@@ -2,8 +2,8 @@
 
 > iPad 上的轻量绘画 PWA：Procreate 手感的克隆。压感 / 自定义笔刷 / 水彩混色 / 图层 / 液化 / 选区。OneDrive 同步，飞机模式可用。
 
-- **🔗 PWA**: _（待部署）_
-- **📦 Source**: _（待建仓）_
+- **🔗 PWA**: https://fangzhangmnm.github.io/webpaint/
+- **📦 Source**: https://github.com/fangzhangmnm/webpaint
 
 ## 状态：一期 alpha
 
