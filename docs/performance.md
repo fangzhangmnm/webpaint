@@ -38,6 +38,28 @@ Stamp 是缩放 drawImage，bilinear 完全够；某些浏览器 `"high"` 会走
 
 `board.requestRender()` flag-based + rAF coalesce → 一帧最多 render 一次，不管 stamp 喊了多少次。已经做了。
 
+### 6. Dirty-rect 合成（2026-05-25 落）
+
+`Board` 加了 `markDocDirty(x0,y0,x1,y1)` 和 `markFullDirty()`。`BrushEngine` 在每颗 stamp 后累积 doc-px bbox，`InputController` 一帧 `extendStroke` 完调 `brush.flushDirty()` 把 bbox 交给 board。render 时：
+
+- `_dirtyFull` 或没有 dirty rect → 走旧的全屏 render（视口 / 主题 / 光标变化时）
+- 否则走 `_renderPartial(docRect)`：在 dirty 屏幕矩形上 `ctx.clip()` 后重画底色 + doc 背景 + 逐 layer。GPU 端依然要采 layer texel，但只在 dirty 像素上算 + blit
+
+省的量随**笔触越细 / 视口越大 / 缩放越小**越多。最大 win 在快速大幅细笔触场景（之前每帧都全屏 drawImage 2048²）。
+
+边界注意：
+- 笔触期间 cursor preview 不画（input.js 在 _down 里 `board.setCursor(null)`），避免 cursor 触发全屏 dirty
+- 笔触结束后下次 hover，cursor 重出 → 整张 dirty 一次，自然回归
+- pan / pinch / 缩放 / 主题切 / undo/redo / clear 都打 `_dirtyFull`，下一帧全画一次
+
+### 7. Undo 链化（2026-05-25 落）
+
+原本 `{before, after}` 双份 × 20 = 640MB → 改成"每状态一份" snapshot 链 + pointer = 320MB。详见 [undo-strategy.md](undo-strategy.md)。下一档 PNG blob 异步压缩，再下一档 tile-diff（和 dirty-rect 共享 bbox 追踪）。
+
+### 8. Smoothing catch-up tail 过滤（2026-05-25 落）
+
+IIR α=0.65 的 smX 在 raw 停手后还在指数收敛 → 末端塞一串小 delta → 局部 stamp pile-up = "细笔触每隔一段一个比较粗的结"。fix：input.js 跟踪 `lastStampedX/Y`（屏 px），smX 相对它移动 < 0.5 px² 的事件**不发** extendStroke（smX 仍在 tick，迟早超阈值后正常发）。catch-up tail 直接被吞掉。
+
 ## 还能挤的（按收益排序）
 
 | 优化 | 收益 | 工程量 | 触发条件 |

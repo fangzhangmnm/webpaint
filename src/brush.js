@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS = {
   type: "round",
   size: 12,           // doc-px 直径（满压）
   opacity: 1,         // 每个 stamp 的 alpha 上限（0..1）
-  hardness: 0.6,      // 0=完全软（径向渐变到边缘）；1=硬边（无渐变）
+  hardness: 0.75,     // 0=完全软（径向渐变到边缘）；1=硬边（无渐变）。窄一点 rim 累积更不明显
   spacing: 0.12,      // stamp 间距 = spacing × size（doc-px）
   // 压感映射：开 → 用 pressure；关 → 一律 1
   pressureToSize: true,
@@ -94,6 +94,7 @@ export class BrushEngine {
       mode, // "brush" or "erase"
       accumDist: 0,
       lastX: x, lastY: y, lastP: pressure,
+      dirty: null,    // [x0,y0,x1,y1] doc-px；累积所有 stamp 的 bbox，给 dirty-rect render 用
     };
     // 起手第一个点落一颗（避免短笔/单点不画）
     this._stampOne(x, y, pressure);
@@ -140,6 +141,15 @@ export class BrushEngine {
     this._stroke = null;
   }
 
+  // 取出（并清空）累积的 dirty bbox，给 Board.markDocDirty 用
+  flushDirty() {
+    const st = this._stroke;
+    if (!st || !st.dirty) return null;
+    const d = st.dirty;
+    st.dirty = null;
+    return d;
+  }
+
   _stampOne(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
@@ -168,6 +178,17 @@ export class BrushEngine {
 
     ctx.globalAlpha = prevAlpha;
     ctx.globalCompositeOperation = prevComp;
+
+    // 累积 dirty bbox（doc-px），给 dirty-rect render 用
+    const d = st.dirty;
+    if (d) {
+      if (x - drawR < d[0]) d[0] = x - drawR;
+      if (y - drawR < d[1]) d[1] = y - drawR;
+      if (x + drawR > d[2]) d[2] = x + drawR;
+      if (y + drawR > d[3]) d[3] = y + drawR;
+    } else {
+      st.dirty = [x - drawR, y - drawR, x + drawR, y + drawR];
+    }
   }
 }
 

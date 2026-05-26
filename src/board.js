@@ -28,6 +28,12 @@ export class Board {
     this._cursor = null;            // {x, y, size} in screen px，可选
     this._showCursor = false;
 
+    // Dirty tracking：
+    // _dirtyDocRect = 笔触改了的 doc-px bbox（[x0,y0,x1,y1]），渲染时只 blit 这一片
+    // _dirtyFull    = 视口 / 主题 / 光标 / 图层结构改了 → 整张重画
+    this._dirtyDocRect = null;
+    this._dirtyFull = true;
+
     // 主题色：从 CSS 变量取
     this._voidColor = "#e6e2d6";
 
@@ -40,12 +46,31 @@ export class Board {
 
   setDoc(doc) {
     this.doc = doc;
+    this._dirtyFull = true;
     this.fitToScreen();
   }
 
   setThemeColors({ voidColor }) {
     if (voidColor) this._voidColor = voidColor;
+    this._dirtyFull = true;
     this.requestRender();
+  }
+
+  // 由 BrushEngine 报告："这一帧 layer 像素被改在这片 doc-px bbox 里"
+  markDocDirty(x0, y0, x1, y1) {
+    if (this._dirtyDocRect) {
+      const d = this._dirtyDocRect;
+      if (x0 < d[0]) d[0] = x0;
+      if (y0 < d[1]) d[1] = y0;
+      if (x1 > d[2]) d[2] = x1;
+      if (y1 > d[3]) d[3] = y1;
+    } else {
+      this._dirtyDocRect = [x0, y0, x1, y1];
+    }
+  }
+  // 视口 / 主题 / 光标 / 图层结构改了 → 整张重画
+  markFullDirty() {
+    this._dirtyFull = true;
   }
 
   // ---- 坐标 ----
@@ -58,10 +83,11 @@ export class Board {
     return { x: dx * scale + tx, y: dy * scale + ty };
   }
 
-  // ---- 视口 ----
+  // ---- 视口 ----（任何视口变都是全屏 dirty）
   pan(dx, dy) {
     this.viewport.tx += dx;
     this.viewport.ty += dy;
+    this._dirtyFull = true;
     this.requestRender();
   }
   zoomAt(anchorX, anchorY, factor) {
@@ -72,12 +98,14 @@ export class Board {
     this.viewport.tx = anchorX - (anchorX - this.viewport.tx) * k;
     this.viewport.ty = anchorY - (anchorY - this.viewport.ty) * k;
     this.viewport.scale = newScale;
+    this._dirtyFull = true;
     this.requestRender();
   }
   setViewport(tx, ty, scale) {
     this.viewport.tx = tx;
     this.viewport.ty = ty;
     this.viewport.scale = clamp(scale, this.minScale, this.maxScale);
+    this._dirtyFull = true;
     this.requestRender();
   }
 
@@ -95,6 +123,12 @@ export class Board {
     this.setViewport(tx, ty, scale);
   }
 
+  // 公共 API：layer 像素被改了（图层结构变 / 切换 / putImageData 等）
+  invalidateAll() {
+    this._dirtyFull = true;
+    this.requestRender();
+  }
+
   // ---- 渲染 ----
   resize() {
     const w = this.canvas.clientWidth || window.innerWidth;
@@ -102,6 +136,7 @@ export class Board {
     this.dpr = Math.max(1, window.devicePixelRatio || 1);
     this.canvas.width = Math.round(w * this.dpr);
     this.canvas.height = Math.round(h * this.dpr);
+    this._dirtyFull = true;
     this.requestRender();
   }
 
@@ -114,12 +149,28 @@ export class Board {
   }
 
   setCursor(c) {
+    // 光标改了 → 整张 dirty（光标是 screen-space，无法做 doc-rect dirty；好在 hover
+    // 不是绘画 hot path）。Stroke 期间 input.js 会调 setCursor(null)，所以画的时候
+    // 不会触发这条全屏 invalidation。
+    const wasShown = this._showCursor;
     this._cursor = c;
     this._showCursor = !!c;
+    if (wasShown || this._showCursor) this._dirtyFull = true;
     this.requestRender();
   }
 
   render() {
+    if (!this.doc) return;
+    if (this._dirtyFull || !this._dirtyDocRect) {
+      this._renderFull();
+    } else {
+      this._renderPartial(this._dirtyDocRect);
+    }
+    this._dirtyDocRect = null;
+    this._dirtyFull = false;
+  }
+
+  _renderFull() {
     const ctx = this.ctx;
     const W = this.canvas.width, H = this.canvas.height;
 
@@ -128,13 +179,10 @@ export class Board {
     ctx.fillStyle = this._voidColor;
     ctx.fillRect(0, 0, W, H);
 
-    if (!this.doc) return;
-
     // 2) 切到 CSS px 坐标
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const { tx, ty, scale } = this.viewport;
 
-    // 视口下采样优化：scale 远小于 1 时让浏览器用低品质 image smoothing（默认即可）
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
 
@@ -142,7 +190,7 @@ export class Board {
     ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
     ctx.fillRect(tx, ty, this.doc.width * scale, this.doc.height * scale);
 
-    // 3) 逐 layer
+    // 逐 layer
     for (const layer of this.doc.layers) {
       if (!layer.visible) continue;
       const prevAlpha = ctx.globalAlpha;
@@ -158,7 +206,7 @@ export class Board {
       ctx.globalCompositeOperation = prevComp;
     }
 
-    // 4) doc 边框
+    // doc 边框
     ctx.strokeStyle = "rgba(0,0,0,0.18)";
     ctx.lineWidth = 1;
     ctx.strokeRect(
@@ -168,19 +216,81 @@ export class Board {
       Math.round(this.doc.height * scale),
     );
 
-    // 5) cursor 预览（笔尖）
-    if (this._showCursor && this._cursor) {
-      const c = this._cursor;
-      ctx.strokeStyle = "rgba(0,0,0,0.65)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, Math.max(2, c.size * scale / 2), 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(255,255,255,0.7)";
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, Math.max(2, c.size * scale / 2) + 1, 0, Math.PI * 2);
-      ctx.stroke();
+    // cursor 预览
+    if (this._showCursor && this._cursor) this._drawCursor();
+  }
+
+  // 只重画 docRect = [x0,y0,x1,y1]（doc-px）覆盖的屏幕区域。
+  // GPU 端依然要采样 layer 的源 texel，但只在 dirty 屏幕像素上算 + blit。
+  // 笔触越细 / 视口越缩小，这边省得越多。
+  _renderPartial(docRect) {
+    const ctx = this.ctx;
+    const { tx, ty, scale } = this.viewport;
+
+    // 多 pad 几个 doc-px 给 AA / 缩放 bleed
+    const pad = Math.max(1, 2 / scale);
+    const dx0 = docRect[0] - pad;
+    const dy0 = docRect[1] - pad;
+    const dx1 = docRect[2] + pad;
+    const dy1 = docRect[3] + pad;
+
+    const sx = dx0 * scale + tx;
+    const sy = dy0 * scale + ty;
+    const sw = (dx1 - dx0) * scale;
+    const sh = (dy1 - dy0) * scale;
+
+    const w = this.canvas.clientWidth || this.canvas.width / this.dpr;
+    const h = this.canvas.clientHeight || this.canvas.height / this.dpr;
+    // 完全在视口外 → no-op
+    if (sx + sw < 0 || sy + sh < 0 || sx > w || sy > h) return;
+
+    ctx.save();
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
+
+    ctx.beginPath();
+    ctx.rect(sx, sy, sw, sh);
+    ctx.clip();
+
+    // 重画：底色 → doc bg → 逐 layer。clip 把它们裁到 dirty 矩形里
+    ctx.fillStyle = this._voidColor;
+    ctx.fillRect(sx, sy, sw, sh);
+    ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
+    ctx.fillRect(tx, ty, this.doc.width * scale, this.doc.height * scale);
+    for (const layer of this.doc.layers) {
+      if (!layer.visible) continue;
+      const prevAlpha = ctx.globalAlpha;
+      const prevComp = ctx.globalCompositeOperation;
+      ctx.globalAlpha = layer.opacity;
+      ctx.globalCompositeOperation = layer.mode || "source-over";
+      ctx.drawImage(
+        layer.canvas,
+        0, 0, layer.width, layer.height,
+        tx, ty, layer.width * scale, layer.height * scale,
+      );
+      ctx.globalAlpha = prevAlpha;
+      ctx.globalCompositeOperation = prevComp;
     }
+
+    ctx.restore();
+    // 注意：partial render 不重画 doc 边框 / cursor，它们保留上一帧的像素就行。
+    // 任何视口 / 主题 / cursor 变化都会触发 _dirtyFull，下一帧会全画一次。
+  }
+
+  _drawCursor() {
+    const ctx = this.ctx;
+    const c = this._cursor;
+    const { scale } = this.viewport;
+    ctx.strokeStyle = "rgba(0,0,0,0.65)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, Math.max(2, c.size * scale / 2), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.7)";
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, Math.max(2, c.size * scale / 2) + 1, 0, Math.PI * 2);
+    ctx.stroke();
   }
 }
 

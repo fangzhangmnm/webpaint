@@ -56,6 +56,18 @@ stampAlpha  = settings.opacity × opacityMul
 > **2026-05-25 user**："笔压也能控制 alpha"。
 > 默认 `pressureToOpacity = true`。size + alpha 同时受压感控。后期 preset UI 拆开。
 
+> **2026-05-25 user**："细笔触时拉线会隔段时间有一个比较粗的结，感觉和抗锯齿有关"。
+>
+> 是 smoothing IIR + rim 累积叠加的效果，不是单纯 AA：
+> - smoothing 在手暂停时还在 catch-up，末端塞一串小 delta → stamp pile-up
+> - 圆笔 hardness 0.6 rim 较宽，多 stamp 叠加把 rim 推高 → 看起来"粗结"
+>
+> 修两处：
+> 1. input.js：`lastStampedX/Y` 记录上次 extendStroke 的 smX；smX 相对它移动 < 0.5 px² 的事件不发 stamp。catch-up tail 直接吞
+> 2. brush.js：默认 hardness 从 0.6 改 0.75，rim 窄一截
+>
+> 顺带把渲染换成 dirty-rect（见 performance.md），细笔触 / 大快速拖时帧时间也短一档
+
 ## 已知问题（用户应该会反馈的）
 
 1. **狗牙**：圆形 stamp 在大 size 下、缩放放大查看时，stamp 边缘的 alpha 衰减不够 GPU-AA 光滑。可能要：

@@ -1,8 +1,10 @@
 # Undo / Redo 策略
 
-一期：**每笔前对当前 layer 做 `getImageData` 快照**，撤销时 `putImageData` 回去。stack 上限 20。
+一期：**snapshot 链 + pointer**。chain[i] = 那一刻 layer 的 ImageData 全张。撤销/重做 = 移指针 + putImageData。链上限 20。
 
 简单粗暴，能跑通，性能 OK。
+
+> **更新 2026-05-25**：原本实现是每笔存 `{before, after}` 双份 → 20 步 = 640MB。改成链式后变成"每个状态一份"，**降到 320MB**。再压一档要走 PNG blob 或 tile diff（见下）。
 
 ## 备选方案 vs 现选
 
@@ -19,16 +21,34 @@
 - 不依赖 brush 是确定性的（水彩、jitter 等后期 dynamic 不破坏 undo）
 - 单图层 + 单 doc，320MB 上限可接受
 
-## 数字
+## 数字（链式之后）
 
 | 项 | 大小 / 数 |
 | - | - |
 | 一张快照 | 2048 × 2048 × 4B = **16 MB** |
-| stack 上限 | 20 |
-| 单笔 entry = before + after | 32 MB |
-| 满栈 | **640 MB** 内存 |
+| 链上限 | 20 |
+| 单 entry = 一张快照 | 16 MB |
+| 满链 | **320 MB** 内存 |
 
-iPad Air M2+ 12-16GB 没事；iPad 第 9 代 4GB 会有压力。后期要换更省的策略。
+iPad Pro 2018+（4GB+）OK。iPad 6 (2GB) 仍可能 OOM —— 下一档要 PNG 压缩或 tile-diff。
+
+## 链式的语义
+
+```
+chain[0]   chain[1]   chain[2]   ...   chain[k]
+ (空白)     ↑ stroke1   ↑ stroke2  ↑ strokeK
+            后状态       后状态     后状态
+```
+
+`undoIndex = k` 表示"现在 layer 长得是 chain[k] 那样"。
+- 起手 lazy push chain[0]（layer 当前状态，通常空白）；undoIndex = 0
+- 一笔结束：截掉 redo 段（`chain.length = undoIndex + 1`），push after，undoIndex++
+- undo: undoIndex--, putImageData(chain[undoIndex])
+- redo: undoIndex++, putImageData(chain[undoIndex])
+- canUndo = undoIndex > 0
+- canRedo = undoIndex < chain.length - 1
+- 超出 MAX 时从队首 shift，undoIndex--
+
 
 ## 边界 case 已处理
 

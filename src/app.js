@@ -211,7 +211,7 @@ els.clearSheet.addEventListener("click", (e) => {
   if (a !== "confirm") return;
   doc.clearActiveLayer();
   input.clearHistory();
-  board.requestRender();
+  board.invalidateAll();
   setStatus("已清空");
 });
 

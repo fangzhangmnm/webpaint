@@ -28,7 +28,10 @@ const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
 const DOUBLETAP_MAX_GAP = 80;
 const STROKE_SMOOTH_ALPHA = 0.65;
-const MAX_UNDO_ENTRIES = 20;       // 2048² × RGBA = 16 MB × 20 = 320 MB 上限；后期换 PNG 压缩
+// 笔停手时 IIR catch-up 会塞一串小 delta → 局部 stamp pile-up（"细笔的结"）。
+// 跳过 smX 移动 < N 屏 px 的 extendStroke 调用 —— smX 内部还在收敛，但不发 stamp。
+const MIN_STAMP_MOVE_SCREEN_SQ = 0.25;   // 0.5 px²
+const MAX_UNDO_ENTRIES = 20;       // 2048² × RGBA = 16 MB × 20 = 320 MB；后期换 PNG / tile-diff 再降
 
 export class InputController {
   constructor(board, doc, opts = {}) {
@@ -48,8 +51,14 @@ export class InputController {
     this.altDown = false;
     this.gestureStart = null;
 
-    this.undoStack = [];      // [{ layerId, before, after }]
-    this.redoStack = [];
+    // Undo: snapshot 链 + pointer。chain[i] = 那一刻 layer 的 ImageData。
+    // - 起手第一颗 stamp 前 lazily 拍一张当前状态（初始空白）
+    // - endStroke 后 truncate（去掉 redo 段）+ push 新状态 → index++
+    // - undo: index--, putImageData(chain[index])
+    // - redo: index++, putImageData(chain[index])
+    // 内存：20 entries × 16 MB = 320 MB（去掉了原本 before+after 的双份）
+    this.undoChain = [];
+    this.undoIndex = -1;
 
     this._lastTap = null;
     this._bind();
@@ -150,6 +159,11 @@ export class InputController {
     this.pointers.set(e.pointerId, rec);
 
     if (role === "draw" || role === "erase") {
+      // 画的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
+      this.board.setCursor(null);
+      // 锚 smoothing 到 down 点
+      rec.lastStampedX = x;
+      rec.lastStampedY = y;
       this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
     } else if (role === "pick") {
       this._doPick(x, y);
@@ -176,17 +190,26 @@ export class InputController {
     }
 
     if (rec.role === "draw" || rec.role === "erase") {
-      this._updateCursorPreview(e);
+      // 画的时候不刷 cursor preview，省一次全屏 dirty
       const events = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : null;
       const list = (events && events.length) ? events : [e];
       const enabled = this.getPressureEnabled();
       for (const ev of list) {
         rec.smX += STROKE_SMOOTH_ALPHA * (ev.clientX - rec.smX);
         rec.smY += STROKE_SMOOTH_ALPHA * (ev.clientY - rec.smY);
+        // 距离上一次 extendStroke 的屏 px 移动；catch-up tail 全过滤掉
+        const dxs = rec.smX - rec.lastStampedX;
+        const dys = rec.smY - rec.lastStampedY;
+        if (dxs * dxs + dys * dys < MIN_STAMP_MOVE_SCREEN_SQ) continue;
+        rec.lastStampedX = rec.smX;
+        rec.lastStampedY = rec.smY;
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
         const pressure = effectivePressure(ev, enabled);
         this.brush.extendStroke(dx, dy, pressure);
       }
+      // 把 brush 累的 dirty bbox 送进 board，rAF render 时只 blit 这一片
+      const bbox = this.brush.flushDirty();
+      if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
       this.board.requestRender();
     } else if (rec.role === "pick") {
       this._doPick(e.clientX, e.clientY);
@@ -252,42 +275,54 @@ export class InputController {
     const settings = this.getBrushSettings();
     if (!settings || !this.doc.activeLayer) return;
     const layer = this.doc.activeLayer;
-    // 快照（undo）
-    const before = layer.ctx.getImageData(0, 0, layer.width, layer.height);
-    this._strokeUndoInProgress = { layerId: layer.id, before };
+    // 链空 → lazy 拍当前状态作为"起点"（撤销能回到的最远状态）
+    if (this.undoChain.length === 0) {
+      this.undoChain.push({
+        layerId: layer.id,
+        imageData: layer.ctx.getImageData(0, 0, layer.width, layer.height),
+      });
+      this.undoIndex = 0;
+    }
+    this._strokeLayerId = layer.id;
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressure(e, this.getPressureEnabled());
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode);
+    // begin 已经落了第一颗 stamp → 也要把它的 dirty 报上去
+    const bbox = this.brush.flushDirty();
+    if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
   }
   _endStroke() {
-    if (!this._strokeUndoInProgress) {
-      this.brush.endStroke();
-      return;
-    }
     this.brush.endStroke();
-    const layer = this.doc.layers.find((l) => l.id === this._strokeUndoInProgress.layerId);
-    if (layer) {
-      const after = layer.ctx.getImageData(0, 0, layer.width, layer.height);
-      this._pushUndo({
-        layerId: layer.id,
-        before: this._strokeUndoInProgress.before,
-        after,
-      });
+    if (this._strokeLayerId == null) return;
+    const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
+    this._strokeLayerId = null;
+    if (!layer) return;
+    const after = layer.ctx.getImageData(0, 0, layer.width, layer.height);
+    // 截掉 redo 段，把新状态 push 进去
+    if (this.undoIndex < this.undoChain.length - 1) {
+      this.undoChain.length = this.undoIndex + 1;
     }
-    this._strokeUndoInProgress = null;
+    this.undoChain.push({ layerId: layer.id, imageData: after });
+    this.undoIndex++;
+    while (this.undoChain.length > MAX_UNDO_ENTRIES) {
+      this.undoChain.shift();
+      this.undoIndex--;
+    }
+    this._emitHistChange();
     this.board.requestRender();
   }
   _abortStroke() {
     this.brush.cancelStroke();
-    if (this._strokeUndoInProgress) {
-      // 把笔画"回退"到 before（取消这一笔的像素改动）
-      const layer = this.doc.layers.find((l) => l.id === this._strokeUndoInProgress.layerId);
-      if (layer) layer.ctx.putImageData(this._strokeUndoInProgress.before, 0, 0);
-      this._strokeUndoInProgress = null;
-      this.board.requestRender();
+    // 退回当前 chain 状态（= 笔触开始前那张）
+    if (this._strokeLayerId != null && this.undoIndex >= 0) {
+      const entry = this.undoChain[this.undoIndex];
+      const layer = this.doc.layers.find((l) => l.id === entry.layerId);
+      if (layer) layer.ctx.putImageData(entry.imageData, 0, 0);
+      this.board.invalidateAll();
     }
+    this._strokeLayerId = null;
   }
 
   // ---- 吸色 ----
@@ -418,36 +453,30 @@ export class InputController {
   _emitTool(tool) { window.dispatchEvent(new CustomEvent("wp:settool", { detail: tool })); }
   _adjustSize(delta) { window.dispatchEvent(new CustomEvent("wp:adjsize", { detail: delta })); }
 
-  // ---- undo / redo ----
-  _pushUndo(entry) {
-    this.undoStack.push(entry);
-    while (this.undoStack.length > MAX_UNDO_ENTRIES) this.undoStack.shift();
-    this.redoStack.length = 0;
-    this._emitHistChange();
-  }
-  canUndo() { return this.undoStack.length > 0; }
-  canRedo() { return this.redoStack.length > 0; }
+  // ---- undo / redo（snapshot 链 + pointer）----
+  canUndo() { return this.undoIndex > 0; }
+  canRedo() { return this.undoIndex >= 0 && this.undoIndex < this.undoChain.length - 1; }
   undo() {
-    const e = this.undoStack.pop();
-    if (!e) return;
-    const layer = this.doc.layers.find((l) => l.id === e.layerId);
-    if (layer) layer.ctx.putImageData(e.before, 0, 0);
-    this.redoStack.push(e);
+    if (!this.canUndo()) return;
+    this.undoIndex--;
+    const entry = this.undoChain[this.undoIndex];
+    const layer = this.doc.layers.find((l) => l.id === entry.layerId);
+    if (layer) layer.ctx.putImageData(entry.imageData, 0, 0);
+    this.board.invalidateAll();
     this._emitHistChange();
-    this.board.requestRender();
   }
   redo() {
-    const e = this.redoStack.pop();
-    if (!e) return;
-    const layer = this.doc.layers.find((l) => l.id === e.layerId);
-    if (layer) layer.ctx.putImageData(e.after, 0, 0);
-    this.undoStack.push(e);
+    if (!this.canRedo()) return;
+    this.undoIndex++;
+    const entry = this.undoChain[this.undoIndex];
+    const layer = this.doc.layers.find((l) => l.id === entry.layerId);
+    if (layer) layer.ctx.putImageData(entry.imageData, 0, 0);
+    this.board.invalidateAll();
     this._emitHistChange();
-    this.board.requestRender();
   }
   clearHistory() {
-    this.undoStack.length = 0;
-    this.redoStack.length = 0;
+    this.undoChain.length = 0;
+    this.undoIndex = -1;
     this._emitHistChange();
   }
   _emitHistChange() {
