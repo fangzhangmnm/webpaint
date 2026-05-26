@@ -50,6 +50,37 @@ self.WEBPAINT_VERSION = "v5-2026-05-25";
 
 如果改了文件但忘了 bump：用户能从 ETag 变化的检测里收到 `asset-updated`，弹"有新版本"toast，点刷新会 reload。但 cache 名没换，下次 reload 仍旧 cache。**bump 是关键**。
 
+## Update 检测的 4 条路径（v7 起，沿用 WebXiaoHeiWu）
+
+iPad Safari 装成 PWA 后默认对 SW update **极不主动** —— standalone 模式下可能几小时甚至几天才 check 一次。光靠"用户重启 app"是不够的。下面 4 条路径全挂上才稳：
+
+1. **`registration.waiting`**（开机时检查）：上一次 session 已经把新 SW 装好但还没 activate 的，开机即 toast。
+2. **`updatefound` + `statechange === "installed"`**（本 session 装到新版本时）：当前 session 内浏览器 check 到新 SW、装完了，且现在还有旧 controller，立即 toast。
+3. **`navigator.serviceWorker.message`**（fetch handler 的 ETag 比对）：任何一个 precached asset 在背景 revalidate 时发现 ETag 变了，SW postMessage `asset-updated` 给页面 → toast。
+4. **`visibilitychange` / `focus` / 10min interval → `registration.update()`**（主动 poll）：每次回到前台或拿焦点都 poke 一下让浏览器去 check SW；再加一个 10 分钟兜底 timer。这是最关键的一条，弥补 iOS PWA "不主动"的默认。
+
+四条任意一条命中都会 `showUpdate()`，但已经被用户 dismiss 过的不再弹（`updateDismissed`）。
+
+刷新按钮：`postMessage({ type: "skip-waiting" })` → 新 SW 立即 activate → `location.reload()` → 新代码起跑。
+
+```
+                 +-----------------------+
+   bump version.js → ETag/byte change ──┤  浏览器 fetch 新 SW │
+                 +-----------┬----------+
+                             |
+                  registration.update() (路径 4)
+                             |
+                  install (precache + skipWaiting)
+                             |
+                  state: installed (路径 2) ────→ showUpdate()
+                             |
+                  activate (clients.claim)
+                             |
+                  asset-updated postMessage (路径 3) ────→ showUpdate()
+
+  开机时：registration.waiting (路径 1) ────→ showUpdate()
+```
+
 ## 本地开发
 
 ```bash

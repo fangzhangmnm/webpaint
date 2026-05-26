@@ -421,25 +421,65 @@ function hexToHsv(hex) {
 setStatus("就绪");
 updateZoomLabel();
 
-// ---- Service worker ----
-if ("serviceWorker" in navigator) {
-  const host = location.hostname;
-  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "";
-  if (!isLocal) {
-    navigator.serviceWorker.register("./service-worker.js").catch((err) => {
-      console.warn("SW register failed", err);
-    });
-    navigator.serviceWorker.addEventListener("message", (e) => {
-      if (e.data?.type === "asset-updated") {
-        els.updateToast.classList.remove("hidden");
-      }
-    });
-  }
+// ---- Service worker + 更新检测 ----
+// 沿用 WebXiaoHeiWu 模式，四条检测路径都挂上，iPad PWA standalone 模式默认
+// 不勤快地 check update —— 每次回到前台再 poke 一下 registration.update()。
+//
+//   1) registration.waiting 在 register 时 → 上次后台装好但没 activate 的，开机直接 toast
+//   2) updatefound + statechange='installed' → 当前 session 内 SW 装了新版本就 toast
+//   3) SW postMessage 'asset-updated' (fetch handler ETag 检测) → 任意一个 asset 变了
+//   4) visibilitychange / focus → registration.update() 主动 poll
+
+const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1", "::1", ""]);
+let updateDismissed = false;
+function showUpdate() {
+  if (updateDismissed) return;
+  els.updateToast.classList.remove("hidden");
 }
 els.updateReload.addEventListener("click", () => {
   navigator.serviceWorker?.controller?.postMessage({ type: "skip-waiting" });
   location.reload();
 });
 els.updateDismiss.addEventListener("click", () => {
+  updateDismissed = true;
   els.updateToast.classList.add("hidden");
 });
+
+if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
+  // 路径 3
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data?.type === "asset-updated") showUpdate();
+  });
+
+  window.addEventListener("load", async () => {
+    let registration;
+    try {
+      registration = await navigator.serviceWorker.register("./service-worker.js");
+    } catch (err) {
+      console.warn("SW register failed", err);
+      return;
+    }
+    // 路径 1
+    if (registration.waiting && navigator.serviceWorker.controller) {
+      showUpdate();
+    }
+    // 路径 2
+    registration.addEventListener("updatefound", () => {
+      const newWorker = registration.installing;
+      if (!newWorker) return;
+      newWorker.addEventListener("statechange", () => {
+        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+          showUpdate();
+        }
+      });
+    });
+    // 路径 4：回到前台 / 拿到焦点时主动 poke 一下
+    const pokeUpdate = () => { registration.update().catch(() => {}); };
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") pokeUpdate();
+    });
+    window.addEventListener("focus", pokeUpdate);
+    // 再加一个低频的 timer 作为兜底（PWA 在前台 30 分钟内每 10 分钟 check 一次）
+    setInterval(pokeUpdate, 10 * 60 * 1000);
+  });
+}
