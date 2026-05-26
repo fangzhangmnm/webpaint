@@ -4,9 +4,12 @@
 
 ## TL;DR
 
-iPad Safari **装成 PWA 后对 SW update 极不主动**。standalone 模式下浏览器可能几小时甚至几天才 check 一次 SW，光靠"用户重启 app"是不够的。**四条检测路径全挂上才能让 update toast 在该出来的时候出来**。
+两件配套，**都是必需，不是可选**：
 
-少挂任何一条就会有"我推了新版本但 user 看不见"的报告。
+1. **挂全 4 条 update 检测路径**，否则 iPad PWA standalone 默认极不主动 check SW，user 看不到"有新版本"toast。
+2. **屏幕上常驻显示版本号**，否则 user 点了"刷新"也不知道有没有真的换上新版本 —— 信任的反馈回路是断的。
+
+少挂任何一条 update 路径，或者没有屏幕水印，都会产生"我推了新版本但 user 不知道有没有装上"的报告。
 
 ## 四条路径
 
@@ -217,9 +220,18 @@ if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
 </div>
 ```
 
-## 单 SSoT 版本号（强烈推荐顺带做）
+## 屏幕上必须显示版本号（必需，非可选）
 
-WebPaint v5 起的额外约定：版本号写在 `src/version.js` 这个 classic script 里，SW 用 `importScripts("./src/version.js")` 拿，index.html 一个 `<script>` 也加载它给 `window.WEBPAINT_VERSION`。app.js 把版本打到 HUD 角落 user 一眼能看出装上没。Bump 一处，两边自动同步、永不漂移。
+**为什么是 hard requirement**：update 检测和 reload 是两个动作，中间隔了一个 SW activate。user 点了"刷新"之后，**他没办法判断新代码是否真的跑起来了**。如果没在 UI 上显示版本号：
+- bug fix 推上去 → user 收到 toast → 点刷新 → 看上去一样 → "你这版本根本没生效" 报告
+- 实际可能是：网络抖动 + SW activate 失败、precache 某个 asset 404、cache 没换、user 手动刷了页但 SW 没换……
+- 没有 visual confirmation 你根本不知道是什么环节出了问题
+
+WebPaint v5 起的做法：**HUD 角落常驻版本号水印**，user 一眼就知道当前装的是哪版。bump 一次发现水印没变 = update 没真装上 = 立刻去查。
+
+### 实现：单 SSoT 版本号（顺手做）
+
+版本号写在 `src/version.js` 这个 classic script 里，SW 用 `importScripts("./src/version.js")` 拿，index.html 一个 `<script>` 也加载它给 `window.WEBPAINT_VERSION`。app.js 把版本打到 HUD 角落。Bump 一处，两边自动同步、永不漂移。
 
 ```js
 // src/version.js
@@ -237,13 +249,35 @@ const CACHE_VERSION = self.WEBPAINT_VERSION;
 ```
 
 ```js
-// app.js
+// app.js —— 启动时打到 HUD
 els.versionLabel.textContent = window.WEBPAINT_VERSION || "v?";
 ```
+
+```html
+<!-- index.html，已有的 HUD 区域加一项 -->
+<div class="hud">
+  <span id="zoomLabel">100%</span>
+  <span class="sep">·</span>
+  <span id="statusLabel">就绪</span>
+  <span class="sep">·</span>
+  <span id="versionLabel" class="version">v?</span>
+</div>
+```
+
+```css
+/* styles.css —— 版本号低调一点 */
+.hud .version {
+  opacity: 0.55;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+```
+
+放哪不重要 —— HUD / 设置面板 / 关于页都行 —— **关键是 user 不用任何操作就能瞄一眼读到当前装的是哪版**。藏在三层菜单里的不算。
 
 ## 关键的 anti-pattern（别犯）
 
 - **❌ 只挂路径 3** —— iPad 上 90% 的情况下不会 fire，因为 SW 都没 check 更新
+- **❌ 不显示版本号** —— user 点了刷新之后没有 visual confirmation，每次 update 都是盲信。bug 报告会变成"你这版本根本没生效"无法定位
 - **❌ 自动 reload** —— user 可能正在写字 / 画画。绝不自动刷。toast + 用户点
 - **❌ 同 session 内反复弹 toast** —— 用 `updateAnnouncedThisLoad` (SW 端) + `updateDismissed` (page 端) 各守一边
 - **❌ 在 localhost 注册 SW** —— 开发时 F5 就拉不到最新代码了。`LOCAL_DEV_HOSTS` 白名单排除
