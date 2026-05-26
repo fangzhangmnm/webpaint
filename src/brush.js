@@ -72,27 +72,24 @@ export class BrushEngine {
     stamp.width = d; stamp.height = d;
     const sctx = stamp.getContext("2d");
     const hd = Math.max(0, Math.min(1, hardness));
-    // 第一步：填一个**纯色**圆盘，RGB 是 useColor，alpha 全 1。
+    // 第一步：**fillRect 整张 canvas** —— 每个像素 RGB = useColor, α=1。
+    // 包括圆外面那些"用不到"的像素也是 useColor，关键是 bilinear 在采圆边时
+    // 不会从外面的 transparent black 引入 RGB 漂移（经典 sprite 白边/黑边 bug）。
     sctx.fillStyle = useColor;
-    sctx.beginPath();
-    sctx.arc(r, r, r, 0, Math.PI * 2);
-    sctx.fill();
-    // 第二步：用 destination-out + 反向 alpha gradient 削外圈 alpha。
-    // 这样 source canvas 的 RGB 永远是纯 useColor，只有 alpha 在 hardness×r 到 r
-    // 间 falloff。如果直接用单 gradient（v12 的 3-stop），Safari 在 alpha→0
-    // 的转色区会把 RGB 也朝 stop 1 的颜色（透明黑）线性拉，导致黑笔重叠时
-    // 边缘"发亮"。Procreate / Krita 都是这套 solid+dest-out 的方法。
-    // hardness=1 跳过这一步，纯硬边。
-    if (hd < 1) {
-      sctx.globalCompositeOperation = "destination-out";
-      const g = sctx.createRadialGradient(r, r, 0, r, r, r);
-      g.addColorStop(0, "rgba(0,0,0,0)");
-      g.addColorStop(hd, "rgba(0,0,0,0)");
-      g.addColorStop(1, "rgba(0,0,0,1)");
-      sctx.fillStyle = g;
-      sctx.fillRect(0, 0, d, d);
-      sctx.globalCompositeOperation = "source-over";
-    }
+    sctx.fillRect(0, 0, d, d);
+    // 第二步：destination-out + 反向 alpha gradient 削外圈 alpha。
+    // dest-out 只改 alpha 不改 RGB（unpremul 语义），所以源 canvas 的 RGB
+    // 保持纯 useColor，只有 alpha 在 hardness×r 到 r 间 falloff，r 之外 α=0。
+    // hd 用 Math.min(_, 0.999) 防止两个 stop 在同位置时 stops 序覆盖坑。
+    sctx.globalCompositeOperation = "destination-out";
+    const safeHd = Math.min(hd, 0.999);
+    const g = sctx.createRadialGradient(r, r, 0, r, r, r);
+    g.addColorStop(0, "rgba(0,0,0,0)");       // 圆心：不擦
+    g.addColorStop(safeHd, "rgba(0,0,0,0)");  // 到 hardness×r：还是不擦
+    g.addColorStop(1, "rgba(0,0,0,1)");       // 到 r：全擦
+    sctx.fillStyle = g;
+    sctx.fillRect(0, 0, d, d);
+    sctx.globalCompositeOperation = "source-over";
 
     this._stampCache = { key, canvas: stamp, baseSize, radius: r };
     return this._stampCache;
@@ -203,6 +200,16 @@ export class BrushEngine {
   _stampOne(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
+    // Uniq 防抖：Pencil sub-pixel 抖动有时让连续 stamp 落点 < 0.5 doc-px，
+    // 视觉上是同一个像素被多敲一遍 → 局部 α 累积出 bead。如果新位置离
+    // 上一颗 < 0.5 doc-px 就 skip。step 默认 ≥ 0.5 所以正常 stamp 不会触发。
+    if (st.lastStampX !== undefined) {
+      const dxs = x - st.lastStampX;
+      const dys = y - st.lastStampY;
+      if (dxs * dxs + dys * dys < 0.25) return;
+    }
+    st.lastStampX = x;
+    st.lastStampY = y;
     const s = st.settings;
     const p = Math.max(0, Math.min(1, pressure));
 
