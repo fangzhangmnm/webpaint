@@ -27,15 +27,21 @@ const TAP_MAX_DURATION = 220;
 const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
 const DOUBLETAP_MAX_GAP = 80;
-const STROKE_SMOOTH_ALPHA = 0.65;
-// 笔停手时 IIR catch-up 会塞一串小 delta → 局部 stamp pile-up（"细笔的结"）。
-// 改成按 raw 输入是否真在动来过滤：raw 静止 → 跳整个 event（不更 smX，不发 stamp）。
-// 之前的 smX-delta 过滤会把 N 个 sub-threshold 事件批成一次 extendStroke，
-// 沿走线就出现"密一段 + 空一段"的 group/skip 周期，被肉眼当 knot。
-const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；Pencil 噪声 < 0.05 px，正常画 > 0.2 px
+// v16 起：用 weighted moving average 替代单极 IIR LPF 平滑位置。
+// 原因：iPad Safari 给 PointerEvent 的 clientX/Y 是 integer long（Safari iOS
+// 不合 spec，已确认 Apple Developer Forums #31124 / jquery-archive PEP #380）。
+// Pencil 真实 sub-pixel 位置拿不到。单极 IIR 面对整数台阶 raw 时，smX 输出
+// 0.65 px 离散跳跃 → 沿台阶落 stamp → 局部聚集 = bead。蓝牙鼠标在 iPad
+// 上无 bead，证明问题在 Pencil 采样路径。
+// 加权平均（最近样本权重大）把整数台阶 in → 平滑 fractional path out，
+// stamp 沿连续路径落，不再聚集。lag ~1 sample (4ms @ 240Hz)，无感。
+const POSITION_BUFFER_N = 4;
+const POSITION_BUFFER_WEIGHTS = [1, 2, 3, 4]; // 越新权重越大
+const POSITION_BUFFER_WSUM = POSITION_BUFFER_WEIGHTS.reduce((a, b) => a + b, 0);
+const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；raw 没动就跳，省 buffer 抖
 // 压感 LPF（stabilizer）：Pencil 自带 ~10Hz 握笔抖动 → 灌进 size = base × p^0.6
 // 会让 step 每秒 10 次缩胀 → segPos 偶尔被 clamp 到段首 → 小堆积 → 视觉上速度
-// 相关的 alpha 结节。LPF 把 10Hz 抖动压平，结节就没了。同步削尖刺，缓解 mid bulb。
+// 相关的 alpha 结节。LPF 把 10Hz 抖动压平。同步削尖刺，缓解 mid bulb。
 // init = -1 当 sentinel：第一颗 stamp 直接用 raw（保持 tap 满压），之后 LPF。
 const PRESSURE_SMOOTH_ALPHA = 0.4;
 const MAX_UNDO_ENTRIES = 20;       // 2048² × RGBA = 16 MB × 20 = 320 MB；后期换 PNG / tile-diff 再降
@@ -192,6 +198,7 @@ export class InputController {
       rec.lastRawY = y;
       rec.lastP = null;   // 本笔最近一次有效 pressure，给 sensor 0 fallback
       rec.smP = -1;       // stabilizer LPF 状态；-1 = 还没收到第一帧（首颗 = raw）
+      rec.posBuffer = []; // weighted moving average 的位置 buffer
       this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
     } else if (role === "pick") {
       this._doPick(x, y);
@@ -270,15 +277,29 @@ export class InputController {
       const list = (events && events.length) ? events : [e];
       const enabled = this.getPressureEnabled();
       for (const ev of list) {
-        // raw 几乎没动 → 跳整个 event（不更 smX，不发 stamp）。
-        // 之前用 smX-delta 阈值会批多个事件成一次 extend → group/skip 周期被当 knot。
+        // raw 几乎没动 → 跳整个 event（buffer 也不更新，避免 weighted avg 漂）
         const drx = ev.clientX - rec.lastRawX;
         const dry = ev.clientY - rec.lastRawY;
         rec.lastRawX = ev.clientX;
         rec.lastRawY = ev.clientY;
         if (drx * drx + dry * dry < RAW_STATIC_SCREEN_SQ) continue;
-        rec.smX += STROKE_SMOOTH_ALPHA * (ev.clientX - rec.smX);
-        rec.smY += STROKE_SMOOTH_ALPHA * (ev.clientY - rec.smY);
+        // 推 buffer，加权平均（最近样本权重大）→ 整数台阶 in，sub-pixel 路径 out
+        rec.posBuffer.push(ev.clientX, ev.clientY);
+        while (rec.posBuffer.length > POSITION_BUFFER_N * 2) {
+          rec.posBuffer.shift(); rec.posBuffer.shift();
+        }
+        const buf = rec.posBuffer;
+        const bn = buf.length / 2;
+        // buf 长度可能 < N，对应权重前缀（保证 sum 一致）
+        let sx = 0, sy = 0, sw = 0;
+        for (let i = 0; i < bn; i++) {
+          const w = POSITION_BUFFER_WEIGHTS[POSITION_BUFFER_WEIGHTS.length - bn + i];
+          sx += buf[i*2] * w;
+          sy += buf[i*2+1] * w;
+          sw += w;
+        }
+        rec.smX = sx / sw;
+        rec.smY = sy / sw;
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
         const pressure = effectivePressureFor(rec, ev, enabled);
         this.brush.extendStroke(dx, dy, pressure);
