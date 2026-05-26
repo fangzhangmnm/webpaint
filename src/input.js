@@ -384,6 +384,7 @@ export class InputController {
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, e, this.getPressureEnabled());
+    this.brush.resetStampCount();
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode);
     // begin 已经落了第一颗 stamp → 也要把它的 dirty 报上去
     const bbox = this.brush.flushDirty();
@@ -391,11 +392,14 @@ export class InputController {
     this.board.requestRender();
   }
   _endStroke() {
+    const stampCount = this.brush.getStampCount();
     this.brush.endStroke();
     if (this._strokeLayerId == null) return;
     const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
     this._strokeLayerId = null;
     if (!layer) return;
+    // Debug: 把这笔的 stamp 数广播给 app，HUD 显示用
+    window.dispatchEvent(new CustomEvent("wp:strokeEnd", { detail: { stamps: stampCount } }));
     const after = layer.ctx.getImageData(0, 0, layer.width, layer.height);
     // 截掉 redo 段，把新状态 push 进去
     if (this.undoIndex < this.undoChain.length - 1) {

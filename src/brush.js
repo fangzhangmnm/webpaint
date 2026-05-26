@@ -42,7 +42,12 @@ export class BrushEngine {
   constructor() {
     this._stampCache = null;       // {key, canvas, radius}
     this._stroke = null;           // { layer, settings, accumDist, lastX, lastY, lastP, mode }
+    // Debug：累计本笔 stamp 次数，给 HUD 显示用，定位 knot 根因
+    this._stampCount = 0;
   }
+  // Debug API
+  resetStampCount() { this._stampCount = 0; }
+  getStampCount() { return this._stampCount; }
 
   // 预渲染一个 stamp 图。color 直接画进去；后期改纹理时这里换实现即可。
   //
@@ -67,11 +72,21 @@ export class BrushEngine {
     stamp.width = d; stamp.height = d;
     const sctx = stamp.getContext("2d");
     const inner = r * Math.max(0, Math.min(1, hardness));
+    // Safari radial gradient 在 inner circle 内是 implementation-specific（MDN
+    // 原话 "undefined inside the inner circle"）。为了不依赖这个行为：先画外环
+    // gradient（fillRect 整张），再画 solid 内盘覆盖中心。保证中心 alpha=1。
     const g = sctx.createRadialGradient(r, r, inner, r, r, r);
     g.addColorStop(0, useColor);
     g.addColorStop(1, hexToRgba(useColor, 0));
     sctx.fillStyle = g;
     sctx.fillRect(0, 0, d, d);
+    // 显式 solid 内盘
+    if (inner > 0) {
+      sctx.fillStyle = useColor;
+      sctx.beginPath();
+      sctx.arc(r, r, inner, 0, Math.PI * 2);
+      sctx.fill();
+    }
 
     this._stampCache = { key, canvas: stamp, baseSize, radius: r };
     return this._stampCache;
@@ -175,6 +190,7 @@ export class BrushEngine {
     const drawD = size + 2 * (size / stamp.baseSize);
     const drawR = drawD / 2;
     ctx.drawImage(stamp.canvas, x - drawR, y - drawR, drawD, drawD);
+    this._stampCount++;
 
     ctx.globalAlpha = prevAlpha;
     ctx.globalCompositeOperation = prevComp;

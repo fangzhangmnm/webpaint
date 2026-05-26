@@ -24,6 +24,7 @@ const els = {
   zoomLabel: document.getElementById("zoomLabel"),
   canvasSizeLabel: document.getElementById("canvasSizeLabel"),
   statusLabel: document.getElementById("statusLabel"),
+  brushDebugLabel: document.getElementById("brushDebugLabel"),
   versionLabel: document.getElementById("versionLabel"),
   sizeSlider: document.getElementById("sizeSlider"),
   opacitySlider: document.getElementById("opacitySlider"),
@@ -433,9 +434,26 @@ function hexToHsv(hex) {
   return { h, s, v };
 }
 
+// ---- Debug: brush 状态在 HUD 显示，方便定位 knot 根因 ----
+// 用闭包变量 + 在 slider 监听器/strokeEnd 事件里直接 refresh，不动 setSize/setOpacity 本体
+let _lastStrokeStamps = 0;
+function refreshBrushDebug() {
+  const s = state.brush;
+  // 满压下的 step / 直径（pressure off 时也是这个）
+  const step = Math.max(0.5, s.size * s.spacing);
+  els.brushDebugLabel.textContent = `step ${step.toFixed(1)} / d ${s.size.toFixed(0)} / n ${_lastStrokeStamps}`;
+}
+window.addEventListener("wp:strokeEnd", (e) => {
+  _lastStrokeStamps = e.detail.stamps;
+  refreshBrushDebug();
+});
+els.sizeSlider.addEventListener("input", refreshBrushDebug);
+els.opacitySlider.addEventListener("input", refreshBrushDebug);
+
 // ---- 启动收尾 ----
 setStatus("就绪");
 updateZoomLabel();
+refreshBrushDebug();
 
 // ---- Service worker + 更新检测 ----
 // 沿用 WebXiaoHeiWu 模式，四条检测路径都挂上，iPad PWA standalone 模式默认
