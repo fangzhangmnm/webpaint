@@ -95,6 +95,15 @@ stampAlpha  = settings.opacity × opacityMul
 >
 > end taper（真正彻底解结尾 bulb）需要把 live stroke 缓冲到离屏 canvas，pointerup 时连同 taper 一起 blit 到 layer —— Procreate 走法，工程量中，留下一轮跟"套索+拖动"一起改造
 
+> **2026-05-26 v12 user 数据**：v11 加了 diagnostic（uniq + α），关压感 + 大笔触画一笔，HUD 显示 `step 6.2 / d 52 / n 395 / uniq 381 / α 0.69-0.83`。两条结论：
+>
+> 1. **uniq 381/395 排除"坐标重复"**：重复只 14 颗（抬笔时 lastP residual），不是 bead 根因
+> 2. **α 最大 0.83 != 1.0** 才是真凶。stamp 中心理论上有 7 颗邻 stamp 的 solid 内圈覆盖；数学反推 stamp 源 alpha ≈ 0.4 而非 1.0 → **Safari "radial gradient is undefined inside the inner circle (r0>0)" 那个 MDN 警告踩中了**
+>
+> v10 用过两步（gradient + solid 内盘）但 v11 user 让回滚，事后看回滚是误判
+>
+> v12 正确修法：`createRadialGradient(r, r, 0, r, r, r)` + 3 段 color stops（center solid → hardness×r solid → edge transparent）。r0=0 永远没有 "inside inner" 区域，绕过 undefined
+
 ## 已知问题（用户应该会反馈的）
 
 1. **狗牙**：圆形 stamp 在大 size 下、缩放放大查看时，stamp 边缘的 alpha 衰减不够 GPU-AA 光滑。可能要：

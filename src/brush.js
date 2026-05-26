@@ -71,9 +71,18 @@ export class BrushEngine {
     const stamp = document.createElement("canvas");
     stamp.width = d; stamp.height = d;
     const sctx = stamp.getContext("2d");
-    const inner = r * Math.max(0, Math.min(1, hardness));
-    const g = sctx.createRadialGradient(r, r, inner, r, r, r);
+    const hd = Math.max(0, Math.min(1, hardness));
+    // **关键**：内圈半径 0（不是 hardness×r），靠 color stops 定义 hardness 边界。
+    // v11 实测 stamp 中心 layer alpha 只有 ~0.8（应当 ≈1），数学反推 stamp 源
+    // alpha ≈ 0.4 不是 1.0 —— 就是 Safari "radial gradient is undefined inside
+    // the inner circle (r0>0)" 那个 MDN 警告。改用 r0=0 + 3 段 stop，永远没有
+    // "inside inner" 区域：
+    //   center → solid 满 alpha
+    //   hardness×r → 还是 solid
+    //   r → 透明
+    const g = sctx.createRadialGradient(r, r, 0, r, r, r);
     g.addColorStop(0, useColor);
+    g.addColorStop(hd, useColor);
     g.addColorStop(1, hexToRgba(useColor, 0));
     sctx.fillStyle = g;
     sctx.fillRect(0, 0, d, d);
