@@ -1,7 +1,7 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
 // 模块 lockstep 改。WebXiaoHeiWu 的教训："I forgot it across three bumps
 // in a row; the user caught it"。bump.sh 可以一次性 sed 所有 module。
-export const MODULE_VERSION = "v19-2026-05-26";
+export const MODULE_VERSION = "v20-2026-05-26";
 
 // 笔刷引擎 v0：圆笔 + 沿线 stamp。
 //
@@ -217,6 +217,8 @@ export class BrushEngine {
     return {
       n, uniq: uniq.size, dropped: st.droppedCount,
       aMin, aMax, dMean, dStd, dMin, dMax,
+      // 复制一份 stamp 位置数组给 board 画视觉 marker
+      positions: Float32Array.from(pts),
     };
   }
   cancelStroke() {
