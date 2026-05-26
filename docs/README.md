@@ -12,6 +12,7 @@
 | [undo-strategy.md](undo-strategy.md) | 整图 ImageData 快照 vs 增量 / 压缩；为什么先选简单的 |
 | [sibling-reuse.md](sibling-reuse.md) | 从 ScratchPad 等兄弟项目直接复用的东西，哪些不一样 |
 | [pwa-shell.md](pwa-shell.md) | PWA 壳的几个关键点（iPad 怪癖 / 错误浮条 / 主题 guard） |
+| [pwa-update-detection.md](pwa-update-detection.md) | **跨项目可拷**：PWA 更新检测必须挂的 4 条路径（iPad standalone 不主动 check SW 的解药） |
 
 ## 怎么用这个目录
 
