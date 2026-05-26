@@ -33,6 +33,7 @@ const els = {
   clearBtn: document.getElementById("clearButton"),
   themeBtn: document.getElementById("themeButton"),
   pressureBtn: document.getElementById("pressureButton"),
+  longPressPickBtn: document.getElementById("longPressPickButton"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
   activeSwatch: document.getElementById("activeSwatch"),
   // 浮动色板
@@ -74,6 +75,7 @@ const state = {
     color: safeLS("webpaint.color") || "#1b1b1b",
   }),
   pressureEnabled: safeLS("webpaint.pressure") !== "0", // 默认开（不像 ScratchPad 默认关）
+  longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
 };
 
 // brush settings keep color in sync
@@ -87,6 +89,7 @@ const input = new InputController(board, doc, {
   getTool: () => state.tool,
   getBrushSettings: () => state.brush,
   getPressureEnabled: () => state.pressureEnabled,
+  getLongPressPickEnabled: () => state.longPressPick,
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
 });
@@ -179,6 +182,19 @@ els.pressureBtn.addEventListener("click", () => {
   setStatus(`压感 · ${state.pressureEnabled ? "开" : "关"}`);
 });
 applyPressure(state.pressureEnabled);
+
+// ---- 单指长按吸色 toggle ----
+function applyLongPressPick(on) {
+  state.longPressPick = !!on;
+  els.longPressPickBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  els.longPressPickBtn.title = `单指长按吸色（${on ? "开" : "关"}）`;
+  safeLSSet("webpaint.longPressPick", on ? "1" : "0");
+}
+els.longPressPickBtn.addEventListener("click", () => {
+  applyLongPressPick(!state.longPressPick);
+  setStatus(`长按吸色 · ${state.longPressPick ? "开" : "关"}`);
+});
+applyLongPressPick(state.longPressPick);
 
 // ---- undo / redo / fit / clear ----
 els.undoBtn.addEventListener("click", () => input.undo());
