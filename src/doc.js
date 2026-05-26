@@ -1,5 +1,5 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。
-export const MODULE_VERSION = "v20-2026-05-26";
+export const MODULE_VERSION = "v21-2026-05-26";
 
 // PaintDoc = 模型层（无 DOM）。
 //

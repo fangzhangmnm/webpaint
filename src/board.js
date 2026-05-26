@@ -1,5 +1,5 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。
-export const MODULE_VERSION = "v20-2026-05-26";
+export const MODULE_VERSION = "v21-2026-05-26";
 
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
 //
@@ -126,6 +126,13 @@ export class Board {
     this.setViewport(tx, ty, scale);
   }
 
+  // Debug：在 layer 之上画上一笔所有 stamp 中心的红点 marker
+  setDebugMarkers(positions) {
+    this._debugMarkers = positions;  // Float32Array [x0,y0,x1,y1,...] 或 null
+    this._dirtyFull = true;
+    this.requestRender();
+  }
+
   // 公共 API：layer 像素被改了（图层结构变 / 切换 / putImageData 等）
   invalidateAll() {
     this._dirtyFull = true;
@@ -220,6 +227,7 @@ export class Board {
     );
 
     // cursor 预览
+    if (this._debugMarkers) this._drawDebugMarkers();
     if (this._showCursor && this._cursor) this._drawCursor();
   }
 
@@ -279,6 +287,22 @@ export class Board {
     ctx.restore();
     // 注意：partial render 不重画 doc 边框 / cursor，它们保留上一帧的像素就行。
     // 任何视口 / 主题 / cursor 变化都会触发 _dirtyFull，下一帧会全画一次。
+  }
+
+  _drawDebugMarkers() {
+    const ctx = this.ctx;
+    const { tx, ty, scale } = this.viewport;
+    const pts = this._debugMarkers;
+    const r = 2;
+    ctx.fillStyle = "rgba(255, 32, 32, 0.85)";
+    ctx.beginPath();
+    for (let i = 0; i < pts.length; i += 2) {
+      const sx = pts[i] * scale + tx;
+      const sy = pts[i + 1] * scale + ty;
+      ctx.moveTo(sx + r, sy);
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    }
+    ctx.fill();
   }
 
   _drawCursor() {
