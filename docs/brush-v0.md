@@ -104,6 +104,16 @@ stampAlpha  = settings.opacity × opacityMul
 >
 > v12 正确修法：`createRadialGradient(r, r, 0, r, r, r)` + 3 段 color stops（center solid → hardness×r solid → edge transparent）。r0=0 永远没有 "inside inner" 区域，绕过 undefined
 
+> **2026-05-26 v13 user**："黑笔重叠时边缘发亮，alpha 边缘过渡区 color 也从黑过渡到白了，应该 color 是纯色 alpha 才 falloff" + "Windows 上鼠标拖动没这个 bead 问题"
+>
+> 两件事一并修：
+>
+> 1. **iPad vs Windows bead 差**：印证我的 Safari 源 α 推断。Windows Chrome 把 inner gradient 正确填 α=1，无 bead；iPad Safari 给低 α，opacity<1 时把 bead 放大。v12 的 r0=0 + 3-stop 已经 fix
+>
+> 2. **黑笔重叠边缘发亮**：v12 单 gradient 让 Safari 在 alpha→0 的 stop 区域同时把 RGB 朝 stop1 颜色（透明黑 = rgba(0,0,0,0)）线性拉。黑色 + 几乎透明黑 中间会出 RGB 抖动。换成**先填纯色实心圆，再用 destination-out + 反向 alpha gradient 削外圈**：源 canvas RGB 永远是纯 useColor，只有 alpha falloff。Procreate / Krita 标准做法
+>
+> hardness=1 时跳过 destination-out 那步，纯硬边圆盘
+
 ## 已知问题（用户应该会反馈的）
 
 1. **狗牙**：圆形 stamp 在大 size 下、缩放放大查看时，stamp 边缘的 alpha 衰减不够 GPU-AA 光滑。可能要：

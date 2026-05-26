@@ -72,20 +72,27 @@ export class BrushEngine {
     stamp.width = d; stamp.height = d;
     const sctx = stamp.getContext("2d");
     const hd = Math.max(0, Math.min(1, hardness));
-    // **关键**：内圈半径 0（不是 hardness×r），靠 color stops 定义 hardness 边界。
-    // v11 实测 stamp 中心 layer alpha 只有 ~0.8（应当 ≈1），数学反推 stamp 源
-    // alpha ≈ 0.4 不是 1.0 —— 就是 Safari "radial gradient is undefined inside
-    // the inner circle (r0>0)" 那个 MDN 警告。改用 r0=0 + 3 段 stop，永远没有
-    // "inside inner" 区域：
-    //   center → solid 满 alpha
-    //   hardness×r → 还是 solid
-    //   r → 透明
-    const g = sctx.createRadialGradient(r, r, 0, r, r, r);
-    g.addColorStop(0, useColor);
-    g.addColorStop(hd, useColor);
-    g.addColorStop(1, hexToRgba(useColor, 0));
-    sctx.fillStyle = g;
-    sctx.fillRect(0, 0, d, d);
+    // 第一步：填一个**纯色**圆盘，RGB 是 useColor，alpha 全 1。
+    sctx.fillStyle = useColor;
+    sctx.beginPath();
+    sctx.arc(r, r, r, 0, Math.PI * 2);
+    sctx.fill();
+    // 第二步：用 destination-out + 反向 alpha gradient 削外圈 alpha。
+    // 这样 source canvas 的 RGB 永远是纯 useColor，只有 alpha 在 hardness×r 到 r
+    // 间 falloff。如果直接用单 gradient（v12 的 3-stop），Safari 在 alpha→0
+    // 的转色区会把 RGB 也朝 stop 1 的颜色（透明黑）线性拉，导致黑笔重叠时
+    // 边缘"发亮"。Procreate / Krita 都是这套 solid+dest-out 的方法。
+    // hardness=1 跳过这一步，纯硬边。
+    if (hd < 1) {
+      sctx.globalCompositeOperation = "destination-out";
+      const g = sctx.createRadialGradient(r, r, 0, r, r, r);
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(hd, "rgba(0,0,0,0)");
+      g.addColorStop(1, "rgba(0,0,0,1)");
+      sctx.fillStyle = g;
+      sctx.fillRect(0, 0, d, d);
+      sctx.globalCompositeOperation = "source-over";
+    }
 
     this._stampCache = { key, canvas: stamp, baseSize, radius: r };
     return this._stampCache;
