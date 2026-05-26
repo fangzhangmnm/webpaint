@@ -68,6 +68,14 @@ stampAlpha  = settings.opacity × opacityMul
 >
 > 顺带把渲染换成 dirty-rect（见 performance.md），细笔触 / 大快速拖时帧时间也短一档
 
+> **2026-05-25 v4 user**："结节还是有，和斜率有关，间隔规律 / 笔画末端突然粗"
+>
+> 两个不同 bug：
+>
+> 1. **末端突然粗** = Pencil 抬笔瞬间 `e.pressure === 0`，原来 `effectivePressure` fallback 0.5 → 抬笔最后一颗 stamp 鼓出一大颗。改成 `effectivePressureFor(rec, ev, enabled)`：本笔记一个 `rec.lastP`（最近一次有效压感），raw=0 时复用它而不是 0.5。warmup 起手第一颗仍走 0.5（lastP 还是 null）
+>
+> 2. **规律间隔的结** = v3 的 smX-delta 过滤器（"smoothed move < 0.5 px 就跳"）实际效果是**把 N 个 sub-threshold 事件批成一次 extendStroke** —— 每次 extend 一发包内 3-4 颗 stamp 紧贴，发包间是 gap。沿走线方向，肉眼把"密一段 + 稀一段"看成 group/skip 周期 = "结"。换成按 **raw 输入是否真的在动**过滤（drx² + dry² < 0.005 → 跳），catch-up tail 还是滤掉（raw 静止 → 跳），但正常画的每个真实 raw 移动都触发独立 extendStroke，无批量化无周期
+
 ## 已知问题（用户应该会反馈的）
 
 1. **狗牙**：圆形 stamp 在大 size 下、缩放放大查看时，stamp 边缘的 alpha 衰减不够 GPU-AA 光滑。可能要：

@@ -29,8 +29,10 @@ const DOUBLETAP_WINDOW = 500;
 const DOUBLETAP_MAX_GAP = 80;
 const STROKE_SMOOTH_ALPHA = 0.65;
 // 笔停手时 IIR catch-up 会塞一串小 delta → 局部 stamp pile-up（"细笔的结"）。
-// 跳过 smX 移动 < N 屏 px 的 extendStroke 调用 —— smX 内部还在收敛，但不发 stamp。
-const MIN_STAMP_MOVE_SCREEN_SQ = 0.25;   // 0.5 px²
+// 改成按 raw 输入是否真在动来过滤：raw 静止 → 跳整个 event（不更 smX，不发 stamp）。
+// 之前的 smX-delta 过滤会把 N 个 sub-threshold 事件批成一次 extendStroke，
+// 沿走线就出现"密一段 + 空一段"的 group/skip 周期，被肉眼当 knot。
+const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；Pencil 噪声 < 0.05 px，正常画 > 0.2 px
 const MAX_UNDO_ENTRIES = 20;       // 2048² × RGBA = 16 MB × 20 = 320 MB；后期换 PNG / tile-diff 再降
 
 export class InputController {
@@ -161,9 +163,10 @@ export class InputController {
     if (role === "draw" || role === "erase") {
       // 画的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
       this.board.setCursor(null);
-      // 锚 smoothing 到 down 点
-      rec.lastStampedX = x;
-      rec.lastStampedY = y;
+      // 锚 smoothing / raw / 压感 状态到 down 点
+      rec.lastRawX = x;
+      rec.lastRawY = y;
+      rec.lastP = null;   // 本笔历史最高的有效 pressure，给 sensor 0 fallback
       this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
     } else if (role === "pick") {
       this._doPick(x, y);
@@ -195,16 +198,17 @@ export class InputController {
       const list = (events && events.length) ? events : [e];
       const enabled = this.getPressureEnabled();
       for (const ev of list) {
+        // raw 几乎没动 → 跳整个 event（不更 smX，不发 stamp）。
+        // 之前用 smX-delta 阈值会批多个事件成一次 extend → group/skip 周期被当 knot。
+        const drx = ev.clientX - rec.lastRawX;
+        const dry = ev.clientY - rec.lastRawY;
+        rec.lastRawX = ev.clientX;
+        rec.lastRawY = ev.clientY;
+        if (drx * drx + dry * dry < RAW_STATIC_SCREEN_SQ) continue;
         rec.smX += STROKE_SMOOTH_ALPHA * (ev.clientX - rec.smX);
         rec.smY += STROKE_SMOOTH_ALPHA * (ev.clientY - rec.smY);
-        // 距离上一次 extendStroke 的屏 px 移动；catch-up tail 全过滤掉
-        const dxs = rec.smX - rec.lastStampedX;
-        const dys = rec.smY - rec.lastStampedY;
-        if (dxs * dxs + dys * dys < MIN_STAMP_MOVE_SCREEN_SQ) continue;
-        rec.lastStampedX = rec.smX;
-        rec.lastStampedY = rec.smY;
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
-        const pressure = effectivePressure(ev, enabled);
+        const pressure = effectivePressureFor(rec, ev, enabled);
         this.brush.extendStroke(dx, dy, pressure);
       }
       // 把 brush 累的 dirty bbox 送进 board，rAF render 时只 blit 这一片
@@ -286,7 +290,7 @@ export class InputController {
     this._strokeLayerId = layer.id;
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
-    const pressure = effectivePressure(e, this.getPressureEnabled());
+    const pressure = effectivePressureFor(rec, e, this.getPressureEnabled());
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode);
     // begin 已经落了第一颗 stamp → 也要把它的 dirty 报上去
     const bbox = this.brush.flushDirty();
@@ -486,13 +490,20 @@ export class InputController {
   }
 }
 
-// pressure 关时一律返 1（"满压感"），数据语义而非渲染开关
-function effectivePressure(e, enabled) {
+// pressure 关时一律返 1（"满压感"），数据语义而非渲染开关。
+// Pencil 在抬笔瞬间会塞一帧 e.pressure === 0，原来 fallback 0.5 让笔触末端
+// 突然鼓一颗大 stamp。改成沿用本笔最近一次有效 pressure（rec.lastP），
+// 让 taper 自然衰减；warmup 起手第一颗仍走 0.5 fallback（lastP 还是 null）。
+function effectivePressureFor(rec, ev, enabled) {
   if (!enabled) return 1;
-  if (e.pointerType === "mouse") return 0.5;
-  const p = typeof e.pressure === "number" ? e.pressure : 0.5;
-  if (p === 0) return 0.5;
-  return Math.max(0.05, Math.min(1, p));
+  if (ev.pointerType === "mouse") return 0.5;
+  const raw = typeof ev.pressure === "number" ? ev.pressure : null;
+  if (raw == null || raw === 0) {
+    return rec.lastP != null ? rec.lastP : 0.5;
+  }
+  const p = Math.max(0.05, Math.min(1, raw));
+  rec.lastP = p;
+  return p;
 }
 
 function parseHex(hex) {

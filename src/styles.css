@@ -58,6 +58,14 @@ html, body {
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
+  /* 全局墙掉浏览器双击 zoom / pinch zoom。canvas 单独 touch-action: none */
+  touch-action: manipulation;
+}
+
+/* 顶栏 / 浮窗 / sheet / toast 上的所有 button / input：也明确写一遍，防 iOS
+   在某些 Safari 版本上 element 默认仍允许 double-tap zoom */
+button, input, .swatch, .tool, .float-panel, .top-bar, .hud, .sheet, .backdrop, .toast {
+  touch-action: manipulation;
 }
 
 .board {
