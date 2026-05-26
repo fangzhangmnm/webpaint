@@ -76,6 +76,25 @@ stampAlpha  = settings.opacity × opacityMul
 >
 > 2. **规律间隔的结** = v3 的 smX-delta 过滤器（"smoothed move < 0.5 px 就跳"）实际效果是**把 N 个 sub-threshold 事件批成一次 extendStroke** —— 每次 extend 一发包内 3-4 颗 stamp 紧贴，发包间是 gap。沿走线方向，肉眼把"密一段 + 稀一段"看成 group/skip 周期 = "结"。换成按 **raw 输入是否真的在动**过滤（drx² + dry² < 0.005 → 跳），catch-up tail 还是滤掉（raw 静止 → 跳），但正常画的每个真实 raw 移动都触发独立 extendStroke，无批量化无周期
 
+> **2026-05-25 v6 user**："结节间隔和拖动速率有关 + 像 alpha 不是厚度 + 开头/中间/结尾偶发 bulb"
+>
+> **结节速率相关 = 没做 pressure stabilizer**。Pencil 自带 ~10Hz 握笔抖动 → 灌进 `size = base × p^0.6` → step 每秒 10 次缩-胀 → step 突然 < accumDist 时我 `if (segPos < 0) segPos = 0` 把首颗 stamp 推到段首 → 紧贴上一颗 → 小 alpha 堆积。时间频率固定 10Hz，**空间间隔 = 速度 / 10**，所以"和拖动速率有关"。
+>
+> **三处 bulb**：
+> - 开头 = 起手第一帧 Pencil 常报 `e.pressure === 0`，旧 fallback 0.5 → 第一颗"半压坨"
+> - 中间 = 传感器偶发尖刺（0.3 中间突然报 0.85）没人过滤
+> - 结尾 = 抬笔最后一帧 0 沿用 lastP，但 lastP 若刚好是中段尖刺值也会鼓
+>
+> **Stabilizer 是行业标配**（Procreate StreamLine / Clip Studio Stabilization / Krita Pen Stabilizer / PS Smoothing / SAI 手抖補正），本质都是位置 LPF + 压感 LPF + 起手 taper。
+>
+> v6 加 `PRESSURE_SMOOTH_ALPHA = 0.4` 的 IIR LPF 在 `effectivePressureFor`：
+> - sentinel `rec.smP = -1` 初始 → 首颗 stamp 直接用 raw（tap 满压保留）
+> - 之后 `smP += α × (raw - smP)`，damp 10Hz 抖动 = 杀速度相关结节
+> - 同时削平传感器尖刺 = 缓解 mid / end bulb
+> - 起手 raw=0 fallback 从 0.5 → 0.2 = 起手 bulb 不再"半压"那么明显
+>
+> end taper（真正彻底解结尾 bulb）需要把 live stroke 缓冲到离屏 canvas，pointerup 时连同 taper 一起 blit 到 layer —— Procreate 走法，工程量中，留下一轮跟"套索+拖动"一起改造
+
 ## 已知问题（用户应该会反馈的）
 
 1. **狗牙**：圆形 stamp 在大 size 下、缩放放大查看时，stamp 边缘的 alpha 衰减不够 GPU-AA 光滑。可能要：

@@ -33,6 +33,11 @@ const STROKE_SMOOTH_ALPHA = 0.65;
 // 之前的 smX-delta 过滤会把 N 个 sub-threshold 事件批成一次 extendStroke，
 // 沿走线就出现"密一段 + 空一段"的 group/skip 周期，被肉眼当 knot。
 const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；Pencil 噪声 < 0.05 px，正常画 > 0.2 px
+// 压感 LPF（stabilizer）：Pencil 自带 ~10Hz 握笔抖动 → 灌进 size = base × p^0.6
+// 会让 step 每秒 10 次缩胀 → segPos 偶尔被 clamp 到段首 → 小堆积 → 视觉上速度
+// 相关的 alpha 结节。LPF 把 10Hz 抖动压平，结节就没了。同步削尖刺，缓解 mid bulb。
+// init = -1 当 sentinel：第一颗 stamp 直接用 raw（保持 tap 满压），之后 LPF。
+const PRESSURE_SMOOTH_ALPHA = 0.4;
 const MAX_UNDO_ENTRIES = 20;       // 2048² × RGBA = 16 MB × 20 = 320 MB；后期换 PNG / tile-diff 再降
 
 export class InputController {
@@ -166,7 +171,8 @@ export class InputController {
       // 锚 smoothing / raw / 压感 状态到 down 点
       rec.lastRawX = x;
       rec.lastRawY = y;
-      rec.lastP = null;   // 本笔历史最高的有效 pressure，给 sensor 0 fallback
+      rec.lastP = null;   // 本笔最近一次有效 pressure，给 sensor 0 fallback
+      rec.smP = -1;       // stabilizer LPF 状态；-1 = 还没收到第一帧（首颗 = raw）
       this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
     } else if (role === "pick") {
       this._doPick(x, y);
@@ -491,19 +497,28 @@ export class InputController {
 }
 
 // pressure 关时一律返 1（"满压感"），数据语义而非渲染开关。
-// Pencil 在抬笔瞬间会塞一帧 e.pressure === 0，原来 fallback 0.5 让笔触末端
-// 突然鼓一颗大 stamp。改成沿用本笔最近一次有效 pressure（rec.lastP），
-// 让 taper 自然衰减；warmup 起手第一颗仍走 0.5 fallback（lastP 还是 null）。
+//
+// 抬笔瞬间 e.pressure === 0 → 沿用 rec.lastP，不退回 0.5（v4）。
+// 起手 warmup 也 0 但 lastP 还没 → 退到 **0.2**（v6，原本 0.5 → 起手鼓 bulb）。
+// 算完 raw 后过一道 LPF（rec.smP，α=PRESSURE_SMOOTH_ALPHA）做 stabilizer，
+// damp 10Hz 抖动 + 削传感器尖刺。sentinel rec.smP < 0 → 首颗用 raw（tap 满压）。
 function effectivePressureFor(rec, ev, enabled) {
   if (!enabled) return 1;
-  if (ev.pointerType === "mouse") return 0.5;
-  const raw = typeof ev.pressure === "number" ? ev.pressure : null;
-  if (raw == null || raw === 0) {
-    return rec.lastP != null ? rec.lastP : 0.5;
+  let raw;
+  if (ev.pointerType === "mouse") {
+    raw = 0.5;
+  } else {
+    const r = typeof ev.pressure === "number" ? ev.pressure : null;
+    if (r == null || r === 0) {
+      raw = rec.lastP != null ? rec.lastP : 0.2;
+    } else {
+      raw = Math.max(0.05, Math.min(1, r));
+      rec.lastP = raw;
+    }
   }
-  const p = Math.max(0.05, Math.min(1, raw));
-  rec.lastP = p;
-  return p;
+  if (rec.smP < 0) rec.smP = raw;
+  else rec.smP += PRESSURE_SMOOTH_ALPHA * (raw - rec.smP);
+  return rec.smP;
 }
 
 function parseHex(hex) {
