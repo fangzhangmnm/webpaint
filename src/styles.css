@@ -269,6 +269,55 @@ input[type=range] {
 .hidden { display: none; }
 .sheet.hidden, .backdrop.hidden { display: block; }
 
+/* 浮动可拖面板（color picker / 未来的 layers / brush params 等都走这套） */
+.float-panel {
+  position: fixed;
+  top: 60px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  width: 264px;
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 15;
+}
+.float-panel.hidden { display: none; }
+.float-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  font-size: 13px;
+  color: var(--ink-soft);
+  touch-action: none;
+}
+.float-panel-head:active { cursor: grabbing; }
+.float-panel-title { font-weight: 600; color: var(--ink); }
+.float-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.close-x {
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.close-x:hover { color: var(--ink); }
+
 /* HSV picker */
 .sv-pad {
   display: block;

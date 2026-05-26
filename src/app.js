@@ -33,11 +33,11 @@ const els = {
   themeBtn: document.getElementById("themeButton"),
   pressureBtn: document.getElementById("pressureButton"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
-  swatches: [...document.querySelectorAll(".swatch[data-color]")],
   activeSwatch: document.getElementById("activeSwatch"),
-  // picker sheet
-  pickerSheet: document.getElementById("pickerSheet"),
-  pickerBackdrop: document.getElementById("pickerBackdrop"),
+  // 浮动色板
+  colorPanel: document.getElementById("colorPanel"),
+  colorPanelHead: document.getElementById("colorPanelHead"),
+  colorPanelClose: document.getElementById("colorPanelClose"),
   svPad: document.getElementById("svPad"),
   hueSlider: document.getElementById("hueSlider"),
   hexInput: document.getElementById("hexInput"),
@@ -135,19 +135,12 @@ function setColor(hex) {
   safeLSSet("webpaint.color", hex);
   els.activeSwatch.style.background = hex;
   syncBrushColor();
-  // swatch 高亮（如果命中预设）
-  for (const s of els.swatches) {
-    s.setAttribute("aria-pressed", s.dataset.color?.toLowerCase() === hex.toLowerCase() ? "true" : "false");
-  }
-  // 同步 picker 状态
-  if (!els.pickerSheet.classList.contains("hidden")) {
+  // 浮动色板开着的话同步 marker / hex
+  if (!els.colorPanel.classList.contains("hidden")) {
     pickerSetFromHex(hex);
   }
 }
-for (const s of els.swatches) {
-  s.addEventListener("click", () => setColor(s.dataset.color));
-}
-els.activeSwatch.addEventListener("click", () => openPicker());
+els.activeSwatch.addEventListener("click", () => toggleColorPanel());
 setColor(state.color);
 
 // ---- size / opacity ----
@@ -249,17 +242,70 @@ board.render = function () {
   updateZoomLabel();
 };
 
-// ---- HSV picker sheet ----
+// ---- HSV 浮动色板 ----
 let pickerHsv = { h: 0, s: 0, v: 0.1 };
-function openPicker() {
-  pickerSetFromHex(state.color);
-  openSheet(els.pickerSheet, els.pickerBackdrop);
-  drawSvPad();
+
+function toggleColorPanel(force) {
+  const hidden = els.colorPanel.classList.contains("hidden");
+  const show = force === true ? true : force === false ? false : hidden;
+  if (show) {
+    pickerSetFromHex(state.color);
+    els.colorPanel.classList.remove("hidden");
+    // 还原位置；没存过就放到右上角
+    const saved = safeLS("webpaint.colorPanel.pos");
+    const w = els.colorPanel.offsetWidth || 264;
+    const h = els.colorPanel.offsetHeight || 320;
+    let left, top;
+    if (saved) {
+      try {
+        const o = JSON.parse(saved);
+        left = o.left; top = o.top;
+      } catch { left = top = null; }
+    }
+    if (left == null) { left = window.innerWidth - w - 16; top = 60; }
+    // clamp
+    left = Math.max(0, Math.min(window.innerWidth - w, left));
+    top = Math.max(0, Math.min(window.innerHeight - h, top));
+    els.colorPanel.style.left = left + "px";
+    els.colorPanel.style.top = top + "px";
+    drawSvPad();
+  } else {
+    els.colorPanel.classList.add("hidden");
+  }
 }
-els.pickerBackdrop.addEventListener("click", () => closeSheet(els.pickerSheet, els.pickerBackdrop));
-els.pickerSheet.addEventListener("click", (e) => {
-  if (e.target.closest("[data-picker]")?.dataset.picker === "close") {
-    closeSheet(els.pickerSheet, els.pickerBackdrop);
+els.colorPanelClose.addEventListener("click", () => toggleColorPanel(false));
+
+// 拖标题栏移动面板（pointer events，捕获到 head 上 → 不会漏掉移出窗口外的 move）
+let _panelDrag = null;
+els.colorPanelHead.addEventListener("pointerdown", (e) => {
+  if (e.target.closest(".close-x")) return;
+  const r = els.colorPanel.getBoundingClientRect();
+  _panelDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
+  els.colorPanelHead.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+els.colorPanelHead.addEventListener("pointermove", (e) => {
+  if (!_panelDrag || e.pointerId !== _panelDrag.id) return;
+  const w = els.colorPanel.offsetWidth;
+  const h = els.colorPanel.offsetHeight;
+  const left = Math.max(0, Math.min(window.innerWidth - w, _panelDrag.ol + (e.clientX - _panelDrag.sx)));
+  const top  = Math.max(0, Math.min(window.innerHeight - h, _panelDrag.ot + (e.clientY - _panelDrag.sy)));
+  els.colorPanel.style.left = left + "px";
+  els.colorPanel.style.top = top + "px";
+  safeLSSet("webpaint.colorPanel.pos", JSON.stringify({ left, top }));
+});
+els.colorPanelHead.addEventListener("pointerup", (e) => {
+  if (_panelDrag && e.pointerId === _panelDrag.id) {
+    try { els.colorPanelHead.releasePointerCapture(e.pointerId); } catch {}
+    _panelDrag = null;
+  }
+});
+
+// 键盘 C 切换
+window.addEventListener("keydown", (e) => {
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+  if (e.key === "c" || e.key === "C") {
+    if (!(e.ctrlKey || e.metaKey)) toggleColorPanel();
   }
 });
 els.hueSlider.addEventListener("input", () => {

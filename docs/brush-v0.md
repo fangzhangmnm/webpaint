@@ -44,6 +44,18 @@ stampAlpha  = settings.opacity × opacityMul
 
 `pressureToOpacity` 默认 **关**：粗细变化 + 满 opacity 看起来像油画 / marker；同时改 opacity 才像水彩 / 铅笔 —— 这是 preset 之间的差异，不该默认开。
 
+## 已修的 bug（v0 第一次反馈后）
+
+> **2026-05-25**：user "笔迹小圆点断断续续的；快速大幅度拖动会卡"。
+>
+> 三处一起修，详见 [performance.md](performance.md)：
+> 1. `extendStroke` 的 `t = (nextAt - traveled) / dist` 与 `traveled = -accumDist` 联用 = `(step + accumDist) / dist`，符号反了 → 跨段时 stamp 位置不均、漏一颗 → 视觉断断续续。正确：`segPos = step - accumDist`，之后每 step 一颗。
+> 2. step 用 `baseSize × spacing` 而不是 `actualSize（含压感）× spacing` → 压感低时笔尖瘦但间距没缩 → 散点。Procreate 是当前直径百分比，已改为一致。
+> 3. `_getStamp` 的 cache key 含 size → 压感每变就 cache miss → 每颗 stamp 都新建 canvas + radialGradient + fillRect = 主线程被拖死。已改为 key=`{color, hardness, mode}`，按 base size 烤一次，stamp 时 drawImage 缩放到 actual。
+
+> **2026-05-25 user**："笔压也能控制 alpha"。
+> 默认 `pressureToOpacity = true`。size + alpha 同时受压感控。后期 preset UI 拆开。
+
 ## 已知问题（用户应该会反馈的）
 
 1. **狗牙**：圆形 stamp 在大 size 下、缩放放大查看时，stamp 边缘的 alpha 衰减不够 GPU-AA 光滑。可能要：

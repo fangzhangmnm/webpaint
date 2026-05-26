@@ -27,8 +27,8 @@ const DEFAULT_SETTINGS = {
   spacing: 0.12,      // stamp 间距 = spacing × size（doc-px）
   // 压感映射：开 → 用 pressure；关 → 一律 1
   pressureToSize: true,
-  pressureToOpacity: false,   // 默认只调粗细，opacity 由 size 间接体现（更像油画/铅笔）
-  sizeCurve: 0.6,     // size = size_max × p^sizeCurve
+  pressureToOpacity: true,    // user 2026-05-25：默认笔压也控 alpha
+  sizeCurve: 0.6,             // size = size_max × p^sizeCurve
   opacityCurve: 0.6,
   color: "#1b1b1b",
 };
@@ -45,14 +45,23 @@ export class BrushEngine {
   }
 
   // 预渲染一个 stamp 图。color 直接画进去；后期改纹理时这里换实现即可。
+  //
+  // **PERF**：cache key 里**不**含 size —— stamp 按 settings.size（最大压感）
+  // 烤一次，每颗 stamp 用 drawImage 的 dest-size 缩放下来。否则 size 因压感
+  // 每颗都变 → 每颗 cache miss → 每颗都重建 canvas + gradient，200Hz 飘起来
+  // GC + GPU 上传立刻爆。color / hardness / mode 才是真正会触发重做的参数。
+  //
+  // base canvas 内分辨率 = MAX(64, settings.size) + 2px AA 边 —— 太小会让
+  // 缩小后的 stamp 锯齿化；64 是个折中（GPU 上的小贴图不贵）。
   _getStamp(size, hardness, color, mode) {
-    // mode 影响是否需要预乘 color（橡皮模式我们走 destination-out，stamp 颜色无所谓）
     const useColor = mode === "erase" ? "#000" : color;
-    const key = `${size}|${hardness}|${useColor}`;
-    if (this._stampCache && this._stampCache.key === key) return this._stampCache;
+    const key = `${useColor}|${hardness.toFixed(3)}|${mode}`;
+    if (this._stampCache && this._stampCache.key === key && this._stampCache.baseSize >= size) {
+      return this._stampCache;
+    }
 
-    // size 是直径；canvas 再外扩 2px 给抗锯齿
-    const d = Math.max(2, Math.ceil(size) + 2);
+    const baseSize = Math.max(64, Math.ceil(size));
+    const d = baseSize + 2;
     const r = d / 2;
     const stamp = document.createElement("canvas");
     stamp.width = d; stamp.height = d;
@@ -64,7 +73,7 @@ export class BrushEngine {
     sctx.fillStyle = g;
     sctx.fillRect(0, 0, d, d);
 
-    this._stampCache = { key, canvas: stamp, radius: r };
+    this._stampCache = { key, canvas: stamp, baseSize, radius: r };
     return this._stampCache;
   }
 
@@ -91,6 +100,10 @@ export class BrushEngine {
   }
 
   // 加点。x,y 是 *doc 坐标*。
+  // accumDist 语义 = "上一颗 stamp 到本段起点的距离"（>=0）。
+  // 本段第一颗 stamp 落在 segPos = step - accumDist 处；之后每隔 step 一颗。
+  // step 用 *当前压感缩放后的 size* 算（与 Procreate 一致 —— spacing 是当前直径
+  // 的百分比，不是最大直径），所以低压时间距也会缩小，不会散成点。
   extendStroke(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
@@ -98,20 +111,25 @@ export class BrushEngine {
     const dist = Math.hypot(dx, dy);
     if (dist === 0) return;
 
-    const baseSize = st.settings.size;
-    const step = Math.max(0.5, baseSize * st.settings.spacing);
-    // 累计距离 + 沿线插值 stamp
-    let traveled = -st.accumDist;
-    let nextAt = step;
-    while (traveled + dist >= nextAt) {
-      const t = (nextAt - traveled) / dist;
+    const s = st.settings;
+    const pNow = Math.max(0.05, Math.min(1, pressure));
+    const sizeMulNow = s.pressureToSize ? Math.pow(pNow, s.sizeCurve) : 1;
+    const step = Math.max(0.5, s.size * sizeMulNow * s.spacing);
+
+    // 首颗 stamp 在 segPos 处；accumDist > step 时（step 因压感变小）就立即落一颗
+    let segPos = step - st.accumDist;
+    if (segPos < 0) segPos = 0;
+
+    while (segPos <= dist) {
+      const t = segPos / dist;
       const px = st.lastX + dx * t;
       const py = st.lastY + dy * t;
       const pp = st.lastP + (pressure - st.lastP) * t;
       this._stampOne(px, py, pp);
-      nextAt += step;
+      segPos += step;
     }
-    st.accumDist = (st.accumDist + dist) % step;
+    // 末次落的位置 = segPos - step；它到段尾的距离 = dist - (segPos - step)
+    st.accumDist = dist - (segPos - step);
     st.lastX = x; st.lastY = y; st.lastP = pressure;
   }
 
@@ -134,21 +152,19 @@ export class BrushEngine {
     const alpha = Math.max(0, Math.min(1, s.opacity * opaMul));
     if (alpha < 0.001) return;
 
-    const stamp = this._getStamp(size, s.hardness, s.color, st.mode);
+    // stamp 按 s.size 烤一次（缓存），这里按 actual size 缩放 drawImage
+    const stamp = this._getStamp(s.size, s.hardness, s.color, st.mode);
     const ctx = st.layer.ctx;
 
     const prevAlpha = ctx.globalAlpha;
     const prevComp = ctx.globalCompositeOperation;
     ctx.globalAlpha = alpha;
-    if (st.mode === "erase") {
-      ctx.globalCompositeOperation = "destination-out";
-    } else {
-      ctx.globalCompositeOperation = "source-over";
-    }
+    ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : "source-over";
 
-    // stamp.canvas 是直径 size+2 的位图；居中 draw
-    const r = stamp.radius;
-    ctx.drawImage(stamp.canvas, x - r, y - r);
+    // 目标直径 = size + 2px 给 AA 边和源贴图一致比例
+    const drawD = size + 2 * (size / stamp.baseSize);
+    const drawR = drawD / 2;
+    ctx.drawImage(stamp.canvas, x - drawR, y - drawR, drawD, drawD);
 
     ctx.globalAlpha = prevAlpha;
     ctx.globalCompositeOperation = prevComp;

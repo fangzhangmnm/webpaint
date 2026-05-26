@@ -32,6 +32,10 @@ export class Layer {
     this.mode = "source-over";       // Canvas2D globalCompositeOperation
     this.canvas = makeBitmap(width, height);
     this.ctx = this.canvas.getContext("2d", { willReadFrequently: false });
+    // PERF: stamp 缩放 drawImage 走 bilinear 足够；high 在某些浏览器是 lanczos
+    // 之类的贵活儿，每颗 stamp 都付一次代价没意义
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = "low";
     // 像素左上原点，Canvas2D 默认即如此。
   }
   get width() { return this.canvas.width; }

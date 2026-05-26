@@ -88,12 +88,7 @@
       </div>
 
       <div class="color-group" role="group" aria-label="color">
-        <button class="swatch active-color" id="activeSwatch" title="当前颜色"></button>
-        <button class="swatch" data-color="#1b1b1b" style="--c: #1b1b1b" title="墨"></button>
-        <button class="swatch" data-color="#ffffff" style="--c: #ffffff" title="白"></button>
-        <button class="swatch" data-color="#d05a4a" style="--c: #d05a4a" title="朱"></button>
-        <button class="swatch" data-color="#3a7ab8" style="--c: #3a7ab8" title="湖蓝"></button>
-        <button class="swatch" data-color="#e8b86b" style="--c: #e8b86b" title="土黄"></button>
+        <button class="swatch active-color" id="activeSwatch" title="颜色 (C)"></button>
       </div>
 
       <label class="num-group" title="笔粗">
@@ -160,17 +155,20 @@
       <span id="statusLabel">就绪</span>
     </div>
 
-    <!-- HSV 拾色器 -->
-    <div id="pickerBackdrop" class="backdrop hidden" aria-hidden="true"></div>
-    <div id="pickerSheet" class="sheet hidden" role="dialog" aria-label="拾色器">
-      <h3>颜色</h3>
-      <canvas id="svPad" class="sv-pad" width="240" height="180" aria-label="饱和度 / 明度面板"></canvas>
-      <input id="hueSlider" type="range" min="0" max="360" step="1" value="0" aria-label="色相" class="hue-slider" />
-      <div class="picker-row">
-        <span id="previewSwatch" class="picker-preview"></span>
-        <input id="hexInput" type="text" maxlength="9" value="#1b1b1b" aria-label="HEX" />
+    <!-- HSV 浮动色板：点 activeSwatch / `C` 开关，拖标题栏移动，位置记忆到 localStorage -->
+    <div id="colorPanel" class="float-panel hidden" role="dialog" aria-label="颜色">
+      <div class="float-panel-head" id="colorPanelHead">
+        <span class="float-panel-title">颜色</span>
+        <button id="colorPanelClose" class="close-x" type="button" aria-label="关闭">×</button>
       </div>
-      <button class="sheet-action ghost" data-picker="close">关闭</button>
+      <div class="float-panel-body">
+        <canvas id="svPad" class="sv-pad" width="240" height="180" aria-label="饱和度 / 明度面板"></canvas>
+        <input id="hueSlider" type="range" min="0" max="360" step="1" value="0" aria-label="色相" class="hue-slider" />
+        <div class="picker-row">
+          <span id="previewSwatch" class="picker-preview"></span>
+          <input id="hexInput" type="text" maxlength="9" value="#1b1b1b" aria-label="HEX" />
+        </div>
+      </div>
     </div>
 
     <!-- 清空确认 -->
