@@ -114,6 +114,14 @@ stampAlpha  = settings.opacity × opacityMul
 >
 > hardness=1 时跳过 destination-out 那步，纯硬边圆盘
 
+> **2026-05-26 v14 → 网上挖到根因**：user 反馈 iPad 还有 bead。搜了一圈 prior art 后发现 **iPad Safari 的 PointerEvent `clientX/Y` 是 integer long，不是 spec 要求的 double float** —— Safari 把 Pencil 真实 sub-pixel 位置量化到 1 logic px 才给 JS。Apple Developer Forums #31124 / jquery-archive PEP #380 都确认了。
+>
+> 这意味着我的 IIR LPF（α=0.65）面对整数台阶的 raw 时：raw 一动就跳 1 px，smX += 0.65 一次性跳 0.65 px → smX 不是连续曲线而是离散台阶 → stamp 沿台阶落 → 局部聚集 = bead
+>
+> tldraw #5813/#5877、excalidraw #4205 都在和这个较劲。Procreate 的 "StreamLine" 平滑也是 spline 拟合 + 重采样，但 native 拿到 sub-pixel 历史能激进；web 这边整数 raw 得保守
+>
+> **v16 计划：spline stabilizer**。维护最近 N=4-6 个 raw 整数样本，Catmull-Rom（或 quadratic Bézier 简化版）拟合一条平滑曲线，沿曲线按 step 重采样输出 stamp 位置。整数台阶 in → sub-pixel 平滑路径 out。stamp 落在曲线 sub-pixel 位置 → 不再聚集
+
 ## 已知问题（用户应该会反馈的）
 
 1. **狗牙**：圆形 stamp 在大 size 下、缩放放大查看时，stamp 边缘的 alpha 衰减不够 GPU-AA 光滑。可能要：
