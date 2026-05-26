@@ -1,7 +1,7 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
 // 模块 lockstep 改。WebXiaoHeiWu 的教训："I forgot it across three bumps
 // in a row; the user caught it"。bump.sh 可以一次性 sed 所有 module。
-export const MODULE_VERSION = "v22-2026-05-26";
+export const MODULE_VERSION = "v23-2026-05-26";
 
 // 笔刷引擎 v0：圆笔 + 沿线 stamp。
 //
@@ -109,64 +109,86 @@ export class BrushEngine {
     this.invalidateStamp();
   }
 
-  // 开始一笔。pressure=1 表示满压（包括"压感关"的情况下也传 1）。
+  // **v23 cache-and-consume 架构**（user 推翻 v19 设计）：
+  //   on_new_event(x, y, p):
+  //     push 到 cache
+  //     consume_cache()
+  //   consume_cache():
+  //     for segment in cache:
+  //       walk segment 每 step 一颗 stamp（沿 path arc-length 严格 step 间距）
+  //   raw_stamp(): 此时距上一颗保证 = step（沿 path），无 dedup
+  //
+  // 之前 v0-v22 用 lastX/Y/accumDist 单 segment 状态。功能等价但 cache 模型
+  // 让未来 look-ahead 平滑 / 真曲线 stamping 有地方接。
+  //
+  // step = settings.size × spacing （v19 起不走 pressure）
+
+  _stepFor(s) {
+    return Math.max(0.5, s.size * s.spacing);
+  }
+
   beginStroke(layer, settings, x, y, pressure, mode = "brush") {
+    const step = this._stepFor(settings);
     this._stroke = {
       layer,
       settings,
-      mode, // "brush" or "erase"
-      accumDist: 0,
-      lastX: x, lastY: y, lastP: pressure,
-      dirty: null,    // [x0,y0,x1,y1] doc-px；累积所有 stamp 的 bbox，给 dirty-rect render 用
-      // Debug: 每颗 stamp 的 (x, y) 都记下来
+      mode,
+      cache: [{ x, y, p: pressure }],     // raw events 缓存
+      segPathPos: [0],                     // 累计 path 长度：segPathPos[i] = cache[i] 离起点的 path 距离
+      nextStampPos: step,                  // 下一颗 stamp 应该落在 path 上哪个位置
+      dirty: null,
       positions: [],
-      // Dedup: 整数像素 Set，落过的像素再来就 drop。同时实现 Procreate
-      // "stroke 内不重叠累积 alpha" 的简版（不像 stroke buffer 那么完美但
-      // 不动 brush 算法骨架，debug 友好）
-      placedPixels: new Set(),
-      droppedCount: 0,
     };
-    // 起手第一个点落一颗（避免短笔/单点不画）
+    this._stampCount = 0;
+    // Touchdown stamp 立刻落在 (x, y) (path position 0)
     this._stampOne(x, y, pressure);
   }
 
-  // 加点。x,y 是 *doc 坐标*。
-  // accumDist 语义 = "上一颗 stamp 到本段起点的距离"（>=0）。
-  // 本段第一颗 stamp 落在 segPos = step - accumDist 处；之后每隔 step 一颗。
-  //
-  // **v19**：step 只看 settings.size × spacing，**不走 pressure**。user 决定：
-  //   "d 永远只和半径有关。step 不应该走 pressure"。
-  // 之前 step = size × p^0.6 × spacing 让 d̄ 随每帧 pressure 飘，方差大。
-  // 现在 step 是整笔恒定（settings 这一笔不会变），d̄ 应该 ≈ step ± 路径
-  // 曲率引入的欧氏短缩。
-  // 副作用：低压时 stamp 直径缩了 step 没缩 → 低压 stamp 间会有空隙。
-  //         这是 user 接受的折中。要恢复"恒等于直径百分比"那种行为，
-  //         改回 sizeMulNow 即可。
   extendStroke(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
-    const dx = x - st.lastX, dy = y - st.lastY;
-    const dist = Math.hypot(dx, dy);
-    if (dist === 0) return;
+    const prev = st.cache[st.cache.length - 1];
+    const dx = x - prev.x, dy = y - prev.y;
+    const segLen = Math.hypot(dx, dy);
+    if (segLen === 0) return;
+    st.cache.push({ x, y, p: pressure });
+    st.segPathPos.push(st.segPathPos[st.segPathPos.length - 1] + segLen);
+    this._consumeCache();
+  }
 
-    const s = st.settings;
-    const step = Math.max(0.5, s.size * s.spacing);
+  _consumeCache() {
+    const st = this._stroke;
+    const step = this._stepFor(st.settings);
+    const totalPath = st.segPathPos[st.segPathPos.length - 1];
 
-    // 首颗 stamp 在 segPos 处；accumDist > step 时（step 因压感变小）就立即落一颗
-    let segPos = step - st.accumDist;
-    if (segPos < 0) segPos = 0;
+    while (st.nextStampPos <= totalPath) {
+      // 找包含 nextStampPos 的 segment
+      let segIdx = 0;
+      while (segIdx + 1 < st.segPathPos.length && st.segPathPos[segIdx + 1] < st.nextStampPos) {
+        segIdx++;
+      }
+      if (segIdx + 1 >= st.cache.length) break;
 
-    while (segPos <= dist) {
-      const t = segPos / dist;
-      const px = st.lastX + dx * t;
-      const py = st.lastY + dy * t;
-      const pp = st.lastP + (pressure - st.lastP) * t;
+      const segStart = st.segPathPos[segIdx];
+      const segEnd   = st.segPathPos[segIdx + 1];
+      const t = (st.nextStampPos - segStart) / (segEnd - segStart);
+
+      const a = st.cache[segIdx];
+      const b = st.cache[segIdx + 1];
+      const px = a.x + (b.x - a.x) * t;
+      const py = a.y + (b.y - a.y) * t;
+      const pp = a.p + (b.p - a.p) * t;
+
       this._stampOne(px, py, pp);
-      segPos += step;
+      st.nextStampPos += step;
     }
-    // 末次落的位置 = segPos - step；它到段尾的距离 = dist - (segPos - step)
-    st.accumDist = dist - (segPos - step);
-    st.lastX = x; st.lastY = y; st.lastP = pressure;
+
+    // 清理：option A (chord lerp) 没 look-ahead，只需保留最后一个 cache entry
+    // 用来算下一段 segment
+    while (st.cache.length > 1) {
+      st.cache.shift();
+      st.segPathPos.shift();
+    }
   }
 
   endStroke() {
@@ -215,7 +237,7 @@ export class BrushEngine {
     const dStd = Math.sqrt(Math.max(0, dVar));
     if (dCount === 0) { dMin = 0; dMax = 0; }
     return {
-      n, uniq: uniq.size, dropped: st.droppedCount,
+      n, uniq: uniq.size, dropped: 0,    // v23 无 dedup，恒 0
       aMin, aMax, dMean, dStd, dMin, dMax,
       // 复制一份 stamp 位置数组给 board 画视觉 marker
       positions: Float32Array.from(pts),
@@ -237,17 +259,7 @@ export class BrushEngine {
   _stampOne(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
-    // 整数像素 dedup：每个 (round x, round y) 像素**这一笔**只画一次。
-    // 解决：
-    //   1. Pencil 高 sample rate 在低速时把多颗 stamp 喂到同 1 px → bead
-    //   2. 笔触自交叉（path 弯回来）时同位置重叠 → alpha 双盖
-    // 副作用：和 Procreate "stroke 内不重叠累积" 同效果（user 想要的）
-    const key = (Math.round(x) << 16) | (Math.round(y) & 0xffff);
-    if (st.placedPixels.has(key)) {
-      st.droppedCount++;
-      return;
-    }
-    st.placedPixels.add(key);
+    // v23: 无 dedup。距上一颗 path arc-length 严格 = step (consume_cache 保证)
     const s = st.settings;
     const p = Math.max(0, Math.min(1, pressure));
 
