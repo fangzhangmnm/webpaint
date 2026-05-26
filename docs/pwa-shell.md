@@ -1,0 +1,71 @@
+# PWA 壳
+
+WebPaint 是纯静态 PWA，部署 GitHub Pages，离线可用。
+
+复用 ScratchPad 的壳模式（见 `../../20260520 ScratchPad/docs/pwa-shell-pattern.md` 和 `ios-pwa-quirks.md`）。这里只记 WebPaint 特有 / 待注意的部分。
+
+## 文件结构
+
+```
+index.html               全屏 canvas + 浮动顶栏 + sheets
+manifest.webmanifest     PWA 描述
+service-worker.js        同源 cache-first + ETag 变化通知 toast
+icon.svg                 笔刷 + 水彩弧 + 米色背景（沿用兄弟项目调色板）
+icon-{192,512}.png       Android / Chrome
+apple-touch-icon-180.png iOS 首屏
+src/
+  app.js                 orchestrator
+  board.js               canvas + viewport + 合成
+  doc.js                 PaintDoc / Layer 模型
+  brush.js               stamp 引擎
+  input.js               pointer / wheel / 键盘 + undo
+  db.js                  IDB stub（一期未启用）
+  styles.css             米色 / 夜黑主题
+docs/                    AI 笔记（这个目录）
+```
+
+## iPad 怪癖（直接抄 ScratchPad 文档）
+
+1. **`apple-touch-icon` 必须 PNG**（iOS 不识别 SVG）—— 已 generate 180/192/512 PNG
+2. **错误浮条 inline `<script>`** 在模块导入前 —— 已加，error / unhandledrejection 都 hook
+3. **theme guard inline `<script>`** 在 `<link rel="stylesheet">` 之前 —— 已加，从 `localStorage.webpaint.theme` 读
+4. **safe-area-inset** —— 顶栏和 HUD 都 `max(env(safe-area-inset-X, 0), Npx)`
+5. **`touch-action: none` on canvas**，并在 pointerdown 时 `setPointerCapture`
+6. **viewport meta with `viewport-fit=cover, user-scalable=no`**
+7. **`apple-mobile-web-app-status-bar-style=black-translucent`** 让画布延伸到状态栏底下
+
+## Service worker 版本管理
+
+```js
+const CACHE_VERSION = "v1-2026-05-25";
+```
+
+改了客户端代码 → bump 这个 string（建议 `vN-YYYY-MM-DD`）。装了 PWA 的用户下次进来 SW 拉到新 manifest → 触发 install → 旧 cache 被 activate 时清掉。
+
+如果改了文件但忘了 bump：用户能从 ETag 变化的检测里收到 `asset-updated` 消息，弹"有新版本"toast，点刷新会 reload。但 cache 名没换，所以下次 reload 还是旧 cache。**bump 是关键**。
+
+## 本地开发
+
+```bash
+cd "/mnt/d/JupyterLocal/20260524 WebPaint/WebPaint"
+python -m http.server 8000
+# 然后浏览器开 http://localhost:8000/
+```
+
+`localhost` / `127.0.0.1` 上 SW 不会注册 —— F5 永远拉到最新代码。要测 PWA 安装 / 离线，用 LAN IP（`http://192.168.x.x:8000/`）或部署版本。
+
+## GitHub Pages 部署（计划）
+
+待建 repo 后：
+1. 新 public repo `webpaint`
+2. push
+3. Settings → Pages → Source: **Deploy from a branch**, branch `main` / `/ (root)`
+4. 改客户端代码记得 bump `CACHE_VERSION`
+
+## 离线第一
+
+引用一下 RealHome 的宪法（[sync-constraints.md](../../20260520%20RealHome/docs/sync-constraints.md) 约束 #1）：
+
+> **零账号是头等公民。**App 完整工作于离线、无云账号 —— 不是降级模式，是头等公民。
+
+WebPaint 一期还没接 OneDrive，但这个原则会贯穿后期：用户从来不登 → app 应该是个完整的离线绘画工具，没有任何 "需要登录才能 X" 的 UI 暗示。

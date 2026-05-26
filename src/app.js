@@ -1,0 +1,397 @@
+// Orchestrator：装配 + UI 绑定 + SW + theme。
+//
+// 一期约束：固定 2048×2048 doc，单图层，无持久化。手感优先。
+// 后期：layers UI / IDB / OneDrive / brush presets / 选区 / 液化 / ...
+//
+// 状态归属：
+//   PaintDoc        ← 画布像素（layers），由 input/brush 写入
+//   Board           ← 视口 + 渲染
+//   BrushSettings   ← 当前笔刷参数（这里持有，传给 input.brush）
+//   App state       ← 工具 / 颜色 / 主题 / 压感开关
+
+import { PaintDoc } from "./doc.js";
+import { Board } from "./board.js";
+import { InputController } from "./input.js";
+import { BrushSettings } from "./brush.js";
+import { getMeta, setMeta, debounce } from "./db.js";
+
+const THEMES = ["auto", "day", "night"];
+const THEME_LABEL = { auto: "跟随系统", day: "日", night: "夜" };
+
+const els = {
+  board: document.getElementById("board"),
+  topBar: document.getElementById("topBar"),
+  zoomLabel: document.getElementById("zoomLabel"),
+  canvasSizeLabel: document.getElementById("canvasSizeLabel"),
+  statusLabel: document.getElementById("statusLabel"),
+  sizeSlider: document.getElementById("sizeSlider"),
+  opacitySlider: document.getElementById("opacitySlider"),
+  undoBtn: document.getElementById("undoButton"),
+  redoBtn: document.getElementById("redoButton"),
+  fitBtn: document.getElementById("fitButton"),
+  clearBtn: document.getElementById("clearButton"),
+  themeBtn: document.getElementById("themeButton"),
+  pressureBtn: document.getElementById("pressureButton"),
+  toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
+  swatches: [...document.querySelectorAll(".swatch[data-color]")],
+  activeSwatch: document.getElementById("activeSwatch"),
+  // picker sheet
+  pickerSheet: document.getElementById("pickerSheet"),
+  pickerBackdrop: document.getElementById("pickerBackdrop"),
+  svPad: document.getElementById("svPad"),
+  hueSlider: document.getElementById("hueSlider"),
+  hexInput: document.getElementById("hexInput"),
+  previewSwatch: document.getElementById("previewSwatch"),
+  // clear sheet
+  clearSheet: document.getElementById("clearSheet"),
+  clearBackdrop: document.getElementById("clearBackdrop"),
+  // update toast
+  updateToast: document.getElementById("updateToast"),
+  updateReload: document.getElementById("updateToastReload"),
+  updateDismiss: document.getElementById("updateToastDismiss"),
+};
+
+function safeLS(key, fallback) {
+  try { return localStorage.getItem(key); } catch { return fallback; }
+}
+function safeLSSet(key, val) {
+  try { localStorage.setItem(key, val); } catch {}
+}
+
+// ---- 启动 ----
+const doc = new PaintDoc({ width: 2048, height: 2048 });
+const board = new Board(els.board, doc);
+els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
+
+const state = {
+  tool: "brush",
+  color: safeLS("webpaint.color") || "#1b1b1b",
+  brush: new BrushSettings({
+    size: parseFloat(safeLS("webpaint.size") || "12"),
+    opacity: parseFloat(safeLS("webpaint.opacity") || "1"),
+    color: safeLS("webpaint.color") || "#1b1b1b",
+  }),
+  pressureEnabled: safeLS("webpaint.pressure") !== "0", // 默认开（不像 ScratchPad 默认关）
+};
+
+// brush settings keep color in sync
+function syncBrushColor() {
+  state.brush.color = state.color;
+  // brush engine 会自动 invalidate stamp（_getStamp key 包含 color）
+}
+syncBrushColor();
+
+const input = new InputController(board, doc, {
+  getTool: () => state.tool,
+  getBrushSettings: () => state.brush,
+  getPressureEnabled: () => state.pressureEnabled,
+  onColorSampled: (hex) => setColor(hex),
+  status: setStatus,
+});
+
+// ---- 主题 ----
+function readCssColor(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function applyThemeColorsToBoard() {
+  board.setThemeColors({ voidColor: readCssColor("--void") });
+}
+
+let theme = safeLS("webpaint.theme") || "auto";
+if (!THEMES.includes(theme)) theme = "auto";
+function applyTheme(t) {
+  theme = t;
+  document.documentElement.setAttribute("data-theme", t);
+  safeLSSet("webpaint.theme", t);
+  els.themeBtn.title = `主题：${THEME_LABEL[t]}`;
+  requestAnimationFrame(applyThemeColorsToBoard);
+}
+applyTheme(theme);
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (theme === "auto") requestAnimationFrame(applyThemeColorsToBoard);
+});
+
+// ---- 工具 ----
+function setTool(t) {
+  state.tool = t;
+  for (const b of els.toolBtns) b.setAttribute("aria-pressed", b.dataset.tool === t ? "true" : "false");
+  document.body.dataset.tool = t;
+}
+for (const b of els.toolBtns) {
+  b.addEventListener("click", () => setTool(b.dataset.tool));
+}
+window.addEventListener("wp:settool", (e) => setTool(e.detail));
+// pencil 模式下双击 → 笔↔橡皮
+window.addEventListener("wp:doubletap", () => {
+  const next = state.tool === "eraser" ? "brush" : "eraser";
+  setTool(next);
+  setStatus(`双击 · ${next === "eraser" ? "橡皮" : "笔刷"}`);
+});
+setTool(state.tool);
+
+// ---- 颜色 ----
+function setColor(hex) {
+  state.color = hex;
+  safeLSSet("webpaint.color", hex);
+  els.activeSwatch.style.background = hex;
+  syncBrushColor();
+  // swatch 高亮（如果命中预设）
+  for (const s of els.swatches) {
+    s.setAttribute("aria-pressed", s.dataset.color?.toLowerCase() === hex.toLowerCase() ? "true" : "false");
+  }
+  // 同步 picker 状态
+  if (!els.pickerSheet.classList.contains("hidden")) {
+    pickerSetFromHex(hex);
+  }
+}
+for (const s of els.swatches) {
+  s.addEventListener("click", () => setColor(s.dataset.color));
+}
+els.activeSwatch.addEventListener("click", () => openPicker());
+setColor(state.color);
+
+// ---- size / opacity ----
+function setSize(v) {
+  state.brush.size = v;
+  safeLSSet("webpaint.size", String(v));
+  els.sizeSlider.value = String(v);
+}
+function setOpacity(v) {
+  state.brush.opacity = v;
+  safeLSSet("webpaint.opacity", String(v));
+  els.opacitySlider.value = String(Math.round(v * 100));
+}
+els.sizeSlider.addEventListener("input", () => setSize(parseFloat(els.sizeSlider.value)));
+els.opacitySlider.addEventListener("input", () => setOpacity(parseFloat(els.opacitySlider.value) / 100));
+setSize(state.brush.size);
+setOpacity(state.brush.opacity);
+// 键盘 [ ] 调粗
+window.addEventListener("wp:adjsize", (e) => {
+  const delta = e.detail;
+  setSize(Math.max(1, Math.min(200, state.brush.size + delta)));
+  setStatus(`笔粗 ${state.brush.size}px`);
+});
+
+// ---- 压感 ----
+function applyPressure(on) {
+  state.pressureEnabled = !!on;
+  els.pressureBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  els.pressureBtn.title = `压感（${on ? "开" : "关"}）`;
+  safeLSSet("webpaint.pressure", on ? "1" : "0");
+}
+els.pressureBtn.addEventListener("click", () => {
+  applyPressure(!state.pressureEnabled);
+  setStatus(`压感 · ${state.pressureEnabled ? "开" : "关"}`);
+});
+applyPressure(state.pressureEnabled);
+
+// ---- undo / redo / fit / clear ----
+els.undoBtn.addEventListener("click", () => input.undo());
+els.redoBtn.addEventListener("click", () => input.redo());
+window.addEventListener("wp:histchange", (e) => {
+  els.undoBtn.disabled = !e.detail.canUndo;
+  els.redoBtn.disabled = !e.detail.canRedo;
+});
+els.undoBtn.disabled = true;
+els.redoBtn.disabled = true;
+
+els.fitBtn.addEventListener("click", () => {
+  board.fitToScreen();
+  updateZoomLabel();
+  setStatus("适应屏幕");
+});
+
+function openSheet(sheet, backdrop) {
+  backdrop.classList.remove("hidden");
+  sheet.classList.remove("hidden");
+}
+function closeSheet(sheet, backdrop) {
+  backdrop.classList.add("hidden");
+  sheet.classList.add("hidden");
+}
+els.clearBtn.addEventListener("click", () => openSheet(els.clearSheet, els.clearBackdrop));
+els.clearBackdrop.addEventListener("click", () => closeSheet(els.clearSheet, els.clearBackdrop));
+els.clearSheet.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-clear]")?.dataset.clear;
+  if (!a) return;
+  closeSheet(els.clearSheet, els.clearBackdrop);
+  if (a !== "confirm") return;
+  doc.clearActiveLayer();
+  input.clearHistory();
+  board.requestRender();
+  setStatus("已清空");
+});
+
+// 主题切换
+els.themeBtn.addEventListener("click", () => {
+  const i = THEMES.indexOf(theme);
+  const next = THEMES[(i + 1) % THEMES.length];
+  applyTheme(next);
+  setStatus(`主题 · ${THEME_LABEL[next]}`);
+});
+
+// ---- HUD ----
+function updateZoomLabel() {
+  els.zoomLabel.textContent = Math.round(board.viewport.scale * 100) + "%";
+}
+let statusTimer = null;
+function setStatus(text, persist = false) {
+  els.statusLabel.textContent = text;
+  if (statusTimer) clearTimeout(statusTimer);
+  if (!persist) {
+    statusTimer = setTimeout(() => { els.statusLabel.textContent = "就绪"; }, 1800);
+  }
+}
+// hook board render 更新 HUD
+const origRender = board.render.bind(board);
+board.render = function () {
+  origRender();
+  updateZoomLabel();
+};
+
+// ---- HSV picker sheet ----
+let pickerHsv = { h: 0, s: 0, v: 0.1 };
+function openPicker() {
+  pickerSetFromHex(state.color);
+  openSheet(els.pickerSheet, els.pickerBackdrop);
+  drawSvPad();
+}
+els.pickerBackdrop.addEventListener("click", () => closeSheet(els.pickerSheet, els.pickerBackdrop));
+els.pickerSheet.addEventListener("click", (e) => {
+  if (e.target.closest("[data-picker]")?.dataset.picker === "close") {
+    closeSheet(els.pickerSheet, els.pickerBackdrop);
+  }
+});
+els.hueSlider.addEventListener("input", () => {
+  pickerHsv.h = parseFloat(els.hueSlider.value);
+  drawSvPad();
+  commitPicker();
+});
+els.hexInput.addEventListener("change", () => {
+  let v = els.hexInput.value.trim();
+  if (!v.startsWith("#")) v = "#" + v;
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+    pickerSetFromHex(v);
+    commitPicker();
+  } else {
+    setStatus("HEX 格式不对");
+    els.hexInput.value = state.color;
+  }
+});
+// SV pad pointer
+let svDragging = false;
+els.svPad.addEventListener("pointerdown", (e) => { svDragging = true; els.svPad.setPointerCapture(e.pointerId); pickFromSv(e); });
+els.svPad.addEventListener("pointermove", (e) => { if (svDragging) pickFromSv(e); });
+els.svPad.addEventListener("pointerup", (e) => { svDragging = false; });
+function pickFromSv(e) {
+  const r = els.svPad.getBoundingClientRect();
+  const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
+  const y = Math.max(0, Math.min(r.height, e.clientY - r.top));
+  pickerHsv.s = x / r.width;
+  pickerHsv.v = 1 - y / r.height;
+  drawSvPad();
+  commitPicker();
+}
+function drawSvPad() {
+  const c = els.svPad;
+  const ctx = c.getContext("2d");
+  const w = c.width, h = c.height;
+  // 横向 = saturation，纵向 = 1-value
+  // 用 hue 一种颜色 + 水平白渐 + 垂直黑渐
+  ctx.fillStyle = `hsl(${pickerHsv.h} 100% 50%)`;
+  ctx.fillRect(0, 0, w, h);
+  const gx = ctx.createLinearGradient(0, 0, w, 0);
+  gx.addColorStop(0, "rgba(255,255,255,1)");
+  gx.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gx;
+  ctx.fillRect(0, 0, w, h);
+  const gy = ctx.createLinearGradient(0, 0, 0, h);
+  gy.addColorStop(0, "rgba(0,0,0,0)");
+  gy.addColorStop(1, "rgba(0,0,0,1)");
+  ctx.fillStyle = gy;
+  ctx.fillRect(0, 0, w, h);
+  // marker
+  const mx = pickerHsv.s * w;
+  const my = (1 - pickerHsv.v) * h;
+  ctx.strokeStyle = "rgba(0,0,0,0.65)";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(mx, my, 6, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI * 2); ctx.stroke();
+}
+function commitPicker() {
+  const hex = hsvToHex(pickerHsv.h, pickerHsv.s, pickerHsv.v);
+  els.hexInput.value = hex;
+  els.previewSwatch.style.background = hex;
+  setColor(hex);
+}
+function pickerSetFromHex(hex) {
+  const { h, s, v } = hexToHsv(hex);
+  pickerHsv = { h, s, v };
+  els.hueSlider.value = String(Math.round(h));
+  els.hexInput.value = hex;
+  els.previewSwatch.style.background = hex;
+}
+
+// ---- color conv ----
+function hsvToHex(h, s, v) {
+  const c = v * s;
+  const hp = (h / 60) % 6;
+  const x = c * (1 - Math.abs(hp % 2 - 1));
+  let r = 0, g = 0, b = 0;
+  if (0 <= hp && hp < 1) { r = c; g = x; b = 0; }
+  else if (1 <= hp && hp < 2) { r = x; g = c; b = 0; }
+  else if (2 <= hp && hp < 3) { r = 0; g = c; b = x; }
+  else if (3 <= hp && hp < 4) { r = 0; g = x; b = c; }
+  else if (4 <= hp && hp < 5) { r = x; g = 0; b = c; }
+  else { r = c; g = 0; b = x; }
+  const m = v - c;
+  const R = Math.round((r + m) * 255), G = Math.round((g + m) * 255), B = Math.round((b + m) * 255);
+  return "#" + [R, G, B].map((n) => n.toString(16).padStart(2, "0")).join("");
+}
+function hexToHsv(hex) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return { h: 0, s: 0, v: 0 };
+  const R = parseInt(hex.slice(1, 3), 16) / 255;
+  const G = parseInt(hex.slice(3, 5), 16) / 255;
+  const B = parseInt(hex.slice(5, 7), 16) / 255;
+  const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+  const d = mx - mn;
+  let h = 0;
+  if (d !== 0) {
+    if (mx === R) h = ((G - B) / d) % 6;
+    else if (mx === G) h = (B - R) / d + 2;
+    else h = (R - G) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  const s = mx === 0 ? 0 : d / mx;
+  const v = mx;
+  return { h, s, v };
+}
+
+// ---- 启动收尾 ----
+setStatus("就绪");
+updateZoomLabel();
+
+// ---- Service worker ----
+if ("serviceWorker" in navigator) {
+  const host = location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "";
+  if (!isLocal) {
+    navigator.serviceWorker.register("./service-worker.js").catch((err) => {
+      console.warn("SW register failed", err);
+    });
+    navigator.serviceWorker.addEventListener("message", (e) => {
+      if (e.data?.type === "asset-updated") {
+        els.updateToast.classList.remove("hidden");
+      }
+    });
+  }
+}
+els.updateReload.addEventListener("click", () => {
+  navigator.serviceWorker?.controller?.postMessage({ type: "skip-waiting" });
+  location.reload();
+});
+els.updateDismiss.addEventListener("click", () => {
+  els.updateToast.classList.add("hidden");
+});

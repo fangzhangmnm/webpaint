@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 背景：和 ScratchPad / RealHome 系一脉相承的米色，强调"兄弟项目"血缘 -->
+  <rect width="512" height="512" rx="96" fill="#f6f4ef"/>
+
+  <!-- 一笔粉/红水彩弧 — 代表"画" -->
+  <path d="M80 360 Q160 200 280 220 Q380 235 432 152"
+        fill="none" stroke="#d05a4a" stroke-width="42"
+        stroke-linecap="round" stroke-linejoin="round" opacity="0.88"/>
+
+  <!-- 一笔湖蓝叠在上面 — 代表"图层混色" -->
+  <path d="M110 410 Q230 320 340 360 Q410 384 450 320"
+        fill="none" stroke="#3a7ab8" stroke-width="34"
+        stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+
+  <!-- 笔刷 -->
+  <g transform="translate(304 296) rotate(-32)">
+    <!-- 笔杆 -->
+    <rect x="0" y="0" width="148" height="22" rx="4"
+          fill="#e8b86b" stroke="#1b1b1b" stroke-width="4"/>
+    <!-- 金属夹 -->
+    <rect x="-26" y="-3" width="28" height="28" rx="3"
+          fill="#9aa0a6" stroke="#1b1b1b" stroke-width="4"/>
+    <!-- 刷毛 -->
+    <path d="M-26 4 L-72 -10 L-72 32 L-26 18 Z"
+          fill="#5a3a28" stroke="#1b1b1b" stroke-width="4" stroke-linejoin="round"/>
+    <!-- 刷毛尖一抹颜料 -->
+    <path d="M-72 -10 Q-92 0 -90 11 Q-92 22 -72 32 L-58 24 L-58 -2 Z"
+          fill="#d05a4a" stroke="#1b1b1b" stroke-width="4" stroke-linejoin="round"/>
+  </g>
+</svg>
