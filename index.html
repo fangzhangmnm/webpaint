@@ -50,6 +50,8 @@
     <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon-180.png" />
     <link rel="stylesheet" href="./src/styles.css" />
+    <!-- 版本号 SSoT；service-worker.js 也 importScripts 同一份 -->
+    <script src="./src/version.js"></script>
   </head>
   <body>
     <canvas id="board" class="board" aria-label="paint canvas"></canvas>
@@ -146,13 +148,15 @@
       </button>
     </header>
 
-    <!-- HUD：缩放 / 状态 -->
+    <!-- HUD：缩放 / 画布尺寸 / 状态 / 版本水印 -->
     <div class="hud" id="hud">
       <span id="zoomLabel">100%</span>
       <span class="sep" aria-hidden="true">·</span>
       <span id="canvasSizeLabel">2048×2048</span>
       <span class="sep" aria-hidden="true">·</span>
       <span id="statusLabel">就绪</span>
+      <span class="sep" aria-hidden="true">·</span>
+      <span id="versionLabel" class="version">v?</span>
     </div>
 
     <!-- HSV 浮动色板：点 activeSwatch / `C` 开关，拖标题栏移动，位置记忆到 localStorage -->

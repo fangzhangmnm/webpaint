@@ -36,13 +36,19 @@ docs/                    AI 笔记（这个目录）
 
 ## Service worker 版本管理
 
+版本号 SSoT 在 [`src/version.js`](../src/version.js)：
+
 ```js
-const CACHE_VERSION = "v1-2026-05-25";
+self.WEBPAINT_VERSION = "v5-2026-05-25";
 ```
 
-改了客户端代码 → bump 这个 string（建议 `vN-YYYY-MM-DD`）。装了 PWA 的用户下次进来 SW 拉到新 manifest → 触发 install → 旧 cache 被 activate 时清掉。
+- `service-worker.js` `importScripts("./src/version.js")`，`CACHE_VERSION = self.WEBPAINT_VERSION`
+- `index.html` 一个普通 `<script src="./src/version.js"></script>` 早于 `app.js` 加载，给 `window.WEBPAINT_VERSION`
+- `app.js` 把它打到 HUD 右下角："100% · 2048×2048 · 就绪 · v5-2026-05-25"。user 一眼看出 update 有没有装上
 
-如果改了文件但忘了 bump：用户能从 ETag 变化的检测里收到 `asset-updated` 消息，弹"有新版本"toast，点刷新会 reload。但 cache 名没换，所以下次 reload 还是旧 cache。**bump 是关键**。
+改了客户端代码 → bump version.js 一处即可（约定 `vN-YYYY-MM-DD`）。装了 PWA 的用户下次进来 SW 拉到新 version.js → 触发 install → 旧 cache 在 activate 时清。
+
+如果改了文件但忘了 bump：用户能从 ETag 变化的检测里收到 `asset-updated`，弹"有新版本"toast，点刷新会 reload。但 cache 名没换，下次 reload 仍旧 cache。**bump 是关键**。
 
 ## 本地开发
 

@@ -24,6 +24,7 @@ const els = {
   zoomLabel: document.getElementById("zoomLabel"),
   canvasSizeLabel: document.getElementById("canvasSizeLabel"),
   statusLabel: document.getElementById("statusLabel"),
+  versionLabel: document.getElementById("versionLabel"),
   sizeSlider: document.getElementById("sizeSlider"),
   opacitySlider: document.getElementById("opacitySlider"),
   undoBtn: document.getElementById("undoButton"),
@@ -62,6 +63,7 @@ function safeLSSet(key, val) {
 const doc = new PaintDoc({ width: 2048, height: 2048 });
 const board = new Board(els.board, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
+els.versionLabel.textContent = window.WEBPAINT_VERSION || "v?";
 
 const state = {
   tool: "brush",

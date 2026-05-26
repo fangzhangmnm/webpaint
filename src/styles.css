@@ -198,6 +198,7 @@ input[type=range] {
   pointer-events: none;
 }
 .hud .sep { opacity: 0.5; }
+.hud .version { opacity: 0.55; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
 /* Sheets / dialogs */
 .backdrop {

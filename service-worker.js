@@ -4,7 +4,9 @@
 // WebPaint 是纯本地，没有任何运行时跨源请求（vendor 全部在仓库里）。
 // 所以 SW 只关心同源。MSAL / Graph 等会在 sync 引入时再决定怎么对待。
 
-const CACHE_VERSION = "v4-2026-05-25";
+// 版本号从 src/version.js 拿，避免和 app 端漂移
+importScripts("./src/version.js");
+const CACHE_VERSION = self.WEBPAINT_VERSION;
 const CACHE_NAME = `webpaint-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -16,6 +18,7 @@ const PRECACHE_URLS = [
   "./icon-192.png",
   "./icon-512.png",
   "./src/styles.css",
+  "./src/version.js",
   "./src/app.js",
   "./src/doc.js",
   "./src/board.js",
