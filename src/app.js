@@ -437,14 +437,20 @@ function hexToHsv(hex) {
 // ---- Debug: brush 状态在 HUD 显示，方便定位 knot 根因 ----
 // 用闭包变量 + 在 slider 监听器/strokeEnd 事件里直接 refresh，不动 setSize/setOpacity 本体
 let _lastStrokeStamps = 0;
+let _lastDiag = null;
 function refreshBrushDebug() {
   const s = state.brush;
   // 满压下的 step / 直径（pressure off 时也是这个）
   const step = Math.max(0.5, s.size * s.spacing);
-  els.brushDebugLabel.textContent = `step ${step.toFixed(1)} / d ${s.size.toFixed(0)} / n ${_lastStrokeStamps}`;
+  let txt = `step ${step.toFixed(1)} / d ${s.size.toFixed(0)} / n ${_lastStrokeStamps}`;
+  if (_lastDiag) {
+    txt += ` / uniq ${_lastDiag.uniq} / α ${_lastDiag.aMin.toFixed(2)}-${_lastDiag.aMax.toFixed(2)}`;
+  }
+  els.brushDebugLabel.textContent = txt;
 }
 window.addEventListener("wp:strokeEnd", (e) => {
   _lastStrokeStamps = e.detail.stamps;
+  _lastDiag = e.detail.diag || null;
   refreshBrushDebug();
 });
 els.sizeSlider.addEventListener("input", refreshBrushDebug);

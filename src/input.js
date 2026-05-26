@@ -393,13 +393,15 @@ export class InputController {
   }
   _endStroke() {
     const stampCount = this.brush.getStampCount();
+    // **endStroke 之前**抓诊断，因为 endStroke 会 null _stroke
+    const diag = this.brush.getStrokeDiagnostic();
     this.brush.endStroke();
     if (this._strokeLayerId == null) return;
     const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
     this._strokeLayerId = null;
     if (!layer) return;
-    // Debug: 把这笔的 stamp 数广播给 app，HUD 显示用
-    window.dispatchEvent(new CustomEvent("wp:strokeEnd", { detail: { stamps: stampCount } }));
+    // Debug: 把这笔的 stamp 数 + diag 广播给 app，HUD 显示用
+    window.dispatchEvent(new CustomEvent("wp:strokeEnd", { detail: { stamps: stampCount, diag } }));
     const after = layer.ctx.getImageData(0, 0, layer.width, layer.height);
     // 截掉 redo 段，把新状态 push 进去
     if (this.undoIndex < this.undoChain.length - 1) {

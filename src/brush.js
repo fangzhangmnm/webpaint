@@ -72,21 +72,11 @@ export class BrushEngine {
     stamp.width = d; stamp.height = d;
     const sctx = stamp.getContext("2d");
     const inner = r * Math.max(0, Math.min(1, hardness));
-    // Safari radial gradient 在 inner circle 内是 implementation-specific（MDN
-    // 原话 "undefined inside the inner circle"）。为了不依赖这个行为：先画外环
-    // gradient（fillRect 整张），再画 solid 内盘覆盖中心。保证中心 alpha=1。
     const g = sctx.createRadialGradient(r, r, inner, r, r, r);
     g.addColorStop(0, useColor);
     g.addColorStop(1, hexToRgba(useColor, 0));
     sctx.fillStyle = g;
     sctx.fillRect(0, 0, d, d);
-    // 显式 solid 内盘
-    if (inner > 0) {
-      sctx.fillStyle = useColor;
-      sctx.beginPath();
-      sctx.arc(r, r, inner, 0, Math.PI * 2);
-      sctx.fill();
-    }
 
     this._stampCache = { key, canvas: stamp, baseSize, radius: r };
     return this._stampCache;
@@ -110,6 +100,8 @@ export class BrushEngine {
       accumDist: 0,
       lastX: x, lastY: y, lastP: pressure,
       dirty: null,    // [x0,y0,x1,y1] doc-px；累积所有 stamp 的 bbox，给 dirty-rect render 用
+      // Debug: 把每颗 stamp 的 (x, y) 都记下来，endStroke 时 unique count + alpha sample
+      positions: [],
     };
     // 起手第一个点落一颗（避免短笔/单点不画）
     this._stampOne(x, y, pressure);
@@ -152,6 +144,33 @@ export class BrushEngine {
   endStroke() {
     this._stroke = null;
   }
+
+  // Debug：给 input.js endStroke 后调，返回这一笔的诊断信息
+  //   uniq    = 不同整数 (x, y) 位置数；若 << stampCount 则坐标真的重复
+  //   alphaSamples = 沿笔触采几点的 layer alpha，看 layer 像素到底成不成 solid
+  getStrokeDiagnostic() {
+    const st = this._stroke;
+    if (!st || !st.positions || st.positions.length === 0) return null;
+    const pts = st.positions;
+    const n = pts.length / 2;
+    const uniq = new Set();
+    for (let i = 0; i < n; i++) uniq.add(`${Math.round(pts[i*2])},${Math.round(pts[i*2+1])}`);
+    // 沿笔触每 ~max(1, n/8) 颗采一点 alpha
+    const stride = Math.max(1, Math.floor(n / 8));
+    const layer = st.layer;
+    let aMin = 1, aMax = 0;
+    for (let i = 0; i < n; i += stride) {
+      const px = Math.round(pts[i*2]);
+      const py = Math.round(pts[i*2+1]);
+      if (px < 0 || py < 0 || px >= layer.width || py >= layer.height) continue;
+      try {
+        const a = layer.ctx.getImageData(px, py, 1, 1).data[3] / 255;
+        if (a < aMin) aMin = a;
+        if (a > aMax) aMax = a;
+      } catch {}
+    }
+    return { n, uniq: uniq.size, aMin, aMax };
+  }
   cancelStroke() {
     this._stroke = null;
   }
@@ -191,6 +210,7 @@ export class BrushEngine {
     const drawR = drawD / 2;
     ctx.drawImage(stamp.canvas, x - drawR, y - drawR, drawD, drawD);
     this._stampCount++;
+    st.positions.push(x, y);
 
     ctx.globalAlpha = prevAlpha;
     ctx.globalCompositeOperation = prevComp;
