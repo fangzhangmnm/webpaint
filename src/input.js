@@ -27,18 +27,18 @@ const TAP_MAX_DURATION = 220;
 const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
 const DOUBLETAP_MAX_GAP = 80;
-// v16 起：用 weighted moving average 替代单极 IIR LPF 平滑位置。
-// 原因：iPad Safari 给 PointerEvent 的 clientX/Y 是 integer long（Safari iOS
-// 不合 spec，已确认 Apple Developer Forums #31124 / jquery-archive PEP #380）。
-// Pencil 真实 sub-pixel 位置拿不到。单极 IIR 面对整数台阶 raw 时，smX 输出
-// 0.65 px 离散跳跃 → 沿台阶落 stamp → 局部聚集 = bead。蓝牙鼠标在 iPad
-// 上无 bead，证明问题在 Pencil 采样路径。
-// 加权平均（最近样本权重大）把整数台阶 in → 平滑 fractional path out，
-// stamp 沿连续路径落，不再聚集。lag ~1 sample (4ms @ 240Hz)，无感。
-const POSITION_BUFFER_N = 4;
-const POSITION_BUFFER_WEIGHTS = [1, 2, 3, 4]; // 越新权重越大
-const POSITION_BUFFER_WSUM = POSITION_BUFFER_WEIGHTS.reduce((a, b) => a + b, 0);
-const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；raw 没动就跳，省 buffer 抖
+// v17 起：DSP 视角。iPad Safari 把 Pencil 真 sub-pixel 位置量化到 integer
+// clientX/Y 才给 JS（不合 spec，Apple Dev #31124）。raw 是噪 + 量化损失的
+// 信号，得先 reconstruct 干净路径再 stamp。
+//
+// 用 Catmull-Rom spline 取 4 个 raw 控制点（P0..P3）的 midpoint (t=0.5)：
+//     output = -1/16·P0 + 9/16·P1 + 9/16·P2 - 1/16·P3
+// 即"过 P1,P2 的平滑曲线在 P1/P2 中间的点"，用 P0,P3 做切线信息保形。
+// 整数台阶 raw in → sub-pixel 连续路径 out → stamp 沿连续路径落，不聚集。
+// lag = 1.5 raw samples ≈ 6ms @ 240Hz，无感。
+// v16 的 weighted MA 是退化版本（无负权重）；spline 在转弯处保形更好。
+const RAW_HISTORY_N = 4;
+const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；raw 没动就跳
 // 压感 LPF（stabilizer）：Pencil 自带 ~10Hz 握笔抖动 → 灌进 size = base × p^0.6
 // 会让 step 每秒 10 次缩胀 → segPos 偶尔被 clamp 到段首 → 小堆积 → 视觉上速度
 // 相关的 alpha 结节。LPF 把 10Hz 抖动压平。同步削尖刺，缓解 mid bulb。
@@ -198,7 +198,7 @@ export class InputController {
       rec.lastRawY = y;
       rec.lastP = null;   // 本笔最近一次有效 pressure，给 sensor 0 fallback
       rec.smP = -1;       // stabilizer LPF 状态；-1 = 还没收到第一帧（首颗 = raw）
-      rec.posBuffer = []; // weighted moving average 的位置 buffer
+      rec.rawHistory = []; // 最近 N 个 raw (x, y) 给 Catmull-Rom 用
       this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
     } else if (role === "pick") {
       this._doPick(x, y);
@@ -277,29 +277,33 @@ export class InputController {
       const list = (events && events.length) ? events : [e];
       const enabled = this.getPressureEnabled();
       for (const ev of list) {
-        // raw 几乎没动 → 跳整个 event（buffer 也不更新，避免 weighted avg 漂）
+        // raw 几乎没动 → 跳整个 event
         const drx = ev.clientX - rec.lastRawX;
         const dry = ev.clientY - rec.lastRawY;
         rec.lastRawX = ev.clientX;
         rec.lastRawY = ev.clientY;
         if (drx * drx + dry * dry < RAW_STATIC_SCREEN_SQ) continue;
-        // 推 buffer，加权平均（最近样本权重大）→ 整数台阶 in，sub-pixel 路径 out
-        rec.posBuffer.push(ev.clientX, ev.clientY);
-        while (rec.posBuffer.length > POSITION_BUFFER_N * 2) {
-          rec.posBuffer.shift(); rec.posBuffer.shift();
+        // 推 raw history，Catmull-Rom midpoint 输出 sub-pixel 位置
+        rec.rawHistory.push(ev.clientX, ev.clientY);
+        while (rec.rawHistory.length > RAW_HISTORY_N * 2) {
+          rec.rawHistory.shift(); rec.rawHistory.shift();
         }
-        const buf = rec.posBuffer;
-        const bn = buf.length / 2;
-        // buf 长度可能 < N，对应权重前缀（保证 sum 一致）
-        let sx = 0, sy = 0, sw = 0;
-        for (let i = 0; i < bn; i++) {
-          const w = POSITION_BUFFER_WEIGHTS[POSITION_BUFFER_WEIGHTS.length - bn + i];
-          sx += buf[i*2] * w;
-          sy += buf[i*2+1] * w;
-          sw += w;
+        const h = rec.rawHistory;
+        const hn = h.length / 2;
+        if (hn >= 4) {
+          // 取 P1, P2 中点（用 P0/P3 当切线）
+          const i0 = (hn - 4) * 2, i1 = (hn - 3) * 2, i2 = (hn - 2) * 2, i3 = (hn - 1) * 2;
+          rec.smX = -0.0625 * h[i0] + 0.5625 * h[i1] + 0.5625 * h[i2] - 0.0625 * h[i3];
+          rec.smY = -0.0625 * h[i0+1] + 0.5625 * h[i1+1] + 0.5625 * h[i2+1] - 0.0625 * h[i3+1];
+        } else if (hn >= 2) {
+          // 不够 4 个：取最后两个的中点
+          const i1 = (hn - 2) * 2, i2 = (hn - 1) * 2;
+          rec.smX = 0.5 * (h[i1] + h[i2]);
+          rec.smY = 0.5 * (h[i1+1] + h[i2+1]);
+        } else {
+          rec.smX = h[0];
+          rec.smY = h[1];
         }
-        rec.smX = sx / sw;
-        rec.smY = sy / sw;
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
         const pressure = effectivePressureFor(rec, ev, enabled);
         this.brush.extendStroke(dx, dy, pressure);
