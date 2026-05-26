@@ -199,6 +199,13 @@
       <button id="updateToastDismiss" type="button" class="dismiss" aria-label="忽略">×</button>
     </div>
 
-    <script type="module" src="./src/app.js"></script>
+    <!-- v15 起 entry 改成 dynamic import + ?v=VERSION，配合 SW 在响应 .js
+         时改写 import URL，每次 bump 都让 WKWebView bytecode cache 失效 -->
+    <script type="module">
+      import(`./src/app.js?v=${window.WEBPAINT_VERSION || "dev"}`).catch((err) => {
+        console.error("app boot failed", err);
+        if (window.__wp_showFatal) window.__wp_showFatal(err.message || String(err));
+      });
+    </script>
   </body>
 </html>
