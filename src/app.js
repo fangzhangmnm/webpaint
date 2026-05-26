@@ -16,7 +16,7 @@ import { BrushSettings, MODULE_VERSION as BRUSH_V } from "./brush.js";
 import { getMeta, setMeta, debounce, MODULE_VERSION as DB_V } from "./db.js";
 
 // 反煤气灯：app.js 自己的硬编码版本，启动时和兄弟 module + window.WEBPAINT_VERSION 对账
-const APP_V = "v18-2026-05-26";
+const APP_V = "v19-2026-05-26";
 const MODULE_VERSIONS = { app: APP_V, doc: DOC_V, board: BOARD_V, input: INPUT_V, brush: BRUSH_V, db: DB_V };
 
 const THEMES = ["auto", "day", "night"];
@@ -457,12 +457,14 @@ let _lastStrokeStamps = 0;
 let _lastDiag = null;
 function refreshBrushDebug() {
   const s = state.brush;
-  // 满压下的 step / 直径（pressure off 时也是这个）
+  // v19 起 step 是整笔常量（不再随 pressure 飘）
   const step = Math.max(0.5, s.size * s.spacing);
-  let txt = `step ${step.toFixed(1)} / d ${s.size.toFixed(0)} / n ${_lastStrokeStamps}`;
+  let txt = `size ${s.size.toFixed(0)} step ${step.toFixed(1)} / n ${_lastStrokeStamps}`;
   if (_lastDiag) {
-    txt += ` / d̄ ${_lastDiag.dMean.toFixed(2)}±${_lastDiag.dStd.toFixed(2)} [${_lastDiag.dMin.toFixed(1)}..${_lastDiag.dMax.toFixed(1)}]`;
-    txt += ` / uniq ${_lastDiag.uniq} / α ${_lastDiag.aMin.toFixed(2)}-${_lastDiag.aMax.toFixed(2)}`;
+    txt += ` drop ${_lastDiag.dropped}`;
+    // d_mean = 相邻 stamp 实测欧氏距离的 mean±std [min..max]，理想 ≈ step
+    txt += ` / d_mean ${_lastDiag.dMean.toFixed(2)}±${_lastDiag.dStd.toFixed(2)} [${_lastDiag.dMin.toFixed(1)}..${_lastDiag.dMax.toFixed(1)}]`;
+    txt += ` / α ${_lastDiag.aMin.toFixed(2)}-${_lastDiag.aMax.toFixed(2)}`;
   }
   els.brushDebugLabel.textContent = txt;
 }

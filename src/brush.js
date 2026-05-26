@@ -1,7 +1,7 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
 // 模块 lockstep 改。WebXiaoHeiWu 的教训："I forgot it across three bumps
 // in a row; the user caught it"。bump.sh 可以一次性 sed 所有 module。
-export const MODULE_VERSION = "v18-2026-05-26";
+export const MODULE_VERSION = "v19-2026-05-26";
 
 // 笔刷引擎 v0：圆笔 + 沿线 stamp。
 //
@@ -118,8 +118,13 @@ export class BrushEngine {
       accumDist: 0,
       lastX: x, lastY: y, lastP: pressure,
       dirty: null,    // [x0,y0,x1,y1] doc-px；累积所有 stamp 的 bbox，给 dirty-rect render 用
-      // Debug: 把每颗 stamp 的 (x, y) 都记下来，endStroke 时 unique count + alpha sample
+      // Debug: 每颗 stamp 的 (x, y) 都记下来
       positions: [],
+      // Dedup: 整数像素 Set，落过的像素再来就 drop。同时实现 Procreate
+      // "stroke 内不重叠累积 alpha" 的简版（不像 stroke buffer 那么完美但
+      // 不动 brush 算法骨架，debug 友好）
+      placedPixels: new Set(),
+      droppedCount: 0,
     };
     // 起手第一个点落一颗（避免短笔/单点不画）
     this._stampOne(x, y, pressure);
@@ -128,8 +133,15 @@ export class BrushEngine {
   // 加点。x,y 是 *doc 坐标*。
   // accumDist 语义 = "上一颗 stamp 到本段起点的距离"（>=0）。
   // 本段第一颗 stamp 落在 segPos = step - accumDist 处；之后每隔 step 一颗。
-  // step 用 *当前压感缩放后的 size* 算（与 Procreate 一致 —— spacing 是当前直径
-  // 的百分比，不是最大直径），所以低压时间距也会缩小，不会散成点。
+  //
+  // **v19**：step 只看 settings.size × spacing，**不走 pressure**。user 决定：
+  //   "d 永远只和半径有关。step 不应该走 pressure"。
+  // 之前 step = size × p^0.6 × spacing 让 d̄ 随每帧 pressure 飘，方差大。
+  // 现在 step 是整笔恒定（settings 这一笔不会变），d̄ 应该 ≈ step ± 路径
+  // 曲率引入的欧氏短缩。
+  // 副作用：低压时 stamp 直径缩了 step 没缩 → 低压 stamp 间会有空隙。
+  //         这是 user 接受的折中。要恢复"恒等于直径百分比"那种行为，
+  //         改回 sizeMulNow 即可。
   extendStroke(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
@@ -138,9 +150,7 @@ export class BrushEngine {
     if (dist === 0) return;
 
     const s = st.settings;
-    const pNow = Math.max(0.05, Math.min(1, pressure));
-    const sizeMulNow = s.pressureToSize ? Math.pow(pNow, s.sizeCurve) : 1;
-    const step = Math.max(0.5, s.size * sizeMulNow * s.spacing);
+    const step = Math.max(0.5, s.size * s.spacing);
 
     // 首颗 stamp 在 segPos 处；accumDist > step 时（step 因压感变小）就立即落一颗
     let segPos = step - st.accumDist;
@@ -204,7 +214,10 @@ export class BrushEngine {
     const dVar = dCount > 0 ? (dSumSq / dCount) - dMean * dMean : 0;
     const dStd = Math.sqrt(Math.max(0, dVar));
     if (dCount === 0) { dMin = 0; dMax = 0; }
-    return { n, uniq: uniq.size, aMin, aMax, dMean, dStd, dMin, dMax };
+    return {
+      n, uniq: uniq.size, dropped: st.droppedCount,
+      aMin, aMax, dMean, dStd, dMin, dMax,
+    };
   }
   cancelStroke() {
     this._stroke = null;
@@ -222,16 +235,17 @@ export class BrushEngine {
   _stampOne(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
-    // Uniq 防抖：Pencil sub-pixel 抖动有时让连续 stamp 落点 < 0.5 doc-px，
-    // 视觉上是同一个像素被多敲一遍 → 局部 α 累积出 bead。如果新位置离
-    // 上一颗 < 0.5 doc-px 就 skip。step 默认 ≥ 0.5 所以正常 stamp 不会触发。
-    if (st.lastStampX !== undefined) {
-      const dxs = x - st.lastStampX;
-      const dys = y - st.lastStampY;
-      if (dxs * dxs + dys * dys < 0.25) return;
+    // 整数像素 dedup：每个 (round x, round y) 像素**这一笔**只画一次。
+    // 解决：
+    //   1. Pencil 高 sample rate 在低速时把多颗 stamp 喂到同 1 px → bead
+    //   2. 笔触自交叉（path 弯回来）时同位置重叠 → alpha 双盖
+    // 副作用：和 Procreate "stroke 内不重叠累积" 同效果（user 想要的）
+    const key = (Math.round(x) << 16) | (Math.round(y) & 0xffff);
+    if (st.placedPixels.has(key)) {
+      st.droppedCount++;
+      return;
     }
-    st.lastStampX = x;
-    st.lastStampY = y;
+    st.placedPixels.add(key);
     const s = st.settings;
     const p = Math.max(0, Math.min(1, pressure));
 
