@@ -1,3 +1,7 @@
+// 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
+// 模块 lockstep 改。
+export const MODULE_VERSION = "v18-2026-05-26";
+
 // Pointer / pen / touch + 手势 + undo stack。
 // 沿用 ScratchPad 的 pointer 模式（防误触、coalesced、平滑、屏幕双击切工具）。
 // 差异：

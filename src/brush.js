@@ -1,3 +1,8 @@
+// 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
+// 模块 lockstep 改。WebXiaoHeiWu 的教训："I forgot it across three bumps
+// in a row; the user caught it"。bump.sh 可以一次性 sed 所有 module。
+export const MODULE_VERSION = "v18-2026-05-26";
+
 // 笔刷引擎 v0：圆笔 + 沿线 stamp。
 //
 // 设计原则（一期手感期）：
@@ -160,7 +165,10 @@ export class BrushEngine {
 
   // Debug：给 input.js endStroke 后调，返回这一笔的诊断信息
   //   uniq    = 不同整数 (x, y) 位置数；若 << stampCount 则坐标真的重复
-  //   alphaSamples = 沿笔触采几点的 layer alpha，看 layer 像素到底成不成 solid
+  //   aMin/aMax = 沿笔触采几点的 layer alpha
+  //   dMean/dStd/dMin/dMax = 相邻 stamp 距离统计（doc-px）
+  //     - 理想：dMean ≈ step, dStd 接近 0, dMin/dMax 紧贴 dMean
+  //     - bead 信号：dStd 大，dMin 远小于 step（聚集），dMax 远大于 step（gap）
   getStrokeDiagnostic() {
     const st = this._stroke;
     if (!st || !st.positions || st.positions.length === 0) return null;
@@ -182,7 +190,21 @@ export class BrushEngine {
         if (a > aMax) aMax = a;
       } catch {}
     }
-    return { n, uniq: uniq.size, aMin, aMax };
+    // 相邻 stamp 距离分布
+    let dMin = Infinity, dMax = 0, dSum = 0, dSumSq = 0, dCount = 0;
+    for (let i = 1; i < n; i++) {
+      const dx = pts[i*2] - pts[(i-1)*2];
+      const dy = pts[i*2+1] - pts[(i-1)*2+1];
+      const d = Math.hypot(dx, dy);
+      if (d < dMin) dMin = d;
+      if (d > dMax) dMax = d;
+      dSum += d; dSumSq += d * d; dCount++;
+    }
+    const dMean = dCount > 0 ? dSum / dCount : 0;
+    const dVar = dCount > 0 ? (dSumSq / dCount) - dMean * dMean : 0;
+    const dStd = Math.sqrt(Math.max(0, dVar));
+    if (dCount === 0) { dMin = 0; dMax = 0; }
+    return { n, uniq: uniq.size, aMin, aMax, dMean, dStd, dMin, dMax };
   }
   cancelStroke() {
     this._stroke = null;
