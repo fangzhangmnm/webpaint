@@ -1,6 +1,6 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
 // 模块 lockstep 改。
-export const MODULE_VERSION = "v23-2026-05-26";
+export const MODULE_VERSION = "v24-2026-05-26";
 
 // Pointer / pen / touch + 手势 + undo stack。
 // 沿用 ScratchPad 的 pointer 模式（防误触、coalesced、平滑、屏幕双击切工具）。
@@ -31,18 +31,12 @@ const TAP_MAX_DURATION = 220;
 const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
 const DOUBLETAP_MAX_GAP = 80;
-// v17 起：DSP 视角。iPad Safari 把 Pencil 真 sub-pixel 位置量化到 integer
-// clientX/Y 才给 JS（不合 spec，Apple Dev #31124）。raw 是噪 + 量化损失的
-// 信号，得先 reconstruct 干净路径再 stamp。
-//
-// 用 Catmull-Rom spline 取 4 个 raw 控制点（P0..P3）的 midpoint (t=0.5)：
-//     output = -1/16·P0 + 9/16·P1 + 9/16·P2 - 1/16·P3
-// 即"过 P1,P2 的平滑曲线在 P1/P2 中间的点"，用 P0,P3 做切线信息保形。
-// 整数台阶 raw in → sub-pixel 连续路径 out → stamp 沿连续路径落，不聚集。
-// lag = 1.5 raw samples ≈ 6ms @ 240Hz，无感。
-// v16 的 weighted MA 是退化版本（无负权重）；spline 在转弯处保形更好。
-const RAW_HISTORY_N = 4;
-const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；raw 没动就跳
+// v24 起：input.js **完全不做位置 smoothing**。raw clientX/Y 直传给 brush。
+// brush 端 cache-and-consume 保证 stamp 间距均匀；smoothing 用别的机制
+// （由 user 后续指定 — 输出端 lerp / live-stroke buffer / 其他）。
+// 之前的 Catmull-Rom (v17) 和 weighted MA (v22 尝试) 都拆掉，避免在 brush
+// 端调试 stamp 分布时 input 端还有未知的 smoothing 干扰。
+const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；raw 没动就跳，避免触发 brush extendStroke
 // 压感 LPF（stabilizer）：Pencil 自带 ~10Hz 握笔抖动 → 灌进 size = base × p^0.6
 // 会让 step 每秒 10 次缩胀 → segPos 偶尔被 clamp 到段首 → 小堆积 → 视觉上速度
 // 相关的 alpha 结节。LPF 把 10Hz 抖动压平。同步削尖刺，缓解 mid bulb。
@@ -202,7 +196,6 @@ export class InputController {
       rec.lastRawY = y;
       rec.lastP = null;   // 本笔最近一次有效 pressure，给 sensor 0 fallback
       rec.smP = -1;       // stabilizer LPF 状态；-1 = 还没收到第一帧（首颗 = raw）
-      rec.rawHistory = []; // 最近 N 个 raw (x, y) 给 Catmull-Rom 用
       this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
     } else if (role === "pick") {
       this._doPick(x, y);
@@ -287,27 +280,9 @@ export class InputController {
         rec.lastRawX = ev.clientX;
         rec.lastRawY = ev.clientY;
         if (drx * drx + dry * dry < RAW_STATIC_SCREEN_SQ) continue;
-        // 推 raw history，Catmull-Rom midpoint 输出 sub-pixel 位置
-        rec.rawHistory.push(ev.clientX, ev.clientY);
-        while (rec.rawHistory.length > RAW_HISTORY_N * 2) {
-          rec.rawHistory.shift(); rec.rawHistory.shift();
-        }
-        const h = rec.rawHistory;
-        const hn = h.length / 2;
-        if (hn >= 4) {
-          // 取 P1, P2 中点（用 P0/P3 当切线）
-          const i0 = (hn - 4) * 2, i1 = (hn - 3) * 2, i2 = (hn - 2) * 2, i3 = (hn - 1) * 2;
-          rec.smX = -0.0625 * h[i0] + 0.5625 * h[i1] + 0.5625 * h[i2] - 0.0625 * h[i3];
-          rec.smY = -0.0625 * h[i0+1] + 0.5625 * h[i1+1] + 0.5625 * h[i2+1] - 0.0625 * h[i3+1];
-        } else if (hn >= 2) {
-          // 不够 4 个：取最后两个的中点
-          const i1 = (hn - 2) * 2, i2 = (hn - 1) * 2;
-          rec.smX = 0.5 * (h[i1] + h[i2]);
-          rec.smY = 0.5 * (h[i1+1] + h[i2+1]);
-        } else {
-          rec.smX = h[0];
-          rec.smY = h[1];
-        }
+        // **v24**：raw clientX/Y 直传 brush，input 端不做位置平滑
+        rec.smX = ev.clientX;
+        rec.smY = ev.clientY;
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
         const pressure = effectivePressureFor(rec, ev, enabled);
         this.brush.extendStroke(dx, dy, pressure);

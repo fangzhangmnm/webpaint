@@ -1,5 +1,5 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。
-export const MODULE_VERSION = "v23-2026-05-26";
+export const MODULE_VERSION = "v24-2026-05-26";
 
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
 //
@@ -126,9 +126,10 @@ export class Board {
     this.setViewport(tx, ty, scale);
   }
 
-  // Debug：在 layer 之上画上一笔所有 stamp 中心的红点 marker
-  setDebugMarkers(positions) {
-    this._debugMarkers = positions;  // Float32Array [x0,y0,x1,y1,...] 或 null
+  // Debug：在 layer 之上画 stamp 红点 + raw input 蓝点
+  setDebugMarkers(stamps, raws) {
+    this._debugMarkers = stamps;     // Float32Array stamp 中心
+    this._debugRawMarkers = raws;    // Float32Array raw event 位置
     this._dirtyFull = true;
     this.requestRender();
   }
@@ -292,17 +293,35 @@ export class Board {
   _drawDebugMarkers() {
     const ctx = this.ctx;
     const { tx, ty, scale } = this.viewport;
-    const pts = this._debugMarkers;
-    const r = 2;
-    ctx.fillStyle = "rgba(255, 32, 32, 0.85)";
-    ctx.beginPath();
-    for (let i = 0; i < pts.length; i += 2) {
-      const sx = pts[i] * scale + tx;
-      const sy = pts[i + 1] * scale + ty;
-      ctx.moveTo(sx + r, sy);
-      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    // raw input 蓝点（先画，避免被 stamp 红点完全盖住；用空心圆且大一圈）
+    const raws = this._debugRawMarkers;
+    if (raws && raws.length) {
+      const rr = 4;
+      ctx.strokeStyle = "rgba(32, 96, 255, 0.85)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i < raws.length; i += 2) {
+        const sx = raws[i] * scale + tx;
+        const sy = raws[i + 1] * scale + ty;
+        ctx.moveTo(sx + rr, sy);
+        ctx.arc(sx, sy, rr, 0, Math.PI * 2);
+      }
+      ctx.stroke();
     }
-    ctx.fill();
+    // stamp 红点（实心，叠在上面）
+    const pts = this._debugMarkers;
+    if (pts && pts.length) {
+      const r = 2;
+      ctx.fillStyle = "rgba(255, 32, 32, 0.85)";
+      ctx.beginPath();
+      for (let i = 0; i < pts.length; i += 2) {
+        const sx = pts[i] * scale + tx;
+        const sy = pts[i + 1] * scale + ty;
+        ctx.moveTo(sx + r, sy);
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
   }
 
   _drawCursor() {

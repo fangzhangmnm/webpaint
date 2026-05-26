@@ -1,5 +1,5 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。
-export const MODULE_VERSION = "v23-2026-05-26";
+export const MODULE_VERSION = "v24-2026-05-26";
 
 // IndexedDB stub。一期手感期没启用持久化（proposal："甚至没保存的情况下"）。
 // 这里先把 store schema 占好位，避免后期换 schema 时还要 bump version。

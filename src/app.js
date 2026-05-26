@@ -16,7 +16,7 @@ import { BrushSettings, MODULE_VERSION as BRUSH_V } from "./brush.js";
 import { getMeta, setMeta, debounce, MODULE_VERSION as DB_V } from "./db.js";
 
 // 反煤气灯：app.js 自己的硬编码版本，启动时和兄弟 module + window.WEBPAINT_VERSION 对账
-const APP_V = "v23-2026-05-26";
+const APP_V = "v24-2026-05-26";
 const MODULE_VERSIONS = { app: APP_V, doc: DOC_V, board: BOARD_V, input: INPUT_V, brush: BRUSH_V, db: DB_V };
 
 const THEMES = ["auto", "day", "night"];
@@ -473,19 +473,19 @@ window.addEventListener("wp:strokeEnd", (e) => {
   _lastStrokeStamps = e.detail.stamps;
   _lastDiag = e.detail.diag || null;
   refreshBrushDebug();
-  // Debug 红点：开了的话把这一笔的 stamp 位置交给 board 画 marker
-  if (_debugStampsOn && _lastDiag?.positions) {
-    board.setDebugMarkers(_lastDiag.positions);
+  // Debug：开了的话把 stamp 红点 + raw 蓝点交给 board 画
+  if (_debugStampsOn && _lastDiag) {
+    board.setDebugMarkers(_lastDiag.positions || null, _lastDiag.rawPositions || null);
   }
 });
 
-// ---- Debug: stamps 红点叠加 toggle ----
+// ---- Debug: stamps 红点 + raw 蓝点叠加 toggle ----
 let _debugStampsOn = false;
 function applyDebugStamps(on) {
   _debugStampsOn = !!on;
   els.debugStampsBtn.setAttribute("aria-pressed", on ? "true" : "false");
-  if (!on) board.setDebugMarkers(null);
-  else if (_lastDiag?.positions) board.setDebugMarkers(_lastDiag.positions);
+  if (!on) board.setDebugMarkers(null, null);
+  else if (_lastDiag) board.setDebugMarkers(_lastDiag.positions || null, _lastDiag.rawPositions || null);
 }
 els.debugStampsBtn.addEventListener("click", () => {
   applyDebugStamps(!_debugStampsOn);

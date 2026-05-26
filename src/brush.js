@@ -1,7 +1,7 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
 // 模块 lockstep 改。WebXiaoHeiWu 的教训："I forgot it across three bumps
 // in a row; the user caught it"。bump.sh 可以一次性 sed 所有 module。
-export const MODULE_VERSION = "v23-2026-05-26";
+export const MODULE_VERSION = "v24-2026-05-26";
 
 // 笔刷引擎 v0：圆笔 + 沿线 stamp。
 //
@@ -133,11 +133,12 @@ export class BrushEngine {
       layer,
       settings,
       mode,
-      cache: [{ x, y, p: pressure }],     // raw events 缓存
+      cache: [{ x, y, p: pressure }],     // raw events 缓存 (consume 后会被裁)
       segPathPos: [0],                     // 累计 path 长度：segPathPos[i] = cache[i] 离起点的 path 距离
       nextStampPos: step,                  // 下一颗 stamp 应该落在 path 上哪个位置
       dirty: null,
-      positions: [],
+      positions: [],                       // 所有 emit 的 stamp (x, y) 给 debug marker
+      rawXY: [x, y],                       // 所有 raw event (x, y) 给 debug marker（不被 consume cleanup 裁）
     };
     this._stampCount = 0;
     // Touchdown stamp 立刻落在 (x, y) (path position 0)
@@ -153,6 +154,7 @@ export class BrushEngine {
     if (segLen === 0) return;
     st.cache.push({ x, y, p: pressure });
     st.segPathPos.push(st.segPathPos[st.segPathPos.length - 1] + segLen);
+    st.rawXY.push(x, y);
     this._consumeCache();
   }
 
@@ -239,8 +241,10 @@ export class BrushEngine {
     return {
       n, uniq: uniq.size, dropped: 0,    // v23 无 dedup，恒 0
       aMin, aMax, dMean, dStd, dMin, dMax,
-      // 复制一份 stamp 位置数组给 board 画视觉 marker
+      // 复制一份 stamp 位置数组给 board 画视觉 marker (红)
       positions: Float32Array.from(pts),
+      // raw input 位置数组（蓝），用来 diff "input 进来就抖" vs "brush 把均匀变不均匀"
+      rawPositions: Float32Array.from(st.rawXY),
     };
   }
   cancelStroke() {
