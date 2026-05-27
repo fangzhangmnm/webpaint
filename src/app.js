@@ -50,12 +50,16 @@ const els = {
   menuLongPressPick: document.getElementById("menuLongPressPick"),
   menuPressureSize: document.getElementById("menuPressureSize"),
   menuPressureOpacity: document.getElementById("menuPressureOpacity"),
-  menuSave: document.getElementById("menuSave"),
-  menuGallery: document.getElementById("menuGallery"),
-  menuSharePng: document.getElementById("menuSharePng"),
-  menuShareJpg: document.getElementById("menuShareJpg"),
-  menuExportOra: document.getElementById("menuExportOra"),
-  menuImportOra: document.getElementById("menuImportOra"),
+  menuTheme: document.getElementById("menuTheme"),
+  menuClear: document.getElementById("menuClear"),
+  topSaveBtn: document.getElementById("topSaveBtn"),
+  topGalleryBtn: document.getElementById("topGalleryBtn"),
+  topImportBtn: document.getElementById("topImportBtn"),
+  topShareBtn: document.getElementById("topShareBtn"),
+  sharePopup: document.getElementById("sharePopup"),
+  sharePopupPng: document.getElementById("sharePopupPng"),
+  sharePopupJpg: document.getElementById("sharePopupJpg"),
+  sharePopupOra: document.getElementById("sharePopupOra"),
   galleryFull: document.getElementById("galleryFull"),
   galleryClose: document.getElementById("galleryClose"),
   galleryCurrentName: document.getElementById("galleryCurrentName"),
@@ -64,8 +68,6 @@ const els = {
   galleryGrid: document.getElementById("galleryGrid"),
   galleryEmpty: document.getElementById("galleryEmpty"),
   oraFileInput: document.getElementById("oraFileInput"),
-  menuTheme: document.getElementById("menuTheme"),
-  menuClear: document.getElementById("menuClear"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
   activeSwatch: document.getElementById("activeSwatch"),
   // 浮动色板
@@ -653,17 +655,14 @@ let _docLastSavedAt = 0;
 let _activeSessionName = "未命名";
 const AUTOSAVE_MS = 3 * 60 * 1000;
 
-function setSaveLabel(text) {
-  const stateEl = els.menuSave.querySelector('[data-state-for="save"]');
-  if (stateEl) stateEl.textContent = text;
-}
 function updateSaveStatus() {
   const name = _activeSessionName;
   const tail = _docSaving ? "保存中…"
     : _docDirty ? "未保存"
     : _docLastSavedAt ? "已保存"
     : "-";
-  setSaveLabel(`${name} · ${tail}`);
+  els.topSaveBtn.title = `保存 (Ctrl+S) · ${name} · ${tail}`;
+  els.topSaveBtn.dataset.state = _docSaving ? "saving" : _docDirty ? "dirty" : "clean";
 }
 async function saveNow() {
   if (_docSaving) return;
@@ -730,35 +729,55 @@ function stampNow() {
   const d = new Date();
   return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}`;
 }
-els.menuSave.addEventListener("click", () => {
-  setMenuOpen(false);
-  saveNow();
+// ---- topbar 4 个独立按钮（保存 / 图库 / 导入 / 分享导出） ----
+els.topSaveBtn.addEventListener("click", () => saveNow());
+els.topGalleryBtn.addEventListener("click", () => setGalleryOpen(true));
+els.topImportBtn.addEventListener("click", () => {
+  els.oraFileInput.value = "";    // 允许选同一个文件再触发 change
+  els.oraFileInput.click();
 });
-els.menuSharePng.addEventListener("click", async () => {
-  setMenuOpen(false);
+
+// ---- 分享 / 导出 下拉 ----
+function setSharePopupOpen(open) {
+  els.sharePopup.classList.toggle("hidden", !open);
+  els.topShareBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    // 锚到 topShareBtn 下方
+    const r = els.topShareBtn.getBoundingClientRect();
+    els.sharePopup.style.top = (r.bottom + 6) + "px";
+    els.sharePopup.style.left = "auto";
+    els.sharePopup.style.right = Math.max(8, window.innerWidth - r.right) + "px";
+  }
+}
+els.topShareBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setSharePopupOpen(els.sharePopup.classList.contains("hidden"));
+});
+document.addEventListener("pointerdown", (e) => {
+  if (els.sharePopup.classList.contains("hidden")) return;
+  if (els.sharePopup.contains(e.target) || els.topShareBtn.contains(e.target)) return;
+  setSharePopupOpen(false);
+});
+els.sharePopupPng.addEventListener("click", async () => {
+  setSharePopupOpen(false);
   try {
-    const r = await shareOrDownloadImage(doc, "png", `WebPaint-${stampNow()}`);
+    const r = await shareOrDownloadImage(doc, "png", `${_activeSessionName}-${stampNow()}`);
     setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : "PNG 已下载");
   } catch (e) { setStatus("分享失败：" + (e && e.message || e)); }
 });
-els.menuShareJpg.addEventListener("click", async () => {
-  setMenuOpen(false);
+els.sharePopupJpg.addEventListener("click", async () => {
+  setSharePopupOpen(false);
   try {
-    const r = await shareOrDownloadImage(doc, "jpg", `WebPaint-${stampNow()}`);
+    const r = await shareOrDownloadImage(doc, "jpg", `${_activeSessionName}-${stampNow()}`);
     setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : "JPG 已下载");
   } catch (e) { setStatus("分享失败：" + (e && e.message || e)); }
 });
-els.menuExportOra.addEventListener("click", async () => {
-  setMenuOpen(false);
+els.sharePopupOra.addEventListener("click", async () => {
+  setSharePopupOpen(false);
   try {
     await exportOraDownload(doc, `${_activeSessionName}.ora`);
     setStatus(".ora 已下载");
   } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
-});
-els.menuImportOra.addEventListener("click", () => {
-  setMenuOpen(false);
-  els.oraFileInput.value = "";    // 允许选同一个文件再触发 change
-  els.oraFileInput.click();
 });
 els.oraFileInput.addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
@@ -788,10 +807,6 @@ function setGalleryOpen(open) {
     _galleryUrls = [];
   }
 }
-els.menuGallery.addEventListener("click", () => {
-  setMenuOpen(false);
-  setGalleryOpen(true);
-});
 els.galleryClose.addEventListener("click", () => setGalleryOpen(false));
 
 els.galleryCurrentName.addEventListener("change", () => {

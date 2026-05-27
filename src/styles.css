@@ -318,6 +318,21 @@ input[type=range] {
 .menu-item-state { color: var(--ink-soft); font-size: 12px; }
 .menu-item[aria-pressed="true"] .menu-item-state { color: var(--accent, #4c8bf5); font-weight: 600; }
 .menu-item.menu-danger { color: #c0392b; }
+
+/* 顶栏保存按钮 dirty / saving 视觉提示 */
+.tool[data-state="dirty"] { color: var(--accent, #4c8bf5); position: relative; }
+.tool[data-state="dirty"]::after {
+  content: ""; position: absolute; top: 6px; right: 6px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent, #4c8bf5);
+}
+.tool[data-state="saving"] { opacity: 0.5; }
+
+/* 分享弹出菜单：菜单样式 + 右上锚定 */
+.share-popup {
+  /* top / right 由 JS 计算锚到 topShareBtn 下面 */
+  min-width: 200px;
+}
 .menu-sep {
   border: 0;
   border-top: 1px solid var(--line);

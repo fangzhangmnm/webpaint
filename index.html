@@ -135,6 +135,38 @@
         </svg>
       </button>
 
+      <button class="tool" id="topSaveBtn" type="button" title="保存 (Ctrl+S)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+          <polyline points="17 21 17 13 7 13 7 21"></polyline>
+          <polyline points="7 3 7 8 15 8"></polyline>
+        </svg>
+      </button>
+      <button class="tool" id="topGalleryBtn" type="button" title="图库">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+          <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+          <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+          <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+        </svg>
+      </button>
+      <button class="tool" id="topImportBtn" type="button" title="导入 .ora">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+      </button>
+      <button class="tool" id="topShareBtn" type="button" title="分享 / 导出" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="18" cy="5" r="3"></circle>
+          <circle cx="6" cy="12" r="3"></circle>
+          <circle cx="18" cy="19" r="3"></circle>
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+        </svg>
+      </button>
+
       <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="4" y1="7" x2="20" y2="7"></line>
@@ -193,32 +225,26 @@
         <span class="menu-item-state" data-state-for="longPressPick">关</span>
       </button>
       <hr class="menu-sep" />
-      <button class="menu-item" id="menuSave" type="button" role="menuitem">
-        <span class="menu-item-label">保存 (Ctrl+S)</span>
-        <span class="menu-item-state" data-state-for="save">-</span>
-      </button>
-      <button class="menu-item" id="menuGallery" type="button" role="menuitem">
-        <span class="menu-item-label">图库 / 新建 / 另存</span>
-      </button>
-      <button class="menu-item" id="menuSharePng" type="button" role="menuitem">
-        <span class="menu-item-label">分享 PNG</span>
-      </button>
-      <button class="menu-item" id="menuShareJpg" type="button" role="menuitem">
-        <span class="menu-item-label">分享 JPG</span>
-      </button>
-      <button class="menu-item" id="menuExportOra" type="button" role="menuitem">
-        <span class="menu-item-label">导出 .ora</span>
-      </button>
-      <button class="menu-item" id="menuImportOra" type="button" role="menuitem">
-        <span class="menu-item-label">导入 .ora</span>
-      </button>
-      <hr class="menu-sep" />
       <button class="menu-item" id="menuTheme" type="button" role="menuitem">
         <span class="menu-item-label">主题</span>
         <span class="menu-item-state" data-state-for="theme">跟随系统</span>
       </button>
       <button class="menu-item menu-danger" id="menuClear" type="button" role="menuitem">
         <span class="menu-item-label">清空画布</span>
+      </button>
+    </div>
+
+    <!-- 分享 / 导出 下拉：点 topbar 分享按钮弹出 -->
+    <div class="share-popup menu-panel hidden" id="sharePopup" role="menu">
+      <button class="menu-item" id="sharePopupPng" type="button" role="menuitem">
+        <span class="menu-item-label">分享 / 保存 PNG</span>
+      </button>
+      <button class="menu-item" id="sharePopupJpg" type="button" role="menuitem">
+        <span class="menu-item-label">分享 / 保存 JPG</span>
+      </button>
+      <hr class="menu-sep" />
+      <button class="menu-item" id="sharePopupOra" type="button" role="menuitem">
+        <span class="menu-item-label">导出 .ora 文件</span>
       </button>
     </div>
 

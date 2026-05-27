@@ -46,13 +46,19 @@ export async function saveSession(doc, name) {
   return pkg;
 }
 
-/** 渲染缩略图 jpg blob（最长边 = maxSide）。给图库 grid 用。 */
+/** 渲染缩略图 blob（最长边 = maxSide）。给图库 grid 用。
+ *
+ * 故意全走 HTMLCanvasElement：Safari iOS 的 OffscreenCanvas.convertToBlob
+ * 对 JPEG 历史上有返 null 的 bug。thumb 不是热路径，HTMLCanvasElement.toBlob
+ * 跨浏览器 / 跨版本最稳。drawImage 接 OffscreenCanvas / HTMLCanvasElement
+ * 当 source 都成立，所以 doc 层 canvas 是 OffscreenCanvas 也没问题。
+ *
+ * 若 JPEG toBlob 仍意外返 null，降级到 PNG（大几倍但起码有）。
+ */
 async function renderThumbBlob(doc, maxSide = 256) {
-  // Render merged at doc resolution
   const W = doc.width, H = doc.height;
-  const merged = (typeof OffscreenCanvas !== "undefined")
-    ? new OffscreenCanvas(W, H)
-    : (() => { const x = document.createElement("canvas"); x.width = W; x.height = H; return x; })();
+  const merged = document.createElement("canvas");
+  merged.width = W; merged.height = H;
   const mctx = merged.getContext("2d");
   mctx.fillStyle = doc.backgroundColor || "#ffffff";
   mctx.fillRect(0, 0, W, H);
@@ -65,21 +71,20 @@ async function renderThumbBlob(doc, maxSide = 256) {
     mctx.globalAlpha = pa;
     mctx.globalCompositeOperation = pc;
   }
-  // Downscale
   const scale = Math.min(1, maxSide / Math.max(W, H));
   const tw = Math.max(1, Math.round(W * scale));
   const th = Math.max(1, Math.round(H * scale));
-  const thumb = (typeof OffscreenCanvas !== "undefined")
-    ? new OffscreenCanvas(tw, th)
-    : (() => { const x = document.createElement("canvas"); x.width = tw; x.height = th; return x; })();
+  const thumb = document.createElement("canvas");
+  thumb.width = tw; thumb.height = th;
   const tctx = thumb.getContext("2d");
   tctx.imageSmoothingEnabled = true;
   tctx.imageSmoothingQuality = "high";
   tctx.drawImage(merged, 0, 0, tw, th);
-  if (typeof thumb.convertToBlob === "function") {
-    return await thumb.convertToBlob({ type: "image/jpeg", quality: 0.78 });
-  }
-  return await new Promise((resolve) => thumb.toBlob(resolve, "image/jpeg", 0.78));
+
+  const jpgBlob = await new Promise((resolve) => thumb.toBlob(resolve, "image/jpeg", 0.78));
+  if (jpgBlob) return jpgBlob;
+  // 兜底 PNG（jpg 在某些 Safari 版本返 null）
+  return await new Promise((resolve) => thumb.toBlob(resolve, "image/png"));
 }
 
 /** 列所有 session 元信息（name + updatedAt + size + thumb Blob）。不解码 .ora。 */
@@ -151,17 +156,12 @@ export async function exportOraDownload(doc, filename = "未命名.ora") {
 
 // ---- 分享 / 导出 PNG / JPG ----
 
-/** 用 ora.js 同一个 merged 渲染逻辑（doc + bg + 各 layer composite）。 */
+/** 渲染合成图 blob（分享 PNG/JPG 用）。全走 HTMLCanvasElement.toBlob，
+ *  避开 Safari OffscreenCanvas.convertToBlob JPEG 返 null 的 bug。 */
 async function renderMergedBlob(doc, mime = "image/png", quality) {
-  // 重写一遍而不是导出 ora.js 的 renderMerged，因为我们需要 Blob 不是 canvas，
-  // 且 ora.js 没 export 那个 helper。简化：直接用同样的逻辑这里复写一遍。
-  const c = (typeof OffscreenCanvas !== "undefined")
-    ? new OffscreenCanvas(doc.width, doc.height)
-    : (() => {
-        const x = document.createElement("canvas");
-        x.width = doc.width; x.height = doc.height;
-        return x;
-      })();
+  const c = document.createElement("canvas");
+  c.width = doc.width;
+  c.height = doc.height;
   const ctx = c.getContext("2d");
   ctx.fillStyle = doc.backgroundColor || "#ffffff";
   ctx.fillRect(0, 0, doc.width, doc.height);
@@ -176,9 +176,13 @@ async function renderMergedBlob(doc, mime = "image/png", quality) {
     ctx.globalAlpha = prevA;
     ctx.globalCompositeOperation = prevC;
   }
-  if (typeof c.convertToBlob === "function") return await c.convertToBlob({ type: mime, quality });
-  if (typeof c.toBlob === "function") return await new Promise((resolve) => c.toBlob(resolve, mime, quality));
-  throw new Error("canvas 无 toBlob / convertToBlob");
+  const blob = await new Promise((resolve) => c.toBlob(resolve, mime, quality));
+  if (blob) return blob;
+  // jpg 返 null 兜底走 png
+  if (mime !== "image/png") {
+    return await new Promise((resolve) => c.toBlob(resolve, "image/png"));
+  }
+  throw new Error("canvas.toBlob 返 null");
 }
 
 /**
