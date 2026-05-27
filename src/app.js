@@ -13,7 +13,12 @@ import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
 import { InputController } from "./input.js";
 import { BrushSettings } from "./brush.js";
-import { saveCurrentSession, loadCurrentSession, exportOraDownload, shareOrDownloadImage } from "./session.js";
+import {
+  saveSession, loadCurrentSession, openSession, removeSession, listSessions,
+  getCurrentSessionName, setCurrentSessionName,
+  exportOraDownload, shareOrDownloadImage,
+} from "./session.js";
+import { decodeOraToDoc } from "./ora.js";
 
 const THEMES = ["auto", "day", "night"];
 const THEME_LABEL = { auto: "跟随系统", day: "日", night: "夜" };
@@ -46,9 +51,19 @@ const els = {
   menuPressureSize: document.getElementById("menuPressureSize"),
   menuPressureOpacity: document.getElementById("menuPressureOpacity"),
   menuSave: document.getElementById("menuSave"),
+  menuGallery: document.getElementById("menuGallery"),
   menuSharePng: document.getElementById("menuSharePng"),
   menuShareJpg: document.getElementById("menuShareJpg"),
   menuExportOra: document.getElementById("menuExportOra"),
+  menuImportOra: document.getElementById("menuImportOra"),
+  galleryBackdrop: document.getElementById("galleryBackdrop"),
+  gallerySheet: document.getElementById("gallerySheet"),
+  gallerySheetClose: document.getElementById("gallerySheetClose"),
+  galleryCurrentName: document.getElementById("galleryCurrentName"),
+  galleryNewBtn: document.getElementById("galleryNewBtn"),
+  gallerySaveAsBtn: document.getElementById("gallerySaveAsBtn"),
+  galleryList: document.getElementById("galleryList"),
+  oraFileInput: document.getElementById("oraFileInput"),
   menuTheme: document.getElementById("menuTheme"),
   menuClear: document.getElementById("menuClear"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
@@ -632,6 +647,10 @@ function hexToHsv(hex) {
 let _docDirty = false;
 let _docSaving = false;
 let _docLastSavedAt = 0;
+// **幽灵 current path 保护**：内存里 _activeSessionName 只在 boot load 成功
+// 或用户主动 open / new / save-as 后才升级到真实名字。boot 失败时保持
+// safe default "未命名"，避免 save 走 rename-delete-old 路径误删。
+let _activeSessionName = "未命名";
 const AUTOSAVE_MS = 3 * 60 * 1000;
 
 function setSaveLabel(text) {
@@ -639,20 +658,22 @@ function setSaveLabel(text) {
   if (stateEl) stateEl.textContent = text;
 }
 function updateSaveStatus() {
-  if (_docSaving) setSaveLabel("保存中…");
-  else if (_docDirty) setSaveLabel("未保存");
-  else if (_docLastSavedAt) setSaveLabel("已保存");
-  else setSaveLabel("-");
+  const name = _activeSessionName;
+  const tail = _docSaving ? "保存中…"
+    : _docDirty ? "未保存"
+    : _docLastSavedAt ? "已保存"
+    : "-";
+  setSaveLabel(`${name} · ${tail}`);
 }
 async function saveNow() {
   if (_docSaving) return;
   _docSaving = true;
   updateSaveStatus();
   try {
-    await saveCurrentSession(doc);
+    await saveSession(doc, _activeSessionName);
     _docDirty = false;
     _docLastSavedAt = Date.now();
-    setStatus("已保存");
+    setStatus(`已保存：${_activeSessionName}`);
   } catch (e) {
     console.warn("[session] save failed:", e);
     setStatus("保存失败：" + (e && e.message || e));
@@ -660,6 +681,26 @@ async function saveNow() {
     _docSaving = false;
     updateSaveStatus();
   }
+}
+
+// 把 loaded doc 的内容塞回 live doc（保持指针，避免到处换引用）
+function adoptLoadedDoc(loaded, sessionName) {
+  doc.layers = loaded.layers;
+  doc.activeIndex = loaded.activeIndex;
+  doc.width = loaded.width;
+  doc.height = loaded.height;
+  doc.backgroundColor = loaded.backgroundColor;
+  els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
+  input.clearHistory();
+  board.fitToScreen();
+  board.invalidateAll();
+  board.requestRender();
+  renderLayersPanel();
+  _activeSessionName = sessionName;
+  setCurrentSessionName(sessionName);
+  _docDirty = false;
+  _docLastSavedAt = Date.now();
+  updateSaveStatus();
 }
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty
 window.addEventListener("wp:histchange", () => {
@@ -710,37 +751,208 @@ els.menuShareJpg.addEventListener("click", async () => {
 els.menuExportOra.addEventListener("click", async () => {
   setMenuOpen(false);
   try {
-    await exportOraDownload(doc, `WebPaint-${stampNow()}.ora`);
+    await exportOraDownload(doc, `${_activeSessionName}.ora`);
     setStatus(".ora 已下载");
   } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
 });
+els.menuImportOra.addEventListener("click", () => {
+  setMenuOpen(false);
+  els.oraFileInput.value = "";    // 允许选同一个文件再触发 change
+  els.oraFileInput.click();
+});
+els.oraFileInput.addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    const loaded = await decodeOraToDoc(file);
+    // 从文件名提取 session name（去 .ora 后缀）
+    const nm = file.name.replace(/\.ora$/i, "") || "未命名";
+    adoptLoadedDoc(loaded, nm);
+    setStatus(`已导入：${nm}`);
+  } catch (err) {
+    console.warn("[session] import failed:", err);
+    setStatus("导入失败：" + (err && err.message || err));
+  }
+});
+
+// ---- 图库 modal ----
+function setGalleryOpen(open) {
+  els.gallerySheet.classList.toggle("hidden", !open);
+  els.galleryBackdrop.classList.toggle("hidden", !open);
+  if (open) renderGallery();
+}
+els.menuGallery.addEventListener("click", () => {
+  setMenuOpen(false);
+  setGalleryOpen(true);
+});
+els.gallerySheetClose.addEventListener("click", () => setGalleryOpen(false));
+els.galleryBackdrop.addEventListener("click", () => setGalleryOpen(false));
+
+els.galleryCurrentName.addEventListener("change", () => {
+  const v = (els.galleryCurrentName.value || "").trim();
+  if (!v) {
+    els.galleryCurrentName.value = _activeSessionName;
+    return;
+  }
+  if (v === _activeSessionName) return;
+  // 重命名 = 把当前 doc 在新名字下另存，删旧名（旧名是"已 load 进 scene 的真名"，
+  // 满足 feedback-phantom-current-path 的安全条件）
+  (async () => {
+    try {
+      await saveSession(doc, v);
+      if (_activeSessionName && _activeSessionName !== v) {
+        await removeSession(_activeSessionName);
+      }
+      _activeSessionName = v;
+      setCurrentSessionName(v);
+      _docDirty = false;
+      _docLastSavedAt = Date.now();
+      updateSaveStatus();
+      renderGallery();
+      setStatus(`已重命名：${v}`);
+    } catch (e) {
+      setStatus("重命名失败：" + (e && e.message || e));
+    }
+  })();
+});
+els.galleryNewBtn.addEventListener("click", () => {
+  const name = prompt("新作品名字", "未命名");
+  if (!name) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  // 新建：先把当前 doc 落盘（如果 dirty），然后切到全空白 doc
+  (async () => {
+    if (_docDirty) await saveNow();
+    // 空白 doc：清掉 layers，重置成一个空层
+    // 复刻一个空白 PaintDoc 的默认 layers
+    const fresh = new PaintDoc({ width: doc.width, height: doc.height });
+    doc.layers = fresh.layers;
+    doc.activeIndex = 0;
+    _activeSessionName = trimmed;
+    setCurrentSessionName(trimmed);
+    input.clearHistory();
+    board.invalidateAll();
+    board.requestRender();
+    renderLayersPanel();
+    _docDirty = true;          // 新建的还没存
+    _docLastSavedAt = 0;
+    updateSaveStatus();
+    await saveNow();           // 立即落盘占名
+    renderGallery();
+    setStatus(`新建：${trimmed}`);
+  })();
+});
+els.gallerySaveAsBtn.addEventListener("click", () => {
+  const name = prompt("另存为", _activeSessionName);
+  if (!name) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  (async () => {
+    try {
+      await saveSession(doc, trimmed);
+      _activeSessionName = trimmed;
+      setCurrentSessionName(trimmed);
+      _docDirty = false;
+      _docLastSavedAt = Date.now();
+      updateSaveStatus();
+      renderGallery();
+      setStatus(`另存为：${trimmed}`);
+    } catch (e) {
+      setStatus("另存为失败：" + (e && e.message || e));
+    }
+  })();
+});
+
+async function renderGallery() {
+  els.galleryCurrentName.value = _activeSessionName;
+  const list = await listSessions();
+  els.galleryList.innerHTML = "";
+  for (const item of list) {
+    const row = document.createElement("div");
+    row.className = "gallery-row" + (item.name === _activeSessionName ? " active" : "");
+    const info = document.createElement("div");
+    info.className = "gallery-row-info";
+    const nm = document.createElement("div");
+    nm.className = "gallery-row-name";
+    nm.textContent = item.name;
+    const meta = document.createElement("div");
+    meta.className = "gallery-row-meta";
+    const date = new Date(item.updatedAt);
+    meta.textContent = `${date.toLocaleString()} · ${(item.size / 1024).toFixed(0)} KB`;
+    info.appendChild(nm);
+    info.appendChild(meta);
+    row.appendChild(info);
+    const del = document.createElement("button");
+    del.className = "gallery-row-del";
+    del.type = "button";
+    del.textContent = "删除";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`删除 "${item.name}"？此操作不可撤销。`)) return;
+      try {
+        await removeSession(item.name);
+        if (item.name === _activeSessionName) {
+          // 删了当前 → 内存里的 doc 还在，但下次 save 写到 new name 下
+          // 这里不主动切换 _activeSessionName，让 user 自己改 / 另存
+          setStatus(`已删除（当前作品在内存里，需另存为新名字保留）`);
+        } else {
+          setStatus(`已删除：${item.name}`);
+        }
+        renderGallery();
+      } catch (err) {
+        setStatus("删除失败：" + (err && err.message || err));
+      }
+    });
+    row.appendChild(del);
+    row.addEventListener("click", async () => {
+      if (item.name === _activeSessionName) {
+        setGalleryOpen(false);
+        return;
+      }
+      // 切换前：保当前 dirty
+      if (_docDirty) await saveNow();
+      try {
+        const loaded = await openSession(item.name);
+        if (!loaded) {
+          setStatus(`找不到：${item.name}`);
+          return;
+        }
+        adoptLoadedDoc(loaded, item.name);
+        setGalleryOpen(false);
+        setStatus(`已打开：${item.name}`);
+      } catch (err) {
+        setStatus("打开失败：" + (err && err.message || err));
+      }
+    });
+    els.galleryList.appendChild(row);
+  }
+}
 
 // ---- 启动收尾：尝试加载上次的 session（异步，不阻塞 UI 显示） ----
 setStatus("就绪");
 updateZoomLabel();
 updateSaveStatus();
 (async () => {
+  const wantedName = getCurrentSessionName();
   try {
     const loaded = await loadCurrentSession();
-    if (!loaded) return;                  // 没有存档 → 用默认空白 doc
-    // 替换 doc 的内容（保持 doc 指针不变，input/board 引用都还在）
-    doc.layers = loaded.layers;
-    doc.activeIndex = loaded.activeIndex;
-    doc.width = loaded.width;
-    doc.height = loaded.height;
-    els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-    input.clearHistory();                 // 旧 undo 链对新 layers 无意义
-    board.fitToScreen();
-    board.invalidateAll();
-    board.requestRender();
-    renderLayersPanel();
-    setStatus(`已恢复 (${loaded.layers.length} 层)`);
+    if (!loaded) {
+      // 没有存档 → safe default 名字，但默认空 doc 已经在
+      _activeSessionName = wantedName;
+      updateSaveStatus();
+      return;
+    }
+    adoptLoadedDoc(loaded, wantedName);
+    setStatus(`已恢复：${wantedName} (${loaded.layers.length} 层)`);
   } catch (e) {
-    // **幽灵 current path 保护**：不主动删 IDB 里失败的 entry；不把 _active 指向
-    // 失败 path（phase 1 只有 fixed "current" slot，无 rename op，天然安全）。
-    // 下次冷启动还会再试。
+    // **幽灵 current path 保护**（feedback-phantom-current-path memory）：
+    //   - **不**重置 localStorage.currentSessionName（用户下次冷启动还能再试）
+    //   - **但**内存里 _activeSessionName 保持 "未命名" safe default，
+    //     避免 Ctrl+S 时 saveSession 写到加载失败的名字下覆盖坏数据
     console.warn("[session] load failed:", e);
-    setStatus("启动加载失败，使用空白文档");
+    _activeSessionName = "未命名";
+    updateSaveStatus();
+    setStatus(`启动加载 "${wantedName}" 失败，使用空白文档`);
   }
 })();
 

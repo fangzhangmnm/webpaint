@@ -144,6 +144,26 @@
       </button>
     </header>
 
+    <!-- 图库 / 文件管理 modal：sheet 风格全屏遮罩 -->
+    <div class="backdrop hidden" id="galleryBackdrop"></div>
+    <div class="sheet gallery-sheet hidden" id="gallerySheet" role="dialog" aria-label="图库">
+      <div class="sheet-head">
+        <span class="sheet-title">图库</span>
+        <button class="sheet-close" id="gallerySheetClose" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="gallery-current">
+        <span class="gallery-current-label">当前</span>
+        <input class="gallery-current-name" id="galleryCurrentName" type="text" placeholder="未命名" />
+      </div>
+      <div class="gallery-foot">
+        <button class="gallery-foot-btn" id="galleryNewBtn" type="button">＋ 新建</button>
+        <button class="gallery-foot-btn" id="gallerySaveAsBtn" type="button">另存为…</button>
+      </div>
+      <div class="gallery-list-head">已保存</div>
+      <div class="gallery-list" id="galleryList"><!-- rows by JS --></div>
+    </div>
+    <input type="file" id="oraFileInput" accept=".ora,application/zip" style="display:none" />
+
     <!-- 图层面板：浮动可拖（沿用 .float-panel）。每行 = 一个 layer，倒序显示
          (UI 习惯：上面在画面上面)。新建按钮在 footer。 -->
     <div class="float-panel layers-panel hidden" id="layersPanel">
@@ -180,6 +200,9 @@
         <span class="menu-item-label">保存 (Ctrl+S)</span>
         <span class="menu-item-state" data-state-for="save">-</span>
       </button>
+      <button class="menu-item" id="menuGallery" type="button" role="menuitem">
+        <span class="menu-item-label">图库 / 新建 / 另存</span>
+      </button>
       <button class="menu-item" id="menuSharePng" type="button" role="menuitem">
         <span class="menu-item-label">分享 PNG</span>
       </button>
@@ -188,6 +211,9 @@
       </button>
       <button class="menu-item" id="menuExportOra" type="button" role="menuitem">
         <span class="menu-item-label">导出 .ora</span>
+      </button>
+      <button class="menu-item" id="menuImportOra" type="button" role="menuitem">
+        <span class="menu-item-label">导入 .ora</span>
       </button>
       <hr class="menu-sep" />
       <button class="menu-item" id="menuTheme" type="button" role="menuitem">

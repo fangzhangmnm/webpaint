@@ -1,6 +1,7 @@
 // Session 管理：把当前 PaintDoc 序列化进 IDB / 从 IDB 还原 / 导出下载 / 分享。
 //
-// phase 1 单一 slot：IDB key = "current"。phase 2 (云同步) 接 sessionFileName 多 slot。
+// **多 session（v36 起）**：IDB key = sessionName。localStorage 记当前 name。
+// 默认 "未命名"。重名直接覆盖。
 //
 // **保存策略**（抄 AtlasMaker shareback TL;DR 第 2 条）：
 //   - Ctrl+S 主导
@@ -9,39 +10,97 @@
 //   - **不要** debounce/heartbeat —— 画图工具用户预期 Blender / Photoshop 模式
 //
 // 幽灵 current path 陷阱（feedback-phantom-current-path memory）：
-//   phase 1 只有一个 fixed slot 不涉及 rename-delete-old；不会撞。phase 2 多
-//   session 时如果实现 rename，必须遵守 "_active 只在 load 成功后才升级到真实
-//   path" 原则。
+//   - boot load 失败时**不要**重置 localStorage（用户下次冷启动能重试）
+//   - 但内存里 _activeSessionName 用 safe default，避免 save 走 rename 路径
+//     把"加载失败的 path"当 oldName 删掉
 
 import { encodeDocToOra, decodeOraToDoc } from "./ora.js";
-import { getSession, putSession } from "./storage.js";
+import { getSession, putSession, deleteSession, listSessionIds } from "./storage.js";
 
-const CURRENT_SLOT = "current";
+const LS_CURRENT_NAME = "webpaint.currentSessionName";
+const DEFAULT_NAME = "未命名";
+const LEGACY_SLOT = "current";   // 旧 v35 单 slot key；冷启动会迁移到 DEFAULT_NAME
 
-/** 把 doc 序列化进 IDB "current" slot。返回 { ora: Blob } 用于状态显示 */
-export async function saveCurrentSession(doc) {
+export function getCurrentSessionName() {
+  try { return localStorage.getItem(LS_CURRENT_NAME) || DEFAULT_NAME; }
+  catch { return DEFAULT_NAME; }
+}
+export function setCurrentSessionName(name) {
+  try { localStorage.setItem(LS_CURRENT_NAME, name); } catch {}
+}
+
+/** 把 doc 序列化进指定 session（默认当前） */
+export async function saveSession(doc, name) {
+  const sessionName = name || getCurrentSessionName();
   const ora = await encodeDocToOra(doc);
   const pkg = {
-    name: "current",
+    name: sessionName,
     updatedAt: Date.now(),
-    ora,                              // Blob
-    // phase 1 不存 thumb；phase 2 sessions browser 时再补
+    ora,
   };
-  await putSession(CURRENT_SLOT, pkg);
+  await putSession(sessionName, pkg);
   return pkg;
 }
 
+/** 列所有 session 元信息（name + updatedAt + size）。不解码 .ora。 */
+export async function listSessions() {
+  const ids = await listSessionIds();
+  const out = [];
+  for (const id of ids) {
+    if (id === LEGACY_SLOT) continue;   // 迁移完后旧 slot 会被删，这里 fallback
+    const pkg = await getSession(id);
+    if (!pkg) continue;
+    out.push({
+      name: id,
+      updatedAt: pkg.updatedAt || 0,
+      size: (pkg.ora && pkg.ora.size) || 0,
+    });
+  }
+  out.sort((a, b) => b.updatedAt - a.updatedAt);
+  return out;
+}
+
 /**
- * 启动时尝试加载 "current" slot。
- * - 没有：返回 null（caller 用 default doc）
- * - 失败：throw（caller 决定怎么 catch，per phantom-current-path 教训，
- *   失败时不要把 _active 锁死在失败的 path）
+ * 启动时加载当前 session。
+ * - currentName 在 IDB 有 → 返回 decoded doc
+ * - currentName 在 IDB 没 → 尝试 legacy "current" slot 迁移
+ * - 都没 → 返回 null
  */
 export async function loadCurrentSession() {
-  const pkg = await getSession(CURRENT_SLOT);
+  const name = getCurrentSessionName();
+  let pkg = await getSession(name);
+  if (!pkg) {
+    // v35 → v36 迁移：从旧 "current" key 拉一次，写到 DEFAULT_NAME 下，删旧 key
+    pkg = await getSession(LEGACY_SLOT);
+    if (pkg) {
+      pkg.name = DEFAULT_NAME;
+      await putSession(DEFAULT_NAME, pkg);
+      await deleteSession(LEGACY_SLOT);
+      setCurrentSessionName(DEFAULT_NAME);
+    }
+  }
   if (!pkg || !pkg.ora) return null;
   return await decodeOraToDoc(pkg.ora);
 }
+
+/** 主动按 name 打开。返回 decoded doc 或 null（不存在）。 */
+export async function openSession(name) {
+  const pkg = await getSession(name);
+  if (!pkg || !pkg.ora) return null;
+  return await decodeOraToDoc(pkg.ora);
+}
+
+export async function removeSession(name) {
+  await deleteSession(name);
+}
+
+/** Save As：把 doc 写到新 name 下。**不删旧的**。caller 决定切到新 name。 */
+export async function saveAsSession(doc, name) {
+  return await saveSession(doc, name);
+}
+
+// 兼容 v35 命名（app.js 旧 import）
+export const saveCurrentSession = saveSession;
 
 /** 导出 .ora 到本地下载 */
 export async function exportOraDownload(doc, filename = "未命名.ora") {
@@ -76,8 +135,9 @@ async function renderMergedBlob(doc, mime = "image/png", quality) {
     ctx.globalAlpha = prevA;
     ctx.globalCompositeOperation = prevC;
   }
-  if (c.convertToBlob) return await c.convertToBlob({ type: mime, quality });
-  return await new Promise((resolve) => c.toBlob(resolve, mime, quality));
+  if (typeof c.convertToBlob === "function") return await c.convertToBlob({ type: mime, quality });
+  if (typeof c.toBlob === "function") return await new Promise((resolve) => c.toBlob(resolve, mime, quality));
+  throw new Error("canvas 无 toBlob / convertToBlob");
 }
 
 /**

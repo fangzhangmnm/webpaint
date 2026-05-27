@@ -34,8 +34,16 @@ function makeBitmap(w, h) {
 }
 
 async function canvasToPngBytes(canvas) {
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) throw new Error("canvas.toBlob 失败");
+  // OffscreenCanvas 用 convertToBlob，HTMLCanvasElement 用 toBlob —— 分支
+  let blob;
+  if (typeof canvas.convertToBlob === "function") {
+    blob = await canvas.convertToBlob({ type: "image/png" });
+  } else if (typeof canvas.toBlob === "function") {
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  } else {
+    throw new Error("canvas 无 toBlob / convertToBlob");
+  }
+  if (!blob) throw new Error("canvas → blob 失败");
   return new Uint8Array(await blob.arrayBuffer());
 }
 
