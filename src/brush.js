@@ -105,6 +105,18 @@ export class BrushEngine {
   }
 
   beginStroke(layer, settings, x, y, pressure, mode = "brush") {
+    // 笔触缓冲：paint 模式下，每个 stamp 写进 layer-size 的 RGBA buffer（per-stamp
+    // alpha 不含 s.opacity）。结束时把 buffer 以 s.opacity composite 进 layer。
+    // 这样低 opacity 笔触折返不会把 alpha 累计上去 —— 因为 buffer 内 source-over
+    // 已经在 1.0 处封顶，composite 时乘 s.opacity 直接得到笔触最大 alpha=s.opacity。
+    // 注：erase 模式跳过 buffer（dst-out live preview 不好做），直接 per-stamp 改 layer。
+    let buffer = null, bufferCtx = null;
+    if (mode !== "erase") {
+      buffer = document.createElement("canvas");
+      buffer.width = layer.width;
+      buffer.height = layer.height;
+      bufferCtx = buffer.getContext("2d");
+    }
     this._stroke = {
       layer,
       settings,
@@ -112,6 +124,7 @@ export class BrushEngine {
       lastX: x, lastY: y, lastP: pressure,
       accumDist: 0,                        // 距上颗 stamp 的剩余 path 长度
       dirty: null,
+      buffer, bufferCtx,                   // null for erase
     };
     this._stampOne(x, y, pressure);
   }
@@ -142,11 +155,32 @@ export class BrushEngine {
   }
 
   endStroke() {
+    const st = this._stroke;
+    if (st && st.buffer) {
+      // composite buffer → layer：globalAlpha = s.opacity 就把笔触最大 alpha 钉死在 s.opacity
+      const ctx = st.layer.ctx;
+      const prevA = ctx.globalAlpha;
+      ctx.globalAlpha = st.settings.opacity;
+      ctx.drawImage(st.buffer, 0, 0);
+      ctx.globalAlpha = prevA;
+    }
     this._stroke = null;
   }
 
   cancelStroke() {
     this._stroke = null;
+  }
+
+  // 给 board 用：返回当前笔触的 live overlay，让 render 每帧在 layer 之上
+  // 再画一遍 buffer，预览不立即写进 layer。endStroke 才把 buffer 烧进 layer。
+  getLiveOverlay() {
+    const st = this._stroke;
+    if (!st || !st.buffer) return null;
+    return {
+      canvas: st.buffer,
+      layer: st.layer,
+      opacity: st.settings.opacity,
+    };
   }
 
   // 取出（并清空）累积的 dirty bbox，给 Board.markDocDirty 用
@@ -167,12 +201,17 @@ export class BrushEngine {
     const sizeMul = s.pressureToSize ? Math.pow(p, s.sizeCurve) : 1;
     const opaMul = s.pressureToOpacity ? Math.pow(p, s.opacityCurve) : 1;
     const size = Math.max(0.5, s.size * sizeMul);
-    const alpha = Math.max(0, Math.min(1, s.opacity * opaMul));
+    // **per-stamp alpha 不含 s.opacity**（paint 路径）：opacity 在 endStroke 一次性乘进去，
+    // 保证笔触折返 alpha 在 buffer 内 source-over 封顶 1.0 → 出 layer 时封顶 s.opacity。
+    // erase 路径仍按老规矩 per-stamp 把 s.opacity 算进去（dst-out 直接削 layer，没有 buffer）。
+    const alpha = st.buffer
+      ? Math.max(0, Math.min(1, opaMul))
+      : Math.max(0, Math.min(1, s.opacity * opaMul));
     if (alpha < 0.001) return;
 
     // stamp 按 s.size 烤一次（缓存），这里按 actual size 缩放 drawImage
     const stamp = this._getStamp(s.size, s.hardness, s.color, st.mode);
-    const ctx = st.layer.ctx;
+    const ctx = st.buffer ? st.bufferCtx : st.layer.ctx;
 
     const prevAlpha = ctx.globalAlpha;
     const prevComp = ctx.globalCompositeOperation;

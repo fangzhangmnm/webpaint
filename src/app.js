@@ -33,7 +33,9 @@ const els = {
   clearBtn: document.getElementById("clearButton"),
   themeBtn: document.getElementById("themeButton"),
   pressureBtn: document.getElementById("pressureButton"),
-  longPressPickBtn: document.getElementById("longPressPickButton"),
+  menuBtn: document.getElementById("menuButton"),
+  menuPanel: document.getElementById("menuPanel"),
+  menuLongPressPick: document.getElementById("menuLongPressPick"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
   activeSwatch: document.getElementById("activeSwatch"),
   // 浮动色板
@@ -94,6 +96,10 @@ const input = new InputController(board, doc, {
   status: setStatus,
 });
 
+// 笔触 buffer live overlay：board 每帧问 brush 要，layer 之上 composite × s.opacity
+// 预览（实际像素在 endStroke 才烧进 layer）。
+board.setOverlayProvider(() => input.brush.getLiveOverlay());
+
 // ---- 主题 ----
 function readCssColor(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -135,13 +141,17 @@ window.addEventListener("wp:doubletap", () => {
 setTool(state.tool);
 
 // ---- 颜色 ----
+// picker 内部触发的 setColor 不要再 round-trip 回 pickerSetFromHex —— 因为
+// HSV→RGB→HSV 在低饱和/低明度处 hue 是 undefined（数学上没定义），
+// hexToHsv 默认返回 h=0，回灌就把 hue slider 弹回去了（旧 bug）。
+// 外部源（吸色、HEX 输入）才需要 sync。
+let _suppressPickerSync = false;
 function setColor(hex) {
   state.color = hex;
   safeLSSet("webpaint.color", hex);
   els.activeSwatch.style.background = hex;
   syncBrushColor();
-  // 浮动色板开着的话同步 marker / hex
-  if (!els.colorPanel.classList.contains("hidden")) {
+  if (!_suppressPickerSync && !els.colorPanel.classList.contains("hidden")) {
     pickerSetFromHex(hex);
   }
 }
@@ -183,18 +193,33 @@ els.pressureBtn.addEventListener("click", () => {
 });
 applyPressure(state.pressureEnabled);
 
-// ---- 单指长按吸色 toggle ----
+// ---- 汉堡菜单 + 内含的"单指长按吸色"toggle ----
 function applyLongPressPick(on) {
   state.longPressPick = !!on;
-  els.longPressPickBtn.setAttribute("aria-pressed", on ? "true" : "false");
-  els.longPressPickBtn.title = `单指长按吸色（${on ? "开" : "关"}）`;
+  els.menuLongPressPick.setAttribute("aria-pressed", on ? "true" : "false");
+  els.menuLongPressPick.querySelector('[data-state-for="longPressPick"]').textContent = on ? "开" : "关";
   safeLSSet("webpaint.longPressPick", on ? "1" : "0");
 }
-els.longPressPickBtn.addEventListener("click", () => {
+els.menuLongPressPick.addEventListener("click", () => {
   applyLongPressPick(!state.longPressPick);
   setStatus(`长按吸色 · ${state.longPressPick ? "开" : "关"}`);
 });
 applyLongPressPick(state.longPressPick);
+
+function setMenuOpen(open) {
+  els.menuPanel.classList.toggle("hidden", !open);
+  els.menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+els.menuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setMenuOpen(els.menuPanel.classList.contains("hidden"));
+});
+// 点菜单外的任何地方都收起来；点菜单本身不收（让 toggle 反复点）
+document.addEventListener("pointerdown", (e) => {
+  if (els.menuPanel.classList.contains("hidden")) return;
+  if (els.menuPanel.contains(e.target) || els.menuBtn.contains(e.target)) return;
+  setMenuOpen(false);
+});
 
 // ---- undo / redo / fit / clear ----
 els.undoBtn.addEventListener("click", () => input.undo());
@@ -387,7 +412,9 @@ function commitPicker() {
   const hex = hsvToHex(pickerHsv.h, pickerHsv.s, pickerHsv.v);
   els.hexInput.value = hex;
   els.previewSwatch.style.background = hex;
+  _suppressPickerSync = true;
   setColor(hex);
+  _suppressPickerSync = false;
 }
 function pickerSetFromHex(hex) {
   const { h, s, v } = hexToHsv(hex);

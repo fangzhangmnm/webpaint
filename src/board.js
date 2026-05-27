@@ -37,6 +37,10 @@ export class Board {
     // 主题色：从 CSS 变量取
     this._voidColor = "#e6e2d6";
 
+    // Live overlay provider：渲染时调一次，返回 {canvas, layer, opacity} 或 null。
+    // 笔触进行中由 brush.getLiveOverlay() 提供，每帧在该 layer 之上 composite。
+    this._overlayProvider = null;
+
     this.resize();
     window.addEventListener("resize", () => this.resize());
 
@@ -129,6 +133,10 @@ export class Board {
     this.requestRender();
   }
 
+  setOverlayProvider(fn) {
+    this._overlayProvider = fn;
+  }
+
   // ---- 渲染 ----
   resize() {
     const w = this.canvas.clientWidth || window.innerWidth;
@@ -191,6 +199,7 @@ export class Board {
     ctx.fillRect(tx, ty, this.doc.width * scale, this.doc.height * scale);
 
     // 逐 layer
+    const overlay = this._overlayProvider?.();
     for (const layer of this.doc.layers) {
       if (!layer.visible) continue;
       const prevAlpha = ctx.globalAlpha;
@@ -202,6 +211,15 @@ export class Board {
         0, 0, layer.width, layer.height,
         tx, ty, layer.width * scale, layer.height * scale,
       );
+      // 笔触 live overlay：单图层期间，buffer 紧贴 layer 之上
+      if (overlay && overlay.layer === layer) {
+        ctx.globalAlpha = layer.opacity * overlay.opacity;
+        ctx.drawImage(
+          overlay.canvas,
+          0, 0, overlay.canvas.width, overlay.canvas.height,
+          tx, ty, overlay.canvas.width * scale, overlay.canvas.height * scale,
+        );
+      }
       ctx.globalAlpha = prevAlpha;
       ctx.globalCompositeOperation = prevComp;
     }
@@ -258,6 +276,7 @@ export class Board {
     ctx.fillRect(sx, sy, sw, sh);
     ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
     ctx.fillRect(tx, ty, this.doc.width * scale, this.doc.height * scale);
+    const overlay = this._overlayProvider?.();
     for (const layer of this.doc.layers) {
       if (!layer.visible) continue;
       const prevAlpha = ctx.globalAlpha;
@@ -269,6 +288,14 @@ export class Board {
         0, 0, layer.width, layer.height,
         tx, ty, layer.width * scale, layer.height * scale,
       );
+      if (overlay && overlay.layer === layer) {
+        ctx.globalAlpha = layer.opacity * overlay.opacity;
+        ctx.drawImage(
+          overlay.canvas,
+          0, 0, overlay.canvas.width, overlay.canvas.height,
+          tx, ty, overlay.canvas.width * scale, overlay.canvas.height * scale,
+        );
+      }
       ctx.globalAlpha = prevAlpha;
       ctx.globalCompositeOperation = prevComp;
     }

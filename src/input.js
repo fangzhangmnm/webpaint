@@ -35,7 +35,10 @@ const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；raw 没动就跳，避免
 // 相关的 alpha 结节。LPF 把 10Hz 抖动压平。同步削尖刺，缓解 mid bulb。
 // init = -1 当 sentinel：第一颗 stamp 直接用 raw（保持 tap 满压），之后 LPF。
 const PRESSURE_SMOOTH_ALPHA = 0.4;
-const MAX_UNDO_ENTRIES = 20;       // 2048² × RGBA = 16 MB × 20 = 320 MB；后期换 PNG / tile-diff 再降
+// Undo entry：endStroke 后 push 一份 ImageData，立刻 toBlob 后台压缩 →
+// 替换为 PNG Blob，释放 ImageData。undo/redo 走 createImageBitmap 解码。
+// 内存：原 20×16MB=320MB → 20×~1MB（典型手绘）+ 1 在压缩中的 ImageData ≈ 36MB。
+const MAX_UNDO_ENTRIES = 20;
 
 // 多指 tap = undo/redo（Procreate 方言）
 const GESTURE_TAP_MAX_MS = 250;
@@ -379,11 +382,14 @@ export class InputController {
     const layer = this.doc.activeLayer;
     // 链空 → lazy 拍当前状态作为"起点"（撤销能回到的最远状态）
     if (this.undoChain.length === 0) {
-      this.undoChain.push({
+      const entry = {
         layerId: layer.id,
         imageData: layer.ctx.getImageData(0, 0, layer.width, layer.height),
-      });
+        blob: null,
+      };
+      this.undoChain.push(entry);
       this.undoIndex = 0;
+      this._compressEntry(entry, layer.width, layer.height);
     }
     this._strokeLayerId = layer.id;
 
@@ -406,7 +412,8 @@ export class InputController {
     if (this.undoIndex < this.undoChain.length - 1) {
       this.undoChain.length = this.undoIndex + 1;
     }
-    this.undoChain.push({ layerId: layer.id, imageData: after });
+    const entry = { layerId: layer.id, imageData: after, blob: null };
+    this.undoChain.push(entry);
     this.undoIndex++;
     while (this.undoChain.length > MAX_UNDO_ENTRIES) {
       this.undoChain.shift();
@@ -414,17 +421,48 @@ export class InputController {
     }
     this._emitHistChange();
     this.board.requestRender();
+    // 后台压缩；toBlob 完成时若 entry 还在链上就替换 imageData → blob
+    this._compressEntry(entry, layer.width, layer.height);
   }
   _abortStroke() {
     this.brush.cancelStroke();
     // 退回当前 chain 状态（= 笔触开始前那张）
     if (this._strokeLayerId != null && this.undoIndex >= 0) {
-      const entry = this.undoChain[this.undoIndex];
-      const layer = this.doc.layers.find((l) => l.id === entry.layerId);
-      if (layer) layer.ctx.putImageData(entry.imageData, 0, 0);
+      this._restoreEntry(this.undoChain[this.undoIndex]);
       this.board.invalidateAll();
     }
     this._strokeLayerId = null;
+  }
+
+  // 把 entry.imageData 压成 PNG Blob，成功后释放 imageData
+  _compressEntry(entry, w, h) {
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    c.getContext("2d").putImageData(entry.imageData, 0, 0);
+    c.toBlob((blob) => {
+      if (!blob) return;                          // 失败就保留 imageData
+      if (!this.undoChain.includes(entry)) return; // 已被裁出链 → 丢
+      entry.blob = blob;
+      entry.imageData = null;                     // 释放原始 16MB
+    }, "image/png");
+  }
+
+  // 把 entry 还原到 layer。imageData 优先，否则解码 blob。
+  // 返回 Promise（blob 路径异步）；caller 可不 await（layer 像素稍后到位）。
+  _restoreEntry(entry) {
+    const layer = this.doc.layers.find((l) => l.id === entry.layerId);
+    if (!layer) return Promise.resolve();
+    if (entry.imageData) {
+      layer.ctx.putImageData(entry.imageData, 0, 0);
+      return Promise.resolve();
+    }
+    if (!entry.blob) return Promise.resolve();
+    return createImageBitmap(entry.blob).then((bitmap) => {
+      layer.ctx.clearRect(0, 0, layer.width, layer.height);
+      layer.ctx.drawImage(bitmap, 0, 0);
+      bitmap.close?.();
+      this.board.invalidateAll();
+    });
   }
 
   // ---- 吸色 ----
@@ -581,18 +619,14 @@ export class InputController {
   undo() {
     if (!this.canUndo()) return;
     this.undoIndex--;
-    const entry = this.undoChain[this.undoIndex];
-    const layer = this.doc.layers.find((l) => l.id === entry.layerId);
-    if (layer) layer.ctx.putImageData(entry.imageData, 0, 0);
+    this._restoreEntry(this.undoChain[this.undoIndex]);
     this.board.invalidateAll();
     this._emitHistChange();
   }
   redo() {
     if (!this.canRedo()) return;
     this.undoIndex++;
-    const entry = this.undoChain[this.undoIndex];
-    const layer = this.doc.layers.find((l) => l.id === entry.layerId);
-    if (layer) layer.ctx.putImageData(entry.imageData, 0, 0);
+    this._restoreEntry(this.undoChain[this.undoIndex]);
     this.board.invalidateAll();
     this._emitHistChange();
   }

@@ -76,6 +76,10 @@ button, input, .swatch, .tool, .float-panel, .top-bar, .hud, .sheet, .backdrop, 
   display: block;
   touch-action: none;
   cursor: crosshair;
+  /* 长按 canvas 时 iOS 会弹文本定位放大镜 / context menu。两条全压住。 */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 body[data-tool="hand"] .board { cursor: grab; }
@@ -277,6 +281,40 @@ input[type=range] {
 
 .hidden { display: none; }
 .sheet.hidden, .backdrop.hidden { display: block; }
+
+/* 汉堡菜单：低频设置 / 操作集合。文字标签 + 状态字。点空白外面关闭。 */
+.menu-panel {
+  position: fixed;
+  top: 56px;
+  right: 12px;
+  min-width: 200px;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 20;
+  padding: 6px;
+}
+.menu-panel.hidden { display: none; }
+.menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.menu-item:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.menu-item-state { color: var(--ink-soft); font-size: 12px; }
+.menu-item[aria-pressed="true"] .menu-item-state { color: var(--accent, #4c8bf5); font-weight: 600; }
 
 /* 浮动可拖面板（color picker / 未来的 layers / brush params 等都走这套） */
 .float-panel {
