@@ -73,10 +73,10 @@
         </button>
         <button class="tool" id="toolPicker" type="button" data-tool="picker" title="吸色 (Alt 临时)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M3 21l6-6"></path>
-            <path d="M9 15l-3 3 0 3 3 0 3-3"></path>
-            <path d="M13 11l3-3 5 5-3 3-5-5z"></path>
-            <path d="M16 8l3-3"></path>
+            <!-- 滴管头：菱形，4 个角 (13,11) (17,7) (21,11) (17,15) -->
+            <path d="M13 11l4-4 4 4-4 4z"></path>
+            <!-- 管 + 液滴尖：(3,21)→(5,21)→(5,19)→(13,11)；终点 (13,11) 正好接菱形左下角 -->
+            <path d="M3 21h2v-2l8-8"></path>
           </svg>
         </button>
         <button class="tool" id="toolHand" type="button" data-tool="hand" title="平移 (H / Space)">

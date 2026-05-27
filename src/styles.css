@@ -48,8 +48,10 @@
 html, body {
   margin: 0;
   padding: 0;
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
+  /* iPad PWA standalone：100% 在某些情况下不包含 home indicator 区域，100dvh 才覆盖整个物理屏幕 */
+  height: 100dvh;
   overflow: hidden;
   background: var(--void);
   color: var(--ink);
