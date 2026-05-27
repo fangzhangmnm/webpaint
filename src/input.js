@@ -385,14 +385,17 @@ export class InputController {
     const layer = this.doc.activeLayer;
     // 链空 → lazy 拍当前状态作为"起点"（撤销能回到的最远状态）
     if (this.undoChain.length === 0) {
+      const snap = layer.snapshot();
       const entry = {
         layerId: layer.id,
-        imageData: layer.ctx.getImageData(0, 0, layer.width, layer.height),
+        bboxX: snap.bboxX, bboxY: snap.bboxY,
+        bboxW: snap.bboxW, bboxH: snap.bboxH,
+        imageData: snap.imageData,
         blob: null,
       };
       this.undoChain.push(entry);
       this.undoIndex = 0;
-      this._compressEntry(entry, layer.width, layer.height);
+      this._compressEntry(entry);
     }
     this._strokeLayerId = layer.id;
 
@@ -410,12 +413,18 @@ export class InputController {
     const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
     this._strokeLayerId = null;
     if (!layer) return;
-    const after = layer.ctx.getImageData(0, 0, layer.width, layer.height);
+    const snap = layer.snapshot();
     // 截掉 redo 段，把新状态 push 进去
     if (this.undoIndex < this.undoChain.length - 1) {
       this.undoChain.length = this.undoIndex + 1;
     }
-    const entry = { layerId: layer.id, imageData: after, blob: null };
+    const entry = {
+      layerId: layer.id,
+      bboxX: snap.bboxX, bboxY: snap.bboxY,
+      bboxW: snap.bboxW, bboxH: snap.bboxH,
+      imageData: snap.imageData,
+      blob: null,
+    };
     this.undoChain.push(entry);
     this.undoIndex++;
     while (this.undoChain.length > MAX_UNDO_ENTRIES) {
@@ -425,7 +434,7 @@ export class InputController {
     this._emitHistChange();
     this.board.requestRender();
     // 后台压缩；toBlob 完成时若 entry 还在链上就替换 imageData → blob
-    this._compressEntry(entry, layer.width, layer.height);
+    this._compressEntry(entry);
   }
   _abortStroke() {
     this.brush.cancelStroke();
@@ -438,9 +447,9 @@ export class InputController {
   }
 
   // 把 entry.imageData 压成 PNG Blob，成功后释放 imageData
-  _compressEntry(entry, w, h) {
+  _compressEntry(entry) {
     const c = document.createElement("canvas");
-    c.width = w; c.height = h;
+    c.width = entry.bboxW; c.height = entry.bboxH;
     c.getContext("2d").putImageData(entry.imageData, 0, 0);
     c.toBlob((blob) => {
       if (!blob) return;                          // 失败就保留 imageData
@@ -450,19 +459,26 @@ export class InputController {
     }, "image/png");
   }
 
-  // 把 entry 还原到 layer。imageData 优先，否则解码 blob。
-  // 返回 Promise（blob 路径异步）；caller 可不 await（layer 像素稍后到位）。
+  // 把 entry 还原到 layer：换 canvas + 复位 bbox + 写入像素。
+  // imageData 优先，否则解码 blob（异步）。
   _restoreEntry(entry) {
     const layer = this.doc.layers.find((l) => l.id === entry.layerId);
     if (!layer) return Promise.resolve();
     if (entry.imageData) {
-      layer.ctx.putImageData(entry.imageData, 0, 0);
+      layer.restoreFromSnapshot({
+        bboxX: entry.bboxX, bboxY: entry.bboxY,
+        bboxW: entry.bboxW, bboxH: entry.bboxH,
+        imageData: entry.imageData,
+      });
       return Promise.resolve();
     }
     if (!entry.blob) return Promise.resolve();
     return createImageBitmap(entry.blob).then((bitmap) => {
-      layer.ctx.clearRect(0, 0, layer.width, layer.height);
-      layer.ctx.drawImage(bitmap, 0, 0);
+      layer.restoreFromSnapshot({
+        bboxX: entry.bboxX, bboxY: entry.bboxY,
+        bboxW: entry.bboxW, bboxH: entry.bboxH,
+        bitmap,
+      });
       bitmap.close?.();
       this.board.invalidateAll();
     });
@@ -481,7 +497,7 @@ export class InputController {
     r = bg.r; g = bg.g; b = bg.b; a = 1;
     for (const layer of this.doc.layers) {
       if (!layer.visible) continue;
-      const px = layer.ctx.getImageData(ix, iy, 1, 1).data;
+      const px = layer.sampleAt(ix, iy);
       const la = (px[3] / 255) * layer.opacity;
       if (la <= 0) continue;
       // source-over 合成（其他 mode 简化处理，吸色按 over 也是惯例）

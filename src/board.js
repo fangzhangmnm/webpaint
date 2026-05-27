@@ -152,34 +152,46 @@ export class Board {
     return this._eraseComposite;
   }
 
-  // 把 (layer, overlay) 在屏幕上 composite。paint = layer + buffer×opacity；
-  // erase = 临时画布做 (layer dst-out buffer×opacity)，再画上去（避开屏幕
-  // alpha:false canvas 对 dst-out 不可预期的问题）。
+  // 把 (layer, overlay) 在屏幕上 composite。layer 和 overlay 都带 doc 坐标
+  // 的 bbox（bboxX/Y/W/H），可以位于 doc 内任何位置 / 任意尺寸。
+  // paint = layer.canvas 画到屏幕 + overlay.canvas 在它之上画 × opacity
+  // erase = 临时画布做 (layer dst-out overlay×opacity)，再画上去
   _drawLayerWithOverlay(ctx, layer, overlay, tx, ty, scale) {
     if (!overlay || overlay.mode !== "erase") {
-      ctx.drawImage(layer.canvas, 0, 0, layer.width, layer.height,
-                    tx, ty, layer.width * scale, layer.height * scale);
+      ctx.drawImage(
+        layer.canvas, 0, 0, layer.bboxW, layer.bboxH,
+        tx + layer.bboxX * scale, ty + layer.bboxY * scale,
+        layer.bboxW * scale, layer.bboxH * scale,
+      );
       if (overlay) {
         const prevA = ctx.globalAlpha;
         ctx.globalAlpha = ctx.globalAlpha * overlay.opacity;
-        ctx.drawImage(overlay.canvas, 0, 0, overlay.canvas.width, overlay.canvas.height,
-                      tx, ty, overlay.canvas.width * scale, overlay.canvas.height * scale);
+        ctx.drawImage(
+          overlay.canvas, 0, 0, overlay.bboxW, overlay.bboxH,
+          tx + overlay.bboxX * scale, ty + overlay.bboxY * scale,
+          overlay.bboxW * scale, overlay.bboxH * scale,
+        );
         ctx.globalAlpha = prevA;
       }
       return;
     }
-    // erase 通路
-    const ec = this._getEraseComposite(layer.width, layer.height);
+    // erase 通路：临时 canvas 用 layer 的 bbox 尺寸（buffer 可能更大，但 layer
+    // bbox 已被 stamp 路径 ensureBbox 扩到 ⊇ buffer，所以 layer.bbox ⊇ buffer.bbox 总成立）
+    const ec = this._getEraseComposite(layer.bboxW, layer.bboxH);
     const ectx = ec.getContext("2d");
     ectx.clearRect(0, 0, ec.width, ec.height);
     ectx.drawImage(layer.canvas, 0, 0);
     ectx.globalAlpha = overlay.opacity;
     ectx.globalCompositeOperation = "destination-out";
-    ectx.drawImage(overlay.canvas, 0, 0);
+    // overlay → layer-local（在 ec 这张图上的位置）
+    ectx.drawImage(overlay.canvas, overlay.bboxX - layer.bboxX, overlay.bboxY - layer.bboxY);
     ectx.globalAlpha = 1;
     ectx.globalCompositeOperation = "source-over";
-    ctx.drawImage(ec, 0, 0, ec.width, ec.height,
-                  tx, ty, ec.width * scale, ec.height * scale);
+    ctx.drawImage(
+      ec, 0, 0, ec.width, ec.height,
+      tx + layer.bboxX * scale, ty + layer.bboxY * scale,
+      ec.width * scale, ec.height * scale,
+    );
   }
 
   // ---- 渲染 ----

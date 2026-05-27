@@ -113,7 +113,8 @@ export class BrushEngine {
   }
 
   beginStroke(layer, settings, x, y, pressure, mode = "brush") {
-    // 笔触缓冲：paint 和 erase 都用 layer-size RGBA buffer。
+    // 笔触缓冲：paint 和 erase 都用 RGBA buffer。Buffer 的 bbox 跟 layer
+    // 当前 bbox 对齐启程；stamp 落到 bbox 外触发 layer 和 buffer 同步 grow。
     // - Paint：per-stamp alpha 不含 s.opacity，source-over 在 buffer 内封顶 1.0，
     //   endStroke 时以 globalAlpha=s.opacity 写进 layer → max alpha = s.opacity。
     // - Erase：per-stamp 把 alpha mask 累在 buffer 上（颜色 RGB 不关心），
@@ -122,8 +123,8 @@ export class BrushEngine {
     // Live preview 由 board 端做：paint 在 layer 之上 composite buffer×opacity；
     // erase 把 layer→临时合成 canvas，对它 dst-out buffer×opacity，再画到屏幕。
     const buffer = document.createElement("canvas");
-    buffer.width = layer.width;
-    buffer.height = layer.height;
+    buffer.width = Math.max(1, layer.bboxW);
+    buffer.height = Math.max(1, layer.bboxH);
     const bufferCtx = buffer.getContext("2d");
     this._stroke = {
       layer,
@@ -133,8 +134,44 @@ export class BrushEngine {
       accumDist: 0,                        // 距上颗 stamp 的剩余 path 长度
       dirty: null,
       buffer, bufferCtx,
+      // buffer 在 doc 坐标系下的 bbox（和 layer 同步 grow）
+      bufBboxX: layer.bboxX,
+      bufBboxY: layer.bboxY,
+      bufBboxW: layer.bboxW,
+      bufBboxH: layer.bboxH,
     };
     this._stampOne(x, y, pressure);
+  }
+
+  // stamp 落在 buffer bbox 外 → 扩 buffer 到能容纳，clamp 在 doc 范围内
+  _ensureBufferBbox(x0, y0, x1, y1) {
+    const st = this._stroke;
+    if (x0 >= st.bufBboxX && y0 >= st.bufBboxY &&
+        x1 <= st.bufBboxX + st.bufBboxW && y1 <= st.bufBboxY + st.bufBboxH) return;
+    const m = 32;
+    let nx  = Math.floor(Math.min(st.bufBboxX, x0 - m));
+    let ny  = Math.floor(Math.min(st.bufBboxY, y0 - m));
+    let nx1 = Math.ceil(Math.max(st.bufBboxX + st.bufBboxW, x1 + m));
+    let ny1 = Math.ceil(Math.max(st.bufBboxY + st.bufBboxH, y1 + m));
+    nx = Math.max(0, nx);
+    ny = Math.max(0, ny);
+    nx1 = Math.min(st.layer.docW, nx1);
+    ny1 = Math.min(st.layer.docH, ny1);
+    const nw = nx1 - nx, nh = ny1 - ny;
+    if (nw <= 0 || nh <= 0) return;
+    const nb = document.createElement("canvas");
+    nb.width = nw;
+    nb.height = nh;
+    const nctx = nb.getContext("2d");
+    if (st.bufBboxW > 0 && st.bufBboxH > 0) {
+      nctx.drawImage(st.buffer, st.bufBboxX - nx, st.bufBboxY - ny);
+    }
+    st.buffer = nb;
+    st.bufferCtx = nctx;
+    st.bufBboxX = nx;
+    st.bufBboxY = ny;
+    st.bufBboxW = nw;
+    st.bufBboxH = nh;
   }
 
   extendStroke(x, y, pressure) {
@@ -170,12 +207,15 @@ export class BrushEngine {
     if (st && st.buffer) {
       // composite buffer → layer：globalAlpha = s.opacity 把笔触最大 alpha
       // 钉死在 s.opacity。paint 用 source-over 写色，erase 用 dst-out 削 alpha。
-      const ctx = st.layer.ctx;
+      // 因为 stamp 路径已经 ensureBbox 了 layer，layer bbox ⊇ buffer bbox。
+      // 偏移 = buffer 在 layer 局部的位置。
+      const layer = st.layer;
+      const ctx = layer.ctx;
       const prevA = ctx.globalAlpha;
       const prevC = ctx.globalCompositeOperation;
       ctx.globalAlpha = st.settings.opacity;
       ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : "source-over";
-      ctx.drawImage(st.buffer, 0, 0);
+      ctx.drawImage(st.buffer, st.bufBboxX - layer.bboxX, st.bufBboxY - layer.bboxY);
       ctx.globalAlpha = prevA;
       ctx.globalCompositeOperation = prevC;
     }
@@ -193,9 +233,12 @@ export class BrushEngine {
     if (!st || !st.buffer) return null;
     return {
       canvas: st.buffer,
+      // doc 坐标系下的 bbox（buffer 不一定和 layer 对齐，可能更大）
+      bboxX: st.bufBboxX, bboxY: st.bufBboxY,
+      bboxW: st.bufBboxW, bboxH: st.bufBboxH,
       layer: st.layer,
       opacity: st.settings.opacity,
-      mode: st.mode,                       // "brush" | "erase"，给 board 选 composite 通路
+      mode: st.mode,
     };
   }
 
@@ -225,17 +268,26 @@ export class BrushEngine {
 
     // stamp 按 s.size 烤一次（缓存），这里按 actual size 缩放 drawImage
     const stamp = this._getStamp(s.size, s.hardness, s.color, st.mode);
-    const ctx = st.bufferCtx;
 
+    // 目标直径 = size + 2px 给 AA 边和源贴图一致比例
+    const drawD = size + 2 * (size / stamp.baseSize);
+    const drawR = drawD / 2;
+    const x0 = x - drawR, y0 = y - drawR, x1 = x + drawR, y1 = y + drawR;
+
+    // 确保 layer 和 buffer 都覆盖这颗 stamp 的 footprint
+    st.layer.ensureBbox(x0, y0, x1, y1);
+    this._ensureBufferBbox(x0, y0, x1, y1);
+
+    const ctx = st.bufferCtx;
     const prevAlpha = ctx.globalAlpha;
     const prevComp = ctx.globalCompositeOperation;
     ctx.globalAlpha = alpha;
     ctx.globalCompositeOperation = "source-over";
 
-    // 目标直径 = size + 2px 给 AA 边和源贴图一致比例
-    const drawD = size + 2 * (size / stamp.baseSize);
-    const drawR = drawD / 2;
-    ctx.drawImage(stamp.canvas, x - drawR, y - drawR, drawD, drawD);
+    // 转换 doc 坐标 → buffer-local 坐标
+    const lx = x - st.bufBboxX;
+    const ly = y - st.bufBboxY;
+    ctx.drawImage(stamp.canvas, lx - drawR, ly - drawR, drawD, drawD);
 
     ctx.globalAlpha = prevAlpha;
     ctx.globalCompositeOperation = prevComp;
@@ -243,12 +295,12 @@ export class BrushEngine {
     // 累积 dirty bbox（doc-px），给 dirty-rect render 用
     const d = st.dirty;
     if (d) {
-      if (x - drawR < d[0]) d[0] = x - drawR;
-      if (y - drawR < d[1]) d[1] = y - drawR;
-      if (x + drawR > d[2]) d[2] = x + drawR;
-      if (y + drawR > d[3]) d[3] = y + drawR;
+      if (x0 < d[0]) d[0] = x0;
+      if (y0 < d[1]) d[1] = y0;
+      if (x1 > d[2]) d[2] = x1;
+      if (y1 > d[3]) d[3] = y1;
     } else {
-      st.dirty = [x - drawR, y - drawR, x + drawR, y + drawR];
+      st.dirty = [x0, y0, x1, y1];
     }
   }
 }
