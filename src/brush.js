@@ -33,6 +33,13 @@ const DEFAULT_SETTINGS = {
   // Streamline：位置 IIR LPF，0=raw 直传，1=完全跟不上。Procreate 同名参数。
   // 默认 0.3 微开一点：手抖 / 整数量化 不会进笔触，又几乎没有可感延迟。
   streamline: 0.3,
+  // taperIn：起手 fade-in 长度 = size × taperIn doc-px。
+  // - 0 = 关（marker / 硬尖钢笔之类的 preset 用 0）
+  // - 默认 1.5 微 taper：减弱 Apple Pencil 碰撞瞬间的 pressure spike 鼓"萝卜尖"
+  // - taperOut 不做：抬笔时机不可预知，回溯改像素不值得（Pencil 物理 pressure
+  //   抬笔本来就会掉）
+  taperIn: 1.5,
+  taperFloor: 0.4,            // touchdown 时 envelope = 0.4 而非 0；dot tap 仍可见
   color: "#1b1b1b",
 };
 
@@ -115,9 +122,9 @@ export class BrushEngine {
   beginStroke(layer, settings, x, y, pressure, mode = "brush") {
     // 笔触缓冲：paint 和 erase 都用 RGBA buffer。Buffer 的 bbox 跟 layer
     // 当前 bbox 对齐启程；stamp 落到 bbox 外触发 layer 和 buffer 同步 grow。
-    // - Paint：per-stamp alpha 不含 s.opacity，source-over 在 buffer 内封顶 1.0，
+    // - Paint：per-stamp alpha 不含 s.opacity，source-over 在 buffer 内封顶 1.0,
     //   endStroke 时以 globalAlpha=s.opacity 写进 layer → max alpha = s.opacity。
-    // - Erase：per-stamp 把 alpha mask 累在 buffer 上（颜色 RGB 不关心），
+    // - Erase：per-stamp 把 alpha mask 累在 buffer 上（颜色 RGB 不关心),
     //   endStroke 时以 dst-out + globalAlpha=s.opacity 应用到 layer → max 去除
     //   alpha = s.opacity。同样不会因为折返过擦。
     // Live preview 由 board 端做：paint 在 layer 之上 composite buffer×opacity；
@@ -132,6 +139,7 @@ export class BrushEngine {
       mode,
       lastX: x, lastY: y, lastP: pressure,
       accumDist: 0,                        // 距上颗 stamp 的剩余 path 长度
+      strokeDist: 0,                       // 自笔触起点累计的 path 长度，给 taperIn 用
       dirty: null,
       buffer, bufferCtx,
       // buffer 在 doc 坐标系下的 bbox（和 layer 同步 grow）
@@ -189,6 +197,7 @@ export class BrushEngine {
       if (st.accumDist + (L - pos) < step) break;
       const need = step - st.accumDist;
       pos += need;
+      st.strokeDist += step;          // 新 stamp 比上一颗远 step
       const t = pos / L;
       const sx = st.lastX + dx * t;
       const sy = st.lastY + dy * t;
@@ -255,7 +264,18 @@ export class BrushEngine {
     const st = this._stroke;
     if (!st) return;
     const s = st.settings;
-    const p = Math.max(0, Math.min(1, pressure));
+    let p = Math.max(0, Math.min(1, pressure));
+
+    // Taper-in：起手 fade-in 减弱 Apple Pencil 碰撞瞬间的 pressure spike。
+    // envelope = floor + (1-floor) × min(1, strokeDist / (size × taperIn))
+    // 同时影响 size 和 opacity（乘进 p）→ 实际 stamp 更小、更淡。
+    // floor > 0 保证 dot tap（strokeDist=0）仍然画得出一颗 mark。
+    if (s.taperIn > 0) {
+      const taperLen = s.size * s.taperIn;
+      const t = Math.min(1, st.strokeDist / taperLen);
+      const env = s.taperFloor + (1 - s.taperFloor) * t;
+      p *= env;
+    }
 
     const sizeMul = s.pressureToSize ? Math.pow(p, s.sizeCurve) : 1;
     const opaMul = s.pressureToOpacity ? Math.pow(p, s.opacityCurve) : 1;
