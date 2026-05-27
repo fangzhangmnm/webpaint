@@ -18,7 +18,12 @@ import {
   getCurrentSessionName, setCurrentSessionName,
   exportOraDownload, shareOrDownloadImage,
 } from "./session.js";
-import { decodeOraToDoc } from "./ora.js";
+import { decodeOraToDoc, encodeDocToOra } from "./ora.js";
+import {
+  isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount,
+  pushSession, pullSessionByPath, listCloudSessionsRecursive, deleteCloudSession,
+  isCloudDirty, setCloudDirty, CloudConflictError,
+} from "./cloud.js";
 
 const THEMES = ["auto", "day", "night"];
 const THEME_LABEL = { auto: "跟随系统", day: "日", night: "夜" };
@@ -67,6 +72,16 @@ const els = {
   gallerySaveCopyBtn: document.getElementById("gallerySaveCopyBtn"),
   galleryGrid: document.getElementById("galleryGrid"),
   galleryEmpty: document.getElementById("galleryEmpty"),
+  topCloudBtn: document.getElementById("topCloudBtn"),
+  cloudFull: document.getElementById("cloudFull"),
+  cloudClose: document.getElementById("cloudClose"),
+  cloudAuthStatus: document.getElementById("cloudAuthStatus"),
+  cloudSignInBtn: document.getElementById("cloudSignInBtn"),
+  cloudSignOutBtn: document.getElementById("cloudSignOutBtn"),
+  cloudPushBtn: document.getElementById("cloudPushBtn"),
+  cloudRefreshBtn: document.getElementById("cloudRefreshBtn"),
+  cloudGrid: document.getElementById("cloudGrid"),
+  cloudEmpty: document.getElementById("cloudEmpty"),
   oraFileInput: document.getElementById("oraFileInput"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
   activeSwatch: document.getElementById("activeSwatch"),
@@ -782,17 +797,66 @@ els.sharePopupOra.addEventListener("click", async () => {
 els.oraFileInput.addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
+  const isOra = /\.ora$/i.test(file.name);
+  const isImage = (file.type || "").startsWith("image/");
   try {
-    const loaded = await decodeOraToDoc(file);
-    // 从文件名提取 session name（去 .ora 后缀）
-    const nm = file.name.replace(/\.ora$/i, "") || "未命名";
-    adoptLoadedDoc(loaded, nm);
-    setStatus(`已导入：${nm}`);
+    if (isOra) {
+      const loaded = await decodeOraToDoc(file);
+      const nm = file.name.replace(/\.ora$/i, "") || "未命名";
+      adoptLoadedDoc(loaded, nm);
+      setStatus(`已导入：${nm}`);
+    } else if (isImage) {
+      await importImageAsLayer(file);
+    } else {
+      setStatus(`不支持的文件类型：${file.type || file.name}`);
+    }
   } catch (err) {
-    console.warn("[session] import failed:", err);
+    console.warn("[import] failed:", err);
     setStatus("导入失败：" + (err && err.message || err));
   }
 });
+
+// 把图片当一个新图层叠进当前 doc（photobash / 参考图工作流）。
+// 居中对齐；如果图片比 doc 大，按比例缩到 80% 短边，避免一上来就盖死。
+async function importImageAsLayer(file) {
+  const bitmap = await createImageBitmap(file);
+  const docW = doc.width, docH = doc.height;
+  let w = bitmap.width, h = bitmap.height;
+  if (w > docW || h > docH) {
+    const s = Math.min(docW / w, docH / h) * 0.8;
+    w = Math.max(1, Math.round(w * s));
+    h = Math.max(1, Math.round(h * s));
+  }
+  // 新建空层
+  const layer = doc.addLayer(file.name.replace(/\.[^.]+$/, ""));
+  if (!layer) {
+    bitmap.close?.();
+    setStatus(`图层已达上限 (${doc.maxLayers})，无法导入`);
+    return;
+  }
+  // bbox 放在 doc 中心
+  layer.bboxX = Math.floor((docW - w) / 2);
+  layer.bboxY = Math.floor((docH - h) / 2);
+  layer.bboxW = w;
+  layer.bboxH = h;
+  const c = (typeof OffscreenCanvas !== "undefined")
+    ? new OffscreenCanvas(w, h)
+    : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
+  layer.canvas = c;
+  layer.ctx = c.getContext("2d", { willReadFrequently: false });
+  layer.ctx.imageSmoothingEnabled = true;
+  layer.ctx.imageSmoothingQuality = "high";
+  layer.ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  renderLayersPanel();
+  board.invalidateAll();
+  board.requestRender();
+  _docDirty = true;
+  updateSaveStatus();
+  // 触发 wp:histchange 让保存状态同步
+  window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
+  setStatus(`已导入为新图层：${file.name}`);
+}
 
 // ---- 图库 全屏 ----
 // 打开时把每个 thumb Blob 转成 ObjectURL 给 <img src>；关闭时 revoke
@@ -1002,10 +1066,191 @@ function humanSize(b) {
   return `${(b / 1048576).toFixed(1)} MB`;
 }
 
+// ---- 云端面板 ----
+function setCloudOpen(open) {
+  els.cloudFull.classList.toggle("hidden", !open);
+  if (open) renderCloud();
+}
+els.topCloudBtn.addEventListener("click", () => setCloudOpen(true));
+els.cloudClose.addEventListener("click", () => setCloudOpen(false));
+
+function updateCloudAuthUI() {
+  const signed = isSignedIn();
+  if (signed) {
+    const acc = getActiveAccount();
+    els.cloudAuthStatus.textContent = `已登录：${acc?.username || acc?.name || ""}`;
+    els.cloudSignInBtn.classList.add("hidden");
+    els.cloudSignOutBtn.classList.remove("hidden");
+    els.cloudPushBtn.disabled = false;
+    els.cloudRefreshBtn.disabled = false;
+  } else {
+    els.cloudAuthStatus.textContent = isAuthConfigured() ? "未登录" : "未配置 (config.js CLIENT_ID)";
+    els.cloudSignInBtn.classList.remove("hidden");
+    els.cloudSignOutBtn.classList.add("hidden");
+    els.cloudPushBtn.disabled = true;
+    els.cloudRefreshBtn.disabled = true;
+  }
+}
+
+els.cloudSignInBtn.addEventListener("click", async () => {
+  if (!isAuthConfigured()) {
+    setStatus("尚未配置 OneDrive 客户端（config.js）");
+    return;
+  }
+  try { await signIn(); } catch (e) { setStatus("登录失败：" + (e && e.message || e)); }
+});
+els.cloudSignOutBtn.addEventListener("click", async () => {
+  try { await signOut(); } catch (_) {}
+  updateCloudAuthUI();
+  renderCloud();
+});
+
+els.cloudPushBtn.addEventListener("click", async () => {
+  if (!isSignedIn()) { setStatus("未登录"); return; }
+  els.cloudPushBtn.disabled = true;
+  els.cloudPushBtn.textContent = "推送中…";
+  try {
+    if (_docDirty) await saveNow();
+    const ora = await encodeDocToOra(doc);
+    await pushSession(_activeSessionName, ora);
+    setStatus(`已推送：${_activeSessionName}`);
+    renderCloud();
+  } catch (e) {
+    if (e instanceof CloudConflictError) {
+      alert(e.message + "\n\n点击「保存副本」用新名字，然后再推送。");
+      setStatus("推送失败：云端有更新版本");
+    } else {
+      console.warn("[cloud] push failed:", e);
+      setStatus("推送失败：" + (e && e.message || e));
+    }
+  } finally {
+    els.cloudPushBtn.disabled = false;
+    els.cloudPushBtn.textContent = "推送当前";
+  }
+});
+els.cloudRefreshBtn.addEventListener("click", () => renderCloud());
+
+async function renderCloud() {
+  updateCloudAuthUI();
+  els.cloudGrid.innerHTML = "";
+  if (!isSignedIn()) {
+    els.cloudEmpty.classList.remove("hidden");
+    els.cloudEmpty.textContent = isAuthConfigured()
+      ? "登录 OneDrive 后看你的云端作品"
+      : "尚未配置 OneDrive 客户端（src/config.js CLIENT_ID）";
+    els.cloudGrid.style.display = "none";
+    return;
+  }
+  els.cloudGrid.style.display = "";
+  els.cloudEmpty.classList.add("hidden");
+  let items;
+  try { items = await listCloudSessionsRecursive(); }
+  catch (e) {
+    setStatus("列云端失败：" + (e && e.message || e));
+    return;
+  }
+  if (!items.length) {
+    els.cloudEmpty.classList.remove("hidden");
+    els.cloudEmpty.textContent = "云端还没有作品。推送当前试试。";
+    els.cloudGrid.style.display = "none";
+    return;
+  }
+  // 排序：最新修改在前
+  items.sort((a, b) => (Date.parse(b.lastModifiedDateTime || 0) - Date.parse(a.lastModifiedDateTime || 0)));
+  for (const it of items) {
+    const tile = document.createElement("div");
+    tile.className = "gallery-tile";
+    // 云端文件 thumb 我们暂时不解 zip 取（要 N 次下载），先用占位
+    const ph = document.createElement("div");
+    ph.className = "gallery-tile-thumb placeholder";
+    ph.textContent = "☁";
+    tile.appendChild(ph);
+    const info = document.createElement("div");
+    info.className = "gallery-tile-info";
+    const nm = document.createElement("div");
+    nm.className = "gallery-tile-name";
+    nm.textContent = it.path.replace(/\.ora$/i, "");
+    const meta = document.createElement("div");
+    meta.className = "gallery-tile-meta";
+    meta.textContent = `${humanTime(Date.parse(it.lastModifiedDateTime || 0))} · ${humanSize(it.size)}`;
+    info.appendChild(nm);
+    info.appendChild(meta);
+    tile.appendChild(info);
+
+    const actions = document.createElement("div");
+    actions.className = "gallery-tile-actions";
+    const pullBtn = document.createElement("button");
+    pullBtn.type = "button";
+    pullBtn.textContent = "拉取";
+    pullBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      pullBtn.disabled = true;
+      pullBtn.textContent = "拉取中…";
+      try {
+        const r = await pullSessionByPath(it.path);
+        if (!r) { setStatus(`找不到：${it.path}`); return; }
+        const loaded = await decodeOraToDoc(r.blob);
+        // **永远 duplicate**：取一个本地不冲突的名字
+        const stem = r.suggestedName;
+        const finalName = await uniqueLocalName(stem);
+        adoptLoadedDoc(loaded, finalName);
+        await saveNow();   // 立即落盘
+        setCloudOpen(false);
+        setStatus(`已从云端拉取并保存为：${finalName}`);
+      } catch (err) {
+        console.warn("[cloud] pull failed:", err);
+        setStatus("拉取失败：" + (err && err.message || err));
+      } finally {
+        pullBtn.disabled = false;
+        pullBtn.textContent = "拉取";
+      }
+    });
+    actions.appendChild(pullBtn);
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "danger";
+    del.textContent = "删除";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`从云端删除 "${it.path}"？不可撤销。`)) return;
+      try {
+        await deleteCloudSession(it.path.replace(/\.ora$/i, ""));
+        renderCloud();
+        setStatus(`已从云端删除：${it.path}`);
+      } catch (err) {
+        setStatus("删除失败：" + (err && err.message || err));
+      }
+    });
+    actions.appendChild(del);
+
+    tile.appendChild(actions);
+    els.cloudGrid.appendChild(tile);
+  }
+}
+
+// 给本地拿一个不冲突的名字（X / X 1 / X 2 / ...）
+async function uniqueLocalName(stem) {
+  const existing = new Set((await listSessions()).map((s) => s.name));
+  if (!existing.has(stem)) return stem;
+  for (let i = 1; i < 100; i++) {
+    const candidate = `${stem} ${i}`;
+    if (!existing.has(candidate)) return candidate;
+  }
+  return `${stem} ${Date.now()}`;
+}
+
 // ---- 启动收尾：尝试加载上次的 session（异步，不阻塞 UI 显示） ----
 setStatus("就绪");
 updateZoomLabel();
 updateSaveStatus();
+updateCloudAuthUI();
+// MSAL init（懒；只在配了 CLIENT_ID 才 load script），失败安静吞
+if (isAuthConfigured()) {
+  initAuth().then(() => updateCloudAuthUI()).catch((e) => {
+    console.warn("[auth] init failed:", e);
+  });
+}
 (async () => {
   const wantedName = getCurrentSessionName();
   try {

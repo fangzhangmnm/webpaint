@@ -28,7 +28,11 @@ const PRECACHE_URLS = [
   "./src/ora.js",
   "./src/session.js",
   "./src/config.js",
+  "./src/auth.js",
+  "./src/graph.js",
+  "./src/cloud.js",
   "./src/vendor/zip-js/zip-full.min.js",
+  "./src/vendor/msal/msal-browser.min.js",
 ];
 
 // 哪些响应需要做 import URL 改写

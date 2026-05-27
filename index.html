@@ -166,6 +166,11 @@
           <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
         </svg>
       </button>
+      <button class="tool" id="topCloudBtn" type="button" title="云端 (OneDrive)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+        </svg>
+      </button>
 
       <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -191,7 +196,27 @@
       <div class="gallery-grid" id="galleryGrid"><!-- tiles by JS --></div>
       <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。Ctrl+S 或新建一个吧。</div>
     </div>
-    <input type="file" id="oraFileInput" accept=".ora,application/zip" style="display:none" />
+    <!-- 云端面板：登录态 + 推 + 拉列表。粗糙 UI，先求功能。 -->
+    <div class="cloud-full hidden" id="cloudFull" role="dialog" aria-label="云端">
+      <div class="gallery-header">
+        <button class="gallery-close" id="cloudClose" type="button" aria-label="返回">←</button>
+        <span class="gallery-title">云端 (OneDrive)</span>
+        <span class="gallery-current-mini">
+          <span class="gallery-current-mini-label" id="cloudAuthStatus">未登录</span>
+        </span>
+        <button class="gallery-action-btn" id="cloudSignInBtn" type="button">登录</button>
+        <button class="gallery-action-btn hidden" id="cloudSignOutBtn" type="button">退出</button>
+        <button class="gallery-action-btn" id="cloudPushBtn" type="button" disabled>推送当前</button>
+        <button class="gallery-action-btn" id="cloudRefreshBtn" type="button" disabled>刷新</button>
+      </div>
+      <div class="gallery-grid" id="cloudGrid"><!-- 云端 tiles by JS --></div>
+      <div class="gallery-empty hidden" id="cloudEmpty">登录 OneDrive 后看你的云端作品</div>
+    </div>
+
+    <!-- 统一导入入口：iPad 上 accept="image/*,.ora" 会同时给出 "Photo Library"
+         / "Take Photo" / "Choose File" 三选项；桌面是标准 file picker。
+         .ora 走 decodeOraToDoc，image/* 走 "新建图层并 drawImage" 路径 (photobash)。 -->
+    <input type="file" id="oraFileInput" accept=".ora,image/png,image/jpeg,image/webp" style="display:none" />
 
     <!-- 图层面板：浮动可拖（沿用 .float-panel）。每行 = 一个 layer，倒序显示
          (UI 习惯：上面在画面上面)。新建按钮在 footer。 -->
