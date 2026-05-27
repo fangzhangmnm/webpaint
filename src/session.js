@@ -29,20 +29,60 @@ export function setCurrentSessionName(name) {
   try { localStorage.setItem(LS_CURRENT_NAME, name); } catch {}
 }
 
-/** 把 doc 序列化进指定 session（默认当前） */
+/** 把 doc 序列化进指定 session（默认当前），同时生成 thumb jpg 存进 pkg */
 export async function saveSession(doc, name) {
   const sessionName = name || getCurrentSessionName();
-  const ora = await encodeDocToOra(doc);
+  const [ora, thumb] = await Promise.all([
+    encodeDocToOra(doc),
+    renderThumbBlob(doc, 256),
+  ]);
   const pkg = {
     name: sessionName,
     updatedAt: Date.now(),
     ora,
+    thumb,            // Blob (image/jpeg, ~5-15KB)
   };
   await putSession(sessionName, pkg);
   return pkg;
 }
 
-/** 列所有 session 元信息（name + updatedAt + size）。不解码 .ora。 */
+/** 渲染缩略图 jpg blob（最长边 = maxSide）。给图库 grid 用。 */
+async function renderThumbBlob(doc, maxSide = 256) {
+  // Render merged at doc resolution
+  const W = doc.width, H = doc.height;
+  const merged = (typeof OffscreenCanvas !== "undefined")
+    ? new OffscreenCanvas(W, H)
+    : (() => { const x = document.createElement("canvas"); x.width = W; x.height = H; return x; })();
+  const mctx = merged.getContext("2d");
+  mctx.fillStyle = doc.backgroundColor || "#ffffff";
+  mctx.fillRect(0, 0, W, H);
+  for (const L of doc.layers) {
+    if (!L.visible || L.bboxW <= 0 || L.bboxH <= 0) continue;
+    const pa = mctx.globalAlpha, pc = mctx.globalCompositeOperation;
+    mctx.globalAlpha = L.opacity;
+    mctx.globalCompositeOperation = L.mode || "source-over";
+    mctx.drawImage(L.canvas, L.bboxX, L.bboxY);
+    mctx.globalAlpha = pa;
+    mctx.globalCompositeOperation = pc;
+  }
+  // Downscale
+  const scale = Math.min(1, maxSide / Math.max(W, H));
+  const tw = Math.max(1, Math.round(W * scale));
+  const th = Math.max(1, Math.round(H * scale));
+  const thumb = (typeof OffscreenCanvas !== "undefined")
+    ? new OffscreenCanvas(tw, th)
+    : (() => { const x = document.createElement("canvas"); x.width = tw; x.height = th; return x; })();
+  const tctx = thumb.getContext("2d");
+  tctx.imageSmoothingEnabled = true;
+  tctx.imageSmoothingQuality = "high";
+  tctx.drawImage(merged, 0, 0, tw, th);
+  if (typeof thumb.convertToBlob === "function") {
+    return await thumb.convertToBlob({ type: "image/jpeg", quality: 0.78 });
+  }
+  return await new Promise((resolve) => thumb.toBlob(resolve, "image/jpeg", 0.78));
+}
+
+/** 列所有 session 元信息（name + updatedAt + size + thumb Blob）。不解码 .ora。 */
 export async function listSessions() {
   const ids = await listSessionIds();
   const out = [];
@@ -54,6 +94,7 @@ export async function listSessions() {
       name: id,
       updatedAt: pkg.updatedAt || 0,
       size: (pkg.ora && pkg.ora.size) || 0,
+      thumb: pkg.thumb || null,         // v36 之前的 pkg 没 thumb，UI 给占位
     });
   }
   out.sort((a, b) => b.updatedAt - a.updatedAt);

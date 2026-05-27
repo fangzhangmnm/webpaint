@@ -144,23 +144,20 @@
       </button>
     </header>
 
-    <!-- 图库 / 文件管理 modal：sheet 风格全屏遮罩 -->
-    <div class="backdrop hidden" id="galleryBackdrop"></div>
-    <div class="sheet gallery-sheet hidden" id="gallerySheet" role="dialog" aria-label="图库">
-      <div class="sheet-head">
-        <span class="sheet-title">图库</span>
-        <button class="sheet-close" id="gallerySheetClose" type="button" aria-label="关闭">×</button>
+    <!-- 图库：全屏 grid，类似 Procreate / Photos -->
+    <div class="gallery-full hidden" id="galleryFull" role="dialog" aria-label="图库">
+      <div class="gallery-header">
+        <button class="gallery-close" id="galleryClose" type="button" aria-label="返回">←</button>
+        <span class="gallery-title">图库</span>
+        <span class="gallery-current-mini">
+          <span class="gallery-current-mini-label">正在编辑：</span>
+          <input class="gallery-current-name" id="galleryCurrentName" type="text" placeholder="未命名" />
+        </span>
+        <button class="gallery-action-btn" id="galleryNewBtn" type="button">＋ 新建</button>
+        <button class="gallery-action-btn" id="gallerySaveCopyBtn" type="button">保存副本…</button>
       </div>
-      <div class="gallery-current">
-        <span class="gallery-current-label">当前</span>
-        <input class="gallery-current-name" id="galleryCurrentName" type="text" placeholder="未命名" />
-      </div>
-      <div class="gallery-foot">
-        <button class="gallery-foot-btn" id="galleryNewBtn" type="button">＋ 新建</button>
-        <button class="gallery-foot-btn" id="gallerySaveAsBtn" type="button">另存为…</button>
-      </div>
-      <div class="gallery-list-head">已保存</div>
-      <div class="gallery-list" id="galleryList"><!-- rows by JS --></div>
+      <div class="gallery-grid" id="galleryGrid"><!-- tiles by JS --></div>
+      <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。Ctrl+S 或新建一个吧。</div>
     </div>
     <input type="file" id="oraFileInput" accept=".ora,application/zip" style="display:none" />
 

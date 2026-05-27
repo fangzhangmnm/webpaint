@@ -56,13 +56,13 @@ const els = {
   menuShareJpg: document.getElementById("menuShareJpg"),
   menuExportOra: document.getElementById("menuExportOra"),
   menuImportOra: document.getElementById("menuImportOra"),
-  galleryBackdrop: document.getElementById("galleryBackdrop"),
-  gallerySheet: document.getElementById("gallerySheet"),
-  gallerySheetClose: document.getElementById("gallerySheetClose"),
+  galleryFull: document.getElementById("galleryFull"),
+  galleryClose: document.getElementById("galleryClose"),
   galleryCurrentName: document.getElementById("galleryCurrentName"),
   galleryNewBtn: document.getElementById("galleryNewBtn"),
-  gallerySaveAsBtn: document.getElementById("gallerySaveAsBtn"),
-  galleryList: document.getElementById("galleryList"),
+  gallerySaveCopyBtn: document.getElementById("gallerySaveCopyBtn"),
+  galleryGrid: document.getElementById("galleryGrid"),
+  galleryEmpty: document.getElementById("galleryEmpty"),
   oraFileInput: document.getElementById("oraFileInput"),
   menuTheme: document.getElementById("menuTheme"),
   menuClear: document.getElementById("menuClear"),
@@ -775,18 +775,24 @@ els.oraFileInput.addEventListener("change", async (e) => {
   }
 });
 
-// ---- 图库 modal ----
+// ---- 图库 全屏 ----
+// 打开时把每个 thumb Blob 转成 ObjectURL 给 <img src>；关闭时 revoke
+// 防内存泄漏。
+let _galleryUrls = [];
 function setGalleryOpen(open) {
-  els.gallerySheet.classList.toggle("hidden", !open);
-  els.galleryBackdrop.classList.toggle("hidden", !open);
-  if (open) renderGallery();
+  els.galleryFull.classList.toggle("hidden", !open);
+  if (open) {
+    renderGallery();
+  } else {
+    for (const u of _galleryUrls) URL.revokeObjectURL(u);
+    _galleryUrls = [];
+  }
 }
 els.menuGallery.addEventListener("click", () => {
   setMenuOpen(false);
   setGalleryOpen(true);
 });
-els.gallerySheetClose.addEventListener("click", () => setGalleryOpen(false));
-els.galleryBackdrop.addEventListener("click", () => setGalleryOpen(false));
+els.galleryClose.addEventListener("click", () => setGalleryOpen(false));
 
 els.galleryCurrentName.addEventListener("change", () => {
   const v = (els.galleryCurrentName.value || "").trim();
@@ -842,59 +848,91 @@ els.galleryNewBtn.addEventListener("click", () => {
     setStatus(`新建：${trimmed}`);
   })();
 });
-els.gallerySaveAsBtn.addEventListener("click", () => {
-  const name = prompt("另存为", _activeSessionName);
+els.gallerySaveCopyBtn.addEventListener("click", () => {
+  const name = prompt("保存副本为", _activeSessionName + " 副本");
   if (!name) return;
   const trimmed = name.trim();
   if (!trimmed) return;
+  if (trimmed === _activeSessionName) {
+    setStatus("副本不能和当前同名");
+    return;
+  }
+  // **保存副本** 语义：把当前 doc 写到 trimmed 名字下，**不**切走 active。
+  // 用户继续编辑原作。和"另存为"语义不同：另存为会换 active 到新名字 →
+  // 容易和"重命名"混淆。
   (async () => {
     try {
       await saveSession(doc, trimmed);
-      _activeSessionName = trimmed;
-      setCurrentSessionName(trimmed);
-      _docDirty = false;
-      _docLastSavedAt = Date.now();
-      updateSaveStatus();
       renderGallery();
-      setStatus(`另存为：${trimmed}`);
+      setStatus(`已保存副本：${trimmed}（仍在编辑：${_activeSessionName}）`);
     } catch (e) {
-      setStatus("另存为失败：" + (e && e.message || e));
+      setStatus("保存副本失败：" + (e && e.message || e));
     }
   })();
 });
 
 async function renderGallery() {
   els.galleryCurrentName.value = _activeSessionName;
+  // revoke 旧 URL
+  for (const u of _galleryUrls) URL.revokeObjectURL(u);
+  _galleryUrls = [];
+
   const list = await listSessions();
-  els.galleryList.innerHTML = "";
+  els.galleryGrid.innerHTML = "";
+  if (list.length === 0) {
+    els.galleryEmpty.classList.remove("hidden");
+    els.galleryGrid.style.display = "none";
+    return;
+  }
+  els.galleryEmpty.classList.add("hidden");
+  els.galleryGrid.style.display = "";
+
   for (const item of list) {
-    const row = document.createElement("div");
-    row.className = "gallery-row" + (item.name === _activeSessionName ? " active" : "");
+    const tile = document.createElement("div");
+    tile.className = "gallery-tile" + (item.name === _activeSessionName ? " active" : "");
+
+    // 缩略图
+    let thumbEl;
+    if (item.thumb) {
+      thumbEl = document.createElement("img");
+      thumbEl.className = "gallery-tile-thumb";
+      thumbEl.alt = item.name;
+      const url = URL.createObjectURL(item.thumb);
+      _galleryUrls.push(url);
+      thumbEl.src = url;
+      thumbEl.loading = "lazy";
+    } else {
+      thumbEl = document.createElement("div");
+      thumbEl.className = "gallery-tile-thumb placeholder";
+      thumbEl.textContent = item.name.slice(0, 1) || "?";
+    }
+    tile.appendChild(thumbEl);
+
     const info = document.createElement("div");
-    info.className = "gallery-row-info";
+    info.className = "gallery-tile-info";
     const nm = document.createElement("div");
-    nm.className = "gallery-row-name";
+    nm.className = "gallery-tile-name";
     nm.textContent = item.name;
     const meta = document.createElement("div");
-    meta.className = "gallery-row-meta";
-    const date = new Date(item.updatedAt);
-    meta.textContent = `${date.toLocaleString()} · ${(item.size / 1024).toFixed(0)} KB`;
+    meta.className = "gallery-tile-meta";
+    meta.textContent = `${humanTime(item.updatedAt)} · ${humanSize(item.size)}`;
     info.appendChild(nm);
     info.appendChild(meta);
-    row.appendChild(info);
+    tile.appendChild(info);
+
+    const actions = document.createElement("div");
+    actions.className = "gallery-tile-actions";
     const del = document.createElement("button");
-    del.className = "gallery-row-del";
     del.type = "button";
+    del.className = "danger";
     del.textContent = "删除";
     del.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm(`删除 "${item.name}"？此操作不可撤销。`)) return;
+      if (!confirm(`删除 "${item.name}"？不可撤销。`)) return;
       try {
         await removeSession(item.name);
         if (item.name === _activeSessionName) {
-          // 删了当前 → 内存里的 doc 还在，但下次 save 写到 new name 下
-          // 这里不主动切换 _activeSessionName，让 user 自己改 / 另存
-          setStatus(`已删除（当前作品在内存里，需另存为新名字保留）`);
+          setStatus(`已删除（当前在内存里，可保存副本为新名字保留）`);
         } else {
           setStatus(`已删除：${item.name}`);
         }
@@ -903,13 +941,15 @@ async function renderGallery() {
         setStatus("删除失败：" + (err && err.message || err));
       }
     });
-    row.appendChild(del);
-    row.addEventListener("click", async () => {
+    actions.appendChild(del);
+    tile.appendChild(actions);
+
+    tile.addEventListener("click", async (e) => {
+      if (e.target.closest(".gallery-tile-actions")) return; // 点 actions 不算打开
       if (item.name === _activeSessionName) {
         setGalleryOpen(false);
         return;
       }
-      // 切换前：保当前 dirty
       if (_docDirty) await saveNow();
       try {
         const loaded = await openSession(item.name);
@@ -924,8 +964,27 @@ async function renderGallery() {
         setStatus("打开失败：" + (err && err.message || err));
       }
     });
-    els.galleryList.appendChild(row);
+
+    els.galleryGrid.appendChild(tile);
   }
+}
+
+function humanTime(ts) {
+  if (!ts) return "未知";
+  const d = new Date(ts);
+  const now = Date.now();
+  const dt = now - ts;
+  if (dt < 60 * 1000) return "刚刚";
+  if (dt < 60 * 60 * 1000) return `${Math.floor(dt / 60000)} 分钟前`;
+  if (dt < 24 * 60 * 60 * 1000) return `${Math.floor(dt / 3600000)} 小时前`;
+  if (dt < 7 * 24 * 60 * 60 * 1000) return `${Math.floor(dt / 86400000)} 天前`;
+  return d.toLocaleDateString();
+}
+function humanSize(b) {
+  if (!b) return "?";
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
+  return `${(b / 1048576).toFixed(1)} MB`;
 }
 
 // ---- 启动收尾：尝试加载上次的 session（异步，不阻塞 UI 显示） ----
