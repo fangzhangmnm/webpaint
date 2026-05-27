@@ -1,6 +1,6 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
 // 模块 lockstep 改。
-export const MODULE_VERSION = "v25-2026-05-26";
+export const MODULE_VERSION = "v26-2026-05-26";
 
 // Pointer / pen / touch + 手势 + undo stack。
 // 沿用 ScratchPad 的 pointer 模式（防误触、coalesced、平滑、屏幕双击切工具）。
@@ -225,6 +225,7 @@ export class InputController {
       rec.lastRawY = y;
       rec.lastP = null;   // 本笔最近一次有效 pressure，给 sensor 0 fallback
       rec.smP = -1;       // stabilizer LPF 状态；-1 = 还没收到第一帧（首颗 = raw）
+      rec.lastEventTs = -Infinity;   // 上一颗送进 brush 的 ev.timeStamp（防 Safari iOS coalesced 边界回放）
       this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
     } else if (role === "pick") {
       this._doPick(x, y);
@@ -305,6 +306,13 @@ export class InputController {
       for (const ev of list) {
         // Raw event recorder：在所有过滤之前抓原始 stream
         if (this._strokeRawLog) this._logRawEvent(ev, ev !== e);
+        // **Safari iOS getCoalescedEvents() 边界回放过滤**：每次 pointermove
+        // 的 coalesced 列表可能把上一批的样本一起带回来 (eg 一批末尾 t=21
+        // 下一批开头又给 t=4..25)。这些"反向小段"被 brush 当真实位移累计
+        // 进 path 长度 → 几十 doc-px 周期的疏密波（鼠标无此问题）。
+        // 只接受 timeStamp 严格递增的 event。
+        if (ev.timeStamp <= rec.lastEventTs) continue;
+        rec.lastEventTs = ev.timeStamp;
         // raw 几乎没动 → 跳整个 event
         const drx = ev.clientX - rec.lastRawX;
         const dry = ev.clientY - rec.lastRawY;

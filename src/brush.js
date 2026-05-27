@@ -1,7 +1,7 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
 // 模块 lockstep 改。WebXiaoHeiWu 的教训："I forgot it across three bumps
 // in a row; the user caught it"。bump.sh 可以一次性 sed 所有 module。
-export const MODULE_VERSION = "v25-2026-05-26";
+export const MODULE_VERSION = "v26-2026-05-26";
 
 // 笔刷引擎 v0：圆笔 + 沿线 stamp。
 //
@@ -109,88 +109,64 @@ export class BrushEngine {
     this.invalidateStamp();
   }
 
-  // **v23 cache-and-consume 架构**（user 推翻 v19 设计）：
-  //   on_new_event(x, y, p):
-  //     push 到 cache
-  //     consume_cache()
-  //   consume_cache():
-  //     for segment in cache:
-  //       walk segment 每 step 一颗 stamp（沿 path arc-length 严格 step 间距）
-  //   raw_stamp(): 此时距上一颗保证 = step（沿 path），无 dedup
+  // **v25 回滚到 accumDist 标量法**（v23 cache list 暴露了 coalesced 边界回放
+  // bug —— 蓝点看着均匀，但接收顺序里的反向小段被累计成 path 长度 → 几十
+  // doc-px 周期疏密波）。真正的修法在 input.js 端按 timeStamp 单调过滤。
   //
-  // 之前 v0-v22 用 lastX/Y/accumDist 单 segment 状态。功能等价但 cache 模型
-  // 让未来 look-ahead 平滑 / 真曲线 stamping 有地方接。
+  // 算法：
+  //   beginStroke: 落 touchdown stamp，lastX/Y/P=(x,y,p)，accumDist=0
+  //   extendStroke(x,y,p):
+  //     L = hypot(x-lastX, y-lastY)
+  //     while accumDist + (L - segPos) >= step:
+  //       消耗 step - accumDist，在 lerp 点落 stamp，accumDist=0
+  //     accumDist += L - segPos
+  //     lastX/Y/P=(x,y,p)
   //
-  // step = settings.size × spacing （v19 起不走 pressure）
+  // step = settings.size × spacing （不走 pressure）
 
   _stepFor(s) {
     return Math.max(0.5, s.size * s.spacing);
   }
 
   beginStroke(layer, settings, x, y, pressure, mode = "brush") {
-    const step = this._stepFor(settings);
     this._stroke = {
       layer,
       settings,
       mode,
-      cache: [{ x, y, p: pressure }],     // raw events 缓存 (consume 后会被裁)
-      segPathPos: [0],                     // 累计 path 长度：segPathPos[i] = cache[i] 离起点的 path 距离
-      nextStampPos: step,                  // 下一颗 stamp 应该落在 path 上哪个位置
+      lastX: x, lastY: y, lastP: pressure,
+      accumDist: 0,                        // 距上颗 stamp 的剩余 path 长度
       dirty: null,
       positions: [],                       // 所有 emit 的 stamp (x, y) 给 debug marker
-      rawXY: [x, y],                       // 所有 raw event (x, y) 给 debug marker（不被 consume cleanup 裁）
+      rawXY: [x, y],                       // 所有 raw event (x, y) 给 debug marker
     };
     this._stampCount = 0;
-    // Touchdown stamp 立刻落在 (x, y) (path position 0)
     this._stampOne(x, y, pressure);
   }
 
   extendStroke(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
-    const prev = st.cache[st.cache.length - 1];
-    const dx = x - prev.x, dy = y - prev.y;
-    const segLen = Math.hypot(dx, dy);
-    if (segLen === 0) return;
-    st.cache.push({ x, y, p: pressure });
-    st.segPathPos.push(st.segPathPos[st.segPathPos.length - 1] + segLen);
+    const dx = x - st.lastX;
+    const dy = y - st.lastY;
+    const L = Math.hypot(dx, dy);
+    if (L === 0) return;
     st.rawXY.push(x, y);
-    this._consumeCache();
-  }
-
-  _consumeCache() {
-    const st = this._stroke;
     const step = this._stepFor(st.settings);
-    const totalPath = st.segPathPos[st.segPathPos.length - 1];
-
-    while (st.nextStampPos <= totalPath) {
-      // 找包含 nextStampPos 的 segment
-      let segIdx = 0;
-      while (segIdx + 1 < st.segPathPos.length && st.segPathPos[segIdx + 1] < st.nextStampPos) {
-        segIdx++;
-      }
-      if (segIdx + 1 >= st.cache.length) break;
-
-      const segStart = st.segPathPos[segIdx];
-      const segEnd   = st.segPathPos[segIdx + 1];
-      const t = (st.nextStampPos - segStart) / (segEnd - segStart);
-
-      const a = st.cache[segIdx];
-      const b = st.cache[segIdx + 1];
-      const px = a.x + (b.x - a.x) * t;
-      const py = a.y + (b.y - a.y) * t;
-      const pp = a.p + (b.p - a.p) * t;
-
-      this._stampOne(px, py, pp);
-      st.nextStampPos += step;
+    let pos = 0;
+    while (st.accumDist + (L - pos) >= step) {
+      const need = step - st.accumDist;
+      pos += need;
+      const t = pos / L;
+      const sx = st.lastX + dx * t;
+      const sy = st.lastY + dy * t;
+      const sp = st.lastP + (pressure - st.lastP) * t;
+      this._stampOne(sx, sy, sp);
+      st.accumDist = 0;
     }
-
-    // 清理：option A (chord lerp) 没 look-ahead，只需保留最后一个 cache entry
-    // 用来算下一段 segment
-    while (st.cache.length > 1) {
-      st.cache.shift();
-      st.segPathPos.shift();
-    }
+    st.accumDist += L - pos;
+    st.lastX = x;
+    st.lastY = y;
+    st.lastP = pressure;
   }
 
   endStroke() {

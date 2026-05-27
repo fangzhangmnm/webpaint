@@ -1,5 +1,5 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。
-export const MODULE_VERSION = "v25-2026-05-26";
+export const MODULE_VERSION = "v26-2026-05-26";
 
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
 //
