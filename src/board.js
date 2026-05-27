@@ -37,9 +37,12 @@ export class Board {
     // 主题色：从 CSS 变量取
     this._voidColor = "#e6e2d6";
 
-    // Live overlay provider：渲染时调一次，返回 {canvas, layer, opacity} 或 null。
-    // 笔触进行中由 brush.getLiveOverlay() 提供，每帧在该 layer 之上 composite。
+    // Live overlay provider：渲染时调一次，返回 {canvas, layer, opacity, mode} 或 null。
+    // 笔触进行中由 brush.getLiveOverlay() 提供。paint 模式：layer 之上 composite buffer×opacity。
+    // erase 模式：把 layer 画进 _eraseComposite，对它 dst-out buffer×opacity，再画到屏幕。
     this._overlayProvider = null;
+    this._eraseComposite = null;
+    this._eraseCompositeKey = null;
 
     this.resize();
     window.addEventListener("resize", () => this.resize());
@@ -137,6 +140,48 @@ export class Board {
     this._overlayProvider = fn;
   }
 
+  // 复用 erase 临时合成 canvas（同 doc 尺寸；改了重新分配）
+  _getEraseComposite(w, h) {
+    const key = `${w}x${h}`;
+    if (!this._eraseComposite || this._eraseCompositeKey !== key) {
+      this._eraseComposite = document.createElement("canvas");
+      this._eraseComposite.width = w;
+      this._eraseComposite.height = h;
+      this._eraseCompositeKey = key;
+    }
+    return this._eraseComposite;
+  }
+
+  // 把 (layer, overlay) 在屏幕上 composite。paint = layer + buffer×opacity；
+  // erase = 临时画布做 (layer dst-out buffer×opacity)，再画上去（避开屏幕
+  // alpha:false canvas 对 dst-out 不可预期的问题）。
+  _drawLayerWithOverlay(ctx, layer, overlay, tx, ty, scale) {
+    if (!overlay || overlay.mode !== "erase") {
+      ctx.drawImage(layer.canvas, 0, 0, layer.width, layer.height,
+                    tx, ty, layer.width * scale, layer.height * scale);
+      if (overlay) {
+        const prevA = ctx.globalAlpha;
+        ctx.globalAlpha = ctx.globalAlpha * overlay.opacity;
+        ctx.drawImage(overlay.canvas, 0, 0, overlay.canvas.width, overlay.canvas.height,
+                      tx, ty, overlay.canvas.width * scale, overlay.canvas.height * scale);
+        ctx.globalAlpha = prevA;
+      }
+      return;
+    }
+    // erase 通路
+    const ec = this._getEraseComposite(layer.width, layer.height);
+    const ectx = ec.getContext("2d");
+    ectx.clearRect(0, 0, ec.width, ec.height);
+    ectx.drawImage(layer.canvas, 0, 0);
+    ectx.globalAlpha = overlay.opacity;
+    ectx.globalCompositeOperation = "destination-out";
+    ectx.drawImage(overlay.canvas, 0, 0);
+    ectx.globalAlpha = 1;
+    ectx.globalCompositeOperation = "source-over";
+    ctx.drawImage(ec, 0, 0, ec.width, ec.height,
+                  tx, ty, ec.width * scale, ec.height * scale);
+  }
+
   // ---- 渲染 ----
   resize() {
     const w = this.canvas.clientWidth || window.innerWidth;
@@ -206,20 +251,8 @@ export class Board {
       const prevComp = ctx.globalCompositeOperation;
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.mode || "source-over";
-      ctx.drawImage(
-        layer.canvas,
-        0, 0, layer.width, layer.height,
-        tx, ty, layer.width * scale, layer.height * scale,
-      );
-      // 笔触 live overlay：单图层期间，buffer 紧贴 layer 之上
-      if (overlay && overlay.layer === layer) {
-        ctx.globalAlpha = layer.opacity * overlay.opacity;
-        ctx.drawImage(
-          overlay.canvas,
-          0, 0, overlay.canvas.width, overlay.canvas.height,
-          tx, ty, overlay.canvas.width * scale, overlay.canvas.height * scale,
-        );
-      }
+      const lOverlay = overlay && overlay.layer === layer ? overlay : null;
+      this._drawLayerWithOverlay(ctx, layer, lOverlay, tx, ty, scale);
       ctx.globalAlpha = prevAlpha;
       ctx.globalCompositeOperation = prevComp;
     }
@@ -283,19 +316,8 @@ export class Board {
       const prevComp = ctx.globalCompositeOperation;
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.mode || "source-over";
-      ctx.drawImage(
-        layer.canvas,
-        0, 0, layer.width, layer.height,
-        tx, ty, layer.width * scale, layer.height * scale,
-      );
-      if (overlay && overlay.layer === layer) {
-        ctx.globalAlpha = layer.opacity * overlay.opacity;
-        ctx.drawImage(
-          overlay.canvas,
-          0, 0, overlay.canvas.width, overlay.canvas.height,
-          tx, ty, overlay.canvas.width * scale, overlay.canvas.height * scale,
-        );
-      }
+      const lOverlay = overlay && overlay.layer === layer ? overlay : null;
+      this._drawLayerWithOverlay(ctx, layer, lOverlay, tx, ty, scale);
       ctx.globalAlpha = prevAlpha;
       ctx.globalCompositeOperation = prevComp;
     }
