@@ -16,7 +16,7 @@ import { BrushSettings, MODULE_VERSION as BRUSH_V } from "./brush.js";
 import { getMeta, setMeta, debounce, MODULE_VERSION as DB_V } from "./db.js";
 
 // 反煤气灯：app.js 自己的硬编码版本，启动时和兄弟 module + window.WEBPAINT_VERSION 对账
-const APP_V = "v24-2026-05-26";
+const APP_V = "v25-2026-05-26";
 const MODULE_VERSIONS = { app: APP_V, doc: DOC_V, board: BOARD_V, input: INPUT_V, brush: BRUSH_V, db: DB_V };
 
 const THEMES = ["auto", "day", "night"];
@@ -484,6 +484,8 @@ let _debugStampsOn = false;
 function applyDebugStamps(on) {
   _debugStampsOn = !!on;
   els.debugStampsBtn.setAttribute("aria-pressed", on ? "true" : "false");
+  // 调试开 → 同时启用 raw event CSV → 剪贴板（每笔抬手时复制）
+  input.setRawLogEnabled(_debugStampsOn);
   if (!on) board.setDebugMarkers(null, null);
   else if (_lastDiag) board.setDebugMarkers(_lastDiag.positions || null, _lastDiag.rawPositions || null);
 }

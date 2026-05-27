@@ -1,6 +1,6 @@
 // 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
 // 模块 lockstep 改。
-export const MODULE_VERSION = "v24-2026-05-26";
+export const MODULE_VERSION = "v25-2026-05-26";
 
 // Pointer / pen / touch + 手势 + undo stack。
 // 沿用 ScratchPad 的 pointer 模式（防误触、coalesced、平滑、屏幕双击切工具）。
@@ -83,7 +83,36 @@ export class InputController {
     this.undoIndex = -1;
 
     this._lastTap = null;
+    // Raw event recorder：debug 用，每笔把所有 coalesced raw pointer events
+    // 攒成 CSV，endStroke 时复制到 clipboard。由 app.js 通过 setRawLogEnabled
+    // 切换。列：t_ms,type,coalesced,clientX,clientY,docX,docY,pressure,tiltX,
+    // tiltY,twist,width,height
+    this._rawLogEnabled = false;
+    this._strokeRawLog = null;
+    this._strokeRawT0 = 0;
     this._bind();
+  }
+
+  setRawLogEnabled(on) { this._rawLogEnabled = !!on; }
+
+  _logRawEvent(ev, coalesced) {
+    if (!this._strokeRawLog) return;
+    const { x: dx, y: dy } = this.board.screenToDoc(ev.clientX, ev.clientY);
+    this._strokeRawLog.push([
+      (ev.timeStamp - this._strokeRawT0).toFixed(3),
+      ev.pointerType || "",
+      coalesced ? 1 : 0,
+      ev.clientX,
+      ev.clientY,
+      dx.toFixed(4),
+      dy.toFixed(4),
+      (ev.pressure ?? 0).toFixed(4),
+      ev.tiltX ?? 0,
+      ev.tiltY ?? 0,
+      ev.twist ?? 0,
+      ev.width ?? 0,
+      ev.height ?? 0,
+    ].join(","));
   }
 
   _bind() {
@@ -274,6 +303,8 @@ export class InputController {
       const list = (events && events.length) ? events : [e];
       const enabled = this.getPressureEnabled();
       for (const ev of list) {
+        // Raw event recorder：在所有过滤之前抓原始 stream
+        if (this._strokeRawLog) this._logRawEvent(ev, ev !== e);
         // raw 几乎没动 → 跳整个 event
         const drx = ev.clientX - rec.lastRawX;
         const dry = ev.clientY - rec.lastRawY;
@@ -386,6 +417,13 @@ export class InputController {
     }
     this._strokeLayerId = layer.id;
 
+    // Raw event recorder：起手即开
+    if (this._rawLogEnabled) {
+      this._strokeRawLog = [];
+      this._strokeRawT0 = e.timeStamp;
+      this._logRawEvent(e, false);
+    }
+
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, e, this.getPressureEnabled());
     this.brush.resetStampCount();
@@ -399,6 +437,17 @@ export class InputController {
     const stampCount = this.brush.getStampCount();
     // **endStroke 之前**抓诊断，因为 endStroke 会 null _stroke
     const diag = this.brush.getStrokeDiagnostic();
+    // Raw CSV → clipboard（在 pointerup 这个用户手势里调，Safari 才允许）
+    if (this._strokeRawLog && this._strokeRawLog.length) {
+      const header = "t_ms,type,coalesced,clientX,clientY,docX,docY,pressure,tiltX,tiltY,twist,width,height";
+      const csv = header + "\n" + this._strokeRawLog.join("\n") + "\n";
+      const n = this._strokeRawLog.length;
+      navigator.clipboard?.writeText(csv).then(
+        () => this.status(`raw CSV → 剪贴板 (${n} 行)`),
+        (err) => this.status(`复制失败: ${err.message || err}`),
+      );
+    }
+    this._strokeRawLog = null;
     this.brush.endStroke();
     if (this._strokeLayerId == null) return;
     const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
@@ -421,6 +470,7 @@ export class InputController {
     this.board.requestRender();
   }
   _abortStroke() {
+    this._strokeRawLog = null;
     this.brush.cancelStroke();
     // 退回当前 chain 状态（= 笔触开始前那张）
     if (this._strokeLayerId != null && this.undoIndex >= 0) {
