@@ -1,6 +1,3 @@
-// 反煤气灯：硬编码模块版本，app.js 启动时对账。
-export const MODULE_VERSION = "v26-2026-05-26";
-
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
 //
 // 坐标系：
@@ -126,14 +123,6 @@ export class Board {
     this.setViewport(tx, ty, scale);
   }
 
-  // Debug：在 layer 之上画 stamp 红点 + raw input 蓝点
-  setDebugMarkers(stamps, raws) {
-    this._debugMarkers = stamps;     // Float32Array stamp 中心
-    this._debugRawMarkers = raws;    // Float32Array raw event 位置
-    this._dirtyFull = true;
-    this.requestRender();
-  }
-
   // 公共 API：layer 像素被改了（图层结构变 / 切换 / putImageData 等）
   invalidateAll() {
     this._dirtyFull = true;
@@ -228,7 +217,6 @@ export class Board {
     );
 
     // cursor 预览
-    if (this._debugMarkers) this._drawDebugMarkers();
     if (this._showCursor && this._cursor) this._drawCursor();
   }
 
@@ -288,40 +276,6 @@ export class Board {
     ctx.restore();
     // 注意：partial render 不重画 doc 边框 / cursor，它们保留上一帧的像素就行。
     // 任何视口 / 主题 / cursor 变化都会触发 _dirtyFull，下一帧会全画一次。
-  }
-
-  _drawDebugMarkers() {
-    const ctx = this.ctx;
-    const { tx, ty, scale } = this.viewport;
-    // raw input 蓝点（先画，避免被 stamp 红点完全盖住；用空心圆且大一圈）
-    const raws = this._debugRawMarkers;
-    if (raws && raws.length) {
-      const rr = 4;
-      ctx.strokeStyle = "rgba(32, 96, 255, 0.85)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let i = 0; i < raws.length; i += 2) {
-        const sx = raws[i] * scale + tx;
-        const sy = raws[i + 1] * scale + ty;
-        ctx.moveTo(sx + rr, sy);
-        ctx.arc(sx, sy, rr, 0, Math.PI * 2);
-      }
-      ctx.stroke();
-    }
-    // stamp 红点（实心，叠在上面）
-    const pts = this._debugMarkers;
-    if (pts && pts.length) {
-      const r = 2;
-      ctx.fillStyle = "rgba(255, 32, 32, 0.85)";
-      ctx.beginPath();
-      for (let i = 0; i < pts.length; i += 2) {
-        const sx = pts[i] * scale + tx;
-        const sy = pts[i + 1] * scale + ty;
-        ctx.moveTo(sx + r, sy);
-        ctx.arc(sx, sy, r, 0, Math.PI * 2);
-      }
-      ctx.fill();
-    }
   }
 
   _drawCursor() {

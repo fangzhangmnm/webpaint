@@ -1,7 +1,3 @@
-// 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
-// 模块 lockstep 改。
-export const MODULE_VERSION = "v26-2026-05-26";
-
 // Pointer / pen / touch + 手势 + undo stack。
 // 沿用 ScratchPad 的 pointer 模式（防误触、coalesced、平滑、屏幕双击切工具）。
 // 差异：
@@ -31,11 +27,8 @@ const TAP_MAX_DURATION = 220;
 const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
 const DOUBLETAP_MAX_GAP = 80;
-// v24 起：input.js **完全不做位置 smoothing**。raw clientX/Y 直传给 brush。
-// brush 端 cache-and-consume 保证 stamp 间距均匀；smoothing 用别的机制
-// （由 user 后续指定 — 输出端 lerp / live-stroke buffer / 其他）。
-// 之前的 Catmull-Rom (v17) 和 weighted MA (v22 尝试) 都拆掉，避免在 brush
-// 端调试 stamp 分布时 input 端还有未知的 smoothing 干扰。
+// 位置不做 smoothing —— raw clientX/Y 直传给 brush。brush 端 accumDist 沿
+// path arc-length 等距撒 stamp。input 端只过滤完全没动的 event。
 const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；raw 没动就跳，避免触发 brush extendStroke
 // 压感 LPF（stabilizer）：Pencil 自带 ~10Hz 握笔抖动 → 灌进 size = base × p^0.6
 // 会让 step 每秒 10 次缩胀 → segPos 偶尔被 clamp 到段首 → 小堆积 → 视觉上速度
@@ -83,36 +76,7 @@ export class InputController {
     this.undoIndex = -1;
 
     this._lastTap = null;
-    // Raw event recorder：debug 用，每笔把所有 coalesced raw pointer events
-    // 攒成 CSV，endStroke 时复制到 clipboard。由 app.js 通过 setRawLogEnabled
-    // 切换。列：t_ms,type,coalesced,clientX,clientY,docX,docY,pressure,tiltX,
-    // tiltY,twist,width,height
-    this._rawLogEnabled = false;
-    this._strokeRawLog = null;
-    this._strokeRawT0 = 0;
     this._bind();
-  }
-
-  setRawLogEnabled(on) { this._rawLogEnabled = !!on; }
-
-  _logRawEvent(ev, coalesced) {
-    if (!this._strokeRawLog) return;
-    const { x: dx, y: dy } = this.board.screenToDoc(ev.clientX, ev.clientY);
-    this._strokeRawLog.push([
-      (ev.timeStamp - this._strokeRawT0).toFixed(3),
-      ev.pointerType || "",
-      coalesced ? 1 : 0,
-      ev.clientX,
-      ev.clientY,
-      dx.toFixed(4),
-      dy.toFixed(4),
-      (ev.pressure ?? 0).toFixed(4),
-      ev.tiltX ?? 0,
-      ev.tiltY ?? 0,
-      ev.twist ?? 0,
-      ev.width ?? 0,
-      ev.height ?? 0,
-    ].join(","));
   }
 
   _bind() {
@@ -304,13 +268,11 @@ export class InputController {
       const list = (events && events.length) ? events : [e];
       const enabled = this.getPressureEnabled();
       for (const ev of list) {
-        // Raw event recorder：在所有过滤之前抓原始 stream
-        if (this._strokeRawLog) this._logRawEvent(ev, ev !== e);
         // **Safari iOS getCoalescedEvents() 边界回放过滤**：每次 pointermove
-        // 的 coalesced 列表可能把上一批的样本一起带回来 (eg 一批末尾 t=21
-        // 下一批开头又给 t=4..25)。这些"反向小段"被 brush 当真实位移累计
-        // 进 path 长度 → 几十 doc-px 周期的疏密波（鼠标无此问题）。
-        // 只接受 timeStamp 严格递增的 event。
+        // 的 coalesced 列表会把上一批的样本一起带回来 (eg 一批末尾 t=21，下
+        // 一批开头又给 t=4..25)。这些"反向小段"被 brush 当真实位移累计进
+        // path 长度 → 几十 doc-px 周期的疏密波（鼠标无此问题）。详见
+        // docs/ipad-coalesced-events.md。只接受 timeStamp 严格递增的 event。
         if (ev.timeStamp <= rec.lastEventTs) continue;
         rec.lastEventTs = ev.timeStamp;
         // raw 几乎没动 → 跳整个 event
@@ -425,16 +387,8 @@ export class InputController {
     }
     this._strokeLayerId = layer.id;
 
-    // Raw event recorder：起手即开
-    if (this._rawLogEnabled) {
-      this._strokeRawLog = [];
-      this._strokeRawT0 = e.timeStamp;
-      this._logRawEvent(e, false);
-    }
-
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, e, this.getPressureEnabled());
-    this.brush.resetStampCount();
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode);
     // begin 已经落了第一颗 stamp → 也要把它的 dirty 报上去
     const bbox = this.brush.flushDirty();
@@ -442,27 +396,11 @@ export class InputController {
     this.board.requestRender();
   }
   _endStroke() {
-    const stampCount = this.brush.getStampCount();
-    // **endStroke 之前**抓诊断，因为 endStroke 会 null _stroke
-    const diag = this.brush.getStrokeDiagnostic();
-    // Raw CSV → clipboard（在 pointerup 这个用户手势里调，Safari 才允许）
-    if (this._strokeRawLog && this._strokeRawLog.length) {
-      const header = "t_ms,type,coalesced,clientX,clientY,docX,docY,pressure,tiltX,tiltY,twist,width,height";
-      const csv = header + "\n" + this._strokeRawLog.join("\n") + "\n";
-      const n = this._strokeRawLog.length;
-      navigator.clipboard?.writeText(csv).then(
-        () => this.status(`raw CSV → 剪贴板 (${n} 行)`),
-        (err) => this.status(`复制失败: ${err.message || err}`),
-      );
-    }
-    this._strokeRawLog = null;
     this.brush.endStroke();
     if (this._strokeLayerId == null) return;
     const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
     this._strokeLayerId = null;
     if (!layer) return;
-    // Debug: 把这笔的 stamp 数 + diag 广播给 app，HUD 显示用
-    window.dispatchEvent(new CustomEvent("wp:strokeEnd", { detail: { stamps: stampCount, diag } }));
     const after = layer.ctx.getImageData(0, 0, layer.width, layer.height);
     // 截掉 redo 段，把新状态 push 进去
     if (this.undoIndex < this.undoChain.length - 1) {
@@ -478,7 +416,6 @@ export class InputController {
     this.board.requestRender();
   }
   _abortStroke() {
-    this._strokeRawLog = null;
     this.brush.cancelStroke();
     // 退回当前 chain 状态（= 笔触开始前那张）
     if (this._strokeLayerId != null && this.undoIndex >= 0) {

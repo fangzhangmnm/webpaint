@@ -9,15 +9,11 @@
 //   BrushSettings   ← 当前笔刷参数（这里持有，传给 input.brush）
 //   App state       ← 工具 / 颜色 / 主题 / 压感开关
 
-import { PaintDoc, MODULE_VERSION as DOC_V } from "./doc.js";
-import { Board, MODULE_VERSION as BOARD_V } from "./board.js";
-import { InputController, MODULE_VERSION as INPUT_V } from "./input.js";
-import { BrushSettings, MODULE_VERSION as BRUSH_V } from "./brush.js";
-import { getMeta, setMeta, debounce, MODULE_VERSION as DB_V } from "./db.js";
-
-// 反煤气灯：app.js 自己的硬编码版本，启动时和兄弟 module + window.WEBPAINT_VERSION 对账
-const APP_V = "v26-2026-05-26";
-const MODULE_VERSIONS = { app: APP_V, doc: DOC_V, board: BOARD_V, input: INPUT_V, brush: BRUSH_V, db: DB_V };
+import { PaintDoc } from "./doc.js";
+import { Board } from "./board.js";
+import { InputController } from "./input.js";
+import { BrushSettings } from "./brush.js";
+import { getMeta, setMeta, debounce } from "./db.js";
 
 const THEMES = ["auto", "day", "night"];
 const THEME_LABEL = { auto: "跟随系统", day: "日", night: "夜" };
@@ -28,7 +24,6 @@ const els = {
   zoomLabel: document.getElementById("zoomLabel"),
   canvasSizeLabel: document.getElementById("canvasSizeLabel"),
   statusLabel: document.getElementById("statusLabel"),
-  brushDebugLabel: document.getElementById("brushDebugLabel"),
   versionLabel: document.getElementById("versionLabel"),
   sizeSlider: document.getElementById("sizeSlider"),
   opacitySlider: document.getElementById("opacitySlider"),
@@ -39,7 +34,6 @@ const els = {
   themeBtn: document.getElementById("themeButton"),
   pressureBtn: document.getElementById("pressureButton"),
   longPressPickBtn: document.getElementById("longPressPickButton"),
-  debugStampsBtn: document.getElementById("debugStampsButton"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
   activeSwatch: document.getElementById("activeSwatch"),
   // 浮动色板
@@ -70,20 +64,7 @@ function safeLSSet(key, val) {
 const doc = new PaintDoc({ width: 2048, height: 2048 });
 const board = new Board(els.board, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-// 版本对账：app.js 这一段 + 各兄弟 module 的 MODULE_VERSION + SW 合成 version.js
-// 三方都对上才是真的"装上 vN"。任一对不上 = bytecode cache 没刷干净 / SW 没更新
-function computeVersionLabel() {
-  const sw = window.WEBPAINT_VERSION || "?";
-  const allMatch = Object.values(MODULE_VERSIONS).every((v) => v === sw);
-  if (allMatch) return `${sw} ✓`;
-  const stale = Object.entries(MODULE_VERSIONS)
-    .filter(([_, v]) => v !== sw)
-    .map(([k, v]) => `${k}=${v}`)
-    .join(" ");
-  return `${sw} ⚠ stale: ${stale}`;
-}
-els.versionLabel.textContent = computeVersionLabel();
-console.log("[WebPaint] versions:", { sw: window.WEBPAINT_VERSION, ...MODULE_VERSIONS });
+els.versionLabel.textContent = window.WEBPAINT_VERSION || "?";
 
 const state = {
   tool: "brush",
@@ -452,54 +433,9 @@ function hexToHsv(hex) {
   return { h, s, v };
 }
 
-// ---- Debug: brush 状态在 HUD 显示，方便定位 knot 根因 ----
-// 用闭包变量 + 在 slider 监听器/strokeEnd 事件里直接 refresh，不动 setSize/setOpacity 本体
-let _lastStrokeStamps = 0;
-let _lastDiag = null;
-function refreshBrushDebug() {
-  const s = state.brush;
-  // v19 起 step 是整笔常量（不再随 pressure 飘）
-  const step = Math.max(0.5, s.size * s.spacing);
-  let txt = `size ${s.size.toFixed(0)} step ${step.toFixed(1)} / n ${_lastStrokeStamps}`;
-  if (_lastDiag) {
-    txt += ` drop ${_lastDiag.dropped}`;
-    // d_mean = 相邻 stamp 实测欧氏距离的 mean±std [min..max]，理想 ≈ step
-    txt += ` / d_mean ${_lastDiag.dMean.toFixed(2)}±${_lastDiag.dStd.toFixed(2)} [${_lastDiag.dMin.toFixed(1)}..${_lastDiag.dMax.toFixed(1)}]`;
-    txt += ` / α ${_lastDiag.aMin.toFixed(2)}-${_lastDiag.aMax.toFixed(2)}`;
-  }
-  els.brushDebugLabel.textContent = txt;
-}
-window.addEventListener("wp:strokeEnd", (e) => {
-  _lastStrokeStamps = e.detail.stamps;
-  _lastDiag = e.detail.diag || null;
-  refreshBrushDebug();
-  // Debug：开了的话把 stamp 红点 + raw 蓝点交给 board 画
-  if (_debugStampsOn && _lastDiag) {
-    board.setDebugMarkers(_lastDiag.positions || null, _lastDiag.rawPositions || null);
-  }
-});
-
-// ---- Debug: stamps 红点 + raw 蓝点叠加 toggle ----
-let _debugStampsOn = false;
-function applyDebugStamps(on) {
-  _debugStampsOn = !!on;
-  els.debugStampsBtn.setAttribute("aria-pressed", on ? "true" : "false");
-  // 调试开 → 同时启用 raw event CSV → 剪贴板（每笔抬手时复制）
-  input.setRawLogEnabled(_debugStampsOn);
-  if (!on) board.setDebugMarkers(null, null);
-  else if (_lastDiag) board.setDebugMarkers(_lastDiag.positions || null, _lastDiag.rawPositions || null);
-}
-els.debugStampsBtn.addEventListener("click", () => {
-  applyDebugStamps(!_debugStampsOn);
-  setStatus(`Debug stamps · ${_debugStampsOn ? "开" : "关"}`);
-});
-els.sizeSlider.addEventListener("input", refreshBrushDebug);
-els.opacitySlider.addEventListener("input", refreshBrushDebug);
-
 // ---- 启动收尾 ----
 setStatus("就绪");
 updateZoomLabel();
-refreshBrushDebug();
 
 // ---- Service worker + 更新检测 ----
 // 沿用 WebXiaoHeiWu 模式，四条检测路径都挂上，iPad PWA standalone 模式默认

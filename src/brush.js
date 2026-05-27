@@ -1,8 +1,3 @@
-// 反煤气灯：硬编码模块版本，app.js 启动时对账。和 src/version.js + 其他
-// 模块 lockstep 改。WebXiaoHeiWu 的教训："I forgot it across three bumps
-// in a row; the user caught it"。bump.sh 可以一次性 sed 所有 module。
-export const MODULE_VERSION = "v26-2026-05-26";
-
 // 笔刷引擎 v0：圆笔 + 沿线 stamp。
 //
 // 设计原则（一期手感期）：
@@ -47,12 +42,7 @@ export class BrushEngine {
   constructor() {
     this._stampCache = null;       // {key, canvas, radius}
     this._stroke = null;           // { layer, settings, accumDist, lastX, lastY, lastP, mode }
-    // Debug：累计本笔 stamp 次数，给 HUD 显示用，定位 knot 根因
-    this._stampCount = 0;
   }
-  // Debug API
-  resetStampCount() { this._stampCount = 0; }
-  getStampCount() { return this._stampCount; }
 
   // 预渲染一个 stamp 图。color 直接画进去；后期改纹理时这里换实现即可。
   //
@@ -60,9 +50,6 @@ export class BrushEngine {
   // 烤一次，每颗 stamp 用 drawImage 的 dest-size 缩放下来。否则 size 因压感
   // 每颗都变 → 每颗 cache miss → 每颗都重建 canvas + gradient，200Hz 飘起来
   // GC + GPU 上传立刻爆。color / hardness / mode 才是真正会触发重做的参数。
-  //
-  // base canvas 内分辨率 = MAX(64, settings.size) + 2px AA 边 —— 太小会让
-  // 缩小后的 stamp 锯齿化；64 是个折中（GPU 上的小贴图不贵）。
   _getStamp(size, hardness, color, mode) {
     const useColor = mode === "erase" ? "#000" : color;
     const key = `${useColor}|${hardness.toFixed(3)}|${mode}`;
@@ -76,25 +63,15 @@ export class BrushEngine {
     const stamp = document.createElement("canvas");
     stamp.width = d; stamp.height = d;
     const sctx = stamp.getContext("2d");
-    const hd = Math.max(0, Math.min(1, hardness));
-    // 第一步：**fillRect 整张 canvas** —— 每个像素 RGB = useColor, α=1。
-    // 包括圆外面那些"用不到"的像素也是 useColor，关键是 bilinear 在采圆边时
-    // 不会从外面的 transparent black 引入 RGB 漂移（经典 sprite 白边/黑边 bug）。
-    sctx.fillStyle = useColor;
-    sctx.fillRect(0, 0, d, d);
-    // 第二步：destination-out + 反向 alpha gradient 削外圈 alpha。
-    // dest-out 只改 alpha 不改 RGB（unpremul 语义），所以源 canvas 的 RGB
-    // 保持纯 useColor，只有 alpha 在 hardness×r 到 r 间 falloff，r 之外 α=0。
-    // hd 用 Math.min(_, 0.999) 防止两个 stop 在同位置时 stops 序覆盖坑。
-    sctx.globalCompositeOperation = "destination-out";
-    const safeHd = Math.min(hd, 0.999);
-    const g = sctx.createRadialGradient(r, r, 0, r, r, r);
-    g.addColorStop(0, "rgba(0,0,0,0)");       // 圆心：不擦
-    g.addColorStop(safeHd, "rgba(0,0,0,0)");  // 到 hardness×r：还是不擦
-    g.addColorStop(1, "rgba(0,0,0,1)");       // 到 r：全擦
+    const hd = Math.max(0, Math.min(0.999, hardness));
+    // Radial gradient：内圈 hd×r 满 alpha 的 useColor，外圈到 r 时同色 α=0。
+    // **关键**：末尾 stop 用同色 α=0（不是 transparent black），bilinear 采
+    // 圆边时不会引入 RGB 漂移，避免经典 sprite 白/黑边。
+    const g = sctx.createRadialGradient(r, r, hd * r, r, r, r);
+    g.addColorStop(0, useColor);
+    g.addColorStop(1, hexToRgba(useColor, 0));
     sctx.fillStyle = g;
     sctx.fillRect(0, 0, d, d);
-    sctx.globalCompositeOperation = "source-over";
 
     this._stampCache = { key, canvas: stamp, baseSize, radius: r };
     return this._stampCache;
@@ -109,11 +86,7 @@ export class BrushEngine {
     this.invalidateStamp();
   }
 
-  // **v25 回滚到 accumDist 标量法**（v23 cache list 暴露了 coalesced 边界回放
-  // bug —— 蓝点看着均匀，但接收顺序里的反向小段被累计成 path 长度 → 几十
-  // doc-px 周期疏密波）。真正的修法在 input.js 端按 timeStamp 单调过滤。
-  //
-  // 算法：
+  // 沿 path arc-length 等距 stamp，标量 accumDist 累加：
   //   beginStroke: 落 touchdown stamp，lastX/Y/P=(x,y,p)，accumDist=0
   //   extendStroke(x,y,p):
   //     L = hypot(x-lastX, y-lastY)
@@ -122,7 +95,10 @@ export class BrushEngine {
   //     accumDist += L - segPos
   //     lastX/Y/P=(x,y,p)
   //
-  // step = settings.size × spacing （不走 pressure）
+  // step = settings.size × spacing （不走 pressure）。
+  // 注意：raw event 必须按时间单调到达（见 docs/ipad-coalesced-events.md），
+  // 否则 Safari iOS coalesced 边界回放会把反向小段算进 path 长度 → 疏密波。
+  // 这一层过滤在 input.js 端做。
 
   _stepFor(s) {
     return Math.max(0.5, s.size * s.spacing);
@@ -136,10 +112,7 @@ export class BrushEngine {
       lastX: x, lastY: y, lastP: pressure,
       accumDist: 0,                        // 距上颗 stamp 的剩余 path 长度
       dirty: null,
-      positions: [],                       // 所有 emit 的 stamp (x, y) 给 debug marker
-      rawXY: [x, y],                       // 所有 raw event (x, y) 给 debug marker
     };
-    this._stampCount = 0;
     this._stampOne(x, y, pressure);
   }
 
@@ -150,7 +123,6 @@ export class BrushEngine {
     const dy = y - st.lastY;
     const L = Math.hypot(dx, dy);
     if (L === 0) return;
-    st.rawXY.push(x, y);
     const step = this._stepFor(st.settings);
     let pos = 0;
     while (st.accumDist + (L - pos) >= step) {
@@ -173,56 +145,6 @@ export class BrushEngine {
     this._stroke = null;
   }
 
-  // Debug：给 input.js endStroke 后调，返回这一笔的诊断信息
-  //   uniq    = 不同整数 (x, y) 位置数；若 << stampCount 则坐标真的重复
-  //   aMin/aMax = 沿笔触采几点的 layer alpha
-  //   dMean/dStd/dMin/dMax = 相邻 stamp 距离统计（doc-px）
-  //     - 理想：dMean ≈ step, dStd 接近 0, dMin/dMax 紧贴 dMean
-  //     - bead 信号：dStd 大，dMin 远小于 step（聚集），dMax 远大于 step（gap）
-  getStrokeDiagnostic() {
-    const st = this._stroke;
-    if (!st || !st.positions || st.positions.length === 0) return null;
-    const pts = st.positions;
-    const n = pts.length / 2;
-    const uniq = new Set();
-    for (let i = 0; i < n; i++) uniq.add(`${Math.round(pts[i*2])},${Math.round(pts[i*2+1])}`);
-    // 沿笔触每 ~max(1, n/8) 颗采一点 alpha
-    const stride = Math.max(1, Math.floor(n / 8));
-    const layer = st.layer;
-    let aMin = 1, aMax = 0;
-    for (let i = 0; i < n; i += stride) {
-      const px = Math.round(pts[i*2]);
-      const py = Math.round(pts[i*2+1]);
-      if (px < 0 || py < 0 || px >= layer.width || py >= layer.height) continue;
-      try {
-        const a = layer.ctx.getImageData(px, py, 1, 1).data[3] / 255;
-        if (a < aMin) aMin = a;
-        if (a > aMax) aMax = a;
-      } catch {}
-    }
-    // 相邻 stamp 距离分布
-    let dMin = Infinity, dMax = 0, dSum = 0, dSumSq = 0, dCount = 0;
-    for (let i = 1; i < n; i++) {
-      const dx = pts[i*2] - pts[(i-1)*2];
-      const dy = pts[i*2+1] - pts[(i-1)*2+1];
-      const d = Math.hypot(dx, dy);
-      if (d < dMin) dMin = d;
-      if (d > dMax) dMax = d;
-      dSum += d; dSumSq += d * d; dCount++;
-    }
-    const dMean = dCount > 0 ? dSum / dCount : 0;
-    const dVar = dCount > 0 ? (dSumSq / dCount) - dMean * dMean : 0;
-    const dStd = Math.sqrt(Math.max(0, dVar));
-    if (dCount === 0) { dMin = 0; dMax = 0; }
-    return {
-      n, uniq: uniq.size, dropped: 0,    // v23 无 dedup，恒 0
-      aMin, aMax, dMean, dStd, dMin, dMax,
-      // 复制一份 stamp 位置数组给 board 画视觉 marker (红)
-      positions: Float32Array.from(pts),
-      // raw input 位置数组（蓝），用来 diff "input 进来就抖" vs "brush 把均匀变不均匀"
-      rawPositions: Float32Array.from(st.rawXY),
-    };
-  }
   cancelStroke() {
     this._stroke = null;
   }
@@ -239,7 +161,6 @@ export class BrushEngine {
   _stampOne(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
-    // v23: 无 dedup。距上一颗 path arc-length 严格 = step (consume_cache 保证)
     const s = st.settings;
     const p = Math.max(0, Math.min(1, pressure));
 
@@ -262,8 +183,6 @@ export class BrushEngine {
     const drawD = size + 2 * (size / stamp.baseSize);
     const drawR = drawD / 2;
     ctx.drawImage(stamp.canvas, x - drawR, y - drawR, drawD, drawD);
-    this._stampCount++;
-    st.positions.push(x, y);
 
     ctx.globalAlpha = prevAlpha;
     ctx.globalCompositeOperation = prevComp;

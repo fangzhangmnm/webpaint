@@ -1,6 +1,3 @@
-// 反煤气灯：硬编码模块版本，app.js 启动时对账。
-export const MODULE_VERSION = "v26-2026-05-26";
-
 // PaintDoc = 模型层（无 DOM）。
 //
 // 一张 doc 由若干 layer 组成。每个 layer 自带一个固定分辨率的 OffscreenCanvas
