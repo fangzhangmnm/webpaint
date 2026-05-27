@@ -324,6 +324,86 @@ input[type=range] {
   margin: 4px 8px;
 }
 
+/* 图层面板 */
+.layers-panel {
+  top: 60px;
+  right: 16px;
+  left: auto;        /* 覆盖 .float-panel 默认 left:16 */
+  width: 240px;
+}
+.float-panel-subtle { color: var(--ink-soft); font-weight: normal; font-size: 12px; margin-left: 6px; }
+.float-panel-close {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 0 4px;
+}
+.layers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.layer-row:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.layer-row.active {
+  background: color-mix(in srgb, var(--accent, #4c8bf5) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent, #4c8bf5) 40%, transparent);
+}
+.layer-vis {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--ink);
+  flex: 0 0 auto;
+}
+.layer-vis.hidden-icon { opacity: 0.3; }
+.layer-name {
+  flex: 1;
+  color: var(--ink);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.layers-foot {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border-top: 1px solid var(--line);
+}
+.layers-foot-btn {
+  flex: 1;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 16px;
+}
+.layers-foot-btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.layers-foot-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
 /* 浮动可拖面板（color picker / 未来的 layers / brush params 等都走这套） */
 .float-panel {
   position: fixed;

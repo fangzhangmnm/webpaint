@@ -125,6 +125,14 @@
         </svg>
       </button>
 
+      <button class="tool" id="layersButton" type="button" title="图层" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="12 2 22 8 12 14 2 8 12 2"></polygon>
+          <polyline points="2 13 12 19 22 13"></polyline>
+          <polyline points="2 18 12 24 22 18" transform="translate(0,-2)"></polyline>
+        </svg>
+      </button>
+
       <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="4" y1="7" x2="20" y2="7"></line>
@@ -133,6 +141,22 @@
         </svg>
       </button>
     </header>
+
+    <!-- 图层面板：浮动可拖（沿用 .float-panel）。每行 = 一个 layer，倒序显示
+         (UI 习惯：上面在画面上面)。新建按钮在 footer。 -->
+    <div class="float-panel layers-panel hidden" id="layersPanel">
+      <div class="float-panel-head" id="layersPanelHead">
+        <span class="float-panel-title">图层 <span id="layersCountLabel" class="float-panel-subtle">0 / 0</span></span>
+        <button class="float-panel-close" id="layersPanelClose" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="layers-list" id="layersList"><!-- rows rendered by JS --></div>
+      <div class="layers-foot">
+        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建图层">＋</button>
+        <button class="layers-foot-btn" id="layerDelBtn" type="button" title="删除当前">🗑</button>
+        <button class="layers-foot-btn" id="layerUpBtn" type="button" title="上移">↑</button>
+        <button class="layers-foot-btn" id="layerDownBtn" type="button" title="下移">↓</button>
+      </div>
+    </div>
 
     <!-- 汉堡菜单：低频开关 / 操作。后续 .ora 导入导出、新建分辨率也放这里。 -->
     <div class="menu-panel hidden" id="menuPanel" role="menu">

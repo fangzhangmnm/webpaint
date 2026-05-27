@@ -30,6 +30,16 @@ const els = {
   undoBtn: document.getElementById("undoButton"),
   redoBtn: document.getElementById("redoButton"),
   fitBtn: document.getElementById("fitButton"),
+  layersBtn: document.getElementById("layersButton"),
+  layersPanel: document.getElementById("layersPanel"),
+  layersPanelHead: document.getElementById("layersPanelHead"),
+  layersPanelClose: document.getElementById("layersPanelClose"),
+  layersList: document.getElementById("layersList"),
+  layersCountLabel: document.getElementById("layersCountLabel"),
+  layerAddBtn: document.getElementById("layerAddBtn"),
+  layerDelBtn: document.getElementById("layerDelBtn"),
+  layerUpBtn: document.getElementById("layerUpBtn"),
+  layerDownBtn: document.getElementById("layerDownBtn"),
   menuBtn: document.getElementById("menuButton"),
   menuPanel: document.getElementById("menuPanel"),
   menuLongPressPick: document.getElementById("menuLongPressPick"),
@@ -363,6 +373,143 @@ window.addEventListener("keydown", (e) => {
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
   if (e.key === "c" || e.key === "C") {
     if (!(e.ctrlKey || e.metaKey)) toggleColorPanel();
+  }
+});
+
+// ---- 图层面板 ----
+function toggleLayersPanel(force) {
+  const hidden = els.layersPanel.classList.contains("hidden");
+  const show = force === true ? true : force === false ? false : hidden;
+  els.layersPanel.classList.toggle("hidden", !show);
+  els.layersBtn.setAttribute("aria-pressed", show ? "true" : "false");
+  if (show) renderLayersPanel();
+}
+els.layersBtn.addEventListener("click", () => toggleLayersPanel());
+els.layersPanelClose.addEventListener("click", () => toggleLayersPanel(false));
+
+// 拖动 layers 面板（沿用 color panel 模式）
+let _layersDrag = null;
+els.layersPanelHead.addEventListener("pointerdown", (e) => {
+  if (e.target.closest(".float-panel-close")) return;
+  const r = els.layersPanel.getBoundingClientRect();
+  _layersDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
+  els.layersPanelHead.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+els.layersPanelHead.addEventListener("pointermove", (e) => {
+  if (!_layersDrag || e.pointerId !== _layersDrag.id) return;
+  const w = els.layersPanel.offsetWidth;
+  const h = els.layersPanel.offsetHeight;
+  const left = Math.max(0, Math.min(window.innerWidth - w, _layersDrag.ol + (e.clientX - _layersDrag.sx)));
+  const top  = Math.max(0, Math.min(window.innerHeight - h, _layersDrag.ot + (e.clientY - _layersDrag.sy)));
+  els.layersPanel.style.left = left + "px";
+  els.layersPanel.style.right = "auto";
+  els.layersPanel.style.top = top + "px";
+  safeLSSet("webpaint.layersPanel.pos", JSON.stringify({ left, top }));
+});
+els.layersPanelHead.addEventListener("pointerup", (e) => {
+  if (_layersDrag && e.pointerId === _layersDrag.id) {
+    try { els.layersPanelHead.releasePointerCapture(e.pointerId); } catch {}
+    _layersDrag = null;
+  }
+});
+// 还原上次位置
+(function restoreLayersPanelPos() {
+  const saved = safeLS("webpaint.layersPanel.pos");
+  if (!saved) return;
+  try {
+    const o = JSON.parse(saved);
+    els.layersPanel.style.left = o.left + "px";
+    els.layersPanel.style.right = "auto";
+    els.layersPanel.style.top = o.top + "px";
+  } catch {}
+})();
+
+// 渲染图层列表（倒序：UI 上 = 最上面图层在面板顶部）
+function renderLayersPanel() {
+  els.layersList.innerHTML = "";
+  const max = doc.maxLayers;
+  els.layersCountLabel.textContent = `${doc.layers.length} / ${max}`;
+  // 倒序：top of UI = top of stack
+  for (let i = doc.layers.length - 1; i >= 0; i--) {
+    const L = doc.layers[i];
+    const row = document.createElement("div");
+    row.className = "layer-row" + (i === doc.activeIndex ? " active" : "");
+    row.dataset.layerId = String(L.id);
+
+    const vis = document.createElement("button");
+    vis.type = "button";
+    vis.className = "layer-vis" + (L.visible ? "" : " hidden-icon");
+    vis.title = L.visible ? "可见" : "已隐藏";
+    vis.innerHTML = L.visible
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a18.94 18.94 0 0 1 4.06-5.06"/><path d="M1 1l22 22"/></svg>';
+    vis.addEventListener("click", (e) => {
+      e.stopPropagation();
+      L.visible = !L.visible;
+      renderLayersPanel();
+      board.invalidateAll();
+      board.requestRender();
+    });
+    row.appendChild(vis);
+
+    const name = document.createElement("span");
+    name.className = "layer-name";
+    name.textContent = L.name;
+    row.appendChild(name);
+
+    row.addEventListener("click", () => {
+      doc.setActiveById(L.id);
+      renderLayersPanel();
+    });
+    els.layersList.appendChild(row);
+  }
+  // foot button enable/disable
+  els.layerAddBtn.disabled = doc.layers.length >= max;
+  els.layerDelBtn.disabled = doc.layers.length <= 1;
+  els.layerUpBtn.disabled = doc.activeIndex >= doc.layers.length - 1;
+  els.layerDownBtn.disabled = doc.activeIndex <= 0;
+}
+
+els.layerAddBtn.addEventListener("click", () => {
+  const L = doc.addLayer();
+  if (!L) {
+    setStatus(`图层数已达上限 ${doc.maxLayers}`);
+    return;
+  }
+  renderLayersPanel();
+  board.invalidateAll();
+  board.requestRender();
+});
+els.layerDelBtn.addEventListener("click", () => {
+  const L = doc.activeLayer;
+  if (!L) return;
+  if (!doc.removeLayer(L.id)) {
+    setStatus("至少保留一层");
+    return;
+  }
+  // 同时清掉这层的 undo 链条 entry（layerId 匹配的）—— 否则 undo 会复活已删层
+  input.dropHistoryForLayer(L.id);
+  renderLayersPanel();
+  board.invalidateAll();
+  board.requestRender();
+});
+els.layerUpBtn.addEventListener("click", () => {
+  const L = doc.activeLayer;
+  if (!L) return;
+  if (doc.moveLayer(L.id, 1)) {
+    renderLayersPanel();
+    board.invalidateAll();
+    board.requestRender();
+  }
+});
+els.layerDownBtn.addEventListener("click", () => {
+  const L = doc.activeLayer;
+  if (!L) return;
+  if (doc.moveLayer(L.id, -1)) {
+    renderLayersPanel();
+    board.invalidateAll();
+    board.requestRender();
   }
 });
 els.hueSlider.addEventListener("input", () => {

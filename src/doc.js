@@ -27,22 +27,30 @@ let _layerIdCounter = 1;
 const BBOX_GROW_MARGIN = 32;
 
 export class Layer {
-  constructor({ width, height, name } = {}) {
+  constructor({ width, height, name, empty = false } = {}) {
     this.id = _layerIdCounter++;
     this.name = name || `图层 ${this.id}`;
     this.visible = true;
     this.opacity = 1;
     this.mode = "source-over";       // Canvas2D globalCompositeOperation
-    // bbox = layer canvas 在 doc 坐标系下的位置 + 实际 canvas 尺寸。
-    // phase 1：bbox = 全 doc，行为和老版一致；future：新建空层时 bbox=0
-    // 第一颗 stamp 才分配；擦干净时 lazy shrink。
     this.docW = width;
     this.docH = height;
-    this.bboxX = 0;
-    this.bboxY = 0;
-    this.bboxW = width;
-    this.bboxH = height;
-    this.canvas = makeBitmap(width, height);
+    if (empty) {
+      // 空层：bbox 为 0，canvas 1×1 占位（避免 null ctx 引用爆栈）。
+      // 第一颗 stamp 触发 ensureBbox 后才真分配。这样新建图层 ≈ 0 内存。
+      this.bboxX = 0;
+      this.bboxY = 0;
+      this.bboxW = 0;
+      this.bboxH = 0;
+      this.canvas = makeBitmap(1, 1);
+    } else {
+      // 老路径（doc 初始层）：bbox = 全 doc，行为同 v32
+      this.bboxX = 0;
+      this.bboxY = 0;
+      this.bboxW = width;
+      this.bboxH = height;
+      this.canvas = makeBitmap(width, height);
+    }
     this.ctx = this.canvas.getContext("2d", { willReadFrequently: false });
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = "low";
@@ -55,15 +63,28 @@ export class Layer {
   // - 加 BBOX_GROW_MARGIN 防 stamp 反复出入边界
   // - clamp 在 doc 边界内（rect 完全在 doc 外 → no-op）
   // - 旧 canvas drawImage 到新 canvas 的对应位置，旧像素保留
+  // - empty 层（bboxW/H=0）首次 ensureBbox 时直接按 rect 分配，不和占位
+  //   1×1 canvas 求 union（否则 bbox 会无谓延伸到 (0,0)）
   ensureBbox(x0, y0, x1, y1) {
-    // 已覆盖
-    if (x0 >= this.bboxX && y0 >= this.bboxY &&
+    const isEmpty = this.bboxW <= 0 || this.bboxH <= 0;
+    if (!isEmpty &&
+        x0 >= this.bboxX && y0 >= this.bboxY &&
         x1 <= this.bboxX + this.bboxW && y1 <= this.bboxY + this.bboxH) return;
     const m = BBOX_GROW_MARGIN;
-    let nx  = Math.floor(Math.min(this.bboxX, x0 - m));
-    let ny  = Math.floor(Math.min(this.bboxY, y0 - m));
-    let nx1 = Math.ceil(Math.max(this.bboxX + this.bboxW, x1 + m));
-    let ny1 = Math.ceil(Math.max(this.bboxY + this.bboxH, y1 + m));
+    let nx, ny, nx1, ny1;
+    if (isEmpty) {
+      nx = x0 - m; ny = y0 - m;
+      nx1 = x1 + m; ny1 = y1 + m;
+    } else {
+      nx  = Math.min(this.bboxX, x0 - m);
+      ny  = Math.min(this.bboxY, y0 - m);
+      nx1 = Math.max(this.bboxX + this.bboxW, x1 + m);
+      ny1 = Math.max(this.bboxY + this.bboxH, y1 + m);
+    }
+    nx = Math.floor(nx);
+    ny = Math.floor(ny);
+    nx1 = Math.ceil(nx1);
+    ny1 = Math.ceil(ny1);
     // clamp 到 doc 边界
     nx = Math.max(0, nx);
     ny = Math.max(0, ny);
@@ -72,13 +93,12 @@ export class Layer {
     const nw = nx1 - nx;
     const nh = ny1 - ny;
     if (nw <= 0 || nh <= 0) return;     // 整块在 doc 外
-    if (nw === this.bboxW && nh === this.bboxH && nx === this.bboxX && ny === this.bboxY) return;
+    if (!isEmpty && nw === this.bboxW && nh === this.bboxH && nx === this.bboxX && ny === this.bboxY) return;
     const nc = makeBitmap(nw, nh);
     const nctx = nc.getContext("2d", { willReadFrequently: false });
     nctx.imageSmoothingEnabled = true;
     nctx.imageSmoothingQuality = "low";
-    // 把旧 canvas 内容画到新 canvas 的对应位置
-    if (this.bboxW > 0 && this.bboxH > 0) {
+    if (!isEmpty) {
       nctx.drawImage(this.canvas, this.bboxX - nx, this.bboxY - ny);
     }
     this.canvas = nc;
@@ -91,6 +111,7 @@ export class Layer {
 
   // doc 坐标采样（吸色用）。落在 bbox 外 → 透明。
   sampleAt(docX, docY) {
+    if (this.bboxW <= 0 || this.bboxH <= 0) return [0, 0, 0, 0];
     const lx = docX - this.bboxX;
     const ly = docY - this.bboxY;
     if (lx < 0 || ly < 0 || lx >= this.bboxW || ly >= this.bboxH) {
@@ -104,8 +125,11 @@ export class Layer {
   }
 
   // 整个 layer 当前像素的快照（给 undo 用）。包含 bbox 信息，restore 时
-  // 会换 canvas + 复位 bbox。
+  // 会换 canvas + 复位 bbox。empty 层 imageData=null。
   snapshot() {
+    if (this.bboxW <= 0 || this.bboxH <= 0) {
+      return { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
+    }
     return {
       bboxX: this.bboxX, bboxY: this.bboxY,
       bboxW: this.bboxW, bboxH: this.bboxH,
@@ -115,8 +139,10 @@ export class Layer {
 
   // 把快照里的像素 + bbox 还原。必要时 realloc canvas。
   restoreFromSnapshot(snap) {
-    if (this.bboxW !== snap.bboxW || this.bboxH !== snap.bboxH) {
-      this.canvas = makeBitmap(snap.bboxW, snap.bboxH);
+    const targetW = Math.max(1, snap.bboxW);   // 1×1 占位给 empty
+    const targetH = Math.max(1, snap.bboxH);
+    if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
+      this.canvas = makeBitmap(targetW, targetH);
       this.ctx = this.canvas.getContext("2d", { willReadFrequently: false });
       this.ctx.imageSmoothingEnabled = true;
       this.ctx.imageSmoothingQuality = "low";
@@ -128,8 +154,11 @@ export class Layer {
     if (snap.imageData) {
       this.ctx.putImageData(snap.imageData, 0, 0);
     } else if (snap.bitmap) {
-      this.ctx.clearRect(0, 0, this.bboxW, this.bboxH);
+      this.ctx.clearRect(0, 0, targetW, targetH);
       this.ctx.drawImage(snap.bitmap, 0, 0);
+    } else {
+      // empty snapshot：清空占位 1×1
+      this.ctx.clearRect(0, 0, targetW, targetH);
     }
   }
 }
@@ -148,16 +177,76 @@ export class PaintDoc {
     return this.layers[this.activeIndex] || null;
   }
 
-  setActive(index) {
-    if (index < 0 || index >= this.layers.length) return;
-    this.activeIndex = index;
+  get maxLayers() {
+    return computeMaxLayers(this.width, this.height);
   }
 
-  // 清空当前 layer 像素（不删 layer）。
+  setActive(index) {
+    if (index < 0 || index >= this.layers.length) return false;
+    this.activeIndex = index;
+    return true;
+  }
+
+  setActiveById(id) {
+    const i = this.layers.findIndex((l) => l.id === id);
+    if (i < 0) return false;
+    this.activeIndex = i;
+    return true;
+  }
+
+  // 新建 empty 层，插在 active 之上。返回新层 / null（封顶或非法）。
+  addLayer(name) {
+    if (this.layers.length >= this.maxLayers) return null;
+    const L = new Layer({
+      width: this.width,
+      height: this.height,
+      name: name || `图层 ${_layerIdCounter}`,
+      empty: true,
+    });
+    const insertAt = this.activeIndex + 1;
+    this.layers.splice(insertAt, 0, L);
+    this.activeIndex = insertAt;
+    return L;
+  }
+
+  // 删除指定层（id）。最后一层不可删（doc 永远至少 1 层）。
+  removeLayer(id) {
+    if (this.layers.length <= 1) return false;
+    const i = this.layers.findIndex((l) => l.id === id);
+    if (i < 0) return false;
+    this.layers.splice(i, 1);
+    if (this.activeIndex >= this.layers.length) this.activeIndex = this.layers.length - 1;
+    if (this.activeIndex < 0) this.activeIndex = 0;
+    return true;
+  }
+
+  // 上移 / 下移（toward = +1 上，-1 下）。bottom 是 layers[0]，top 是末尾。
+  // 注意：UI 里"图层 1 在最上面"是常见 anime 工作流；但 doc.layers 数组 0 是底，
+  // 用 UI 渲染时倒序即可，doc 本身不翻。
+  moveLayer(id, toward) {
+    const i = this.layers.findIndex((l) => l.id === id);
+    if (i < 0) return false;
+    const j = i + toward;
+    if (j < 0 || j >= this.layers.length) return false;
+    const [L] = this.layers.splice(i, 1);
+    this.layers.splice(j, 0, L);
+    if (this.activeIndex === i) this.activeIndex = j;
+    else if (this.activeIndex === j) this.activeIndex = i;
+    return true;
+  }
+
+  // 清空当前 layer 像素（不删 layer）。bbox 复位为 empty（释放 canvas）。
   clearActiveLayer() {
     const L = this.activeLayer;
     if (!L) return;
-    L.ctx.clearRect(0, 0, L.width, L.height);
+    L.bboxX = 0;
+    L.bboxY = 0;
+    L.bboxW = 0;
+    L.bboxH = 0;
+    L.canvas = makeBitmap(1, 1);
+    L.ctx = L.canvas.getContext("2d", { willReadFrequently: false });
+    L.ctx.imageSmoothingEnabled = true;
+    L.ctx.imageSmoothingQuality = "low";
   }
 
   // 整张 doc 的像素 dump（旧 API 兼容；新代码直接用 Layer.snapshot()）。

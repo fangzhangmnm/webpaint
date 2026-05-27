@@ -379,30 +379,23 @@ export class InputController {
   }
 
   // ---- 笔画 ----
+  // **undo 模型**（v34 多图层引入）：每个 op 存 {layerId, before, after}。
+  // before/after 都是 layer snapshot 的复本（bboxX/Y/W/H + imageData|blob）。
+  // - undo[i] → 把 chain[i].layerId 的层 restore 到 chain[i].before；index--
+  // - redo → index++；restore 到 chain[index].after
+  // - 起手 index=-1，canUndo = index>=0
+  // 旧版本"状态链"模型在跨图层时撤销出现"撤销不可见"问题，弃用。
   _beginStroke(e, rec, mode) {
     const settings = this.getBrushSettings();
     if (!settings || !this.doc.activeLayer) return;
     const layer = this.doc.activeLayer;
-    // 链空 → lazy 拍当前状态作为"起点"（撤销能回到的最远状态）
-    if (this.undoChain.length === 0) {
-      const snap = layer.snapshot();
-      const entry = {
-        layerId: layer.id,
-        bboxX: snap.bboxX, bboxY: snap.bboxY,
-        bboxW: snap.bboxW, bboxH: snap.bboxH,
-        imageData: snap.imageData,
-        blob: null,
-      };
-      this.undoChain.push(entry);
-      this.undoIndex = 0;
-      this._compressEntry(entry);
-    }
     this._strokeLayerId = layer.id;
+    // 在笔触前拍一张 before snapshot（pending，endStroke 时和 after 一起 push）
+    this._strokePreSnap = layer.snapshot();
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, e);
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode);
-    // begin 已经落了第一颗 stamp → 也要把它的 dirty 报上去
     const bbox = this.brush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
@@ -411,19 +404,21 @@ export class InputController {
     this.brush.endStroke();
     if (this._strokeLayerId == null) return;
     const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
+    const preSnap = this._strokePreSnap;
     this._strokeLayerId = null;
-    if (!layer) return;
-    const snap = layer.snapshot();
-    // 截掉 redo 段，把新状态 push 进去
+    this._strokePreSnap = null;
+    if (!layer || !preSnap) return;
+    const postSnap = layer.snapshot();
+    // 截掉 redo 段
     if (this.undoIndex < this.undoChain.length - 1) {
       this.undoChain.length = this.undoIndex + 1;
     }
     const entry = {
       layerId: layer.id,
-      bboxX: snap.bboxX, bboxY: snap.bboxY,
-      bboxW: snap.bboxW, bboxH: snap.bboxH,
-      imageData: snap.imageData,
-      blob: null,
+      before: preSnap,    // {bboxX, bboxY, bboxW, bboxH, imageData}
+      after: postSnap,
+      beforeBlob: null,
+      afterBlob: null,
     };
     this.undoChain.push(entry);
     this.undoIndex++;
@@ -433,52 +428,62 @@ export class InputController {
     }
     this._emitHistChange();
     this.board.requestRender();
-    // 后台压缩；toBlob 完成时若 entry 还在链上就替换 imageData → blob
     this._compressEntry(entry);
   }
   _abortStroke() {
     this.brush.cancelStroke();
-    // 退回当前 chain 状态（= 笔触开始前那张）
-    if (this._strokeLayerId != null && this.undoIndex >= 0) {
-      this._restoreEntry(this.undoChain[this.undoIndex]);
+    // 退回笔触开始前 = 应用 pre snap
+    if (this._strokeLayerId != null && this._strokePreSnap) {
+      const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
+      if (layer) layer.restoreFromSnapshot(this._strokePreSnap);
       this.board.invalidateAll();
     }
     this._strokeLayerId = null;
+    this._strokePreSnap = null;
   }
 
-  // 把 entry.imageData 压成 PNG Blob，成功后释放 imageData
+  // 把 entry.before / after 都压成 PNG Blob，成功后释放 imageData
   _compressEntry(entry) {
+    this._compressSnap(entry, "before");
+    this._compressSnap(entry, "after");
+  }
+  _compressSnap(entry, key) {
+    const snap = entry[key];
+    if (!snap || !snap.imageData) return;
+    if (snap.bboxW <= 0 || snap.bboxH <= 0) { snap.imageData = null; return; }
     const c = document.createElement("canvas");
-    c.width = entry.bboxW; c.height = entry.bboxH;
-    c.getContext("2d").putImageData(entry.imageData, 0, 0);
+    c.width = snap.bboxW;
+    c.height = snap.bboxH;
+    c.getContext("2d").putImageData(snap.imageData, 0, 0);
     c.toBlob((blob) => {
-      if (!blob) return;                          // 失败就保留 imageData
-      if (!this.undoChain.includes(entry)) return; // 已被裁出链 → 丢
-      entry.blob = blob;
-      entry.imageData = null;                     // 释放原始 16MB
+      if (!blob) return;
+      if (!this.undoChain.includes(entry)) return;
+      entry[key + "Blob"] = blob;
+      snap.imageData = null;     // 释放 raw
     }, "image/png");
   }
 
-  // 把 entry 还原到 layer：换 canvas + 复位 bbox + 写入像素。
-  // imageData 优先，否则解码 blob（异步）。
-  _restoreEntry(entry) {
+  // restoreEntrySide(entry, "before" | "after")：把那一侧应用到 layer。
+  // invalidateAll 在 layer 真的被更新后才触发：sync 路径立即调，async 路径
+  // 在 blob decode 完成后调。这样避免渲染 stale 帧再 flash 一下。
+  _restoreEntrySide(entry, side) {
     const layer = this.doc.layers.find((l) => l.id === entry.layerId);
     if (!layer) return Promise.resolve();
-    if (entry.imageData) {
-      layer.restoreFromSnapshot({
-        bboxX: entry.bboxX, bboxY: entry.bboxY,
-        bboxW: entry.bboxW, bboxH: entry.bboxH,
-        imageData: entry.imageData,
-      });
+    const snap = entry[side];
+    const blob = entry[side + "Blob"];
+    if (snap && snap.imageData) {
+      layer.restoreFromSnapshot(snap);
+      this.board.invalidateAll();
       return Promise.resolve();
     }
-    if (!entry.blob) return Promise.resolve();
-    return createImageBitmap(entry.blob).then((bitmap) => {
-      layer.restoreFromSnapshot({
-        bboxX: entry.bboxX, bboxY: entry.bboxY,
-        bboxW: entry.bboxW, bboxH: entry.bboxH,
-        bitmap,
-      });
+    if (!blob) {
+      // 空层 / 没像素：复位 bbox 即可
+      if (snap) layer.restoreFromSnapshot({ ...snap, imageData: null });
+      this.board.invalidateAll();
+      return Promise.resolve();
+    }
+    return createImageBitmap(blob).then((bitmap) => {
+      layer.restoreFromSnapshot({ ...snap, bitmap });
       bitmap.close?.();
       this.board.invalidateAll();
     });
@@ -632,26 +637,40 @@ export class InputController {
   _emitTool(tool) { window.dispatchEvent(new CustomEvent("wp:settool", { detail: tool })); }
   _adjustSize(delta) { window.dispatchEvent(new CustomEvent("wp:adjsize", { detail: delta })); }
 
-  // ---- undo / redo（snapshot 链 + pointer）----
-  canUndo() { return this.undoIndex > 0; }
-  canRedo() { return this.undoIndex >= 0 && this.undoIndex < this.undoChain.length - 1; }
+  // ---- undo / redo（op-based: 每个 entry 有 before + after）----
+  canUndo() { return this.undoIndex >= 0; }
+  canRedo() { return this.undoIndex < this.undoChain.length - 1; }
   undo() {
     if (!this.canUndo()) return;
+    const entry = this.undoChain[this.undoIndex];
     this.undoIndex--;
-    this._restoreEntry(this.undoChain[this.undoIndex]);
-    this.board.invalidateAll();
+    this._restoreEntrySide(entry, "before");  // 自己负责 invalidateAll
     this._emitHistChange();
   }
   redo() {
     if (!this.canRedo()) return;
     this.undoIndex++;
-    this._restoreEntry(this.undoChain[this.undoIndex]);
-    this.board.invalidateAll();
+    const entry = this.undoChain[this.undoIndex];
+    this._restoreEntrySide(entry, "after");
     this._emitHistChange();
   }
   clearHistory() {
     this.undoChain.length = 0;
     this.undoIndex = -1;
+    this._emitHistChange();
+  }
+
+  // 图层被删除：链上属于这层的 op 全砍掉，index 重算。
+  // 简单粗暴；phase 2b 可改成"删除图层"也作为可撤销 op。
+  dropHistoryForLayer(layerId) {
+    let newIndex = this.undoIndex;
+    for (let i = this.undoChain.length - 1; i >= 0; i--) {
+      if (this.undoChain[i].layerId === layerId) {
+        this.undoChain.splice(i, 1);
+        if (i <= newIndex) newIndex--;
+      }
+    }
+    this.undoIndex = Math.max(-1, Math.min(this.undoChain.length - 1, newIndex));
     this._emitHistChange();
   }
   _emitHistChange() {
