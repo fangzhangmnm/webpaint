@@ -315,6 +315,12 @@ input[type=range] {
 .menu-item:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .menu-item-state { color: var(--ink-soft); font-size: 12px; }
 .menu-item[aria-pressed="true"] .menu-item-state { color: var(--accent, #4c8bf5); font-weight: 600; }
+.menu-item.menu-danger { color: #c0392b; }
+.menu-sep {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 4px 8px;
+}
 
 /* 浮动可拖面板（color picker / 未来的 layers / brush params 等都走这套） */
 .float-panel {

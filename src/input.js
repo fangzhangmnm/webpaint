@@ -56,7 +56,6 @@ export class InputController {
     this.brush = new BrushEngine();
     this.getTool = opts.getTool || (() => "brush");
     this.getBrushSettings = opts.getBrushSettings || (() => null);   // 必须传
-    this.getPressureEnabled = opts.getPressureEnabled || (() => true);
     this.getLongPressPickEnabled = opts.getLongPressPickEnabled || (() => false);
     this.onColorSampled = opts.onColorSampled || (() => {});
     this.status = opts.status || (() => {});
@@ -269,7 +268,7 @@ export class InputController {
       // 画的时候不刷 cursor preview，省一次全屏 dirty
       const events = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : null;
       const list = (events && events.length) ? events : [e];
-      const enabled = this.getPressureEnabled();
+      const settings = this.getBrushSettings();
       for (const ev of list) {
         // **Safari iOS getCoalescedEvents() 边界回放过滤**：每次 pointermove
         // 的 coalesced 列表会把上一批的样本一起带回来 (eg 一批末尾 t=21，下
@@ -284,11 +283,15 @@ export class InputController {
         rec.lastRawX = ev.clientX;
         rec.lastRawY = ev.clientY;
         if (drx * drx + dry * dry < RAW_STATIC_SCREEN_SQ) continue;
-        // **v24**：raw clientX/Y 直传 brush，input 端不做位置平滑
-        rec.smX = ev.clientX;
-        rec.smY = ev.clientY;
+        // Streamline：位置一阶 IIR LPF。settings.streamline ∈ [0,1]，
+        // 0=raw 直传，1=完全跟不上（笔尖卡在起点）。Procreate 同名 slider。
+        // α 下限 0.05 避免完全 stuck。
+        const sm = settings ? settings.streamline ?? 0 : 0;
+        const alphaPos = Math.max(0.05, 1 - sm);
+        rec.smX = rec.smX + alphaPos * (ev.clientX - rec.smX);
+        rec.smY = rec.smY + alphaPos * (ev.clientY - rec.smY);
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
-        const pressure = effectivePressureFor(rec, ev, enabled);
+        const pressure = effectivePressureFor(rec, ev);
         this.brush.extendStroke(dx, dy, pressure);
       }
       // 把 brush 累的 dirty bbox 送进 board，rAF render 时只 blit 这一片
@@ -394,7 +397,7 @@ export class InputController {
     this._strokeLayerId = layer.id;
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
-    const pressure = effectivePressureFor(rec, e, this.getPressureEnabled());
+    const pressure = effectivePressureFor(rec, e);
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode);
     // begin 已经落了第一颗 stamp → 也要把它的 dirty 报上去
     const bbox = this.brush.flushDirty();
@@ -642,14 +645,13 @@ export class InputController {
   }
 }
 
-// pressure 关时一律返 1（"满压感"），数据语义而非渲染开关。
-//
 // 抬笔瞬间 e.pressure === 0 → 沿用 rec.lastP，不退回 0.5（v4）。
 // 起手 warmup 也 0 但 lastP 还没 → 退到 **0.2**（v6，原本 0.5 → 起手鼓 bulb）。
 // 算完 raw 后过一道 LPF（rec.smP，α=PRESSURE_SMOOTH_ALPHA）做 stabilizer，
 // damp 10Hz 抖动 + 削传感器尖刺。sentinel rec.smP < 0 → 首颗用 raw（tap 满压）。
-function effectivePressureFor(rec, ev, enabled) {
-  if (!enabled) return 1;
+// 注：是否真的把 pressure 用进 size / opacity 由 BrushSettings.pressureToSize /
+// pressureToOpacity 决定（v30 起，分别 toggle）。这里永远 return 真值。
+function effectivePressureFor(rec, ev) {
   let raw;
   if (ev.pointerType === "mouse") {
     raw = 0.5;

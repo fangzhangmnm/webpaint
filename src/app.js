@@ -30,12 +30,13 @@ const els = {
   undoBtn: document.getElementById("undoButton"),
   redoBtn: document.getElementById("redoButton"),
   fitBtn: document.getElementById("fitButton"),
-  clearBtn: document.getElementById("clearButton"),
-  themeBtn: document.getElementById("themeButton"),
-  pressureBtn: document.getElementById("pressureButton"),
   menuBtn: document.getElementById("menuButton"),
   menuPanel: document.getElementById("menuPanel"),
   menuLongPressPick: document.getElementById("menuLongPressPick"),
+  menuPressureSize: document.getElementById("menuPressureSize"),
+  menuPressureOpacity: document.getElementById("menuPressureOpacity"),
+  menuTheme: document.getElementById("menuTheme"),
+  menuClear: document.getElementById("menuClear"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
   activeSwatch: document.getElementById("activeSwatch"),
   // 浮动色板
@@ -75,8 +76,9 @@ const state = {
     size: parseFloat(safeLS("webpaint.size") || "12"),
     opacity: parseFloat(safeLS("webpaint.opacity") || "1"),
     color: safeLS("webpaint.color") || "#1b1b1b",
+    pressureToSize: safeLS("webpaint.pToSize") !== "0",     // 默认开
+    pressureToOpacity: safeLS("webpaint.pToOpacity") !== "0",
   }),
-  pressureEnabled: safeLS("webpaint.pressure") !== "0", // 默认开（不像 ScratchPad 默认关）
   longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
 };
 
@@ -90,7 +92,6 @@ syncBrushColor();
 const input = new InputController(board, doc, {
   getTool: () => state.tool,
   getBrushSettings: () => state.brush,
-  getPressureEnabled: () => state.pressureEnabled,
   getLongPressPickEnabled: () => state.longPressPick,
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
@@ -114,7 +115,7 @@ function applyTheme(t) {
   theme = t;
   document.documentElement.setAttribute("data-theme", t);
   safeLSSet("webpaint.theme", t);
-  els.themeBtn.title = `主题：${THEME_LABEL[t]}`;
+  els.menuTheme.querySelector('[data-state-for="theme"]').textContent = THEME_LABEL[t];
   requestAnimationFrame(applyThemeColorsToBoard);
 }
 applyTheme(theme);
@@ -180,30 +181,53 @@ window.addEventListener("wp:adjsize", (e) => {
   setStatus(`笔粗 ${state.brush.size}px`);
 });
 
-// ---- 压感 ----
-function applyPressure(on) {
-  state.pressureEnabled = !!on;
-  els.pressureBtn.setAttribute("aria-pressed", on ? "true" : "false");
-  els.pressureBtn.title = `压感（${on ? "开" : "关"}）`;
-  safeLSSet("webpaint.pressure", on ? "1" : "0");
+// ---- 汉堡菜单 ----
+function setMenuItem(btn, on, stateLabel = on ? "开" : "关") {
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+  const st = btn.querySelector('.menu-item-state');
+  if (st) st.textContent = stateLabel;
 }
-els.pressureBtn.addEventListener("click", () => {
-  applyPressure(!state.pressureEnabled);
-  setStatus(`压感 · ${state.pressureEnabled ? "开" : "关"}`);
-});
-applyPressure(state.pressureEnabled);
 
-// ---- 汉堡菜单 + 内含的"单指长按吸色"toggle ----
+function applyPressureSize(on) {
+  state.brush.pressureToSize = !!on;
+  setMenuItem(els.menuPressureSize, on);
+  safeLSSet("webpaint.pToSize", on ? "1" : "0");
+}
+function applyPressureOpacity(on) {
+  state.brush.pressureToOpacity = !!on;
+  setMenuItem(els.menuPressureOpacity, on);
+  safeLSSet("webpaint.pToOpacity", on ? "1" : "0");
+}
 function applyLongPressPick(on) {
   state.longPressPick = !!on;
-  els.menuLongPressPick.setAttribute("aria-pressed", on ? "true" : "false");
-  els.menuLongPressPick.querySelector('[data-state-for="longPressPick"]').textContent = on ? "开" : "关";
+  setMenuItem(els.menuLongPressPick, on);
   safeLSSet("webpaint.longPressPick", on ? "1" : "0");
 }
+
+els.menuPressureSize.addEventListener("click", () => {
+  applyPressureSize(!state.brush.pressureToSize);
+  setStatus(`压·粗 · ${state.brush.pressureToSize ? "开" : "关"}`);
+});
+els.menuPressureOpacity.addEventListener("click", () => {
+  applyPressureOpacity(!state.brush.pressureToOpacity);
+  setStatus(`压·透 · ${state.brush.pressureToOpacity ? "开" : "关"}`);
+});
 els.menuLongPressPick.addEventListener("click", () => {
   applyLongPressPick(!state.longPressPick);
   setStatus(`长按吸色 · ${state.longPressPick ? "开" : "关"}`);
 });
+els.menuTheme.addEventListener("click", () => {
+  const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  applyTheme(next);
+  setStatus(`主题 · ${THEME_LABEL[next]}`);
+});
+els.menuClear.addEventListener("click", () => {
+  setMenuOpen(false);
+  openSheet(els.clearSheet, els.clearBackdrop);
+});
+
+applyPressureSize(state.brush.pressureToSize);
+applyPressureOpacity(state.brush.pressureToOpacity);
 applyLongPressPick(state.longPressPick);
 
 function setMenuOpen(open) {
@@ -214,14 +238,13 @@ els.menuBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   setMenuOpen(els.menuPanel.classList.contains("hidden"));
 });
-// 点菜单外的任何地方都收起来；点菜单本身不收（让 toggle 反复点）
 document.addEventListener("pointerdown", (e) => {
   if (els.menuPanel.classList.contains("hidden")) return;
   if (els.menuPanel.contains(e.target) || els.menuBtn.contains(e.target)) return;
   setMenuOpen(false);
 });
 
-// ---- undo / redo / fit / clear ----
+// ---- undo / redo / fit ----
 els.undoBtn.addEventListener("click", () => input.undo());
 els.redoBtn.addEventListener("click", () => input.redo());
 window.addEventListener("wp:histchange", (e) => {
@@ -245,7 +268,6 @@ function closeSheet(sheet, backdrop) {
   backdrop.classList.add("hidden");
   sheet.classList.add("hidden");
 }
-els.clearBtn.addEventListener("click", () => openSheet(els.clearSheet, els.clearBackdrop));
 els.clearBackdrop.addEventListener("click", () => closeSheet(els.clearSheet, els.clearBackdrop));
 els.clearSheet.addEventListener("click", (e) => {
   const a = e.target.closest("[data-clear]")?.dataset.clear;
@@ -256,14 +278,6 @@ els.clearSheet.addEventListener("click", (e) => {
   input.clearHistory();
   board.invalidateAll();
   setStatus("已清空");
-});
-
-// 主题切换
-els.themeBtn.addEventListener("click", () => {
-  const i = THEMES.indexOf(theme);
-  const next = THEMES[(i + 1) % THEMES.length];
-  applyTheme(next);
-  setStatus(`主题 · ${THEME_LABEL[next]}`);
 });
 
 // ---- HUD ----
@@ -422,6 +436,7 @@ function pickerSetFromHex(hex) {
   els.hueSlider.value = String(Math.round(h));
   els.hexInput.value = hex;
   els.previewSwatch.style.background = hex;
+  drawSvPad();         // 不画的话 marker / hue band 都停在旧值，吸色看不出新颜色
 }
 
 // ---- color conv ----

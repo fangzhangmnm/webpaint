@@ -103,12 +103,6 @@
         <input id="opacitySlider" type="range" min="1" max="100" step="1" value="100" aria-label="不透明度" />
       </label>
 
-      <button class="tool" id="pressureButton" type="button" title="压感（默认开）" aria-pressed="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <line x1="3" y1="12" x2="21" y2="7"></line>
-          <line x1="3" y1="12" x2="21" y2="17"></line>
-        </svg>
-      </button>
       <div class="spacer"></div>
 
       <button class="tool" id="undoButton" type="button" title="撤销 (Ctrl+Z)">
@@ -131,21 +125,6 @@
         </svg>
       </button>
 
-      <button class="tool" id="clearButton" type="button" title="清空画布（不可撤销）">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
-          <path d="M10 11v6"></path>
-          <path d="M14 11v6"></path>
-        </svg>
-      </button>
-
-      <button class="tool" id="themeButton" type="button" title="主题">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-        </svg>
-      </button>
-
       <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="4" y1="7" x2="20" y2="7"></line>
@@ -157,9 +136,26 @@
 
     <!-- 汉堡菜单：低频开关 / 操作。后续 .ora 导入导出、新建分辨率也放这里。 -->
     <div class="menu-panel hidden" id="menuPanel" role="menu">
+      <button class="menu-item" id="menuPressureSize" type="button" role="menuitemcheckbox" aria-pressed="true">
+        <span class="menu-item-label">压感 → 粗细</span>
+        <span class="menu-item-state" data-state-for="pressureSize">开</span>
+      </button>
+      <button class="menu-item" id="menuPressureOpacity" type="button" role="menuitemcheckbox" aria-pressed="true">
+        <span class="menu-item-label">压感 → 透明度</span>
+        <span class="menu-item-state" data-state-for="pressureOpacity">开</span>
+      </button>
+      <hr class="menu-sep" />
       <button class="menu-item" id="menuLongPressPick" type="button" role="menuitemcheckbox" aria-pressed="false">
         <span class="menu-item-label">单指长按吸色</span>
         <span class="menu-item-state" data-state-for="longPressPick">关</span>
+      </button>
+      <hr class="menu-sep" />
+      <button class="menu-item" id="menuTheme" type="button" role="menuitem">
+        <span class="menu-item-label">主题</span>
+        <span class="menu-item-state" data-state-for="theme">跟随系统</span>
+      </button>
+      <button class="menu-item menu-danger" id="menuClear" type="button" role="menuitem">
+        <span class="menu-item-label">清空画布</span>
       </button>
     </div>
 

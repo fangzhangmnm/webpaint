@@ -15,7 +15,15 @@ on extendStroke(x, y, p):
 ```
 
 特征：
-- **沿路径每 step doc-px 一颗 stamp**，step = size × spacing（不走 pressure，避免 spacing 颤）
+- **沿路径每 step doc-px 一颗 stamp**，**step 走当前 stamp 的有效半径**：
+  `step = max(0.5, size × p^sizeCurve × spacing)`。
+  - 旧版（v19..v28）step = size × spacing 是整笔常量。在压感关 / 满压时没问题，
+    低压感时 stamp 直径缩成 size × p^0.6 但 step 没缩 → 笔触上能看到一颗颗豆。
+  - v30 改成 step 用 current event 的 pressure 算，低压感时 step 跟着缩，
+    豆豆消失。
+  - 注意：早期一度禁了 step 走 pressure（v19）是因为当时 stamp 之间的 accumDist
+    会被 step 反复缩涨干扰；buffer 架构（v28）+ timeStamp 单调过滤（v26）后
+    这个干扰被消化掉了，可以放心走 pressure。
 - **一笔一 buffer**：layer-size RGBA 离屏 canvas
 - **per-stamp alpha 不含 s.opacity**：只含 `p^opacityCurve`（压感）
 - **endStroke 一次性合成**：buffer × s.opacity 写进 layer

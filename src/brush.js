@@ -30,6 +30,9 @@ const DEFAULT_SETTINGS = {
   pressureToOpacity: true,    // user 2026-05-25：默认笔压也控 alpha
   sizeCurve: 0.6,             // size = size_max × p^sizeCurve
   opacityCurve: 0.6,
+  // Streamline：位置 IIR LPF，0=raw 直传，1=完全跟不上。Procreate 同名参数。
+  // 默认 0.3 微开一点：手抖 / 整数量化 不会进笔触，又几乎没有可感延迟。
+  streamline: 0.3,
   color: "#1b1b1b",
 };
 
@@ -100,8 +103,13 @@ export class BrushEngine {
   // 否则 Safari iOS coalesced 边界回放会把反向小段算进 path 长度 → 疏密波。
   // 这一层过滤在 input.js 端做。
 
-  _stepFor(s) {
-    return Math.max(0.5, s.size * s.spacing);
+  // step 走"当前 stamp 的有效半径"：低压感时 effSize 小，step 也小 →
+  // 不再因为 stamp 直径远小于 step 而看到一颗颗豆豆。
+  // 旧版（v19~v28）step 是整笔常量 = size × spacing，低压感时 stamp 缩成豆。
+  _stepFor(s, pressure) {
+    const p = Math.max(0, Math.min(1, pressure));
+    const effSize = s.size * (s.pressureToSize ? Math.pow(p, s.sizeCurve) : 1);
+    return Math.max(0.5, effSize * s.spacing);
   }
 
   beginStroke(layer, settings, x, y, pressure, mode = "brush") {
@@ -136,9 +144,12 @@ export class BrushEngine {
     const dy = y - st.lastY;
     const L = Math.hypot(dx, dy);
     if (L === 0) return;
-    const step = this._stepFor(st.settings);
     let pos = 0;
-    while (st.accumDist + (L - pos) >= step) {
+    while (true) {
+      // step 用本次 event 的目标 pressure 算（在 event 内常量）。
+      // 想再精确可在 lerp 后用 sp 重算，但 240Hz event 之间 p 变化很小，差别看不出。
+      const step = this._stepFor(st.settings, pressure);
+      if (st.accumDist + (L - pos) < step) break;
       const need = step - st.accumDist;
       pos += need;
       const t = pos / L;
