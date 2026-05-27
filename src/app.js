@@ -17,6 +17,7 @@ import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   getCurrentSessionName, setCurrentSessionName,
   exportOraDownload, shareOrDownloadImage,
+  copyImageToClipboard, readImageFromClipboard,
 } from "./session.js";
 import { decodeOraToDoc, encodeDocToOra } from "./ora.js";
 import {
@@ -39,7 +40,6 @@ const els = {
   opacitySlider: document.getElementById("opacitySlider"),
   undoBtn: document.getElementById("undoButton"),
   redoBtn: document.getElementById("redoButton"),
-  fitBtn: document.getElementById("fitButton"),
   layersBtn: document.getElementById("layersButton"),
   layersPanel: document.getElementById("layersPanel"),
   layersPanelHead: document.getElementById("layersPanelHead"),
@@ -57,14 +57,15 @@ const els = {
   menuPressureOpacity: document.getElementById("menuPressureOpacity"),
   menuTheme: document.getElementById("menuTheme"),
   menuClear: document.getElementById("menuClear"),
+  menuImport: document.getElementById("menuImport"),
+  menuExportPng: document.getElementById("menuExportPng"),
+  menuExportJpg: document.getElementById("menuExportJpg"),
+  menuExportOra: document.getElementById("menuExportOra"),
+  menuClipboardCopy: document.getElementById("menuClipboardCopy"),
+  menuClipboardPaste: document.getElementById("menuClipboardPaste"),
+  menuFit: document.getElementById("menuFit"),
   topSaveBtn: document.getElementById("topSaveBtn"),
   topGalleryBtn: document.getElementById("topGalleryBtn"),
-  topImportBtn: document.getElementById("topImportBtn"),
-  topShareBtn: document.getElementById("topShareBtn"),
-  sharePopup: document.getElementById("sharePopup"),
-  sharePopupPng: document.getElementById("sharePopupPng"),
-  sharePopupJpg: document.getElementById("sharePopupJpg"),
-  sharePopupOra: document.getElementById("sharePopupOra"),
   galleryFull: document.getElementById("galleryFull"),
   galleryClose: document.getElementById("galleryClose"),
   galleryCurrentName: document.getElementById("galleryCurrentName"),
@@ -72,16 +73,11 @@ const els = {
   gallerySaveCopyBtn: document.getElementById("gallerySaveCopyBtn"),
   galleryGrid: document.getElementById("galleryGrid"),
   galleryEmpty: document.getElementById("galleryEmpty"),
-  topCloudBtn: document.getElementById("topCloudBtn"),
-  cloudFull: document.getElementById("cloudFull"),
-  cloudClose: document.getElementById("cloudClose"),
-  cloudAuthStatus: document.getElementById("cloudAuthStatus"),
+  galleryCloudStatus: document.getElementById("galleryCloudStatus"),
   cloudSignInBtn: document.getElementById("cloudSignInBtn"),
   cloudSignOutBtn: document.getElementById("cloudSignOutBtn"),
   cloudPushBtn: document.getElementById("cloudPushBtn"),
   cloudRefreshBtn: document.getElementById("cloudRefreshBtn"),
-  cloudGrid: document.getElementById("cloudGrid"),
-  cloudEmpty: document.getElementById("cloudEmpty"),
   oraFileInput: document.getElementById("oraFileInput"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
   activeSwatch: document.getElementById("activeSwatch"),
@@ -299,12 +295,6 @@ window.addEventListener("wp:histchange", (e) => {
 });
 els.undoBtn.disabled = true;
 els.redoBtn.disabled = true;
-
-els.fitBtn.addEventListener("click", () => {
-  board.fitToScreen();
-  updateZoomLabel();
-  setStatus("适应屏幕");
-});
 
 function openSheet(sheet, backdrop) {
   backdrop.classList.remove("hidden");
@@ -670,14 +660,33 @@ let _docLastSavedAt = 0;
 let _activeSessionName = "未命名";
 const AUTOSAVE_MS = 3 * 60 * 1000;
 
+// Smart save button：
+//   saving → 半透明 disk
+//   dirty → 蓝色 disk + 角点
+//   cloud-dirty → 上传箭头（点 = push to cloud）
+//   synced → 灰色对勾云（点 = noop）
+//   saved (未登录 / 未配置 cloud) → 灰色 disk
+const ICON_DISK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
+const ICON_UPLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+const ICON_CLOUD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
+
+function computeSaveState() {
+  if (_docSaving) return "saving";
+  if (_docDirty) return "dirty";
+  // doc clean
+  if (isSignedIn() && isCloudDirty(_activeSessionName)) return "cloud-dirty";
+  if (isSignedIn()) return "synced";
+  return "saved";
+}
 function updateSaveStatus() {
+  const state = computeSaveState();
+  els.topSaveBtn.dataset.state = state;
   const name = _activeSessionName;
-  const tail = _docSaving ? "保存中…"
-    : _docDirty ? "未保存"
-    : _docLastSavedAt ? "已保存"
-    : "-";
-  els.topSaveBtn.title = `保存 (Ctrl+S) · ${name} · ${tail}`;
-  els.topSaveBtn.dataset.state = _docSaving ? "saving" : _docDirty ? "dirty" : "clean";
+  if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存中… · ${name}`; }
+  else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存 (Ctrl+S) · ${name} · 未保存`; }
+  else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = `推送到云端 · ${name} · 本地已保存`; }
+  else if (state === "synced") { els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK; els.topSaveBtn.title = `已同步到云端 · ${name}`; }
+  else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `已保存到本地 · ${name}（未连云端）`; }
 }
 async function saveNow() {
   if (_docSaving) return;
@@ -698,6 +707,7 @@ async function saveNow() {
 }
 
 // 把 loaded doc 的内容塞回 live doc（保持指针，避免到处换引用）
+// **不**调 board.fitToScreen —— 保留用户当前视口（zoom / pan），切 session 不重置
 function adoptLoadedDoc(loaded, sessionName) {
   doc.layers = loaded.layers;
   doc.activeIndex = loaded.activeIndex;
@@ -706,7 +716,6 @@ function adoptLoadedDoc(loaded, sessionName) {
   doc.backgroundColor = loaded.backgroundColor;
   els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   input.clearHistory();
-  board.fitToScreen();
   board.invalidateAll();
   board.requestRender();
   renderLayersPanel();
@@ -719,6 +728,8 @@ function adoptLoadedDoc(loaded, sessionName) {
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty
 window.addEventListener("wp:histchange", () => {
   _docDirty = true;
+  // 任何编辑 → 云端也变 dirty（待 push）
+  if (isSignedIn()) setCloudDirty(_activeSessionName, true);
   updateSaveStatus();
 });
 // Ctrl+S
@@ -744,55 +755,75 @@ function stampNow() {
   const d = new Date();
   return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}`;
 }
-// ---- topbar 4 个独立按钮（保存 / 图库 / 导入 / 分享导出） ----
-els.topSaveBtn.addEventListener("click", () => saveNow());
+// ---- topbar：save/upload + gallery ----
+// Smart save 按钮：dirty=保存到本地；本地 clean + 云 dirty=推送；synced=noop
+els.topSaveBtn.addEventListener("click", async () => {
+  const state = computeSaveState();
+  if (state === "dirty" || state === "saving") {
+    await saveNow();
+    // saveNow 完成后 state 会重新算；如果接着 cloud-dirty 给用户提示
+    if (computeSaveState() === "cloud-dirty") {
+      setStatus("已保存到本地，再点一下推送到云端");
+    }
+  } else if (state === "cloud-dirty") {
+    await cloudPushCurrent();
+  } else if (state === "synced") {
+    setStatus("已同步到云端");
+  } else {
+    setStatus("已保存到本地");
+  }
+});
 els.topGalleryBtn.addEventListener("click", () => setGalleryOpen(true));
-els.topImportBtn.addEventListener("click", () => {
-  els.oraFileInput.value = "";    // 允许选同一个文件再触发 change
+
+// ---- 菜单：导入 / 导出 / 剪贴板 / 适应 ----
+els.menuImport.addEventListener("click", () => {
+  setMenuOpen(false);
+  els.oraFileInput.value = "";
   els.oraFileInput.click();
 });
-
-// ---- 分享 / 导出 下拉 ----
-function setSharePopupOpen(open) {
-  els.sharePopup.classList.toggle("hidden", !open);
-  els.topShareBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) {
-    // 锚到 topShareBtn 下方
-    const r = els.topShareBtn.getBoundingClientRect();
-    els.sharePopup.style.top = (r.bottom + 6) + "px";
-    els.sharePopup.style.left = "auto";
-    els.sharePopup.style.right = Math.max(8, window.innerWidth - r.right) + "px";
-  }
-}
-els.topShareBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  setSharePopupOpen(els.sharePopup.classList.contains("hidden"));
-});
-document.addEventListener("pointerdown", (e) => {
-  if (els.sharePopup.classList.contains("hidden")) return;
-  if (els.sharePopup.contains(e.target) || els.topShareBtn.contains(e.target)) return;
-  setSharePopupOpen(false);
-});
-els.sharePopupPng.addEventListener("click", async () => {
-  setSharePopupOpen(false);
+els.menuExportPng.addEventListener("click", async () => {
+  setMenuOpen(false);
   try {
     const r = await shareOrDownloadImage(doc, "png", `${_activeSessionName}-${stampNow()}`);
     setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : "PNG 已下载");
-  } catch (e) { setStatus("分享失败：" + (e && e.message || e)); }
+  } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
 });
-els.sharePopupJpg.addEventListener("click", async () => {
-  setSharePopupOpen(false);
+els.menuExportJpg.addEventListener("click", async () => {
+  setMenuOpen(false);
   try {
     const r = await shareOrDownloadImage(doc, "jpg", `${_activeSessionName}-${stampNow()}`);
     setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : "JPG 已下载");
-  } catch (e) { setStatus("分享失败：" + (e && e.message || e)); }
+  } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
 });
-els.sharePopupOra.addEventListener("click", async () => {
-  setSharePopupOpen(false);
+els.menuExportOra.addEventListener("click", async () => {
+  setMenuOpen(false);
   try {
     await exportOraDownload(doc, `${_activeSessionName}.ora`);
     setStatus(".ora 已下载");
   } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
+});
+els.menuClipboardCopy.addEventListener("click", async () => {
+  setMenuOpen(false);
+  try {
+    await copyImageToClipboard(doc);
+    setStatus("已复制 PNG 到剪贴板");
+  } catch (e) { setStatus("复制失败：" + (e && e.message || e)); }
+});
+els.menuClipboardPaste.addEventListener("click", async () => {
+  setMenuOpen(false);
+  try {
+    const blob = await readImageFromClipboard();
+    if (!blob) { setStatus("剪贴板里没有图片"); return; }
+    // 包装成 File 给 importImageAsLayer 复用
+    const fakeFile = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
+    await importImageAsLayer(fakeFile);
+  } catch (e) { setStatus("从剪贴板粘贴失败：" + (e && e.message || e)); }
+});
+els.menuFit.addEventListener("click", () => {
+  setMenuOpen(false);
+  board.fitToScreen();
+  updateZoomLabel();
+  setStatus("适应屏幕");
 });
 els.oraFileInput.addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
@@ -952,13 +983,38 @@ els.gallerySaveCopyBtn.addEventListener("click", () => {
 
 async function renderGallery() {
   els.galleryCurrentName.value = _activeSessionName;
+  updateCloudAuthUI();
   // revoke 旧 URL
   for (const u of _galleryUrls) URL.revokeObjectURL(u);
   _galleryUrls = [];
 
-  const list = await listSessions();
+  // 同时拿本地 + 云端 list（如果登录），按 name 合并
+  const local = await listSessions();
+  let cloud = [];
+  if (isSignedIn()) {
+    try { cloud = await listCloudSessionsRecursive(); }
+    catch (e) { console.warn("[cloud] list failed:", e); }
+  }
+  // 合并：用 name (无 .ora 后缀) 当 key
+  const byName = new Map();
+  for (const l of local) {
+    byName.set(l.name, { name: l.name, local: l, cloud: null });
+  }
+  for (const c of cloud) {
+    const name = c.path.replace(/\.ora$/i, "");
+    const ent = byName.get(name);
+    if (ent) ent.cloud = c;
+    else byName.set(name, { name, local: null, cloud: c });
+  }
+  const merged = [...byName.values()];
+  merged.sort((a, b) => {
+    const ta = (a.local?.updatedAt) || Date.parse(a.cloud?.lastModifiedDateTime || 0);
+    const tb = (b.local?.updatedAt) || Date.parse(b.cloud?.lastModifiedDateTime || 0);
+    return tb - ta;
+  });
+
   els.galleryGrid.innerHTML = "";
-  if (list.length === 0) {
+  if (merged.length === 0) {
     els.galleryEmpty.classList.remove("hidden");
     els.galleryGrid.style.display = "none";
     return;
@@ -966,24 +1022,26 @@ async function renderGallery() {
   els.galleryEmpty.classList.add("hidden");
   els.galleryGrid.style.display = "";
 
-  for (const item of list) {
+  for (const item of merged) {
+    const isLocal = !!item.local;
+    const isCloud = !!item.cloud;
     const tile = document.createElement("div");
     tile.className = "gallery-tile" + (item.name === _activeSessionName ? " active" : "");
 
-    // 缩略图
+    // 缩略图：local thumb 优先；纯云端用 ☁ 占位
     let thumbEl;
-    if (item.thumb) {
+    if (isLocal && item.local.thumb) {
       thumbEl = document.createElement("img");
       thumbEl.className = "gallery-tile-thumb";
       thumbEl.alt = item.name;
-      const url = URL.createObjectURL(item.thumb);
+      const url = URL.createObjectURL(item.local.thumb);
       _galleryUrls.push(url);
       thumbEl.src = url;
       thumbEl.loading = "lazy";
     } else {
       thumbEl = document.createElement("div");
       thumbEl.className = "gallery-tile-thumb placeholder";
-      thumbEl.textContent = item.name.slice(0, 1) || "?";
+      thumbEl.textContent = isCloud ? "☁" : (item.name.slice(0, 1) || "?");
     }
     tile.appendChild(thumbEl);
 
@@ -991,26 +1049,48 @@ async function renderGallery() {
     info.className = "gallery-tile-info";
     const nm = document.createElement("div");
     nm.className = "gallery-tile-name";
-    nm.textContent = item.name;
+    // 在 name 后面挂 source badges
+    const sources = [];
+    if (isLocal) sources.push("本地");
+    if (isCloud) sources.push("☁");
+    nm.textContent = item.name + (sources.length ? ` · ${sources.join(" ")}` : "");
     const meta = document.createElement("div");
     meta.className = "gallery-tile-meta";
-    meta.textContent = `${humanTime(item.updatedAt)} · ${humanSize(item.size)}`;
+    const t = (item.local?.updatedAt) || Date.parse(item.cloud?.lastModifiedDateTime || 0);
+    const sz = (item.local?.size) || item.cloud?.size || 0;
+    meta.textContent = `${humanTime(t)} · ${humanSize(sz)}`;
     info.appendChild(nm);
     info.appendChild(meta);
     tile.appendChild(info);
 
     const actions = document.createElement("div");
     actions.className = "gallery-tile-actions";
+    if (isCloud && !isLocal) {
+      // 纯云端 → 拉取
+      const pullBtn = document.createElement("button");
+      pullBtn.type = "button";
+      pullBtn.textContent = "拉取";
+      pullBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        pullBtn.disabled = true;
+        pullBtn.textContent = "拉取中…";
+        await pullCloudPath(item.cloud.path);
+        pullBtn.disabled = false;
+        pullBtn.textContent = "拉取";
+      });
+      actions.appendChild(pullBtn);
+    }
     const del = document.createElement("button");
     del.type = "button";
     del.className = "danger";
-    del.textContent = "删除";
+    del.textContent = isCloud && !isLocal ? "删除（云）" : (isLocal && isCloud ? "删除（本地+云）" : "删除");
     del.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm(`删除 "${item.name}"？不可撤销。`)) return;
+      if (!confirm(`删除 "${item.name}"？\n${isLocal ? "✓ 本地\n" : ""}${isCloud ? "✓ 云端\n" : ""}不可撤销。`)) return;
       try {
-        await removeSession(item.name);
-        if (item.name === _activeSessionName) {
+        if (isLocal) await removeSession(item.name);
+        if (isCloud) await deleteCloudSession(item.name);
+        if (item.name === _activeSessionName && isLocal) {
           setStatus(`已删除（当前在内存里，可保存副本为新名字保留）`);
         } else {
           setStatus(`已删除：${item.name}`);
@@ -1024,23 +1104,25 @@ async function renderGallery() {
     tile.appendChild(actions);
 
     tile.addEventListener("click", async (e) => {
-      if (e.target.closest(".gallery-tile-actions")) return; // 点 actions 不算打开
+      if (e.target.closest(".gallery-tile-actions")) return;
       if (item.name === _activeSessionName) {
         setGalleryOpen(false);
         return;
       }
       if (_docDirty) await saveNow();
-      try {
-        const loaded = await openSession(item.name);
-        if (!loaded) {
-          setStatus(`找不到：${item.name}`);
-          return;
+      if (isLocal) {
+        try {
+          const loaded = await openSession(item.name);
+          if (!loaded) { setStatus(`找不到：${item.name}`); return; }
+          adoptLoadedDoc(loaded, item.name);
+          setGalleryOpen(false);
+          setStatus(`已打开：${item.name}`);
+        } catch (err) {
+          setStatus("打开失败：" + (err && err.message || err));
         }
-        adoptLoadedDoc(loaded, item.name);
-        setGalleryOpen(false);
-        setStatus(`已打开：${item.name}`);
-      } catch (err) {
-        setStatus("打开失败：" + (err && err.message || err));
+      } else if (isCloud) {
+        // 纯云端：点 tile 也走拉取
+        await pullCloudPath(item.cloud.path);
       }
     });
 
@@ -1066,46 +1148,37 @@ function humanSize(b) {
   return `${(b / 1048576).toFixed(1)} MB`;
 }
 
-// ---- 云端面板 ----
-function setCloudOpen(open) {
-  els.cloudFull.classList.toggle("hidden", !open);
-  if (open) renderCloud();
-}
-els.topCloudBtn.addEventListener("click", () => setCloudOpen(true));
-els.cloudClose.addEventListener("click", () => setCloudOpen(false));
-
+// ---- 云端按钮（在 gallery header 里），登录态 / 推送 / 刷新 ----
 function updateCloudAuthUI() {
   const signed = isSignedIn();
   if (signed) {
     const acc = getActiveAccount();
-    els.cloudAuthStatus.textContent = `已登录：${acc?.username || acc?.name || ""}`;
+    els.galleryCloudStatus.textContent = `云端：${acc?.username || acc?.name || "已登录"}`;
     els.cloudSignInBtn.classList.add("hidden");
     els.cloudSignOutBtn.classList.remove("hidden");
-    els.cloudPushBtn.disabled = false;
-    els.cloudRefreshBtn.disabled = false;
+    els.cloudPushBtn.classList.remove("hidden");
+    els.cloudRefreshBtn.classList.remove("hidden");
   } else {
-    els.cloudAuthStatus.textContent = isAuthConfigured() ? "未登录" : "未配置 (config.js CLIENT_ID)";
-    els.cloudSignInBtn.classList.remove("hidden");
+    els.galleryCloudStatus.textContent = isAuthConfigured() ? "云端：未登录" : "云端：未配置";
+    els.cloudSignInBtn.classList.toggle("hidden", !isAuthConfigured());
     els.cloudSignOutBtn.classList.add("hidden");
-    els.cloudPushBtn.disabled = true;
-    els.cloudRefreshBtn.disabled = true;
+    els.cloudPushBtn.classList.add("hidden");
+    els.cloudRefreshBtn.classList.add("hidden");
   }
+  updateSaveStatus();   // save 按钮的 state 也跟着变
 }
 
 els.cloudSignInBtn.addEventListener("click", async () => {
-  if (!isAuthConfigured()) {
-    setStatus("尚未配置 OneDrive 客户端（config.js）");
-    return;
-  }
+  if (!isAuthConfigured()) { setStatus("尚未配置 OneDrive 客户端"); return; }
   try { await signIn(); } catch (e) { setStatus("登录失败：" + (e && e.message || e)); }
 });
 els.cloudSignOutBtn.addEventListener("click", async () => {
   try { await signOut(); } catch (_) {}
   updateCloudAuthUI();
-  renderCloud();
+  renderGallery();
 });
 
-els.cloudPushBtn.addEventListener("click", async () => {
+async function cloudPushCurrent() {
   if (!isSignedIn()) { setStatus("未登录"); return; }
   els.cloudPushBtn.disabled = true;
   els.cloudPushBtn.textContent = "推送中…";
@@ -1114,7 +1187,8 @@ els.cloudPushBtn.addEventListener("click", async () => {
     const ora = await encodeDocToOra(doc);
     await pushSession(_activeSessionName, ora);
     setStatus(`已推送：${_activeSessionName}`);
-    renderCloud();
+    updateSaveStatus();
+    renderGallery();
   } catch (e) {
     if (e instanceof CloudConflictError) {
       alert(e.message + "\n\n点击「保存副本」用新名字，然后再推送。");
@@ -1127,107 +1201,9 @@ els.cloudPushBtn.addEventListener("click", async () => {
     els.cloudPushBtn.disabled = false;
     els.cloudPushBtn.textContent = "推送当前";
   }
-});
-els.cloudRefreshBtn.addEventListener("click", () => renderCloud());
-
-async function renderCloud() {
-  updateCloudAuthUI();
-  els.cloudGrid.innerHTML = "";
-  if (!isSignedIn()) {
-    els.cloudEmpty.classList.remove("hidden");
-    els.cloudEmpty.textContent = isAuthConfigured()
-      ? "登录 OneDrive 后看你的云端作品"
-      : "尚未配置 OneDrive 客户端（src/config.js CLIENT_ID）";
-    els.cloudGrid.style.display = "none";
-    return;
-  }
-  els.cloudGrid.style.display = "";
-  els.cloudEmpty.classList.add("hidden");
-  let items;
-  try { items = await listCloudSessionsRecursive(); }
-  catch (e) {
-    setStatus("列云端失败：" + (e && e.message || e));
-    return;
-  }
-  if (!items.length) {
-    els.cloudEmpty.classList.remove("hidden");
-    els.cloudEmpty.textContent = "云端还没有作品。推送当前试试。";
-    els.cloudGrid.style.display = "none";
-    return;
-  }
-  // 排序：最新修改在前
-  items.sort((a, b) => (Date.parse(b.lastModifiedDateTime || 0) - Date.parse(a.lastModifiedDateTime || 0)));
-  for (const it of items) {
-    const tile = document.createElement("div");
-    tile.className = "gallery-tile";
-    // 云端文件 thumb 我们暂时不解 zip 取（要 N 次下载），先用占位
-    const ph = document.createElement("div");
-    ph.className = "gallery-tile-thumb placeholder";
-    ph.textContent = "☁";
-    tile.appendChild(ph);
-    const info = document.createElement("div");
-    info.className = "gallery-tile-info";
-    const nm = document.createElement("div");
-    nm.className = "gallery-tile-name";
-    nm.textContent = it.path.replace(/\.ora$/i, "");
-    const meta = document.createElement("div");
-    meta.className = "gallery-tile-meta";
-    meta.textContent = `${humanTime(Date.parse(it.lastModifiedDateTime || 0))} · ${humanSize(it.size)}`;
-    info.appendChild(nm);
-    info.appendChild(meta);
-    tile.appendChild(info);
-
-    const actions = document.createElement("div");
-    actions.className = "gallery-tile-actions";
-    const pullBtn = document.createElement("button");
-    pullBtn.type = "button";
-    pullBtn.textContent = "拉取";
-    pullBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      pullBtn.disabled = true;
-      pullBtn.textContent = "拉取中…";
-      try {
-        const r = await pullSessionByPath(it.path);
-        if (!r) { setStatus(`找不到：${it.path}`); return; }
-        const loaded = await decodeOraToDoc(r.blob);
-        // **永远 duplicate**：取一个本地不冲突的名字
-        const stem = r.suggestedName;
-        const finalName = await uniqueLocalName(stem);
-        adoptLoadedDoc(loaded, finalName);
-        await saveNow();   // 立即落盘
-        setCloudOpen(false);
-        setStatus(`已从云端拉取并保存为：${finalName}`);
-      } catch (err) {
-        console.warn("[cloud] pull failed:", err);
-        setStatus("拉取失败：" + (err && err.message || err));
-      } finally {
-        pullBtn.disabled = false;
-        pullBtn.textContent = "拉取";
-      }
-    });
-    actions.appendChild(pullBtn);
-
-    const del = document.createElement("button");
-    del.type = "button";
-    del.className = "danger";
-    del.textContent = "删除";
-    del.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (!confirm(`从云端删除 "${it.path}"？不可撤销。`)) return;
-      try {
-        await deleteCloudSession(it.path.replace(/\.ora$/i, ""));
-        renderCloud();
-        setStatus(`已从云端删除：${it.path}`);
-      } catch (err) {
-        setStatus("删除失败：" + (err && err.message || err));
-      }
-    });
-    actions.appendChild(del);
-
-    tile.appendChild(actions);
-    els.cloudGrid.appendChild(tile);
-  }
 }
+els.cloudPushBtn.addEventListener("click", cloudPushCurrent);
+els.cloudRefreshBtn.addEventListener("click", () => renderGallery());
 
 // 给本地拿一个不冲突的名字（X / X 1 / X 2 / ...）
 async function uniqueLocalName(stem) {
@@ -1238,6 +1214,23 @@ async function uniqueLocalName(stem) {
     if (!existing.has(candidate)) return candidate;
   }
   return `${stem} ${Date.now()}`;
+}
+
+// 从云端拉一个文件，duplicate 到本地（永远）
+async function pullCloudPath(path) {
+  try {
+    const r = await pullSessionByPath(path);
+    if (!r) { setStatus(`找不到：${path}`); return; }
+    const loaded = await decodeOraToDoc(r.blob);
+    const finalName = await uniqueLocalName(r.suggestedName);
+    adoptLoadedDoc(loaded, finalName);
+    await saveNow();
+    setGalleryOpen(false);
+    setStatus(`已从云端拉取并保存为：${finalName}`);
+  } catch (err) {
+    console.warn("[cloud] pull failed:", err);
+    setStatus("拉取失败：" + (err && err.message || err));
+  }
 }
 
 // ---- 启动收尾：尝试加载上次的 session（异步，不阻塞 UI 显示） ----

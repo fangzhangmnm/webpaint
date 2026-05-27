@@ -212,6 +212,37 @@ export async function shareOrDownloadImage(doc, format = "png", filename = "WebP
   return { method: "download" };
 }
 
+// ---- 剪贴板 IO ----
+
+/** 把 doc 合成图复制到剪贴板（PNG）。iPad Safari / 桌面都支持。 */
+export async function copyImageToClipboard(doc) {
+  if (!navigator.clipboard || !navigator.clipboard.write) {
+    throw new Error("浏览器不支持剪贴板写入");
+  }
+  const blob = await renderMergedBlob(doc, "image/png");
+  if (!blob) throw new Error("生成 PNG 失败");
+  // ClipboardItem 在 Safari 必须用 lazy promise 写法（write 在 user gesture 内）
+  await navigator.clipboard.write([
+    new ClipboardItem({ "image/png": blob }),
+  ]);
+}
+
+/** 读剪贴板里的图片。返回 Blob 或 null（剪贴板里没图）。 */
+export async function readImageFromClipboard() {
+  if (!navigator.clipboard || !navigator.clipboard.read) {
+    throw new Error("浏览器不支持剪贴板读取");
+  }
+  const items = await navigator.clipboard.read();
+  for (const item of items) {
+    for (const type of item.types) {
+      if (type.startsWith("image/")) {
+        return await item.getType(type);
+      }
+    }
+  }
+  return null;
+}
+
 // ---- 工具 ----
 
 function triggerDownload(blob, filename) {
