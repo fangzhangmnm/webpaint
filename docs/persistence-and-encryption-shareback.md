@@ -31,6 +31,34 @@
 - **WebPaint 内层格式**：要不要兼容 .psd？.atlas.zip 是自定义的，但 PSD 有 OneDrive 缩略图、其它工具兼容性。值得讨论。
 - **多设备同步的「劳动」颗粒度**：AtlasMaker 一次 Ctrl+S = 一次完整提交。WebPaint 是不是要支持「自动 push 每 5 分钟一次」给「正在画」的高频场景？需要 user 决定。一旦上「自动 push」就要面对 412 sibling-copy 不在场场景，认真做 UX。
 
+## ⚠️ 幽灵 current path 陷阱（AtlasMaker 0.7.2 修；WebPaint 必须避开）
+
+**场景**：
+1. `localStorage.currentPath` = 某个加密 session 的路径
+2. Boot 时 `loadCurrentSession` → 解密 → 用户 cancel 密码 / 输错 → **throw**
+3. 内存里 scene 还是 blank（初始空 doc）
+4. 但 `_activeIDBPath` 在文件顶部已经用 `getCurrentPath()` 初始化 → **指向那个加密 path**
+5. 用户在 blank scene 上随手画了点东西 → Ctrl+S
+6. `saveSession` 看到 `oldPath = _activeIDBPath` ≠ `newPath = pathFromInput()`，判定 rename
+7. **`storage.deleteSession(oldPath)` 把加密 session 真本体删了** —— 用户的数据永久丢失
+
+WebPaint 同样的脆弱点：保存路径里如果有「rename = delete old + write new」的 op，且 active path 是从 localStorage 初始化的，会撞同一颗石头。
+
+**修复（AtlasMaker 0.7.2 做的，WebPaint 抄）**：
+1. Boot 的 `.catch` 里：`_activeIDBPath = safeDefault()`（"未命名" 之类的）—— 不再指向加载失败的 path
+2. `_activeCloudPath = null` —— 防云端同 paradigm 误删
+3. `localStorage.currentPath` **不要重置** —— 下次 boot 还能再试加载，否则用户彻底没机会重试
+4. Toast 通知用户「未能打开 X，回到空白文档；可在文件菜单重试」
+5. sessions 列表里 current row 的「打开」按钮**永远显示**（不要因为 `key===cur` 就藏起来），label 改 "重新打开"
+
+**meta 教训（适用于所有有 destructive op 的持久化系统）**：
+
+> **「localStorage 里宣称的 current」≠「scene 里实际加载的 session」**。任何基于"current"做 destructive op（save 时的 rename-delete-old / push 覆盖云端）的代码，都要先确认 current 是"实际加载成功过"的状态，而不是"localStorage 里记的、但加载失败过的"状态。
+
+具体到代码：
+- 不要在模块顶部用 `let _activePath = readLS()` 直接锁死。先 init 成 safe default，**只有 load 成功后**才赋值为真实 path。
+- 任何 destructive op 前 assert：「这个 path 真的曾经在内存里有过对应内容吗」。
+
 ## 关键的「不要这样做」
 
 不要做以下事情，每条都是 AtlasMaker 走过的弯路：

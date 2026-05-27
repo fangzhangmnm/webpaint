@@ -52,6 +52,8 @@
     <link rel="stylesheet" href="./src/styles.css" />
     <!-- 版本号 SSoT；service-worker.js 也 importScripts 同一份 -->
     <script src="./src/version.js"></script>
+    <!-- zip.js UMD bundle：自挂 window.zip。必须在 module scripts 之前。 -->
+    <script src="./src/vendor/zip-js/zip-full.min.js"></script>
   </head>
   <body>
     <canvas id="board" class="board" aria-label="paint canvas"></canvas>
@@ -172,6 +174,20 @@
       <button class="menu-item" id="menuLongPressPick" type="button" role="menuitemcheckbox" aria-pressed="false">
         <span class="menu-item-label">单指长按吸色</span>
         <span class="menu-item-state" data-state-for="longPressPick">关</span>
+      </button>
+      <hr class="menu-sep" />
+      <button class="menu-item" id="menuSave" type="button" role="menuitem">
+        <span class="menu-item-label">保存 (Ctrl+S)</span>
+        <span class="menu-item-state" data-state-for="save">-</span>
+      </button>
+      <button class="menu-item" id="menuSharePng" type="button" role="menuitem">
+        <span class="menu-item-label">分享 PNG</span>
+      </button>
+      <button class="menu-item" id="menuShareJpg" type="button" role="menuitem">
+        <span class="menu-item-label">分享 JPG</span>
+      </button>
+      <button class="menu-item" id="menuExportOra" type="button" role="menuitem">
+        <span class="menu-item-label">导出 .ora</span>
       </button>
       <hr class="menu-sep" />
       <button class="menu-item" id="menuTheme" type="button" role="menuitem">

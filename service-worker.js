@@ -23,7 +23,12 @@ const PRECACHE_URLS = [
   "./src/board.js",
   "./src/input.js",
   "./src/brush.js",
-  "./src/db.js",
+  "./src/storage.js",
+  "./src/zip.js",
+  "./src/ora.js",
+  "./src/session.js",
+  "./src/config.js",
+  "./src/vendor/zip-js/zip-full.min.js",
 ];
 
 // 哪些响应需要做 import URL 改写

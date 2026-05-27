@@ -13,7 +13,7 @@ import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
 import { InputController } from "./input.js";
 import { BrushSettings } from "./brush.js";
-import { getMeta, setMeta, debounce } from "./db.js";
+import { saveCurrentSession, loadCurrentSession, exportOraDownload, shareOrDownloadImage } from "./session.js";
 
 const THEMES = ["auto", "day", "night"];
 const THEME_LABEL = { auto: "跟随系统", day: "日", night: "夜" };
@@ -45,6 +45,10 @@ const els = {
   menuLongPressPick: document.getElementById("menuLongPressPick"),
   menuPressureSize: document.getElementById("menuPressureSize"),
   menuPressureOpacity: document.getElementById("menuPressureOpacity"),
+  menuSave: document.getElementById("menuSave"),
+  menuSharePng: document.getElementById("menuSharePng"),
+  menuShareJpg: document.getElementById("menuShareJpg"),
+  menuExportOra: document.getElementById("menuExportOra"),
   menuTheme: document.getElementById("menuTheme"),
   menuClear: document.getElementById("menuClear"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
@@ -622,9 +626,123 @@ function hexToHsv(hex) {
   return { h, s, v };
 }
 
-// ---- 启动收尾 ----
+// ---- 持久化：IDB 自动 + Ctrl+S + autosave + visibility/pagehide 抢救 ----
+// 抄 AtlasMaker shareback：Ctrl+S 主导 + 3min 兜底 + visibility/pagehide 抢救。
+// 不走 debounce —— 画图工具不该 300ms 自动保存。
+let _docDirty = false;
+let _docSaving = false;
+let _docLastSavedAt = 0;
+const AUTOSAVE_MS = 3 * 60 * 1000;
+
+function setSaveLabel(text) {
+  const stateEl = els.menuSave.querySelector('[data-state-for="save"]');
+  if (stateEl) stateEl.textContent = text;
+}
+function updateSaveStatus() {
+  if (_docSaving) setSaveLabel("保存中…");
+  else if (_docDirty) setSaveLabel("未保存");
+  else if (_docLastSavedAt) setSaveLabel("已保存");
+  else setSaveLabel("-");
+}
+async function saveNow() {
+  if (_docSaving) return;
+  _docSaving = true;
+  updateSaveStatus();
+  try {
+    await saveCurrentSession(doc);
+    _docDirty = false;
+    _docLastSavedAt = Date.now();
+    setStatus("已保存");
+  } catch (e) {
+    console.warn("[session] save failed:", e);
+    setStatus("保存失败：" + (e && e.message || e));
+  } finally {
+    _docSaving = false;
+    updateSaveStatus();
+  }
+}
+// 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty
+window.addEventListener("wp:histchange", () => {
+  _docDirty = true;
+  updateSaveStatus();
+});
+// Ctrl+S
+window.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+    e.preventDefault();
+    saveNow();
+  }
+});
+// 3 min 兜底
+setInterval(() => { if (_docDirty && !_docSaving) saveNow(); }, AUTOSAVE_MS);
+// visibility / pagehide 抢救
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden" && _docDirty && !_docSaving) saveNow();
+});
+window.addEventListener("pagehide", () => {
+  // pagehide 是同步语境，但 IDB tx 仍能在 page 真被关之前完成（浏览器 grace ~几百 ms）
+  if (_docDirty && !_docSaving) saveNow();
+});
+
+// 菜单：保存 / 分享 / 导出
+function stampNow() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}`;
+}
+els.menuSave.addEventListener("click", () => {
+  setMenuOpen(false);
+  saveNow();
+});
+els.menuSharePng.addEventListener("click", async () => {
+  setMenuOpen(false);
+  try {
+    const r = await shareOrDownloadImage(doc, "png", `WebPaint-${stampNow()}`);
+    setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : "PNG 已下载");
+  } catch (e) { setStatus("分享失败：" + (e && e.message || e)); }
+});
+els.menuShareJpg.addEventListener("click", async () => {
+  setMenuOpen(false);
+  try {
+    const r = await shareOrDownloadImage(doc, "jpg", `WebPaint-${stampNow()}`);
+    setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : "JPG 已下载");
+  } catch (e) { setStatus("分享失败：" + (e && e.message || e)); }
+});
+els.menuExportOra.addEventListener("click", async () => {
+  setMenuOpen(false);
+  try {
+    await exportOraDownload(doc, `WebPaint-${stampNow()}.ora`);
+    setStatus(".ora 已下载");
+  } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
+});
+
+// ---- 启动收尾：尝试加载上次的 session（异步，不阻塞 UI 显示） ----
 setStatus("就绪");
 updateZoomLabel();
+updateSaveStatus();
+(async () => {
+  try {
+    const loaded = await loadCurrentSession();
+    if (!loaded) return;                  // 没有存档 → 用默认空白 doc
+    // 替换 doc 的内容（保持 doc 指针不变，input/board 引用都还在）
+    doc.layers = loaded.layers;
+    doc.activeIndex = loaded.activeIndex;
+    doc.width = loaded.width;
+    doc.height = loaded.height;
+    els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
+    input.clearHistory();                 // 旧 undo 链对新 layers 无意义
+    board.fitToScreen();
+    board.invalidateAll();
+    board.requestRender();
+    renderLayersPanel();
+    setStatus(`已恢复 (${loaded.layers.length} 层)`);
+  } catch (e) {
+    // **幽灵 current path 保护**：不主动删 IDB 里失败的 entry；不把 _active 指向
+    // 失败 path（phase 1 只有 fixed "current" slot，无 rename op，天然安全）。
+    // 下次冷启动还会再试。
+    console.warn("[session] load failed:", e);
+    setStatus("启动加载失败，使用空白文档");
+  }
+})();
 
 // ---- Service worker + 更新检测 ----
 // 沿用 WebXiaoHeiWu 模式，四条检测路径都挂上，iPad PWA standalone 模式默认
