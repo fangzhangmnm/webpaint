@@ -579,6 +579,19 @@ input[type=range] {
 }
 .gallery-full.hidden,
 .cloud-full.hidden { display: none; }
+/*
+ * z-index 层级表（项目约定，新加 UI 看这里）：
+ *   10  top-bar / HUD
+ *   15  .float-panel (图层 / 笔刷 / 液化 / 参考 / 色板)
+ *   20  .menu-panel (汉堡 / 调整 / 图层 ⋯)
+ *   30  .toast
+ *   50  .gallery-full（全屏模态）
+ *   55  gallery 内部 popup（加号 / 云端账号）—— 必须 > 50
+ *   60  .backdrop（sheet 背后蒙层）
+ *   61  .sheet（关键确认对话）
+ */
+#galleryAddPopup, #cloudAccountPopup { z-index: 55; }
+
 /* v50 重做：左标题 + 右对齐 icon 组。无返回键，点 active tile 关闭。 */
 .gallery-header {
   display: flex; align-items: center;
@@ -610,12 +623,7 @@ input[type=range] {
   background: var(--bg-soft);
 }
 .gallery-foot-usage { font-variant-numeric: tabular-nums; }
-.gallery-foot-btn {
-  background: transparent; border: 1px solid var(--line);
-  border-radius: 6px; padding: 6px 12px;
-  color: var(--ink-soft); cursor: pointer; font: inherit;
-}
-.gallery-foot-btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); }
+.gallery-foot-hint { color: var(--ink-soft); font-size: 11px; opacity: 0.7; }
 
 .menu-item-info {
   padding: 8px 12px;

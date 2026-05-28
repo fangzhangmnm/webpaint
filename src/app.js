@@ -117,7 +117,6 @@ const els = {
   cloudSignOutBtn: document.getElementById("cloudSignOutBtn"),
   cloudRefreshBtn: document.getElementById("cloudRefreshBtn"),
   galleryFootUsage: document.getElementById("galleryFootUsage"),
-  galleryClearCacheBtn: document.getElementById("galleryClearCacheBtn"),
   newDocBackdrop: document.getElementById("newDocBackdrop"),
   newDocSheet: document.getElementById("newDocSheet"),
   newDocName: document.getElementById("newDocName"),
@@ -1803,36 +1802,22 @@ els.newDocConfirm.addEventListener("click", async () => {
   setStatus(`新建：${name}（${w}×${h}）`);
 });
 
-els.galleryClearCacheBtn.addEventListener("click", async () => {
-  const ok = await openConfirmSheet(
-    "清扫本地缓存？",
-    "把所有本地保存的作品移除，恢复成首次启动状态。已登录云端的作品云端不动。当前正在编辑的内容不受影响。",
-  );
-  if (!ok) return;
-  try {
-    const list = await listSessions();
-    for (const s of list) await removeSession(s.name);
-    setStatus("已清扫本地缓存");
-    renderGallery();
-    updateIdbUsage();
-  } catch (e) {
-    setStatus("清扫失败：" + (e && e.message || e));
-  }
-});
-
-// 本地占用 = 实际所有 IDB session blob 大小之和（**不**走 storage.estimate —— 它把 SW 预缓存 / localStorage 算进去会虚高几 MB）。
-// quota 仍走 storage.estimate（这个数 alone 有意义）。
+// 本地占用 = 实际所有 IDB session blob 大小之和（**不**走 storage.estimate —— 它把 SW
+// 预缓存 / localStorage 算进去虚高几 MB）。
+// quota 来自 storage.estimate，是**浏览器愿意分配的上限**（iOS Safari 通常 ~ 60-80% 可用
+// 磁盘；动辄几十 GB），不是 "我们申请了多少"。所以放 title 里给好奇用户看，不主显。
 async function updateIdbUsage() {
   try {
     const sessions = await listSessions();
     let total = 0;
     for (const s of sessions) total += (s.size || 0);
-    let quotaText = "";
+    els.galleryFootUsage.textContent = `本地占用：${humanSize(total)}（${sessions.length} 件）`;
     if (navigator.storage && navigator.storage.estimate) {
       const est = await navigator.storage.estimate();
-      if (est && est.quota) quotaText = ` / 配额 ${humanSize(est.quota)}`;
+      if (est && est.quota) {
+        els.galleryFootUsage.title = `浏览器分配上限约 ${humanSize(est.quota)}（用满了浏览器才会限）`;
+      }
     }
-    els.galleryFootUsage.textContent = `画作占用：${humanSize(total)}（${sessions.length} 件）${quotaText}`;
   } catch {
     els.galleryFootUsage.textContent = "占用：未知";
   }
@@ -1972,6 +1957,33 @@ async function renderGallery() {
         }
       });
       actions.appendChild(pushBtn);
+    } else if (isLocal && isCloud) {
+      // 本地 + 云都有 → 可以"卸载本地"省地方，云端是备份。下次"拉取"还能回来。
+      // 不弱化为 danger 按钮 —— 它不破坏数据，只清本地副本。
+      const offloadBtn = document.createElement("button");
+      offloadBtn.type = "button";
+      offloadBtn.textContent = "卸载本地";
+      offloadBtn.title = "清这幅画的本地 IDB 副本，云端保留。下次需要可点拉取。";
+      offloadBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (item.name === _activeSessionName) {
+          setStatus("正在编辑这幅画，不能卸载本地副本");
+          return;
+        }
+        offloadBtn.disabled = true;
+        offloadBtn.textContent = "卸载中…";
+        try {
+          await removeSession(item.name);
+          setStatus(`已卸载本地：${item.name}（云端保留）`);
+          renderGallery();
+        } catch (err) {
+          setStatus("卸载失败：" + (err && err.message || err));
+        } finally {
+          offloadBtn.disabled = false;
+          offloadBtn.textContent = "卸载本地";
+        }
+      });
+      actions.appendChild(offloadBtn);
     }
     const del = document.createElement("button");
     del.type = "button";
