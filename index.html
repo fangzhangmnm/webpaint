@@ -257,7 +257,9 @@
         <button class="lasso-tool-btn" data-lasso-mode="free" type="button">自由</button>
         <button class="lasso-tool-btn" data-lasso-mode="uniform" type="button">等比</button>
         <button class="lasso-tool-btn" data-lasso-mode="distort" type="button">透视</button>
-        <button class="lasso-tool-btn" data-lasso-mode="warp" type="button">变形</button>
+        <!-- 变形（warp）暂不上线：4×4 mesh + Catmull-Rom 三角化未达 C1 视觉效果。
+             代码保留在 src/lasso.js，待 forward-splat preview + Newton inverse commit 实现后再启用 -->
+        <button class="lasso-tool-btn hidden" data-lasso-mode="warp" type="button">变形</button>
         <span class="lasso-tool-sep" aria-hidden="true">|</span>
         <button class="lasso-tool-btn lasso-tool-cancel" id="lassoSelectedCancelBtn" type="button">取消选区</button>
       </div>

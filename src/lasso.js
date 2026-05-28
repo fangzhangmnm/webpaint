@@ -303,13 +303,13 @@ export class LassoEngine {
       out.push({ kind: "corner", row: 0, col: 1, pos: m[0][1] });
       out.push({ kind: "corner", row: 1, col: 0, pos: m[1][0] });
       out.push({ kind: "corner", row: 1, col: 1, pos: m[1][1] });
-      // 4 边中点：free / uniform 暴露（1D 缩放）；distort 不（用 4 角自由）
-      if (f.mode !== "distort") {
-        out.push({ kind: "edge", edge: "top",    pos: mid(m[0][0], m[0][1]) });
-        out.push({ kind: "edge", edge: "right",  pos: mid(m[0][1], m[1][1]) });
-        out.push({ kind: "edge", edge: "bottom", pos: mid(m[1][0], m[1][1]) });
-        out.push({ kind: "edge", edge: "left",   pos: mid(m[0][0], m[1][0]) });
-      }
+      // 4 边中点：所有 2×2 mode 都暴露
+      //   free / uniform：1D 缩放（对边锚定）
+      //   distort：拖边 = 平移该边两端点（保 4 角自由，但给"整边一起拖"的快捷出口）
+      out.push({ kind: "edge", edge: "top",    pos: mid(m[0][0], m[0][1]) });
+      out.push({ kind: "edge", edge: "right",  pos: mid(m[0][1], m[1][1]) });
+      out.push({ kind: "edge", edge: "bottom", pos: mid(m[1][0], m[1][1]) });
+      out.push({ kind: "edge", edge: "left",   pos: mid(m[0][0], m[1][0]) });
     } else {
       // 4×4 = 16 个 warp 点
       for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
@@ -438,6 +438,22 @@ export class LassoEngine {
   _applyEdgeDrag(edge, meshSnap, x, y) {
     const f = this._floating;
     const m = meshSnap;
+    // distort 模式：拖边 = 平移该边两个端点（其他两角不动）
+    if (f.mode === "distort") {
+      const d = this._drag;
+      const dx = x - d.startX, dy = y - d.startY;
+      // 边对应的两个角索引
+      const idx = {
+        top:    [[0,0],[0,1]],
+        bottom: [[1,0],[1,1]],
+        left:   [[0,0],[1,0]],
+        right:  [[0,1],[1,1]],
+      }[edge];
+      for (const [r, c] of idx) {
+        f.mesh[r][c] = { x: m[r][c].x + dx, y: m[r][c].y + dy };
+      }
+      return;
+    }
     const origAx = sub(m[0][1], m[0][0]);
     const origAy = sub(m[1][0], m[0][0]);
     const axU = norm(origAx);
