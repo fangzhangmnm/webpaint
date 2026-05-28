@@ -16,7 +16,7 @@
 //
 // 加密 (phase 3) 暂不做。
 
-import { isAuthConfigured, initAuth, signIn, signOut, getActiveAccount, isSignedIn } from "./auth.js";
+import { isAuthConfigured, initAuth, signIn, signOut, getActiveAccount, isSignedIn, retrySilentSignIn } from "./auth.js";
 import { listChildren, getItemByPath, downloadItemBlob, uploadFileToApproot, deleteItem } from "./graph.js";
 import { sessionFileName } from "./config.js";
 
@@ -49,7 +49,7 @@ export function setCloudDirty(name, dirty) {
   try { localStorage.setItem(cloudDirtyKey(name), dirty ? "1" : "0"); } catch (_) {}
 }
 
-export { isAuthConfigured, initAuth, signIn, signOut, getActiveAccount, isSignedIn };
+export { isAuthConfigured, initAuth, signIn, signOut, getActiveAccount, isSignedIn, retrySilentSignIn };
 
 // ----- push 当前 session 到 OneDrive -----
 // 返回 { item }。412 → 抛 CloudConflictError，caller 提示用户改名 / 重 push。

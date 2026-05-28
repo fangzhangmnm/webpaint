@@ -23,7 +23,7 @@ import {
 } from "./session.js";
 import { decodeOraToDoc, encodeDocToOra } from "./ora.js";
 import {
-  isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount,
+  isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
   pushSession, pullSessionByPath, listCloudSessionsRecursive, deleteCloudSession,
   isCloudDirty, setCloudDirty, CloudConflictError,
 } from "./cloud.js";
@@ -2266,7 +2266,14 @@ els.cloudSignOutBtn.addEventListener("click", async () => {
   renderGallery();
 });
 
-els.cloudRefreshBtn.addEventListener("click", () => renderGallery());
+els.cloudRefreshBtn.addEventListener("click", async () => {
+  // 离线 → 在线 后第一次按"刷新"：若未签到但有缓存账号，silent retry 一次
+  if (!isSignedIn() && navigator.onLine !== false) {
+    await retrySilentSignIn();
+    updateCloudAuthUI();
+  }
+  renderGallery();
+});
 
 // 给本地拿一个不冲突的名字（X / X 1 / X 2 / ...）
 async function uniqueLocalName(stem) {
@@ -2281,15 +2288,20 @@ async function uniqueLocalName(stem) {
 
 // 从云端拉一个文件，duplicate 到本地（永远）
 async function pullCloudPath(path) {
+  // **不切走当前 active doc**（user 反馈：拉取不应跳进画布）。
+  // 只把云上 .ora 解码 + 写到本地 IDB 作为一条新 session；tile 接下来变成
+  // "本地+云"，user 想打开它再点 tile（走 openSession + adoptLoadedDoc 路径）
   try {
     const r = await pullSessionByPath(path);
     if (!r) { setStatus(`找不到：${path}`); return; }
     const loaded = await decodeOraToDoc(r.blob);
     const finalName = await uniqueLocalName(r.suggestedName);
-    adoptLoadedDoc(loaded, finalName);
-    await saveNow();
-    setGalleryOpen(false);
-    setStatus(`已从云端拉取并保存为：${finalName}`);
+    await saveSession(loaded, finalName, {
+      referenceImage: loaded._referenceBlob,
+      webpaintState: loaded._webpaintState,
+    });
+    setStatus(`已从云端拉取到本地：${finalName}（点 tile 打开）`);
+    renderGallery();
   } catch (err) {
     console.warn("[cloud] pull failed:", err);
     setStatus("拉取失败：" + (err && err.message || err));
@@ -2307,8 +2319,13 @@ if (isAuthConfigured()) {
     console.warn("[auth] init failed:", e);
   });
 }
-// 在线 / 离线变化时刷新云端 UI（标签 / 按钮可见性）；图库打开时还顺便重渲染列表
-window.addEventListener("online",  () => { updateCloudAuthUI(); if (!els.galleryFull.classList.contains("hidden")) renderGallery(); });
+// 在线 / 离线变化时刷新云端 UI（标签 / 按钮可见性）。
+// online 时尝试 silent re-auth：boot 离线 → activeAccount 为 null；有网了主动 retry 一次
+window.addEventListener("online", async () => {
+  if (!isSignedIn()) await retrySilentSignIn();
+  updateCloudAuthUI();
+  if (!els.galleryFull.classList.contains("hidden")) renderGallery();
+});
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
 (async () => {
   const wantedName = getCurrentSessionName();

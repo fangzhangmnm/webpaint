@@ -1,15 +1,44 @@
-# PWA 更新检测：四条路径要全挂
+# PWA 更新检测 + 版本号显示 + 手动检测：四件套全挂
 
-> 给兄弟项目和未来的 AI：这套**直接拷过去能用**。WebPaint 第一版只挂了第三条，user 反馈"PWA 更新不太主动"。补齐 4 条后稳了。WebXiaoHeiWu 是最早的范式，下面把它整理成可复用的模式。
+> 给兄弟项目和未来的 AI：这套**直接拷过去能用**。WebPaint 第一版只挂了第三条，user 反馈"PWA 更新不太主动"。补齐 4 条 + 加手动检测 + 加版本号水印才完整。WebXiaoHeiWu 是最早的范式。
 
-## TL;DR
+## TL;DR（hard requirements，少一件都会有 user 抱怨）
 
-两件配套，**都是必需，不是可选**：
+1. **SW 在模块顶层 register**，不要塞进 `window.load` 里。详见下方 §0
+2. **4 条 update 检测路径全挂**（waiting / updatefound / postMessage / poll），iPad PWA 默认不主动 check
+3. **菜单加一个"检测更新"按钮**，返回"已是最新（vNN）"或"有新版本"。给 user 一个"我现在主动 check 一下"的出口
+4. **屏幕上常驻显示版本号**。user 点了"刷新"之后没法判断新代码是否真生效；版本号水印 = 视觉确认
 
-1. **挂全 4 条 update 检测路径**，否则 iPad PWA standalone 默认极不主动 check SW，user 看不到"有新版本"toast。
-2. **屏幕上常驻显示版本号**，否则 user 点了"刷新"也不知道有没有真的换上新版本 —— 信任的反馈回路是断的。
+每条都不可省。少 1 = 收到"你这版本根本没生效 / PWA 离线打不开 / 检查不到更新"那类报告。
 
-少挂任何一条 update 路径，或者没有屏幕水印，都会产生"我推了新版本但 user 不知道有没有装上"的报告。
+## 0. SW 注册必须在模块顶层（v58 教训）
+
+```js
+// ❌ 错的（WebPaint v55 之前的写法）
+window.addEventListener("load", async () => {
+  const reg = await navigator.serviceWorker.register("./service-worker.js");
+});
+```
+
+**为什么炸**：现代 PWA 用 `<script type="module">` 加 dynamic `import()` 拉应用入口。模块加载是异步：网络 + 编译 + 依赖图。等模块跑起来时 `load` event 经常已经 fire 过了 → addEventListener 挂的 listener 永远不触发 → **SW 根本没注册**。iPad PWA 加到主屏 → 飞行模式 → 找不到服务器；菜单"检测更新"说 "SW 未注册"。
+
+```js
+// ✅ 对的（模块顶层直接 register）
+const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1", "::1", ""]);
+let _swRegistration = null;
+if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
+  navigator.serviceWorker.register("./service-worker.js").then((reg) => {
+    _swRegistration = reg;
+    // 4 条 update 路径在 .then 里挂
+    ...
+  }).catch((err) => console.warn("SW register failed", err));
+}
+```
+
+要点：
+- 模块顶层 → 同步触发 register（不等 load）
+- 不 await → promise 后台跑，不卡其他启动逻辑
+- 把 registration 存到模块级变量（如 `_swRegistration`）给后面的"检测更新"菜单项用
 
 ## 四条路径
 
@@ -148,11 +177,12 @@ self.addEventListener("message", (event) => {
 });
 ```
 
-### app.js 里的 SW 注册 + 4 条检测
+### app.js 里的 SW 注册 + 4 条检测（v58 起的正确写法）
 
 ```js
 const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1", "::1", ""]);
 let updateDismissed = false;
+let _swRegistration = null;       // 给"检测更新"菜单项 / 调试用
 
 function showUpdate() {
   if (updateDismissed) return;
@@ -174,14 +204,9 @@ if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
     if (e.data?.type === "asset-updated") showUpdate();
   });
 
-  window.addEventListener("load", async () => {
-    let registration;
-    try {
-      registration = await navigator.serviceWorker.register("./service-worker.js");
-    } catch (err) {
-      console.warn("SW register failed", err);
-      return;
-    }
+  // **模块顶层注册**，不要塞 window.load。dynamic import 异步加载，load 经常已 fire
+  navigator.serviceWorker.register("./service-worker.js").then((registration) => {
+    _swRegistration = registration;
 
     // 路径 1：开机检查有没有 waiting 的新 SW
     if (registration.waiting && navigator.serviceWorker.controller) {
@@ -206,9 +231,42 @@ if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
     });
     window.addEventListener("focus", pokeUpdate);
     setInterval(pokeUpdate, 10 * 60 * 1000);
+  }).catch((err) => {
+    console.warn("SW register failed", err);
   });
 }
 ```
+
+## 5. 手动"检测更新"菜单项（必需）
+
+四条自动路径都挂上了还要这条人工出口，因为：
+- iPad PWA 长开着 user 点"刷新"之前想自己确认一次"现在是不是最新"
+- 自动路径都是异步的；user 没有"我此刻 check 一下"的反馈
+- bug 报告时 user 能自己点一下确认 "是的我装的是 vNN" / "提示我有新版本"
+
+**实现**：菜单加一项"检测更新"，调 `_swRegistration.update()`，等 1.5 秒看 `waiting` 状态。
+
+```js
+// 汉堡菜单某一项
+document.getElementById("menuCheckUpdate").addEventListener("click", async () => {
+  setStatus("检测更新中…", true);
+  try {
+    // **优先用模块级 _swRegistration**。navigator.serviceWorker.getRegistration()
+    // 在 iPad save-to-home-screen 模式下偶尔返 undefined。我们启动时存的 reg 更稳。
+    const reg = _swRegistration || await navigator.serviceWorker?.getRegistration();
+    if (!reg) { setStatus("Service Worker 未注册（刷一次页面）"); return; }
+    await reg.update();
+    setTimeout(() => {
+      if (reg.waiting) setStatus("有新版本，刷新页面应用");
+      else setStatus(`已是最新（${window.WEBPAINT_VERSION || ""}）`);
+    }, 1500);
+  } catch (e) {
+    setStatus("检测失败：" + (e && e.message || e));
+  }
+});
+```
+
+**返回消息要带版本号**："已是最新（v58-2026-05-28）"比"已是最新"信息量大十倍 —— user 看到具体版本号 = 视觉确认 + 跟自己屏幕水印对照 = 闭环。
 
 ### index.html 里的 toast（CSS 不放在这）
 
@@ -276,8 +334,12 @@ els.versionLabel.textContent = window.WEBPAINT_VERSION || "v?";
 
 ## 关键的 anti-pattern（别犯）
 
+- **❌ SW register 放在 `window.load` 里**（v58 修过）—— 用 dynamic import 加载入口模块时 load 经常已 fire 完，listener 永远不触发。模块顶层直接 register
 - **❌ 只挂路径 3** —— iPad 上 90% 的情况下不会 fire，因为 SW 都没 check 更新
-- **❌ 不显示版本号** —— user 点了刷新之后没有 visual confirmation，每次 update 都是盲信。bug 报告会变成"你这版本根本没生效"无法定位
+- **❌ 没有手动"检测更新"出口** —— 自动路径都是异步 + 隐式。user 想主动确认时没地方点
+- **❌ 不显示版本号** —— user 点了刷新之后没有 visual confirmation，每次 update 都是盲信
+- **❌ "检测更新"返回不带版本号** —— "已是最新"和"已是最新（v58-2026-05-28）"信息量差十倍
+- **❌ 用 `navigator.serviceWorker.getRegistration()` 拿 reg** —— iPad save-to-home-screen 模式下偶尔返 undefined。启动时把 reg 存到模块级变量更稳
 - **❌ 自动 reload** —— user 可能正在写字 / 画画。绝不自动刷。toast + 用户点
 - **❌ 同 session 内反复弹 toast** —— 用 `updateAnnouncedThisLoad` (SW 端) + `updateDismissed` (page 端) 各守一边
 - **❌ 在 localhost 注册 SW** —— 开发时 F5 就拉不到最新代码了。`LOCAL_DEV_HOSTS` 白名单排除

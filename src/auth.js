@@ -133,3 +133,25 @@ export async function getToken() {
 
 export function getActiveAccount() { return activeAccount; }
 export function isSignedIn() { return !!activeAccount; }
+
+// 当从离线变成在线时调一次。boot 时 acquireTokenSilent 因网络抛错 → activeAccount
+// 留空 → 后面有网了 isSignedIn 也还是 false。这个函数显式 retry 一次 silent，
+// 成功就把 activeAccount 设上，UI 该刷新 / cloud list 该重拉的就跟着走。
+export async function retrySilentSignIn() {
+  if (activeAccount) return true;                    // 已签到
+  if (!isAuthConfigured()) return false;
+  if (!pca) {
+    try { await initAuth(); } catch (_) { return false; }
+  }
+  if (!pca) return false;
+  const cached = pca.getAllAccounts();
+  if (cached.length === 0) return false;
+  try {
+    await pca.acquireTokenSilent({ scopes: SCOPES, account: cached[0] });
+    pca.setActiveAccount(cached[0]);
+    activeAccount = cached[0];
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
