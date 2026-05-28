@@ -103,17 +103,31 @@ const els = {
   referenceFitBtn: document.getElementById("referenceFitBtn"),
   referenceFileInput: document.getElementById("referenceFileInput"),
   galleryFull: document.getElementById("galleryFull"),
-  galleryClose: document.getElementById("galleryClose"),
-  galleryCurrentName: document.getElementById("galleryCurrentName"),
-  galleryNewBtn: document.getElementById("galleryNewBtn"),
-  gallerySaveCopyBtn: document.getElementById("gallerySaveCopyBtn"),
   galleryGrid: document.getElementById("galleryGrid"),
   galleryEmpty: document.getElementById("galleryEmpty"),
-  galleryCloudStatus: document.getElementById("galleryCloudStatus"),
+  galleryAddBtn: document.getElementById("galleryAddBtn"),
+  galleryAddPopup: document.getElementById("galleryAddPopup"),
+  addNew: document.getElementById("addNew"),
+  addImportPhoto: document.getElementById("addImportPhoto"),
+  cloudIconBtn: document.getElementById("cloudIconBtn"),
+  cloudAccountPopup: document.getElementById("cloudAccountPopup"),
+  cloudAccountInfo: document.getElementById("cloudAccountInfo"),
   cloudSignInBtn: document.getElementById("cloudSignInBtn"),
   cloudSignOutBtn: document.getElementById("cloudSignOutBtn"),
-  cloudPushBtn: document.getElementById("cloudPushBtn"),
   cloudRefreshBtn: document.getElementById("cloudRefreshBtn"),
+  galleryFootUsage: document.getElementById("galleryFootUsage"),
+  galleryClearCacheBtn: document.getElementById("galleryClearCacheBtn"),
+  newDocBackdrop: document.getElementById("newDocBackdrop"),
+  newDocSheet: document.getElementById("newDocSheet"),
+  newDocName: document.getElementById("newDocName"),
+  newDocPreset: document.getElementById("newDocPreset"),
+  newDocCustomRow: document.getElementById("newDocCustomRow"),
+  newDocW: document.getElementById("newDocW"),
+  newDocH: document.getElementById("newDocH"),
+  newDocConfirm: document.getElementById("newDocConfirm"),
+  newDocCancel: document.getElementById("newDocCancel"),
+  menuCheckerboard: document.getElementById("menuCheckerboard"),
+  menuCheckUpdate: document.getElementById("menuCheckUpdate"),
   oraFileInput: document.getElementById("oraFileInput"),
   genericBackdrop: document.getElementById("genericBackdrop"),
   genericSheet: document.getElementById("genericSheet"),
@@ -169,6 +183,7 @@ const state = {
     motionFilter: parseFloat(safeLS("webpaint.motionFilter") || "0"),
   }),
   longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
+  checkerboard: safeLS("webpaint.checkerboard") === "1",   // 默认关；开后用半透明灰白格替代纯背景
   // 液化设置（独立于 brush，见 src/liquify.js + docs/artist-priorities.md v46）
   liquify: {
     mode: safeLS("webpaint.liquify.mode") || "push",
@@ -307,6 +322,14 @@ function applyLongPressPick(on) {
   setMenuItem(els.menuLongPressPick, on);
   safeLSSet("webpaint.longPressPick", on ? "1" : "0");
 }
+function applyCheckerboard(on) {
+  state.checkerboard = !!on;
+  setMenuItem(els.menuCheckerboard, on);
+  safeLSSet("webpaint.checkerboard", on ? "1" : "0");
+  board.setShowCheckerboard?.(!!on);
+  board.invalidateAll();
+  board.requestRender();
+}
 
 els.menuPressureSize.addEventListener("click", () => {
   applyPressureSize(!state.brush.pressureToSize);
@@ -320,10 +343,30 @@ els.menuLongPressPick.addEventListener("click", () => {
   applyLongPressPick(!state.longPressPick);
   setStatus(`长按吸色 · ${state.longPressPick ? "开" : "关"}`);
 });
+els.menuCheckerboard.addEventListener("click", () => {
+  applyCheckerboard(!state.checkerboard);
+  setStatus(`透明棋盘 · ${state.checkerboard ? "开" : "关"}`);
+});
 els.menuTheme.addEventListener("click", () => {
   const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
   applyTheme(next);
   setStatus(`主题 · ${THEME_LABEL[next]}`);
+});
+els.menuCheckUpdate.addEventListener("click", async () => {
+  setMenuOpen(false);
+  setStatus("检测更新中…", true);
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (!reg) { setStatus("Service Worker 未就绪（可能是 file:// 协议）"); return; }
+    await reg.update();
+    // 等一拍看 waiting 有没有出现
+    setTimeout(() => {
+      if (reg.waiting) setStatus("有新版本，刷新页面应用");
+      else setStatus("已是最新");
+    }, 1500);
+  } catch (e) {
+    setStatus("检测失败：" + (e && e.message || e));
+  }
 });
 els.menuClear.addEventListener("click", () => {
   setMenuOpen(false);
@@ -333,6 +376,7 @@ els.menuClear.addEventListener("click", () => {
 applyPressureSize(state.brush.pressureToSize);
 applyPressureOpacity(state.brush.pressureToOpacity);
 applyLongPressPick(state.longPressPick);
+applyCheckerboard(state.checkerboard);
 
 function setMenuOpen(open) {
   els.menuPanel.classList.toggle("hidden", !open);
@@ -1163,11 +1207,12 @@ async function saveAndPush() {
   }
 }
 
-// Ctrl+S
+// Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地（不推云）
 window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
     e.preventDefault();
-    saveAndPush();
+    if (e.shiftKey) saveNow();          // 只本地
+    else saveAndPush();                 // 本地 + 云
   }
 });
 // 3 min 兜底
@@ -1476,6 +1521,9 @@ els.referenceFitBtn.addEventListener("click", () => referenceWindow.fitToPanel()
 
 els.oraFileInput.addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
+  // 图库里"导入照片"语义：把照片当新 doc 打底（不是叠到当前）
+  const asNewDoc = _addImportAsNewDoc;
+  _addImportAsNewDoc = false;
   if (!file) return;
   const isOra = /\.ora$/i.test(file.name);
   const isImage = (file.type || "").startsWith("image/");
@@ -1485,8 +1533,14 @@ els.oraFileInput.addEventListener("change", async (e) => {
       const nm = file.name.replace(/\.ora$/i, "") || "未命名";
       adoptLoadedDoc(loaded, nm);
       setStatus(`已导入：${nm}`);
+      setGalleryOpen(false);
     } else if (isImage) {
-      await importImageAsLayer(file);
+      if (asNewDoc) {
+        await importImageAsNewDoc(file);
+        setGalleryOpen(false);
+      } else {
+        await importImageAsLayer(file);
+      }
     } else {
       setStatus(`不支持的文件类型：${file.type || file.name}`);
     }
@@ -1495,6 +1549,47 @@ els.oraFileInput.addEventListener("change", async (e) => {
     setStatus("导入失败：" + (err && err.message || err));
   }
 });
+
+// 「导入照片」语义：用照片新建一个 doc（doc 尺寸 = 照片尺寸，cap 8192），
+// 单层就是这张照片。和"导入图片 / .ora"（叠新图层到当前 doc）不同。
+async function importImageAsNewDoc(file) {
+  const bitmap = await createImageBitmap(file);
+  const w = Math.min(8192, bitmap.width);
+  const h = Math.min(8192, bitmap.height);
+  if (_docDirty) await saveNow();
+  const fresh = new PaintDoc({ width: w, height: h });
+  doc.layers = fresh.layers;
+  doc.activeIndex = 0;
+  doc.width = w; doc.height = h;
+  els.canvasSizeLabel.textContent = `${w}×${h}`;
+  // 把照片直接画到 base layer 全图（覆盖 bbox 到整 doc）
+  const layer = doc.layers[0];
+  layer.name = file.name.replace(/\.[^.]+$/, "") || "图像";
+  layer.bboxX = 0; layer.bboxY = 0;
+  layer.bboxW = w; layer.bboxH = h;
+  const c = (typeof OffscreenCanvas !== "undefined")
+    ? new OffscreenCanvas(w, h)
+    : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
+  layer.canvas = c;
+  layer.ctx = c.getContext("2d", { willReadFrequently: false });
+  layer.ctx.imageSmoothingEnabled = true;
+  layer.ctx.imageSmoothingQuality = "high";
+  layer.ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  const stem = file.name.replace(/\.[^.]+$/, "") || "导入";
+  const name = await uniqueLocalName(stem);
+  _activeSessionName = name;
+  setCurrentSessionName(name);
+  input.clearHistory();
+  board.invalidateAll();
+  board.fitToScreen();
+  renderLayersPanel();
+  _docDirty = true;
+  _docLastSavedAt = 0;
+  updateSaveStatus();
+  await saveNow();
+  setStatus(`新建（照片）：${name}（${w}×${h}）`);
+}
 
 // 把图片当一个新图层叠进当前 doc（photobash / 参考图工作流）。
 // 居中对齐；如果图片比 doc 大，按比例缩到 80% 短边，避免一上来就盖死。
@@ -1538,94 +1633,171 @@ async function importImageAsLayer(file) {
   setStatus(`已导入为新图层：${file.name}`);
 }
 
-// ---- 图库 全屏 ----
-// 打开时把每个 thumb Blob 转成 ObjectURL 给 <img src>；关闭时 revoke
-// 防内存泄漏。
+// ---- 图库 全屏（v50 重做：无返回键、底栏 IDB 占用 + 清扫、加号 popup、云图标 popup） ----
+// 进入和退出都触发 saveNow。进入后把主画布 UI 全 disable（body[data-mode="gallery"]）。
+// 退出 = 点 active tile，或选择另一个 tile / 新建 / 导入照片 / 拉云图。
 let _galleryUrls = [];
-function setGalleryOpen(open) {
-  els.galleryFull.classList.toggle("hidden", !open);
+async function setGalleryOpen(open) {
   if (open) {
+    // 进图库 = 立即保存当前 doc 到本地（用户离开编辑场景）
+    if (_docDirty && !_docSaving) await saveNow();
+    document.body.dataset.mode = "gallery";
+    els.galleryFull.classList.remove("hidden");
     renderGallery();
+    updateIdbUsage();
   } else {
+    // 退图库 = 同样兜底保存一次
+    if (_docDirty && !_docSaving) await saveNow();
+    els.galleryFull.classList.add("hidden");
+    delete document.body.dataset.mode;
     for (const u of _galleryUrls) URL.revokeObjectURL(u);
     _galleryUrls = [];
+    // 关闭可能打开的 popup
+    els.galleryAddPopup.classList.add("hidden");
+    els.cloudAccountPopup.classList.add("hidden");
+    board.requestRender();
   }
 }
-els.galleryClose.addEventListener("click", () => setGalleryOpen(false));
 
-els.galleryCurrentName.addEventListener("change", () => {
-  const v = (els.galleryCurrentName.value || "").trim();
-  if (!v) {
-    els.galleryCurrentName.value = _activeSessionName;
-    return;
-  }
-  if (v === _activeSessionName) return;
-  // 重命名 = 把当前 doc 在新名字下另存，删旧名（旧名是"已 load 进 scene 的真名"，
-  // 满足 feedback-phantom-current-path 的安全条件）
-  (async () => {
-    try {
-      await saveSession(doc, v);
-      if (_activeSessionName && _activeSessionName !== v) {
-        await removeSession(_activeSessionName);
-      }
-      _activeSessionName = v;
-      setCurrentSessionName(v);
-      _docDirty = false;
-      _docLastSavedAt = Date.now();
-      updateSaveStatus();
-      renderGallery();
-      setStatus(`已重命名：${v}`);
-    } catch (e) {
-      setStatus("重命名失败：" + (e && e.message || e));
-    }
-  })();
+// 加号 popup
+els.galleryAddBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const hidden = els.galleryAddPopup.classList.contains("hidden");
+  els.cloudAccountPopup.classList.add("hidden");
+  els.galleryAddPopup.classList.toggle("hidden", !hidden);
+  if (hidden) anchorPopupToBtn(els.galleryAddPopup, els.galleryAddBtn);
+  els.galleryAddBtn.setAttribute("aria-expanded", hidden ? "true" : "false");
 });
-els.galleryNewBtn.addEventListener("click", async () => {
-  const name = await openInputSheet("新建作品", "未命名", { placeholder: "作品名字" });
-  if (name === null) return;
-  const trimmed = name.trim();
-  if (!trimmed) return;
+// 云 icon popup
+els.cloudIconBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const hidden = els.cloudAccountPopup.classList.contains("hidden");
+  els.galleryAddPopup.classList.add("hidden");
+  els.cloudAccountPopup.classList.toggle("hidden", !hidden);
+  if (hidden) anchorPopupToBtn(els.cloudAccountPopup, els.cloudIconBtn);
+  els.cloudIconBtn.setAttribute("aria-expanded", hidden ? "true" : "false");
+});
+document.addEventListener("pointerdown", (e) => {
+  if (!els.galleryAddPopup.classList.contains("hidden") &&
+      !els.galleryAddPopup.contains(e.target) &&
+      !els.galleryAddBtn.contains(e.target)) {
+    els.galleryAddPopup.classList.add("hidden");
+  }
+  if (!els.cloudAccountPopup.classList.contains("hidden") &&
+      !els.cloudAccountPopup.contains(e.target) &&
+      !els.cloudIconBtn.contains(e.target)) {
+    els.cloudAccountPopup.classList.add("hidden");
+  }
+});
+function anchorPopupToBtn(popup, btn) {
+  const r = btn.getBoundingClientRect();
+  popup.style.position = "fixed";
+  popup.style.top = (r.bottom + 4) + "px";
+  popup.style.right = (window.innerWidth - r.right) + "px";
+  popup.style.left = "auto";
+}
+
+// 加号 → 新建：弹 sheet 选名字 + 分辨率
+els.addNew.addEventListener("click", () => {
+  els.galleryAddPopup.classList.add("hidden");
+  openNewDocSheet();
+});
+els.addImportPhoto.addEventListener("click", () => {
+  els.galleryAddPopup.classList.add("hidden");
+  // 复用 oraFileInput 但限定 accept = image only。实际上 oraFileInput accept 包含 image
+  els.oraFileInput.value = "";
+  els.oraFileInput.click();
+  // 上面的 onchange 会路由到 importImageAsLayer / decodeOraToDoc
+  // 但用户语义是"新建作品打底"，所以新建一个 doc 把 image 当 base layer 放进去
+  // 标记一个 pending flag
+  _addImportAsNewDoc = true;
+});
+let _addImportAsNewDoc = false;
+
+// 新建作品 sheet
+function openNewDocSheet() {
+  els.newDocName.value = "未命名";
+  els.newDocPreset.value = "2048";
+  els.newDocCustomRow.style.display = "none";
+  els.newDocW.value = doc.width;
+  els.newDocH.value = doc.height;
+  els.newDocBackdrop.classList.remove("hidden");
+  els.newDocSheet.classList.remove("hidden");
+  setTimeout(() => els.newDocName.focus(), 50);
+}
+function closeNewDocSheet() {
+  els.newDocBackdrop.classList.add("hidden");
+  els.newDocSheet.classList.add("hidden");
+}
+els.newDocPreset.addEventListener("change", () => {
+  els.newDocCustomRow.style.display = els.newDocPreset.value === "custom" ? "" : "none";
+});
+els.newDocBackdrop.addEventListener("click", closeNewDocSheet);
+els.newDocCancel.addEventListener("click", closeNewDocSheet);
+els.newDocConfirm.addEventListener("click", async () => {
+  const nameRaw = (els.newDocName.value || "").trim() || "未命名";
+  let w, h;
+  if (els.newDocPreset.value === "custom") {
+    w = Math.max(64, Math.min(8192, parseInt(els.newDocW.value, 10) || 2048));
+    h = Math.max(64, Math.min(8192, parseInt(els.newDocH.value, 10) || 2048));
+  } else {
+    w = h = parseInt(els.newDocPreset.value, 10);
+  }
+  const name = await uniqueLocalName(nameRaw);
+  closeNewDocSheet();
   if (_docDirty) await saveNow();
-  const fresh = new PaintDoc({ width: doc.width, height: doc.height });
+  const fresh = new PaintDoc({ width: w, height: h });
   doc.layers = fresh.layers;
   doc.activeIndex = 0;
-  _activeSessionName = trimmed;
-  setCurrentSessionName(trimmed);
+  doc.width = w; doc.height = h;
+  els.canvasSizeLabel.textContent = `${w}×${h}`;
+  _activeSessionName = name;
+  setCurrentSessionName(name);
   input.clearHistory();
   board.invalidateAll();
-  board.requestRender();
+  board.fitToScreen();
   renderLayersPanel();
   _docDirty = true;
   _docLastSavedAt = 0;
   updateSaveStatus();
   await saveNow();
-  renderGallery();
-  setStatus(`新建：${trimmed}`);
+  setGalleryOpen(false);
+  setStatus(`新建：${name}（${w}×${h}）`);
 });
-els.gallerySaveCopyBtn.addEventListener("click", async () => {
-  const name = await openInputSheet("保存副本", _activeSessionName + " 副本");
-  if (name === null) return;
-  const trimmed = name.trim();
-  if (!trimmed) return;
-  if (trimmed === _activeSessionName) {
-    setStatus("副本不能和当前同名");
-    return;
-  }
-  // **保存副本** 语义：把当前 doc 写到 trimmed 名字下，**不**切走 active。
-  // 用户继续编辑原作。和"另存为"语义不同：另存为会换 active 到新名字 →
-  // 容易和"重命名"混淆。
+
+els.galleryClearCacheBtn.addEventListener("click", async () => {
+  const ok = await openConfirmSheet(
+    "清扫本地缓存？",
+    "把所有本地保存的作品移除，恢复成首次启动状态。已登录云端的作品云端不动。当前正在编辑的内容不受影响。",
+  );
+  if (!ok) return;
   try {
-    await saveSession(doc, trimmed);
+    const list = await listSessions();
+    for (const s of list) await removeSession(s.name);
+    setStatus("已清扫本地缓存");
     renderGallery();
-    setStatus(`已保存副本：${trimmed}（仍在编辑：${_activeSessionName}）`);
+    updateIdbUsage();
   } catch (e) {
-    setStatus("保存副本失败：" + (e && e.message || e));
+    setStatus("清扫失败：" + (e && e.message || e));
   }
 });
 
+async function updateIdbUsage() {
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const { usage, quota } = await navigator.storage.estimate();
+      els.galleryFootUsage.textContent = `本地占用：${humanSize(usage)} / ${humanSize(quota)}`;
+    } else {
+      els.galleryFootUsage.textContent = "本地占用：浏览器不支持估算";
+    }
+  } catch {
+    els.galleryFootUsage.textContent = "本地占用：未知";
+  }
+}
+
 async function renderGallery() {
-  els.galleryCurrentName.value = _activeSessionName;
   updateCloudAuthUI();
+  updateIdbUsage();
   // revoke 旧 URL
   for (const u of _galleryUrls) URL.revokeObjectURL(u);
   _galleryUrls = [];
@@ -1691,16 +1863,19 @@ async function renderGallery() {
     info.className = "gallery-tile-info";
     const nm = document.createElement("div");
     nm.className = "gallery-tile-name";
-    // 在 name 后面挂 source badges
-    const sources = [];
-    if (isLocal) sources.push("本地");
-    if (isCloud) sources.push("☁");
-    nm.textContent = item.name + (sources.length ? ` · ${sources.join(" ")}` : "");
+    nm.textContent = item.name;
     const meta = document.createElement("div");
     meta.className = "gallery-tile-meta";
     const t = (item.local?.updatedAt) || Date.parse(item.cloud?.lastModifiedDateTime || 0);
     const sz = (item.local?.size) || item.cloud?.size || 0;
-    meta.textContent = `${humanTime(t)} · ${humanSize(sz)}`;
+    // 状态标签：本地 / 云 / 未上传 / 本地+云
+    const signedIn = isSignedIn();
+    let stateLabel;
+    if (isLocal && isCloud) stateLabel = "本地+云";
+    else if (isCloud) stateLabel = "纯云端";
+    else if (isLocal && signedIn) stateLabel = "未上传";
+    else stateLabel = "本地";
+    meta.textContent = `${stateLabel} · ${humanTime(t)} · ${humanSize(sz)}`;
     info.appendChild(nm);
     info.appendChild(meta);
     tile.appendChild(info);
@@ -1721,6 +1896,35 @@ async function renderGallery() {
         pullBtn.textContent = "拉取";
       });
       actions.appendChild(pullBtn);
+    } else if (isLocal && !isCloud && signedIn) {
+      // 本地未上传 → 推送
+      const pushBtn = document.createElement("button");
+      pushBtn.type = "button";
+      pushBtn.textContent = "推送";
+      pushBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        pushBtn.disabled = true;
+        pushBtn.textContent = "推送中…";
+        try {
+          // 拿这个 session 的 ora 内容直接推（不影响当前编辑的 doc）
+          const loaded = await openSession(item.name);
+          if (!loaded) throw new Error("找不到本地 session");
+          const ora = await encodeDocToOra(loaded);
+          await pushSession(item.name, ora);
+          setStatus(`已推送：${item.name}`);
+          renderGallery();
+        } catch (err) {
+          if (err instanceof CloudConflictError) {
+            setStatus(`云端冲突：${item.name}（先改名再推）`, true);
+          } else {
+            setStatus("推送失败：" + (err && err.message || err));
+          }
+        } finally {
+          pushBtn.disabled = false;
+          pushBtn.textContent = "推送";
+        }
+      });
+      actions.appendChild(pushBtn);
     }
     const del = document.createElement("button");
     del.type = "button";
@@ -1791,38 +1995,48 @@ function humanSize(b) {
   return `${(b / 1048576).toFixed(1)} MB`;
 }
 
-// ---- 云端按钮（在 gallery header 里），登录态 / 推送 / 刷新 ----
+// ---- 云端 icon 按钮（gallery header 右侧）----
+// 一颗云图标 + 状态色：未登录灰，已登录蓝勾；点开 popup 显示账号 + 登录/退出。
+// 刷新按钮只在登录后显示。
+const ICON_CLOUD_OUT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
+const ICON_CLOUD_IN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
+
 function updateCloudAuthUI() {
   const signed = isSignedIn();
+  const configured = isAuthConfigured();
   if (signed) {
     const acc = getActiveAccount();
-    els.galleryCloudStatus.textContent = `云端：${acc?.username || acc?.name || "已登录"}`;
+    els.cloudIconBtn.innerHTML = ICON_CLOUD_IN;
+    els.cloudIconBtn.dataset.cloudState = "signedin";
+    els.cloudIconBtn.title = `云端：${acc?.username || acc?.name || "已登录"}（点开账号菜单）`;
+    els.cloudAccountInfo.textContent = `云端：${acc?.username || acc?.name || "已登录"}`;
     els.cloudSignInBtn.classList.add("hidden");
     els.cloudSignOutBtn.classList.remove("hidden");
-    els.cloudPushBtn.classList.remove("hidden");
     els.cloudRefreshBtn.classList.remove("hidden");
   } else {
-    els.galleryCloudStatus.textContent = isAuthConfigured() ? "云端：未登录" : "云端：未配置";
-    els.cloudSignInBtn.classList.toggle("hidden", !isAuthConfigured());
+    els.cloudIconBtn.innerHTML = ICON_CLOUD_OUT;
+    els.cloudIconBtn.dataset.cloudState = configured ? "out" : "unconfigured";
+    els.cloudIconBtn.title = configured ? "云端：未登录（点开登录）" : "云端：未配置";
+    els.cloudAccountInfo.textContent = configured ? "云端：未登录" : "云端：未配置";
+    els.cloudSignInBtn.classList.toggle("hidden", !configured);
     els.cloudSignOutBtn.classList.add("hidden");
-    els.cloudPushBtn.classList.add("hidden");
     els.cloudRefreshBtn.classList.add("hidden");
   }
-  updateSaveStatus();   // save 按钮的 state 也跟着变
+  updateSaveStatus();
 }
 
 els.cloudSignInBtn.addEventListener("click", async () => {
+  els.cloudAccountPopup.classList.add("hidden");
   if (!isAuthConfigured()) { setStatus("尚未配置 OneDrive 客户端"); return; }
   try { await signIn(); } catch (e) { setStatus("登录失败：" + (e && e.message || e)); }
 });
 els.cloudSignOutBtn.addEventListener("click", async () => {
+  els.cloudAccountPopup.classList.add("hidden");
   try { await signOut(); } catch (_) {}
   updateCloudAuthUI();
   renderGallery();
 });
 
-// gallery 顶部的"推送当前" 按钮 = 同 Ctrl+S（saveAndPush 包含 IDB + 云）
-els.cloudPushBtn.addEventListener("click", () => saveAndPush());
 els.cloudRefreshBtn.addEventListener("click", () => renderGallery());
 
 // 给本地拿一个不冲突的名字（X / X 1 / X 2 / ...）

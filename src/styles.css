@@ -574,40 +574,59 @@ input[type=range] {
 }
 .gallery-full.hidden,
 .cloud-full.hidden { display: none; }
+/* v50 重做：左标题 + 右对齐 icon 组。无返回键，点 active tile 关闭。 */
 .gallery-header {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center;
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);
-  flex-wrap: wrap;
 }
-.gallery-close {
-  background: transparent; border: none; font-size: 22px;
-  color: var(--ink); cursor: pointer; padding: 4px 8px;
-  flex: 0 0 auto;
+.gallery-title { font-size: 20px; font-weight: 600; color: var(--ink); flex: 1; }
+.gallery-actions { display: flex; align-items: center; gap: 6px; }
+.gallery-icon-btn {
+  width: 36px; height: 36px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 20px; line-height: 1;
+  padding: 0;
 }
-.gallery-title { font-size: 18px; font-weight: 600; color: var(--ink); flex: 0 0 auto; margin-right: 8px; }
-.gallery-current-mini {
-  display: flex; align-items: center; gap: 6px;
-  flex: 1 1 200px; min-width: 0;
-}
-.gallery-current-mini-label { color: var(--ink-soft); font-size: 13px; flex: 0 0 auto; }
-.gallery-current-name {
-  flex: 1; min-width: 0;
-  padding: 6px 10px;
-  font: inherit; background: var(--bg-soft);
-  border: 1px solid var(--line); border-radius: 6px; color: var(--ink);
-}
-.gallery-action-btn {
-  padding: 8px 14px;
+.gallery-icon-btn:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.gallery-icon-btn[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #4c8bf5) 14%, transparent); color: var(--accent, #4c8bf5); }
+.gallery-icon-btn[data-cloud-state="signedin"] { color: #4c8bf5; }
+.gallery-icon-btn[data-cloud-state="unconfigured"] { color: var(--ink-soft); opacity: 0.5; }
+
+.gallery-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--ink-soft);
   background: var(--bg-soft);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--ink); cursor: pointer; font: inherit;
-  flex: 0 0 auto;
 }
-.gallery-action-btn:hover { background: color-mix(in srgb, var(--ink) 8%, var(--bg-soft)); }
-.gallery-cloud-sep { color: var(--ink-soft); margin: 0 4px; }
-.gallery-cloud-status { color: var(--ink-soft); font-size: 12px; flex: 0 0 auto; }
+.gallery-foot-usage { font-variant-numeric: tabular-nums; }
+.gallery-foot-btn {
+  background: transparent; border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 12px;
+  color: var(--ink-soft); cursor: pointer; font: inherit;
+}
+.gallery-foot-btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); color: var(--ink); }
+
+.menu-item-info {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+/* 进入图库模式 = 主画布 UI 全 disable + 隐藏，给图库清场 */
+body[data-mode="gallery"] .top-bar,
+body[data-mode="gallery"] .hud,
+body[data-mode="gallery"] .float-panel,
+body[data-mode="gallery"] .menu-panel:not(#galleryAddPopup):not(#cloudAccountPopup),
+body[data-mode="gallery"] .adjust-popup,
+body[data-mode="gallery"] .board { display: none !important; }
 
 /* Save 按钮 4 态视觉 */
 .tool[data-state="dirty"] { color: var(--accent, #4c8bf5); position: relative; }

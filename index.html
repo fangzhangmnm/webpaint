@@ -76,10 +76,10 @@
         <button class="tool" id="toolPicker" type="button" data-tool="picker" title="吸色 (Alt 临时)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <!-- 滴管轮廓（一笔闭合，沿对角线 (3,21)→(21,3)）：
-                 尖 (3,21) → 管顶 (5,17)→(12,10) → 肩 (11,9) → 球顶左 (17,3) → 球顶右 (21,7)
-                 → 肩 (15,13) → 管底 (14,12)→(7,19) → 回尖 (3,21)
-                 关键：球宽 (4) 比管宽 (2) 显著大，肩部 1 单位台阶清晰可见；尖端收成一点 -->
-            <path d="M3 21l2-4 7-7-1-1 6-6 4 4-6 6-1-1-7 7z"></path>
+                 尖 (3,21) → 管顶 (5,17)→(12,10) → 肩 (11,9) → 球顶左 (17,3)
+                 ⤴半圆圆顶⤵ 球顶右 (21,7) → 肩 (15,13) → 管底 (14,12)→(7,19) → 回尖
+                 球身=平行四边形，远端用半圆弧 (r=2√2≈2.83) 做圆顶；尖端收成一点 -->
+            <path d="M3 21l2-4 7-7-1-1 6-6a2.83 2.83 0 0 1 4 4l-6 6-1-1-7 7z"></path>
           </svg>
         </button>
         <button class="tool" id="toolHand" type="button" data-tool="hand" title="平移 (H / Space)">
@@ -158,26 +158,70 @@
       </button>
     </header>
 
-    <!-- 图库 + 云端 合并：全屏 grid + header 含登录态 / 推送 / 刷新 -->
+    <!-- 图库：左标题 + 右对齐 (云图标 / 刷新 / 加号)；底部 IDB 占用 + 清扫缓存。
+         无返回键 —— 点当前 active tile 关闭。详见 docs/artist-priorities.md ergonomics. -->
     <div class="gallery-full hidden" id="galleryFull" role="dialog" aria-label="图库">
       <div class="gallery-header">
-        <button class="gallery-close" id="galleryClose" type="button" aria-label="返回">←</button>
         <span class="gallery-title">图库</span>
-        <span class="gallery-current-mini">
-          <span class="gallery-current-mini-label">正在编辑：</span>
-          <input class="gallery-current-name" id="galleryCurrentName" type="text" placeholder="未命名" />
-        </span>
-        <button class="gallery-action-btn" id="galleryNewBtn" type="button">＋ 新建</button>
-        <button class="gallery-action-btn" id="gallerySaveCopyBtn" type="button">保存副本…</button>
-        <span class="gallery-cloud-sep" aria-hidden="true">|</span>
-        <span class="gallery-cloud-status" id="galleryCloudStatus">云端：未登录</span>
-        <button class="gallery-action-btn" id="cloudSignInBtn" type="button">登录</button>
-        <button class="gallery-action-btn hidden" id="cloudSignOutBtn" type="button">退出</button>
-        <button class="gallery-action-btn hidden" id="cloudPushBtn" type="button">推送当前</button>
-        <button class="gallery-action-btn hidden" id="cloudRefreshBtn" type="button">刷新</button>
+        <div class="gallery-actions" role="group" aria-label="账号 / 新增">
+          <button class="gallery-icon-btn" id="cloudIconBtn" type="button" title="云端账号" aria-haspopup="true" aria-expanded="false"></button>
+          <button class="gallery-icon-btn hidden" id="cloudRefreshBtn" type="button" title="刷新云端列表">↻</button>
+          <button class="gallery-icon-btn" id="galleryAddBtn" type="button" title="新增" aria-haspopup="true" aria-expanded="false">＋</button>
+        </div>
       </div>
       <div class="gallery-grid" id="galleryGrid"><!-- 本地 + 云端 tiles by JS --></div>
-      <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。Ctrl+S 或新建一个吧。</div>
+      <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。点右上 ＋ 新建一个，或先在 PC 上画一笔。</div>
+      <div class="gallery-foot">
+        <span class="gallery-foot-usage" id="galleryFootUsage">本地占用：计算中…</span>
+        <button class="gallery-foot-btn" id="galleryClearCacheBtn" type="button">清扫本地缓存…</button>
+      </div>
+    </div>
+
+    <!-- 加号 popup：新建 / 导入照片 -->
+    <div class="menu-panel hidden" id="galleryAddPopup" role="menu">
+      <button class="menu-item" id="addNew" type="button" role="menuitem">
+        <span class="menu-item-label">新建作品…</span>
+      </button>
+      <button class="menu-item" id="addImportPhoto" type="button" role="menuitem">
+        <span class="menu-item-label">导入照片…</span>
+      </button>
+    </div>
+
+    <!-- 云图标 popup：未登录显示"登录"；已登录显示账号 + 退出 -->
+    <div class="menu-panel hidden" id="cloudAccountPopup" role="menu">
+      <div class="menu-item-info" id="cloudAccountInfo">云端：未配置</div>
+      <button class="menu-item hidden" id="cloudSignInBtn" type="button" role="menuitem">
+        <span class="menu-item-label">登录 OneDrive</span>
+      </button>
+      <button class="menu-item hidden" id="cloudSignOutBtn" type="button" role="menuitem">
+        <span class="menu-item-label">退出登录</span>
+      </button>
+    </div>
+
+    <!-- 新建作品 sheet：名字 + 分辨率（预设 + 自定义） -->
+    <div class="backdrop hidden" id="newDocBackdrop"></div>
+    <div class="sheet hidden" id="newDocSheet" role="dialog" aria-modal="true" aria-label="新建作品">
+      <h3>新建作品</h3>
+      <label class="brush-slider-row" style="grid-template-columns: 80px 1fr;">
+        <span class="brush-slider-label">名字</span>
+        <input id="newDocName" type="text" class="generic-sheet-input" placeholder="未命名" />
+      </label>
+      <label class="brush-slider-row" style="grid-template-columns: 80px 1fr;">
+        <span class="brush-slider-label">预设</span>
+        <select id="newDocPreset">
+          <option value="2048">2048 × 2048（默认）</option>
+          <option value="1024">1024 × 1024（轻量）</option>
+          <option value="4096">4096 × 4096（高清，慢）</option>
+          <option value="custom">自定义…</option>
+        </select>
+      </label>
+      <label class="brush-slider-row" id="newDocCustomRow" style="grid-template-columns: 80px 1fr 1fr; display:none;">
+        <span class="brush-slider-label">尺寸</span>
+        <input id="newDocW" type="number" min="64" max="8192" step="64" value="2048" />
+        <input id="newDocH" type="number" min="64" max="8192" step="64" value="2048" />
+      </label>
+      <button class="sheet-action" id="newDocConfirm" type="button">创建</button>
+      <button class="sheet-action ghost" id="newDocCancel" type="button">取消</button>
     </div>
 
     <!-- 通用 in-app 对话（替代 alert / prompt / confirm；见 feedback-no-system-dialog） -->
@@ -301,39 +345,42 @@
       <!-- 之后加：曲线 / 色相 / Levels / ... -->
     </div>
 
-    <!-- 汉堡菜单：低频项收纳处 -->
+    <!-- 汉堡菜单：低频项收纳处。顺序见 user 2026-05-28 反馈 -->
     <div class="menu-panel hidden" id="menuPanel" role="menu">
       <button class="menu-item" id="menuGallery" type="button" role="menuitem">
-        <span class="menu-item-label">图库 / 云端…</span>
+        <span class="menu-item-label">图库</span>
       </button>
-      <hr class="menu-sep" />
       <button class="menu-item" id="menuImport" type="button" role="menuitem">
-        <span class="menu-item-label">导入图片 / .ora …</span>
-      </button>
-      <button class="menu-item" id="menuExportPng" type="button" role="menuitem">
-        <span class="menu-item-label">导出 / 分享 PNG</span>
-      </button>
-      <button class="menu-item" id="menuExportJpg" type="button" role="menuitem">
-        <span class="menu-item-label">导出 / 分享 JPG</span>
-      </button>
-      <button class="menu-item" id="menuExportOra" type="button" role="menuitem">
-        <span class="menu-item-label">导出 .ora 文件</span>
-      </button>
-      <button class="menu-item" id="menuClipboardCopy" type="button" role="menuitem">
-        <span class="menu-item-label">复制 PNG 到剪贴板</span>
+        <span class="menu-item-label">导入文件</span>
       </button>
       <button class="menu-item" id="menuClipboardPaste" type="button" role="menuitem">
-        <span class="menu-item-label">从剪贴板新建图层</span>
+        <span class="menu-item-label">导入剪切板</span>
+      </button>
+      <button class="menu-item" id="menuExportPng" type="button" role="menuitem">
+        <span class="menu-item-label">导出 PNG</span>
+      </button>
+      <button class="menu-item" id="menuExportJpg" type="button" role="menuitem">
+        <span class="menu-item-label">导出 JPG</span>
+      </button>
+      <button class="menu-item" id="menuExportOra" type="button" role="menuitem">
+        <span class="menu-item-label">导出源文件</span>
+      </button>
+      <button class="menu-item" id="menuClipboardCopy" type="button" role="menuitem">
+        <span class="menu-item-label">导出到剪切板</span>
       </button>
       <hr class="menu-sep" />
       <button class="menu-item" id="menuFit" type="button" role="menuitem">
-        <span class="menu-item-label">适应画布 (0)</span>
+        <span class="menu-item-label">画布居中 (0)</span>
       </button>
       <button class="menu-item" id="menuReference" type="button" role="menuitem">
         <span class="menu-item-label">参考小窗…</span>
       </button>
       <button class="menu-item" id="menuBrushSettings" type="button" role="menuitem">
         <span class="menu-item-label">笔刷平滑设置…</span>
+      </button>
+      <button class="menu-item" id="menuCheckerboard" type="button" role="menuitemcheckbox" aria-pressed="false">
+        <span class="menu-item-label">透明背景显示棋盘</span>
+        <span class="menu-item-state" data-state-for="checkerboard">关</span>
       </button>
       <hr class="menu-sep" />
       <button class="menu-item" id="menuPressureSize" type="button" role="menuitemcheckbox" aria-pressed="true">
@@ -352,6 +399,9 @@
       <button class="menu-item" id="menuTheme" type="button" role="menuitem">
         <span class="menu-item-label">主题</span>
         <span class="menu-item-state" data-state-for="theme">跟随系统</span>
+      </button>
+      <button class="menu-item" id="menuCheckUpdate" type="button" role="menuitem">
+        <span class="menu-item-label">检测更新</span>
       </button>
       <button class="menu-item menu-danger" id="menuClear" type="button" role="menuitem">
         <span class="menu-item-label">清空当前图层</span>

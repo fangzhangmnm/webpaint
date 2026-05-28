@@ -38,6 +38,9 @@ export class Board {
 
     // 主题色：从 CSS 变量取
     this._voidColor = "#e6e2d6";
+    // 棋盘背景：开后底层用半透明灰白格替代 doc.backgroundColor。
+    // 适合做透明素材 / 看图层 alpha 通道。
+    this._showCheckerboard = false;
 
     // Live overlay provider：渲染时调一次，返回 {canvas, layer, opacity, mode} 或 null。
     // 笔触进行中由 brush.getLiveOverlay() 提供。paint 模式：layer 之上 composite buffer×opacity。
@@ -59,6 +62,10 @@ export class Board {
     this.fitToScreen();
   }
 
+  setShowCheckerboard(on) {
+    this._showCheckerboard = !!on;
+    this._dirtyFull = true;
+  }
   setThemeColors({ voidColor }) {
     if (voidColor) this._voidColor = voidColor;
     this._dirtyFull = true;
@@ -302,9 +309,13 @@ export class Board {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
 
-    // doc 背景 —— 直接画 (0,0,W,H) in doc coords
-    ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
-    ctx.fillRect(0, 0, this.doc.width, this.doc.height);
+    // doc 背景：默认 backgroundColor；开了棋盘则画半透明灰白格（Procreate 透明背景同款）
+    if (this._showCheckerboard) {
+      this._drawCheckerboard(ctx, this.doc.width, this.doc.height);
+    } else {
+      ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
+      ctx.fillRect(0, 0, this.doc.width, this.doc.height);
+    }
 
     // 逐 layer
     const overlay = this._overlayProvider?.();
@@ -370,8 +381,12 @@ export class Board {
     this._applyDocTransform(ctx);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
-    ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
-    ctx.fillRect(0, 0, this.doc.width, this.doc.height);
+    if (this._showCheckerboard) {
+      this._drawCheckerboard(ctx, this.doc.width, this.doc.height);
+    } else {
+      ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
+      ctx.fillRect(0, 0, this.doc.width, this.doc.height);
+    }
     const overlay = this._overlayProvider?.();
     for (const layer of this.doc.layers) {
       if (!layer.visible) continue;
@@ -401,6 +416,19 @@ export class Board {
     ctx.beginPath();
     ctx.arc(c.x, c.y, Math.max(2, c.size * scale / 2) + 1, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  // 画 doc 区半透明灰白格背景。在 doc 坐标系下画（cell = 16 doc-px）。
+  _drawCheckerboard(ctx, W, H) {
+    const cell = 16;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#c8c8c8";
+    for (let y = 0; y < H; y += cell) {
+      for (let x = ((y / cell) | 0) % 2 ? 0 : cell; x < W; x += cell * 2) {
+        ctx.fillRect(x, y, cell, cell);
+      }
+    }
   }
 }
 
