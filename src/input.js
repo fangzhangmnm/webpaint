@@ -430,7 +430,16 @@ export class InputController {
       this.board.requestRender();
     } else if (rec.role === "lasso") {
       const { x: dx, y: dy } = this.board.screenToDoc(e.clientX, e.clientY);
-      if (rec._lassoMode === "drawing") {
+      if (rec._lassoMode === "tentative") {
+        // 跨过 4 doc-px² 阈值才升级成 drawing
+        const ddx = dx - rec._lassoStartDocX;
+        const ddy = dy - rec._lassoStartDocY;
+        if (ddx * ddx + ddy * ddy > 4) {
+          rec._lassoMode = "drawing";
+          this.lasso.beginPath(rec._lassoStartDocX, rec._lassoStartDocY);
+          this.lasso.extendPath(dx, dy);
+        }
+      } else if (rec._lassoMode === "drawing") {
         this.lasso.extendPath(dx, dy);
       } else if (rec._lassoMode === "dragging") {
         this.lasso.extendDrag(dx, dy);
@@ -632,19 +641,21 @@ export class InputController {
   _beginLasso(rec) {
     if (!this.doc.activeLayer) { rec.role = null; return; }
     const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
-    const st = this.lasso.state();
-    if (st === "floating") {
-      if (this.lasso.hitFloating(dx, dy)) {
-        // 拖 floating
-        rec._lassoMode = "dragging";
-        this.lasso.beginDrag(dx, dy);
-        return;
-      }
-      // 点在 floating 外 = 把当前 commit，再开新选区
+    if (this.lasso.state() === "floating" && this.lasso.hitFloating(dx, dy)) {
+      // 命中 floating 内部 → 拖
+      rec._lassoMode = "dragging";
+      this.lasso.beginDrag(dx, dy);
+      return;
+    }
+    if (this.lasso.state() === "floating") {
+      // 在 floating 外按下：先把当前 commit 收尾。下一步是 tap 还是 drag，看 _move 决定
       this._commitLasso();
     }
-    rec._lassoMode = "drawing";
-    this.lasso.beginPath(dx, dy);
+    // tentative：still 不开 path。要等 _move 跨过阈值才升级成 drawing。
+    // 这样单纯轻点（floating 外 / 空层）= 纯 commit / 无操作，不会触发"选区太小"误报
+    rec._lassoMode = "tentative";
+    rec._lassoStartDocX = dx;
+    rec._lassoStartDocY = dy;
   }
   _endLasso(rec) {
     if (rec._lassoMode === "drawing") {
@@ -657,6 +668,7 @@ export class InputController {
     } else if (rec._lassoMode === "dragging") {
       this.lasso.endDrag();
     }
+    // tentative 不报任何状态——用户根本没想画
   }
   _commitLasso() {
     const entry = this.lasso.commit();
