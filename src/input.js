@@ -906,10 +906,28 @@ export class InputController {
 
   // undo / redo / canUndo / canRedo 现在都走共享 history（v44 起）。
   // 留这几个 wrapper 给绑了快捷键 / 老 listener 用，**不**自己保存状态。
-  canUndo() { return !!this.history && this.history.canUndo(); }
-  canRedo() { return !!this.history && this.history.canRedo(); }
-  undo()    { if (this.history) this.history.undo(); }
-  redo()    { if (this.history) this.history.redo(); }
+  canUndo() {
+    if (this.lasso.hasFloating()) return true;     // floating 时 undo = cancel
+    return !!this.history && this.history.canUndo();
+  }
+  canRedo() {
+    if (this.lasso.hasFloating()) return false;    // floating 时无 redo 语义
+    return !!this.history && this.history.canRedo();
+  }
+  // floating 状态下 undo = 取消变换（user 反馈：transform 时撤销应是 cancel 语义）
+  // redo 在 floating 下被禁；切回去 history 自然续上
+  undo() {
+    if (this.lasso.hasFloating()) {
+      this._abortLasso();
+      this.status?.("已取消变换");
+      return;
+    }
+    if (this.history) this.history.undo();
+  }
+  redo() {
+    if (this.lasso.hasFloating()) return;
+    if (this.history) this.history.redo();
+  }
   clearHistory() { if (this.history) this.history.clear(); }
 
   // ---- 防误触 / ghost pointer 清理 ----

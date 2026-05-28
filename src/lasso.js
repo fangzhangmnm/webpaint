@@ -620,21 +620,33 @@ function inverseBilinear(x, y, tl, tr, bl, br) {
 // ============ 三角剖分 mesh 渲染 ============
 // export 给 board.js 也用同一份代码画 floating 浮层
 //
-// 默认线性三角：(N-1)×(N-1) 个 cell，每 cell 切 2 个三角。
-// opts.smooth=true（warp 模式）：先用 Catmull-Rom 把 4×4 mesh 升采样到密集网格再画。
-// 等价于"曲面用曲线插值，渲染再切三角"，肉眼接近 Procreate 的平滑变形。
-const SMOOTH_SUBDIV = 4;   // 每 cell 切 4×4 子格；4×4 mesh 总 → (3×4+1)² = 169 个顶点
+// 2×2 mesh（free / uniform / distort）：用 homography 把 src 单位方格映射到 dst 四边形
+//   → 在 dst 上按 homography 取密集子格点 → 每子格切 2 三角 affine drawImage
+//   等价于让小三角足够小，使得 perspective ≈ affine（PS1 经典 artifact 消失）
+// 4×4 mesh（warp）：tensor-product Catmull-Rom 升采样到密集网格再画。Catmull-Rom 控
+//   制点处 C1（切线连续），密集子格下渲染 C0 折角小到肉眼难察。
+const PERSP_SUBDIV = 12;   // 2×2 quad 切 12×12 子格 = 144 cell = 288 三角
+const SMOOTH_SUBDIV = 6;   // 4×4 mesh 每 cell 切 6 段 = (3×6+1)² = 361 顶点 = 648 三角
 export function drawMesh(ctx, srcCanvas, srcW, srcH, mesh, opts = {}) {
-  let renderMesh = mesh;
-  if (opts.smooth && mesh.length === 4) {
+  let renderMesh;
+  let densifySrc = false;
+  if (mesh.length === 4 && opts.smooth) {
     renderMesh = subdivideCatmullRom4x4(mesh, SMOOTH_SUBDIV);
+    densifySrc = true;
+  } else if (mesh.length === 2) {
+    // 任何 2×2 都走 homography 子格化（free / uniform 平行四边形时它退化到 affine；
+    // distort 时给出真正的透视）
+    renderMesh = subdivideQuadByHomography(mesh, PERSP_SUBDIV);
+    densifySrc = true;
+  } else {
+    renderMesh = mesh;
   }
   const N = renderMesh.length;
   for (let i = 0; i < N - 1; i++) {
     for (let j = 0; j < N - 1; j++) {
-      const sxL = j     * srcW / (N - 1);
+      const sxL = j       * srcW / (N - 1);
       const sxR = (j + 1) * srcW / (N - 1);
-      const syT = i     * srcH / (N - 1);
+      const syT = i       * srcH / (N - 1);
       const syB = (i + 1) * srcH / (N - 1);
       const dTL = renderMesh[i][j],     dTR = renderMesh[i][j + 1];
       const dBL = renderMesh[i + 1][j], dBR = renderMesh[i + 1][j + 1];
@@ -646,6 +658,54 @@ export function drawMesh(ctx, srcCanvas, srcW, srcH, mesh, opts = {}) {
         dTR.x, dTR.y, dBR.x, dBR.y, dBL.x, dBL.y);
     }
   }
+}
+
+// 单位方格 (0,0)-(1,1) → 一般四边形 (TL, TR, BR, BL) 的 homography。
+// 用 Heckbert 1989 闭式解。返回 8 系数 + 隐含 i=1：
+//   x = (a*u + b*v + c) / (g*u + h*v + 1)
+//   y = (d*u + e*v + f) / (g*u + h*v + 1)
+// 当四角是平行四边形时 g=h=0，退化为纯 affine
+function homographyFromUnitSquareToQuad(tl, tr, br, bl) {
+  const dx1 = tr.x - br.x, dy1 = tr.y - br.y;
+  const dx2 = bl.x - br.x, dy2 = bl.y - br.y;
+  const sx = tl.x - tr.x + br.x - bl.x;
+  const sy = tl.y - tr.y + br.y - bl.y;
+  const det = dx1 * dy2 - dx2 * dy1;
+  if (Math.abs(det) < 1e-9) return null;        // 退化
+  const g = (sx * dy2 - dx2 * sy) / det;
+  const h = (dx1 * sy - sx * dy1) / det;
+  return {
+    a: tr.x - tl.x + g * tr.x,
+    b: bl.x - tl.x + h * bl.x,
+    c: tl.x,
+    d: tr.y - tl.y + g * tr.y,
+    e: bl.y - tl.y + h * bl.y,
+    f: tl.y,
+    g, h,
+  };
+}
+function homographySample(H, u, v) {
+  const w = H.g * u + H.h * v + 1;
+  return {
+    x: (H.a * u + H.b * v + H.c) / w,
+    y: (H.d * u + H.e * v + H.f) / w,
+  };
+}
+// 2×2 mesh → (sub+1)×(sub+1) 密集网格（沿真 homography 取样，非简单 bilinear）
+function subdivideQuadByHomography(m, sub) {
+  const H = homographyFromUnitSquareToQuad(m[0][0], m[0][1], m[1][1], m[1][0]);
+  if (!H) return m;
+  const N = sub + 1;
+  const out = [];
+  for (let i = 0; i < N; i++) {
+    out[i] = new Array(N);
+    const v = i / sub;
+    for (let j = 0; j < N; j++) {
+      const u = j / sub;
+      out[i][j] = homographySample(H, u, v);
+    }
+  }
+  return out;
 }
 
 // 4×4 控制网格 → 密集网格（tensor-product Catmull-Rom）。
