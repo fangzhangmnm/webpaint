@@ -20,7 +20,7 @@
 // arrayBuffer() 转 Uint8Array。
 
 import { zipPack, zipUnpack } from "./zip.js";
-import { Layer, PaintDoc } from "./doc.js";
+import { Layer, PaintDoc, computeClipBaseFor } from "./doc.js";
 
 // ---- 工具 ----
 
@@ -68,14 +68,28 @@ function renderMerged(doc) {
   // 白底（doc.backgroundColor）
   ctx.fillStyle = doc.backgroundColor || "#ffffff";
   ctx.fillRect(0, 0, doc.width, doc.height);
-  for (const L of doc.layers) {
+  // Clipping mask：详细算法见 doc.js computeClipBaseFor + board.js _renderLayer*
+  const baseFor = computeClipBaseFor(doc.layers);
+  for (let i = 0; i < doc.layers.length; i++) {
+    const L = doc.layers[i];
     if (!L.visible) continue;
     if (L.bboxW <= 0 || L.bboxH <= 0) continue;
+    const baseIdx = baseFor[i];
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
     ctx.globalAlpha = L.opacity;
     ctx.globalCompositeOperation = L.mode || "source-over";
-    ctx.drawImage(L.canvas, L.bboxX, L.bboxY);
+    if (baseIdx < 0) {
+      ctx.drawImage(L.canvas, L.bboxX, L.bboxY);
+    } else {
+      const base = doc.layers[baseIdx];
+      const tmp = makeBitmap(L.bboxW, L.bboxH);
+      const tctx = tmp.getContext("2d");
+      tctx.drawImage(L.canvas, 0, 0);
+      tctx.globalCompositeOperation = "destination-in";
+      tctx.drawImage(base.canvas, base.bboxX - L.bboxX, base.bboxY - L.bboxY);
+      ctx.drawImage(tmp, L.bboxX, L.bboxY);
+    }
     ctx.globalAlpha = prevA;
     ctx.globalCompositeOperation = prevC;
   }
@@ -113,11 +127,13 @@ function buildStackXml(doc) {
       `opacity="${L.opacity.toFixed(4)}"`,
       `visibility="${L.visible ? "visible" : "hidden"}"`,
       `composite-op="${oraCompositeOp(L.mode || "source-over")}"`,
+      // 私有属性：clipping mask（其他 ora reader 会忽略；自家 reader 会读）
+      ...(L.clippingMask ? [`webpaint:clipping="true"`] : []),
     ];
     layers.push(`    <layer ${attrs.join(" ")} />`);
   }
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<image version="0.0.3" w="${doc.width}" h="${doc.height}" xres="72" yres="72">
+<image version="0.0.3" w="${doc.width}" h="${doc.height}" xres="72" yres="72" xmlns:webpaint="https://github.com/fangzhangmnm/webpaint/ns">
   <stack name="root">
 ${layers.join("\n")}
   </stack>
@@ -219,6 +235,7 @@ function parseStackXml(xmlText) {
     opacity: parseFloat(n.getAttribute("opacity") || "1"),
     visible: (n.getAttribute("visibility") || "visible") === "visible",
     mode: canvasModeFromOra(n.getAttribute("composite-op") || "svg:src-over"),
+    clippingMask: n.getAttribute("webpaint:clipping") === "true",
   }));
   return { w, h, layers };
 }
@@ -252,6 +269,7 @@ export async function decodeOraToDoc(blob) {
     layer.visible = L.visible;
     layer.opacity = L.opacity;
     layer.mode = L.mode;
+    layer.clippingMask = !!L.clippingMask;
     layer.bboxX = L.x;
     layer.bboxY = L.y;
     layer.bboxW = bitmap.width;

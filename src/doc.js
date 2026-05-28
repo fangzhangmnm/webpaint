@@ -33,6 +33,8 @@ export class Layer {
     this.visible = true;
     this.opacity = 1;
     this.mode = "source-over";       // Canvas2D globalCompositeOperation
+    this.clippingMask = false;       // true → 被剪裁到「下方第一颗非剪裁层」alpha；
+                                     //         连续剪裁层链共用同一颗基底（Procreate）
     this.docW = width;
     this.docH = height;
     if (empty) {
@@ -315,6 +317,29 @@ export class PaintDoc {
 //
 // `navigator.deviceMemory` 在 Chrome/Edge/Firefox 有，**Safari iOS 没有**，
 // fallback 当 4 GB（保守，撑得起入门 iPad）。
+// Clipping mask 解析：每层的「剪裁基底」index（-1 = 无基底，正常画）。
+// 规则（Procreate 兼容）：
+//   - 层 clippingMask=true：往下找最近的「非剪裁、可见、非空」层当基底
+//   - 连续剪裁链共用同一颗基底（不是上一颗剪裁层）
+//   - 没有可用基底（如最底层就是剪裁）→ -1，按普通层画
+// 基底必须可见且非空，否则 dst-in 会把整层抹掉，不符合用户预期（user 隐藏基底 = 整组隐藏）。
+export function computeClipBaseFor(layers) {
+  const out = new Array(layers.length);
+  let currentBase = -1;
+  for (let i = 0; i < layers.length; i++) {
+    const L = layers[i];
+    if (L.clippingMask && currentBase >= 0) {
+      out[i] = currentBase;
+    } else {
+      out[i] = -1;
+      if (!L.clippingMask && L.visible && L.bboxW > 0 && L.bboxH > 0) {
+        currentBase = i;
+      }
+    }
+  }
+  return out;
+}
+
 export function computeMaxLayers(canvasW, canvasH) {
   const deviceMemoryGB = navigator.deviceMemory ?? 4;
   const deviceMemoryMB = deviceMemoryGB * 1024;

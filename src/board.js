@@ -1,5 +1,6 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
 import { drawMesh, renderQuadPerPixel, extractMaskOutline } from "./lasso.js";
+import { computeClipBaseFor } from "./doc.js";
 //
 // 坐标系：
 //   doc 坐标 = 像素左上原点，单位 = doc 像素（document px）
@@ -217,6 +218,40 @@ export class Board {
     }
     return this._eraseComposite;
   }
+  // Clipping mask 临时合成 canvas。grow-only：取所有用过的 layer.bbox 最大值。
+  // 不和 _eraseComposite 共用（同一帧可能两者都要）。
+  _getClipTmp(w, h) {
+    if (!this._clipTmp || this._clipTmp.width < w || this._clipTmp.height < h) {
+      const nw = Math.max(this._clipTmp?.width || 0, w);
+      const nh = Math.max(this._clipTmp?.height || 0, h);
+      this._clipTmp = document.createElement("canvas");
+      this._clipTmp.width = nw;
+      this._clipTmp.height = nh;
+    }
+    return this._clipTmp;
+  }
+  // 给一颗 clipping mask 层做 dst-in 剪裁 + composite 到 ctx。
+  // 算法：在 tmp 上先以 layer.bbox 局部坐标渲染 (layer + overlay) → dst-in base alpha
+  //       → 把 tmp 当一张 (bboxW × bboxH) image drawImage 到 ctx 的 doc 坐标 bbox 位置。
+  // 注意：tmp 复用，先 clearRect(0, 0, bboxW, bboxH) 防上一次脏数据残留。
+  _renderLayerClipped(ctx, layer, baseLayer, overlay) {
+    const tmp = this._getClipTmp(layer.bboxW, layer.bboxH);
+    const tctx = tmp.getContext("2d");
+    tctx.setTransform(1, 0, 0, 1, 0, 0);
+    tctx.clearRect(0, 0, layer.bboxW, layer.bboxH);
+    // 平移使 layer.bboxX/Y 对齐到 tmp (0,0) → _drawLayerWithOverlay 用的
+    // drawImage(layer.canvas, layer.bboxX, layer.bboxY) 落到 tmp (0,0)
+    tctx.setTransform(1, 0, 0, 1, -layer.bboxX, -layer.bboxY);
+    this._drawLayerWithOverlay(tctx, layer, overlay);
+    tctx.setTransform(1, 0, 0, 1, 0, 0);
+    tctx.globalCompositeOperation = "destination-in";
+    tctx.drawImage(baseLayer.canvas, baseLayer.bboxX - layer.bboxX, baseLayer.bboxY - layer.bboxY);
+    tctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(
+      tmp, 0, 0, layer.bboxW, layer.bboxH,
+      layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH,
+    );
+  }
 
   // 把 (layer, overlay) 在 ctx 上 composite。ctx 已经被调用方 setTransform
   // 到 **doc 坐标系**（doc (0,0) = ctx origin，doc (W,H) = (W,H) in ctx）。
@@ -346,19 +381,8 @@ export class Board {
       ctx.fillRect(0, 0, this.doc.width, this.doc.height);
     }
 
-    // 逐 layer
-    const overlay = this._overlayProvider?.();
-    for (const layer of this.doc.layers) {
-      if (!layer.visible) continue;
-      const prevAlpha = ctx.globalAlpha;
-      const prevComp = ctx.globalCompositeOperation;
-      ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = layer.mode || "source-over";
-      const lOverlay = overlay && overlay.layer === layer ? overlay : null;
-      this._drawLayerWithOverlay(ctx, layer, lOverlay);
-      ctx.globalAlpha = prevAlpha;
-      ctx.globalCompositeOperation = prevComp;
-    }
+    // 逐 layer（带 clipping mask 处理）
+    this._renderLayers(ctx);
 
     // 套索 overlay（在 doc 坐标系下画 polygon / floating）
     this._drawLassoOverlay(ctx, scale);
@@ -424,20 +448,34 @@ export class Board {
       ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
       ctx.fillRect(0, 0, this.doc.width, this.doc.height);
     }
+    this._renderLayers(ctx);
+
+    ctx.restore();
+  }
+  // 一段逻辑两处用（_renderFull / _renderPartial）。带 clipping mask 处理。
+  // ctx 已经在 doc 坐标系（drawImage 的 dest 用 doc 坐标）。
+  _renderLayers(ctx) {
     const overlay = this._overlayProvider?.();
-    for (const layer of this.doc.layers) {
+    const layers = this.doc.layers;
+    const baseFor = computeClipBaseFor(layers);
+    for (let i = 0; i < layers.length; i++) {
+      const layer = layers[i];
       if (!layer.visible) continue;
+      if (layer.bboxW <= 0 || layer.bboxH <= 0) continue;
       const prevAlpha = ctx.globalAlpha;
       const prevComp = ctx.globalCompositeOperation;
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.mode || "source-over";
       const lOverlay = overlay && overlay.layer === layer ? overlay : null;
-      this._drawLayerWithOverlay(ctx, layer, lOverlay);
+      const baseIdx = baseFor[i];
+      if (baseIdx < 0) {
+        this._drawLayerWithOverlay(ctx, layer, lOverlay);
+      } else {
+        this._renderLayerClipped(ctx, layer, layers[baseIdx], lOverlay);
+      }
       ctx.globalAlpha = prevAlpha;
       ctx.globalCompositeOperation = prevComp;
     }
-
-    ctx.restore();
   }
 
   _drawCursor() {

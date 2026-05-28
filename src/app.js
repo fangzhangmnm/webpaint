@@ -805,7 +805,9 @@ function renderLayersPanel() {
   for (let i = doc.layers.length - 1; i >= 0; i--) {
     const L = doc.layers[i];
     const row = document.createElement("div");
-    row.className = "layer-row" + (i === doc.activeIndex ? " active" : "");
+    row.className = "layer-row"
+      + (i === doc.activeIndex ? " active" : "")
+      + (L.clippingMask ? " clipping" : "");
     row.dataset.layerId = String(L.id);
 
     const vis = document.createElement("button");
@@ -831,6 +833,15 @@ function renderLayersPanel() {
     name.className = "layer-name";
     name.textContent = L.name;
     row.appendChild(name);
+
+    // Clipping mask 视觉提示：剪裁层左侧加 ↘ 标
+    if (L.clippingMask) {
+      const chip = document.createElement("span");
+      chip.className = "layer-clip-chip";
+      chip.textContent = "↘";
+      chip.title = "已剪裁到下方第一颗非剪裁层";
+      row.appendChild(chip);
+    }
 
     // "⋯" 工具菜单按钮（per-row tools，先放重命名，后续加复制 / 清空内容等）
     const tools = document.createElement("button");
@@ -917,6 +928,30 @@ function renderLayersPanel() {
       });
       modeSelect.addEventListener("click", (e) => e.stopPropagation());
       expand.appendChild(modeRow);
+
+      // Clipping mask 切换：剪裁到下方第一颗非剪裁层（Procreate 行为）
+      const clipRow = document.createElement("div");
+      clipRow.className = "layer-slider-row";
+      clipRow.innerHTML = `
+        <span>剪裁</span>
+        <span class="layer-clip-hint">↘ 跟随下方</span>
+        <button type="button" class="layer-clip-toggle" aria-pressed="${L.clippingMask ? "true" : "false"}">${L.clippingMask ? "开" : "关"}</button>
+      `;
+      const clipBtn = clipRow.querySelector(".layer-clip-toggle");
+      clipBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const oldVal = L.clippingMask;
+        L.clippingMask = !oldVal;
+        history.push({
+          type: "setLayerProp", layerId: L.id,
+          prop: "clippingMask", oldVal, newVal: L.clippingMask,
+        });
+        renderLayersPanel();
+        board.invalidateAll();
+        board.requestRender();
+      });
+      expand.appendChild(clipRow);
+
       expand.addEventListener("click", (e) => e.stopPropagation());
       els.layersList.appendChild(expand);
     }
@@ -1366,6 +1401,7 @@ async function saveNow(opts = {}) {
     _docDirty = false;
     _docLastSavedAt = Date.now();
     setStatus(`已保存：${_activeSessionName}`);
+    checkQuotaAndWarn();
   } catch (e) {
     console.warn("[session] save failed:", e);
     setStatus("保存失败：" + (e && e.message || e));
@@ -2135,16 +2171,48 @@ async function updateIdbUsage() {
     const sessions = await listSessions();
     let total = 0;
     for (const s of sessions) total += (s.size || 0);
-    els.galleryFootUsage.textContent = `本地占用：${humanSize(total)}（${sessions.length} 件）`;
+    let label = `本地占用：${humanSize(total)}（${sessions.length} 件）`;
+    let level = "ok";   // ok | warn | critical
     if (navigator.storage && navigator.storage.estimate) {
       const est = await navigator.storage.estimate();
       if (est && est.quota) {
-        els.galleryFootUsage.title = `浏览器分配上限约 ${humanSize(est.quota)}（用满了浏览器才会限）`;
+        const ratio = (est.usage || 0) / est.quota;
+        const pct = Math.round(ratio * 100);
+        els.galleryFootUsage.title =
+          `浏览器分配上限约 ${humanSize(est.quota)}；当前 ${pct}% 已用（含 SW 缓存等）`;
+        if (ratio > 0.95) { level = "critical"; label += ` · 已用 ${pct}%`; }
+        else if (ratio > 0.8) { level = "warn"; label += ` · 已用 ${pct}%`; }
       }
     }
+    els.galleryFootUsage.textContent = label;
+    els.galleryFootUsage.classList.toggle("usage-warn", level === "warn");
+    els.galleryFootUsage.classList.toggle("usage-critical", level === "critical");
   } catch {
     els.galleryFootUsage.textContent = "占用：未知";
   }
+}
+
+// 每次保存后检查一次配额；> 80% 弹状态条提示用户去图库整理。
+// 同一阈值短时间内不重复弹（避免每笔 stroke 后骚扰）。
+let _lastQuotaWarnLevel = "ok";
+async function checkQuotaAndWarn() {
+  try {
+    if (!navigator.storage || !navigator.storage.estimate) return;
+    const est = await navigator.storage.estimate();
+    if (!est || !est.quota) return;
+    const ratio = (est.usage || 0) / est.quota;
+    const pct = Math.round(ratio * 100);
+    let level = "ok";
+    if (ratio > 0.95) level = "critical";
+    else if (ratio > 0.8) level = "warn";
+    if (level === _lastQuotaWarnLevel) return;
+    _lastQuotaWarnLevel = level;
+    if (level === "critical") {
+      setStatus(`本地存储 ${pct}% 已满 — 立即去图库卸载不常用的作品`, true);
+    } else if (level === "warn") {
+      setStatus(`本地存储 ${pct}% 已用 — 建议在图库整理`, true);
+    }
+  } catch {}
 }
 
 async function renderGallery() {

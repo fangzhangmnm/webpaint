@@ -601,6 +601,34 @@ input[type=range] {
   padding: 2px 4px;
 }
 .layer-slider-val { text-align: right; font-variant-numeric: tabular-nums; }
+/* Clipping mask 视觉：剪裁层缩进一点 + 加 chip。基底层无样式。 */
+.layer-row.clipping { padding-left: 18px; }
+.layer-clip-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-left: 4px;
+  user-select: none;
+}
+.layer-clip-hint { color: var(--ink-soft); font-size: 11px; }
+.layer-clip-toggle {
+  font: inherit;
+  background: var(--bg-soft);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.layer-clip-toggle[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent, #4c8bf5) 18%, transparent);
+  border-color: var(--accent, #4c8bf5);
+  color: var(--accent, #4c8bf5);
+}
 .layers-foot {
   display: flex;
   gap: 4px;
@@ -676,6 +704,8 @@ input[type=range] {
   background: var(--bg-soft);
 }
 .gallery-foot-usage { font-variant-numeric: tabular-nums; }
+.gallery-foot-usage.usage-warn { color: #d97706; font-weight: 600; }
+.gallery-foot-usage.usage-critical { color: #dc2626; font-weight: 700; }
 .gallery-foot-hint { color: var(--ink-soft); font-size: 11px; opacity: 0.7; }
 
 .menu-item-info {
