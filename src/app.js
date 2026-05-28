@@ -18,7 +18,7 @@ import { ReferenceWindow } from "./reference.js";
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   getCurrentSessionName, setCurrentSessionName,
-  exportOraDownload, shareOrDownloadImage,
+  exportOraDownload, exportPsdDownload, shareOrDownloadImage,
   copyImageToClipboard, readImageFromClipboard,
 } from "./session.js";
 import { decodeOraToDoc, encodeDocToOra } from "./ora.js";
@@ -63,6 +63,7 @@ const els = {
   menuExportPng: document.getElementById("menuExportPng"),
   menuExportJpg: document.getElementById("menuExportJpg"),
   menuExportOra: document.getElementById("menuExportOra"),
+  menuExportPsd: document.getElementById("menuExportPsd"),
   menuClipboardCopy: document.getElementById("menuClipboardCopy"),
   menuClipboardPaste: document.getElementById("menuClipboardPaste"),
   menuFit: document.getElementById("menuFit"),
@@ -1298,6 +1299,17 @@ els.menuExportOra.addEventListener("click", async () => {
     await exportOraDownload(doc, `${_activeSessionName}.ora`);
     setStatus(".ora 已下载");
   } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
+});
+els.menuExportPsd.addEventListener("click", async () => {
+  setMenuOpen(false);
+  setStatus("PSD 编码中…", true);
+  try {
+    await exportPsdDownload(doc, `${_activeSessionName}.psd`);
+    setStatus(".psd 已下载");
+  } catch (e) {
+    console.warn("[psd] export failed:", e);
+    setStatus("PSD 导出失败：" + (e && e.message || e));
+  }
 });
 els.menuClipboardCopy.addEventListener("click", async () => {
   setMenuOpen(false);

@@ -154,6 +154,14 @@ export async function exportOraDownload(doc, filename = "未命名.ora") {
   triggerDownload(blob, filename);
 }
 
+/** 导出 .psd 到本地下载（最小子集：raster layer + bbox + blend mode + opacity + name）。
+ *  Photoshop / Affinity / Procreate / Krita 都吃。详见 src/psd.js */
+export async function exportPsdDownload(doc, filename = "未命名.psd") {
+  const { encodeDocToPsd } = await import("./psd.js");
+  const blob = await encodeDocToPsd(doc);
+  triggerDownload(blob, filename);
+}
+
 // ---- 分享 / 导出 PNG / JPG ----
 
 /** 渲染合成图 blob（分享 PNG/JPG 用）。全走 HTMLCanvasElement.toBlob，
