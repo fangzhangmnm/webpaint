@@ -92,6 +92,13 @@ const els = {
   cloudPushBtn: document.getElementById("cloudPushBtn"),
   cloudRefreshBtn: document.getElementById("cloudRefreshBtn"),
   oraFileInput: document.getElementById("oraFileInput"),
+  genericBackdrop: document.getElementById("genericBackdrop"),
+  genericSheet: document.getElementById("genericSheet"),
+  genericSheetTitle: document.getElementById("genericSheetTitle"),
+  genericSheetMessage: document.getElementById("genericSheetMessage"),
+  genericSheetInput: document.getElementById("genericSheetInput"),
+  genericSheetConfirm: document.getElementById("genericSheetConfirm"),
+  genericSheetCancel: document.getElementById("genericSheetCancel"),
   toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
   activeSwatch: document.getElementById("activeSwatch"),
   // 浮动色板
@@ -519,16 +526,23 @@ function renderLayersPanel() {
     });
     row.appendChild(vis);
 
-    // 名字：双击进入 inline 编辑
+    // 名字：单击 row = setActive（行 click handler 处理）。重命名走 "⋯" 工具菜单。
     const name = document.createElement("span");
     name.className = "layer-name";
     name.textContent = L.name;
-    name.title = "双击重命名";
-    name.addEventListener("dblclick", (e) => {
-      e.stopPropagation();
-      startLayerRename(L, name);
-    });
     row.appendChild(name);
+
+    // "⋯" 工具菜单按钮（per-row tools，先放重命名，后续加复制 / 清空内容等）
+    const tools = document.createElement("button");
+    tools.type = "button";
+    tools.className = "layer-tools-btn";
+    tools.title = "图层菜单";
+    tools.textContent = "⋯";
+    tools.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openLayerToolsMenu(L, tools, name);
+    });
+    row.appendChild(tools);
 
     // Mode / opacity badge：点开折叠区
     const badge = document.createElement("button");
@@ -666,6 +680,99 @@ els.layerDownBtn.addEventListener("click", () => {
   history.push({ type: "moveLayer", layerId: L.id, fromIdx: from, toIdx: to });
   _afterDocChange();
 });
+
+// In-app 通用 sheet：替代 alert / prompt / confirm（详见 feedback-no-system-dialog）。
+// 返回 Promise，resolve 输入值 / true / null（取消）。
+function _resolveAndClose(resolve, value, cleanup) {
+  closeSheet(els.genericSheet, els.genericBackdrop);
+  cleanup();
+  resolve(value);
+}
+function openInputSheet(title, defaultValue = "", { placeholder = "" } = {}) {
+  return new Promise((resolve) => {
+    els.genericSheetTitle.textContent = title;
+    els.genericSheetMessage.classList.add("hidden");
+    els.genericSheetInput.classList.remove("hidden");
+    els.genericSheetInput.value = defaultValue;
+    els.genericSheetInput.placeholder = placeholder;
+    openSheet(els.genericSheet, els.genericBackdrop);
+    setTimeout(() => { els.genericSheetInput.focus(); els.genericSheetInput.select(); }, 0);
+    const onConfirm = () => _resolveAndClose(resolve, els.genericSheetInput.value, cleanup);
+    const onCancel  = () => _resolveAndClose(resolve, null, cleanup);
+    const onKey = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); onConfirm(); }
+      else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+    };
+    const cleanup = () => {
+      els.genericSheetConfirm.removeEventListener("click", onConfirm);
+      els.genericSheetCancel.removeEventListener("click", onCancel);
+      els.genericBackdrop.removeEventListener("click", onCancel);
+      els.genericSheetInput.removeEventListener("keydown", onKey);
+    };
+    els.genericSheetConfirm.addEventListener("click", onConfirm);
+    els.genericSheetCancel.addEventListener("click", onCancel);
+    els.genericBackdrop.addEventListener("click", onCancel);
+    els.genericSheetInput.addEventListener("keydown", onKey);
+  });
+}
+function openConfirmSheet(title, message) {
+  return new Promise((resolve) => {
+    els.genericSheetTitle.textContent = title;
+    els.genericSheetInput.classList.add("hidden");
+    els.genericSheetMessage.classList.remove("hidden");
+    els.genericSheetMessage.textContent = message;
+    openSheet(els.genericSheet, els.genericBackdrop);
+    const onConfirm = () => _resolveAndClose(resolve, true, cleanup);
+    const onCancel  = () => _resolveAndClose(resolve, false, cleanup);
+    const cleanup = () => {
+      els.genericSheetConfirm.removeEventListener("click", onConfirm);
+      els.genericSheetCancel.removeEventListener("click", onCancel);
+      els.genericBackdrop.removeEventListener("click", onCancel);
+    };
+    els.genericSheetConfirm.addEventListener("click", onConfirm);
+    els.genericSheetCancel.addEventListener("click", onCancel);
+    els.genericBackdrop.addEventListener("click", onCancel);
+  });
+}
+
+// Per-row "⋯" 工具菜单：弹出 in-app popup（**不用** alert / prompt 等系统对话框）。
+// 现在只有重命名一项；之后加复制图层 / 清空内容 / 合并下方 等。
+function openLayerToolsMenu(L, anchorEl, nameEl) {
+  // 关掉可能已开的（防多个同时）
+  document.querySelectorAll(".layer-tools-popup").forEach((p) => p.remove());
+
+  const popup = document.createElement("div");
+  popup.className = "menu-panel layer-tools-popup";
+  popup.innerHTML = `
+    <button class="menu-item" data-act="rename" type="button">
+      <span class="menu-item-label">重命名…</span>
+    </button>
+  `;
+  document.body.appendChild(popup);
+  // 锚到按钮下方，右对齐
+  const r = anchorEl.getBoundingClientRect();
+  const w = popup.offsetWidth || 160;
+  popup.style.position = "fixed";
+  popup.style.top = (r.bottom + 4) + "px";
+  popup.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + "px";
+
+  const cleanup = () => {
+    popup.remove();
+    document.removeEventListener("pointerdown", outside, true);
+  };
+  const outside = (e) => {
+    if (!popup.contains(e.target) && !anchorEl.contains(e.target)) cleanup();
+  };
+  // 异步挂 listener 避开本次点击事件
+  setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
+
+  popup.addEventListener("click", (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) return;
+    cleanup();
+    if (act === "rename") startLayerRename(L, nameEl);
+  });
+}
 
 // Layer rename：把 name span 换成 input，blur / Enter 提交，Esc 撤销
 function startLayerRename(L, nameEl) {
@@ -899,12 +1006,20 @@ let _docLastSavedAt = 0;
 let _activeSessionName = "未命名";
 const AUTOSAVE_MS = 3 * 60 * 1000;
 
-// Smart save button：
-//   saving → 半透明 disk
-//   dirty → 蓝色 disk + 角点
-//   cloud-dirty → 上传箭头（点 = push to cloud）
-//   synced → 灰色对勾云（点 = noop）
-//   saved (未登录 / 未配置 cloud) → 灰色 disk
+// v45 新语义：
+//   **Ctrl+S / 点 save 按钮 = "save local + push cloud" 一把梭**（user 显式 consent）。
+//   autosave (3min / visibility / pagehide) **仅写 IDB**，不触云 —— autosave
+//   只防崩，IDB 是 transient（浏览器随时可能 evict / 用户清缓存），不算安全位置。
+//   真正"安全"= 同步到云端。
+//
+//   Save 按钮 4 态：
+//   - saving → 半透明
+//   - dirty (本地未存) → 蓝色 disk + 角点
+//   - cloud-dirty (IDB 已存但云端未同步) → 橙色上传箭头
+//   - synced → 灰色对勾云（已安全）
+//   - local-only (未登录云端) → 灰色 disk（提示 IDB 易失，建议登录）
+//   点任意状态都触发 saveAndPush（dirty + cloud-dirty 一次性处理）。
+//   冲突 (412) → alert 提示用户改名，本地已保存但云端没动。
 const ICON_DISK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
 const ICON_UPLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
 const ICON_CLOUD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
@@ -912,20 +1027,19 @@ const ICON_CLOUD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentCo
 function computeSaveState() {
   if (_docSaving) return "saving";
   if (_docDirty) return "dirty";
-  // doc clean
   if (isSignedIn() && isCloudDirty(_activeSessionName)) return "cloud-dirty";
   if (isSignedIn()) return "synced";
-  return "saved";
+  return "local-only";
 }
 function updateSaveStatus() {
   const state = computeSaveState();
   els.topSaveBtn.dataset.state = state;
   const name = _activeSessionName;
   if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存中… · ${name}`; }
-  else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存 (Ctrl+S) · ${name} · 未保存`; }
-  else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = `推送到云端 · ${name} · 本地已保存`; }
+  else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存 + 推送 (Ctrl+S) · ${name} · 未保存`; }
+  else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = `推送到云端 (Ctrl+S) · ${name} · 本地已存，云端未同步`; }
   else if (state === "synced") { els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK; els.topSaveBtn.title = `已同步到云端 · ${name}`; }
-  else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `已保存到本地 · ${name}（未连云端）`; }
+  else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `已存本地（IDB 易失，登录云端更安全） · ${name}`; }
 }
 async function saveNow() {
   if (_docSaving) return;
@@ -971,11 +1085,44 @@ window.addEventListener("wp:histchange", () => {
   if (isSignedIn()) setCloudDirty(_activeSessionName, true);
   updateSaveStatus();
 });
+// **Ctrl+S / 点 save 按钮** = 完全保存（local IDB + push cloud）。
+// user 显式 consent + 在场 → 触云。autosave / visibility / pagehide
+// 走 saveNow（仅 IDB），不触云。详见 docs/persistence-and-encryption-shareback.md。
+async function saveAndPush() {
+  if (_docSaving) return;
+  // 1) local IDB
+  if (_docDirty) await saveNow();
+  // 2) push cloud（user 在场 + 已登录 + 云端未同步）
+  if (isSignedIn() && isCloudDirty(_activeSessionName)) {
+    _docSaving = true;
+    updateSaveStatus();
+    try {
+      const ora = await encodeDocToOra(doc);
+      await pushSession(_activeSessionName, ora);
+      setStatus(`已同步到云端：${_activeSessionName}`);
+      renderGallery();
+    } catch (e) {
+      if (e instanceof CloudConflictError) {
+        // 不弹 alert（系统对话框打断手感）。状态行长驻 + 引导 user 去图库改名
+        setStatus(`云端冲突：${e.message} 打开"图库"改名后再点保存。`, true);
+      } else {
+        console.warn("[cloud] push failed:", e);
+        setStatus("推送失败：" + (e && e.message || e));
+      }
+    } finally {
+      _docSaving = false;
+      updateSaveStatus();
+    }
+  } else if (!isSignedIn() && !_docDirty) {
+    setStatus(`已存本地：${_activeSessionName}（IDB 易失，登录云端更安全）`);
+  }
+}
+
 // Ctrl+S
 window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
     e.preventDefault();
-    saveNow();
+    saveAndPush();
   }
 });
 // 3 min 兜底
@@ -995,23 +1142,9 @@ function stampNow() {
   return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}`;
 }
 // ---- topbar：save/upload + gallery ----
-// Smart save 按钮：dirty=保存到本地；本地 clean + 云 dirty=推送；synced=noop
-els.topSaveBtn.addEventListener("click", async () => {
-  const state = computeSaveState();
-  if (state === "dirty" || state === "saving") {
-    await saveNow();
-    // saveNow 完成后 state 会重新算；如果接着 cloud-dirty 给用户提示
-    if (computeSaveState() === "cloud-dirty") {
-      setStatus("已保存到本地，再点一下推送到云端");
-    }
-  } else if (state === "cloud-dirty") {
-    await cloudPushCurrent();
-  } else if (state === "synced") {
-    setStatus("已同步到云端");
-  } else {
-    setStatus("已保存到本地");
-  }
-});
+// 点 save 按钮 = saveAndPush 一把梭（同 Ctrl+S）。state == "synced" 时
+// 也跑一遍（no-op fast path）让 user 永远不需要"再点一下"。
+els.topSaveBtn.addEventListener("click", () => saveAndPush());
 els.topGalleryBtn.addEventListener("click", () => setGalleryOpen(true));
 
 // ---- 菜单：导入 / 导出 / 剪贴板 / 适应 ----
@@ -1243,36 +1376,31 @@ els.galleryCurrentName.addEventListener("change", () => {
     }
   })();
 });
-els.galleryNewBtn.addEventListener("click", () => {
-  const name = prompt("新作品名字", "未命名");
-  if (!name) return;
+els.galleryNewBtn.addEventListener("click", async () => {
+  const name = await openInputSheet("新建作品", "未命名", { placeholder: "作品名字" });
+  if (name === null) return;
   const trimmed = name.trim();
   if (!trimmed) return;
-  // 新建：先把当前 doc 落盘（如果 dirty），然后切到全空白 doc
-  (async () => {
-    if (_docDirty) await saveNow();
-    // 空白 doc：清掉 layers，重置成一个空层
-    // 复刻一个空白 PaintDoc 的默认 layers
-    const fresh = new PaintDoc({ width: doc.width, height: doc.height });
-    doc.layers = fresh.layers;
-    doc.activeIndex = 0;
-    _activeSessionName = trimmed;
-    setCurrentSessionName(trimmed);
-    input.clearHistory();
-    board.invalidateAll();
-    board.requestRender();
-    renderLayersPanel();
-    _docDirty = true;          // 新建的还没存
-    _docLastSavedAt = 0;
-    updateSaveStatus();
-    await saveNow();           // 立即落盘占名
-    renderGallery();
-    setStatus(`新建：${trimmed}`);
-  })();
+  if (_docDirty) await saveNow();
+  const fresh = new PaintDoc({ width: doc.width, height: doc.height });
+  doc.layers = fresh.layers;
+  doc.activeIndex = 0;
+  _activeSessionName = trimmed;
+  setCurrentSessionName(trimmed);
+  input.clearHistory();
+  board.invalidateAll();
+  board.requestRender();
+  renderLayersPanel();
+  _docDirty = true;
+  _docLastSavedAt = 0;
+  updateSaveStatus();
+  await saveNow();
+  renderGallery();
+  setStatus(`新建：${trimmed}`);
 });
-els.gallerySaveCopyBtn.addEventListener("click", () => {
-  const name = prompt("保存副本为", _activeSessionName + " 副本");
-  if (!name) return;
+els.gallerySaveCopyBtn.addEventListener("click", async () => {
+  const name = await openInputSheet("保存副本", _activeSessionName + " 副本");
+  if (name === null) return;
   const trimmed = name.trim();
   if (!trimmed) return;
   if (trimmed === _activeSessionName) {
@@ -1282,15 +1410,13 @@ els.gallerySaveCopyBtn.addEventListener("click", () => {
   // **保存副本** 语义：把当前 doc 写到 trimmed 名字下，**不**切走 active。
   // 用户继续编辑原作。和"另存为"语义不同：另存为会换 active 到新名字 →
   // 容易和"重命名"混淆。
-  (async () => {
-    try {
-      await saveSession(doc, trimmed);
-      renderGallery();
-      setStatus(`已保存副本：${trimmed}（仍在编辑：${_activeSessionName}）`);
-    } catch (e) {
-      setStatus("保存副本失败：" + (e && e.message || e));
-    }
-  })();
+  try {
+    await saveSession(doc, trimmed);
+    renderGallery();
+    setStatus(`已保存副本：${trimmed}（仍在编辑：${_activeSessionName}）`);
+  } catch (e) {
+    setStatus("保存副本失败：" + (e && e.message || e));
+  }
 });
 
 async function renderGallery() {
@@ -1398,7 +1524,8 @@ async function renderGallery() {
     del.textContent = isCloud && !isLocal ? "删除（云）" : (isLocal && isCloud ? "删除（本地+云）" : "删除");
     del.addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (!confirm(`删除 "${item.name}"？\n${isLocal ? "✓ 本地\n" : ""}${isCloud ? "✓ 云端\n" : ""}不可撤销。`)) return;
+      const ok = await openConfirmSheet(`删除 "${item.name}"？`, `${isLocal ? "本地 " : ""}${isCloud ? "云端 " : ""}不可撤销。`);
+      if (!ok) return;
       try {
         if (isLocal) await removeSession(item.name);
         if (isCloud) await deleteCloudSession(item.name);
@@ -1490,31 +1617,8 @@ els.cloudSignOutBtn.addEventListener("click", async () => {
   renderGallery();
 });
 
-async function cloudPushCurrent() {
-  if (!isSignedIn()) { setStatus("未登录"); return; }
-  els.cloudPushBtn.disabled = true;
-  els.cloudPushBtn.textContent = "推送中…";
-  try {
-    if (_docDirty) await saveNow();
-    const ora = await encodeDocToOra(doc);
-    await pushSession(_activeSessionName, ora);
-    setStatus(`已推送：${_activeSessionName}`);
-    updateSaveStatus();
-    renderGallery();
-  } catch (e) {
-    if (e instanceof CloudConflictError) {
-      alert(e.message + "\n\n点击「保存副本」用新名字，然后再推送。");
-      setStatus("推送失败：云端有更新版本");
-    } else {
-      console.warn("[cloud] push failed:", e);
-      setStatus("推送失败：" + (e && e.message || e));
-    }
-  } finally {
-    els.cloudPushBtn.disabled = false;
-    els.cloudPushBtn.textContent = "推送当前";
-  }
-}
-els.cloudPushBtn.addEventListener("click", cloudPushCurrent);
+// gallery 顶部的"推送当前" 按钮 = 同 Ctrl+S（saveAndPush 包含 IDB + 云）
+els.cloudPushBtn.addEventListener("click", () => saveAndPush());
 els.cloudRefreshBtn.addEventListener("click", () => renderGallery());
 
 // 给本地拿一个不冲突的名字（X / X 1 / X 2 / ...）

@@ -6,8 +6,8 @@
 
 1. **一个 .wpaint 文件 = 一次 IDB put**（原子）。**不要**拆 layer-blobs 多 store 多 tx —— refresh 截断会丢半边。
 2. **保存策略：Ctrl+S 主导 + 3 分钟兜底 + visibility/pagehide 抢救**。**不要**抄 webxiaoheiwu 的 debounce/heartbeat/trivial-skip —— 那是给文字编辑的，画图工具用户习惯 Blender / Photoshop 模式，自动保存频繁带来不稳定。
-3. **OneDrive push / pull 必须用户显式按按钮**，autosave 永不触云。这一条对 WebPaint 尤其重要：画到一半改了几笔自动推上去 → 412 → 自动 sibling-copy → 用户当时不在场 → 整个 work 不可追溯。
-4. **本地 autosave 之后状态要明示「云端未同步」**：双独立指示，pill 反映本地，云端按钮上画个脉冲点。
+3. **「保存」语义 = 本地 + 云推 一起**（0.9.x 修正）。Ctrl+S 和云按钮**走同一路径**都是完全保存。autosave（timer / visibility）是**不完全态**，只写本地。规矩本质不是「云有风险」，而是「用户在场 + 显式 consent 才能触云」——Ctrl+S 满足两条，autosave 一个都不满足。412 sibling-copy 只在用户在场（看得见 toast）时发生。Pull 始终是独立 destructive 按钮。
+4. **本地 autosave 之后状态要明示「云端未同步」**：双独立指示，pill 反映本地，云端按钮上画个脉冲点 = 「这是不完全态，按 Ctrl+S 或云按钮完成保存」。
 5. **加密走外层明文 zip 包内层 AES-256**（vendor `zip.js`）。WebPaint 也可能涉及 NSFW / 私密素描，per-session 加密是合理需求。
 6. **密码绝不持久化**，关 tab 就忘。
 7. **document.title 不能放文件名** —— 历史里会重复 + privacy leak。
@@ -29,7 +29,7 @@
   - **可能要分层 atomic**：每个 layer 一个 IDB key，统一管理。但这就违背了「一个文件 = 一次 atomic 写」原则。需要重新设计 —— 也许 base atlas + 增量 layer，或 worker offload。
   - 或者：layer 数据延迟落盘（保持 dirty），Ctrl+S 时才整包写。
 - **WebPaint 内层格式**：要不要兼容 .psd？.atlas.zip 是自定义的，但 PSD 有 OneDrive 缩略图、其它工具兼容性。值得讨论。
-- **多设备同步的「劳动」颗粒度**：AtlasMaker 一次 Ctrl+S = 一次完整提交。WebPaint 是不是要支持「自动 push 每 5 分钟一次」给「正在画」的高频场景？需要 user 决定。一旦上「自动 push」就要面对 412 sibling-copy 不在场场景，认真做 UX。
+- **多设备同步的「劳动」颗粒度**：AtlasMaker 0.9.x 修正后 Ctrl+S = 完全提交（本地 + 云），3-min autosave 不触云。WebPaint 同 paradigm：用户显式按 Ctrl+S 时上云，automated bookkeeping（3-min / blur）只写本地。若画图 session 极长（4 小时画一张），autosave 兜底间隔可以放短到 1 min（保 crash recovery 颗粒度），云推还是用户 Ctrl+S 主导。绝不引入「auto push 每 N 分钟」。
 
 ## ⚠️ 幽灵 current path 陷阱（AtlasMaker 0.7.2 修；WebPaint 必须避开）
 
@@ -65,7 +65,7 @@ WebPaint 同样的脆弱点：保存路径里如果有「rename = delete old + w
 
 - ❌ **IDB 拆多个 store + 多 tx 写一次保存** —— refresh 在中间截断丢东西
 - ❌ **debounce 自动保存** —— Blender 用户原话「don't push 300ms after a stray keystroke」
-- ❌ **autosave 触云** —— 用户看不到 412 sibling 发生，sync surprises
+- ❌ **autosave 触云** —— 用户看不到 412 sibling 发生，sync surprises（**注**：用户 explicit Ctrl+S 不算 autosave，那个反而该触云，因为用户在场看 toast / 处理冲突）
 - ❌ **encrypted zip 不裹外层** —— 网盘扫描器拒
 - ❌ **`@microsoft.graph.conflictBehavior` 放 header** —— `@` 非法
 - ❌ **Graph `body` 没 `ArrayBuffer.isView` 检查** —— TypedArray 被 JSON-stringify 10× 膨胀
@@ -73,6 +73,20 @@ WebPaint 同样的脆弱点：保存路径里如果有「rename = delete old + w
 - ❌ **persist 密码** —— 持久化加密 = 名义加密
 
 完整列表与各项 anti-pattern 解释见 canonical doc。
+
+## WebPaint v45 实现要点（落实 TL;DR #3 / #4）
+
+- `saveAndPush()` 在 `src/app.js`：一个函数完成 (1) 本地 IDB save，
+  (2) 已登录时 push 云端。Ctrl+S / topbar save 按钮 / gallery "推送当前"
+  都调它。原 `cloudPushCurrent()` 删了，cloud / save 两套实现合一。
+- `saveNow()` 仍存在但**只写 IDB** —— 给 autosave (3min 兜底 / visibility /
+  pagehide) 用。这一路**不触云**。
+- 冲突（412 CloudConflictError）：**不**弹 `alert()` —— 用 `setStatus(msg, true)`
+  长驻状态行，引导 user 去 gallery 改名后再点保存。系统对话框在 iPad 手感差。
+- Save 按钮 5 态视觉（state machine 在 `computeSaveState`）：
+  saving / dirty (本地未存) / cloud-dirty (IDB 已存云端未同步) /
+  synced (安全) / local-only (未登录)。任何状态点都触发 `saveAndPush`，
+  no-op fast path 保 user 不需要"再点一下"。
 
 ## 关联
 

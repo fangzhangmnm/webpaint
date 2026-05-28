@@ -176,6 +176,16 @@
       <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。Ctrl+S 或新建一个吧。</div>
     </div>
 
+    <!-- 通用 in-app 对话（替代 alert / prompt / confirm；见 feedback-no-system-dialog） -->
+    <div class="backdrop hidden" id="genericBackdrop"></div>
+    <div class="sheet hidden" id="genericSheet" role="dialog" aria-modal="true">
+      <h3 id="genericSheetTitle">提示</h3>
+      <p id="genericSheetMessage" class="sheet-hint hidden"></p>
+      <input id="genericSheetInput" type="text" class="generic-sheet-input hidden" />
+      <button class="sheet-action" id="genericSheetConfirm" type="button">确定</button>
+      <button class="sheet-action ghost" id="genericSheetCancel" type="button">取消</button>
+    </div>
+
     <!-- 统一导入入口：iPad 上 accept="image/*,.ora" 会同时给出 "Photo Library"
          / "Take Photo" / "Choose File" 三选项；桌面是标准 file picker。
          .ora 走 decodeOraToDoc，image/* 走 "新建图层并 drawImage" 路径 (photobash)。 -->
