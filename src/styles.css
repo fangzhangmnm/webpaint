@@ -129,6 +129,9 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 .lasso-tool-sep { color: var(--ink-soft); margin: 0 4px; opacity: 0.4; }
 .lasso-tool-confirm { color: var(--accent, #4c8bf5); font-weight: 600; }
 .lasso-tool-cancel { color: var(--ink-soft); }
+.lasso-tool-label { font-size: 13px; color: var(--ink); font-weight: 600; padding: 0 8px; }
+.lasso-picker, .lasso-transform-ctrl { display: flex; align-items: center; gap: 4px; }
+.lasso-picker.hidden, .lasso-transform-ctrl.hidden { display: none; }
 
 /* 顶栏：浮动毛玻璃胶囊 */
 .top-bar {

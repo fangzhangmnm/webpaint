@@ -480,44 +480,71 @@ export class Board {
     }
     if (info.floating) {
       const f = info.floating;
+      const isWarp = f.mode === "warp";
       ctx.save();
-      // 1) 浮层像素（mesh 三角片）
-      drawMesh(ctx, f.canvas, f.srcW, f.srcH, f.mesh);
-      // 2) mesh 网格线（doc 坐标，虚线）
+      // 1) 浮层像素（warp 模式走平滑 Catmull-Rom 升采样后线性三角）
+      drawMesh(ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: isWarp });
+      // 2) mesh 网格线 + 外框
       const N = f.meshN;
+      // 外框（4 角连成的"包络"），所有模式都画一条主线
       ctx.lineWidth = Math.max(1, 1.5 / scale);
       ctx.setLineDash([6 / scale, 4 / scale]);
       ctx.beginPath();
-      // 横线
-      for (let i = 0; i < N; i++) {
-        ctx.moveTo(f.mesh[i][0].x, f.mesh[i][0].y);
-        for (let j = 1; j < N; j++) ctx.lineTo(f.mesh[i][j].x, f.mesh[i][j].y);
-      }
-      // 竖线
-      for (let j = 0; j < N; j++) {
-        ctx.moveTo(f.mesh[0][j].x, f.mesh[0][j].y);
-        for (let i = 1; i < N; i++) ctx.lineTo(f.mesh[i][j].x, f.mesh[i][j].y);
-      }
-      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.moveTo(f.mesh[0][0].x, f.mesh[0][0].y);
+      for (let j = 1; j < N; j++) ctx.lineTo(f.mesh[0][j].x, f.mesh[0][j].y);
+      for (let i = 1; i < N; i++) ctx.lineTo(f.mesh[i][N-1].x, f.mesh[i][N-1].y);
+      for (let j = N - 2; j >= 0; j--) ctx.lineTo(f.mesh[N-1][j].x, f.mesh[N-1][j].y);
+      for (let i = N - 2; i >= 1; i--) ctx.lineTo(f.mesh[i][0].x, f.mesh[i][0].y);
+      ctx.closePath();
+      ctx.strokeStyle = "rgba(0,0,0,0.7)";
       ctx.stroke();
-      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.strokeStyle = "rgba(255,255,255,0.7)";
       ctx.lineDashOffset = 5 / scale;
       ctx.stroke();
+      // warp 内部网格：低调（细 + 半透明 + 无 dash），不要抢戏
+      if (isWarp && f.mode !== null) {
+        ctx.setLineDash([]);
+        ctx.lineWidth = Math.max(0.5, 0.75 / scale);
+        ctx.strokeStyle = "rgba(128,128,128,0.35)";
+        ctx.beginPath();
+        for (let i = 1; i < N - 1; i++) {
+          ctx.moveTo(f.mesh[i][0].x, f.mesh[i][0].y);
+          for (let j = 1; j < N; j++) ctx.lineTo(f.mesh[i][j].x, f.mesh[i][j].y);
+        }
+        for (let j = 1; j < N - 1; j++) {
+          ctx.moveTo(f.mesh[0][j].x, f.mesh[0][j].y);
+          for (let i = 1; i < N; i++) ctx.lineTo(f.mesh[i][j].x, f.mesh[i][j].y);
+        }
+        ctx.stroke();
+      }
       ctx.restore();
-      // 3) handles 切到屏幕坐标画（恒定像素大小，无视 doc 缩放）
+      // 3) handles 切屏幕坐标画。warp 用小填点（不画圈），其余画白圆+黑边
       if (info.handles && info.handles.length) {
         ctx.save();
         ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
         for (const h of info.handles) {
           const s = this.docToScreen(h.pos.x, h.pos.y);
-          const r = h.kind === "warp-point" ? 5 : 7;
-          ctx.beginPath();
-          ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
-          ctx.fillStyle = "#fff";
-          ctx.fill();
-          ctx.strokeStyle = "rgba(0,0,0,0.85)";
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
+          if (h.kind === "warp-point") {
+            // 小填点 + 极细外圈，不抢眼
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(0,0,0,0.6)";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, 3, 0, Math.PI * 2);
+            ctx.strokeStyle = "rgba(255,255,255,0.8)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          } else {
+            // free / uniform / distort：白圆 + 黑边明显 handle
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+            ctx.fillStyle = "#fff";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(0,0,0,0.85)";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
         }
         ctx.restore();
       }

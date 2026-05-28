@@ -103,11 +103,13 @@ export class LassoEngine {
     lctx.restore();
 
     // mesh: 2×2 对齐到 src bbox（doc 坐标）
+    // mode = null → "selected" 状态：只显轮廓 + 拖内部 = 平移；显示模式选择 toolbar
+    // mode = "free" / "uniform" / "distort" / "warp" → "transforming"：显具体 gizmo + Apply / Cancel
     this._floating = {
       canvas: floating,
       srcW: w, srcH: h,
       layer, preSnap,
-      mode: "free",
+      mode: null,                                       // ← 进 selected 状态等用户挑模式
       meshN: 2,
       mesh: [
         [{ x: x0,     y: y0     }, { x: x0 + w, y: y0     }],
@@ -121,18 +123,18 @@ export class LassoEngine {
   }
 
   // -------- 模式切换 --------
+  // mode 可以是 null（selected：只显轮廓 + 拖内 = 平移）
+  //         或 "free" | "uniform" | "distort" | "warp"
   setMode(mode) {
     const f = this._floating;
     if (!f) return;
     if (mode === f.mode) return;
-    // free / uniform / distort 间切换：mesh 是 2×2 → 不变
-    // 切去 warp：升采样 2×2 → 3×3
-    // 切回 2×2 模式（从 warp）：取 4 角，丢中间 5 点
+    // 2x2 ↔ 4x4 mesh 升 / 降采样
     if (mode === "warp" && f.meshN === 2) {
-      f.mesh = upsampleMesh2to3(f.mesh);
-      f.meshN = 3;
-    } else if (mode !== "warp" && f.meshN === 3) {
-      f.mesh = downsampleMesh3to2(f.mesh);
+      f.mesh = upsampleMesh2to4(f.mesh);
+      f.meshN = 4;
+    } else if (mode !== "warp" && f.meshN === 4) {
+      f.mesh = downsampleMesh4to2(f.mesh);
       f.meshN = 2;
     }
     f.mode = mode;
@@ -145,12 +147,21 @@ export class LassoEngine {
   hitTest(x, y, screenScale = 1) {
     const f = this._floating;
     if (!f) return null;
+    // selected 状态（mode=null）：不暴露 handles，仅内部 = 平移
+    if (f.mode === null) {
+      return this._pointInQuad(x, y) ? { kind: "translate" } : null;
+    }
     // 优先 mesh 控制点（按 mode 决定哪些点暴露）。半径 = 10 / screenScale doc-px
     const r = 10 / screenScale;
     const handles = this._visibleHandles();
     for (const h of handles) {
       const dx = x - h.pos.x, dy = y - h.pos.y;
       if (dx * dx + dy * dy < r * r) return h;
+    }
+    // warp 模式：内部任意点 = 软拖（分布到最近 cell 4 角）
+    if (f.mode === "warp") {
+      const cell = this._findWarpCell(x, y);
+      if (cell) return { kind: "warp-soft", ...cell };
     }
     // 内部 = translate
     if (this._pointInQuad(x, y)) {
@@ -182,6 +193,8 @@ export class LassoEngine {
       this._applyEdgeDrag(d.edge, d.meshSnap, x, y);
     } else if (d.kind === "warp-point") {
       this._applyWarpPoint(d.row, d.col, d.meshSnap, dx, dy);
+    } else if (d.kind === "warp-soft") {
+      this._applyWarpSoft(d, dx, dy);
     }
     this.onChange();
   }
@@ -202,10 +215,11 @@ export class LassoEngine {
     }
     layer.ensureBbox(Math.floor(minX), Math.floor(minY), Math.ceil(maxX), Math.ceil(maxY));
     const lbX = layer.bboxX, lbY = layer.bboxY;
-    // 直接画到 layer 的 ctx（doc 坐标 - layer.bbox 偏移）
+    // 直接画到 layer 的 ctx（doc 坐标 - layer.bbox 偏移）。
+    // warp 模式走平滑（quadratic Catmull-Rom 升采样后线性三角）
     layer.ctx.save();
     layer.ctx.translate(-lbX, -lbY);
-    drawMesh(layer.ctx, f.canvas, f.srcW, f.srcH, f.mesh);
+    drawMesh(layer.ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: f.mode === "warp" });
     layer.ctx.restore();
 
     const after = layer.snapshot();
@@ -264,15 +278,16 @@ export class LassoEngine {
   _visibleHandles() {
     const f = this._floating;
     if (!f) return [];
+    // selected 状态：不暴露
+    if (f.mode === null) return [];
     const out = [];
     if (f.meshN === 2) {
-      // 4 角
       const m = f.mesh;
       out.push({ kind: "corner", row: 0, col: 0, pos: m[0][0] });
       out.push({ kind: "corner", row: 0, col: 1, pos: m[0][1] });
       out.push({ kind: "corner", row: 1, col: 0, pos: m[1][0] });
       out.push({ kind: "corner", row: 1, col: 1, pos: m[1][1] });
-      // 4 边中点（free/uniform 才暴露；distort 不暴露 —— 用 4 角自由就够了）
+      // 4 边中点：free / uniform 暴露（1D 缩放）；distort 不（用 4 角自由）
       if (f.mode !== "distort") {
         out.push({ kind: "edge", edge: "top",    pos: mid(m[0][0], m[0][1]) });
         out.push({ kind: "edge", edge: "right",  pos: mid(m[0][1], m[1][1]) });
@@ -280,8 +295,8 @@ export class LassoEngine {
         out.push({ kind: "edge", edge: "left",   pos: mid(m[0][0], m[1][0]) });
       }
     } else {
-      // 3×3 = 9 个 warp 点
-      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+      // 4×4 = 16 个 warp 点
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
         out.push({ kind: "warp-point", row: i, col: j, pos: f.mesh[i][j] });
       }
     }
@@ -291,17 +306,11 @@ export class LassoEngine {
   _pointInQuad(x, y) {
     const f = this._floating;
     if (!f) return false;
-    if (f.meshN === 2) {
-      // 4 角四边形点内检测（winding-test on the 4-corner quad）
-      const m = f.mesh;
-      const poly = [m[0][0], m[0][1], m[1][1], m[1][0]];
-      return pointInPoly(poly, x, y);
-    } else {
-      // 3×3：用 4 角包络（最简单，准确性够用）
-      const m = f.mesh;
-      const poly = [m[0][0], m[0][2], m[2][2], m[2][0]];
-      return pointInPoly(poly, x, y);
-    }
+    const N = f.meshN;
+    const m = f.mesh;
+    // 用 4 个外角的包络（warp 也用这个，足够检测"在不在选区内"）
+    const poly = [m[0][0], m[0][N - 1], m[N - 1][N - 1], m[N - 1][0]];
+    return pointInPoly(poly, x, y);
   }
 
   _applyTranslate(meshSnap, dx, dy) {
@@ -383,16 +392,21 @@ export class LassoEngine {
     if (Math.abs(det) < 1e-6) return;   // 退化（ax / ay 平行）；放弃这帧
     let lenAx = (dragVec.x * M22 - dragVec.y * M12) / det;
     let lenAy = (-dragVec.x * M21 + dragVec.y * M11) / det;
-    // uniform 模式：锁长宽比 = f.uniformAspect = |ax|/|ay|。
-    // 用主导轴决定新 scale，另一轴按比例跟随。"主导"= 相对变化量大的那个轴。
+    // uniform 模式：把 finger 沿"原对角方向"投影，等比例缩放两轴。
+    // 角"滑"在原对角线上 → 锁长宽比；垂直于对角的拖动不改 scale（更稳）
     if (f.mode === "uniform") {
-      const origLenAx = Math.hypot(origAx.x, origAx.y);
-      const origLenAy = Math.hypot(origAy.x, origAy.y);
-      const sX = origLenAx > 1e-6 ? lenAx / origLenAx : 1;
-      const sY = origLenAy > 1e-6 ? lenAy / origLenAy : 1;
-      const s = Math.abs(sX) >= Math.abs(sY) ? sX : sY;
-      lenAx = s * origLenAx;
-      lenAy = s * origLenAy;
+      const origCorner = meshSnap[row][col];
+      const Dvec = sub(origCorner, anchor);       // 原对角向量
+      const Dlen2 = Dvec.x * Dvec.x + Dvec.y * Dvec.y;
+      if (Dlen2 > 1e-6) {
+        const fingerFromAnchor = sub({ x: targetX, y: targetY }, anchor);
+        const scale = (fingerFromAnchor.x * Dvec.x + fingerFromAnchor.y * Dvec.y) / Dlen2;
+        const origLenAx = Math.hypot(origAx.x, origAx.y);
+        const origLenAy = Math.hypot(origAy.x, origAy.y);
+        // 用原 αx / αy 决定方向（lenAx 在 free 解算中带的符号）
+        lenAx = αx * scale * origLenAx;
+        lenAy = αy * scale * origLenAy;
+      }
     }
     const newAx = { x: axU.x * lenAx, y: axU.y * lenAx };
     const newAy = { x: ayU.x * lenAy, y: ayU.y * lenAy };
@@ -482,6 +496,42 @@ export class LassoEngine {
       y: meshSnap[row][col].y + dy,
     };
   }
+
+  // Warp 软拖：拖任意点 → 邻近 cell 的 4 角按 bilinear 权重分配 delta
+  // (cell.row, cell.col) = 4×4 mesh 中 cell 的 TL 索引（0..2）
+  // (u, v) ∈ [0,1] = cell 内部的 bilinear 坐标
+  _applyWarpSoft(d, dx, dy) {
+    const f = this._floating;
+    const r = d.row, c = d.col;
+    const u = d.u, v = d.v;
+    const wTL = (1 - u) * (1 - v);
+    const wTR = u * (1 - v);
+    const wBL = (1 - u) * v;
+    const wBR = u * v;
+    // 把 (dx, dy) 按权重分给 4 角（注意：用户拖到的点位移 = dx, dy，
+    // 等于 4 角各自位移 × 各自权重之和 = dx, dy。所以每个角各位移 dx*w）
+    f.mesh[r    ][c    ] = { x: d.meshSnap[r    ][c    ].x + dx * wTL, y: d.meshSnap[r    ][c    ].y + dy * wTL };
+    f.mesh[r    ][c + 1] = { x: d.meshSnap[r    ][c + 1].x + dx * wTR, y: d.meshSnap[r    ][c + 1].y + dy * wTR };
+    f.mesh[r + 1][c    ] = { x: d.meshSnap[r + 1][c    ].x + dx * wBL, y: d.meshSnap[r + 1][c    ].y + dy * wBL };
+    f.mesh[r + 1][c + 1] = { x: d.meshSnap[r + 1][c + 1].x + dx * wBR, y: d.meshSnap[r + 1][c + 1].y + dy * wBR };
+  }
+
+  // 给定 doc 坐标 (x, y) 找它落在 4×4 mesh 的哪个 cell + bilinear (u, v)
+  _findWarpCell(x, y) {
+    const f = this._floating;
+    if (!f || f.meshN !== 4) return null;
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        const tl = f.mesh[r][c], tr = f.mesh[r][c + 1];
+        const bl = f.mesh[r + 1][c], br = f.mesh[r + 1][c + 1];
+        const uv = inverseBilinear(x, y, tl, tr, bl, br);
+        if (uv && uv.u >= 0 && uv.u <= 1 && uv.v >= 0 && uv.v <= 1) {
+          return { row: r, col: c, u: uv.u, v: uv.v };
+        }
+      }
+    }
+    return null;
+  }
 }
 
 // ============ 几何工具 ============
@@ -510,44 +560,84 @@ function pointInPoly(poly, x, y) {
   return inside;
 }
 
-function upsampleMesh2to3(m) {
-  // 2×2 → 3×3：4 角保留，4 个边中点 + 1 个中心新增
+// 2×2 → 4×4：4 角保留，按 bilinear 内插填 12 个中间点
+// 索引 (i, j) ∈ [0..3]，参数 u=j/3, v=i/3
+function upsampleMesh2to4(m) {
   const tl = m[0][0], tr = m[0][1], bl = m[1][0], br = m[1][1];
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    out[i] = [];
+    const v = i / 3;
+    for (let j = 0; j < 4; j++) {
+      const u = j / 3;
+      out[i][j] = {
+        x: (1 - u) * (1 - v) * tl.x + u * (1 - v) * tr.x + (1 - u) * v * bl.x + u * v * br.x,
+        y: (1 - u) * (1 - v) * tl.y + u * (1 - v) * tr.y + (1 - u) * v * bl.y + u * v * br.y,
+      };
+    }
+  }
+  return out;
+}
+// 4×4 → 2×2：只留 4 角，丢中间 12 点
+function downsampleMesh4to2(m) {
   return [
-    [{ ...tl }, mid(tl, tr), { ...tr }],
-    [mid(tl, bl), midOfFour(tl, tr, bl, br), mid(tr, br)],
-    [{ ...bl }, mid(bl, br), { ...br }],
+    [{ ...m[0][0] }, { ...m[0][3] }],
+    [{ ...m[3][0] }, { ...m[3][3] }],
   ];
 }
-function downsampleMesh3to2(m) {
-  return [
-    [{ ...m[0][0] }, { ...m[0][2] }],
-    [{ ...m[2][0] }, { ...m[2][2] }],
-  ];
-}
-function midOfFour(a, b, c, d) {
-  return { x: (a.x + b.x + c.x + d.x) / 4, y: (a.y + b.y + c.y + d.y) / 4 };
+
+// 逆 bilinear：给定四边形 (tl, tr, bl, br) 和点 (x, y)，求 (u, v) ∈ [0,1] 使得
+// (1-u)(1-v)tl + u(1-v)tr + (1-u)v bl + uv br = (x, y)
+// 一般是二次方程。这里用迭代逼近（数值稳健 + 对小扭曲准）
+function inverseBilinear(x, y, tl, tr, bl, br) {
+  // 初值：投影到 TL-TR-BL 三角的 affine 逆映射
+  // affine: (x, y) = tl + u*(tr - tl) + v*(bl - tl)
+  const ex = tr.x - tl.x, ey = tr.y - tl.y;
+  const fx = bl.x - tl.x, fy = bl.y - tl.y;
+  const det = ex * fy - ey * fx;
+  if (Math.abs(det) < 1e-6) return null;
+  const px = x - tl.x, py = y - tl.y;
+  let u = (px * fy - py * fx) / det;
+  let v = (-px * ey + py * ex) / det;
+  // Newton 迭代精修（最多 4 步，残差 << 1px 就停）
+  for (let k = 0; k < 4; k++) {
+    const fx_ = (1 - u) * (1 - v) * tl.x + u * (1 - v) * tr.x + (1 - u) * v * bl.x + u * v * br.x - x;
+    const fy_ = (1 - u) * (1 - v) * tl.y + u * (1 - v) * tr.y + (1 - u) * v * bl.y + u * v * br.y - y;
+    if (Math.abs(fx_) < 0.5 && Math.abs(fy_) < 0.5) break;
+    // Jacobian
+    const Jux = -(1 - v) * tl.x + (1 - v) * tr.x - v * bl.x + v * br.x;
+    const Juy = -(1 - v) * tl.y + (1 - v) * tr.y - v * bl.y + v * br.y;
+    const Jvx = -(1 - u) * tl.x - u * tr.x + (1 - u) * bl.x + u * br.x;
+    const Jvy = -(1 - u) * tl.y - u * tr.y + (1 - u) * bl.y + u * br.y;
+    const jdet = Jux * Jvy - Juy * Jvx;
+    if (Math.abs(jdet) < 1e-6) break;
+    u -= (fx_ * Jvy - fy_ * Jvx) / jdet;
+    v -= (-fx_ * Juy + fy_ * Jux) / jdet;
+  }
+  return { u, v };
 }
 
 // ============ 三角剖分 mesh 渲染 ============
 // export 给 board.js 也用同一份代码画 floating 浮层
 //
-// 渲染策略：mesh 切成 (N-1)×(N-1) 个 cell；每 cell 切 2 个三角。
-// 对每三角：src 三角（pixel 空间）→ dst 三角（doc 空间）的 affine drawImage。
-// 单元 (i,j) 的 cell 4 角：
-//   src: (j/(N-1)*srcW, i/(N-1)*srcH) 配对 4 角的 mesh 索引
-//   dst: f.mesh[i][j], [i][j+1], [i+1][j], [i+1][j+1]
-// 三角化：tri1 = [TL, TR, BL], tri2 = [TR, BR, BL]
-export function drawMesh(ctx, srcCanvas, srcW, srcH, mesh) {
-  const N = mesh.length;
+// 默认线性三角：(N-1)×(N-1) 个 cell，每 cell 切 2 个三角。
+// opts.smooth=true（warp 模式）：先用 Catmull-Rom 把 4×4 mesh 升采样到密集网格再画。
+// 等价于"曲面用曲线插值，渲染再切三角"，肉眼接近 Procreate 的平滑变形。
+const SMOOTH_SUBDIV = 4;   // 每 cell 切 4×4 子格；4×4 mesh 总 → (3×4+1)² = 169 个顶点
+export function drawMesh(ctx, srcCanvas, srcW, srcH, mesh, opts = {}) {
+  let renderMesh = mesh;
+  if (opts.smooth && mesh.length === 4) {
+    renderMesh = subdivideCatmullRom4x4(mesh, SMOOTH_SUBDIV);
+  }
+  const N = renderMesh.length;
   for (let i = 0; i < N - 1; i++) {
     for (let j = 0; j < N - 1; j++) {
       const sxL = j     * srcW / (N - 1);
       const sxR = (j + 1) * srcW / (N - 1);
       const syT = i     * srcH / (N - 1);
       const syB = (i + 1) * srcH / (N - 1);
-      const dTL = mesh[i][j],     dTR = mesh[i][j + 1];
-      const dBL = mesh[i + 1][j], dBR = mesh[i + 1][j + 1];
+      const dTL = renderMesh[i][j],     dTR = renderMesh[i][j + 1];
+      const dBL = renderMesh[i + 1][j], dBR = renderMesh[i + 1][j + 1];
       drawTextureTri(ctx, srcCanvas,
         sxL, syT, sxR, syT, sxL, syB,
         dTL.x, dTL.y, dTR.x, dTR.y, dBL.x, dBL.y);
@@ -556,6 +646,60 @@ export function drawMesh(ctx, srcCanvas, srcW, srcH, mesh) {
         dTR.x, dTR.y, dBR.x, dBR.y, dBL.x, dBL.y);
     }
   }
+}
+
+// 4×4 控制网格 → 密集网格（tensor-product Catmull-Rom）。
+// 一行 4 个 control point → 3 段曲线 (P0-P1, P1-P2, P2-P3)
+// 端点反射当 phantom P-1 / P4，让曲线在端点处有连续切线
+// 输出网格：每方向 (3 * sub + 1) 个点，过原 control point 时插值精确
+function subdivideCatmullRom4x4(m, sub) {
+  // 先按行升采样（每行 4 点 → 3*sub+1 点）
+  const rowDense = [];
+  for (let i = 0; i < 4; i++) {
+    rowDense.push(catmullRomSegments(m[i], sub));
+  }
+  // 再按列升采样
+  const cols = rowDense[0].length;
+  const out = [];
+  for (let bi = 0; bi < 3 * sub + 1; bi++) {
+    out[bi] = new Array(cols);
+  }
+  for (let j = 0; j < cols; j++) {
+    const colPts = [rowDense[0][j], rowDense[1][j], rowDense[2][j], rowDense[3][j]];
+    const denseCol = catmullRomSegments(colPts, sub);
+    for (let i = 0; i < denseCol.length; i++) {
+      out[i][j] = denseCol[i];
+    }
+  }
+  return out;
+}
+
+// 4 control points → 3 segments * sub 子段 + 1 endpoint
+function catmullRomSegments([p0, p1, p2, p3], sub) {
+  // phantom 端点：反射
+  const pm1 = { x: 2 * p0.x - p1.x, y: 2 * p0.y - p1.y };
+  const pp4 = { x: 2 * p3.x - p2.x, y: 2 * p3.y - p2.y };
+  const out = [];
+  out.push({ ...p0 });
+  // seg 0: pm1, p0, p1, p2 between p0 and p1
+  for (let s = 1; s <= sub; s++) {
+    out.push(catmullRomPoint(pm1, p0, p1, p2, s / sub));
+  }
+  for (let s = 1; s <= sub; s++) {
+    out.push(catmullRomPoint(p0, p1, p2, p3, s / sub));
+  }
+  for (let s = 1; s <= sub; s++) {
+    out.push(catmullRomPoint(p1, p2, p3, pp4, s / sub));
+  }
+  return out;
+}
+function catmullRomPoint(P0, P1, P2, P3, t) {
+  const t2 = t * t, t3 = t2 * t;
+  // Standard Catmull-Rom basis（tau = 0.5）
+  return {
+    x: 0.5 * ((2 * P1.x) + (-P0.x + P2.x) * t + (2*P0.x - 5*P1.x + 4*P2.x - P3.x) * t2 + (-P0.x + 3*P1.x - 3*P2.x + P3.x) * t3),
+    y: 0.5 * ((2 * P1.y) + (-P0.y + P2.y) * t + (2*P0.y - 5*P1.y + 4*P2.y - P3.y) * t2 + (-P0.y + 3*P1.y - 3*P2.y + P3.y) * t3),
+  };
 }
 
 // 把源图的一个三角形（在 src 像素坐标里）映射到 dst 三角形（在当前 ctx 坐标里）

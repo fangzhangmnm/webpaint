@@ -248,15 +248,26 @@
       <button class="sheet-action ghost" id="newDocCancel" type="button">取消</button>
     </div>
 
-    <!-- 套索浮层工具栏：lasso 有 floating 时弹出，切 4 种变形模式 + 确定 / 取消 -->
+    <!-- 套索浮层工具栏。两个子状态：
+         - selected：选区刚建好，只显模式 picker（4 个按钮）+ 取消选区
+         - transforming：用户挑了模式，只显模式 label + 应用 + 取消（其他模式按钮收起避免误触） -->
     <div class="lasso-toolbar hidden" id="lassoToolbar" role="toolbar" aria-label="套索变形">
-      <button class="lasso-tool-btn" data-lasso-mode="free" type="button" aria-pressed="true">自由</button>
-      <button class="lasso-tool-btn" data-lasso-mode="uniform" type="button">等比</button>
-      <button class="lasso-tool-btn" data-lasso-mode="distort" type="button">扭曲</button>
-      <button class="lasso-tool-btn" data-lasso-mode="warp" type="button">变形</button>
-      <span class="lasso-tool-sep" aria-hidden="true">|</span>
-      <button class="lasso-tool-btn lasso-tool-confirm" id="lassoCommitBtn" type="button">确定</button>
-      <button class="lasso-tool-btn lasso-tool-cancel" id="lassoCancelBtn" type="button">取消</button>
+      <!-- 模式 picker（selected 状态显示） -->
+      <div class="lasso-picker" id="lassoPicker">
+        <button class="lasso-tool-btn" data-lasso-mode="free" type="button">自由</button>
+        <button class="lasso-tool-btn" data-lasso-mode="uniform" type="button">等比</button>
+        <button class="lasso-tool-btn" data-lasso-mode="distort" type="button">透视</button>
+        <button class="lasso-tool-btn" data-lasso-mode="warp" type="button">变形</button>
+        <span class="lasso-tool-sep" aria-hidden="true">|</span>
+        <button class="lasso-tool-btn lasso-tool-cancel" id="lassoSelectedCancelBtn" type="button">取消选区</button>
+      </div>
+      <!-- 变换控制（transforming 状态显示） -->
+      <div class="lasso-transform-ctrl hidden" id="lassoTransformCtrl">
+        <span class="lasso-tool-label" id="lassoModeLabel">自由</span>
+        <span class="lasso-tool-sep" aria-hidden="true">|</span>
+        <button class="lasso-tool-btn lasso-tool-confirm" id="lassoCommitBtn" type="button">应用</button>
+        <button class="lasso-tool-btn lasso-tool-cancel" id="lassoCancelBtn" type="button">取消</button>
+      </div>
     </div>
 
     <!-- 通用 in-app 对话（替代 alert / prompt / confirm；见 feedback-no-system-dialog） -->

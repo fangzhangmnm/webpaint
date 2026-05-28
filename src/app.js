@@ -225,16 +225,28 @@ board.setLassoProvider(() => ({
   handles:     input.lasso.visibleHandles(),
 }));
 
-// 套索工具栏（4 模式 + 确定 / 取消）。lasso 改变状态 → 同步 toolbar
+// 套索工具栏（两态：selected = 4 模式 picker；transforming = mode label + 应用 / 取消）
 const lassoToolbar = document.getElementById("lassoToolbar");
-const lassoModeBtns = [...document.querySelectorAll("[data-lasso-mode]")];
+const lassoPicker = document.getElementById("lassoPicker");
+const lassoTransformCtrl = document.getElementById("lassoTransformCtrl");
+const lassoModeLabel = document.getElementById("lassoModeLabel");
+const lassoModeBtns = [...lassoPicker.querySelectorAll("[data-lasso-mode]")];
+const LASSO_MODE_LABEL = { free: "自由", uniform: "等比", distort: "透视", warp: "变形" };
+
 function updateLassoToolbar() {
   const has = input.lasso.hasFloating();
   lassoToolbar.classList.toggle("hidden", !has);
   if (!has) return;
   const mode = input.lasso.getMode();
-  for (const b of lassoModeBtns) {
-    b.setAttribute("aria-pressed", b.dataset.lassoMode === mode ? "true" : "false");
+  if (mode === null) {
+    // selected：只显 picker
+    lassoPicker.classList.remove("hidden");
+    lassoTransformCtrl.classList.add("hidden");
+  } else {
+    // transforming：只显 mode label + 应用 / 取消
+    lassoPicker.classList.add("hidden");
+    lassoTransformCtrl.classList.remove("hidden");
+    lassoModeLabel.textContent = LASSO_MODE_LABEL[mode] || mode;
   }
 }
 for (const b of lassoModeBtns) {
@@ -248,6 +260,13 @@ document.getElementById("lassoCommitBtn").addEventListener("click", () => {
   updateLassoToolbar();
 });
 document.getElementById("lassoCancelBtn").addEventListener("click", () => {
+  if (input.lasso.hasFloating()) {
+    input.lasso.cancel();
+    board.invalidateAll();
+    updateLassoToolbar();
+  }
+});
+document.getElementById("lassoSelectedCancelBtn").addEventListener("click", () => {
   if (input.lasso.hasFloating()) {
     input.lasso.cancel();
     board.invalidateAll();
@@ -294,8 +313,12 @@ for (const b of els.toolBtns) {
   b.addEventListener("click", () => setTool(b.dataset.tool));
 }
 window.addEventListener("wp:settool", (e) => setTool(e.detail));
-// pencil 模式下双击 → 笔↔橡皮
+// pencil 模式下双击 → 笔↔橡皮。但 floating 选区存在时屏蔽（避免误触切工具 = 自动 apply 变换）
 window.addEventListener("wp:doubletap", () => {
+  if (input.lasso.hasFloating()) {
+    setStatus("套索浮层进行中，双击切换暂停（点应用 / 取消 / 返回工具栏）");
+    return;
+  }
   const next = state.tool === "eraser" ? "brush" : "eraser";
   setTool(next);
   setStatus(`双击 · ${next === "eraser" ? "橡皮" : "笔刷"}`);
@@ -1243,7 +1266,12 @@ async function saveAndPush() {
   if (_docSaving) return;
   // 1) local IDB
   if (_docDirty) await saveNow();
-  // 2) push cloud（user 在场 + 已登录 + 云端未同步）
+  // 2) push cloud（user 在场 + 已登录 + 在线 + 云端未同步）
+  // 离线时跳过推送（不要弹错；本地已存，回到在线再 save 一次自动推）
+  if (isSignedIn() && navigator.onLine === false && isCloudDirty(_activeSessionName)) {
+    setStatus(`已存本地：${_activeSessionName}（离线，回到在线再 Ctrl+S 推云端）`);
+    return;
+  }
   if (isSignedIn() && isCloudDirty(_activeSessionName)) {
     _cloudPushing = true;
     updateSaveStatus();
@@ -1950,14 +1978,20 @@ async function updateIdbUsage() {
 async function renderGallery() {
   updateCloudAuthUI();
   updateIdbUsage();
-  // revoke 旧 URL
   for (const u of _galleryUrls) URL.revokeObjectURL(u);
   _galleryUrls = [];
 
-  // 同时拿本地 + 云端 list（如果登录），按 name 合并
-  const local = await listSessions();
+  // listSessions 在 IDB 被禁（隐私窗口 / 配额耗尽 / 浏览器策略）时会抛。
+  // 这时图库没法用是合理结果，但要给个明确状态消息（原代码静默死掉）。
+  let local = [];
+  try { local = await listSessions(); }
+  catch (e) {
+    console.error("[gallery] listSessions failed:", e);
+    setStatus("本地图库读取失败：" + (e && e.message || e) + "（可能是隐私窗口 / IDB 被禁）", true);
+  }
+  // 云端：仅在登录 + 在线 时尝试。navigator.onLine === false 几乎确定离线，跳网络省超时
   let cloud = [];
-  if (isSignedIn()) {
+  if (isSignedIn() && navigator.onLine !== false) {
     try { cloud = await listCloudSessionsRecursive(); }
     catch (e) { console.warn("[cloud] list failed:", e); }
   }
@@ -2192,21 +2226,28 @@ const ICON_CLOUD_IN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 function updateCloudAuthUI() {
   const signed = isSignedIn();
   const configured = isAuthConfigured();
+  const offline = navigator.onLine === false;     // navigator.onLine=undefined 当 true
   if (signed) {
     const acc = getActiveAccount();
     els.cloudIconBtn.innerHTML = ICON_CLOUD_IN;
     els.cloudIconBtn.dataset.cloudState = "signedin";
-    els.cloudIconBtn.title = `云端：${acc?.username || acc?.name || "已登录"}（点开账号菜单）`;
-    els.cloudAccountInfo.textContent = `云端：${acc?.username || acc?.name || "已登录"}`;
+    const who = acc?.username || acc?.name || "已登录";
+    els.cloudIconBtn.title = offline ? `云端：${who}（离线，无法推 / 拉）` : `云端：${who}（点开账号菜单）`;
+    els.cloudAccountInfo.textContent = offline ? `云端：${who}（离线）` : `云端：${who}`;
     els.cloudSignInBtn.classList.add("hidden");
     els.cloudSignOutBtn.classList.remove("hidden");
-    els.cloudRefreshBtn.classList.remove("hidden");
+    els.cloudRefreshBtn.classList.toggle("hidden", offline);   // 离线时藏刷新（按了没意义）
   } else {
     els.cloudIconBtn.innerHTML = ICON_CLOUD_OUT;
     els.cloudIconBtn.dataset.cloudState = configured ? "out" : "unconfigured";
-    els.cloudIconBtn.title = configured ? "云端：未登录（点开登录）" : "云端：未配置";
-    els.cloudAccountInfo.textContent = configured ? "云端：未登录" : "云端：未配置";
-    els.cloudSignInBtn.classList.toggle("hidden", !configured);
+    if (offline && configured) {
+      els.cloudIconBtn.title = "云端：离线（无法登录 / 同步；本地图库正常）";
+      els.cloudAccountInfo.textContent = "云端：离线";
+    } else {
+      els.cloudIconBtn.title = configured ? "云端：未登录（点开登录）" : "云端：未配置";
+      els.cloudAccountInfo.textContent = configured ? "云端：未登录" : "云端：未配置";
+    }
+    els.cloudSignInBtn.classList.toggle("hidden", !configured || offline);    // 离线时登录按钮无意义
     els.cloudSignOutBtn.classList.add("hidden");
     els.cloudRefreshBtn.classList.add("hidden");
   }
@@ -2266,6 +2307,9 @@ if (isAuthConfigured()) {
     console.warn("[auth] init failed:", e);
   });
 }
+// 在线 / 离线变化时刷新云端 UI（标签 / 按钮可见性）；图库打开时还顺便重渲染列表
+window.addEventListener("online",  () => { updateCloudAuthUI(); if (!els.galleryFull.classList.contains("hidden")) renderGallery(); });
+window.addEventListener("offline", () => { updateCloudAuthUI(); });
 (async () => {
   const wantedName = getCurrentSessionName();
   try {

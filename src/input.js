@@ -645,15 +645,16 @@ export class InputController {
     if (!this.doc.activeLayer) { rec.role = null; return; }
     const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
     if (this.lasso.state() === "floating") {
-      // 先 hit-test gizmo handle / 内部 → 进入 transform 模式
+      // hit-test：handle / 内部翻译 / warp 软拖 → 启动 transform
       const hit = this.lasso.hitTest(dx, dy, this.board.viewport.scale);
       if (hit) {
         rec._lassoMode = "transform";
         this.lasso.beginDrag(hit, dx, dy);
         return;
       }
-      // 没击中 → commit 当前；下一步 tap 还是 drag 看 _move 决定
-      this._commitLasso();
+      // 没击中 = no-op（卡在 floating，必须走应用 / 取消 / 切工具）。详见 v57 UX 决策
+      rec.role = null;
+      return;
     }
     rec._lassoMode = "tentative";
     rec._lassoStartDocX = dx;
