@@ -211,7 +211,8 @@ input[type=range] {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
-  z-index: 20;
+  /* 必须高于 .gallery-full (50) —— 否则在图库里点新建/改名看不到 sheet */
+  z-index: 60;
   opacity: 1;
   transition: opacity 0.18s ease;
 }
@@ -234,7 +235,7 @@ input[type=range] {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 21;
+  z-index: 61;
   transition: transform 0.22s ease, opacity 0.18s ease;
 }
 .sheet.hidden {
@@ -561,6 +562,13 @@ input[type=range] {
 }
 .tool[data-state="saving"] { opacity: 0.5; }
 .tool[data-state="cloud-dirty"] { color: #d49100; }
+.tool[data-state="cloud-busy"] { color: #d49100; }
+/* 云上传中：箭头部分自旋。SVG 里 class="spin-arc" 是旋转弧 */
+.tool[data-state="cloud-busy"] .spin-arc { animation: wp-spin 1s linear infinite; }
+@keyframes wp-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
 .tool[data-state="synced"] { color: #8a8a8a; }
 .tool[data-state="saved"] { color: var(--ink-soft); }
 .gallery-grid {

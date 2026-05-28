@@ -300,7 +300,11 @@ export class InputController {
     if (rec.role === "draw" || rec.role === "erase" || rec.role === "liquify") {
       // 画 / 液化的时候不刷 cursor preview，省一次全屏 dirty
       const events = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : null;
-      const list = (events && events.length) ? events : [e];
+      let list = (events && events.length) ? events : [e];
+      // **液化丢帧**：每个 event 跑 ~31K typed-array ops，大笔半径下 coalesced
+      // 整批连续跑 → 帧延迟堆积 → 越拖越卡。只跑最新一个（保 timeStamp 滤后的）。
+      // 画笔不能丢帧，会断笔/疏密；液化每帧独立重采样，丢帧 = 跳过细分但形状仍连续。
+      if (rec.role === "liquify" && list.length > 1) list = [list[list.length - 1]];
       const settings = rec.role === "liquify" ? null : this.getBrushSettings();
       for (const ev of list) {
         // **Safari iOS getCoalescedEvents() 边界回放过滤**：每次 pointermove
@@ -669,15 +673,8 @@ export class InputController {
     if (dRot > Math.PI) dRot -= 2 * Math.PI;
     if (dRot < -Math.PI) dRot += 2 * Math.PI;
     let newRot = g.vp.rot + dRot;
-    // 接近 0° / 90° / 180° / 270° 时 snap（Procreate 同款）。阈值 5°。
-    const SNAP_DEG = 5;
-    const snapStep = Math.PI / 2;
-    // 规整 newRot 到 (-π, π] 域便于取最近的 n × π/2
-    let n = Math.round(newRot / snapStep);
-    const snapped = n * snapStep;
-    if (Math.abs(newRot - snapped) < SNAP_DEG * Math.PI / 180) {
-      newRot = snapped;
-    }
+    // 旋转 snap 改成松手时才生效（v47）—— gesture 进行中用户拧着角度，
+    // 不要让画面被吸到整数，那样手感粘。endGesture 里检查并 snap 一次。
     // 围绕 g.midX, g.midY 旋转 + 缩放 + 平移到当前 midX, midY
     // 用变换的 anchor-preserving 公式（参考 board.rotateAt / zoomAt）：
     // 1. 起始：viewport = g.vp
@@ -710,6 +707,26 @@ export class InputController {
   _endGesture() {
     this.gestureStart = null;
     delete document.body.dataset.panning;
+    // 松手时检查旋转是否接近 0°/90°/180°/270°，是则吸到整数。
+    // 阈值 5°（同 Procreate）。在 update 阶段不 snap 是为了不"粘手"。
+    const SNAP_DEG = 5;
+    const snapStep = Math.PI / 2;
+    const cur = this.board.viewport.rot;
+    const n = Math.round(cur / snapStep);
+    const snapped = n * snapStep;
+    if (cur !== snapped && Math.abs(cur - snapped) < SNAP_DEG * Math.PI / 180) {
+      // 以画布中心为锚，保持画面中心稳定地吸到正角度
+      const W = this.board.doc.width, H = this.board.doc.height;
+      const vp = this.board.viewport;
+      const cxScreen = vp.tx + W * vp.scale / 2;
+      const cyScreen = vp.ty + H * vp.scale / 2;
+      this.board.setViewport(
+        cxScreen - W * vp.scale / 2,
+        cyScreen - H * vp.scale / 2,
+        vp.scale,
+        snapped,
+      );
+    }
   }
 
   // ---- wheel ----

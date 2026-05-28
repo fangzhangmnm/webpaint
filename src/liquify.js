@@ -47,15 +47,21 @@ export class LiquifyEngine {
     const strength = Math.max(0, Math.min(2, s.strength)); // 0..1 主区间，上限 2 给极端
     const cx = x, cy = y;
 
-    // brush footprint bbox（doc 坐标），clamp 到 layer 实际像素区
     const layer = st.layer;
-    const lbX = layer.bboxX, lbY = layer.bboxY;
-    const lbW = layer.bboxW, lbH = layer.bboxH;
-    if (lbW <= 0 || lbH <= 0) {
+    if (layer.bboxW <= 0 || layer.bboxH <= 0) {
       // 空层无像素可液化，跳
       st.lastX = x; st.lastY = y;
       return;
     }
+    // 让 layer bbox 包住 brush footprint（被推到边缘外的像素能落地）
+    // ensureBbox 会 clamp 到 doc 边界；ensure 后再读 bbox 才对
+    layer.ensureBbox(
+      Math.floor(cx - R), Math.floor(cy - R),
+      Math.ceil(cx + R),  Math.ceil(cy + R),
+    );
+    const lbX = layer.bboxX, lbY = layer.bboxY;
+    const lbW = layer.bboxW, lbH = layer.bboxH;
+    // brush footprint bbox（doc 坐标），clamp 到 layer 实际像素区
     const x0 = Math.max(lbX, Math.floor(cx - R));
     const y0 = Math.max(lbY, Math.floor(cy - R));
     const x1 = Math.min(lbX + lbW, Math.ceil(cx + R));

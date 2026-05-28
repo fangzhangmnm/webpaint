@@ -138,6 +138,14 @@ User 原话举例：
     - stamp 走更高 hardness 默认（更锐边）
     - sub-pixel offset jitter (4-tap supersample) 减锯齿
     - WebGL/WebGPU 加速通路（远期，brush preset 系统稳定后）
+8d. **平滑大档"过去笔迹反向蠕动"（user 2026-05-28，观察 Procreate）**：当 streamline / stabilization 拉到极限，Procreate 不只是延迟下一笔的落点 —— **它会回头改已经画完的那段轨迹**（live overlay 实时重算）。
+    - 当前实现：smoothed 输出 (smX, smY) 是单调"追"原始指针；从落第一颗 stamp 起，已 commit 的 stamp 不动。
+    - Procreate 风格：缓冲 raw path（不立即 commit），用 splined / averaged path 推迟到松手 / 延迟阈值才烧到 layer。烧之前的预览是 live overlay。这相当于一个 "短期 ring buffer + late commit"。
+    - 论证点：
+      - 是否真值得做？高 streamline 用户少；低/中档下没有差异
+      - 烤进 layer 的时机怎么定？落第 N 颗后就锁 / 一段时间没动就锁
+      - 和压感曲线交互（commit 时机晚 = 压感 stabilizer 窗口大）
+    - 目前优先级：cel shading / lasso / crop 之后
 9. **长按直线 / 长按弧**（Procreate quick-assist）：笔画末尾停住 → 自动拉直 / 拉成圆弧。**不是形状工具**，是"拉直辅助"。
 10. **图层模式**（multiply / overlay / screen / ...）：阴影 / 高光叠加。
 11. **更多 brush preset**：硬笔 / 软喷枪 / 着色笔 / 厚涂笔，先 4-5 个够用。
@@ -147,6 +155,11 @@ User 原话举例：
     - offset 视图：把 doc 居中点偏移 (W/2, H/2)，让 seam 在画面中央
     - wrap 笔刷：stamp 落在边缘时同时在反面镜像画一笔（modulo wrap），缝消失
     - 低优先级（user 备注），等 cel-shading + lasso 稳了再做。
+14b. **Interactive crop（user 2026-05-28）**：UI 可拖边拉手柄 shrink / expand doc 尺寸。
+    - shrink：把 docW/H 改小 + clamp 所有 layer bbox + 提示 user 哪几层有像素被剪
+    - expand：把 docW/H 改大 + 居中（或按手柄锚点）平移 layer 内容
+    - undo 必须能整体回滚（doc 尺寸 + 所有 layer 偏移）。和 lasso transform 是同一类"变换型" history entry，时机一起做
+    - Procreate "Canvas → Crop & Resize" 一类工具
 
 ### Tier 3：兜底
 

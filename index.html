@@ -128,14 +128,6 @@
         </svg>
       </button>
 
-      <!-- 智能 save/upload 按钮：
-           data-state="dirty" → 磁盘图标，点 = 保存到 IDB
-           data-state="cloud-dirty" → 上传图标，点 = 推送到云端 (需登录)
-           data-state="synced" → 云端√，点 = no-op
-           data-state="saved" → 灰勾，无云端配置 / 未登录
-           SVG content 由 app.js 按状态切换 -->
-      <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
-
       <button class="tool" id="topAdjustBtn" type="button" title="调整（液化 / 调色…）" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="4" y1="6" x2="20" y2="6"></line>
@@ -146,6 +138,15 @@
           <circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"></circle>
         </svg>
       </button>
+
+      <!-- 智能 save/upload 按钮：
+           data-state="dirty" → 磁盘图标，点 = 保存到 IDB
+           data-state="cloud-dirty" → 上传图标，点 = 推送到云端 (需登录)
+           data-state="cloud-busy" → 旋转上传中（点 = no-op）
+           data-state="synced" → 云端√，点 = no-op
+           data-state="saved" → 灰勾，无云端配置 / 未登录
+           SVG content 由 app.js 按状态切换 -->
+      <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
 
       <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -327,7 +328,7 @@
         <span class="menu-item-state" data-state-for="theme">跟随系统</span>
       </button>
       <button class="menu-item menu-danger" id="menuClear" type="button" role="menuitem">
-        <span class="menu-item-label">清空画布</span>
+        <span class="menu-item-label">清空当前图层</span>
       </button>
     </div>
 
@@ -359,11 +360,11 @@
       </div>
     </div>
 
-    <!-- 清空确认 -->
+    <!-- 清空确认（只清当前图层；可撤销） -->
     <div id="clearBackdrop" class="backdrop hidden" aria-hidden="true"></div>
     <div id="clearSheet" class="sheet hidden" role="dialog" aria-label="清空确认">
-      <h3>清空画布？</h3>
-      <p class="sheet-hint">一期没有持久化也没有撤销越界保护 —— 清空之后这张就空白了。</p>
+      <h3>清空当前图层？</h3>
+      <p class="sheet-hint" id="clearSheetMessage">把当前图层的像素全部抹掉。可以 Ctrl+Z 撤销。</p>
       <button class="sheet-action danger" data-clear="confirm">清空</button>
       <button class="sheet-action ghost" data-clear="cancel">取消</button>
     </div>

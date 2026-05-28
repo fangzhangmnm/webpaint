@@ -360,10 +360,18 @@ els.clearSheet.addEventListener("click", (e) => {
   if (!a) return;
   closeSheet(els.clearSheet, els.clearBackdrop);
   if (a !== "confirm") return;
+  const layer = doc.activeLayer;
+  if (!layer) return;
+  // 走 stroke handler 让 Ctrl+Z 能复活。before = 当前像素；after = 空层快照。
+  const before = layer.snapshot();
   doc.clearActiveLayer();
-  input.clearHistory();
+  const after = layer.snapshot();
+  const entry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
+  history.push(entry);
+  compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
+  compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
   board.invalidateAll();
-  setStatus("已清空");
+  setStatus("已清空当前图层（Ctrl+Z 撤销）");
 });
 
 // ---- HUD ----
@@ -1019,6 +1027,7 @@ function hexToHsv(hex) {
 // 不走 debounce —— 画图工具不该 300ms 自动保存。
 let _docDirty = false;
 let _docSaving = false;
+let _cloudPushing = false;     // 区分 IDB 写盘 vs 云端 push（按钮显示不同图标）
 let _docLastSavedAt = 0;
 // **幽灵 current path 保护**：内存里 _activeSessionName 只在 boot load 成功
 // 或用户主动 open / new / save-as 后才升级到真实名字。boot 失败时保持
@@ -1043,8 +1052,11 @@ const AUTOSAVE_MS = 3 * 60 * 1000;
 const ICON_DISK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
 const ICON_UPLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
 const ICON_CLOUD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
+// 上传中：云形 + 旋转的弧。CSS animation rotate 由 [data-state="cloud-busy"] 触发
+const ICON_CLOUD_BUSY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><g class="spin-arc" style="transform-origin: 12px 13px;"><path d="M9 13a3 3 0 0 1 5.5-1.6" /><polyline points="14.5 9.5 14.5 11.4 12.6 11.4" /></g></svg>';
 
 function computeSaveState() {
+  if (_cloudPushing) return "cloud-busy";
   if (_docSaving) return "saving";
   if (_docDirty) return "dirty";
   if (isSignedIn() && isCloudDirty(_activeSessionName)) return "cloud-dirty";
@@ -1055,7 +1067,8 @@ function updateSaveStatus() {
   const state = computeSaveState();
   els.topSaveBtn.dataset.state = state;
   const name = _activeSessionName;
-  if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存中… · ${name}`; }
+  if (state === "cloud-busy") { els.topSaveBtn.innerHTML = ICON_CLOUD_BUSY; els.topSaveBtn.title = `上传中… · ${name}`; }
+  else if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存中… · ${name}`; }
   else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存 + 推送 (Ctrl+S) · ${name} · 未保存`; }
   else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = `推送到云端 (Ctrl+S) · ${name} · 本地已存，云端未同步`; }
   else if (state === "synced") { els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK; els.topSaveBtn.title = `已同步到云端 · ${name}`; }
@@ -1114,7 +1127,7 @@ async function saveAndPush() {
   if (_docDirty) await saveNow();
   // 2) push cloud（user 在场 + 已登录 + 云端未同步）
   if (isSignedIn() && isCloudDirty(_activeSessionName)) {
-    _docSaving = true;
+    _cloudPushing = true;
     updateSaveStatus();
     try {
       const ora = await encodeDocToOra(doc);
@@ -1130,7 +1143,7 @@ async function saveAndPush() {
         setStatus("推送失败：" + (e && e.message || e));
       }
     } finally {
-      _docSaving = false;
+      _cloudPushing = false;
       updateSaveStatus();
     }
   } else if (!isSignedIn() && !_docDirty) {
