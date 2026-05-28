@@ -430,10 +430,13 @@ export class Board {
   // 只重画 docRect 覆盖的区域。**rot != 0 时直接走 full**（旋转 dirty rect
   // 在 screen 上是斜矩形，clip + 算屏幕 bbox 复杂度不值，stamp 路径少见旋转后画）
   _renderPartial(docRect) {
-    // 套索浮层 / drawing path 走全屏（overlay 在 dirty rect 外的覆盖需重画）
+    // 套索浮层 / drawing path / **选区** 走全屏。
+    // 选区也要：否则蚂蚁线在 partial 区域里被擦掉（_drawLassoOverlay 不在 partial 路径）
     if (this._lassoProvider) {
       const info = this._lassoProvider();
-      if (info && (info.drawingPath?.length || info.floating)) { this._renderFull(); return; }
+      if (info && (info.drawingPath?.length || info.floating || info.selection)) {
+        this._renderFull(); return;
+      }
     }
     if (this.viewport.rot !== 0) {
       this._renderFull();
@@ -542,22 +545,21 @@ export class Board {
       if (!s._outline) s._outline = extractMaskOutline(s);
       const segs = s._outline;
       ctx.save();
-      // outline segs 是 mask 局部坐标；平移到 selection bbox 在 doc 坐标的位置
-      ctx.translate(s.bboxX, s.bboxY);
-      ctx.lineWidth = 1 / scale;
+      // extractMaskOutline 输出**已是 doc 坐标**（内部加了 sel.bboxX/Y），不 translate。
+      // 风格沿用「正在画的 path」（黑 0 偏移 + 白 5/scale 偏移）—— user 要求一致。
+      ctx.lineWidth = Math.max(1, 1.5 / scale);
       ctx.lineCap = "butt";
-      const dash = 4 / scale;
+      ctx.setLineDash([6 / scale, 4 / scale]);
       ctx.beginPath();
       for (let i = 0; i < segs.length; i += 4) {
         ctx.moveTo(segs[i],     segs[i + 1]);
         ctx.lineTo(segs[i + 2], segs[i + 3]);
       }
-      ctx.setLineDash([dash, dash]);
       ctx.lineDashOffset = 0;
-      ctx.strokeStyle = "#000";
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
       ctx.stroke();
-      ctx.lineDashOffset = dash;
-      ctx.strokeStyle = "#fff";
+      ctx.lineDashOffset = 5 / scale;
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
       ctx.stroke();
       ctx.restore();
     }
