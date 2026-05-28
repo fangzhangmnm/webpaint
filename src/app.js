@@ -2366,9 +2366,23 @@ function showUpdate() {
   if (updateDismissed) return;
   els.updateToast.classList.remove("hidden");
 }
-els.updateReload.addEventListener("click", () => {
-  navigator.serviceWorker?.controller?.postMessage({ type: "skip-waiting" });
-  location.reload();
+els.updateReload.addEventListener("click", async () => {
+  // **v60 修**：必须把 skip-waiting 推给 WAITING SW，不是 controller。
+  // controller = 当前 active SW（旧版本），收到 skipWaiting 无意义；要的是让 waiting
+  // 的新 SW 转 active。然后听 controllerchange 再 reload —— 否则 reload 时旧 SW 还
+  // 在控位，又返一份旧 index.html → 用户体感"toast 一直弹但版本没换"。
+  const reg = _swRegistration || await navigator.serviceWorker?.getRegistration();
+  if (!reg || !reg.waiting) {
+    // 没有 waiting SW（可能已 active 但 page 没 reload）→ 直接刷
+    location.reload();
+    return;
+  }
+  let reloaded = false;
+  const doReload = () => { if (reloaded) return; reloaded = true; location.reload(); };
+  navigator.serviceWorker.addEventListener("controllerchange", doReload, { once: true });
+  reg.waiting.postMessage({ type: "skip-waiting" });
+  // 5s 兜底：controllerchange 不来就硬 reload（不会把状态推得更差）
+  setTimeout(doReload, 5000);
 });
 els.updateDismiss.addEventListener("click", () => {
   updateDismissed = true;

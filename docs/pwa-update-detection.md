@@ -237,6 +237,58 @@ if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
 }
 ```
 
+## 4.5 ⚠️ "刷新"按钮的常见 bug：skip-waiting 推错对象（v60 教训）
+
+**错的写法**（WebPaint v59 之前）：
+```js
+els.updateReload.addEventListener("click", () => {
+  navigator.serviceWorker?.controller?.postMessage({ type: "skip-waiting" });
+  location.reload();
+});
+```
+
+**炸的现象**：toast 弹"有新版本"→ user 点刷新 → 仍是旧版本 → toast 又弹。死循环。
+只有 Safari 浏览器（非 PWA）刷一次才能脱困。
+
+**为什么**：`navigator.serviceWorker.controller` 是**当前 active 的 SW = 旧版本**。
+SW 的 message handler 长这样：
+```js
+self.addEventListener("message", (e) => {
+  if (e.data?.type === "skip-waiting") self.skipWaiting();
+});
+```
+推给旧 SW，它自己已经 active，`self.skipWaiting()` 无意义。新 SW 永远卡在 `waiting`
+状态，等不到激活信号。
+
+而 reload 又用旧 SW（controller 没换）服务，从旧 cache 返旧 index.html → 老代码再
+跑一遍 → 4 条 update 检测又看到 `registration.waiting`，再弹 toast。永动机。
+
+**对的写法**：
+```js
+els.updateReload.addEventListener("click", async () => {
+  const reg = _swRegistration || await navigator.serviceWorker?.getRegistration();
+  if (!reg || !reg.waiting) { location.reload(); return; }
+  let reloaded = false;
+  const doReload = () => { if (reloaded) return; reloaded = true; location.reload(); };
+  // 听 controllerchange 后再 reload；新 SW 当 controller 才能从新 cache 服务
+  navigator.serviceWorker.addEventListener("controllerchange", doReload, { once: true });
+  // 推 WAITING SW（不是 controller）让它 skipWaiting → activate
+  reg.waiting.postMessage({ type: "skip-waiting" });
+  // 5s 兜底（极端情况 iOS 不发 controllerchange）
+  setTimeout(doReload, 5000);
+});
+```
+
+**关键**：
+- postMessage 推 `reg.waiting`，不是 `navigator.serviceWorker.controller`
+- 听 `controllerchange` 等新 SW 接管，再 reload；否则 reload 时旧 SW 还在控位
+- 兜底 timeout 防 iOS 偶发不 fire `controllerchange`
+
+**iOS PWA 特有**：上面这套即使写对，已经卡在旧版本的用户（用错代码 push 的那批）
+**仍然卡住**，因为他们 PWA 里跑的还是旧 reload 逻辑。解套：Safari 浏览器刷一次
+（非 PWA），强制全网络 navigate；下次进 PWA 才能跟上。打补丁版本时一定要在 release
+note 提示用户做一次浏览器刷新。
+
 ## 5. 手动"检测更新"菜单项（必需）
 
 四条自动路径都挂上了还要这条人工出口，因为：
@@ -335,6 +387,7 @@ els.versionLabel.textContent = window.WEBPAINT_VERSION || "v?";
 ## 关键的 anti-pattern（别犯）
 
 - **❌ SW register 放在 `window.load` 里**（v58 修过）—— 用 dynamic import 加载入口模块时 load 经常已 fire 完，listener 永远不触发。模块顶层直接 register
+- **❌ "刷新"按钮 postMessage 给 `controller`**（v60 修过）—— controller 是旧 SW，自己已 active，skipWaiting 无意义。要推 `reg.waiting`，并听 `controllerchange` 再 reload。详见 §4.5
 - **❌ 只挂路径 3** —— iPad 上 90% 的情况下不会 fire，因为 SW 都没 check 更新
 - **❌ 没有手动"检测更新"出口** —— 自动路径都是异步 + 隐式。user 想主动确认时没地方点
 - **❌ 不显示版本号** —— user 点了刷新之后没有 visual confirmation，每次 update 都是盲信
