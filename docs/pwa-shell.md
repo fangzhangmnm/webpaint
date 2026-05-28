@@ -81,6 +81,41 @@ iPad Safari 装成 PWA 后默认对 SW update **极不主动** —— standalone
   开机时：registration.waiting (路径 1) ────→ showUpdate()
 ```
 
+## ⚠️ SW 必须在模块顶层 register，不能放进 `window.load`（v58 教训）
+
+**坑**：WebPaint v55 之前 SW register 是这么写的：
+
+```js
+window.addEventListener("load", async () => {
+  const registration = await navigator.serviceWorker.register("./service-worker.js");
+  ...
+});
+```
+
+**问题**：`app.js` 是被 `<script type="module">` 里的 dynamic `import()` 拉起来的（index.html 顶部那段加 `?v=VERSION` 的）。动态 import 是异步：网络 + 模块编译 + 依赖图解析。等到 `app.js` 真正执行的时候，`window.load` 可能已经 fire 过了 —— 这时再 addEventListener 挂的 listener **永远不会触发**。
+
+**症状**：iPad PWA 装到主屏 → 飞行模式打开 → 找不到 github pages（SW 根本没装，没有 cache 兜底）→ 用户报 "PWA 不可用"。检测更新菜单也会说 "SW 未注册"。
+
+**正确写法**（同 ScratchPad）：模块顶层直接 register，不绕 load 事件：
+
+```js
+if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
+  navigator.serviceWorker.register("./service-worker.js").then((registration) => {
+    _swRegistration = registration;
+    // 4 条 update 路径在 then() 里挂
+    ...
+  }).catch((err) => console.warn("SW register failed", err));
+}
+```
+
+**核对要点**：
+- 不要 await，让 promise 后台跑
+- 不要包在 `load` / `DOMContentLoaded` 里
+- catch 兜底但不 await
+- `navigator.serviceWorker` 检测 + dev host 黑名单仍然要做
+
+iPad PWA 第一次打开必须有网（首装时 SW 下载 + 把 PRECACHE 全 fetch 一遍）。之后才能离线。
+
 ## 本地开发
 
 ```bash

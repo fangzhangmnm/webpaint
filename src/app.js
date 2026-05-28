@@ -2358,22 +2358,20 @@ els.updateDismiss.addEventListener("click", () => {
   els.updateToast.classList.add("hidden");
 });
 
-let _swRegistration = null;       // 暴露给 menuCheckUpdate 用，避免 getRegistration() 返 undefined
+let _swRegistration = null;       // 暴露给 menuCheckUpdate 用
+// **v58 修**：之前 register 写在 `window.addEventListener("load", ...)` 里。
+// 但 app.js 是 dynamic `import()` 异步加载（见 index.html 顶部 module script），
+// 等模块跑完时 `load` event 经常已经 fire 过了 → addEventListener 挂的 listener
+// 永远不触发 → SW 从来没注册。iPad PWA 离线就崩，"检测更新"也说"未注册"。
+// 现在改成模块顶层直接 register（同 ScratchPad），不依赖 load event。
 if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
-  // 路径 3
+  // 路径 3：asset-updated 消息
   navigator.serviceWorker.addEventListener("message", (e) => {
     if (e.data?.type === "asset-updated") showUpdate();
   });
 
-  window.addEventListener("load", async () => {
-    let registration;
-    try {
-      registration = await navigator.serviceWorker.register("./service-worker.js");
-      _swRegistration = registration;
-    } catch (err) {
-      console.warn("SW register failed", err);
-      return;
-    }
+  navigator.serviceWorker.register("./service-worker.js").then((registration) => {
+    _swRegistration = registration;
     // 路径 1
     if (registration.waiting && navigator.serviceWorker.controller) {
       showUpdate();
@@ -2388,13 +2386,14 @@ if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
         }
       });
     });
-    // 路径 4：回到前台 / 拿到焦点时主动 poke 一下
+    // 路径 4：回前台 / 焦点 → poke
     const pokeUpdate = () => { registration.update().catch(() => {}); };
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") pokeUpdate();
     });
     window.addEventListener("focus", pokeUpdate);
-    // 再加一个低频的 timer 作为兜底（PWA 在前台 30 分钟内每 10 分钟 check 一次）
     setInterval(pokeUpdate, 10 * 60 * 1000);
+  }).catch((err) => {
+    console.warn("SW register failed", err);
   });
 }
