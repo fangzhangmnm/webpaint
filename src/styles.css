@@ -399,6 +399,52 @@ input[type=range] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.layer-mode-badge {
+  width: 28px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+}
+.layer-mode-badge:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.layer-mode-badge.active { color: var(--accent, #4c8bf5); border-color: var(--accent, #4c8bf5); }
+
+/* 折叠：每个 layer 行下方的 opacity / mode 编辑区，点 badge 才展开 */
+.layer-row-expand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  margin: 2px 4px 4px;
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.layer-row-expand.hidden { display: none; }
+.layer-slider-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 30px;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink);
+}
+.layer-slider-row > span:first-child { color: var(--ink-soft); }
+.layer-slider-row select {
+  font: inherit;
+  background: var(--bg-soft);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+.layer-slider-val { text-align: right; font-variant-numeric: tabular-nums; }
 .layers-foot {
   display: flex;
   gap: 4px;

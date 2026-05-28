@@ -21,7 +21,9 @@ export class Board {
     this.ctx = canvas.getContext("2d", { alpha: false });
     this.doc = doc;
     this.dpr = Math.max(1, window.devicePixelRatio || 1);
-    this.viewport = { tx: 0, ty: 0, scale: 1 };
+    // viewport: tx/ty = screen-px offset of doc top-left (in scale=1, rot=0 frame),
+    // scale = zoom, rot = radians (旋转锚点 = doc center). 见 _docToScreenAffine。
+    this.viewport = { tx: 0, ty: 0, scale: 1, rot: 0 };
     this.minScale = MIN_SCALE;
     this.maxScale = MAX_SCALE;
     this._raf = null;
@@ -81,13 +83,30 @@ export class Board {
   }
 
   // ---- 坐标 ----
-  screenToDoc(sx, sy) {
+  // 视口变换：
+  //   screen = R(rot, doc_center_screen) ∘ scale ∘ translate_by_(tx,ty)
+  // 其中 doc_center_screen = (tx + W*scale/2, ty + H*scale/2)（rot=0 时即 doc 中心
+  // 在屏幕上的位置）。rotation 围绕 doc center 转 = 用户直观的"原地旋转画布"。
+  _docCenterScreen() {
     const { tx, ty, scale } = this.viewport;
-    return { x: (sx - tx) / scale, y: (sy - ty) / scale };
+    return { cx: tx + this.doc.width * scale / 2, cy: ty + this.doc.height * scale / 2 };
+  }
+  screenToDoc(sx, sy) {
+    const { scale, rot } = this.viewport;
+    const { cx, cy } = this._docCenterScreen();
+    const dx = sx - cx, dy = sy - cy;
+    const c = Math.cos(-rot), s = Math.sin(-rot);
+    const rx = dx * c - dy * s;
+    const ry = dx * s + dy * c;
+    return { x: rx / scale + this.doc.width / 2, y: ry / scale + this.doc.height / 2 };
   }
   docToScreen(dx, dy) {
-    const { tx, ty, scale } = this.viewport;
-    return { x: dx * scale + tx, y: dy * scale + ty };
+    const { scale, rot } = this.viewport;
+    const { cx, cy } = this._docCenterScreen();
+    const x = (dx - this.doc.width / 2) * scale;
+    const y = (dy - this.doc.height / 2) * scale;
+    const c = Math.cos(rot), s = Math.sin(rot);
+    return { x: x * c - y * s + cx, y: x * s + y * c + cy };
   }
 
   // ---- 视口 ----（任何视口变都是全屏 dirty）
@@ -97,26 +116,42 @@ export class Board {
     this._dirtyFull = true;
     this.requestRender();
   }
+  // anchor 在 screen 坐标。zoom 时保 anchor 在 screen 上的 doc 点不变。
   zoomAt(anchorX, anchorY, factor) {
     const oldScale = this.viewport.scale;
     const newScale = clamp(oldScale * factor, this.minScale, this.maxScale);
     if (newScale === oldScale) return;
-    const k = newScale / oldScale;
-    this.viewport.tx = anchorX - (anchorX - this.viewport.tx) * k;
-    this.viewport.ty = anchorY - (anchorY - this.viewport.ty) * k;
+    // 先把 anchor 转 doc 坐标，再 zoom，再补 tx/ty 让 anchor 处 doc 点不动
+    const docPt = this.screenToDoc(anchorX, anchorY);
     this.viewport.scale = newScale;
-    this._dirtyFull = true;
-    this.requestRender();
-  }
-  setViewport(tx, ty, scale) {
-    this.viewport.tx = tx;
-    this.viewport.ty = ty;
-    this.viewport.scale = clamp(scale, this.minScale, this.maxScale);
+    const after = this.docToScreen(docPt.x, docPt.y);
+    this.viewport.tx += anchorX - after.x;
+    this.viewport.ty += anchorY - after.y;
     this._dirtyFull = true;
     this.requestRender();
   }
 
-  // 适配屏幕：让 doc 居中并铺满（留一点边）。
+  // rotateAt 围绕 screen anchor 旋转视口（delta 是 radian 增量）
+  rotateAt(anchorX, anchorY, deltaRot) {
+    const docPt = this.screenToDoc(anchorX, anchorY);
+    this.viewport.rot += deltaRot;
+    const after = this.docToScreen(docPt.x, docPt.y);
+    this.viewport.tx += anchorX - after.x;
+    this.viewport.ty += anchorY - after.y;
+    this._dirtyFull = true;
+    this.requestRender();
+  }
+
+  setViewport(tx, ty, scale, rot) {
+    this.viewport.tx = tx;
+    this.viewport.ty = ty;
+    this.viewport.scale = clamp(scale, this.minScale, this.maxScale);
+    if (typeof rot === "number") this.viewport.rot = rot;
+    this._dirtyFull = true;
+    this.requestRender();
+  }
+
+  // 适配屏幕：让 doc 居中并铺满（留一点边）。同时复位 rotation。
   fitToScreen(padding = 24) {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
@@ -127,7 +162,7 @@ export class Board {
     const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
     const tx = (w - this.doc.width * scale) / 2;
     const ty = (h - this.doc.height * scale) / 2;
-    this.setViewport(tx, ty, scale);
+    this.setViewport(tx, ty, scale, 0);   // 复位 rotation
   }
 
   // 公共 API：layer 像素被改了（图层结构变 / 切换 / putImageData 等）
@@ -152,46 +187,62 @@ export class Board {
     return this._eraseComposite;
   }
 
-  // 把 (layer, overlay) 在屏幕上 composite。layer 和 overlay 都带 doc 坐标
-  // 的 bbox（bboxX/Y/W/H），可以位于 doc 内任何位置 / 任意尺寸。
-  // paint = layer.canvas 画到屏幕 + overlay.canvas 在它之上画 × opacity
-  // erase = 临时画布做 (layer dst-out overlay×opacity)，再画上去
-  _drawLayerWithOverlay(ctx, layer, overlay, tx, ty, scale) {
+  // 把 (layer, overlay) 在 ctx 上 composite。ctx 已经被调用方 setTransform
+  // 到 **doc 坐标系**（doc (0,0) = ctx origin，doc (W,H) = (W,H) in ctx）。
+  // 所以这里 drawImage 的 dest 直接用 layer.bboxX/Y/W/H（doc 坐标）。
+  _drawLayerWithOverlay(ctx, layer, overlay) {
     if (!overlay || overlay.mode !== "erase") {
       ctx.drawImage(
         layer.canvas, 0, 0, layer.bboxW, layer.bboxH,
-        tx + layer.bboxX * scale, ty + layer.bboxY * scale,
-        layer.bboxW * scale, layer.bboxH * scale,
+        layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH,
       );
       if (overlay) {
         const prevA = ctx.globalAlpha;
         ctx.globalAlpha = ctx.globalAlpha * overlay.opacity;
         ctx.drawImage(
           overlay.canvas, 0, 0, overlay.bboxW, overlay.bboxH,
-          tx + overlay.bboxX * scale, ty + overlay.bboxY * scale,
-          overlay.bboxW * scale, overlay.bboxH * scale,
+          overlay.bboxX, overlay.bboxY, overlay.bboxW, overlay.bboxH,
         );
         ctx.globalAlpha = prevA;
       }
       return;
     }
-    // erase 通路：临时 canvas 用 layer 的 bbox 尺寸（buffer 可能更大，但 layer
-    // bbox 已被 stamp 路径 ensureBbox 扩到 ⊇ buffer，所以 layer.bbox ⊇ buffer.bbox 总成立）
+    // erase 通路
     const ec = this._getEraseComposite(layer.bboxW, layer.bboxH);
     const ectx = ec.getContext("2d");
     ectx.clearRect(0, 0, ec.width, ec.height);
     ectx.drawImage(layer.canvas, 0, 0);
     ectx.globalAlpha = overlay.opacity;
     ectx.globalCompositeOperation = "destination-out";
-    // overlay → layer-local（在 ec 这张图上的位置）
     ectx.drawImage(overlay.canvas, overlay.bboxX - layer.bboxX, overlay.bboxY - layer.bboxY);
     ectx.globalAlpha = 1;
     ectx.globalCompositeOperation = "source-over";
     ctx.drawImage(
       ec, 0, 0, ec.width, ec.height,
-      tx + layer.bboxX * scale, ty + layer.bboxY * scale,
-      ec.width * scale, ec.height * scale,
+      layer.bboxX, layer.bboxY, ec.width, ec.height,
     );
+  }
+
+  // 把 ctx 设到 "doc 坐标系"：doc (0,0) 映射到 ctx 当前 origin，含 dpr +
+  // viewport (tx,ty,scale,rot) 全部。setTransform 接 6 浮点 a,b,c,d,e,f：
+  //   screen.x = a*doc.x + c*doc.y + e
+  //   screen.y = b*doc.x + d*doc.y + f
+  // 我们的视口：先平移 -W/2 (-H/2) → 缩放 scale → 旋转 rot → 平移到屏幕上
+  // doc center。dpr 在所有之外（用 setTransform 顶层再乘）。
+  _applyDocTransform(ctx) {
+    const { scale, rot } = this.viewport;
+    const dpr = this.dpr;
+    const { cx, cy } = this._docCenterScreen();
+    const W = this.doc.width, H = this.doc.height;
+    const cosR = Math.cos(rot), sinR = Math.sin(rot);
+    // 复合矩阵 = T(cx,cy) · R(rot) · S(scale) · T(-W/2,-H/2)，再乘 dpr 给 device px
+    const a = scale * cosR;
+    const b = scale * sinR;
+    const c = -scale * sinR;
+    const d = scale * cosR;
+    const e = cx - a * (W / 2) - c * (H / 2);
+    const f = cy - b * (W / 2) - d * (H / 2);
+    ctx.setTransform(dpr * a, dpr * b, dpr * c, dpr * d, dpr * e, dpr * f);
   }
 
   // ---- 渲染 ----
@@ -244,16 +295,16 @@ export class Board {
     ctx.fillStyle = this._voidColor;
     ctx.fillRect(0, 0, W, H);
 
-    // 2) 切到 CSS px 坐标
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    const { tx, ty, scale } = this.viewport;
+    // 2) 切到 doc 坐标系（含 dpr / scale / rot / translate）
+    this._applyDocTransform(ctx);
+    const { scale } = this.viewport;
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
 
-    // doc 背景
+    // doc 背景 —— 直接画 (0,0,W,H) in doc coords
     ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
-    ctx.fillRect(tx, ty, this.doc.width * scale, this.doc.height * scale);
+    ctx.fillRect(0, 0, this.doc.width, this.doc.height);
 
     // 逐 layer
     const overlay = this._overlayProvider?.();
@@ -264,33 +315,32 @@ export class Board {
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.mode || "source-over";
       const lOverlay = overlay && overlay.layer === layer ? overlay : null;
-      this._drawLayerWithOverlay(ctx, layer, lOverlay, tx, ty, scale);
+      this._drawLayerWithOverlay(ctx, layer, lOverlay);
       ctx.globalAlpha = prevAlpha;
       ctx.globalCompositeOperation = prevComp;
     }
 
-    // doc 边框
+    // doc 边框（doc 坐标系下；lineWidth 在缩放 / 旋转下会变粗细，
+    // 需要 inverse-scale lineWidth）
     ctx.strokeStyle = "rgba(0,0,0,0.18)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(
-      Math.round(tx) + 0.5,
-      Math.round(ty) + 0.5,
-      Math.round(this.doc.width * scale),
-      Math.round(this.doc.height * scale),
-    );
+    ctx.lineWidth = 1 / scale;
+    ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
 
-    // cursor 预览
+    // cursor 预览（切回 screen 坐标）
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (this._showCursor && this._cursor) this._drawCursor();
   }
 
-  // 只重画 docRect = [x0,y0,x1,y1]（doc-px）覆盖的屏幕区域。
-  // GPU 端依然要采样 layer 的源 texel，但只在 dirty 屏幕像素上算 + blit。
-  // 笔触越细 / 视口越缩小，这边省得越多。
+  // 只重画 docRect 覆盖的区域。**rot != 0 时直接走 full**（旋转 dirty rect
+  // 在 screen 上是斜矩形，clip + 算屏幕 bbox 复杂度不值，stamp 路径少见旋转后画）
   _renderPartial(docRect) {
+    if (this.viewport.rot !== 0) {
+      this._renderFull();
+      return;
+    }
     const ctx = this.ctx;
     const { tx, ty, scale } = this.viewport;
 
-    // 多 pad 几个 doc-px 给 AA / 缩放 bleed
     const pad = Math.max(1, 2 / scale);
     const dx0 = docRect[0] - pad;
     const dy0 = docRect[1] - pad;
@@ -304,23 +354,24 @@ export class Board {
 
     const w = this.canvas.clientWidth || this.canvas.width / this.dpr;
     const h = this.canvas.clientHeight || this.canvas.height / this.dpr;
-    // 完全在视口外 → no-op
     if (sx + sw < 0 || sy + sh < 0 || sx > w || sy > h) return;
 
     ctx.save();
+    // Clip 用 screen 坐标
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
-
     ctx.beginPath();
     ctx.rect(sx, sy, sw, sh);
     ctx.clip();
-
-    // 重画：底色 → doc bg → 逐 layer。clip 把它们裁到 dirty 矩形里
+    // 重底色 (screen)
     ctx.fillStyle = this._voidColor;
     ctx.fillRect(sx, sy, sw, sh);
+
+    // 切到 doc 坐标系画 layer
+    this._applyDocTransform(ctx);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
     ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
-    ctx.fillRect(tx, ty, this.doc.width * scale, this.doc.height * scale);
+    ctx.fillRect(0, 0, this.doc.width, this.doc.height);
     const overlay = this._overlayProvider?.();
     for (const layer of this.doc.layers) {
       if (!layer.visible) continue;
@@ -329,14 +380,12 @@ export class Board {
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.mode || "source-over";
       const lOverlay = overlay && overlay.layer === layer ? overlay : null;
-      this._drawLayerWithOverlay(ctx, layer, lOverlay, tx, ty, scale);
+      this._drawLayerWithOverlay(ctx, layer, lOverlay);
       ctx.globalAlpha = prevAlpha;
       ctx.globalCompositeOperation = prevComp;
     }
 
     ctx.restore();
-    // 注意：partial render 不重画 doc 边框 / cursor，它们保留上一帧的像素就行。
-    // 任何视口 / 主题 / cursor 变化都会触发 _dirtyFull，下一帧会全画一次。
   }
 
   _drawCursor() {

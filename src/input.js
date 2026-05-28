@@ -621,6 +621,7 @@ export class InputController {
       dist: Math.hypot(dx, dy) || 1,
       midX: (a.x + b.x) / 2,
       midY: (a.y + b.y) / 2,
+      angle: Math.atan2(dy, dx),          // 起手两指连线角度
       vp: { ...this.board.viewport },
     };
     document.body.dataset.panning = "1";
@@ -633,14 +634,46 @@ export class InputController {
     const dist = Math.hypot(dx, dy) || 1;
     const midX = (a.x + b.x) / 2;
     const midY = (a.y + b.y) / 2;
+    const angle = Math.atan2(dy, dx);
     const g = this.gestureStart;
+    // scale 增量
     const k = dist / g.dist;
     let newScale = g.vp.scale * k;
     newScale = Math.max(this.board.minScale, Math.min(this.board.maxScale, newScale));
-    const actualK = newScale / g.vp.scale;
-    const newTx = midX - (g.midX - g.vp.tx) * actualK;
-    const newTy = midY - (g.midY - g.vp.ty) * actualK;
-    this.board.setViewport(newTx, newTy, newScale);
+    // rotation 增量（两指角度差）
+    let dRot = angle - g.angle;
+    // 归一化到 [-π, π]
+    if (dRot > Math.PI) dRot -= 2 * Math.PI;
+    if (dRot < -Math.PI) dRot += 2 * Math.PI;
+    const newRot = g.vp.rot + dRot;
+    // 围绕 g.midX, g.midY 旋转 + 缩放 + 平移到当前 midX, midY
+    // 用变换的 anchor-preserving 公式（参考 board.rotateAt / zoomAt）：
+    // 1. 起始：viewport = g.vp
+    // 2. 想要：手指开始时按住的 doc 点（screenToDoc(g.midX, g.midY) under g.vp）
+    //    在更新后视口下出现在 (midX, midY)
+    // 直接 setViewport：先求新 tx/ty
+    //   newTx, newTy 让 docPoint @ (g.midX, g.midY) 落到 (midX, midY)
+    // 推导：用临时 viewport (newScale, newRot, ?, ?)，求 ?, ?
+    // 见 board.screenToDoc 公式逆运算
+    const W = this.board.doc.width, H = this.board.doc.height;
+    // 起始时 g.midX, g.midY 对应的 doc 点
+    const startDocCenterX = g.vp.tx + W * g.vp.scale / 2;
+    const startDocCenterY = g.vp.ty + H * g.vp.scale / 2;
+    const sdx = g.midX - startDocCenterX, sdy = g.midY - startDocCenterY;
+    const sc = Math.cos(-g.vp.rot), ss = Math.sin(-g.vp.rot);
+    const dpX = (sdx * sc - sdy * ss) / g.vp.scale + W / 2;
+    const dpY = (sdx * ss + sdy * sc) / g.vp.scale + H / 2;
+    // 现在求 newTx, newTy 让 dpX, dpY 在新视口下落到 midX, midY
+    //   midX = (dpX - W/2) * newScale * cos(newRot) - (dpY - H/2) * newScale * sin(newRot) + cx
+    // 其中 cx = newTx + W * newScale / 2 → 解出 newTx
+    const c = Math.cos(newRot), s = Math.sin(newRot);
+    const rx = (dpX - W / 2) * newScale;
+    const ry = (dpY - H / 2) * newScale;
+    const newCx = midX - (rx * c - ry * s);
+    const newCy = midY - (rx * s + ry * c);
+    const newTx = newCx - W * newScale / 2;
+    const newTy = newCy - H * newScale / 2;
+    this.board.setViewport(newTx, newTy, newScale, newRot);
   }
   _endGesture() {
     this.gestureStart = null;

@@ -468,6 +468,21 @@ els.layersPanelHead.addEventListener("pointerup", (e) => {
 })();
 
 // 渲染图层列表（倒序：UI 上 = 最上面图层在面板顶部）
+// 图层模式 → 单字符 badge (Procreate 风格)
+const LAYER_MODE_INITIAL = {
+  "source-over": "N", "multiply": "M", "screen": "S", "overlay": "O",
+  "darken": "Da", "lighten": "Li", "color-dodge": "CD", "color-burn": "CB",
+  "hard-light": "HL", "soft-light": "SL", "difference": "Df", "exclusion": "Ex",
+};
+const LAYER_MODE_LABEL = {
+  "source-over": "正常", "multiply": "正片叠底", "screen": "滤色", "overlay": "叠加",
+  "darken": "变暗", "lighten": "变亮", "color-dodge": "颜色减淡", "color-burn": "颜色加深",
+  "hard-light": "强光", "soft-light": "柔光", "difference": "差值", "exclusion": "排除",
+};
+function modeInitial(m) { return LAYER_MODE_INITIAL[m] || "?"; }
+
+let _expandedLayerId = null;
+
 function renderLayersPanel() {
   els.layersList.innerHTML = "";
   const max = doc.maxLayers;
@@ -500,11 +515,66 @@ function renderLayersPanel() {
     name.textContent = L.name;
     row.appendChild(name);
 
+    // Mode / opacity badge：点开折叠区
+    const badge = document.createElement("button");
+    badge.type = "button";
+    badge.className = "layer-mode-badge" + (_expandedLayerId === L.id ? " active" : "");
+    badge.textContent = modeInitial(L.mode);
+    badge.title = `不透明度 ${Math.round(L.opacity * 100)}% · 模式 ${LAYER_MODE_LABEL[L.mode] || L.mode}`;
+    badge.addEventListener("click", (e) => {
+      e.stopPropagation();
+      _expandedLayerId = _expandedLayerId === L.id ? null : L.id;
+      renderLayersPanel();
+    });
+    row.appendChild(badge);
+
     row.addEventListener("click", () => {
       doc.setActiveById(L.id);
       renderLayersPanel();
     });
     els.layersList.appendChild(row);
+
+    // 折叠区（点 badge 才出现）
+    if (_expandedLayerId === L.id) {
+      const expand = document.createElement("div");
+      expand.className = "layer-row-expand";
+      // 不透明度 slider
+      const opaRow = document.createElement("label");
+      opaRow.className = "layer-slider-row";
+      opaRow.innerHTML = `<span>透</span><input type="range" min="0" max="100" value="${Math.round(L.opacity * 100)}"><span class="layer-slider-val">${Math.round(L.opacity * 100)}</span>`;
+      const opaInput = opaRow.querySelector("input");
+      const opaVal = opaRow.querySelector(".layer-slider-val");
+      opaInput.addEventListener("input", () => {
+        const v = parseFloat(opaInput.value) / 100;
+        L.opacity = v;
+        opaVal.textContent = String(Math.round(v * 100));
+        badge.title = `不透明度 ${Math.round(v * 100)}% · 模式 ${LAYER_MODE_LABEL[L.mode] || L.mode}`;
+        board.invalidateAll();
+        board.requestRender();
+      });
+      opaInput.addEventListener("click", (e) => e.stopPropagation());
+      expand.appendChild(opaRow);
+      // 模式 dropdown
+      const modeRow = document.createElement("label");
+      modeRow.className = "layer-slider-row";
+      let optsHtml = "";
+      for (const [val, lbl] of Object.entries(LAYER_MODE_LABEL)) {
+        optsHtml += `<option value="${val}"${L.mode === val ? " selected" : ""}>${lbl}</option>`;
+      }
+      modeRow.innerHTML = `<span>模式</span><select style="grid-column: span 2;">${optsHtml}</select>`;
+      const modeSelect = modeRow.querySelector("select");
+      modeSelect.addEventListener("change", () => {
+        L.mode = modeSelect.value;
+        badge.textContent = modeInitial(L.mode);
+        badge.title = `不透明度 ${Math.round(L.opacity * 100)}% · 模式 ${LAYER_MODE_LABEL[L.mode] || L.mode}`;
+        board.invalidateAll();
+        board.requestRender();
+      });
+      modeSelect.addEventListener("click", (e) => e.stopPropagation());
+      expand.appendChild(modeRow);
+      expand.addEventListener("click", (e) => e.stopPropagation());   // 点 expand 内部不切换 active
+      els.layersList.appendChild(expand);
+    }
   }
   // foot button enable/disable
   els.layerAddBtn.disabled = doc.layers.length >= max;
