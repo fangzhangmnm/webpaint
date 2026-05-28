@@ -1,5 +1,5 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
-import { drawMesh } from "./lasso.js";
+import { drawMesh, renderQuadPerPixel } from "./lasso.js";
 //
 // 坐标系：
 //   doc 坐标 = 像素左上原点，单位 = doc 像素（document px）
@@ -482,8 +482,20 @@ export class Board {
       const f = info.floating;
       const isWarp = f.mode === "warp";
       ctx.save();
-      // 1) 浮层像素（warp 模式走平滑 Catmull-Rom 升采样后线性三角）
-      drawMesh(ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: isWarp });
+      // 1) 浮层像素
+      //   - 2×2 mesh：per-pixel inverse homography（math-exact，~50ms / 帧 in drag）
+      //     缓存到 f._renderCache；mesh 变了 lasso.js 那边 invalidate
+      //   - 4×4 mesh (warp)：暂走 Catmull-Rom + 三角化。下个 PR 替成 forward splat
+      if (f.meshN === 2) {
+        if (!f._renderCache) {
+          f._renderCache = renderQuadPerPixel(f.imageData, f.srcW, f.srcH, f.mesh);
+        }
+        if (f._renderCache) {
+          ctx.drawImage(f._renderCache.canvas, f._renderCache.dstX, f._renderCache.dstY);
+        }
+      } else {
+        drawMesh(ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: isWarp });
+      }
       // 2) mesh 网格线 + 外框
       const N = f.meshN;
       // 外框（4 角连成的"包络"），所有模式都画一条主线

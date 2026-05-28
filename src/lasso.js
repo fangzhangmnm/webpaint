@@ -98,6 +98,9 @@ export class LassoEngine {
     fctx.globalCompositeOperation = "destination-in";
     fctx.drawImage(maskCanvas, 0, 0);
     fctx.globalCompositeOperation = "source-over";
+    // 拍一份 ImageData 给 per-pixel renderer 用（getImageData 是 CPU readback，
+    // 这里 lift 一次性付费，后续渲染只读这份）
+    const floatingImageData = fctx.getImageData(0, 0, w, h);
 
     // 挖空 layer
     const lctx = layer.ctx;
@@ -108,6 +111,7 @@ export class LassoEngine {
 
     this._floating = {
       canvas: floating,
+      imageData: floatingImageData,         // ← 给 per-pixel renderer
       srcW: w, srcH: h,
       layer, preSnap,
       mode: null,
@@ -117,6 +121,7 @@ export class LassoEngine {
         [{ x: x0,     y: y0 + h }, { x: x0 + w, y: y0 + h }],
       ],
       uniformAspect: w / Math.max(1, h),
+      _renderCache: null,                   // {canvas, dstX, dstY} | null；mesh 改时 setMesh 处 invalidate
     };
     this._state = "floating";
     this.onChange();
@@ -134,9 +139,11 @@ export class LassoEngine {
     if (mode === "warp" && f.meshN === 2) {
       f.mesh = upsampleMesh2to4(f.mesh);
       f.meshN = 4;
+      f._renderCache = null;
     } else if (mode !== "warp" && f.meshN === 4) {
       f.mesh = downsampleMesh4to2(f.mesh);
       f.meshN = 2;
+      f._renderCache = null;
     }
     f.mode = mode;
     this.onChange();
@@ -197,6 +204,7 @@ export class LassoEngine {
     } else if (d.kind === "warp-soft") {
       this._applyWarpSoft(d, dx, dy);
     }
+    if (f) f._renderCache = null;            // mesh 变了，作废 cached render
     this.onChange();
   }
   endDrag() { this._drag = null; }
@@ -216,12 +224,19 @@ export class LassoEngine {
     }
     layer.ensureBbox(Math.floor(minX), Math.floor(minY), Math.ceil(maxX), Math.ceil(maxY));
     const lbX = layer.bboxX, lbY = layer.bboxY;
-    // 直接画到 layer 的 ctx（doc 坐标 - layer.bbox 偏移）。
-    // warp 模式走平滑（quadratic Catmull-Rom 升采样后线性三角）
-    layer.ctx.save();
-    layer.ctx.translate(-lbX, -lbY);
-    drawMesh(layer.ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: f.mode === "warp" });
-    layer.ctx.restore();
+    // 2×2 mesh：per-pixel inverse homography（math-exact，无 PS1 artifact）
+    // 4×4 mesh：暂时还是 Catmull-Rom 升采样 + 三角化。下个 PR 改 Newton inverse
+    if (f.meshN === 2) {
+      const rendered = renderQuadPerPixel(f.imageData, f.srcW, f.srcH, f.mesh);
+      if (rendered) {
+        layer.ctx.drawImage(rendered.canvas, rendered.dstX - lbX, rendered.dstY - lbY);
+      }
+    } else {
+      layer.ctx.save();
+      layer.ctx.translate(-lbX, -lbY);
+      drawMesh(layer.ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: true });
+      layer.ctx.restore();
+    }
 
     const after = layer.snapshot();
     const entry = {
@@ -763,9 +778,110 @@ function catmullRomPoint(P0, P1, P2, P3, t) {
   };
 }
 
+// ============ Per-pixel inverse-homography render (free / uniform / distort) ============
+// 2×2 mesh 走真正的 per-pixel inverse mapping，不再用三角化近似。
+// 数学正确：每个 dst pixel 通过 inverse homography 算回 src 单位方格的 (u, v)，
+// 再 bilinear 采样源像素。零 PS1 artifact，零 C0 折角（quad 内是 1 个连续映射）。
+//
+// 返回 { canvas: <bitmap>, dstX, dstY } 表示渲染出的图 + 它在 doc 坐标的左上角。
+// caller 负责 drawImage 到合适的上下文。
+//
+// 性能：500×500 输出 ≈ 250K pixels × ~20 ops = 5M ops ≈ 50ms on iPad mini。preview 可接受。
+export function renderQuadPerPixel(srcImageData, srcW, srcH, mesh) {
+  const tl = mesh[0][0], tr = mesh[0][1], bl = mesh[1][0], br = mesh[1][1];
+  const minX = Math.floor(Math.min(tl.x, tr.x, bl.x, br.x));
+  const minY = Math.floor(Math.min(tl.y, tr.y, bl.y, br.y));
+  const maxX = Math.ceil(Math.max(tl.x, tr.x, bl.x, br.x));
+  const maxY = Math.ceil(Math.max(tl.y, tr.y, bl.y, br.y));
+  const dstW = maxX - minX, dstH = maxY - minY;
+  if (dstW <= 0 || dstH <= 0) return null;
+
+  // Forward H: unit square → quad（Heckbert）
+  const Hfwd = homographyFromUnitSquareToQuad(tl, tr, br, bl);
+  if (!Hfwd) return null;
+  const H9 = [Hfwd.a, Hfwd.b, Hfwd.c, Hfwd.d, Hfwd.e, Hfwd.f, Hfwd.g, Hfwd.h, 1];
+  // Inverse: quad → unit square
+  const Hinv = invertMat3(H9);
+  if (!Hinv) return null;
+
+  const out = new ImageData(dstW, dstH);
+  const odata = out.data;
+  const sdata = srcImageData.data;
+
+  for (let dy = 0; dy < dstH; dy++) {
+    for (let dx = 0; dx < dstW; dx++) {
+      const docX = minX + dx + 0.5;     // pixel center
+      const docY = minY + dy + 0.5;
+      const w = Hinv[6] * docX + Hinv[7] * docY + Hinv[8];
+      if (Math.abs(w) < 1e-9) continue;
+      const u = (Hinv[0] * docX + Hinv[1] * docY + Hinv[2]) / w;
+      const v = (Hinv[3] * docX + Hinv[4] * docY + Hinv[5]) / w;
+      if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+      const sx = u * srcW;
+      const sy = v * srcH;
+      bilinearSample(sdata, srcW, srcH, sx, sy, odata, (dy * dstW + dx) * 4);
+    }
+  }
+
+  const canvas = makeBitmap(dstW, dstH);
+  const c = canvas.getContext("2d");
+  c.putImageData(out, 0, 0);
+  return { canvas, dstX: minX, dstY: minY };
+}
+
+// bilinear sample（同 liquify.js 那份；private copy 避免跨模块依赖）
+function bilinearSample(sdat, w, h, sx, sy, ddat, dstIdx) {
+  const ix = Math.floor(sx);
+  const iy = Math.floor(sy);
+  const fx = sx - ix;
+  const fy = sy - iy;
+  const x0 = ix, x1 = ix + 1;
+  const y0 = iy, y1 = iy + 1;
+  const p00 = (x0 >= 0 && x0 < w && y0 >= 0 && y0 < h) ? (y0 * w + x0) * 4 : -1;
+  const p10 = (x1 >= 0 && x1 < w && y0 >= 0 && y0 < h) ? (y0 * w + x1) * 4 : -1;
+  const p01 = (x0 >= 0 && x0 < w && y1 >= 0 && y1 < h) ? (y1 * w + x0) * 4 : -1;
+  const p11 = (x1 >= 0 && x1 < w && y1 >= 0 && y1 < h) ? (y1 * w + x1) * 4 : -1;
+  const w00 = (1 - fx) * (1 - fy);
+  const w10 = fx * (1 - fy);
+  const w01 = (1 - fx) * fy;
+  const w11 = fx * fy;
+  for (let c = 0; c < 4; c++) {
+    let v = 0;
+    if (p00 >= 0) v += sdat[p00 + c] * w00;
+    if (p10 >= 0) v += sdat[p10 + c] * w10;
+    if (p01 >= 0) v += sdat[p01 + c] * w01;
+    if (p11 >= 0) v += sdat[p11 + c] * w11;
+    ddat[dstIdx + c] = v;
+  }
+}
+
+// 3×3 matrix invert (canonical form：output normalize so [8] = 1)
+function invertMat3(m) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  if (Math.abs(det) < 1e-9) return null;
+  const inv = [
+    (e * i - f * h) / det,
+    -(b * i - c * h) / det,
+    (b * f - c * e) / det,
+    -(d * i - f * g) / det,
+    (a * i - c * g) / det,
+    -(a * f - c * d) / det,
+    (d * h - e * g) / det,
+    -(a * h - b * g) / det,
+    (a * e - b * d) / det,
+  ];
+  if (Math.abs(inv[8]) > 1e-9) {
+    const k = 1 / inv[8];
+    for (let n = 0; n < 9; n++) inv[n] *= k;
+  }
+  return inv;
+}
+
 // 把源图的一个三角形（在 src 像素坐标里）映射到 dst 三角形（在当前 ctx 坐标里）
 // 通过 ctx.transform 设 affine（src → dst）+ ctx.clip 限范围 + ctx.drawImage 整张源。
 // 标准 Canvas2D texture-mapping 技巧；O(三角形像素面积) GPU 复合。
+// warp 模式（4×4 mesh）暂时仍走这个。下个 PR 走 Newton inverse + forward splat。
 function drawTextureTri(ctx, src,
                         sx0, sy0, sx1, sy1, sx2, sy2,
                         dx0, dy0, dx1, dy1, dx2, dy2) {
