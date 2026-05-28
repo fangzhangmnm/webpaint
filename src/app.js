@@ -104,6 +104,7 @@ const els = {
   referenceFitBtn: document.getElementById("referenceFitBtn"),
   referenceFileInput: document.getElementById("referenceFileInput"),
   galleryFull: document.getElementById("galleryFull"),
+  galleryCloseBtn: document.getElementById("galleryCloseBtn"),
   galleryGrid: document.getElementById("galleryGrid"),
   galleryEmpty: document.getElementById("galleryEmpty"),
   galleryAddBtn: document.getElementById("galleryAddBtn"),
@@ -221,7 +222,39 @@ board.setOverlayProvider(() => input.brush.getLiveOverlay());
 board.setLassoProvider(() => ({
   drawingPath: input.lasso.getDrawingPath(),
   floating:    input.lasso.getFloating(),
+  handles:     input.lasso.visibleHandles(),
 }));
+
+// 套索工具栏（4 模式 + 确定 / 取消）。lasso 改变状态 → 同步 toolbar
+const lassoToolbar = document.getElementById("lassoToolbar");
+const lassoModeBtns = [...document.querySelectorAll("[data-lasso-mode]")];
+function updateLassoToolbar() {
+  const has = input.lasso.hasFloating();
+  lassoToolbar.classList.toggle("hidden", !has);
+  if (!has) return;
+  const mode = input.lasso.getMode();
+  for (const b of lassoModeBtns) {
+    b.setAttribute("aria-pressed", b.dataset.lassoMode === mode ? "true" : "false");
+  }
+}
+for (const b of lassoModeBtns) {
+  b.addEventListener("click", () => {
+    input.lasso.setMode(b.dataset.lassoMode);
+    updateLassoToolbar();
+  });
+}
+document.getElementById("lassoCommitBtn").addEventListener("click", () => {
+  input.commitLassoIfFloating();
+  updateLassoToolbar();
+});
+document.getElementById("lassoCancelBtn").addEventListener("click", () => {
+  if (input.lasso.hasFloating()) {
+    input.lasso.cancel();
+    board.invalidateAll();
+    updateLassoToolbar();
+  }
+});
+window.addEventListener("wp:lassochange", updateLassoToolbar);
 
 // ---- 主题 ----
 function readCssColor(name) {
@@ -1787,6 +1820,7 @@ async function setGalleryOpen(open) {
 }
 
 // 加号 popup
+els.galleryCloseBtn.addEventListener("click", () => setGalleryOpen(false));
 els.galleryAddBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   const hidden = els.galleryAddPopup.classList.contains("hidden");

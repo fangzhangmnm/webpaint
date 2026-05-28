@@ -57,7 +57,10 @@ export class InputController {
     this.brush = new BrushEngine();
     this.liquify = new LiquifyEngine();
     this.lasso = new LassoEngine();
-    this.lasso.onChange = () => this.board.requestRender();
+    this.lasso.onChange = () => {
+      this.board.requestRender();
+      window.dispatchEvent(new CustomEvent("wp:lassochange"));
+    };
     this.getTool = opts.getTool || (() => "brush");
     this.getBrushSettings = opts.getBrushSettings || (() => null);   // 必须传
     this.getLiquifySettings = opts.getLiquifySettings || (() => ({ mode: "push", size: 50, strength: 0.5 }));
@@ -441,7 +444,7 @@ export class InputController {
         }
       } else if (rec._lassoMode === "drawing") {
         this.lasso.extendPath(dx, dy);
-      } else if (rec._lassoMode === "dragging") {
+      } else if (rec._lassoMode === "transform") {
         this.lasso.extendDrag(dx, dy);
         const bb = this.lasso.getFloatingScreenBbox();
         if (bb) this.board.markDocDirty(bb[0], bb[1], bb[2], bb[3]);
@@ -641,18 +644,17 @@ export class InputController {
   _beginLasso(rec) {
     if (!this.doc.activeLayer) { rec.role = null; return; }
     const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
-    if (this.lasso.state() === "floating" && this.lasso.hitFloating(dx, dy)) {
-      // 命中 floating 内部 → 拖
-      rec._lassoMode = "dragging";
-      this.lasso.beginDrag(dx, dy);
-      return;
-    }
     if (this.lasso.state() === "floating") {
-      // 在 floating 外按下：先把当前 commit 收尾。下一步是 tap 还是 drag，看 _move 决定
+      // 先 hit-test gizmo handle / 内部 → 进入 transform 模式
+      const hit = this.lasso.hitTest(dx, dy, this.board.viewport.scale);
+      if (hit) {
+        rec._lassoMode = "transform";
+        this.lasso.beginDrag(hit, dx, dy);
+        return;
+      }
+      // 没击中 → commit 当前；下一步 tap 还是 drag 看 _move 决定
       this._commitLasso();
     }
-    // tentative：still 不开 path。要等 _move 跨过阈值才升级成 drawing。
-    // 这样单纯轻点（floating 外 / 空层）= 纯 commit / 无操作，不会触发"选区太小"误报
     rec._lassoMode = "tentative";
     rec._lassoStartDocX = dx;
     rec._lassoStartDocY = dy;
@@ -665,7 +667,7 @@ export class InputController {
       } else {
         this.status("选区太小，已取消");
       }
-    } else if (rec._lassoMode === "dragging") {
+    } else if (rec._lassoMode === "transform") {
       this.lasso.endDrag();
     }
     // tentative 不报任何状态——用户根本没想画

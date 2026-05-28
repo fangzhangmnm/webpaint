@@ -89,7 +89,8 @@ Top bar 一颗按钮，根据状态切图标 + 标题：
 ```
 
 **设计决定**：
-- **无返回键**。图库不是"二级页面 peek 进去就要返回"，而是 session picker。退路 = 点 active tile 关 / 选别的 tile / 新建。这条违反直觉，但用顺了就发现 picker 模型其实更对
+- ~~**无返回键**。图库不是"二级页面 peek 进去就要返回"，而是 session picker。退路 = 点 active tile 关 / 选别的 tile / 新建。~~
+  **2026-05-28 改回有返回键**：picker-only 模型对老用户 OK，但新用户 / iPad 多任务切换回来时找不到出路。左上角加一颗 ← icon，单图标低视觉负担即可
 - **没有"正在编辑：xxx"指示**。current tile 自带高亮足够；多一个标题栏 input 占地方又触发 phantom path 风险
 - **进图库 / 退图库都自动 saveNow**。用户离开编辑场景 = 该落盘
 - **图库模式 disable 主画布 UI**（body[data-mode="gallery"] CSS hide）。canvas display:none 后没法误画到下面

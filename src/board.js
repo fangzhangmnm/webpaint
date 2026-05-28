@@ -1,4 +1,5 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
+import { drawMesh } from "./lasso.js";
 //
 // 坐标系：
 //   doc 坐标 = 像素左上原点，单位 = doc 像素（document px）
@@ -454,8 +455,10 @@ export class Board {
     ctx.stroke();
   }
 
-  // 套索 overlay：drawing 期间显示当前 polygon；floating 时显示浮层 + dashed 边框。
-  // 全在 doc 坐标系下画（caller 已 _applyDocTransform）。
+  // 套索 overlay：
+  //   drawing 期间：画 polyline overlay
+  //   floating：用 mesh 三角剖分画浮层；画 mesh 边框 + 内部线 + handles
+  // 边框 / mesh 线在 doc 坐标系（随缩放）；handles 在 screen 坐标（恒定像素大小）
   _drawLassoOverlay(ctx, scale) {
     if (!this._lassoProvider) return;
     const info = this._lassoProvider();
@@ -470,9 +473,7 @@ export class Board {
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
       ctx.stroke();
-      // 副线提升可见性
       ctx.strokeStyle = "rgba(255,255,255,0.8)";
-      ctx.setLineDash([6 / scale, 4 / scale]);
       ctx.lineDashOffset = 5 / scale;
       ctx.stroke();
       ctx.restore();
@@ -480,17 +481,46 @@ export class Board {
     if (info.floating) {
       const f = info.floating;
       ctx.save();
-      // 画浮层像素
-      ctx.drawImage(f.canvas, f.bboxX + f.offsetX, f.bboxY + f.offsetY);
-      // 画虚线边框
+      // 1) 浮层像素（mesh 三角片）
+      drawMesh(ctx, f.canvas, f.srcW, f.srcH, f.mesh);
+      // 2) mesh 网格线（doc 坐标，虚线）
+      const N = f.meshN;
       ctx.lineWidth = Math.max(1, 1.5 / scale);
-      ctx.strokeStyle = "rgba(0,0,0,0.85)";
       ctx.setLineDash([6 / scale, 4 / scale]);
-      ctx.strokeRect(f.bboxX + f.offsetX, f.bboxY + f.offsetY, f.bboxW, f.bboxH);
+      ctx.beginPath();
+      // 横线
+      for (let i = 0; i < N; i++) {
+        ctx.moveTo(f.mesh[i][0].x, f.mesh[i][0].y);
+        for (let j = 1; j < N; j++) ctx.lineTo(f.mesh[i][j].x, f.mesh[i][j].y);
+      }
+      // 竖线
+      for (let j = 0; j < N; j++) {
+        ctx.moveTo(f.mesh[0][j].x, f.mesh[0][j].y);
+        for (let i = 1; i < N; i++) ctx.lineTo(f.mesh[i][j].x, f.mesh[i][j].y);
+      }
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.stroke();
       ctx.strokeStyle = "rgba(255,255,255,0.8)";
       ctx.lineDashOffset = 5 / scale;
-      ctx.strokeRect(f.bboxX + f.offsetX, f.bboxY + f.offsetY, f.bboxW, f.bboxH);
+      ctx.stroke();
       ctx.restore();
+      // 3) handles 切到屏幕坐标画（恒定像素大小，无视 doc 缩放）
+      if (info.handles && info.handles.length) {
+        ctx.save();
+        ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        for (const h of info.handles) {
+          const s = this.docToScreen(h.pos.x, h.pos.y);
+          const r = h.kind === "warp-point" ? 5 : 7;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+          ctx.fillStyle = "#fff";
+          ctx.fill();
+          ctx.strokeStyle = "rgba(0,0,0,0.85)";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
     }
   }
 

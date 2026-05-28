@@ -90,6 +90,46 @@ body[data-tool="eraser"] .board { cursor: cell; }
 body[data-tool="picker"] .board { cursor: copy; }
 body[data-tool="lasso"] .board { cursor: crosshair; }
 
+/* 套索浮层工具栏 —— 浮在顶栏下方居中，floating 选区存在时显示 */
+.lasso-toolbar {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  z-index: 25;     /* > .menu-panel (20)；< .gallery-full (50) */
+}
+.lasso-toolbar.hidden { display: none; }
+.lasso-tool-btn {
+  background: transparent;
+  border: none;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.lasso-tool-btn:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.lasso-tool-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent, #4c8bf5) 14%, transparent);
+  color: var(--accent, #4c8bf5);
+  font-weight: 600;
+}
+.lasso-tool-sep { color: var(--ink-soft); margin: 0 4px; opacity: 0.4; }
+.lasso-tool-confirm { color: var(--accent, #4c8bf5); font-weight: 600; }
+.lasso-tool-cancel { color: var(--ink-soft); }
+
 /* 顶栏：浮动毛玻璃胶囊 */
 .top-bar {
   position: fixed;
