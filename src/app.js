@@ -222,12 +222,28 @@ const input = new InputController(board, doc, {
 // 预览（实际像素在 endStroke 才烧进 layer）。
 board.setOverlayProvider(() => input.brush.getLiveOverlay());
 board.setLassoProvider(() => ({
-  selection:   doc.selection,
-  drawingPath: input.lasso.getDrawingPath(),
-  drawingRect: input.lasso.getDrawingRect(),
-  floating:    input.lasso.getFloating(),
-  handles:     input.lasso.visibleHandles(),
+  selection:      doc.selection,
+  drawingPath:    input.lasso.getDrawingPath(),
+  drawingRect:    input.lasso.getDrawingRect(),
+  drawingEllipse: input.lasso.getDrawingEllipse(),
+  floating:       input.lasso.getFloating(),
+  handles:        input.lasso.visibleHandles(),
 }));
+
+// Marching ants 动画：选区存在时低频 invalidate board，让 dash offset 推进。
+// 80ms = ~12fps，肉眼有蚂蚁感，CPU < 1%
+let _antsTimer = null;
+function updateMarchingAntsTimer() {
+  const should = !!doc.selection && !input.lasso.hasFloating();
+  if (should && !_antsTimer) {
+    _antsTimer = setInterval(() => board.requestRender(), 80);
+  } else if (!should && _antsTimer) {
+    clearInterval(_antsTimer);
+    _antsTimer = null;
+  }
+}
+window.addEventListener("wp:lassochange", updateMarchingAntsTimer);
+window.addEventListener("wp:histchange", updateMarchingAntsTimer);
 
 // 套索工具栏（v65 重做）。三个 section 按状态切换：
 //   - subToolBar：lasso 工具激活时显（不论有没有选区），含 sub-tool picker / set-op / threshold
@@ -243,6 +259,8 @@ const lassoTransformModeBtns = [...lassoTransformCtrl.querySelectorAll("[data-la
 const lassoThresholdRow = document.getElementById("lassoThresholdRow");
 const lassoThresholdInput = document.getElementById("lassoThreshold");
 const lassoThresholdVal = document.getElementById("lassoThresholdVal");
+const lassoConstrainBtn = document.getElementById("lassoConstrainBtn");
+const lassoConstrainSep = document.querySelector(".lasso-constrain-sep");
 
 function updateLassoToolbar() {
   const floating = input.lasso.hasFloating();
@@ -263,6 +281,13 @@ function updateLassoToolbar() {
     b.setAttribute("aria-pressed", b.dataset.lassoSub === sub ? "true" : "false");
   }
   lassoThresholdRow.classList.toggle("hidden", sub !== "magic");
+  // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
+  const showConstrain = sub === "rect" || sub === "ellipse";
+  lassoConstrainBtn.classList.toggle("hidden", !showConstrain);
+  lassoConstrainSep.classList.toggle("hidden", !showConstrain);
+  if (showConstrain) {
+    lassoConstrainBtn.setAttribute("aria-pressed", input.lasso.getConstrainSquare() ? "true" : "false");
+  }
   const setOp = input.lasso.getSetOpMode();
   for (const b of lassoSetOpBtns) {
     b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
@@ -294,6 +319,11 @@ lassoThresholdInput.addEventListener("input", () => {
   const v = parseInt(lassoThresholdInput.value, 10) || 0;
   input.lasso.setMagicThreshold(v);
   lassoThresholdVal.textContent = String(v);
+});
+// 1:1 约束 toggle（rect / ellipse 用）
+lassoConstrainBtn.addEventListener("click", () => {
+  input.lasso.setConstrainSquare(!input.lasso.getConstrainSquare());
+  updateLassoToolbar();
 });
 
 // 选区动作

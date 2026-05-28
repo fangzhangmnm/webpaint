@@ -29,12 +29,13 @@
 
 export class LassoEngine {
   constructor() {
-    this._state = "idle";         // idle | drawing-freehand | drawing-rect | floating
-    this._subTool = "freehand";   // freehand | rect | magic
+    this._state = "idle";         // idle | drawing-freehand | drawing-rect | drawing-ellipse | floating
+    this._subTool = "freehand";   // freehand | rect | ellipse | magic
     this._setOpMode = "new";      // new | union | subtract | intersect
+    this._constrainSquare = false; // rect / ellipse 是否强制 1:1（正方形 / 圆）
     this._magicThreshold = 20;    // 0..100；魔术棒颜色相似度
     this._points = [];            // freehand draft
-    this._rect = null;            // {x0, y0, x1, y1} during rect draw
+    this._rect = null;            // {x0, y0, x1, y1} during rect / ellipse draw
     this._magicStart = null;      // for magic-tap path
     this._floating = null;
     this._drag = null;
@@ -54,6 +55,8 @@ export class LassoEngine {
   getSetOpMode() { return this._setOpMode; }
   setMagicThreshold(v) { this._magicThreshold = Math.max(0, Math.min(100, v)); }
   getMagicThreshold() { return this._magicThreshold; }
+  setConstrainSquare(on) { this._constrainSquare = !!on; this.onChange(); }
+  getConstrainSquare() { return this._constrainSquare; }
 
   // -------- 选区路径（按 subTool 路由）--------
   beginPath(x, y) {
@@ -63,6 +66,9 @@ export class LassoEngine {
       this._points = [{ x, y }];
     } else if (this._subTool === "rect") {
       this._state = "drawing-rect";
+      this._rect = { x0: x, y0: y, x1: x, y1: y };
+    } else if (this._subTool === "ellipse") {
+      this._state = "drawing-ellipse";
       this._rect = { x0: x, y0: y, x1: x, y1: y };
     } else if (this._subTool === "magic") {
       // 单击：不进 drawing 状态；input.js 的 _endLasso 看 magicStart 做 flood fill
@@ -77,9 +83,17 @@ export class LassoEngine {
       if (p && Math.abs(p.x - x) < 1 && Math.abs(p.y - y) < 1) return;
       this._points.push({ x, y });
       this.onChange();
-    } else if (this._state === "drawing-rect") {
-      this._rect.x1 = x;
-      this._rect.y1 = y;
+    } else if (this._state === "drawing-rect" || this._state === "drawing-ellipse") {
+      let nx = x, ny = y;
+      // 正方 / 圆 约束：让 (x1-x0) 和 (y1-y0) 绝对值相等（取较大者）
+      if (this._constrainSquare) {
+        const dx = x - this._rect.x0, dy = y - this._rect.y0;
+        const m = Math.max(Math.abs(dx), Math.abs(dy));
+        nx = this._rect.x0 + (dx >= 0 ? m : -m);
+        ny = this._rect.y0 + (dy >= 0 ? m : -m);
+      }
+      this._rect.x1 = nx;
+      this._rect.y1 = ny;
       this.onChange();
     }
   }
@@ -92,6 +106,9 @@ export class LassoEngine {
       this._points = [];
     } else if (this._state === "drawing-rect") {
       newSel = this._rasterizeRectToSelection(this._rect);
+      this._rect = null;
+    } else if (this._state === "drawing-ellipse") {
+      newSel = this._rasterizeEllipseToSelection(this._rect);
       this._rect = null;
     } else if (this._state === "magic-tentative") {
       newSel = this._magicWandToSelection(this._magicStart, activeLayer);
@@ -106,6 +123,8 @@ export class LassoEngine {
     if (!this.doc) return null;
     const oldSel = this.doc.selection;
     if (oldSel === sel) return null;
+    // 新 selection 还没缓存 outline；history undo / redo 拿回旧 sel 时 outline 还在那
+    if (sel && !sel._outline) sel._outline = null;
     this.doc.selection = sel;
     this.onChange();
     return { type: "selectionChange", before: oldSel, after: sel };
@@ -210,6 +229,22 @@ export class LassoEngine {
     const mctx = maskCanvas.getContext("2d");
     mctx.fillStyle = "#fff";
     mctx.fillRect(0, 0, w, h);
+    return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas };
+  }
+  _rasterizeEllipseToSelection(r) {
+    if (!r) return null;
+    const x0 = Math.floor(Math.min(r.x0, r.x1));
+    const y0 = Math.floor(Math.min(r.y0, r.y1));
+    const x1 = Math.ceil(Math.max(r.x0, r.x1));
+    const y1 = Math.ceil(Math.max(r.y0, r.y1));
+    const w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return null;
+    const maskCanvas = makeBitmap(w, h);
+    const mctx = maskCanvas.getContext("2d");
+    mctx.fillStyle = "#fff";
+    mctx.beginPath();
+    mctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    mctx.fill();
     return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas };
   }
   // 魔术棒：从点击像素开始 flood fill，颜色差 ≤ threshold 的相邻像素都被选中
@@ -422,6 +457,7 @@ export class LassoEngine {
   hasFloating() { return this._state === "floating"; }
   getDrawingPath() { return this._state === "drawing-freehand" ? this._points : null; }
   getDrawingRect() { return this._state === "drawing-rect" ? this._rect : null; }
+  getDrawingEllipse() { return this._state === "drawing-ellipse" ? this._rect : null; }
   getFloating() { return this._floating; }
   state() { return this._state; }
 
@@ -770,6 +806,52 @@ function combineSelections(oldSel, newSel, mode) {
   ctx.globalCompositeOperation = "source-over";
   // TODO（P2 完善）：trim bbox 到 mask 实际范围。暂用合成 bbox（可能略大）
   return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas: canvas };
+}
+
+// Marching squares：从 selection 的 maskCanvas 抽出轮廓 polyline 段。
+// 输入：selection = { bboxX, bboxY, bboxW, bboxH, maskCanvas }
+// 输出：Float32Array 平铺 [x0, y0, x1, y1, ...]（每 4 个数一条线段，doc 坐标）
+// 复杂度：O(bboxW × bboxH)。500×500 ≈ 250K cells ≈ 10ms（一次性，cache 到 sel）
+export function extractMaskOutline(sel) {
+  const w = sel.bboxW, h = sel.bboxH;
+  if (w <= 1 || h <= 1) return new Float32Array(0);
+  const ctx = sel.maskCanvas.getContext("2d");
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const segs = [];
+  // 每个 (x, y) cell 用 4 邻角组 4-bit index：TL=bit0 TR=bit1 BR=bit2 BL=bit3
+  // 边中点：T=(x+0.5, y), R=(x+1, y+0.5), B=(x+0.5, y+1), L=(x, y+0.5)
+  for (let y = 0; y < h - 1; y++) {
+    for (let x = 0; x < w - 1; x++) {
+      const a00 = data[(y       * w + x      ) * 4 + 3] > 128 ? 1 : 0;
+      const a10 = data[(y       * w + (x + 1)) * 4 + 3] > 128 ? 1 : 0;
+      const a01 = data[((y + 1) * w + x      ) * 4 + 3] > 128 ? 1 : 0;
+      const a11 = data[((y + 1) * w + (x + 1)) * 4 + 3] > 128 ? 1 : 0;
+      const idx = a00 | (a10 << 1) | (a11 << 2) | (a01 << 3);
+      if (idx === 0 || idx === 15) continue;
+      const xL = sel.bboxX + x,       xR = sel.bboxX + x + 1, xM = sel.bboxX + x + 0.5;
+      const yT = sel.bboxY + y,       yB = sel.bboxY + y + 1, yM = sel.bboxY + y + 0.5;
+      // 4-bit lookup → 0/1/2 段（saddle case 5/10 拆两段）
+      switch (idx) {
+        case 1:  segs.push(xM, yT,  xL, yM); break;
+        case 2:  segs.push(xM, yT,  xR, yM); break;
+        case 3:  segs.push(xL, yM,  xR, yM); break;
+        case 4:  segs.push(xR, yM,  xM, yB); break;
+        case 5:  segs.push(xM, yT,  xR, yM);
+                 segs.push(xM, yB,  xL, yM); break;
+        case 6:  segs.push(xM, yT,  xM, yB); break;
+        case 7:  segs.push(xM, yB,  xL, yM); break;
+        case 8:  segs.push(xL, yM,  xM, yB); break;
+        case 9:  segs.push(xM, yT,  xM, yB); break;
+        case 10: segs.push(xM, yT,  xL, yM);
+                 segs.push(xR, yM,  xM, yB); break;
+        case 11: segs.push(xR, yM,  xM, yB); break;
+        case 12: segs.push(xL, yM,  xR, yM); break;
+        case 13: segs.push(xM, yT,  xR, yM); break;
+        case 14: segs.push(xM, yT,  xL, yM); break;
+      }
+    }
+  }
+  return new Float32Array(segs);
 }
 
 // 反选：在 docW×docH 上 全白 - 选区 mask

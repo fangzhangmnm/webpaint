@@ -1,5 +1,5 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
-import { drawMesh, renderQuadPerPixel } from "./lasso.js";
+import { drawMesh, renderQuadPerPixel, extractMaskOutline } from "./lasso.js";
 //
 // 坐标系：
 //   doc 坐标 = 像素左上原点，单位 = doc 像素（document px）
@@ -463,28 +463,30 @@ export class Board {
     if (!this._lassoProvider) return;
     const info = this._lassoProvider();
     if (!info) return;
-    // (a) 选区 marching ants（doc.selection 存在 + 没在变换中）。floating 时这块被
-    // floating overlay 覆盖，避免重复画
+    // (a) 选区 marching ants：用 marching squares 抽 mask 轮廓 polyline，沿真正的边
+    // 画虚线。outline cache 到 sel._outline，mask 变了下面 lasso.setSelection 清缓存
     if (info.selection && !info.floating) {
       const s = info.selection;
+      if (!s._outline) s._outline = extractMaskOutline(s);
+      const segs = s._outline;
       ctx.save();
-      ctx.lineWidth = Math.max(1, 1.5 / scale);
-      ctx.setLineDash([6 / scale, 4 / scale]);
-      // 用 mask 的 alpha 描边：把 mask 当 path stroke 是不可能的（mask 是 raster）。
-      // 简化：用 mask bbox 框 + 内部 mask drawImage 半透明。要真 marching ants 沿 mask
-      // 轮廓需要 marching squares，复杂。当前用半透明蒙片 + 虚线 bbox 已经能用
-      ctx.strokeStyle = "rgba(0,0,0,0.85)";
-      ctx.strokeRect(s.bboxX, s.bboxY, s.bboxW, s.bboxH);
-      ctx.strokeStyle = "rgba(255,255,255,0.8)";
-      ctx.lineDashOffset = 5 / scale;
-      ctx.strokeRect(s.bboxX, s.bboxY, s.bboxW, s.bboxH);
-      // 选区内 tint（轻；让用户清楚 mask 形状不是简单矩形）
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = "#4c8bf5";
-      // 用 mask alpha 做 dst-in：先 fillRect → 然后 source-in mask
-      // 简化：直接 drawImage(mask) 当 tint —— mask alpha 已经是形状
-      ctx.drawImage(s.maskCanvas, s.bboxX, s.bboxY);
+      ctx.lineWidth = Math.max(1, 1.2 / scale);
+      // 动画 dash offset：基于 wall clock，给"行进"感（marching ants）
+      const dash = 6 / scale, gap = 4 / scale;
+      const off = ((Date.now() / 80) % (dash + gap));
+      ctx.setLineDash([dash, gap]);
+      ctx.lineCap = "butt";
+      ctx.beginPath();
+      for (let i = 0; i < segs.length; i += 4) {
+        ctx.moveTo(segs[i],     segs[i + 1]);
+        ctx.lineTo(segs[i + 2], segs[i + 3]);
+      }
+      ctx.lineDashOffset = -off;
+      ctx.strokeStyle = "rgba(0,0,0,0.9)";
+      ctx.stroke();
+      ctx.lineDashOffset = -off + (dash + gap) / 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.stroke();
       ctx.restore();
     }
     // (b) 正在画的 path
@@ -503,19 +505,28 @@ export class Board {
       ctx.stroke();
       ctx.restore();
     }
-    // (c) 正在拖的矩形（rect 子工具）
-    if (info.drawingRect) {
-      const r = info.drawingRect;
+    // (c) 正在拖的矩形 / 椭圆
+    const drawShape = info.drawingRect || info.drawingEllipse;
+    if (drawShape) {
+      const r = drawShape;
       ctx.save();
       ctx.lineWidth = Math.max(1, 1.5 / scale);
       ctx.setLineDash([6 / scale, 4 / scale]);
-      ctx.strokeStyle = "rgba(0,0,0,0.85)";
       const x = Math.min(r.x0, r.x1), y = Math.min(r.y0, r.y1);
       const w = Math.abs(r.x1 - r.x0), h = Math.abs(r.y1 - r.y0);
-      ctx.strokeRect(x, y, w, h);
-      ctx.strokeStyle = "rgba(255,255,255,0.8)";
-      ctx.lineDashOffset = 5 / scale;
-      ctx.strokeRect(x, y, w, h);
+      const isEllipse = !!info.drawingEllipse;
+      const stroke2x = () => {
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.lineDashOffset = 0;
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(255,255,255,0.8)";
+        ctx.lineDashOffset = 5 / scale;
+        ctx.stroke();
+      };
+      ctx.beginPath();
+      if (isEllipse) ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+      else ctx.rect(x, y, w, h);
+      stroke2x();
       ctx.restore();
     }
     if (info.floating) {

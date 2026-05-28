@@ -260,13 +260,15 @@
       <div class="lasso-section hidden" id="lassoSubToolBar">
         <button class="lasso-tool-btn" data-lasso-sub="freehand" type="button">自由</button>
         <button class="lasso-tool-btn" data-lasso-sub="rect" type="button">矩形</button>
+        <button class="lasso-tool-btn" data-lasso-sub="ellipse" type="button">椭圆</button>
         <button class="lasso-tool-btn" data-lasso-sub="magic" type="button">魔术棒</button>
         <span class="lasso-tool-sep" aria-hidden="true">|</span>
-        <!-- set-op modifier (P2)；当前 P1 仅"新建"生效 -->
         <button class="lasso-tool-btn" data-lasso-setop="new" type="button" title="新建">＋新</button>
         <button class="lasso-tool-btn" data-lasso-setop="union" type="button" title="并集">∪</button>
         <button class="lasso-tool-btn" data-lasso-setop="subtract" type="button" title="差集">−</button>
         <button class="lasso-tool-btn" data-lasso-setop="intersect" type="button" title="交集">∩</button>
+        <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
+        <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" title="约束 1:1（正方 / 圆）">1:1</button>
         <!-- 魔术棒阈值（magic sub-tool only） -->
         <label class="lasso-tool-threshold hidden" id="lassoThresholdRow">
           <span>阈值</span>
