@@ -337,13 +337,15 @@ input[type=range] {
 .reference-action-btn {
   background: transparent;
   border: none;
-  font-size: 14px;
   color: var(--ink-soft);
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 4px;
   border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
+.reference-action-btn svg { width: 18px; height: 18px; display: block; }
 .reference-action-btn:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
+.reference-action-btn[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #4c8bf5) 18%, transparent); color: var(--accent, #4c8bf5); }
 .reference-body {
   position: relative;
   flex: 1;
@@ -472,7 +474,9 @@ input[type=range] {
 }
 .layer-tools-btn:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
 
-.layer-tools-popup { padding: 4px; min-width: 160px; }
+/* per-row "⋯" 工具菜单：item 内容少，让宽度自适应内容；min 用 auto 取消 .menu-panel 的 200px */
+.layer-tools-popup { padding: 4px; min-width: auto; }
+.layer-tools-popup .menu-item { padding: 8px 12px; }
 
 /* 通用 in-app sheet input */
 .generic-sheet-input {
@@ -552,14 +556,15 @@ input[type=range] {
 }
 .layers-foot-btn {
   flex: 1;
-  padding: 8px;
+  padding: 6px;
   background: transparent;
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--ink);
   cursor: pointer;
-  font-size: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
+.layers-foot-btn svg { width: 18px; height: 18px; display: block; }
 .layers-foot-btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
 .layers-foot-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
@@ -589,9 +594,9 @@ input[type=range] {
   border-radius: 8px;
   color: var(--ink); cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 20px; line-height: 1;
   padding: 0;
 }
+.gallery-icon-btn svg { width: 22px; height: 22px; display: block; }
 .gallery-icon-btn:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .gallery-icon-btn[aria-pressed="true"] { background: color-mix(in srgb, var(--accent, #4c8bf5) 14%, transparent); color: var(--accent, #4c8bf5); }
 .gallery-icon-btn[data-cloud-state="signedin"] { color: #4c8bf5; }

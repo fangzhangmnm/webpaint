@@ -32,7 +32,16 @@ export class ReferenceWindow {
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = "high";
 
-    this.bitmap = null;                        // 当前显示的 ImageBitmap
+    // 显示源 = 二选一：
+    //   bitmap (ImageBitmap)：静态加载的图，setBitmap()
+    //   liveDoc (PaintDoc) + _composeCanvas：实时镜像主画布，setLiveSource()
+    // event-driven 重合成：board.markDocDirty() 触发 "wp:docpixeldirty" →
+    // markLiveDirty() 置 flag + schedule rAF；rAF 里 _render() 见 flag 才合成。
+    // 没改动 = 不合成，开销近 0。
+    this.bitmap = null;
+    this._liveDoc = null;
+    this._composeCanvas = null;
+    this._liveDirty = false;
     this.vp = { tx: 0, ty: 0, scale: 1, rot: 0 };
     this._raf = null;
     this._panelDrag = null;                    // 拖整窗 state
@@ -47,16 +56,71 @@ export class ReferenceWindow {
 
   // ---- 外部 API ----
   setBitmap(bitmap) {
+    // 切静态源 → 退出 live 模式
+    this._stopLive();
     if (this.bitmap && this.bitmap !== bitmap) this.bitmap.close?.();
     this.bitmap = bitmap;
     if (bitmap) this.fitToPanel();
     this._updateEmptyHint();
     this._invalidate();
   }
+  // 实时镜像主画布：board.markDocDirty 触发 wp:docpixeldirty → markLiveDirty
+  setLiveSource(doc) {
+    if (this.bitmap) { this.bitmap.close?.(); this.bitmap = null; }
+    this._liveDoc = doc;
+    if (!this._composeCanvas) this._composeCanvas = document.createElement("canvas");
+    this._liveDirty = true;                  // 初次进 live 立刻合成一次
+    this.fitToPanel();
+    this._updateEmptyHint();
+    this._invalidate();
+  }
+  isLive() { return !!this._liveDoc; }
+  toggleLive(doc) {
+    if (this.isLive()) {
+      this._stopLive();
+      this._updateEmptyHint();
+      this._invalidate();
+    } else {
+      this.setLiveSource(doc);
+    }
+  }
+  _stopLive() {
+    this._liveDoc = null;
+    this._liveDirty = false;
+  }
+  // 外部（board.markDocDirty / wp:histchange）调用：标脏 + 触发渲染。
+  // 真合成发生在 _render 里，且只在 _liveDirty=true 时合成。
+  markLiveDirty() {
+    if (!this._liveDoc) return;
+    this._liveDirty = true;
+    this._invalidate();
+  }
+  _recomposeLive() {
+    const doc = this._liveDoc;
+    if (!doc) return;
+    const W = doc.width, H = doc.height;
+    if (this._composeCanvas.width !== W || this._composeCanvas.height !== H) {
+      this._composeCanvas.width = W;
+      this._composeCanvas.height = H;
+    }
+    const cx = this._composeCanvas.getContext("2d");
+    cx.clearRect(0, 0, W, H);
+    cx.fillStyle = doc.backgroundColor || "#ffffff";
+    cx.fillRect(0, 0, W, H);
+    for (const layer of doc.layers) {
+      if (!layer.visible) continue;
+      if (!(layer.bboxW > 0 && layer.bboxH > 0)) continue;
+      cx.globalAlpha = layer.opacity ?? 1;
+      cx.globalCompositeOperation = layer.mode || "source-over";
+      cx.drawImage(layer.canvas, layer.bboxX, layer.bboxY);
+    }
+    cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
+  }
   open() {
     this.panel.classList.remove("hidden");
     this._resizeCanvasToBody();
     this._updateEmptyHint();
+    if (this._liveDoc) this._liveDirty = true;   // 重新打开 = 默认重画一次
     this._invalidate();
   }
   close() {
@@ -66,21 +130,30 @@ export class ReferenceWindow {
   toggle() { this.isOpen() ? this.close() : this.open(); }
 
   fitToPanel() {
-    if (!this.bitmap) return;
+    const src = this._sourceSize();
+    if (!src) return;
     const bw = this.canvas.width / (window.devicePixelRatio || 1);
     const bh = this.canvas.height / (window.devicePixelRatio || 1);
-    const iw = this.bitmap.width, ih = this.bitmap.height;
-    if (iw <= 0 || ih <= 0 || bw <= 0 || bh <= 0) return;
-    const s = Math.min(bw / iw, bh / ih) * 0.95;
+    if (src.w <= 0 || src.h <= 0 || bw <= 0 || bh <= 0) return;
+    const s = Math.min(bw / src.w, bh / src.h) * 0.95;
     this.vp = { tx: bw / 2, ty: bh / 2, scale: s, rot: 0 };
     this._saveVp();
     this._invalidate();
+  }
+  _sourceSize() {
+    if (this._liveDoc) return { w: this._liveDoc.width, h: this._liveDoc.height };
+    if (this.bitmap) return { w: this.bitmap.width, h: this.bitmap.height };
+    return null;
   }
 
   // ---- 内部 ----
   _bind() {
     // 关
     this.closeBtn.addEventListener("click", () => this.close());
+
+    // doc 像素或图层结构变 → 标 live 脏（不强行渲染：_invalidate rAF 自己处理）
+    window.addEventListener("wp:docpixeldirty", () => this.markLiveDirty());
+    window.addEventListener("wp:histchange", () => this.markLiveDirty());
 
     // 拖整窗（标题栏）
     this.head.addEventListener("pointerdown", (e) => {
@@ -228,12 +301,18 @@ export class ReferenceWindow {
     });
   }
   _render() {
+    // live 模式下：只在 _liveDirty=true 时才重新合成 layers → compose canvas
+    if (this._liveDoc && this._liveDirty) {
+      this._recomposeLive();
+      this._liveDirty = false;
+    }
     const dpr = window.devicePixelRatio || 1;
     const W = this.canvas.width, H = this.canvas.height;
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    if (!this.bitmap) return;
+    const source = this._liveDoc ? this._composeCanvas : this.bitmap;
+    if (!source) return;
     // 棋盘格底（暗示透明 / 浮在主画布上的感觉）
     const cell = 8 * dpr;
     ctx.fillStyle = "#2a2a2a";
@@ -252,13 +331,13 @@ export class ReferenceWindow {
       -v.scale * s * dpr, v.scale * c * dpr,
       v.tx * dpr, v.ty * dpr,
     );
-    // image 中心对齐 viewport 原点（rotate 围绕中心而非左上角）
-    ctx.drawImage(this.bitmap, -this.bitmap.width / 2, -this.bitmap.height / 2);
+    ctx.drawImage(source, -source.width / 2, -source.height / 2);
   }
 
   _updateEmptyHint() {
     if (!this.emptyHint) return;
-    this.emptyHint.classList.toggle("hidden", !!this.bitmap);
+    const has = !!(this.bitmap || this._liveDoc);
+    this.emptyHint.classList.toggle("hidden", has);
   }
   _savePos() {
     try {

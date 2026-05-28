@@ -100,7 +100,7 @@ const els = {
   referenceCanvas: document.getElementById("referenceCanvas"),
   referenceEmpty: document.getElementById("referenceEmpty"),
   referenceLoadBtn: document.getElementById("referenceLoadBtn"),
-  referenceSnapBtn: document.getElementById("referenceSnapBtn"),
+  referenceLiveBtn: document.getElementById("referenceLiveBtn"),
   referenceFitBtn: document.getElementById("referenceFitBtn"),
   referenceFileInput: document.getElementById("referenceFileInput"),
   galleryFull: document.getElementById("galleryFull"),
@@ -357,13 +357,14 @@ els.menuCheckUpdate.addEventListener("click", async () => {
   setMenuOpen(false);
   setStatus("检测更新中…", true);
   try {
-    const reg = await navigator.serviceWorker?.getRegistration();
-    if (!reg) { setStatus("Service Worker 未就绪（可能是 file:// 协议）"); return; }
+    // 优先用 boot 时存的 registration（iPad PWA / save-to-home-screen 模式下
+    // navigator.serviceWorker.getRegistration() 偶尔返 undefined）
+    const reg = _swRegistration || await navigator.serviceWorker?.getRegistration();
+    if (!reg) { setStatus("Service Worker 未注册（先把页面刷一次）"); return; }
     await reg.update();
-    // 等一拍看 waiting 有没有出现
     setTimeout(() => {
       if (reg.waiting) setStatus("有新版本，刷新页面应用");
-      else setStatus("已是最新");
+      else setStatus(`已是最新（${window.WEBPAINT_VERSION || ""}）`);
     }, 1500);
   } catch (e) {
     setStatus("检测失败：" + (e && e.message || e));
@@ -1209,11 +1210,55 @@ async function saveAndPush() {
 }
 
 // Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地（不推云）
+//
+// **Coalesce**（user 2026-05-28）：连按 Ctrl+S 不并行串 N 次。
+//   - 当前没在跑 → 立刻跑
+//   - 当前在跑 + 中间没新编辑 + 同类型 → no-op（state 没变，省一次空转）
+//   - 当前在跑 + 中间新编辑了 → queue 一个 pending，in-flight 完成后跑
+//   - 当前在跑 local-only + 用户改主意 push → queue push（云端还没覆盖）
+//   - pending 升级规则：push 覆盖 local（再多按几次也只一个尾巴）
+let _savePending = null;             // null | "local" | "push"
+let _inFlightSaveType = null;        // "local" | "push" | null
+let _editVersion = 0;
+let _inFlightStartVersion = 0;
+window.addEventListener("wp:histchange", () => { _editVersion++; });
+
+function queueSave(type) {
+  if (!_inFlightSaveType) {
+    runQueuedSave(type);
+    return;
+  }
+  const hasNewEdits = _editVersion !== _inFlightStartVersion;
+  // 决定要不要 queue 尾巴：
+  //   in-flight local + 用户按 push → queue push（云端还没推）
+  //   其他情况只看是否中间真有新编辑
+  let shouldQueue;
+  if (_inFlightSaveType === "local" && type === "push") shouldQueue = true;
+  else shouldQueue = hasNewEdits;
+  if (!shouldQueue) return;
+  if (type === "push" || _savePending !== "push") _savePending = type;
+}
+
+async function runQueuedSave(type) {
+  _inFlightSaveType = type;
+  _inFlightStartVersion = _editVersion;
+  try {
+    if (type === "push") await saveAndPush();
+    else await saveNow();
+  } finally {
+    _inFlightSaveType = null;
+    if (_savePending) {
+      const next = _savePending;
+      _savePending = null;
+      runQueuedSave(next);             // 不 await，避免递归栈
+    }
+  }
+}
+
 window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
     e.preventDefault();
-    if (e.shiftKey) saveNow();          // 只本地
-    else saveAndPush();                 // 本地 + 云
+    queueSave(e.shiftKey ? "local" : "push");
   }
 });
 // 3 min 兜底
@@ -1235,7 +1280,7 @@ function stampNow() {
 // ---- topbar：save/upload + gallery ----
 // 点 save 按钮 = saveAndPush 一把梭（同 Ctrl+S）。state == "synced" 时
 // 也跑一遍（no-op fast path）让 user 永远不需要"再点一下"。
-els.topSaveBtn.addEventListener("click", () => saveAndPush());
+els.topSaveBtn.addEventListener("click", () => queueSave("push"));
 
 // ---- topbar：adjustments popup（液化 / 后续调色 etc）----
 // 单按钮 → 弹一列 menu-item（同 menuPanel 模式）。学 Procreate adjustments icon。
@@ -1505,29 +1550,10 @@ els.referenceFileInput.addEventListener("change", async (e) => {
     setStatus("参考图载入失败：" + (err && err.message || err));
   }
 });
-els.referenceSnapBtn.addEventListener("click", async () => {
-  // 抓当前画布合成（不要 viewport 变换，直接拍 doc 全图）
-  try {
-    const c = document.createElement("canvas");
-    c.width = doc.width; c.height = doc.height;
-    const cx = c.getContext("2d");
-    cx.fillStyle = doc.backgroundColor || "#ffffff";
-    cx.fillRect(0, 0, c.width, c.height);
-    for (const layer of doc.layers) {
-      if (!layer.visible) continue;
-      cx.globalAlpha = layer.opacity ?? 1;
-      cx.globalCompositeOperation = layer.mode || "source-over";
-      if (layer.bboxW > 0 && layer.bboxH > 0) {
-        cx.drawImage(layer.canvas, layer.bboxX, layer.bboxY);
-      }
-    }
-    cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
-    const bitmap = await createImageBitmap(c);
-    referenceWindow.setBitmap(bitmap);
-    setStatus("已抓当前画布到参考");
-  } catch (err) {
-    setStatus("抓画布失败：" + (err && err.message || err));
-  }
+els.referenceLiveBtn.addEventListener("click", () => {
+  referenceWindow.toggleLive(doc);
+  els.referenceLiveBtn.setAttribute("aria-pressed", referenceWindow.isLive() ? "true" : "false");
+  setStatus(referenceWindow.isLive() ? "参考小窗：实时镜像主画布" : "参考小窗：已退出实时模式");
 });
 els.referenceFitBtn.addEventListener("click", () => referenceWindow.fitToPanel());
 
@@ -1794,16 +1820,21 @@ els.galleryClearCacheBtn.addEventListener("click", async () => {
   }
 });
 
+// 本地占用 = 实际所有 IDB session blob 大小之和（**不**走 storage.estimate —— 它把 SW 预缓存 / localStorage 算进去会虚高几 MB）。
+// quota 仍走 storage.estimate（这个数 alone 有意义）。
 async function updateIdbUsage() {
   try {
+    const sessions = await listSessions();
+    let total = 0;
+    for (const s of sessions) total += (s.size || 0);
+    let quotaText = "";
     if (navigator.storage && navigator.storage.estimate) {
-      const { usage, quota } = await navigator.storage.estimate();
-      els.galleryFootUsage.textContent = `本地占用：${humanSize(usage)} / ${humanSize(quota)}`;
-    } else {
-      els.galleryFootUsage.textContent = "本地占用：浏览器不支持估算";
+      const est = await navigator.storage.estimate();
+      if (est && est.quota) quotaText = ` / 配额 ${humanSize(est.quota)}`;
     }
+    els.galleryFootUsage.textContent = `画作占用：${humanSize(total)}（${sessions.length} 件）${quotaText}`;
   } catch {
-    els.galleryFootUsage.textContent = "本地占用：未知";
+    els.galleryFootUsage.textContent = "占用：未知";
   }
 }
 
@@ -1854,7 +1885,7 @@ async function renderGallery() {
     const tile = document.createElement("div");
     tile.className = "gallery-tile" + (item.name === _activeSessionName ? " active" : "");
 
-    // 缩略图：local thumb 优先；纯云端用 ☁ 占位
+    // 缩略图：local thumb 优先；纯云端用云朵 SVG 占位；纯本地无 thumb 用名字首字
     let thumbEl;
     if (isLocal && item.local.thumb) {
       thumbEl = document.createElement("img");
@@ -1867,7 +1898,11 @@ async function renderGallery() {
     } else {
       thumbEl = document.createElement("div");
       thumbEl.className = "gallery-tile-thumb placeholder";
-      thumbEl.textContent = isCloud ? "☁" : (item.name.slice(0, 1) || "?");
+      if (isCloud) {
+        thumbEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:48px;height:48px;"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
+      } else {
+        thumbEl.textContent = (item.name.slice(0, 1) || "?");
+      }
     }
     tile.appendChild(thumbEl);
 
@@ -2001,10 +2036,12 @@ function humanTime(ts) {
   return d.toLocaleDateString();
 }
 function humanSize(b) {
-  if (!b) return "?";
+  if (b == null) return "?";
+  if (b === 0) return "0 B";
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
-  return `${(b / 1048576).toFixed(1)} MB`;
+  if (b < 1024 * 1024 * 1024) return `${(b / 1048576).toFixed(1)} MB`;
+  return `${(b / 1073741824).toFixed(2)} GB`;
 }
 
 // ---- 云端 icon 按钮（gallery header 右侧）----
@@ -2138,6 +2175,7 @@ els.updateDismiss.addEventListener("click", () => {
   els.updateToast.classList.add("hidden");
 });
 
+let _swRegistration = null;       // 暴露给 menuCheckUpdate 用，避免 getRegistration() 返 undefined
 if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
   // 路径 3
   navigator.serviceWorker.addEventListener("message", (e) => {
@@ -2148,6 +2186,7 @@ if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
     let registration;
     try {
       registration = await navigator.serviceWorker.register("./service-worker.js");
+      _swRegistration = registration;
     } catch (err) {
       console.warn("SW register failed", err);
       return;

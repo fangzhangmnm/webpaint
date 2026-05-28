@@ -83,6 +83,13 @@ export class Board {
     } else {
       this._dirtyDocRect = [x0, y0, x1, y1];
     }
+    // 通知挂在 doc 上的旁观者（如 reference live 镜像）。每个 brush stamp 都会触发，
+    // 但 reference 端 markLiveDirty 仅置 flag + 走 rAF，不真合成，开销 ≪ 1ms。
+    if (!Board._dispatchingDirty) {
+      Board._dispatchingDirty = true;
+      window.dispatchEvent(new CustomEvent("wp:docpixeldirty"));
+      Board._dispatchingDirty = false;
+    }
   }
   // 视口 / 主题 / 光标 / 图层结构改了 → 整张重画
   markFullDirty() {

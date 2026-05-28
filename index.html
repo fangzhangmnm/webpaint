@@ -26,7 +26,7 @@
             bar.addEventListener("click", function () { bar.remove(); });
             (document.body || document.documentElement).appendChild(bar);
           }
-          bar.textContent = "⚠ " + text + "  (点击关闭)";
+          bar.textContent = text + "  (点击关闭)";
         }
         window.__wp_showFatal = show;
         window.addEventListener("error", function (e) {
@@ -165,12 +165,23 @@
         <span class="gallery-title">图库</span>
         <div class="gallery-actions" role="group" aria-label="账号 / 新增">
           <button class="gallery-icon-btn" id="cloudIconBtn" type="button" title="云端账号" aria-haspopup="true" aria-expanded="false"></button>
-          <button class="gallery-icon-btn hidden" id="cloudRefreshBtn" type="button" title="刷新云端列表">↻</button>
-          <button class="gallery-icon-btn" id="galleryAddBtn" type="button" title="新增" aria-haspopup="true" aria-expanded="false">＋</button>
+          <button class="gallery-icon-btn hidden" id="cloudRefreshBtn" type="button" title="刷新云端列表">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <!-- 顺时针 3/4 圆 + 箭头：从 12 点出发顺时针绕到 9 点；箭头尖在右上 -->
+              <path d="M21 12a9 9 0 1 1-3.5-7.1"/>
+              <polyline points="21 4 21 9 16 9"/>
+            </svg>
+          </button>
+          <button class="gallery-icon-btn" id="galleryAddBtn" type="button" title="新增" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
         </div>
       </div>
       <div class="gallery-grid" id="galleryGrid"><!-- 本地 + 云端 tiles by JS --></div>
-      <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。点右上 ＋ 新建一个，或先在 PC 上画一笔。</div>
+      <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。</div>
       <div class="gallery-foot">
         <span class="gallery-foot-usage" id="galleryFootUsage">本地占用：计算中…</span>
         <button class="gallery-foot-btn" id="galleryClearCacheBtn" type="button">清扫本地缓存…</button>
@@ -248,10 +259,34 @@
       </div>
       <div class="layers-list" id="layersList"><!-- rows rendered by JS --></div>
       <div class="layers-foot">
-        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建图层">＋</button>
-        <button class="layers-foot-btn" id="layerDelBtn" type="button" title="删除当前">🗑</button>
-        <button class="layers-foot-btn" id="layerUpBtn" type="button" title="上移">↑</button>
-        <button class="layers-foot-btn" id="layerDownBtn" type="button" title="下移">↓</button>
+        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建图层">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+        <button class="layers-foot-btn" id="layerDelBtn" type="button" title="删除当前">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- 垃圾桶：盖 + 身 + 两道竖纹 -->
+            <polyline points="3 6 21 6"/>
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            <path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/>
+            <line x1="10" y1="11" x2="10" y2="17"/>
+            <line x1="14" y1="11" x2="14" y2="17"/>
+          </svg>
+        </button>
+        <button class="layers-foot-btn" id="layerUpBtn" type="button" title="上移">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="19" x2="12" y2="5"/>
+            <polyline points="6 11 12 5 18 11"/>
+          </svg>
+        </button>
+        <button class="layers-foot-btn" id="layerDownBtn" type="button" title="下移">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <polyline points="6 13 12 19 18 13"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -282,7 +317,7 @@
           <input id="liquifyStrength" type="range" min="1" max="100" step="1" value="40" />
           <span class="brush-slider-value" id="liquifyStrengthVal">40</span>
         </label>
-        <p class="sheet-hint" style="margin-top: 6px;">⚠ 液化只动当前图层；反复拖累加变形。撤销整个笔触可 Ctrl+Z。</p>
+        <p class="sheet-hint" style="margin-top: 6px;">液化只动当前图层；反复拖累加变形。撤销整个笔触可 Ctrl+Z。</p>
       </div>
     </div>
 
@@ -290,16 +325,36 @@
     <div class="float-panel reference-panel hidden" id="referencePanel">
       <div class="float-panel-head" id="referencePanelHead">
         <span class="float-panel-title">参考</span>
-        <button class="reference-action-btn" id="referenceLoadBtn" type="button" title="从文件载入">📁</button>
-        <button class="reference-action-btn" id="referenceSnapBtn" type="button" title="抓当前画布">📷</button>
-        <button class="reference-action-btn" id="referenceFitBtn" type="button" title="适应窗口">⤢</button>
+        <button class="reference-action-btn" id="referenceLoadBtn" type="button" title="从文件载入">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- 文件夹：左边 tab + 矩形主体 -->
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          </svg>
+        </button>
+        <button class="reference-action-btn" id="referenceLiveBtn" type="button" title="实时镜像主画布" aria-pressed="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- 大框（主画布）+ 内嵌小窗（参考小窗自己）—— picture-in-picture 隐喻 -->
+            <rect x="3" y="4" width="18" height="14" rx="2"/>
+            <rect x="12" y="10" width="7" height="5" rx="1"/>
+          </svg>
+        </button>
+        <button class="reference-action-btn" id="referenceFitBtn" type="button" title="适应窗口">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- 四角向外的箭头 -->
+            <polyline points="4 9 4 4 9 4"/>
+            <polyline points="20 9 20 4 15 4"/>
+            <polyline points="4 15 4 20 9 20"/>
+            <polyline points="20 15 20 20 15 20"/>
+          </svg>
+        </button>
         <button class="float-panel-close" id="referencePanelClose" type="button" aria-label="关闭">×</button>
       </div>
       <div class="reference-body" id="referenceBody">
         <canvas id="referenceCanvas" class="reference-canvas"></canvas>
         <div class="reference-empty" id="referenceEmpty">
-          <p>选个图当参考：</p>
-          <p class="sheet-hint">📁 从文件 · 📷 抓当前画布</p>
+          <p>选个图当参考</p>
+          <p class="sheet-hint">文件夹图标 = 加载图片</p>
+          <p class="sheet-hint">画中画图标 = 实时镜像主画布</p>
           <p class="sheet-hint">单指拖移 / 双指 pinch + 旋转 / 双击适应</p>
         </div>
       </div>
