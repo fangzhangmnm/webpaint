@@ -899,6 +899,63 @@ function combineSelections(oldSel, newSel, mode) {
 // 输入：selection = { bboxX, bboxY, bboxW, bboxH, maskCanvas }
 // 输出：Float32Array 平铺 [x0, y0, x1, y1, ...]（每 4 个数一条线段，doc 坐标）
 // 复杂度：O(bboxW × bboxH)。500×500 ≈ 250K cells ≈ 10ms（一次性，cache 到 sel）
+// 把 extractMaskOutline 输出的碎段（每段 ~0.7 doc px）链成连续 polyline。
+// 关键：Canvas2D 的 setLineDash 在**每个 subpath 重置**，碎段当 subpath 画时
+// 每段太短 < 一个 dash 周期 → 永远在 "on" 阶段 → dash 看不见。链成长 path 后
+// dash 才能沿边流。
+// 输出：Array<Float32Array> = 多条 polyline。
+export function chainMaskOutline(segs) {
+  const out = [];
+  if (segs.length < 4) return out;
+  const n = segs.length / 4;
+  const key = (x, y) => `${Math.round(x * 2)},${Math.round(y * 2)}`;  // 端点都落在 .0 / .5
+  const endpoints = new Map();
+  for (let i = 0; i < n; i++) {
+    const k0 = key(segs[i*4],     segs[i*4 + 1]);
+    const k1 = key(segs[i*4 + 2], segs[i*4 + 3]);
+    if (!endpoints.has(k0)) endpoints.set(k0, []);
+    if (!endpoints.has(k1)) endpoints.set(k1, []);
+    endpoints.get(k0).push(i * 2);        // 偶数 = 起点
+    endpoints.get(k1).push(i * 2 + 1);    // 奇数 = 终点
+  }
+  const used = new Uint8Array(n);
+  const findUnused = (k) => {
+    const arr = endpoints.get(k);
+    if (!arr) return -1;
+    for (const slot of arr) if (!used[slot >> 1]) return slot;
+    return -1;
+  };
+  for (let i = 0; i < n; i++) {
+    if (used[i]) continue;
+    used[i] = 1;
+    const chain = [segs[i*4], segs[i*4+1], segs[i*4+2], segs[i*4+3]];
+    // 向前延伸
+    while (true) {
+      const ex = chain[chain.length - 2], ey = chain[chain.length - 1];
+      const slot = findUnused(key(ex, ey));
+      if (slot < 0) break;
+      const segIdx = slot >> 1;
+      used[segIdx] = 1;
+      const si = segIdx * 4;
+      if (slot & 1) chain.push(segs[si],     segs[si + 1]);   // 段终点匹配 → 取段起点
+      else          chain.push(segs[si + 2], segs[si + 3]);   // 段起点匹配 → 取段终点
+    }
+    // 向后延伸
+    while (true) {
+      const sx = chain[0], sy = chain[1];
+      const slot = findUnused(key(sx, sy));
+      if (slot < 0) break;
+      const segIdx = slot >> 1;
+      used[segIdx] = 1;
+      const si = segIdx * 4;
+      if (slot & 1) chain.unshift(segs[si],     segs[si + 1]);
+      else          chain.unshift(segs[si + 2], segs[si + 3]);
+    }
+    out.push(new Float32Array(chain));
+  }
+  return out;
+}
+
 export function extractMaskOutline(sel) {
   const w = sel.bboxW, h = sel.bboxH;
   if (w <= 1 || h <= 1) return new Float32Array(0);

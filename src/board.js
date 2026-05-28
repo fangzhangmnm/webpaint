@@ -1,5 +1,5 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
-import { drawMesh, renderQuadPerPixel, extractMaskOutline } from "./lasso.js";
+import { drawMesh, renderQuadPerPixel, extractMaskOutline, chainMaskOutline } from "./lasso.js";
 import { computeClipBaseFor } from "./doc.js";
 //
 // 坐标系：
@@ -542,20 +542,24 @@ export class Board {
     // 不要动画（user 反馈太干扰）。线宽 1 / scale = 1 CSS px。
     if (info.selection && !info.floating) {
       const s = info.selection;
-      if (!s._outline) s._outline = extractMaskOutline(s);
-      const segs = s._outline;
+      if (!s._chains) {
+        if (!s._outline) s._outline = extractMaskOutline(s);
+        s._chains = chainMaskOutline(s._outline);
+      }
       ctx.save();
-      // extractMaskOutline 输出**已是 doc 坐标**（内部加了 sel.bboxX/Y），不 translate。
-      // 真黑白相间：dash + gap 等长，白色 offset 一个 dash 正好填黑的空 →
-      // 黑[0..N] 白[N..2N] 黑[2N..3N] ... 不再灰糊。
+      // 用 polyline chains（每条 = 一个 subpath）让 dash 沿整条边流。
+      // 否则 marching squares 几百段都是 ~1 doc px 短 subpath，dash 在每段
+      // 重置 → 段内永远 "on" 阶段 → 看不到相间。
+      // 屏幕常量大小：lineWidth / dash 都 / scale，渲到 doc-transform ctx 之后
+      // 都是固定 CSS px 宽（缩放不变）。
       const dash = 4 / scale;
-      ctx.lineWidth = Math.max(1, 1.2 / scale);
+      ctx.lineWidth = 1.2 / scale;
       ctx.lineCap = "butt";
       ctx.setLineDash([dash, dash]);
       ctx.beginPath();
-      for (let i = 0; i < segs.length; i += 4) {
-        ctx.moveTo(segs[i],     segs[i + 1]);
-        ctx.lineTo(segs[i + 2], segs[i + 3]);
+      for (const ch of s._chains) {
+        ctx.moveTo(ch[0], ch[1]);
+        for (let i = 2; i < ch.length; i += 2) ctx.lineTo(ch[i], ch[i + 1]);
       }
       ctx.lineDashOffset = 0;
       ctx.strokeStyle = "#000";
