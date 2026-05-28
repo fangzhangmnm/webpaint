@@ -230,6 +230,35 @@ export class Board {
     }
     return this._clipTmp;
   }
+  // Overlay 选区裁剪临时 canvas。同一帧 ≤ 1 颗 active 层有 overlay，独占用。
+  _getOverlayClipTmp(w, h) {
+    if (!this._overlayClipTmp || this._overlayClipTmp.width < w || this._overlayClipTmp.height < h) {
+      const nw = Math.max(this._overlayClipTmp?.width || 0, w);
+      const nh = Math.max(this._overlayClipTmp?.height || 0, h);
+      this._overlayClipTmp = document.createElement("canvas");
+      this._overlayClipTmp.width = nw;
+      this._overlayClipTmp.height = nh;
+    }
+    return this._overlayClipTmp;
+  }
+  // 把笔刷 live overlay 按 doc.selection mask 裁一遍，让画中实时看到选区限制。
+  // 返回一个**新 overlay 描述**，canvas 指向裁过的临时 canvas；bbox 保持不变（局部坐标不变）。
+  // 落笔后 applySelectionMaskPostStroke 会做最终持久化裁；这里只是 preview。
+  _clipOverlayToSelection(overlay, selection) {
+    const tmp = this._getOverlayClipTmp(overlay.bboxW, overlay.bboxH);
+    const tctx = tmp.getContext("2d");
+    tctx.setTransform(1, 0, 0, 1, 0, 0);
+    tctx.clearRect(0, 0, overlay.bboxW, overlay.bboxH);
+    tctx.drawImage(overlay.canvas, 0, 0);
+    tctx.globalCompositeOperation = "destination-in";
+    tctx.drawImage(
+      selection.maskCanvas,
+      selection.bboxX - overlay.bboxX,
+      selection.bboxY - overlay.bboxY,
+    );
+    tctx.globalCompositeOperation = "source-over";
+    return { ...overlay, canvas: tmp };
+  }
   // 给一颗 clipping mask 层做 dst-in 剪裁 + composite 到 ctx。
   // 算法：在 tmp 上先以 layer.bbox 局部坐标渲染 (layer + overlay) → dst-in base alpha
   //       → 把 tmp 当一张 (bboxW × bboxH) image drawImage 到 ctx 的 doc 坐标 bbox 位置。
@@ -466,7 +495,11 @@ export class Board {
       const prevComp = ctx.globalCompositeOperation;
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.mode || "source-over";
-      const lOverlay = overlay && overlay.layer === layer ? overlay : null;
+      let lOverlay = overlay && overlay.layer === layer ? overlay : null;
+      // 笔刷 live overlay 也要 respect 选区：在画里实时看到限制范围
+      if (lOverlay && this.doc.selection) {
+        lOverlay = this._clipOverlayToSelection(lOverlay, this.doc.selection);
+      }
       const baseIdx = baseFor[i];
       if (baseIdx < 0) {
         this._drawLayerWithOverlay(ctx, layer, lOverlay);
@@ -501,29 +534,28 @@ export class Board {
     if (!this._lassoProvider) return;
     const info = this._lassoProvider();
     if (!info) return;
-    // (a) 选区 marching ants：用 marching squares 抽 mask 轮廓 polyline，沿真正的边
-    // 画虚线。outline cache 到 sel._outline，mask 变了下面 lasso.setSelection 清缓存
+    // (a) 选区蚂蚁线：marching squares 抽 mask 轮廓 → 黑白相间虚线。
+    // 真"相间"：dash 和 gap 等长，白色 dashOffset 偏一个 dash，正好填黑的空位。
+    // 不要动画（user 反馈太干扰）。线宽 1 / scale = 1 CSS px。
     if (info.selection && !info.floating) {
       const s = info.selection;
       if (!s._outline) s._outline = extractMaskOutline(s);
       const segs = s._outline;
       ctx.save();
-      ctx.lineWidth = Math.max(1, 1.2 / scale);
-      // 动画 dash offset：基于 wall clock，给"行进"感（marching ants）
-      const dash = 6 / scale, gap = 4 / scale;
-      const off = ((Date.now() / 80) % (dash + gap));
-      ctx.setLineDash([dash, gap]);
+      ctx.lineWidth = 1 / scale;
       ctx.lineCap = "butt";
+      const dash = 4 / scale;
       ctx.beginPath();
       for (let i = 0; i < segs.length; i += 4) {
         ctx.moveTo(segs[i],     segs[i + 1]);
         ctx.lineTo(segs[i + 2], segs[i + 3]);
       }
-      ctx.lineDashOffset = -off;
-      ctx.strokeStyle = "rgba(0,0,0,0.9)";
+      ctx.setLineDash([dash, dash]);
+      ctx.lineDashOffset = 0;
+      ctx.strokeStyle = "#000";
       ctx.stroke();
-      ctx.lineDashOffset = -off + (dash + gap) / 2;
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineDashOffset = dash;
+      ctx.strokeStyle = "#fff";
       ctx.stroke();
       ctx.restore();
     }

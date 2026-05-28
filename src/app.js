@@ -230,20 +230,7 @@ board.setLassoProvider(() => ({
   handles:        input.lasso.visibleHandles(),
 }));
 
-// Marching ants 动画：选区存在时低频 invalidate board，让 dash offset 推进。
-// 80ms = ~12fps，肉眼有蚂蚁感，CPU < 1%
-let _antsTimer = null;
-function updateMarchingAntsTimer() {
-  const should = !!doc.selection && !input.lasso.hasFloating();
-  if (should && !_antsTimer) {
-    _antsTimer = setInterval(() => board.requestRender(), 80);
-  } else if (!should && _antsTimer) {
-    clearInterval(_antsTimer);
-    _antsTimer = null;
-  }
-}
-window.addEventListener("wp:lassochange", updateMarchingAntsTimer);
-window.addEventListener("wp:histchange", updateMarchingAntsTimer);
+// 蚂蚁线无动画（user 反馈太干扰）；选区改变时 setLassoProvider 已触发 invalidateAll。
 
 // 套索工具栏（v65 重做）。三个 section 按状态切换：
 //   - subToolBar：lasso 工具激活时显（不论有没有选区），含 sub-tool picker / set-op / threshold
@@ -256,9 +243,12 @@ const lassoTransformCtrl = document.getElementById("lassoTransformCtrl");
 const lassoSubBtns = [...lassoSubToolBar.querySelectorAll("[data-lasso-sub]")];
 const lassoSetOpBtns = [...lassoSubToolBar.querySelectorAll("[data-lasso-setop]")];
 const lassoTransformModeBtns = [...lassoTransformCtrl.querySelectorAll("[data-lasso-mode]")];
-const lassoThresholdRow = document.getElementById("lassoThresholdRow");
 const lassoThresholdInput = document.getElementById("lassoThreshold");
 const lassoThresholdVal = document.getElementById("lassoThresholdVal");
+const lassoMagicGapInput = document.getElementById("lassoMagicGap");
+const lassoMagicGapVal = document.getElementById("lassoMagicGapVal");
+const lassoMagicCfgBtn = document.getElementById("lassoMagicCfgBtn");
+const lassoMagicPopup = document.getElementById("lassoMagicPopup");
 const lassoConstrainBtn = document.getElementById("lassoConstrainBtn");
 const lassoConstrainSep = document.querySelector(".lasso-constrain-sep");
 
@@ -280,7 +270,9 @@ function updateLassoToolbar() {
   for (const b of lassoSubBtns) {
     b.setAttribute("aria-pressed", b.dataset.lassoSub === sub ? "true" : "false");
   }
-  lassoThresholdRow.classList.toggle("hidden", sub !== "magic");
+  lassoMagicCfgBtn.classList.toggle("hidden", sub !== "magic");
+  // 子工具切走 → 关掉魔术棒 popup
+  if (sub !== "magic") lassoMagicPopup.classList.add("hidden");
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
   lassoConstrainBtn.classList.toggle("hidden", !showConstrain);
@@ -314,11 +306,31 @@ for (const b of lassoSetOpBtns) {
     updateLassoToolbar();
   });
 }
-// magic threshold
+// magic threshold + 容隙
 lassoThresholdInput.addEventListener("input", () => {
   const v = parseInt(lassoThresholdInput.value, 10) || 0;
   input.lasso.setMagicThreshold(v);
   lassoThresholdVal.textContent = String(v);
+});
+lassoMagicGapInput.addEventListener("input", () => {
+  const v = parseInt(lassoMagicGapInput.value, 10) || 0;
+  input.lasso.setMagicGapPx(v);
+  lassoMagicGapVal.textContent = String(v);
+});
+// 初始化滑块到 lasso 引擎默认值（避免两边不一致）
+lassoMagicGapInput.value = String(input.lasso.getMagicGapPx());
+lassoMagicGapVal.textContent = String(input.lasso.getMagicGapPx());
+// ⚙ 按钮 → popup toggle
+lassoMagicCfgBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  lassoMagicPopup.classList.toggle("hidden");
+});
+// 点 popup 外侧 → 关
+document.addEventListener("pointerdown", (e) => {
+  if (lassoMagicPopup.classList.contains("hidden")) return;
+  if (lassoMagicPopup.contains(e.target)) return;
+  if (lassoMagicCfgBtn.contains(e.target)) return;
+  lassoMagicPopup.classList.add("hidden");
 });
 // 1:1 约束 toggle（rect / ellipse 用）
 lassoConstrainBtn.addEventListener("click", () => {

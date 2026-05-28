@@ -93,7 +93,8 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 /* 套索浮层工具栏 —— 浮在顶栏下方居中，floating 选区存在时显示 */
 .lasso-toolbar {
   position: fixed;
-  top: 60px;
+  /* top-bar = max(safe-area, 8) + ~56 高，再留 12 间隙 = 68 */
+  top: calc(max(env(safe-area-inset-top, 0px), 8px) + 68px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -121,6 +122,14 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   white-space: nowrap;
 }
 .lasso-tool-btn:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+/* 图标按钮：等宽方框，比文字按钮窄一半（user 反馈选区栏太宽）。 */
+.lasso-tool-icon {
+  padding: 4px 0;
+  min-width: 32px;
+  text-align: center;
+  font-size: 16px;
+  line-height: 20px;
+}
 .lasso-tool-btn[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent, #4c8bf5) 14%, transparent);
   color: var(--accent, #4c8bf5);
@@ -141,6 +150,36 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 }
 .lasso-tool-threshold.hidden { display: none; }
 .lasso-tool-threshold input[type="range"] { width: 100px; }
+/* 魔术棒设置弹出小卡片：位于 lasso-toolbar 下方居中 */
+.lasso-popup {
+  position: fixed;
+  top: calc(max(env(safe-area-inset-top, 0px), 8px) + 116px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  z-index: 26;            /* 高于 lasso-toolbar */
+  font-size: 12px;
+  color: var(--ink);
+  min-width: 220px;
+}
+.lasso-popup.hidden { display: none; }
+.lasso-popup-row {
+  display: grid;
+  grid-template-columns: 32px 1fr 28px;
+  align-items: center;
+  gap: 8px;
+}
+.lasso-popup-row > span:first-child { color: var(--ink-soft); }
+.lasso-popup-val { text-align: right; font-variant-numeric: tabular-nums; }
+.lasso-popup-row input[type="range"] { width: 100%; }
 
 /* 顶栏：浮动毛玻璃胶囊 */
 .top-bar {
