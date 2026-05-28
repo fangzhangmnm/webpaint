@@ -220,36 +220,95 @@ const input = new InputController(board, doc, {
 // 预览（实际像素在 endStroke 才烧进 layer）。
 board.setOverlayProvider(() => input.brush.getLiveOverlay());
 board.setLassoProvider(() => ({
+  selection:   doc.selection,
   drawingPath: input.lasso.getDrawingPath(),
+  drawingRect: input.lasso.getDrawingRect(),
   floating:    input.lasso.getFloating(),
   handles:     input.lasso.visibleHandles(),
 }));
 
-// 套索工具栏（两态：selected = 4 模式 picker；transforming = mode label + 应用 / 取消）
+// 套索工具栏（v65 重做）。三个 section 按状态切换：
+//   - subToolBar：lasso 工具激活时显（不论有没有选区），含 sub-tool picker / set-op / threshold
+//   - selectionActions：有选区 + 没在 floating 时显，含 变换 / 取消选区
+//   - transformCtrl：floating 状态下显，含 mode picker + 应用 / 取消
 const lassoToolbar = document.getElementById("lassoToolbar");
-const lassoPicker = document.getElementById("lassoPicker");
+const lassoSubToolBar = document.getElementById("lassoSubToolBar");
+const lassoSelectionActions = document.getElementById("lassoSelectionActions");
 const lassoTransformCtrl = document.getElementById("lassoTransformCtrl");
-const lassoModeLabel = document.getElementById("lassoModeLabel");
-const lassoModeBtns = [...lassoPicker.querySelectorAll("[data-lasso-mode]")];
-const LASSO_MODE_LABEL = { free: "自由", uniform: "等比", distort: "透视", warp: "变形" };
+const lassoSubBtns = [...lassoSubToolBar.querySelectorAll("[data-lasso-sub]")];
+const lassoSetOpBtns = [...lassoSubToolBar.querySelectorAll("[data-lasso-setop]")];
+const lassoTransformModeBtns = [...lassoTransformCtrl.querySelectorAll("[data-lasso-mode]")];
+const lassoThresholdRow = document.getElementById("lassoThresholdRow");
+const lassoThresholdInput = document.getElementById("lassoThreshold");
+const lassoThresholdVal = document.getElementById("lassoThresholdVal");
 
 function updateLassoToolbar() {
-  const has = input.lasso.hasFloating();
-  lassoToolbar.classList.toggle("hidden", !has);
-  if (!has) return;
-  const mode = input.lasso.getMode();
-  if (mode === null) {
-    // selected：只显 picker
-    lassoPicker.classList.remove("hidden");
-    lassoTransformCtrl.classList.add("hidden");
-  } else {
-    // transforming：只显 mode label + 应用 / 取消
-    lassoPicker.classList.add("hidden");
-    lassoTransformCtrl.classList.remove("hidden");
-    lassoModeLabel.textContent = LASSO_MODE_LABEL[mode] || mode;
+  const floating = input.lasso.hasFloating();
+  const hasSelection = !!doc.selection;
+  const lassoActive = state.tool === "lasso";
+  // toolbar 显示总条件：任一 section 非空
+  const showAny = floating || hasSelection || lassoActive;
+  lassoToolbar.classList.toggle("hidden", !showAny);
+  if (!showAny) return;
+
+  lassoSubToolBar.classList.toggle("hidden", floating || !lassoActive);
+  lassoSelectionActions.classList.toggle("hidden", floating || !hasSelection);
+  lassoTransformCtrl.classList.toggle("hidden", !floating);
+
+  // 高亮当前 sub-tool / set-op / transform mode
+  const sub = input.lasso.getSubTool();
+  for (const b of lassoSubBtns) {
+    b.setAttribute("aria-pressed", b.dataset.lassoSub === sub ? "true" : "false");
+  }
+  lassoThresholdRow.classList.toggle("hidden", sub !== "magic");
+  const setOp = input.lasso.getSetOpMode();
+  for (const b of lassoSetOpBtns) {
+    b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
+  }
+  if (floating) {
+    const mode = input.lasso.getMode();
+    for (const b of lassoTransformModeBtns) {
+      b.setAttribute("aria-pressed", b.dataset.lassoMode === mode ? "true" : "false");
+    }
   }
 }
-for (const b of lassoModeBtns) {
+
+// sub-tool picker
+for (const b of lassoSubBtns) {
+  b.addEventListener("click", () => {
+    input.lasso.setSubTool(b.dataset.lassoSub);
+    updateLassoToolbar();
+  });
+}
+// set-op modifier
+for (const b of lassoSetOpBtns) {
+  b.addEventListener("click", () => {
+    input.lasso.setSetOpMode(b.dataset.lassoSetop);
+    updateLassoToolbar();
+  });
+}
+// magic threshold
+lassoThresholdInput.addEventListener("input", () => {
+  const v = parseInt(lassoThresholdInput.value, 10) || 0;
+  input.lasso.setMagicThreshold(v);
+  lassoThresholdVal.textContent = String(v);
+});
+
+// 选区动作
+document.getElementById("lassoTransformBtn").addEventListener("click", () => {
+  if (!doc.selection) return;
+  const ok = input.lasso.liftSelectionForTransform(doc.activeLayer);
+  if (ok) updateLassoToolbar();
+});
+document.getElementById("lassoDeselectBtn").addEventListener("click", () => {
+  const entry = input.lasso.setSelection(null);
+  if (entry && history) history.push(entry);
+  board.invalidateAll();
+  updateLassoToolbar();
+});
+
+// transform 模式 picker + 应用 / 取消
+for (const b of lassoTransformModeBtns) {
   b.addEventListener("click", () => {
     input.lasso.setMode(b.dataset.lassoMode);
     updateLassoToolbar();
@@ -266,14 +325,9 @@ document.getElementById("lassoCancelBtn").addEventListener("click", () => {
     updateLassoToolbar();
   }
 });
-document.getElementById("lassoSelectedCancelBtn").addEventListener("click", () => {
-  if (input.lasso.hasFloating()) {
-    input.lasso.cancel();
-    board.invalidateAll();
-    updateLassoToolbar();
-  }
-});
 window.addEventListener("wp:lassochange", updateLassoToolbar);
+// 任何 history push/undo/redo 都可能改 doc.selection → 刷新 toolbar 显隐
+window.addEventListener("wp:histchange", updateLassoToolbar);
 
 // ---- 主题 ----
 function readCssColor(name) {
@@ -335,6 +389,7 @@ function setTool(t) {
   // 液化没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
   els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
   document.body.dataset.tool = t;
+  updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
 }
 for (const b of els.toolBtns) {
   b.addEventListener("click", () => setTool(b.dataset.tool));

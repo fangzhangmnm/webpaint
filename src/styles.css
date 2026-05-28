@@ -132,6 +132,15 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 .lasso-tool-label { font-size: 13px; color: var(--ink); font-weight: 600; padding: 0 8px; }
 .lasso-picker, .lasso-transform-ctrl { display: flex; align-items: center; gap: 4px; }
 .lasso-picker.hidden, .lasso-transform-ctrl.hidden { display: none; }
+.lasso-section { display: flex; align-items: center; gap: 4px; }
+.lasso-section.hidden { display: none; }
+.lasso-tool-threshold {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--ink-soft);
+  padding: 0 8px;
+}
+.lasso-tool-threshold.hidden { display: none; }
+.lasso-tool-threshold input[type="range"] { width: 100px; }
 
 /* 顶栏：浮动毛玻璃胶囊 */
 .top-bar {

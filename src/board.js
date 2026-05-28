@@ -463,6 +463,31 @@ export class Board {
     if (!this._lassoProvider) return;
     const info = this._lassoProvider();
     if (!info) return;
+    // (a) 选区 marching ants（doc.selection 存在 + 没在变换中）。floating 时这块被
+    // floating overlay 覆盖，避免重复画
+    if (info.selection && !info.floating) {
+      const s = info.selection;
+      ctx.save();
+      ctx.lineWidth = Math.max(1, 1.5 / scale);
+      ctx.setLineDash([6 / scale, 4 / scale]);
+      // 用 mask 的 alpha 描边：把 mask 当 path stroke 是不可能的（mask 是 raster）。
+      // 简化：用 mask bbox 框 + 内部 mask drawImage 半透明。要真 marching ants 沿 mask
+      // 轮廓需要 marching squares，复杂。当前用半透明蒙片 + 虚线 bbox 已经能用
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.strokeRect(s.bboxX, s.bboxY, s.bboxW, s.bboxH);
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineDashOffset = 5 / scale;
+      ctx.strokeRect(s.bboxX, s.bboxY, s.bboxW, s.bboxH);
+      // 选区内 tint（轻；让用户清楚 mask 形状不是简单矩形）
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = "#4c8bf5";
+      // 用 mask alpha 做 dst-in：先 fillRect → 然后 source-in mask
+      // 简化：直接 drawImage(mask) 当 tint —— mask alpha 已经是形状
+      ctx.drawImage(s.maskCanvas, s.bboxX, s.bboxY);
+      ctx.restore();
+    }
+    // (b) 正在画的 path
     if (info.drawingPath && info.drawingPath.length >= 2) {
       ctx.save();
       ctx.lineWidth = Math.max(1, 1.5 / scale);
@@ -476,6 +501,21 @@ export class Board {
       ctx.strokeStyle = "rgba(255,255,255,0.8)";
       ctx.lineDashOffset = 5 / scale;
       ctx.stroke();
+      ctx.restore();
+    }
+    // (c) 正在拖的矩形（rect 子工具）
+    if (info.drawingRect) {
+      const r = info.drawingRect;
+      ctx.save();
+      ctx.lineWidth = Math.max(1, 1.5 / scale);
+      ctx.setLineDash([6 / scale, 4 / scale]);
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      const x = Math.min(r.x0, r.x1), y = Math.min(r.y0, r.y1);
+      const w = Math.abs(r.x1 - r.x0), h = Math.abs(r.y1 - r.y0);
+      ctx.strokeRect(x, y, w, h);
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineDashOffset = 5 / scale;
+      ctx.strokeRect(x, y, w, h);
       ctx.restore();
     }
     if (info.floating) {

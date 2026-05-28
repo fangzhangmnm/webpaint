@@ -171,6 +171,9 @@ export class PaintDoc {
     this.activeIndex = 0;
     // 背景色：手感期固定白纸。后期开 doc.background 概念时再补。
     this.backgroundColor = "#ffffff";
+    // 选区（一等公民）。null = 没选区 = 所有像素都可作用。详见 docs/lasso-and-selection.md。
+    //   { bboxX, bboxY, bboxW, bboxH, maskCanvas } —— maskCanvas alpha = mask（255 内 / 0 外）
+    this.selection = null;
   }
 
   get activeLayer() {

@@ -97,13 +97,22 @@ export class InputController {
         redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board),
         refsLayer: (e, id) => e.layerId === id,
       });
-      // 套索 commit 也是 raster snap：lift + translate + commit 整体作为单步 undo
+      // 套索 transform commit 是 raster snap：lift + transform + commit 整体作为单步 undo
       this.history.registerHandler("lasso", {
         undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
         redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board),
         refsLayer: (e, id) => e.layerId === id,
       });
+      // 选区变化（lasso 圈 / 取消选区 / 反选 等）也进 undo，但不动像素
+      this.history.registerHandler("selectionChange", {
+        undo: (e) => { this.doc.selection = e.before; this.board.invalidateAll(); },
+        redo: (e) => { this.doc.selection = e.after;  this.board.invalidateAll(); },
+        // 选区不属于某一 layer；refsLayer 永远 false（删图层不影响选区 entry）
+        refsLayer: () => false,
+      });
     }
+    // 把 doc 引用给 lasso，便于直接操作 doc.selection
+    this.lasso.setDoc(this.doc);
     this._bind();
   }
 
@@ -434,7 +443,9 @@ export class InputController {
     } else if (rec.role === "lasso") {
       const { x: dx, y: dy } = this.board.screenToDoc(e.clientX, e.clientY);
       if (rec._lassoMode === "tentative") {
-        // 跨过 4 doc-px² 阈值才升级成 drawing
+        // magic 子工具是 tap-only：不升级到 drawing；_endLasso 在 pointerup 时触发
+        if (this.lasso.getSubTool() === "magic") return;
+        // freehand / rect：跨过 4 doc-px² 阈值才升级成 drawing
         const ddx = dx - rec._lassoStartDocX;
         const ddy = dy - rec._lassoStartDocY;
         if (ddx * ddx + ddy * ddy > 4) {
@@ -635,24 +646,23 @@ export class InputController {
     this._liquifyPreSnap = null;
   }
 
-  // ---- 套索 ----
-  // 行为：
-  //   状态 "idle"：pointer down 在 floating 内部 = 拖；否则 = 开始画选区
-  //   状态 "drawing"：扩展路径；up = 闭合 + lift → floating
-  //   状态 "floating"：down 在 floating 内 = 拖；down 在外 = commit 当前 + 新选区
-  //   commit / abort 自动收 history entry
+  // ---- 套索 ----（v65 重构：lasso 只编辑选区 doc.selection；变换是显式按钮）
+  //   floating 状态（transform 中）：hit-test handle / 内部拖；空白无操作（必须走应用/取消）
+  //   非 floating：pointerdown 进 tentative；超阈值后按 subTool 分支：
+  //     freehand → drawing-freehand
+  //     rect     → drawing-rect
+  //     magic    → magic-tentative（pointerup 时立即 flood fill）
   _beginLasso(rec) {
     if (!this.doc.activeLayer) { rec.role = null; return; }
     const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
     if (this.lasso.state() === "floating") {
-      // hit-test：handle / 内部翻译 / warp 软拖 → 启动 transform
       const hit = this.lasso.hitTest(dx, dy, this.board.viewport.scale);
       if (hit) {
         rec._lassoMode = "transform";
         this.lasso.beginDrag(hit, dx, dy);
         return;
       }
-      // 没击中 = no-op（卡在 floating，必须走应用 / 取消 / 切工具）。详见 v57 UX 决策
+      // floating 外按下：no-op（防误触自动 commit；走应用 / 取消按钮）
       rec.role = null;
       return;
     }
@@ -662,16 +672,32 @@ export class InputController {
   }
   _endLasso(rec) {
     if (rec._lassoMode === "drawing") {
-      const ok = this.lasso.endPath(this.doc.activeLayer);
-      if (ok) {
+      // freehand / rect / magic-tentative 共用：lasso 自己根据 state 走对的分支
+      const entry = this.lasso.endPath(this.doc.activeLayer);
+      if (entry) {
+        if (this.history) this.history.push(entry);
         this.board.invalidateAll();
       } else {
-        this.status("选区太小，已取消");
+        // tentative 状态下 magic 点击 = 上面 endPath 已处理；其他没结果就静默
+        this.lasso.cancelDrawing();
       }
     } else if (rec._lassoMode === "transform") {
       this.lasso.endDrag();
+    } else if (rec._lassoMode === "tentative") {
+      // 没拖到阈值 → magic 子工具仍触发（魔术棒是 tap）；freehand / rect 静默
+      if (this.lasso.getSubTool() === "magic") {
+        // 模拟一次 beginPath + endPath 走 magic 路径
+        const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
+        this.lasso.beginPath(dx, dy);     // 进 magic-tentative + 记起点
+        const entry = this.lasso.endPath(this.doc.activeLayer);
+        if (entry) {
+          if (this.history) this.history.push(entry);
+          this.board.invalidateAll();
+        } else {
+          this.status("魔术棒：未选中任何像素");
+        }
+      }
     }
-    // tentative 不报任何状态——用户根本没想画
   }
   _commitLasso() {
     const entry = this.lasso.commit();
@@ -682,15 +708,13 @@ export class InputController {
     compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
   }
   _abortLasso() {
-    // 进行中的 path 直接丢；floating 还原 pre-snapshot（不进 history）
+    // floating（变换中）→ 还原 pre-snapshot
     if (this.lasso.state() === "floating") {
       this.lasso.cancel();
       this.board.invalidateAll();
     } else {
-      // drawing 中 → 简单中断
-      this.lasso._points = [];
-      this.lasso._state = "idle";
-      this.lasso.onChange();
+      // drawing-freehand / drawing-rect / magic-tentative → 丢弃，不进 history
+      this.lasso.cancelDrawing();
     }
   }
   // 给外部（tool 切换、Esc）用：commit 当前 floating（如果有）。
@@ -886,6 +910,13 @@ export class InputController {
     else if (e.key === "l" || e.key === "L") this._emitTool("lasso");
     else if (e.key === "Enter" && this.lasso.state() === "floating") { this._commitLasso(); e.preventDefault(); }
     else if (e.key === "Escape" && this.lasso.state() === "floating") { this._abortLasso(); e.preventDefault(); }
+    // Esc 在非 floating 状态 = 取消选区（仅有选区时；不进 history 显式 push 会让 toolbar 自动更新）
+    else if (e.key === "Escape" && this.lasso.hasSelection() && this.lasso.state() === "idle") {
+      const entry = this.lasso.setSelection(null);
+      if (entry && this.history) this.history.push(entry);
+      this.board.invalidateAll();
+      e.preventDefault();
+    }
     else if (e.key === "0") this.board.fitToScreen();
     else if (e.key === "=" || e.key === "+") this.board.zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1.2);
     else if (e.key === "-" || e.key === "_") this.board.zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1 / 1.2);

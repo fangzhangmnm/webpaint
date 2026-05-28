@@ -29,33 +29,151 @@
 
 export class LassoEngine {
   constructor() {
-    this._state = "idle";    // idle | drawing | floating
-    this._points = [];
+    this._state = "idle";         // idle | drawing-freehand | drawing-rect | floating
+    this._subTool = "freehand";   // freehand | rect | magic
+    this._setOpMode = "new";      // new | union | subtract | intersect
+    this._magicThreshold = 20;    // 0..100；魔术棒颜色相似度
+    this._points = [];            // freehand draft
+    this._rect = null;            // {x0, y0, x1, y1} during rect draw
+    this._magicStart = null;      // for magic-tap path
     this._floating = null;
-    this._drag = null;       // { kind: "translate" | "corner" | "edge" | "warp-point", ... }
+    this._drag = null;
+    this.doc = null;              // 由 input.js 注入；选区是 doc 的一等公民
     this.onChange = () => {};
   }
+  setDoc(doc) { this.doc = doc; }
+  setSubTool(name) {
+    if (this._subTool === name) return;
+    this._subTool = name;
+    this._points = []; this._rect = null; this._magicStart = null;
+    this._state = "idle";
+    this.onChange();
+  }
+  getSubTool() { return this._subTool; }
+  setSetOpMode(mode) { this._setOpMode = mode; this.onChange(); }
+  getSetOpMode() { return this._setOpMode; }
+  setMagicThreshold(v) { this._magicThreshold = Math.max(0, Math.min(100, v)); }
+  getMagicThreshold() { return this._magicThreshold; }
 
-  // -------- 选区路径 --------
+  // -------- 选区路径（按 subTool 路由）--------
   beginPath(x, y) {
-    this._state = "drawing";
-    this._points = [{ x, y }];
+    if (this._floating) return;        // transform 期间不能再画
+    if (this._subTool === "freehand") {
+      this._state = "drawing-freehand";
+      this._points = [{ x, y }];
+    } else if (this._subTool === "rect") {
+      this._state = "drawing-rect";
+      this._rect = { x0: x, y0: y, x1: x, y1: y };
+    } else if (this._subTool === "magic") {
+      // 单击：不进 drawing 状态；input.js 的 _endLasso 看 magicStart 做 flood fill
+      this._state = "magic-tentative";
+      this._magicStart = { x, y };
+    }
     this.onChange();
   }
   extendPath(x, y) {
-    if (this._state !== "drawing") return;
-    const p = this._points[this._points.length - 1];
-    if (p && Math.abs(p.x - x) < 1 && Math.abs(p.y - y) < 1) return;
-    this._points.push({ x, y });
+    if (this._state === "drawing-freehand") {
+      const p = this._points[this._points.length - 1];
+      if (p && Math.abs(p.x - x) < 1 && Math.abs(p.y - y) < 1) return;
+      this._points.push({ x, y });
+      this.onChange();
+    } else if (this._state === "drawing-rect") {
+      this._rect.x1 = x;
+      this._rect.y1 = y;
+      this.onChange();
+    }
+  }
+  // 收笔：rasterize → combine with doc.selection per setOpMode → 更新 doc.selection
+  // 返回 history entry（caller push）或 null（选区无效 / 没动）
+  endPath(activeLayer) {
+    let newSel = null;
+    if (this._state === "drawing-freehand") {
+      newSel = this._rasterizeFreehandToSelection(this._points);
+      this._points = [];
+    } else if (this._state === "drawing-rect") {
+      newSel = this._rasterizeRectToSelection(this._rect);
+      this._rect = null;
+    } else if (this._state === "magic-tentative") {
+      newSel = this._magicWandToSelection(this._magicStart, activeLayer);
+      this._magicStart = null;
+    }
+    this._state = "idle";
+    if (!newSel) { this.onChange(); return null; }
+    return this._applySelectionUpdate(newSel);
+  }
+  // 编程入口（取消选区 / 反选 / 由 history undo 调用恢复）
+  setSelection(sel) {
+    if (!this.doc) return null;
+    const oldSel = this.doc.selection;
+    if (oldSel === sel) return null;
+    this.doc.selection = sel;
+    this.onChange();
+    return { type: "selectionChange", before: oldSel, after: sel };
+  }
+  hasSelection() { return !!this.doc?.selection; }
+  getSelection() { return this.doc?.selection || null; }
+  cancelDrawing() {
+    this._state = "idle";
+    this._points = []; this._rect = null; this._magicStart = null;
     this.onChange();
   }
-  // 闭合 + lift。返回 true = 成功 lift。
-  endPath(layer) {
-    if (this._state !== "drawing") return false;
-    const pts = this._points;
-    this._points = [];
-    if (pts.length < 3) { this._state = "idle"; this.onChange(); return false; }
 
+  // 用 doc.selection 作 mask source，把对应 layer 像素 lift 到 floating。
+  // 完成后进 floating 状态（transform 子状态）。
+  // 默认进入 free 模式（不再走 v56 那种"selected sub-state"）
+  liftSelectionForTransform(layer) {
+    if (this._floating) return false;
+    const sel = this.doc?.selection;
+    if (!sel) return false;
+    const lbX = layer.bboxX, lbY = layer.bboxY, lbW = layer.bboxW, lbH = layer.bboxH;
+    // 选区可能跨 layer.bbox 外；clip 到交集
+    const x0 = Math.max(lbX, sel.bboxX);
+    const y0 = Math.max(lbY, sel.bboxY);
+    const x1 = Math.min(lbX + lbW, sel.bboxX + sel.bboxW);
+    const y1 = Math.min(lbY + lbH, sel.bboxY + sel.bboxH);
+    const w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return false;
+
+    const preSnap = layer.snapshot();
+
+    // floating canvas = layer ∩ selection mask（在交集 bbox 内）
+    const floating = makeBitmap(w, h);
+    const fctx = floating.getContext("2d");
+    fctx.drawImage(layer.canvas, x0 - lbX, y0 - lbY, w, h, 0, 0, w, h);
+    fctx.globalCompositeOperation = "destination-in";
+    fctx.drawImage(sel.maskCanvas, sel.bboxX - x0, sel.bboxY - y0);
+    fctx.globalCompositeOperation = "source-over";
+    const floatingImageData = fctx.getImageData(0, 0, w, h);
+
+    // 挖空 layer
+    const lctx = layer.ctx;
+    lctx.save();
+    lctx.globalCompositeOperation = "destination-out";
+    lctx.drawImage(sel.maskCanvas, sel.bboxX - lbX, sel.bboxY - lbY);
+    lctx.restore();
+
+    this._floating = {
+      canvas: floating,
+      imageData: floatingImageData,
+      srcW: w, srcH: h,
+      layer, preSnap,
+      mode: "free",                  // 默认就是 free 模式（不再有 selected sub-state）
+      meshN: 2,
+      mesh: [
+        [{ x: x0,     y: y0     }, { x: x0 + w, y: y0     }],
+        [{ x: x0,     y: y0 + h }, { x: x0 + w, y: y0 + h }],
+      ],
+      uniformAspect: w / Math.max(1, h),
+      _renderCache: null,
+    };
+    this._state = "floating";
+    this.onChange();
+    return true;
+  }
+
+  // ---- rasterize helpers（返回 selection-shaped object 或 null）----
+  _rasterizeFreehandToSelection(pts) {
+    if (pts.length < 3) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of pts) {
       if (p.x < minX) minX = p.x;
@@ -63,24 +181,12 @@ export class LassoEngine {
       if (p.x > maxX) maxX = p.x;
       if (p.y > maxY) maxY = p.y;
     }
-    const lbX = layer.bboxX, lbY = layer.bboxY, lbW = layer.bboxW, lbH = layer.bboxH;
-    const x0 = Math.max(lbX, Math.floor(minX));
-    const y0 = Math.max(lbY, Math.floor(minY));
-    const x1 = Math.min(lbX + lbW, Math.ceil(maxX));
-    const y1 = Math.min(lbY + lbH, Math.ceil(maxY));
+    const x0 = Math.floor(minX), y0 = Math.floor(minY);
+    const x1 = Math.ceil(maxX),  y1 = Math.ceil(maxY);
     const w = x1 - x0, h = y1 - y0;
-    if (w <= 0 || h <= 0) { this._state = "idle"; this.onChange(); return false; }
-
-    // lift = dst-out layer + 把 mask 区域像素拷到 floating。layer 进入"有洞"状态。
-    // 这不是数据损坏 —— 用户最多丢这次 lift（重开看到洞，可以擦掉重画）。
-    // 配套：(a) skip autosave during floating —— IDB 不写洞；
-    //      (b) auto-commit on explicit save / gallery / session switch —— 用户期望"save = 当前所见"
-    const preSnap = layer.snapshot();
-
-    // mask
+    if (w <= 0 || h <= 0) return null;
     const maskCanvas = makeBitmap(w, h);
     const mctx = maskCanvas.getContext("2d");
-    mctx.clearRect(0, 0, w, h);
     mctx.fillStyle = "#fff";
     mctx.beginPath();
     for (let i = 0; i < pts.length; i++) {
@@ -90,42 +196,90 @@ export class LassoEngine {
     }
     mctx.closePath();
     mctx.fill("evenodd");
-
-    // floating canvas = layer ∩ mask
-    const floating = makeBitmap(w, h);
-    const fctx = floating.getContext("2d");
-    fctx.drawImage(layer.canvas, x0 - lbX, y0 - lbY, w, h, 0, 0, w, h);
-    fctx.globalCompositeOperation = "destination-in";
-    fctx.drawImage(maskCanvas, 0, 0);
-    fctx.globalCompositeOperation = "source-over";
-    // 拍一份 ImageData 给 per-pixel renderer 用（getImageData 是 CPU readback，
-    // 这里 lift 一次性付费，后续渲染只读这份）
-    const floatingImageData = fctx.getImageData(0, 0, w, h);
-
-    // 挖空 layer
-    const lctx = layer.ctx;
-    lctx.save();
-    lctx.globalCompositeOperation = "destination-out";
-    lctx.drawImage(maskCanvas, x0 - lbX, y0 - lbY);
-    lctx.restore();
-
-    this._floating = {
-      canvas: floating,
-      imageData: floatingImageData,         // ← 给 per-pixel renderer
-      srcW: w, srcH: h,
-      layer, preSnap,
-      mode: null,
-      meshN: 2,
-      mesh: [
-        [{ x: x0,     y: y0     }, { x: x0 + w, y: y0     }],
-        [{ x: x0,     y: y0 + h }, { x: x0 + w, y: y0 + h }],
-      ],
-      uniformAspect: w / Math.max(1, h),
-      _renderCache: null,                   // {canvas, dstX, dstY} | null；mesh 改时 setMesh 处 invalidate
-    };
-    this._state = "floating";
+    return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas };
+  }
+  _rasterizeRectToSelection(r) {
+    if (!r) return null;
+    const x0 = Math.floor(Math.min(r.x0, r.x1));
+    const y0 = Math.floor(Math.min(r.y0, r.y1));
+    const x1 = Math.ceil(Math.max(r.x0, r.x1));
+    const y1 = Math.ceil(Math.max(r.y0, r.y1));
+    const w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return null;
+    const maskCanvas = makeBitmap(w, h);
+    const mctx = maskCanvas.getContext("2d");
+    mctx.fillStyle = "#fff";
+    mctx.fillRect(0, 0, w, h);
+    return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas };
+  }
+  // 魔术棒：从点击像素开始 flood fill，颜色差 ≤ threshold 的相邻像素都被选中
+  _magicWandToSelection(start, layer) {
+    if (!start || !layer || !(layer.bboxW > 0 && layer.bboxH > 0)) return null;
+    const lbX = layer.bboxX, lbY = layer.bboxY;
+    const lbW = layer.bboxW, lbH = layer.bboxH;
+    const sx = Math.floor(start.x) - lbX;
+    const sy = Math.floor(start.y) - lbY;
+    if (sx < 0 || sx >= lbW || sy < 0 || sy >= lbH) return null;
+    // 读 layer 像素
+    const img = layer.ctx.getImageData(0, 0, lbW, lbH);
+    const data = img.data;
+    const startIdx = (sy * lbW + sx) * 4;
+    const sr = data[startIdx], sg = data[startIdx + 1], sb = data[startIdx + 2], sa = data[startIdx + 3];
+    // threshold: 0..100 → max squared RGB+A distance（每通道 max 255）
+    // 用 max-norm（max diff per channel）更符合直觉
+    const tCh = this._magicThreshold * 2.55;       // 0 = exact，100 ≈ any
+    const visited = new Uint8Array(lbW * lbH);     // 0 = not visited
+    const mask = new Uint8Array(lbW * lbH);
+    const stack = [sx + sy * lbW];
+    visited[sx + sy * lbW] = 1;
+    while (stack.length) {
+      const p = stack.pop();
+      const i4 = p * 4;
+      const dr = Math.abs(data[i4] - sr);
+      const dg = Math.abs(data[i4 + 1] - sg);
+      const db = Math.abs(data[i4 + 2] - sb);
+      const da = Math.abs(data[i4 + 3] - sa);
+      if (Math.max(dr, dg, db, da) > tCh) continue;
+      mask[p] = 255;
+      const px = p % lbW;
+      const py = (p - px) / lbW;
+      // 4-connected
+      if (px > 0       && !visited[p - 1])   { visited[p - 1] = 1; stack.push(p - 1); }
+      if (px < lbW - 1 && !visited[p + 1])   { visited[p + 1] = 1; stack.push(p + 1); }
+      if (py > 0       && !visited[p - lbW]) { visited[p - lbW] = 1; stack.push(p - lbW); }
+      if (py < lbH - 1 && !visited[p + lbW]) { visited[p + lbW] = 1; stack.push(p + lbW); }
+    }
+    // trim bbox 紧到 mask 实际区域
+    let mnx = lbW, mny = lbH, mxx = -1, mxy = -1;
+    for (let y = 0; y < lbH; y++) for (let x = 0; x < lbW; x++) {
+      if (mask[y * lbW + x]) {
+        if (x < mnx) mnx = x; if (y < mny) mny = y;
+        if (x > mxx) mxx = x; if (y > mxy) mxy = y;
+      }
+    }
+    if (mxx < 0) return null;
+    const tw = mxx - mnx + 1, th = mxy - mny + 1;
+    const maskCanvas = makeBitmap(tw, th);
+    const mctx = maskCanvas.getContext("2d");
+    const out = mctx.createImageData(tw, th);
+    const odata = out.data;
+    for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
+      const src = mask[(mny + y) * lbW + (mnx + x)];
+      const o = (y * tw + x) * 4;
+      odata[o] = 255; odata[o + 1] = 255; odata[o + 2] = 255; odata[o + 3] = src;
+    }
+    mctx.putImageData(out, 0, 0);
+    return { bboxX: lbX + mnx, bboxY: lbY + mny, bboxW: tw, bboxH: th, maskCanvas };
+  }
+  // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
+  _applySelectionUpdate(newSel) {
+    if (!this.doc) return null;
+    const oldSel = this.doc.selection;
+    const merged = combineSelections(oldSel, newSel, this._setOpMode);
+    if (oldSel === merged) { this.onChange(); return null; }
+    this.doc.selection = merged;
     this.onChange();
-    return true;
+    return { type: "selectionChange", before: oldSel, after: merged };
   }
 
   // -------- 模式切换 --------
@@ -266,7 +420,8 @@ export class LassoEngine {
 
   // -------- 外部查询 --------
   hasFloating() { return this._state === "floating"; }
-  getDrawingPath() { return this._state === "drawing" ? this._points : null; }
+  getDrawingPath() { return this._state === "drawing-freehand" ? this._points : null; }
+  getDrawingRect() { return this._state === "drawing-rect" ? this._rect : null; }
   getFloating() { return this._floating; }
   state() { return this._state; }
 
@@ -564,6 +719,71 @@ export class LassoEngine {
     }
     return null;
   }
+}
+
+// ============ Selection 合成 ============
+
+// 把 newSel 按 mode 合并到 oldSel。selection = {bboxX, bboxY, bboxW, bboxH, maskCanvas}
+// 各 mode：
+//   new       —— 直接替换为 newSel
+//   union     —— old ∪ new                  (max alpha, equivalent to draw both)
+//   subtract  —— old \ new                  (old AND NOT new = destination-out)
+//   intersect —— old ∩ new                  (destination-in)
+// 退化结果（mask 全空）→ 返回 null
+function combineSelections(oldSel, newSel, mode) {
+  if (!newSel) return oldSel;
+  if (mode === "new" || !oldSel) return newSel;
+  // 计算合成 bbox
+  let x0, y0, x1, y1;
+  if (mode === "intersect") {
+    x0 = Math.max(oldSel.bboxX, newSel.bboxX);
+    y0 = Math.max(oldSel.bboxY, newSel.bboxY);
+    x1 = Math.min(oldSel.bboxX + oldSel.bboxW, newSel.bboxX + newSel.bboxW);
+    y1 = Math.min(oldSel.bboxY + oldSel.bboxH, newSel.bboxY + newSel.bboxH);
+    if (x1 <= x0 || y1 <= y0) return null;           // 不交 = 空选区
+  } else {
+    // union / subtract：union bbox
+    x0 = Math.min(oldSel.bboxX, newSel.bboxX);
+    y0 = Math.min(oldSel.bboxY, newSel.bboxY);
+    x1 = Math.max(oldSel.bboxX + oldSel.bboxW, newSel.bboxX + newSel.bboxW);
+    y1 = Math.max(oldSel.bboxY + oldSel.bboxH, newSel.bboxY + newSel.bboxH);
+    if (mode === "subtract") {
+      // 结果不会比 oldSel 大；用 oldSel 的 bbox 即可
+      x0 = oldSel.bboxX; y0 = oldSel.bboxY;
+      x1 = oldSel.bboxX + oldSel.bboxW; y1 = oldSel.bboxY + oldSel.bboxH;
+    }
+  }
+  const w = x1 - x0, h = y1 - y0;
+  const canvas = makeBitmap(w, h);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(oldSel.maskCanvas, oldSel.bboxX - x0, oldSel.bboxY - y0);
+  if (mode === "union") {
+    ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(newSel.maskCanvas, newSel.bboxX - x0, newSel.bboxY - y0);
+  } else if (mode === "subtract") {
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.drawImage(newSel.maskCanvas, newSel.bboxX - x0, newSel.bboxY - y0);
+  } else if (mode === "intersect") {
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.drawImage(newSel.maskCanvas, newSel.bboxX - x0, newSel.bboxY - y0);
+  }
+  ctx.globalCompositeOperation = "source-over";
+  // TODO（P2 完善）：trim bbox 到 mask 实际范围。暂用合成 bbox（可能略大）
+  return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas: canvas };
+}
+
+// 反选：在 docW×docH 上 全白 - 选区 mask
+export function invertSelection(sel, docW, docH) {
+  const canvas = makeBitmap(docW, docH);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, docW, docH);
+  if (sel) {
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.drawImage(sel.maskCanvas, sel.bboxX, sel.bboxY);
+    ctx.globalCompositeOperation = "source-over";
+  }
+  return { bboxX: 0, bboxY: 0, bboxW: docW, bboxH: docH, maskCanvas: canvas };
 }
 
 // ============ 几何工具 ============
