@@ -645,7 +645,16 @@ export class InputController {
     // 归一化到 [-π, π]
     if (dRot > Math.PI) dRot -= 2 * Math.PI;
     if (dRot < -Math.PI) dRot += 2 * Math.PI;
-    const newRot = g.vp.rot + dRot;
+    let newRot = g.vp.rot + dRot;
+    // 接近 0° / 90° / 180° / 270° 时 snap（Procreate 同款）。阈值 5°。
+    const SNAP_DEG = 5;
+    const snapStep = Math.PI / 2;
+    // 规整 newRot 到 (-π, π] 域便于取最近的 n × π/2
+    let n = Math.round(newRot / snapStep);
+    const snapped = n * snapStep;
+    if (Math.abs(newRot - snapped) < SNAP_DEG * Math.PI / 180) {
+      newRot = snapped;
+    }
     // 围绕 g.midX, g.midY 旋转 + 缩放 + 平移到当前 midX, midY
     // 用变换的 anchor-preserving 公式（参考 board.rotateAt / zoomAt）：
     // 1. 起始：viewport = g.vp
