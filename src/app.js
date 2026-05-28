@@ -22,7 +22,7 @@ import {
   copyImageToClipboard, readImageFromClipboard,
 } from "./session.js";
 import { fillSelectionOnLayer, clearSelectionOnLayer, invertSelection } from "./lasso.js";
-import { decodeOraToDoc, encodeDocToOra } from "./ora.js";
+import { decodeOraToDoc, encodeDocToOra, parseAppVersion } from "./ora.js";
 import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
   pushSession, pullSessionByPath, listCloudSessionsRecursive, deleteCloudSession,
@@ -751,6 +751,14 @@ function setStatus(text, persist = false) {
   if (statusTimer) clearTimeout(statusTimer);
   if (!persist) {
     statusTimer = setTimeout(() => { els.statusLabel.textContent = "就绪"; }, 1800);
+  }
+}
+// 文档版本警告：在 setStatus 之上再呈现一个持久 banner（用 doc.body.dataset 给 CSS 染色）
+function updateNewerBanner() {
+  if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
+    document.body.dataset.docNewer = "1";
+  } else {
+    delete document.body.dataset.docNewer;
   }
 }
 // hook board render 更新 HUD
@@ -1497,6 +1505,10 @@ function hexToHsv(hex) {
 // 不走 debounce —— 画图工具不该 300ms 自动保存。
 let _docDirty = false;
 let _docSaving = false;
+// 当前 doc 由比自己高的 WebPaint 版本写过 → 编辑保存有降级风险
+let _loadedDocIsNewer = false;
+let _loadedDocWriterVer = null;
+let _loadedDocNewerConfirmed = false;   // user 已经确认过本 session 的降级风险
 let _cloudPushing = false;     // 区分 IDB 写盘 vs 云端 push（按钮显示不同图标）
 let _docLastSavedAt = 0;
 // **幽灵 current path 保护**：内存里 _activeSessionName 只在 boot load 成功
@@ -1554,6 +1566,19 @@ async function saveNow(opts = {}) {
     if (opts.implicit) return;             // 后台路径：保持 IDB 干净，等用户回来
     applyAllPendingTransients();           // 显式路径：先把变换 / 浮层等都 apply
   }
+  // 文档来自更新版本 → 用户必须显式确认才能覆盖（每个 session 只问一次）
+  // implicit 路径（autosave / visibility / pagehide）直接 skip 保存——防自动覆盖
+  if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
+    if (opts.implicit) return;
+    const ok = await openConfirmSheet(
+      `覆盖更新版本写的画？`,
+      `这画由 ${_loadedDocWriterVer} 写的，你是 ${window.WEBPAINT_VERSION}。` +
+      `保存会丢失新版本特有的属性（如新图层 flag 等）。建议先刷新升级。`,
+    );
+    if (!ok) { setStatus("已取消保存"); return; }
+    _loadedDocNewerConfirmed = true;
+    updateNewerBanner();
+  }
   _docSaving = true;
   updateSaveStatus();
   try {
@@ -1582,6 +1607,9 @@ function adoptLoadedDoc(loaded, sessionName) {
   doc.width = loaded.width;
   doc.height = loaded.height;
   doc.backgroundColor = loaded.backgroundColor;
+  // 跟层无关的 doc-level state（之前漏带 → reload 后丢失）
+  doc.referenceLayerId = loaded.referenceLayerId ?? null;
+  doc.selection = null;     // 跨 session 不沿用选区
   els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   input.clearHistory();
   board.invalidateAll();
@@ -1592,6 +1620,25 @@ function adoptLoadedDoc(loaded, sessionName) {
   _docDirty = false;
   _docLastSavedAt = Date.now();
   updateSaveStatus();
+  // 文档版本检测：写入这画时的 WebPaint 版本 > 当前 → 警告
+  // 防：旧客户端打开新版写的画 → 编辑 → 保存时把新版独有的层属性
+  // （clipping / reference / 未来的扩展）静默吃掉。
+  _loadedDocIsNewer = false;
+  _loadedDocNewerConfirmed = false;
+  const writerN = parseAppVersion(loaded._wroteWith);
+  const selfN   = parseAppVersion(window.WEBPAINT_VERSION);
+  if (writerN !== null && selfN !== null && writerN > selfN) {
+    _loadedDocIsNewer = true;
+    _loadedDocWriterVer = loaded._wroteWith;
+    setStatus(
+      `这画由 ${loaded._wroteWith} 写的，你是 ${window.WEBPAINT_VERSION} —— ` +
+      `编辑保存会丢失新版特有的层属性。建议先刷新升级。`,
+      true,
+    );
+  } else {
+    _loadedDocWriterVer = null;
+  }
+  updateNewerBanner();
   // 恢复 reference 小窗（.ora webpaint/ 扩展）
   if (loaded._referenceBlob) {
     createImageBitmap(loaded._referenceBlob).then((bitmap) => {

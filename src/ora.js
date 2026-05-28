@@ -133,8 +133,13 @@ function buildStackXml(doc) {
     ];
     layers.push(`    <layer ${attrs.join(" ")} />`);
   }
+  // wrote-with：记录写入这份 .ora 时的 WebPaint 版本号。
+  // 用途：读取端若发现比自己版本高 → 警告（避免旧版客户端静默吃掉新版图层属性）
+  // 论证见 conversation v71→v72。
+  const wroteWith = (typeof window !== "undefined" && window.WEBPAINT_VERSION) ||
+                    (typeof self !== "undefined" && self.WEBPAINT_VERSION) || "";
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<image version="0.0.3" w="${doc.width}" h="${doc.height}" xres="72" yres="72" xmlns:webpaint="https://github.com/fangzhangmnm/webpaint/ns">
+<image version="0.0.3" w="${doc.width}" h="${doc.height}" xres="72" yres="72" xmlns:webpaint="https://github.com/fangzhangmnm/webpaint/ns" webpaint:wrote-with="${escapeXml(wroteWith)}">
   <stack name="root">
 ${layers.join("\n")}
   </stack>
@@ -239,7 +244,8 @@ function parseStackXml(xmlText) {
     clippingMask: n.getAttribute("webpaint:clipping") === "true",
     isReference: n.getAttribute("webpaint:reference") === "true",
   }));
-  return { w, h, layers };
+  const wroteWith = image.getAttribute("webpaint:wrote-with") || null;
+  return { w, h, layers, wroteWith };
 }
 
 /** Blob (.ora) → PaintDoc */
@@ -301,5 +307,14 @@ export async function decodeOraToDoc(blob) {
       console.warn("[ora] webpaint/state.json parse failed:", e);
     }
   }
+  doc._wroteWith = meta.wroteWith || null;
   return doc;
+}
+
+// 把版本号字符串（"v71-2026-05-28" 或 "v71"）解析成可比较的整数。
+// 失败 → null（caller 跳过比较；零信息时不警告）
+export function parseAppVersion(s) {
+  if (!s) return null;
+  const m = String(s).match(/^v(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
 }

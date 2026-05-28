@@ -755,6 +755,9 @@ input[type=range] {
 .gallery-foot-usage { font-variant-numeric: tabular-nums; }
 .gallery-foot-usage.usage-warn { color: #d97706; font-weight: 600; }
 .gallery-foot-usage.usage-critical { color: #dc2626; font-weight: 700; }
+/* 文档版本警告：身体一圈细红边 + 顶栏染色，提示用户当前 doc 来自更新版本 */
+body[data-doc-newer="1"] .top-bar { border-color: #dc2626; box-shadow: 0 0 0 2px rgba(220, 38, 38, .25), var(--shadow); }
+body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 .gallery-foot-hint { color: var(--ink-soft); font-size: 11px; opacity: 0.7; }
 
 .menu-item-info {
