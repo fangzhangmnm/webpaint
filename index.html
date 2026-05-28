@@ -271,7 +271,7 @@
         <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
         <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" title="约束 1:1（正方 / 圆）">1:1</button>
         <!-- 魔术棒设置弹出按钮（magic sub-tool only） -->
-        <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒设置（阈值 / 容隙）">设置</button>
+        <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒阈值">设置</button>
       </div>
       <!-- 魔术棒设置 popup（点 ⚙ 弹出，再点别处关） -->
       <div class="lasso-popup hidden" id="lassoMagicPopup" role="dialog" aria-label="魔术棒设置">
@@ -279,11 +279,6 @@
           <span>阈值</span>
           <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" />
           <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
-        </label>
-        <label class="lasso-popup-row">
-          <span title="容忍线稿小缝隙；0 = 不容隙">容隙</span>
-          <input type="range" id="lassoMagicGap" min="0" max="10" step="1" value="4" />
-          <span id="lassoMagicGapVal" class="lasso-popup-val">4</span>
         </label>
       </div>
       <!-- 选区动作（has-selection 时显） -->

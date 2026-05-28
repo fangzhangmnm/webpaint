@@ -34,7 +34,6 @@ export class LassoEngine {
     this._setOpMode = "new";      // new | union | subtract | intersect
     this._constrainSquare = false; // rect / ellipse 是否强制 1:1（正方形 / 圆）
     this._magicThreshold = 20;    // 0..100；魔术棒颜色相似度
-    this._magicGapPx = 4;         // 0..10 px；缝隙容隙（容隙），> 0 时启用 gap closing
     this._sampleMode = "bilinear";// nearest | bilinear | bicubic（transform 重采样质量）
     this._points = [];            // freehand draft
     this._rect = null;            // {x0, y0, x1, y1} during rect / ellipse draw
@@ -57,8 +56,6 @@ export class LassoEngine {
   getSetOpMode() { return this._setOpMode; }
   setMagicThreshold(v) { this._magicThreshold = Math.max(0, Math.min(100, v)); }
   getMagicThreshold() { return this._magicThreshold; }
-  setMagicGapPx(v) { this._magicGapPx = Math.max(0, Math.min(10, v | 0)); }
-  getMagicGapPx() { return this._magicGapPx; }
   setSampleMode(m) {
     if (m === "nearest" || m === "bilinear" || m === "bicubic") {
       this._sampleMode = m;
@@ -258,17 +255,16 @@ export class LassoEngine {
     mctx.fill();
     return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas };
   }
-  // 魔术棒：tap → flood fill → 颜色差 ≤ threshold 的相邻像素入选。
+  // 魔术棒：tap → flood fill 颜色差 ≤ threshold 的相邻像素入选。
   //
-  // 经典 bug 1（v66）+ 又犯一次（v69）：迭代局限在 layer.bbox 内
-  // → 点空白处只能选到 bbox 矩形。修：迭代 **整 doc 尺寸**，layer bbox 外
-  // 视为 (0,0,0,0) 透明像素。点空白时 flood 能跨出 layer bbox 选到全部相连透明。
+  // 经典 bug（v66 + v69 又犯）：iteration 局限在 layer.bbox 内 → 点空白只选到
+  // bbox 矩形。修：迭代**整 doc 尺寸**，layer.bbox 外当 (0,0,0,0) 透明像素。
   //
-  // 容隙模式（gapPx > 0，WebPaint 独有）：处理线稿不闭合的小缝。
-  //   step 1: 标 barrier（颜色差 > threshold = 「线」）
-  //   step 2: dilate barrier N px，缝隙 ≤ 2N 自动封口
-  //   step 3: flood fill in non-barrier
-  //   step 4: dilate fill mask N px，让选区贴回原线
+  // 历史「容隙」功能 v71→v79 撤掉：barrier dilate N px 会盖住 user 的 tap 点
+  // 让小区域整片不可点。详 docs/lessons-magic-wand-gap-closing.md。
+  //
+  // 内存（2048² doc）：layerData 16MB + visited buffer 4MB + maskCanvas
+  // 仅 bbox 大小。barrier 不再单独 alloc（diff 算在 flood fill 里 inline）。
   _magicWandToSelection(start, sourceLayer) {
     if (!start || !this.doc) return null;
     const docW = this.doc.width, docH = this.doc.height;
@@ -276,7 +272,6 @@ export class LassoEngine {
     const sy = Math.floor(start.y);
     if (sx < 0 || sx >= docW || sy < 0 || sy >= docH) return null;
 
-    // 取 source layer pixels（可能小于 doc）；layer 外当透明
     const lbX = sourceLayer?.bboxX ?? 0;
     const lbY = sourceLayer?.bboxY ?? 0;
     const lbW = sourceLayer?.bboxW ?? 0;
@@ -285,7 +280,6 @@ export class LassoEngine {
     if (sourceLayer && lbW > 0 && lbH > 0) {
       layerData = sourceLayer.ctx.getImageData(0, 0, lbW, lbH).data;
     }
-
     // tap 点颜色（layer 外 → 透明）
     let sr = 0, sg = 0, sb = 0, sa = 0;
     if (layerData && sx >= lbX && sx < lbX + lbW && sy >= lbY && sy < lbY + lbH) {
@@ -293,75 +287,61 @@ export class LassoEngine {
       sr = layerData[idx]; sg = layerData[idx + 1]; sb = layerData[idx + 2]; sa = layerData[idx + 3];
     }
     const tCh = this._magicThreshold * 2.55;
-    const N = this._magicGapPx | 0;
     const total = docW * docH;
 
-    // step 1: barrier 整 doc 尺寸。layer 外按透明 diff 决定一次：透明 vs tap
-    const outsideDiff = Math.max(sr, sg, sb, sa);  // = max(|0-sr|, |0-sg|, |0-sb|, |0-sa|)
-    const outsideIsBarrier = outsideDiff > tCh ? 1 : 0;
-    const barrier = new Uint8Array(total);
-    if (outsideIsBarrier) barrier.fill(1);
-    // layer 内：per-pixel barrier
-    if (layerData) {
-      for (let y = 0; y < lbH; y++) {
-        const docY = lbY + y;
-        if (docY < 0 || docY >= docH) continue;
-        for (let x = 0; x < lbW; x++) {
-          const docX = lbX + x;
-          if (docX < 0 || docX >= docW) continue;
-          const i4 = (y * lbW + x) * 4;
-          const dr = Math.abs(layerData[i4]     - sr);
-          const dg = Math.abs(layerData[i4 + 1] - sg);
-          const db = Math.abs(layerData[i4 + 2] - sb);
-          const da = Math.abs(layerData[i4 + 3] - sa);
-          barrier[docY * docW + docX] = Math.max(dr, dg, db, da) > tCh ? 1 : 0;
-        }
+    // 「layer 外」的 barrier 算一次：透明 (0,0,0,0) 跟 tap 色的 max-diff
+    const outsideIsBarrier = Math.max(sr, sg, sb, sa) > tCh;
+    // inline barrier 检查：返回 true = 是 barrier = flood 不能进
+    const isBarrier = (p) => {
+      const py = (p / docW) | 0;
+      const px = p - py * docW;
+      if (!layerData || px < lbX || px >= lbX + lbW || py < lbY || py >= lbY + lbH) {
+        return outsideIsBarrier;
       }
-    }
-    // step 2: dilate barrier
-    const effBarrier = N > 0 ? dilateBinary(barrier, docW, docH, N) : barrier;
-    if (effBarrier[sx + sy * docW]) return null;
-    // step 3: flood fill；同时 track mask bbox 省后面扫一遍
-    const visited = new Uint8Array(total);
-    let mask = new Uint8Array(total);
-    const stack = [sx + sy * docW];
-    visited[sx + sy * docW] = 1;
+      const i4 = ((py - lbY) * lbW + (px - lbX)) * 4;
+      const dr = Math.abs(layerData[i4]     - sr);
+      const dg = Math.abs(layerData[i4 + 1] - sg);
+      const db = Math.abs(layerData[i4 + 2] - sb);
+      const da = Math.abs(layerData[i4 + 3] - sa);
+      return Math.max(dr, dg, db, da) > tCh;
+    };
+
+    // combined buffer：0 = 未访问；1 = 进入 mask；2 = 访问过但是 barrier
+    // 比之前的 barrier + visited + mask 三个数组省 8MB
+    const combined = new Uint8Array(total);
+    const startIdx = sx + sy * docW;
+    if (isBarrier(startIdx)) return null;
+
+    const stack = [startIdx];
     let mnx = docW, mny = docH, mxx = -1, mxy = -1;
     while (stack.length) {
       const p = stack.pop();
-      if (effBarrier[p]) continue;
-      mask[p] = 255;
+      if (combined[p] !== 0) continue;
+      if (isBarrier(p)) { combined[p] = 2; continue; }
+      combined[p] = 1;
       const px = p % docW;
       const py = (p - px) / docW;
       if (px < mnx) mnx = px; if (px > mxx) mxx = px;
       if (py < mny) mny = py; if (py > mxy) mxy = py;
-      if (px > 0        && !visited[p - 1])    { visited[p - 1] = 1; stack.push(p - 1); }
-      if (px < docW - 1 && !visited[p + 1])    { visited[p + 1] = 1; stack.push(p + 1); }
-      if (py > 0        && !visited[p - docW]) { visited[p - docW] = 1; stack.push(p - docW); }
-      if (py < docH - 1 && !visited[p + docW]) { visited[p + docW] = 1; stack.push(p + docW); }
+      if (px > 0        && combined[p - 1]    === 0) stack.push(p - 1);
+      if (px < docW - 1 && combined[p + 1]    === 0) stack.push(p + 1);
+      if (py > 0        && combined[p - docW] === 0) stack.push(p - docW);
+      if (py < docH - 1 && combined[p + docW] === 0) stack.push(p + docW);
     }
     if (mxx < 0) return null;
-    // step 4: dilate mask；bbox 跟着外扩 N
-    if (N > 0) {
-      mask = dilateBinary(mask, docW, docH, N);
-      mnx = Math.max(0, mnx - N);
-      mny = Math.max(0, mny - N);
-      mxx = Math.min(docW - 1, mxx + N);
-      mxy = Math.min(docH - 1, mxy + N);
-    }
-    // Build maskCanvas from [mnx..mxx, mny..mxy]
+
     const tw = mxx - mnx + 1, th = mxy - mny + 1;
     const maskCanvas = makeBitmap(tw, th);
     const mctx = maskCanvas.getContext("2d");
     const out = mctx.createImageData(tw, th);
     const odata = out.data;
     for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
-      const src = mask[(mny + y) * docW + (mnx + x)];
+      const accepted = combined[(mny + y) * docW + (mnx + x)] === 1;
       const o = (y * tw + x) * 4;
-      odata[o] = 255; odata[o + 1] = 255; odata[o + 2] = 255; odata[o + 3] = src;
+      odata[o] = 255; odata[o + 1] = 255; odata[o + 2] = 255;
+      odata[o + 3] = accepted ? 255 : 0;
     }
     mctx.putImageData(out, 0, 0);
-    // mnx/mny 已经是 doc 坐标（迭代是整 doc 尺寸）
     return { bboxX: mnx, bboxY: mny, bboxW: tw, bboxH: th, maskCanvas };
   }
   // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
@@ -1116,41 +1096,6 @@ export function clearSelectionOnLayer(layer, selection) {
 }
 
 // ============ 几何工具 ============
-
-// Chebyshev / 方块 kernel dilate（可分离：横一次 + 纵一次 = 2N 比 N×N 快得多）
-// 输入 / 输出：Uint8Array(w*h)，每个像素 0 或 ≥1（值不区分；输出全 0 / 1）
-function dilateBinary(src, w, h, n) {
-  if (n <= 0) return src;
-  const tmp = new Uint8Array(w * h);
-  // horizontal pass：tmp[y, x] = max(src[y, x-n..x+n])
-  for (let y = 0; y < h; y++) {
-    const row = y * w;
-    let count = 0;
-    // sliding count: 维护窗口内 src=1 的数量
-    for (let x = 0; x < Math.min(n, w); x++) if (src[row + x]) count++;
-    for (let x = 0; x < w; x++) {
-      const right = x + n;
-      if (right < w && src[row + right]) count++;
-      tmp[row + x] = count > 0 ? 1 : 0;
-      const left = x - n;
-      if (left >= 0 && src[row + left]) count--;
-    }
-  }
-  // vertical pass：out[y, x] = max(tmp[y-n..y+n, x])
-  const out = new Uint8Array(w * h);
-  for (let x = 0; x < w; x++) {
-    let count = 0;
-    for (let y = 0; y < Math.min(n, h); y++) if (tmp[y * w + x]) count++;
-    for (let y = 0; y < h; y++) {
-      const bot = y + n;
-      if (bot < h && tmp[bot * w + x]) count++;
-      out[y * w + x] = count > 0 ? 1 : 0;
-      const top = y - n;
-      if (top >= 0 && tmp[top * w + x]) count--;
-    }
-  }
-  return out;
-}
 
 function makeBitmap(w, h) {
   return (typeof OffscreenCanvas !== "undefined")

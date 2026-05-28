@@ -247,8 +247,6 @@ const lassoSetOpBtns = [...lassoSubToolBar.querySelectorAll("[data-lasso-setop]"
 const lassoTransformModeBtns = [...lassoTransformCtrl.querySelectorAll("[data-lasso-mode]")];
 const lassoThresholdInput = document.getElementById("lassoThreshold");
 const lassoThresholdVal = document.getElementById("lassoThresholdVal");
-const lassoMagicGapInput = document.getElementById("lassoMagicGap");
-const lassoMagicGapVal = document.getElementById("lassoMagicGapVal");
 const lassoMagicCfgBtn = document.getElementById("lassoMagicCfgBtn");
 const lassoMagicPopup = document.getElementById("lassoMagicPopup");
 const lassoConstrainBtn = document.getElementById("lassoConstrainBtn");
@@ -312,20 +310,12 @@ for (const b of lassoSetOpBtns) {
     updateLassoToolbar();
   });
 }
-// magic threshold + 容隙
+// magic threshold（容隙功能 v71→v79 撤掉，详 docs/lessons-magic-wand-gap-closing.md）
 lassoThresholdInput.addEventListener("input", () => {
   const v = parseInt(lassoThresholdInput.value, 10) || 0;
   input.lasso.setMagicThreshold(v);
   lassoThresholdVal.textContent = String(v);
 });
-lassoMagicGapInput.addEventListener("input", () => {
-  const v = parseInt(lassoMagicGapInput.value, 10) || 0;
-  input.lasso.setMagicGapPx(v);
-  lassoMagicGapVal.textContent = String(v);
-});
-// 初始化滑块到 lasso 引擎默认值（避免两边不一致）
-lassoMagicGapInput.value = String(input.lasso.getMagicGapPx());
-lassoMagicGapVal.textContent = String(input.lasso.getMagicGapPx());
 // 设置按钮 → popup toggle
 function toggleMagicPopup(e) {
   e.stopPropagation();

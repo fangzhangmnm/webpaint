@@ -682,13 +682,17 @@ export class InputController {
   }
   _endLasso(rec) {
     if (rec._lassoMode === "drawing") {
-      // freehand / rect / magic-tentative 共用：lasso 自己根据 state 走对的分支
-      const entry = this.lasso.endPath(this.doc.getFloodSourceLayer());
-      if (entry) {
-        if (this.history) this.history.push(entry);
-        this.board.invalidateAll();
-      } else {
-        // tentative 状态下 magic 点击 = 上面 endPath 已处理；其他没结果就静默
+      try {
+        const entry = this.lasso.endPath(this.doc.getFloodSourceLayer());
+        if (entry) {
+          if (this.history) this.history.push(entry);
+          this.board.invalidateAll();
+        } else {
+          this.lasso.cancelDrawing();
+        }
+      } catch (e) {
+        console.error("[lasso end]", e);
+        this.status("选区操作出错：" + (e.message || e));
         this.lasso.cancelDrawing();
       }
     } else if (rec._lassoMode === "transform") {
@@ -696,15 +700,20 @@ export class InputController {
     } else if (rec._lassoMode === "tentative") {
       // 没拖到阈值 → magic 子工具仍触发（魔术棒是 tap）；freehand / rect 静默
       if (this.lasso.getSubTool() === "magic") {
-        // 模拟一次 beginPath + endPath 走 magic 路径
-        const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
-        this.lasso.beginPath(dx, dy);     // 进 magic-tentative + 记起点
-        const entry = this.lasso.endPath(this.doc.getFloodSourceLayer());
-        if (entry) {
-          if (this.history) this.history.push(entry);
-          this.board.invalidateAll();
-        } else {
-          this.status("魔术棒：未选中任何像素");
+        try {
+          const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
+          this.lasso.beginPath(dx, dy);
+          const entry = this.lasso.endPath(this.doc.getFloodSourceLayer());
+          if (entry) {
+            if (this.history) this.history.push(entry);
+            this.board.invalidateAll();
+          } else {
+            this.status("魔术棒：tap 在线 / 边界上，没选到");
+          }
+        } catch (e) {
+          // 不要再静默挂 —— v71 容隙 bug 就是因为这条路径默默吞掉错误
+          console.error("[magic-wand]", e);
+          this.status("魔术棒出错：" + (e.message || e));
         }
       }
     }
