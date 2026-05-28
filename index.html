@@ -75,10 +75,11 @@
         </button>
         <button class="tool" id="toolPicker" type="button" data-tool="picker" title="吸色 (Alt 临时)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <!-- 滴管头：菱形，4 个角 (13,11) (17,7) (21,11) (17,15) -->
-            <path d="M13 11l4-4 4 4-4 4z"></path>
-            <!-- 管 + 液滴尖：(3,21)→(5,21)→(5,19)→(13,11)；终点 (13,11) 正好接菱形左下角 -->
-            <path d="M3 21h2v-2l8-8"></path>
+            <!-- 滴管轮廓（一笔闭合，沿对角线 (3,21)→(21,3)）：
+                 尖 (3,21) → 管顶 (5,17)→(12,10) → 肩 (11,9) → 球顶左 (17,3) → 球顶右 (21,7)
+                 → 肩 (15,13) → 管底 (14,12)→(7,19) → 回尖 (3,21)
+                 关键：球宽 (4) 比管宽 (2) 显著大，肩部 1 单位台阶清晰可见；尖端收成一点 -->
+            <path d="M3 21l2-4 7-7-1-1 6-6 4 4-6 6-1-1-7 7z"></path>
           </svg>
         </button>
         <button class="tool" id="toolHand" type="button" data-tool="hand" title="平移 (H / Space)">
@@ -241,6 +242,27 @@
       </div>
     </div>
 
+    <!-- 参考小窗：浮动 panel 装一张参考图，独立 pinch / zoom / rotate -->
+    <div class="float-panel reference-panel hidden" id="referencePanel">
+      <div class="float-panel-head" id="referencePanelHead">
+        <span class="float-panel-title">参考</span>
+        <button class="reference-action-btn" id="referenceLoadBtn" type="button" title="从文件载入">📁</button>
+        <button class="reference-action-btn" id="referenceSnapBtn" type="button" title="抓当前画布">📷</button>
+        <button class="reference-action-btn" id="referenceFitBtn" type="button" title="适应窗口">⤢</button>
+        <button class="float-panel-close" id="referencePanelClose" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="reference-body" id="referenceBody">
+        <canvas id="referenceCanvas" class="reference-canvas"></canvas>
+        <div class="reference-empty" id="referenceEmpty">
+          <p>选个图当参考：</p>
+          <p class="sheet-hint">📁 从文件 · 📷 抓当前画布</p>
+          <p class="sheet-hint">单指拖移 / 双指 pinch + 旋转 / 双击适应</p>
+        </div>
+      </div>
+    </div>
+    <!-- 参考图文件 input（只 image，不接 .ora） -->
+    <input type="file" id="referenceFileInput" accept="image/*" style="display:none" />
+
     <!-- 笔刷设置浮动面板（沿用 .float-panel） -->
     <div class="float-panel brush-panel hidden" id="brushPanel">
       <div class="float-panel-head" id="brushPanelHead">
@@ -306,6 +328,9 @@
       <hr class="menu-sep" />
       <button class="menu-item" id="menuFit" type="button" role="menuitem">
         <span class="menu-item-label">适应画布 (0)</span>
+      </button>
+      <button class="menu-item" id="menuReference" type="button" role="menuitem">
+        <span class="menu-item-label">参考小窗…</span>
       </button>
       <button class="menu-item" id="menuBrushSettings" type="button" role="menuitem">
         <span class="menu-item-label">笔刷平滑设置…</span>

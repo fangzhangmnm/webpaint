@@ -14,6 +14,7 @@ import { Board } from "./board.js";
 import { InputController, compressPixelSnap, applyPixelSnap } from "./input.js";
 import { BrushSettings } from "./brush.js";
 import { UndoStack } from "./history.js";
+import { ReferenceWindow } from "./reference.js";
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   getCurrentSessionName, setCurrentSessionName,
@@ -90,6 +91,17 @@ const els = {
   liquifySizeVal: document.getElementById("liquifySizeVal"),
   liquifyStrength: document.getElementById("liquifyStrength"),
   liquifyStrengthVal: document.getElementById("liquifyStrengthVal"),
+  menuReference: document.getElementById("menuReference"),
+  referencePanel: document.getElementById("referencePanel"),
+  referencePanelHead: document.getElementById("referencePanelHead"),
+  referencePanelClose: document.getElementById("referencePanelClose"),
+  referenceBody: document.getElementById("referenceBody"),
+  referenceCanvas: document.getElementById("referenceCanvas"),
+  referenceEmpty: document.getElementById("referenceEmpty"),
+  referenceLoadBtn: document.getElementById("referenceLoadBtn"),
+  referenceSnapBtn: document.getElementById("referenceSnapBtn"),
+  referenceFitBtn: document.getElementById("referenceFitBtn"),
+  referenceFileInput: document.getElementById("referenceFileInput"),
   galleryFull: document.getElementById("galleryFull"),
   galleryClose: document.getElementById("galleryClose"),
   galleryCurrentName: document.getElementById("galleryCurrentName"),
@@ -1405,6 +1417,63 @@ els.liquifyStrength.addEventListener("input", () => {
   els.liquifyStrengthVal.textContent = String(Math.round(v * 100));
   safeLSSet("webpaint.liquify.strength", String(v));
 });
+
+// ---- 参考小窗 ----
+// 浮动 panel + 独立 viewport（pinch / zoom / rotate）。状态在 ReferenceWindow 内部维护。
+const referenceWindow = new ReferenceWindow({
+  panel: els.referencePanel,
+  head: els.referencePanelHead,
+  body: els.referenceBody,
+  canvas: els.referenceCanvas,
+  closeBtn: els.referencePanelClose,
+  emptyHint: els.referenceEmpty,
+  status: setStatus,
+});
+els.menuReference.addEventListener("click", () => {
+  setMenuOpen(false);
+  referenceWindow.open();
+});
+els.referenceLoadBtn.addEventListener("click", () => {
+  els.referenceFileInput.value = "";
+  els.referenceFileInput.click();
+});
+els.referenceFileInput.addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    const bitmap = await createImageBitmap(file);
+    referenceWindow.setBitmap(bitmap);
+    setStatus(`参考：${file.name}`);
+  } catch (err) {
+    setStatus("参考图载入失败：" + (err && err.message || err));
+  }
+});
+els.referenceSnapBtn.addEventListener("click", async () => {
+  // 抓当前画布合成（不要 viewport 变换，直接拍 doc 全图）
+  try {
+    const c = document.createElement("canvas");
+    c.width = doc.width; c.height = doc.height;
+    const cx = c.getContext("2d");
+    cx.fillStyle = doc.backgroundColor || "#ffffff";
+    cx.fillRect(0, 0, c.width, c.height);
+    for (const layer of doc.layers) {
+      if (!layer.visible) continue;
+      cx.globalAlpha = layer.opacity ?? 1;
+      cx.globalCompositeOperation = layer.mode || "source-over";
+      if (layer.bboxW > 0 && layer.bboxH > 0) {
+        cx.drawImage(layer.canvas, layer.bboxX, layer.bboxY);
+      }
+    }
+    cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
+    const bitmap = await createImageBitmap(c);
+    referenceWindow.setBitmap(bitmap);
+    setStatus("已抓当前画布到参考");
+  } catch (err) {
+    setStatus("抓画布失败：" + (err && err.message || err));
+  }
+});
+els.referenceFitBtn.addEventListener("click", () => referenceWindow.fitToPanel());
+
 els.oraFileInput.addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;

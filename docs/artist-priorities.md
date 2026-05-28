@@ -123,7 +123,7 @@ User 原话举例：
 3. ~~**导入图片到图层**~~ ✅ v39 统一入口（File / 相册 / 剪贴板）
 4. **Lasso + 自由变换**：套索 → move / scale / rotate / skew，进阶 perspective。**草稿打形** vertical slice 必备
 5. ~~**液化**~~ ✅ v46 做了独立 LiquifyEngine（推 / 收 / 胀 / 旋；reconstruct 暂不做；藏在 topbar adjustments 按钮里）。基本可用，待用户检验。
-6. **Reference 小窗**：浮动可拖窗口装参考图（导入 / 当前画布 snapshot），独立 pinch / zoom / rotate。草稿打形必备
+6. ~~**Reference 小窗**~~ ✅ v49 做了 ReferenceWindow（浮动 panel + 独立 viewport + 单指 pan / 双指 pinch+rotate / wheel zoom / 双击适应；支持文件加载和"抓当前画布"两种源；面板可拖可缩，状态 + viewport 持久化到 localStorage）。
 7. **Clipping mask（真正的）**：每个图层可以 clip 到下面那层的 alpha。喷枪 / 渐变上色用。alpha lock 不够。**cel shading 上色** 后续 slice 必备
 
 ### Tier 2：工作流润色
