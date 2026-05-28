@@ -113,6 +113,14 @@ R=60, bbox=120×120=14400 像素，56K reads/event。比 v46 的 ~31K 单 footpr
 
 ## 4. 实现优先级
 
-v47 做 A 路径。**不**改 mode 公式，**不**改 cursor，**不**改 UI。只换内部数据结构。失败回退到 v46 实现（git revert）。
+v48 已做 A 路径（见 src/liquify.js）。
 
-实现完后 user 在 iPad 上跑「反复拖同一处 100 次」验证不糊。
+### 与论证的差异
+- **option (b)**：每个 event 只重采样 footprint 内（dispField 这次变了的那块），footprint 外的 layer 像素保留上次的结果。这正确因为 dispField 在 footprint 外没动 → 那块的 layer 结果上次已对。比"重采整个 dispField bbox"省 10×–100×。
+- **reconstruct 模式**：原本 user 说 "听起来是好东西、先不做"，但 path A 实现起来就一行：`dispField *= (1 - α)`。所以顺手加上当第 5 个 mode。
+
+### 验证（user 在 iPad 上）
+- 笔尖小幅 push → 反复拉同一处 100 次 → 颜色应保真（线条不糊）
+- pinch / bloat 反复 → 不出现"水彩晕开"
+- 推一个图形再切 reconstruct 涂回去 → 应接近原始（dispField → 0）
+- 大半径 R=200 + 长笔触 → 内存：dispField 跟 layer bbox 同大小，最坏 2048² × 8B ≈ 32MB，可接受
