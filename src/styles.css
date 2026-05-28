@@ -758,6 +758,39 @@ input[type=range] {
 /* 文档版本警告：身体一圈细红边 + 顶栏染色，提示用户当前 doc 来自更新版本 */
 body[data-doc-newer="1"] .top-bar { border-color: #dc2626; box-shadow: 0 0 0 2px rgba(220, 38, 38, .25), var(--shadow); }
 body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
+
+/* Sync gate ——— 锁屏 + 决策 sheet（见 docs/sync-design.md） */
+.sync-gate-backdrop { z-index: 100; background: rgba(0, 0, 0, 0.45); }
+.sync-gate-sheet { z-index: 101; max-width: 320px; }
+.sync-gate-spinner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 0; color: var(--ink-soft); font-size: 12px;
+}
+.sync-gate-spinner.hidden { display: none; }
+.spinner-ring {
+  width: 18px; height: 18px;
+  border: 2px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  border-top-color: var(--accent, #4c8bf5);
+  border-radius: 50%;
+  animation: spinner-rot 0.8s linear infinite;
+}
+@keyframes spinner-rot { to { transform: rotate(360deg); } }
+.sync-gate-actions {
+  display: flex; flex-direction: column;
+  gap: 8px; margin-top: 8px;
+}
+.sync-gate-actions button {
+  width: 100%; padding: 10px 14px;
+  font: inherit; font-size: 14px;
+  background: var(--bg-soft); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px;
+  cursor: pointer; text-align: left;
+}
+.sync-gate-actions button.primary {
+  background: var(--accent, #4c8bf5); color: #fff; border-color: var(--accent, #4c8bf5);
+  font-weight: 600;
+}
+.sync-gate-actions button:hover { filter: brightness(0.95); }
 .gallery-foot-hint { color: var(--ink-soft); font-size: 11px; opacity: 0.7; }
 
 .menu-item-info {

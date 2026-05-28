@@ -49,6 +49,32 @@ export function setCloudDirty(name, dirty) {
   try { localStorage.setItem(cloudDirtyKey(name), dirty ? "1" : "0"); } catch (_) {}
 }
 
+// 上次 session 结束时是否是登录态。给「这次离线 → 上次登录的话锁屏问」用。
+// **关键**：user 选「离线」时**不**改这个 flag——意图保留。下次进还会问。
+// 只有显式登录 / 登出才改。
+const LAST_SIGNED_IN_KEY = "webpaint.lastSessionSignedIn";
+export function getLastSessionSignedIn() {
+  try { return localStorage.getItem(LAST_SIGNED_IN_KEY) === "1"; } catch (_) { return false; }
+}
+export function setLastSessionSignedIn(v) {
+  try { localStorage.setItem(LAST_SIGNED_IN_KEY, v ? "1" : "0"); } catch (_) {}
+}
+
+// 拉云端 item metadata（含 etag + lastModified）。不下载 body，~1KB 响应。
+// 失败 → throw。caller 用 try/catch 区分 offline / 404 / 401。
+export async function fetchSessionMetadata(name) {
+  if (!isSignedIn()) throw new Error("未登录 OneDrive");
+  const path = sessionFileName(name);
+  const item = await getItemByPath(path);
+  if (!item) return null;
+  return {
+    etag: item.eTag,
+    lastModified: item.lastModifiedDateTime,
+    size: item.size,
+    item,
+  };
+}
+
 export { isAuthConfigured, initAuth, signIn, signOut, getActiveAccount, isSignedIn, retrySilentSignIn };
 
 // ----- push 当前 session 到 OneDrive -----

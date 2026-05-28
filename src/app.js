@@ -27,6 +27,7 @@ import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
   pushSession, pullSessionByPath, listCloudSessionsRecursive, deleteCloudSession,
   isCloudDirty, setCloudDirty, CloudConflictError,
+  getLastSessionSignedIn, setLastSessionSignedIn, fetchSessionMetadata, getKnownETag,
 } from "./cloud.js";
 
 const THEMES = ["auto", "day", "night"];
@@ -1185,6 +1186,206 @@ function openInputSheet(title, defaultValue = "", { placeholder = "" } = {}) {
     els.genericSheetInput.addEventListener("keydown", onKey);
   });
 }
+// ============ Sync gate ============
+// 锁屏 + 同步状态决策。详见 docs/sync-design.md
+//
+// 设计原则：
+//   - 应该连线 → 拦住用户等
+//   - 应该连线但离线 / token 过期 → user 显式 consent（选「离线」/「登录」）
+//   - 未登录 / 一开始就 offline → 直接走，不卡
+//   - 转圈期间 user 可随时点「离线」fall back，不强制等满
+//   - 「离线」选择**不**更新 lastSessionSignedIn → 意图保留，下次进还问
+
+const syncGate = {
+  backdrop: document.getElementById("syncGateBackdrop"),
+  sheet: document.getElementById("syncGateSheet"),
+  title: document.getElementById("syncGateTitle"),
+  message: document.getElementById("syncGateMessage"),
+  spinner: document.getElementById("syncGateSpinner"),
+  actions: document.getElementById("syncGateActions"),
+};
+function lockSyncGate({ title, message, showSpinner, actions }) {
+  syncGate.title.textContent = title;
+  syncGate.message.textContent = message;
+  syncGate.spinner.classList.toggle("hidden", !showSpinner);
+  syncGate.actions.innerHTML = "";
+  return new Promise((resolve) => {
+    for (const a of actions) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = a.label;
+      if (a.primary) btn.classList.add("primary");
+      btn.addEventListener("click", () => { unlockSyncGate(); resolve(a.value); });
+      syncGate.actions.appendChild(btn);
+    }
+    syncGate.backdrop.classList.remove("hidden");
+    syncGate.sheet.classList.remove("hidden");
+    // 暴露 resolve 让 fetch 完成时能从外部 unlock 并返回
+    syncGate._pendingResolve = resolve;
+  });
+}
+function unlockSyncGate() {
+  syncGate.backdrop.classList.add("hidden");
+  syncGate.sheet.classList.add("hidden");
+  syncGate._pendingResolve = null;
+}
+function settleSyncGate(value) {
+  if (syncGate._pendingResolve) {
+    const r = syncGate._pendingResolve;
+    unlockSyncGate();
+    r(value);
+  }
+}
+
+// 主流程：openSession 后调一次
+async function gateCloudSyncOnOpen(sessionName) {
+  // 未登录过 / 没开 OneDrive 配置 → 不卡
+  if (!isAuthConfigured() || !getLastSessionSignedIn()) return;
+
+  const online = navigator.onLine;
+  // 上次登录这次离线 → 锁屏问意图（不动 lastSessionSignedIn 直到 user 选）
+  if (!online) {
+    const choice = await lockSyncGate({
+      title: "未连接网络",
+      message: "上次是登录 OneDrive 状态。离线只能用本地缓存。",
+      showSpinner: false,
+      actions: [
+        { label: "离线模式", value: "offline" },
+        { label: "稍后再试（取消）", value: "offline", primary: false },
+      ],
+    });
+    if (choice === "offline") setStatus("离线模式：用本地缓存", true);
+    return;
+  }
+
+  // 上次登录这次在线但 isSignedIn() false → token 过期 / silent acquire 失败
+  if (!isSignedIn()) {
+    const choice = await lockSyncGate({
+      title: "OneDrive 登录已过期",
+      message: "token 失效。重登拿云端，离线用本地。",
+      showSpinner: false,
+      actions: [
+        { label: "重新登录", value: "signin", primary: true },
+        { label: "离线模式", value: "offline" },
+      ],
+    });
+    if (choice === "signin") {
+      try { await signIn(); setStatus("已登录"); }
+      catch (e) { setStatus("登录失败：" + (e.message || e), true); return; }
+      // 登录成功 → 重入流程
+      return gateCloudSyncOnOpen(sessionName);
+    }
+    return;     // offline
+  }
+
+  // 登录 + 在线 + token 有效 → 拉云端 etag 比对
+  await checkCloudETag(sessionName);
+}
+
+// 拉 etag，转圈 + 「离线」按钮立刻可用；无硬超时。
+async function checkCloudETag(sessionName) {
+  if (!sessionName) return;
+  // 起 spinner 锁屏；同时跑 fetch
+  const result = await Promise.race([
+    lockSyncGate({
+      title: "检查云端",
+      message: sessionName,
+      showSpinner: true,
+      actions: [
+        { label: "跳过到离线", value: { kind: "skip" } },
+      ],
+    }),
+    (async () => {
+      try {
+        const meta = await fetchSessionMetadata(sessionName);
+        return { kind: "fetched", meta };
+      } catch (e) {
+        return { kind: "error", error: e };
+      }
+    })(),
+  ]);
+  // race 赢家：fetch 完了 → 主动 settle gate（让锁屏关闭）
+  // user 跳过：lockSyncGate 已自己 unlock
+  if (result.kind === "fetched") settleSyncGate(null);
+  else if (result.kind === "error") settleSyncGate(null);
+
+  if (result.kind === "skip") {
+    setStatus("已跳过云端检查，用本地版本");
+    return;
+  }
+  if (result.kind === "error") {
+    setStatus("连不上云端，用本地版本");
+    return;
+  }
+  // 比对
+  const cloudETag = result.meta?.etag || null;
+  const localETag = getKnownETag(sessionName);
+  if (!cloudETag || cloudETag === localETag) {
+    // in sync → 静默
+    return;
+  }
+  // 不一致 → 弹「拉 / 留 / 分支」
+  const cloudTime = result.meta?.lastModified || "?";
+  const choice = await lockSyncGate({
+    title: "云端有新版本",
+    message: `${sessionName} 在云端 ${formatCloudTime(cloudTime)} 有新版本。本地是 ${getLocalSavedAtLabel()}。`,
+    showSpinner: false,
+    actions: [
+      { label: "拉云端（备份本地）", value: "pull", primary: true },
+      { label: "保留本地（之后 push 可能冲突）", value: "keep" },
+      { label: "云端开为副本", value: "branch" },
+    ],
+  });
+  if (choice === "pull") {
+    setStatus("正在拉云端…");
+    try {
+      const r = await pullSessionByPath(sessionName + ".ora");
+      if (r) {
+        // 拉之前先把本地另存一份做备份
+        const backupName = `${sessionName}-backup-${Date.now()}`;
+        await renameLocalSessionAsBackup(sessionName, backupName);
+        const loaded = await decodeOraToDoc(r.blob);
+        adoptLoadedDoc(loaded, r.suggestedName || sessionName);
+        await saveSession(doc, _activeSessionName, {});
+        setStatus(`已拉云端；本地原版备份为「${backupName}」`);
+      }
+    } catch (e) { setStatus("拉云端失败：" + (e.message || e), true); }
+  } else if (choice === "branch") {
+    setStatus("正在拉云端到副本…");
+    try {
+      const r = await pullSessionByPath(sessionName + ".ora");
+      if (r) {
+        const branchName = `${sessionName}-cloud-${Date.now()}`;
+        const loaded = await decodeOraToDoc(r.blob);
+        await saveSession(loaded, branchName, {});
+        setStatus(`云端版已开为「${branchName}」`);
+      }
+    } catch (e) { setStatus("开副本失败：" + (e.message || e), true); }
+  } else {
+    setStatus("已保留本地，云端版本暂不动");
+  }
+}
+
+// 把本地 sessionName 重命名为 backupName（拉云端前的备份）
+async function renameLocalSessionAsBackup(name, backupName) {
+  try {
+    const loaded = await openSession(name);
+    if (loaded) await saveSession(loaded, backupName, {});
+  } catch (e) { console.warn("备份失败：", e); }
+}
+function formatCloudTime(iso) {
+  if (!iso) return "?";
+  const t = Date.parse(iso);
+  if (!t) return iso;
+  const d = new Date(t);
+  return `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+function getLocalSavedAtLabel() {
+  if (!_docLastSavedAt) return "（未保存）";
+  const d = new Date(_docLastSavedAt);
+  return `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 function openConfirmSheet(title, message) {
   return new Promise((resolve) => {
     els.genericSheetTitle.textContent = title;
@@ -1691,14 +1892,48 @@ async function saveAndPush() {
       renderGallery();
     } catch (e) {
       if (e instanceof CloudConflictError) {
-        // 云端有同名 → inline 弹改名 sheet（不再让用户去图库找）
-        setStatus(`云端有同名 "${_activeSessionName}"，改个名再推`, true);
+        // 412 → 锁屏 + 弹「拉云端 / 保留本地 / 都留」
         _cloudPushing = false;
         updateSaveStatus();
-        const newName = await renameCurrentSession({ suggested: _activeSessionName + " (新)", reason: "云端冲突" });
-        if (newName && isSignedIn()) {
-          setCloudDirty(newName, true);
-          queueSave("push");        // 走 coalesce 路径自动重试
+        const sessionName = _activeSessionName;
+        const choice = await lockSyncGate({
+          title: "云端有更新版本",
+          message: `${sessionName} 在云端已被改过。推会覆盖那次改动。`,
+          showSpinner: false,
+          actions: [
+            { label: "拉云端覆盖本地（备份本地）", value: "pull", primary: true },
+            { label: "保留本地另存为副本", value: "rename" },
+            { label: "都留（云端开为副本）", value: "branch" },
+          ],
+        });
+        if (choice === "pull") {
+          try {
+            const r = await pullSessionByPath(sessionName + ".ora");
+            if (r) {
+              const backupName = `${sessionName}-backup-${Date.now()}`;
+              await renameLocalSessionAsBackup(sessionName, backupName);
+              const loaded = await decodeOraToDoc(r.blob);
+              adoptLoadedDoc(loaded, sessionName);
+              await saveSession(doc, sessionName, {});
+              setStatus(`已拉云端；本地原版备份为「${backupName}」`);
+            }
+          } catch (err) { setStatus("拉云端失败：" + (err.message || err), true); }
+        } else if (choice === "rename") {
+          const newName = await renameCurrentSession({ suggested: sessionName + " (新)", reason: "云端冲突" });
+          if (newName && isSignedIn()) {
+            setCloudDirty(newName, true);
+            queueSave("push");
+          }
+        } else if (choice === "branch") {
+          try {
+            const r = await pullSessionByPath(sessionName + ".ora");
+            if (r) {
+              const branchName = `${sessionName}-cloud-${Date.now()}`;
+              const loaded = await decodeOraToDoc(r.blob);
+              await saveSession(loaded, branchName, {});
+              setStatus(`云端版开为「${branchName}」；本地未变`);
+            }
+          } catch (err) { setStatus("开副本失败：" + (err.message || err), true); }
         }
         return;
       } else {
@@ -2636,6 +2871,7 @@ async function renderGallery() {
           adoptLoadedDoc(loaded, item.name);
           setGalleryOpen(false);
           setStatus(`已打开：${item.name}`);
+          gateCloudSyncOnOpen(item.name).catch((e) => console.warn("[sync-gate]", e));
         } catch (err) {
           setStatus("打开失败：" + (err && err.message || err));
         }
@@ -2709,11 +2945,12 @@ function updateCloudAuthUI() {
 els.cloudSignInBtn.addEventListener("click", async () => {
   els.cloudAccountPopup.classList.add("hidden");
   if (!isAuthConfigured()) { setStatus("尚未配置 OneDrive 客户端"); return; }
-  try { await signIn(); } catch (e) { setStatus("登录失败：" + (e && e.message || e)); }
+  try { await signIn(); setLastSessionSignedIn(true); } catch (e) { setStatus("登录失败：" + (e && e.message || e)); }
 });
 els.cloudSignOutBtn.addEventListener("click", async () => {
   els.cloudAccountPopup.classList.add("hidden");
   try { await signOut(); } catch (_) {}
+  setLastSessionSignedIn(false);    // 显式登出 → 下次不问
   updateCloudAuthUI();
   renderGallery();
 });
@@ -2767,7 +3004,11 @@ updateSaveStatus();
 updateCloudAuthUI();
 // MSAL init（懒；只在配了 CLIENT_ID 才 load script），失败安静吞
 if (isAuthConfigured()) {
-  initAuth().then(() => updateCloudAuthUI()).catch((e) => {
+  initAuth().then(() => {
+    // silent acquire 成功后 isSignedIn() = true → 同步 lastSessionSignedIn
+    if (isSignedIn()) setLastSessionSignedIn(true);
+    updateCloudAuthUI();
+  }).catch((e) => {
     console.warn("[auth] init failed:", e);
   });
 }
@@ -2791,6 +3032,8 @@ window.addEventListener("offline", () => { updateCloudAuthUI(); });
     }
     adoptLoadedDoc(loaded, wantedName);
     setStatus(`已恢复：${wantedName} (${loaded.layers.length} 层)`);
+    // 启动 sync gate（不阻塞主流程，但锁屏期间用户不能画）
+    gateCloudSyncOnOpen(wantedName).catch((e) => console.warn("[sync-gate]", e));
   } catch (e) {
     // **幽灵 current path 保护**（feedback-phantom-current-path memory）：
     //   - **不**重置 localStorage.currentSessionName（用户下次冷启动还能再试）

@@ -327,6 +327,16 @@
       </div>
     </div>
 
+    <!-- Sync gate（OneDrive 状态决策；详见 docs/sync-design.md） -->
+    <!-- 锁屏 backdrop 拦住所有 input；sheet 给 user 显式选项。 -->
+    <div class="backdrop sync-gate-backdrop hidden" id="syncGateBackdrop"></div>
+    <div class="sheet sync-gate-sheet hidden" id="syncGateSheet" role="dialog" aria-modal="true">
+      <h3 id="syncGateTitle">同步状态</h3>
+      <p id="syncGateMessage" class="sheet-hint"></p>
+      <div id="syncGateSpinner" class="sync-gate-spinner hidden"><div class="spinner-ring"></div><span>正在检查云端…</span></div>
+      <div id="syncGateActions" class="sync-gate-actions"></div>
+    </div>
+
     <!-- 通用 in-app 对话（替代 alert / prompt / confirm；见 feedback-no-system-dialog） -->
     <div class="backdrop hidden" id="genericBackdrop"></div>
     <div class="sheet hidden" id="genericSheet" role="dialog" aria-modal="true">
