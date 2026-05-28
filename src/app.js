@@ -297,12 +297,39 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () 
   if (theme === "auto") requestAnimationFrame(applyThemeColorsToBoard);
 });
 
+// ---- Pending transients 架构级护栏 ----
+// 思路：app 里可能有多种"未提交的瞬时编辑状态"（套索浮层、未来的 text in progress、
+// shape draft 等）。任何"用户决定性动作"（切工具 / save / 切 session / 进图库 / rename）
+// 之前，都应该让每个 pending state 有个 apply 的机会。
+// 每个 transient state 注册 (check, apply, label)。
+// - check(): 当前是否有 pending
+// - apply(): 把 pending 烤进 doc / layer / 等持久状态
+// - label: 调试用
+const _pendingTransients = [];
+function registerPendingTransient({ check, apply, label }) {
+  _pendingTransients.push({ check, apply, label });
+}
+function hasAnyPendingTransient() {
+  return _pendingTransients.some((p) => { try { return p.check(); } catch { return false; } });
+}
+function applyAllPendingTransients() {
+  for (const p of _pendingTransients) {
+    try { if (p.check()) p.apply(); }
+    catch (e) { console.warn(`[pending] ${p.label} apply failed:`, e); }
+  }
+}
+
+// 注册套索浮层。未来 text / shape 工具的 in-progress state 也在这注册一行
+registerPendingTransient({
+  label: "lasso-floating",
+  check: () => input.lasso.hasFloating(),
+  apply: () => input.commitLassoIfFloating(),
+});
+
 // ---- 工具 ----
 function setTool(t) {
-  // 切走 lasso 时，把当前 floating 选区 commit（避免遗漏；用户预期切工具 = 确认）
-  if (state.tool === "lasso" && t !== "lasso") {
-    input.commitLassoIfFloating();
-  }
+  // 切工具 = 用户决定性动作 → 让所有 pending 先 apply（套索浮层 commit 等）
+  applyAllPendingTransients();
   state.tool = t;
   for (const b of els.toolBtns) b.setAttribute("aria-pressed", b.dataset.tool === t ? "true" : "false");
   // 液化没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
@@ -1196,8 +1223,16 @@ function updateSaveStatus() {
   else if (state === "synced") { els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK; els.topSaveBtn.title = `已同步到云端 · ${name}`; }
   else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `已存本地（IDB 易失，登录云端更安全） · ${name}`; }
 }
-async function saveNow() {
+// opts.implicit = autosave / visibility / pagehide 这类后台路径。
+// floating 状态下 implicit 路径**完全跳**——不把"layer 有洞"持久化进 IDB。
+// 显式路径（Ctrl+S / 切 session / 进图库 / rename）会自动 commit floating 再保存，
+// 匹配用户语义"save = 当前所见，包含正在变换"
+async function saveNow(opts = {}) {
   if (_docSaving) return;
+  if (hasAnyPendingTransient()) {
+    if (opts.implicit) return;             // 后台路径：保持 IDB 干净，等用户回来
+    applyAllPendingTransients();           // 显式路径：先把变换 / 浮层等都 apply
+  }
   _docSaving = true;
   updateSaveStatus();
   try {
@@ -1311,6 +1346,8 @@ async function saveAndPush() {
 // 重命名当前 active session。在画画界面也能调（汉堡菜单），云冲突时也会自动弹。
 // 同名循环检查（local 范围）；返回新名（或 null 取消 / 失败）。
 async function renameCurrentSession({ suggested, reason } = {}) {
+  // 重命名 = 用户决定性动作 → apply pending（套索浮层等）
+  applyAllPendingTransients();
   const oldName = _activeSessionName;
   let candidate = suggested || oldName;
   // 循环直到 user 给出可用名 / 取消
@@ -1404,14 +1441,13 @@ window.addEventListener("keydown", (e) => {
   }
 });
 // 3 min 兜底
-setInterval(() => { if (_docDirty && !_docSaving) saveNow(); }, AUTOSAVE_MS);
-// visibility / pagehide 抢救
+setInterval(() => { if (_docDirty && !_docSaving) saveNow({ implicit: true }); }, AUTOSAVE_MS);
+// visibility / pagehide 抢救（implicit：floating 状态下跳过；layer 留半态在内存，但 IDB 干净）
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden" && _docDirty && !_docSaving) saveNow();
+  if (document.visibilityState === "hidden" && _docDirty && !_docSaving) saveNow({ implicit: true });
 });
 window.addEventListener("pagehide", () => {
-  // pagehide 是同步语境，但 IDB tx 仍能在 page 真被关之前完成（浏览器 grace ~几百 ms）
-  if (_docDirty && !_docSaving) saveNow();
+  if (_docDirty && !_docSaving) saveNow({ implicit: true });
 });
 
 // 菜单：保存 / 分享 / 导出
@@ -1827,14 +1863,15 @@ async function importImageAsLayer(file) {
 let _galleryUrls = [];
 async function setGalleryOpen(open) {
   if (open) {
-    // 进图库 = 立即保存当前 doc 到本地（用户离开编辑场景）
+    // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存
+    applyAllPendingTransients();
     if (_docDirty && !_docSaving) await saveNow();
     document.body.dataset.mode = "gallery";
     els.galleryFull.classList.remove("hidden");
     renderGallery();
     updateIdbUsage();
   } else {
-    // 退图库 = 同样兜底保存一次
+    applyAllPendingTransients();
     if (_docDirty && !_docSaving) await saveNow();
     els.galleryFull.classList.add("hidden");
     delete document.body.dataset.mode;
@@ -2367,6 +2404,9 @@ function showUpdate() {
   els.updateToast.classList.remove("hidden");
 }
 els.updateReload.addEventListener("click", async () => {
+  // 用户决定性动作 → apply 所有 pending（套索浮层等）+ 保一次（reload 会清掉内存）
+  applyAllPendingTransients();
+  if (_docDirty && !_docSaving) await saveNow();
   // **v60 修**：必须把 skip-waiting 推给 WAITING SW，不是 controller。
   // controller = 当前 active SW（旧版本），收到 skipWaiting 无意义；要的是让 waiting
   // 的新 SW 转 active。然后听 controllerchange 再 reload —— 否则 reload 时旧 SW 还

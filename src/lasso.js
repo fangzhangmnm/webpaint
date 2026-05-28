@@ -71,6 +71,10 @@ export class LassoEngine {
     const w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) { this._state = "idle"; this.onChange(); return false; }
 
+    // lift = dst-out layer + 把 mask 区域像素拷到 floating。layer 进入"有洞"状态。
+    // 这不是数据损坏 —— 用户最多丢这次 lift（重开看到洞，可以擦掉重画）。
+    // 配套：(a) skip autosave during floating —— IDB 不写洞；
+    //      (b) auto-commit on explicit save / gallery / session switch —— 用户期望"save = 当前所见"
     const preSnap = layer.snapshot();
 
     // mask
@@ -102,14 +106,11 @@ export class LassoEngine {
     lctx.drawImage(maskCanvas, x0 - lbX, y0 - lbY);
     lctx.restore();
 
-    // mesh: 2×2 对齐到 src bbox（doc 坐标）
-    // mode = null → "selected" 状态：只显轮廓 + 拖内部 = 平移；显示模式选择 toolbar
-    // mode = "free" / "uniform" / "distort" / "warp" → "transforming"：显具体 gizmo + Apply / Cancel
     this._floating = {
       canvas: floating,
       srcW: w, srcH: h,
       layer, preSnap,
-      mode: null,                                       // ← 进 selected 状态等用户挑模式
+      mode: null,
       meshN: 2,
       mesh: [
         [{ x: x0,     y: y0     }, { x: x0 + w, y: y0     }],
