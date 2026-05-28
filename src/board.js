@@ -569,38 +569,42 @@ export class Board {
       ctx.stroke();
       ctx.restore();
     }
-    // (b) 正在画的 path
+    // (b) 正在画的 path —— 风格跟蚂蚁线一致（user：drawing → endPath 不要突变）
     if (info.drawingPath && info.drawingPath.length >= 2) {
+      const dash = 4 / scale;
       ctx.save();
-      ctx.lineWidth = Math.max(1, 1.5 / scale);
-      ctx.strokeStyle = "rgba(0,0,0,0.85)";
-      ctx.setLineDash([6 / scale, 4 / scale]);
+      ctx.lineWidth = 1.2 / scale;
+      ctx.lineCap = "butt";
+      ctx.setLineDash([dash, dash]);
       ctx.beginPath();
       const pts = info.drawingPath;
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.lineDashOffset = 0;
+      ctx.strokeStyle = "#000";
       ctx.stroke();
-      ctx.strokeStyle = "rgba(255,255,255,0.8)";
-      ctx.lineDashOffset = 5 / scale;
+      ctx.lineDashOffset = dash;
+      ctx.strokeStyle = "#fff";
       ctx.stroke();
       ctx.restore();
     }
-    // (c) 正在拖的矩形 / 椭圆
+    // (c) 正在拖的矩形 / 椭圆 —— 同 style
     const drawShape = info.drawingRect || info.drawingEllipse;
     if (drawShape) {
       const r = drawShape;
+      const dash = 4 / scale;
       ctx.save();
-      ctx.lineWidth = Math.max(1, 1.5 / scale);
-      ctx.setLineDash([6 / scale, 4 / scale]);
+      ctx.lineWidth = 1.2 / scale;
+      ctx.setLineDash([dash, dash]);
       const x = Math.min(r.x0, r.x1), y = Math.min(r.y0, r.y1);
       const w = Math.abs(r.x1 - r.x0), h = Math.abs(r.y1 - r.y0);
       const isEllipse = !!info.drawingEllipse;
       const stroke2x = () => {
-        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.strokeStyle = "#000";
         ctx.lineDashOffset = 0;
         ctx.stroke();
-        ctx.strokeStyle = "rgba(255,255,255,0.8)";
-        ctx.lineDashOffset = 5 / scale;
+        ctx.strokeStyle = "#fff";
+        ctx.lineDashOffset = dash;
         ctx.stroke();
       };
       ctx.beginPath();
