@@ -127,8 +127,9 @@ function buildStackXml(doc) {
       `opacity="${L.opacity.toFixed(4)}"`,
       `visibility="${L.visible ? "visible" : "hidden"}"`,
       `composite-op="${oraCompositeOp(L.mode || "source-over")}"`,
-      // 私有属性：clipping mask（其他 ora reader 会忽略；自家 reader 会读）
+      // 私有属性：clipping mask + reference layer 标记
       ...(L.clippingMask ? [`webpaint:clipping="true"`] : []),
+      ...(doc.referenceLayerId === L.id ? [`webpaint:reference="true"`] : []),
     ];
     layers.push(`    <layer ${attrs.join(" ")} />`);
   }
@@ -236,6 +237,7 @@ function parseStackXml(xmlText) {
     visible: (n.getAttribute("visibility") || "visible") === "visible",
     mode: canvasModeFromOra(n.getAttribute("composite-op") || "svg:src-over"),
     clippingMask: n.getAttribute("webpaint:clipping") === "true",
+    isReference: n.getAttribute("webpaint:reference") === "true",
   }));
   return { w, h, layers };
 }
@@ -281,6 +283,7 @@ export async function decodeOraToDoc(blob) {
     layer.ctx.drawImage(bitmap, 0, 0);
     bitmap.close?.();
     doc.layers.push(layer);
+    if (L.isReference) doc.referenceLayerId = layer.id;
   }
   if (doc.layers.length === 0) {
     // 防御：完全空 .ora → 给个默认层

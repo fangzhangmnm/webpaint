@@ -35,6 +35,7 @@ export class LassoEngine {
     this._constrainSquare = false; // rect / ellipse 是否强制 1:1（正方形 / 圆）
     this._magicThreshold = 20;    // 0..100；魔术棒颜色相似度
     this._magicGapPx = 4;         // 0..10 px；缝隙容隙（容隙），> 0 时启用 gap closing
+    this._sampleMode = "bilinear";// nearest | bilinear | bicubic（transform 重采样质量）
     this._points = [];            // freehand draft
     this._rect = null;            // {x0, y0, x1, y1} during rect / ellipse draw
     this._magicStart = null;      // for magic-tap path
@@ -58,6 +59,13 @@ export class LassoEngine {
   getMagicThreshold() { return this._magicThreshold; }
   setMagicGapPx(v) { this._magicGapPx = Math.max(0, Math.min(10, v | 0)); }
   getMagicGapPx() { return this._magicGapPx; }
+  setSampleMode(m) {
+    if (m === "nearest" || m === "bilinear" || m === "bicubic") {
+      this._sampleMode = m;
+      if (this._floating) { this._floating._renderCache = null; this.onChange(); }
+    }
+  }
+  getSampleMode() { return this._sampleMode; }
   setConstrainSquare(on) { this._constrainSquare = !!on; this.onChange(); }
   getConstrainSquare() { return this._constrainSquare; }
 
@@ -102,7 +110,7 @@ export class LassoEngine {
   }
   // 收笔：rasterize → combine with doc.selection per setOpMode → 更新 doc.selection
   // 返回 history entry（caller push）或 null（选区无效 / 没动）
-  endPath(activeLayer) {
+  endPath(sourceLayer) {
     let newSel = null;
     if (this._state === "drawing-freehand") {
       newSel = this._rasterizeFreehandToSelection(this._points);
@@ -114,7 +122,7 @@ export class LassoEngine {
       newSel = this._rasterizeEllipseToSelection(this._rect);
       this._rect = null;
     } else if (this._state === "magic-tentative") {
-      newSel = this._magicWandToSelection(this._magicStart, activeLayer);
+      newSel = this._magicWandToSelection(this._magicStart, sourceLayer);
       this._magicStart = null;
     }
     this._state = "idle";
@@ -252,77 +260,109 @@ export class LassoEngine {
   }
   // 魔术棒：tap → flood fill → 颜色差 ≤ threshold 的相邻像素入选。
   //
+  // 经典 bug 1（v66）+ 又犯一次（v69）：迭代局限在 layer.bbox 内
+  // → 点空白处只能选到 bbox 矩形。修：迭代 **整 doc 尺寸**，layer bbox 外
+  // 视为 (0,0,0,0) 透明像素。点空白时 flood 能跨出 layer bbox 选到全部相连透明。
+  //
   // 容隙模式（gapPx > 0，WebPaint 独有）：处理线稿不闭合的小缝。
-  //   step 1: 标 barrier（颜色差 > threshold 的像素，即「线」）
-  //   step 2: dilate barrier 一圈 N px（Chebyshev / 可分离），缝隙 ≤ 2N 自动封口
+  //   step 1: 标 barrier（颜色差 > threshold = 「线」）
+  //   step 2: dilate barrier N px，缝隙 ≤ 2N 自动封口
   //   step 3: flood fill in non-barrier
-  //   step 4: dilate fill mask N px，让选区贴回原线（抵消 step 2 的内缩）
-  //   ~200ms / 2048² @ N=4。论证详见 conversation v69。
-  _magicWandToSelection(start, layer) {
-    if (!start || !layer || !(layer.bboxW > 0 && layer.bboxH > 0)) return null;
-    const lbX = layer.bboxX, lbY = layer.bboxY;
-    const lbW = layer.bboxW, lbH = layer.bboxH;
-    const sx = Math.floor(start.x) - lbX;
-    const sy = Math.floor(start.y) - lbY;
-    if (sx < 0 || sx >= lbW || sy < 0 || sy >= lbH) return null;
-    const img = layer.ctx.getImageData(0, 0, lbW, lbH);
-    const data = img.data;
-    const startIdx = (sy * lbW + sx) * 4;
-    const sr = data[startIdx], sg = data[startIdx + 1], sb = data[startIdx + 2], sa = data[startIdx + 3];
+  //   step 4: dilate fill mask N px，让选区贴回原线
+  _magicWandToSelection(start, sourceLayer) {
+    if (!start || !this.doc) return null;
+    const docW = this.doc.width, docH = this.doc.height;
+    const sx = Math.floor(start.x);
+    const sy = Math.floor(start.y);
+    if (sx < 0 || sx >= docW || sy < 0 || sy >= docH) return null;
+
+    // 取 source layer pixels（可能小于 doc）；layer 外当透明
+    const lbX = sourceLayer?.bboxX ?? 0;
+    const lbY = sourceLayer?.bboxY ?? 0;
+    const lbW = sourceLayer?.bboxW ?? 0;
+    const lbH = sourceLayer?.bboxH ?? 0;
+    let layerData = null;
+    if (sourceLayer && lbW > 0 && lbH > 0) {
+      layerData = sourceLayer.ctx.getImageData(0, 0, lbW, lbH).data;
+    }
+
+    // tap 点颜色（layer 外 → 透明）
+    let sr = 0, sg = 0, sb = 0, sa = 0;
+    if (layerData && sx >= lbX && sx < lbX + lbW && sy >= lbY && sy < lbY + lbH) {
+      const idx = ((sy - lbY) * lbW + (sx - lbX)) * 4;
+      sr = layerData[idx]; sg = layerData[idx + 1]; sb = layerData[idx + 2]; sa = layerData[idx + 3];
+    }
     const tCh = this._magicThreshold * 2.55;
     const N = this._magicGapPx | 0;
-    const total = lbW * lbH;
-    // step 1: barrier map（1 = 不让 flood 进 = "线"）
+    const total = docW * docH;
+
+    // step 1: barrier 整 doc 尺寸。layer 外按透明 diff 决定一次：透明 vs tap
+    const outsideDiff = Math.max(sr, sg, sb, sa);  // = max(|0-sr|, |0-sg|, |0-sb|, |0-sa|)
+    const outsideIsBarrier = outsideDiff > tCh ? 1 : 0;
     const barrier = new Uint8Array(total);
-    for (let i = 0, p = 0; i < total; i++, p += 4) {
-      const dr = Math.abs(data[p]     - sr);
-      const dg = Math.abs(data[p + 1] - sg);
-      const db = Math.abs(data[p + 2] - sb);
-      const da = Math.abs(data[p + 3] - sa);
-      if (Math.max(dr, dg, db, da) > tCh) barrier[i] = 1;
+    if (outsideIsBarrier) barrier.fill(1);
+    // layer 内：per-pixel barrier
+    if (layerData) {
+      for (let y = 0; y < lbH; y++) {
+        const docY = lbY + y;
+        if (docY < 0 || docY >= docH) continue;
+        for (let x = 0; x < lbW; x++) {
+          const docX = lbX + x;
+          if (docX < 0 || docX >= docW) continue;
+          const i4 = (y * lbW + x) * 4;
+          const dr = Math.abs(layerData[i4]     - sr);
+          const dg = Math.abs(layerData[i4 + 1] - sg);
+          const db = Math.abs(layerData[i4 + 2] - sb);
+          const da = Math.abs(layerData[i4 + 3] - sa);
+          barrier[docY * docW + docX] = Math.max(dr, dg, db, da) > tCh ? 1 : 0;
+        }
+      }
     }
-    // step 2: dilate barrier N px（可分离 max filter）
-    const effBarrier = N > 0 ? dilateBinary(barrier, lbW, lbH, N) : barrier;
-    if (effBarrier[sx + sy * lbW]) return null;  // tap 点本身在 dilated barrier → 不填
-    // step 3: flood fill
+    // step 2: dilate barrier
+    const effBarrier = N > 0 ? dilateBinary(barrier, docW, docH, N) : barrier;
+    if (effBarrier[sx + sy * docW]) return null;
+    // step 3: flood fill；同时 track mask bbox 省后面扫一遍
     const visited = new Uint8Array(total);
     let mask = new Uint8Array(total);
-    const stack = [sx + sy * lbW];
-    visited[sx + sy * lbW] = 1;
+    const stack = [sx + sy * docW];
+    visited[sx + sy * docW] = 1;
+    let mnx = docW, mny = docH, mxx = -1, mxy = -1;
     while (stack.length) {
       const p = stack.pop();
       if (effBarrier[p]) continue;
       mask[p] = 255;
-      const px = p % lbW;
-      const py = (p - px) / lbW;
-      if (px > 0       && !visited[p - 1])   { visited[p - 1] = 1; stack.push(p - 1); }
-      if (px < lbW - 1 && !visited[p + 1])   { visited[p + 1] = 1; stack.push(p + 1); }
-      if (py > 0       && !visited[p - lbW]) { visited[p - lbW] = 1; stack.push(p - lbW); }
-      if (py < lbH - 1 && !visited[p + lbW]) { visited[p + lbW] = 1; stack.push(p + lbW); }
-    }
-    // step 4: dilate mask N px，让选区贴线
-    if (N > 0) mask = dilateBinary(mask, lbW, lbH, N);
-    // trim bbox 紧到 mask 实际区域
-    let mnx = lbW, mny = lbH, mxx = -1, mxy = -1;
-    for (let y = 0; y < lbH; y++) for (let x = 0; x < lbW; x++) {
-      if (mask[y * lbW + x]) {
-        if (x < mnx) mnx = x; if (y < mny) mny = y;
-        if (x > mxx) mxx = x; if (y > mxy) mxy = y;
-      }
+      const px = p % docW;
+      const py = (p - px) / docW;
+      if (px < mnx) mnx = px; if (px > mxx) mxx = px;
+      if (py < mny) mny = py; if (py > mxy) mxy = py;
+      if (px > 0        && !visited[p - 1])    { visited[p - 1] = 1; stack.push(p - 1); }
+      if (px < docW - 1 && !visited[p + 1])    { visited[p + 1] = 1; stack.push(p + 1); }
+      if (py > 0        && !visited[p - docW]) { visited[p - docW] = 1; stack.push(p - docW); }
+      if (py < docH - 1 && !visited[p + docW]) { visited[p + docW] = 1; stack.push(p + docW); }
     }
     if (mxx < 0) return null;
+    // step 4: dilate mask；bbox 跟着外扩 N
+    if (N > 0) {
+      mask = dilateBinary(mask, docW, docH, N);
+      mnx = Math.max(0, mnx - N);
+      mny = Math.max(0, mny - N);
+      mxx = Math.min(docW - 1, mxx + N);
+      mxy = Math.min(docH - 1, mxy + N);
+    }
+    // Build maskCanvas from [mnx..mxx, mny..mxy]
     const tw = mxx - mnx + 1, th = mxy - mny + 1;
     const maskCanvas = makeBitmap(tw, th);
     const mctx = maskCanvas.getContext("2d");
     const out = mctx.createImageData(tw, th);
     const odata = out.data;
     for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
-      const src = mask[(mny + y) * lbW + (mnx + x)];
+      const src = mask[(mny + y) * docW + (mnx + x)];
       const o = (y * tw + x) * 4;
       odata[o] = 255; odata[o + 1] = 255; odata[o + 2] = 255; odata[o + 3] = src;
     }
     mctx.putImageData(out, 0, 0);
-    return { bboxX: lbX + mnx, bboxY: lbY + mny, bboxW: tw, bboxH: th, maskCanvas };
+    // mnx/mny 已经是 doc 坐标（迭代是整 doc 尺寸）
+    return { bboxX: mnx, bboxY: mny, bboxW: tw, bboxH: th, maskCanvas };
   }
   // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
   _applySelectionUpdate(newSel) {
@@ -416,6 +456,35 @@ export class LassoEngine {
   }
   endDrag() { this._drag = null; }
 
+  // Stamp：当前 float 写入 layer，但 KEEP float 在原状态。
+  // 不 push history（stamp 是 float session 内部动作）；最终 commit 时一次性 push。
+  // 多次 stamp + commit/cancel：cancel 会 restoreFromSnapshot(preLift) 把所有 stamp 一并撤回。
+  stamp() {
+    const f = this._floating;
+    if (!f) return false;
+    const layer = f.layer;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const row of f.mesh) for (const p of row) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    layer.ensureBbox(Math.floor(minX), Math.floor(minY), Math.ceil(maxX), Math.ceil(maxY));
+    const lbX = layer.bboxX, lbY = layer.bboxY;
+    if (f.meshN === 2) {
+      const rendered = renderQuadPerPixel(f.imageData, f.srcW, f.srcH, f.mesh, this._sampleMode);
+      if (rendered) layer.ctx.drawImage(rendered.canvas, rendered.dstX - lbX, rendered.dstY - lbY);
+    } else {
+      layer.ctx.save();
+      layer.ctx.translate(-lbX, -lbY);
+      drawMesh(layer.ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: this._sampleMode !== "nearest" });
+      layer.ctx.restore();
+    }
+    this.onChange();
+    return true;
+  }
+
   // -------- commit / cancel --------
   commit() {
     const f = this._floating;
@@ -434,14 +503,14 @@ export class LassoEngine {
     // 2×2 mesh：per-pixel inverse homography（math-exact，无 PS1 artifact）
     // 4×4 mesh：暂时还是 Catmull-Rom 升采样 + 三角化。下个 PR 改 Newton inverse
     if (f.meshN === 2) {
-      const rendered = renderQuadPerPixel(f.imageData, f.srcW, f.srcH, f.mesh);
+      const rendered = renderQuadPerPixel(f.imageData, f.srcW, f.srcH, f.mesh, this._sampleMode);
       if (rendered) {
         layer.ctx.drawImage(rendered.canvas, rendered.dstX - lbX, rendered.dstY - lbY);
       }
     } else {
       layer.ctx.save();
       layer.ctx.translate(-lbX, -lbY);
-      drawMesh(layer.ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: true });
+      drawMesh(layer.ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: this._sampleMode !== "nearest" });
       layer.ctx.restore();
     }
 
@@ -1261,7 +1330,7 @@ function catmullRomPoint(P0, P1, P2, P3, t) {
 // caller 负责 drawImage 到合适的上下文。
 //
 // 性能：500×500 输出 ≈ 250K pixels × ~20 ops = 5M ops ≈ 50ms on iPad mini。preview 可接受。
-export function renderQuadPerPixel(srcImageData, srcW, srcH, mesh) {
+export function renderQuadPerPixel(srcImageData, srcW, srcH, mesh, sampleMode = "bilinear") {
   const tl = mesh[0][0], tr = mesh[0][1], bl = mesh[1][0], br = mesh[1][1];
   const minX = Math.floor(Math.min(tl.x, tr.x, bl.x, br.x));
   const minY = Math.floor(Math.min(tl.y, tr.y, bl.y, br.y));
@@ -1293,7 +1362,13 @@ export function renderQuadPerPixel(srcImageData, srcW, srcH, mesh) {
       if (u < 0 || u > 1 || v < 0 || v > 1) continue;
       const sx = u * srcW;
       const sy = v * srcH;
-      bilinearSample(sdata, srcW, srcH, sx, sy, odata, (dy * dstW + dx) * 4);
+      if (sampleMode === "nearest") {
+        nearestSample(sdata, srcW, srcH, sx, sy, odata, (dy * dstW + dx) * 4);
+      } else if (sampleMode === "bicubic") {
+        bicubicSample(sdata, srcW, srcH, sx, sy, odata, (dy * dstW + dx) * 4);
+      } else {
+        bilinearSample(sdata, srcW, srcH, sx, sy, odata, (dy * dstW + dx) * 4);
+      }
     }
   }
 
@@ -1303,6 +1378,50 @@ export function renderQuadPerPixel(srcImageData, srcW, srcH, mesh) {
   return { canvas, dstX: minX, dstY: minY };
 }
 
+// 最近邻 sample：pixel art / 硬边
+function nearestSample(sdat, w, h, sx, sy, ddat, dstIdx) {
+  const ix = Math.floor(sx), iy = Math.floor(sy);
+  if (ix < 0 || ix >= w || iy < 0 || iy >= h) return;
+  const p = (iy * w + ix) * 4;
+  ddat[dstIdx]     = sdat[p];
+  ddat[dstIdx + 1] = sdat[p + 1];
+  ddat[dstIdx + 2] = sdat[p + 2];
+  ddat[dstIdx + 3] = sdat[p + 3];
+}
+// Catmull-Rom bicubic（B=0, C=0.5）。4×4 taps，钝锐适中。
+function bicubicSample(sdat, w, h, sx, sy, ddat, dstIdx) {
+  const ix = Math.floor(sx), iy = Math.floor(sy);
+  // Catmull-Rom kernel
+  const k = (t) => {
+    const a = -0.5;
+    const at = Math.abs(t);
+    if (at < 1) return (a + 2) * at * at * at - (a + 3) * at * at + 1;
+    if (at < 2) return a * at * at * at - 5 * a * at * at + 8 * a * at - 4 * a;
+    return 0;
+  };
+  // 4 taps: x = ix-1, ix, ix+1, ix+2；t = tap_x - sx
+  const kx = [k((ix - 1) - sx), k(ix - sx), k((ix + 1) - sx), k((ix + 2) - sx)];
+  const ky = [k((iy - 1) - sy), k(iy - sy), k((iy + 1) - sy), k((iy + 2) - sy)];
+  let r = 0, g = 0, b = 0, a = 0;
+  for (let j = 0; j < 4; j++) {
+    const yy = iy - 1 + j;
+    if (yy < 0 || yy >= h) continue;
+    for (let i = 0; i < 4; i++) {
+      const xx = ix - 1 + i;
+      if (xx < 0 || xx >= w) continue;
+      const p = (yy * w + xx) * 4;
+      const ww = kx[i] * ky[j];
+      r += sdat[p]     * ww;
+      g += sdat[p + 1] * ww;
+      b += sdat[p + 2] * ww;
+      a += sdat[p + 3] * ww;
+    }
+  }
+  ddat[dstIdx]     = Math.max(0, Math.min(255, r));
+  ddat[dstIdx + 1] = Math.max(0, Math.min(255, g));
+  ddat[dstIdx + 2] = Math.max(0, Math.min(255, b));
+  ddat[dstIdx + 3] = Math.max(0, Math.min(255, a));
+}
 // bilinear sample（同 liquify.js 那份；private copy 避免跨模块依赖）
 function bilinearSample(sdat, w, h, sx, sy, ddat, dstIdx) {
   const ix = Math.floor(sx);

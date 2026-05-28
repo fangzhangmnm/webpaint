@@ -176,6 +176,18 @@ export class PaintDoc {
     // 选区（一等公民）。null = 没选区 = 所有像素都可作用。详见 docs/lasso-and-selection.md。
     //   { bboxX, bboxY, bboxW, bboxH, maskCanvas } —— maskCanvas alpha = mask（255 内 / 0 外）
     this.selection = null;
+    // 参考层：unique。null = 用 active 层做魔棒 / 油漆桶的源。否则用这一层
+    // （线稿在它上面、上色在 active 上的工作流）
+    this.referenceLayerId = null;
+  }
+  // 取参考层 / 没有就返回 null（不是 active；调用方按需 fallback）
+  getReferenceLayer() {
+    if (this.referenceLayerId == null) return null;
+    return this.layers.find((L) => L.id === this.referenceLayerId) || null;
+  }
+  // 魔棒 / 油漆桶用的 source：reference 优先，否则 active
+  getFloodSourceLayer() {
+    return this.getReferenceLayer() || this.activeLayer;
   }
 
   get activeLayer() {

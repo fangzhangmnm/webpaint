@@ -228,6 +228,7 @@ board.setLassoProvider(() => ({
   drawingEllipse: input.lasso.getDrawingEllipse(),
   floating:       input.lasso.getFloating(),
   handles:        input.lasso.visibleHandles(),
+  sampleMode:     input.lasso.getSampleMode(),
 }));
 
 // 蚂蚁线无动画（user 反馈太干扰）；选区改变时 setLassoProvider 已触发 invalidateAll。
@@ -249,6 +250,8 @@ const lassoMagicGapInput = document.getElementById("lassoMagicGap");
 const lassoMagicGapVal = document.getElementById("lassoMagicGapVal");
 const lassoMagicCfgBtn = document.getElementById("lassoMagicCfgBtn");
 const lassoMagicPopup = document.getElementById("lassoMagicPopup");
+const bucketToolbar = document.getElementById("bucketToolbar");
+const bucketCfgBtn = document.getElementById("bucketCfgBtn");
 const lassoConstrainBtn = document.getElementById("lassoConstrainBtn");
 const lassoConstrainSep = document.querySelector(".lasso-constrain-sep");
 
@@ -271,7 +274,7 @@ function updateLassoToolbar() {
     b.setAttribute("aria-pressed", b.dataset.lassoSub === sub ? "true" : "false");
   }
   lassoMagicCfgBtn.classList.toggle("hidden", sub !== "magic");
-  // 子工具切走 → 关掉魔术棒 popup
+  // 子工具切走 → 关掉魔术棒 popup（油漆桶按工具栏没装；按 ⚙ 仅在 magic 下出）
   if (sub !== "magic") lassoMagicPopup.classList.add("hidden");
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
@@ -288,6 +291,10 @@ function updateLassoToolbar() {
     const mode = input.lasso.getMode();
     for (const b of lassoTransformModeBtns) {
       b.setAttribute("aria-pressed", b.dataset.lassoMode === mode ? "true" : "false");
+    }
+    const sm = input.lasso.getSampleMode();
+    for (const b of lassoTransformCtrl.querySelectorAll("[data-lasso-sample]")) {
+      b.setAttribute("aria-pressed", b.dataset.lassoSample === sm ? "true" : "false");
     }
   }
 }
@@ -320,16 +327,19 @@ lassoMagicGapInput.addEventListener("input", () => {
 // 初始化滑块到 lasso 引擎默认值（避免两边不一致）
 lassoMagicGapInput.value = String(input.lasso.getMagicGapPx());
 lassoMagicGapVal.textContent = String(input.lasso.getMagicGapPx());
-// ⚙ 按钮 → popup toggle
-lassoMagicCfgBtn.addEventListener("click", (e) => {
+// 设置 按钮 → popup toggle（魔棒 + 油漆桶共用一个 popup）
+function toggleMagicPopup(e) {
   e.stopPropagation();
   lassoMagicPopup.classList.toggle("hidden");
-});
+}
+lassoMagicCfgBtn.addEventListener("click", toggleMagicPopup);
+bucketCfgBtn.addEventListener("click", toggleMagicPopup);
 // 点 popup 外侧 → 关
 document.addEventListener("pointerdown", (e) => {
   if (lassoMagicPopup.classList.contains("hidden")) return;
   if (lassoMagicPopup.contains(e.target)) return;
   if (lassoMagicCfgBtn.contains(e.target)) return;
+  if (bucketCfgBtn.contains(e.target)) return;
   lassoMagicPopup.classList.add("hidden");
 });
 // 1:1 约束 toggle（rect / ellipse 用）
@@ -405,6 +415,77 @@ document.getElementById("lassoCancelBtn").addEventListener("click", () => {
     updateLassoToolbar();
   }
 });
+// Stamp：写入图层但保留 float（连击多次叠加复印）
+document.getElementById("lassoStampBtn").addEventListener("click", () => {
+  if (!input.lasso.hasFloating()) return;
+  if (input.lasso.stamp()) {
+    board.invalidateAll();
+    setStatus("已复印");
+  }
+});
+// 插值模式 picker
+const lassoSampleBtns = [...lassoTransformCtrl.querySelectorAll("[data-lasso-sample]")];
+for (const b of lassoSampleBtns) {
+  b.addEventListener("click", () => {
+    input.lasso.setSampleMode(b.dataset.lassoSample);
+    board.invalidateAll();
+    updateLassoToolbar();
+  });
+}
+// 选区 → 新层 / 复制层
+document.getElementById("lassoDuplicateBtn").addEventListener("click", () => {
+  selectionToNewLayer({ move: false });
+});
+document.getElementById("lassoMoveToLayerBtn").addEventListener("click", () => {
+  selectionToNewLayer({ move: true });
+});
+function selectionToNewLayer({ move }) {
+  const sel = doc.selection;
+  if (!sel) { setStatus("没选区"); return; }
+  if (doc.layers.length >= doc.maxLayers) { setStatus(`图层数已达上限 ${doc.maxLayers}`); return; }
+  const src = doc.activeLayer;
+  if (!src) return;
+  const beforeActive = move ? src.snapshot() : null;
+  const newL = doc.addLayer(move ? "移到新层" : "复制层");
+  if (!newL) return;
+  // 把 newL 的 bbox / canvas 重设为 selection bbox
+  newL.bboxX = sel.bboxX;
+  newL.bboxY = sel.bboxY;
+  newL.bboxW = sel.bboxW;
+  newL.bboxH = sel.bboxH;
+  newL.canvas.width = sel.bboxW;
+  newL.canvas.height = sel.bboxH;
+  newL.ctx = newL.canvas.getContext("2d", { willReadFrequently: false });
+  newL.ctx.imageSmoothingEnabled = true;
+  newL.ctx.imageSmoothingQuality = "low";
+  // 把 active ∩ selection 的像素 copy 进 newL
+  newL.ctx.drawImage(src.canvas, src.bboxX - sel.bboxX, src.bboxY - sel.bboxY);
+  newL.ctx.globalCompositeOperation = "destination-in";
+  newL.ctx.drawImage(sel.maskCanvas, 0, 0);
+  newL.ctx.globalCompositeOperation = "source-over";
+  if (move) {
+    src.ctx.save();
+    src.ctx.globalCompositeOperation = "destination-out";
+    src.ctx.drawImage(sel.maskCanvas, sel.bboxX - src.bboxX, sel.bboxY - src.bboxY);
+    src.ctx.restore();
+  }
+  const insertIndex = doc.layers.findIndex((l) => l.id === newL.id);
+  const newLayerSpec = layerSpecFrom(newL);
+  const afterActive = move ? src.snapshot() : null;
+  history.push({
+    type: "selectionToLayer",
+    isMove: move,
+    newLayerSpec, insertIndex,
+    activeLayerId: src.id,
+    beforeActive, afterActive,
+  });
+  // 异步压缩 newL pixels（同 removeLayer 路径）
+  compressPixelSnap(newLayerSpec, (blob) => { newLayerSpec.blob = blob; });
+  if (move && beforeActive) compressPixelSnap(beforeActive, (blob) => { beforeActive.blob = blob; });
+  if (move && afterActive)  compressPixelSnap(afterActive,  (blob) => { afterActive.blob = blob; });
+  _afterDocChange();
+  setStatus(move ? "已移到新层" : "已复制到新层");
+}
 window.addEventListener("wp:lassochange", updateLassoToolbar);
 // 任何 history push/undo/redo 都可能改 doc.selection → 刷新 toolbar 显隐
 window.addEventListener("wp:histchange", updateLassoToolbar);
@@ -469,6 +550,8 @@ function setTool(t) {
   // 液化没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
   els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
   document.body.dataset.tool = t;
+  bucketToolbar.classList.toggle("hidden", t !== "bucket");
+  if (t !== "bucket") lassoMagicPopup.classList.add("hidden");
   updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
 }
 for (const b of els.toolBtns) {
@@ -817,9 +900,11 @@ function renderLayersPanel() {
   for (let i = doc.layers.length - 1; i >= 0; i--) {
     const L = doc.layers[i];
     const row = document.createElement("div");
+    const isRef = doc.referenceLayerId === L.id;
     row.className = "layer-row"
       + (i === doc.activeIndex ? " active" : "")
-      + (L.clippingMask ? " clipping" : "");
+      + (L.clippingMask ? " clipping" : "")
+      + (isRef ? " reference" : "");
     row.dataset.layerId = String(L.id);
 
     const vis = document.createElement("button");
@@ -852,6 +937,14 @@ function renderLayersPanel() {
       chip.className = "layer-clip-chip";
       chip.textContent = "↘";
       chip.title = "已剪裁到下方第一颗非剪裁层";
+      row.appendChild(chip);
+    }
+    // 参考层视觉提示：右侧加「参」chip
+    if (isRef) {
+      const chip = document.createElement("span");
+      chip.className = "layer-ref-chip";
+      chip.textContent = "参";
+      chip.title = "参考层：魔棒 / 油漆桶读这一层";
       row.appendChild(chip);
     }
 
@@ -963,6 +1056,26 @@ function renderLayersPanel() {
         board.requestRender();
       });
       expand.appendChild(clipRow);
+
+      // 参考层 toggle：unique；设这一层时自动清掉旧的
+      const refRow = document.createElement("div");
+      refRow.className = "layer-slider-row";
+      const isRefNow = doc.referenceLayerId === L.id;
+      refRow.innerHTML = `
+        <span>参考</span>
+        <span class="layer-clip-hint">魔棒 / 油漆桶读这层</span>
+        <button type="button" class="layer-clip-toggle" aria-pressed="${isRefNow ? "true" : "false"}">${isRefNow ? "开" : "关"}</button>
+      `;
+      const refBtn = refRow.querySelector(".layer-clip-toggle");
+      refBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const oldVal = doc.referenceLayerId;
+        const newVal = isRefNow ? null : L.id;
+        doc.referenceLayerId = newVal;
+        history.push({ type: "setReferenceLayer", oldVal, newVal });
+        renderLayersPanel();
+      });
+      expand.appendChild(refRow);
 
       expand.addEventListener("click", (e) => e.stopPropagation());
       els.layersList.appendChild(expand);
@@ -1230,6 +1343,44 @@ history.registerHandler("setLayerProp", {
   undo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L[e.prop] = e.oldVal; _afterDocChange(); } },
   redo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L[e.prop] = e.newVal; _afterDocChange(); } },
   refsLayer: (e, id) => e.layerId === id,
+});
+// setReferenceLayer：unique doc-level state
+history.registerHandler("setReferenceLayer", {
+  undo: (e) => { doc.referenceLayerId = e.oldVal; renderLayersPanel(); },
+  redo: (e) => { doc.referenceLayerId = e.newVal; renderLayersPanel(); },
+  refsLayer: (e, id) => e.oldVal === id || e.newVal === id,
+});
+// selectionToLayer：复合 entry。undo / redo 同步处理 newLayer + active 改变
+history.registerHandler("selectionToLayer", {
+  undo: async (e) => {
+    // 1. 删 new layer
+    doc.removeLayer(e.newLayerSpec.id);
+    // 2. 还原 active layer（仅 move 模式）
+    if (e.isMove && e.beforeActive) {
+      const L = doc.findLayer(e.activeLayerId);
+      if (L) await applyPixelSnap(doc, L.id, e.beforeActive, e.beforeActive.blob, board);
+    }
+    // 3. active 切回原来
+    doc.setActiveById(e.activeLayerId);
+    _afterDocChange();
+  },
+  redo: async (e) => {
+    const spec = e.newLayerSpec;
+    if (spec.blob && !spec.imageData) {
+      const bitmap = await createImageBitmap(spec.blob);
+      doc.insertLayerAt(e.insertIndex, { ...spec, bitmap });
+      bitmap.close?.();
+    } else {
+      doc.insertLayerAt(e.insertIndex, spec);
+    }
+    if (e.isMove && e.afterActive) {
+      const L = doc.findLayer(e.activeLayerId);
+      if (L) await applyPixelSnap(doc, L.id, e.afterActive, e.afterActive.blob, board);
+    }
+    doc.setActiveById(spec.id);
+    _afterDocChange();
+  },
+  refsLayer: (e, id) => e.newLayerSpec.id === id || e.activeLayerId === id,
 });
 els.hueSlider.addEventListener("input", () => {
   pickerHsv.h = parseFloat(els.hueSlider.value);

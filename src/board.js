@@ -611,13 +611,13 @@ export class Board {
       //   - 4×4 mesh (warp)：暂走 Catmull-Rom + 三角化。下个 PR 替成 forward splat
       if (f.meshN === 2) {
         if (!f._renderCache) {
-          f._renderCache = renderQuadPerPixel(f.imageData, f.srcW, f.srcH, f.mesh);
+          f._renderCache = renderQuadPerPixel(f.imageData, f.srcW, f.srcH, f.mesh, info.sampleMode);
         }
         if (f._renderCache) {
           ctx.drawImage(f._renderCache.canvas, f._renderCache.dstX, f._renderCache.dstY);
         }
       } else {
-        drawMesh(ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: isWarp });
+        drawMesh(ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: info.sampleMode !== "nearest" });
       }
       // 2) mesh 网格线 + 外框
       const N = f.meshN;

@@ -654,6 +654,16 @@ input[type=range] {
   user-select: none;
 }
 .layer-clip-hint { color: var(--ink-soft); font-size: 11px; }
+.layer-ref-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
+  font-size: 11px; font-weight: 600;
+  color: #fff;
+  background: var(--accent, #4c8bf5);
+  border-radius: 4px;
+  margin-left: 4px;
+  user-select: none;
+}
 .layer-clip-toggle {
   font: inherit;
   background: var(--bg-soft);
