@@ -786,6 +786,109 @@ export function invertSelection(sel, docW, docH) {
   return { bboxX: 0, bboxY: 0, bboxW: docW, bboxH: docH, maskCanvas: canvas };
 }
 
+// ============ 选区应用到 layer 的操作 ============
+
+// 笔刷 / 橡皮 / 液化结束后调用：把 layer 在 selection 外的像素 revert 到 preSnap。
+// 等价"stroke 只在 selection 内生效"。post-process 比 in-stroke clip 简单 + 与
+// brush engine 解耦。代价：用户拖动时看到完整 stroke，松手时才 snap 到选区内（v1 接受）
+//
+// 走 per-pixel JS：选区外 → 取 pre 像素；选区内 → 取 after 像素。
+// 同时适用 brush（additive）和 eraser（destructive）—— 因为是"按 mask 选 pre 还是 after"，
+// 不是用 composite 模式组合，所以 erase 模式（stroke 让某些像素变透明）也正确
+export function applySelectionMaskPostStroke(layer, preSnap, selection) {
+  if (!selection || !preSnap) return;
+  const afterSnap = layer.snapshot();
+  // 联合 bbox = max(pre, after) in doc coords
+  const px0 = preSnap.bboxX, py0 = preSnap.bboxY;
+  const px1 = px0 + preSnap.bboxW, py1 = py0 + preSnap.bboxH;
+  const ax0 = afterSnap.bboxX, ay0 = afterSnap.bboxY;
+  const ax1 = ax0 + afterSnap.bboxW, ay1 = ay0 + afterSnap.bboxH;
+  const ux0 = Math.min(px0, ax0), uy0 = Math.min(py0, ay0);
+  const ux1 = Math.max(px1, ax1), uy1 = Math.max(py1, ay1);
+  const uw = ux1 - ux0, uh = uy1 - uy0;
+  if (uw <= 0 || uh <= 0) return;
+
+  // 读 mask 全像素到 ImageData
+  let maskData = null;
+  if (selection.bboxW > 0 && selection.bboxH > 0) {
+    const mctx = selection.maskCanvas.getContext("2d");
+    maskData = mctx.getImageData(0, 0, selection.bboxW, selection.bboxH).data;
+  }
+
+  const preData = preSnap.imageData ? preSnap.imageData.data : null;
+  const afterData = afterSnap.imageData ? afterSnap.imageData.data : null;
+
+  const out = new ImageData(uw, uh);
+  const odata = out.data;
+  for (let y = 0; y < uh; y++) {
+    for (let x = 0; x < uw; x++) {
+      const docX = ux0 + x;
+      const docY = uy0 + y;
+      // mask lookup
+      let maskAlpha = 0;
+      const mx = docX - selection.bboxX;
+      const my = docY - selection.bboxY;
+      if (maskData && mx >= 0 && mx < selection.bboxW && my >= 0 && my < selection.bboxH) {
+        maskAlpha = maskData[(my * selection.bboxW + mx) * 4 + 3];
+      }
+      const oi = (y * uw + x) * 4;
+      // 选区内取 after；选区外取 pre。两个都没数据 = 透明（odata 默认 0）
+      const useAfter = maskAlpha > 0;
+      if (useAfter && afterData) {
+        const aix = docX - ax0, aiy = docY - ay0;
+        if (aix >= 0 && aix < afterSnap.bboxW && aiy >= 0 && aiy < afterSnap.bboxH) {
+          const i = (aiy * afterSnap.bboxW + aix) * 4;
+          odata[oi] = afterData[i]; odata[oi + 1] = afterData[i + 1];
+          odata[oi + 2] = afterData[i + 2]; odata[oi + 3] = afterData[i + 3];
+        }
+      } else if (!useAfter && preData) {
+        const pix = docX - px0, piy = docY - py0;
+        if (pix >= 0 && pix < preSnap.bboxW && piy >= 0 && piy < preSnap.bboxH) {
+          const i = (piy * preSnap.bboxW + pix) * 4;
+          odata[oi] = preData[i]; odata[oi + 1] = preData[i + 1];
+          odata[oi + 2] = preData[i + 2]; odata[oi + 3] = preData[i + 3];
+        }
+      }
+    }
+  }
+  // 写回 layer（先 ensureBbox 容纳 union）
+  layer.ensureBbox(ux0, uy0, ux1, uy1);
+  layer.ctx.putImageData(out, ux0 - layer.bboxX, uy0 - layer.bboxY);
+}
+
+// 填色：在 selection 内填 layer 当前颜色（layer 改前 push history snap）
+// 调用方负责 push history entry
+export function fillSelectionOnLayer(layer, selection, color) {
+  if (!selection || !layer) return;
+  layer.ensureBbox(
+    selection.bboxX, selection.bboxY,
+    selection.bboxX + selection.bboxW, selection.bboxY + selection.bboxH,
+  );
+  // 先建一张 selection-shape 的 colored canvas，再 drawImage 到 layer
+  const tmp = makeBitmap(selection.bboxW, selection.bboxH);
+  const tctx = tmp.getContext("2d");
+  tctx.fillStyle = color;
+  tctx.fillRect(0, 0, selection.bboxW, selection.bboxH);
+  tctx.globalCompositeOperation = "destination-in";
+  tctx.drawImage(selection.maskCanvas, 0, 0);
+  tctx.globalCompositeOperation = "source-over";
+  layer.ctx.drawImage(tmp,
+    selection.bboxX - layer.bboxX,
+    selection.bboxY - layer.bboxY);
+}
+
+// 清除选区内像素（dst-out mask）
+export function clearSelectionOnLayer(layer, selection) {
+  if (!selection || !layer) return;
+  const lctx = layer.ctx;
+  lctx.save();
+  lctx.globalCompositeOperation = "destination-out";
+  lctx.drawImage(selection.maskCanvas,
+    selection.bboxX - layer.bboxX,
+    selection.bboxY - layer.bboxY);
+  lctx.restore();
+}
+
 // ============ 几何工具 ============
 
 function makeBitmap(w, h) {

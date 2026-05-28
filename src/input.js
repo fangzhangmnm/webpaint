@@ -22,7 +22,7 @@
 
 import { BrushEngine } from "./brush.js";
 import { LiquifyEngine } from "./liquify.js";
-import { LassoEngine } from "./lasso.js";
+import { LassoEngine, applySelectionMaskPostStroke } from "./lasso.js";
 
 const ERASER_RADIUS_SCREEN = 0;   // 用 BrushEngine 自己的 size，不再独立
 const TAP_MAX_DURATION = 220;
@@ -575,6 +575,11 @@ export class InputController {
     this._strokeLayerId = null;
     this._strokePreSnap = null;
     if (!layer || !preSnap) return;
+    // 有选区 → stroke 只在选区内生效（per-pixel revert outside mask 到 pre）
+    if (this.doc.selection) {
+      applySelectionMaskPostStroke(layer, preSnap, this.doc.selection);
+      this.board.invalidateAll();
+    }
     const postSnap = layer.snapshot();
     const entry = {
       type: "stroke",
@@ -621,6 +626,11 @@ export class InputController {
     this._liquifyLayerId = null;
     this._liquifyPreSnap = null;
     if (!layer || !preSnap) return;
+    // 有选区 → 液化只在选区内生效
+    if (this.doc.selection) {
+      applySelectionMaskPostStroke(layer, preSnap, this.doc.selection);
+      this.board.invalidateAll();
+    }
     const postSnap = layer.snapshot();
     const entry = {
       type: "liquify",

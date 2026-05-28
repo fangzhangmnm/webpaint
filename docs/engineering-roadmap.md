@@ -67,6 +67,16 @@ board.js 当前对 erase 合成有一个 `_eraseComposite` 缓存。未来如果
 
 当前没实现配额告警。低优先级。
 
+### 笔刷边缘 antialiasing（user 2026-05-28 暂存）
+
+user 注意到线条边缘有"狗牙"（aliasing）。待研究 Procreate 怎么处理 brush edge AA 后决定要不要做。
+当前 stamp 在 GPU 通过 drawImage 走 bilinear，边缘已经有一定柔化；要更软的需要：
+- stamp 更高 hardness 默认（更锐边但更可靠的形状）
+- subpixel offset jitter (4-tap supersample)
+- 或上 WebGL 走 fragment shader 真做 supersampling
+
+参考 docs/artist-priorities.md Tier 2 #8c 已有类似条目（笔刷抗抖 / 抗锯齿再升级）。
+
 ### 笔刷预设序列化格式
 
 未来加 brush presets（Tier 2 #11）时，要决定：

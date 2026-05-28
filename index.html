@@ -201,13 +201,16 @@
       </div>
     </div>
 
-    <!-- 加号 popup：新建 / 导入照片 -->
+    <!-- 加号 popup：新建 / 从图片 / 从剪切板 -->
     <div class="menu-panel hidden" id="galleryAddPopup" role="menu">
       <button class="menu-item" id="addNew" type="button" role="menuitem">
         <span class="menu-item-label">新建作品…</span>
       </button>
       <button class="menu-item" id="addImportPhoto" type="button" role="menuitem">
-        <span class="menu-item-label">导入照片…</span>
+        <span class="menu-item-label">从图片新建…</span>
+      </button>
+      <button class="menu-item" id="addImportClipboard" type="button" role="menuitem">
+        <span class="menu-item-label">从剪切板新建</span>
       </button>
     </div>
 
@@ -274,7 +277,10 @@
       <!-- 选区动作（has-selection 时显） -->
       <div class="lasso-section hidden" id="lassoSelectionActions">
         <button class="lasso-tool-btn lasso-tool-confirm" id="lassoTransformBtn" type="button">变换</button>
-        <!-- P4 加 填色 / 清除 / 反选 -->
+        <button class="lasso-tool-btn" id="lassoFillBtn" type="button" title="用当前颜色填选区">填色</button>
+        <button class="lasso-tool-btn" id="lassoClearBtn" type="button" title="清除选区内像素">清除</button>
+        <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" title="反选">反选</button>
+        <span class="lasso-tool-sep" aria-hidden="true">|</span>
         <button class="lasso-tool-btn lasso-tool-cancel" id="lassoDeselectBtn" type="button">取消选区</button>
       </div>
       <!-- 变换控制（floating 期间） -->

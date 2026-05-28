@@ -21,6 +21,7 @@ import {
   exportOraDownload, exportPsdDownload, shareOrDownloadImage,
   copyImageToClipboard, readImageFromClipboard,
 } from "./session.js";
+import { fillSelectionOnLayer, clearSelectionOnLayer, invertSelection } from "./lasso.js";
 import { decodeOraToDoc, encodeDocToOra } from "./ora.js";
 import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
@@ -111,6 +112,7 @@ const els = {
   galleryAddPopup: document.getElementById("galleryAddPopup"),
   addNew: document.getElementById("addNew"),
   addImportPhoto: document.getElementById("addImportPhoto"),
+  addImportClipboard: document.getElementById("addImportClipboard"),
   cloudIconBtn: document.getElementById("cloudIconBtn"),
   cloudAccountPopup: document.getElementById("cloudAccountPopup"),
   cloudAccountInfo: document.getElementById("cloudAccountInfo"),
@@ -302,6 +304,42 @@ document.getElementById("lassoTransformBtn").addEventListener("click", () => {
 });
 document.getElementById("lassoDeselectBtn").addEventListener("click", () => {
   const entry = input.lasso.setSelection(null);
+  if (entry && history) history.push(entry);
+  board.invalidateAll();
+  updateLassoToolbar();
+});
+// 填色：选区内填当前颜色（push stroke-type entry，可 Ctrl+Z）
+document.getElementById("lassoFillBtn").addEventListener("click", () => {
+  const layer = doc.activeLayer;
+  if (!layer || !doc.selection) return;
+  const before = layer.snapshot();
+  fillSelectionOnLayer(layer, doc.selection, state.color);
+  const after = layer.snapshot();
+  const entry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
+  history.push(entry);
+  compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
+  compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
+  board.invalidateAll();
+  setStatus(`已填色：${state.color}`);
+});
+// 清除：选区内 dst-out
+document.getElementById("lassoClearBtn").addEventListener("click", () => {
+  const layer = doc.activeLayer;
+  if (!layer || !doc.selection) return;
+  const before = layer.snapshot();
+  clearSelectionOnLayer(layer, doc.selection);
+  const after = layer.snapshot();
+  const entry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
+  history.push(entry);
+  compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
+  compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
+  board.invalidateAll();
+  setStatus("已清除选区内像素");
+});
+// 反选：在 docW×docH 上 mask 取反
+document.getElementById("lassoInvertBtn").addEventListener("click", () => {
+  const inv = invertSelection(doc.selection, doc.width, doc.height);
+  const entry = input.lasso.setSelection(inv);
   if (entry && history) history.push(entry);
   board.invalidateAll();
   updateLassoToolbar();
@@ -1992,6 +2030,18 @@ els.addImportPhoto.addEventListener("click", () => {
   // 但用户语义是"新建作品打底"，所以新建一个 doc 把 image 当 base layer 放进去
   // 标记一个 pending flag
   _addImportAsNewDoc = true;
+});
+els.addImportClipboard.addEventListener("click", async () => {
+  els.galleryAddPopup.classList.add("hidden");
+  try {
+    const blob = await readImageFromClipboard();
+    if (!blob) { setStatus("剪贴板里没有图片"); return; }
+    const file = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
+    await importImageAsNewDoc(file);
+    setGalleryOpen(false);
+  } catch (e) {
+    setStatus("从剪切板新建失败：" + (e && e.message || e));
+  }
 });
 let _addImportAsNewDoc = false;
 
