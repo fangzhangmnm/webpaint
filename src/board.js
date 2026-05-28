@@ -542,6 +542,8 @@ export class Board {
       if (!s._outline) s._outline = extractMaskOutline(s);
       const segs = s._outline;
       ctx.save();
+      // outline segs 是 mask 局部坐标；平移到 selection bbox 在 doc 坐标的位置
+      ctx.translate(s.bboxX, s.bboxY);
       ctx.lineWidth = 1 / scale;
       ctx.lineCap = "butt";
       const dash = 4 / scale;
