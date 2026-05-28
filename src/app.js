@@ -11,8 +11,9 @@
 
 import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
-import { InputController } from "./input.js";
+import { InputController, compressPixelSnap, applyPixelSnap } from "./input.js";
 import { BrushSettings } from "./brush.js";
+import { UndoStack } from "./history.js";
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   getCurrentSessionName, setCurrentSessionName,
@@ -147,12 +148,18 @@ function syncBrushColor() {
 }
 syncBrushColor();
 
+// Undo / redo 共享栈（command pattern + 注册 handler，详见
+// docs/undo-architecture.md）。input.js 注册 "stroke" handler；layer
+// 操作的 5 个 handler 在下方 boot 段集中注册（四条纪律 #1）。
+const history = new UndoStack({ max: 50 });
+
 const input = new InputController(board, doc, {
   getTool: () => state.tool,
   getBrushSettings: () => state.brush,
   getLongPressPickEnabled: () => state.longPressPick,
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
+  history,
 });
 
 // 笔触 buffer live overlay：board 每帧问 brush 要，layer 之上 composite × s.opacity
@@ -503,16 +510,24 @@ function renderLayersPanel() {
       : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a18.94 18.94 0 0 1 4.06-5.06"/><path d="M1 1l22 22"/></svg>';
     vis.addEventListener("click", (e) => {
       e.stopPropagation();
-      L.visible = !L.visible;
+      const oldVal = L.visible;
+      L.visible = !oldVal;
+      history.push({ type: "setLayerProp", layerId: L.id, prop: "visible", oldVal, newVal: L.visible });
       renderLayersPanel();
       board.invalidateAll();
       board.requestRender();
     });
     row.appendChild(vis);
 
+    // 名字：双击进入 inline 编辑
     const name = document.createElement("span");
     name.className = "layer-name";
     name.textContent = L.name;
+    name.title = "双击重命名";
+    name.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      startLayerRename(L, name);
+    });
     row.appendChild(name);
 
     // Mode / opacity badge：点开折叠区
@@ -544,6 +559,10 @@ function renderLayersPanel() {
       opaRow.innerHTML = `<span>透</span><input type="range" min="0" max="100" value="${Math.round(L.opacity * 100)}"><span class="layer-slider-val">${Math.round(L.opacity * 100)}</span>`;
       const opaInput = opaRow.querySelector("input");
       const opaVal = opaRow.querySelector(".layer-slider-val");
+      // Slider **coalescing**：pointerdown 记 oldVal，pointerup 才 push history entry。
+      // input 期间只改 layer.opacity + render，不动 history。一次拖动 = 一个 entry。
+      let opaCoalesceOldVal = null;
+      opaInput.addEventListener("pointerdown", () => { opaCoalesceOldVal = L.opacity; });
       opaInput.addEventListener("input", () => {
         const v = parseFloat(opaInput.value) / 100;
         L.opacity = v;
@@ -552,9 +571,18 @@ function renderLayersPanel() {
         board.invalidateAll();
         board.requestRender();
       });
+      const opaCommit = () => {
+        if (opaCoalesceOldVal === null) return;
+        if (opaCoalesceOldVal !== L.opacity) {
+          history.push({ type: "setLayerProp", layerId: L.id, prop: "opacity", oldVal: opaCoalesceOldVal, newVal: L.opacity });
+        }
+        opaCoalesceOldVal = null;
+      };
+      opaInput.addEventListener("pointerup", opaCommit);
+      opaInput.addEventListener("pointercancel", opaCommit);
       opaInput.addEventListener("click", (e) => e.stopPropagation());
       expand.appendChild(opaRow);
-      // 模式 dropdown
+      // 模式 dropdown：change 是离散事件，直接 push 一个 entry
       const modeRow = document.createElement("label");
       modeRow.className = "layer-slider-row";
       let optsHtml = "";
@@ -564,7 +592,10 @@ function renderLayersPanel() {
       modeRow.innerHTML = `<span>模式</span><select style="grid-column: span 2;">${optsHtml}</select>`;
       const modeSelect = modeRow.querySelector("select");
       modeSelect.addEventListener("change", () => {
-        L.mode = modeSelect.value;
+        const oldVal = L.mode;
+        const newVal = modeSelect.value;
+        L.mode = newVal;
+        history.push({ type: "setLayerProp", layerId: L.id, prop: "mode", oldVal, newVal });
         badge.textContent = modeInitial(L.mode);
         badge.title = `不透明度 ${Math.round(L.opacity * 100)}% · 模式 ${LAYER_MODE_LABEL[L.mode] || L.mode}`;
         board.invalidateAll();
@@ -572,7 +603,7 @@ function renderLayersPanel() {
       });
       modeSelect.addEventListener("click", (e) => e.stopPropagation());
       expand.appendChild(modeRow);
-      expand.addEventListener("click", (e) => e.stopPropagation());   // 点 expand 内部不切换 active
+      expand.addEventListener("click", (e) => e.stopPropagation());
       els.layersList.appendChild(expand);
     }
   }
@@ -583,46 +614,168 @@ function renderLayersPanel() {
   els.layerDownBtn.disabled = doc.activeIndex <= 0;
 }
 
-els.layerAddBtn.addEventListener("click", () => {
-  const L = doc.addLayer();
-  if (!L) {
-    setStatus(`图层数已达上限 ${doc.maxLayers}`);
-    return;
-  }
+// 各层操作都走 history.push → handler 同时 apply 和 push。这样未来 undo / redo
+// 都自动可以反向 apply。helper：apply 即时效果 + 渲染。
+function _afterDocChange() {
   renderLayersPanel();
   board.invalidateAll();
   board.requestRender();
+}
+
+els.layerAddBtn.addEventListener("click", () => {
+  if (doc.layers.length >= doc.maxLayers) {
+    setStatus(`图层数已达上限 ${doc.maxLayers}`);
+    return;
+  }
+  // 先 add（拿到分配的 id），然后用它的 spec 当 entry data
+  const L = doc.addLayer();
+  if (!L) return;
+  const insertIndex = doc.layers.findIndex((l) => l.id === L.id);
+  const layerSpec = layerSpecFrom(L);    // empty 新层 → spec 也是 empty
+  history.push({ type: "addLayer", index: insertIndex, layerSpec });
+  _afterDocChange();
 });
 els.layerDelBtn.addEventListener("click", () => {
   const L = doc.activeLayer;
   if (!L) return;
-  if (!doc.removeLayer(L.id)) {
-    setStatus("至少保留一层");
-    return;
-  }
-  // 同时清掉这层的 undo 链条 entry（layerId 匹配的）—— 否则 undo 会复活已删层
-  input.dropHistoryForLayer(L.id);
-  renderLayersPanel();
-  board.invalidateAll();
-  board.requestRender();
+  if (doc.layers.length <= 1) { setStatus("至少保留一层"); return; }
+  const index = doc.layers.findIndex((l) => l.id === L.id);
+  const layerSpec = layerSpecFrom(L);     // 含 pixel snapshot
+  doc.removeLayer(L.id);
+  const entry = { type: "removeLayer", index, layerSpec };
+  history.push(entry);
+  // 异步压缩 layerSpec 的 imageData → blob
+  compressPixelSnap(layerSpec, (blob) => { layerSpec.blob = blob; });
+  _afterDocChange();
 });
 els.layerUpBtn.addEventListener("click", () => {
   const L = doc.activeLayer;
   if (!L) return;
-  if (doc.moveLayer(L.id, 1)) {
-    renderLayersPanel();
-    board.invalidateAll();
-    board.requestRender();
-  }
+  const from = doc.layers.findIndex((l) => l.id === L.id);
+  if (!doc.moveLayer(L.id, 1)) return;
+  const to = doc.layers.findIndex((l) => l.id === L.id);
+  history.push({ type: "moveLayer", layerId: L.id, fromIdx: from, toIdx: to });
+  _afterDocChange();
 });
 els.layerDownBtn.addEventListener("click", () => {
   const L = doc.activeLayer;
   if (!L) return;
-  if (doc.moveLayer(L.id, -1)) {
+  const from = doc.layers.findIndex((l) => l.id === L.id);
+  if (!doc.moveLayer(L.id, -1)) return;
+  const to = doc.layers.findIndex((l) => l.id === L.id);
+  history.push({ type: "moveLayer", layerId: L.id, fromIdx: from, toIdx: to });
+  _afterDocChange();
+});
+
+// Layer rename：把 name span 换成 input，blur / Enter 提交，Esc 撤销
+function startLayerRename(L, nameEl) {
+  const oldName = L.name;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = oldName;
+  input.className = "layer-name-input";
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let committed = false;
+  const commit = () => {
+    if (committed) return;
+    committed = true;
+    const v = input.value.trim();
+    const newName = v || oldName;
+    if (newName !== oldName) {
+      L.name = newName;
+      history.push({ type: "renameLayer", layerId: L.id, oldName, newName });
+    }
     renderLayersPanel();
-    board.invalidateAll();
-    board.requestRender();
-  }
+  };
+  const cancel = () => {
+    if (committed) return;
+    committed = true;
+    renderLayersPanel();
+  };
+  input.addEventListener("blur", commit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
+    else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+  });
+  input.addEventListener("click", (e) => e.stopPropagation());
+}
+
+// 从 Layer 拿一份 spec（含 pixel snapshot）—— add/remove handler 都用
+function layerSpecFrom(L) {
+  const snap = L.snapshot();
+  return {
+    id: L.id,
+    name: L.name,
+    visible: L.visible,
+    opacity: L.opacity,
+    mode: L.mode,
+    bboxX: snap.bboxX, bboxY: snap.bboxY,
+    bboxW: snap.bboxW, bboxH: snap.bboxH,
+    imageData: snap.imageData,
+    blob: null,
+  };
+}
+
+// ---- 5 个 layer handler 注册（**纪律 #1**：集中在 boot 段）----
+// addLayer：undo 删层，redo 在 index 处插入空层（spec 通常 empty）
+history.registerHandler("addLayer", {
+  undo: (e) => { doc.removeLayer(e.layerSpec.id); _afterDocChange(); },
+  redo: (e) => { doc.insertLayerAt(e.index, e.layerSpec); _afterDocChange(); },
+  refsLayer: (e, id) => e.layerSpec.id === id,
+});
+// removeLayer：undo 在 index 处恢复层（含 pixel）；redo 再删
+history.registerHandler("removeLayer", {
+  undo: async (e) => {
+    const spec = e.layerSpec;
+    // 优先 imageData（同步）；否则 decode blob
+    if (spec.imageData || (!spec.blob && (spec.bboxW <= 0 || spec.bboxH <= 0))) {
+      doc.insertLayerAt(e.index, spec);
+      _afterDocChange();
+      return;
+    }
+    if (spec.blob) {
+      const bitmap = await createImageBitmap(spec.blob);
+      doc.insertLayerAt(e.index, { ...spec, bitmap });
+      bitmap.close?.();
+      _afterDocChange();
+      return;
+    }
+    // 没像素 fallback
+    doc.insertLayerAt(e.index, spec);
+    _afterDocChange();
+  },
+  redo: (e) => { doc.removeLayer(e.layerSpec.id); _afterDocChange(); },
+  refsLayer: (e, id) => e.layerSpec.id === id,
+});
+// moveLayer：undo 从 toIdx 移回 fromIdx；redo 从 fromIdx 移到 toIdx
+history.registerHandler("moveLayer", {
+  undo: (e) => {
+    const cur = doc.layers.findIndex((l) => l.id === e.layerId);
+    if (cur < 0) return;
+    doc.moveLayer(e.layerId, e.fromIdx - cur);
+    _afterDocChange();
+  },
+  redo: (e) => {
+    const cur = doc.layers.findIndex((l) => l.id === e.layerId);
+    if (cur < 0) return;
+    doc.moveLayer(e.layerId, e.toIdx - cur);
+    _afterDocChange();
+  },
+  refsLayer: (e, id) => e.layerId === id,
+});
+// renameLayer：oldName / newName
+history.registerHandler("renameLayer", {
+  undo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L.name = e.oldName; renderLayersPanel(); } },
+  redo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L.name = e.newName; renderLayersPanel(); } },
+  refsLayer: (e, id) => e.layerId === id,
+});
+// setLayerProp：visibility / opacity / mode
+history.registerHandler("setLayerProp", {
+  undo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L[e.prop] = e.oldVal; _afterDocChange(); } },
+  redo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L[e.prop] = e.newVal; _afterDocChange(); } },
+  refsLayer: (e, id) => e.layerId === id,
 });
 els.hueSlider.addEventListener("input", () => {
   pickerHsv.h = parseFloat(els.hueSlider.value);

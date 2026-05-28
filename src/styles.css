@@ -399,6 +399,16 @@ input[type=range] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.layer-name-input {
+  flex: 1;
+  font: inherit;
+  background: var(--bg-soft);
+  color: var(--ink);
+  border: 1px solid var(--accent, #4c8bf5);
+  border-radius: 4px;
+  padding: 2px 6px;
+  min-width: 0;
+}
 .layer-mode-badge {
   width: 28px;
   height: 22px;

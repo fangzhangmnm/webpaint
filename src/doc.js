@@ -220,6 +220,41 @@ export class PaintDoc {
     return true;
   }
 
+  // 按 layerSpec 在 index 处插入一层（**用 spec.id**，不走 auto-increment）。
+  // 给 history undo "removeLayer" / redo "addLayer" 用。
+  // layerSpec: { id, name, visible, opacity, mode, bboxX, bboxY, bboxW, bboxH,
+  //   imageData?, bitmap? }   —— 像素数据走 Layer.restoreFromSnapshot 同形 snap
+  insertLayerAt(index, spec) {
+    if (this.layers.length >= this.maxLayers) return false;
+    const L = new Layer({
+      width: this.width,
+      height: this.height,
+      name: spec.name,
+      empty: true,
+    });
+    L.id = spec.id;         // 关键：保留原 id 让历史上的 stroke entry 仍能引用
+    if (typeof spec.visible === "boolean") L.visible = spec.visible;
+    if (typeof spec.opacity === "number") L.opacity = spec.opacity;
+    if (typeof spec.mode === "string") L.mode = spec.mode;
+    L.restoreFromSnapshot({
+      bboxX: spec.bboxX | 0, bboxY: spec.bboxY | 0,
+      bboxW: spec.bboxW | 0, bboxH: spec.bboxH | 0,
+      imageData: spec.imageData || null,
+      bitmap: spec.bitmap || null,
+    });
+    const i = Math.max(0, Math.min(index, this.layers.length));
+    this.layers.splice(i, 0, L);
+    if (this.activeIndex >= i) this.activeIndex++;
+    // 防止 _layerIdCounter 撞到一个 spec.id（避免后续 addLayer 复用 id）
+    if (spec.id >= _layerIdCounter) _layerIdCounter = spec.id + 1;
+    return true;
+  }
+
+  // 给 setLayerProp / renameLayer 用：按 id 查 layer
+  findLayer(id) {
+    return this.layers.find((l) => l.id === id) || null;
+  }
+
   // 上移 / 下移（toward = +1 上，-1 下）。bottom 是 layers[0]，top 是末尾。
   // 注意：UI 里"图层 1 在最上面"是常见 anime 工作流；但 doc.layers 数组 0 是底，
   // 用 UI 渲染时倒序即可，doc 本身不翻。
