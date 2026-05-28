@@ -546,20 +546,22 @@ export class Board {
       const segs = s._outline;
       ctx.save();
       // extractMaskOutline 输出**已是 doc 坐标**（内部加了 sel.bboxX/Y），不 translate。
-      // 风格沿用「正在画的 path」（黑 0 偏移 + 白 5/scale 偏移）—— user 要求一致。
-      ctx.lineWidth = Math.max(1, 1.5 / scale);
+      // 真黑白相间：dash + gap 等长，白色 offset 一个 dash 正好填黑的空 →
+      // 黑[0..N] 白[N..2N] 黑[2N..3N] ... 不再灰糊。
+      const dash = 4 / scale;
+      ctx.lineWidth = Math.max(1, 1.2 / scale);
       ctx.lineCap = "butt";
-      ctx.setLineDash([6 / scale, 4 / scale]);
+      ctx.setLineDash([dash, dash]);
       ctx.beginPath();
       for (let i = 0; i < segs.length; i += 4) {
         ctx.moveTo(segs[i],     segs[i + 1]);
         ctx.lineTo(segs[i + 2], segs[i + 3]);
       }
       ctx.lineDashOffset = 0;
-      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.strokeStyle = "#000";
       ctx.stroke();
-      ctx.lineDashOffset = 5 / scale;
-      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineDashOffset = dash;
+      ctx.strokeStyle = "#fff";
       ctx.stroke();
       ctx.restore();
     }

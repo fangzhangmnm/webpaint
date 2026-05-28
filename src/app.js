@@ -553,6 +553,8 @@ function setTool(t) {
   bucketToolbar.classList.toggle("hidden", t !== "bucket");
   if (t !== "bucket") lassoMagicPopup.classList.add("hidden");
   updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
+  // bucket 时 lassoToolbar 强制隐藏 —— 否则两者位置一样会盖在 bucket 设置 / 点击上
+  if (t === "bucket") lassoToolbar.classList.add("hidden");
 }
 for (const b of els.toolBtns) {
   b.addEventListener("click", () => setTool(b.dataset.tool));
