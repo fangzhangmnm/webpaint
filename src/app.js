@@ -251,8 +251,6 @@ const lassoMagicGapInput = document.getElementById("lassoMagicGap");
 const lassoMagicGapVal = document.getElementById("lassoMagicGapVal");
 const lassoMagicCfgBtn = document.getElementById("lassoMagicCfgBtn");
 const lassoMagicPopup = document.getElementById("lassoMagicPopup");
-const bucketToolbar = document.getElementById("bucketToolbar");
-const bucketCfgBtn = document.getElementById("bucketCfgBtn");
 const lassoConstrainBtn = document.getElementById("lassoConstrainBtn");
 const lassoConstrainSep = document.querySelector(".lasso-constrain-sep");
 
@@ -328,19 +326,17 @@ lassoMagicGapInput.addEventListener("input", () => {
 // 初始化滑块到 lasso 引擎默认值（避免两边不一致）
 lassoMagicGapInput.value = String(input.lasso.getMagicGapPx());
 lassoMagicGapVal.textContent = String(input.lasso.getMagicGapPx());
-// 设置 按钮 → popup toggle（魔棒 + 油漆桶共用一个 popup）
+// 设置按钮 → popup toggle
 function toggleMagicPopup(e) {
   e.stopPropagation();
   lassoMagicPopup.classList.toggle("hidden");
 }
 lassoMagicCfgBtn.addEventListener("click", toggleMagicPopup);
-bucketCfgBtn.addEventListener("click", toggleMagicPopup);
 // 点 popup 外侧 → 关
 document.addEventListener("pointerdown", (e) => {
   if (lassoMagicPopup.classList.contains("hidden")) return;
   if (lassoMagicPopup.contains(e.target)) return;
   if (lassoMagicCfgBtn.contains(e.target)) return;
-  if (bucketCfgBtn.contains(e.target)) return;
   lassoMagicPopup.classList.add("hidden");
 });
 // 1:1 约束 toggle（rect / ellipse 用）
@@ -551,11 +547,7 @@ function setTool(t) {
   // 液化没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
   els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
   document.body.dataset.tool = t;
-  bucketToolbar.classList.toggle("hidden", t !== "bucket");
-  if (t !== "bucket") lassoMagicPopup.classList.add("hidden");
   updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
-  // bucket 时 lassoToolbar 强制隐藏 —— 否则两者位置一样会盖在 bucket 设置 / 点击上
-  if (t === "bucket") lassoToolbar.classList.add("hidden");
 }
 for (const b of els.toolBtns) {
   b.addEventListener("click", () => setTool(b.dataset.tool));
@@ -1338,18 +1330,30 @@ async function checkCloudETag(sessionName) {
   });
   if (choice === "pull") {
     setStatus("正在拉云端…");
+    // **顺序很重要**：先备份本地，再拉云端，再覆盖
+    //   备份失败 → 整个 abort，本地不动
+    //   云端拉失败 → 整个 abort，本地不动（backup 是无害多余）
+    //   只有都成功才 saveSession 覆盖
+    const backupName = `${sessionName}-backup-${Date.now()}`;
+    try {
+      await renameLocalSessionAsBackup(sessionName, backupName);
+    } catch (e) {
+      setStatus(`本地备份失败，已取消拉云端：${e.message || e}`, true);
+      return;
+    }
     try {
       const r = await pullSessionByPath(sessionName + ".ora");
       if (r) {
-        // 拉之前先把本地另存一份做备份
-        const backupName = `${sessionName}-backup-${Date.now()}`;
-        await renameLocalSessionAsBackup(sessionName, backupName);
         const loaded = await decodeOraToDoc(r.blob);
-        adoptLoadedDoc(loaded, r.suggestedName || sessionName);
-        await saveSession(doc, _activeSessionName, {});
+        adoptLoadedDoc(loaded, sessionName);    // 闭锁：显式用 sessionName
+        await saveSession(doc, sessionName, {});
         setStatus(`已拉云端；本地原版备份为「${backupName}」`);
+      } else {
+        setStatus(`云端找不到「${sessionName}」（本地未动，备份「${backupName}」可删）`, true);
       }
-    } catch (e) { setStatus("拉云端失败：" + (e.message || e), true); }
+    } catch (e) {
+      setStatus(`拉云端失败：${e.message || e}（本地未动，备份「${backupName}」可删）`, true);
+    }
   } else if (choice === "branch") {
     setStatus("正在拉云端到副本…");
     try {
@@ -1366,12 +1370,13 @@ async function checkCloudETag(sessionName) {
   }
 }
 
-// 把本地 sessionName 重命名为 backupName（拉云端前的备份）
+// 把本地 sessionName 复制到 backupName（拉云端前的安全网）。
+// **失败必须抛**——caller 不能继续 pull 否则丢画（v77→v78 红线 bug）。
+// 注意：是「复制」不是「重命名」；原 sessionName 还在 IDB，等 pull 完才被覆盖。
 async function renameLocalSessionAsBackup(name, backupName) {
-  try {
-    const loaded = await openSession(name);
-    if (loaded) await saveSession(loaded, backupName, {});
-  } catch (e) { console.warn("备份失败：", e); }
+  const loaded = await openSession(name);
+  if (!loaded) throw new Error(`本地找不到「${name}」，无法备份`);
+  await saveSession(loaded, backupName, {});
 }
 function formatCloudTime(iso) {
   if (!iso) return "?";
@@ -1907,17 +1912,27 @@ async function saveAndPush() {
           ],
         });
         if (choice === "pull") {
+          // 同 gateCloudSyncOnOpen 的 pull：先备份本地，再拉云端，再覆盖
+          const backupName = `${sessionName}-backup-${Date.now()}`;
+          try {
+            await renameLocalSessionAsBackup(sessionName, backupName);
+          } catch (err) {
+            setStatus(`本地备份失败，已取消拉云端：${err.message || err}`, true);
+            return;
+          }
           try {
             const r = await pullSessionByPath(sessionName + ".ora");
             if (r) {
-              const backupName = `${sessionName}-backup-${Date.now()}`;
-              await renameLocalSessionAsBackup(sessionName, backupName);
               const loaded = await decodeOraToDoc(r.blob);
               adoptLoadedDoc(loaded, sessionName);
               await saveSession(doc, sessionName, {});
               setStatus(`已拉云端；本地原版备份为「${backupName}」`);
+            } else {
+              setStatus(`云端找不到「${sessionName}」（备份「${backupName}」可删）`, true);
             }
-          } catch (err) { setStatus("拉云端失败：" + (err.message || err), true); }
+          } catch (err) {
+            setStatus(`拉云端失败：${err.message || err}（备份「${backupName}」可删）`, true);
+          }
         } else if (choice === "rename") {
           const newName = await renameCurrentSession({ suggested: sessionName + " (新)", reason: "云端冲突" });
           if (newName && isSignedIn()) {

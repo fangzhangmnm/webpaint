@@ -212,7 +212,6 @@ export class InputController {
         : effectiveTool === "picker" ? "pick"
         : effectiveTool === "liquify" ? "liquify"
         : effectiveTool === "lasso" ? "lasso"
-        : effectiveTool === "bucket" ? "bucket"
         : "draw";
       else role = "pan";
     } else if (e.pointerType === "pen") {
@@ -222,7 +221,6 @@ export class InputController {
       else if (effectiveTool === "eraser") role = "erase";
       else if (effectiveTool === "liquify") role = "liquify";
       else if (effectiveTool === "lasso") role = "lasso";
-      else if (effectiveTool === "bucket") role = "bucket";
       else role = "draw";
     } else if (e.pointerType === "touch") {
       if (this.penEverSeen) {
@@ -232,7 +230,6 @@ export class InputController {
         else if (effectiveTool === "eraser") role = "erase";
         else if (effectiveTool === "liquify") role = "liquify";
         else if (effectiveTool === "lasso") role = "lasso";
-        else if (effectiveTool === "bucket") role = "bucket";
         else role = "draw";
       }
     }
@@ -266,9 +263,6 @@ export class InputController {
     } else if (role === "lasso") {
       this.board.setCursor(null);
       this._beginLasso(rec);
-    } else if (role === "bucket") {
-      this.board.setCursor(null);
-      this._doBucket(x, y);
     } else if (role === "pick") {
       this._doPick(x, y);
     } else if (role === "pan") {
@@ -767,58 +761,6 @@ export class InputController {
     this.status(`吸色 ${hex}`);
   }
 
-  // ---- 油漆桶 ----
-  // 算法：跑魔棒（读 reference 或 active）得 mask → 当前颜色 fill 到 active layer。
-  // 选区存在时：mask ∩ selection（受选区限制）
-  _doBucket(sx, sy) {
-    const { x: dx, y: dy } = this.board.screenToDoc(sx, sy);
-    if (!this.doc.activeLayer) { this.status("油漆桶：没活动层"); return; }
-    if (dx < 0 || dy < 0 || dx >= this.doc.width || dy >= this.doc.height) return;
-    const source = this.doc.getFloodSourceLayer();
-    if (!source) { this.status("油漆桶：没源图层"); return; }
-    // lasso engine 已有完整 magic wand 逻辑（带容隙）；借它产 mask
-    const sel = this.lasso._magicWandToSelection({ x: dx, y: dy }, source);
-    if (!sel) { this.status("油漆桶：未填到任何像素"); return; }
-    // 受当前 selection 限制（mask ∩ doc.selection）
-    const layer = this.doc.activeLayer;
-    const before = layer.snapshot();
-    // ensureBbox 把目标 mask 区域纳入 layer.bbox
-    layer.ensureBbox(sel.bboxX, sel.bboxY, sel.bboxX + sel.bboxW, sel.bboxY + sel.bboxH);
-    const lctx = layer.ctx;
-    lctx.save();
-    // mask shape from sel.maskCanvas at sel.bboxX/Y
-    // 用 fillRect → source-in mask → 颜色填在 mask 形状内
-    // 走 tmp canvas：避免影响 layer 其它像素的 alpha
-    const tmp = document.createElement("canvas");
-    tmp.width = sel.bboxW;
-    tmp.height = sel.bboxH;
-    const tctx = tmp.getContext("2d");
-    const settings = this.getBrushSettings();
-    tctx.fillStyle = (settings && settings.color) || "#000";
-    tctx.fillRect(0, 0, sel.bboxW, sel.bboxH);
-    tctx.globalCompositeOperation = "destination-in";
-    tctx.drawImage(sel.maskCanvas, 0, 0);
-    // 受 selection 限制
-    const docSel = this.doc.selection;
-    if (docSel) {
-      tctx.drawImage(docSel.maskCanvas, docSel.bboxX - sel.bboxX, docSel.bboxY - sel.bboxY);
-    }
-    tctx.globalCompositeOperation = "source-over";
-    lctx.drawImage(tmp, sel.bboxX - layer.bboxX, sel.bboxY - layer.bboxY);
-    lctx.restore();
-    const after = layer.snapshot();
-    if (this.history) {
-      const entry = {
-        type: "stroke", layerId: layer.id,
-        before, after, beforeBlob: null, afterBlob: null,
-      };
-      this.history.push(entry);
-      compressPixelSnap(before, (blob) => { entry.beforeBlob = blob; });
-      compressPixelSnap(after,  (blob) => { entry.afterBlob  = blob; });
-    }
-    this.board.invalidateAll();
-  }
-
   // ---- gesture ----
   _gestureTouches() {
     return [...this.pointers.values()].filter(
@@ -976,7 +918,6 @@ export class InputController {
     else if (e.key === "i" || e.key === "I") this._emitTool("picker");
     else if (e.key === "h" || e.key === "H") this._emitTool("hand");
     else if (e.key === "l" || e.key === "L") this._emitTool("lasso");
-    else if (e.key === "g" || e.key === "G") this._emitTool("bucket");
     else if (e.key === "Enter" && this.lasso.state() === "floating") { this._commitLasso(); e.preventDefault(); }
     else if (e.key === "Escape" && this.lasso.state() === "floating") { this._abortLasso(); e.preventDefault(); }
     // Esc 在非 floating 状态 = 取消选区（仅有选区时；不进 history 显式 push 会让 toolbar 自动更新）

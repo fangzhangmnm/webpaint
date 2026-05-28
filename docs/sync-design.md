@@ -1,17 +1,24 @@
 # WebPaint Sync 设计
 
-> 同事接手版。v77 起的设计；之前 v66 docs/persistence-and-encryption-shareback.md
-> 是 push/pull 协议层细节，本文是**用户决策流**。
+> 同事接手版。v77 起的设计，v78 修了红线 bug；之前 v66
+> docs/persistence-and-encryption-shareback.md 是 push/pull 协议层细节，本文是
+> **用户决策流**。
 
-## 出发点
+## 红线 + 出发点
 
-WebPaint 是**离线优先**的 PWA + 可选 OneDrive 同步。两条强约束：
+**红线**: **绝不能丢画**。其他成本（偶尔出现 sibling 副本、偶尔忘记 sync）都能容忍。
+
+WebPaint 是**离线优先**的 PWA + 可选 OneDrive 同步。三条强约束：
 
 1. **离线第一公民** —— 没网 / 没登录也得完全可用，不能阻断打开 / 编辑 / 保存（IDB）
-2. **不偷动数据** —— 任何「覆盖本地」/「覆盖云端」决定必须 user 显式 consent
+2. **不偷动数据** —— 任何「覆盖本地」/「覆盖云端」决定必须 user **显式 consent**
+3. **不一致永远问** —— etag 不一致 = user 决定权，**不**自动 pull / push 任何一边
 
 加上业界经典坑：cache invalidation 半自动化最容易出事。所以我们**没有 auto-pull**。
 有的是：**强提示 + 用户选 + 副本保底**。
+
+「不一致 → 锁屏 + 三选 + 备份保底」是这套设计的核心，是 user 跟我反复确认的姿态：
+**给 user 决定权比帮 user 做决定更重要**。哪怕成本是多一次 click，对画家来说值。
 
 ## ETag 局限 —— 为什么不光靠它
 
@@ -79,17 +86,16 @@ gateCloudSyncOnOpen(sessionName: string): Promise<void>   // 打开 doc 后调
 lockSyncGate({ title, message, showSpinner, actions }): Promise<value>
 ```
 
-## 没做的（未来再说）
+## 不做的事 + 为啥
 
-- **3-way merge / OT / CRDT**：像素数据不像字符有 op 序，业界 paint 没人做
-- **后台 idle poll**：每 N 秒查 etag 弹横幅；现在只在 open 时查
-- **lock 文件**：server-side 独占编辑，需服务器配合（OneDrive 不支持）
-- **历史版本时间轴 UI**：OneDrive 服务端有 version 但我们没暴露
-
-## 为啥不做 auto-pull
-
-参 conversation v76→v77 的论证。简言：方案 3（last-write-wins + history）里
-auto-pull 等于客户端替用户决定 trunk，用户没法回滚——比 ETag 不够更糟。
+| 没做 | 为啥 |
+|---|---|
+| **auto-pull** | 客户端替 user 决定 trunk = 红线违反。详 v76→v77 论证 |
+| **后台 idle poll** | 保存时 412 已经接住；poll 是多余的 round-trip + 多一个状态条噪音 |
+| **mid-session 401 独立路径** | 跟保存时断网一个模型——push 失败时统一走 412 / 错误分支。`saveNow` 已经先把 IDB 落地，push 失败本地不丢 |
+| **3-way merge / OT / CRDT** | 像素数据没 op 序可合并；业界 paint app 也没做 |
+| **lock 文件 (server 独占)** | OneDrive 不支持；改 server 不符合「PWA + 第三方云盘」前提 |
+| **时间轴 UI** | 离 paint app 太远，过度复杂 |
 
 ## 对照行业其他做法
 
