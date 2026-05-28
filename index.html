@@ -136,12 +136,14 @@
            SVG content 由 app.js 按状态切换 -->
       <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
 
-      <button class="tool" id="topGalleryBtn" type="button" title="图库 / 云端">
+      <button class="tool" id="topAdjustBtn" type="button" title="调整（液化 / 调色…）" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-          <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-          <rect x="3" y="14" width="7" height="7" rx="1"></rect>
-          <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+          <line x1="4" y1="6" x2="20" y2="6"></line>
+          <line x1="4" y1="12" x2="20" y2="12"></line>
+          <line x1="4" y1="18" x2="20" y2="18"></line>
+          <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"></circle>
+          <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"></circle>
+          <circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"></circle>
         </svg>
       </button>
 
@@ -207,6 +209,36 @@
       </div>
     </div>
 
+    <!-- 液化设置面板（沿用 .float-panel）。Procreate 风格：选液化后弹这个 -->
+    <div class="float-panel brush-panel hidden" id="liquifyPanel">
+      <div class="float-panel-head" id="liquifyPanelHead">
+        <span class="float-panel-title">液化</span>
+        <button class="float-panel-close" id="liquifyPanelClose" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="float-panel-body">
+        <label class="brush-slider-row" title="液化模式">
+          <span class="brush-slider-label">模式</span>
+          <select id="liquifyMode" style="grid-column: span 2;">
+            <option value="push">推 (Push)</option>
+            <option value="pinch">收 (Pinch)</option>
+            <option value="bloat">胀 (Bloat)</option>
+            <option value="twirl">旋 (Twirl)</option>
+          </select>
+        </label>
+        <label class="brush-slider-row" title="brush 半径（doc-px）">
+          <span class="brush-slider-label">大小</span>
+          <input id="liquifySize" type="range" min="8" max="300" step="1" value="60" />
+          <span class="brush-slider-value" id="liquifySizeVal">60</span>
+        </label>
+        <label class="brush-slider-row" title="单 event 位移强度">
+          <span class="brush-slider-label">力度</span>
+          <input id="liquifyStrength" type="range" min="1" max="100" step="1" value="40" />
+          <span class="brush-slider-value" id="liquifyStrengthVal">40</span>
+        </label>
+        <p class="sheet-hint" style="margin-top: 6px;">⚠ 液化只动当前图层；反复拖累加变形。撤销整个笔触可 Ctrl+Z。</p>
+      </div>
+    </div>
+
     <!-- 笔刷设置浮动面板（沿用 .float-panel） -->
     <div class="float-panel brush-panel hidden" id="brushPanel">
       <div class="float-panel-head" id="brushPanelHead">
@@ -237,8 +269,20 @@
       </div>
     </div>
 
+    <!-- Adjustments popup：液化 / 调色等。学 Procreate adjustments icon -->
+    <div class="adjust-popup menu-panel hidden" id="adjustPopup" role="menu">
+      <button class="menu-item" id="adjustLiquify" type="button" role="menuitem">
+        <span class="menu-item-label">液化</span>
+      </button>
+      <!-- 之后加：曲线 / 色相 / Levels / ... -->
+    </div>
+
     <!-- 汉堡菜单：低频项收纳处 -->
     <div class="menu-panel hidden" id="menuPanel" role="menu">
+      <button class="menu-item" id="menuGallery" type="button" role="menuitem">
+        <span class="menu-item-label">图库 / 云端…</span>
+      </button>
+      <hr class="menu-sep" />
       <button class="menu-item" id="menuImport" type="button" role="menuitem">
         <span class="menu-item-label">导入图片 / .ora …</span>
       </button>

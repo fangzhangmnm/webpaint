@@ -78,7 +78,18 @@ const els = {
   brushMotionFilter: document.getElementById("brushMotionFilter"),
   brushMotionFilterVal: document.getElementById("brushMotionFilterVal"),
   topSaveBtn: document.getElementById("topSaveBtn"),
-  topGalleryBtn: document.getElementById("topGalleryBtn"),
+  topAdjustBtn: document.getElementById("topAdjustBtn"),
+  adjustPopup: document.getElementById("adjustPopup"),
+  adjustLiquify: document.getElementById("adjustLiquify"),
+  menuGallery: document.getElementById("menuGallery"),
+  liquifyPanel: document.getElementById("liquifyPanel"),
+  liquifyPanelHead: document.getElementById("liquifyPanelHead"),
+  liquifyPanelClose: document.getElementById("liquifyPanelClose"),
+  liquifyMode: document.getElementById("liquifyMode"),
+  liquifySize: document.getElementById("liquifySize"),
+  liquifySizeVal: document.getElementById("liquifySizeVal"),
+  liquifyStrength: document.getElementById("liquifyStrength"),
+  liquifyStrengthVal: document.getElementById("liquifyStrengthVal"),
   galleryFull: document.getElementById("galleryFull"),
   galleryClose: document.getElementById("galleryClose"),
   galleryCurrentName: document.getElementById("galleryCurrentName"),
@@ -146,6 +157,12 @@ const state = {
     motionFilter: parseFloat(safeLS("webpaint.motionFilter") || "0"),
   }),
   longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
+  // 液化设置（独立于 brush，见 src/liquify.js + docs/artist-priorities.md v46）
+  liquify: {
+    mode: safeLS("webpaint.liquify.mode") || "push",
+    size: parseFloat(safeLS("webpaint.liquify.size") || "60"),
+    strength: parseFloat(safeLS("webpaint.liquify.strength") || "0.4"),
+  },
 };
 
 // brush settings keep color in sync
@@ -163,6 +180,7 @@ const history = new UndoStack({ max: 50 });
 const input = new InputController(board, doc, {
   getTool: () => state.tool,
   getBrushSettings: () => state.brush,
+  getLiquifySettings: () => state.liquify,
   getLongPressPickEnabled: () => state.longPressPick,
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
@@ -199,6 +217,8 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () 
 function setTool(t) {
   state.tool = t;
   for (const b of els.toolBtns) b.setAttribute("aria-pressed", b.dataset.tool === t ? "true" : "false");
+  // 液化没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
+  els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
   document.body.dataset.tool = t;
 }
 for (const b of els.toolBtns) {
@@ -1145,7 +1165,42 @@ function stampNow() {
 // 点 save 按钮 = saveAndPush 一把梭（同 Ctrl+S）。state == "synced" 时
 // 也跑一遍（no-op fast path）让 user 永远不需要"再点一下"。
 els.topSaveBtn.addEventListener("click", () => saveAndPush());
-els.topGalleryBtn.addEventListener("click", () => setGalleryOpen(true));
+
+// ---- topbar：adjustments popup（液化 / 后续调色 etc）----
+// 单按钮 → 弹一列 menu-item（同 menuPanel 模式）。学 Procreate adjustments icon。
+function setAdjustOpen(open) {
+  els.adjustPopup.classList.toggle("hidden", !open);
+  els.topAdjustBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    // 锚到按钮下方右对齐
+    const r = els.topAdjustBtn.getBoundingClientRect();
+    const w = els.adjustPopup.offsetWidth || 200;
+    els.adjustPopup.style.top = (r.bottom + 4) + "px";
+    els.adjustPopup.style.right = (window.innerWidth - r.right) + "px";
+    els.adjustPopup.style.left = "auto";
+  }
+}
+els.topAdjustBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  setAdjustOpen(els.adjustPopup.classList.contains("hidden"));
+});
+document.addEventListener("pointerdown", (e) => {
+  if (els.adjustPopup.classList.contains("hidden")) return;
+  if (els.adjustPopup.contains(e.target) || els.topAdjustBtn.contains(e.target)) return;
+  setAdjustOpen(false);
+});
+els.adjustLiquify.addEventListener("click", () => {
+  setAdjustOpen(false);
+  setTool("liquify");
+  toggleLiquifyPanel(true);
+  setStatus("液化");
+});
+
+// ---- 菜单：图库（v46 从 topbar 迁下来，避免误点）----
+els.menuGallery.addEventListener("click", () => {
+  setMenuOpen(false);
+  setGalleryOpen(true);
+});
 
 // ---- 菜单：导入 / 导出 / 剪贴板 / 适应 ----
 els.menuImport.addEventListener("click", () => {
@@ -1270,6 +1325,73 @@ bindBrushSlider(els.brushStreamline, els.brushStreamlineVal, "webpaint.streamlin
 bindBrushSlider(els.brushStabilization, els.brushStabilizationVal, "webpaint.stabilization", "stabilization");
 bindBrushSlider(els.brushPullStabilizer, els.brushPullStabilizerVal, "webpaint.pullStabilizer", "pullStabilizer");
 bindBrushSlider(els.brushMotionFilter, els.brushMotionFilterVal, "webpaint.motionFilter", "motionFilter");
+
+// ---- 液化设置面板 ----
+function toggleLiquifyPanel(force) {
+  const hidden = els.liquifyPanel.classList.contains("hidden");
+  const show = force === true ? true : force === false ? false : hidden;
+  els.liquifyPanel.classList.toggle("hidden", !show);
+  if (show) {
+    syncLiquifyPanelFromState();
+    const saved = safeLS("webpaint.liquifyPanel.pos");
+    const w = els.liquifyPanel.offsetWidth || 280;
+    let left, top;
+    if (saved) { try { const o = JSON.parse(saved); left = o.left; top = o.top; } catch { left = top = null; } }
+    if (left == null) { left = window.innerWidth - w - 16; top = 60; }
+    els.liquifyPanel.style.left = Math.max(0, Math.min(window.innerWidth - w, left)) + "px";
+    els.liquifyPanel.style.top = Math.max(0, top) + "px";
+  }
+}
+els.liquifyPanelClose.addEventListener("click", () => toggleLiquifyPanel(false));
+
+let _liquifyPanelDrag = null;
+els.liquifyPanelHead.addEventListener("pointerdown", (e) => {
+  if (e.target.closest(".float-panel-close")) return;
+  const r = els.liquifyPanel.getBoundingClientRect();
+  _liquifyPanelDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
+  els.liquifyPanelHead.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+els.liquifyPanelHead.addEventListener("pointermove", (e) => {
+  if (!_liquifyPanelDrag || e.pointerId !== _liquifyPanelDrag.id) return;
+  const w = els.liquifyPanel.offsetWidth, h = els.liquifyPanel.offsetHeight;
+  const left = Math.max(0, Math.min(window.innerWidth - w, _liquifyPanelDrag.ol + (e.clientX - _liquifyPanelDrag.sx)));
+  const top  = Math.max(0, Math.min(window.innerHeight - h, _liquifyPanelDrag.ot + (e.clientY - _liquifyPanelDrag.sy)));
+  els.liquifyPanel.style.left = left + "px";
+  els.liquifyPanel.style.top = top + "px";
+  safeLSSet("webpaint.liquifyPanel.pos", JSON.stringify({ left, top }));
+});
+els.liquifyPanelHead.addEventListener("pointerup", (e) => {
+  if (_liquifyPanelDrag && e.pointerId === _liquifyPanelDrag.id) {
+    try { els.liquifyPanelHead.releasePointerCapture(e.pointerId); } catch {}
+    _liquifyPanelDrag = null;
+  }
+});
+
+function syncLiquifyPanelFromState() {
+  const q = state.liquify;
+  els.liquifyMode.value = q.mode;
+  els.liquifySize.value = String(Math.round(q.size));
+  els.liquifySizeVal.textContent = String(Math.round(q.size));
+  els.liquifyStrength.value = String(Math.round(q.strength * 100));
+  els.liquifyStrengthVal.textContent = String(Math.round(q.strength * 100));
+}
+els.liquifyMode.addEventListener("change", () => {
+  state.liquify.mode = els.liquifyMode.value;
+  safeLSSet("webpaint.liquify.mode", state.liquify.mode);
+});
+els.liquifySize.addEventListener("input", () => {
+  const v = parseFloat(els.liquifySize.value);
+  state.liquify.size = v;
+  els.liquifySizeVal.textContent = String(Math.round(v));
+  safeLSSet("webpaint.liquify.size", String(v));
+});
+els.liquifyStrength.addEventListener("input", () => {
+  const v = parseFloat(els.liquifyStrength.value) / 100;
+  state.liquify.strength = v;
+  els.liquifyStrengthVal.textContent = String(Math.round(v * 100));
+  safeLSSet("webpaint.liquify.strength", String(v));
+});
 els.oraFileInput.addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;

@@ -21,6 +21,7 @@
 //     else                   → 平移
 
 import { BrushEngine } from "./brush.js";
+import { LiquifyEngine } from "./liquify.js";
 
 const ERASER_RADIUS_SCREEN = 0;   // 用 BrushEngine 自己的 size，不再独立
 const TAP_MAX_DURATION = 220;
@@ -53,8 +54,10 @@ export class InputController {
     this.doc = doc;
     this.canvas = board.canvas;
     this.brush = new BrushEngine();
+    this.liquify = new LiquifyEngine();
     this.getTool = opts.getTool || (() => "brush");
     this.getBrushSettings = opts.getBrushSettings || (() => null);   // 必须传
+    this.getLiquifySettings = opts.getLiquifySettings || (() => ({ mode: "push", size: 50, strength: 0.5 }));
     this.getLongPressPickEnabled = opts.getLongPressPickEnabled || (() => false);
     this.onColorSampled = opts.onColorSampled || (() => {});
     this.status = opts.status || (() => {});
@@ -77,6 +80,13 @@ export class InputController {
     this.history = opts.history || null;
     if (this.history) {
       this.history.registerHandler("stroke", {
+        undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
+        redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board),
+        refsLayer: (e, id) => e.layerId === id,
+      });
+      // 液化和 stroke 同 schema（layerId + before/after pixel snap）。共用 handler 也行，
+      // 但分开命名便于以后区分 history UI 标签。
+      this.history.registerHandler("liquify", {
         undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
         redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board),
         refsLayer: (e, id) => e.layerId === id,
@@ -105,8 +115,14 @@ export class InputController {
       this.board.setCursor(null);
       return;
     }
-    const settings = this.getBrushSettings();
-    const size = settings ? settings.size : 12;
+    let size;
+    if (tool === "liquify") {
+      const q = this.getLiquifySettings();
+      size = (q && q.size) ? q.size * 2 : 100;     // size 是半径 → 直径 = ×2
+    } else {
+      const settings = this.getBrushSettings();
+      size = settings ? settings.size : 12;
+    }
     this.board.setCursor({ x: e.clientX, y: e.clientY, size });
   }
 
@@ -143,6 +159,8 @@ export class InputController {
       for (const [pid, p] of this.pointers) {
         if (p.role === "draw" || p.role === "erase") {
           this._abortStroke();
+        } else if (p.role === "liquify") {
+          this._abortLiquify();
         }
         // 任何 active touch 都转 gesture，让 pinch/pan math 接管，不再跑 per-pointer 逻辑
         if (p.pointerType === "touch" && p.role !== "ignore") {
@@ -161,13 +179,17 @@ export class InputController {
     if (tool === "hand" || this.spaceDown) {
       role = "pan";
     } else if (e.pointerType === "mouse") {
-      if (e.button === 0) role = effectiveTool === "eraser" ? "erase" : (effectiveTool === "picker" ? "pick" : "draw");
+      if (e.button === 0) role = effectiveTool === "eraser" ? "erase"
+        : effectiveTool === "picker" ? "pick"
+        : effectiveTool === "liquify" ? "liquify"
+        : "draw";
       else role = "pan";
     } else if (e.pointerType === "pen") {
       // pen 副按钮 → 强制橡皮
       if (e.button === 2 || (e.buttons & 2)) role = "erase";
       else if (effectiveTool === "picker") role = "pick";
       else if (effectiveTool === "eraser") role = "erase";
+      else if (effectiveTool === "liquify") role = "liquify";
       else role = "draw";
     } else if (e.pointerType === "touch") {
       if (this.penEverSeen) {
@@ -175,6 +197,7 @@ export class InputController {
       } else {
         if (effectiveTool === "picker") role = "pick";
         else if (effectiveTool === "eraser") role = "erase";
+        else if (effectiveTool === "liquify") role = "liquify";
         else role = "draw";
       }
     }
@@ -187,21 +210,22 @@ export class InputController {
     };
     this.pointers.set(e.pointerId, rec);
 
-    if (role === "draw" || role === "erase") {
-      // 画的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
+    if (role === "draw" || role === "erase" || role === "liquify") {
+      // 画 / 液化的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
       this.board.setCursor(null);
-      // 锚 smoothing / raw / 压感 状态到 down 点
+      // 锚 smoothing / raw / 压感 状态到 down 点。液化也走同一套 smoothing 拿
+      // 防 dx 坑（timeStamp 单调 + 四件套），见 docs/ipad-coalesced-events.md
       rec.lastRawX = x;
       rec.lastRawY = y;
-      rec.lastP = null;   // 本笔最近一次有效 pressure，给 sensor 0 fallback
-      rec.smP = -1;       // stabilizer LPF 状态；-1 = 还没收到第一帧（首颗 = raw）
-      rec.lastEventTs = -Infinity;   // 上一颗送进 brush 的 ev.timeStamp（防 Safari iOS coalesced 边界回放）
-      // 四件套 smoothing 状态
-      rec.stabBuf = [];        // Stabilization 滑动平均环形缓冲
-      rec.pullX = x; rec.pullY = y;   // Pull-stabilizer follower 位置
-      rec.lastDirX = 0; rec.lastDirY = 0;   // Motion filter 角速度参考
-      rec.filtX = x; rec.filtY = y;    // Motion-filtered "raw" 位置（独立于 lastRawX，因为 MF 会改向）
-      this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
+      rec.lastP = null;
+      rec.smP = -1;
+      rec.lastEventTs = -Infinity;
+      rec.stabBuf = [];
+      rec.pullX = x; rec.pullY = y;
+      rec.lastDirX = 0; rec.lastDirY = 0;
+      rec.filtX = x; rec.filtY = y;
+      if (role === "liquify") this._beginLiquify(rec);
+      else this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
     } else if (role === "pick") {
       this._doPick(x, y);
     } else if (role === "pan") {
@@ -273,11 +297,11 @@ export class InputController {
       return;
     }
 
-    if (rec.role === "draw" || rec.role === "erase") {
-      // 画的时候不刷 cursor preview，省一次全屏 dirty
+    if (rec.role === "draw" || rec.role === "erase" || rec.role === "liquify") {
+      // 画 / 液化的时候不刷 cursor preview，省一次全屏 dirty
       const events = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : null;
       const list = (events && events.length) ? events : [e];
-      const settings = this.getBrushSettings();
+      const settings = rec.role === "liquify" ? null : this.getBrushSettings();
       for (const ev of list) {
         // **Safari iOS getCoalescedEvents() 边界回放过滤**：每次 pointermove
         // 的 coalesced 列表会把上一批的样本一起带回来 (eg 一批末尾 t=21，下
@@ -363,11 +387,15 @@ export class InputController {
         rec.smX = rec.smX + alphaPos * (rec.pullX - rec.smX);
         rec.smY = rec.smY + alphaPos * (rec.pullY - rec.smY);
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
-        const pressure = effectivePressureFor(rec, ev);
-        this.brush.extendStroke(dx, dy, pressure);
+        if (rec.role === "liquify") {
+          this.liquify.extendStroke(dx, dy);
+        } else {
+          const pressure = effectivePressureFor(rec, ev);
+          this.brush.extendStroke(dx, dy, pressure);
+        }
       }
-      // 把 brush 累的 dirty bbox 送进 board，rAF render 时只 blit 这一片
-      const bbox = this.brush.flushDirty();
+      // 把 brush / liquify 累的 dirty bbox 送进 board，rAF render 时只 blit 这一片
+      const bbox = rec.role === "liquify" ? this.liquify.flushDirty() : this.brush.flushDirty();
       if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
       this.board.requestRender();
     } else if (rec.role === "pick") {
@@ -442,6 +470,9 @@ export class InputController {
     if (rec.role === "draw" || rec.role === "erase") {
       if (cancelled) this._abortStroke();
       else this._endStroke();
+    } else if (rec.role === "liquify") {
+      if (cancelled) this._abortLiquify();
+      else this._endLiquify();
     } else if (rec.role === "pan") {
       if (![...this.pointers.values()].some((p) => p.role === "pan")) {
         delete document.body.dataset.panning;
@@ -502,6 +533,51 @@ export class InputController {
     }
     this._strokeLayerId = null;
     this._strokePreSnap = null;
+  }
+
+  // ---- 液化 ----
+  // 一次"按-拖-抬"= 一个 "liquify" history entry。schema 同 stroke。
+  _beginLiquify(rec) {
+    const settings = this.getLiquifySettings();
+    if (!settings || !this.doc.activeLayer) { rec.role = null; return; }
+    const layer = this.doc.activeLayer;
+    this._liquifyLayerId = layer.id;
+    this._liquifyPreSnap = layer.snapshot();
+    const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
+    this.liquify.beginStroke(layer, settings, dx, dy);
+    this.board.requestRender();
+  }
+  _endLiquify() {
+    this.liquify.endStroke();
+    if (this._liquifyLayerId == null) return;
+    const layer = this.doc.layers.find((l) => l.id === this._liquifyLayerId);
+    const preSnap = this._liquifyPreSnap;
+    this._liquifyLayerId = null;
+    this._liquifyPreSnap = null;
+    if (!layer || !preSnap) return;
+    const postSnap = layer.snapshot();
+    const entry = {
+      type: "liquify",
+      layerId: layer.id,
+      before: preSnap,
+      after: postSnap,
+      beforeBlob: null,
+      afterBlob: null,
+    };
+    if (this.history) this.history.push(entry);
+    this.board.requestRender();
+    compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
+    compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
+  }
+  _abortLiquify() {
+    this.liquify.cancelStroke();
+    if (this._liquifyLayerId != null && this._liquifyPreSnap) {
+      const layer = this.doc.layers.find((l) => l.id === this._liquifyLayerId);
+      if (layer) layer.restoreFromSnapshot(this._liquifyPreSnap);
+      this.board.invalidateAll();
+    }
+    this._liquifyLayerId = null;
+    this._liquifyPreSnap = null;
   }
 
   // ---- 吸色 ----

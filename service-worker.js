@@ -23,6 +23,7 @@ const PRECACHE_URLS = [
   "./src/board.js",
   "./src/input.js",
   "./src/brush.js",
+  "./src/liquify.js",
   "./src/history.js",
   "./src/storage.js",
   "./src/zip.js",
