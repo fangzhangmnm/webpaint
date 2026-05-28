@@ -319,6 +319,19 @@ input[type=range] {
 .menu-item[aria-pressed="true"] .menu-item-state { color: var(--accent, #4c8bf5); font-weight: 600; }
 .menu-item.menu-danger { color: #c0392b; }
 
+/* 笔刷设置浮动面板（沿用 .float-panel 框架） */
+.brush-panel { width: 280px; }
+.brush-slider-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 30px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink);
+}
+.brush-slider-label { color: var(--ink-soft); }
+.brush-slider-value { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+
 .menu-sep {
   border: 0;
   border-top: 1px solid var(--line);

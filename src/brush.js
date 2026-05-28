@@ -30,9 +30,21 @@ const DEFAULT_SETTINGS = {
   pressureToOpacity: true,    // user 2026-05-25：默认笔压也控 alpha
   sizeCurve: 0.6,             // size = size_max × p^sizeCurve
   opacityCurve: 0.6,
-  // Streamline：位置 IIR LPF，0=raw 直传，1=完全跟不上。Procreate 同名参数。
-  // 默认 0.3 微开一点：手抖 / 整数量化 不会进笔触，又几乎没有可感延迟。
+  // === 四件套位置平滑（对标 Procreate 全套）===
+  // 都在 input.js _move 内按 raw → MF → Stab → Pull → SL 顺序串联：
+  // - StreamLine：一阶 IIR LPF（指数时间衰减）。0=raw 直传，1=完全跟不上。
+  //   默认 0.3 微开 —— 手抖 / 整数量化不进笔触，又几乎没可感延迟。
+  // - Stabilization：滑动平均（最近 N 点平均），N = 1 + stabilization × 16。
+  //   高值笔感"团稳"，转向时切方向慢。Procreate 同名参数。
+  // - Pull-Stabilizer：速度上限 follower。pullStab=1 时每帧最多动 maxStep×0.05 px。
+  //   "实笔感" / 重笔；和 IIR 互补。Procreate "Stabilization" 实际包含这一档。
+  // - Motion Filtering：角速度 clamp。motionFilter=1 时新方向不能偏离旧方向超过
+  //   阈值（瞬尖被钝化）。Procreate 同名参数。
+  // 默认除 StreamLine 外都为 0（行为同 v40）。
   streamline: 0.3,
+  stabilization: 0,
+  pullStabilizer: 0,
+  motionFilter: 0,
   // taperIn：起手 fade-in 长度 = size × taperIn doc-px。
   // - 0 = 关（marker / 硬尖钢笔之类的 preset 用 0）
   // - 默认 1.5 微 taper：减弱 Apple Pencil 碰撞瞬间的 pressure spike 鼓"萝卜尖"

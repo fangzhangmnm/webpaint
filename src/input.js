@@ -192,6 +192,11 @@ export class InputController {
       rec.lastP = null;   // 本笔最近一次有效 pressure，给 sensor 0 fallback
       rec.smP = -1;       // stabilizer LPF 状态；-1 = 还没收到第一帧（首颗 = raw）
       rec.lastEventTs = -Infinity;   // 上一颗送进 brush 的 ev.timeStamp（防 Safari iOS coalesced 边界回放）
+      // 四件套 smoothing 状态
+      rec.stabBuf = [];        // Stabilization 滑动平均环形缓冲
+      rec.pullX = x; rec.pullY = y;   // Pull-stabilizer follower 位置
+      rec.lastDirX = 0; rec.lastDirY = 0;   // Motion filter 角速度参考
+      rec.filtX = x; rec.filtY = y;    // Motion-filtered "raw" 位置（独立于 lastRawX，因为 MF 会改向）
       this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
     } else if (role === "pick") {
       this._doPick(x, y);
@@ -283,13 +288,76 @@ export class InputController {
         rec.lastRawX = ev.clientX;
         rec.lastRawY = ev.clientY;
         if (drx * drx + dry * dry < RAW_STATIC_SCREEN_SQ) continue;
-        // Streamline：位置一阶 IIR LPF。settings.streamline ∈ [0,1]，
-        // 0=raw 直传，1=完全跟不上（笔尖卡在起点）。Procreate 同名 slider。
-        // α 下限 0.05 避免完全 stuck。
-        const sm = settings ? settings.streamline ?? 0 : 0;
-        const alphaPos = Math.max(0.05, 1 - sm);
-        rec.smX = rec.smX + alphaPos * (ev.clientX - rec.smX);
-        rec.smY = rec.smY + alphaPos * (ev.clientY - rec.smY);
+        // 四件套位置平滑（对标 Procreate，链式）：
+        //   raw → Motion Filter (角速度) → Stabilization (滑动平均) →
+        //       Pull-Stabilizer (速度上限) → StreamLine (IIR LPF) → brush
+        // 都 0 时 = 单纯 raw 直传。默认 streamline=0.3 其他 0 = 同 v40 行为。
+        const sl = settings?.streamline ?? 0;
+        const stab = settings?.stabilization ?? 0;
+        const pull = settings?.pullStabilizer ?? 0;
+        const mf = settings?.motionFilter ?? 0;
+
+        // 1) Motion Filter：限制 (drx, dry) 相对 (lastDirX, lastDirY) 的角度。
+        //    mf=1 → 0° clamp (硬锁方向)；mf=0 → 不限。
+        let fdx = drx, fdy = dry;
+        if (mf > 0) {
+          const nLen = Math.hypot(fdx, fdy);
+          const oLen = Math.hypot(rec.lastDirX, rec.lastDirY);
+          if (nLen > 0 && oLen > 0) {
+            const dot = (fdx * rec.lastDirX + fdy * rec.lastDirY) / (nLen * oLen);
+            const ang = Math.acos(Math.max(-1, Math.min(1, dot)));
+            const maxAng = (1 - mf) * Math.PI;
+            if (ang > maxAng && maxAng > 0.001) {
+              // 把 (fdx, fdy) 沿短弧旋向 lastDir，限到 maxAng
+              const cross = fdx * rec.lastDirY - fdy * rec.lastDirX;
+              const sign = cross < 0 ? 1 : -1;
+              const ca = Math.cos(maxAng), sa = sign * Math.sin(maxAng);
+              const ux = rec.lastDirX / oLen, uy = rec.lastDirY / oLen;
+              fdx = (ux * ca - uy * sa) * nLen;
+              fdy = (ux * sa + uy * ca) * nLen;
+            }
+          }
+        }
+        rec.lastDirX = fdx;
+        rec.lastDirY = fdy;
+        rec.filtX += fdx;
+        rec.filtY += fdy;
+        let rx = rec.filtX, ry = rec.filtY;
+
+        // 2) Stabilization：滑动平均，window = 1 + stab × 16
+        let sx = rx, sy = ry;
+        if (stab > 0) {
+          const cap = 1 + Math.round(stab * 16);
+          rec.stabBuf.push([rx, ry]);
+          if (rec.stabBuf.length > cap) rec.stabBuf.shift();
+          let mx = 0, my = 0;
+          for (const p of rec.stabBuf) { mx += p[0]; my += p[1]; }
+          sx = mx / rec.stabBuf.length;
+          sy = my / rec.stabBuf.length;
+        } else if (rec.stabBuf.length) {
+          rec.stabBuf.length = 0;
+        }
+
+        // 3) Pull-Stabilizer：速度上限 follower。pull=0 → 不限；
+        //    pull→1 时 maxStep → 0.5 px / event
+        if (pull > 0) {
+          const maxStep = Math.max(0.5, (1 - pull) * 64);
+          const ddx = sx - rec.pullX, ddy = sy - rec.pullY;
+          const d = Math.hypot(ddx, ddy);
+          if (d > maxStep) {
+            rec.pullX += ddx * maxStep / d;
+            rec.pullY += ddy * maxStep / d;
+          } else {
+            rec.pullX = sx; rec.pullY = sy;
+          }
+        } else {
+          rec.pullX = sx; rec.pullY = sy;
+        }
+
+        // 4) StreamLine：一阶 IIR LPF。α 下限 0.05 避免 stuck 死
+        const alphaPos = Math.max(0.05, 1 - sl);
+        rec.smX = rec.smX + alphaPos * (rec.pullX - rec.smX);
+        rec.smY = rec.smY + alphaPos * (rec.pullY - rec.smY);
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
         const pressure = effectivePressureFor(rec, ev);
         this.brush.extendStroke(dx, dy, pressure);

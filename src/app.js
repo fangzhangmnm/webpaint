@@ -64,6 +64,18 @@ const els = {
   menuClipboardCopy: document.getElementById("menuClipboardCopy"),
   menuClipboardPaste: document.getElementById("menuClipboardPaste"),
   menuFit: document.getElementById("menuFit"),
+  menuBrushSettings: document.getElementById("menuBrushSettings"),
+  brushPanel: document.getElementById("brushPanel"),
+  brushPanelHead: document.getElementById("brushPanelHead"),
+  brushPanelClose: document.getElementById("brushPanelClose"),
+  brushStreamline: document.getElementById("brushStreamline"),
+  brushStreamlineVal: document.getElementById("brushStreamlineVal"),
+  brushStabilization: document.getElementById("brushStabilization"),
+  brushStabilizationVal: document.getElementById("brushStabilizationVal"),
+  brushPullStabilizer: document.getElementById("brushPullStabilizer"),
+  brushPullStabilizerVal: document.getElementById("brushPullStabilizerVal"),
+  brushMotionFilter: document.getElementById("brushMotionFilter"),
+  brushMotionFilterVal: document.getElementById("brushMotionFilterVal"),
   topSaveBtn: document.getElementById("topSaveBtn"),
   topGalleryBtn: document.getElementById("topGalleryBtn"),
   galleryFull: document.getElementById("galleryFull"),
@@ -120,6 +132,10 @@ const state = {
     color: safeLS("webpaint.color") || "#1b1b1b",
     pressureToSize: safeLS("webpaint.pToSize") !== "0",     // 默认开
     pressureToOpacity: safeLS("webpaint.pToOpacity") !== "0",
+    streamline: parseFloat(safeLS("webpaint.streamline") || "0.3"),
+    stabilization: parseFloat(safeLS("webpaint.stabilization") || "0"),
+    pullStabilizer: parseFloat(safeLS("webpaint.pullStabilizer") || "0"),
+    motionFilter: parseFloat(safeLS("webpaint.motionFilter") || "0"),
   }),
   longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
 };
@@ -825,6 +841,79 @@ els.menuFit.addEventListener("click", () => {
   updateZoomLabel();
   setStatus("适应屏幕");
 });
+
+// ---- 笔刷平滑设置面板 ----
+function toggleBrushPanel(force) {
+  const hidden = els.brushPanel.classList.contains("hidden");
+  const show = force === true ? true : force === false ? false : hidden;
+  els.brushPanel.classList.toggle("hidden", !show);
+  if (show) {
+    syncBrushPanelFromState();
+    // 还原位置 / 默认右上
+    const saved = safeLS("webpaint.brushPanel.pos");
+    const w = els.brushPanel.offsetWidth || 280;
+    let left, top;
+    if (saved) { try { const o = JSON.parse(saved); left = o.left; top = o.top; } catch { left = top = null; } }
+    if (left == null) { left = window.innerWidth - w - 16; top = 60; }
+    els.brushPanel.style.left = Math.max(0, Math.min(window.innerWidth - w, left)) + "px";
+    els.brushPanel.style.top = Math.max(0, top) + "px";
+  }
+}
+els.menuBrushSettings.addEventListener("click", () => {
+  setMenuOpen(false);
+  toggleBrushPanel(true);
+});
+els.brushPanelClose.addEventListener("click", () => toggleBrushPanel(false));
+
+// 拖标题栏移动（沿用 color panel 模式）
+let _brushPanelDrag = null;
+els.brushPanelHead.addEventListener("pointerdown", (e) => {
+  if (e.target.closest(".float-panel-close")) return;
+  const r = els.brushPanel.getBoundingClientRect();
+  _brushPanelDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
+  els.brushPanelHead.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+els.brushPanelHead.addEventListener("pointermove", (e) => {
+  if (!_brushPanelDrag || e.pointerId !== _brushPanelDrag.id) return;
+  const w = els.brushPanel.offsetWidth, h = els.brushPanel.offsetHeight;
+  const left = Math.max(0, Math.min(window.innerWidth - w, _brushPanelDrag.ol + (e.clientX - _brushPanelDrag.sx)));
+  const top  = Math.max(0, Math.min(window.innerHeight - h, _brushPanelDrag.ot + (e.clientY - _brushPanelDrag.sy)));
+  els.brushPanel.style.left = left + "px";
+  els.brushPanel.style.top = top + "px";
+  safeLSSet("webpaint.brushPanel.pos", JSON.stringify({ left, top }));
+});
+els.brushPanelHead.addEventListener("pointerup", (e) => {
+  if (_brushPanelDrag && e.pointerId === _brushPanelDrag.id) {
+    try { els.brushPanelHead.releasePointerCapture(e.pointerId); } catch {}
+    _brushPanelDrag = null;
+  }
+});
+
+function syncBrushPanelFromState() {
+  const b = state.brush;
+  els.brushStreamline.value = String(Math.round(b.streamline * 100));
+  els.brushStreamlineVal.textContent = String(Math.round(b.streamline * 100));
+  els.brushStabilization.value = String(Math.round(b.stabilization * 100));
+  els.brushStabilizationVal.textContent = String(Math.round(b.stabilization * 100));
+  els.brushPullStabilizer.value = String(Math.round(b.pullStabilizer * 100));
+  els.brushPullStabilizerVal.textContent = String(Math.round(b.pullStabilizer * 100));
+  els.brushMotionFilter.value = String(Math.round(b.motionFilter * 100));
+  els.brushMotionFilterVal.textContent = String(Math.round(b.motionFilter * 100));
+}
+
+function bindBrushSlider(input, label, lsKey, field) {
+  input.addEventListener("input", () => {
+    const v = parseFloat(input.value) / 100;
+    state.brush[field] = v;
+    label.textContent = String(Math.round(v * 100));
+    safeLSSet(lsKey, String(v));
+  });
+}
+bindBrushSlider(els.brushStreamline, els.brushStreamlineVal, "webpaint.streamline", "streamline");
+bindBrushSlider(els.brushStabilization, els.brushStabilizationVal, "webpaint.stabilization", "stabilization");
+bindBrushSlider(els.brushPullStabilizer, els.brushPullStabilizerVal, "webpaint.pullStabilizer", "pullStabilizer");
+bindBrushSlider(els.brushMotionFilter, els.brushMotionFilterVal, "webpaint.motionFilter", "motionFilter");
 els.oraFileInput.addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
