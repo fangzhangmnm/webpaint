@@ -126,6 +126,7 @@ const els = {
   newDocH: document.getElementById("newDocH"),
   newDocConfirm: document.getElementById("newDocConfirm"),
   newDocCancel: document.getElementById("newDocCancel"),
+  menuRename: document.getElementById("menuRename"),
   menuCheckerboard: document.getElementById("menuCheckerboard"),
   menuCheckUpdate: document.getElementById("menuCheckUpdate"),
   oraFileInput: document.getElementById("oraFileInput"),
@@ -217,6 +218,10 @@ const input = new InputController(board, doc, {
 // 笔触 buffer live overlay：board 每帧问 brush 要，layer 之上 composite × s.opacity
 // 预览（实际像素在 endStroke 才烧进 layer）。
 board.setOverlayProvider(() => input.brush.getLiveOverlay());
+board.setLassoProvider(() => ({
+  drawingPath: input.lasso.getDrawingPath(),
+  floating:    input.lasso.getFloating(),
+}));
 
 // ---- 主题 ----
 function readCssColor(name) {
@@ -242,6 +247,10 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () 
 
 // ---- 工具 ----
 function setTool(t) {
+  // 切走 lasso 时，把当前 floating 选区 commit（避免遗漏；用户预期切工具 = 确认）
+  if (state.tool === "lasso" && t !== "lasso") {
+    input.commitLassoIfFloating();
+  }
   state.tool = t;
   for (const b of els.toolBtns) b.setAttribute("aria-pressed", b.dataset.tool === t ? "true" : "false");
   // 液化没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
@@ -1206,14 +1215,25 @@ async function saveAndPush() {
     _cloudPushing = true;
     updateSaveStatus();
     try {
-      const ora = await encodeDocToOra(doc);
+      const ora = await encodeDocToOra(doc, {
+        referenceImage: referenceWindow.getPersistBlob(),
+        webpaintState: { reference: referenceWindow.getSerializedState() },
+      });
       await pushSession(_activeSessionName, ora);
       setStatus(`已同步到云端：${_activeSessionName}`);
       renderGallery();
     } catch (e) {
       if (e instanceof CloudConflictError) {
-        // 不弹 alert（系统对话框打断手感）。状态行长驻 + 引导 user 去图库改名
-        setStatus(`云端冲突：${e.message} 打开"图库"改名后再点保存。`, true);
+        // 云端有同名 → inline 弹改名 sheet（不再让用户去图库找）
+        setStatus(`云端有同名 "${_activeSessionName}"，改个名再推`, true);
+        _cloudPushing = false;
+        updateSaveStatus();
+        const newName = await renameCurrentSession({ suggested: _activeSessionName + " (新)", reason: "云端冲突" });
+        if (newName && isSignedIn()) {
+          setCloudDirty(newName, true);
+          queueSave("push");        // 走 coalesce 路径自动重试
+        }
+        return;
       } else {
         console.warn("[cloud] push failed:", e);
         setStatus("推送失败：" + (e && e.message || e));
@@ -1224,6 +1244,49 @@ async function saveAndPush() {
     }
   } else if (!isSignedIn() && !_docDirty) {
     setStatus(`已存本地：${_activeSessionName}（IDB 易失，登录云端更安全）`);
+  }
+}
+
+// 重命名当前 active session。在画画界面也能调（汉堡菜单），云冲突时也会自动弹。
+// 同名循环检查（local 范围）；返回新名（或 null 取消 / 失败）。
+async function renameCurrentSession({ suggested, reason } = {}) {
+  const oldName = _activeSessionName;
+  let candidate = suggested || oldName;
+  // 循环直到 user 给出可用名 / 取消
+  while (true) {
+    const title = reason ? `重命名（${reason}）` : "重命名当前画作";
+    const input = await openInputSheet(title, candidate, { placeholder: "作品名字" });
+    if (input === null) return null;
+    const trimmed = input.trim();
+    if (!trimmed) { setStatus("名字不能空", true); candidate = ""; continue; }
+    if (trimmed === oldName) return oldName;       // 没改 = 等于成功
+    // local 同名检查
+    const localNames = (await listSessions()).map((s) => s.name);
+    if (localNames.includes(trimmed)) {
+      setStatus(`本地已有同名 "${trimmed}"，换一个`, true);
+      candidate = trimmed;
+      continue;
+    }
+    // 干活：先存新名，再删旧名（feedback-phantom-current-path：oldName 是 actually-loaded 的）
+    try {
+      await saveSession(doc, trimmed, {
+        referenceImage: referenceWindow.getPersistBlob(),
+        webpaintState: { reference: referenceWindow.getSerializedState() },
+      });
+      if (oldName && oldName !== trimmed) {
+        try { await removeSession(oldName); } catch {}
+      }
+      _activeSessionName = trimmed;
+      setCurrentSessionName(trimmed);
+      _docDirty = false;
+      _docLastSavedAt = Date.now();
+      updateSaveStatus();
+      setStatus(`已重命名：${oldName} → ${trimmed}`);
+      return trimmed;
+    } catch (e) {
+      setStatus("重命名失败：" + (e && e.message || e));
+      return null;
+    }
   }
 }
 
@@ -1337,6 +1400,10 @@ els.menuGallery.addEventListener("click", () => {
 });
 
 // ---- 菜单：导入 / 导出 / 剪贴板 / 适应 ----
+els.menuRename.addEventListener("click", () => {
+  setMenuOpen(false);
+  renameCurrentSession();
+});
 els.menuImport.addEventListener("click", () => {
   setMenuOpen(false);
   els.oraFileInput.value = "";
@@ -1964,7 +2031,10 @@ async function renderGallery() {
           // 拿这个 session 的 ora 内容直接推（不影响当前编辑的 doc）
           const loaded = await openSession(item.name);
           if (!loaded) throw new Error("找不到本地 session");
-          const ora = await encodeDocToOra(loaded);
+          const ora = await encodeDocToOra(loaded, {
+            referenceImage: loaded._referenceBlob,
+            webpaintState: loaded._webpaintState,
+          });
           await pushSession(item.name, ora);
           setStatus(`已推送：${item.name}`);
           renderGallery();

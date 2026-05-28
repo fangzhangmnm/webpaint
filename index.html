@@ -82,6 +82,13 @@
             <path d="M3 21l2-4 7-7-1-1 6-6a2.83 2.83 0 0 1 4 4l-6 6-1-1-7 7z"></path>
           </svg>
         </button>
+        <button class="tool" id="toolLasso" type="button" data-tool="lasso" title="套索 (L)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- 自由曲线套索 + 收口绳尾。开口在底部，提示 lift / drag 语义 -->
+            <path d="M4 7c0-2 4-4 8-4s8 2 8 4-4 4-8 4-8-2-8-4z"></path>
+            <path d="M8 11c-1 4 1 8 5 9"></path>
+          </svg>
+        </button>
         <button class="tool" id="toolHand" type="button" data-tool="hand" title="平移 (H / Space)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M18 11V6a2 2 0 0 0-4 0v5"></path>
@@ -404,6 +411,9 @@
     <div class="menu-panel hidden" id="menuPanel" role="menu">
       <button class="menu-item" id="menuGallery" type="button" role="menuitem">
         <span class="menu-item-label">图库</span>
+      </button>
+      <button class="menu-item" id="menuRename" type="button" role="menuitem">
+        <span class="menu-item-label">重命名当前画作…</span>
       </button>
       <button class="menu-item" id="menuImport" type="button" role="menuitem">
         <span class="menu-item-label">导入文件</span>

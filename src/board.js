@@ -200,6 +200,10 @@ export class Board {
   setOverlayProvider(fn) {
     this._overlayProvider = fn;
   }
+  // 套索 overlay：在 layer 像素之上画一条 polygon (drawing) 或 floating canvas + marching ants
+  setLassoProvider(fn) {
+    this._lassoProvider = fn;
+  }
 
   // 复用 erase 临时合成 canvas（同 doc 尺寸；改了重新分配）
   _getEraseComposite(w, h) {
@@ -355,6 +359,9 @@ export class Board {
       ctx.globalCompositeOperation = prevComp;
     }
 
+    // 套索 overlay（在 doc 坐标系下画 polygon / floating）
+    this._drawLassoOverlay(ctx, scale);
+
     // doc 边框（doc 坐标系下；lineWidth 在缩放 / 旋转下会变粗细，
     // 需要 inverse-scale lineWidth）
     ctx.strokeStyle = "rgba(0,0,0,0.18)";
@@ -369,6 +376,11 @@ export class Board {
   // 只重画 docRect 覆盖的区域。**rot != 0 时直接走 full**（旋转 dirty rect
   // 在 screen 上是斜矩形，clip + 算屏幕 bbox 复杂度不值，stamp 路径少见旋转后画）
   _renderPartial(docRect) {
+    // 套索浮层 / drawing path 走全屏（overlay 在 dirty rect 外的覆盖需重画）
+    if (this._lassoProvider) {
+      const info = this._lassoProvider();
+      if (info && (info.drawingPath?.length || info.floating)) { this._renderFull(); return; }
+    }
     if (this.viewport.rot !== 0) {
       this._renderFull();
       return;
@@ -440,6 +452,46 @@ export class Board {
     ctx.beginPath();
     ctx.arc(c.x, c.y, Math.max(2, c.size * scale / 2) + 1, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  // 套索 overlay：drawing 期间显示当前 polygon；floating 时显示浮层 + dashed 边框。
+  // 全在 doc 坐标系下画（caller 已 _applyDocTransform）。
+  _drawLassoOverlay(ctx, scale) {
+    if (!this._lassoProvider) return;
+    const info = this._lassoProvider();
+    if (!info) return;
+    if (info.drawingPath && info.drawingPath.length >= 2) {
+      ctx.save();
+      ctx.lineWidth = Math.max(1, 1.5 / scale);
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.setLineDash([6 / scale, 4 / scale]);
+      ctx.beginPath();
+      const pts = info.drawingPath;
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+      // 副线提升可见性
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.setLineDash([6 / scale, 4 / scale]);
+      ctx.lineDashOffset = 5 / scale;
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (info.floating) {
+      const f = info.floating;
+      ctx.save();
+      // 画浮层像素
+      ctx.drawImage(f.canvas, f.bboxX + f.offsetX, f.bboxY + f.offsetY);
+      // 画虚线边框
+      ctx.lineWidth = Math.max(1, 1.5 / scale);
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.setLineDash([6 / scale, 4 / scale]);
+      ctx.strokeRect(f.bboxX + f.offsetX, f.bboxY + f.offsetY, f.bboxW, f.bboxH);
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineDashOffset = 5 / scale;
+      ctx.strokeRect(f.bboxX + f.offsetX, f.bboxY + f.offsetY, f.bboxW, f.bboxH);
+      ctx.restore();
+    }
   }
 
   // 画 doc 区半透明灰白格背景。在 doc 坐标系下画（cell = 16 doc-px）。

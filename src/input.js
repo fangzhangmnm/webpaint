@@ -22,6 +22,7 @@
 
 import { BrushEngine } from "./brush.js";
 import { LiquifyEngine } from "./liquify.js";
+import { LassoEngine } from "./lasso.js";
 
 const ERASER_RADIUS_SCREEN = 0;   // 用 BrushEngine 自己的 size，不再独立
 const TAP_MAX_DURATION = 220;
@@ -55,6 +56,8 @@ export class InputController {
     this.canvas = board.canvas;
     this.brush = new BrushEngine();
     this.liquify = new LiquifyEngine();
+    this.lasso = new LassoEngine();
+    this.lasso.onChange = () => this.board.requestRender();
     this.getTool = opts.getTool || (() => "brush");
     this.getBrushSettings = opts.getBrushSettings || (() => null);   // 必须传
     this.getLiquifySettings = opts.getLiquifySettings || (() => ({ mode: "push", size: 50, strength: 0.5 }));
@@ -87,6 +90,12 @@ export class InputController {
       // 液化和 stroke 同 schema（layerId + before/after pixel snap）。共用 handler 也行，
       // 但分开命名便于以后区分 history UI 标签。
       this.history.registerHandler("liquify", {
+        undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
+        redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board),
+        refsLayer: (e, id) => e.layerId === id,
+      });
+      // 套索 commit 也是 raster snap：lift + translate + commit 整体作为单步 undo
+      this.history.registerHandler("lasso", {
         undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
         redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board),
         refsLayer: (e, id) => e.layerId === id,
@@ -167,6 +176,8 @@ export class InputController {
           this._abortStroke();
         } else if (p.role === "liquify") {
           this._abortLiquify();
+        } else if (p.role === "lasso") {
+          this._abortLasso();
         }
         // 任何 active touch 都转 gesture，让 pinch/pan math 接管，不再跑 per-pointer 逻辑
         if (p.pointerType === "touch" && p.role !== "ignore") {
@@ -188,6 +199,7 @@ export class InputController {
       if (e.button === 0) role = effectiveTool === "eraser" ? "erase"
         : effectiveTool === "picker" ? "pick"
         : effectiveTool === "liquify" ? "liquify"
+        : effectiveTool === "lasso" ? "lasso"
         : "draw";
       else role = "pan";
     } else if (e.pointerType === "pen") {
@@ -196,6 +208,7 @@ export class InputController {
       else if (effectiveTool === "picker") role = "pick";
       else if (effectiveTool === "eraser") role = "erase";
       else if (effectiveTool === "liquify") role = "liquify";
+      else if (effectiveTool === "lasso") role = "lasso";
       else role = "draw";
     } else if (e.pointerType === "touch") {
       if (this.penEverSeen) {
@@ -204,6 +217,7 @@ export class InputController {
         if (effectiveTool === "picker") role = "pick";
         else if (effectiveTool === "eraser") role = "erase";
         else if (effectiveTool === "liquify") role = "liquify";
+        else if (effectiveTool === "lasso") role = "lasso";
         else role = "draw";
       }
     }
@@ -234,6 +248,9 @@ export class InputController {
       rec.filtX = x; rec.filtY = y;
       if (role === "liquify") this._beginLiquify(rec);
       else this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
+    } else if (role === "lasso") {
+      this.board.setCursor(null);
+      this._beginLasso(rec);
     } else if (role === "pick") {
       this._doPick(x, y);
     } else if (role === "pan") {
@@ -411,6 +428,16 @@ export class InputController {
       const bbox = rec.role === "liquify" ? this.liquify.flushDirty() : this.brush.flushDirty();
       if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
       this.board.requestRender();
+    } else if (rec.role === "lasso") {
+      const { x: dx, y: dy } = this.board.screenToDoc(e.clientX, e.clientY);
+      if (rec._lassoMode === "drawing") {
+        this.lasso.extendPath(dx, dy);
+      } else if (rec._lassoMode === "dragging") {
+        this.lasso.extendDrag(dx, dy);
+        const bb = this.lasso.getFloatingScreenBbox();
+        if (bb) this.board.markDocDirty(bb[0], bb[1], bb[2], bb[3]);
+        this.board.requestRender();
+      }
     } else if (rec.role === "pick") {
       this._doPick(e.clientX, e.clientY);
     } else if (rec.role === "pan") {
@@ -486,6 +513,9 @@ export class InputController {
     } else if (rec.role === "liquify") {
       if (cancelled) this._abortLiquify();
       else this._endLiquify();
+    } else if (rec.role === "lasso") {
+      if (cancelled) this._abortLasso();
+      else this._endLasso(rec);
     } else if (rec.role === "pan") {
       if (![...this.pointers.values()].some((p) => p.role === "pan")) {
         delete document.body.dataset.panning;
@@ -591,6 +621,66 @@ export class InputController {
     }
     this._liquifyLayerId = null;
     this._liquifyPreSnap = null;
+  }
+
+  // ---- 套索 ----
+  // 行为：
+  //   状态 "idle"：pointer down 在 floating 内部 = 拖；否则 = 开始画选区
+  //   状态 "drawing"：扩展路径；up = 闭合 + lift → floating
+  //   状态 "floating"：down 在 floating 内 = 拖；down 在外 = commit 当前 + 新选区
+  //   commit / abort 自动收 history entry
+  _beginLasso(rec) {
+    if (!this.doc.activeLayer) { rec.role = null; return; }
+    const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
+    const st = this.lasso.state();
+    if (st === "floating") {
+      if (this.lasso.hitFloating(dx, dy)) {
+        // 拖 floating
+        rec._lassoMode = "dragging";
+        this.lasso.beginDrag(dx, dy);
+        return;
+      }
+      // 点在 floating 外 = 把当前 commit，再开新选区
+      this._commitLasso();
+    }
+    rec._lassoMode = "drawing";
+    this.lasso.beginPath(dx, dy);
+  }
+  _endLasso(rec) {
+    if (rec._lassoMode === "drawing") {
+      const ok = this.lasso.endPath(this.doc.activeLayer);
+      if (ok) {
+        this.board.invalidateAll();
+      } else {
+        this.status("选区太小，已取消");
+      }
+    } else if (rec._lassoMode === "dragging") {
+      this.lasso.endDrag();
+    }
+  }
+  _commitLasso() {
+    const entry = this.lasso.commit();
+    if (!entry) return;
+    if (this.history) this.history.push(entry);
+    this.board.invalidateAll();
+    compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
+    compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
+  }
+  _abortLasso() {
+    // 进行中的 path 直接丢；floating 还原 pre-snapshot（不进 history）
+    if (this.lasso.state() === "floating") {
+      this.lasso.cancel();
+      this.board.invalidateAll();
+    } else {
+      // drawing 中 → 简单中断
+      this.lasso._points = [];
+      this.lasso._state = "idle";
+      this.lasso.onChange();
+    }
+  }
+  // 给外部（tool 切换、Esc）用：commit 当前 floating（如果有）。
+  commitLassoIfFloating() {
+    if (this.lasso.state() === "floating") this._commitLasso();
   }
 
   // ---- 吸色 ----
@@ -778,6 +868,9 @@ export class InputController {
     else if (e.key === "e" || e.key === "E") this._emitTool("eraser");
     else if (e.key === "i" || e.key === "I") this._emitTool("picker");
     else if (e.key === "h" || e.key === "H") this._emitTool("hand");
+    else if (e.key === "l" || e.key === "L") this._emitTool("lasso");
+    else if (e.key === "Enter" && this.lasso.state() === "floating") { this._commitLasso(); e.preventDefault(); }
+    else if (e.key === "Escape" && this.lasso.state() === "floating") { this._abortLasso(); e.preventDefault(); }
     else if (e.key === "0") this.board.fitToScreen();
     else if (e.key === "=" || e.key === "+") this.board.zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1.2);
     else if (e.key === "-" || e.key === "_") this.board.zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1 / 1.2);
@@ -836,6 +929,7 @@ export class InputController {
     // 如果它正在执笔，把笔触状态也收尾掉（保留 history entry）
     if (p.role === "draw" || p.role === "erase") this._abortStroke();
     else if (p.role === "liquify") this._abortLiquify();
+    else if (p.role === "lasso") this._abortLasso();
     try { this.canvas.releasePointerCapture?.(pid); } catch {}
     this.pointers.delete(pid);
   }

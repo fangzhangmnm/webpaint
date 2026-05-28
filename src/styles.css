@@ -88,6 +88,7 @@ body[data-tool="hand"] .board { cursor: grab; }
 body[data-panning="1"] .board { cursor: grabbing !important; }
 body[data-tool="eraser"] .board { cursor: cell; }
 body[data-tool="picker"] .board { cursor: copy; }
+body[data-tool="lasso"] .board { cursor: crosshair; }
 
 /* 顶栏：浮动毛玻璃胶囊 */
 .top-bar {
