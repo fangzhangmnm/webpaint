@@ -29,11 +29,17 @@ export function setCurrentSessionName(name) {
   try { localStorage.setItem(LS_CURRENT_NAME, name); } catch {}
 }
 
-/** 把 doc 序列化进指定 session（默认当前），同时生成 thumb jpg 存进 pkg */
-export async function saveSession(doc, name) {
+/** 把 doc 序列化进指定 session（默认当前），同时生成 thumb jpg 存进 pkg。
+ *  opts.referenceImage: optional Blob —— 嵌进 .ora 跟着文件走（webpaint/reference.png）。
+ *  opts.webpaintState:  optional 对象，进 webpaint/state.json
+ */
+export async function saveSession(doc, name, opts = {}) {
   const sessionName = name || getCurrentSessionName();
   const [ora, thumb] = await Promise.all([
-    encodeDocToOra(doc),
+    encodeDocToOra(doc, {
+      referenceImage: opts.referenceImage,
+      webpaintState: opts.webpaintState,
+    }),
     renderThumbBlob(doc, 256),
   ]);
   const pkg = {

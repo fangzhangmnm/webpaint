@@ -150,8 +150,16 @@ function canvasModeFromOra(op) {
   return ORA_TO_MODE[op] || "source-over";
 }
 
-/** doc → Blob (.ora) */
-export async function encodeDocToOra(doc) {
+/** doc → Blob (.ora)
+ *
+ * WebPaint 私有扩展（都在 webpaint/ 命名空间下，第三方 reader 会忽略或剥离）：
+ *   webpaint/state.json   — 杂七杂八的应用状态（ref 小窗 open 标志、viewport 等）
+ *   webpaint/reference.png — ref 小窗当前显示的图（原 Blob bytes）
+ *
+ * opts.referenceImage: optional Blob
+ * opts.webpaintState:  optional object（直接 JSON.stringify）
+ */
+export async function encodeDocToOra(doc, opts = {}) {
   const merged = renderMerged(doc);
   const thumb = renderThumbnail(merged, 256);
   const mergedPng = await canvasToPngBytes(merged);
@@ -175,6 +183,16 @@ export async function encodeDocToOra(doc) {
       png = await canvasToPngBytes(c);
     }
     entries.push({ path: `data/layer${L.id}.png`, data: png });
+  }
+
+  // WebPaint 私有扩展：reference 小窗的图 + 杂项 state JSON。
+  if (opts.referenceImage instanceof Blob) {
+    const refBytes = new Uint8Array(await opts.referenceImage.arrayBuffer());
+    entries.push({ path: "webpaint/reference.png", data: refBytes });
+  }
+  if (opts.webpaintState && typeof opts.webpaintState === "object") {
+    const jsonText = JSON.stringify(opts.webpaintState);
+    entries.push({ path: "webpaint/state.json", data: jsonText });
   }
 
   return await zipPack(entries);
@@ -251,5 +269,16 @@ export async function decodeOraToDoc(blob) {
     doc.layers.push(new Layer({ width: meta.w, height: meta.h, name: "图层 1" }));
   }
   doc.activeIndex = Math.max(0, doc.layers.length - 1);
+  // WebPaint 扩展：reference 小窗的图 + state JSON（可有可无）
+  if (files["webpaint/reference.png"]) {
+    doc._referenceBlob = new Blob([files["webpaint/reference.png"]], { type: "image/png" });
+  }
+  if (files["webpaint/state.json"]) {
+    try {
+      doc._webpaintState = JSON.parse(bytesToString(files["webpaint/state.json"]));
+    } catch (e) {
+      console.warn("[ora] webpaint/state.json parse failed:", e);
+    }
+  }
   return doc;
 }

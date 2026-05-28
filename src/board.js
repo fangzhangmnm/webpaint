@@ -51,6 +51,18 @@ export class Board {
 
     this.resize();
     window.addEventListener("resize", () => this.resize());
+    // iOS / iPad PWA：地址栏 / 状态栏推送或键盘弹出会改 visualViewport，但不一定触发
+    // window resize。如果不响应，canvas 内部 pixel buffer 仍是旧尺寸，被 CSS 拉伸到新
+    // viewport → 渲染像素和 clientX/Y 错位 → 笔触和光标的偏移。详见 v54 反馈。
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", () => this.resize());
+      window.visualViewport.addEventListener("scroll", () => this.resize());
+    }
+    // 兜底：直接观察 canvas 的 CSS 尺寸变化（PWA 容器 reflow / Safari URL bar 等）
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => this.resize());
+      ro.observe(this.canvas);
+    }
 
     // 首次：把 doc 居中适配
     this.fitToScreen();
@@ -263,9 +275,14 @@ export class Board {
   resize() {
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
-    this.dpr = Math.max(1, window.devicePixelRatio || 1);
-    this.canvas.width = Math.round(w * this.dpr);
-    this.canvas.height = Math.round(h * this.dpr);
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const tw = Math.round(w * dpr);
+    const th = Math.round(h * dpr);
+    // 没变就不动 —— ResizeObserver / visualViewport 频繁触发也不浪费
+    if (tw === this.canvas.width && th === this.canvas.height && dpr === this.dpr) return;
+    this.dpr = dpr;
+    this.canvas.width = tw;
+    this.canvas.height = th;
     this._dirtyFull = true;
     this.requestRender();
   }

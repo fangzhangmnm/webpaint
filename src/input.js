@@ -127,7 +127,13 @@ export class InputController {
   }
 
   _down(e) {
+    // ① 清掉 stale ghost pointers（iOS 偶尔丢 pointerup → ghost 卡在 map 里
+    // 让单指手势误判成双指、画布失控旋转。user 2026-05-28）
+    this._purgeStalePointers();
+    // ② 笔尖落下 = 权威信号。之前所有触摸都视作掌触提前结束（即使没收到 up）。
+    // 这条比 stale purge 更激进：不管时间多久，pen down 就清。
     if (e.pointerType === "pen") {
+      this._purgeAllTouches();
       this.penEverSeen = true;
       this._lastTap = null;
     }
@@ -142,7 +148,7 @@ export class InputController {
       (p) => p.pointerType === "pen" && (p.role === "draw" || p.role === "erase"),
     );
     if (e.pointerType === "touch" && penDrawing) {
-      this.pointers.set(e.pointerId, { pointerType: e.pointerType, role: "ignore", x, y });
+      this.pointers.set(e.pointerId, { pointerType: e.pointerType, role: "ignore", x, y, lastUpdateTs: performance.now() });
       e.preventDefault();
       return;
     }
@@ -167,7 +173,7 @@ export class InputController {
           p.role = "gesture";
         }
       }
-      this.pointers.set(e.pointerId, { pointerType: e.pointerType, role: "gesture", x, y, startX: x, startY: y, downTime: performance.now() });
+      this.pointers.set(e.pointerId, { pointerType: e.pointerType, role: "gesture", x, y, startX: x, startY: y, downTime: performance.now(), lastUpdateTs: performance.now() });
       this._beginGesture();
       this._updateGestureTapSnapshot();
       e.preventDefault();
@@ -202,11 +208,13 @@ export class InputController {
       }
     }
 
+    const now = performance.now();
     const rec = {
       pointerType: e.pointerType, role,
       x, y, startX: x, startY: y,
       smX: x, smY: y,
-      downTime: performance.now(),
+      downTime: now,
+      lastUpdateTs: now,
     };
     this.pointers.set(e.pointerId, rec);
 
@@ -266,6 +274,7 @@ export class InputController {
     }
     rec.x = e.clientX;
     rec.y = e.clientY;
+    rec.lastUpdateTs = performance.now();
 
     // 单指长按 timer 还在 → 检查是否移动超阈值，超了就取消（当 draw 处理）
     if (rec.longPressTimer) {
@@ -794,6 +803,47 @@ export class InputController {
   undo()    { if (this.history) this.history.undo(); }
   redo()    { if (this.history) this.history.redo(); }
   clearHistory() { if (this.history) this.history.clear(); }
+
+  // ---- 防误触 / ghost pointer 清理 ----
+  // iOS 在 PalmRejection / 系统 gesture 抢断 / 应用切换时偶尔不发 pointerup。
+  // ghost pointer 留在 map 里会让单指 → 误判为双指 gesture，画布一直转。
+  // user 反馈 2026-05-28：长画时容易遇到。
+  _purgeStalePointers() {
+    const now = performance.now();
+    const STALE_MS = 1500;       // 单纯触摸 1.5s 没有事件 = 八九不离十丢了 up
+    const stale = [];
+    for (const [pid, p] of this.pointers) {
+      if (p.lastUpdateTs != null && (now - p.lastUpdateTs) > STALE_MS) {
+        stale.push(pid);
+      }
+    }
+    for (const pid of stale) this._discardPointer(pid);
+    if (stale.length) this._maybeEndGesture();
+  }
+  // 笔尖落下时把所有 touch 当掌触清掉（含可能没收 up 的 ghost）
+  _purgeAllTouches() {
+    const dead = [];
+    for (const [pid, p] of this.pointers) {
+      if (p.pointerType === "touch") dead.push(pid);
+    }
+    for (const pid of dead) this._discardPointer(pid);
+    if (dead.length) this._maybeEndGesture();
+  }
+  _discardPointer(pid) {
+    const p = this.pointers.get(pid);
+    if (!p) return;
+    if (p.longPressTimer) { clearTimeout(p.longPressTimer); p.longPressTimer = null; }
+    // 如果它正在执笔，把笔触状态也收尾掉（保留 history entry）
+    if (p.role === "draw" || p.role === "erase") this._abortStroke();
+    else if (p.role === "liquify") this._abortLiquify();
+    try { this.canvas.releasePointerCapture?.(pid); } catch {}
+    this.pointers.delete(pid);
+  }
+  _maybeEndGesture() {
+    if (this.gestureStart && this._gestureTouches().length < 2) {
+      this._endGesture();
+    }
+  }
 }
 
 // ---- Pixel snapshot helpers（exported；handler 里 layer/raster 类 op 都用这套）----

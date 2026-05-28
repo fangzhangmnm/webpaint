@@ -18,6 +18,7 @@
 
 const LS_POS = "webpaint.refPanel.pos";       // {left, top, width, height}
 const LS_VP  = "webpaint.refPanel.vp";        // {tx, ty, scale, rot}
+const LS_OPEN = "webpaint.refPanel.open";     // "1" | "0"
 
 export class ReferenceWindow {
   constructor(opts) {
@@ -55,13 +56,48 @@ export class ReferenceWindow {
   }
 
   // ---- 外部 API ----
-  setBitmap(bitmap) {
+  setBitmap(bitmap, opts = {}) {
     // 切静态源 → 退出 live 模式
     this._stopLive();
     if (this.bitmap && this.bitmap !== bitmap) this.bitmap.close?.();
     this.bitmap = bitmap;
+    // 持久化的原始 Blob（PNG / JPEG / 不管什么 mime），跟 doc 一起进 .ora。
+    // opts.persistBlob 是调用方给的"原始文件" Blob。
+    this._bitmapBlob = opts.persistBlob || null;
     if (bitmap) this.fitToPanel();
     this._updateEmptyHint();
+    this._invalidate();
+  }
+  // 给 saveSession 用：拿当前静态 ref 的原始 Blob（live 模式返 null）
+  getPersistBlob() {
+    return this._liveDoc ? null : this._bitmapBlob;
+  }
+  // 没图时清空
+  clearBitmap() {
+    if (this.bitmap) this.bitmap.close?.();
+    this.bitmap = null;
+    this._bitmapBlob = null;
+    this._updateEmptyHint();
+    this._invalidate();
+  }
+
+  // 跟着 .ora 进 / 出 webpaint/state.json（painting-scoped 状态）。
+  // 不带 panel 位置 / 大小（那是 device-scoped，留 localStorage）。
+  getSerializedState() {
+    return {
+      open: this.isOpen(),
+      viewport: { ...this.vp },
+    };
+  }
+  applySerializedState(state) {
+    if (!state || typeof state !== "object") return;
+    if (state.viewport) {
+      if (Number.isFinite(state.viewport.tx)) this.vp.tx = state.viewport.tx;
+      if (Number.isFinite(state.viewport.ty)) this.vp.ty = state.viewport.ty;
+      if (Number.isFinite(state.viewport.scale)) this.vp.scale = state.viewport.scale;
+      if (Number.isFinite(state.viewport.rot)) this.vp.rot = state.viewport.rot;
+    }
+    if (state.open) this.open(); else this.close();
     this._invalidate();
   }
   // 实时镜像主画布：board.markDocDirty 触发 wp:docpixeldirty → markLiveDirty

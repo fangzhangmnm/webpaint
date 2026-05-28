@@ -1136,7 +1136,10 @@ async function saveNow() {
   _docSaving = true;
   updateSaveStatus();
   try {
-    await saveSession(doc, _activeSessionName);
+    await saveSession(doc, _activeSessionName, {
+      referenceImage: referenceWindow.getPersistBlob(),
+      webpaintState: { reference: referenceWindow.getSerializedState() },
+    });
     _docDirty = false;
     _docLastSavedAt = Date.now();
     setStatus(`已保存：${_activeSessionName}`);
@@ -1167,6 +1170,22 @@ function adoptLoadedDoc(loaded, sessionName) {
   _docDirty = false;
   _docLastSavedAt = Date.now();
   updateSaveStatus();
+  // 恢复 reference 小窗（.ora webpaint/ 扩展）
+  if (loaded._referenceBlob) {
+    createImageBitmap(loaded._referenceBlob).then((bitmap) => {
+      referenceWindow.setBitmap(bitmap, { persistBlob: loaded._referenceBlob });
+      // 图就绪后再应用 viewport + open（applySerializedState 顺序无关，但 fitToPanel 在
+      // setBitmap 里会被调用 → 应用 viewport 后用户保存时的 vp 才生效）
+      if (loaded._webpaintState?.reference) {
+        referenceWindow.applySerializedState(loaded._webpaintState.reference);
+      }
+    }).catch(() => {});
+  } else {
+    referenceWindow.clearBitmap();
+    if (loaded._webpaintState?.reference) {
+      referenceWindow.applySerializedState(loaded._webpaintState.reference);
+    }
+  }
 }
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty
 window.addEventListener("wp:histchange", () => {
@@ -1543,8 +1562,12 @@ els.referenceFileInput.addEventListener("change", async (e) => {
   if (!file) return;
   try {
     const bitmap = await createImageBitmap(file);
-    referenceWindow.setBitmap(bitmap);
-    setStatus(`参考：${file.name}`);
+    // 留 file 原 Blob 作持久化源 → 跟着当前 doc 一起进 .ora
+    referenceWindow.setBitmap(bitmap, { persistBlob: file });
+    _docDirty = true;
+    updateSaveStatus();
+    window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
+    setStatus(`参考：${file.name}（会跟当前画一起保存）`);
   } catch (err) {
     setStatus("参考图载入失败：" + (err && err.message || err));
   }
