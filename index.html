@@ -378,6 +378,12 @@
       </div>
       <div class="brush-rack-folders" id="brushRackFolders"></div>
       <div class="brush-rack-grid" id="brushRackGrid"></div>
+      <div class="brush-rack-foot">
+        <button class="brush-rack-action" id="brushRackExportFolder" type="button">导出本文件夹</button>
+        <button class="brush-rack-action" id="brushRackCloudPush" type="button">上传云端</button>
+        <button class="brush-rack-action" id="brushRackReset" type="button">重置笔架</button>
+        <button class="brush-rack-action" id="brushRackDumpCode" type="button" title="dev：复制当前 rack 为 DEFAULTS_SPEC 代码">复制为代码</button>
+      </div>
     </div>
 
     <!-- Brush settings 全屏 view（v83）：编辑某个 brush preset -->
@@ -635,9 +641,7 @@
 
       <hr class="menu-sep" />
       <div class="menu-section-label">调试</div>
-      <button class="menu-item" id="menuResetBrushRack" type="button" role="menuitem">
-        <span class="menu-item-label">重置笔架（删自定义）</span>
-      </button>
+      <button class="menu-item" id="menuResetBrushRack" type="button" role="menuitem" hidden></button>
       <button class="menu-item" id="menuForcePwaReset" type="button" role="menuitem">
         <span class="menu-item-label">强制清缓存重启</span>
       </button>

@@ -234,17 +234,16 @@ let _brushRack = null;
 const RACK_META_KEY = "brush-rack";
 
 // 默认 tool state：从 rack preset 拿初值
-// v98：toolStates { size, opacity, flow, activeBrushId }
-//   opacity = slider 2 调（per-tool 持久），preset 拷 defaultOpa 当初值
-//   flow    = brush settings 里调（藏在「高级」），preset 拷 defaultFlow 当初值
+// v99：toolStates { size, opacity, flow, activeBrushId }
+//   opacity / flow 选 preset 时都初始化为 1.0 (user：「默认 opacity 默认 flow 两个字段不要，都是 1」)
 function defaultToolStateFor(tool) {
   if (_brushRack) {
     const brush = getActiveBrush(_brushRack, tool);
     if (brush) {
       return {
         size: brush.size.base,
-        opacity: brush.defaultOpa ?? 1.0,
-        flow:    brush.defaultFlow ?? 1.0,
+        opacity: 1.0,
+        flow:    1.0,
         activeBrushId: brush.id,
       };
     }
@@ -337,7 +336,7 @@ if (_sidebarBrushBtn) {
   });
 }
 
-// v98：应用 preset 冻结字段到 state.brush（coeffs + compositeMode + pixelMode + gamma）
+// v99：应用 preset 冻结字段到 state.brush（coeffs + compositeMode + pixelMode + gamma + smooth）
 // user-controlled fields (opacity / flow / size) 不在这里设，applyToolState 后设
 function applyBrushPresetFrozen(brush) {
   if (!brush) return;
@@ -356,6 +355,12 @@ function applyBrushPresetFrozen(brush) {
     ? brush.spacing
     : (brush.spacing?.value ?? 0.06);
   state.brush.pixelMode     = !!brush.pixelMode;
+  // v99：smooth 跟 preset 走（位置平滑也是笔感的一部分，不该是系统全局）
+  const sm = brush.smooth || {};
+  state.brush.streamline     = sm.streamline     ?? 0.3;
+  state.brush.stabilization  = sm.stabilization  ?? 0;
+  state.brush.pullStabilizer = sm.pullStabilizer ?? 0;
+  state.brush.motionFilter   = sm.motionFilter   ?? 0;
   if (brush.smudge) {
     state.brush.smudgeStrength = brush.smudge.strength ?? 0.8;
     state.brush.smudgeDryness  = brush.smudge.dryness  ?? 0.1;
@@ -375,8 +380,8 @@ function applyToolState(tool) {
   const brush = ts.activeBrushId ? findBrush(_brushRack, ts.activeBrushId) : null;
   if (brush) applyBrushPresetFrozen(brush);
   state.brush.size    = ts.size;
-  state.brush.opacity = ts.opacity ?? brush?.defaultOpa ?? 1.0;
-  state.brush.flow    = ts.flow    ?? brush?.defaultFlow ?? 1.0;
+  state.brush.opacity = ts.opacity ?? 1.0;
+  state.brush.flow    = ts.flow    ?? 1.0;
   // size slider：log 化 0~100 → 1~sizeMax px
   if (els.sizeSlider) {
     const sliderMax = brush?.size?.max || 200;
@@ -424,8 +429,8 @@ function selectBrushPresetForTool(tool, brushId) {
   if (!brush) return;
   ts.activeBrushId = brushId;
   ts.size    = brush.size.base;
-  ts.opacity = brush.defaultOpa ?? 1.0;
-  ts.flow    = brush.defaultFlow ?? 1.0;
+  ts.opacity = 1.0;
+  ts.flow    = 1.0;
   if (key === getRackToolKey(state.tool)) applyToolState(state.tool);
 }
 
@@ -3493,6 +3498,11 @@ const _rackEls = {
   newBtn: document.getElementById("brushRackNew"),
   folders: document.getElementById("brushRackFolders"),
   grid: document.getElementById("brushRackGrid"),
+  // v99 footer 操作
+  exportFolderBtn: document.getElementById("brushRackExportFolder"),
+  cloudPushBtn:    document.getElementById("brushRackCloudPush"),
+  resetBtn:        document.getElementById("brushRackReset"),
+  dumpCodeBtn:     document.getElementById("brushRackDumpCode"),
 };
 const _settingsEls = {
   view: document.getElementById("brushSettingsView"),
@@ -3716,7 +3726,7 @@ function _nextBrushName() {
   return `新笔 ${max + 1}`;
 }
 _rackEls.newBtn.addEventListener("click", () => {
-  // v98 schema：coeff + compositeMode + defaultOpa/defaultFlow
+  // v99 schema：coeff + compositeMode + smooth
   const newB = {
     id: newBrushId(),
     name: _nextBrushName(),
@@ -3726,12 +3736,12 @@ _rackEls.newBtn.addEventListener("click", () => {
     size: { base: 12, max: 200 },
     sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
     pressureGamma: 1.0,
-    defaultOpa: 1.0, defaultFlow: 1.0,
     compositeMode: "wash",
     spacing: 0.06,
     pixelMode: false,
     taper: { in: 0, out: 0 },
     smudge: _rackCurrentTool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
+    smooth: { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 },
   };
   _brushRack.brushes.push(newB);
   _rackDirty = true;
@@ -3769,15 +3779,17 @@ async function exportBrushAsFile(brush) {
   const json = brushToJSON(brush);
   const blob = new Blob([json], { type: "application/json" });
   const filename = `${brush.name || "brush"}-${brush.tool}.json`;
-  // navigator.share with files (iOS Safari 16+)
+  await _shareOrDownloadJSON(blob, filename, brush.name);
+}
+
+async function _shareOrDownloadJSON(blob, filename, title) {
   if (navigator.canShare && navigator.share) {
     const file = new File([blob], filename, { type: "application/json" });
     if (navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: brush.name }); return; }
+      try { await navigator.share({ files: [file], title }); return; }
       catch (_) {/* user cancel / not supported → fallback */}
     }
   }
-  // Fallback：a[download]
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -3786,6 +3798,120 @@ async function exportBrushAsFile(brush) {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
 }
+
+// v99：导出当前文件夹下的所有 brush 为一个 JSON pack（{ folder, brushes: [...] }）
+async function exportRackFolderAsFile() {
+  if (!_brushRack) return;
+  const tool = _rackCurrentTool;
+  const folder = _rackCurrentFolder;
+  const brushes = brushesByTool(_brushRack, tool).filter(b => (b.folder || DEFAULT_FOLDER) === folder);
+  if (brushes.length === 0) { setStatus("本文件夹是空的", true); return; }
+  const pack = { version: 1, folder, tool, brushes };
+  const json = JSON.stringify(pack, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const filename = `${folder || "folder"}-${tool}.json`;
+  await _shareOrDownloadJSON(blob, filename, folder);
+  setStatus(`已导出文件夹「${folder}」（${brushes.length} 笔）`);
+}
+
+// v99 dev：把当前 _brushRack 拼成 DEFAULTS_SPEC 代码片段，clipboard
+// user：「我 ipad 调好了你写回默认」—— 调好后复制贴进 src/brushes.js DEFAULTS_SPEC
+function dumpRackAsCode() {
+  if (!_brushRack) return;
+  const lines = [];
+  lines.push("// 复制以下到 src/brushes.js DEFAULTS_SPEC (替换原 array 内容)");
+  lines.push("const DEFAULTS_SPEC = [");
+  for (const b of _brushRack.brushes) {
+    const args = {};
+    args.size = b.size?.base ?? 12;
+    args.sizeBaseMax = b.size?.max ?? 200;
+    args.hardness = b.shape?.hardness ?? 1.0;
+    if (b.shape?.kind && b.shape.kind !== "round") args.shapeKind = b.shape.kind;
+    if (b.shape?.aspect != null && b.shape.aspect !== 1) args.aspect = b.shape.aspect;
+    if (b.shape?.rotation) args.rotation = b.shape.rotation;
+    args.sizeCoeff = b.sizeCoeff ?? 0.6;
+    args.opaCoeff  = b.opaCoeff  ?? 0.6;
+    args.flowCoeff = b.flowCoeff ?? 0;
+    if (b.pressureGamma != null && b.pressureGamma !== 1.0) args.pressureGamma = b.pressureGamma;
+    args.compositeMode = b.compositeMode || "wash";
+    args.spacingValue = (typeof b.spacing === "number") ? b.spacing : (b.spacing?.value ?? 0.06);
+    if (b.pixelMode) args.pixelMode = true;
+    if (b.taper?.in)  args.taperIn  = b.taper.in;
+    if (b.taper?.out) args.taperOut = b.taper.out;
+    if (b.smudge) args.smudge = b.smudge;
+    const sm = b.smooth || {};
+    if (sm.streamline     != null && sm.streamline     !== 0.3) args.streamline     = sm.streamline;
+    if (sm.stabilization  != null && sm.stabilization  !== 0)   args.stabilization  = sm.stabilization;
+    if (sm.pullStabilizer != null && sm.pullStabilizer !== 0)   args.pullStabilizer = sm.pullStabilizer;
+    if (sm.motionFilter   != null && sm.motionFilter   !== 0)   args.motionFilter   = sm.motionFilter;
+    const argsStr = JSON.stringify(args).replace(/"([a-zA-Z_]\w*)":/g, "$1:");
+    lines.push(`  { id: ${JSON.stringify(b.id)}, name: ${JSON.stringify(b.name)}, tool: ${JSON.stringify(b.tool)},`);
+    lines.push(`    args: ${argsStr} },`);
+  }
+  lines.push("];");
+  const code = lines.join("\n");
+  // 写剪贴板；fallback：浮 textarea 让 user 长按复制
+  navigator.clipboard?.writeText(code).then(
+    () => setStatus(`已复制 ${_brushRack.brushes.length} 笔的代码到剪贴板`),
+    () => _showCodeInGenericSheet(code)
+  );
+}
+function _showCodeInGenericSheet(code) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = code;
+    ta.style.position = "fixed";
+    ta.style.top = "10%";
+    ta.style.left = "5%";
+    ta.style.width = "90%";
+    ta.style.height = "80%";
+    ta.style.zIndex = "9999";
+    ta.style.background = "var(--bg)";
+    ta.style.color = "var(--ink)";
+    ta.style.border = "1px solid var(--line)";
+    ta.style.padding = "12px";
+    ta.style.fontFamily = "ui-monospace, monospace";
+    ta.style.fontSize = "11px";
+    document.body.appendChild(ta);
+    ta.select();
+    setStatus("剪贴板失败 → 长按选中下面 textarea 复制；点 textarea 外侧关闭");
+    setTimeout(() => {
+      const close = (e) => {
+        if (e.target === ta) return;
+        ta.remove();
+        document.removeEventListener("pointerdown", close, true);
+      };
+      document.addEventListener("pointerdown", close, true);
+    }, 100);
+  } catch (_) {}
+}
+
+if (_rackEls.exportFolderBtn) _rackEls.exportFolderBtn.addEventListener("click", () => exportRackFolderAsFile());
+if (_rackEls.cloudPushBtn) _rackEls.cloudPushBtn.addEventListener("click", async () => {
+  if (!isSignedIn()) { setStatus("请先登录云端账号", true); return; }
+  setStatus("正在上传笔架…");
+  await pushBrushRackIfSignedIn();
+});
+if (_rackEls.resetBtn) _rackEls.resetBtn.addEventListener("click", async () => {
+  const ok = await openConfirmSheet(
+    "重置笔架？",
+    "会删除全部自定义笔刷 + 改过的默认笔，恢复出厂默认。不可撤销。",
+  );
+  if (!ok) return;
+  _brushRack = makeDefaultRack();
+  for (const t of Object.keys(state.toolStates)) {
+    state.toolStates[t].activeBrushId = null;
+    Object.assign(state.toolStates[t], defaultToolStateFor(t));
+  }
+  await persistBrushRack();
+  applyToolState(state.tool);
+  if (RACK_PANEL_BY_TOOL[state.tool] === getCurrentExclusive()) _renderRackSheet();
+  _rackDirty = true;
+  if (isSignedIn()) pushBrushRackIfSignedIn();
+  _rackDirty = false;
+  setStatus(`笔架已重置（${_brushRack.brushes.length} 个 brush）`, true);
+});
+if (_rackEls.dumpCodeBtn) _rackEls.dumpCodeBtn.addEventListener("click", () => dumpRackAsCode());
 
 // ---- brush settings 全屏 view ----
 let _editingBrushId = null;
@@ -3889,14 +4015,13 @@ function _renderBrushSettings() {
   }
   rangeRow(shape, "硬度", 0, 1.0, 0.05, b.shape.hardness, (v) => v.toFixed(2), (v) => b.shape.hardness = v);
 
-  // v98 schema 补缺
+  // v99 schema 补缺
   if (b.sizeCoeff == null) b.sizeCoeff = 0.6;
   if (b.opaCoeff == null)  b.opaCoeff = 0.6;
   if (b.flowCoeff == null) b.flowCoeff = 0;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
-  if (b.defaultOpa == null)  b.defaultOpa = 1.0;
-  if (b.defaultFlow == null) b.defaultFlow = 1.0;
   if (b.compositeMode == null) b.compositeMode = "wash";
+  if (!b.smooth) b.smooth = { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 };
 
   // Size：base + max
   const size = section("粗细 (size)");
@@ -3909,10 +4034,12 @@ function _renderBrushSettings() {
   rangeRow(dyn, "opacity", -1, 1, 0.05, b.opaCoeff,  (v) => v.toFixed(2), (v) => b.opaCoeff = v);
   rangeRow(dyn, "flow",    -1, 1, 0.05, b.flowCoeff, (v) => v.toFixed(2), (v) => b.flowCoeff = v);
 
-  // 默认 user 值（选 preset 时拷进 toolState）
-  const def = section("默认值（选笔时拷给滑块）");
-  rangeRow(def, "默认 opacity", 0, 1.0, 0.05, b.defaultOpa,  (v) => `${(v*100)|0}%`, (v) => b.defaultOpa = v);
-  rangeRow(def, "默认 flow",    0, 1.0, 0.01, b.defaultFlow, (v) => `${(v*100)|0}%`, (v) => b.defaultFlow = v);
+  // 笔画平滑（v99：从 system 挪进 preset）
+  const smooth = section("笔画平滑");
+  rangeRow(smooth, "streamline",   0, 1.0, 0.05, b.smooth.streamline,    (v) => v.toFixed(2), (v) => b.smooth.streamline = v);
+  rangeRow(smooth, "stabilization",0, 1.0, 0.05, b.smooth.stabilization, (v) => v.toFixed(2), (v) => b.smooth.stabilization = v);
+  rangeRow(smooth, "pull-stab",    0, 1.0, 0.05, b.smooth.pullStabilizer,(v) => v.toFixed(2), (v) => b.smooth.pullStabilizer = v);
+  rangeRow(smooth, "motion-filter",0, 1.0, 0.05, b.smooth.motionFilter,  (v) => v.toFixed(2), (v) => b.smooth.motionFilter = v);
 
   // 高级：composite mode + pressureGamma + pixelMode
   const adv = section("高级");

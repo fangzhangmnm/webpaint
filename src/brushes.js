@@ -1,6 +1,6 @@
 // Brush rack 数据模型 + 默认笔架。详 docs/brush-architecture.md。
 //
-// **v98 schema (Krita-aligned)**：
+// **v99 schema (Krita-aligned)**：
 // - **三个压感 coeff** (sizeCoeff / opaCoeff / flowCoeff)：−1..1，0=不响应，
 //   1=满压感线性，−1=反向。`signed_lerp(coeff, p) = amp + (1−amp)×p (coeff≥0)`
 //   or `1 − (1−amp)×p (coeff<0)`，其中 amp = 1−|coeff|。
@@ -8,16 +8,18 @@
 // - **compositeMode** = stroke buffer 内重叠合成方式（per-brush 标志）：
 //     "wash"    = Alpha Darken：buffer = max(buffer, α_dab) → 自交不变深、单笔有上限
 //     "buildup" = source-over：累积，可达 1.0（喷枪 feel）
-// - **opacity / flow 不存** preset：preset 给 `defaultOpa` / `defaultFlow` 当 hint，
-//   user 选 preset 时拷进 toolState；slider / settings 自由调。
-// - **airbrush flag 没了**：buildup + opaCoeff=0 + 低 defaultFlow 就是喷枪。
+// - **opacity / flow 不存** preset：选 preset 时 toolState.opacity = 1, toolState.flow = 1
+//   （user：「默认 opacity 默认 flow 两个字段不要，都是 1」）。user 自己拉 slider / brush settings 调。
+// - **airbrush flag 没了**：buildup + opaCoeff=0 就是喷枪 feel，user 自己拉低 flow slider。
 // - **pressureGamma**：p' = p^gamma，统一 power 曲线（默 1.0）。
+// - **smooth**：per-preset 位置平滑参数（streamline / stabilization / pullStabilizer / motionFilter）。
+//   v98 之前是全局 state.brush 上的，user：「smooth 没进笔刷，这个不是系统参数」。
 //
 // **不冻结字段**（user 当场调，不回写预设）：
 //   size.base / color  + per-tool 的 opacity / flow
 // **冻结字段**（显式「保存为预设」/「更新预设」才动）：
-//   shape / coeffs / pressureGamma / defaultOpa / defaultFlow / compositeMode /
-//   spacing / pixelMode / taper / hardness / 椭圆参数 / smudge
+//   shape / coeffs / pressureGamma / compositeMode /
+//   spacing / pixelMode / taper / hardness / 椭圆参数 / smudge / smooth
 
 export const RACK_VERSION = 1;
 export const DEFAULT_FOLDER = "我的常用";
@@ -35,7 +37,6 @@ function makeBrush({
   size = 12, sizeBaseMax = 200,
   sizeCoeff = 0.6, opaCoeff = 0.6, flowCoeff = 0,
   pressureGamma = 1.0,
-  defaultOpa = 1.0, defaultFlow = 1.0,
   compositeMode = "wash",
   shapeKind = "round", aspect = 1.0, rotation = 0, hardness = 1.0,
   textureB64 = null,
@@ -43,6 +44,8 @@ function makeBrush({
   pixelMode = false,
   taperIn = 0, taperOut = 0,
   smudge = null,
+  // 位置平滑（per-brush，v99 起从 system 挪进 preset）
+  streamline = 0.3, stabilization = 0, pullStabilizer = 0, motionFilter = 0,
 }) {
   return {
     id, name, tool, folder,
@@ -50,12 +53,12 @@ function makeBrush({
     size: { base: size, max: sizeBaseMax },
     sizeCoeff, opaCoeff, flowCoeff,
     pressureGamma,
-    defaultOpa, defaultFlow,
     compositeMode,
     spacing: spacingValue,
     pixelMode,
     taper: { in: taperIn, out: taperOut },
     smudge,
+    smooth: { streamline, stabilization, pullStabilizer, motionFilter },
   };
 }
 
@@ -64,44 +67,39 @@ function makeBrush({
 // merge 到用户 rack（不覆盖用户改过的 brush，但缺失的会补上）。
 // **shapes 不在 rack 里**——shapes 工具复用 brush rack（getRackToolKey）。
 const DEFAULTS_SPEC = [
-  // 铅笔：sketch。opacity 压感主轴（轻=淡），flow 也略跟（轻=慢累）。Wash 让自交不变深。
+  // 铅笔：sketch。opacity 压感主轴（轻=淡），flow 也略跟。Wash 让自交不变深。
   { id: "default-brush-pencil",   name: "铅笔",   tool: "brush",
     args: { size: 8, sizeBaseMax: 80, hardness: 0.5,
             sizeCoeff: 0.4, opaCoeff: 0.7, flowCoeff: 0.3,
-            defaultOpa: 0.6, defaultFlow: 1.0,
             spacingValue: 0.06, compositeMode: "wash" } },
-  // 勾线：满 flow + 满 opa，强 size 压感，起末 taper。Wash。
+  // 勾线：强 size 压感，起末 stylistic taper。Wash。
   { id: "default-brush-ink",      name: "勾线",   tool: "brush",
     args: { size: 6, sizeBaseMax: 60, hardness: 1.0,
             sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
-            defaultOpa: 1.0, defaultFlow: 1.0,
             spacingValue: 0.04, compositeMode: "wash",
             taperIn: 0.3, taperOut: 0.3 } },
-  // 平涂：大笔填色，强 size 压感，满 flow / 满 opa。Wash 单笔封顶。
+  // 平涂：大笔填色，强 size 压感。Wash 单笔封顶（user.opacity slider 控）。
   { id: "default-brush-fill",     name: "平涂",   tool: "brush",
     args: { size: 24, sizeBaseMax: 200, hardness: 1.0,
             sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
-            defaultOpa: 1.0, defaultFlow: 1.0,
             spacingValue: 0.06, compositeMode: "wash" } },
 
   // 大喷枪：size 固定（sizeCoeff=0）；flow 跟压感；Build-Up 可喷到 100%。
+  // user 自己拉低 flow slider 当喷雾 feel。
   { id: "default-airbrush-big",   name: "大喷枪", tool: "brush",
     args: { size: 300, sizeBaseMax: 800, hardness: 0,
             sizeCoeff: 0, opaCoeff: 0, flowCoeff: 1.0,
-            defaultOpa: 1.0, defaultFlow: 0.1,
             spacingValue: 0.05, compositeMode: "buildup" } },
   // 小喷枪：当 sketch 用，size 略跟压感。Build-Up。
   { id: "default-airbrush-small", name: "小喷枪", tool: "brush",
     args: { size: 16, sizeBaseMax: 200, hardness: 0.15,
             sizeCoeff: 0.4, opaCoeff: 0, flowCoeff: 1.0,
-            defaultOpa: 1.0, defaultFlow: 0.15,
             spacingValue: 0.05, compositeMode: "buildup" } },
 
-  // 涂抹（smudge）：sample + blend 走专用 path，compositeMode 不实际生效但保留 Build-Up 语义。
+  // 涂抹（smudge）：sample + blend 走专用 path。
   { id: "default-smudge-soft",    name: "涂抹",   tool: "smudge",
     args: { size: 16, sizeBaseMax: 80, hardness: 0.6,
             sizeCoeff: 0.2, opaCoeff: 0, flowCoeff: 1.0,
-            defaultOpa: 1.0, defaultFlow: 0.8,
             spacingValue: 0.06, compositeMode: "buildup",
             smudge: { strength: 0.8, dryness: 0.1 } } },
 
@@ -109,27 +107,26 @@ const DEFAULTS_SPEC = [
   { id: "default-eraser-hard",    name: "硬橡皮", tool: "eraser",
     args: { size: 16, sizeBaseMax: 100, hardness: 1.0,
             sizeCoeff: 0.8, opaCoeff: 1.0, flowCoeff: 0,
-            defaultOpa: 1.0, defaultFlow: 1.0,
             spacingValue: 0.04, compositeMode: "wash" } },
-  // 软橡皮：喷枪 eraser；同大喷枪逻辑（Build-Up，flow 跟压感）。
+  // 软橡皮：喷枪 eraser；Build-Up，flow 跟压感。
   { id: "default-eraser-soft",    name: "软橡皮", tool: "eraser",
     args: { size: 60, sizeBaseMax: 300, hardness: 0,
             sizeCoeff: 0, opaCoeff: 0, flowCoeff: 1.0,
-            defaultOpa: 1.0, defaultFlow: 0.08,
             spacingValue: 0.05, compositeMode: "buildup" } },
 
-  // 像素笔：1px stamps，无限硬，spacing 50%；pixelMode 整数 snap + 无 AA。
+  // 像素笔：1px stamps，无限硬，spacing 50%；pixelMode 整数 snap + 无 AA + 0 streamline。
   { id: "default-brush-pixel",    name: "像素笔", tool: "brush",
     args: { size: 4, sizeBaseMax: 64, hardness: 1.0,
             sizeCoeff: 0, opaCoeff: 0, flowCoeff: 0,
-            defaultOpa: 1.0, defaultFlow: 1.0,
             spacingValue: 0.5, compositeMode: "wash",
-            pixelMode: true } },
+            pixelMode: true,
+            streamline: 0 } },
 ];
 
-// IDB 老 schema 兼容（v82~v97 → v98）：
+// IDB 老 schema 兼容（v82~v98 → v99）：
 // - 老 spacing { kind, value } / size.pressureCurve / flow.pressureCurve / bufferMode / airbrush / opacity / flow.base / flow.min / size.min
-// - 全部转成 v98 (coeffs + compositeMode + defaultOpa/defaultFlow)
+// - v98 的 defaultOpa / defaultFlow 也删（user：「默认 opacity 默认 flow 两个字段不要，都是 1」）
+// - v99 加 smooth 字段（user：「smooth 没进笔刷」）
 export function migrateBrush(b) {
   if (!b) return b;
   // 老 spacing { kind, value } → 标量
@@ -158,20 +155,15 @@ export function migrateBrush(b) {
       b.flowCoeff = (pc != null && pc > 0) ? 1.0 : 0;
     }
   }
-  // defaultFlow：从老 flow.base 取
-  if (b.defaultFlow == null) {
-    b.defaultFlow = b.flow?.base ?? 1.0;
-  }
   delete b.flow;
   // opaCoeff：legacy 无 → airbrush 时 0，其他 0.6
   if (b.opaCoeff == null) {
     b.opaCoeff = b.airbrush ? 0 : 0.6;
   }
-  // defaultOpa：从老 opacity 取
-  if (b.defaultOpa == null) {
-    b.defaultOpa = b.opacity ?? 1.0;
-  }
   delete b.opacity;
+  // v98 defaultOpa / defaultFlow：删（toolState 选 preset 时硬编码 1.0）
+  delete b.defaultOpa;
+  delete b.defaultFlow;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
   // compositeMode：airbrush=true → buildup；否则 wash
   if (b.compositeMode == null) {
@@ -179,6 +171,10 @@ export function migrateBrush(b) {
   }
   delete b.airbrush;
   delete b.bufferMode;
+  // v99 smooth：之前在 system state.brush 上的 4 个字段挪进 preset
+  if (!b.smooth) {
+    b.smooth = { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 };
+  }
   return b;
 }
 
