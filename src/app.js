@@ -458,6 +458,38 @@ const input = new InputController(board, doc, {
   history,
 });
 
+// v116: transient mode panel suppression
+// user：「transient 的时候有些窗口应该暂时 hide... 大部分窗口都是准模态的，而不是一直留在画布上」
+// 进 transient (lasso transform / crop / color adjust)：把不相关 float 暂时藏起；
+// 退出时复原。brush rack 走 closeExclusive 顺便关；brush settings 全屏 view 不动 (用户主动开的)
+let _suppressedDuringTransient = [];
+function _suppressTransientPanels(mode) {
+  const allow = {
+    transform:      ["referencePanel", "layersPanel"],     // transform 时还要看引用图 / 切活动层
+    crop:           ["referencePanel"],
+    "adjust-color": ["referencePanel", "layersPanel"],
+  };
+  const allowList = allow[mode] || [];
+  const candidates = ["colorPanel", "paletteWindow", "referencePanel", "layersPanel", "liquifyPanel"];
+  // 防递归 (transition 间套用)：先复原再藏
+  _restoreTransientPanels();
+  for (const id of candidates) {
+    if (allowList.includes(id)) continue;
+    const el = document.getElementById(id);
+    if (!el || el.classList.contains("hidden")) continue;
+    _suppressedDuringTransient.push({ el, id });
+    el.classList.add("hidden");
+  }
+  // brush rack: closeExclusive 一把关
+  try { closeExclusive(); } catch {}
+}
+function _restoreTransientPanels() {
+  for (const { el } of _suppressedDuringTransient) {
+    el.classList.remove("hidden");
+  }
+  _suppressedDuringTransient = [];
+}
+
 // v113: panel z-order —— 点击 panel 把它带到同 panel 层内最高 z
 // user：「adjust panel 点出来之后在 color panel 下面，导致我以为坏了，能不能点开谁谁到这一层的 top」
 let _panelTopZ = 15;     // float-panel 默认 z = 15；递增不限上限
@@ -619,7 +651,10 @@ lassoConstrainBtn.addEventListener("click", () => {
 document.getElementById("lassoTransformBtn").addEventListener("click", () => {
   if (!doc.selection) return;
   const ok = input.lasso.liftSelectionForTransform(doc.activeLayer);
-  if (ok) updateLassoToolbar();
+  if (ok) {
+    updateLassoToolbar();
+    _suppressTransientPanels("transform");
+  }
 });
 document.getElementById("lassoDeselectBtn").addEventListener("click", () => {
   const entry = input.lasso.setSelection(null);
@@ -689,6 +724,7 @@ for (const b of lassoTransformModeBtns) {
 document.getElementById("lassoCommitBtn").addEventListener("click", () => {
   input.commitLassoIfFloating();
   updateLassoToolbar();
+  _restoreTransientPanels();
 });
 document.getElementById("lassoCancelBtn").addEventListener("click", () => {
   if (input.lasso.hasFloating()) {
@@ -696,6 +732,7 @@ document.getElementById("lassoCancelBtn").addEventListener("click", () => {
     board.invalidateAll();
     updateLassoToolbar();
   }
+  _restoreTransientPanels();
 });
 // Stamp：写入图层但保留 float（连击多次叠加复印）
 document.getElementById("lassoStampBtn").addEventListener("click", () => {
@@ -814,6 +851,8 @@ function applyAllPendingTransients() {
     try { if (p.check()) p.apply(); }
     catch (e) { console.warn(`[pending] ${p.label} apply failed:`, e); }
   }
+  // v116: 兜底复原被 transient 藏起来的面板（即使没走显式 commit/cancel button）
+  _restoreTransientPanels?.();
 }
 
 // 注册套索浮层。未来 text / shape 工具的 in-progress state 也在这注册一行
@@ -2652,11 +2691,13 @@ function _openCropMode() {
   document.getElementById("cropOverlay").classList.remove("hidden");
   document.getElementById("cropToolbar").classList.remove("hidden");
   _renderCropOverlay();
+  _suppressTransientPanels("crop");
 }
 function _closeCropMode() {
   _cropState = null;
   document.getElementById("cropOverlay").classList.add("hidden");
   document.getElementById("cropToolbar").classList.add("hidden");
+  _restoreTransientPanels();
 }
 document.getElementById("adjustCropFree").addEventListener("click", () => {
   setMenuOpen(false);
@@ -2919,6 +2960,7 @@ function _openAdjustPanel() {
   _syncAdjustSliders();
   board.setActiveLayerSurrogate?.(L.id, sur);    // 启动 surrogate 预览
   _onAdjustChange();                              // 初次渲染（identity）
+  _suppressTransientPanels("adjust-color");
 }
 function _syncAdjustSliders() {
   const s = _adjustState;
@@ -2958,6 +3000,7 @@ function _closeAdjustPanel(applied) {
   }
   _adjustState = null;
   els.adjustPanel.classList.add("hidden");
+  _restoreTransientPanels();
   board.invalidateAll();
 }
 document.getElementById("adjustColor").addEventListener("click", () => {
@@ -3401,6 +3444,7 @@ async function importImageAsLayer(file) {
       if (ok) {
         input.lasso.setMode("free");
         updateLassoToolbar();
+        _suppressTransientPanels("transform");
         board.invalidateAll();
         setStatus(`已导入：${file.name}（拖角变换 → 应用 / 取消）`);
         return;
