@@ -162,6 +162,45 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - 或：Wash mode 的 JS per-pixel 路径也升 16-bit Uint16Array 存 α
 - 关联 docs/engineering-roadmap.md WebGL 通路（已论证）
 
+### iPad 双击误触 window 拖动 → finger state 抽风（v104 记）
+- user：「有时双击时还是会错误拖动 ipad window 然后 finger state 抽风，按钮都按不了」
+- 现象：iPad PWA 在某些位置双击触发了系统级 window drag gesture，本应进 app 的 finger
+  state 被劫持，后续 pointer 事件错乱，按钮无响应
+- 调查方向：
+  - meta viewport `user-scalable=no` 是否生效？
+  - touch-action 全局 manipulation 是否漏了某些区域？
+  - PWA standalone mode display: `standalone` 是否影响 window drag 行为？
+  - 双击是否被 iPad 系统判定为 "drag to resize/move"？需要 preventDefault on double-tap
+- 短期修：global doubletap detector → preventDefault + 重置 pointer state
+- 长期：可能要 logging 双击事件 + finger state，看 iOS 14/15/16/17 行为差异
+
+### lasso 反选/去选 应该在一起（v104 记）
+- user：「lasso 里面反选和去选应该在一个地方，你分类错了」
+- 现状：「反选」和「去选」按钮分散在 lasso toolbar 不同位置
+- 都是 selection 修改类操作（接受当前选区，输出新选区或无），归一起
+- 改：lassoToolbarRow2 重排，selectionActions 里把反选 / 去选 / 填色 / 清除选区
+  四个 grouping 到一起；变换 / 复印 / 复制层等 lift-类操作另一组
+
+### lasso 多边形模式（v104 记）
+- user：「lasso 能加多边形模式吗？最好是 down 之后拖拽，然后 up 之后才写入」
+- procreate / PS 标准多边形 lasso：tap = 落点，拖拽 = 预览下一段线，up = 写入下一顶点；
+  闭合靠 tap 起点 或 双击
+- 跟现有 freehand lasso 的 sub-tool 切换并列（add SubTool: "polygon"）
+- 也可以 Photoshop 那种"拖一段画曲线，up 转多边形"风格——user 描述更像 down 拖 up 写入
+- 工作量：~80 行 lasso.js 状态机 + drawingPath 渲染
+
+### shape 工具改 procreate 自动建议（v104 记）
+- user：「我感觉直线和正圆还是需要轻重变化。所以也许还是应该参考 procreate 的方案，
+  而不是单独的无压感图形工具」
+- 现状：shapes tool 独立工具，画形状无压感（无 size variation）
+- procreate：画完任意 stroke 末尾停手不抬笔 0.5s → 自动 snap 到「最接近」的几何形状
+  （直线 / 圆 / 椭圆 / 矩形 / 三角形）。形状继承原 stroke 的 size variation（压感留着）
+- 实现：detect end-of-stroke pause → 形状识别（curvature analysis / circle fit / line fit）
+  → 提示 "auto-line / auto-circle / ..."，user 点确认 snap
+- 好处：保留压感笔感，user 不需要切工具
+- shapes 工具可保留但弱化（fallback for cases auto detect 不准）
+- 工作量：~300 行（识别算法 + UI 提示 + 适配现有 stroke buffer）
+
 ### 导入图片自动进 transform（v103 记）
 - user：「导入图片到图层之后自动全选图片进入 transform 模式」
 - 现状：导入图片 = 新图层 + 像素就位，user 还得手动 lasso 全选才能调位置 / 缩放

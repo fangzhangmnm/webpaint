@@ -4082,8 +4082,10 @@ function _renderBrushSettings() {
     (v) => `${v|0}%`,
     (v) => { b.spacing = v / 100; });
   // v104: flow 乘数 —— spacing 调到很小（如大喷枪 2%）时让 user 把单 stamp flow 压回来
+  // v105：range 1-200 step 1。大喷枪 spacing 2% 单 px 被 ~50 stamp 覆盖，
+  // flowScale 50% 仅把 92%→72%（肉眼区分小），要到 10-20% 才显眼
   if (b.flowScale == null) b.flowScale = 1.0;
-  rangeRow(sp, "flow 乘数", 5, 200, 5, Math.round(b.flowScale * 100),
+  rangeRow(sp, "flow 乘数", 1, 200, 1, Math.round(b.flowScale * 100),
     (v) => `${v|0}%`,
     (v) => { b.flowScale = v / 100; });
 
