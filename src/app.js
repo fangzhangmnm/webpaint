@@ -3842,7 +3842,9 @@ function _smoothstepRadialGradient(hardness, stops = 16) {
     const apct = (alpha * 100).toFixed(1);
     out.push(`color-mix(in srgb, var(--ink) ${apct}%, transparent) ${pct}%`);
   }
-  return `radial-gradient(circle, ${out.join(", ")})`;
+  // v108 BUG FIX：默认 farthest-corner = √2 × 半宽，100% stop 跑框外角 → 视觉框边
+  // 只走 ~70.7% 渐变（user 反映「preview 没变」+ 猜「多了个根号 2」），必须 closest-side
+  return `radial-gradient(circle closest-side, ${out.join(", ")})`;
 }
 
 // v100r2：rack 操作按钮回退 text 标签

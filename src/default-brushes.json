@@ -11,7 +11,7 @@
               "taperIn": 0.3, "taperOut": 0.3,
               "streamline": 0.8, "stabilization": 0.75, "motionFilter": 0.2 } },
   { "id": "default-brush-fill", "name": "平涂", "tool": "brush",
-    "args": { "size": 50, "sizeBaseMax": 200, "hardness": 0.8,
+    "args": { "size": 50, "sizeBaseMax": 800, "hardness": 0.8,
               "sizeCoeff": 1.0, "opaCoeff": 0, "flowCoeff": 0,
               "pressureGamma": 1.2, "pressureLPF": 100,
               "spacingValue": 0.06, "compositeMode": "wash",
@@ -40,7 +40,7 @@
               "spacingValue": 0.04, "compositeMode": "wash",
               "stabilization": 0.15, "motionFilter": 0.05 } },
   { "id": "default-eraser-soft", "name": "软橡皮", "tool": "eraser",
-    "args": { "size": 125, "sizeBaseMax": 300, "hardness": 0,
+    "args": { "size": 125, "sizeBaseMax": 800, "hardness": 0,
               "sizeCoeff": 0, "opaCoeff": 0, "flowCoeff": 1.0,
               "spacingValue": 0.1, "compositeMode": "buildup" } },
 

@@ -153,6 +153,18 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - PS 用了几十年的标准做法
 - 兴趣不大，但留在这里参考
 
+### size popup 预览 bug 一堆（v108 记）
+- user：「大小预览忘了算 scale，而且太大会被 clamp（可以框有最大，然后 preview crop）。
+  然后笔的预设我也动过」
+- 现状：size popup 显「N px」+ mini circle (capped 60px display)
+- bug 1：忘算 board zoom scale —— "100 px" 是 doc 像素，但屏幕 cursor 实际半径
+  = 100 × board.zoom；user 拖 slider 时看不到屏幕实际大小
+- bug 2：超过 60px display 时被 clamp，预览不再随 size 增长 → 反馈断
+- 解：popup 框设最大尺寸（如 80×80 或 100×100），circle 真正按 size × zoom 画，
+  超出框时 overflow: hidden crop 显示（procreate 是这样）
+- 加 text 同时显「N px（屏幕约 M px）」二行展示
+- backlog，等顺手做
+
 ### 大喷枪低 alpha 处 color quantize banding（v104 记）
 - user：「大喷枪能看到 color quantize error」
 - 现状：buildup 模式 buffer = Canvas2D RGBA (8-bit/channel)
