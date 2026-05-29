@@ -867,20 +867,24 @@ input[type=range] {
 body[data-doc-newer="1"] .top-bar { border-color: #dc2626; box-shadow: 0 0 0 2px rgba(220, 38, 38, .25), var(--shadow); }
 body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 
-/* Brush rack sheet（v83）—— 底部弹出 */
+/* Brush rack sheet（v83，v102 改 CSS grid 布局）—— 底部弹出
+   v100/101 用 flex column + min-height: 0 hack 在 iPad PWA 上和 max-height 打架
+   改 CSS grid auto/auto/1fr 后 grid 区天然 1fr 不受 head 增删按钮影响 */
 .brush-rack-sheet {
   position: fixed;
   left: 50%;
   bottom: max(env(safe-area-inset-bottom, 0px), 12px);
   transform: translateX(-50%);
   width: min(720px, calc(100% - 24px));
-  max-height: 70vh;
+  height: 70dvh;          /* 显式 height (非 max-height)；grid 区计算稳 */
+  max-height: 70dvh;
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: var(--shadow);
   z-index: 30;          /* > top-bar 10 + lasso 25 */
-  display: flex; flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
   overflow: hidden;
 }
 .brush-rack-sheet.hidden { display: none; }
@@ -889,7 +893,6 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   padding: 10px 12px; gap: 8px;
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
-  flex-shrink: 0;          /* v100r2：head 不被压扁，让 grid 计算正确 */
 }
 .brush-rack-head > span { font-weight: 600; flex: 1 1 100px; min-width: 80px; }
 /* v100r2：回退 text 按钮，允许 head 内换行（窄屏 6 个按钮换 2 行） */
@@ -923,7 +926,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   padding: 8px 12px 4px;
   overflow-x: auto;
   scrollbar-width: thin;
-  flex-shrink: 0;          /* v100r2：folders 不被压扁 */
+  /* grid auto 行天然不会被挤；这里不再需要 flex-shrink */
 }
 .brush-rack-folder {
   font: inherit; font-size: 12px;
@@ -939,12 +942,13 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 .brush-rack-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  align-content: start;        /* tiles 顶对齐，不在 1fr 里居中 */
   gap: 8px;
   padding: 8px 12px 14px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  flex: 1 1 0;
-  min-height: 0;
+  min-height: 0;               /* grid 1fr 里也需要这个保 scroll */
+  touch-action: pan-y;
 }
 .brush-rack-tile {
   display: flex; flex-direction: column;
@@ -987,16 +991,20 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 }
 .brush-rack-tile-edit:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
 
-/* Brush settings 全屏 view（v83）*/
+/* Brush settings 全屏 view（v83，v102 改 CSS grid）
+   v99/100/101 用 flex column + min-height: 0 在 iPad 上常有"旁边触摸不滚"问题
+   改 grid auto/1fr + pan-y 让 body 整块（含两侧 padding）都吃 vertical pan */
 .brush-settings-view {
   position: fixed;
   inset: 0;
-  /* v99：显式高度，iOS Safari address bar 切换不挤压 */
-  height: 100%;
-  width: 100%;
+  height: 100dvh;
+  width: 100vw;
   background: var(--bg);
   z-index: 40;          /* > brush-rack 30 */
-  display: flex; flex-direction: column;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  touch-action: pan-y;        /* 全 view 允许竖向 pan，body 触摸侧边也能滚 */
 }
 .brush-settings-view.hidden { display: none; }
 .brush-settings-head {

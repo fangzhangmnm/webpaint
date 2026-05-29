@@ -25,6 +25,10 @@
 - doc.width/height + layer.canvas 全部重做
 - 跟 v83 的 transform 插值模式可共享 helper
 
+---
+
+## P1（想做，等时机）
+
 ### adjust suite（v89 计划）
 - Brightness / Contrast / Saturation / Hue（CSS filter live preview, bake on apply）
 - Levels / Curves / Color Balance（pixel op，参 AtlasMaker src/canvas-filters.js）
@@ -33,10 +37,6 @@
 ### 多选 layer + 折叠 / 文件夹
 - 见下面「多选 layer 设计」section
 - Collapse all / Collapse to below / Group selected → folder
-
----
-
-## P1（想做，等时机）
 
 ### 图库里支持重命名
 - user：「图库 ui 可以重命名」
@@ -152,6 +152,19 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - mask 是独立画布，可以独立画 / 擦
 - PS 用了几十年的标准做法
 - 兴趣不大，但留在这里参考
+
+### thumb 改 sidecar 文件 + 改善线稿缩图狗牙（v102 记）
+- user：「thumb 生成的时候在线稿场景狗牙很厉害」+「thumb 改成 sidecar，可以从云上批量拉，
+  然后也方便 pc 端管理」
+- 现状 = thumb 烧进 .ora 文件内的 mergedimage.png；本地 gallery 渲染要先解压 ora 才能看
+- 目标 = 拆出独立的 `<name>.thumb.png`（OneDrive 同目录），跟 .ora 平级
+  - 云端 list 一次就拿到所有 thumb url，gallery 批量 fetch + cache，速度上来
+  - PC 端 / Finder 端文件管理友好（双击就看见缩图）
+  - .ora 内部还保留 mergedimage.png 当 fallback（offline 兜底）
+- 狗牙问题（独立）：当前 `drawImage` 单步 box-filter；线稿 + 大面积透明 → hard edge 出狗牙
+  - 解：多步降采样（每步缩半级联）；或线稿专用 path（detect alpha 占比 + 边缘锐度）
+- 改：session.js 加 thumb 单独读写；cloud.js / OneDrive 同步 thumb；gallery.js 渲染换 thumb url
+- 跟 v98 brush rack 同套云端同步 + 冲突 model 复用
 
 ### 像素艺术工作流：pixel grid 显示 + 整数缩放
 - v97 加了像素笔（pixelMode）：整数 snap + fillRect 无 AA

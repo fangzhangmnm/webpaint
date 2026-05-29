@@ -3663,12 +3663,12 @@ function _renderRackSheet() {
     const name = document.createElement("span");
     name.className = "brush-rack-tile-name";
     name.textContent = b.name;
-    // gear icon → 直接进设置（不用长按）
+    // gear icon → 直接进设置（不用长按）。v101r2：unicode ⚙ 在 iOS 渲染不一致，换 SVG 小扳手
     const gear = document.createElement("button");
     gear.type = "button";
     gear.className = "brush-rack-tile-edit";
     gear.title = "编辑";
-    gear.innerHTML = "⚙";
+    gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
     gear.addEventListener("click", (e) => {
       e.stopPropagation();
       closeExclusive();
