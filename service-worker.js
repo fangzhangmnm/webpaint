@@ -1,72 +1,50 @@
-// SW: cache-first + 后台 revalidate + 改了通知页面（toast）。
-// v15 起：在响应 .js 时改写 import URL 加 ?v=VERSION，绕开 iPad Safari
-// WKWebView 的 bytecode cache（按 URL 索引，URL 没变就用旧 bytecode）。
-// 同时 version.js 由 SW 动态返回当前 CACHE_VERSION，保证 page 端拿到的
-// 版本永远和 SW 自己的一致。
+// SW v121 重写：bundle 后整个站只剩 1 个 hash-named bundle，缓存失效**自动**
+// 通过文件名差异解决。manifest hash / import URL rewrite / version.js 合成 这些老花招全删。
+//
+// 设计：
+//   - install：fetch index.html → 抠出当前 bundle 文件名 → precache 入口 + bundle + statics
+//   - cache name = "webpaint-<bundleHash>"。新 bundle = 新 cache name；activate 时清老的。
+//   - fetch：cache-first + 后台 revalidate；ETag 变了通知 page。
+//
+// 跟 sibling family 抄：基本可以 1:1 拷，改 STATIC_PRECACHE 列表就行。
+// 论证见 docs/why-content-hash-bundle.md。
 
-importScripts("./src/version.js");
-const CACHE_VERSION = self.WEBPAINT_VERSION;
-const CACHE_NAME = `webpaint-${CACHE_VERSION}`;
-
-const PRECACHE_URLS = [
+const STATIC_PRECACHE = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./icon.svg",
-  "./apple-touch-icon-180.png",
   "./icon-192.png",
   "./icon-512.png",
+  "./apple-touch-icon-180.png",
   "./src/styles.css",
-  "./src/version.js",
-  "./src/app.js",
-  "./src/doc.js",
-  "./src/board.js",
-  "./src/input.js",
-  "./src/brush.js",
-  "./src/brushes.js",
-  "./src/default-brushes.json",
-  "./src/panel-state.js",
-  "./src/palette.js",
-  "./src/history.js",
-  "./src/liquify.js",
-  "./src/lasso.js",
-  "./src/reference.js",
-  "./src/psd.js",
-  "./src/history.js",
-  "./src/storage.js",
-  "./src/zip.js",
-  "./src/ora.js",
-  "./src/session.js",
-  "./src/config.js",
-  "./src/auth.js",
-  "./src/graph.js",
-  "./src/cloud.js",
   "./src/vendor/zip-js/zip-full.min.js",
-  "./src/vendor/msal/msal-browser.min.js",
+  // msal / 其它惰性加载的库 SW 不预缓存。用到才下，那时候 fetch 会自动 cache。
 ];
 
-// 哪些响应需要做 import URL 改写
-function isJSModule(url) {
-  return url.pathname.endsWith(".js")
-    && url.pathname.includes("/src/")
-    && !url.pathname.endsWith("/version.js");
-}
+let CACHE_NAME = "webpaint-boot";   // install 时会被替换为 webpaint-<bundleHash>
 
-// 把源码里 `from "./xxx.js"` 和 `import("./xxx.js")` 改成 `?v=VERSION`
-// 保留可能已有的 query（无 query 就加）。bump 时整套 module URL 都换 →
-// JS engine 把它当全新模块编译 → bytecode cache 必失效。
-function rewriteImports(text) {
-  const v = `?v=${CACHE_VERSION}`;
-  return text
-    .replace(/(\bfrom\s+)(["'])(\.[^"'?]+\.js)(["'])/g, `$1$2$3${v}$4`)
-    .replace(/(\bimport\s*\(\s*)(["'])(\.[^"'?]+\.js)(["'])/g, `$1$2$3${v}$4`);
+async function getCurrentBundleUrl() {
+  const res = await fetch("./index.html", { cache: "no-store" });
+  if (!res.ok) throw new Error("install: index.html fetch failed " + res.status);
+  const html = await res.text();
+  // <script type="module" src="./dist/main-<hash>.mjs"></script>
+  const m = html.match(/src="(\.\/dist\/main-[a-z0-9-]+\.mjs)"/i);
+  if (!m) throw new Error("install: 找不到 ./dist/main-*.mjs 入口 in index.html");
+  return { html, bundleUrl: m[1] };
 }
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
+    const { bundleUrl } = await getCurrentBundleUrl();
+    const bundleHash = bundleUrl.match(/main-([a-z0-9-]+)\.mjs/i)?.[1] || "boot";
+    CACHE_NAME = `webpaint-${bundleHash}`;
     const cache = await caches.open(CACHE_NAME);
-    await Promise.all(PRECACHE_URLS.map((u) =>
-      cache.add(u).catch((err) => console.warn("precache miss", u, err))
+    const urls = [...STATIC_PRECACHE, bundleUrl, bundleUrl + ".map"];
+    await Promise.all(urls.map((u) =>
+      fetch(u, { cache: "no-store" })
+        .then((r) => r.ok ? cache.put(u, r) : null)
+        .catch((err) => console.warn("[SW] precache miss", u, err.message))
     ));
     await self.skipWaiting();
   })());
@@ -96,28 +74,14 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // v121 dev/ 入口走纯 HTTP（不进 SW cache 层），让 dev 改完即见
+  if (url.pathname.includes("/dev/")) return;
 
   event.respondWith((async () => {
-    // version.js：SW 直接合成响应，永远是当前 SW 自己的 CACHE_VERSION。
-    // 这样 page 端 import 进 window.WEBPAINT_VERSION 之后立即就是新版本，
-    // 后面的 `?v=${WEBPAINT_VERSION}` 才不会用旧值。
-    if (url.pathname.endsWith("/src/version.js")) {
-      return new Response(
-        `self.WEBPAINT_VERSION = "${CACHE_VERSION}";\n`,
-        { headers: {
-            "Content-Type": "application/javascript",
-            "Cache-Control": "no-store",
-          } }
-      );
-    }
-
     const cache = await caches.open(CACHE_NAME);
-    // ignoreSearch：缓存按裸 URL 存；带 ?v=N 的请求也能命中
     const cached = await cache.match(req, { ignoreSearch: true });
-    // 拿网络版本时去掉 query，cache 也按裸 URL put
-    const bareReq = new Request(url.origin + url.pathname);
 
-    const network = fetch(bareReq).then((resp) => {
+    const networkPromise = fetch(req).then((resp) => {
       if (resp && resp.ok) {
         if (cached) {
           const cE = cached.headers.get("etag");
@@ -127,27 +91,18 @@ self.addEventListener("fetch", (event) => {
           const changed = (cE && fE && cE !== fE) || (!cE && cL && fL && cL !== fL);
           if (changed) notifyUpdate(req.url).catch(() => {});
         }
-        cache.put(bareReq, resp.clone()).catch(() => {});
+        // hash-named bundle 不可能变内容；其它文件可能更新，put 一次
+        cache.put(req, resp.clone()).catch(() => {});
       }
       return resp;
     }).catch(() => null);
 
-    async function maybeRewrite(resp) {
-      if (!resp || !isJSModule(url)) return resp;
-      const text = await resp.text();
-      const rewritten = rewriteImports(text);
-      return new Response(rewritten, {
-        status: resp.status,
-        headers: { "Content-Type": "application/javascript" },
-      });
-    }
-
     if (cached) {
-      network.catch(() => {});
-      return await maybeRewrite(cached.clone());
+      networkPromise.catch(() => {});
+      return cached;
     }
-    const resp = await network;
-    if (resp) return await maybeRewrite(resp.clone());
+    const resp = await networkPromise;
+    if (resp) return resp;
     if (req.mode === "navigate") {
       const fallback = await cache.match("./index.html");
       if (fallback) return fallback;

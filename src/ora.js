@@ -1,3 +1,4 @@
+import { WEBPAINT_VERSION } from "./version.js";
 // OpenRaster (.ora) encode / decode。
 //
 // 标准：https://www.openraster.org/baseline/file-layout-spec.html
@@ -136,8 +137,7 @@ function buildStackXml(doc) {
   // wrote-with：记录写入这份 .ora 时的 WebPaint 版本号。
   // 用途：读取端若发现比自己版本高 → 警告（避免旧版客户端静默吃掉新版图层属性）
   // 论证见 conversation v71→v72。
-  const wroteWith = (typeof window !== "undefined" && window.WEBPAINT_VERSION) ||
-                    (typeof self !== "undefined" && self.WEBPAINT_VERSION) || "";
+  const wroteWith = WEBPAINT_VERSION;
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <image version="0.0.3" w="${doc.width}" h="${doc.height}" xres="72" yres="72" xmlns:webpaint="https://github.com/fangzhangmnm/webpaint/ns" webpaint:wrote-with="${escapeXml(wroteWith)}">
   <stack name="root">

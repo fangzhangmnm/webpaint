@@ -17,20 +17,32 @@
 
 **不能"等用户测过再 commit"** — 因为非 PC 设备要先有 commit 才能测。
 
-正确流程：
-1. 写完代码
-2. **commit + push**（即使你觉得逻辑还没复测）
-3. 等 GitHub Pages 部署（顶栏版本号会切，或 SW 触发更新 toast）
-4. 用户 iPad 上测
+正确流程（v121 起：bundle + dev/prod 分家）：
+1. 写完代码（src/ 里）
+2. `bash scripts/build.sh --dev` 重 bundle 成 `dist/main-dev.mjs`
+3. **commit + push**（即使你觉得逻辑还没复测）
+4. 用户 iPad 开 `https://<host>/<project>/dev/`，刷新即见
 5. 不对再迭代
+6. 用户**显式 consent** 后（比如每晚一次），跑 `bash scripts/build.sh --prod` →
+   生成 hashed bundle、sed 改 `index.html`、commit + push → prod 入口 `/` 升级
 
-但要在 commit message 里**坦白没在浏览器复测**（[[feedback-no-browser-self-claim]]），让用户知道这一坨是"等你来测"的状态。
+**dev 改了 prod 不动** —— 真用户继续用 prod 的稳定版，不会被你 daily 改动伤到画。
+规范见 [docs/dev-prod-split.md](dev-prod-split.md)、bundle 原理见 [docs/why-content-hash-bundle.md](why-content-hash-bundle.md)。
 
-## PWA 更新检测细节
+commit message 里仍要**坦白没在浏览器复测**（[[feedback-no-browser-self-claim]]）。
 
-push 之后 iPad 上不会自动刷 —— 看 [[pwa-update-detection]]（4 路检测：`registration.waiting` / `updatefound`+`statechange='installed'` / `asset-updated` postMessage / `visibilitychange` poke）。
+## PWA 更新检测细节（prod 入口）
 
-如果用户从 home screen 重启 PWA 仍然装着旧版：WKWebView bytecode cache 按 URL 缓存 V8 bytecode。SW 已经在 fetch 里给 `./xxx.js` 加 `?v=VERSION` 强制 URL 变化绕开（见 `service-worker.js` 的 `rewriteImportUrls`）。如果还不行，让用户从 app switcher 强制 kill PWA 再开。
+prod URL 下 SW 还跑。push 之后 iPad 上不会自动刷 —— 看 [[pwa-update-detection]]
+（4 路检测：`registration.waiting` / `updatefound`+`statechange='installed'` /
+`asset-updated` postMessage / `visibilitychange` poke）。
+
+v121 起 prod bundle URL 自带 content-hash，旧 URL 上没有新内容，**绝对不可能撞
+"版本号对了行为旧"的 bug**（v119-v120 经历的那个坑）。如果用户重启 PWA 还是旧
+版，是 SW 自己还没拿到新 `index.html`；等下次 SW 后台 revalidate 触发即可。
+WKWebView bytecode cache 也不再是问题——新 bundle 文件名都不同，V8 重编译。
+
+dev 入口 `/dev/` 不注册 SW，**改了就生效**，不需要这些机制。
 
 ## 兄弟项目复用
 

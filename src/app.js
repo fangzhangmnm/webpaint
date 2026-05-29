@@ -9,6 +9,7 @@
 //   BrushSettings   ← 当前笔刷参数（这里持有，传给 input.brush）
 //   App state       ← 工具 / 颜色 / 主题 / 压感开关
 
+import { WEBPAINT_VERSION } from "./version.js";
 import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
 import { InputController, compressPixelSnap, applyPixelSnap } from "./input.js";
@@ -198,7 +199,7 @@ if (navigator.maxTouchPoints > 0) {
 const doc = new PaintDoc({ width: 2048, height: 2048 });
 const board = new Board(els.board, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-els.versionLabel.textContent = window.WEBPAINT_VERSION || "?";
+els.versionLabel.textContent = WEBPAINT_VERSION || "?";
 
 const state = {
   tool: "brush",
@@ -2223,7 +2224,7 @@ async function saveNow(opts = {}) {
     if (opts.implicit) return;
     const ok = await openConfirmSheet(
       `覆盖更新版本写的画？`,
-      `这画由 ${_loadedDocWriterVer} 写的，你是 ${window.WEBPAINT_VERSION}。` +
+      `这画由 ${_loadedDocWriterVer} 写的，你是 ${WEBPAINT_VERSION}。` +
       `保存会丢失新版本特有的属性（如新图层 flag 等）。建议先刷新升级。`,
     );
     if (!ok) { setStatus("已取消保存"); return; }
@@ -2277,12 +2278,12 @@ function adoptLoadedDoc(loaded, sessionName) {
   _loadedDocIsNewer = false;
   _loadedDocNewerConfirmed = false;
   const writerN = parseAppVersion(loaded._wroteWith);
-  const selfN   = parseAppVersion(window.WEBPAINT_VERSION);
+  const selfN   = parseAppVersion(WEBPAINT_VERSION);
   if (writerN !== null && selfN !== null && writerN > selfN) {
     _loadedDocIsNewer = true;
     _loadedDocWriterVer = loaded._wroteWith;
     setStatus(
-      `这画由 ${loaded._wroteWith} 写的，你是 ${window.WEBPAINT_VERSION} —— ` +
+      `这画由 ${loaded._wroteWith} 写的，你是 ${WEBPAINT_VERSION} —— ` +
       `编辑保存会丢失新版特有的层属性。建议先刷新升级。`,
       true,
     );
@@ -4883,7 +4884,10 @@ let _swRegistration = null;       // 暴露给 menuCheckUpdate 用
 // 等模块跑完时 `load` event 经常已经 fire 过了 → addEventListener 挂的 listener
 // 永远不触发 → SW 从来没注册。iPad PWA 离线就崩，"检测更新"也说"未注册"。
 // 现在改成模块顶层直接 register（同 ScratchPad），不依赖 load event。
-if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
+// v121 dev/ 子目录跳 SW 注册：dev bundle 文件名固定 + ?v=epoch 防缓存，无 SW
+// 反而每次刷新都直接拿最新代码，免得 dev 自己也踩"过一会才好"
+const IS_DEV_ROUTE = location.pathname.includes("/dev/");
+if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname) && !IS_DEV_ROUTE) {
   // 路径 3：asset-updated 消息
   navigator.serviceWorker.addEventListener("message", (e) => {
     if (e.data?.type === "asset-updated") showUpdate();

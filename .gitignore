@@ -12,7 +12,15 @@ Thumbs.db
 
 # 工具产物
 node_modules/
-dist/
 *.log
 .cache/
 debug/
+
+# v121: build 中间产物（成功的 main-tmp 会 mv 到 main-<hash>；崩了的留着 debug）
+dist/main-tmp.mjs
+dist/main-tmp.mjs.map
+
+# v121: esbuild 二进制 ~10MB，不入库省 repo 体积。
+# 新机器跑：curl -sL https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.24.0.tgz | tar -xz -C /tmp && mkdir -p vendor/esbuild && mv /tmp/package/bin/esbuild vendor/esbuild/esbuild && chmod +x vendor/esbuild/esbuild
+# 详 docs/dev-prod-split.md "sibling family checklist"。换 OS 改 linux-x64 → darwin-arm64 / win32-x64。
+vendor/esbuild/

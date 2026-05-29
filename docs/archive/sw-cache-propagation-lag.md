@@ -1,3 +1,8 @@
+> **v121 归档**：这个问题 v121 切 esbuild bundle + content-hash 文件名之后**根本上不可能发生**了——
+> 因为 bundle URL 本身就是 hash，旧版 URL 上没有新版本内容，PoP propagate 也撞不到。
+> SW 不再用 manifest hash 校验 / 一次性 precache，看 docs/why-content-hash-bundle.md。
+> 留这个文件做"为啥换掉 v119 ~ v120 那套方案"的论证底。
+
 # 已知问题：版本号对了，行为还是旧的（GitHub Pages 传播 + SW 预缓存竞态）
 
 ## 症状

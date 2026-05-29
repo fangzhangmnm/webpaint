@@ -14,6 +14,40 @@
 
 ## P0（v89+ 路线明确的）
 
+### Windows 画画时 stamps 出现小黑框（commit 后消失） (v120 记，user：「windows 上画画的时候会出现一些小黑框 for stamps，送笔 commit 之后好」+ 手机拍图)
+- 现象：Windows 上落笔过程中，stroke 沿线撒一堆**细矩形轮廓**（不是实心块），
+  大小≈ stamp / 上次 buffer bbox 尺寸，commit 后干净。看图像描述 = "GPU quirk，根据更新的 bbox spawn around trajectory"
+- 关键洞察：是**矩形轮廓**不是实心黑块 → 不是某处实心填了黑色，而是 **partial render
+  的 clip 边缘**在屏幕上漏了 1–2 px。screen ctx = `{alpha: false}` → 任何未画到的 pixel = 黑色。
+- 最可能根因：[board.js:451-510] `_renderPartial`
+  - 用浮点 `sx, sy, sw, sh` 做 `ctx.rect + clip + fillRect`
+  - Windows Skia GPU 在 DPR>1 下处理小数 clip 边界与 fillRect 边界**不完全一致** →
+    clip 把 outer 0.5 px 排除掉、fillRect 又只画 inner 0.5 px → 留 1 px sliver 没被任何东西画过
+    → 沿 alpha:false canvas 初始状态露出 = 黑色细线 = **看上去就是 dirty rect 的黑色 outline**
+  - 每帧 _markDirty 都加新区，每帧都漏一圈 → 整段 trajectory 上撒满黑框
+- **defensive fix（高概率管用）**：partial render 算 screen rect 时整 pixel 取整 +
+  小幅外扩：
+  ```js
+  const sx = Math.floor(dx0 * scale + tx) - 1;
+  const sy = Math.floor(dy0 * scale + ty) - 1;
+  const sw = Math.ceil(dx1 * scale + tx) - sx + 1;
+  const sh = Math.ceil(dy1 * scale + ty) - sy + 1;
+  ```
+  确保 void fill 严格覆盖 clip 边沿，不留 sliver
+- 兜底 fix（万一上面没用）：stroke 进行中强制走 `_renderFull()` 不走 partial（一帧多一次全屏 fill 而已）
+- commit 后好 = endStroke 时 applyPixelSnap 触发 _markDirty(整 layer.bbox)，dirty 区被一次大块覆盖（不会再有 sliver 漏出来），看起来就 "好了"。
+- v120 还没做。Windows 实机测试需要 user 配合：试 floor/ceil fix → screenshot 对比
+
+### smudge icon 再改：单手指 45° 向下按压 (v120 记，user：「smudge 错啦，是一根手指 45° 向下伸出来按住涂抹」)
+- v120 我选了 Lucide 张开手掌（4 指立 + 拇指），错了；user 要的是**单根手指**
+- 设计意图：一根食指从右上 45° 角斜下来，指尖触屏，下方有涂抹/压感弧痕
+  - 类似 https://lucide.dev "pointer" 但角度斜的、指尖按压有压感拖痕
+  - 或参考 procreate 涂抹工具的「拇指 + 涂抹弧线」
+- 关联 [feedback:artist-intuition]：图标设计也是 artist 直觉，问 user 别凭 engineer 想象
+- 工作量：5 行 SVG，下次顺手做
+
+
+
 ### crop / 画布裁切
 - 裁画布到选区 / 自定义矩形
 - 画布尺寸缩水（layers 同步裁）
