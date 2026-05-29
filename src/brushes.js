@@ -52,7 +52,8 @@ export function newBrushId() {
 //     opacity: 1.0,                      最终 cap
 //     spacing: {
 //       kind: "distance" | "time",
-//       value: 1.5,                      px (distance) or ms (time)
+//       value: 0.12,                     **fraction of size**（不是 px），跟 engine 一致
+//                                        time 模式时是 ms
 //     },
 //     bufferMode: "stroke-buffer" | "direct-layer",
 //                                        spacing 跟 buffer 强耦合：
@@ -74,7 +75,7 @@ function makeBrush({
   opacity = 1.0,
   shapeKind = "round", aspect = 1.0, rotation = 0, hardness = 1.0,
   textureB64 = null,
-  spacingKind = "distance", spacingValue = 1.5,
+  spacingKind = "distance", spacingValue = 0.12,    // **fraction of size**（同 BrushEngine 默认 0.12）
   bufferMode = null,        // 不填 = 跟 spacingKind 推
   taperIn = 0, taperOut = 0,
   smudge = null,
@@ -95,66 +96,59 @@ function makeBrush({
   };
 }
 
-// 默认笔架——6 个 brush 覆盖每个工具一个开箱即用的 preset。
-//
-// 用户第一次进 WebPaint（IDB 空）时落地这套。每个工具就有 1 个能用的笔。
-// 用户后续可改 / 加 / 删。
+// 默认笔架——每工具一个开箱即用 preset。
+// **stable ID**：以 "default-{tool}-{slug}" 形式固定。bump 时新 default 通过 id 比对
+// merge 到用户 rack（不覆盖用户改过的 brush，但缺失的会补上）—— 解决 stale default 问题。
+const DEFAULTS_SPEC = [
+  { id: "default-brush-pencil",   name: "铅笔",   tool: "brush",
+    args: { size: 8, hardness: 0.6, flow: 0.5, flowPressureCurve: 1.0, opacity: 0.6 } },
+  { id: "default-brush-ink",      name: "勾线",   tool: "brush",
+    args: { size: 4, hardness: 1.0, flow: 1.0, opacity: 1.0, sizePressureCurve: 1.5, taperIn: 0.3, taperOut: 0.3 } },
+  { id: "default-brush-fill",     name: "平涂",   tool: "brush",
+    args: { size: 24, hardness: 1.0, flow: 1.0, opacity: 1.0, sizePressureCurve: 0 } },
+  { id: "default-airbrush-soft",  name: "软喷枪", tool: "airbrush",
+    args: { size: 40, hardness: 0, flow: 0.05, opacity: 1.0, spacingKind: "time", spacingValue: 16 } },
+  { id: "default-smudge-soft",    name: "涂抹",   tool: "smudge",
+    args: { size: 16, hardness: 0.6, smudge: { strength: 0.8, dryness: 0.1 } } },
+  { id: "default-eraser-soft",    name: "软橡皮", tool: "eraser",
+    args: { size: 32, hardness: 0.3, flow: 0.4, opacity: 0.6 } },
+];
+function specToBrush(spec) {
+  const b = makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args });
+  return b;
+}
+
 export function makeDefaultRack() {
-  const brushes = [
-    makeBrush({
-      name: "铅笔",
-      tool: "brush",
-      size: 8, hardness: 0.6,
-      flow: 0.5, flowPressureCurve: 1.0,    // 压力 → flow（user 要求 sketch 半透明压感）
-      opacity: 0.6,
-    }),
-    makeBrush({
-      name: "勾线",
-      tool: "brush",
-      size: 4, hardness: 1.0,
-      flow: 1.0,
-      opacity: 1.0,
-      sizePressureCurve: 1.5,               // 压力 → size taper
-      taperIn: 0.3, taperOut: 0.3,
-    }),
-    makeBrush({
-      name: "平涂",
-      tool: "brush",
-      size: 24, hardness: 1.0,
-      flow: 1.0,
-      opacity: 1.0,
-      sizePressureCurve: 0.0,               // 平涂不要压感
-    }),
-    makeBrush({
-      name: "软喷枪",
-      tool: "airbrush",
-      size: 40, hardness: 0.0,              // 纯软高斯
-      flow: 0.05,                           // 每 stamp 5% alpha，hover 累积
-      opacity: 1.0,
-      spacingKind: "time", spacingValue: 16,// 60fps 一 stamp
-    }),
-    makeBrush({
-      name: "涂抹",
-      tool: "smudge",
-      size: 16, hardness: 0.6,
-      smudge: { strength: 0.8, dryness: 0.1 },
-    }),
-    makeBrush({
-      name: "软橡皮",
-      tool: "eraser",
-      size: 32, hardness: 0.3,
-      flow: 0.4, opacity: 0.6,              // eraser 用 dst-out，flow/opacity 控擦力度
-    }),
-  ];
+  const brushes = DEFAULTS_SPEC.map(specToBrush);
   const activeByTool = {};
   for (const b of brushes) {
     if (!activeByTool[b.tool]) activeByTool[b.tool] = b.id;
   }
-  return {
-    version: RACK_VERSION,
-    brushes,
-    activeByTool,
-  };
+  return { version: RACK_VERSION, brushes, activeByTool };
+}
+
+// 给 IDB 已有 rack 补缺：遍历 DEFAULTS_SPEC，缺哪个 ID 就 push 一份。
+// 用户改过的 default brush 仍保留（id 已存在，跳过）。新版加新 default 自动出现。
+// 返回 true = 改动了，需要持久化。
+export function mergeMissingDefaults(rack) {
+  if (!rack || !Array.isArray(rack.brushes)) return false;
+  const ids = new Set(rack.brushes.map((b) => b.id));
+  let changed = false;
+  for (const spec of DEFAULTS_SPEC) {
+    if (!ids.has(spec.id)) {
+      rack.brushes.push(specToBrush(spec));
+      changed = true;
+    }
+  }
+  // activeByTool 缺工具的 → 用新默认填
+  if (!rack.activeByTool) { rack.activeByTool = {}; changed = true; }
+  for (const spec of DEFAULTS_SPEC) {
+    if (!rack.activeByTool[spec.tool]) {
+      rack.activeByTool[spec.tool] = spec.id;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 // 序列化/反序列化：直接 JSON.stringify/parse 就行（无 Blob/Canvas）。

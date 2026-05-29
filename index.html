@@ -338,6 +338,24 @@
       <button class="lasso-tool-btn" id="shapesAlignAxisBtn" type="button" title="直线 snap 水平/垂直">H/V</button>
     </div>
 
+    <!-- Palette 调色板小窗（v87）：256×256 内嵌混色画布 + 笔/涂/吸
+         浮动可拖；canvas 内容跟 doc 走（webpaint/state.json 持久化） -->
+    <div class="palette-window hidden" id="paletteWindow">
+      <div class="palette-head">
+        <span class="palette-title">调色板</span>
+        <button class="palette-close" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="palette-body">
+        <canvas class="palette-canvas" width="256" height="256"></canvas>
+      </div>
+      <div class="palette-tools">
+        <button class="palette-tool" data-palette-tool="brush" type="button" title="刷（用当前色）">笔</button>
+        <button class="palette-tool" data-palette-tool="smudge" type="button" title="涂抹">涂</button>
+        <button class="palette-tool" data-palette-tool="picker" type="button" title="吸到主画">吸</button>
+        <button class="palette-clear" type="button" title="清空">清</button>
+      </div>
+    </div>
+
     <!-- Brush rack sheet（v83）：底部弹出，选当前工具的 brush
          exclusive；任何 transient（pointerdown 画布 / lasso transform / 别的 panel 开）关掉 -->
     <div class="backdrop hidden" id="brushRackBackdrop"></div>
@@ -574,6 +592,9 @@
       </button>
       <button class="menu-item" id="menuReference" type="button" role="menuitem">
         <span class="menu-item-label">参考小窗…</span>
+      </button>
+      <button class="menu-item" id="menuPalette" type="button" role="menuitem">
+        <span class="menu-item-label">调色板小窗…</span>
       </button>
       <button class="menu-item" id="menuBrushSettings" type="button" role="menuitem">
         <span class="menu-item-label">笔刷平滑设置…</span>

@@ -239,20 +239,25 @@ body[data-input-touchscreen="1"] .tool-hand-conditional { display: none; }
   border-radius: 14px;
   box-shadow: var(--shadow);
   z-index: 9;            /* < top-bar 10 */
+  width: 52px;           /* 限死，防内部 slider 不支持 vertical-appearance 时撑宽 */
+  box-sizing: border-box;
 }
 .left-sidebar.hidden { display: none; }
 /* gallery 模式隐藏 */
 body[data-mode="gallery"] .left-sidebar { display: none; }
 
-/* 竖滑块 ——iPad Safari + Chrome + Firefox 都支持 -webkit-appearance: slider-vertical */
+/* 竖滑块 ——iPad Safari + Chrome 都支持 -webkit-appearance: slider-vertical */
 .left-sidebar-slider {
   -webkit-appearance: slider-vertical;
   appearance: slider-vertical;
   writing-mode: vertical-lr;
   direction: rtl;
   width: 28px;
+  max-width: 28px;       /* 防 Firefox / appearance 不支持时撑宽 */
   height: 120px;
   background: transparent;
+  padding: 0;
+  margin: 0;
 }
 .left-sidebar-label {
   font-size: 11px;
@@ -961,6 +966,59 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 }
 .brush-settings-row.brush-settings-row-full {
   grid-template-columns: 80px 1fr;
+}
+
+/* Palette 调色板小窗（v87）—— 256×256 浮动 mixer */
+.palette-window {
+  position: fixed;
+  right: max(env(safe-area-inset-right, 0px), 12px);
+  top: 80px;
+  width: 280px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  z-index: 11;
+  display: flex; flex-direction: column;
+}
+.palette-window.hidden { display: none; }
+.palette-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: move;
+  user-select: none;
+}
+.palette-title { font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+.palette-close {
+  font: inherit; font-size: 16px;
+  width: 24px; height: 24px;
+  background: transparent; color: var(--ink-soft);
+  border: none; border-radius: 4px; cursor: pointer;
+}
+.palette-body { padding: 8px; display: flex; justify-content: center; }
+.palette-canvas {
+  width: 256px; height: 256px;
+  border: 1px solid var(--line); border-radius: 4px;
+  touch-action: none;
+  cursor: crosshair;
+  background: #fff;
+}
+.palette-tools {
+  display: flex; gap: 4px;
+  padding: 6px 8px 8px;
+  justify-content: center;
+}
+.palette-tools button {
+  font: inherit; font-size: 12px;
+  padding: 4px 12px;
+  background: var(--bg-soft); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px;
+  cursor: pointer;
+}
+.palette-tools button:hover { filter: brightness(0.95); }
+.palette-tools button[aria-pressed="true"] {
+  background: var(--ink); color: var(--bg); border-color: var(--ink);
 }
 
 /* Sync gate ——— 锁屏 + 决策 sheet（见 docs/sync-design.md） */

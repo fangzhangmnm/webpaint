@@ -15,12 +15,13 @@ import { InputController, compressPixelSnap, applyPixelSnap } from "./input.js";
 import { BrushSettings } from "./brush.js";
 import {
   makeDefaultRack, findBrush, getActiveBrush, brushesByTool,
-  newBrushId, brushToJSON, brushFromJSON, DEFAULT_FOLDER,
+  newBrushId, brushToJSON, brushFromJSON, DEFAULT_FOLDER, mergeMissingDefaults,
 } from "./brushes.js";
 import { PANELS, registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
 import { getMeta, setMeta } from "./storage.js";
 import { UndoStack } from "./history.js";
 import { ReferenceWindow } from "./reference.js";
+import { PaletteWindow } from "./palette.js";
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   getCurrentSessionName, setCurrentSessionName,
@@ -102,6 +103,7 @@ const els = {
   liquifyStrength: document.getElementById("liquifyStrength"),
   liquifyStrengthVal: document.getElementById("liquifyStrengthVal"),
   menuReference: document.getElementById("menuReference"),
+  menuPalette: document.getElementById("menuPalette"),
   referencePanel: document.getElementById("referencePanel"),
   referencePanelHead: document.getElementById("referencePanelHead"),
   referencePanelClose: document.getElementById("referencePanelClose"),
@@ -252,6 +254,10 @@ async function loadBrushRack() {
   try {
     const stored = await getMeta(RACK_META_KEY);
     if (stored && Array.isArray(stored.brushes) && stored.brushes.length > 0) {
+      // 补缺 default brush（解 stale default 问题）；merge 只加缺的，不覆盖
+      if (mergeMissingDefaults(stored)) {
+        try { await setMeta(RACK_META_KEY, stored); } catch (_) {}
+      }
       return stored;
     }
   } catch (e) {
@@ -1984,7 +1990,7 @@ async function saveNow(opts = {}) {
   try {
     await saveSession(doc, _activeSessionName, {
       referenceImage: referenceWindow.getPersistBlob(),
-      webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates },
+      webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState() },
     });
     _docDirty = false;
     _docLastSavedAt = Date.now();
@@ -2059,6 +2065,10 @@ function adoptLoadedDoc(loaded, sessionName) {
   if (loaded._webpaintState?.color) {
     setColor(loaded._webpaintState.color);
   }
+  // 恢复调色板（v87 起）
+  if (loaded._webpaintState?.palette) {
+    try { paletteWindow.applySerializedState(loaded._webpaintState.palette); } catch (_) {}
+  }
   if (loaded._webpaintState?.toolStates && typeof loaded._webpaintState.toolStates === "object") {
     for (const t of Object.keys(state.toolStates)) {
       const saved = loaded._webpaintState.toolStates[t];
@@ -2099,7 +2109,7 @@ async function saveAndPush() {
     try {
       const ora = await encodeDocToOra(doc, {
         referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates },
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState() },
       });
       await pushSession(_activeSessionName, ora);
       setStatus(`已同步到云端：${_activeSessionName}`);
@@ -2199,7 +2209,7 @@ async function renameCurrentSession({ suggested, reason } = {}) {
     try {
       await saveSession(doc, trimmed, {
         referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates },
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState() },
       });
       if (oldName && oldName !== trimmed) {
         try { await removeSession(oldName); } catch {}
@@ -2543,6 +2553,19 @@ const referenceWindow = new ReferenceWindow({
   emptyHint: els.referenceEmpty,
   status: setStatus,
 });
+// ---- 调色板小窗（v87）----
+// 256×256 mixer canvas + 刷 / 涂 / 吸 3 工具。吸色 → 主画 setColor。
+// 画布内容跟 doc 走（webpaint/state.json 持久化，跟 reference 同模式）
+const paletteWindow = new PaletteWindow({
+  root: document.getElementById("paletteWindow"),
+  onColorSampled: (hex) => setColor(hex),
+  getCurrentColor: () => state.color,
+});
+els.menuPalette.addEventListener("click", () => {
+  paletteWindow.toggle();
+  els.menuPanel?.classList.add("hidden");
+});
+
 els.menuReference.addEventListener("click", () => {
   setMenuOpen(false);
   referenceWindow.open();
