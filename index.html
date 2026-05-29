@@ -302,7 +302,7 @@
       <!-- Row 2: 选区操作 / 变换控制 -->
       <div class="lasso-toolbar hidden" id="lassoToolbarRow2">
         <div class="lasso-section hidden" id="lassoSelectionActions">
-          <button class="lasso-tool-btn lasso-tool-confirm" id="lassoTransformBtn" type="button" title="变换 / 移动">变换</button>
+          <button class="lasso-tool-btn" id="lassoTransformBtn" type="button" title="变换 / 移动">变换</button>
           <button class="lasso-tool-btn" id="lassoFillBtn" type="button" title="用当前颜色填选区">填色</button>
           <button class="lasso-tool-btn" id="lassoClearBtn" type="button" title="清除选区内像素">清除</button>
           <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" title="反选">反选</button>
@@ -425,6 +425,13 @@
       </div>
       <div class="layers-list" id="layersList"><!-- rows rendered by JS --></div>
       <div class="layers-foot">
+        <button class="layers-foot-btn" id="layerImportPhotoBtn" type="button" title="导入照片为新图层">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="14" rx="2"/>
+            <circle cx="8" cy="10" r="1.5"/>
+            <polyline points="3 17 9 12 14 17 21 11"/>
+          </svg>
+        </button>
         <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建图层">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"/>
@@ -568,18 +575,31 @@
 
     <!-- 汉堡菜单：低频项收纳处。顺序见 user 2026-05-28 反馈 -->
     <div class="menu-panel hidden" id="menuPanel" role="menu">
+      <!-- v94 重组：清晰分组，操作 / 导入 / 导出 / 设置 / 调试 / 危险
+           user：「主菜单分导入，导出，调试等子菜单」
+           user：「压感 -> 颜色，不透明度 这些应该只在笔刷设置页出现」→ 删 -->
+      <div class="menu-section-label">文件</div>
       <button class="menu-item" id="menuGallery" type="button" role="menuitem">
         <span class="menu-item-label">图库</span>
       </button>
       <button class="menu-item" id="menuRename" type="button" role="menuitem">
         <span class="menu-item-label">重命名当前画作…</span>
       </button>
+      <button class="menu-item" id="menuFit" type="button" role="menuitem">
+        <span class="menu-item-label">画布居中 (0)</span>
+      </button>
+
+      <hr class="menu-sep" />
+      <div class="menu-section-label">导入</div>
       <button class="menu-item" id="menuImport" type="button" role="menuitem">
-        <span class="menu-item-label">导入文件</span>
+        <span class="menu-item-label">导入文件…</span>
       </button>
       <button class="menu-item" id="menuClipboardPaste" type="button" role="menuitem">
         <span class="menu-item-label">导入剪切板</span>
       </button>
+
+      <hr class="menu-sep" />
+      <div class="menu-section-label">导出</div>
       <button class="menu-item" id="menuExportPng" type="button" role="menuitem">
         <span class="menu-item-label">导出 PNG</span>
       </button>
@@ -595,21 +615,11 @@
       <button class="menu-item" id="menuClipboardCopy" type="button" role="menuitem">
         <span class="menu-item-label">导出到剪切板</span>
       </button>
+
       <hr class="menu-sep" />
-      <button class="menu-item" id="menuFit" type="button" role="menuitem">
-        <span class="menu-item-label">画布居中 (0)</span>
-      </button>
+      <div class="menu-section-label">设置</div>
       <button class="menu-item" id="menuReference" type="button" role="menuitem">
         <span class="menu-item-label">参考小窗…</span>
-      </button>
-      <button class="menu-item" id="menuPalette" type="button" role="menuitem">
-        <span class="menu-item-label">调色板小窗…</span>
-      </button>
-      <button class="menu-item" id="menuResetBrushRack" type="button" role="menuitem">
-        <span class="menu-item-label">重置笔架（删自定义）</span>
-      </button>
-      <button class="menu-item" id="menuForcePwaReset" type="button" role="menuitem">
-        <span class="menu-item-label">强制清缓存重启（PWA 卡老版本时）</span>
       </button>
       <button class="menu-item" id="menuBrushSettings" type="button" role="menuitem">
         <span class="menu-item-label">笔刷平滑设置…</span>
@@ -618,30 +628,36 @@
         <span class="menu-item-label">透明背景显示棋盘</span>
         <span class="menu-item-state" data-state-for="checkerboard">关</span>
       </button>
-      <hr class="menu-sep" />
-      <button class="menu-item" id="menuPressureSize" type="button" role="menuitemcheckbox" aria-pressed="true">
-        <span class="menu-item-label">压感 → 粗细</span>
-        <span class="menu-item-state" data-state-for="pressureSize">开</span>
-      </button>
-      <button class="menu-item" id="menuPressureOpacity" type="button" role="menuitemcheckbox" aria-pressed="true">
-        <span class="menu-item-label">压感 → 透明度</span>
-        <span class="menu-item-state" data-state-for="pressureOpacity">开</span>
-      </button>
       <button class="menu-item" id="menuLongPressPick" type="button" role="menuitemcheckbox" aria-pressed="false">
         <span class="menu-item-label">单指长按吸色</span>
         <span class="menu-item-state" data-state-for="longPressPick">关</span>
       </button>
-      <hr class="menu-sep" />
       <button class="menu-item" id="menuTheme" type="button" role="menuitem">
         <span class="menu-item-label">主题</span>
         <span class="menu-item-state" data-state-for="theme">跟随系统</span>
       </button>
+
+      <hr class="menu-sep" />
+      <div class="menu-section-label">调试</div>
+      <button class="menu-item" id="menuResetBrushRack" type="button" role="menuitem">
+        <span class="menu-item-label">重置笔架（删自定义）</span>
+      </button>
+      <button class="menu-item" id="menuForcePwaReset" type="button" role="menuitem">
+        <span class="menu-item-label">强制清缓存重启</span>
+      </button>
       <button class="menu-item" id="menuCheckUpdate" type="button" role="menuitem">
         <span class="menu-item-label">检测更新</span>
       </button>
+
+      <hr class="menu-sep" />
       <button class="menu-item menu-danger" id="menuClear" type="button" role="menuitem">
         <span class="menu-item-label">清空当前图层</span>
       </button>
+
+      <!-- 隐藏 stub：删了的菜单项 (压感 size / 压感 flow)，应在 brush settings 全屏 view 里调。
+           hide 但保留 id 让旧代码引用不崩 -->
+      <button id="menuPressureSize" type="button" hidden></button>
+      <button id="menuPressureOpacity" type="button" hidden></button>
     </div>
 
 

@@ -485,13 +485,22 @@ input[type=range] {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 20;
+  z-index: 30;     /* > lasso 25；user：「主菜单 zorder 应该在 lasso 等的菜单上面」 */
   padding: 6px;
-  /* iOS 流畅滚动 */
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
 .menu-panel.hidden { display: none; }
+.menu-section-label {
+  font-size: 10px;
+  color: var(--ink-soft);
+  padding: 6px 12px 2px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  user-select: none;
+  font-weight: 600;
+  opacity: 0.7;
+}
 .menu-item {
   width: 100%;
   display: flex;

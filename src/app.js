@@ -103,7 +103,6 @@ const els = {
   liquifyStrength: document.getElementById("liquifyStrength"),
   liquifyStrengthVal: document.getElementById("liquifyStrengthVal"),
   menuReference: document.getElementById("menuReference"),
-  menuPalette: document.getElementById("menuPalette"),
   menuResetBrushRack: document.getElementById("menuResetBrushRack"),
   menuForcePwaReset: document.getElementById("menuForcePwaReset"),
   referencePanel: document.getElementById("referencePanel"),
@@ -1509,7 +1508,13 @@ async function gateCloudSyncOnOpen(sessionName) {
     return;
   }
 
-  // 上次登录这次在线但 isSignedIn() false → token 过期 / silent acquire 失败
+  // 上次登录这次在线但 isSignedIn() false → 先 silent retry 一次确认；
+  // user：「老是提示 onedrive token 过期，但实际上可以正常拉取保存」
+  // → isSignedIn() 是 stale 状态，silent acquire 仍可能拿到 token
+  if (!isSignedIn()) {
+    try { await retrySilentSignIn(); } catch (_) {}
+  }
+  // 真的拿不到 token → 才弹 gate
   if (!isSignedIn()) {
     const choice = await lockSyncGate({
       title: "OneDrive 登录已过期",
@@ -2407,6 +2412,14 @@ els.menuImport.addEventListener("click", () => {
   els.oraFileInput.value = "";
   els.oraFileInput.click();
 });
+// 图层窗口里也加快捷导入照片（user：「图层窗口里应该有导入照片的选项」）
+const _layerImportBtn = document.getElementById("layerImportPhotoBtn");
+if (_layerImportBtn) {
+  _layerImportBtn.addEventListener("click", () => {
+    els.oraFileInput.value = "";
+    els.oraFileInput.click();
+  });
+}
 els.menuExportPng.addEventListener("click", async () => {
   setMenuOpen(false);
   try {
@@ -2622,10 +2635,7 @@ const paletteWindow = new PaletteWindow({
   onColorSampled: (hex) => setColor(hex),
   getCurrentColor: () => state.color,
 });
-els.menuPalette.addEventListener("click", () => {
-  paletteWindow.toggle();
-  els.menuPanel?.classList.add("hidden");
-});
+// 调色板小窗（v87 → v94 撤掉 menu 入口）：UI 已删，code 留 P2（backlog）
 
 els.menuForcePwaReset.addEventListener("click", async () => {
   els.menuPanel?.classList.add("hidden");
@@ -3470,6 +3480,7 @@ async function pushBrushRackIfSignedIn() {
           const pulled = await pullBrushRack();
           if (pulled?.rack) {
             _brushRack = pulled.rack;
+            mergeMissingDefaults(_brushRack);   // 防云端空 rack 把本地清空
             await persistBrushRack();
             applyToolState(state.tool);
             setStatus("已拉云端笔架");
@@ -3500,6 +3511,7 @@ async function checkBrushRackCloud() {
     const pulled = await pullBrushRack();
     if (pulled?.rack) {
       _brushRack = pulled.rack;
+      mergeMissingDefaults(_brushRack);   // 防云端空 rack 把本地清空
       await persistBrushRack();
       applyToolState(state.tool);
       setStatus("笔架已从云端同步");
@@ -3509,7 +3521,37 @@ async function checkBrushRackCloud() {
   }
 }
 function _renderRackSheet() {
+  // 防护：rack 为空时显「重置笔架」入口而不是空白
+  if (!_brushRack || !_brushRack.brushes || _brushRack.brushes.length === 0) {
+    _rackEls.folders.innerHTML = "";
+    _rackEls.grid.innerHTML = `<div style="padding:20px;text-align:center;color:var(--ink-soft);">
+      笔架是空的。<br><br>
+      <button class="brush-rack-action" id="_rackEmptyResetBtn">恢复默认笔架（8 个）</button>
+    </div>`;
+    const btn = document.getElementById("_rackEmptyResetBtn");
+    if (btn) btn.addEventListener("click", () => {
+      _brushRack = makeDefaultRack();
+      for (const t of Object.keys(state.toolStates)) {
+        state.toolStates[t].activeBrushId = null;
+        Object.assign(state.toolStates[t], defaultToolStateFor(t));
+      }
+      _rackDirty = true;
+      persistBrushRack();
+      applyToolState(state.tool);
+      _renderRackSheet();
+      setStatus(`已恢复默认笔架（${_brushRack.brushes.length} 个）`, true);
+    });
+    return;
+  }
   const brushes = brushesByTool(_brushRack, _rackCurrentTool);
+  // 当前工具没 brush 也提示
+  if (brushes.length === 0) {
+    _rackEls.folders.innerHTML = "";
+    _rackEls.grid.innerHTML = `<div style="padding:20px;text-align:center;color:var(--ink-soft);">
+      此工具暂无笔刷。点「+ 新建」加一个。
+    </div>`;
+    return;
+  }
   // 收集 folder 列表
   const folderSet = new Set();
   for (const b of brushes) folderSet.add(b.folder || DEFAULT_FOLDER);

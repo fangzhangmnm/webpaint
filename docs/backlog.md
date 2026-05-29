@@ -142,6 +142,12 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - PS 用了几十年的标准做法
 - 兴趣不大，但留在这里参考
 
+### 调色板小窗 (palette mixer)
+- v87 实装 256×256 浮动 mixer 窗 → v94 撤掉 UI（user 觉得不值得自己做）
+- user：「需要同样的笔刷混色。你觉得麻烦，那还不如就在画布上调色」
+- code 在 src/palette.js 留着；HTML / 菜单入口 / CSS 已删
+- 重启时机：如果做了「找颜色辅助 UI 近色搜索」，可考虑跟 mixer 合并
+
 ### Lineart 重新着色
 - 详 docs/artist-priorities.md Tier 2 #8b
 - 把已有描线颜色换成另一色（红描线 → 黑 / 棕）
