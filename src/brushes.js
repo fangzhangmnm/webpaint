@@ -112,6 +112,13 @@ const DEFAULTS_SPEC = [
     args: { size: 16, hardness: 0.6, smudge: { strength: 0.8, dryness: 0.1 } } },
   { id: "default-eraser-soft",    name: "软橡皮", tool: "eraser",
     args: { size: 32, hardness: 0.3, flow: 0.4, opacity: 0.6 } },
+  // shapes：line subtool 走 BrushEngine stamp，吃 hardness / shape / spacing
+  // rect / ellipse 仍走 fill（不 stamp）
+  { id: "default-shapes-line",    name: "细线",   tool: "shapes",
+    args: { size: 4, hardness: 1.0, flow: 1.0, opacity: 1.0,
+            sizePressureCurve: 0, flowPressureCurve: 0,
+            taperIn: 0, taperOut: 0,                       // 直线不要 taper
+            spacingValue: 0.06 } },                        // 紧凑 stamp 让线连续
 ];
 function specToBrush(spec) {
   const b = makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args });

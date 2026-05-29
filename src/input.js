@@ -703,12 +703,25 @@ export class InputController {
     const settings = this.getBrushSettings();
     const before = layer.snapshot();
     try {
-      const bbox = this.shapes.end({
-        color: (settings && settings.color) || "#000",
-        size: (settings && settings.size) || 4,
-        selection: this.doc.selection,
-      });
-      if (!bbox) return;
+      const subtool = this.shapes.getSubtool();
+      // line：复用 BrushEngine 沿线 stamp，吃 hardness / shape / spacing / 未来纹理
+      // （user：「线条预设应该也有硬度...直接走复用笔刷库里面的绘制笔刷」）
+      // rect / ellipse：仍走 fill（实心形状），不用 stamp
+      if (subtool === "line" && this.shapes.getState()) {
+        const st = this.shapes.getState();
+        // Pressure = 1.0（直线没压感），taperIn 跟 preset 走；想纯硬线就把 preset taperIn=0
+        this.brush.beginStroke(layer, settings, st.x0, st.y0, 1.0, "brush");
+        this.brush.extendStroke(st.x1, st.y1, 1.0);
+        this.brush.endStroke();
+        this.shapes.resetState();
+      } else {
+        const bbox = this.shapes.end({
+          color: (settings && settings.color) || "#000",
+          size: (settings && settings.size) || 4,
+          selection: this.doc.selection,
+        });
+        if (!bbox) return;
+      }
       const after = layer.snapshot();
       if (this.history) {
         const entry = {

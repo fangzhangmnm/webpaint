@@ -105,6 +105,8 @@ export class ShapesEngine {
   getPreview() {
     return this._state ? { subtool: this._subtool, ...this._state } : null;
   }
+  getState() { return this._state; }
+  resetState() { this._state = null; }
 
   // 受 doc.selection 限制（user 要求：直线吃选区）
   _maybeClipSelection(ctx, layer, selection) {
