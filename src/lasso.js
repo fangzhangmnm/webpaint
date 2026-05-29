@@ -372,6 +372,19 @@ export class LassoEngine {
       f.meshN = 2;
       f._renderCache = null;
     }
+    // v111: 切到低自由度时把 mesh 投到对应基底，避免 perspective→free 拖手柄异常
+    // (user：「perspective → free, uniform 时拖拽行为异常」根因 = mesh 还在 perspective 形态)
+    if (f.meshN === 2) {
+      const fromDistort = f.mode === "distort";
+      const fromFree    = f.mode === "free";
+      if (mode === "free" && fromDistort) {
+        f.mesh = _projectMeshToParallelogram(f.mesh);   // distort → free: 4 角对偶平均成平行四边形
+        f._renderCache = null;
+      } else if (mode === "uniform" && (fromDistort || fromFree)) {
+        f.mesh = _projectMeshToUniformRect(f.mesh, f.uniformAspect);  // → 矩形 + 锁纵横比
+        f._renderCache = null;
+      }
+    }
     f.mode = mode;
     this.onChange();
   }
@@ -1144,6 +1157,56 @@ function downsampleMesh4to2(m) {
   return [
     [{ ...m[0][0] }, { ...m[0][3] }],
     [{ ...m[3][0] }, { ...m[3][3] }],
+  ];
+}
+
+// v111: distort (任意 quad) → free (parallelogram)。对 4 角对偶平均：
+//   centroid = avg of 4 corners
+//   halfU = avg of 2 horizontal half-edges  (右半 - 左半)
+//   halfV = avg of 2 vertical half-edges    (下半 - 上半)
+//   新 4 角 = centroid ± halfU ± halfV → 平行四边形
+function _projectMeshToParallelogram(mesh) {
+  const tl = mesh[0][0], tr = mesh[0][1];
+  const bl = mesh[1][0], br = mesh[1][1];
+  const cx = (tl.x + tr.x + bl.x + br.x) / 4;
+  const cy = (tl.y + tr.y + bl.y + br.y) / 4;
+  const hUx = ((tr.x - tl.x) + (br.x - bl.x)) / 4;
+  const hUy = ((tr.y - tl.y) + (br.y - bl.y)) / 4;
+  const hVx = ((bl.x - tl.x) + (br.x - tr.x)) / 4;
+  const hVy = ((bl.y - tl.y) + (br.y - tr.y)) / 4;
+  return [
+    [{ x: cx - hUx - hVx, y: cy - hUy - hVy },
+     { x: cx + hUx - hVx, y: cy + hUy - hVy }],
+    [{ x: cx - hUx + hVx, y: cy - hUy + hVy },
+     { x: cx + hUx + hVx, y: cy + hUy + hVy }],
+  ];
+}
+
+// v111: parallelogram → rectangle 锁纵横比（uniform 模式）。
+// u 方向 = 4 角的平均水平向量；v 方向 = u 转 90°；u 长度按 u 算，v 长度 = u 长度 / aspect (保留 v 投影符号)
+function _projectMeshToUniformRect(mesh, aspect) {
+  const tl = mesh[0][0], tr = mesh[0][1];
+  const bl = mesh[1][0], br = mesh[1][1];
+  const cx = (tl.x + tr.x + bl.x + br.x) / 4;
+  const cy = (tl.y + tr.y + bl.y + br.y) / 4;
+  const ux = ((tr.x - tl.x) + (br.x - bl.x)) / 2;
+  const uy = ((tr.y - tl.y) + (br.y - bl.y)) / 2;
+  const uLen = Math.hypot(ux, uy);
+  const uDirX = uLen > 0.01 ? ux / uLen : 1;
+  const uDirY = uLen > 0.01 ? uy / uLen : 0;
+  // perpendicular for v（CW rotation: (x,y) → (-y, x)）
+  const vDirX = -uDirY, vDirY = uDirX;
+  // v 投影符号（保留方向 ↑/↓）
+  const vx = ((bl.x - tl.x) + (br.x - tr.x)) / 2;
+  const vy = ((bl.y - tl.y) + (br.y - tr.y)) / 2;
+  const vProj = vx * vDirX + vy * vDirY;
+  const halfU = uLen / 2;
+  const halfV = (uLen / Math.max(0.01, aspect)) / 2 * (vProj >= 0 ? 1 : -1);
+  return [
+    [{ x: cx - halfU * uDirX - halfV * vDirX, y: cy - halfU * uDirY - halfV * vDirY },
+     { x: cx + halfU * uDirX - halfV * vDirX, y: cy + halfU * uDirY - halfV * vDirY }],
+    [{ x: cx - halfU * uDirX + halfV * vDirX, y: cy - halfU * uDirY + halfV * vDirY },
+     { x: cx + halfU * uDirX + halfV * vDirX, y: cy + halfU * uDirY + halfV * vDirY }],
   ];
 }
 

@@ -1095,6 +1095,14 @@ export class InputController {
       this._endGesture();
     }
   }
+
+  // v111: blanket reset 用于 iPad PWA 系统手势抢断 / 双击误触 window drag 后
+  //       app.js 全局监听 window pointercancel / visibilitychange / blur 都调它
+  cancelAllPointers() {
+    const all = [...this.pointers.keys()];
+    for (const pid of all) this._discardPointer(pid);
+    this._maybeEndGesture();
+  }
 }
 
 // ---- Pixel snapshot helpers（exported；handler 里 layer/raster 类 op 都用这套）----

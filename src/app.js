@@ -458,6 +458,16 @@ const input = new InputController(board, doc, {
   history,
 });
 
+// v111: iPad PWA 双击误触 window 拖动 → finger state 抽风修
+// user：「有时双击时还是会错误拖动 ipad window 然后 finger state 抽风，按钮都按不了」
+// iPad 系统手势抢断 canvas pointer 后偶尔不发 pointercancel 到 canvas，map 里残留 ghost。
+// 全局 capture-phase 监听兜底：window 级 cancel / app 隐藏 / 窗口失焦 都 cancelAllPointers
+window.addEventListener("pointercancel", () => input.cancelAllPointers(), true);
+window.addEventListener("blur", () => input.cancelAllPointers());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") input.cancelAllPointers();
+});
+
 // 笔触 buffer live overlay：board 每帧问 brush 要，layer 之上 composite × s.opacity
 // 预览（实际像素在 endStroke 才烧进 layer）。
 board.setOverlayProvider(() => input.brush.getLiveOverlay());
@@ -3218,7 +3228,37 @@ async function importImageAsLayer(file) {
   updateSaveStatus();
   // 触发 wp:histchange 让保存状态同步
   window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
+
+  // v111: 自动 lift 全图入 transform（user：「导入图片到图层之后自动全选图片进入 transform 模式」）
+  try {
+    const sel = _makeFullLayerSelection(layer);
+    if (sel) {
+      doc.selection = sel;
+      setTool("lasso");
+      const ok = input.lasso.liftSelectionForTransform(layer);
+      if (ok) {
+        input.lasso.setMode("free");
+        updateLassoToolbar();
+        board.invalidateAll();
+        setStatus(`已导入：${file.name}（拖角变换 → 应用 / 取消）`);
+        return;
+      }
+    }
+  } catch (e) { console.warn("[import auto-transform]", e); }
   setStatus(`已导入为新图层：${file.name}`);
+}
+
+// v111: 给 layer 当前 bbox 做一个全白 mask 当 selection（占满整个 layer 像素）
+function _makeFullLayerSelection(layer) {
+  const w = layer.bboxW, h = layer.bboxH;
+  if (w <= 0 || h <= 0) return null;
+  const mask = (typeof OffscreenCanvas !== "undefined")
+    ? new OffscreenCanvas(w, h)
+    : (() => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; })();
+  const mctx = mask.getContext("2d");
+  mctx.fillStyle = "#fff";
+  mctx.fillRect(0, 0, w, h);
+  return { bboxX: layer.bboxX, bboxY: layer.bboxY, bboxW: w, bboxH: h, maskCanvas: mask };
 }
 
 // ---- 图库 全屏（v50 重做：无返回键、底栏 IDB 占用 + 清扫、加号 popup、云图标 popup） ----
