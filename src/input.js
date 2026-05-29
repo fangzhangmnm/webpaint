@@ -100,9 +100,22 @@ export class InputController {
         refsLayer: (e, id) => e.layerId === id,
       });
       // 套索 transform commit 是 raster snap：lift + transform + commit 整体作为单步 undo
+      // v119: commit 时清了 selection，undo 时把它恢复回来
       this.history.registerHandler("lasso", {
-        undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
-        redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board),
+        undo: (e) => {
+          applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board);
+          if (e.prevSelection !== undefined) {
+            this.doc.selection = e.prevSelection;
+            this.board.invalidateAll();
+          }
+        },
+        redo: (e) => {
+          applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board);
+          if (e.prevSelection !== undefined) {
+            this.doc.selection = null;       // redo 后再清
+            this.board.invalidateAll();
+          }
+        },
         refsLayer: (e, id) => e.layerId === id,
       });
       // 选区变化（lasso 圈 / 取消选区 / 反选 等）也进 undo，但不动像素

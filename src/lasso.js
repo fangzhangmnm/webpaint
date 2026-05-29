@@ -510,6 +510,10 @@ export class LassoEngine {
     }
 
     const after = layer.snapshot();
+    // v119: 变换应用后自动清选区 (user：「变换应用之后应该自动清楚选区」)
+    // 把清前 selection 记到 entry 里，undo 时可恢复
+    const prevSelection = this.doc?.selection || null;
+    if (this.doc) this.doc.selection = null;
     const entry = {
       type: "lasso",
       layerId: layer.id,
@@ -517,6 +521,7 @@ export class LassoEngine {
       after,
       beforeBlob: null,
       afterBlob: null,
+      prevSelection,                          // undo 时还原
     };
     this._floating = null;
     this._state = "idle";
@@ -630,8 +635,9 @@ export class LassoEngine {
     const f = this._floating;
     // 保 finger-handle 偏移：corner 的新位置 = 原位置 + (drag delta)，而不是直接 = finger 位置
     const d = this._drag;
-    const targetX = meshSnap[row][col].x + (x - d.startX);
-    const targetY = meshSnap[row][col].y + (y - d.startY);
+    // v119: 改 let（uniform mode 会重算到对角线上）
+    let targetX = meshSnap[row][col].x + (x - d.startX);
+    let targetY = meshSnap[row][col].y + (y - d.startY);
     if (f.mode === "distort") {
       f.mesh[row][col].x = targetX;
       f.mesh[row][col].y = targetY;
@@ -695,9 +701,13 @@ export class LassoEngine {
     let lenAx = (dragVec.x * M22 - dragVec.y * M12) / det;
     let lenAy = (-dragVec.x * M21 + dragVec.y * M11) / det;
     // uniform 模式：把 finger 沿"原对角方向"投影，等比例缩放两轴。
-    // v118 bug fix (user：「等比的 math 还是错了」)：之前乘了 αx / αy 把 lenAy 符号搞反，
-    // 导致非 TL 角拖时 BL（anchor）会飞。free 的 αx/αy 是 2×2 解的符号约定，
-    // 不能直接套到 uniform。uniform 只需要 scale 因子（带符号自然处理 anchor 翻转）。
+    // v118 bug fix：去掉 αx / αy 多乘（free 的 2×2 解符号约定不能套到 uniform）。
+    // v119 bug fix (user：「uniform 还是不对」)：旋转过的矩形拖 corner 时，
+    //   老代码用 finger 位置当 target，但 finger 偏对角的分量会让 origin/anchor 算偏。
+    //   修：把 target 也投到 anchor + scale×Dvec 上（严格沿对角线缩放）。
+    //   验证：45° 旋转矩形拖 TR 到 (14.14, 14.14)，scale = 1.5
+    //         老 target=(14.14,14.14) → TL=(3.54,3.54) ❌ anchor 跟着歪
+    //         新 target=(14.14, 7.07) → TL=(3.54,-3.54) ✓ anchor 严格不动
     if (f.mode === "uniform") {
       const origCorner = meshSnap[row][col];
       const Dvec = sub(origCorner, anchor);       // 原对角向量
@@ -707,8 +717,11 @@ export class LassoEngine {
         const scale = (fingerFromAnchor.x * Dvec.x + fingerFromAnchor.y * Dvec.y) / Dlen2;
         const origLenAx = Math.hypot(origAx.x, origAx.y);
         const origLenAy = Math.hypot(origAy.x, origAy.y);
-        lenAx = scale * origLenAx;          // 不乘 αx
-        lenAy = scale * origLenAy;          // 不乘 αy
+        lenAx = scale * origLenAx;
+        lenAy = scale * origLenAy;
+        // 把 target 投到对角线上（严格 uniform，忽略 finger 偏对角的分量）
+        targetX = anchor.x + scale * Dvec.x;
+        targetY = anchor.y + scale * Dvec.y;
       }
     }
     const newAx = { x: axU.x * lenAx, y: axU.y * lenAx };
