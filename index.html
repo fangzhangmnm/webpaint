@@ -357,8 +357,7 @@
     </div>
 
     <!-- Brush rack sheet（v83）：底部弹出，选当前工具的 brush
-         exclusive；任何 transient（pointerdown 画布 / lasso transform / 别的 panel 开）关掉 -->
-    <div class="backdrop hidden" id="brushRackBackdrop"></div>
+         exclusive；tap 画布关（不要 backdrop，语义是 drawer 不是 modal） -->
     <div class="brush-rack-sheet hidden" id="brushRackSheet" role="dialog" aria-label="笔架">
       <div class="brush-rack-head">
         <span id="brushRackTitle">笔架 · 笔刷</span>

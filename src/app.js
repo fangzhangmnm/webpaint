@@ -2585,11 +2585,12 @@ els.menuResetBrushRack.addEventListener("click", async () => {
   }
   await persistBrushRack();
   applyToolState(state.tool);
-  // 触发关 sheet 时的推云路径
+  // 若 rack sheet 当前开着 → 强制刷一遍
+  if (RACK_PANEL_BY_TOOL[state.tool] === getCurrentExclusive()) _renderRackSheet();
   _rackDirty = true;
   if (isSignedIn()) pushBrushRackIfSignedIn();
   _rackDirty = false;
-  setStatus("笔架已重置");
+  setStatus(`笔架已重置（${_brushRack.brushes.length} 个 brush）`, true);
 });
 
 els.menuReference.addEventListener("click", () => {
@@ -3322,7 +3323,6 @@ window.addEventListener("offline", () => { updateCloudAuthUI(); });
 // ============ Brush rack sheet + 设置 view（v83）============
 
 const _rackEls = {
-  backdrop: document.getElementById("brushRackBackdrop"),
   sheet: document.getElementById("brushRackSheet"),
   title: document.getElementById("brushRackTitle"),
   close: document.getElementById("brushRackClose"),
@@ -3351,11 +3351,9 @@ function _showRackSheet(tool) {
   _rackCurrentTool = tool;
   _rackEls.title.textContent = `笔架 · ${TOOL_LABEL[tool] || tool}`;
   _renderRackSheet();
-  _rackEls.backdrop.classList.remove("hidden");
   _rackEls.sheet.classList.remove("hidden");
 }
 function _hideRackSheet() {
-  _rackEls.backdrop.classList.add("hidden");
   _rackEls.sheet.classList.add("hidden");
   if (_rackDirty) {
     persistBrushRack();           // 同步 IDB
@@ -3506,7 +3504,6 @@ for (const tool of Object.keys(RACK_PANEL_BY_TOOL)) {
   });
 }
 _rackEls.close.addEventListener("click", () => closeExclusive());
-_rackEls.backdrop.addEventListener("click", () => closeExclusive());
 _rackEls.newBtn.addEventListener("click", () => {
   // 在当前 tool + folder 下新建空白 brush，进设置 view
   const newB = {
