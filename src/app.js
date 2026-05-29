@@ -2522,6 +2522,20 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => {
   if (_docDirty && !_docSaving) saveNow({ implicit: true });
 });
+// v115: Ctrl+Shift+R / 关 tab / 浏览器返回 前弹挽留 + 偷偷本地备份
+// (user：「可以弹挽留对话框，应该弹」+「挽留的时候偷偷本地备份」)
+// 1. beforeunload 是唯一能 block 浏览器的钩子；对话框内容浏览器自管
+// 2. dialog 弹出时浏览器暂停 UI 但 JS async 还在跑 → 偷偷起 saveNow，user 看 dialog 时
+//    后台 IDB transaction 大概率能跑完；user 选「留下」→ 成果保住，选「离开」→
+//    至少有 dialog 那一两秒救了
+window.addEventListener("beforeunload", (e) => {
+  if (_docDirty && !_docSaving) {
+    e.preventDefault();
+    e.returnValue = "";
+    // 偷存（implicit 只写 IDB 不推云）；不 await 让 dialog 立刻起
+    saveNow({ implicit: true }).catch(() => {});
+  }
+});
 
 // 菜单：保存 / 分享 / 导出
 function stampNow() {
