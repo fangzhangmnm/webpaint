@@ -206,6 +206,13 @@ export class Board {
   setLassoProvider(fn) {
     this._lassoProvider = fn;
   }
+  // v110: 给某 layer 在 board 渲染时套 ctx.filter（颜色调整 live preview）
+  // (layerId, filterStr) 启动；(null, null) 关
+  setActiveLayerFilter(layerId, filterStr) {
+    this._activeFilterLayerId = layerId;
+    this._activeFilterStr = filterStr;
+    this.invalidateAll();
+  }
 
   // 复用 erase 临时合成 canvas（同 doc 尺寸；改了重新分配）
   _getEraseComposite(w, h) {
@@ -286,11 +293,15 @@ export class Board {
   // 到 **doc 坐标系**（doc (0,0) = ctx origin，doc (W,H) = (W,H) in ctx）。
   // 所以这里 drawImage 的 dest 直接用 layer.bboxX/Y/W/H（doc 坐标）。
   _drawLayerWithOverlay(ctx, layer, overlay) {
+    // v110: 颜色调整 live preview —— 给指定 layer 在 drawImage 时套 ctx.filter
+    const tempFilter = (this._activeFilterLayerId === layer.id) ? this._activeFilterStr : null;
     if (!overlay || overlay.mode !== "erase") {
+      if (tempFilter) ctx.filter = tempFilter;
       ctx.drawImage(
         layer.canvas, 0, 0, layer.bboxW, layer.bboxH,
         layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH,
       );
+      if (tempFilter) ctx.filter = "none";
       if (overlay) {
         const prevA = ctx.globalAlpha;
         ctx.globalAlpha = ctx.globalAlpha * overlay.opacity;

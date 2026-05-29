@@ -238,6 +238,12 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 /* hand 工具：触屏设备双指 pan 已足够，不显示 */
 body[data-input-touchscreen="1"] .tool-hand-conditional { display: none; }
 
+/* v110: smudge / shapes engine 待实装；按钮灰 + 不响应 click。setTool 会先弹状态条 */
+.tool[data-tool="smudge"], .tool[data-tool="shapes"] {
+  opacity: 0.4;
+  filter: grayscale(0.6);
+}
+
 /* 左侧栏 (drawing 时常驻) */
 .left-sidebar {
   position: fixed;
@@ -1071,6 +1077,143 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 .brush-settings-row.brush-settings-row-full {
   grid-template-columns: 80px 1fr;
 }
+
+/* v110 重采样对话框 */
+.resample-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 50;
+}
+.resample-backdrop.hidden { display: none; }
+.resample-sheet {
+  position: fixed; z-index: 51;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(360px, calc(100% - 32px));
+  background: var(--bg);
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.resample-sheet.hidden { display: none; }
+.resample-head {
+  padding: 12px 16px; font-weight: 600;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+.resample-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.resample-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.resample-row > label { min-width: 60px; color: var(--ink-soft); }
+.resample-row > input[type="number"], .resample-row > select {
+  flex: 1;
+  font: inherit; padding: 4px 8px;
+  background: var(--bg-soft); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px;
+}
+.resample-row-link > label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.resample-foot {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+.resample-foot > button {
+  font: inherit; font-size: 13px;
+  padding: 6px 14px;
+  background: var(--bg-soft); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px;
+  cursor: pointer;
+}
+.resample-foot > .primary {
+  background: var(--accent, #4c8bf5); color: #fff;
+  border-color: var(--accent, #4c8bf5); font-weight: 600;
+}
+
+/* v110 颜色调整面板 (float)；adjust-panel + foot */
+.adjust-panel {
+  position: fixed;
+  z-index: 11;
+  width: 280px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column;
+}
+.adjust-panel.hidden { display: none; }
+.adjust-panel-foot {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.adjust-panel-foot > button {
+  font: inherit; font-size: 12px;
+  padding: 4px 12px;
+  background: var(--bg-soft); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px;
+  cursor: pointer;
+}
+.adjust-panel-foot > .primary {
+  background: var(--accent, #4c8bf5); color: #fff;
+  border-color: var(--accent, #4c8bf5); font-weight: 600;
+}
+
+/* v110 自由裁切 overlay：全屏覆盖，rect+handles 在屏幕坐标 */
+.crop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 24;                /* < crop-toolbar 25，< brush-rack 30 */
+  touch-action: none;
+  /* 外圈 dim：用 box-shadow 大边框模拟（rect 自己挖洞） */
+}
+.crop-overlay.hidden { display: none; }
+.crop-rect {
+  position: absolute;
+  border: 2px dashed #fff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5),
+              0 0 0 1px rgba(0, 0, 0, 0.6) inset;
+  box-sizing: border-box;
+  cursor: move;
+}
+.crop-handle {
+  position: absolute;
+  width: 14px; height: 14px;
+  background: #fff;
+  border: 1px solid #000;
+  border-radius: 2px;
+}
+.crop-handle[data-handle="nw"] { top: -8px; left: -8px;  cursor: nwse-resize; }
+.crop-handle[data-handle="n"]  { top: -8px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.crop-handle[data-handle="ne"] { top: -8px; right: -8px; cursor: nesw-resize; }
+.crop-handle[data-handle="e"]  { top: 50%; right: -8px; transform: translateY(-50%); cursor: ew-resize; }
+.crop-handle[data-handle="se"] { bottom: -8px; right: -8px; cursor: nwse-resize; }
+.crop-handle[data-handle="s"]  { bottom: -8px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.crop-handle[data-handle="sw"] { bottom: -8px; left: -8px; cursor: nesw-resize; }
+.crop-handle[data-handle="w"]  { top: 50%; left: -8px; transform: translateY(-50%); cursor: ew-resize; }
+
+/* v110 自由裁切 toolbar (顶栏下方居中) */
+.crop-toolbar {
+  position: fixed;
+  top: 56px; left: 50%; transform: translateX(-50%);
+  z-index: 25;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+.crop-toolbar.hidden { display: none; }
+.crop-toolbar-label { color: var(--ink-soft); }
+.crop-toolbar-sep { color: var(--line); }
+.crop-toolbar-btn {
+  font: inherit; font-size: 12px;
+  padding: 4px 10px;
+  background: var(--bg-soft); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px;
+  cursor: pointer;
+}
+.crop-toolbar-cancel { color: #dc2626; }
 
 /* v104 size 滑块 popup（v109 zoom-aware + viewport crop）*/
 .size-popup {

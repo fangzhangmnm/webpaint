@@ -325,6 +325,135 @@ export class PaintDoc {
     if (!L || !snap) return;
     L.restoreFromSnapshot(snap);
   }
+
+  // v110: doc 整状态 snapshot（给 crop / resample 等 doc-level transform 的 undo 用）
+  // 比单层 snapshot 重得多——含每层 imageData + bbox + 元信息 + selection mask 副本
+  snapshotAll() {
+    return {
+      width: this.width,
+      height: this.height,
+      activeIndex: this.activeIndex,
+      referenceLayerId: this.referenceLayerId,
+      selection: _cloneSelection(this.selection),
+      layers: this.layers.map((L) => ({
+        id: L.id,
+        name: L.name,
+        visible: L.visible,
+        opacity: L.opacity,
+        mode: L.mode,
+        clippingMask: L.clippingMask,
+        snap: L.snapshot(),
+      })),
+    };
+  }
+  restoreSnapshotAll(snap) {
+    if (!snap) return;
+    this.width = snap.width;
+    this.height = snap.height;
+    this.activeIndex = snap.activeIndex;
+    this.referenceLayerId = snap.referenceLayerId;
+    this.selection = _cloneSelection(snap.selection);
+    this.layers = snap.layers.map((s) => {
+      const L = new Layer({ width: snap.width, height: snap.height, name: s.name, empty: true });
+      L.id = s.id;
+      L.visible = s.visible;
+      L.opacity = s.opacity;
+      L.mode = s.mode;
+      L.clippingMask = s.clippingMask;
+      L.docW = snap.width;
+      L.docH = snap.height;
+      L.restoreFromSnapshot(s.snap);
+      return L;
+    });
+  }
+
+  // v110: 裁切 doc 到 rect（doc 坐标 {x, y, w, h}）。各 layer bbox 偏移 -rect.x/y；
+  // 像素数据不裁（layer canvas 仍是原大小，bbox 偏到 doc 外部分自然不渲染）。
+  // 想真正释放裁外像素 → 后续 layer realloc + clip。这版先简单做。
+  cropTo(rect) {
+    const dx = rect.x | 0, dy = rect.y | 0, nw = Math.max(1, rect.w | 0), nh = Math.max(1, rect.h | 0);
+    for (const L of this.layers) {
+      L.bboxX -= dx;
+      L.bboxY -= dy;
+      L.docW = nw;
+      L.docH = nh;
+    }
+    if (this.selection) {
+      this.selection.bboxX -= dx;
+      this.selection.bboxY -= dy;
+      this.selection._chains = null;
+      this.selection._outline = null;
+    }
+    this.width = nw;
+    this.height = nh;
+  }
+
+  // v110: 重采样 doc 到 newW × newH。mode: "nearest" | "bilinear" | "bicubic"
+  // 各 layer canvas 重画 + bbox 缩放；selection mask 同步缩放
+  resampleTo(newW, newH, mode = "bilinear") {
+    const nw = Math.max(1, newW | 0);
+    const nh = Math.max(1, newH | 0);
+    const sx = nw / this.width;
+    const sy = nh / this.height;
+    const smooth = mode !== "nearest";
+    const quality = mode === "bicubic" ? "high" : "low";
+    for (const L of this.layers) {
+      L.docW = nw;
+      L.docH = nh;
+      if (L.bboxW <= 0 || L.bboxH <= 0) continue;
+      const ox = L.canvas;
+      const oW = L.bboxW;
+      const oH = L.bboxH;
+      const nbw = Math.max(1, Math.round(oW * sx));
+      const nbh = Math.max(1, Math.round(oH * sy));
+      const nbx = Math.round(L.bboxX * sx);
+      const nby = Math.round(L.bboxY * sy);
+      const nc = makeBitmap(nbw, nbh);
+      const nctx = nc.getContext("2d", { willReadFrequently: false });
+      nctx.imageSmoothingEnabled = smooth;
+      nctx.imageSmoothingQuality = quality;
+      nctx.drawImage(ox, 0, 0, oW, oH, 0, 0, nbw, nbh);
+      L.canvas = nc;
+      L.ctx = nctx;
+      L.bboxX = nbx;
+      L.bboxY = nby;
+      L.bboxW = nbw;
+      L.bboxH = nbh;
+    }
+    if (this.selection) {
+      const oW = this.selection.bboxW;
+      const oH = this.selection.bboxH;
+      const nbw = Math.max(1, Math.round(oW * sx));
+      const nbh = Math.max(1, Math.round(oH * sy));
+      const nbx = Math.round(this.selection.bboxX * sx);
+      const nby = Math.round(this.selection.bboxY * sy);
+      const m = document.createElement("canvas");
+      m.width = nbw; m.height = nbh;
+      const mctx = m.getContext("2d");
+      mctx.imageSmoothingEnabled = smooth;
+      mctx.imageSmoothingQuality = quality;
+      mctx.drawImage(this.selection.maskCanvas, 0, 0, oW, oH, 0, 0, nbw, nbh);
+      this.selection.bboxX = nbx;
+      this.selection.bboxY = nby;
+      this.selection.bboxW = nbw;
+      this.selection.bboxH = nbh;
+      this.selection.maskCanvas = m;
+      this.selection._chains = null;
+      this.selection._outline = null;
+    }
+    this.width = nw;
+    this.height = nh;
+  }
+}
+
+// selection { bboxX, bboxY, bboxW, bboxH, maskCanvas } 深拷贝。snapshotAll 用。
+function _cloneSelection(sel) {
+  if (!sel) return null;
+  const m = document.createElement("canvas");
+  m.width = Math.max(1, sel.bboxW);
+  m.height = Math.max(1, sel.bboxH);
+  m.getContext("2d").drawImage(sel.maskCanvas, 0, 0);
+  return { bboxX: sel.bboxX, bboxY: sel.bboxY, bboxW: sel.bboxW, bboxH: sel.bboxH, maskCanvas: m };
 }
 
 // 按设备 RAM + 画布分辨率 算图层数上限。**悲观估计**：每层按占满 doc 算

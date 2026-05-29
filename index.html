@@ -546,12 +546,113 @@
 
     <!-- v109: brushPanel 浮动面板撤了 —— 平滑参数现在 per-preset，进 brush settings 调 -->
 
-    <!-- Adjustments popup：液化 / 调色等。学 Procreate adjustments icon -->
+    <!-- Adjustments popup：液化 / 裁切 / 重采样 / 颜色调整。学 Procreate adjustments icon -->
     <div class="adjust-popup menu-panel hidden" id="adjustPopup" role="menu">
       <button class="menu-item" id="adjustLiquify" type="button" role="menuitem">
         <span class="menu-item-label">液化</span>
       </button>
-      <!-- 之后加：曲线 / 色相 / Levels / ... -->
+      <hr class="menu-sep" />
+      <button class="menu-item" id="adjustCropToSelection" type="button" role="menuitem">
+        <span class="menu-item-label">裁切到选区</span>
+      </button>
+      <button class="menu-item" id="adjustCropFree" type="button" role="menuitem">
+        <span class="menu-item-label">自由裁切（8 handle）</span>
+      </button>
+      <button class="menu-item" id="adjustResample" type="button" role="menuitem">
+        <span class="menu-item-label">画布重采样…</span>
+      </button>
+      <hr class="menu-sep" />
+      <button class="menu-item" id="adjustColor" type="button" role="menuitem">
+        <span class="menu-item-label">颜色调整（B/C/S/H）</span>
+      </button>
+    </div>
+
+    <!-- v110 重采样对话框 -->
+    <div class="resample-backdrop hidden" id="resampleBackdrop"></div>
+    <div class="resample-sheet hidden" id="resampleSheet" role="dialog" aria-modal="true">
+      <div class="resample-head">画布重采样</div>
+      <div class="resample-body">
+        <div class="resample-row">
+          <label for="resampleW">宽 (px)</label>
+          <input type="number" id="resampleW" min="1" max="8192" step="1" />
+        </div>
+        <div class="resample-row">
+          <label for="resampleH">高 (px)</label>
+          <input type="number" id="resampleH" min="1" max="8192" step="1" />
+        </div>
+        <div class="resample-row resample-row-link">
+          <label><input type="checkbox" id="resampleLock" checked /> 锁比例</label>
+        </div>
+        <div class="resample-row">
+          <label for="resampleMode">插值</label>
+          <select id="resampleMode">
+            <option value="bilinear">双线性（默认 / 软）</option>
+            <option value="nearest">最近邻（像素艺术 / 硬边）</option>
+            <option value="bicubic">双三次（高质量 / 慢）</option>
+          </select>
+        </div>
+      </div>
+      <div class="resample-foot">
+        <button type="button" id="resampleCancel">取消</button>
+        <button type="button" id="resampleConfirm" class="primary">应用</button>
+      </div>
+    </div>
+
+    <!-- v110 颜色调整面板（沿用 .float-panel 拖标题模式）-->
+    <div class="float-panel adjust-panel hidden" id="adjustPanel">
+      <div class="float-panel-head" id="adjustPanelHead">
+        <span class="float-panel-title">颜色调整</span>
+        <button class="float-panel-close" id="adjustPanelClose" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="float-panel-body">
+        <label class="brush-slider-row" title="亮度 (-100..+100)">
+          <span class="brush-slider-label">亮度</span>
+          <input id="adjustBrightness" type="range" min="-100" max="100" step="1" value="0" />
+          <span class="brush-slider-value" id="adjustBrightnessVal">0</span>
+        </label>
+        <label class="brush-slider-row" title="对比度 (-100..+100)">
+          <span class="brush-slider-label">对比</span>
+          <input id="adjustContrast" type="range" min="-100" max="100" step="1" value="0" />
+          <span class="brush-slider-value" id="adjustContrastVal">0</span>
+        </label>
+        <label class="brush-slider-row" title="饱和度 (-100..+100)">
+          <span class="brush-slider-label">饱和</span>
+          <input id="adjustSaturation" type="range" min="-100" max="100" step="1" value="0" />
+          <span class="brush-slider-value" id="adjustSaturationVal">0</span>
+        </label>
+        <label class="brush-slider-row" title="色相旋转 (-180..+180°)">
+          <span class="brush-slider-label">色相</span>
+          <input id="adjustHue" type="range" min="-180" max="180" step="1" value="0" />
+          <span class="brush-slider-value" id="adjustHueVal">0°</span>
+        </label>
+        <div class="adjust-panel-foot">
+          <button type="button" id="adjustReset">重置</button>
+          <button type="button" id="adjustCancel">取消</button>
+          <button type="button" id="adjustApply" class="primary">应用</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- v110 自由裁切：toolbar (8-handle crop) -->
+    <div class="crop-toolbar hidden" id="cropToolbar">
+      <span class="crop-toolbar-label">裁切：拖角 / 边 / 框内移动</span>
+      <span class="crop-toolbar-sep" aria-hidden="true">|</span>
+      <button class="crop-toolbar-btn" id="cropToolbarApply" type="button">应用</button>
+      <button class="crop-toolbar-btn crop-toolbar-cancel" id="cropToolbarCancel" type="button">取消</button>
+    </div>
+
+    <!-- v110 自由裁切 overlay：rect + 8 handles + dimmed mask -->
+    <div class="crop-overlay hidden" id="cropOverlay">
+      <div class="crop-rect" id="cropRect">
+        <div class="crop-handle" data-handle="nw"></div>
+        <div class="crop-handle" data-handle="n"></div>
+        <div class="crop-handle" data-handle="ne"></div>
+        <div class="crop-handle" data-handle="e"></div>
+        <div class="crop-handle" data-handle="se"></div>
+        <div class="crop-handle" data-handle="s"></div>
+        <div class="crop-handle" data-handle="sw"></div>
+        <div class="crop-handle" data-handle="w"></div>
+      </div>
     </div>
 
     <!-- 汉堡菜单：低频项收纳处。顺序见 user 2026-05-28 反馈 -->

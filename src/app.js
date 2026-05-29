@@ -86,6 +86,25 @@ const els = {
   topAdjustBtn: document.getElementById("topAdjustBtn"),
   adjustPopup: document.getElementById("adjustPopup"),
   adjustLiquify: document.getElementById("adjustLiquify"),
+  // v110 crop / resample / adjust
+  resampleBackdrop: document.getElementById("resampleBackdrop"),
+  resampleSheet: document.getElementById("resampleSheet"),
+  resampleW: document.getElementById("resampleW"),
+  resampleH: document.getElementById("resampleH"),
+  resampleLock: document.getElementById("resampleLock"),
+  resampleMode: document.getElementById("resampleMode"),
+  resampleCancel: document.getElementById("resampleCancel"),
+  resampleConfirm: document.getElementById("resampleConfirm"),
+  adjustPanel: document.getElementById("adjustPanel"),
+  adjustPanelHead: document.getElementById("adjustPanelHead"),
+  adjustBrightness: document.getElementById("adjustBrightness"),
+  adjustBrightnessVal: document.getElementById("adjustBrightnessVal"),
+  adjustContrast: document.getElementById("adjustContrast"),
+  adjustContrastVal: document.getElementById("adjustContrastVal"),
+  adjustSaturation: document.getElementById("adjustSaturation"),
+  adjustSaturationVal: document.getElementById("adjustSaturationVal"),
+  adjustHue: document.getElementById("adjustHue"),
+  adjustHueVal: document.getElementById("adjustHueVal"),
   topGalleryBtn: document.getElementById("topGalleryBtn"),
   liquifyPanel: document.getElementById("liquifyPanel"),
   liquifyPanelHead: document.getElementById("liquifyPanelHead"),
@@ -763,6 +782,11 @@ registerPendingTransient({
 function setTool(t) {
   // v96：airbrush 工具不存在了。老 doc 持久化里可能存了 "airbrush" → 透明回退到 brush
   if (t === "airbrush") t = "brush";
+  // v110：smudge / shapes engine 未真实装（user：「smudge 和 shapes 灰色先不响应」）
+  if (t === "smudge" || t === "shapes") {
+    setStatus(`${t === "smudge" ? "涂抹" : "形状"} 工具暂未启用`);
+    return;
+  }
   // 切工具 = 用户决定性动作 → 让所有 pending 先 apply（套索浮层 commit 等）
   applyAllPendingTransients();
   state.tool = t;
@@ -1901,6 +1925,25 @@ history.registerHandler("setReferenceLayer", {
   redo: (e) => { doc.referenceLayerId = e.newVal; renderLayersPanel(); },
   refsLayer: (e, id) => e.oldVal === id || e.newVal === id,
 });
+// v110: docTransform —— crop / resample 一次 op 影响所有 layer + doc 尺寸；存全 doc snap
+history.registerHandler("docTransform", {
+  undo: (e) => {
+    doc.restoreSnapshotAll(e.before);
+    _afterDocChange();
+    if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
+    board.invalidateAll();
+    renderLayersPanel();
+  },
+  redo: (e) => {
+    doc.restoreSnapshotAll(e.after);
+    _afterDocChange();
+    if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
+    board.invalidateAll();
+    renderLayersPanel();
+  },
+  refsLayer: () => true,        // 所有层都受影响
+});
+
 // selectionToLayer：复合 entry。undo / redo 同步处理 newLayer + active 改变
 history.registerHandler("selectionToLayer", {
   undo: async (e) => {
@@ -2471,6 +2514,346 @@ els.adjustLiquify.addEventListener("click", () => {
   toggleLiquifyPanel(true);
   setStatus("液化");
 });
+
+// ===== v110 crop / resample / adjust =====
+// 通用：op 前先 commit floating + 把当前 doc snapshot 当 before
+function _captureDocBefore() {
+  applyAllPendingTransients();
+  return doc.snapshotAll();
+}
+function _pushDocTransform(before, after, label) {
+  history.push({ type: "docTransform", before, after });
+  _docDirty = true;
+  if (isSignedIn()) setCloudDirty(_activeSessionName, true);
+  if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
+  board.invalidateAll();
+  renderLayersPanel();
+  setStatus(label);
+}
+
+// 裁到选区 ----
+document.getElementById("adjustCropToSelection").addEventListener("click", () => {
+  setAdjustOpen(false);
+  if (!doc.selection) { setStatus("没选区——画一个 lasso 选区先", true); return; }
+  const s = doc.selection;
+  const x = Math.max(0, s.bboxX | 0), y = Math.max(0, s.bboxY | 0);
+  const w = Math.min(doc.width - x, s.bboxW | 0), h = Math.min(doc.height - y, s.bboxH | 0);
+  if (w < 1 || h < 1) { setStatus("选区太小或在画布外", true); return; }
+  const before = _captureDocBefore();
+  doc.cropTo({ x, y, w, h });
+  const after = doc.snapshotAll();
+  _pushDocTransform(before, after, `已裁到选区：${w}×${h}`);
+});
+
+// 自由裁切（8-handle）----
+let _cropState = null;     // { rect:{x,y,w,h} in doc, drag:'nw'|'n'|'ne'|...|'move'|null, startMouse, startRect }
+function _docRectToScreen(r) {
+  const { tx, ty, scale } = board.viewport;
+  return { x: r.x * scale + tx, y: r.y * scale + ty, w: r.w * scale, h: r.h * scale };
+}
+function _screenToDocPt(sx, sy) {
+  const { tx, ty, scale } = board.viewport;
+  return { x: (sx - tx) / scale, y: (sy - ty) / scale };
+}
+function _renderCropOverlay() {
+  if (!_cropState) return;
+  const r = _docRectToScreen(_cropState.rect);
+  const el = document.getElementById("cropRect");
+  el.style.left = r.x + "px";
+  el.style.top  = r.y + "px";
+  el.style.width  = Math.max(2, r.w) + "px";
+  el.style.height = Math.max(2, r.h) + "px";
+}
+function _openCropMode() {
+  if (board.viewport.rot && Math.abs(board.viewport.rot) > 0.01) {
+    setStatus("先把画布旋转复位（按 0）再进自由裁切", true);
+    return;
+  }
+  _cropState = {
+    rect: { x: 0, y: 0, w: doc.width, h: doc.height },
+    drag: null, startMouse: null, startRect: null,
+  };
+  document.getElementById("cropOverlay").classList.remove("hidden");
+  document.getElementById("cropToolbar").classList.remove("hidden");
+  _renderCropOverlay();
+}
+function _closeCropMode() {
+  _cropState = null;
+  document.getElementById("cropOverlay").classList.add("hidden");
+  document.getElementById("cropToolbar").classList.add("hidden");
+}
+document.getElementById("adjustCropFree").addEventListener("click", () => {
+  setAdjustOpen(false);
+  _openCropMode();
+});
+document.getElementById("cropToolbarCancel").addEventListener("click", () => _closeCropMode());
+document.getElementById("cropToolbarApply").addEventListener("click", () => {
+  if (!_cropState) return;
+  const r = _cropState.rect;
+  const x = Math.max(0, Math.min(doc.width - 1, r.x | 0));
+  const y = Math.max(0, Math.min(doc.height - 1, r.y | 0));
+  const w = Math.max(1, Math.min(doc.width - x, r.w | 0));
+  const h = Math.max(1, Math.min(doc.height - y, r.h | 0));
+  const before = _captureDocBefore();
+  doc.cropTo({ x, y, w, h });
+  const after = doc.snapshotAll();
+  _pushDocTransform(before, after, `已裁切：${w}×${h}`);
+  _closeCropMode();
+});
+
+// 裁切 overlay 拖拽 (handle / rect 内 = move)
+(function bindCropOverlayPointer() {
+  const overlay = document.getElementById("cropOverlay");
+  const rect = document.getElementById("cropRect");
+  overlay.addEventListener("pointerdown", (e) => {
+    if (!_cropState) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const handle = e.target?.dataset?.handle || (e.target === rect ? "move" : null);
+    if (!handle) return;
+    overlay.setPointerCapture(e.pointerId);
+    _cropState.drag = handle;
+    _cropState.startMouse = { x: e.clientX, y: e.clientY };
+    _cropState.startRect = { ...(_cropState.rect) };
+  });
+  overlay.addEventListener("pointermove", (e) => {
+    if (!_cropState || !_cropState.drag) return;
+    const dx_screen = e.clientX - _cropState.startMouse.x;
+    const dy_screen = e.clientY - _cropState.startMouse.y;
+    const scale = board.viewport.scale;
+    const dx = dx_screen / scale;
+    const dy = dy_screen / scale;
+    const r0 = _cropState.startRect;
+    const r = { ..._cropState.rect };
+    const h = _cropState.drag;
+    if (h === "move") {
+      r.x = r0.x + dx;
+      r.y = r0.y + dy;
+    } else {
+      if (h.includes("n")) { r.y = r0.y + dy; r.h = r0.h - dy; }
+      if (h.includes("s")) { r.h = r0.h + dy; }
+      if (h.includes("w")) { r.x = r0.x + dx; r.w = r0.w - dx; }
+      if (h.includes("e")) { r.w = r0.w + dx; }
+    }
+    // clamp 到 doc 边界 + 最小 4px
+    if (r.w < 4) { r.w = 4; if (h.includes("w")) r.x = r0.x + r0.w - 4; }
+    if (r.h < 4) { r.h = 4; if (h.includes("n")) r.y = r0.y + r0.h - 4; }
+    r.x = Math.max(0, Math.min(doc.width - r.w, r.x));
+    r.y = Math.max(0, Math.min(doc.height - r.h, r.y));
+    if (r.x + r.w > doc.width) r.w = doc.width - r.x;
+    if (r.y + r.h > doc.height) r.h = doc.height - r.y;
+    _cropState.rect = r;
+    _renderCropOverlay();
+  });
+  overlay.addEventListener("pointerup", (e) => {
+    if (!_cropState) return;
+    try { overlay.releasePointerCapture(e.pointerId); } catch {}
+    _cropState.drag = null;
+  });
+  overlay.addEventListener("pointercancel", (e) => {
+    if (!_cropState) return;
+    try { overlay.releasePointerCapture(e.pointerId); } catch {}
+    _cropState.drag = null;
+  });
+})();
+
+// 重采样对话框 ----
+function _openResampleDialog() {
+  els.resampleBackdrop.classList.remove("hidden");
+  els.resampleSheet.classList.remove("hidden");
+  els.resampleW.value = String(doc.width);
+  els.resampleH.value = String(doc.height);
+  els.resampleW.focus();
+  // 锁比例：变 W 自动改 H
+  const aspect = doc.width / doc.height;
+  const onW = () => {
+    if (!els.resampleLock.checked) return;
+    const w = parseFloat(els.resampleW.value) | 0;
+    if (w > 0) els.resampleH.value = String(Math.max(1, Math.round(w / aspect)));
+  };
+  const onH = () => {
+    if (!els.resampleLock.checked) return;
+    const h = parseFloat(els.resampleH.value) | 0;
+    if (h > 0) els.resampleW.value = String(Math.max(1, Math.round(h * aspect)));
+  };
+  els.resampleW.oninput = onW;
+  els.resampleH.oninput = onH;
+}
+function _closeResampleDialog() {
+  els.resampleBackdrop.classList.add("hidden");
+  els.resampleSheet.classList.add("hidden");
+}
+document.getElementById("adjustResample").addEventListener("click", () => {
+  setAdjustOpen(false);
+  _openResampleDialog();
+});
+els.resampleCancel.addEventListener("click", () => _closeResampleDialog());
+els.resampleBackdrop.addEventListener("click", () => _closeResampleDialog());
+els.resampleConfirm.addEventListener("click", () => {
+  const nw = parseFloat(els.resampleW.value) | 0;
+  const nh = parseFloat(els.resampleH.value) | 0;
+  const mode = els.resampleMode.value || "bilinear";
+  if (nw < 1 || nh < 1 || nw > 8192 || nh > 8192) { setStatus("尺寸超出 [1, 8192]", true); return; }
+  if (nw === doc.width && nh === doc.height) { _closeResampleDialog(); return; }
+  const before = _captureDocBefore();
+  doc.resampleTo(nw, nh, mode);
+  const after = doc.snapshotAll();
+  _pushDocTransform(before, after, `已重采样到 ${nw}×${nh}（${mode}）`);
+  _closeResampleDialog();
+});
+
+// 颜色调整面板 (B/C/S/H) ----
+// 用 Canvas2D ctx.filter 算 brightness/contrast/saturate/hue-rotate
+// live preview：board 渲染时给 active layer 的 drawImage 加 ctx.filter
+// 应用：到 active layer 像素 (off-screen canvas + ctx.filter + drawImage 回 layer)，
+//       受 doc.selection mask 限制
+let _adjustState = null;     // { active, brightness, contrast, saturation, hue, beforeSnap }
+function _adjustFilterString(s) {
+  // 0% slider = 100% original; ±100% slider = ±100% delta
+  const b = 1 + (s.brightness / 100);    // -100..100 → 0..2
+  const c = 1 + (s.contrast / 100);      // 同上
+  const sat = 1 + (s.saturation / 100);  // 同上
+  const hue = s.hue | 0;                 // -180..180 度
+  return `brightness(${b}) contrast(${c}) saturate(${sat}) hue-rotate(${hue}deg)`;
+}
+function _openAdjustPanel() {
+  const L = doc.activeLayer;
+  if (!L) { setStatus("没活动图层", true); return; }
+  if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("活动图层是空的", true); return; }
+  _adjustState = { active: L, brightness: 0, contrast: 0, saturation: 0, hue: 0, beforeSnap: L.snapshot() };
+  els.adjustPanel.classList.remove("hidden");
+  // 默认位置 right-top
+  const w = els.adjustPanel.offsetWidth || 280;
+  els.adjustPanel.style.left = (window.innerWidth - w - 16) + "px";
+  els.adjustPanel.style.top  = "70px";
+  _syncAdjustSliders();
+  board.setActiveLayerFilter?.(L.id, _adjustFilterString(_adjustState));
+}
+function _syncAdjustSliders() {
+  const s = _adjustState;
+  els.adjustBrightness.value = String(s.brightness);
+  els.adjustBrightnessVal.textContent = String(s.brightness);
+  els.adjustContrast.value = String(s.contrast);
+  els.adjustContrastVal.textContent = String(s.contrast);
+  els.adjustSaturation.value = String(s.saturation);
+  els.adjustSaturationVal.textContent = String(s.saturation);
+  els.adjustHue.value = String(s.hue);
+  els.adjustHueVal.textContent = `${s.hue}°`;
+}
+function _onAdjustChange() {
+  if (!_adjustState) return;
+  board.setActiveLayerFilter?.(_adjustState.active.id, _adjustFilterString(_adjustState));
+  board.invalidateAll();
+}
+function _closeAdjustPanel(applied) {
+  if (!_adjustState) return;
+  const L = _adjustState.active;
+  board.setActiveLayerFilter?.(null, null);
+  if (applied) {
+    // 烤进 layer 像素
+    _bakeAdjustToLayer(L, _adjustFilterString(_adjustState), doc.selection);
+    const after = L.snapshot();
+    history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });
+    compressPixelSnap(_adjustState.beforeSnap, (blob) => { /* will be set on history entry by name via existing stroke flow */ });
+    compressPixelSnap(after, (blob) => { /* ditto */ });
+    _docDirty = true;
+    if (isSignedIn()) setCloudDirty(_activeSessionName, true);
+    setStatus(`颜色已应用：${L.name}`);
+  }
+  _adjustState = null;
+  els.adjustPanel.classList.add("hidden");
+  board.invalidateAll();
+}
+function _bakeAdjustToLayer(L, filterString, selection) {
+  const off = document.createElement("canvas");
+  off.width = L.bboxW; off.height = L.bboxH;
+  const offCtx = off.getContext("2d");
+  offCtx.filter = filterString;
+  offCtx.drawImage(L.canvas, 0, 0);
+  offCtx.filter = "none";
+  if (selection) {
+    // 只在 mask 内替换：先把 off 裁到 selection 内
+    offCtx.globalCompositeOperation = "destination-in";
+    offCtx.drawImage(selection.maskCanvas, selection.bboxX - L.bboxX, selection.bboxY - L.bboxY);
+    offCtx.globalCompositeOperation = "source-over";
+    // 然后 layer.canvas 把 mask 内挖空，再 source-over 写入 off
+    L.ctx.save();
+    L.ctx.globalCompositeOperation = "destination-out";
+    L.ctx.drawImage(selection.maskCanvas, selection.bboxX - L.bboxX, selection.bboxY - L.bboxY);
+    L.ctx.globalCompositeOperation = "source-over";
+    L.ctx.drawImage(off, 0, 0);
+    L.ctx.restore();
+  } else {
+    L.ctx.clearRect(0, 0, L.bboxW, L.bboxH);
+    L.ctx.drawImage(off, 0, 0);
+  }
+}
+document.getElementById("adjustColor").addEventListener("click", () => {
+  setAdjustOpen(false);
+  _openAdjustPanel();
+});
+document.getElementById("adjustReset").addEventListener("click", () => {
+  if (!_adjustState) return;
+  _adjustState.brightness = 0;
+  _adjustState.contrast = 0;
+  _adjustState.saturation = 0;
+  _adjustState.hue = 0;
+  _syncAdjustSliders();
+  _onAdjustChange();
+});
+document.getElementById("adjustCancel").addEventListener("click", () => _closeAdjustPanel(false));
+document.getElementById("adjustPanelClose").addEventListener("click", () => _closeAdjustPanel(false));
+document.getElementById("adjustApply").addEventListener("click", () => _closeAdjustPanel(true));
+els.adjustBrightness.addEventListener("input", () => {
+  if (!_adjustState) return;
+  _adjustState.brightness = parseFloat(els.adjustBrightness.value) | 0;
+  els.adjustBrightnessVal.textContent = String(_adjustState.brightness);
+  _onAdjustChange();
+});
+els.adjustContrast.addEventListener("input", () => {
+  if (!_adjustState) return;
+  _adjustState.contrast = parseFloat(els.adjustContrast.value) | 0;
+  els.adjustContrastVal.textContent = String(_adjustState.contrast);
+  _onAdjustChange();
+});
+els.adjustSaturation.addEventListener("input", () => {
+  if (!_adjustState) return;
+  _adjustState.saturation = parseFloat(els.adjustSaturation.value) | 0;
+  els.adjustSaturationVal.textContent = String(_adjustState.saturation);
+  _onAdjustChange();
+});
+els.adjustHue.addEventListener("input", () => {
+  if (!_adjustState) return;
+  _adjustState.hue = parseFloat(els.adjustHue.value) | 0;
+  els.adjustHueVal.textContent = `${_adjustState.hue}°`;
+  _onAdjustChange();
+});
+// adjust panel head 拖动
+(function bindAdjustPanelDrag() {
+  let drag = null;
+  els.adjustPanelHead.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".float-panel-close")) return;
+    const r = els.adjustPanel.getBoundingClientRect();
+    drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
+    els.adjustPanelHead.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  els.adjustPanelHead.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const w = els.adjustPanel.offsetWidth, h = els.adjustPanel.offsetHeight;
+    const left = Math.max(0, Math.min(window.innerWidth - w, drag.ol + (e.clientX - drag.sx)));
+    const top  = Math.max(0, Math.min(window.innerHeight - h, drag.ot + (e.clientY - drag.sy)));
+    els.adjustPanel.style.left = left + "px";
+    els.adjustPanel.style.top = top + "px";
+  });
+  els.adjustPanelHead.addEventListener("pointerup", (e) => {
+    if (drag && e.pointerId === drag.id) {
+      try { els.adjustPanelHead.releasePointerCapture(e.pointerId); } catch {}
+      drag = null;
+    }
+  });
+})();
+// ===== v110 crop/resample/adjust end =====
 
 // ---- 图库 icon（v95：从菜单挪回 topbar，user：「图库从菜单中拿出来单独做一个 icon 放菜单旁边」）----
 els.topGalleryBtn.addEventListener("click", () => {
