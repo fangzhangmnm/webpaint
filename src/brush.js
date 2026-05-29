@@ -42,6 +42,9 @@ const DEFAULT_SETTINGS = {
   opaCoeff: 0.6,
   flowCoeff: 0,
   pressureGamma: 1.0,
+  // v102: 压感时间域 LPF (ms，一阶 IIR)
+  // 0 = raw，正值 = 平滑（解 "转角顿一下 out-leg 突然细" 的问题）
+  pressureLPF: 0,
   // shape：
   hardness: 0.75,
   shapeKind: "round",
@@ -138,9 +141,13 @@ export class BrushEngine {
     let loaded = null;
     if (mode === "smudge") loaded = this._sampleLayerColor(layer, x, y);
     const isBuildup = (settings.compositeMode || "wash") === "buildup";
+    // v102: pressure LPF state；初值 = 当前 pressure（落笔瞬间不 LPF）
+    const pLPF0 = pressure;
     this._stroke = {
       layer, settings, mode,
-      lastX: x, lastY: y, lastP: pressure,
+      lastX: x, lastY: y, lastP: pLPF0,
+      pLPF: pLPF0,                              // 当前 LPF 态
+      lastEventTime: performance.now(),
       accumDist: 0,
       strokeDist: 0,
       dirty: null,
@@ -224,13 +231,30 @@ export class BrushEngine {
   extendStroke(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
+    // v102: 用 raw pressure 更新 LPF state，然后所有插值用 LPF'd pressure
+    // 一阶 IIR: α = dt / (dt + τ)；τ=0 时 α=1 → 直传 raw
+    const tau = st.settings.pressureLPF || 0;
+    const now = performance.now();
+    const dt = Math.max(1, now - st.lastEventTime);
+    st.lastEventTime = now;
+    let pEff;
+    if (tau > 0) {
+      const alpha = dt / (dt + tau);
+      st.pLPF += alpha * (pressure - st.pLPF);
+      pEff = st.pLPF;
+    } else {
+      pEff = pressure;
+      st.pLPF = pressure;
+    }
+
     const dx = x - st.lastX;
     const dy = y - st.lastY;
     const L = Math.hypot(dx, dy);
     if (L === 0) return;
     let pos = 0;
     while (true) {
-      const step = this._stepFor(st.settings, pressure);
+      // step 用 LPF'd 压感算（spacing 也跟着平滑）
+      const step = this._stepFor(st.settings, pEff);
       if (st.accumDist + (L - pos) < step) break;
       const need = step - st.accumDist;
       pos += need;
@@ -238,14 +262,15 @@ export class BrushEngine {
       const t = pos / L;
       const sx = st.lastX + dx * t;
       const sy = st.lastY + dy * t;
-      const sp = st.lastP + (pressure - st.lastP) * t;
+      // 段内插值在上次 LPF 值 与 当前 LPF 值 之间
+      const sp = st.lastP + (pEff - st.lastP) * t;
       this._stampOne(sx, sy, sp);
       st.accumDist = 0;
     }
     st.accumDist += L - pos;
     st.lastX = x;
     st.lastY = y;
-    st.lastP = pressure;
+    st.lastP = pEff;
   }
 
   endStroke() {

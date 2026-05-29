@@ -876,7 +876,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   bottom: max(env(safe-area-inset-bottom, 0px), 12px);
   transform: translateX(-50%);
   width: min(720px, calc(100% - 24px));
-  height: 70dvh;          /* 显式 height (非 max-height)；grid 区计算稳 */
+  /* 关键：只 max-height 不 height — sheet 按内容自适应高度，少笔时不撑满 */
   max-height: 70dvh;
   background: var(--bg);
   border: 1px solid var(--line);

@@ -37,6 +37,9 @@ function makeBrush({
   size = 12, sizeBaseMax = 200,
   sizeCoeff = 0.6, opaCoeff = 0.6, flowCoeff = 0,
   pressureGamma = 1.0,
+  // v102+: pressure low-pass filter（ms，时间域 IIR）
+  // 解 "勾线转角顿一下 out-leg 变细" —— LPF 让落点过去几十毫秒的高 pressure 仍留尾巴
+  pressureLPF = 0,
   compositeMode = "wash",
   shapeKind = "round", aspect = 1.0, rotation = 0, hardness = 1.0,
   textureB64 = null,
@@ -47,7 +50,6 @@ function makeBrush({
   // 位置平滑（per-brush，v99 起从 system 挪进 preset）
   streamline = 0.3, stabilization = 0, pullStabilizer = 0, motionFilter = 0,
   // v99r2：defaultOpa 留着，默认 1.0；user 编辑笔可以改成 0.6 当 sketch 默认
-  // user：「default opacity 还是留着吧但都是 1」
   defaultOpa = 1.0,
 }) {
   return {
@@ -56,6 +58,7 @@ function makeBrush({
     size: { base: size, max: sizeBaseMax },
     sizeCoeff, opaCoeff, flowCoeff,
     pressureGamma,
+    pressureLPF,
     defaultOpa,
     compositeMode,
     spacing: spacingValue,
@@ -78,10 +81,11 @@ const DEFAULTS_SPEC = [
             sizeCoeff: 0.4, opaCoeff: 0.7, flowCoeff: 0.3,
             spacingValue: 0.06, compositeMode: "wash" } },
   // 勾线：强 size 压感，起末 stylistic taper。Wash。
-  // hardness 0.5（user iPad 调；之前 1.0 太硬）
+  // pressureLPF 50ms：转角顿一下时 out-leg 有尾巴，不会突然变细（user 主诉）
   { id: "default-brush-ink",      name: "勾线",   tool: "brush",
     args: { size: 6, sizeBaseMax: 60, hardness: 0.5,
             sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
+            pressureLPF: 50,
             spacingValue: 0.04, compositeMode: "wash",
             taperIn: 0.3, taperOut: 0.3 } },
   // 平涂：大笔填色，强 size 压感。Wash 单笔封顶（user.opacity slider 控）。
@@ -98,9 +102,11 @@ const DEFAULTS_SPEC = [
             sizeCoeff: 0, opaCoeff: 0, flowCoeff: 1.0,
             spacingValue: 0.05, compositeMode: "buildup" } },
   // 小喷枪：当 sketch 用，size 略跟压感。Build-Up。
+  // pressureLPF 20ms 轻量平滑
   { id: "default-airbrush-small", name: "小喷枪", tool: "brush",
     args: { size: 16, sizeBaseMax: 200, hardness: 0.15,
             sizeCoeff: 0.4, opaCoeff: 0, flowCoeff: 1.0,
+            pressureLPF: 20,
             spacingValue: 0.05, compositeMode: "buildup" } },
 
   // 涂抹（smudge）：sample + blend 走专用 path。
@@ -111,10 +117,11 @@ const DEFAULTS_SPEC = [
             smudge: { strength: 0.8, dryness: 0.1 } } },
 
   // 硬橡皮：精修线稿，强 size 压感。Wash。
-  // size 50 + opaCoeff 0（user iPad 调；之前 16 太小、opaCoeff 1.0 让轻压几乎擦不掉）
+  // pressureLPF 30ms 类似勾线（精修线稿 out-leg 也要尾巴）
   { id: "default-eraser-hard",    name: "硬橡皮", tool: "eraser",
     args: { size: 50, sizeBaseMax: 100, hardness: 1.0,
             sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
+            pressureLPF: 30,
             spacingValue: 0.04, compositeMode: "wash" } },
   // 软橡皮：喷枪 eraser；Build-Up，flow 跟压感。
   { id: "default-eraser-soft",    name: "软橡皮", tool: "eraser",
@@ -173,6 +180,7 @@ export function migrateBrush(b) {
   if (b.defaultOpa == null) b.defaultOpa = 1.0;
   delete b.defaultFlow;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
+  if (b.pressureLPF == null) b.pressureLPF = 0;
   // compositeMode：airbrush=true → buildup；否则 wash
   if (b.compositeMode == null) {
     b.compositeMode = b.airbrush ? "buildup" : "wash";

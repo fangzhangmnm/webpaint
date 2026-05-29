@@ -350,6 +350,7 @@ function applyBrushPresetFrozen(brush) {
   state.brush.opaCoeff      = brush.opaCoeff ?? 0.6;
   state.brush.flowCoeff     = brush.flowCoeff ?? 0;
   state.brush.pressureGamma = brush.pressureGamma ?? 1.0;
+  state.brush.pressureLPF   = brush.pressureLPF ?? 0;       // v102 时间域压感平滑
   state.brush.compositeMode = brush.compositeMode || "wash";
   state.brush.spacing       = (typeof brush.spacing === "number")
     ? brush.spacing
@@ -3725,6 +3726,7 @@ _rackEls.newBtn.addEventListener("click", () => {
     size: { base: 12, max: 200 },
     sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
     pressureGamma: 1.0,
+    pressureLPF: 0,
     defaultOpa: 1.0,
     compositeMode: "wash",
     spacing: 0.06,
@@ -3991,6 +3993,7 @@ function _renderBrushSettings() {
   if (b.opaCoeff == null)  b.opaCoeff = 0.6;
   if (b.flowCoeff == null) b.flowCoeff = 0;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
+  if (b.pressureLPF == null) b.pressureLPF = 0;
   if (b.compositeMode == null) b.compositeMode = "wash";
   if (b.defaultOpa == null) b.defaultOpa = 1.0;
   if (!b.smooth) b.smooth = { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 };
@@ -4024,6 +4027,7 @@ function _renderBrushSettings() {
     ["buildup", "Build-Up（累积；可达 100%，喷枪 feel）"],
   ], b.compositeMode, (v) => b.compositeMode = v);
   rangeRow(adv, "pressureGamma", 0.2, 3.0, 0.05, b.pressureGamma, (v) => v.toFixed(2), (v) => b.pressureGamma = v);
+  rangeRow(adv, "pressureLPF (ms)", 0, 200, 5, b.pressureLPF, (v) => `${v|0} ms`, (v) => b.pressureLPF = v);
 
   // Pixel mode toggle
   const pmRow = document.createElement("div");
