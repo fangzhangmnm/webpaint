@@ -34,6 +34,7 @@ import {
   pushSession, pullSessionByPath, listCloudSessionsRecursive, deleteCloudSession,
   isCloudDirty, setCloudDirty, CloudConflictError,
   getLastSessionSignedIn, setLastSessionSignedIn, fetchSessionMetadata, getKnownETag,
+  pushBrushRack, pullBrushRack, fetchBrushRackMetadata, getBrushRackKnownETag,
 } from "./cloud.js";
 
 const THEMES = ["auto", "day", "night"];
@@ -277,15 +278,16 @@ function applyBrushPresetFrozen(brush) {
   state.brush.shapeAspect   = brush.shape.aspect ?? 1.0;
   state.brush.shapeRotation = (brush.shape.rotation ?? 0) * Math.PI / 180;
   state.brush.hardness      = brush.shape.hardness ?? 1.0;
-  // taper（brush.js 默认 taperIn=1.5；preset taper.in 是「相对 size 的倍数」同语义）
   state.brush.taperIn       = brush.taper.in ?? 0;
-  // spacing：brush.js 用 spacing 标量（spacing × size = step px）。preset spacing.value 同义
-  if (brush.spacing.kind === "distance") {
+  // v84：spacing + bufferMode（airbrush 走 time + direct-layer）
+  state.brush.spacingKind   = brush.spacing.kind || "distance";
+  if (brush.spacing.kind === "time") {
+    state.brush.spacingValueMs = brush.spacing.value || 16;
+    state.brush.bufferMode = "direct-layer";
+  } else {
     state.brush.spacing = brush.spacing.value || 1.5;
+    state.brush.bufferMode = brush.bufferMode || "stroke-buffer";
   }
-  // time-stamp / direct-layer mode 在 BrushEngine 里还没接，v84+ 处理
-  // 颜色不在 preset 里（color 是 doc-level）
-  // 关键：BrushEngine stamp cache 跟 color/hardness 绑，要 invalidate
   if (input?.brush?.invalidateStamp) input.brush.invalidateStamp();
 }
 
@@ -717,6 +719,8 @@ loadBrushRack().then((rack) => {
     }
   }
   applyToolState(state.tool);
+  // 后台：拉云端 etag 对比，不一致 + 本地 clean 默默更新
+  setTimeout(() => { checkBrushRackCloud().catch(() => {}); }, 2000);
 }).catch((e) => console.warn("[brush-rack] init failed:", e));
 
 // ---- 颜色 ----
@@ -3276,8 +3280,71 @@ function _hideRackSheet() {
   _rackEls.sheet.classList.add("hidden");
   if (_rackDirty) {
     persistBrushRack();           // 同步 IDB
+    pushBrushRackIfSignedIn();    // 同步云
     _rackDirty = false;
-    // v84+: 此时若 user 登录 OneDrive 则推云（待实装）
+  }
+}
+
+// 推云：仅 IDB 已写后调；user 在场（关 sheet 是 explicit action）
+async function pushBrushRackIfSignedIn() {
+  if (!isSignedIn() || !navigator.onLine) return;
+  if (!_brushRack) return;
+  try {
+    await pushBrushRack(_brushRack);
+    setStatus("笔架已同步到云端");
+  } catch (e) {
+    if (e instanceof CloudConflictError) {
+      // 云端有更新版本 → 跟 doc 一样 3 选 sheet
+      const choice = await lockSyncGate({
+        title: "笔架云端有更新版本",
+        message: "另一台设备改过云端笔架。推会覆盖那次改动。",
+        showSpinner: false,
+        actions: [
+          { label: "拉云端覆盖本地", value: "pull", primary: true },
+          { label: "保留本地（之后可重推）", value: "keep" },
+        ],
+      });
+      if (choice === "pull") {
+        try {
+          const pulled = await pullBrushRack();
+          if (pulled?.rack) {
+            _brushRack = pulled.rack;
+            await persistBrushRack();
+            applyToolState(state.tool);
+            setStatus("已拉云端笔架");
+          }
+        } catch (err) { setStatus("拉云端笔架失败：" + (err.message || err), true); }
+      }
+    } else {
+      console.warn("[brush-rack push]", e);
+      setStatus("笔架推送失败：" + (e.message || e), true);
+    }
+  }
+}
+
+// Boot 后调一次：背景拉云端 etag 比对；不一致 + 本地 clean → 默默拉
+async function checkBrushRackCloud() {
+  if (!isAuthConfigured() || !navigator.onLine || !isSignedIn()) return;
+  if (!_brushRack) return;
+  try {
+    const meta = await fetchBrushRackMetadata();
+    if (!meta) return;                          // 云端尚无 → silent OK
+    const localETag = getBrushRackKnownETag();
+    if (meta.etag === localETag) return;        // 已同步 → silent
+    if (_rackDirty) {
+      // 本地未推改动，云端也变了 → 等 user 关 sheet 时统一处理冲突
+      return;
+    }
+    // 本地 clean + 云端 newer → 默默拉
+    const pulled = await pullBrushRack();
+    if (pulled?.rack) {
+      _brushRack = pulled.rack;
+      await persistBrushRack();
+      applyToolState(state.tool);
+      setStatus("笔架已从云端同步");
+    }
+  } catch (e) {
+    console.warn("[brush-rack cloud check]", e);
   }
 }
 function _renderRackSheet() {

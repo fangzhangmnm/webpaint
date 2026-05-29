@@ -173,6 +173,56 @@ export async function deleteCloudSession(name) {
   clearCloudState(name);
 }
 
+// ============ Brush rack 云同步（v84）============
+// 单文件 Apps/WebPaint/brush-rack.json。低频改动，跟 doc 同模式：ETag 防并发覆盖。
+// user 指示：「不进行笔刷整理或者笔刷设置操作不 sync 云。操作的时候只有点保存退出 UI 才 sync 云」
+// → 整理 / 设置只写 IDB；关 rack sheet / 关 settings view 时才推云。
+
+const BRUSH_RACK_NAME = "brush-rack";
+const BRUSH_RACK_PATH = "brush-rack.json";
+const BRUSH_RACK_CT = "application/json";
+
+export async function pushBrushRack(rack) {
+  if (!isSignedIn()) throw new Error("未登录 OneDrive");
+  const knownETag = getKnownETag(BRUSH_RACK_NAME);
+  const json = JSON.stringify(rack);
+  const blob = new Blob([json], { type: BRUSH_RACK_CT });
+  try {
+    const item = await uploadFileToApproot(BRUSH_RACK_PATH, blob, BRUSH_RACK_CT, {
+      conflictBehavior: "replace",
+      eTag: knownETag,
+    });
+    setKnownETag(BRUSH_RACK_NAME, item.eTag);
+    return { item };
+  } catch (e) {
+    if (e.status === 412) {
+      throw new CloudConflictError(`云端笔架已被改过`, BRUSH_RACK_NAME);
+    }
+    throw e;
+  }
+}
+
+export async function pullBrushRack() {
+  if (!isSignedIn()) throw new Error("未登录 OneDrive");
+  const item = await getItemByPath(BRUSH_RACK_PATH);
+  if (!item) return null;
+  const blob = await downloadItemBlob(item.id);
+  setKnownETag(BRUSH_RACK_NAME, item.eTag);
+  const text = await blob.text();
+  return { rack: JSON.parse(text), etag: item.eTag };
+}
+
+export async function fetchBrushRackMetadata() {
+  if (!isSignedIn()) throw new Error("未登录 OneDrive");
+  const item = await getItemByPath(BRUSH_RACK_PATH);
+  if (!item) return null;
+  return { etag: item.eTag, lastModified: item.lastModifiedDateTime };
+}
+
+export function getBrushRackKnownETag() {
+  return getKnownETag(BRUSH_RACK_NAME);
+}
+
 export function clearCloudState(name) {
   try {
     localStorage.removeItem(etagKey(name));

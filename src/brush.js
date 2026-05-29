@@ -58,6 +58,12 @@ const DEFAULT_SETTINGS = {
   shapeKind: "round",         // "round" | "ellipse" | "texture" (texture 待实装)
   shapeAspect: 1.0,           // ellipse 短轴 / 长轴比 (0.1..1.0)
   shapeRotation: 0,           // ellipse 旋转 radians（preset 里是度，apply 时换算）
+  // v84 airbrush：time-stamp + direct-layer
+  spacingKind: "distance",    // "distance" | "time"
+  spacingValueMs: 16,         // 当 spacingKind="time" 用；distance 仍走 spacing 标量
+  bufferMode: "stroke-buffer",// "stroke-buffer" | "direct-layer"
+                              // direct-layer：跳过 stroke buffer，stamp 直接 source-over 到 layer
+                              // 配合 time-stamp = 喷枪 hover 累积加深
 };
 
 export class BrushSettings {
@@ -137,35 +143,44 @@ export class BrushEngine {
   }
 
   beginStroke(layer, settings, x, y, pressure, mode = "brush") {
-    // 笔触缓冲：paint 和 erase 都用 RGBA buffer。Buffer 的 bbox 跟 layer
-    // 当前 bbox 对齐启程；stamp 落到 bbox 外触发 layer 和 buffer 同步 grow。
-    // - Paint：per-stamp alpha 不含 s.opacity，source-over 在 buffer 内封顶 1.0,
-    //   endStroke 时以 globalAlpha=s.opacity 写进 layer → max alpha = s.opacity。
-    // - Erase：per-stamp 把 alpha mask 累在 buffer 上（颜色 RGB 不关心),
-    //   endStroke 时以 dst-out + globalAlpha=s.opacity 应用到 layer → max 去除
-    //   alpha = s.opacity。同样不会因为折返过擦。
-    // Live preview 由 board 端做：paint 在 layer 之上 composite buffer×opacity；
-    // erase 把 layer→临时合成 canvas，对它 dst-out buffer×opacity，再画到屏幕。
-    const buffer = document.createElement("canvas");
-    buffer.width = Math.max(1, layer.bboxW);
-    buffer.height = Math.max(1, layer.bboxH);
-    const bufferCtx = buffer.getContext("2d");
+    // v84：两条路径
+    //   stroke-buffer（默认 brush / eraser）：buffer + endStroke composite，opacity cap
+    //   direct-layer（喷枪）：跳 buffer，stamp 直接 source-over 到 layer
+    //     + time-stamp（spacingKind="time"）→ hover 时 setInterval 累积 stamp
+    const direct = settings.bufferMode === "direct-layer";
+    const timeStamp = settings.spacingKind === "time";
+    let buffer = null, bufferCtx = null;
+    if (!direct) {
+      buffer = document.createElement("canvas");
+      buffer.width = Math.max(1, layer.bboxW);
+      buffer.height = Math.max(1, layer.bboxH);
+      bufferCtx = buffer.getContext("2d");
+    }
     this._stroke = {
-      layer,
-      settings,
-      mode,
+      layer, settings, mode,
       lastX: x, lastY: y, lastP: pressure,
-      accumDist: 0,                        // 距上颗 stamp 的剩余 path 长度
-      strokeDist: 0,                       // 自笔触起点累计的 path 长度，给 taperIn 用
+      accumDist: 0,
+      strokeDist: 0,
       dirty: null,
       buffer, bufferCtx,
-      // buffer 在 doc 坐标系下的 bbox（和 layer 同步 grow）
       bufBboxX: layer.bboxX,
       bufBboxY: layer.bboxY,
       bufBboxW: layer.bboxW,
       bufBboxH: layer.bboxH,
+      direct,
+      timeStamp,
+      timer: null,
     };
     this._stampOne(x, y, pressure);
+    // time-stamp：每 ms 间隔从最新 pos 喷一颗
+    if (timeStamp) {
+      const ms = Math.max(8, settings.spacingValueMs || 16);
+      this._stroke.timer = setInterval(() => {
+        const st = this._stroke;
+        if (!st) return;
+        this._stampOne(st.lastX, st.lastY, st.lastP);
+      }, ms);
+    }
   }
 
   // stamp 落在 buffer bbox 外 → 扩 buffer 到能容纳，clamp 在 doc 范围内
@@ -202,6 +217,11 @@ export class BrushEngine {
   extendStroke(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
+    // time-stamp：不算距离，只更新 last，让 timer 在最新位置喷
+    if (st.timeStamp) {
+      st.lastX = x; st.lastY = y; st.lastP = pressure;
+      return;
+    }
     const dx = x - st.lastX;
     const dy = y - st.lastY;
     const L = Math.hypot(dx, dy);
@@ -230,11 +250,9 @@ export class BrushEngine {
 
   endStroke() {
     const st = this._stroke;
+    if (st && st.timer) { clearInterval(st.timer); st.timer = null; }
     if (st && st.buffer) {
-      // composite buffer → layer：globalAlpha = s.opacity 把笔触最大 alpha
-      // 钉死在 s.opacity。paint 用 source-over 写色，erase 用 dst-out 削 alpha。
-      // 因为 stamp 路径已经 ensureBbox 了 layer，layer bbox ⊇ buffer bbox。
-      // 偏移 = buffer 在 layer 局部的位置。
+      // stroke-buffer 路径：buffer → layer composite at endStroke
       const layer = st.layer;
       const ctx = layer.ctx;
       const prevA = ctx.globalAlpha;
@@ -245,10 +263,15 @@ export class BrushEngine {
       ctx.globalAlpha = prevA;
       ctx.globalCompositeOperation = prevC;
     }
+    // direct-layer 路径：stamps 已经直接进 layer，endStroke 无 composite 步骤
     this._stroke = null;
   }
 
   cancelStroke() {
+    const st = this._stroke;
+    if (st && st.timer) { clearInterval(st.timer); st.timer = null; }
+    // direct-layer cancel：layer 已经写脏了，没法回滚（除非外面有 snapshot）。
+    // brush 用户基本不会主动 cancel airbrush，触屏中断走 history undo。
     this._stroke = null;
   }
 
@@ -256,10 +279,9 @@ export class BrushEngine {
   // 再画一遍 buffer，预览不立即写进 layer。endStroke 才把 buffer 烧进 layer。
   getLiveOverlay() {
     const st = this._stroke;
-    if (!st || !st.buffer) return null;
+    if (!st || !st.buffer) return null;     // direct-layer 无 buffer → null（stamp 已在 layer 上，board 渲染时已包含）
     return {
       canvas: st.buffer,
-      // doc 坐标系下的 bbox（buffer 不一定和 layer 对齐，可能更大）
       bboxX: st.bufBboxX, bboxY: st.bufBboxY,
       bboxW: st.bufBboxW, bboxH: st.bufBboxH,
       layer: st.layer,
@@ -311,21 +333,27 @@ export class BrushEngine {
     const drawR = drawD / 2;
     const x0 = x - drawR, y0 = y - drawR, x1 = x + drawR, y1 = y + drawR;
 
-    // 确保 layer 和 buffer 都覆盖这颗 stamp 的 footprint
+    // 确保 layer 覆盖（buffer 路径下也 ensureBuffer）
     st.layer.ensureBbox(x0, y0, x1, y1);
-    this._ensureBufferBbox(x0, y0, x1, y1);
-
-    const ctx = st.bufferCtx;
+    let ctx, lx, ly;
+    if (st.direct) {
+      // direct-layer：直接写 layer.ctx；坐标 = doc - layer.bbox
+      ctx = st.layer.ctx;
+      lx = x - st.layer.bboxX;
+      ly = y - st.layer.bboxY;
+    } else {
+      this._ensureBufferBbox(x0, y0, x1, y1);
+      ctx = st.bufferCtx;
+      lx = x - st.bufBboxX;
+      ly = y - st.bufBboxY;
+    }
     const prevAlpha = ctx.globalAlpha;
     const prevComp = ctx.globalCompositeOperation;
     ctx.globalAlpha = alpha;
-    ctx.globalCompositeOperation = "source-over";
+    // direct-layer 喷枪用 source-over；direct-layer + eraser 用 dst-out
+    ctx.globalCompositeOperation = (st.direct && st.mode === "erase") ? "destination-out" : "source-over";
 
-    // 转换 doc 坐标 → buffer-local 坐标
-    const lx = x - st.bufBboxX;
-    const ly = y - st.bufBboxY;
-    // v83：ellipse 绕中心 scale Y + rotate，stamp cache 仍是圆（省 cache）。
-    // round 走快路径 drawImage（无 transform）。
+    // v83：ellipse scale Y + rotate；round 走快路径
     if (s.shapeKind === "ellipse" && (s.shapeAspect !== 1 || s.shapeRotation !== 0)) {
       ctx.save();
       ctx.translate(lx, ly);
