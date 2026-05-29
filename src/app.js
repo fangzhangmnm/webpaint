@@ -13,6 +13,8 @@ import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
 import { InputController, compressPixelSnap, applyPixelSnap } from "./input.js";
 import { BrushSettings } from "./brush.js";
+import { makeDefaultRack, findBrush, getActiveBrush, brushesByTool, newBrushId } from "./brushes.js";
+import { getMeta, setMeta } from "./storage.js";
 import { UndoStack } from "./history.js";
 import { ReferenceWindow } from "./reference.js";
 import {
@@ -207,6 +209,53 @@ function syncBrushColor() {
   // brush engine 会自动 invalidate stamp（_getStamp key 包含 color）
 }
 syncBrushColor();
+
+// ============ Brush rack（v81+）============
+// 用户的笔架 = 一个 JSON。boot 时从 IDB 拿；没就装默认。
+// 每个工具切换时把那个工具的 activeBrush 应用到 state.brush 上。
+//
+// **冻结字段**（preset 内）：shape / size.curve / flow.curve / spacing / taper / hardness
+// **不冻结**：size.base（= 用户滑块的「粗」）、opacity（= 「流」）、color
+// 当前调整 size/opacity 不回写预设，只动 state.brush。显式「保存为预设」才写。
+let _brushRack = null;             // 整个 rack object，详 src/brushes.js
+const RACK_META_KEY = "brush-rack";
+async function loadBrushRack() {
+  try {
+    const stored = await getMeta(RACK_META_KEY);
+    if (stored && Array.isArray(stored.brushes) && stored.brushes.length > 0) {
+      return stored;
+    }
+  } catch (e) {
+    console.warn("[brush-rack] load failed:", e);
+  }
+  // 没存档 → 装默认
+  const rack = makeDefaultRack();
+  try { await setMeta(RACK_META_KEY, rack); } catch (e) { console.warn("[brush-rack] save default failed:", e); }
+  return rack;
+}
+async function persistBrushRack() {
+  if (!_brushRack) return;
+  try { await setMeta(RACK_META_KEY, _brushRack); }
+  catch (e) { console.warn("[brush-rack] persist failed:", e); }
+}
+// 把 brush preset 应用到 state.brush（保 color 不动；size 跟 preset 的 base）
+function applyBrushPreset(brush) {
+  if (!brush) return;
+  state.brush.size = brush.size.base;
+  state.brush.opacity = brush.opacity;
+  // pressureToSize / pressureToOpacity 从 curve 推：curve > 0 表示压感
+  state.brush.pressureToSize = brush.size.pressureCurve > 0;
+  state.brush.pressureToOpacity = brush.flow.pressureCurve > 0;
+  // 同步 UI 滑块
+  if (els.sizeSlider) els.sizeSlider.value = String(brush.size.base);
+  if (els.opacitySlider) els.opacitySlider.value = String(Math.round(brush.opacity * 100));
+}
+// 切到 tool t 时 → 应用该 tool 当前 active brush；保 color
+function applyActiveBrushForTool(tool) {
+  if (!_brushRack) return;
+  const brush = getActiveBrush(_brushRack, tool);
+  if (brush) applyBrushPreset(brush);
+}
 
 // Undo / redo 共享栈（command pattern + 注册 handler，详见
 // docs/undo-architecture.md）。input.js 注册 "stroke" handler；layer
@@ -542,10 +591,14 @@ function setTool(t) {
   els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
   document.body.dataset.tool = t;
   updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
-  // v80 占位：smudge / shapes / airbrush UI 已加但 engine 未实现，状态条提示
-  // v81+ 上各自的 engine 后这里删
+  // 切工具 → 应用该工具的当前 active brush preset（如果有）
+  // brush / smudge / eraser / shapes / airbrush 五个有 rack；其他工具不动 brush settings
+  if (t === "brush" || t === "smudge" || t === "eraser" || t === "shapes" || t === "airbrush") {
+    applyActiveBrushForTool(t);
+  }
+  // v80 占位：smudge / shapes / airbrush engine 未上，先按 brush 路径走
   if (t === "smudge" || t === "shapes" || t === "airbrush") {
-    setStatus(`${t} 工具 UI 已就位，engine 待 v81+ 实装；现在按 brush 走`);
+    setStatus(`${t} 工具 engine 待 v83+ 实装；现在按 brush 走（已应用对应 preset）`);
   }
 }
 for (const b of els.toolBtns) {
@@ -563,6 +616,12 @@ window.addEventListener("wp:doubletap", () => {
   setStatus(`双击 · ${next === "eraser" ? "橡皮" : "笔刷"}`);
 });
 setTool(state.tool);
+
+// Brush rack 异步加载：boot 时拿 IDB 缓存，应用当前 tool 的 active preset
+loadBrushRack().then((rack) => {
+  _brushRack = rack;
+  applyActiveBrushForTool(state.tool);
+}).catch((e) => console.warn("[brush-rack] init failed:", e));
 
 // ---- 颜色 ----
 // picker 内部触发的 setColor 不要再 round-trip 回 pickerSetFromHex —— 因为
