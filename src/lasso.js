@@ -372,16 +372,16 @@ export class LassoEngine {
       f.meshN = 2;
       f._renderCache = null;
     }
-    // v111: 切到低自由度时把 mesh 投到对应基底，避免 perspective→free 拖手柄异常
-    // (user：「perspective → free, uniform 时拖拽行为异常」根因 = mesh 还在 perspective 形态)
+    // v111/118: 切到低自由度时把 mesh 投到对应基底
+    // v118 改：free = 严格 shearless 矩形 (user：「自由应该是 shearless 的」)
     if (f.meshN === 2) {
       const fromDistort = f.mode === "distort";
       const fromFree    = f.mode === "free";
       if (mode === "free" && fromDistort) {
-        f.mesh = _projectMeshToParallelogram(f.mesh);   // distort → free: 4 角对偶平均成平行四边形
+        f.mesh = _projectMeshToRectangle(f.mesh);     // distort → free: 强制 v⊥u 矩形
         f._renderCache = null;
       } else if (mode === "uniform" && (fromDistort || fromFree)) {
-        f.mesh = _projectMeshToUniformRect(f.mesh, f.uniformAspect);  // → 矩形 + 锁纵横比
+        f.mesh = _projectMeshToUniformRect(f.mesh, f.uniformAspect);
         f._renderCache = null;
       }
     }
@@ -695,7 +695,9 @@ export class LassoEngine {
     let lenAx = (dragVec.x * M22 - dragVec.y * M12) / det;
     let lenAy = (-dragVec.x * M21 + dragVec.y * M11) / det;
     // uniform 模式：把 finger 沿"原对角方向"投影，等比例缩放两轴。
-    // 角"滑"在原对角线上 → 锁长宽比；垂直于对角的拖动不改 scale（更稳）
+    // v118 bug fix (user：「等比的 math 还是错了」)：之前乘了 αx / αy 把 lenAy 符号搞反，
+    // 导致非 TL 角拖时 BL（anchor）会飞。free 的 αx/αy 是 2×2 解的符号约定，
+    // 不能直接套到 uniform。uniform 只需要 scale 因子（带符号自然处理 anchor 翻转）。
     if (f.mode === "uniform") {
       const origCorner = meshSnap[row][col];
       const Dvec = sub(origCorner, anchor);       // 原对角向量
@@ -705,9 +707,8 @@ export class LassoEngine {
         const scale = (fingerFromAnchor.x * Dvec.x + fingerFromAnchor.y * Dvec.y) / Dlen2;
         const origLenAx = Math.hypot(origAx.x, origAx.y);
         const origLenAy = Math.hypot(origAy.x, origAy.y);
-        // 用原 αx / αy 决定方向（lenAx 在 free 解算中带的符号）
-        lenAx = αx * scale * origLenAx;
-        lenAy = αy * scale * origLenAy;
+        lenAx = scale * origLenAx;          // 不乘 αx
+        lenAy = scale * origLenAy;          // 不乘 αy
       }
     }
     const newAx = { x: axU.x * lenAx, y: axU.y * lenAx };
@@ -1203,25 +1204,35 @@ function downsampleMesh4to2(m) {
   ];
 }
 
-// v111: distort (任意 quad) → free (parallelogram)。对 4 角对偶平均：
-//   centroid = avg of 4 corners
-//   halfU = avg of 2 horizontal half-edges  (右半 - 左半)
-//   halfV = avg of 2 vertical half-edges    (下半 - 上半)
-//   新 4 角 = centroid ± halfU ± halfV → 平行四边形
-function _projectMeshToParallelogram(mesh) {
+// v117 改 v118：distort (任意 quad) → free (旋转矩形，shearless)
+// (user：「自由应该是 shearless 的，除非你想加 shear」)
+//   u 方向 = avg horizontal vector (TR-TL + BR-BL)/2
+//   v 方向 = u 顺时针转 90°（强制垂直，去 shear）
+//   halfU = |u| / 2
+//   halfV = avg vertical (BL-TL + BR-TR)/2 投影到 v_dir / 2  (带符号保 ↑/↓)
+//   新 4 角 = centroid ± halfU·uDir ± halfV·vDir → 严格矩形（仅 rotate + scale）
+function _projectMeshToRectangle(mesh) {
   const tl = mesh[0][0], tr = mesh[0][1];
   const bl = mesh[1][0], br = mesh[1][1];
   const cx = (tl.x + tr.x + bl.x + br.x) / 4;
   const cy = (tl.y + tr.y + bl.y + br.y) / 4;
-  const hUx = ((tr.x - tl.x) + (br.x - bl.x)) / 4;
-  const hUy = ((tr.y - tl.y) + (br.y - bl.y)) / 4;
-  const hVx = ((bl.x - tl.x) + (br.x - tr.x)) / 4;
-  const hVy = ((bl.y - tl.y) + (br.y - tr.y)) / 4;
+  const ux = ((tr.x - tl.x) + (br.x - bl.x)) / 2;
+  const uy = ((tr.y - tl.y) + (br.y - bl.y)) / 2;
+  const uLen = Math.hypot(ux, uy);
+  const uDirX = uLen > 0.01 ? ux / uLen : 1;
+  const uDirY = uLen > 0.01 ? uy / uLen : 0;
+  // v 垂直 u (顺时针 90°)
+  const vDirX = -uDirY, vDirY = uDirX;
+  const halfU = uLen / 2;
+  // 原 vertical vector 投影到 vDir 上的长度（带符号）
+  const vx = ((bl.x - tl.x) + (br.x - tr.x)) / 2;
+  const vy = ((bl.y - tl.y) + (br.y - tr.y)) / 2;
+  const halfV = (vx * vDirX + vy * vDirY) / 2;
   return [
-    [{ x: cx - hUx - hVx, y: cy - hUy - hVy },
-     { x: cx + hUx - hVx, y: cy + hUy - hVy }],
-    [{ x: cx - hUx + hVx, y: cy - hUy + hVy },
-     { x: cx + hUx + hVx, y: cy + hUy + hVy }],
+    [{ x: cx - halfU * uDirX - halfV * vDirX, y: cy - halfU * uDirY - halfV * vDirY },
+     { x: cx + halfU * uDirX - halfV * vDirX, y: cy + halfU * uDirY - halfV * vDirY }],
+    [{ x: cx - halfU * uDirX + halfV * vDirX, y: cy - halfU * uDirY + halfV * vDirY },
+     { x: cx + halfU * uDirX + halfV * vDirX, y: cy + halfU * uDirY + halfV * vDirY }],
   ];
 }
 

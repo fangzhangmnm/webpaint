@@ -707,7 +707,8 @@ export class Board {
             ctx.lineWidth = 1;
             ctx.stroke();
           } else if (h.kind === "rotate") {
-            // v117 rotate handle：白圆 + 黑边 + 从 anchor (top mid) 画一条连接线
+            // v117/118 rotate handle：白圆 + 黑边 + 从 anchor (top mid) 画一条连接线
+            // v118: 删内部小弧 icon (user：「rotation handle 上面不需要那个小弧线 icon」)
             if (h.anchor) {
               const a = this.docToScreen(h.anchor.x, h.anchor.y);
               ctx.beginPath();
@@ -723,12 +724,6 @@ export class Board {
             ctx.fill();
             ctx.strokeStyle = "rgba(0,0,0,0.85)";
             ctx.lineWidth = 1.5;
-            ctx.stroke();
-            // 小箭头标志 rotate
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, 3.2, -0.6 * Math.PI, 0.6 * Math.PI);
-            ctx.strokeStyle = "rgba(0,0,0,0.85)";
-            ctx.lineWidth = 1.2;
             ctx.stroke();
           } else {
             // free / uniform / distort：白圆 + 黑边明显 handle

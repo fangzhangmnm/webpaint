@@ -734,12 +734,12 @@ document.getElementById("lassoCancelBtn").addEventListener("click", () => {
   }
   _restoreTransientPanels();
 });
-// Stamp：写入图层但保留 float（连击多次叠加复印）
+// Stamp：写入图层但保留 float（连击多次叠加盖印）
 document.getElementById("lassoStampBtn").addEventListener("click", () => {
   if (!input.lasso.hasFloating()) return;
   if (input.lasso.stamp()) {
     board.invalidateAll();
-    setStatus("已复印");
+    setStatus("已盖印");
   }
 });
 // 插值模式 picker
