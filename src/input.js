@@ -23,6 +23,7 @@
 import { BrushEngine } from "./brush.js";
 import { LiquifyEngine } from "./liquify.js";
 import { LassoEngine, applySelectionMaskPostStroke } from "./lasso.js";
+import { ShapesEngine } from "./shapes.js";
 
 const ERASER_RADIUS_SCREEN = 0;   // 用 BrushEngine 自己的 size，不再独立
 const TAP_MAX_DURATION = 220;
@@ -55,6 +56,7 @@ export class InputController {
     this.doc = doc;
     this.canvas = board.canvas;
     this.brush = new BrushEngine();
+    this.shapes = new ShapesEngine();
     this.liquify = new LiquifyEngine();
     this.lasso = new LassoEngine();
     this.lasso.onChange = () => {
@@ -214,7 +216,7 @@ export class InputController {
         : effectiveTool === "lasso" ? "lasso"
         : effectiveTool === "airbrush" ? "draw"        // 共享 BrushEngine, settings 决定 time/direct
         : effectiveTool === "smudge" ? "draw"          // v85+ smudge engine 实装前先按 draw 走
-        : effectiveTool === "shapes" ? "draw"          // v85+ shapes engine 实装前先按 draw 走
+        : effectiveTool === "shapes" ? "shapes"
         : "draw";
       else role = "pan";
     } else if (e.pointerType === "pen") {
@@ -238,7 +240,7 @@ export class InputController {
         else if (effectiveTool === "lasso") role = "lasso";
         else if (effectiveTool === "airbrush") role = "draw";
         else if (effectiveTool === "smudge") role = "draw";     // v85+
-        else if (effectiveTool === "shapes") role = "draw";     // v85+
+        else if (effectiveTool === "shapes") role = "shapes";
         else role = "draw";
       }
     }
@@ -279,6 +281,9 @@ export class InputController {
     } else if (role === "lasso") {
       this.board.setCursor(null);
       this._beginLasso(rec);
+    } else if (role === "shapes") {
+      this.board.setCursor(null);
+      this._beginShapes(rec);
     } else if (role === "pick") {
       this._doPick(x, y);
     } else if (role === "pan") {
@@ -477,6 +482,11 @@ export class InputController {
         if (bb) this.board.markDocDirty(bb[0], bb[1], bb[2], bb[3]);
         this.board.requestRender();
       }
+    } else if (rec.role === "shapes") {
+      const { x: dx, y: dy } = this.board.screenToDoc(e.clientX, e.clientY);
+      this.shapes.extend(dx, dy);
+      this.board.invalidateAll();      // shapes preview 全屏，懒得 dirty rect
+      this.board.requestRender();
     } else if (rec.role === "pick") {
       this._doPick(e.clientX, e.clientY);
     } else if (rec.role === "pan") {
@@ -555,6 +565,9 @@ export class InputController {
     } else if (rec.role === "lasso") {
       if (cancelled) this._abortLasso();
       else this._endLasso(rec);
+    } else if (rec.role === "shapes") {
+      if (cancelled) this.shapes.cancel();
+      else this._endShapes();
     } else if (rec.role === "pan") {
       if (![...this.pointers.values()].some((p) => p.role === "pan")) {
         delete document.body.dataset.panning;
@@ -678,6 +691,41 @@ export class InputController {
   //     freehand → drawing-freehand
   //     rect     → drawing-rect
   //     magic    → magic-tentative（pointerup 时立即 flood fill）
+  // ---- shapes ----
+  _beginShapes(rec) {
+    if (!this.doc.activeLayer) { rec.role = null; return; }
+    const { x, y } = this.board.screenToDoc(rec.x, rec.y);
+    this.shapes.begin(this.doc.activeLayer, x, y);
+  }
+  _endShapes() {
+    const layer = this.doc.activeLayer;
+    if (!layer) return;
+    const settings = this.getBrushSettings();
+    const before = layer.snapshot();
+    try {
+      const bbox = this.shapes.end({
+        color: (settings && settings.color) || "#000",
+        size: (settings && settings.size) || 4,
+        selection: this.doc.selection,
+      });
+      if (!bbox) return;
+      const after = layer.snapshot();
+      if (this.history) {
+        const entry = {
+          type: "stroke", layerId: layer.id,
+          before, after, beforeBlob: null, afterBlob: null,
+        };
+        this.history.push(entry);
+        compressPixelSnap(before, (blob) => { entry.beforeBlob = blob; });
+        compressPixelSnap(after,  (blob) => { entry.afterBlob  = blob; });
+      }
+      this.board.invalidateAll();
+    } catch (e) {
+      console.error("[shapes]", e);
+      this.status("形状出错：" + (e.message || e));
+    }
+  }
+
   _beginLasso(rec) {
     if (!this.doc.activeLayer) { rec.role = null; return; }
     const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);

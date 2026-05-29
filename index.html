@@ -328,6 +328,16 @@
       </div>
     </div>
 
+    <!-- Shapes 子工具栏（v86）：shapes tool 激活时显，跟 lasso 子栏同位 -->
+    <div class="lasso-toolbar hidden" id="shapesToolbar" role="toolbar" aria-label="形状">
+      <button class="lasso-tool-btn" data-shape-sub="rect" type="button" title="矩形">矩形</button>
+      <button class="lasso-tool-btn" data-shape-sub="ellipse" type="button" title="椭圆">椭圆</button>
+      <button class="lasso-tool-btn" data-shape-sub="line" type="button" title="直线">直线</button>
+      <span class="lasso-tool-sep" aria-hidden="true">|</span>
+      <button class="lasso-tool-btn" id="shapesEqualAspectBtn" type="button" title="等比（矩→正方 / 椭→圆）">1:1</button>
+      <button class="lasso-tool-btn" id="shapesAlignAxisBtn" type="button" title="直线 snap 水平/垂直">H/V</button>
+    </div>
+
     <!-- Brush rack sheet（v83）：底部弹出，选当前工具的 brush
          exclusive；任何 transient（pointerdown 画布 / lasso transform / 别的 panel 开）关掉 -->
     <div class="backdrop hidden" id="brushRackBackdrop"></div>

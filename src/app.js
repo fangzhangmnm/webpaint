@@ -668,6 +668,9 @@ function setTool(t) {
   els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
   document.body.dataset.tool = t;
   updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
+  // shapes 子工具栏只在 shapes tool 下显
+  const shapesToolbar = document.getElementById("shapesToolbar");
+  if (shapesToolbar) shapesToolbar.classList.toggle("hidden", t !== "shapes");
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
   if (t === "brush" || t === "smudge" || t === "eraser" || t === "shapes" || t === "airbrush") {
     applyToolState(t);
@@ -700,6 +703,28 @@ for (const b of els.toolBtns) {
   });
 }
 window.addEventListener("wp:settool", (e) => setTool(e.detail));
+
+// ---- Shapes 子工具栏（v86）----
+{
+  const tb = document.getElementById("shapesToolbar");
+  if (tb) {
+    const subBtns = [...tb.querySelectorAll("[data-shape-sub]")];
+    const eqBtn = document.getElementById("shapesEqualAspectBtn");
+    const alBtn = document.getElementById("shapesAlignAxisBtn");
+    const refresh = () => {
+      const sub = input.shapes.getSubtool();
+      for (const b of subBtns) b.setAttribute("aria-pressed", b.dataset.shapeSub === sub ? "true" : "false");
+      eqBtn.setAttribute("aria-pressed", input.shapes.getEqualAspect() ? "true" : "false");
+      alBtn.setAttribute("aria-pressed", input.shapes.getAlignAxis() ? "true" : "false");
+    };
+    for (const b of subBtns) {
+      b.addEventListener("click", () => { input.shapes.setSubtool(b.dataset.shapeSub); refresh(); });
+    }
+    eqBtn.addEventListener("click", () => { input.shapes.setEqualAspect(!input.shapes.getEqualAspect()); refresh(); });
+    alBtn.addEventListener("click", () => { input.shapes.setAlignAxis(!input.shapes.getAlignAxis()); refresh(); });
+    refresh();
+  }
+}
 // pencil 模式下双击 → 笔↔橡皮。但 floating 选区存在时屏蔽（避免误触切工具 = 自动 apply 变换）
 window.addEventListener("wp:doubletap", () => {
   if (input.lasso.hasFloating()) {
