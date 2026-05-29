@@ -193,6 +193,26 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - 改：lassoToolbarRow2 重排，selectionActions 里把反选 / 去选 / 填色 / 清除选区
   四个 grouping 到一起；变换 / 复印 / 复制层等 lift-类操作另一组
 
+### lasso transform 数学大修 (v112 记，user：「建议好好理一遍数学」)
+v110 加 mesh 后 v111 投影补丁，user 测出多个 drag/handle bug：
+- **uniform 还是错**：应该用 opposite angle 做 pivot（拖角时对角角固定），现在大概 pivot 在中心
+- **自由 / 等比 忘了旋转 handle**：通常在 top-edge 上方浮一个 rotation handle
+- **free transform 拖动上面下面动**：top/bottom 拖某条边时另一条跟着动，math 错了
+- **变换 commit 后 lasso 再拖矩形蚂蚁线不见**：可能新 selection 的 _chains / _outline 没正确重算
+- 建议重新论证 transform basis：
+  - free = pure affine (rotate + scale + skew)，需要旋转 handle
+  - uniform = affine + lock aspect，opposite corner pivot
+  - distort = perspective (free quad)，4 corner = 4 control points
+  - warp = bezier patch (4x4 mesh)
+- 写 docs/transform-math.md 论证 + 比对 Procreate / Photoshop UX
+
+### 颜色调整 ctx.filter 兜底 (v112 记，user：「颜色调整没 work」)
+- v110 用 ctx.filter on board render；v112 加 save/restore 包裹防 setter 不清
+- 若 iPad Safari Canvas2D filter 仍偶发不渲染：fallback 走 off-screen canvas 预渲染
+  + board.setActiveLayerSurrogate(layerId, canvas) 路径
+- 终极 fallback：JS per-pixel 算 B/C/S/H (avoid Canvas2D filter)
+- 优先级：v112 先看 save/restore 够不够
+
 ### lasso 多边形模式（v104 记）
 - user：「lasso 能加多边形模式吗？最好是 down 之后拖拽，然后 up 之后才写入」
 - procreate / PS 标准多边形 lasso：tap = 落点，拖拽 = 预览下一段线，up = 写入下一顶点；

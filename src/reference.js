@@ -154,6 +154,14 @@ export class ReferenceWindow {
   }
   open() {
     this.panel.classList.remove("hidden");
+    // v112: 默认位置避开 topbar + 左 sidebar（user：「不要 spawn 在左上角贴顶，那样难点」）
+    // 仅在 panel 没被拖过 / 没 applySerializedState 时设默认；保留 user 调过的位置
+    if (!this.panel.style.left || !this.panel.style.top) {
+      const topbarH = 56;
+      const sidebarW = 80;
+      this.panel.style.left = (sidebarW + 16) + "px";
+      this.panel.style.top  = (topbarH + 24) + "px";
+    }
     this._resizeCanvasToBody();
     this._updateEmptyHint();
     if (this._liveDoc) this._liveDirty = true;   // 重新打开 = 默认重画一次

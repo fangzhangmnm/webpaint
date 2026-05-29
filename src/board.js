@@ -293,15 +293,16 @@ export class Board {
   // 到 **doc 坐标系**（doc (0,0) = ctx origin，doc (W,H) = (W,H) in ctx）。
   // 所以这里 drawImage 的 dest 直接用 layer.bboxX/Y/W/H（doc 坐标）。
   _drawLayerWithOverlay(ctx, layer, overlay) {
-    // v110: 颜色调整 live preview —— 给指定 layer 在 drawImage 时套 ctx.filter
+    // v110/112: 颜色调整 live preview —— 给指定 layer 在 drawImage 时套 ctx.filter
+    // v112: save/restore 包起来；iPad Safari Canvas2D filter 偶发不清，直接 setter 不稳
     const tempFilter = (this._activeFilterLayerId === layer.id) ? this._activeFilterStr : null;
     if (!overlay || overlay.mode !== "erase") {
-      if (tempFilter) ctx.filter = tempFilter;
+      if (tempFilter) { ctx.save(); ctx.filter = tempFilter; }
       ctx.drawImage(
         layer.canvas, 0, 0, layer.bboxW, layer.bboxH,
         layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH,
       );
-      if (tempFilter) ctx.filter = "none";
+      if (tempFilter) ctx.restore();
       if (overlay) {
         const prevA = ctx.globalAlpha;
         ctx.globalAlpha = ctx.globalAlpha * overlay.opacity;

@@ -635,6 +635,21 @@ document.getElementById("lassoClearBtn").addEventListener("click", () => {
   board.invalidateAll();
   setStatus("已清除选区内像素");
 });
+// v112: 全选（user：「lasso 加全选」）
+document.getElementById("lassoSelectAllBtn").addEventListener("click", () => {
+  const w = doc.width, h = doc.height;
+  const mask = document.createElement("canvas");
+  mask.width = w; mask.height = h;
+  const mctx = mask.getContext("2d");
+  mctx.fillStyle = "#fff";
+  mctx.fillRect(0, 0, w, h);
+  const sel = { bboxX: 0, bboxY: 0, bboxW: w, bboxH: h, maskCanvas: mask };
+  const entry = input.lasso.setSelection(sel);
+  if (entry && history) history.push(entry);
+  board.invalidateAll();
+  updateLassoToolbar();
+});
+
 // 反选：在 docW×docH 上 mask 取反
 document.getElementById("lassoInvertBtn").addEventListener("click", () => {
   const inv = invertSelection(doc.selection, doc.width, doc.height);

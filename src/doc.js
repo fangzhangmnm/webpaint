@@ -367,22 +367,67 @@ export class PaintDoc {
     });
   }
 
-  // v110: 裁切 doc 到 rect（doc 坐标 {x, y, w, h}）。各 layer bbox 偏移 -rect.x/y；
-  // 像素数据不裁（layer canvas 仍是原大小，bbox 偏到 doc 外部分自然不渲染）。
-  // 想真正释放裁外像素 → 后续 layer realloc + clip。这版先简单做。
+  // v112: 裁切 doc 到 rect（doc 坐标 {x, y, w, h}）。
+  // v110 偷懒只改 bbox 不真裁 canvas，导致裁后旧像素 bbox 偏到 -X 露在 void 上
+  // → user 画的东西落在新 doc 外 (实际是落在旧 bbox 区域)。修：真 clip layer canvas。
   cropTo(rect) {
     const dx = rect.x | 0, dy = rect.y | 0, nw = Math.max(1, rect.w | 0), nh = Math.max(1, rect.h | 0);
     for (const L of this.layers) {
-      L.bboxX -= dx;
-      L.bboxY -= dy;
       L.docW = nw;
       L.docH = nh;
+      if (L.bboxW <= 0 || L.bboxH <= 0) {
+        L.bboxX = 0; L.bboxY = 0;
+        continue;
+      }
+      // 老 bbox → 新 doc 坐标后 clip 到 [0, nw] × [0, nh]
+      const tL = L.bboxX - dx, tT = L.bboxY - dy;
+      const tR = tL + L.bboxW, tB = tT + L.bboxH;
+      const newL = Math.max(0, tL),  newT = Math.max(0, tT);
+      const newR = Math.min(nw, tR), newB = Math.min(nh, tB);
+      const newW = newR - newL, newH = newB - newT;
+      if (newW <= 0 || newH <= 0) {
+        // 整层裁到 doc 外 → 空层占位
+        L.bboxX = 0; L.bboxY = 0; L.bboxW = 0; L.bboxH = 0;
+        L.canvas = makeBitmap(1, 1);
+        L.ctx = L.canvas.getContext("2d", { willReadFrequently: false });
+        L.ctx.imageSmoothingEnabled = true;
+        L.ctx.imageSmoothingQuality = "low";
+        continue;
+      }
+      // srcX/srcY = 老 layer canvas 上要拷贝的左上角 (老 bbox 局部坐标)
+      const srcX = newL - tL;
+      const srcY = newT - tT;
+      const nc = makeBitmap(newW, newH);
+      const nctx = nc.getContext("2d", { willReadFrequently: false });
+      nctx.imageSmoothingEnabled = true;
+      nctx.imageSmoothingQuality = "low";
+      nctx.drawImage(L.canvas, srcX, srcY, newW, newH, 0, 0, newW, newH);
+      L.canvas = nc;
+      L.ctx = nctx;
+      L.bboxX = newL;
+      L.bboxY = newT;
+      L.bboxW = newW;
+      L.bboxH = newH;
     }
     if (this.selection) {
-      this.selection.bboxX -= dx;
-      this.selection.bboxY -= dy;
-      this.selection._chains = null;
-      this.selection._outline = null;
+      const tL = this.selection.bboxX - dx, tT = this.selection.bboxY - dy;
+      const tR = tL + this.selection.bboxW, tB = tT + this.selection.bboxH;
+      const newL = Math.max(0, tL), newT = Math.max(0, tT);
+      const newR = Math.min(nw, tR), newB = Math.min(nh, tB);
+      const newW = newR - newL, newH = newB - newT;
+      if (newW <= 0 || newH <= 0) {
+        this.selection = null;
+      } else {
+        const srcX = newL - tL, srcY = newT - tT;
+        const m = document.createElement("canvas");
+        m.width = newW; m.height = newH;
+        m.getContext("2d").drawImage(this.selection.maskCanvas, srcX, srcY, newW, newH, 0, 0, newW, newH);
+        this.selection.bboxX = newL; this.selection.bboxY = newT;
+        this.selection.bboxW = newW; this.selection.bboxH = newH;
+        this.selection.maskCanvas = m;
+        this.selection._chains = null;
+        this.selection._outline = null;
+      }
     }
     this.width = nw;
     this.height = nh;
