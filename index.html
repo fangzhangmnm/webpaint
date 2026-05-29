@@ -170,7 +170,9 @@
       <input id="sizeSlider" class="left-sidebar-slider" type="range" min="1" max="200" step="1" value="12" aria-label="笔粗" orient="vertical" />
       <span class="left-sidebar-label" title="笔粗">粗</span>
       <div class="size-popup hidden" id="sizePopup" aria-hidden="true">
-        <div class="size-popup-circle" id="sizePopupCircle"></div>
+        <div class="size-popup-circle-frame">
+          <div class="size-popup-circle" id="sizePopupCircle"></div>
+        </div>
         <span class="size-popup-text" id="sizePopupText">12 px</span>
       </div>
       <input id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1" value="100" aria-label="流量 / 不透明" orient="vertical" />
@@ -308,11 +310,11 @@
           <button class="lasso-tool-btn" id="lassoTransformBtn" type="button" title="变换 / 移动">变换</button>
           <button class="lasso-tool-btn" id="lassoFillBtn" type="button" title="用当前颜色填选区">填色</button>
           <button class="lasso-tool-btn" id="lassoClearBtn" type="button" title="清除选区内像素">清除</button>
-          <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" title="反选">反选</button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <button class="lasso-tool-btn" id="lassoDuplicateBtn" type="button" title="复制选区到新层">复制层</button>
           <button class="lasso-tool-btn" id="lassoMoveToLayerBtn" type="button" title="选区移动到新层（旧层清除）">移到层</button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
+          <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" title="反选">反选</button>
           <button class="lasso-tool-btn lasso-tool-cancel" id="lassoDeselectBtn" type="button" title="清除选区（去选）">去选</button>
         </div>
         <div class="lasso-section hidden" id="lassoTransformCtrl">
@@ -542,35 +544,7 @@
     <!-- 参考图文件 input（只 image，不接 .ora） -->
     <input type="file" id="referenceFileInput" accept="image/*" style="display:none" />
 
-    <!-- 笔刷设置浮动面板（沿用 .float-panel） -->
-    <div class="float-panel brush-panel hidden" id="brushPanel">
-      <div class="float-panel-head" id="brushPanelHead">
-        <span class="float-panel-title">笔刷平滑</span>
-        <button class="float-panel-close" id="brushPanelClose" type="button" aria-label="关闭">×</button>
-      </div>
-      <div class="float-panel-body">
-        <label class="brush-slider-row" title="一阶 IIR LPF（指数时间衰减）。0=raw，1=完全跟不上">
-          <span class="brush-slider-label">StreamLine</span>
-          <input id="brushStreamline" type="range" min="0" max="100" step="1" value="30" />
-          <span class="brush-slider-value" id="brushStreamlineVal">30</span>
-        </label>
-        <label class="brush-slider-row" title="滑动平均，窗口 = 1 + 值 × 16 点">
-          <span class="brush-slider-label">Stabilization</span>
-          <input id="brushStabilization" type="range" min="0" max="100" step="1" value="0" />
-          <span class="brush-slider-value" id="brushStabilizationVal">0</span>
-        </label>
-        <label class="brush-slider-row" title="速度上限 follower（"实笔感"）">
-          <span class="brush-slider-label">Pull Stabilizer</span>
-          <input id="brushPullStabilizer" type="range" min="0" max="100" step="1" value="0" />
-          <span class="brush-slider-value" id="brushPullStabilizerVal">0</span>
-        </label>
-        <label class="brush-slider-row" title="角速度 clamp（防瞬尖）">
-          <span class="brush-slider-label">Motion Filter</span>
-          <input id="brushMotionFilter" type="range" min="0" max="100" step="1" value="0" />
-          <span class="brush-slider-value" id="brushMotionFilterVal">0</span>
-        </label>
-      </div>
-    </div>
+    <!-- v109: brushPanel 浮动面板撤了 —— 平滑参数现在 per-preset，进 brush settings 调 -->
 
     <!-- Adjustments popup：液化 / 调色等。学 Procreate adjustments icon -->
     <div class="adjust-popup menu-panel hidden" id="adjustPopup" role="menu">
@@ -625,9 +599,7 @@
       <button class="menu-item" id="menuReference" type="button" role="menuitem">
         <span class="menu-item-label">参考小窗…</span>
       </button>
-      <button class="menu-item" id="menuBrushSettings" type="button" role="menuitem">
-        <span class="menu-item-label">笔刷平滑设置…</span>
-      </button>
+      <button class="menu-item" id="menuBrushSettings" type="button" role="menuitem" hidden></button>
       <button class="menu-item" id="menuCheckerboard" type="button" role="menuitemcheckbox" aria-pressed="false">
         <span class="menu-item-label">透明背景显示棋盘</span>
         <span class="menu-item-state" data-state-for="checkerboard">关</span>

@@ -11,7 +11,7 @@
               "taperIn": 0.3, "taperOut": 0.3,
               "streamline": 0.8, "stabilization": 0.75, "motionFilter": 0.2 } },
   { "id": "default-brush-fill", "name": "平涂", "tool": "brush",
-    "args": { "size": 50, "sizeBaseMax": 800, "hardness": 0.8,
+    "args": { "size": 50, "sizeBaseMax": 800, "hardness": 0.9,
               "sizeCoeff": 1.0, "opaCoeff": 0, "flowCoeff": 0,
               "pressureGamma": 1.2, "pressureLPF": 100,
               "spacingValue": 0.06, "compositeMode": "wash",
@@ -45,7 +45,7 @@
               "spacingValue": 0.1, "compositeMode": "buildup" } },
 
   { "id": "default-brush-pixel", "name": "像素笔", "tool": "brush",
-    "args": { "size": 4, "sizeBaseMax": 64, "hardness": 1.0,
+    "args": { "size": 1, "sizeBaseMax": 64, "hardness": 1.0,
               "sizeCoeff": 0, "opaCoeff": 0, "flowCoeff": 0,
               "spacingValue": 0.5, "compositeMode": "wash",
               "pixelMode": true,

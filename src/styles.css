@@ -1072,7 +1072,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   grid-template-columns: 80px 1fr;
 }
 
-/* v104 size 滑块 popup：拖动时显 px + mini circle 预览，1.2s 后隐 */
+/* v104 size 滑块 popup（v109 zoom-aware + viewport crop）*/
 .size-popup {
   position: fixed;
   background: var(--bg);
@@ -1087,10 +1087,16 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   box-shadow: var(--shadow);
 }
 .size-popup.hidden { display: none; }
+/* v109: 圆按屏 px 真画，可能超 frame；圆所在 cell 裁掉框外 */
+.size-popup-circle-frame {
+  width: 120px; height: 120px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
 .size-popup-circle {
   background: var(--ink);
   border-radius: 50%;
-  width: 20px; height: 20px;
   flex-shrink: 0;
 }
 .size-popup-text {
@@ -1098,6 +1104,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   font-size: 13px;
   min-width: 50px;
   text-align: right;
+  white-space: nowrap;
 }
 
 /* Palette 调色板小窗（v87）—— 256×256 浮动 mixer */
