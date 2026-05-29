@@ -53,6 +53,11 @@ const DEFAULT_SETTINGS = {
   taperIn: 1.5,
   taperFloor: 0.4,            // touchdown 时 envelope = 0.4 而非 0；dot tap 仍可见
   color: "#1b1b1b",
+  // v83 新加：从 brush preset 同步过来的 shape 描述（applyBrushPresetFrozen 写）
+  // round → 圆；ellipse → 用 ctx.transform scale + rotate 绘 stamp（cache 仍是圆）
+  shapeKind: "round",         // "round" | "ellipse" | "texture" (texture 待实装)
+  shapeAspect: 1.0,           // ellipse 短轴 / 长轴比 (0.1..1.0)
+  shapeRotation: 0,           // ellipse 旋转 radians（preset 里是度，apply 时换算）
 };
 
 export class BrushSettings {
@@ -319,7 +324,18 @@ export class BrushEngine {
     // 转换 doc 坐标 → buffer-local 坐标
     const lx = x - st.bufBboxX;
     const ly = y - st.bufBboxY;
-    ctx.drawImage(stamp.canvas, lx - drawR, ly - drawR, drawD, drawD);
+    // v83：ellipse 绕中心 scale Y + rotate，stamp cache 仍是圆（省 cache）。
+    // round 走快路径 drawImage（无 transform）。
+    if (s.shapeKind === "ellipse" && (s.shapeAspect !== 1 || s.shapeRotation !== 0)) {
+      ctx.save();
+      ctx.translate(lx, ly);
+      if (s.shapeRotation) ctx.rotate(s.shapeRotation);
+      if (s.shapeAspect !== 1) ctx.scale(1, s.shapeAspect);
+      ctx.drawImage(stamp.canvas, -drawR, -drawR, drawD, drawD);
+      ctx.restore();
+    } else {
+      ctx.drawImage(stamp.canvas, lx - drawR, ly - drawR, drawD, drawD);
+    }
 
     ctx.globalAlpha = prevAlpha;
     ctx.globalCompositeOperation = prevComp;

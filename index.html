@@ -328,6 +328,32 @@
       </div>
     </div>
 
+    <!-- Brush rack sheet（v83）：底部弹出，选当前工具的 brush
+         exclusive；任何 transient（pointerdown 画布 / lasso transform / 别的 panel 开）关掉 -->
+    <div class="backdrop hidden" id="brushRackBackdrop"></div>
+    <div class="brush-rack-sheet hidden" id="brushRackSheet" role="dialog" aria-label="笔架">
+      <div class="brush-rack-head">
+        <span id="brushRackTitle">笔架 · 笔刷</span>
+        <div class="brush-rack-actions">
+          <button class="brush-rack-action" id="brushRackImport" type="button" title="导入 JSON">导入</button>
+          <button class="brush-rack-action" id="brushRackNew" type="button" title="新建笔">+ 新建</button>
+          <button class="brush-rack-close" id="brushRackClose" type="button" aria-label="关闭">×</button>
+        </div>
+      </div>
+      <div class="brush-rack-folders" id="brushRackFolders"></div>
+      <div class="brush-rack-grid" id="brushRackGrid"></div>
+    </div>
+
+    <!-- Brush settings 全屏 view（v83）：编辑某个 brush preset -->
+    <div class="brush-settings-view hidden" id="brushSettingsView" role="dialog" aria-modal="true" aria-label="笔刷设置">
+      <header class="brush-settings-head">
+        <button class="brush-settings-back" id="brushSettingsCancel" type="button">取消</button>
+        <span class="brush-settings-title">笔刷设置</span>
+        <button class="brush-settings-save" id="brushSettingsSave" type="button">保存</button>
+      </header>
+      <div class="brush-settings-body" id="brushSettingsBody"></div>
+    </div>
+
     <!-- Sync gate（OneDrive 状态决策；详见 docs/sync-design.md） -->
     <!-- 锁屏 backdrop 拦住所有 input；sheet 给 user 显式选项。 -->
     <div class="backdrop sync-gate-backdrop hidden" id="syncGateBackdrop"></div>

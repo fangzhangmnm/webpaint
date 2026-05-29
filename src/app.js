@@ -13,7 +13,11 @@ import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
 import { InputController, compressPixelSnap, applyPixelSnap } from "./input.js";
 import { BrushSettings } from "./brush.js";
-import { makeDefaultRack, findBrush, getActiveBrush, brushesByTool, newBrushId } from "./brushes.js";
+import {
+  makeDefaultRack, findBrush, getActiveBrush, brushesByTool,
+  newBrushId, brushToJSON, brushFromJSON, DEFAULT_FOLDER,
+} from "./brushes.js";
+import { PANELS, registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
 import { getMeta, setMeta } from "./storage.js";
 import { UndoStack } from "./history.js";
 import { ReferenceWindow } from "./reference.js";
@@ -268,7 +272,21 @@ function applyBrushPresetFrozen(brush) {
   if (!brush) return;
   state.brush.pressureToSize = brush.size.pressureCurve > 0;
   state.brush.pressureToOpacity = brush.flow.pressureCurve > 0;
-  // v83+ engine refactor 后这里加 shape / hardness / spacing 等
+  // shape：deg → rad；其他直接抄
+  state.brush.shapeKind     = brush.shape.kind || "round";
+  state.brush.shapeAspect   = brush.shape.aspect ?? 1.0;
+  state.brush.shapeRotation = (brush.shape.rotation ?? 0) * Math.PI / 180;
+  state.brush.hardness      = brush.shape.hardness ?? 1.0;
+  // taper（brush.js 默认 taperIn=1.5；preset taper.in 是「相对 size 的倍数」同语义）
+  state.brush.taperIn       = brush.taper.in ?? 0;
+  // spacing：brush.js 用 spacing 标量（spacing × size = step px）。preset spacing.value 同义
+  if (brush.spacing.kind === "distance") {
+    state.brush.spacing = brush.spacing.value || 1.5;
+  }
+  // time-stamp / direct-layer mode 在 BrushEngine 里还没接，v84+ 处理
+  // 颜色不在 preset 里（color 是 doc-level）
+  // 关键：BrushEngine stamp cache 跟 color/hardness 绑，要 invalidate
+  if (input?.brush?.invalidateStamp) input.brush.invalidateStamp();
 }
 
 // 切到 tool t：从 toolStates[t] 取 size/flow 应用到 state.brush + UI；preset 取冻结字段
@@ -652,8 +670,27 @@ function setTool(t) {
     setStatus(`${t} 工具 engine 待 v83+ 实装；现在按 brush 走（已应用对应 per-tool 状态）`);
   }
 }
+// Rack 工具 → 对应的 exclusive panel id
+const RACK_PANEL_BY_TOOL = {
+  brush: PANELS.RACK_BRUSH,
+  smudge: PANELS.RACK_SMUDGE,
+  eraser: PANELS.RACK_ERASER,
+  shapes: PANELS.RACK_SHAPES,
+  airbrush: PANELS.RACK_AIRBRUSH,
+};
 for (const b of els.toolBtns) {
-  b.addEventListener("click", () => setTool(b.dataset.tool));
+  b.addEventListener("click", () => {
+    const t = b.dataset.tool;
+    // tap-active-again：已激活的 rack 工具再点 → 开/关该工具的笔架 sheet
+    // 详 conversation v79→v80：「tap = 切换 / 已激活 tap = 开 rack」
+    if (state.tool === t && RACK_PANEL_BY_TOOL[t]) {
+      openExclusive(RACK_PANEL_BY_TOOL[t]);
+      return;
+    }
+    setTool(t);
+    // 切到新 tool 时关掉之前开的 rack（防止 stale）
+    closeExclusive();
+  });
 }
 window.addEventListener("wp:settool", (e) => setTool(e.detail));
 // pencil 模式下双击 → 笔↔橡皮。但 floating 选区存在时屏蔽（避免误触切工具 = 自动 apply 变换）
@@ -3198,6 +3235,335 @@ window.addEventListener("offline", () => { updateCloudAuthUI(); });
     setStatus(`启动加载 "${wantedName}" 失败，使用空白文档`);
   }
 })();
+
+// ============ Brush rack sheet + 设置 view（v83）============
+
+const _rackEls = {
+  backdrop: document.getElementById("brushRackBackdrop"),
+  sheet: document.getElementById("brushRackSheet"),
+  title: document.getElementById("brushRackTitle"),
+  close: document.getElementById("brushRackClose"),
+  importBtn: document.getElementById("brushRackImport"),
+  newBtn: document.getElementById("brushRackNew"),
+  folders: document.getElementById("brushRackFolders"),
+  grid: document.getElementById("brushRackGrid"),
+};
+const _settingsEls = {
+  view: document.getElementById("brushSettingsView"),
+  body: document.getElementById("brushSettingsBody"),
+  save: document.getElementById("brushSettingsSave"),
+  cancel: document.getElementById("brushSettingsCancel"),
+};
+
+const TOOL_LABEL = {
+  brush: "笔刷", smudge: "涂抹", eraser: "橡皮",
+  shapes: "形状", airbrush: "喷枪",
+};
+let _rackCurrentFolder = DEFAULT_FOLDER;
+let _rackCurrentTool = "brush";   // 当前 rack sheet 显示的工具
+let _rackDirty = false;           // sheet 操作 dirty 标记，**关闭时**才同步云（user 指示）
+
+function _showRackSheet(tool) {
+  if (!_brushRack) return;
+  _rackCurrentTool = tool;
+  _rackEls.title.textContent = `笔架 · ${TOOL_LABEL[tool] || tool}`;
+  _renderRackSheet();
+  _rackEls.backdrop.classList.remove("hidden");
+  _rackEls.sheet.classList.remove("hidden");
+}
+function _hideRackSheet() {
+  _rackEls.backdrop.classList.add("hidden");
+  _rackEls.sheet.classList.add("hidden");
+  if (_rackDirty) {
+    persistBrushRack();           // 同步 IDB
+    _rackDirty = false;
+    // v84+: 此时若 user 登录 OneDrive 则推云（待实装）
+  }
+}
+function _renderRackSheet() {
+  const brushes = brushesByTool(_brushRack, _rackCurrentTool);
+  // 收集 folder 列表
+  const folderSet = new Set();
+  for (const b of brushes) folderSet.add(b.folder || DEFAULT_FOLDER);
+  if (folderSet.size === 0) folderSet.add(DEFAULT_FOLDER);
+  const folders = Array.from(folderSet);
+  if (!folders.includes(_rackCurrentFolder)) _rackCurrentFolder = folders[0];
+  // 渲 folder tabs
+  _rackEls.folders.innerHTML = "";
+  for (const f of folders) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "brush-rack-folder";
+    btn.textContent = f;
+    btn.setAttribute("aria-pressed", f === _rackCurrentFolder ? "true" : "false");
+    btn.addEventListener("click", () => {
+      _rackCurrentFolder = f;
+      _renderRackSheet();
+    });
+    _rackEls.folders.appendChild(btn);
+  }
+  // 渲 brush tiles
+  const activeId = state.toolStates[_rackCurrentTool]?.activeBrushId;
+  _rackEls.grid.innerHTML = "";
+  for (const b of brushes.filter((x) => (x.folder || DEFAULT_FOLDER) === _rackCurrentFolder)) {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "brush-rack-tile";
+    tile.setAttribute("aria-pressed", b.id === activeId ? "true" : "false");
+    tile.dataset.brushId = b.id;
+    const preview = document.createElement("div");
+    preview.className = "brush-rack-tile-preview";
+    // 简易 preview：根据 shape 形状用 CSS 描述
+    if (b.shape.kind === "ellipse") {
+      const ar = b.shape.aspect;
+      preview.style.transform = `rotate(${b.shape.rotation}deg) scaleY(${ar})`;
+    }
+    if (b.shape.hardness < 0.5) {
+      const hh = b.shape.hardness;
+      preview.style.background = `radial-gradient(circle, var(--ink) ${hh*100}%, transparent 100%)`;
+    }
+    const name = document.createElement("span");
+    name.className = "brush-rack-tile-name";
+    name.textContent = b.name;
+    tile.appendChild(preview);
+    tile.appendChild(name);
+    // tap → 选中 + 关 sheet
+    tile.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selectBrushPresetForTool(_rackCurrentTool, b.id);
+      _rackDirty = true;
+      closeExclusive();
+    });
+    // 长按 → 设置
+    let longPressTimer = null;
+    tile.addEventListener("pointerdown", () => {
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        closeExclusive();
+        _openBrushSettings(b.id);
+      }, 600);
+    });
+    const cancelLongPress = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
+    tile.addEventListener("pointerup", cancelLongPress);
+    tile.addEventListener("pointerleave", cancelLongPress);
+    tile.addEventListener("pointercancel", cancelLongPress);
+    _rackEls.grid.appendChild(tile);
+  }
+}
+
+// 注册 panel-state
+for (const tool of Object.keys(RACK_PANEL_BY_TOOL)) {
+  const id = RACK_PANEL_BY_TOOL[tool];
+  registerPanel(id, {
+    show: () => _showRackSheet(tool),
+    hide: _hideRackSheet,
+  });
+}
+_rackEls.close.addEventListener("click", () => closeExclusive());
+_rackEls.backdrop.addEventListener("click", () => closeExclusive());
+_rackEls.newBtn.addEventListener("click", () => {
+  // 在当前 tool + folder 下新建空白 brush，进设置 view
+  const newB = {
+    id: newBrushId(),
+    name: `新建笔 ${_brushRack.brushes.length + 1}`,
+    tool: _rackCurrentTool,
+    folder: _rackCurrentFolder,
+    shape: { kind: "round", aspect: 1, rotation: 0, hardness: 1.0, textureB64: null },
+    size: { base: 12, min: 1, max: 200, pressureCurve: 1.0 },
+    flow: { base: 1.0, pressureCurve: 0 },
+    opacity: 1.0,
+    spacing: { kind: "distance", value: 1.5 },
+    bufferMode: "stroke-buffer",
+    taper: { in: 0, out: 0 },
+    smudge: null,
+  };
+  _brushRack.brushes.push(newB);
+  _rackDirty = true;
+  closeExclusive();
+  _openBrushSettings(newB.id);
+});
+_rackEls.importBtn.addEventListener("click", async () => {
+  // 简易：直接弹 prompt 让 user 粘贴 JSON。后期可改文件选择
+  const txt = await openInputSheet("粘贴 brush JSON", "", { placeholder: "{...}" });
+  if (!txt) return;
+  try {
+    const b = brushFromJSON(txt);
+    b.folder = _rackCurrentFolder;
+    b.tool = _rackCurrentTool;
+    _brushRack.brushes.push(b);
+    _rackDirty = true;
+    _renderRackSheet();
+    setStatus("已导入");
+  } catch (e) { setStatus("导入失败：" + (e.message || e)); }
+});
+
+// ---- brush settings 全屏 view ----
+let _editingBrushId = null;
+let _editingBrushDraft = null;
+
+function _openBrushSettings(brushId) {
+  const b = findBrush(_brushRack, brushId);
+  if (!b) return;
+  _editingBrushId = brushId;
+  _editingBrushDraft = JSON.parse(JSON.stringify(b));    // deep clone
+  _renderBrushSettings();
+  _settingsEls.view.classList.remove("hidden");
+}
+function _closeBrushSettings(save) {
+  if (save && _editingBrushDraft) {
+    const idx = _brushRack.brushes.findIndex((x) => x.id === _editingBrushId);
+    if (idx >= 0) {
+      _brushRack.brushes[idx] = _editingBrushDraft;
+      _rackDirty = true;
+      persistBrushRack();
+      // 若是当前 tool 的 active brush → 同步 frozen 字段
+      const ts = state.toolStates[_editingBrushDraft.tool];
+      if (ts?.activeBrushId === _editingBrushId && state.tool === _editingBrushDraft.tool) {
+        applyToolState(state.tool);
+      }
+      setStatus(`已保存：${_editingBrushDraft.name}`);
+    }
+  }
+  _editingBrushId = null;
+  _editingBrushDraft = null;
+  _settingsEls.view.classList.add("hidden");
+}
+_settingsEls.save.addEventListener("click", () => _closeBrushSettings(true));
+_settingsEls.cancel.addEventListener("click", () => _closeBrushSettings(false));
+
+function _renderBrushSettings() {
+  const b = _editingBrushDraft;
+  if (!b) return;
+  const body = _settingsEls.body;
+  body.innerHTML = "";
+  // 用模板化 helper 简写各 row
+  const section = (title) => {
+    const s = document.createElement("div");
+    s.className = "brush-settings-section";
+    const t = document.createElement("div");
+    t.className = "brush-settings-section-title";
+    t.textContent = title;
+    s.appendChild(t);
+    body.appendChild(s);
+    return s;
+  };
+  const rangeRow = (sec, label, min, max, step, val, fmt, onChange) => {
+    const row = document.createElement("div");
+    row.className = "brush-settings-row";
+    row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}" value="${val}"><span class="brush-settings-val">${fmt(val)}</span>`;
+    const input = row.querySelector("input");
+    const valSpan = row.querySelector(".brush-settings-val");
+    input.addEventListener("input", () => {
+      const v = parseFloat(input.value);
+      valSpan.textContent = fmt(v);
+      onChange(v);
+    });
+    sec.appendChild(row);
+  };
+  const textRow = (sec, label, val, onChange) => {
+    const row = document.createElement("div");
+    row.className = "brush-settings-row brush-settings-row-full";
+    row.innerHTML = `<label>${label}</label><input type="text" value="">`;
+    const input = row.querySelector("input");
+    input.value = val;
+    input.addEventListener("input", () => onChange(input.value));
+    sec.appendChild(row);
+  };
+  const selectRow = (sec, label, options, val, onChange) => {
+    const row = document.createElement("div");
+    row.className = "brush-settings-row brush-settings-row-full";
+    const opts = options.map(([v, l]) => `<option value="${v}"${v===val?" selected":""}>${l}</option>`).join("");
+    row.innerHTML = `<label>${label}</label><select>${opts}</select>`;
+    const sel = row.querySelector("select");
+    sel.addEventListener("change", () => onChange(sel.value));
+    sec.appendChild(row);
+  };
+
+  // 基本
+  const basic = section("基本");
+  textRow(basic, "名字", b.name, (v) => b.name = v);
+  selectRow(basic, "工具", [
+    ["brush", "笔刷"], ["smudge", "涂抹"], ["eraser", "橡皮"],
+    ["shapes", "形状"], ["airbrush", "喷枪"],
+  ], b.tool, (v) => b.tool = v);
+  textRow(basic, "文件夹", b.folder, (v) => b.folder = v);
+
+  // Shape
+  const shape = section("形状");
+  selectRow(shape, "类型", [["round", "圆"], ["ellipse", "椭圆"], ["texture", "纹理"]], b.shape.kind, (v) => {
+    b.shape.kind = v; _renderBrushSettings();   // 切类型刷新可见 row
+  });
+  if (b.shape.kind === "ellipse") {
+    rangeRow(shape, "长短轴", 0.1, 1.0, 0.05, b.shape.aspect, (v) => v.toFixed(2), (v) => b.shape.aspect = v);
+    rangeRow(shape, "旋转°", 0, 180, 1, b.shape.rotation, (v) => `${v|0}°`, (v) => b.shape.rotation = v);
+  }
+  rangeRow(shape, "硬度", 0, 1.0, 0.05, b.shape.hardness, (v) => v.toFixed(2), (v) => b.shape.hardness = v);
+
+  // Size dynamics
+  const size = section("粗细");
+  rangeRow(size, "基础", 1, 200, 1, b.size.base, (v) => `${v|0}`, (v) => b.size.base = v);
+  rangeRow(size, "压感", 0, 2.0, 0.1, b.size.pressureCurve, (v) => v.toFixed(1), (v) => b.size.pressureCurve = v);
+
+  // Flow dynamics
+  const flow = section("流量");
+  rangeRow(flow, "基础", 0, 1.0, 0.05, b.flow.base, (v) => v.toFixed(2), (v) => b.flow.base = v);
+  rangeRow(flow, "压感", 0, 2.0, 0.1, b.flow.pressureCurve, (v) => v.toFixed(1), (v) => b.flow.pressureCurve = v);
+
+  // Opacity
+  const opa = section("不透明度");
+  rangeRow(opa, "上限", 0, 1.0, 0.05, b.opacity, (v) => v.toFixed(2), (v) => b.opacity = v);
+
+  // Spacing
+  const sp = section("间距");
+  selectRow(sp, "类型", [["distance", "距离 (px)"], ["time", "时间 (ms)"]], b.spacing.kind, (v) => {
+    b.spacing.kind = v;
+    b.bufferMode = v === "time" ? "direct-layer" : "stroke-buffer";
+    _renderBrushSettings();
+  });
+  rangeRow(sp, "值", 0.1, b.spacing.kind === "time" ? 200 : 5, b.spacing.kind === "time" ? 1 : 0.1,
+    b.spacing.value, (v) => b.spacing.kind === "time" ? `${v|0} ms` : v.toFixed(1), (v) => b.spacing.value = v);
+
+  // Taper
+  const tp = section("收尾");
+  rangeRow(tp, "入端", 0, 5, 0.1, b.taper.in, (v) => v.toFixed(1), (v) => b.taper.in = v);
+  rangeRow(tp, "出端", 0, 5, 0.1, b.taper.out, (v) => v.toFixed(1), (v) => b.taper.out = v);
+
+  // Smudge specific
+  if (b.tool === "smudge") {
+    if (!b.smudge) b.smudge = { strength: 0.8, dryness: 0.1 };
+    const sm = section("涂抹");
+    rangeRow(sm, "强度", 0, 1.0, 0.05, b.smudge.strength, (v) => v.toFixed(2), (v) => b.smudge.strength = v);
+    rangeRow(sm, "干燥度", 0, 1.0, 0.05, b.smudge.dryness, (v) => v.toFixed(2), (v) => b.smudge.dryness = v);
+  }
+
+  // 删除按钮
+  const del = section("");
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "brush-rack-action";
+  delBtn.textContent = "删除此笔";
+  delBtn.style.background = "rgba(220,38,38,0.1)";
+  delBtn.style.color = "#dc2626";
+  delBtn.style.borderColor = "#dc2626";
+  delBtn.addEventListener("click", async () => {
+    const ok = await openConfirmSheet("删除这支笔？", `「${b.name}」（不可撤销）`);
+    if (!ok) return;
+    const idx = _brushRack.brushes.findIndex((x) => x.id === _editingBrushId);
+    if (idx >= 0) _brushRack.brushes.splice(idx, 1);
+    _rackDirty = true;
+    persistBrushRack();
+    _editingBrushId = null;
+    _editingBrushDraft = null;
+    _settingsEls.view.classList.add("hidden");
+    setStatus("已删除");
+  });
+  del.appendChild(delBtn);
+}
+
+// canvas pointerdown → 关 exclusive panel（user：「画画时别让 panel 挡着」）
+els.board.addEventListener("pointerdown", () => {
+  if (getCurrentExclusive()) closeExclusive();
+}, { capture: true });   // capture 在 input.js 处理 stroke 之前
 
 // ---- Service worker + 更新检测 ----
 // 沿用 WebXiaoHeiWu 模式，四条检测路径都挂上，iPad PWA standalone 模式默认
