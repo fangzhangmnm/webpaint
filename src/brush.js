@@ -64,6 +64,9 @@ const DEFAULT_SETTINGS = {
   bufferMode: "stroke-buffer",// "stroke-buffer" | "direct-layer"
                               // direct-layer：跳过 stroke buffer，stamp 直接 source-over 到 layer
                               // 配合 time-stamp = 喷枪 hover 累积加深
+  // v85 smudge：笔毛参数
+  smudgeStrength: 0.8,        // loaded 占 output 的比重；0 = 纯 current, 1 = 纯 loaded
+  smudgeDryness: 0.1,         // 每 stamp 后 loaded 吸 current 的比例；0 = 不吸，1 = 完全换
 };
 
 export class BrushSettings {
@@ -147,8 +150,13 @@ export class BrushEngine {
     //   stroke-buffer（默认 brush / eraser）：buffer + endStroke composite，opacity cap
     //   direct-layer（喷枪）：跳 buffer，stamp 直接 source-over 到 layer
     //     + time-stamp（spacingKind="time"）→ hover 时 setInterval 累积 stamp
-    const direct = settings.bufferMode === "direct-layer";
+    // v85：smudge mode
+    //   direct-layer 强制；每 stamp 采 current pixel + blend with loaded → draw out
+    //   每 stamp 后用 dryness 更新 loaded
+    const direct = settings.bufferMode === "direct-layer" || mode === "smudge";
     const timeStamp = settings.spacingKind === "time";
+    let loaded = null;
+    if (mode === "smudge") loaded = this._sampleLayerColor(layer, x, y);
     let buffer = null, bufferCtx = null;
     if (!direct) {
       buffer = document.createElement("canvas");
@@ -170,6 +178,7 @@ export class BrushEngine {
       direct,
       timeStamp,
       timer: null,
+      loaded,                            // smudge "笔毛"含的颜色 {r,g,b,a} 或 null
     };
     this._stampOne(x, y, pressure);
     // time-stamp：每 ms 间隔从最新 pos 喷一颗
@@ -299,6 +308,19 @@ export class BrushEngine {
     return d;
   }
 
+  // 采 layer (x, y) 的 RGBA 颜色（doc 坐标）。layer 外当透明
+  _sampleLayerColor(layer, x, y) {
+    const ix = Math.floor(x - layer.bboxX);
+    const iy = Math.floor(y - layer.bboxY);
+    if (ix < 0 || iy < 0 || ix >= layer.bboxW || iy >= layer.bboxH) {
+      return { r: 0, g: 0, b: 0, a: 0 };
+    }
+    try {
+      const d = layer.ctx.getImageData(ix, iy, 1, 1).data;
+      return { r: d[0], g: d[1], b: d[2], a: d[3] };
+    } catch (_) { return { r: 0, g: 0, b: 0, a: 0 }; }
+  }
+
   _stampOne(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
@@ -325,8 +347,31 @@ export class BrushEngine {
     const alpha = Math.max(0, Math.min(1, opaMul));
     if (alpha < 0.001) return;
 
-    // stamp 按 s.size 烤一次（缓存），这里按 actual size 缩放 drawImage
-    const stamp = this._getStamp(s.size, s.hardness, s.color, st.mode);
+    // smudge：每 stamp 采当前像素 → blend with loaded → 输出色喷 stamp
+    // 输出后用 dryness 更新 loaded（吸新色）
+    let stamp;
+    if (st.mode === "smudge" && st.loaded) {
+      const cur = this._sampleLayerColor(st.layer, x, y);
+      const strength = s.smudgeStrength ?? 0.8;
+      const dryness  = s.smudgeDryness  ?? 0.1;
+      const out = {
+        r: st.loaded.r * strength + cur.r * (1 - strength),
+        g: st.loaded.g * strength + cur.g * (1 - strength),
+        b: st.loaded.b * strength + cur.b * (1 - strength),
+        a: Math.max(st.loaded.a, cur.a),  // alpha 取大值，不让 smudge 削掉不透明像素
+      };
+      const hex = "#" + [out.r, out.g, out.b].map(v => Math.max(0, Math.min(255, v|0)).toString(16).padStart(2, "0")).join("");
+      stamp = this._getStamp(s.size, s.hardness, hex, "brush");
+      // 用 cur 比例更新 loaded：吸一点新色
+      st.loaded = {
+        r: st.loaded.r * (1 - dryness) + cur.r * dryness,
+        g: st.loaded.g * (1 - dryness) + cur.g * dryness,
+        b: st.loaded.b * (1 - dryness) + cur.b * dryness,
+        a: st.loaded.a * (1 - dryness) + cur.a * dryness,
+      };
+    } else {
+      stamp = this._getStamp(s.size, s.hardness, s.color, st.mode);
+    }
 
     // 目标直径 = size + 2px 给 AA 边和源贴图一致比例
     const drawD = size + 2 * (size / stamp.baseSize);

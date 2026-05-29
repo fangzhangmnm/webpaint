@@ -268,7 +268,14 @@ export class InputController {
       rec.lastDirX = 0; rec.lastDirY = 0;
       rec.filtX = x; rec.filtY = y;
       if (role === "liquify") this._beginLiquify(rec);
-      else this._beginStroke(e, rec, role === "erase" ? "erase" : "brush");
+      else {
+        // mode 推断：tool=smudge → "smudge"；其他按 erase/brush 走
+        const tool = this.getTool();
+        const mode = role === "erase" ? "erase"
+          : tool === "smudge" ? "smudge"
+          : "brush";
+        this._beginStroke(e, rec, mode);
+      }
     } else if (role === "lasso") {
       this.board.setCursor(null);
       this._beginLasso(rec);

@@ -288,6 +288,11 @@ function applyBrushPresetFrozen(brush) {
     state.brush.spacing = brush.spacing.value || 1.5;
     state.brush.bufferMode = brush.bufferMode || "stroke-buffer";
   }
+  // v85：smudge 笔毛参数
+  if (brush.smudge) {
+    state.brush.smudgeStrength = brush.smudge.strength ?? 0.8;
+    state.brush.smudgeDryness  = brush.smudge.dryness  ?? 0.1;
+  }
   if (input?.brush?.invalidateStamp) input.brush.invalidateStamp();
 }
 
