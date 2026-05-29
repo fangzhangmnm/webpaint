@@ -1,72 +1,73 @@
-// 笔刷引擎 v0：圆笔 + 沿线 stamp。
+// 笔刷引擎 v98（Krita-aligned + 双 path）。详 docs/brush-architecture.md。
 //
-// 设计原则（一期手感期）：
-// - 数据语义层与渲染语义层分离（沿用 ScratchPad 的洞察）：
-//   - "压感关" = 写入 p=1.0 进数据。**不是**渲染分支。
-//   - 一期没有"笔画"持久结构 —— 直接 stamp 进 layer.ctx。但 brush settings
-//     单独打包 BrushSettings 对象，方便后期接 brush preset / 序列化。
-// - 一笔的"质感"由 sample-spacing 决定，不依赖屏幕事件频率。
-//   每个 pointermove 拿 coalesced events 后，每两个采样之间按 doc-px 距离
-//   走 `spacing × size` 的步长 stamp。这样无论 60Hz 还是 240Hz，落笔密度一致。
-// - stamp 是预渲染的 offscreen canvas。颜色 / size / hardness 变了再重做。
+// **核心模型**：
+//   per stamp at pressure p：
+//     p' = p ^ pressureGamma
+//     size_mul = signed_lerp(sizeCoeff, p')
+//     flow_mul = signed_lerp(flowCoeff, p')
+//     opa_mul  = signed_lerp(opaCoeff,  p')
+//     size_eff = preset.size × size_mul
+//     stamp_α  = state.brush.flow × flow_mul × opa_mul    ← user.opacity 不在这里
 //
-// 后期会扩展的钩子（写在脑子里，不写在代码里）：
-//   * 自定义 stamp 纹理（图片 / 噪声）
-//   * dual brush（两个 stamp 叠加）
-//   * 抖动（size / opacity / rotation / scatter）
-//   * 笔刷 dynamics 曲线（pressure → param 不只是 pow）
-//   * 水彩混色（每个 stamp 拉一下底色再吐）
-//   * 厚涂（normal map / 法线方向）
-//   * WebGPU 加速
+//   stroke buffer 内重叠合成（compositeMode 决定）：
+//     buildup  (PS 默认 / 喷枪 feel): buffer = 1 − ∏(1 − stamp_α × shape_α)
+//                                      ↑ 就是 Canvas2D 原生 source-over，走 native
+//     wash     (Krita Alpha Darken):  buffer = max(buffer, stamp_α × shape_α)
+//                                      ↑ Canvas2D 没 alpha-max，走 JS per-pixel
+//
+//   endStroke composite to layer：
+//     globalAlpha = user.opacity  ← Π 外面那一层乘 opacity
+//     normal 模式 source-over；erase 模式 destination-out
+//
+// **为啥 opacity 在 Π 外**：flow 在 Π 内、opacity 在 Π 外是 PS / Krita 的标准。
+//   spacing=100% 无重叠时 Π 退化为单项 → flow 和 opacity 可交换；
+//   spacing<100% 有重叠时 flow 被 Π 放大、opacity 不被 → 出现 "10%flow > 100%flow×10%opa" 那种现象。
+//
+// **双 path**：
+//   Build-Up: 走 Canvas2D 原生 source-over（GPU），bufferCanvas RGBA，
+//             cached colored radial-gradient stamp 跟 v97 一样
+//   Wash:     走 JS per-pixel max，bufferData Uint8 (α only)，
+//             shape α 解析公式 (round / ellipse)，endStroke 转 RGBA canvas 上 layer
+//   smudge / pixelMode: 都直接进 layer（不进 buffer）
 
 const DEFAULT_SETTINGS = {
   type: "round",
-  size: 12,           // doc-px 直径（满压）
-  opacity: 1,         // 每个 stamp 的 alpha 上限（0..1）
-  hardness: 0.75,     // 0=完全软（径向渐变到边缘）；1=硬边（无渐变）。窄一点 rim 累积更不明显
-  spacing: 0.12,      // stamp 间距 = spacing × size（doc-px）
-  // 压感映射：开 → 用 pressure；关 → 一律 1
-  pressureToSize: true,
-  pressureToOpacity: true,    // user 2026-05-25：默认笔压也控 alpha
-  sizeCurve: 0.6,             // size = size_max × p^sizeCurve
-  opacityCurve: 0.6,
-  // === 四件套位置平滑（对标 Procreate 全套）===
-  // 都在 input.js _move 内按 raw → MF → Stab → Pull → SL 顺序串联：
-  // - StreamLine：一阶 IIR LPF（指数时间衰减）。0=raw 直传，1=完全跟不上。
-  //   默认 0.3 微开 —— 手抖 / 整数量化不进笔触，又几乎没可感延迟。
-  // - Stabilization：滑动平均（最近 N 点平均），N = 1 + stabilization × 16。
-  //   高值笔感"团稳"，转向时切方向慢。Procreate 同名参数。
-  // - Pull-Stabilizer：速度上限 follower。pullStab=1 时每帧最多动 maxStep×0.05 px。
-  //   "实笔感" / 重笔；和 IIR 互补。Procreate "Stabilization" 实际包含这一档。
-  // - Motion Filtering：角速度 clamp。motionFilter=1 时新方向不能偏离旧方向超过
-  //   阈值（瞬尖被钝化）。Procreate 同名参数。
-  // 默认除 StreamLine 外都为 0（行为同 v40）。
+  size: 12,
+  color: "#1b1b1b",
+  // 用户当场调（per-tool 持久）：
+  opacity: 1.0,           // user.opacity —— 应用在 endStroke composite (Π 外)
+  flow: 1.0,              // user.flow —— 进 α_dab (Π 内)
+  // 压感 dynamics（preset 冻结，−1..1 signed）：
+  sizeCoeff: 0.6,
+  opaCoeff: 0.6,
+  flowCoeff: 0,
+  pressureGamma: 1.0,
+  // shape：
+  hardness: 0.75,
+  shapeKind: "round",
+  shapeAspect: 1.0,
+  shapeRotation: 0,
+  // spacing：
+  spacing: 0.12,
+  // buffer 合成模式：
+  compositeMode: "wash",  // "wash" = Alpha Darken (JS max), "buildup" = source-over (Canvas2D native)
+  // pixel mode：
+  pixelMode: false,
+  // 位置平滑（input.js 用，不在引擎）：
   streamline: 0.3,
   stabilization: 0,
   pullStabilizer: 0,
   motionFilter: 0,
-  // taperIn：起手 fade-in 长度 = size × taperIn doc-px。
-  // - 0 = 关（marker / 硬尖钢笔之类的 preset 用 0）
-  // - 默认 1.5 微 taper：减弱 Apple Pencil 碰撞瞬间的 pressure spike 鼓"萝卜尖"
-  // - taperOut 不做：抬笔时机不可预知，回溯改像素不值得（Pencil 物理 pressure
-  //   抬笔本来就会掉）
+  // 系统级 anti-spike taper（Apple Pencil 落笔 spike → 萝卜尖补偿）：
+  // 这是硬件信号缺陷补偿，跟 brush 风格 taper 分开；preset 的 taper.in/out 是 stylistic 的
   taperIn: 1.5,
-  taperFloor: 0.4,            // touchdown 时 envelope = 0.4 而非 0；dot tap 仍可见
-  color: "#1b1b1b",
-  // v83 新加：从 brush preset 同步过来的 shape 描述（applyBrushPresetFrozen 写）
-  // round → 圆；ellipse → 用 ctx.transform scale + rotate 绘 stamp（cache 仍是圆）
-  shapeKind: "round",         // "round" | "ellipse" | "texture" (texture 待实装)
-  shapeAspect: 1.0,           // ellipse 短轴 / 长轴比 (0.1..1.0)
-  shapeRotation: 0,           // ellipse 旋转 radians（preset 里是度，apply 时换算）
-  // v84 airbrush：time-stamp + direct-layer
-  spacingKind: "distance",    // "distance" | "time"
-  spacingValueMs: 16,         // 当 spacingKind="time" 用；distance 仍走 spacing 标量
-  bufferMode: "stroke-buffer",// "stroke-buffer" | "direct-layer"
-                              // direct-layer：跳过 stroke buffer，stamp 直接 source-over 到 layer
-                              // 配合 time-stamp = 喷枪 hover 累积加深
-  // v85 smudge：笔毛参数
-  smudgeStrength: 0.8,        // loaded 占 output 的比重；0 = 纯 current, 1 = 纯 loaded
-  smudgeDryness: 0.1,         // 每 stamp 后 loaded 吸 current 的比例；0 = 不吸，1 = 完全换
+  taperFloor: 0.4,
+  // smudge：
+  smudgeStrength: 0.8,
+  smudgeDryness: 0.1,
+  // legacy 字段（applyBrushPresetFrozen 老路径可能 reference，no-op）：
+  pressureToSize: true,
+  pressureToOpacity: true,
 };
 
 export class BrushSettings {
@@ -74,25 +75,30 @@ export class BrushSettings {
   clone(over) { return new BrushSettings({ ...this, ...over }); }
 }
 
+// signed_lerp：coeff ∈ [−1, 1]，p ∈ [0, 1]，返回 ∈ [amp, 1] where amp = 1 − |coeff|。
+//   coeff ≥ 0：amp + (1 − amp) × p  →  p=0 → amp，p=1 → 1
+//   coeff < 0：1 + (amp − 1) × p    →  p=0 → 1，  p=1 → amp
+//   coeff = 0：永远 1（不响应压感）
+function signedLerp(coeff, p) {
+  const amp = 1 - Math.abs(coeff);
+  return coeff >= 0 ? amp + (1 - amp) * p
+                    : 1 + (amp - 1) * p;
+}
+
 export class BrushEngine {
   constructor() {
-    this._stampCache = null;       // {key, canvas, radius}
-    this._stroke = null;           // { layer, settings, accumDist, lastX, lastY, lastP, mode }
+    this._stampCache = null;       // {key, canvas, baseSize, radius} —— Build-Up colored stamp cache
+    this._stroke = null;
   }
 
-  // 预渲染一个 stamp 图。color 直接画进去；后期改纹理时这里换实现即可。
-  //
-  // **PERF**：cache key 里**不**含 size —— stamp 按 settings.size（最大压感）
-  // 烤一次，每颗 stamp 用 drawImage 的 dest-size 缩放下来。否则 size 因压感
-  // 每颗都变 → 每颗 cache miss → 每颗都重建 canvas + gradient，200Hz 飘起来
-  // GC + GPU 上传立刻爆。color / hardness / mode 才是真正会触发重做的参数。
+  // 预渲染 colored radial-gradient stamp（Build-Up native path 用）。
+  // PERF：cache key 不含 size —— stamp 按 baseSize 烤一次，每颗 drawImage 缩到目标 size。
   _getStamp(size, hardness, color, mode) {
     const useColor = mode === "erase" ? "#000" : color;
     const key = `${useColor}|${hardness.toFixed(3)}|${mode}`;
     if (this._stampCache && this._stampCache.key === key && this._stampCache.baseSize >= size) {
       return this._stampCache;
     }
-
     const baseSize = Math.max(64, Math.ceil(size));
     const d = baseSize + 2;
     const r = d / 2;
@@ -100,123 +106,115 @@ export class BrushEngine {
     stamp.width = d; stamp.height = d;
     const sctx = stamp.getContext("2d");
     const hd = Math.max(0, Math.min(0.999, hardness));
-    // Radial gradient：内圈 hd×r 满 alpha 的 useColor，外圈到 r 时同色 α=0。
-    // **关键**：末尾 stop 用同色 α=0（不是 transparent black），bilinear 采
-    // 圆边时不会引入 RGB 漂移，避免经典 sprite 白/黑边。
     const g = sctx.createRadialGradient(r, r, hd * r, r, r, r);
     g.addColorStop(0, useColor);
-    g.addColorStop(1, hexToRgba(useColor, 0));
+    g.addColorStop(1, hexToRgba(useColor, 0));   // 同色 α=0 避免 RGB 漂移白/黑边
     sctx.fillStyle = g;
     sctx.fillRect(0, 0, d, d);
-
     this._stampCache = { key, canvas: stamp, baseSize, radius: r };
     return this._stampCache;
   }
 
-  // 失效缓存（颜色 / size / hardness 大幅改 → 下次自动重做）
   invalidateStamp() { this._stampCache = null; }
 
-  // settings 中的 color 也可以单独切（更轻量）
   setColor(color) {
-    if (this._stroke) this._stroke.settings.color = color;
+    if (this._stroke) {
+      this._stroke.settings.color = color;
+      this._stroke.overlayDirty = true;
+    }
     this.invalidateStamp();
   }
 
-  // 沿 path arc-length 等距 stamp，标量 accumDist 累加：
-  //   beginStroke: 落 touchdown stamp，lastX/Y/P=(x,y,p)，accumDist=0
-  //   extendStroke(x,y,p):
-  //     L = hypot(x-lastX, y-lastY)
-  //     while accumDist + (L - segPos) >= step:
-  //       消耗 step - accumDist，在 lerp 点落 stamp，accumDist=0
-  //     accumDist += L - segPos
-  //     lastX/Y/P=(x,y,p)
-  //
-  // step = settings.size × spacing （不走 pressure）。
-  // 注意：raw event 必须按时间单调到达（见 docs/ipad-coalesced-events.md），
-  // 否则 Safari iOS coalesced 边界回放会把反向小段算进 path 长度 → 疏密波。
-  // 这一层过滤在 input.js 端做。
-
-  // step 走"当前 stamp 的有效半径"：低压感时 effSize 小，step 也小 →
-  // 不再因为 stamp 直径远小于 step 而看到一颗颗豆豆。
-  // 旧版（v19~v28）step 是整笔常量 = size × spacing，低压感时 stamp 缩成豆。
+  // step = size_eff × spacing；低压感 size 小 → step 小，不会出豆豆链
   _stepFor(s, pressure) {
     const p = Math.max(0, Math.min(1, pressure));
-    const effSize = s.size * (s.pressureToSize ? Math.pow(p, s.sizeCurve) : 1);
+    const pCurve = Math.pow(p, Math.max(0.01, s.pressureGamma || 1.0));
+    const sizeMul = signedLerp(s.sizeCoeff || 0, pCurve);
+    const effSize = s.size * sizeMul;
     return Math.max(0.5, effSize * s.spacing);
   }
 
   beginStroke(layer, settings, x, y, pressure, mode = "brush") {
-    // v84：两条路径
-    //   stroke-buffer（默认 brush / eraser）：buffer + endStroke composite，opacity cap
-    //   direct-layer（喷枪）：跳 buffer，stamp 直接 source-over 到 layer
-    //     + time-stamp（spacingKind="time"）→ hover 时 setInterval 累积 stamp
-    // v85：smudge mode
-    //   direct-layer 强制；每 stamp 采 current pixel + blend with loaded → draw out
-    //   每 stamp 后用 dryness 更新 loaded
-    const direct = settings.bufferMode === "direct-layer" || mode === "smudge";
-    const timeStamp = settings.spacingKind === "time";
     let loaded = null;
     if (mode === "smudge") loaded = this._sampleLayerColor(layer, x, y);
-    let buffer = null, bufferCtx = null;
-    if (!direct) {
-      buffer = document.createElement("canvas");
-      buffer.width = Math.max(1, layer.bboxW);
-      buffer.height = Math.max(1, layer.bboxH);
-      bufferCtx = buffer.getContext("2d");
-    }
+    const isBuildup = (settings.compositeMode || "wash") === "buildup";
     this._stroke = {
       layer, settings, mode,
       lastX: x, lastY: y, lastP: pressure,
       accumDist: 0,
       strokeDist: 0,
       dirty: null,
-      buffer, bufferCtx,
+      // Build-Up path：bufferCanvas (RGBA Canvas2D, native source-over)
+      // Wash path：bufferData (Uint8ClampedArray, JS per-pixel max)
+      isBuildup,
+      bufferCanvas: null, bufferCtx: null,    // Build-Up only
+      bufferData: null,                       // Wash only
       bufBboxX: layer.bboxX,
       bufBboxY: layer.bboxY,
-      bufBboxW: layer.bboxW,
-      bufBboxH: layer.bboxH,
-      direct,
-      timeStamp,
-      timer: null,
-      loaded,                            // smudge "笔毛"含的颜色 {r,g,b,a} 或 null
+      bufBboxW: 0,
+      bufBboxH: 0,
+      overlayCanvas: null,                    // Wash only（Build-Up 直接用 bufferCanvas）
+      overlayDirty: false,
+      loaded,
     };
     this._stampOne(x, y, pressure);
-    // time-stamp：每 ms 间隔从最新 pos 喷一颗
-    if (timeStamp) {
-      const ms = Math.max(8, settings.spacingValueMs || 16);
-      this._stroke.timer = setInterval(() => {
-        const st = this._stroke;
-        if (!st) return;
-        this._stampOne(st.lastX, st.lastY, st.lastP);
-      }, ms);
-    }
   }
 
-  // stamp 落在 buffer bbox 外 → 扩 buffer 到能容纳，clamp 在 doc 范围内
   _ensureBufferBbox(x0, y0, x1, y1) {
     const st = this._stroke;
-    if (x0 >= st.bufBboxX && y0 >= st.bufBboxY &&
-        x1 <= st.bufBboxX + st.bufBboxW && y1 <= st.bufBboxY + st.bufBboxH) return;
     const m = 32;
-    let nx  = Math.floor(Math.min(st.bufBboxX, x0 - m));
-    let ny  = Math.floor(Math.min(st.bufBboxY, y0 - m));
-    let nx1 = Math.ceil(Math.max(st.bufBboxX + st.bufBboxW, x1 + m));
-    let ny1 = Math.ceil(Math.max(st.bufBboxY + st.bufBboxH, y1 + m));
+    let nx, ny, nx1, ny1;
+    if (st.bufBboxW === 0) {
+      nx = Math.floor(x0 - m);
+      ny = Math.floor(y0 - m);
+      nx1 = Math.ceil(x1 + m);
+      ny1 = Math.ceil(y1 + m);
+    } else {
+      if (x0 >= st.bufBboxX && y0 >= st.bufBboxY &&
+          x1 <= st.bufBboxX + st.bufBboxW && y1 <= st.bufBboxY + st.bufBboxH) return;
+      nx  = Math.floor(Math.min(st.bufBboxX, x0 - m));
+      ny  = Math.floor(Math.min(st.bufBboxY, y0 - m));
+      nx1 = Math.ceil(Math.max(st.bufBboxX + st.bufBboxW, x1 + m));
+      ny1 = Math.ceil(Math.max(st.bufBboxY + st.bufBboxH, y1 + m));
+    }
     nx = Math.max(0, nx);
     ny = Math.max(0, ny);
     nx1 = Math.min(st.layer.docW, nx1);
     ny1 = Math.min(st.layer.docH, ny1);
-    const nw = nx1 - nx, nh = ny1 - ny;
+    const nw = nx1 - nx;
+    const nh = ny1 - ny;
     if (nw <= 0 || nh <= 0) return;
-    const nb = document.createElement("canvas");
-    nb.width = nw;
-    nb.height = nh;
-    const nctx = nb.getContext("2d");
-    if (st.bufBboxW > 0 && st.bufBboxH > 0) {
-      nctx.drawImage(st.buffer, st.bufBboxX - nx, st.bufBboxY - ny);
+
+    if (st.isBuildup) {
+      // Build-Up：移老 canvas 像素到新 canvas
+      const newCanvas = document.createElement("canvas");
+      newCanvas.width = nw;
+      newCanvas.height = nh;
+      const newCtx = newCanvas.getContext("2d");
+      if (st.bufferCanvas && st.bufBboxW > 0 && st.bufBboxH > 0) {
+        newCtx.drawImage(st.bufferCanvas, st.bufBboxX - nx, st.bufBboxY - ny);
+      }
+      st.bufferCanvas = newCanvas;
+      st.bufferCtx = newCtx;
+    } else {
+      // Wash：复制老 Uint8Array 到新 array
+      const newBuf = new Uint8ClampedArray(nw * nh);
+      if (st.bufferData && st.bufBboxW > 0 && st.bufBboxH > 0) {
+        const dx = st.bufBboxX - nx;
+        const dy = st.bufBboxY - ny;
+        const oldW = st.bufBboxW;
+        const oldH = st.bufBboxH;
+        for (let y = 0; y < oldH; y++) {
+          const oldOff = y * oldW;
+          const newOff = (y + dy) * nw + dx;
+          for (let x = 0; x < oldW; x++) {
+            newBuf[newOff + x] = st.bufferData[oldOff + x];
+          }
+        }
+      }
+      st.bufferData = newBuf;
+      st.overlayCanvas = null;    // size 变 → 重建
     }
-    st.buffer = nb;
-    st.bufferCtx = nctx;
     st.bufBboxX = nx;
     st.bufBboxY = ny;
     st.bufBboxW = nw;
@@ -226,24 +224,17 @@ export class BrushEngine {
   extendStroke(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
-    // time-stamp：不算距离，只更新 last，让 timer 在最新位置喷
-    if (st.timeStamp) {
-      st.lastX = x; st.lastY = y; st.lastP = pressure;
-      return;
-    }
     const dx = x - st.lastX;
     const dy = y - st.lastY;
     const L = Math.hypot(dx, dy);
     if (L === 0) return;
     let pos = 0;
     while (true) {
-      // step 用本次 event 的目标 pressure 算（在 event 内常量）。
-      // 想再精确可在 lerp 后用 sp 重算，但 240Hz event 之间 p 变化很小，差别看不出。
       const step = this._stepFor(st.settings, pressure);
       if (st.accumDist + (L - pos) < step) break;
       const need = step - st.accumDist;
       pos += need;
-      st.strokeDist += step;          // 新 stamp 比上一颗远 step
+      st.strokeDist += step;
       const t = pos / L;
       const sx = st.lastX + dx * t;
       const sy = st.lastY + dy * t;
@@ -259,47 +250,90 @@ export class BrushEngine {
 
   endStroke() {
     const st = this._stroke;
-    if (st && st.timer) { clearInterval(st.timer); st.timer = null; }
-    if (st && st.buffer) {
-      // stroke-buffer 路径：buffer → layer composite at endStroke
-      const layer = st.layer;
-      const ctx = layer.ctx;
-      const prevA = ctx.globalAlpha;
-      const prevC = ctx.globalCompositeOperation;
-      ctx.globalAlpha = st.settings.opacity;
-      ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : "source-over";
-      ctx.drawImage(st.buffer, st.bufBboxX - layer.bboxX, st.bufBboxY - layer.bboxY);
-      ctx.globalAlpha = prevA;
-      ctx.globalCompositeOperation = prevC;
-    }
-    // direct-layer 路径：stamps 已经直接进 layer，endStroke 无 composite 步骤
+    if (st && (st.bufferCanvas || st.bufferData)) this._compositeBufferToLayer();
     this._stroke = null;
   }
 
-  cancelStroke() {
+  cancelStroke() { this._stroke = null; }
+
+  _compositeBufferToLayer() {
     const st = this._stroke;
-    if (st && st.timer) { clearInterval(st.timer); st.timer = null; }
-    // direct-layer cancel：layer 已经写脏了，没法回滚（除非外面有 snapshot）。
-    // brush 用户基本不会主动 cancel airbrush，触屏中断走 history undo。
-    this._stroke = null;
+    const layer = st.layer;
+    const ctx = layer.ctx;
+    const composeCanvas = st.isBuildup ? st.bufferCanvas : this._renderWashToCanvas();
+    if (!composeCanvas) return;
+    const prevA = ctx.globalAlpha;
+    const prevC = ctx.globalCompositeOperation;
+    ctx.globalAlpha = Math.max(0, Math.min(1, st.settings.opacity ?? 1.0));   // Π 外 × opacity
+    ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : "source-over";
+    ctx.drawImage(composeCanvas, st.bufBboxX - layer.bboxX, st.bufBboxY - layer.bboxY);
+    ctx.globalAlpha = prevA;
+    ctx.globalCompositeOperation = prevC;
   }
 
-  // 给 board 用：返回当前笔触的 live overlay，让 render 每帧在 layer 之上
-  // 再画一遍 buffer，预览不立即写进 layer。endStroke 才把 buffer 烧进 layer。
+  // Wash：把 Uint8 buffer 转 RGBA canvas（color × α）。用于 endStroke 合成 + live overlay。
+  _renderWashToCanvas(targetCanvas = null) {
+    const st = this._stroke;
+    if (!st || !st.bufferData) return null;
+    const w = st.bufBboxW, h = st.bufBboxH;
+    let canvas = targetCanvas;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+    } else if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+    }
+    const cctx = canvas.getContext("2d");
+    const out = cctx.createImageData(w, h);
+    // erase 模式 color 不影响（dst-out 只看 α），还是填黑省得 RGB 漏到合成层
+    const color = st.mode === "erase" ? { r: 0, g: 0, b: 0 } : hexToRgbObj(st.settings.color);
+    const buf = st.bufferData;
+    const n = buf.length;
+    const r = color.r, g = color.g, b = color.b;
+    for (let i = 0; i < n; i++) {
+      const o = i * 4;
+      out.data[o]     = r;
+      out.data[o + 1] = g;
+      out.data[o + 2] = b;
+      out.data[o + 3] = buf[i];
+    }
+    cctx.putImageData(out, 0, 0);
+    return canvas;
+  }
+
+  // board 每帧调；返回 {canvas, bboxX/Y/W/H, layer, opacity, mode}。
+  // opacity 是 user.opacity（Π 外那一层）；board 渲染时会 globalAlpha *= opacity
   getLiveOverlay() {
     const st = this._stroke;
-    if (!st || !st.buffer) return null;     // direct-layer 无 buffer → null（stamp 已在 layer 上，board 渲染时已包含）
+    if (!st) return null;
+    let canvas;
+    if (st.isBuildup) {
+      if (!st.bufferCanvas) return null;
+      canvas = st.bufferCanvas;
+    } else {
+      if (!st.bufferData) return null;
+      if (!st.overlayCanvas) {
+        st.overlayCanvas = document.createElement("canvas");
+        st.overlayCanvas.width = st.bufBboxW;
+        st.overlayCanvas.height = st.bufBboxH;
+        st.overlayDirty = true;
+      }
+      if (st.overlayDirty) {
+        this._renderWashToCanvas(st.overlayCanvas);
+        st.overlayDirty = false;
+      }
+      canvas = st.overlayCanvas;
+    }
     return {
-      canvas: st.buffer,
+      canvas,
       bboxX: st.bufBboxX, bboxY: st.bufBboxY,
       bboxW: st.bufBboxW, bboxH: st.bufBboxH,
       layer: st.layer,
-      opacity: st.settings.opacity,
+      opacity: Math.max(0, Math.min(1, st.settings.opacity ?? 1.0)),
       mode: st.mode,
     };
   }
 
-  // 取出（并清空）累积的 dirty bbox，给 Board.markDocDirty 用
   flushDirty() {
     const st = this._stroke;
     if (!st || !st.dirty) return null;
@@ -308,7 +342,6 @@ export class BrushEngine {
     return d;
   }
 
-  // 采 layer (x, y) 的 RGBA 颜色（doc 坐标）。layer 外当透明
   _sampleLayerColor(layer, x, y) {
     const ix = Math.floor(x - layer.bboxX);
     const iy = Math.floor(y - layer.bboxY);
@@ -327,10 +360,7 @@ export class BrushEngine {
     const s = st.settings;
     let p = Math.max(0, Math.min(1, pressure));
 
-    // Taper-in：起手 fade-in 减弱 Apple Pencil 碰撞瞬间的 pressure spike。
-    // envelope = floor + (1-floor) × min(1, strokeDist / (size × taperIn))
-    // 同时影响 size 和 opacity（乘进 p）→ 实际 stamp 更小、更淡。
-    // floor > 0 保证 dot tap（strokeDist=0）仍然画得出一颗 mark。
+    // 系统级 anti-spike taper（藏起来）：起手 fade-in，缓解 Apple Pencil 落笔 spike → 萝卜尖
     if (s.taperIn > 0) {
       const taperLen = s.size * s.taperIn;
       const t = Math.min(1, st.strokeDist / taperLen);
@@ -338,68 +368,65 @@ export class BrushEngine {
       p *= env;
     }
 
-    const sizeMul = s.pressureToSize ? Math.pow(p, s.sizeCurve) : 1;
-    const opaMul = s.pressureToOpacity ? Math.pow(p, s.opacityCurve) : 1;
+    const pCurve = Math.pow(p, Math.max(0.01, s.pressureGamma || 1.0));
+    const sizeMul = signedLerp(s.sizeCoeff || 0, pCurve);
+    const flowMul = signedLerp(s.flowCoeff || 0, pCurve);
+    const opaMul  = signedLerp(s.opaCoeff  || 0, pCurve);
+
     const size = Math.max(0.5, s.size * sizeMul);
-    // **per-stamp alpha 不含 s.opacity**：opacity 在 endStroke 一次性乘进去，
-    // 保证笔触折返 alpha 在 buffer 内 source-over 封顶 1.0 → 出 layer 时封顶 s.opacity。
-    // paint / erase 都走 buffer；erase 的 dst-out 在 endStroke 应用，buffer 内永远 source-over。
-    const alpha = Math.max(0, Math.min(1, opaMul));
-    if (alpha < 0.001) return;
+    const effFlow = Math.max(0, Math.min(1, s.flow * flowMul));
+    // stamp_α = flow × opa_mul（Π 内层）；user.opacity 在 composite 时乘（Π 外层）
+    const stampAlpha = effFlow * opaMul;
+    if (stampAlpha < 0.001) return;
 
-    // smudge：每 stamp 采当前像素 → blend with loaded → 输出色喷 stamp
-    // 输出后用 dryness 更新 loaded（吸新色）
-    let stamp;
+    const radius = size / 2;
+    const x0 = x - radius - 1;
+    const y0 = y - radius - 1;
+    const x1 = x + radius + 1;
+    const y1 = y + radius + 1;
+
+    st.layer.ensureBbox(x0, y0, x1, y1);
+
+    // smudge：sample + blend + 直接 drawImage 到 layer
     if (st.mode === "smudge" && st.loaded) {
-      const cur = this._sampleLayerColor(st.layer, x, y);
-      const strength = s.smudgeStrength ?? 0.8;
-      const dryness  = s.smudgeDryness  ?? 0.1;
-      const out = {
-        r: st.loaded.r * strength + cur.r * (1 - strength),
-        g: st.loaded.g * strength + cur.g * (1 - strength),
-        b: st.loaded.b * strength + cur.b * (1 - strength),
-        a: Math.max(st.loaded.a, cur.a),  // alpha 取大值，不让 smudge 削掉不透明像素
-      };
-      const hex = "#" + [out.r, out.g, out.b].map(v => Math.max(0, Math.min(255, v|0)).toString(16).padStart(2, "0")).join("");
-      stamp = this._getStamp(s.size, s.hardness, hex, "brush");
-      // 用 cur 比例更新 loaded：吸一点新色
-      st.loaded = {
-        r: st.loaded.r * (1 - dryness) + cur.r * dryness,
-        g: st.loaded.g * (1 - dryness) + cur.g * dryness,
-        b: st.loaded.b * (1 - dryness) + cur.b * dryness,
-        a: st.loaded.a * (1 - dryness) + cur.a * dryness,
-      };
-    } else {
-      stamp = this._getStamp(s.size, s.hardness, s.color, st.mode);
+      this._smudgeStampDirect(x, y, size, stampAlpha);
+      this._markDirty(x0, y0, x1, y1);
+      return;
     }
+    // pixelMode：整数 snap + fillRect 直接到 layer（不进 buffer）
+    if (s.pixelMode) {
+      this._pixelStampDirect(x, y, size, stampAlpha);
+      this._markDirty(x0, y0, x1, y1);
+      return;
+    }
+    // 进 buffer，按 compositeMode 分支
+    this._ensureBufferBbox(x0, y0, x1, y1);
+    if (st.isBuildup) {
+      this._stampToBufferBuildup(x, y, size, stampAlpha);
+    } else {
+      this._stampToBufferWash(x, y, size, stampAlpha);
+      st.overlayDirty = true;
+    }
+    this._markDirty(x0, y0, x1, y1);
+  }
 
-    // 目标直径 = size + 2px 给 AA 边和源贴图一致比例
+  // Build-Up: Canvas2D 原生 source-over。drawImage cached colored stamp，globalAlpha = stamp_α
+  _stampToBufferBuildup(x, y, size, stampAlpha) {
+    const st = this._stroke;
+    const s = st.settings;
+    // erase 模式：buffer 颜色取黑（dst-out 只用 src.α，RGB 不影响）；非 erase 用 brush.color
+    const stamp = this._getStamp(s.size, s.hardness, s.color, st.mode);
     const drawD = size + 2 * (size / stamp.baseSize);
     const drawR = drawD / 2;
-    const x0 = x - drawR, y0 = y - drawR, x1 = x + drawR, y1 = y + drawR;
-
-    // 确保 layer 覆盖（buffer 路径下也 ensureBuffer）
-    st.layer.ensureBbox(x0, y0, x1, y1);
-    let ctx, lx, ly;
-    if (st.direct) {
-      // direct-layer：直接写 layer.ctx；坐标 = doc - layer.bbox
-      ctx = st.layer.ctx;
-      lx = x - st.layer.bboxX;
-      ly = y - st.layer.bboxY;
-    } else {
-      this._ensureBufferBbox(x0, y0, x1, y1);
-      ctx = st.bufferCtx;
-      lx = x - st.bufBboxX;
-      ly = y - st.bufBboxY;
-    }
-    const prevAlpha = ctx.globalAlpha;
-    const prevComp = ctx.globalCompositeOperation;
-    ctx.globalAlpha = alpha;
-    // direct-layer 喷枪用 source-over；direct-layer + eraser 用 dst-out
-    ctx.globalCompositeOperation = (st.direct && st.mode === "erase") ? "destination-out" : "source-over";
-
-    // v83：ellipse scale Y + rotate；round 走快路径
-    if (s.shapeKind === "ellipse" && (s.shapeAspect !== 1 || s.shapeRotation !== 0)) {
+    const lx = x - st.bufBboxX;
+    const ly = y - st.bufBboxY;
+    const ctx = st.bufferCtx;
+    const prevA = ctx.globalAlpha;
+    ctx.globalAlpha = stampAlpha;
+    // buffer 内部永远 source-over（buildup 累积）；erase 的 dst-out 在 endStroke 用，不在 stamp
+    ctx.globalCompositeOperation = "source-over";
+    const useEllipse = s.shapeKind === "ellipse" && (s.shapeAspect !== 1 || s.shapeRotation !== 0);
+    if (useEllipse) {
       ctx.save();
       ctx.translate(lx, ly);
       if (s.shapeRotation) ctx.rotate(s.shapeRotation);
@@ -409,11 +436,115 @@ export class BrushEngine {
     } else {
       ctx.drawImage(stamp.canvas, lx - drawR, ly - drawR, drawD, drawD);
     }
+    ctx.globalAlpha = prevA;
+  }
 
-    ctx.globalAlpha = prevAlpha;
-    ctx.globalCompositeOperation = prevComp;
+  // Wash: JS per-pixel max blend，shape α 解析公式 (round / ellipse)
+  _stampToBufferWash(x, y, size, stampAlpha) {
+    const st = this._stroke;
+    const s = st.settings;
+    const buf = st.bufferData;
+    const bufW = st.bufBboxW;
+    const bufH = st.bufBboxH;
+    const cx = x - st.bufBboxX;
+    const cy = y - st.bufBboxY;
+    const radius = size / 2;
 
-    // 累积 dirty bbox（doc-px），给 dirty-rect render 用
+    const hardness = Math.max(0, Math.min(0.999, s.hardness));
+    const innerR = hardness * radius;
+    const decayLen = radius - innerR;
+    const stampA255 = stampAlpha * 255;
+
+    const useEllipse = s.shapeKind === "ellipse" && (s.shapeAspect !== 1 || s.shapeRotation !== 0);
+    const cosR = useEllipse ? Math.cos(s.shapeRotation) : 1;
+    const sinR = useEllipse ? Math.sin(s.shapeRotation) : 0;
+    const invAspect = useEllipse ? (1 / Math.max(0.01, s.shapeAspect)) : 1;
+
+    const px0 = Math.max(0, Math.floor(cx - radius));
+    const py0 = Math.max(0, Math.floor(cy - radius));
+    const px1 = Math.min(bufW, Math.ceil(cx + radius));
+    const py1 = Math.min(bufH, Math.ceil(cy + radius));
+
+    for (let py = py0; py < py1; py++) {
+      const dy = py + 0.5 - cy;
+      const rowOff = py * bufW;
+      for (let px = px0; px < px1; px++) {
+        const dx = px + 0.5 - cx;
+        let dist;
+        if (useEllipse) {
+          const dxR = cosR * dx + sinR * dy;
+          const dyR = (-sinR * dx + cosR * dy) * invAspect;
+          dist = Math.sqrt(dxR * dxR + dyR * dyR);
+        } else {
+          dist = Math.sqrt(dx * dx + dy * dy);
+        }
+        if (dist >= radius) continue;
+        let shapeA;
+        if (decayLen === 0 || dist <= innerR) shapeA = 1;
+        else shapeA = (radius - dist) / decayLen;
+        const dabA = stampA255 * shapeA;
+        const idx = rowOff + px;
+        if (dabA > buf[idx]) buf[idx] = dabA;     // Alpha Darken = max
+      }
+    }
+  }
+
+  _smudgeStampDirect(x, y, size, stampAlpha) {
+    const st = this._stroke;
+    const s = st.settings;
+    const cur = this._sampleLayerColor(st.layer, x, y);
+    const strength = s.smudgeStrength ?? 0.8;
+    const dryness = s.smudgeDryness ?? 0.1;
+    const outCol = {
+      r: st.loaded.r * strength + cur.r * (1 - strength),
+      g: st.loaded.g * strength + cur.g * (1 - strength),
+      b: st.loaded.b * strength + cur.b * (1 - strength),
+      a: Math.max(st.loaded.a, cur.a),
+    };
+    const hex = "#" + [outCol.r, outCol.g, outCol.b]
+      .map(v => Math.max(0, Math.min(255, v|0)).toString(16).padStart(2, "0")).join("");
+    st.loaded = {
+      r: st.loaded.r * (1 - dryness) + cur.r * dryness,
+      g: st.loaded.g * (1 - dryness) + cur.g * dryness,
+      b: st.loaded.b * (1 - dryness) + cur.b * dryness,
+      a: st.loaded.a * (1 - dryness) + cur.a * dryness,
+    };
+    const stamp = makeRadialStamp(size, s.hardness, hex);
+    const drawD = stamp.size;
+    const drawR = drawD / 2;
+    const layer = st.layer;
+    const ctx = layer.ctx;
+    const lx = x - layer.bboxX;
+    const ly = y - layer.bboxY;
+    const prevA = ctx.globalAlpha;
+    ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));   // smudge 不走 buffer，opacity 这里乘
+    ctx.drawImage(stamp.canvas, lx - drawR, ly - drawR, drawD, drawD);
+    ctx.globalAlpha = prevA;
+  }
+
+  _pixelStampDirect(x, y, size, stampAlpha) {
+    const st = this._stroke;
+    const s = st.settings;
+    const layer = st.layer;
+    const ctx = layer.ctx;
+    const lx = x - layer.bboxX;
+    const ly = y - layer.bboxY;
+    const intSize = Math.max(1, Math.round(size));
+    const ix = Math.round(lx) - Math.floor(intSize / 2);
+    const iy = Math.round(ly) - Math.floor(intSize / 2);
+    const prevA = ctx.globalAlpha;
+    const prevC = ctx.globalCompositeOperation;
+    ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));   // pixel 不走 buffer，opacity 这里乘
+    ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : "source-over";
+    ctx.fillStyle = st.mode === "erase" ? "#000" : (s.color || "#000");
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillRect(ix, iy, intSize, intSize);
+    ctx.globalAlpha = prevA;
+    ctx.globalCompositeOperation = prevC;
+  }
+
+  _markDirty(x0, y0, x1, y1) {
+    const st = this._stroke;
     const d = st.dirty;
     if (d) {
       if (x0 < d[0]) d[0] = x0;
@@ -426,20 +557,43 @@ export class BrushEngine {
   }
 }
 
+// smudge 用的小 radial gradient stamp（每颗 color 不同，不 cache）
+function makeRadialStamp(size, hardness, color) {
+  const d = Math.max(4, Math.ceil(size + 2));
+  const r = d / 2;
+  const c = document.createElement("canvas");
+  c.width = d; c.height = d;
+  const cx = c.getContext("2d");
+  const hd = Math.max(0, Math.min(0.999, hardness));
+  const g = cx.createRadialGradient(r, r, hd * r, r, r, r);
+  g.addColorStop(0, color);
+  g.addColorStop(1, hexToRgba(color, 0));
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, d, d);
+  return { canvas: c, size: d };
+}
+
+function hexToRgbObj(hex) {
+  if (!hex || hex[0] !== "#") return { r: 0, g: 0, b: 0 };
+  if (hex.length === 7) {
+    return {
+      r: parseInt(hex.slice(1, 3), 16),
+      g: parseInt(hex.slice(3, 5), 16),
+      b: parseInt(hex.slice(5, 7), 16),
+    };
+  }
+  if (hex.length === 4) {
+    return {
+      r: parseInt(hex[1] + hex[1], 16),
+      g: parseInt(hex[2] + hex[2], 16),
+      b: parseInt(hex[3] + hex[3], 16),
+    };
+  }
+  return { r: 0, g: 0, b: 0 };
+}
+
 // "#rrggbb" → "rgba(r,g,b,a)"
 export function hexToRgba(hex, a = 1) {
-  if (!hex || hex[0] !== "#") return `rgba(0,0,0,${a})`;
-  let r, g, b;
-  if (hex.length === 7) {
-    r = parseInt(hex.slice(1, 3), 16);
-    g = parseInt(hex.slice(3, 5), 16);
-    b = parseInt(hex.slice(5, 7), 16);
-  } else if (hex.length === 4) {
-    r = parseInt(hex[1] + hex[1], 16);
-    g = parseInt(hex[2] + hex[2], 16);
-    b = parseInt(hex[3] + hex[3], 16);
-  } else {
-    return `rgba(0,0,0,${a})`;
-  }
-  return `rgba(${r},${g},${b},${a})`;
+  const c = hexToRgbObj(hex);
+  return `rgba(${c.r},${c.g},${c.b},${a})`;
 }

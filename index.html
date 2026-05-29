@@ -103,17 +103,8 @@
             <circle cx="17" cy="17" r="4"></circle>
           </svg>
         </button>
-        <button class="tool" id="toolAirbrush" type="button" data-tool="airbrush" title="喷枪（待实现）">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <!-- 喷枪：握把 + 喷口 + 散喷点 -->
-            <path d="M3 14h7v-4H3z"></path>
-            <path d="M10 12h4l4-4v8l-4-4"></path>
-            <circle cx="20" cy="6" r="0.6" fill="currentColor"></circle>
-            <circle cx="22" cy="9" r="0.6" fill="currentColor"></circle>
-            <circle cx="22" cy="14" r="0.6" fill="currentColor"></circle>
-            <circle cx="20" cy="17" r="0.6" fill="currentColor"></circle>
-          </svg>
-        </button>
+        <!-- 喷枪不再是独立工具 (v96)：是 brush preset 的特征（spacing.kind=time + bufferMode=direct）。
+             用户点笔刷工具，picks 大喷枪 / 小喷枪 preset 就行 -->
         <button class="tool" id="toolPicker" type="button" data-tool="picker" title="吸色 (I)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M3 21l2-4 7-7-1-1 6-6a2.83 2.83 0 0 1 4 4l-6 6-1-1-7 7z"></path>

@@ -15,7 +15,7 @@ import { InputController, compressPixelSnap, applyPixelSnap } from "./input.js";
 import { BrushSettings } from "./brush.js";
 import {
   makeDefaultRack, findBrush, getActiveBrush, brushesByTool,
-  newBrushId, brushToJSON, brushFromJSON, DEFAULT_FOLDER, mergeMissingDefaults,
+  newBrushId, brushToJSON, brushFromJSON, DEFAULT_FOLDER, mergeMissingDefaults, migrateBrush,
 } from "./brushes.js";
 import { PANELS, registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
 import { getMeta, setMeta } from "./storage.js";
@@ -233,23 +233,35 @@ syncBrushColor();
 let _brushRack = null;
 const RACK_META_KEY = "brush-rack";
 
-// 默认 tool state：从 rack preset 拿 size/flow base。preset 切换或 doc 加载时覆盖
+// 默认 tool state：从 rack preset 拿初值
+// v98：toolStates { size, opacity, flow, activeBrushId }
+//   opacity = slider 2 调（per-tool 持久），preset 拷 defaultOpa 当初值
+//   flow    = brush settings 里调（藏在「高级」），preset 拷 defaultFlow 当初值
 function defaultToolStateFor(tool) {
   if (_brushRack) {
     const brush = getActiveBrush(_brushRack, tool);
-    if (brush) return { size: brush.size.base, flow: brush.opacity, activeBrushId: brush.id };
+    if (brush) {
+      return {
+        size: brush.size.base,
+        opacity: brush.defaultOpa ?? 1.0,
+        flow:    brush.defaultFlow ?? 1.0,
+        activeBrushId: brush.id,
+      };
+    }
   }
-  return { size: 12, flow: 1.0, activeBrushId: null };
+  return { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null };
 }
 
 // state.toolStates：per-tool 持久化（per-doc）。
 // shapes **不**自己存——user：「笔刷和形状用同样的 brush class，就是同一个 ref」
 // shapes 路径全部 alias 到 brush（见 getRackToolKey）
-// v95：airbrush 也 alias 到 brush；toolStates 仅 brush / smudge / eraser
+// v98：toolStates { size, opacity, flow, activeBrushId }
+//   opacity → 左侧栏 slider 2（label「透」）
+//   flow    → 只在 brush settings 里调（默认隐藏到「高级」），preset 决定初值
 state.toolStates = {
-  brush:    { size: 12, flow: 1.0, activeBrushId: null },
-  smudge:   { size: 16, flow: 1.0, activeBrushId: null },
-  eraser:   { size: 32, flow: 0.6, activeBrushId: null },
+  brush:    { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null },
+  smudge:   { size: 16, opacity: 1.0, flow: 0.8, activeBrushId: null },
+  eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
 };
 // shapes / airbrush 工具都 alias 到 brush（user：「喷枪笔架合并到笔刷」）。
 // 笔架是一个池子，所有 tool="brush" 的 preset 都在这。spacing.kind="time" 的 preset 就是喷枪。
@@ -262,7 +274,16 @@ async function loadBrushRack() {
     const stored = await getMeta(RACK_META_KEY);
     if (stored && Array.isArray(stored.brushes) && stored.brushes.length > 0) {
       // 补缺 default brush（解 stale default 问题）；merge 只加缺的，不覆盖
-      if (mergeMissingDefaults(stored)) {
+      // v98 migration：老 schema brushes 转新（sizeMin/flowMin → coeff；
+      // airbrush/bufferMode → compositeMode；opacity → defaultOpa；flow.base → defaultFlow）
+      let migrated = false;
+      for (const b of stored.brushes) {
+        const before = JSON.stringify(b);
+        migrateBrush(b);
+        if (JSON.stringify(b) !== before) migrated = true;
+      }
+      const merged = mergeMissingDefaults(stored);
+      if (migrated || merged) {
         try { await setMeta(RACK_META_KEY, stored); } catch (_) {}
       }
       return stored;
@@ -316,28 +337,25 @@ if (_sidebarBrushBtn) {
   });
 }
 
-// 应用 preset 冻结字段到 state.brush（shape / curve / hardness / taper 等）；
-// size + flow 走 toolStates，不在这里处理
+// v98：应用 preset 冻结字段到 state.brush（coeffs + compositeMode + pixelMode + gamma）
+// user-controlled fields (opacity / flow / size) 不在这里设，applyToolState 后设
 function applyBrushPresetFrozen(brush) {
   if (!brush) return;
-  state.brush.pressureToSize = brush.size.pressureCurve > 0;
-  state.brush.pressureToOpacity = brush.flow.pressureCurve > 0;
-  // shape：deg → rad；其他直接抄
   state.brush.shapeKind     = brush.shape.kind || "round";
   state.brush.shapeAspect   = brush.shape.aspect ?? 1.0;
   state.brush.shapeRotation = (brush.shape.rotation ?? 0) * Math.PI / 180;
   state.brush.hardness      = brush.shape.hardness ?? 1.0;
   state.brush.taperIn       = brush.taper.in ?? 0;
-  // v84：spacing + bufferMode（airbrush 走 time + direct-layer）
-  state.brush.spacingKind   = brush.spacing.kind || "distance";
-  if (brush.spacing.kind === "time") {
-    state.brush.spacingValueMs = brush.spacing.value || 16;
-    state.brush.bufferMode = "direct-layer";
-  } else {
-    state.brush.spacing = brush.spacing.value || 1.5;
-    state.brush.bufferMode = brush.bufferMode || "stroke-buffer";
-  }
-  // v85：smudge 笔毛参数
+  // v98 coeff 模型（−1..1 signed）
+  state.brush.sizeCoeff     = brush.sizeCoeff ?? 0.6;
+  state.brush.opaCoeff      = brush.opaCoeff ?? 0.6;
+  state.brush.flowCoeff     = brush.flowCoeff ?? 0;
+  state.brush.pressureGamma = brush.pressureGamma ?? 1.0;
+  state.brush.compositeMode = brush.compositeMode || "wash";
+  state.brush.spacing       = (typeof brush.spacing === "number")
+    ? brush.spacing
+    : (brush.spacing?.value ?? 0.06);
+  state.brush.pixelMode     = !!brush.pixelMode;
   if (brush.smudge) {
     state.brush.smudgeStrength = brush.smudge.strength ?? 0.8;
     state.brush.smudgeDryness  = brush.smudge.dryness  ?? 0.1;
@@ -345,7 +363,7 @@ function applyBrushPresetFrozen(brush) {
   if (input?.brush?.invalidateStamp) input.brush.invalidateStamp();
 }
 
-// 切到 tool t：从 toolStates[rackKey(t)] 取 size/flow 应用到 state.brush + UI
+// 切到 tool t：从 toolStates[rackKey(t)] 取 size/opacity/flow 应用到 state.brush + UI
 function applyToolState(tool) {
   if (!_brushRack) return;
   const key = getRackToolKey(tool);
@@ -356,11 +374,37 @@ function applyToolState(tool) {
   }
   const brush = ts.activeBrushId ? findBrush(_brushRack, ts.activeBrushId) : null;
   if (brush) applyBrushPresetFrozen(brush);
-  state.brush.size = ts.size;
-  state.brush.opacity = ts.flow;
-  if (els.sizeSlider)    els.sizeSlider.value = String(ts.size);
-  if (els.opacitySlider) els.opacitySlider.value = String(Math.round(ts.flow * 100));
+  state.brush.size    = ts.size;
+  state.brush.opacity = ts.opacity ?? brush?.defaultOpa ?? 1.0;
+  state.brush.flow    = ts.flow    ?? brush?.defaultFlow ?? 1.0;
+  // size slider：log 化 0~100 → 1~sizeMax px
+  if (els.sizeSlider) {
+    const sliderMax = brush?.size?.max || 200;
+    els.sizeSlider.max = "100";
+    els.sizeSlider.min = "0";
+    els.sizeSlider.step = "1";
+    els.sizeSlider.value = String(sizeToSliderPos(ts.size, sliderMax));
+    els.sizeSlider.dataset.maxPx = String(sliderMax);
+  }
+  if (els.opacitySlider) {
+    els.opacitySlider.value = String(Math.round((ts.opacity ?? 1.0) * 100));
+  }
   updateSidebarBrushIndicator();
+  updateSidebarSlider2Label();
+}
+
+// v97：size slider log 化 helpers
+function sliderPosToSize(pos, maxPx) {
+  const t = Math.max(0, Math.min(100, pos)) / 100;
+  return Math.max(1, Math.round(Math.exp(t * Math.log(Math.max(2, maxPx)))));
+}
+function sizeToSliderPos(size, maxPx) {
+  const t = Math.log(Math.max(1, size)) / Math.log(Math.max(2, maxPx));
+  return Math.round(Math.max(0, Math.min(1, t)) * 100);
+}
+function updateSidebarSlider2Label() {
+  // v98：slider 永远标「透」(opacity 语义)。
+  // user：「slider 是 opacity 不是 flow」。flow 在 brush settings 改。
 }
 
 // 滑块改值 → 写回当前工具的 toolState（shapes 写到 brush）
@@ -368,9 +412,9 @@ function writeCurrentToolSize(v) {
   const ts = state.toolStates[getRackToolKey(state.tool)];
   if (ts) ts.size = v;
 }
-function writeCurrentToolFlow(v) {
+function writeCurrentToolOpacity(v) {
   const ts = state.toolStates[getRackToolKey(state.tool)];
-  if (ts) ts.flow = v;
+  if (ts) ts.opacity = v;
 }
 function selectBrushPresetForTool(tool, brushId) {
   const key = getRackToolKey(tool);
@@ -379,8 +423,9 @@ function selectBrushPresetForTool(tool, brushId) {
   const brush = findBrush(_brushRack, brushId);
   if (!brush) return;
   ts.activeBrushId = brushId;
-  ts.size = brush.size.base;
-  ts.flow = brush.opacity;
+  ts.size    = brush.size.base;
+  ts.opacity = brush.defaultOpa ?? 1.0;
+  ts.flow    = brush.defaultFlow ?? 1.0;
   if (key === getRackToolKey(state.tool)) applyToolState(state.tool);
 }
 
@@ -721,6 +766,8 @@ registerPendingTransient({
 
 // ---- 工具 ----
 function setTool(t) {
+  // v96：airbrush 工具不存在了。老 doc 持久化里可能存了 "airbrush" → 透明回退到 brush
+  if (t === "airbrush") t = "brush";
   // 切工具 = 用户决定性动作 → 让所有 pending 先 apply（套索浮层 commit 等）
   applyAllPendingTransients();
   state.tool = t;
@@ -747,7 +794,6 @@ const RACK_PANEL_BY_TOOL = {
   smudge: PANELS.RACK_SMUDGE,
   eraser: PANELS.RACK_ERASER,
   shapes: PANELS.RACK_BRUSH,    // shapes 共用 brush 的 rack
-  airbrush: PANELS.RACK_BRUSH,  // v95：喷枪也合并进 brush rack
 };
 for (const b of els.toolBtns) {
   b.addEventListener("click", () => {
@@ -840,23 +886,35 @@ function setColor(hex) {
 els.activeSwatch.addEventListener("click", () => toggleColorPanel());
 setColor(state.color);
 
-// ---- size / opacity ----
-// v82：size / flow 写**当前工具**的 per-tool state（持久化在 doc 的 webpaint/state.json）。
-// localStorage 仍写，给「新 doc」的初始 fallback。
+// v97：setSize 接受 px；slider 转 log；setIntensity 路由 flow/opacity
 function setSize(v) {
   state.brush.size = v;
-  writeCurrentToolSize(v);              // ← per-tool 持久化
+  writeCurrentToolSize(v);
   safeLSSet("webpaint.size", String(v));
-  els.sizeSlider.value = String(v);
+  // 同步 slider（log 化）
+  const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
+  els.sizeSlider.value = String(sizeToSliderPos(v, maxPx));
 }
 function setOpacity(v) {
   state.brush.opacity = v;
-  writeCurrentToolFlow(v);              // ← per-tool 持久化（flow 在 toolState 里）
+  writeCurrentToolOpacity(v);
   safeLSSet("webpaint.opacity", String(v));
   els.opacitySlider.value = String(Math.round(v * 100));
 }
-els.sizeSlider.addEventListener("input", () => setSize(parseFloat(els.sizeSlider.value)));
+// 老 setIntensity alias 给跨 v97 调用兜底
+const setIntensity = setOpacity;
+// v97：size slider log → px。max 100 (slider pos), 实际 px = sliderPosToSize
+els.sizeSlider.addEventListener("input", () => {
+  const pos = parseFloat(els.sizeSlider.value);
+  const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
+  const px = sliderPosToSize(pos, maxPx);
+  state.brush.size = px;
+  writeCurrentToolSize(px);
+  safeLSSet("webpaint.size", String(px));
+});
 els.opacitySlider.addEventListener("input", () => setOpacity(parseFloat(els.opacitySlider.value) / 100));
+// boot 初值
+els.sizeSlider.dataset.maxPx = "200";
 setSize(state.brush.size);
 setOpacity(state.brush.opacity);
 // 键盘 [ ] 调粗
@@ -2139,9 +2197,17 @@ function adoptLoadedDoc(loaded, sessionName) {
     for (const t of Object.keys(state.toolStates)) {
       const saved = loaded._webpaintState.toolStates[t];
       if (saved && typeof saved === "object") {
+        // v98：opacity/flow 分离；老 doc 的 .intensity 当 opacity 兼容
+        const op = typeof saved.opacity === "number" ? saved.opacity
+                 : typeof saved.intensity === "number" ? saved.intensity
+                 : typeof saved.flow === "number" ? saved.flow
+                 : state.toolStates[t].opacity;
+        const fl = typeof saved.flow === "number" && typeof saved.opacity === "number" ? saved.flow
+                 : state.toolStates[t].flow;
         Object.assign(state.toolStates[t], {
           size: typeof saved.size === "number" ? saved.size : state.toolStates[t].size,
-          flow: typeof saved.flow === "number" ? saved.flow : state.toolStates[t].flow,
+          opacity: op,
+          flow: fl,
           activeBrushId: typeof saved.activeBrushId === "string" ? saved.activeBrushId : state.toolStates[t].activeBrushId,
         });
       }
@@ -3579,14 +3645,15 @@ function _renderRackSheet() {
   const activeId = state.toolStates[_rackCurrentTool]?.activeBrushId;
   _rackEls.grid.innerHTML = "";
   for (const b of brushes.filter((x) => (x.folder || DEFAULT_FOLDER) === _rackCurrentFolder)) {
-    const tile = document.createElement("button");
-    tile.type = "button";
+    // v96：tile 改 div + 内嵌 gear button（user 不喜欢长按）
+    const tile = document.createElement("div");
     tile.className = "brush-rack-tile";
     tile.setAttribute("aria-pressed", b.id === activeId ? "true" : "false");
     tile.dataset.brushId = b.id;
+    tile.setAttribute("role", "button");
+    tile.tabIndex = 0;
     const preview = document.createElement("div");
     preview.className = "brush-rack-tile-preview";
-    // 简易 preview：根据 shape 形状用 CSS 描述
     if (b.shape.kind === "ellipse") {
       const ar = b.shape.aspect;
       preview.style.transform = `rotate(${b.shape.rotation}deg) scaleY(${ar})`;
@@ -3598,28 +3665,27 @@ function _renderRackSheet() {
     const name = document.createElement("span");
     name.className = "brush-rack-tile-name";
     name.textContent = b.name;
+    // gear icon → 直接进设置（不用长按）
+    const gear = document.createElement("button");
+    gear.type = "button";
+    gear.className = "brush-rack-tile-edit";
+    gear.title = "编辑";
+    gear.innerHTML = "⚙";
+    gear.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeExclusive();
+      _openBrushSettings(b.id);
+    });
     tile.appendChild(preview);
     tile.appendChild(name);
-    // tap → 选中 + 关 sheet
+    tile.appendChild(gear);
+    // tap tile body → 选中 + 关 sheet
     tile.addEventListener("click", (e) => {
       e.stopPropagation();
       selectBrushPresetForTool(_rackCurrentTool, b.id);
       _rackDirty = true;
       closeExclusive();
     });
-    // 长按 → 设置
-    let longPressTimer = null;
-    tile.addEventListener("pointerdown", () => {
-      longPressTimer = setTimeout(() => {
-        longPressTimer = null;
-        closeExclusive();
-        _openBrushSettings(b.id);
-      }, 600);
-    });
-    const cancelLongPress = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
-    tile.addEventListener("pointerup", cancelLongPress);
-    tile.addEventListener("pointerleave", cancelLongPress);
-    tile.addEventListener("pointercancel", cancelLongPress);
     _rackEls.grid.appendChild(tile);
   }
 }
@@ -3639,21 +3705,33 @@ for (const tool of Object.keys(RACK_PANEL_BY_TOOL)) {
   });
 }
 _rackEls.close.addEventListener("click", () => closeExclusive());
+function _nextBrushName() {
+  // conflict-free 新笔名：找现有「新笔 N」最大 N
+  const re = /^新笔\s*(\d+)$/;
+  let max = 0;
+  for (const b of _brushRack.brushes) {
+    const m = re.exec(b.name);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `新笔 ${max + 1}`;
+}
 _rackEls.newBtn.addEventListener("click", () => {
-  // 在当前 tool + folder 下新建空白 brush，进设置 view
+  // v98 schema：coeff + compositeMode + defaultOpa/defaultFlow
   const newB = {
     id: newBrushId(),
-    name: `新建笔 ${_brushRack.brushes.length + 1}`,
+    name: _nextBrushName(),
     tool: _rackCurrentTool,
     folder: _rackCurrentFolder,
     shape: { kind: "round", aspect: 1, rotation: 0, hardness: 1.0, textureB64: null },
-    size: { base: 12, min: 1, max: 200, pressureCurve: 1.0 },
-    flow: { base: 1.0, pressureCurve: 0 },
-    opacity: 1.0,
-    spacing: { kind: "distance", value: 1.5 },
-    bufferMode: "stroke-buffer",
+    size: { base: 12, max: 200 },
+    sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
+    pressureGamma: 1.0,
+    defaultOpa: 1.0, defaultFlow: 1.0,
+    compositeMode: "wash",
+    spacing: 0.06,
+    pixelMode: false,
     taper: { in: 0, out: 0 },
-    smudge: null,
+    smudge: _rackCurrentTool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
   };
   _brushRack.brushes.push(newB);
   _rackDirty = true;
@@ -3811,29 +3889,65 @@ function _renderBrushSettings() {
   }
   rangeRow(shape, "硬度", 0, 1.0, 0.05, b.shape.hardness, (v) => v.toFixed(2), (v) => b.shape.hardness = v);
 
-  // Size dynamics
-  const size = section("粗细");
-  rangeRow(size, "基础", 1, 200, 1, b.size.base, (v) => `${v|0}`, (v) => b.size.base = v);
-  rangeRow(size, "压感", 0, 2.0, 0.1, b.size.pressureCurve, (v) => v.toFixed(1), (v) => b.size.pressureCurve = v);
+  // v98 schema 补缺
+  if (b.sizeCoeff == null) b.sizeCoeff = 0.6;
+  if (b.opaCoeff == null)  b.opaCoeff = 0.6;
+  if (b.flowCoeff == null) b.flowCoeff = 0;
+  if (b.pressureGamma == null) b.pressureGamma = 1.0;
+  if (b.defaultOpa == null)  b.defaultOpa = 1.0;
+  if (b.defaultFlow == null) b.defaultFlow = 1.0;
+  if (b.compositeMode == null) b.compositeMode = "wash";
 
-  // Flow dynamics
-  const flow = section("流量");
-  rangeRow(flow, "基础", 0, 1.0, 0.05, b.flow.base, (v) => v.toFixed(2), (v) => b.flow.base = v);
-  rangeRow(flow, "压感", 0, 2.0, 0.1, b.flow.pressureCurve, (v) => v.toFixed(1), (v) => b.flow.pressureCurve = v);
+  // Size：base + max
+  const size = section("粗细 (size)");
+  rangeRow(size, "基础", 1, b.size.max || 200, 1, b.size.base, (v) => `${v|0} px`, (v) => b.size.base = v);
+  rangeRow(size, "最大", 4, 800, 1, b.size.max || 200, (v) => `${v|0} px`, (v) => b.size.max = v);
 
-  // Opacity
-  const opa = section("不透明度");
-  rangeRow(opa, "上限", 0, 1.0, 0.05, b.opacity, (v) => v.toFixed(2), (v) => b.opacity = v);
+  // 压感 dynamics（signed coeff −1..1，0=不响应）
+  const dyn = section("压感 (−1..1，0 = 不响应、负数 = 反向)");
+  rangeRow(dyn, "size",    -1, 1, 0.05, b.sizeCoeff, (v) => v.toFixed(2), (v) => b.sizeCoeff = v);
+  rangeRow(dyn, "opacity", -1, 1, 0.05, b.opaCoeff,  (v) => v.toFixed(2), (v) => b.opaCoeff = v);
+  rangeRow(dyn, "flow",    -1, 1, 0.05, b.flowCoeff, (v) => v.toFixed(2), (v) => b.flowCoeff = v);
 
-  // Spacing
-  const sp = section("间距");
-  selectRow(sp, "类型", [["distance", "距离 (px)"], ["time", "时间 (ms)"]], b.spacing.kind, (v) => {
-    b.spacing.kind = v;
-    b.bufferMode = v === "time" ? "direct-layer" : "stroke-buffer";
-    _renderBrushSettings();
+  // 默认 user 值（选 preset 时拷进 toolState）
+  const def = section("默认值（选笔时拷给滑块）");
+  rangeRow(def, "默认 opacity", 0, 1.0, 0.05, b.defaultOpa,  (v) => `${(v*100)|0}%`, (v) => b.defaultOpa = v);
+  rangeRow(def, "默认 flow",    0, 1.0, 0.01, b.defaultFlow, (v) => `${(v*100)|0}%`, (v) => b.defaultFlow = v);
+
+  // 高级：composite mode + pressureGamma + pixelMode
+  const adv = section("高级");
+  selectRow(adv, "重叠模式 compositeMode", [
+    ["wash",    "Wash（max；自交不变深，有上限）"],
+    ["buildup", "Build-Up（累积；可达 100%，喷枪 feel）"],
+  ], b.compositeMode, (v) => b.compositeMode = v);
+  rangeRow(adv, "pressureGamma", 0.2, 3.0, 0.05, b.pressureGamma, (v) => v.toFixed(2), (v) => b.pressureGamma = v);
+
+  // Pixel mode toggle
+  const pmRow = document.createElement("div");
+  pmRow.className = "brush-settings-row brush-settings-row-full";
+  const initPM = !!b.pixelMode;
+  pmRow.innerHTML = `
+    <label>pixelMode<br><span style="font-size:11px;color:var(--ink-soft);">开 = 整数 snap + fillRect 无 AA（像素艺术）</span></label>
+    <button type="button" class="brush-rack-action" style="justify-self:end;" aria-pressed="${initPM}">
+      ${initPM ? "开" : "关"}
+    </button>
+  `;
+  const pmBtn = pmRow.querySelector("button");
+  b.pixelMode = initPM;
+  pmBtn.addEventListener("click", () => {
+    b.pixelMode = !b.pixelMode;
+    pmBtn.setAttribute("aria-pressed", b.pixelMode ? "true" : "false");
+    pmBtn.textContent = b.pixelMode ? "开" : "关";
   });
-  rangeRow(sp, "值", 0.1, b.spacing.kind === "time" ? 200 : 5, b.spacing.kind === "time" ? 1 : 0.1,
-    b.spacing.value, (v) => b.spacing.kind === "time" ? `${v|0} ms` : v.toFixed(1), (v) => b.spacing.value = v);
+  adv.appendChild(pmRow);
+
+  // Spacing (1%-200%)
+  const sp = section("间距 (% 直径)");
+  // 转 scalar
+  const spVal = (typeof b.spacing === "number") ? b.spacing : (b.spacing?.value ?? 0.06);
+  rangeRow(sp, "间距", 1, 200, 1, Math.round(spVal * 100),
+    (v) => `${v|0}%`,
+    (v) => { b.spacing = v / 100; });
 
   // Taper
   const tp = section("收尾");

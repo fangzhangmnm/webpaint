@@ -212,18 +212,31 @@ export class PaintDoc {
   }
 
   // 新建 empty 层，插在 active 之上。返回新层 / null（封顶或非法）。
+  // v97 命名 conflict-free（user：「图层和笔重命名数字总是很怪，而且反而会发生冲突」）：
+  // 找现有「图层 N」最大 N，新层 = N+1。避免 _layerIdCounter 跨 session 重启导致碰撞
   addLayer(name) {
     if (this.layers.length >= this.maxLayers) return null;
+    const finalName = name || this._nextLayerName();
     const L = new Layer({
       width: this.width,
       height: this.height,
-      name: name || `图层 ${_layerIdCounter}`,
+      name: finalName,
       empty: true,
     });
     const insertAt = this.activeIndex + 1;
     this.layers.splice(insertAt, 0, L);
     this.activeIndex = insertAt;
     return L;
+  }
+
+  _nextLayerName() {
+    const re = /^图层\s*(\d+)$/;
+    let max = 0;
+    for (const L of this.layers) {
+      const m = re.exec(L.name);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return `图层 ${max + 1}`;
   }
 
   // 删除指定层（id）。最后一层不可删（doc 永远至少 1 层）。

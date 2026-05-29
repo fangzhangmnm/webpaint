@@ -38,6 +38,12 @@
 
 ## P1（想做，等时机）
 
+### 图库里支持重命名
+- user：「图库 ui 可以重命名」
+- 当前 menuRename 只能改当前打开的画
+- 图库 tile 长按 / ⋯ 菜单 → 重命名 + 删除 + 卸载本地
+- 重命名要处理 IDB key + cloud rename + UI 更新
+
 ### Texture brush 真导入
 - brush settings 全屏 view 已有 shape.kind = "texture" 占位
 - 缺 PNG 文件选择 + b64 嵌入 brush JSON 的 UI
@@ -57,6 +63,9 @@
 - 高强度 stabilization 时 Procreate 会让 stroke 路径**回头扭动**找最佳曲线
 - 每帧重画整笔（性能压力大）
 - 暂不做，先看 user 是否需要
+
+### 大笔刷性能优化
+走per pixel js解决没有lighten的问题，是否可以用其他聪明的数学绕开？
 
 ---
 
@@ -143,6 +152,13 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - mask 是独立画布，可以独立画 / 擦
 - PS 用了几十年的标准做法
 - 兴趣不大，但留在这里参考
+
+### 像素艺术工作流：pixel grid 显示 + 整数缩放
+- v97 加了像素笔（pixelMode）：整数 snap + fillRect 无 AA
+- 缺：缩放 ≥ 8× 时叠 1px 网格线（Aseprite 风格）
+- 缺：像素笔时 cursor 显示为 1px 方块（不是圆圈）
+- 缺：缩放 snap 到整数倍（避免 1.5× 出现锯齿）
+- 工作量 ~150 行 board / overlay 改
 
 ### 调色板小窗 (palette mixer)
 - v87 实装 256×256 浮动 mixer 窗 → v94 撤掉 UI（user 觉得不值得自己做）

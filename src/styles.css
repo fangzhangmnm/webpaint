@@ -956,6 +956,21 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   flex-shrink: 0;
 }
 .brush-rack-tile-name { font-size: 11px; text-align: center; line-height: 1.2; }
+/* gear icon 浮在 tile 右上角，user 不喜欢长按入设置 */
+.brush-rack-tile { position: relative; }
+.brush-rack-tile-edit {
+  position: absolute;
+  top: 2px; right: 2px;
+  width: 22px; height: 22px;
+  font-size: 12px;
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+}
+.brush-rack-tile-edit:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
 
 /* Brush settings 全屏 view（v83）*/
 .brush-settings-view {
@@ -985,9 +1000,12 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   border-color: var(--accent, #4c8bf5); font-weight: 600;
 }
 .brush-settings-body {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;          /* user：「笔刷设置没有做滚动条」根因 = 嵌套 flex 没 min-height */
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 16px 20px;
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
   max-width: 600px;
   margin: 0 auto;
   width: 100%;

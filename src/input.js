@@ -214,7 +214,6 @@ export class InputController {
         : effectiveTool === "picker" ? "pick"
         : effectiveTool === "liquify" ? "liquify"
         : effectiveTool === "lasso" ? "lasso"
-        : effectiveTool === "airbrush" ? "draw"        // 共享 BrushEngine, settings 决定 time/direct
         : effectiveTool === "smudge" ? "draw"          // v85+ smudge engine 实装前先按 draw 走
         : effectiveTool === "shapes" ? "shapes"
         : "draw";
@@ -226,7 +225,6 @@ export class InputController {
       else if (effectiveTool === "eraser") role = "erase";
       else if (effectiveTool === "liquify") role = "liquify";
       else if (effectiveTool === "lasso") role = "lasso";
-      else if (effectiveTool === "airbrush") role = "draw";
       else if (effectiveTool === "smudge") role = "draw";       // v85+ smudge engine 后改回 smudge
       else if (effectiveTool === "shapes") role = "draw";       // v85+ shapes engine 后改回 shapes
       else role = "draw";
@@ -238,8 +236,7 @@ export class InputController {
         else if (effectiveTool === "eraser") role = "erase";
         else if (effectiveTool === "liquify") role = "liquify";
         else if (effectiveTool === "lasso") role = "lasso";
-        else if (effectiveTool === "airbrush") role = "draw";
-        else if (effectiveTool === "smudge") role = "draw";     // v85+
+          else if (effectiveTool === "smudge") role = "draw";     // v85+
         else if (effectiveTool === "shapes") role = "shapes";
         else role = "draw";
       }
