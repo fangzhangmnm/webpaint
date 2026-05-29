@@ -153,6 +153,23 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - PS 用了几十年的标准做法
 - 兴趣不大，但留在这里参考
 
+### 导入图片自动进 transform（v103 记）
+- user：「导入图片到图层之后自动全选图片进入 transform 模式」
+- 现状：导入图片 = 新图层 + 像素就位，user 还得手动 lasso 全选才能调位置 / 缩放
+- 目标：导入完直接 lift 整个 layer 到 floating transform，user 直接拖角调位置 / 缩放 /
+  旋转 / 透视；commit 落到 layer 像素
+- 关联：layer 操作（add layer with image）+ lasso lift selection 等价但选区 = 全部
+- 改：menuImport / addImportPhoto 等 handler 走 fillSelection (whole doc) → liftSelectionForTransform
+- 工作量 ~50 行
+
+### transform 模式自由度切换 drag 异常（v103 记）
+- user：「transform 模式下你高自由度（比如 perspective）时调回低自由度模式（比如 free, uniform）时拖拽行为异常」
+- 现象：在 perspective 模式下拖动后，切回 free / uniform 拖角行为异常（猜：handle 锚点 / 矩阵基底没重算）
+- 根因猜：mode 切换时 floating.transform matrix 是 perspective 的（4 控制点变形），降级回 free
+  时该把 matrix 投影回 affine basis（rotation + scale + translation），而不是直接当 free 用
+- 改：lasso.js setMode 切换路径加 matrix 降级 helper（perspective → affine 投影，反之保持当前不动）
+- 工作量 ~30 行；待复现 + 测
+
 ### thumb 改 sidecar 文件 + 改善线稿缩图狗牙（v102 记）
 - user：「thumb 生成的时候在线稿场景狗牙很厉害」+「thumb 改成 sidecar，可以从云上批量拉，
   然后也方便 pc 端管理」
