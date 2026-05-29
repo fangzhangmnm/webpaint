@@ -3680,10 +3680,8 @@ function _renderRackSheet() {
       const ar = b.shape.aspect;
       preview.style.transform = `rotate(${b.shape.rotation}deg) scaleY(${ar})`;
     }
-    if (b.shape.hardness < 0.5) {
-      const hh = b.shape.hardness;
-      preview.style.background = `radial-gradient(circle, var(--ink) ${hh*100}%, transparent 100%)`;
-    }
+    // v107：smoothstep multi-stop 跟 stamp 真值一致；hardness=1 时 16 stops 全 α=1（solid 不浪费）
+    preview.style.background = _smoothstepRadialGradient(b.shape.hardness);
     const name = document.createElement("span");
     name.className = "brush-rack-tile-name";
     name.textContent = b.name;
@@ -3739,25 +3737,37 @@ function _nextBrushName() {
   return `新笔 ${max + 1}`;
 }
 _rackEls.newBtn.addEventListener("click", () => {
-  // v99r2 schema：coeff + compositeMode + smooth + defaultOpa
-  const newB = {
-    id: newBrushId(),
-    name: _nextBrushName(),
-    tool: _rackCurrentTool,
-    folder: _rackCurrentFolder,
-    shape: { kind: "round", aspect: 1, rotation: 0, hardness: 1.0, textureB64: null },
-    size: { base: 12, max: 200 },
-    sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
-    pressureGamma: 1.0,
-    pressureLPF: 0,
-    defaultOpa: 1.0,
-    compositeMode: "wash",
-    spacing: 0.06,
-    pixelMode: false,
-    taper: { in: 0, out: 0 },
-    smudge: _rackCurrentTool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
-    smooth: { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 },
-  };
+  // v107: 新建 = 复制当前笔（user：「笔架加号应该是复制当前笔，找个接近的就行了」）
+  // 优先复制当前 active brush，否则当前 tool/folder 第一个，否则 rack 第一个，最后才硬编码模板
+  const activeId = state.toolStates[getRackToolKey(_rackCurrentTool)]?.activeBrushId;
+  let source = activeId ? findBrush(_brushRack, activeId) : null;
+  if (!source) {
+    const inFolder = brushesByTool(_brushRack, _rackCurrentTool)
+      .filter(b => (b.folder || DEFAULT_FOLDER) === _rackCurrentFolder);
+    source = inFolder[0] || _brushRack.brushes[0] || null;
+  }
+  let newB;
+  if (source) {
+    newB = JSON.parse(JSON.stringify(source));         // deep clone
+    newB.id = newBrushId();
+    newB.name = _nextBrushName();
+    newB.folder = _rackCurrentFolder;
+    newB.tool = _rackCurrentTool;
+  } else {
+    // 兜底：rack 整个空时（理论不会到这）
+    newB = {
+      id: newBrushId(), name: _nextBrushName(),
+      tool: _rackCurrentTool, folder: _rackCurrentFolder,
+      shape: { kind: "round", aspect: 1, rotation: 0, hardness: 1.0, textureB64: null },
+      size: { base: 12, max: 200 },
+      sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
+      pressureGamma: 1.0, pressureLPF: 0, defaultOpa: 1.0,
+      compositeMode: "wash", spacing: 0.06, pixelMode: false,
+      taper: { in: 0, out: 0 },
+      smudge: _rackCurrentTool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
+      smooth: { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 },
+    };
+  }
   _brushRack.brushes.push(newB);
   _rackDirty = true;
   closeExclusive();
@@ -3812,6 +3822,27 @@ async function _shareOrDownloadJSON(blob, filename, title) {
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+}
+
+// v107: tile preview 用跟 stamp 一致的 smoothstep falloff (16 stops CSS gradient)
+// 真 stamp 是 putImageData 解析公式（连续），CSS gradient 只能 stop 间 linear interp，
+// 16 stops 视觉上已经平滑（dα 在 stop 处 jump 小到看不见）
+function _smoothstepRadialGradient(hardness, stops = 16) {
+  const hd = Math.max(0, Math.min(1, hardness));
+  const out = [];
+  for (let i = 0; i <= stops; i++) {
+    const t = i / stops;
+    let alpha;
+    if (t <= hd) alpha = 1;
+    else {
+      const u = (t - hd) / (1 - hd);
+      alpha = 1 - u * u * (3 - 2 * u);
+    }
+    const pct = (t * 100).toFixed(1);
+    const apct = (alpha * 100).toFixed(1);
+    out.push(`color-mix(in srgb, var(--ink) ${apct}%, transparent) ${pct}%`);
+  }
+  return `radial-gradient(circle, ${out.join(", ")})`;
 }
 
 // v100r2：rack 操作按钮回退 text 标签

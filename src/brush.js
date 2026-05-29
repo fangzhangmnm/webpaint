@@ -11,9 +11,11 @@
 //
 //   stroke buffer 内重叠合成（compositeMode 决定）：
 //     buildup  (PS 默认 / 喷枪 feel): buffer = 1 − ∏(1 − stamp_α × shape_α)
-//                                      ↑ 就是 Canvas2D 原生 source-over，走 native
 //     wash     (Krita Alpha Darken):  buffer = max(buffer, stamp_α × shape_α)
-//                                      ↑ Canvas2D 没 alpha-max，走 JS per-pixel
+//   v107: 两 mode 都走 JS per-pixel (Uint8 buffer)。原 Build-Up 用 Canvas2D 原生 source-over
+//   + cached colored gradient，gradient linear interp 在 boundary 不平滑要 16 stops 逼近，复杂；
+//   且 8-bit RGBA buffer 还有 quantize 问题。user 论证 per-pixel JS 70k×50/sec = 3.5M ops/sec
+//   JS 不卡，更稳妥。两 mode 同 path，shape α 走解析 smoothstep。
 //
 //   endStroke composite to layer：
 //     globalAlpha = user.opacity  ← Π 外面那一层乘 opacity
@@ -94,11 +96,10 @@ export class BrushEngine {
     this._stroke = null;
   }
 
-  // 预渲染 colored radial-gradient stamp（Build-Up native path 用）。
+  // 预渲染 colored stamp（Build-Up native path 用，drawImage 当 texture）。
   // PERF：cache key 不含 size —— stamp 按 baseSize 烤一次，每颗 drawImage 缩到目标 size。
-  // v106：linear gradient 在 boundary 不平滑（dα/dr ≠ 0 → 两 stamp 间 banding，
-  // user 反映「boundary 没 falloff 到 0」），改 multi-stop 模拟 smoothstep（dα/dr = 0 at 两端）。
-  // Canvas2D radialGradient 没有 cubic interpolation，必须多 stop 离散逼近。
+  // v107: 撤 createRadialGradient（linear interp，dα/dr 在 boundary 非 0 → C0 不连续），
+  // 改 putImageData 用 JS per-pixel 真值 smoothstep 烤。bake 一次的开销换 stamp 完全无 banding。
   _getStamp(size, hardness, color, mode) {
     const useColor = mode === "erase" ? "#000" : color;
     const key = `${useColor}|${hardness.toFixed(3)}|${mode}`;
@@ -107,27 +108,39 @@ export class BrushEngine {
     }
     const baseSize = Math.max(64, Math.ceil(size));
     const d = baseSize + 2;
-    const r = d / 2;
+    const r = d / 2;                          // stamp 中心 = canvas 半宽
     const stamp = document.createElement("canvas");
     stamp.width = d; stamp.height = d;
     const sctx = stamp.getContext("2d");
     const hd = Math.max(0, Math.min(0.999, hardness));
-    // multi-stop smoothstep：center hd*r 段是 α=1，hd*r..r 段是 smoothstep down to 0
-    const g = sctx.createRadialGradient(r, r, 0, r, r, r);
-    const STOPS = 16;
-    for (let i = 0; i <= STOPS; i++) {
-      const t = i / STOPS;                  // 0 at center, 1 at outer
-      let alpha;
-      if (t <= hd) {
-        alpha = 1;
-      } else {
-        const u = (t - hd) / (1 - hd);      // 0..1 in decay zone
-        alpha = 1 - u * u * (3 - 2 * u);    // smoothstep down: 1 → 0
+    const innerR = hd * r;                    // 硬芯半径（α=1 内）
+    const decayLen = r - innerR;              // 衰减区长度（α 从 1 → 0）
+
+    // 解析 smoothstep：α(dist) = 1 - u²(3-2u)，u = (dist - innerR) / decayLen
+    // 每像素直接写 ImageData；不走 Canvas2D gradient → 无 stop 间 linear interp 误差
+    const col = hexToRgbObj(useColor);
+    const img = sctx.createImageData(d, d);
+    const data = img.data;
+    for (let py = 0; py < d; py++) {
+      const dy = py + 0.5 - r;
+      for (let px = 0; px < d; px++) {
+        const dx = px + 0.5 - r;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        let alpha;
+        if (dist >= r) alpha = 0;
+        else if (decayLen === 0 || dist <= innerR) alpha = 1;
+        else {
+          const u = (dist - innerR) / decayLen;
+          alpha = 1 - u * u * (3 - 2 * u);    // smoothstep down
+        }
+        const idx = (py * d + px) * 4;
+        data[idx]     = col.r;
+        data[idx + 1] = col.g;
+        data[idx + 2] = col.b;
+        data[idx + 3] = Math.round(alpha * 255);
       }
-      g.addColorStop(t, hexToRgba(useColor, alpha));
     }
-    sctx.fillStyle = g;
-    sctx.fillRect(0, 0, d, d);
+    sctx.putImageData(img, 0, 0);
     this._stampCache = { key, canvas: stamp, baseSize, radius: r };
     return this._stampCache;
   }

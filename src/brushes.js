@@ -70,73 +70,13 @@ function makeBrush({
 }
 
 // 默认笔架——每工具一组开箱即用 preset。
+// v107: 数据搬到 src/default-brushes.json（user：「default 笔刷放 json 吧」）。
+// ES module JSON import 同步加载（iPad Safari 17.2+ / Chrome 123+ 支持），no async loader needed。
+// SW 把 .json 也 precache。
 // **stable ID**：以 "default-{tool}-{slug}" 形式固定。bump 时新 default 通过 id 比对
 // merge 到用户 rack（不覆盖用户改过的 brush，但缺失的会补上）。
 // **shapes 不在 rack 里**——shapes 工具复用 brush rack（getRackToolKey）。
-const DEFAULTS_SPEC = [
-  // 铅笔：sketch。opacity 压感主轴（轻=淡），flow 也略跟。Wash 让自交不变深。
-  // size 6（user iPad 调）
-  { id: "default-brush-pencil",   name: "铅笔",   tool: "brush",
-    args: { size: 6, sizeBaseMax: 80, hardness: 0.5,
-            sizeCoeff: 0.4, opaCoeff: 0.7, flowCoeff: 0.3,
-            spacingValue: 0.06, compositeMode: "wash" } },
-  // 勾线：anime quality。LPF 100ms（user：「lpf 够了，默认 100ms 舒服，能达到 anime quality」）
-  // + streamline 0.8 + stabilization 0.75 + motionFilter 0.2
-  { id: "default-brush-ink",      name: "勾线",   tool: "brush",
-    args: { size: 6, sizeBaseMax: 60, hardness: 0.5,
-            sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
-            pressureLPF: 100,
-            spacingValue: 0.04, compositeMode: "wash",
-            taperIn: 0.3, taperOut: 0.3,
-            streamline: 0.8, stabilization: 0.75, motionFilter: 0.2 } },
-  // 平涂：大笔填色。hardness 0.9 + gamma 1.2 + LPF 100 + 笔风 taper。
-  { id: "default-brush-fill",     name: "平涂",   tool: "brush",
-    args: { size: 50, sizeBaseMax: 200, hardness: 0.9,
-            sizeCoeff: 1.0, opaCoeff: 0, flowCoeff: 0,
-            pressureGamma: 1.2, pressureLPF: 100,
-            spacingValue: 0.06, compositeMode: "wash",
-            taperIn: 0.3, taperOut: 0.3,
-            stabilization: 0.1, motionFilter: 0.1 } },
-
-  // 大喷枪：v106 smoothstep falloff 之后 spacing 10% 也平滑（之前 2% 是绕开 linear-banding artifact）
-  // user：「间距应该大一些，比如 10%」
-  { id: "default-airbrush-big",   name: "大喷枪", tool: "brush",
-    args: { size: 300, sizeBaseMax: 800, hardness: 0,
-            sizeCoeff: 0, opaCoeff: 0, flowCoeff: 1.0,
-            spacingValue: 0.1, compositeMode: "buildup" } },
-  // 小喷枪：当 sketch 用，size 32（iPad 调）+ spacing 10%。Build-Up。
-  { id: "default-airbrush-small", name: "小喷枪", tool: "brush",
-    args: { size: 32, sizeBaseMax: 200, hardness: 0.15,
-            sizeCoeff: 0.4, opaCoeff: 0, flowCoeff: 1.0,
-            spacingValue: 0.1, compositeMode: "buildup" } },
-
-  // 涂抹（smudge）：sample + blend 走专用 path。
-  { id: "default-smudge-soft",    name: "涂抹",   tool: "smudge",
-    args: { size: 16, sizeBaseMax: 80, hardness: 0.6,
-            sizeCoeff: 0.2, opaCoeff: 0, flowCoeff: 1.0,
-            spacingValue: 0.06, compositeMode: "buildup",
-            smudge: { strength: 0.8, dryness: 0.1 } } },
-
-  // 硬橡皮：精修线稿，强 size 压感。Wash。hardness 0.75（iPad 调；之前 1.0 太硬）。
-  // LPF user 实测设回 0（精修橡皮要 raw 跟手），不靠 LPF。
-  { id: "default-eraser-hard",    name: "硬橡皮", tool: "eraser",
-    args: { size: 50, sizeBaseMax: 100, hardness: 0.75,
-            sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
-            spacingValue: 0.04, compositeMode: "wash" } },
-  // 软橡皮：喷枪 eraser；Build-Up，flow 跟压感。
-  { id: "default-eraser-soft",    name: "软橡皮", tool: "eraser",
-    args: { size: 60, sizeBaseMax: 300, hardness: 0,
-            sizeCoeff: 0, opaCoeff: 0, flowCoeff: 1.0,
-            spacingValue: 0.05, compositeMode: "buildup" } },
-
-  // 像素笔：1px stamps，无限硬，spacing 50%；pixelMode 整数 snap + 无 AA + 0 streamline。
-  { id: "default-brush-pixel",    name: "像素笔", tool: "brush",
-    args: { size: 4, sizeBaseMax: 64, hardness: 1.0,
-            sizeCoeff: 0, opaCoeff: 0, flowCoeff: 0,
-            spacingValue: 0.5, compositeMode: "wash",
-            pixelMode: true,
-            streamline: 0 } },
-];
+import DEFAULTS_SPEC from "./default-brushes.json" with { type: "json" };
 
 // IDB 老 schema 兼容（v82~v98 → v99）：
 // - 老 spacing { kind, value } / size.pressureCurve / flow.pressureCurve / bufferMode / airbrush / opacity / flow.base / flow.min / size.min
