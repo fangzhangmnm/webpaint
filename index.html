@@ -59,12 +59,36 @@
     <canvas id="board" class="board" aria-label="paint canvas"></canvas>
 
     <!-- 顶栏：工具 + 颜色 + 笔粗 + undo / redo / fit / 主题 -->
+    <!-- 顶栏（v80 重排）：颜色 · 图层 │ 工具组 │ adjust │ 保存 · 菜单
+         operator 全在这（点了有动作，要 user consent）。read-only 状态在右下 HUD。
+         详 docs/ui-layout.md（待写）+ conversation v79→v80 -->
     <header class="top-bar" id="topBar">
+      <div class="color-group" role="group" aria-label="color">
+        <button class="swatch active-color" id="activeSwatch" title="颜色 (C)"></button>
+      </div>
+
+      <button class="tool" id="layersButton" type="button" title="图层" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polygon points="12 2 22 8 12 14 2 8 12 2"></polygon>
+          <polyline points="2 13 12 19 22 13"></polyline>
+          <polyline points="2 18 12 24 22 18" transform="translate(0,-2)"></polyline>
+        </svg>
+      </button>
+
+      <span class="top-bar-sep" aria-hidden="true"></span>
+
       <div class="tool-group" role="group" aria-label="tools">
         <button class="tool" id="toolPen" type="button" data-tool="brush" aria-pressed="true" title="笔刷 (B)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M14 4l6 6-9 9H5v-6l9-9z"></path>
             <path d="M13 5l6 6"></path>
+          </svg>
+        </button>
+        <button class="tool" id="toolSmudge" type="button" data-tool="smudge" title="涂抹（待实现）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- 食指竖立涂抹 + 拖痕：指尖 (12,3) 指根 (12,15)，拖痕从 (8,18) → (16,18) -->
+            <path d="M10 4a2 2 0 0 1 4 0v9h-4z"></path>
+            <path d="M8 18c2-2 6-2 8 0"></path>
           </svg>
         </button>
         <button class="tool" id="toolEraser" type="button" data-tool="eraser" title="橡皮 (E)">
@@ -73,23 +97,35 @@
             <path d="M14 7l3 3"></path>
           </svg>
         </button>
-        <button class="tool" id="toolPicker" type="button" data-tool="picker" title="吸色 (Alt 临时)">
+        <button class="tool" id="toolShapes" type="button" data-tool="shapes" title="形状（矩形/椭圆/直线 待实现）">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <!-- 滴管轮廓（一笔闭合，沿对角线 (3,21)→(21,3)）：
-                 尖 (3,21) → 管顶 (5,17)→(12,10) → 肩 (11,9) → 球顶左 (17,3)
-                 ⤴半圆圆顶⤵ 球顶右 (21,7) → 肩 (15,13) → 管底 (14,12)→(7,19) → 回尖
-                 球身=平行四边形，远端用半圆弧 (r=2√2≈2.83) 做圆顶；尖端收成一点 -->
+            <rect x="3" y="3" width="9" height="9"></rect>
+            <circle cx="17" cy="17" r="4"></circle>
+          </svg>
+        </button>
+        <button class="tool" id="toolAirbrush" type="button" data-tool="airbrush" title="喷枪（待实现）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <!-- 喷枪：握把 + 喷口 + 散喷点 -->
+            <path d="M3 14h7v-4H3z"></path>
+            <path d="M10 12h4l4-4v8l-4-4"></path>
+            <circle cx="20" cy="6" r="0.6" fill="currentColor"></circle>
+            <circle cx="22" cy="9" r="0.6" fill="currentColor"></circle>
+            <circle cx="22" cy="14" r="0.6" fill="currentColor"></circle>
+            <circle cx="20" cy="17" r="0.6" fill="currentColor"></circle>
+          </svg>
+        </button>
+        <button class="tool" id="toolPicker" type="button" data-tool="picker" title="吸色 (I)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M3 21l2-4 7-7-1-1 6-6a2.83 2.83 0 0 1 4 4l-6 6-1-1-7 7z"></path>
           </svg>
         </button>
         <button class="tool" id="toolLasso" type="button" data-tool="lasso" title="套索 (L)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <!-- 自由曲线套索 + 收口绳尾。开口在底部，提示 lift / drag 语义 -->
             <path d="M4 7c0-2 4-4 8-4s8 2 8 4-4 4-8 4-8-2-8-4z"></path>
             <path d="M8 11c-1 4 1 8 5 9"></path>
           </svg>
         </button>
-        <button class="tool" id="toolHand" type="button" data-tool="hand" title="平移 (H / Space)">
+        <button class="tool tool-hand-conditional" id="toolHand" type="button" data-tool="hand" title="平移 (H / Space)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M18 11V6a2 2 0 0 0-4 0v5"></path>
             <path d="M14 10V4a2 2 0 0 0-4 0v6"></path>
@@ -99,42 +135,7 @@
         </button>
       </div>
 
-      <div class="color-group" role="group" aria-label="color">
-        <button class="swatch active-color" id="activeSwatch" title="颜色 (C)"></button>
-      </div>
-
-      <label class="num-group" title="笔粗">
-        <span class="num-label">粗</span>
-        <input id="sizeSlider" type="range" min="1" max="200" step="1" value="12" aria-label="笔粗" />
-      </label>
-
-      <label class="num-group" title="不透明度">
-        <span class="num-label">透</span>
-        <input id="opacitySlider" type="range" min="1" max="100" step="1" value="100" aria-label="不透明度" />
-      </label>
-
-      <div class="spacer"></div>
-
-      <button class="tool" id="undoButton" type="button" title="撤销 (Ctrl+Z)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polyline points="9 14 4 9 9 4"></polyline>
-          <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
-        </svg>
-      </button>
-      <button class="tool" id="redoButton" type="button" title="重做 (Ctrl+Shift+Z)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polyline points="15 14 20 9 15 4"></polyline>
-          <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
-        </svg>
-      </button>
-
-      <button class="tool" id="layersButton" type="button" title="图层" aria-pressed="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polygon points="12 2 22 8 12 14 2 8 12 2"></polygon>
-          <polyline points="2 13 12 19 22 13"></polyline>
-          <polyline points="2 18 12 24 22 18" transform="translate(0,-2)"></polyline>
-        </svg>
-      </button>
+      <span class="top-bar-sep" aria-hidden="true"></span>
 
       <button class="tool" id="topAdjustBtn" type="button" title="调整（液化 / 调色…）" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -147,13 +148,9 @@
         </svg>
       </button>
 
-      <!-- 智能 save/upload 按钮：
-           data-state="dirty" → 磁盘图标，点 = 保存到 IDB
-           data-state="cloud-dirty" → 上传图标，点 = 推送到云端 (需登录)
-           data-state="cloud-busy" → 旋转上传中（点 = no-op）
-           data-state="synced" → 云端√，点 = no-op
-           data-state="saved" → 灰勾，无云端配置 / 未登录
-           SVG content 由 app.js 按状态切换 -->
+      <span class="top-bar-sep" aria-hidden="true"></span>
+
+      <!-- 智能保存：operator（不是 status）。data-state 由 app.js 切（dirty / cloud-dirty / cloud-busy / synced / saved）-->
       <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
 
       <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
@@ -164,6 +161,26 @@
         </svg>
       </button>
     </header>
+
+    <!-- 左侧栏（drawing 时常驻）：size + flow + undo + redo -->
+    <aside class="left-sidebar" id="leftSidebar">
+      <input id="sizeSlider" class="left-sidebar-slider" type="range" min="1" max="200" step="1" value="12" aria-label="笔粗" orient="vertical" />
+      <span class="left-sidebar-label" title="笔粗">粗</span>
+      <input id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1" value="100" aria-label="流量 / 不透明" orient="vertical" />
+      <span class="left-sidebar-label" title="流量">流</span>
+      <button class="tool" id="undoButton" type="button" title="撤销 (Ctrl+Z)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="9 14 4 9 9 4"></polyline>
+          <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
+        </svg>
+      </button>
+      <button class="tool" id="redoButton" type="button" title="重做 (Ctrl+Shift+Z)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 14 20 9 15 4"></polyline>
+          <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
+        </svg>
+      </button>
+    </aside>
 
     <!-- 图库：左标题 + 右对齐 (云图标 / 刷新 / 加号)；底部 IDB 占用 + 清扫缓存。
          无返回键 —— 点当前 active tile 关闭。详见 docs/artist-priorities.md ergonomics. -->

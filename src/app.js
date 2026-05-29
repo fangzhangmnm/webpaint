@@ -168,6 +168,10 @@ function safeLSSet(key, val) {
 }
 
 // ---- 启动 ----
+// 触屏检测（iPad / iPhone / surface touchscreen）→ hand 工具隐藏（双指 pan 已足）
+if (navigator.maxTouchPoints > 0) {
+  document.body.dataset.inputTouchscreen = "1";
+}
 const doc = new PaintDoc({ width: 2048, height: 2048 });
 const board = new Board(els.board, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
@@ -538,6 +542,11 @@ function setTool(t) {
   els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
   document.body.dataset.tool = t;
   updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
+  // v80 占位：smudge / shapes / airbrush UI 已加但 engine 未实现，状态条提示
+  // v81+ 上各自的 engine 后这里删
+  if (t === "smudge" || t === "shapes" || t === "airbrush") {
+    setStatus(`${t} 工具 UI 已就位，engine 待 v81+ 实装；现在按 brush 走`);
+  }
 }
 for (const b of els.toolBtns) {
   b.addEventListener("click", () => setTool(b.dataset.tool));

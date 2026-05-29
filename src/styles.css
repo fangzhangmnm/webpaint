@@ -205,15 +205,61 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 }
 .top-bar::-webkit-scrollbar { display: none; }
 
-.tool-group, .color-group, .num-group {
+.tool-group, .color-group {
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 0 4px;
-  border-right: 1px solid var(--line);
 }
-.num-group { padding: 0 8px; gap: 6px; }
-.num-label { font-size: 11px; color: var(--ink-soft); }
+/* 顶栏 separator —— vertical hairline，替代旧 .group border-right */
+.top-bar-sep {
+  width: 1px;
+  height: 24px;
+  background: var(--line);
+  margin: 0 4px;
+}
+/* hand 工具：触屏设备双指 pan 已足够，不显示 */
+body[data-input-touchscreen="1"] .tool-hand-conditional { display: none; }
+
+/* 左侧栏 (drawing 时常驻) */
+.left-sidebar {
+  position: fixed;
+  left: max(env(safe-area-inset-left, 0px), 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 6px;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 9;            /* < top-bar 10 */
+}
+.left-sidebar.hidden { display: none; }
+/* gallery 模式隐藏 */
+body[data-mode="gallery"] .left-sidebar { display: none; }
+
+/* 竖滑块 ——iPad Safari + Chrome + Firefox 都支持 -webkit-appearance: slider-vertical */
+.left-sidebar-slider {
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 28px;
+  height: 120px;
+  background: transparent;
+}
+.left-sidebar-label {
+  font-size: 11px;
+  color: var(--ink-soft);
+  user-select: none;
+  margin-top: -4px;
+}
 
 .tool {
   display: inline-flex;
