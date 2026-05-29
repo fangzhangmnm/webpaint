@@ -401,7 +401,7 @@ export class LassoEngine {
     }
     // 优先 mesh 控制点（按 mode 决定哪些点暴露）。半径 = 10 / screenScale doc-px
     const r = 10 / screenScale;
-    const handles = this._visibleHandles();
+    const handles = this._visibleHandles(screenScale);   // v117: 让 rotate handle 定位正确
     for (const h of handles) {
       const dx = x - h.pos.x, dy = y - h.pos.y;
       if (dx * dx + dy * dy < r * r) return h;
@@ -439,6 +439,8 @@ export class LassoEngine {
       this._applyCornerDrag(d.row, d.col, d.meshSnap, x, y);
     } else if (d.kind === "edge") {
       this._applyEdgeDrag(d.edge, d.meshSnap, x, y);
+    } else if (d.kind === "rotate") {
+      this._applyRotate(d.meshSnap, x, y);
     } else if (d.kind === "warp-point") {
       this._applyWarpPoint(d.row, d.col, d.meshSnap, dx, dy);
     } else if (d.kind === "warp-soft") {
@@ -556,13 +558,14 @@ export class LassoEngine {
   }
 
   // 给 board overlay 用：返回当前可拖的 handle 列表（位置 + 类型）
-  visibleHandles() { return this._visibleHandles(); }
+  // v117: 接 screenScale 让 rotate handle 在 doc-px 里按屏幕 px 偏移定位
+  visibleHandles(screenScale = 1) { return this._visibleHandles(screenScale); }
   // 给 board overlay：渲染 floating 用
   // 调 drawMesh(ctx, canvas, srcW, srcH, mesh) 接到 board 里更方便，所以也 export drawMesh
 
   // ---------- 内部 ----------
 
-  _visibleHandles() {
+  _visibleHandles(screenScale = 1) {
     const f = this._floating;
     if (!f) return [];
     // selected 状态：不暴露
@@ -581,6 +584,18 @@ export class LassoEngine {
       out.push({ kind: "edge", edge: "right",  pos: mid(m[0][1], m[1][1]) });
       out.push({ kind: "edge", edge: "bottom", pos: mid(m[1][0], m[1][1]) });
       out.push({ kind: "edge", edge: "left",   pos: mid(m[0][0], m[1][0]) });
+      // v117: rotate handle (free / uniform only)。在 top edge midpoint 沿 ay 反方向偏移 28 屏幕 px
+      // distort 4 角任意拖不需要 rotate；warp 16 点也不需要
+      if (f.mode === "free" || f.mode === "uniform") {
+        const topMid = mid(m[0][0], m[0][1]);
+        const ayU = norm(sub(m[1][0], m[0][0]));   // 单位向量：TL → BL（向下）
+        const offset = 28 / Math.max(0.01, screenScale);
+        out.push({
+          kind: "rotate",
+          pos: { x: topMid.x - ayU.x * offset, y: topMid.y - ayU.y * offset },
+          anchor: topMid,                          // 给 board 画连接线用
+        });
+      }
     } else {
       // 4×4 = 16 个 warp 点
       for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
@@ -759,22 +774,22 @@ export class LassoEngine {
       if (axis.startsWith("ax")) lenAy = lenAx / f.uniformAspect;
       else lenAx = lenAy * f.uniformAspect;
     }
-    // 重建。对边锚定 → origin 也可能变（拖 top 时对边是 bottom，所以 BL 锚定 = origin + ay = old BL）
-    // 但 origin = old TL = m[0][0]，如果 ay 缩短，TL 必须沿 ay 方向移动以保持 BL 不动
-    // BL_anchor = m[1][0] = m[0][0] + lenAy_old * ayU
-    // 新 origin: BL_anchor - lenAy_new * ayU
+    // 重建。对边锚定原则：drag X 边 → opposite 边不动。
+    // v117 bug fix (user：「free transform 拖动上面下面动」)：
+    //   老代码 top/bottom origin 写反了——drag top 时锚了 top (TL)，drag bottom 时锚了 BL，
+    //   都是同边锚同边 → "拖谁都是另一边在动"。修：swap 两支。
+    //   left/right 一直对（drag right 锚 TL；drag left 锚 TR）。
     const blAnchor = m[1][0];
     const newAy = { x: ayU.x * lenAy, y: ayU.y * lenAy };
     const newAx = { x: axU.x * lenAx, y: axU.y * lenAx };
     let origin;
     if (axis.startsWith("ay")) {
-      // 上 / 下边拖 → ay 在变。底边锚 = blAnchor（bottom）当 axis="ay-grow"；顶边锚 = m[0][0] 当 "ay-shrink"
       if (axis === "ay-grow") {
-        // bottom edge anchored → origin = blAnchor - newAy
-        origin = { x: blAnchor.x - newAy.x, y: blAnchor.y - newAy.y };
-      } else {
-        // top edge anchored → origin = m[0][0]（不变）
+        // 拖 bottom → 锚 top (TL 不动) → origin = old TL
         origin = { x: m[0][0].x, y: m[0][0].y };
+      } else {
+        // 拖 top (ay-shrink) → 锚 bottom (BL 不动) → origin = BL_old − newAy
+        origin = { x: blAnchor.x - newAy.x, y: blAnchor.y - newAy.y };
       }
     } else {
       // 左 / 右边拖 → ax 在变。左边锚 = m[0][0] 当 "ax-grow"；右边锚 = m[0][1] 当 "ax-shrink"
@@ -789,6 +804,27 @@ export class LassoEngine {
     f.mesh[0][1] = { x: origin.x + newAx.x, y: origin.y + newAx.y };
     f.mesh[1][0] = { x: origin.x + newAy.x, y: origin.y + newAy.y };
     f.mesh[1][1] = { x: origin.x + newAx.x + newAy.x, y: origin.y + newAx.y + newAy.y };
+  }
+
+  // v117: rotate 拖动 —— 绕 centroid 转 dθ
+  //   centroid = 4 角平均
+  //   dθ = atan2(finger − centroid) − atan2(start − centroid)
+  //   每个 meshSnap 角 rotate(p, centroid, dθ) → mesh
+  _applyRotate(meshSnap, x, y) {
+    const f = this._floating;
+    const m = meshSnap;
+    const cx = (m[0][0].x + m[0][1].x + m[1][0].x + m[1][1].x) / 4;
+    const cy = (m[0][0].y + m[0][1].y + m[1][0].y + m[1][1].y) / 4;
+    const d = this._drag;
+    const a0 = Math.atan2(d.startY - cy, d.startX - cx);
+    const a1 = Math.atan2(y - cy, x - cx);
+    const dθ = a1 - a0;
+    const cos = Math.cos(dθ), sin = Math.sin(dθ);
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+      const px = m[i][j].x - cx;
+      const py = m[i][j].y - cy;
+      f.mesh[i][j] = { x: cx + px * cos - py * sin, y: cy + px * sin + py * cos };
+    }
   }
 
   // Warp 单点拖：那一个点 += delta

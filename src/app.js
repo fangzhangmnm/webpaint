@@ -529,7 +529,7 @@ board.setLassoProvider(() => ({
   drawingRect:    input.lasso.getDrawingRect(),
   drawingEllipse: input.lasso.getDrawingEllipse(),
   floating:       input.lasso.getFloating(),
-  handles:        input.lasso.visibleHandles(),
+  handles:        input.lasso.visibleHandles(board.viewport.scale),
   sampleMode:     input.lasso.getSampleMode(),
 }));
 
