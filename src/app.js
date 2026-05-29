@@ -1970,17 +1970,20 @@ history.registerHandler("setReferenceLayer", {
   redo: (e) => { doc.referenceLayerId = e.newVal; renderLayersPanel(); },
   refsLayer: (e, id) => e.oldVal === id || e.newVal === id,
 });
-// v110: docTransform —— crop / resample 一次 op 影响所有 layer + doc 尺寸；存全 doc snap
+// v110/114: docTransform —— crop / resample 一次 op 影响所有 layer + doc 尺寸 + viewport
+// entry shape: { before: {doc, viewport}, after: {doc, viewport} }
 history.registerHandler("docTransform", {
   undo: (e) => {
-    doc.restoreSnapshotAll(e.before);
+    doc.restoreSnapshotAll(e.before.doc);
+    if (e.before.viewport) Object.assign(board.viewport, e.before.viewport);
     _afterDocChange();
     if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
     board.invalidateAll();
     renderLayersPanel();
   },
   redo: (e) => {
-    doc.restoreSnapshotAll(e.after);
+    doc.restoreSnapshotAll(e.after.doc);
+    if (e.after.viewport) Object.assign(board.viewport, e.after.viewport);
     _afterDocChange();
     if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
     board.invalidateAll();
@@ -2560,11 +2563,14 @@ els.adjustLiquify.addEventListener("click", () => {
   setStatus("液化");
 });
 
-// ===== v110 crop / resample / adjust =====
-// 通用：op 前先 commit floating + 把当前 doc snapshot 当 before
+// ===== v110/114 crop / resample / adjust =====
+// 通用：op 前先 commit floating + 把当前 doc + viewport snapshot 当 before
 function _captureDocBefore() {
   applyAllPendingTransients();
-  return doc.snapshotAll();
+  return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
+}
+function _captureDocAfter() {
+  return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
 }
 function _pushDocTransform(before, after, label) {
   history.push({ type: "docTransform", before, after });
@@ -2576,8 +2582,18 @@ function _pushDocTransform(before, after, label) {
   setStatus(label);
 }
 
+// v114: 裁切后让原 (rect.x, rect.y) 像素在屏上不挪 → viewport.tx/ty 减去 (rect.x, rect.y) × scale
+// 数学：old 屏位 = old_tx + rect.x × scale；new 屏位 = new_tx + 0 × scale = new_tx
+// 要等 → new_tx = old_tx + rect.x × scale
+function _shiftViewportAfterCrop(rect) {
+  const v = board.viewport;
+  v.tx = v.tx + rect.x * v.scale;
+  v.ty = v.ty + rect.y * v.scale;
+}
+
 // 裁到选区 ----
 document.getElementById("adjustCropToSelection").addEventListener("click", () => {
+  setMenuOpen(false);
   setAdjustOpen(false);
   if (!doc.selection) { setStatus("没选区——画一个 lasso 选区先", true); return; }
   const s = doc.selection;
@@ -2586,7 +2602,8 @@ document.getElementById("adjustCropToSelection").addEventListener("click", () =>
   if (w < 1 || h < 1) { setStatus("选区太小或在画布外", true); return; }
   const before = _captureDocBefore();
   doc.cropTo({ x, y, w, h });
-  const after = doc.snapshotAll();
+  _shiftViewportAfterCrop({ x, y });
+  const after = _captureDocAfter();
   _pushDocTransform(before, after, `已裁到选区：${w}×${h}`);
 });
 
@@ -2628,6 +2645,7 @@ function _closeCropMode() {
   document.getElementById("cropToolbar").classList.add("hidden");
 }
 document.getElementById("adjustCropFree").addEventListener("click", () => {
+  setMenuOpen(false);
   setAdjustOpen(false);
   _openCropMode();
 });
@@ -2641,7 +2659,8 @@ document.getElementById("cropToolbarApply").addEventListener("click", () => {
   const h = Math.max(1, Math.min(doc.height - y, r.h | 0));
   const before = _captureDocBefore();
   doc.cropTo({ x, y, w, h });
-  const after = doc.snapshotAll();
+  _shiftViewportAfterCrop({ x, y });
+  const after = _captureDocAfter();
   _pushDocTransform(before, after, `已裁切：${w}×${h}`);
   _closeCropMode();
 });
@@ -2729,6 +2748,7 @@ function _closeResampleDialog() {
   els.resampleSheet.classList.add("hidden");
 }
 document.getElementById("adjustResample").addEventListener("click", () => {
+  setMenuOpen(false);
   setAdjustOpen(false);
   _openResampleDialog();
 });
@@ -2742,7 +2762,7 @@ els.resampleConfirm.addEventListener("click", () => {
   if (nw === doc.width && nh === doc.height) { _closeResampleDialog(); return; }
   const before = _captureDocBefore();
   doc.resampleTo(nw, nh, mode);
-  const after = doc.snapshotAll();
+  const after = _captureDocAfter();
   _pushDocTransform(before, after, `已重采样到 ${nw}×${nh}（${mode}）`);
   _closeResampleDialog();
 });

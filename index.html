@@ -548,22 +548,12 @@
 
     <!-- v109: brushPanel 浮动面板撤了 —— 平滑参数现在 per-preset，进 brush settings 调 -->
 
-    <!-- Adjustments popup：液化 / 裁切 / 重采样 / 颜色调整。学 Procreate adjustments icon -->
+    <!-- Adjustments popup：液化 / 颜色调整。学 Procreate adjustments icon
+         v114: 裁切 / 重采样 挪进主菜单「画布」区 (user：「裁切丢到文件目录里，而不是调整目录里」) -->
     <div class="adjust-popup menu-panel hidden" id="adjustPopup" role="menu">
       <button class="menu-item" id="adjustLiquify" type="button" role="menuitem">
         <span class="menu-item-label">液化</span>
       </button>
-      <hr class="menu-sep" />
-      <button class="menu-item" id="adjustCropToSelection" type="button" role="menuitem">
-        <span class="menu-item-label">裁切到选区</span>
-      </button>
-      <button class="menu-item" id="adjustCropFree" type="button" role="menuitem">
-        <span class="menu-item-label">自由裁切（8 handle）</span>
-      </button>
-      <button class="menu-item" id="adjustResample" type="button" role="menuitem">
-        <span class="menu-item-label">画布重采样…</span>
-      </button>
-      <hr class="menu-sep" />
       <button class="menu-item" id="adjustColor" type="button" role="menuitem">
         <span class="menu-item-label">颜色调整（B/C/S/H）</span>
       </button>
@@ -668,6 +658,20 @@
       </button>
       <button class="menu-item" id="menuFit" type="button" role="menuitem">
         <span class="menu-item-label">画布居中 (0)</span>
+      </button>
+
+      <hr class="menu-sep" />
+      <div class="menu-section-label">画布</div>
+      <!-- v114: 裁切 / 重采样 从 adjust popup 挪到这里
+           user：「裁切丢到文件目录里，而不是调整目录里」 -->
+      <button class="menu-item" id="adjustCropToSelection" type="button" role="menuitem">
+        <span class="menu-item-label">裁切到选区</span>
+      </button>
+      <button class="menu-item" id="adjustCropFree" type="button" role="menuitem">
+        <span class="menu-item-label">自由裁切（8 handle）</span>
+      </button>
+      <button class="menu-item" id="adjustResample" type="button" role="menuitem">
+        <span class="menu-item-label">画布重采样…</span>
       </button>
 
       <hr class="menu-sep" />
