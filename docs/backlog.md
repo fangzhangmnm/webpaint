@@ -153,6 +153,15 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - PS 用了几十年的标准做法
 - 兴趣不大，但留在这里参考
 
+### 大喷枪低 alpha 处 color quantize banding（v104 记）
+- user：「大喷枪能看到 color quantize error」
+- 现状：buildup 模式 buffer = Canvas2D RGBA (8-bit/channel)
+- 低 alpha stamps 累积时每步 round 到 8-bit → 视觉 banding（特别是 spacing 2% 时层数极多）
+- 解：buffer 升 16-bit（offscreen canvas RGBA16 还没真正普及，要 WebGL2 RGBA16F 路径）
+- 或：buffer 改 float32 Uint8 模拟（每像素 4 bytes int → float scale，自己做 alpha 累加）
+- 或：Wash mode 的 JS per-pixel 路径也升 16-bit Uint16Array 存 α
+- 关联 docs/engineering-roadmap.md WebGL 通路（已论证）
+
 ### 导入图片自动进 transform（v103 记）
 - user：「导入图片到图层之后自动全选图片进入 transform 模式」
 - 现状：导入图片 = 新图层 + 像素就位，user 还得手动 lasso 全选才能调位置 / 缩放

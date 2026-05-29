@@ -52,6 +52,8 @@ const DEFAULT_SETTINGS = {
   shapeRotation: 0,
   // spacing：
   spacing: 0.12,
+  // v104：per-preset flow 乘数；spacing 调到极小时（如大喷枪 2%）用它压回手感
+  flowScale: 1.0,
   // buffer 合成模式：
   compositeMode: "wash",  // "wash" = Alpha Darken (JS max), "buildup" = source-over (Canvas2D native)
   // pixel mode：
@@ -399,7 +401,8 @@ export class BrushEngine {
     const opaMul  = signedLerp(s.opaCoeff  || 0, pCurve);
 
     const size = Math.max(0.5, s.size * sizeMul);
-    const effFlow = Math.max(0, Math.min(1, s.flow * flowMul));
+    // v104: per-preset flowScale 乘进 stamp_α (Π 内)；user 用它在小 spacing 时压回手感
+    const effFlow = Math.max(0, Math.min(1, s.flow * flowMul * (s.flowScale ?? 1.0)));
     // stamp_α = flow × opa_mul（Π 内层）；user.opacity 在 composite 时乘（Π 外层）
     const stampAlpha = effFlow * opaMul;
     if (stampAlpha < 0.001) return;
@@ -555,8 +558,11 @@ export class BrushEngine {
     const lx = x - layer.bboxX;
     const ly = y - layer.bboxY;
     const intSize = Math.max(1, Math.round(size));
-    const ix = Math.round(lx) - Math.floor(intSize / 2);
-    const iy = Math.round(ly) - Math.floor(intSize / 2);
+    // v104: 像素中心位置。pixel i 覆盖 [i, i+1)，光标 lx 所在 pixel = floor(lx)。
+    // 之前 Math.round(lx) - floor(intSize/2) 在 0.5 边界少偏一个像素（user 反映「差了 0.5」）。
+    // 新公式 floor(lx - (intSize-1)/2)：intSize=1 时 = floor(lx) ✓，>1 偶数时左偏 0.5（可接受）
+    const ix = Math.floor(lx - (intSize - 1) / 2);
+    const iy = Math.floor(ly - (intSize - 1) / 2);
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
     ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));   // pixel 不走 buffer，opacity 这里乘

@@ -49,6 +49,9 @@ const els = {
   statusLabel: document.getElementById("statusLabel"),
   versionLabel: document.getElementById("versionLabel"),
   sizeSlider: document.getElementById("sizeSlider"),
+  sizePopup: document.getElementById("sizePopup"),
+  sizePopupCircle: document.getElementById("sizePopupCircle"),
+  sizePopupText: document.getElementById("sizePopupText"),
   opacitySlider: document.getElementById("opacitySlider"),
   undoBtn: document.getElementById("undoButton"),
   redoBtn: document.getElementById("redoButton"),
@@ -355,6 +358,7 @@ function applyBrushPresetFrozen(brush) {
   state.brush.spacing       = (typeof brush.spacing === "number")
     ? brush.spacing
     : (brush.spacing?.value ?? 0.06);
+  state.brush.flowScale     = brush.flowScale ?? 1.0;       // v104 per-preset flow 乘数
   state.brush.pixelMode     = !!brush.pixelMode;
   // v99：smooth 跟 preset 走（位置平滑也是笔感的一部分，不该是系统全局）
   const sm = brush.smooth || {};
@@ -893,14 +897,33 @@ function setColor(hex) {
 els.activeSwatch.addEventListener("click", () => toggleColorPanel());
 setColor(state.color);
 
+// v104: size 滑块 popup（px + mini circle 预览，1.2s 自动隐）
+let _sizePopupTimer = null;
+function showSizePopup(px) {
+  if (!els.sizePopup) return;
+  const r = Math.max(2, Math.min(60, px / 2));
+  els.sizePopupCircle.style.width  = (r * 2) + "px";
+  els.sizePopupCircle.style.height = (r * 2) + "px";
+  els.sizePopupText.textContent = `${px|0} px`;
+  const rect = els.sizeSlider.getBoundingClientRect();
+  // 浮在 slider 右侧，竖直中线对齐 popup 中心
+  els.sizePopup.style.left = (rect.right + 12) + "px";
+  els.sizePopup.style.top  = (rect.top + rect.height / 2 - 30) + "px";
+  els.sizePopup.classList.remove("hidden");
+  clearTimeout(_sizePopupTimer);
+  _sizePopupTimer = setTimeout(() => els.sizePopup.classList.add("hidden"), 1200);
+}
+
 // v97：setSize 接受 px；slider 转 log；setIntensity 路由 flow/opacity
 function setSize(v) {
+  v = Math.max(1, Math.round(v));        // v104: clamp to int
   state.brush.size = v;
   writeCurrentToolSize(v);
   safeLSSet("webpaint.size", String(v));
   // 同步 slider（log 化）
   const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
   els.sizeSlider.value = String(sizeToSliderPos(v, maxPx));
+  showSizePopup(v);
 }
 function setOpacity(v) {
   state.brush.opacity = v;
@@ -914,10 +937,11 @@ const setIntensity = setOpacity;
 els.sizeSlider.addEventListener("input", () => {
   const pos = parseFloat(els.sizeSlider.value);
   const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
-  const px = sliderPosToSize(pos, maxPx);
+  const px = sliderPosToSize(pos, maxPx);   // sliderPosToSize 已 round 到 int
   state.brush.size = px;
   writeCurrentToolSize(px);
   safeLSSet("webpaint.size", String(px));
+  showSizePopup(px);
 });
 els.opacitySlider.addEventListener("input", () => setOpacity(parseFloat(els.opacitySlider.value) / 100));
 // boot 初值
@@ -3730,6 +3754,7 @@ _rackEls.newBtn.addEventListener("click", () => {
     defaultOpa: 1.0,
     compositeMode: "wash",
     spacing: 0.06,
+    flowScale: 1.0,
     pixelMode: false,
     taper: { in: 0, out: 0 },
     smudge: _rackCurrentTool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
@@ -3831,6 +3856,7 @@ async function dumpRackAsCode() {
     if (b.defaultOpa != null && b.defaultOpa !== 1.0) args.defaultOpa = b.defaultOpa;
     args.compositeMode = b.compositeMode || "wash";
     args.spacingValue = (typeof b.spacing === "number") ? b.spacing : (b.spacing?.value ?? 0.06);
+    if (b.flowScale != null && b.flowScale !== 1.0) args.flowScale = b.flowScale;
     if (b.pixelMode) args.pixelMode = true;
     if (b.taper?.in)  args.taperIn  = b.taper.in;
     if (b.taper?.out) args.taperOut = b.taper.out;
@@ -4013,12 +4039,13 @@ function _renderBrushSettings() {
   const def = section("默认值（选笔时拷给 opacity 滑块）");
   rangeRow(def, "默认 opacity", 0, 1.0, 0.05, b.defaultOpa, (v) => `${(v*100)|0}%`, (v) => b.defaultOpa = v);
 
-  // 笔画平滑（v99：从 system 挪进 preset）
+  // 笔画平滑（v99：从 system 挪进 preset；v104 LPF 也归这里）
   const smooth = section("笔画平滑");
   rangeRow(smooth, "streamline",   0, 1.0, 0.05, b.smooth.streamline,    (v) => v.toFixed(2), (v) => b.smooth.streamline = v);
   rangeRow(smooth, "stabilization",0, 1.0, 0.05, b.smooth.stabilization, (v) => v.toFixed(2), (v) => b.smooth.stabilization = v);
   rangeRow(smooth, "pull-stab",    0, 1.0, 0.05, b.smooth.pullStabilizer,(v) => v.toFixed(2), (v) => b.smooth.pullStabilizer = v);
   rangeRow(smooth, "motion-filter",0, 1.0, 0.05, b.smooth.motionFilter,  (v) => v.toFixed(2), (v) => b.smooth.motionFilter = v);
+  rangeRow(smooth, "pressure LPF", 0, 200, 5,  b.pressureLPF,            (v) => `${v|0} ms`,  (v) => b.pressureLPF = v);
 
   // 高级：composite mode + pressureGamma + pixelMode
   const adv = section("高级");
@@ -4027,7 +4054,6 @@ function _renderBrushSettings() {
     ["buildup", "Build-Up（累积；可达 100%，喷枪 feel）"],
   ], b.compositeMode, (v) => b.compositeMode = v);
   rangeRow(adv, "pressureGamma", 0.2, 3.0, 0.05, b.pressureGamma, (v) => v.toFixed(2), (v) => b.pressureGamma = v);
-  rangeRow(adv, "pressureLPF (ms)", 0, 200, 5, b.pressureLPF, (v) => `${v|0} ms`, (v) => b.pressureLPF = v);
 
   // Pixel mode toggle
   const pmRow = document.createElement("div");
@@ -4055,11 +4081,15 @@ function _renderBrushSettings() {
   rangeRow(sp, "间距", 1, 200, 1, Math.round(spVal * 100),
     (v) => `${v|0}%`,
     (v) => { b.spacing = v / 100; });
+  // v104: flow 乘数 —— spacing 调到很小（如大喷枪 2%）时让 user 把单 stamp flow 压回来
+  if (b.flowScale == null) b.flowScale = 1.0;
+  rangeRow(sp, "flow 乘数", 5, 200, 5, Math.round(b.flowScale * 100),
+    (v) => `${v|0}%`,
+    (v) => { b.flowScale = v / 100; });
 
-  // Taper
+  // Taper：入端 stylistic taper（生效）；出端 v98+ 没接进引擎 → 撤
   const tp = section("收尾");
   rangeRow(tp, "入端", 0, 5, 0.1, b.taper.in, (v) => v.toFixed(1), (v) => b.taper.in = v);
-  rangeRow(tp, "出端", 0, 5, 0.1, b.taper.out, (v) => v.toFixed(1), (v) => b.taper.out = v);
 
   // Smudge specific
   if (b.tool === "smudge") {

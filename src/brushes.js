@@ -44,6 +44,7 @@ function makeBrush({
   shapeKind = "round", aspect = 1.0, rotation = 0, hardness = 1.0,
   textureB64 = null,
   spacingValue = 0.06,
+  flowScale = 1.0,                    // v104: per-preset flow 乘数；spacing 调小后用它压回手感
   pixelMode = false,
   taperIn = 0, taperOut = 0,
   smudge = null,
@@ -62,6 +63,7 @@ function makeBrush({
     defaultOpa,
     compositeMode,
     spacing: spacingValue,
+    flowScale,
     pixelMode,
     taper: { in: taperIn, out: taperOut },
     smudge,
@@ -80,33 +82,35 @@ const DEFAULTS_SPEC = [
     args: { size: 6, sizeBaseMax: 80, hardness: 0.5,
             sizeCoeff: 0.4, opaCoeff: 0.7, flowCoeff: 0.3,
             spacingValue: 0.06, compositeMode: "wash" } },
-  // 勾线：强 size 压感，起末 stylistic taper。Wash。
-  // pressureLPF 50ms：转角顿一下时 out-leg 有尾巴，不会突然变细（user 主诉）
+  // 勾线：anime quality。LPF 100ms（user：「lpf 够了，默认 100ms 舒服，能达到 anime quality」）
+  // + streamline 0.8 + stabilization 0.75 + motionFilter 0.2
   { id: "default-brush-ink",      name: "勾线",   tool: "brush",
     args: { size: 6, sizeBaseMax: 60, hardness: 0.5,
             sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
-            pressureLPF: 50,
+            pressureLPF: 100,
             spacingValue: 0.04, compositeMode: "wash",
-            taperIn: 0.3, taperOut: 0.3 } },
-  // 平涂：大笔填色，强 size 压感。Wash 单笔封顶（user.opacity slider 控）。
-  // size 50 + sizeCoeff 1.0（user iPad 调；之前 24/0.8 太小不够灵敏）
+            taperIn: 0.3, taperOut: 0.3,
+            streamline: 0.8, stabilization: 0.75, motionFilter: 0.2 } },
+  // 平涂：大笔填色。hardness 0.9 + gamma 1.2 + LPF 100 + 笔风 taper。
   { id: "default-brush-fill",     name: "平涂",   tool: "brush",
-    args: { size: 50, sizeBaseMax: 200, hardness: 1.0,
+    args: { size: 50, sizeBaseMax: 200, hardness: 0.9,
             sizeCoeff: 1.0, opaCoeff: 0, flowCoeff: 0,
-            spacingValue: 0.06, compositeMode: "wash" } },
+            pressureGamma: 1.2, pressureLPF: 100,
+            spacingValue: 0.06, compositeMode: "wash",
+            taperIn: 0.3, taperOut: 0.3,
+            stabilization: 0.1, motionFilter: 0.1 } },
 
-  // 大喷枪：size 固定（sizeCoeff=0）；flow 跟压感；Build-Up 可喷到 100%。
-  // user 自己拉低 flow slider 当喷雾 feel。
+  // 大喷枪：spacing 2%（user：「大喷枪间距要到 2% artifact 才小」）。
+  // defaultOpa 0.5 让单笔 cap 在 50%（喷枪感）；flowScale 留 1.0，user 自己拉 slider。
   { id: "default-airbrush-big",   name: "大喷枪", tool: "brush",
     args: { size: 300, sizeBaseMax: 800, hardness: 0,
             sizeCoeff: 0, opaCoeff: 0, flowCoeff: 1.0,
-            spacingValue: 0.05, compositeMode: "buildup" } },
+            spacingValue: 0.02, compositeMode: "buildup",
+            defaultOpa: 0.5 } },
   // 小喷枪：当 sketch 用，size 略跟压感。Build-Up。
-  // pressureLPF 20ms 轻量平滑
   { id: "default-airbrush-small", name: "小喷枪", tool: "brush",
     args: { size: 16, sizeBaseMax: 200, hardness: 0.15,
             sizeCoeff: 0.4, opaCoeff: 0, flowCoeff: 1.0,
-            pressureLPF: 20,
             spacingValue: 0.05, compositeMode: "buildup" } },
 
   // 涂抹（smudge）：sample + blend 走专用 path。
@@ -116,12 +120,11 @@ const DEFAULTS_SPEC = [
             spacingValue: 0.06, compositeMode: "buildup",
             smudge: { strength: 0.8, dryness: 0.1 } } },
 
-  // 硬橡皮：精修线稿，强 size 压感。Wash。
-  // pressureLPF 30ms 类似勾线（精修线稿 out-leg 也要尾巴）
+  // 硬橡皮：精修线稿，强 size 压感。Wash。hardness 0.75（iPad 调；之前 1.0 太硬）。
+  // LPF user 实测设回 0（精修橡皮要 raw 跟手），不靠 LPF。
   { id: "default-eraser-hard",    name: "硬橡皮", tool: "eraser",
-    args: { size: 50, sizeBaseMax: 100, hardness: 1.0,
+    args: { size: 50, sizeBaseMax: 100, hardness: 0.75,
             sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
-            pressureLPF: 30,
             spacingValue: 0.04, compositeMode: "wash" } },
   // 软橡皮：喷枪 eraser；Build-Up，flow 跟压感。
   { id: "default-eraser-soft",    name: "软橡皮", tool: "eraser",
@@ -181,6 +184,7 @@ export function migrateBrush(b) {
   delete b.defaultFlow;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
   if (b.pressureLPF == null) b.pressureLPF = 0;
+  if (b.flowScale == null) b.flowScale = 1.0;
   // compositeMode：airbrush=true → buildup；否则 wash
   if (b.compositeMode == null) {
     b.compositeMode = b.airbrush ? "buildup" : "wash";

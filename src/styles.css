@@ -1026,17 +1026,16 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   border-color: var(--accent, #4c8bf5); font-weight: 600;
 }
 .brush-settings-body {
-  flex: 1 1 0;
-  min-height: 0;          /* user：「笔刷设置没有做滚动条」根因 = 嵌套 flex 没 min-height */
+  /* v102 grid layout 改了：body 在 grid 1fr cell，宽度天然 100% */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  touch-action: pan-y;    /* v99：强制竖向 pan，避免子元素触摸吞掉滚动 */
-  padding: 16px 20px;
+  touch-action: pan-y;
+  /* v104：用 dynamic padding 居中代替 max-width，body 真正吃满宽度，两侧空白也算 body
+     → touch-action pan-y 真正生效，user 在左右空白也能拖滚动（之前 max-width 把
+     两侧排除出 body，空白触摸落在 view 上不滚） */
+  padding: 16px max(20px, calc(50% - 300px));
   padding-bottom: max(env(safe-area-inset-bottom, 0px), 32px);
-  max-width: 600px;
-  margin: 0 auto;
-  width: 100%;
   box-sizing: border-box;
   scrollbar-width: thin;
 }
@@ -1071,6 +1070,34 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 }
 .brush-settings-row.brush-settings-row-full {
   grid-template-columns: 80px 1fr;
+}
+
+/* v104 size 滑块 popup：拖动时显 px + mini circle 预览，1.2s 后隐 */
+.size-popup {
+  position: fixed;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+  box-shadow: var(--shadow);
+}
+.size-popup.hidden { display: none; }
+.size-popup-circle {
+  background: var(--ink);
+  border-radius: 50%;
+  width: 20px; height: 20px;
+  flex-shrink: 0;
+}
+.size-popup-text {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  min-width: 50px;
+  text-align: right;
 }
 
 /* Palette 调色板小窗（v87）—— 256×256 浮动 mixer */
