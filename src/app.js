@@ -3690,10 +3690,11 @@ function _renderRackSheet() {
     tile.appendChild(name);
     tile.appendChild(gear);
     // tap tile body → 选中 + 关 sheet
+    // 注意：选笔只动 state.toolStates（per-doc 活动笔），**不**改 _brushRack 内容。
+    // 所以不设 _rackDirty，避免每次切笔都触发云端 push（拿旧 ETag 必然 412 冲突）。
     tile.addEventListener("click", (e) => {
       e.stopPropagation();
       selectBrushPresetForTool(_rackCurrentTool, b.id);
-      _rackDirty = true;
       closeExclusive();
     });
     _rackEls.grid.appendChild(tile);
