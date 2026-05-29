@@ -44,7 +44,6 @@ function makeBrush({
   shapeKind = "round", aspect = 1.0, rotation = 0, hardness = 1.0,
   textureB64 = null,
   spacingValue = 0.06,
-  flowScale = 1.0,                    // v104: per-preset flow 乘数；spacing 调小后用它压回手感
   pixelMode = false,
   taperIn = 0, taperOut = 0,
   smudge = null,
@@ -63,7 +62,6 @@ function makeBrush({
     defaultOpa,
     compositeMode,
     spacing: spacingValue,
-    flowScale,
     pixelMode,
     taper: { in: taperIn, out: taperOut },
     smudge,
@@ -100,18 +98,17 @@ const DEFAULTS_SPEC = [
             taperIn: 0.3, taperOut: 0.3,
             stabilization: 0.1, motionFilter: 0.1 } },
 
-  // 大喷枪：spacing 2%（user：「大喷枪间距要到 2% artifact 才小」）。
-  // defaultOpa 0.5 让单笔 cap 在 50%（喷枪感）；flowScale 留 1.0，user 自己拉 slider。
+  // 大喷枪：v106 smoothstep falloff 之后 spacing 10% 也平滑（之前 2% 是绕开 linear-banding artifact）
+  // user：「间距应该大一些，比如 10%」
   { id: "default-airbrush-big",   name: "大喷枪", tool: "brush",
     args: { size: 300, sizeBaseMax: 800, hardness: 0,
             sizeCoeff: 0, opaCoeff: 0, flowCoeff: 1.0,
-            spacingValue: 0.02, compositeMode: "buildup",
-            defaultOpa: 0.5 } },
-  // 小喷枪：当 sketch 用，size 略跟压感。Build-Up。
+            spacingValue: 0.1, compositeMode: "buildup" } },
+  // 小喷枪：当 sketch 用，size 32（iPad 调）+ spacing 10%。Build-Up。
   { id: "default-airbrush-small", name: "小喷枪", tool: "brush",
-    args: { size: 16, sizeBaseMax: 200, hardness: 0.15,
+    args: { size: 32, sizeBaseMax: 200, hardness: 0.15,
             sizeCoeff: 0.4, opaCoeff: 0, flowCoeff: 1.0,
-            spacingValue: 0.05, compositeMode: "buildup" } },
+            spacingValue: 0.1, compositeMode: "buildup" } },
 
   // 涂抹（smudge）：sample + blend 走专用 path。
   { id: "default-smudge-soft",    name: "涂抹",   tool: "smudge",
@@ -184,7 +181,8 @@ export function migrateBrush(b) {
   delete b.defaultFlow;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
   if (b.pressureLPF == null) b.pressureLPF = 0;
-  if (b.flowScale == null) b.flowScale = 1.0;
+  delete b.flowScale;                          // v106 撤
+  delete b.spacingFlowMul;                     // 顺便清未出生的字段
   // compositeMode：airbrush=true → buildup；否则 wash
   if (b.compositeMode == null) {
     b.compositeMode = b.airbrush ? "buildup" : "wash";

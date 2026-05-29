@@ -358,7 +358,6 @@ function applyBrushPresetFrozen(brush) {
   state.brush.spacing       = (typeof brush.spacing === "number")
     ? brush.spacing
     : (brush.spacing?.value ?? 0.06);
-  state.brush.flowScale     = brush.flowScale ?? 1.0;       // v104 per-preset flow 乘数
   state.brush.pixelMode     = !!brush.pixelMode;
   // v99：smooth 跟 preset 走（位置平滑也是笔感的一部分，不该是系统全局）
   const sm = brush.smooth || {};
@@ -3754,7 +3753,6 @@ _rackEls.newBtn.addEventListener("click", () => {
     defaultOpa: 1.0,
     compositeMode: "wash",
     spacing: 0.06,
-    flowScale: 1.0,
     pixelMode: false,
     taper: { in: 0, out: 0 },
     smudge: _rackCurrentTool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
@@ -3856,7 +3854,6 @@ async function dumpRackAsCode() {
     if (b.defaultOpa != null && b.defaultOpa !== 1.0) args.defaultOpa = b.defaultOpa;
     args.compositeMode = b.compositeMode || "wash";
     args.spacingValue = (typeof b.spacing === "number") ? b.spacing : (b.spacing?.value ?? 0.06);
-    if (b.flowScale != null && b.flowScale !== 1.0) args.flowScale = b.flowScale;
     if (b.pixelMode) args.pixelMode = true;
     if (b.taper?.in)  args.taperIn  = b.taper.in;
     if (b.taper?.out) args.taperOut = b.taper.out;
@@ -4081,13 +4078,8 @@ function _renderBrushSettings() {
   rangeRow(sp, "间距", 1, 200, 1, Math.round(spVal * 100),
     (v) => `${v|0}%`,
     (v) => { b.spacing = v / 100; });
-  // v104: flow 乘数 —— spacing 调到很小（如大喷枪 2%）时让 user 把单 stamp flow 压回来
-  // v105：range 1-200 step 1。大喷枪 spacing 2% 单 px 被 ~50 stamp 覆盖，
-  // flowScale 50% 仅把 92%→72%（肉眼区分小），要到 10-20% 才显眼
-  if (b.flowScale == null) b.flowScale = 1.0;
-  rangeRow(sp, "flow 乘数", 1, 200, 1, Math.round(b.flowScale * 100),
-    (v) => `${v|0}%`,
-    (v) => { b.flowScale = v / 100; });
+  // v106：flow 乘数撤了 (user：「flow 乘数好像没 work，要不删掉」+「root cause 是 stamp boundary
+  // 没 falloff 到 0」)。v106 已改 smoothstep falloff，spacing 10% 也平滑，乘数没必要。
 
   // Taper：入端 stylistic taper（生效）；出端 v98+ 没接进引擎 → 撤
   const tp = section("收尾");

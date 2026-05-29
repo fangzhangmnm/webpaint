@@ -52,8 +52,6 @@ const DEFAULT_SETTINGS = {
   shapeRotation: 0,
   // spacing：
   spacing: 0.12,
-  // v104：per-preset flow 乘数；spacing 调到极小时（如大喷枪 2%）用它压回手感
-  flowScale: 1.0,
   // buffer 合成模式：
   compositeMode: "wash",  // "wash" = Alpha Darken (JS max), "buildup" = source-over (Canvas2D native)
   // pixel mode：
@@ -98,6 +96,9 @@ export class BrushEngine {
 
   // 预渲染 colored radial-gradient stamp（Build-Up native path 用）。
   // PERF：cache key 不含 size —— stamp 按 baseSize 烤一次，每颗 drawImage 缩到目标 size。
+  // v106：linear gradient 在 boundary 不平滑（dα/dr ≠ 0 → 两 stamp 间 banding，
+  // user 反映「boundary 没 falloff 到 0」），改 multi-stop 模拟 smoothstep（dα/dr = 0 at 两端）。
+  // Canvas2D radialGradient 没有 cubic interpolation，必须多 stop 离散逼近。
   _getStamp(size, hardness, color, mode) {
     const useColor = mode === "erase" ? "#000" : color;
     const key = `${useColor}|${hardness.toFixed(3)}|${mode}`;
@@ -111,9 +112,20 @@ export class BrushEngine {
     stamp.width = d; stamp.height = d;
     const sctx = stamp.getContext("2d");
     const hd = Math.max(0, Math.min(0.999, hardness));
-    const g = sctx.createRadialGradient(r, r, hd * r, r, r, r);
-    g.addColorStop(0, useColor);
-    g.addColorStop(1, hexToRgba(useColor, 0));   // 同色 α=0 避免 RGB 漂移白/黑边
+    // multi-stop smoothstep：center hd*r 段是 α=1，hd*r..r 段是 smoothstep down to 0
+    const g = sctx.createRadialGradient(r, r, 0, r, r, r);
+    const STOPS = 16;
+    for (let i = 0; i <= STOPS; i++) {
+      const t = i / STOPS;                  // 0 at center, 1 at outer
+      let alpha;
+      if (t <= hd) {
+        alpha = 1;
+      } else {
+        const u = (t - hd) / (1 - hd);      // 0..1 in decay zone
+        alpha = 1 - u * u * (3 - 2 * u);    // smoothstep down: 1 → 0
+      }
+      g.addColorStop(t, hexToRgba(useColor, alpha));
+    }
     sctx.fillStyle = g;
     sctx.fillRect(0, 0, d, d);
     this._stampCache = { key, canvas: stamp, baseSize, radius: r };
@@ -401,8 +413,7 @@ export class BrushEngine {
     const opaMul  = signedLerp(s.opaCoeff  || 0, pCurve);
 
     const size = Math.max(0.5, s.size * sizeMul);
-    // v104: per-preset flowScale 乘进 stamp_α (Π 内)；user 用它在小 spacing 时压回手感
-    const effFlow = Math.max(0, Math.min(1, s.flow * flowMul * (s.flowScale ?? 1.0)));
+    const effFlow = Math.max(0, Math.min(1, s.flow * flowMul));
     // stamp_α = flow × opa_mul（Π 内层）；user.opacity 在 composite 时乘（Π 外层）
     const stampAlpha = effFlow * opaMul;
     if (stampAlpha < 0.001) return;
@@ -509,7 +520,12 @@ export class BrushEngine {
         if (dist >= radius) continue;
         let shapeA;
         if (decayLen === 0 || dist <= innerR) shapeA = 1;
-        else shapeA = (radius - dist) / decayLen;
+        else {
+          // v106: smoothstep falloff (derivative 0 at 两端) 取代 linear
+          // 解 user 反映「boundary 没 falloff 到 0」+ 两 stamp 间 banding
+          const u = (dist - innerR) / decayLen;     // 0 at innerR, 1 at radius
+          shapeA = 1 - u * u * (3 - 2 * u);          // 1 → 0 smoothstep
+        }
         const dabA = stampA255 * shapeA;
         const idx = rowOff + px;
         if (dabA > buf[idx]) buf[idx] = dabA;     // Alpha Darken = max
