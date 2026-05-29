@@ -68,20 +68,23 @@ function makeBrush({
 // **shapes 不在 rack 里**——shapes 工具复用 brush rack（getRackToolKey）。
 const DEFAULTS_SPEC = [
   // 铅笔：sketch。opacity 压感主轴（轻=淡），flow 也略跟。Wash 让自交不变深。
+  // size 6（user iPad 调）
   { id: "default-brush-pencil",   name: "铅笔",   tool: "brush",
-    args: { size: 8, sizeBaseMax: 80, hardness: 0.5,
+    args: { size: 6, sizeBaseMax: 80, hardness: 0.5,
             sizeCoeff: 0.4, opaCoeff: 0.7, flowCoeff: 0.3,
             spacingValue: 0.06, compositeMode: "wash" } },
   // 勾线：强 size 压感，起末 stylistic taper。Wash。
+  // hardness 0.5（user iPad 调；之前 1.0 太硬）
   { id: "default-brush-ink",      name: "勾线",   tool: "brush",
-    args: { size: 6, sizeBaseMax: 60, hardness: 1.0,
+    args: { size: 6, sizeBaseMax: 60, hardness: 0.5,
             sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
             spacingValue: 0.04, compositeMode: "wash",
             taperIn: 0.3, taperOut: 0.3 } },
   // 平涂：大笔填色，强 size 压感。Wash 单笔封顶（user.opacity slider 控）。
+  // size 50 + sizeCoeff 1.0（user iPad 调；之前 24/0.8 太小不够灵敏）
   { id: "default-brush-fill",     name: "平涂",   tool: "brush",
-    args: { size: 24, sizeBaseMax: 200, hardness: 1.0,
-            sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
+    args: { size: 50, sizeBaseMax: 200, hardness: 1.0,
+            sizeCoeff: 1.0, opaCoeff: 0, flowCoeff: 0,
             spacingValue: 0.06, compositeMode: "wash" } },
 
   // 大喷枪：size 固定（sizeCoeff=0）；flow 跟压感；Build-Up 可喷到 100%。
@@ -103,10 +106,11 @@ const DEFAULTS_SPEC = [
             spacingValue: 0.06, compositeMode: "buildup",
             smudge: { strength: 0.8, dryness: 0.1 } } },
 
-  // 硬橡皮：精修线稿，强 size 压感 + opacity 压感。Wash。
+  // 硬橡皮：精修线稿，强 size 压感。Wash。
+  // size 50 + opaCoeff 0（user iPad 调；之前 16 太小、opaCoeff 1.0 让轻压几乎擦不掉）
   { id: "default-eraser-hard",    name: "硬橡皮", tool: "eraser",
-    args: { size: 16, sizeBaseMax: 100, hardness: 1.0,
-            sizeCoeff: 0.8, opaCoeff: 1.0, flowCoeff: 0,
+    args: { size: 50, sizeBaseMax: 100, hardness: 1.0,
+            sizeCoeff: 0.8, opaCoeff: 0, flowCoeff: 0,
             spacingValue: 0.04, compositeMode: "wash" } },
   // 软橡皮：喷枪 eraser；Build-Up，flow 跟压感。
   { id: "default-eraser-soft",    name: "软橡皮", tool: "eraser",
