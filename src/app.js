@@ -429,7 +429,8 @@ function selectBrushPresetForTool(tool, brushId) {
   if (!brush) return;
   ts.activeBrushId = brushId;
   ts.size    = brush.size.base;
-  ts.opacity = 1.0;
+  // v99r2：opacity 从 preset.defaultOpa 取（默 1.0）；flow 永远 1.0（preset 不存 flow）
+  ts.opacity = brush.defaultOpa ?? 1.0;
   ts.flow    = 1.0;
   if (key === getRackToolKey(state.tool)) applyToolState(state.tool);
 }
@@ -981,23 +982,10 @@ els.menuTheme.addEventListener("click", () => {
   applyTheme(next);
   setStatus(`主题 · ${THEME_LABEL[next]}`);
 });
-els.menuCheckUpdate.addEventListener("click", async () => {
-  setMenuOpen(false);
-  setStatus("检测更新中…", true);
-  try {
-    // 优先用 boot 时存的 registration（iPad PWA / save-to-home-screen 模式下
-    // navigator.serviceWorker.getRegistration() 偶尔返 undefined）
-    const reg = _swRegistration || await navigator.serviceWorker?.getRegistration();
-    if (!reg) { setStatus("Service Worker 未注册（先把页面刷一次）"); return; }
-    await reg.update();
-    setTimeout(() => {
-      if (reg.waiting) setStatus("有新版本，刷新页面应用");
-      else setStatus(`已是最新（${window.WEBPAINT_VERSION || ""}）`);
-    }, 1500);
-  } catch (e) {
-    setStatus("检测失败：" + (e && e.message || e));
-  }
-});
+// v100：删「检测更新」menu (实测在 iPad PWA 上不可靠，user：「检测更新功能没用」)。
+// 强制更新一律走「强制清缓存重启」（menuForcePwaReset）— 详 docs/pwa-update-detection.md。
+// 老 element 在 HTML 里 hidden，handler 留空保 element exists 防 null deref。
+if (els.menuCheckUpdate) els.menuCheckUpdate.addEventListener("click", () => setMenuOpen(false));
 els.menuClear.addEventListener("click", () => {
   setMenuOpen(false);
   openSheet(els.clearSheet, els.clearBackdrop);
@@ -3727,7 +3715,7 @@ function _nextBrushName() {
   return `新笔 ${max + 1}`;
 }
 _rackEls.newBtn.addEventListener("click", () => {
-  // v99 schema：coeff + compositeMode + smooth
+  // v99r2 schema：coeff + compositeMode + smooth + defaultOpa
   const newB = {
     id: newBrushId(),
     name: _nextBrushName(),
@@ -3737,6 +3725,7 @@ _rackEls.newBtn.addEventListener("click", () => {
     size: { base: 12, max: 200 },
     sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
     pressureGamma: 1.0,
+    defaultOpa: 1.0,
     compositeMode: "wash",
     spacing: 0.06,
     pixelMode: false,
@@ -3800,6 +3789,24 @@ async function _shareOrDownloadJSON(blob, filename, title) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
 }
 
+// v99r2: rack action icons (lucide-style; 跟 topSaveBtn 同一套描线)
+const ICON_RACK_IMPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+const ICON_RACK_EXPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
+const ICON_RACK_CLOUD  = ICON_UPLOAD;          // 复用 smart save 推送 icon
+const ICON_RACK_CODE   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
+const ICON_RACK_RESET  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
+const ICON_RACK_NEW    = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+
+function _initRackActionIcons() {
+  if (_rackEls.importBtn)       _rackEls.importBtn.innerHTML       = ICON_RACK_IMPORT;
+  if (_rackEls.exportFolderBtn) _rackEls.exportFolderBtn.innerHTML = ICON_RACK_EXPORT;
+  if (_rackEls.cloudPushBtn)    _rackEls.cloudPushBtn.innerHTML    = ICON_RACK_CLOUD;
+  if (_rackEls.dumpCodeBtn)     _rackEls.dumpCodeBtn.innerHTML     = ICON_RACK_CODE;
+  if (_rackEls.resetBtn)        _rackEls.resetBtn.innerHTML        = ICON_RACK_RESET;
+  if (_rackEls.newBtn)          _rackEls.newBtn.innerHTML          = ICON_RACK_NEW;
+}
+_initRackActionIcons();
+
 // v99：导出当前文件夹下的所有 brush 为一个 JSON pack（{ folder, brushes: [...] }）
 async function exportRackFolderAsFile() {
   if (!_brushRack) return;
@@ -3815,13 +3822,13 @@ async function exportRackFolderAsFile() {
   setStatus(`已导出文件夹「${folder}」（${brushes.length} 笔）`);
 }
 
-// v99 dev：把当前 _brushRack 拼成 DEFAULTS_SPEC 代码片段，clipboard
-// user：「我 ipad 调好了你写回默认」—— 调好后复制贴进 src/brushes.js DEFAULTS_SPEC
-function dumpRackAsCode() {
+// v99r2 dev：把当前 _brushRack 拼成 DEFAULTS_SPEC 代码文件下载（不走剪贴板）
+// user：「我 ipad 调好了你写回默认」+「不要走剪切板，就是文件」
+async function dumpRackAsCode() {
   if (!_brushRack) return;
   const lines = [];
-  lines.push("// 复制以下到 src/brushes.js DEFAULTS_SPEC (替换原 array 内容)");
-  lines.push("const DEFAULTS_SPEC = [");
+  lines.push("// Auto-dumped from brush rack. 替换 src/brushes.js DEFAULTS_SPEC array 内容。");
+  lines.push("export const DEFAULTS_SPEC = [");
   for (const b of _brushRack.brushes) {
     const args = {};
     args.size = b.size?.base ?? 12;
@@ -3834,6 +3841,7 @@ function dumpRackAsCode() {
     args.opaCoeff  = b.opaCoeff  ?? 0.6;
     args.flowCoeff = b.flowCoeff ?? 0;
     if (b.pressureGamma != null && b.pressureGamma !== 1.0) args.pressureGamma = b.pressureGamma;
+    if (b.defaultOpa != null && b.defaultOpa !== 1.0) args.defaultOpa = b.defaultOpa;
     args.compositeMode = b.compositeMode || "wash";
     args.spacingValue = (typeof b.spacing === "number") ? b.spacing : (b.spacing?.value ?? 0.06);
     if (b.pixelMode) args.pixelMode = true;
@@ -3851,40 +3859,9 @@ function dumpRackAsCode() {
   }
   lines.push("];");
   const code = lines.join("\n");
-  // 写剪贴板；fallback：浮 textarea 让 user 长按复制
-  navigator.clipboard?.writeText(code).then(
-    () => setStatus(`已复制 ${_brushRack.brushes.length} 笔的代码到剪贴板`),
-    () => _showCodeInGenericSheet(code)
-  );
-}
-function _showCodeInGenericSheet(code) {
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = code;
-    ta.style.position = "fixed";
-    ta.style.top = "10%";
-    ta.style.left = "5%";
-    ta.style.width = "90%";
-    ta.style.height = "80%";
-    ta.style.zIndex = "9999";
-    ta.style.background = "var(--bg)";
-    ta.style.color = "var(--ink)";
-    ta.style.border = "1px solid var(--line)";
-    ta.style.padding = "12px";
-    ta.style.fontFamily = "ui-monospace, monospace";
-    ta.style.fontSize = "11px";
-    document.body.appendChild(ta);
-    ta.select();
-    setStatus("剪贴板失败 → 长按选中下面 textarea 复制；点 textarea 外侧关闭");
-    setTimeout(() => {
-      const close = (e) => {
-        if (e.target === ta) return;
-        ta.remove();
-        document.removeEventListener("pointerdown", close, true);
-      };
-      document.addEventListener("pointerdown", close, true);
-    }, 100);
-  } catch (_) {}
+  const blob = new Blob([code], { type: "text/javascript" });
+  await _shareOrDownloadJSON(blob, "default-brushes.js", "笔架代码");
+  setStatus(`已导出 ${_brushRack.brushes.length} 笔的代码文件`);
 }
 
 if (_rackEls.exportFolderBtn) _rackEls.exportFolderBtn.addEventListener("click", () => exportRackFolderAsFile());
@@ -3933,10 +3910,18 @@ function _closeBrushSettings(save) {
       _brushRack.brushes[idx] = _editingBrushDraft;
       _rackDirty = true;
       persistBrushRack();
-      // 若是当前 tool 的 active brush → 同步 frozen 字段
-      const ts = state.toolStates[_editingBrushDraft.tool];
-      if (ts?.activeBrushId === _editingBrushId && state.tool === _editingBrushDraft.tool) {
-        applyToolState(state.tool);
+      // v99r2：保存后自动切到该笔（包括 size 回 base、opacity / flow 重置默认）
+      // user：「修改保存了一个笔刷之后自动切到那一个（包括回到 default size）」
+      const tool = _editingBrushDraft.tool;
+      const targetTool = (state.tool === "shapes" || state.tool === "airbrush") ? "brush" : tool;
+      // 切到对应 tool（如果用户当前不在）
+      // 不主动切 tool，避免打断 user 当下的工具；只切笔
+      // 在当前 tool 的 rackKey 跟 brush.tool 兼容时才切
+      if (getRackToolKey(state.tool) === getRackToolKey(targetTool)) {
+        selectBrushPresetForTool(state.tool, _editingBrushDraft.id);
+      } else {
+        // 写到目标 tool 的 toolState 但不切 tool
+        selectBrushPresetForTool(targetTool, _editingBrushDraft.id);
       }
       setStatus(`已保存：${_editingBrushDraft.name}`);
     }
@@ -4022,6 +4007,7 @@ function _renderBrushSettings() {
   if (b.flowCoeff == null) b.flowCoeff = 0;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
   if (b.compositeMode == null) b.compositeMode = "wash";
+  if (b.defaultOpa == null) b.defaultOpa = 1.0;
   if (!b.smooth) b.smooth = { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 };
 
   // Size：base + max
@@ -4034,6 +4020,10 @@ function _renderBrushSettings() {
   rangeRow(dyn, "size",    -1, 1, 0.05, b.sizeCoeff, (v) => v.toFixed(2), (v) => b.sizeCoeff = v);
   rangeRow(dyn, "opacity", -1, 1, 0.05, b.opaCoeff,  (v) => v.toFixed(2), (v) => b.opaCoeff = v);
   rangeRow(dyn, "flow",    -1, 1, 0.05, b.flowCoeff, (v) => v.toFixed(2), (v) => b.flowCoeff = v);
+
+  // 默认值（选笔时拷给 toolState；flow 永远 1.0 不存）
+  const def = section("默认值（选笔时拷给 opacity 滑块）");
+  rangeRow(def, "默认 opacity", 0, 1.0, 0.05, b.defaultOpa, (v) => `${(v*100)|0}%`, (v) => b.defaultOpa = v);
 
   // 笔画平滑（v99：从 system 挪进 preset）
   const smooth = section("笔画平滑");

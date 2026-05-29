@@ -46,6 +46,9 @@ function makeBrush({
   smudge = null,
   // 位置平滑（per-brush，v99 起从 system 挪进 preset）
   streamline = 0.3, stabilization = 0, pullStabilizer = 0, motionFilter = 0,
+  // v99r2：defaultOpa 留着，默认 1.0；user 编辑笔可以改成 0.6 当 sketch 默认
+  // user：「default opacity 还是留着吧但都是 1」
+  defaultOpa = 1.0,
 }) {
   return {
     id, name, tool, folder,
@@ -53,6 +56,7 @@ function makeBrush({
     size: { base: size, max: sizeBaseMax },
     sizeCoeff, opaCoeff, flowCoeff,
     pressureGamma,
+    defaultOpa,
     compositeMode,
     spacing: spacingValue,
     pixelMode,
@@ -165,8 +169,8 @@ export function migrateBrush(b) {
     b.opaCoeff = b.airbrush ? 0 : 0.6;
   }
   delete b.opacity;
-  // v98 defaultOpa / defaultFlow：删（toolState 选 preset 时硬编码 1.0）
-  delete b.defaultOpa;
+  // v99r2：defaultOpa 留着（默认 1.0），defaultFlow 撤
+  if (b.defaultOpa == null) b.defaultOpa = 1.0;
   delete b.defaultFlow;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
   // compositeMode：airbrush=true → buildup；否则 wash

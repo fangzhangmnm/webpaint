@@ -371,19 +371,17 @@
       <div class="brush-rack-head">
         <span id="brushRackTitle">笔架 · 笔刷</span>
         <div class="brush-rack-actions">
-          <button class="brush-rack-action" id="brushRackImport" type="button" title="导入 JSON">导入</button>
-          <button class="brush-rack-action" id="brushRackNew" type="button" title="新建笔">+ 新建</button>
+          <button class="brush-rack-icon-btn" id="brushRackImport" type="button" title="导入笔刷 JSON 文件"></button>
+          <button class="brush-rack-icon-btn" id="brushRackExportFolder" type="button" title="导出本文件夹为 JSON 文件"></button>
+          <button class="brush-rack-icon-btn" id="brushRackCloudPush" type="button" title="上传笔架到云端"></button>
+          <button class="brush-rack-icon-btn" id="brushRackDumpCode" type="button" title="dev：导出当前笔架为 DEFAULTS_SPEC 代码文件"></button>
+          <button class="brush-rack-icon-btn" id="brushRackReset" type="button" title="重置笔架（恢复默认）"></button>
+          <button class="brush-rack-icon-btn" id="brushRackNew" type="button" title="新建笔"></button>
           <button class="brush-rack-close" id="brushRackClose" type="button" aria-label="关闭">×</button>
         </div>
       </div>
       <div class="brush-rack-folders" id="brushRackFolders"></div>
       <div class="brush-rack-grid" id="brushRackGrid"></div>
-      <div class="brush-rack-foot">
-        <button class="brush-rack-action" id="brushRackExportFolder" type="button">导出本文件夹</button>
-        <button class="brush-rack-action" id="brushRackCloudPush" type="button">上传云端</button>
-        <button class="brush-rack-action" id="brushRackReset" type="button">重置笔架</button>
-        <button class="brush-rack-action" id="brushRackDumpCode" type="button" title="dev：复制当前 rack 为 DEFAULTS_SPEC 代码">复制为代码</button>
-      </div>
     </div>
 
     <!-- Brush settings 全屏 view（v83）：编辑某个 brush preset -->
@@ -643,11 +641,9 @@
       <div class="menu-section-label">调试</div>
       <button class="menu-item" id="menuResetBrushRack" type="button" role="menuitem" hidden></button>
       <button class="menu-item" id="menuForcePwaReset" type="button" role="menuitem">
-        <span class="menu-item-label">强制清缓存重启</span>
+        <span class="menu-item-label">强制更新（清缓存重启）</span>
       </button>
-      <button class="menu-item" id="menuCheckUpdate" type="button" role="menuitem">
-        <span class="menu-item-label">检测更新</span>
-      </button>
+      <button class="menu-item" id="menuCheckUpdate" type="button" role="menuitem" hidden></button>
 
       <hr class="menu-sep" />
       <button class="menu-item menu-danger" id="menuClear" type="button" role="menuitem">

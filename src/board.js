@@ -399,8 +399,14 @@ export class Board {
     this._applyDocTransform(ctx);
     const { scale } = this.viewport;
 
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
+    // v100：放大查看（scale > 1）走 nearest-neighbor，看像素级细节
+    // user：「画布当放缩 > 1 的时候改成 nearest neighbor」
+    if (scale > 1) {
+      ctx.imageSmoothingEnabled = false;
+    } else {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
+    }
 
     // doc 背景：默认 backgroundColor；开了棋盘则画半透明灰白格（Procreate 透明背景同款）
     if (this._showCheckerboard) {
@@ -472,8 +478,13 @@ export class Board {
 
     // 切到 doc 坐标系画 layer
     this._applyDocTransform(ctx);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
+    // v100：scale > 1 走 nearest-neighbor 同 _renderFull
+    if (scale > 1) {
+      ctx.imageSmoothingEnabled = false;
+    } else {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
+    }
     if (this._showCheckerboard) {
       this._drawCheckerboard(ctx, this.doc.width, this.doc.height);
     } else {

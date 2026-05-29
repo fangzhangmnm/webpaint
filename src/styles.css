@@ -890,18 +890,19 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   border-bottom: 1px solid var(--line);
 }
 .brush-rack-head > span { font-weight: 600; flex: 1; }
-.brush-rack-actions { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
-.brush-rack-foot {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
-  padding-bottom: max(env(safe-area-inset-bottom, 0px), 10px);
-  border-top: 1px solid var(--line);
-  background: var(--bg-soft);
-  flex-shrink: 0;
+.brush-rack-actions { display: flex; gap: 2px; align-items: center; flex-wrap: nowrap; }
+/* v100：rack 操作 icon 按钮（导入/导出/上传/dump/重置/新建）；同 top-bar tool 大小 */
+.brush-rack-icon-btn {
+  width: 32px; height: 32px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--ink-soft);
+  border: 1px solid transparent; border-radius: 6px;
+  cursor: pointer;
 }
-.brush-rack-foot > .brush-rack-action { font-size: 12px; padding: 4px 10px; }
+.brush-rack-icon-btn > svg { width: 18px; height: 18px; }
+.brush-rack-icon-btn:hover { background: var(--bg-soft); color: var(--ink); border-color: var(--line); }
+.brush-rack-icon-btn:active { transform: scale(0.94); }
 .brush-rack-action {
   font: inherit; font-size: 12px;
   padding: 4px 10px;

@@ -1,13 +1,23 @@
-# PWA 更新检测 + 版本号显示 + 手动检测：四件套全挂
+# PWA 更新检测 + 版本号显示 + 强制更新：四件套全挂
 
-> 给兄弟项目和未来的 AI：这套**直接拷过去能用**。WebPaint 第一版只挂了第三条，user 反馈"PWA 更新不太主动"。补齐 4 条 + 加手动检测 + 加版本号水印才完整。WebXiaoHeiWu 是最早的范式。
+> 给兄弟项目和未来的 AI：这套**直接拷过去能用**。WebPaint 第一版只挂了第三条，user 反馈"PWA 更新不太主动"。补齐 4 条 + 加**强制更新**（v100 起替代手动 check）+ 加版本号水印才完整。
+
+## v100 更新（user 实测后修正）
+
+「**检测更新**」menu 删了。user：「检测更新功能没用，有强制清缓存重启就够了，改个名字说明就是强制更新的意思」。
+
+**根因**：iPad PWA 上 `reg.update()` 仅触发后台 SW check，**不等于** application reload；user 点了「检测更新」看不到新 UI，会以为没生效。哪怕真有新版本，UI 仍要等下一次 visibility change 才换。这条 UX 链不直观。
+
+替代：menu 改成「**强制更新（清缓存重启）**」（原 menuForcePwaReset），一键 unregister SW + caches.delete + location.reload(true)。一气呵成进到新版本，user 看到顶栏版本号 = 视觉确认。详 §5。
+
+旧的 menuCheckUpdate element 留在 HTML 但 hidden，handler no-op，避免 null deref + 防破坏 a11y。
 
 ## TL;DR（hard requirements，少一件都会有 user 抱怨）
 
 1. **SW 在模块顶层 register**，不要塞进 `window.load` 里。详见下方 §0
 2. **4 条 update 检测路径全挂**（waiting / updatefound / postMessage / poll），iPad PWA 默认不主动 check
-3. **菜单加一个"检测更新"按钮**，返回"已是最新（vNN）"或"有新版本"。给 user 一个"我现在主动 check 一下"的出口
-4. **屏幕上常驻显示版本号**。user 点了"刷新"之后没法判断新代码是否真生效；版本号水印 = 视觉确认
+3. **菜单加「强制更新（清缓存重启）」按钮**（v100 之前是「检测更新」，user 嫌没用）。一键 unregister + caches.delete + reload
+4. **屏幕上常驻显示版本号**。user 点了「刷新」之后没法判断新代码是否真生效；版本号水印 = 视觉确认
 
 每条都不可省。少 1 = 收到"你这版本根本没生效 / PWA 离线打不开 / 检查不到更新"那类报告。
 
