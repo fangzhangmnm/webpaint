@@ -206,11 +206,14 @@ export class Board {
   setLassoProvider(fn) {
     this._lassoProvider = fn;
   }
-  // v110: 给某 layer 在 board 渲染时套 ctx.filter（颜色调整 live preview）
-  // (layerId, filterStr) 启动；(null, null) 关
-  setActiveLayerFilter(layerId, filterStr) {
-    this._activeFilterLayerId = layerId;
-    this._activeFilterStr = filterStr;
+  // v110: 给某 layer 在 board 渲染时套 ctx.filter（颜色调整 live preview）—— v113 撤
+  // ctx.filter on iPad Safari Canvas2D 偶发不渲染 (user：「颜色调整预览，apply 都没用」)
+  setActiveLayerFilter() { /* no-op, replaced by surrogate */ }
+  // v113: 颜色调整 live preview 走 surrogate canvas（per-pixel JS BCSH 之后塞进来）
+  // (layerId, canvas) 启动；(null, null) 关
+  setActiveLayerSurrogate(layerId, canvas) {
+    this._activeSurrogateLayerId = layerId;
+    this._activeSurrogateCanvas = canvas;
     this.invalidateAll();
   }
 
@@ -293,16 +296,14 @@ export class Board {
   // 到 **doc 坐标系**（doc (0,0) = ctx origin，doc (W,H) = (W,H) in ctx）。
   // 所以这里 drawImage 的 dest 直接用 layer.bboxX/Y/W/H（doc 坐标）。
   _drawLayerWithOverlay(ctx, layer, overlay) {
-    // v110/112: 颜色调整 live preview —— 给指定 layer 在 drawImage 时套 ctx.filter
-    // v112: save/restore 包起来；iPad Safari Canvas2D filter 偶发不清，直接 setter 不稳
-    const tempFilter = (this._activeFilterLayerId === layer.id) ? this._activeFilterStr : null;
+    // v113: 颜色调整 live preview 走 surrogate canvas（per-pixel BCSH 烤好的）
+    const sourceCanvas = (this._activeSurrogateLayerId === layer.id && this._activeSurrogateCanvas)
+      ? this._activeSurrogateCanvas : layer.canvas;
     if (!overlay || overlay.mode !== "erase") {
-      if (tempFilter) { ctx.save(); ctx.filter = tempFilter; }
       ctx.drawImage(
-        layer.canvas, 0, 0, layer.bboxW, layer.bboxH,
+        sourceCanvas, 0, 0, layer.bboxW, layer.bboxH,
         layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH,
       );
-      if (tempFilter) ctx.restore();
       if (overlay) {
         const prevA = ctx.globalAlpha;
         ctx.globalAlpha = ctx.globalAlpha * overlay.opacity;

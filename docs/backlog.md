@@ -193,6 +193,16 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - 改：lassoToolbarRow2 重排，selectionActions 里把反选 / 去选 / 填色 / 清除选区
   四个 grouping 到一起；变换 / 复印 / 复制层等 lift-类操作另一组
 
+### 液化 + 笔刷 respect 选区 (v113 记，user：「液化和笔刷都要 respect 选区」)
+- 现状：lasso fill/clear 受选区影响；adjust suite v113 起 respect；笔刷 / 液化 不 respect
+- 笔刷：current stroke 走 brush engine 直接写 layer，选区 mask 没 hook
+  - lasso.applySelectionMaskPostStroke 已有！是 stroke 结束后把选区外像素 revert 到 preSnap
+  - 检查为啥没在 brush endStroke 后自动调；找 input.js _abortStroke / _commitStroke 路径
+- 液化：current 走 liquify engine 改 layer 像素，同样没受 mask 限制
+  - 同思路：preSnap → liquify → 选区外 revert，applySelectionMaskPostStroke 可复用
+- 关联：stroke entry beforeSnap 已经存了；只缺 "endStroke 时检查 doc.selection 并 mask"
+- 工作量 ~20 行 hook
+
 ### lasso transform 数学大修 (v112 记，user：「建议好好理一遍数学」)
 v110 加 mesh 后 v111 投影补丁，user 测出多个 drag/handle bug：
 - **uniform 还是错**：应该用 opposite angle 做 pivot（拖角时对角角固定），现在大概 pivot 在中心

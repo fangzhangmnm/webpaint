@@ -458,6 +458,26 @@ const input = new InputController(board, doc, {
   history,
 });
 
+// v113: panel z-order —— 点击 panel 把它带到同 panel 层内最高 z
+// user：「adjust panel 点出来之后在 color panel 下面，导致我以为坏了，能不能点开谁谁到这一层的 top」
+let _panelTopZ = 15;     // float-panel 默认 z = 15；递增不限上限
+function _bringPanelTop(el) {
+  if (!el) return;
+  _panelTopZ++;
+  el.style.zIndex = _panelTopZ;
+}
+// 给每个可能弹出来的 float panel 在 pointerdown 时 bringTop
+(function bindPanelZOrder() {
+  const panels = [
+    "colorPanel", "paletteWindow", "referencePanel",
+    "adjustPanel", "liquifyPanel",
+  ];
+  for (const id of panels) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("pointerdown", () => _bringPanelTop(el), true);
+  }
+})();
+
 // v111: iPad PWA 双击误触 window 拖动 → finger state 抽风修
 // user：「有时双击时还是会错误拖动 ipad window 然后 finger state 抽风，按钮都按不了」
 // iPad 系统手势抢断 canvas pointer 后偶尔不发 pointercancel 到 canvas，map 里残留 ghost。
@@ -2728,31 +2748,143 @@ els.resampleConfirm.addEventListener("click", () => {
 });
 
 // 颜色调整面板 (B/C/S/H) ----
-// 用 Canvas2D ctx.filter 算 brightness/contrast/saturate/hue-rotate
-// live preview：board 渲染时给 active layer 的 drawImage 加 ctx.filter
-// 应用：到 active layer 像素 (off-screen canvas + ctx.filter + drawImage 回 layer)，
-//       受 doc.selection mask 限制
-let _adjustState = null;     // { active, brightness, contrast, saturation, hue, beforeSnap }
-function _adjustFilterString(s) {
-  // 0% slider = 100% original; ±100% slider = ±100% delta
-  const b = 1 + (s.brightness / 100);    // -100..100 → 0..2
-  const c = 1 + (s.contrast / 100);      // 同上
-  const sat = 1 + (s.saturation / 100);  // 同上
-  const hue = s.hue | 0;                 // -180..180 度
-  return `brightness(${b}) contrast(${c}) saturate(${sat}) hue-rotate(${hue}deg)`;
+// v113: 撤 Canvas2D ctx.filter（iPad Safari 偶发不渲染，user：「预览 apply 都没用」）
+// 改 per-pixel JS BCSH 算式 (color matrix)，preview 走 surrogate canvas，apply 烤到 layer
+let _adjustState = null;     // { active, brightness, contrast, saturation, hue, beforeSnap, surrogate }
+// BCSH per-pixel: brightness × → contrast × → saturate (lerp toward luma) → hue rotate (CSS hue-rotate matrix)
+function _bakeBCSHToImageData(srcData, dstData, s) {
+  const b = 1 + (s.brightness / 100);
+  const c = 1 + (s.contrast / 100);
+  const sat = 1 + (s.saturation / 100);
+  const hueRad = (s.hue | 0) * Math.PI / 180;
+  const cosH = Math.cos(hueRad);
+  const sinH = Math.sin(hueRad);
+  // CSS hue-rotate matrix (linear; W3C SVG filter spec)
+  const lumR = 0.213, lumG = 0.715, lumB = 0.072;
+  const m11 = lumR + cosH * (1 - lumR) + sinH * (-lumR);
+  const m12 = lumG + cosH * (-lumG)    + sinH * (-lumG);
+  const m13 = lumB + cosH * (-lumB)    + sinH * (1 - lumB);
+  const m21 = lumR + cosH * (-lumR)    + sinH * 0.143;
+  const m22 = lumG + cosH * (1 - lumG) + sinH * 0.140;
+  const m23 = lumB + cosH * (-lumB)    + sinH * (-0.283);
+  const m31 = lumR + cosH * (-lumR)    + sinH * (-(1 - lumR));
+  const m32 = lumG + cosH * (-lumG)    + sinH * lumG;
+  const m33 = lumB + cosH * (1 - lumB) + sinH * lumB;
+  const useHue = s.hue !== 0;
+  const N = srcData.length;
+  for (let i = 0; i < N; i += 4) {
+    let r = srcData[i], g = srcData[i + 1], bl = srcData[i + 2];
+    // brightness: multiply
+    r *= b; g *= b; bl *= b;
+    // contrast: (x - 128) * c + 128
+    r = (r - 128) * c + 128;
+    g = (g - 128) * c + 128;
+    bl = (bl - 128) * c + 128;
+    // saturate: lerp toward luma
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+    r = luma + (r - luma) * sat;
+    g = luma + (g - luma) * sat;
+    bl = luma + (bl - luma) * sat;
+    // hue rotate (color matrix)
+    if (useHue) {
+      const nr = r * m11 + g * m12 + bl * m13;
+      const ng = r * m21 + g * m22 + bl * m23;
+      const nb = r * m31 + g * m32 + bl * m33;
+      r = nr; g = ng; bl = nb;
+    }
+    dstData[i]     = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+    dstData[i + 1] = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+    dstData[i + 2] = bl < 0 ? 0 : bl > 255 ? 255 : bl | 0;
+    dstData[i + 3] = srcData[i + 3];     // alpha 不动
+  }
+}
+// 在选区 mask 内才烤 (sel 提供 maskData)；mask 外 dst 复制 src
+function _bakeBCSHWithMask(srcData, dstData, s, mask) {
+  if (!mask) { _bakeBCSHToImageData(srcData, dstData, s); return; }
+  const b = 1 + (s.brightness / 100);
+  const c = 1 + (s.contrast / 100);
+  const sat = 1 + (s.saturation / 100);
+  const hueRad = (s.hue | 0) * Math.PI / 180;
+  const cosH = Math.cos(hueRad);
+  const sinH = Math.sin(hueRad);
+  const lumR = 0.213, lumG = 0.715, lumB = 0.072;
+  const m11 = lumR + cosH * (1 - lumR) + sinH * (-lumR);
+  const m12 = lumG + cosH * (-lumG)    + sinH * (-lumG);
+  const m13 = lumB + cosH * (-lumB)    + sinH * (1 - lumB);
+  const m21 = lumR + cosH * (-lumR)    + sinH * 0.143;
+  const m22 = lumG + cosH * (1 - lumG) + sinH * 0.140;
+  const m23 = lumB + cosH * (-lumB)    + sinH * (-0.283);
+  const m31 = lumR + cosH * (-lumR)    + sinH * (-(1 - lumR));
+  const m32 = lumG + cosH * (-lumG)    + sinH * lumG;
+  const m33 = lumB + cosH * (1 - lumB) + sinH * lumB;
+  const useHue = s.hue !== 0;
+  const N = srcData.length / 4;
+  for (let i = 0; i < N; i++) {
+    const o = i * 4;
+    const mAlpha = mask[i * 4 + 3];      // 0..255
+    if (mAlpha < 128) {
+      // 选区外：复制原值
+      dstData[o] = srcData[o]; dstData[o + 1] = srcData[o + 1];
+      dstData[o + 2] = srcData[o + 2]; dstData[o + 3] = srcData[o + 3];
+      continue;
+    }
+    let r = srcData[o], g = srcData[o + 1], bl = srcData[o + 2];
+    r *= b; g *= b; bl *= b;
+    r = (r - 128) * c + 128;
+    g = (g - 128) * c + 128;
+    bl = (bl - 128) * c + 128;
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+    r = luma + (r - luma) * sat;
+    g = luma + (g - luma) * sat;
+    bl = luma + (bl - luma) * sat;
+    if (useHue) {
+      const nr = r * m11 + g * m12 + bl * m13;
+      const ng = r * m21 + g * m22 + bl * m23;
+      const nb = r * m31 + g * m32 + bl * m33;
+      r = nr; g = ng; bl = nb;
+    }
+    dstData[o]     = r < 0 ? 0 : r > 255 ? 255 : r | 0;
+    dstData[o + 1] = g < 0 ? 0 : g > 255 ? 255 : g | 0;
+    dstData[o + 2] = bl < 0 ? 0 : bl > 255 ? 255 : bl | 0;
+    dstData[o + 3] = srcData[o + 3];
+  }
+}
+// 给 adjustState 准备 surrogate canvas + 提取 src/mask 数据
+function _initAdjustSurrogate(L) {
+  const sur = document.createElement("canvas");
+  sur.width = L.bboxW; sur.height = L.bboxH;
+  const surCtx = sur.getContext("2d");
+  // 拿原 layer 像素一次缓存
+  surCtx.drawImage(L.canvas, 0, 0);
+  const srcImg = surCtx.getImageData(0, 0, L.bboxW, L.bboxH);
+  // mask data 投到 layer 坐标系（mask 在 doc 坐标，转 layer 局部）
+  let maskData = null;
+  if (doc.selection) {
+    const m = document.createElement("canvas");
+    m.width = L.bboxW; m.height = L.bboxH;
+    const mctx = m.getContext("2d");
+    mctx.drawImage(doc.selection.maskCanvas,
+      doc.selection.bboxX - L.bboxX, doc.selection.bboxY - L.bboxY);
+    maskData = mctx.getImageData(0, 0, L.bboxW, L.bboxH).data;
+  }
+  return { sur, surCtx, srcImg, maskData };
 }
 function _openAdjustPanel() {
   const L = doc.activeLayer;
   if (!L) { setStatus("没活动图层", true); return; }
   if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("活动图层是空的", true); return; }
-  _adjustState = { active: L, brightness: 0, contrast: 0, saturation: 0, hue: 0, beforeSnap: L.snapshot() };
+  const { sur, surCtx, srcImg, maskData } = _initAdjustSurrogate(L);
+  _adjustState = { active: L, brightness: 0, contrast: 0, saturation: 0, hue: 0,
+                   beforeSnap: L.snapshot(), sur, surCtx, srcImg, maskData };
   els.adjustPanel.classList.remove("hidden");
   // 默认位置 right-top
   const w = els.adjustPanel.offsetWidth || 280;
   els.adjustPanel.style.left = (window.innerWidth - w - 16) + "px";
   els.adjustPanel.style.top  = "70px";
+  _bringPanelTop(els.adjustPanel);
   _syncAdjustSliders();
-  board.setActiveLayerFilter?.(L.id, _adjustFilterString(_adjustState));
+  board.setActiveLayerSurrogate?.(L.id, sur);    // 启动 surrogate 预览
+  _onAdjustChange();                              // 初次渲染（identity）
 }
 function _syncAdjustSliders() {
   const s = _adjustState;
@@ -2765,22 +2897,27 @@ function _syncAdjustSliders() {
   els.adjustHue.value = String(s.hue);
   els.adjustHueVal.textContent = `${s.hue}°`;
 }
+// v113: per-pixel JS BCSH 写进 surrogate canvas（live preview）
 function _onAdjustChange() {
   if (!_adjustState) return;
-  board.setActiveLayerFilter?.(_adjustState.active.id, _adjustFilterString(_adjustState));
+  const s = _adjustState;
+  // 复用 srcImg 缓存的原像素，per-pixel 烤进 surrogate
+  const outImg = s.surCtx.createImageData(s.srcImg.width, s.srcImg.height);
+  if (s.maskData) _bakeBCSHWithMask(s.srcImg.data, outImg.data, s, s.maskData);
+  else _bakeBCSHToImageData(s.srcImg.data, outImg.data, s);
+  s.surCtx.putImageData(outImg, 0, 0);
   board.invalidateAll();
 }
 function _closeAdjustPanel(applied) {
   if (!_adjustState) return;
   const L = _adjustState.active;
-  board.setActiveLayerFilter?.(null, null);
+  board.setActiveLayerSurrogate?.(null, null);
   if (applied) {
-    // 烤进 layer 像素
-    _bakeAdjustToLayer(L, _adjustFilterString(_adjustState), doc.selection);
+    // 烤进 layer 像素（surrogate 已经是结果，直接拷回 layer.canvas）
+    L.ctx.clearRect(0, 0, L.bboxW, L.bboxH);
+    L.ctx.drawImage(_adjustState.sur, 0, 0);
     const after = L.snapshot();
     history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });
-    compressPixelSnap(_adjustState.beforeSnap, (blob) => { /* will be set on history entry by name via existing stroke flow */ });
-    compressPixelSnap(after, (blob) => { /* ditto */ });
     _docDirty = true;
     if (isSignedIn()) setCloudDirty(_activeSessionName, true);
     setStatus(`颜色已应用：${L.name}`);
@@ -2788,30 +2925,6 @@ function _closeAdjustPanel(applied) {
   _adjustState = null;
   els.adjustPanel.classList.add("hidden");
   board.invalidateAll();
-}
-function _bakeAdjustToLayer(L, filterString, selection) {
-  const off = document.createElement("canvas");
-  off.width = L.bboxW; off.height = L.bboxH;
-  const offCtx = off.getContext("2d");
-  offCtx.filter = filterString;
-  offCtx.drawImage(L.canvas, 0, 0);
-  offCtx.filter = "none";
-  if (selection) {
-    // 只在 mask 内替换：先把 off 裁到 selection 内
-    offCtx.globalCompositeOperation = "destination-in";
-    offCtx.drawImage(selection.maskCanvas, selection.bboxX - L.bboxX, selection.bboxY - L.bboxY);
-    offCtx.globalCompositeOperation = "source-over";
-    // 然后 layer.canvas 把 mask 内挖空，再 source-over 写入 off
-    L.ctx.save();
-    L.ctx.globalCompositeOperation = "destination-out";
-    L.ctx.drawImage(selection.maskCanvas, selection.bboxX - L.bboxX, selection.bboxY - L.bboxY);
-    L.ctx.globalCompositeOperation = "source-over";
-    L.ctx.drawImage(off, 0, 0);
-    L.ctx.restore();
-  } else {
-    L.ctx.clearRect(0, 0, L.bboxW, L.bboxH);
-    L.ctx.drawImage(off, 0, 0);
-  }
 }
 document.getElementById("adjustColor").addEventListener("click", () => {
   setAdjustOpen(false);

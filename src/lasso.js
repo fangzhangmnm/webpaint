@@ -955,18 +955,25 @@ export function extractMaskOutline(sel) {
   const ctx = sel.maskCanvas.getContext("2d");
   const data = ctx.getImageData(0, 0, w, h).data;
   const segs = [];
+  // v113: virtual padding —— 在 canvas 外侧加一圈 alpha=0 虚拟像素，
+  // 让 mask 占满 canvas 边时（rect/ellipse 全填）也能 detect 边界 transition。
+  // 输出坐标 clamp 到 [0, w/h]，所以 segment 正好落在 bbox 边上。
+  const alpha = (x, y) => (x < 0 || x >= w || y < 0 || y >= h) ? 0 : (data[(y * w + x) * 4 + 3] > 128 ? 1 : 0);
   // 每个 (x, y) cell 用 4 邻角组 4-bit index：TL=bit0 TR=bit1 BR=bit2 BL=bit3
   // 边中点：T=(x+0.5, y), R=(x+1, y+0.5), B=(x+0.5, y+1), L=(x, y+0.5)
-  for (let y = 0; y < h - 1; y++) {
-    for (let x = 0; x < w - 1; x++) {
-      const a00 = data[(y       * w + x      ) * 4 + 3] > 128 ? 1 : 0;
-      const a10 = data[(y       * w + (x + 1)) * 4 + 3] > 128 ? 1 : 0;
-      const a01 = data[((y + 1) * w + x      ) * 4 + 3] > 128 ? 1 : 0;
-      const a11 = data[((y + 1) * w + (x + 1)) * 4 + 3] > 128 ? 1 : 0;
+  for (let y = -1; y < h; y++) {
+    for (let x = -1; x < w; x++) {
+      const a00 = alpha(x,     y);
+      const a10 = alpha(x + 1, y);
+      const a01 = alpha(x,     y + 1);
+      const a11 = alpha(x + 1, y + 1);
       const idx = a00 | (a10 << 1) | (a11 << 2) | (a01 << 3);
       if (idx === 0 || idx === 15) continue;
-      const xL = sel.bboxX + x,       xR = sel.bboxX + x + 1, xM = sel.bboxX + x + 0.5;
-      const yT = sel.bboxY + y,       yB = sel.bboxY + y + 1, yM = sel.bboxY + y + 0.5;
+      // clamp 到 [0, w/h]：虚拟像素的输出落在 bbox 真实边上
+      const cxL = Math.max(0, Math.min(w, x)),     cxR = Math.max(0, Math.min(w, x + 1));
+      const cyT = Math.max(0, Math.min(h, y)),     cyB = Math.max(0, Math.min(h, y + 1));
+      const xL = sel.bboxX + cxL, xR = sel.bboxX + cxR, xM = (xL + xR) / 2;
+      const yT = sel.bboxY + cyT, yB = sel.bboxY + cyB, yM = (yT + yB) / 2;
       // 4-bit lookup → 0/1/2 段（saddle case 5/10 拆两段）
       switch (idx) {
         case 1:  segs.push(xM, yT,  xL, yM); break;
