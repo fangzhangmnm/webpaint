@@ -110,10 +110,10 @@ const DEFAULTS_SPEC = [
   { id: "default-brush-fill",     name: "平涂",   tool: "brush",
     args: { size: 24, hardness: 1.0, flow: 1.0, opacity: 1.0, sizePressureCurve: 0 } },
 
-  // ---- airbrush（user 要 2 个：大喷枪喷大关系 + 小喷枪当画笔用）----
-  { id: "default-airbrush-big",   name: "大喷枪", tool: "airbrush",
+  // ---- airbrush（v95：合并进 brush rack。 spacing.kind=time 决定喷枪行为）----
+  { id: "default-airbrush-big",   name: "大喷枪", tool: "brush",
     args: { size: 120, hardness: 0, flow: 0.04, opacity: 1.0, spacingKind: "time", spacingValue: 16 } },
-  { id: "default-airbrush-small", name: "小喷枪", tool: "airbrush",
+  { id: "default-airbrush-small", name: "小喷枪", tool: "brush",
     args: { size: 24, hardness: 0.2, flow: 0.08, opacity: 1.0, spacingKind: "time", spacingValue: 16 } },
 
   // ---- smudge ----
@@ -200,7 +200,13 @@ export function brushFromJSON(text) {
 export function findBrush(rack, id) {
   return rack.brushes.find((b) => b.id === id) || null;
 }
+// v95：brush 工具包含 airbrush + shapes 老笔（共享 brush rack）
+// 老 IDB 里 tool="airbrush" / "shapes" 的 brush 在 brush 工具下仍可见
+const BRUSH_GROUP = ["brush", "airbrush", "shapes"];
 export function brushesByTool(rack, tool) {
+  if (tool === "brush") {
+    return rack.brushes.filter((b) => BRUSH_GROUP.includes(b.tool));
+  }
   return rack.brushes.filter((b) => b.tool === tool);
 }
 export function brushesByFolder(rack, folder) {

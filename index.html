@@ -153,6 +153,14 @@
       <!-- 智能保存：operator（不是 status）。data-state 由 app.js 切（dirty / cloud-dirty / cloud-busy / synced / saved）-->
       <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
 
+      <button class="tool" id="topGalleryBtn" type="button" title="图库">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2"/>
+          <circle cx="8" cy="9" r="1.5"/>
+          <polyline points="3 17 9 11 14 16 21 9"/>
+        </svg>
+      </button>
+
       <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="4" y1="7" x2="20" y2="7"></line>
@@ -579,9 +587,6 @@
            user：「主菜单分导入，导出，调试等子菜单」
            user：「压感 -> 颜色，不透明度 这些应该只在笔刷设置页出现」→ 删 -->
       <div class="menu-section-label">文件</div>
-      <button class="menu-item" id="menuGallery" type="button" role="menuitem">
-        <span class="menu-item-label">图库</span>
-      </button>
       <button class="menu-item" id="menuRename" type="button" role="menuitem">
         <span class="menu-item-label">重命名当前画作…</span>
       </button>

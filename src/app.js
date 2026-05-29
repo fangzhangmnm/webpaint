@@ -93,7 +93,7 @@ const els = {
   topAdjustBtn: document.getElementById("topAdjustBtn"),
   adjustPopup: document.getElementById("adjustPopup"),
   adjustLiquify: document.getElementById("adjustLiquify"),
-  menuGallery: document.getElementById("menuGallery"),
+  topGalleryBtn: document.getElementById("topGalleryBtn"),
   liquifyPanel: document.getElementById("liquifyPanel"),
   liquifyPanelHead: document.getElementById("liquifyPanelHead"),
   liquifyPanelClose: document.getElementById("liquifyPanelClose"),
@@ -245,14 +245,17 @@ function defaultToolStateFor(tool) {
 // state.toolStates：per-tool 持久化（per-doc）。
 // shapes **不**自己存——user：「笔刷和形状用同样的 brush class，就是同一个 ref」
 // shapes 路径全部 alias 到 brush（见 getRackToolKey）
+// v95：airbrush 也 alias 到 brush；toolStates 仅 brush / smudge / eraser
 state.toolStates = {
   brush:    { size: 12, flow: 1.0, activeBrushId: null },
   smudge:   { size: 16, flow: 1.0, activeBrushId: null },
   eraser:   { size: 32, flow: 0.6, activeBrushId: null },
-  airbrush: { size: 40, flow: 0.05, activeBrushId: null },
 };
-// shapes 工具 → 用 brush 的 state 和 active preset。其他工具 = 用自己的
-function getRackToolKey(tool) { return tool === "shapes" ? "brush" : tool; }
+// shapes / airbrush 工具都 alias 到 brush（user：「喷枪笔架合并到笔刷」）。
+// 笔架是一个池子，所有 tool="brush" 的 preset 都在这。spacing.kind="time" 的 preset 就是喷枪。
+function getRackToolKey(tool) {
+  return (tool === "shapes" || tool === "airbrush") ? "brush" : tool;
+}
 
 async function loadBrushRack() {
   try {
@@ -743,8 +746,8 @@ const RACK_PANEL_BY_TOOL = {
   brush: PANELS.RACK_BRUSH,
   smudge: PANELS.RACK_SMUDGE,
   eraser: PANELS.RACK_ERASER,
-  shapes: PANELS.RACK_BRUSH,    // shapes 共用 brush 的 rack（user：「就是同一个 ref」）
-  airbrush: PANELS.RACK_AIRBRUSH,
+  shapes: PANELS.RACK_BRUSH,    // shapes 共用 brush 的 rack
+  airbrush: PANELS.RACK_BRUSH,  // v95：喷枪也合并进 brush rack
 };
 for (const b of els.toolBtns) {
   b.addEventListener("click", () => {
@@ -2112,20 +2115,17 @@ function adoptLoadedDoc(loaded, sessionName) {
   }
   updateNewerBanner();
   // 恢复 reference 小窗（.ora webpaint/ 扩展）
+  // **先清后设**——防上一画的 ref 在异步路径里残留显示（v95 user 反馈）
+  referenceWindow.clearBitmap();
   if (loaded._referenceBlob) {
     createImageBitmap(loaded._referenceBlob).then((bitmap) => {
       referenceWindow.setBitmap(bitmap, { persistBlob: loaded._referenceBlob });
-      // 图就绪后再应用 viewport + open（applySerializedState 顺序无关，但 fitToPanel 在
-      // setBitmap 里会被调用 → 应用 viewport 后用户保存时的 vp 才生效）
       if (loaded._webpaintState?.reference) {
         referenceWindow.applySerializedState(loaded._webpaintState.reference);
       }
     }).catch(() => {});
-  } else {
-    referenceWindow.clearBitmap();
-    if (loaded._webpaintState?.reference) {
-      referenceWindow.applySerializedState(loaded._webpaintState.reference);
-    }
+  } else if (loaded._webpaintState?.reference) {
+    referenceWindow.applySerializedState(loaded._webpaintState.reference);
   }
   // 恢复 per-doc 的 color + per-tool 状态（v82 起）
   if (loaded._webpaintState?.color) {
@@ -2396,9 +2396,8 @@ els.adjustLiquify.addEventListener("click", () => {
   setStatus("液化");
 });
 
-// ---- 菜单：图库（v46 从 topbar 迁下来，避免误点）----
-els.menuGallery.addEventListener("click", () => {
-  setMenuOpen(false);
+// ---- 图库 icon（v95：从菜单挪回 topbar，user：「图库从菜单中拿出来单独做一个 icon 放菜单旁边」）----
+els.topGalleryBtn.addEventListener("click", () => {
   setGalleryOpen(true);
 });
 
@@ -2962,6 +2961,8 @@ els.newDocConfirm.addEventListener("click", async () => {
   doc.layers = fresh.layers;
   doc.activeIndex = 0;
   doc.width = w; doc.height = h;
+  doc.selection = null;
+  doc.referenceLayerId = null;
   els.canvasSizeLabel.textContent = `${w}×${h}`;
   _activeSessionName = name;
   setCurrentSessionName(name);
@@ -2972,6 +2973,8 @@ els.newDocConfirm.addEventListener("click", async () => {
   _docDirty = true;
   _docLastSavedAt = 0;
   updateSaveStatus();
+  // user：「新建作品时参考里面的图没更新」→ 清 reference 小窗
+  referenceWindow.clearBitmap();
   await saveNow();
   setGalleryOpen(false);
   setStatus(`新建：${name}（${w}×${h}）`);
@@ -3622,8 +3625,14 @@ function _renderRackSheet() {
 }
 
 // 注册 panel-state
+// **bug 修**：多个 tool map 到同 panel id 时（brush + shapes + airbrush → RACK_BRUSH）
+// 后注册的会覆盖前面的 show()。结果点 brush 按钮但 title 显示「形状」/「喷枪」。
+// 修：去重，第一个 tool 赢（canonical）。
+const _registeredPanels = new Set();
 for (const tool of Object.keys(RACK_PANEL_BY_TOOL)) {
   const id = RACK_PANEL_BY_TOOL[tool];
+  if (_registeredPanels.has(id)) continue;
+  _registeredPanels.add(id);
   registerPanel(id, {
     show: () => _showRackSheet(tool),
     hide: _hideRackSheet,

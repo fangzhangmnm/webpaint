@@ -123,10 +123,12 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - 当前用 eyedropper 频繁取色代偿。palette window 也帮一点
 - 真做出来 = 一个小窗显「画布上跟当前色 ΔE < N 的所有色」
 
-### 吸色拖动 + 放大镜
+### 吸色拖动 + 放大镜 + 拖 size 时浮 radius indicator
 - 详 docs/artist-priorities.md Tier 3 #18
-- 长按吸色时在指尖上方浮 1-2 px 放大镜，精确选色
-- 现有 picker 够用但精度不极致
+- 吸色：长按吸色时在指尖上方浮放大镜（user：「eyedropper 小圆 indicator 只要显示颜色也就够了」）
+- 拖 size 滑块时弹个小窗显示当前 px 直径（user：「Procreate 是在旁边弹小窗，计算好尺寸」）
+- 两者形式相近：浮动小窗 + 跟随手指 + 显数值或色块
+- 一起做时 share 一个 floating-bubble 组件
 
 ### 长按 quick-assist（直线 / 弧）
 - 详 docs/artist-priorities.md Tier 2 #9
