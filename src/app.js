@@ -105,6 +105,7 @@ const els = {
   menuReference: document.getElementById("menuReference"),
   menuPalette: document.getElementById("menuPalette"),
   menuResetBrushRack: document.getElementById("menuResetBrushRack"),
+  menuForcePwaReset: document.getElementById("menuForcePwaReset"),
   referencePanel: document.getElementById("referencePanel"),
   referencePanelHead: document.getElementById("referencePanelHead"),
   referencePanelClose: document.getElementById("referencePanelClose"),
@@ -277,6 +278,42 @@ async function persistBrushRack() {
   catch (e) { console.warn("[brush-rack] persist failed:", e); }
 }
 
+// 左侧栏当前 brush 指示器（v93）
+const _sidebarBrushBtn = document.getElementById("leftSidebarBrush");
+const _sidebarBrushName = document.getElementById("leftSidebarBrushName");
+function updateSidebarBrushIndicator() {
+  if (!_brushRack || !_sidebarBrushName) return;
+  const tool = state.tool;
+  const rackKey = getRackToolKey(tool);
+  const ts = state.toolStates[rackKey];
+  const brush = ts?.activeBrushId ? findBrush(_brushRack, ts.activeBrushId) : null;
+  _sidebarBrushName.textContent = brush ? brush.name : "—";
+}
+if (_sidebarBrushBtn) {
+  // tap 切换 rack；长按 600ms 直接进设置
+  let lpTimer = null;
+  _sidebarBrushBtn.addEventListener("pointerdown", () => {
+    lpTimer = setTimeout(() => {
+      lpTimer = null;
+      const rackKey = getRackToolKey(state.tool);
+      const ts = state.toolStates[rackKey];
+      if (ts?.activeBrushId) {
+        closeExclusive();
+        _openBrushSettings(ts.activeBrushId);
+      }
+    }, 600);
+  });
+  const cancelLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+  _sidebarBrushBtn.addEventListener("pointerup", cancelLP);
+  _sidebarBrushBtn.addEventListener("pointerleave", cancelLP);
+  _sidebarBrushBtn.addEventListener("pointercancel", cancelLP);
+  _sidebarBrushBtn.addEventListener("click", () => {
+    const t = state.tool;
+    const id = RACK_PANEL_BY_TOOL[t];
+    if (id) openExclusive(id);
+  });
+}
+
 // 应用 preset 冻结字段到 state.brush（shape / curve / hardness / taper 等）；
 // size + flow 走 toolStates，不在这里处理
 function applyBrushPresetFrozen(brush) {
@@ -321,6 +358,7 @@ function applyToolState(tool) {
   state.brush.opacity = ts.flow;
   if (els.sizeSlider)    els.sizeSlider.value = String(ts.size);
   if (els.opacitySlider) els.opacitySlider.value = String(Math.round(ts.flow * 100));
+  updateSidebarBrushIndicator();
 }
 
 // 滑块改值 → 写回当前工具的 toolState（shapes 写到 brush）
@@ -378,7 +416,10 @@ board.setLassoProvider(() => ({
 //   - subToolBar：lasso 工具激活时显（不论有没有选区），含 sub-tool picker / set-op / threshold
 //   - selectionActions：有选区 + 没在 floating 时显，含 变换 / 取消选区
 //   - transformCtrl：floating 状态下显，含 mode picker + 应用 / 取消
-const lassoToolbar = document.getElementById("lassoToolbar");
+// 两行 toolbar stack（v93）：row1 = 选区方式，row2 = 操作 / 变换
+const lassoToolbarStack = document.getElementById("lassoToolbarStack");
+const lassoToolbarRow1 = document.getElementById("lassoToolbarRow1");
+const lassoToolbarRow2 = document.getElementById("lassoToolbarRow2");
 const lassoSubToolBar = document.getElementById("lassoSubToolBar");
 const lassoSelectionActions = document.getElementById("lassoSelectionActions");
 const lassoTransformCtrl = document.getElementById("lassoTransformCtrl");
@@ -396,14 +437,22 @@ function updateLassoToolbar() {
   const floating = input.lasso.hasFloating();
   const hasSelection = !!doc.selection;
   const lassoActive = state.tool === "lasso";
-  // toolbar 显示总条件：任一 section 非空
   const showAny = floating || hasSelection || lassoActive;
-  lassoToolbar.classList.toggle("hidden", !showAny);
+  lassoToolbarStack.classList.toggle("hidden", !showAny);
   if (!showAny) return;
 
-  lassoSubToolBar.classList.toggle("hidden", floating || !lassoActive);
-  lassoSelectionActions.classList.toggle("hidden", floating || !hasSelection);
-  lassoTransformCtrl.classList.toggle("hidden", !floating);
+  // Row 1：lasso 工具激活 + 不在 floating 才显（floating 时不能新建选区）
+  const showRow1 = lassoActive && !floating;
+  lassoToolbarRow1.classList.toggle("hidden", !showRow1);
+  lassoSubToolBar.classList.toggle("hidden", !showRow1);
+
+  // Row 2：有选区显 selectionActions / floating 显 transformCtrl
+  const showSelectionActions = hasSelection && !floating;
+  const showTransformCtrl = floating;
+  const showRow2 = showSelectionActions || showTransformCtrl;
+  lassoToolbarRow2.classList.toggle("hidden", !showRow2);
+  lassoSelectionActions.classList.toggle("hidden", !showSelectionActions);
+  lassoTransformCtrl.classList.toggle("hidden", !showTransformCtrl);
 
   // 高亮当前 sub-tool / set-op / transform mode
   const sub = input.lasso.getSubTool();
@@ -751,7 +800,6 @@ setTool(state.tool);
 // 然后应用当前 tool 的 state
 loadBrushRack().then((rack) => {
   _brushRack = rack;
-  // 给每个工具一个起始 activeBrushId（如果还没有）
   for (const t of Object.keys(state.toolStates)) {
     if (state.toolStates[t].activeBrushId == null) {
       const init = defaultToolStateFor(t);
@@ -759,9 +807,18 @@ loadBrushRack().then((rack) => {
     }
   }
   applyToolState(state.tool);
-  // 后台：拉云端 etag 对比，不一致 + 本地 clean 默默更新
+  updateSidebarBrushIndicator();
   setTimeout(() => { checkBrushRackCloud().catch(() => {}); }, 2000);
-}).catch((e) => console.warn("[brush-rack] init failed:", e));
+}).catch((e) => {
+  // **关键**：IDB 在 iPad Safari 私密浏览模式下会 throw。loadBrushRack 内部已有
+  // try/catch fallback；这条 catch 接住极端情况（boot 期 promise 链外 throw）。
+  // 至少给个 in-memory rack 让 user 能画
+  console.warn("[brush-rack] init failed:", e);
+  _brushRack = makeDefaultRack();
+  applyToolState(state.tool);
+  updateSidebarBrushIndicator();
+  setStatus("笔架持久化失败（可能私密浏览）：本次 session 可用，重启会重置", true);
+});
 
 // ---- 颜色 ----
 // picker 内部触发的 setColor 不要再 round-trip 回 pickerSetFromHex —— 因为
@@ -2570,6 +2627,33 @@ els.menuPalette.addEventListener("click", () => {
   els.menuPanel?.classList.add("hidden");
 });
 
+els.menuForcePwaReset.addEventListener("click", async () => {
+  els.menuPanel?.classList.add("hidden");
+  const ok = await openConfirmSheet(
+    "强制清缓存重启？",
+    "会清掉 SW + Cache Storage，强制重新拉所有 JS / CSS。" +
+    "你的画 / 笔架（IDB / OneDrive）不会动。\n" +
+    "用途：PWA 卡老版本，点更新还是老的时候用。",
+  );
+  if (!ok) return;
+  try {
+    // 1. 注销所有 SW
+    if (navigator.serviceWorker) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) await r.unregister().catch(() => {});
+    }
+    // 2. 清 Cache Storage（不动 IDB）
+    if (typeof caches !== "undefined") {
+      const keys = await caches.keys();
+      for (const k of keys) await caches.delete(k).catch(() => {});
+    }
+    setStatus("已清缓存，正在硬重载…", true);
+    setTimeout(() => location.reload(), 200);
+  } catch (e) {
+    setStatus("清缓存失败：" + (e.message || e), true);
+  }
+});
+
 els.menuResetBrushRack.addEventListener("click", async () => {
   els.menuPanel?.classList.add("hidden");
   const ok = await openConfirmSheet(
@@ -3525,20 +3609,54 @@ _rackEls.newBtn.addEventListener("click", () => {
   closeExclusive();
   _openBrushSettings(newB.id);
 });
-_rackEls.importBtn.addEventListener("click", async () => {
-  // 简易：直接弹 prompt 让 user 粘贴 JSON。后期可改文件选择
-  const txt = await openInputSheet("粘贴 brush JSON", "", { placeholder: "{...}" });
-  if (!txt) return;
-  try {
-    const b = brushFromJSON(txt);
-    b.folder = _rackCurrentFolder;
-    b.tool = _rackCurrentTool;
-    _brushRack.brushes.push(b);
-    _rackDirty = true;
-    _renderRackSheet();
-    setStatus("已导入");
-  } catch (e) { setStatus("导入失败：" + (e.message || e)); }
+// 导入：文件选择 (user：「不应该是粘贴，而是文件上传下载」)
+_rackEls.importBtn.addEventListener("click", () => {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = "application/json,.json";
+  inp.style.display = "none";
+  inp.addEventListener("change", async () => {
+    const file = inp.files?.[0];
+    if (!file) return;
+    try {
+      const txt = await file.text();
+      const b = brushFromJSON(txt);
+      b.folder = _rackCurrentFolder;
+      b.tool = _rackCurrentTool;
+      _brushRack.brushes.push(b);
+      _rackDirty = true;
+      persistBrushRack();
+      _renderRackSheet();
+      setStatus(`已导入：${b.name}`);
+    } catch (e) { setStatus("导入失败：" + (e.message || e), true); }
+    document.body.removeChild(inp);
+  });
+  document.body.appendChild(inp);
+  inp.click();
 });
+
+// 单 brush 导出（navigator.share 优先，fallback download）
+async function exportBrushAsFile(brush) {
+  const json = brushToJSON(brush);
+  const blob = new Blob([json], { type: "application/json" });
+  const filename = `${brush.name || "brush"}-${brush.tool}.json`;
+  // navigator.share with files (iOS Safari 16+)
+  if (navigator.canShare && navigator.share) {
+    const file = new File([blob], filename, { type: "application/json" });
+    if (navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: brush.name }); return; }
+      catch (_) {/* user cancel / not supported → fallback */}
+    }
+  }
+  // Fallback：a[download]
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+}
 
 // ---- brush settings 全屏 view ----
 let _editingBrushId = null;
@@ -3678,6 +3796,15 @@ function _renderBrushSettings() {
     rangeRow(sm, "强度", 0, 1.0, 0.05, b.smudge.strength, (v) => v.toFixed(2), (v) => b.smudge.strength = v);
     rangeRow(sm, "干燥度", 0, 1.0, 0.05, b.smudge.dryness, (v) => v.toFixed(2), (v) => b.smudge.dryness = v);
   }
+
+  // 导出此笔（navigator.share / 下载）
+  const exp = section("");
+  const expBtn = document.createElement("button");
+  expBtn.type = "button";
+  expBtn.className = "brush-rack-action";
+  expBtn.textContent = "导出此笔为 JSON 文件";
+  expBtn.addEventListener("click", () => exportBrushAsFile(b));
+  exp.appendChild(expBtn);
 
   // 删除按钮
   const del = section("");

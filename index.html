@@ -162,8 +162,12 @@
       </button>
     </header>
 
-    <!-- 左侧栏（drawing 时常驻）：size + flow + undo + redo -->
+    <!-- 左侧栏（drawing 时常驻）：当前笔 + size + flow + undo + redo -->
     <aside class="left-sidebar" id="leftSidebar">
+      <!-- 当前 brush 名（tap = 开 rack；长按 = 进设置） -->
+      <button class="left-sidebar-brush" id="leftSidebarBrush" type="button" title="当前笔刷（tap 切换 / 长按编辑）">
+        <span class="left-sidebar-brush-name" id="leftSidebarBrushName">—</span>
+      </button>
       <input id="sizeSlider" class="left-sidebar-slider" type="range" min="1" max="200" step="1" value="12" aria-label="笔粗" orient="vertical" />
       <span class="left-sidebar-label" title="笔粗">粗</span>
       <input id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1" value="100" aria-label="流量 / 不透明" orient="vertical" />
@@ -268,64 +272,70 @@
       <button class="sheet-action ghost" id="newDocCancel" type="button">取消</button>
     </div>
 
-    <!-- 套索工具栏（v65 重做）。三种状态：
-         - lasso-active（有选区或无）：sub-tool picker（自由/矩形/魔术棒）+ set-op + 阈值滑块（魔术棒 only）
-         - has-selection（任何工具下都显）：变换 / 取消选区
-         - transforming（floating 期间）：模式 picker + 应用 / 取消 -->
-    <div class="lasso-toolbar hidden" id="lassoToolbar" role="toolbar" aria-label="套索 / 选区">
-      <!-- sub-tool + set-op（lasso 工具激活时显示） -->
-      <!-- 短文字（user 反馈：字符符号太难懂）。title 提供长说明。 -->
-      <div class="lasso-section hidden" id="lassoSubToolBar">
-        <button class="lasso-tool-btn" data-lasso-sub="freehand" type="button" title="自由套索">自由</button>
-        <button class="lasso-tool-btn" data-lasso-sub="rect" type="button" title="矩形选区">矩形</button>
-        <button class="lasso-tool-btn" data-lasso-sub="ellipse" type="button" title="椭圆选区">椭圆</button>
-        <button class="lasso-tool-btn" data-lasso-sub="magic" type="button" title="魔术棒">魔棒</button>
-        <span class="lasso-tool-sep" aria-hidden="true">|</span>
-        <button class="lasso-tool-btn" data-lasso-setop="new" type="button" title="新建选区">新</button>
-        <button class="lasso-tool-btn" data-lasso-setop="union" type="button" title="并集">并</button>
-        <button class="lasso-tool-btn" data-lasso-setop="subtract" type="button" title="差集">差</button>
-        <button class="lasso-tool-btn" data-lasso-setop="intersect" type="button" title="交集">交</button>
-        <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
-        <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" title="约束 1:1（正方 / 圆）">1:1</button>
-        <!-- 魔术棒设置弹出按钮（magic sub-tool only） -->
-        <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒阈值">设置</button>
+    <!-- 套索工具栏 v91：两行 stack 设计，详 conversation v91→v92
+         Row 1 「选区方式」：sub-tools + set-ops + 修饰 (1:1 / 设置)
+         Row 2 「选区操作」：actions on selection（floating 时换成 transform ctrl）
+
+         显示规则：
+         - Row 1: lasso tool active + !floating
+         - Row 2: hasSelection + !floating  →  selectionActions
+                  floating                    →  transformCtrl
+         每行各自横滚兜底，不会撑出 iPad mini 竖屏 -->
+    <div class="lasso-toolbar-stack hidden" id="lassoToolbarStack" role="toolbar" aria-label="套索 / 选区">
+      <!-- Row 1: 选区方式 -->
+      <div class="lasso-toolbar hidden" id="lassoToolbarRow1">
+        <div class="lasso-section" id="lassoSubToolBar">
+          <button class="lasso-tool-btn" data-lasso-sub="freehand" type="button" title="自由套索">自由</button>
+          <button class="lasso-tool-btn" data-lasso-sub="rect" type="button" title="矩形选区">矩形</button>
+          <button class="lasso-tool-btn" data-lasso-sub="ellipse" type="button" title="椭圆选区">椭圆</button>
+          <button class="lasso-tool-btn" data-lasso-sub="magic" type="button" title="魔术棒">魔棒</button>
+          <span class="lasso-tool-sep" aria-hidden="true">|</span>
+          <button class="lasso-tool-btn" data-lasso-setop="new" type="button" title="新建选区">新</button>
+          <button class="lasso-tool-btn" data-lasso-setop="union" type="button" title="并集">并</button>
+          <button class="lasso-tool-btn" data-lasso-setop="subtract" type="button" title="差集">差</button>
+          <button class="lasso-tool-btn" data-lasso-setop="intersect" type="button" title="交集">交</button>
+          <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
+          <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" title="约束 1:1（正方 / 圆）">1:1</button>
+          <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒阈值">设置</button>
+        </div>
       </div>
-      <!-- 魔术棒设置 popup（点 ⚙ 弹出，再点别处关） -->
-      <div class="lasso-popup hidden" id="lassoMagicPopup" role="dialog" aria-label="魔术棒设置">
-        <label class="lasso-popup-row">
-          <span>阈值</span>
-          <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" />
-          <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
-        </label>
+      <!-- Row 2: 选区操作 / 变换控制 -->
+      <div class="lasso-toolbar hidden" id="lassoToolbarRow2">
+        <div class="lasso-section hidden" id="lassoSelectionActions">
+          <button class="lasso-tool-btn lasso-tool-confirm" id="lassoTransformBtn" type="button" title="变换 / 移动">变换</button>
+          <button class="lasso-tool-btn" id="lassoFillBtn" type="button" title="用当前颜色填选区">填色</button>
+          <button class="lasso-tool-btn" id="lassoClearBtn" type="button" title="清除选区内像素">清除</button>
+          <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" title="反选">反选</button>
+          <span class="lasso-tool-sep" aria-hidden="true">|</span>
+          <button class="lasso-tool-btn" id="lassoDuplicateBtn" type="button" title="复制选区到新层">复制层</button>
+          <button class="lasso-tool-btn" id="lassoMoveToLayerBtn" type="button" title="选区移动到新层（旧层清除）">移到层</button>
+          <span class="lasso-tool-sep" aria-hidden="true">|</span>
+          <button class="lasso-tool-btn lasso-tool-cancel" id="lassoDeselectBtn" type="button" title="清除选区（去选）">去选</button>
+        </div>
+        <div class="lasso-section hidden" id="lassoTransformCtrl">
+          <button class="lasso-tool-btn" data-lasso-mode="free" type="button" title="自由变换">自由</button>
+          <button class="lasso-tool-btn" data-lasso-mode="uniform" type="button" title="等比缩放">等比</button>
+          <button class="lasso-tool-btn" data-lasso-mode="distort" type="button" title="透视变换">透视</button>
+          <button class="lasso-tool-btn hidden" data-lasso-mode="warp" type="button" title="变形">变形</button>
+          <span class="lasso-tool-sep" aria-hidden="true">|</span>
+          <button class="lasso-tool-btn" data-lasso-sample="nearest" type="button" title="最近邻（像素艺术 / 硬边）">最近</button>
+          <button class="lasso-tool-btn" data-lasso-sample="bilinear" type="button" title="双线性（默认 / 软）">双线</button>
+          <button class="lasso-tool-btn" data-lasso-sample="bicubic" type="button" title="双三次（高质量 / 慢）">双三</button>
+          <span class="lasso-tool-sep" aria-hidden="true">|</span>
+          <button class="lasso-tool-btn lasso-tool-confirm" id="lassoStampBtn" type="button" title="复印（写入但保留浮层）">复印</button>
+          <button class="lasso-tool-btn lasso-tool-confirm" id="lassoCommitBtn" type="button" title="应用变换">应用</button>
+          <button class="lasso-tool-btn lasso-tool-cancel" id="lassoCancelBtn" type="button" title="取消变换">取消</button>
+        </div>
       </div>
-      <!-- 选区动作（has-selection 时显） -->
-      <div class="lasso-section hidden" id="lassoSelectionActions">
-        <button class="lasso-tool-btn lasso-tool-confirm" id="lassoTransformBtn" type="button" title="变换 / 移动">变换</button>
-        <button class="lasso-tool-btn" id="lassoFillBtn" type="button" title="用当前颜色填选区">填色</button>
-        <button class="lasso-tool-btn" id="lassoClearBtn" type="button" title="清除选区内像素">清除</button>
-        <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" title="反选">反选</button>
-        <span class="lasso-tool-sep" aria-hidden="true">|</span>
-        <button class="lasso-tool-btn" id="lassoDuplicateBtn" type="button" title="复制选区到新层">复制层</button>
-        <button class="lasso-tool-btn" id="lassoMoveToLayerBtn" type="button" title="选区移动到新层（旧层清除）">移到层</button>
-        <span class="lasso-tool-sep" aria-hidden="true">|</span>
-        <button class="lasso-tool-btn lasso-tool-cancel" id="lassoDeselectBtn" type="button" title="清除选区（去选）">去选</button>
-      </div>
-      <!-- 变换控制（floating 期间） -->
-      <div class="lasso-section hidden" id="lassoTransformCtrl">
-        <button class="lasso-tool-btn" data-lasso-mode="free" type="button" title="自由变换">自由</button>
-        <button class="lasso-tool-btn" data-lasso-mode="uniform" type="button" title="等比缩放">等比</button>
-        <button class="lasso-tool-btn" data-lasso-mode="distort" type="button" title="透视变换">透视</button>
-        <button class="lasso-tool-btn hidden" data-lasso-mode="warp" type="button" title="变形">变形</button>
-        <span class="lasso-tool-sep" aria-hidden="true">|</span>
-        <!-- 插值模式（影响 transform preview + commit 重采样质量） -->
-        <button class="lasso-tool-btn" data-lasso-sample="nearest" type="button" title="最近邻（像素艺术 / 硬边）">最近</button>
-        <button class="lasso-tool-btn" data-lasso-sample="bilinear" type="button" title="双线性（默认 / 软）">双线</button>
-        <button class="lasso-tool-btn" data-lasso-sample="bicubic" type="button" title="双三次（高质量 / 慢）">双三</button>
-        <span class="lasso-tool-sep" aria-hidden="true">|</span>
-        <button class="lasso-tool-btn lasso-tool-confirm" id="lassoStampBtn" type="button" title="复印（写入但保留浮层）">复印</button>
-        <button class="lasso-tool-btn lasso-tool-confirm" id="lassoCommitBtn" type="button" title="应用变换">应用</button>
-        <button class="lasso-tool-btn lasso-tool-cancel" id="lassoCancelBtn" type="button" title="取消变换">取消</button>
-      </div>
+    </div>
+
+    <!-- 魔术棒设置 popup（点设置弹出，再点别处关）—— 独立于 toolbar stack -->
+    <div class="lasso-popup hidden" id="lassoMagicPopup" role="dialog" aria-label="魔术棒设置">
+      <label class="lasso-popup-row">
+        <span>阈值</span>
+        <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" />
+        <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
+      </label>
     </div>
 
     <!-- Shapes 子工具栏（v86）：shapes tool 激活时显，跟 lasso 子栏同位 -->
@@ -597,6 +607,9 @@
       </button>
       <button class="menu-item" id="menuResetBrushRack" type="button" role="menuitem">
         <span class="menu-item-label">重置笔架（删自定义）</span>
+      </button>
+      <button class="menu-item" id="menuForcePwaReset" type="button" role="menuitem">
+        <span class="menu-item-label">强制清缓存重启（PWA 卡老版本时）</span>
       </button>
       <button class="menu-item" id="menuBrushSettings" type="button" role="menuitem">
         <span class="menu-item-label">笔刷平滑设置…</span>

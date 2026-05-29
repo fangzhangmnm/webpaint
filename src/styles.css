@@ -91,12 +91,23 @@ body[data-tool="picker"] .board { cursor: copy; }
 body[data-tool="lasso"] .board { cursor: crosshair; }
 
 /* 套索浮层工具栏 —— 浮在顶栏下方居中，floating 选区存在时显示 */
-.lasso-toolbar {
+/* 两行 stack 容器：1 行 = 选区方式，2 行 = 选区操作 / 变换 */
+.lasso-toolbar-stack {
   position: fixed;
-  /* top-bar = max(safe-area, 8) + ~56 高，再留 12 间隙 = 68 */
   top: calc(max(env(safe-area-inset-top, 0px), 8px) + 68px);
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 25;
+  max-width: calc(100vw - 24px);
+}
+.lasso-toolbar-stack.hidden { display: none; }
+
+.lasso-toolbar {
+  /* 内部 pill；stack 里堆两行 */
   display: flex;
   align-items: center;
   gap: 4px;
@@ -107,9 +118,8 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   border: 1px solid var(--line);
   border-radius: 999px;
   box-shadow: var(--shadow);
-  z-index: 25;     /* > .menu-panel (20)；< .gallery-full (50) */
-  /* iPad mini 竖屏太窄会超 → 横向滚 */
-  max-width: calc(100vw - 24px);
+  /* 单行内若超长仍横滚兜底 */
+  max-width: 100%;
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
@@ -271,6 +281,31 @@ body[data-mode="gallery"] .left-sidebar { display: none; }
   color: var(--ink-soft);
   user-select: none;
   margin-top: -4px;
+}
+/* 当前笔指示器 + 编辑入口 */
+.left-sidebar-brush {
+  width: 40px;
+  height: 40px;
+  padding: 2px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px;
+  line-height: 1.1;
+  text-align: center;
+  overflow: hidden;
+}
+.left-sidebar-brush:hover { filter: brightness(0.95); }
+.left-sidebar-brush-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
 }
 
 .tool {
