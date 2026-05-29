@@ -104,6 +104,7 @@ const els = {
   liquifyStrengthVal: document.getElementById("liquifyStrengthVal"),
   menuReference: document.getElementById("menuReference"),
   menuPalette: document.getElementById("menuPalette"),
+  menuResetBrushRack: document.getElementById("menuResetBrushRack"),
   referencePanel: document.getElementById("referencePanel"),
   referencePanelHead: document.getElementById("referencePanelHead"),
   referencePanelClose: document.getElementById("referencePanelClose"),
@@ -241,14 +242,17 @@ function defaultToolStateFor(tool) {
   return { size: 12, flow: 1.0, activeBrushId: null };
 }
 
-// state.toolStates：per-tool 持久化的 working state（per-doc）
+// state.toolStates：per-tool 持久化（per-doc）。
+// shapes **不**自己存——user：「笔刷和形状用同样的 brush class，就是同一个 ref」
+// shapes 路径全部 alias 到 brush（见 getRackToolKey）
 state.toolStates = {
   brush:    { size: 12, flow: 1.0, activeBrushId: null },
   smudge:   { size: 16, flow: 1.0, activeBrushId: null },
   eraser:   { size: 32, flow: 0.6, activeBrushId: null },
-  shapes:   { size: 12, flow: 1.0, activeBrushId: null },
   airbrush: { size: 40, flow: 0.05, activeBrushId: null },
 };
+// shapes 工具 → 用 brush 的 state 和 active preset。其他工具 = 用自己的
+function getRackToolKey(tool) { return tool === "shapes" ? "brush" : tool; }
 
 async function loadBrushRack() {
   try {
@@ -302,14 +306,14 @@ function applyBrushPresetFrozen(brush) {
   if (input?.brush?.invalidateStamp) input.brush.invalidateStamp();
 }
 
-// 切到 tool t：从 toolStates[t] 取 size/flow 应用到 state.brush + UI；preset 取冻结字段
+// 切到 tool t：从 toolStates[rackKey(t)] 取 size/flow 应用到 state.brush + UI
 function applyToolState(tool) {
   if (!_brushRack) return;
-  const ts = state.toolStates[tool];
+  const key = getRackToolKey(tool);
+  const ts = state.toolStates[key];
   if (!ts) return;
   if (ts.activeBrushId == null) {
-    // 第一次进这工具 → 用默认 preset 初始化
-    Object.assign(ts, defaultToolStateFor(tool));
+    Object.assign(ts, defaultToolStateFor(key));
   }
   const brush = ts.activeBrushId ? findBrush(_brushRack, ts.activeBrushId) : null;
   if (brush) applyBrushPresetFrozen(brush);
@@ -319,25 +323,25 @@ function applyToolState(tool) {
   if (els.opacitySlider) els.opacitySlider.value = String(Math.round(ts.flow * 100));
 }
 
-// 滑块改值 → 写回当前工具的 toolState
+// 滑块改值 → 写回当前工具的 toolState（shapes 写到 brush）
 function writeCurrentToolSize(v) {
-  const ts = state.toolStates[state.tool];
+  const ts = state.toolStates[getRackToolKey(state.tool)];
   if (ts) ts.size = v;
 }
 function writeCurrentToolFlow(v) {
-  const ts = state.toolStates[state.tool];
+  const ts = state.toolStates[getRackToolKey(state.tool)];
   if (ts) ts.flow = v;
 }
-// 用户从 rack 选了一个 preset → 切 activeBrushId + 把 preset 的 size.base / opacity 当**初始值**写回
 function selectBrushPresetForTool(tool, brushId) {
-  const ts = state.toolStates[tool];
+  const key = getRackToolKey(tool);
+  const ts = state.toolStates[key];
   if (!ts) return;
   const brush = findBrush(_brushRack, brushId);
   if (!brush) return;
   ts.activeBrushId = brushId;
   ts.size = brush.size.base;
   ts.flow = brush.opacity;
-  if (tool === state.tool) applyToolState(tool);
+  if (key === getRackToolKey(state.tool)) applyToolState(state.tool);
 }
 
 // Undo / redo 共享栈（command pattern + 注册 handler，详见
@@ -691,7 +695,7 @@ const RACK_PANEL_BY_TOOL = {
   brush: PANELS.RACK_BRUSH,
   smudge: PANELS.RACK_SMUDGE,
   eraser: PANELS.RACK_ERASER,
-  shapes: PANELS.RACK_SHAPES,
+  shapes: PANELS.RACK_BRUSH,    // shapes 共用 brush 的 rack（user：「就是同一个 ref」）
   airbrush: PANELS.RACK_AIRBRUSH,
 };
 for (const b of els.toolBtns) {
@@ -2564,6 +2568,28 @@ const paletteWindow = new PaletteWindow({
 els.menuPalette.addEventListener("click", () => {
   paletteWindow.toggle();
   els.menuPanel?.classList.add("hidden");
+});
+
+els.menuResetBrushRack.addEventListener("click", async () => {
+  els.menuPanel?.classList.add("hidden");
+  const ok = await openConfirmSheet(
+    "重置笔架？",
+    "会删除全部自定义笔刷 + 改过的默认笔，恢复出厂 8 个 brush。不可撤销。",
+  );
+  if (!ok) return;
+  _brushRack = makeDefaultRack();
+  // 重置所有 toolStates 的 activeBrushId 让 applyToolState 重选默认
+  for (const t of Object.keys(state.toolStates)) {
+    state.toolStates[t].activeBrushId = null;
+    Object.assign(state.toolStates[t], defaultToolStateFor(t));
+  }
+  await persistBrushRack();
+  applyToolState(state.tool);
+  // 触发关 sheet 时的推云路径
+  _rackDirty = true;
+  if (isSignedIn()) pushBrushRackIfSignedIn();
+  _rackDirty = false;
+  setStatus("笔架已重置");
 });
 
 els.menuReference.addEventListener("click", () => {

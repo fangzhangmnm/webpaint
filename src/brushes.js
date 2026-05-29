@@ -99,26 +99,36 @@ function makeBrush({
 // 默认笔架——每工具一个开箱即用 preset。
 // **stable ID**：以 "default-{tool}-{slug}" 形式固定。bump 时新 default 通过 id 比对
 // merge 到用户 rack（不覆盖用户改过的 brush，但缺失的会补上）—— 解决 stale default 问题。
+// **shapes 不在 rack 里**（v89 起）—— shapes 工具复用 brush 当前 preset
+// （user：「笔刷和形状用同样的 brush class，没有单独的形状笔，就是同一个 ref」）
 const DEFAULTS_SPEC = [
+  // ---- brush（草图、勾线、平涂三件套）----
   { id: "default-brush-pencil",   name: "铅笔",   tool: "brush",
     args: { size: 8, hardness: 0.6, flow: 0.5, flowPressureCurve: 1.0, opacity: 0.6 } },
   { id: "default-brush-ink",      name: "勾线",   tool: "brush",
     args: { size: 4, hardness: 1.0, flow: 1.0, opacity: 1.0, sizePressureCurve: 1.5, taperIn: 0.3, taperOut: 0.3 } },
   { id: "default-brush-fill",     name: "平涂",   tool: "brush",
     args: { size: 24, hardness: 1.0, flow: 1.0, opacity: 1.0, sizePressureCurve: 0 } },
-  { id: "default-airbrush-soft",  name: "软喷枪", tool: "airbrush",
-    args: { size: 40, hardness: 0, flow: 0.05, opacity: 1.0, spacingKind: "time", spacingValue: 16 } },
+
+  // ---- airbrush（user 要 2 个：大喷枪喷大关系 + 小喷枪当画笔用）----
+  { id: "default-airbrush-big",   name: "大喷枪", tool: "airbrush",
+    args: { size: 120, hardness: 0, flow: 0.04, opacity: 1.0, spacingKind: "time", spacingValue: 16 } },
+  { id: "default-airbrush-small", name: "小喷枪", tool: "airbrush",
+    args: { size: 24, hardness: 0.2, flow: 0.08, opacity: 1.0, spacingKind: "time", spacingValue: 16 } },
+
+  // ---- smudge ----
   { id: "default-smudge-soft",    name: "涂抹",   tool: "smudge",
     args: { size: 16, hardness: 0.6, smudge: { strength: 0.8, dryness: 0.1 } } },
+
+  // ---- eraser（user 要 2 个：硬橡皮 + 软橡皮）----
+  // 硬橡皮：压感控制大小 / 满流量。精修线稿
+  { id: "default-eraser-hard",    name: "硬橡皮", tool: "eraser",
+    args: { size: 16, hardness: 1.0, flow: 1.0, opacity: 1.0,
+            sizePressureCurve: 1.5, flowPressureCurve: 0 } },
+  // 软橡皮：压感控制流量 / size 弱变。柔淡
   { id: "default-eraser-soft",    name: "软橡皮", tool: "eraser",
-    args: { size: 32, hardness: 0.3, flow: 0.4, opacity: 0.6 } },
-  // shapes：line subtool 走 BrushEngine stamp，吃 hardness / shape / spacing
-  // rect / ellipse 仍走 fill（不 stamp）
-  { id: "default-shapes-line",    name: "细线",   tool: "shapes",
-    args: { size: 4, hardness: 1.0, flow: 1.0, opacity: 1.0,
-            sizePressureCurve: 0, flowPressureCurve: 0,
-            taperIn: 0, taperOut: 0,                       // 直线不要 taper
-            spacingValue: 0.06 } },                        // 紧凑 stamp 让线连续
+    args: { size: 32, hardness: 0.2, flow: 0.5, opacity: 0.7,
+            sizePressureCurve: 0.3, flowPressureCurve: 1.0 } },
 ];
 function specToBrush(spec) {
   const b = makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args });
