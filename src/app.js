@@ -210,15 +210,39 @@ function syncBrushColor() {
 }
 syncBrushColor();
 
-// ============ Brush rack（v81+）============
-// 用户的笔架 = 一个 JSON。boot 时从 IDB 拿；没就装默认。
-// 每个工具切换时把那个工具的 activeBrush 应用到 state.brush 上。
+// ============ Brush rack + per-tool state（v81→v82）============
 //
-// **冻结字段**（preset 内）：shape / size.curve / flow.curve / spacing / taper / hardness
-// **不冻结**：size.base（= 用户滑块的「粗」）、opacity（= 「流」）、color
-// 当前调整 size/opacity 不回写预设，只动 state.brush。显式「保存为预设」才写。
-let _brushRack = null;             // 整个 rack object，详 src/brushes.js
+// **两层 state**（user：「这个比笔刷预设还重要」）：
+//   1. brushRack —— 全账户共享笔架，preset 定义。IDB + 云同步（v83+）
+//   2. toolStates —— 每工具的 current size / flow / activeBrushId，**per-doc**
+//      存在 .ora webpaint/state.json，跟 doc 一起走，不跨 doc
+//
+// state.brush（BrushSettings 单例）是 *当前工具的 working snapshot* —— 给 BrushEngine 用。
+// setTool 切换时 toolStates[oldTool] 已是最新（slider input 时写过），就直接读
+// toolStates[newTool] 应用到 state.brush + UI。
+//
+// color 是全局（不分工具），跟 doc 走（也存 webpaint/state.json）。
+let _brushRack = null;
 const RACK_META_KEY = "brush-rack";
+
+// 默认 tool state：从 rack preset 拿 size/flow base。preset 切换或 doc 加载时覆盖
+function defaultToolStateFor(tool) {
+  if (_brushRack) {
+    const brush = getActiveBrush(_brushRack, tool);
+    if (brush) return { size: brush.size.base, flow: brush.opacity, activeBrushId: brush.id };
+  }
+  return { size: 12, flow: 1.0, activeBrushId: null };
+}
+
+// state.toolStates：per-tool 持久化的 working state（per-doc）
+state.toolStates = {
+  brush:    { size: 12, flow: 1.0, activeBrushId: null },
+  smudge:   { size: 16, flow: 1.0, activeBrushId: null },
+  eraser:   { size: 32, flow: 0.6, activeBrushId: null },
+  shapes:   { size: 12, flow: 1.0, activeBrushId: null },
+  airbrush: { size: 40, flow: 0.05, activeBrushId: null },
+};
+
 async function loadBrushRack() {
   try {
     const stored = await getMeta(RACK_META_KEY);
@@ -228,7 +252,6 @@ async function loadBrushRack() {
   } catch (e) {
     console.warn("[brush-rack] load failed:", e);
   }
-  // 没存档 → 装默认
   const rack = makeDefaultRack();
   try { await setMeta(RACK_META_KEY, rack); } catch (e) { console.warn("[brush-rack] save default failed:", e); }
   return rack;
@@ -238,23 +261,52 @@ async function persistBrushRack() {
   try { await setMeta(RACK_META_KEY, _brushRack); }
   catch (e) { console.warn("[brush-rack] persist failed:", e); }
 }
-// 把 brush preset 应用到 state.brush（保 color 不动；size 跟 preset 的 base）
-function applyBrushPreset(brush) {
+
+// 应用 preset 冻结字段到 state.brush（shape / curve / hardness / taper 等）；
+// size + flow 走 toolStates，不在这里处理
+function applyBrushPresetFrozen(brush) {
   if (!brush) return;
-  state.brush.size = brush.size.base;
-  state.brush.opacity = brush.opacity;
-  // pressureToSize / pressureToOpacity 从 curve 推：curve > 0 表示压感
   state.brush.pressureToSize = brush.size.pressureCurve > 0;
   state.brush.pressureToOpacity = brush.flow.pressureCurve > 0;
-  // 同步 UI 滑块
-  if (els.sizeSlider) els.sizeSlider.value = String(brush.size.base);
-  if (els.opacitySlider) els.opacitySlider.value = String(Math.round(brush.opacity * 100));
+  // v83+ engine refactor 后这里加 shape / hardness / spacing 等
 }
-// 切到 tool t 时 → 应用该 tool 当前 active brush；保 color
-function applyActiveBrushForTool(tool) {
+
+// 切到 tool t：从 toolStates[t] 取 size/flow 应用到 state.brush + UI；preset 取冻结字段
+function applyToolState(tool) {
   if (!_brushRack) return;
-  const brush = getActiveBrush(_brushRack, tool);
-  if (brush) applyBrushPreset(brush);
+  const ts = state.toolStates[tool];
+  if (!ts) return;
+  if (ts.activeBrushId == null) {
+    // 第一次进这工具 → 用默认 preset 初始化
+    Object.assign(ts, defaultToolStateFor(tool));
+  }
+  const brush = ts.activeBrushId ? findBrush(_brushRack, ts.activeBrushId) : null;
+  if (brush) applyBrushPresetFrozen(brush);
+  state.brush.size = ts.size;
+  state.brush.opacity = ts.flow;
+  if (els.sizeSlider)    els.sizeSlider.value = String(ts.size);
+  if (els.opacitySlider) els.opacitySlider.value = String(Math.round(ts.flow * 100));
+}
+
+// 滑块改值 → 写回当前工具的 toolState
+function writeCurrentToolSize(v) {
+  const ts = state.toolStates[state.tool];
+  if (ts) ts.size = v;
+}
+function writeCurrentToolFlow(v) {
+  const ts = state.toolStates[state.tool];
+  if (ts) ts.flow = v;
+}
+// 用户从 rack 选了一个 preset → 切 activeBrushId + 把 preset 的 size.base / opacity 当**初始值**写回
+function selectBrushPresetForTool(tool, brushId) {
+  const ts = state.toolStates[tool];
+  if (!ts) return;
+  const brush = findBrush(_brushRack, brushId);
+  if (!brush) return;
+  ts.activeBrushId = brushId;
+  ts.size = brush.size.base;
+  ts.flow = brush.opacity;
+  if (tool === state.tool) applyToolState(tool);
 }
 
 // Undo / redo 共享栈（command pattern + 注册 handler，详见
@@ -591,14 +643,13 @@ function setTool(t) {
   els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
   document.body.dataset.tool = t;
   updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
-  // 切工具 → 应用该工具的当前 active brush preset（如果有）
-  // brush / smudge / eraser / shapes / airbrush 五个有 rack；其他工具不动 brush settings
+  // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
   if (t === "brush" || t === "smudge" || t === "eraser" || t === "shapes" || t === "airbrush") {
-    applyActiveBrushForTool(t);
+    applyToolState(t);
   }
   // v80 占位：smudge / shapes / airbrush engine 未上，先按 brush 路径走
   if (t === "smudge" || t === "shapes" || t === "airbrush") {
-    setStatus(`${t} 工具 engine 待 v83+ 实装；现在按 brush 走（已应用对应 preset）`);
+    setStatus(`${t} 工具 engine 待 v83+ 实装；现在按 brush 走（已应用对应 per-tool 状态）`);
   }
 }
 for (const b of els.toolBtns) {
@@ -617,10 +668,18 @@ window.addEventListener("wp:doubletap", () => {
 });
 setTool(state.tool);
 
-// Brush rack 异步加载：boot 时拿 IDB 缓存，应用当前 tool 的 active preset
+// Brush rack 异步加载：boot 时拿 IDB 缓存，把 toolStates 缺失字段从 rack 补齐
+// 然后应用当前 tool 的 state
 loadBrushRack().then((rack) => {
   _brushRack = rack;
-  applyActiveBrushForTool(state.tool);
+  // 给每个工具一个起始 activeBrushId（如果还没有）
+  for (const t of Object.keys(state.toolStates)) {
+    if (state.toolStates[t].activeBrushId == null) {
+      const init = defaultToolStateFor(t);
+      Object.assign(state.toolStates[t], init);
+    }
+  }
+  applyToolState(state.tool);
 }).catch((e) => console.warn("[brush-rack] init failed:", e));
 
 // ---- 颜色 ----
@@ -642,13 +701,17 @@ els.activeSwatch.addEventListener("click", () => toggleColorPanel());
 setColor(state.color);
 
 // ---- size / opacity ----
+// v82：size / flow 写**当前工具**的 per-tool state（持久化在 doc 的 webpaint/state.json）。
+// localStorage 仍写，给「新 doc」的初始 fallback。
 function setSize(v) {
   state.brush.size = v;
+  writeCurrentToolSize(v);              // ← per-tool 持久化
   safeLSSet("webpaint.size", String(v));
   els.sizeSlider.value = String(v);
 }
 function setOpacity(v) {
   state.brush.opacity = v;
+  writeCurrentToolFlow(v);              // ← per-tool 持久化（flow 在 toolState 里）
   safeLSSet("webpaint.opacity", String(v));
   els.opacitySlider.value = String(Math.round(v * 100));
 }
@@ -1850,7 +1913,7 @@ async function saveNow(opts = {}) {
   try {
     await saveSession(doc, _activeSessionName, {
       referenceImage: referenceWindow.getPersistBlob(),
-      webpaintState: { reference: referenceWindow.getSerializedState() },
+      webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates },
     });
     _docDirty = false;
     _docLastSavedAt = Date.now();
@@ -1921,6 +1984,23 @@ function adoptLoadedDoc(loaded, sessionName) {
       referenceWindow.applySerializedState(loaded._webpaintState.reference);
     }
   }
+  // 恢复 per-doc 的 color + per-tool 状态（v82 起）
+  if (loaded._webpaintState?.color) {
+    setColor(loaded._webpaintState.color);
+  }
+  if (loaded._webpaintState?.toolStates && typeof loaded._webpaintState.toolStates === "object") {
+    for (const t of Object.keys(state.toolStates)) {
+      const saved = loaded._webpaintState.toolStates[t];
+      if (saved && typeof saved === "object") {
+        Object.assign(state.toolStates[t], {
+          size: typeof saved.size === "number" ? saved.size : state.toolStates[t].size,
+          flow: typeof saved.flow === "number" ? saved.flow : state.toolStates[t].flow,
+          activeBrushId: typeof saved.activeBrushId === "string" ? saved.activeBrushId : state.toolStates[t].activeBrushId,
+        });
+      }
+    }
+    applyToolState(state.tool);
+  }
 }
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty
 window.addEventListener("wp:histchange", () => {
@@ -1948,7 +2028,7 @@ async function saveAndPush() {
     try {
       const ora = await encodeDocToOra(doc, {
         referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState() },
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates },
       });
       await pushSession(_activeSessionName, ora);
       setStatus(`已同步到云端：${_activeSessionName}`);
@@ -2048,7 +2128,7 @@ async function renameCurrentSession({ suggested, reason } = {}) {
     try {
       await saveSession(doc, trimmed, {
         referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState() },
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates },
       });
       if (oldName && oldName !== trimmed) {
         try { await removeSession(oldName); } catch {}
