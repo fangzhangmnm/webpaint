@@ -108,7 +108,14 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   border-radius: 999px;
   box-shadow: var(--shadow);
   z-index: 25;     /* > .menu-panel (20)；< .gallery-full (50) */
+  /* iPad mini 竖屏太窄会超 → 横向滚 */
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
+.lasso-toolbar::-webkit-scrollbar { display: none; }
 .lasso-toolbar.hidden { display: none; }
 .lasso-tool-btn {
   background: transparent;
@@ -434,6 +441,9 @@ input[type=range] {
   top: 56px;
   right: 12px;
   min-width: 200px;
+  /* 长菜单 + iPad mini 竖屏：限高 + 滚动 */
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
   background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
@@ -442,6 +452,9 @@ input[type=range] {
   box-shadow: var(--shadow);
   z-index: 20;
   padding: 6px;
+  /* iOS 流畅滚动 */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 .menu-panel.hidden { display: none; }
 .menu-item {
