@@ -888,21 +888,20 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   display: flex; align-items: center;
   padding: 10px 12px; gap: 8px;
   border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+  flex-shrink: 0;          /* v100r2：head 不被压扁，让 grid 计算正确 */
 }
-.brush-rack-head > span { font-weight: 600; flex: 1; }
-.brush-rack-actions { display: flex; gap: 2px; align-items: center; flex-wrap: nowrap; }
-/* v100：rack 操作 icon 按钮（导入/导出/上传/dump/重置/新建）；同 top-bar tool 大小 */
-.brush-rack-icon-btn {
-  width: 32px; height: 32px;
-  padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: transparent; color: var(--ink-soft);
-  border: 1px solid transparent; border-radius: 6px;
-  cursor: pointer;
+.brush-rack-head > span { font-weight: 600; flex: 1 1 100px; min-width: 80px; }
+/* v100r2：回退 text 按钮，允许 head 内换行（窄屏 6 个按钮换 2 行） */
+.brush-rack-actions {
+  display: flex; gap: 4px; align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
-.brush-rack-icon-btn > svg { width: 18px; height: 18px; }
-.brush-rack-icon-btn:hover { background: var(--bg-soft); color: var(--ink); border-color: var(--line); }
-.brush-rack-icon-btn:active { transform: scale(0.94); }
+.brush-rack-action-dev {
+  opacity: 0.55;
+  font-size: 11px !important;
+}
 .brush-rack-action {
   font: inherit; font-size: 12px;
   padding: 4px 10px;
@@ -924,6 +923,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   padding: 8px 12px 4px;
   overflow-x: auto;
   scrollbar-width: thin;
+  flex-shrink: 0;          /* v100r2：folders 不被压扁 */
 }
 .brush-rack-folder {
   font: inherit; font-size: 12px;

@@ -3789,23 +3789,8 @@ async function _shareOrDownloadJSON(blob, filename, title) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
 }
 
-// v99r2: rack action icons (lucide-style; 跟 topSaveBtn 同一套描线)
-const ICON_RACK_IMPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
-const ICON_RACK_EXPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
-const ICON_RACK_CLOUD  = ICON_UPLOAD;          // 复用 smart save 推送 icon
-const ICON_RACK_CODE   = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
-const ICON_RACK_RESET  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>';
-const ICON_RACK_NEW    = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
-
-function _initRackActionIcons() {
-  if (_rackEls.importBtn)       _rackEls.importBtn.innerHTML       = ICON_RACK_IMPORT;
-  if (_rackEls.exportFolderBtn) _rackEls.exportFolderBtn.innerHTML = ICON_RACK_EXPORT;
-  if (_rackEls.cloudPushBtn)    _rackEls.cloudPushBtn.innerHTML    = ICON_RACK_CLOUD;
-  if (_rackEls.dumpCodeBtn)     _rackEls.dumpCodeBtn.innerHTML     = ICON_RACK_CODE;
-  if (_rackEls.resetBtn)        _rackEls.resetBtn.innerHTML        = ICON_RACK_RESET;
-  if (_rackEls.newBtn)          _rackEls.newBtn.innerHTML          = ICON_RACK_NEW;
-}
-_initRackActionIcons();
+// v100r2：rack 操作按钮回退 text 标签
+// user：「几个 svg 按钮不好理解什么意思。还是改回文字」
 
 // v99：导出当前文件夹下的所有 brush 为一个 JSON pack（{ folder, brushes: [...] }）
 async function exportRackFolderAsFile() {
