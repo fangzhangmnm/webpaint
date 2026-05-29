@@ -84,11 +84,14 @@
             <path d="M13 5l6 6"></path>
           </svg>
         </button>
-        <button class="tool" id="toolSmudge" type="button" data-tool="smudge" title="涂抹（待实现）">
+        <button class="tool" id="toolSmudge" type="button" data-tool="smudge" title="涂抹（手指）">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <!-- 食指竖立涂抹 + 拖痕：指尖 (12,3) 指根 (12,15)，拖痕从 (8,18) → (16,18) -->
-            <path d="M10 4a2 2 0 0 1 4 0v9h-4z"></path>
-            <path d="M8 18c2-2 6-2 8 0"></path>
+            <!-- v120: 用 Lucide 手势 (user：「smudge icon 换成一个手指的手势」)
+                 4 指立 + 拇指外伸的张开手掌 -->
+            <path d="M18 11V6a2 2 0 0 0-4 0v5"/>
+            <path d="M14 10V4a2 2 0 0 0-4 0v6"/>
+            <path d="M10 10.5V6a2 2 0 0 0-4 0v8"/>
+            <path d="M18 8a2 2 0 0 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>
           </svg>
         </button>
         <button class="tool" id="toolEraser" type="button" data-tool="eraser" title="橡皮 (E)">
@@ -97,12 +100,9 @@
             <path d="M14 7l3 3"></path>
           </svg>
         </button>
-        <button class="tool" id="toolShapes" type="button" data-tool="shapes" title="形状（矩形/椭圆/直线 待实现）">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="9" height="9"></rect>
-            <circle cx="17" cy="17" r="4"></circle>
-          </svg>
-        </button>
+        <!-- v120: shapes tool 撤了 (user：「shapes icon 不要，以后不要这个 tool 了，
+                  shapes toggle 放在笔刷里面，比如专门画 shapes 的笔，画架里面找」)
+                  → 未来变成 brush preset 的 toggle 字段 -->
         <!-- 喷枪不再是独立工具 (v96)：是 brush preset 的特征（spacing.kind=time + bufferMode=direct）。
              用户点笔刷工具，picks 大喷枪 / 小喷枪 preset 就行 -->
         <button class="tool" id="toolPicker" type="button" data-tool="picker" title="吸色 (I)">
@@ -325,9 +325,12 @@
           <button class="lasso-tool-btn" data-lasso-mode="distort" type="button" title="透视变换">透视</button>
           <button class="lasso-tool-btn hidden" data-lasso-mode="warp" type="button" title="变形">变形</button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
-          <button class="lasso-tool-btn" data-lasso-sample="nearest" type="button" title="最近邻（像素艺术 / 硬边）">最近</button>
-          <button class="lasso-tool-btn" data-lasso-sample="bilinear" type="button" title="双线性（默认 / 软）">双线</button>
-          <button class="lasso-tool-btn" data-lasso-sample="bicubic" type="button" title="双三次（高质量 / 慢）">双三</button>
+          <!-- v120: 3 个按钮意义不明，改 dropdown；nearest 改成「像素画」直说语义 -->
+          <select class="lasso-tool-select" id="lassoSampleSel" title="采样模式">
+            <option value="bilinear">双线性</option>
+            <option value="nearest">像素画</option>
+            <option value="bicubic">双三次</option>
+          </select>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <button class="lasso-tool-btn lasso-tool-confirm" id="lassoStampBtn" type="button" title="盖印（写入但保留浮层，可连击多次叠加）">盖印</button>
           <button class="lasso-tool-btn lasso-tool-confirm" id="lassoCommitBtn" type="button" title="应用变换">应用</button>
@@ -345,15 +348,7 @@
       </label>
     </div>
 
-    <!-- Shapes 子工具栏（v86）：shapes tool 激活时显，跟 lasso 子栏同位 -->
-    <div class="lasso-toolbar hidden" id="shapesToolbar" role="toolbar" aria-label="形状">
-      <button class="lasso-tool-btn" data-shape-sub="rect" type="button" title="矩形">矩形</button>
-      <button class="lasso-tool-btn" data-shape-sub="ellipse" type="button" title="椭圆">椭圆</button>
-      <button class="lasso-tool-btn" data-shape-sub="line" type="button" title="直线">直线</button>
-      <span class="lasso-tool-sep" aria-hidden="true">|</span>
-      <button class="lasso-tool-btn" id="shapesEqualAspectBtn" type="button" title="等比（矩→正方 / 椭→圆）">1:1</button>
-      <button class="lasso-tool-btn" id="shapesAlignAxisBtn" type="button" title="直线 snap 水平/垂直">H/V</button>
-    </div>
+    <!-- v120 删除：shapes tool 撤了。以后 shapes 改成 brush preset 的 toggle，在画架里挑。 -->
 
     <!-- Palette 调色板小窗（v87）：256×256 内嵌混色画布 + 笔/涂/吸
          浮动可拖；canvas 内容跟 doc 走（webpaint/state.json 持久化） -->
@@ -675,31 +670,46 @@
       </button>
 
       <hr class="menu-sep" />
-      <div class="menu-section-label">导入</div>
-      <button class="menu-item" id="menuImport" type="button" role="menuitem">
-        <span class="menu-item-label">导入文件…</span>
-      </button>
-      <button class="menu-item" id="menuClipboardPaste" type="button" role="menuitem">
-        <span class="menu-item-label">导入剪切板</span>
-      </button>
+      <!-- v120 (user：「导出项目和导出语义分开 + 小扳手」+「导入图片」)
+           主行 = 按 sticky config 一键执行；右侧 🔧 = 改配置（弹 inline popup）
+           sticky 存 localStorage，下次同样的菜单项保留上次选择 -->
+      <div class="menu-section-label">导出</div>
+      <div class="menu-item-row">
+        <button class="menu-item menu-item-main" id="menuExportProject" type="button" role="menuitem">
+          <span class="menu-item-label">导出项目</span>
+          <span class="menu-item-sub" id="menuExportProjectSub">.ora</span>
+        </button>
+        <button class="menu-item-wrench" id="menuExportProjectConfig" type="button" title="配置导出项目" aria-label="配置导出项目">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="menu-item-row">
+        <button class="menu-item menu-item-main" id="menuExportImage" type="button" role="menuitem">
+          <span class="menu-item-label">导出图片</span>
+          <span class="menu-item-sub" id="menuExportImageSub">PNG · 文件</span>
+        </button>
+        <button class="menu-item-wrench" id="menuExportImageConfig" type="button" title="配置导出图片" aria-label="配置导出图片">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+        </button>
+      </div>
 
       <hr class="menu-sep" />
-      <div class="menu-section-label">导出</div>
-      <button class="menu-item" id="menuExportPng" type="button" role="menuitem">
-        <span class="menu-item-label">导出 PNG</span>
-      </button>
-      <button class="menu-item" id="menuExportJpg" type="button" role="menuitem">
-        <span class="menu-item-label">导出 JPG</span>
-      </button>
-      <button class="menu-item" id="menuExportOra" type="button" role="menuitem">
-        <span class="menu-item-label">导出源文件 (.ora)</span>
-      </button>
-      <button class="menu-item" id="menuExportPsd" type="button" role="menuitem">
-        <span class="menu-item-label">导出 PSD</span>
-      </button>
-      <button class="menu-item" id="menuClipboardCopy" type="button" role="menuitem">
-        <span class="menu-item-label">导出到剪切板</span>
-      </button>
+      <div class="menu-section-label">导入</div>
+      <div class="menu-item-row">
+        <button class="menu-item menu-item-main" id="menuImportImage" type="button" role="menuitem">
+          <span class="menu-item-label">导入图片</span>
+          <span class="menu-item-sub" id="menuImportImageSub">文件 · 新图层</span>
+        </button>
+        <button class="menu-item-wrench" id="menuImportImageConfig" type="button" title="配置导入图片" aria-label="配置导入图片">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+        </button>
+      </div>
 
       <hr class="menu-sep" />
       <div class="menu-section-label">设置</div>

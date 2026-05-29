@@ -526,6 +526,51 @@ input[type=range] {
 .menu-item[aria-pressed="true"] .menu-item-state { color: var(--accent, #4c8bf5); font-weight: 600; }
 .menu-item.menu-danger { color: #c0392b; }
 
+/* v120：菜单一行两钮（主操作 + 配置 🔧）。
+   主钮 = 一键执行当前 sticky config；🔧 = 弹 inline popup 改 config */
+.menu-item-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  position: relative;
+}
+.menu-item-row .menu-item-main { flex: 1 1 auto; }
+.menu-item-sub {
+  color: var(--ink-soft);
+  font-size: 11px;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+.menu-item-wrench {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; padding: 0;
+  background: transparent; border: none; border-radius: 6px;
+  color: var(--ink-soft); cursor: pointer; flex: 0 0 36px;
+}
+.menu-item-wrench:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
+.menu-item-wrench svg { width: 16px; height: 16px; }
+.menu-config-popup {
+  position: absolute; right: 0; top: 100%; z-index: 50;
+  margin-top: 4px; padding: 10px 12px;
+  background: var(--panel-bg, #fff);
+  border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+  min-width: 180px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.menu-config-popup label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.menu-config-popup .menu-config-section { display: flex; flex-direction: column; gap: 4px; }
+.menu-config-popup .menu-config-title { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; }
+
+/* v120：lasso 工具栏的 dropdown（采样模式 3 按钮 → 1 select） */
+.lasso-tool-select {
+  font: inherit; font-size: 12px;
+  padding: 4px 6px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
+  background: transparent; color: var(--ink); cursor: pointer;
+}
+
 /* 笔刷设置浮动面板（沿用 .float-panel 框架） */
 .brush-panel { width: 280px; }
 

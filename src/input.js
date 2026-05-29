@@ -228,7 +228,6 @@ export class InputController {
         : effectiveTool === "liquify" ? "liquify"
         : effectiveTool === "lasso" ? "lasso"
         : effectiveTool === "smudge" ? "draw"          // v85+ smudge engine 实装前先按 draw 走
-        : effectiveTool === "shapes" ? "shapes"
         : "draw";
       else role = "pan";
     } else if (e.pointerType === "pen") {
@@ -239,7 +238,6 @@ export class InputController {
       else if (effectiveTool === "liquify") role = "liquify";
       else if (effectiveTool === "lasso") role = "lasso";
       else if (effectiveTool === "smudge") role = "draw";       // v85+ smudge engine 后改回 smudge
-      else if (effectiveTool === "shapes") role = "draw";       // v85+ shapes engine 后改回 shapes
       else role = "draw";
     } else if (e.pointerType === "touch") {
       if (this.penEverSeen) {
@@ -249,8 +247,7 @@ export class InputController {
         else if (effectiveTool === "eraser") role = "erase";
         else if (effectiveTool === "liquify") role = "liquify";
         else if (effectiveTool === "lasso") role = "lasso";
-          else if (effectiveTool === "smudge") role = "draw";     // v85+
-        else if (effectiveTool === "shapes") role = "shapes";
+        else if (effectiveTool === "smudge") role = "draw";     // v85+
         else role = "draw";
       }
     }
@@ -977,7 +974,19 @@ export class InputController {
   _wheel(e) {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
-      const factor = Math.exp(-e.deltaY * 0.01);
+      // v120 (user：「windows 下 ctrl 滚轮缩放一次太大了」)
+      // Windows 鼠标滚轮一格 deltaY=±100 / ±120 → 老系数 0.01 → 一格 e^-1 ≈ 0.37x 太狠。
+      // trackpad pinch 是连续小 delta (1-10)，跟鼠标轮区分一下：
+      //   |dy| >= 50 → 鼠标轮，按格走（一格 ≈ 1.1x）
+      //   小 dy → trackpad，连续平滑（旧系数 0.005 即可，0.01 也偏大）
+      const dy = e.deltaY;
+      let factor;
+      if (Math.abs(dy) >= 50) {
+        const step = Math.sign(dy);
+        factor = Math.exp(-step * 0.1);     // 一格 ≈ 1.105x
+      } else {
+        factor = Math.exp(-dy * 0.005);     // trackpad：连续，比旧 0.01 减半
+      }
       this.board.zoomAt(e.clientX, e.clientY, factor);
     } else {
       let dx = -e.deltaX, dy = -e.deltaY;

@@ -72,13 +72,14 @@ const els = {
   menuPressureOpacity: document.getElementById("menuPressureOpacity"),
   menuTheme: document.getElementById("menuTheme"),
   menuClear: document.getElementById("menuClear"),
-  menuImport: document.getElementById("menuImport"),
-  menuExportPng: document.getElementById("menuExportPng"),
-  menuExportJpg: document.getElementById("menuExportJpg"),
-  menuExportOra: document.getElementById("menuExportOra"),
-  menuExportPsd: document.getElementById("menuExportPsd"),
-  menuClipboardCopy: document.getElementById("menuClipboardCopy"),
-  menuClipboardPaste: document.getElementById("menuClipboardPaste"),
+  // v120 (user：「导出项目和导出语义分开 + 小扳手」)
+  // 旧 5 项 (menuImport / menuExportPng/Jpg/Ora/Psd / menuClipboardCopy/Paste) → 新 3 行
+  menuExportProject: document.getElementById("menuExportProject"),
+  menuExportProjectConfig: document.getElementById("menuExportProjectConfig"),
+  menuExportImage: document.getElementById("menuExportImage"),
+  menuExportImageConfig: document.getElementById("menuExportImageConfig"),
+  menuImportImage: document.getElementById("menuImportImage"),
+  menuImportImageConfig: document.getElementById("menuImportImageConfig"),
   menuFit: document.getElementById("menuFit"),
   menuBrushSettings: document.getElementById("menuBrushSettings"),
   // v109: brushPanel + brush* sliders 撤了（平滑 per-preset，进 brush settings 调）
@@ -269,10 +270,11 @@ state.toolStates = {
   smudge:   { size: 16, opacity: 1.0, flow: 0.8, activeBrushId: null },
   eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
 };
-// shapes / airbrush 工具都 alias 到 brush（user：「喷枪笔架合并到笔刷」）。
+// airbrush 工具 alias 到 brush（user：「喷枪笔架合并到笔刷」）。
+// v120：shapes tool 撤了（user：「以后不要这个 tool 了」），shapes 会变 brush preset 的 toggle。
 // 笔架是一个池子，所有 tool="brush" 的 preset 都在这。spacing.kind="time" 的 preset 就是喷枪。
 function getRackToolKey(tool) {
-  return (tool === "shapes" || tool === "airbrush") ? "brush" : tool;
+  return tool === "airbrush" ? "brush" : tool;
 }
 
 async function loadBrushRack() {
@@ -602,9 +604,8 @@ function updateLassoToolbar() {
       b.setAttribute("aria-pressed", b.dataset.lassoMode === mode ? "true" : "false");
     }
     const sm = input.lasso.getSampleMode();
-    for (const b of lassoTransformCtrl.querySelectorAll("[data-lasso-sample]")) {
-      b.setAttribute("aria-pressed", b.dataset.lassoSample === sm ? "true" : "false");
-    }
+    const sel = document.getElementById("lassoSampleSel");
+    if (sel && sel.value !== sm) sel.value = sm;
   }
 }
 
@@ -742,11 +743,11 @@ document.getElementById("lassoStampBtn").addEventListener("click", () => {
     setStatus("已盖印");
   }
 });
-// 插值模式 picker
-const lassoSampleBtns = [...lassoTransformCtrl.querySelectorAll("[data-lasso-sample]")];
-for (const b of lassoSampleBtns) {
-  b.addEventListener("click", () => {
-    input.lasso.setSampleMode(b.dataset.lassoSample);
+// v120: 插值模式 dropdown（旧 3 个按钮 → 1 个 select）
+const lassoSampleSel = document.getElementById("lassoSampleSel");
+if (lassoSampleSel) {
+  lassoSampleSel.addEventListener("change", () => {
+    input.lasso.setSampleMode(lassoSampleSel.value);
     board.invalidateAll();
     updateLassoToolbar();
   });
@@ -866,9 +867,11 @@ registerPendingTransient({
 function setTool(t) {
   // v96：airbrush 工具不存在了。老 doc 持久化里可能存了 "airbrush" → 透明回退到 brush
   if (t === "airbrush") t = "brush";
-  // v110：smudge / shapes engine 未真实装（user：「smudge 和 shapes 灰色先不响应」）
-  if (t === "smudge" || t === "shapes") {
-    setStatus(`${t === "smudge" ? "涂抹" : "形状"} 工具暂未启用`);
+  // v120：shapes 撤了。老 doc 持久化里可能存了 "shapes" → 透明回退 brush
+  if (t === "shapes") t = "brush";
+  // v110：smudge engine 未真实装（user：「smudge 和 shapes 灰色先不响应」）
+  if (t === "smudge") {
+    setStatus("涂抹 工具暂未启用");
     return;
   }
   // 切工具 = 用户决定性动作 → 让所有 pending 先 apply（套索浮层 commit 等）
@@ -879,16 +882,12 @@ function setTool(t) {
   els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
   document.body.dataset.tool = t;
   updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
-  // shapes 子工具栏只在 shapes tool 下显
-  const shapesToolbar = document.getElementById("shapesToolbar");
-  if (shapesToolbar) shapesToolbar.classList.toggle("hidden", t !== "shapes");
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
-  if (t === "brush" || t === "smudge" || t === "eraser" || t === "shapes" || t === "airbrush") {
+  if (t === "brush" || t === "smudge" || t === "eraser") {
     applyToolState(t);
   }
-  // v80 占位：smudge / shapes / airbrush engine 未上，先按 brush 路径走
-  if (t === "smudge" || t === "shapes" || t === "airbrush") {
-    setStatus(`${t} 工具 engine 待 v83+ 实装；现在按 brush 走（已应用对应 per-tool 状态）`);
+  if (t === "smudge") {
+    setStatus("smudge engine 待实装；现在按 brush 走");
   }
 }
 // Rack 工具 → 对应的 exclusive panel id
@@ -896,7 +895,6 @@ const RACK_PANEL_BY_TOOL = {
   brush: PANELS.RACK_BRUSH,
   smudge: PANELS.RACK_SMUDGE,
   eraser: PANELS.RACK_ERASER,
-  shapes: PANELS.RACK_BRUSH,    // shapes 共用 brush 的 rack
 };
 for (const b of els.toolBtns) {
   b.addEventListener("click", () => {
@@ -914,27 +912,7 @@ for (const b of els.toolBtns) {
 }
 window.addEventListener("wp:settool", (e) => setTool(e.detail));
 
-// ---- Shapes 子工具栏（v86）----
-{
-  const tb = document.getElementById("shapesToolbar");
-  if (tb) {
-    const subBtns = [...tb.querySelectorAll("[data-shape-sub]")];
-    const eqBtn = document.getElementById("shapesEqualAspectBtn");
-    const alBtn = document.getElementById("shapesAlignAxisBtn");
-    const refresh = () => {
-      const sub = input.shapes.getSubtool();
-      for (const b of subBtns) b.setAttribute("aria-pressed", b.dataset.shapeSub === sub ? "true" : "false");
-      eqBtn.setAttribute("aria-pressed", input.shapes.getEqualAspect() ? "true" : "false");
-      alBtn.setAttribute("aria-pressed", input.shapes.getAlignAxis() ? "true" : "false");
-    };
-    for (const b of subBtns) {
-      b.addEventListener("click", () => { input.shapes.setSubtool(b.dataset.shapeSub); refresh(); });
-    }
-    eqBtn.addEventListener("click", () => { input.shapes.setEqualAspect(!input.shapes.getEqualAspect()); refresh(); });
-    alBtn.addEventListener("click", () => { input.shapes.setAlignAxis(!input.shapes.getAlignAxis()); refresh(); });
-    refresh();
-  }
-}
+// v120 删：Shapes 子工具栏。shapes tool 撤了 → 以后 shapes 改 brush preset 的 toggle 字段
 // pencil 模式下双击 → 笔↔橡皮。但 floating 选区存在时屏蔽（避免误触切工具 = 自动 apply 变换）
 window.addEventListener("wp:doubletap", () => {
   if (input.lasso.hasFloating()) {
@@ -3080,11 +3058,83 @@ els.menuRename.addEventListener("click", () => {
   setMenuOpen(false);
   renameCurrentSession();
 });
-els.menuImport.addEventListener("click", () => {
+// v120: 主菜单导出/导入 重组（user：「导出项目和导出语义分开」+「小扳手」)
+// - 主行 = 按 sticky config 一键执行；🔧 = 弹 inline popup 改 config
+// - sticky 存 localStorage（不绑 doc，配一次全工程用）
+const _EXP_PRJ_KEY = "webpaint:exportProject:v1";   // { format: "ora" | "psd" }
+const _EXP_IMG_KEY = "webpaint:exportImage:v1";     // { format, target }
+const _IMP_IMG_KEY = "webpaint:importImage:v1";     // { source: "file" | "clipboard" }
+function _getExpPrj() {
+  try { return JSON.parse(localStorage.getItem(_EXP_PRJ_KEY)) || { format: "ora" }; }
+  catch { return { format: "ora" }; }
+}
+function _getExpImg() {
+  try { return JSON.parse(localStorage.getItem(_EXP_IMG_KEY)) || { format: "png", target: "file" }; }
+  catch { return { format: "png", target: "file" }; }
+}
+function _getImpImg() {
+  try { return JSON.parse(localStorage.getItem(_IMP_IMG_KEY)) || { source: "file" }; }
+  catch { return { source: "file" }; }
+}
+function _setExpPrj(v) { localStorage.setItem(_EXP_PRJ_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
+function _setExpImg(v) { localStorage.setItem(_EXP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
+function _setImpImg(v) { localStorage.setItem(_IMP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
+function _updateMenuSubLabels() {
+  const ep = _getExpPrj();
+  const ei = _getExpImg();
+  const ii = _getImpImg();
+  const epEl = document.getElementById("menuExportProjectSub");
+  const eiEl = document.getElementById("menuExportImageSub");
+  const iiEl = document.getElementById("menuImportImageSub");
+  if (epEl) epEl.textContent = "." + ep.format;
+  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.target === "clipboard" ? "剪切板" : "文件"}`;
+  if (iiEl) iiEl.textContent = `${ii.source === "clipboard" ? "剪切板" : "文件"} · 新图层`;
+}
+_updateMenuSubLabels();
+
+els.menuExportProject.addEventListener("click", async () => {
   setMenuOpen(false);
-  els.oraFileInput.value = "";
-  els.oraFileInput.click();
+  const { format } = _getExpPrj();
+  try {
+    if (format === "psd") {
+      setStatus("PSD 编码中…", true);
+      await exportPsdDownload(doc, `${_activeSessionName}.psd`);
+      setStatus(".psd 已下载");
+    } else {
+      await exportOraDownload(doc, `${_activeSessionName}.ora`);
+      setStatus(".ora 已下载");
+    }
+  } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
 });
+els.menuExportImage.addEventListener("click", async () => {
+  setMenuOpen(false);
+  const c = _getExpImg();
+  try {
+    if (c.target === "clipboard") {
+      await copyImageToClipboard(doc);
+      setStatus("已复制 PNG 到剪贴板");
+    } else {
+      const r = await shareOrDownloadImage(doc, c.format, `${_activeSessionName}-${stampNow()}`);
+      setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : `${c.format.toUpperCase()} 已下载`);
+    }
+  } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
+});
+els.menuImportImage.addEventListener("click", async () => {
+  setMenuOpen(false);
+  const { source } = _getImpImg();
+  if (source === "clipboard") {
+    try {
+      const blob = await readImageFromClipboard();
+      if (!blob) { setStatus("剪贴板里没有图片"); return; }
+      const fakeFile = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
+      await importImageAsLayer(fakeFile);
+    } catch (e) { setStatus("从剪贴板粘贴失败：" + (e && e.message || e)); }
+  } else {
+    els.oraFileInput.value = "";
+    els.oraFileInput.click();
+  }
+});
+
 // 图层窗口里也加快捷导入照片（user：「图层窗口里应该有导入照片的选项」）
 const _layerImportBtn = document.getElementById("layerImportPhotoBtn");
 if (_layerImportBtn) {
@@ -3093,54 +3143,76 @@ if (_layerImportBtn) {
     els.oraFileInput.click();
   });
 }
-els.menuExportPng.addEventListener("click", async () => {
-  setMenuOpen(false);
-  try {
-    const r = await shareOrDownloadImage(doc, "png", `${_activeSessionName}-${stampNow()}`);
-    setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : "PNG 已下载");
-  } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
+
+// 🔧 配置 popup（点开 / 点别处关）。setMenuOpen 不变，popup 嵌在 menu-item-row 里
+function _openMenuConfigPopup(wrenchBtn, html, onApply) {
+  document.querySelectorAll(".menu-config-popup").forEach((el) => el.remove());
+  const row = wrenchBtn.closest(".menu-item-row");
+  if (!row) return;
+  const popup = document.createElement("div");
+  popup.className = "menu-config-popup";
+  popup.innerHTML = html;
+  row.appendChild(popup);
+  const onPopupChange = () => onApply(popup);
+  popup.addEventListener("change", onPopupChange);
+  // popup 内点击不冒泡（让 menu 自身的「点外面关」别误把 popup 当外面）
+  popup.addEventListener("click", (e) => e.stopPropagation());
+  setTimeout(() => {
+    function onDocClick(ev) {
+      if (popup.contains(ev.target) || wrenchBtn.contains(ev.target)) return;
+      popup.remove();
+      document.removeEventListener("pointerdown", onDocClick, true);
+    }
+    document.addEventListener("pointerdown", onDocClick, true);
+  }, 0);
+}
+els.menuExportProjectConfig.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const c = _getExpPrj();
+  _openMenuConfigPopup(e.currentTarget, `
+    <div class="menu-config-section">
+      <div class="menu-config-title">格式</div>
+      <label><input type="radio" name="fmt" value="ora" ${c.format === "ora" ? "checked" : ""} /> .ora（推荐 / 开源）</label>
+      <label><input type="radio" name="fmt" value="psd" ${c.format === "psd" ? "checked" : ""} /> .psd（Photoshop）</label>
+    </div>
+  `, (popup) => {
+    const fmt = popup.querySelector('input[name="fmt"]:checked')?.value || "ora";
+    _setExpPrj({ format: fmt });
+  });
 });
-els.menuExportJpg.addEventListener("click", async () => {
-  setMenuOpen(false);
-  try {
-    const r = await shareOrDownloadImage(doc, "jpg", `${_activeSessionName}-${stampNow()}`);
-    setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : "JPG 已下载");
-  } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
+els.menuExportImageConfig.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const c = _getExpImg();
+  _openMenuConfigPopup(e.currentTarget, `
+    <div class="menu-config-section">
+      <div class="menu-config-title">格式</div>
+      <label><input type="radio" name="fmt" value="png" ${c.format === "png" ? "checked" : ""} /> PNG</label>
+      <label><input type="radio" name="fmt" value="jpg" ${c.format === "jpg" ? "checked" : ""} /> JPG</label>
+    </div>
+    <div class="menu-config-section">
+      <div class="menu-config-title">去向</div>
+      <label><input type="radio" name="tgt" value="file" ${c.target === "file" ? "checked" : ""} /> 文件</label>
+      <label><input type="radio" name="tgt" value="clipboard" ${c.target === "clipboard" ? "checked" : ""} /> 剪切板</label>
+    </div>
+  `, (popup) => {
+    const fmt = popup.querySelector('input[name="fmt"]:checked')?.value || "png";
+    const tgt = popup.querySelector('input[name="tgt"]:checked')?.value || "file";
+    _setExpImg({ format: fmt, target: tgt });
+  });
 });
-els.menuExportOra.addEventListener("click", async () => {
-  setMenuOpen(false);
-  try {
-    await exportOraDownload(doc, `${_activeSessionName}.ora`);
-    setStatus(".ora 已下载");
-  } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
-});
-els.menuExportPsd.addEventListener("click", async () => {
-  setMenuOpen(false);
-  setStatus("PSD 编码中…", true);
-  try {
-    await exportPsdDownload(doc, `${_activeSessionName}.psd`);
-    setStatus(".psd 已下载");
-  } catch (e) {
-    console.warn("[psd] export failed:", e);
-    setStatus("PSD 导出失败：" + (e && e.message || e));
-  }
-});
-els.menuClipboardCopy.addEventListener("click", async () => {
-  setMenuOpen(false);
-  try {
-    await copyImageToClipboard(doc);
-    setStatus("已复制 PNG 到剪贴板");
-  } catch (e) { setStatus("复制失败：" + (e && e.message || e)); }
-});
-els.menuClipboardPaste.addEventListener("click", async () => {
-  setMenuOpen(false);
-  try {
-    const blob = await readImageFromClipboard();
-    if (!blob) { setStatus("剪贴板里没有图片"); return; }
-    // 包装成 File 给 importImageAsLayer 复用
-    const fakeFile = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
-    await importImageAsLayer(fakeFile);
-  } catch (e) { setStatus("从剪贴板粘贴失败：" + (e && e.message || e)); }
+els.menuImportImageConfig.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const c = _getImpImg();
+  _openMenuConfigPopup(e.currentTarget, `
+    <div class="menu-config-section">
+      <div class="menu-config-title">来源</div>
+      <label><input type="radio" name="src" value="file" ${c.source === "file" ? "checked" : ""} /> 文件</label>
+      <label><input type="radio" name="src" value="clipboard" ${c.source === "clipboard" ? "checked" : ""} /> 剪切板</label>
+    </div>
+  `, (popup) => {
+    const src = popup.querySelector('input[name="src"]:checked')?.value || "file";
+    _setImpImg({ source: src });
+  });
 });
 els.menuFit.addEventListener("click", () => {
   setMenuOpen(false);
@@ -4124,6 +4196,7 @@ const _settingsEls = {
 
 const TOOL_LABEL = {
   brush: "笔刷", smudge: "涂抹", eraser: "橡皮",
+  // v120 删 shapes / airbrush（旧 brush.tool 持久化里可能还在，留映射给 UI 翻译）
   shapes: "形状", airbrush: "喷枪",
 };
 let _rackCurrentFolder = DEFAULT_FOLDER;
@@ -4555,7 +4628,7 @@ function _closeBrushSettings(save) {
       // v99r2：保存后自动切到该笔（包括 size 回 base、opacity / flow 重置默认）
       // user：「修改保存了一个笔刷之后自动切到那一个（包括回到 default size）」
       const tool = _editingBrushDraft.tool;
-      const targetTool = (state.tool === "shapes" || state.tool === "airbrush") ? "brush" : tool;
+      const targetTool = state.tool === "airbrush" ? "brush" : tool;
       // 切到对应 tool（如果用户当前不在）
       // 不主动切 tool，避免打断 user 当下的工具；只切笔
       // 在当前 tool 的 rackKey 跟 brush.tool 兼容时才切
@@ -4626,9 +4699,9 @@ function _renderBrushSettings() {
   // 基本
   const basic = section("基本");
   textRow(basic, "名字", b.name, (v) => b.name = v);
+  // v120: shapes / airbrush 撤了，brush rack 编辑器里也不再显这俩选项（写到 brush.tool 字段会失效）
   selectRow(basic, "工具", [
     ["brush", "笔刷"], ["smudge", "涂抹"], ["eraser", "橡皮"],
-    ["shapes", "形状"], ["airbrush", "喷枪"],
   ], b.tool, (v) => b.tool = v);
   textRow(basic, "文件夹", b.folder, (v) => b.folder = v);
 
