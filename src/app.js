@@ -3060,11 +3060,13 @@ function _updateMenuCropLabel() {
 document.getElementById("cropToolbarCancel").addEventListener("click", () => _closeCropMode());
 document.getElementById("cropToolbarApply").addEventListener("click", () => {
   if (!_cropState) return;
+  // v127 (user：「裁切还可以扩张」)：允许 x/y 负（向左/向上扩），允许 w/h > doc（向右/向下扩）
+  //   只保最小 1 + 最大 8192；doc.cropTo 已支持负 dx/dy
   const r = _cropState.rect;
-  const x = Math.max(0, Math.min(doc.width - 1, r.x | 0));
-  const y = Math.max(0, Math.min(doc.height - 1, r.y | 0));
-  const w = Math.max(1, Math.min(doc.width - x, r.w | 0));
-  const h = Math.max(1, Math.min(doc.height - y, r.h | 0));
+  const x = r.x | 0;
+  const y = r.y | 0;
+  const w = Math.max(1, Math.min(8192, r.w | 0));
+  const h = Math.max(1, Math.min(8192, r.h | 0));
   const before = _captureDocBefore();
   doc.cropTo({ x, y, w, h });
   _shiftViewportAfterCrop({ x, y });
@@ -3109,13 +3111,14 @@ document.getElementById("cropToolbarApply").addEventListener("click", () => {
       if (h.includes("w")) { r.x = r0.x + dx; r.w = r0.w - dx; }
       if (h.includes("e")) { r.w = r0.w + dx; }
     }
-    // clamp 到 doc 边界 + 最小 4px
+    // v127 (user：「裁切还可以扩张」)
+    //   原本 clamp 到 [0, doc] 不让拖出；现在只保 min 4px + max 8192
+    //   r.x / r.y 可负（向左 / 向上 扩张）；r.w / r.h 可超 doc（向右 / 向下 扩张）
+    //   doc.cropTo 已支持负 dx/dy 扩张语义，不需要再改
     if (r.w < 4) { r.w = 4; if (h.includes("w")) r.x = r0.x + r0.w - 4; }
     if (r.h < 4) { r.h = 4; if (h.includes("n")) r.y = r0.y + r0.h - 4; }
-    r.x = Math.max(0, Math.min(doc.width - r.w, r.x));
-    r.y = Math.max(0, Math.min(doc.height - r.h, r.y));
-    if (r.x + r.w > doc.width) r.w = doc.width - r.x;
-    if (r.y + r.h > doc.height) r.h = doc.height - r.y;
+    if (r.w > 8192) { r.w = 8192; if (h.includes("w")) r.x = r0.x + r0.w - 8192; }
+    if (r.h > 8192) { r.h = 8192; if (h.includes("n")) r.y = r0.y + r0.h - 8192; }
     _cropState.rect = r;
     _renderCropOverlay();
   });
