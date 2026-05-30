@@ -40,6 +40,12 @@ export class SharpenBlurFilter {
     }));
   }
 
+  // v135 锐化重写（user：「老版全是彩色噪点」）
+  //   - per-channel USM 跨通道 ringing → 色噪。改 luma-only delta
+  //   - box blur 替成 Gaussian 3×3 (1,2,1/2,4,2/1,2,1 /16)，边缘干净
+  //   - threshold（|luma diff| < 4 跳过）= 抗噪（PS Unsharp Mask 的 threshold 参数）
+  //   - k = amt/100（不再 ×2）减弱过冲
+  //   模糊 path 保持 box blur N iter
   static bake(srcData, dstData, p, mask, w, h) {
     const amt = p.amount | 0;
     if (amt === 0) { dstData.set(srcData); return; }
@@ -55,10 +61,11 @@ export class SharpenBlurFilter {
       if (src !== dstData) dstData.set(src);
       return;
     }
-    // unsharp mask
+    // 锐化：luma-only USM with Gaussian + threshold
     const blurred = new Uint8ClampedArray(srcData.length);
-    SharpenBlurFilter._boxBlur3(srcData, blurred, w, h, null);
-    const k = amt / 100 * 2;
+    SharpenBlurFilter._gaussianBlur3(srcData, blurred, w, h);
+    const k = amt / 100;        // amt=100 → k=1.0 适度
+    const THRESHOLD = 4;        // |luma diff| < 4 不锐化（抗噪）
     const N = srcData.length / 4;
     for (let i = 0; i < N; i++) {
       const o = i * 4;
@@ -67,13 +74,43 @@ export class SharpenBlurFilter {
         dstData[o+2] = srcData[o+2]; dstData[o+3] = srcData[o+3];
         continue;
       }
-      dstData[o]   = clamp8(srcData[o]   + k * (srcData[o]   - blurred[o]));
-      dstData[o+1] = clamp8(srcData[o+1] + k * (srcData[o+1] - blurred[o+1]));
-      dstData[o+2] = clamp8(srcData[o+2] + k * (srcData[o+2] - blurred[o+2]));
+      const r = srcData[o], g = srcData[o+1], b = srcData[o+2];
+      const br = blurred[o], bg = blurred[o+1], bb = blurred[o+2];
+      const luma  = 0.2126 * r  + 0.7152 * g  + 0.0722 * b;
+      const lumaB = 0.2126 * br + 0.7152 * bg + 0.0722 * bb;
+      const diff = luma - lumaB;
+      if (Math.abs(diff) < THRESHOLD) {
+        dstData[o] = r; dstData[o+1] = g; dstData[o+2] = b;
+      } else {
+        // 3 通道同 delta = 保 chroma：无 cross-channel ringing → 无色噪
+        const delta = k * diff;
+        dstData[o]   = clamp8(r + delta);
+        dstData[o+1] = clamp8(g + delta);
+        dstData[o+2] = clamp8(b + delta);
+      }
       dstData[o+3] = srcData[o+3];
     }
   }
 
+  // v135 Gaussian 3×3 (1,2,1 / 2,4,2 / 1,2,1 / 16)：sharpen path 用，比 box 干净
+  static _gaussianBlur3(src, dst, w, h) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const o = (y * w + x) * 4;
+        let r = 0, g = 0, b = 0, a = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const sx = x + dx < 0 ? 0 : x + dx >= w ? w - 1 : x + dx;
+            const sy = y + dy < 0 ? 0 : y + dy >= h ? h - 1 : y + dy;
+            const so = (sy * w + sx) * 4;
+            const kw = (dx === 0 ? 2 : 1) * (dy === 0 ? 2 : 1);
+            r += src[so] * kw; g += src[so+1] * kw; b += src[so+2] * kw; a += src[so+3] * kw;
+          }
+        }
+        dst[o] = (r / 16) | 0; dst[o+1] = (g / 16) | 0; dst[o+2] = (b / 16) | 0; dst[o+3] = (a / 16) | 0;
+      }
+    }
+  }
   static _boxBlur3(src, dst, w, h, mask) {
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {

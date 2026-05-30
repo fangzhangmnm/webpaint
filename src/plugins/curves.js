@@ -20,15 +20,12 @@ export class CurvesFilter {
     return { active: "comp", comp: id(), r: id(), g: id(), b: id(), a: id() };
   }
 
-  // 点列 → 256-entry Uint8 LUT，用 Monotonic Cubic Hermite (Fritsch-Carlson)
-  // 算法：
-  //   slope[i] = (y[i+1]-y[i]) / (x[i+1]-x[i])  线段斜率
-  //   tangent[i] = 端点用单边，中间用相邻斜率均值
-  //   若相邻 slope 异号 或 任一为 0 → tangent = 0（locally flat 防 overshoot）
-  //   修：α = tangent[i] / slope[i], β = tangent[i+1] / slope[i]
-  //     α² + β² > 9 → 缩到 9 (Fritsch-Carlson 保单调条件)
-  //   Hermite basis: h00(t)=2t³-3t²+1, h10(t)=t³-2t²+t, h01(t)=-2t³+3t², h11(t)=t³-t²
-  //     y(t) = h00·y0 + h10·dx·m0 + h01·y1 + h11·dx·m1
+  // v135 (user：「曲线还是有点怪，不是 PS / Unity 手感」)：换 Catmull-Rom
+  //   切线 = (邻居 y 差) / (邻居 x 差) — 中心差分
+  //   端点 = 单边斜率
+  //   平滑舒服（视觉跟 PS / Unity Curve Editor 一致）
+  //   越界值会 clamp 到 0..255，偶尔出现 plateau 是 trade-off（PS 也这样）
+  //   Hermite basis 复用：y(t) = h00·y0 + h10·dx·m0 + h01·y1 + h11·dx·m1
   static _buildLut(points) {
     const pts = points.slice().sort((a, b) => a[0] - b[0]);
     const n = pts.length;
@@ -37,38 +34,21 @@ export class CurvesFilter {
       for (let x = 0; x < 256; x++) lut[x] = x;
       return lut;
     }
-    // 1) 计算每段斜率
-    const slopes = new Float32Array(n - 1);
-    const dxs    = new Float32Array(n - 1);
-    for (let i = 0; i < n - 1; i++) {
-      const dx = pts[i + 1][0] - pts[i][0];
-      dxs[i] = dx;
-      slopes[i] = dx === 0 ? 0 : (pts[i + 1][1] - pts[i][1]) / dx;
-    }
-    // 2) 切线
+    // 1) Catmull-Rom 切线（中心差分；端点单边）
     const tans = new Float32Array(n);
-    tans[0] = slopes[0];
-    tans[n - 1] = slopes[n - 2];
-    for (let i = 1; i < n - 1; i++) {
-      if (slopes[i - 1] * slopes[i] <= 0) {
-        tans[i] = 0;           // 异号 / 任一 0 → 平
+    for (let i = 0; i < n; i++) {
+      if (i === 0) {
+        const dx = pts[1][0] - pts[0][0];
+        tans[i] = dx === 0 ? 0 : (pts[1][1] - pts[0][1]) / dx;
+      } else if (i === n - 1) {
+        const dx = pts[n - 1][0] - pts[n - 2][0];
+        tans[i] = dx === 0 ? 0 : (pts[n - 1][1] - pts[n - 2][1]) / dx;
       } else {
-        tans[i] = (slopes[i - 1] + slopes[i]) / 2;
+        const dx = pts[i + 1][0] - pts[i - 1][0];
+        tans[i] = dx === 0 ? 0 : (pts[i + 1][1] - pts[i - 1][1]) / dx;
       }
     }
-    // 3) Fritsch-Carlson 限制 (α²+β²>9 时缩)
-    for (let i = 0; i < n - 1; i++) {
-      const s = slopes[i];
-      if (s === 0) { tans[i] = 0; tans[i + 1] = 0; continue; }
-      const a = tans[i] / s, b = tans[i + 1] / s;
-      const sum = a * a + b * b;
-      if (sum > 9) {
-        const tau = 3 / Math.sqrt(sum);
-        tans[i]     = tau * a * s;
-        tans[i + 1] = tau * b * s;
-      }
-    }
-    // 4) 采样到 LUT
+    // 2) 采样到 LUT（Hermite basis）
     let seg = 0;
     for (let x = 0; x < 256; x++) {
       while (seg < n - 2 && x > pts[seg + 1][0]) seg++;

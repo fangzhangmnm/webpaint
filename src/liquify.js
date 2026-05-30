@@ -259,27 +259,28 @@ export class LiquifyEngine {
 }
 
 // bilinear 取样 sdat[sx, sy] → ddat[dstIdx..+3]。sx/sy 浮点；越界 → 透明黑。
+// v135 (user：「液化做一下防黑边」)
+//   越界返 0 = 黑透明在 buildup 背景上显实黑。改 clamp-to-edge：
+//   越界取边像素 → "重复 / 引力透镜" 视觉保留，但没实黑（边像素=透明的话仍透，不糊黑）
 function bilinearSample(sdat, w, h, sx, sy, ddat, dstIdx) {
   const ix = Math.floor(sx);
   const iy = Math.floor(sy);
   const fx = sx - ix;
   const fy = sy - iy;
-  const x0 = ix, x1 = ix + 1;
-  const y0 = iy, y1 = iy + 1;
-  const p00 = (x0 >= 0 && x0 < w && y0 >= 0 && y0 < h) ? (y0 * w + x0) * 4 : -1;
-  const p10 = (x1 >= 0 && x1 < w && y0 >= 0 && y0 < h) ? (y0 * w + x1) * 4 : -1;
-  const p01 = (x0 >= 0 && x0 < w && y1 >= 0 && y1 < h) ? (y1 * w + x0) * 4 : -1;
-  const p11 = (x1 >= 0 && x1 < w && y1 >= 0 && y1 < h) ? (y1 * w + x1) * 4 : -1;
+  const cx0 = ix < 0 ? 0 : ix >= w ? w - 1 : ix;
+  const cx1 = (ix + 1) < 0 ? 0 : (ix + 1) >= w ? w - 1 : (ix + 1);
+  const cy0 = iy < 0 ? 0 : iy >= h ? h - 1 : iy;
+  const cy1 = (iy + 1) < 0 ? 0 : (iy + 1) >= h ? h - 1 : (iy + 1);
+  const p00 = (cy0 * w + cx0) * 4;
+  const p10 = (cy0 * w + cx1) * 4;
+  const p01 = (cy1 * w + cx0) * 4;
+  const p11 = (cy1 * w + cx1) * 4;
   const w00 = (1 - fx) * (1 - fy);
   const w10 = fx * (1 - fy);
   const w01 = (1 - fx) * fy;
   const w11 = fx * fy;
   for (let c = 0; c < 4; c++) {
-    let v = 0;
-    if (p00 >= 0) v += sdat[p00 + c] * w00;
-    if (p10 >= 0) v += sdat[p10 + c] * w10;
-    if (p01 >= 0) v += sdat[p01 + c] * w01;
-    if (p11 >= 0) v += sdat[p11 + c] * w11;
-    ddat[dstIdx + c] = v;
+    ddat[dstIdx + c] = sdat[p00 + c] * w00 + sdat[p10 + c] * w10
+                     + sdat[p01 + c] * w01 + sdat[p11 + c] * w11;
   }
 }

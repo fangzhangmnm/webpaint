@@ -13,7 +13,5 @@ import "./curves.js";
 // 笔刷类（modes=["brush"]）：sharpenBlur 和 liquify 走 filter brush engine
 import "./sharpen-blur.js";
 import "./liquify.js";
-// 艺术组（category="artist"）—— dogfood plugin pattern；后期可剥离成下载插件
-import "./mosaic.js";
-import "./halftone.js";
-import "./stained-glass.js";
+// 风格化组（category="artist"）—— 3 个同主题合一个 plugin 文件
+import "./stylize_filters.js";
