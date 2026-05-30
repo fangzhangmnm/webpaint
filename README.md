@@ -1,6 +1,20 @@
-# WebPaint
+# WebPaint 打开即用的开源画画软件
 
-> iPad 上的轻量绘画 PWA：Procreate 手感的克隆。压感 / 自定义笔刷 / 水彩混色 / 图层 / 液化 / 选区。OneDrive 同步，飞机模式可用。
+开源的网页版画画软件。目标是在二次元和3D手绘贴图领域追上Procreate的手感和画质，同时保持开源的灵活可修改性。
+
+开源意味着你可以自己（或者让AI）修改，加入自己喜欢的功能，或者和自己的工作流对接。
+
+比如画好之后一键推送到Blender贴图内存，或者和Galgame数据库同步热加载，甚至是WYSIWYG的世界地图编辑器。也可以接入你喜欢的AI大模型，帮你一键整理线稿，生成素材。技术宅也可以把自己写的科研，数学代码，比如分形，有趣的图形学算法（比如自动生成玫瑰花的L系统，或者大气散射模型）加进来。理由本软件的交互性和专业的画图功能进行快速迭代修改。
+
+这个Modding的自由度是闭源软件所不具有的。
+
+当然，如果你缺那68块钱买Procreate的，不想订阅Photoshop，或者想要在PC端拥有类Procreate的手感，体验的话，也欢迎来捡漏。
+
+*fangzhangmnm*
+*May.30 2026, 于Long Island*
+
+
+<!-- > iPad 上的轻量绘画 PWA：Procreate 手感的克隆。压感 / 自定义笔刷 / 水彩混色 / 图层 / 液化 / 选区。OneDrive 同步，飞机模式可用。
 
 - **🔗 PWA**: https://fangzhangmnm.github.io/webpaint/
 - **📦 Source**: https://github.com/fangzhangmnm/webpaint
@@ -61,4 +75,4 @@ python -m http.server 8000
 
 ## 部署（计划）
 
-GitHub Pages，纯静态，零 build。改了客户端代码 → bump [`service-worker.js`](service-worker.js) 里的 `CACHE_VERSION`。
+GitHub Pages，纯静态，零 build。改了客户端代码 → bump [`service-worker.js`](service-worker.js) 里的 `CACHE_VERSION`。 -->

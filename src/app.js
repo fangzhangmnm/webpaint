@@ -155,6 +155,7 @@ const els = {
   newDocConfirm: document.getElementById("newDocConfirm"),
   newDocCancel: document.getElementById("newDocCancel"),
   menuRename: document.getElementById("menuRename"),
+  menuSaveAs: document.getElementById("menuSaveAs"),
   menuCheckerboard: document.getElementById("menuCheckerboard"),
   menuCheckUpdate: document.getElementById("menuCheckUpdate"),
   oraFileInput: document.getElementById("oraFileInput"),
@@ -211,7 +212,10 @@ const state = {
     // v109：smooth 字段 per-preset，删 LS load。applyBrushPresetFrozen 会覆盖
   }),
   longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
-  checkerboard: safeLS("webpaint.checkerboard") === "1",   // 默认关；开后用半透明灰白格替代纯背景
+  // v125 (user：「透明背景显示棋盘这个设置跟文件走」)
+  //   checkerboard 从全局 LS 改 per-doc：保存在 webpaint/state.json，跟文件走
+  //   初始 false；adoptLoadedDoc 时按文件值覆盖；新建 doc 默认 false
+  checkerboard: false,
   // 液化设置（独立于 brush，见 src/liquify.js + docs/artist-priorities.md v46）
   liquify: {
     mode: safeLS("webpaint.liquify.mode") || "push",
@@ -1172,9 +1176,9 @@ function applyLongPressPick(on) {
   safeLSSet("webpaint.longPressPick", on ? "1" : "0");
 }
 function applyCheckerboard(on) {
+  // v125: checkerboard per-doc，不再写 localStorage
   state.checkerboard = !!on;
   setMenuItem(els.menuCheckerboard, on);
-  safeLSSet("webpaint.checkerboard", on ? "1" : "0");
   board.setShowCheckerboard?.(!!on);
   board.invalidateAll();
   board.requestRender();
@@ -1194,6 +1198,8 @@ els.menuLongPressPick.addEventListener("click", () => {
 });
 els.menuCheckerboard.addEventListener("click", () => {
   applyCheckerboard(!state.checkerboard);
+  // v125 per-doc：触发 dirty 让 autosave 把新值写进 webpaint/state.json
+  _docDirty = true; updateSaveStatus();
   setStatus(`透明棋盘 · ${state.checkerboard ? "开" : "关"}`);
 });
 els.menuTheme.addEventListener("click", () => {
@@ -1497,10 +1503,18 @@ function renderLayersPanel() {
     });
     row.appendChild(vis);
 
-    // 名字：单击 row = setActive（行 click handler 处理）。重命名走 "⋯" 工具菜单。
+    // 名字：单击 row = setActive（行 click handler 处理）。
+    // v125 (user：「点图层名可以 rename」) active 时再点 name = rename，"⋯" 菜单仍保留入口
     const name = document.createElement("span");
     name.className = "layer-name";
     name.textContent = L.name;
+    name.addEventListener("click", (e) => {
+      if (L.id === doc.activeLayer?.id) {
+        e.stopPropagation();
+        startLayerRename(L, name);
+      }
+      // else 让 row.click 设 active
+    });
     row.appendChild(name);
 
     // Clipping mask 视觉提示：剪裁层左侧加 ↘ 标
@@ -1679,6 +1693,11 @@ function _addEmptyLayer() {
   _afterDocChange();
 }
 function _openImagePicker() {
+  // v125 修 (user：「图层面板的导入图片不成功」)
+  //   图库"导入照片"会 set _addImportAsNewDoc=true，如果用户取消 file picker
+  //   flag 不会清。下次从图层面板导入会被路由到 importImageAsNewDoc（替换 doc），
+  //   user 觉得"不成功"。这里强制 false 让图层面板入口走 importImageAsLayer
+  _addImportAsNewDoc = false;
   els.oraFileInput.value = "";
   els.oraFileInput.click();
 }
@@ -2161,33 +2180,46 @@ function layerSpecFrom(L) {
 
 // ---- 5 个 layer handler 注册（**纪律 #1**：集中在 boot 段）----
 // addLayer：undo 删层，redo 在 index 处插入空层（spec 通常 empty）
+// v125 (user：「undo redo 创建图层时不跳过去会误导用户，要 toast + 跳」)
+//   addLayer.redo（重做创建）：setActive 到恢复的图层并 toast
+//   addLayer.undo（撤销创建）：remove 后 active 落回兜底层，toast 提示
 history.registerHandler("addLayer", {
-  undo: (e) => { doc.removeLayer(e.layerSpec.id); _afterDocChange(); },
-  redo: (e) => { doc.insertLayerAt(e.index, e.layerSpec); _afterDocChange(); },
+  undo: (e) => {
+    doc.removeLayer(e.layerSpec.id);
+    _afterDocChange();
+    setStatus(`已撤销创建图层「${e.layerSpec.name || ""}」`);
+  },
+  redo: (e) => {
+    doc.insertLayerAt(e.index, e.layerSpec);
+    doc.setActiveById(e.layerSpec.id);
+    _afterDocChange();
+    setStatus(`已恢复图层「${e.layerSpec.name || ""}」`);
+  },
   refsLayer: (e, id) => e.layerSpec.id === id,
 });
 // removeLayer：undo 在 index 处恢复层（含 pixel）；redo 再删
+// v125: 一律 setActive 到恢复的图层 + toast
 history.registerHandler("removeLayer", {
   undo: async (e) => {
     const spec = e.layerSpec;
-    // 优先 imageData（同步）；否则 decode blob
     if (spec.imageData || (!spec.blob && (spec.bboxW <= 0 || spec.bboxH <= 0))) {
       doc.insertLayerAt(e.index, spec);
-      _afterDocChange();
-      return;
-    }
-    if (spec.blob) {
+    } else if (spec.blob) {
       const bitmap = await createImageBitmap(spec.blob);
       doc.insertLayerAt(e.index, { ...spec, bitmap });
       bitmap.close?.();
-      _afterDocChange();
-      return;
+    } else {
+      doc.insertLayerAt(e.index, spec);
     }
-    // 没像素 fallback
-    doc.insertLayerAt(e.index, spec);
+    doc.setActiveById(spec.id);
     _afterDocChange();
+    setStatus(`已恢复图层「${spec.name || ""}」`);
   },
-  redo: (e) => { doc.removeLayer(e.layerSpec.id); _afterDocChange(); },
+  redo: (e) => {
+    doc.removeLayer(e.layerSpec.id);
+    _afterDocChange();
+    setStatus(`已删除图层「${e.layerSpec.name || ""}」`);
+  },
   refsLayer: (e, id) => e.layerSpec.id === id,
 });
 // v124b mergeDown：undo 还原 under 像素 + opacity/mode，再 insert active 回 activeIndex；redo 应用 underAfter + 删 active
@@ -2211,6 +2243,7 @@ history.registerHandler("mergeDown", {
     }
     doc.setActiveById(spec.id);
     _afterDocChange();
+    setStatus(`已撤销合并 · 恢复「${spec.name || ""}」`);
   },
   redo: (e) => {
     const under = doc.findLayer(e.underId);
@@ -2222,6 +2255,7 @@ history.registerHandler("mergeDown", {
     doc.removeLayer(e.activeSpec.id);
     doc.setActiveById(e.underId);
     _afterDocChange();
+    setStatus("已向下合并");
   },
   refsLayer: (e, id) => e.underId === id || e.activeSpec.id === id,
 });
@@ -2232,25 +2266,42 @@ history.registerHandler("moveLayer", {
     if (cur < 0) return;
     doc.moveLayer(e.layerId, e.fromIdx - cur);
     _afterDocChange();
+    const L = doc.findLayer(e.layerId);
+    setStatus(`图层「${L?.name || ""}」移回原位`);
   },
   redo: (e) => {
     const cur = doc.layers.findIndex((l) => l.id === e.layerId);
     if (cur < 0) return;
     doc.moveLayer(e.layerId, e.toIdx - cur);
     _afterDocChange();
+    const L = doc.findLayer(e.layerId);
+    setStatus(`图层「${L?.name || ""}」已移动`);
   },
   refsLayer: (e, id) => e.layerId === id,
 });
 // renameLayer：oldName / newName
 history.registerHandler("renameLayer", {
-  undo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L.name = e.oldName; renderLayersPanel(); } },
-  redo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L.name = e.newName; renderLayersPanel(); } },
+  undo: (e) => {
+    const L = doc.findLayer(e.layerId);
+    if (L) { L.name = e.oldName; renderLayersPanel(); setStatus(`图层名还原「${e.oldName}」`); }
+  },
+  redo: (e) => {
+    const L = doc.findLayer(e.layerId);
+    if (L) { L.name = e.newName; renderLayersPanel(); setStatus(`图层重命名「${e.newName}」`); }
+  },
   refsLayer: (e, id) => e.layerId === id,
 });
 // setLayerProp：visibility / opacity / mode
+const _LP_LABEL = { visible: "可见", opacity: "不透明度", mode: "混合", clippingMask: "剪裁" };
 history.registerHandler("setLayerProp", {
-  undo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L[e.prop] = e.oldVal; _afterDocChange(); } },
-  redo: (e) => { const L = doc.findLayer(e.layerId); if (L) { L[e.prop] = e.newVal; _afterDocChange(); } },
+  undo: (e) => {
+    const L = doc.findLayer(e.layerId);
+    if (L) { L[e.prop] = e.oldVal; _afterDocChange(); setStatus(`「${L.name}」${_LP_LABEL[e.prop] || e.prop} 已还原`); }
+  },
+  redo: (e) => {
+    const L = doc.findLayer(e.layerId);
+    if (L) { L[e.prop] = e.newVal; _afterDocChange(); setStatus(`「${L.name}」${_LP_LABEL[e.prop] || e.prop} 已更新`); }
+  },
   refsLayer: (e, id) => e.layerId === id,
 });
 // setReferenceLayer：unique doc-level state
@@ -2516,7 +2567,7 @@ async function saveNow(opts = {}) {
   try {
     await saveSession(doc, _activeSessionName, {
       referenceImage: referenceWindow.getPersistBlob(),
-      webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState() },
+      webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
     });
     _docDirty = false;
     _docLastSavedAt = Date.now();
@@ -2613,6 +2664,8 @@ function adoptLoadedDoc(loaded, sessionName) {
     }
     applyToolState(state.tool);
   }
+  // v125 per-doc checkerboard：按文件值刷新，缺省回 false
+  applyCheckerboard(!!loaded._webpaintState?.checkerboard);
 }
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty
 window.addEventListener("wp:histchange", () => {
@@ -2640,7 +2693,7 @@ async function saveAndPush() {
     try {
       const ora = await encodeDocToOra(doc, {
         referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState() },
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
       });
       await pushSession(_activeSessionName, ora);
       setStatus(`已同步到云端：${_activeSessionName}`);
@@ -2740,7 +2793,7 @@ async function renameCurrentSession({ suggested, reason } = {}) {
     try {
       await saveSession(doc, trimmed, {
         referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState() },
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
       });
       if (oldName && oldName !== trimmed) {
         try { await removeSession(oldName); } catch {}
@@ -2750,7 +2803,27 @@ async function renameCurrentSession({ suggested, reason } = {}) {
       _docDirty = false;
       _docLastSavedAt = Date.now();
       updateSaveStatus();
-      setStatus(`已重命名：${oldName} → ${trimmed}`);
+      // v125 (user：「云端重命名没做」)：登录 + 在线时同步重命名到云端
+      //   云端 OneDrive 不支持原子 rename，只能 push 新名 + delete 旧名。
+      //   失败不阻塞 local rename 已成功（next push 会自动续）
+      if (isSignedIn() && navigator.onLine !== false) {
+        try {
+          const ora = await encodeDocToOra(doc, {
+            referenceImage: referenceWindow.getPersistBlob(),
+            webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+          });
+          await pushSession(trimmed, ora);
+          if (oldName && oldName !== trimmed) {
+            try { await deleteCloudSession(oldName); } catch (e) { console.warn("[rename] 云端旧名删除失败:", e); }
+          }
+          setStatus(`已重命名（含云端）：${oldName} → ${trimmed}`);
+        } catch (e) {
+          console.warn("[rename] 云端推送失败:", e);
+          setStatus(`已重命名（仅本地）：${oldName} → ${trimmed}（云端稍后 Ctrl+S 推）`);
+        }
+      } else {
+        setStatus(`已重命名：${oldName} → ${trimmed}`);
+      }
       return trimmed;
     } catch (e) {
       setStatus("重命名失败：" + (e && e.message || e));
@@ -3000,7 +3073,9 @@ document.getElementById("cropToolbarApply").addEventListener("click", () => {
     if (!_cropState) return;
     e.preventDefault();
     e.stopPropagation();
-    const handle = e.target?.dataset?.handle || (e.target === rect ? "move" : null);
+    // v125 (user：「crop 的时候 选区不应该点击空白时可拖动，只有拖动 handler 才行」)
+    //   只有 [data-handle] 命中才进 drag；rect 内空白 → no-op（防误碰整体移动）
+    const handle = e.target?.dataset?.handle || null;
     if (!handle) return;
     overlay.setPointerCapture(e.pointerId);
     _cropState.drag = handle;
@@ -3084,7 +3159,7 @@ els.resampleBackdrop.addEventListener("click", () => _closeResampleDialog());
 els.resampleConfirm.addEventListener("click", () => {
   const nw = parseFloat(els.resampleW.value) | 0;
   const nh = parseFloat(els.resampleH.value) | 0;
-  const mode = els.resampleMode.value || "bilinear";
+  const mode = els.resampleMode.value || "bicubic";
   if (nw < 1 || nh < 1 || nw > 8192 || nh > 8192) { setStatus("尺寸超出 [1, 8192]", true); return; }
   if (nw === doc.width && nh === doc.height) { _closeResampleDialog(); return; }
   const before = _captureDocBefore();
@@ -3350,6 +3425,67 @@ els.menuGallery?.addEventListener("click", () => { setMenuOpen(false); setGaller
 els.menuRename.addEventListener("click", () => {
   setMenuOpen(false);
   renameCurrentSession();
+});
+// v125 (user：「菜单加另存为（画库 + 名字冲突检查）」)
+//   "另存为" = 当前 doc 复制到新名字 session（原 session 保留）。
+//   完成后切到新 session 继续编辑（Photoshop 语义）。同名检查本地 + 云端。
+els.menuSaveAs.addEventListener("click", async () => {
+  setMenuOpen(false);
+  applyAllPendingTransients();
+  const oldName = _activeSessionName || "未命名";
+  let candidate = `${oldName} 副本`;
+  while (true) {
+    const input = await openInputSheet("另存为", candidate, { placeholder: "新作品名字" });
+    if (input === null) return;
+    const trimmed = input.trim();
+    if (!trimmed) { setStatus("名字不能空", true); candidate = ""; continue; }
+    if (trimmed === oldName) { setStatus("名字和当前一样，换一个", true); candidate = trimmed; continue; }
+    const localNames = (await listSessions()).map((s) => s.name);
+    if (localNames.includes(trimmed)) {
+      setStatus(`本地已有同名 "${trimmed}"，换一个`, true);
+      candidate = trimmed; continue;
+    }
+    if (isSignedIn() && navigator.onLine !== false) {
+      try {
+        const cloud = await listCloudSessionsRecursive();
+        const cloudNames = cloud.map((c) => c.path.replace(/\.ora$/i, ""));
+        if (cloudNames.includes(trimmed)) {
+          setStatus(`云端已有同名 "${trimmed}"，换一个`, true);
+          candidate = trimmed; continue;
+        }
+      } catch (e) { console.warn("[saveAs] cloud list failed:", e); }
+    }
+    try {
+      await saveSession(doc, trimmed, {
+        referenceImage: referenceWindow.getPersistBlob(),
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+      });
+      _activeSessionName = trimmed;
+      setCurrentSessionName(trimmed);
+      _docDirty = false;
+      _docLastSavedAt = Date.now();
+      updateSaveStatus();
+      if (isSignedIn() && navigator.onLine !== false) {
+        try {
+          const ora = await encodeDocToOra(doc, {
+            referenceImage: referenceWindow.getPersistBlob(),
+            webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+          });
+          await pushSession(trimmed, ora);
+          setStatus(`已另存为（含云端）：${trimmed}`);
+        } catch (e) {
+          console.warn("[saveAs] 云端推送失败:", e);
+          setStatus(`已另存为（仅本地）：${trimmed}（云端稍后 Ctrl+S 推）`);
+        }
+      } else {
+        setStatus(`已另存为：${trimmed}`);
+      }
+      return;
+    } catch (e) {
+      setStatus("另存为失败：" + (e && e.message || e));
+      return;
+    }
+  }
 });
 // v120: 主菜单导出/导入 重组（user：「导出项目和导出语义分开」+「小扳手」)
 // - 主行 = 按 sticky config 一键执行；🔧 = 弹 inline popup 改 config
@@ -3756,6 +3892,7 @@ async function importImageAsNewDoc(file) {
   layer.ctx.imageSmoothingQuality = "high";
   layer.ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close?.();
+  applyCheckerboard(false);    // v125: 导入新作品默认关棋盘
   const stem = file.name.replace(/\.[^.]+$/, "") || "导入";
   const name = await uniqueLocalName(stem);
   _activeSessionName = name;
@@ -3987,6 +4124,7 @@ els.newDocConfirm.addEventListener("click", async () => {
   updateSaveStatus();
   // user：「新建作品时参考里面的图没更新」→ 清 reference 小窗
   referenceWindow.clearBitmap();
+  applyCheckerboard(false);    // v125: 新建 doc 棋盘 reset 关
   await saveNow();
   setGalleryOpen(false);
   setStatus(`新建：${name}（${w}×${h}）`);

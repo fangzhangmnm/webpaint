@@ -375,6 +375,16 @@ export class InputController {
     };
     this.pointers.set(e.pointerId, rec);
 
+    // v125 (user：「在隐藏图层上动笔会 reject 并警告」)
+    // 画 / 擦 / 液化 / 形状 都改 activeLayer 像素；hidden 时一律拒绝
+    if ((role === "draw" || role === "erase" || role === "liquify" || role === "shapes")
+        && this.doc.activeLayer && !this.doc.activeLayer.visible) {
+      this.status("当前图层已隐藏，无法绘制");
+      rec.role = null;
+      this.pointers.delete(e.pointerId);
+      return;
+    }
+
     if (role === "draw" || role === "erase" || role === "liquify") {
       // 画 / 液化的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
       this.board.setCursor(null);
@@ -896,7 +906,9 @@ export class InputController {
           if (this.history) this.history.push(entry);
           this.board.invalidateAll();
         } else {
+          // v125: rasterize 后全在 doc 外 → status 提示，不静默
           this.lasso.cancelDrawing();
+          this.status("选区全在画布外，已取消");
         }
       } catch (e) {
         console.error("[lasso end]", e);

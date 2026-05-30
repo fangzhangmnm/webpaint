@@ -34,7 +34,8 @@ export class LassoEngine {
     this._setOpMode = "new";      // new | union | subtract | intersect
     this._constrainSquare = false; // rect / ellipse 是否强制 1:1（正方形 / 圆）
     this._magicThreshold = 20;    // 0..100；魔术棒颜色相似度
-    this._sampleMode = "bilinear";// nearest | bilinear | bicubic（transform 重采样质量）
+    this._sampleMode = "bicubic"; // nearest | bilinear | bicubic（transform 重采样质量）
+    // v125 (user：「bilinear 质量太差，默认双三次」)
     this._points = [];            // freehand draft
     this._rect = null;            // {x0, y0, x1, y1} during rect / ellipse draw
     this._magicStart = null;      // for magic-tap path
@@ -107,6 +108,8 @@ export class LassoEngine {
   }
   // 收笔：rasterize → combine with doc.selection per setOpMode → 更新 doc.selection
   // 返回 history entry（caller push）或 null（选区无效 / 没动）
+  // v125 (user：「lasso 全在外面时行为奇怪，应该自动清掉在外面，然后判断没选中任何」)
+  //   rasterize 出 newSel 后先 clip 到 doc 边界。完全在外 → 返 null
   endPath(sourceLayer) {
     let newSel = null;
     if (this._state === "drawing-freehand") {
@@ -123,8 +126,25 @@ export class LassoEngine {
       this._magicStart = null;
     }
     this._state = "idle";
+    newSel = this._clipSelectionToDoc(newSel);   // v125
     if (!newSel) { this.onChange(); return null; }
     return this._applySelectionUpdate(newSel);
+  }
+  // v125: 把 selection bbox 与 doc 矩形相交。完全在外 → null
+  _clipSelectionToDoc(sel) {
+    if (!sel || !this.doc) return sel;
+    const docW = this.doc.width, docH = this.doc.height;
+    const x0 = Math.max(0, sel.bboxX);
+    const y0 = Math.max(0, sel.bboxY);
+    const x1 = Math.min(docW, sel.bboxX + sel.bboxW);
+    const y1 = Math.min(docH, sel.bboxY + sel.bboxH);
+    const w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return null;
+    if (x0 === sel.bboxX && y0 === sel.bboxY && w === sel.bboxW && h === sel.bboxH) return sel;
+    const c = makeBitmap(w, h);
+    const cctx = c.getContext("2d");
+    cctx.drawImage(sel.maskCanvas, sel.bboxX - x0, sel.bboxY - y0);
+    return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas: c };
   }
   // 编程入口（取消选区 / 反选 / 由 history undo 调用恢复）
   setSelection(sel) {
@@ -392,6 +412,8 @@ export class LassoEngine {
 
   // -------- 拖动 --------
   // 鼠标 / 手指 down 时调：判断点击在哪里 → 设 _drag。返回 hit 类型。
+  // v125 (user：「transform 拖外面也能移动，gizmo 安全区大一点」)
+  //   handle 半径 10 → 18 doc-px；warp 之外的 mode 在 quad 外按下默认 translate
   hitTest(x, y, screenScale = 1) {
     const f = this._floating;
     if (!f) return null;
@@ -399,8 +421,8 @@ export class LassoEngine {
     if (f.mode === null) {
       return this._pointInQuad(x, y) ? { kind: "translate" } : null;
     }
-    // 优先 mesh 控制点（按 mode 决定哪些点暴露）。半径 = 10 / screenScale doc-px
-    const r = 10 / screenScale;
+    // 优先 mesh 控制点（按 mode 决定哪些点暴露）。半径 = 18 / screenScale doc-px
+    const r = 18 / screenScale;
     const handles = this._visibleHandles(screenScale);   // v117: 让 rotate handle 定位正确
     for (const h of handles) {
       const dx = x - h.pos.x, dy = y - h.pos.y;
@@ -410,12 +432,10 @@ export class LassoEngine {
     if (f.mode === "warp") {
       const cell = this._findWarpCell(x, y);
       if (cell) return { kind: "warp-soft", ...cell };
+      return null;     // warp 外不接管，保持原 no-op
     }
-    // 内部 = translate
-    if (this._pointInQuad(x, y)) {
-      return { kind: "translate" };
-    }
-    return null;
+    // 其他 mode（free / uniform / distort）：内部 + 外部都 translate
+    return { kind: "translate" };
   }
 
   beginDrag(hit, x, y) {

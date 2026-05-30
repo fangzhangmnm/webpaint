@@ -76,6 +76,7 @@
 ### 多选 layer + 折叠 / 文件夹
 - 见下面「多选 layer 设计」section
 - Collapse all / Collapse to below / Group selected → folder
+- ora模式支持图层组吗？
 
 ### 图库里支持重命名
 - user：「图库 ui 可以重命名」

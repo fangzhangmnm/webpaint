@@ -389,9 +389,9 @@
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <!-- v120: 3 个按钮意义不明，改 dropdown；nearest 改成「像素画」直说语义 -->
           <select class="lasso-tool-select" id="lassoSampleSel" title="采样模式">
+            <option value="bicubic">双三次</option>
             <option value="bilinear">双线性</option>
             <option value="nearest">像素画</option>
-            <option value="bicubic">双三次</option>
           </select>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <button class="lasso-tool-btn lasso-tool-confirm" id="lassoStampBtn" type="button" title="盖印（写入但保留浮层，可连击多次叠加）">盖印</button>
@@ -614,9 +614,9 @@
         <div class="resample-row">
           <label for="resampleMode">插值</label>
           <select id="resampleMode">
-            <option value="bilinear">双线性（默认 / 软）</option>
+            <option value="bicubic">双三次（默认 / 高质量）</option>
+            <option value="bilinear">双线性（软）</option>
             <option value="nearest">最近邻（像素艺术 / 硬边）</option>
-            <option value="bicubic">双三次（高质量 / 慢）</option>
           </select>
         </div>
       </div>
@@ -695,6 +695,8 @@
       <!-- v124 (user) 文件操作扁平化：删 section label / inner separator / 居中画布；
            裁切 context-aware（有选区→裁选区；否则开自由裁切 8-handle）；
            重采样 renamed 成 Resize；参考小窗 挪进来一起 -->
+      <!-- v125 (user：「主目录第一个栏叫做文件」) 文件 label 回归 -->
+      <div class="menu-section-label">文件</div>
       <div class="menu-item-row">
         <button class="menu-item menu-item-main" id="menuImportImage" type="button" role="menuitem">
           <span class="menu-item-label">导入图片</span>
@@ -724,6 +726,10 @@
       </div>
       <button class="menu-item" id="menuRename" type="button" role="menuitem">
         <span class="menu-item-label">重命名当前画作…</span>
+      </button>
+      <!-- v125 (user：「菜单加另存为（画库，名字冲突检查）」) -->
+      <button class="menu-item" id="menuSaveAs" type="button" role="menuitem">
+        <span class="menu-item-label">另存为…</span>
       </button>
       <!-- v124 裁切合并：有选区 → 裁切到选区；否则 → 自由裁切 8 handle -->
       <button class="menu-item" id="menuCrop" type="button" role="menuitem">
@@ -840,6 +846,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-825bf3c79f91.mjs"></script>
+    <script type="module" src="./dist/webpaint-8dc7561adabc.mjs"></script>
   </body>
 </html>

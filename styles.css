@@ -1290,23 +1290,40 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5),
               0 0 0 1px rgba(0, 0, 0, 0.6) inset;
   box-sizing: border-box;
-  cursor: move;
+  /* v125 (user：「裁切时空白不应该可拖动」)：cursor 不再 move */
+  cursor: default;
 }
+/* v125 (user：「crop 的 handler 改成黑色的直线和直角」)：
+   corner = 直角 L 形（2 条粗黑边）；edge = 短粗黑横/竖线
+   背景不再实心白方块 */
 .crop-handle {
   position: absolute;
-  width: 14px; height: 14px;
-  background: #fff;
-  border: 1px solid #000;
-  border-radius: 2px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
-.crop-handle[data-handle="nw"] { top: -8px; left: -8px;  cursor: nwse-resize; }
-.crop-handle[data-handle="n"]  { top: -8px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
-.crop-handle[data-handle="ne"] { top: -8px; right: -8px; cursor: nesw-resize; }
-.crop-handle[data-handle="e"]  { top: 50%; right: -8px; transform: translateY(-50%); cursor: ew-resize; }
-.crop-handle[data-handle="se"] { bottom: -8px; right: -8px; cursor: nwse-resize; }
-.crop-handle[data-handle="s"]  { bottom: -8px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
-.crop-handle[data-handle="sw"] { bottom: -8px; left: -8px; cursor: nesw-resize; }
-.crop-handle[data-handle="w"]  { top: 50%; left: -8px; transform: translateY(-50%); cursor: ew-resize; }
+.crop-handle[data-handle="nw"],
+.crop-handle[data-handle="ne"],
+.crop-handle[data-handle="se"],
+.crop-handle[data-handle="sw"] {
+  width: 20px; height: 20px;
+}
+.crop-handle[data-handle="nw"] { top: -3px;    left: -3px;
+  border-top:   3px solid #000; border-left:  3px solid #000; cursor: nwse-resize; }
+.crop-handle[data-handle="ne"] { top: -3px;    right: -3px;
+  border-top:   3px solid #000; border-right: 3px solid #000; cursor: nesw-resize; }
+.crop-handle[data-handle="se"] { bottom: -3px; right: -3px;
+  border-bottom: 3px solid #000; border-right: 3px solid #000; cursor: nwse-resize; }
+.crop-handle[data-handle="sw"] { bottom: -3px; left: -3px;
+  border-bottom: 3px solid #000; border-left:  3px solid #000; cursor: nesw-resize; }
+.crop-handle[data-handle="n"]  { top: -2px;    left: 50%; transform: translateX(-50%);
+  width: 28px; height: 3px; background: #000; cursor: ns-resize; }
+.crop-handle[data-handle="s"]  { bottom: -2px; left: 50%; transform: translateX(-50%);
+  width: 28px; height: 3px; background: #000; cursor: ns-resize; }
+.crop-handle[data-handle="w"]  { top: 50%; left: -2px;    transform: translateY(-50%);
+  width: 3px; height: 28px; background: #000; cursor: ew-resize; }
+.crop-handle[data-handle="e"]  { top: 50%; right: -2px;   transform: translateY(-50%);
+  width: 3px; height: 28px; background: #000; cursor: ew-resize; }
 
 /* v110 自由裁切 toolbar (顶栏下方居中) */
 .crop-toolbar {
