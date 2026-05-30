@@ -1274,6 +1274,38 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   background: var(--accent, #4c8bf5); color: #fff;
   border-color: var(--accent, #4c8bf5); font-weight: 600;
 }
+/* v131 filter 面板：section title / curves canvas / curves tabs */
+.adjust-section-title {
+  font-size: 11px; color: var(--ink-muted, #888);
+  margin: 8px 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+  letter-spacing: 0.5px;
+}
+.curves-tabs {
+  display: flex; gap: 4px; margin-bottom: 8px;
+}
+.curves-tab {
+  flex: 1;
+  font: inherit; font-size: 12px;
+  padding: 4px 0;
+  background: var(--bg-soft); color: var(--ink);
+  border: 1px solid var(--line);
+  border-bottom-width: 3px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.curves-tab[aria-pressed="true"] {
+  background: var(--accent, #4c8bf5); color: #fff;
+}
+.curves-canvas {
+  width: 100%;
+  aspect-ratio: 1;
+  display: block;
+  border-radius: 4px;
+  background: #1c1c1c;
+  margin-bottom: 6px;
+}
 
 /* v110 自由裁切 overlay：全屏覆盖，rect+handles 在屏幕坐标 */
 .crop-overlay {

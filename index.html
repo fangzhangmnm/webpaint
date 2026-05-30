@@ -590,8 +590,18 @@
       <button class="menu-item" id="adjustLiquify" type="button" role="menuitem">
         <span class="menu-item-label">液化</span>
       </button>
+      <!-- v131 (user：「先把调色做了：HSB / Color Balance / Curves / Sharpen-Blur」) -->
       <button class="menu-item" id="adjustColor" type="button" role="menuitem">
-        <span class="menu-item-label">颜色调整（B/C/S/H）</span>
+        <span class="menu-item-label">色相饱和度 / 亮度对比</span>
+      </button>
+      <button class="menu-item" id="adjustColorBalance" type="button" role="menuitem">
+        <span class="menu-item-label">色彩平衡</span>
+      </button>
+      <button class="menu-item" id="adjustCurves" type="button" role="menuitem">
+        <span class="menu-item-label">曲线（RGBA）</span>
+      </button>
+      <button class="menu-item" id="adjustSharpenBlur" type="button" role="menuitem">
+        <span class="menu-item-label">锐化 / 模糊</span>
       </button>
     </div>
 
@@ -626,33 +636,16 @@
       </div>
     </div>
 
-    <!-- v110 颜色调整面板（沿用 .float-panel 拖标题模式）-->
+    <!-- v110 颜色调整面板（沿用 .float-panel 拖标题模式）
+         v131 (user：「先把调色做了」) refactor → 通用 filter 平台：
+         body 改成空容器，JS 按 filter 类型动态填（HSB / 色彩平衡 / Curves / 锐化模糊） -->
     <div class="float-panel adjust-panel hidden" id="adjustPanel">
       <div class="float-panel-head" id="adjustPanelHead">
-        <span class="float-panel-title">颜色调整</span>
+        <span class="float-panel-title" id="adjustPanelTitle">颜色调整</span>
         <button class="float-panel-close" id="adjustPanelClose" type="button" aria-label="关闭">×</button>
       </div>
       <div class="float-panel-body">
-        <label class="brush-slider-row" title="亮度 (-100..+100)">
-          <span class="brush-slider-label">亮度</span>
-          <input id="adjustBrightness" type="range" min="-100" max="100" step="1" value="0" />
-          <span class="brush-slider-value" id="adjustBrightnessVal">0</span>
-        </label>
-        <label class="brush-slider-row" title="对比度 (-100..+100)">
-          <span class="brush-slider-label">对比</span>
-          <input id="adjustContrast" type="range" min="-100" max="100" step="1" value="0" />
-          <span class="brush-slider-value" id="adjustContrastVal">0</span>
-        </label>
-        <label class="brush-slider-row" title="饱和度 (-100..+100)">
-          <span class="brush-slider-label">饱和</span>
-          <input id="adjustSaturation" type="range" min="-100" max="100" step="1" value="0" />
-          <span class="brush-slider-value" id="adjustSaturationVal">0</span>
-        </label>
-        <label class="brush-slider-row" title="色相旋转 (-180..+180°)">
-          <span class="brush-slider-label">色相</span>
-          <input id="adjustHue" type="range" min="-180" max="180" step="1" value="0" />
-          <span class="brush-slider-value" id="adjustHueVal">0°</span>
-        </label>
+        <div id="adjustParamsBody"><!-- JS 填 --></div>
         <div class="adjust-panel-foot">
           <button type="button" id="adjustReset">重置</button>
           <button type="button" id="adjustCancel">取消</button>
@@ -846,6 +839,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-9cca655d9399.mjs"></script>
+    <script type="module" src="./dist/webpaint-f7c9f03df0c0.mjs"></script>
   </body>
 </html>

@@ -423,6 +423,9 @@ jitter, scattering, h/s/v variation, texture, rotation/size variation
 
 ### 测试指绘，PC板绘（数位板）
 
+### Gradient Map
+类似ColorRamp
+
 ## 用我这本本子的方式
 
 新点子来了 → 先写这里，标 P0/P1/P2/❄。等积累到自然想做某件，再单独开个 docs/lesson-*.md / 设计 doc 论证。

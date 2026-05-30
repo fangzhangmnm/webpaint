@@ -31,6 +31,10 @@ import {
   copyImageToClipboard, readImageFromClipboard,
 } from "./session.js";
 import { fillSelectionOnLayer, clearSelectionOnLayer, invertSelection } from "./lasso.js";
+import {
+  getFilter, listFilters, registerFilter,
+  HsbFilter, ColorBalanceFilter, CurvesFilter, SharpenBlurFilter,
+} from "./filters.js";
 import { decodeOraToDoc, encodeDocToOra, parseAppVersion } from "./ora.js";
 import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
@@ -98,14 +102,8 @@ const els = {
   resampleConfirm: document.getElementById("resampleConfirm"),
   adjustPanel: document.getElementById("adjustPanel"),
   adjustPanelHead: document.getElementById("adjustPanelHead"),
-  adjustBrightness: document.getElementById("adjustBrightness"),
-  adjustBrightnessVal: document.getElementById("adjustBrightnessVal"),
-  adjustContrast: document.getElementById("adjustContrast"),
-  adjustContrastVal: document.getElementById("adjustContrastVal"),
-  adjustSaturation: document.getElementById("adjustSaturation"),
-  adjustSaturationVal: document.getElementById("adjustSaturationVal"),
-  adjustHue: document.getElementById("adjustHue"),
-  adjustHueVal: document.getElementById("adjustHueVal"),
+  adjustPanelTitle: document.getElementById("adjustPanelTitle"),
+  adjustParamsBody: document.getElementById("adjustParamsBody"),
   // v123 topGalleryBtn 撤了，图库挪进菜单 (id=menuGallery)
   menuGallery: document.getElementById("menuGallery"),
   liquifyPanel: document.getElementById("liquifyPanel"),
@@ -924,7 +922,7 @@ registerPendingTransient({
 registerPendingTransient({
   label: "color-adjust",
   check: () => !!_adjustState,
-  apply: () => _closeAdjustPanel(true),
+  apply: () => _closeFilterPanel(true),
 });
 
 // ---- 工具 ----
@@ -3180,117 +3178,21 @@ els.resampleConfirm.addEventListener("click", () => {
   _closeResampleDialog();
 });
 
-// 颜色调整面板 (B/C/S/H) ----
-// v113: 撤 Canvas2D ctx.filter（iPad Safari 偶发不渲染，user：「预览 apply 都没用」）
-// 改 per-pixel JS BCSH 算式 (color matrix)，preview 走 surrogate canvas，apply 烤到 layer
-let _adjustState = null;     // { active, brightness, contrast, saturation, hue, beforeSnap, surrogate }
-// BCSH per-pixel: brightness × → contrast × → saturate (lerp toward luma) → hue rotate (CSS hue-rotate matrix)
-function _bakeBCSHToImageData(srcData, dstData, s) {
-  const b = 1 + (s.brightness / 100);
-  const c = 1 + (s.contrast / 100);
-  const sat = 1 + (s.saturation / 100);
-  const hueRad = (s.hue | 0) * Math.PI / 180;
-  const cosH = Math.cos(hueRad);
-  const sinH = Math.sin(hueRad);
-  // CSS hue-rotate matrix (linear; W3C SVG filter spec)
-  const lumR = 0.213, lumG = 0.715, lumB = 0.072;
-  const m11 = lumR + cosH * (1 - lumR) + sinH * (-lumR);
-  const m12 = lumG + cosH * (-lumG)    + sinH * (-lumG);
-  const m13 = lumB + cosH * (-lumB)    + sinH * (1 - lumB);
-  const m21 = lumR + cosH * (-lumR)    + sinH * 0.143;
-  const m22 = lumG + cosH * (1 - lumG) + sinH * 0.140;
-  const m23 = lumB + cosH * (-lumB)    + sinH * (-0.283);
-  const m31 = lumR + cosH * (-lumR)    + sinH * (-(1 - lumR));
-  const m32 = lumG + cosH * (-lumG)    + sinH * lumG;
-  const m33 = lumB + cosH * (1 - lumB) + sinH * lumB;
-  const useHue = s.hue !== 0;
-  const N = srcData.length;
-  for (let i = 0; i < N; i += 4) {
-    let r = srcData[i], g = srcData[i + 1], bl = srcData[i + 2];
-    // brightness: multiply
-    r *= b; g *= b; bl *= b;
-    // contrast: (x - 128) * c + 128
-    r = (r - 128) * c + 128;
-    g = (g - 128) * c + 128;
-    bl = (bl - 128) * c + 128;
-    // saturate: lerp toward luma
-    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
-    r = luma + (r - luma) * sat;
-    g = luma + (g - luma) * sat;
-    bl = luma + (bl - luma) * sat;
-    // hue rotate (color matrix)
-    if (useHue) {
-      const nr = r * m11 + g * m12 + bl * m13;
-      const ng = r * m21 + g * m22 + bl * m23;
-      const nb = r * m31 + g * m32 + bl * m33;
-      r = nr; g = ng; bl = nb;
-    }
-    dstData[i]     = r < 0 ? 0 : r > 255 ? 255 : r | 0;
-    dstData[i + 1] = g < 0 ? 0 : g > 255 ? 255 : g | 0;
-    dstData[i + 2] = bl < 0 ? 0 : bl > 255 ? 255 : bl | 0;
-    dstData[i + 3] = srcData[i + 3];     // alpha 不动
-  }
-}
-// 在选区 mask 内才烤 (sel 提供 maskData)；mask 外 dst 复制 src
-function _bakeBCSHWithMask(srcData, dstData, s, mask) {
-  if (!mask) { _bakeBCSHToImageData(srcData, dstData, s); return; }
-  const b = 1 + (s.brightness / 100);
-  const c = 1 + (s.contrast / 100);
-  const sat = 1 + (s.saturation / 100);
-  const hueRad = (s.hue | 0) * Math.PI / 180;
-  const cosH = Math.cos(hueRad);
-  const sinH = Math.sin(hueRad);
-  const lumR = 0.213, lumG = 0.715, lumB = 0.072;
-  const m11 = lumR + cosH * (1 - lumR) + sinH * (-lumR);
-  const m12 = lumG + cosH * (-lumG)    + sinH * (-lumG);
-  const m13 = lumB + cosH * (-lumB)    + sinH * (1 - lumB);
-  const m21 = lumR + cosH * (-lumR)    + sinH * 0.143;
-  const m22 = lumG + cosH * (1 - lumG) + sinH * 0.140;
-  const m23 = lumB + cosH * (-lumB)    + sinH * (-0.283);
-  const m31 = lumR + cosH * (-lumR)    + sinH * (-(1 - lumR));
-  const m32 = lumG + cosH * (-lumG)    + sinH * lumG;
-  const m33 = lumB + cosH * (1 - lumB) + sinH * lumB;
-  const useHue = s.hue !== 0;
-  const N = srcData.length / 4;
-  for (let i = 0; i < N; i++) {
-    const o = i * 4;
-    const mAlpha = mask[i * 4 + 3];      // 0..255
-    if (mAlpha < 128) {
-      // 选区外：复制原值
-      dstData[o] = srcData[o]; dstData[o + 1] = srcData[o + 1];
-      dstData[o + 2] = srcData[o + 2]; dstData[o + 3] = srcData[o + 3];
-      continue;
-    }
-    let r = srcData[o], g = srcData[o + 1], bl = srcData[o + 2];
-    r *= b; g *= b; bl *= b;
-    r = (r - 128) * c + 128;
-    g = (g - 128) * c + 128;
-    bl = (bl - 128) * c + 128;
-    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
-    r = luma + (r - luma) * sat;
-    g = luma + (g - luma) * sat;
-    bl = luma + (bl - luma) * sat;
-    if (useHue) {
-      const nr = r * m11 + g * m12 + bl * m13;
-      const ng = r * m21 + g * m22 + bl * m23;
-      const nb = r * m31 + g * m32 + bl * m33;
-      r = nr; g = ng; bl = nb;
-    }
-    dstData[o]     = r < 0 ? 0 : r > 255 ? 255 : r | 0;
-    dstData[o + 1] = g < 0 ? 0 : g > 255 ? 255 : g | 0;
-    dstData[o + 2] = bl < 0 ? 0 : bl > 255 ? 255 : bl | 0;
-    dstData[o + 3] = srcData[o + 3];
-  }
-}
-// 给 adjustState 准备 surrogate canvas + 提取 src/mask 数据
-function _initAdjustSurrogate(L) {
+// v131 Filter 面板（重构自原 BCSH 颜色调整）
+// 所有 filter 走 src/filters.js 的 Filter 接口（含 id/title/menuId/modes/bleedRadius/defaults/buildBody/bake）
+// _adjustState = { Filter, active, params, beforeSnap, sur, surCtx, srcImg, maskData, _rafId }
+// 入口 _openFilterPanel(filterId)；Reset / Cancel / Apply 共用
+// preview 用 rAF coalesce：slider drag 不堵队列（user：「液化笔刷事件 last commit，slider drag 也是，gaussian blur fps 低 OK，别 queue 卡半天」）
+let _adjustState = null;     // 见上注释
+// === 老 BCSH 实现已迁 src/filters.js HsbFilter，这里只剩 panel infra ===
+
+// 准备 surrogate canvas + 提取 src/mask 数据
+function _initFilterSurrogate(L) {
   const sur = document.createElement("canvas");
   sur.width = L.bboxW; sur.height = L.bboxH;
   const surCtx = sur.getContext("2d");
-  // 拿原 layer 像素一次缓存
   surCtx.drawImage(L.canvas, 0, 0);
   const srcImg = surCtx.getImageData(0, 0, L.bboxW, L.bboxH);
-  // mask data 投到 layer 坐标系（mask 在 doc 坐标，转 layer 局部）
   let maskData = null;
   if (doc.selection) {
     const m = document.createElement("canvas");
@@ -3302,105 +3204,100 @@ function _initAdjustSurrogate(L) {
   }
   return { sur, surCtx, srcImg, maskData };
 }
-function _openAdjustPanel() {
+
+function _openFilterPanel(filterId) {
+  const Filter = getFilter(filterId);
+  if (!Filter) { setStatus(`未知 filter：${filterId}`, true); return; }
   const L = doc.activeLayer;
   if (!L) { setStatus("没活动图层", true); return; }
   if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("活动图层是空的", true); return; }
-  const { sur, surCtx, srcImg, maskData } = _initAdjustSurrogate(L);
-  _adjustState = { active: L, brightness: 0, contrast: 0, saturation: 0, hue: 0,
-                   beforeSnap: L.snapshot(), sur, surCtx, srcImg, maskData };
+  if (_adjustState) _closeFilterPanel(false);
+  const { sur, surCtx, srcImg, maskData } = _initFilterSurrogate(L);
+  _adjustState = {
+    Filter, active: L, params: Filter.defaults(),
+    beforeSnap: L.snapshot(), sur, surCtx, srcImg, maskData,
+    _rafId: 0,
+  };
+  if (els.adjustPanelTitle) els.adjustPanelTitle.textContent = Filter.title;
+  els.adjustParamsBody.innerHTML = "";
+  Filter.buildBody(els.adjustParamsBody, _adjustState, _onFilterChange);
   els.adjustPanel.classList.remove("hidden");
-  // 默认位置 right-top
-  const w = els.adjustPanel.offsetWidth || 280;
+  const w = els.adjustPanel.offsetWidth || 320;
   els.adjustPanel.style.left = (window.innerWidth - w - 16) + "px";
   els.adjustPanel.style.top  = "70px";
   _bringPanelTop(els.adjustPanel);
-  _syncAdjustSliders();
-  board.setActiveLayerSurrogate?.(L.id, sur);    // 启动 surrogate 预览
-  _onAdjustChange();                              // 初次渲染（identity）
+  board.setActiveLayerSurrogate?.(L.id, sur);
+  _runFilterPreview();      // 初次渲染（identity）
   _suppressTransientPanels("adjust-color");
 }
-function _syncAdjustSliders() {
-  const s = _adjustState;
-  els.adjustBrightness.value = String(s.brightness);
-  els.adjustBrightnessVal.textContent = String(s.brightness);
-  els.adjustContrast.value = String(s.contrast);
-  els.adjustContrastVal.textContent = String(s.contrast);
-  els.adjustSaturation.value = String(s.saturation);
-  els.adjustSaturationVal.textContent = String(s.saturation);
-  els.adjustHue.value = String(s.hue);
-  els.adjustHueVal.textContent = `${s.hue}°`;
-}
-// v113: per-pixel JS BCSH 写进 surrogate canvas（live preview）
-function _onAdjustChange() {
+
+// preview coalesce：rAF 保证最多 1 帧 1 次 bake，slider drag 不堵队列
+// (user：「液化笔刷事件 last commit，slider drag 也是，fps 低 OK，别 queue 卡半天」)
+function _onFilterChange() {
   if (!_adjustState) return;
+  if (_adjustState._rafId) return;
+  _adjustState._rafId = requestAnimationFrame(() => {
+    if (!_adjustState) return;
+    _adjustState._rafId = 0;
+    _runFilterPreview();
+  });
+}
+function _runFilterPreview() {
   const s = _adjustState;
-  // 复用 srcImg 缓存的原像素，per-pixel 烤进 surrogate
   const outImg = s.surCtx.createImageData(s.srcImg.width, s.srcImg.height);
-  if (s.maskData) _bakeBCSHWithMask(s.srcImg.data, outImg.data, s, s.maskData);
-  else _bakeBCSHToImageData(s.srcImg.data, outImg.data, s);
+  s.Filter.bake(s.srcImg.data, outImg.data, s.params, s.maskData, s.srcImg.width, s.srcImg.height);
   s.surCtx.putImageData(outImg, 0, 0);
   board.invalidateAll();
 }
-function _closeAdjustPanel(applied) {
+
+function _closeFilterPanel(applied) {
   if (!_adjustState) return;
   const L = _adjustState.active;
+  if (_adjustState._rafId) { cancelAnimationFrame(_adjustState._rafId); _adjustState._rafId = 0; }
   board.setActiveLayerSurrogate?.(null, null);
   if (applied) {
-    // 烤进 layer 像素（surrogate 已经是结果，直接拷回 layer.canvas）
+    // 烤进 layer（surrogate 已是最终结果，直接拷回）
     L.ctx.clearRect(0, 0, L.bboxW, L.bboxH);
     L.ctx.drawImage(_adjustState.sur, 0, 0);
     const after = L.snapshot();
     history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });
     _docDirty = true;
     if (isSignedIn()) setCloudDirty(_activeSessionName, true);
-    setStatus(`颜色已应用：${L.name}`);
+    setStatus(`${_adjustState.Filter.title} 已应用：${L.name}`);
   }
   _adjustState = null;
   els.adjustPanel.classList.add("hidden");
+  els.adjustParamsBody.innerHTML = "";
   _restoreTransientPanels();
   board.invalidateAll();
 }
-document.getElementById("adjustColor").addEventListener("click", () => {
-  setAdjustOpen(false);
-  _openAdjustPanel();
-});
+
+// 注册所有 filter 的菜单入口（Filter.menuId → _openFilterPanel(Filter.id)）
+for (const Filter of listFilters()) {
+  if (!Filter.menuId) continue;
+  const btn = document.getElementById(Filter.menuId);
+  if (!btn) { console.warn("[filter] menu 入口缺失:", Filter.menuId, Filter.id); continue; }
+  btn.addEventListener("click", () => {
+    setAdjustOpen(false);
+    _openFilterPanel(Filter.id);
+  });
+}
 document.getElementById("adjustReset").addEventListener("click", () => {
   if (!_adjustState) return;
-  _adjustState.brightness = 0;
-  _adjustState.contrast = 0;
-  _adjustState.saturation = 0;
-  _adjustState.hue = 0;
-  _syncAdjustSliders();
-  _onAdjustChange();
+  _adjustState.params = _adjustState.Filter.defaults();
+  els.adjustParamsBody.innerHTML = "";
+  _adjustState.Filter.buildBody(els.adjustParamsBody, _adjustState, _onFilterChange);
+  _onFilterChange();
 });
-document.getElementById("adjustCancel").addEventListener("click", () => _closeAdjustPanel(false));
-document.getElementById("adjustPanelClose").addEventListener("click", () => _closeAdjustPanel(false));
-document.getElementById("adjustApply").addEventListener("click", () => _closeAdjustPanel(true));
-els.adjustBrightness.addEventListener("input", () => {
-  if (!_adjustState) return;
-  _adjustState.brightness = parseFloat(els.adjustBrightness.value) | 0;
-  els.adjustBrightnessVal.textContent = String(_adjustState.brightness);
-  _onAdjustChange();
-});
-els.adjustContrast.addEventListener("input", () => {
-  if (!_adjustState) return;
-  _adjustState.contrast = parseFloat(els.adjustContrast.value) | 0;
-  els.adjustContrastVal.textContent = String(_adjustState.contrast);
-  _onAdjustChange();
-});
-els.adjustSaturation.addEventListener("input", () => {
-  if (!_adjustState) return;
-  _adjustState.saturation = parseFloat(els.adjustSaturation.value) | 0;
-  els.adjustSaturationVal.textContent = String(_adjustState.saturation);
-  _onAdjustChange();
-});
-els.adjustHue.addEventListener("input", () => {
-  if (!_adjustState) return;
-  _adjustState.hue = parseFloat(els.adjustHue.value) | 0;
-  els.adjustHueVal.textContent = `${_adjustState.hue}°`;
-  _onAdjustChange();
-});
+document.getElementById("adjustCancel").addEventListener("click", () => _closeFilterPanel(false));
+document.getElementById("adjustPanelClose").addEventListener("click", () => _closeFilterPanel(false));
+document.getElementById("adjustApply").addEventListener("click", () => _closeFilterPanel(true));
+
+// 暴露给 plugin（v131）：window.WebPaint.registerFilter(FilterClass)
+// 插件自己写 buildBody，可以放色环 / 自定义 canvas / 任何 DOM（user：「插件自己提供 UI」）
+window.WebPaint = window.WebPaint || {};
+window.WebPaint.registerFilter = registerFilter;
+window.WebPaint.listFilters = listFilters;
 // adjust panel head 拖动
 (function bindAdjustPanelDrag() {
   let drag = null;
