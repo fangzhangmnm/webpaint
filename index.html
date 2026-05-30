@@ -164,7 +164,7 @@
       <button class="left-sidebar-brush" id="leftSidebarBrush" type="button" title="当前笔刷（tap 切换 / 长按编辑）">
         <span class="left-sidebar-brush-name" id="leftSidebarBrushName">—</span>
       </button>
-      <input id="sizeSlider" class="left-sidebar-slider" type="range" min="1" max="200" step="1" value="12" aria-label="笔粗" orient="vertical" />
+      <input id="sizeSlider" class="left-sidebar-slider" type="range" min="0" max="1000" step="1" value="60" aria-label="笔粗" orient="vertical" />
       <span class="left-sidebar-label" title="笔粗">粗</span>
       <div class="size-popup hidden" id="sizePopup" aria-hidden="true">
         <div class="size-popup-circle-frame">
@@ -840,6 +840,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-39909e2574ce.mjs"></script>
+    <script type="module" src="./dist/webpaint-ed1c6850cfc7.mjs"></script>
   </body>
 </html>

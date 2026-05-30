@@ -412,15 +412,22 @@ function applyToolState(tool) {
 }
 
 // v97：size slider log 化 helpers
-// v124b 修 (user：「老拖到 299」)：HTML slider max=200，老公式 /100 → 半个 slider 没响应；
-// 改成读 slider 实际 max attr。同时**末端 snap**：pos > 0.995 直接 = maxPx，保证整数 cap 可达
-const SLIDER_RANGE = 200;
+// v124c (user：「想拖到 300 但 299 / 301 一不小心过头」)：
+//   - 老 SLIDER_RANGE=200 → 1000，slider positions 5× 细
+//   - 末端 1%（pos > 990）snap 到 maxPx，让 user 一拖到底就是精确整数
+//   - 首端 0.5%（pos < 5）snap 到 1（size=1 同样精确可达）
+// 代价：损失 ~290-299 范围（snap 吃掉了），日常画用不到这么细。
+const SLIDER_RANGE = 1000;
+const SNAP_HEAD = 0.005;
+const SNAP_TAIL = 0.99;
 function sliderPosToSize(pos, maxPx) {
   const t = Math.max(0, Math.min(SLIDER_RANGE, pos)) / SLIDER_RANGE;
-  if (t > 0.995) return maxPx;             // 末端 snap → 用户能拖到精确整数 maxPx
+  if (t <= SNAP_HEAD) return 1;
+  if (t >= SNAP_TAIL) return maxPx;
   return Math.max(1, Math.round(Math.exp(t * Math.log(Math.max(2, maxPx)))));
 }
 function sizeToSliderPos(size, maxPx) {
+  if (size <= 1) return 0;
   if (size >= maxPx) return SLIDER_RANGE;
   const t = Math.log(Math.max(1, size)) / Math.log(Math.max(2, maxPx));
   return Math.round(Math.max(0, Math.min(1, t)) * SLIDER_RANGE);
