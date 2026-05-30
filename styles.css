@@ -326,6 +326,19 @@ body[data-mode="gallery"] .left-sidebar { display: none; }
   word-break: break-all;
 }
 
+/* v124b dev 环境 chip：HUD 里的小红标签 (user：「让我们知道是 dev」) */
+.env-chip {
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.6px;
+  margin-left: 4px;
+}
+.env-chip.hidden { display: none; }
+
 /* v124 工具 disabled 视觉 (smudge engine 待实装) */
 .tool.tool-disabled { opacity: 0.35; cursor: not-allowed; }
 .tool.tool-disabled:hover { background: transparent; }

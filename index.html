@@ -801,6 +801,8 @@
       <span id="statusLabel">就绪</span>
       <span class="sep" aria-hidden="true">·</span>
       <span id="versionLabel" class="version">v?</span>
+      <!-- v124b dev 标识 (user：「让我们知道是 dev」)；app.js 检测后加 .visible -->
+      <span id="envChip" class="env-chip hidden" aria-label="dev environment">DEV</span>
     </div>
 
     <!-- HSV 浮动色板：点 activeSwatch / `C` 开关，拖标题栏移动，位置记忆到 localStorage -->
@@ -838,6 +840,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-5092b899c45c.mjs"></script>
+    <script type="module" src="./dist/webpaint-39909e2574ce.mjs"></script>
   </body>
 </html>

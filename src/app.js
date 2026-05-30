@@ -5166,7 +5166,15 @@ let _swRegistration = null;       // 暴露给 menuCheckUpdate 用
 // 现在改成模块顶层直接 register（同 ScratchPad），不依赖 load event。
 // v121 dev/ 子目录跳 SW 注册：dev bundle 文件名固定 + ?v=epoch 防缓存，无 SW
 // 反而每次刷新都直接拿最新代码，免得 dev 自己也踩"过一会才好"
-const IS_DEV_ROUTE = location.pathname.includes("/dev/");
+// v124b：扩义——任何非 prod-root 路径都算 dev (含 /dev/, /staging/, localhost 等)。
+// HUD 上挂红色 DEV chip 让人一眼看出环境
+const IS_DEV_ROUTE = location.pathname.includes("/dev/")
+  || location.hostname === "localhost"
+  || location.hostname === "127.0.0.1";
+{
+  const chip = document.getElementById("envChip");
+  if (chip && IS_DEV_ROUTE) chip.classList.remove("hidden");
+}
 if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname) && !IS_DEV_ROUTE) {
   // 路径 3：asset-updated 消息
   navigator.serviceWorker.addEventListener("message", (e) => {
