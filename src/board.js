@@ -199,6 +199,9 @@ export class Board {
     this.requestRender();
   }
 
+  // v131: liquify / filter brush 等没用 overlay 但仍需禁 partial。fn 返回 truthy = 强全屏
+  setStrokeActiveHint(fn) { this._strokeActiveHint = fn; }
+
   setOverlayProvider(fn) {
     this._overlayProvider = fn;
   }
@@ -464,7 +467,9 @@ export class Board {
     // v124 (user：「windows stamps 出现小黑框」第二尝试)：
     // 第一招 (clip 边界 floor/ceil) 失败。**兜底**：有 live overlay (= stroke 进行中) 直接全屏。
     // 一帧多个 fillRect 在 hidpi 上微秒级，不会影响 60fps；换 partial render clip 边沿 sliver bug 不再可能。
-    if (this._overlayProvider?.()) {
+    // v131 (user：「液化又出现白框」)：液化没用 overlayProvider（直接改 layer 像素），
+    //   regression。补 strokeActiveHint：任何 stroke-in-progress 都强 full。
+    if (this._overlayProvider?.() || this._strokeActiveHint?.()) {
       this._renderFull(); return;
     }
     const ctx = this.ctx;

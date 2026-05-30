@@ -31,10 +31,11 @@ import {
   copyImageToClipboard, readImageFromClipboard,
 } from "./session.js";
 import { fillSelectionOnLayer, clearSelectionOnLayer, invertSelection } from "./lasso.js";
-import {
-  getFilter, listFilters, registerFilter,
-  HsbFilter, ColorBalanceFilter, CurvesFilter, SharpenBlurFilter,
-} from "./filters.js";
+// v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
+//   filters.js 只剩 Filter 契约 + registry + helper；
+//   每个调色器在 src/plugins/ 自成一文件，import 时自注册
+import { getFilter, listFilters, registerFilter, onFilterRegistered } from "./filters.js";
+import "./plugins/index.js";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 import { decodeOraToDoc, encodeDocToOra, parseAppVersion } from "./ora.js";
 import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
@@ -202,6 +203,8 @@ els.versionLabel.textContent = WEBPAINT_VERSION || "?";
 
 const state = {
   tool: "brush",
+  // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
+  filterBrush: null,
   color: safeLS("webpaint.color") || "#1b1b1b",
   brush: new BrushSettings({
     size: parseFloat(safeLS("webpaint.size") || "12"),
@@ -272,6 +275,10 @@ state.toolStates = {
   brush:    { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null },
   smudge:   { size: 16, opacity: 1.0, flow: 0.8, activeBrushId: null },
   eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
+  // v132 (user：「记得文件持久化 filter brush 的 selection, radius, transparency」)
+  //   size = radius，opacity = transparency / flow，variantId = 子算法选择（如 blur/sharp）
+  //   variantId 由 Filter.brushVariants[].id 索引；空时 = 该 Filter 默认
+  filterBrush: { size: 32, opacity: 1.0, flow: 1.0, activeBrushId: null, variantId: null },
 };
 // airbrush 工具 alias 到 brush（user：「喷枪笔架合并到笔刷」）。
 // v120：shapes tool 撤了（user：「以后不要这个 tool 了」），shapes 会变 brush preset 的 toggle。
@@ -484,6 +491,8 @@ const input = new InputController(board, doc, {
   getTool: () => state.tool,
   getBrushSettings: () => state.brush,
   getLiquifySettings: () => state.liquify,
+  // v132 filter brush: state.filterBrush = { Filter, params, variantLabel } 或 null
+  getFilterBrushState: () => state.filterBrush || null,
   getLongPressPickEnabled: () => state.longPressPick,
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
@@ -580,6 +589,10 @@ window.addEventListener("gesturechange", (e) => e.preventDefault(), { capture: t
 // 笔触 buffer live overlay：board 每帧问 brush 要，layer 之上 composite × s.opacity
 // 预览（实际像素在 endStroke 才烧进 layer）。
 board.setOverlayProvider(() => input.brush.getLiveOverlay());
+// v131 修 (user：「液化 windows 又有 partial redraw 白框」)
+//   液化没用 overlayProvider 通路，board partial render 抓不到，sliver 漏出
+//   strokeActiveHint 兜底：液化 stroke 进行中 = 全屏渲染
+board.setStrokeActiveHint(() => input.liquify.isActive?.() || input.filterBrush.isActive?.());
 board.setLassoProvider(() => ({
   selection:      doc.selection,
   drawingPath:    input.lasso.getDrawingPath(),
@@ -938,14 +951,20 @@ function setTool(t) {
   }
   // 切工具 = 用户决定性动作 → 让所有 pending 先 apply（套索浮层 commit 等）
   applyAllPendingTransients();
+  // v132: 切到非 filterBrush 工具时自动退出 filter brush 模式（藏 toolbar / 清 state）
+  if (state.filterBrush && t !== "filterBrush") {
+    state.filterBrush = null;
+    const tb = document.getElementById("filterBrushToolbar");
+    if (tb) tb.classList.add("hidden");
+  }
   state.tool = t;
   for (const b of els.toolBtns) b.setAttribute("aria-pressed", b.dataset.tool === t ? "true" : "false");
-  // 液化没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
-  els.topAdjustBtn.setAttribute("aria-pressed", t === "liquify" ? "true" : "false");
+  // 液化 / filterBrush 没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
+  els.topAdjustBtn.setAttribute("aria-pressed", (t === "liquify" || t === "filterBrush") ? "true" : "false");
   document.body.dataset.tool = t;
   updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
-  if (t === "brush" || t === "smudge" || t === "eraser") {
+  if (t === "brush" || t === "smudge" || t === "eraser" || t === "filterBrush") {
     applyToolState(t);
   }
   if (t === "smudge") {
@@ -957,6 +976,7 @@ const RACK_PANEL_BY_TOOL = {
   brush: PANELS.RACK_BRUSH,
   smudge: PANELS.RACK_SMUDGE,
   eraser: PANELS.RACK_ERASER,
+  filterBrush: PANELS.RACK_FILTER_BRUSH,    // v132
 };
 let _lastNonLassoTool = "brush";
 for (const b of els.toolBtns) {
@@ -2657,6 +2677,8 @@ function adoptLoadedDoc(loaded, sessionName) {
           opacity: op,
           flow: fl,
           activeBrushId: typeof saved.activeBrushId === "string" ? saved.activeBrushId : state.toolStates[t].activeBrushId,
+          // v132 filterBrush 多 variantId（user：「持久化 filter brush 的 selection」）
+          ...(typeof saved.variantId === "string" ? { variantId: saved.variantId } : {}),
         });
       }
     }
@@ -3272,16 +3294,142 @@ function _closeFilterPanel(applied) {
   board.invalidateAll();
 }
 
-// 注册所有 filter 的菜单入口（Filter.menuId → _openFilterPanel(Filter.id)）
-for (const Filter of listFilters()) {
-  if (!Filter.menuId) continue;
-  const btn = document.getElementById(Filter.menuId);
-  if (!btn) { console.warn("[filter] menu 入口缺失:", Filter.menuId, Filter.id); continue; }
-  btn.addEventListener("click", () => {
-    setAdjustOpen(false);
-    _openFilterPanel(Filter.id);
-  });
+// v132 菜单动态渲染（plugin-aware）：listFilters() 按 category 渲染按钮，
+//   插件 registerFilter 后 onFilterRegistered hook 触发重渲。
+//   index.html 里 #adjustFilterList 是空容器，下面填。
+//   Filter 同时支持 region + brush 模式时：
+//     - 默认 1 个入口走 region
+//     - 如果 Filter.brushVariants 有，渲染额外的 brush variant 入口
+function _renderFilterMenu() {
+  const container = document.getElementById("adjustFilterList");
+  if (!container) return;
+  container.innerHTML = "";
+  const byCat = new Map();
+  for (const F of listFilters()) {
+    const cat = F.category || "adjustment";
+    if (!byCat.has(cat)) byCat.set(cat, []);
+    byCat.get(cat).push(F);
+  }
+  const CAT_LABEL = { adjustment: "调整", artist: "艺术" };
+  let first = true;
+  for (const [cat, filters] of byCat) {
+    if (!first) {
+      const hr = document.createElement("hr");
+      hr.className = "menu-sep";
+      container.appendChild(hr);
+    }
+    first = false;
+    if (byCat.size > 1) {
+      const lbl = document.createElement("div");
+      lbl.className = "menu-section-label";
+      lbl.textContent = CAT_LABEL[cat] || cat;
+      container.appendChild(lbl);
+    }
+    for (const F of filters) {
+      // region 模式入口（如果支持）
+      if (F.modes.includes("region")) {
+        const btn = document.createElement("button");
+        btn.className = "menu-item";
+        btn.type = "button";
+        btn.setAttribute("role", "menuitem");
+        btn.innerHTML = `<span class="menu-item-label">${F.title}</span>`;
+        btn.addEventListener("click", () => {
+          setAdjustOpen(false);
+          _openFilterPanel(F.id);
+        });
+        container.appendChild(btn);
+      }
+      // brush 模式：1 个 menu item（user：「子算法是 toolbar dropdown，不要 menu 变 pile of shame」）
+      // 子算法 = Filter.brushVariants，在 toolbar 里切；首次进入用持久化的 variantId 或第一个
+      if (F.modes.includes("brush")) {
+        const btn = document.createElement("button");
+        btn.className = "menu-item";
+        btn.type = "button";
+        btn.setAttribute("role", "menuitem");
+        btn.innerHTML = `<span class="menu-item-label">🖌 ${F.title}（笔刷）</span>`;
+        btn.addEventListener("click", () => {
+          setAdjustOpen(false);
+          _enterFilterBrushMode(F);
+        });
+        container.appendChild(btn);
+      }
+    }
+  }
 }
+_renderFilterMenu();
+onFilterRegistered(_renderFilterMenu);
+
+// v132 进入 / 退出 filter brush 模式
+//   进入：state.filterBrush = { Filter, params, variantId, variantLabel }；setTool("filterBrush")
+//        + openExclusive 弹 filter brush rack（user：「我不是让你做两个新笔吗」）
+//        + variantId 优先用 toolStates.filterBrush.variantId 持久化值
+//        + toolbar 渲染子算法 dropdown（user：「不同算法是 toolbar dropdown」）
+//   退出：清 state.filterBrush；关 rack；setTool 回前一个
+let _filterBrushPreviousTool = null;
+function _enterFilterBrushMode(Filter) {
+  applyAllPendingTransients();
+  _filterBrushPreviousTool = state.tool === "filterBrush" ? "brush" : state.tool;
+  // 取持久化的 variantId（user 上次选过的；新 doc 默认第一个）
+  const variants = Filter.brushVariants || [{ id: "default", title: Filter.title, params: Filter.defaults() }];
+  const savedVid = state.toolStates.filterBrush?.variantId;
+  let variant = variants.find((v) => v.id === savedVid) || variants[0];
+  state.filterBrush = { Filter, params: variant.params, variantId: variant.id, variantLabel: variant.title };
+  if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = variant.id;
+  setTool("filterBrush");
+  _renderFilterBrushToolbar();
+  // 弹 rack 让 user 看到 filter brush 池
+  openExclusive(PANELS.RACK_FILTER_BRUSH);
+  setStatus(`${Filter.title}（笔刷）`);
+}
+function _exitFilterBrushMode() {
+  state.filterBrush = null;
+  const tb = document.getElementById("filterBrushToolbar");
+  if (tb) tb.classList.add("hidden");
+  closeExclusive();   // 收 rack
+  setTool(_filterBrushPreviousTool || "brush");
+  _filterBrushPreviousTool = null;
+  setStatus("已退出 filter brush");
+}
+// 渲染 toolbar：title + variant dropdown (if multi) + 退出
+function _renderFilterBrushToolbar() {
+  if (!state.filterBrush) return;
+  const { Filter, variantId } = state.filterBrush;
+  const tb = document.getElementById("filterBrushToolbar");
+  const title = document.getElementById("filterBrushTitle");
+  if (!tb || !title) return;
+  tb.classList.remove("hidden");
+  title.textContent = Filter.title;
+  // dropdown：清掉旧的，按 brushVariants 重建
+  let sel = document.getElementById("filterBrushVariantSel");
+  if (sel) sel.remove();
+  const variants = Filter.brushVariants || [];
+  if (variants.length > 1) {
+    sel = document.createElement("select");
+    sel.id = "filterBrushVariantSel";
+    sel.className = "crop-toolbar-btn";
+    sel.style.padding = "2px 6px";
+    for (const v of variants) {
+      const opt = document.createElement("option");
+      opt.value = v.id;
+      opt.textContent = v.title;
+      if (v.id === variantId) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => {
+      const v = variants.find((x) => x.id === sel.value);
+      if (!v) return;
+      state.filterBrush.params = v.params;
+      state.filterBrush.variantId = v.id;
+      state.filterBrush.variantLabel = v.title;
+      if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = v.id;
+      _docDirty = true; updateSaveStatus();
+      setStatus(`已切 ${v.title}`);
+    });
+    // 插在 title 后
+    title.insertAdjacentElement("afterend", sel);
+  }
+}
+document.getElementById("filterBrushExit")?.addEventListener("click", _exitFilterBrushMode);
 document.getElementById("adjustReset").addEventListener("click", () => {
   if (!_adjustState) return;
   _adjustState.params = _adjustState.Filter.defaults();
@@ -3587,7 +3735,12 @@ function toggleLiquifyPanel(force) {
     els.liquifyPanel.style.top = Math.max(0, top) + "px";
   }
 }
-els.liquifyPanelClose.addEventListener("click", () => toggleLiquifyPanel(false));
+els.liquifyPanelClose.addEventListener("click", () => {
+  toggleLiquifyPanel(false);
+  // v131 (user：「液化关闭窗口之后应该退回 default tool」)
+  setTool("brush");
+  setStatus("已退出液化");
+});
 
 let _liquifyPanelDrag = null;
 els.liquifyPanelHead.addEventListener("pointerdown", (e) => {

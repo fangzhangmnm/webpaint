@@ -172,8 +172,9 @@
         </div>
         <span class="size-popup-text" id="sizePopupText">12 px</span>
       </div>
-      <input id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1" value="100" aria-label="流量 / 不透明" orient="vertical" />
-      <span class="left-sidebar-label" title="流量">流</span>
+      <!-- v131 (user：「left bar 语义是 opacity 不是 flow」) 改 label：流→透 -->
+      <input id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1" value="100" aria-label="不透明度" orient="vertical" />
+      <span class="left-sidebar-label" title="不透明度">透</span>
       <button class="tool" id="undoButton" type="button" title="撤销 (Ctrl+Z)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="9 14 4 9 9 4"></polyline>
@@ -586,23 +587,14 @@
 
     <!-- Adjustments popup：液化 / 颜色调整。学 Procreate adjustments icon
          v114: 裁切 / 重采样 挪进主菜单「画布」区 (user：「裁切丢到文件目录里，而不是调整目录里」) -->
+    <!-- v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
+         filter 菜单由 JS 按 listFilters() 动态渲染；下载插件 registerFilter 后自动出现入口 -->
     <div class="adjust-popup menu-panel hidden" id="adjustPopup" role="menu">
       <button class="menu-item" id="adjustLiquify" type="button" role="menuitem">
         <span class="menu-item-label">液化</span>
       </button>
-      <!-- v131 (user：「先把调色做了：HSB / Color Balance / Curves / Sharpen-Blur」) -->
-      <button class="menu-item" id="adjustColor" type="button" role="menuitem">
-        <span class="menu-item-label">色相饱和度 / 亮度对比</span>
-      </button>
-      <button class="menu-item" id="adjustColorBalance" type="button" role="menuitem">
-        <span class="menu-item-label">色彩平衡</span>
-      </button>
-      <button class="menu-item" id="adjustCurves" type="button" role="menuitem">
-        <span class="menu-item-label">曲线（RGBA）</span>
-      </button>
-      <button class="menu-item" id="adjustSharpenBlur" type="button" role="menuitem">
-        <span class="menu-item-label">锐化 / 模糊</span>
-      </button>
+      <hr class="menu-sep" />
+      <div id="adjustFilterList"><!-- 由 app.js _renderFilterMenu 填 --></div>
     </div>
 
     <!-- v110 重采样对话框 -->
@@ -660,6 +652,13 @@
       <span class="crop-toolbar-sep" aria-hidden="true">|</span>
       <button class="crop-toolbar-btn" id="cropToolbarApply" type="button">应用</button>
       <button class="crop-toolbar-btn crop-toolbar-cancel" id="cropToolbarCancel" type="button">取消</button>
+    </div>
+
+    <!-- v132 Filter brush toolbar：进入模糊笔刷 / 锐化笔刷等 filter brush 模式时浮在顶栏下方 -->
+    <div class="crop-toolbar hidden" id="filterBrushToolbar">
+      <span class="crop-toolbar-label" id="filterBrushTitle">滤镜笔刷</span>
+      <span class="crop-toolbar-sep" aria-hidden="true">|</span>
+      <button class="crop-toolbar-btn crop-toolbar-cancel" id="filterBrushExit" type="button">退出</button>
     </div>
 
     <!-- v110 自由裁切 overlay：rect + 8 handles + dimmed mask -->
@@ -839,6 +838,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-f7c9f03df0c0.mjs"></script>
+    <script type="module" src="./dist/webpaint-64c64966bf99.mjs"></script>
   </body>
 </html>

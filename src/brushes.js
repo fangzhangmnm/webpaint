@@ -238,6 +238,7 @@ export function brushesByTool(rack, tool) {
   if (tool === "brush") {
     return rack.brushes.filter((b) => BRUSH_GROUP.includes(b.tool));
   }
+  // v132 filterBrush 是新工具类别，自己的 rack（不串到 brush）
   return rack.brushes.filter((b) => b.tool === tool);
 }
 export function brushesByFolder(rack, folder) {

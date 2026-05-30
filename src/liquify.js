@@ -213,6 +213,9 @@ export class LiquifyEngine {
     this._stroke = null;
   }
 
+  // v131: 给 board 用——液化 stroke 进行中时禁掉 partial render（Windows Skia sliver bug）
+  isActive() { return !!this._stroke; }
+
   cancelStroke() {
     // 调用方（input.js _abortLiquify）会用 _liquifyPreSnap 还原 layer，
     // 这里只清状态

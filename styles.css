@@ -710,6 +710,51 @@ input[type=range] {
 .brush-slider-label { color: var(--ink-soft); }
 .brush-slider-value { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
 
+/* v132 (user：「色彩平衡和 HSV 看不到 colorful slider」)
+   range input 默认 track 盖了 background-image，加 .color-ramp 切自定义 track
+   只对显式声明的 ramp slider 生效，其他 slider 保持系统默认外观 */
+input[type="range"].color-ramp {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 14px;
+  border-radius: 7px;
+  outline: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+}
+input[type="range"].color-ramp::-webkit-slider-runnable-track {
+  height: 14px;
+  background: transparent;
+  border-radius: 7px;
+}
+input[type="range"].color-ramp::-moz-range-track {
+  height: 14px;
+  background: transparent;
+  border-radius: 7px;
+}
+input[type="range"].color-ramp::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #222;
+  cursor: pointer;
+  margin-top: -2px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+input[type="range"].color-ramp::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #222;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
 .menu-sep {
   border: 0;
   border-top: 1px solid var(--line);

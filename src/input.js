@@ -24,6 +24,7 @@ import { BrushEngine } from "./brush.js";
 import { LiquifyEngine } from "./liquify.js";
 import { LassoEngine, applySelectionMaskPostStroke } from "./lasso.js";
 import { ShapesEngine } from "./shapes.js";
+import { FilterBrushEngine } from "./filter-brush.js";
 
 const ERASER_RADIUS_SCREEN = 0;   // 用 BrushEngine 自己的 size，不再独立
 const TAP_MAX_DURATION = 220;
@@ -172,6 +173,9 @@ export class InputController {
     this.shapes = new ShapesEngine();
     this.liquify = new LiquifyEngine();
     this.lasso = new LassoEngine();
+    // v132 filter brush（user：「blur/sharpen/液化 走 filter brush engine」）
+    //   引擎本身是薄 delegate；filter 自己提供 begin/extend/end brush 方法
+    this.filterBrush = new FilterBrushEngine();
     this.lasso.onChange = () => {
       this.board.requestRender();
       window.dispatchEvent(new CustomEvent("wp:lassochange"));
@@ -179,6 +183,8 @@ export class InputController {
     this.getTool = opts.getTool || (() => "brush");
     this.getBrushSettings = opts.getBrushSettings || (() => null);   // 必须传
     this.getLiquifySettings = opts.getLiquifySettings || (() => ({ mode: "push", size: 50, strength: 0.5 }));
+    // v132 filter brush 当前激活的 { Filter, params } 或 null
+    this.getFilterBrushState = opts.getFilterBrushState || (() => null);
     this.getLongPressPickEnabled = opts.getLongPressPickEnabled || (() => false);
     this.onColorSampled = opts.onColorSampled || (() => {});
     this.status = opts.status || (() => {});
@@ -316,6 +322,8 @@ export class InputController {
           this._abortStroke();
         } else if (p.role === "liquify") {
           this._abortLiquify();
+        } else if (p.role === "filterBrush") {
+          this._abortFilterBrush();
         } else if (p.role === "lasso") {
           this._abortLasso();
         }
@@ -339,6 +347,7 @@ export class InputController {
       if (e.button === 0) role = effectiveTool === "eraser" ? "erase"
         : effectiveTool === "picker" ? "pick"
         : effectiveTool === "liquify" ? "liquify"
+        : effectiveTool === "filterBrush" ? "filterBrush"
         : effectiveTool === "lasso" ? "lasso"
         : effectiveTool === "smudge" ? "draw"          // v85+ smudge engine 实装前先按 draw 走
         : "draw";
@@ -349,6 +358,7 @@ export class InputController {
       else if (effectiveTool === "picker") role = "pick";
       else if (effectiveTool === "eraser") role = "erase";
       else if (effectiveTool === "liquify") role = "liquify";
+      else if (effectiveTool === "filterBrush") role = "filterBrush";
       else if (effectiveTool === "lasso") role = "lasso";
       else if (effectiveTool === "smudge") role = "draw";       // v85+ smudge engine 后改回 smudge
       else role = "draw";
@@ -359,6 +369,7 @@ export class InputController {
         if (effectiveTool === "picker") role = "pick";
         else if (effectiveTool === "eraser") role = "erase";
         else if (effectiveTool === "liquify") role = "liquify";
+        else if (effectiveTool === "filterBrush") role = "filterBrush";
         else if (effectiveTool === "lasso") role = "lasso";
         else if (effectiveTool === "smudge") role = "draw";     // v85+
         else role = "draw";
@@ -377,7 +388,7 @@ export class InputController {
 
     // v125 (user：「在隐藏图层上动笔会 reject 并警告」)
     // 画 / 擦 / 液化 / 形状 都改 activeLayer 像素；hidden 时一律拒绝
-    if ((role === "draw" || role === "erase" || role === "liquify" || role === "shapes")
+    if ((role === "draw" || role === "erase" || role === "liquify" || role === "shapes" || role === "filterBrush")
         && this.doc.activeLayer && !this.doc.activeLayer.visible) {
       this.status("当前图层已隐藏，无法绘制");
       rec.role = null;
@@ -385,8 +396,8 @@ export class InputController {
       return;
     }
 
-    if (role === "draw" || role === "erase" || role === "liquify") {
-      // 画 / 液化的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
+    if (role === "draw" || role === "erase" || role === "liquify" || role === "filterBrush") {
+      // 画 / 液化 / filter brush 的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
       this.board.setCursor(null);
       // 锚 smoothing / raw / 压感 状态到 down 点。液化也走同一套 smoothing 拿
       // 防 dx 坑（timeStamp 单调 + 四件套），见 docs/ipad-coalesced-events.md
@@ -400,6 +411,7 @@ export class InputController {
       rec.lastDirX = 0; rec.lastDirY = 0;
       rec.filtX = x; rec.filtY = y;
       if (role === "liquify") this._beginLiquify(rec);
+      else if (role === "filterBrush") this._beginFilterBrush(rec);
       else {
         // mode 推断：tool=smudge → "smudge"；其他按 erase/brush 走
         const tool = this.getTool();
@@ -486,15 +498,15 @@ export class InputController {
       return;
     }
 
-    if (rec.role === "draw" || rec.role === "erase" || rec.role === "liquify") {
-      // 画 / 液化的时候不刷 cursor preview，省一次全屏 dirty
+    if (rec.role === "draw" || rec.role === "erase" || rec.role === "liquify" || rec.role === "filterBrush") {
+      // 画 / 液化 / filter brush 的时候不刷 cursor preview，省一次全屏 dirty
       const events = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : null;
       let list = (events && events.length) ? events : [e];
-      // **液化丢帧**：每个 event 跑 ~31K typed-array ops，大笔半径下 coalesced
+      // **液化 / filter brush 丢帧**：每个 event 跑 ~31K typed-array ops，大笔半径下 coalesced
       // 整批连续跑 → 帧延迟堆积 → 越拖越卡。只跑最新一个（保 timeStamp 滤后的）。
-      // 画笔不能丢帧，会断笔/疏密；液化每帧独立重采样，丢帧 = 跳过细分但形状仍连续。
-      if (rec.role === "liquify" && list.length > 1) list = [list[list.length - 1]];
-      const settings = rec.role === "liquify" ? null : this.getBrushSettings();
+      // 画笔不能丢帧，会断笔/疏密；液化 / filter brush 每帧独立重采样，丢帧 = 跳过细分但形状仍连续。
+      if ((rec.role === "liquify" || rec.role === "filterBrush") && list.length > 1) list = [list[list.length - 1]];
+      const settings = (rec.role === "liquify" || rec.role === "filterBrush") ? null : this.getBrushSettings();
       for (const ev of list) {
         // **Safari iOS getCoalescedEvents() 边界回放过滤**：每次 pointermove
         // 的 coalesced 列表会把上一批的样本一起带回来 (eg 一批末尾 t=21，下
@@ -600,13 +612,18 @@ export class InputController {
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
         if (rec.role === "liquify") {
           this.liquify.extendStroke(dx, dy);
+        } else if (rec.role === "filterBrush") {
+          const pressure = effectivePressureFor(rec, ev);
+          this.filterBrush.extendStroke(dx, dy, pressure);
         } else {
           const pressure = effectivePressureFor(rec, ev);
           this.brush.extendStroke(dx, dy, pressure);
         }
       }
-      // 把 brush / liquify 累的 dirty bbox 送进 board，rAF render 时只 blit 这一片
-      const bbox = rec.role === "liquify" ? this.liquify.flushDirty() : this.brush.flushDirty();
+      // 把 brush / liquify / filter brush 累的 dirty bbox 送进 board
+      const bbox = rec.role === "liquify" ? this.liquify.flushDirty()
+                 : rec.role === "filterBrush" ? this.filterBrush.flushDirty()
+                 : this.brush.flushDirty();
       if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
       this.board.requestRender();
     } else if (rec.role === "lasso") {
@@ -705,6 +722,9 @@ export class InputController {
     } else if (rec.role === "liquify") {
       if (cancelled) this._abortLiquify();
       else this._endLiquify();
+    } else if (rec.role === "filterBrush") {
+      if (cancelled) this._abortFilterBrush();
+      else this._endFilterBrush();
     } else if (rec.role === "lasso") {
       if (cancelled) this._abortLasso();
       else this._endLasso(rec);
@@ -824,6 +844,68 @@ export class InputController {
     }
     this._liquifyLayerId = null;
     this._liquifyPreSnap = null;
+  }
+
+  // ---- Filter brush (v132) ----
+  // 一笔 = 1 个 "stroke" history entry（schema 同笔触）
+  // brushSettings 从 getBrushSettings() 拿（沿用当前画笔 size / hardness / spacing / opacity）
+  // filter + params 从 getFilterBrushState() 拿（app.js 在进入 filter brush 模式时 set）
+  _beginFilterBrush(rec) {
+    const fbState = this.getFilterBrushState();
+    const brushSettings = this.getBrushSettings();
+    if (!fbState || !fbState.Filter || !brushSettings || !this.doc.activeLayer) {
+      rec.role = null; return;
+    }
+    const layer = this.doc.activeLayer;
+    this._filterBrushLayerId = layer.id;
+    this._filterBrushPreSnap = layer.snapshot();
+    const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
+    const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
+    try {
+      this.filterBrush.beginStroke(layer, fbState.Filter, fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
+    } catch (e) {
+      console.warn("[filter brush] begin failed:", e);
+      this._filterBrushLayerId = null;
+      this._filterBrushPreSnap = null;
+      rec.role = null;
+      this.status?.(`filter brush 出错：${e.message || e}`);
+      return;
+    }
+    const bbox = this.filterBrush.flushDirty();
+    if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
+    this.board.requestRender();
+  }
+  _endFilterBrush() {
+    this.filterBrush.endStroke();
+    if (this._filterBrushLayerId == null) return;
+    const layer = this.doc.layers.find((l) => l.id === this._filterBrushLayerId);
+    const preSnap = this._filterBrushPreSnap;
+    this._filterBrushLayerId = null;
+    this._filterBrushPreSnap = null;
+    if (!layer || !preSnap) return;
+    const postSnap = layer.snapshot();
+    const entry = {
+      type: "stroke",
+      layerId: layer.id,
+      before: preSnap,
+      after: postSnap,
+      beforeBlob: null,
+      afterBlob: null,
+    };
+    if (this.history) this.history.push(entry);
+    this.board.requestRender();
+    compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
+    compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
+  }
+  _abortFilterBrush() {
+    this.filterBrush.cancelStroke();
+    if (this._filterBrushLayerId != null && this._filterBrushPreSnap) {
+      const layer = this.doc.layers.find((l) => l.id === this._filterBrushLayerId);
+      if (layer) layer.restoreFromSnapshot(this._filterBrushPreSnap);
+      this.board.invalidateAll();
+    }
+    this._filterBrushLayerId = null;
+    this._filterBrushPreSnap = null;
   }
 
   // ---- 套索 ----（v65 重构：lasso 只编辑选区 doc.selection；变换是显式按钮）
@@ -1232,6 +1314,7 @@ export class InputController {
     // 如果它正在执笔，把笔触状态也收尾掉（保留 history entry）
     if (p.role === "draw" || p.role === "erase") this._abortStroke();
     else if (p.role === "liquify") this._abortLiquify();
+    else if (p.role === "filterBrush") this._abortFilterBrush();
     else if (p.role === "lasso") this._abortLasso();
     try { this.canvas.releasePointerCapture?.(pid); } catch {}
     this.pointers.delete(pid);

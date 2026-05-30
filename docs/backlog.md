@@ -111,6 +111,63 @@
 
 ## P2（备选 / 有趣）
 
+### 锐化笔刷算法有 bug
+v132 实测：模糊（笔刷）流畅 OK，锐化（笔刷）有 bug 现在用不了。猜可能在 unsharp mask 的局部应用 — 单 stamp blur 取的是 stamp+bleed 范围，与全图 unsharp 行为不一致；或者 blend 公式参数 sign 错。
+- 复现：进锐化（笔刷）画一笔 → 看效果是否合理（应该是增锐 / 边缘强化）
+- 调查方向：bake 内 amt>0 path 的 unsharp k 系数（`k = amt/100 * 2`）以及 mask=null 时的边界 clamp
+
+### Artist filter 菜单 dropdown 合并（user 审美）
+现在每个 artist filter（mosaic / halftone / stained glass）一个 menu item。user：「不同的 artist filter 是一个 dropdown」= 想要 1 个 "艺术滤镜" menu item，下拉里选具体 effect。
+- 设计：调整菜单底部加 `<select id="artistFilterPicker">`，选项是所有 category="artist" 的 filter，选完 → 直接打开对应 filter
+- 收益：菜单更整洁，将来插件 10+ 个不挤
+- 关联：plugin 自动注册时，artist category 入这个 dropdown 而非新 menu item
+
+### Smudge / Liquify 迁移到 FilterBrushEngine
+v132 加了 FilterBrushEngine：薄 delegate + attachColorBrushBehavior helper（filters.js）。当前已覆盖 blur/sharpen brush 模式。
+
+剩下两个候选：
+
+- **Liquify**：现有 LiquifyEngine 跟 FilterBrushEngine 形状一致（begin/extend/end + flushDirty + isActive）。迁移路径：
+  - 新建 `src/plugins/liquify.js` 注册 LiquifyFilter，static `modes = ["brush"]`，没 region 模式
+  - `brushVariants` 列 5 个：推 / 收 / 胀 / 旋 / 还原（对应当前 mode）
+  - `beginBrushStroke / extendBrushStamp / endBrushStroke` 是直接调用现有 LiquifyEngine 实例的 thin wrapper
+  - 老 menu "液化" 入口删，走自动菜单渲染
+  - 老 role="liquify" + _beginLiquify 删，走 role="filterBrush"
+  - 风险：现有液化 UI（liquify panel：mode / size / strength sliders）要重排进 toolbar 或 brush settings
+  - 收益：液化变 plugin，新 mode 加进去不动核心代码
+
+- **Smudge**：本质就是 filter brush（每 stamp 读 layer 像素 + 沿笔触方向 drag/blend + 写回）
+  - smudge engine 至今没真实装（tool 一直 disabled）
+  - 实装时直接当 FilterPlugin 写：`src/plugins/smudge.js`，`modes = ["brush"]`
+  - 参数：strength（drag 量）、dryness（颜色新进度）
+  - top toolbar 工具栏的 smudge 按钮 = setTool("filterBrush") + 选 smudge variant
+
+两个迁移做完后，FilterBrushEngine = 唯一 brush filter 通路。色彩 brush（blur/sharpen/mosaic-brush/halftone-brush）走 attachColorBrushBehavior；位移 brush（liquify/smudge）走 filter 自家实现。
+
+### Artist filter 插件（马赛克 / 半调 / 教堂彩窗 / Stained glass …）
+v132 已经把 4 个 built-in 调色（HSB / Color Balance / Curves / Sharpen-Blur）转成 plugin 模型：每个一个 src/plugins/*.js，import 自注册到 registry。菜单由 listFilters() 动态渲染。架构留好下载插件的口子（registerFilter 暴露在 window.WebPaint，菜单 onFilterRegistered 自动更新）。
+
+未来 artist filter 候选：
+- **马赛克笔刷**：filter brush，比 native pixel 大的 pixelite 效果。提交作业过审用，使用频率蛮高
+- **半调（Halftone）**：报刊 / 漫画风格网点
+- **教堂彩窗（Stained glass）**：cell-based shape decomposition
+- 等
+
+走插件流程：
+- 默认**不**打包进 bundle
+- 「插件管理」UI 显示可下载列表（manifest 拉自固定 URL）
+- user 选 → fetch script → IDB 缓存 → 动态 import / new Function eval
+- 加载完插件调 `window.WebPaint.registerFilter(MyFilter)`
+- 菜单自动出现入口（已实装的 onFilterRegistered hook）
+
+**下拉子选项**（一个 filter 多个 variant，如 mosaic 不同 pixel size）= filter 自己 buildBody 里加 select，不是新 filter。同 menu-item 不占地方。
+
+**Plugin loader 还需要做**：
+- Manifest 格式
+- 下载 / 验证 / 缓存 / 卸载 UI
+- 安全：plugin 跑 main thread，eval 任意代码（信任 first-party manifest）。Sandbox 走 Web Worker 是更大的工作
+- 跟 [AI 本地 WASM 按需下载] 同模式可共用
+
 ### 导入图片 → auto transform → Ctrl+Z 行为很差
 v126 / v127 导入照片后自动 lift 进 transform。这时候按 Ctrl+Z：
 - 各种没有复位（transform float / selection / 新建的 layer / 入口的 setTool / 各种 panel suppress 状态）
@@ -356,6 +413,8 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 
 <!-- v123 删：transform 模式自由度切换 drag 异常 —— v117/v118/v122 修完，distort→free 已加 shearless 投影 (_projectMeshToRectangle)；user v123 确认"修好了" -->
 
+### 系统性的把工具，架构，undo stack理一遍，做一个工具架构？
+
 
 ### thumb 改 sidecar 文件 + 改善线稿缩图狗牙（v102 记）
 - user：「thumb 生成的时候在线稿场景狗牙很厉害」+「thumb 改成 sidecar，可以从云上批量拉，
@@ -425,6 +484,12 @@ jitter, scattering, h/s/v variation, texture, rotation/size variation
 
 ### Gradient Map
 类似ColorRamp
+
+### 马赛克滤镜
+不走filter brush，走选区adjust
+比native pixel大的pixelite效果。其实使用频率蛮高的（提交作业过审用）
+后期可以lift成一个下拉框选项有各种不同效果，比如半调，photoshop里面的教堂彩窗
+走插件。插件默认不下载，需要下载才能用。下载之后才能看见对应选项
 
 ## 用我这本本子的方式
 
