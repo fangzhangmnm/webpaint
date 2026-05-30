@@ -1,0 +1,73 @@
+# 部署 GitHub Pages：prod 分支 → /，main 分支 → /dev/
+#
+# 各分支自己已经 commit 好 dist/main-<hash>.mjs（人手跑 build.sh 后 commit）。
+# 本 workflow 只做"组合两分支 → upload"，**不重 build**，因此快、确定性高。
+#
+# 第一次 setup：手动建 prod 分支 → push（否则 checkout prod 会 fail）：
+#   git checkout -b prod && git push -u origin prod
+#
+# 论证 / sibling 抄法：docs/dev-prod-split.md
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main, prod]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout prod branch
+        uses: actions/checkout@v4
+        with:
+          ref: prod
+          path: prod-tree
+
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-tree
+
+      - name: Compose site (prod=/, main=/dev/)
+        run: |
+          mkdir -p site/dev
+          # 根级 PWA 元数据 + 图标 + SW + 运行时资源 (styles / brushes data)
+          # v122 r2: styles.css / default-brushes.json / vendor/ 从 src/ 挪到根
+          for f in index.html manifest.webmanifest service-worker.js styles.css default-brushes.json \
+                   icon.svg icon-192.png icon-512.png apple-touch-icon-180.png; do
+            cp -p prod-tree/$f site/        2>/dev/null || true
+            cp -p main-tree/$f site/dev/    2>/dev/null || true
+          done
+          # 运行时 UMD libs + bundle 产物。src/ 是构建输入不进 deploy（bundle 后里头啥都不需要）
+          cp -r prod-tree/vendor site/
+          cp -r prod-tree/dist   site/
+          cp -r main-tree/vendor site/dev/
+          cp -r main-tree/dist   site/dev/
+          # /dev/ 不要 SW（dev 应该改完即见，不走缓存层）
+          rm -f site/dev/service-worker.js
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

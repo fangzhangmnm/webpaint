@@ -1,138 +1,122 @@
-# dev/prod 分家规范（v121 起，sibling family 抄）
+# dev / prod 分家（v122 起，branch + GH Actions）
 
-> **目的**：daily 改代码 push 进来时不破坏正在用 PWA 的用户。iPad 不想搭
-> localhost 也能远程测最新代码。所有 sibling 项目（ScratchPad / AtlasMaker /
-> JustReadPapers / ...）走**同一个规范**，省心智迁移。
+> **这件事是可选的**。只有项目同时满足三条才值得搞：
+> 1. 有**外部用户**（不是只你自己用）
+> 2. 用户**有数据在 PWA 里**（画 / 笔记 / 配置）—— 一个 bug 会让人丢东西
+> 3. 别人会 **dependency 这个 URL**（导入你的 module、把链接发给朋友）
+>
+> WebPaint 三条都中。
+> JustReadPapers、Background Radio 之类的纯读项目可能根本不需要，单分支保持简单更好。
+> 抄前先评估，**别每个 sibling 都套**。
 
-## 一句话
+## 一句话总结
 
-`/` = production（**已 promote** 的稳定版本，所有真用户在这）
-`/dev/` = development（**daily 提交** 落地处，只有自己 / 测试人员在这）
+`main` 分支 = 工作区，daily push 这里
+`prod` 分支 = 上次 promote 时 main 的 fast-forward snapshot
 
-两套独立入口、独立 bundle、共享 `src/` 和 vendor。
+GH Actions 把两个分支组合成一个站，prod 在 `/`，main 在 `/dev/`。
 
-## 仓库结构
+iPad URL：
+- `https://<user>.github.io/<repo>/`     ← prod（真用户）
+- `https://<user>.github.io/<repo>/dev/` ← dev（你 + AI 测）
+
+## 源 repo 结构
 
 ```
 project-root/
-├─ index.html              ← prod 入口（默认用户访问 /）
-├─ dev/
-│  └─ index.html           ← dev 入口（自己测试访问 /dev/）
-├─ src/                    ← ES module 源码（dev 和 prod 共用）
-├─ dist/
-│  ├─ main-<hash>.mjs      ← prod bundle（content-hash 文件名）
-│  ├─ main-<hash>.mjs.map
-│  ├─ main-dev.mjs         ← dev bundle（固定名）
-│  └─ main-dev.mjs.map
-├─ service-worker.js       ← 只服务 prod。dev/ 路径下不注册 SW
-├─ scripts/build.sh        ← --dev / --prod 两种 build
-├─ vendor/esbuild/         ← vendored esbuild 二进制
-└─ src/vendor/             ← UMD 大库（msal / zip-js 等）
+├─ index.html               ← 引 ./dist/main-<hash>.mjs
+├─ styles.css               ← 运行时资源（HTML <link> 拉）
+├─ default-brushes.json     ← 运行时资源（fetch；SW precache 离线兜底）
+├─ vendor/                  ← 运行时 UMD lib（zip-js / msal 等）
+├─ icon.svg / icon-*.png
+├─ apple-touch-icon-*.png
+├─ manifest.webmanifest
+├─ service-worker.js
+├─ src/                     ← 纯 build input（.js 代码）。删了重 build 能完整复原
+├─ dist/main-<hash>.mjs     ← esbuild bundled，commit 进 git
+├─ scripts/build.sh
+├─ .github/workflows/deploy.yml
+├─ tools/esbuild/           ← gitignored 构建工具（build.sh 自动 curl）
+└─ docs/, journal/, README ...
 ```
+
+**分类原则**：
+- **根目录**：运行时资源（浏览器会 GET 的文件）+ 入口 + 构建产物 + PWA 元数据
+- **src/**：纯构建输入。bundle 后 `src/*.js` 运行时不被请求；`src/` 整个删了重 build 能复原
+- **vendor/**：运行时 UMD lib（commit 进 git，跟 styles 一样是运行时资源）
+- **tools/**：构建工具（gitignored，跨 OS 不通用）
+
+dev / prod 不在文件夹分，**在 git 分支分**。`dist/main-<hash>.mjs` 是源树唯一的 build artifact。
 
 ## 工作流
 
-### 日常开发（daily push）
+### Daily（dev 推送）
 
-1. 改 `src/` 里的代码
-2. `bash scripts/build.sh --dev` → 生成 `dist/main-dev.mjs`（不 minify，带 sourcemap）
-3. `git add . && git commit -m "..." && git push`
-4. iPad 浏览器开 `https://<your-host>/<project>/dev/`，刷新即见最新
-5. **prod 入口 `/` 完全不动**，真用户继续用上次 promote 的稳定版
+1. 编辑 `src/...` 或 `index.html`
+2. `bash scripts/build.sh` —— bundle src/ → dist/main-<hash>.mjs，sed 改 index.html 引新 hash
+3. `git add . && git commit && git push origin main`
+4. **GH Actions 自动跑** ~30 秒 → /dev/ 部署
+5. iPad 开 `<host>/<repo>/dev/`，刷新即新版
 
-dev 入口 HTML 里用 `import('../dist/main-dev.mjs?v=' + Date.now())` 每次刷新强制
-拿最新（避开浏览器 HTTP cache）。dev 路径下 app.js 检测到 `/dev/` 子串就**不注册
-SW** —— 没有 cache 层，刷新就生效。
+### Promote 到 prod（**push prod 必须问人**）
 
-### Promote 到 prod（"consent" 之后）
+**唯一**的死规则：**push 到 prod 必须人手动**，AI 不擅自做。
 
-通常意味着 dev 已经实测稳定。"每晚提一次"也是合理节奏。
+```bash
+git checkout prod
+git merge --ff-only main      # ff-only：拒非线性合并，保 prod 历史线性
+git push origin prod
+git checkout main             # 立刻切回
+```
 
-1. 在仓库根目录跑 `bash scripts/build.sh --prod`
-2. 脚本干这几件事：
-   - 用 esbuild 重 bundle（minify + sourcemap + content hash）
-   - 算 bundle 的 sha256 截 12 位作文件名后缀（如 `main-a3b9c0d12345.mjs`）
-   - 清掉 `dist/` 下老的 hashed bundle
-   - **sed 改 `index.html`** 里那行 `<script src="./dist/main-XXX.mjs">` 指向新 hash
-3. `git add . && git commit -m "promote vXXX → prod" && git push`
-4. 用户 PWA 一段时间内还吃旧 bundle（SW cache），SW 后台 revalidate 拿到
-   新 `index.html` 就发 toast 通知刷新
-5. 用户点刷新 → 加载新 `index.html` → 引用新 bundle hash → 浏览器拿新代码
+Actions 自动跑 → / 部署完。真用户下次刷新见新版。
 
-prod 不进 dev 不走过的代码。promote 是**显式动作**，不是 daily 自动。
+### 第一次 setup（一次性）
 
-### iPad 上同时两个入口
+1. `git checkout -b prod && git push -u origin prod`
+2. GitHub UI：Settings → Pages → Source 改 "GitHub Actions"
+3. （可选）Settings → Branches → 给 `prod` 加 protection rule
 
-- bookmark 1：`https://<host>/<project>/` → prod，PWA install 给真用户
-- bookmark 2：`https://<host>/<project>/dev/` → dev，**不要 install PWA**（防 SW
-  cache 污染），用 Safari 标签即可
+## AI 工作规则
 
-两个入口共享 `src/vendor/` 和 icon 资源（dev/index.html 用 `../` 引到根目录的
-manifest / icons / styles）。但**不共享** SW（dev 不注册）和 PWA install 状态
-（prod 才 install）。
+唯一规则：**push prod 前问人**。
 
-## 关键不变量
+不罗列死规则。AI 信任 + 一个 hard checkpoint。
 
-1. **`/` 入口的 bundle URL 改变** = 一次 prod release。**不要直接 push 改 `index.html`
-   引用而不 build**——会指向不存在的 bundle，prod 立刻崩。
-2. **`/dev/index.html`** 永远引 `main-dev.mjs`（固定名）。daily push 改的是
-   `dist/main-dev.mjs` 内容，**不改文件名**。
-3. **service-worker.js** 只服务 prod。dev 不注册 SW 是有意为之。
-4. **`src/` 是 bundle 输入**，不是直接被 HTML import 的。HTML 不要 `<script
-   type="module" src="./src/app.js">`——一旦这么写，就回退到了"30 个文件版本对齐"
-   的老坑。
-5. **vendor 大库**（msal / zip-js）放 `src/vendor/` 不入 bundle，通过 classic
-   `<script>` 或动态注入加载。两套入口都从根目录 `./src/vendor/` 共享。
+## 为啥不是别的方案
 
-## 抄给 sibling family 时的 checklist
+| 方案 | 否的原因 |
+|---|---|
+| 两 repo (webpaint + webpaint-dev) | GitHub account pile of shame；msal 重定向 URI 翻倍调 |
+| folder mirror (/ 和 /dev/ 同 repo 两份) | 文件夹 mirror 是 hack 不专业；AI 改错文件夹 risk 实在 |
+| 单分支 + feature flag | dev 烂代码仍影响真用户；AI 安全 = 0 |
+| 单分支 + git tag | tag 不解决"daily / promote"分离，只是 mark 历史 |
 
-- [ ] vendor esbuild 二进制到 `vendor/esbuild/esbuild`（用你 OS 的版本，**别入 git**）
-  ```bash
-  # Linux x64（WSL 也用这个）：
-  curl -sL https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.24.0.tgz \
-    | tar -xz -C /tmp \
-    && mkdir -p vendor/esbuild \
-    && mv /tmp/package/bin/esbuild vendor/esbuild/esbuild \
-    && chmod +x vendor/esbuild/esbuild
-  ```
-  其它 OS 改 `linux-x64` → `darwin-arm64` / `darwin-x64` / `win32-x64`。
-  npm 包名 `@esbuild/<os>-<arch>`。版本号自己挑（这套基于 0.24.0 测过）。
-- [ ] 抄 `scripts/build.sh`，改顶部的 `ENTRY` 指向项目入口模块（一般 `src/app.js`）
-- [ ] 抄 `service-worker.js`，改 `STATIC_PRECACHE` 列表里的 icons / styles / vendor 路径
-- [ ] 抄 `dev/index.html` 模板，改 title 和 asset 路径
-- [ ] 项目根 `index.html` 里入口改成 `<script type="module" src="./dist/main-XXX.mjs">`
-      （bump 之后 build.sh 会自动 sed 改）
-- [ ] 在 `src/version.js` 改成 ES module 形式 `export const PROJECT_VERSION`
-- [ ] CLAUDE.md 加一条提醒：「daily push 跑 build.sh --dev，promote prod 跑 --prod」
+行业对照：NumPy 是 tag + PyPI 外部存储；React 是 branch + npm tag；Vercel apps 是 branch + preview URL。**统一规律**：dev/prod 通过 **deploy target / branch ref** 区分，不通过源树文件夹。
 
-## 老 sibling 项目迁移路径
+我们这套（branch + Actions Pages 子路径）是这个规律在静态 PWA 下的合理化身。
 
-迁过来的成本主要在：
-- 把 vendor 模块的 `import.meta.url` 改成 `document.baseURI`（bundle 后 import.meta.url
-  会指 `dist/main-XXX.mjs`，相对路径就错位置了）
-- 删 `?v=VERSION` 形式的 import URL（bundle 内没有这种 import 了）
-- 删任何"SW importScripts version.js"的 hack
-- 把版本 SSoT 文件改成 ES module export
+## 抄给 sibling family checklist
 
-老 SW 老 index.html 全删，照本规范重写。
+如果判断需要分家：
 
-## 必踩的坑（写在前面）
+- [ ] 抄 `scripts/build.sh`，改顶部 `ENTRY` 指向项目入口（一般 `./src/app.js`）
+- [ ] 抄 `.github/workflows/deploy.yml`
+- [ ] `.gitignore` 加 `vendor/esbuild/`、`dist/main-tmp.mjs*`
+- [ ] index.html 入口改成 `<script type="module" src="./dist/main-<hash>.mjs"></script>`
+- [ ] `src/version.js` 是 ES module export
+- [ ] `git checkout -b prod && git push -u origin prod`
+- [ ] GitHub UI：Pages source 改 "GitHub Actions"
+- [ ] OAuth：/ 和 /dev/ 两条 redirect URI 都要存在
 
-1. **`.gitignore` 里如果有 `dist/`，立刻删掉**。早期 webapp 模板常加 `dist/`
-   （因为很多项目里 dist 是本地产物、CI 在线 build）。我们这套**dist 必须
-   commit 进 git**，因为 GitHub Pages 直接 serve repo 文件，你不 push 它就没有。
-   一旦遗忘，prod URL 引用的 `dist/main-XXX.mjs` 是 404，prod 立刻全崩。
-   v121 第一次切的时候我自己踩了一脚。**抄到 sibling family 时第一件事检查
-   `.gitignore`**。
-2. **不要把 `dist/main-tmp.mjs` 这种中间产物 commit**。build.sh 写中间文件再
-   mv 成最终 hashed 名；如果 mv 之前你手 ctrl-c 了，tmp 还在。`.gitignore` 排
-   它一下。
-3. **vendor/esbuild 二进制不入库**（10MB），跨 OS 也不通用。docs 写清楚
-   "新机器跑这个 curl 命令" 就行。
-4. **`dev/index.html` 里 `<base href="../">` 必须有，且在所有 `<link>` / `<script>`
-   之前**。不加的话，bundle 里 `new URL("./src/foo.js", document.baseURI)` 会
-   解到 `/<repo>/dev/src/foo.js`（dev/ 这层不存在 src/），404。v121 user 立刻撞
-   `MSAL load failed .../dev/src/vendor/msal/...`。
-   加 `<base href="../">` 后 dev/ 里所有相对路径回 `./...` 跟 prod 同写法，
-   bundle 内 `import.meta.url` / `document.baseURI` 都解到项目根。
-   **绝对位置必须紧贴 `<head>`**：base 只对它后面出现的 URL 生效。
+老 sibling 项目（有 dist/ 在 git 但路径不一致的）：
+- 删 SW 里 `manifest.json` hash 校验、`importScripts version.js`、`?v=` import 重写
+- 删任何"为 PWA 缓存绕路"的奇技
+- 改 vendor lib 加载用 `document.baseURI` 而非 `import.meta.url`（bundle 后才不错位）
+
+## 必踩坑
+
+1. **prod 分支不存在就推 main**：Actions 第一步 checkout prod fail。先建 prod 分支再 push。
+2. **index.html 里 dist 路径手改了 / sed 找不到**：build.sh 用 sed 替 `main-XXX.mjs`，如果你（或 AI）跑过 build 然后 commit 了 patched 版本，下次跑 sed 还是能找到（它匹配任何 12 位 hex hash），但万一你手改成完全不同的写法，sed 就静默失败。**别手改那一行**。
+3. **Actions concurrency**：两个分支同时 push 会排队跑 Actions（pages 不能并发部署）。可接受。
+4. **vendor/esbuild 二进制不入 git**（10MB + 跨 OS 不通用）。build.sh 自动 curl 安装。新机器或 CI 第一次跑 build.sh 多 5-10 秒下载，之后 cached。

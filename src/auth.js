@@ -15,10 +15,10 @@ export function isAuthConfigured() {
   return typeof CLIENT_ID === "string" && CLIENT_ID.length > 0 && !CLIENT_ID.startsWith("REPLACE_ME");
 }
 
-// v121: 改用 document.baseURI 而非 import.meta.url —— bundle 后 import.meta.url
-// 是 dist/main-<hash>.mjs，那相对路径就指到 dist/vendor/... 错位置。
-// 用 baseURI = HTML 文件位置，无论 bundle 与否都从 site root 解。
-const MSAL_URL = new URL("./src/vendor/msal/msal-browser.min.js", document.baseURI).href;
+// v121: 用 document.baseURI 而非 import.meta.url —— bundle 后 import.meta.url
+// 是 dist/main-<hash>.mjs，相对路径会错位置。baseURI = HTML 文件位置，从 site root 解。
+// v122 r2: vendor/ 从 src/vendor/ 挪到根 vendor/（"运行时资源在根，src/ 只剩 build input"）
+const MSAL_URL = new URL("./vendor/msal/msal-browser.min.js", document.baseURI).href;
 
 let msalLoadPromise = null;
 let pca = null;

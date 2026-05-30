@@ -17,6 +17,7 @@ import { BrushSettings } from "./brush.js";
 import {
   makeDefaultRack, findBrush, getActiveBrush, brushesByTool,
   newBrushId, brushToJSON, brushFromJSON, DEFAULT_FOLDER, mergeMissingDefaults, migrateBrush,
+  defaultsPromise,
 } from "./brushes.js";
 import { PANELS, registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
 import { getMeta, setMeta } from "./storage.js";
@@ -280,7 +281,7 @@ function getRackToolKey(tool) {
 
 async function loadBrushRack() {
   try {
-    const stored = await getMeta(RACK_META_KEY);
+    let stored = await getMeta(RACK_META_KEY);
     if (stored && Array.isArray(stored.brushes) && stored.brushes.length > 0) {
       // 补缺 default brush（解 stale default 问题）；merge 只加缺的，不覆盖
       // v98 migration：老 schema brushes 转新（sizeMin/flowMin → coeff；
@@ -291,8 +292,10 @@ async function loadBrushRack() {
         migrateBrush(b);
         if (JSON.stringify(b) !== before) migrated = true;
       }
-      const merged = mergeMissingDefaults(stored);
-      if (migrated || merged) {
+      // v122 r2: atomic swap，不 mutate
+      const newRack = mergeMissingDefaults(stored);
+      if (newRack) stored = newRack;
+      if (migrated || newRack) {
         try { await setMeta(RACK_META_KEY, stored); } catch (_) {}
       }
       return stored;
@@ -939,6 +942,23 @@ loadBrushRack().then((rack) => {
   applyToolState(state.tool);
   updateSidebarBrushIndicator();
   setTimeout(() => { checkBrushRackCloud().catch(() => {}); }, 2000);
+  // v122 r2: default-brushes.json 是 async fetch；先用现有 rack boot（可能是 IDB / emergency
+  // 兜底空），fetch 回来后再 retroactively merge 缺失的 default brushes，写 IDB + 刷 UI
+  defaultsPromise().then(() => {
+    if (!_brushRack) return;
+    const newRack = mergeMissingDefaults(_brushRack);
+    if (!newRack) return;
+    _brushRack = newRack;           // atomic swap
+    persistBrushRack().catch(() => {});
+    for (const t of Object.keys(state.toolStates)) {
+      if (state.toolStates[t].activeBrushId == null) {
+        const init = defaultToolStateFor(t);
+        Object.assign(state.toolStates[t], init);
+      }
+    }
+    applyToolState(state.tool);
+    updateSidebarBrushIndicator();
+  });
 }).catch((e) => {
   // **关键**：IDB 在 iPad Safari 私密浏览模式下会 throw。loadBrushRack 内部已有
   // try/catch fallback；这条 catch 接住极端情况（boot 期 promise 链外 throw）。
@@ -4244,7 +4264,7 @@ async function pushBrushRackIfSignedIn() {
           const pulled = await pullBrushRack();
           if (pulled?.rack) {
             _brushRack = pulled.rack;
-            mergeMissingDefaults(_brushRack);   // 防云端空 rack 把本地清空
+            { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }   // 防云端空 rack 把本地清空 (v122 r2 atomic swap)
             await persistBrushRack();
             applyToolState(state.tool);
             setStatus("已拉云端笔架");

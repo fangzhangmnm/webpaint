@@ -6,7 +6,7 @@
 
 function Z() {
   if (typeof window === "undefined" || !window.zip) {
-    throw new Error("zip.js 未加载（应在 app.js 之前以 classic <script> 引入 vendor/zip-js/zip-full.min.js）");
+    throw new Error("zip.js 未加载（应在 app.js 之前以 classic <script> 引入 ./vendor/zip-js/zip-full.min.js）");
   }
   return window.zip;
 }

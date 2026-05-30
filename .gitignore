@@ -16,11 +16,14 @@ node_modules/
 .cache/
 debug/
 
-# v121: build 中间产物（成功的 main-tmp 会 mv 到 main-<hash>；崩了的留着 debug）
+# v122：dist/main-<hash>.mjs 是 build 产物**入** git（跟 v121 之前一样 naive 结构，
+# 源树就只多 dist/ 这一个新东西）。GH Actions 的 deploy.yml 只是把 prod + main 两
+# 个分支的现成 dist 组合上 Pages，不重 build。
+#
+# v122 r2: tools/esbuild 跨 OS 不通用且 10MB；build.sh 没找到会自动 curl 一份。
+# 重命名自 vendor/esbuild：tools/ = 构建工具（gitignored）；vendor/ = 运行时 lib（commit 进 git）。
+tools/esbuild/
+
+# v122 build 中间产物
 dist/main-tmp.mjs
 dist/main-tmp.mjs.map
-
-# v121: esbuild 二进制 ~10MB，不入库省 repo 体积。
-# 新机器跑：curl -sL https://registry.npmjs.org/@esbuild/linux-x64/-/linux-x64-0.24.0.tgz | tar -xz -C /tmp && mkdir -p vendor/esbuild && mv /tmp/package/bin/esbuild vendor/esbuild/esbuild && chmod +x vendor/esbuild/esbuild
-# 详 docs/dev-prod-split.md "sibling family checklist"。换 OS 改 linux-x64 → darwin-arm64 / win32-x64。
-vendor/esbuild/

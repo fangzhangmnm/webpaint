@@ -49,9 +49,9 @@
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon-180.png" />
-    <link rel="stylesheet" href="./src/styles.css" />
+    <link rel="stylesheet" href="./styles.css" />
     <!-- zip.js UMD bundle：自挂 window.zip。必须在 module bundle 之前。 -->
-    <script src="./src/vendor/zip-js/zip-full.min.js"></script>
+    <script src="./vendor/zip-js/zip-full.min.js"></script>
   </head>
   <body>
     <canvas id="board" class="board" aria-label="paint canvas"></canvas>
@@ -794,6 +794,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh --prod 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/main-5abfb7ced99e.mjs"></script>
+    <script type="module" src="./dist/main-f4f68a8ec45c.mjs"></script>
   </body>
 </html>

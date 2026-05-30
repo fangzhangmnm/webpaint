@@ -17,23 +17,30 @@
 
 **不能"等用户测过再 commit"** — 因为非 PC 设备要先有 commit 才能测。
 
-正确流程（v121 起：bundle + dev/prod 分家）：
-1. 写完代码（src/ 里）
-2. `bash scripts/build.sh --dev` 重 bundle 成 `dist/main-dev.mjs`
-3. **commit + push**（即使你觉得逻辑还没复测）
-4. 用户 iPad 开 `https://<host>/<project>/dev/`，刷新即见
-5. 不对再迭代
-6. 用户**显式 consent** 后（比如每晚一次），跑 `bash scripts/build.sh --prod` →
-   生成 hashed bundle、sed 改 `index.html`、commit + push → prod 入口 `/` 升级
+正确流程（v122 起：bundle + branch + Actions Pages）：
+1. 写完代码（src/ 里），保持在 main 分支
+2. `bash scripts/build.sh` —— bundle src → dist/main-<hash>.mjs，sed 改 index.html 引新 hash
+3. `git add . && git commit && git push origin main`
+4. **GH Actions 自动跑** ~30 秒 → /dev/ 部署完成
+5. iPad 开 `https://<host>/<project>/dev/`，刷新即见
+6. 不对再迭代
+7. 用户**显式 consent** 后（人手操作）：
+   ```bash
+   git checkout prod
+   git merge --ff-only main
+   git push origin prod          # ← 这一步必须问人，AI 不擅自做
+   git checkout main
+   ```
+   Actions 自动跑 → / 部署。真用户下次刷新见新版。
 
-**dev 改了 prod 不动** —— 真用户继续用 prod 的稳定版，不会被你 daily 改动伤到画。
-规范见 [docs/dev-prod-split.md](dev-prod-split.md)、bundle 原理见 [docs/why-content-hash-bundle.md](why-content-hash-bundle.md)。
+**dev 改了 prod 不动**——真用户继续用上一次 promote 的稳定版，不会被 daily 改动伤到画。
+规范见 [docs/dev-prod-split.md](dev-prod-split.md)。bundle 原理见 [docs/why-content-hash-bundle.md](why-content-hash-bundle.md)。
 
 commit message 里仍要**坦白没在浏览器复测**（[[feedback-no-browser-self-claim]]）。
 
 ## PWA 更新检测细节（prod 入口）
 
-prod URL 下 SW 还跑。push 之后 iPad 上不会自动刷 —— 看 [[pwa-update-detection]]
+prod URL 下 SW 跑。push 之后 iPad 上不会自动刷 —— 看 [[pwa-update-detection]]
 （4 路检测：`registration.waiting` / `updatefound`+`statechange='installed'` /
 `asset-updated` postMessage / `visibilitychange` poke）。
 

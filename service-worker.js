@@ -17,8 +17,9 @@ const STATIC_PRECACHE = [
   "./icon-192.png",
   "./icon-512.png",
   "./apple-touch-icon-180.png",
-  "./src/styles.css",
-  "./src/vendor/zip-js/zip-full.min.js",
+  "./styles.css",
+  "./default-brushes.json",   // v122 r2: 改 runtime fetch，必须 precache 保证离线
+  "./vendor/zip-js/zip-full.min.js",
   // msal / 其它惰性加载的库 SW 不预缓存。用到才下，那时候 fetch 会自动 cache。
 ];
 

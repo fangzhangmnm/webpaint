@@ -70,13 +70,37 @@ function makeBrush({
 }
 
 // 默认笔架——每工具一组开箱即用 preset。
-// v107: 数据搬到 src/default-brushes.json（user：「default 笔刷放 json 吧」）。
-// ES module JSON import 同步加载（iPad Safari 17.2+ / Chrome 123+ 支持），no async loader needed。
-// SW 把 .json 也 precache。
+// v122 r2：default-brushes.json 从 src/ 挪到根，改 runtime fetch（user：「async fetch，
+// 什么时候拿到什么时候填，之前填空」）。SW precache 离线兜底；fetch 失败也不卡 boot。
 // **stable ID**：以 "default-{tool}-{slug}" 形式固定。bump 时新 default 通过 id 比对
 // merge 到用户 rack（不覆盖用户改过的 brush，但缺失的会补上）。
 // **shapes 不在 rack 里**——shapes 工具复用 brush rack（getRackToolKey）。
-import DEFAULTS_SPEC from "./default-brushes.json" with { type: "json" };
+let _defaultsSpec = [];      // fetch 回来前是空，回来后就是 default-brushes.json 内容
+const _defaultsPromise = (async () => {
+  try {
+    const url = new URL("./default-brushes.json", document.baseURI).href;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const json = await r.json();
+    if (!Array.isArray(json)) throw new Error("default-brushes.json 不是数组");
+    _defaultsSpec = json;
+  } catch (e) {
+    console.warn("[brushes] default-brushes.json 加载失败 → rack 走空兜底（emergency brush 顶上）。IDB 有的话照常用。", e);
+    _defaultsSpec = [];
+  }
+  return _defaultsSpec;
+})();
+// 给 app.js 拿到这个 promise → boot 后 .then() retroactively merge
+export function defaultsPromise() { return _defaultsPromise; }
+export function getDefaultsSpec() { return _defaultsSpec; }
+
+// fetch 失败 + IDB 也空时的兜底：至少一个能画的笔，UI 不挂。
+function _emergencyBrush() {
+  return makeBrush({
+    id: "emergency-brush", name: "默认笔", tool: "brush",
+    size: 12, hardness: 0.8, sizeCoeff: 0.6, opaCoeff: 0.6,
+  });
+}
 
 // IDB 老 schema 兼容（v82~v98 → v99）：
 // - 老 spacing { kind, value } / size.pressureCurve / flow.pressureCurve / bufferMode / airbrush / opacity / flow.base / flow.min / size.min
@@ -141,7 +165,8 @@ function specToBrush(spec) {
 }
 
 export function makeDefaultRack() {
-  const brushes = DEFAULTS_SPEC.map(specToBrush);
+  let brushes = _defaultsSpec.map(specToBrush);
+  if (brushes.length === 0) brushes = [_emergencyBrush()];
   const activeByTool = {};
   for (const b of brushes) {
     if (!activeByTool[b.tool]) activeByTool[b.tool] = b.id;
@@ -149,26 +174,32 @@ export function makeDefaultRack() {
   return { version: RACK_VERSION, brushes, activeByTool };
 }
 
-// 给 IDB 已有 rack 补缺：遍历 DEFAULTS_SPEC，缺哪个 ID 就 push 一份。
-// 返回 true = 改动了，需要持久化。
+// 给 IDB 已有 rack 补缺：遍历 _defaultsSpec，缺哪个 ID 就 push 一份。
+// v122 r2 改原子语义（user：「不是 merge，而是直接改数组 ref，这样就 atomic」）：
+//   - 不 mutate 输入 rack
+//   - 算完整新 rack（含原 brushes + 缺失 defaults），一次性返回
+//   - 返回 null 表示不需要改 → caller 不 swap，省一次 UI 刷
+//   - 返回新 rack 时 caller 做 `_brushRack = newRack` 单写 = atomic
+// 注：_defaultsSpec 还空时（fetch 没回），返回 null = no-op；fetch 回来后 app.js 再调一次。
 export function mergeMissingDefaults(rack) {
-  if (!rack || !Array.isArray(rack.brushes)) return false;
+  if (!rack || !Array.isArray(rack.brushes)) return null;
   const ids = new Set(rack.brushes.map((b) => b.id));
-  let changed = false;
-  for (const spec of DEFAULTS_SPEC) {
-    if (!ids.has(spec.id)) {
-      rack.brushes.push(specToBrush(spec));
-      changed = true;
+  const missing = _defaultsSpec.filter((s) => !ids.has(s.id));
+  const oldActive = rack.activeByTool || {};
+  const newActive = { ...oldActive };
+  let activeChanged = !rack.activeByTool;
+  for (const spec of _defaultsSpec) {
+    if (!newActive[spec.tool]) {
+      newActive[spec.tool] = spec.id;
+      activeChanged = true;
     }
   }
-  if (!rack.activeByTool) { rack.activeByTool = {}; changed = true; }
-  for (const spec of DEFAULTS_SPEC) {
-    if (!rack.activeByTool[spec.tool]) {
-      rack.activeByTool[spec.tool] = spec.id;
-      changed = true;
-    }
-  }
-  return changed;
+  if (missing.length === 0 && !activeChanged) return null;
+  return {
+    ...rack,
+    brushes: [...rack.brushes, ...missing.map(specToBrush)],
+    activeByTool: newActive,
+  };
 }
 
 // 序列化
