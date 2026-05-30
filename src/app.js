@@ -2567,7 +2567,7 @@ async function saveNow(opts = {}) {
   try {
     await saveSession(doc, _activeSessionName, {
       referenceImage: referenceWindow.getPersistBlob(),
-      webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+      webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
     });
     _docDirty = false;
     _docLastSavedAt = Date.now();
@@ -2666,6 +2666,14 @@ function adoptLoadedDoc(loaded, sessionName) {
   }
   // v125 per-doc checkerboard：按文件值刷新，缺省回 false
   applyCheckerboard(!!loaded._webpaintState?.checkerboard);
+  // v126 (user：「画布的旋转和位置缩放跟文件」)
+  //   per-doc viewport：有就 restore，没有的话 caller 会 fitToScreen
+  const vp = loaded._webpaintState?.viewport;
+  if (vp && typeof vp.scale === "number") {
+    Object.assign(board.viewport, vp);
+    board.invalidateAll();
+    board.requestRender();
+  }
 }
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty
 window.addEventListener("wp:histchange", () => {
@@ -2693,7 +2701,7 @@ async function saveAndPush() {
     try {
       const ora = await encodeDocToOra(doc, {
         referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
       });
       await pushSession(_activeSessionName, ora);
       setStatus(`已同步到云端：${_activeSessionName}`);
@@ -2793,7 +2801,7 @@ async function renameCurrentSession({ suggested, reason } = {}) {
     try {
       await saveSession(doc, trimmed, {
         referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
       });
       if (oldName && oldName !== trimmed) {
         try { await removeSession(oldName); } catch {}
@@ -2810,7 +2818,7 @@ async function renameCurrentSession({ suggested, reason } = {}) {
         try {
           const ora = await encodeDocToOra(doc, {
             referenceImage: referenceWindow.getPersistBlob(),
-            webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+            webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
           });
           await pushSession(trimmed, ora);
           if (oldName && oldName !== trimmed) {
@@ -3458,7 +3466,7 @@ els.menuSaveAs.addEventListener("click", async () => {
     try {
       await saveSession(doc, trimmed, {
         referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
       });
       _activeSessionName = trimmed;
       setCurrentSessionName(trimmed);
@@ -3469,7 +3477,7 @@ els.menuSaveAs.addEventListener("click", async () => {
         try {
           const ora = await encodeDocToOra(doc, {
             referenceImage: referenceWindow.getPersistBlob(),
-            webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+            webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
           });
           await pushSession(trimmed, ora);
           setStatus(`已另存为（含云端）：${trimmed}`);
@@ -3567,14 +3575,10 @@ els.menuImportImage.addEventListener("click", async () => {
   }
 });
 
-// 图层窗口里也加快捷导入照片（user：「图层窗口里应该有导入照片的选项」）
-const _layerImportBtn = document.getElementById("layerImportPhotoBtn");
-if (_layerImportBtn) {
-  _layerImportBtn.addEventListener("click", () => {
-    els.oraFileInput.value = "";
-    els.oraFileInput.click();
-  });
-}
+// v126 (user：「图层窗口的导入照片还是不灵」)
+//   原本这里注册了第二个 click handler 重复触发 picker.click()，
+//   双 click() 在 iPad Safari 上 picker 干脆不开。删掉；layerImportPhotoBtn
+//   已在 line ~1788 通过 _openImagePicker 接管（含 _addImportAsNewDoc 复位）。
 
 // 🔧 配置 popup（点开 / 点别处关）。setMenuOpen 不变，popup 嵌在 menu-item-row 里
 function _openMenuConfigPopup(wrenchBtn, html, onApply) {

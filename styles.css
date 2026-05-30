@@ -1302,6 +1302,14 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   border: none;
   border-radius: 0;
 }
+/* v126 (user：「裁剪的 Gizmos 可点击区域太窄」)：
+   ::after 拉一圈透明 hit-area 让指尖好按。不影响视觉 L / 短线 */
+.crop-handle::after {
+  content: "";
+  position: absolute;
+  inset: -16px;
+  pointer-events: auto;
+}
 .crop-handle[data-handle="nw"],
 .crop-handle[data-handle="ne"],
 .crop-handle[data-handle="se"],
