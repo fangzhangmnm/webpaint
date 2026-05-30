@@ -266,7 +266,8 @@ export class InputController {
   // -- pen tip hover preview（iPad Pro M2+ 有 pen hover；mouse 模式也利用）
   _updateCursorPreview(e) {
     const tool = this.getTool();
-    if (tool === "hand") {
+    // v132 (user：「picker 时 windows 鼠标圆没隐藏」) hand / picker / lasso 都不显
+    if (tool === "hand" || tool === "picker" || tool === "lasso") {
       this.board.setCursor(null);
       return;
     }

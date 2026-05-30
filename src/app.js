@@ -1164,11 +1164,23 @@ els.sizeSlider.dataset.maxPx = "200";
 els.sizeSlider.max = String(_sliderMaxPos(200));
 setSize(state.brush.size, { silent: true });        // boot 不弹 popup
 setOpacity(state.brush.opacity, { silent: true });
-// 键盘 [ ] 调粗
+// 键盘 [ ] 调粗（v132: tool-aware dispatch）
+//   - 液化（legacy 路径已废，state.tool 不会 "liquify"，留 fallback）
+//   - 笔刷 / 橡皮 / 涂抹 / filter brush → state.brush.size，max 用 sizeSlider.dataset.maxPx
+//   - 其他模式（lasso / picker / hand）→ no-op
 window.addEventListener("wp:adjsize", (e) => {
   const delta = e.detail;
-  setSize(Math.max(1, Math.min(200, state.brush.size + delta)));
-  setStatus(`笔粗 ${state.brush.size}px`);
+  const t = state.tool;
+  if (t === "brush" || t === "eraser" || t === "smudge" || t === "filterBrush") {
+    const maxPx = parseInt(els.sizeSlider?.dataset.maxPx || "200", 10);
+    const next = Math.max(1, Math.min(maxPx, state.brush.size + delta));
+    setSize(next);
+    // v132 (user：「[] 时 windows 鼠标圆 size 没动」) 不等下次 pointermove，立刻刷新 hover cursor
+    if (board._cursor) {
+      board.setCursor({ ...board._cursor, size: next });
+    }
+  }
+  // 其他工具忽略（液化已 migrate 进 filterBrush）
 });
 
 // ---- 汉堡菜单 ----
@@ -1687,6 +1699,9 @@ function renderLayersPanel() {
   }
   // v123 footer 只剩 add（del / up / down 进 per-row "⋯" 菜单）
   els.layerAddBtn.disabled = doc.layers.length >= max;
+  // v132 global 删除按钮 disable + 灰（user：「删除图层不可用时应该灰色」）
+  const delBtn = document.getElementById("layerDeleteBtn");
+  if (delBtn) delBtn.disabled = doc.layers.length <= 1;
 }
 
 // 各层操作都走 history.push → handler 同时 apply 和 push。这样未来 undo / redo
@@ -1728,6 +1743,22 @@ function _deleteLayer(L) {
   history.push({ type: "removeLayer", index, layerSpec });
   compressPixelSnap(layerSpec, (blob) => { layerSpec.blob = blob; });
   _afterDocChange();
+}
+// v132 (user：「··· 菜单加 clear layer」)
+//   清空当前图层像素：保留图层 + 名字 + opacity / mode，bbox 归零
+function _clearLayerPixels(L) {
+  if (!L) return;
+  if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("图层已经是空的"); return; }
+  const before = L.snapshot();
+  // restoreFromSnapshot 用空 spec 把 layer 像素清掉，bbox 归零
+  L.restoreFromSnapshot({ bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null, bitmap: null });
+  const after = L.snapshot();
+  history.push({ type: "stroke", layerId: L.id, before, after, beforeBlob: null, afterBlob: null });
+  compressPixelSnap(before, (blob) => { before.blob = blob; });
+  compressPixelSnap(after,  (blob) => { after.blob  = blob; });
+  _afterDocChange();
+  board.invalidateAll();
+  setStatus(`已清空：${L.name}`);
 }
 // v124b 向下合并 (user 急需，mode-aware)：
 // 用 active 的 mode + opacity 把 active 合到下方层；删 active。
@@ -1804,6 +1835,10 @@ function _moveLayerDelta(L, delta) {
 // v124b user 改主意：拆回 2 按钮。"+" 直加空层；相框 直开文件选
 els.layerAddBtn.addEventListener("click", _addEmptyLayer);
 document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);
+// v132 (user：「global 加删除当前图层」) 删当前 active layer
+document.getElementById("layerDeleteBtn")?.addEventListener("click", () => {
+  if (doc.activeLayer) _deleteLayer(doc.activeLayer);
+});
 
 // In-app 通用 sheet：替代 alert / prompt / confirm（详见 feedback-no-system-dialog）。
 // 返回 Promise，resolve 输入值 / true / null（取消）。
@@ -2097,6 +2132,8 @@ function openLayerToolsMenu(L, anchorEl, nameEl) {
   const canDown = idx > 0;
   const canDel = doc.layers.length > 1;
   const canMergeDown = idx > 0 && !L.clippingMask && !doc.layers[idx - 1].clippingMask;
+  // v132 (user：「··· 菜单加 clear layer 在删除上面，删除不标红」)
+  const hasPx = L.bboxW > 0 && L.bboxH > 0;
   popup.innerHTML = `
     <button class="menu-item" data-act="rename" type="button">
       <span class="menu-item-label">重命名…</span>
@@ -2109,6 +2146,9 @@ function openLayerToolsMenu(L, anchorEl, nameEl) {
     </button>
     <button class="menu-item" data-act="mergeDown" type="button"${canMergeDown ? "" : " disabled"}>
       <span class="menu-item-label">向下合并</span>
+    </button>
+    <button class="menu-item" data-act="clear" type="button"${hasPx ? "" : " disabled"}>
+      <span class="menu-item-label">清空内容</span>
     </button>
     <button class="menu-item menu-danger" data-act="del" type="button"${canDel ? "" : " disabled"}>
       <span class="menu-item-label">删除</span>
@@ -2141,6 +2181,7 @@ function openLayerToolsMenu(L, anchorEl, nameEl) {
     else if (act === "up")          _moveLayerDelta(L, 1);
     else if (act === "down")        _moveLayerDelta(L, -1);
     else if (act === "mergeDown")   _mergeDownLayer(L);
+    else if (act === "clear")       _clearLayerPixels(L);
     else if (act === "del")         _deleteLayer(L);
   });
 }
@@ -3227,7 +3268,9 @@ function _initFilterSurrogate(L) {
   return { sur, surCtx, srcImg, maskData };
 }
 
-function _openFilterPanel(filterId) {
+// v132 opts.picker = [Filter, ...]：在 panel body 顶部插一个 dropdown 切其他 filter
+//   切换 = cancel 当前 → reopen 新 filter（同一 picker）。用于"艺术滤镜"组
+function _openFilterPanel(filterId, opts = {}) {
   const Filter = getFilter(filterId);
   if (!Filter) { setStatus(`未知 filter：${filterId}`, true); return; }
   const L = doc.activeLayer;
@@ -3239,9 +3282,36 @@ function _openFilterPanel(filterId) {
     Filter, active: L, params: Filter.defaults(),
     beforeSnap: L.snapshot(), sur, surCtx, srcImg, maskData,
     _rafId: 0,
+    picker: opts.picker || null,
   };
-  if (els.adjustPanelTitle) els.adjustPanelTitle.textContent = Filter.title;
+  if (els.adjustPanelTitle) els.adjustPanelTitle.textContent = opts.picker ? "艺术滤镜" : Filter.title;
   els.adjustParamsBody.innerHTML = "";
+  // picker 模式：插 dropdown
+  if (opts.picker) {
+    const wrap = document.createElement("label");
+    wrap.className = "brush-slider-row";
+    wrap.innerHTML = `<span class="brush-slider-label">选滤镜</span>`;
+    const sel = document.createElement("select");
+    sel.style.flex = "1";
+    sel.style.font = "inherit";
+    sel.style.padding = "2px 4px";
+    for (const F of opts.picker) {
+      const opt = document.createElement("option");
+      opt.value = F.id;
+      opt.textContent = F.title;
+      if (F.id === filterId) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener("change", () => {
+      const newId = sel.value;
+      if (newId === filterId) return;
+      _closeFilterPanel(false);
+      _openFilterPanel(newId, { picker: opts.picker });
+    });
+    wrap.appendChild(sel);
+    wrap.appendChild(document.createElement("span"));
+    els.adjustParamsBody.appendChild(wrap);
+  }
   Filter.buildBody(els.adjustParamsBody, _adjustState, _onFilterChange);
   els.adjustPanel.classList.remove("hidden");
   const w = els.adjustPanel.offsetWidth || 320;
@@ -3294,67 +3364,75 @@ function _closeFilterPanel(applied) {
   board.invalidateAll();
 }
 
-// v132 菜单动态渲染（plugin-aware）：listFilters() 按 category 渲染按钮，
-//   插件 registerFilter 后 onFilterRegistered hook 触发重渲。
-//   index.html 里 #adjustFilterList 是空容器，下面填。
-//   Filter 同时支持 region + brush 模式时：
-//     - 默认 1 个入口走 region
-//     - 如果 Filter.brushVariants 有，渲染额外的 brush variant 入口
+// v132 菜单 3 组渲染（user：「3 组 hr 分组：调色 / 液化锐化模糊 / 艺术滤镜」）
+//   - 调色 = adjustment category + 有 region 模式（HSV / ColorBalance / Curves）
+//             左侧 prefix = 旧 adjust SVG（3 条滑块 + 圆点）
+//   - 笔刷类 = 液化 + 所有有 brush 模式的 filter
+//             左侧 prefix = 笔刷 SVG（跟工具栏一致）
+//   - 艺术滤镜 = category="artist"，1 个 picker item（点开 panel 里有 dropdown 切）
+//   - 组之间 hr 分隔，不写类别 label
+const ADJUST_PREFIX_SVG = `<svg class="menu-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
+  <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"/>
+  <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/>
+  <circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"/>
+</svg>`;
+const BRUSH_PREFIX_SVG = `<svg class="menu-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="M14 4l6 6-9 9H5v-6l9-9z"/><path d="M13 5l6 6"/>
+</svg>`;
 function _renderFilterMenu() {
   const container = document.getElementById("adjustFilterList");
   if (!container) return;
   container.innerHTML = "";
-  const byCat = new Map();
-  for (const F of listFilters()) {
-    const cat = F.category || "adjustment";
-    if (!byCat.has(cat)) byCat.set(cat, []);
-    byCat.get(cat).push(F);
+  const all = listFilters();
+  const adjustmentRegion = all.filter((F) => (F.category || "adjustment") === "adjustment" && F.modes.includes("region"));
+  const brushFilters     = all.filter((F) => F.modes.includes("brush"));
+  const artistFilters    = all.filter((F) => F.category === "artist");
+  const addHr = () => {
+    const hr = document.createElement("hr"); hr.className = "menu-sep"; container.appendChild(hr);
+  };
+  const addItem = (label, prefixSvg, onClick) => {
+    const btn = document.createElement("button");
+    btn.className = "menu-item menu-item-with-icon";
+    btn.type = "button";
+    btn.setAttribute("role", "menuitem");
+    btn.innerHTML = `${prefixSvg}<span class="menu-item-label">${label}</span>`;
+    btn.addEventListener("click", onClick);
+    container.appendChild(btn);
+    return btn;
+  };
+  let groupOpened = false;
+  // 1) 调色
+  for (const F of adjustmentRegion) {
+    addItem(F.title, ADJUST_PREFIX_SVG, () => {
+      setAdjustOpen(false);
+      _openFilterPanel(F.id);
+    });
+    groupOpened = true;
   }
-  const CAT_LABEL = { adjustment: "调整", artist: "艺术" };
-  let first = true;
-  for (const [cat, filters] of byCat) {
-    if (!first) {
-      const hr = document.createElement("hr");
-      hr.className = "menu-sep";
-      container.appendChild(hr);
-    }
-    first = false;
-    if (byCat.size > 1) {
-      const lbl = document.createElement("div");
-      lbl.className = "menu-section-label";
-      lbl.textContent = CAT_LABEL[cat] || cat;
-      container.appendChild(lbl);
-    }
-    for (const F of filters) {
-      // region 模式入口（如果支持）
-      if (F.modes.includes("region")) {
-        const btn = document.createElement("button");
-        btn.className = "menu-item";
-        btn.type = "button";
-        btn.setAttribute("role", "menuitem");
-        btn.innerHTML = `<span class="menu-item-label">${F.title}</span>`;
-        btn.addEventListener("click", () => {
-          setAdjustOpen(false);
-          _openFilterPanel(F.id);
-        });
-        container.appendChild(btn);
-      }
-      // brush 模式：1 个 menu item（user：「子算法是 toolbar dropdown，不要 menu 变 pile of shame」）
-      // 子算法 = Filter.brushVariants，在 toolbar 里切；首次进入用持久化的 variantId 或第一个
-      if (F.modes.includes("brush")) {
-        const btn = document.createElement("button");
-        btn.className = "menu-item";
-        btn.type = "button";
-        btn.setAttribute("role", "menuitem");
-        btn.innerHTML = `<span class="menu-item-label">🖌 ${F.title}（笔刷）</span>`;
-        btn.addEventListener("click", () => {
-          setAdjustOpen(false);
-          _enterFilterBrushMode(F);
-        });
-        container.appendChild(btn);
-      }
-    }
+  // 2) 笔刷类 filter（液化 / 锐化模糊 都是 plugin，自动列出来）
+  if (groupOpened && brushFilters.length > 0) addHr();
+  groupOpened = brushFilters.length > 0;
+  for (const F of brushFilters) {
+    addItem(F.title, BRUSH_PREFIX_SVG, () => {
+      setAdjustOpen(false);
+      _enterFilterBrushMode(F);
+    });
   }
+  // 3) 艺术滤镜（1 picker item）
+  if (artistFilters.length > 0) {
+    if (groupOpened) addHr();
+    addItem("艺术滤镜", ADJUST_PREFIX_SVG, () => {
+      setAdjustOpen(false);
+      _openArtistPicker();
+    });
+  }
+}
+// 艺术滤镜：开 adjust panel，body 顶部加 dropdown 切具体 filter
+function _openArtistPicker() {
+  const artist = listFilters().filter((F) => F.category === "artist");
+  if (artist.length === 0) { setStatus("没有艺术滤镜"); return; }
+  _openFilterPanel(artist[0].id, { picker: artist });
 }
 _renderFilterMenu();
 onFilterRegistered(_renderFilterMenu);
@@ -3368,6 +3446,8 @@ onFilterRegistered(_renderFilterMenu);
 let _filterBrushPreviousTool = null;
 function _enterFilterBrushMode(Filter) {
   applyAllPendingTransients();
+  // v132 mutex (user：「锐化模糊 / 液化 / 选区 互斥」)：进 filter brush 关液化面板
+  toggleLiquifyPanel?.(false);
   _filterBrushPreviousTool = state.tool === "filterBrush" ? "brush" : state.tool;
   // 取持久化的 variantId（user 上次选过的；新 doc 默认第一个）
   const variants = Filter.brushVariants || [{ id: "default", title: Filter.title, params: Filter.defaults() }];
@@ -3377,8 +3457,8 @@ function _enterFilterBrushMode(Filter) {
   if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = variant.id;
   setTool("filterBrush");
   _renderFilterBrushToolbar();
-  // 弹 rack 让 user 看到 filter brush 池
-  openExclusive(PANELS.RACK_FILTER_BRUSH);
+  // v132 (user：「点 filter brush 不要自动弹笔架」) 进入时不开 rack
+  //   user 想换笔点 toolbar 的「笔架」button
   setStatus(`${Filter.title}（笔刷）`);
 }
 function _exitFilterBrushMode() {
@@ -3430,6 +3510,10 @@ function _renderFilterBrushToolbar() {
   }
 }
 document.getElementById("filterBrushExit")?.addEventListener("click", _exitFilterBrushMode);
+// v132 笔架 button：再开 rack（user：「ui 里有开笔架，不然关了开不了」）
+document.getElementById("filterBrushOpenRack")?.addEventListener("click", () => {
+  openExclusive(PANELS.RACK_FILTER_BRUSH);
+});
 document.getElementById("adjustReset").addEventListener("click", () => {
   if (!_adjustState) return;
   _adjustState.params = _adjustState.Filter.defaults();

@@ -10,7 +10,7 @@ import { registerFilter, clamp8 } from "../filters.js";
 
 export class CurvesFilter {
   static id = "curves";
-  static title = "曲线（含 Alpha）";
+  static title = "曲线";
   static category = "adjustment";
   static modes = ["region"];
   static bleedRadius() { return 0; }

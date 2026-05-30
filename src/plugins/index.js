@@ -10,7 +10,9 @@
 import "./hsb.js";
 import "./color-balance.js";
 import "./curves.js";
+// 笔刷类（modes=["brush"]）：sharpenBlur 和 liquify 走 filter brush engine
 import "./sharpen-blur.js";
+import "./liquify.js";
 // 艺术组（category="artist"）—— dogfood plugin pattern；后期可剥离成下载插件
 import "./mosaic.js";
 import "./halftone.js";

@@ -111,6 +111,43 @@
 
 ## P2（备选 / 有趣）
 
+### 架构 session：paintMode 状态机 + Ctrl+Z mode dispatch + revert
+v132 user 提的一组深度耦合的事，要专心做：
+
+**paintMode 状态机**
+- 现在 transient（lasso transform / crop / adjust panel / filter brush / liquify）各自实现，不互斥也不统一
+- 引入 `paintMode = "idle" | "drawing" | "transform" | "crop" | "filterBrush" | "adjustRegion" | "liquify"` 等
+- 每个 mode：enter / leave hook，UI 显隐订阅 state，input 事件按 mode guard reject
+- 模态 vs 半模态：真模态（gallery / input sheet / modal dialog）block all；半模态 = paintMode 状态机
+- user 倾向 callback guard（局部清晰）+ 视觉 subscribe（统一刷新）
+
+**Ctrl+Z mode dispatch（user 命名 C）**
+- 笔触之间 Ctrl+Z = 真 undo（退上一笔）
+- 笔触进行中 Ctrl+Z = 取消当前笔
+- transient 模式（crop / transform / adjust panel / filter brush 进入态）Ctrl+Z = 取消 transient
+- 实施在 input.js Ctrl+Z handler 顶部 dispatch on paintMode
+
+**Revert（user 命名 B 修正）**
+- adoptLoadedDoc 时 IDB 写 `session:NAME:opened` checkpoint（这次 session 打开时的状态）
+- 关闭 doc → 保留，next 开新 doc 时覆盖
+- 菜单 → 文件 → 「恢复到本次打开时」
+- 确认 sheet：「回到 X 分钟前打开时的版本，N 笔修改将丢失」
+  - X = now - opened_at（用 performance.now，记 open 时戳）
+  - N = history.size since open（在 adoptLoadedDoc 时记下 history 长度起点）
+- 成本：磁盘 2× session（一般几十 MB），内存 0
+- 走 IDB 不走 RAM = 没 iPad OOM 风险
+
+**Undo quota 调大**
+- 当前限额 + OOM safety 论证：iPad PWA RAM 不富裕，大画布 layer snapshot 占内存
+- 改 idea：增加上限到 50 / 100 entries，但 snapshot 内存压缩（gzip blob）+ LRU 释放老 entry 的 imageData 留 blob
+- 已有 compressPixelSnap 异步压缩通路，可往老的 entry 推
+
+**Brush engine 薄 delegate 收尾**
+- FilterBrushEngine 已是薄 delegate；LiquifyFilter 包装 LiquifyEngine 也接通
+- attachColorBrushBehavior helper 抽掉 color filter 共用代码
+- 唯一剩 fat 的：brush.js 的 BrushEngine
+- 不一定要重构，brush 通路 stroke-based 跟 filter brush 同形，undo entry 一致 ✓
+
 ### 锐化笔刷算法有 bug
 v132 实测：模糊（笔刷）流畅 OK，锐化（笔刷）有 bug 现在用不了。猜可能在 unsharp mask 的局部应用 — 单 stamp blur 取的是 stamp+bleed 范围，与全图 unsharp 行为不一致；或者 blend 公式参数 sign 错。
 - 复现：进锐化（笔刷）画一笔 → 看效果是否合理（应该是增锐 / 边缘强化）
@@ -389,6 +426,7 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - 跟现有 freehand lasso 的 sub-tool 切换并列（add SubTool: "polygon"）
 - 也可以 Photoshop 那种"拖一段画曲线，up 转多边形"风格——user 描述更像 down 拖 up 写入
 - 工作量：~80 行 lasso.js 状态机 + drawingPath 渲染
+- 选区描边功能
 
 ### shape 工具改 procreate 自动建议（v104 记）
 - user：「我感觉直线和正圆还是需要轻重变化。所以也许还是应该参考 procreate 的方案，

@@ -156,7 +156,8 @@ export class LiquifyEngine {
             switch (mode) {
               case "pinch": ddx = -dxc * ff * strength; ddy = -dyc * ff * strength; break;
               case "bloat": ddx =  dxc * ff * strength; ddy =  dyc * ff * strength; break;
-              case "twirl": ddx = -dyc * ff * strength; ddy =  dxc * ff * strength; break;
+              case "twirl":   ddx = -dyc * ff * strength; ddy =  dxc * ff * strength; break;
+              case "twirlCW": ddx =  dyc * ff * strength; ddy = -dxc * ff * strength; break;
               case "push":
               default:      ddx =  vx  * ff * strength; ddy =  vy  * ff * strength;
             }

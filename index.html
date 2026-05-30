@@ -133,14 +133,11 @@
 
       <span class="top-bar-sep" aria-hidden="true"></span>
 
-      <button class="tool" id="topAdjustBtn" type="button" title="调整（液化 / 调色…）" aria-haspopup="true" aria-expanded="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <line x1="4" y1="6" x2="20" y2="6"></line>
-          <line x1="4" y1="12" x2="20" y2="12"></line>
-          <line x1="4" y1="18" x2="20" y2="18"></line>
-          <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"></circle>
-          <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"></circle>
-          <circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"></circle>
+      <!-- v132 fx icon：f / x 同字体（Georgia italic），仅 size 不同 -->
+      <button class="tool" id="topAdjustBtn" type="button" title="调整" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <text x="5" y="19" font-family="Georgia, 'Times New Roman', serif" font-size="22" font-style="italic" font-weight="500">f</text>
+          <text x="14" y="19" font-family="Georgia, 'Times New Roman', serif" font-size="13" font-style="italic" font-weight="500">x</text>
         </svg>
       </button>
 
@@ -165,7 +162,12 @@
         <span class="left-sidebar-brush-name" id="leftSidebarBrushName">—</span>
       </button>
       <input id="sizeSlider" class="left-sidebar-slider" type="range" min="0" max="1000" step="1" value="60" aria-label="笔粗" orient="vertical" />
-      <span class="left-sidebar-label" title="笔粗">粗</span>
+      <!-- v132 粗 icon：< 形（小于号 / 早期"笔刷压感"图标），左尖右厚 -->
+      <span class="left-sidebar-label" title="笔粗" aria-hidden="true">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="12 3, 4 8, 12 13"/>
+        </svg>
+      </span>
       <div class="size-popup hidden" id="sizePopup" aria-hidden="true">
         <div class="size-popup-circle-frame">
           <div class="size-popup-circle" id="sizePopupCircle"></div>
@@ -174,7 +176,19 @@
       </div>
       <!-- v131 (user：「left bar 语义是 opacity 不是 flow」) 改 label：流→透 -->
       <input id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1" value="100" aria-label="不透明度" orient="vertical" />
-      <span class="left-sidebar-label" title="不透明度">透</span>
+      <!-- v132 透 icon：圆 mask 内 2x2 棋盘 -->
+      <span class="left-sidebar-label" title="不透明度" aria-hidden="true">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <defs>
+            <clipPath id="opaCircleClip"><circle cx="8" cy="8" r="6.5"/></clipPath>
+          </defs>
+          <g clip-path="url(#opaCircleClip)">
+            <rect x="0" y="0" width="8" height="8" fill="currentColor"/>
+            <rect x="8" y="8" width="8" height="8" fill="currentColor"/>
+          </g>
+          <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+      </span>
       <button class="tool" id="undoButton" type="button" title="撤销 (Ctrl+Z)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="9 14 4 9 9 4"></polyline>
@@ -439,10 +453,11 @@
         <div class="brush-rack-actions">
           <button class="brush-rack-action" id="brushRackImport" type="button">导入</button>
           <button class="brush-rack-action" id="brushRackExportFolder" type="button">导出</button>
-          <button class="brush-rack-action" id="brushRackCloudPush" type="button">上传</button>
-          <button class="brush-rack-action" id="brushRackReset" type="button">重置</button>
+          <!-- v132 (user：「上传/重置语义不明，云备份 / 重置出厂」+ 代码按钮 obsolete) -->
+          <button class="brush-rack-action" id="brushRackCloudPush" type="button" title="把当前笔架推送到 OneDrive 备份">云备份</button>
+          <button class="brush-rack-action" id="brushRackReset" type="button" title="把笔架还原成出厂默认（自定义笔会丢）">重置出厂</button>
           <button class="brush-rack-action" id="brushRackNew" type="button">+ 新建</button>
-          <button class="brush-rack-action brush-rack-action-dev" id="brushRackDumpCode" type="button" title="dev：导出当前笔架为 DEFAULTS_SPEC 代码文件">代码</button>
+          <button class="brush-rack-action brush-rack-action-dev" id="brushRackDumpCode" type="button" title="dev：导出当前笔架为 DEFAULTS_SPEC 代码文件" hidden>代码</button>
           <button class="brush-rack-close" id="brushRackClose" type="button" aria-label="关闭">×</button>
         </div>
       </div>
@@ -506,6 +521,16 @@
             <rect x="3" y="5" width="18" height="14" rx="2"/>
             <circle cx="8" cy="10" r="1.5"/>
             <polyline points="3 17 9 12 14 17 21 11"/>
+          </svg>
+        </button>
+        <!-- v132 (user：「global 加删除当前图层 垃圾桶 svg」) -->
+        <button class="layers-foot-btn" id="layerDeleteBtn" type="button" title="删除当前图层" aria-label="删除当前图层">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            <path d="M10 11v6"/>
+            <path d="M14 11v6"/>
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
           </svg>
         </button>
       </div>
@@ -587,15 +612,13 @@
 
     <!-- Adjustments popup：液化 / 颜色调整。学 Procreate adjustments icon
          v114: 裁切 / 重采样 挪进主菜单「画布」区 (user：「裁切丢到文件目录里，而不是调整目录里」) -->
-    <!-- v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
-         filter 菜单由 JS 按 listFilters() 动态渲染；下载插件 registerFilter 后自动出现入口 -->
+    <!-- v132 调整 popup 完全 JS 渲染（3 组 hr 分隔）：调色 / 笔刷类 / 艺术滤镜
+         liquify 仍走老 menu item（藏在外面 stub，由 _renderFilterMenu 调） -->
     <div class="adjust-popup menu-panel hidden" id="adjustPopup" role="menu">
-      <button class="menu-item" id="adjustLiquify" type="button" role="menuitem">
-        <span class="menu-item-label">液化</span>
-      </button>
-      <hr class="menu-sep" />
       <div id="adjustFilterList"><!-- 由 app.js _renderFilterMenu 填 --></div>
     </div>
+    <!-- adjustLiquify stub：保留 id 不挂在菜单里（_renderFilterMenu 会把 click 接到合适入口） -->
+    <button id="adjustLiquify" type="button" hidden></button>
 
     <!-- v110 重采样对话框 -->
     <div class="resample-backdrop hidden" id="resampleBackdrop"></div>
@@ -658,6 +681,8 @@
     <div class="crop-toolbar hidden" id="filterBrushToolbar">
       <span class="crop-toolbar-label" id="filterBrushTitle">滤镜笔刷</span>
       <span class="crop-toolbar-sep" aria-hidden="true">|</span>
+      <!-- v132 (user：「ui 里有一个开笔架的功能，不然笔架关了开不了」) -->
+      <button class="crop-toolbar-btn" id="filterBrushOpenRack" type="button">笔架</button>
       <button class="crop-toolbar-btn crop-toolbar-cancel" id="filterBrushExit" type="button">退出</button>
     </div>
 
@@ -838,6 +863,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-64c64966bf99.mjs"></script>
+    <script type="module" src="./dist/webpaint-8183dce28f54.mjs"></script>
   </body>
 </html>

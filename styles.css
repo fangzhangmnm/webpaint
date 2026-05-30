@@ -581,6 +581,9 @@ input[type=range] {
   text-align: left;
 }
 .menu-item:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+/* v132 (user：「··· 删除会有不可用的清空，要灰」) menu item disabled = 灰 + 禁交互 */
+.menu-item:disabled { opacity: 0.35; cursor: not-allowed; }
+.menu-item:disabled:hover { background: transparent; }
 /* v124 menu-item 带 SVG icon（目前只用于图库）：左对齐 + 间距 */
 .menu-item.menu-item-with-icon { justify-content: flex-start; gap: 10px; }
 .menu-item.menu-item-with-icon svg { width: 18px; height: 18px; flex-shrink: 0; }
