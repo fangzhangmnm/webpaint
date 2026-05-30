@@ -111,6 +111,25 @@
 
 ## P2（备选 / 有趣）
 
+### Ctrl+C / Ctrl+V 实装（v134 论证完毕）
+**决策**：
+- Ctrl+V 统一 = 浮层（lasso transform）
+- 应用 = 烤进 active layer（80% workflow：复制粘贴叠图）
+- 取消 = 丢弃
+- 外部图想"新层永久" → 走菜单 / 图层面板「导入图片」（已存在）
+- Ctrl+D 保留"取消选区"，不动（跟 Photoshop 对齐）
+
+**实施**：
+1. Ctrl+C：读 active layer ∩ selection 像素 → 写系统 clipboard（PNG blob，加 wp:source=internal tEXt chunk 区分内外，避免外部图片被当内部 paste）
+2. Ctrl+V：
+   - 读 clipboard image
+   - 创建临时浮层 lift 进 lasso transform（modes=free，居中或鼠标位置）
+   - 应用 / 取消按 lasso toolbar 现有按钮
+3. PNG marker：写 tEXt chunk（~30 行 helper）；读时检测（marker 不影响 PS 等外部工具粘贴）
+4. 安全：marker 在 = 内部（任意 session），可以无差别 float；marker 不在 = 外部（safe，相机照片也走 float，user 想新层走"导入"菜单）
+
+工作量：~3 小时。等 paintMode 状态机架构 session 一起做。
+
 ### 架构 session：paintMode 状态机 + Ctrl+Z mode dispatch + revert
 v132 user 提的一组深度耦合的事，要专心做：
 

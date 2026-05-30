@@ -257,6 +257,8 @@ body[data-input-touchscreen="1"] .tool-hand-conditional { display: none; }
 }
 
 /* 左侧栏 (drawing 时常驻) */
+/* v134 (user：「左 panel 还是有点粗」) 紧 12px：52→40
+   brush 缩到 32×32（笔名 2 字 8px font 仍可见）；slider 24，足够 thumb tap */
 .left-sidebar {
   position: fixed;
   left: max(env(safe-area-inset-left, 0px), 8px);
@@ -265,16 +267,16 @@ body[data-input-touchscreen="1"] .tool-hand-conditional { display: none; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 10px 6px;
+  gap: 6px;
+  padding: 8px 4px;
   background: color-mix(in srgb, var(--bg) 80%, transparent);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   box-shadow: var(--shadow);
   z-index: 9;            /* < top-bar 10 */
-  width: 52px;           /* 限死，防内部 slider 不支持 vertical-appearance 时撑宽 */
+  width: 40px;
   box-sizing: border-box;
 }
 .left-sidebar.hidden { display: none; }
@@ -287,8 +289,8 @@ body[data-mode="gallery"] .left-sidebar { display: none; }
   appearance: slider-vertical;
   writing-mode: vertical-lr;
   direction: rtl;
-  width: 28px;
-  max-width: 28px;       /* 防 Firefox / appearance 不支持时撑宽 */
+  width: 24px;
+  max-width: 24px;       /* 防 Firefox / appearance 不支持时撑宽 */
   height: 120px;
   background: transparent;
   padding: 0;
@@ -302,28 +304,34 @@ body[data-mode="gallery"] .left-sidebar { display: none; }
 }
 /* 当前笔指示器 + 编辑入口 */
 .left-sidebar-brush {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   padding: 2px;
   background: var(--bg-soft);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   font: inherit;
   color: var(--ink);
   display: flex; align-items: center; justify-content: center;
-  font-size: 9px;
+  font-size: 8px;
   line-height: 1.1;
   text-align: center;
   overflow: hidden;
 }
 .left-sidebar-brush:hover { filter: brightness(0.95); }
+/* v134 (user：「笔刷名碰到超级长不应变形」) 强制内容不撑父容器 */
+.left-sidebar-brush {
+  flex-shrink: 0;
+  min-width: 0;       /* flex 子默认 min-width=auto，会被内容撑大；归 0 */
+}
 .left-sidebar-brush-name {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-all;
+  max-width: 100%;
 }
 
 /* v124b dev 环境 chip：HUD 里的小红标签 (user：「让我们知道是 dev」) */
@@ -651,11 +659,27 @@ input[type=range] {
   height: 360px;
   min-width: 160px;
   min-height: 160px;
-  resize: both;             /* 浏览器原生右下角拖手柄 */
+  resize: both;             /* 桌面鼠标拖右下角 */
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
+/* v134 iPad / touch resize handle —— CSS resize:both 不响应 touch */
+.reference-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 22px;
+  height: 22px;
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-soft);
+  opacity: 0.55;
+}
+.reference-resize-handle:hover { opacity: 1; }
+.reference-resize-handle svg { width: 16px; height: 16px; display: block; }
 .reference-action-btn {
   background: transparent;
   border: none;
@@ -1082,6 +1106,13 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   cursor: pointer;
 }
 .brush-rack-action:hover { filter: brightness(0.95); }
+/* v134 icon-only variant */
+.brush-rack-action-icon {
+  padding: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 28px;
+}
+.brush-rack-action-icon svg { width: 18px; height: 18px; display: block; }
 .brush-rack-close {
   font: inherit; font-size: 18px;
   width: 28px; height: 28px;
@@ -1618,7 +1649,9 @@ body[data-mode="gallery"] .board { display: none !important; }
 .tool[data-state="cloud-dirty"] { color: #d49100; }
 .tool[data-state="cloud-busy"] { color: #d49100; }
 /* 云上传中：箭头部分自旋。SVG 里 class="spin-arc" 是旋转弧 */
-.tool[data-state="cloud-busy"] .spin-arc { animation: wp-spin 1s linear infinite; }
+/* v134 笔架云备份按钮也用同 spin 动画（data-state="busy"） */
+.tool[data-state="cloud-busy"] .spin-arc,
+.brush-rack-action[data-state="busy"] .spin-arc { animation: wp-spin 1s linear infinite; }
 @keyframes wp-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }

@@ -422,39 +422,61 @@ function applyToolState(tool) {
 }
 
 // v124g (user：「以后所有 size slider 统一这个分段 quantize」)：
+// v134 量化更新（user：「20内1, 50内2, 100内5, 200内10, 500内20, 1000内50」）
 //   1..20   步长 1   → 20 positions
 //   20..50  步长 2   → 15 positions
 //   50..100 步长 5   → 10 positions
-//   100..500 步长 10 → 40 positions
-//   500..1000 步长 20 → 25 positions
-// maxPx=300 → 65 positions（拖到顶就是 300）；maxPx=1000 → 110 positions；maxPx=15 → 15 positions
+//   100..200 步长 10 → 10 positions
+//   200..500 步长 20 → 15 positions
+//   500..1000 步长 50 → 10 positions
 function _segPositions(maxPx) {
   const a = Math.max(0, Math.min(20, maxPx));
-  const bEnd = Math.min(50, maxPx);  const b = bEnd > 20 ? Math.floor((bEnd - 20) / 2) : 0;
-  const cEnd = Math.min(100, maxPx); const c = cEnd > 50 ? Math.floor((cEnd - 50) / 5) : 0;
-  const dEnd = Math.min(500, maxPx); const d = dEnd > 100 ? Math.floor((dEnd - 100) / 10) : 0;
-  const eEnd = Math.min(1000, maxPx); const e = eEnd > 500 ? Math.floor((eEnd - 500) / 20) : 0;
-  return { a, b, c, d, e, total: a + b + c + d + e };
+  const bEnd = Math.min(50, maxPx);   const b = bEnd > 20  ? Math.floor((bEnd - 20)  / 2)  : 0;
+  const cEnd = Math.min(100, maxPx);  const c = cEnd > 50  ? Math.floor((cEnd - 50)  / 5)  : 0;
+  const dEnd = Math.min(200, maxPx);  const d = dEnd > 100 ? Math.floor((dEnd - 100) / 10) : 0;
+  const eEnd = Math.min(500, maxPx);  const e = eEnd > 200 ? Math.floor((eEnd - 200) / 20) : 0;
+  const fEnd = Math.min(1000, maxPx); const f = fEnd > 500 ? Math.floor((fEnd - 500) / 50) : 0;
+  return { a, b, c, d, e, f, total: a + b + c + d + e + f };
 }
 function sliderPosToSize(pos, maxPx) {
-  const { a, b, c, d, total } = _segPositions(maxPx);
+  const { a, b, c, d, e, total } = _segPositions(maxPx);
   const p = Math.max(0, Math.min(total - 1, Math.round(pos)));
-  if (p < a)             return p + 1;                          // 1..20 step 1
-  if (p < a + b)         return 20  + (p - a + 1) * 2;          // 22..50 step 2
-  if (p < a + b + c)     return 50  + (p - a - b + 1) * 5;      // 55..100 step 5
-  if (p < a + b + c + d) return 100 + (p - a - b - c + 1) * 10; // 110..500 step 10
-  return                          500 + (p - a - b - c - d + 1) * 20; // 520..1000 step 20
+  if (p < a)                 return p + 1;                                  // 1..20 step 1
+  if (p < a + b)             return 20  + (p - a + 1) * 2;                  // 22..50 step 2
+  if (p < a + b + c)         return 50  + (p - a - b + 1) * 5;              // 55..100 step 5
+  if (p < a + b + c + d)     return 100 + (p - a - b - c + 1) * 10;         // 110..200 step 10
+  if (p < a + b + c + d + e) return 200 + (p - a - b - c - d + 1) * 20;     // 220..500 step 20
+  return                            500 + (p - a - b - c - d - e + 1) * 50; // 550..1000 step 50
 }
 function sizeToSliderPos(size, maxPx) {
-  const { a, b, c, d } = _segPositions(maxPx);
+  const { a, b, c, d, e } = _segPositions(maxPx);
   const s = Math.max(1, Math.min(maxPx, Math.round(size)));
   if (s <= 20)  return s - 1;
   if (s <= 50)  return a + Math.round((s - 20) / 2) - 1;
   if (s <= 100) return a + b + Math.round((s - 50) / 5) - 1;
-  if (s <= 500) return a + b + c + Math.round((s - 100) / 10) - 1;
-  return            a + b + c + d + Math.round((s - 500) / 20) - 1;
+  if (s <= 200) return a + b + c + Math.round((s - 100) / 10) - 1;
+  if (s <= 500) return a + b + c + d + Math.round((s - 200) / 20) - 1;
+  return            a + b + c + d + e + Math.round((s - 500) / 50) - 1;
 }
 function _sliderMaxPos(maxPx) { return _segPositions(maxPx).total - 1; }
+// v134 量化辅助：圆 v 到段步长（[] 按此 step）
+function _stepFor(size) {
+  if (size < 20) return 1;
+  if (size < 50) return 2;
+  if (size < 100) return 5;
+  if (size < 200) return 10;
+  if (size < 500) return 20;
+  return 50;
+}
+function _quantizeSize(v) {
+  v = Math.round(v);
+  if (v < 20)  return Math.max(1, v);
+  if (v <= 50) return Math.round(v / 2) * 2;
+  if (v <= 100) return Math.round(v / 5) * 5;
+  if (v <= 200) return Math.round(v / 10) * 10;
+  if (v <= 500) return Math.round(v / 20) * 20;
+  return Math.round(v / 50) * 50;
+}
 function updateSidebarSlider2Label() {
   // v98：slider 永远标「透」(opacity 语义)。
   // user：「slider 是 opacity 不是 flow」。flow 在 brush settings 改。
@@ -1033,7 +1055,7 @@ loadBrushRack().then((rack) => {
   }
   applyToolState(state.tool);
   updateSidebarBrushIndicator();
-  setTimeout(() => { checkBrushRackCloud().catch(() => {}); }, 2000);
+  setTimeout(() => { checkBrushRackCloud().catch(() => {}); _refreshRackCloudState(); }, 2000);
   // v122 r2: default-brushes.json 是 async fetch；先用现有 rack boot（可能是 IDB / emergency
   // 兜底空），fetch 回来后再 retroactively merge 缺失的 default brushes，写 IDB + 刷 UI
   defaultsPromise().then(() => {
@@ -1109,7 +1131,10 @@ window.addEventListener("wp:pickerHide", () => {
 
 let _sizePopupTimer = null;
 const POPUP_FRAME = 64;
-function showSizePopup() {
+// v134 (user：「popup 位置动态跟 slider，两个 slider 都算」)
+//   anchor 元素由 caller 传：size slider 用 sizeSlider，opacity slider 用 opacitySlider
+//   水平 anchor 到 sidebar.right（slider 太瘦不稳）；垂直跟传进的 slider 中心
+function showSizePopup(anchorEl) {
   if (!els.sizePopup) return;
   const px = state.brush.size;
   const op = state.brush.opacity;
@@ -1120,9 +1145,12 @@ function showSizePopup() {
   els.sizePopupCircle.style.height  = (r * 2) + "px";
   els.sizePopupCircle.style.opacity = String(op);
   els.sizePopupText.textContent = `${px|0} px · ${Math.round(op * 100)}%`;
-  const rect = els.sizeSlider.getBoundingClientRect();
-  els.sizePopup.style.left = (rect.right + 8) + "px";
-  els.sizePopup.style.top  = (rect.top + rect.height / 2 - POPUP_FRAME / 2) + "px";
+  const a = anchorEl || els.sizeSlider;
+  const aRect = a.getBoundingClientRect();
+  const sidebar = document.getElementById("leftSidebar");
+  const anchorRight = sidebar ? sidebar.getBoundingClientRect().right : aRect.right;
+  els.sizePopup.style.left = (anchorRight + 12) + "px";
+  els.sizePopup.style.top  = (aRect.top + aRect.height / 2 - POPUP_FRAME / 2) + "px";
   els.sizePopup.classList.remove("hidden");
   clearTimeout(_sizePopupTimer);
   _sizePopupTimer = setTimeout(() => els.sizePopup.classList.add("hidden"), 1500);
@@ -1138,14 +1166,14 @@ function setSize(v, opts = {}) {
   // 同步 slider（log 化）
   const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
   els.sizeSlider.value = String(sizeToSliderPos(v, maxPx));
-  if (!opts.silent) showSizePopup();
+  if (!opts.silent) showSizePopup(els.sizeSlider);
 }
 function setOpacity(v, opts = {}) {
   state.brush.opacity = v;
   writeCurrentToolOpacity(v);
   safeLSSet("webpaint.opacity", String(v));
   els.opacitySlider.value = String(Math.round(v * 100));
-  if (!opts.silent) showSizePopup();   // v123 共用 size+opacity popup
+  if (!opts.silent) showSizePopup(els.opacitySlider);   // v123 共用 size+opacity popup
 }
 // 老 setIntensity alias 给跨 v97 调用兜底
 const setIntensity = setOpacity;
@@ -1157,7 +1185,7 @@ els.sizeSlider.addEventListener("input", () => {
   state.brush.size = px;
   writeCurrentToolSize(px);
   safeLSSet("webpaint.size", String(px));
-  showSizePopup();
+  showSizePopup(els.sizeSlider);
 });
 els.opacitySlider.addEventListener("input", () => setOpacity(parseFloat(els.opacitySlider.value) / 100));
 // boot 初值 (v124e applyToolState 会被笔架 load 后再调一次刷新；这里先给一个合理默认 maxPx 防 NaN)
@@ -1174,9 +1202,12 @@ window.addEventListener("wp:adjsize", (e) => {
   const t = state.tool;
   if (t === "brush" || t === "eraser" || t === "smudge" || t === "filterBrush") {
     const maxPx = parseInt(els.sizeSlider?.dataset.maxPx || "200", 10);
-    const next = Math.max(1, Math.min(maxPx, state.brush.size + delta));
+    // v134 [] step 按段量化：20内1, 50内2, 100内5, 200内10, 500内20, 1000内50
+    const dir = Math.sign(delta) || 1;
+    const step = _stepFor(state.brush.size);
+    const raw = state.brush.size + dir * step;
+    const next = Math.max(1, Math.min(maxPx, _quantizeSize(raw)));
     setSize(next);
-    // v132 (user：「[] 时 windows 鼠标圆 size 没动」) 不等下次 pointermove，立刻刷新 hover cursor
     if (board._cursor) {
       board.setCursor({ ...board._cursor, size: next });
     }
@@ -3953,6 +3984,37 @@ const referenceWindow = new ReferenceWindow({
   emptyHint: els.referenceEmpty,
   status: setStatus,
 });
+// v134 (user：「参考窗口大小可以调整」) iPad/touch resize handle
+(function bindReferenceResize() {
+  const handle = document.getElementById("referenceResizeHandle");
+  const panel = els.referencePanel;
+  if (!handle || !panel) return;
+  let drag = null;
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    const rect = panel.getBoundingClientRect();
+    drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, w0: rect.width, h0: rect.height };
+  });
+  handle.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const w = Math.max(160, Math.min(window.innerWidth - 40, drag.w0 + (e.clientX - drag.sx)));
+    const h = Math.max(160, Math.min(window.innerHeight - 80, drag.h0 + (e.clientY - drag.sy)));
+    panel.style.width = w + "px";
+    panel.style.height = h + "px";
+  });
+  const endDrag = (e) => {
+    if (drag && e.pointerId === drag.id) {
+      try { handle.releasePointerCapture(e.pointerId); } catch {}
+      drag = null;
+      // 触发 reference 重新布局（如果需要）
+      window.dispatchEvent(new CustomEvent("wp:referenceResize"));
+    }
+  };
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+})();
 // ---- 调色板小窗（v87）----
 // 256×256 mixer canvas + 刷 / 涂 / 吸 3 工具。吸色 → 主画 setColor。
 // 画布内容跟 doc 走（webpaint/state.json 持久化，跟 reference 同模式）
@@ -4121,13 +4183,84 @@ async function importImageAsNewDoc(file) {
 
 // 把图片当一个新图层叠进当前 doc（photobash / 参考图工作流）。
 // 居中对齐；如果图片比 doc 大，按比例缩到 80% 短边，避免一上来就盖死。
+// v134 big-import sheet：图片 > 画布 弹询问
+//   resolve { w, h, mode } 或 null（取消）
+function _openBigImportSheet(ow, oh, docW, docH) {
+  const backdrop = document.getElementById("bigImportBackdrop");
+  const sheet = document.getElementById("bigImportSheet");
+  const wIn = document.getElementById("bigImportW");
+  const hIn = document.getElementById("bigImportH");
+  const modeSel = document.getElementById("bigImportMode");
+  const info = document.getElementById("bigImportInfo");
+  const okBtn = document.getElementById("bigImportConfirm");
+  const cancelBtn = document.getElementById("bigImportCancel");
+  // fit-to-canvas（保比例 = 短边贴齐）
+  const scale = Math.min(docW / ow, docH / oh);
+  const fitW = Math.round(ow * scale);
+  const fitH = Math.round(oh * scale);
+  info.textContent = `图片 ${ow}×${oh} · 画布 ${docW}×${docH}`;
+  wIn.value = String(fitW);
+  hIn.value = String(fitH);
+  // 默认 fit choice
+  for (const r of sheet.querySelectorAll('input[name="bigImportChoice"]')) {
+    r.checked = (r.value === "fit");
+  }
+  // W/H input 联动（锁宽高比，由当前 ow/oh 决定）
+  const aspect = ow / oh;
+  const setChoice = (val) => {
+    for (const r of sheet.querySelectorAll('input[name="bigImportChoice"]')) {
+      r.checked = (r.value === val);
+    }
+    if (val === "fit") { wIn.value = String(fitW); hIn.value = String(fitH); }
+    else if (val === "keep") { wIn.value = String(ow); hIn.value = String(oh); }
+  };
+  wIn.oninput = () => {
+    setChoice("custom");
+    const v = parseFloat(wIn.value) | 0;
+    if (v > 0) hIn.value = String(Math.max(1, Math.round(v / aspect)));
+  };
+  hIn.oninput = () => {
+    setChoice("custom");
+    const v = parseFloat(hIn.value) | 0;
+    if (v > 0) wIn.value = String(Math.max(1, Math.round(v * aspect)));
+  };
+  for (const r of sheet.querySelectorAll('input[name="bigImportChoice"]')) {
+    r.addEventListener("change", () => setChoice(r.value));
+  }
+  backdrop.classList.remove("hidden");
+  sheet.classList.remove("hidden");
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      backdrop.classList.add("hidden");
+      sheet.classList.add("hidden");
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      backdrop.onclick = null;
+    };
+    okBtn.onclick = () => {
+      const w = Math.max(1, Math.min(8192, parseFloat(wIn.value) | 0));
+      const h = Math.max(1, Math.min(8192, parseFloat(hIn.value) | 0));
+      const mode = modeSel.value || "bicubic";
+      cleanup();
+      resolve({ w, h, mode });
+    };
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
+    backdrop.onclick  = () => { cleanup(); resolve(null); };
+  });
+}
+
 async function importImageAsLayer(file) {
   const bitmap = await createImageBitmap(file);
-  // v124：保留原图分辨率 (user：「如果图片大过画板没有自动 crop 吧，而是 apply
-  // 之后再 crop」)。之前会自动缩到 doc 的 0.8 倍丢分辨率；现在 layer.bbox 可超
-  // doc 边界，transform 里 user 自己缩 / 移动 / 应用后再裁画布
-  const w = bitmap.width, h = bitmap.height;
+  const ow = bitmap.width, oh = bitmap.height;
   const docW = doc.width, docH = doc.height;
+  // v134 (user：「导入超大图片弹 sheet」) bitmap 比 doc 大 → 询问 fit / 保原 / 自定义
+  let w = ow, h = oh, imgSmoothing = "high";
+  if (ow > docW || oh > docH) {
+    const choice = await _openBigImportSheet(ow, oh, docW, docH);
+    if (!choice) { bitmap.close?.(); return; }   // user 取消
+    w = choice.w; h = choice.h;
+    imgSmoothing = choice.mode === "nearest" ? "low" : "high";
+  }
   // 新建空层
   const layer = doc.addLayer(file.name.replace(/\.[^.]+$/, ""));
   if (!layer) {
@@ -4145,8 +4278,8 @@ async function importImageAsLayer(file) {
     : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
   layer.canvas = c;
   layer.ctx = c.getContext("2d", { willReadFrequently: false });
-  layer.ctx.imageSmoothingEnabled = true;
-  layer.ctx.imageSmoothingQuality = "high";
+  layer.ctx.imageSmoothingEnabled = imgSmoothing !== "low";
+  layer.ctx.imageSmoothingQuality = imgSmoothing;
   layer.ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close?.();
   renderLayersPanel();
@@ -4863,6 +4996,7 @@ function _showRackSheet(tool) {
   _rackEls.title.textContent = `笔架 · ${TOOL_LABEL[tool] || tool}`;
   _renderRackSheet();
   _rackEls.sheet.classList.remove("hidden");
+  _refreshRackCloudState();        // v134 打开 rack 时刷 icon
 }
 function _hideRackSheet() {
   _rackEls.sheet.classList.add("hidden");
@@ -4873,41 +5007,130 @@ function _hideRackSheet() {
   }
 }
 
+// v134 rack cloud 状态机：smart icon + auto push
+//   synced：ETag 匹配 + 没本地未推改动
+//   busy：正在推
+//   dirty：本地有未推改动（短暂；auto push 会清掉）
+//   conflict：上次推遇到 412，待 user 选三选
+//   offline：navigator.onLine === false
+//   no-auth：未登录
+let _rackCloudState = "no-auth";
+function updateRackCloudIcon() {
+  const btn = document.getElementById("brushRackCloudPush");
+  if (!btn) return;
+  const name = "笔架";
+  const ICON = {
+    "synced":   ICON_CLOUD_CHECK,
+    "busy":     ICON_CLOUD_BUSY,
+    "dirty":    ICON_UPLOAD,
+    "conflict": ICON_UPLOAD,    // 冲突时也用 ↑ icon；data-state 让 CSS 改色
+    "offline":  ICON_DISK,
+    "no-auth":  ICON_DISK,
+  };
+  const TITLE = {
+    "synced":   `${name} 已同步云端`,
+    "busy":     `${name} 上传中…`,
+    "dirty":    `${name} 待推 — 点推送`,
+    "conflict": `${name} 云端冲突 — 点解决`,
+    "offline":  `${name} 离线 — 仅本地`,
+    "no-auth":  `${name} 未登录 — 登 OneDrive 自动同步`,
+  };
+  btn.innerHTML = ICON[_rackCloudState] || ICON.synced;
+  btn.title = TITLE[_rackCloudState] || "";
+  btn.dataset.state = _rackCloudState;
+}
+function _refreshRackCloudState() {
+  if (!isSignedIn()) _rackCloudState = "no-auth";
+  else if (navigator.onLine === false) _rackCloudState = "offline";
+  else if (_rackDirty) _rackCloudState = "dirty";
+  else _rackCloudState = "synced";
+  updateRackCloudIcon();
+}
+
 // 推云：仅 IDB 已写后调；user 在场（关 sheet 是 explicit action）
+//   v134：冲突时 3 选（拉 / 强推 / 合并）；其他状态 auto retry
 async function pushBrushRackIfSignedIn() {
-  if (!isSignedIn() || !navigator.onLine) return;
+  if (!isSignedIn() || !navigator.onLine) { _refreshRackCloudState(); return; }
   if (!_brushRack) return;
+  _rackCloudState = "busy"; updateRackCloudIcon();
   try {
     await pushBrushRack(_brushRack);
+    _rackDirty = false;
+    _rackCloudState = "synced"; updateRackCloudIcon();
     setStatus("笔架已同步到云端");
   } catch (e) {
     if (e instanceof CloudConflictError) {
-      // 云端有更新版本 → 跟 doc 一样 3 选 sheet
-      const choice = await lockSyncGate({
-        title: "笔架云端有更新版本",
-        message: "另一台设备改过云端笔架。推会覆盖那次改动。",
-        showSpinner: false,
-        actions: [
-          { label: "拉云端覆盖本地", value: "pull", primary: true },
-          { label: "保留本地（之后可重推）", value: "keep" },
-        ],
-      });
-      if (choice === "pull") {
-        try {
-          const pulled = await pullBrushRack();
-          if (pulled?.rack) {
-            _brushRack = pulled.rack;
-            { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }   // 防云端空 rack 把本地清空 (v122 r2 atomic swap)
-            await persistBrushRack();
-            applyToolState(state.tool);
-            setStatus("已拉云端笔架");
-          }
-        } catch (err) { setStatus("拉云端笔架失败：" + (err.message || err), true); }
-      }
+      _rackCloudState = "conflict"; updateRackCloudIcon();
+      await _resolveRackCloudConflict();
     } else {
       console.warn("[brush-rack push]", e);
+      _rackCloudState = "dirty"; updateRackCloudIcon();
       setStatus("笔架推送失败：" + (e.message || e), true);
     }
+  }
+}
+// 3 选解决冲突（user：「保留本地重命名」=合并）
+async function _resolveRackCloudConflict() {
+  const choice = await lockSyncGate({
+    title: "笔架云端有更新版本",
+    message: "另一台设备改过云端笔架。",
+    showSpinner: false,
+    actions: [
+      { label: "拉云端（丢本地新增）", value: "pull" },
+      { label: "本地覆盖云端（丢云端改动）", value: "force" },
+      { label: "合并（保留两边的笔刷）", value: "merge", primary: true },
+    ],
+  });
+  try {
+    if (choice === "pull") {
+      const pulled = await pullBrushRack();
+      if (pulled?.rack) {
+        _brushRack = pulled.rack;
+        { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
+        await persistBrushRack();
+        applyToolState(state.tool);
+        _rackDirty = false;
+        _rackCloudState = "synced";
+        setStatus("已拉云端笔架");
+      }
+    } else if (choice === "force") {
+      await pushBrushRack(_brushRack, { force: true });
+      _rackDirty = false;
+      _rackCloudState = "synced";
+      setStatus("已用本地笔架覆盖云端");
+    } else if (choice === "merge") {
+      const pulled = await pullBrushRack();
+      const cloudRack = pulled?.rack;
+      if (!cloudRack) {
+        // 云端空 / 拉失败 → fallback 强推
+        await pushBrushRack(_brushRack, { force: true });
+      } else {
+        const cloudIds = new Set(cloudRack.brushes.map((b) => b.id));
+        const localExtras = _brushRack.brushes.filter((b) => !cloudIds.has(b.id));
+        const merged = {
+          ...cloudRack,
+          brushes: [...cloudRack.brushes, ...localExtras],
+          activeByTool: { ...cloudRack.activeByTool, ..._brushRack.activeByTool },
+        };
+        _brushRack = merged;
+        { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
+        await persistBrushRack();
+        applyToolState(state.tool);
+        await pushBrushRack(_brushRack, { force: true });
+        setStatus(`已合并（云端 ${cloudRack.brushes.length} + 本地新增 ${localExtras.length}）`);
+      }
+      _rackDirty = false;
+      _rackCloudState = "synced";
+    } else {
+      // user 关闭 sheet 不选 → 保 conflict 状态，icon 提示，user 自己再点
+      return;
+    }
+  } catch (err) {
+    console.warn("[rack conflict resolve]", err);
+    setStatus("解决冲突出错：" + (err.message || err), true);
+    _rackCloudState = "dirty";
+  } finally {
+    updateRackCloudIcon();
   }
 }
 
@@ -5236,8 +5459,13 @@ async function dumpRackAsCode() {
 if (_rackEls.exportFolderBtn) _rackEls.exportFolderBtn.addEventListener("click", () => exportRackFolderAsFile());
 if (_rackEls.cloudPushBtn) _rackEls.cloudPushBtn.addEventListener("click", async () => {
   if (!isSignedIn()) { setStatus("请先登录云端账号", true); return; }
-  setStatus("正在上传笔架…");
-  await pushBrushRackIfSignedIn();
+  // v134 在冲突态点 = 重新弹 3 选；其他态 = 推
+  if (_rackCloudState === "conflict") {
+    await _resolveRackCloudConflict();
+  } else {
+    setStatus("正在上传笔架…");
+    await pushBrushRackIfSignedIn();
+  }
 });
 if (_rackEls.resetBtn) _rackEls.resetBtn.addEventListener("click", async () => {
   const ok = await openConfirmSheet(
@@ -5381,10 +5609,11 @@ function _renderBrushSettings() {
   if (!b.smooth) b.smooth = { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 };
 
   // Size：base + max
+  // v134 (user：「基础和最大都用同样的段量化 [] step」+「存的也是量化」)
+  //   fmt 和 onChange 都跑 _quantizeSize，存的 / 显的 / [] step 三者一致
   const size = section("粗细 (size)");
-  rangeRow(size, "基础", 1, b.size.max || 200, 1, b.size.base, (v) => `${v|0} px`, (v) => b.size.base = v);
-  // v124f (user：「设某个值到 300 很难 snap」) 最大 step 1→10：10/20/.../300/.../800 80 个 pos 在 150 px 滑条上 = 1.9 finger px / pos，能稳落整 10 倍数
-  rangeRow(size, "最大", 10, 800, 10, b.size.max || 200, (v) => `${v|0} px`, (v) => b.size.max = v);
+  rangeRow(size, "基础", 1, b.size.max || 200, 1, b.size.base, (v) => `${_quantizeSize(v)} px`, (v) => b.size.base = _quantizeSize(v));
+  rangeRow(size, "最大", 10, 1000, 1, b.size.max || 200, (v) => `${_quantizeSize(v)} px`, (v) => b.size.max = _quantizeSize(v));
 
   // 压感 dynamics（signed coeff −1..1，0=不响应）
   const dyn = section("压感 (−1..1，0 = 不响应、负数 = 反向)");

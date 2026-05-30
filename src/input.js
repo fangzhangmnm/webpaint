@@ -632,10 +632,12 @@ export class InputController {
       if (rec._lassoMode === "tentative") {
         // magic 子工具是 tap-only：不升级到 drawing；_endLasso 在 pointerup 时触发
         if (this.lasso.getSubTool() === "magic") return;
-        // freehand / rect：跨过 4 doc-px² 阈值才升级成 drawing
-        const ddx = dx - rec._lassoStartDocX;
-        const ddy = dy - rec._lassoStartDocY;
-        if (ddx * ddx + ddy * ddy > 4) {
+        // v134 (user：「用 screen px，不然像素画时 lasso 用不了」)
+        //   tap vs drag 阈值 = 8 screen-px 距离（防 pen jitter / mouse 抖）
+        //   原本 4 doc-px² 在 32×32 pixel art zoom in 时巨大，永远不升级
+        const sdx = e.clientX - rec.startX;
+        const sdy = e.clientY - rec.startY;
+        if (sdx * sdx + sdy * sdy > 64) {
           rec._lassoMode = "drawing";
           this.lasso.beginPath(rec._lassoStartDocX, rec._lassoStartDocY);
           this.lasso.extendPath(dx, dy);
@@ -1001,8 +1003,10 @@ export class InputController {
     } else if (rec._lassoMode === "transform") {
       this.lasso.endDrag();
     } else if (rec._lassoMode === "tentative") {
-      // 没拖到阈值 → magic 子工具仍触发（魔术棒是 tap）；freehand / rect 静默
-      if (this.lasso.getSubTool() === "magic") {
+      // 没拖到阈值
+      const sub = this.lasso.getSubTool();
+      if (sub === "magic") {
+        // 魔术棒就是 tap-only
         try {
           const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
           this.lasso.beginPath(dx, dy);
@@ -1014,9 +1018,17 @@ export class InputController {
             this.status("魔术棒：tap 在线 / 边界上，没选到");
           }
         } catch (e) {
-          // 不要再静默挂 —— v71 容隙 bug 就是因为这条路径默默吞掉错误
           console.error("[magic-wand]", e);
           this.status("魔术棒出错：" + (e.message || e));
+        }
+      } else {
+        // v134 (user：「自由/矩形/圆 单击在新建选区模式下 = 取消当前选区」)
+        //   add / subtract / intersect 模式 = 防误触静默（user 还想加，但 tap 不应改）
+        if (this.lasso.getSetOpMode() === "new" && this.lasso.hasSelection()) {
+          const entry = this.lasso.setSelection(null);
+          if (entry && this.history) this.history.push(entry);
+          this.board.invalidateAll();
+          this.status("已取消选区");
         }
       }
     }

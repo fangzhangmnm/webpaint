@@ -180,7 +180,9 @@ async function renderMergedBlob(doc, mime = "image/png", quality, scope = "merge
   c.width = doc.width;
   c.height = doc.height;
   const ctx = c.getContext("2d");
-  const wantBg = scope === "merged" || mime === "image/jpeg";
+  // v134 (user：「导出 png 保留透明度！！」) 只 JPG 涂 doc 背景（无 alpha 通道）
+  //   PNG 永远不涂，empty 区域 = 透明，user 想要白底自己加图层
+  const wantBg = mime === "image/jpeg";
   if (wantBg) {
     ctx.fillStyle = doc.backgroundColor || "#ffffff";
     ctx.fillRect(0, 0, doc.width, doc.height);

@@ -66,9 +66,9 @@ function escapeXml(s) {
 function renderMerged(doc) {
   const c = makeBitmap(doc.width, doc.height);
   const ctx = c.getContext("2d");
-  // 白底（doc.backgroundColor）
-  ctx.fillStyle = doc.backgroundColor || "#ffffff";
-  ctx.fillRect(0, 0, doc.width, doc.height);
+  // v134 (user：「即使 merged 也保留 alpha；ora 里 merged 同处理」)
+  //   不再涂 doc.backgroundColor 作 base —— ora 的 mergedimage.png 也保 alpha
+  //   user 想要白底自己加图层
   // Clipping mask：详细算法见 doc.js computeClipBaseFor + board.js _renderLayer*
   const baseFor = computeClipBaseFor(doc.layers);
   for (let i = 0; i < doc.layers.length; i++) {

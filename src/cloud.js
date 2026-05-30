@@ -182,9 +182,10 @@ const BRUSH_RACK_NAME = "brush-rack";
 const BRUSH_RACK_PATH = "brush-rack.json";
 const BRUSH_RACK_CT = "application/json";
 
-export async function pushBrushRack(rack) {
+// v134 opts.force = true 跳过 ETag 检查（本地覆盖云端，强推）
+export async function pushBrushRack(rack, opts = {}) {
   if (!isSignedIn()) throw new Error("未登录 OneDrive");
-  const knownETag = getKnownETag(BRUSH_RACK_NAME);
+  const knownETag = opts.force ? undefined : getKnownETag(BRUSH_RACK_NAME);
   const json = JSON.stringify(rack);
   const blob = new Blob([json], { type: BRUSH_RACK_CT });
   try {

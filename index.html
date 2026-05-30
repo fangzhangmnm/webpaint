@@ -133,11 +133,11 @@
 
       <span class="top-bar-sep" aria-hidden="true"></span>
 
-      <!-- v132 fx icon：f / x 同字体（Georgia italic），仅 size 不同 -->
+      <!-- v134 fx icon：x 往 f 收近一点（user：「负间距更贴」）-->
       <button class="tool" id="topAdjustBtn" type="button" title="调整" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <text x="5" y="19" font-family="Georgia, 'Times New Roman', serif" font-size="22" font-style="italic" font-weight="500">f</text>
-          <text x="14" y="19" font-family="Georgia, 'Times New Roman', serif" font-size="13" font-style="italic" font-weight="500">x</text>
+          <text x="12" y="19" font-family="Georgia, 'Times New Roman', serif" font-size="13" font-style="italic" font-weight="500">x</text>
         </svg>
       </button>
 
@@ -451,13 +451,33 @@
       <div class="brush-rack-head">
         <span id="brushRackTitle">笔架 · 笔刷</span>
         <div class="brush-rack-actions">
-          <button class="brush-rack-action" id="brushRackImport" type="button">导入</button>
-          <button class="brush-rack-action" id="brushRackExportFolder" type="button">导出</button>
-          <!-- v132 (user：「上传/重置语义不明，云备份 / 重置出厂」+ 代码按钮 obsolete) -->
-          <button class="brush-rack-action" id="brushRackCloudPush" type="button" title="把当前笔架推送到 OneDrive 备份">云备份</button>
-          <button class="brush-rack-action" id="brushRackReset" type="button" title="把笔架还原成出厂默认（自定义笔会丢）">重置出厂</button>
-          <button class="brush-rack-action" id="brushRackNew" type="button">+ 新建</button>
-          <button class="brush-rack-action brush-rack-action-dev" id="brushRackDumpCode" type="button" title="dev：导出当前笔架为 DEFAULTS_SPEC 代码文件" hidden>代码</button>
+          <!-- v134 全 SVG icon；重置出厂挪进菜单 → 调试（safety net）；导入/导出/新建/云备份 都 icon -->
+          <button class="brush-rack-action brush-rack-action-icon" id="brushRackImport" type="button" title="导入笔架 JSON" aria-label="导入笔架">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3 v11"/><polyline points="7 9, 12 14, 17 9"/>
+              <path d="M4 17 v3 a1 1 0 0 0 1 1 h14 a1 1 0 0 0 1 -1 v-3"/>
+            </svg>
+          </button>
+          <button class="brush-rack-action brush-rack-action-icon" id="brushRackExportFolder" type="button" title="导出当前文件夹为 JSON" aria-label="导出笔架">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 21 v-11"/><polyline points="7 15, 12 10, 17 15"/>
+              <path d="M4 7 v-3 a1 1 0 0 1 1 -1 h14 a1 1 0 0 1 1 1 v3"/>
+            </svg>
+          </button>
+          <button class="brush-rack-action brush-rack-action-icon" id="brushRackCloudPush" type="button" title="云备份笔架到 OneDrive" aria-label="云备份笔架">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M17.5 19 H6.5 A4.5 4.5 0 0 1 6 10 a6 6 0 0 1 11.6 -1 A4 4 0 0 1 17.5 19 Z"/>
+              <polyline points="9 14, 12 11, 15 14"/><path d="M12 11 v6"/>
+            </svg>
+          </button>
+          <button class="brush-rack-action brush-rack-action-icon" id="brushRackNew" type="button" title="新建笔刷" aria-label="新建笔刷">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
+          <!-- v134 重置出厂藏菜单 调试段 -->
+          <button id="brushRackReset" type="button" hidden></button>
+          <button id="brushRackDumpCode" type="button" hidden></button>
           <button class="brush-rack-close" id="brushRackClose" type="button" aria-label="关闭">×</button>
         </div>
       </div>
@@ -595,6 +615,13 @@
         </button>
         <button class="float-panel-close" id="referencePanelClose" type="button" aria-label="关闭">×</button>
       </div>
+      <!-- v134 (user：「参考窗口大小可以调整」) iPad touch 拖手柄：CSS resize:both 只支持鼠标 -->
+      <div class="reference-resize-handle" id="referenceResizeHandle" aria-label="拖动调整窗口大小" title="拖动调整大小">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <line x1="4" y1="14" x2="14" y2="4"/>
+          <line x1="9" y1="14" x2="14" y2="9"/>
+        </svg>
+      </div>
       <div class="reference-body" id="referenceBody">
         <canvas id="referenceCanvas" class="reference-canvas"></canvas>
         <div class="reference-empty" id="referenceEmpty">
@@ -619,6 +646,46 @@
     </div>
     <!-- adjustLiquify stub：保留 id 不挂在菜单里（_renderFilterMenu 会把 click 接到合适入口） -->
     <button id="adjustLiquify" type="button" hidden></button>
+
+    <!-- v134 导入超大图片 sheet（图片 > 画布时弹）：保持原 / fit-to-canvas（默认）/ 自定义 + 锁比例 + 插值 -->
+    <div class="resample-backdrop hidden" id="bigImportBackdrop"></div>
+    <div class="resample-sheet hidden" id="bigImportSheet" role="dialog" aria-modal="true">
+      <div class="resample-head">图片比画布大</div>
+      <div class="resample-body">
+        <div class="resample-row" style="font-size:12px; color:var(--ink-soft);">
+          <span id="bigImportInfo">图片 W×H · 画布 docW×docH</span>
+        </div>
+        <div class="resample-row">
+          <label><input type="radio" name="bigImportChoice" value="fit" checked /> 缩到画布（默认）</label>
+        </div>
+        <div class="resample-row">
+          <label><input type="radio" name="bigImportChoice" value="keep" /> 保持原尺寸（layer 超出画布，可后调）</label>
+        </div>
+        <div class="resample-row">
+          <label><input type="radio" name="bigImportChoice" value="custom" /> 自定义</label>
+        </div>
+        <div class="resample-row">
+          <label for="bigImportW">宽 (px)</label>
+          <input type="number" id="bigImportW" min="1" max="8192" step="1" />
+        </div>
+        <div class="resample-row">
+          <label for="bigImportH">高 (px)</label>
+          <input type="number" id="bigImportH" min="1" max="8192" step="1" />
+        </div>
+        <div class="resample-row">
+          <label for="bigImportMode">插值</label>
+          <select id="bigImportMode">
+            <option value="bicubic">双三次（默认 / 高质量）</option>
+            <option value="bilinear">双线性（软）</option>
+            <option value="nearest">最近邻（像素艺术 / 硬边）</option>
+          </select>
+        </div>
+      </div>
+      <div class="resample-foot">
+        <button type="button" id="bigImportCancel">取消</button>
+        <button type="button" id="bigImportConfirm" class="primary">确定</button>
+      </div>
+    </div>
 
     <!-- v110 重采样对话框 -->
     <div class="resample-backdrop hidden" id="resampleBackdrop"></div>
@@ -788,7 +855,10 @@
 
       <hr class="menu-sep" />
       <div class="menu-section-label">调试</div>
-      <button class="menu-item" id="menuResetBrushRack" type="button" role="menuitem" hidden></button>
+      <!-- v134 重置出厂从笔架 toolbar 挪过来（safety net 防误触）-->
+      <button class="menu-item menu-danger" id="menuResetBrushRack" type="button" role="menuitem">
+        <span class="menu-item-label">重置笔架出厂…</span>
+      </button>
       <button class="menu-item" id="menuForcePwaReset" type="button" role="menuitem">
         <span class="menu-item-label">强制更新（清缓存重启）</span>
       </button>
@@ -867,6 +937,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-ce70a936aaf6.mjs"></script>
+    <script type="module" src="./dist/webpaint-87cf4073792c.mjs"></script>
   </body>
 </html>

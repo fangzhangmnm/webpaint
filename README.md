@@ -122,6 +122,10 @@ AITODO 加一下每个场景的折叠。配图不折叠
     - [ ] Tiling Preview（预览无缝贴图）
 
 - [ ] Matte Paint背景图绘制场景
+    - [ ] 水笔感椭圆笔刷(RJ最喜欢的Gesinski Pen)
+    - [ ] 选区填色
+    - 完备的图层合成，抠图功能
+    - [ ] 保存图层到笔刷
 
 - [ ] 类BodyPaint直接在3D模型上绘制
 
