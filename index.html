@@ -56,22 +56,28 @@
   <body>
     <canvas id="board" class="board" aria-label="paint canvas"></canvas>
 
-    <!-- 顶栏：工具 + 颜色 + 笔粗 + undo / redo / fit / 主题 -->
-    <!-- 顶栏（v80 重排）：颜色 · 图层 │ 工具组 │ adjust │ 保存 · 菜单
-         operator 全在这（点了有动作，要 user consent）。read-only 状态在右下 HUD。
-         详 docs/ui-layout.md（待写）+ conversation v79→v80 -->
+    <!-- 顶栏 (v123 起 Procreate 顺序)：菜单 | 保存 | 工具组 | 调整 | 图层 | 颜色
+         operator 全在这（点了有动作，要 user consent）。read-only 状态在右下 HUD。 -->
     <header class="top-bar" id="topBar">
-      <div class="color-group" role="group" aria-label="color">
-        <button class="swatch active-color" id="activeSwatch" title="颜色 (C)"></button>
-      </div>
-
-      <button class="tool" id="layersButton" type="button" title="图层" aria-pressed="false">
+      <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polygon points="12 2 22 8 12 14 2 8 12 2"></polygon>
-          <polyline points="2 13 12 19 22 13"></polyline>
-          <polyline points="2 18 12 24 22 18" transform="translate(0,-2)"></polyline>
+          <line x1="4" y1="7" x2="20" y2="7"></line>
+          <line x1="4" y1="12" x2="20" y2="12"></line>
+          <line x1="4" y1="17" x2="20" y2="17"></line>
         </svg>
       </button>
+      <!-- v124 (user) 图库挪回菜单按钮右边 -->
+      <button class="tool" id="topGalleryBtn" type="button" title="图库" aria-label="图库">
+        <!-- v124 webui 迭代 (双相框堆叠) -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7.5 6.2 V5 a1.8 1.8 0 0 1 1.8 -1.8 H20 a1.8 1.8 0 0 1 1.8 1.8 V15.5 a1.8 1.8 0 0 1 -1.8 1.8 H17"/>
+          <rect x="2.5" y="6.5" width="13" height="13" rx="2"/>
+          <circle cx="6.3" cy="10.3" r="1.2"/>
+          <path d="M2.9 16.6 L6.6 13 L9.4 15.8 L12 13.2 L15.3 16.5"/>
+        </svg>
+      </button>
+      <!-- 智能保存：operator。data-state 由 app.js 切 -->
+      <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
 
       <span class="top-bar-sep" aria-hidden="true"></span>
 
@@ -82,20 +88,18 @@
             <path d="M13 5l6 6"></path>
           </svg>
         </button>
-        <button class="tool" id="toolSmudge" type="button" data-tool="smudge" title="涂抹（手指）">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <!-- v120: 用 Lucide 手势 (user：「smudge icon 换成一个手指的手势」)
-                 4 指立 + 拇指外伸的张开手掌 -->
-            <path d="M18 11V6a2 2 0 0 0-4 0v5"/>
-            <path d="M14 10V4a2 2 0 0 0-4 0v6"/>
-            <path d="M10 10.5V6a2 2 0 0 0-4 0v8"/>
-            <path d="M18 8a2 2 0 0 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>
+        <button class="tool tool-disabled" id="toolSmudge" type="button" data-tool="smudge" title="涂抹（engine 待实装）" aria-disabled="true">
+          <!-- v124 webui 迭代 + user 手编 path -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M17.09 2.5 C15.99 2.18 15.7 4.1 14.34 4.51 C12.98 4.92 10.24 4.44 8.92 4.98 C7.6 5.52 7.04 6.86 6.45 7.76 C5.86 8.66 5.31 9.26 5.36 10.36 C5.35 13.2 7.34 13.88 7.26 15.29 C6.88 16.81 5.22 18.15 4.37 19.09 C3.6 20.25 3.36 21.21 3.84 21.95 C4.61 22.35 5.01 22.48 6.65 21.21 C8.63 19.75 13.96 13.99 15.56 12.75 C16.79 11.2 13.95 13.97 13.4 14.9 C12.85 15.83 12.25 15.91 11.9 16.64 C11.89 17.45 12.69 18.05 14.37 17.55 C15.32 17.01 17.13 16.09 17.94 15.08 C18.75 14.07 18.92 13.32 19.1 12.29 C19.28 11.26 18.72 9.89 19.02 8.92 C19.32 7.95 21.24 7.52 20.92 6.45 C20.6 5.38 18.19 2.82 17.09 2.5 Z"/>
           </svg>
         </button>
         <button class="tool" id="toolEraser" type="button" data-tool="eraser" title="橡皮 (E)">
+          <!-- v124 webui 迭代 -->
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M20 20H7L3 16a2 2 0 0 1 0-2.83l9-9a2 2 0 0 1 2.83 0l5.17 5.17a2 2 0 0 1 0 2.83L11 21"></path>
-            <path d="M14 7l3 3"></path>
+            <path d="M7 21 l-4.3 -4.3 c-1 -1 -1 -2.5 0 -3.4 l9.6 -9.6 c1 -1 2.5 -1 3.4 0 l5.6 5.6 c1 1 1 2.5 0 3.4 L13 21"/>
+            <path d="M22 21 H7"/>
+            <path d="M5 11 l9 9"/>
           </svg>
         </button>
         <!-- v120: shapes tool 撤了 (user：「shapes icon 不要，以后不要这个 tool 了，
@@ -104,8 +108,11 @@
         <!-- 喷枪不再是独立工具 (v96)：是 brush preset 的特征（spacing.kind=time + bufferMode=direct）。
              用户点笔刷工具，picks 大喷枪 / 小喷枪 preset 就行 -->
         <button class="tool" id="toolPicker" type="button" data-tool="picker" title="吸色 (I)">
+          <!-- v124 webui 迭代 -->
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M3 21l2-4 7-7-1-1 6-6a2.83 2.83 0 0 1 4 4l-6 6-1-1-7 7z"></path>
+            <path d="M3 21 l1 -1 h2.5 L14 12.5"/>
+            <path d="M4 20 v-2.5 L11.5 10"/>
+            <path d="M14.2 6.9 L17.4 3.7 a2.4 2.4 0 0 1 3 3 L17.1 9.6 a1.3 1.3 0 0 1 0 1.9 a1.3 1.3 0 0 1 -1.9 0 L12.5 9.6 a1.3 1.3 0 0 1 0 -1.9 a1.3 1.3 0 0 1 1.9 0 Z"/>
           </svg>
         </button>
         <button class="tool" id="toolLasso" type="button" data-tool="lasso" title="套索 (L)">
@@ -137,26 +144,18 @@
         </svg>
       </button>
 
-      <span class="top-bar-sep" aria-hidden="true"></span>
-
-      <!-- 智能保存：operator（不是 status）。data-state 由 app.js 切（dirty / cloud-dirty / cloud-busy / synced / saved）-->
-      <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
-
-      <button class="tool" id="topGalleryBtn" type="button" title="图库">
+      <!-- v123 图层 + 颜色 挪到右边（Procreate 习惯）。图库进菜单顶部 -->
+      <button class="tool" id="layersButton" type="button" title="图层" aria-pressed="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="18" height="18" rx="2"/>
-          <circle cx="8" cy="9" r="1.5"/>
-          <polyline points="3 17 9 11 14 16 21 9"/>
+          <polygon points="12 2 22 8 12 14 2 8 12 2"></polygon>
+          <polyline points="2 13 12 19 22 13"></polyline>
+          <polyline points="2 18 12 24 22 18" transform="translate(0,-2)"></polyline>
         </svg>
       </button>
 
-      <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <line x1="4" y1="7" x2="20" y2="7"></line>
-          <line x1="4" y1="12" x2="20" y2="12"></line>
-          <line x1="4" y1="17" x2="20" y2="17"></line>
-        </svg>
-      </button>
+      <div class="color-group" role="group" aria-label="color">
+        <button class="swatch active-color" id="activeSwatch" title="颜色 (C)"></button>
+      </div>
     </header>
 
     <!-- 左侧栏（drawing 时常驻）：当前笔 + size + flow + undo + redo -->
@@ -288,17 +287,84 @@
       <!-- Row 1: 选区方式 -->
       <div class="lasso-toolbar hidden" id="lassoToolbarRow1">
         <div class="lasso-section" id="lassoSubToolBar">
-          <button class="lasso-tool-btn" data-lasso-sub="freehand" type="button" title="自由套索">自由</button>
-          <button class="lasso-tool-btn" data-lasso-sub="rect" type="button" title="矩形选区">矩形</button>
-          <button class="lasso-tool-btn" data-lasso-sub="ellipse" type="button" title="椭圆选区">椭圆</button>
-          <button class="lasso-tool-btn" data-lasso-sub="magic" type="button" title="魔术棒">魔棒</button>
+          <!-- v123 sub-tool 改 icon (user) -->
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="freehand" type="button" title="自由套索" aria-label="自由套索">
+            <!-- v124 webui 迭代 -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 2.4" aria-hidden="true">
+              <path d="M3.5 11.5 C3.83 9.83 6.08 7 7.5 6.5 C8.92 6 10.5 8.5 12 8.5 C13.5 8.5 15.08 6 16.5 6.5 C17.92 7 20.17 9.83 20.5 11.5 C20.83 13.17 19.92 15.5 18.5 16.5 C17.08 17.5 14.17 17.5 12 17.5 C9.83 17.5 6.92 17.5 5.5 16.5 C4.08 15.5 3.17 13.17 3.5 11.5 Z"/>
+            </svg>
+          </button>
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="rect" type="button" title="矩形选区" aria-label="矩形选区">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="6" width="16" height="12" stroke-dasharray="3 2"/>
+            </svg>
+          </button>
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="ellipse" type="button" title="椭圆选区" aria-label="椭圆选区">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <ellipse cx="12" cy="12" rx="8" ry="6" stroke-dasharray="3 2"/>
+            </svg>
+          </button>
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="magic" type="button" title="魔术棒" aria-label="魔术棒">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <!-- 魔棒 stick -->
+              <path d="M4 20l11-11"/>
+              <!-- 星星 tip -->
+              <path d="M17 4l.8 1.7L19.5 6.5l-1.7.8L17 9l-.8-1.7L14.5 6.5l1.7-.8z"/>
+              <!-- 闪光 -->
+              <path d="M20 11h1M14 4l-.5-.8M21 16l-.7.3"/>
+            </svg>
+          </button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
-          <button class="lasso-tool-btn" data-lasso-setop="new" type="button" title="新建选区">新</button>
-          <button class="lasso-tool-btn" data-lasso-setop="union" type="button" title="并集">并</button>
-          <button class="lasso-tool-btn" data-lasso-setop="subtract" type="button" title="差集">差</button>
-          <button class="lasso-tool-btn" data-lasso-setop="intersect" type="button" title="交集">交</button>
+          <!-- v123 set-op 改文氏图 (user：「新/并/差 用文氏图，dashed 边缘，加号表 new，不要交集」) -->
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" title="新建选区（替换当前）" aria-label="新建选区">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="7" stroke-dasharray="3 2"/>
+              <path d="M12 9v6M9 12h6"/>
+            </svg>
+          </button>
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" title="添加到选区" aria-label="添加到选区">
+            <!-- v124 webui 迭代 -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2.5" y="3" width="10" height="10" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2" fill="currentColor" fill-opacity="0.16"/>
+              <rect x="10.5" y="9" width="11" height="11" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2"/>
+              <path d="M16 11.5 V17.5 M13 14.5 H19" stroke-width="2"/>
+            </svg>
+          </button>
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="subtract" type="button" title="从选区减去" aria-label="从选区减去">
+            <!-- v124 webui 迭代 -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2.5" y="3" width="10" height="10" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2" fill="currentColor" fill-opacity="0.16"/>
+              <rect x="10.5" y="9" width="11" height="11" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2"/>
+              <path d="M13 14.5 H19" stroke-width="2"/>
+            </svg>
+          </button>
+          <!-- v123 删交集 (user：「不要交集」) -->
+          <button class="lasso-tool-btn hidden" data-lasso-setop="intersect" type="button" aria-hidden="true"></button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
-          <button class="lasso-tool-btn" id="lassoSelectAllBtn" type="button" title="全选 doc">全选</button>
+          <!-- v124 全选 / 反选 / 去选 同组 (user) -->
+          <button class="lasso-tool-btn lasso-tool-icon" id="lassoSelectAllBtn" type="button" title="全选 (Ctrl+A)" aria-label="全选">
+            <!-- v124 webui 迭代 -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-width="1.8"/>
+              <rect x="5.6" y="5.6" width="12.8" height="12.8" rx="1.5" stroke-width="1.4" stroke-dasharray="3 2" fill="currentColor" fill-opacity="0.14"/>
+            </svg>
+          </button>
+          <button class="lasso-tool-btn lasso-tool-icon" id="lassoInvertBtn" type="button" title="反选 (Ctrl+Shift+I)" aria-label="反选">
+            <!-- v124 webui 迭代 -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <defs><clipPath id="invClip"><rect x="3" y="3" width="18" height="18" rx="2.5"/></clipPath></defs>
+              <g clip-path="url(#invClip)"><path d="M3 3 L3 21 L21 21 Z" fill="currentColor" fill-opacity="0.18" stroke="none"/></g>
+              <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2" stroke-width="1.6"/>
+              <path d="M4.2 4.2 L19.8 19.8" stroke-width="1.5"/>
+            </svg>
+          </button>
+          <button class="lasso-tool-btn lasso-tool-icon lasso-tool-cancel" id="lassoDeselectBtn" type="button" title="取消选区 (Ctrl+D)" aria-label="取消选区">
+            <!-- v124 webui 迭代 -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2"/>
+              <path d="M9 9 L15 15 M15 9 L9 15" stroke-width="1.8"/>
+            </svg>
+          </button>
           <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
           <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" title="约束 1:1（正方 / 圆）">1:1</button>
           <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒阈值">设置</button>
@@ -313,9 +379,7 @@
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <button class="lasso-tool-btn" id="lassoDuplicateBtn" type="button" title="复制选区到新层">复制层</button>
           <button class="lasso-tool-btn" id="lassoMoveToLayerBtn" type="button" title="选区移动到新层（旧层清除）">移到层</button>
-          <span class="lasso-tool-sep" aria-hidden="true">|</span>
-          <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" title="反选">反选</button>
-          <button class="lasso-tool-btn lasso-tool-cancel" id="lassoDeselectBtn" type="button" title="清除选区（去选）">去选</button>
+          <!-- v124：反选 / 去选 挪到 Row 1 跟 全选 一起 (user) -->
         </div>
         <div class="lasso-section hidden" id="lassoTransformCtrl">
           <button class="lasso-tool-btn" data-lasso-mode="free" type="button" title="自由变换">自由</button>
@@ -428,41 +492,15 @@
         <button class="float-panel-close" id="layersPanelClose" type="button" aria-label="关闭">×</button>
       </div>
       <div class="layers-list" id="layersList"><!-- rows rendered by JS --></div>
+      <!-- v123：footer 精简为 1 个 "+"（user：「省一行，from image + new empty 放下拉框」）
+           del / up / down 挪进 per-row "⋯" 菜单 -->
       <div class="layers-foot">
-        <button class="layers-foot-btn" id="layerImportPhotoBtn" type="button" title="导入照片为新图层">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="5" width="18" height="14" rx="2"/>
-            <circle cx="8" cy="10" r="1.5"/>
-            <polyline points="3 17 9 12 14 17 21 11"/>
-          </svg>
-        </button>
-        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建图层">
+        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建图层（点开选 空层 / 从图片）">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"/>
             <line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
-        </button>
-        <button class="layers-foot-btn" id="layerDelBtn" type="button" title="删除当前">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <!-- 垃圾桶：盖 + 身 + 两道竖纹 -->
-            <polyline points="3 6 21 6"/>
-            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-            <path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/>
-            <line x1="10" y1="11" x2="10" y2="17"/>
-            <line x1="14" y1="11" x2="14" y2="17"/>
-          </svg>
-        </button>
-        <button class="layers-foot-btn" id="layerUpBtn" type="button" title="上移">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="12" y1="19" x2="12" y2="5"/>
-            <polyline points="6 11 12 5 18 11"/>
-          </svg>
-        </button>
-        <button class="layers-foot-btn" id="layerDownBtn" type="button" title="下移">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="12" y1="5" x2="12" y2="19"/>
-            <polyline points="6 13 12 19 18 13"/>
-          </svg>
+          <span class="layers-foot-btn-arrow" aria-hidden="true">▾</span>
         </button>
       </div>
     </div>
@@ -645,42 +683,20 @@
       <!-- v94 重组：清晰分组，操作 / 导入 / 导出 / 设置 / 调试 / 危险
            user：「主菜单分导入，导出，调试等子菜单」
            user：「压感 -> 颜色，不透明度 这些应该只在笔刷设置页出现」→ 删 -->
-      <div class="menu-section-label">文件</div>
-      <button class="menu-item" id="menuRename" type="button" role="menuitem">
-        <span class="menu-item-label">重命名当前画作…</span>
-      </button>
-      <button class="menu-item" id="menuFit" type="button" role="menuitem">
-        <span class="menu-item-label">画布居中 (0)</span>
-      </button>
+      <!-- v124 (user) 图库挪回顶栏；menuGallery 留 hidden stub 给 app.js 兜底 -->
+      <button id="menuGallery" type="button" hidden></button>
 
       <hr class="menu-sep" />
-      <div class="menu-section-label">画布</div>
-      <!-- v114: 裁切 / 重采样 从 adjust popup 挪到这里
-           user：「裁切丢到文件目录里，而不是调整目录里」 -->
-      <button class="menu-item" id="adjustCropToSelection" type="button" role="menuitem">
-        <span class="menu-item-label">裁切到选区</span>
-      </button>
-      <button class="menu-item" id="adjustCropFree" type="button" role="menuitem">
-        <span class="menu-item-label">自由裁切（8 handle）</span>
-      </button>
-      <button class="menu-item" id="adjustResample" type="button" role="menuitem">
-        <span class="menu-item-label">画布重采样…</span>
-      </button>
-
-      <hr class="menu-sep" />
-      <!-- v120 (user：「导出项目和导出语义分开 + 小扳手」+「导入图片」)
-           主行 = 按 sticky config 一键执行；右侧 🔧 = 改配置（弹 inline popup）
-           sticky 存 localStorage，下次同样的菜单项保留上次选择 -->
-      <div class="menu-section-label">导出</div>
+      <!-- v124 (user) 文件操作扁平化：删 section label / inner separator / 居中画布；
+           裁切 context-aware（有选区→裁选区；否则开自由裁切 8-handle）；
+           重采样 renamed 成 Resize；参考小窗 挪进来一起 -->
       <div class="menu-item-row">
-        <button class="menu-item menu-item-main" id="menuExportProject" type="button" role="menuitem">
-          <span class="menu-item-label">导出项目</span>
-          <span class="menu-item-sub" id="menuExportProjectSub">.ora</span>
+        <button class="menu-item menu-item-main" id="menuImportImage" type="button" role="menuitem">
+          <span class="menu-item-label">导入图片</span>
+          <span class="menu-item-sub" id="menuImportImageSub">文件 · 新图层</span>
         </button>
-        <button class="menu-item-wrench" id="menuExportProjectConfig" type="button" title="配置导出项目" aria-label="配置导出项目">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-          </svg>
+        <button class="menu-item-wrench" id="menuImportImageConfig" type="button" title="配置导入图片" aria-label="配置导入图片">
+          ⋯
         </button>
       </div>
       <div class="menu-item-row">
@@ -689,31 +705,41 @@
           <span class="menu-item-sub" id="menuExportImageSub">PNG · 文件</span>
         </button>
         <button class="menu-item-wrench" id="menuExportImageConfig" type="button" title="配置导出图片" aria-label="配置导出图片">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-          </svg>
+          ⋯
         </button>
       </div>
-
-      <hr class="menu-sep" />
-      <div class="menu-section-label">导入</div>
       <div class="menu-item-row">
-        <button class="menu-item menu-item-main" id="menuImportImage" type="button" role="menuitem">
-          <span class="menu-item-label">导入图片</span>
-          <span class="menu-item-sub" id="menuImportImageSub">文件 · 新图层</span>
+        <button class="menu-item menu-item-main" id="menuExportProject" type="button" role="menuitem">
+          <span class="menu-item-label">导出项目</span>
+          <span class="menu-item-sub" id="menuExportProjectSub">.ora</span>
         </button>
-        <button class="menu-item-wrench" id="menuImportImageConfig" type="button" title="配置导入图片" aria-label="配置导入图片">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-          </svg>
+        <button class="menu-item-wrench" id="menuExportProjectConfig" type="button" title="配置导出项目" aria-label="配置导出项目">
+          ⋯
         </button>
       </div>
+      <button class="menu-item" id="menuRename" type="button" role="menuitem">
+        <span class="menu-item-label">重命名当前画作…</span>
+      </button>
+      <!-- v124 裁切合并：有选区 → 裁切到选区；否则 → 自由裁切 8 handle -->
+      <button class="menu-item" id="menuCrop" type="button" role="menuitem">
+        <span class="menu-item-label" id="menuCropLabel">裁切</span>
+      </button>
+      <button class="menu-item" id="adjustResample" type="button" role="menuitem">
+        <span class="menu-item-label">调整尺寸</span>
+      </button>
+      <button class="menu-item" id="menuReference" type="button" role="menuitem">
+        <span class="menu-item-label">参考小窗</span>
+      </button>
+      <button class="menu-item" id="menuShortcuts" type="button" role="menuitem">
+        <span class="menu-item-label">快捷键</span>
+      </button>
+      <!-- v124 隐藏 stub：删了的旧入口 id 留着防 app.js getElementById 崩 -->
+      <button id="menuFit" type="button" hidden></button>
+      <button id="adjustCropToSelection" type="button" hidden></button>
+      <button id="adjustCropFree" type="button" hidden></button>
 
       <hr class="menu-sep" />
       <div class="menu-section-label">设置</div>
-      <button class="menu-item" id="menuReference" type="button" role="menuitem">
-        <span class="menu-item-label">参考小窗…</span>
-      </button>
       <button class="menu-item" id="menuBrushSettings" type="button" role="menuitem" hidden></button>
       <button class="menu-item" id="menuCheckerboard" type="button" role="menuitemcheckbox" aria-pressed="false">
         <span class="menu-item-label">透明背景显示棋盘</span>
@@ -736,10 +762,8 @@
       </button>
       <button class="menu-item" id="menuCheckUpdate" type="button" role="menuitem" hidden></button>
 
-      <hr class="menu-sep" />
-      <button class="menu-item menu-danger" id="menuClear" type="button" role="menuitem">
-        <span class="menu-item-label">清空当前图层</span>
-      </button>
+      <!-- v124 删主菜单 "清空当前图层"——user 要求挪进图层 ⋯ menu。stub 留 id 给 app.js 兜底 -->
+      <button id="menuClear" type="button" hidden></button>
 
       <!-- 隐藏 stub：删了的菜单项 (压感 size / 压感 flow)，应在 brush settings 全屏 view 里调。
            hide 但保留 id 让旧代码引用不崩 -->
@@ -747,6 +771,21 @@
       <button id="menuPressureOpacity" type="button" hidden></button>
     </div>
 
+
+    <!-- v124 快捷键面板（从 KEYBOARD_SHORTCUTS 自动渲染） -->
+    <div class="backdrop hidden" id="shortcutsBackdrop"></div>
+    <div class="sheet shortcuts-sheet hidden" id="shortcutsSheet" role="dialog" aria-labelledby="shortcutsTitle">
+      <div class="sheet-head">
+        <span id="shortcutsTitle" class="sheet-title">快捷键</span>
+        <button type="button" id="shortcutsClose" class="sheet-close" aria-label="关闭">×</button>
+      </div>
+      <div class="sheet-body" id="shortcutsBody"><!-- JS 渲染 --></div>
+    </div>
+
+    <!-- v124 吸色 pin (Google Maps 风格)：picker tool / 长按吸色时手指上方浮一个 pin -->
+    <div class="picker-pin hidden" id="pickerPin" aria-hidden="true">
+      <div class="picker-pin-head" id="pickerPinHead"></div>
+    </div>
 
     <!-- HUD：缩放 / 画布尺寸 / 状态 / 版本水印 -->
     <div class="hud" id="hud">
@@ -793,7 +832,7 @@
 
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
-         build.sh --prod 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/main-f4f68a8ec45c.mjs"></script>
+         build.sh 会 sed 改下面这行的文件名。 -->
+    <script type="module" src="./dist/webpaint-a1e5a1a1131e.mjs"></script>
   </body>
 </html>

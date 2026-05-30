@@ -461,6 +461,12 @@ export class Board {
       this._renderFull();
       return;
     }
+    // v124 (user：「windows stamps 出现小黑框」第二尝试)：
+    // 第一招 (clip 边界 floor/ceil) 失败。**兜底**：有 live overlay (= stroke 进行中) 直接全屏。
+    // 一帧多个 fillRect 在 hidpi 上微秒级，不会影响 60fps；换 partial render clip 边沿 sliver bug 不再可能。
+    if (this._overlayProvider?.()) {
+      this._renderFull(); return;
+    }
     const ctx = this.ctx;
     const { tx, ty, scale } = this.viewport;
 
@@ -470,10 +476,19 @@ export class Board {
     const dx1 = docRect[2] + pad;
     const dy1 = docRect[3] + pad;
 
-    const sx = dx0 * scale + tx;
-    const sy = dy0 * scale + ty;
-    const sw = (dx1 - dx0) * scale;
-    const sh = (dy1 - dy0) * scale;
+    // v124 (user：「Windows 上画画 stamps 出现小黑框，commit 后消失」)
+    // 根因：浮点 sx/sw 让 clip 与 fillRect 的边界落到亚像素 → Windows Skia GPU 在
+    // DPR>1 时 clip rounds outward 但 fillRect rounds inward (或反过来) → 1 px sliver
+    // 没被任何东西画过 → 主 canvas {alpha:false} 初始黑色露出 = 黑色边线
+    // 修：整 pixel 取整 + 1 px 外扩，让 clip 与 fill 都严格覆盖到底
+    const rawSx = dx0 * scale + tx;
+    const rawSy = dy0 * scale + ty;
+    const rawSx1 = dx1 * scale + tx;
+    const rawSy1 = dy1 * scale + ty;
+    const sx = Math.floor(rawSx) - 1;
+    const sy = Math.floor(rawSy) - 1;
+    const sw = Math.ceil(rawSx1) - sx + 1;
+    const sh = Math.ceil(rawSy1) - sy + 1;
 
     const w = this.canvas.clientWidth || this.canvas.width / this.dpr;
     const h = this.canvas.clientHeight || this.canvas.height / this.dpr;

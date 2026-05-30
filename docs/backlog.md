@@ -14,29 +14,34 @@
 
 ## P0（v89+ 路线明确的）
 
-### Windows 画画时 stamps 出现小黑框（commit 后消失） (v120 记，user：「windows 上画画的时候会出现一些小黑框 for stamps，送笔 commit 之后好」+ 手机拍图)
-- 现象：Windows 上落笔过程中，stroke 沿线撒一堆**细矩形轮廓**（不是实心块），
-  大小≈ stamp / 上次 buffer bbox 尺寸，commit 后干净。看图像描述 = "GPU quirk，根据更新的 bbox spawn around trajectory"
-- 关键洞察：是**矩形轮廓**不是实心黑块 → 不是某处实心填了黑色，而是 **partial render
-  的 clip 边缘**在屏幕上漏了 1–2 px。screen ctx = `{alpha: false}` → 任何未画到的 pixel = 黑色。
-- 最可能根因：[board.js:451-510] `_renderPartial`
-  - 用浮点 `sx, sy, sw, sh` 做 `ctx.rect + clip + fillRect`
-  - Windows Skia GPU 在 DPR>1 下处理小数 clip 边界与 fillRect 边界**不完全一致** →
-    clip 把 outer 0.5 px 排除掉、fillRect 又只画 inner 0.5 px → 留 1 px sliver 没被任何东西画过
-    → 沿 alpha:false canvas 初始状态露出 = 黑色细线 = **看上去就是 dirty rect 的黑色 outline**
-  - 每帧 _markDirty 都加新区，每帧都漏一圈 → 整段 trajectory 上撒满黑框
-- **defensive fix（高概率管用）**：partial render 算 screen rect 时整 pixel 取整 +
-  小幅外扩：
-  ```js
-  const sx = Math.floor(dx0 * scale + tx) - 1;
-  const sy = Math.floor(dy0 * scale + ty) - 1;
-  const sw = Math.ceil(dx1 * scale + tx) - sx + 1;
-  const sh = Math.ceil(dy1 * scale + ty) - sy + 1;
-  ```
-  确保 void fill 严格覆盖 clip 边沿，不留 sliver
-- 兜底 fix（万一上面没用）：stroke 进行中强制走 `_renderFull()` 不走 partial（一帧多一次全屏 fill 而已）
-- commit 后好 = endStroke 时 applyPixelSnap 触发 _markDirty(整 layer.bbox)，dirty 区被一次大块覆盖（不会再有 sliver 漏出来），看起来就 "好了"。
-- v120 还没做。Windows 实机测试需要 user 配合：试 floor/ceil fix → screenshot 对比
+<!-- v124 第一招（partial render clip 取整 + 1px 外扩）失败；
+     v124 兜底：stroke 进行中（有 live overlay）强走 _renderFull，规避 partial sliver bug。
+     等 user 在 Windows 验证。 -->
+
+### 图库文件夹管理（v124 记，user：「图库最好支持文件夹管理；文件夹删除只能空文件夹」）
+- 现状：图库是 flat list 所有 doc，按名 sort
+- 加 folder 概念：
+  - doc 有 `folder` 字段（string），默认 ""（根）
+  - 图库左边或顶部加 folder breadcrumb / 列表
+  - 移动 doc 到 folder：右键 / "..." menu
+  - 新建文件夹：图库 + 按钮 旁边一个"新文件夹"入口
+  - **删除文件夹只允许 empty**（安全约束，防误删一堆画）
+- 持久化：doc 已有元数据（IDB），新增字段 + migration
+- 关联 cloud sync：folder 也要同步到 OneDrive 子目录映射
+
+### 新画布常见模板（v124 记，user：「正方形不太常见，加几个 pixel art 等」）
+- 现状：新建只让 user 填 W×H，默认 2048×2048 正方
+- 候选模板：
+  - **iPad 横屏** 2732×2048 (Procreate 默认 4K)
+  - **手机竖屏** 1080×1920
+  - **A4 300dpi** 2480×3508
+  - **方形小图** 1024×1024
+  - **Pixel art 像素图**：32×32 / 64×64 / 128×128（自动 set 笔刷 pixel mode）
+  - **Web banner** 1200×630（社交分享卡）
+  - **Twitter 头图** 1500×500
+- UI：新建画作 sheet 顶部加 chip 列表，点击 → 填 W/H + 设笔刷 preset
+
+
 
 ### smudge icon 再改：单手指 45° 向下按压 (v120 记，user：「smudge 错啦，是一根手指 45° 向下伸出来按住涂抹」)
 - v120 我选了 Lucide 张开手掌（4 指立 + 拇指），错了；user 要的是**单根手指**
@@ -187,26 +192,17 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - PS 用了几十年的标准做法
 - 兴趣不大，但留在这里参考
 
-### size popup 预览 bug 一堆（v108 记）
-- user：「大小预览忘了算 scale，而且太大会被 clamp（可以框有最大，然后 preview crop）。
-  然后笔的预设我也动过」
-- 现状：size popup 显「N px」+ mini circle (capped 60px display)
-- bug 1：忘算 board zoom scale —— "100 px" 是 doc 像素，但屏幕 cursor 实际半径
-  = 100 × board.zoom；user 拖 slider 时看不到屏幕实际大小
-- bug 2：超过 60px display 时被 clamp，预览不再随 size 增长 → 反馈断
-- 解：popup 框设最大尺寸（如 80×80 或 100×100），circle 真正按 size × zoom 画，
-  超出框时 overflow: hidden crop 显示（procreate 是这样）
-- 加 text 同时显「N px（屏幕约 M px）」二行展示
-- backlog，等顺手做
+<!-- v123 删：size popup 预览 bug —— v123 全部重写（缩小 64px、竖排、显 "N px · M%"、boot 静默） -->
 
-### 大喷枪低 alpha 处 color quantize banding（v104 记）
-- user：「大喷枪能看到 color quantize error」
-- 现状：buildup 模式 buffer = Canvas2D RGBA (8-bit/channel)
-- 低 alpha stamps 累积时每步 round 到 8-bit → 视觉 banding（特别是 spacing 2% 时层数极多）
-- 解：buffer 升 16-bit（offscreen canvas RGBA16 还没真正普及，要 WebGL2 RGBA16F 路径）
-- 或：buffer 改 float32 Uint8 模拟（每像素 4 bytes int → float scale，自己做 alpha 累加）
-- 或：Wash mode 的 JS per-pixel 路径也升 16-bit Uint16Array 存 α
-- 关联 docs/engineering-roadmap.md WebGL 通路（已论证）
+### 大喷枪低 alpha 处 color quantize banding 16-bit 升级（v104 记，v123 user 确认 8-bit 有瑕疵但无伤大雅，**tier 2 拖到以后做**）
+- 现状：buildup 模式 buffer = Canvas2D RGBA 8-bit / channel；低 alpha stamps 累积每步 round 到 8-bit → 视觉 banding
+- 8-bit 路径**可用**，banding 在大喷枪 + spacing 2% 时才明显，不影响日常画
+- 升级路径备选：
+  - 推 WebGL2 RGBA16F offscreen buffer
+  - 或 Wash mode JS per-pixel buffer 升 Uint16Array 存 α
+- 关联 docs/engineering-roadmap.md WebGL 通路
+
+
 
 ### iPad 双击误触 window 拖动 → finger state 抽风（v104 记）
 - user：「有时双击时还是会错误拖动 ipad window 然后 finger state 抽风，按钮都按不了」
@@ -220,42 +216,88 @@ UX：菜单「AI 工具」分组 → 「配置 API key」→ 填进 localStorage
 - 短期修：global doubletap detector → preventDefault + 重置 pointer state
 - 长期：可能要 logging 双击事件 + finger state，看 iOS 14/15/16/17 行为差异
 
-### lasso 反选/去选 应该在一起（v104 记）
-- user：「lasso 里面反选和去选应该在一个地方，你分类错了」
-- 现状：「反选」和「去选」按钮分散在 lasso toolbar 不同位置
-- 都是 selection 修改类操作（接受当前选区，输出新选区或无），归一起
-- 改：lassoToolbarRow2 重排，selectionActions 里把反选 / 去选 / 填色 / 清除选区
-  四个 grouping 到一起；变换 / 复印 / 复制层等 lift-类操作另一组
+<!-- v123：反选 + 去选 跟 全选 同组 —— 移入 immediately-now 这一批做（不在 backlog） -->
 
-### 液化 + 笔刷 respect 选区 (v113 记，user：「液化和笔刷都要 respect 选区」)
-- 现状：lasso fill/clear 受选区影响；adjust suite v113 起 respect；笔刷 / 液化 不 respect
-- 笔刷：current stroke 走 brush engine 直接写 layer，选区 mask 没 hook
-  - lasso.applySelectionMaskPostStroke 已有！是 stroke 结束后把选区外像素 revert 到 preSnap
-  - 检查为啥没在 brush endStroke 后自动调；找 input.js _abortStroke / _commitStroke 路径
-- 液化：current 走 liquify engine 改 layer 像素，同样没受 mask 限制
-  - 同思路：preSnap → liquify → 选区外 revert，applySelectionMaskPostStroke 可复用
-- 关联：stroke entry beforeSnap 已经存了；只缺 "endStroke 时检查 doc.selection 并 mask"
-- 工作量 ~20 行 hook
+### 未下载文件的 thumb 显示（v124 记，user：「在头疼未下载文件的 thumbs 问题」）
+- 现状：图库 tile 显示需要 thumb；云端文件未下载本地时 IDB 没缓存 → tile 显示问号 / 空
+- 痛点：user 在云端有 N 张画，登录后不想全下载（流量 / 时间），但又想在图库里**看到缩略图**
+- 候选路径：
+  - sidecar thumb：每个 .ora 在云上同目录存一个 `<name>.thumb.png`（小，256-512px），
+    图库只拉 thumb 不拉本体；user 点开才下 .ora
+  - thumb 进 IDB 单独 store，登录后**只**同步 thumb store，本体懒下载
+  - .ora 内部 mergedimage.png 是 thumb 候选，但要拉整 zip 才能读 → 不能省流量
+- 关联：之前 backlog 有 "thumb 改 sidecar 文件 + 改善线稿缩图狗牙"，是同根问题
+- 工作量：sidecar 路径 ~50 行（save 时多写一个 file；load 时优先拉 thumb）
 
-### lasso transform 数学大修 (v112 记，user：「建议好好理一遍数学」)
-v110 加 mesh 后 v111 投影补丁，user 测出多个 drag/handle bug：
-- **uniform 还是错**：应该用 opposite angle 做 pivot（拖角时对角角固定），现在大概 pivot 在中心
-- **自由 / 等比 忘了旋转 handle**：通常在 top-edge 上方浮一个 rotation handle
-- **free transform 拖动上面下面动**：top/bottom 拖某条边时另一条跟着动，math 错了
-- **变换 commit 后 lasso 再拖矩形蚂蚁线不见**：可能新 selection 的 _chains / _outline 没正确重算
-- 建议重新论证 transform basis：
-  - free = pure affine (rotate + scale + skew)，需要旋转 handle
-  - uniform = affine + lock aspect，opposite corner pivot
-  - distort = perspective (free quad)，4 corner = 4 control points
-  - warp = bezier patch (4x4 mesh)
-- 写 docs/transform-math.md 论证 + 比对 Procreate / Photoshop UX
+### 蚂蚁线动画（tier 2，v123 记）
+- 现状：marching squares 抽轮廓画黑白相间虚线，**不动**（user v113 起反映动画太干扰，撤了）
+- 后续可加**很缓慢**的 dash offset 动画（每秒 1-2 像素，跟 Photoshop 比要慢）让"这是选区在动"语义更明确
+- tier 2 低优先级
 
-### 颜色调整 ctx.filter 兜底 (v112 记，user：「颜色调整没 work」)
-- v110 用 ctx.filter on board render；v112 加 save/restore 包裹防 setter 不清
-- 若 iPad Safari Canvas2D filter 仍偶发不渲染：fallback 走 off-screen canvas 预渲染
-  + board.setActiveLayerSurrogate(layerId, canvas) 路径
-- 终极 fallback：JS per-pixel 算 B/C/S/H (avoid Canvas2D filter)
-- 优先级：v112 先看 save/restore 够不够
+### smudge engine 真实装（v123 记，user：「smudge 之后做，先灰显」）
+- 现状：tool=smudge 在 input.js 路由成 role=draw，走 brush engine（fallback）；setTool("smudge") 直接 return + status "暂未启用"
+- v123 计划：UI 改灰显（按钮 visually 标 disabled、title 显"待实装"），不挑起用户预期
+- 后续真做：参考 docs/brush-architecture.md 的 smudge 通路；engine 已有 `_sampleLayerColor`，需要 mode="smudge" 的 stamp-with-loaded-color + 步长内 color decay
+
+### 7 个 toolbar icon webui 迭代后替换（v123 记）
+- 求助信 docs/icon-iteration-prompt.md：smudge / 魔棒 / Venn 并 / Venn 差 / 橡皮 / eyedropper / 图库 / 笔刷 / 套索 / 全选 共 10 个
+- user 走 Claude WebUI 拿回新 SVG → 替到 index.html 对应 `<button id="...">` 即可
+
+### 颜色调整：更多模式（port AtlasMaker，v123 记）
+- 现状：BCSH (亮度/对比/饱和/色相) per-pixel 烤进 surrogate canvas
+- AtlasMaker 有：色阶 (levels)、曲线 (curves)、色彩平衡 (color balance)、HSL 选择性调整
+- 抄前先看 AtlasMaker 实现，per-pixel 路径模板已稳
+- 关联 v123 immediately-now 的"颜色调整 transient + UI 整理"先收尾，再扩
+
+### 导入图片大过画板：apply 后用户主动 crop（v123 记，user 行为澄清）
+- 现状（v122 起）：导入图片自动 lift 进 transform，user 调位置 / 缩放
+- **要确认**：当导入图片大过画板边界时，**不要** auto-crop。让 user apply 后看到 floating 像素出 doc 边，然后用画布裁切手动收
+- 工作量 ~5 行：lift 时**不**调整 lift 后的 bbox 到 doc 边内；commit 时仍按 selection 走（selection = whole doc 仅 doc 范围内被写）
+
+### history entry blob 压缩节奏监控（v123 记）
+- 现状：stroke / lasso / docTransform / liquify 等 entry 都走 compressPixelSnap → blob，imageData 释放
+- 没 bug，但 memory pressure 大时（多 entry 累积）blob 仍可观；监控**内存峰值**，必要时减少 entry 保留窗口或 OPFS spill
+- tier 2
+
+### Lasso 描边 v125+（user 早提，v124 归位）
+- 现在 lasso 只有 fill / clear；user 要 stroke 选区边
+- 参数（user 列）：width / softness / use active brush vs 简单线 / inner-outer 对齐（inside/center/outside）
+- 接现有 lasso UI row 2，加 "描边" 按钮 + 弹配置 popup
+- 工作量：~80 行 stroke rendering（按 mask 边缘 marching squares 路径走 + 模拟笔刷 stamp 或简单线）
+
+### Lasso polygon mode（**已在上面 "lasso 多边形模式" 条**，这条删避重复）
+
+### 颜色调整：更多模式（port AtlasMaker，v123 记，**已在上面**，去重）
+
+### 智能形状笔（brush preset toggle，v125+，user 早提）
+- brush settings 加 toggle："智能形状"
+- 开启后：用户画完一笔，**实时**分析（不是 procreate 那种长按激活）：
+  - 直线 / 折线 / 闭合多边形 / 矩形 / 椭圆 / 正圆 / 正方形
+  - 自动 snap，保留压感（继承原 stroke 的 size variation）
+- UX 论证待写：什么 stroke shape 判定准则；何时弹"已被识别为 X"提示；如何允许 user reject
+- 不是替代 procreate 长按；是默认行为
+- 关联 backlog 旧条 "shape 工具改 procreate 自动建议" — 思路一致但更激进（自动而非建议）
+
+### dev/prod branch 抄给 sibling family（v123 记）
+- WebPaint v122 走通后，按 docs/dev-prod-split.md checklist 逐个考量 sibling：
+  - 满足"外部用户 + 用户有数据 + dependency 你 URL"三条的：上 branch + Actions
+  - 不满足的（如 Background Radio 纯 read）：留单分支保持简单
+- 评估 + 决定一个一个来，不强推
+
+<!-- v124 删：液化 + 笔刷 respect 选区 —— 实际全部实施完了 (input.js _endStroke / _endLiquify 已 hook applySelectionMaskPostStroke；color adjust _bakeBCSHWithMask；board live overlay _clipOverlayToSelection)。backlog 条目过时。 -->
+
+
+<!-- v123 删：lasso transform 数学大修 整条
+  - uniform 角拖：v118 + v119 修完，user 多次确认"fix 角"而非中心缩放（**不要再加中心缩放**）
+  - rotation handle：v117 加了 line + circle（无 arc icon per user v118）
+  - free top/bottom 拖动反向：v117 swap 修了
+  - ants 不见：v113 marching squares virtual padding 修了
+  - distort → free 切换基底：v117 + v122 已修
+
+  v123 删：颜色调整 ctx.filter 兜底
+  - v113 已切 per-pixel BCSH（user 确认走这条），ctx.filter 通路废
+-->
+
 
 ### lasso 多边形模式（v104 记）
 - user：「lasso 能加多边形模式吗？最好是 down 之后拖拽，然后 up 之后才写入」
@@ -286,13 +328,8 @@ v110 加 mesh 后 v111 投影补丁，user 测出多个 drag/handle bug：
 - 改：menuImport / addImportPhoto 等 handler 走 fillSelection (whole doc) → liftSelectionForTransform
 - 工作量 ~50 行
 
-### transform 模式自由度切换 drag 异常（v103 记）
-- user：「transform 模式下你高自由度（比如 perspective）时调回低自由度模式（比如 free, uniform）时拖拽行为异常」
-- 现象：在 perspective 模式下拖动后，切回 free / uniform 拖角行为异常（猜：handle 锚点 / 矩阵基底没重算）
-- 根因猜：mode 切换时 floating.transform matrix 是 perspective 的（4 控制点变形），降级回 free
-  时该把 matrix 投影回 affine basis（rotation + scale + translation），而不是直接当 free 用
-- 改：lasso.js setMode 切换路径加 matrix 降级 helper（perspective → affine 投影，反之保持当前不动）
-- 工作量 ~30 行；待复现 + 测
+<!-- v123 删：transform 模式自由度切换 drag 异常 —— v117/v118/v122 修完，distort→free 已加 shearless 投影 (_projectMeshToRectangle)；user v123 确认"修好了" -->
+
 
 ### thumb 改 sidecar 文件 + 改善线稿缩图狗牙（v102 记）
 - user：「thumb 生成的时候在线稿场景狗牙很厉害」+「thumb 改成 sidecar，可以从云上批量拉，
@@ -335,6 +372,9 @@ v110 加 mesh 后 v111 投影补丁，user 测出多个 drag/handle bug：
 ### PC鼠绘方案
 - 关键是缺压感，是否可以使用滚轮来设置压感
 - 鼠标拖拽画笔来实现平滑
+
+### 手机模式
+小屏指绘，UI需要特别精简，全部空间留给画布
 
 ### VR方案
 - meta quest webxr画笔方案？类似3d白板（太远了，但是有趣）

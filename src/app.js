@@ -12,7 +12,7 @@
 import { WEBPAINT_VERSION } from "./version.js";
 import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
-import { InputController, compressPixelSnap, applyPixelSnap } from "./input.js";
+import { InputController, compressPixelSnap, applyPixelSnap, KEYBOARD_SHORTCUTS } from "./input.js";
 import { BrushSettings } from "./brush.js";
 import {
   makeDefaultRack, findBrush, getActiveBrush, brushesByTool,
@@ -64,9 +64,7 @@ const els = {
   layersList: document.getElementById("layersList"),
   layersCountLabel: document.getElementById("layersCountLabel"),
   layerAddBtn: document.getElementById("layerAddBtn"),
-  layerDelBtn: document.getElementById("layerDelBtn"),
-  layerUpBtn: document.getElementById("layerUpBtn"),
-  layerDownBtn: document.getElementById("layerDownBtn"),
+  // v123：del/up/down 挪进 per-row "⋯" 菜单；footer 只剩 layerAddBtn
   menuBtn: document.getElementById("menuButton"),
   menuPanel: document.getElementById("menuPanel"),
   menuLongPressPick: document.getElementById("menuLongPressPick"),
@@ -108,7 +106,8 @@ const els = {
   adjustSaturationVal: document.getElementById("adjustSaturationVal"),
   adjustHue: document.getElementById("adjustHue"),
   adjustHueVal: document.getElementById("adjustHueVal"),
-  topGalleryBtn: document.getElementById("topGalleryBtn"),
+  // v123 topGalleryBtn 撤了，图库挪进菜单 (id=menuGallery)
+  menuGallery: document.getElementById("menuGallery"),
   liquifyPanel: document.getElementById("liquifyPanel"),
   liquifyPanelHead: document.getElementById("liquifyPanelHead"),
   liquifyPanelClose: document.getElementById("liquifyPanelClose"),
@@ -526,6 +525,31 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") input.cancelAllPointers();
 });
 
+// v124 iPad 双击 systematic 4 层防御 layer 2 (capture-phase 拦截系统手势)
+// docs/ipad-doubletap-architecture.md。layer 1 (body touch-action) + layer 3 (user-select)
+// 都已在 styles.css 里；layer 4 (pointer 自愈) 上面 v111 已加；这里补 layer 2。
+function _isTextEditableTarget(t) {
+  if (!t) return false;
+  const tag = t.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return true;
+  if (t.isContentEditable) return true;
+  return false;
+}
+// capture-phase 拦 dblclick（防 iPad 系统级"双击文本选中 / 双击拖窗"劫持）
+window.addEventListener("dblclick", (e) => {
+  if (_isTextEditableTarget(e.target)) return;
+  e.preventDefault();
+}, { capture: true, passive: false });
+// 3 指及以上 touchstart：拦掉系统 split-view / slide-over 抢手
+window.addEventListener("touchstart", (e) => {
+  if (e.touches.length >= 3 && !_isTextEditableTarget(e.target)) {
+    e.preventDefault();
+  }
+}, { capture: true, passive: false });
+// gesturestart（iOS Safari 多点缩放专属事件）也拦
+window.addEventListener("gesturestart", (e) => e.preventDefault(), { capture: true, passive: false });
+window.addEventListener("gesturechange", (e) => e.preventDefault(), { capture: true, passive: false });
+
 // 笔触 buffer live overlay：board 每帧问 brush 要，layer 之上 composite × s.opacity
 // 预览（实际像素在 endStroke 才烧进 layer）。
 board.setOverlayProvider(() => input.brush.getLiveOverlay());
@@ -866,6 +890,13 @@ registerPendingTransient({
   check: () => input.lasso.hasFloating(),
   apply: () => input.commitLassoIfFloating(),
 });
+// v124 颜色调整 panel 也是 transient（user：「颜色调整 transient 做」）
+// 切工具 / 打开图库 / 任何决定性 user 动作 → 自动 apply（如果开着）
+registerPendingTransient({
+  label: "color-adjust",
+  check: () => !!_adjustState,
+  apply: () => _closeAdjustPanel(true),
+});
 
 // ---- 工具 ----
 function setTool(t) {
@@ -900,6 +931,7 @@ const RACK_PANEL_BY_TOOL = {
   smudge: PANELS.RACK_SMUDGE,
   eraser: PANELS.RACK_ERASER,
 };
+let _lastNonLassoTool = "brush";
 for (const b of els.toolBtns) {
   b.addEventListener("click", () => {
     const t = b.dataset.tool;
@@ -909,6 +941,18 @@ for (const b of els.toolBtns) {
       openExclusive(RACK_PANEL_BY_TOOL[t]);
       return;
     }
+    // v124 (user) 第二次按 lasso = Esc 语义：清选区 + 回上一个非 lasso 工具
+    if (state.tool === "lasso" && t === "lasso") {
+      if (doc.selection) {
+        const entry = input.lasso.setSelection(null);
+        if (entry) history.push(entry);
+        board.invalidateAll();
+      }
+      setTool(_lastNonLassoTool || "brush");
+      closeExclusive();
+      return;
+    }
+    if (state.tool !== "lasso") _lastNonLassoTool = state.tool;
     setTool(t);
     // 切到新 tool 时关掉之前开的 rack（防止 stale）
     closeExclusive();
@@ -988,33 +1032,57 @@ function setColor(hex) {
 els.activeSwatch.addEventListener("click", () => toggleColorPanel());
 setColor(state.color);
 
-// v104 size 滑块 popup；v109 改 zoom-aware + viewport clamp（user 反映 popup 比视口大被 clamp）
-// 圆按真实屏幕直径 (doc px × board.zoom) 画；超过 popup 框（max 120px）时 overflow:hidden 裁
+// v104 size 滑块 popup；v109 zoom-aware；v123 (user) 改：
+//   - size + opacity 同 popup 复用，任一 slider 拖动都刷
+//   - 圆的半径 = size × zoom，**透明度 = opacity**（视觉看到两个变化）
+//   - 文字"N px · M%"，去掉"屏 px"备注
+//   - 竖排（圆上字下），frame 缩到 64px
+// 圆按真实屏 px 画；超 frame 时 frame overflow:hidden 裁
+// v124 吸色 pin：input.js _doPick 派发 wp:pickerShow，tip 在采样 pixel 屏坐标
+// pin 上浮 (transform translateY(-100%)) 避免被手指挡。1500ms 后自动淡出
+let _pickerPinTimer = null;
+const _pickerPin = document.getElementById("pickerPin");
+const _pickerPinHead = document.getElementById("pickerPinHead");
+window.addEventListener("wp:pickerShow", (e) => {
+  if (!_pickerPin) return;
+  const { sx, sy, hex } = e.detail;
+  _pickerPin.style.left = sx + "px";
+  _pickerPin.style.top = sy + "px";
+  _pickerPin.style.setProperty("--head-color", hex);
+  _pickerPin.classList.remove("hidden");
+  clearTimeout(_pickerPinTimer);
+  _pickerPinTimer = setTimeout(() => _pickerPin.classList.add("hidden"), 1500);
+});
+window.addEventListener("wp:pickerHide", () => {
+  if (!_pickerPin) return;
+  _pickerPin.classList.add("hidden");
+  clearTimeout(_pickerPinTimer);
+});
+
 let _sizePopupTimer = null;
-function showSizePopup(px) {
+const POPUP_FRAME = 64;
+function showSizePopup() {
   if (!els.sizePopup) return;
+  const px = state.brush.size;
+  const op = state.brush.opacity;
   const zoom = board?.viewport?.scale ?? 1;
-  const screenPx = px * zoom;                       // 实际屏上半径计算用直径
-  const FRAME = 120;                                // 框最大边长（CSS px）
-  const r = Math.max(2, screenPx / 2);              // 真半径，可能 > FRAME/2
-  els.sizePopupCircle.style.width  = (r * 2) + "px";
-  els.sizePopupCircle.style.height = (r * 2) + "px";
-  // popup 显「N px × zoom% = M px(屏)」；zoom = 100% 时简显
-  if (Math.abs(zoom - 1) < 0.005) {
-    els.sizePopupText.textContent = `${px|0} px`;
-  } else {
-    els.sizePopupText.textContent = `${px|0} px (屏 ${Math.round(screenPx)})`;
-  }
+  const screenPx = px * zoom;
+  const r = Math.max(2, screenPx / 2);
+  els.sizePopupCircle.style.width   = (r * 2) + "px";
+  els.sizePopupCircle.style.height  = (r * 2) + "px";
+  els.sizePopupCircle.style.opacity = String(op);
+  els.sizePopupText.textContent = `${px|0} px · ${Math.round(op * 100)}%`;
   const rect = els.sizeSlider.getBoundingClientRect();
-  els.sizePopup.style.left = (rect.right + 12) + "px";
-  els.sizePopup.style.top  = (rect.top + rect.height / 2 - FRAME / 2) + "px";
+  els.sizePopup.style.left = (rect.right + 8) + "px";
+  els.sizePopup.style.top  = (rect.top + rect.height / 2 - POPUP_FRAME / 2) + "px";
   els.sizePopup.classList.remove("hidden");
   clearTimeout(_sizePopupTimer);
   _sizePopupTimer = setTimeout(() => els.sizePopup.classList.add("hidden"), 1500);
 }
 
 // v97：setSize 接受 px；slider 转 log；setIntensity 路由 flow/opacity
-function setSize(v) {
+// v123 加 silent option：boot 时设默认值不弹 popup（user：「新页面 brush preview 没默认隐藏」）
+function setSize(v, opts = {}) {
   v = Math.max(1, Math.round(v));        // v104: clamp to int
   state.brush.size = v;
   writeCurrentToolSize(v);
@@ -1022,13 +1090,14 @@ function setSize(v) {
   // 同步 slider（log 化）
   const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
   els.sizeSlider.value = String(sizeToSliderPos(v, maxPx));
-  showSizePopup(v);
+  if (!opts.silent) showSizePopup();
 }
-function setOpacity(v) {
+function setOpacity(v, opts = {}) {
   state.brush.opacity = v;
   writeCurrentToolOpacity(v);
   safeLSSet("webpaint.opacity", String(v));
   els.opacitySlider.value = String(Math.round(v * 100));
+  if (!opts.silent) showSizePopup();   // v123 共用 size+opacity popup
 }
 // 老 setIntensity alias 给跨 v97 调用兜底
 const setIntensity = setOpacity;
@@ -1040,13 +1109,13 @@ els.sizeSlider.addEventListener("input", () => {
   state.brush.size = px;
   writeCurrentToolSize(px);
   safeLSSet("webpaint.size", String(px));
-  showSizePopup(px);
+  showSizePopup();
 });
 els.opacitySlider.addEventListener("input", () => setOpacity(parseFloat(els.opacitySlider.value) / 100));
 // boot 初值
 els.sizeSlider.dataset.maxPx = "200";
-setSize(state.brush.size);
-setOpacity(state.brush.opacity);
+setSize(state.brush.size, { silent: true });        // boot 不弹 popup
+setOpacity(state.brush.opacity, { silent: true });
 // 键盘 [ ] 调粗
 window.addEventListener("wp:adjsize", (e) => {
   const delta = e.detail;
@@ -1110,10 +1179,38 @@ els.menuTheme.addEventListener("click", () => {
 // 强制更新一律走「强制清缓存重启」（menuForcePwaReset）— 详 docs/pwa-update-detection.md。
 // 老 element 在 HTML 里 hidden，handler 留空保 element exists 防 null deref。
 if (els.menuCheckUpdate) els.menuCheckUpdate.addEventListener("click", () => setMenuOpen(false));
-els.menuClear.addEventListener("click", () => {
+// v124b: menuClear 撤了（user：「清空内容跟删除重复，删掉」）。stub 留兜底
+if (els.menuClear) els.menuClear.addEventListener("click", () => setMenuOpen(false));
+
+// v124 快捷键 sheet：从 KEYBOARD_SHORTCUTS 自动渲染（input.js 注册的唯一真理源）
+const _shortcutsSheet = document.getElementById("shortcutsSheet");
+const _shortcutsBackdrop = document.getElementById("shortcutsBackdrop");
+const _shortcutsBody = document.getElementById("shortcutsBody");
+function _renderShortcutsSheet() {
+  if (!_shortcutsBody) return;
+  const byCat = new Map();
+  for (const sc of KEYBOARD_SHORTCUTS) {
+    const cat = sc.category || "其它";
+    if (!byCat.has(cat)) byCat.set(cat, []);
+    byCat.get(cat).push(sc);
+  }
+  // 同 combo 多 entry（如 Escape 在 floating / hasSelection 两条）合并展示
+  let html = "";
+  for (const [cat, list] of byCat) {
+    html += `<div class="shortcuts-category">${cat}</div>`;
+    for (const sc of list) {
+      html += `<div class="shortcuts-row"><span>${sc.desc}</span><span class="shortcuts-combo">${sc.combo}</span></div>`;
+    }
+  }
+  _shortcutsBody.innerHTML = html;
+}
+document.getElementById("menuShortcuts")?.addEventListener("click", () => {
   setMenuOpen(false);
-  openSheet(els.clearSheet, els.clearBackdrop);
+  _renderShortcutsSheet();
+  openSheet(_shortcutsSheet, _shortcutsBackdrop);
 });
+document.getElementById("shortcutsClose")?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
+_shortcutsBackdrop?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
 
 applyPressureSize(state.brush.pressureToSize);
 applyPressureOpacity(state.brush.pressureToOpacity);
@@ -1123,6 +1220,15 @@ applyCheckerboard(state.checkerboard);
 function setMenuOpen(open) {
   els.menuPanel.classList.toggle("hidden", !open);
   els.menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    // v124 menu panel 跟随菜单按钮屏坐标（top-bar 居中 transform，
+    // 用 viewport 写死的 left: 12px 在宽屏上对不齐图标）
+    const r = els.menuBtn.getBoundingClientRect();
+    els.menuPanel.style.top = (r.bottom + 6) + "px";
+    els.menuPanel.style.left = r.left + "px";
+    els.menuPanel.style.right = "auto";
+    _updateMenuCropLabel?.();
+  }
 }
 els.menuBtn.addEventListener("click", (e) => {
   e.stopPropagation();
@@ -1350,9 +1456,10 @@ function renderLayersPanel() {
     vis.type = "button";
     vis.className = "layer-vis" + (L.visible ? "" : " hidden-icon");
     vis.title = L.visible ? "可见" : "已隐藏";
+    // v123 眼睛 icon 放大 16→22 (user)
     vis.innerHTML = L.visible
-      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>'
-      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a18.94 18.94 0 0 1 4.06-5.06"/><path d="M1 1l22 22"/></svg>';
+      ? '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>'
+      : '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a18.94 18.94 0 0 1 4.06-5.06"/><path d="M1 1l22 22"/></svg>';
     vis.addEventListener("click", (e) => {
       e.stopPropagation();
       const oldVal = L.visible;
@@ -1520,11 +1627,8 @@ function renderLayersPanel() {
       els.layersList.appendChild(expand);
     }
   }
-  // foot button enable/disable
+  // v123 footer 只剩 add（del / up / down 进 per-row "⋯" 菜单）
   els.layerAddBtn.disabled = doc.layers.length >= max;
-  els.layerDelBtn.disabled = doc.layers.length <= 1;
-  els.layerUpBtn.disabled = doc.activeIndex >= doc.layers.length - 1;
-  els.layerDownBtn.disabled = doc.activeIndex <= 0;
 }
 
 // 各层操作都走 history.push → handler 同时 apply 和 push。这样未来 undo / redo
@@ -1535,49 +1639,80 @@ function _afterDocChange() {
   board.requestRender();
 }
 
-els.layerAddBtn.addEventListener("click", () => {
+// v123 把 layer op 抽成 named 函数：原 4 个 footer 按钮挪进 menu/popup
+function _addEmptyLayer() {
   if (doc.layers.length >= doc.maxLayers) {
     setStatus(`图层数已达上限 ${doc.maxLayers}`);
     return;
   }
-  // 先 add（拿到分配的 id），然后用它的 spec 当 entry data
   const L = doc.addLayer();
   if (!L) return;
   const insertIndex = doc.layers.findIndex((l) => l.id === L.id);
-  const layerSpec = layerSpecFrom(L);    // empty 新层 → spec 也是 empty
+  const layerSpec = layerSpecFrom(L);
   history.push({ type: "addLayer", index: insertIndex, layerSpec });
   _afterDocChange();
-});
-els.layerDelBtn.addEventListener("click", () => {
-  const L = doc.activeLayer;
+}
+function _openImagePicker() {
+  els.oraFileInput.value = "";
+  els.oraFileInput.click();
+}
+function _deleteLayer(L) {
   if (!L) return;
   if (doc.layers.length <= 1) { setStatus("至少保留一层"); return; }
   const index = doc.layers.findIndex((l) => l.id === L.id);
-  const layerSpec = layerSpecFrom(L);     // 含 pixel snapshot
+  const layerSpec = layerSpecFrom(L);
   doc.removeLayer(L.id);
-  const entry = { type: "removeLayer", index, layerSpec };
-  history.push(entry);
-  // 异步压缩 layerSpec 的 imageData → blob
+  history.push({ type: "removeLayer", index, layerSpec });
   compressPixelSnap(layerSpec, (blob) => { layerSpec.blob = blob; });
   _afterDocChange();
-});
-els.layerUpBtn.addEventListener("click", () => {
-  const L = doc.activeLayer;
+}
+function _moveLayerDelta(L, delta) {
   if (!L) return;
   const from = doc.layers.findIndex((l) => l.id === L.id);
-  if (!doc.moveLayer(L.id, 1)) return;
+  if (!doc.moveLayer(L.id, delta)) return;
   const to = doc.layers.findIndex((l) => l.id === L.id);
   history.push({ type: "moveLayer", layerId: L.id, fromIdx: from, toIdx: to });
   _afterDocChange();
-});
-els.layerDownBtn.addEventListener("click", () => {
-  const L = doc.activeLayer;
-  if (!L) return;
-  const from = doc.layers.findIndex((l) => l.id === L.id);
-  if (!doc.moveLayer(L.id, -1)) return;
-  const to = doc.layers.findIndex((l) => l.id === L.id);
-  history.push({ type: "moveLayer", layerId: L.id, fromIdx: from, toIdx: to });
-  _afterDocChange();
+}
+
+// "+" 按钮：点开 popup 选 空层 / 从图片
+els.layerAddBtn.addEventListener("click", () => {
+  // v124 toggle：再点一下 + 收回（user 反映 popup 不消失）
+  const existing = document.querySelector(".layer-tools-popup[data-source='layerAdd']");
+  if (existing) { existing.remove(); return; }
+  document.querySelectorAll(".layer-tools-popup").forEach((p) => p.remove());
+  const popup = document.createElement("div");
+  popup.dataset.source = "layerAdd";
+  popup.className = "menu-panel layer-tools-popup";
+  popup.innerHTML = `
+    <button class="menu-item" data-act="empty" type="button">
+      <span class="menu-item-label">新空图层</span>
+    </button>
+    <button class="menu-item" data-act="image" type="button">
+      <span class="menu-item-label">从图片…</span>
+    </button>
+  `;
+  document.body.appendChild(popup);
+  const r = els.layerAddBtn.getBoundingClientRect();
+  const w = popup.offsetWidth || 160;
+  popup.style.position = "fixed";
+  popup.style.top = (r.top - popup.offsetHeight - 4) + "px";   // popup 在按钮上方（footer 在底）
+  popup.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left)) + "px";
+  const cleanup = () => {
+    popup.remove();
+    document.removeEventListener("pointerdown", outside, true);
+  };
+  const outside = (e) => {
+    if (!popup.contains(e.target) && !els.layerAddBtn.contains(e.target)) cleanup();
+  };
+  setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
+  popup.addEventListener("click", (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) return;
+    cleanup();
+    if (act === "empty") _addEmptyLayer();
+    else if (act === "image") _openImagePicker();
+  });
 });
 
 // In-app 通用 sheet：替代 alert / prompt / confirm（详见 feedback-no-system-dialog）。
@@ -1861,9 +1996,23 @@ function openLayerToolsMenu(L, anchorEl, nameEl) {
 
   const popup = document.createElement("div");
   popup.className = "menu-panel layer-tools-popup";
+  // v123：del / up / down 从 footer 挪进这里（user 要求）
+  const idx = doc.layers.findIndex((l) => l.id === L.id);
+  const canUp = idx < doc.layers.length - 1;
+  const canDown = idx > 0;
+  const canDel = doc.layers.length > 1;
   popup.innerHTML = `
     <button class="menu-item" data-act="rename" type="button">
       <span class="menu-item-label">重命名…</span>
+    </button>
+    <button class="menu-item" data-act="up" type="button"${canUp ? "" : " disabled"}>
+      <span class="menu-item-label">上移</span>
+    </button>
+    <button class="menu-item" data-act="down" type="button"${canDown ? "" : " disabled"}>
+      <span class="menu-item-label">下移</span>
+    </button>
+    <button class="menu-item menu-danger" data-act="del" type="button"${canDel ? "" : " disabled"}>
+      <span class="menu-item-label">删除</span>
     </button>
   `;
   document.body.appendChild(popup);
@@ -1885,10 +2034,14 @@ function openLayerToolsMenu(L, anchorEl, nameEl) {
   setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
 
   popup.addEventListener("click", (e) => {
-    const act = e.target.closest("[data-act]")?.dataset.act;
-    if (!act) return;
+    const btn = e.target.closest("[data-act]");
+    if (!btn || btn.disabled) return;
+    const act = btn.dataset.act;
     cleanup();
-    if (act === "rename") startLayerRename(L, nameEl);
+    if (act === "rename")      startLayerRename(L, nameEl);
+    else if (act === "up")     _moveLayerDelta(L, 1);
+    else if (act === "down")   _moveLayerDelta(L, -1);
+    else if (act === "del")    _deleteLayer(L);
   });
 }
 
@@ -2232,8 +2385,17 @@ function updateSaveStatus() {
 // floating 状态下 implicit 路径**完全跳**——不把"layer 有洞"持久化进 IDB。
 // 显式路径（Ctrl+S / 切 session / 进图库 / rename）会自动 commit floating 再保存，
 // 匹配用户语义"save = 当前所见，包含正在变换"
+// v124 (user)：未命名 + 一笔没动 (所有层 bbox 全空) → 跳过保存，避免 IDB 灌一堆"未命名"
+function _docIsBlankUnnamed() {
+  if (_activeSessionName && _activeSessionName !== "未命名") return false;
+  for (const L of doc.layers) {
+    if (L.bboxW > 0 && L.bboxH > 0) return false;   // 有像素 → 不算 blank
+  }
+  return true;
+}
 async function saveNow(opts = {}) {
   if (_docSaving) return;
+  if (_docIsBlankUnnamed()) return;
   if (hasAnyPendingTransient()) {
     if (opts.implicit) return;             // 后台路径：保持 IDB 干净，等用户回来
     applyAllPendingTransients();           // 显式路径：先把变换 / 浮层等都 apply
@@ -2703,6 +2865,19 @@ document.getElementById("adjustCropFree").addEventListener("click", () => {
   setAdjustOpen(false);
   _openCropMode();
 });
+// v124 合并裁切入口：有选区 → 裁到选区；无选区 → 自由裁切。label 在 setMenuOpen(true) 时动态切
+const _menuCropBtn = document.getElementById("menuCrop");
+if (_menuCropBtn) {
+  _menuCropBtn.addEventListener("click", () => {
+    if (doc.selection) document.getElementById("adjustCropToSelection").click();
+    else                document.getElementById("adjustCropFree").click();
+  });
+}
+function _updateMenuCropLabel() {
+  const lbl = document.getElementById("menuCropLabel");
+  if (!lbl) return;
+  lbl.textContent = doc.selection ? "裁切到选区" : "裁切（自由）";
+}
 document.getElementById("cropToolbarCancel").addEventListener("click", () => _closeCropMode());
 document.getElementById("cropToolbarApply").addEventListener("click", () => {
   if (!_cropState) return;
@@ -3069,10 +3244,9 @@ els.adjustHue.addEventListener("input", () => {
 })();
 // ===== v110 crop/resample/adjust end =====
 
-// ---- 图库 icon（v95：从菜单挪回 topbar，user：「图库从菜单中拿出来单独做一个 icon 放菜单旁边」）----
-els.topGalleryBtn.addEventListener("click", () => {
-  setGalleryOpen(true);
-});
+// v124 (user) 图库挪回顶栏：topGalleryBtn 直接开图库；menuGallery 留 stub 兜底
+document.getElementById("topGalleryBtn")?.addEventListener("click", () => setGalleryOpen(true));
+els.menuGallery?.addEventListener("click", () => { setMenuOpen(false); setGalleryOpen(true); });
 
 // ---- 菜单：导入 / 导出 / 剪贴板 / 适应 ----
 els.menuRename.addEventListener("click", () => {
@@ -3090,8 +3264,11 @@ function _getExpPrj() {
   catch { return { format: "ora" }; }
 }
 function _getExpImg() {
-  try { return JSON.parse(localStorage.getItem(_EXP_IMG_KEY)) || { format: "png", target: "file" }; }
-  catch { return { format: "png", target: "file" }; }
+  try {
+    const v = JSON.parse(localStorage.getItem(_EXP_IMG_KEY)) || {};
+    // v124 加 scope 字段 ("merged" | "active")，默认 merged 兼容旧配置
+    return { format: "png", target: "file", scope: "merged", ...v };
+  } catch { return { format: "png", target: "file", scope: "merged" }; }
 }
 function _getImpImg() {
   try { return JSON.parse(localStorage.getItem(_IMP_IMG_KEY)) || { source: "file" }; }
@@ -3108,7 +3285,7 @@ function _updateMenuSubLabels() {
   const eiEl = document.getElementById("menuExportImageSub");
   const iiEl = document.getElementById("menuImportImageSub");
   if (epEl) epEl.textContent = "." + ep.format;
-  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.target === "clipboard" ? "剪切板" : "文件"}`;
+  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? "当前层" : "合并"} · ${ei.target === "clipboard" ? "剪切板" : "文件"}`;
   if (iiEl) iiEl.textContent = `${ii.source === "clipboard" ? "剪切板" : "文件"} · 新图层`;
 }
 _updateMenuSubLabels();
@@ -3132,10 +3309,10 @@ els.menuExportImage.addEventListener("click", async () => {
   const c = _getExpImg();
   try {
     if (c.target === "clipboard") {
-      await copyImageToClipboard(doc);
-      setStatus("已复制 PNG 到剪贴板");
+      await copyImageToClipboard(doc, c.scope);
+      setStatus(`已复制 PNG 到剪贴板（${c.scope === "active" ? "当前层" : "合并"}）`);
     } else {
-      const r = await shareOrDownloadImage(doc, c.format, `${_activeSessionName}-${stampNow()}`);
+      const r = await shareOrDownloadImage(doc, c.format, `${_activeSessionName}-${stampNow()}`, c.scope);
       setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : `${c.format.toUpperCase()} 已下载`);
     }
   } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
@@ -3167,6 +3344,9 @@ if (_layerImportBtn) {
 
 // 🔧 配置 popup（点开 / 点别处关）。setMenuOpen 不变，popup 嵌在 menu-item-row 里
 function _openMenuConfigPopup(wrenchBtn, html, onApply) {
+  // v124 toggle：再点同一个扳手就收回（user：「再按一下扳手应该收回」）
+  const existing = wrenchBtn.closest(".menu-item-row")?.querySelector(".menu-config-popup");
+  if (existing) { existing.remove(); return; }
   document.querySelectorAll(".menu-config-popup").forEach((el) => el.remove());
   const row = wrenchBtn.closest(".menu-item-row");
   if (!row) return;
@@ -3211,6 +3391,11 @@ els.menuExportImageConfig.addEventListener("click", (e) => {
       <label><input type="radio" name="fmt" value="jpg" ${c.format === "jpg" ? "checked" : ""} /> JPG</label>
     </div>
     <div class="menu-config-section">
+      <div class="menu-config-title">范围</div>
+      <label><input type="radio" name="scope" value="merged" ${c.scope === "merged" ? "checked" : ""} /> 合并所有可见层</label>
+      <label><input type="radio" name="scope" value="active" ${c.scope === "active" ? "checked" : ""} /> 仅当前层</label>
+    </div>
+    <div class="menu-config-section">
       <div class="menu-config-title">去向</div>
       <label><input type="radio" name="tgt" value="file" ${c.target === "file" ? "checked" : ""} /> 文件</label>
       <label><input type="radio" name="tgt" value="clipboard" ${c.target === "clipboard" ? "checked" : ""} /> 剪切板</label>
@@ -3218,7 +3403,8 @@ els.menuExportImageConfig.addEventListener("click", (e) => {
   `, (popup) => {
     const fmt = popup.querySelector('input[name="fmt"]:checked')?.value || "png";
     const tgt = popup.querySelector('input[name="tgt"]:checked')?.value || "file";
-    _setExpImg({ format: fmt, target: tgt });
+    const scope = popup.querySelector('input[name="scope"]:checked')?.value || "merged";
+    _setExpImg({ format: fmt, target: tgt, scope });
   });
 });
 els.menuImportImageConfig.addEventListener("click", (e) => {
@@ -3491,13 +3677,11 @@ async function importImageAsNewDoc(file) {
 // 居中对齐；如果图片比 doc 大，按比例缩到 80% 短边，避免一上来就盖死。
 async function importImageAsLayer(file) {
   const bitmap = await createImageBitmap(file);
+  // v124：保留原图分辨率 (user：「如果图片大过画板没有自动 crop 吧，而是 apply
+  // 之后再 crop」)。之前会自动缩到 doc 的 0.8 倍丢分辨率；现在 layer.bbox 可超
+  // doc 边界，transform 里 user 自己缩 / 移动 / 应用后再裁画布
+  const w = bitmap.width, h = bitmap.height;
   const docW = doc.width, docH = doc.height;
-  let w = bitmap.width, h = bitmap.height;
-  if (w > docW || h > docH) {
-    const s = Math.min(docW / w, docH / h) * 0.8;
-    w = Math.max(1, Math.round(w * s));
-    h = Math.max(1, Math.round(h * s));
-  }
   // 新建空层
   const layer = doc.addLayer(file.name.replace(/\.[^.]+$/, ""));
   if (!layer) {
@@ -4215,10 +4399,9 @@ const _settingsEls = {
   cancel: document.getElementById("brushSettingsCancel"),
 };
 
+// v124 (user：「暂时不用管后向兼容，还没到 alpha」) 删 shapes / airbrush 映射
 const TOOL_LABEL = {
   brush: "笔刷", smudge: "涂抹", eraser: "橡皮",
-  // v120 删 shapes / airbrush（旧 brush.tool 持久化里可能还在，留映射给 UI 翻译）
-  shapes: "形状", airbrush: "喷枪",
 };
 let _rackCurrentFolder = DEFAULT_FOLDER;
 let _rackCurrentTool = "brush";   // 当前 rack sheet 显示的工具

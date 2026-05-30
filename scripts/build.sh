@@ -34,7 +34,7 @@ if [ ! -x "$ESBUILD" ]; then
 fi
 
 mkdir -p "$OUT_DIR"
-TMP_OUT="$OUT_DIR/main-tmp.mjs"
+TMP_OUT="$OUT_DIR/webpaint-tmp.mjs"
 
 # 1. esbuild bundle 到临时名
 "$ESBUILD" "$ENTRY" \
@@ -45,21 +45,22 @@ TMP_OUT="$OUT_DIR/main-tmp.mjs"
 
 # 2. content hash 截 12 位作文件名
 HASH=$(sha256sum "$TMP_OUT" | awk '{print substr($1, 1, 12)}')
-OUT="$OUT_DIR/main-$HASH.mjs"
+OUT="$OUT_DIR/webpaint-$HASH.mjs"
 
 # 3. mv 到最终名（先 mv 后清，否则 find 误删 main-tmp）
 mv "$TMP_OUT"     "$OUT"
 mv "$TMP_OUT.map" "$OUT.map"
 
 # 老 hashed bundle 清掉，不堆积
-find "$OUT_DIR" -maxdepth 1 -name 'main-*.mjs' -not -name "main-$HASH.mjs" -delete
-find "$OUT_DIR" -maxdepth 1 -name 'main-*.mjs.map' -not -name "main-$HASH.mjs.map" -delete
+find "$OUT_DIR" -maxdepth 1 -name 'webpaint-*.mjs' -not -name "webpaint-$HASH.mjs" -delete
+find "$OUT_DIR" -maxdepth 1 -name 'webpaint-*.mjs.map' -not -name "webpaint-$HASH.mjs.map" -delete
 
 # 4. sed 改 index.html 里引用，指向新 hash
-if grep -q 'src="./dist/main-' index.html; then
-  sed -i "s|src=\"./dist/main-[a-z0-9-]*\\.mjs\"|src=\"./dist/main-$HASH.mjs\"|" index.html
+if grep -q 'src="./dist/webpaint-' index.html; then
+  # 兼容 PLACEHOLDER (大写) 和 hash (小写 hex)
+  sed -i "s|src=\"./dist/webpaint-[A-Za-z0-9-]*\\.mjs\"|src=\"./dist/webpaint-$HASH.mjs\"|" index.html
 else
-  echo "[build] 警告：index.html 里没找到 ./dist/main-*.mjs script tag" >&2
+  echo "[build] 警告：index.html 里没找到 ./dist/webpaint-*.mjs script tag" >&2
 fi
 
 size=$(stat -c%s "$OUT" 2>/dev/null || wc -c < "$OUT")

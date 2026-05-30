@@ -94,24 +94,26 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 /* 两行 stack 容器：1 行 = 选区方式，2 行 = 选区操作 / 变换 */
 .lasso-toolbar-stack {
   position: fixed;
-  top: calc(max(env(safe-area-inset-top, 0px), 8px) + 68px);
+  /* v124 (user：「LASSO toolbar 和上面距离太高了」) 收 68 → 44 (top-bar 30 + 6 padding + 8 gap) */
+  top: calc(max(env(safe-area-inset-top, 0px), 6px) + 44px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  /* 两行间距也收 8 → 4 */
+  gap: 4px;
   z-index: 25;
   max-width: calc(100vw - 24px);
 }
 .lasso-toolbar-stack.hidden { display: none; }
 
 .lasso-toolbar {
-  /* 内部 pill；stack 里堆两行 */
+  /* 内部 pill；stack 里堆两行。v124 padding 6→4 收一格 */
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px;
+  padding: 4px;
   background: color-mix(in srgb, var(--bg) 94%, transparent);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
@@ -130,7 +132,8 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 .lasso-tool-btn {
   background: transparent;
   border: none;
-  padding: 6px 14px;
+  /* v124 收 6×14 → 4×10 (user：「padding 都收一下」) */
+  padding: 4px 10px;
   font: inherit;
   font-size: 13px;
   color: var(--ink);
@@ -146,6 +149,14 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   text-align: center;
   font-size: 16px;
   line-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* v123: lasso 子工具 / set-op 改 SVG */
+.lasso-tool-icon svg {
+  width: 20px;
+  height: 20px;
 }
 .lasso-tool-btn[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent, #4c8bf5) 14%, transparent);
@@ -201,13 +212,14 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 /* 顶栏：浮动毛玻璃胶囊 */
 .top-bar {
   position: fixed;
-  top: max(env(safe-area-inset-top, 0px), 8px);
+  top: max(env(safe-area-inset-top, 0px), 6px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
+  /* v124 (user：「app 各种 padding 都收一下，小屏笔架空间不够」) */
+  gap: 2px;
+  padding: 4px 6px;
   background: color-mix(in srgb, var(--bg) 80%, transparent);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
@@ -314,12 +326,16 @@ body[data-mode="gallery"] .left-sidebar { display: none; }
   word-break: break-all;
 }
 
+/* v124 工具 disabled 视觉 (smudge engine 待实装) */
+.tool.tool-disabled { opacity: 0.35; cursor: not-allowed; }
+.tool.tool-disabled:hover { background: transparent; }
 .tool {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  /* v124 收 36 → 32 (user) */
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: none;
   background: transparent;
@@ -439,6 +455,35 @@ input[type=range] {
   font-size: 16px;
   font-weight: 600;
 }
+/* v124 sheet 通用 head（close 在右）+ body 滚动 */
+.sheet-head { display: flex; align-items: center; justify-content: space-between; }
+.sheet-title { font-size: 16px; font-weight: 600; }
+.sheet-close {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 22px; line-height: 1; color: var(--ink-soft);
+  padding: 0 4px;
+}
+.sheet-close:hover { color: var(--ink); }
+/* v124 (user 小屏)：用 dvh 单位 + sheet 自身 max-height + body 内滚 */
+.sheet-body { max-height: calc(75dvh - 60px); overflow-y: auto; }
+
+/* v124 快捷键 sheet：稍宽，list 网格 */
+.shortcuts-sheet { width: min(420px, calc(100% - 24px)); max-height: 80dvh; }
+.shortcuts-category {
+  font-size: 11px; color: var(--ink-soft); text-transform: uppercase;
+  letter-spacing: 0.6px; margin: 10px 0 4px;
+}
+.shortcuts-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 0; font-size: 13px;
+}
+.shortcuts-combo {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 2px 6px; border-radius: 4px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
+}
 .sheet-hint {
   margin: 0 0 8px 0;
   font-size: 13px;
@@ -480,7 +525,8 @@ input[type=range] {
 .menu-panel {
   position: fixed;
   top: 56px;
-  right: 12px;
+  /* v123 菜单按钮从右挪到左 (Procreate 顺序)，panel 也跟着挪 */
+  left: 12px;
   min-width: 200px;
   /* 长菜单 + iPad mini 竖屏：限高 + 滚动 */
   max-height: calc(100vh - 80px);
@@ -522,6 +568,9 @@ input[type=range] {
   text-align: left;
 }
 .menu-item:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+/* v124 menu-item 带 SVG icon（目前只用于图库）：左对齐 + 间距 */
+.menu-item.menu-item-with-icon { justify-content: flex-start; gap: 10px; }
+.menu-item.menu-item-with-icon svg { width: 18px; height: 18px; flex-shrink: 0; }
 .menu-item-state { color: var(--ink-soft); font-size: 12px; }
 .menu-item[aria-pressed="true"] .menu-item-state { color: var(--accent, #4c8bf5); font-weight: 600; }
 .menu-item.menu-danger { color: #c0392b; }
@@ -541,25 +590,31 @@ input[type=range] {
   margin-left: 8px;
   white-space: nowrap;
 }
+/* v124 wrench → ⋯（user：「导入导出用 ⋯ 更合适，扳手 SVG 留备用」）
+   .menu-item-wrench class 名留着——只是字符换了，将来想换回扳手只改 HTML 里那个字符即可 */
 .menu-item-wrench {
   display: flex; align-items: center; justify-content: center;
   width: 36px; padding: 0;
   background: transparent; border: none; border-radius: 6px;
   color: var(--ink-soft); cursor: pointer; flex: 0 0 36px;
+  font: inherit; font-size: 20px; line-height: 1;
 }
 .menu-item-wrench:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
-.menu-item-wrench svg { width: 16px; height: 16px; }
 .menu-config-popup {
   position: absolute; right: 0; top: 100%; z-index: 50;
   margin-top: 4px; padding: 10px 12px;
-  background: var(--panel-bg, #fff);
-  border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
+  /* v124 跟主题 (user：「没跟随 theme 配色」)：用 --bg / --line / --ink 系列 */
+  background: color-mix(in srgb, var(--bg) 96%, transparent);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid var(--line);
+  color: var(--ink);
   border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
   min-width: 180px;
   display: flex; flex-direction: column; gap: 8px;
 }
-.menu-config-popup label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+.menu-config-popup label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; color: var(--ink); }
 .menu-config-popup .menu-config-section { display: flex; flex-direction: column; gap: 4px; }
 .menu-config-popup .menu-config-title { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; }
 
@@ -725,9 +780,10 @@ input[type=range] {
 }
 .layer-tools-btn:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
 
-/* per-row "⋯" 工具菜单：item 内容少，让宽度自适应内容；min 用 auto 取消 .menu-panel 的 200px */
-.layer-tools-popup { padding: 4px; min-width: auto; }
-.layer-tools-popup .menu-item { padding: 8px 12px; }
+/* per-row "⋯" 工具菜单：item 内容少，让宽度自适应内容；min 用 auto 取消 .menu-panel 的 200px
+   v124：覆盖 .menu-panel 的 right: 12px / top: 56px（不然 JS 设 left 也会被 right 拉宽到全屏） */
+.layer-tools-popup { padding: 4px; min-width: auto; right: auto; top: auto; }
+.layer-tools-popup .menu-item { padding: 6px 14px; }
 
 /* 通用 in-app sheet input */
 .generic-sheet-input {
@@ -941,7 +997,8 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 .brush-rack-sheet.hidden { display: none; }
 .brush-rack-head {
   display: flex; align-items: center;
-  padding: 10px 12px; gap: 8px;
+  /* v124 (user：「小屏 brush rack 空间不够」) 10×12 → 6×10 */
+  padding: 6px 10px; gap: 6px;
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
@@ -1260,24 +1317,57 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 }
 .crop-toolbar-cancel { color: #dc2626; }
 
-/* v104 size 滑块 popup（v109 zoom-aware + viewport crop）*/
+/* v124 吸色 pin (Google Maps 风格)：head 圆显采样色 + 下方 triangle 尖端指 pixel */
+.picker-pin {
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+  /* v124 修 (user：「pin 尖尖头位置没扎对」)：
+     ::after triangle 用 bottom:-8 凸到 pin div 之外，tip 比 pin div 底再下 8px。
+     translate(-50%, -100%) 让 pin div 底贴 (sx, sy) → tip 实际在 sy+8。
+     补偿：再上移 8px 让 tip 落在 (sx, sy) */
+  transform: translate(-50%, calc(-100% - 8px));
+  transition: opacity 0.15s ease-out;
+}
+.picker-pin.hidden { display: none; }
+.picker-pin-head {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--head-color, #fff);
+  border: 3px solid var(--bg);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+/* tip triangle 指向 pixel。v124 user：「小三角放圆下面，黑色」固定黑色不跟色 */
+.picker-pin::after {
+  content: "";
+  position: absolute;
+  left: 50%; bottom: -8px;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 10px solid #000;
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+}
+
+/* v104 size 滑块 popup
+   v123: user「太大太长，位置不对，px 放下面，不用屏 px」→ 改竖排（圆上字下），缩小 frame */
 .size-popup {
   position: fixed;
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 6px 8px;
   z-index: 100;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
   pointer-events: none;
   box-shadow: var(--shadow);
 }
 .size-popup.hidden { display: none; }
-/* v109: 圆按屏 px 真画，可能超 frame；圆所在 cell 裁掉框外 */
 .size-popup-circle-frame {
-  width: 120px; height: 120px;
+  width: 64px; height: 64px;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
   flex-shrink: 0;
@@ -1289,9 +1379,8 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 }
 .size-popup-text {
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  min-width: 50px;
-  text-align: right;
+  font-size: 11px;
+  text-align: center;
   white-space: nowrap;
 }
 

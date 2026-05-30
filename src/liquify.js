@@ -42,9 +42,21 @@ export class LiquifyEngine {
     this._stroke = null;
   }
 
-  beginStroke(layer, settings, x, y) {
+  // v124 selection 参数：{ maskCanvas, bboxX, bboxY, bboxW, bboxH } 来自 doc.selection。
+  // 给了就在每个 stamp 内 mask 外像素**保留 startSnap**（不液化）→ live preview 立刻
+  // 看到选区限制，跟 brush 一致；commit 时 applySelectionMaskPostStroke 兜底也无害。
+  beginStroke(layer, settings, x, y, selection) {
     const lbW = Math.max(1, layer.bboxW);
     const lbH = Math.max(1, layer.bboxH);
+    // 把 selection mask 烤进一个 Uint8 array 与 layer.bbox 对齐 (mask alpha 通道 0..255)
+    let maskData = null;
+    if (selection) {
+      const c = document.createElement("canvas");
+      c.width = lbW; c.height = lbH;
+      const cctx = c.getContext("2d");
+      cctx.drawImage(selection.maskCanvas, selection.bboxX - layer.bboxX, selection.bboxY - layer.bboxY);
+      maskData = cctx.getImageData(0, 0, lbW, lbH).data;   // RGBA, 看 [i*4+3]
+    }
     this._stroke = {
       layer,
       settings,
@@ -59,6 +71,8 @@ export class LiquifyEngine {
         bboxW: lbW, bboxH: lbH,
         data: new Float32Array(2 * lbW * lbH),
       },
+      maskData,
+      maskBbox: selection ? { x: layer.bboxX, y: layer.bboxY, w: lbW, h: lbH } : null,
     };
   }
 
@@ -112,6 +126,9 @@ export class LiquifyEngine {
     const ssX = ss.bboxX, ssY = ss.bboxY;
     const ssW = ss.bboxW, ssH = ss.bboxH;
     const ssData = ss.imageData ? ss.imageData.data : null;
+    // v124 (user：「预览的时候没有 apply 选区」) selection mask
+    const maskData = st.maskData;
+    const maskBox = st.maskBbox;
 
     // 目标 footprint 像素（要 putImageData 回 layer 的）
     const dst = new ImageData(w, h);
@@ -152,10 +169,26 @@ export class LiquifyEngine {
         const tdx = fdata[fIdx];
         const tdy = fdata[fIdx + 1];
         const idx = (py * w + px) * 4;
+        // v124 selection 检查：mask 外不液化，原 startSnap 像素直采
+        let selOK = true;
+        if (maskData && maskBox) {
+          const mx = wx - maskBox.x, my = wy - maskBox.y;
+          if (mx < 0 || my < 0 || mx >= maskBox.w || my >= maskBox.h) {
+            selOK = false;     // mask bbox 外 = 视为 outside selection
+          } else {
+            selOK = maskData[(my * maskBox.w + mx) * 4 + 3] >= 128;
+          }
+        }
         if (ssData) {
-          const sx = (wx - tdx) - ssX;
-          const sy = (wy - tdy) - ssY;
-          bilinearSample(ssData, ssW, ssH, sx, sy, ddat, idx);
+          if (selOK) {
+            const sx = (wx - tdx) - ssX;
+            const sy = (wy - tdy) - ssY;
+            bilinearSample(ssData, ssW, ssH, sx, sy, ddat, idx);
+          } else {
+            // 选区外：原像素直采 (无位移)
+            const sx = wx - ssX, sy = wy - ssY;
+            bilinearSample(ssData, ssW, ssH, sx, sy, ddat, idx);
+          }
         }
         // 空 startSnap → ddat 默认 0（透明黑），液化空层无源可推 = 不变
       }

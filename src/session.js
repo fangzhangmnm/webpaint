@@ -172,14 +172,23 @@ export async function exportPsdDownload(doc, filename = "未命名.psd") {
 
 /** 渲染合成图 blob（分享 PNG/JPG 用）。全走 HTMLCanvasElement.toBlob，
  *  避开 Safari OffscreenCanvas.convertToBlob JPEG 返 null 的 bug。 */
-async function renderMergedBlob(doc, mime = "image/png", quality) {
+// v124 加 scope 参数 (user)：
+//   "merged" (default) = 所有可见层 + doc 背景（兼容旧行为）
+//   "active" = 仅当前 active layer。JPG 仍涂 doc 背景（无 alpha）；PNG 保 alpha
+async function renderMergedBlob(doc, mime = "image/png", quality, scope = "merged") {
   const c = document.createElement("canvas");
   c.width = doc.width;
   c.height = doc.height;
   const ctx = c.getContext("2d");
-  ctx.fillStyle = doc.backgroundColor || "#ffffff";
-  ctx.fillRect(0, 0, doc.width, doc.height);
-  for (const L of doc.layers) {
+  const wantBg = scope === "merged" || mime === "image/jpeg";
+  if (wantBg) {
+    ctx.fillStyle = doc.backgroundColor || "#ffffff";
+    ctx.fillRect(0, 0, doc.width, doc.height);
+  }
+  const layers = scope === "active"
+    ? (doc.activeLayer ? [doc.activeLayer] : [])
+    : doc.layers;
+  for (const L of layers) {
     if (!L.visible) continue;
     if (L.bboxW <= 0 || L.bboxH <= 0) continue;
     const prevA = ctx.globalAlpha;
@@ -203,11 +212,11 @@ async function renderMergedBlob(doc, mime = "image/png", quality) {
  * 分享 / 保存合成图。优先 navigator.share（iPad / Android 弹系统分享面板 → 相册
  * / iMessage / ...）。不支持时 fallback 触发下载到 Downloads 目录。
  */
-export async function shareOrDownloadImage(doc, format = "png", filename = "WebPaint") {
+export async function shareOrDownloadImage(doc, format = "png", filename = "WebPaint", scope = "merged") {
   const mime = format === "jpg" ? "image/jpeg" : "image/png";
   const ext  = format === "jpg" ? "jpg" : "png";
   const quality = format === "jpg" ? 0.92 : undefined;
-  const blob = await renderMergedBlob(doc, mime, quality);
+  const blob = await renderMergedBlob(doc, mime, quality, scope);
   const fname = `${filename}.${ext}`;
   const file = new File([blob], fname, { type: mime });
 
@@ -229,11 +238,11 @@ export async function shareOrDownloadImage(doc, format = "png", filename = "WebP
 // ---- 剪贴板 IO ----
 
 /** 把 doc 合成图复制到剪贴板（PNG）。iPad Safari / 桌面都支持。 */
-export async function copyImageToClipboard(doc) {
+export async function copyImageToClipboard(doc, scope = "merged") {
   if (!navigator.clipboard || !navigator.clipboard.write) {
     throw new Error("浏览器不支持剪贴板写入");
   }
-  const blob = await renderMergedBlob(doc, "image/png");
+  const blob = await renderMergedBlob(doc, "image/png", undefined, scope);
   if (!blob) throw new Error("生成 PNG 失败");
   // ClipboardItem 在 Safari 必须用 lazy promise 写法（write 在 user gesture 内）
   await navigator.clipboard.write([

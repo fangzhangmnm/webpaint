@@ -1555,28 +1555,33 @@ function bicubicSample(sdat, w, h, sx, sy, ddat, dstIdx) {
   ddat[dstIdx + 3] = Math.max(0, Math.min(255, a));
 }
 // bilinear sample（同 liquify.js 那份；private copy 避免跨模块依赖）
+// v124 (user：「stamp 时有黑边」BIG bug)：caller 已 clamp u/v∈[0,1] 才进；
+// 但 sx = u·srcW 在边缘可能 = srcW，x1 = ix+1 = srcW 越界 → 老代码 invalid neighbor
+// 被 skip 但 weight 仍计入 → output 被 (1-fx) 拉暗变半透 → 看起来就是黑边 + 半透。
+// **修**：clamp x0/x1/y0/y1 到合法范围（replicate edge）→ 边缘像素值完整，无暗化。
 function bilinearSample(sdat, w, h, sx, sy, ddat, dstIdx) {
   const ix = Math.floor(sx);
   const iy = Math.floor(sy);
   const fx = sx - ix;
   const fy = sy - iy;
-  const x0 = ix, x1 = ix + 1;
-  const y0 = iy, y1 = iy + 1;
-  const p00 = (x0 >= 0 && x0 < w && y0 >= 0 && y0 < h) ? (y0 * w + x0) * 4 : -1;
-  const p10 = (x1 >= 0 && x1 < w && y0 >= 0 && y0 < h) ? (y0 * w + x1) * 4 : -1;
-  const p01 = (x0 >= 0 && x0 < w && y1 >= 0 && y1 < h) ? (y1 * w + x0) * 4 : -1;
-  const p11 = (x1 >= 0 && x1 < w && y1 >= 0 && y1 < h) ? (y1 * w + x1) * 4 : -1;
+  // 全在源外 → 维持透明 (没写 ddat，外层 ImageData 默认 0)
+  if (ix < -1 || ix >= w || iy < -1 || iy >= h) return;
+  // clamp 到合法 (replicate edge)
+  const x0 = ix < 0 ? 0 : (ix >= w ? w - 1 : ix);
+  const x1 = (ix + 1) < 0 ? 0 : ((ix + 1) >= w ? w - 1 : (ix + 1));
+  const y0 = iy < 0 ? 0 : (iy >= h ? h - 1 : iy);
+  const y1 = (iy + 1) < 0 ? 0 : ((iy + 1) >= h ? h - 1 : (iy + 1));
+  const p00 = (y0 * w + x0) * 4;
+  const p10 = (y0 * w + x1) * 4;
+  const p01 = (y1 * w + x0) * 4;
+  const p11 = (y1 * w + x1) * 4;
   const w00 = (1 - fx) * (1 - fy);
   const w10 = fx * (1 - fy);
   const w01 = (1 - fx) * fy;
   const w11 = fx * fy;
   for (let c = 0; c < 4; c++) {
-    let v = 0;
-    if (p00 >= 0) v += sdat[p00 + c] * w00;
-    if (p10 >= 0) v += sdat[p10 + c] * w10;
-    if (p01 >= 0) v += sdat[p01 + c] * w01;
-    if (p11 >= 0) v += sdat[p11 + c] * w11;
-    ddat[dstIdx + c] = v;
+    ddat[dstIdx + c] = sdat[p00 + c] * w00 + sdat[p10 + c] * w10
+                     + sdat[p01 + c] * w01 + sdat[p11 + c] * w11;
   }
 }
 

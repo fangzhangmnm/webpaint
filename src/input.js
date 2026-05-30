@@ -50,6 +50,108 @@ const GESTURE_TAP_MAX_MOVE_SQ = 256;     // 16 px²
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
+// v124 (user：「统一快捷键注册收集，不会改了这里忘了那里」+「Gallery 等 transient 要小心不要误触」)
+// SSoT：_keydown 按这个表 dispatch；app.js 菜单"快捷键"面板从这里读 desc 渲染。
+// 加新快捷键 = 新增一条 entry。
+//
+// when(i) 守卫：返回 false 时跳过。常用：
+//   - _editMode：默认 gate，gallery / 任何全屏 modal 时不响应
+//   - _floating：只在套索浮层时
+//   - _hasSelection：只在有选区时（无 floating）
+function _editMode(i) {
+  // gallery 全屏时不响应工具切换 / 选区类快捷键
+  if (document.body.dataset.mode === "gallery") return false;
+  return true;
+}
+function _floating(i) { return i.lasso?.state() === "floating"; }
+function _hasSelectionIdle(i) {
+  return i.lasso?.hasSelection() && i.lasso?.state() === "idle";
+}
+
+export const KEYBOARD_SHORTCUTS = [
+  // 编辑（任何时候都该 work，除了 gallery 单 modal）
+  { combo: "Ctrl+Z",           desc: "撤销",     category: "编辑",
+    when: _editMode, run: (i) => i.undo() },
+  { combo: "Ctrl+Shift+Z",     desc: "重做",     category: "编辑",
+    when: _editMode, run: (i) => i.redo() },
+  { combo: "Ctrl+Y",           desc: "重做",     category: "编辑",
+    when: _editMode, run: (i) => i.redo() },
+
+  // 套索 / 选区（在浮层时只 Enter/Esc，其它跳过）
+  { combo: "Enter",            desc: "应用变换", category: "套索",
+    when: _floating, run: (i) => i._commitLasso() },
+  { combo: "Escape",           desc: "取消变换", category: "套索",
+    when: _floating, run: (i) => i._abortLasso() },
+  { combo: "Escape",           desc: "取消选区", category: "套索",
+    when: _hasSelectionIdle,
+    run: (i) => {
+      const entry = i.lasso.setSelection(null);
+      if (entry && i.history) i.history.push(entry);
+      i.board.invalidateAll();
+    },
+  },
+  { combo: "Ctrl+A",           desc: "全选",     category: "套索",
+    when: (i) => _editMode(i) && !_floating(i),
+    run: () => document.getElementById("lassoSelectAllBtn")?.click() },
+  { combo: "Ctrl+D",           desc: "取消选区", category: "套索",
+    when: (i) => _editMode(i) && !_floating(i),
+    run: () => document.getElementById("lassoDeselectBtn")?.click() },
+  { combo: "Ctrl+Shift+I",     desc: "反选",     category: "套索",
+    when: (i) => _editMode(i) && !_floating(i),
+    run: () => document.getElementById("lassoInvertBtn")?.click() },
+
+  // 工具切换（gallery / floating 时跳过）
+  { combo: "B",                desc: "笔刷",     category: "工具",
+    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("brush") },
+  { combo: "E",                desc: "橡皮",     category: "工具",
+    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("eraser") },
+  { combo: "I",                desc: "吸色",     category: "工具",
+    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("picker") },
+  { combo: "L",                desc: "套索",     category: "工具",
+    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("lasso") },
+  { combo: "H",                desc: "平移",     category: "工具",
+    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("hand") },
+
+  // 视图
+  { combo: "0",                desc: "画布居中", category: "视图",
+    when: _editMode, run: (i) => i.board.fitToScreen() },
+  { combo: "+",                desc: "放大",     category: "视图",
+    when: _editMode, run: (i) => i.board.zoomAt(innerWidth/2, innerHeight/2, 1.2) },
+  { combo: "-",                desc: "缩小",     category: "视图",
+    when: _editMode, run: (i) => i.board.zoomAt(innerWidth/2, innerHeight/2, 1/1.2) },
+
+  // 笔粗
+  { combo: "[",                desc: "笔粗 -",   category: "笔粗",
+    when: _editMode, run: (i) => i._adjustSize(-2) },
+  { combo: "]",                desc: "笔粗 +",   category: "笔粗",
+    when: _editMode, run: (i) => i._adjustSize(+2) },
+
+  // **特殊**：Space hold = 临时 pan，需要 keyup 解除（_keydown 顶部硬编码，不走 registry）
+  // **特殊**：Ctrl+S = 保存（绑在 app.js 拦截，不走 registry）
+];
+
+function _matchCombo(e, combo) {
+  const parts = combo.split("+").map(s => s.trim());
+  const wantCtrl  = parts.includes("Ctrl");
+  const wantShift = parts.includes("Shift");
+  const wantAlt   = parts.includes("Alt");
+  const key = parts[parts.length - 1];
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (!!ctrl !== wantCtrl) return false;
+  if (!!e.shiftKey !== wantShift) return false;
+  if (!!e.altKey   !== wantAlt)   return false;
+  if (key === "Enter")  return e.key === "Enter";
+  if (key === "Escape") return e.key === "Escape";
+  if (key === "+")      return e.key === "+" || e.key === "=";
+  if (key === "-")      return e.key === "-" || e.key === "_";
+  if (key === "[" || key === "]") return e.key === key;
+  if (key === "0")      return e.key === "0";
+  if (key.length === 1) {
+    return e.code === "Key" + key.toUpperCase() || e.key.toUpperCase() === key.toUpperCase();
+  }
+  return e.key === key;
+}
+
 export class InputController {
   constructor(board, doc, opts = {}) {
     this.board = board;
@@ -489,11 +591,6 @@ export class InputController {
         if (bb) this.board.markDocDirty(bb[0], bb[1], bb[2], bb[3]);
         this.board.requestRender();
       }
-    } else if (rec.role === "shapes") {
-      const { x: dx, y: dy } = this.board.screenToDoc(e.clientX, e.clientY);
-      this.shapes.extend(dx, dy);
-      this.board.invalidateAll();      // shapes preview 全屏，懒得 dirty rect
-      this.board.requestRender();
     } else if (rec.role === "pick") {
       this._doPick(e.clientX, e.clientY);
     } else if (rec.role === "pan") {
@@ -572,9 +669,6 @@ export class InputController {
     } else if (rec.role === "lasso") {
       if (cancelled) this._abortLasso();
       else this._endLasso(rec);
-    } else if (rec.role === "shapes") {
-      if (cancelled) this.shapes.cancel();
-      else this._endShapes();
     } else if (rec.role === "pan") {
       if (![...this.pointers.values()].some((p) => p.role === "pan")) {
         delete document.body.dataset.panning;
@@ -651,7 +745,8 @@ export class InputController {
     this._liquifyLayerId = layer.id;
     this._liquifyPreSnap = layer.snapshot();
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
-    this.liquify.beginStroke(layer, settings, dx, dy);
+    // v124 (user：「preview 没 apply 选区」) 把 selection 传给 liquify，stamp 内 mask 外保留 startSnap
+    this.liquify.beginStroke(layer, settings, dx, dy, this.doc.selection);
     this.board.requestRender();
   }
   _endLiquify() {
@@ -830,7 +925,10 @@ export class InputController {
     const { x: dx, y: dy } = this.board.screenToDoc(sx, sy);
     const ix = Math.floor(dx), iy = Math.floor(dy);
     if (!this.doc.activeLayer) return;
-    if (ix < 0 || iy < 0 || ix >= this.doc.width || iy >= this.doc.height) return;
+    if (ix < 0 || iy < 0 || ix >= this.doc.width || iy >= this.doc.height) {
+      window.dispatchEvent(new CustomEvent("wp:pickerHide"));
+      return;
+    }
     // 吸的是"合成后的可见颜色"。从所有可见图层底向上 alpha-blend。
     let r = 0, g = 0, b = 0, a = 0;
     // doc 背景作为底
@@ -852,6 +950,8 @@ export class InputController {
       [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
     this.onColorSampled(hex);
     this.status(`吸色 ${hex}`);
+    // v124 吸色 pin (user：「Google Maps pin 风格，pin 头颜色 / pin 尖中选 pixel」)
+    window.dispatchEvent(new CustomEvent("wp:pickerShow", { detail: { sx, sy, hex } }));
   }
 
   // ---- gesture ----
@@ -996,8 +1096,14 @@ export class InputController {
   }
 
   // ---- 键盘 ----
+  // v124 (user：「统一快捷键注册收集，不会改了这里忘了那里」)
+  // KEYBOARD_SHORTCUTS 一个数组 = 唯一真理源：
+  //   - _keydown 按这个表 dispatch
+  //   - app.js 菜单的"快捷键"面板从这里读 desc 渲染
+  // 加新快捷键：只改这一个数组。
   _keydown(e) {
     if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+    // Space hold = 临时 pan（特殊：需 keyup 解除，独立 state）
     if (e.code === "Space" && !this.spaceDown) {
       this.spaceDown = true;
       document.body.dataset.spacePan = "1";
@@ -1007,36 +1113,13 @@ export class InputController {
     if (e.key === "Alt" || e.code === "AltLeft" || e.code === "AltRight") {
       this.altDown = true;
     }
-    const ctrl = e.ctrlKey || e.metaKey;
-    if (ctrl && e.code === "KeyZ") {
-      if (e.shiftKey) this.redo(); else this.undo();
+    for (const sc of KEYBOARD_SHORTCUTS) {
+      if (sc.when && !sc.when(this)) continue;
+      if (!_matchCombo(e, sc.combo)) continue;
+      try { sc.run(this); } catch (err) { console.warn("[shortcut]", sc.combo, err); }
       e.preventDefault();
       return;
     }
-    if (ctrl && e.code === "KeyY") {
-      this.redo();
-      e.preventDefault();
-      return;
-    }
-    if (e.key === "b" || e.key === "B") this._emitTool("brush");
-    else if (e.key === "e" || e.key === "E") this._emitTool("eraser");
-    else if (e.key === "i" || e.key === "I") this._emitTool("picker");
-    else if (e.key === "h" || e.key === "H") this._emitTool("hand");
-    else if (e.key === "l" || e.key === "L") this._emitTool("lasso");
-    else if (e.key === "Enter" && this.lasso.state() === "floating") { this._commitLasso(); e.preventDefault(); }
-    else if (e.key === "Escape" && this.lasso.state() === "floating") { this._abortLasso(); e.preventDefault(); }
-    // Esc 在非 floating 状态 = 取消选区（仅有选区时；不进 history 显式 push 会让 toolbar 自动更新）
-    else if (e.key === "Escape" && this.lasso.hasSelection() && this.lasso.state() === "idle") {
-      const entry = this.lasso.setSelection(null);
-      if (entry && this.history) this.history.push(entry);
-      this.board.invalidateAll();
-      e.preventDefault();
-    }
-    else if (e.key === "0") this.board.fitToScreen();
-    else if (e.key === "=" || e.key === "+") this.board.zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1.2);
-    else if (e.key === "-" || e.key === "_") this.board.zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1 / 1.2);
-    else if (e.key === "[") this._adjustSize(-2);
-    else if (e.key === "]") this._adjustSize(+2);
   }
   _keyup(e) {
     if (e.code === "Space") {
