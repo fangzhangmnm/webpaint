@@ -395,10 +395,10 @@ function applyToolState(tool) {
   state.brush.size    = ts.size;
   state.brush.opacity = ts.opacity ?? 1.0;
   state.brush.flow    = ts.flow    ?? 1.0;
-  // size slider：log 化 0~100 → 1~sizeMax px
+  // size slider：v124e 分段步长，HTML max 跟随当前 brush.size.max 动态算
   if (els.sizeSlider) {
     const sliderMax = brush?.size?.max || 200;
-    els.sizeSlider.max = "100";
+    els.sizeSlider.max = String(_sliderMaxPos(sliderMax));   // 修 (user：「8 就满了」)
     els.sizeSlider.min = "0";
     els.sizeSlider.step = "1";
     els.sizeSlider.value = String(sizeToSliderPos(ts.size, sliderMax));
@@ -411,27 +411,33 @@ function applyToolState(tool) {
   updateSidebarSlider2Label();
 }
 
-// v97：size slider log 化 helpers
-// v124c (user：「想拖到 300 但 299 / 301 一不小心过头」)：
-//   - 老 SLIDER_RANGE=200 → 1000，slider positions 5× 细
-//   - 末端 1%（pos > 990）snap 到 maxPx，让 user 一拖到底就是精确整数
-//   - 首端 0.5%（pos < 5）snap 到 1（size=1 同样精确可达）
-// 代价：损失 ~290-299 范围（snap 吃掉了），日常画用不到这么细。
-const SLIDER_RANGE = 1000;
-const SNAP_HEAD = 0.005;
-const SNAP_TAIL = 0.99;
+// v124e (user：「分段步长」)：替换 log，naive 分段
+//   sizes 1..20: 步长 1（细控小笔）
+//   sizes 20..100: 步长 2
+//   sizes 100..maxPx: 步长 5
+// maxPx=300 → 100 positions；maxPx=60 → 40 positions；maxPx=15 → 15 positions
+// 一拖到底就是精确 maxPx，任何 5 的倍数（≥100）/ 2 的倍数（20-100）/ 整数（≤20）可达
+function _segPositions(maxPx) {
+  const seg1 = Math.min(20, maxPx);
+  const seg2 = Math.max(0, Math.floor((Math.min(100, maxPx) - 20) / 2));
+  const seg3 = Math.max(0, Math.floor((maxPx - 100) / 5));
+  return { seg1, seg2, seg3, total: seg1 + seg2 + seg3 };
+}
 function sliderPosToSize(pos, maxPx) {
-  const t = Math.max(0, Math.min(SLIDER_RANGE, pos)) / SLIDER_RANGE;
-  if (t <= SNAP_HEAD) return 1;
-  if (t >= SNAP_TAIL) return maxPx;
-  return Math.max(1, Math.round(Math.exp(t * Math.log(Math.max(2, maxPx)))));
+  const { seg1, seg2, total } = _segPositions(maxPx);
+  const p = Math.max(0, Math.min(total - 1, Math.round(pos)));
+  if (p < seg1)              return p + 1;                       // step 1
+  if (p < seg1 + seg2)        return 20 + (p - seg1 + 1) * 2;     // step 2
+  return 100 + (p - seg1 - seg2 + 1) * 5;                         // step 5
 }
 function sizeToSliderPos(size, maxPx) {
-  if (size <= 1) return 0;
-  if (size >= maxPx) return SLIDER_RANGE;
-  const t = Math.log(Math.max(1, size)) / Math.log(Math.max(2, maxPx));
-  return Math.round(Math.max(0, Math.min(1, t)) * SLIDER_RANGE);
+  const { seg1, seg2, total } = _segPositions(maxPx);
+  const s = Math.max(1, Math.min(maxPx, Math.round(size)));
+  if (s <= seg1)              return s - 1;
+  if (s <= 100)               return seg1 + Math.round((s - 20) / 2) - 1;
+  return seg1 + seg2 + Math.round((s - 100) / 5) - 1;
 }
+function _sliderMaxPos(maxPx) { return _segPositions(maxPx).total - 1; }
 function updateSidebarSlider2Label() {
   // v98：slider 永远标「透」(opacity 语义)。
   // user：「slider 是 opacity 不是 flow」。flow 在 brush settings 改。
@@ -1124,8 +1130,9 @@ els.sizeSlider.addEventListener("input", () => {
   showSizePopup();
 });
 els.opacitySlider.addEventListener("input", () => setOpacity(parseFloat(els.opacitySlider.value) / 100));
-// boot 初值
+// boot 初值 (v124e applyToolState 会被笔架 load 后再调一次刷新；这里先给一个合理默认 maxPx 防 NaN)
 els.sizeSlider.dataset.maxPx = "200";
+els.sizeSlider.max = String(_sliderMaxPos(200));
 setSize(state.brush.size, { silent: true });        // boot 不弹 popup
 setOpacity(state.brush.opacity, { silent: true });
 // 键盘 [ ] 调粗
