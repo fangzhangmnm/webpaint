@@ -411,33 +411,20 @@ function applyToolState(tool) {
   updateSidebarSlider2Label();
 }
 
-// v124e (user：「分段步长」)：替换 log，naive 分段
-//   sizes 1..20: 步长 1（细控小笔）
-//   sizes 20..100: 步长 2
-//   sizes 100..maxPx: 步长 5
-// maxPx=300 → 100 positions；maxPx=60 → 40 positions；maxPx=15 → 15 positions
-// 一拖到底就是精确 maxPx，任何 5 的倍数（≥100）/ 2 的倍数（20-100）/ 整数（≤20）可达
-function _segPositions(maxPx) {
-  const seg1 = Math.min(20, maxPx);
-  const seg2 = Math.max(0, Math.floor((Math.min(100, maxPx) - 20) / 2));
-  const seg3 = Math.max(0, Math.floor((maxPx - 100) / 5));
-  return { seg1, seg2, seg3, total: seg1 + seg2 + seg3 };
-}
+// v124f (user：「画布 slider 可以不 snap」) 回到简单 log，t=1 用 min(maxPx, ...) 保证拖到顶 = maxPx 精确整数
+// 不分段、不 snap zone，slider 给浮动 size，整 px 由 round 决定
+const SLIDER_RANGE = 1000;
 function sliderPosToSize(pos, maxPx) {
-  const { seg1, seg2, total } = _segPositions(maxPx);
-  const p = Math.max(0, Math.min(total - 1, Math.round(pos)));
-  if (p < seg1)              return p + 1;                       // step 1
-  if (p < seg1 + seg2)        return 20 + (p - seg1 + 1) * 2;     // step 2
-  return 100 + (p - seg1 - seg2 + 1) * 5;                         // step 5
+  const t = Math.max(0, Math.min(SLIDER_RANGE, pos)) / SLIDER_RANGE;
+  return Math.max(1, Math.min(maxPx, Math.round(Math.exp(t * Math.log(Math.max(2, maxPx))))));
 }
 function sizeToSliderPos(size, maxPx) {
-  const { seg1, seg2, total } = _segPositions(maxPx);
-  const s = Math.max(1, Math.min(maxPx, Math.round(size)));
-  if (s <= seg1)              return s - 1;
-  if (s <= 100)               return seg1 + Math.round((s - 20) / 2) - 1;
-  return seg1 + seg2 + Math.round((s - 100) / 5) - 1;
+  if (size <= 1) return 0;
+  if (size >= maxPx) return SLIDER_RANGE;
+  const t = Math.log(size) / Math.log(Math.max(2, maxPx));
+  return Math.round(Math.max(0, Math.min(1, t)) * SLIDER_RANGE);
 }
-function _sliderMaxPos(maxPx) { return _segPositions(maxPx).total - 1; }
+function _sliderMaxPos() { return SLIDER_RANGE; }
 function updateSidebarSlider2Label() {
   // v98：slider 永远标「透」(opacity 语义)。
   // user：「slider 是 opacity 不是 flow」。flow 在 brush settings 改。
@@ -5024,7 +5011,8 @@ function _renderBrushSettings() {
   // Size：base + max
   const size = section("粗细 (size)");
   rangeRow(size, "基础", 1, b.size.max || 200, 1, b.size.base, (v) => `${v|0} px`, (v) => b.size.base = v);
-  rangeRow(size, "最大", 4, 800, 1, b.size.max || 200, (v) => `${v|0} px`, (v) => b.size.max = v);
+  // v124f (user：「设某个值到 300 很难 snap」) 最大 step 1→10：10/20/.../300/.../800 80 个 pos 在 150 px 滑条上 = 1.9 finger px / pos，能稳落整 10 倍数
+  rangeRow(size, "最大", 10, 800, 10, b.size.max || 200, (v) => `${v|0} px`, (v) => b.size.max = v);
 
   // 压感 dynamics（signed coeff −1..1，0=不响应）
   const dyn = section("压感 (−1..1，0 = 不响应、负数 = 反向)");

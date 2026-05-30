@@ -388,6 +388,9 @@ ai vr 3d等东西可以作为第一方插件？用户可以选择安装。
 ### 字体工具
 只带一个轻量的最基本的（或者浏览器有？那么连这个都不提供）。提供字体管理小窗用户可以上传到appfolder/.fonts/里面，自动根据fontname(或者别的什么）改名方便检索）
 
+### 撒花撒星星
+jitter, scattering, h/s/v variation, texture, rotation/size variation
+
 ## 用我这本本子的方式
 
 新点子来了 → 先写这里，标 P0/P1/P2/❄。等积累到自然想做某件，再单独开个 docs/lesson-*.md / 设计 doc 论证。

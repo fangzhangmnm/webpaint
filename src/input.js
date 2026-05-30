@@ -554,18 +554,26 @@ export class InputController {
           rec.pullX = sx; rec.pullY = sy;
         }
 
-        // 4) StreamLine：一阶 IIR LPF。**v124b 速度自适应** (user：「拖动速度自适应调整 alpha」)
-        //   慢笔 → α=1（无滞后，落点贴指）；快笔 → α=α_base（平滑全开，Procreate 感）
-        //   速度 px/ms：用 fdx fdy (motion filter 后) 和事件 timestamp 间隔
-        //   V_LO 0.1 px/ms（很慢）→ α=1；V_HI 1.5 px/ms（快）→ α=α_base；中间 smoothstep
+        // 4) StreamLine：一阶 IIR LPF + **v124f 速度自适应 (adaptStrength = streamline)**
+        //   user：「默认正常笔刷下还原之前的手感」→ adapt 强度 = streamline 本身
+        //     streamline=0：adapt=0，α=1 永远不滤（无 streamline）
+        //     streamline=1：adapt=1，慢笔 α=1（不滤）、快笔 α=α_base（满滤）
+        //     streamline=0.3（default）：adapt=0.3，几乎跟老版一样（fast 处差异 ~0%）
+        //   速度阈值（CSS px / ms，DPR 已归一）：
+        //     V_LO=0.3 ≈ 3 inch/sec（典型慢拖）
+        //     V_HI=1.5 ≈ 15 inch/sec（典型快画）
+        //     来自手画速度常识；过慢/过快用 smoothstep 平滑过渡
         const alphaBase = Math.max(0.05, 1 - sl);
         const _evtDt = Math.max(1, ev.timeStamp - (rec._prevEvtTs ?? ev.timeStamp - 16));
         rec._prevEvtTs = ev.timeStamp;
         const speed = Math.hypot(fdx, fdy) / _evtDt;
-        const V_LO = 0.1, V_HI = 1.5;
+        const V_LO = 0.3, V_HI = 1.5;
         const t = Math.max(0, Math.min(1, (speed - V_LO) / (V_HI - V_LO)));
-        const ramp = t * t * (3 - 2 * t);                          // smoothstep
-        const alphaPos = 1 - ramp * (1 - alphaBase);               // lerp(1, alphaBase, ramp)
+        const ramp = t * t * (3 - 2 * t);                                  // smoothstep
+        // α(v) = α_base + adaptStrength × (1 - ramp) × (1 - α_base)
+        //      = lerp(α_base, lerp(1, α_base, ramp), adaptStrength)
+        const adaptStrength = sl;
+        const alphaPos = alphaBase + adaptStrength * (1 - ramp) * (1 - alphaBase);
         rec.smX = rec.smX + alphaPos * (rec.pullX - rec.smX);
         rec.smY = rec.smY + alphaPos * (rec.pullY - rec.smY);
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
