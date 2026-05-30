@@ -21,7 +21,12 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  # v130 (user prod race 踩坑后)：
+  #   原本 false → 排队，main+prod 几乎同 push 时 workflow A 的 "checkout prod"
+  #   先于 prod push 落到 GitHub，A 用旧 prod tree 部署了；B 后跑被 Pages 静默 collapse。
+  #   改 true → 新 push 来时取消正在跑的旧 workflow，最后那次必赢。
+  #   副作用：连续 push（调代码 1 分钟 3 次）只最后 deploy 生效，dev/ 这无所谓。
+  cancel-in-progress: true
 
 jobs:
   deploy:
