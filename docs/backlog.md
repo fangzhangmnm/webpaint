@@ -391,6 +391,10 @@ ai vr 3d等东西可以作为第一方插件？用户可以选择安装。
 ### 撒花撒星星
 jitter, scattering, h/s/v variation, texture, rotation/size variation
 
+### 记录时间和重放
+记录画的时间，stroke数。不过如何判断idle呢需要一个规则
+然后也可以考虑下procreate的保留一个replay mp4的功能
+
 ## 用我这本本子的方式
 
 新点子来了 → 先写这里，标 P0/P1/P2/❄。等积累到自然想做某件，再单独开个 docs/lesson-*.md / 设计 doc 论证。

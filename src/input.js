@@ -567,7 +567,12 @@ export class InputController {
         //   - V_REF = 0.3 ≈ 3 inch/s（典型仔细画速度）
         //   - v ≥ V_REF → ramp=1 → streamline 满血
         //   - v ≈ 0 → ramp=0 → α 上扬，慢笔贴指
-        //   adaptStrength = streamline 本身：sl=0 disable，sl=0.3 几乎 = 老版，sl=1 满 unlag
+        //   v124h 修 (user：「勾线 sl=0.95 还不显著，procreate 已经夸张了」)：
+        //     adapt = 1 - sl（不是 sl）。高 sl = 用户主动要平滑，别让 adapt 把它废了：
+        //     - sl=0:    adapt=1 → 满 unlag（无平滑无意义）
+        //     - sl=0.3:  adapt=0.7 → 明显 unlag（默认笔感）
+        //     - sl=0.95: adapt=0.05 → 几乎不 unlag → 平滑保住（Procreate 夸张感）
+        //     - sl=1:    adapt=0 → 完全无 adapt，max 平滑
         const V_REF = _streamlineVRef();
         const alphaBase = Math.max(0.05, 1 - sl);
         const _evtDt = Math.max(1, ev.timeStamp - (rec._prevEvtTs ?? ev.timeStamp - 16));
@@ -575,7 +580,7 @@ export class InputController {
         const v = Math.hypot(fdx, fdy) / _evtDt;          // CSS px / ms（已 DPR 归一）
         const t = Math.min(1, v / V_REF);                  // 无量纲
         const ramp = t * t * (3 - 2 * t);                  // smoothstep
-        const adaptStrength = sl;
+        const adaptStrength = Math.max(0, 1 - sl);         // 关键修
         const alphaPos = alphaBase + adaptStrength * (1 - ramp) * (1 - alphaBase);
         rec.smX = rec.smX + alphaPos * (rec.pullX - rec.smX);
         rec.smY = rec.smY + alphaPos * (rec.pullY - rec.smY);
