@@ -411,20 +411,40 @@ function applyToolState(tool) {
   updateSidebarSlider2Label();
 }
 
-// v124f (user：「画布 slider 可以不 snap」) 回到简单 log，t=1 用 min(maxPx, ...) 保证拖到顶 = maxPx 精确整数
-// 不分段、不 snap zone，slider 给浮动 size，整 px 由 round 决定
-const SLIDER_RANGE = 1000;
+// v124g (user：「以后所有 size slider 统一这个分段 quantize」)：
+//   1..20   步长 1   → 20 positions
+//   20..50  步长 2   → 15 positions
+//   50..100 步长 5   → 10 positions
+//   100..500 步长 10 → 40 positions
+//   500..1000 步长 20 → 25 positions
+// maxPx=300 → 65 positions（拖到顶就是 300）；maxPx=1000 → 110 positions；maxPx=15 → 15 positions
+function _segPositions(maxPx) {
+  const a = Math.max(0, Math.min(20, maxPx));
+  const bEnd = Math.min(50, maxPx);  const b = bEnd > 20 ? Math.floor((bEnd - 20) / 2) : 0;
+  const cEnd = Math.min(100, maxPx); const c = cEnd > 50 ? Math.floor((cEnd - 50) / 5) : 0;
+  const dEnd = Math.min(500, maxPx); const d = dEnd > 100 ? Math.floor((dEnd - 100) / 10) : 0;
+  const eEnd = Math.min(1000, maxPx); const e = eEnd > 500 ? Math.floor((eEnd - 500) / 20) : 0;
+  return { a, b, c, d, e, total: a + b + c + d + e };
+}
 function sliderPosToSize(pos, maxPx) {
-  const t = Math.max(0, Math.min(SLIDER_RANGE, pos)) / SLIDER_RANGE;
-  return Math.max(1, Math.min(maxPx, Math.round(Math.exp(t * Math.log(Math.max(2, maxPx))))));
+  const { a, b, c, d, total } = _segPositions(maxPx);
+  const p = Math.max(0, Math.min(total - 1, Math.round(pos)));
+  if (p < a)             return p + 1;                          // 1..20 step 1
+  if (p < a + b)         return 20  + (p - a + 1) * 2;          // 22..50 step 2
+  if (p < a + b + c)     return 50  + (p - a - b + 1) * 5;      // 55..100 step 5
+  if (p < a + b + c + d) return 100 + (p - a - b - c + 1) * 10; // 110..500 step 10
+  return                          500 + (p - a - b - c - d + 1) * 20; // 520..1000 step 20
 }
 function sizeToSliderPos(size, maxPx) {
-  if (size <= 1) return 0;
-  if (size >= maxPx) return SLIDER_RANGE;
-  const t = Math.log(size) / Math.log(Math.max(2, maxPx));
-  return Math.round(Math.max(0, Math.min(1, t)) * SLIDER_RANGE);
+  const { a, b, c, d } = _segPositions(maxPx);
+  const s = Math.max(1, Math.min(maxPx, Math.round(size)));
+  if (s <= 20)  return s - 1;
+  if (s <= 50)  return a + Math.round((s - 20) / 2) - 1;
+  if (s <= 100) return a + b + Math.round((s - 50) / 5) - 1;
+  if (s <= 500) return a + b + c + Math.round((s - 100) / 10) - 1;
+  return            a + b + c + d + Math.round((s - 500) / 20) - 1;
 }
-function _sliderMaxPos() { return SLIDER_RANGE; }
+function _sliderMaxPos(maxPx) { return _segPositions(maxPx).total - 1; }
 function updateSidebarSlider2Label() {
   // v98：slider 永远标「透」(opacity 语义)。
   // user：「slider 是 opacity 不是 flow」。flow 在 brush settings 改。

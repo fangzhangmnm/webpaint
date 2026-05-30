@@ -50,6 +50,14 @@ const GESTURE_TAP_MAX_MOVE_SQ = 256;     // 16 px²
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
+// streamline 速度自适应参考速度 V_REF (CSS px/ms)。bake 默认 + localStorage 覆盖：
+// 在 dev console / 设置加 entry 时改 localStorage.setItem('webpaint.vref', '0.45')
+// 即可 retune。无 UI 时 default 0.3 适合大多数。
+function _streamlineVRef() {
+  const v = parseFloat(localStorage.getItem("webpaint.vref"));
+  return (v > 0 && v < 5) ? v : 0.3;
+}
+
 // v124 (user：「统一快捷键注册收集，不会改了这里忘了那里」+「Gallery 等 transient 要小心不要误触」)
 // SSoT：_keydown 按这个表 dispatch；app.js 菜单"快捷键"面板从这里读 desc 渲染。
 // 加新快捷键 = 新增一条 entry。
@@ -554,24 +562,19 @@ export class InputController {
           rec.pullX = sx; rec.pullY = sy;
         }
 
-        // 4) StreamLine：一阶 IIR LPF + **v124f 速度自适应 (adaptStrength = streamline)**
-        //   user：「默认正常笔刷下还原之前的手感」→ adapt 强度 = streamline 本身
-        //     streamline=0：adapt=0，α=1 永远不滤（无 streamline）
-        //     streamline=1：adapt=1，慢笔 α=1（不滤）、快笔 α=α_base（满滤）
-        //     streamline=0.3（default）：adapt=0.3，几乎跟老版一样（fast 处差异 ~0%）
-        //   速度阈值（CSS px / ms，DPR 已归一）：
-        //     V_LO=0.3 ≈ 3 inch/sec（典型慢拖）
-        //     V_HI=1.5 ≈ 15 inch/sec（典型快画）
-        //     来自手画速度常识；过慢/过快用 smoothstep 平滑过渡
+        // 4) StreamLine：一阶 IIR LPF + 速度自适应（详 docs/streamline-velocity-math.md）
+        //   单参 V_REF (CSS px/ms)，bake default + localStorage 可覆盖（user：「能调教」）
+        //   - V_REF = 0.3 ≈ 3 inch/s（典型仔细画速度）
+        //   - v ≥ V_REF → ramp=1 → streamline 满血
+        //   - v ≈ 0 → ramp=0 → α 上扬，慢笔贴指
+        //   adaptStrength = streamline 本身：sl=0 disable，sl=0.3 几乎 = 老版，sl=1 满 unlag
+        const V_REF = _streamlineVRef();
         const alphaBase = Math.max(0.05, 1 - sl);
         const _evtDt = Math.max(1, ev.timeStamp - (rec._prevEvtTs ?? ev.timeStamp - 16));
         rec._prevEvtTs = ev.timeStamp;
-        const speed = Math.hypot(fdx, fdy) / _evtDt;
-        const V_LO = 0.3, V_HI = 1.5;
-        const t = Math.max(0, Math.min(1, (speed - V_LO) / (V_HI - V_LO)));
-        const ramp = t * t * (3 - 2 * t);                                  // smoothstep
-        // α(v) = α_base + adaptStrength × (1 - ramp) × (1 - α_base)
-        //      = lerp(α_base, lerp(1, α_base, ramp), adaptStrength)
+        const v = Math.hypot(fdx, fdy) / _evtDt;          // CSS px / ms（已 DPR 归一）
+        const t = Math.min(1, v / V_REF);                  // 无量纲
+        const ramp = t * t * (3 - 2 * t);                  // smoothstep
         const adaptStrength = sl;
         const alphaPos = alphaBase + adaptStrength * (1 - ramp) * (1 - alphaBase);
         rec.smX = rec.smX + alphaPos * (rec.pullX - rec.smX);
