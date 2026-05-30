@@ -118,8 +118,8 @@ manifest / icons / styles）。但**不共享** SW（dev 不注册）和 PWA ins
 
 ## 必踩的坑（写在前面）
 
-1. **`.gitignore` 里如果有 `dist/`，**`** 立刻删掉**。**`** —— 早期 webapp 模板常加
-   `dist/`（因为很多项目里 dist 是本地产物、CI 在线 build）。我们这套**dist 必须
+1. **`.gitignore` 里如果有 `dist/`，立刻删掉**。早期 webapp 模板常加 `dist/`
+   （因为很多项目里 dist 是本地产物、CI 在线 build）。我们这套**dist 必须
    commit 进 git**，因为 GitHub Pages 直接 serve repo 文件，你不 push 它就没有。
    一旦遗忘，prod URL 引用的 `dist/main-XXX.mjs` 是 404，prod 立刻全崩。
    v121 第一次切的时候我自己踩了一脚。**抄到 sibling family 时第一件事检查
@@ -129,3 +129,10 @@ manifest / icons / styles）。但**不共享** SW（dev 不注册）和 PWA ins
    它一下。
 3. **vendor/esbuild 二进制不入库**（10MB），跨 OS 也不通用。docs 写清楚
    "新机器跑这个 curl 命令" 就行。
+4. **`dev/index.html` 里 `<base href="../">` 必须有，且在所有 `<link>` / `<script>`
+   之前**。不加的话，bundle 里 `new URL("./src/foo.js", document.baseURI)` 会
+   解到 `/<repo>/dev/src/foo.js`（dev/ 这层不存在 src/），404。v121 user 立刻撞
+   `MSAL load failed .../dev/src/vendor/msal/...`。
+   加 `<base href="../">` 后 dev/ 里所有相对路径回 `./...` 跟 prod 同写法，
+   bundle 内 `import.meta.url` / `document.baseURI` 都解到项目根。
+   **绝对位置必须紧贴 `<head>`**：base 只对它后面出现的 URL 生效。
