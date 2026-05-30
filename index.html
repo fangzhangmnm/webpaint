@@ -748,6 +748,10 @@
       <button class="menu-item" id="menuSaveAs" type="button" role="menuitem">
         <span class="menu-item-label">另存为…</span>
       </button>
+      <!-- v133 (user：「revert + explicit save 重写 checkpoint」) -->
+      <button class="menu-item" id="menuRevertToOpen" type="button" role="menuitem">
+        <span class="menu-item-label">撤销修改…</span>
+      </button>
       <!-- v124 裁切合并：有选区 → 裁切到选区；否则 → 自由裁切 8 handle -->
       <button class="menu-item" id="menuCrop" type="button" role="menuitem">
         <span class="menu-item-label" id="menuCropLabel">裁切</span>
@@ -863,6 +867,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-8183dce28f54.mjs"></script>
+    <script type="module" src="./dist/webpaint-ce70a936aaf6.mjs"></script>
   </body>
 </html>

@@ -155,6 +155,7 @@ const els = {
   newDocCancel: document.getElementById("newDocCancel"),
   menuRename: document.getElementById("menuRename"),
   menuSaveAs: document.getElementById("menuSaveAs"),
+  menuRevertToOpen: document.getElementById("menuRevertToOpen"),
   menuCheckerboard: document.getElementById("menuCheckerboard"),
   menuCheckUpdate: document.getElementById("menuCheckUpdate"),
   oraFileInput: document.getElementById("oraFileInput"),
@@ -2735,6 +2736,36 @@ function adoptLoadedDoc(loaded, sessionName) {
     board.invalidateAll();
     board.requestRender();
   }
+  // v133 (user：「revert 回到本次 session 打开时」) 写 checkpoint
+  //   opts.skipCheckpoint = true 给 revert 路径用（revert 后不刷新 checkpoint，user 还能再 revert）
+  if (!_adoptLoadedOpts.skipCheckpoint) {
+    _sessionOpenedAt = Date.now();
+    // 异步写：encode 几百 ms，不阻塞 UI
+    _writeSessionCheckpoint(sessionName).catch((e) => console.warn("[revert] checkpoint 失败:", e));
+  }
+}
+// v133 revert: session-open checkpoint state
+let _sessionOpenedAt = 0;
+// adoptLoadedDoc opts 用全局传（绕开签名兼容）：调前 set，复位
+let _adoptLoadedOpts = {};
+function adoptLoadedDocWithOpts(loaded, name, opts) {
+  _adoptLoadedOpts = opts || {};
+  try { adoptLoadedDoc(loaded, name); }
+  finally { _adoptLoadedOpts = {}; }
+}
+async function _writeSessionCheckpoint(name) {
+  if (!name) return;
+  const blob = await encodeDocToOra(doc, {
+    referenceImage: referenceWindow.getPersistBlob(),
+    webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
+  });
+  await setMeta(`revert:${name}:ora`, blob);
+  await setMeta(`revert:${name}:at`, _sessionOpenedAt);
+}
+async function _readSessionCheckpoint(name) {
+  const blob = await getMeta(`revert:${name}:ora`);
+  const at = await getMeta(`revert:${name}:at`);
+  return blob ? { blob, at: at || 0 } : null;
 }
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty
 window.addEventListener("wp:histchange", () => {
@@ -2750,6 +2781,12 @@ async function saveAndPush() {
   if (_docSaving) return;
   // 1) local IDB
   if (_docDirty) await saveNow();
+  // v133 (user：「explicit save 应该重写 revert checkpoint，跟 Blender Revert 类似」)
+  //   autosave 不动 checkpoint；user 主动 Ctrl+S = "我认可当前状态" → 推后 revert 点
+  if (_activeSessionName) {
+    _sessionOpenedAt = Date.now();
+    _writeSessionCheckpoint(_activeSessionName).catch((e) => console.warn("[revert] explicit save checkpoint:", e));
+  }
   // 2) push cloud（user 在场 + 已登录 + 在线 + 云端未同步）
   // 离线时跳过推送（不要弹错；本地已存，回到在线再 save 一次自动推）
   if (isSignedIn() && navigator.onLine === false && isCloudDirty(_activeSessionName)) {
@@ -3627,6 +3664,36 @@ els.menuSaveAs.addEventListener("click", async () => {
     }
   }
 });
+// v133 revert：从 IDB checkpoint 恢复 session 打开时的状态
+els.menuRevertToOpen?.addEventListener("click", async () => {
+  setMenuOpen(false);
+  if (!_activeSessionName) { setStatus("没活动 session", true); return; }
+  const cp = await _readSessionCheckpoint(_activeSessionName);
+  if (!cp || !cp.blob) {
+    setStatus("没找到本次打开时的快照", true);
+    return;
+  }
+  const ageMin = Math.max(1, Math.round((Date.now() - (cp.at || _sessionOpenedAt)) / 60000));
+  const choice = await lockSyncGate({
+    title: "撤销修改",
+    message: `回到约 ${ageMin} 分钟前的快照（本次打开或上次保存时的版本）。\n之后所有修改将丢失。`,
+    actions: [
+      { label: "取消", value: "cancel" },
+      { label: "撤销", value: "ok", primary: true },
+    ],
+  });
+  if (choice !== "ok") return;
+  applyAllPendingTransients();
+  try {
+    const loaded = await decodeOraToDoc(cp.blob);
+    adoptLoadedDocWithOpts(loaded, _activeSessionName, { skipCheckpoint: true });
+    _docDirty = true;     // 跟磁盘内容已经偏离，下次保存把 revert 后的状态写进去
+    updateSaveStatus();
+    setStatus(`已恢复到本次打开时（${ageMin} 分钟前）`);
+  } catch (e) {
+    setStatus("恢复失败：" + (e && e.message || e), true);
+  }
+});
 // v120: 主菜单导出/导入 重组（user：「导出项目和导出语义分开」+「小扳手」)
 // - 主行 = 按 sticky config 一键执行；🔧 = 弹 inline popup 改 config
 // - sticky 存 localStorage（不绑 doc，配一次全工程用）
@@ -4046,6 +4113,9 @@ async function importImageAsNewDoc(file) {
   _docLastSavedAt = 0;
   updateSaveStatus();
   await saveNow();
+  // v133 revert checkpoint
+  _sessionOpenedAt = Date.now();
+  _writeSessionCheckpoint(name).catch((e) => console.warn("[revert] photo-import checkpoint:", e));
   setStatus(`新建（照片）：${name}（${w}×${h}）`);
 }
 
@@ -4267,6 +4337,9 @@ els.newDocConfirm.addEventListener("click", async () => {
   referenceWindow.clearBitmap();
   applyCheckerboard(false);    // v125: 新建 doc 棋盘 reset 关
   await saveNow();
+  // v133 revert checkpoint：新建后 = 空白 doc 状态
+  _sessionOpenedAt = Date.now();
+  _writeSessionCheckpoint(name).catch((e) => console.warn("[revert] new-doc checkpoint:", e));
   setGalleryOpen(false);
   setStatus(`新建：${name}（${w}×${h}）`);
 });
