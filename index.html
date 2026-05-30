@@ -492,15 +492,20 @@
         <button class="float-panel-close" id="layersPanelClose" type="button" aria-label="关闭">×</button>
       </div>
       <div class="layers-list" id="layersList"><!-- rows rendered by JS --></div>
-      <!-- v123：footer 精简为 1 个 "+"（user：「省一行，from image + new empty 放下拉框」）
-           del / up / down 挪进 per-row "⋯" 菜单 -->
+      <!-- v124b user 改主意：拆回 2 按钮（"+" 直加 空层 / 相框图标 导入图片）。下拉太烦 -->
       <div class="layers-foot">
-        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建图层（点开选 空层 / 从图片）">
+        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建空图层" aria-label="新建空图层">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"/>
             <line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
-          <span class="layers-foot-btn-arrow" aria-hidden="true">▾</span>
+        </button>
+        <button class="layers-foot-btn" id="layerImportPhotoBtn" type="button" title="导入图片为新图层" aria-label="导入图片">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="14" rx="2"/>
+            <circle cx="8" cy="10" r="1.5"/>
+            <polyline points="3 17 9 12 14 17 21 11"/>
+          </svg>
         </button>
       </div>
     </div>
@@ -833,6 +838,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-a1e5a1a1131e.mjs"></script>
+    <script type="module" src="./dist/webpaint-27b2edf7ee9b.mjs"></script>
   </body>
 </html>

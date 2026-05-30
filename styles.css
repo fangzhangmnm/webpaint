@@ -1089,7 +1089,9 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   position: absolute;
   top: 2px; right: 2px;
   width: 22px; height: 22px;
-  font-size: 12px;
+  /* v124b ⋯ 比 svg gear 视觉更突出，字号大一点 */
+  font-size: 18px;
+  line-height: 1;
   background: transparent;
   border: none;
   color: var(--ink-soft);

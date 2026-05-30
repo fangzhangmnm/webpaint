@@ -412,13 +412,18 @@ function applyToolState(tool) {
 }
 
 // v97：size slider log 化 helpers
+// v124b 修 (user：「老拖到 299」)：HTML slider max=200，老公式 /100 → 半个 slider 没响应；
+// 改成读 slider 实际 max attr。同时**末端 snap**：pos > 0.995 直接 = maxPx，保证整数 cap 可达
+const SLIDER_RANGE = 200;
 function sliderPosToSize(pos, maxPx) {
-  const t = Math.max(0, Math.min(100, pos)) / 100;
+  const t = Math.max(0, Math.min(SLIDER_RANGE, pos)) / SLIDER_RANGE;
+  if (t > 0.995) return maxPx;             // 末端 snap → 用户能拖到精确整数 maxPx
   return Math.max(1, Math.round(Math.exp(t * Math.log(Math.max(2, maxPx)))));
 }
 function sizeToSliderPos(size, maxPx) {
+  if (size >= maxPx) return SLIDER_RANGE;
   const t = Math.log(Math.max(1, size)) / Math.log(Math.max(2, maxPx));
-  return Math.round(Math.max(0, Math.min(1, t)) * 100);
+  return Math.round(Math.max(0, Math.min(1, t)) * SLIDER_RANGE);
 }
 function updateSidebarSlider2Label() {
   // v98：slider 永远标「透」(opacity 语义)。
@@ -1666,6 +1671,69 @@ function _deleteLayer(L) {
   compressPixelSnap(layerSpec, (blob) => { layerSpec.blob = blob; });
   _afterDocChange();
 }
+// v124b 向下合并 (user 急需，mode-aware)：
+// 用 active 的 mode + opacity 把 active 合到下方层；删 active。
+// **不**改 active 的 mode (因为它要消失了)；下方层保留它原本 mode + opacity。
+// 视觉等价：合并前后画面相同。clippingMask layer 不支持（先返回不做）。
+function _mergeDownLayer(L) {
+  if (!L) return;
+  const idx = doc.layers.findIndex((l) => l.id === L.id);
+  if (idx <= 0) { setStatus("已经是最底层，没法向下合"); return; }
+  if (L.clippingMask) { setStatus("剪裁层不支持向下合并（先取消剪裁）"); return; }
+  const under = doc.layers[idx - 1];
+  if (under.clippingMask) { setStatus("下方是剪裁层不支持合并"); return; }
+  // 算合并后的 bbox = active ∪ under
+  const aHasPx = L.bboxW > 0 && L.bboxH > 0;
+  const uHasPx = under.bboxW > 0 && under.bboxH > 0;
+  if (!aHasPx) { _deleteLayer(L); return; }   // active 空，直接当删 active 处理
+  const x0 = uHasPx ? Math.min(under.bboxX, L.bboxX) : L.bboxX;
+  const y0 = uHasPx ? Math.min(under.bboxY, L.bboxY) : L.bboxY;
+  const x1 = uHasPx ? Math.max(under.bboxX + under.bboxW, L.bboxX + L.bboxW) : L.bboxX + L.bboxW;
+  const y1 = uHasPx ? Math.max(under.bboxY + under.bboxH, L.bboxY + L.bboxH) : L.bboxY + L.bboxH;
+  const newW = x1 - x0, newH = y1 - y0;
+  // 离屏画 tmp = under (source-over) → active (with active.mode × active.opacity)
+  const tmp = (typeof OffscreenCanvas !== "undefined")
+    ? new OffscreenCanvas(newW, newH)
+    : (() => { const c = document.createElement("canvas"); c.width = newW; c.height = newH; return c; })();
+  const tctx = tmp.getContext("2d");
+  if (uHasPx) {
+    tctx.globalAlpha = under.opacity;
+    tctx.drawImage(under.canvas, under.bboxX - x0, under.bboxY - y0);
+    tctx.globalAlpha = 1;
+  }
+  tctx.globalAlpha = L.opacity;
+  tctx.globalCompositeOperation = L.mode || "source-over";
+  tctx.drawImage(L.canvas, L.bboxX - x0, L.bboxY - y0);
+  tctx.globalAlpha = 1;
+  tctx.globalCompositeOperation = "source-over";
+  // 先抓"被改前"状态再 mutate
+  const underBeforeSnap = under.snapshot();
+  const underBeforeOpacity = under.opacity;
+  const underBeforeMode = under.mode;
+  const activeSpec = layerSpecFrom(L);
+  // 替换 under 的画布 + 归一化 opacity/mode（因为 active.mode×active.opacity 已经烤进 tmp 像素）
+  under.canvas = tmp;
+  under.ctx = tmp.getContext("2d", { willReadFrequently: false });
+  under.bboxX = x0; under.bboxY = y0; under.bboxW = newW; under.bboxH = newH;
+  under.opacity = 1;
+  under.mode = "source-over";
+  doc.removeLayer(L.id);
+  const underAfterSnap = under.snapshot();
+  history.push({
+    type: "mergeDown",
+    underId: under.id,
+    underBefore: underBeforeSnap, underAfter: underAfterSnap,
+    underBeforeOpacity, underBeforeMode,
+    activeSpec, activeIndex: idx,
+  });
+  compressPixelSnap(underBeforeSnap, (blob) => { underBeforeSnap.blob = blob; });
+  compressPixelSnap(underAfterSnap, (blob) => { underAfterSnap.blob = blob; });
+  if (activeSpec.imageData) compressPixelSnap(activeSpec, (blob) => { activeSpec.blob = blob; });
+  // 选 active = under (刚合并完的层)
+  doc.setActiveById(under.id);
+  _afterDocChange();
+}
+
 function _moveLayerDelta(L, delta) {
   if (!L) return;
   const from = doc.layers.findIndex((l) => l.id === L.id);
@@ -1675,45 +1743,9 @@ function _moveLayerDelta(L, delta) {
   _afterDocChange();
 }
 
-// "+" 按钮：点开 popup 选 空层 / 从图片
-els.layerAddBtn.addEventListener("click", () => {
-  // v124 toggle：再点一下 + 收回（user 反映 popup 不消失）
-  const existing = document.querySelector(".layer-tools-popup[data-source='layerAdd']");
-  if (existing) { existing.remove(); return; }
-  document.querySelectorAll(".layer-tools-popup").forEach((p) => p.remove());
-  const popup = document.createElement("div");
-  popup.dataset.source = "layerAdd";
-  popup.className = "menu-panel layer-tools-popup";
-  popup.innerHTML = `
-    <button class="menu-item" data-act="empty" type="button">
-      <span class="menu-item-label">新空图层</span>
-    </button>
-    <button class="menu-item" data-act="image" type="button">
-      <span class="menu-item-label">从图片…</span>
-    </button>
-  `;
-  document.body.appendChild(popup);
-  const r = els.layerAddBtn.getBoundingClientRect();
-  const w = popup.offsetWidth || 160;
-  popup.style.position = "fixed";
-  popup.style.top = (r.top - popup.offsetHeight - 4) + "px";   // popup 在按钮上方（footer 在底）
-  popup.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left)) + "px";
-  const cleanup = () => {
-    popup.remove();
-    document.removeEventListener("pointerdown", outside, true);
-  };
-  const outside = (e) => {
-    if (!popup.contains(e.target) && !els.layerAddBtn.contains(e.target)) cleanup();
-  };
-  setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
-  popup.addEventListener("click", (e) => {
-    const act = e.target.closest("[data-act]")?.dataset.act;
-    if (!act) return;
-    cleanup();
-    if (act === "empty") _addEmptyLayer();
-    else if (act === "image") _openImagePicker();
-  });
-});
+// v124b user 改主意：拆回 2 按钮。"+" 直加空层；相框 直开文件选
+els.layerAddBtn.addEventListener("click", _addEmptyLayer);
+document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);
 
 // In-app 通用 sheet：替代 alert / prompt / confirm（详见 feedback-no-system-dialog）。
 // 返回 Promise，resolve 输入值 / true / null（取消）。
@@ -1991,16 +2023,22 @@ function openConfirmSheet(title, message) {
 // Per-row "⋯" 工具菜单：弹出 in-app popup（**不用** alert / prompt 等系统对话框）。
 // 现在只有重命名一项；之后加复制图层 / 清空内容 / 合并下方 等。
 function openLayerToolsMenu(L, anchorEl, nameEl) {
-  // 关掉可能已开的（防多个同时）
+  // v124b toggle (user：「图层的 ⋯ 没法关，所有的 ⋯ 都点了能关」)
+  // 同 anchor 再按 = 收回；不同 anchor 替换
+  const existing = document.querySelector(".layer-tools-popup");
+  const sameAnchor = existing && existing.dataset.anchorId === String(L.id);
   document.querySelectorAll(".layer-tools-popup").forEach((p) => p.remove());
+  if (sameAnchor) return;
 
   const popup = document.createElement("div");
   popup.className = "menu-panel layer-tools-popup";
-  // v123：del / up / down 从 footer 挪进这里（user 要求）
+  popup.dataset.anchorId = String(L.id);
+  // v123 起：del / up / down / 向下合并 都在这里
   const idx = doc.layers.findIndex((l) => l.id === L.id);
   const canUp = idx < doc.layers.length - 1;
   const canDown = idx > 0;
   const canDel = doc.layers.length > 1;
+  const canMergeDown = idx > 0 && !L.clippingMask && !doc.layers[idx - 1].clippingMask;
   popup.innerHTML = `
     <button class="menu-item" data-act="rename" type="button">
       <span class="menu-item-label">重命名…</span>
@@ -2010,6 +2048,9 @@ function openLayerToolsMenu(L, anchorEl, nameEl) {
     </button>
     <button class="menu-item" data-act="down" type="button"${canDown ? "" : " disabled"}>
       <span class="menu-item-label">下移</span>
+    </button>
+    <button class="menu-item" data-act="mergeDown" type="button"${canMergeDown ? "" : " disabled"}>
+      <span class="menu-item-label">向下合并</span>
     </button>
     <button class="menu-item menu-danger" data-act="del" type="button"${canDel ? "" : " disabled"}>
       <span class="menu-item-label">删除</span>
@@ -2038,10 +2079,11 @@ function openLayerToolsMenu(L, anchorEl, nameEl) {
     if (!btn || btn.disabled) return;
     const act = btn.dataset.act;
     cleanup();
-    if (act === "rename")      startLayerRename(L, nameEl);
-    else if (act === "up")     _moveLayerDelta(L, 1);
-    else if (act === "down")   _moveLayerDelta(L, -1);
-    else if (act === "del")    _deleteLayer(L);
+    if (act === "rename")           startLayerRename(L, nameEl);
+    else if (act === "up")          _moveLayerDelta(L, 1);
+    else if (act === "down")        _moveLayerDelta(L, -1);
+    else if (act === "mergeDown")   _mergeDownLayer(L);
+    else if (act === "del")         _deleteLayer(L);
   });
 }
 
@@ -2126,6 +2168,41 @@ history.registerHandler("removeLayer", {
   },
   redo: (e) => { doc.removeLayer(e.layerSpec.id); _afterDocChange(); },
   refsLayer: (e, id) => e.layerSpec.id === id,
+});
+// v124b mergeDown：undo 还原 under 像素 + opacity/mode，再 insert active 回 activeIndex；redo 应用 underAfter + 删 active
+history.registerHandler("mergeDown", {
+  undo: async (e) => {
+    const under = doc.findLayer(e.underId);
+    if (under) {
+      applyPixelSnap(doc, e.underId, e.underBefore, e.underBefore.blob, board);
+      under.opacity = e.underBeforeOpacity;
+      under.mode = e.underBeforeMode;
+    }
+    // 把 active 插回原 index
+    const spec = e.activeSpec;
+    if (spec.imageData || spec.bboxW <= 0 || spec.bboxH <= 0) {
+      doc.insertLayerAt(e.activeIndex, spec);
+    } else if (spec.blob) {
+      const bitmap = await createImageBitmap(spec.blob);
+      doc.insertLayerAt(e.activeIndex, { ...spec, bitmap });
+    } else {
+      doc.insertLayerAt(e.activeIndex, spec);
+    }
+    doc.setActiveById(spec.id);
+    _afterDocChange();
+  },
+  redo: (e) => {
+    const under = doc.findLayer(e.underId);
+    if (under) {
+      applyPixelSnap(doc, e.underId, e.underAfter, e.underAfter.blob, board);
+      under.opacity = 1;
+      under.mode = "source-over";
+    }
+    doc.removeLayer(e.activeSpec.id);
+    doc.setActiveById(e.underId);
+    _afterDocChange();
+  },
+  refsLayer: (e, id) => e.underId === id || e.activeSpec.id === id,
 });
 // moveLayer：undo 从 toIdx 移回 fromIdx；redo 从 fromIdx 移到 toIdx
 history.registerHandler("moveLayer", {
@@ -4561,12 +4638,12 @@ function _renderRackSheet() {
     const name = document.createElement("span");
     name.className = "brush-rack-tile-name";
     name.textContent = b.name;
-    // gear icon → 直接进设置（不用长按）。v101r2：unicode ⚙ 在 iOS 渲染不一致，换 SVG 小扳手
+    // v124b (user：「笔刷的扳手改成 ⋯，统一用一个框架」) 扳手 → ⋯ (unicode 在 iOS 一致)
     const gear = document.createElement("button");
     gear.type = "button";
     gear.className = "brush-rack-tile-edit";
     gear.title = "编辑";
-    gear.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+    gear.textContent = "⋯";
     gear.addEventListener("click", (e) => {
       e.stopPropagation();
       closeExclusive();
