@@ -111,6 +111,31 @@
 
 ## P2（备选 / 有趣）
 
+### 导入图片 → auto transform → Ctrl+Z 行为很差
+v126 / v127 导入照片后自动 lift 进 transform。这时候按 Ctrl+Z：
+- 各种没有复位（transform float / selection / 新建的 layer / 入口的 setTool / 各种 panel suppress 状态）
+- 涉及好几个系统：lasso transform state、selection、history（addLayer 没 push 进 history）、ui state（_suppressTransientPanels）
+- 期望：一键回到导入之前的样子
+
+设计要点：
+- 导入流程要 push 一个 composite history entry（addLayer + setSelection + lift + setTool 一起）
+- 或者：transform 期间 Ctrl+Z 先 abort transform，再 undo 上一步（两段式）
+
+### 导入图片 iPad 上仍偶发黑边
+v124 修了 transform bilinear edge 黑边（clamp-to-edge），但 user v128 实测 iPad 上某些图还是有。
+- 可能是 importImageAsLayer 的 drawImage(bitmap, 0, 0, w, h) 走 Canvas2D imageSmoothing 仍有 1px 透明 fringe
+- 或者 auto transform 走 mesh stamp 时还有 bilinear → bicubic 没接到位
+- 待 user 给具体图复现，看是哪个路径
+
+### iPad 偶发 zoom 误触（水珠 / 误触挡板还会漏）
+v124 装了 4 层防御（body touch-action、capture-phase dblclick / 三指、paint-UI user-select、pointer 自愈），日常稳了。但极偶发还是会 zoom 一下——典型是手心湿 / iPad 屏上有水珠 / 戴手套点击，触发系统级 multi-touch 拼接的"伪 dblclick"绕过 dblclick handler。
+
+可能要的兜底：
+- viewport scale 锁定后 visualViewport scale 任何变化 → 直接 reset
+- iOS 17+ 看看 GestureEvent 能不能再补一刀
+
+不阻塞日常使用，遇到了重画一笔。等真踩多了再上面动。
+
 ### AI 本地 WASM（按需下载，不默 vendor）
 
 | 工具 | 包大小 | 用途 | 一张耗时 |
