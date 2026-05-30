@@ -71,6 +71,8 @@ git checkout main             # 立刻切回
 
 Actions 自动跑 → / 部署完。真用户下次刷新见新版。
 
+> **deploy race 注意**：如果几秒前刚 push 过 main，那次 main workflow 还在跑。`cancel-in-progress: true`（v130 加的）会自动取消它，让 prod push 触发的 workflow 重新跑、用最新两分支 tip 部署。如果手贱把 `cancel-in-progress` 改回了 false，main 那次会用旧 prod tree 抢先 deploy，prod 这次 success 也不生效——见 [lessons-pages-deploy-race.md](lessons-pages-deploy-race.md)。
+
 ### 第一次 setup（一次性）
 
 1. `git checkout -b prod && git push -u origin prod`
@@ -101,7 +103,7 @@ Actions 自动跑 → / 部署完。真用户下次刷新见新版。
 如果判断需要分家：
 
 - [ ] 抄 `scripts/build.sh`，改顶部 `ENTRY` 指向项目入口（一般 `./src/app.js`）
-- [ ] 抄 `.github/workflows/deploy.yml`
+- [ ] 抄 `.github/workflows/deploy.yml`（**确认 `concurrency.cancel-in-progress: true`**，false 会踩 deploy race，[lessons-pages-deploy-race.md](lessons-pages-deploy-race.md)）
 - [ ] `.gitignore` 加 `vendor/esbuild/`、`dist/main-tmp.mjs*`
 - [ ] index.html 入口改成 `<script type="module" src="./dist/main-<hash>.mjs"></script>`
 - [ ] `src/version.js` 是 ES module export
@@ -118,5 +120,11 @@ Actions 自动跑 → / 部署完。真用户下次刷新见新版。
 
 1. **prod 分支不存在就推 main**：Actions 第一步 checkout prod fail。先建 prod 分支再 push。
 2. **index.html 里 dist 路径手改了 / sed 找不到**：build.sh 用 sed 替 `main-XXX.mjs`，如果你（或 AI）跑过 build 然后 commit 了 patched 版本，下次跑 sed 还是能找到（它匹配任何 12 位 hex hash），但万一你手改成完全不同的写法，sed 就静默失败。**别手改那一行**。
-3. **Actions concurrency**：两个分支同时 push 会排队跑 Actions（pages 不能并发部署）。可接受。
+3. **Actions concurrency race（v130 踩到的）**：两个分支几乎同时 push（典型场景：promote prod 时先 push main 再 merge push prod，间隔 10 秒）会触发 **deploy race**：
+   - 第一个 workflow 在它 checkout 时 prod 还是旧 tip → 用旧 prod 部署
+   - 第二个 workflow 后跑、checkout 拿到新 tip，但 Actions success 不等于 Pages 实际切到它的 artifact（GH Pages 对同 environment 的连发 deploy 会静默 collapse）
+   - 结果：根目录卡在旧内容，user 一脸懵
+   - **必须** `concurrency.cancel-in-progress: true`（v130 改的）。新 push 来时取消旧 workflow，最后那次必赢。**别留 false**。
+   - 详细复盘 [lessons-pages-deploy-race.md](lessons-pages-deploy-race.md)
+   - 救活方法（万一已经踩了）：到出问题的分支 push 一个 `--allow-empty` commit 强制 redeploy
 4. **vendor/esbuild 二进制不入 git**（10MB + 跨 OS 不通用）。build.sh 自动 curl 安装。新机器或 CI 第一次跑 build.sh 多 5-10 秒下载，之后 cached。
