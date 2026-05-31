@@ -18,7 +18,7 @@
 
 import { isAuthConfigured, initAuth, signIn, signOut, getActiveAccount, isSignedIn, retrySilentSignIn } from "./auth.js";
 import { listChildren, getItemByPath, downloadItemBlob, uploadFileToApproot, deleteItem,
-  ensureSubfolder, moveItemToFolder, renameItem } from "./graph.js";
+  ensureSubfolder, moveItemToFolder, renameItem, getApprootId } from "./graph.js";
 import { sessionFileName } from "./config.js";
 
 const ORA_CT = "application/zip";
@@ -179,16 +179,26 @@ export async function listCloudTrash() {
   }
 }
 
-// ----- 重命名云端 session（PATCH name，原子）-----
-// caller 已确保 newName 在云端不冲突（call前 listCloudSessionsRecursive 检查）
+// ----- 重命名云端 session（支持跨 folder move）-----
+// caller 已确保 newName 在云端不冲突
+// 同 folder → PATCH name；跨 folder → move + rename（自动 ensureSubfolder 新 folder）
 export async function renameCloudSession(oldName, newName) {
   if (!isSignedIn()) throw new Error("未登录 OneDrive");
   if (oldName === newName) return;
   const path = sessionFileName(oldName);
   const item = await getItemByPath(path);
   if (!item) throw new Error(`云端找不到：${oldName}`);
-  const newFileName = sessionFileName(newName);
-  await renameItem(item.id, newFileName);
+  const oldFolder = oldName.includes("/") ? oldName.slice(0, oldName.lastIndexOf("/")) : "";
+  const newFolder = newName.includes("/") ? newName.slice(0, newName.lastIndexOf("/")) : "";
+  const newBaseName = sessionFileName(newName.includes("/") ? newName.slice(newName.lastIndexOf("/") + 1) : newName);
+  if (oldFolder === newFolder) {
+    // 同 folder → 仅改名
+    await renameItem(item.id, newBaseName);
+  } else {
+    // 跨 folder → ensureSubfolder + move
+    const targetFolderId = newFolder ? await ensureSubfolder(newFolder) : await getApprootId();
+    await moveItemToFolder(item.id, targetFolderId, { newName: newBaseName, conflictBehavior: "fail" });
+  }
   // 迁移本地 etag/dirty key（基于 name）
   const eTag = getKnownETag(oldName);
   if (eTag) setKnownETag(newName, eTag);
@@ -219,32 +229,36 @@ export async function trashCloudSession(name) {
   const item = await getItemByPath(path);
   if (!item) { clearCloudState(name); return null; }   // 云端没这个文件 → 无操作
   const trashFolderId = await ensureSubfolder(CLOUD_TRASH_FOLDER);
-  const stampedName = `${name} [${Date.now()}].ora`;
+  // newName 必须是 basename（不能含 /），子文件夹的 folder context 在 trash 内丢失
+  const baseName = name.includes("/") ? name.slice(name.lastIndexOf("/") + 1) : name;
+  const stampedName = `${baseName} [${Date.now()}].ora`;
   const moved = await moveItemToFolder(item.id, trashFolderId, { newName: stampedName, conflictBehavior: "fail" });
   clearCloudState(name);
   return moved;
 }
 
-// 从 trash 恢复：把 itemId 移回 approot 根目录，剥掉 [ts] 后缀回原名。
-// conflictBehavior=fail 防覆盖 root 的同名文件（关键：data-loss 风险点）
-// caller 应该提前算好不冲突的 targetName；如果还是冲突 → 服务器抛 409 → 加 (2)(3)... 后缀重试
+// 从 trash 恢复：把 itemId 移回 approot 原 folder（targetName 含 folder path → 自动 ensureSubfolder）
+// conflictBehavior=fail 防覆盖目标位置的同名文件（关键：data-loss 风险点）
+// caller 已算好不冲突的 targetName；如果还是冲突 → 服务器抛 409 → 加 (2)(3)... 后缀重试
 export async function restoreCloudFromTrash(itemId, targetName) {
   if (!isSignedIn()) throw new Error("未登录 OneDrive");
-  const rootId = await ensureSubfolder("");
-  const baseName = targetName.replace(/\.ora$/i, "");
-  // 先尝试 desired name
+  // targetName 可能含 folder：拆 folder + basename
+  const cleanName = targetName.replace(/\.ora$/i, "");
+  const targetFolder = cleanName.includes("/") ? cleanName.slice(0, cleanName.lastIndexOf("/")) : "";
+  const baseName = cleanName.includes("/") ? cleanName.slice(cleanName.lastIndexOf("/") + 1) : cleanName;
+  const folderId = targetFolder ? await ensureSubfolder(targetFolder) : await ensureSubfolder("");
+  // 候选名循环防冲突（newName 只能是 basename 不含 /）
   for (let attempt = 1; attempt < 100; attempt++) {
     const candidate = attempt === 1 ? baseName : `${baseName} (${attempt})`;
     const fileName = `${candidate}.ora`;
     try {
-      return await moveItemToFolder(itemId, rootId, { newName: fileName, conflictBehavior: "fail" });
+      return await moveItemToFolder(itemId, folderId, { newName: fileName, conflictBehavior: "fail" });
     } catch (e) {
-      if (e.status === 409 || e.status === 412) continue;   // 冲突 → 下一个候选
+      if (e.status === 409 || e.status === 412) continue;
       throw e;
     }
   }
-  // 100 个都冲突极不可能；兜底加 ts 必唯一
-  return await moveItemToFolder(itemId, rootId, { newName: `${baseName} [${Date.now()}].ora`, conflictBehavior: "fail" });
+  return await moveItemToFolder(itemId, folderId, { newName: `${baseName} [${Date.now()}].ora`, conflictBehavior: "fail" });
 }
 
 // ============ Brush rack 云同步（v84）============

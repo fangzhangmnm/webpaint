@@ -243,6 +243,7 @@
           </div>
         </div>
       </div>
+      <div class="gallery-breadcrumb hidden" id="galleryBreadcrumb"><!-- 面包屑：在子文件夹内时显示 by JS --></div>
       <div class="gallery-grid" id="galleryGrid"><!-- 本地 + 云端 tiles by JS --></div>
       <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。</div>
       <div class="gallery-foot">
@@ -260,6 +261,9 @@
       </button>
       <button class="menu-item" id="addImportClipboard" type="button" role="menuitem">
         <span class="menu-item-label">从剪切板新建</span>
+      </button>
+      <button class="menu-item" id="addNewFolder" type="button" role="menuitem">
+        <span class="menu-item-label">新建文件夹…</span>
       </button>
     </div>
 
@@ -948,6 +952,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-df13d2462ce7.mjs"></script>
+    <script type="module" src="./dist/webpaint-1089b471e753.mjs"></script>
   </body>
 </html>

@@ -1798,6 +1798,52 @@ body[data-mode="gallery"] .board { display: none !important; }
   color: var(--ink-soft);
   font-size: 14px;
 }
+
+/* 面包屑 */
+.gallery-breadcrumb {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.gallery-breadcrumb.hidden { display: none; }
+.gallery-breadcrumb button {
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.gallery-breadcrumb button:hover:not(.current) {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
+}
+.gallery-breadcrumb button.current {
+  color: var(--ink);
+  font-weight: 500;
+  cursor: default;
+}
+.gallery-breadcrumb .sep {
+  color: var(--ink-soft);
+  opacity: 0.6;
+}
+
+/* Folder tile（gallery 内显示为文件夹的特殊 tile） */
+.gallery-tile.folder .gallery-tile-thumb {
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent, #4c8bf5) 8%, white);
+  color: var(--accent, #4c8bf5);
+}
+.gallery-tile.folder .gallery-tile-thumb svg {
+  width: 80px; height: 80px;
+}
+.gallery-tile.folder .gallery-tile-name {
+  font-weight: 500;
+}
 /* 回收站 bar：trash 视图独立 header，含返回 + 标题 + 清空按钮 */
 .gallery-trash-bar {
   display: flex; align-items: center;

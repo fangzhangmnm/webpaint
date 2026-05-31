@@ -218,7 +218,7 @@ export class LiquifyEngine {
   isActive() { return !!this._stroke; }
 
   cancelStroke() {
-    // 调用方（input.js _abortLiquify）会用 _liquifyPreSnap 还原 layer，
+    // 调用方（input.js _abortLiquify）会用 PixelEdit 事务 abort() 还原 layer，
     // 这里只清状态
     this._stroke = null;
   }

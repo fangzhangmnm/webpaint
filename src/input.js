@@ -25,6 +25,7 @@ import { LiquifyEngine } from "./liquify.js";
 import { LassoEngine, applySelectionMaskPostStroke } from "./lasso.js";
 import { ShapesEngine } from "./shapes.js";
 import { FilterBrushEngine } from "./filter-brush.js";
+import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
 
 const ERASER_RADIUS_SCREEN = 0;   // 用 BrushEngine 自己的 size，不再独立
 const TAP_MAX_DURATION = 220;
@@ -203,21 +204,12 @@ export class InputController {
     // - undo: index--, putImageData(chain[index])
     // - redo: index++, putImageData(chain[index])
     this._lastTap = null;
-    // history: 共享 UndoStack 实例（由 app.js 创建并注入）。注册 "stroke" handler。
+    // history: 共享 UndoStack 实例（由 app.js 创建并注入）。
     this.history = opts.history || null;
+    // pixelHistory: PixelEdit 实例（app.js 注入）。纯像素三件套的事务 + "stroke"/"liquify"
+    // handler 由它注册（见 pixel-edit.js）。input 这里只留 lasso / selectionChange。
+    this.pixelHistory = opts.pixelHistory || null;
     if (this.history) {
-      this.history.registerHandler("stroke", {
-        undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
-        redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board),
-        refsLayer: (e, id) => e.layerId === id,
-      });
-      // 液化和 stroke 同 schema（layerId + before/after pixel snap）。共用 handler 也行，
-      // 但分开命名便于以后区分 history UI 标签。
-      this.history.registerHandler("liquify", {
-        undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
-        redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board),
-        refsLayer: (e, id) => e.layerId === id,
-      });
       // 套索 transform commit 是 raster snap：lift + transform + commit 整体作为单步 undo
       // v119: commit 时清了 selection，undo 时把它恢复回来
       this.history.registerHandler("lasso", {
@@ -749,8 +741,7 @@ export class InputController {
     const settings = this.getBrushSettings();
     if (!settings || !this.doc.activeLayer) return;
     const layer = this.doc.activeLayer;
-    this._strokeLayerId = layer.id;
-    this._strokePreSnap = layer.snapshot();
+    this._strokeTx = this.pixelHistory.begin(layer, "stroke");
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, e);
@@ -761,41 +752,18 @@ export class InputController {
   }
   _endStroke() {
     this.brush.endStroke();
-    if (this._strokeLayerId == null) return;
-    const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
-    const preSnap = this._strokePreSnap;
-    this._strokeLayerId = null;
-    this._strokePreSnap = null;
-    if (!layer || !preSnap) return;
-    // 有选区 → stroke 只在选区内生效（per-pixel revert outside mask 到 pre）
-    if (this.doc.selection) {
-      applySelectionMaskPostStroke(layer, preSnap, this.doc.selection);
-      this.board.invalidateAll();
-    }
-    const postSnap = layer.snapshot();
-    const entry = {
-      type: "stroke",
-      layerId: layer.id,
-      before: preSnap,
-      after: postSnap,
-      beforeBlob: null,
-      afterBlob: null,
-    };
-    if (this.history) this.history.push(entry);
-    this.board.requestRender();
-    // 异步压缩：toBlob 完成后释放 imageData。失败保留 imageData（无 blob 仍可走 imageData 路径）
-    compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
+    if (!this._strokeTx) return;
+    const tx = this._strokeTx;
+    this._strokeTx = null;
+    // 有选区 → stroke 只在选区内生效（finalize 里 per-pixel revert outside mask 到 pre）
+    const sel = this.doc.selection;
+    tx.commit(sel ? (layer, pre) => applySelectionMaskPostStroke(layer, pre, sel) : null);
+    if (sel) this.board.invalidateAll(); else this.board.requestRender();
   }
   _abortStroke() {
     this.brush.cancelStroke();
-    if (this._strokeLayerId != null && this._strokePreSnap) {
-      const layer = this.doc.layers.find((l) => l.id === this._strokeLayerId);
-      if (layer) layer.restoreFromSnapshot(this._strokePreSnap);
-      this.board.invalidateAll();
-    }
-    this._strokeLayerId = null;
-    this._strokePreSnap = null;
+    this._strokeTx?.abort();
+    this._strokeTx = null;
   }
 
   // ---- 液化 ----
@@ -804,8 +772,7 @@ export class InputController {
     const settings = this.getLiquifySettings();
     if (!settings || !this.doc.activeLayer) { rec.role = null; return; }
     const layer = this.doc.activeLayer;
-    this._liquifyLayerId = layer.id;
-    this._liquifyPreSnap = layer.snapshot();
+    this._liquifyTx = this.pixelHistory.begin(layer, "liquify");
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     // v124 (user：「preview 没 apply 选区」) 把 selection 传给 liquify，stamp 内 mask 外保留 startSnap
     this.liquify.beginStroke(layer, settings, dx, dy, this.doc.selection);
@@ -813,40 +780,18 @@ export class InputController {
   }
   _endLiquify() {
     this.liquify.endStroke();
-    if (this._liquifyLayerId == null) return;
-    const layer = this.doc.layers.find((l) => l.id === this._liquifyLayerId);
-    const preSnap = this._liquifyPreSnap;
-    this._liquifyLayerId = null;
-    this._liquifyPreSnap = null;
-    if (!layer || !preSnap) return;
+    if (!this._liquifyTx) return;
+    const tx = this._liquifyTx;
+    this._liquifyTx = null;
     // 有选区 → 液化只在选区内生效
-    if (this.doc.selection) {
-      applySelectionMaskPostStroke(layer, preSnap, this.doc.selection);
-      this.board.invalidateAll();
-    }
-    const postSnap = layer.snapshot();
-    const entry = {
-      type: "liquify",
-      layerId: layer.id,
-      before: preSnap,
-      after: postSnap,
-      beforeBlob: null,
-      afterBlob: null,
-    };
-    if (this.history) this.history.push(entry);
-    this.board.requestRender();
-    compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
+    const sel = this.doc.selection;
+    tx.commit(sel ? (layer, pre) => applySelectionMaskPostStroke(layer, pre, sel) : null);
+    if (sel) this.board.invalidateAll(); else this.board.requestRender();
   }
   _abortLiquify() {
     this.liquify.cancelStroke();
-    if (this._liquifyLayerId != null && this._liquifyPreSnap) {
-      const layer = this.doc.layers.find((l) => l.id === this._liquifyLayerId);
-      if (layer) layer.restoreFromSnapshot(this._liquifyPreSnap);
-      this.board.invalidateAll();
-    }
-    this._liquifyLayerId = null;
-    this._liquifyPreSnap = null;
+    this._liquifyTx?.abort();
+    this._liquifyTx = null;
   }
 
   // ---- Filter brush (v132) ----
@@ -860,16 +805,14 @@ export class InputController {
       rec.role = null; return;
     }
     const layer = this.doc.activeLayer;
-    this._filterBrushLayerId = layer.id;
-    this._filterBrushPreSnap = layer.snapshot();
+    this._filterBrushTx = this.pixelHistory.begin(layer, "stroke");
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
     try {
       this.filterBrush.beginStroke(layer, fbState.Filter, fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
     } catch (e) {
       console.warn("[filter brush] begin failed:", e);
-      this._filterBrushLayerId = null;
-      this._filterBrushPreSnap = null;
+      this._filterBrushTx = null;
       rec.role = null;
       this.status?.(`filter brush 出错：${e.message || e}`);
       return;
@@ -880,35 +823,17 @@ export class InputController {
   }
   _endFilterBrush() {
     this.filterBrush.endStroke();
-    if (this._filterBrushLayerId == null) return;
-    const layer = this.doc.layers.find((l) => l.id === this._filterBrushLayerId);
-    const preSnap = this._filterBrushPreSnap;
-    this._filterBrushLayerId = null;
-    this._filterBrushPreSnap = null;
-    if (!layer || !preSnap) return;
-    const postSnap = layer.snapshot();
-    const entry = {
-      type: "stroke",
-      layerId: layer.id,
-      before: preSnap,
-      after: postSnap,
-      beforeBlob: null,
-      afterBlob: null,
-    };
-    if (this.history) this.history.push(entry);
+    if (!this._filterBrushTx) return;
+    const tx = this._filterBrushTx;
+    this._filterBrushTx = null;
+    // filter brush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre，无需 finalize
+    tx.commit();
     this.board.requestRender();
-    compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
   }
   _abortFilterBrush() {
     this.filterBrush.cancelStroke();
-    if (this._filterBrushLayerId != null && this._filterBrushPreSnap) {
-      const layer = this.doc.layers.find((l) => l.id === this._filterBrushLayerId);
-      if (layer) layer.restoreFromSnapshot(this._filterBrushPreSnap);
-      this.board.invalidateAll();
-    }
-    this._filterBrushLayerId = null;
-    this._filterBrushPreSnap = null;
+    this._filterBrushTx?.abort();
+    this._filterBrushTx = null;
   }
 
   // ---- 套索 ----（v65 重构：lasso 只编辑选区 doc.selection；变换是显式按钮）
@@ -927,7 +852,7 @@ export class InputController {
     const layer = this.doc.activeLayer;
     if (!layer) return;
     const settings = this.getBrushSettings();
-    const before = layer.snapshot();
+    const tx = this.pixelHistory.begin(layer, "stroke");
     try {
       const subtool = this.shapes.getSubtool();
       // line：复用 BrushEngine 沿线 stamp，吃 hardness / shape / spacing / 未来纹理
@@ -948,16 +873,7 @@ export class InputController {
         });
         if (!bbox) return;
       }
-      const after = layer.snapshot();
-      if (this.history) {
-        const entry = {
-          type: "stroke", layerId: layer.id,
-          before, after, beforeBlob: null, afterBlob: null,
-        };
-        this.history.push(entry);
-        compressPixelSnap(before, (blob) => { entry.beforeBlob = blob; });
-        compressPixelSnap(after,  (blob) => { entry.afterBlob  = blob; });
-      }
+      tx.commit();
       this.board.invalidateAll();
     } catch (e) {
       console.error("[shapes]", e);
@@ -1347,44 +1263,7 @@ export class InputController {
   }
 }
 
-// ---- Pixel snapshot helpers（exported；handler 里 layer/raster 类 op 都用这套）----
-// 取 Layer.snapshot() 出来的 { bboxX/Y/W/H, imageData } 异步压成 PNG Blob。
-// 成功时回调拿到 Blob 且 snap.imageData 被置 null 释放 16MB。失败保留 imageData。
-export function compressPixelSnap(snap, onBlob) {
-  if (!snap || !snap.imageData) { onBlob(null); return; }
-  if (snap.bboxW <= 0 || snap.bboxH <= 0) { snap.imageData = null; onBlob(null); return; }
-  const c = document.createElement("canvas");
-  c.width = snap.bboxW;
-  c.height = snap.bboxH;
-  c.getContext("2d").putImageData(snap.imageData, 0, 0);
-  c.toBlob((blob) => {
-    if (!blob) { onBlob(null); return; }
-    snap.imageData = null;     // 释放 raw
-    onBlob(blob);
-  }, "image/png");
-}
-
-// 把 { snap, blob } 应用到指定 layer。imageData 优先（同步），否则解 blob（异步）。
-// invalidateAll 在像素到位后才调，避免渲染 stale 帧 flash。
-export function applyPixelSnap(doc, layerId, snap, blob, board) {
-  const layer = doc.layers.find((l) => l.id === layerId);
-  if (!layer) return Promise.resolve();
-  if (snap && snap.imageData) {
-    layer.restoreFromSnapshot(snap);
-    board?.invalidateAll();
-    return Promise.resolve();
-  }
-  if (!blob) {
-    if (snap) layer.restoreFromSnapshot({ ...snap, imageData: null });
-    board?.invalidateAll();
-    return Promise.resolve();
-  }
-  return createImageBitmap(blob).then((bitmap) => {
-    layer.restoreFromSnapshot({ ...snap, bitmap });
-    bitmap.close?.();
-    board?.invalidateAll();
-  });
-}
+// compressPixelSnap / applyPixelSnap 已搬到 pixel-edit.js（顶部 import 复用，lasso 复合 entry 也用）。
 
 // 抬笔瞬间 e.pressure === 0 → 沿用 rec.lastP，不退回 0.5（v4）。
 // 起手 warmup 也 0 但 lastP 还没 → 退到 **0.2**（v6，原本 0.5 → 起手鼓 bulb）。

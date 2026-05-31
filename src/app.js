@@ -12,7 +12,8 @@
 import { WEBPAINT_VERSION } from "./version.js";
 import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
-import { InputController, compressPixelSnap, applyPixelSnap, KEYBOARD_SHORTCUTS } from "./input.js";
+import { InputController, KEYBOARD_SHORTCUTS } from "./input.js";
+import { PixelEdit, compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
 import { BrushSettings } from "./brush.js";
 import {
   makeDefaultRack, findBrush, getActiveBrush, brushesByTool,
@@ -38,6 +39,7 @@ import { fillSelectionOnLayer, clearSelectionOnLayer, invertSelection } from "./
 import { getFilter, listFilters, registerFilter, onFilterRegistered } from "./filters.js";
 import "./plugins/index.js";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 import { decodeOraToDoc, encodeDocToOra, parseAppVersion } from "./ora.js";
+import { getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches } from "./graph.js";
 import { getOrFetchCloudThumb, clearCloudThumbCache, stats as cloudThumbStats, config as cloudThumbConfig, resetStats as cloudThumbResetStats } from "./cloud-thumb-cache.js";
 import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTelemetry } from "./cloud-thumbs.js";
 import {
@@ -145,6 +147,8 @@ const els = {
   galleryTrashMenuBtn: document.getElementById("galleryTrashMenuBtn"),
   galleryTrashMenuPopup: document.getElementById("galleryTrashMenuPopup"),
   galleryEmptyTrashBtn: document.getElementById("galleryEmptyTrashBtn"),
+  galleryBreadcrumb: document.getElementById("galleryBreadcrumb"),
+  addNewFolder: document.getElementById("addNewFolder"),
   addNew: document.getElementById("addNew"),
   addImportPhoto: document.getElementById("addImportPhoto"),
   addImportClipboard: document.getElementById("addImportClipboard"),
@@ -520,6 +524,9 @@ function selectBrushPresetForTool(tool, brushId) {
 // docs/undo-architecture.md）。input.js 注册 "stroke" handler；layer
 // 操作的 5 个 handler 在下方 boot 段集中注册（四条纪律 #1）。
 const history = new UndoStack({ max: 50 });
+// PixelEdit：纯像素三件套（stroke/liquify/filterBrush/shapes）的 undo 事务 + handler。
+// 和 UndoStack 平级，注入 input。见 pixel-edit.js / CONTEXT.md。
+const pixelHistory = new PixelEdit({ doc, history, board });
 
 const input = new InputController(board, doc, {
   getTool: () => state.tool,
@@ -531,6 +538,7 @@ const input = new InputController(board, doc, {
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
   history,
+  pixelHistory,
 });
 
 // v116: transient mode panel suppression
@@ -4416,6 +4424,45 @@ let _galleryThumbInflight = new Set();   // itemId in-flight，去重
 let _galleryDownloadUrls = new Map();    // itemId → @microsoft.graph.downloadUrl（listChildren 带回，1h 有效）
 let _galleryView = "files";              // "files" | "trash"
 
+// ===== 子文件夹 state =====
+// 当前浏览的 folder（"" = 根；"characters" / "characters/side" = 嵌套）
+// 跨 refresh 持久化，进 gallery 时不重置（用户期望停留上次位置）
+const LS_GALLERY_FOLDER = "webpaint.galleryFolder";
+const LS_EXPLICIT_FOLDERS = "webpaint.explicitFolders";
+let _galleryFolder = "";
+try { _galleryFolder = localStorage.getItem(LS_GALLERY_FOLDER) || ""; } catch {}
+function setGalleryFolder(path) {
+  _galleryFolder = path || "";
+  try { localStorage.setItem(LS_GALLERY_FOLDER, _galleryFolder); } catch {}
+}
+// 显式空文件夹（用户手动建的；没 item 落 prefix 时仍可见）
+function getExplicitFolders() {
+  try { return JSON.parse(localStorage.getItem(LS_EXPLICIT_FOLDERS) || "[]"); }
+  catch { return []; }
+}
+function addExplicitFolder(path) {
+  const s = new Set(getExplicitFolders()); s.add(path);
+  try { localStorage.setItem(LS_EXPLICIT_FOLDERS, JSON.stringify([...s])); } catch {}
+}
+function removeExplicitFolder(path) {
+  const s = new Set(getExplicitFolders()); s.delete(path);
+  try { localStorage.setItem(LS_EXPLICIT_FOLDERS, JSON.stringify([...s])); } catch {}
+}
+// path utils
+function pathFolder(name) {
+  const i = name.lastIndexOf("/");
+  return i < 0 ? "" : name.slice(0, i);
+}
+function pathBasename(name) {
+  const i = name.lastIndexOf("/");
+  return i < 0 ? name : name.slice(i + 1);
+}
+function pathJoin(folder, name) {
+  if (!folder) return name;
+  if (!name) return folder;
+  return `${folder}/${name}`;
+}
+
 // gallery-first 设计：删 / 卸载 active session 后，**进 gallery**（不创建新空白 doc）。
 // _activeSessionName 设 null = 未绑定任何 session；画布 hidden。
 // 用户在 gallery 选别的 / 新建 / 关 → 重新绑定。
@@ -4426,6 +4473,8 @@ async function _exitCanvasToGallery() {
     await withBusy(`正在保存 ${_activeSessionName}…`, async () => {
       try { await saveAndPush(); } catch (e) { console.warn("[exit-to-gallery] save failed:", e); }
     });
+    // 退到 gallery 停在 active session 所在 folder（连贯感）
+    setGalleryFolder(pathFolder(_activeSessionName));
   }
   _activeSessionName = null;
   setCurrentSessionName("");
@@ -4584,11 +4633,41 @@ els.addImportClipboard.addEventListener("click", async () => {
     setStatus("从剪切板新建失败：" + (e && e.message || e));
   }
 });
+
+// + 新建文件夹（建一个空 folder；用户接下来可在其中新建作品）
+els.addNewFolder?.addEventListener("click", async () => {
+  els.galleryAddPopup.classList.add("hidden");
+  const stem = await openInputSheet("新建文件夹", "新文件夹", { placeholder: "文件夹名" });
+  if (stem == null) return;
+  const trimmed = stem.trim();
+  if (!trimmed) { setStatus("文件夹名不能空", true); return; }
+  if (trimmed.includes("/")) { setStatus("文件夹名不能含 /（要建嵌套请进对应文件夹再点新建）", true); return; }
+  const fullPath = pathJoin(_galleryFolder, trimmed);
+  // 已存在 check（含 derived from items）
+  let allNames = [];
+  try { allNames = allNames.concat((await listSessions()).map(s => s.name)); } catch {}
+  if (isSignedIn() && navigator.onLine !== false) {
+    try { allNames = allNames.concat((await listCloudSessionsRecursive()).map(c => c.path.replace(/\.ora$/i, ""))); } catch {}
+  }
+  const fullPrefix = `${fullPath}/`;
+  const exists = allNames.some(n => n === fullPath || n.startsWith(fullPrefix)) || getExplicitFolders().includes(fullPath);
+  if (exists) { setStatus(`文件夹 "${trimmed}" 已存在`, true); return; }
+  await withBusy(`正在创建文件夹 ${trimmed}…`, async () => {
+    addExplicitFolder(fullPath);
+    if (isSignedIn() && navigator.onLine !== false) {
+      try { await ensureSubfolder(fullPath); }
+      catch (e) { console.warn("[folder] cloud ensure failed:", e); }
+    }
+    setStatus(`已建文件夹：${trimmed}`);
+  });
+  renderGallery();
+});
 let _addImportAsNewDoc = false;
 
 // 新建作品 sheet
 function openNewDocSheet() {
-  els.newDocName.value = "未命名";
+  // 默认名带当前 folder 前缀（用户在某子文件夹打开 → 新作品落该 folder）
+  els.newDocName.value = _galleryFolder ? `${_galleryFolder}/未命名` : "未命名";
   els.newDocPreset.value = "2048";
   els.newDocCustomRow.style.display = "none";
   els.newDocW.value = doc.width;
@@ -4746,23 +4825,66 @@ async function renderGallery() {
     if (ent) ent.cloud = c;
     else byName.set(name, { name, local: null, cloud: c });
   }
-  const merged = [...byName.values()];
-  merged.sort((a, b) => {
+  const allItems = [...byName.values()];
+
+  // ====== 子文件夹切片 ======
+  // 取 _galleryFolder prefix 之内的 items；按"剩余路径含 /"分 folder vs file
+  const prefix = _galleryFolder ? `${_galleryFolder}/` : "";
+  const folderSet = new Set();    // 当前层 immediate sub-folder name
+  const filesInFolder = [];        // 当前层 direct child files
+  for (const it of allItems) {
+    if (_galleryFolder && !it.name.startsWith(prefix)) continue;
+    const rest = it.name.slice(prefix.length);
+    const slashIdx = rest.indexOf("/");
+    if (slashIdx >= 0) {
+      folderSet.add(rest.slice(0, slashIdx));
+    } else if (rest) {
+      filesInFolder.push(it);
+    }
+  }
+  // explicit empty folders（用户手动建的）
+  for (const f of getExplicitFolders()) {
+    if (_galleryFolder) {
+      if (!f.startsWith(prefix)) continue;
+      const rest = f.slice(prefix.length);
+      if (rest && !rest.includes("/")) folderSet.add(rest);
+    } else {
+      const first = f.split("/")[0];
+      if (first) folderSet.add(first);
+    }
+  }
+  filesInFolder.sort((a, b) => {
     const ta = (a.local?.updatedAt) || Date.parse(a.cloud?.lastModifiedDateTime || 0);
     const tb = (b.local?.updatedAt) || Date.parse(b.cloud?.lastModifiedDateTime || 0);
     return tb - ta;
   });
+  const folderNames = [...folderSet].sort((a, b) => a.localeCompare(b));
+
+  // ====== Breadcrumb ======
+  _renderBreadcrumb();
 
   els.galleryGrid.innerHTML = "";
-  if (merged.length === 0) {
+  if (folderNames.length === 0 && filesInFolder.length === 0) {
     els.galleryEmpty.classList.remove("hidden");
+    els.galleryEmpty.textContent = _galleryFolder
+      ? `文件夹 "${_galleryFolder}" 是空的`
+      : "还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。";
     els.galleryGrid.style.display = "none";
     return;
   }
   els.galleryEmpty.classList.add("hidden");
   els.galleryGrid.style.display = "";
 
-  for (const item of merged) {
+  // ====== Folder tiles 先（字母序） ======
+  for (const folderName of folderNames) {
+    const folderPath = pathJoin(_galleryFolder, folderName);
+    // 检测是否为空：没有任何 item 以这 path 为 prefix
+    const fullPrefix = `${folderPath}/`;
+    const hasItems = allItems.some((it) => it.name.startsWith(fullPrefix));
+    _renderFolderTile(folderName, folderPath, hasItems);
+  }
+
+  for (const item of filesInFolder) {
     const isLocal = !!item.local;
     const isCloud = !!item.cloud;
     const tile = document.createElement("div");
@@ -4805,8 +4927,8 @@ async function renderGallery() {
     nameRow.className = "gallery-tile-name-row";
     const nm = document.createElement("div");
     nm.className = "gallery-tile-name";
-    nm.textContent = item.name;
-    nm.title = item.name;     // 溢出 tooltip 保底
+    nm.textContent = pathBasename(item.name);   // 在子文件夹下只显示 basename
+    nm.title = item.name;                       // 完整路径走 tooltip
     nameRow.appendChild(nm);
     const meta = document.createElement("div");
     meta.className = "gallery-tile-meta";
@@ -5004,6 +5126,12 @@ async function renderGallery() {
             else         await trashSession(item.name);
           } catch (e) { localErr = e; console.warn("[trash] local failed:", e); }
         }
+        // 保留 folder 可见性：item 所在的 folder 加进 explicit set
+        // 这样最后一个 item 删了 folder 仍显示（空文件夹），user 可再放东西
+        const parentFolder = pathFolder(item.name);
+        if (parentFolder && !cloudErr && !localErr) {
+          addExplicitFolder(parentFolder);
+        }
         if (isActive && !localErr && !cloudErr) {
           await _exitCanvasToGallery();
         }
@@ -5085,6 +5213,121 @@ async function renderGallery() {
   for (const el of els.galleryGrid.querySelectorAll(".gallery-tile-thumb.placeholder[data-cloud-item-id]")) {
     _galleryThumbObserver.observe(el);
   }
+}
+
+// ===== 子文件夹 helpers =====
+function _renderBreadcrumb() {
+  const bc = els.galleryBreadcrumb;
+  if (!bc) return;
+  bc.innerHTML = "";
+  if (!_galleryFolder && _galleryView !== "trash") {
+    bc.classList.add("hidden");
+    return;
+  }
+  bc.classList.remove("hidden");
+  // 根按钮
+  const rootBtn = document.createElement("button");
+  rootBtn.type = "button";
+  rootBtn.textContent = "/ 根目录";
+  if (!_galleryFolder) rootBtn.classList.add("current");
+  else rootBtn.addEventListener("click", () => { setGalleryFolder(""); renderGallery(); });
+  bc.appendChild(rootBtn);
+  // 每段路径
+  if (_galleryFolder) {
+    const segs = _galleryFolder.split("/").filter(Boolean);
+    let accum = "";
+    for (let i = 0; i < segs.length; i++) {
+      const sep = document.createElement("span");
+      sep.className = "sep";
+      sep.textContent = "›";
+      bc.appendChild(sep);
+      const seg = segs[i];
+      accum = accum ? `${accum}/${seg}` : seg;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = seg;
+      if (i === segs.length - 1) {
+        btn.classList.add("current");
+      } else {
+        const target = accum;
+        btn.addEventListener("click", () => { setGalleryFolder(target); renderGallery(); });
+      }
+      bc.appendChild(btn);
+    }
+  }
+}
+
+function _renderFolderTile(folderName, folderPath, hasItems) {
+  const tile = document.createElement("div");
+  tile.className = "gallery-tile folder";
+  // thumb 用 folder icon
+  const thumb = document.createElement("div");
+  thumb.className = "gallery-tile-thumb";
+  thumb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  tile.appendChild(thumb);
+  // name row
+  const nameRow = document.createElement("div");
+  nameRow.className = "gallery-tile-name-row";
+  const nm = document.createElement("div");
+  nm.className = "gallery-tile-name";
+  nm.textContent = folderName;
+  nm.title = folderPath;
+  nameRow.appendChild(nm);
+  const meta = document.createElement("div");
+  meta.className = "gallery-tile-meta";
+  meta.textContent = hasItems ? "文件夹" : "空文件夹";
+  nameRow.appendChild(meta);
+  tile.appendChild(nameRow);
+  // ⋯ menu（只显示"删除"，且仅在空时启用）
+  const menuBtn = document.createElement("button");
+  menuBtn.type = "button";
+  menuBtn.className = "gallery-tile-menu-btn";
+  menuBtn.setAttribute("aria-label", "更多操作");
+  menuBtn.textContent = "⋯";
+  tile.appendChild(menuBtn);
+  const popup = document.createElement("div");
+  popup.className = "gallery-tile-menu-popup hidden";
+  const delBtn = document.createElement("button");
+  delBtn.type = "button";
+  delBtn.className = "danger";
+  delBtn.textContent = hasItems ? "删除（请先清空里面）" : "删除空文件夹";
+  delBtn.disabled = hasItems;
+  delBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    popup.classList.add("hidden");
+    if (hasItems) {
+      setStatus("文件夹非空，请先把里面的作品移走或删除", true);
+      return;
+    }
+    await withBusy(`正在删除文件夹 ${folderName}…`, async () => {
+      removeExplicitFolder(folderPath);
+      if (isSignedIn() && navigator.onLine !== false) {
+        try {
+          const item = await getItemByPath(folderPath);
+          if (item && item.folder) await deleteItem(item.id);
+          clearFolderCaches();
+        } catch (e) { console.warn("[folder] cloud delete:", e); }
+      }
+      setStatus(`已删除空文件夹：${folderName}`);
+    });
+    renderGallery();
+  });
+  popup.appendChild(delBtn);
+  tile.appendChild(popup);
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    for (const p of els.galleryGrid.querySelectorAll(".gallery-tile-menu-popup")) {
+      if (p !== popup) p.classList.add("hidden");
+    }
+    popup.classList.toggle("hidden");
+  });
+  tile.addEventListener("click", (e) => {
+    if (e.target.closest(".gallery-tile-menu-btn")) return;
+    if (e.target.closest(".gallery-tile-menu-popup")) return;
+    setGalleryFolder(folderPath);
+    renderGallery();
+  });
+  els.galleryGrid.appendChild(tile);
 }
 
 // 回收站视图：每条 trash 独立 tile（trashKey / itemId 唯一），不按 name 合并。
