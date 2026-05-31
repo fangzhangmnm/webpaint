@@ -97,17 +97,57 @@ function renderMerged(doc) {
   return c;
 }
 
-/** 缩略图：最长边 = maxSide 的小图，PNG。 */
+/** 缩略图自适应：先按 256 编码，超 70KB 降 192，再超降 128，最后档不论大小都收。
+ *  cloud-thumbs.js suffix budget = 80KB；留 ~10KB 给 zip 尾巴（CD + EOCD + 扫描余量）→ thumb ≤ 70KB
+ *  返 { canvas, png: Uint8Array }
+ */
+async function renderThumbnailAdaptive(merged, maxBytes = 71680) {
+  const sizes = [256, 192, 128];
+  let lastPng = null, lastCanvas = null;
+  for (let i = 0; i < sizes.length; i++) {
+    const c = renderThumbnail(merged, sizes[i]);
+    const png = await canvasToPngBytes(c);
+    lastPng = png; lastCanvas = c;
+    if (png.byteLength <= maxBytes) return { canvas: c, png };
+  }
+  // 都超：用最小尺寸的结果
+  return { canvas: lastCanvas, png: lastPng };
+}
+
+/** 缩略图：最长边 = maxSide 的小图。
+ *
+ * Step-down 多 pass 1/2 缩：浏览器 drawImage("high") 单次 4x+ 缩有狗牙；
+ * 每次缩 1/2 + 高质量 bilinear ≈ box filter 多次叠加，等效抗锯齿。
+ * 最后一步缩到精确目标。
+ */
 function renderThumbnail(merged, maxSide = 256) {
-  const w = merged.width, h = merged.height;
-  const scale = Math.min(1, maxSide / Math.max(w, h));
-  const tw = Math.max(1, Math.round(w * scale));
-  const th = Math.max(1, Math.round(h * scale));
-  const c = makeBitmap(tw, th);
+  const srcW = merged.width, srcH = merged.height;
+  const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
+  const tw = Math.max(1, Math.round(srcW * scale));
+  const th = Math.max(1, Math.round(srcH * scale));
+  // 比例 ≤ 2x → 直接一次缩
+  if (Math.max(srcW, srcH) <= maxSide * 2) {
+    return _drawScaled(merged, tw, th);
+  }
+  // step-down：每次缩半直到下一步会过头
+  let cur = merged;
+  let curW = srcW, curH = srcH;
+  while (curW > tw * 2 && curH > th * 2) {
+    const nw = Math.max(1, Math.floor(curW / 2));
+    const nh = Math.max(1, Math.floor(curH / 2));
+    cur = _drawScaled(cur, nw, nh);
+    curW = nw; curH = nh;
+  }
+  // 最后一步精确到 tw × th
+  return _drawScaled(cur, tw, th);
+}
+
+function _drawScaled(src, w, h) {
+  const c = makeBitmap(w, h);
   const ctx = c.getContext("2d");
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(merged, 0, 0, tw, th);
+  ctx.drawImage(src, 0, 0, w, h);
   return c;
 }
 
@@ -183,16 +223,19 @@ function canvasModeFromOra(op) {
  */
 export async function encodeDocToOra(doc, opts = {}) {
   const merged = renderMerged(doc);
-  const thumb = renderThumbnail(merged, 256);
   const mergedPng = await canvasToPngBytes(merged);
-  const thumbPng = await canvasToPngBytes(thumb);
+  // thumb：自适应尺寸 256→192→128，目标 ≤ 80KB（让云端 48KB suffix 大概率命中）
+  const { png: thumbPng } = await renderThumbnailAdaptive(merged);
 
+  // entry 顺序很重要：
+  //   1. spec 强制 mimetype 第一
+  //   2. Thumbnails/thumbnail.png 故意放最后 → 云端 byte-range thumbnail（v137）
+  //      只拉 last 128KB 就能一次性拿到 EOCD + CD + thumbnail data，省 2 次请求
+  //   3. mergedimage / layer 是大块，放中间
   const entries = [
-    // spec 要求 mimetype 是第一个 entry
     { path: "mimetype", data: "image/openraster" },
     { path: "stack.xml", data: buildStackXml(doc) },
     { path: "mergedimage.png", data: mergedPng },
-    { path: "Thumbnails/thumbnail.png", data: thumbPng },
   ];
 
   for (const L of doc.layers) {
@@ -206,6 +249,9 @@ export async function encodeDocToOra(doc, opts = {}) {
     }
     entries.push({ path: `data/layer${L.id}.png`, data: png });
   }
+
+  // thumbnail 末尾（云端 byte-range 优化）
+  entries.push({ path: "Thumbnails/thumbnail.png", data: thumbPng });
 
   // WebPaint 私有扩展：reference 小窗的图 + 杂项 state JSON。
   if (opts.referenceImage instanceof Blob) {

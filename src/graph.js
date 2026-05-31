@@ -60,7 +60,10 @@ async function graphFetch(method, pathOrUrl, { headers = {}, body = null } = {})
 export async function listChildren(subfolder = "") {
   const pathPart = subfolder ? `:/${encodeApprootPath(subfolder)}:` : "";
   const items = [];
-  let next = `/me/drive/special/approot${pathPart}/children?$top=200&$select=id,name,size,eTag,createdDateTime,lastModifiedDateTime,file,folder`;
+  // @microsoft.graph.downloadUrl：1h 短效 CDN URL，加进 $select 让 list 一次性带回
+  // → 后续 byte-range 直接打 CDN，省掉每张 thumb 的 metadata RTT
+  // 过期后 caller 拿 401/403 → 重新走 getDownloadUrl 申请
+  let next = `/me/drive/special/approot${pathPart}/children?$top=200&$select=id,name,size,eTag,createdDateTime,lastModifiedDateTime,file,folder,@microsoft.graph.downloadUrl`;
   while (next) {
     let response;
     try { response = await graphFetch("GET", next); }
@@ -89,12 +92,7 @@ export async function getItemByPath(path) {
 // ----- 二进制下载 -----
 export async function downloadItemBlob(itemId) {
   // 优先 @microsoft.graph.downloadUrl（短期签名 CDN）；没有就走 /content
-  const meta = await graphFetch(
-    "GET",
-    `/me/drive/items/${itemId}?$select=id,@microsoft.graph.downloadUrl`,
-  );
-  const metaJson = await meta.json();
-  const dl = metaJson["@microsoft.graph.downloadUrl"];
+  const dl = await getDownloadUrl(itemId);
   if (dl) {
     const r = await fetch(dl);
     if (!r.ok) throw new Error(`downloadUrl failed ${r.status}`);
@@ -102,6 +100,42 @@ export async function downloadItemBlob(itemId) {
   }
   const r = await graphFetch("GET", `/me/drive/items/${itemId}/content`);
   return await r.blob();
+}
+
+// byte-range 下载
+//   offset = null + length 给 suffix range "bytes=-N"（取最后 N 字节）
+//   offset 给 prefix range "bytes=OFFSET-OFFSET+LEN-1"
+//   走 downloadUrl 拿 CDN signed URL（支持 Range header），fallback /content
+export async function downloadItemRange(itemId, offset, length) {
+  const dl = await getDownloadUrl(itemId);
+  if (dl) return await downloadRangeFromUrl(dl, offset, length);
+  const r = await graphFetch("GET", `/me/drive/items/${itemId}/content`, { headers: { Range: _rangeHeader(offset, length) } });
+  return await r.arrayBuffer();
+}
+
+function _rangeHeader(offset, length) {
+  return (offset == null)
+    ? `bytes=-${length}`
+    : `bytes=${offset}-${offset + length - 1}`;
+}
+
+// 直接打已知 CDN URL 的 byte-range（省掉每张 thumb 的 metadata RTT）
+// caller 处理 401/403 = downloadUrl 过期，重申请 getDownloadUrl 重试一次
+export async function downloadRangeFromUrl(downloadUrl, offset, length) {
+  const r = await fetch(downloadUrl, { headers: { Range: _rangeHeader(offset, length) } });
+  if (!r.ok && r.status !== 206) {
+    const err = new Error(`range download failed ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
+  return await r.arrayBuffer();
+}
+
+// 拿一个新的 1h 短效 downloadUrl（过期重申请用）
+export async function getDownloadUrl(itemId) {
+  const r = await graphFetch("GET", `/me/drive/items/${itemId}?$select=id,@microsoft.graph.downloadUrl`);
+  const j = await r.json();
+  return j["@microsoft.graph.downloadUrl"] || null;
 }
 
 // ----- 上传 -----
@@ -161,4 +195,94 @@ export async function uploadFileToApproot(path, blob, contentType = "application
 // ----- 删除 -----
 export async function deleteItem(itemId) {
   await graphFetch("DELETE", `/me/drive/items/${itemId}`);
+}
+
+// ----- approot + 子文件夹 ensure / 移动 -----（trash + folder feature 用）
+
+let _approotIdCache = null;
+const _subfolderIdCache = new Map();
+
+export function clearFolderCaches() { _approotIdCache = null; _subfolderIdCache.clear(); }
+
+export async function getApprootId() {
+  if (_approotIdCache) return _approotIdCache;
+  const r = await graphFetch("GET", "/me/drive/special/approot?$select=id");
+  _approotIdCache = (await r.json()).id;
+  return _approotIdCache;
+}
+
+// 确保 approot 下有指定子文件夹（name 单段或多段 "a/b/c"），返 folder id。
+// 加缓存：第一次拉 / 建，之后 reuse。
+export async function ensureSubfolder(name) {
+  if (!name) return getApprootId();
+  if (_subfolderIdCache.has(name)) return _subfolderIdCache.get(name);
+  // 先试拿现有
+  try {
+    const r = await graphFetch(
+      "GET",
+      `/me/drive/special/approot:/${encodeApprootPath(name)}?$select=id,name,folder`,
+    );
+    const item = await r.json();
+    if (item.folder) {
+      _subfolderIdCache.set(name, item.id);
+      return item.id;
+    }
+    throw new Error(`${name} 已存在但不是文件夹`);
+  } catch (e) {
+    if (e.status !== 404) throw e;
+  }
+  // 不存在 → 逐段建。多段路径用 children POST 每段。
+  const segments = name.split("/").filter(Boolean);
+  let parentId = await getApprootId();
+  let cumulative = "";
+  for (const seg of segments) {
+    cumulative = cumulative ? `${cumulative}/${seg}` : seg;
+    if (_subfolderIdCache.has(cumulative)) { parentId = _subfolderIdCache.get(cumulative); continue; }
+    try {
+      const r = await graphFetch(
+        "GET",
+        `/me/drive/special/approot:/${encodeApprootPath(cumulative)}?$select=id,folder`,
+      );
+      const it = await r.json();
+      if (it.folder) { parentId = it.id; _subfolderIdCache.set(cumulative, parentId); continue; }
+    } catch (e) { if (e.status !== 404) throw e; }
+    const r = await graphFetch("POST", `/me/drive/items/${parentId}/children`, {
+      body: {
+        name: seg,
+        folder: {},
+        "@microsoft.graph.conflictBehavior": "fail",
+      },
+    });
+    const it = await r.json();
+    parentId = it.id;
+    _subfolderIdCache.set(cumulative, parentId);
+  }
+  return parentId;
+}
+
+// 把 item 移到指定 parent folder。atomic at server side（PATCH parentReference）
+// eTag 给 If-Match 防覆盖；newName 不传保持原 name
+// conflictBehavior: "fail" | "replace" | "rename" —— 默认 "fail"（防误覆盖目标位置同名）
+//   trash / restore 用 "fail" 保护数据，caller 自己 fallback 改名
+export async function moveItemToFolder(itemId, targetFolderId, { eTag = null, newName = null, conflictBehavior = "fail" } = {}) {
+  const headers = {};
+  if (eTag) headers["If-Match"] = eTag;
+  const body = {
+    parentReference: { id: targetFolderId },
+    "@microsoft.graph.conflictBehavior": conflictBehavior,
+  };
+  if (newName) body.name = newName;
+  const r = await graphFetch("PATCH", `/me/drive/items/${itemId}`, { headers, body });
+  return r.json();
+}
+
+// 改名 only（不移动）
+export async function renameItem(itemId, newName, eTag = null) {
+  const headers = {};
+  if (eTag) headers["If-Match"] = eTag;
+  const r = await graphFetch("PATCH", `/me/drive/items/${itemId}`, {
+    headers,
+    body: { name: newName },
+  });
+  return r.json();
 }

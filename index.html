@@ -207,12 +207,6 @@
          无返回键 —— 点当前 active tile 关闭。详见 docs/artist-priorities.md ergonomics. -->
     <div class="gallery-full hidden" id="galleryFull" role="dialog" aria-label="图库">
       <div class="gallery-header">
-        <button class="gallery-icon-btn" id="galleryCloseBtn" type="button" title="返回画作" aria-label="返回">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="19" y1="12" x2="5" y2="12"/>
-            <polyline points="12 19 5 12 12 5"/>
-          </svg>
-        </button>
         <span class="gallery-title">图库</span>
         <div class="gallery-actions" role="group" aria-label="账号 / 新增">
           <button class="gallery-icon-btn" id="cloudIconBtn" type="button" title="云端账号" aria-haspopup="true" aria-expanded="false"></button>
@@ -223,6 +217,14 @@
               <polyline points="21 4 21 9 16 9"/>
             </svg>
           </button>
+          <button class="gallery-icon-btn" id="galleryTrashBtn" type="button" title="回收站" aria-label="回收站">
+            <!-- 归档箱 + 时钟回拨：暗示"已删/可恢复"，避免 trash-can 误读为"删选中" -->
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 5h18v4H3z"/>
+              <path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/>
+              <path d="M10 13h4"/>
+            </svg>
+          </button>
           <button class="gallery-icon-btn" id="galleryAddBtn" type="button" title="新增" aria-haspopup="true" aria-expanded="false">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="12" y1="5" x2="12" y2="19"/>
@@ -231,11 +233,20 @@
           </button>
         </div>
       </div>
+      <div class="gallery-trash-bar hidden" id="galleryTrashBar">
+        <button class="gallery-back-btn" id="galleryTrashBack" type="button">← 返回图库</button>
+        <span class="gallery-trash-title">回收站</span>
+        <div class="gallery-trash-menu-wrap">
+          <button class="gallery-trash-menu-btn" id="galleryTrashMenuBtn" type="button" title="回收站操作" aria-haspopup="true">⋯</button>
+          <div class="gallery-trash-menu-popup hidden" id="galleryTrashMenuPopup" role="menu">
+            <button class="gallery-trash-menu-item danger" id="galleryEmptyTrashBtn" type="button" role="menuitem">清空回收站</button>
+          </div>
+        </div>
+      </div>
       <div class="gallery-grid" id="galleryGrid"><!-- 本地 + 云端 tiles by JS --></div>
       <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。</div>
       <div class="gallery-foot">
         <span class="gallery-foot-usage" id="galleryFootUsage">本地占用：计算中…</span>
-        <span class="gallery-foot-hint">点 tile 上「卸载本地」可单独清这幅画的本地缓存，云端会保留</span>
       </div>
     </div>
 
@@ -937,6 +948,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-305ec434879e.mjs"></script>
+    <script type="module" src="./dist/webpaint-df13d2462ce7.mjs"></script>
   </body>
 </html>

@@ -80,6 +80,44 @@ export async function listSessionIds() {
   });
 }
 
+// trash 用：原子 rename。put new key + delete old key 同一 tx，保证不会出现两份 / 都没的中间态。
+// 不读 pkg 出来再 put（多一次复制 + tx 跨 turn 风险），用 get 之后 put 整对象。
+// 若 newKey 已存在，抛 'destination-exists'（caller 负责改名重试）。
+export async function renameSessionKey(oldKey, newKey) {
+  if (oldKey === newKey) return;
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_SESSIONS, "readwrite");
+    const store = tx.objectStore(STORE_SESSIONS);
+    const getOld = store.get(oldKey);
+    const checkNew = store.get(newKey);
+    let oldPkg = null;
+    getOld.onsuccess = () => { oldPkg = getOld.result; };
+    checkNew.onsuccess = () => {
+      if (checkNew.result !== undefined) {
+        // newKey 已占用
+        tx.abort();
+        const err = new Error("destination-exists");
+        err.code = "destination-exists";
+        reject(err);
+        return;
+      }
+      if (!oldPkg) {
+        tx.abort();
+        const err = new Error("source-missing");
+        err.code = "source-missing";
+        reject(err);
+        return;
+      }
+      store.put(oldPkg, newKey);
+      store.delete(oldKey);
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => { /* reject 已经在 onsuccess 调过 */ };
+  });
+}
+
 // meta：单条配置（settings 之类）。app.js 现在用 localStorage；这里留给将来用。
 export async function getMeta(key) {
   const db = await openDB();

@@ -15,15 +15,17 @@
 //     把"加载失败的 path"当 oldName 删掉
 
 import { encodeDocToOra, decodeOraToDoc } from "./ora.js";
-import { getSession, putSession, deleteSession, listSessionIds } from "./storage.js";
+import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.js";
 
 const LS_CURRENT_NAME = "webpaint.currentSessionName";
 const DEFAULT_NAME = "未命名";
 const LEGACY_SLOT = "current";   // 旧 v35 单 slot key；冷启动会迁移到 DEFAULT_NAME
 
+// gallery-first: 空字符串 = 没活动 session（在 gallery）。
+// 老 user 没 set 过 → null → 返 ""（停 gallery，等用户选）
 export function getCurrentSessionName() {
-  try { return localStorage.getItem(LS_CURRENT_NAME) || DEFAULT_NAME; }
-  catch { return DEFAULT_NAME; }
+  try { return localStorage.getItem(LS_CURRENT_NAME) || ""; }
+  catch { return ""; }
 }
 export function setCurrentSessionName(name) {
   try { localStorage.setItem(LS_CURRENT_NAME, name); } catch {}
@@ -53,21 +55,14 @@ export async function saveSession(doc, name, opts = {}) {
 }
 
 /** 渲染缩略图 blob（最长边 = maxSide）。给图库 grid 用。
- *
- * 故意全走 HTMLCanvasElement：Safari iOS 的 OffscreenCanvas.convertToBlob
- * 对 JPEG 历史上有返 null 的 bug。thumb 不是热路径，HTMLCanvasElement.toBlob
- * 跨浏览器 / 跨版本最稳。drawImage 接 OffscreenCanvas / HTMLCanvasElement
- * 当 source 都成立，所以 doc 层 canvas 是 OffscreenCanvas 也没问题。
- *
- * 若 JPEG toBlob 仍意外返 null，降级到 PNG（大几倍但起码有）。
+ *  PNG 保留 alpha → 容器 CSS 背景可独立调色，立绘透明区跟容器自然融合。
  */
 async function renderThumbBlob(doc, maxSide = 256) {
   const W = doc.width, H = doc.height;
   const merged = document.createElement("canvas");
   merged.width = W; merged.height = H;
   const mctx = merged.getContext("2d");
-  mctx.fillStyle = doc.backgroundColor || "#ffffff";
-  mctx.fillRect(0, 0, W, H);
+  // 不涂底：保 alpha，PNG 编码透出来 → 容器 CSS bg 直接生效（调色不用改 JS）
   for (const L of doc.layers) {
     if (!L.visible || L.bboxW <= 0 || L.bboxH <= 0) continue;
     const pa = mctx.globalAlpha, pc = mctx.globalCompositeOperation;
@@ -87,29 +82,110 @@ async function renderThumbBlob(doc, maxSide = 256) {
   tctx.imageSmoothingQuality = "high";
   tctx.drawImage(merged, 0, 0, tw, th);
 
-  const jpgBlob = await new Promise((resolve) => thumb.toBlob(resolve, "image/jpeg", 0.78));
-  if (jpgBlob) return jpgBlob;
-  // 兜底 PNG（jpg 在某些 Safari 版本返 null）
+  // PNG 保 alpha；体积通常 5-25KB（立绘透明区压缩好），可接受
   return await new Promise((resolve) => thumb.toBlob(resolve, "image/png"));
 }
 
-/** 列所有 session 元信息（name + updatedAt + size + thumb Blob）。不解码 .ora。 */
+/** trash 用 key prefix。delete 时 rename 到 trash:<timestamp>-<counter>:<name>，恢复时 rename 回。
+ *  counter 防同 ms 内多次 trash 同名冲突（Date.now() ms 级 + 自增 counter 永不重复）。 */
+const TRASH_PREFIX = "trash:";
+let _trashCounter = 0;
+function makeTrashKey(name) {
+  return `${TRASH_PREFIX}${Date.now()}-${++_trashCounter}:${name}`;
+}
+function isTrashKey(key) { return typeof key === "string" && key.startsWith(TRASH_PREFIX); }
+function parseTrashKey(key) {
+  // trash:<ts>[-<counter>]:<originalName>。counter 段可选（旧记录无）。name 可能含 ":"
+  const m = /^trash:(\d+)(?:-\d+)?:(.+)$/s.exec(key);
+  if (!m) return null;
+  return { deletedAt: Number(m[1]), originalName: m[2] };
+}
+
+/** 本地原子重命名（atomic put new + delete old）。同名抛 destination-exists。 */
+export async function renameLocalSession(oldName, newName) {
+  if (oldName === newName) return;
+  await renameSessionKey(oldName, newName);
+}
+
+/** 列所有 session 元信息（name + updatedAt + size + thumb Blob）。不解码 .ora。
+ *  默认过滤 trash:* keys；要看 trash 用 listTrashedSessions */
 export async function listSessions() {
   const ids = await listSessionIds();
   const out = [];
   for (const id of ids) {
-    if (id === LEGACY_SLOT) continue;   // 迁移完后旧 slot 会被删，这里 fallback
+    if (id === LEGACY_SLOT) continue;
+    if (isTrashKey(id)) continue;       // trash 单独列
     const pkg = await getSession(id);
     if (!pkg) continue;
     out.push({
       name: id,
       updatedAt: pkg.updatedAt || 0,
       size: (pkg.ora && pkg.ora.size) || 0,
-      thumb: pkg.thumb || null,         // v36 之前的 pkg 没 thumb，UI 给占位
+      thumb: pkg.thumb || null,
     });
   }
   out.sort((a, b) => b.updatedAt - a.updatedAt);
   return out;
+}
+
+/** 列 trash 内 sessions。返 [{ trashKey, originalName, deletedAt, thumb, size }] */
+export async function listTrashedSessions() {
+  const ids = await listSessionIds();
+  const out = [];
+  for (const id of ids) {
+    if (!isTrashKey(id)) continue;
+    const parsed = parseTrashKey(id);
+    if (!parsed) continue;
+    const pkg = await getSession(id);
+    if (!pkg) continue;
+    out.push({
+      trashKey: id,
+      originalName: parsed.originalName,
+      deletedAt: parsed.deletedAt,
+      size: (pkg.ora && pkg.ora.size) || 0,
+      thumb: pkg.thumb || null,
+    });
+  }
+  out.sort((a, b) => b.deletedAt - a.deletedAt);
+  return out;
+}
+
+/** 软删：把本地 session rename 到 trash:<ts>:<name>。返 trashKey */
+export async function trashSession(name) {
+  const trashKey = makeTrashKey(name);
+  await renameSessionKey(name, trashKey);
+  return trashKey;
+}
+
+/** 从 trash 恢复。如果 originalName 冲突（同名 active session 存在）→ 自动加 (2)(3)... 后缀。
+ *  返实际恢复的 name */
+export async function restoreSession(trashKey) {
+  const parsed = parseTrashKey(trashKey);
+  if (!parsed) throw new Error("非 trash key");
+  let target = parsed.originalName;
+  const existing = new Set(await listSessionIds());
+  if (existing.has(target)) {
+    for (let i = 2; i < 1000; i++) {
+      const candidate = `${parsed.originalName} (${i})`;
+      if (!existing.has(candidate)) { target = candidate; break; }
+    }
+  }
+  await renameSessionKey(trashKey, target);
+  return target;
+}
+
+/** 永久删 trash 里一条 */
+export async function purgeFromTrash(trashKey) {
+  if (!isTrashKey(trashKey)) throw new Error("非 trash key");
+  await deleteSession(trashKey);
+}
+
+/** 清空整个 trash */
+export async function emptyTrash() {
+  const ids = await listSessionIds();
+  for (const id of ids) {
+    if (isTrashKey(id)) await deleteSession(id);
+  }
 }
 
 /**
