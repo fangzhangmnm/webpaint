@@ -22,7 +22,7 @@
 
 import { BrushEngine } from "./brush.js";
 import { LiquifyEngine } from "./liquify.js";
-import { LassoEngine, applySelectionMaskPostStroke } from "./lasso.js";
+import { LassoEngine } from "./lasso.js";
 import { ShapesEngine } from "./shapes.js";
 import { FilterBrushEngine } from "./filter-brush.js";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
@@ -757,7 +757,7 @@ export class InputController {
     this._strokeTx = null;
     // 有选区 → stroke 只在选区内生效（finalize 里 per-pixel revert outside mask 到 pre）
     const sel = this.doc.selection;
-    tx.commit(sel ? (layer, pre) => applySelectionMaskPostStroke(layer, pre, sel) : null);
+    tx.commit(sel ? (layer, pre) => sel.applyMaskPostStroke(layer, pre) : null);
     if (sel) this.board.invalidateAll(); else this.board.requestRender();
   }
   _abortStroke() {
@@ -785,7 +785,7 @@ export class InputController {
     this._liquifyTx = null;
     // 有选区 → 液化只在选区内生效
     const sel = this.doc.selection;
-    tx.commit(sel ? (layer, pre) => applySelectionMaskPostStroke(layer, pre, sel) : null);
+    tx.commit(sel ? (layer, pre) => sel.applyMaskPostStroke(layer, pre) : null);
     if (sel) this.board.invalidateAll(); else this.board.requestRender();
   }
   _abortLiquify() {

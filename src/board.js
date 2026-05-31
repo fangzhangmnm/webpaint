@@ -1,5 +1,5 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
-import { drawMesh, renderQuadPerPixel, extractMaskOutline, chainMaskOutline } from "./lasso.js";
+import { drawMesh, renderQuadPerPixel } from "./lasso.js";
 import { computeClipBaseFor } from "./doc.js";
 //
 // 坐标系：
@@ -256,7 +256,7 @@ export class Board {
   }
   // 把笔刷 live overlay 按 doc.selection mask 裁一遍，让画中实时看到选区限制。
   // 返回一个**新 overlay 描述**，canvas 指向裁过的临时 canvas；bbox 保持不变（局部坐标不变）。
-  // 落笔后 applySelectionMaskPostStroke 会做最终持久化裁；这里只是 preview。
+  // 落笔后 Selection.applyMaskPostStroke 会做最终持久化裁；这里只是 preview。
   _clipOverlayToSelection(overlay, selection) {
     const tmp = this._getOverlayClipTmp(overlay.bboxW, overlay.bboxH);
     const tctx = tmp.getContext("2d");
@@ -586,10 +586,7 @@ export class Board {
     // 不要动画（user 反馈太干扰）。线宽 1 / scale = 1 CSS px。
     if (info.selection && !info.floating) {
       const s = info.selection;
-      if (!s._chains) {
-        if (!s._outline) s._outline = extractMaskOutline(s);
-        s._chains = chainMaskOutline(s._outline);
-      }
+      const chains = s.outline();
       ctx.save();
       // 用 polyline chains（每条 = 一个 subpath）让 dash 沿整条边流。
       // 否则 marching squares 几百段都是 ~1 doc px 短 subpath，dash 在每段
@@ -601,7 +598,7 @@ export class Board {
       ctx.lineCap = "butt";
       ctx.setLineDash([dash, dash]);
       ctx.beginPath();
-      for (const ch of s._chains) {
+      for (const ch of chains) {
         ctx.moveTo(ch[0], ch[1]);
         for (let i = 2; i < ch.length; i += 2) ctx.lineTo(ch[i], ch[i + 1]);
       }

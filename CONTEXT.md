@@ -26,8 +26,8 @@ _Avoid_: controller, handler
 _Avoid_: tool (tool 是 UI 层的工具选择), brush (brush 专指圆笔引擎)
 
 **Selection**:
-选区，doc 的一等公民。`{ bboxX,bboxY,bboxW,bboxH, maskCanvas }`，mask alpha=255 内/0 外。null=无选区=全图可作用。
-_Avoid_: mask (mask 是 selection 的实现细节), marquee
+选区，doc 的一等公民。**不可变值对象**（bbox + maskCanvas，alpha=255 内/0 外），拥有 mask 操作：compose（并/减/交）、invert、outline（懒算缓存的行军蚁描边）、applyMaskPostStroke、fill/clearOnLayer、croppedTo/resampledTo。compose/invert/transform 返回新 Selection。`doc.selection` 持 Selection|null，null=无选区=全图可作用。undo 只换引用，不深拷。
+_Avoid_: mask (mask 是 Selection 的实现细节), marquee, selection state
 
 **Snapshot**:
 某一刻 layer 像素的拷贝 `{ bboxX/Y/W/H, imageData }`，空层 imageData=null。undo 的原子。
@@ -40,3 +40,11 @@ _Avoid_: command, action, undo step
 **PixelEdit**:
 一次"按-拖-抬"产生的像素编辑事务模块。`begin(layer,type)` 拍 before-snapshot，`commit()` 拍 after、压缩、入栈，`abort()` 还原。自己注册 stroke/liquify/filterBrush 三类 handler。拥有 snapshot 压缩与还原原语。
 _Avoid_: undo manager, snapshot manager, stroke recorder
+
+**Mode**:
+独占状态机的 SSoT。双轴 `{ tool, transient }`：tool=持久工具选择，transient=null 或一个停驻的多步模式。能力表（canDraw/allowsColor/cursor/ctrlZ）按 current() 查表。输入 gating、UI 显隐、ctrl-z 语义都从它派生。提案见 [[docs/tool-mode-state-machine.md]]。
+_Avoid_: tool state, app state, mode manager
+
+**Transient**:
+半模态：绘画时停驻的 exclusive 多步模式（transform / crop / adjust-color），跨多次手势直到 commit/cancel；ctrl-z 语义是「取消」而非弹栈。注册 `{ apply, abort }`。区别于单次手势进行中（那是 PixelEdit 的 tx）。
+_Avoid_: pending state, temporary mode, overlay

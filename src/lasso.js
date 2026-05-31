@@ -26,6 +26,11 @@
 //   free → uniform：不动 mesh，后续 drag 才有锁比约束
 //   free → distort：扩 mesh 到 2×2 通用四边形（free 已经是）
 //   anything → warp：把当前 mesh 升采样到 3×3（双线性内插）
+//
+// 选区值 + mask 操作（compose/invert/outline/applyMaskPostStroke/fill/clear/crop）已搬到
+// selection.js 的 Selection 类。lasso 只负责手势光栅化（产 Selection）+ 自由变换 gizmo。
+
+import { Selection } from "./selection.js";
 
 export class LassoEngine {
   constructor() {
@@ -144,15 +149,13 @@ export class LassoEngine {
     const c = makeBitmap(w, h);
     const cctx = c.getContext("2d");
     cctx.drawImage(sel.maskCanvas, sel.bboxX - x0, sel.bboxY - y0);
-    return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas: c };
+    return new Selection(x0, y0, w, h, c);
   }
   // 编程入口（取消选区 / 反选 / 由 history undo 调用恢复）
   setSelection(sel) {
     if (!this.doc) return null;
     const oldSel = this.doc.selection;
     if (oldSel === sel) return null;
-    // 新 selection 还没缓存 outline；history undo / redo 拿回旧 sel 时 outline 还在那
-    if (sel && !sel._outline) sel._outline = null;
     this.doc.selection = sel;
     this.onChange();
     return { type: "selectionChange", before: oldSel, after: sel };
@@ -243,7 +246,7 @@ export class LassoEngine {
     }
     mctx.closePath();
     mctx.fill("evenodd");
-    return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas };
+    return new Selection(x0, y0, w, h, maskCanvas);
   }
   _rasterizeRectToSelection(r) {
     if (!r) return null;
@@ -257,7 +260,7 @@ export class LassoEngine {
     const mctx = maskCanvas.getContext("2d");
     mctx.fillStyle = "#fff";
     mctx.fillRect(0, 0, w, h);
-    return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas };
+    return new Selection(x0, y0, w, h, maskCanvas);
   }
   _rasterizeEllipseToSelection(r) {
     if (!r) return null;
@@ -273,7 +276,7 @@ export class LassoEngine {
     mctx.beginPath();
     mctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
     mctx.fill();
-    return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas };
+    return new Selection(x0, y0, w, h, maskCanvas);
   }
   // 魔术棒：tap → flood fill 颜色差 ≤ threshold 的相邻像素入选。
   //
@@ -362,13 +365,13 @@ export class LassoEngine {
       odata[o + 3] = accepted ? 255 : 0;
     }
     mctx.putImageData(out, 0, 0);
-    return { bboxX: mnx, bboxY: mny, bboxW: tw, bboxH: th, maskCanvas };
+    return new Selection(mnx, mny, tw, th, maskCanvas);
   }
   // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
   _applySelectionUpdate(newSel) {
     if (!this.doc) return null;
     const oldSel = this.doc.selection;
-    const merged = combineSelections(oldSel, newSel, this._setOpMode);
+    const merged = Selection.compose(oldSel, newSel, this._setOpMode);
     if (oldSel === merged) { this.onChange(); return null; }
     this.doc.selection = merged;
     this.onChange();
@@ -905,284 +908,6 @@ export class LassoEngine {
     }
     return null;
   }
-}
-
-// ============ Selection 合成 ============
-
-// 把 newSel 按 mode 合并到 oldSel。selection = {bboxX, bboxY, bboxW, bboxH, maskCanvas}
-// 各 mode：
-//   new       —— 直接替换为 newSel
-//   union     —— old ∪ new                  (max alpha, equivalent to draw both)
-//   subtract  —— old \ new                  (old AND NOT new = destination-out)
-//   intersect —— old ∩ new                  (destination-in)
-// 退化结果（mask 全空）→ 返回 null
-function combineSelections(oldSel, newSel, mode) {
-  if (!newSel) return oldSel;
-  if (mode === "new" || !oldSel) return newSel;
-  // 计算合成 bbox
-  let x0, y0, x1, y1;
-  if (mode === "intersect") {
-    x0 = Math.max(oldSel.bboxX, newSel.bboxX);
-    y0 = Math.max(oldSel.bboxY, newSel.bboxY);
-    x1 = Math.min(oldSel.bboxX + oldSel.bboxW, newSel.bboxX + newSel.bboxW);
-    y1 = Math.min(oldSel.bboxY + oldSel.bboxH, newSel.bboxY + newSel.bboxH);
-    if (x1 <= x0 || y1 <= y0) return null;           // 不交 = 空选区
-  } else {
-    // union / subtract：union bbox
-    x0 = Math.min(oldSel.bboxX, newSel.bboxX);
-    y0 = Math.min(oldSel.bboxY, newSel.bboxY);
-    x1 = Math.max(oldSel.bboxX + oldSel.bboxW, newSel.bboxX + newSel.bboxW);
-    y1 = Math.max(oldSel.bboxY + oldSel.bboxH, newSel.bboxY + newSel.bboxH);
-    if (mode === "subtract") {
-      // 结果不会比 oldSel 大；用 oldSel 的 bbox 即可
-      x0 = oldSel.bboxX; y0 = oldSel.bboxY;
-      x1 = oldSel.bboxX + oldSel.bboxW; y1 = oldSel.bboxY + oldSel.bboxH;
-    }
-  }
-  const w = x1 - x0, h = y1 - y0;
-  const canvas = makeBitmap(w, h);
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(oldSel.maskCanvas, oldSel.bboxX - x0, oldSel.bboxY - y0);
-  if (mode === "union") {
-    ctx.globalCompositeOperation = "source-over";
-    ctx.drawImage(newSel.maskCanvas, newSel.bboxX - x0, newSel.bboxY - y0);
-  } else if (mode === "subtract") {
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.drawImage(newSel.maskCanvas, newSel.bboxX - x0, newSel.bboxY - y0);
-  } else if (mode === "intersect") {
-    ctx.globalCompositeOperation = "destination-in";
-    ctx.drawImage(newSel.maskCanvas, newSel.bboxX - x0, newSel.bboxY - y0);
-  }
-  ctx.globalCompositeOperation = "source-over";
-  // TODO（P2 完善）：trim bbox 到 mask 实际范围。暂用合成 bbox（可能略大）
-  return { bboxX: x0, bboxY: y0, bboxW: w, bboxH: h, maskCanvas: canvas };
-}
-
-// Marching squares：从 selection 的 maskCanvas 抽出轮廓 polyline 段。
-// 输入：selection = { bboxX, bboxY, bboxW, bboxH, maskCanvas }
-// 输出：Float32Array 平铺 [x0, y0, x1, y1, ...]（每 4 个数一条线段，doc 坐标）
-// 复杂度：O(bboxW × bboxH)。500×500 ≈ 250K cells ≈ 10ms（一次性，cache 到 sel）
-// 把 extractMaskOutline 输出的碎段（每段 ~0.7 doc px）链成连续 polyline。
-// 关键：Canvas2D 的 setLineDash 在**每个 subpath 重置**，碎段当 subpath 画时
-// 每段太短 < 一个 dash 周期 → 永远在 "on" 阶段 → dash 看不见。链成长 path 后
-// dash 才能沿边流。
-// 输出：Array<Float32Array> = 多条 polyline。
-export function chainMaskOutline(segs) {
-  const out = [];
-  if (segs.length < 4) return out;
-  const n = segs.length / 4;
-  const key = (x, y) => `${Math.round(x * 2)},${Math.round(y * 2)}`;  // 端点都落在 .0 / .5
-  const endpoints = new Map();
-  for (let i = 0; i < n; i++) {
-    const k0 = key(segs[i*4],     segs[i*4 + 1]);
-    const k1 = key(segs[i*4 + 2], segs[i*4 + 3]);
-    if (!endpoints.has(k0)) endpoints.set(k0, []);
-    if (!endpoints.has(k1)) endpoints.set(k1, []);
-    endpoints.get(k0).push(i * 2);        // 偶数 = 起点
-    endpoints.get(k1).push(i * 2 + 1);    // 奇数 = 终点
-  }
-  const used = new Uint8Array(n);
-  const findUnused = (k) => {
-    const arr = endpoints.get(k);
-    if (!arr) return -1;
-    for (const slot of arr) if (!used[slot >> 1]) return slot;
-    return -1;
-  };
-  for (let i = 0; i < n; i++) {
-    if (used[i]) continue;
-    used[i] = 1;
-    const chain = [segs[i*4], segs[i*4+1], segs[i*4+2], segs[i*4+3]];
-    // 向前延伸
-    while (true) {
-      const ex = chain[chain.length - 2], ey = chain[chain.length - 1];
-      const slot = findUnused(key(ex, ey));
-      if (slot < 0) break;
-      const segIdx = slot >> 1;
-      used[segIdx] = 1;
-      const si = segIdx * 4;
-      if (slot & 1) chain.push(segs[si],     segs[si + 1]);   // 段终点匹配 → 取段起点
-      else          chain.push(segs[si + 2], segs[si + 3]);   // 段起点匹配 → 取段终点
-    }
-    // 向后延伸
-    while (true) {
-      const sx = chain[0], sy = chain[1];
-      const slot = findUnused(key(sx, sy));
-      if (slot < 0) break;
-      const segIdx = slot >> 1;
-      used[segIdx] = 1;
-      const si = segIdx * 4;
-      if (slot & 1) chain.unshift(segs[si],     segs[si + 1]);
-      else          chain.unshift(segs[si + 2], segs[si + 3]);
-    }
-    out.push(new Float32Array(chain));
-  }
-  return out;
-}
-
-export function extractMaskOutline(sel) {
-  const w = sel.bboxW, h = sel.bboxH;
-  if (w <= 1 || h <= 1) return new Float32Array(0);
-  const ctx = sel.maskCanvas.getContext("2d");
-  const data = ctx.getImageData(0, 0, w, h).data;
-  const segs = [];
-  // v113: virtual padding —— 在 canvas 外侧加一圈 alpha=0 虚拟像素，
-  // 让 mask 占满 canvas 边时（rect/ellipse 全填）也能 detect 边界 transition。
-  // 输出坐标 clamp 到 [0, w/h]，所以 segment 正好落在 bbox 边上。
-  const alpha = (x, y) => (x < 0 || x >= w || y < 0 || y >= h) ? 0 : (data[(y * w + x) * 4 + 3] > 128 ? 1 : 0);
-  // 每个 (x, y) cell 用 4 邻角组 4-bit index：TL=bit0 TR=bit1 BR=bit2 BL=bit3
-  // 边中点：T=(x+0.5, y), R=(x+1, y+0.5), B=(x+0.5, y+1), L=(x, y+0.5)
-  for (let y = -1; y < h; y++) {
-    for (let x = -1; x < w; x++) {
-      const a00 = alpha(x,     y);
-      const a10 = alpha(x + 1, y);
-      const a01 = alpha(x,     y + 1);
-      const a11 = alpha(x + 1, y + 1);
-      const idx = a00 | (a10 << 1) | (a11 << 2) | (a01 << 3);
-      if (idx === 0 || idx === 15) continue;
-      // clamp 到 [0, w/h]：虚拟像素的输出落在 bbox 真实边上
-      const cxL = Math.max(0, Math.min(w, x)),     cxR = Math.max(0, Math.min(w, x + 1));
-      const cyT = Math.max(0, Math.min(h, y)),     cyB = Math.max(0, Math.min(h, y + 1));
-      const xL = sel.bboxX + cxL, xR = sel.bboxX + cxR, xM = (xL + xR) / 2;
-      const yT = sel.bboxY + cyT, yB = sel.bboxY + cyB, yM = (yT + yB) / 2;
-      // 4-bit lookup → 0/1/2 段（saddle case 5/10 拆两段）
-      switch (idx) {
-        case 1:  segs.push(xM, yT,  xL, yM); break;
-        case 2:  segs.push(xM, yT,  xR, yM); break;
-        case 3:  segs.push(xL, yM,  xR, yM); break;
-        case 4:  segs.push(xR, yM,  xM, yB); break;
-        case 5:  segs.push(xM, yT,  xR, yM);
-                 segs.push(xM, yB,  xL, yM); break;
-        case 6:  segs.push(xM, yT,  xM, yB); break;
-        case 7:  segs.push(xM, yB,  xL, yM); break;
-        case 8:  segs.push(xL, yM,  xM, yB); break;
-        case 9:  segs.push(xM, yT,  xM, yB); break;
-        case 10: segs.push(xM, yT,  xL, yM);
-                 segs.push(xR, yM,  xM, yB); break;
-        case 11: segs.push(xR, yM,  xM, yB); break;
-        case 12: segs.push(xL, yM,  xR, yM); break;
-        case 13: segs.push(xM, yT,  xR, yM); break;
-        case 14: segs.push(xM, yT,  xL, yM); break;
-      }
-    }
-  }
-  return new Float32Array(segs);
-}
-
-// 反选：在 docW×docH 上 全白 - 选区 mask
-export function invertSelection(sel, docW, docH) {
-  const canvas = makeBitmap(docW, docH);
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, docW, docH);
-  if (sel) {
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.drawImage(sel.maskCanvas, sel.bboxX, sel.bboxY);
-    ctx.globalCompositeOperation = "source-over";
-  }
-  return { bboxX: 0, bboxY: 0, bboxW: docW, bboxH: docH, maskCanvas: canvas };
-}
-
-// ============ 选区应用到 layer 的操作 ============
-
-// 笔刷 / 橡皮 / 液化结束后调用：把 layer 在 selection 外的像素 revert 到 preSnap。
-// 等价"stroke 只在 selection 内生效"。post-process 比 in-stroke clip 简单 + 与
-// brush engine 解耦。代价：用户拖动时看到完整 stroke，松手时才 snap 到选区内（v1 接受）
-//
-// 走 per-pixel JS：选区外 → 取 pre 像素；选区内 → 取 after 像素。
-// 同时适用 brush（additive）和 eraser（destructive）—— 因为是"按 mask 选 pre 还是 after"，
-// 不是用 composite 模式组合，所以 erase 模式（stroke 让某些像素变透明）也正确
-export function applySelectionMaskPostStroke(layer, preSnap, selection) {
-  if (!selection || !preSnap) return;
-  const afterSnap = layer.snapshot();
-  // 联合 bbox = max(pre, after) in doc coords
-  const px0 = preSnap.bboxX, py0 = preSnap.bboxY;
-  const px1 = px0 + preSnap.bboxW, py1 = py0 + preSnap.bboxH;
-  const ax0 = afterSnap.bboxX, ay0 = afterSnap.bboxY;
-  const ax1 = ax0 + afterSnap.bboxW, ay1 = ay0 + afterSnap.bboxH;
-  const ux0 = Math.min(px0, ax0), uy0 = Math.min(py0, ay0);
-  const ux1 = Math.max(px1, ax1), uy1 = Math.max(py1, ay1);
-  const uw = ux1 - ux0, uh = uy1 - uy0;
-  if (uw <= 0 || uh <= 0) return;
-
-  // 读 mask 全像素到 ImageData
-  let maskData = null;
-  if (selection.bboxW > 0 && selection.bboxH > 0) {
-    const mctx = selection.maskCanvas.getContext("2d");
-    maskData = mctx.getImageData(0, 0, selection.bboxW, selection.bboxH).data;
-  }
-
-  const preData = preSnap.imageData ? preSnap.imageData.data : null;
-  const afterData = afterSnap.imageData ? afterSnap.imageData.data : null;
-
-  const out = new ImageData(uw, uh);
-  const odata = out.data;
-  for (let y = 0; y < uh; y++) {
-    for (let x = 0; x < uw; x++) {
-      const docX = ux0 + x;
-      const docY = uy0 + y;
-      // mask lookup
-      let maskAlpha = 0;
-      const mx = docX - selection.bboxX;
-      const my = docY - selection.bboxY;
-      if (maskData && mx >= 0 && mx < selection.bboxW && my >= 0 && my < selection.bboxH) {
-        maskAlpha = maskData[(my * selection.bboxW + mx) * 4 + 3];
-      }
-      const oi = (y * uw + x) * 4;
-      // 选区内取 after；选区外取 pre。两个都没数据 = 透明（odata 默认 0）
-      const useAfter = maskAlpha > 0;
-      if (useAfter && afterData) {
-        const aix = docX - ax0, aiy = docY - ay0;
-        if (aix >= 0 && aix < afterSnap.bboxW && aiy >= 0 && aiy < afterSnap.bboxH) {
-          const i = (aiy * afterSnap.bboxW + aix) * 4;
-          odata[oi] = afterData[i]; odata[oi + 1] = afterData[i + 1];
-          odata[oi + 2] = afterData[i + 2]; odata[oi + 3] = afterData[i + 3];
-        }
-      } else if (!useAfter && preData) {
-        const pix = docX - px0, piy = docY - py0;
-        if (pix >= 0 && pix < preSnap.bboxW && piy >= 0 && piy < preSnap.bboxH) {
-          const i = (piy * preSnap.bboxW + pix) * 4;
-          odata[oi] = preData[i]; odata[oi + 1] = preData[i + 1];
-          odata[oi + 2] = preData[i + 2]; odata[oi + 3] = preData[i + 3];
-        }
-      }
-    }
-  }
-  // 写回 layer（先 ensureBbox 容纳 union）
-  layer.ensureBbox(ux0, uy0, ux1, uy1);
-  layer.ctx.putImageData(out, ux0 - layer.bboxX, uy0 - layer.bboxY);
-}
-
-// 填色：在 selection 内填 layer 当前颜色（layer 改前 push history snap）
-// 调用方负责 push history entry
-export function fillSelectionOnLayer(layer, selection, color) {
-  if (!selection || !layer) return;
-  layer.ensureBbox(
-    selection.bboxX, selection.bboxY,
-    selection.bboxX + selection.bboxW, selection.bboxY + selection.bboxH,
-  );
-  // 先建一张 selection-shape 的 colored canvas，再 drawImage 到 layer
-  const tmp = makeBitmap(selection.bboxW, selection.bboxH);
-  const tctx = tmp.getContext("2d");
-  tctx.fillStyle = color;
-  tctx.fillRect(0, 0, selection.bboxW, selection.bboxH);
-  tctx.globalCompositeOperation = "destination-in";
-  tctx.drawImage(selection.maskCanvas, 0, 0);
-  tctx.globalCompositeOperation = "source-over";
-  layer.ctx.drawImage(tmp,
-    selection.bboxX - layer.bboxX,
-    selection.bboxY - layer.bboxY);
-}
-
-// 清除选区内像素（dst-out mask）
-export function clearSelectionOnLayer(layer, selection) {
-  if (!selection || !layer) return;
-  const lctx = layer.ctx;
-  lctx.save();
-  lctx.globalCompositeOperation = "destination-out";
-  lctx.drawImage(selection.maskCanvas,
-    selection.bboxX - layer.bboxX,
-    selection.bboxY - layer.bboxY);
-  lctx.restore();
 }
 
 // ============ 几何工具 ============

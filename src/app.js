@@ -32,7 +32,7 @@ import {
   exportOraDownload, exportPsdDownload, shareOrDownloadImage,
   copyImageToClipboard, readImageFromClipboard,
 } from "./session.js";
-import { fillSelectionOnLayer, clearSelectionOnLayer, invertSelection } from "./lasso.js";
+import { Selection } from "./selection.js";
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
 //   filters.js 只剩 Filter 契约 + registry + helper；
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
@@ -778,7 +778,7 @@ document.getElementById("lassoFillBtn").addEventListener("click", () => {
   const layer = doc.activeLayer;
   if (!layer || !doc.selection) return;
   const before = layer.snapshot();
-  fillSelectionOnLayer(layer, doc.selection, state.color);
+  doc.selection.fillOnLayer(layer, state.color);
   const after = layer.snapshot();
   const entry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
   history.push(entry);
@@ -792,7 +792,7 @@ document.getElementById("lassoClearBtn").addEventListener("click", () => {
   const layer = doc.activeLayer;
   if (!layer || !doc.selection) return;
   const before = layer.snapshot();
-  clearSelectionOnLayer(layer, doc.selection);
+  doc.selection.clearOnLayer(layer);
   const after = layer.snapshot();
   const entry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
   history.push(entry);
@@ -803,13 +803,7 @@ document.getElementById("lassoClearBtn").addEventListener("click", () => {
 });
 // v112: 全选（user：「lasso 加全选」）
 document.getElementById("lassoSelectAllBtn").addEventListener("click", () => {
-  const w = doc.width, h = doc.height;
-  const mask = document.createElement("canvas");
-  mask.width = w; mask.height = h;
-  const mctx = mask.getContext("2d");
-  mctx.fillStyle = "#fff";
-  mctx.fillRect(0, 0, w, h);
-  const sel = { bboxX: 0, bboxY: 0, bboxW: w, bboxH: h, maskCanvas: mask };
+  const sel = Selection.full(doc.width, doc.height);
   const entry = input.lasso.setSelection(sel);
   if (entry && history) history.push(entry);
   board.invalidateAll();
@@ -818,7 +812,7 @@ document.getElementById("lassoSelectAllBtn").addEventListener("click", () => {
 
 // 反选：在 docW×docH 上 mask 取反
 document.getElementById("lassoInvertBtn").addEventListener("click", () => {
-  const inv = invertSelection(doc.selection, doc.width, doc.height);
+  const inv = doc.selection ? doc.selection.invert(doc.width, doc.height) : Selection.full(doc.width, doc.height);
   const entry = input.lasso.setSelection(inv);
   if (entry && history) history.push(entry);
   board.invalidateAll();
@@ -4404,15 +4398,7 @@ async function importImageAsLayer(file) {
 
 // v111: 给 layer 当前 bbox 做一个全白 mask 当 selection（占满整个 layer 像素）
 function _makeFullLayerSelection(layer) {
-  const w = layer.bboxW, h = layer.bboxH;
-  if (w <= 0 || h <= 0) return null;
-  const mask = (typeof OffscreenCanvas !== "undefined")
-    ? new OffscreenCanvas(w, h)
-    : (() => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; })();
-  const mctx = mask.getContext("2d");
-  mctx.fillStyle = "#fff";
-  mctx.fillRect(0, 0, w, h);
-  return { bboxX: layer.bboxX, bboxY: layer.bboxY, bboxW: w, bboxH: h, maskCanvas: mask };
+  return Selection.full(layer.bboxW, layer.bboxH, layer.bboxX, layer.bboxY);
 }
 
 // ---- 图库 全屏（v50 重做：无返回键、底栏 IDB 占用 + 清扫、加号 popup、云图标 popup） ----

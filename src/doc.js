@@ -334,7 +334,7 @@ export class PaintDoc {
       height: this.height,
       activeIndex: this.activeIndex,
       referenceLayerId: this.referenceLayerId,
-      selection: _cloneSelection(this.selection),
+      selection: this.selection,   // 不可变 → 存引用，不深拷
       layers: this.layers.map((L) => ({
         id: L.id,
         name: L.name,
@@ -352,7 +352,7 @@ export class PaintDoc {
     this.height = snap.height;
     this.activeIndex = snap.activeIndex;
     this.referenceLayerId = snap.referenceLayerId;
-    this.selection = _cloneSelection(snap.selection);
+    this.selection = snap.selection;   // 不可变引用
     this.layers = snap.layers.map((s) => {
       const L = new Layer({ width: snap.width, height: snap.height, name: s.name, empty: true });
       L.id = s.id;
@@ -410,24 +410,7 @@ export class PaintDoc {
       L.bboxH = newH;
     }
     if (this.selection) {
-      const tL = this.selection.bboxX - dx, tT = this.selection.bboxY - dy;
-      const tR = tL + this.selection.bboxW, tB = tT + this.selection.bboxH;
-      const newL = Math.max(0, tL), newT = Math.max(0, tT);
-      const newR = Math.min(nw, tR), newB = Math.min(nh, tB);
-      const newW = newR - newL, newH = newB - newT;
-      if (newW <= 0 || newH <= 0) {
-        this.selection = null;
-      } else {
-        const srcX = newL - tL, srcY = newT - tT;
-        const m = document.createElement("canvas");
-        m.width = newW; m.height = newH;
-        m.getContext("2d").drawImage(this.selection.maskCanvas, srcX, srcY, newW, newH, 0, 0, newW, newH);
-        this.selection.bboxX = newL; this.selection.bboxY = newT;
-        this.selection.bboxW = newW; this.selection.bboxH = newH;
-        this.selection.maskCanvas = m;
-        this.selection._chains = null;
-        this.selection._outline = null;
-      }
+      this.selection = this.selection.croppedTo(dx, dy, nw, nh);
     }
     this.width = nw;
     this.height = nh;
@@ -466,39 +449,11 @@ export class PaintDoc {
       L.bboxH = nbh;
     }
     if (this.selection) {
-      const oW = this.selection.bboxW;
-      const oH = this.selection.bboxH;
-      const nbw = Math.max(1, Math.round(oW * sx));
-      const nbh = Math.max(1, Math.round(oH * sy));
-      const nbx = Math.round(this.selection.bboxX * sx);
-      const nby = Math.round(this.selection.bboxY * sy);
-      const m = document.createElement("canvas");
-      m.width = nbw; m.height = nbh;
-      const mctx = m.getContext("2d");
-      mctx.imageSmoothingEnabled = smooth;
-      mctx.imageSmoothingQuality = quality;
-      mctx.drawImage(this.selection.maskCanvas, 0, 0, oW, oH, 0, 0, nbw, nbh);
-      this.selection.bboxX = nbx;
-      this.selection.bboxY = nby;
-      this.selection.bboxW = nbw;
-      this.selection.bboxH = nbh;
-      this.selection.maskCanvas = m;
-      this.selection._chains = null;
-      this.selection._outline = null;
+      this.selection = this.selection.resampledTo(sx, sy, smooth, quality);
     }
     this.width = nw;
     this.height = nh;
   }
-}
-
-// selection { bboxX, bboxY, bboxW, bboxH, maskCanvas } 深拷贝。snapshotAll 用。
-function _cloneSelection(sel) {
-  if (!sel) return null;
-  const m = document.createElement("canvas");
-  m.width = Math.max(1, sel.bboxW);
-  m.height = Math.max(1, sel.bboxH);
-  m.getContext("2d").drawImage(sel.maskCanvas, 0, 0);
-  return { bboxX: sel.bboxX, bboxY: sel.bboxY, bboxW: sel.bboxW, bboxH: sel.bboxH, maskCanvas: m };
 }
 
 // 按设备 RAM + 画布分辨率 算图层数上限。**悲观估计**：每层按占满 doc 算

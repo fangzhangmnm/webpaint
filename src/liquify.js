@@ -44,7 +44,7 @@ export class LiquifyEngine {
 
   // v124 selection 参数：{ maskCanvas, bboxX, bboxY, bboxW, bboxH } 来自 doc.selection。
   // 给了就在每个 stamp 内 mask 外像素**保留 startSnap**（不液化）→ live preview 立刻
-  // 看到选区限制，跟 brush 一致；commit 时 applySelectionMaskPostStroke 兜底也无害。
+  // 看到选区限制，跟 brush 一致；commit 时 Selection.applyMaskPostStroke 兜底也无害。
   beginStroke(layer, settings, x, y, selection) {
     const lbW = Math.max(1, layer.bboxW);
     const lbH = Math.max(1, layer.bboxH);
