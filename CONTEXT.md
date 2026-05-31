@@ -41,10 +41,10 @@ _Avoid_: command, action, undo step
 一次"按-拖-抬"产生的像素编辑事务模块。`begin(layer,type)` 拍 before-snapshot，`commit()` 拍 after、压缩、入栈，`abort()` 还原。自己注册 stroke/liquify/filterBrush 三类 handler。拥有 snapshot 压缩与还原原语。
 _Avoid_: undo manager, snapshot manager, stroke recorder
 
-**Mode**:
-独占状态机的 SSoT。双轴 `{ tool, transient }`：tool=持久工具选择，transient=null 或一个停驻的多步模式。能力表（canDraw/allowsColor/cursor/ctrlZ）按 current() 查表。输入 gating、UI 显隐、ctrl-z 语义都从它派生。提案见 [[docs/tool-mode-state-machine.md]]。
-_Avoid_: tool state, app state, mode manager
+**EditMode**:
+独占编辑状态机的 SSoT（`src/edit-mode.js`）。**单轴**：`current()` 是一个 enum（CAPS 的 key），持久工具（brush/eraser/lasso/...）和 transient（transform/crop/adjust）平级。能力表 CAPS（canDraw/allowsColor/cursor/ctrlZ/transient）按 current() 查表 → 谓词。输入 gating、UI 显隐/cursor、ctrl-z 语义全从 current() 派生。叫 EditMode 不叫 Mode 因为 "mode" 在本仓重载（L.mode 混合 / liquify.mode / body.dataset.mode）。提案见 [[docs/tool-mode-state-machine.md]]。
+_Avoid_: tool state, app state, mode manager, Mode（裸"mode"歧义）
 
 **Transient**:
-半模态：绘画时停驻的 exclusive 多步模式（transform / crop / adjust-color），跨多次手势直到 commit/cancel；ctrl-z 语义是「取消」而非弹栈。注册 `{ apply, abort }`。区别于单次手势进行中（那是 PixelEdit 的 tx）。
-_Avoid_: pending state, temporary mode, overlay
+EditMode 里"多 step、需 commit/cancel、ctrl-z=取消"的那类 mode（transform / crop / adjust），与持久工具平级（CAPS `transient:true`）。canDraw=false → 期间结构上不可能起 stroke。结束回到进来前的持久工具（_returnTool，内部，brush 兜底）。两个语义旋钮在 CAPS：onToolSwitch（点工具=apply/cancel）、returnTo。区别于单次手势进行中（那是 PixelEdit 的 tx）。
+_Avoid_: pending state, temporary mode, overlay, 双轴/second axis

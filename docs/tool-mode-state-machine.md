@@ -41,74 +41,73 @@ PixelEdit 管"记什么"，Mode 管"何时允许记 / ctrl-z 是什么意思"。
 > Mode 的 transient 专指**停驻的多步模式**（transform/crop/adjust，跨多次手势直到 commit/cancel）。
 > 这把"手势级 abort"和"模式级 cancel"两件事彻底分开。
 
-## 已定决策（2026-05-31 grilling）
+> **概念分离（2026-05-31 实现期 grilling 推清）**：三件事别混——
+> **lasso = 输入**（创建 mask 的一种手势方式）；**mask / Selection = state**（doc 的一等公民，已抽成独立模块见 [[selection.js]]）；
+> **transform = 操作这个 state 的 transient 模式**，不是 lasso。
+> 推论：
+> - **tool 与 transient 是两条独立轴**，transient 活跃时与 tool 输入**互斥**（canDraw=false）。
+> - **transient 结束自动回到底层 tool**——因为 tool 轴从没被改（transient 只覆盖 current()）。**不需要 previousTool**。
+>   （否决了"进 transform 时 setTool('lasso')"的 Model B：那会改 tool 轴、需要 previousTool、且把 transform 和 lasso 输入混为一谈。）
+> - **各 transient 路由不同**，不是统一路由给 lasso：transform→gizmo（gizmo 代码暂在 LassoEngine，机械上 role="lasso"）；
+>   crop→自己的 overlay 拖拽 handler（app.js，不走画布路由）；adjust→面板 slider，画布 pointer 无操作。三者都靠 canDraw=false 挡掉绘画。
 
-1. **Mode 身份 = 双轴 `{ tool, transient }`**。tool 是持久选择；transient 是 null 或**一个**停驻模式，覆盖在 tool 上但不丢 tool。
-   取消 transient 天然回到 tool（无需 previousTool 字段）。transient 不嵌套（无栈，YAGNI）。
-2. **能力表 = 纯数据表**，谓词 = 查表。Mode 纯 in-process，**不持 doc/board 引用**。
-   "层可见/未锁"这种 runtime fact 在 seam 上另一道 guard 组合，不混进 Mode（保持纯函数可测、不把层语义混进模式能力）。
-3. **本轮只做 persistent + transient**。modal（完美 block + 统一 in-app 对话框入口）留作后续，现在 modal 仍走各自 ad-hoc。
+## 已定决策（2026-05-31 grilling + 实现期推敲）
 
-## Mode 接口（定稿）
+1. **单轴**（**否决了双轴**）。`current()` 是一个 enum（CAPS key）；持久工具与 transient 平级，差别只是 transient
+   是"多 step、commit/cancel、ctrl-z=取消"那类。**为什么单轴**：让 current() 成为唯一公开主读取器 →
+   忘了考虑 transient 的代码 fail-safe（拿 "transform"，canDraw=false，不画），不是 fail-open（拿底层 brush 误触 stroke）。
+   transient 期间结构上不可能起 stroke → 没杂散像素进 undo 栈 → 根除一类 undo bleaching。"transient 工具栏不高亮"
+   正是想实现它才发现双轴的 `tool()` 总返回一个真工具、是 fail-open footgun（也是我们刚修的那个 bug 的根）。
+2. **结束回哪个工具**：returnTo 覆盖（CAPS，默认 null）> 进来前那个持久工具（_returnTool，**内部不暴露**）> brush 兜底（仅 bug）。
+   _returnTool 只从持久 mode 捕获（transient→transient 不覆盖）。
+3. **两个语义旋钮写在 CAPS（SSoT 定义语义）**：`onToolSwitch`（transient 期间点工具 = apply/cancel）、`returnTo`。
+4. **能力表 = 纯数据**，谓词 = 查表。EditMode 纯 in-process，不持 doc/board。"层可见/未锁"在 seam 另一道 guard。
+5. **本轮只做 persistent + transient**。modal（完美 block + 统一 in-app 对话框）留后续，现 modal 仍各自 ad-hoc。
+6. **命名 EditMode**（不叫 Mode）——"mode" 在本仓重载（L.mode 混合 / liquify.mode / body.dataset.mode）。
+
+## EditMode 接口（定稿 · 单轴 · 实现见 [[src/edit-mode.js]]）
 
 ```js
-// mode.js —— 纯 in-process（只持 _tool 字符串 + _transient 对象）
-const CAPS = {                 // 能力表 = 纯数据，谓词 = 查表（接口即测面）
-  // 持久·交互式 stamp 工具（brush-driven）：都 canDraw、笔刷 cursor、ctrlZ history、产 "stroke" PixelEdit。
-  //   唯一实质差别 = allowsColor。"stamp 干什么" 是引擎 payload，不是 mode：
-  //   paint=上色, eraser=擦, filterBrush=滤镜/液化/涂抹...（见下"stamp 家族"）
-  brush:       { canDraw: true,  allowsColor: true,  cursor: "brush", ctrlZ: "history" },
-  eraser:      { canDraw: true,  allowsColor: false, cursor: "brush", ctrlZ: "history" },
-  filterBrush: { canDraw: true,  allowsColor: false, cursor: "brush", ctrlZ: "history" }, // liquify / 未来 smudge / 色彩滤镜笔 = 它的 payload
-  // 非绘画持久工具
-  picker: { canDraw: false, allowsColor: true,  cursor: "none", ctrlZ: "history" },
-  lasso:  { canDraw: false, allowsColor: true,  cursor: "none", ctrlZ: "history" },
-  hand:   { canDraw: false, allowsColor: false, cursor: "grab", ctrlZ: "history" },
-  // 半模态 transient（活跃时覆盖工具行）
-  transform: { canDraw: false, allowsColor: false, cursor: "none", ctrlZ: "abort-transient" },
-  crop:      { canDraw: false, allowsColor: false, cursor: "none", ctrlZ: "abort-transient" },
-  adjust:    { canDraw: false, allowsColor: false, cursor: "none", ctrlZ: "abort-transient" }, // 整个滤镜家族共用一行，见下
+// edit-mode.js —— 纯 in-process。单轴 _current + 内部 _returnTool + 当前 _transient 闭包。
+const CAPS = {  // flat enum；新增滤镜/笔刷 effect = payload，不动表。transient:true 那类 = 多 step。
+  brush:       { canDraw:true,  allowsColor:true,  cursor:"brush", ctrlZ:"history",         transient:false },
+  eraser:      { canDraw:true,  allowsColor:false, cursor:"brush", ctrlZ:"history",         transient:false },
+  filterBrush: { canDraw:true,  allowsColor:false, cursor:"brush", ctrlZ:"history",         transient:false }, // liquify/smudge/色彩笔 = payload
+  liquify:     { canDraw:true,  allowsColor:false, cursor:"ring",  ctrlZ:"history",         transient:false },
+  picker:      { canDraw:false, allowsColor:true,  cursor:"none",  ctrlZ:"history",         transient:false },
+  lasso:       { canDraw:false, allowsColor:true,  cursor:"none",  ctrlZ:"history",         transient:false },
+  hand:        { canDraw:false, allowsColor:false, cursor:"grab",  ctrlZ:"history",         transient:false },
+  transform:   { canDraw:false, allowsColor:false, cursor:"none",  ctrlZ:"abort-transient", transient:true, onToolSwitch:"apply", returnTo:null },
+  crop:        { canDraw:false, allowsColor:false, cursor:"none",  ctrlZ:"abort-transient", transient:true, onToolSwitch:"apply", returnTo:null },
+  adjust:      { canDraw:false, allowsColor:false, cursor:"none",  ctrlZ:"abort-transient", transient:true, onToolSwitch:"apply", returnTo:null }, // 整个滤镜家族共用，payload=Filter
 };
 
-class Mode {
-  // --- SSoT 状态（双轴）---
-  setTool(tool)                          // 取代 state.tool 写入；若有 transient 先 applyPendingTransient()
-  tool()                                 // 当前持久工具
-  enterTransient(name, { apply, abort }) // 进 transform/crop/adjust
-  exitTransient()                        // commit 后正常退（不调 apply/abort）
-  current()  // _transient?.name ?? _tool
-  isTransient()
-
-  // --- 谓词（O(1) 查表）---
-  canDraw()          // CAPS[current()].canDraw
-  allowsColor()
-  showsBrushCursor() // cursor === "brush"
-  cursor()
-  ctrlZMeans()       // "history" | "abort-transient"
-
-  // --- ctrl-z / decisive-action 执行点（吸收 pending-transients）---
-  abortTransient()        // 调 _transient.abort()，清
-  hasPendingTransient()   // !!_transient?.apply
-  applyPendingTransient() // _transient.apply()，清
-
-  // 每次 setTool / enterTransient / exitTransient → emit "wp:modechange"（沿用 wp:histchange 模式）
-  // UI 监听重新派生面板显隐 + cursor
+class EditMode {
+  current()              // 唯一公开主读取器（CAPS key）。返回 _returnTool 的访问器**不暴露**。
+  isTransient() canDraw() allowsColor() cursor() showsBrushCursor() ctrlZMeans()  // 谓词 = 查表
+  setTool(tool)          // 决定性动作；transient 期间按 onToolSwitch apply/cancel 它再进点的工具
+  enterTransient(name, { apply, abort })   // 进 transform/crop/adjust（_returnTool 从持久 mode 捕获）
+  exitTransient()        // 按钮 commit/cancel 后正常退 → 回 returnTo||_returnTool||brush
+  applyPendingTransient()// 非工具决定性动作（save/图库）：always apply 后回工具
+  abortTransient()       // ctrl-z/cancel：abort 后回工具
+  hasPendingTransient()
+  // 状态变 → emit "wp:modechange"。UI 派生：工具按钮高亮(current) / slider 禁(!canDraw,!allowsColor) / cursor
 }
 ```
 
 ### 调用点
 
 ```js
-// input._down —— gate 在 seam，分类在表
-if (!mode.canDraw()) return;
-if (!doc.activeLayer?.visible) { this.status("隐藏图层不能画"); return; }  // ← 层可见性是 seam 的另一道 guard
+// input._down —— gate 在 seam，分类在表（fail-safe：transient 期间 canDraw=false）
+if (!editMode.canDraw()) return;
+if (!doc.activeLayer?.visible) { this.status("隐藏图层不能画"); return; }  // ← 层可见性是 seam 另一道 guard
 this._strokeTx = this.pixelHistory.begin(doc.activeLayer, "stroke");
 
-// 全局 ctrl-z —— 语义由 Mode 路由
-mode.ctrlZMeans() === "abort-transient" ? mode.abortTransient() : history.undo();
+// 全局 ctrl-z —— 语义由 EditMode 路由
+editMode.ctrlZMeans() === "abort-transient" ? editMode.abortTransient() : history.undo();
 ```
 
-**分类 vs event-guard（journal 83 行的问题）：两者分层。** 能力表放 Mode（一处定义每模式准什么 = locality）；
+**分类 vs event-guard（journal 83 行）：两者分层。** 能力表放 EditMode（一处定义每模式准什么 = locality）；
 guard 留 event callback 但只调谓词（每 callback/UI 读同一组 = leverage）。纯声明式 visibility 表罩不住 hotkey 细节；纯手写 reject 会散。
 
 ## 它怎么吃掉 pending-transients（并简化）

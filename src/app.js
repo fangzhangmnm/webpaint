@@ -23,6 +23,7 @@ import {
 import { PANELS, registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
 import { getMeta, setMeta } from "./storage.js";
 import { UndoStack } from "./history.js";
+import { EditMode } from "./edit-mode.js";
 import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
 import {
@@ -218,7 +219,7 @@ els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
 els.versionLabel.textContent = WEBPAINT_VERSION || "?";
 
 const state = {
-  tool: "brush",
+  // tool（当前工具）的 SSoT 已搬到 editMode（editMode.current()）。见 edit-mode.js / CONTEXT.md。
   // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
   filterBrush: null,
   color: safeLS("webpaint.color") || "#1b1b1b",
@@ -342,7 +343,7 @@ const _sidebarBrushBtn = document.getElementById("leftSidebarBrush");
 const _sidebarBrushName = document.getElementById("leftSidebarBrushName");
 function updateSidebarBrushIndicator() {
   if (!_brushRack || !_sidebarBrushName) return;
-  const tool = state.tool;
+  const tool = editMode.current();
   const rackKey = getRackToolKey(tool);
   const ts = state.toolStates[rackKey];
   const brush = ts?.activeBrushId ? findBrush(_brushRack, ts.activeBrushId) : null;
@@ -354,7 +355,7 @@ if (_sidebarBrushBtn) {
   _sidebarBrushBtn.addEventListener("pointerdown", () => {
     lpTimer = setTimeout(() => {
       lpTimer = null;
-      const rackKey = getRackToolKey(state.tool);
+      const rackKey = getRackToolKey(editMode.current());
       const ts = state.toolStates[rackKey];
       if (ts?.activeBrushId) {
         closeExclusive();
@@ -367,7 +368,7 @@ if (_sidebarBrushBtn) {
   _sidebarBrushBtn.addEventListener("pointerleave", cancelLP);
   _sidebarBrushBtn.addEventListener("pointercancel", cancelLP);
   _sidebarBrushBtn.addEventListener("click", () => {
-    const t = state.tool;
+    const t = editMode.current();
     const id = RACK_PANEL_BY_TOOL[t];
     if (id) openExclusive(id);
   });
@@ -499,11 +500,11 @@ function updateSidebarSlider2Label() {
 
 // 滑块改值 → 写回当前工具的 toolState（shapes 写到 brush）
 function writeCurrentToolSize(v) {
-  const ts = state.toolStates[getRackToolKey(state.tool)];
+  const ts = state.toolStates[getRackToolKey(editMode.current())];
   if (ts) ts.size = v;
 }
 function writeCurrentToolOpacity(v) {
-  const ts = state.toolStates[getRackToolKey(state.tool)];
+  const ts = state.toolStates[getRackToolKey(editMode.current())];
   if (ts) ts.opacity = v;
 }
 function selectBrushPresetForTool(tool, brushId) {
@@ -517,19 +518,21 @@ function selectBrushPresetForTool(tool, brushId) {
   // v99r2：opacity 从 preset.defaultOpa 取（默 1.0）；flow 永远 1.0（preset 不存 flow）
   ts.opacity = brush.defaultOpa ?? 1.0;
   ts.flow    = 1.0;
-  if (key === getRackToolKey(state.tool)) applyToolState(state.tool);
+  if (key === getRackToolKey(editMode.current())) applyToolState(editMode.current());
 }
 
 // Undo / redo 共享栈（command pattern + 注册 handler，详见
 // docs/undo-architecture.md）。input.js 注册 "stroke" handler；layer
 // 操作的 5 个 handler 在下方 boot 段集中注册（四条纪律 #1）。
 const history = new UndoStack({ max: 50 });
+// EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。
+const editMode = new EditMode({ initialTool: "brush" });
 // PixelEdit：纯像素三件套（stroke/liquify/filterBrush/shapes）的 undo 事务 + handler。
 // 和 UndoStack 平级，注入 input。见 pixel-edit.js / CONTEXT.md。
 const pixelHistory = new PixelEdit({ doc, history, board });
 
 const input = new InputController(board, doc, {
-  getTool: () => state.tool,
+  getTool: () => editMode.current(),
   getBrushSettings: () => state.brush,
   getLiquifySettings: () => state.liquify,
   // v132 filter brush: state.filterBrush = { Filter, params, variantLabel } 或 null
@@ -539,6 +542,7 @@ const input = new InputController(board, doc, {
   status: setStatus,
   history,
   pixelHistory,
+  editMode,
 });
 
 // v116: transient mode panel suppression
@@ -671,7 +675,7 @@ const lassoConstrainSep = document.querySelector(".lasso-constrain-sep");
 function updateLassoToolbar() {
   const floating = input.lasso.hasFloating();
   const hasSelection = !!doc.selection;
-  const lassoActive = state.tool === "lasso";
+  const lassoActive = editMode.current() === "lasso";
   const showAny = floating || hasSelection || lassoActive;
   lassoToolbarStack.classList.toggle("hidden", !showAny);
   if (!showAny) return;
@@ -993,7 +997,7 @@ function setTool(t) {
     const tb = document.getElementById("filterBrushToolbar");
     if (tb) tb.classList.add("hidden");
   }
-  state.tool = t;
+  editMode.setTool(t);
   for (const b of els.toolBtns) b.setAttribute("aria-pressed", b.dataset.tool === t ? "true" : "false");
   // 液化 / filterBrush 没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
   els.topAdjustBtn.setAttribute("aria-pressed", (t === "liquify" || t === "filterBrush") ? "true" : "false");
@@ -1020,12 +1024,12 @@ for (const b of els.toolBtns) {
     const t = b.dataset.tool;
     // tap-active-again：已激活的 rack 工具再点 → 开/关该工具的笔架 sheet
     // 详 conversation v79→v80：「tap = 切换 / 已激活 tap = 开 rack」
-    if (state.tool === t && RACK_PANEL_BY_TOOL[t]) {
+    if (editMode.current() === t && RACK_PANEL_BY_TOOL[t]) {
       openExclusive(RACK_PANEL_BY_TOOL[t]);
       return;
     }
     // v124 (user) 第二次按 lasso = Esc 语义：清选区 + 回上一个非 lasso 工具
-    if (state.tool === "lasso" && t === "lasso") {
+    if (editMode.current() === "lasso" && t === "lasso") {
       if (doc.selection) {
         const entry = input.lasso.setSelection(null);
         if (entry) history.push(entry);
@@ -1035,7 +1039,7 @@ for (const b of els.toolBtns) {
       closeExclusive();
       return;
     }
-    if (state.tool !== "lasso") _lastNonLassoTool = state.tool;
+    if (editMode.current() !== "lasso") _lastNonLassoTool = editMode.current();
     setTool(t);
     // 切到新 tool 时关掉之前开的 rack（防止 stale）
     closeExclusive();
@@ -1050,11 +1054,11 @@ window.addEventListener("wp:doubletap", () => {
     setStatus("套索浮层进行中，双击切换暂停（点应用 / 取消 / 返回工具栏）");
     return;
   }
-  const next = state.tool === "eraser" ? "brush" : "eraser";
+  const next = editMode.current() === "eraser" ? "brush" : "eraser";
   setTool(next);
   setStatus(`双击 · ${next === "eraser" ? "橡皮" : "笔刷"}`);
 });
-setTool(state.tool);
+setTool(editMode.current());
 
 // Brush rack 异步加载：boot 时拿 IDB 缓存，把 toolStates 缺失字段从 rack 补齐
 // 然后应用当前 tool 的 state
@@ -1066,7 +1070,7 @@ loadBrushRack().then((rack) => {
       Object.assign(state.toolStates[t], init);
     }
   }
-  applyToolState(state.tool);
+  applyToolState(editMode.current());
   updateSidebarBrushIndicator();
   setTimeout(() => { checkBrushRackCloud().catch(() => {}); _refreshRackCloudState(); }, 2000);
   // v122 r2: default-brushes.json 是 async fetch；先用现有 rack boot（可能是 IDB / emergency
@@ -1083,7 +1087,7 @@ loadBrushRack().then((rack) => {
         Object.assign(state.toolStates[t], init);
       }
     }
-    applyToolState(state.tool);
+    applyToolState(editMode.current());
     updateSidebarBrushIndicator();
   });
 }).catch((e) => {
@@ -1092,7 +1096,7 @@ loadBrushRack().then((rack) => {
   // 至少给个 in-memory rack 让 user 能画
   console.warn("[brush-rack] init failed:", e);
   _brushRack = makeDefaultRack();
-  applyToolState(state.tool);
+  applyToolState(editMode.current());
   updateSidebarBrushIndicator();
   setStatus("笔架持久化失败（可能私密浏览）：本次 session 可用，重启会重置", true);
 });
@@ -1207,12 +1211,12 @@ els.sizeSlider.max = String(_sliderMaxPos(200));
 setSize(state.brush.size, { silent: true });        // boot 不弹 popup
 setOpacity(state.brush.opacity, { silent: true });
 // 键盘 [ ] 调粗（v132: tool-aware dispatch）
-//   - 液化（legacy 路径已废，state.tool 不会 "liquify"，留 fallback）
+//   - 液化（legacy 路径已废，editMode.current() 不会 "liquify"，留 fallback）
 //   - 笔刷 / 橡皮 / 涂抹 / filter brush → state.brush.size，max 用 sizeSlider.dataset.maxPx
 //   - 其他模式（lasso / picker / hand）→ no-op
 window.addEventListener("wp:adjsize", (e) => {
   const delta = e.detail;
-  const t = state.tool;
+  const t = editMode.current();
   if (t === "brush" || t === "eraser" || t === "smudge" || t === "filterBrush") {
     const maxPx = parseInt(els.sizeSlider?.dataset.maxPx || "200", 10);
     // v134 [] step 按段量化：20内1, 50内2, 100内5, 200内10, 500内20, 1000内50
@@ -2796,7 +2800,7 @@ function adoptLoadedDoc(loaded, sessionName) {
         });
       }
     }
-    applyToolState(state.tool);
+    applyToolState(editMode.current());
   }
   // v125 per-doc checkerboard：按文件值刷新，缺省回 false
   applyCheckerboard(!!loaded._webpaintState?.checkerboard);
@@ -3561,7 +3565,7 @@ function _enterFilterBrushMode(Filter) {
   applyAllPendingTransients();
   // v132 mutex (user：「锐化模糊 / 液化 / 选区 互斥」)：进 filter brush 关液化面板
   toggleLiquifyPanel?.(false);
-  _filterBrushPreviousTool = state.tool === "filterBrush" ? "brush" : state.tool;
+  _filterBrushPreviousTool = editMode.current() === "filterBrush" ? "brush" : editMode.current();
   // 取持久化的 variantId（user 上次选过的；新 doc 默认第一个）
   const variants = Filter.brushVariants || [{ id: "default", title: Filter.title, params: Filter.defaults() }];
   const savedVid = state.toolStates.filterBrush?.variantId;
@@ -4152,9 +4156,9 @@ els.menuResetBrushRack.addEventListener("click", async () => {
     Object.assign(state.toolStates[t], defaultToolStateFor(t));
   }
   await persistBrushRack();
-  applyToolState(state.tool);
+  applyToolState(editMode.current());
   // 若 rack sheet 当前开着 → 强制刷一遍
-  if (RACK_PANEL_BY_TOOL[state.tool] === getCurrentExclusive()) _renderRackSheet();
+  if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
   _rackDirty = true;
   if (isSignedIn()) pushBrushRackIfSignedIn();
   _rackDirty = false;
@@ -5907,7 +5911,7 @@ async function _resolveRackCloudConflict() {
         _brushRack = pulled.rack;
         { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
         await persistBrushRack();
-        applyToolState(state.tool);
+        applyToolState(editMode.current());
         _rackDirty = false;
         _rackCloudState = "synced";
         setStatus("已拉云端笔架");
@@ -5934,7 +5938,7 @@ async function _resolveRackCloudConflict() {
         _brushRack = merged;
         { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
         await persistBrushRack();
-        applyToolState(state.tool);
+        applyToolState(editMode.current());
         await pushBrushRack(_brushRack, { force: true });
         setStatus(`已合并（云端 ${cloudRack.brushes.length} + 本地新增 ${localExtras.length}）`);
       }
@@ -5972,7 +5976,7 @@ async function checkBrushRackCloud() {
       _brushRack = pulled.rack;
       mergeMissingDefaults(_brushRack);   // 防云端空 rack 把本地清空
       await persistBrushRack();
-      applyToolState(state.tool);
+      applyToolState(editMode.current());
       setStatus("笔架已从云端同步");
     }
   } catch (e) {
@@ -5996,7 +6000,7 @@ function _renderRackSheet() {
       }
       _rackDirty = true;
       persistBrushRack();
-      applyToolState(state.tool);
+      applyToolState(editMode.current());
       _renderRackSheet();
       setStatus(`已恢复默认笔架（${_brushRack.brushes.length} 个）`, true);
     });
@@ -6298,8 +6302,8 @@ if (_rackEls.resetBtn) _rackEls.resetBtn.addEventListener("click", async () => {
     Object.assign(state.toolStates[t], defaultToolStateFor(t));
   }
   await persistBrushRack();
-  applyToolState(state.tool);
-  if (RACK_PANEL_BY_TOOL[state.tool] === getCurrentExclusive()) _renderRackSheet();
+  applyToolState(editMode.current());
+  if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
   _rackDirty = true;
   if (isSignedIn()) pushBrushRackIfSignedIn();
   _rackDirty = false;
@@ -6329,12 +6333,12 @@ function _closeBrushSettings(save) {
       // v99r2：保存后自动切到该笔（包括 size 回 base、opacity / flow 重置默认）
       // user：「修改保存了一个笔刷之后自动切到那一个（包括回到 default size）」
       const tool = _editingBrushDraft.tool;
-      const targetTool = state.tool === "airbrush" ? "brush" : tool;
+      const targetTool = editMode.current() === "airbrush" ? "brush" : tool;
       // 切到对应 tool（如果用户当前不在）
       // 不主动切 tool，避免打断 user 当下的工具；只切笔
       // 在当前 tool 的 rackKey 跟 brush.tool 兼容时才切
-      if (getRackToolKey(state.tool) === getRackToolKey(targetTool)) {
-        selectBrushPresetForTool(state.tool, _editingBrushDraft.id);
+      if (getRackToolKey(editMode.current()) === getRackToolKey(targetTool)) {
+        selectBrushPresetForTool(editMode.current(), _editingBrushDraft.id);
       } else {
         // 写到目标 tool 的 toolState 但不切 tool
         selectBrushPresetForTool(targetTool, _editingBrushDraft.id);

@@ -182,6 +182,7 @@ export class InputController {
       window.dispatchEvent(new CustomEvent("wp:lassochange"));
     };
     this.getTool = opts.getTool || (() => "brush");
+    this.editMode = opts.editMode || null;   // EditMode 独占状态机（路由/gate/ctrl-z 用，见 edit-mode.js）
     this.getBrushSettings = opts.getBrushSettings || (() => null);   // 必须传
     this.getLiquifySettings = opts.getLiquifySettings || (() => ({ mode: "push", size: 50, strength: 0.5 }));
     // v132 filter brush 当前激活的 { Filter, params } 或 null
