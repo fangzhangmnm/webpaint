@@ -288,7 +288,10 @@ export class InputController {
     this.canvas.setPointerCapture?.(e.pointerId);
 
     const tool = this.getTool();
-    const effectiveTool = this.altDown && tool === "brush" ? "picker" : tool;
+    let effectiveTool = this.altDown && tool === "brush" ? "picker" : tool;
+    // 浮动变换是 transient，抢占工具路由：无论当前工具，pointer 都按 lasso 走。
+    // 否则切到画笔后点 Transform 进入浮动态，鼠标行为仍是画笔、gizmo 拖不动（#6 Mode 原则缩影）。
+    if (this.lasso.hasFloating()) effectiveTool = "lasso";
     const x = e.clientX, y = e.clientY;
 
     // pen 正在画 → touch 当掌触
