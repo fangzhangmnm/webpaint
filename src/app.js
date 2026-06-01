@@ -34,6 +34,7 @@ import {
   copyImageToClipboard, readImageFromClipboard,
 } from "./session.js";
 import { Selection } from "./selection.js";
+import { decodeImageFile, fitWithin, canvasToBlob, smartResample } from "./resample.js";
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
 //   filters.js 只剩 Filter 契约 + registry + helper；
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
@@ -4191,13 +4192,17 @@ els.referenceFileInput.addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
   try {
-    const bitmap = await createImageBitmap(file);
-    // 留 file 原 Blob 作持久化源 → 跟着当前 doc 一起进 .ora
-    referenceWindow.setBitmap(bitmap, { persistBlob: file });
+    const decoded = await decodeImageFile(file);          // C：鲁棒解码（修 Windows createImageBitmap 失效）
+    const REF_MAX = 2048;                                 // B：参考图最大边（≈2048² 面积上限）
+    const fit = fitWithin(decoded, REF_MAX, REF_MAX);     // 超了 step-halving 缩小
+    // 缩了就存缩小后的 PNG（省 .ora 体积）；没缩存原文件 Blob
+    const persistBlob = fit.scaled ? await canvasToBlob(fit.source) : file;
+    referenceWindow.setBitmap(fit.source, { persistBlob });
+    if (fit.scaled) decoded.close?.();                    // 缩放后原 bitmap 没用了，释放
     _docDirty = true;
     updateSaveStatus();
     window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
-    setStatus(`参考：${file.name}（会跟当前画一起保存）`);
+    setStatus(`参考：${file.name}${fit.scaled ? `（已缩到 ${fit.w}×${fit.h}）` : ""}（会跟当前画一起保存）`);
   } catch (err) {
     setStatus("参考图载入失败：" + (err && err.message || err));
   }
@@ -4243,7 +4248,7 @@ els.oraFileInput.addEventListener("change", async (e) => {
 // 「导入照片」语义：用照片新建一个 doc（doc 尺寸 = 照片尺寸，cap 8192），
 // 单层就是这张照片。和"导入图片 / .ora"（叠新图层到当前 doc）不同。
 async function importImageAsNewDoc(file) {
-  const bitmap = await createImageBitmap(file);
+  const bitmap = await decodeImageFile(file);
   const w = Math.min(8192, bitmap.width);
   const h = Math.min(8192, bitmap.height);
   if (_docDirty) await saveNow();
@@ -4264,7 +4269,9 @@ async function importImageAsNewDoc(file) {
   layer.ctx = c.getContext("2d", { willReadFrequently: false });
   layer.ctx.imageSmoothingEnabled = true;
   layer.ctx.imageSmoothingQuality = "high";
-  layer.ctx.drawImage(bitmap, 0, 0, w, h);
+  // 超 8192 缩小走 step-halving 抗锯齿；否则原样画
+  const src = (w < bitmap.width || h < bitmap.height) ? smartResample(bitmap, w, h) : bitmap;
+  layer.ctx.drawImage(src, 0, 0, w, h);
   bitmap.close?.();
   applyCheckerboard(false);    // v125: 导入新作品默认关棋盘
   const stem = file.name.replace(/\.[^.]+$/, "") || "导入";
@@ -4354,7 +4361,7 @@ function _openBigImportSheet(ow, oh, docW, docH) {
 }
 
 async function importImageAsLayer(file) {
-  const bitmap = await createImageBitmap(file);
+  const bitmap = await decodeImageFile(file);
   const ow = bitmap.width, oh = bitmap.height;
   const docW = doc.width, docH = doc.height;
   // v134 (user：「导入超大图片弹 sheet」) bitmap 比 doc 大 → 询问 fit / 保原 / 自定义
@@ -4384,7 +4391,9 @@ async function importImageAsLayer(file) {
   layer.ctx = c.getContext("2d", { willReadFrequently: false });
   layer.ctx.imageSmoothingEnabled = imgSmoothing !== "low";
   layer.ctx.imageSmoothingQuality = imgSmoothing;
-  layer.ctx.drawImage(bitmap, 0, 0, w, h);
+  // 缩小且非 nearest（像素画保持硬边）→ step-halving 抗锯齿；否则原样画
+  const lsrc = (imgSmoothing !== "low" && (w < ow || h < oh)) ? smartResample(bitmap, w, h) : bitmap;
+  layer.ctx.drawImage(lsrc, 0, 0, w, h);
   bitmap.close?.();
   renderLayersPanel();
   board.invalidateAll();

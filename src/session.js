@@ -15,6 +15,7 @@
 //     把"加载失败的 path"当 oldName 删掉
 
 import { encodeDocToOra, decodeOraToDoc } from "./ora.js";
+import { smartResample, canvasToBlob } from "./resample.js";
 import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.js";
 
 const LS_CURRENT_NAME = "webpaint.currentSessionName";
@@ -75,15 +76,11 @@ async function renderThumbBlob(doc, maxSide = 256) {
   const scale = Math.min(1, maxSide / Math.max(W, H));
   const tw = Math.max(1, Math.round(W * scale));
   const th = Math.max(1, Math.round(H * scale));
-  const thumb = document.createElement("canvas");
-  thumb.width = tw; thumb.height = th;
-  const tctx = thumb.getContext("2d");
-  tctx.imageSmoothingEnabled = true;
-  tctx.imageSmoothingQuality = "high";
-  tctx.drawImage(merged, 0, 0, tw, th);
+  // step-halving 缩小（抗锯齿，缩略图更干净）；scale=1（doc 比 maxSide 小）时 smartResample 直接收尾不失真
+  const thumb = smartResample(merged, tw, th);
 
   // PNG 保 alpha；体积通常 5-25KB（立绘透明区压缩好），可接受
-  return await new Promise((resolve) => thumb.toBlob(resolve, "image/png"));
+  return await canvasToBlob(thumb, "image/png");
 }
 
 /** trash 用 key prefix。delete 时 rename 到 trash:<timestamp>-<counter>:<name>，恢复时 rename 回。

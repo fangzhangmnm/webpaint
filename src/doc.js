@@ -9,6 +9,8 @@
 // - 没有持久化（proposal："甚至没保存的情况下"）。但 doc 的 API 已经按"会被序列化"
 //   去设计 —— 后期换 IndexedDB / OneDrive / 自定义文件格式时不需要重构模型。
 
+import { smartResample } from "./resample.js";
+
 export const DEFAULT_DOC_SIZE = 2048;
 
 // 兼容 OffscreenCanvas（Safari 16.4+）和回退到 HTMLCanvas
@@ -440,7 +442,12 @@ export class PaintDoc {
       const nctx = nc.getContext("2d", { willReadFrequently: false });
       nctx.imageSmoothingEnabled = smooth;
       nctx.imageSmoothingQuality = quality;
-      nctx.drawImage(ox, 0, 0, oW, oH, 0, 0, nbw, nbh);
+      // 缩小且非 nearest → step-halving 抗锯齿（PS Bicubic Sharper 的近似）；放大/nearest 原样画
+      if (smooth && (nbw < oW || nbh < oH)) {
+        nctx.drawImage(smartResample(ox, nbw, nbh), 0, 0);
+      } else {
+        nctx.drawImage(ox, 0, 0, oW, oH, 0, 0, nbw, nbh);
+      }
       L.canvas = nc;
       L.ctx = nctx;
       L.bboxX = nbx;
