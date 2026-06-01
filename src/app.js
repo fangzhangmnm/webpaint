@@ -1752,6 +1752,8 @@ function renderLayersPanel() {
       els.layersList.appendChild(expand);
     }
   }
+  // 滚动到当前活动层（undo/redo 切了 activeIndex 时让面板跳过去，用户看得见变化）
+  els.layersList.querySelector(".layer-row.active")?.scrollIntoView({ block: "nearest" });
   // v123 footer 只剩 add（del / up / down 进 per-row "⋯" 菜单）
   els.layerAddBtn.disabled = doc.layers.length >= max;
   // v132 global 删除按钮 disable + 灰（user：「删除图层不可用时应该灰色」）
@@ -1773,11 +1775,12 @@ function _addEmptyLayer() {
     setStatus(`图层数已达上限 ${doc.maxLayers}`);
     return;
   }
+  const prevActiveId = doc.activeLayer?.id ?? null;   // 持久化：undo 创建时回到创建前的活动层
   const L = doc.addLayer();
   if (!L) return;
   const insertIndex = doc.layers.findIndex((l) => l.id === L.id);
   const layerSpec = layerSpecFrom(L);
-  history.push({ type: "addLayer", index: insertIndex, layerSpec });
+  history.push({ type: "addLayer", index: insertIndex, layerSpec, prevActiveId });
   _afterDocChange();
 }
 function _openImagePicker() {
@@ -2300,6 +2303,7 @@ function layerSpecFrom(L) {
 history.registerHandler("addLayer", {
   undo: (e) => {
     doc.removeLayer(e.layerSpec.id);
+    if (e.prevActiveId != null) doc.setActiveById(e.prevActiveId);   // 回到创建前的活动层（不误导）
     _afterDocChange();
     setStatus(`已撤销创建图层「${e.layerSpec.name || ""}」`);
   },
