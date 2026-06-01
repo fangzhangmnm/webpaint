@@ -258,14 +258,16 @@ export class InputController {
 
   // -- pen tip hover preview（iPad Pro M2+ 有 pen hover；mouse 模式也利用）
   _updateCursorPreview(e) {
-    const tool = this.getTool();
-    // v132 (user：「picker 时 windows 鼠标圆没隐藏」) hand / picker / lasso 都不显
-    if (tool === "hand" || tool === "picker" || tool === "lasso") {
+    // #6 stage 4b：圆的显隐从 EditMode.cursor() 派生（取代硬编码 tool 列表）。
+    //   "none"/"grab"（picker/lasso/hand + transform/crop/adjust）→ 不显（修"transient 时圆没隐藏"）
+    //   "ring"（liquify）→ 显，用液化笔大小；"brush"（笔/橡皮/filterBrush）→ 显，用画笔大小
+    const cur = this.editMode ? this.editMode.cursor() : "brush";
+    if (cur === "none" || cur === "grab") {
       this.board.setCursor(null);
       return;
     }
     let size;
-    if (tool === "liquify") {
+    if (cur === "ring") {
       const q = this.getLiquifySettings();
       size = (q && q.size) ? q.size * 2 : 100;     // size 是半径 → 直径 = ×2
     } else {

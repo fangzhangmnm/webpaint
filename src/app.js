@@ -978,12 +978,8 @@ function setTool(t) {
     const tb = document.getElementById("filterBrushToolbar");
     if (tb) tb.classList.add("hidden");
   }
-  editMode.setTool(t);
-  for (const b of els.toolBtns) b.setAttribute("aria-pressed", b.dataset.tool === t ? "true" : "false");
-  // 液化 / filterBrush 没有独立 data-tool topbar 按钮，但 adjust 按钮在该工具下高亮
-  els.topAdjustBtn.setAttribute("aria-pressed", (t === "liquify" || t === "filterBrush") ? "true" : "false");
-  document.body.dataset.tool = t;
-  updateLassoToolbar();   // sub-tool bar 跟着工具切换显隐
+  editMode.setTool(t);   // emit wp:modechange → _syncEditModeUI 派生按钮高亮 / lasso 工具栏
+  document.body.dataset.tool = t;   // 持久工具的 CSS hook（transient 期间保持不变）
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
   if (t === "brush" || t === "smudge" || t === "eraser" || t === "filterBrush") {
     applyToolState(t);
@@ -992,6 +988,28 @@ function setTool(t) {
     setStatus("smudge engine 待实装；现在按 brush 走");
   }
 }
+
+// #6 stage 4：UI 从 EditMode 派生（监听 wp:modechange）。setTool / enterTransient / exit 都会触发。
+// transient 期间（current()=transform/crop/adjust）**不高亮任何工具按钮** —— 这正是当初想实现、
+// 逼出"双轴不行"的那个 payoff（双轴的 tool() 仍指向底层工具会误亮）。
+function _syncEditModeUI() {
+  const m = editMode.current();
+  const transient = editMode.isTransient();
+  // 工具按钮高亮：transient 时一个都不亮；持久工具高亮对应按钮
+  for (const b of els.toolBtns) b.setAttribute("aria-pressed", (!transient && b.dataset.tool === m) ? "true" : "false");
+  // 液化 / filterBrush 没独立 data-tool 按钮，用 adjust 按钮高亮（transient 期间也不亮）
+  els.topAdjustBtn?.setAttribute("aria-pressed", (m === "liquify" || m === "filterBrush") ? "true" : "false");
+  // 注：body.dataset.tool 保持"持久工具"（在 setTool 里设），不在这改成 transient 名——避免扰乱
+  // 依赖 body[data-tool] 的 CSS（且 data-mode 被图库占用）。transient 的 UI 抑制走面板 suppress + 按钮高亮。
+  // slider 禁用：size/opacity 仅 canDraw 模式可调；color 仅 allowsColor 上下文（笔刷/选区）可点。
+  if (els.sizeSlider) els.sizeSlider.disabled = !editMode.canDraw();
+  if (els.opacitySlider) els.opacitySlider.disabled = !editMode.canDraw();
+  if (els.activeSwatch) els.activeSwatch.disabled = !editMode.allowsColor();
+  updateLassoToolbar();             // 选区/变换工具栏跟着重新派生
+}
+window.addEventListener("wp:modechange", _syncEditModeUI);
+_syncEditModeUI();   // 初始同步（boot setTool 同工具会 early-return 不 emit，这里兜一次）
+
 // Rack 工具 → 对应的 exclusive panel id
 const RACK_PANEL_BY_TOOL = {
   brush: PANELS.RACK_BRUSH,

@@ -86,8 +86,7 @@ button, input, .swatch, .tool, .float-panel, .top-bar, .hud, .sheet, .backdrop, 
 
 body[data-tool="hand"] .board { cursor: grab; }
 body[data-panning="1"] .board { cursor: grabbing !important; }
-body[data-tool="eraser"] .board { cursor: cell; }
-body[data-tool="picker"] .board { cursor: copy; }
+/* 橡皮 / 吸色 都跟画笔同 pointer style（默认 crosshair）；不再用 cell / copy 那种出戏光标 */
 body[data-tool="lasso"] .board { cursor: crosshair; }
 
 /* 套索浮层工具栏 —— 浮在顶栏下方居中，floating 选区存在时显示 */
