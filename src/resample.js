@@ -4,6 +4,30 @@
 // 高质量缩小要 step-halving（每步 ≤2x，近似 box/area 平均）。这套逻辑若散在 N 个 resample 点会被抄 N 遍，
 // 收进这里：调用方只说"缩到这么大"，怎么缩干净是实现细节。PS 缩小推荐 Bicubic Sharper，我们用 step-halving + high smoothing 近似。
 
+// 重采样方法 SSoT。所有 dropdown（变换采样 / 调整尺寸 / 导入 sheet）从这拉，加新方法（以后 AI）只改这。
+// contexts：warp = 变换的逐像素采样（renderQuadPerPixel 支持）；scale = 轴对齐缩放（drawImage / smartResample）。
+// 以后 AI 放大多半只属于 scale（神经网络整图，非逐像素 kernel）→ contexts: ["scale"]。
+export const RESAMPLE_MODES = [
+  { id: "bicubic",  label: "双三次（高质量）", contexts: ["warp", "scale"] },
+  { id: "bilinear", label: "双线性（软）",     contexts: ["warp", "scale"] },
+  { id: "nearest",  label: "最近邻（像素画）", contexts: ["warp", "scale"] },
+  // 以后：{ id: "ai", label: "AI 放大", contexts: ["scale"] }
+];
+
+// 用 RESAMPLE_MODES 填一个 <select>（按 context 过滤），选中 selected。
+export function fillResampleSelect(sel, context, selected) {
+  if (!sel) return;
+  sel.innerHTML = "";
+  for (const m of RESAMPLE_MODES) {
+    if (context && m.contexts && !m.contexts.includes(context)) continue;
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.label;
+    if (m.id === selected) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
 function makeCanvas(w, h) {
   w = Math.max(1, w | 0); h = Math.max(1, h | 0);
   return (typeof OffscreenCanvas !== "undefined")

@@ -182,6 +182,42 @@ adjust transient 的 apply 内部就是一个 PixelEdit tx——Mode 与 PixelEd
 | **功能** | revert（回到上次 explicit save / 打开态）；collapse all layers（to new layer / 替换全部）；filter stage 不 log slider tweak | revert → #3 save 协调器；collapse → 独立 feature；slider 合并已有先例（图层 opacity：pointerdown 记 old、pointerup 才 push 一个 entry） |
 | **一行 / ad-hoc** | undo 配额 50→调大；picker 笔刷圆先 ad-hoc 藏 | 配额**待办：需查 memory（内存预算）再定数**；笔刷圆由步骤 5 的 `showsBrushCursor()` 统一治 |
 
+## 分类定死：transient vs command（含 one-shot-UI command）（2026-06-01）
+
+判据一句话：**有没有"画布上的活预览、跨多次手势、ctrl-z 该取消它"。**
+
+| 类 | 判据 | 例 | ctrl-z | EditMode 里 |
+|---|---|---|---|---|
+| **transient** | 画布活预览 + 多步 + commit/cancel | transform(gizmo) / crop(框) / adjust(画布 live 滤镜预览+slider) | 取消该 transient | 是 CAPS 一行（current()=它） |
+| **command** | 收参→应用一次，无画布活预览 | fill / clear / deselect / flatten | undo 那个结果（history） | **不是 mode**，不进 CAPS |
+| **command（one-shot UI）** | 带模态参数对话框的 command | **resize** / 指定尺寸新建 / 导出配置 | 同 command（对话框自带取消） | **不是 mode** |
+
+- **resize 是 command（one-shot UI），不是 transient**：对话框只收 W/H/mode，画布无活预览；对话框有自己的取消键。
+- **和 adjust 的分界**：adjust 在画布上 surrogate 实时预览 + ctrl-z 取消 → transient；resize 在对话框里填数 → command。
+  "其他 adjust" 若哪天是纯对话框填参（无画布预览），归 command-with-UI，不是 transient。
+- **one-shot-UI 的对话框理想上走 EditMode 的 modal kind**（期间 block 画布 + ctrl-z；modal 那档已 defer），现在用 backdrop 凑合。
+- 所有 command（含 one-shot-UI）触发时都 `applyPendingTransient()` 先解析停驻 transient —— 由下面的 command chokepoint 结构性保证。
+
+> **⚠ 地雷（2026-06-01 用户）：别用 transient 的 undo-atomic 去 enforce 模态对话框 / command 的原子性。**
+> command 的原子 = 提交时 push **一个** history entry（PixelEdit/docTransform）。transient 是**画布活预览状态**，
+> 两者正交：① 别假设 transient = 一个 undo entry（盖印能产 N 个，见 [undo-architecture.md](undo-architecture.md)）；
+> ② 别把模态对话框塞成 transient 来"凑"原子性 —— 它会白白继承 ctrl-z=取消 / 面板抑制 / canDraw gate 那堆不该有的语义。
+> resize 就是反例正解：它是 command（push 一个 docTransform entry），**不是** transient。
+
+## 架构债：决定性命令的 transient 解析靠手动（command chokepoint 候选）
+
+> 2026-06-01：transform 浮动时点"调整尺寸"，doc.resampleTo 重采样了带洞的层、浮层错位 → 坏状态。
+> 根因：resize 入口忘了 `editMode.applyPendingTransient()`。
+
+**现状（脆）**：每个决定性命令（切工具/save/图库/crop/adjust/import/resize/...）在自己的 entry **手动**调
+`editMode.applyPendingTransient()` 先 commit 掉停驻 transient。N 个命令 × 手动 = 必漏一个（resize 就漏了，已补）。
+pending-transients.md 早预警过这个 NM-if 问题。
+
+**结构性解法（架构大改，候选）**：所有"决定性命令"走一个 **command chokepoint / dispatch**——
+`runCommand(fn)` 先 `editMode.applyPendingTransient()`（按 implicit/explicit 决定 apply/skip）再执行 fn，忘不了。
+进一步可演化成正式 command 层（命令注册 + 统一前置 hook + 也许 undo 集成）。
+现在先逐个补手动调用；命令多到再漏时升级到 chokepoint。**记此免得下个 AI 又漏一个命令。**
+
 ## 待决 / 开放问题
 
 - **undo 配额数**：用户要求查 memory（内存预算，见 [undo-architecture.md](undo-architecture.md) 内存预算节）再定，以后做。

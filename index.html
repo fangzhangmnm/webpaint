@@ -418,11 +418,8 @@
           <button class="lasso-tool-btn hidden" data-lasso-mode="warp" type="button" title="变形">变形</button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <!-- v120: 3 个按钮意义不明，改 dropdown；nearest 改成「像素画」直说语义 -->
-          <select class="lasso-tool-select" id="lassoSampleSel" title="采样模式">
-            <option value="bicubic">双三次</option>
-            <option value="bilinear">双线性</option>
-            <option value="nearest">像素画</option>
-          </select>
+          <!-- 选项由 JS 从 resample.js RESAMPLE_MODES (SSoT) 填，见 fillResampleSelect -->
+          <select class="lasso-tool-select" id="lassoSampleSel" title="采样模式"></select>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <button class="lasso-tool-btn lasso-tool-confirm" id="lassoStampBtn" type="button" title="盖印（写入但保留浮层，可连击多次叠加）">盖印</button>
           <button class="lasso-tool-btn lasso-tool-confirm" id="lassoCommitBtn" type="button" title="应用变换">应用</button>
@@ -720,11 +717,8 @@
         </div>
         <div class="resample-row">
           <label for="resampleMode">插值</label>
-          <select id="resampleMode">
-            <option value="bicubic">双三次（默认 / 高质量）</option>
-            <option value="bilinear">双线性（软）</option>
-            <option value="nearest">最近邻（像素艺术 / 硬边）</option>
-          </select>
+          <!-- 选项由 JS 从 resample.js RESAMPLE_MODES (SSoT) 填，见 fillResampleSelect -->
+          <select id="resampleMode"></select>
         </div>
       </div>
       <div class="resample-foot">
@@ -953,6 +947,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-3e6012ec34c3.mjs"></script>
+    <script type="module" src="./dist/webpaint-6f9c59ccb307.mjs"></script>
   </body>
 </html>

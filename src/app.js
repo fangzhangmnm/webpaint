@@ -34,7 +34,7 @@ import {
   copyImageToClipboard, readImageFromClipboard,
 } from "./session.js";
 import { Selection } from "./selection.js";
-import { decodeImageFile, fitWithin, canvasToBlob, smartResample } from "./resample.js";
+import { decodeImageFile, fitWithin, canvasToBlob, smartResample, fillResampleSelect } from "./resample.js";
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
 //   filters.js 只剩 Filter 契约 + registry + helper；
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
@@ -852,6 +852,9 @@ document.getElementById("lassoStampBtn").addEventListener("click", () => {
 });
 // v120: 插值模式 dropdown（旧 3 个按钮 → 1 个 select）
 const lassoSampleSel = document.getElementById("lassoSampleSel");
+// 变换采样 + 调整尺寸 两个 dropdown 都从 resample.js 的 RESAMPLE_MODES SSoT 填（以后加方法/AI 一处生效）
+fillResampleSelect(lassoSampleSel, "warp", "bicubic");
+fillResampleSelect(els.resampleMode, "scale", "bicubic");
 if (lassoSampleSel) {
   lassoSampleSel.addEventListener("change", () => {
     input.lasso.setSampleMode(lassoSampleSel.value);
@@ -3353,6 +3356,7 @@ function _closeResampleDialog() {
 document.getElementById("adjustResample").addEventListener("click", () => {
   setMenuOpen(false);
   setAdjustOpen(false);
+  editMode.applyPendingTransient();   // 决定性命令：先 commit 掉浮动变换/调色，再改 doc 尺寸（否则浮层错位+undo 不一致）
   _openResampleDialog();
 });
 els.resampleCancel.addEventListener("click", () => _closeResampleDialog());
