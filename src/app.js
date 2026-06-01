@@ -767,6 +767,7 @@ document.getElementById("lassoTransformBtn").addEventListener("click", () => {
   if (!doc.selection) return;
   const ok = input.lasso.liftSelectionForTransform(doc.activeLayer);
   if (ok) {
+    editMode.enterTransient("transform", { apply: _commitTransform, abort: _cancelTransform });
     updateLassoToolbar();
     _suppressTransientPanels("transform");
   }
@@ -830,18 +831,12 @@ for (const b of lassoTransformModeBtns) {
     updateLassoToolbar();
   });
 }
+// commit/cancel 按钮 = 薄壳，走 EditMode → 运行 transform transient 的 apply/abort 闭包（_commit/_cancelTransform）
 document.getElementById("lassoCommitBtn").addEventListener("click", () => {
-  input.commitLassoIfFloating();
-  updateLassoToolbar();
-  _restoreTransientPanels();
+  editMode.applyPendingTransient();
 });
 document.getElementById("lassoCancelBtn").addEventListener("click", () => {
-  if (input.lasso.hasFloating()) {
-    input.lasso.cancel();
-    board.invalidateAll();
-    updateLassoToolbar();
-  }
-  _restoreTransientPanels();
+  editMode.abortTransient();
 });
 // Stamp：写入图层但保留 float（连击多次叠加盖印）
 document.getElementById("lassoStampBtn").addEventListener("click", () => {
@@ -941,42 +936,29 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () 
 });
 
 // ---- Pending transients 架构级护栏 ----
-// 思路：app 里可能有多种"未提交的瞬时编辑状态"（套索浮层、未来的 text in progress、
-// shape draft 等）。任何"用户决定性动作"（切工具 / save / 切 session / 进图库 / rename）
-// 之前，都应该让每个 pending state 有个 apply 的机会。
-// 每个 transient state 注册 (check, apply, label)。
-// - check(): 当前是否有 pending
-// - apply(): 把 pending 烤进 doc / layer / 等持久状态
-// - label: 调试用
-const _pendingTransients = [];
-function registerPendingTransient({ check, apply, label }) {
-  _pendingTransients.push({ check, apply, label });
-}
-function hasAnyPendingTransient() {
-  return _pendingTransients.some((p) => { try { return p.check(); } catch { return false; } });
-}
-function applyAllPendingTransients() {
-  for (const p of _pendingTransients) {
-    try { if (p.check()) p.apply(); }
-    catch (e) { console.warn(`[pending] ${p.label} apply failed:`, e); }
-  }
-  // v116: 兜底复原被 transient 藏起来的面板（即使没走显式 commit/cancel button）
-  _restoreTransientPanels?.();
-}
+// #6 stage 2：transient（未提交的瞬时编辑态：套索浮层 / 调色预览 / crop 框）由 EditMode 全量接管。
+// 旧的 registerPendingTransient/applyAllPendingTransients 注册表已废——改为在各 transient 的入口
+// editMode.enterTransient(name, { apply, abort })，决定性动作调 editMode.applyPendingTransient()。
+// 三个 transient 的 apply/abort 闭包：
+//   transform(lasso 浮层)：apply=commit 浮层，abort=取消浮层（见下两个命名函数）
+//   adjust(调色)：apply/abort = _closeFilterPanel(true/false)（在 _openFilterPanel 处注册）
+//   crop：apply/abort = _closeCropMode（丢弃裁切框；真裁只走 Apply 按钮，在 _openCropMode 处注册）
+// transient 期间结构上 canDraw=false（不可能起 stroke）；面板 suppress/restore 暂仍手动（stage 5 改派生）。
 
-// 注册套索浮层。未来 text / shape 工具的 in-progress state 也在这注册一行
-registerPendingTransient({
-  label: "lasso-floating",
-  check: () => input.lasso.hasFloating(),
-  apply: () => input.commitLassoIfFloating(),
-});
-// v124 颜色调整 panel 也是 transient（user：「颜色调整 transient 做」）
-// 切工具 / 打开图库 / 任何决定性 user 动作 → 自动 apply（如果开着）
-registerPendingTransient({
-  label: "color-adjust",
-  check: () => !!_adjustState,
-  apply: () => _closeFilterPanel(true),
-});
+// transform 浮层的 commit / cancel（lasso commit/cancel 按钮 + 决定性动作都走这两个）
+function _commitTransform() {
+  input.commitLassoIfFloating();
+  updateLassoToolbar();
+  _restoreTransientPanels();
+}
+function _cancelTransform() {
+  if (input.lasso.hasFloating()) {
+    input.lasso.cancel();
+    board.invalidateAll();
+    updateLassoToolbar();
+  }
+  _restoreTransientPanels();
+}
 
 // ---- 工具 ----
 function setTool(t) {
@@ -989,8 +971,7 @@ function setTool(t) {
     setStatus("涂抹 工具暂未启用");
     return;
   }
-  // 切工具 = 用户决定性动作 → 让所有 pending 先 apply（套索浮层 commit 等）
-  applyAllPendingTransients();
+  // 切工具 = 决定性动作 → editMode.setTool 内部按 onToolSwitch 把停驻 transient apply/cancel（不在这单独调）
   // v132: 切到非 filterBrush 工具时自动退出 filter brush 模式（藏 toolbar / 清 state）
   if (state.filterBrush && t !== "filterBrush") {
     state.filterBrush = null;
@@ -2680,9 +2661,9 @@ async function saveNow(opts = {}) {
   if (_docSaving) return;
   if (!_activeSessionName) return;       // gallery-first: 在 gallery 没绑 session → 不保存
   if (_docIsBlankUnnamed()) return;
-  if (hasAnyPendingTransient()) {
+  if (editMode.hasPendingTransient()) {
     if (opts.implicit) return;             // 后台路径：保持 IDB 干净，等用户回来
-    applyAllPendingTransients();           // 显式路径：先把变换 / 浮层等都 apply
+    editMode.applyPendingTransient();           // 显式路径：先把变换 / 浮层等都 apply
   }
   // 文档来自更新版本 → 用户必须显式确认才能覆盖（每个 session 只问一次）
   // implicit 路径（autosave / visibility / pagehide）直接 skip 保存——防自动覆盖
@@ -2957,7 +2938,7 @@ async function saveAndPush() {
 // 同名循环检查（local 范围）；返回新名（或 null 取消 / 失败）。
 async function renameCurrentSession({ suggested, reason } = {}) {
   // 重命名 = 用户决定性动作 → apply pending（套索浮层等）
-  applyAllPendingTransients();
+  editMode.applyPendingTransient();
   const oldName = _activeSessionName;
   let candidate = suggested || oldName;
   // 循环直到 user 给出可用名 / 取消
@@ -3137,7 +3118,7 @@ els.adjustLiquify.addEventListener("click", () => {
 // ===== v110/114 crop / resample / adjust =====
 // 通用：op 前先 commit floating + 把当前 doc + viewport snapshot 当 before
 function _captureDocBefore() {
-  applyAllPendingTransients();
+  editMode.applyPendingTransient();
   return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
 }
 function _captureDocAfter() {
@@ -3210,12 +3191,15 @@ function _openCropMode() {
   document.getElementById("cropToolbar").classList.remove("hidden");
   _renderCropOverlay();
   _suppressTransientPanels("crop");
+  // crop transient：apply/abort 都 = 丢弃裁切框（真裁只走 Apply 按钮）。决定性动作/ctrl-z 不会误裁。
+  editMode.enterTransient("crop", { apply: _closeCropMode, abort: _closeCropMode });
 }
 function _closeCropMode() {
   _cropState = null;
   document.getElementById("cropOverlay").classList.add("hidden");
   document.getElementById("cropToolbar").classList.add("hidden");
   _restoreTransientPanels();
+  editMode.exitTransient();   // sync 点：任何关闭路径（按钮/decisive）都清 EditMode 的 transient
 }
 document.getElementById("adjustCropFree").addEventListener("click", () => {
   setMenuOpen(false);
@@ -3438,6 +3422,8 @@ function _openFilterPanel(filterId, opts = {}) {
   board.setActiveLayerSurrogate?.(L.id, sur);
   _runFilterPreview();      // 初次渲染（identity）
   _suppressTransientPanels("adjust-color");
+  // adjust transient：apply=烤进(true)，abort=丢弃(false)。_closeFilterPanel 是 sync 点（见其尾 exitTransient）。
+  editMode.enterTransient("adjust", { apply: () => _closeFilterPanel(true), abort: () => _closeFilterPanel(false) });
 }
 
 // preview coalesce：rAF 保证最多 1 帧 1 次 bake，slider drag 不堵队列
@@ -3479,6 +3465,7 @@ function _closeFilterPanel(applied) {
   els.adjustParamsBody.innerHTML = "";
   _restoreTransientPanels();
   board.invalidateAll();
+  editMode.exitTransient();   // sync 点：任何关闭路径（OK/cancel/重开/picker/decisive）都清 EditMode transient
 }
 
 // v132 菜单 3 组渲染（user：「3 组 hr 分组：调色 / 液化锐化模糊 / 艺术滤镜」）
@@ -3562,7 +3549,7 @@ onFilterRegistered(_renderFilterMenu);
 //   退出：清 state.filterBrush；关 rack；setTool 回前一个
 let _filterBrushPreviousTool = null;
 function _enterFilterBrushMode(Filter) {
-  applyAllPendingTransients();
+  editMode.applyPendingTransient();
   // v132 mutex (user：「锐化模糊 / 液化 / 选区 互斥」)：进 filter brush 关液化面板
   toggleLiquifyPanel?.(false);
   _filterBrushPreviousTool = editMode.current() === "filterBrush" ? "brush" : editMode.current();
@@ -3729,7 +3716,7 @@ els.menuRename.addEventListener("click", () => {
 //   完成后切到新 session 继续编辑（Photoshop 语义）。同名检查本地 + 云端。
 els.menuSaveAs.addEventListener("click", async () => {
   setMenuOpen(false);
-  applyAllPendingTransients();
+  editMode.applyPendingTransient();
   const oldName = _activeSessionName || "未命名";
   let candidate = `${oldName} 副本`;
   while (true) {
@@ -3804,7 +3791,7 @@ els.menuRevertToOpen?.addEventListener("click", async () => {
     ],
   });
   if (choice !== "ok") return;
-  applyAllPendingTransients();
+  editMode.applyPendingTransient();
   try {
     const loaded = await decodeOraToDoc(cp.blob);
     adoptLoadedDocWithOpts(loaded, _activeSessionName, { skipCheckpoint: true });
@@ -4388,6 +4375,7 @@ async function importImageAsLayer(file) {
       setTool("lasso");
       const ok = input.lasso.liftSelectionForTransform(layer);
       if (ok) {
+        editMode.enterTransient("transform", { apply: _commitTransform, abort: _cancelTransform });
         input.lasso.setMode("free");
         updateLassoToolbar();
         _suppressTransientPanels("transform");
@@ -4534,7 +4522,7 @@ async function _awaitCloudPushIdle() {
 async function setGalleryOpen(open) {
   if (open) {
     // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存
-    applyAllPendingTransients();
+    editMode.applyPendingTransient();
     if (_docDirty && !_docSaving) await saveNow();
     await _awaitCloudPushIdle();   // 等 cloud push 完，防 status race
     document.body.dataset.mode = "gallery";
@@ -4544,7 +4532,7 @@ async function setGalleryOpen(open) {
     renderGallery();
     updateIdbUsage();
   } else {
-    applyAllPendingTransients();
+    editMode.applyPendingTransient();
     if (_docDirty && !_docSaving) await saveNow();
     els.galleryFull.classList.add("hidden");
     delete document.body.dataset.mode;
@@ -6560,7 +6548,7 @@ function showUpdate() {
 }
 els.updateReload.addEventListener("click", async () => {
   // 用户决定性动作 → apply 所有 pending（套索浮层等）+ 保一次（reload 会清掉内存）
-  applyAllPendingTransients();
+  editMode.applyPendingTransient();
   if (_docDirty && !_docSaving) await saveNow();
   // **v60 修**：必须把 skip-waiting 推给 WAITING SW，不是 controller。
   // controller = 当前 active SW（旧版本），收到 skipWaiting 无意义；要的是让 waiting

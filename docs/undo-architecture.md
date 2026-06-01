@@ -211,6 +211,39 @@ handler 复用 `pixelRestore`。`params` 字段给"显示这一步在干啥"的 
 50 entry 混合（典型 ~10 stroke + ~5 removeLayer + ~35 small）≈ 30 MB。
 比当前 20 stroke × 2 MB = 40 MB 更宽容。
 
+## undo 哲学：什么进栈，什么不进（2026-05-31，#6 / PixelEdit / 盖印讨论）
+
+理清 EditMode（编辑模式 SSoT）+ PixelEdit（像素事务）后逼出来的几条统一原则，记给将来做盖印 / transform undo 的人：
+
+1. **undo 原子 = PixelEdit tx（一次 begin→commit），不是 transient。** "transient 必须 atomic 进栈" 是伪原则。
+   一个 transient（transform/crop/adjust）能产 0/1/N 个 PixelEdit entry：adjust/crop 看起来 atomic 是因为只在 commit 产 1 个。
+2. **预览/调整/live 工作态住在栈外，只有"烤进 layer 的像素"才产 entry。** 同一条原则覆盖：slider tweak 不进 undo、
+   adjust 用 surrogate 预览、transform 的 float-transform/mesh/handles 不进 undo、盖印每印一格。tweak 免费，bake 一次一格。
+   → float 是**三层**：已烤像素=document（进栈）；float 的 transform/mesh=tweak（栈外，和 slider 同类）；
+   "还在 transform 模式、float 还浮着"=mode 态（EditMode 活态，栈外）。
+3. **PixelEdit 存 before/after 像素快照（结果），不重放操作** → redo = putImageData(after)，**不依赖 float**。
+
+### 盖印（已实装）与 transform-undo：当前 = 路 2，路 1 待做
+
+现状（路 2，已实装并验证）：`lasso.stamp()` 直接画进 layer、**不 push history**；整个 transform（lift→盖印×N→commit）
+只在 commit 产**一个** "lasso" entry（before=lift 前，after=含所有盖印）。ctrl-z during transform = abort（取消全部）。
+
+三条路（grilling 取舍）：
+- **路 1（待做，长期正解）**：每次盖印包一个 PixelEdit tx = 一印一 entry；为支持"redo 回某盖印态时 float 还在"，
+  每个 stamp entry 存当时 **mesh**（几十字节）+ 引用 **lift 时拍的不可变 float 画布**。ctrl-z 改 history（逐印剥，剥到 pre-lift 自然退出）。
+  破"float ⊥ undo"纯度但为盖印手感值；便宜（float 画布共享不可变）。
+- **路 2（当前）**：transform atomic，ctrl-z=abort 全部。安全、保持 float 全程栈外。代价：浮着时不能单独撤一印。
+- **路 3（否决）**：护栏 clamp undo range during transform。商软常用但脆、易 bug（用户自评）。不在刚理干净的架构里埋雷。
+
+**决策**：#6 先做完（stage 2-5）保持路 2（`ctrlZMeans("transform")="abort-transient"`，只是改由 EditMode 路由）；
+**路 1 当 #6 之后的独立 follow-up**（骑在 EditMode.ctrlZMeans + PixelEdit tx 上，聚焦改 transform 那行 + stamp 走 tx + 存 mesh）。
+
+### 图层 op 怎么 snapshot（同一条 command-pattern）
+
+结构 op 存命令数据（addLayer/moveLayer/renameLayer/setLayerProp = index/id/old-new，几十字节）；
+含像素 op 复用 PixelEdit before/after blob（removeLayer 存完整层 + **保留原 id** 复活；复制到层/移动到层 = 新层 spec + 源层 before/after；mergeDown = 下层 before/after + spec）；
+docTransform（crop/resample）动全图 → 唯一用 snapshotAll（全层 + selection 引用）。live 工作态永不进栈。
+
 ## 给 AtlasMaker 同事
 
 你的场景 op 类型不同，但**架构同构**：
