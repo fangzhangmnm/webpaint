@@ -1,7 +1,9 @@
-# Tool / Mode 独占状态机（设计定稿 · 架构候选 #6 · 未实现）
+# Tool / Mode 独占状态机（**已实现** · 架构候选 #6 · 见 src/edit-mode.js）
 
 > 整理自 `journal/cached feedback.md` 80–91 行（用户旧想法）+ 2026-05-31 架构 grilling。
-> **接口已定稿，尚未实现。** 候选 #6，是 #2(选区)/#3(save 协调器)/#5(FloatingPanel) 的共同前置。
+> **已实现（2026-05-31，stage 1-4）：** EditMode 单轴 SSoT + transient 接管 + 输入 gating + ctrl-z 路由 + UI 派生。
+> 注意：最终是**单轴**（current() 唯一公开读取器），下文"双轴"段是被否决的历史；实现以 [src/edit-mode.js](../src/edit-mode.js) 为准。
+> 候选 #6，是 #2(选区)/#3(save 协调器)/#5(FloatingPanel) 的共同前置。
 > 领域词见 [CONTEXT.md](../CONTEXT.md) 的 Mode / Transient；undo 事务见 [undo-architecture.md](undo-architecture.md) + 已落地的 PixelEdit；
 > transient 现状见 [pending-transients.md](pending-transients.md)（本设计吸收并简化它）。
 
