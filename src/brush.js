@@ -258,6 +258,8 @@ export class BrushEngine {
   extendStroke(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
+    // NaN/inf 护栏：甩太快 / 坏事件可能传入非有限坐标 → 跳过，别污染 lastX/lastY 与循环
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     // v102: 用 raw pressure 更新 LPF state，然后所有插值用 LPF'd pressure
     // 一阶 IIR: α = dt / (dt + τ)；τ=0 时 α=1 → 直传 raw
     const tau = st.settings.pressureLPF || 0;
@@ -291,7 +293,12 @@ export class BrushEngine {
       const sy = st.lastY + dy * t;
       // 段内插值在上次 LPF 值 与 当前 LPF 值 之间
       const sp = st.lastP + (pEff - st.lastP) * t;
-      this._stampOne(sx, sy, sp);
+      // culling：stamp 中心超出 doc 边缘 > 半径（整颗在画布外）→ 跳过 _stampOne 的逐颗 CPU。
+      // 循环仍推进（spacing 不变、回到画布内自然续上）；"slightly offscreen"（半径内）保留 → 边缘描边平滑。
+      const r = (st.settings.size || 4) / 2;
+      if (sx >= -r && sx <= st.layer.docW + r && sy >= -r && sy <= st.layer.docH + r) {
+        this._stampOne(sx, sy, sp);
+      }
       st.accumDist = 0;
     }
     st.accumDist += L - pos;

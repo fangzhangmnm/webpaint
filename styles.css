@@ -170,6 +170,8 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 .lasso-picker.hidden, .lasso-transform-ctrl.hidden { display: none; }
 .lasso-section { display: flex; align-items: center; gap: 4px; }
 .lasso-section.hidden { display: none; }
+/* 其他工具模式下有选区：lasso 工具栏只露"取消选区"（选区只是蒙板，不给 lasso 全套） */
+#lassoSubToolBar.lasso-deselect-only > *:not(#lassoDeselectBtn) { display: none !important; }
 .lasso-tool-threshold {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--ink-soft);

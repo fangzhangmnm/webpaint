@@ -680,13 +680,16 @@ function updateLassoToolbar() {
   lassoToolbarStack.classList.toggle("hidden", !showAny);
   if (!showAny) return;
 
-  // Row 1：lasso 工具激活 + 不在 floating 才显（floating 时不能新建选区）
-  const showRow1 = lassoActive && !floating;
+  // 其他工具模式下有选区：选区只是个蒙板，工具栏只给一个"取消选区"（否则去选还得切回 lasso）。
+  const otherToolSel = hasSelection && !floating && !lassoActive;
+  // Row 1：lasso 模式给全套；其他工具+有选区只露 deselect（加 class，CSS 藏其余）。floating 时都不给。
+  const showRow1 = (lassoActive && !floating) || otherToolSel;
   lassoToolbarRow1.classList.toggle("hidden", !showRow1);
   lassoSubToolBar.classList.toggle("hidden", !showRow1);
+  lassoSubToolBar.classList.toggle("lasso-deselect-only", otherToolSel);
 
-  // Row 2：有选区显 selectionActions / floating 显 transformCtrl
-  const showSelectionActions = hasSelection && !floating;
+  // Row 2：selectionActions（变换/填色/清除/复制/移层）只在 lasso 模式给；其他工具模式不给。floating 显 transformCtrl。
+  const showSelectionActions = hasSelection && !floating && lassoActive;
   const showTransformCtrl = floating;
   const showRow2 = showSelectionActions || showTransformCtrl;
   lassoToolbarRow2.classList.toggle("hidden", !showRow2);

@@ -1140,22 +1140,20 @@ export class InputController {
   // ---- wheel ----
   _wheel(e) {
     e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      // v120 (user：「windows 下 ctrl 滚轮缩放一次太大了」)
-      // Windows 鼠标滚轮一格 deltaY=±100 / ±120 → 老系数 0.01 → 一格 e^-1 ≈ 0.37x 太狠。
-      // trackpad pinch 是连续小 delta (1-10)，跟鼠标轮区分一下：
-      //   |dy| >= 50 → 鼠标轮，按格走（一格 ≈ 1.1x）
-      //   小 dy → trackpad，连续平滑（旧系数 0.005 即可，0.01 也偏大）
+    // 鼠标滚轮 vs 触摸板（启发式，不完美）：
+    //   滚轮 = 离散大步：deltaMode≠PIXEL（Firefox LINE 模式），或 deltaX=0 且 |deltaY|≥50（Chrome 一格 ±100/120）
+    //   触摸板 = 连续小 delta（常带 deltaX 分量、deltaMode=PIXEL）
+    // (user：「windows 下鼠标滚轮缩放而不是上下滚动」) → 滚轮直接缩放；触摸板双指滚动 = 平移。
+    const likelyMouseWheel = e.deltaMode !== 0 || (e.deltaX === 0 && Math.abs(e.deltaY) >= 50);
+    if (e.ctrlKey || e.metaKey || likelyMouseWheel) {
+      // ctrl+滚轮 = pinch；鼠标滚轮 = 直接缩放。一格 deltaY=±100/120 → 系数 0.01 太狠，按格走 1.1x。
       const dy = e.deltaY;
-      let factor;
-      if (Math.abs(dy) >= 50) {
-        const step = Math.sign(dy);
-        factor = Math.exp(-step * 0.1);     // 一格 ≈ 1.105x
-      } else {
-        factor = Math.exp(-dy * 0.005);     // trackpad：连续，比旧 0.01 减半
-      }
+      const factor = Math.abs(dy) >= 50
+        ? Math.exp(-Math.sign(dy) * 0.1)     // 离散一格 ≈ 1.105x
+        : Math.exp(-dy * 0.005);             // 连续（trackpad pinch）
       this.board.zoomAt(e.clientX, e.clientY, factor);
     } else {
+      // 触摸板双指滚动 = 平移
       let dx = -e.deltaX, dy = -e.deltaY;
       if (e.shiftKey && dx === 0) { dx = dy; dy = 0; }
       this.board.pan(dx, dy);
