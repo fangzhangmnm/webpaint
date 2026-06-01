@@ -26,6 +26,7 @@ export class Board {
     // viewport: tx/ty = screen-px offset of doc top-left (in scale=1, rot=0 frame),
     // scale = zoom, rot = radians (旋转锚点 = doc center). 见 _docToScreenAffine。
     this.viewport = { tx: 0, ty: 0, scale: 1, rot: 0 };
+    this.onViewportChange = null;   // 可选回调：viewport 变时同步屏幕坐标 DOM overlay（crop rect）
     this.minScale = MIN_SCALE;
     this.maxScale = MAX_SCALE;
     this._raf = null;
@@ -373,6 +374,9 @@ export class Board {
   }
 
   requestRender() {
+    // viewport 变（pan/zoom/rotate/fit 都先改 viewport 再 requestRender）→ 同步屏幕坐标的 DOM overlay
+    // （如 crop rect gizmo）。放早退之前：pinch 一帧内 pan+zoom 各调一次都同步，不脱位。非 crop 时回调 no-op。
+    this.onViewportChange?.();
     if (this._raf) return;
     this._raf = requestAnimationFrame(() => {
       this._raf = null;

@@ -771,6 +771,7 @@
     <!-- v110 自由裁切 overlay：rect + 8 handles + dimmed mask -->
     <div class="crop-overlay hidden" id="cropOverlay">
       <div class="crop-rect" id="cropRect">
+        <div class="crop-dim" id="cropDim"></div>
         <div class="crop-handle" data-handle="nw"></div>
         <div class="crop-handle" data-handle="n"></div>
         <div class="crop-handle" data-handle="ne"></div>
@@ -952,6 +953,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-0d2c9addc037.mjs"></script>
+    <script type="module" src="./dist/webpaint-c36eb02a304c.mjs"></script>
   </body>
 </html>

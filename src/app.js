@@ -3198,6 +3198,9 @@ function _renderCropOverlay() {
   el.style.top  = r.y + "px";
   el.style.width  = Math.max(2, r.w) + "px";
   el.style.height = Math.max(2, r.h) + "px";
+  // L69：实时显示裁切后分辨率（doc 像素，非屏幕）
+  const dim = document.getElementById("cropDim");
+  if (dim) dim.textContent = `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)}`;
 }
 function _openCropMode() {
   if (board.viewport.rot && Math.abs(board.viewport.rot) > 0.01) {
@@ -3222,6 +3225,8 @@ function _closeCropMode() {
   _restoreTransientPanels();
   editMode.exitTransient();   // sync 点：任何关闭路径（按钮/decisive）都清 EditMode 的 transient
 }
+// crop 时画布 pan/zoom（两指 / 滚轮）→ rect SSoT 是 doc 坐标，重投影到屏幕跟随 viewport
+board.onViewportChange = () => { if (_cropState) _renderCropOverlay(); };
 document.getElementById("adjustCropFree").addEventListener("click", () => {
   setMenuOpen(false);
   setAdjustOpen(false);
@@ -3270,7 +3275,8 @@ document.getElementById("cropToolbarApply").addEventListener("click", () => {
     //   只有 [data-handle] 命中才进 drag；rect 内空白 → no-op（防误碰整体移动）
     const handle = e.target?.dataset?.handle || null;
     if (!handle) return;
-    overlay.setPointerCapture(e.pointerId);
+    // 捕获在 handle 上（overlay 现在 pointer-events:none，捕在它身上不稳）。pointerup 自动释放。
+    try { e.target.setPointerCapture(e.pointerId); } catch {}
     _cropState.drag = handle;
     _cropState.startMouse = { x: e.clientX, y: e.clientY };
     _cropState.startRect = { ...(_cropState.rect) };

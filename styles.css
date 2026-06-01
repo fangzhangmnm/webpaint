@@ -1393,7 +1393,18 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   inset: 0;
   z-index: 24;                /* < crop-toolbar 25，< brush-rack 30 */
   touch-action: none;
+  /* crop 时仍可两指缩放/平移画布 + 滚轮缩放：overlay 透传，只有 handle 捕获。
+     空白/单指落到 canvas 由 EditMode canDraw gate（crop→false）拦掉，不会误起笔触。 */
+  pointer-events: none;
   /* 外圈 dim：用 box-shadow 大边框模拟（rect 自己挖洞） */
+}
+.crop-handle { pointer-events: auto; }   /* 只有 handle 捕获指针（拖动裁切框） */
+/* 裁切框实时分辨率标签（L69） */
+.crop-dim {
+  position: absolute; left: 50%; top: -22px; transform: translateX(-50%);
+  font: 600 11px/1 ui-monospace, monospace; color: #fff;
+  background: rgba(0,0,0,0.6); padding: 2px 6px; border-radius: 3px;
+  white-space: nowrap; pointer-events: none;
 }
 .crop-overlay.hidden { display: none; }
 .crop-rect {
