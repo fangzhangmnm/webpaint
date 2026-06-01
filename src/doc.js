@@ -442,8 +442,8 @@ export class PaintDoc {
       const nctx = nc.getContext("2d", { willReadFrequently: false });
       nctx.imageSmoothingEnabled = smooth;
       nctx.imageSmoothingQuality = quality;
-      // 缩小且非 nearest → step-halving 抗锯齿（PS Bicubic Sharper 的近似）；放大/nearest 原样画
-      if (smooth && (nbw < oW || nbh < oH)) {
+      // "sharper" 模式 = step-halving（缩小抗锯齿 / 放大高质量，PS Bicubic Sharper 近似）；其余单遍 browser
+      if (mode === "sharper") {
         nctx.drawImage(smartResample(ox, nbw, nbh), 0, 0);
       } else {
         nctx.drawImage(ox, 0, 0, oW, oH, 0, 0, nbw, nbh);
