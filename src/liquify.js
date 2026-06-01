@@ -45,9 +45,16 @@ export class LiquifyEngine {
   // v124 selection 参数：{ maskCanvas, bboxX, bboxY, bboxW, bboxH } 来自 doc.selection。
   // 给了就在每个 stamp 内 mask 外像素**保留 startSnap**（不液化）→ live preview 立刻
   // 看到选区限制，跟 brush 一致；commit 时 Selection.applyMaskPostStroke 兜底也无害。
+  //
+  // v147 选区边界取样模式 settings.bleed（仅在有选区时生效，处理 dest 在选区内但位移源落选区外）：
+  //   "import" — 源不夹：位移源落选区外仍照采 → 真把外部内容拉进来
+  //   "clip"   — 设墙：源落选区外 → 保留 dest 原像素（无位移），什么都不进
+  //   "edge"   — (默认) 沿 dest→source 射线 march 到刚离开选区的边界点采样
+  //              → 边界像素沿拉拽方向被无限拉长，无外部内容、无中轴接缝（见 docs/liquify-blur.md）
   beginStroke(layer, settings, x, y, selection) {
     const lbW = Math.max(1, layer.bboxW);
     const lbH = Math.max(1, layer.bboxH);
+    const bleed = settings.bleed || "edge";
     // 把 selection mask 烤进一个 Uint8 array 与 layer.bbox 对齐 (mask alpha 通道 0..255)
     let maskData = null;
     if (selection) {
@@ -60,6 +67,7 @@ export class LiquifyEngine {
     this._stroke = {
       layer,
       settings,
+      bleed,
       lastX: x,
       lastY: y,
       dirty: null,
@@ -129,6 +137,24 @@ export class LiquifyEngine {
     // v124 (user：「预览的时候没有 apply 选区」) selection mask
     const maskData = st.maskData;
     const maskBox = st.maskBbox;
+    const bleed = st.bleed;
+    const maskX = maskBox ? maskBox.x : 0, maskY = maskBox ? maskBox.y : 0;
+    const maskW = maskBox ? maskBox.w : 0, maskH = maskBox ? maskBox.h : 0;
+    // 整数 cell (ix,iy) 是否在选区内（mask alpha>=128）
+    const cellIn = (ix, iy) => {
+      const mx = ix - maskX, my = iy - maskY;
+      if (mx < 0 || my < 0 || mx >= maskW || my >= maskH) return false;
+      return maskData[(my * maskW + mx) * 4 + 3] >= 128;
+    };
+    // doc 坐标 (px,py)（四舍五入到最近 cell）是否在选区内
+    const inMask = (px, py) => cellIn(Math.round(px), Math.round(py));
+    // 浮点源 (fsx,fsy) 的 bilinear 2×2 footprint 是否**整个**在选区内。
+    // v147 修白边：只测中心点不够——中心 in-mask 但某个角 tap 落选区外时，
+    // bilinear 会把外面（可能透明）像素混进来 → 边界一条细白线。要求 4 tap 全 in。
+    const srcFootprintIn = (fsx, fsy) => {
+      const ix = Math.floor(fsx), iy = Math.floor(fsy);
+      return cellIn(ix, iy) && cellIn(ix + 1, iy) && cellIn(ix, iy + 1) && cellIn(ix + 1, iy + 1);
+    };
 
     // 目标 footprint 像素（要 putImageData 回 layer 的）
     const dst = new ImageData(w, h);
@@ -170,26 +196,43 @@ export class LiquifyEngine {
         const tdx = fdata[fIdx];
         const tdy = fdata[fIdx + 1];
         const idx = (py * w + px) * 4;
-        // v124 selection 检查：mask 外不液化，原 startSnap 像素直采
-        let selOK = true;
-        if (maskData && maskBox) {
-          const mx = wx - maskBox.x, my = wy - maskBox.y;
-          if (mx < 0 || my < 0 || mx >= maskBox.w || my >= maskBox.h) {
-            selOK = false;     // mask bbox 外 = 视为 outside selection
-          } else {
-            selOK = maskData[(my * maskBox.w + mx) * 4 + 3] >= 128;
-          }
-        }
         if (ssData) {
-          if (selOK) {
-            const sx = (wx - tdx) - ssX;
-            const sy = (wy - tdy) - ssY;
-            bilinearSample(ssData, ssW, ssH, sx, sy, ddat, idx);
-          } else {
-            // 选区外：原像素直采 (无位移)
-            const sx = wx - ssX, sy = wy - ssY;
-            bilinearSample(ssData, ssW, ssH, sx, sy, ddat, idx);
+          // 源采样位置（默认 = 位移后位置）。
+          let srcX = wx - tdx, srcY = wy - tdy;
+          if (maskData) {
+            // v124 dest 在选区外 → 不液化，原像素直采（commit 时 applyMaskPostStroke 兜底）
+            if (!inMask(wx, wy)) {
+              srcX = wx; srcY = wy;
+            } else if (bleed !== "import" && !srcFootprintIn(srcX, srcY)) {
+              // v147 dest 在选区内但位移源的 bilinear footprint 触及选区外 → 按 bleed 模式处理
+              if (bleed === "clip") {
+                // 设墙：保留 dest 原像素，外部什么都不进
+                srcX = wx; srcY = wy;
+              } else {
+                // edge：沿 dest→source 射线 march 到刚离开选区的边界点（无中轴接缝）
+                const len = Math.hypot(tdx, tdy);
+                if (len >= 1e-3) {
+                  const dirX = -tdx / len, dirY = -tdy / len;
+                  const maxK = Math.min(Math.ceil(len), 4096);
+                  // 关键（v147 修斑马）：只走**整数 cell**，srcX/Y 落整数格 →
+                  // 下面 bilinear 退化成 point sample，绝不把 2×2 footprint 里的
+                  // 选区外像素混进来。否则边界点是浮点，bilinear 跨界混样 +
+                  // 浮点抖动 → 选区内外差大时高频条纹（斑马）。wx/wy 本就是整数=dest。
+                  let sxi = wx, syi = wy;             // dest（整数，已知 in-mask）
+                  for (let k = 1; k <= maxK; k++) {
+                    const rxi = Math.round(wx + dirX * k);
+                    const ryi = Math.round(wy + dirY * k);
+                    if (!inMask(rxi, ryi)) break;     // 越界：sxi/syi 是最后一个 in-mask 整数 cell
+                    sxi = rxi; syi = ryi;
+                  }
+                  srcX = sxi; srcY = syi;
+                } else {
+                  srcX = wx; srcY = wy;
+                }
+              }
+            }
           }
+          bilinearSample(ssData, ssW, ssH, srcX - ssX, srcY - ssY, ddat, idx);
         }
         // 空 startSnap → ddat 默认 0（透明黑），液化空层无源可推 = 不变
       }

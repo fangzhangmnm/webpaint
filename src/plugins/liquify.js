@@ -38,6 +38,14 @@ export class LiquifyFilter {
     { id: "twirlR",  title: "右旋", params: { mode: "twirlCW", strengthScale: 0.1 } },
   ];
 
+  // v147 选区边界取样模式（仅有选区时有意义）。feature 自己声明，toolbar 通用渲染第 2 个下拉，
+  // 值经 params.bleed 透传到 LiquifyEngine.settings.bleed（见 src/liquify.js 注释）。
+  static boundaryModes = [
+    { id: "edge",   title: "边缘拉伸" },   // 默认：边界像素沿拉拽方向无限拉长
+    { id: "clip",   title: "不拉边界外" }, // 设墙：外部什么都不进
+    { id: "import", title: "拉边界外" },   // 旧行为：把外部内容拉进选区
+  ];
+
   // region 模式没意义（液化天生是 stroke-based），所以不提供 bake / buildBody
 
   // Filter brush 契约：begin / extend / end / cancel / flushDirty
@@ -48,6 +56,7 @@ export class LiquifyFilter {
       mode: params.mode || "push",
       size: brushSettings.size,
       strength: (brushSettings.opacity ?? 1) * scale,    // opacity × variant scale
+      bleed: params.bleed || "edge",                      // v147 选区边界取样模式
     };
     engine.beginStroke(layer, settings, x, y, selection);
     return { engine };

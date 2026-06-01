@@ -317,12 +317,8 @@ export class InputController {
         if (p.longPressTimer) { clearTimeout(p.longPressTimer); p.longPressTimer = null; }
       }
       for (const [pid, p] of this.pointers) {
-        if (p.role === "draw" || p.role === "erase") {
+        if (p.role === "draw" || p.role === "erase" || p.role === "liquify" || p.role === "filterBrush") {
           this._abortStroke();
-        } else if (p.role === "liquify") {
-          this._abortLiquify();
-        } else if (p.role === "filterBrush") {
-          this._abortFilterBrush();
         } else if (p.role === "lasso") {
           this._abortLasso();
         }
@@ -618,20 +614,12 @@ export class InputController {
         rec.smX = rec.smX + alphaPos * (rec.pullX - rec.smX);
         rec.smY = rec.smY + alphaPos * (rec.pullY - rec.smY);
         const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
-        if (rec.role === "liquify") {
-          this.liquify.extendStroke(dx, dy);
-        } else if (rec.role === "filterBrush") {
-          const pressure = effectivePressureFor(rec, ev);
-          this.filterBrush.extendStroke(dx, dy, pressure);
-        } else {
-          const pressure = effectivePressureFor(rec, ev);
-          this.brush.extendStroke(dx, dy, pressure);
-        }
+        // 活动 engine 统一接口：liquify 忽略多余的 pressure 参数
+        const pressure = effectivePressureFor(rec, ev);
+        this._activeStroke?.engine.extendStroke(dx, dy, pressure);
       }
-      // 把 brush / liquify / filter brush 累的 dirty bbox 送进 board
-      const bbox = rec.role === "liquify" ? this.liquify.flushDirty()
-                 : rec.role === "filterBrush" ? this.filterBrush.flushDirty()
-                 : this.brush.flushDirty();
+      // 把活动 engine 累的 dirty bbox 送进 board
+      const bbox = this._activeStroke?.engine.flushDirty();
       if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
       this.board.requestRender();
     } else if (rec.role === "lasso") {
@@ -726,15 +714,9 @@ export class InputController {
       }
     }
 
-    if (rec.role === "draw" || rec.role === "erase") {
+    if (rec.role === "draw" || rec.role === "erase" || rec.role === "liquify" || rec.role === "filterBrush") {
       if (cancelled) this._abortStroke();
       else this._endStroke();
-    } else if (rec.role === "liquify") {
-      if (cancelled) this._abortLiquify();
-      else this._endLiquify();
-    } else if (rec.role === "filterBrush") {
-      if (cancelled) this._abortFilterBrush();
-      else this._endFilterBrush();
     } else if (rec.role === "lasso") {
       if (cancelled) this._abortLasso();
       else this._endLasso(rec);
@@ -756,7 +738,8 @@ export class InputController {
     const settings = this.getBrushSettings();
     if (!settings || !this.doc.activeLayer) return;
     const layer = this.doc.activeLayer;
-    this._strokeTx = this.pixelHistory.begin(layer, "stroke");
+    const tx = this.pixelHistory.begin(layer, "stroke");
+    this._activeStroke = { engine: this.brush, tx, finalize: true };
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, e);
@@ -765,20 +748,25 @@ export class InputController {
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
   }
+  // brush / liquify / filterBrush 共享 begin/extend/end/cancel 协议；活动笔画存进 _activeStroke，
+  // end / abort / extend / flushDirty 不再按 role 重新分支挑 engine。
+  // finalize=true → 有选区时 stroke 只在选区内生效（finalize 里 per-pixel revert outside mask 到 pre）。
+  // filterBrush 在 begin 时已吃 selection，finalize=false。
   _endStroke() {
-    this.brush.endStroke();
-    if (!this._strokeTx) return;
-    const tx = this._strokeTx;
-    this._strokeTx = null;
-    // 有选区 → stroke 只在选区内生效（finalize 里 per-pixel revert outside mask 到 pre）
-    const sel = this.doc.selection;
-    tx.commit(sel ? (layer, pre) => sel.applyMaskPostStroke(layer, pre) : null);
+    const as = this._activeStroke;
+    if (!as) return;
+    this._activeStroke = null;
+    as.engine.endStroke();
+    const sel = as.finalize ? this.doc.selection : null;
+    as.tx.commit(sel ? (layer, pre) => sel.applyMaskPostStroke(layer, pre) : null);
     if (sel) this.board.invalidateAll(); else this.board.requestRender();
   }
   _abortStroke() {
-    this.brush.cancelStroke();
-    this._strokeTx?.abort();
-    this._strokeTx = null;
+    const as = this._activeStroke;
+    if (!as) return;
+    this._activeStroke = null;
+    as.engine.cancelStroke();
+    as.tx.abort();
   }
 
   // ---- 液化 ----
@@ -787,26 +775,12 @@ export class InputController {
     const settings = this.getLiquifySettings();
     if (!settings || !this.doc.activeLayer) { rec.role = null; return; }
     const layer = this.doc.activeLayer;
-    this._liquifyTx = this.pixelHistory.begin(layer, "liquify");
+    const tx = this.pixelHistory.begin(layer, "liquify");
+    this._activeStroke = { engine: this.liquify, tx, finalize: true };
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     // v124 (user：「preview 没 apply 选区」) 把 selection 传给 liquify，stamp 内 mask 外保留 startSnap
     this.liquify.beginStroke(layer, settings, dx, dy, this.doc.selection);
     this.board.requestRender();
-  }
-  _endLiquify() {
-    this.liquify.endStroke();
-    if (!this._liquifyTx) return;
-    const tx = this._liquifyTx;
-    this._liquifyTx = null;
-    // 有选区 → 液化只在选区内生效
-    const sel = this.doc.selection;
-    tx.commit(sel ? (layer, pre) => sel.applyMaskPostStroke(layer, pre) : null);
-    if (sel) this.board.invalidateAll(); else this.board.requestRender();
-  }
-  _abortLiquify() {
-    this.liquify.cancelStroke();
-    this._liquifyTx?.abort();
-    this._liquifyTx = null;
   }
 
   // ---- Filter brush (v132) ----
@@ -820,14 +794,16 @@ export class InputController {
       rec.role = null; return;
     }
     const layer = this.doc.activeLayer;
-    this._filterBrushTx = this.pixelHistory.begin(layer, "stroke");
+    const tx = this.pixelHistory.begin(layer, "stroke");
+    // filterBrush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre → 无需 post-stroke finalize
+    this._activeStroke = { engine: this.filterBrush, tx, finalize: false };
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
     try {
       this.filterBrush.beginStroke(layer, fbState.Filter, fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
     } catch (e) {
       console.warn("[filter brush] begin failed:", e);
-      this._filterBrushTx = null;
+      this._activeStroke = null;
       rec.role = null;
       this.status?.(`filter brush 出错：${e.message || e}`);
       return;
@@ -835,20 +811,6 @@ export class InputController {
     const bbox = this.filterBrush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
-  }
-  _endFilterBrush() {
-    this.filterBrush.endStroke();
-    if (!this._filterBrushTx) return;
-    const tx = this._filterBrushTx;
-    this._filterBrushTx = null;
-    // filter brush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre，无需 finalize
-    tx.commit();
-    this.board.requestRender();
-  }
-  _abortFilterBrush() {
-    this.filterBrush.cancelStroke();
-    this._filterBrushTx?.abort();
-    this._filterBrushTx = null;
   }
 
   // ---- 套索 ----（v65 重构：lasso 只编辑选区 doc.selection；变换是显式按钮）
@@ -1257,9 +1219,7 @@ export class InputController {
     if (!p) return;
     if (p.longPressTimer) { clearTimeout(p.longPressTimer); p.longPressTimer = null; }
     // 如果它正在执笔，把笔触状态也收尾掉（保留 history entry）
-    if (p.role === "draw" || p.role === "erase") this._abortStroke();
-    else if (p.role === "liquify") this._abortLiquify();
-    else if (p.role === "filterBrush") this._abortFilterBrush();
+    if (p.role === "draw" || p.role === "erase" || p.role === "liquify" || p.role === "filterBrush") this._abortStroke();
     else if (p.role === "lasso") this._abortLasso();
     try { this.canvas.releasePointerCapture?.(pid); } catch {}
     this.pointers.delete(pid);

@@ -100,7 +100,6 @@ const els = {
   topSaveBtn: document.getElementById("topSaveBtn"),
   topAdjustBtn: document.getElementById("topAdjustBtn"),
   adjustPopup: document.getElementById("adjustPopup"),
-  adjustLiquify: document.getElementById("adjustLiquify"),
   // v110 crop / resample / adjust
   resampleBackdrop: document.getElementById("resampleBackdrop"),
   resampleSheet: document.getElementById("resampleSheet"),
@@ -116,14 +115,6 @@ const els = {
   adjustParamsBody: document.getElementById("adjustParamsBody"),
   // v123 topGalleryBtn 撤了，图库挪进菜单 (id=menuGallery)
   menuGallery: document.getElementById("menuGallery"),
-  liquifyPanel: document.getElementById("liquifyPanel"),
-  liquifyPanelHead: document.getElementById("liquifyPanelHead"),
-  liquifyPanelClose: document.getElementById("liquifyPanelClose"),
-  liquifyMode: document.getElementById("liquifyMode"),
-  liquifySize: document.getElementById("liquifySize"),
-  liquifySizeVal: document.getElementById("liquifySizeVal"),
-  liquifyStrength: document.getElementById("liquifyStrength"),
-  liquifyStrengthVal: document.getElementById("liquifyStrengthVal"),
   menuReference: document.getElementById("menuReference"),
   menuResetBrushRack: document.getElementById("menuResetBrushRack"),
   menuForcePwaReset: document.getElementById("menuForcePwaReset"),
@@ -235,12 +226,8 @@ const state = {
   //   checkerboard 从全局 LS 改 per-doc：保存在 webpaint/state.json，跟文件走
   //   初始 false；adoptLoadedDoc 时按文件值覆盖；新建 doc 默认 false
   checkerboard: false,
-  // 液化设置（独立于 brush，见 src/liquify.js + docs/artist-priorities.md v46）
-  liquify: {
-    mode: safeLS("webpaint.liquify.mode") || "push",
-    size: parseFloat(safeLS("webpaint.liquify.size") || "60"),
-    strength: parseFloat(safeLS("webpaint.liquify.strength") || "0.4"),
-  },
+  // 注：液化设置不在这里——液化 v132 migrate 进 filterBrush，mode=variant 下拉、
+  // size/strength=左栏 slider；引擎默认 bleed="edge"（见 src/liquify.js / plugins/liquify.js）。
 };
 
 // brush settings keep color in sync
@@ -535,7 +522,6 @@ const pixelHistory = new PixelEdit({ doc, history, board });
 const input = new InputController(board, doc, {
   getTool: () => editMode.current(),
   getBrushSettings: () => state.brush,
-  getLiquifySettings: () => state.liquify,
   // v132 filter brush: state.filterBrush = { Filter, params, variantLabel } 或 null
   getFilterBrushState: () => state.filterBrush || null,
   getLongPressPickEnabled: () => state.longPressPick,
@@ -558,7 +544,7 @@ function _suppressTransientPanels(mode) {
     "adjust-color": ["referencePanel", "layersPanel"],
   };
   const allowList = allow[mode] || [];
-  const candidates = ["colorPanel", "paletteWindow", "referencePanel", "layersPanel", "liquifyPanel"];
+  const candidates = ["colorPanel", "paletteWindow", "referencePanel", "layersPanel"];
   // 防递归 (transition 间套用)：先复原再藏
   _restoreTransientPanels();
   for (const id of candidates) {
@@ -590,7 +576,7 @@ function _bringPanelTop(el) {
 (function bindPanelZOrder() {
   const panels = [
     "colorPanel", "paletteWindow", "referencePanel",
-    "adjustPanel", "liquifyPanel",
+    "adjustPanel",
   ];
   for (const id of panels) {
     const el = document.getElementById(id);
@@ -637,9 +623,9 @@ window.addEventListener("gesturechange", (e) => e.preventDefault(), { capture: t
 // 预览（实际像素在 endStroke 才烧进 layer）。
 board.setOverlayProvider(() => input.brush.getLiveOverlay());
 // v131 修 (user：「液化 windows 又有 partial redraw 白框」)
-//   液化没用 overlayProvider 通路，board partial render 抓不到，sliver 漏出
-//   strokeActiveHint 兜底：液化 stroke 进行中 = 全屏渲染
-board.setStrokeActiveHint(() => input.liquify.isActive?.() || input.filterBrush.isActive?.());
+//   filter brush（含 v132 后的液化）没用 overlayProvider 通路，board partial render 抓不到，sliver 漏出
+//   strokeActiveHint 兜底：stroke 进行中 = 全屏渲染
+board.setStrokeActiveHint(() => input.filterBrush.isActive?.());
 board.setLassoProvider(() => ({
   selection:      doc.selection,
   drawingPath:    input.lasso.getDrawingPath(),
@@ -3137,12 +3123,6 @@ document.addEventListener("pointerdown", (e) => {
   if (els.adjustPopup.contains(e.target) || els.topAdjustBtn.contains(e.target)) return;
   setAdjustOpen(false);
 });
-els.adjustLiquify.addEventListener("click", () => {
-  setAdjustOpen(false);
-  setTool("liquify");
-  toggleLiquifyPanel(true);
-  setStatus("液化");
-});
 
 // ===== v110/114 crop / resample / adjust =====
 // 通用：op 前先 commit floating + 把当前 doc + viewport snapshot 当 before
@@ -3586,14 +3566,16 @@ onFilterRegistered(_renderFilterMenu);
 let _filterBrushPreviousTool = null;
 function _enterFilterBrushMode(Filter) {
   editMode.applyPendingTransient();
-  // v132 mutex (user：「锐化模糊 / 液化 / 选区 互斥」)：进 filter brush 关液化面板
-  toggleLiquifyPanel?.(false);
   _filterBrushPreviousTool = editMode.current() === "filterBrush" ? "brush" : editMode.current();
   // 取持久化的 variantId（user 上次选过的；新 doc 默认第一个）
   const variants = Filter.brushVariants || [{ id: "default", title: Filter.title, params: Filter.defaults() }];
   const savedVid = state.toolStates.filterBrush?.variantId;
   let variant = variants.find((v) => v.id === savedVid) || variants[0];
-  state.filterBrush = { Filter, params: variant.params, variantId: variant.id, variantLabel: variant.title };
+  // v147 声明了 boundaryModes 的 filter（液化）→ params 带上持久化的 bleed；其他 filter 不掺这个 key
+  const params = Filter.boundaryModes
+    ? { ...variant.params, bleed: safeLS("webpaint.liquify.bleed") || "edge" }
+    : variant.params;
+  state.filterBrush = { Filter, params, variantId: variant.id, variantLabel: variant.title };
   if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = variant.id;
   setTool("filterBrush");
   _renderFilterBrushToolbar();
@@ -3638,7 +3620,10 @@ function _renderFilterBrushToolbar() {
     sel.addEventListener("change", () => {
       const v = variants.find((x) => x.id === sel.value);
       if (!v) return;
-      state.filterBrush.params = v.params;
+      // 切 variant 别丢 bleed（boundaryModes filter 才有这个 key）
+      state.filterBrush.params = Filter.boundaryModes
+        ? { ...v.params, bleed: state.filterBrush.params.bleed }
+        : v.params;
       state.filterBrush.variantId = v.id;
       state.filterBrush.variantLabel = v.title;
       if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = v.id;
@@ -3647,6 +3632,33 @@ function _renderFilterBrushToolbar() {
     });
     // 插在 title 后
     title.insertAdjacentElement("afterend", sel);
+  }
+  // v147 边界取样下拉：仅当 filter 声明 boundaryModes（液化）且有选区时渲染。
+  // feature 声明数据 + 通用渲染 → 删 filter 即删 UI，不再像旧 #liquifyPanel 那样静态腐烂。
+  let bsel = document.getElementById("filterBrushBleedSel");
+  if (bsel) bsel.remove();
+  if (Filter.boundaryModes && doc.selection) {
+    bsel = document.createElement("select");
+    bsel.id = "filterBrushBleedSel";
+    bsel.className = "crop-toolbar-btn";
+    bsel.style.padding = "2px 6px";
+    bsel.title = "选区边界：位移源落到选区外怎么办";
+    const curBleed = state.filterBrush.params.bleed || "edge";
+    for (const b of Filter.boundaryModes) {
+      const opt = document.createElement("option");
+      opt.value = b.id;
+      opt.textContent = b.title;
+      if (b.id === curBleed) opt.selected = true;
+      bsel.appendChild(opt);
+    }
+    bsel.addEventListener("change", () => {
+      state.filterBrush.params = { ...state.filterBrush.params, bleed: bsel.value };
+      safeLSSet("webpaint.liquify.bleed", bsel.value);
+      const m = Filter.boundaryModes.find((b) => b.id === bsel.value);
+      setStatus(`边界：${m ? m.title : bsel.value}`);
+    });
+    // 插在 variant select 后（没有 variant 就插 title 后）
+    (document.getElementById("filterBrushVariantSel") || title).insertAdjacentElement("afterend", bsel);
   }
 }
 document.getElementById("filterBrushExit")?.addEventListener("click", _exitFilterBrushMode);
@@ -4014,77 +4026,8 @@ els.menuFit.addEventListener("click", () => {
 // menuBrushSettings element hidden 保兼容（HTML 不报 null），handler no-op
 if (els.menuBrushSettings) els.menuBrushSettings.addEventListener("click", () => setMenuOpen(false));
 
-// ---- 液化设置面板 ----
-function toggleLiquifyPanel(force) {
-  const hidden = els.liquifyPanel.classList.contains("hidden");
-  const show = force === true ? true : force === false ? false : hidden;
-  els.liquifyPanel.classList.toggle("hidden", !show);
-  if (show) {
-    syncLiquifyPanelFromState();
-    const saved = safeLS("webpaint.liquifyPanel.pos");
-    const w = els.liquifyPanel.offsetWidth || 280;
-    let left, top;
-    if (saved) { try { const o = JSON.parse(saved); left = o.left; top = o.top; } catch { left = top = null; } }
-    if (left == null) { left = window.innerWidth - w - 16; top = 60; }
-    els.liquifyPanel.style.left = Math.max(0, Math.min(window.innerWidth - w, left)) + "px";
-    els.liquifyPanel.style.top = Math.max(0, top) + "px";
-  }
-}
-els.liquifyPanelClose.addEventListener("click", () => {
-  toggleLiquifyPanel(false);
-  // v131 (user：「液化关闭窗口之后应该退回 default tool」)
-  setTool("brush");
-  setStatus("已退出液化");
-});
-
-let _liquifyPanelDrag = null;
-els.liquifyPanelHead.addEventListener("pointerdown", (e) => {
-  if (e.target.closest(".float-panel-close")) return;
-  const r = els.liquifyPanel.getBoundingClientRect();
-  _liquifyPanelDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
-  els.liquifyPanelHead.setPointerCapture(e.pointerId);
-  e.preventDefault();
-});
-els.liquifyPanelHead.addEventListener("pointermove", (e) => {
-  if (!_liquifyPanelDrag || e.pointerId !== _liquifyPanelDrag.id) return;
-  const w = els.liquifyPanel.offsetWidth, h = els.liquifyPanel.offsetHeight;
-  const left = Math.max(0, Math.min(window.innerWidth - w, _liquifyPanelDrag.ol + (e.clientX - _liquifyPanelDrag.sx)));
-  const top  = Math.max(0, Math.min(window.innerHeight - h, _liquifyPanelDrag.ot + (e.clientY - _liquifyPanelDrag.sy)));
-  els.liquifyPanel.style.left = left + "px";
-  els.liquifyPanel.style.top = top + "px";
-  safeLSSet("webpaint.liquifyPanel.pos", JSON.stringify({ left, top }));
-});
-els.liquifyPanelHead.addEventListener("pointerup", (e) => {
-  if (_liquifyPanelDrag && e.pointerId === _liquifyPanelDrag.id) {
-    try { els.liquifyPanelHead.releasePointerCapture(e.pointerId); } catch {}
-    _liquifyPanelDrag = null;
-  }
-});
-
-function syncLiquifyPanelFromState() {
-  const q = state.liquify;
-  els.liquifyMode.value = q.mode;
-  els.liquifySize.value = String(Math.round(q.size));
-  els.liquifySizeVal.textContent = String(Math.round(q.size));
-  els.liquifyStrength.value = String(Math.round(q.strength * 100));
-  els.liquifyStrengthVal.textContent = String(Math.round(q.strength * 100));
-}
-els.liquifyMode.addEventListener("change", () => {
-  state.liquify.mode = els.liquifyMode.value;
-  safeLSSet("webpaint.liquify.mode", state.liquify.mode);
-});
-els.liquifySize.addEventListener("input", () => {
-  const v = parseFloat(els.liquifySize.value);
-  state.liquify.size = v;
-  els.liquifySizeVal.textContent = String(Math.round(v));
-  safeLSSet("webpaint.liquify.size", String(v));
-});
-els.liquifyStrength.addEventListener("input", () => {
-  const v = parseFloat(els.liquifyStrength.value) / 100;
-  state.liquify.strength = v;
-  els.liquifyStrengthVal.textContent = String(Math.round(v * 100));
-  safeLSSet("webpaint.liquify.strength", String(v));
-});
+// v147 旧液化设置面板（toggleLiquifyPanel / syncLiquifyPanelFromState / 拖拽 / change handlers）
+// 已删：液化 v132 migrate 进 filterBrush，UI = toolbar variant 下拉 + 左栏 slider。
 
 // ---- 参考小窗 ----
 // 浮动 panel + 独立 viewport（pinch / zoom / rotate）。状态在 ReferenceWindow 内部维护。

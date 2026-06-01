@@ -124,3 +124,24 @@ v48 已做 A 路径（见 src/liquify.js）。
 - pinch / bloat 反复 → 不出现"水彩晕开"
 - 推一个图形再切 reconstruct 涂回去 → 应接近原始（dispField → 0）
 - 大半径 R=200 + 长笔触 → 内存：dispField 跟 layer bbox 同大小，最坏 2048² × 8B ≈ 32MB，可接受
+
+## 5. 选区边界取样模式（v147 `settings.bleed`）
+
+背景：有选区时，dest 像素在选区内，但累积位移 `(tdx,tdy)` 会让源 `(wx-tdx, wy-tdy)` 落到选区**外**。
+v124 只 gate 了 **dest**（mask 外不动），没 gate **源** → 选区外的内容被"拉进来"。user 报为 bug，
+但也想要这个行为作为可选项（Procreate 风）。→ 三种模式（液化面板「边界」下拉，默认 edge）：
+
+- **import（拉边界外的东西）**：源不夹，照采 startSnap 位移位置 → 真把外部图像拉进选区。= v124 老行为。
+- **clip（不拉边界外）**：源落选区外 → 保留 dest 原像素（无位移）。选区边界=墙，外部什么都不进。
+- **edge（默认，边缘拉伸）**：沿 `dest→source` 射线从 dest 向外 march，停在刚离开选区的最后一个 in-mask 点采样
+  → 边界像素沿**拉拽方向**被无限拉长（同 clamp-to-edge streak）。
+
+### 为何 edge 用"沿位移向量 march"而非"夹到最近 in-mask 像素"
+两种 clamp 数学上不同：
+- **最近点投影（夹到最近边缘）**：需要距离变换(DT)；且只在**凸**选区里唯一连续——凹选区的中轴(medial
+  axis)上点到两个边缘等距 → 投影不连续 → 视觉**接缝/撕裂**。chamfer DT 还是欧氏近似，接缝更明显。且方向与拉拽无关。
+- **沿位移向量回退（采用）**：per-pixel 一个短 ray-march，无全局 DT、无那块内存；位移场是 smoothstep 平滑的
+  → 相邻像素方向接近 → **无中轴接缝**；且"沿你拉的方向把边界像素拉长"最贴合直觉。
+
+实现：`src/liquify.js` extendStroke (b) 段。march 步长 1px，上限 `min(ceil|disp|, 4096)`。
+只在 `bleed!=="import"` 且 dest∈选区、源∉选区时触发（选区边界一圈像素），开销可忽略。

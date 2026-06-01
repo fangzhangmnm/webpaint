@@ -568,36 +568,8 @@
       </div>
     </div>
 
-    <!-- 液化设置面板（沿用 .float-panel）。Procreate 风格：选液化后弹这个 -->
-    <div class="float-panel brush-panel hidden" id="liquifyPanel">
-      <div class="float-panel-head" id="liquifyPanelHead">
-        <span class="float-panel-title">液化</span>
-        <button class="float-panel-close" id="liquifyPanelClose" type="button" aria-label="关闭">×</button>
-      </div>
-      <div class="float-panel-body">
-        <label class="brush-slider-row" title="液化模式">
-          <span class="brush-slider-label">模式</span>
-          <select id="liquifyMode" style="grid-column: span 2;">
-            <option value="push">推 (Push)</option>
-            <option value="pinch">收 (Pinch)</option>
-            <option value="bloat">胀 (Bloat)</option>
-            <option value="twirl">旋 (Twirl)</option>
-            <option value="reconstruct">还原 (Reconstruct)</option>
-          </select>
-        </label>
-        <label class="brush-slider-row" title="brush 半径（doc-px）">
-          <span class="brush-slider-label">大小</span>
-          <input id="liquifySize" type="range" min="8" max="300" step="1" value="60" />
-          <span class="brush-slider-value" id="liquifySizeVal">60</span>
-        </label>
-        <label class="brush-slider-row" title="单 event 位移强度">
-          <span class="brush-slider-label">力度</span>
-          <input id="liquifyStrength" type="range" min="1" max="100" step="1" value="40" />
-          <span class="brush-slider-value" id="liquifyStrengthVal">40</span>
-        </label>
-        <p class="sheet-hint" style="margin-top: 6px;">液化只动当前图层；反复拖累加变形。撤销整个笔触可 Ctrl+Z。</p>
-      </div>
-    </div>
+    <!-- v147 液化设置面板已删：液化 v132 migrate 进 filterBrush，模式=toolbar 下拉、
+         大小/力度=左栏 slider。旧 #liquifyPanel 整套是死 UI（见 docs/reports/stale-ui-review-20260601.html）。 -->
 
     <!-- 参考小窗：浮动 panel 装一张参考图，独立 pinch / zoom / rotate -->
     <div class="float-panel reference-panel hidden" id="referencePanel">
@@ -651,13 +623,10 @@
 
     <!-- Adjustments popup：液化 / 颜色调整。学 Procreate adjustments icon
          v114: 裁切 / 重采样 挪进主菜单「画布」区 (user：「裁切丢到文件目录里，而不是调整目录里」) -->
-    <!-- v132 调整 popup 完全 JS 渲染（3 组 hr 分隔）：调色 / 笔刷类 / 艺术滤镜
-         liquify 仍走老 menu item（藏在外面 stub，由 _renderFilterMenu 调） -->
+    <!-- v132 调整 popup 完全 JS 渲染（3 组 hr 分隔）：调色 / 笔刷类 / 艺术滤镜 -->
     <div class="adjust-popup menu-panel hidden" id="adjustPopup" role="menu">
       <div id="adjustFilterList"><!-- 由 app.js _renderFilterMenu 填 --></div>
     </div>
-    <!-- adjustLiquify stub：保留 id 不挂在菜单里（_renderFilterMenu 会把 click 接到合适入口） -->
-    <button id="adjustLiquify" type="button" hidden></button>
 
     <!-- v134 导入超大图片 sheet（图片 > 画布时弹）：保持原 / fit-to-canvas（默认）/ 自定义 + 锁比例 + 插值 -->
     <div class="resample-backdrop hidden" id="bigImportBackdrop"></div>
@@ -947,6 +916,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-0f69bc0a2ed6.mjs"></script>
+    <script type="module" src="./dist/webpaint-a81499cee790.mjs"></script>
   </body>
 </html>
