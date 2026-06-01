@@ -84,7 +84,7 @@ function _hasSelectionIdle(i) {
 export const KEYBOARD_SHORTCUTS = [
   // 编辑（任何时候都该 work，除了 gallery 单 modal）
   { combo: "Ctrl+Z",           desc: "撤销",     category: "编辑",
-    when: _editMode, run: (i) => i.undo() },
+    when: _editMode, run: (i) => i.ctrlZ() },
   { combo: "Ctrl+Shift+Z",     desc: "重做",     category: "编辑",
     when: _editMode, run: (i) => i.redo() },
   { combo: "Ctrl+Y",           desc: "重做",     category: "编辑",
@@ -288,11 +288,11 @@ export class InputController {
     }
     this.canvas.setPointerCapture?.(e.pointerId);
 
-    const tool = this.getTool();
+    const tool = this.getTool();   // = editMode.current()；transient 时是 "transform"/"crop"/"adjust"
     let effectiveTool = this.altDown && tool === "brush" ? "picker" : tool;
-    // 浮动变换是 transient，抢占工具路由：无论当前工具，pointer 都按 lasso 走。
-    // 否则切到画笔后点 Transform 进入浮动态，鼠标行为仍是画笔、gizmo 拖不动（#6 Mode 原则缩影）。
-    if (this.lasso.hasFloating()) effectiveTool = "lasso";
+    // transform transient 抢占画布路由 → gizmo（机械上 role="lasso"，gizmo 代码在 LassoEngine）。
+    // crop/adjust 的输入走各自 overlay/panel，不在画布路由；它们 fall-through 到 "draw" 由下面 canDraw gate 挡。
+    if (tool === "transform") effectiveTool = "lasso";
     const x = e.clientX, y = e.clientY;
 
     // pen 正在画 → touch 当掌触
@@ -383,9 +383,18 @@ export class InputController {
     };
     this.pointers.set(e.pointerId, rec);
 
+    // #6 EditMode gate（fail-safe）：transient/非绘画 mode 下，draw 类 role 一律拒绝。
+    // 防 role 决策对未知 mode（crop/adjust）fall-through 到 "draw" 而误触 stroke 污染 undo。
+    const _isDrawRole = (role === "draw" || role === "erase" || role === "liquify" || role === "shapes" || role === "filterBrush");
+    if (_isDrawRole && this.editMode && !this.editMode.canDraw()) {
+      rec.role = null;
+      this.pointers.delete(e.pointerId);
+      return;
+    }
+
     // v125 (user：「在隐藏图层上动笔会 reject 并警告」)
     // 画 / 擦 / 液化 / 形状 都改 activeLayer 像素；hidden 时一律拒绝
-    if ((role === "draw" || role === "erase" || role === "liquify" || role === "shapes" || role === "filterBrush")
+    if (_isDrawRole
         && this.doc.activeLayer && !this.doc.activeLayer.visible) {
       this.status("当前图层已隐藏，无法绘制");
       rec.role = null;
@@ -677,7 +686,7 @@ export class InputController {
           const elapsed = performance.now() - tap.startTime;
           if (tap.isTap && elapsed < GESTURE_TAP_MAX_MS) {
             if (tap.maxCount === 2) {
-              this.undo();
+              this.ctrlZ();
               this.status("双指 · 撤销");
             } else if (tap.maxCount >= 3) {
               this.redo();
@@ -1192,25 +1201,28 @@ export class InputController {
   // undo / redo / canUndo / canRedo 现在都走共享 history（v44 起）。
   // 留这几个 wrapper 给绑了快捷键 / 老 listener 用，**不**自己保存状态。
   canUndo() {
-    if (this.lasso.hasFloating()) return true;     // floating 时 undo = cancel
+    if (this.editMode && this.editMode.isTransient()) return true;   // transient：ctrl-z = 取消
     return !!this.history && this.history.canUndo();
   }
   canRedo() {
-    if (this.lasso.hasFloating()) return false;    // floating 时无 redo 语义
+    if (this.editMode && this.editMode.isTransient()) return false;  // transient 期间无 redo 语义
     return !!this.history && this.history.canRedo();
   }
-  // floating 状态下 undo = 取消变换（user 反馈：transform 时撤销应是 cancel 语义）
-  // redo 在 floating 下被禁；切回去 history 自然续上
-  undo() {
-    if (this.lasso.hasFloating()) {
-      this._abortLasso();
-      this.status?.("已取消变换");
+  // #6 ctrl-z 路由（所有 undo 入口走这：键盘 Ctrl+Z / 双指 tap / undo 按钮）。
+  // 语义由 EditMode 决定：transient(abort-transient) = 取消当前 transient（transform/crop/adjust 统一）；
+  // 否则 = 正常 history undo。取代旧的"只在 lasso.hasFloating 时 cancel"的 ad-hoc。
+  ctrlZ() {
+    if (this.editMode && this.editMode.ctrlZMeans() === "abort-transient") {
+      this.editMode.abortTransient();
       return;
     }
+    this.undo();
+  }
+  undo() {   // 纯 history undo（transient 取消走 ctrlZ → editMode.abortTransient）
     if (this.history) this.history.undo();
   }
   redo() {
-    if (this.lasso.hasFloating()) return;
+    if (this.editMode && this.editMode.isTransient()) return;        // transient 期间禁 redo
     if (this.history) this.history.redo();
   }
   clearHistory() { if (this.history) this.history.clear(); }

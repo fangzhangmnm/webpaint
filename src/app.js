@@ -1333,7 +1333,7 @@ document.addEventListener("pointerdown", (e) => {
 });
 
 // ---- undo / redo / fit ----
-els.undoBtn.addEventListener("click", () => input.undo());
+els.undoBtn.addEventListener("click", () => input.ctrlZ());
 els.redoBtn.addEventListener("click", () => input.redo());
 window.addEventListener("wp:histchange", (e) => {
   els.undoBtn.disabled = !e.detail.canUndo;
