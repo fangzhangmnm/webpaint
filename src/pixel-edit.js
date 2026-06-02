@@ -60,14 +60,6 @@ class PixelEditTx {
     this._layerId = layer.id;
     this._pre = layer.snapshot();
   }
-  // 确保 layer bbox 覆盖 [x0,y0,x1,y1]（doc 坐标）。layer 存储是裁剪过的，写像素前要先长大，
-  // 否则超出旧 bbox 的部分被裁。bbox 扩张是 pixel 引擎的事——engine 只报「我要写哪」。
-  // before-snap 在 begin 已拍（独立于此），commit 时 after-snap 拍的是扩张后的 layer，undo 正常。
-  ensureCovers(x0, y0, x1, y1) {
-    const layer = this._owner.doc.layers.find((l) => l.id === this._layerId);
-    layer?.ensureBbox(x0, y0, x1, y1);
-  }
-
   // 入栈成功返回 true；layer 中途没了（删层）→ 不入栈返回 false。
   commit(finalize) {
     const layer = this._owner.doc.layers.find((l) => l.id === this._layerId);

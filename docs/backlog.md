@@ -18,7 +18,7 @@
      v124 兜底：stroke 进行中（有 live overlay）强走 _renderFull，规避 partial sliver bug。
      等 user 在 Windows 验证。 -->
 
-### 🐛 buffered brush 笔触超出 layer bbox 被裁 + bbox 该放哪（2026-06-02 记，架构 / 笔刷 agent 必看）
+### ✅ buffered brush 笔触超出 layer bbox 被裁 + bbox 该放哪（2026-06-02 修，按推荐方案）
 
 **症状**：在 bbox 小于 doc 的图层上，用画笔/橡皮（buffered 路径）画到该层现有内容**之外**，
 pen-up commit 后超出旧 bbox 的部分**被裁**。画时看不出（live overlay 走 doc 坐标不裁），抬笔才丢。
@@ -38,8 +38,10 @@ pen-up commit 后超出旧 bbox 的部分**被裁**。画时看不出（live ove
 - **不推荐（tx 路由）**：把增长塞进 `PixelEditTx.ensureCovers` + `endStroke(callback)`——扩 PixelEdit 职责、
   且**只 brush 一个走 tx、其它引擎自己长 → 两套模式**，最差。若真要这模型，得**所有引擎都改走 tx**（大改），不许只特殊化 brush。
 
-> ⚠ **2026-06-02 现状**：有 agent 正沿"塞进 PixelEditTx"方向改到一半（working tree 未提交：pixel-edit.js 已加 `ensureCovers`，
-> input.js 已接 `endStroke(回调)`）。**功能正确（修好了 clip），但是上面"不推荐"的那条。** 接手先拍板：引擎侧一行 vs 全量 tx，收掉中间态。
+> ✅ **2026-06-02 已修（推荐方案）**：tx 路由中间态已回退——删 `PixelEditTx.ensureCovers`、
+> `endStroke` 去掉回调（input.js 两处 `endStroke()` 复原）。改为引擎侧一行：
+> `brush._compositeBufferToLayer` 里 drawImage 前 `layer.ensureBbox(bufBbox)`（在 freeze-all 之后调，
+> bufBbox 已终值）。PixelEdit 恢复纯 undo。详见 `docs/brush-frozen-tail-smoothing.md` §8.5。
 
 ### 图库文件夹管理（v124 记，user：「图库最好支持文件夹管理；文件夹删除只能空文件夹」）
 - 现状：图库是 flat list 所有 doc，按名 sort

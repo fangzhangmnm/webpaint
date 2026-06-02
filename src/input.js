@@ -769,9 +769,7 @@ export class InputController {
     const as = this._activeStroke;
     if (!as) return;
     this._activeStroke = null;
-    // layer bbox 扩张交给 pixel 引擎（tx.ensureCovers）；brush 在 freeze-all 后、composite 前回调。
-    // liquify / filterBrush 的 endStroke 不收这个参数，忽略即可（它们不进 buffer）。
-    as.engine.endStroke((x0, y0, x1, y1) => as.tx.ensureCovers(x0, y0, x1, y1));
+    as.engine.endStroke();
     const sel = as.finalize ? this.doc.selection : null;
     as.tx.commit(sel ? (layer, pre) => sel.applyMaskPostStroke(layer, pre) : null);
     if (sel) this.board.invalidateAll(); else this.board.requestRender();
@@ -855,7 +853,7 @@ export class InputController {
         // Pressure = 1.0（直线没压感），taperIn 跟 preset 走；想纯硬线就把 preset taperIn=0
         this.brush.beginStroke(layer, settings, st.x0, st.y0, 1.0, "brush");
         this.brush.extendStroke(st.x1, st.y1, 1.0);
-        this.brush.endStroke((x0, y0, x1, y1) => tx.ensureCovers(x0, y0, x1, y1));
+        this.brush.endStroke();
         this.shapes.resetState();
       } else {
         const bbox = this.shapes.end({

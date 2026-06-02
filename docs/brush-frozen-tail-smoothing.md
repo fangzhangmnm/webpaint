@@ -202,11 +202,13 @@ F α=1, T α=1 同像素, opacity=0.5
   新 frozen/tail 进的是 stroke buffer，漏了这步 → commit 时 `drawImage` 把 buffer 画进过小的
   layer canvas，画到旧 bbox 外的部分被裁掉。**live overlay 不经 layer bbox（doc 坐标直画）
   → 画的时候看不出，pen-up commit 才丢像素**（这就是「边缘 degenerate」）。
-  修（v148）：**bbox 扩张是 pixel 引擎的事**（`PixelEditTx.ensureCovers`），不是 brush 的。
-  brush.endStroke 收一个 `ensureLayerBbox(x0,y0,x1,y1)` 回调，在 **freeze-all 之后、composite
-  之前**（freeze-all 可能再扩 bufBbox，时机要紧）调它；input 把 `tx.ensureCovers` 传进去。
-  brush 只报「我要写哪」，layer.ensureBbox 由 tx 调。immediate(smudge/pixel)逐 stamp 直画 layer，
-  仍由 brush._stampOne 调 layer.ensureBbox（无法预批，是另一回事）。
+  修（v152，按架构师定调）：**bbox 增长是引擎的事**（其它引擎—immediate brush / liquify /
+  shapes / 填充 / lasso—也都各自 `layer.ensureBbox`）；**PixelEdit 保持纯 undo，不碰 bbox**。
+  实现 = `brush._compositeBufferToLayer` 里 drawImage 前一行 `layer.ensureBbox(bufBbox)`。
+  该函数在 freeze-all 之后调，bufBbox 已是终值，时机自然对。
+  （曾短暂走过 `PixelEditTx.ensureCovers` + `endStroke(回调)` 的 tx 路由——功能对但只 brush 一个走
+  tx、其它引擎自己长 → 两套模式，被否决回退。若真要 tx 模型须所有引擎都改走 tx，不许只特殊化 brush。）
+  immediate(smudge/pixel)逐 stamp 直画 layer，仍由 brush._stampOne 调 layer.ensureBbox。
 - **曲线弯曲不自然**（待论证数学）：windowed 位置平均会系统性「瘪」曲率（把点往弯内侧
   拉）。Procreate 感更自然。需重新论证平滑算子（见 §10 候选：tangent/heading 域平滑、
   Catmull-Rom / Bézier 拟合、Taubin λ|μ 防收缩、one-euro）。

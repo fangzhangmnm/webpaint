@@ -388,20 +388,13 @@ export class BrushEngine {
     this._markDirty(x0, y0, x1, y1);
   }
 
-  // ensureLayerBbox(x0,y0,x1,y1)：由 pixel 引擎(PixelEditTx)提供——layer 存储裁剪过(bbox)，
-  //   commit 前要把 layer bbox 扩到覆盖整条 stroke buffer，否则 drawImage 把超出旧 bbox 的
-  //   像素裁掉（live overlay 走 doc 坐标不裁 → 画时看不出，pen-up commit 才丢）。
-  //   时机关键：必须在 freeze-all（可能再扩 bufBbox）之后、composite 之前调。
-  endStroke(ensureLayerBbox) {
+  endStroke() {
     const st = this._stroke;
     if (st && st.buffered) {
       st.sm.update();
       const last = st.sm.count - 1;
       // tail 全部转正（endIdx=last）；单点 tap (last=0) 也会经 !started 撒一颗
       if (last >= 0) this._walkStamps(st.frozenWalk, last, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));
-    }
-    if (st && ensureLayerBbox && st.bufBboxW > 0 && st.bufBboxH > 0) {
-      ensureLayerBbox(st.bufBboxX, st.bufBboxY, st.bufBboxX + st.bufBboxW, st.bufBboxY + st.bufBboxH);
     }
     if (st && (st.bufferCanvas || st.bufferData)) this._compositeBufferToLayer();
     this._stroke = null;
@@ -414,6 +407,12 @@ export class BrushEngine {
     const layer = st.layer;
     const composeCanvas = st.isBuildup ? st.bufferCanvas : this._renderWashToCanvas();
     if (!composeCanvas) return;
+    // layer 存储是裁剪过的(bbox)，frozen/tail buffer 全程不碰 layer → commit 前必须把 layer bbox
+    // 扩到覆盖整条 stroke buffer，否则 drawImage 落到过小的 layer canvas → 超出旧 bbox 的像素被裁
+    // （live overlay 走 doc 坐标不裁，所以画时看不出，pen-up 才丢）。bbox 增长是引擎的事——其它引擎
+    // (immediate brush / liquify / shapes / 填充 / lasso) 也都各自 ensureBbox；PixelEdit 只管 undo。
+    // 时机：本函数在 freeze-all 之后被调，bufBbox 已是终值。
+    layer.ensureBbox(st.bufBboxX, st.bufBboxY, st.bufBboxX + st.bufBboxW, st.bufBboxY + st.bufBboxH);
     const ctx = layer.ctx;
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
