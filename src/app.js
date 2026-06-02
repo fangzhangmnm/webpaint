@@ -31,7 +31,7 @@ import {
   trashSession, restoreSession, purgeFromTrash, emptyTrash, listTrashedSessions, renameLocalSession,
   getCurrentSessionName, setCurrentSessionName,
   exportOraDownload, exportPsdDownload, shareOrDownloadImage,
-  copyImageToClipboard, readImageFromClipboard,
+  copyImageToClipboard, readImageFromClipboard, writeImageBlobToClipboard,
 } from "./session.js";
 import { Selection } from "./selection.js";
 import { decodeImageFile, fitWithin, canvasToBlob, smartResample, fillResampleSelect } from "./resample.js";
@@ -762,6 +762,86 @@ document.getElementById("lassoTransformBtn").addEventListener("click", () => {
     _suppressTransientPanels("transform");
   }
 });
+// ===== v156 剪贴板 / 复制为浮层 快捷键 =====
+// 入口在 input.js KEYBOARD_SHORTCUTS（hub）；run 派发 window 事件，逻辑在这（要 doc/import/setColor）。
+// Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
+function _extractSelectionRegionCanvas(layer, sel) {
+  const lbX = layer.bboxX, lbY = layer.bboxY, lbW = layer.bboxW, lbH = layer.bboxH;
+  const x0 = Math.max(lbX, sel.bboxX), y0 = Math.max(lbY, sel.bboxY);
+  const x1 = Math.min(lbX + lbW, sel.bboxX + sel.bboxW), y1 = Math.min(lbY + lbH, sel.bboxY + sel.bboxH);
+  const w = x1 - x0, h = y1 - y0;
+  if (w <= 0 || h <= 0) return null;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const cx = c.getContext("2d");
+  cx.drawImage(layer.canvas, x0 - lbX, y0 - lbY, w, h, 0, 0, w, h);
+  cx.globalCompositeOperation = "destination-in";   // 裁到选区形状
+  cx.drawImage(sel.maskCanvas, sel.bboxX - x0, sel.bboxY - y0);
+  cx.globalCompositeOperation = "source-over";
+  return c;
+}
+// Ctrl+C：当前层 ∩ 选区（无选区 → 整层）→ 系统剪贴板 PNG
+window.addEventListener("wp:copy", async () => {
+  const layer = doc.activeLayer;
+  if (!layer) { setStatus("没有活动图层", true); return; }
+  let canvas;
+  if (doc.selection) {
+    canvas = _extractSelectionRegionCanvas(layer, doc.selection);
+    if (!canvas) { setStatus("选区在图层外，无内容可复制", true); return; }
+  } else {
+    if (layer.bboxW <= 0 || layer.bboxH <= 0) { setStatus("当前图层为空", true); return; }
+    canvas = document.createElement("canvas");
+    canvas.width = layer.bboxW; canvas.height = layer.bboxH;
+    canvas.getContext("2d").drawImage(layer.canvas, 0, 0);
+  }
+  try {
+    // lazy promise：blob 生成放进 ClipboardItem，保 Safari user-gesture
+    await writeImageBlobToClipboard(new Promise((res) => canvas.toBlob(res, "image/png")));
+    setStatus(doc.selection ? "已复制选区到剪贴板" : "已复制当前图层到剪贴板");
+  } catch (e) {
+    setStatus(`复制失败：${e.message || e}`, true);
+  }
+});
+// Ctrl+V：系统剪贴板图 → 新层，视口居中（复用 importImageAsLayer）
+window.addEventListener("wp:paste", async () => {
+  let blob;
+  try { blob = await readImageFromClipboard(); }
+  catch (e) { setStatus(`读取剪贴板失败：${e.message || e}`, true); return; }
+  if (!blob) { setStatus("剪贴板里没有图片", true); return; }
+  const file = new File([blob], "paste.png", { type: blob.type || "image/png" });
+  const r = board.canvas.getBoundingClientRect();
+  const center = board.screenToDoc(r.left + r.width / 2, r.top + r.height / 2);
+  await importImageAsLayer(file, { center });
+});
+// Ctrl+D：当前选区 → 原位浮层（不挖洞）= 非破坏性 lift + transform
+window.addEventListener("wp:duplicateFloat", () => {
+  if (input.lasso.hasFloating()) return;
+  if (!doc.selection) { setStatus("先框选再 Ctrl+D 复制为浮层", true); return; }
+  const ok = input.lasso.liftSelectionForTransform(doc.activeLayer, { cut: false });
+  if (ok) {
+    editMode.enterTransient("transform", { apply: _commitTransform, abort: _cancelTransform });
+    updateLassoToolbar();
+    _suppressTransientPanels("transform");
+    board.invalidateAll();
+    setStatus("已复制选区为浮层（拖动定位 → 应用 / 取消）");
+  }
+});
+
+// v156 桌面拖拽图片到画布 → 导入为新层（落点 = 拖放位置）。external image = new layer 语义。
+window.addEventListener("dragover", (e) => {
+  if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) e.preventDefault();   // 允许 drop
+});
+window.addEventListener("drop", async (e) => {
+  const files = [...(e.dataTransfer?.files || [])];
+  const img = files.find((f) => f.type && f.type.startsWith("image/"));
+  if (!img) return;                                  // 非图片（如 .ora）不拦，让默认行为
+  e.preventDefault();
+  if (document.body.dataset.mode === "gallery") { setStatus("退出图库后再拖入图片", true); return; }
+  const center = board.screenToDoc(e.clientX, e.clientY);
+  try { await importImageAsLayer(img, { center }); }
+  catch (err) { setStatus(`拖入失败：${err.message || err}`, true); }
+});
+
 document.getElementById("lassoDeselectBtn").addEventListener("click", () => {
   const entry = input.lasso.setSelection(null);
   if (entry && history) history.push(entry);
@@ -4331,7 +4411,7 @@ function _openBigImportSheet(ow, oh, docW, docH) {
   });
 }
 
-async function importImageAsLayer(file) {
+async function importImageAsLayer(file, opts = {}) {
   const bitmap = await decodeImageFile(file);
   const ow = bitmap.width, oh = bitmap.height;
   const docW = doc.width, docH = doc.height;
@@ -4350,9 +4430,11 @@ async function importImageAsLayer(file) {
     setStatus(`图层已达上限 (${doc.maxLayers})，无法导入`);
     return;
   }
-  // bbox 放在 doc 中心
-  layer.bboxX = Math.floor((docW - w) / 2);
-  layer.bboxY = Math.floor((docH - h) / 2);
+  // bbox 中心：默认 doc 中心；opts.center（doc 坐标）可指定（Ctrl+V 传视口中心）
+  const ccx = opts.center?.x ?? docW / 2;
+  const ccy = opts.center?.y ?? docH / 2;
+  layer.bboxX = Math.floor(ccx - w / 2);
+  layer.bboxY = Math.floor(ccy - h / 2);
   layer.bboxW = w;
   layer.bboxH = h;
   const c = (typeof OffscreenCanvas !== "undefined")

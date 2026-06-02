@@ -99,6 +99,12 @@ export const KEYBOARD_SHORTCUTS = [
     when: _editMode, run: (i) => i.redo() },
   { combo: "Ctrl+Y",           desc: "重做",     category: "编辑",
     when: _editMode, run: (i) => i.redo() },
+  // v156 剪贴板：逻辑在 app.js（doc/import/clipboard）→ run 派发 window 事件。
+  //   when=_editMode（不查选区）→ 始终匹配以 preventDefault，挡掉浏览器原生 copy/paste；run 内部再决定。
+  { combo: "Ctrl+C",           desc: "复制到剪贴板", category: "编辑",
+    when: _editMode, run: () => window.dispatchEvent(new CustomEvent("wp:copy")) },
+  { combo: "Ctrl+V",           desc: "粘贴为新层",   category: "编辑",
+    when: _editMode, run: () => window.dispatchEvent(new CustomEvent("wp:paste")) },
 
   // 套索 / 选区（在浮层时只 Enter/Esc，其它跳过）
   { combo: "Enter",            desc: "应用变换", category: "套索",
@@ -122,6 +128,13 @@ export const KEYBOARD_SHORTCUTS = [
   { combo: "Ctrl+Shift+I",     desc: "反选",     category: "套索",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoInvertBtn")?.click() },
+  // v156 变换 / 复制为浮层（都需选区 + 非浮层；run 内部再查选区）
+  { combo: "Ctrl+T",           desc: "变换选区",     category: "套索",
+    when: (i) => _editMode(i) && !_floating(i),
+    run: () => document.getElementById("lassoTransformBtn")?.click() },
+  { combo: "Ctrl+J",           desc: "复制选区为浮层", category: "套索",
+    when: (i) => _editMode(i) && !_floating(i),
+    run: () => window.dispatchEvent(new CustomEvent("wp:duplicateFloat")) },
 
   // 工具切换（gallery / floating 时跳过）
   { combo: "B",                desc: "笔刷",     category: "工具",

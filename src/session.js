@@ -283,9 +283,18 @@ async function renderMergedBlob(doc, mime = "image/png", quality, scope = "merge
   throw new Error("canvas.toBlob 返 null");
 }
 
+// 只有移动端（iOS/iPadOS/Android）才优先 share（→ 相册/Files 才是自然"保存"路径）。
+// 桌面（Windows/Mac/Linux）的 share 面板不能存文件（user：「windows 的 share 没有保存」）→ 直接下载。
+function _prefersShare() {
+  const ua = navigator.userAgent || "";
+  if (/iPhone|iPad|iPod|Android/i.test(ua)) return true;
+  // iPadOS 13+ 伪装成 MacIntel 桌面 UA，但有多点触控
+  if (navigator.platform === "MacIntel" && (navigator.maxTouchPoints || 0) > 1) return true;
+  return false;
+}
+
 /**
- * 分享 / 保存合成图。优先 navigator.share（iPad / Android 弹系统分享面板 → 相册
- * / iMessage / ...）。不支持时 fallback 触发下载到 Downloads 目录。
+ * 分享 / 保存合成图。移动端优先 navigator.share（→ 相册 / Files）；桌面直接下载到 Downloads。
  */
 export async function shareOrDownloadImage(doc, format = "png", filename = "WebPaint", scope = "merged") {
   const mime = format === "jpg" ? "image/jpeg" : "image/png";
@@ -295,8 +304,8 @@ export async function shareOrDownloadImage(doc, format = "png", filename = "WebP
   const fname = `${filename}.${ext}`;
   const file = new File([blob], fname, { type: mime });
 
-  // 优先 Web Share Level 2（支持 files）
-  if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+  // 移动端优先 Web Share Level 2（支持 files）；桌面跳过 → 下载
+  if (_prefersShare() && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
     try {
       await navigator.share({ files: [file], title: filename });
       return { method: "share" };
@@ -322,6 +331,16 @@ export async function copyImageToClipboard(doc, scope = "merged") {
   // ClipboardItem 在 Safari 必须用 lazy promise 写法（write 在 user gesture 内）
   await navigator.clipboard.write([
     new ClipboardItem({ "image/png": blob }),
+  ]);
+}
+
+/** 把任意 PNG blob（或 Promise<Blob>，Safari lazy 写法）复制到剪贴板。 */
+export async function writeImageBlobToClipboard(blobOrPromise) {
+  if (!navigator.clipboard || !navigator.clipboard.write) {
+    throw new Error("浏览器不支持剪贴板写入");
+  }
+  await navigator.clipboard.write([
+    new ClipboardItem({ "image/png": blobOrPromise }),
   ]);
 }
 

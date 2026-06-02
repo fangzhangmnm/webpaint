@@ -171,7 +171,8 @@ export class LassoEngine {
   // 用 doc.selection 作 mask source，把对应 layer 像素 lift 到 floating。
   // 完成后进 floating 状态（transform 子状态）。
   // 默认进入 free 模式（不再走 v56 那种"selected sub-state"）
-  liftSelectionForTransform(layer) {
+  // opts.cut: true(默认) = 挖空源层（Ctrl+T 变换）；false = 不挖洞，源层保留（Ctrl+D 复制为浮层）
+  liftSelectionForTransform(layer, opts = {}) {
     if (this._floating) return false;
     const sel = this.doc?.selection;
     if (!sel) return false;
@@ -195,12 +196,14 @@ export class LassoEngine {
     fctx.globalCompositeOperation = "source-over";
     const floatingImageData = fctx.getImageData(0, 0, w, h);
 
-    // 挖空 layer
-    const lctx = layer.ctx;
-    lctx.save();
-    lctx.globalCompositeOperation = "destination-out";
-    lctx.drawImage(sel.maskCanvas, sel.bboxX - lbX, sel.bboxY - lbY);
-    lctx.restore();
+    // 挖空 layer（cut=false 时跳过 → 复制为浮层，源层不动）
+    if (opts.cut !== false) {
+      const lctx = layer.ctx;
+      lctx.save();
+      lctx.globalCompositeOperation = "destination-out";
+      lctx.drawImage(sel.maskCanvas, sel.bboxX - lbX, sel.bboxY - lbY);
+      lctx.restore();
+    }
 
     this._floating = {
       canvas: floating,

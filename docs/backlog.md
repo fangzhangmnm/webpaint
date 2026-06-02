@@ -12,6 +12,14 @@
 
 ---
 
+## P2 重构
+
+### 把游离 keydown 收进 hub（2026-06-02 记）
+快捷键 SSoT 是 `input.js KEYBOARD_SHORTCUTS`（`_keydown` dispatch + 菜单"快捷键"面板都读它）。
+但 `app.js` 还有个游离 keydown 监听（裸 "c" → 切调色板，`app.js` ~1471），不在 hub 里 →
+快捷键面板看不到、且双 keydown 系统易踩坑。把它（及其它散落的裸键）收进 KEYBOARD_SHORTCUTS。
+不急（裸 c 有 `!ctrlKey` 守卫，不和 Ctrl+C 冲突）。
+
 ## P0（v89+ 路线明确的）
 
 <!-- v124 第一招（partial render clip 取整 + 1px 外扩）失败；
