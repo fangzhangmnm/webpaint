@@ -129,7 +129,11 @@ export const KEYBOARD_SHORTCUTS = [
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoInvertBtn")?.click() },
   // v156 变换 / 复制为浮层（都需选区 + 非浮层；run 内部再查选区）
-  { combo: "Ctrl+T",           desc: "变换选区",     category: "套索",
+  // 裸 T 任何环境可用；Ctrl+T 是浏览器保留键 → 仅装成 PWA(standalone) 时可用，标签页里被浏览器开新标签吞掉。
+  { combo: "T",                desc: "变换选区",     category: "套索",
+    when: (i) => _editMode(i) && !_floating(i),
+    run: () => document.getElementById("lassoTransformBtn")?.click() },
+  { combo: "Ctrl+T",           desc: "变换选区（仅 PWA；浏览器标签页内 Ctrl+T 被占用）", category: "套索",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoTransformBtn")?.click() },
   { combo: "Ctrl+J",           desc: "复制选区为浮层", category: "套索",
@@ -147,6 +151,14 @@ export const KEYBOARD_SHORTCUTS = [
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("lasso") },
   { combo: "H",                desc: "平移",     category: "工具",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("hand") },
+
+  // 窗格（裸字母；逻辑在 app.js，run 派发 window 事件）。不用 F 键（笔记本要 Fn / iPad 没有）。
+  { combo: "C",                desc: "颜色窗格", category: "窗格",
+    when: (i) => _editMode(i) && !_floating(i), run: () => window.dispatchEvent(new CustomEvent("wp:toggleColor")) },
+  { combo: "N",                desc: "图层窗格", category: "窗格",
+    when: (i) => _editMode(i) && !_floating(i), run: () => window.dispatchEvent(new CustomEvent("wp:toggleLayers")) },
+  { combo: "R",                desc: "参考小窗", category: "窗格",
+    when: (i) => _editMode(i) && !_floating(i), run: () => window.dispatchEvent(new CustomEvent("wp:toggleReference")) },
 
   // 视图
   { combo: "0",                desc: "画布居中", category: "视图",

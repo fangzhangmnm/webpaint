@@ -14,11 +14,11 @@
 
 ## P2 重构
 
-### 把游离 keydown 收进 hub（2026-06-02 记）
+### 把游离 keydown 收进 hub（2026-06-02 记，v157 大部分已做）
 快捷键 SSoT 是 `input.js KEYBOARD_SHORTCUTS`（`_keydown` dispatch + 菜单"快捷键"面板都读它）。
-但 `app.js` 还有个游离 keydown 监听（裸 "c" → 切调色板，`app.js` ~1471），不在 hub 里 →
-快捷键面板看不到、且双 keydown 系统易踩坑。把它（及其它散落的裸键）收进 KEYBOARD_SHORTCUTS。
-不急（裸 c 有 `!ctrlKey` 守卫，不和 Ctrl+C 冲突）。
+- ✅ v157：裸 "c"（切调色板）已收进 hub（连同 N 图层 / R 参考一起，category="窗格"）。
+- 剩 `Ctrl+S`=保存（`app.js` ~3146 拦截）—— **故意**不走 hub（要拦浏览器保存对话框，且面板已在
+  特殊注释里标了）。可留作现状，或以后给 hub 加个"仅展示不 dispatch"的特殊条目让面板也列出它。
 
 ## P0（v89+ 路线明确的）
 

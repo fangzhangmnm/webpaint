@@ -1548,12 +1548,11 @@ els.colorPanelHead.addEventListener("pointerup", (e) => {
 });
 
 // 键盘 C 切换
-window.addEventListener("keydown", (e) => {
-  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
-  if (e.key === "c" || e.key === "C") {
-    if (!(e.ctrlKey || e.metaKey)) toggleColorPanel();
-  }
-});
+// v156 窗格快捷键（C/N/R）逻辑：入口在 input.js KEYBOARD_SHORTCUTS hub，run 派发这些事件。
+//   （取代了原来散落在这里的裸 "c" keydown —— 收进 hub，见 docs/backlog.md）
+window.addEventListener("wp:toggleColor", () => toggleColorPanel());
+window.addEventListener("wp:toggleLayers", () => toggleLayersPanel());
+window.addEventListener("wp:toggleReference", () => referenceWindow.toggle());
 
 // ---- 图层面板 ----
 function toggleLayersPanel(force) {
