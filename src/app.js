@@ -1631,6 +1631,8 @@ function renderLayersPanel() {
     row.appendChild(badge);
 
     row.addEventListener("click", () => {
+      // v154 (user)：点别的层 → 收起非选中层的展开折叠区（badge dropdown）；点自己展开着的保留
+      if (_expandedLayerId !== L.id) _expandedLayerId = null;
       doc.setActiveById(L.id);
       renderLayersPanel();
     });
@@ -3191,9 +3193,11 @@ function _renderCropOverlay() {
   if (dim) dim.textContent = `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)}`;
 }
 function _openCropMode() {
+  // v154 (user)：自由裁切要求 rot=0（裁切框是屏幕轴对齐 DOM，doc 旋转会错位）。
+  //   以前弹提示让用户手动按 0；改成自动复位旋转（保 zoom/位置，只归零 rot），直接进。
   if (board.viewport.rot && Math.abs(board.viewport.rot) > 0.01) {
-    setStatus("先把画布旋转复位（按 0）再进自由裁切", true);
-    return;
+    board.setViewport(board.viewport.tx, board.viewport.ty, board.viewport.scale, 0);
+    setStatus("已复位画布旋转以进入自由裁切");
   }
   _cropState = {
     rect: { x: 0, y: 0, w: doc.width, h: doc.height },
