@@ -480,22 +480,11 @@ export class BrushEngine {
   }
 
   // 每帧重画 tail（frozen 前沿 → 笔尖）。两趟：先收集 stamp 算 bbox，再 ensure buffer + 光栅化。
-  // DEBUG：frozen/tail 分界点（doc 坐标）。无活动 buffered 笔触时 null。
-  debugBoundaryDoc() {
-    const st = this._stroke;
-    if (!st || !st.buffered || !st.dbgBoundary) return null;
-    return st.dbgBoundary;
-  }
-
   _renderTail() {
     const st = this._stroke;
     const sm = st.sm;
     sm.update();                                // 确保 C 最新（begin 后首帧也对）
     const last = sm.count - 1;
-    // DEBUG：记录 frozen/tail 分界点 C[fi]（fi<0 → 还没冻结，用 C[0]）
-    const _fi = sm.frozenIndex();
-    const _bi = _fi >= 0 ? _fi : 0;
-    st.dbgBoundary = (sm.cx.length > _bi) ? { x: sm.cx[_bi], y: sm.cy[_bi] } : null;
     if (last < 0) { st.tailW = 0; st.tailH = 0; return; }
     // tail walk = frozenWalk 的临时拷贝（不动真游标）
     const walk = {

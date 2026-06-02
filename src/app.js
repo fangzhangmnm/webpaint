@@ -626,21 +626,6 @@ board.setOverlayProvider(() => input.brush.getLiveOverlay());
 //   filter brush（含 v132 后的液化）没用 overlayProvider 通路，board partial render 抓不到，sliver 漏出
 //   strokeActiveHint 兜底：stroke 进行中 = 全屏渲染
 board.setStrokeActiveHint(() => input.filterBrush.isActive?.());
-// DEBUG（v148）：frozen/tail 分界点红十字。每帧渲染后同步到屏幕坐标。
-(() => {
-  const dbgEl = document.getElementById("strokeBoundaryDebug");
-  if (!dbgEl) return;
-  const enabled = localStorage.getItem("webpaint.debugBoundary") !== "0";
-  if (!enabled) return;
-  board.setAfterRender(() => {
-    const p = input.brush.debugBoundaryDoc?.();
-    if (!p) { dbgEl.style.display = "none"; return; }
-    const s = board.docToScreen(p.x, p.y);
-    dbgEl.style.left = s.x + "px";
-    dbgEl.style.top = s.y + "px";
-    dbgEl.style.display = "block";
-  });
-})();
 board.setLassoProvider(() => ({
   selection:      doc.selection,
   drawingPath:    input.lasso.getDrawingPath(),
