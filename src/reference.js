@@ -12,13 +12,15 @@
 //   wheel = zoom（以光标为锚）
 //   双击 = 适应窗口（fitToPanel）
 //
-// 不做（避免和主画布混淆）：
-// - 不参与吸色 / 笔刷 / undo
-// - 不持久化原图（dataURL 占空间）—— 关掉 panel = 释放图。下次开要重新选
+// 吸色（v154）：eyedropper 工具在参考窗上 tap/拖 → 吸窗内显示色；touch 长按(若开启)同理。
+//   直接读自家 canvas 像素（所见即所吸），复用主吸色的 pin（wp:pickerShow）。其余仍不参与笔刷/undo。
+// 不持久化原图（dataURL 占空间）—— 关掉 panel = 释放图。下次开要重新选
 
 const LS_POS = "webpaint.refPanel.pos";       // {left, top, width, height}
 const LS_VP  = "webpaint.refPanel.vp";        // {tx, ty, scale, rot}
 const LS_OPEN = "webpaint.refPanel.open";     // "1" | "0"
+const REF_LONG_PRESS_MS = 450;                // 长按吸色延迟（对齐 input.js）
+const REF_LONG_PRESS_CANCEL_SQ = 64;          // 8px²：长按期间移动超此 → 取消，回 pan
 
 export class ReferenceWindow {
   constructor(opts) {
@@ -29,6 +31,13 @@ export class ReferenceWindow {
     this.closeBtn = opts.closeBtn;
     this.emptyHint = opts.emptyHint;           // "选个图…" 占位文字
     this.status  = opts.status || (() => {});
+    // 吸色（v154）：从 app 注入，和主吸色共用一套
+    this.getTool = opts.getTool || (() => null);
+    this.getLongPressPickEnabled = opts.getLongPressPickEnabled || (() => false);
+    this.onColorSampled = opts.onColorSampled || (() => {});
+    this._picking = false;                     // 当前指在吸色（非 pan）
+    this._longPressTimer = null;
+    this._lpStart = null;
     this.ctx = this.canvas.getContext("2d");
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = "high";
@@ -201,7 +210,9 @@ export class ReferenceWindow {
 
     // 拖整窗（标题栏）
     this.head.addEventListener("pointerdown", (e) => {
-      if (e.target.closest(".float-panel-close")) return;
+      // 标题栏里的按钮（载入 / 镜像画布 / 适应 / 关闭）不参与拖窗——否则 head 的
+      // setPointerCapture 吞掉按钮 click，导入/镜像按钮就「点了没反应」（v154 修，user 反映又不弹）
+      if (e.target.closest("button")) return;
       const r = this.panel.getBoundingClientRect();
       this._panelDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
       this.head.setPointerCapture(e.pointerId);
@@ -243,7 +254,18 @@ export class ReferenceWindow {
   _onDown(e) {
     this.canvas.setPointerCapture?.(e.pointerId);
     this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // 吸色（v154）：eyedropper 工具 → 立即吸；touch + 长按吸色开启 → 起 timer（不动才吸，动了回 pan）
+    if (this._pointers.size === 1) {
+      if (this.getTool() === "picker") { this._beginPick(e); e.preventDefault(); return; }
+      if (e.pointerType === "touch" && this.getLongPressPickEnabled()) {
+        this._lpStart = { x: e.clientX, y: e.clientY };
+        this._longPressTimer = setTimeout(() => { this._longPressTimer = null; this._beginPick(e); }, REF_LONG_PRESS_MS);
+      }
+    }
     if (this._pointers.size === 2) {
+      // 第二指进来 → 取消吸色 / 长按，进 gesture
+      this._cancelLongPress();
+      this._endPick();
       // 进 gesture
       const arr = [...this._pointers.values()];
       const dx = arr[1].x - arr[0].x, dy = arr[1].y - arr[0].y;
@@ -262,6 +284,17 @@ export class ReferenceWindow {
     if (!p) return;
     const px = p.x, py = p.y;
     p.x = e.clientX; p.y = e.clientY;
+    // 长按 timer 期间移动超阈值 → 取消，回 pan
+    if (this._longPressTimer && this._lpStart) {
+      const ddx = e.clientX - this._lpStart.x, ddy = e.clientY - this._lpStart.y;
+      if (ddx * ddx + ddy * ddy > REF_LONG_PRESS_CANCEL_SQ) this._cancelLongPress();
+    }
+    // 吸色中（单指）→ 连续吸，不 pan
+    if (this._picking && this._pointers.size === 1) {
+      this._pickAt(e.clientX, e.clientY);
+      e.preventDefault();
+      return;
+    }
     if (this._pointers.size === 1) {
       // pan
       this.vp.tx += (e.clientX - px);
@@ -304,12 +337,48 @@ export class ReferenceWindow {
   }
   _onUp(e) {
     this._pointers.delete(e.pointerId);
+    this._cancelLongPress();
+    if (this._pointers.size === 0) this._endPick();
     if (this._pointers.size < 2) this._gestureStart = null;
     if (this._pointers.size === 1) {
       // 还有一指 → 不进 gesture，单指 pan 接续。先 reset start
       this._gestureStart = null;
     }
     e.preventDefault?.();
+  }
+
+  // ---- 吸色（v154）----
+  _cancelLongPress() {
+    if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; }
+    this._lpStart = null;
+  }
+  _beginPick(e) {
+    this._picking = true;
+    this._cancelLongPress();
+    this.status("吸色（参考）");
+    this._pickAt(e.clientX, e.clientY);
+  }
+  _endPick() {
+    if (!this._picking) return;
+    this._picking = false;
+    window.dispatchEvent(new CustomEvent("wp:pickerHide"));
+  }
+  // 读自家 canvas 像素（所见即所吸）。透明区（没图）不吸。半透明合成到白底。
+  _pickAt(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    let px = Math.round((clientX - rect.left) * dpr);
+    let py = Math.round((clientY - rect.top) * dpr);
+    px = Math.max(0, Math.min(this.canvas.width - 1, px));
+    py = Math.max(0, Math.min(this.canvas.height - 1, py));
+    let d;
+    try { d = this.ctx.getImageData(px, py, 1, 1).data; } catch { return; }
+    let r = d[0], g = d[1], b = d[2]; const a = d[3];
+    if (a === 0) { window.dispatchEvent(new CustomEvent("wp:pickerHide")); return; }   // 透明 → 没东西吸
+    if (a < 255) { const f = a / 255; r = Math.round(r * f + 255 * (1 - f)); g = Math.round(g * f + 255 * (1 - f)); b = Math.round(b * f + 255 * (1 - f)); }
+    const hex = "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+    this.onColorSampled(hex);
+    window.dispatchEvent(new CustomEvent("wp:pickerShow", { detail: { sx: clientX, sy: clientY, hex } }));
   }
   _onWheel(e) {
     e.preventDefault();

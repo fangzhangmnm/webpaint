@@ -712,6 +712,10 @@ input[type=range] {
   cursor: grab;
 }
 .reference-canvas:active { cursor: grabbing; }
+/* v154 吸色：参考窗光标随工具变（手→十字）。入口统一——和主画布 .board 一样订阅
+   body[data-tool]（setTool 设的 SSoT）。eyedropper(=picker) 时十字，pan 时仍是手。 */
+body[data-tool="picker"] .reference-canvas,
+body[data-tool="picker"] .reference-canvas:active { cursor: crosshair; }
 .reference-empty {
   position: absolute;
   inset: 0;

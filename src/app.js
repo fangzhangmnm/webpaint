@@ -4051,6 +4051,10 @@ const referenceWindow = new ReferenceWindow({
   closeBtn: els.referencePanelClose,
   emptyHint: els.referenceEmpty,
   status: setStatus,
+  // v154 参考窗吸色：eyedropper / 长按 → 吸窗内显示色，复用主吸色 setColor + pin
+  getTool: () => editMode.current(),
+  getLongPressPickEnabled: () => state.longPressPick,
+  onColorSampled: (hex) => setColor(hex),
 });
 // v134 (user：「参考窗口大小可以调整」) iPad/touch resize handle
 (function bindReferenceResize() {

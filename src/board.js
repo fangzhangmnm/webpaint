@@ -278,22 +278,30 @@ export class Board {
   //       → 把 tmp 当一张 (bboxW × bboxH) image drawImage 到 ctx 的 doc 坐标 bbox 位置。
   // 注意：tmp 复用，先 clearRect(0, 0, bboxW, bboxH) 防上一次脏数据残留。
   _renderLayerClipped(ctx, layer, baseLayer, overlay) {
-    const tmp = this._getClipTmp(layer.bboxW, layer.bboxH);
+    // 区域 = layer bbox ∪ overlay bbox。layer 空(第一笔)、或 overlay 超出 layer bbox(笔触进行中
+    //   buffer 比 layer 大) 时，都要让区域覆盖 overlay，否则 overlay 被 tmp 尺寸裁掉。
+    let rx0 = Infinity, ry0 = Infinity, rx1 = -Infinity, ry1 = -Infinity;
+    if (layer.bboxW > 0 && layer.bboxH > 0) {
+      rx0 = layer.bboxX; ry0 = layer.bboxY; rx1 = layer.bboxX + layer.bboxW; ry1 = layer.bboxY + layer.bboxH;
+    }
+    if (overlay) {
+      rx0 = Math.min(rx0, overlay.bboxX); ry0 = Math.min(ry0, overlay.bboxY);
+      rx1 = Math.max(rx1, overlay.bboxX + overlay.bboxW); ry1 = Math.max(ry1, overlay.bboxY + overlay.bboxH);
+    }
+    const rw = rx1 - rx0, rh = ry1 - ry0;
+    if (rw <= 0 || rh <= 0) return;
+    const tmp = this._getClipTmp(rw, rh);
     const tctx = tmp.getContext("2d");
     tctx.setTransform(1, 0, 0, 1, 0, 0);
-    tctx.clearRect(0, 0, layer.bboxW, layer.bboxH);
-    // 平移使 layer.bboxX/Y 对齐到 tmp (0,0) → _drawLayerWithOverlay 用的
-    // drawImage(layer.canvas, layer.bboxX, layer.bboxY) 落到 tmp (0,0)
-    tctx.setTransform(1, 0, 0, 1, -layer.bboxX, -layer.bboxY);
+    tctx.clearRect(0, 0, rw, rh);
+    // 平移使区域左上 (rx0,ry0) 对齐到 tmp (0,0) → _drawLayerWithOverlay 用 doc 绝对坐标画
+    tctx.setTransform(1, 0, 0, 1, -rx0, -ry0);
     this._drawLayerWithOverlay(tctx, layer, overlay);
     tctx.setTransform(1, 0, 0, 1, 0, 0);
     tctx.globalCompositeOperation = "destination-in";
-    tctx.drawImage(baseLayer.canvas, baseLayer.bboxX - layer.bboxX, baseLayer.bboxY - layer.bboxY);
+    tctx.drawImage(baseLayer.canvas, baseLayer.bboxX - rx0, baseLayer.bboxY - ry0);
     tctx.globalCompositeOperation = "source-over";
-    ctx.drawImage(
-      tmp, 0, 0, layer.bboxW, layer.bboxH,
-      layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH,
-    );
+    ctx.drawImage(tmp, 0, 0, rw, rh, rx0, ry0, rw, rh);
   }
 
   // 把 (layer, overlay) 在 ctx 上 composite。ctx 已经被调用方 setTransform
@@ -303,11 +311,15 @@ export class Board {
     // v113: 颜色调整 live preview 走 surrogate canvas（per-pixel BCSH 烤好的）
     const sourceCanvas = (this._activeSurrogateLayerId === layer.id && this._activeSurrogateCanvas)
       ? this._activeSurrogateCanvas : layer.canvas;
+    // 空 layer(bbox=0) 没像素：drawImage 0 宽会抛 IndexSizeError → 跳过层像素，只画 overlay
+    const hasLayerPixels = layer.bboxW > 0 && layer.bboxH > 0;
     if (!overlay || overlay.mode !== "erase") {
-      ctx.drawImage(
-        sourceCanvas, 0, 0, layer.bboxW, layer.bboxH,
-        layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH,
-      );
+      if (hasLayerPixels) {
+        ctx.drawImage(
+          sourceCanvas, 0, 0, layer.bboxW, layer.bboxH,
+          layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH,
+        );
+      }
       if (overlay) {
         const prevA = ctx.globalAlpha;
         ctx.globalAlpha = ctx.globalAlpha * overlay.opacity;
@@ -319,7 +331,8 @@ export class Board {
       }
       return;
     }
-    // erase 通路
+    // erase 通路：空 layer 没像素可擦 → 不画
+    if (!hasLayerPixels) return;
     const ec = this._getEraseComposite(layer.bboxW, layer.bboxH);
     const ectx = ec.getContext("2d");
     ectx.clearRect(0, 0, ec.width, ec.height);
@@ -541,12 +554,15 @@ export class Board {
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
       if (!layer.visible) continue;
-      if (layer.bboxW <= 0 || layer.bboxH <= 0) continue;
+      let lOverlay = overlay && overlay.layer === layer ? overlay : null;
+      // v154 修：空 layer(bbox=0) 也要画 live overlay。新 buffered beginStroke 不碰 layer →
+      //   新建层 / 新作品的**第一笔**画时 layer 仍空；旧逻辑在这 continue 掉 → 第一笔画时不显示、
+      //   抬笔 commit 才出。overlay 是 doc 坐标的，不依赖 layer bbox。空 layer 且无 overlay 才真没东西画。
+      if ((layer.bboxW <= 0 || layer.bboxH <= 0) && !lOverlay) continue;
       const prevAlpha = ctx.globalAlpha;
       const prevComp = ctx.globalCompositeOperation;
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.mode || "source-over";
-      let lOverlay = overlay && overlay.layer === layer ? overlay : null;
       // 笔刷 live overlay 也要 respect 选区：在画里实时看到限制范围
       if (lOverlay && this.doc.selection) {
         lOverlay = this._clipOverlayToSelection(lOverlay, this.doc.selection);
