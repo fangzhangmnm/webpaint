@@ -732,6 +732,11 @@
     </div>
 
     <!-- v110 自由裁切 overlay：rect + 8 handles + dimmed mask -->
+    <!-- DEBUG（v148）：frozen/tail 分界点红十字。localStorage['webpaint.debugBoundary']='0' 关 -->
+    <div id="strokeBoundaryDebug" style="position:fixed;width:21px;height:21px;pointer-events:none;z-index:9998;display:none;transform:translate(-50%,-50%)">
+      <div style="position:absolute;left:0;top:10px;width:21px;height:1px;background:#ff2d2d"></div>
+      <div style="position:absolute;left:10px;top:0;width:1px;height:21px;background:#ff2d2d"></div>
+    </div>
     <div class="crop-overlay hidden" id="cropOverlay">
       <div class="crop-rect" id="cropRect">
         <div class="crop-dim" id="cropDim"></div>
@@ -919,6 +924,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-223281362aec.mjs"></script>
+    <script type="module" src="./dist/webpaint-df202f85b1d4.mjs"></script>
   </body>
 </html>

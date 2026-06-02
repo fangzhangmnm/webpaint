@@ -404,7 +404,9 @@ export class Board {
     }
     this._dirtyDocRect = null;
     this._dirtyFull = false;
+    this._onAfterRender?.();   // DEBUG / overlay 同步钩子（每帧渲染后）
   }
+  setAfterRender(fn) { this._onAfterRender = fn; }
 
   _renderFull() {
     const ctx = this.ctx;

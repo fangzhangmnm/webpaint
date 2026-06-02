@@ -195,6 +195,24 @@ F α=1, T α=1 同像素, opacity=0.5
 5. **culling**：现状整颗在画布外的 stamp 跳过但循环推进（[brush.js:299](../src/brush.js#L299)），
    tail 同样要保留这个边缘连续性。
 
+## 8.5 已知问题 / backlog（v148 实测后）
+
+- **layer bbox 不自动扩**（v148 已修）：layer 存储是**裁剪过的**（只存 bbox 内像素，见
+  `doc.js Layer.ensureBbox`）。老的逐 stamp 路径每颗都 `layer.ensureBbox` 把 layer 长大；
+  新 frozen/tail 进的是 stroke buffer，漏了这步 → commit 时 `drawImage` 把 buffer 画进过小的
+  layer canvas，画到旧 bbox 外的部分被裁掉。**live overlay 不经 layer bbox（doc 坐标直画）
+  → 画的时候看不出，pen-up commit 才丢像素**（这就是「边缘 degenerate」）。
+  修（v148）：**bbox 扩张是 pixel 引擎的事**（`PixelEditTx.ensureCovers`），不是 brush 的。
+  brush.endStroke 收一个 `ensureLayerBbox(x0,y0,x1,y1)` 回调，在 **freeze-all 之后、composite
+  之前**（freeze-all 可能再扩 bufBbox，时机要紧）调它；input 把 `tx.ensureCovers` 传进去。
+  brush 只报「我要写哪」，layer.ensureBbox 由 tx 调。immediate(smudge/pixel)逐 stamp 直画 layer，
+  仍由 brush._stampOne 调 layer.ensureBbox（无法预批，是另一回事）。
+- **曲线弯曲不自然**（待论证数学）：windowed 位置平均会系统性「瘪」曲率（把点往弯内侧
+  拉）。Procreate 感更自然。需重新论证平滑算子（见 §10 候选：tangent/heading 域平滑、
+  Catmull-Rom / Bézier 拟合、Taubin λ|μ 防收缩、one-euro）。
+- **tail taper 可实装**（user）：有了 tail rendering，描线收尾的 taper-out（笔尖渐细/渐淡）
+  现在可以做了——tail 段每帧重画，末端按到笔尖距离施加包络即可，不污染 frozen。
+
 ## 9. Open questions
 
 - 窗口平滑器具体选型：居中移动平均（简单、线性相位）vs 局部三次样条（更顺、贵一点）。

@@ -388,13 +388,20 @@ export class BrushEngine {
     this._markDirty(x0, y0, x1, y1);
   }
 
-  endStroke() {
+  // ensureLayerBbox(x0,y0,x1,y1)：由 pixel 引擎(PixelEditTx)提供——layer 存储裁剪过(bbox)，
+  //   commit 前要把 layer bbox 扩到覆盖整条 stroke buffer，否则 drawImage 把超出旧 bbox 的
+  //   像素裁掉（live overlay 走 doc 坐标不裁 → 画时看不出，pen-up commit 才丢）。
+  //   时机关键：必须在 freeze-all（可能再扩 bufBbox）之后、composite 之前调。
+  endStroke(ensureLayerBbox) {
     const st = this._stroke;
     if (st && st.buffered) {
       st.sm.update();
       const last = st.sm.count - 1;
       // tail 全部转正（endIdx=last）；单点 tap (last=0) 也会经 !started 撒一颗
       if (last >= 0) this._walkStamps(st.frozenWalk, last, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));
+    }
+    if (st && ensureLayerBbox && st.bufBboxW > 0 && st.bufBboxH > 0) {
+      ensureLayerBbox(st.bufBboxX, st.bufBboxY, st.bufBboxX + st.bufBboxW, st.bufBboxY + st.bufBboxH);
     }
     if (st && (st.bufferCanvas || st.bufferData)) this._compositeBufferToLayer();
     this._stroke = null;
@@ -405,9 +412,9 @@ export class BrushEngine {
   _compositeBufferToLayer() {
     const st = this._stroke;
     const layer = st.layer;
-    const ctx = layer.ctx;
     const composeCanvas = st.isBuildup ? st.bufferCanvas : this._renderWashToCanvas();
     if (!composeCanvas) return;
+    const ctx = layer.ctx;
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
     ctx.globalAlpha = Math.max(0, Math.min(1, st.settings.opacity ?? 1.0));   // Π 外 × opacity
@@ -473,11 +480,22 @@ export class BrushEngine {
   }
 
   // 每帧重画 tail（frozen 前沿 → 笔尖）。两趟：先收集 stamp 算 bbox，再 ensure buffer + 光栅化。
+  // DEBUG：frozen/tail 分界点（doc 坐标）。无活动 buffered 笔触时 null。
+  debugBoundaryDoc() {
+    const st = this._stroke;
+    if (!st || !st.buffered || !st.dbgBoundary) return null;
+    return st.dbgBoundary;
+  }
+
   _renderTail() {
     const st = this._stroke;
     const sm = st.sm;
     sm.update();                                // 确保 C 最新（begin 后首帧也对）
     const last = sm.count - 1;
+    // DEBUG：记录 frozen/tail 分界点 C[fi]（fi<0 → 还没冻结，用 C[0]）
+    const _fi = sm.frozenIndex();
+    const _bi = _fi >= 0 ? _fi : 0;
+    st.dbgBoundary = (sm.cx.length > _bi) ? { x: sm.cx[_bi], y: sm.cy[_bi] } : null;
     if (last < 0) { st.tailW = 0; st.tailH = 0; return; }
     // tail walk = frozenWalk 的临时拷贝（不动真游标）
     const walk = {
