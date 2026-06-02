@@ -58,15 +58,37 @@ export class StrokeSmoother {
     const xi = this.rx[i], yi = this.ry[i];
     if (W <= 0) { this.cx[i] = xi; this.cy[i] = yi; this.cp[i] = this.rp[i]; return; }
     const si = this.rs[i];
-    // v150 试 expo：双边指数权重平均（正权重 → 凸组合 → 角点零 ringing / 无 overshoot）。
-    //   bench：角点 ringing 0%（quad 8.9%），但红十字 κ 跳变 ~18%（quad ~0.5%），尖端贴指靠 ramp。
-    //   τ = W/2，截断 |Δs| ≤ W。内缩(bias) 是 feature（毛笔甩尖），不修。
-    const tau = W / 2;
-    let sw = 0, ax = 0, ay = 0;
-    for (let j = i; j >= 0; j--) { const d = si - this.rs[j]; if (d > W) break; const w = Math.exp(-d / tau); sw += w; ax += w * this.rx[j]; ay += w * this.ry[j]; }
-    for (let j = i + 1, n = this.rx.length; j < n; j++) { const d = this.rs[j] - si; if (d > W) break; const w = Math.exp(-d / tau); sw += w; ax += w * this.rx[j]; ay += w * this.ry[j]; }
-    const fx = ax / sw, fy = ay / sw;
-    // 端点 ramp：缺 lookahead 处把平滑淡回 raw（钉笔尖/落笔）
+    // 三角权重「局部二次加权最小二乘」，取中心(û=0)的常数项 = 平滑位置。
+    // 二次拟合保到二阶导 → 圆弧不内缩、保曲率；红十字 artifact 比 expo 小 ~30×（bench 实测 quad 胜）。
+    // 软肋：负旁瓣 → 角点/稀疏点 overfit 时会 ringing（待 limiter 兜）。
+    // 点不够(<3 distinct s)→ det≈0 → 降回加权均值兜底。û = (s−si)/W ∈ [−1,1] 归一化条件数。
+    let m0 = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0;          // Σ w·û^k
+    let bx0 = 0, bx1 = 0, bx2 = 0, by0 = 0, by1 = 0, by2 = 0;
+    const acc = (j) => {
+      const u = (this.rs[j] - si) / W;
+      const w = 1 - Math.abs(u);
+      const u2 = u * u;
+      m0 += w; m1 += w * u; m2 += w * u2; m3 += w * u2 * u; m4 += w * u2 * u2;
+      const X = this.rx[j], Y = this.ry[j];
+      bx0 += w * X; bx1 += w * u * X; bx2 += w * u2 * X;
+      by0 += w * Y; by1 += w * u * Y; by2 += w * u2 * Y;
+    };
+    for (let j = i; j >= 0; j--) { if ((si - this.rs[j]) / W > 1) break; acc(j); }
+    for (let j = i + 1, n = this.rx.length; j < n; j++) { if ((this.rs[j] - si) / W > 1) break; acc(j); }
+    // 解对称 3×3 M=[[m0,m1,m2],[m1,m2,m3],[m2,m3,m4]] 的第 0 行（只要 a0 = 值@û=0）
+    const c00 = m2 * m4 - m3 * m3;
+    const c01 = m2 * m3 - m1 * m4;
+    const c02 = m1 * m3 - m2 * m2;
+    const det = m0 * c00 + m1 * c01 + m2 * c02;
+    let fx, fy;
+    if (Math.abs(det) > 1e-9 && m0 > 0) {
+      fx = (c00 * bx0 + c01 * bx1 + c02 * bx2) / det;
+      fy = (c00 * by0 + c01 * by1 + c02 * by2) / det;
+    } else {                                  // 退化（点太少/共线）→ 加权均值兜底
+      fx = m0 > 0 ? bx0 / m0 : xi;
+      fy = m0 > 0 ? by0 / m0 : yi;
+    }
+    // 端点 ramp：缺 lookahead 处把拟合淡回 raw（钉笔尖/落笔；也防一侧窗口下二次外插发散）
     const leftReach = si, rightReach = this.tipS - si;
     const r = Math.max(0, Math.min(1, Math.min(leftReach, rightReach) / W));
     this.cx[i] = xi + r * (fx - xi);
