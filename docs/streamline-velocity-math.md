@@ -1,3 +1,8 @@
+> ⚠️ **已漂移，勿全信**：本文写的 `adapt = streamline`、`V_REF = 0.3`，但代码后来
+> 改成了 `adapt = 1 - sl`（v124h）、`V_REF = 0.1`（v124i），导致速度自适应基本不触发、
+> ④ 退化成固定-α LPF。诊断与正解见
+> [brush-frozen-tail-smoothing.md](brush-frozen-tail-smoothing.md) §1。
+
 # Streamline 速度自适应 数学（v124g 起）
 
 ## 目的

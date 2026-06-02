@@ -418,6 +418,30 @@ export class PaintDoc {
     this.height = nh;
   }
 
+  // 水平翻转整个 doc（所有 layer + selection）。doc 尺寸不变。
+  // 每层：canvas 内容左右镜像；bbox 左上角 x → docW - (bboxX + bboxW)。
+  flipHorizontal() {
+    const W = this.width;
+    for (const L of this.layers) {
+      if (L.bboxW > 0 && L.bboxH > 0) {
+        const nc = makeBitmap(L.bboxW, L.bboxH);
+        const nctx = nc.getContext("2d", { willReadFrequently: false });
+        nctx.imageSmoothingEnabled = false;
+        nctx.setTransform(-1, 0, 0, 1, L.bboxW, 0);
+        nctx.drawImage(L.canvas, 0, 0);
+        nctx.setTransform(1, 0, 0, 1, 0, 0);   // 还原，后续 brush 直接画不带镜像
+        nctx.imageSmoothingEnabled = true;
+        nctx.imageSmoothingQuality = "low";
+        L.canvas = nc;
+        L.ctx = nctx;
+        L.bboxX = W - (L.bboxX + L.bboxW);
+      }
+    }
+    if (this.selection) {
+      this.selection = this.selection.flippedHorizontal(W);
+    }
+  }
+
   // v110: 重采样 doc 到 newW × newH。mode: "nearest" | "bilinear" | "bicubic"
   // 各 layer canvas 重画 + bbox 缩放；selection mask 同步缩放
   resampleTo(newW, newH, mode = "bilinear") {

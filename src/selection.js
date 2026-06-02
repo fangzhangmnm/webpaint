@@ -201,6 +201,15 @@ export class Selection {
     return new Selection(newL, newT, newW, newH, m);
   }
 
+  // 水平翻转：mask 左右镜像，bbox 在 docW 内镜像。返回新 Selection。
+  flippedHorizontal(docW) {
+    const m = makeBitmap(this.bboxW, this.bboxH);
+    const mctx = m.getContext("2d");
+    mctx.setTransform(-1, 0, 0, 1, this.bboxW, 0);
+    mctx.drawImage(this.maskCanvas, 0, 0);
+    return new Selection(docW - (this.bboxX + this.bboxW), this.bboxY, this.bboxW, this.bboxH, m);
+  }
+
   // 重采样：mask 同步缩放 (sx,sy)。
   resampledTo(sx, sy, smooth, quality) {
     const oW = this.bboxW, oH = this.bboxH;

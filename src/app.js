@@ -3233,6 +3233,18 @@ function _updateMenuCropLabel() {
   if (!lbl) return;
   lbl.textContent = doc.selection ? "裁切到选区" : "裁切（自由）";
 }
+// 水平翻转整个画布（所有层 + 选区）。一次 docTransform op，可撤销。
+const _menuFlipHBtn = document.getElementById("menuFlipH");
+if (_menuFlipHBtn) {
+  _menuFlipHBtn.addEventListener("click", () => {
+    setMenuOpen(false);
+    setAdjustOpen(false);
+    const before = _captureDocBefore();
+    doc.flipHorizontal();
+    const after = _captureDocAfter();
+    _pushDocTransform(before, after, "已水平翻转");
+  });
+}
 document.getElementById("cropToolbarCancel").addEventListener("click", () => _closeCropMode());
 document.getElementById("cropToolbarApply").addEventListener("click", () => {
   if (!_cropState) return;

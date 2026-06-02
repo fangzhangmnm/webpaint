@@ -63,6 +63,16 @@ function _streamlineVRef() {
   return (v > 0 && v < 5) ? v : 0.1;
 }
 
+// v148: streamline → lookahead 平滑窗口（screen px）。引擎按 doc px 用（÷scale）。
+// frozen/tail 平滑半宽 = W；冻结滞后 ≈ W（但 tail 钉笔尖 → 无持久滞后）。
+// 上限可 localStorage 'webpaint.lookahead' 覆盖（默认 90 screen px @ streamline=1）。
+function _streamlineToLookaheadPx(streamline) {
+  const sl = Math.max(0, Math.min(1, streamline || 0));
+  const max = parseFloat(localStorage.getItem("webpaint.lookahead"));
+  const cap = (max > 0 && max < 1000) ? max : 90;
+  return sl * cap;
+}
+
 // v124 (user：「统一快捷键注册收集，不会改了这里忘了那里」+「Gallery 等 transient 要小心不要误触」)
 // SSoT：_keydown 按这个表 dispatch；app.js 菜单"快捷键"面板从这里读 desc 渲染。
 // 加新快捷键 = 新增一条 entry。
@@ -525,95 +535,17 @@ export class InputController {
         rec.lastRawX = ev.clientX;
         rec.lastRawY = ev.clientY;
         if (drx * drx + dry * dry < RAW_STATIC_SCREEN_SQ) continue;
-        // 四件套位置平滑（对标 Procreate，链式）：
-        //   raw → Motion Filter (角速度) → Stabilization (滑动平均) →
-        //       Pull-Stabilizer (速度上限) → StreamLine (IIR LPF) → brush
-        // 都 0 时 = 单纯 raw 直传。默认 streamline=0.3 其他 0 = 同 v40 行为。
-        const sl = settings?.streamline ?? 0;
-        const stab = settings?.stabilization ?? 0;
-        const pull = settings?.pullStabilizer ?? 0;
-        const mf = settings?.motionFilter ?? 0;
-
-        // 1) Motion Filter：限制 (drx, dry) 相对 (lastDirX, lastDirY) 的角度。
-        //    mf=1 → 0° clamp (硬锁方向)；mf=0 → 不限。
-        let fdx = drx, fdy = dry;
-        if (mf > 0) {
-          const nLen = Math.hypot(fdx, fdy);
-          const oLen = Math.hypot(rec.lastDirX, rec.lastDirY);
-          if (nLen > 0 && oLen > 0) {
-            const dot = (fdx * rec.lastDirX + fdy * rec.lastDirY) / (nLen * oLen);
-            const ang = Math.acos(Math.max(-1, Math.min(1, dot)));
-            const maxAng = (1 - mf) * Math.PI;
-            if (ang > maxAng && maxAng > 0.001) {
-              // 把 (fdx, fdy) 沿短弧旋向 lastDir，限到 maxAng
-              const cross = fdx * rec.lastDirY - fdy * rec.lastDirX;
-              const sign = cross < 0 ? 1 : -1;
-              const ca = Math.cos(maxAng), sa = sign * Math.sin(maxAng);
-              const ux = rec.lastDirX / oLen, uy = rec.lastDirY / oLen;
-              fdx = (ux * ca - uy * sa) * nLen;
-              fdy = (ux * sa + uy * ca) * nLen;
-            }
-          }
-        }
-        rec.lastDirX = fdx;
-        rec.lastDirY = fdy;
-        rec.filtX += fdx;
-        rec.filtY += fdy;
-        let rx = rec.filtX, ry = rec.filtY;
-
-        // 2) Stabilization：滑动平均，window = 1 + stab × 16
-        let sx = rx, sy = ry;
-        if (stab > 0) {
-          const cap = 1 + Math.round(stab * 16);
-          rec.stabBuf.push([rx, ry]);
-          if (rec.stabBuf.length > cap) rec.stabBuf.shift();
-          let mx = 0, my = 0;
-          for (const p of rec.stabBuf) { mx += p[0]; my += p[1]; }
-          sx = mx / rec.stabBuf.length;
-          sy = my / rec.stabBuf.length;
-        } else if (rec.stabBuf.length) {
-          rec.stabBuf.length = 0;
-        }
-
-        // 3) Pull-Stabilizer：速度上限 follower。pull=0 → 不限；
-        //    pull→1 时 maxStep → 0.5 px / event
-        if (pull > 0) {
-          const maxStep = Math.max(0.5, (1 - pull) * 64);
-          const ddx = sx - rec.pullX, ddy = sy - rec.pullY;
-          const d = Math.hypot(ddx, ddy);
-          if (d > maxStep) {
-            rec.pullX += ddx * maxStep / d;
-            rec.pullY += ddy * maxStep / d;
-          } else {
-            rec.pullX = sx; rec.pullY = sy;
-          }
+        // v148: buffered 笔触（brush/erase 非 pixel）位置平滑改由引擎做（lookahead/
+        //   frozen/tail，线到笔尖）→ input 直传 raw。smudge/pixel/liquify/filterBrush
+        //   仍走四件套（_fourStageSmooth），保持原手感。
+        let psx, psy;
+        if (rec.rawToEngine) {
+          psx = ev.clientX; psy = ev.clientY;
         } else {
-          rec.pullX = sx; rec.pullY = sy;
+          const sp = this._fourStageSmooth(rec, ev, settings, drx, dry);
+          psx = sp.x; psy = sp.y;
         }
-
-        // 4) StreamLine：一阶 IIR LPF + 速度自适应（详 docs/streamline-velocity-math.md）
-        //   单参 V_REF (CSS px/ms)，bake default + localStorage 可覆盖（user：「能调教」）
-        //   - V_REF = 0.3 ≈ 3 inch/s（典型仔细画速度）
-        //   - v ≥ V_REF → ramp=1 → streamline 满血
-        //   - v ≈ 0 → ramp=0 → α 上扬，慢笔贴指
-        //   v124h 修 (user：「勾线 sl=0.95 还不显著，procreate 已经夸张了」)：
-        //     adapt = 1 - sl（不是 sl）。高 sl = 用户主动要平滑，别让 adapt 把它废了：
-        //     - sl=0:    adapt=1 → 满 unlag（无平滑无意义）
-        //     - sl=0.3:  adapt=0.7 → 明显 unlag（默认笔感）
-        //     - sl=0.95: adapt=0.05 → 几乎不 unlag → 平滑保住（Procreate 夸张感）
-        //     - sl=1:    adapt=0 → 完全无 adapt，max 平滑
-        const V_REF = _streamlineVRef();
-        const alphaBase = Math.max(0.05, 1 - sl);
-        const _evtDt = Math.max(1, ev.timeStamp - (rec._prevEvtTs ?? ev.timeStamp - 16));
-        rec._prevEvtTs = ev.timeStamp;
-        const v = Math.hypot(fdx, fdy) / _evtDt;          // CSS px / ms（已 DPR 归一）
-        const t = Math.min(1, v / V_REF);                  // 无量纲
-        const ramp = t * t * (3 - 2 * t);                  // smoothstep
-        const adaptStrength = Math.max(0, 1 - sl);         // 关键修
-        const alphaPos = alphaBase + adaptStrength * (1 - ramp) * (1 - alphaBase);
-        rec.smX = rec.smX + alphaPos * (rec.pullX - rec.smX);
-        rec.smY = rec.smY + alphaPos * (rec.pullY - rec.smY);
-        const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
+        const { x: dx, y: dy } = this.board.screenToDoc(psx, psy);
         // 活动 engine 统一接口：liquify 忽略多余的 pressure 参数
         const pressure = effectivePressureFor(rec, ev);
         this._activeStroke?.engine.extendStroke(dx, dy, pressure);
@@ -734,6 +666,81 @@ export class InputController {
   // - before/after = Layer.snapshot()（bboxX/Y/W/H + imageData）
   // - blob 字段 push 后异步 toBlob 填，填好后释放 imageData
   // 详见 docs/undo-architecture.md。
+  // 四件套位置平滑（对标 Procreate，链式）：raw → Motion Filter (角速度) →
+  //   Stabilization (滑动平均) → Pull-Stabilizer (速度上限) → StreamLine (IIR LPF)。
+  // 返回平滑后的 screen 点 {x, y}（也存进 rec.smX/smY）。drx/dry = 本 event raw screen 位移。
+  // v148: 只剩 smudge/pixel/liquify/filterBrush 走这条；buffered brush/erase 已改引擎 lookahead。
+  _fourStageSmooth(rec, ev, settings, drx, dry) {
+    const sl = settings?.streamline ?? 0;
+    const stab = settings?.stabilization ?? 0;
+    const pull = settings?.pullStabilizer ?? 0;
+    const mf = settings?.motionFilter ?? 0;
+
+    // 1) Motion Filter：限制 (drx, dry) 相对 (lastDirX, lastDirY) 的角度。mf=1 → 硬锁方向。
+    let fdx = drx, fdy = dry;
+    if (mf > 0) {
+      const nLen = Math.hypot(fdx, fdy);
+      const oLen = Math.hypot(rec.lastDirX, rec.lastDirY);
+      if (nLen > 0 && oLen > 0) {
+        const dot = (fdx * rec.lastDirX + fdy * rec.lastDirY) / (nLen * oLen);
+        const ang = Math.acos(Math.max(-1, Math.min(1, dot)));
+        const maxAng = (1 - mf) * Math.PI;
+        if (ang > maxAng && maxAng > 0.001) {
+          const cross = fdx * rec.lastDirY - fdy * rec.lastDirX;
+          const sign = cross < 0 ? 1 : -1;
+          const ca = Math.cos(maxAng), sa = sign * Math.sin(maxAng);
+          const ux = rec.lastDirX / oLen, uy = rec.lastDirY / oLen;
+          fdx = (ux * ca - uy * sa) * nLen;
+          fdy = (ux * sa + uy * ca) * nLen;
+        }
+      }
+    }
+    rec.lastDirX = fdx;
+    rec.lastDirY = fdy;
+    rec.filtX += fdx;
+    rec.filtY += fdy;
+    const rx = rec.filtX, ry = rec.filtY;
+
+    // 2) Stabilization：滑动平均，window = 1 + stab × 16
+    let sx = rx, sy = ry;
+    if (stab > 0) {
+      const cap = 1 + Math.round(stab * 16);
+      rec.stabBuf.push([rx, ry]);
+      if (rec.stabBuf.length > cap) rec.stabBuf.shift();
+      let mx = 0, my = 0;
+      for (const p of rec.stabBuf) { mx += p[0]; my += p[1]; }
+      sx = mx / rec.stabBuf.length;
+      sy = my / rec.stabBuf.length;
+    } else if (rec.stabBuf.length) {
+      rec.stabBuf.length = 0;
+    }
+
+    // 3) Pull-Stabilizer：速度上限 follower。pull→1 时 maxStep → 0.5 px/event
+    if (pull > 0) {
+      const maxStep = Math.max(0.5, (1 - pull) * 64);
+      const ddx = sx - rec.pullX, ddy = sy - rec.pullY;
+      const d = Math.hypot(ddx, ddy);
+      if (d > maxStep) { rec.pullX += ddx * maxStep / d; rec.pullY += ddy * maxStep / d; }
+      else { rec.pullX = sx; rec.pullY = sy; }
+    } else {
+      rec.pullX = sx; rec.pullY = sy;
+    }
+
+    // 4) StreamLine：一阶 IIR LPF + 速度自适应（详 docs/streamline-velocity-math.md，已漂移）
+    const V_REF = _streamlineVRef();
+    const alphaBase = Math.max(0.05, 1 - sl);
+    const _evtDt = Math.max(1, ev.timeStamp - (rec._prevEvtTs ?? ev.timeStamp - 16));
+    rec._prevEvtTs = ev.timeStamp;
+    const v = Math.hypot(fdx, fdy) / _evtDt;
+    const t = Math.min(1, v / V_REF);
+    const ramp = t * t * (3 - 2 * t);
+    const adaptStrength = Math.max(0, 1 - sl);
+    const alphaPos = alphaBase + adaptStrength * (1 - ramp) * (1 - alphaBase);
+    rec.smX = rec.smX + alphaPos * (rec.pullX - rec.smX);
+    rec.smY = rec.smY + alphaPos * (rec.pullY - rec.smY);
+    return { x: rec.smX, y: rec.smY };
+  }
+
   _beginStroke(e, rec, mode) {
     const settings = this.getBrushSettings();
     if (!settings || !this.doc.activeLayer) return;
@@ -743,7 +750,13 @@ export class InputController {
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, e);
-    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode);
+    // v148: buffered（brush/erase 非 pixel）位置平滑由引擎做（lookahead/frozen/tail），
+    //   input 直传 raw（见 pointermove 的 rec.rawToEngine 分支）。smudge/pixel 仍走四件套。
+    const buffered = mode !== "smudge" && !settings.pixelMode;
+    rec.rawToEngine = buffered;
+    const scale = this.board.viewport.scale || 1;
+    const lookahead = buffered ? _streamlineToLookaheadPx(settings.streamline) / scale : 0;
+    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, lookahead);
     const bbox = this.brush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
