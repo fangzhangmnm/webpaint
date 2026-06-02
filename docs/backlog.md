@@ -18,6 +18,29 @@
      v124 兜底：stroke 进行中（有 live overlay）强走 _renderFull，规避 partial sliver bug。
      等 user 在 Windows 验证。 -->
 
+### 🐛 buffered brush 笔触超出 layer bbox 被裁 + bbox 该放哪（2026-06-02 记，架构 / 笔刷 agent 必看）
+
+**症状**：在 bbox 小于 doc 的图层上，用画笔/橡皮（buffered 路径）画到该层现有内容**之外**，
+pen-up commit 后超出旧 bbox 的部分**被裁**。画时看不出（live overlay 走 doc 坐标不裁），抬笔才丢。
+
+**根因**：v148 frozen/tail buffer 模型（`7d244c5`）——buffered stamp 进 stroke buffer（只长 buffer bbox），
+全程不碰 layer；只在 `brush._compositeBufferToLayer` 一次 `drawImage(buffer, bufBboxX - layer.bboxX, ...)` 落 layer。
+**该 composite 前没 `layer.ensureBbox`** → bufBbox 超出 layer 旧 bbox → 负偏移/越界 → 裁。
+
+**设计定位（别改错地方）**：
+- `PixelEdit` = 纯 undo 事务，**本设计不碰 bbox**；bbox 增长是**引擎的事**。
+- 其余引擎都自己 `layer.ensureBbox`：immediate brush（`_stampOne`）/ liquify / shapes / 选区填充 / lasso 变换。
+  **唯独 buffered brush 这条漏** —— brush 局部洞，非跨引擎共性。
+
+**两条修法，二选一别并存**：
+- **推荐（引擎侧一行，一致）**：`brush._compositeBufferToLayer` 里 drawImage 前
+  `layer.ensureBbox(bufBboxX, bufBboxY, bufBboxX+bufBboxW, bufBboxY+bufBboxH)`。PixelEdit 保持纯 undo。
+- **不推荐（tx 路由）**：把增长塞进 `PixelEditTx.ensureCovers` + `endStroke(callback)`——扩 PixelEdit 职责、
+  且**只 brush 一个走 tx、其它引擎自己长 → 两套模式**，最差。若真要这模型，得**所有引擎都改走 tx**（大改），不许只特殊化 brush。
+
+> ⚠ **2026-06-02 现状**：有 agent 正沿"塞进 PixelEditTx"方向改到一半（working tree 未提交：pixel-edit.js 已加 `ensureCovers`，
+> input.js 已接 `endStroke(回调)`）。**功能正确（修好了 clip），但是上面"不推荐"的那条。** 接手先拍板：引擎侧一行 vs 全量 tx，收掉中间态。
+
 ### 图库文件夹管理（v124 记，user：「图库最好支持文件夹管理；文件夹删除只能空文件夹」）
 - 现状：图库是 flat list 所有 doc，按名 sort
 - 加 folder 概念：
