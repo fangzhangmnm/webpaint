@@ -373,6 +373,7 @@ function applyBrushPresetFrozen(brush) {
   state.brush.shapeRotation = (brush.shape.rotation ?? 0) * Math.PI / 180;
   state.brush.hardness      = brush.shape.hardness ?? 1.0;
   state.brush.taperIn       = brush.taper.in ?? 0;
+  state.brush.taperOut      = brush.taper.out ?? 0;   // v160 末端 taper（之前漏接，引擎拿不到）
   // v98 coeff 模型（−1..1 signed）
   state.brush.sizeCoeff     = brush.sizeCoeff ?? 0.6;
   state.brush.opaCoeff      = brush.opaCoeff ?? 0.6;
@@ -6647,9 +6648,10 @@ function _renderBrushSettings() {
   // v106：flow 乘数撤了 (user：「flow 乘数好像没 work，要不删掉」+「root cause 是 stamp boundary
   // 没 falloff 到 0」)。v106 已改 smoothstep falloff，spacing 10% 也平滑，乘数没必要。
 
-  // Taper：入端 stylistic taper（生效）；出端 v98+ 没接进引擎 → 撤
+  // Taper：入端 / 出端 stylistic taper（v160 起出端也接进引擎了）。数值 = taper 长度(× 笔径)，越大越长。
   const tp = section("收尾");
-  rangeRow(tp, "入端", 0, 5, 0.1, b.taper.in, (v) => v.toFixed(1), (v) => b.taper.in = v);
+  rangeRow(tp, "入端", 0, 5, 0.1, b.taper.in,  (v) => v.toFixed(1), (v) => b.taper.in = v);
+  rangeRow(tp, "出端", 0, 5, 0.1, b.taper.out, (v) => v.toFixed(1), (v) => b.taper.out = v);
 
   // Smudge specific
   if (b.tool === "smudge") {

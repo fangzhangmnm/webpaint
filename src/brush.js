@@ -75,6 +75,7 @@ const DEFAULT_SETTINGS = {
   // 系统级 anti-spike taper（Apple Pencil 落笔 spike → 萝卜尖补偿）：
   // 这是硬件信号缺陷补偿，跟 brush 风格 taper 分开；preset 的 taper.in/out 是 stylistic 的
   taperIn: 1.5,
+  taperOut: 0,        // 末端渐细长度（× 笔径）。0=无。endStroke 时按到末端距离施加（需总笔长）
   taperFloor: 0.4,
   // smudge：
   smudgeStrength: 0.8,
@@ -201,6 +202,7 @@ export class BrushEngine {
       overlayCanvas: null,                     // 合成显示 (frozen ⊕ tail) RGBA
       overlayCtx: null,
       _composeAtCount: -1,                      // 上次 compose 时的 sm.count（同帧缓存用）
+      _taperTotal: null,                        // endStroke 时填总笔长，给出端 taper 用（live 为 null=不 taper）
       // --- v148 frozen/tail · v158 时间门 ---
       sm: buffered ? new StrokeSmoother({ W: smooth.W || 0, T: smooth.T, deflate: smooth.deflate }) : null,
       // frozen 撒点游标（沿平滑中心线 C 的连续走样）
@@ -394,8 +396,16 @@ export class BrushEngine {
     if (st && st.buffered) {
       st.sm.update();
       const last = st.sm.count - 1;
-      // tail 全部转正（endIdx=last）；单点 tap (last=0) 也会经 !started 撒一颗
-      if (last >= 0) this._walkStamps(st.frozenWalk, last, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));
+      if (last >= 0) {
+        // 出端 taper 需总笔长 → 先用 frozenWalk 拷贝干走一遍量 total（不烤），再设 _taperTotal 真烤。
+        if (st.settings.taperOut > 0) {
+          const dry = { ci: st.frozenWalk.ci, started: st.frozenWalk.started, accumDist: st.frozenWalk.accumDist, lastP: st.frozenWalk.lastP, strokeDist: st.frozenWalk.strokeDist };
+          this._walkStamps(dry, last, () => {});
+          st._taperTotal = dry.strokeDist;
+        }
+        // tail 全部转正（endIdx=last）；单点 tap (last=0) 也会经 !started 撒一颗
+        this._walkStamps(st.frozenWalk, last, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));
+      }
     }
     if (st && (st.bufferCanvas || st.bufferData)) this._compositeBufferToLayer();
     this._stroke = null;
@@ -668,11 +678,19 @@ export class BrushEngine {
     const st = this._stroke;
     const s = st.settings;
     let p = Math.max(0, Math.min(1, pressure));
-    // 系统级 anti-spike taper：起手 fade-in，缓解 Apple Pencil 落笔 spike → 萝卜尖
+    // 入端 taper：起手 fade-in（也兼顾 Apple Pencil 落笔 spike → 萝卜尖）
     if (s.taperIn > 0) {
-      const taperLen = s.size * s.taperIn;
-      const t = Math.min(1, strokeDist / taperLen);
+      const t = Math.min(1, strokeDist / (s.size * s.taperIn));
       p *= s.taperFloor + (1 - s.taperFloor) * t;
+    }
+    // 出端 taper：末端 fade-out。需总笔长 → 只在 endStroke 时 st._taperTotal 有值（live 不 taper）
+    if (s.taperOut > 0 && st._taperTotal != null) {
+      const distFromEnd = st._taperTotal - strokeDist;
+      const taperLen = s.size * s.taperOut;
+      if (distFromEnd < taperLen) {
+        const t = Math.max(0, distFromEnd / taperLen);
+        p *= s.taperFloor + (1 - s.taperFloor) * t;
+      }
     }
     const pCurve = Math.pow(p, Math.max(0.01, s.pressureGamma || 1.0));
     const size = Math.max(0.5, s.size * signedLerp(s.sizeCoeff || 0, pCurve));

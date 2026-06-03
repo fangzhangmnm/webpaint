@@ -67,7 +67,6 @@ export class StrokeSmoother {
     const si = this.rs[i], ti = this.rt[i];
     let m0 = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0;
     let bx0 = 0, bx1 = 0, bx2 = 0, by0 = 0, by1 = 0, by2 = 0;
-    let wL = 0, wR = 0;                           // 左/右侧权重和，量窗口对称度（边界判定）
     const acc = (j) => {
       const u = (this.rs[j] - si) / W;          // ∈[−1,1]
       const w = 1 - Math.abs(u);                 // 弧长三角权（时间只做硬门，不入权 → 快速=旧版逐字节同）
@@ -76,32 +75,26 @@ export class StrokeSmoother {
       const X = this.rx[j], Y = this.ry[j];
       bx0 += w * X; bx1 += w * u * X; bx2 += w * u2 * X;
       by0 += w * Y; by1 += w * u * Y; by2 += w * u2 * Y;
-      if (u < 0) wL += w; else if (u > 0) wR += w;
     };
     // 窗口 = 弧长 ∩ 时间；任一超界即停（s、t 都单调 → 越远只会更超）
     for (let j = i; j >= 0; j--) { if (si - this.rs[j] > W || ti - this.rt[j] > T) break; acc(j); }
     for (let j = i + 1, n = this.rx.length; j < n; j++) { if (this.rs[j] - si > W || this.rt[j] - ti > T) break; acc(j); }
 
-    const meanx = m0 > 0 ? bx0 / m0 : xi, meany = m0 > 0 ? by0 / m0 : yi;
     let fx, fy;
     if (this.deflate) {                          // 0 阶：加权均值（内缩/毛笔甩尖）
-      fx = meanx; fy = meany;
+      fx = m0 > 0 ? bx0 / m0 : xi; fy = m0 > 0 ? by0 / m0 : yi;
     } else {                                     // 2 阶：局部二次 WLS 取中心（保曲率）
+      // 关键：二次在**单边窗口**(起笔)仍**无偏**——直线外插回起点=原位，不拖。
+      // （0 阶均值在单边窗口偏向前向质心 ~+W/3 → 把起笔往前拖成团/钉子，故起笔绝不能用均值。）
       const c00 = m2 * m4 - m3 * m3, c01 = m2 * m3 - m1 * m4, c02 = m1 * m3 - m2 * m2;
       const det = m0 * c00 + m1 * c01 + m2 * c02;
       if (Math.abs(det) > 1e-9 && m0 > 0) {
         fx = (c00 * bx0 + c01 * bx1 + c02 * bx2) / det;
         fy = (c00 * by0 + c01 * by1 + c02 * by2) / det;
-      } else { fx = meanx; fy = meany; }         // 点太少 → 均值兜底
+      } else { fx = m0 > 0 ? bx0 / m0 : xi; fy = m0 > 0 ? by0 / m0 : yi; }  // <3 点 → 均值兜底
     }
-    // 边界单边窗口（起笔处只有前向样本）→ 二次会外插 overshoot。按窗口对称度 balance 把拟合
-    // 淡回加权均值（均值=凸组合永不外插）。balance: 1=两侧均衡(用二次) / 0=单边(用均值,安全平滑)。
-    const balance = (wL > 0 && wR > 0) ? Math.min(wL, wR) / Math.max(wL, wR) : 0;
-    fx = meanx + balance * (fx - meanx);
-    fy = meany + balance * (fy - meany);
-    // ramp：v159 起**不再钉死起笔**（Procreate 落地即平滑：起点用前向 lookahead 重新平滑，
-    //   随笔滑出而收敛；上面的 balance 兜底防起笔单边 overshoot）。只保**笔尖**钉 raw（贴指）。
-    //   笔尖 reach = 弧长/时间较大者，两者都→0(刚画的) → r→0 → C=raw。
+    // ramp：v159 起**不再钉死起笔**（Procreate 落地即平滑：起点用前向 lookahead 的二次拟合，无偏不拖）。
+    //   只保**笔尖**钉 raw（贴指）。笔尖 reach = 弧长/时间较大者，两者都→0(刚画的) → r→0 → C=raw。
     const rightFrac = Math.max((this.tipS - si) / W, T === Infinity ? 0 : (this.tipT - ti) / T);
     const r = Math.max(0, Math.min(1, rightFrac));
     this.cx[i] = xi + r * (fx - xi);
