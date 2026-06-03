@@ -1,4 +1,19 @@
-# 笔刷平滑：frozen / tail 模型（v148 已实现 Tier 2，**未浏览器验证**）
+# 笔刷平滑：frozen / tail 模型
+
+> **v158 现状（iPad 实测有效，转角问题解决）**：在 frozen/tail 的弧长窗口二次平滑上**加了时间维度**——
+> 决定与论证见 **[docs/adr/0001-time-gated-arc-smoothing.md](adr/0001-time-gated-arc-smoothing.md)**。一句话演进：
+>
+> 1. v148 frozen/tail（弧长 lookahead 窗口）：线跟到笔尖、无持久滞后。
+> 2. v149 估计子从 0 阶均值 → **局部二次回归**（保曲率/不内缩，杀掉「磨圆曲线」）。
+> 3. v158 窗口加 **时间门** `|Δt| ≤ T` + **时间冻结** `tip_t−t_i ≥ T`：
+>    - **快速**（笔速 ≥ W/T）：时间门不 bind → 与 v149 逐字节相同（快速手感零回归）。
+>    - **慢 / dwell(顿)**：剔除时间上久远的进/出腿 → **保住顿的尖角**（纯弧长看不见 dwell，怎么顿都磨圆）。
+>    - 全程按真实时间戳，不用帧数 → framerate 无关。
+> 4. 所有平滑魔数搬进 `src/smooth-config.js`(SMOOTH) + 菜单「平滑调参(dev)」textbox 面板 → 设备上 live 调参、自测死参数。
+>
+> 下面 §1–§10 是 v148 起的原始设计推演，保留作背景；当前实现以 ADR-0001 为准。
+
+# 笔刷平滑：frozen / tail 模型（v148 原始设计 note）
 
 > **v148 实现状态**：Tier 2 已落地，esbuild 通过 + smoother 数学已 Node 单测，但**没在
 > 浏览器/iPad 实测**。要验证的点见本节末「待验证」。代码：
