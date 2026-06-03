@@ -34,6 +34,7 @@ import {
   copyImageToClipboard, readImageFromClipboard, writeImageBlobToClipboard,
 } from "./session.js";
 import { Selection } from "./selection.js";
+import { SMOOTH, SMOOTH_DEFAULTS, saveSmooth, resetSmooth } from "./smooth-config.js";
 import { decodeImageFile, fitWithin, canvasToBlob, smartResample, fillResampleSelect } from "./resample.js";
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
 //   filters.js 只剩 Filter 契约 + registry + helper；
@@ -118,6 +119,7 @@ const els = {
   menuReference: document.getElementById("menuReference"),
   menuResetBrushRack: document.getElementById("menuResetBrushRack"),
   menuForcePwaReset: document.getElementById("menuForcePwaReset"),
+  menuSmoothDev: document.getElementById("menuSmoothDev"),
   referencePanel: document.getElementById("referencePanel"),
   referencePanelHead: document.getElementById("referencePanelHead"),
   referencePanelClose: document.getElementById("referencePanelClose"),
@@ -4179,6 +4181,82 @@ const paletteWindow = new PaletteWindow({
   getCurrentColor: () => state.color,
 });
 // 调色板小窗（v87 → v94 撤掉 menu 入口）：UI 已删，code 留 P2（backlog）
+
+// ===== v158 平滑调参 dev 面板 =====
+// 所有平滑魔数：连续用 textbox（可打任意数量级值 → 自测是否真起作用/跳出饱和区，杀煤气灯）、二元用 checkbox。
+// live 改 SMOOTH + localStorage 持久化；下一笔生效。详 docs/adr/0001。
+const _SMOOTH_LABELS = {
+  lookaheadCap: "窗口上限 W (screen px @ streamline=1)",
+  dwellMs:      "dwell 时间门 T (ms)",
+  deflate:      "内缩/毛笔甩尖 (开=0阶 / 关=保曲率)",
+  vref:         "V_REF 旧四件套 (疑似对主笔刷无效)",
+  rawStaticSq:  "raw 静止门限 (screen px²)",
+  pressureAlpha:"压感 EMA α (0..1)",
+};
+let _smoothDevPanel = null;
+function _refreshSmoothInputs(p) {
+  for (const el of p.querySelectorAll("[data-skey]")) {
+    const k = el.dataset.skey;
+    if (el.type === "checkbox") el.checked = !!SMOOTH[k];
+    else el.value = String(SMOOTH[k]);
+  }
+}
+function _buildSmoothDevPanel() {
+  const p = document.createElement("div");
+  p.style.cssText = "position:fixed;right:12px;top:60px;z-index:300;background:var(--panel,#fff);color:var(--ink,#222);border:1px solid var(--line,#ccc);border-radius:10px;padding:12px 14px;font:12px/1.5 system-ui;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:300px";
+  const head = document.createElement("div");
+  head.style.cssText = "display:flex;justify-content:space-between;align-items:center;font-weight:600;margin-bottom:8px";
+  head.innerHTML = "<span>平滑调参 (dev)</span>";
+  const close = document.createElement("button");
+  close.textContent = "×";
+  close.style.cssText = "border:none;background:none;font-size:18px;line-height:1;cursor:pointer;color:inherit";
+  close.addEventListener("click", () => { p.style.display = "none"; });
+  head.appendChild(close);
+  p.appendChild(head);
+  for (const k of Object.keys(SMOOTH_DEFAULTS)) {
+    const row = document.createElement("label");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;margin:5px 0";
+    const lbl = document.createElement("span");
+    lbl.textContent = _SMOOTH_LABELS[k] || k;
+    lbl.style.cssText = "flex:1";
+    row.appendChild(lbl);
+    if (typeof SMOOTH_DEFAULTS[k] === "boolean") {
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.dataset.skey = k; cb.checked = !!SMOOTH[k];
+      cb.addEventListener("change", () => { SMOOTH[k] = cb.checked; saveSmooth(); });
+      row.appendChild(cb);
+    } else {
+      const tb = document.createElement("input");
+      tb.type = "text"; tb.inputMode = "decimal"; tb.dataset.skey = k; tb.value = String(SMOOTH[k]);
+      tb.style.cssText = "width:74px;text-align:right;font:inherit";
+      tb.addEventListener("change", () => {
+        const v = parseFloat(tb.value);
+        if (Number.isFinite(v)) { SMOOTH[k] = v; saveSmooth(); }
+        else tb.value = String(SMOOTH[k]);
+      });
+      row.appendChild(tb);
+    }
+    p.appendChild(row);
+  }
+  const reset = document.createElement("button");
+  reset.textContent = "重置默认";
+  reset.style.cssText = "margin-top:8px;width:100%;padding:6px;cursor:pointer";
+  reset.addEventListener("click", () => { resetSmooth(); _refreshSmoothInputs(p); setStatus("平滑参数已重置默认"); });
+  p.appendChild(reset);
+  const note = document.createElement("div");
+  note.style.cssText = "margin-top:8px;color:var(--ink-soft,#888);font-size:11px";
+  note.textContent = "textbox 可打任意数量级值。改完下一笔生效。×100 没变化 = 该参数对当前笔无效。";
+  p.appendChild(note);
+  document.body.appendChild(p);
+  return p;
+}
+els.menuSmoothDev?.addEventListener("click", () => {
+  setMenuOpen(false);
+  if (!_smoothDevPanel) _smoothDevPanel = _buildSmoothDevPanel();
+  const showing = _smoothDevPanel.style.display !== "none";
+  _smoothDevPanel.style.display = showing ? "none" : "block";
+  if (!showing) _refreshSmoothInputs(_smoothDevPanel);
+});
 
 els.menuForcePwaReset.addEventListener("click", async () => {
   els.menuPanel?.classList.add("hidden");

@@ -26,20 +26,20 @@ import { LassoEngine } from "./lasso.js";
 import { ShapesEngine } from "./shapes.js";
 import { FilterBrushEngine } from "./filter-brush.js";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
+import { SMOOTH } from "./smooth-config.js";
 
 const ERASER_RADIUS_SCREEN = 0;   // 用 BrushEngine 自己的 size，不再独立
 const TAP_MAX_DURATION = 220;
 const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
 const DOUBLETAP_MAX_GAP = 80;
-// 位置不做 smoothing —— raw clientX/Y 直传给 brush。brush 端 accumDist 沿
-// path arc-length 等距撒 stamp。input 端只过滤完全没动的 event。
-const RAW_STATIC_SCREEN_SQ = 0.005;     // 0.07 px²；raw 没动就跳，避免触发 brush extendStroke
-// 压感 LPF（stabilizer）：Pencil 自带 ~10Hz 握笔抖动 → 灌进 size = base × p^0.6
-// 会让 step 每秒 10 次缩胀 → segPos 偶尔被 clamp 到段首 → 小堆积 → 视觉上速度
-// 相关的 alpha 结节。LPF 把 10Hz 抖动压平。同步削尖刺，缓解 mid bulb。
-// init = -1 当 sentinel：第一颗 stamp 直接用 raw（保持 tap 满压），之后 LPF。
-const PRESSURE_SMOOTH_ALPHA = 0.4;
+// 平滑管线魔数已移到 src/smooth-config.js (SMOOTH)，dev 面板可 live 调 + 自测：
+//   SMOOTH.rawStaticSq   raw 静止门限（screen px²）
+//   SMOOTH.pressureAlpha 压感 smP 一阶 EMA α
+//   SMOOTH.vref          V_REF（旧四件套；对主笔刷已无效，暴露以自证）
+//   SMOOTH.lookaheadCap  streamline=1 时窗口上限 (screen px)
+//   SMOOTH.dwellMs       T：dwell 时间门 (ms)
+//   SMOOTH.deflate       内缩/毛笔甩尖开关
 // Undo 通过 history.UndoStack（v44 起 command pattern + 注册 handler）。
 // 这里只注册 "stroke" type 的 handler，layer 操作的 handler 在 app.js 注册。
 // 详见 docs/undo-architecture.md。
@@ -52,25 +52,11 @@ const GESTURE_TAP_MAX_MOVE_SQ = 256;     // 16 px²
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
-// streamline 速度自适应参考速度 V_REF (CSS px/ms)。bake 默认 + localStorage 覆盖：
-// 在 dev console / 设置加 entry 时改 localStorage.setItem('webpaint.vref', '0.45')
-// 即可 retune。
-// v124i 改 default 0.3 → 0.1 (user: 「调小，streamline 应该占主导」)
-//   V_REF 0.1 ≈ 1 in/s：日常画都算 "够快、满 streamline"，只有手停级 (<1 in/s)
-//   才 adapt boost。基本 = 老行为 + 微 anti-lag 在真静止时。
-function _streamlineVRef() {
-  const v = parseFloat(localStorage.getItem("webpaint.vref"));
-  return (v > 0 && v < 5) ? v : 0.1;
-}
-
 // v148: streamline → lookahead 平滑窗口（screen px）。引擎按 doc px 用（÷scale）。
-// frozen/tail 平滑半宽 = W；冻结滞后 ≈ W（但 tail 钉笔尖 → 无持久滞后）。
-// 上限可 localStorage 'webpaint.lookahead' 覆盖（默认 90 screen px @ streamline=1）。
+// 上限 = SMOOTH.lookaheadCap（dev 面板可调）。
 function _streamlineToLookaheadPx(streamline) {
   const sl = Math.max(0, Math.min(1, streamline || 0));
-  const max = parseFloat(localStorage.getItem("webpaint.lookahead"));
-  const cap = (max > 0 && max < 1000) ? max : 90;
-  return sl * cap;
+  return sl * (SMOOTH.lookaheadCap > 0 ? SMOOTH.lookaheadCap : 90);
 }
 
 // v124 (user：「统一快捷键注册收集，不会改了这里忘了那里」+「Gallery 等 transient 要小心不要误触」)
@@ -559,7 +545,7 @@ export class InputController {
         const dry = ev.clientY - rec.lastRawY;
         rec.lastRawX = ev.clientX;
         rec.lastRawY = ev.clientY;
-        if (drx * drx + dry * dry < RAW_STATIC_SCREEN_SQ) continue;
+        if (drx * drx + dry * dry < SMOOTH.rawStaticSq) continue;
         // v148: buffered 笔触（brush/erase 非 pixel）位置平滑改由引擎做（lookahead/
         //   frozen/tail，线到笔尖）→ input 直传 raw。smudge/pixel/liquify/filterBrush
         //   仍走四件套（_fourStageSmooth），保持原手感。
@@ -571,9 +557,9 @@ export class InputController {
           psx = sp.x; psy = sp.y;
         }
         const { x: dx, y: dy } = this.board.screenToDoc(psx, psy);
-        // 活动 engine 统一接口：liquify 忽略多余的 pressure 参数
+        // 活动 engine 统一接口：liquify/filterBrush 忽略多余的 pressure/时间戳参数
         const pressure = effectivePressureFor(rec, ev);
-        this._activeStroke?.engine.extendStroke(dx, dy, pressure);
+        this._activeStroke?.engine.extendStroke(dx, dy, pressure, ev.timeStamp);
       }
       // 把活动 engine 累的 dirty bbox 送进 board
       const bbox = this._activeStroke?.engine.flushDirty();
@@ -752,7 +738,7 @@ export class InputController {
     }
 
     // 4) StreamLine：一阶 IIR LPF + 速度自适应（详 docs/streamline-velocity-math.md，已漂移）
-    const V_REF = _streamlineVRef();
+    const V_REF = (SMOOTH.vref > 0) ? SMOOTH.vref : 0.1;
     const alphaBase = Math.max(0.05, 1 - sl);
     const _evtDt = Math.max(1, ev.timeStamp - (rec._prevEvtTs ?? ev.timeStamp - 16));
     rec._prevEvtTs = ev.timeStamp;
@@ -780,8 +766,14 @@ export class InputController {
     const buffered = mode !== "smudge" && !settings.pixelMode;
     rec.rawToEngine = buffered;
     const scale = this.board.viewport.scale || 1;
-    const lookahead = buffered ? _streamlineToLookaheadPx(settings.streamline) / scale : 0;
-    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, lookahead);
+    // v158 时间门：W=弧长窗(doc px)、T=dwell 时间门(ms)、deflate=内缩开关。详 docs/adr/0001。
+    const smooth = buffered ? {
+      W: _streamlineToLookaheadPx(settings.streamline) / scale,
+      T: SMOOTH.dwellMs,
+      deflate: SMOOTH.deflate,
+      t: e.timeStamp,
+    } : {};
+    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth);
     const bbox = this.brush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
@@ -1299,7 +1291,7 @@ function effectivePressureFor(rec, ev) {
     }
   }
   if (rec.smP < 0) rec.smP = raw;
-  else rec.smP += PRESSURE_SMOOTH_ALPHA * (raw - rec.smP);
+  else rec.smP += SMOOTH.pressureAlpha * (raw - rec.smP);
   return rec.smP;
 }
 

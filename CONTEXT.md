@@ -25,6 +25,14 @@ _Avoid_: controller, handler
 把一笔落到 layer 像素上的东西（BrushEngine / LiquifyEngine / FilterBrushEngine / ShapesEngine / LassoEngine）。统一节律 begin/extend/end/cancel。
 _Avoid_: tool (tool 是 UI 层的工具选择), brush (brush 专指圆笔引擎)
 
+**Stroke smoother**:
+笔触位置平滑：把 raw 输入点序列变成平滑的中心线（笔迹脊线），抑制手抖、保住有意的形状。强度由 streamline 参数控制。是 Input→Engine 之间的一级处理。
+_Avoid_: streamline (那是它的强度参数 / UI 名), stabilizer, 防抖
+
+**Dwell (顿)**:
+落笔中**故意的停顿**——高时间、近零位移，常在转角，语义 =「这个角要保住、别被磨圆」。平滑须能识别并保住它；弧长维度看不见 dwell（几乎不累积弧长），只有**时间维度**能。
+_Avoid_: pause / stop（泛词）, hover
+
 **Selection**:
 选区，doc 的一等公民。**不可变值对象**（bbox + maskCanvas，alpha=255 内/0 外），拥有 mask 操作：compose（并/减/交）、invert、outline（懒算缓存的行军蚁描边）、applyMaskPostStroke、fill/clearOnLayer、croppedTo/resampledTo。compose/invert/transform 返回新 Selection。`doc.selection` 持 Selection|null，null=无选区=全图可作用。undo 只换引用，不深拷。
 _Avoid_: mask (mask 是 Selection 的实现细节), marquee, selection state

@@ -844,6 +844,9 @@
       <button class="menu-item" id="menuForcePwaReset" type="button" role="menuitem">
         <span class="menu-item-label">强制更新（清缓存重启）</span>
       </button>
+      <button class="menu-item" id="menuSmoothDev" type="button" role="menuitem">
+        <span class="menu-item-label">平滑调参（dev）</span>
+      </button>
       <button class="menu-item" id="menuCheckUpdate" type="button" role="menuitem" hidden></button>
 
       <!-- v124 删主菜单 "清空当前图层"——user 要求挪进图层 ⋯ menu。stub 留 id 给 app.js 兜底 -->
@@ -919,6 +922,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-b5710ad3edbb.mjs"></script>
+    <script type="module" src="./dist/webpaint-cba21cf8a669.mjs"></script>
   </body>
 </html>
