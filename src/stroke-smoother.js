@@ -21,14 +21,24 @@
 // 纯几何，无 canvas。压感原样挂 C[i].p（引擎侧已过 pressureLPF）。
 
 export class StrokeSmoother {
-  // opts: { W (弧长 doc px), T (时间 ms), deflate (bool) }
+  // opts: { W (弧长 doc px), T (时间 ms), deflate (bool), boost (轻压平滑增益) }
   constructor(opts = {}) {
     this.W = Math.max(0, opts.W || 0);
     this.T = opts.T > 0 ? opts.T : Infinity;   // ≤0 → 无时间门（退化纯弧长）
     this.deflate = !!opts.deflate;             // true → 0 阶（内缩）；false → 2 阶（保曲率）
+    // v162 压感轴自适应：轻压 → 窗口更大 → 平滑更强（治提笔/轻描抖）。W_i = W×(1+boost×(1−p))。
+    this.boost = Math.max(0, opts.boost || 0);
+    this.Wmax = this.W * (1 + this.boost);     // 冻结用保守上界（保前缀缓存单调）
     this.rx = []; this.ry = []; this.rp = []; this.rs = []; this.rt = [];
     this.cx = []; this.cy = []; this.cp = [];
     this.cFrozenCount = 0;
+  }
+
+  // 点 i 的窗口（弧长）：轻压 p→0 时 ×(1+boost)，重压 p→1 时 = W。
+  _Wat(i) {
+    if (this.boost <= 0) return this.W;
+    const p = Math.max(0, Math.min(1, this.rp[i]));
+    return this.W * (1 + this.boost * (1 - p));
   }
 
   get count() { return this.rx.length; }
@@ -52,10 +62,11 @@ export class StrokeSmoother {
     return ans;
   }
 
-  // (tip_s − s_i ≥ W) 或 (tip_t − t_i ≥ T) 的最大 i
+  // (tip_s − s_i ≥ Wmax) 或 (tip_t − t_i ≥ T) 的最大 i。
+  // 用 Wmax 保守冻结：任意点的 W_i ≤ Wmax → tip 过了 Wmax 其窗口必闭，且 tip_s−s_i 单调 → 前缀。
   frozenIndex() {
     if (this.W <= 0) return this.rx.length - 1;     // 无平滑 → 全可冻
-    const arcAns = this._lastLE(this.rs, this.tipS - this.W);
+    const arcAns = this._lastLE(this.rs, this.tipS - this.Wmax);
     const timeAns = (this.T === Infinity) ? -1 : this._lastLE(this.rt, this.tipT - this.T);
     return Math.max(arcAns, timeAns);
   }
@@ -64,11 +75,12 @@ export class StrokeSmoother {
     const W = this.W, T = this.T;
     const xi = this.rx[i], yi = this.ry[i];
     if (W <= 0) { this.cx[i] = xi; this.cy[i] = yi; this.cp[i] = this.rp[i]; return; }
+    const Wi = this._Wat(i);                     // 该点窗口（轻压更大）
     const si = this.rs[i], ti = this.rt[i];
     let m0 = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0;
     let bx0 = 0, bx1 = 0, bx2 = 0, by0 = 0, by1 = 0, by2 = 0;
     const acc = (j) => {
-      const u = (this.rs[j] - si) / W;          // ∈[−1,1]
+      const u = (this.rs[j] - si) / Wi;         // ∈[−1,1]
       const w = 1 - Math.abs(u);                 // 弧长三角权（时间只做硬门，不入权 → 快速=旧版逐字节同）
       const u2 = u * u;
       m0 += w; m1 += w * u; m2 += w * u2; m3 += w * u2 * u; m4 += w * u2 * u2;
@@ -76,9 +88,9 @@ export class StrokeSmoother {
       bx0 += w * X; bx1 += w * u * X; bx2 += w * u2 * X;
       by0 += w * Y; by1 += w * u * Y; by2 += w * u2 * Y;
     };
-    // 窗口 = 弧长 ∩ 时间；任一超界即停（s、t 都单调 → 越远只会更超）
-    for (let j = i; j >= 0; j--) { if (si - this.rs[j] > W || ti - this.rt[j] > T) break; acc(j); }
-    for (let j = i + 1, n = this.rx.length; j < n; j++) { if (this.rs[j] - si > W || this.rt[j] - ti > T) break; acc(j); }
+    // 窗口 = 弧长(W_i) ∩ 时间(T)；任一超界即停（s、t 都单调 → 越远只会更超）
+    for (let j = i; j >= 0; j--) { if (si - this.rs[j] > Wi || ti - this.rt[j] > T) break; acc(j); }
+    for (let j = i + 1, n = this.rx.length; j < n; j++) { if (this.rs[j] - si > Wi || this.rt[j] - ti > T) break; acc(j); }
 
     let fx, fy;
     if (this.deflate) {                          // 0 阶：加权均值（内缩/毛笔甩尖）
@@ -95,7 +107,7 @@ export class StrokeSmoother {
     }
     // ramp：v159 起**不再钉死起笔**（Procreate 落地即平滑：起点用前向 lookahead 的二次拟合，无偏不拖）。
     //   只保**笔尖**钉 raw（贴指）。笔尖 reach = 弧长/时间较大者，两者都→0(刚画的) → r→0 → C=raw。
-    const rightFrac = Math.max((this.tipS - si) / W, T === Infinity ? 0 : (this.tipT - ti) / T);
+    const rightFrac = Math.max((this.tipS - si) / Wi, T === Infinity ? 0 : (this.tipT - ti) / T);
     const r = Math.max(0, Math.min(1, rightFrac));
     this.cx[i] = xi + r * (fx - xi);
     this.cy[i] = yi + r * (fy - yi);

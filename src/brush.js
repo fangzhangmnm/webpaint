@@ -55,7 +55,7 @@ const DEFAULT_SETTINGS = {
   pressureGamma: 1.0,
   // v102: 压感时间域 LPF (ms，一阶 IIR)
   // 0 = raw，正值 = 平滑（解 "转角顿一下 out-leg 突然细" 的问题）
-  pressureLPF: 0,
+  pressureLPF: 50,
   // shape：
   hardness: 0.75,
   shapeKind: "round",
@@ -204,7 +204,7 @@ export class BrushEngine {
       _composeAtCount: -1,                      // 上次 compose 时的 sm.count（同帧缓存用）
       _taperTotal: null,                        // endStroke 时填总笔长，给出端 taper 用（live 为 null=不 taper）
       // --- v148 frozen/tail · v158 时间门 ---
-      sm: buffered ? new StrokeSmoother({ W: smooth.W || 0, T: smooth.T, deflate: smooth.deflate }) : null,
+      sm: buffered ? new StrokeSmoother({ W: smooth.W || 0, T: smooth.T, deflate: smooth.deflate, boost: smooth.boost }) : null,
       // frozen 撒点游标（沿平滑中心线 C 的连续走样）
       frozenWalk: { ci: 0, started: false, accumDist: 0, lastP: pLPF0, strokeDist: 0 },
       // tail buffer（预分配 grow-only，覆盖 tail bbox 子区）

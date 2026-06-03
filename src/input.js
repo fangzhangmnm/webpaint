@@ -771,6 +771,7 @@ export class InputController {
       W: _streamlineToLookaheadPx(settings.streamline) / scale,
       T: SMOOTH.dwellMs,
       deflate: SMOOTH.deflate,
+      boost: SMOOTH.smoothBoost,
       t: e.timeStamp,
     } : {};
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth);

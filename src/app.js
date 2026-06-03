@@ -379,7 +379,7 @@ function applyBrushPresetFrozen(brush) {
   state.brush.opaCoeff      = brush.opaCoeff ?? 0.6;
   state.brush.flowCoeff     = brush.flowCoeff ?? 0;
   state.brush.pressureGamma = brush.pressureGamma ?? 1.0;
-  state.brush.pressureLPF   = brush.pressureLPF ?? 0;       // v102 时间域压感平滑
+  state.brush.pressureLPF   = brush.pressureLPF ?? 50;      // v102 时间域压感平滑（v161 默认 50ms：100ms 太钝，抬笔不收=末端不渐细）
   state.brush.compositeMode = brush.compositeMode || "wash";
   state.brush.spacing       = (typeof brush.spacing === "number")
     ? brush.spacing
@@ -4189,6 +4189,7 @@ const paletteWindow = new PaletteWindow({
 const _SMOOTH_LABELS = {
   lookaheadCap: "窗口上限 W (screen px @ streamline=1)",
   dwellMs:      "dwell 时间门 T (ms)",
+  smoothBoost:  "轻压平滑增益 (0=关, 1=轻按窗口×2)",
   deflate:      "内缩/毛笔甩尖 (开=0阶 / 关=保曲率)",
   vref:         "V_REF 旧四件套 (疑似对主笔刷无效)",
   rawStaticSq:  "raw 静止门限 (screen px²)",
@@ -6288,7 +6289,7 @@ _rackEls.newBtn.addEventListener("click", () => {
       shape: { kind: "round", aspect: 1, rotation: 0, hardness: 1.0, textureB64: null },
       size: { base: 12, max: 200 },
       sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
-      pressureGamma: 1.0, pressureLPF: 0, defaultOpa: 1.0,
+      pressureGamma: 1.0, pressureLPF: 50, defaultOpa: 1.0,
       compositeMode: "wash", spacing: 0.06, pixelMode: false,
       taper: { in: 0, out: 0 },
       smudge: _rackCurrentTool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
@@ -6581,7 +6582,7 @@ function _renderBrushSettings() {
   if (b.opaCoeff == null)  b.opaCoeff = 0.6;
   if (b.flowCoeff == null) b.flowCoeff = 0;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
-  if (b.pressureLPF == null) b.pressureLPF = 0;
+  if (b.pressureLPF == null) b.pressureLPF = 50;
   if (b.compositeMode == null) b.compositeMode = "wash";
   if (b.defaultOpa == null) b.defaultOpa = 1.0;
   if (!b.smooth) b.smooth = { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 };

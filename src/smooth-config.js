@@ -11,6 +11,7 @@ const LS_KEY = "webpaint.smooth.v1";
 export const SMOOTH_DEFAULTS = Object.freeze({
   lookaheadCap: 90,    // streamline=1 时的窗口上限（screen px）；W_doc = streamline × cap ÷ scale
   dwellMs:      120,   // T：dwell 时间门（ms）。笔速 < W/T 时时间门生效，保住顿的尖角 + 按时冻结
+  smoothBoost:  1,     // 轻压平滑增益：W_i = W×(1+boost×(1−p))。轻按(p→0)窗口×(1+boost) → 治提笔/轻描抖。0=关
   deflate:      false, // 内缩/毛笔甩尖：false→2 阶(保曲率,默认) / true→0 阶(内缩)
   vref:         0.1,   // V_REF（旧四件套速度自适应；已知对主笔刷无效，暴露以自证）
   rawStaticSq:  0.005, // raw 静止门限（screen px²）：动得比这小的 event 跳过
