@@ -85,7 +85,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
           if (e && e.name === "CloudConflictError") {
             if (await _tryHeal(name, bytes)) return _finish(name, v0, getEditVersion, "healed");
             const choice = onConflict ? await onConflict({ name }) : "keep";
-            return await _resolveConflict(name, choice, { adopt, saveBranch, now });   // pull/branch 在 Store 内执行
+            return await _resolveConflict(name, choice, { bytes, adopt, saveBranch, now });   // pull/branch/weak-override 在 Store 内执行
           }
           if (_retriable(e) && attempt < maxAttempts) { lastErr = e; await _sleep(backoffMs * attempt); continue; }
           throw e;
@@ -123,12 +123,18 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // push 和 open 共用，绝不静默覆盖。
   // 给了执行回调（adopt for pull / saveBranch for branch）→ Store 内执行，返 "resolved"。
   // 没给（或 keep/rename 这类身份变更）→ 返 "conflict"+choice，交 app 处理（向后兼容旧消费代码）。
-  async function _resolveConflict(name, choice, { adopt, saveBranch, now = () => 0 } = {}) {
+  async function _resolveConflict(name, choice, { bytes, adopt, saveBranch, now = () => 0 } = {}) {
     if (choice === "pull" && adopt) {
       const r = await _safePull(name, adopt);
       return r.ok
         ? { status: "resolved", resolution: "pull", backupName: r.backupName }
         : { status: "conflict", choice, resolution: "pull-failed", reason: r.reason, backupName: r.backupName, dirtyAfter: true };
+    }
+    // weak-override（Work 的 never-lose 覆盖）：云端→.backup，再 force-push 本地。需 bytes（仅 push 上下文有）。
+    if (choice === "weak-override" && bytes != null && cloud.weakOverride) {
+      const r = await cloud.weakOverride(name, bytes);
+      if (r.item && r.item.eTag) _base.set(name, r.item.eTag);
+      return { status: "resolved", resolution: "weak-override", backedUp: r.backedUp };
     }
     if (choice === "branch" && saveBranch) {
       const r = await cloud.pull(name);

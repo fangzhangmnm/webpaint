@@ -40,7 +40,7 @@ export function memKv() {
  */
 export function createCloudSync(cfg) {
   const { provider, kv, fileName, contentType = "application/octet-stream",
-    trashFolder = ".trash", appKey = "sync" } = cfg;
+    trashFolder = ".trash", backupFolder = ".backup", appKey = "sync" } = cfg;
   const now = cfg.now || (() => Date.now());
   // match(item)：哪些云端文件算"session"（扩展名 agnostic；默认所有非文件夹）。gallery 列表用。
   const match = cfg.match || ((it) => !it.isFolder);
@@ -124,6 +124,25 @@ export function createCloudSync(cfg) {
     await provider.delete(itemId);
   }
 
+  // weak-override（ADR-0009 / share-file-model）：用本地覆盖云端，但**云端 loser 先 stash 进 .backup 不丢**。
+  // 永不 lossy（Work 禁 hard-override / destructive pull；这是 never-lose 的覆盖）。返 { item, backedUp }。
+  async function weakOverride(name, bytes) {
+    const path = fileName(name);
+    const cur = await provider.getItemByPath(path);
+    let backedUp = null;
+    if (cur) {
+      const folderId = await provider.ensureFolder(backupFolder);
+      const stamped = fileName(`${baseName(name)} [${now()}]`);
+      await provider.move(cur.id, folderId, { newName: stamped, conflictBehavior: "fail" });
+      backedUp = `${backupFolder}/${stamped}`;
+    }
+    // 原 path 现已空 → force-push 本地（无 If-Match）。
+    let item = await provider.upload(path, bytes, { contentType, conflictBehavior: "replace" });
+    if (!item || !item.eTag) { const f = await provider.getItemByPath(path).catch(() => null); if (f && f.eTag) item = f; }
+    if (item && item.eTag) { setETag(name, item.eTag); setDirty(name, false); }
+    return { item, backedUp };
+  }
+
   // ---- gallery 列表 / rename / 硬删（扩展名 agnostic：match/toName 注入）----
   async function _walk(subpath, out, depth) {
     if (depth > 8) return;
@@ -170,7 +189,7 @@ export function createCloudSync(cfg) {
   }
 
   return {
-    push, pull, fetchMeta,
+    push, pull, fetchMeta, weakOverride,
     trash, restore, purge,
     list, listTrash, rename, remove,
     getETag, setETag, isDirty, setDirty, clearState,

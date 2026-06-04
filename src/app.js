@@ -2180,10 +2180,11 @@ async function checkCloudETag(sessionName) {
     title: "云端有新版本",
     message: `${sessionName} 在云端 ${formatCloudTime(cloudTime)} 有新版本。本地是 ${getLocalSavedAtLabel()}。`,
     showSpinner: false,
+    // spec（file-enter）：安全项 no-op 默认（本地可能有未推编辑，默认拉云会丢）。override-local / no-op / 两份都留。
     actions: [
-      { label: "拉云端（备份本地）", value: "pull", primary: true },
-      { label: "保留本地（之后 push 可能冲突）", value: "keep" },
-      { label: "云端开为副本", value: "branch" },
+      { label: "保留本地（之后 push 会再确认）", value: "keep", primary: true },
+      { label: "用云端覆盖本地（本地先备份进 .backup）", value: "pull" },
+      { label: "两份都留（云端另存为副本）", value: "branch" },
     ],
   });
   if (choice === "pull") {
@@ -2997,19 +2998,23 @@ async function saveAndPush() {
         webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
       }),
       getEditVersion: () => _editVersion,
+      // spec（share-file-model / ADR-0009）：Work 禁 destructive pull。no-op 安全默认 / save-as / weak-override。
       onConflict: async () => await lockSyncGate({
         title: "云端有更新版本",
-        message: `${sessionName} 在云端已被改过。推会覆盖那次改动。`,
+        message: `「${sessionName}」云端已被改过；你本地是 ${getLocalSavedAtLabel()}。`,
         showSpinner: false,
         actions: [
-          { label: "拉云端覆盖本地（备份本地）", value: "pull", primary: true },
-          { label: "保留本地另存为副本", value: "rename" },
-          { label: "都留（云端开为副本）", value: "branch" },
+          { label: "保留本地、暂不推（稍后再决定）", value: "no-op", primary: true },
+          { label: "本地另存为新名再推", value: "save-as" },
+          { label: "用本地覆盖云端（云端原版存进 .backup，不丢）", value: "weak-override" },
         ],
       }),
     });
     if (result.status === "conflict") {
-      conflictChoice = result.choice;
+      conflictChoice = result.choice;                 // no-op / save-as（app 执行）
+    } else if (result.status === "resolved" && result.resolution === "weak-override") {
+      setStatus(`已用本地覆盖云端：${sessionName}（云端原版存进 .backup，可恢复）`);
+      renderGallery();
     } else {
       setStatus(result.status === "healed"
         ? `已同步到云端：${sessionName}（云端本已是这份）`
@@ -3023,35 +3028,13 @@ async function saveAndPush() {
     _cloudPushing = false;
     updateSaveStatus();
   }
-  // 冲突执行（在 _cloudPushing 释放之后；复用既有 primitives，与原 saveAndPush 同序）
-  if (conflictChoice === "pull") {
-    const backupName = `${sessionName}-backup-${Date.now()}`;
-    try { await renameLocalSessionAsBackup(sessionName, backupName); }
-    catch (err) { setStatus(`本地备份失败，已取消拉云端：${err.message || err}`, true); return; }
-    try {
-      const r = await pullSessionByPath(sessionName + ".ora");
-      if (r) {
-        const loaded = await decodeOraToDoc(r.blob);
-        adoptLoadedDoc(loaded, sessionName);
-        await saveSession(doc, sessionName, {});
-        setStatus(`已拉云端；本地原版备份为「${backupName}」`);
-      } else {
-        setStatus(`云端找不到「${sessionName}」（备份「${backupName}」可删）`, true);
-      }
-    } catch (err) { setStatus(`拉云端失败：${err.message || err}（备份「${backupName}」可删）`, true); }
-  } else if (conflictChoice === "rename") {
+  // 冲突执行：weak-override 已由 store 内部完成（云端→.backup + 本地上位）；这里只处理 no-op / save-as。
+  if (conflictChoice === "no-op") {
+    setStatus(`已保留本地，云端未动；下次推会再确认（${sessionName}）`);
+  } else if (conflictChoice === "save-as") {
+    // spec：save-as = 本地另存新名再推（one attempt；renameCurrentSession 内含同名检查）。
     const newName = await renameCurrentSession({ suggested: sessionName + " (新)", reason: "云端冲突" });
     if (newName && isSignedIn()) { setCloudDirty(newName, true); queueSave("push"); }
-  } else if (conflictChoice === "branch") {
-    try {
-      const r = await pullSessionByPath(sessionName + ".ora");
-      if (r) {
-        const branchName = `${sessionName}-cloud-${Date.now()}`;
-        const loaded = await decodeOraToDoc(r.blob);
-        await saveSession(loaded, branchName, {});
-        setStatus(`云端版开为「${branchName}」；本地未变`);
-      }
-    } catch (err) { setStatus("开副本失败：" + (err.message || err), true); }
   }
 }
 
