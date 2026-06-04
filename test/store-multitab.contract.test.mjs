@@ -37,7 +37,7 @@ describe("C4 多 tab base-etag", () => {
 
     // B 仍基于 E1（它的内存 base 没被 A 改），尽管共享 LS 已是 E2
     const rB = await tabB.flow.push("画", { encode: enc("vB"), onConflict: async () => "keep" });
-    eq(rB.status, "conflict", "B 的陈旧推被 412 拦下");
+    eq(rB.status, "conflict", "B 的陈旧推被 412 拦下，交 app 决策（没静默覆盖）");
     eq(await srvBytes(mock, "画.ora"), "vA", "云端是 A 的版本，B 没静默覆盖");
   });
 

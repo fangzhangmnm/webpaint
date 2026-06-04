@@ -3,6 +3,7 @@
 // Store 编排在上，底层注入「真 cloud.js（跑在 MockCloudProvider 上）」当 adapter。
 import { describe, it, assert, eq, throwsStatus } from "./runner.mjs";
 import { createMockProvider } from "../src/store/mock-provider.js";
+import { createMockLocal } from "../src/store/mock-local.js";
 import { createStore } from "../src/store/store.js";
 import { memLS, graphFromProvider, blobText } from "./helpers.mjs";
 
@@ -19,6 +20,15 @@ function fresh() {
   cloud.__setSignedIn(() => true);
   const store = createStore({ cloud, sleep: fastSleep, backoffMs: 0 });
   return { mock, store };
+}
+function freshLocal() {
+  globalThis.localStorage.clear();
+  const mock = createMockProvider();
+  cloud.__setGraph(graphFromProvider(mock));
+  cloud.__setSignedIn(() => true);
+  const local = createMockLocal();
+  const store = createStore({ cloud, local, sleep: fastSleep, backoffMs: 0 });
+  return { mock, local, store };
 }
 const enc = (s) => () => new TextEncoder().encode(s);
 const srvBytes = async (mock, path) => blobText(await mock.download((await mock.getItemByPath(path)).id));
@@ -132,19 +142,47 @@ describe("retry 退避重试", () => {
 });
 
 describe("真冲突（非自愈）", () => {
-  it("云端是别人改的、与本地不同 → onConflict 被调用，status=conflict", async () => {
+  it("没给执行回调 → status=conflict+choice，交 app 处理（向后兼容）", async () => {
     const { mock, store } = fresh();
-    await store.flow.push("画", { encode: enc("v1") });          // known etag E1
-    await mock.upload("画.ora", "OTHER-DEVICE", {});             // 别的设备写了不同内容，etag 变
-
+    await store.flow.push("画", { encode: enc("v1") });
+    await mock.upload("画.ora", "OTHER-DEVICE", {});
     let seen = null;
-    const r = await store.flow.push("画", {
-      encode: enc("v2"),
-      onConflict: async (info) => { seen = info; return "keep"; },
-    });
-    eq(r.status, "conflict");
-    eq(r.choice, "keep");
+    const r = await store.flow.push("画", { encode: enc("v2"), onConflict: async (info) => { seen = info; return "pull"; } });
+    eq(r.status, "conflict");      // pull 但没传 adopt → 不在 Store 执行，交 app
+    eq(r.choice, "pull");
     assert(seen && seen.name === "画", "onConflict 收到 name");
-    eq(await srvBytes(mock, "画.ora"), "OTHER-DEVICE", "未自作主张覆盖云端");
+    eq(await srvBytes(mock, "画.ora"), "OTHER-DEVICE", "未覆盖云端");
+  });
+
+  it("pull → Store 内执行 _safePull（备份→拉→覆盖→adopt），status=resolved", async () => {
+    const { mock, local, store } = freshLocal();
+    await store.flow.push("画", { encode: enc("v1") });
+    await local.save("画", new TextEncoder().encode("v1"));
+    await mock.upload("画.ora", "cloud-v2", {});
+    let adopted = null;
+    const r = await store.flow.push("画", {
+      encode: enc("v2-local"),
+      onConflict: async () => "pull",
+      adopt: async (blob) => { adopted = new TextDecoder().decode(new Uint8Array(await blob.arrayBuffer())); },
+    });
+    eq(r.status, "resolved"); eq(r.resolution, "pull");
+    eq(adopted, "cloud-v2", "adopt 收到云端版本");
+    eq(new TextDecoder().decode(await local.get("画")), "cloud-v2", "本地已覆盖为云端版");
+  });
+
+  it("branch → Store 内拉云存副本，status=resolved，原作不动", async () => {
+    const { mock, local, store } = freshLocal();
+    await store.flow.push("画", { encode: enc("v1") });
+    await local.save("画", new TextEncoder().encode("v1-local"));
+    await mock.upload("画.ora", "cloud-v2", {});
+    const r = await store.flow.push("画", {
+      encode: enc("v2-local"),
+      onConflict: async () => "branch",
+      saveBranch: async (blob, name) => { await local.save(name, blob); },
+      now: () => 999,
+    });
+    eq(r.status, "resolved"); eq(r.resolution, "branch"); eq(r.branchName, "画-cloud-999");
+    eq(new TextDecoder().decode(await local.get("画-cloud-999")), "cloud-v2");
+    eq(new TextDecoder().decode(await local.get("画")), "v1-local", "原作不动");
   });
 });

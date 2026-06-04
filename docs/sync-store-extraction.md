@@ -4,6 +4,32 @@
 > 上游需求：MyPWAPatterns `docs/sync-library-spec.md`（RFC）+ `docs/MASTER.md §A`（红线）。
 > 架构 review：MyPWAPatterns `docs/reports/20260604-webpaint-architecture-review.html` 候选 1。
 
+## 终极目标 + 接缝（2026-06-04 定）
+
+**Store 本身就是产物**：app-agnostic 的可复用同步模块（家族 sync-store lib）。app 层切干净 = **定义好这道消费接缝**（app wire 什么进 Store），之后交接给别人/别的 session 收尾。**火力集中在把 Store 做完整可测，不盲改 app.js 那 58 处。**
+
+旧 app.js code = AI slop（已挖出 H7 / cloud-dirty / 多tab 三个真 bug 都在旧 code）。所以「保旧 code 增量包一层」不是降风险，是把 slop 缠进干净模块。消费层该重写、不该护。**但物理约束：浏览器/DOM/真云 node 测不了** → 策略=尽量多逻辑做成 Mock 可测的模块，app 压成薄壳，薄壳真机验。
+
+### 消费接缝（app 要 wire 进 Store 的）
+
+```
+createStore({
+  cloud,   // CloudProvider（WebPaint=cloud.js 包 OneDrive；家族各自实现）
+  local,   // store.local 契约（WebPaint=local-adapter.js 包 session/storage；MockLocal 测）
+})
+// flow 调用时 app 传的回调（真·doc/UI/env，不进 Store 核心）：
+//   encode()            doc → ora bytes
+//   adopt(bytes,name)   bytes → 活编辑器（pull 后反映；给了它 Store 才在内部执行 pull）
+//   saveBranch(bytes,n) bytes → 另存副本（给了它 Store 才在内部执行 branch）
+//   getEditVersion()    app 编辑游标（B2 不丢编辑）
+//   isOnline()          环境
+//   onConflict/onNewer/confirm/onDirtyWarn/busy   UI sheet/spinner
+//   store.adoptBase(name, etag)  打开 session 时 app 调，捕获本 tab base（C4 多tab）
+// app 仍持有（doc 身份，全局共享，不进 Store）：_activeSessionName / _docDirty / doc 本体
+```
+
+**冲突执行深化（2026-06-04）**：pull/branch 现在**在 Store 内执行**（`_resolveConflict` + `_safePull`），前提是 app 传了 `adopt`/`saveBranch`。没传 → 返 `{status:"conflict",choice}` 交 app（向后兼容旧 saveAndPushViaStore，dev 不破）。交接时 app 改成传 adopt/saveBranch，冲突 pull/branch 代码就从 app.js 删掉。
+
 ## 决定（2026-06-04）
 
 - **先在 WebPaint 内部建 Store**（`src/store/`），验稳再整体 lift 到 MyPWAPatterns/sync-store。不先在共享 repo 立架子（spec §9 的反向）——配合「理欠债」节奏，改动闭环、真机验证快。

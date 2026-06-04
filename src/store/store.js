@@ -70,7 +70,7 @@ export function createStore({ cloud, local, maxAttempts = 4, backoffMs = 200, sl
     return { status, dirtyAfter };
   }
 
-  async function _doPush(name, { encode, getEditVersion = () => 0, onConflict, busy = passBusy } = {}) {
+  async function _doPush(name, { encode, getEditVersion = () => 0, onConflict, adopt, saveBranch, now, busy = passBusy } = {}) {
     const v0 = getEditVersion();
     const bytes = await toU8(await encode());      // 只编码一次，重试复用（B5 逐字节比对要相等）
     return busy("正在同步…", async () => {
@@ -85,7 +85,7 @@ export function createStore({ cloud, local, maxAttempts = 4, backoffMs = 200, sl
           if (e && e.name === "CloudConflictError") {
             if (await _tryHeal(name, bytes)) return _finish(name, v0, getEditVersion, "healed");
             const choice = onConflict ? await onConflict({ name }) : "keep";
-            return { status: "conflict", choice, dirtyAfter: true };
+            return await _resolveConflict(name, choice, { adopt, saveBranch, now });   // pull/branch 在 Store 内执行
           }
           if (_retriable(e) && attempt < maxAttempts) { lastErr = e; await _sleep(backoffMs * attempt); continue; }
           throw e;
@@ -113,8 +113,31 @@ export function createStore({ cloud, local, maxAttempts = 4, backoffMs = 200, sl
     const r = await cloud.pullSession(name);
     if (!r) return { ok: false, reason: "cloud-vanished", backupName };
     await local.save(name, r.blob);                // 覆盖本地为云端版（原件已备份）
+    if (r.item && r.item.eTag) _base.set(name, r.item.eTag);  // base 推进到云端版本（多tab/冲突后一致）
+    cloud.setCloudDirty(name, false);              // 已采纳云端 → 不再 unpushed
     if (adopt) await adopt(r.blob, name);          // 反映到活编辑器
     return { ok: true, backupName };
+  }
+
+  // 真冲突的执行（pull/branch 在 Store 内做；keep/rename 交回 app 处理身份变更）。
+  // push 和 openSession 共用，绝不静默覆盖。
+  // 给了执行回调（adopt for pull / saveBranch for branch）→ Store 内执行，返 "resolved"。
+  // 没给（或 keep/rename 这类身份变更）→ 返 "conflict"+choice，交 app 处理（向后兼容旧消费代码）。
+  async function _resolveConflict(name, choice, { adopt, saveBranch, now = () => 0 } = {}) {
+    if (choice === "pull" && adopt) {
+      const r = await _safePull(name, adopt);
+      return r.ok
+        ? { status: "resolved", resolution: "pull", backupName: r.backupName }
+        : { status: "conflict", choice, resolution: "pull-failed", reason: r.reason, backupName: r.backupName, dirtyAfter: true };
+    }
+    if (choice === "branch" && saveBranch) {
+      const r = await cloud.pullSession(name);
+      if (!r) return { status: "conflict", choice, resolution: "cloud-vanished", dirtyAfter: true };
+      const branchName = `${name}-cloud-${now()}`;
+      await saveBranch(r.blob, branchName);
+      return { status: "resolved", resolution: "branch", branchName };
+    }
+    return { status: "conflict", choice, dirtyAfter: true };  // 交回 app（旧 saveAndPushViaStore 自己执行）
   }
 
   // C2：开 session 的云端 gate。绝不静默覆盖。E8：probe（跳过到离线）与 metadata race，无硬超时。
@@ -169,7 +192,7 @@ export function createStore({ cloud, local, maxAttempts = 4, backoffMs = 200, sl
       if (_retriable(e)) return { status: "deferred", canClearActive: true, queued: true };
       throw e;
     }
-    const safe = (r.status === "pushed" || r.status === "healed") && !r.dirtyAfter;
+    const safe = ["pushed", "healed", "resolved"].includes(r.status) && !r.dirtyAfter;
     return { ...r, canClearActive: safe };
   }
 
