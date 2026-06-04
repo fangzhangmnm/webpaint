@@ -4,6 +4,8 @@ import { describe, it, assert, eq } from "./runner.mjs";
 import { createMockProvider } from "../src/store/mock-provider.js";
 import { memLS, graphFromProvider, blobText } from "./helpers.mjs";
 
+const srvBytes = async (mock, path) => blobText(await mock.download((await mock.getItemByPath(path)).id));
+
 // cloud.js 的 etag/dirty 缓存读全局 localStorage —— import 前装好 shim。
 globalThis.localStorage = memLS();
 const cloud = await import("../src/cloud.js");
@@ -37,6 +39,19 @@ describe("pushSession", () => {
     assert(err, "应抛错");
     eq(err.name, "CloudConflictError", "应是 CloudConflictError");
     eq(err.sessionName, "画", "带 sessionName");
+  });
+});
+
+describe("pushSession H7（分片上传末响应无 item）", () => {
+  it("upload 返回 null（字节其实已写）→ 拉权威 etag，不崩、不缓存 null", async () => {
+    const mock = fresh();
+    const g = graphFromProvider(mock);
+    // 包一层：真写入但返回 null（模拟 >4MB 分片末响应不带 driveItem）
+    cloud.__setGraph({ ...g, uploadFileToApproot: async (...a) => { await g.uploadFileToApproot(...a); return null; } });
+    const { item } = await cloud.pushSession("画", "v1");
+    assert(item && item.eTag, "应从 getItemByPath 拿回权威 etag");
+    eq(cloud.getKnownETag("画"), item.eTag, "缓存的是真 etag，不是 null");
+    eq(await srvBytes(mock, "画.ora"), "v1", "字节确实上去了");
   });
 });
 

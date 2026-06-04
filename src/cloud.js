@@ -103,12 +103,20 @@ export async function pushSession(name, oraBlob, opts = {}) {
   const path = sessionFileName(name);
   const knownETag = ("baseEtag" in opts) ? opts.baseEtag : getKnownETag(name);
   try {
-    const item = await graph.uploadFileToApproot(path, oraBlob, ORA_CT, {
+    let item = await graph.uploadFileToApproot(path, oraBlob, ORA_CT, {
       conflictBehavior: "replace",
       eTag: knownETag,                    // 首次推 null → 服务器接受
     });
-    setKnownETag(name, item.eTag);
-    setCloudDirty(name, false);
+    // H7：>4MB 走分片上传，最后一个 200/201 响应有时**不带 driveItem/eTag** → item 可能 null。
+    // 绝不在 null.eTag 上崩、也绝不缓存 null etag（会让之后每次 push 都 412）。拉一次权威 etag。
+    if (!item || !item.eTag) {
+      const fresh = await graph.getItemByPath(path).catch(() => null);
+      if (fresh && fresh.eTag) item = fresh;
+    }
+    if (item && item.eTag) {
+      setKnownETag(name, item.eTag);
+      setCloudDirty(name, false);
+    }
     return { item };
   } catch (e) {
     if (e.status === 412) {
