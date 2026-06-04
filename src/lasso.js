@@ -39,6 +39,7 @@ export class LassoEngine {
     this._setOpMode = "new";      // new | union | subtract | intersect
     this._constrainSquare = false; // rect / ellipse 是否强制 1:1（正方形 / 圆）
     this._magicThreshold = 20;    // 0..100；魔术棒颜色相似度
+    this._magicExpand = 2;        // 选区扩展(+)/收缩(−) px。默认 +2 吃掉抗锯齿线的白边halo
     this._sampleMode = "bicubic"; // nearest | bilinear | bicubic（transform 重采样质量）
     // v125 (user：「bilinear 质量太差，默认双三次」)
     this._points = [];            // freehand draft
@@ -62,6 +63,8 @@ export class LassoEngine {
   getSetOpMode() { return this._setOpMode; }
   setMagicThreshold(v) { this._magicThreshold = Math.max(0, Math.min(100, v)); }
   getMagicThreshold() { return this._magicThreshold; }
+  setMagicExpand(v) { this._magicExpand = Math.max(-20, Math.min(20, Math.round(v))); }
+  getMagicExpand() { return this._magicExpand; }
   setSampleMode(m) {
     if (m === "nearest" || m === "bilinear" || m === "bicubic") {
       this._sampleMode = m;
@@ -356,6 +359,18 @@ export class LassoEngine {
     }
     if (mxx < 0) return null;
 
+    // 扩展/收缩：抗锯齿线art 填色会留 1~2px 白边（半透明边缘像素差超阈值=barrier，没入选）。
+    //   默认 +2px 形态学膨胀，让选区钻进 AA 边缘下面 → 填色盖住 halo。负值=腐蚀（收缩）。
+    //   膨胀范围会超出 flood bbox，所以连 bbox 一起按 expand 撑大（clamp 到 doc）。
+    const expand = this._magicExpand | 0;
+    if (expand > 0) {
+      mnx = Math.max(0, mnx - expand); mny = Math.max(0, mny - expand);
+      mxx = Math.min(docW - 1, mxx + expand); mxy = Math.min(docH - 1, mxy + expand);
+      this._morphMask(combined, docW, docH, expand, true, mnx, mny, mxx, mxy);
+    } else if (expand < 0) {
+      this._morphMask(combined, docW, docH, -expand, false, mnx, mny, mxx, mxy);
+    }
+
     const tw = mxx - mnx + 1, th = mxy - mny + 1;
     const maskCanvas = makeBitmap(tw, th);
     const mctx = maskCanvas.getContext("2d");
@@ -369,6 +384,39 @@ export class LassoEngine {
     }
     mctx.putImageData(out, 0, 0);
     return new Selection(mnx, mny, tw, th, maskCanvas);
+  }
+  // 形态学膨胀(grow)/腐蚀(!grow) combined 的 accepted 集（值 1），8 连通，radius 轮。
+  //   每轮「先收集再应用」(double-buffer) 保证恰好 radius 像素环，不在同轮内自传播。
+  //   grow：把贴着 accepted 的非 accepted(0/2) 拉进来；erode：把贴着非 accepted/越界的 accepted 删掉。
+  _morphMask(combined, docW, docH, radius, grow, rx0, ry0, rx1, ry1) {
+    if (radius <= 0) return;
+    for (let k = 0; k < radius; k++) {
+      const changes = [];
+      for (let y = ry0; y <= ry1; y++) {
+        const row = y * docW;
+        for (let x = rx0; x <= rx1; x++) {
+          const p = row + x;
+          const isAcc = combined[p] === 1;
+          if (grow ? isAcc : !isAcc) continue;
+          let touch = false;
+          for (let dy = -1; dy <= 1 && !touch; dy++) {
+            const ny = y + dy;
+            if (ny < 0 || ny >= docH) { if (!grow) touch = true; continue; }
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dy === 0) continue;
+              const nx = x + dx;
+              if (nx < 0 || nx >= docW) { if (!grow) { touch = true; break; } continue; }
+              const nAcc = combined[ny * docW + nx] === 1;
+              if (grow ? nAcc : !nAcc) { touch = true; break; }
+            }
+          }
+          if (touch) changes.push(p);
+        }
+      }
+      if (!changes.length) break;
+      const val = grow ? 1 : 0;
+      for (let i = 0; i < changes.length; i++) combined[changes[i]] = val;
+    }
   }
   // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
   _applySelectionUpdate(newSel) {

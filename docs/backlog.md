@@ -581,6 +581,11 @@ jitter, scattering, h/s/v variation, texture, rotation/size variation
 后期可以lift成一个下拉框选项有各种不同效果，比如半调，photoshop里面的教堂彩窗
 走插件。插件默认不下载，需要下载才能用。下载之后才能看见对应选项
 
+### 魔术棒 gap-robust 填色（P1）
+线art 有缝隙时 flood 漏到整画布。v163 已加阈值 + 扩展/收缩(默认+2吃白边)，但没解 gap。
+方案见 docs/lessons-magic-wand-gap-closing.md：Plan A(距离场+Dijkstra，窄缝高代价) > B(死端配对) > C(检测灾难性泄漏弹提示)。
+历史教训：v71-79 直接 dilate barrier 会盖住 tap 点 → 撤了。下一件单独开工，先论证再写。
+
 ## 用我这本本子的方式
 
 新点子来了 → 先写这里，标 P0/P1/P2/❄。等积累到自然想做某件，再单独开个 docs/lesson-*.md / 设计 doc 论证。

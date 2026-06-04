@@ -1,5 +1,5 @@
 // 平滑管线的全局可调参数（SSoT）。dev 面板用 textbox/开关 改这里，localStorage 持久化。
-// 详 docs/adr/0001-time-gated-arc-smoothing.md。默认值 = 各处原来写死的常数。
+// 详 docs/stroke-smoother-time-gate.md。默认值 = 各处原来写死的常数。
 //
 // 为什么集中在这：调参从「改代码 commit/push」搬到「设备上改值」。dev 面板大范围 textbox →
 // 自测每个参数是否真起作用（×100 没变化 = 死参数，如 vref），杀「饱和假阴性」式煤气灯。

@@ -766,7 +766,7 @@ export class InputController {
     const buffered = mode !== "smudge" && !settings.pixelMode;
     rec.rawToEngine = buffered;
     const scale = this.board.viewport.scale || 1;
-    // v158 时间门：W=弧长窗(doc px)、T=dwell 时间门(ms)、deflate=内缩开关。详 docs/adr/0001。
+    // v158 时间门：W=弧长窗(doc px)、T=dwell 时间门(ms)、deflate=内缩开关。详 docs/stroke-smoother-time-gate.md。
     const smooth = buffered ? {
       W: _streamlineToLookaheadPx(settings.streamline) / scale,
       T: SMOOTH.dwellMs,

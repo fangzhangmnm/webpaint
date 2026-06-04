@@ -1,7 +1,7 @@
 # 笔刷平滑：frozen / tail 模型
 
 > **v158 现状（iPad 实测有效，转角问题解决）**：在 frozen/tail 的弧长窗口二次平滑上**加了时间维度**——
-> 决定与论证见 **[docs/adr/0001-time-gated-arc-smoothing.md](adr/0001-time-gated-arc-smoothing.md)**。一句话演进：
+> 决定与论证见 **[docs/stroke-smoother-time-gate.md](stroke-smoother-time-gate.md)**。一句话演进：
 >
 > 1. v148 frozen/tail（弧长 lookahead 窗口）：线跟到笔尖、无持久滞后。
 > 2. v149 估计子从 0 阶均值 → **局部二次回归**（保曲率/不内缩，杀掉「磨圆曲线」）。

@@ -55,6 +55,9 @@
   </head>
   <body>
     <canvas id="board" class="board" aria-label="paint canvas"></canvas>
+    <!-- v163：像素栅格(独立 canvas，仅视口变时重画，device-px 对齐) + 光标 div，主画布之上、UI(≥10) 之下，pointer-events:none。 -->
+    <canvas id="boardGrid" class="board-grid" aria-hidden="true"></canvas>
+    <div id="boardCursor" class="board-cursor" aria-hidden="true"></div>
 
     <!-- 顶栏 (v123 起 Procreate 顺序)：菜单 | 保存 | 工具组 | 调整 | 图层 | 颜色
          operator 全在这（点了有动作，要 user consent）。read-only 状态在右下 HUD。 -->
@@ -289,16 +292,29 @@
       <label class="brush-slider-row" style="grid-template-columns: 80px 1fr;">
         <span class="brush-slider-label">预设</span>
         <select id="newDocPreset">
-          <option value="2048">2048 × 2048（默认）</option>
-          <option value="1024">1024 × 1024（轻量）</option>
-          <option value="4096">4096 × 4096（高清，慢）</option>
+          <optgroup label="绘画">
+            <option value="2048x2048">2048 × 2048（方·默认）</option>
+            <option value="1024x1024">1024 × 1024（方·轻量）</option>
+            <option value="4096x4096">4096 × 4096（方·高清，慢）</option>
+            <option value="2480x3508">A4 竖（2480 × 3508，300dpi）</option>
+            <option value="3508x2480">A4 横（3508 × 2480，300dpi）</option>
+            <option value="1920x1080">1920 × 1080（桌面横）</option>
+            <option value="2560x1440">2560 × 1440（2K 横）</option>
+            <option value="1080x1920">1080 × 1920（手机竖）</option>
+          </optgroup>
+          <optgroup label="像素画">
+            <option value="16x16">16 × 16</option>
+            <option value="32x32">32 × 32</option>
+            <option value="64x64">64 × 64</option>
+            <option value="128x128">128 × 128</option>
+          </optgroup>
           <option value="custom">自定义…</option>
         </select>
       </label>
       <label class="brush-slider-row" id="newDocCustomRow" style="grid-template-columns: 80px 1fr 1fr; display:none;">
         <span class="brush-slider-label">尺寸</span>
-        <input id="newDocW" type="number" min="64" max="8192" step="64" value="2048" />
-        <input id="newDocH" type="number" min="64" max="8192" step="64" value="2048" />
+        <input id="newDocW" type="number" min="16" max="8192" step="16" value="2048" />
+        <input id="newDocH" type="number" min="16" max="8192" step="16" value="2048" />
       </label>
       <button class="sheet-action" id="newDocConfirm" type="button">创建</button>
       <button class="sheet-action ghost" id="newDocCancel" type="button">取消</button>
@@ -434,6 +450,11 @@
         <span>阈值</span>
         <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" />
         <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
+      </label>
+      <label class="lasso-popup-row">
+        <span>扩展</span>
+        <input type="range" id="lassoExpand" min="-10" max="10" step="1" value="2" />
+        <span id="lassoExpandVal" class="lasso-popup-val">2</span>
       </label>
     </div>
 
@@ -830,6 +851,10 @@
         <span class="menu-item-label">单指长按吸色</span>
         <span class="menu-item-state" data-state-for="longPressPick">关</span>
       </button>
+      <button class="menu-item" id="menuPixelGrid" type="button" role="menuitemcheckbox" aria-pressed="true">
+        <span class="menu-item-label">像素栅格（放大时）</span>
+        <span class="menu-item-state" data-state-for="pixelGrid">开</span>
+      </button>
       <button class="menu-item" id="menuTheme" type="button" role="menuitem">
         <span class="menu-item-label">主题</span>
         <span class="menu-item-state" data-state-for="theme">跟随系统</span>
@@ -922,6 +947,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-0abb695706b0.mjs"></script>
+    <script type="module" src="./dist/webpaint-dd73a3773e45.mjs"></script>
   </body>
 </html>

@@ -1,5 +1,5 @@
 // 位置平滑：时间门控的弧长窗口 + 边缘 ramp。给 frozen/tail 分段提供平滑中心线。
-// 详 docs/brush-frozen-tail-smoothing.md 和 docs/adr/0001-time-gated-arc-smoothing.md。
+// 详 docs/brush-frozen-tail-smoothing.md 和 docs/stroke-smoother-time-gate.md。
 //
 // 模型：
 //   raw[i]   —— 输入点（doc 坐标 x/y + 压感 p + 累积弧长 s_i + 时间戳 t_i）

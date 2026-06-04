@@ -15,7 +15,12 @@ import { computeClipBaseFor } from "./doc.js";
 //   4) cursor 预览（笔尖圈圈，可选）
 
 const MIN_SCALE = 0.05;
-const MAX_SCALE = 32;
+const MAX_SCALE = 64;   // v163：放大上限提到 64，给像素画 + 像素栅格留空间
+// 像素栅格淡入：scale < LO 全隐（释放 backing）；LO→FULL 之间 alpha 线性渐隐；≥ FULL 满强度。
+// 渐隐避免缩放时栅格"啪"地消失，且往低 zoom 多留一段。
+const PIXEL_GRID_FADE_LO = 4;
+const PIXEL_GRID_FULL = 7;
+const PIXEL_GRID_ALPHA = 0.4;   // 满强度 alpha（线已是 1 device px 最细，靠 alpha 调细的观感）
 
 export class Board {
   constructor(canvas, doc) {
@@ -44,6 +49,9 @@ export class Board {
     // 棋盘背景：开后底层用半透明灰白格替代 doc.backgroundColor。
     // 适合做透明素材 / 看图层 alpha 通道。
     this._showCheckerboard = false;
+    // v163 像素栅格：放大到 PIXEL_GRID_FADE_LO 以上渐显 1 doc-px 网格（像素画对齐）。
+    //   只画可见区域格线（性能）；很细很淡；全局开关可关。
+    this._pixelGridEnabled = true;
 
     // Live overlay provider：渲染时调一次，返回 {canvas, layer, opacity, mode} 或 null。
     // 笔触进行中由 brush.getLiveOverlay() 提供。paint 模式：layer 之上 composite buffer×opacity。
@@ -51,6 +59,17 @@ export class Board {
     this._overlayProvider = null;
     this._eraseComposite = null;
     this._eraseCompositeKey = null;
+
+    // v163 瞬态 UI 分层（省 hot-path + 显存，详 docs/overlay-grid-cursor-layers.md）：
+    //   像素栅格 = 独立 canvas，**仅视口变时重画**（_syncGrid sig 守卫）→ 画笔行进时不碰它，零逐帧成本；
+    //     device-px 对齐画线（CSS gradient 在浮点 zoom 下 sub-pixel 糊：少线/粗细不一，业界都用 canvas）。
+    //     backing 按需分配，隐藏/缩小时释放（width=0）→ 只在高 zoom 看栅格时占一张屏的显存。
+    //   光标 = DOM div（transform 移动）：hover 不再 full render。
+    //   蚂蚁线 / floating 仍在主 canvas（需 canvas；只有选区时才逐帧，旧行为）。
+    this.gridCanvas = document.getElementById("boardGrid");
+    this.gctx = null;
+    this.cursorEl = document.getElementById("boardCursor");
+    this._gridSig = "";
 
     this.resize();
     window.addEventListener("resize", () => this.resize());
@@ -81,6 +100,12 @@ export class Board {
     this._showCheckerboard = !!on;
     this._dirtyFull = true;
   }
+  setPixelGridEnabled(on) {
+    this._pixelGridEnabled = !!on;
+    this._gridSig = "";        // 强制下次 _syncGrid 重算
+    this.requestRender();
+  }
+  getPixelGridEnabled() { return this._pixelGridEnabled; }
   setThemeColors({ voidColor }) {
     if (voidColor) this._voidColor = voidColor;
     this._dirtyFull = true;
@@ -313,7 +338,12 @@ export class Board {
       ? this._activeSurrogateCanvas : layer.canvas;
     // 空 layer(bbox=0) 没像素：drawImage 0 宽会抛 IndexSizeError → 跳过层像素，只画 overlay
     const hasLayerPixels = layer.bboxW > 0 && layer.bboxH > 0;
-    if (!overlay || overlay.mode !== "erase") {
+    // overlay 落到本层的合成算子：erase=destination-out；否则 per-brush blendMode（默认 source-over）。
+    const overlayOp = !overlay ? "source-over"
+      : overlay.mode === "erase" ? "destination-out"
+      : (overlay.blendMode || "source-over");
+    // 快通路：无 overlay，或普通叠加 → 直接落到 ctx
+    if (overlayOp === "source-over") {
       if (hasLayerPixels) {
         ctx.drawImage(
           sourceCanvas, 0, 0, layer.bboxW, layer.bboxH,
@@ -331,21 +361,32 @@ export class Board {
       }
       return;
     }
-    // erase 通路：空 layer 没像素可擦 → 不画
-    if (!hasLayerPixels) return;
-    const ec = this._getEraseComposite(layer.bboxW, layer.bboxH);
+    // 复合通路（erase / 混合模式）：overlay 必须只对**本层像素**做合成（不能直接落 ctx——
+    //   ctx 已带 layer.mode + 下方所有层）。在临时画布上 (layer ⊕ overlay) 烤好，再整体按 ctx 当前
+    //   (layer.mode / opacity) blit。结果 = commit 后的样子（_compositeBufferToLayer 同 op）。
+    // erase 空 layer 没像素可擦 → 跳过；混合模式在空 layer 上 = 直接显示 stroke（仍要画）。
+    if (!hasLayerPixels && overlay.mode === "erase") return;
+    // 区域 = layer bbox ∪ overlay bbox（overlay 可能比 layer 大 / layer 空）
+    let rx0 = Infinity, ry0 = Infinity, rx1 = -Infinity, ry1 = -Infinity;
+    if (hasLayerPixels) {
+      rx0 = layer.bboxX; ry0 = layer.bboxY; rx1 = layer.bboxX + layer.bboxW; ry1 = layer.bboxY + layer.bboxH;
+    }
+    rx0 = Math.min(rx0, overlay.bboxX); ry0 = Math.min(ry0, overlay.bboxY);
+    rx1 = Math.max(rx1, overlay.bboxX + overlay.bboxW); ry1 = Math.max(ry1, overlay.bboxY + overlay.bboxH);
+    const rw = rx1 - rx0, rh = ry1 - ry0;
+    if (rw <= 0 || rh <= 0) return;
+    const ec = this._getEraseComposite(rw, rh);
     const ectx = ec.getContext("2d");
-    ectx.clearRect(0, 0, ec.width, ec.height);
-    ectx.drawImage(layer.canvas, 0, 0);
+    ectx.setTransform(1, 0, 0, 1, 0, 0);
+    ectx.clearRect(0, 0, rw, rh);
+    ectx.globalCompositeOperation = "source-over";
+    if (hasLayerPixels) ectx.drawImage(sourceCanvas, layer.bboxX - rx0, layer.bboxY - ry0);
     ectx.globalAlpha = overlay.opacity;
-    ectx.globalCompositeOperation = "destination-out";
-    ectx.drawImage(overlay.canvas, overlay.bboxX - layer.bboxX, overlay.bboxY - layer.bboxY);
+    ectx.globalCompositeOperation = overlayOp;
+    ectx.drawImage(overlay.canvas, overlay.bboxX - rx0, overlay.bboxY - ry0);
     ectx.globalAlpha = 1;
     ectx.globalCompositeOperation = "source-over";
-    ctx.drawImage(
-      ec, 0, 0, ec.width, ec.height,
-      layer.bboxX, layer.bboxY, ec.width, ec.height,
-    );
+    ctx.drawImage(ec, 0, 0, rw, rh, rx0, ry0, rw, rh);
   }
 
   // 把 ctx 设到 "doc 坐标系"：doc (0,0) 映射到 ctx 当前 origin，含 dpr +
@@ -383,6 +424,7 @@ export class Board {
     this.canvas.width = tw;
     this.canvas.height = th;
     this._dirtyFull = true;
+    this._gridSig = "";   // 尺寸变 → 强制重算栅格 div
     this.requestRender();
   }
 
@@ -398,14 +440,24 @@ export class Board {
   }
 
   setCursor(c) {
-    // 光标改了 → 整张 dirty（光标是 screen-space，无法做 doc-rect dirty；好在 hover
-    // 不是绘画 hot path）。Stroke 期间 input.js 会调 setCursor(null)，所以画的时候
-    // 不会触发这条全屏 invalidation。
-    const wasShown = this._showCursor;
+    // v163：光标是独立 DOM div，移动只改 transform（GPU 合成），不碰 canvas → hover 也不再 full render。
+    //   Stroke 期间 input.js 仍调 setCursor(null) 隐藏光标。
     this._cursor = c;
     this._showCursor = !!c;
-    if (wasShown || this._showCursor) this._dirtyFull = true;
-    this.requestRender();
+    this._updateCursorEl();
+  }
+  // 把光标 DOM div 同步到 _cursor（screen CSS px）。size 是 doc px → 半径 = size×scale/2。
+  _updateCursorEl() {
+    const el = this.cursorEl;
+    if (!el) return;
+    if (this._showCursor && this._cursor) {
+      const r = Math.max(2, this._cursor.size * this.viewport.scale / 2);
+      el.style.width = el.style.height = (2 * r) + "px";
+      el.style.transform = `translate(${this._cursor.x - r}px, ${this._cursor.y - r}px)`;
+      el.style.display = "block";
+    } else {
+      el.style.display = "none";
+    }
   }
 
   render() {
@@ -417,6 +469,7 @@ export class Board {
     }
     this._dirtyDocRect = null;
     this._dirtyFull = false;
+    this._syncGrid();   // 每帧一次：sig 守卫，视口没变（如 stroke 中）→ 立即 no-op
   }
 
   _renderFull() {
@@ -452,18 +505,14 @@ export class Board {
     // 逐 layer（带 clipping mask 处理）
     this._renderLayers(ctx);
 
-    // 套索 overlay（在 doc 坐标系下画 polygon / floating）
+    // 套索 overlay（蚂蚁线 / drawing path / floating / handles，doc 坐标系）
     this._drawLassoOverlay(ctx, scale);
 
-    // doc 边框（doc 坐标系下；lineWidth 在缩放 / 旋转下会变粗细，
-    // 需要 inverse-scale lineWidth）
+    // doc 边框（doc 坐标系下；lineWidth 在缩放 / 旋转下会变粗细，需要 inverse-scale lineWidth）
+    // 栅格 = CSS div（_syncGrid），光标 = DOM div（_updateCursorEl），都不在这条 canvas hot path。
     ctx.strokeStyle = "rgba(0,0,0,0.18)";
     ctx.lineWidth = 1 / scale;
     ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
-
-    // cursor 预览（切回 screen 坐标）
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    if (this._showCursor && this._cursor) this._drawCursor();
   }
 
   // 只重画 docRect 覆盖的区域。**rot != 0 时直接走 full**（旋转 dirty rect
@@ -576,21 +625,6 @@ export class Board {
       ctx.globalAlpha = prevAlpha;
       ctx.globalCompositeOperation = prevComp;
     }
-  }
-
-  _drawCursor() {
-    const ctx = this.ctx;
-    const c = this._cursor;
-    const { scale } = this.viewport;
-    ctx.strokeStyle = "rgba(0,0,0,0.65)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, Math.max(2, c.size * scale / 2), 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,0.7)";
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, Math.max(2, c.size * scale / 2) + 1, 0, Math.PI * 2);
-    ctx.stroke();
   }
 
   // 套索 overlay：
@@ -788,6 +822,75 @@ export class Board {
       for (let x = ((y / cell) | 0) % 2 ? 0 : cell; x < W; x += cell * 2) {
         ctx.fillRect(x, y, cell, cell);
       }
+    }
+  }
+  // 像素栅格：独立 canvas，仅视口变（sig 变）才重画。stroke 中视口不变 → no-op → 零逐帧成本（所有笔型）。
+  _syncGrid() {
+    const cv = this.gridCanvas;
+    if (!cv || !this.doc) return;
+    const v = this.viewport;
+    const sig = `${v.scale}|${v.tx}|${v.ty}|${v.rot}|${this._pixelGridEnabled}|${this.doc.width}|${this.doc.height}|${this.canvas.width}`;
+    if (sig === this._gridSig) return;
+    this._gridSig = sig;
+    this._drawGrid();
+    this._updateCursorEl();   // scale 变 → 光标尺寸也跟着变
+  }
+  _drawGrid() {
+    const cv = this.gridCanvas;
+    if (!cv) return;
+    const { scale, tx, ty, rot } = this.viewport;
+    // 隐藏：释放 backing（width=0）→ 不占显存
+    if (!this._pixelGridEnabled || scale < PIXEL_GRID_FADE_LO) {
+      cv.style.display = "none";
+      if (cv.width) { cv.width = 0; cv.height = 0; }
+      return;
+    }
+    // LO→FULL 线性渐隐
+    const fade = Math.min(1, (scale - PIXEL_GRID_FADE_LO) / (PIXEL_GRID_FULL - PIXEL_GRID_FADE_LO));
+    const alpha = PIXEL_GRID_ALPHA * fade;
+    const stroke = `rgba(128,128,128,${alpha})`;
+    const cw = this.canvas.width, ch = this.canvas.height;   // device px（同主 canvas）
+    if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
+    cv.style.display = "block";
+    const g = this.gctx || (this.gctx = cv.getContext("2d"));
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, cw, ch);
+    // 可见 doc 区间（screen 四角逆变换 → doc AABB，裁到画布）
+    const W = this.doc.width, H = this.doc.height;
+    const sw = this.canvas.clientWidth || cw / this.dpr, sh = this.canvas.clientHeight || ch / this.dpr;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const c of [[0, 0], [sw, 0], [0, sh], [sw, sh]]) {
+      const p = this.screenToDoc(c[0], c[1]);
+      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+    }
+    const x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(W, Math.ceil(maxX));
+    const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(H, Math.ceil(maxY));
+    if (x1 <= x0 || y1 <= y0) return;
+    const dpr = this.dpr;
+    g.fillStyle = stroke;
+    if (!rot) {
+      // rot=0：device-px 取整 fillRect → 1 device px 清晰均匀（无 AA、无 sub-pixel 糊）
+      const vy0 = Math.max(0, Math.round((ty + y0 * scale) * dpr));
+      const vy1 = Math.min(ch, Math.round((ty + y1 * scale) * dpr));
+      const vx0 = Math.max(0, Math.round((tx + x0 * scale) * dpr));
+      const vx1 = Math.min(cw, Math.round((tx + x1 * scale) * dpr));
+      for (let x = x0; x <= x1; x++) g.fillRect(Math.round((tx + x * scale) * dpr), vy0, 1, vy1 - vy0);
+      for (let y = y0; y <= y1; y++) g.fillRect(vx0, Math.round((ty + y * scale) * dpr), vx1 - vx0, 1);
+    } else {
+      // rot≠0（罕见）：斜线走 stroke（AA），不强求 device 对齐
+      g.strokeStyle = stroke;
+      g.lineWidth = 1;
+      g.beginPath();
+      for (let x = x0; x <= x1; x++) {
+        const a = this.docToScreen(x, y0), b = this.docToScreen(x, y1);
+        g.moveTo(a.x * dpr, a.y * dpr); g.lineTo(b.x * dpr, b.y * dpr);
+      }
+      for (let y = y0; y <= y1; y++) {
+        const a = this.docToScreen(x0, y), b = this.docToScreen(x1, y);
+        g.moveTo(a.x * dpr, a.y * dpr); g.lineTo(b.x * dpr, b.y * dpr);
+      }
+      g.stroke();
     }
   }
 }

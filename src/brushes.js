@@ -41,6 +41,7 @@ function makeBrush({
   // 解 "勾线转角顿一下 out-leg 变细" —— LPF 让落点过去几十毫秒的高 pressure 仍留尾巴
   pressureLPF = 0,
   compositeMode = "wash",
+  blendMode = "source-over",   // v163: per-brush 混合模式（multiply/screen/... ＝ Canvas2D globalCompositeOperation）
   shapeKind = "round", aspect = 1.0, rotation = 0, hardness = 1.0,
   textureB64 = null,
   spacingValue = 0.06,
@@ -61,6 +62,7 @@ function makeBrush({
     pressureLPF,
     defaultOpa,
     compositeMode,
+    blendMode,
     spacing: spacingValue,
     pixelMode,
     taper: { in: taperIn, out: taperOut },

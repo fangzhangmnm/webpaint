@@ -65,6 +65,9 @@ const DEFAULT_SETTINGS = {
   spacing: 0.12,
   // buffer 合成模式：
   compositeMode: "wash",  // "wash" = Alpha Darken (JS max), "buildup" = source-over (Canvas2D native)
+  // 笔刷混合模式：整条 stroke 落到 layer 时的 globalCompositeOperation（multiply/screen/...）。
+  //   compositeMode 管 stroke 自身内部重叠；blendMode 管整条 stroke vs 下方 layer 像素。
+  blendMode: "source-over",
   // pixel mode：
   pixelMode: false,
   // 位置平滑（input.js 用，不在引擎）：
@@ -177,7 +180,7 @@ export class BrushEngine {
   }
 
   // smooth: { W:弧长窗口(doc px), T:dwell 时间门(ms), deflate:bool, t:落笔时间戳 }
-  //   W=0 → 不平滑（立即冻结，退化 raw）。详 docs/adr/0001。
+  //   W=0 → 不平滑（立即冻结，退化 raw）。详 docs/stroke-smoother-time-gate.md。
   beginStroke(layer, settings, x, y, pressure, mode = "brush", smooth = {}) {
     let loaded = null;
     if (mode === "smudge") loaded = this._sampleLayerColor(layer, x, y);
@@ -428,7 +431,9 @@ export class BrushEngine {
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
     ctx.globalAlpha = Math.max(0, Math.min(1, st.settings.opacity ?? 1.0));   // Π 外 × opacity
-    ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : "source-over";
+    ctx.globalCompositeOperation = st.mode === "erase"
+      ? "destination-out"
+      : (st.settings.blendMode || "source-over");   // v163 per-brush 混合模式
     ctx.drawImage(composeCanvas, st.bufBboxX - layer.bboxX, st.bufBboxY - layer.bboxY);
     ctx.globalAlpha = prevA;
     ctx.globalCompositeOperation = prevC;
@@ -486,6 +491,7 @@ export class BrushEngine {
       layer: st.layer,
       opacity: Math.max(0, Math.min(1, st.settings.opacity ?? 1.0)),
       mode: st.mode,
+      blendMode: st.settings.blendMode || "source-over",   // v163 board 用它合成 overlay
     };
   }
 

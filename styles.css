@@ -84,6 +84,32 @@ button, input, .swatch, .tool, .float-panel, .top-bar, .hud, .sheet, .backdrop, 
   user-select: none;
 }
 
+/* v163：像素栅格 = 独立 canvas（仅视口变时重画，device-px 对齐 → 清晰均匀）+ 光标 div。
+   主画布之上、UI(≥10) 之下。backing store 由 board.js 按需分配（隐藏时释放）。 */
+.board-grid {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: none;
+  pointer-events: none;
+  z-index: 1;
+}
+body[data-mode="gallery"] .board-grid { display: none !important; }
+.board-cursor {
+  position: fixed;
+  left: 0; top: 0;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.65);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+  z-index: 2;
+  display: none;
+  will-change: transform;
+}
+body[data-mode="gallery"] .board-cursor { display: none !important; }
+
 body[data-tool="hand"] .board { cursor: grab; }
 body[data-panning="1"] .board { cursor: grabbing !important; }
 /* 橡皮 / 吸色 都跟画笔同 pointer style（默认 crosshair）；不再用 cell / copy 那种出戏光标 */

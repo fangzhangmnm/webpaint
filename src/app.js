@@ -167,6 +167,7 @@ const els = {
   menuSaveAs: document.getElementById("menuSaveAs"),
   menuRevertToOpen: document.getElementById("menuRevertToOpen"),
   menuCheckerboard: document.getElementById("menuCheckerboard"),
+  menuPixelGrid: document.getElementById("menuPixelGrid"),
   menuCheckUpdate: document.getElementById("menuCheckUpdate"),
   oraFileInput: document.getElementById("oraFileInput"),
   genericBackdrop: document.getElementById("genericBackdrop"),
@@ -381,6 +382,7 @@ function applyBrushPresetFrozen(brush) {
   state.brush.pressureGamma = brush.pressureGamma ?? 1.0;
   state.brush.pressureLPF   = brush.pressureLPF ?? 50;      // v102 时间域压感平滑（v161 默认 50ms：100ms 太钝，抬笔不收=末端不渐细）
   state.brush.compositeMode = brush.compositeMode || "wash";
+  state.brush.blendMode     = brush.blendMode || "source-over";   // v163 per-brush 混合模式
   state.brush.spacing       = (typeof brush.spacing === "number")
     ? brush.spacing
     : (brush.spacing?.value ?? 0.06);
@@ -731,6 +733,17 @@ for (const b of lassoSetOpBtns) {
   });
 }
 // magic threshold（容隙功能 v71→v79 撤掉，详 docs/lessons-magic-wand-gap-closing.md）
+const lassoExpandInput = document.getElementById("lassoExpand");
+const lassoExpandVal = document.getElementById("lassoExpandVal");
+if (lassoExpandInput) {
+  lassoExpandInput.value = String(input.lasso.getMagicExpand());
+  lassoExpandVal.textContent = String(input.lasso.getMagicExpand());
+  lassoExpandInput.addEventListener("input", () => {
+    const v = parseInt(lassoExpandInput.value, 10) || 0;
+    input.lasso.setMagicExpand(v);
+    lassoExpandVal.textContent = String(v);
+  });
+}
 lassoThresholdInput.addEventListener("input", () => {
   const v = parseInt(lassoThresholdInput.value, 10) || 0;
   input.lasso.setMagicThreshold(v);
@@ -1355,6 +1368,18 @@ els.menuCheckerboard.addEventListener("click", () => {
   // v125 per-doc：触发 dirty 让 autosave 把新值写进 webpaint/state.json
   _docDirty = true; updateSaveStatus();
   setStatus(`透明棋盘 · ${state.checkerboard ? "开" : "关"}`);
+});
+// v163 像素栅格：全局开关（视图辅助，跟设备不跟文件），localStorage 持久化，默认开
+function applyPixelGrid(on) {
+  board.setPixelGridEnabled?.(!!on);
+  setMenuItem(els.menuPixelGrid, !!on);
+  safeLSSet("webpaint.pixelGrid", on ? "1" : "0");
+}
+applyPixelGrid(safeLS("webpaint.pixelGrid") !== "0");   // boot：缺省=开
+if (els.menuPixelGrid) els.menuPixelGrid.addEventListener("click", () => {
+  const next = !board.getPixelGridEnabled();
+  applyPixelGrid(next);
+  setStatus(`像素栅格 · ${next ? "开" : "关"}`);
 });
 els.menuTheme.addEventListener("click", () => {
   const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
@@ -4185,7 +4210,7 @@ const paletteWindow = new PaletteWindow({
 
 // ===== v158 平滑调参 dev 面板 =====
 // 所有平滑魔数：连续用 textbox（可打任意数量级值 → 自测是否真起作用/跳出饱和区，杀煤气灯）、二元用 checkbox。
-// live 改 SMOOTH + localStorage 持久化；下一笔生效。详 docs/adr/0001。
+// live 改 SMOOTH + localStorage 持久化；下一笔生效。详 docs/stroke-smoother-time-gate.md。
 const _SMOOTH_LABELS = {
   lookaheadCap: "窗口上限 W (screen px @ streamline=1)",
   dwellMs:      "dwell 时间门 T (ms)",
@@ -4835,10 +4860,13 @@ els.newDocConfirm.addEventListener("click", async () => {
   const nameRaw = (els.newDocName.value || "").trim() || "未命名";
   let w, h;
   if (els.newDocPreset.value === "custom") {
-    w = Math.max(64, Math.min(8192, parseInt(els.newDocW.value, 10) || 2048));
-    h = Math.max(64, Math.min(8192, parseInt(els.newDocH.value, 10) || 2048));
+    w = Math.max(16, Math.min(8192, parseInt(els.newDocW.value, 10) || 2048));
+    h = Math.max(16, Math.min(8192, parseInt(els.newDocH.value, 10) || 2048));
   } else {
-    w = h = parseInt(els.newDocPreset.value, 10);
+    // v163：preset value 改成 "W×H"（支持非正方形 / 像素画 / 纸张比例）
+    const parts = String(els.newDocPreset.value).split("x");
+    w = Math.max(16, Math.min(8192, parseInt(parts[0], 10) || 2048));
+    h = Math.max(16, Math.min(8192, parseInt(parts[1], 10) || w));
   }
   const name = await uniqueLocalName(nameRaw);
   closeNewDocSheet();
@@ -6290,7 +6318,7 @@ _rackEls.newBtn.addEventListener("click", () => {
       size: { base: 12, max: 200 },
       sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
       pressureGamma: 1.0, pressureLPF: 50, defaultOpa: 1.0,
-      compositeMode: "wash", spacing: 0.06, pixelMode: false,
+      compositeMode: "wash", blendMode: "source-over", spacing: 0.06, pixelMode: false,
       taper: { in: 0, out: 0 },
       smudge: _rackCurrentTool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
       smooth: { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 },
@@ -6414,6 +6442,7 @@ async function dumpRackAsCode() {
     if (b.pressureGamma != null && b.pressureGamma !== 1.0) args.pressureGamma = b.pressureGamma;
     if (b.defaultOpa != null && b.defaultOpa !== 1.0) args.defaultOpa = b.defaultOpa;
     args.compositeMode = b.compositeMode || "wash";
+    if (b.blendMode && b.blendMode !== "source-over") args.blendMode = b.blendMode;
     args.spacingValue = (typeof b.spacing === "number") ? b.spacing : (b.spacing?.value ?? 0.06);
     if (b.pixelMode) args.pixelMode = true;
     if (b.taper?.in)  args.taperIn  = b.taper.in;
@@ -6564,6 +6593,10 @@ function _renderBrushSettings() {
   selectRow(basic, "工具", [
     ["brush", "笔刷"], ["smudge", "涂抹"], ["eraser", "橡皮"],
   ], b.tool, (v) => b.tool = v);
+  // v163 笔刷混合模式（整条 stroke vs 下方 layer，复用图层那套 Canvas2D 模式）。基础设置，放上面。
+  if (b.blendMode == null) b.blendMode = "source-over";
+  selectRow(basic, "混合模式", Object.entries(LAYER_MODE_LABEL),
+    b.blendMode, (v) => b.blendMode = v);
   textRow(basic, "文件夹", b.folder, (v) => b.folder = v);
 
   // Shape
