@@ -7,6 +7,7 @@ import "./store-flow-push.contract.test.mjs";
 import "./store-flow-open-exit.contract.test.mjs";
 import "./store-flow-trash.contract.test.mjs";
 import "./store-multitab.contract.test.mjs";
+import "./onedrive-provider.contract.test.mjs";
 
 console.log("\n  sync-store contract tests\n");
 await run();

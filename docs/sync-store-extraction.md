@@ -126,6 +126,15 @@ mock 原本只模拟「快、可靠、原子」的云。补了 **fault 注入面
 
 **不在本层 provider 测试范围**：auth/MSAL（F 系列）、加密（G 系列）、reader 专属（I 系列）——归各自模块。
 
+## 做2：lift 到 MyPWAPatterns/sync-store（2026-06-04，进行中）
+
+Store 抽成家族 lib：`MyPWAPatterns/sync-store/`（自包含、10 test、README、已 commit）。三层接缝：
+`Store(编排) → cloud-sync(session语义) → CloudProvider(低层,app实现)` + `store.local(IDB,app实现)`。
+- `sync-store/src/cloud-sync.js`：**吸收 cloud.js 的 session 逻辑**（push/pull/trash/restore/etag/dirty/H7）over 低层 provider，命名/kv/now 注入、去 WebPaint 化。
+- WebPaint 侧 `src/store/onedrive-provider.js`：graph.js → CloudProvider 薄适配（**cloud.js 拆 provider 的低层一半**）。验法妙：`OneDriveProvider(graphFromProvider(mock)) ≈ 恒等`，Mock 完整验适配（test/onedrive-provider.contract，8 test）。
+
+**还剩（WebPaint cut-over = 交接）**：app.js 把 `_store` 改成 `createStore({ cloud: createCloudSync({ provider: createOneDriveProvider(), kv, fileName:n=>n+".ora" }), local })`，并**把所有 cloud-state 访问（isCloudDirty/getKnownETag/computeSaveState/gate…）全路由进 lib**，否则 app.js 直调 cloud.js + _store 走 lib = 两个 dirty store 分叉（正是我们一直在修的 bug 类）。所以必须整体切、不能半切。切完删 cloud.js 的 session 逻辑（已在 lib 复用）。kv 用 localStorage 包装（注意 dirty key：lib 用 `webpaint.dirty:`，旧 cloud.js 用 `webpaint.cloudDirty:`，迁移时对齐或接受自愈）。
+
 ## 待澄清/待修（user 2026-06-04 flag）
 
 - **「smart save icon 本地 vs 云端要不一样」**（UI 层，user 说缓做）：澄清=保存按钮图标要区分「只存本地」vs「已同步到云」。现状机器其实已分：local-only→`ICON_DISK`、synced→`ICON_CLOUD_CHECK`、cloud-dirty→`ICON_UPLOAD`（computeSaveState/updateSaveStatus, app.js ~2749-2773）。基本已有，细化（更醒目区分 / 状态时机）留 UI 那轮。自动保存确认只本地（A7），唯一自动碰云=退图库（consent push）。

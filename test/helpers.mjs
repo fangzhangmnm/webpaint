@@ -26,6 +26,7 @@ export function graphFromProvider(provider) {
     listChildren: async (sub = "") => (await provider.list(sub)).map(toGraphItem),
     getItemByPath: async (path) => toGraphItem(await provider.getItemByPath(path)),
     downloadItemBlob: (id) => provider.download(id),
+    downloadItemRange: (id, offset, length) => provider.downloadRange(id, offset, length),
     uploadFileToApproot: (path, blob, ct, opts = {}) =>
       provider.upload(path, blob, { contentType: ct, ...opts }).then(toGraphItem),
     deleteItem: (id) => provider.delete(id),
