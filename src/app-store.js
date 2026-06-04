@@ -54,6 +54,8 @@ export const isSignedIn = () => _auth.isSignedIn();
 export const getActiveAccount = () => _auth.getActiveAccount();
 export const retrySilentSignIn = (...a) => _auth.retrySilentSignIn(...a);
 export const getToken = (...a) => _auth.getToken(...a);
+export const onAuthChanged = (cb) => _auth.onAuthChanged(cb);   // auth 可观察 seam（候选1）
+export const getAuthState = () => _auth.getAuthState();
 
 // ---- 上次登录 flag ----
 export const getLastSessionSignedIn = () => lsKv.get("webpaint.lastSessionSignedIn") === "1";

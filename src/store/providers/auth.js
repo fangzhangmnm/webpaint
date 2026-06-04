@@ -34,6 +34,18 @@ let pca = null;
 let activeAccount = null;
 let initPromise = null;
 
+// ---- auth 状态可观察 seam ----
+// 单一源 = activeAccount。**每个**转变（登录回来 / 后台 silent / 登出 / 过期）都 _emitAuth。
+// UI 订阅一次（onAuthChanged）→ 永不漂移；isSignedIn() 是派生读。治"按钮不变蓝"+ F2 过期假登录。
+const _authSubs = new Set();
+export function onAuthChanged(cb) { _authSubs.add(cb); return () => _authSubs.delete(cb); }
+export function getAuthState() { return { signedIn: !!activeAccount, account: activeAccount }; }
+function _emitAuth() {
+  const st = getAuthState();
+  for (const cb of _authSubs) { try { cb(st); } catch (_) {} }
+  try { if (typeof window !== "undefined") window.dispatchEvent(new Event("wp:auth-changed")); } catch (_) {}
+}
+
 function loadScript(url) {
   return new Promise((resolve, reject) => {
     const s = document.createElement("script");
@@ -98,6 +110,7 @@ export async function initAuth() {
     if (response?.account) {
       pca.setActiveAccount(response.account);
       activeAccount = response.account;
+      _emitAuth();                                  // 登录 redirect 回来 → 通知 UI（按钮变蓝）
       return { signedIn: true, account: activeAccount };
     }
 
@@ -118,7 +131,7 @@ async function _probeSilent(account) {
     await pca.acquireTokenSilent({ scopes: SCOPES, account });
     pca.setActiveAccount(account);
     activeAccount = account;
-    try { if (typeof window !== "undefined") window.dispatchEvent(new Event("wp:auth-changed")); } catch (_) {}
+    _emitAuth();                                    // 后台 silent 成功 → 通知 UI
   } catch (_) { /* 拿不到 token = 未真登录；UI 保持未登录，用户可显式登录 */ }
 }
 
@@ -135,6 +148,7 @@ export async function signOut() {
   if (!pca || !activeAccount) return;
   const account = activeAccount;
   activeAccount = null;
+  _emitAuth();                                      // 登出 → 立即通知 UI（按钮变灰）
   try { await pca.clearCache({ account }); }
   catch (e) { console.warn("clearCache failed:", e); }
   try { pca.setActiveAccount(null); } catch (_) {}
@@ -146,7 +160,9 @@ export async function getToken() {
     const result = await pca.acquireTokenSilent({ scopes: SCOPES, account: activeAccount });
     return result.accessToken;
   } catch (e) {
-    // silent 失败 → 重定向到登录页（一般是 token 过期）
+    // silent 失败 = token 过期/失效 → **先清 activeAccount + 通知**（F2：别再假装已登录），再重定向登录。
+    activeAccount = null;
+    _emitAuth();
     await pca.acquireTokenRedirect({ scopes: SCOPES });
     throw e;
   }
@@ -171,6 +187,7 @@ export async function retrySilentSignIn() {
     await pca.acquireTokenSilent({ scopes: SCOPES, account: cached[0] });
     pca.setActiveAccount(cached[0]);
     activeAccount = cached[0];
+    _emitAuth();                                    // online 后 silent 补登 → 通知 UI
     return true;
   } catch (_) {
     return false;

@@ -14,7 +14,7 @@ import * as graph from "./graph.js";
 import {
   configureOneDriveAuth,
   isAuthConfigured, initAuth, signIn, signOut, getToken, isSignedIn,
-  getActiveAccount, retrySilentSignIn,
+  getActiveAccount, retrySilentSignIn, onAuthChanged, getAuthState,
 } from "./auth.js";
 import { graphToCloudProvider } from "../onedrive-provider.js";
 
@@ -22,7 +22,7 @@ export function createOneDriveProvider(config = {}) {
   configureOneDriveAuth(config);                  // { clientId, scopes?, authority?, msalUrl? }
   return {
     provider: graphToCloudProvider(graph),        // CloudProvider（喂 createCloudSync）
-    auth: { isAuthConfigured, initAuth, signIn, signOut, getToken, isSignedIn, getActiveAccount, retrySilentSignIn },
+    auth: { isAuthConfigured, initAuth, signIn, signOut, getToken, isSignedIn, getActiveAccount, retrySilentSignIn, onAuthChanged, getAuthState },
   };
 }
 

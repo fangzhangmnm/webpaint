@@ -2739,12 +2739,14 @@ const ICON_CLOUD_SYNCED = '<svg viewBox="0 0 24 24" fill="none" stroke="currentC
 const ICON_CLOUD_PENDING = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><line x1="12" y1="17" x2="12" y2="11"/><polyline points="9 14 12 11 15 14"/></svg>';
 
 function computeSaveState() {
+  // transient（本地未存/存盘中/推云中）= app 态；synced/dirty/local-only = store.cloud.status 单一源（候选2）。
   if (_cloudPushing) return "cloud-busy";
   if (_docSaving) return "saving";
   if (_docDirty) return "dirty";
-  if (isSignedIn() && isCloudDirty(_activeSessionName)) return "cloud-dirty";
-  if (isSignedIn()) return "synced";
-  return "local-only";
+  const st = _store.cloud.status(_activeSessionName, { signedIn: isSignedIn(), hasLocal: true });
+  if (st === "dirty") return "cloud-dirty";     // 本地已存、云端未同步
+  if (st === "synced") return "synced";         // 与云端一致
+  return "local-only";                          // 未登录（含 cloud-only/absent，对本地视角=只本地）
 }
 function updateSaveStatus() {
   // gallery-first: 没绑 session → 隐藏 save btn（没东西可保存）
@@ -5904,10 +5906,12 @@ if (isAuthConfigured()) {
     console.warn("[auth] init failed:", e);
   });
 }
-// 后台 silent token 探测成功（auth.js 移出阻塞 init，避免 iOS interaction_in_progress）→ 刷新 UI。
+// auth 可观察 seam（候选1）：lib 在**每个** auth 转变（登录回来/后台silent/登出/过期F2）fire wp:auth-changed。
+// UI 订阅一次 → 按钮蓝/灰、save 图标、云列表 全自动同步，永不漂移、不再靠散落手 poke。
 window.addEventListener("wp:auth-changed", () => {
   if (isSignedIn()) setLastSessionSignedIn(true);
   updateCloudAuthUI();
+  updateSaveStatus();                                       // 候选2：auth 变化影响 save 图标
   if (!els.galleryFull.classList.contains("hidden")) renderGallery();
 });
 // 在线 / 离线变化时刷新云端 UI（标签 / 按钮可见性）。
