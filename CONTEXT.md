@@ -56,3 +56,7 @@ _Avoid_: tool state, app state, mode manager, Mode（裸"mode"歧义）
 **Transient**:
 EditMode 里"多 step、需 commit/cancel、ctrl-z=取消"的那类 mode（transform / crop / adjust），与持久工具平级（CAPS `transient:true`）。canDraw=false → 期间结构上不可能起 stroke。结束回到进来前的持久工具（_returnTool，内部，brush 兜底）。两个语义旋钮在 CAPS：onToolSwitch（点工具=apply/cancel）、returnTo。区别于单次手势进行中（那是 PixelEdit 的 tx）。
 _Avoid_: pending state, temporary mode, overlay, 双轴/second axis
+
+**Store**:
+持久化 + 同步的**深模块**（施工中，`src/store/`）。拥有全部 safety machinery：push-vs-pull 顺序、race serialize、412 fail-fast、trash-vs-delete 判定、etag/dirty 状态。对 UI 只暴露 flow 接口（`flow.push/openSession/exitSession/...`，UI 传 `busy/onConflict` 回调），红线在库内 enforce 不在 UI。内部调 CloudProvider（OneDrive/Mock 等 adapter）+ 本地 IDB。WebPaint 是 MyPWAPatterns `sync-store` 抽象的 pilot：先在本仓内部收拢，验稳再整体抽出。提案见 [[docs/sync-store-extraction.md]] 与 MyPWAPatterns `sync-library-spec.md`。
+_Avoid_: cloud / storage / sync manager（那些是它的内部 adapter，不是 Store 本身）, facade（弯路1：透传 re-export 已失败，Store 必须**吸收**编排而非包装）

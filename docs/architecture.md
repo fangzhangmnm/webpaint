@@ -1,5 +1,10 @@
 # 架构
 
+> ⚠️ **STALE（2026-06-04 标注）**：本文写于「一期」，下半段「一期 vs 后期边界」「状态归属」已严重落后于代码。
+> 现状早已有：保存 / OneDrive 同步 / 多图层 UI / brush preset rack / 液化 / 选区 / lasso / 滤镜。
+> 顶部的核心隐喻（PaintDoc ⇄ Board ⇄ Input + Engine）仍准确，可继续参考；其余以代码与 `CONTEXT.md` 为准。
+> 待 sync-store 抽象（见 MyPWAPatterns 架构 review 候选 1）落地后重写本文。
+
 一句话：**模型（PaintDoc）⇄ 显示（Board）⇄ 输入（InputController）+ 笔刷（BrushEngine），App 装配它们。**
 
 ```

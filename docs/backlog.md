@@ -144,6 +144,14 @@ pen-up commit 后超出旧 bbox 的部分**被裁**。画时看不出（live ove
 
 ## P2（备选 / 有趣）
 
+### MSAL never-signed-in 跳过门（hasEverSignedIn，2026-06-04 记）
+**已知噪声，故意不急修。** 控制台偶发红：`Unsafe attempt to load URL http://localhost:5173/ from frame with URL chrome-error://chromewebdata/`。
+- **根因**：MSAL `acquireTokenSilent` 开隐藏 iframe 做 SSO；现代 Chrome 屏蔽 iframe 第三方 cookie → iframe 落 chrome-error 页 → 它再 redirect 回 redirectUri → Chrome 报跨域安全警告。= `MyPWAPatterns/docs/potential-bugs.md` **F3**。
+- **benign**：被 `auth.js initAuth` 的 `catch` 兜住，回落「未登录」，不抛 JS、不坏功能、用户看不到。正常多 tab 不复现。
+- **处方（F5）**：加 `hasEverSignedIn` 标志——**从没登录过的用户完全跳过 MSAL**（不 load bundle、不开 iframe）→ 红字消失，顺带 boot 更快（省 MSAL 660KB 懒加载 + iframe 超时）。auth 可选、zero-account 离线是一等公民。
+- **改动点**：`auth.js`（initAuth 顶部门控）；写 `webpaint.hasEverSignedIn` 在 signIn 成功后。低优先，等顺手或真烦了再做。
+- **注意**：跟 Store/sync-store 抽取无关，别混在一起改。
+
 ### Ctrl+C / Ctrl+V 实装（v134 论证完毕）
 **决策**：
 - Ctrl+V 统一 = 浮层（lasso transform）

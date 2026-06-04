@@ -1,0 +1,10 @@
+{
+  "name": "webpaint",
+  "private": true,
+  "type": "module",
+  "comment": "仅声明 src/ 为 ESM，让 node 能直跑 test/ 与 bench/。无依赖、不 npm install（全 vendor）。构建走 scripts/build.sh + tools/esbuild。",
+  "scripts": {
+    "test": "node test/run.mjs",
+    "build": "bash scripts/build.sh"
+  }
+}

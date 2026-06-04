@@ -54,6 +54,8 @@ import {
   getLastSessionSignedIn, setLastSessionSignedIn, fetchSessionMetadata, getKnownETag,
   pushBrushRack, pullBrushRack, fetchBrushRackMetadata, getBrushRackKnownETag,
 } from "./cloud.js";
+import * as cloudMod from "./cloud.js";          // C1b：给 Store 当 cloud adapter（namespace）
+import { createStore } from "./store/store.js";  // 同步编排深模块（docs/sync-store-extraction.md）
 
 const THEMES = ["auto", "day", "night"];
 const THEME_LABEL = { auto: "跟随系统", day: "日", night: "夜" };
@@ -202,6 +204,16 @@ function safeLS(key, fallback) {
 function safeLSSet(key, val) {
   try { localStorage.setItem(key, val); } catch {}
 }
+
+// ---- C1b：Store（同步编排深模块）。explicit 保存的云推走 store.flow.push（B1/B2/B5/retry/C4 多tab）。----
+// 灰度：**dev 路由默认开**（iPad 无控制台，dev 不影响 prod），**prod 默认关**；显式 LS 可覆盖：
+//   localStorage.setItem("webpaint.storeFlowPush","1"|"0") 后刷新。
+// 关 = 走原 saveAndPush（行为零变化）；本地 IDB 保存（saveNow）两边都不变，只替换"云推+412"那段。
+const _store = createStore({ cloud: cloudMod });
+const _storeFlowPushLS = safeLS("webpaint.storeFlowPush", null);
+const _isDevRouteEarly = location.pathname.includes("/dev/")
+  || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+const USE_STORE_PUSH = _storeFlowPushLS != null ? _storeFlowPushLS === "1" : _isDevRouteEarly;
 
 // ---- 启动 ----
 // 触屏检测（iPad / iPhone / surface touchscreen）→ hand 工具隐藏（双指 pan 已足）
@@ -2840,6 +2852,9 @@ function adoptLoadedDoc(loaded, sessionName) {
   renderLayersPanel();
   _activeSessionName = sessionName;
   setCurrentSessionName(sessionName);
+  // C4：捕获本 tab 的 base-etag（打开这画时的云端版本）进 Store 内存。
+  // 之后 store.flow.push 用它当 If-Match，不读共享 localStorage → 杜绝多 tab 静默覆盖。
+  _store.adoptBase(sessionName, getKnownETag(sessionName));
   _docDirty = false;
   _docLastSavedAt = Date.now();
   _isLazyBlankSession = false;   // 加载了真实 session，不再 lazy
@@ -2959,6 +2974,7 @@ window.addEventListener("wp:histchange", () => {
 // user 显式 consent + 在场 → 触云。autosave / visibility / pagehide
 // 走 saveNow（仅 IDB），不触云。详见 docs/persistence-and-encryption-shareback.md。
 async function saveAndPush() {
+  if (USE_STORE_PUSH) return saveAndPushViaStore();
   if (_docSaving) return;
   // 防 race：上一个 push 还没完就再触发 → 第二次拿旧 etag → 必 412
   // user：「点 save 之后没改点 gallery 有概率云端有新版本 → backup sheet」
@@ -3055,6 +3071,96 @@ async function saveAndPush() {
     }
   } else if (!isSignedIn() && !_docDirty) {
     setStatus(`已存本地：${_activeSessionName}（IDB 易失，登录云端更安全）`);
+  }
+}
+
+// C1b：saveAndPush 的 Store 版（USE_STORE_PUSH 时走这条）。
+// 本地保存 / 离线跳过 / 登录态门控与原版一致；只把"云推 + 412 处理"换成 store.flow.push。
+// flow.push 内含 B1 串行 / B2 不丢编辑 / B5 lost-response 自愈 / retry 退避；
+// 真冲突时 flow.push 返回 {status:"conflict", choice}，下面复用既有 primitives 执行 pull/rename/branch。
+async function saveAndPushViaStore() {
+  if (_docSaving) return;
+  if (_cloudPushing) await _awaitCloudPushIdle();
+  if (!_activeSessionName) { setStatus("没打开作品，无法保存", true); return; }
+  if (_docDirty) await saveNow();
+  if (_activeSessionName) {
+    _sessionOpenedAt = Date.now();
+    _writeSessionCheckpoint(_activeSessionName).catch((e) => console.warn("[revert] explicit save checkpoint:", e));
+  }
+  if (isSignedIn() && navigator.onLine === false && isCloudDirty(_activeSessionName)) {
+    setStatus(`已存本地：${_activeSessionName}（离线，回到在线再 Ctrl+S 推云端）`);
+    return;
+  }
+  if (!(isSignedIn() && isCloudDirty(_activeSessionName))) {
+    if (!isSignedIn() && !_docDirty) setStatus(`已存本地：${_activeSessionName}（IDB 易失，登录云端更安全）`);
+    return;
+  }
+  const sessionName = _activeSessionName;
+  let conflictChoice = null;
+  _cloudPushing = true;
+  updateSaveStatus();
+  try {
+    const result = await _store.flow.push(sessionName, {
+      encode: () => encodeDocToOra(doc, {
+        referenceImage: referenceWindow.getPersistBlob(),
+        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
+      }),
+      getEditVersion: () => _editVersion,
+      onConflict: async () => await lockSyncGate({
+        title: "云端有更新版本",
+        message: `${sessionName} 在云端已被改过。推会覆盖那次改动。`,
+        showSpinner: false,
+        actions: [
+          { label: "拉云端覆盖本地（备份本地）", value: "pull", primary: true },
+          { label: "保留本地另存为副本", value: "rename" },
+          { label: "都留（云端开为副本）", value: "branch" },
+        ],
+      }),
+    });
+    if (result.status === "conflict") {
+      conflictChoice = result.choice;
+    } else {
+      setStatus(result.status === "healed"
+        ? `已同步到云端：${sessionName}（云端本已是这份）`
+        : `已同步到云端：${sessionName}`);
+      renderGallery();
+    }
+  } catch (e) {
+    console.warn("[cloud] store push failed:", e);
+    setStatus("推送失败：" + (e && e.message || e));
+  } finally {
+    _cloudPushing = false;
+    updateSaveStatus();
+  }
+  // 冲突执行（在 _cloudPushing 释放之后；复用既有 primitives，与原 saveAndPush 同序）
+  if (conflictChoice === "pull") {
+    const backupName = `${sessionName}-backup-${Date.now()}`;
+    try { await renameLocalSessionAsBackup(sessionName, backupName); }
+    catch (err) { setStatus(`本地备份失败，已取消拉云端：${err.message || err}`, true); return; }
+    try {
+      const r = await pullSessionByPath(sessionName + ".ora");
+      if (r) {
+        const loaded = await decodeOraToDoc(r.blob);
+        adoptLoadedDoc(loaded, sessionName);
+        await saveSession(doc, sessionName, {});
+        setStatus(`已拉云端；本地原版备份为「${backupName}」`);
+      } else {
+        setStatus(`云端找不到「${sessionName}」（备份「${backupName}」可删）`, true);
+      }
+    } catch (err) { setStatus(`拉云端失败：${err.message || err}（备份「${backupName}」可删）`, true); }
+  } else if (conflictChoice === "rename") {
+    const newName = await renameCurrentSession({ suggested: sessionName + " (新)", reason: "云端冲突" });
+    if (newName && isSignedIn()) { setCloudDirty(newName, true); queueSave("push"); }
+  } else if (conflictChoice === "branch") {
+    try {
+      const r = await pullSessionByPath(sessionName + ".ora");
+      if (r) {
+        const branchName = `${sessionName}-cloud-${Date.now()}`;
+        const loaded = await decodeOraToDoc(r.blob);
+        await saveSession(loaded, branchName, {});
+        setStatus(`云端版开为「${branchName}」；本地未变`);
+      }
+    } catch (err) { setStatus("开副本失败：" + (err.message || err), true); }
   }
 }
 

@@ -18,7 +18,11 @@ export function isAuthConfigured() {
 // v121: 用 document.baseURI 而非 import.meta.url —— bundle 后 import.meta.url
 // 是 dist/main-<hash>.mjs，相对路径会错位置。baseURI = HTML 文件位置，从 site root 解。
 // v122 r2: vendor/ 从 src/vendor/ 挪到根 vendor/（"运行时资源在根，src/ 只剩 build input"）
-const MSAL_URL = new URL("./vendor/msal/msal-browser.min.js", document.baseURI).href;
+// typeof document 守卫：让 auth.js 能在 node（test/bench）里被 import 而不崩。
+// 浏览器里 document 一定在，行为与之前完全一致；node 里 = null（loadMsal 永不在 node 触发）。
+const MSAL_URL = (typeof document !== "undefined" && document.baseURI)
+  ? new URL("./vendor/msal/msal-browser.min.js", document.baseURI).href
+  : null;
 
 let msalLoadPromise = null;
 let pca = null;
