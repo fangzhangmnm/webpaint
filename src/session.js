@@ -58,7 +58,7 @@ export async function saveSession(doc, name, opts = {}) {
 /** 渲染缩略图 blob（最长边 = maxSide）。给图库 grid 用。
  *  PNG 保留 alpha → 容器 CSS 背景可独立调色，立绘透明区跟容器自然融合。
  */
-async function renderThumbBlob(doc, maxSide = 256) {
+export async function renderThumbBlob(doc, maxSide = 256) {
   const W = doc.width, H = doc.height;
   const merged = document.createElement("canvas");
   merged.width = W; merged.height = H;

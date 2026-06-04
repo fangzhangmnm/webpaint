@@ -56,6 +56,7 @@ import {
 } from "./cloud.js";
 import * as cloudMod from "./cloud.js";          // C1b：给 Store 当 cloud adapter（namespace）
 import { createStore } from "./store/store.js";  // 同步编排深模块（docs/sync-store-extraction.md）
+import { createLocalAdapter } from "./store/local-adapter.js";  // 真本地持久 adapter（包 session/storage）
 
 const THEMES = ["auto", "day", "night"];
 const THEME_LABEL = { auto: "跟随系统", day: "日", night: "夜" };
@@ -209,7 +210,7 @@ function safeLSSet(key, val) {
 // 灰度：**dev 路由默认开**（iPad 无控制台，dev 不影响 prod），**prod 默认关**；显式 LS 可覆盖：
 //   localStorage.setItem("webpaint.storeFlowPush","1"|"0") 后刷新。
 // 关 = 走原 saveAndPush（行为零变化）；本地 IDB 保存（saveNow）两边都不变，只替换"云推+412"那段。
-const _store = createStore({ cloud: cloudMod });
+const _store = createStore({ cloud: cloudMod, local: createLocalAdapter() });
 const _storeFlowPushLS = safeLS("webpaint.storeFlowPush", null);
 const _isDevRouteEarly = location.pathname.includes("/dev/")
   || location.hostname === "localhost" || location.hostname === "127.0.0.1";
@@ -2967,7 +2968,10 @@ async function _readSessionCheckpoint(name) {
 window.addEventListener("wp:histchange", () => {
   if (!_activeSessionName) return;            // gallery-first: 无绑 session 时不响应
   _docDirty = true;
-  if (isSignedIn()) setCloudDirty(_activeSessionName, true);
+  // **不 gate isSignedIn**：编辑必标云脏。否则登出 / SSO 抖动期间的编辑不被标脏，
+  // 登回来后 push 判 isCloudDirty=false 静默跳过 → 编辑永不上云、无报错（看不见 bug 根因）。
+  // 安全：isCloudDirty getter 在未登录时本就返 false 忽略此标记，登回来才认这个 "1" → 补推。
+  setCloudDirty(_activeSessionName, true);
   updateSaveStatus();
 });
 // **Ctrl+S / 点 save 按钮** = 完全保存（local IDB + push cloud）。

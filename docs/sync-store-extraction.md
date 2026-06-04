@@ -100,6 +100,11 @@ mock 原本只模拟「快、可靠、原子」的云。补了 **fault 注入面
 
 **不在本层 provider 测试范围**：auth/MSAL（F 系列）、加密（G 系列）、reader 专属（I 系列）——归各自模块。
 
+## 待澄清/待修（user 2026-06-04 flag）
+
+- **「smart save icon 本地 vs 云端要不一样」**（UI 层，user 说缓做）：澄清=保存按钮图标要区分「只存本地」vs「已同步到云」。现状机器其实已分：local-only→`ICON_DISK`、synced→`ICON_CLOUD_CHECK`、cloud-dirty→`ICON_UPLOAD`（computeSaveState/updateSaveStatus, app.js ~2749-2773）。基本已有，细化（更醒目区分 / 状态时机）留 UI 那轮。自动保存确认只本地（A7），唯一自动碰云=退图库（consent push）。
+- **登出/SSO 抖动期间编辑标云脏**：已修（app.js histchange 去掉 isSignedIn 门控，见 potential-bugs B10）。
+
 ## C1a 完成：`src/store/store.js` 的 flow.push core
 
 `createStore({ cloud, maxAttempts, backoffMs, sleep })` → `store.flow.push(name, { encode, getEditVersion, onConflict })`。
