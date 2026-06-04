@@ -104,22 +104,37 @@ export async function initAuth() {
     const cached = pca.getAllAccounts();
     if (cached.length === 0) return { signedIn: false, account: null };
 
-    // 同 origin cache leak 过滤：拿过本 app 的 token 才算真登录
-    try {
-      await pca.acquireTokenSilent({ scopes: SCOPES, account: cached[0] });
-      pca.setActiveAccount(cached[0]);
-      activeAccount = cached[0];
-      return { signedIn: true, account: activeAccount };
-    } catch (_) {
-      return { signedIn: false, account: null, probedAccount: cached[0] };
-    }
+    // silent token 探测**移出阻塞 init** → 后台跑（F4）。iOS 上 acquireTokenSilent 的 iframe 会卡住；
+    // 若在此 await，MSAL interaction 状态被一直占着 → 用户点登录的 loginRedirect 撞 interaction_in_progress。
+    _probeSilent(cached[0]);
+    return { signedIn: false, account: null, probing: true, probedAccount: cached[0] };
   })().catch((e) => { initPromise = null; throw e; });
   return initPromise;
 }
 
+// 后台 silent token 探测：成功 → 设 activeAccount + 广播。绝不阻塞 init / sign-in（iOS iframe 卡不要紧）。
+async function _probeSilent(account) {
+  try {
+    await pca.acquireTokenSilent({ scopes: SCOPES, account });
+    pca.setActiveAccount(account);
+    activeAccount = account;
+    try { if (typeof window !== "undefined") window.dispatchEvent(new Event("wp:auth-changed")); } catch (_) {}
+  } catch (_) { /* 拿不到 token = 未真登录；UI 保持未登录，用户可显式登录 */ }
+}
+
 export async function signIn() {
-  if (!pca) await initAuth();
-  return pca.loginRedirect({ scopes: SCOPES });
+  // 先等 init（含 handleRedirectPromise）跑完——它清掉 MSAL 的 interaction 状态。silent 探测已移后台不阻塞。
+  try { await initAuth(); } catch (_) {}
+  try {
+    return await pca.loginRedirect({ scopes: SCOPES });
+  } catch (e) {
+    // 兜底：仍撞 interaction_in_progress（上一次 redirect 没收尾）→ 等一拍再试一次。
+    if (e && (e.errorCode === "interaction_in_progress" || /interaction.*progress/i.test(e.message || ""))) {
+      await new Promise((r) => setTimeout(r, 400));
+      return pca.loginRedirect({ scopes: SCOPES });
+    }
+    throw e;
+  }
 }
 
 export async function signOut() {

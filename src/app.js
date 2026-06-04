@@ -5904,6 +5904,12 @@ if (isAuthConfigured()) {
     console.warn("[auth] init failed:", e);
   });
 }
+// 后台 silent token 探测成功（auth.js 移出阻塞 init，避免 iOS interaction_in_progress）→ 刷新 UI。
+window.addEventListener("wp:auth-changed", () => {
+  if (isSignedIn()) setLastSessionSignedIn(true);
+  updateCloudAuthUI();
+  if (!els.galleryFull.classList.contains("hidden")) renderGallery();
+});
 // 在线 / 离线变化时刷新云端 UI（标签 / 按钮可见性）。
 // online 时尝试 silent re-auth：boot 离线 → activeAccount 为 null；有网了主动 retry 一次
 window.addEventListener("online", async () => {
