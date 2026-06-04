@@ -17,7 +17,7 @@
 //   - 硬扫：8 字节 sig + IHDR 验证 + IEND 终止，false-match 概率 ~1/2^96
 //   - ZIP 解析：EOCD commentLen sanity 防 false-positive；输出 PNG magic 校验
 
-import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./graph.js";
+import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./app-store.js";
 
 // 投机 suffix：last N 字节一次性拿 EOCD + CD +（自家 ora）thumbnail data
 // 80KB budget = thumb 自适应目标 ≤ 70KB + 尾巴 ~10KB（CD + EOCD + sig 扫描余量）

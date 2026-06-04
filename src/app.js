@@ -42,7 +42,7 @@ import { decodeImageFile, fitWithin, canvasToBlob, smartResample, fillResampleSe
 import { getFilter, listFilters, registerFilter, onFilterRegistered } from "./filters.js";
 import "./plugins/index.js";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 import { decodeOraToDoc, encodeDocToOra, parseAppVersion } from "./ora.js";
-import { getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches } from "./graph.js";
+import { getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches } from "./app-store.js";
 import { getOrFetchCloudThumb, clearCloudThumbCache, stats as cloudThumbStats, config as cloudThumbConfig, resetStats as cloudThumbResetStats } from "./cloud-thumb-cache.js";
 import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTelemetry } from "./cloud-thumbs.js";
 import {
@@ -53,10 +53,8 @@ import {
   isCloudDirty, setCloudDirty, CloudConflictError,
   getLastSessionSignedIn, setLastSessionSignedIn, fetchSessionMetadata, getKnownETag,
   pushBrushRack, pullBrushRack, fetchBrushRackMetadata, getBrushRackKnownETag,
-} from "./cloud.js";
-import * as cloudMod from "./cloud.js";          // C1b：给 Store 当 cloud adapter（namespace）
-import { createStore } from "./store/store.js";  // 同步编排深模块（docs/sync-store-extraction.md）
-import { createLocalAdapter } from "./store/local-adapter.js";  // 真本地持久 adapter（包 session/storage）
+  store as _store,
+} from "./app-store.js";   // cut-over：cloud/auth/graph 全走 lib（app-store shim 保旧名）
 
 const THEMES = ["auto", "day", "night"];
 const THEME_LABEL = { auto: "跟随系统", day: "日", night: "夜" };
@@ -206,15 +204,7 @@ function safeLSSet(key, val) {
   try { localStorage.setItem(key, val); } catch {}
 }
 
-// ---- C1b：Store（同步编排深模块）。explicit 保存的云推走 store.flow.push（B1/B2/B5/retry/C4 多tab）。----
-// 灰度：**dev 路由默认开**（iPad 无控制台，dev 不影响 prod），**prod 默认关**；显式 LS 可覆盖：
-//   localStorage.setItem("webpaint.storeFlowPush","1"|"0") 后刷新。
-// 关 = 走原 saveAndPush（行为零变化）；本地 IDB 保存（saveNow）两边都不变，只替换"云推+412"那段。
-const _store = createStore({ cloud: cloudMod, local: createLocalAdapter() });
-const _storeFlowPushLS = safeLS("webpaint.storeFlowPush", null);
-const _isDevRouteEarly = location.pathname.includes("/dev/")
-  || location.hostname === "localhost" || location.hostname === "127.0.0.1";
-const USE_STORE_PUSH = _storeFlowPushLS != null ? _storeFlowPushLS === "1" : _isDevRouteEarly;
+// cut-over 完成：_store 从 app-store import（接 lib）。explicit 保存恒走 store.flow.push（B1/B2/B5/retry/C4）。
 
 // ---- 启动 ----
 // 触屏检测（iPad / iPhone / surface touchscreen）→ hand 工具隐藏（双指 pan 已足）
@@ -2977,112 +2967,9 @@ window.addEventListener("wp:histchange", () => {
 // **Ctrl+S / 点 save 按钮** = 完全保存（local IDB + push cloud）。
 // user 显式 consent + 在场 → 触云。autosave / visibility / pagehide
 // 走 saveNow（仅 IDB），不触云。详见 docs/persistence-and-encryption-shareback.md。
+// 云推走 _store.flow.push（lib）：内含 B1 串行 / B2 不丢编辑 / B5 lost-response 自愈 / retry / C4 多tab。
+// 真冲突 → flow.push 返回 {status:"conflict", choice}，下面复用既有 primitives 执行 pull/rename/branch。
 async function saveAndPush() {
-  if (USE_STORE_PUSH) return saveAndPushViaStore();
-  if (_docSaving) return;
-  // 防 race：上一个 push 还没完就再触发 → 第二次拿旧 etag → 必 412
-  // user：「点 save 之后没改点 gallery 有概率云端有新版本 → backup sheet」
-  if (_cloudPushing) await _awaitCloudPushIdle();
-  if (!_activeSessionName) { setStatus("没打开作品，无法保存", true); return; }
-  // 1) local IDB
-  if (_docDirty) await saveNow();
-  // v133 (user：「explicit save 应该重写 revert checkpoint，跟 Blender Revert 类似」)
-  //   autosave 不动 checkpoint；user 主动 Ctrl+S = "我认可当前状态" → 推后 revert 点
-  if (_activeSessionName) {
-    _sessionOpenedAt = Date.now();
-    _writeSessionCheckpoint(_activeSessionName).catch((e) => console.warn("[revert] explicit save checkpoint:", e));
-  }
-  // 2) push cloud（user 在场 + 已登录 + 在线 + 云端未同步）
-  // 离线时跳过推送（不要弹错；本地已存，回到在线再 save 一次自动推）
-  if (isSignedIn() && navigator.onLine === false && isCloudDirty(_activeSessionName)) {
-    setStatus(`已存本地：${_activeSessionName}（离线，回到在线再 Ctrl+S 推云端）`);
-    return;
-  }
-  if (isSignedIn() && isCloudDirty(_activeSessionName)) {
-    _cloudPushing = true;
-    updateSaveStatus();
-    try {
-      const ora = await encodeDocToOra(doc, {
-        referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
-      });
-      await pushSession(_activeSessionName, ora);
-      setStatus(`已同步到云端：${_activeSessionName}`);
-      renderGallery();
-    } catch (e) {
-      if (e instanceof CloudConflictError) {
-        // 412 → 锁屏 + 弹「拉云端 / 保留本地 / 都留」
-        _cloudPushing = false;
-        updateSaveStatus();
-        const sessionName = _activeSessionName;
-        const choice = await lockSyncGate({
-          title: "云端有更新版本",
-          message: `${sessionName} 在云端已被改过。推会覆盖那次改动。`,
-          showSpinner: false,
-          actions: [
-            { label: "拉云端覆盖本地（备份本地）", value: "pull", primary: true },
-            { label: "保留本地另存为副本", value: "rename" },
-            { label: "都留（云端开为副本）", value: "branch" },
-          ],
-        });
-        if (choice === "pull") {
-          // 同 gateCloudSyncOnOpen 的 pull：先备份本地，再拉云端，再覆盖
-          const backupName = `${sessionName}-backup-${Date.now()}`;
-          try {
-            await renameLocalSessionAsBackup(sessionName, backupName);
-          } catch (err) {
-            setStatus(`本地备份失败，已取消拉云端：${err.message || err}`, true);
-            return;
-          }
-          try {
-            const r = await pullSessionByPath(sessionName + ".ora");
-            if (r) {
-              const loaded = await decodeOraToDoc(r.blob);
-              adoptLoadedDoc(loaded, sessionName);
-              await saveSession(doc, sessionName, {});
-              setStatus(`已拉云端；本地原版备份为「${backupName}」`);
-            } else {
-              setStatus(`云端找不到「${sessionName}」（备份「${backupName}」可删）`, true);
-            }
-          } catch (err) {
-            setStatus(`拉云端失败：${err.message || err}（备份「${backupName}」可删）`, true);
-          }
-        } else if (choice === "rename") {
-          const newName = await renameCurrentSession({ suggested: sessionName + " (新)", reason: "云端冲突" });
-          if (newName && isSignedIn()) {
-            setCloudDirty(newName, true);
-            queueSave("push");
-          }
-        } else if (choice === "branch") {
-          try {
-            const r = await pullSessionByPath(sessionName + ".ora");
-            if (r) {
-              const branchName = `${sessionName}-cloud-${Date.now()}`;
-              const loaded = await decodeOraToDoc(r.blob);
-              await saveSession(loaded, branchName, {});
-              setStatus(`云端版开为「${branchName}」；本地未变`);
-            }
-          } catch (err) { setStatus("开副本失败：" + (err.message || err), true); }
-        }
-        return;
-      } else {
-        console.warn("[cloud] push failed:", e);
-        setStatus("推送失败：" + (e && e.message || e));
-      }
-    } finally {
-      _cloudPushing = false;
-      updateSaveStatus();
-    }
-  } else if (!isSignedIn() && !_docDirty) {
-    setStatus(`已存本地：${_activeSessionName}（IDB 易失，登录云端更安全）`);
-  }
-}
-
-// C1b：saveAndPush 的 Store 版（USE_STORE_PUSH 时走这条）。
-// 本地保存 / 离线跳过 / 登录态门控与原版一致；只把"云推 + 412 处理"换成 store.flow.push。
-// flow.push 内含 B1 串行 / B2 不丢编辑 / B5 lost-response 自愈 / retry 退避；
-// 真冲突时 flow.push 返回 {status:"conflict", choice}，下面复用既有 primitives 执行 pull/rename/branch。
-async function saveAndPushViaStore() {
   if (_docSaving) return;
   if (_cloudPushing) await _awaitCloudPushIdle();
   if (!_activeSessionName) { setStatus("没打开作品，无法保存", true); return; }

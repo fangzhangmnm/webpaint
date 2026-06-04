@@ -1,13 +1,6 @@
-// 入口：注册全部 test 文件后跑。用法：node test/run.mjs
+// WebPaint 专属测试入口（store/cloud-sync/provider 契约在 lib 的 test/，这里只留 WebPaint vendored adapter）。
 import { run } from "./runner.mjs";
-import "./mock-provider.contract.test.mjs";
-import "./cloud.contract.test.mjs";
-import "./cloud-faults.contract.test.mjs";
-import "./store-flow-push.contract.test.mjs";
-import "./store-flow-open-exit.contract.test.mjs";
-import "./store-flow-trash.contract.test.mjs";
-import "./store-multitab.contract.test.mjs";
 import "./onedrive-provider.contract.test.mjs";
 
-console.log("\n  sync-store contract tests\n");
+console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
 await run();

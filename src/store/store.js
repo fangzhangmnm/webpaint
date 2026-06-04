@@ -39,12 +39,12 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   const _chain = new Map();
   const _sleep = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
 
-  // C4：base-etag 归这个 Store 实例（= 这个 tab）的内存，openSession/adopt 时捕获一次。
+  // C4：base-etag 归这个 Store 实例（= 这个 tab）的内存，open/adopt 时捕获一次。
   // push 用它当 If-Match、成功只推进**自己的**——绝不每次去读跨 tab 共享的 localStorage etag，
   // 否则别的 tab 推成功后改了共享 etag，本 tab 的陈旧推会被误判成"无冲突"→ 静默覆盖（W2 红线）。
   const _base = new Map();   // name → etag|null（null = 无基准，首推不带 If-Match）
   function adoptBase(name, etag) { _base.set(name, etag ?? null); }
-  function baseFor(name) { return _base.has(name) ? _base.get(name) : cloud.getKnownETag(name); }
+  function baseFor(name) { return _base.has(name) ? _base.get(name) : cloud.getETag(name); }
 
   function _retriable(e) {
     return !!e && (e.status == null || e.status === 429 || (e.status >= 500 && e.status <= 599))
@@ -54,10 +54,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // 412：可能是自己 lost-response 已落盘的写。拉云比对，相等即自愈（B5/W1）。
   async function _tryHeal(name, bytes) {
     let pulled;
-    try { pulled = await cloud.pullSession(name); } catch (_) { return false; }
+    try { pulled = await cloud.pull(name); } catch (_) { return false; }
     if (!pulled) return false;
     if (bytesEqual(await toU8(pulled.blob), bytes)) {
-      cloud.setCloudDirty(name, false);
+      cloud.setDirty(name, false);
       if (pulled.item && pulled.item.eTag) _base.set(name, pulled.item.eTag);  // 自愈后 base 推进到云端版本
       return true;
     }
@@ -66,7 +66,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   function _finish(name, v0, getEditVersion, status) {
     const dirtyAfter = getEditVersion() !== v0;   // B2：PUT 期间又改过 → 仍 unpushed
-    if (dirtyAfter) cloud.setCloudDirty(name, true);
+    if (dirtyAfter) cloud.setDirty(name, true);
     return { status, dirtyAfter };
   }
 
@@ -78,7 +78,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       while (attempt < maxAttempts) {
         attempt++;
         try {
-          const { item } = await cloud.pushSession(name, bytes, { baseEtag: baseFor(name) });
+          const { item } = await cloud.push(name, bytes, { baseEtag: baseFor(name) });
           if (item && item.eTag) _base.set(name, item.eTag);   // 只推进自己的 base
           return _finish(name, v0, getEditVersion, "pushed");
         } catch (e) {
@@ -110,17 +110,17 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     let backupName;
     try { backupName = await local.backup(name); }
     catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
-    const r = await cloud.pullSession(name);
+    const r = await cloud.pull(name);
     if (!r) return { ok: false, reason: "cloud-vanished", backupName };
     await local.save(name, r.blob);                // 覆盖本地为云端版（原件已备份）
     if (r.item && r.item.eTag) _base.set(name, r.item.eTag);  // base 推进到云端版本（多tab/冲突后一致）
-    cloud.setCloudDirty(name, false);              // 已采纳云端 → 不再 unpushed
+    cloud.setDirty(name, false);              // 已采纳云端 → 不再 unpushed
     if (adopt) await adopt(r.blob, name);          // 反映到活编辑器
     return { ok: true, backupName };
   }
 
   // 真冲突的执行（pull/branch 在 Store 内做；keep/rename 交回 app 处理身份变更）。
-  // push 和 openSession 共用，绝不静默覆盖。
+  // push 和 open 共用，绝不静默覆盖。
   // 给了执行回调（adopt for pull / saveBranch for branch）→ Store 内执行，返 "resolved"。
   // 没给（或 keep/rename 这类身份变更）→ 返 "conflict"+choice，交 app 处理（向后兼容旧消费代码）。
   async function _resolveConflict(name, choice, { adopt, saveBranch, now = () => 0 } = {}) {
@@ -131,7 +131,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         : { status: "conflict", choice, resolution: "pull-failed", reason: r.reason, backupName: r.backupName, dirtyAfter: true };
     }
     if (choice === "branch" && saveBranch) {
-      const r = await cloud.pullSession(name);
+      const r = await cloud.pull(name);
       if (!r) return { status: "conflict", choice, resolution: "cloud-vanished", dirtyAfter: true };
       const branchName = `${name}-cloud-${now()}`;
       await saveBranch(r.blob, branchName);
@@ -141,25 +141,25 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // C2：开 session 的云端 gate。绝不静默覆盖。E8：probe（跳过到离线）与 metadata race，无硬超时。
-  async function openSession(name, opts = {}) {
+  async function open(name, opts = {}) {
     const { isOnline = () => true, probe, onNewer, adopt, busy = passBusy, now = () => 0 } = opts;
     if (!isOnline()) return { source: "local", reason: "offline" };
     return busy("检查云端…", async () => {
       let meta;
       if (probe) {
         const raced = await Promise.race([
-          cloud.fetchSessionMetadata(name).then((m) => ({ k: "meta", m }), (e) => ({ k: "err", e })),
+          cloud.fetchMeta(name).then((m) => ({ k: "meta", m }), (e) => ({ k: "err", e })),
           Promise.resolve(probe).then(() => ({ k: "skip" })),
         ]);
         if (raced.k === "skip") return { source: "local", reason: "skipped" };
         if (raced.k === "err") return { source: "local", reason: "cloud-error" };
         meta = raced.m;
       } else {
-        try { meta = await cloud.fetchSessionMetadata(name); }
+        try { meta = await cloud.fetchMeta(name); }
         catch (_) { return { source: "local", reason: "cloud-error" }; }
       }
       if (!meta) return { source: "local", reason: "cloud-absent" };
-      const base = cloud.getKnownETag(name);
+      const base = cloud.getETag(name);
       if (!base || meta.etag === base) return { source: "local", reason: "in-sync" };
       // 云端自 base 后动过 → 弹「拉 / 留 / 分支」（onNewer 是 UI 回调；强退在此安全：尚无持久副作用）
       const choice = onNewer
@@ -172,7 +172,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
           : { source: "local", reason: r.reason, backupName: r.backupName, error: r.error };
       }
       if (choice === "branch") {
-        const r = await cloud.pullSession(name);
+        const r = await cloud.pull(name);
         if (!r) return { source: "local", reason: "cloud-vanished" };
         const branchName = `${name}-cloud-${now()}`;
         await local.save(branchName, r.blob);
@@ -183,7 +183,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // C3：退出 = consent push。H3：先 flush（encode→local.save 落地）→ push → 才允许清 active。
-  async function exitSession(name, opts = {}) {
+  async function close(name, opts = {}) {
     const { encode, getEditVersion, onConflict, busy = passBusy } = opts;
     if (encode && local) await local.save(name, await encode());   // flush：绝不在保存前清状态
     let r;
@@ -197,23 +197,23 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // C5：删除 = move-aside。三态（仅本地 / 仅云端 / 两者）。两者 → 云端进 .trash + 本地直接删（不留双份）。
-  async function deleteSession(name, opts = {}) {
+  async function del(name, opts = {}) {
     const { isOnline = () => true, confirm, onDirtyWarn, busy = passBusy } = opts;
     if (confirm && !(await confirm({ title: "删除", body: name, danger: true }))) return { status: "cancelled" };
-    if (cloud.isCloudDirty(name) && onDirtyWarn && !(await onDirtyWarn({ name }))) return { status: "cancelled" };
+    if (cloud.isDirty(name) && onDirtyWarn && !(await onDirtyWarn({ name }))) return { status: "cancelled" };
 
     const localPresent = local ? await local.exists(name) : false;
     if (!isOnline()) {
       // 离线：本地 move-aside + 排队云删（带 base-etag 供重连重放）。队列须持久化（C1b 接 IDB）。
       let trashKey = null;
       if (localPresent) trashKey = await local.trash(name);
-      return { status: "trashed", where: "local", queuedCloudDelete: true, baseEtag: cloud.getKnownETag(name), trashKey };
+      return { status: "trashed", where: "local", queuedCloudDelete: true, baseEtag: cloud.getETag(name), trashKey };
     }
     return busy("删除中…", async () => {
       let cloudPresent = false;
-      try { cloudPresent = !!(await cloud.fetchSessionMetadata(name)); } catch (_) { cloudPresent = false; }
+      try { cloudPresent = !!(await cloud.fetchMeta(name)); } catch (_) { cloudPresent = false; }
       if (cloudPresent) {
-        const trashed = await cloud.trashCloudSession(name);       // 先云端进 .trash（失败抛 → 本地不动）
+        const trashed = await cloud.trash(name);       // 先云端进 .trash（失败抛 → 本地不动）
         if (localPresent) await local.hardDelete(name);            // 再本地直接删（不留双份）
         return { status: "trashed", where: "cloud", trashed };
       }
@@ -226,18 +226,18 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   async function replayDelete(name, opts = {}) {
     const { baseEtag } = opts;
     let meta;
-    try { meta = await cloud.fetchSessionMetadata(name); }
+    try { meta = await cloud.fetchMeta(name); }
     catch (_) { return { status: "deferred-offline" }; }
     if (!meta) return { status: "converged", reason: "already-gone" };
     if (baseEtag && meta.etag !== baseEtag) return { status: "conflict-edit-wins" };
-    return { status: "trashed", trashed: await cloud.trashCloudSession(name) };
+    return { status: "trashed", trashed: await cloud.trash(name) };
   }
 
   // 从 trash 恢复：云端用 itemId（撞名自动 (2)，cloud.js 已实现）；本地用 trashKey（local.restore）。
   async function restore(opts = {}) {
     const { fromCloud, cloudItemId, targetName, trashKey, busy = passBusy } = opts;
     return busy("恢复中…", async () => {
-      if (fromCloud) return { status: "restored", where: "cloud", item: await cloud.restoreCloudFromTrash(cloudItemId, targetName) };
+      if (fromCloud) return { status: "restored", where: "cloud", item: await cloud.restore(cloudItemId, targetName) };
       if (trashKey && local) { const name = await local.restore(trashKey); return { status: "restored", where: "local", name }; }
       return { status: "noop" };
     });
@@ -247,20 +247,20 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   async function purge(cloudItemId, opts = {}) {
     const { confirm, busy = passBusy } = opts;
     if (confirm && !(await confirm({ title: "彻底删除", body: "不可恢复", danger: true }))) return { status: "cancelled" };
-    return busy("彻底删除…", async () => { await cloud.purgeCloudTrashItem(cloudItemId); return { status: "purged" }; });
+    return busy("彻底删除…", async () => { await cloud.purge(cloudItemId); return { status: "purged" }; });
   }
 
   // ---- state-as-store（①）：app 不再直碰 localStorage，全走这些 typed 接口 ----
   // 云端同步态（dirty/etag/status）。status 直接喂 save 按钮 icon（local-only vs synced vs dirty）。
   const cloudState = {
-    isDirty: (name) => cloud.isCloudDirty(name),
-    getETag: (name) => cloud.getKnownETag(name),
-    setDirty: (name, d) => cloud.setCloudDirty(name, d),
+    isDirty: (name) => cloud.isDirty(name),
+    getETag: (name) => cloud.getETag(name),
+    setDirty: (name, d) => cloud.setDirty(name, d),
     // signedIn/hasLocal 是 app context（auth/本地存在），调用方传入；同步返回，给 UI 高频查。
     status: (name, { signedIn = true, hasLocal = true } = {}) => {
-      if (!hasLocal) return cloud.getKnownETag(name) ? "cloud-only" : "absent";
+      if (!hasLocal) return cloud.getETag(name) ? "cloud-only" : "absent";
       if (!signedIn) return "local-only";
-      return cloud.isCloudDirty(name) ? "dirty" : "synced";
+      return cloud.isDirty(name) ? "dirty" : "synced";
     },
   };
   // 通用 app 设置（主题/笔刷尺寸/面板位置…）。app 丢掉自己的 localStorage 调用。
@@ -269,19 +269,19 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     set: (k, v) => { if (kv) kv.set(`settings:${k}`, v); },
     remove: (k) => { if (kv) kv.remove(`settings:${k}`); },
   };
-  // 活动 session 指针（跨 reload）。取代 app 的 localStorage currentSessionName。
-  const session = {
-    getActive: () => (kv ? kv.get("session:active") || null : null),
-    setActive: (name) => { if (kv) kv.set("session:active", name); },
-    clearActive: () => { if (kv) kv.remove("session:active"); },
+  // 活动 item 指针（跨 reload）。取代 app 的 localStorage current-pointer。app-agnostic（不叫 session）。
+  const active = {
+    get: () => (kv ? kv.get("active:pointer") || null : null),
+    set: (name) => { if (kv) kv.set("active:pointer", name); },
+    clear: () => { if (kv) kv.remove("active:pointer"); },
   };
 
   return {
-    flow: { push, openSession, exitSession, delete: deleteSession, replayDelete, restore, purge },
+    flow: { push, open, close, delete: del, replayDelete, restore, purge },
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
-    session,                   // 活动 session 指针
-    adoptBase,                 // app 在打开/采纳 session 时调，捕获本 tab 的 base-etag（C4）
+    active,                    // 活动 item 指针（不叫 session，app-agnostic）
+    adoptBase,                 // app 打开/采纳 item 时调，捕获本 tab 的 base-etag（C4）
     _internal: { toU8, bytesEqual, baseFor },
   };
 }

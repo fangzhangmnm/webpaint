@@ -9,21 +9,26 @@
 //   有 account 不代表本 app 有 token（本 app 可能从没授权过）。
 // - signOut() 只清本 app cache（clearCache），不 logoutRedirect 把用户 Outlook 一起踢掉。
 
-import { CLIENT_ID, AUTHORITY, SCOPES } from "./config.js";
+// 配置注入（取代 WebPaint 的 config.js import，去 app 化）。app 调一次 configureOneDriveAuth。
+let CLIENT_ID = "";
+let AUTHORITY = "https://login.microsoftonline.com/common";
+let SCOPES = ["Files.ReadWrite.AppFolder", "offline_access"];
+let MSAL_URL = null;
+export function configureOneDriveAuth({ clientId, authority, scopes, msalUrl } = {}) {
+  if (clientId) CLIENT_ID = clientId;
+  if (authority) AUTHORITY = authority;
+  if (scopes) SCOPES = scopes;
+  if (msalUrl != null) {   // 浏览器相对路径（vendored 脚本）→ 绝对；node 里 = null
+    MSAL_URL = (typeof document !== "undefined" && document.baseURI)
+      ? new URL(msalUrl, document.baseURI).href : null;
+  }
+}
 
 export function isAuthConfigured() {
   return typeof CLIENT_ID === "string" && CLIENT_ID.length > 0 && !CLIENT_ID.startsWith("REPLACE_ME");
 }
 
-// v121: 用 document.baseURI 而非 import.meta.url —— bundle 后 import.meta.url
-// 是 dist/main-<hash>.mjs，相对路径会错位置。baseURI = HTML 文件位置，从 site root 解。
-// v122 r2: vendor/ 从 src/vendor/ 挪到根 vendor/（"运行时资源在根，src/ 只剩 build input"）
-// typeof document 守卫：让 auth.js 能在 node（test/bench）里被 import 而不崩。
-// 浏览器里 document 一定在，行为与之前完全一致；node 里 = null（loadMsal 永不在 node 触发）。
-const MSAL_URL = (typeof document !== "undefined" && document.baseURI)
-  ? new URL("./vendor/msal/msal-browser.min.js", document.baseURI).href
-  : null;
-
+// MSAL_URL 由 configureOneDriveAuth 设（app 传 vendored 脚本相对路径，document.baseURI 解绝对）。
 let msalLoadPromise = null;
 let pca = null;
 let activeAccount = null;
