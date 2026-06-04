@@ -123,18 +123,12 @@ async function _probeSilent(account) {
 }
 
 export async function signIn() {
-  // 先等 init（含 handleRedirectPromise）跑完——它清掉 MSAL 的 interaction 状态。silent 探测已移后台不阻塞。
-  try { await initAuth(); } catch (_) {}
-  try {
-    return await pca.loginRedirect({ scopes: SCOPES });
-  } catch (e) {
-    // 兜底：仍撞 interaction_in_progress（上一次 redirect 没收尾）→ 等一拍再试一次。
-    if (e && (e.errorCode === "interaction_in_progress" || /interaction.*progress/i.test(e.message || ""))) {
-      await new Promise((r) => setTimeout(r, 400));
-      return pca.loginRedirect({ scopes: SCOPES });
-    }
-    throw e;
-  }
+  // **iOS 关键**：loginRedirect 必须在同步 user-gesture（点击）里调，**前面不能有 await**，
+  // 否则 iOS Safari 把它当非手势导航静默拦截（→ 不弹登录框）。
+  // interaction 状态由 boot initAuth 的 handleRedirectPromise 清（silent 探测已移后台不占 interaction），
+  // 所以点击时 pca 通常已就绪，直接同步 loginRedirect。
+  if (!pca) await initAuth();                  // 仅 boot 还没建 pca 的极少数情况才等（会丢 gesture，但罕见）
+  return pca.loginRedirect({ scopes: SCOPES }); // 同步调用，保住 iOS user-gesture
 }
 
 export async function signOut() {
