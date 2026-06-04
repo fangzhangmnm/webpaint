@@ -35,7 +35,7 @@ const passBusy = (label, fn) => fn();   // 默认 busy：直接跑
  * @param {number} [deps.backoffMs=200]
  * @param {(ms:number)=>Promise} [deps.sleep]
  */
-export function createStore({ cloud, local, maxAttempts = 4, backoffMs = 200, sleep } = {}) {
+export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep } = {}) {
   const _chain = new Map();
   const _sleep = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
 
@@ -250,8 +250,37 @@ export function createStore({ cloud, local, maxAttempts = 4, backoffMs = 200, sl
     return busy("彻底删除…", async () => { await cloud.purgeCloudTrashItem(cloudItemId); return { status: "purged" }; });
   }
 
+  // ---- state-as-store（①）：app 不再直碰 localStorage，全走这些 typed 接口 ----
+  // 云端同步态（dirty/etag/status）。status 直接喂 save 按钮 icon（local-only vs synced vs dirty）。
+  const cloudState = {
+    isDirty: (name) => cloud.isCloudDirty(name),
+    getETag: (name) => cloud.getKnownETag(name),
+    setDirty: (name, d) => cloud.setCloudDirty(name, d),
+    // signedIn/hasLocal 是 app context（auth/本地存在），调用方传入；同步返回，给 UI 高频查。
+    status: (name, { signedIn = true, hasLocal = true } = {}) => {
+      if (!hasLocal) return cloud.getKnownETag(name) ? "cloud-only" : "absent";
+      if (!signedIn) return "local-only";
+      return cloud.isCloudDirty(name) ? "dirty" : "synced";
+    },
+  };
+  // 通用 app 设置（主题/笔刷尺寸/面板位置…）。app 丢掉自己的 localStorage 调用。
+  const settings = {
+    get: (k) => (kv ? kv.get(`settings:${k}`) : null),
+    set: (k, v) => { if (kv) kv.set(`settings:${k}`, v); },
+    remove: (k) => { if (kv) kv.remove(`settings:${k}`); },
+  };
+  // 活动 session 指针（跨 reload）。取代 app 的 localStorage currentSessionName。
+  const session = {
+    getActive: () => (kv ? kv.get("session:active") || null : null),
+    setActive: (name) => { if (kv) kv.set("session:active", name); },
+    clearActive: () => { if (kv) kv.remove("session:active"); },
+  };
+
   return {
     flow: { push, openSession, exitSession, delete: deleteSession, replayDelete, restore, purge },
+    cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
+    settings,                  // 通用 KV（app 丢 localStorage）
+    session,                   // 活动 session 指针
     adoptBase,                 // app 在打开/采纳 session 时调，捕获本 tab 的 base-etag（C4）
     _internal: { toU8, bytesEqual, baseFor },
   };
