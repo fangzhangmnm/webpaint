@@ -2,7 +2,7 @@
 // （≈ 恒等还原）。真 graph.js 与 graphFromProvider 同表面，故这等价于验真适配正确。
 import { describe, it, assert, eq, throwsStatus } from "./runner.mjs";
 import { createMockProvider } from "../src/store/mock-provider.js";
-import { createOneDriveProvider } from "../src/store/onedrive-provider.js";
+import { graphToCloudProvider } from "../src/store/onedrive-provider.js";
 import { graphFromProvider } from "./helpers.mjs";
 
 const bytes = (s) => new TextEncoder().encode(s);
@@ -11,7 +11,7 @@ const txt = async (blob) => new TextDecoder().decode(new Uint8Array(await blob.a
 // 真 graph 形态 = graphFromProvider(clean mock)；OneDriveProvider 把它翻回 clean provider。
 function odp() {
   const mock = createMockProvider();
-  return { mock, p: createOneDriveProvider(graphFromProvider(mock)) };
+  return { mock, p: graphToCloudProvider(graphFromProvider(mock)) };
 }
 
 describe("OneDriveProvider 适配", () => {

@@ -1,11 +1,8 @@
-// OneDriveProvider —— WebPaint 的 CloudProvider 实现，薄包 graph.js（Graph/approot）。
-// 把 graph.js 的原始 Graph item（file/folder facet、@microsoft.graph.downloadUrl）翻成 lib 的 CloudItem。
-// 这是「cloud.js 拆成 provider」的低层一半：session 语义归 lib 的 cloud-sync，传输归这里。
-//
-// graph 注入（默认真 graph.js）→ 可用 graphFromProvider(MockCloudProvider) 测：
-//   OneDriveProvider ∘ graphFromProvider ≈ 恒等 → 完整 Mock 验适配正确性。
-
-import * as _realGraph from "../graph.js";
+// graphToCloudProvider —— 把 Graph transport（graph.js）翻成 lib 的 CloudProvider。
+// 原始 Graph item（file/folder facet、@microsoft.graph.downloadUrl）→ CloudItem。
+// 纯：graph **必传**（测试传 graphFromProvider(MockCloudProvider)）。
+//   graphToCloudProvider ∘ graphFromProvider ≈ 恒等 → 完整 Mock 验适配正确性。
+// 完整的「config 驱动 OneDriveProvider」在 providers/index.js（wire auth+graph+本适配器）。
 
 function toItem(it) {
   if (!it) return null;
@@ -21,7 +18,8 @@ function toItem(it) {
   };
 }
 
-export function createOneDriveProvider(graph = _realGraph) {
+export function graphToCloudProvider(graph) {
+  if (!graph) throw new Error("graphToCloudProvider: graph transport 必传");
   return {
     list: async (folder = "") => (await graph.listChildren(folder)).map(toItem),
     getItemByPath: async (path) => toItem(await graph.getItemByPath(path)),
