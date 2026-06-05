@@ -256,6 +256,85 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return busy("彻底删除…", async () => { await cloud.purge(cloudItemId); return { status: "purged" }; });
   }
 
+  // 在 oldName + newName 两条链尾串行跑 fn（重命名牵动两个身份，须挡住对任一名的 in-flight push）。
+  function _serialize2(oldName, newName, fn) {
+    const prev = Promise.all([_chain.get(oldName) || Promise.resolve(), _chain.get(newName) || Promise.resolve()]);
+    const next = prev.then(fn, fn);
+    const tail = next.then(() => {}, () => {});
+    _chain.set(oldName, tail); _chain.set(newName, tail);
+    return next;
+  }
+
+  // 身份变更：重命名当前 item。本地先存新名再删旧名（phantom-path 红线：绝不先删）。
+  // 云端：synced（无未推编辑）→ 服务端 move 保 etag、不重传字节；dirty / 云端无旧文件 → push 当前字节到新名 + 旧名进 .trash（非 hard-delete）。
+  // 串行 against 两个 name 的 in-flight push。app 只负责取名 + UI；机制全在库内。
+  async function rename(oldName, newName, opts = {}) {
+    const { encode, getEditVersion = () => 0, cloud: doCloud = true, busy = passBusy } = opts;
+    if (!oldName || !newName || oldName === newName) return { status: "noop" };
+    return _serialize2(oldName, newName, () => busy("重命名…", async () => {
+      const bytes = await toU8(await encode());
+      if (local) {
+        await local.save(newName, bytes);                              // 先存新名（含当前字节）
+        if (await local.exists(oldName)) await local.hardDelete(oldName);  // 成功后才删旧名
+      }
+      if (!doCloud) { _base.delete(oldName); return { status: "renamed", where: "local", newName }; }
+      // 云端 best-effort：本地改名已落地，绝不因云端失败回滚。失败 → 标新名脏，下次 push 续（与旧 app 行为一致）。
+      try {
+        let cloudOld = null;
+        try { cloudOld = await cloud.fetchMeta(oldName); } catch (_) { cloudOld = null; }
+        if (cloudOld && !cloud.isDirty(oldName)) {
+          await cloud.rename(oldName, newName);                        // 服务端 move，etag 顺延（cloud.rename 内 setETag(new)+clearState(old)）
+          _base.set(newName, cloud.getETag(newName)); _base.delete(oldName);
+          return { status: "renamed", where: "cloud-move", newName };
+        }
+        const res = await _doPush(newName, { encode: () => bytes, getEditVersion, busy });  // dirty / 无旧云文件 → 推当前字节（含 B5/retry/conflict）
+        if (cloudOld) { try { await cloud.trash(oldName); } catch (_) {} }  // 旧名进 .trash，不 hard-delete（C5）
+        _base.delete(oldName);
+        return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, push: res };
+      } catch (e) {
+        cloud.setDirty(newName, true); _base.delete(oldName);
+        return { status: "renamed", where: "local", newName, cloudDeferred: true, error: e };
+      }
+    }));
+  }
+
+  // 另存为：写新身份，旧的不动（Photoshop 语义，调用方完成后切到新名）。
+  async function saveAs(newName, opts = {}) {
+    const { encode, getEditVersion = () => 0, cloud: doCloud = true, busy = passBusy } = opts;
+    const run = async () => {
+      const bytes = await toU8(await encode());
+      if (local) await local.save(newName, bytes);
+      if (!doCloud) return { status: "saved", where: "local", newName };
+      try {
+        const res = await _doPush(newName, { encode: () => bytes, getEditVersion, busy });
+        return { status: "saved", where: "cloud", newName, push: res };
+      } catch (e) {
+        cloud.setDirty(newName, true);                                 // 云端没成 → 标脏，下次 Ctrl+S 续；本地已存
+        return { status: "saved", where: "local", newName, cloudDeferred: true, error: e };
+      }
+    };
+    const prev = _chain.get(newName) || Promise.resolve();
+    const next = prev.then(run, run);
+    _chain.set(newName, next.then(() => {}, () => {}));
+    return next;
+  }
+
+  // 首取：云端 item → 本地（gallery「拉取到本地」，无冲突——本地本来没有）。localName 由 app 去重后传入。
+  async function acquire(cloudName, opts = {}) {
+    const { localName = cloudName, adopt, busy = passBusy } = opts;
+    return busy("拉取中…", async () => {
+      const r = await cloud.pull(cloudName);
+      if (!r) return { status: "absent" };
+      if (local) await local.save(localName, r.blob);
+      if (r.item && r.item.eTag) {
+        _base.set(localName, r.item.eTag);
+        if (localName !== cloudName) { cloud.setETag(localName, r.item.eTag); cloud.setDirty(localName, false); }
+      }
+      if (adopt) await adopt(r.blob, localName);
+      return { status: "acquired", localName, item: r.item };
+    });
+  }
+
   // ---- state-as-store（①）：app 不再直碰 localStorage，全走这些 typed 接口 ----
   // 云端同步态（dirty/etag/status）。status 直接喂 save 按钮 icon（local-only vs synced vs dirty）。
   const cloudState = {
@@ -283,7 +362,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   };
 
   return {
-    flow: { push, open, close, delete: del, replayDelete, restore, purge },
+    flow: { push, open, close, delete: del, rename, saveAs, acquire, replayDelete, restore, purge },
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
     active,                    // 活动 item 指针（不叫 session，app-agnostic）

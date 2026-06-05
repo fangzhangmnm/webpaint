@@ -47,11 +47,11 @@ import { getOrFetchCloudThumb, clearCloudThumbCache, stats as cloudThumbStats, c
 import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTelemetry } from "./cloud-thumbs.js";
 import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
-  pushSession, pullSessionByPath, listCloudSessionsRecursive, listCloudAll, listCloudFolders, deleteCloudSession,
+  listCloudSessionsRecursive, listCloudAll, listCloudFolders,
   trashCloudSession, restoreCloudFromTrash, listCloudTrash, purgeCloudTrashItem,
   renameCloudSession,
   isCloudDirty, setCloudDirty, CloudConflictError,
-  getLastSessionSignedIn, setLastSessionSignedIn, fetchSessionMetadata, getKnownETag,
+  getLastSessionSignedIn, setLastSessionSignedIn, getKnownETag,
   pushBrushRack, pullBrushRack, fetchBrushRackMetadata, getBrushRackKnownETag,
   store as _store,
 } from "./app-store.js";   // cut-over：cloud/auth/graph 全走 lib（app-store shim 保旧名）
@@ -2141,111 +2141,62 @@ async function gateCloudSyncOnOpen(sessionName) {
   await checkCloudETag(sessionName);
 }
 
-// 拉 etag，转圈 + 「离线」按钮立刻可用；无硬超时。
+// 拉 etag 比对 + 冲突决断 —— 整套（备份先于覆盖 / keep-pull-branch）已收进 store.flow.open。
+// 这里只剩 UI：spinner 锁屏 + 「跳过到离线」probe + 弹「拉/留/分支」+ 状态提示。
 async function checkCloudETag(sessionName) {
   if (!sessionName) return;
-  // 起 spinner 锁屏；同时跑 fetch
-  const result = await Promise.race([
-    lockSyncGate({
-      title: "检查云端",
-      message: sessionName,
-      showSpinner: true,
-      actions: [
-        { label: "跳过到离线", value: { kind: "skip" } },
-      ],
-    }),
-    (async () => {
-      try {
-        const meta = await fetchSessionMetadata(sessionName);
-        return { kind: "fetched", meta };
-      } catch (e) {
-        return { kind: "error", error: e };
-      }
-    })(),
-  ]);
-  // race 赢家：fetch 完了 → 主动 settle gate（让锁屏关闭）
-  // user 跳过：lockSyncGate 已自己 unlock
-  if (result.kind === "fetched") settleSyncGate(null);
-  else if (result.kind === "error") settleSyncGate(null);
+  // spinner 锁屏；点「跳过到离线」→ resolve probe（flow.open 内部 race 到 skip）。
+  // 注意：settleSyncGate(null)（fetch 赢 / onNewer 弹窗时）也会 resolve 这个 promise，值是 null——
+  //       只有 value.kind==="skip"（用户真点了按钮）才算跳过，避免误判。
+  let onSkip;
+  const probe = new Promise((res) => { onSkip = res; });
+  let skipped = false;
+  lockSyncGate({
+    title: "检查云端", message: sessionName, showSpinner: true,
+    actions: [{ label: "跳过到离线", value: { kind: "skip" } }],
+  }).then((v) => { if (v && v.kind === "skip") { skipped = true; onSkip(); } });
 
-  if (result.kind === "skip") {
-    setStatus("已跳过云端检查，用本地版本");
-    return;
+  let res;
+  try {
+    res = await _store.flow.open(sessionName, {
+      isOnline: () => navigator.onLine !== false,
+      probe,
+      now: () => Date.now(),
+      // 云端比 base 新 → 关 spinner，弹「保留 / 覆盖 / 分支」。pull/branch 的备份+覆盖由 flow.open 内执行。
+      onNewer: async ({ cloudTime }) => {
+        settleSyncGate(null);
+        return await lockSyncGate({
+          title: "云端有新版本",
+          message: `${sessionName} 在云端 ${formatCloudTime(cloudTime)} 有新版本。本地是 ${getLocalSavedAtLabel()}。`,
+          showSpinner: false,
+          // spec（file-enter）：安全项 keep 默认（本地可能有未推编辑，默认拉云会丢）。
+          actions: [
+            { label: "保留本地（之后 push 会再确认）", value: "keep", primary: true },
+            { label: "用云端覆盖本地（本地先备份进 .backup）", value: "pull" },
+            { label: "两份都留（云端另存为副本）", value: "branch" },
+          ],
+        });
+      },
+      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
+    });
+  } finally {
+    settleSyncGate(null);   // 收尾确保 spinner 关（已关则安全 no-op）
   }
-  if (result.kind === "error") {
-    setStatus("连不上云端，用本地版本");
-    return;
-  }
-  // 比对
-  const cloudETag = result.meta?.etag || null;
-  const localETag = getKnownETag(sessionName);
-  if (!cloudETag || cloudETag === localETag) {
-    // in sync → 静默
-    return;
-  }
-  // 不一致 → 弹「拉 / 留 / 分支」
-  const cloudTime = result.meta?.lastModified || "?";
-  const choice = await lockSyncGate({
-    title: "云端有新版本",
-    message: `${sessionName} 在云端 ${formatCloudTime(cloudTime)} 有新版本。本地是 ${getLocalSavedAtLabel()}。`,
-    showSpinner: false,
-    // spec（file-enter）：安全项 no-op 默认（本地可能有未推编辑，默认拉云会丢）。override-local / no-op / 两份都留。
-    actions: [
-      { label: "保留本地（之后 push 会再确认）", value: "keep", primary: true },
-      { label: "用云端覆盖本地（本地先备份进 .backup）", value: "pull" },
-      { label: "两份都留（云端另存为副本）", value: "branch" },
-    ],
-  });
-  if (choice === "pull") {
-    setStatus("正在拉云端…");
-    // **顺序很重要**：先备份本地，再拉云端，再覆盖
-    //   备份失败 → 整个 abort，本地不动
-    //   云端拉失败 → 整个 abort，本地不动（backup 是无害多余）
-    //   只有都成功才 saveSession 覆盖
-    const backupName = `${sessionName}-backup-${Date.now()}`;
-    try {
-      await renameLocalSessionAsBackup(sessionName, backupName);
-    } catch (e) {
-      setStatus(`本地备份失败，已取消拉云端：${e.message || e}`, true);
-      return;
-    }
-    try {
-      const r = await pullSessionByPath(sessionName + ".ora");
-      if (r) {
-        const loaded = await decodeOraToDoc(r.blob);
-        adoptLoadedDoc(loaded, sessionName);    // 闭锁：显式用 sessionName
-        await saveSession(doc, sessionName, {});
-        setStatus(`已拉云端；本地原版备份为「${backupName}」`);
-      } else {
-        setStatus(`云端找不到「${sessionName}」（本地未动，备份「${backupName}」可删）`, true);
-      }
-    } catch (e) {
-      setStatus(`拉云端失败：${e.message || e}（本地未动，备份「${backupName}」可删）`, true);
-    }
-  } else if (choice === "branch") {
-    setStatus("正在拉云端到副本…");
-    try {
-      const r = await pullSessionByPath(sessionName + ".ora");
-      if (r) {
-        const branchName = `${sessionName}-cloud-${Date.now()}`;
-        const loaded = await decodeOraToDoc(r.blob);
-        await saveSession(loaded, branchName, {});
-        setStatus(`云端版已开为「${branchName}」`);
-      }
-    } catch (e) { setStatus("开副本失败：" + (e.message || e), true); }
-  } else {
-    setStatus("已保留本地，云端版本暂不动");
+
+  // flow.open 的 source/reason → 状态提示
+  if (res.source === "pulled") setStatus(`已拉云端；本地原版备份为「${res.backupName}」`);
+  else if (res.source === "branched") setStatus(`云端版已开为「${res.branchName}」`);
+  else {
+    const reason = res.reason;
+    if (skipped || reason === "skipped") setStatus("已跳过云端检查，用本地版本");
+    else if (reason === "cloud-error") setStatus("连不上云端，用本地版本");
+    else if (reason === "backup-failed") setStatus(`本地备份失败，已取消拉云端（本地未动）`, true);
+    else if (reason === "cloud-vanished") setStatus(`云端找不到「${sessionName}」（本地未动）`, true);
+    else if (reason === "kept") setStatus("已保留本地，云端版本暂不动");
+    // in-sync / cloud-absent → 静默
   }
 }
 
-// 把本地 sessionName 复制到 backupName（拉云端前的安全网）。
-// **失败必须抛**——caller 不能继续 pull 否则丢画（v77→v78 红线 bug）。
-// 注意：是「复制」不是「重命名」；原 sessionName 还在 IDB，等 pull 完才被覆盖。
-async function renameLocalSessionAsBackup(name, backupName) {
-  const loaded = await openSession(name);
-  if (!loaded) throw new Error(`本地找不到「${name}」，无法备份`);
-  await saveSession(loaded, backupName, {});
-}
 function formatCloudTime(iso) {
   if (!iso) return "?";
   const t = Date.parse(iso);
@@ -2952,12 +2903,19 @@ function adoptLoadedDocWithOpts(loaded, name, opts) {
   try { adoptLoadedDoc(loaded, name); }
   finally { _adoptLoadedOpts = {}; }
 }
-async function _writeSessionCheckpoint(name) {
-  if (!name) return;
-  const blob = await encodeDocToOra(doc, {
+// 当前 doc 的标准持久化 meta（reference + webpaintState）。flow.encode 回调 / checkpoint / saveAndPush 共用，
+// 避免这个形状散抄多份（drift 源）。
+function _buildOraMeta() {
+  return {
     referenceImage: referenceWindow.getPersistBlob(),
     webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
-  });
+  };
+}
+function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
+
+async function _writeSessionCheckpoint(name) {
+  if (!name) return;
+  const blob = await _encodeCurrentOra();
   await setMeta(`revert:${name}:ora`, blob);
   await setMeta(`revert:${name}:at`, _sessionOpenedAt);
 }
@@ -3071,41 +3029,25 @@ async function renameCurrentSession({ suggested, reason } = {}) {
       candidate = trimmed;
       continue;
     }
-    // 干活：先存新名，再删旧名（feedback-phantom-current-path：oldName 是 actually-loaded 的）
+    // 干活全交给 store.flow.rename（feedback-phantom-current-path：本地先存新名再删旧名，红线在库内）。
+    //   云端：synced→服务端 move 保 etag；dirty/无云文件→push 新名 + 旧名进 .trash（非 hard-delete）。
+    //   云端 best-effort：失败不回滚本地，新名标脏下次 Ctrl+S 续（res.cloudDeferred）。
     try {
-      await saveSession(doc, trimmed, {
-        referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
+      const cloudOn = isSignedIn() && navigator.onLine !== false;
+      const res = await _store.flow.rename(oldName, trimmed, {
+        encode: () => _encodeCurrentOra(),
+        getEditVersion: () => _editVersion,
+        cloud: cloudOn,
       });
-      if (oldName && oldName !== trimmed) {
-        try { await removeSession(oldName); } catch {}
-      }
       _activeSessionName = trimmed;
       setCurrentSessionName(trimmed);
       _docDirty = false;
       _docLastSavedAt = Date.now();
       updateSaveStatus();
-      // v125 (user：「云端重命名没做」)：登录 + 在线时同步重命名到云端
-      //   云端 OneDrive 不支持原子 rename，只能 push 新名 + delete 旧名。
-      //   失败不阻塞 local rename 已成功（next push 会自动续）
-      if (isSignedIn() && navigator.onLine !== false) {
-        try {
-          const ora = await encodeDocToOra(doc, {
-            referenceImage: referenceWindow.getPersistBlob(),
-            webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
-          });
-          await pushSession(trimmed, ora);
-          if (oldName && oldName !== trimmed) {
-            try { await deleteCloudSession(oldName); } catch (e) { console.warn("[rename] 云端旧名删除失败:", e); }
-          }
-          setStatus(`已重命名（含云端）：${oldName} → ${trimmed}`);
-        } catch (e) {
-          console.warn("[rename] 云端推送失败:", e);
-          setStatus(`已重命名（仅本地）：${oldName} → ${trimmed}（云端稍后 Ctrl+S 推）`);
-        }
-      } else {
-        setStatus(`已重命名：${oldName} → ${trimmed}`);
-      }
+      if (!cloudOn) setStatus(`已重命名：${oldName} → ${trimmed}`);
+      else if (res.cloudDeferred) setStatus(`已重命名（仅本地）：${oldName} → ${trimmed}（云端稍后 Ctrl+S 推）`);
+      else setStatus(`已重命名（含云端）：${oldName} → ${trimmed}`);
+      renderGallery();
       return trimmed;
     } catch (e) {
       setStatus("重命名失败：" + (e && e.message || e));
@@ -3902,31 +3844,23 @@ els.menuSaveAs.addEventListener("click", async () => {
         }
       } catch (e) { console.warn("[saveAs] cloud list failed:", e); }
     }
+    // 另存为 = 写新身份、旧的不动（store.flow.saveAs：本地存 + 云端 push，云端 best-effort）。
     try {
-      await saveSession(doc, trimmed, {
-        referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
+      const cloudOn = isSignedIn() && navigator.onLine !== false;
+      const res = await _store.flow.saveAs(trimmed, {
+        encode: () => _encodeCurrentOra(),
+        getEditVersion: () => _editVersion,
+        cloud: cloudOn,
       });
       _activeSessionName = trimmed;
       setCurrentSessionName(trimmed);
       _docDirty = false;
       _docLastSavedAt = Date.now();
       updateSaveStatus();
-      if (isSignedIn() && navigator.onLine !== false) {
-        try {
-          const ora = await encodeDocToOra(doc, {
-            referenceImage: referenceWindow.getPersistBlob(),
-            webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
-          });
-          await pushSession(trimmed, ora);
-          setStatus(`已另存为（含云端）：${trimmed}`);
-        } catch (e) {
-          console.warn("[saveAs] 云端推送失败:", e);
-          setStatus(`已另存为（仅本地）：${trimmed}（云端稍后 Ctrl+S 推）`);
-        }
-      } else {
-        setStatus(`已另存为：${trimmed}`);
-      }
+      if (!cloudOn) setStatus(`已另存为：${trimmed}`);
+      else if (res.cloudDeferred) setStatus(`已另存为（仅本地）：${trimmed}（云端稍后 Ctrl+S 推）`);
+      else setStatus(`已另存为（含云端）：${trimmed}`);
+      renderGallery();
       return;
     } catch (e) {
       setStatus("另存为失败：" + (e && e.message || e));
@@ -5304,12 +5238,13 @@ async function renderGallery() {
           try {
             const loaded = await openSession(item.name);
             if (!loaded) throw new Error("找不到本地 session");
-            const ora = await encodeDocToOra(loaded, {
-              referenceImage: loaded._referenceBlob,
-              webpaintState: loaded._webpaintState,
+            // 走 store.flow.push：拿到 B1 串行 / B5 自愈 / retry / 冲突 gate（不再裸推）。
+            const res = await _store.flow.push(item.name, {
+              encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
+              onConflict: async () => "keep",   // gallery 非 active item：冲突不静默覆盖，提示先改名
             });
-            await pushSession(item.name, ora);
-            setStatus(`已推送：${item.name}`);
+            if (res.status === "conflict") setStatus(`云端冲突：${item.name}（先改名再推）`, true);
+            else setStatus(`已推送：${item.name}`);
           } catch (err) {
             if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（先改名再推）`, true);
             else setStatus("推送失败：" + (err && err.message || err));
@@ -5959,22 +5894,20 @@ function hideFullscreenBusy() {
 }
 
 async function pullCloudPath(path) {
-  // 云端 → 本地 IDB → 自动打开（user：「下载好了应该自动进去」）
+  // 云端 → 本地 IDB → 自动打开（user：「下载好了应该自动进去」）。
+  // store.flow.acquire：cloud-only 首取，本地存原始 ora bytes（不 re-encode）+ adopt。
   showFullscreenBusy(`正在从云端拉取…`);
   try {
-    const r = await pullSessionByPath(path);
-    if (!r) { setStatus(`找不到：${path}`); return; }
-    const loaded = await decodeOraToDoc(r.blob);
-    const finalName = await uniqueLocalName(r.suggestedName);
-    await saveSession(loaded, finalName, {
-      referenceImage: loaded._referenceBlob,
-      webpaintState: loaded._webpaintState,
+    const cloudName = String(path).replace(/\.ora$/i, "");
+    const localName = await uniqueLocalName(cloudName);
+    const res = await _store.flow.acquire(cloudName, {
+      localName,
+      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
     });
-    // 自动 adopt + 关图库
-    adoptLoadedDoc(loaded, finalName);
+    if (res.status === "absent") { setStatus(`找不到：${path}`); return; }
     setGalleryOpen(false);
-    setStatus(`已打开：${finalName}（从云端拉取）`);
-    gateCloudSyncOnOpen(finalName).catch((e) => console.warn("[sync-gate]", e));
+    setStatus(`已打开：${res.localName}（从云端拉取）`);
+    gateCloudSyncOnOpen(res.localName).catch((e) => console.warn("[sync-gate]", e));
   } catch (err) {
     console.warn("[cloud] pull failed:", err);
     setStatus("拉取失败：" + (err && err.message || err));

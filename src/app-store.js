@@ -62,10 +62,9 @@ export const getLastSessionSignedIn = () => lsKv.get("webpaint.lastSessionSigned
 export const setLastSessionSignedIn = (v) => lsKv.set("webpaint.lastSessionSignedIn", v ? "1" : "0");
 
 // ---- session 云同步（旧名 → cloud.*）----
-export const pushSession = (name, bytes, opts) => cloud.push(name, bytes, opts);
-export const pullSession = (name) => cloud.pull(name);
-export const pullSessionByPath = (path) => cloud.pull(String(path).replace(/\.ora$/i, ""));
-export const fetchSessionMetadata = (name) => cloud.fetchMeta(name);
+// ③ 完成：push / pull / fetchMeta / hard-delete 不再裸暴露——身份/持久化流全走 store.flow.*
+//   （push/open/close/rename/saveAs/acquire/delete），红线在库内。剩下的 list/trash/rename 是
+//   gallery 对「非 active item」的只读/搬运操作，仍直用 cloud.*。
 export const listCloudSessionsRecursive = () => cloud.list();
 // gallery：一次取齐 { files, folders }（folders 含空文件夹）。文件夹模型「云端真文件夹为准」单一真相源。
 export const listCloudAll = () => cloud.listAll();
@@ -75,7 +74,6 @@ export const trashCloudSession = (name) => cloud.trash(name);
 export const restoreCloudFromTrash = (itemId, targetName) => cloud.restore(itemId, targetName);
 export const purgeCloudTrashItem = (itemId) => cloud.purge(itemId);
 export const renameCloudSession = (oldN, newN) => cloud.rename(oldN, newN);
-export const deleteCloudSession = (name) => cloud.remove(name);
 // 旧 isCloudDirty 在未登录时返 false（app 多处 `isSignedIn() && isCloudDirty()`，保此语义）。
 export const isCloudDirty = (name) => _auth.isSignedIn() && cloud.isDirty(name);
 export const setCloudDirty = (name, d) => cloud.setDirty(name, d);
