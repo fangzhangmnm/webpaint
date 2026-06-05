@@ -371,8 +371,18 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // phantom-path 保护）。曾在此放过一个 store.active（kv "active:pointer"），与之并存只会双源失同步、
   // 从无调用 → 已删。将来真要 app-agnostic 化，应迁到 session.js 那个键、而非另起炉灶。
 
-  // ---- 编辑游标（④）：单一 SSoT，B2（_doPush）与本机合流（session）共用。app histchange → mark()。
-  const edits = { mark: () => { _editVersion++; }, version: () => _editVersion };
+  // ---- 编辑游标（④）：单一 SSoT。B2（_doPush）、本机合流（session）、本地落盘 dirty 共用同一游标。
+  //   mark()        内容变了（任何 wp:histchange 或会进 .ora 的状态变更）→ 推进游标。
+  //   markSaved()   本地落盘点：记下「已存进 IDB 的游标」。
+  //   localDirty()  本地未落盘？= 游标自上次 markSaved 后又动过（取代 app 散落的 _docDirty 标志）。
+  // cloud 未推是另一正交事实，走 cloud.isDirty（per-file、跨 reload 持久）；二者别混。
+  let _savedVersion = 0;
+  const edits = {
+    mark: () => { _editVersion++; },
+    version: () => _editVersion,
+    markSaved: (v) => { _savedVersion = (v == null) ? _editVersion : v; },
+    localDirty: () => _editVersion !== _savedVersion,
+  };
 
   // ---- save 合流（④ coalescer）：连按 Ctrl+S/点保存不串 N 次。app 注入真·保存动作（configure）。
   //   - 没在跑 → 立刻跑

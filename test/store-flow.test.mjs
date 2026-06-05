@@ -188,6 +188,29 @@ describe("Store.flow.restore / purge（本地+云端一条路）", () => {
   });
 });
 
+describe("Store.edits 本地落盘 dirty（派生自编辑游标，取代 app 的 _docDirty）", () => {
+  it("初始 clean；mark→dirty；markSaved→clean", () => {
+    const env = mk();
+    const e = env.store.edits;
+    eq(e.localDirty(), false, "新建 = 干净");
+    e.mark();
+    eq(e.localDirty(), true, "改一笔 = 脏");
+    e.markSaved();
+    eq(e.localDirty(), false, "落盘后 = 干净");
+  });
+  it("落盘期间又改（markSaved 给旧游标）→ 仍脏（B2 语义，不丢编辑）", () => {
+    const env = mk();
+    const e = env.store.edits;
+    e.mark();                       // v=1
+    const v0 = e.version();         // 落盘前快照
+    e.mark();                       // v=2：落盘 await 期间又改了一笔
+    e.markSaved(v0);                // 只确认存到 v0 那一刻
+    eq(e.localDirty(), true, "落盘期间的新编辑仍标脏");
+    e.markSaved();                  // 确认到当前
+    eq(e.localDirty(), false);
+  });
+});
+
 describe("Store.flow.saveAs", () => {
   it("写新身份，旧的不动", async () => {
     const env = mk();

@@ -1377,7 +1377,7 @@ els.menuLongPressPick.addEventListener("click", () => {
 els.menuCheckerboard.addEventListener("click", () => {
   applyCheckerboard(!state.checkerboard);
   // v125 per-doc：触发 dirty 让 autosave 把新值写进 webpaint/state.json
-  _docDirty = true; updateSaveStatus();
+  _store.edits.mark(); updateSaveStatus();
   setStatus(`透明棋盘 · ${state.checkerboard ? "开" : "关"}`);
 });
 // v163 像素栅格：全局开关（视图辅助，跟设备不跟文件），localStorage 持久化，默认开
@@ -2653,7 +2653,7 @@ function hexToHsv(hex) {
 // ---- 持久化：IDB 自动 + Ctrl+S + autosave + visibility/pagehide 抢救 ----
 // 抄 AtlasMaker shareback：Ctrl+S 主导 + 3min 兜底 + visibility/pagehide 抢救。
 // 不走 debounce —— 画图工具不该 300ms 自动保存。
-let _docDirty = false;
+// 本地未落盘 = store.edits.localDirty()（派生自编辑游标，不再用独立的 _docDirty 标志）。
 let _docSaving = false;
 // 当前 doc 由比自己高的 WebPaint 版本写过 → 编辑保存有降级风险
 let _loadedDocIsNewer = false;
@@ -2701,7 +2701,7 @@ function computeSaveState() {
   // transient（本地未存/存盘中/推云中）= app 态；synced/dirty/local-only = store.cloud.status 单一源（候选2）。
   if (_cloudPushing) return "cloud-busy";
   if (_docSaving) return "saving";
-  if (_docDirty) return "dirty";
+  if (_store.edits.localDirty()) return "dirty";
   const st = _store.cloud.status(_activeSessionName, { signedIn: isSignedIn(), hasLocal: true });
   if (st === "dirty") return "cloud-dirty";     // 本地已存、云端未同步
   if (st === "synced") return "synced";         // 与云端一致
@@ -2774,7 +2774,7 @@ async function saveNow(opts = {}) {
       referenceImage: referenceWindow.getPersistBlob(),
       webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
     });
-    _docDirty = false;
+    _store.edits.markSaved();
     _docLastSavedAt = Date.now();
     setStatus(`已保存：${_activeSessionName}`);
     checkQuotaAndWarn();
@@ -2808,7 +2808,7 @@ function adoptLoadedDoc(loaded, sessionName) {
   // C4：捕获本 tab 的 base-etag（打开这画时的云端版本）进 Store 内存。
   // 之后 store.flow.push 用它当 If-Match，不读共享 localStorage → 杜绝多 tab 静默覆盖。
   _store.adoptBase(sessionName, getKnownETag(sessionName));
-  _docDirty = false;
+  _store.edits.markSaved();
   _docLastSavedAt = Date.now();
   _isLazyBlankSession = false;   // 加载了真实 session，不再 lazy
   updateSaveStatus();
@@ -2926,9 +2926,8 @@ async function _readSessionCheckpoint(name) {
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty。
 // 合并了原来分开的「_editVersion++」监听：编辑游标 SSoT 归 Store（④），这里 mark 一次（无条件，含 B2 语义）。
 window.addEventListener("wp:histchange", () => {
-  _store.edits.mark();                        // 编辑游标推进（B2 + 合流共用）；不 gate session，保旧语义
+  _store.edits.mark();                        // 编辑游标推进 → 本地 localDirty 自动为真（B2 + 合流 + 本地落盘共用）
   if (!_activeSessionName) return;            // gallery-first: 无绑 session 时不响应
-  _docDirty = true;
   // **不 gate isSignedIn**：编辑必标云脏。否则登出 / SSO 抖动期间的编辑不被标脏，
   // 登回来后 push 判 isCloudDirty=false 静默跳过 → 编辑永不上云、无报错（看不见 bug 根因）。
   // 安全：isCloudDirty getter 在未登录时本就返 false 忽略此标记，登回来才认这个 "1" → 补推。
@@ -2944,7 +2943,7 @@ async function saveAndPush() {
   if (_docSaving) return;
   if (_cloudPushing) await _awaitCloudPushIdle();
   if (!_activeSessionName) { setStatus("没打开作品，无法保存", true); return; }
-  if (_docDirty) await saveNow();
+  if (_store.edits.localDirty()) await saveNow();
   if (_activeSessionName) {
     _sessionOpenedAt = Date.now();
     _writeSessionCheckpoint(_activeSessionName).catch((e) => console.warn("[revert] explicit save checkpoint:", e));
@@ -2954,7 +2953,7 @@ async function saveAndPush() {
     return;
   }
   if (!(isSignedIn() && isCloudDirty(_activeSessionName))) {
-    if (!isSignedIn() && !_docDirty) setStatus(`已存本地：${_activeSessionName}（IDB 易失，登录云端更安全）`);
+    if (!isSignedIn() && !_store.edits.localDirty()) setStatus(`已存本地：${_activeSessionName}（IDB 易失，登录云端更安全）`);
     return;
   }
   const sessionName = _activeSessionName;
@@ -3040,7 +3039,7 @@ async function renameCurrentSession({ suggested, reason } = {}) {
       });
       _activeSessionName = trimmed;
       setCurrentSessionName(trimmed);
-      _docDirty = false;
+      _store.edits.markSaved();
       _docLastSavedAt = Date.now();
       updateSaveStatus();
       if (!cloudOn) setStatus(`已重命名：${oldName} → ${trimmed}`);
@@ -3067,13 +3066,13 @@ window.addEventListener("keydown", (e) => {
   }
 });
 // 3 min 兜底
-setInterval(() => { if (_docDirty && !_docSaving) saveNow({ implicit: true }); }, AUTOSAVE_MS);
+setInterval(() => { if (_store.edits.localDirty() && !_docSaving) saveNow({ implicit: true }); }, AUTOSAVE_MS);
 // visibility / pagehide 抢救（implicit：floating 状态下跳过；layer 留半态在内存，但 IDB 干净）
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden" && _docDirty && !_docSaving) saveNow({ implicit: true });
+  if (document.visibilityState === "hidden" && _store.edits.localDirty() && !_docSaving) saveNow({ implicit: true });
 });
 window.addEventListener("pagehide", () => {
-  if (_docDirty && !_docSaving) saveNow({ implicit: true });
+  if (_store.edits.localDirty() && !_docSaving) saveNow({ implicit: true });
 });
 // v115: Ctrl+Shift+R / 关 tab / 浏览器返回 前弹挽留 + 偷偷本地备份
 // (user：「可以弹挽留对话框，应该弹」+「挽留的时候偷偷本地备份」)
@@ -3082,7 +3081,7 @@ window.addEventListener("pagehide", () => {
 //    后台 IDB transaction 大概率能跑完；user 选「留下」→ 成果保住，选「离开」→
 //    至少有 dialog 那一两秒救了
 window.addEventListener("beforeunload", (e) => {
-  if (_docDirty && !_docSaving) {
+  if (_store.edits.localDirty() && !_docSaving) {
     e.preventDefault();
     e.returnValue = "";
     // 偷存（implicit 只写 IDB 不推云）；不 await 让 dialog 立刻起
@@ -3135,7 +3134,7 @@ function _captureDocAfter() {
 }
 function _pushDocTransform(before, after, label) {
   history.push({ type: "docTransform", before, after });
-  _docDirty = true;
+  _store.edits.mark();
   if (isSignedIn()) setCloudDirty(_activeSessionName, true);
   if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   board.invalidateAll();
@@ -3486,7 +3485,7 @@ function _closeFilterPanel(applied) {
     L.ctx.drawImage(_adjustState.sur, 0, 0);
     const after = L.snapshot();
     history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });
-    _docDirty = true;
+    _store.edits.mark();
     if (isSignedIn()) setCloudDirty(_activeSessionName, true);
     setStatus(`${_adjustState.Filter.title} 已应用：${L.name}`);
   }
@@ -3641,7 +3640,7 @@ function _renderFilterBrushToolbar() {
       state.filterBrush.variantId = v.id;
       state.filterBrush.variantLabel = v.title;
       if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = v.id;
-      _docDirty = true; updateSaveStatus();
+      _store.edits.mark(); updateSaveStatus();
       setStatus(`已切 ${v.title}`);
     });
     // 插在 title 后
@@ -3811,7 +3810,7 @@ els.menuSaveAs.addEventListener("click", async () => {
       });
       _activeSessionName = trimmed;
       setCurrentSessionName(trimmed);
-      _docDirty = false;
+      _store.edits.markSaved();
       _docLastSavedAt = Date.now();
       updateSaveStatus();
       if (!cloudOn) setStatus(`已另存为：${trimmed}`);
@@ -3848,7 +3847,7 @@ els.menuRevertToOpen?.addEventListener("click", async () => {
   try {
     const loaded = await decodeOraToDoc(cp.blob);
     adoptLoadedDocWithOpts(loaded, _activeSessionName, { skipCheckpoint: true });
-    _docDirty = true;     // 跟磁盘内容已经偏离，下次保存把 revert 后的状态写进去
+    _store.edits.mark();     // 跟磁盘内容已经偏离，下次保存把 revert 后的状态写进去
     updateSaveStatus();
     setStatus(`已恢复到本次打开时（${ageMin} 分钟前）`);
   } catch (e) {
@@ -4236,7 +4235,7 @@ els.referenceFileInput.addEventListener("change", async (e) => {
     const persistBlob = fit.scaled ? await canvasToBlob(fit.source) : file;
     referenceWindow.setBitmap(fit.source, { persistBlob });
     if (fit.scaled) decoded.close?.();                    // 缩放后原 bitmap 没用了，释放
-    _docDirty = true;
+    _store.edits.mark();
     updateSaveStatus();
     window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
     setStatus(`参考：${file.name}${fit.scaled ? `（已缩到 ${fit.w}×${fit.h}）` : ""}（会跟当前画一起保存）`);
@@ -4288,7 +4287,7 @@ async function importImageAsNewDoc(file) {
   const bitmap = await decodeImageFile(file);
   const w = Math.min(8192, bitmap.width);
   const h = Math.min(8192, bitmap.height);
-  if (_docDirty) await saveNow();
+  if (_store.edits.localDirty()) await saveNow();
   const fresh = new PaintDoc({ width: w, height: h });
   doc.layers = fresh.layers;
   doc.activeIndex = 0;
@@ -4319,7 +4318,7 @@ async function importImageAsNewDoc(file) {
   board.invalidateAll();
   board.fitToScreen();
   renderLayersPanel();
-  _docDirty = true;
+  _store.edits.mark();
   _docLastSavedAt = 0;
   updateSaveStatus();
   await saveNow();
@@ -4437,7 +4436,7 @@ async function importImageAsLayer(file, opts = {}) {
   renderLayersPanel();
   board.invalidateAll();
   board.requestRender();
-  _docDirty = true;
+  _store.edits.mark();
   updateSaveStatus();
   // 触发 wp:histchange 让保存状态同步
   window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
@@ -4522,7 +4521,7 @@ async function _exitCanvasToGallery() {
   }
   _activeSessionName = null;
   setCurrentSessionName("");
-  _docDirty = false;
+  _store.edits.markSaved();
   _isLazyBlankSession = false;
   updateSaveStatus();
   await setGalleryOpen(true);
@@ -4589,7 +4588,7 @@ async function setGalleryOpen(open) {
   if (open) {
     // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存
     editMode.applyPendingTransient();
-    if (_docDirty && !_docSaving) await saveNow();
+    if (_store.edits.localDirty() && !_docSaving) await saveNow();
     await _awaitCloudPushIdle();   // 等 cloud push 完，防 status race
     document.body.dataset.mode = "gallery";
     els.galleryFull.classList.remove("hidden");
@@ -4599,7 +4598,7 @@ async function setGalleryOpen(open) {
     updateIdbUsage();
   } else {
     editMode.applyPendingTransient();
-    if (_docDirty && !_docSaving) await saveNow();
+    if (_store.edits.localDirty() && !_docSaving) await saveNow();
     els.galleryFull.classList.add("hidden");
     delete document.body.dataset.mode;
     for (const u of _galleryUrls) URL.revokeObjectURL(u);
@@ -4791,7 +4790,7 @@ els.newDocConfirm.addEventListener("click", async () => {
   }
   const name = await uniqueLocalName(nameRaw);
   closeNewDocSheet();
-  if (_docDirty) await saveNow();
+  if (_store.edits.localDirty()) await saveNow();
   const fresh = new PaintDoc({ width: w, height: h });
   doc.layers = fresh.layers;
   doc.activeIndex = 0;
@@ -4805,7 +4804,7 @@ els.newDocConfirm.addEventListener("click", async () => {
   board.invalidateAll();
   board.fitToScreen();
   renderLayersPanel();
-  _docDirty = true;
+  _store.edits.mark();
   _docLastSavedAt = 0;
   updateSaveStatus();
   // user：「新建作品时参考里面的图没更新」→ 清 reference 小窗
@@ -5285,7 +5284,7 @@ async function renderGallery() {
       }
       tile.dataset.busy = "1";
       try {
-        if (_docDirty) await saveNow();
+        if (_store.edits.localDirty()) await saveNow();
         if (isLocal) {
           const loaded = await openSession(item.name);
           if (!loaded) { setStatus(`找不到：${item.name}`); return; }
@@ -6694,7 +6693,7 @@ function showUpdate() {
 els.updateReload.addEventListener("click", async () => {
   // 用户决定性动作 → apply 所有 pending（套索浮层等）+ 保一次（reload 会清掉内存）
   editMode.applyPendingTransient();
-  if (_docDirty && !_docSaving) await saveNow();
+  if (_store.edits.localDirty() && !_docSaving) await saveNow();
   // **v60 修**：必须把 skip-waiting 推给 WAITING SW，不是 controller。
   // controller = 当前 active SW（旧版本），收到 skipWaiting 无意义；要的是让 waiting
   // 的新 SW 转 active。然后听 controllerchange 再 reload —— 否则 reload 时旧 SW 还
