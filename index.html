@@ -234,6 +234,11 @@
               <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
           </button>
+          <button class="gallery-icon-btn" id="galleryMenuBtn" type="button" title="图库菜单（更新 / 设置）" aria-haspopup="true" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>
+            </svg>
+          </button>
         </div>
       </div>
       <div class="gallery-trash-bar hidden" id="galleryTrashBar">
@@ -251,7 +256,19 @@
       <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。</div>
       <div class="gallery-foot">
         <span class="gallery-foot-usage" id="galleryFootUsage">本地占用：计算中…</span>
+        <span class="gallery-foot-version" id="galleryFootVersion" title="当前 WebPaint 版本"></span>
       </div>
+    </div>
+
+    <!-- 图库菜单 popup：版本号 + 强制更新 + 文件无关设置（动作代理到主菜单 handler） -->
+    <div class="menu-panel hidden" id="galleryMenuPopup" role="menu">
+      <div class="menu-item-info" id="galleryMenuVersion">版本：—</div>
+      <button class="menu-item" id="galleryMenuForceUpdate" type="button" role="menuitem">
+        <span class="menu-item-label">强制更新（清缓存重启）</span>
+      </button>
+      <button class="menu-item" id="galleryMenuTheme" type="button" role="menuitem">
+        <span class="menu-item-label">主题…</span>
+      </button>
     </div>
 
     <!-- 加号 popup：新建 / 从图片 / 从剪切板 -->
@@ -947,6 +964,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-52114236dc67.mjs"></script>
+    <script type="module" src="./dist/webpaint-170020a866d3.mjs"></script>
   </body>
 </html>

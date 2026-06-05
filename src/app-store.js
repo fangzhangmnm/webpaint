@@ -67,6 +67,9 @@ export const pullSession = (name) => cloud.pull(name);
 export const pullSessionByPath = (path) => cloud.pull(String(path).replace(/\.ora$/i, ""));
 export const fetchSessionMetadata = (name) => cloud.fetchMeta(name);
 export const listCloudSessionsRecursive = () => cloud.list();
+// gallery：一次取齐 { files, folders }（folders 含空文件夹）。文件夹模型「云端真文件夹为准」单一真相源。
+export const listCloudAll = () => cloud.listAll();
+export const listCloudFolders = () => cloud.listFolders();
 export const listCloudTrash = () => cloud.listTrash();
 export const trashCloudSession = (name) => cloud.trash(name);
 export const restoreCloudFromTrash = (itemId, targetName) => cloud.restore(itemId, targetName);

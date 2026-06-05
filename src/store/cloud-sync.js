@@ -144,18 +144,27 @@ export function createCloudSync(cfg) {
   }
 
   // ---- gallery 列表 / rename / 硬删（扩展名 agnostic：match/toName 注入）----
-  async function _walk(subpath, out, depth) {
+  // folders 非 null 时顺带收集子文件夹路径（含空文件夹）——gallery 文件夹模型「云端真文件夹为准」用。
+  // 一次 walk 同时拿文件+文件夹（listAll），省一半 Graph 往返。list() 传 folders=null，语义不变。
+  async function _walk(subpath, out, depth, folders) {
     if (depth > 8) return;
     let items;
     try { items = await provider.list(subpath); } catch (_) { return; }
     for (const it of items) {
       if (depth === 0 && it.isFolder && it.name === trashFolder) continue;  // 顶层 .trash 不进
       const itPath = subpath ? `${subpath}/${it.name}` : it.name;
-      if (it.isFolder) await _walk(itPath, out, depth + 1);
+      if (it.isFolder) {
+        // 收进 gallery folder 列表，但排掉顶层 .backup（内部冲突备份，不该当用户文件夹）。
+        if (folders && !(depth === 0 && it.name === backupFolder)) folders.push(itPath);
+        await _walk(itPath, out, depth + 1, folders);
+      }
       else if (match(it)) out.push({ ...it, path: itPath, name: toName(itPath) });
     }
   }
-  async function list() { const out = []; await _walk("", out, 0); return out; }
+  async function list() { const out = []; await _walk("", out, 0, null); return out; }
+  // gallery 一次取齐：{ files, folders }（folders 含空文件夹）。文件夹模型单一真相源。
+  async function listAll() { const out = [], folders = []; await _walk("", out, 0, folders); return { files: out, folders }; }
+  async function listFolders() { const out = [], folders = []; await _walk("", out, 0, folders); return folders; }
 
   async function listTrash() {
     let items;
@@ -191,7 +200,7 @@ export function createCloudSync(cfg) {
   return {
     push, pull, fetchMeta, weakOverride,
     trash, restore, purge,
-    list, listTrash, rename, remove,
+    list, listAll, listFolders, listTrash, rename, remove,
     getETag, setETag, isDirty, setDirty, clearState,
     CloudConflictError,
   };

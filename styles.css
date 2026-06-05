@@ -1084,6 +1084,7 @@ input[type="range"].color-ramp::-moz-range-thumb {
   background: var(--bg-soft);
 }
 .gallery-foot-usage { font-variant-numeric: tabular-nums; }
+.gallery-foot-version { opacity: 0.55; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 .gallery-foot-usage.usage-warn { color: #d97706; font-weight: 600; }
 .gallery-foot-usage.usage-critical { color: #dc2626; font-weight: 700; }
 /* 文档版本警告：身体一圈细红边 + 顶栏染色，提示用户当前 doc 来自更新版本 */

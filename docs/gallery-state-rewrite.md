@@ -9,6 +9,8 @@
 **auth / sync 状态散在 god file，没有可观察的源，UI 靠散落手 poke → 漂移。**
 真机症状全是它：登录成功按钮不变蓝、token 过期仍假装已登录（F2）、save 图标"本地 vs 云"不准、云端画漏显、名字冲突没 detect。不是单点 bug，是缺 seam。
 
+> **病根澄清（user 2026-06-04）**：「名字冲突没 detect」**不是缺 collision 检查**——是**假登录**（F2）把本地文件当成了云端文件来显示，叠加**离线时新建了同名文件**，于是 UI 看着像云端重名。**候选1+2 治的就是那个假登录根**，所以这条已随 1+2 解。**值得注意：即便状态混乱，两份同名文件没有互相覆盖**——store 红线（GUID-by-path / backup-before-overwrite）扛住了数据安全。新建走 `yyyymmdd-N` 自动避让（本地+云都查）后，同名本身也不再轻易发生。
+
 ## 4 候选（顺序：1+2 是 3 的地基）
 
 ### ✅ 候选1：auth 可观察 seam（已做）
@@ -22,7 +24,22 @@
 - `wp:auth-changed` 也刷 `updateSaveStatus`（auth 影响 save 图标）。
 - = 你要的 smart-save-icon 的干净数据源。
 
-### ⏳ 候选3：gallery 推倒成 store.list 之上的深模块（下一步，主菜）
+### ✅ 候选3：gallery 重做（已做，原地重写非独立 module —— user 说「重做 ui」非「抽 module」；smart-save 抽 module 才是 optional）
+
+**user 拍板的三个架构岔路（2026-06-04）**：
+1. **空文件夹 = 云端真文件夹为准**。删掉 localStorage `explicitFolders` 旁路（就是「半残文件夹」，和真 fs 漂移）。
+   空文件夹 = OneDrive 上 `ensureSubfolder` 建的真文件夹，lib 新增 `cloud.listAll()/listFolders()`（一次 walk 带回含空文件夹，排 `.trash`/`.backup`）带回。
+   代价：未登录/离线建不了纯本地空文件夹（无处持久化）；删最后一个文件后云端父文件夹仍在 → 空文件夹自然保留。
+2. **本遍只做 card view，做深做对**；list view 留给以后（画图 app card 天然，list 是 pdf/txt 文档类的形态）。**没做 card/list 切换。**
+3. **不做拖拽**（iPad 触屏 drag-drop 不可靠，spec 也把触屏批选标 TBD）→ **卡片菜单加「移动到…」**：lockSyncGate 复用成 folder picker，移动 = 跨文件夹 rename（同 GUID，无副本，ADR-0011）。
+
+**另交付**：新建命名 `yyyymmdd / -2 / -3`（替「未命名」，避让本地+云重名）；gallery footer + 菜单显**版本号**；gallery header 加**菜单**（强制更新 + 主题，动作代理到主菜单 handler，不重复状态）。
+
+**未做（留以后）**：list view、ls 慢（等 virtual-fs）、真正抽独立 gallery module、smart-save 深模块、候选4 单一 ConflictSheet。
+
+<details><summary>原候选3 设想（部分已被上面取代）</summary>
+
+#### gallery 推倒成 store.list 之上的深模块
 - 现状：app.js 4572–5750 ≈1200 行浅而宽缠绕（云/本地列表 + thumb + 文件夹(explicitFolders localStorage 旁路) + 冲突 + DOM + trash），状态全在局部 let。
 - 目标深模块：
   - **数据**只从 `store.cloud.list()` / `store.cloud.listTrash()`（lib 真相，带 path/name/folder）+ 本地 `store.local` 列表，**在 store 层 merge**（治"云端画漏显"——现在 merge 缺口在 god file）。
@@ -31,6 +48,8 @@
   - **重名**走 store 一处检查（治"名字冲突没 detect"）。
   - 订阅 `wp:auth-changed` / sync 事件 / changed → 重渲。
 - 旧 1200 行**删**（toxic）。
+
+</details>
 
 ### ⏳ 候选4：一个 conflict-sheet 接缝（spec §192）
 - 现状：open-gate / push-412 / brush-rack / 新建重名 各自一套。

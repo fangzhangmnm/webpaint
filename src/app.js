@@ -47,7 +47,7 @@ import { getOrFetchCloudThumb, clearCloudThumbCache, stats as cloudThumbStats, c
 import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTelemetry } from "./cloud-thumbs.js";
 import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
-  pushSession, pullSessionByPath, listCloudSessionsRecursive, deleteCloudSession,
+  pushSession, pullSessionByPath, listCloudSessionsRecursive, listCloudAll, listCloudFolders, deleteCloudSession,
   trashCloudSession, restoreCloudFromTrash, listCloudTrash, purgeCloudTrashItem,
   renameCloudSession,
   isCloudDirty, setCloudDirty, CloudConflictError,
@@ -155,6 +155,12 @@ const els = {
   cloudSignOutBtn: document.getElementById("cloudSignOutBtn"),
   cloudRefreshBtn: document.getElementById("cloudRefreshBtn"),
   galleryFootUsage: document.getElementById("galleryFootUsage"),
+  galleryFootVersion: document.getElementById("galleryFootVersion"),
+  galleryMenuBtn: document.getElementById("galleryMenuBtn"),
+  galleryMenuPopup: document.getElementById("galleryMenuPopup"),
+  galleryMenuVersion: document.getElementById("galleryMenuVersion"),
+  galleryMenuForceUpdate: document.getElementById("galleryMenuForceUpdate"),
+  galleryMenuTheme: document.getElementById("galleryMenuTheme"),
   newDocBackdrop: document.getElementById("newDocBackdrop"),
   newDocSheet: document.getElementById("newDocSheet"),
   newDocName: document.getElementById("newDocName"),
@@ -215,6 +221,9 @@ const doc = new PaintDoc({ width: 2048, height: 2048 });
 const board = new Board(els.board, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
 els.versionLabel.textContent = WEBPAINT_VERSION || "?";
+// gallery 也显版本号（footer 水印 + 菜单信息行）——配合「强制更新」让用户知道自己在哪个版本。
+if (els.galleryFootVersion) els.galleryFootVersion.textContent = WEBPAINT_VERSION || "?";
+if (els.galleryMenuVersion) els.galleryMenuVersion.textContent = `版本：${WEBPAINT_VERSION || "?"}`;
 
 const state = {
   // tool（当前工具）的 SSoT 已搬到 editMode（editMode.current()）。见 edit-mode.js / CONTEXT.md。
@@ -4581,26 +4590,17 @@ let _galleryView = "files";              // "files" | "trash"
 // 当前浏览的 folder（"" = 根；"characters" / "characters/side" = 嵌套）
 // 跨 refresh 持久化，进 gallery 时不重置（用户期望停留上次位置）
 const LS_GALLERY_FOLDER = "webpaint.galleryFolder";
-const LS_EXPLICIT_FOLDERS = "webpaint.explicitFolders";
 let _galleryFolder = "";
 try { _galleryFolder = localStorage.getItem(LS_GALLERY_FOLDER) || ""; } catch {}
 function setGalleryFolder(path) {
   _galleryFolder = path || "";
   try { localStorage.setItem(LS_GALLERY_FOLDER, _galleryFolder); } catch {}
 }
-// 显式空文件夹（用户手动建的；没 item 落 prefix 时仍可见）
-function getExplicitFolders() {
-  try { return JSON.parse(localStorage.getItem(LS_EXPLICIT_FOLDERS) || "[]"); }
-  catch { return []; }
-}
-function addExplicitFolder(path) {
-  const s = new Set(getExplicitFolders()); s.add(path);
-  try { localStorage.setItem(LS_EXPLICIT_FOLDERS, JSON.stringify([...s])); } catch {}
-}
-function removeExplicitFolder(path) {
-  const s = new Set(getExplicitFolders()); s.delete(path);
-  try { localStorage.setItem(LS_EXPLICIT_FOLDERS, JSON.stringify([...s])); } catch {}
-}
+// 空文件夹模型：**云端真文件夹为准**（OneDrive 上 ensureSubfolder 建的真文件夹，listCloudFolders
+// 带回，含空的）。删掉了旧的 localStorage explicitFolders 旁路——它和真 fs 漂移，是「半残文件夹」。
+// 代价：未登录/离线时建不了纯本地空文件夹（无处持久化）；但本地作品本就要登录才上云，可接受。
+// 本次渲染拿到的云端真文件夹路径（renderGallery 填，_renderFolderTile / 空判用）。
+let _galleryCloudFolders = [];
 // path utils
 function pathFolder(name) {
   const i = name.lastIndexOf("/");
@@ -4716,6 +4716,7 @@ async function setGalleryOpen(open) {
     // 关闭可能打开的 popup
     els.galleryAddPopup.classList.add("hidden");
     els.cloudAccountPopup.classList.add("hidden");
+    els.galleryMenuPopup?.classList.add("hidden");
     board.requestRender();
   }
 }
@@ -4739,6 +4740,25 @@ els.cloudIconBtn.addEventListener("click", (e) => {
   if (hidden) anchorPopupToBtn(els.cloudAccountPopup, els.cloudIconBtn);
   els.cloudIconBtn.setAttribute("aria-expanded", hidden ? "true" : "false");
 });
+// 图库菜单 popup（版本号 + 强制更新 + 文件无关设置）
+els.galleryMenuBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const hidden = els.galleryMenuPopup.classList.contains("hidden");
+  els.galleryAddPopup.classList.add("hidden");
+  els.cloudAccountPopup.classList.add("hidden");
+  els.galleryMenuPopup.classList.toggle("hidden", !hidden);
+  if (hidden) anchorPopupToBtn(els.galleryMenuPopup, els.galleryMenuBtn);
+  els.galleryMenuBtn.setAttribute("aria-expanded", hidden ? "true" : "false");
+});
+// 动作代理到主菜单已有 handler（.click() 即触发，无需主菜单可见）——不重复逻辑/状态。
+els.galleryMenuForceUpdate?.addEventListener("click", () => {
+  els.galleryMenuPopup.classList.add("hidden");
+  els.menuForcePwaReset?.click();
+});
+els.galleryMenuTheme?.addEventListener("click", () => {
+  els.galleryMenuPopup.classList.add("hidden");
+  els.menuTheme?.click();
+});
 document.addEventListener("pointerdown", (e) => {
   if (!els.galleryAddPopup.classList.contains("hidden") &&
       !els.galleryAddPopup.contains(e.target) &&
@@ -4749,6 +4769,11 @@ document.addEventListener("pointerdown", (e) => {
       !els.cloudAccountPopup.contains(e.target) &&
       !els.cloudIconBtn.contains(e.target)) {
     els.cloudAccountPopup.classList.add("hidden");
+  }
+  if (els.galleryMenuPopup && !els.galleryMenuPopup.classList.contains("hidden") &&
+      !els.galleryMenuPopup.contains(e.target) &&
+      !els.galleryMenuBtn.contains(e.target)) {
+    els.galleryMenuPopup.classList.add("hidden");
   }
 });
 function anchorPopupToBtn(popup, btn) {
@@ -4787,46 +4812,69 @@ els.addImportClipboard.addEventListener("click", async () => {
   }
 });
 
-// + 新建文件夹（建一个空 folder；用户接下来可在其中新建作品）
+// + 新建文件夹（云端真文件夹为准：在 OneDrive 上建真文件夹，需登录+在线）
 els.addNewFolder?.addEventListener("click", async () => {
   els.galleryAddPopup.classList.add("hidden");
+  // 文件夹模型「云端真文件夹为准」→ 必须登录+在线才能建（否则无处持久化空文件夹）
+  if (!isSignedIn() || navigator.onLine === false) {
+    setStatus("新建文件夹需先登录云端（空文件夹存在 OneDrive 上）", true);
+    return;
+  }
   const stem = await openInputSheet("新建文件夹", "新文件夹", { placeholder: "文件夹名" });
   if (stem == null) return;
   const trimmed = stem.trim();
   if (!trimmed) { setStatus("文件夹名不能空", true); return; }
   if (trimmed.includes("/")) { setStatus("文件夹名不能含 /（要建嵌套请进对应文件夹再点新建）", true); return; }
   const fullPath = pathJoin(_galleryFolder, trimmed);
-  // 已存在 check（含 derived from items）
-  let allNames = [];
+  // 已存在 check（本地+云的 item 派生 + 云端真文件夹）
+  let allNames = [], cloudFolders = [];
   try { allNames = allNames.concat((await listSessions()).map(s => s.name)); } catch {}
-  if (isSignedIn() && navigator.onLine !== false) {
-    try { allNames = allNames.concat((await listCloudSessionsRecursive()).map(c => c.path.replace(/\.ora$/i, ""))); } catch {}
-  }
+  try {
+    const all = await listCloudAll();
+    allNames = allNames.concat(all.files.map(c => c.path.replace(/\.ora$/i, "")));
+    cloudFolders = all.folders;
+  } catch (e) { console.warn("[folder] cloud list failed:", e); }
   const fullPrefix = `${fullPath}/`;
-  const exists = allNames.some(n => n === fullPath || n.startsWith(fullPrefix)) || getExplicitFolders().includes(fullPath);
+  const exists = allNames.some(n => n === fullPath || n.startsWith(fullPrefix)) || cloudFolders.includes(fullPath);
   if (exists) { setStatus(`文件夹 "${trimmed}" 已存在`, true); return; }
   await withBusy(`正在创建文件夹 ${trimmed}…`, async () => {
-    addExplicitFolder(fullPath);
-    if (isSignedIn() && navigator.onLine !== false) {
-      try { await ensureSubfolder(fullPath); }
-      catch (e) { console.warn("[folder] cloud ensure failed:", e); }
-    }
-    setStatus(`已建文件夹：${trimmed}`);
+    try { await ensureSubfolder(fullPath); setStatus(`已建文件夹：${trimmed}`); }
+    catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus("建文件夹失败：" + (e && e.message || e), true); }
   });
   renderGallery();
 });
 let _addImportAsNewDoc = false;
 
 // 新建作品 sheet
-function openNewDocSheet() {
-  // 默认名带当前 folder 前缀（用户在某子文件夹打开 → 新作品落该 folder）
-  els.newDocName.value = _galleryFolder ? `${_galleryFolder}/未命名` : "未命名";
+// 日期戳 yyyymmdd（取代"未命名"；user）。
+function _todayStamp() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+}
+// 下一个可用名：yyyymmdd / yyyymmdd-2 / yyyymmdd-3 …（查本地+云重名自动避让，顺带解决"重名没 detect"）。
+async function _nextDocName(folder) {
+  const base = _todayStamp();
+  const names = new Set();
+  try { (await listSessions()).forEach((s) => names.add(s.name)); } catch {}
+  if (isSignedIn() && navigator.onLine !== false) {
+    try { (await listCloudSessionsRecursive()).forEach((c) => names.add(c.path.replace(/\.ora$/i, ""))); } catch {}
+  }
+  const full = (n) => (folder ? `${folder}/${n}` : n);
+  if (!names.has(full(base))) return base;
+  for (let i = 2; i < 1000; i++) if (!names.has(full(`${base}-${i}`))) return `${base}-${i}`;
+  return `${base}-${Date.now()}`;
+}
+async function openNewDocSheet() {
+  els.newDocName.value = _galleryFolder ? `${_galleryFolder}/…` : "…";   // 占位，下面 async 填日期名
   els.newDocPreset.value = "2048";
   els.newDocCustomRow.style.display = "none";
   els.newDocW.value = doc.width;
   els.newDocH.value = doc.height;
   els.newDocBackdrop.classList.remove("hidden");
   els.newDocSheet.classList.remove("hidden");
+  // yyyymmdd-N（避让本地+云重名）。folder 前缀保留（落当前子文件夹）。
+  const next = await _nextDocName(_galleryFolder);
+  els.newDocName.value = _galleryFolder ? `${_galleryFolder}/${next}` : next;
   setTimeout(() => els.newDocName.focus(), 50);
 }
 function closeNewDocSheet() {
@@ -4964,10 +5012,12 @@ async function renderGallery() {
     console.error("[gallery] listSessions failed:", e);
     setStatus("本地图库读取失败：" + (e && e.message || e) + "（可能是隐私窗口 / IDB 被禁）", true);
   }
-  // 云端：仅在登录 + 在线 时尝试。navigator.onLine === false 几乎确定离线，跳网络省超时
+  // 云端：仅在登录 + 在线 时尝试。一次 listCloudAll 同时拿文件 + 真文件夹（含空），省一半往返。
+  // navigator.onLine === false 几乎确定离线，跳网络省超时。
   let cloud = [];
+  _galleryCloudFolders = [];
   if (isSignedIn() && navigator.onLine !== false) {
-    try { cloud = await listCloudSessionsRecursive(); }
+    try { const all = await listCloudAll(); cloud = all.files; _galleryCloudFolders = all.folders; }
     catch (e) { console.warn("[cloud] list failed:", e); }
   }
   // 合并：用 name (无 .ora 后缀) 当 key
@@ -4998,12 +5048,13 @@ async function renderGallery() {
       filesInFolder.push(it);
     }
   }
-  // explicit empty folders（用户手动建的）
-  for (const f of getExplicitFolders()) {
+  // 云端真文件夹（含空）—— 文件夹模型单一真相源（取代旧 explicitFolders 旁路）。
+  for (const f of _galleryCloudFolders) {
     if (_galleryFolder) {
-      if (!f.startsWith(prefix)) continue;
+      if (f === _galleryFolder || !f.startsWith(prefix)) continue;
       const rest = f.slice(prefix.length);
-      if (rest && !rest.includes("/")) folderSet.add(rest);
+      const seg = rest.includes("/") ? rest.slice(0, rest.indexOf("/")) : rest;
+      if (seg) folderSet.add(seg);
     } else {
       const first = f.split("/")[0];
       if (first) folderSet.add(first);
@@ -5034,9 +5085,10 @@ async function renderGallery() {
   // ====== Folder tiles 先（字母序） ======
   for (const folderName of folderNames) {
     const folderPath = pathJoin(_galleryFolder, folderName);
-    // 检测是否为空：没有任何 item 以这 path 为 prefix
+    // 是否为空：没有 item 也没有子文件夹以这 path 为 prefix（非空时禁删，避免级联）
     const fullPrefix = `${folderPath}/`;
-    const hasItems = allItems.some((it) => it.name.startsWith(fullPrefix));
+    const hasItems = allItems.some((it) => it.name.startsWith(fullPrefix))
+      || _galleryCloudFolders.some((f) => f.startsWith(fullPrefix));
     _renderFolderTile(folderName, folderPath, hasItems);
   }
 
@@ -5194,6 +5246,52 @@ async function renderGallery() {
       renderGallery();
     });
 
+    // 移动到…（取代拖拽：iPad 触屏 drag-drop 不可靠 → 卡片菜单选目标文件夹）。
+    // 移动 = 跨文件夹 rename：lib rename 同folder→PATCH名，跨folder→ensureFolder+move（同 GUID，无副本，ADR-0011）。
+    addAction("移动到…", async () => {
+      const curFolder = pathFolder(item.name);
+      const base = pathBasename(item.name);
+      // 候选目标 = 所有已知文件夹（云端真文件夹 + item 派生的各级祖先）+ 根目录，排掉当前所在。
+      const folders = new Set(_galleryCloudFolders);
+      folders.add("");  // 根目录
+      for (const it of allItems) {
+        const parts = it.name.split("/");
+        let acc = "";
+        for (let i = 0; i < parts.length - 1; i++) { acc = acc ? `${acc}/${parts[i]}` : parts[i]; folders.add(acc); }
+      }
+      folders.delete(curFolder);
+      const sorted = [...folders].sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
+      if (sorted.length === 0) { setStatus("没有别的文件夹可移（先新建一个）"); return; }
+      const actions = sorted.map((f) => ({ label: f === "" ? "/ 根目录" : f, value: f }));
+      actions.push({ label: "✕ 取消", value: "__cancel__" });
+      const target = await lockSyncGate({ title: `移动「${base}」到…`, message: "选择目标文件夹", showSpinner: false, actions });
+      if (target == null || target === "__cancel__") return;
+      const newName = pathJoin(target, base);
+      if (newName === item.name) { setStatus("已在该文件夹"); return; }
+      // 冲突检查：目标文件夹下不能撞名（本地 + 云端）
+      const localNames = new Set((await listSessions()).map((s) => s.name));
+      if (localNames.has(newName)) { setStatus(`目标已有同名「${base}」，先改名`, true); return; }
+      if (isCloud) {
+        try {
+          const cloudNames = new Set((await listCloudSessionsRecursive()).map((c) => c.path.replace(/\.ora$/i, "")));
+          if (cloudNames.has(newName)) { setStatus(`云端目标已有同名「${base}」`, true); return; }
+        } catch (e) { console.warn("[move] 云端列表失败:", e); }
+      }
+      await withBusy(`正在移动 ${base} → ${target || "根目录"}…`, async () => {
+        let localErr = null, cloudErr = null;
+        if (isLocal) { try { await renameLocalSession(item.name, newName); } catch (e) { localErr = e; console.warn("[move] local:", e); } }
+        if (isCloud) { try { await renameCloudSession(item.name, newName); } catch (e) { cloudErr = e; console.warn("[move] cloud:", e); } }
+        // active session 跟着改名（否则后续保存写错路径）
+        if (item.name === _activeSessionName && !localErr) { _activeSessionName = newName; setCurrentSessionName(newName); }
+        if (localErr || cloudErr) {
+          setStatus(`移动部分失败：${[localErr, cloudErr].filter(Boolean).map((e) => e.message || e).join("；")}`, true);
+        } else {
+          setStatus(`已移动到：${target || "根目录"}`);
+        }
+      });
+      renderGallery();
+    });
+
     // 拉取/推送/卸载（按状态，3 选 1 或者没有）
     if (isCloud && !isLocal) {
       addAction("拉取到本地", async () => {
@@ -5282,12 +5380,9 @@ async function renderGallery() {
             else         await trashSession(item.name);
           } catch (e) { localErr = e; console.warn("[trash] local failed:", e); }
         }
-        // 保留 folder 可见性：item 所在的 folder 加进 explicit set
-        // 这样最后一个 item 删了 folder 仍显示（空文件夹），user 可再放东西
-        const parentFolder = pathFolder(item.name);
-        if (parentFolder && !cloudErr && !localErr) {
-          addExplicitFolder(parentFolder);
-        }
+        // 文件夹模型「云端真文件夹为准」：删最后一个文件后，OneDrive 上的父文件夹仍是真文件夹
+        // （上传时已隐式建），listCloudFolders 下次照常带回 → 空文件夹自然保留，无需旁路记录。
+        // （纯本地未上云的文件夹会随最后一个文件消失，这是该模型可接受的代价。）
         if (isActive && !localErr && !cloudErr) {
           await _exitCanvasToGallery();
         }
@@ -5456,7 +5551,7 @@ function _renderFolderTile(folderName, folderPath, hasItems) {
       return;
     }
     await withBusy(`正在删除文件夹 ${folderName}…`, async () => {
-      removeExplicitFolder(folderPath);
+      // 云端真文件夹为准：直接删 OneDrive 上的真文件夹（无旁路要清）。
       if (isSignedIn() && navigator.onLine !== false) {
         try {
           const item = await getItemByPath(folderPath);
