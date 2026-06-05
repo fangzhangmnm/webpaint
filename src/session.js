@@ -45,13 +45,15 @@ export async function saveSession(doc, name, opts = {}) {
     }),
     renderThumbBlob(doc, 256),
   ]);
-  const pkg = {
-    name: sessionName,
-    updatedAt: Date.now(),
-    ora,
-    thumb,            // Blob (image/jpeg, ~5-15KB)
-  };
-  await putSession(sessionName, pkg);
+  return await putSessionPkg(sessionName, ora, thumb);
+}
+
+/** **单一本地落盘点**：组 pkg（name/updatedAt/ora/thumb）+ 原子 putSession。
+ *  两条路共用——saveSession（活 doc 算 ora+thumb，热路径不解码）与 LocalAdapter
+ *  （Store 流：bytes 解码渲 thumb，冷路径）。pkg 结构只在这里定义一次。 */
+export async function putSessionPkg(name, ora, thumb = null) {
+  const pkg = { name, updatedAt: Date.now(), ora, thumb };
+  await putSession(name, pkg);
   return pkg;
 }
 

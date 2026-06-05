@@ -12,17 +12,20 @@
 //   restore(trashKey)   → name（session.restoreSession，撞名自动 (2)）
 
 import { getSession, putSession, deleteSession } from "../storage.js";
-import { trashSession, restoreSession, purgeFromTrash, renderThumbBlob } from "../session.js";
+import { trashSession, restoreSession, purgeFromTrash, renderThumbBlob, putSessionPkg } from "../session.js";
 import { decodeOraToDoc } from "../ora.js";
 
 export function createLocalAdapter() {
   return {
     async save(name, oraBlob) {
       // app 主存路径用 saveNow（live doc，不解码）；这里给 Store 流（exit flush / pull 覆盖）用，非热路径。
-      // 解码一次渲 thumb，用**原始 ora bytes** putSession（不 re-encode，保字节）。
-      const doc = await decodeOraToDoc(oraBlob);
-      const thumb = await renderThumbBlob(doc, 256);
-      await putSession(name, { name, updatedAt: Date.now(), ora: oraBlob, thumb });
+      // 解码一次渲 thumb，用**原始 ora bytes** 落盘（不 re-encode，保字节）。
+      // 解码 / 渲 thumb 失败**不阻断落盘**：字节是真相，thumb 是派生——宁可少缩略图也绝不丢字节
+      //   （否则坏/新格式 ora 会卡死整条 pull/flush，见 docs/reports 候选 4）。
+      let thumb = null;
+      try { thumb = await renderThumbBlob(await decodeOraToDoc(oraBlob), 256); }
+      catch (e) { console.warn("[local] thumb 渲染失败，仅存字节：", e); }
+      await putSessionPkg(name, oraBlob, thumb);   // 与 saveSession 共用唯一落盘原语
     },
 
     async get(name) {
