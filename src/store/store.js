@@ -191,19 +191,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
-  // C3：退出 = consent push。H3：先 flush（encode→local.save 落地）→ push → 才允许清 active。
-  async function close(name, opts = {}) {
-    const { encode, getEditVersion, onConflict, busy = passBusy } = opts;
-    if (encode && local) await local.save(name, await encode());   // flush：绝不在保存前清状态
-    let r;
-    try { r = await push(name, { encode, getEditVersion, onConflict, busy }); }
-    catch (e) {
-      if (_retriable(e)) return { status: "deferred", canClearActive: true, queued: true };
-      throw e;
-    }
-    const safe = ["pushed", "healed", "resolved"].includes(r.status) && !r.dirtyAfter;
-    return { ...r, canClearActive: safe };
-  }
+  // C3/H3（退出 = consent push、先 flush 后清）由 app 的 saveAndPush + _exitCanvasToGallery 承担：
+  // 那条路有完整的冲突 UI（no-op / save-as / weak-override）+ checkpoint + 离线提示，是 flush+push 的富版本。
+  // 曾有过一个 flow.close（薄 flush+push）但被 saveAndPush 取代、从无调用 → 已删（别再加回来）。
 
   // C5：删除 = move-aside。三态（仅本地 / 仅云端 / 两者）。两者 → 云端进 .trash + 本地直接删（不留双份）。
   async function del(name, opts = {}) {
@@ -232,6 +222,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // C7：离线删除重连重放。按 base-etag 收敛；被别处改过 → delete-vs-edit 默认 edit-wins（不删）。
+  // NOT-WIRED（aspirational）：flow.delete 离线时返 queuedCloudDelete，但队列尚未持久化（C1b 接 IDB），
+  //   故此函数目前无调用方。保留为 C7 的唯一实现；接队列那轮再启用，别误当死码删掉。
   async function replayDelete(name, opts = {}) {
     const { baseEtag } = opts;
     let meta;
@@ -375,12 +367,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     set: (k, v) => { if (kv) kv.set(`settings:${k}`, v); },
     remove: (k) => { if (kv) kv.remove(`settings:${k}`); },
   };
-  // 活动 item 指针（跨 reload）。取代 app 的 localStorage current-pointer。app-agnostic（不叫 session）。
-  const active = {
-    get: () => (kv ? kv.get("active:pointer") || null : null),
-    set: (name) => { if (kv) kv.set("active:pointer", name); },
-    clear: () => { if (kv) kv.remove("active:pointer"); },
-  };
+  // 活动 item 指针：WebPaint 用 session.js 的 webpaint.currentSessionName（含 boot-load 失败时的
+  // phantom-path 保护）。曾在此放过一个 store.active（kv "active:pointer"），与之并存只会双源失同步、
+  // 从无调用 → 已删。将来真要 app-agnostic 化，应迁到 session.js 那个键、而非另起炉灶。
 
   // ---- 编辑游标（④）：单一 SSoT，B2（_doPush）与本机合流（session）共用。app histchange → mark()。
   const edits = { mark: () => { _editVersion++; }, version: () => _editVersion };
@@ -418,10 +407,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   const session = createCoalescer();
 
   return {
-    flow: { push, open, close, delete: del, rename, saveAs, acquire, replayDelete, restore, purge },
+    flow: { push, open, delete: del, rename, saveAs, acquire, replayDelete, restore, purge },
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
-    active,                    // 活动 item 指针（不叫 session，app-agnostic）
     edits,                     // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④）
     session,                   // save 合流 coalescer（configure/request）（④）
     adoptBase,                 // app 打开/采纳 item 时调，捕获本 tab 的 base-etag（C4）
