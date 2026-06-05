@@ -28,7 +28,7 @@ import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
-  trashSession, restoreSession, purgeFromTrash, emptyTrash, listTrashedSessions, renameLocalSession,
+  emptyTrash, listTrashedSessions,
   getCurrentSessionName, setCurrentSessionName,
   exportOraDownload, exportPsdDownload, shareOrDownloadImage,
   copyImageToClipboard, readImageFromClipboard, writeImageBlobToClipboard,
@@ -48,8 +48,7 @@ import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTele
 import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
   listCloudSessionsRecursive, listCloudAll, listCloudFolders,
-  trashCloudSession, restoreCloudFromTrash, listCloudTrash, purgeCloudTrashItem,
-  renameCloudSession,
+  listCloudTrash, purgeCloudTrashItem,
   isCloudDirty, setCloudDirty, CloudConflictError,
   getLastSessionSignedIn, setLastSessionSignedIn, getKnownETag,
   pushBrushRack, pullBrushRack, fetchBrushRackMetadata, getBrushRackKnownETag,
@@ -5115,24 +5114,15 @@ async function renderGallery() {
           if (cloudNames.has(trimmed)) { setStatus(`云端已有同名 "${trimmed}"，换一个`, true); return; }
         } catch (e) { console.warn("[rename] 云端列表失败:", e); }
       }
-      // 干活：本地原子 rename + 云端 PATCH name；任一失败都报但另一边已走的不退
+      // 干活全交给 store.flow.rename（机制在库内）：本地先存新名再删旧名（phantom-path 红线）；
+      // 云端 synced→服务端 move 保 etag、dirty→push 新+trash 旧。cloud:isCloud 让纯本地 item 不误传云端。
       await withBusy(`正在重命名 ${item.name} → ${trimmed}…`, async () => {
-        let localErr = null, cloudErr = null;
-        if (isLocal) {
-          try { await renameLocalSession(item.name, trimmed); }
-          catch (e) { localErr = e; console.warn("[rename] local:", e); }
-        }
-        if (isCloud) {
-          try { await renameCloudSession(item.name, trimmed); }
-          catch (e) { cloudErr = e; console.warn("[rename] cloud:", e); }
-        }
-        if (localErr || cloudErr) {
-          const msgs = [];
-          if (localErr) msgs.push(`本地：${localErr.message || localErr}`);
-          if (cloudErr) msgs.push(`云端：${cloudErr.message || cloudErr}`);
-          setStatus(`重命名部分失败：${msgs.join("；")}`, true);
-        } else {
-          setStatus(`已重命名：${item.name} → ${trimmed}`);
+        try {
+          const res = await _store.flow.rename(item.name, trimmed, { cloud: isCloud });
+          if (res.cloudDeferred) setStatus(`已重命名（云端稍后重试）：${item.name} → ${trimmed}`);
+          else setStatus(`已重命名：${item.name} → ${trimmed}`);
+        } catch (e) {
+          setStatus(`重命名失败：${e && e.message || e}`, true);
         }
       });
       renderGallery();
@@ -5169,16 +5159,16 @@ async function renderGallery() {
           if (cloudNames.has(newName)) { setStatus(`云端目标已有同名「${base}」`, true); return; }
         } catch (e) { console.warn("[move] 云端列表失败:", e); }
       }
+      // 移动 = 跨文件夹 rename，走 store.flow.rename（同 GUID、保 etag/红线，机制在库内）。
       await withBusy(`正在移动 ${base} → ${target || "根目录"}…`, async () => {
-        let localErr = null, cloudErr = null;
-        if (isLocal) { try { await renameLocalSession(item.name, newName); } catch (e) { localErr = e; console.warn("[move] local:", e); } }
-        if (isCloud) { try { await renameCloudSession(item.name, newName); } catch (e) { cloudErr = e; console.warn("[move] cloud:", e); } }
-        // active session 跟着改名（否则后续保存写错路径）
-        if (item.name === _activeSessionName && !localErr) { _activeSessionName = newName; setCurrentSessionName(newName); }
-        if (localErr || cloudErr) {
-          setStatus(`移动部分失败：${[localErr, cloudErr].filter(Boolean).map((e) => e.message || e).join("；")}`, true);
-        } else {
-          setStatus(`已移动到：${target || "根目录"}`);
+        try {
+          const res = await _store.flow.rename(item.name, newName, { cloud: isCloud });
+          // active session 跟着改名（否则后续保存写错路径）
+          if (item.name === _activeSessionName) { _activeSessionName = newName; setCurrentSessionName(newName); }
+          if (res.cloudDeferred) setStatus(`已移动（云端稍后重试）：${target || "根目录"}`);
+          else setStatus(`已移动到：${target || "根目录"}`);
+        } catch (e) {
+          setStatus(`移动失败：${e && e.message || e}`, true);
         }
       });
       renderGallery();
@@ -5259,33 +5249,16 @@ async function renderGallery() {
       if (isActive) detail += " 当前画布会关闭。";
       const ok = await openConfirmSheet(`删除 "${item.name}"？`, detail);
       if (!ok) return;
+      // 干活全交给 store.flow.delete（三态 move-aside / 不留双份 / 离线排队，机制在库内）。
+      // dirty 警告已在上面的 confirm sheet 里说清，故不再传 onDirtyWarn（不重复弹）。
+      // 文件夹模型「云端真文件夹为准」：删最后一个文件后 OneDrive 父文件夹仍在 → 空文件夹自然保留。
       await withBusy(`正在删除 ${item.name}…`, async () => {
-        let cloudErr = null, localErr = null;
-        // 先动云端（云端是 source；如果失败本地保留）
-        if (isCloud) {
-          try { await trashCloudSession(item.name); }
-          catch (e) { cloudErr = e; console.warn("[trash] cloud failed:", e); }
-        }
-        // 本地：双端时直接 delete；纯本地时 trash
-        if (isLocal && !cloudErr) {
-          try {
-            if (isCloud) await removeSession(item.name);
-            else         await trashSession(item.name);
-          } catch (e) { localErr = e; console.warn("[trash] local failed:", e); }
-        }
-        // 文件夹模型「云端真文件夹为准」：删最后一个文件后，OneDrive 上的父文件夹仍是真文件夹
-        // （上传时已隐式建），listCloudFolders 下次照常带回 → 空文件夹自然保留，无需旁路记录。
-        // （纯本地未上云的文件夹会随最后一个文件消失，这是该模型可接受的代价。）
-        if (isActive && !localErr && !cloudErr) {
-          await _exitCanvasToGallery();
-        }
-        if (cloudErr || localErr) {
-          const msgs = [];
-          if (cloudErr) msgs.push(`云端：${cloudErr.message || cloudErr}`);
-          if (localErr) msgs.push(`本地：${localErr.message || localErr}`);
-          setStatus(`部分失败：${msgs.join("；")}`, true);
-        } else {
+        try {
+          await _store.flow.delete(item.name, { isOnline: () => navigator.onLine !== false });
+          if (isActive) await _exitCanvasToGallery();
           setStatus(`已删除：${item.name}`);
+        } catch (e) {
+          setStatus(`删除失败：${e && e.message || e}`, true);
         }
       });
       renderGallery();
@@ -5589,21 +5562,19 @@ async function renderTrashView() {
     };
 
     addAction("恢复", async () => {
+      // 走 store.flow.restore：本地先恢复拿到实际落名（撞名自动 (2)）→ 云端按同一名恢复，两端不再失同步。
       await withBusy(`正在恢复 ${item.name}…`, async () => {
-        let restoredName = item.name;
-        let localErr = null, cloudErr = null;
-        if (item.local) {
-          try { restoredName = await restoreSession(item.local.trashKey); }
-          catch (e) { localErr = e; console.warn("[restore] local:", e); }
-        }
-        if (item.cloud) {
-          try { await restoreCloudFromTrash(item.cloud.id, restoredName); }
-          catch (e) { cloudErr = e; console.warn("[restore] cloud:", e); }
-        }
-        if (localErr || cloudErr) {
-          setStatus(`恢复部分失败：${[localErr, cloudErr].filter(Boolean).map(e => e.message || e).join("；")}`, true);
-        } else {
+        try {
+          const res = await _store.flow.restore({
+            trashKey: item.local ? item.local.trashKey : null,
+            fromCloud: !!item.cloud,
+            cloudItemId: item.cloud ? item.cloud.id : null,
+            targetName: item.name,
+          });
+          const restoredName = res.name || item.name;
           setStatus(`已恢复：${restoredName}${restoredName !== item.name ? `（原名 ${item.name} 已被占用）` : ""}`);
+        } catch (e) {
+          setStatus(`恢复失败：${e && e.message || e}`, true);
         }
       });
       renderGallery();
@@ -5612,20 +5583,16 @@ async function renderTrashView() {
     addAction("永久删除", async () => {
       const ok = await openConfirmSheet(`永久删除 "${item.name}"？`, "不可撤销。");
       if (!ok) return;
+      // 走 store.flow.purge：本地 trash + 云端 trash 一处删。
       await withBusy(`正在永久删除 ${item.name}…`, async () => {
-        let localErr = null, cloudErr = null;
-        if (item.local) {
-          try { await purgeFromTrash(item.local.trashKey); }
-          catch (e) { localErr = e; console.warn("[purge] local:", e); }
-        }
-        if (item.cloud) {
-          try { await purgeCloudTrashItem(item.cloud.id); }
-          catch (e) { cloudErr = e; console.warn("[purge] cloud:", e); }
-        }
-        if (localErr || cloudErr) {
-          setStatus(`永久删除部分失败：${[localErr, cloudErr].filter(Boolean).map(e => e.message || e).join("；")}`, true);
-        } else {
+        try {
+          await _store.flow.purge({
+            trashKey: item.local ? item.local.trashKey : null,
+            cloudItemId: item.cloud ? item.cloud.id : null,
+          });
           setStatus(`已永久删除：${item.name}`);
+        } catch (e) {
+          setStatus(`永久删除失败：${e && e.message || e}`, true);
         }
       });
       renderGallery();

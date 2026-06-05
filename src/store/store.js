@@ -242,21 +242,28 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return { status: "trashed", trashed: await cloud.trash(name) };
   }
 
-  // 从 trash 恢复：云端用 itemId（撞名自动 (2)，cloud.js 已实现）；本地用 trashKey（local.restore）。
+  // 从 trash 恢复：本地先恢复（撞名自动 (2)，拿到实际落名）→ 云端按同一名恢复（撞名自动 (2)，cloud.js 已实现）。
+  // 两端都可有可无（local-only / cloud-only / both 一条路）。返回实际恢复的 name。
   async function restore(opts = {}) {
     const { fromCloud, cloudItemId, targetName, trashKey, busy = passBusy } = opts;
     return busy("恢复中…", async () => {
-      if (fromCloud) return { status: "restored", where: "cloud", item: await cloud.restore(cloudItemId, targetName) };
-      if (trashKey && local) { const name = await local.restore(trashKey); return { status: "restored", where: "local", name }; }
-      return { status: "noop" };
+      let name = targetName || null, restoredLocal = false, restoredCloud = false;
+      if (trashKey && local) { const n = await local.restore(trashKey); if (n) { name = n; restoredLocal = true; } }
+      if (fromCloud && cloudItemId != null) { await cloud.restore(cloudItemId, name || targetName); restoredCloud = true; }
+      if (!restoredLocal && !restoredCloud) return { status: "noop" };
+      return { status: "restored", name, local: restoredLocal, cloud: restoredCloud };
     });
   }
 
-  // 永久删（不可恢复）→ 强制 danger confirm（H2）。
-  async function purge(cloudItemId, opts = {}) {
-    const { confirm, busy = passBusy } = opts;
+  // 永久删（不可恢复）→ 强制 danger confirm（H2）。两端都可有可无（trashKey 本地 / cloudItemId 云端）。
+  async function purge(opts = {}) {
+    const { trashKey, cloudItemId, confirm, busy = passBusy } = opts;
     if (confirm && !(await confirm({ title: "彻底删除", body: "不可恢复", danger: true }))) return { status: "cancelled" };
-    return busy("彻底删除…", async () => { await cloud.purge(cloudItemId); return { status: "purged" }; });
+    return busy("彻底删除…", async () => {
+      if (trashKey && local && local.purgeTrash) await local.purgeTrash(trashKey);
+      if (cloudItemId != null) await cloud.purge(cloudItemId);
+      return { status: "purged" };
+    });
   }
 
   // 在 oldName + newName 两条链尾串行跑 fn（重命名牵动两个身份，须挡住对任一名的 in-flight push）。
@@ -268,29 +275,40 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return next;
   }
 
-  // 身份变更：重命名当前 item。本地先存新名再删旧名（phantom-path 红线：绝不先删）。
-  // 云端：synced（无未推编辑）→ 服务端 move 保 etag、不重传字节；dirty / 云端无旧文件 → push 当前字节到新名 + 旧名进 .trash（非 hard-delete）。
+  // 身份变更：重命名一个**具名文件**（active Work 或图库里没打开的 item，统一一条路）。
+  // 字节来源：active 传 encode（活 doc）；图库非活动不传 encode → 库内从 local.get(old) 取既存字节，不重编码。
+  // 本地先存新名再删旧名（phantom-path 红线：绝不先删）。
+  // 云端：synced（无未推编辑）或纯云端无本地字节 → 服务端 move 保 etag、不重传字节；
+  //       dirty 且有本地字节 → push 当前字节到新名 + 旧名进 .trash（非 hard-delete）。
   // 串行 against 两个 name 的 in-flight push。app 只负责取名 + UI；机制全在库内。
   async function rename(oldName, newName, opts = {}) {
-    const { encode, getEditVersion = () => _editVersion, cloud: doCloud = true, busy = passBusy } = opts;
+    const { encode, getEditVersion, cloud: doCloud = true, busy = passBusy } = opts;
     if (!oldName || !newName || oldName === newName) return { status: "noop" };
+    // 非 active 改名（无 encode）不该被活 doc 的编辑游标污染 dirtyAfter → 用冻结游标。
+    const gev = encode ? (getEditVersion || (() => _editVersion)) : () => 0;
     return _serialize2(oldName, newName, () => busy("重命名…", async () => {
-      const bytes = await toU8(await encode());
-      if (local) {
+      const hasLocal = local ? await local.exists(oldName) : false;
+      let bytes = null;
+      if (encode) bytes = await toU8(await encode());
+      else if (hasLocal) bytes = await toU8(await local.get(oldName));
+
+      if (local && hasLocal) {
         await local.save(newName, bytes);                              // 先存新名（含当前字节）
-        if (await local.exists(oldName)) await local.hardDelete(oldName);  // 成功后才删旧名
+        await local.hardDelete(oldName);                              // 成功后才删旧名
       }
       if (!doCloud) { _base.delete(oldName); return { status: "renamed", where: "local", newName }; }
       // 云端 best-effort：本地改名已落地，绝不因云端失败回滚。失败 → 标新名脏，下次 push 续（与旧 app 行为一致）。
       try {
         let cloudOld = null;
         try { cloudOld = await cloud.fetchMeta(oldName); } catch (_) { cloudOld = null; }
-        if (cloudOld && !cloud.isDirty(oldName)) {
-          await cloud.rename(oldName, newName);                        // 服务端 move，etag 顺延（cloud.rename 内 setETag(new)+clearState(old)）
+        // synced，或没有本地字节可推（纯云端 item）→ 服务端 move，etag 顺延（cloud.rename 内 setETag(new)+clearState(old)）。
+        if (cloudOld && (!cloud.isDirty(oldName) || bytes == null)) {
+          await cloud.rename(oldName, newName);
           _base.set(newName, cloud.getETag(newName)); _base.delete(oldName);
           return { status: "renamed", where: "cloud-move", newName };
         }
-        const res = await _doPush(newName, { encode: () => bytes, getEditVersion, busy });  // dirty / 无旧云文件 → 推当前字节（含 B5/retry/conflict）
+        if (bytes == null) { _base.delete(oldName); return { status: "renamed", where: "local", newName }; }
+        const res = await _doPush(newName, { encode: () => bytes, getEditVersion: gev, busy });  // dirty / 无旧云文件 → 推当前字节（含 B5/retry/conflict）
         if (cloudOld) { try { await cloud.trash(oldName); } catch (_) {} }  // 旧名进 .trash，不 hard-delete（C5）
         _base.delete(oldName);
         return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, push: res };

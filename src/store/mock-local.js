@@ -48,6 +48,7 @@ export function createMockLocal() {
       trash.delete(trashKey);
       return e.name;
     },
+    async purgeTrash(trashKey) { trash.delete(trashKey); },
     // 测试辅助
     _items: items,
     _trash: trash,

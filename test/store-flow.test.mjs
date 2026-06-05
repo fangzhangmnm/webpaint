@@ -91,6 +91,103 @@ describe("Store.flow.rename", () => {
   });
 });
 
+describe("Store.flow.rename（图库非活动 item：无 encode，字节取自 local）", () => {
+  it("synced 非活动 → 不传 encode，从 local.get 取字节，服务端 move 保 etag", async () => {
+    const env = mk();
+    const it0 = await seedSynced(env, "猫", "v1");
+    const res = await env.store.flow.rename("猫", "狗", {});   // 无 encode
+    eq(res.where, "cloud-move");
+    eq(env.cloud.getETag("狗"), it0.eTag, "etag 顺延");
+    eq(u8txt(await env.local.get("狗")), "v1", "本地新名 = 既存字节");
+    eq(await env.local.get("猫"), null, "本地旧名删了");
+  });
+
+  it("cloud-only（无本地）→ 无 encode → 纯服务端 move，不写本地", async () => {
+    const env = mk();
+    await env.cloud.push("云猫", bytes("c1"));               // 只云端
+    env.store.adoptBase("云猫", env.cloud.getETag("云猫"));
+    const res = await env.store.flow.rename("云猫", "云狗", {});
+    eq(res.where, "cloud-move");
+    assert(await env.provider.getItemByPath("云狗.ora"), "云端新名在");
+    eq(await env.provider.getItemByPath("云猫.ora"), null, "云端旧名没了");
+    eq(await env.local.get("云狗"), null, "没误写本地");
+  });
+
+  it("dirty 非活动 → 无 encode 但有本地字节 → push 本地字节到新名 + 旧名进 .trash", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    await env.local.save("猫", bytes("v2-local"));            // 本地比云端新
+    env.cloud.setDirty("猫", true);
+    const res = await env.store.flow.rename("猫", "狗", {});   // 无 encode
+    eq(res.where, "cloud-push+trash");
+    eq(await txt(await env.provider.download((await env.provider.getItemByPath("狗.ora")).id)), "v2-local", "推的是本地字节");
+    assert((await env.cloud.listTrash()).length === 1, "旧名进 .trash");
+  });
+});
+
+describe("Store.flow.delete（三态 move-aside / 不留双份）", () => {
+  it("both → 云端进 .trash + 本地 hardDelete（不留双份）", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    const res = await env.store.flow.delete("猫");
+    eq(res.where, "cloud");
+    eq(await env.local.get("猫"), null, "本地真删（不进本地 trash）");
+    eq(env.local._trash.size, 0, "本地无双份");
+    assert((await env.cloud.listTrash()).length === 1, "云端进 .trash 可恢复");
+  });
+
+  it("local-only → 本地 move-aside（进本地 trash，绝不硬删）", async () => {
+    const env = mk();
+    await env.local.save("草稿", bytes("d1"));
+    const res = await env.store.flow.delete("草稿");
+    eq(res.where, "local");
+    eq(await env.local.get("草稿"), null);
+    eq(env.local._trash.size, 1, "进本地 trash 可恢复");
+  });
+
+  it("cloud-only → 云端进 .trash", async () => {
+    const env = mk();
+    await env.cloud.push("云猫", bytes("c1"));
+    const res = await env.store.flow.delete("云猫");
+    eq(res.where, "cloud");
+    assert((await env.cloud.listTrash()).length === 1);
+  });
+
+  it("离线 → 本地 move-aside + 排队云删（不碰网络）", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    const res = await env.store.flow.delete("猫", { isOnline: () => false });
+    eq(res.status, "trashed"); eq(res.where, "local");
+    eq(res.queuedCloudDelete, true, "记下重连重放");
+    assert(await env.provider.getItemByPath("猫.ora"), "离线不动云端");
+  });
+});
+
+describe("Store.flow.restore / purge（本地+云端一条路）", () => {
+  it("both 在回收站 → 本地恢复拿名、云端按同一名恢复", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    const trashKey = await env.local.trash("猫");            // 本地进 trash
+    const moved = await env.cloud.trash("猫");               // 云端进 .trash，moved.id
+    const res = await env.store.flow.restore({ trashKey, fromCloud: true, cloudItemId: moved.id, targetName: "猫" });
+    eq(res.status, "restored"); eq(res.name, "猫");
+    eq(res.local, true); eq(res.cloud, true);
+    eq(u8txt(await env.local.get("猫")), "v1", "本地恢复");
+    assert(await env.provider.getItemByPath("猫.ora"), "云端恢复回原位");
+  });
+
+  it("purge both → 本地 trash 与云端 trash 都清", async () => {
+    const env = mk();
+    await env.local.save("猫", bytes("v1"));
+    const trashKey = await env.local.trash("猫");
+    await env.cloud.push("猫", bytes("v1"));
+    const moved = await env.cloud.trash("猫");
+    await env.store.flow.purge({ trashKey, cloudItemId: moved.id });
+    eq(env.local._trash.size, 0, "本地 trash 清空");
+    // 云端：purge 删的是 trash 里的 itemId
+  });
+});
+
 describe("Store.flow.saveAs", () => {
   it("写新身份，旧的不动", async () => {
     const env = mk();

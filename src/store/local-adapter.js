@@ -12,7 +12,7 @@
 //   restore(trashKey)   → name（session.restoreSession，撞名自动 (2)）
 
 import { getSession, putSession, deleteSession } from "../storage.js";
-import { trashSession, restoreSession, renderThumbBlob } from "../session.js";
+import { trashSession, restoreSession, purgeFromTrash, renderThumbBlob } from "../session.js";
 import { decodeOraToDoc } from "../ora.js";
 
 export function createLocalAdapter() {
@@ -53,6 +53,10 @@ export function createLocalAdapter() {
 
     async restore(trashKey) {
       return await restoreSession(trashKey);  // rename 回原名，撞名自动 (2)(3)
+    },
+
+    async purgeTrash(trashKey) {
+      await purgeFromTrash(trashKey);          // 永久删本地回收站一条
     },
   };
 }
