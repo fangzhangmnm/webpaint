@@ -63,9 +63,12 @@ export function createCloudSync(cfg) {
     try {
       let item = await provider.upload(path, bytes, { contentType, eTag: baseEtag, conflictBehavior: "replace" });
       // H7：分片末响应可能不带 item/eTag → 拉权威 etag，绝不在 null.eTag 崩、不缓存 null。
+      // 但**只在大小匹配时才认**：上传失败会留下 createUploadSession 的 0 字节占位，若无脑采纳它的
+      // etag + setDirty(false) 就会骗成 synced（postmortem 2026-06-05 第④级）。size 不符 → 当失败、保 dirty。
       if (!item || !item.eTag) {
         const fresh = await provider.getItemByPath(path).catch(() => null);
-        if (fresh && fresh.eTag) item = fresh;
+        const wrote = (bytes && (bytes.byteLength ?? bytes.size ?? bytes.length)) || 0;
+        if (fresh && fresh.eTag && fresh.size === wrote) item = fresh;
       }
       if (item && item.eTag) { setETag(name, item.eTag); setDirty(name, false); }
       return { item };

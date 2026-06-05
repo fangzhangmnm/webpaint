@@ -188,6 +188,33 @@ describe("Store.flow.restore / purge（本地+云端一条路）", () => {
   });
 });
 
+describe("cloud-sync.push H7 兜底 · 对抗（不得把 0 字节占位当成功）", () => {
+  it("[对抗] upload 返回 null + 留下 0 字节占位 → 仍 dirty，不骗成 synced", async () => {
+    const fake = {
+      // 模拟：分片末无 item / 上传失败，但 createUploadSession 已留下 0 字节占位（有 eTag）
+      upload: async () => null,
+      getItemByPath: async () => ({ id: "x", name: "猫.ora", eTag: "e1", size: 0 }),
+    };
+    const cs = createCloudSync({ provider: fake, kv: memKv(), fileName: (n) => n + ".ora", appKey: "t" });
+    cs.setDirty("猫", true);
+    const { item } = await cs.push("猫", new TextEncoder().encode("12345"));   // 写 5 字节
+    assert(!item, "size 不符的 0 字节占位不该被认作上传结果");
+    eq(cs.isDirty("猫"), true, "必须仍 dirty——下次 Ctrl+S 重试，绝不骗成 synced");
+  });
+
+  it("真 H7（分片末无 item 但字节确实上传到位）→ 大小匹配 → 认，标 synced", async () => {
+    const fake = {
+      upload: async () => null,                                                 // 末响应没带 item
+      getItemByPath: async () => ({ id: "x", name: "猫.ora", eTag: "e2", size: 5 }),  // 但云端确有 5 字节
+    };
+    const cs = createCloudSync({ provider: fake, kv: memKv(), fileName: (n) => n + ".ora", appKey: "t" });
+    cs.setDirty("猫", true);
+    const { item } = await cs.push("猫", new TextEncoder().encode("12345"));
+    assert(item && item.eTag === "e2", "大小匹配 → 采纳权威 etag");
+    eq(cs.isDirty("猫"), false, "真上传成功 → 标 synced");
+  });
+});
+
 describe("Store.edits 本地落盘 dirty（派生自编辑游标，取代 app 的 _docDirty）", () => {
   it("初始 clean；mark→dirty；markSaved→clean", () => {
     const env = mk();

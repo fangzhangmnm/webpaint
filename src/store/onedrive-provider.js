@@ -25,8 +25,13 @@ export function graphToCloudProvider(graph) {
     getItemByPath: async (path) => toItem(await graph.getItemByPath(path)),
     download: (id) => graph.downloadItemBlob(id),
     downloadRange: (id, offset, length) => graph.downloadItemRange(id, offset, length),
-    upload: (path, blob, { contentType = "application/octet-stream", eTag = null, conflictBehavior = "replace" } = {}) =>
-      graph.uploadFileToApproot(path, blob, contentType, { conflictBehavior, eTag }).then(toItem),
+    // graph.js 是 Blob 原生（按 .size 选简单/分块路径、用 .slice 切块）；lib 把字节归一成 Uint8Array。
+    // 必须在这道接缝转回 Blob——Uint8Array.size===undefined → undefined<=4MB 为 false → 永远走分块、
+    // while(0<undefined) 一个 chunk 都不传 → 上传 0 字节占位还回 etag（postmortem 2026-06-05 根因）。
+    upload: (path, blob, { contentType = "application/octet-stream", eTag = null, conflictBehavior = "replace" } = {}) => {
+      const body = blob instanceof Blob ? blob : new Blob([blob], { type: contentType });
+      return graph.uploadFileToApproot(path, body, contentType, { conflictBehavior, eTag }).then(toItem);
+    },
     delete: (id) => graph.deleteItem(id),
     ensureFolder: (path) => graph.ensureSubfolder(path),
     move: (id, folderId, opts = {}) => graph.moveItemToFolder(id, folderId, opts).then(toItem),
