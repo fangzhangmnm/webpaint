@@ -39,6 +39,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   const _chain = new Map();
   const _sleep = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
 
+  // 编辑游标（B2 + 本机合流共用的单一 SSoT）。app histchange → edits.mark()；不再各持一份 _editVersion。
+  let _editVersion = 0;
+
   // C4：base-etag 归这个 Store 实例（= 这个 tab）的内存，open/adopt 时捕获一次。
   // push 用它当 If-Match、成功只推进**自己的**——绝不每次去读跨 tab 共享的 localStorage etag，
   // 否则别的 tab 推成功后改了共享 etag，本 tab 的陈旧推会被误判成"无冲突"→ 静默覆盖（W2 红线）。
@@ -70,7 +73,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return { status, dirtyAfter };
   }
 
-  async function _doPush(name, { encode, getEditVersion = () => 0, onConflict, adopt, saveBranch, now, busy = passBusy } = {}) {
+  async function _doPush(name, { encode, getEditVersion = () => _editVersion, onConflict, adopt, saveBranch, now, busy = passBusy } = {}) {
     const v0 = getEditVersion();
     const bytes = await toU8(await encode());      // 只编码一次，重试复用（B5 逐字节比对要相等）
     return busy("正在同步…", async () => {
@@ -269,7 +272,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // 云端：synced（无未推编辑）→ 服务端 move 保 etag、不重传字节；dirty / 云端无旧文件 → push 当前字节到新名 + 旧名进 .trash（非 hard-delete）。
   // 串行 against 两个 name 的 in-flight push。app 只负责取名 + UI；机制全在库内。
   async function rename(oldName, newName, opts = {}) {
-    const { encode, getEditVersion = () => 0, cloud: doCloud = true, busy = passBusy } = opts;
+    const { encode, getEditVersion = () => _editVersion, cloud: doCloud = true, busy = passBusy } = opts;
     if (!oldName || !newName || oldName === newName) return { status: "noop" };
     return _serialize2(oldName, newName, () => busy("重命名…", async () => {
       const bytes = await toU8(await encode());
@@ -300,7 +303,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // 另存为：写新身份，旧的不动（Photoshop 语义，调用方完成后切到新名）。
   async function saveAs(newName, opts = {}) {
-    const { encode, getEditVersion = () => 0, cloud: doCloud = true, busy = passBusy } = opts;
+    const { encode, getEditVersion = () => _editVersion, cloud: doCloud = true, busy = passBusy } = opts;
     const run = async () => {
       const bytes = await toU8(await encode());
       if (local) await local.save(newName, bytes);
@@ -361,11 +364,48 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     clear: () => { if (kv) kv.remove("active:pointer"); },
   };
 
+  // ---- 编辑游标（④）：单一 SSoT，B2（_doPush）与本机合流（session）共用。app histchange → mark()。
+  const edits = { mark: () => { _editVersion++; }, version: () => _editVersion };
+
+  // ---- save 合流（④ coalescer）：连按 Ctrl+S/点保存不串 N 次。app 注入真·保存动作（configure）。
+  //   - 没在跑 → 立刻跑
+  //   - 在跑 + 期间没新编辑 + 同类型 → no-op（state 没变，省一次空转）
+  //   - 在跑 + 期间有新编辑 → queue 尾巴，in-flight 完成后跑
+  //   - 在跑 local-only + 用户改主意 push → queue push（云端还没覆盖）
+  //   - pending 升级：push 盖过 local（再多按也只一个尾巴）
+  // editVersion 取 edits 的 SSoT（与 B2 同一个游标）。纯逻辑、无 I/O——可 node 单测（注入 fake doLocal/doPush）。
+  function createCoalescer() {
+    let pending = null;          // null | "local" | "push"
+    let inFlight = null;         // null | "local" | "push"
+    let startVer = 0;
+    let doLocal = async () => {}, doPush = async () => {};
+    function configure(fns = {}) { if (fns.doLocal) doLocal = fns.doLocal; if (fns.doPush) doPush = fns.doPush; }
+    async function _run(type) {
+      inFlight = type; startVer = _editVersion;
+      try { if (type === "push") await doPush(); else await doLocal(); }
+      finally {
+        inFlight = null;
+        if (pending) { const next = pending; pending = null; _run(next); }   // 不 await，避免递归栈
+      }
+    }
+    function request(type) {
+      if (!inFlight) { _run(type); return; }
+      const hasNewEdits = _editVersion !== startVer;
+      const shouldQueue = (inFlight === "local" && type === "push") ? true : hasNewEdits;
+      if (!shouldQueue) return;
+      if (type === "push" || pending !== "push") pending = type;
+    }
+    return { configure, request, state: () => ({ pending, inFlight, startVer }) };
+  }
+  const session = createCoalescer();
+
   return {
     flow: { push, open, close, delete: del, rename, saveAs, acquire, replayDelete, restore, purge },
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
     active,                    // 活动 item 指针（不叫 session，app-agnostic）
+    edits,                     // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④）
+    session,                   // save 合流 coalescer（configure/request）（④）
     adoptBase,                 // app 打开/采纳 item 时调，捕获本 tab 的 base-etag（C4）
     _internal: { toU8, bytesEqual, baseFor },
   };

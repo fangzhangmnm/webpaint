@@ -2924,8 +2924,10 @@ async function _readSessionCheckpoint(name) {
   const at = await getMeta(`revert:${name}:at`);
   return blob ? { blob, at: at || 0 } : null;
 }
-// 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty
+// 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty。
+// 合并了原来分开的「_editVersion++」监听：编辑游标 SSoT 归 Store（④），这里 mark 一次（无条件，含 B2 语义）。
 window.addEventListener("wp:histchange", () => {
+  _store.edits.mark();                        // 编辑游标推进（B2 + 合流共用）；不 gate session，保旧语义
   if (!_activeSessionName) return;            // gallery-first: 无绑 session 时不响应
   _docDirty = true;
   // **不 gate isSignedIn**：编辑必标云脏。否则登出 / SSO 抖动期间的编辑不被标脏，
@@ -2966,7 +2968,6 @@ async function saveAndPush() {
         referenceImage: referenceWindow.getPersistBlob(),
         webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
       }),
-      getEditVersion: () => _editVersion,
       // spec（share-file-model / ADR-0009）：Work 禁 destructive pull。no-op 安全默认 / save-as / weak-override。
       onConflict: async () => await lockSyncGate({
         title: "云端有更新版本",
@@ -3003,7 +3004,7 @@ async function saveAndPush() {
   } else if (conflictChoice === "save-as") {
     // spec：save-as = 本地另存新名再推（one attempt；renameCurrentSession 内含同名检查）。
     const newName = await renameCurrentSession({ suggested: sessionName + " (新)", reason: "云端冲突" });
-    if (newName && isSignedIn()) { setCloudDirty(newName, true); queueSave("push"); }
+    if (newName && isSignedIn()) { setCloudDirty(newName, true); _store.session.request("push"); }
   }
 }
 
@@ -3036,7 +3037,6 @@ async function renameCurrentSession({ suggested, reason } = {}) {
       const cloudOn = isSignedIn() && navigator.onLine !== false;
       const res = await _store.flow.rename(oldName, trimmed, {
         encode: () => _encodeCurrentOra(),
-        getEditVersion: () => _editVersion,
         cloud: cloudOn,
       });
       _activeSessionName = trimmed;
@@ -3056,56 +3056,15 @@ async function renameCurrentSession({ suggested, reason } = {}) {
   }
 }
 
-// Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地（不推云）
-//
-// **Coalesce**（user 2026-05-28）：连按 Ctrl+S 不并行串 N 次。
-//   - 当前没在跑 → 立刻跑
-//   - 当前在跑 + 中间没新编辑 + 同类型 → no-op（state 没变，省一次空转）
-//   - 当前在跑 + 中间新编辑了 → queue 一个 pending，in-flight 完成后跑
-//   - 当前在跑 local-only + 用户改主意 push → queue push（云端还没覆盖）
-//   - pending 升级规则：push 覆盖 local（再多按几次也只一个尾巴）
-let _savePending = null;             // null | "local" | "push"
-let _inFlightSaveType = null;        // "local" | "push" | null
-let _editVersion = 0;
-let _inFlightStartVersion = 0;
-window.addEventListener("wp:histchange", () => { _editVersion++; });
-
-function queueSave(type) {
-  if (!_inFlightSaveType) {
-    runQueuedSave(type);
-    return;
-  }
-  const hasNewEdits = _editVersion !== _inFlightStartVersion;
-  // 决定要不要 queue 尾巴：
-  //   in-flight local + 用户按 push → queue push（云端还没推）
-  //   其他情况只看是否中间真有新编辑
-  let shouldQueue;
-  if (_inFlightSaveType === "local" && type === "push") shouldQueue = true;
-  else shouldQueue = hasNewEdits;
-  if (!shouldQueue) return;
-  if (type === "push" || _savePending !== "push") _savePending = type;
-}
-
-async function runQueuedSave(type) {
-  _inFlightSaveType = type;
-  _inFlightStartVersion = _editVersion;
-  try {
-    if (type === "push") await saveAndPush();
-    else await saveNow();
-  } finally {
-    _inFlightSaveType = null;
-    if (_savePending) {
-      const next = _savePending;
-      _savePending = null;
-      runQueuedSave(next);             // 不 await，避免递归栈
-    }
-  }
-}
+// Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地（不推云）。
+// 合流（coalesce）状态机收进 Store（④）：_store.session.request(type)。逻辑/单测见 store.js + test/store-coalescer。
+// app 只注入两个真·保存动作（doLocal/doPush）。编辑游标也归 Store（_store.edits）——histchange 里 mark 一次。
+_store.session.configure({ doLocal: () => saveNow(), doPush: () => saveAndPush() });
 
 window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
     e.preventDefault();
-    queueSave(e.shiftKey ? "local" : "push");
+    _store.session.request(e.shiftKey ? "local" : "push");
   }
 });
 // 3 min 兜底
@@ -3140,7 +3099,7 @@ function stampNow() {
 // ---- topbar：save/upload + gallery ----
 // 点 save 按钮 = saveAndPush 一把梭（同 Ctrl+S）。state == "synced" 时
 // 也跑一遍（no-op fast path）让 user 永远不需要"再点一下"。
-els.topSaveBtn.addEventListener("click", () => queueSave("push"));
+els.topSaveBtn.addEventListener("click", () => _store.session.request("push"));
 
 // ---- topbar：adjustments popup（液化 / 后续调色 etc）----
 // 单按钮 → 弹一列 menu-item（同 menuPanel 模式）。学 Procreate adjustments icon。
@@ -3849,7 +3808,6 @@ els.menuSaveAs.addEventListener("click", async () => {
       const cloudOn = isSignedIn() && navigator.onLine !== false;
       const res = await _store.flow.saveAs(trimmed, {
         encode: () => _encodeCurrentOra(),
-        getEditVersion: () => _editVersion,
         cloud: cloudOn,
       });
       _activeSessionName = trimmed;
