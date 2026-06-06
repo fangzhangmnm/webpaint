@@ -259,14 +259,18 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // 清空回收站（批量彻底删）：本地 + 云端两端在库内一处清，逐项独立 try、失败汇总不静默。
-  // 不按 GUID 配对 local↔cloud——两端都要清空，配对无意义（≠ restore）；离线则只清本地、
-  // 云端项留待回线（isOnline()=false 时跳过云端段）。取代 app 旧两腿（emptyTrash+循环 purge）。
+  // 不按 GUID 配对 local↔cloud——两端都要清空，配对无意义（≠ restore）。
+  // 离线（isOnline()=false）→ 这次只清本地、云端清不了；要清云端得回线后用户**再点一次**清空。
+  // **强退 = cancel（一次性操作，绝不持久化 / 不自动续）**：中途强退 = 已删的永久没了（彻底删本不可逆）、
+  //   没删的留在 trash；要清剩的得用户**手动再点**清空（针对那时 trash 的现状）。
+  //   ⚠ 别做成「自动续上次未完成的清空」——下次 trash 可能已有新 item，自动续会连新 item 一起删 = 灾难。
+  // 云端 bounded 并发（默 5，每项仍独立原子），避免大量文件串行太慢。
   async function emptyTrash(opts = {}) {
-    const { isOnline, busy = passBusy } = opts;
+    const { isOnline, busy = passBusy, concurrency = 5 } = opts;
     return busy("清空回收站…", async () => {
       let purged = 0; const failed = [];
       if (local && local.listTrash && local.purgeTrash) {
-        for (const t of await local.listTrash()) {
+        for (const t of await local.listTrash()) {            // 本地 IDB 删很快，串行即可
           try { await local.purgeTrash(t.trashKey); purged++; }
           catch (e) { failed.push({ name: t.name, where: "local", error: String(e && e.message || e) }); }
         }
@@ -275,9 +279,12 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         let items = null;
         try { items = await cloud.listTrash(); }
         catch (e) { failed.push({ where: "cloud-list", error: String(e && e.message || e) }); }
-        for (const it of (items || [])) {
-          try { await cloud.purge(it.id); purged++; }
-          catch (e) { failed.push({ name: it.name, where: "cloud", error: String(e && e.message || e) }); }
+        items = items || [];
+        for (let i = 0; i < items.length; i += concurrency) {  // bounded 并发（~5），快约 N×
+          await Promise.all(items.slice(i, i + concurrency).map(async (it) => {
+            try { await cloud.purge(it.id); purged++; }
+            catch (e) { failed.push({ name: it.name, where: "cloud", error: String(e && e.message || e) }); }
+          }));
         }
       }
       return { status: "emptied", purged, failed };
