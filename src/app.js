@@ -2239,6 +2239,7 @@ async function maybeFastForwardActive({ manual = false } = {}) {
       isOnline: () => navigator.onLine !== false,
       localDirty: () => _store.edits.localDirty(),
       adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
+      busy: manual ? withBusy : undefined,   // 手动点 → 锁屏（反馈 + 防刷新中途动笔）；自动轮询 → 静默
     });
     if (res.status === "in-sync" || res.status === "fast-forwarded") _lastCheckedAt = Date.now();   // 成功联到云、确认了新鲜度
     if (res.status === "fast-forwarded") {
@@ -2740,6 +2741,8 @@ const AUTOSAVE_MS = 3 * 60 * 1000;
 const ICON_DISK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
 const ICON_UPLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
 const ICON_CLOUD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
+// 刷新（双箭头圆环）：synced 过了新鲜期 → 提示「点此刷新检查云端」（ADR-0017）。
+const ICON_REFRESH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
 // 上传中：云形 + 旋转的弧。CSS animation rotate 由 [data-state="cloud-busy"] 触发
 const ICON_CLOUD_BUSY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><g class="spin-arc" style="transform-origin: 12px 13px;"><path d="M9 13a3 3 0 0 1 5.5-1.6" /><polyline points="14.5 9.5 14.5 11.4 12.6 11.4" /></g></svg>';
 
@@ -2773,18 +2776,23 @@ function updateSaveStatus() {
   }
   const state = computeSaveState();
   els.topSaveBtn.dataset.state = state;
-  els.topSaveBtn.style.opacity = "";   // 默认不灰；仅 synced+stale 才变灰（ADR-0017）
+  els.topSaveBtn.style.color = "";   // 默认色；仅 synced+fresh 才蓝（ADR-0017）
   const name = _activeSessionName;
   if (state === "cloud-busy") { els.topSaveBtn.innerHTML = ICON_CLOUD_BUSY; els.topSaveBtn.title = `上传中… · ${name}`; }
   else if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存中… · ${name}`; }
   else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存 + 推送 (Ctrl+S) · ${name} · 未保存`; }
   else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = `推送到云端 (Ctrl+S) · ${name} · 本地已存，云端未同步`; }
   else if (state === "synced") {
-    // synced = 无可存可推 → 图标兼作「云端新鲜度 / 点此刷新」（ADR-0017）。stale 变灰提示点一下。
-    const stale = _freshnessStale();
-    els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK;
-    els.topSaveBtn.style.opacity = stale ? "0.4" : "";
-    els.topSaveBtn.title = stale ? `云端状态可能过期 · 点此刷新检查 · ${name}` : `已同步 · 点此刷新检查云端 · ${name}`;
+    // synced = 无可存可推 → 图标兼作「云端新鲜度 / 刷新」（ADR-0017）。
+    //   fresh（刚确认）= 蓝云✓（成功）；过了新鲜期 = 双箭头刷新键（点此刷新检查）。
+    if (_freshnessStale()) {
+      els.topSaveBtn.innerHTML = ICON_REFRESH;
+      els.topSaveBtn.title = `点此刷新检查云端 · ${name}`;
+    } else {
+      els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK;
+      els.topSaveBtn.style.color = "#2563eb";   // 蓝云 = 刚确认是云端最新
+      els.topSaveBtn.title = `已同步 · 云端最新 · ${name}`;
+    }
   }
   else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `已存本地（IDB 易失，登录云端更安全） · ${name}`; }
 }
@@ -3066,6 +3074,7 @@ async function saveAndPush() {
         : `已同步到云端：${sessionName}`);
       renderGallery();
     }
+    _lastCheckedAt = Date.now();   // 推成功 = 刚确认云端就是本机这份 → 新鲜（save 图标显蓝云非刷新键）（ADR-0017）
   } catch (e) {
     console.warn("[cloud] store push failed:", e);
     setStatus("推送失败：" + (e && e.message || e));
