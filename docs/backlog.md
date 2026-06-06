@@ -118,7 +118,7 @@ pen-up commit 后超出旧 bbox 的部分**被裁**。画时看不出（live ove
   - **防 AI bypass 的结构锁**：产生 dirty 的**唯一入口**=这道门（拿 edit-lease 捕获 parentBase）；push 若发现 dirty 但没 lease → **直接抛**，把"忘了走门"从静默 bug 变响亮 throw。门唯一（flow 已是唯一入口，地基在）。
 - **诚实边界**：已 dirty 且开着、对方此时改 → 有未推编辑、无法无损 FF → 真冲突（opaque blob 躲不掉，对的）；"空闲数分钟自动收敛"仍需后台 poll。
 
-**风险 / ADR**：碰冲突 UX 模型（干净画布内容在眼皮下静默变；与 open() 的保留/覆盖/分支弹窗交互——干净 FF 自动化后弹窗只为 dirty 分叉留）。**ADR 级**（ADR-0009/0014 地界），动手前先写 ADR。
+**设计决定（2026-06-06 user 拍板）**：干净画布在用户眼皮下**静默变成对方最新版** = **可接受、反而是好事**（始终最新 / 准实时协作感），**不是风险，别再当顾虑重新论证**。于是 Fix 1 的争议点消失，剩下的只是交互收尾：open() 的"保留/覆盖/分支"弹窗在干净 FF 自动化后**只为 dirty 分叉留**（clean → 静默 FF，dirty → 才 surface）。仍建议落地前写一条 ADR 把这个「clean=silent-FF / dirty=surface」分流钉进 ADR-0009/0014 谱系。
 
 **修法 2（已同意，低风险）**：同步的 `.ora` 字节别掺设备本地视图态——`saveAndPush` 的 `webpaintState.viewport`（app.js:2966 `{...board.viewport}`）使"同图异缩放"字节不同 → `_tryHeal` 的 bytesEqual 跨设备永不命中（store.js:58）→ 连纯平移后存一下都算内容冲突刷 backup。剔除 viewport 等纯视图态（或 heal 只比承载像素的部分），让"字节=同一张画"成立。
 
