@@ -5950,6 +5950,21 @@ const TOOL_LABEL = {
 let _rackCurrentFolder = DEFAULT_FOLDER;
 let _rackCurrentTool = "brush";   // 当前 rack sheet 显示的工具
 // dirty 单源 = rackSync（isRackDirty/setRackDirty）；旧 app 侧 _rackDirty 双源已删（v2）。
+// 内容改动（存预设/删/导入/重置）后防抖自动同步（停手 ~1.5s 推）。FolderFlow 自带 412 重试 +
+// 无损 union，频繁推也安全；切笔是 per-doc 不脏 rack，故不会因切笔狂推。关 sheet 立即 flush。
+let _rackSyncTimer = null;
+function _scheduleRackSync(delay = 1500) {
+  if (_rackSyncTimer) clearTimeout(_rackSyncTimer);
+  _rackSyncTimer = setTimeout(() => { _rackSyncTimer = null; pushBrushRackIfSignedIn(); }, delay);
+  _refreshRackCloudState();   // icon 立刻切 dirty
+}
+// 「笔架内容变了」单一语义入口：落本地 + 防抖同步云。
+// 编辑器 / 导入 / 删除 只声明「变了」，**不直接碰 sync**（load+save 与 sync 解耦）。
+function markRackChanged() {
+  setRackDirty(true);
+  persistBrushRack();
+  _scheduleRackSync();
+}
 
 function _showRackSheet(tool) {
   if (!_brushRack) return;
@@ -5961,6 +5976,7 @@ function _showRackSheet(tool) {
 }
 function _hideRackSheet() {
   _rackEls.sheet.classList.add("hidden");
+  if (_rackSyncTimer) { clearTimeout(_rackSyncTimer); _rackSyncTimer = null; }   // 关 sheet 立即 flush，取消防抖
   if (isRackDirty()) {
     persistBrushRack();           // 同步 IDB
     pushBrushRackIfSignedIn();    // 同步云（成功内部清 rackSync dirty）
@@ -6055,8 +6071,7 @@ function _renderRackSheet() {
         state.toolStates[t].activeBrushId = null;
         Object.assign(state.toolStates[t], defaultToolStateFor(t));
       }
-      setRackDirty(true);
-      persistBrushRack();
+      markRackChanged();
       applyToolState(editMode.current());
       _renderRackSheet();
       setStatus(`已恢复默认笔架（${_brushRack.brushes.length} 个）`, true);
@@ -6197,11 +6212,10 @@ _rackEls.newBtn.addEventListener("click", () => {
       smooth: { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 },
     };
   }
-  newB.uat = Date.now();            // v2: 建笔 = user-action-time（FolderFlow 合并键）
-  _brushRack.brushes.push(newB);
-  setRackDirty(true);
+  // 新建 = 进 draft、**不落 rack**；存才落、cancel/闪退 = 没建过（user：不点保存 = cancel）。
+  newB.uat = Date.now();            // v2: 建笔 user-action-time（存时再刷新）
   closeExclusive();
-  _openBrushSettings(newB.id);
+  _openBrushSettings(newB.id, newB);
 });
 // 导入：文件选择 (user：「不应该是粘贴，而是文件上传下载」)
 _rackEls.importBtn.addEventListener("click", () => {
@@ -6219,8 +6233,7 @@ _rackEls.importBtn.addEventListener("click", () => {
       b.tool = _rackCurrentTool;
       b.uat = Date.now();             // v2: 导入 = user-action-time
       _brushRack.brushes.push(b);
-      setRackDirty(true);
-      persistBrushRack();
+      markRackChanged();
       _renderRackSheet();
       setStatus(`已导入：${b.name}`);
     } catch (e) { setStatus("导入失败：" + (e.message || e), true); }
@@ -6369,37 +6382,34 @@ if (_rackEls.dumpCodeBtn) _rackEls.dumpCodeBtn.addEventListener("click", () => d
 let _editingBrushId = null;
 let _editingBrushDraft = null;
 
-function _openBrushSettings(brushId) {
-  const b = findBrush(_brushRack, brushId);
-  if (!b) return;
+// brushId 已在 rack → 克隆成 draft 编辑；newDraft 传入 → 编辑一个**尚未落 rack** 的新笔（存才落）。
+function _openBrushSettings(brushId, newDraft) {
+  let draft;
+  if (newDraft) draft = newDraft;
+  else { const b = findBrush(_brushRack, brushId); if (!b) return; draft = JSON.parse(JSON.stringify(b)); }
   _editingBrushId = brushId;
-  _editingBrushDraft = JSON.parse(JSON.stringify(b));    // deep clone
+  _editingBrushDraft = draft;
   _renderBrushSettings();
   _settingsEls.view.classList.remove("hidden");
 }
+// 编辑全程改的是 draft（深拷贝/新笔）；**只有点保存才落 rack**。cancel / 不点保存闪退 = draft 丢弃 = 没改过/没建过。
 function _closeBrushSettings(save) {
   if (save && _editingBrushDraft) {
+    _editingBrushDraft.uat = Date.now();   // v2: 保存/更新预设/改名/移 folder = user-action-time
     const idx = _brushRack.brushes.findIndex((x) => x.id === _editingBrushId);
-    if (idx >= 0) {
-      _editingBrushDraft.uat = Date.now();   // v2: 更新预设/改名/移 folder = user-action-time
-      _brushRack.brushes[idx] = _editingBrushDraft;
-      setRackDirty(true);
-      persistBrushRack();
-      // v99r2：保存后自动切到该笔（包括 size 回 base、opacity / flow 重置默认）
-      // user：「修改保存了一个笔刷之后自动切到那一个（包括回到 default size）」
-      const tool = _editingBrushDraft.tool;
-      const targetTool = editMode.current() === "airbrush" ? "brush" : tool;
-      // 切到对应 tool（如果用户当前不在）
-      // 不主动切 tool，避免打断 user 当下的工具；只切笔
-      // 在当前 tool 的 rackKey 跟 brush.tool 兼容时才切
-      if (getRackToolKey(editMode.current()) === getRackToolKey(targetTool)) {
-        selectBrushPresetForTool(editMode.current(), _editingBrushDraft.id);
-      } else {
-        // 写到目标 tool 的 toolState 但不切 tool
-        selectBrushPresetForTool(targetTool, _editingBrushDraft.id);
-      }
-      setStatus(`已保存：${_editingBrushDraft.name}`);
+    if (idx >= 0) _brushRack.brushes[idx] = _editingBrushDraft;   // 更新现有
+    else _brushRack.brushes.push(_editingBrushDraft);             // 新建落地（draft → rack）
+    markRackChanged();             // 存 = 落本地 + 防抖同步（sheet 不直接碰 sync）
+    // v99r2：保存后自动切到该笔（user：「修改保存后自动切到那一个，回 default size」）。不主动切 tool。
+    const tool = _editingBrushDraft.tool;
+    const targetTool = editMode.current() === "airbrush" ? "brush" : tool;
+    if (getRackToolKey(editMode.current()) === getRackToolKey(targetTool)) {
+      selectBrushPresetForTool(editMode.current(), _editingBrushDraft.id);
+    } else {
+      selectBrushPresetForTool(targetTool, _editingBrushDraft.id);
     }
+    if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+    setStatus(`已保存：${_editingBrushDraft.name}`);
   }
   _editingBrushId = null;
   _editingBrushDraft = null;
@@ -6588,12 +6598,15 @@ function _renderBrushSettings() {
     if (!ok) return;
     const delId = _editingBrushId;
     const idx = _brushRack.brushes.findIndex((x) => x.id === delId);
-    if (idx >= 0) _brushRack.brushes.splice(idx, 1);
-    // v2: delete = move-to-trash 记录（缺席≠删除；merge 靠它判真删 vs edit-wins 复活）
-    if (!Array.isArray(_brushRack.trash)) _brushRack.trash = [];
-    _brushRack.trash.push({ id: delId, uat: Date.now() });
-    setRackDirty(true);
-    persistBrushRack();
+    if (idx >= 0) {
+      // 真在 rack 里的笔才记 trash（缺席≠删除；merge 靠它判真删 vs edit-wins 复活）。
+      _brushRack.brushes.splice(idx, 1);
+      if (!Array.isArray(_brushRack.trash)) _brushRack.trash = [];
+      _brushRack.trash.push({ id: delId, uat: Date.now() });
+      markRackChanged();
+      if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+    }
+    // 删一个尚未保存的新笔（idx<0）→ 仅丢 draft，等同 cancel。
     _editingBrushId = null;
     _editingBrushDraft = null;
     _settingsEls.view.classList.add("hidden");
