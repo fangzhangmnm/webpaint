@@ -101,6 +101,31 @@ pen-up commit 后超出旧 bbox 的部分**被裁**。画时看不出（live ove
 
 ## P1（想做，等时机）
 
+### 云同步收敛：干净态快进，别在冲突点修（2026-06-06 记，sync 重构后实测发现）
+**症状**：两设备**串行**改同一张画，每次交接都刷一个新 `.backup`（云端 weakOverride + 本地 pull-on-open 各刷一份）。
+
+**根因（base etag 蛙跳）**：一个设备的 `_base`（store.js:50）只在 ① 自己 push（→自己产的 etag）② open/pull（→云端 etag）时前进，**永远学不到"对方趁我空闲时推的那版"**。所以交替编辑时每次 save 都 `server ≠ 我的 base` → 412 → 冲突 → backup。**单个可变 base etag 表达不了因果**：在 412 那刻按定义 `cloud ≠ base`，永远证不出"这版我已见过"，所以**冲突点无法安全静默覆盖**——别在那儿修。
+
+**修法 1（根治，方向认可）**：把收敛搬到"我还干净"的时刻——`!localDirty && !cloudDirty` 且云端前进时**无损快进**（adopt 云端版），不只在 open()，也在 focus/visibilitychange/online/**动笔前**。这样串行交接里下一台空闲时已悄悄吃下对方版，落笔即在最新版之上 → save 干净 push（base==server）→ 0 个 412、0 backup。weakOverride+backup 只留给**真并发分叉**（双方都有源自同祖先的未推编辑）。
+- 现状缺口：grep 全仓，活动 doc **只在 open() 快进**（`gateCloudSyncOnOpen`→`checkCloudETag`→`flow.open`，app.js:2140）；visibility/online 都不 re-sync 活动 doc；saveAndPush 只在 `isCloudDirty` 时动（干净设备既不 push 也不 pull）。
+
+**能否在深模块强制（2026-06-06 论证）**：
+- **完全后台「空闲自动收敛」= 不能**，除非 Store 从被动库变**主动 agent**（poll/subscribe）。idle = 没人调它，被动库动不了 → 那是更大的 ADR。
+- **串行交接这个子集 = 能强制**，把强制点搬到深模块管得住的 `clean→dirty` + `push`：
+  1. 深模块持 `parentBase`（这次编辑会话**派生自哪个云版**，不是会蛙跳的可变单 base）。
+  2. 第一笔走深模块的门（`edits.beginEdit`/首个 mark-after-markSaved）：干净+在线 → 无损快进、`parentBase=cloud etag`。
+  3. push 比 `parentBase` vs server：相等→静默 FF、不 backup；分叉→真冲突→backup。
+  - **防 AI bypass 的结构锁**：产生 dirty 的**唯一入口**=这道门（拿 edit-lease 捕获 parentBase）；push 若发现 dirty 但没 lease → **直接抛**，把"忘了走门"从静默 bug 变响亮 throw。门唯一（flow 已是唯一入口，地基在）。
+- **诚实边界**：已 dirty 且开着、对方此时改 → 有未推编辑、无法无损 FF → 真冲突（opaque blob 躲不掉，对的）；"空闲数分钟自动收敛"仍需后台 poll。
+
+**风险 / ADR**：碰冲突 UX 模型（干净画布内容在眼皮下静默变；与 open() 的保留/覆盖/分支弹窗交互——干净 FF 自动化后弹窗只为 dirty 分叉留）。**ADR 级**（ADR-0009/0014 地界），动手前先写 ADR。
+
+**修法 2（已同意，低风险）**：同步的 `.ora` 字节别掺设备本地视图态——`saveAndPush` 的 `webpaintState.viewport`（app.js:2966 `{...board.viewport}`）使"同图异缩放"字节不同 → `_tryHeal` 的 bytesEqual 跨设备永不命中（store.js:58）→ 连纯平移后存一下都算内容冲突刷 backup。剔除 viewport 等纯视图态（或 heal 只比承载像素的部分），让"字节=同一张画"成立。
+
+**修法 3（顺带，低风险）**：`_safePull` 无条件先 `local.backup` 再覆盖（store.js:113），**即使本地干净已同步**（那份能从云端拿回、无未见内容可丢）→ pull-on-open 每次刷冗余 `.backup-local`。改成仅 `localDirty||cloudDirty` 时才备份。
+
+> 相关：postmortem `docs/reports/20260605-postmortem-zero-byte-upload.html`（同期 sync 体检）；MASTER §A 红线（no-LWW / move-aside / If-Match）。**先做 2、3（净收益），1 等 ADR。**
+
 ### adjust suite（v89 计划）
 - Brightness / Contrast / Saturation / Hue（CSS filter live preview, bake on apply）
 - Levels / Curves / Color Balance（pixel op，参 AtlasMaker src/canvas-filters.js）
