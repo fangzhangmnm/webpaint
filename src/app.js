@@ -2216,13 +2216,18 @@ async function checkCloudETag(sessionName) {
 // ADR-0016 §2：事件驱动的「干净 Work 无损快进」。放下 A 设备、回到 B 设备 → B 触发 focus/visibility/online →
 // B 干净时先快进到云端最新（= A 的版本）再落笔 → B 的第一笔就根于最新 → B 的 push 是干净 If-Match（零 412 零 backup）。
 // **硬约束（ADR-0016 §7）**：绝不每笔/每编辑触发——只挂人速事件；refresh 内部只 fetchMeta（etag 真动才拉内容）。
-// ADR-0017 前台新鲜度：活动 doc「上次成功联云确认新鲜度」的 wall-clock 时刻。
-//   新鲜度是**时间属性、不靠 timer tick**——suspend 期间 timer 不跑；resume(focus/visibility/online) 时
-//   按 now - _lastCheckedAt 现算（关机一周再开 → 第一个事件即判 stale → 刷新；绝不把周龄当新鲜）。
-const FRESHNESS_STALE_AFTER_MS = 3 * 60 * 1000;                          // 超过即「可能过期」→ save 图标变灰、提示点一下刷新
-const FRESHNESS_CHECK_EVERY_MS = Math.round(FRESHNESS_STALE_AFTER_MS * 0.8);  // 比 stale 阈值短 → 前台在线时持续保持新鲜
-let _lastCheckedAt = 0;
+// ADR-0017（修订 2026-06-06）：**不做后台静默刷新**——内容创作里盯着画布时内容 unsolicited 突变会让人疯。
+//   新鲜度走 **explicit 超时锁屏**：距上次动笔/操作 ≥ IDLE_LOCK_AFTER → 像 iPad 闲置熄屏那样**锁屏**；
+//   点「继续」= 用户主动 → 才查云 + 干净则快进（任何内容变更都在用户点继续之后发生 = solicited）。
+//   新鲜度是 wall-clock 属性、不靠 timer tick——suspend 期间 timer 冻结不跑，回前台靠 visibility/focus 现算
+//   （关机一周再开 → 第一个事件即判 idle → 锁屏；绝不把周龄当新鲜、绝不静默 FF）。
+const FRESHNESS_STALE_AFTER_MS = 3 * 60 * 1000;     // save 图标 synced 显「刷新键」vs「蓝云」的门槛（距上次联云）
+const IDLE_LOCK_AFTER_MS = 3 * 60 * 1000;           // 距上次动笔/操作 ≥ 此 → 锁屏（explicit 继续才刷新）
+let _lastCheckedAt = 0;                              // 上次成功联云确认新鲜度的时刻
+let _lastActivityAt = Date.now();                   // 上次动笔/操作的时刻（idle 锁屏用）
+let _idleLockShowing = false;
 function _freshnessStale() { return Date.now() - _lastCheckedAt >= FRESHNESS_STALE_AFTER_MS; }
+function _markActivity() { _lastActivityAt = Date.now(); }
 
 let _ffInFlight = false;
 async function maybeFastForwardActive({ manual = false } = {}) {
@@ -2251,6 +2256,33 @@ async function maybeFastForwardActive({ manual = false } = {}) {
     updateSaveStatus();   // 刷新新鲜度指示（synced 图标 fresh/stale）
   } catch (e) { console.warn("[ff] 快进失败：", e); }
   finally { _ffInFlight = false; }
+}
+
+// ADR-0017（修订）：超时 → 锁屏，点「继续」才 explicit 刷新。复用 lockSyncGate 当锁屏覆盖。
+//   只在「活动·干净·已同步·登录·在线·闲够了·没别的 gate」时锁——这正是原来会**静默 FF** 的时机，
+//   现在改成等用户主动点继续才把内容换到云端最新（绝不在你看着画布时突变）。dirty/离线/图库 → 不锁。
+async function showIdleLockIfStale() {
+  if (_idleLockShowing) return;
+  if (!isSignedIn() || navigator.onLine === false) return;
+  const name = _activeSessionName;
+  if (!name || name === "未命名") return;
+  if (els.galleryFull && !els.galleryFull.classList.contains("hidden")) return;   // 图库里不锁
+  if (_store.edits.localDirty() || isCloudDirty(name)) return;                     // 有未存/未推编辑 → 不锁（不会 FF，你的活还在）
+  if (Date.now() - _lastActivityAt < IDLE_LOCK_AFTER_MS) return;                   // 还没闲够
+  _idleLockShowing = true;
+  try {
+    await lockSyncGate({
+      title: "暂离编辑",
+      message: "离开一会儿了。点「继续」会检查云端最新版本（可能是其他设备的改动）。",
+      showSpinner: false,
+      actions: [{ label: "继续编辑", value: "resume", primary: true }],
+    });
+  } finally {
+    settleSyncGate(null);   // 收尾（已关则 no-op）
+    _idleLockShowing = false;
+    _markActivity();        // 点了继续 = 重新活跃，重置闲置计时
+  }
+  await maybeFastForwardActive({ manual: true });   // explicit：查云 + 干净则快进（withBusy 锁着拉，拉完才放手）
 }
 
 function formatCloudTime(iso) {
@@ -5952,15 +5984,17 @@ window.addEventListener("online", async () => {
   if (!isSignedIn()) await retrySilentSignIn();
   updateCloudAuthUI();
   if (!els.galleryFull.classList.contains("hidden")) renderGallery();
-  maybeFastForwardActive();   // 回到在线 → 活动 doc 干净则快进到云端最新（ADR-0016 §2）
+  showIdleLockIfStale();   // 回到在线 → 闲够了则锁屏（不静默 FF；点继续才 explicit 刷新）
 });
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
 
-// ADR-0017 前台新鲜度的两个 timer（best-effort 装饰；正确性靠 resume-recompute + 手动刷新，不靠 timer 跑准）：
-//   ① bounded 前台轮询：在线+前台时持续把活动干净 doc 保持新鲜（suspend 期间 OS 冻结此 timer，不跑；
-//      回前台靠 focus/visibilitychange/online 现算——见那三处 maybeFastForwardActive）。
-//   ② 渲染 tick：仅重绘 save 图标，让 stale 状态在「前台但离线/轮询拿不到」时也能按 wall-clock 变灰。
-setInterval(() => { if (document.visibilityState === "visible") maybeFastForwardActive(); }, FRESHNESS_CHECK_EVERY_MS);
+// ADR-0017（修订）前台新鲜度 —— **不静默 FF**，超时 explicit 锁屏：
+//   · 活动监听：动笔/操作重置闲置计时（pointerdown/keydown 全局 capture）。
+//   · idle 检查 tick：前台时每 30s 看闲够没 → 锁屏（像 iPad 闲置熄屏；suspend 时 timer 冻结，回前台靠 visibility 现算）。
+//   · 渲染 tick：仅重绘 save 图标，让 synced 的「蓝云↔刷新键」按 wall-clock 切。
+document.addEventListener("pointerdown", _markActivity, true);
+document.addEventListener("keydown", _markActivity, true);
+setInterval(() => { if (document.visibilityState === "visible") showIdleLockIfStale(); }, 30 * 1000);
 setInterval(() => { if (document.visibilityState === "visible") updateSaveStatus(); }, 60 * 1000);
 // Gallery-first 启动：
 //   1) galleryOpen flag = true（上次退出在 gallery） → 停 gallery
@@ -6776,12 +6810,12 @@ if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname) && !
         }
       });
     });
-    // 路径 4：回前台 / 焦点 → poke SW 更新 + ADR-0016 §2 干净快进（复用同一组人速事件钩子）。
+    // 路径 4：回前台 / 焦点 → poke SW 更新 + ADR-0017 闲置锁屏检查（**不静默 FF**，闲够了锁屏等用户点继续）。
     const pokeUpdate = () => { registration.update().catch(() => {}); };
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") { pokeUpdate(); maybeFastForwardActive(); }
+      if (document.visibilityState === "visible") { pokeUpdate(); showIdleLockIfStale(); }
     });
-    window.addEventListener("focus", () => { pokeUpdate(); maybeFastForwardActive(); });
+    window.addEventListener("focus", () => { pokeUpdate(); showIdleLockIfStale(); });
     setInterval(pokeUpdate, 10 * 60 * 1000);
   }).catch((err) => {
     console.warn("SW register failed", err);
