@@ -55,6 +55,21 @@
 - 现状：open-gate / push-412 / brush-rack / 新建重名 各自一套。
 - 目标：一个 ConflictSheet（按 user-action-time 显两边 + 预览 + shape-appropriate 按钮），全复用。重名也走它 → detect 到。
 
+## v174 真机回归（user 2026-06-04 测，**未修** —— user 要先整理重构再测，别 patch）
+
+下个 thread 接手。按 user：「先重构整理好再测，不然浪费时间。」别零敲碎打。
+
+| # | 症状 | 初判病根（待重构 thread 确认） |
+|---|---|---|
+| 1 | **空文件夹删不掉** | 删走 `getItemByPath(folderPath)`→`deleteItem`。可能 path 解析/缓存或 OneDrive 空文件夹 id 取不到；或 `hasItems` 误判非空（含子文件夹判断 `_galleryCloudFolders.some(startsWith)` 可能把自己算进去？）。要查。 |
+| 2 | 移动到… ✅ 能用 | — |
+| 3 | 多机冲突 | user 自己看，先挂。 |
+| 4 | **图库菜单 z-order 又错** | **根因确诊**：项目里两个弹窗 helper —— `openAnchoredPopup`（设 z=200）vs `anchorPopupToBtn`（**不设 z-index**）。gallery 菜单/加号/云账号都用 `anchorPopupToBtn` → 不在受控 z 层。**重构 UI 库时统一成一个 owned top-layer（`<dialog>`/portal + 单 stacking context），新弹窗零配置自动对，断这个反复病。** user 已认可这是正解。 |
+| 5 | **上传的文件在另一台电脑看是 0B** | ⚠ 数据红线。push 上传 → 另一端 list/download 看 0B。疑：chunked-upload 收尾（H7 路径）或 etag/content 落地不一致；或 thumb byte-range 把主文件读空？**重点查 cloud-sync.push + onedrive-provider upload 收尾。** |
+| 6 | **两文件同时编辑仍不报冲突** | ⚠ 多 tab/多机并发编辑静默覆盖。C4 base-etag 在「**同名同文件**」并发已修；这条是**两个不同文件**同时编辑互不报——可能不是冲突语义问题而是同步覆盖。要复现确认到底指什么。 |
+
+5/6 是 sync 红线级，别只当 UI bug。参照 MyPWAPatterns/docs/potential-bugs.md + sync-design.md。
+
 ## 纪律
 
 - 不留恋旧 gallery 代码（有毒）。重写，不 patch。

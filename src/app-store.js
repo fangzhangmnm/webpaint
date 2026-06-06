@@ -5,6 +5,8 @@
 
 import { createStore, createCloudSync, createOneDriveProvider } from "./store/index.js";
 import { CloudConflictError } from "./store/cloud-sync.js";
+import { createFolderFlow } from "./store/folder-flow.js";
+export { resolveRef } from "./store/folder-merge.js";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.js";
 import { CLIENT_ID, SCOPES, sessionFileName } from "./config.js";
 // lib 的 graph（OneDrive transport，单一 auth）—— gallery folder 操作 + thumb byte-range 都走它。
@@ -79,16 +81,32 @@ export const isCloudDirty = (name) => _auth.isSignedIn() && cloud.isDirty(name);
 export const setCloudDirty = (name, d) => cloud.setDirty(name, d);
 export const getKnownETag = (name) => cloud.getETag(name);
 
-// ---- brush-rack（旧名 → brushRack.*）----
-const _rackBlob = (rack) => new Blob([JSON.stringify(rack)], { type: "application/json" });
-export const pushBrushRack = (rack, opts = {}) =>
-  rackSync.push("rack", _rackBlob(rack), opts.force ? { baseEtag: undefined } : {});
-export const pullBrushRack = async () => {
-  const r = await rackSync.pull("rack");
-  return r ? { rack: JSON.parse(await r.blob.text()), etag: r.item.eTag } : null;
-};
-export const fetchBrushRackMetadata = () => rackSync.fetchMeta("rack");
-export const getBrushRackKnownETag = () => rackSync.getETag("rack");
+// ---- brush-rack 单源 dirty（v2：取代 app 的 _rackDirty 双源；rackSync 是 SSoT）----
+//   编辑 → setRackDirty(true)；FolderFlow.sync 成功内部清（pull/push setDirty(false)）。
+export const setRackDirty = (d) => rackSync.setDirty("rack", d);
+export const isRackDirty = () => rackSync.isDirty("rack");
+
+// ---- brush-rack = Folder shape：FolderFlow（pull-merge-push，无损 union，零冲突 UI）----
+// 取代 pushBrushRack/pullBrushRack/_resolveRackCloudConflict 那套手搓平行同步栈。
+// cloud blob 仍是 {version, brushes, trash, resetAt}（brushes 名不变，旧设备仍认）；引擎内部用 items。
+const RACK_UAT_PREHISTORY = 1;
+function rackDecode(text) {
+  let o; try { o = JSON.parse(text); } catch { return null; }
+  if (!o || typeof o !== "object" || !Array.isArray(o.brushes)) return null;   // 非 rack（伪在线 HTML / 截断）→ null
+  return {
+    version: 2,
+    items: o.brushes.map((b) => (b && b.uat == null ? { ...b, uat: RACK_UAT_PREHISTORY } : b)),
+    trash: Array.isArray(o.trash) ? o.trash : [],
+    resetAt: o.resetAt || 0,
+  };
+}
+function rackEncode(folder) {
+  return new Blob([JSON.stringify({ version: 2, brushes: folder.items, trash: folder.trash, resetAt: folder.resetAt })], { type: "application/json" });
+}
+export const rackFolderFlow = createFolderFlow({
+  cloud: rackSync, name: "rack", encode: rackEncode, decode: rackDecode,
+  isOnline: () => navigator.onLine !== false,
+});
 
 // ---- graph 直用（gallery folder 操作 + thumb byte-range）→ lib 的 graph（原始形态，单一 auth）----
 export {

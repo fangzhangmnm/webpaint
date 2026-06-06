@@ -21,8 +21,10 @@
 //   shape / coeffs / pressureGamma / compositeMode /
 //   spacing / pixelMode / taper / hardness / 椭圆参数 / smudge / smooth
 
-export const RACK_VERSION = 1;
+export const RACK_VERSION = 2;     // v2: brush 加 uat；rack 加 trash[]/resetAt；删 activeByTool（活动笔归 per-doc toolStates）。Folder shape，见 docs/folderflow-build-plan.md
 export const DEFAULT_FOLDER = "我的常用";
+// 迁移 / 出厂基准 uat：> resetAt(0) 故不被水位误丢；任何真实编辑(Date.now())必胜过它。
+export const PRE_HISTORY_UAT = 1;
 
 export function newBrushId() {
   if (crypto?.randomUUID) return crypto.randomUUID();
@@ -52,9 +54,11 @@ function makeBrush({
   streamline = 0.3, stabilization = 0, pullStabilizer = 0, motionFilter = 0,
   // v99r2：defaultOpa 留着，默认 1.0；user 编辑笔可以改成 0.6 当 sketch 默认
   defaultOpa = 1.0,
+  // v2: last user-action-time —— FolderFlow 合并键（见 src/store/folder-merge.js）。
+  uat = PRE_HISTORY_UAT,
 }) {
   return {
-    id, name, tool, folder,
+    id, uat, name, tool, folder,
     shape: { kind: shapeKind, aspect, rotation, hardness, textureB64 },
     size: { base: size, max: sizeBaseMax },
     sizeCoeff, opaCoeff, flowCoeff,
@@ -97,10 +101,10 @@ export function defaultsPromise() { return _defaultsPromise; }
 export function getDefaultsSpec() { return _defaultsSpec; }
 
 // fetch 失败 + IDB 也空时的兜底：至少一个能画的笔，UI 不挂。
-function _emergencyBrush() {
+function _emergencyBrush(uat = PRE_HISTORY_UAT) {
   return makeBrush({
     id: "emergency-brush", name: "默认笔", tool: "brush",
-    size: 12, hardness: 0.8, sizeCoeff: 0.6, opaCoeff: 0.6,
+    size: 12, hardness: 0.8, sizeCoeff: 0.6, opaCoeff: 0.6, uat,
   });
 }
 
@@ -159,21 +163,22 @@ export function migrateBrush(b) {
   if (!b.smooth) {
     b.smooth = { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 };
   }
+  // v2: 老笔无 uat → pre-history 基准（任何真实编辑都胜过它）
+  if (b.uat == null) b.uat = PRE_HISTORY_UAT;
   return b;
 }
 
-function specToBrush(spec) {
-  return makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args });
+function specToBrush(spec, uat = PRE_HISTORY_UAT) {
+  return makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args, uat });
 }
 
-export function makeDefaultRack() {
-  let brushes = _defaultsSpec.map(specToBrush);
-  if (brushes.length === 0) brushes = [_emergencyBrush()];
-  const activeByTool = {};
-  for (const b of brushes) {
-    if (!activeByTool[b.tool]) activeByTool[b.tool] = b.id;
-  }
-  return { version: RACK_VERSION, brushes, activeByTool };
+// resetAt=0 → 首 boot（出厂笔 uat=PRE_HISTORY）；resetAt>0 → 恢复出厂
+// （出厂笔 uat 须 > resetAt，否则刚重置就被自己的水位线丢掉）。
+export function makeDefaultRack({ resetAt = 0 } = {}) {
+  const uat = resetAt > 0 ? resetAt + 1 : PRE_HISTORY_UAT;
+  let brushes = _defaultsSpec.map((s) => specToBrush(s, uat));
+  if (brushes.length === 0) brushes = [_emergencyBrush(uat)];
+  return { version: RACK_VERSION, brushes, trash: [], resetAt };
 }
 
 // 给 IDB 已有 rack 补缺：遍历 _defaultsSpec，缺哪个 ID 就 push 一份。
@@ -183,25 +188,26 @@ export function makeDefaultRack() {
 //   - 返回 null 表示不需要改 → caller 不 swap，省一次 UI 刷
 //   - 返回新 rack 时 caller 做 `_brushRack = newRack` 单写 = atomic
 // 注：_defaultsSpec 还空时（fetch 没回），返回 null = no-op；fetch 回来后 app.js 再调一次。
+// 也承担 v1→v2 迁移：补 trash[]/resetAt、删 activeByTool、置 version。
 export function mergeMissingDefaults(rack) {
   if (!rack || !Array.isArray(rack.brushes)) return null;
   const ids = new Set(rack.brushes.map((b) => b.id));
-  const missing = _defaultsSpec.filter((s) => !ids.has(s.id));
-  const oldActive = rack.activeByTool || {};
-  const newActive = { ...oldActive };
-  let activeChanged = !rack.activeByTool;
-  for (const spec of _defaultsSpec) {
-    if (!newActive[spec.tool]) {
-      newActive[spec.tool] = spec.id;
-      activeChanged = true;
-    }
-  }
-  if (missing.length === 0 && !activeChanged) return null;
-  return {
+  const trashIds = new Set((rack.trash || []).map((t) => t.id));   // 已删的 default 不复活
+  const missing = _defaultsSpec.filter((s) => !ids.has(s.id) && !trashIds.has(s.id));
+  const needsFields = !Array.isArray(rack.trash) || rack.resetAt == null
+    || rack.activeByTool != null || rack.version !== RACK_VERSION;
+  if (missing.length === 0 && !needsFields) return null;
+  const resetAt = rack.resetAt || 0;
+  const uat = resetAt > 0 ? resetAt + 1 : PRE_HISTORY_UAT;
+  const out = {
     ...rack,
-    brushes: [...rack.brushes, ...missing.map(specToBrush)],
-    activeByTool: newActive,
+    version: RACK_VERSION,
+    brushes: [...rack.brushes, ...missing.map((s) => specToBrush(s, uat))],
+    trash: Array.isArray(rack.trash) ? rack.trash : [],
+    resetAt,
   };
+  delete out.activeByTool;
+  return out;
 }
 
 // 序列化
@@ -215,6 +221,8 @@ export function rackFromJSON(text) {
   if (obj.version !== RACK_VERSION) {
     console.warn(`[brushes] rack version ${obj.version} ≠ ${RACK_VERSION}; 当 ${RACK_VERSION} 用`);
   }
+  if (!Array.isArray(obj.trash)) obj.trash = [];
+  if (obj.resetAt == null) obj.resetAt = 0;
   return obj;
 }
 
@@ -246,7 +254,9 @@ export function brushesByTool(rack, tool) {
 export function brushesByFolder(rack, folder) {
   return rack.brushes.filter((b) => b.folder === folder);
 }
-export function getActiveBrush(rack, tool) {
-  const id = rack.activeByTool?.[tool];
-  return id ? findBrush(rack, id) : null;
+// 某工具的「代表笔」——给 defaultToolStateFor 取初值。
+// activeByTool 已废（v2：活动笔归 per-doc toolStates，见 docs/folderflow-build-plan.md §6）；
+// 这里就取该工具第一支笔当默认。
+export function defaultBrushForTool(rack, tool) {
+  return brushesByTool(rack, tool)[0] || null;
 }

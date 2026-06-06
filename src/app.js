@@ -16,7 +16,7 @@ import { InputController, KEYBOARD_SHORTCUTS } from "./input.js";
 import { PixelEdit, compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
 import { BrushSettings } from "./brush.js";
 import {
-  makeDefaultRack, findBrush, getActiveBrush, brushesByTool,
+  makeDefaultRack, findBrush, defaultBrushForTool, brushesByTool,
   newBrushId, brushToJSON, brushFromJSON, DEFAULT_FOLDER, mergeMissingDefaults, migrateBrush,
   defaultsPromise,
 } from "./brushes.js";
@@ -51,7 +51,7 @@ import {
   listCloudTrash, purgeCloudTrashItem,
   isCloudDirty, setCloudDirty, CloudConflictError,
   getLastSessionSignedIn, setLastSessionSignedIn, getKnownETag,
-  pushBrushRack, pullBrushRack, fetchBrushRackMetadata, getBrushRackKnownETag,
+  rackFolderFlow, setRackDirty, isRackDirty, resolveRef,
   store as _store,
 } from "./app-store.js";   // cut-over：cloud/auth/graph 全走 lib（app-store shim 保旧名）
 
@@ -271,17 +271,27 @@ const RACK_META_KEY = "brush-rack";
 //   opacity / flow 选 preset 时都初始化为 1.0 (user：「默认 opacity 默认 flow 两个字段不要，都是 1」)
 function defaultToolStateFor(tool) {
   if (_brushRack) {
-    const brush = getActiveBrush(_brushRack, tool);
+    const brush = defaultBrushForTool(_brushRack, tool);
     if (brush) {
       return {
         size: brush.size.base,
         opacity: 1.0,
         flow:    1.0,
         activeBrushId: brush.id,
+        activeBrushName: brush.name,
       };
     }
   }
-  return { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null };
+  return { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null, activeBrushName: null };
+}
+
+// 解析某 toolState 的活动笔 = resolveRef（id→name 兜底）。命中后回填 id/name（healing：跨设备/
+// 重导入换了 GUID 时靠 name 兜，并把本机 GUID 写回 ts）。见 CONTEXT [[活动笔刷引用]]。
+function _findToolBrush(ts) {
+  if (!ts || !_brushRack) return null;
+  const b = resolveRef(_brushRack.brushes, { id: ts.activeBrushId, name: ts.activeBrushName });
+  if (b) { ts.activeBrushId = b.id; ts.activeBrushName = b.name; }
+  return b;
 }
 
 // state.toolStates：per-tool 持久化（per-doc）。
@@ -348,7 +358,7 @@ function updateSidebarBrushIndicator() {
   const tool = editMode.current();
   const rackKey = getRackToolKey(tool);
   const ts = state.toolStates[rackKey];
-  const brush = ts?.activeBrushId ? findBrush(_brushRack, ts.activeBrushId) : null;
+  const brush = _findToolBrush(ts);
   _sidebarBrushName.textContent = brush ? brush.name : "—";
 }
 if (_sidebarBrushBtn) {
@@ -359,9 +369,10 @@ if (_sidebarBrushBtn) {
       lpTimer = null;
       const rackKey = getRackToolKey(editMode.current());
       const ts = state.toolStates[rackKey];
-      if (ts?.activeBrushId) {
+      const b = _findToolBrush(ts);
+      if (b) {
         closeExclusive();
-        _openBrushSettings(ts.activeBrushId);
+        _openBrushSettings(b.id);
       }
     }, 600);
   });
@@ -420,7 +431,7 @@ function applyToolState(tool) {
   if (ts.activeBrushId == null) {
     Object.assign(ts, defaultToolStateFor(key));
   }
-  const brush = ts.activeBrushId ? findBrush(_brushRack, ts.activeBrushId) : null;
+  const brush = _findToolBrush(ts);
   if (brush) applyBrushPresetFrozen(brush);
   state.brush.size    = ts.size;
   state.brush.opacity = ts.opacity ?? 1.0;
@@ -518,6 +529,7 @@ function selectBrushPresetForTool(tool, brushId) {
   const brush = findBrush(_brushRack, brushId);
   if (!brush) return;
   ts.activeBrushId = brushId;
+  ts.activeBrushName = brush.name;
   ts.size    = brush.size.base;
   // v99r2：opacity 从 preset.defaultOpa 取（默 1.0）；flow 永远 1.0（preset 不存 flow）
   ts.opacity = brush.defaultOpa ?? 1.0;
@@ -2868,6 +2880,7 @@ function adoptLoadedDoc(loaded, sessionName) {
           opacity: op,
           flow: fl,
           activeBrushId: typeof saved.activeBrushId === "string" ? saved.activeBrushId : state.toolStates[t].activeBrushId,
+          activeBrushName: typeof saved.activeBrushName === "string" ? saved.activeBrushName : state.toolStates[t].activeBrushName,
           // v132 filterBrush 多 variantId（user：「持久化 filter brush 的 selection」）
           ...(typeof saved.variantId === "string" ? { variantId: saved.variantId } : {}),
         });
@@ -4200,7 +4213,7 @@ els.menuResetBrushRack.addEventListener("click", async () => {
     "会删除全部自定义笔刷 + 改过的默认笔，恢复出厂 8 个 brush。不可撤销。",
   );
   if (!ok) return;
-  _brushRack = makeDefaultRack();
+  _brushRack = makeDefaultRack({ resetAt: Date.now() });   // v2: 恢复出厂 = resetAt watermark（跨设备 merge 也清掉旧自定义笔）
   // 重置所有 toolStates 的 activeBrushId 让 applyToolState 重选默认
   for (const t of Object.keys(state.toolStates)) {
     state.toolStates[t].activeBrushId = null;
@@ -4210,9 +4223,8 @@ els.menuResetBrushRack.addEventListener("click", async () => {
   applyToolState(editMode.current());
   // 若 rack sheet 当前开着 → 强制刷一遍
   if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
-  _rackDirty = true;
+  setRackDirty(true);
   if (isSignedIn()) pushBrushRackIfSignedIn();
-  _rackDirty = false;
   setStatus(`笔架已重置（${_brushRack.brushes.length} 个 brush）`, true);
 });
 
@@ -5937,7 +5949,7 @@ const TOOL_LABEL = {
 };
 let _rackCurrentFolder = DEFAULT_FOLDER;
 let _rackCurrentTool = "brush";   // 当前 rack sheet 显示的工具
-let _rackDirty = false;           // sheet 操作 dirty 标记，**关闭时**才同步云（user 指示）
+// dirty 单源 = rackSync（isRackDirty/setRackDirty）；旧 app 侧 _rackDirty 双源已删（v2）。
 
 function _showRackSheet(tool) {
   if (!_brushRack) return;
@@ -5949,10 +5961,9 @@ function _showRackSheet(tool) {
 }
 function _hideRackSheet() {
   _rackEls.sheet.classList.add("hidden");
-  if (_rackDirty) {
+  if (isRackDirty()) {
     persistBrushRack();           // 同步 IDB
-    pushBrushRackIfSignedIn();    // 同步云
-    _rackDirty = false;
+    pushBrushRackIfSignedIn();    // 同步云（成功内部清 rackSync dirty）
   }
 }
 
@@ -5972,7 +5983,6 @@ function updateRackCloudIcon() {
     "synced":   ICON_CLOUD_CHECK,
     "busy":     ICON_CLOUD_BUSY,
     "dirty":    ICON_UPLOAD,
-    "conflict": ICON_UPLOAD,    // 冲突时也用 ↑ icon；data-state 让 CSS 改色
     "offline":  ICON_DISK,
     "no-auth":  ICON_DISK,
   };
@@ -5980,7 +5990,6 @@ function updateRackCloudIcon() {
     "synced":   `${name} 已同步云端`,
     "busy":     `${name} 上传中…`,
     "dirty":    `${name} 待推 — 点推送`,
-    "conflict": `${name} 云端冲突 — 点解决`,
     "offline":  `${name} 离线 — 仅本地`,
     "no-auth":  `${name} 未登录 — 登 OneDrive 自动同步`,
   };
@@ -5991,123 +6000,45 @@ function updateRackCloudIcon() {
 function _refreshRackCloudState() {
   if (!isSignedIn()) _rackCloudState = "no-auth";
   else if (navigator.onLine === false) _rackCloudState = "offline";
-  else if (_rackDirty) _rackCloudState = "dirty";
+  else if (isRackDirty()) _rackCloudState = "dirty";
   else _rackCloudState = "synced";
   updateRackCloudIcon();
 }
 
 // 推云：仅 IDB 已写后调；user 在场（关 sheet 是 explicit action）
 //   v134：冲突时 3 选（拉 / 强推 / 合并）；其他状态 auto retry
+// 笔架同步 = FolderFlow（pull-merge-push，无损 union，零冲突 UI）。
+// 编辑永远本地即时（调用方已落本地）；这里只在能连时后台 reconcile。merge 把别的设备新增的笔带回来。
 async function pushBrushRackIfSignedIn() {
   if (!isSignedIn() || !navigator.onLine) { _refreshRackCloudState(); return; }
   if (!_brushRack) return;
   _rackCloudState = "busy"; updateRackCloudIcon();
-  try {
-    await pushBrushRack(_brushRack);
-    _rackDirty = false;
-    _rackCloudState = "synced"; updateRackCloudIcon();
-    setStatus("笔架已同步到云端");
-  } catch (e) {
-    if (e instanceof CloudConflictError) {
-      _rackCloudState = "conflict"; updateRackCloudIcon();
-      await _resolveRackCloudConflict();
-    } else {
-      console.warn("[brush-rack push]", e);
-      _rackCloudState = "dirty"; updateRackCloudIcon();
-      setStatus("笔架推送失败：" + (e.message || e), true);
-    }
-  }
-}
-// 3 选解决冲突（user：「保留本地重命名」=合并）
-async function _resolveRackCloudConflict() {
-  const choice = await lockSyncGate({
-    title: "笔架云端有更新版本",
-    message: "另一台设备改过云端笔架。",
-    showSpinner: false,
-    actions: [
-      { label: "拉云端（丢本地新增）", value: "pull" },
-      { label: "本地覆盖云端（丢云端改动）", value: "force" },
-      { label: "合并（保留两边的笔刷）", value: "merge", primary: true },
-    ],
+  const res = await rackFolderFlow.sync({
+    version: _brushRack.version, items: _brushRack.brushes,
+    trash: _brushRack.trash || [], resetAt: _brushRack.resetAt || 0,
   });
-  try {
-    if (choice === "pull") {
-      const pulled = await pullBrushRack();
-      if (pulled?.rack) {
-        _brushRack = pulled.rack;
-        { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
-        await persistBrushRack();
-        applyToolState(editMode.current());
-        _rackDirty = false;
-        _rackCloudState = "synced";
-        setStatus("已拉云端笔架");
-      }
-    } else if (choice === "force") {
-      await pushBrushRack(_brushRack, { force: true });
-      _rackDirty = false;
-      _rackCloudState = "synced";
-      setStatus("已用本地笔架覆盖云端");
-    } else if (choice === "merge") {
-      const pulled = await pullBrushRack();
-      const cloudRack = pulled?.rack;
-      if (!cloudRack) {
-        // 云端空 / 拉失败 → fallback 强推
-        await pushBrushRack(_brushRack, { force: true });
-      } else {
-        const cloudIds = new Set(cloudRack.brushes.map((b) => b.id));
-        const localExtras = _brushRack.brushes.filter((b) => !cloudIds.has(b.id));
-        const merged = {
-          ...cloudRack,
-          brushes: [...cloudRack.brushes, ...localExtras],
-          activeByTool: { ...cloudRack.activeByTool, ..._brushRack.activeByTool },
-        };
-        _brushRack = merged;
-        { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
-        await persistBrushRack();
-        applyToolState(editMode.current());
-        await pushBrushRack(_brushRack, { force: true });
-        setStatus(`已合并（云端 ${cloudRack.brushes.length} + 本地新增 ${localExtras.length}）`);
-      }
-      _rackDirty = false;
-      _rackCloudState = "synced";
-    } else {
-      // user 关闭 sheet 不选 → 保 conflict 状态，icon 提示，user 自己再点
-      return;
-    }
-  } catch (err) {
-    console.warn("[rack conflict resolve]", err);
-    setStatus("解决冲突出错：" + (err.message || err), true);
-    _rackCloudState = "dirty";
-  } finally {
-    updateRackCloudIcon();
+  // 采纳 merge 结果（可能含云端别设备新增的笔）。正在编辑某把笔时不揪它——挂到关闭再 reconcile。
+  if (res.folder && _editingBrushId == null) {
+    _brushRack = { ...(_brushRack), version: res.folder.version, brushes: res.folder.items, trash: res.folder.trash, resetAt: res.folder.resetAt };
+    { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
+    await persistBrushRack();
+    applyToolState(editMode.current());
+    if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
   }
+  if (res.status === "synced") setStatus("笔架已同步到云端");
+  else if (res.status === "invalid") setStatus("笔架云端数据异常，已留待重试", true);
+  else if (res.status === "dirty") { console.warn("[brush-rack sync]", res.error); setStatus("笔架同步失败，已留待重试", true); }
+  // offline：静默
+  _refreshRackCloudState();   // 单源派生 icon（dirty 来自 rackSync）
 }
+// （旧 _resolveRackCloudConflict 三选对话框已删——Folder shape 的 union-merge 让冲突消失，
+//   FolderFlow 自动无损合并，不再有 lossy「拉云端丢本地/覆盖云端丢云端」）。
 
-// Boot 后调一次：背景拉云端 etag 比对；不一致 + 本地 clean → 默默拉
+// Boot 后调一次：背景 reconcile（FolderFlow pull-merge-push）。
+// merge 无损：本地有就 union 上去再推，本地没新就只采纳云端、不白写（folder-flow 的跳推优化）。
 async function checkBrushRackCloud() {
   if (!isAuthConfigured() || !navigator.onLine || !isSignedIn()) return;
-  if (!_brushRack) return;
-  try {
-    const meta = await fetchBrushRackMetadata();
-    if (!meta) return;                          // 云端尚无 → silent OK
-    const localETag = getBrushRackKnownETag();
-    if (meta.etag === localETag) return;        // 已同步 → silent
-    if (_rackDirty) {
-      // 本地未推改动，云端也变了 → 等 user 关 sheet 时统一处理冲突
-      return;
-    }
-    // 本地 clean + 云端 newer → 默默拉
-    const pulled = await pullBrushRack();
-    if (pulled?.rack) {
-      _brushRack = pulled.rack;
-      mergeMissingDefaults(_brushRack);   // 防云端空 rack 把本地清空
-      await persistBrushRack();
-      applyToolState(editMode.current());
-      setStatus("笔架已从云端同步");
-    }
-  } catch (e) {
-    console.warn("[brush-rack cloud check]", e);
-  }
+  await pushBrushRackIfSignedIn();
 }
 function _renderRackSheet() {
   // 防护：rack 为空时显「重置笔架」入口而不是空白
@@ -6124,7 +6055,7 @@ function _renderRackSheet() {
         state.toolStates[t].activeBrushId = null;
         Object.assign(state.toolStates[t], defaultToolStateFor(t));
       }
-      _rackDirty = true;
+      setRackDirty(true);
       persistBrushRack();
       applyToolState(editMode.current());
       _renderRackSheet();
@@ -6266,8 +6197,9 @@ _rackEls.newBtn.addEventListener("click", () => {
       smooth: { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 },
     };
   }
+  newB.uat = Date.now();            // v2: 建笔 = user-action-time（FolderFlow 合并键）
   _brushRack.brushes.push(newB);
-  _rackDirty = true;
+  setRackDirty(true);
   closeExclusive();
   _openBrushSettings(newB.id);
 });
@@ -6285,8 +6217,9 @@ _rackEls.importBtn.addEventListener("click", () => {
       const b = brushFromJSON(txt);
       b.folder = _rackCurrentFolder;
       b.tool = _rackCurrentTool;
+      b.uat = Date.now();             // v2: 导入 = user-action-time
       _brushRack.brushes.push(b);
-      _rackDirty = true;
+      setRackDirty(true);
       persistBrushRack();
       _renderRackSheet();
       setStatus(`已导入：${b.name}`);
@@ -6409,13 +6342,8 @@ async function dumpRackAsCode() {
 if (_rackEls.exportFolderBtn) _rackEls.exportFolderBtn.addEventListener("click", () => exportRackFolderAsFile());
 if (_rackEls.cloudPushBtn) _rackEls.cloudPushBtn.addEventListener("click", async () => {
   if (!isSignedIn()) { setStatus("请先登录云端账号", true); return; }
-  // v134 在冲突态点 = 重新弹 3 选；其他态 = 推
-  if (_rackCloudState === "conflict") {
-    await _resolveRackCloudConflict();
-  } else {
-    setStatus("正在上传笔架…");
-    await pushBrushRackIfSignedIn();
-  }
+  setStatus("正在同步笔架…");
+  await pushBrushRackIfSignedIn();
 });
 if (_rackEls.resetBtn) _rackEls.resetBtn.addEventListener("click", async () => {
   const ok = await openConfirmSheet(
@@ -6423,7 +6351,7 @@ if (_rackEls.resetBtn) _rackEls.resetBtn.addEventListener("click", async () => {
     "会删除全部自定义笔刷 + 改过的默认笔，恢复出厂默认。不可撤销。",
   );
   if (!ok) return;
-  _brushRack = makeDefaultRack();
+  _brushRack = makeDefaultRack({ resetAt: Date.now() });   // v2: 恢复出厂 = resetAt watermark
   for (const t of Object.keys(state.toolStates)) {
     state.toolStates[t].activeBrushId = null;
     Object.assign(state.toolStates[t], defaultToolStateFor(t));
@@ -6431,9 +6359,8 @@ if (_rackEls.resetBtn) _rackEls.resetBtn.addEventListener("click", async () => {
   await persistBrushRack();
   applyToolState(editMode.current());
   if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
-  _rackDirty = true;
+  setRackDirty(true);
   if (isSignedIn()) pushBrushRackIfSignedIn();
-  _rackDirty = false;
   setStatus(`笔架已重置（${_brushRack.brushes.length} 个 brush）`, true);
 });
 if (_rackEls.dumpCodeBtn) _rackEls.dumpCodeBtn.addEventListener("click", () => dumpRackAsCode());
@@ -6454,8 +6381,9 @@ function _closeBrushSettings(save) {
   if (save && _editingBrushDraft) {
     const idx = _brushRack.brushes.findIndex((x) => x.id === _editingBrushId);
     if (idx >= 0) {
+      _editingBrushDraft.uat = Date.now();   // v2: 更新预设/改名/移 folder = user-action-time
       _brushRack.brushes[idx] = _editingBrushDraft;
-      _rackDirty = true;
+      setRackDirty(true);
       persistBrushRack();
       // v99r2：保存后自动切到该笔（包括 size 回 base、opacity / flow 重置默认）
       // user：「修改保存了一个笔刷之后自动切到那一个（包括回到 default size）」
@@ -6658,9 +6586,13 @@ function _renderBrushSettings() {
   delBtn.addEventListener("click", async () => {
     const ok = await openConfirmSheet("删除这支笔？", `「${b.name}」（不可撤销）`);
     if (!ok) return;
-    const idx = _brushRack.brushes.findIndex((x) => x.id === _editingBrushId);
+    const delId = _editingBrushId;
+    const idx = _brushRack.brushes.findIndex((x) => x.id === delId);
     if (idx >= 0) _brushRack.brushes.splice(idx, 1);
-    _rackDirty = true;
+    // v2: delete = move-to-trash 记录（缺席≠删除；merge 靠它判真删 vs edit-wins 复活）
+    if (!Array.isArray(_brushRack.trash)) _brushRack.trash = [];
+    _brushRack.trash.push({ id: delId, uat: Date.now() });
+    setRackDirty(true);
     persistBrushRack();
     _editingBrushId = null;
     _editingBrushDraft = null;
