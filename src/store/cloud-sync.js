@@ -10,6 +10,8 @@
 //   分片末响应无 item→拉权威 etag 不崩不缓存 null（H7）· trash=move-aside 加 [ts] 后缀（A8/C2）·
 //   restore 撞名 (2)(3) 防覆盖。
 
+import { asideStamp } from "./move-aside.js";   // 深模块的 move-aside 命名策略（yyyymmddhhmmss-guid 防撞）
+
 export class CloudConflictError extends Error {
   constructor(message, sessionName) {
     super(message);
@@ -50,6 +52,9 @@ export function createCloudSync(cfg) {
   const etagKey = (n) => `${appKey}.etag:${n}`;
   const dirtyKey = (n) => `${appKey}.dirty:${n}`;
   const baseName = (n) => (n.includes("/") ? n.slice(n.lastIndexOf("/") + 1) : n);
+  // move-aside（.trash/.backup）的防撞名：<base> [<yyyymmddhhmmss>-<guid>]（命名策略在深模块 move-aside.js）。
+  // guid 防同名多次 move-aside 撞（旧版 [ts] 同 ms → conflictBehavior:"fail" 抛错的真 bug）。trash/backup 共用。
+  const stampedName = (n) => fileName(`${baseName(n)} [${asideStamp(now())}]`);
 
   function getETag(name) { return kv.get(etagKey(name)) || null; }
   function setETag(name, eTag) { if (eTag) kv.set(etagKey(name), eTag); else kv.remove(etagKey(name)); }
@@ -99,7 +104,7 @@ export function createCloudSync(cfg) {
     const item = await provider.getItemByPath(fileName(name));
     if (!item) { clearState(name); return null; }
     const folderId = await provider.ensureFolder(trashFolder);
-    const stamped = fileName(`${baseName(name)} [${now()}]`);   // basename（trash 内丢 folder context）
+    const stamped = stampedName(name);   // basename + ts-counter（trash 内丢 folder context；防同名撞）
     const moved = await provider.move(item.id, folderId, { newName: stamped, conflictBehavior: "fail" });
     clearState(name);
     return moved;
@@ -135,7 +140,7 @@ export function createCloudSync(cfg) {
     let backedUp = null;
     if (cur) {
       const folderId = await provider.ensureFolder(backupFolder);
-      const stamped = fileName(`${baseName(name)} [${now()}]`);
+      const stamped = stampedName(name);   // ts-counter 防同名多次备份撞（旧版同 ms 会 fail 抛错）
       await provider.move(cur.id, folderId, { newName: stamped, conflictBehavior: "fail" });
       backedUp = `${backupFolder}/${stamped}`;
     }
@@ -154,11 +159,12 @@ export function createCloudSync(cfg) {
     let items;
     try { items = await provider.list(subpath); } catch (_) { return; }
     for (const it of items) {
-      if (depth === 0 && it.isFolder && it.name === trashFolder) continue;  // 顶层 .trash 不进
+      // 顶层 .trash / .backup 都是隐藏安全网：整个跳过（不进文件列表、不进文件夹列表、不递归其内容）。
+      // 旧版只把 .backup 排出 folders 却仍递归进去 → 备份文件会漏进 gallery 文件列表（与 .trash 不一致的 bug）。
+      if (depth === 0 && it.isFolder && (it.name === trashFolder || it.name === backupFolder)) continue;
       const itPath = subpath ? `${subpath}/${it.name}` : it.name;
       if (it.isFolder) {
-        // 收进 gallery folder 列表，但排掉顶层 .backup（内部冲突备份，不该当用户文件夹）。
-        if (folders && !(depth === 0 && it.name === backupFolder)) folders.push(itPath);
+        if (folders) folders.push(itPath);
         await _walk(itPath, out, depth + 1, folders);
       }
       else if (match(it)) out.push({ ...it, path: itPath, name: toName(itPath) });

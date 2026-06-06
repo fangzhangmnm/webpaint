@@ -17,6 +17,7 @@
 import { encodeDocToOra, decodeOraToDoc } from "./ora.js";
 import { smartResample, canvasToBlob } from "./resample.js";
 import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.js";
+import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.js";   // 深模块的隐藏命名空间约定（backup 不进图库）
 
 const LS_CURRENT_NAME = "webpaint.currentSessionName";
 const DEFAULT_NAME = "未命名";
@@ -99,6 +100,8 @@ function parseTrashKey(key) {
   if (!m) return null;
   return { deletedAt: Number(m[1]), originalName: m[2] };
 }
+// 本地 backup 的命名/防撞/命名空间策略在深模块（src/store/move-aside.js + local-adapter）。
+// 这里只消费它的前缀常量，把这道隐藏命名空间从图库列表过滤掉（覆盖前留底，不该 flood 用户文件夹）。
 
 /** 本地原子重命名（atomic put new + delete old）。同名抛 destination-exists。 */
 export async function renameLocalSession(oldName, newName) {
@@ -113,7 +116,8 @@ export async function listSessions() {
   const out = [];
   for (const id of ids) {
     if (id === LEGACY_SLOT) continue;
-    if (isTrashKey(id)) continue;       // trash 单独列
+    if (isTrashKey(id)) continue;                       // trash 单独列
+    if (id.startsWith(LOCAL_BACKUP_PREFIX)) continue;   // .backup-local/ 隐藏安全网（深模块所有），不进图库
     const pkg = await getSession(id);
     if (!pkg) continue;
     out.push({

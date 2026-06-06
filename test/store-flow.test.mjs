@@ -188,6 +188,46 @@ describe("Store.flow.restore / purge（本地+云端一条路）", () => {
   });
 });
 
+describe("move-aside 同名防撞 · 对抗（trash/backup 多次同名靠 guid 不撞）", () => {
+  it("[对抗] 同一时钟下两次 weakOverride 同名 → .backup 留两份（旧版 [ts] 同 ms 会 fail 抛错）", async () => {
+    const provider = createMockProvider();
+    const cloud = createCloudSync({
+      provider, kv: memKv(), fileName: (n) => n + ".ora",
+      contentType: "application/zip", appKey: "wp", now: () => 1000,   // 固定时钟：逼出同秒，靠 guid 区分
+    });
+    await cloud.push("猫", bytes("v1"));
+    await cloud.weakOverride("猫", bytes("v2"));   // 备份 v1 → .backup/猫 [yyyymmddhhmmss-<guid1>]
+    await cloud.weakOverride("猫", bytes("v3"));   // 备份 v2 → .backup/猫 [yyyymmddhhmmss-<guid2>]（guid 不同，不撞）
+    const backups = await provider.list(".backup");
+    eq(backups.length, 2, "两次备份都在，且文件名互不冲突");
+    eq(backups[0].name === backups[1].name, false, "两个 backup 名必须不同（guid 区分）");
+  });
+
+  it("[对抗] 云端 .backup/ 内容不漏进 gallery 列表（旧版只排 folders 却仍递归进去）", async () => {
+    const env = mk();
+    const it0 = await seedSynced(env, "猫", "v1");
+    env.store.adoptBase("猫", it0.eTag);
+    await env.cloud.weakOverride("猫", bytes("v2"));        // 造一个 .backup/猫 [stamp] 备份项
+    const { files, folders } = await env.cloud.listAll();
+    eq(files.some((f) => f.path.startsWith(".backup")), false, ".backup 文件不得进文件列表");
+    eq(folders.some((f) => f.startsWith(".backup")), false, ".backup 不得进文件夹列表");
+    assert(files.some((f) => f.name === "猫"), "正常文件仍在");
+  });
+
+  it("[对抗] 本地 backup 同名两次 → 两份独立、隐藏命名空间、原件不动（旧版同 ms 会静默覆盖）", async () => {
+    const local = createMockLocal();
+    await local.save("猫", bytes("v1"));
+    const b1 = await local.backup("猫");
+    await local.save("猫", bytes("v2"));
+    const b2 = await local.backup("猫");
+    assert(b1.startsWith(".backup-local/") && b2.startsWith(".backup-local/"), "进隐藏 .backup-local/ 命名空间");
+    eq(b1 === b2, false, "两次 backup key 必须不同");
+    eq(u8txt(await local.get(b1)), "v1", "第一份留底是 v1");
+    eq(u8txt(await local.get(b2)), "v2", "第二份留底是 v2");
+    eq(u8txt(await local.get("猫")), "v2", "原件还在");
+  });
+});
+
 describe("cloud-sync.push H7 兜底 · 对抗（不得把 0 字节占位当成功）", () => {
   it("[对抗] upload 返回 null + 留下 0 字节占位 → 仍 dirty，不骗成 synced", async () => {
     const fake = {

@@ -14,6 +14,7 @@
 import { getSession, putSession, deleteSession } from "../storage.js";
 import { trashSession, restoreSession, purgeFromTrash, renderThumbBlob, putSessionPkg } from "../session.js";
 import { decodeOraToDoc } from "../ora.js";
+import { LOCAL_BACKUP_PREFIX, asideStamp } from "./move-aside.js";
 
 export function createLocalAdapter() {
   return {
@@ -38,12 +39,13 @@ export function createLocalAdapter() {
     },
 
     async backup(name) {
+      // 覆盖前留底：复制到隐藏 .backup-local/ 命名空间（深模块约定，见 move-aside.js）；
+      // 名字 yyyymmddhhmmss-guid 防撞；原件不动、不进图库（不 flood 用户文件夹）。
       const pkg = await getSession(name);
       if (!pkg) throw new Error(`本地无 ${name}，无法备份`);
-      const backupName = `${name}-backup-${Date.now()}`;
-      // 复制整 pkg（含 thumb）；原件留着，pull 失败时无害。
-      await putSession(backupName, { ...pkg, name: backupName, updatedAt: Date.now() });
-      return backupName;
+      const backupKey = `${LOCAL_BACKUP_PREFIX}${asideStamp(Date.now())}:${name}`;
+      await putSession(backupKey, { ...pkg, updatedAt: Date.now() });   // 复制，原件留着
+      return backupKey;
     },
 
     async trash(name) {

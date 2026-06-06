@@ -22,15 +22,15 @@ async function toU8(x) {
 export function createMockLocal() {
   const items = new Map();     // name → Uint8Array
   const trash = new Map();     // trashKey → { name, bytes }
-  let tk = 0;
+  let tk = 0, bk = 0;
   return {
     async save(name, bytes) { items.set(name, await toU8(bytes)); },
     async get(name) { return items.has(name) ? items.get(name) : null; },
     async exists(name) { return items.has(name); },
     async backup(name) {
       if (!items.has(name)) throw new Error(`本地无 ${name}，无法备份`);
-      const backupName = `${name}-backup`;
-      items.set(backupName, items.get(name));        // 复制：原件不动
+      const backupName = `.backup-local/${++bk}:${name}`;   // 隐藏命名空间 + counter 防撞（测试确定性）；同名多次也唯一
+      items.set(backupName, items.get(name));               // 复制：原件不动
       return backupName;
     },
     async trash(name) {
