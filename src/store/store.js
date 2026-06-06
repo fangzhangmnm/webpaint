@@ -258,6 +258,32 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
+  // 清空回收站（批量彻底删）：本地 + 云端两端在库内一处清，逐项独立 try、失败汇总不静默。
+  // 不按 GUID 配对 local↔cloud——两端都要清空，配对无意义（≠ restore）；离线则只清本地、
+  // 云端项留待回线（isOnline()=false 时跳过云端段）。取代 app 旧两腿（emptyTrash+循环 purge）。
+  async function emptyTrash(opts = {}) {
+    const { isOnline, busy = passBusy } = opts;
+    return busy("清空回收站…", async () => {
+      let purged = 0; const failed = [];
+      if (local && local.listTrash && local.purgeTrash) {
+        for (const t of await local.listTrash()) {
+          try { await local.purgeTrash(t.trashKey); purged++; }
+          catch (e) { failed.push({ name: t.name, where: "local", error: String(e && e.message || e) }); }
+        }
+      }
+      if (!isOnline || isOnline()) {
+        let items = null;
+        try { items = await cloud.listTrash(); }
+        catch (e) { failed.push({ where: "cloud-list", error: String(e && e.message || e) }); }
+        for (const it of (items || [])) {
+          try { await cloud.purge(it.id); purged++; }
+          catch (e) { failed.push({ name: it.name, where: "cloud", error: String(e && e.message || e) }); }
+        }
+      }
+      return { status: "emptied", purged, failed };
+    });
+  }
+
   // 在 oldName + newName 两条链尾串行跑 fn（重命名牵动两个身份，须挡住对任一名的 in-flight push）。
   function _serialize2(oldName, newName, fn) {
     const prev = Promise.all([_chain.get(oldName) || Promise.resolve(), _chain.get(newName) || Promise.resolve()]);
@@ -417,7 +443,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   const session = createCoalescer();
 
   return {
-    flow: { push, open, delete: del, rename, saveAs, acquire, replayDelete, restore, purge },
+    flow: { push, open, delete: del, rename, saveAs, acquire, replayDelete, restore, purge, emptyTrash },
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
     edits,                     // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④）

@@ -12,7 +12,7 @@
 //   restore(trashKey)   → name（session.restoreSession，撞名自动 (2)）
 
 import { getSession, putSession, deleteSession } from "../storage.js";
-import { trashSession, restoreSession, purgeFromTrash, renderThumbBlob, putSessionPkg } from "../session.js";
+import { trashSession, restoreSession, purgeFromTrash, listTrashedSessions, renderThumbBlob, putSessionPkg } from "../session.js";
 import { decodeOraToDoc } from "../ora.js";
 import { LOCAL_BACKUP_PREFIX, asideStamp } from "./move-aside.js";
 
@@ -62,6 +62,11 @@ export function createLocalAdapter() {
 
     async purgeTrash(trashKey) {
       await purgeFromTrash(trashKey);          // 永久删本地回收站一条
+    },
+
+    async listTrash() {
+      // 本地回收站清单（给 flow.emptyTrash 枚举用）：{ trashKey, name }。
+      return (await listTrashedSessions()).map((t) => ({ trashKey: t.trashKey, name: t.originalName }));
     },
   };
 }

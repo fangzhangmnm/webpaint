@@ -28,7 +28,7 @@ import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
-  emptyTrash, listTrashedSessions,
+  listTrashedSessions,
   getCurrentSessionName, setCurrentSessionName,
   exportOraDownload, exportPsdDownload, shareOrDownloadImage,
   copyImageToClipboard, readImageFromClipboard, writeImageBlobToClipboard,
@@ -48,7 +48,7 @@ import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTele
 import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
   listCloudSessionsRecursive, listCloudAll, listCloudFolders,
-  listCloudTrash, purgeCloudTrashItem,
+  listCloudTrash,
   isCloudDirty, setCloudDirty, CloudConflictError,
   getLastSessionSignedIn, setLastSessionSignedIn, getKnownETag,
   rackFolderFlow, setRackDirty, isRackDirty, resolveRef,
@@ -5770,22 +5770,13 @@ els.galleryEmptyTrashBtn?.addEventListener("click", async () => {
   els.galleryTrashMenuPopup?.classList.add("hidden");
   const ok = await openConfirmSheet("清空回收站？", "本地和云端的回收站都会清。不可撤销。");
   if (!ok) return;
+  // 一条 flow：本地 + 云端两端在库内清、失败汇总不静默（取代旧 app 两腿 emptyTrash+循环 purgeCloudTrashItem）。
   await withBusy("正在清空回收站…", async () => {
-    try {
-      await emptyTrash();
-      if (isSignedIn() && navigator.onLine !== false) {
-        try {
-          const items = await listCloudTrash();
-          for (const it of items) {
-            try { await purgeCloudTrashItem(it.id); }
-            catch (e) { console.warn("[empty trash] cloud item failed:", it.name, e); }
-          }
-        } catch (e) { console.warn("[empty trash] list cloud failed:", e); }
-      }
-      setStatus("回收站已清空");
-    } catch (e) {
-      setStatus("清空失败：" + (e && e.message || e), true);
-    }
+    const res = await _store.flow.emptyTrash({ isOnline: () => isSignedIn() && navigator.onLine !== false });
+    const cloudFails = (res.failed || []).filter((f) => f.where !== "local").length;
+    if (cloudFails) setStatus(`已清本地；${cloudFails} 项云端没清（可能离线），回线再清`, true);
+    else if ((res.failed || []).length) setStatus("清空时部分失败", true);
+    else setStatus("回收站已清空");
   });
   renderGallery();
 });

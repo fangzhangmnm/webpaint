@@ -326,3 +326,28 @@ describe("Store.flow.open（site 4 合流目标）", () => {
     assert(await env.local.get(res.backupName), "备份副本存在（原版未丢）");
   });
 });
+
+describe("Store.flow.emptyTrash（批量彻底删，两端在库内一处清）", () => {
+  it("本地 + 云端 trash 都清；不按 GUID 配对", async () => {
+    const env = mk();
+    await env.local.save("a", bytes("A")); await env.local.trash("a");
+    await env.local.save("b", bytes("B")); await env.local.trash("b");
+    await env.cloud.push("c", bytes("C")); await env.cloud.trash("c");
+    const res = await env.store.flow.emptyTrash({ isOnline: () => true });
+    eq(res.status, "emptied");
+    eq(res.failed.length, 0, "无失败");
+    eq((await env.local.listTrash()).length, 0, "本地 trash 应空");
+    eq((await env.cloud.listTrash()).length, 0, "云端 trash 应空");
+  });
+
+  it("离线：只清本地、云端 trash 留着、无失败（isOnline=false 跳过云段）", async () => {
+    const env = mk();
+    await env.local.save("a", bytes("A")); await env.local.trash("a");
+    await env.cloud.push("c", bytes("C")); await env.cloud.trash("c");
+    const res = await env.store.flow.emptyTrash({ isOnline: () => false });
+    eq(res.status, "emptied");
+    eq(res.failed.length, 0);
+    eq((await env.local.listTrash()).length, 0, "本地清空");
+    eq((await env.cloud.listTrash()).length, 1, "云端 trash 离线应保留");
+  });
+});

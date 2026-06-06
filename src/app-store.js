@@ -72,10 +72,9 @@ export const listCloudSessionsRecursive = () => cloud.list();
 export const listCloudAll = () => cloud.listAll();
 export const listCloudFolders = () => cloud.listFolders();
 export const listCloudTrash = () => cloud.listTrash();
-export const trashCloudSession = (name) => cloud.trash(name);
-export const restoreCloudFromTrash = (itemId, targetName) => cloud.restore(itemId, targetName);
-export const purgeCloudTrashItem = (itemId) => cloud.purge(itemId);
-export const renameCloudSession = (oldN, newN) => cloud.rename(oldN, newN);
+// 旧裸 cloud trash/rename/restore/purge shim 已删（trashCloudSession / restoreCloudFromTrash /
+// purgeCloudTrashItem / renameCloudSession，均 0 调用方）：删/改名/还原/彻底删/清空回收站
+// 全走 store.flow.*（含新 flow.emptyTrash）。缩小「能绕过 flow 的表面积」——绕过做成不可能而非靠自觉。
 // 旧 isCloudDirty 在未登录时返 false（app 多处 `isSignedIn() && isCloudDirty()`，保此语义）。
 export const isCloudDirty = (name) => _auth.isSignedIn() && cloud.isDirty(name);
 export const setCloudDirty = (name, d) => cloud.setDirty(name, d);
