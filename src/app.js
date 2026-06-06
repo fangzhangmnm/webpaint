@@ -2828,7 +2828,13 @@ async function saveNow(opts = {}) {
 
 // 把 loaded doc 的内容塞回 live doc（保持指针，避免到处换引用）
 // **不**调 board.fitToScreen —— 保留用户当前视口（zoom / pan），切 session 不重置
+// 加载/采纳/FF 期间会调 input.clearHistory() → 派发 wp:histchange → dirty 监听器会把刚载入的画误标成
+// **云端 dirty**（markSaved 只复位本地、复位不了云端）→ 刚 FF/打开就又脏、退出即冲突（真机实测「没画却冲突」根因）。
+// _loadingDoc 在整个 adopt 期间挡掉 dirty 标记：保留 adopt 前的云端 dirty 真值（FF/pull=clean、本地脏画=仍脏）。
+let _loadingDoc = false;
 function adoptLoadedDoc(loaded, sessionName) {
+  _loadingDoc = true;
+  try {
   doc.layers = loaded.layers;
   doc.activeIndex = loaded.activeIndex;
   doc.width = loaded.width;
@@ -2932,6 +2938,7 @@ function adoptLoadedDoc(loaded, sessionName) {
     // 异步写：encode 几百 ms，不阻塞 UI
     _writeSessionCheckpoint(sessionName).catch((e) => console.warn("[revert] checkpoint 失败:", e));
   }
+  } finally { _loadingDoc = false; }
 }
 // v133 revert: session-open checkpoint state
 let _sessionOpenedAt = 0;
@@ -2971,6 +2978,7 @@ async function _readSessionCheckpoint(name) {
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty。
 // 合并了原来分开的「_editVersion++」监听：编辑游标 SSoT 归 Store（④），这里 mark 一次（无条件，含 B2 语义）。
 window.addEventListener("wp:histchange", () => {
+  if (_loadingDoc) return;                    // 加载/采纳/FF 期间 clearHistory 派发的 histchange 不算编辑（不标本地脏、不标云脏）
   _store.edits.mark();                        // 编辑游标推进 → 本地 localDirty 自动为真（B2 + 合流 + 本地落盘共用）
   if (!_activeSessionName) return;            // gallery-first: 无绑 session 时不响应
   // **不 gate isSignedIn**：编辑必标云脏。否则登出 / SSO 抖动期间的编辑不被标脏，
@@ -3008,20 +3016,26 @@ async function saveAndPush() {
   try {
     const result = await _store.flow.push(sessionName, {
       encode: () => _encodeCurrentOra(),   // 同步字节不带 viewport（ADR-0016 §6；与 checkpoint/flow.encode 共用一处形状）
-      // spec（share-file-model / ADR-0009）：Work 禁 destructive pull。no-op 安全默认 / save-as / weak-override。
+      // store 内执行 take-cloud(pull) 需要 adopt 把云端版反映进活编辑器（_safePull：本地先 backup→拉云覆盖→adopt）。
+      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
+      // spec（share-file-model / ADR-0009）：Work 禁 destructive pull。三选项无命名、两个「覆盖」输方都进 backup 不丢：
+      //   no-op 安全默认 / pull=云端赢·我的进本地 .backup / weak-override=我赢·云端原版进云端 .backup。
       onConflict: async () => await lockSyncGate({
         title: "云端有更新版本",
         message: `「${sessionName}」云端已被改过；你本地是 ${getLocalSavedAtLabel()}。`,
         showSpinner: false,
         actions: [
           { label: "保留本地、暂不推（稍后再决定）", value: "no-op", primary: true },
-          { label: "本地另存为新名再推", value: "save-as" },
-          { label: "用本地覆盖云端（云端原版存进 .backup，不丢）", value: "weak-override" },
+          { label: "用云端覆盖本地（我的版本存进 .backup，可恢复）", value: "pull" },
+          { label: "用本地覆盖云端（云端原版存进 .backup，可恢复）", value: "weak-override" },
         ],
       }),
     });
     if (result.status === "conflict") {
-      conflictChoice = result.choice;                 // no-op / save-as（app 执行）
+      conflictChoice = result.choice;                 // no-op（app 执行）
+    } else if (result.status === "resolved" && result.resolution === "pull") {
+      setStatus(`已采用云端版本：${sessionName}（你的版本存进本地 .backup，可恢复）`);
+      renderGallery();
     } else if (result.status === "resolved" && result.resolution === "weak-override") {
       setStatus(`已用本地覆盖云端：${sessionName}（云端原版存进 .backup，可恢复）`);
       renderGallery();
@@ -3038,13 +3052,9 @@ async function saveAndPush() {
     _cloudPushing = false;
     updateSaveStatus();
   }
-  // 冲突执行：weak-override 已由 store 内部完成（云端→.backup + 本地上位）；这里只处理 no-op / save-as。
+  // 冲突执行：pull / weak-override 都已由 store 内部完成（备份先于覆盖）；这里只剩 no-op 提示。
   if (conflictChoice === "no-op") {
     setStatus(`已保留本地，云端未动；下次推会再确认（${sessionName}）`);
-  } else if (conflictChoice === "save-as") {
-    // spec：save-as = 本地另存新名再推（one attempt；renameCurrentSession 内含同名检查）。
-    const newName = await renameCurrentSession({ suggested: sessionName + " (新)", reason: "云端冲突" });
-    if (newName && isSignedIn()) { setCloudDirty(newName, true); _store.session.request("push"); }
   }
 }
 

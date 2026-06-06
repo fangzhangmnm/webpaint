@@ -71,15 +71,20 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // 412：可能是自己 lost-response 已落盘的写。拉云比对，相等即自愈（B5/W1）。
   async function _tryHeal(name, bytes) {
+    // ⚠ cloud.pull 有副作用：会 setDirty(name,false)。没自愈（真分叉）时必须还原 dirty——否则
+    //   ① 后续 _safePull 的 dirty-gate 看成 clean → 不备份 → 用户版本被覆盖丢失；
+    //   ② onConflict 选 no-op 保留本地后，dirty 假性归零 → 下次 push 判 clean 跳过 → 静默丢更新。
+    const wasDirty = cloud.isDirty(name);
     let pulled;
-    try { pulled = await cloud.pull(name); } catch (_) { return false; }
-    if (!pulled) return false;
+    try { pulled = await cloud.pull(name); } catch (_) { if (wasDirty) cloud.setDirty(name, true); return false; }
+    if (!pulled) { if (wasDirty) cloud.setDirty(name, true); return false; }
     if (bytesEqual(await toU8(pulled.blob), bytes)) {
       cloud.setDirty(name, false);
       if (pulled.item && pulled.item.eTag) _base.set(name, pulled.item.eTag);  // 自愈后 base 推进到云端版本
       clearParent(name);                                                       // episode 落地（这次推等价于已在云端）
       return true;
     }
+    if (wasDirty) cloud.setDirty(name, true);                                   // 真分叉 → 还原 dirty（撤销 pull 的副作用）
     return false;
   }
 
