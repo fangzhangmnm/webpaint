@@ -45,9 +45,24 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // C4：base-etag 归这个 Store 实例（= 这个 tab）的内存，open/adopt 时捕获一次。
   // push 用它当 If-Match、成功只推进**自己的**——绝不每次去读跨 tab 共享的 localStorage etag，
   // 否则别的 tab 推成功后改了共享 etag，本 tab 的陈旧推会被误判成"无冲突"→ 静默覆盖（W2 红线）。
-  const _base = new Map();   // name → etag|null（null = 无基准，首推不带 If-Match）
-  function adoptBase(name, etag) { _base.set(name, etag ?? null); }
-  function baseFor(name) { return _base.has(name) ? _base.get(name) : cloud.getETag(name); }
+  const _base = new Map();   // name → etag|null：这个 tab「已见/已采纳」的云版（open/refresh/pull/heal/push 推进）。
+  // 采纳一个 item 的云版基准（open/load 时）。若该 item 已是 dirty（未推编辑跨 reload 持久），
+  // parentBase 是内存态、reload 后丢了 → 这里补捕：未推编辑派生自这个刚载入的云版，免得下次 push 撞 bypass 守卫。
+  function adoptBase(name, etag) { _base.set(name, etag ?? null); if (cloud.isDirty(name)) captureParent(name); }
+  // 这个 tab 见过的云版。仅在 _base 缺失（刚从图库列出、尚未 adopt）才回退到 kv 里的 etag——
+  // **只用于 open/refresh 的「云端动没动」比较**（漏判=少快进一次，非数据丢失），绝不用于 push 的 If-Match。
+  function seenBase(name) { return _base.has(name) ? _base.get(name) : cloud.getETag(name); }
+
+  // parentBase 权威（ADR-0016 §4）：每条 name「当前未推编辑派生自哪个云版」。
+  //   捕获 = clean→dirty 边沿（cloudState.setDirty(name,true)）时取当时的 _base（本 tab 已见版）。
+  //   用途 = push 的 If-Match **唯一**来源——绝不回退跨 tab 共享 etag（W2 红线：陈旧推被误判无冲突→静默覆盖）。
+  //   清除 = push/pull/heal/refresh 采纳云版后（不再 dirty）。
+  const _parent = new Map();   // name → etag|null（null=新文件/无基准，首推不带 If-Match）
+  function captureParent(name) { if (!_parent.has(name)) _parent.set(name, _base.has(name) ? _base.get(name) : null); }   // episode 内幂等：只在头一次变脏捕获
+  function reparent(name) { _parent.set(name, _base.has(name) ? _base.get(name) : null); }   // 强制重锚到当前 _base（B2：剩余编辑派生自刚推上去的版本）
+  function clearParent(name) { _parent.delete(name); }
+  function hasParent(name) { return _parent.has(name); }
+  function parentFor(name) { return _parent.has(name) ? _parent.get(name) : null; }
 
   function _retriable(e) {
     return !!e && (e.status == null || e.status === 429 || (e.status >= 500 && e.status <= 599))
@@ -62,6 +77,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     if (bytesEqual(await toU8(pulled.blob), bytes)) {
       cloud.setDirty(name, false);
       if (pulled.item && pulled.item.eTag) _base.set(name, pulled.item.eTag);  // 自愈后 base 推进到云端版本
+      clearParent(name);                                                       // episode 落地（这次推等价于已在云端）
       return true;
     }
     return false;
@@ -69,11 +85,19 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   function _finish(name, v0, getEditVersion, status) {
     const dirtyAfter = getEditVersion() !== v0;   // B2：PUT 期间又改过 → 仍 unpushed
-    if (dirtyAfter) cloud.setDirty(name, true);
+    if (dirtyAfter) { cloud.setDirty(name, true); reparent(name); }   // 剩余编辑派生自刚推上去的版本（_base 已在 push 成功时推进）
+    else clearParent(name);                                            // 干净落地：episode 结束
     return { status, dirtyAfter };
   }
 
   async function _doPush(name, { encode, getEditVersion = () => _editVersion, onConflict, adopt, saveBranch, now, busy = passBusy } = {}) {
+    // bypass 守卫（ADR-0016 §4）：已知云版基准 + 内容 dirty + 却没经过 clean→dirty 门捕获 parentBase
+    //   → 有编辑路径绕过了门，再推会拿陈旧/跨tab base 静默覆盖。宁可响亮抛错（=失败的测试）也不静默丢更新。
+    if (cloud.isDirty(name) && !hasParent(name) && _base.has(name) && _base.get(name) != null) {
+      throw new Error(`Store: "${name}" 有未推编辑但缺 parentBase（编辑未走 clean→dirty 门，拒绝可能静默覆盖的推送）`);
+    }
+    // If-Match 唯一来源：parentBase。无 parent 时——dirty=新文件(首推不带 If-Match)；非 dirty=强推用本 tab 已见版。
+    const baseEtag = hasParent(name) ? parentFor(name) : (cloud.isDirty(name) ? null : seenBase(name));
     const v0 = getEditVersion();
     const bytes = await toU8(await encode());      // 只编码一次，重试复用（B5 逐字节比对要相等）
     return busy("正在同步…", async () => {
@@ -81,7 +105,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       while (attempt < maxAttempts) {
         attempt++;
         try {
-          const { item } = await cloud.push(name, bytes, { baseEtag: baseFor(name) });
+          const { item } = await cloud.push(name, bytes, { baseEtag });
           if (item && item.eTag) _base.set(name, item.eTag);   // 只推进自己的 base
           return _finish(name, v0, getEditVersion, "pushed");
         } catch (e) {
@@ -111,13 +135,18 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // 持久状态只在原子点改：备份是复制（原件留着）；覆盖是一次 local.save。强退任一 await 点都可重入。
   async function _safePull(name, adopt) {
     let backupName;
-    try { backupName = await local.backup(name); }
-    catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
+    // ADR-0016 §consequences：clean 本地是可从云端重取的已知版本，无未见内容可丢 → 跳过 backup（不再 spam .backup-local）。
+    //   仅 dirty——未推（cloud.isDirty）或未落盘（edits.localDirty）——才在覆盖前留底。匹配 ADR-0009「clean switch never spams a backup」。
+    if (cloud.isDirty(name) || edits.localDirty()) {
+      try { backupName = await local.backup(name); }
+      catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
+    }
     const r = await cloud.pull(name);
     if (!r) return { ok: false, reason: "cloud-vanished", backupName };
-    await local.save(name, r.blob);                // 覆盖本地为云端版（原件已备份）
+    await local.save(name, r.blob);                // 覆盖本地为云端版（dirty 时原件已备份）
     if (r.item && r.item.eTag) _base.set(name, r.item.eTag);  // base 推进到云端版本（多tab/冲突后一致）
     cloud.setDirty(name, false);              // 已采纳云端 → 不再 unpushed
+    clearParent(name);                        // episode 结束（已采纳云版）
     if (adopt) await adopt(r.blob, name);          // 反映到活编辑器
     return { ok: true, backupName };
   }
@@ -137,6 +166,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     if (choice === "weak-override" && bytes != null && cloud.weakOverride) {
       const r = await cloud.weakOverride(name, bytes);
       if (r.item && r.item.eTag) _base.set(name, r.item.eTag);
+      clearParent(name);                        // 本地已强推上云、loser 进 .backup → episode 结束
       return { status: "resolved", resolution: "weak-override", backedUp: r.backedUp };
     }
     if (choice === "branch" && saveBranch) {
@@ -149,9 +179,11 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return { status: "conflict", choice, dirtyAfter: true };  // 交回 app（旧 saveAndPushViaStore 自己执行）
   }
 
-  // C2：开 session 的云端 gate。绝不静默覆盖。E8：probe（跳过到离线）与 metadata race，无硬超时。
+  // C2：开 session 的云端 gate。E8：probe（跳过到离线）与 metadata race，无硬超时。
+  // ADR-0016：云端自「本 tab 已见版」后动过时——clean（无未推/未落盘编辑）→ **静默无损快进**（不弹 sheet、_safePull 内部跳 backup）；
+  //           dirty → 才弹「拉/留/分支」sheet（真分叉）。绝不静默覆盖 dirty 内容。
   async function open(name, opts = {}) {
-    const { isOnline = () => true, probe, onNewer, adopt, busy = passBusy, now = () => 0 } = opts;
+    const { isOnline = () => true, probe, onNewer, adopt, busy = passBusy, now = () => 0, localDirty } = opts;
     if (!isOnline()) return { source: "local", reason: "offline" };
     return busy("检查云端…", async () => {
       let meta;
@@ -168,14 +200,23 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         catch (_) { return { source: "local", reason: "cloud-error" }; }
       }
       if (!meta) return { source: "local", reason: "cloud-absent" };
-      const base = cloud.getETag(name);
+      const base = seenBase(name);
       if (!base || meta.etag === base) return { source: "local", reason: "in-sync" };
-      // 云端自 base 后动过 → 弹「拉 / 留 / 分支」（onNewer 是 UI 回调；强退在此安全：尚无持久副作用）
+      // 云端动过。dirty? = 未推（cloud.isDirty）或活动 doc 未落盘（localDirty）。
+      const dirty = cloud.isDirty(name) || (localDirty ? localDirty() : false);
+      if (!dirty) {
+        // clean → 静默快进（无 onNewer sheet；_safePull 因 clean 跳过 backup）
+        const r = await _safePull(name, adopt);
+        return r.ok
+          ? { source: "fast-forwarded", backupName: r.backupName }
+          : { source: "local", reason: r.reason, error: r.error };
+      }
+      // dirty 分叉 → 弹「拉 / 留 / 分支」（onNewer 是 UI 回调；强退在此安全：尚无持久副作用）
       const choice = onNewer
         ? await onNewer({ name, cloudEtag: meta.etag, baseEtag: base, cloudTime: meta.lastModified })
         : "keep";
       if (choice === "pull") {
-        const r = await _safePull(name, adopt);
+        const r = await _safePull(name, adopt);   // dirty → _safePull 内部会备份再覆盖
         return r.ok
           ? { source: "pulled", backupName: r.backupName }
           : { source: "local", reason: r.reason, backupName: r.backupName, error: r.error };
@@ -188,6 +229,27 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         return { source: "branched", branchName };
       }
       return { source: "local", reason: "kept" };
+    });
+  }
+
+  // refresh（ADR-0016 §2）：事件驱动的「干净 Work 无损快进」。app 在 focus / visibilitychange / online 且当前干净时调。
+  //   只 metadata（fetchMeta/etag）；etag 真动了且仍 clean 才 _safePull 拉内容（内部因 clean 跳 backup）。
+  //   dirty（未推/未落盘）→ no-op（绝不在事件里弹 sheet；后续 push 的 412 会正常 surface 真分叉）。
+  //   **硬约束**：绝不每笔/每编辑触发——只由人速的 focus/visibility/online 事件驱动（ADR-0016 §7）。
+  async function refresh(name, opts = {}) {
+    const { isOnline = () => true, adopt, localDirty, busy = passBusy } = opts;
+    if (!isOnline()) return { status: "offline" };
+    if (cloud.isDirty(name) || (localDirty && localDirty())) return { status: "dirty-skip" };
+    return busy("检查云端…", async () => {
+      let meta;
+      try { meta = await cloud.fetchMeta(name); }
+      catch (_) { return { status: "cloud-error" }; }
+      if (!meta) return { status: "cloud-absent" };
+      const base = seenBase(name);
+      if (!base || meta.etag === base) return { status: "in-sync" };
+      if (cloud.isDirty(name) || (localDirty && localDirty())) return { status: "dirty-skip" };  // fetchMeta 期间用户动了笔 → 放弃
+      const r = await _safePull(name, adopt);
+      return r.ok ? { status: "fast-forwarded" } : { status: "ff-failed", reason: r.reason };
     });
   }
 
@@ -386,7 +448,11 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   const cloudState = {
     isDirty: (name) => cloud.isDirty(name),
     getETag: (name) => cloud.getETag(name),
-    setDirty: (name, d) => cloud.setDirty(name, d),
+    // clean→dirty 门（ADR-0016 §4）：app 在编辑落地处标脏时，**唯一**捕获 parentBase 的地方。
+    setDirty: (name, d) => {
+      if (d && !cloud.isDirty(name)) captureParent(name);   // 头一次变脏 → 锚定「派生自哪个云版」
+      cloud.setDirty(name, d);
+    },
     // signedIn/hasLocal 是 app context（auth/本地存在），调用方传入；同步返回，给 UI 高频查。
     status: (name, { signedIn = true, hasLocal = true } = {}) => {
       if (!hasLocal) return cloud.getETag(name) ? "cloud-only" : "absent";
@@ -450,12 +516,12 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   const session = createCoalescer();
 
   return {
-    flow: { push, open, delete: del, rename, saveAs, acquire, replayDelete, restore, purge, emptyTrash },
+    flow: { push, open, refresh, delete: del, rename, saveAs, acquire, replayDelete, restore, purge, emptyTrash },
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
     edits,                     // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④）
     session,                   // save 合流 coalescer（configure/request）（④）
     adoptBase,                 // app 打开/采纳 item 时调，捕获本 tab 的 base-etag（C4）
-    _internal: { toU8, bytesEqual, baseFor },
+    _internal: { toU8, bytesEqual, seenBase, parentFor, hasParent },
   };
 }

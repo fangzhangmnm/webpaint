@@ -308,22 +308,133 @@ describe("Store.flow.acquire", () => {
   });
 });
 
-describe("Store.flow.open（site 4 合流目标）", () => {
-  it("云端比 base 新 + onNewer=pull → 本地先备份再覆盖再 adopt", async () => {
+describe("Store.flow.open（ADR-0016：clean 静默快进 / dirty 才弹 sheet）", () => {
+  it("clean + 云端动 → 静默快进：不弹 onNewer、不刷 backup、adopt 云版", async () => {
     const env = mk();
-    await seedSynced(env, "猫", "local-old");
-    // 云端被「别处」改新：直接 force-push 一个新版本（base 仍是旧 etag）
+    await seedSynced(env, "猫", "local-old");                 // clean，_base=etag0
+    // 云端被「别处」改新（base 仍旧 etag、本地仍 clean）
     await env.provider.upload("猫.ora", bytes("cloud-new"), { contentType: "application/zip", conflictBehavior: "replace" });
-    let adoptedBody = null;
+    let onNewerCalled = false, adoptedBody = null;
     const res = await env.store.flow.open("猫", {
-      onNewer: async () => "pull",
+      onNewer: async () => { onNewerCalled = true; return "pull"; },
       adopt: async (blob) => { adoptedBody = await txt(blob); },
     });
-    eq(res.source, "pulled");
-    assert(res.backupName, "本地原版已备份");
+    eq(res.source, "fast-forwarded", "clean → 快进而非 surfaced pull");
+    eq(onNewerCalled, false, "clean 不该弹冲突 sheet");
+    eq(res.backupName, undefined, "clean 快进不刷 backup（可从云端重取的已知版本）");
     eq(adoptedBody, "cloud-new", "adopt 到云端新版");
-    eq(u8txt(await env.local.get("猫")), "cloud-new", "本地被云端覆盖");
-    assert(await env.local.get(res.backupName), "备份副本存在（原版未丢）");
+    eq(u8txt(await env.local.get("猫")), "cloud-new", "本地快进到云版");
+  });
+
+  it("dirty + 云端动 → 弹 onNewer；pull 则覆盖前先备份（真分叉才 backup）", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "local-old");
+    env.store.cloud.setDirty("猫", true);                     // 本地有未推编辑（经门捕获 parentBase）
+    await env.provider.upload("猫.ora", bytes("cloud-new"), { contentType: "application/zip", conflictBehavior: "replace" });
+    let onNewerCalled = false, adoptedBody = null;
+    const res = await env.store.flow.open("猫", {
+      onNewer: async () => { onNewerCalled = true; return "pull"; },
+      adopt: async (blob) => { adoptedBody = await txt(blob); },
+    });
+    eq(onNewerCalled, true, "dirty 分叉 → 弹 sheet");
+    eq(res.source, "pulled");
+    assert(res.backupName, "dirty pull → 覆盖前先备份（never-lose）");
+    eq(adoptedBody, "cloud-new", "adopt 到云端新版");
+    assert(await env.local.get(res.backupName), "备份副本在（原版未丢）");
+  });
+
+  it("云端没动 → in-sync（本地权威，不拉）", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    const res = await env.store.flow.open("猫", { onNewer: async () => "pull", adopt: async () => {} });
+    eq(res.source, "local"); eq(res.reason, "in-sync");
+  });
+});
+
+describe("Store.flow.refresh（事件驱动干净快进 · ADR-0016 §2）", () => {
+  it("clean + 云端动 → fast-forwarded、adopt 云版、不刷 backup", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "local-old");
+    await env.provider.upload("猫.ora", bytes("cloud-new"), { contentType: "application/zip", conflictBehavior: "replace" });
+    let adopted = null;
+    const res = await env.store.flow.refresh("猫", { adopt: async (b) => { adopted = await txt(b); } });
+    eq(res.status, "fast-forwarded");
+    eq(adopted, "cloud-new");
+    eq(u8txt(await env.local.get("猫")), "cloud-new", "本地快进到云版");
+    eq([...env.local._items.keys()].some((k) => k.startsWith(".backup-local/")), false, "clean 快进不刷 backup");
+  });
+
+  it("dirty → dirty-skip：绝不在事件里覆盖/弹 sheet", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "local-old");
+    env.store.cloud.setDirty("猫", true);
+    await env.provider.upload("猫.ora", bytes("cloud-new"), { contentType: "application/zip", conflictBehavior: "replace" });
+    const res = await env.store.flow.refresh("猫", { adopt: async () => {} });
+    eq(res.status, "dirty-skip");
+    eq(u8txt(await env.local.get("猫")), "local-old", "dirty 时绝不被事件覆盖（保未推编辑）");
+  });
+
+  it("云端没动 → in-sync no-op（etag 没动不拉内容）", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    let pulled = false;
+    const res = await env.store.flow.refresh("猫", { adopt: async () => { pulled = true; } });
+    eq(res.status, "in-sync");
+    eq(pulled, false, "etag 没动不拉内容（热路径零多余网络）");
+  });
+
+  it("离线 → offline，不碰云、不覆盖本地", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    const res = await env.store.flow.refresh("猫", { isOnline: () => false, adopt: async () => {} });
+    eq(res.status, "offline");
+  });
+});
+
+describe("Store parentBase 权威（ADR-0016 §4：clean→dirty 门 + bypass 守卫）", () => {
+  it("[对抗] dirty 推送绕过门（无 parentBase）→ 抛，绝不拿陈旧 base 静默覆盖", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");                        // _base=etag、clean
+    env.cloud.setDirty("猫", true);                           // **低层** cloud.setDirty 绕过 Store 的门 → 不捕获 parentBase
+    let threw = false;
+    try { await env.store.flow.push("猫", { encode: () => bytes("v2") }); }
+    catch { threw = true; }
+    assert(threw, "dirty 无 parentBase 必须 loud failure，而非静默丢更新");
+  });
+
+  it("走门标脏（cloudState.setDirty）→ 捕获 parentBase=派生云版 → push 干净落地、episode 清除", async () => {
+    const env = mk();
+    const it0 = await seedSynced(env, "猫", "v1");
+    env.store.cloud.setDirty("猫", true);                     // 经 Store 的门
+    eq(env.store._internal.hasParent("猫"), true, "门捕获了 parentBase");
+    eq(env.store._internal.parentFor("猫"), it0.eTag, "parentBase = 派生自的云版");
+    const res = await env.store.flow.push("猫", { encode: () => bytes("v2") });
+    eq(res.status, "pushed");
+    eq(env.store._internal.hasParent("猫"), false, "干净落地后 episode 清除");
+  });
+
+  it("门 episode 内幂等：已 dirty 再标脏不重捕（base 中途变也不改 parentBase）", async () => {
+    const env = mk();
+    const it0 = await seedSynced(env, "猫", "v1");
+    env.store.cloud.setDirty("猫", true);
+    env.store.adoptBase("猫", "etag-moved");                  // 模拟 base 中途被推进
+    env.store.cloud.setDirty("猫", true);                     // 已 dirty 再标脏 → 不重新捕获
+    eq(env.store._internal.parentFor("猫"), it0.eTag, "episode 内 parentBase 恒定（幂等）");
+  });
+
+  it("串行交接：B(干净) refresh 快进到 A 版 → B 编辑 → push 干净 If-Match，0 backup（无 .backup 蛙跳）", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");                        // B 设备：synced v1
+    await env.provider.upload("猫.ora", bytes("v2-fromA"), { contentType: "application/zip", conflictBehavior: "replace" });  // A 推了 v2
+    const ff = await env.store.flow.refresh("猫", { adopt: async () => {} });
+    eq(ff.status, "fast-forwarded", "B 干净 → 先快进到 A 版");
+    env.store.cloud.setDirty("猫", true);                     // B 现在落笔（门捕获 parentBase=v2 etag）
+    const res = await env.store.flow.push("猫", { encode: () => bytes("v3-fromB") });
+    eq(res.status, "pushed", "干净 If-Match 落地，无 412");
+    const backups = await env.provider.list(".backup").catch(() => []);   // 没建 .backup 文件夹 = 0 备份
+    eq(backups.length, 0, "串行交接不刷云端 .backup");
+    eq([...env.local._items.keys()].some((k) => k.startsWith(".backup-local/")), false, "也不刷本地 backup");
+    eq(await txt(await env.provider.download((await env.provider.getItemByPath("猫.ora")).id)), "v3-fromB", "云端是 B 的 v3");
   });
 });
 

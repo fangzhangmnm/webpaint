@@ -2173,6 +2173,8 @@ async function checkCloudETag(sessionName) {
       isOnline: () => navigator.onLine !== false,
       probe,
       now: () => Date.now(),
+      localDirty: () => _store.edits.localDirty(),   // 未落盘编辑也算 dirty → 不静默快进（ADR-0016）
+
       // 云端比 base 新 → 关 spinner，弹「保留 / 覆盖 / 分支」。pull/branch 的备份+覆盖由 flow.open 内执行。
       onNewer: async ({ cloudTime }) => {
         settleSyncGate(null);
@@ -2195,7 +2197,8 @@ async function checkCloudETag(sessionName) {
   }
 
   // flow.open 的 source/reason → 状态提示
-  if (res.source === "pulled") setStatus(`已拉云端；本地原版备份为「${res.backupName}」`);
+  if (res.source === "fast-forwarded") setStatus(`已同步到云端最新：${sessionName}`);   // clean 静默快进（ADR-0016）
+  else if (res.source === "pulled") setStatus(`已拉云端；本地原版备份为「${res.backupName}」`);
   else if (res.source === "branched") setStatus(`云端版已开为「${res.branchName}」`);
   else {
     const reason = res.reason;
@@ -2206,6 +2209,33 @@ async function checkCloudETag(sessionName) {
     else if (reason === "kept") setStatus("已保留本地，云端版本暂不动");
     // in-sync / cloud-absent → 静默
   }
+}
+
+// ADR-0016 §2：事件驱动的「干净 Work 无损快进」。放下 A 设备、回到 B 设备 → B 触发 focus/visibility/online →
+// B 干净时先快进到云端最新（= A 的版本）再落笔 → B 的第一笔就根于最新 → B 的 push 是干净 If-Match（零 412 零 backup）。
+// **硬约束（ADR-0016 §7）**：绝不每笔/每编辑触发——只挂人速事件；refresh 内部只 fetchMeta（etag 真动才拉内容）。
+let _ffInFlight = false;
+async function maybeFastForwardActive() {
+  if (_ffInFlight) return;
+  if (!isSignedIn() || navigator.onLine === false) return;
+  const name = _activeSessionName;
+  if (!name || name === "未命名") return;
+  if (els.galleryFull && !els.galleryFull.classList.contains("hidden")) return;   // 在图库（无活动画布）不 FF
+  if (_store.edits.localDirty() || isCloudDirty(name)) return;                     // 仅干净（refresh 内还会再判，这里先省一次网络）
+  _ffInFlight = true;
+  try {
+    const vp = { ...board.viewport };   // 视口是设备态：FF 换的是内容，别让本设备的 zoom/pan 跟着跳
+    const res = await _store.flow.refresh(name, {
+      isOnline: () => navigator.onLine !== false,
+      localDirty: () => _store.edits.localDirty(),
+      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
+    });
+    if (res.status === "fast-forwarded") {
+      board.setViewport(vp.tx, vp.ty, vp.scale, vp.rot || 0);   // 还原本设备视口
+      setStatus(`已同步到云端最新：${name}`);
+    }
+  } catch (e) { console.warn("[ff] 事件驱动快进失败：", e); }
+  finally { _ffInFlight = false; }
 }
 
 function formatCloudTime(iso) {
@@ -2782,10 +2812,7 @@ async function saveNow(opts = {}) {
   _docSaving = true;
   updateSaveStatus();
   try {
-    await saveSession(doc, _activeSessionName, {
-      referenceImage: referenceWindow.getPersistBlob(),
-      webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
-    });
+    await saveSession(doc, _activeSessionName, _buildOraMeta({ withViewport: true }));   // 本地落盘带视口（同设备重开恢复）
     _store.edits.markSaved();
     _docLastSavedAt = Date.now();
     setStatus(`已保存：${_activeSessionName}`);
@@ -2917,11 +2944,13 @@ function adoptLoadedDocWithOpts(loaded, name, opts) {
 }
 // 当前 doc 的标准持久化 meta（reference + webpaintState）。flow.encode 回调 / checkpoint / saveAndPush 共用，
 // 避免这个形状散抄多份（drift 源）。
-function _buildOraMeta() {
-  return {
-    referenceImage: referenceWindow.getPersistBlob(),
-    webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
-  };
+// withViewport：仅本地 IDB 落盘带视口（zoom/pan 是**设备本地态**，同设备重开能恢复）。
+// 同步字节（push / flow.encode / checkpoint）一律**不带** viewport——ADR-0016 §6：设备态进 .ora 会让
+// 两设备同像素产生不同字节 → W1 字节相等自愈跨设备永不命中、纯平移也算冲突。默认 false = 同步安全。
+function _buildOraMeta({ withViewport = false } = {}) {
+  const webpaintState = { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard };
+  if (withViewport) webpaintState.viewport = { ...board.viewport };
+  return { referenceImage: referenceWindow.getPersistBlob(), webpaintState };
 }
 function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
 
@@ -2975,10 +3004,7 @@ async function saveAndPush() {
   updateSaveStatus();
   try {
     const result = await _store.flow.push(sessionName, {
-      encode: () => encodeDocToOra(doc, {
-        referenceImage: referenceWindow.getPersistBlob(),
-        webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, viewport: { ...board.viewport } },
-      }),
+      encode: () => _encodeCurrentOra(),   // 同步字节不带 viewport（ADR-0016 §6；与 checkpoint/flow.encode 共用一处形状）
       // spec（share-file-model / ADR-0009）：Work 禁 destructive pull。no-op 安全默认 / save-as / weak-override。
       onConflict: async () => await lockSyncGate({
         title: "云端有更新版本",
@@ -5875,6 +5901,7 @@ window.addEventListener("online", async () => {
   if (!isSignedIn()) await retrySilentSignIn();
   updateCloudAuthUI();
   if (!els.galleryFull.classList.contains("hidden")) renderGallery();
+  maybeFastForwardActive();   // 回到在线 → 活动 doc 干净则快进到云端最新（ADR-0016 §2）
 });
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
 // Gallery-first 启动：
@@ -6691,12 +6718,12 @@ if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname) && !
         }
       });
     });
-    // 路径 4：回前台 / 焦点 → poke
+    // 路径 4：回前台 / 焦点 → poke SW 更新 + ADR-0016 §2 干净快进（复用同一组人速事件钩子）。
     const pokeUpdate = () => { registration.update().catch(() => {}); };
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") pokeUpdate();
+      if (document.visibilityState === "visible") { pokeUpdate(); maybeFastForwardActive(); }
     });
-    window.addEventListener("focus", pokeUpdate);
+    window.addEventListener("focus", () => { pokeUpdate(); maybeFastForwardActive(); });
     setInterval(pokeUpdate, 10 * 60 * 1000);
   }).catch((err) => {
     console.warn("SW register failed", err);
