@@ -2812,7 +2812,7 @@ async function saveNow(opts = {}) {
   _docSaving = true;
   updateSaveStatus();
   try {
-    await saveSession(doc, _activeSessionName, _buildOraMeta({ withViewport: true }));   // 本地落盘带视口（同设备重开恢复）
+    await saveSession(doc, _activeSessionName, _buildOraMeta());   // 本地/云端字节统一：viewport 不进 .ora（ADR-0016 §6）
     _store.edits.markSaved();
     _docLastSavedAt = Date.now();
     setStatus(`已保存：${_activeSessionName}`);
@@ -2944,13 +2944,16 @@ function adoptLoadedDocWithOpts(loaded, name, opts) {
 }
 // 当前 doc 的标准持久化 meta（reference + webpaintState）。flow.encode 回调 / checkpoint / saveAndPush 共用，
 // 避免这个形状散抄多份（drift 源）。
-// withViewport：仅本地 IDB 落盘带视口（zoom/pan 是**设备本地态**，同设备重开能恢复）。
-// 同步字节（push / flow.encode / checkpoint）一律**不带** viewport——ADR-0016 §6：设备态进 .ora 会让
-// 两设备同像素产生不同字节 → W1 字节相等自愈跨设备永不命中、纯平移也算冲突。默认 false = 同步安全。
-function _buildOraMeta({ withViewport = false } = {}) {
-  const webpaintState = { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard };
-  if (withViewport) webpaintState.viewport = { ...board.viewport };
-  return { referenceImage: referenceWindow.getPersistBlob(), webpaintState };
+// viewport（zoom/pan）是**设备本地态**，**不进任何 .ora 字节**（本地落盘 / 云端同步一律不带）——
+// ADR-0016 §6：设备态进 .ora 会让两设备同像素产生不同字节 → W1 字节相等自愈跨设备永不命中、纯平移也算冲突。
+// 所有 .ora 字节由此统一（本地==云端），无「同一版本两份字节」的不一致。
+// 取舍（用户定 2026-06-06）：重开（含同设备）一律 fitToScreen，不记忆视口。活动中的事件驱动 FF 仍保留当前视口
+//   （maybeFastForwardActive 在内存里前后存还，不碰字节），别让背景快进把你正看的画面跳掉。
+function _buildOraMeta() {
+  return {
+    referenceImage: referenceWindow.getPersistBlob(),
+    webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+  };
 }
 function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
 
