@@ -2209,15 +2209,25 @@ async function checkCloudETag(sessionName) {
     else if (reason === "kept") setStatus("已保留本地，云端版本暂不动");
     // in-sync / cloud-absent → 静默
   }
+  // 成功联到云（非离线/出错/跳过）→ 记新鲜度时刻（ADR-0017：开图本身就是一次云端检查）。
+  if (res && !["offline", "cloud-error", "skipped"].includes(res.reason)) { _lastCheckedAt = Date.now(); updateSaveStatus(); }
 }
 
 // ADR-0016 §2：事件驱动的「干净 Work 无损快进」。放下 A 设备、回到 B 设备 → B 触发 focus/visibility/online →
 // B 干净时先快进到云端最新（= A 的版本）再落笔 → B 的第一笔就根于最新 → B 的 push 是干净 If-Match（零 412 零 backup）。
 // **硬约束（ADR-0016 §7）**：绝不每笔/每编辑触发——只挂人速事件；refresh 内部只 fetchMeta（etag 真动才拉内容）。
+// ADR-0017 前台新鲜度：活动 doc「上次成功联云确认新鲜度」的 wall-clock 时刻。
+//   新鲜度是**时间属性、不靠 timer tick**——suspend 期间 timer 不跑；resume(focus/visibility/online) 时
+//   按 now - _lastCheckedAt 现算（关机一周再开 → 第一个事件即判 stale → 刷新；绝不把周龄当新鲜）。
+const FRESHNESS_STALE_AFTER_MS = 3 * 60 * 1000;                          // 超过即「可能过期」→ save 图标变灰、提示点一下刷新
+const FRESHNESS_CHECK_EVERY_MS = Math.round(FRESHNESS_STALE_AFTER_MS * 0.8);  // 比 stale 阈值短 → 前台在线时持续保持新鲜
+let _lastCheckedAt = 0;
+function _freshnessStale() { return Date.now() - _lastCheckedAt >= FRESHNESS_STALE_AFTER_MS; }
+
 let _ffInFlight = false;
-async function maybeFastForwardActive() {
+async function maybeFastForwardActive({ manual = false } = {}) {
   if (_ffInFlight) return;
-  if (!isSignedIn() || navigator.onLine === false) return;
+  if (!isSignedIn() || navigator.onLine === false) { if (manual) setStatus("离线，暂时无法检查云端", true); return; }
   const name = _activeSessionName;
   if (!name || name === "未命名") return;
   if (els.galleryFull && !els.galleryFull.classList.contains("hidden")) return;   // 在图库（无活动画布）不 FF
@@ -2230,11 +2240,15 @@ async function maybeFastForwardActive() {
       localDirty: () => _store.edits.localDirty(),
       adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
     });
+    if (res.status === "in-sync" || res.status === "fast-forwarded") _lastCheckedAt = Date.now();   // 成功联到云、确认了新鲜度
     if (res.status === "fast-forwarded") {
       board.setViewport(vp.tx, vp.ty, vp.scale, vp.rot || 0);   // 还原本设备视口
       setStatus(`已同步到云端最新：${name}`);
+    } else if (manual && res.status === "in-sync") {
+      setStatus(`已是云端最新：${name}`);
     }
-  } catch (e) { console.warn("[ff] 事件驱动快进失败：", e); }
+    updateSaveStatus();   // 刷新新鲜度指示（synced 图标 fresh/stale）
+  } catch (e) { console.warn("[ff] 快进失败：", e); }
   finally { _ffInFlight = false; }
 }
 
@@ -2759,12 +2773,19 @@ function updateSaveStatus() {
   }
   const state = computeSaveState();
   els.topSaveBtn.dataset.state = state;
+  els.topSaveBtn.style.opacity = "";   // 默认不灰；仅 synced+stale 才变灰（ADR-0017）
   const name = _activeSessionName;
   if (state === "cloud-busy") { els.topSaveBtn.innerHTML = ICON_CLOUD_BUSY; els.topSaveBtn.title = `上传中… · ${name}`; }
   else if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存中… · ${name}`; }
   else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存 + 推送 (Ctrl+S) · ${name} · 未保存`; }
   else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = `推送到云端 (Ctrl+S) · ${name} · 本地已存，云端未同步`; }
-  else if (state === "synced") { els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK; els.topSaveBtn.title = `已同步到云端 · ${name}`; }
+  else if (state === "synced") {
+    // synced = 无可存可推 → 图标兼作「云端新鲜度 / 点此刷新」（ADR-0017）。stale 变灰提示点一下。
+    const stale = _freshnessStale();
+    els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK;
+    els.topSaveBtn.style.opacity = stale ? "0.4" : "";
+    els.topSaveBtn.title = stale ? `云端状态可能过期 · 点此刷新检查 · ${name}` : `已同步 · 点此刷新检查云端 · ${name}`;
+  }
   else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `已存本地（IDB 易失，登录云端更安全） · ${name}`; }
 }
 // opts.implicit = autosave / visibility / pagehide 这类后台路径。
@@ -3149,7 +3170,15 @@ function stampNow() {
 // ---- topbar：save/upload + gallery ----
 // 点 save 按钮 = saveAndPush 一把梭（同 Ctrl+S）。state == "synced" 时
 // 也跑一遍（no-op fast path）让 user 永远不需要"再点一下"。
-els.topSaveBtn.addEventListener("click", () => _store.session.request("push"));
+els.topSaveBtn.addEventListener("click", () => {
+  const name = _activeSessionName;
+  // synced（无可存可推）→ 按钮兼作「刷新云端态」（ADR-0017，点一下 = 现场查云 + 干净则快进）；否则正常存/推。
+  if (name && name !== "未命名" && isSignedIn() && !_store.edits.localDirty() && !isCloudDirty(name)) {
+    maybeFastForwardActive({ manual: true });
+  } else {
+    _store.session.request("push");
+  }
+});
 
 // ---- topbar：adjustments popup（液化 / 后续调色 etc）----
 // 单按钮 → 弹一列 menu-item（同 menuPanel 模式）。学 Procreate adjustments icon。
@@ -5917,6 +5946,13 @@ window.addEventListener("online", async () => {
   maybeFastForwardActive();   // 回到在线 → 活动 doc 干净则快进到云端最新（ADR-0016 §2）
 });
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
+
+// ADR-0017 前台新鲜度的两个 timer（best-effort 装饰；正确性靠 resume-recompute + 手动刷新，不靠 timer 跑准）：
+//   ① bounded 前台轮询：在线+前台时持续把活动干净 doc 保持新鲜（suspend 期间 OS 冻结此 timer，不跑；
+//      回前台靠 focus/visibilitychange/online 现算——见那三处 maybeFastForwardActive）。
+//   ② 渲染 tick：仅重绘 save 图标，让 stale 状态在「前台但离线/轮询拿不到」时也能按 wall-clock 变灰。
+setInterval(() => { if (document.visibilityState === "visible") maybeFastForwardActive(); }, FRESHNESS_CHECK_EVERY_MS);
+setInterval(() => { if (document.visibilityState === "visible") updateSaveStatus(); }, 60 * 1000);
 // Gallery-first 启动：
 //   1) galleryOpen flag = true（上次退出在 gallery） → 停 gallery
 //   2) 否则有上次 session 名 → load → 成功 adopt + 进画布；失败 → 停 gallery
