@@ -467,10 +467,28 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     pushing: () => _busy.pushing,
   };
 
+  // ---- autosave cadence（L4 ②c）：store 拥「何时写本地」的节律。WebPaint **故意不 debounce-per-edit**
+  //   （画图每笔写盘太重）→ cadence = 3min 兜底 timer + 生命周期事件 flush。dirty/busy 判定收这一处，
+  //   取代 app 散落的 4 份 `if(localDirty && !saving) saveNow`。app：configure(persist) + start(ms) 各一次，
+  //   visibility/pagehide/beforeunload 转 flush()。persist=app 注入的本地存（含 encode + blank/transient/newer
+  //   skip 守卫——doc 语义留 app，store 不碰；store 只决定何时调它）。
+  let _autosaveTimer = null;
+  let _persist = async () => {};
+  const autosave = {
+    configure: ({ persist } = {}) => { if (persist) _persist = persist; },
+    start: (intervalMs) => {
+      if (_autosaveTimer != null) clearInterval(_autosaveTimer);
+      _autosaveTimer = setInterval(() => { if (sub.edits.localDirty() && !_busy.saving) _persist(); }, intervalMs);
+    },
+    stop: () => { if (_autosaveTimer != null) { clearInterval(_autosaveTimer); _autosaveTimer = null; } },
+    flush: () => (sub.edits.localDirty() && !_busy.saving) ? _persist() : Promise.resolve(),
+  };
+
   return {
     flow: { push, open, refresh, delete: del, rename, saveAs, acquire, replayDelete, restore, purge, emptyTrash },
     edit,                      // 唯一编辑入口（游标 + 门）（L4 ②）
     busy,                      // transient saving/pushing busy（状态归 store，status 只读）（L4 ②b）
+    autosave,                  // 本地落盘节律（configure/start/flush）：cadence 归 store（L4 ②c）
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
     edits: sub.edits,          // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④，住 substrate）；设置类 local-only 改动仍直用 mark

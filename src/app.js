@@ -3123,15 +3123,15 @@ window.addEventListener("keydown", (e) => {
     _store.session.request(e.shiftKey ? "local" : "push");
   }
 });
-// 3 min 兜底
-setInterval(() => { if (_store.edits.localDirty() && !_store.busy.saving()) saveNow({ implicit: true }); }, AUTOSAVE_MS);
-// visibility / pagehide 抢救（implicit：floating 状态下跳过；layer 留半态在内存，但 IDB 干净）
+// autosave cadence 归 store（L4 ②c）：app 注入 persist（= dirty-gated 本地存，含 blank/transient/newer 守卫）
+//   + start 3min 兜底 timer 各一次；dirty/busy 判定都在 store.autosave 内（取代散落的 4 份 if-saveNow）。
+_store.autosave.configure({ persist: () => saveNow({ implicit: true }) });
+_store.autosave.start(AUTOSAVE_MS);   // 3 min 兜底
+// visibility / pagehide 抢救（implicit：floating 状态下跳过；layer 留半态在内存，但 IDB 干净）→ store.autosave.flush()
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden" && _store.edits.localDirty() && !_store.busy.saving()) saveNow({ implicit: true });
+  if (document.visibilityState === "hidden") _store.autosave.flush();
 });
-window.addEventListener("pagehide", () => {
-  if (_store.edits.localDirty() && !_store.busy.saving()) saveNow({ implicit: true });
-});
+window.addEventListener("pagehide", () => { _store.autosave.flush(); });
 // v115: Ctrl+Shift+R / 关 tab / 浏览器返回 前弹挽留 + 偷偷本地备份
 // (user：「可以弹挽留对话框，应该弹」+「挽留的时候偷偷本地备份」)
 // 1. beforeunload 是唯一能 block 浏览器的钩子；对话框内容浏览器自管
@@ -3142,8 +3142,8 @@ window.addEventListener("beforeunload", (e) => {
   if (_store.edits.localDirty() && !_store.busy.saving()) {
     e.preventDefault();
     e.returnValue = "";
-    // 偷存（implicit 只写 IDB 不推云）；不 await 让 dialog 立刻起
-    saveNow({ implicit: true }).catch(() => {});
+    // 偷存（implicit 只写 IDB 不推云）；不 await 让 dialog 立刻起。flush 内部再判一次 dirty/busy（无害）
+    _store.autosave.flush().catch(() => {});
   }
 });
 

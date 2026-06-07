@@ -406,6 +406,22 @@ describe("Store.busy（②b：transient saving/pushing 归 store，status 只读
   });
 });
 
+describe("Store.autosave（②c：cadence 归 store，flush dirty-gated）", () => {
+  it("flush：仅 dirty && !saving 才调 persist", async () => {
+    const env = mk();
+    let calls = 0;
+    env.store.autosave.configure({ persist: async () => { calls++; } });
+    await env.store.autosave.flush();          // clean → 不调
+    eq(calls, 0);
+    env.store.edit(null);                       // 推游标 → localDirty
+    await env.store.autosave.flush();          // dirty → 调
+    eq(calls, 1);
+    env.store.busy.set("saving", true);
+    await env.store.autosave.flush();          // 正在存盘 → 不重入
+    eq(calls, 1);
+  });
+});
+
 describe("Store parentBase 权威（ADR-0016 §4：clean→dirty 门 + bypass 守卫）", () => {
   it("[对抗] dirty 推送绕过门（无 parentBase）→ 抛，绝不拿陈旧 base 静默覆盖", async () => {
     const env = mk();
