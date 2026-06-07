@@ -25,6 +25,7 @@ import { LiquifyEngine } from "./liquify.js";
 import { LassoEngine } from "./lasso.js";
 import { ShapesEngine } from "./shapes.js";
 import { FilterBrushEngine } from "./filter-brush.js";
+import { isPixelStroke, pixelStrokeSpec, isDrawGated } from "./engine-registry.js";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
 import { SMOOTH } from "./smooth-config.js";
 
@@ -338,7 +339,7 @@ export class InputController {
         if (p.longPressTimer) { clearTimeout(p.longPressTimer); p.longPressTimer = null; }
       }
       for (const [pid, p] of this.pointers) {
-        if (p.role === "draw" || p.role === "erase" || p.role === "liquify" || p.role === "filterBrush") {
+        if (isPixelStroke(p.role)) {
           this._abortStroke();
         } else if (p.role === "lasso") {
           this._abortLasso();
@@ -404,7 +405,7 @@ export class InputController {
 
     // #6 EditMode gate（fail-safe）：transient/非绘画 mode 下，draw 类 role 一律拒绝。
     // 防 role 决策对未知 mode（crop/adjust）fall-through 到 "draw" 而误触 stroke 污染 undo。
-    const _isDrawRole = (role === "draw" || role === "erase" || role === "liquify" || role === "shapes" || role === "filterBrush");
+    const _isDrawRole = isDrawGated(role);
     if (_isDrawRole && this.editMode && !this.editMode.canDraw()) {
       rec.role = null;
       this.pointers.delete(e.pointerId);
@@ -421,7 +422,7 @@ export class InputController {
       return;
     }
 
-    if (role === "draw" || role === "erase" || role === "liquify" || role === "filterBrush") {
+    if (isPixelStroke(role)) {
       // 画 / 液化 / filter brush 的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
       this.board.setCursor(null);
       // 锚 smoothing / raw / 压感 状态到 down 点。液化也走同一套 smoothing 拿
@@ -523,15 +524,16 @@ export class InputController {
       return;
     }
 
-    if (rec.role === "draw" || rec.role === "erase" || rec.role === "liquify" || rec.role === "filterBrush") {
+    if (isPixelStroke(rec.role)) {
+      const spec = pixelStrokeSpec(rec.role);
       // 画 / 液化 / filter brush 的时候不刷 cursor preview，省一次全屏 dirty
       const events = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : null;
       let list = (events && events.length) ? events : [e];
-      // **液化 / filter brush 丢帧**：每个 event 跑 ~31K typed-array ops，大笔半径下 coalesced
-      // 整批连续跑 → 帧延迟堆积 → 越拖越卡。只跑最新一个（保 timeStamp 滤后的）。
+      // **液化 / filter brush 丢帧**（spec.coalesceLatest）：每个 event 跑 ~31K typed-array ops，大笔
+      // 半径下 coalesced 整批连续跑 → 帧延迟堆积 → 越拖越卡。只跑最新一个（保 timeStamp 滤后的）。
       // 画笔不能丢帧，会断笔/疏密；液化 / filter brush 每帧独立重采样，丢帧 = 跳过细分但形状仍连续。
-      if ((rec.role === "liquify" || rec.role === "filterBrush") && list.length > 1) list = [list[list.length - 1]];
-      const settings = (rec.role === "liquify" || rec.role === "filterBrush") ? null : this.getBrushSettings();
+      if (spec.coalesceLatest && list.length > 1) list = [list[list.length - 1]];
+      const settings = spec.usesBrushSettings ? this.getBrushSettings() : null;
       for (const ev of list) {
         // **Safari iOS getCoalescedEvents() 边界回放过滤**：每次 pointermove
         // 的 coalesced 列表会把上一批的样本一起带回来 (eg 一批末尾 t=21，下
@@ -657,7 +659,7 @@ export class InputController {
       }
     }
 
-    if (rec.role === "draw" || rec.role === "erase" || rec.role === "liquify" || rec.role === "filterBrush") {
+    if (isPixelStroke(rec.role)) {
       if (cancelled) this._abortStroke();
       else this._endStroke();
     } else if (rec.role === "lasso") {
@@ -756,8 +758,9 @@ export class InputController {
     const settings = this.getBrushSettings();
     if (!settings || !this.doc.activeLayer) return;
     const layer = this.doc.activeLayer;
-    const tx = this.pixelHistory.begin(layer, "stroke");
-    this._activeStroke = { engine: this.brush, tx, finalize: true };
+    const spec = pixelStrokeSpec(rec.role);   // draw / erase → 同 stroke 事务 + finalize
+    const tx = this.pixelHistory.begin(layer, spec.historyType);
+    this._activeStroke = { engine: this.brush, tx, finalize: spec.finalize };
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, e);
@@ -809,8 +812,9 @@ export class InputController {
     const settings = this.getLiquifySettings();
     if (!settings || !this.doc.activeLayer) { rec.role = null; return; }
     const layer = this.doc.activeLayer;
-    const tx = this.pixelHistory.begin(layer, "liquify");
-    this._activeStroke = { engine: this.liquify, tx, finalize: true };
+    const spec = pixelStrokeSpec(rec.role);   // liquify → 独立 "liquify" 事务 + finalize
+    const tx = this.pixelHistory.begin(layer, spec.historyType);
+    this._activeStroke = { engine: this.liquify, tx, finalize: spec.finalize };
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     // v124 (user：「preview 没 apply 选区」) 把 selection 传给 liquify，stamp 内 mask 外保留 startSnap
     this.liquify.beginStroke(layer, settings, dx, dy, this.doc.selection);
@@ -828,9 +832,10 @@ export class InputController {
       rec.role = null; return;
     }
     const layer = this.doc.activeLayer;
-    const tx = this.pixelHistory.begin(layer, "stroke");
-    // filterBrush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre → 无需 post-stroke finalize
-    this._activeStroke = { engine: this.filterBrush, tx, finalize: false };
+    const spec = pixelStrokeSpec(rec.role);   // filterBrush → "stroke" 事务，finalize:false
+    const tx = this.pixelHistory.begin(layer, spec.historyType);
+    // filterBrush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre → 无需 post-stroke finalize（spec.finalize=false）
+    this._activeStroke = { engine: this.filterBrush, tx, finalize: spec.finalize };
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX, rec.smY);
     const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
     try {
@@ -1253,7 +1258,7 @@ export class InputController {
     if (!p) return;
     if (p.longPressTimer) { clearTimeout(p.longPressTimer); p.longPressTimer = null; }
     // 如果它正在执笔，把笔触状态也收尾掉（保留 history entry）
-    if (p.role === "draw" || p.role === "erase" || p.role === "liquify" || p.role === "filterBrush") this._abortStroke();
+    if (isPixelStroke(p.role)) this._abortStroke();
     else if (p.role === "lasso") this._abortLasso();
     try { this.canvas.releasePointerCapture?.(pid); } catch {}
     this.pointers.delete(pid);
