@@ -7,6 +7,7 @@ import "./folder-merge.test.mjs";
 import "./folder-flow.test.mjs";
 import "./brush-rack-migrate.test.mjs";
 import "./engine-registry.test.mjs";
+import "./pointer-gesture.test.mjs";
 
 console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
 await run();

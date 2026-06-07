@@ -36,6 +36,7 @@ _Avoid_: pause / stop（泛词）, hover
 **Selection**:
 选区，doc 的一等公民。**不可变值对象**（bbox + maskCanvas，alpha=255 内/0 外），拥有 mask 操作：compose（并/减/交）、invert、outline（懒算缓存的行军蚁描边）、applyMaskPostStroke、fill/clearOnLayer、croppedTo/resampledTo。compose/invert/transform 返回新 Selection。`doc.selection` 持 Selection|null，null=无选区=全图可作用。undo 只换引用，不深拷。
 _Avoid_: mask (mask 是 Selection 的实现细节), marquee, selection state
+**已完成的整合·别再提议搬**：compose/invert/outline/applyMaskPostStroke/fill/clear/crop 等 mask 代数**早已全在 selection.js**（见 `lasso.js:30` 注释）；lasso.js 只**构造** Selection（freehand/rect/ellipse/magic）并 `Selection.compose` 委托，不重复实现代数。lasso.js 大（63KB）是因为浮动 gizmo 的透视/单应矩阵数学（`invertMat3`=3×3 矩阵求逆，≠ 选区反选）+ 选区构造，不是冗余代数。历轮 AI（含 fresh explorer）反复幻觉「lasso 该把 mask 操作收回 selection」——那是 2026-05 就做完的事，勘探到此即可停。
 
 **Snapshot**:
 某一刻 layer 像素的拷贝 `{ bboxX/Y/W/H, imageData }`，空层 imageData=null。undo 的原子。

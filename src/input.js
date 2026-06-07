@@ -26,6 +26,7 @@ import { LassoEngine } from "./lasso.js";
 import { ShapesEngine } from "./shapes.js";
 import { FilterBrushEngine } from "./filter-brush.js";
 import { isPixelStroke, pixelStrokeSpec, isDrawGated } from "./engine-registry.js";
+import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./pointer-gesture.js";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
 import { SMOOTH } from "./smooth-config.js";
 
@@ -620,13 +621,9 @@ export class InputController {
           this._gestureTap = null;
           const elapsed = performance.now() - tap.startTime;
           if (tap.isTap && elapsed < GESTURE_TAP_MAX_MS) {
-            if (tap.maxCount === 2) {
-              this.ctrlZ();
-              this.status("双指 · 撤销");
-            } else if (tap.maxCount >= 3) {
-              this.redo();
-              this.status("三指 · 重做");
-            }
+            const act = gestureTapAction(tap.maxCount);   // 2→undo / 3+→redo
+            if (act === "undo") { this.ctrlZ(); this.status("双指 · 撤销"); }
+            else if (act === "redo") { this.redo(); this.status("三指 · 重做"); }
           }
         }
       } else {
@@ -643,12 +640,8 @@ export class InputController {
       const now = performance.now();
       const dur = now - rec.downTime;
       const dist = Math.hypot(rec.x - rec.startX, rec.y - rec.startY);
-      const isTap = dur < TAP_MAX_DURATION && dist < TAP_MAX_MOVE;
-      if (isTap) {
-        const lt = this._lastTap;
-        const isDouble = lt && (now - lt.time) < DOUBLETAP_WINDOW &&
-          Math.hypot(rec.startX - lt.x, rec.startY - lt.y) < DOUBLETAP_MAX_GAP;
-        if (isDouble) {
+      if (isTap(dur, dist, TAP_MAX_DURATION, TAP_MAX_MOVE)) {
+        if (isDoubleTap(now, this._lastTap, rec.startX, rec.startY, DOUBLETAP_WINDOW, DOUBLETAP_MAX_GAP)) {
           this._lastTap = null;
           window.dispatchEvent(new CustomEvent("wp:doubletap"));
           return;
@@ -1066,64 +1059,20 @@ export class InputController {
     const t = this._gestureTouches();
     if (t.length < 2 || !this.gestureStart) return;
     const [a, b] = t;
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    const midX = (a.x + b.x) / 2;
-    const midY = (a.y + b.y) / 2;
-    const angle = Math.atan2(dy, dx);
-    const g = this.gestureStart;
-    // scale 增量
-    const k = dist / g.dist;
-    let newScale = g.vp.scale * k;
-    newScale = Math.max(this.board.minScale, Math.min(this.board.maxScale, newScale));
-    // rotation 增量（两指角度差）
-    let dRot = angle - g.angle;
-    // 归一化到 [-π, π]
-    if (dRot > Math.PI) dRot -= 2 * Math.PI;
-    if (dRot < -Math.PI) dRot += 2 * Math.PI;
-    let newRot = g.vp.rot + dRot;
-    // 旋转 snap 改成松手时才生效（v47）—— gesture 进行中用户拧着角度，
-    // 不要让画面被吸到整数，那样手感粘。endGesture 里检查并 snap 一次。
-    // 围绕 g.midX, g.midY 旋转 + 缩放 + 平移到当前 midX, midY
-    // 用变换的 anchor-preserving 公式（参考 board.rotateAt / zoomAt）：
-    // 1. 起始：viewport = g.vp
-    // 2. 想要：手指开始时按住的 doc 点（screenToDoc(g.midX, g.midY) under g.vp）
-    //    在更新后视口下出现在 (midX, midY)
-    // 直接 setViewport：先求新 tx/ty
-    //   newTx, newTy 让 docPoint @ (g.midX, g.midY) 落到 (midX, midY)
-    // 推导：用临时 viewport (newScale, newRot, ?, ?)，求 ?, ?
-    // 见 board.screenToDoc 公式逆运算
-    const W = this.board.doc.width, H = this.board.doc.height;
-    // 起始时 g.midX, g.midY 对应的 doc 点
-    const startDocCenterX = g.vp.tx + W * g.vp.scale / 2;
-    const startDocCenterY = g.vp.ty + H * g.vp.scale / 2;
-    const sdx = g.midX - startDocCenterX, sdy = g.midY - startDocCenterY;
-    const sc = Math.cos(-g.vp.rot), ss = Math.sin(-g.vp.rot);
-    const dpX = (sdx * sc - sdy * ss) / g.vp.scale + W / 2;
-    const dpY = (sdx * ss + sdy * sc) / g.vp.scale + H / 2;
-    // 现在求 newTx, newTy 让 dpX, dpY 在新视口下落到 midX, midY
-    //   midX = (dpX - W/2) * newScale * cos(newRot) - (dpY - H/2) * newScale * sin(newRot) + cx
-    // 其中 cx = newTx + W * newScale / 2 → 解出 newTx
-    const c = Math.cos(newRot), s = Math.sin(newRot);
-    const rx = (dpX - W / 2) * newScale;
-    const ry = (dpY - H / 2) * newScale;
-    const newCx = midX - (rx * c - ry * s);
-    const newCy = midY - (rx * s + ry * c);
-    const newTx = newCx - W * newScale / 2;
-    const newTy = newCy - H * newScale / 2;
-    this.board.setViewport(newTx, newTy, newScale, newRot);
+    // anchor-preserving 双指变换数学已抽到 pointer-gesture.js（纯函数·可单测）。
+    // 旋转**不**在此 snap（进行中吸附粘手）；松手由 _endGesture/snapRotation 吸。
+    const vp = computePinchViewport(this.gestureStart, a, b, {
+      minScale: this.board.minScale, maxScale: this.board.maxScale,
+      docW: this.board.doc.width, docH: this.board.doc.height,
+    });
+    this.board.setViewport(vp.tx, vp.ty, vp.scale, vp.rot);
   }
   _endGesture() {
     this.gestureStart = null;
     delete document.body.dataset.panning;
-    // 松手时检查旋转是否接近 0°/90°/180°/270°，是则吸到整数。
-    // 阈值 5°（同 Procreate）。在 update 阶段不 snap 是为了不"粘手"。
-    const SNAP_DEG = 5;
-    const snapStep = Math.PI / 2;
-    const cur = this.board.viewport.rot;
-    const n = Math.round(cur / snapStep);
-    const snapped = n * snapStep;
-    if (cur !== snapped && Math.abs(cur - snapped) < SNAP_DEG * Math.PI / 180) {
+    // 松手时旋转吸附（±5° 内吸到 0/90/180/270°；进行中不吸=不粘手）。判定见 pointer-gesture.js。
+    const snapped = snapRotation(this.board.viewport.rot, 5);
+    if (snapped !== null) {
       // 以画布中心为锚，保持画面中心稳定地吸到正角度
       const W = this.board.doc.width, H = this.board.doc.height;
       const vp = this.board.viewport;
