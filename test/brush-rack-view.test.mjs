@@ -1,15 +1,6 @@
 // 笔架 view-model 验收（A3）。纯派生。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { deriveRackCloudState, collectFolders, brushesInFolder } from "../src/brush-rack-view.js";
-
-describe("brush-rack-view · deriveRackCloudState", () => {
-  it("优先级：未登录 > 离线 > 脏 > 已同步", () => {
-    eq(deriveRackCloudState({ signedIn: false, online: true, dirty: true }), "no-auth");
-    eq(deriveRackCloudState({ signedIn: true, online: false, dirty: true }), "offline");
-    eq(deriveRackCloudState({ signedIn: true, online: true, dirty: true }), "dirty");
-    eq(deriveRackCloudState({ signedIn: true, online: true, dirty: false }), "synced");
-  });
-});
+import { collectFolders, brushesInFolder } from "../src/brush-rack-view.js";
 
 describe("brush-rack-view · collectFolders", () => {
   const D = "默认";

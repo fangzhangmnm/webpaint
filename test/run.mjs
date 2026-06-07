@@ -6,6 +6,7 @@ import "./store-flow.test.mjs";
 import "./store-coalescer.test.mjs";
 import "./folder-merge.test.mjs";
 import "./folder-flow.test.mjs";
+import "./folder-store.test.mjs";
 import "./brush-rack-migrate.test.mjs";
 import "./engine-registry.test.mjs";
 import "./pointer-gesture.test.mjs";

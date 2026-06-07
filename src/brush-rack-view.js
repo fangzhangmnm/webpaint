@@ -3,14 +3,8 @@
 // 笔架的 IDB 落盘 / cloud push（rackFolderFlow.sync）/ draft 生命周期是编排，留在 app
 // （同 adoptLoadedDoc 的判断——不把 IDB/网络拖进模块冒充深度）。
 
-// 云态机：登录 / 在线 / 脏 → 图标态枚举。
-//   "busy"（上传中）是 push 进行中由 app 显式置，不在纯派生里。
-export function deriveRackCloudState({ signedIn, online, dirty }) {
-  if (!signedIn) return "no-auth";
-  if (!online) return "offline";
-  if (dirty) return "dirty";
-  return "synced";
-}
+// 云态机已迁入 createFolderStore.status（L4 ③：含 busy，rack=Folder Store 实例）——
+// 旧 deriveRackCloudState 已删；这里只剩笔架视图的 folder 派生。
 
 // 某工具的 brush 列表 → folder 名集合（保序去重；空则给默认夹）。
 export function collectFolders(brushes, defaultFolder) {

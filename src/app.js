@@ -39,7 +39,7 @@ import { decodeImageFile, fitWithin, canvasToBlob, smartResample, fillResampleSe
 import { resizeCropRect, cropRectToInts } from "./crop-geometry.js";
 import { pathFolder, pathBasename, pathJoin } from "./gallery-path.js";
 import { mergeLocalCloud, sliceFolder, folderHasContents } from "./gallery-model.js";
-import { deriveRackCloudState, collectFolders, brushesInFolder } from "./brush-rack-view.js";
+import { collectFolders, brushesInFolder } from "./brush-rack-view.js";
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
 //   filters.js 只剩 Filter 契约 + registry + helper；
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
@@ -55,7 +55,7 @@ import {
   listCloudTrash,
   isCloudDirty, CloudConflictError,
   getLastSessionSignedIn, setLastSessionSignedIn, getKnownETag,
-  rackFolderFlow, setRackDirty, isRackDirty, resolveRef,
+  rackFolderFlow, rackStore, setRackDirty, isRackDirty, resolveRef,
   store as _store,
 } from "./app-store.js";   // cut-over：cloud/auth/graph 全走 lib（app-store shim 保旧名）
 
@@ -6007,11 +6007,8 @@ function updateRackCloudIcon() {
   btn.dataset.state = _rackCloudState;
 }
 function _refreshRackCloudState() {
-  _rackCloudState = deriveRackCloudState({
-    signedIn: isSignedIn(),
-    online: navigator.onLine !== false,
-    dirty: isRackDirty(),
-  });
+  // 单源派生：rackStore.status（含 busy）取代 app 手搓 deriveRackCloudState + _rackCloudState="busy"（C4）。
+  _rackCloudState = rackStore.status({ signedIn: isSignedIn(), online: navigator.onLine !== false });
   updateRackCloudIcon();
 }
 
@@ -6022,24 +6019,28 @@ function _refreshRackCloudState() {
 async function pushBrushRackIfSignedIn() {
   if (!isSignedIn() || !navigator.onLine) { _refreshRackCloudState(); return; }
   if (!_brushRack) return;
-  _rackCloudState = "busy"; updateRackCloudIcon();
-  const res = await rackFolderFlow.sync({
-    version: _brushRack.version, items: _brushRack.brushes,
-    trash: _brushRack.trash || [], resetAt: _brushRack.resetAt || 0,
-  });
-  // 采纳 merge 结果（可能含云端别设备新增的笔）。正在编辑某把笔时不揪它——挂到关闭再 reconcile。
-  if (res.folder && _editingBrushId == null) {
-    _brushRack = { ...(_brushRack), version: res.folder.version, brushes: res.folder.items, trash: res.folder.trash, resetAt: res.folder.resetAt };
-    { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
-    await persistBrushRack();
-    applyToolState(editMode.current());
-    if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+  rackStore.busy.set(true); _refreshRackCloudState();   // busy 归 rackStore（status 含 busy）→ icon 显示上传中
+  try {
+    const res = await rackFolderFlow.sync({
+      version: _brushRack.version, items: _brushRack.brushes,
+      trash: _brushRack.trash || [], resetAt: _brushRack.resetAt || 0,
+    });
+    // 采纳 merge 结果（可能含云端别设备新增的笔）。正在编辑某把笔时不揪它——挂到关闭再 reconcile。
+    if (res.folder && _editingBrushId == null) {
+      _brushRack = { ...(_brushRack), version: res.folder.version, brushes: res.folder.items, trash: res.folder.trash, resetAt: res.folder.resetAt };
+      { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
+      await persistBrushRack();
+      applyToolState(editMode.current());
+      if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+    }
+    if (res.status === "synced") setStatus("笔架已同步到云端");
+    else if (res.status === "invalid") setStatus("笔架云端数据异常，已留待重试", true);
+    else if (res.status === "dirty") { console.warn("[brush-rack sync]", res.error); setStatus("笔架同步失败，已留待重试", true); }
+    // offline：静默
+  } finally {
+    rackStore.busy.set(false);
+    _refreshRackCloudState();   // 单源派生 icon（busy 清、dirty 来自 rackSync）
   }
-  if (res.status === "synced") setStatus("笔架已同步到云端");
-  else if (res.status === "invalid") setStatus("笔架云端数据异常，已留待重试", true);
-  else if (res.status === "dirty") { console.warn("[brush-rack sync]", res.error); setStatus("笔架同步失败，已留待重试", true); }
-  // offline：静默
-  _refreshRackCloudState();   // 单源派生 icon（dirty 来自 rackSync）
 }
 // （旧 _resolveRackCloudConflict 三选对话框已删——Folder shape 的 union-merge 让冲突消失，
 //   FolderFlow 自动无损合并，不再有 lossy「拉云端丢本地/覆盖云端丢云端」）。

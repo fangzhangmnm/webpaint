@@ -6,6 +6,7 @@
 import { createStore, createCloudSync, createOneDriveProvider } from "./store/index.js";
 import { CloudConflictError } from "./store/cloud-sync.js";
 import { createFolderFlow } from "./store/folder-flow.js";
+import { createFolderStore } from "./store/folder-store.js";
 export { resolveRef } from "./store/folder-merge.js";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.js";
 import { CLIENT_ID, SCOPES, sessionFileName } from "./config.js";
@@ -81,10 +82,12 @@ export const isCloudDirty = (name) => _auth.isSignedIn() && cloud.isDirty(name);
 // app 编辑落地只调 _store.edit()，不再直暴露 setCloudDirty（绕过门 = 缺 parentBase footgun，已删）。
 export const getKnownETag = (name) => cloud.getETag(name);
 
-// ---- brush-rack 单源 dirty（v2：取代 app 的 _rackDirty 双源；rackSync 是 SSoT）----
-//   编辑 → setRackDirty(true)；FolderFlow.sync 成功内部清（pull/push setDirty(false)）。
-export const setRackDirty = (d) => rackSync.setDirty("rack", d);
-export const isRackDirty = () => rackSync.isDirty("rack");
+// ---- brush-rack = Folder-shape Store 实例（L4 ③：第二 Store 实例，共享 Substrate 思路）----
+//   busy/status 归 rackStore（取代 app 的 _rackCloudState="busy" + deriveRackCloudState，报告 C4）。
+//   dirty 单源仍是 rackSync（rackStore.setDirty/isDirty 包它）；FolderFlow.sync 成功内部清。
+export const rackStore = createFolderStore({ cloud: rackSync, name: "rack" });
+export const setRackDirty = (d) => rackStore.setDirty(d);
+export const isRackDirty = () => rackStore.isDirty();
 
 // ---- brush-rack = Folder shape：FolderFlow（pull-merge-push，无损 union，零冲突 UI）----
 // 取代 pushBrushRack/pullBrushRack/_resolveRackCloudConflict 那套手搓平行同步栈。
