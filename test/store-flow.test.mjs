@@ -391,6 +391,21 @@ describe("Store.flow.refresh（事件驱动干净快进 · ADR-0016 §2）", () 
   });
 });
 
+describe("Store.busy（②b：transient saving/pushing 归 store，status 只读）", () => {
+  it("saving / pushing 独立置位与读取", () => {
+    const env = mk();
+    eq(env.store.busy.saving(), false);
+    eq(env.store.busy.pushing(), false);
+    env.store.busy.set("saving", true);
+    eq(env.store.busy.saving(), true);
+    eq(env.store.busy.pushing(), false);     // 互不影响
+    env.store.busy.set("pushing", true);
+    env.store.busy.set("saving", false);
+    eq(env.store.busy.saving(), false);
+    eq(env.store.busy.pushing(), true);
+  });
+});
+
 describe("Store parentBase 权威（ADR-0016 §4：clean→dirty 门 + bypass 守卫）", () => {
   it("[对抗] dirty 推送绕过门（无 parentBase）→ 抛，绝不拿陈旧 base 静默覆盖", async () => {
     const env = mk();

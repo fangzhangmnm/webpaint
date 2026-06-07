@@ -458,9 +458,19 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     if (name) cloudState.setDirty(name, true);
   }
 
+  // transient busy（saving=本地 IDB 写盘中 / pushing=云端 push 中）：app 的 save 编排置位，status 只读（L4 ②b）。
+  // 取代 app 的 _docSaving/_cloudPushing 全局——computeSaveState 从此只读 store，不再碰 app 态。
+  const _busy = { saving: false, pushing: false };
+  const busy = {
+    set: (k, v) => { _busy[k] = !!v; },
+    saving: () => _busy.saving,
+    pushing: () => _busy.pushing,
+  };
+
   return {
     flow: { push, open, refresh, delete: del, rename, saveAs, acquire, replayDelete, restore, purge, emptyTrash },
     edit,                      // 唯一编辑入口（游标 + 门）（L4 ②）
+    busy,                      // transient saving/pushing busy（状态归 store，status 只读）（L4 ②b）
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
     edits: sub.edits,          // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④，住 substrate）；设置类 local-only 改动仍直用 mark

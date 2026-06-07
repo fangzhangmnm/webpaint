@@ -2705,12 +2705,12 @@ function hexToHsv(hex) {
 // 抄 AtlasMaker shareback：Ctrl+S 主导 + 3min 兜底 + visibility/pagehide 抢救。
 // 不走 debounce —— 画图工具不该 300ms 自动保存。
 // 本地未落盘 = store.edits.localDirty()（派生自编辑游标，不再用独立的 _docDirty 标志）。
-let _docSaving = false;
+// transient busy（saving=IDB 写盘中 / pushing=云端 push 中）归 store（_store.busy，L4 ②b）——
+// app 不再持 saving/pushing 全局变量；computeSaveState 只读 store。
 // 当前 doc 由比自己高的 WebPaint 版本写过 → 编辑保存有降级风险
 let _loadedDocIsNewer = false;
 let _loadedDocWriterVer = null;
 let _loadedDocNewerConfirmed = false;   // user 已经确认过本 session 的降级风险
-let _cloudPushing = false;     // 区分 IDB 写盘 vs 云端 push（按钮显示不同图标）
 let _docLastSavedAt = 0;
 // **幽灵 current path 保护**：内存里 _activeSessionName 只在 boot load 成功
 // 或用户主动 open / new / save-as 后才升级到真实名字。boot 失败时保持
@@ -2750,8 +2750,8 @@ const ICON_CLOUD_PENDING = '<svg viewBox="0 0 24 24" fill="none" stroke="current
 
 function computeSaveState() {
   // transient（本地未存/存盘中/推云中）= app 态；synced/dirty/local-only = store.cloud.status 单一源（候选2）。
-  if (_cloudPushing) return "cloud-busy";
-  if (_docSaving) return "saving";
+  if (_store.busy.pushing()) return "cloud-busy";
+  if (_store.busy.saving()) return "saving";
   if (_store.edits.localDirty()) return "dirty";
   const st = _store.cloud.status(_activeSessionName, { signedIn: isSignedIn(), hasLocal: true });
   if (st === "dirty") return "cloud-dirty";     // 本地已存、云端未同步
@@ -2803,7 +2803,7 @@ function _docIsBlankUnnamed() {
   return true;
 }
 async function saveNow(opts = {}) {
-  if (_docSaving) return;
+  if (_store.busy.saving()) return;
   if (!_activeSessionName) return;       // gallery-first: 在 gallery 没绑 session → 不保存
   if (_docIsBlankUnnamed()) return;
   if (editMode.hasPendingTransient()) {
@@ -2823,7 +2823,7 @@ async function saveNow(opts = {}) {
     _loadedDocNewerConfirmed = true;
     updateNewerBanner();
   }
-  _docSaving = true;
+  _store.busy.set("saving", true);
   updateSaveStatus();
   try {
     await saveSession(doc, _activeSessionName, _buildOraMeta());   // 本地/云端字节统一：viewport 不进 .ora（ADR-0016 §6）
@@ -2835,7 +2835,7 @@ async function saveNow(opts = {}) {
     console.warn("[session] save failed:", e);
     setStatus("保存失败：" + (e && e.message || e));
   } finally {
-    _docSaving = false;
+    _store.busy.set("saving", false);
     updateSaveStatus();
   }
 }
@@ -2999,8 +2999,8 @@ window.addEventListener("wp:histchange", () => {
 // 云推走 _store.flow.push（lib）：内含 B1 串行 / B2 不丢编辑 / B5 lost-response 自愈 / retry / C4 多tab。
 // 真冲突 → flow.push 返回 {status:"conflict", choice}，下面复用既有 primitives 执行 pull/rename/branch。
 async function saveAndPush() {
-  if (_docSaving) return;
-  if (_cloudPushing) await _awaitCloudPushIdle();
+  if (_store.busy.saving()) return;
+  if (_store.busy.pushing()) await _awaitCloudPushIdle();
   if (!_activeSessionName) { setStatus("没打开作品，无法保存", true); return; }
   if (_store.edits.localDirty()) await saveNow();
   if (_activeSessionName) {
@@ -3017,7 +3017,7 @@ async function saveAndPush() {
   }
   const sessionName = _activeSessionName;
   let conflictChoice = null;
-  _cloudPushing = true;
+  _store.busy.set("pushing", true);
   updateSaveStatus();
   try {
     const result = await _store.flow.push(sessionName, {
@@ -3055,7 +3055,7 @@ async function saveAndPush() {
     console.warn("[cloud] store push failed:", e);
     setStatus("推送失败：" + (e && e.message || e));
   } finally {
-    _cloudPushing = false;
+    _store.busy.set("pushing", false);
     updateSaveStatus();
   }
   // 冲突执行：pull / weak-override 都已由 store 内部完成（备份先于覆盖）；这里只剩 no-op 提示。
@@ -3124,13 +3124,13 @@ window.addEventListener("keydown", (e) => {
   }
 });
 // 3 min 兜底
-setInterval(() => { if (_store.edits.localDirty() && !_docSaving) saveNow({ implicit: true }); }, AUTOSAVE_MS);
+setInterval(() => { if (_store.edits.localDirty() && !_store.busy.saving()) saveNow({ implicit: true }); }, AUTOSAVE_MS);
 // visibility / pagehide 抢救（implicit：floating 状态下跳过；layer 留半态在内存，但 IDB 干净）
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden" && _store.edits.localDirty() && !_docSaving) saveNow({ implicit: true });
+  if (document.visibilityState === "hidden" && _store.edits.localDirty() && !_store.busy.saving()) saveNow({ implicit: true });
 });
 window.addEventListener("pagehide", () => {
-  if (_store.edits.localDirty() && !_docSaving) saveNow({ implicit: true });
+  if (_store.edits.localDirty() && !_store.busy.saving()) saveNow({ implicit: true });
 });
 // v115: Ctrl+Shift+R / 关 tab / 浏览器返回 前弹挽留 + 偷偷本地备份
 // (user：「可以弹挽留对话框，应该弹」+「挽留的时候偷偷本地备份」)
@@ -3139,7 +3139,7 @@ window.addEventListener("pagehide", () => {
 //    后台 IDB transaction 大概率能跑完；user 选「留下」→ 成果保住，选「离开」→
 //    至少有 dialog 那一两秒救了
 window.addEventListener("beforeunload", (e) => {
-  if (_store.edits.localDirty() && !_docSaving) {
+  if (_store.edits.localDirty() && !_store.busy.saving()) {
     e.preventDefault();
     e.returnValue = "";
     // 偷存（implicit 只写 IDB 不推云）；不 await 让 dialog 立刻起
@@ -4603,10 +4603,10 @@ async function withBusy(label, fn) {
 
 // 等云端 push 完成。push 进行中点进图库可能 race（status 报错给错 session 名 / sync-gate sheet 错位）
 async function _awaitCloudPushIdle() {
-  if (!_cloudPushing) return;
+  if (!_store.busy.pushing()) return;
   showFullscreenBusy("正在同步到云端…");
   try {
-    while (_cloudPushing) await new Promise((r) => setTimeout(r, 80));
+    while (_store.busy.pushing()) await new Promise((r) => setTimeout(r, 80));
   } finally { hideFullscreenBusy(); }
 }
 
@@ -4614,7 +4614,7 @@ async function setGalleryOpen(open) {
   if (open) {
     // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存
     editMode.applyPendingTransient();
-    if (_store.edits.localDirty() && !_docSaving) await saveNow();
+    if (_store.edits.localDirty() && !_store.busy.saving()) await saveNow();
     await _awaitCloudPushIdle();   // 等 cloud push 完，防 status race
     document.body.dataset.mode = "gallery";
     els.galleryFull.classList.remove("hidden");
@@ -4624,7 +4624,7 @@ async function setGalleryOpen(open) {
     updateIdbUsage();
   } else {
     editMode.applyPendingTransient();
-    if (_store.edits.localDirty() && !_docSaving) await saveNow();
+    if (_store.edits.localDirty() && !_store.busy.saving()) await saveNow();
     els.galleryFull.classList.add("hidden");
     delete document.body.dataset.mode;
     for (const u of _galleryUrls) URL.revokeObjectURL(u);
@@ -6629,7 +6629,7 @@ function showUpdate() {
 els.updateReload.addEventListener("click", async () => {
   // 用户决定性动作 → apply 所有 pending（套索浮层等）+ 保一次（reload 会清掉内存）
   editMode.applyPendingTransient();
-  if (_store.edits.localDirty() && !_docSaving) await saveNow();
+  if (_store.edits.localDirty() && !_store.busy.saving()) await saveNow();
   // **v60 修**：必须把 skip-waiting 推给 WAITING SW，不是 controller。
   // controller = 当前 active SW（旧版本），收到 skipWaiting 无意义；要的是让 waiting
   // 的新 SW 转 active。然后听 controllerchange 再 reload —— 否则 reload 时旧 SW 还
