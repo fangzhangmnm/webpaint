@@ -11,6 +11,7 @@ import "./pointer-gesture.test.mjs";
 import "./crop-geometry.test.mjs";
 import "./gallery-model.test.mjs";
 import "./brush-rack-view.test.mjs";
+import "./pointer-route.test.mjs";
 
 console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
 await run();

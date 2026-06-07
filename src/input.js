@@ -27,6 +27,7 @@ import { ShapesEngine } from "./shapes.js";
 import { FilterBrushEngine } from "./filter-brush.js";
 import { isPixelStroke, pixelStrokeSpec, isDrawGated } from "./engine-registry.js";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./pointer-gesture.js";
+import { assignRole } from "./pointer-route.js";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
 import { SMOOTH } from "./smooth-config.js";
 
@@ -314,10 +315,7 @@ export class InputController {
     this.canvas.setPointerCapture?.(e.pointerId);
 
     const tool = this.getTool();   // = editMode.current()；transient 时是 "transform"/"crop"/"adjust"
-    let effectiveTool = this.altDown && tool === "brush" ? "picker" : tool;
-    // transform transient 抢占画布路由 → gizmo（机械上 role="lasso"，gizmo 代码在 LassoEngine）。
-    // crop/adjust 的输入走各自 overlay/panel，不在画布路由；它们 fall-through 到 "draw" 由下面 canDraw gate 挡。
-    if (tool === "transform") effectiveTool = "lasso";
+    // effectiveTool（transform→lasso / alt+brush→picker）与 role 决策一起抽到 pointer-route.js
     const x = e.clientX, y = e.clientY;
 
     // pen 正在画 → touch 当掌触
@@ -357,42 +355,12 @@ export class InputController {
       return;
     }
 
-    // 决定角色
-    let role = null;
-    if (tool === "hand" || this.spaceDown) {
-      role = "pan";
-    } else if (e.pointerType === "mouse") {
-      if (e.button === 0) role = effectiveTool === "eraser" ? "erase"
-        : effectiveTool === "picker" ? "pick"
-        : effectiveTool === "liquify" ? "liquify"
-        : effectiveTool === "filterBrush" ? "filterBrush"
-        : effectiveTool === "lasso" ? "lasso"
-        : effectiveTool === "smudge" ? "draw"          // v85+ smudge engine 实装前先按 draw 走
-        : "draw";
-      else role = "pan";
-    } else if (e.pointerType === "pen") {
-      // pen 副按钮 → 强制橡皮
-      if (e.button === 2 || (e.buttons & 2)) role = "erase";
-      else if (effectiveTool === "picker") role = "pick";
-      else if (effectiveTool === "eraser") role = "erase";
-      else if (effectiveTool === "liquify") role = "liquify";
-      else if (effectiveTool === "filterBrush") role = "filterBrush";
-      else if (effectiveTool === "lasso") role = "lasso";
-      else if (effectiveTool === "smudge") role = "draw";       // v85+ smudge engine 后改回 smudge
-      else role = "draw";
-    } else if (e.pointerType === "touch") {
-      if (this.penEverSeen) {
-        role = "pan";
-      } else {
-        if (effectiveTool === "picker") role = "pick";
-        else if (effectiveTool === "eraser") role = "erase";
-        else if (effectiveTool === "liquify") role = "liquify";
-        else if (effectiveTool === "filterBrush") role = "filterBrush";
-        else if (effectiveTool === "lasso") role = "lasso";
-        else if (effectiveTool === "smudge") role = "draw";     // v85+
-        else role = "draw";
-      }
-    }
+    // 决定角色（纯决策抽到 pointer-route.js·可单测；含 hand/space=pan、设备分支、pen 副键=erase、
+    //   touch+penEverSeen=pan、transform→lasso、alt+brush→picker）
+    const role = assignRole({
+      tool, pointerType: e.pointerType, button: e.button, buttons: e.buttons,
+      spaceDown: this.spaceDown, altDown: this.altDown, penEverSeen: this.penEverSeen,
+    });
 
     const now = performance.now();
     const rec = {
