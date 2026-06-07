@@ -5178,6 +5178,31 @@ async function renderGallery() {
         renderGallery();
       });
     } else if (isLocal && isCloud) {
+      // pending（本地有未推改动）→ 显式「补推」菜单项（取代只能 open+exit 才自动推）。
+      // **安全**：先 adoptBase 重锚 If-Match（reloaded 后内存丢了 parentBase，必须补，否则裸推=null base
+      //   会静默盖掉更新的云版 = W2 红线）。云端被改过 → push 412 → onConflict "keep" 不解决、不覆盖，
+      //   提示用户打开它处理冲突。完整 keep/pull/branch 解决留 active 打开路径（saveAndPush）。
+      if (signedIn && isCloudDirty(item.name)) {
+        addAction("推送到云端", async () => {
+          await withBusy(`正在推送 ${item.name} 到云端…`, async () => {
+            try {
+              const loaded = await openSession(item.name);
+              if (!loaded) throw new Error("找不到本地 session");
+              _store.adoptBase(item.name, getKnownETag(item.name));   // 重锚 base-etag/parentBase（同打开时 adoptLoadedDoc）
+              const res = await _store.flow.push(item.name, {
+                encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
+                onConflict: async () => "keep",   // 非 active：云端有新版 → 不静默覆盖，提示打开处理
+              });
+              if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开它处理冲突，或先改名再推）`, true);
+              else setStatus(`已推送到云端：${item.name}`);
+            } catch (err) {
+              if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（打开处理）`, true);
+              else setStatus("推送失败：" + (err && err.message || err));
+            }
+          });
+          renderGallery();
+        });
+      }
       // 卸载 = 删本地副本，云端备份还在。
       // - 无冲突（cloud-dirty=false）：本地跟云端同步过 → 直接卸载
       // - 有冲突（cloud-dirty=true）：本地有未推改动 → warning confirm，卸载会丢
