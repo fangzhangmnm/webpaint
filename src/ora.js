@@ -243,8 +243,11 @@ export async function encodeDocToOra(doc, opts = {}) {
     if (L.bboxW > 0 && L.bboxH > 0) {
       png = await canvasToPngBytes(L.canvas);
     } else {
-      // 空层 → 1×1 透明 png
+      // 空层 → 1×1 透明 png。**必须先取一次 2d context**：OffscreenCanvas 从未 getContext 就
+      // convertToBlob，Chromium 抛「offscreen canvas has no rendering content」→ 空层/空画布存不了。
+      // （renderMerged 那条路径 makeBitmap 后立刻 getContext，所以不踩；只有这个占位分支漏了。）
       const c = makeBitmap(1, 1);
+      c.getContext("2d");
       png = await canvasToPngBytes(c);
     }
     entries.push({ path: `data/layer${L.id}.png`, data: png });
