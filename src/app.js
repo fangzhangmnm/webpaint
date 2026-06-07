@@ -2210,7 +2210,7 @@ async function checkCloudETag(sessionName) {
     // in-sync / cloud-absent → 静默
   }
   // 成功联到云（非离线/出错/跳过）→ 记新鲜度时刻（ADR-0017：开图本身就是一次云端检查）。
-  if (res && !["offline", "cloud-error", "skipped"].includes(res.reason)) { _lastCheckedAt = Date.now(); updateSaveStatus(); }
+  _markActivity();   // 刚开图 = 用户主动到场 → 重置闲置计时（别一进来就快到锁屏阈值）
 }
 
 // ADR-0016 §2：事件驱动的「干净 Work 无损快进」。放下 A 设备、回到 B 设备 → B 触发 focus/visibility/online →
@@ -2221,13 +2221,12 @@ async function checkCloudETag(sessionName) {
 //   点「继续」= 用户主动 → 才查云 + 干净则快进（任何内容变更都在用户点继续之后发生 = solicited）。
 //   新鲜度是 wall-clock 属性、不靠 timer tick——suspend 期间 timer 冻结不跑，回前台靠 visibility/focus 现算
 //   （关机一周再开 → 第一个事件即判 idle → 锁屏；绝不把周龄当新鲜、绝不静默 FF）。
-const FRESHNESS_STALE_AFTER_MS = 3 * 60 * 1000;     // save 图标 synced 显「刷新键」vs「蓝云」的门槛（距上次联云）
 const IDLE_LOCK_AFTER_MS = 3 * 60 * 1000;           // 距上次动笔/操作 ≥ 此 → 锁屏（explicit 继续才刷新）
-let _lastCheckedAt = 0;                              // 上次成功联云确认新鲜度的时刻
 let _lastActivityAt = Date.now();                   // 上次动笔/操作的时刻（idle 锁屏用）
 let _idleLockShowing = false;
-function _freshnessStale() { return Date.now() - _lastCheckedAt >= FRESHNESS_STALE_AFTER_MS; }
 function _markActivity() { _lastActivityAt = Date.now(); }
+// 注：save 图标 synced 态固定显「云✓+角标刷新箭」（中性色，含义=上次保存已同步·点击检查新版本），
+//   不随时间变样——「过期该刷新」由闲置锁屏负责，不在图标上。故无云端新鲜度时钟（_lastCheckedAt 已删）。
 
 let _ffInFlight = false;
 async function maybeFastForwardActive({ manual = false } = {}) {
@@ -2246,7 +2245,6 @@ async function maybeFastForwardActive({ manual = false } = {}) {
       adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
       busy: manual ? withBusy : undefined,   // 手动点 → 锁屏（反馈 + 防刷新中途动笔）；自动轮询 → 静默
     });
-    if (res.status === "in-sync" || res.status === "fast-forwarded") _lastCheckedAt = Date.now();   // 成功联到云、确认了新鲜度
     if (res.status === "fast-forwarded") {
       board.setViewport(vp.tx, vp.ty, vp.scale, vp.rot || 0);   // 还原本设备视口
       setStatus(`已同步到云端最新：${name}`);
@@ -2773,8 +2771,8 @@ const AUTOSAVE_MS = 3 * 60 * 1000;
 const ICON_DISK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
 const ICON_UPLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
 const ICON_CLOUD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
-// 刷新（双箭头圆环）：synced 过了新鲜期 → 提示「点此刷新检查云端」（ADR-0017）。
-const ICON_REFRESH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
+// synced 态图标：云✓（上次保存时已同步）+ 右下角小刷新箭（点击检查云端新版本）。中性色、不随时间变样（ADR-0017）。
+const ICON_CLOUD_CHECK_REFRESH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/><g stroke-width="1.5"><path d="M21.8 18.5a2.3 2.3 0 1 1-.67-1.63"/><polyline points="21.8 16 21.15 16.9 20.2 16.5"/></g></svg>';
 // 上传中：云形 + 旋转的弧。CSS animation rotate 由 [data-state="cloud-busy"] 触发
 const ICON_CLOUD_BUSY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><g class="spin-arc" style="transform-origin: 12px 13px;"><path d="M9 13a3 3 0 0 1 5.5-1.6" /><polyline points="14.5 9.5 14.5 11.4 12.6 11.4" /></g></svg>';
 
@@ -2808,23 +2806,15 @@ function updateSaveStatus() {
   }
   const state = computeSaveState();
   els.topSaveBtn.dataset.state = state;
-  els.topSaveBtn.style.color = "";   // 默认色；仅 synced+fresh 才蓝（ADR-0017）
   const name = _activeSessionName;
   if (state === "cloud-busy") { els.topSaveBtn.innerHTML = ICON_CLOUD_BUSY; els.topSaveBtn.title = `上传中… · ${name}`; }
   else if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存中… · ${name}`; }
   else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存 + 推送 (Ctrl+S) · ${name} · 未保存`; }
   else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = `推送到云端 (Ctrl+S) · ${name} · 本地已存，云端未同步`; }
   else if (state === "synced") {
-    // synced = 无可存可推 → 图标兼作「云端新鲜度 / 刷新」（ADR-0017）。
-    //   fresh（刚确认）= 蓝云✓（成功）；过了新鲜期 = 双箭头刷新键（点此刷新检查）。
-    if (_freshnessStale()) {
-      els.topSaveBtn.innerHTML = ICON_REFRESH;
-      els.topSaveBtn.title = `点此刷新检查云端 · ${name}`;
-    } else {
-      els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK;
-      els.topSaveBtn.style.color = "#2563eb";   // 蓝云 = 刚确认是云端最新
-      els.topSaveBtn.title = `已同步 · 云端最新 · ${name}`;
-    }
+    // synced = 无可存可推 → 云✓（上次保存时已同步）+ 角标刷新箭；点击=检查云端新版本（中性色，不随时间变）。
+    els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK_REFRESH;
+    els.topSaveBtn.title = `已同步云端（上次保存时）· 点击检查是否有新版本 · ${name}`;
   }
   else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `已存本地（IDB 易失，登录云端更安全） · ${name}`; }
 }
@@ -3106,7 +3096,6 @@ async function saveAndPush() {
         : `已同步到云端：${sessionName}`);
       renderGallery();
     }
-    _lastCheckedAt = Date.now();   // 推成功 = 刚确认云端就是本机这份 → 新鲜（save 图标显蓝云非刷新键）（ADR-0017）
   } catch (e) {
     console.warn("[cloud] store push failed:", e);
     setStatus("推送失败：" + (e && e.message || e));
@@ -5991,11 +5980,9 @@ window.addEventListener("offline", () => { updateCloudAuthUI(); });
 // ADR-0017（修订）前台新鲜度 —— **不静默 FF**，超时 explicit 锁屏：
 //   · 活动监听：动笔/操作重置闲置计时（pointerdown/keydown 全局 capture）。
 //   · idle 检查 tick：前台时每 30s 看闲够没 → 锁屏（像 iPad 闲置熄屏；suspend 时 timer 冻结，回前台靠 visibility 现算）。
-//   · 渲染 tick：仅重绘 save 图标，让 synced 的「蓝云↔刷新键」按 wall-clock 切。
 document.addEventListener("pointerdown", _markActivity, true);
 document.addEventListener("keydown", _markActivity, true);
 setInterval(() => { if (document.visibilityState === "visible") showIdleLockIfStale(); }, 30 * 1000);
-setInterval(() => { if (document.visibilityState === "visible") updateSaveStatus(); }, 60 * 1000);
 // Gallery-first 启动：
 //   1) galleryOpen flag = true（上次退出在 gallery） → 停 gallery
 //   2) 否则有上次 session 名 → load → 成功 adopt + 进画布；失败 → 停 gallery
