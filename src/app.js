@@ -657,7 +657,10 @@ board.setOverlayProvider(() => input.brush.getLiveOverlay());
 // v131 修 (user：「液化 windows 又有 partial redraw 白框」)
 //   filter brush（含 v132 后的液化）没用 overlayProvider 通路，board partial render 抓不到，sliver 漏出
 //   strokeActiveHint 兜底：stroke 进行中 = 全屏渲染
-board.setStrokeActiveHint(() => input.filterBrush.isActive?.());
+// v189 修 (user：「像素笔 Windows 又出黑框」)：旧 hint 只兜 filterBrush，像素笔/smudge 直接写 layer、
+//   无 buffered overlay、又非 filterBrush → 漏。改用 input.isStrokeActive()（任一笔画进行中都强全屏，
+//   含 brush/像素笔/smudge/liquify/filterBrush）；buffered 笔本就走 overlayProvider，这里冗余无害。
+board.setStrokeActiveHint(() => input.isStrokeActive());
 board.setLassoProvider(() => ({
   selection:      doc.selection,
   drawingPath:    input.lasso.getDrawingPath(),

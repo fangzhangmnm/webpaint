@@ -694,6 +694,10 @@ export class InputController {
     as.engine.cancelStroke();
     as.tx.abort();
   }
+  // 任一像素笔画进行中（brush / 像素笔 / smudge / liquify / filterBrush 都设 _activeStroke）。
+  // board partial-render 守卫用它强走全屏 → 避开 Windows clip-sliver 黑框（docs/lessons-canvas-edge-bugs.md 坑2）。
+  // 原来 strokeActiveHint 只兜 filterBrush，**像素笔直接写 layer、无 buffered overlay、又非 filterBrush → 漏出黑框**。
+  isStrokeActive() { return !!this._activeStroke; }
 
   // ---- 液化 ----
   // 一次"按-拖-抬"= 一个 "liquify" history entry。schema 同 stroke。
