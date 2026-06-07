@@ -16,6 +16,10 @@
 //   直接读自家 canvas 像素（所见即所吸），复用主吸色的 pin（wp:pickerShow）。其余仍不参与笔刷/undo。
 // 不持久化原图（dataURL 占空间）—— 关掉 panel = 释放图。下次开要重新选
 
+// 参考窗用独立 viewport（image-origin 约定），但双指变换的三角与主画布同一套：
+// 共享 pinchScaleRot + solveAnchorTranslation（见 pointer-gesture.js / K3）。
+import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.js";
+
 const LS_POS = "webpaint.refPanel.pos";       // {left, top, width, height}
 const LS_VP  = "webpaint.refPanel.vp";        // {tx, ty, scale, rot}
 const LS_OPEN = "webpaint.refPanel.open";     // "1" | "0"
@@ -309,27 +313,12 @@ export class ReferenceWindow {
       const midY = (arr[0].y + arr[1].y) / 2;
       const angle = Math.atan2(dy, dx);
       const g = this._gestureStart;
-      const k = dist / g.dist;
-      let dRot = angle - g.angle;
-      if (dRot > Math.PI) dRot -= 2 * Math.PI;
-      if (dRot < -Math.PI) dRot += 2 * Math.PI;
-      // anchor-preserving: 把 g.midX/Y 那个 image 坐标在新 viewport 下保持在 midX/Y
-      const newScale = clamp(g.vp.scale * k, 0.02, 50);
-      const newRot = g.vp.rot + dRot;
-      // 求 newTx, newTy 使 image-point(=screenToImg(g.midX, g.midY, g.vp)) 落到 (midX, midY)
+      // 共享 scale/rot + anchor 解（image-origin 约定）：起手按住的 image 点保持在当前两指中点
+      const { scale, rot } = pinchScaleRot(g, dist, angle, 0.02, 50);
       const rect = this.canvas.getBoundingClientRect();
-      const sm0 = g.midX - rect.left;
-      const sm1 = g.midY - rect.top;
-      const sx = midX - rect.left;
-      const sy = midY - rect.top;
-      // image point under g.vp
-      const ip = screenToImg(sm0, sm1, g.vp);
-      // 求 newTx newTy: imgToScreen(ip, vp') == (sx, sy)
-      // imgToScreen: (img.x * scale * cos - img.y * scale * sin + tx, ... + ty)
-      const c = Math.cos(newRot), si = Math.sin(newRot);
-      const newTx = sx - (ip.x * newScale * c - ip.y * newScale * si);
-      const newTy = sy - (ip.x * newScale * si + ip.y * newScale * c);
-      this.vp = { tx: newTx, ty: newTy, scale: newScale, rot: newRot };
+      const ip = screenToImg(g.midX - rect.left, g.midY - rect.top, g.vp);
+      const t = solveAnchorTranslation(ip, scale, rot, midX - rect.left, midY - rect.top);
+      this.vp = { tx: t.tx, ty: t.ty, scale, rot };
       this._saveVp();
       this._invalidate();
     }
@@ -388,10 +377,9 @@ export class ReferenceWindow {
     const ip = screenToImg(sx, sy, this.vp);
     const factor = e.ctrlKey || e.metaKey ? Math.exp(-e.deltaY * 0.01) : Math.exp(-e.deltaY * 0.005);
     const newScale = clamp(this.vp.scale * factor, 0.02, 50);
-    const c = Math.cos(this.vp.rot), si = Math.sin(this.vp.rot);
-    this.vp.tx = sx - (ip.x * newScale * c - ip.y * newScale * si);
-    this.vp.ty = sy - (ip.x * newScale * si + ip.y * newScale * c);
-    this.vp.scale = newScale;
+    // anchor-preserving 以光标为锚（同 pinch 的解，复用 solveAnchorTranslation）
+    const t = solveAnchorTranslation(ip, newScale, this.vp.rot, sx, sy);
+    this.vp.tx = t.tx; this.vp.ty = t.ty; this.vp.scale = newScale;
     this._saveVp();
     this._invalidate();
   }

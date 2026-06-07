@@ -8,29 +8,46 @@
 // **不**动 live 派发（那是设备态机，需真机验，留 input.js）。input 只在 _updateGesture /
 // _endGesture / _up 的 tap 分支调这些函数，行为逐字保持。
 
-// 双指 anchor-preserving 变换：起手锚点在新视口下仍落在当前两指中点。
+// ---- 两个共享 kernel（board 与参考窗都用；最易错符号、过去各抄一份的那段三角）----
+
+// 双指 scale+rot 增量：两 caller 完全相同的部分。
+//   start = { dist, angle, vp:{scale,rot} }（caller 拍的起手快照；mid/坐标系各自管）
+//   dist/angle = 当前两指的连线长度/角度
+//   → { scale（已夹 [minScale,maxScale]）, rot（已把角度差归一化到 [-π,π] 再叠加）}
+export function pinchScaleRot(start, dist, angle, minScale, maxScale) {
+  const scale = Math.max(minScale, Math.min(maxScale, start.vp.scale * (dist / start.dist)));
+  let dRot = angle - start.angle;
+  if (dRot > Math.PI) dRot -= 2 * Math.PI;
+  if (dRot < -Math.PI) dRot += 2 * Math.PI;
+  return { scale, rot: start.vp.rot + dRot };
+}
+
+// anchor-preserving 平移解（origin-affine：screen = scale·R(rot)·model + (tx,ty)）：
+// 求 (tx,ty) 让固定的 model 点落到屏幕 (screenX, screenY)。
+// board pinch / 参考窗 pinch / 参考窗 wheel 三处都是这段，过去各抄一份。
+export function solveAnchorTranslation(modelPt, scale, rot, screenX, screenY) {
+  const c = Math.cos(rot), s = Math.sin(rot);
+  return {
+    tx: screenX - (modelPt.x * scale * c - modelPt.y * scale * s),
+    ty: screenY - (modelPt.x * scale * s + modelPt.y * scale * c),
+  };
+}
+
+// 双指 anchor-preserving 变换（board / 主画布 = doc-center 约定）：起手锚点在新视口下仍落当前两指中点。
 //   start = { dist, midX, midY, angle, vp:{tx,ty,scale,rot} }   （_beginGesture 拍的起手快照）
-//   a, b  = 当前两指 {x,y}（screen）
-//   limits = { minScale, maxScale, docW, docH }
+//   a, b  = 当前两指 {x,y}（screen）；limits = { minScale, maxScale, docW, docH }
 //   → 新 viewport { tx, ty, scale, rot }
 // 旋转**不**在此 snap（进行中吸附会粘手）；松手吸附交给 snapRotation。
+// 共享三角走 pinchScaleRot + solveAnchorTranslation；这里只剩 board 自己的 doc-center 记账。
 export function computePinchViewport(start, a, b, limits) {
   const dx = b.x - a.x, dy = b.y - a.y;
   const dist = Math.hypot(dx, dy) || 1;
   const midX = (a.x + b.x) / 2;
   const midY = (a.y + b.y) / 2;
   const angle = Math.atan2(dy, dx);
+  const { scale, rot } = pinchScaleRot(start, dist, angle, limits.minScale, limits.maxScale);
+  // 起手 g.midX/g.midY 对应的 doc 点（board.screenToDoc 逆运算），减 doc 中心 → origin-affine 的 model 点
   const g = start;
-  // scale 增量（夹到 board 缩放区间）
-  const k = dist / g.dist;
-  let newScale = g.vp.scale * k;
-  newScale = Math.max(limits.minScale, Math.min(limits.maxScale, newScale));
-  // rotation 增量（两指连线角度差，归一化到 [-π, π]）
-  let dRot = angle - g.angle;
-  if (dRot > Math.PI) dRot -= 2 * Math.PI;
-  if (dRot < -Math.PI) dRot += 2 * Math.PI;
-  const newRot = g.vp.rot + dRot;
-  // 起手 g.midX/g.midY 对应的 doc 点（board.screenToDoc 逆运算；公式见 board）
   const W = limits.docW, H = limits.docH;
   const startDocCenterX = g.vp.tx + W * g.vp.scale / 2;
   const startDocCenterY = g.vp.ty + H * g.vp.scale / 2;
@@ -38,18 +55,9 @@ export function computePinchViewport(start, a, b, limits) {
   const sc = Math.cos(-g.vp.rot), ss = Math.sin(-g.vp.rot);
   const dpX = (sdx * sc - sdy * ss) / g.vp.scale + W / 2;
   const dpY = (sdx * ss + sdy * sc) / g.vp.scale + H / 2;
-  // 求 newTx/newTy 让该 doc 点在新视口下落到当前 midX/midY
-  const c = Math.cos(newRot), s = Math.sin(newRot);
-  const rx = (dpX - W / 2) * newScale;
-  const ry = (dpY - H / 2) * newScale;
-  const newCx = midX - (rx * c - ry * s);
-  const newCy = midY - (rx * s + ry * c);
-  return {
-    tx: newCx - W * newScale / 2,
-    ty: newCy - H * newScale / 2,
-    scale: newScale,
-    rot: newRot,
-  };
+  const cen = solveAnchorTranslation({ x: dpX - W / 2, y: dpY - H / 2 }, scale, rot, midX, midY);
+  // board.tx/ty 存的是「doc 左上角 ± 中心」记账 → 把 origin 解换回 board 约定
+  return { tx: cen.tx - W * scale / 2, ty: cen.ty - H * scale / 2, scale, rot };
 }
 
 // 松手旋转吸附（Procreate：±5° 内吸到 0/90/180/270°）。

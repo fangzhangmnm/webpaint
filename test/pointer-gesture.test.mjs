@@ -4,6 +4,7 @@
 import { describe, it, assert } from "./runner.mjs";
 import {
   computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction,
+  pinchScaleRot, solveAnchorTranslation,
 } from "../src/pointer-gesture.js";
 
 const approx = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
@@ -75,6 +76,46 @@ describe("pointer-gesture · computePinchViewport（anchor-preserving）", () =>
     const g = startFrom({ x: 499, y: 500 }, { x: 501, y: 500 }, idVp); // dist≈2
     const nvp = computePinchViewport(g, { x: 0, y: 500 }, { x: 1000, y: 500 }, limits); // dist 1000 → k=500
     assert(approx(nvp.scale, limits.maxScale), `应夹到 maxScale，实得 ${nvp.scale}`);
+  });
+});
+
+describe("pointer-gesture · 共享 kernel（参考窗复用同一套）", () => {
+  it("pinchScaleRot：scale=起手×(dist比)，夹区间；rot=归一化角度差叠加", () => {
+    const start = { dist: 100, angle: 0, vp: { scale: 2, rot: 0 } };
+    const r = pinchScaleRot(start, 150, Math.PI / 4, 0.1, 50);
+    assert(approx(r.scale, 3), `scale 应 2×1.5=3，实得 ${r.scale}`);
+    assert(approx(r.rot, Math.PI / 4), `rot 应 π/4，实得 ${r.rot}`);
+    // 角度差跨 ±π 要走短弧（归一化）：start angle≈π，cur≈-π → dRot≈0 不是 2π
+    const wrap = pinchScaleRot({ dist: 10, angle: Math.PI - 0.05, vp: { scale: 1, rot: 0 } }, 10, -Math.PI + 0.05, 0.1, 50);
+    assert(Math.abs(wrap.rot) < 0.2, `跨 ±π 应走短弧，实得 ${wrap.rot}`);
+    // 夹取
+    assert(approx(pinchScaleRot({ dist: 1, angle: 0, vp: { scale: 1, rot: 0 } }, 1000, 0, 0.1, 50).scale, 50), "夹到 max");
+  });
+
+  // 参考窗（image-origin 约定）：screen = scale·R(rot)·img + (tx,ty)。
+  // 验 pinchScaleRot + solveAnchorTranslation 组出的 vp 让起手 image 锚点落回当前两指中点。
+  it("solveAnchorTranslation：image-origin 下 anchor 落回当前中点（参考窗路径）", () => {
+    const imgToScreen = (ip, vp) => {
+      const c = Math.cos(vp.rot), s = Math.sin(vp.rot);
+      return { x: ip.x * vp.scale * c - ip.y * vp.scale * s + vp.tx, y: ip.x * vp.scale * s + ip.y * vp.scale * c + vp.ty };
+    };
+    const screenToImg = (sx, sy, vp) => {
+      const c = Math.cos(-vp.rot), s = Math.sin(-vp.rot);
+      const dx = sx - vp.tx, dy = sy - vp.ty;
+      return { x: (dx * c - dy * s) / vp.scale, y: (dx * s + dy * c) / vp.scale };
+    };
+    const startVp = { tx: 40, ty: 80, scale: 1.3, rot: 0.4 };
+    const sa = { x: 60, y: 70 }, sb = { x: 220, y: 130 };
+    const g = startFrom(sa, sb, startVp);
+    const ca = { x: 90, y: 60 }, cb = { x: 300, y: 240 };   // 当前两指
+    const dx = cb.x - ca.x, dy = cb.y - ca.y;
+    const { scale, rot } = pinchScaleRot(g, Math.hypot(dx, dy), Math.atan2(dy, dx), 0.02, 50);
+    const ip = screenToImg(g.midX, g.midY, startVp);          // 起手锚的 image 坐标
+    const t = solveAnchorTranslation(ip, scale, rot, (ca.x + cb.x) / 2, (ca.y + cb.y) / 2);
+    const back = imgToScreen(ip, { ...t, scale, rot });
+    const m = mid(ca, cb);
+    assert(approx(back.x, m.x, 1e-4) && approx(back.y, m.y, 1e-4),
+      `image-origin anchor 未保持：(${back.x.toFixed(2)},${back.y.toFixed(2)}) vs 中点(${m.x},${m.y})`);
   });
 });
 
