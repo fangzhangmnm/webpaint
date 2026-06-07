@@ -4602,12 +4602,12 @@ async function withBusy(label, fn) {
 }
 
 // 等云端 push 完成。push 进行中点进图库可能 race（status 报错给错 session 名 / sync-gate sheet 错位）
+// 等当前云端 push 跑完（防 status race）。L4 ②d：不再 80ms 轮询，await store 的真信号 whenPushIdle
+//   （store serialize 落地那刻 resolve）。fullscreen-busy 是 app UI，留这；轮询那段（重抄 store serialize）删了。
 async function _awaitCloudPushIdle() {
   if (!_store.busy.pushing()) return;
   showFullscreenBusy("正在同步到云端…");
-  try {
-    while (_store.busy.pushing()) await new Promise((r) => setTimeout(r, 80));
-  } finally { hideFullscreenBusy(); }
+  try { await _store.busy.whenPushIdle(); } finally { hideFullscreenBusy(); }
 }
 
 async function setGalleryOpen(open) {

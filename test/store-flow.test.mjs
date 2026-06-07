@@ -404,6 +404,18 @@ describe("Store.busy（②b：transient saving/pushing 归 store，status 只读
     eq(env.store.busy.saving(), false);
     eq(env.store.busy.pushing(), true);
   });
+  it("whenPushIdle：无 push 立即 resolve；有 push 等 set(pushing,false) 才 resolve", async () => {
+    const env = mk();
+    await env.store.busy.whenPushIdle();           // 无 push → 立即（不挂起）
+    env.store.busy.set("pushing", true);
+    let resolved = false;
+    env.store.busy.whenPushIdle().then(() => { resolved = true; });
+    await Promise.resolve(); await Promise.resolve();
+    eq(resolved, false, "push 在飞 → 仍等待");
+    env.store.busy.set("pushing", false);
+    await Promise.resolve(); await Promise.resolve();
+    eq(resolved, true, "push 落地 → resolve");
+  });
 });
 
 describe("Store.autosave（②c：cadence 归 store，flush dirty-gated）", () => {

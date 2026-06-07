@@ -461,10 +461,19 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // transient busy（saving=本地 IDB 写盘中 / pushing=云端 push 中）：app 的 save 编排置位，status 只读（L4 ②b）。
   // 取代 app 的 _docSaving/_cloudPushing 全局——computeSaveState 从此只读 store，不再碰 app 态。
   const _busy = { saving: false, pushing: false };
+  let _pushIdleWaiters = [];
   const busy = {
-    set: (k, v) => { _busy[k] = !!v; },
+    set: (k, v) => {
+      _busy[k] = !!v;
+      if (k === "pushing" && !_busy.pushing && _pushIdleWaiters.length) {   // push 落地 → 唤醒所有等待者
+        const ws = _pushIdleWaiters; _pushIdleWaiters = []; ws.forEach((r) => r());
+      }
+    },
     saving: () => _busy.saving,
     pushing: () => _busy.pushing,
+    // 等当前 push 跑完（L4 ②d）：取代 app 的 80ms 轮询 _awaitCloudPushIdle = 重抄 store serialize。
+    // 无 push 在飞 → 立即 resolve；有 → 等 set("pushing",false) 那刻 resolve。
+    whenPushIdle: () => _busy.pushing ? new Promise((r) => _pushIdleWaiters.push(r)) : Promise.resolve(),
   };
 
   // ---- autosave cadence（L4 ②c）：store 拥「何时写本地」的节律。WebPaint **故意不 debounce-per-edit**
