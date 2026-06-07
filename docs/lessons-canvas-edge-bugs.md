@@ -88,6 +88,16 @@ _renderPartial(docRect) {
 
 stroke 期间一帧多几个 fillRect 在 hidpi 上微秒级，**60fps 安全**。换掉 partial render 的 clip sliver bug 不再可能发生。
 
+### 回归（v179）—— commit 帧是 overlay 守卫的盲区
+
+**症状**：Windows 上**抬笔时**出灰框（不是画的时候）。Mac/iPad 不复现。
+
+**根因**：第二招的守卫是「有 live overlay → 强 full」，只罩**画的时候**。但 buffered（frozen/tail = "double buffer"）笔触在 `brush.endStroke()` 里把 buffer 烤进 layer 后 `this._stroke = null` → `getLiveOverlay()` 立刻返回 null。随后 `input._endStroke()` 的 commit 帧（无选区时）走 `board.requestRender()` → partial render，**此刻 overlay 已 null，守卫拦不住** → 撞 clip-sliver 灰框。有选区时走 `invalidateAll()`（full）所以不复现 = 间歇性的来源。
+
+**修**：commit 帧无条件 full —— `input._endStroke()` 末尾 `this.board.invalidateAll()`（原来 `if (sel) invalidateAll(); else requestRender();`）。抬笔是人速、一帧 full 无感。
+
+**Takeaway**：守卫「stroke 进行中 → full」要覆盖**整个 stroke 生命周期含 commit 那一帧**。double-buffer 把「实际像素落 layer」推迟到 pen-up，于是 overlay 在 commit *之前* 就清了——守卫的边界从「画的时候」偷偷挪到了「画 + 抬笔的前一刻」，commit 帧掉进盲区。改 buffer 架构时，**重画 stroke 生命周期里 overlay 何时为真**。
+
 ### Takeaway
 - "我能修这个 sub-pixel rounding bug" 经常是**幻觉**，GPU 路径上有太多浮点转整数的环节，client code 控不住
 - 当 **stroke 进行中** 一帧 cost 不变（user 在画，CPU 反正满载），是**最适合"放弃 optimization"** 的时机

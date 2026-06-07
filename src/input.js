@@ -790,7 +790,10 @@ export class InputController {
     as.engine.endStroke();
     const sel = as.finalize ? this.doc.selection : null;
     as.tx.commit(sel ? (layer, pre) => sel.applyMaskPostStroke(layer, pre) : null);
-    if (sel) this.board.invalidateAll(); else this.board.requestRender();
+    // 抬笔 commit 帧**强制全屏**：endStroke() 已把 buffer 烤进 layer 并清掉 live overlay（_stroke=null），
+    // 这一帧再走 partial 会撞 Windows clip-sliver 灰框——_renderPartial 的 overlay 守卫此刻拦不住（overlay 已 null）。
+    // 见 docs/lessons-canvas-edge-bugs.md 坑2：buffered（double-buffer）stroke commit 是守卫的盲区，full 兜底。
+    this.board.invalidateAll();
   }
   _abortStroke() {
     const as = this._activeStroke;
