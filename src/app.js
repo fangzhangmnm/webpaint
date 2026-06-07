@@ -36,6 +36,10 @@ import {
 import { Selection } from "./selection.js";
 import { SMOOTH, SMOOTH_DEFAULTS, saveSmooth, resetSmooth } from "./smooth-config.js";
 import { decodeImageFile, fitWithin, canvasToBlob, smartResample, fillResampleSelect } from "./resample.js";
+import { resizeCropRect, cropRectToInts } from "./crop-geometry.js";
+import { pathFolder, pathBasename, pathJoin } from "./gallery-path.js";
+import { mergeLocalCloud, sliceFolder, folderHasContents } from "./gallery-model.js";
+import { deriveRackCloudState, collectFolders, brushesInFolder } from "./brush-rack-view.js";
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
 //   filters.js 只剩 Filter 契约 + registry + helper；
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
@@ -3313,11 +3317,7 @@ document.getElementById("cropToolbarApply").addEventListener("click", () => {
   if (!_cropState) return;
   // v127 (user：「裁切还可以扩张」)：允许 x/y 负（向左/向上扩），允许 w/h > doc（向右/向下扩）
   //   只保最小 1 + 最大 8192；doc.cropTo 已支持负 dx/dy
-  const r = _cropState.rect;
-  const x = r.x | 0;
-  const y = r.y | 0;
-  const w = Math.max(1, Math.min(8192, r.w | 0));
-  const h = Math.max(1, Math.min(8192, r.h | 0));
+  const { x, y, w, h } = cropRectToInts(_cropState.rect, { min: 1, max: 8192 });
   const before = _captureDocBefore();
   doc.cropTo({ x, y, w, h });
   _shiftViewportAfterCrop({ x, y });
@@ -3351,27 +3351,8 @@ document.getElementById("cropToolbarApply").addEventListener("click", () => {
     const scale = board.viewport.scale;
     const dx = dx_screen / scale;
     const dy = dy_screen / scale;
-    const r0 = _cropState.startRect;
-    const r = { ..._cropState.rect };
-    const h = _cropState.drag;
-    if (h === "move") {
-      r.x = r0.x + dx;
-      r.y = r0.y + dy;
-    } else {
-      if (h.includes("n")) { r.y = r0.y + dy; r.h = r0.h - dy; }
-      if (h.includes("s")) { r.h = r0.h + dy; }
-      if (h.includes("w")) { r.x = r0.x + dx; r.w = r0.w - dx; }
-      if (h.includes("e")) { r.w = r0.w + dx; }
-    }
-    // v127 (user：「裁切还可以扩张」)
-    //   原本 clamp 到 [0, doc] 不让拖出；现在只保 min 4px + max 8192
-    //   r.x / r.y 可负（向左 / 向上 扩张）；r.w / r.h 可超 doc（向右 / 向下 扩张）
-    //   doc.cropTo 已支持负 dx/dy 扩张语义，不需要再改
-    if (r.w < 4) { r.w = 4; if (h.includes("w")) r.x = r0.x + r0.w - 4; }
-    if (r.h < 4) { r.h = 4; if (h.includes("n")) r.y = r0.y + r0.h - 4; }
-    if (r.w > 8192) { r.w = 8192; if (h.includes("w")) r.x = r0.x + r0.w - 8192; }
-    if (r.h > 8192) { r.h = 8192; if (h.includes("n")) r.y = r0.y + r0.h - 8192; }
-    _cropState.rect = r;
+    // 8-handle resize 几何（含「缩到下限对边不动」+ v127 向外扩张）抽到 crop-geometry.js
+    _cropState.rect = resizeCropRect(_cropState.drag, _cropState.startRect, dx, dy, { min: 4, max: 8192 });
     _renderCropOverlay();
   });
   overlay.addEventListener("pointerup", (e) => {
@@ -4553,19 +4534,7 @@ function setGalleryFolder(path) {
 // 本次渲染拿到的云端真文件夹路径（renderGallery 填，_renderFolderTile / 空判用）。
 let _galleryCloudFolders = [];
 // path utils
-function pathFolder(name) {
-  const i = name.lastIndexOf("/");
-  return i < 0 ? "" : name.slice(0, i);
-}
-function pathBasename(name) {
-  const i = name.lastIndexOf("/");
-  return i < 0 ? name : name.slice(i + 1);
-}
-function pathJoin(folder, name) {
-  if (!folder) return name;
-  if (!name) return folder;
-  return `${folder}/${name}`;
-}
+// 路径代数 pathFolder/pathBasename/pathJoin 已下沉 gallery-path.js（import 在顶）。
 
 // gallery-first 设计：删 / 卸载 active session 后，**进 gallery**（不创建新空白 doc）。
 // _activeSessionName 设 null = 未绑定任何 session；画布 hidden。
@@ -4971,52 +4940,9 @@ async function renderGallery() {
     try { const all = await listCloudAll(); cloud = all.files; _galleryCloudFolders = all.folders; }
     catch (e) { console.warn("[cloud] list failed:", e); }
   }
-  // 合并：用 name (无 .ora 后缀) 当 key
-  const byName = new Map();
-  for (const l of local) {
-    byName.set(l.name, { name: l.name, local: l, cloud: null });
-  }
-  for (const c of cloud) {
-    const name = c.path.replace(/\.ora$/i, "");
-    const ent = byName.get(name);
-    if (ent) ent.cloud = c;
-    else byName.set(name, { name, local: null, cloud: c });
-  }
-  const allItems = [...byName.values()];
-
-  // ====== 子文件夹切片 ======
-  // 取 _galleryFolder prefix 之内的 items；按"剩余路径含 /"分 folder vs file
-  const prefix = _galleryFolder ? `${_galleryFolder}/` : "";
-  const folderSet = new Set();    // 当前层 immediate sub-folder name
-  const filesInFolder = [];        // 当前层 direct child files
-  for (const it of allItems) {
-    if (_galleryFolder && !it.name.startsWith(prefix)) continue;
-    const rest = it.name.slice(prefix.length);
-    const slashIdx = rest.indexOf("/");
-    if (slashIdx >= 0) {
-      folderSet.add(rest.slice(0, slashIdx));
-    } else if (rest) {
-      filesInFolder.push(it);
-    }
-  }
-  // 云端真文件夹（含空）—— 文件夹模型单一真相源（取代旧 explicitFolders 旁路）。
-  for (const f of _galleryCloudFolders) {
-    if (_galleryFolder) {
-      if (f === _galleryFolder || !f.startsWith(prefix)) continue;
-      const rest = f.slice(prefix.length);
-      const seg = rest.includes("/") ? rest.slice(0, rest.indexOf("/")) : rest;
-      if (seg) folderSet.add(seg);
-    } else {
-      const first = f.split("/")[0];
-      if (first) folderSet.add(first);
-    }
-  }
-  filesInFolder.sort((a, b) => {
-    const ta = (a.local?.updatedAt) || Date.parse(a.cloud?.lastModifiedDateTime || 0);
-    const tb = (b.local?.updatedAt) || Date.parse(b.cloud?.lastModifiedDateTime || 0);
-    return tb - ta;
-  });
-  const folderNames = [...folderSet].sort((a, b) => a.localeCompare(b));
+  // 合并 local⊕cloud + 切当前文件夹层（folder 模型已下沉 gallery-model.js）
+  const allItems = mergeLocalCloud(local, cloud);
+  const { folderNames, files: filesInFolder } = sliceFolder(allItems, _galleryCloudFolders, _galleryFolder);
 
   // ====== Breadcrumb ======
   _renderBreadcrumb();
@@ -5036,10 +4962,8 @@ async function renderGallery() {
   // ====== Folder tiles 先（字母序） ======
   for (const folderName of folderNames) {
     const folderPath = pathJoin(_galleryFolder, folderName);
-    // 是否为空：没有 item 也没有子文件夹以这 path 为 prefix（非空时禁删，避免级联）
-    const fullPrefix = `${folderPath}/`;
-    const hasItems = allItems.some((it) => it.name.startsWith(fullPrefix))
-      || _galleryCloudFolders.some((f) => f.startsWith(fullPrefix));
+    // 非空（有 item 或子夹）→ 禁删，避免级联删整棵子树
+    const hasItems = folderHasContents(allItems, _galleryCloudFolders, folderPath);
     _renderFolderTile(folderName, folderPath, hasItems);
   }
 
@@ -6062,10 +5986,11 @@ function updateRackCloudIcon() {
   btn.dataset.state = _rackCloudState;
 }
 function _refreshRackCloudState() {
-  if (!isSignedIn()) _rackCloudState = "no-auth";
-  else if (navigator.onLine === false) _rackCloudState = "offline";
-  else if (isRackDirty()) _rackCloudState = "dirty";
-  else _rackCloudState = "synced";
+  _rackCloudState = deriveRackCloudState({
+    signedIn: isSignedIn(),
+    online: navigator.onLine !== false,
+    dirty: isRackDirty(),
+  });
   updateRackCloudIcon();
 }
 
@@ -6135,11 +6060,8 @@ function _renderRackSheet() {
     </div>`;
     return;
   }
-  // 收集 folder 列表
-  const folderSet = new Set();
-  for (const b of brushes) folderSet.add(b.folder || DEFAULT_FOLDER);
-  if (folderSet.size === 0) folderSet.add(DEFAULT_FOLDER);
-  const folders = Array.from(folderSet);
+  // 收集 folder 列表（纯派生下沉 brush-rack-view.js）
+  const folders = collectFolders(brushes, DEFAULT_FOLDER);
   if (!folders.includes(_rackCurrentFolder)) _rackCurrentFolder = folders[0];
   // 渲 folder tabs
   _rackEls.folders.innerHTML = "";
@@ -6158,7 +6080,7 @@ function _renderRackSheet() {
   // 渲 brush tiles
   const activeId = state.toolStates[_rackCurrentTool]?.activeBrushId;
   _rackEls.grid.innerHTML = "";
-  for (const b of brushes.filter((x) => (x.folder || DEFAULT_FOLDER) === _rackCurrentFolder)) {
+  for (const b of brushesInFolder(brushes, _rackCurrentFolder, DEFAULT_FOLDER)) {
     // v96：tile 改 div + 内嵌 gear button（user 不喜欢长按）
     const tile = document.createElement("div");
     tile.className = "brush-rack-tile";
