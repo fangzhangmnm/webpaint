@@ -182,6 +182,19 @@ export class PaintDoc {
     // （线稿在它上面、上色在 active 上的工作流）
     this.referenceLayerId = null;
   }
+  // 从一个「已解码的 loaded doc」吸收**模型层**字段（layers / active / 尺寸 / 背景 / 参考层 id）。
+  // 只碰模型——屏幕 / 工具 / 笔刷 / 视口 / 参考窗 / 调色板等是 app 编排的事，不进这里
+  // （PaintDoc 不知道它们；见 CONTEXT.md）。跨 session 不沿用选区 → selection 清空。
+  adoptState(loaded) {
+    this.layers = loaded.layers;
+    this.activeIndex = loaded.activeIndex;
+    this.width = loaded.width;
+    this.height = loaded.height;
+    this.backgroundColor = loaded.backgroundColor;
+    this.referenceLayerId = loaded.referenceLayerId ?? null;
+    this.selection = null;
+  }
+
   // 取参考层 / 没有就返回 null（不是 active；调用方按需 fallback）
   getReferenceLayer() {
     if (this.referenceLayerId == null) return null;
@@ -250,6 +263,78 @@ export class PaintDoc {
     if (this.activeIndex >= this.layers.length) this.activeIndex = this.layers.length - 1;
     if (this.activeIndex < 0) this.activeIndex = 0;
     return true;
+  }
+
+  // 把一层序列化成 layerSpec（id/name/visible/opacity/mode/bbox + imageData）。
+  // 模型层拥有「层 ↔ spec」的形状（undo 入栈、mergeDown、insertLayerAt 共用）。
+  // blob 留 null：异步压缩是 undo 编排的事，由 caller 填。
+  layerSpec(L) {
+    const snap = L.snapshot();
+    return {
+      id: L.id, name: L.name, visible: L.visible,
+      opacity: L.opacity, mode: L.mode,
+      bboxX: snap.bboxX, bboxY: snap.bboxY, bboxW: snap.bboxW, bboxH: snap.bboxH,
+      imageData: snap.imageData, blob: null,
+    };
+  }
+
+  // v124b 向下合并（mode-aware）：用 active 的 mode×opacity 把 active 烤进下方层、删 active。
+  // **视觉等价**：合并前后画面相同（active.mode×active.opacity 已烤进像素 → under 归一化 source-over/α=1）。
+  // 纯模型操作（无 DOM / 无 history / 无 status）：成功返回 undo 所需数据，caller 负责入栈+刷新+压缩。
+  //   成功 → { ok:true, underId, underBefore, underAfter, underBeforeOpacity, underBeforeMode, activeSpec, activeIndex }
+  //   不可合并 → { ok:false, reason }；reason ∈ bottom | clipping-active | clipping-under | empty-active
+  //   （empty-active = active 无像素，caller 应改走「删 active」；语义不同，不在此处删）
+  mergeDownLayer(L) {
+    if (!L) return { ok: false, reason: "bottom" };
+    const idx = this.layers.findIndex((l) => l.id === L.id);
+    if (idx <= 0) return { ok: false, reason: "bottom" };
+    if (L.clippingMask) return { ok: false, reason: "clipping-active" };
+    const under = this.layers[idx - 1];
+    if (under.clippingMask) return { ok: false, reason: "clipping-under" };
+
+    const aHasPx = L.bboxW > 0 && L.bboxH > 0;
+    const uHasPx = under.bboxW > 0 && under.bboxH > 0;
+    if (!aHasPx) return { ok: false, reason: "empty-active" };
+
+    // 合并后 bbox = active ∪ under
+    const x0 = uHasPx ? Math.min(under.bboxX, L.bboxX) : L.bboxX;
+    const y0 = uHasPx ? Math.min(under.bboxY, L.bboxY) : L.bboxY;
+    const x1 = uHasPx ? Math.max(under.bboxX + under.bboxW, L.bboxX + L.bboxW) : L.bboxX + L.bboxW;
+    const y1 = uHasPx ? Math.max(under.bboxY + under.bboxH, L.bboxY + L.bboxH) : L.bboxY + L.bboxH;
+    const newW = x1 - x0, newH = y1 - y0;
+    // 离屏：under (source-over) → active (active.mode × active.opacity)
+    const tmp = makeBitmap(newW, newH);
+    const tctx = tmp.getContext("2d");
+    if (uHasPx) {
+      tctx.globalAlpha = under.opacity;
+      tctx.drawImage(under.canvas, under.bboxX - x0, under.bboxY - y0);
+      tctx.globalAlpha = 1;
+    }
+    tctx.globalAlpha = L.opacity;
+    tctx.globalCompositeOperation = L.mode || "source-over";
+    tctx.drawImage(L.canvas, L.bboxX - x0, L.bboxY - y0);
+    tctx.globalAlpha = 1;
+    tctx.globalCompositeOperation = "source-over";
+
+    // 先抓「改前」状态再 mutate
+    const underBefore = under.snapshot();
+    const underBeforeOpacity = under.opacity;
+    const underBeforeMode = under.mode;
+    const activeSpec = this.layerSpec(L);
+    // 替换 under 画布 + 归一化（active.mode×active.opacity 已烤进 tmp）
+    under.canvas = tmp;
+    under.ctx = tmp.getContext("2d", { willReadFrequently: false });
+    under.bboxX = x0; under.bboxY = y0; under.bboxW = newW; under.bboxH = newH;
+    under.opacity = 1;
+    under.mode = "source-over";
+    this.removeLayer(L.id);
+    const underAfter = under.snapshot();
+    this.setActiveById(under.id);
+    return {
+      ok: true, underId: under.id,
+      underBefore, underAfter, underBeforeOpacity, underBeforeMode,
+      activeSpec, activeIndex: idx,
+    };
   }
 
   // 按 layerSpec 在 index 处插入一层（**用 spec.id**，不走 auto-increment）。

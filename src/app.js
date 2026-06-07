@@ -1940,62 +1940,31 @@ function _clearLayerPixels(L) {
 // 用 active 的 mode + opacity 把 active 合到下方层；删 active。
 // **不**改 active 的 mode (因为它要消失了)；下方层保留它原本 mode + opacity。
 // 视觉等价：合并前后画面相同。clippingMask layer 不支持（先返回不做）。
+// 薄 caller：合并数学/画布交换/删层归 doc.mergeDownLayer（模型层）；这里只翻译
+// 不可合并的原因→中文状态、把结果包成 mergeDown undo entry、异步压缩快照、刷新。
+const _MERGE_DOWN_STATUS = {
+  bottom: "已经是最底层，没法向下合",
+  "clipping-active": "剪裁层不支持向下合并（先取消剪裁）",
+  "clipping-under": "下方是剪裁层不支持合并",
+};
 function _mergeDownLayer(L) {
   if (!L) return;
-  const idx = doc.layers.findIndex((l) => l.id === L.id);
-  if (idx <= 0) { setStatus("已经是最底层，没法向下合"); return; }
-  if (L.clippingMask) { setStatus("剪裁层不支持向下合并（先取消剪裁）"); return; }
-  const under = doc.layers[idx - 1];
-  if (under.clippingMask) { setStatus("下方是剪裁层不支持合并"); return; }
-  // 算合并后的 bbox = active ∪ under
-  const aHasPx = L.bboxW > 0 && L.bboxH > 0;
-  const uHasPx = under.bboxW > 0 && under.bboxH > 0;
-  if (!aHasPx) { _deleteLayer(L); return; }   // active 空，直接当删 active 处理
-  const x0 = uHasPx ? Math.min(under.bboxX, L.bboxX) : L.bboxX;
-  const y0 = uHasPx ? Math.min(under.bboxY, L.bboxY) : L.bboxY;
-  const x1 = uHasPx ? Math.max(under.bboxX + under.bboxW, L.bboxX + L.bboxW) : L.bboxX + L.bboxW;
-  const y1 = uHasPx ? Math.max(under.bboxY + under.bboxH, L.bboxY + L.bboxH) : L.bboxY + L.bboxH;
-  const newW = x1 - x0, newH = y1 - y0;
-  // 离屏画 tmp = under (source-over) → active (with active.mode × active.opacity)
-  const tmp = (typeof OffscreenCanvas !== "undefined")
-    ? new OffscreenCanvas(newW, newH)
-    : (() => { const c = document.createElement("canvas"); c.width = newW; c.height = newH; return c; })();
-  const tctx = tmp.getContext("2d");
-  if (uHasPx) {
-    tctx.globalAlpha = under.opacity;
-    tctx.drawImage(under.canvas, under.bboxX - x0, under.bboxY - y0);
-    tctx.globalAlpha = 1;
+  const r = doc.mergeDownLayer(L);
+  if (!r.ok) {
+    if (r.reason === "empty-active") { _deleteLayer(L); return; }   // active 空 → 当删 active
+    setStatus(_MERGE_DOWN_STATUS[r.reason] || "无法向下合并");
+    return;
   }
-  tctx.globalAlpha = L.opacity;
-  tctx.globalCompositeOperation = L.mode || "source-over";
-  tctx.drawImage(L.canvas, L.bboxX - x0, L.bboxY - y0);
-  tctx.globalAlpha = 1;
-  tctx.globalCompositeOperation = "source-over";
-  // 先抓"被改前"状态再 mutate
-  const underBeforeSnap = under.snapshot();
-  const underBeforeOpacity = under.opacity;
-  const underBeforeMode = under.mode;
-  const activeSpec = layerSpecFrom(L);
-  // 替换 under 的画布 + 归一化 opacity/mode（因为 active.mode×active.opacity 已经烤进 tmp 像素）
-  under.canvas = tmp;
-  under.ctx = tmp.getContext("2d", { willReadFrequently: false });
-  under.bboxX = x0; under.bboxY = y0; under.bboxW = newW; under.bboxH = newH;
-  under.opacity = 1;
-  under.mode = "source-over";
-  doc.removeLayer(L.id);
-  const underAfterSnap = under.snapshot();
   history.push({
     type: "mergeDown",
-    underId: under.id,
-    underBefore: underBeforeSnap, underAfter: underAfterSnap,
-    underBeforeOpacity, underBeforeMode,
-    activeSpec, activeIndex: idx,
+    underId: r.underId,
+    underBefore: r.underBefore, underAfter: r.underAfter,
+    underBeforeOpacity: r.underBeforeOpacity, underBeforeMode: r.underBeforeMode,
+    activeSpec: r.activeSpec, activeIndex: r.activeIndex,
   });
-  compressPixelSnap(underBeforeSnap, (blob) => { underBeforeSnap.blob = blob; });
-  compressPixelSnap(underAfterSnap, (blob) => { underAfterSnap.blob = blob; });
-  if (activeSpec.imageData) compressPixelSnap(activeSpec, (blob) => { activeSpec.blob = blob; });
-  // 选 active = under (刚合并完的层)
-  doc.setActiveById(under.id);
+  compressPixelSnap(r.underBefore, (blob) => { r.underBefore.blob = blob; });
+  compressPixelSnap(r.underAfter, (blob) => { r.underAfter.blob = blob; });
+  if (r.activeSpec.imageData) compressPixelSnap(r.activeSpec, (blob) => { r.activeSpec.blob = blob; });
   _afterDocChange();
 }
 
@@ -2425,20 +2394,8 @@ function startLayerRename(L, nameEl) {
 }
 
 // 从 Layer 拿一份 spec（含 pixel snapshot）—— add/remove handler 都用
-function layerSpecFrom(L) {
-  const snap = L.snapshot();
-  return {
-    id: L.id,
-    name: L.name,
-    visible: L.visible,
-    opacity: L.opacity,
-    mode: L.mode,
-    bboxX: snap.bboxX, bboxY: snap.bboxY,
-    bboxW: snap.bboxW, bboxH: snap.bboxH,
-    imageData: snap.imageData,
-    blob: null,
-  };
-}
+// 「层 → spec」的形状归模型层（doc.layerSpec）；这里只是旧名兜底。
+function layerSpecFrom(L) { return doc.layerSpec(L); }
 
 // ---- 5 个 layer handler 注册（**纪律 #1**：集中在 boot 段）----
 // addLayer：undo 删层，redo 在 index 处插入空层（spec 通常 empty）
@@ -2885,14 +2842,9 @@ let _loadingDoc = false;
 function adoptLoadedDoc(loaded, sessionName) {
   _loadingDoc = true;
   try {
-  doc.layers = loaded.layers;
-  doc.activeIndex = loaded.activeIndex;
-  doc.width = loaded.width;
-  doc.height = loaded.height;
-  doc.backgroundColor = loaded.backgroundColor;
-  // 跟层无关的 doc-level state（之前漏带 → reload 后丢失）
-  doc.referenceLayerId = loaded.referenceLayerId ?? null;
-  doc.selection = null;     // 跨 session 不沿用选区
+  // 模型层字段（layers/active/尺寸/背景/参考层id/清选区）归 doc.adoptState；
+  // 下面全是 app 编排（UI 刷新 / 工具态 / 参考窗 / 视口 / store base / 版本检测 / checkpoint）。
+  doc.adoptState(loaded);
   els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   input.clearHistory();
   board.invalidateAll();
