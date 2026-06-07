@@ -55,7 +55,7 @@ import {
   listCloudTrash,
   isCloudDirty, CloudConflictError,
   getLastSessionSignedIn, setLastSessionSignedIn, getKnownETag,
-  rackFolderFlow, rackStore, setRackDirty, isRackDirty, resolveRef,
+  rackStore, setRackDirty, isRackDirty, resolveRef,
   store as _store,
 } from "./app-store.js";   // cut-over：cloud/auth/graph 全走 lib（app-store shim 保旧名）
 
@@ -5942,21 +5942,14 @@ const TOOL_LABEL = {
 };
 let _rackCurrentFolder = DEFAULT_FOLDER;
 let _rackCurrentTool = "brush";   // 当前 rack sheet 显示的工具
-// dirty 单源 = rackSync（isRackDirty/setRackDirty）；旧 app 侧 _rackDirty 双源已删（v2）。
-// 内容改动（存预设/删/导入/重置）后防抖自动同步（停手 ~1.5s 推）。FolderFlow 自带 412 重试 +
-// 无损 union，频繁推也安全；切笔是 per-doc 不脏 rack，故不会因切笔狂推。关 sheet 立即 flush。
-let _rackSyncTimer = null;
-function _scheduleRackSync(delay = 1500) {
-  if (_rackSyncTimer) clearTimeout(_rackSyncTimer);
-  _rackSyncTimer = setTimeout(() => { _rackSyncTimer = null; pushBrushRackIfSignedIn(); }, delay);
-  _refreshRackCloudState();   // icon 立刻切 dirty
-}
-// 「笔架内容变了」单一语义入口：落本地 + 防抖同步云。
+// 「笔架内容变了」单一语义入口：落本地 + 标脏排防抖同步（cadence 归 rackStore，L4 ③b）。
 // 编辑器 / 导入 / 删除 只声明「变了」，**不直接碰 sync**（load+save 与 sync 解耦）。
+// rackStore.edit() = setDirty + 防抖排 sync（停手 ~1.5s；FolderFlow 无损 union、零冲突，频繁推安全；
+//   切笔 per-doc 不脏 rack 故不狂推）。persist 本地仍 app（rackStore 不碰 IDB doc 编码）。
 function markRackChanged() {
-  setRackDirty(true);
   persistBrushRack();
-  _scheduleRackSync();
+  rackStore.edit();
+  _refreshRackCloudState();   // icon 立刻切 dirty
 }
 
 function _showRackSheet(tool) {
@@ -5969,11 +5962,9 @@ function _showRackSheet(tool) {
 }
 function _hideRackSheet() {
   _rackEls.sheet.classList.add("hidden");
-  if (_rackSyncTimer) { clearTimeout(_rackSyncTimer); _rackSyncTimer = null; }   // 关 sheet 立即 flush，取消防抖
-  if (isRackDirty()) {
-    persistBrushRack();           // 同步 IDB
-    pushBrushRackIfSignedIn();    // 同步云（成功内部清 rackSync dirty）
-  }
+  // 关 sheet 立即 flush（rackStore.flush = 取消防抖 + 若脏即同步）。脏则先落 IDB 再 flush 推云。
+  if (rackStore.isDirty()) persistBrushRack();
+  rackStore.flush();
 }
 
 // v134 rack cloud 状态机：smart icon + auto push
@@ -6012,19 +6003,16 @@ function _refreshRackCloudState() {
   updateRackCloudIcon();
 }
 
-// 推云：仅 IDB 已写后调；user 在场（关 sheet 是 explicit action）
-//   v134：冲突时 3 选（拉 / 强推 / 合并）；其他状态 auto retry
-// 笔架同步 = FolderFlow（pull-merge-push，无损 union，零冲突 UI）。
-// 编辑永远本地即时（调用方已落本地）；这里只在能连时后台 reconcile。merge 把别的设备新增的笔带回来。
-async function pushBrushRackIfSignedIn() {
-  if (!isSignedIn() || !navigator.onLine) { _refreshRackCloudState(); return; }
-  if (!_brushRack) return;
-  rackStore.busy.set(true); _refreshRackCloudState();   // busy 归 rackStore（status 含 busy）→ icon 显示上传中
-  try {
-    const res = await rackFolderFlow.sync({
-      version: _brushRack.version, items: _brushRack.brushes,
-      trash: _brushRack.trash || [], resetAt: _brushRack.resetAt || 0,
-    });
+// 笔架同步编排归 rackStore（L4 ③b）：canSync 门 + snapshot + FolderFlow.sync(无损 union·零冲突) + onResult。
+// app 注入「模型/UI 语义」（采纳 merge 结果 + 状态提示）；busy/cadence/flow 全在 store。
+rackStore.configure({
+  canSync: () => isSignedIn() && navigator.onLine !== false,
+  snapshot: () => _brushRack ? {
+    version: _brushRack.version, items: _brushRack.brushes,
+    trash: _brushRack.trash || [], resetAt: _brushRack.resetAt || 0,
+  } : null,
+  onBusyChange: () => _refreshRackCloudState(),   // busy 变 → 刷 icon（store 不碰 DOM）
+  onResult: async (res) => {
     // 采纳 merge 结果（可能含云端别设备新增的笔）。正在编辑某把笔时不揪它——挂到关闭再 reconcile。
     if (res.folder && _editingBrushId == null) {
       _brushRack = { ...(_brushRack), version: res.folder.version, brushes: res.folder.items, trash: res.folder.trash, resetAt: res.folder.resetAt };
@@ -6036,11 +6024,13 @@ async function pushBrushRackIfSignedIn() {
     if (res.status === "synced") setStatus("笔架已同步到云端");
     else if (res.status === "invalid") setStatus("笔架云端数据异常，已留待重试", true);
     else if (res.status === "dirty") { console.warn("[brush-rack sync]", res.error); setStatus("笔架同步失败，已留待重试", true); }
-    // offline：静默
-  } finally {
-    rackStore.busy.set(false);
-    _refreshRackCloudState();   // 单源派生 icon（busy 清、dirty 来自 rackSync）
-  }
+    // offline/skipped：静默
+  },
+});
+// 兼容旧调用点（boot / 编辑 / 重置等）：薄壳 → rackStore.sync()。
+async function pushBrushRackIfSignedIn() {
+  await rackStore.sync();
+  _refreshRackCloudState();   // skip（离线/未登录）无 busy 变化 → 这里补刷一次
 }
 // （旧 _resolveRackCloudConflict 三选对话框已删——Folder shape 的 union-merge 让冲突消失，
 //   FolderFlow 自动无损合并，不再有 lossy「拉云端丢本地/覆盖云端丢云端」）。

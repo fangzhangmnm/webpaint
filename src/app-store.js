@@ -5,7 +5,6 @@
 
 import { createStore, createCloudSync, createOneDriveProvider } from "./store/index.js";
 import { CloudConflictError } from "./store/cloud-sync.js";
-import { createFolderFlow } from "./store/folder-flow.js";
 import { createFolderStore } from "./store/folder-store.js";
 export { resolveRef } from "./store/folder-merge.js";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.js";
@@ -82,16 +81,7 @@ export const isCloudDirty = (name) => _auth.isSignedIn() && cloud.isDirty(name);
 // app 编辑落地只调 _store.edit()，不再直暴露 setCloudDirty（绕过门 = 缺 parentBase footgun，已删）。
 export const getKnownETag = (name) => cloud.getETag(name);
 
-// ---- brush-rack = Folder-shape Store 实例（L4 ③：第二 Store 实例，共享 Substrate 思路）----
-//   busy/status 归 rackStore（取代 app 的 _rackCloudState="busy" + deriveRackCloudState，报告 C4）。
-//   dirty 单源仍是 rackSync（rackStore.setDirty/isDirty 包它）；FolderFlow.sync 成功内部清。
-export const rackStore = createFolderStore({ cloud: rackSync, name: "rack" });
-export const setRackDirty = (d) => rackStore.setDirty(d);
-export const isRackDirty = () => rackStore.isDirty();
-
-// ---- brush-rack = Folder shape：FolderFlow（pull-merge-push，无损 union，零冲突 UI）----
-// 取代 pushBrushRack/pullBrushRack/_resolveRackCloudConflict 那套手搓平行同步栈。
-// cloud blob 仍是 {version, brushes, trash, resetAt}（brushes 名不变，旧设备仍认）；引擎内部用 items。
+// ---- brush-rack = Folder shape blob：{version, brushes, trash, resetAt}（brushes 名不变，旧设备仍认）；引擎内部用 items。
 const RACK_UAT_PREHISTORY = 1;
 function rackDecode(text) {
   let o; try { o = JSON.parse(text); } catch { return null; }
@@ -106,10 +96,16 @@ function rackDecode(text) {
 function rackEncode(folder) {
   return new Blob([JSON.stringify({ version: 2, brushes: folder.items, trash: folder.trash, resetAt: folder.resetAt })], { type: "application/json" });
 }
-export const rackFolderFlow = createFolderFlow({
+// ---- brush-rack = Folder-shape Store 实例（L4 ③：第二 Store 实例，内置 FolderFlow + busy/status/防抖 cadence）----
+//   取代 pushBrushRack/pullBrushRack/_resolveRackCloudConflict 手搓栈 + app 的 _rackCloudState/_scheduleRackSync/
+//   deriveRackCloudState（报告 C4：两套 sync-icon 态机合一）。dirty 单源仍是 rackSync。
+//   app 经 rackStore.configure 注入 snapshot/onResult/canSync/onBusyChange（模型/UI 语义留 app）。
+export const rackStore = createFolderStore({
   cloud: rackSync, name: "rack", encode: rackEncode, decode: rackDecode,
   isOnline: () => navigator.onLine !== false,
 });
+export const setRackDirty = (d) => rackStore.setDirty(d);
+export const isRackDirty = () => rackStore.isDirty();
 
 // ---- graph 直用（gallery folder 操作 + thumb byte-range）→ lib 的 graph（原始形态，单一 auth）----
 export {
