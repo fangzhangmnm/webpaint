@@ -73,7 +73,7 @@ PixelEdit 管"记什么"，Mode 管"何时允许记 / ctrl-z 是什么意思"。
 // edit-mode.js —— 纯 in-process。单轴 _current + 内部 _returnTool + 当前 _transient 闭包。
 const CAPS = {  // flat enum；新增滤镜/笔刷 effect = payload，不动表。transient:true 那类 = 多 step。
   brush:       { canDraw:true,  allowsColor:true,  cursor:"brush", ctrlZ:"history",         transient:false },
-  eraser:      { canDraw:true,  allowsColor:false, cursor:"brush", ctrlZ:"history",         transient:false },
+  eraser:      { canDraw:true,  allowsColor:true,  cursor:"brush", ctrlZ:"history",         transient:false }, // 2026-06-06：橡皮放开色板（禁用会误导=「弹不出来」），可预选下一笔色
   filterBrush: { canDraw:true,  allowsColor:false, cursor:"brush", ctrlZ:"history",         transient:false }, // liquify/smudge/色彩笔 = payload
   liquify:     { canDraw:true,  allowsColor:false, cursor:"ring",  ctrlZ:"history",         transient:false },
   picker:      { canDraw:false, allowsColor:true,  cursor:"none",  ctrlZ:"history",         transient:false },

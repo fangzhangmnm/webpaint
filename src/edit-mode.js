@@ -21,7 +21,9 @@ const FALLBACK_TOOL = "brush";   // returnTool 兜底
 const CAPS = {
   // 持久·交互式 stamp 工具（brush-driven）：canDraw、笔刷 cursor、ctrlZ history、产 "stroke" PixelEdit。
   brush:       { canDraw: true,  allowsColor: true,  cursor: "brush", ctrlZ: "history",         transient: false },
-  eraser:      { canDraw: true,  allowsColor: false, cursor: "brush", ctrlZ: "history",         transient: false },
+  // eraser allowsColor:true（2026-06-06 user 改）：橡皮本身不吃 state.color，但禁用色板按钮**误导**
+  //   （看着像坏了/弹不出来）。放开 = 橡皮时可预选下一笔颜色，免去 iPad 来回切工具。别改回 false。
+  eraser:      { canDraw: true,  allowsColor: true,  cursor: "brush", ctrlZ: "history",         transient: false },
   filterBrush: { canDraw: true,  allowsColor: false, cursor: "brush", ctrlZ: "history",         transient: false }, // liquify/smudge/色彩笔 = payload
   liquify:     { canDraw: true,  allowsColor: false, cursor: "ring",  ctrlZ: "history",         transient: false },
   // 非绘画持久工具
