@@ -5,6 +5,9 @@ journals/
 # machine generated reports
 docs/reports/
 
+# 抛弃型原型 / 草稿
+tmp/
+
 # OS
 .DS_Store
 Thumbs.db
