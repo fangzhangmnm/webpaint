@@ -12,19 +12,8 @@
 // 红线：B1 串行 · B2 不丢编辑 · B5 lost-response 自愈 · retry 退避 · A4/A10 备份先于覆盖 ·
 //       E8 跳过离线 · H3 先存后清 · E4 离线 deferred · 三态删除不留双份 · C7 重连收敛 · H2 confirm 强制。
 
-async function toU8(x) {
-  if (x == null) return new Uint8Array(0);
-  if (x instanceof Uint8Array) return x;
-  if (x instanceof ArrayBuffer) return new Uint8Array(x);
-  if (typeof x === "string") return new TextEncoder().encode(x);
-  if (typeof x.arrayBuffer === "function") return new Uint8Array(await x.arrayBuffer());
-  throw new Error("Store: 无法识别的 bytes 类型");
-}
-function bytesEqual(a, b) {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
+import { toU8, bytesEqual, createSubstrate } from "./substrate.js";
+
 const passBusy = (label, fn) => fn();   // 默认 busy：直接跑
 
 /**
@@ -36,11 +25,8 @@ const passBusy = (label, fn) => fn();   // 默认 busy：直接跑
  * @param {(ms:number)=>Promise} [deps.sleep]
  */
 export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep } = {}) {
-  const _chain = new Map();
+  const sub = createSubstrate();    // shape-agnostic 底座：编辑游标 + push-serialize + save 合流
   const _sleep = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
-
-  // 编辑游标（B2 + 本机合流共用的单一 SSoT）。app histchange → edits.mark()；不再各持一份 _editVersion。
-  let _editVersion = 0;
 
   // C4：base-etag 归这个 Store 实例（= 这个 tab）的内存，open/adopt 时捕获一次。
   // push 用它当 If-Match、成功只推进**自己的**——绝不每次去读跨 tab 共享的 localStorage etag，
@@ -95,7 +81,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return { status, dirtyAfter };
   }
 
-  async function _doPush(name, { encode, getEditVersion = () => _editVersion, onConflict, adopt, saveBranch, now, busy = passBusy } = {}) {
+  async function _doPush(name, { encode, getEditVersion = () => sub.edits.version(), onConflict, adopt, saveBranch, now, busy = passBusy } = {}) {
     // bypass 守卫（ADR-0016 §4）：已知云版基准 + 内容 dirty + 却没经过 clean→dirty 门捕获 parentBase
     //   → 有编辑路径绕过了门，再推会拿陈旧/跨tab base 静默覆盖。宁可响亮抛错（=失败的测试）也不静默丢更新。
     if (cloud.isDirty(name) && !hasParent(name) && _base.has(name) && _base.get(name) != null) {
@@ -127,13 +113,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
-  // 同一 name 串行（B1）：每次 push 等前一次跑完才启动。
+  // 同一 name 串行（B1）：每次 push 等前一次跑完才启动（串行机制在 substrate）。
   function push(name, opts) {
-    const run = () => _doPush(name, opts);
-    const prev = _chain.get(name) || Promise.resolve();
-    const next = prev.then(run, run);
-    _chain.set(name, next.then(() => {}, () => {}));
-    return next;
+    return sub.serialize(name, () => _doPush(name, opts));
   }
 
   // 安全拉取覆盖（A4/A10）：先 local.backup（失败即 abort，绝不 pull/覆盖）→ 拉云 → 覆盖本地 → adopt。
@@ -142,7 +124,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     let backupName;
     // ADR-0016 §consequences：clean 本地是可从云端重取的已知版本，无未见内容可丢 → 跳过 backup（不再 spam .backup-local）。
     //   仅 dirty——未推（cloud.isDirty）或未落盘（edits.localDirty）——才在覆盖前留底。匹配 ADR-0009「clean switch never spams a backup」。
-    if (cloud.isDirty(name) || edits.localDirty()) {
+    if (cloud.isDirty(name) || sub.edits.localDirty()) {
       try { backupName = await local.backup(name); }
       catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
     }
@@ -358,15 +340,6 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
-  // 在 oldName + newName 两条链尾串行跑 fn（重命名牵动两个身份，须挡住对任一名的 in-flight push）。
-  function _serialize2(oldName, newName, fn) {
-    const prev = Promise.all([_chain.get(oldName) || Promise.resolve(), _chain.get(newName) || Promise.resolve()]);
-    const next = prev.then(fn, fn);
-    const tail = next.then(() => {}, () => {});
-    _chain.set(oldName, tail); _chain.set(newName, tail);
-    return next;
-  }
-
   // 身份变更：重命名一个**具名文件**（active Work 或图库里没打开的 item，统一一条路）。
   // 字节来源：active 传 encode（活 doc）；图库非活动不传 encode → 库内从 local.get(old) 取既存字节，不重编码。
   // 本地先存新名再删旧名（phantom-path 红线：绝不先删）。
@@ -377,8 +350,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     const { encode, getEditVersion, cloud: doCloud = true, busy = passBusy } = opts;
     if (!oldName || !newName || oldName === newName) return { status: "noop" };
     // 非 active 改名（无 encode）不该被活 doc 的编辑游标污染 dirtyAfter → 用冻结游标。
-    const gev = encode ? (getEditVersion || (() => _editVersion)) : () => 0;
-    return _serialize2(oldName, newName, () => busy("重命名…", async () => {
+    const gev = encode ? (getEditVersion || (() => sub.edits.version())) : () => 0;
+    return sub.serialize2(oldName, newName, () => busy("重命名…", async () => {
       const hasLocal = local ? await local.exists(oldName) : false;
       let bytes = null;
       if (encode) bytes = await toU8(await encode());
@@ -413,7 +386,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // 另存为：写新身份，旧的不动（Photoshop 语义，调用方完成后切到新名）。
   async function saveAs(newName, opts = {}) {
-    const { encode, getEditVersion = () => _editVersion, cloud: doCloud = true, busy = passBusy } = opts;
+    const { encode, getEditVersion = () => sub.edits.version(), cloud: doCloud = true, busy = passBusy } = opts;
     const run = async () => {
       const bytes = await toU8(await encode());
       if (local) await local.save(newName, bytes);
@@ -426,10 +399,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         return { status: "saved", where: "local", newName, cloudDeferred: true, error: e };
       }
     };
-    const prev = _chain.get(newName) || Promise.resolve();
-    const next = prev.then(run, run);
-    _chain.set(newName, next.then(() => {}, () => {}));
-    return next;
+    return sub.serialize(newName, run);
   }
 
   // 首取：云端 item → 本地（gallery「拉取到本地」，无冲突——本地本来没有）。localName 由 app 去重后传入。
@@ -475,57 +445,15 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // phantom-path 保护）。曾在此放过一个 store.active（kv "active:pointer"），与之并存只会双源失同步、
   // 从无调用 → 已删。将来真要 app-agnostic 化，应迁到 session.js 那个键、而非另起炉灶。
 
-  // ---- 编辑游标（④）：单一 SSoT。B2（_doPush）、本机合流（session）、本地落盘 dirty 共用同一游标。
-  //   mark()        内容变了（任何 wp:histchange 或会进 .ora 的状态变更）→ 推进游标。
-  //   markSaved()   本地落盘点：记下「已存进 IDB 的游标」。
-  //   localDirty()  本地未落盘？= 游标自上次 markSaved 后又动过（取代 app 散落的 _docDirty 标志）。
-  // cloud 未推是另一正交事实，走 cloud.isDirty（per-file、跨 reload 持久）；二者别混。
-  let _savedVersion = 0;
-  const edits = {
-    mark: () => { _editVersion++; },
-    version: () => _editVersion,
-    markSaved: (v) => { _savedVersion = (v == null) ? _editVersion : v; },
-    localDirty: () => _editVersion !== _savedVersion,
-  };
-
-  // ---- save 合流（④ coalescer）：连按 Ctrl+S/点保存不串 N 次。app 注入真·保存动作（configure）。
-  //   - 没在跑 → 立刻跑
-  //   - 在跑 + 期间没新编辑 + 同类型 → no-op（state 没变，省一次空转）
-  //   - 在跑 + 期间有新编辑 → queue 尾巴，in-flight 完成后跑
-  //   - 在跑 local-only + 用户改主意 push → queue push（云端还没覆盖）
-  //   - pending 升级：push 盖过 local（再多按也只一个尾巴）
-  // editVersion 取 edits 的 SSoT（与 B2 同一个游标）。纯逻辑、无 I/O——可 node 单测（注入 fake doLocal/doPush）。
-  function createCoalescer() {
-    let pending = null;          // null | "local" | "push"
-    let inFlight = null;         // null | "local" | "push"
-    let startVer = 0;
-    let doLocal = async () => {}, doPush = async () => {};
-    function configure(fns = {}) { if (fns.doLocal) doLocal = fns.doLocal; if (fns.doPush) doPush = fns.doPush; }
-    async function _run(type) {
-      inFlight = type; startVer = _editVersion;
-      try { if (type === "push") await doPush(); else await doLocal(); }
-      finally {
-        inFlight = null;
-        if (pending) { const next = pending; pending = null; _run(next); }   // 不 await，避免递归栈
-      }
-    }
-    function request(type) {
-      if (!inFlight) { _run(type); return; }
-      const hasNewEdits = _editVersion !== startVer;
-      const shouldQueue = (inFlight === "local" && type === "push") ? true : hasNewEdits;
-      if (!shouldQueue) return;
-      if (type === "push" || pending !== "push") pending = type;
-    }
-    return { configure, request, state: () => ({ pending, inFlight, startVer }) };
-  }
-  const session = createCoalescer();
+  // 编辑游标（④）+ save 合流 coalescer（④）+ push-serialize（B1）下沉 substrate.js（shape-agnostic，
+  // WorkFileStore/FolderStore 共享）。这里经 sub.edits / sub.session 暴露，对外接口不变。
 
   return {
     flow: { push, open, refresh, delete: del, rename, saveAs, acquire, replayDelete, restore, purge, emptyTrash },
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
-    edits,                     // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④）
-    session,                   // save 合流 coalescer（configure/request）（④）
+    edits: sub.edits,          // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④，住 substrate）
+    session: sub.session,      // save 合流 coalescer（configure/request）（④，住 substrate）
     adoptBase,                 // app 打开/采纳 item 时调，捕获本 tab 的 base-etag（C4）
     _internal: { toU8, bytesEqual, seenBase, parentFor, hasParent },
   };
