@@ -448,11 +448,22 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // 编辑游标（④）+ save 合流 coalescer（④）+ push-serialize（B1）下沉 substrate.js（shape-agnostic，
   // WorkFileStore/FolderStore 共享）。这里经 sub.edits / sub.session 暴露，对外接口不变。
 
+  // store.edit(name)：work-file 的**唯一编辑入口**（L4 ②）。一处吸两事实：
+  //   ① 推编辑游标（→ local-dirty，autosave 凭此落盘）；② 经 clean→dirty 门标云脏（→ 捕获 parentBase 唯一点）。
+  // name 空（gallery-first 未绑 session）→ 只推游标、不标云脏。门 = cloudState.setDirty，**绝不暴露给 app 直调**
+  //   （ADR-0016 §4 footgun：app 绕过门标脏 = 缺 parentBase → 下次 push 撞 bypass 守卫）。云脏**不 gate signedIn**：
+  //   登出/SSO 抖动期间的编辑也必标，登回来才认（isCloudDirty getter 未登录返 false，安全）。
+  function edit(name) {
+    sub.edits.mark();
+    if (name) cloudState.setDirty(name, true);
+  }
+
   return {
     flow: { push, open, refresh, delete: del, rename, saveAs, acquire, replayDelete, restore, purge, emptyTrash },
+    edit,                      // 唯一编辑入口（游标 + 门）（L4 ②）
     cloud: cloudState,         // dirty/etag/status 查询（state-as-store）
     settings,                  // 通用 KV（app 丢 localStorage）
-    edits: sub.edits,          // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④，住 substrate）
+    edits: sub.edits,          // 编辑游标 SSoT（mark/version）—— B2 + 合流共用（④，住 substrate）；设置类 local-only 改动仍直用 mark
     session: sub.session,      // save 合流 coalescer（configure/request）（④，住 substrate）
     adoptBase,                 // app 打开/采纳 item 时调，捕获本 tab 的 base-etag（C4）
     _internal: { toU8, bytesEqual, seenBase, parentFor, hasParent },

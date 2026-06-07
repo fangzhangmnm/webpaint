@@ -77,9 +77,8 @@ export const listCloudTrash = () => cloud.listTrash();
 // 全走 store.flow.*（含新 flow.emptyTrash）。缩小「能绕过 flow 的表面积」——绕过做成不可能而非靠自觉。
 // 旧 isCloudDirty 在未登录时返 false（app 多处 `isSignedIn() && isCloudDirty()`，保此语义）。
 export const isCloudDirty = (name) => _auth.isSignedIn() && cloud.isDirty(name);
-// 经 store 的 cloudState.setDirty（**门**）：clean→dirty 边沿在此捕获 parentBase（ADR-0016 §4）。
-// 绝不再直连低层 cloud.setDirty——否则编辑标脏却没锚 parentBase，下次 push 会撞 bypass 守卫。
-export const setCloudDirty = (name, d) => store.cloud.setDirty(name, d);
+// clean→dirty 门（parentBase 唯一捕获点，ADR-0016 §4）已收进 store.edit(name)（L4 ②）——
+// app 编辑落地只调 _store.edit()，不再直暴露 setCloudDirty（绕过门 = 缺 parentBase footgun，已删）。
 export const getKnownETag = (name) => cloud.getETag(name);
 
 // ---- brush-rack 单源 dirty（v2：取代 app 的 _rackDirty 双源；rackSync 是 SSoT）----

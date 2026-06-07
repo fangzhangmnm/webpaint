@@ -53,7 +53,7 @@ import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
   listCloudSessionsRecursive, listCloudAll, listCloudFolders,
   listCloudTrash,
-  isCloudDirty, setCloudDirty, CloudConflictError,
+  isCloudDirty, CloudConflictError,
   getLastSessionSignedIn, setLastSessionSignedIn, getKnownETag,
   rackFolderFlow, setRackDirty, isRackDirty, resolveRef,
   store as _store,
@@ -2981,16 +2981,13 @@ async function _readSessionCheckpoint(name) {
   const at = await getMeta(`revert:${name}:at`);
   return blob ? { blob, at: at || 0 } : null;
 }
-// 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty。
-// 合并了原来分开的「_editVersion++」监听：编辑游标 SSoT 归 Store（④），这里 mark 一次（无条件，含 B2 语义）。
+// 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty。这是 work-file 的**唯一编辑门**。
+// store.edit(name) 一处吸：推编辑游标(local-dirty) + 经门标云脏(捕 parentBase；不 gate signedIn)。
+// name 空（gallery-first 未绑 session）→ 只推游标。门机制全在库内（app 不再直调 setCloudDirty，ADR-0016 §4）。
 window.addEventListener("wp:histchange", () => {
-  if (_loadingDoc) return;                    // 加载/采纳/FF 期间 clearHistory 派发的 histchange 不算编辑（不标本地脏、不标云脏）
-  _store.edits.mark();                        // 编辑游标推进 → 本地 localDirty 自动为真（B2 + 合流 + 本地落盘共用）
-  if (!_activeSessionName) return;            // gallery-first: 无绑 session 时不响应
-  // **不 gate isSignedIn**：编辑必标云脏。否则登出 / SSO 抖动期间的编辑不被标脏，
-  // 登回来后 push 判 isCloudDirty=false 静默跳过 → 编辑永不上云、无报错（看不见 bug 根因）。
-  // 安全：isCloudDirty getter 在未登录时本就返 false 忽略此标记，登回来才认这个 "1" → 补推。
-  setCloudDirty(_activeSessionName, true);
+  if (_loadingDoc) return;                    // 加载/采纳/FF 期间 clearHistory 派发的 histchange 不算编辑（不标脏）
+  _store.edit(_activeSessionName || null);
+  if (!_activeSessionName) return;            // gallery-first: 无绑 session 时不刷 save 按钮
   updateSaveStatus();
 });
 // **Ctrl+S / 点 save 按钮** = 完全保存（local IDB + push cloud）。
@@ -3199,9 +3196,7 @@ function _captureDocAfter() {
   return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
 }
 function _pushDocTransform(before, after, label) {
-  history.push({ type: "docTransform", before, after });
-  _store.edits.mark();
-  if (isSignedIn()) setCloudDirty(_activeSessionName, true);
+  history.push({ type: "docTransform", before, after });   // history.push 同步派 wp:histchange → 编辑门已标游标+云脏（无需再标）
   if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   board.invalidateAll();
   renderLayersPanel();
@@ -3527,9 +3522,7 @@ function _closeFilterPanel(applied) {
     L.ctx.clearRect(0, 0, L.bboxW, L.bboxH);
     L.ctx.drawImage(_adjustState.sur, 0, 0);
     const after = L.snapshot();
-    history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });
-    _store.edits.mark();
-    if (isSignedIn()) setCloudDirty(_activeSessionName, true);
+    history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });   // history.push 同步派 wp:histchange → 编辑门已标
     setStatus(`${_adjustState.Filter.title} 已应用：${L.name}`);
   }
   _adjustState = null;

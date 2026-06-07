@@ -402,6 +402,28 @@ describe("Store parentBase 权威（ADR-0016 §4：clean→dirty 门 + bypass �
     assert(threw, "dirty 无 parentBase 必须 loud failure，而非静默丢更新");
   });
 
+  it("store.edit(name)（L4 ② 唯一编辑入口）= 推游标 + 经门捕 parentBase → push 不撞 bypass 守卫", async () => {
+    const env = mk();
+    const it0 = await seedSynced(env, "猫", "v1");            // clean、_base=etag
+    eq(env.store.edits.localDirty(), false);
+    env.store.edit("猫");                                     // app 编辑落地只调这一处
+    assert(env.store.edits.localDirty(), "edit() 推了游标 → local-dirty");
+    eq(env.cloud.isDirty("猫"), true, "edit() 经门标了云脏");
+    eq(env.store._internal.parentFor("猫"), it0.eTag, "edit() 经门捕了 parentBase");
+    const res = await env.store.flow.push("猫", { encode: () => bytes("v2") });
+    eq(res.status, "pushed", "走 edit() 的脏 → push 干净落地（不撞 bypass）");
+  });
+
+  it("store.edit(null)（gallery-first 未绑 session）→ 只推游标、不经门标任何 item", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");                        // 猫 = clean
+    eq(env.cloud.isDirty("猫"), false);
+    env.store.edit(null);
+    assert(env.store.edits.localDirty(), "无 name 仍推游标");
+    eq(env.cloud.isDirty("猫"), false, "edit(null) 不经门、不标已存在 item 脏");
+    eq(env.store._internal.hasParent("猫"), false, "edit(null) 不捕 parentBase");
+  });
+
   it("走门标脏（cloudState.setDirty）→ 捕获 parentBase=派生云版 → push 干净落地、episode 清除", async () => {
     const env = mk();
     const it0 = await seedSynced(env, "猫", "v1");
