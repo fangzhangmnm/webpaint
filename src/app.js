@@ -28,6 +28,11 @@ import { EditMode } from "./edit-mode.js";
 import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
 import { mountColorWheel } from "./ui/color-wheel.ts";   // UI 深化 candidate 1 · Vue pilot
+import { mountBrushSettings } from "./ui/brush-settings.ts";   // candidate 1 · 笔设置编辑器
+import {
+  sliderPosToSize, sizeToSliderPos,
+  sliderMaxPos as _sliderMaxPos, stepFor as _stepFor, quantizeSize as _quantizeSize,
+} from "./ui/brush-size.ts";   // candidate 1 · 笔粗分段量化（form + dial 共用）
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   listTrashedSessions,
@@ -444,62 +449,8 @@ function applyToolState(tool) {
   updateSidebarSlider2Label();
 }
 
-// v124g (user：「以后所有 size slider 统一这个分段 quantize」)：
-// v134 量化更新（user：「20内1, 50内2, 100内5, 200内10, 500内20, 1000内50」）
-//   1..20   步长 1   → 20 positions
-//   20..50  步长 2   → 15 positions
-//   50..100 步长 5   → 10 positions
-//   100..200 步长 10 → 10 positions
-//   200..500 步长 20 → 15 positions
-//   500..1000 步长 50 → 10 positions
-function _segPositions(maxPx) {
-  const a = Math.max(0, Math.min(20, maxPx));
-  const bEnd = Math.min(50, maxPx);   const b = bEnd > 20  ? Math.floor((bEnd - 20)  / 2)  : 0;
-  const cEnd = Math.min(100, maxPx);  const c = cEnd > 50  ? Math.floor((cEnd - 50)  / 5)  : 0;
-  const dEnd = Math.min(200, maxPx);  const d = dEnd > 100 ? Math.floor((dEnd - 100) / 10) : 0;
-  const eEnd = Math.min(500, maxPx);  const e = eEnd > 200 ? Math.floor((eEnd - 200) / 20) : 0;
-  const fEnd = Math.min(1000, maxPx); const f = fEnd > 500 ? Math.floor((fEnd - 500) / 50) : 0;
-  return { a, b, c, d, e, f, total: a + b + c + d + e + f };
-}
-function sliderPosToSize(pos, maxPx) {
-  const { a, b, c, d, e, total } = _segPositions(maxPx);
-  const p = Math.max(0, Math.min(total - 1, Math.round(pos)));
-  if (p < a)                 return p + 1;                                  // 1..20 step 1
-  if (p < a + b)             return 20  + (p - a + 1) * 2;                  // 22..50 step 2
-  if (p < a + b + c)         return 50  + (p - a - b + 1) * 5;              // 55..100 step 5
-  if (p < a + b + c + d)     return 100 + (p - a - b - c + 1) * 10;         // 110..200 step 10
-  if (p < a + b + c + d + e) return 200 + (p - a - b - c - d + 1) * 20;     // 220..500 step 20
-  return                            500 + (p - a - b - c - d - e + 1) * 50; // 550..1000 step 50
-}
-function sizeToSliderPos(size, maxPx) {
-  const { a, b, c, d, e } = _segPositions(maxPx);
-  const s = Math.max(1, Math.min(maxPx, Math.round(size)));
-  if (s <= 20)  return s - 1;
-  if (s <= 50)  return a + Math.round((s - 20) / 2) - 1;
-  if (s <= 100) return a + b + Math.round((s - 50) / 5) - 1;
-  if (s <= 200) return a + b + c + Math.round((s - 100) / 10) - 1;
-  if (s <= 500) return a + b + c + d + Math.round((s - 200) / 20) - 1;
-  return            a + b + c + d + e + Math.round((s - 500) / 50) - 1;
-}
-function _sliderMaxPos(maxPx) { return _segPositions(maxPx).total - 1; }
-// v134 量化辅助：圆 v 到段步长（[] 按此 step）
-function _stepFor(size) {
-  if (size < 20) return 1;
-  if (size < 50) return 2;
-  if (size < 100) return 5;
-  if (size < 200) return 10;
-  if (size < 500) return 20;
-  return 50;
-}
-function _quantizeSize(v) {
-  v = Math.round(v);
-  if (v < 20)  return Math.max(1, v);
-  if (v <= 50) return Math.round(v / 2) * 2;
-  if (v <= 100) return Math.round(v / 5) * 5;
-  if (v <= 200) return Math.round(v / 10) * 10;
-  if (v <= 500) return Math.round(v / 20) * 20;
-  return Math.round(v / 50) * 50;
-}
+// 笔粗分段量化（_segPositions/sliderPosToSize/sizeToSliderPos/_sliderMaxPos/_stepFor/_quantizeSize）
+// 已搬进 src/ui/brush-size.ts（纯 + node 测，form 与 dial 共用），见上方 import。
 function updateSidebarSlider2Label() {
   // v98：slider 永远标「透」(opacity 语义)。
   // user：「slider 是 opacity 不是 flow」。flow 在 brush settings 改。
@@ -6262,13 +6213,22 @@ let _editingBrushId = null;
 let _editingBrushDraft = null;
 
 // brushId 已在 rack → 克隆成 draft 编辑；newDraft 传入 → 编辑一个**尚未落 rack** 的新笔（存才落）。
+// 笔设置编辑器 = 薄 Vue 组件（src/ui/brush-settings.ts）。app 拥有 draft（preset 深拷贝/新笔），
+// 组件原地编辑它（reactive 代理写回同一对象）；保存/取消是 view header 的事（仍在这），
+// 删除/导出按钮在 body 里、经 emit 回这编排（confirm / 落 trash / 下载文件）。
+const brushSettingsUI = mountBrushSettings(_settingsEls.body, {
+  blendModes: LAYER_MODE_LABEL,
+  onDelete: () => _deleteEditingBrush(),
+  onExport: () => { if (_editingBrushDraft) exportBrushAsFile(_editingBrushDraft); },
+});
+
 function _openBrushSettings(brushId, newDraft) {
   let draft;
   if (newDraft) draft = newDraft;
   else { const b = findBrush(_brushRack, brushId); if (!b) return; draft = JSON.parse(JSON.stringify(b)); }
   _editingBrushId = brushId;
   _editingBrushDraft = draft;
-  _renderBrushSettings();
+  brushSettingsUI.open(draft);   // 组件编辑同一对象 → 改动回写 _editingBrushDraft
   _settingsEls.view.classList.remove("hidden");
 }
 // 编辑全程改的是 draft（深拷贝/新笔）；**只有点保存才落 rack**。cancel / 不点保存闪退 = draft 丢弃 = 没改过/没建过。
@@ -6292,207 +6252,35 @@ function _closeBrushSettings(save) {
   }
   _editingBrushId = null;
   _editingBrushDraft = null;
+  brushSettingsUI.close();
   _settingsEls.view.classList.add("hidden");
+}
+// 删除当前编辑的笔（form 的删除按钮 emit 过来）。真在 rack 的笔记 trash（缺席≠删除；merge 靠它判真删）。
+async function _deleteEditingBrush() {
+  const b = _editingBrushDraft;
+  if (!b) return;
+  const ok = await openConfirmSheet("删除这支笔？", `「${b.name}」（不可撤销）`);
+  if (!ok) return;
+  const delId = _editingBrushId;
+  const idx = _brushRack.brushes.findIndex((x) => x.id === delId);
+  if (idx >= 0) {
+    _brushRack.brushes.splice(idx, 1);
+    if (!Array.isArray(_brushRack.trash)) _brushRack.trash = [];
+    _brushRack.trash.push({ id: delId, uat: Date.now() });
+    markRackChanged();
+    if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+  }
+  // 删一个尚未保存的新笔（idx<0）→ 仅丢 draft，等同 cancel。
+  _editingBrushId = null;
+  _editingBrushDraft = null;
+  brushSettingsUI.close();
+  _settingsEls.view.classList.add("hidden");
+  setStatus("已删除");
 }
 _settingsEls.save.addEventListener("click", () => _closeBrushSettings(true));
 _settingsEls.cancel.addEventListener("click", () => _closeBrushSettings(false));
-
-function _renderBrushSettings() {
-  const b = _editingBrushDraft;
-  if (!b) return;
-  const body = _settingsEls.body;
-  body.innerHTML = "";
-  // 用模板化 helper 简写各 row
-  const section = (title) => {
-    const s = document.createElement("div");
-    s.className = "brush-settings-section";
-    const t = document.createElement("div");
-    t.className = "brush-settings-section-title";
-    t.textContent = title;
-    s.appendChild(t);
-    body.appendChild(s);
-    return s;
-  };
-  const rangeRow = (sec, label, min, max, step, val, fmt, onChange) => {
-    const row = document.createElement("div");
-    row.className = "brush-settings-row";
-    row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}" value="${val}"><span class="brush-settings-val">${fmt(val)}</span>`;
-    const input = row.querySelector("input");
-    const valSpan = row.querySelector(".brush-settings-val");
-    input.addEventListener("input", () => {
-      const v = parseFloat(input.value);
-      valSpan.textContent = fmt(v);
-      onChange(v);
-    });
-    sec.appendChild(row);
-  };
-  const textRow = (sec, label, val, onChange) => {
-    const row = document.createElement("div");
-    row.className = "brush-settings-row brush-settings-row-full";
-    row.innerHTML = `<label>${label}</label><input type="text" value="">`;
-    const input = row.querySelector("input");
-    input.value = val;
-    input.addEventListener("input", () => onChange(input.value));
-    sec.appendChild(row);
-  };
-  const selectRow = (sec, label, options, val, onChange) => {
-    const row = document.createElement("div");
-    row.className = "brush-settings-row brush-settings-row-full";
-    const opts = options.map(([v, l]) => `<option value="${v}"${v===val?" selected":""}>${l}</option>`).join("");
-    row.innerHTML = `<label>${label}</label><select>${opts}</select>`;
-    const sel = row.querySelector("select");
-    sel.addEventListener("change", () => onChange(sel.value));
-    sec.appendChild(row);
-  };
-
-  // 基本
-  const basic = section("基本");
-  textRow(basic, "名字", b.name, (v) => b.name = v);
-  // v120: shapes / airbrush 撤了，brush rack 编辑器里也不再显这俩选项（写到 brush.tool 字段会失效）
-  selectRow(basic, "工具", [
-    ["brush", "笔刷"], ["smudge", "涂抹"], ["eraser", "橡皮"],
-  ], b.tool, (v) => b.tool = v);
-  // v163 笔刷混合模式（整条 stroke vs 下方 layer，复用图层那套 Canvas2D 模式）。基础设置，放上面。
-  if (b.blendMode == null) b.blendMode = "source-over";
-  selectRow(basic, "混合模式", Object.entries(LAYER_MODE_LABEL),
-    b.blendMode, (v) => b.blendMode = v);
-  textRow(basic, "文件夹", b.folder, (v) => b.folder = v);
-
-  // Shape
-  const shape = section("形状");
-  selectRow(shape, "类型", [["round", "圆"], ["ellipse", "椭圆"], ["texture", "纹理"]], b.shape.kind, (v) => {
-    b.shape.kind = v; _renderBrushSettings();   // 切类型刷新可见 row
-  });
-  if (b.shape.kind === "ellipse") {
-    rangeRow(shape, "长短轴", 0.1, 1.0, 0.05, b.shape.aspect, (v) => v.toFixed(2), (v) => b.shape.aspect = v);
-    rangeRow(shape, "旋转°", 0, 180, 1, b.shape.rotation, (v) => `${v|0}°`, (v) => b.shape.rotation = v);
-  }
-  rangeRow(shape, "硬度", 0, 1.0, 0.05, b.shape.hardness, (v) => v.toFixed(2), (v) => b.shape.hardness = v);
-
-  // v99 schema 补缺
-  if (b.sizeCoeff == null) b.sizeCoeff = 0.6;
-  if (b.opaCoeff == null)  b.opaCoeff = 0.6;
-  if (b.flowCoeff == null) b.flowCoeff = 0;
-  if (b.pressureGamma == null) b.pressureGamma = 1.0;
-  if (b.pressureLPF == null) b.pressureLPF = 50;
-  if (b.compositeMode == null) b.compositeMode = "wash";
-  if (b.defaultOpa == null) b.defaultOpa = 1.0;
-  if (!b.smooth) b.smooth = { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 };
-
-  // Size：base + max
-  // v134 (user：「基础和最大都用同样的段量化 [] step」+「存的也是量化」)
-  //   fmt 和 onChange 都跑 _quantizeSize，存的 / 显的 / [] step 三者一致
-  const size = section("粗细 (size)");
-  rangeRow(size, "基础", 1, b.size.max || 200, 1, b.size.base, (v) => `${_quantizeSize(v)} px`, (v) => b.size.base = _quantizeSize(v));
-  rangeRow(size, "最大", 10, 1000, 1, b.size.max || 200, (v) => `${_quantizeSize(v)} px`, (v) => b.size.max = _quantizeSize(v));
-
-  // 压感 dynamics（signed coeff −1..1，0=不响应）
-  const dyn = section("压感 (−1..1，0 = 不响应、负数 = 反向)");
-  rangeRow(dyn, "size",    -1, 1, 0.05, b.sizeCoeff, (v) => v.toFixed(2), (v) => b.sizeCoeff = v);
-  rangeRow(dyn, "opacity", -1, 1, 0.05, b.opaCoeff,  (v) => v.toFixed(2), (v) => b.opaCoeff = v);
-  rangeRow(dyn, "flow",    -1, 1, 0.05, b.flowCoeff, (v) => v.toFixed(2), (v) => b.flowCoeff = v);
-
-  // 默认值（选笔时拷给 toolState；flow 永远 1.0 不存）
-  const def = section("默认值（选笔时拷给 opacity 滑块）");
-  rangeRow(def, "默认 opacity", 0, 1.0, 0.05, b.defaultOpa, (v) => `${(v*100)|0}%`, (v) => b.defaultOpa = v);
-
-  // 笔画平滑（v99：从 system 挪进 preset；v104 LPF 也归这里）
-  const smooth = section("笔画平滑");
-  rangeRow(smooth, "streamline",   0, 1.0, 0.05, b.smooth.streamline,    (v) => v.toFixed(2), (v) => b.smooth.streamline = v);
-  rangeRow(smooth, "stabilization",0, 1.0, 0.05, b.smooth.stabilization, (v) => v.toFixed(2), (v) => b.smooth.stabilization = v);
-  rangeRow(smooth, "pull-stab",    0, 1.0, 0.05, b.smooth.pullStabilizer,(v) => v.toFixed(2), (v) => b.smooth.pullStabilizer = v);
-  rangeRow(smooth, "motion-filter",0, 1.0, 0.05, b.smooth.motionFilter,  (v) => v.toFixed(2), (v) => b.smooth.motionFilter = v);
-  rangeRow(smooth, "pressure LPF", 0, 200, 5,  b.pressureLPF,            (v) => `${v|0} ms`,  (v) => b.pressureLPF = v);
-
-  // 高级：composite mode + pressureGamma + pixelMode
-  const adv = section("高级");
-  selectRow(adv, "重叠模式 compositeMode", [
-    ["wash",    "Wash（max；自交不变深，有上限）"],
-    ["buildup", "Build-Up（累积；可达 100%，喷枪 feel）"],
-  ], b.compositeMode, (v) => b.compositeMode = v);
-  rangeRow(adv, "pressureGamma", 0.2, 3.0, 0.05, b.pressureGamma, (v) => v.toFixed(2), (v) => b.pressureGamma = v);
-
-  // Pixel mode toggle
-  const pmRow = document.createElement("div");
-  pmRow.className = "brush-settings-row brush-settings-row-full";
-  const initPM = !!b.pixelMode;
-  pmRow.innerHTML = `
-    <label>pixelMode<br><span style="font-size:11px;color:var(--ink-soft);">开 = 整数 snap + fillRect 无 AA（像素艺术）</span></label>
-    <button type="button" class="brush-rack-action" style="justify-self:end;" aria-pressed="${initPM}">
-      ${initPM ? "开" : "关"}
-    </button>
-  `;
-  const pmBtn = pmRow.querySelector("button");
-  b.pixelMode = initPM;
-  pmBtn.addEventListener("click", () => {
-    b.pixelMode = !b.pixelMode;
-    pmBtn.setAttribute("aria-pressed", b.pixelMode ? "true" : "false");
-    pmBtn.textContent = b.pixelMode ? "开" : "关";
-  });
-  adv.appendChild(pmRow);
-
-  // Spacing (1%-200%)
-  const sp = section("间距 (% 直径)");
-  // 转 scalar
-  const spVal = (typeof b.spacing === "number") ? b.spacing : (b.spacing?.value ?? 0.06);
-  rangeRow(sp, "间距", 1, 200, 1, Math.round(spVal * 100),
-    (v) => `${v|0}%`,
-    (v) => { b.spacing = v / 100; });
-  // v106：flow 乘数撤了 (user：「flow 乘数好像没 work，要不删掉」+「root cause 是 stamp boundary
-  // 没 falloff 到 0」)。v106 已改 smoothstep falloff，spacing 10% 也平滑，乘数没必要。
-
-  // Taper：入端 / 出端 stylistic taper（v160 起出端也接进引擎了）。数值 = taper 长度(× 笔径)，越大越长。
-  const tp = section("收尾");
-  rangeRow(tp, "入端", 0, 5, 0.1, b.taper.in,  (v) => v.toFixed(1), (v) => b.taper.in = v);
-  rangeRow(tp, "出端", 0, 5, 0.1, b.taper.out, (v) => v.toFixed(1), (v) => b.taper.out = v);
-
-  // Smudge specific
-  if (b.tool === "smudge") {
-    if (!b.smudge) b.smudge = { strength: 0.8, dryness: 0.1 };
-    const sm = section("涂抹");
-    rangeRow(sm, "强度", 0, 1.0, 0.05, b.smudge.strength, (v) => v.toFixed(2), (v) => b.smudge.strength = v);
-    rangeRow(sm, "干燥度", 0, 1.0, 0.05, b.smudge.dryness, (v) => v.toFixed(2), (v) => b.smudge.dryness = v);
-  }
-
-  // 导出此笔（navigator.share / 下载）
-  const exp = section("");
-  const expBtn = document.createElement("button");
-  expBtn.type = "button";
-  expBtn.className = "brush-rack-action";
-  expBtn.textContent = "导出此笔为 JSON 文件";
-  expBtn.addEventListener("click", () => exportBrushAsFile(b));
-  exp.appendChild(expBtn);
-
-  // 删除按钮
-  const del = section("");
-  const delBtn = document.createElement("button");
-  delBtn.type = "button";
-  delBtn.className = "brush-rack-action";
-  delBtn.textContent = "删除此笔";
-  delBtn.style.background = "rgba(220,38,38,0.1)";
-  delBtn.style.color = "#dc2626";
-  delBtn.style.borderColor = "#dc2626";
-  delBtn.addEventListener("click", async () => {
-    const ok = await openConfirmSheet("删除这支笔？", `「${b.name}」（不可撤销）`);
-    if (!ok) return;
-    const delId = _editingBrushId;
-    const idx = _brushRack.brushes.findIndex((x) => x.id === delId);
-    if (idx >= 0) {
-      // 真在 rack 里的笔才记 trash（缺席≠删除；merge 靠它判真删 vs edit-wins 复活）。
-      _brushRack.brushes.splice(idx, 1);
-      if (!Array.isArray(_brushRack.trash)) _brushRack.trash = [];
-      _brushRack.trash.push({ id: delId, uat: Date.now() });
-      markRackChanged();
-      if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
-    }
-    // 删一个尚未保存的新笔（idx<0）→ 仅丢 draft，等同 cancel。
-    _editingBrushId = null;
-    _editingBrushDraft = null;
-    _settingsEls.view.classList.add("hidden");
-    setStatus("已删除");
-  });
-  del.appendChild(delBtn);
-}
+// 旧 _renderBrushSettings（~195 行命令式 form builder，改 shape kind 即 innerHTML 全量重建）
+// 已收成 src/ui/brush-settings.ts（reactive draft + v-if/v-model）+ brush-settings-model.ts（补缺）。
 
 // canvas pointerdown → 关 exclusive panel（user：「画画时别让 panel 挡着」）
 els.board.addEventListener("pointerdown", () => {
