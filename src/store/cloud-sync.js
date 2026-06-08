@@ -19,6 +19,16 @@ export class CloudConflictError extends Error {
     this.sessionName = sessionName;
   }
 }
+// 新建/无基准的 push 撞上云端**已存在的同名异文件**（两设备各建同名）。
+// ≠ CloudConflictError（那是「同一文件版本分叉」走 keep/pull/branch）。这里是「两个不同文件抢同一个名」，
+// **绝不覆盖**（否则静默吃掉别人的作品 = 数据丢失）→ caller 留本地 + 提示改名。
+export class CloudNameCollisionError extends Error {
+  constructor(sessionName) {
+    super(`云端已有同名「${sessionName}」（不同文件）`);
+    this.name = "CloudNameCollisionError";
+    this.sessionName = sessionName;
+  }
+}
 
 /** 内存 kv（测试用；WebPaint 传 localStorage 包装）。 */
 export function memKv() {
@@ -65,22 +75,29 @@ export function createCloudSync(cfg) {
   async function push(name, bytes, opts = {}) {
     const path = fileName(name);
     const baseEtag = ("baseEtag" in opts) ? opts.baseEtag : getETag(name);
+    const wrote = (bytes && (bytes.byteLength ?? bytes.size ?? bytes.length)) || 0;
+    // conflictBehavior：有 baseEtag → "replace"（If-Match 守，412 才冲突）；**无 baseEtag（新建/未基于云版）→ "fail"**
+    //   → 绝不无条件覆盖云端已存在的同名文件（否则静默吃掉别人/旧版的同名作品 = 数据丢失，path-身份红线）。
+    let item = null;
     try {
-      let item = await provider.upload(path, bytes, { contentType, eTag: baseEtag, conflictBehavior: "replace" });
-      // H7：分片末响应可能不带 item/eTag → 拉权威 etag，绝不在 null.eTag 崩、不缓存 null。
-      // 但**只在大小匹配时才认**：上传失败会留下 createUploadSession 的 0 字节占位，若无脑采纳它的
-      // etag + setDirty(false) 就会骗成 synced（postmortem 2026-06-05 第④级）。size 不符 → 当失败、保 dirty。
-      if (!item || !item.eTag) {
-        const fresh = await provider.getItemByPath(path).catch(() => null);
-        const wrote = (bytes && (bytes.byteLength ?? bytes.size ?? bytes.length)) || 0;
-        if (fresh && fresh.eTag && fresh.size === wrote) item = fresh;
-      }
-      if (item && item.eTag) { setETag(name, item.eTag); setDirty(name, false); }
-      return { item };
+      item = await provider.upload(path, bytes, { contentType, eTag: baseEtag, conflictBehavior: baseEtag ? "replace" : "fail" });
     } catch (e) {
       if (e.status === 412) throw new CloudConflictError(`云端已有更新版本 "${name}"`, name);
-      throw e;
+      if (!(e.status === 409 && !baseEtag)) throw e;
+      // 409 = conflictBehavior:fail 撞上云端已存在同名 → 落下面核验（大小匹配=我方上次成功上传/同内容→认；否则不覆盖）。
     }
+    // H7 / 409 兜底：末响应无 item（分片丢响应）或 fail-409 → 拉权威 meta；**仅大小匹配才认**（防把
+    //   0 字节占位 / 别人的异文件 骗成 synced——postmortem 2026-06-05 第④级 + path-身份同名碰撞）。
+    if (!item || !item.eTag) {
+      const fresh = await provider.getItemByPath(path).catch(() => null);
+      if (fresh && fresh.eTag && fresh.size === wrote) item = fresh;   // 大小匹配 → 认（我方成功上传/同内容）
+      else if (!baseEtag && fresh && fresh.size > 0) {
+        // 云端已有同名、**非空且大小不符** = 别人的同名异文件 → 绝不覆盖。保持 dirty，抛 collision 让 caller 提示改名。
+        throw new CloudNameCollisionError(name);
+      } else { item = null; }   // 0 字节占位（我方失败上传）/ 其他 → 保持 dirty，下次重试
+    }
+    if (item && item.eTag) { setETag(name, item.eTag); setDirty(name, false); }
+    return { item };
   }
 
   // 永远 duplicate 进本地（caller 决定落地名），不覆盖既存。

@@ -38,6 +38,8 @@
 
 ## 回滚后单独待办（非本次混入）
 
-- **D**：同名异内容碰撞 → flow 层优雅处理（检测 + 改名消歧/冲突）。
-- **F**：改名延迟锁屏 → 查 rename sync-gate 时序。
-- **渲染线（独立）**：pixel brush 等渲染问题——单独 backlog、单独修，不与存储混。
+- **D ✅ 已修（v200）**：cloud-sync.push 对**无 baseEtag（新建/未基于云版）用 `conflictBehavior:"fail"`**（不再无条件 replace）→ 撞云端同名 → 走 H7 同款大小核验：大小匹配=我方成功上传(末响应丢)/同内容→认；**非空异大小=别人的同名异文件→抛 `CloudNameCollisionError`、绝不覆盖、保持 dirty**；0 字节占位=我方失败上传→保持 dirty 重试。app 提示「云端已有同名（不同作品），已留本地未覆盖，改名再推」。`_retriable` 排除 collision（不重试）。**根因**：path-身份下两设备同名是「写同一 path 无 base」，blind replace = 红线（漏 If-Match）。**与 H7 纠缠**（自己的中断上传占位 vs 别人的异文件，靠大小区分；同大小异内容是已知罕见弱点）。多设备真机验。
+- **F ✅ 已修（v200）**：gallery 改名把**云端撞名检查(listCloud=网络)挪进 withBusy** → 确认即锁屏（原来云检查在锁外 → 锁屏延到网络回来）。
+- **C 0B**：回滚 GUID 后复验是否消失（疑当时 GUID 收敛 side-effect）。
+- **E**：多设备改名裂卡——path-身份接受不修。
+- **渲染线（独立）**：pixel brush 等——已修（用户确认）/ 单独 backlog，不与存储混。

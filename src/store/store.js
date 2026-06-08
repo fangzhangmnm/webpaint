@@ -52,7 +52,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   function _retriable(e) {
     return !!e && (e.status == null || e.status === 429 || (e.status >= 500 && e.status <= 599))
-      && e.name !== "CloudConflictError";
+      && e.name !== "CloudConflictError" && e.name !== "CloudNameCollisionError";   // 撞名异文件不重试（重试只会再撞）
   }
 
   // 412：可能是自己 lost-response 已落盘的写。拉云比对，相等即自愈（B5/W1）。

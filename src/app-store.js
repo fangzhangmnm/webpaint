@@ -4,7 +4,7 @@
 // WebPaint 专属（不 vendor）。lib 是 canonical；这里只做 config 注入 + 装配 + 兼容 shim。
 
 import { createStore, createCloudSync, createOneDriveProvider } from "./store/index.js";
-import { CloudConflictError } from "./store/cloud-sync.js";
+import { CloudConflictError, CloudNameCollisionError } from "./store/cloud-sync.js";
 import { createFolderStore } from "./store/folder-store.js";
 export { resolveRef } from "./store/folder-merge.js";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.js";
@@ -42,7 +42,7 @@ const rackSync = createCloudSync({ provider, kv: lsKv, fileName: () => "brush-ra
 
 const local = createLocalAdapter();
 export const store = createStore({ cloud, local, kv: lsKv });
-export { CloudConflictError };
+export { CloudConflictError, CloudNameCollisionError };
 
 // ============ 兼容 shim（旧 cloud.js / auth.js / graph.js 名字 → 新 lib）============
 // app.js 改 import 来源即可，调用点不动。store.flow.push 才是真编排入口（save 路径用它）。

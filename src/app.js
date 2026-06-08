@@ -53,7 +53,7 @@ import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
   listCloudSessionsRecursive, listCloudAll, listCloudFolders,
   listCloudTrash,
-  isCloudDirty, CloudConflictError,
+  isCloudDirty, CloudConflictError, CloudNameCollisionError,
   getLastSessionSignedIn, setLastSessionSignedIn, getKnownETag,
   rackStore, setRackDirty, isRackDirty, resolveRef,
   store as _store,
@@ -3053,7 +3053,9 @@ async function saveAndPush() {
     }
   } catch (e) {
     console.warn("[cloud] store push failed:", e);
-    setStatus("推送失败：" + (e && e.message || e));
+    if (e instanceof CloudNameCollisionError)
+      setStatus(`云端已有同名「${sessionName}」（不同作品）——已留本地、未覆盖云端，改个名再推`, true);
+    else setStatus("推送失败：" + (e && e.message || e));
   } finally {
     _store.busy.set("pushing", false);
     updateSaveStatus();
@@ -5084,19 +5086,20 @@ async function renderGallery() {
       const trimmed = input.trim();
       if (!trimmed) { setStatus("名字不能空", true); return; }
       if (trimmed === item.name) { setStatus("名字未变"); return; }
-      // 冲突检查：本地 + 云端都不能撞名
+      // 本地撞名检查（快、无网络）放锁外。
       const localNames = new Set((await listSessions()).map(s => s.name));
       if (localNames.has(trimmed)) { setStatus(`本地已有同名 "${trimmed}"，换一个`, true); return; }
-      if (isCloud) {
-        try {
-          const cloudList = await listCloudSessionsRecursive();
-          const cloudNames = new Set(cloudList.map(c => c.path.replace(/\.ora$/i, "")));
-          if (cloudNames.has(trimmed)) { setStatus(`云端已有同名 "${trimmed}"，换一个`, true); return; }
-        } catch (e) { console.warn("[rename] 云端列表失败:", e); }
-      }
-      // 干活全交给 store.flow.rename（机制在库内）：本地先存新名再删旧名（phantom-path 红线）；
-      // 云端 synced→服务端 move 保 etag、dirty→push 新+trash 旧。cloud:isCloud 让纯本地 item 不误传云端。
+      // 云端撞名检查（listCloud = 网络）+ rename 一起进 withBusy → **确认即锁屏**（F：原来云检查在锁外
+      //   → 锁屏延迟到网络回来才出）。机制全在 store.flow.rename（本地先存新删旧=phantom-path 红线；
+      //   云端 synced→move 保 etag、dirty→push 新+trash 旧；cloud:isCloud 纯本地不误传）。
+      let collided = false;
       await withBusy(`正在重命名 ${item.name} → ${trimmed}…`, async () => {
+        if (isCloud) {
+          try {
+            const cloudNames = new Set((await listCloudSessionsRecursive()).map(c => c.path.replace(/\.ora$/i, "")));
+            if (cloudNames.has(trimmed)) { setStatus(`云端已有同名 "${trimmed}"，换一个`, true); collided = true; return; }
+          } catch (e) { console.warn("[rename] 云端列表失败:", e); }
+        }
         try {
           const res = await _store.flow.rename(item.name, trimmed, { cloud: isCloud });
           if (res.cloudDeferred) setStatus(`已重命名（云端稍后重试）：${item.name} → ${trimmed}`);
@@ -5105,6 +5108,7 @@ async function renderGallery() {
           setStatus(`重命名失败：${e && e.message || e}`, true);
         }
       });
+      if (collided) return;
       renderGallery();
     });
 
@@ -5174,7 +5178,8 @@ async function renderGallery() {
             if (res.status === "conflict") setStatus(`云端冲突：${item.name}（先改名再推）`, true);
             else setStatus(`已推送：${item.name}`);
           } catch (err) {
-            if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（先改名再推）`, true);
+            if (err instanceof CloudNameCollisionError) setStatus(`云端已有同名「${item.name}」（不同作品）——未覆盖，改名再推`, true);
+            else if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（先改名再推）`, true);
             else setStatus("推送失败：" + (err && err.message || err));
           }
         });
@@ -5199,7 +5204,8 @@ async function renderGallery() {
               if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开它处理冲突，或先改名再推）`, true);
               else setStatus(`已推送到云端：${item.name}`);
             } catch (err) {
-              if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（打开处理）`, true);
+              if (err instanceof CloudNameCollisionError) setStatus(`云端已有同名「${item.name}」（不同作品）——未覆盖，改名再推`, true);
+              else if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（打开处理）`, true);
               else setStatus("推送失败：" + (err && err.message || err));
             }
           });
