@@ -46,6 +46,7 @@ import { collectFolders, brushesInFolder } from "./brush-rack-view.js";
 import { getFilter, listFilters, registerFilter, onFilterRegistered } from "./filters.js";
 import "./plugins/index.js";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 import { decodeOraToDoc, encodeDocToOra, parseAppVersion } from "./ora.js";
+import { ENVELOPE_VERSION } from "./file-envelope.js";
 import { getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches } from "./app-store.js";
 import { getOrFetchCloudThumb, clearCloudThumbCache, stats as cloudThumbStats, config as cloudThumbConfig, resetStats as cloudThumbResetStats } from "./cloud-thumb-cache.js";
 import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTelemetry } from "./cloud-thumbs.js";
@@ -2716,6 +2717,9 @@ let _docLastSavedAt = 0;
 // 或用户主动 open / new / save-as 后才升级到真实名字。boot 失败时保持
 // safe default "未命名"，避免 save 走 rename-delete-old 路径误删。
 let _activeSessionName = "未命名";
+// 当前 doc 的稳定身份 GUID（ADR-0011；与 name 并行，name 是可变属性）。新建 doc 铸新；load 读 doc._meta.g
+// 缺则铸（legacy 迁移，下次保存落 .ora+pkg）；**rename/move 不变**（同 GUID 新 path）。写进 .ora EOCD comment + 本地 pkg。
+let _activeDocGuid = crypto.randomUUID();
 const AUTOSAVE_MS = 3 * 60 * 1000;
 
 // v45 新语义：
@@ -2859,6 +2863,7 @@ function adoptLoadedDoc(loaded, sessionName) {
   renderLayersPanel();
   _activeSessionName = sessionName;
   setCurrentSessionName(sessionName);
+  _activeDocGuid = loaded._meta?.g || crypto.randomUUID();   // 读身份 GUID；legacy 无 → 铸（下次保存落 .ora+pkg）
   // C4：捕获本 tab 的 base-etag（打开这画时的云端版本）进 Store 内存。
   // 之后 store.flow.push 用它当 If-Match，不读共享 localStorage → 杜绝多 tab 静默覆盖。
   _store.adoptBase(sessionName, getKnownETag(sessionName));
@@ -2969,6 +2974,8 @@ function _buildOraMeta() {
   return {
     referenceImage: referenceWindow.getPersistBlob(),
     webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+    // 信封身份 meta（→ EOCD comment）：极简 {g,v,e}。绘画态在 webpaintState，身份与之分离。
+    meta: { g: _activeDocGuid, v: ENVELOPE_VERSION, e: WEBPAINT_VERSION },
   };
 }
 function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
@@ -4352,6 +4359,7 @@ async function importImageAsNewDoc(file) {
   const name = await uniqueLocalName(stem);
   _activeSessionName = name;
   setCurrentSessionName(name);
+  _activeDocGuid = crypto.randomUUID();   // 新建作品（导入照片）→ 铸新身份
   input.clearHistory();
   board.invalidateAll();
   board.fitToScreen();
@@ -4826,6 +4834,7 @@ els.newDocConfirm.addEventListener("click", async () => {
   els.canvasSizeLabel.textContent = `${w}×${h}`;
   _activeSessionName = name;
   setCurrentSessionName(name);
+  _activeDocGuid = crypto.randomUUID();   // 新建空白作品 → 铸新身份
   input.clearHistory();
   board.invalidateAll();
   board.fitToScreen();
@@ -5168,7 +5177,7 @@ async function renderGallery() {
             if (!loaded) throw new Error("找不到本地 session");
             // 走 store.flow.push：拿到 B1 串行 / B5 自愈 / retry / 冲突 gate（不再裸推）。
             const res = await _store.flow.push(item.name, {
-              encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
+              encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState, meta: loaded._meta || undefined }),
               onConflict: async () => "keep",   // gallery 非 active item：冲突不静默覆盖，提示先改名
             });
             if (res.status === "conflict") setStatus(`云端冲突：${item.name}（先改名再推）`, true);
@@ -5193,7 +5202,7 @@ async function renderGallery() {
               if (!loaded) throw new Error("找不到本地 session");
               _store.adoptBase(item.name, getKnownETag(item.name));   // 重锚 base-etag/parentBase（同打开时 adoptLoadedDoc）
               const res = await _store.flow.push(item.name, {
-                encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
+                encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState, meta: loaded._meta || undefined }),
                 onConflict: async () => "keep",   // 非 active：云端有新版 → 不静默覆盖，提示打开处理
               });
               if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开它处理冲突，或先改名再推）`, true);
