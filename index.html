@@ -222,9 +222,8 @@
           </div>
         </div>
       </div>
-      <div class="gallery-breadcrumb hidden" id="galleryBreadcrumb"><!-- 面包屑：在子文件夹内时显示 by JS --></div>
-      <div class="gallery-grid" id="galleryGrid"><!-- 本地 + 云端 tiles by JS --></div>
-      <div class="gallery-empty hidden" id="galleryEmpty">还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。</div>
+      <!-- 图库正文 = <Gallery> Vue 深模块（src/ui/gallery.ts）：面包屑 + 文件夹/文件/回收站 grid + 空态 -->
+      <div id="galleryMount"></div>
       <div class="gallery-foot">
         <span class="gallery-foot-usage" id="galleryFootUsage">本地占用：计算中…</span>
         <span class="gallery-foot-version" id="galleryFootVersion" title="当前 WebPaint 版本"></span>
@@ -930,6 +929,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-43adb0f927cc.mjs"></script>
+    <script type="module" src="./dist/webpaint-47a6b610aaef.mjs"></script>
   </body>
 </html>

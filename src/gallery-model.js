@@ -22,6 +22,24 @@ export function itemTime(it) {
   return (it.local?.updatedAt) || Date.parse(it.cloud?.lastModifiedDateTime || 0);
 }
 
+// 回收站合并：本地 trash（{trashKey,originalName,deletedAt,thumb,size}）⊕ 云端 trash 文件，
+// 按 originalName 配对 → 统一 item { name, local|null, cloud|null, deletedAt }，新→旧。
+// 云端名要剥两层：.ora 后缀 + move-aside 撞名加的 ` [N]` 尾标。
+export function mergeTrash(localTrash, cloudTrash) {
+  const byName = new Map();
+  for (const t of localTrash) {
+    byName.set(t.originalName, { name: t.originalName, local: t, cloud: null, deletedAt: t.deletedAt || 0 });
+  }
+  for (const c of cloudTrash) {
+    const name = (c.name || c.path || "").replace(/\.ora$/i, "").replace(/ \[\d+\]$/, "");
+    const dAt = Date.parse(c.lastModifiedDateTime || 0) || 0;
+    const ent = byName.get(name);
+    if (ent) { ent.cloud = c; ent.deletedAt = Math.max(ent.deletedAt, dAt); }
+    else byName.set(name, { name, local: null, cloud: c, deletedAt: dAt });
+  }
+  return [...byName.values()].sort((a, b) => b.deletedAt - a.deletedAt);
+}
+
 // 切当前文件夹层 → { folderNames（immediate 子夹，字母序）, files（直属文件，新→旧） }。
 //   allItems = mergeLocalCloud 结果；cloudFolders = 云端真文件夹路径（含空夹）；folder = 当前路径（""=根）
 export function sliceFolder(allItems, cloudFolders, folder) {

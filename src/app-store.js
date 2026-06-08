@@ -8,6 +8,8 @@ import { CloudConflictError, CloudNameCollisionError } from "./store/cloud-sync.
 import { createFolderStore } from "./store/folder-store.js";
 export { resolveRef } from "./store/folder-merge.js";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.js";
+import { listSessions, listTrashedSessions } from "./session.js";
+import { mergeLocalCloud, mergeTrash } from "./gallery-model.js";
 import { CLIENT_ID, SCOPES, sessionFileName } from "./config.js";
 // lib 的 graph（OneDrive transport，单一 auth）—— gallery folder 操作 + thumb byte-range 都走它。
 import {
@@ -80,6 +82,37 @@ export const isCloudDirty = (name) => _auth.isSignedIn() && cloud.isDirty(name);
 // clean→dirty 门（parentBase 唯一捕获点，ADR-0016 §4）已收进 store.edit(name)（L4 ②）——
 // app 编辑落地只调 _store.edit()，不再直暴露 setCloudDirty（绕过门 = 缺 parentBase footgun，已删）。
 export const getKnownETag = (name) => cloud.getETag(name);
+
+// ---- store.list seam（gallery 数据解析）----
+// 本地⊕云 → 统一 item 列表 + 每项 dirty + 云端真文件夹。store 只做 acquisition+merge+status，
+// **不懂「当前文件夹」**（那是 UI 概念，view-model 切片）。离线/未登录 → 只本地（cloud 留空，
+// 绝不阻断）。本地读失败 → 标 localError，app 报状态。返回的 item = { name, local|null, cloud|null, dirty }，
+// item.cloud 自带 { id, eTag, size, lastModifiedDateTime, path, downloadUrl? }（thumb provider 直接读）。
+export async function listGallery({ signedIn, online } = {}) {
+  let local = [], localError = null;
+  try { local = await listSessions(); }
+  catch (e) { localError = e; }
+  let files = [], cloudFolders = [];
+  if (signedIn && online) {
+    try { const all = await listCloudAll(); files = all.files; cloudFolders = all.folders; }
+    catch (e) { console.warn("[gallery] cloud list failed:", e); }
+  }
+  const items = mergeLocalCloud(local, files);
+  for (const it of items) it.dirty = !!(it.cloud && isCloudDirty(it.name));
+  return { items, cloudFolders, localError };
+}
+
+// 回收站清单（本地 trash ⊕ 云端 trash），按 originalName 合并成统一 item（mergeTrash 纯函数）。
+//   item = { name, local:{trashKey,deletedAt,thumb,size}|null, cloud:{id,name,...}|null, deletedAt }
+export async function listGalleryTrash({ signedIn, online } = {}) {
+  let localTrash = [];
+  try { localTrash = await listTrashedSessions(); } catch (e) { console.warn("[gallery] local trash failed:", e); }
+  let cloudTrash = [];
+  if (signedIn && online) {
+    try { cloudTrash = await listCloudTrash(); } catch (e) { console.warn("[gallery] cloud trash failed:", e); }
+  }
+  return mergeTrash(localTrash, cloudTrash);
+}
 
 // ---- brush-rack = Folder shape blob：{version, brushes, trash, resetAt}（brushes 名不变，旧设备仍认）；引擎内部用 items。
 const RACK_UAT_PREHISTORY = 1;

@@ -29,6 +29,7 @@ import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
 import { mountColorWheel } from "./ui/color-wheel.ts";   // UI 深化 candidate 1 · Vue pilot
 import { mountBrushSettings } from "./ui/brush-settings.ts";   // candidate 1 · 笔设置编辑器
+import { mountGallery } from "./ui/gallery.ts";          // candidate 1 · 图库深模块
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
 import { mountRackSheet } from "./ui/rack-sheet.ts";   // candidate 1 · 笔架 sheet（folder tabs + 笔 grid）
 import { stepFor as _stepFor, quantizeSize as _quantizeSize } from "./ui/brush-size.ts";   // [ ] 键盘调粗用（slider 映射在 <LeftDial>）
@@ -141,8 +142,6 @@ const els = {
   referenceFileInput: document.getElementById("referenceFileInput"),
   galleryFull: document.getElementById("galleryFull"),
   galleryCloseBtn: document.getElementById("galleryCloseBtn"),
-  galleryGrid: document.getElementById("galleryGrid"),
-  galleryEmpty: document.getElementById("galleryEmpty"),
   galleryAddBtn: document.getElementById("galleryAddBtn"),
   galleryAddPopup: document.getElementById("galleryAddPopup"),
   galleryTrashBtn: document.getElementById("galleryTrashBtn"),
@@ -151,7 +150,6 @@ const els = {
   galleryTrashMenuBtn: document.getElementById("galleryTrashMenuBtn"),
   galleryTrashMenuPopup: document.getElementById("galleryTrashMenuPopup"),
   galleryEmptyTrashBtn: document.getElementById("galleryEmptyTrashBtn"),
-  galleryBreadcrumb: document.getElementById("galleryBreadcrumb"),
   addNewFolder: document.getElementById("addNewFolder"),
   addNew: document.getElementById("addNew"),
   addImportPhoto: document.getElementById("addImportPhoto"),
@@ -2804,15 +2802,15 @@ async function saveAndPush() {
       conflictChoice = result.choice;                 // no-op（app 执行）
     } else if (result.status === "resolved" && result.resolution === "pull") {
       setStatus(`已采用云端版本：${sessionName}（你的版本存进本地 .backup，可恢复）`);
-      renderGallery();
+      gallery.refresh();
     } else if (result.status === "resolved" && result.resolution === "weak-override") {
       setStatus(`已用本地覆盖云端：${sessionName}（云端原版存进 .backup，可恢复）`);
-      renderGallery();
+      gallery.refresh();
     } else {
       setStatus(result.status === "healed"
         ? `已同步到云端：${sessionName}（云端本已是这份）`
         : `已同步到云端：${sessionName}`);
-      renderGallery();
+      gallery.refresh();
     }
   } catch (e) {
     console.warn("[cloud] store push failed:", e);
@@ -2868,7 +2866,7 @@ async function renameCurrentSession({ suggested, reason } = {}) {
       if (!cloudOn) setStatus(`已重命名：${oldName} → ${trimmed}`);
       else if (res.cloudDeferred) setStatus(`已重命名（仅本地）：${oldName} → ${trimmed}（云端稍后 Ctrl+S 推）`);
       else setStatus(`已重命名（含云端）：${oldName} → ${trimmed}`);
-      renderGallery();
+      gallery.refresh();
       return trimmed;
     } catch (e) {
       setStatus("重命名失败：" + (e && e.message || e));
@@ -3626,7 +3624,7 @@ els.menuSaveAs.addEventListener("click", async () => {
       if (!cloudOn) setStatus(`已另存为：${trimmed}`);
       else if (res.cloudDeferred) setStatus(`已另存为（仅本地）：${trimmed}（云端稍后 Ctrl+S 推）`);
       else setStatus(`已另存为（含云端）：${trimmed}`);
-      renderGallery();
+      gallery.refresh();
       return;
     } catch (e) {
       setStatus("另存为失败：" + (e && e.message || e));
@@ -4283,30 +4281,6 @@ function _makeFullLayerSelection(layer) {
 // ---- 图库 全屏（v50 重做：无返回键、底栏 IDB 占用 + 清扫、加号 popup、云图标 popup） ----
 // 进入和退出都触发 saveNow。进入后把主画布 UI 全 disable（body[data-mode="gallery"]）。
 // 退出 = 点 active tile，或选择另一个 tile / 新建 / 导入照片 / 拉云图。
-let _galleryUrls = [];
-let _galleryThumbObserver = null;
-let _galleryThumbInflight = new Set();   // itemId in-flight，去重
-let _galleryDownloadUrls = new Map();    // itemId → @microsoft.graph.downloadUrl（listChildren 带回，1h 有效）
-let _galleryView = "files";              // "files" | "trash"
-
-// ===== 子文件夹 state =====
-// 当前浏览的 folder（"" = 根；"characters" / "characters/side" = 嵌套）
-// 跨 refresh 持久化，进 gallery 时不重置（用户期望停留上次位置）
-const LS_GALLERY_FOLDER = "webpaint.galleryFolder";
-let _galleryFolder = "";
-try { _galleryFolder = localStorage.getItem(LS_GALLERY_FOLDER) || ""; } catch {}
-function setGalleryFolder(path) {
-  _galleryFolder = path || "";
-  try { localStorage.setItem(LS_GALLERY_FOLDER, _galleryFolder); } catch {}
-}
-// 空文件夹模型：**云端真文件夹为准**（OneDrive 上 ensureSubfolder 建的真文件夹，listCloudFolders
-// 带回，含空的）。删掉了旧的 localStorage explicitFolders 旁路——它和真 fs 漂移，是「半残文件夹」。
-// 代价：未登录/离线时建不了纯本地空文件夹（无处持久化）；但本地作品本就要登录才上云，可接受。
-// 本次渲染拿到的云端真文件夹路径（renderGallery 填，_renderFolderTile / 空判用）。
-let _galleryCloudFolders = [];
-// path utils
-// 路径代数 pathFolder/pathBasename/pathJoin 已下沉 gallery-path.js（import 在顶）。
-
 // gallery-first 设计：删 / 卸载 active session 后，**进 gallery**（不创建新空白 doc）。
 // _activeSessionName 设 null = 未绑定任何 session；画布 hidden。
 // 用户在 gallery 选别的 / 新建 / 关 → 重新绑定。
@@ -4318,7 +4292,7 @@ async function _exitCanvasToGallery() {
       try { await saveAndPush(); } catch (e) { console.warn("[exit-to-gallery] save failed:", e); }
     });
     // 退到 gallery 停在 active session 所在 folder（连贯感）
-    setGalleryFolder(pathFolder(_activeSessionName));
+    gallery.setFolder(pathFolder(_activeSessionName));
   }
   _activeSessionName = null;
   setCurrentSessionName("");
@@ -4385,6 +4359,13 @@ async function _awaitCloudPushIdle() {
   try { await _store.busy.whenPushIdle(); } finally { hideFullscreenBusy(); }
 }
 
+// trash-bar / add / trash 按钮的可见性随视图（旧 renderGallery 内联，现 app chrome 显式管）。
+function _galleryChrome(view) {
+  els.galleryTrashBar?.classList.toggle("hidden", view !== "trash");
+  els.galleryAddBtn?.classList.toggle("hidden", view === "trash");
+  els.galleryTrashBtn?.classList.toggle("hidden", view === "trash");
+}
+
 async function setGalleryOpen(open) {
   if (open) {
     // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存
@@ -4393,17 +4374,14 @@ async function setGalleryOpen(open) {
     await _awaitCloudPushIdle();   // 等 cloud push 完，防 status race
     document.body.dataset.mode = "gallery";
     els.galleryFull.classList.remove("hidden");
-    _galleryView = "files";     // 每次进默认 files 视图（避免上次留在 trash 里的混乱）
-    if (els.galleryEmpty) els.galleryEmpty.textContent = "还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。";
-    renderGallery();
+    _galleryChrome("files");      // 每次进默认 files 视图（避免上次留在 trash 里的混乱）
+    gallery.setView("files");     // setView 内含 reload
     updateIdbUsage();
   } else {
     editMode.applyPendingTransient();
     if (_store.edits.localDirty() && !_store.busy.saving()) await saveNow();
     els.galleryFull.classList.add("hidden");
     delete document.body.dataset.mode;
-    for (const u of _galleryUrls) URL.revokeObjectURL(u);
-    _galleryUrls = [];
     // 关闭可能打开的 popup
     els.galleryAddPopup.classList.add("hidden");
     els.cloudAccountPopup.classList.add("hidden");
@@ -4413,6 +4391,72 @@ async function setGalleryOpen(open) {
 }
 
 // 加号 popup
+// ===== 图库 = <Gallery> 深模块（src/ui/gallery.ts）。app 只供画布耦合 host 回调 + 无系统弹窗 UI =====
+const gallery = mountGallery(document.getElementById("galleryMount"), {
+  signedIn: () => isSignedIn(),
+  online: () => navigator.onLine !== false,
+  activeName: () => _activeSessionName,
+  confirm: (t, m) => openConfirmSheet(t, m),
+  input: (t, d, o) => openInputSheet(t, d, o),
+  chooseFolder: async (title, message, options) => {
+    const v = await lockSyncGate({ title, message, showSpinner: false, actions: [...options, { label: "✕ 取消", value: "__cancel__" }] });
+    return (v == null || v === "__cancel__") ? null : v;
+  },
+  status: (m, e) => setStatus(m, e),
+  busy: (label, fn) => withBusy(label, fn),
+  // ---- 画布耦合（app 拥有活动 doc）----
+  openItem: async (item) => {
+    if (item.name === _activeSessionName) { setGalleryOpen(false); return; }
+    if (_store.edits.localDirty()) await saveNow();
+    try {
+      if (item.local) {
+        const loaded = await openSession(item.name);
+        if (!loaded) { setStatus(`找不到：${item.name}`); return; }
+        adoptLoadedDoc(loaded, item.name);
+        setGalleryOpen(false);
+        setStatus(`已打开：${item.name}`);
+        gateCloudSyncOnOpen(item.name).catch((e) => console.warn("[sync-gate]", e));
+      } else if (item.cloud) {
+        setStatus(`正在拉取：${item.name}…`);
+        await pullCloudPath(item.cloud.path);   // 自带 busy + adopt + 关库
+      }
+    } catch (err) { setStatus("打开失败：" + (err && err.message || err)); }
+  },
+  pushItem: async (item) => {
+    await withBusy(`正在推送 ${item.name} 到云端…`, async () => {
+      try {
+        const loaded = await openSession(item.name);
+        if (!loaded) throw new Error("找不到本地 session");
+        if (item.local && item.cloud) _store.adoptBase(item.name, getKnownETag(item.name));  // reloaded 后补锚 If-Match（W2 红线）
+        const res = await _store.flow.push(item.name, {
+          encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
+          onConflict: async () => "keep",
+        });
+        if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开处理 / 先改名）`, true);
+        else setStatus(`已推送：${item.name}`);
+      } catch (err) {
+        if (err instanceof CloudNameCollisionError) setStatus(`云端已有同名「${item.name}」（不同作品）——未覆盖，改名再推`, true);
+        else if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（打开处理）`, true);
+        else setStatus("推送失败：" + (err && err.message || err));
+      }
+    });
+  },
+  unloadItem: async (item) => {
+    const isActive = item.name === _activeSessionName;
+    if (isCloudDirty(item.name)) {
+      const ok = await openConfirmSheet(`卸载本地 "${item.name}"？`, "本地有未推送到云端的修改，卸载会**丢失这些修改**。云端保留旧版本。");
+      if (!ok) return;
+    }
+    await withBusy(`正在卸载本地 ${item.name}…`, async () => {
+      try { await removeSession(item.name); if (isActive) await _exitCanvasToGallery(); setStatus(`已卸载本地：${item.name}（云端保留）`); }
+      catch (err) { setStatus("卸载失败：" + (err && err.message || err)); }
+    });
+  },
+  renameActive: () => renameCurrentSession(),
+  exitActive: () => _exitCanvasToGallery(),
+  setActiveName: (name) => { _activeSessionName = name; setCurrentSessionName(name); },
+});
+
 // (galleryCloseBtn 已删除 gallery-first，无 close-back-to-canvas 按钮)
 els.galleryAddBtn.addEventListener("click", (e) => {
   e.stopPropagation();
@@ -4516,7 +4560,7 @@ els.addNewFolder?.addEventListener("click", async () => {
   const trimmed = stem.trim();
   if (!trimmed) { setStatus("文件夹名不能空", true); return; }
   if (trimmed.includes("/")) { setStatus("文件夹名不能含 /（要建嵌套请进对应文件夹再点新建）", true); return; }
-  const fullPath = pathJoin(_galleryFolder, trimmed);
+  const fullPath = pathJoin(gallery.getFolder(), trimmed);
   // 已存在 check（本地+云的 item 派生 + 云端真文件夹）
   let allNames = [], cloudFolders = [];
   try { allNames = allNames.concat((await listSessions()).map(s => s.name)); } catch {}
@@ -4532,7 +4576,7 @@ els.addNewFolder?.addEventListener("click", async () => {
     try { await ensureSubfolder(fullPath); setStatus(`已建文件夹：${trimmed}`); }
     catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus("建文件夹失败：" + (e && e.message || e), true); }
   });
-  renderGallery();
+  gallery.refresh();
 });
 let _addImportAsNewDoc = false;
 
@@ -4556,7 +4600,7 @@ async function _nextDocName(folder) {
   return `${base}-${Date.now()}`;
 }
 async function openNewDocSheet() {
-  els.newDocName.value = _galleryFolder ? `${_galleryFolder}/…` : "…";   // 占位，下面 async 填日期名
+  els.newDocName.value = gallery.getFolder() ? `${gallery.getFolder()}/…` : "…";   // 占位，下面 async 填日期名
   els.newDocPreset.value = "2048";
   els.newDocCustomRow.style.display = "none";
   els.newDocW.value = doc.width;
@@ -4564,8 +4608,8 @@ async function openNewDocSheet() {
   els.newDocBackdrop.classList.remove("hidden");
   els.newDocSheet.classList.remove("hidden");
   // yyyymmdd-N（避让本地+云重名）。folder 前缀保留（落当前子文件夹）。
-  const next = await _nextDocName(_galleryFolder);
-  els.newDocName.value = _galleryFolder ? `${_galleryFolder}/${next}` : next;
+  const next = await _nextDocName(gallery.getFolder());
+  els.newDocName.value = gallery.getFolder() ? `${gallery.getFolder()}/${next}` : next;
   setTimeout(() => els.newDocName.focus(), 50);
 }
 function closeNewDocSheet() {
@@ -4674,780 +4718,6 @@ async function checkQuotaAndWarn() {
   } catch {}
 }
 
-async function renderGallery() {
-  updateCloudAuthUI();
-  updateIdbUsage();
-  for (const u of _galleryUrls) URL.revokeObjectURL(u);
-  _galleryUrls = [];
-  if (_galleryThumbObserver) { _galleryThumbObserver.disconnect(); _galleryThumbObserver = null; }
-  _galleryThumbInflight.clear();
-  _galleryDownloadUrls.clear();
-
-  // trash 视图独立渲染
-  els.galleryTrashBar?.classList.toggle("hidden", _galleryView !== "trash");
-  els.galleryAddBtn?.classList.toggle("hidden", _galleryView === "trash");
-  els.galleryTrashBtn?.classList.toggle("hidden", _galleryView === "trash");
-  // 占位"加载中" sync 显示 → 防 user 看到旧 tiles 一会儿
-  els.galleryGrid.innerHTML = '<div class="gallery-loading">加载中…</div>';
-  els.galleryGrid.style.display = "";
-  els.galleryEmpty.classList.add("hidden");
-  if (_galleryView === "trash") {
-    return await renderTrashView();
-  }
-
-  // listSessions 在 IDB 被禁（隐私窗口 / 配额耗尽 / 浏览器策略）时会抛。
-  // 这时图库没法用是合理结果，但要给个明确状态消息（原代码静默死掉）。
-  let local = [];
-  try { local = await listSessions(); }
-  catch (e) {
-    console.error("[gallery] listSessions failed:", e);
-    setStatus("本地图库读取失败：" + (e && e.message || e) + "（可能是隐私窗口 / IDB 被禁）", true);
-  }
-  // 云端：仅在登录 + 在线 时尝试。一次 listCloudAll 同时拿文件 + 真文件夹（含空），省一半往返。
-  // navigator.onLine === false 几乎确定离线，跳网络省超时。
-  let cloud = [];
-  _galleryCloudFolders = [];
-  if (isSignedIn() && navigator.onLine !== false) {
-    try { const all = await listCloudAll(); cloud = all.files; _galleryCloudFolders = all.folders; }
-    catch (e) { console.warn("[cloud] list failed:", e); }
-  }
-  // 合并 local⊕cloud + 切当前文件夹层（folder 模型已下沉 gallery-model.js）
-  const allItems = mergeLocalCloud(local, cloud);
-  const { folderNames, files: filesInFolder } = sliceFolder(allItems, _galleryCloudFolders, _galleryFolder);
-
-  // ====== Breadcrumb ======
-  _renderBreadcrumb();
-
-  els.galleryGrid.innerHTML = "";
-  if (folderNames.length === 0 && filesInFolder.length === 0) {
-    els.galleryEmpty.classList.remove("hidden");
-    els.galleryEmpty.textContent = _galleryFolder
-      ? `文件夹 "${_galleryFolder}" 是空的`
-      : "还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。";
-    els.galleryGrid.style.display = "none";
-    return;
-  }
-  els.galleryEmpty.classList.add("hidden");
-  els.galleryGrid.style.display = "";
-
-  // ====== Folder tiles 先（字母序） ======
-  for (const folderName of folderNames) {
-    const folderPath = pathJoin(_galleryFolder, folderName);
-    // 非空（有 item 或子夹）→ 禁删，避免级联删整棵子树
-    const hasItems = folderHasContents(allItems, _galleryCloudFolders, folderPath);
-    _renderFolderTile(folderName, folderPath, hasItems);
-  }
-
-  for (const item of filesInFolder) {
-    const isLocal = !!item.local;
-    const isCloud = !!item.cloud;
-    const tile = document.createElement("div");
-    // gallery-first：进 gallery 时 _activeSessionName 应该 null，所以不会有 active 框
-    tile.className = "gallery-tile";
-
-    // 缩略图：local thumb 优先；纯云端用云朵 SVG 占位；纯本地无 thumb 用名字首字
-    let thumbEl;
-    if (isLocal && item.local.thumb) {
-      thumbEl = document.createElement("img");
-      thumbEl.className = "gallery-tile-thumb";
-      thumbEl.alt = item.name;
-      const url = URL.createObjectURL(item.local.thumb);
-      _galleryUrls.push(url);
-      thumbEl.src = url;
-      thumbEl.loading = "lazy";
-    } else {
-      thumbEl = document.createElement("div");
-      thumbEl.className = "gallery-tile-thumb placeholder";
-      if (isCloud) {
-        // 云朵 placeholder + 标记，IntersectionObserver 进视口才拉
-        thumbEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:48px;height:48px;"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
-        thumbEl.dataset.cloudItemId = item.cloud.id;
-        thumbEl.dataset.cloudEtag = item.cloud.eTag || "";
-        thumbEl.dataset.cloudSize = String(item.cloud.size || 0);
-        thumbEl.dataset.cloudName = item.name;
-        // listChildren 带回的 downloadUrl 存模块 Map（dataset 放 URL 太长）
-        const dl = item.cloud["@microsoft.graph.downloadUrl"];
-        if (dl) _galleryDownloadUrls.set(item.cloud.id, dl);
-      } else {
-        thumbEl.textContent = (item.name.slice(0, 1) || "?");
-      }
-    }
-    tile.appendChild(thumbEl);
-
-    const signedIn = isSignedIn();
-
-    // 名字 + 备注（第 1 行 name ellipsis；第 2 行 状态·时间·大小，淡色）
-    const nameRow = document.createElement("div");
-    nameRow.className = "gallery-tile-name-row";
-    const nm = document.createElement("div");
-    nm.className = "gallery-tile-name";
-    nm.textContent = pathBasename(item.name);   // 在子文件夹下只显示 basename
-    nm.title = item.name;                       // 完整路径走 tooltip
-    nameRow.appendChild(nm);
-    const meta = document.createElement("div");
-    meta.className = "gallery-tile-meta";
-    const t = (item.local?.updatedAt) || Date.parse(item.cloud?.lastModifiedDateTime || 0);
-    const sz = (item.local?.size) || item.cloud?.size || 0;
-    // 状态 icon (4 态)：
-    //   本地 only：HDD
-    //   云端 only：cloud
-    //   本地+云已同步：cloud + check
-    //   本地+云有未推改动：cloud + ↑  (autosave 只 IDB，没推云的临时态)
-    let stateIcon, stateTitle;
-    if (isLocal && isCloud) {
-      if (signedIn && isCloudDirty(item.name)) {
-        stateIcon = ICON_CLOUD_PENDING; stateTitle = "本地+云端 · 本地有未推改动（点退 gallery 自动推）";
-      } else {
-        stateIcon = ICON_CLOUD_SYNCED; stateTitle = "本地+云端（已同步）";
-      }
-    } else if (isCloud) {
-      stateIcon = ICON_CLOUD_SOLID; stateTitle = "纯云端（未拉到本地）";
-    } else if (isLocal && signedIn) {
-      stateIcon = ICON_LOCAL; stateTitle = "仅本地（未上传云端）";
-    } else {
-      stateIcon = ICON_LOCAL; stateTitle = "本地";
-    }
-    const stateIconEl = document.createElement("span");
-    stateIconEl.className = "gallery-tile-state-icon";
-    stateIconEl.innerHTML = stateIcon;
-    stateIconEl.title = stateTitle;
-    meta.appendChild(stateIconEl);
-    const metaText = document.createElement("span");
-    metaText.textContent = `${humanTime(t)} · ${humanSize(sz)}`;
-    meta.appendChild(metaText);
-    nameRow.appendChild(meta);
-    tile.appendChild(nameRow);
-
-    // ⋯ 菜单按钮叠在 thumb 右上 + 弹出菜单
-    const menuBtn = document.createElement("button");
-    menuBtn.type = "button";
-    menuBtn.className = "gallery-tile-menu-btn";
-    menuBtn.setAttribute("aria-label", "更多操作");
-    menuBtn.textContent = "⋯";
-    tile.appendChild(menuBtn);
-
-    const popup = document.createElement("div");
-    popup.className = "gallery-tile-menu-popup hidden";
-
-    function addAction(label, handler, opts = {}) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = label;
-      if (opts.danger) b.className = "danger";
-      b.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        popup.classList.add("hidden");
-        await handler();
-      });
-      popup.appendChild(b);
-    }
-
-    addAction("重命名", async () => {
-      // active session 走 renameCurrentSession（已含云端同步）
-      if (item.name === _activeSessionName) {
-        const newName = await renameCurrentSession();
-        if (newName && newName !== item.name) {
-          setStatus(`已重命名：${item.name} → ${newName}`);
-          renderGallery();
-        } else if (newName === item.name) {
-          setStatus("名字未变");
-        }
-        return;
-      }
-      const input = await openInputSheet("重命名", item.name, { placeholder: "新名字" });
-      if (input == null) { setStatus("已取消"); return; }
-      const trimmed = input.trim();
-      if (!trimmed) { setStatus("名字不能空", true); return; }
-      if (trimmed === item.name) { setStatus("名字未变"); return; }
-      // 本地撞名检查（快、无网络）放锁外。
-      const localNames = new Set((await listSessions()).map(s => s.name));
-      if (localNames.has(trimmed)) { setStatus(`本地已有同名 "${trimmed}"，换一个`, true); return; }
-      // 云端撞名检查（listCloud = 网络）+ rename 一起进 withBusy → **确认即锁屏**（F：原来云检查在锁外
-      //   → 锁屏延迟到网络回来才出）。机制全在 store.flow.rename（本地先存新删旧=phantom-path 红线；
-      //   云端 synced→move 保 etag、dirty→push 新+trash 旧；cloud:isCloud 纯本地不误传）。
-      let collided = false;
-      await withBusy(`正在重命名 ${item.name} → ${trimmed}…`, async () => {
-        if (isCloud) {
-          try {
-            const cloudNames = new Set((await listCloudSessionsRecursive()).map(c => c.path.replace(/\.ora$/i, "")));
-            if (cloudNames.has(trimmed)) { setStatus(`云端已有同名 "${trimmed}"，换一个`, true); collided = true; return; }
-          } catch (e) { console.warn("[rename] 云端列表失败:", e); }
-        }
-        try {
-          const res = await _store.flow.rename(item.name, trimmed, { cloud: isCloud });
-          if (res.cloudDeferred) setStatus(`已重命名（云端稍后重试）：${item.name} → ${trimmed}`);
-          else setStatus(`已重命名：${item.name} → ${trimmed}`);
-        } catch (e) {
-          setStatus(`重命名失败：${e && e.message || e}`, true);
-        }
-      });
-      if (collided) return;
-      renderGallery();
-    });
-
-    // 移动到…（取代拖拽：iPad 触屏 drag-drop 不可靠 → 卡片菜单选目标文件夹）。
-    // 移动 = 跨文件夹 rename：lib rename 同folder→PATCH名，跨folder→ensureFolder+move（同 GUID，无副本，ADR-0011）。
-    addAction("移动到…", async () => {
-      const curFolder = pathFolder(item.name);
-      const base = pathBasename(item.name);
-      // 候选目标 = 所有已知文件夹（云端真文件夹 + item 派生的各级祖先）+ 根目录，排掉当前所在。
-      const folders = new Set(_galleryCloudFolders);
-      folders.add("");  // 根目录
-      for (const it of allItems) {
-        const parts = it.name.split("/");
-        let acc = "";
-        for (let i = 0; i < parts.length - 1; i++) { acc = acc ? `${acc}/${parts[i]}` : parts[i]; folders.add(acc); }
-      }
-      folders.delete(curFolder);
-      const sorted = [...folders].sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
-      if (sorted.length === 0) { setStatus("没有别的文件夹可移（先新建一个）"); return; }
-      const actions = sorted.map((f) => ({ label: f === "" ? "/ 根目录" : f, value: f }));
-      actions.push({ label: "✕ 取消", value: "__cancel__" });
-      const target = await lockSyncGate({ title: `移动「${base}」到…`, message: "选择目标文件夹", showSpinner: false, actions });
-      if (target == null || target === "__cancel__") return;
-      const newName = pathJoin(target, base);
-      if (newName === item.name) { setStatus("已在该文件夹"); return; }
-      // 冲突检查：目标文件夹下不能撞名（本地 + 云端）
-      const localNames = new Set((await listSessions()).map((s) => s.name));
-      if (localNames.has(newName)) { setStatus(`目标已有同名「${base}」，先改名`, true); return; }
-      if (isCloud) {
-        try {
-          const cloudNames = new Set((await listCloudSessionsRecursive()).map((c) => c.path.replace(/\.ora$/i, "")));
-          if (cloudNames.has(newName)) { setStatus(`云端目标已有同名「${base}」`, true); return; }
-        } catch (e) { console.warn("[move] 云端列表失败:", e); }
-      }
-      // 移动 = 跨文件夹 rename，走 store.flow.rename（同 GUID、保 etag/红线，机制在库内）。
-      await withBusy(`正在移动 ${base} → ${target || "根目录"}…`, async () => {
-        try {
-          const res = await _store.flow.rename(item.name, newName, { cloud: isCloud });
-          // active session 跟着改名（否则后续保存写错路径）
-          if (item.name === _activeSessionName) { _activeSessionName = newName; setCurrentSessionName(newName); }
-          if (res.cloudDeferred) setStatus(`已移动（云端稍后重试）：${target || "根目录"}`);
-          else setStatus(`已移动到：${target || "根目录"}`);
-        } catch (e) {
-          setStatus(`移动失败：${e && e.message || e}`, true);
-        }
-      });
-      renderGallery();
-    });
-
-    // 拉取/推送/卸载（按状态，3 选 1 或者没有）
-    if (isCloud && !isLocal) {
-      addAction("拉取到本地", async () => {
-        // pullCloudPath 自带 fullscreen busy + 自动 adopt
-        await pullCloudPath(item.cloud.path);
-      });
-    } else if (isLocal && !isCloud && signedIn) {
-      addAction("推送到云端", async () => {
-        await withBusy(`正在推送 ${item.name} 到云端…`, async () => {
-          try {
-            const loaded = await openSession(item.name);
-            if (!loaded) throw new Error("找不到本地 session");
-            // 走 store.flow.push：拿到 B1 串行 / B5 自愈 / retry / 冲突 gate（不再裸推）。
-            const res = await _store.flow.push(item.name, {
-              encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
-              onConflict: async () => "keep",   // gallery 非 active item：冲突不静默覆盖，提示先改名
-            });
-            if (res.status === "conflict") setStatus(`云端冲突：${item.name}（先改名再推）`, true);
-            else setStatus(`已推送：${item.name}`);
-          } catch (err) {
-            if (err instanceof CloudNameCollisionError) setStatus(`云端已有同名「${item.name}」（不同作品）——未覆盖，改名再推`, true);
-            else if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（先改名再推）`, true);
-            else setStatus("推送失败：" + (err && err.message || err));
-          }
-        });
-        renderGallery();
-      });
-    } else if (isLocal && isCloud) {
-      // pending（本地有未推改动）→ 显式「补推」菜单项（取代只能 open+exit 才自动推）。
-      // **安全**：先 adoptBase 重锚 If-Match（reloaded 后内存丢了 parentBase，必须补，否则裸推=null base
-      //   会静默盖掉更新的云版 = W2 红线）。云端被改过 → push 412 → onConflict "keep" 不解决、不覆盖，
-      //   提示用户打开它处理冲突。完整 keep/pull/branch 解决留 active 打开路径（saveAndPush）。
-      if (signedIn && isCloudDirty(item.name)) {
-        addAction("推送到云端", async () => {
-          await withBusy(`正在推送 ${item.name} 到云端…`, async () => {
-            try {
-              const loaded = await openSession(item.name);
-              if (!loaded) throw new Error("找不到本地 session");
-              _store.adoptBase(item.name, getKnownETag(item.name));   // 重锚 base-etag/parentBase（同打开时 adoptLoadedDoc）
-              const res = await _store.flow.push(item.name, {
-                encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
-                onConflict: async () => "keep",   // 非 active：云端有新版 → 不静默覆盖，提示打开处理
-              });
-              if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开它处理冲突，或先改名再推）`, true);
-              else setStatus(`已推送到云端：${item.name}`);
-            } catch (err) {
-              if (err instanceof CloudNameCollisionError) setStatus(`云端已有同名「${item.name}」（不同作品）——未覆盖，改名再推`, true);
-              else if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（打开处理）`, true);
-              else setStatus("推送失败：" + (err && err.message || err));
-            }
-          });
-          renderGallery();
-        });
-      }
-      // 卸载 = 删本地副本，云端备份还在。
-      // - 无冲突（cloud-dirty=false）：本地跟云端同步过 → 直接卸载
-      // - 有冲突（cloud-dirty=true）：本地有未推改动 → warning confirm，卸载会丢
-      // - active session 卸载：跟"送到回收站 active"一样走 _resetCanvasToBlank（lazy 空白占位）
-      addAction("卸载本地", async () => {
-        const isActive = (item.name === _activeSessionName);
-        const dirty = isCloudDirty(item.name);
-        if (dirty) {
-          const ok = await openConfirmSheet(
-            `卸载本地 "${item.name}"？`,
-            "本地有未推送到云端的修改，卸载会**丢失这些修改**。云端保留的是旧版本。",
-          );
-          if (!ok) return;
-        }
-        await withBusy(`正在卸载本地 ${item.name}…`, async () => {
-          try {
-            await removeSession(item.name);
-            if (isActive) await _exitCanvasToGallery();
-            setStatus(`已卸载本地：${item.name}（云端保留）`);
-          } catch (err) {
-            setStatus("卸载失败：" + (err && err.message || err));
-          }
-        });
-        renderGallery();
-      });
-    }
-
-    // 删除 = 软删（送回收站，可恢复）。策略：有云端就只云端进 trash，本地直接 IDB delete。
-    // - 本地 only：本地 trash
-    // - 云端 only：云端 trash
-    // - 本地+云：云端 trash（source of truth）+ 本地 IDB 直接删
-    //   特殊：cloud-dirty（本地有未推改动） → warning：删本地会丢这部分改动
-    addAction("送到回收站", async () => {
-      const isActive = (item.name === _activeSessionName);
-      const dirty = isLocal && isCloud && isCloudDirty(item.name);
-      let detail;
-      if (isLocal && isCloud) {
-        detail = dirty
-          ? "本地有**未推送到云端的修改**，删除会丢失这些改动。云端备份会进回收站可恢复。"
-          : "本地副本会一起删，云端进回收站可恢复。";
-      } else if (isCloud) {
-        detail = "会进云端回收站，可恢复。";
-      } else {
-        detail = "会进本地回收站，可恢复。";
-      }
-      if (isActive) detail += " 当前画布会关闭。";
-      const ok = await openConfirmSheet(`删除 "${item.name}"？`, detail);
-      if (!ok) return;
-      // 干活全交给 store.flow.delete（三态 move-aside / 不留双份 / 离线排队，机制在库内）。
-      // dirty 警告已在上面的 confirm sheet 里说清，故不再传 onDirtyWarn（不重复弹）。
-      // 文件夹模型「云端真文件夹为准」：删最后一个文件后 OneDrive 父文件夹仍在 → 空文件夹自然保留。
-      await withBusy(`正在删除 ${item.name}…`, async () => {
-        try {
-          await _store.flow.delete(item.name, { isOnline: () => navigator.onLine !== false });
-          if (isActive) await _exitCanvasToGallery();
-          setStatus(`已删除：${item.name}`);
-        } catch (e) {
-          setStatus(`删除失败：${e && e.message || e}`, true);
-        }
-      });
-      renderGallery();
-    }, { danger: true });
-
-    tile.appendChild(popup);
-
-    menuBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      // 关其他打开的 popup
-      for (const p of els.galleryGrid.querySelectorAll(".gallery-tile-menu-popup")) {
-        if (p !== popup) p.classList.add("hidden");
-      }
-      popup.classList.toggle("hidden");
-    });
-
-    tile.addEventListener("click", async (e) => {
-      if (e.target.closest(".gallery-tile-menu-btn")) return;
-      if (e.target.closest(".gallery-tile-menu-popup")) return;
-      if (tile.dataset.busy === "1") return;   // 防狂点 race
-      if (item.name === _activeSessionName) {
-        setGalleryOpen(false);
-        return;
-      }
-      tile.dataset.busy = "1";
-      try {
-        if (_store.edits.localDirty()) await saveNow();
-        if (isLocal) {
-          const loaded = await openSession(item.name);
-          if (!loaded) { setStatus(`找不到：${item.name}`); return; }
-          adoptLoadedDoc(loaded, item.name);
-          setGalleryOpen(false);
-          setStatus(`已打开：${item.name}`);
-          gateCloudSyncOnOpen(item.name).catch((e) => console.warn("[sync-gate]", e));
-        } else if (isCloud) {
-          // 纯云端：点 tile = 拉取（与"拉取"按钮等价）
-          setStatus(`正在拉取：${item.name}…`);
-          await pullCloudPath(item.cloud.path);
-        }
-      } catch (err) {
-        setStatus("打开失败：" + (err && err.message || err));
-      } finally {
-        delete tile.dataset.busy;
-      }
-    });
-
-    els.galleryGrid.appendChild(tile);
-  }
-
-  // 关闭弹出的 ⋯ 菜单：grid 内任何地方点击且不在菜单 btn / popup 上 → 关全部
-  els.galleryGrid.addEventListener("click", (e) => {
-    if (e.target.closest(".gallery-tile-menu-btn")) return;
-    if (e.target.closest(".gallery-tile-menu-popup")) return;
-    for (const p of els.galleryGrid.querySelectorAll(".gallery-tile-menu-popup")) {
-      p.classList.add("hidden");
-    }
-  }, { capture: true });
-
-  // 云端 thumbnail 懒加载：进视口（rootMargin 多 extend 一点降延迟）才拉
-  _galleryThumbObserver = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      const el = e.target;
-      _galleryThumbObserver.unobserve(el);
-      _hydrateCloudThumb(el);
-    }
-  }, { root: els.galleryGrid, rootMargin: "600px 0px", threshold: 0.01 });
-
-  for (const el of els.galleryGrid.querySelectorAll(".gallery-tile-thumb.placeholder[data-cloud-item-id]")) {
-    _galleryThumbObserver.observe(el);
-  }
-}
-
-// ===== 子文件夹 helpers =====
-function _renderBreadcrumb() {
-  const bc = els.galleryBreadcrumb;
-  if (!bc) return;
-  bc.innerHTML = "";
-  if (!_galleryFolder && _galleryView !== "trash") {
-    bc.classList.add("hidden");
-    return;
-  }
-  bc.classList.remove("hidden");
-  // 根按钮
-  const rootBtn = document.createElement("button");
-  rootBtn.type = "button";
-  rootBtn.textContent = "/ 根目录";
-  if (!_galleryFolder) rootBtn.classList.add("current");
-  else rootBtn.addEventListener("click", () => { setGalleryFolder(""); renderGallery(); });
-  bc.appendChild(rootBtn);
-  // 每段路径
-  if (_galleryFolder) {
-    const segs = _galleryFolder.split("/").filter(Boolean);
-    let accum = "";
-    for (let i = 0; i < segs.length; i++) {
-      const sep = document.createElement("span");
-      sep.className = "sep";
-      sep.textContent = "›";
-      bc.appendChild(sep);
-      const seg = segs[i];
-      accum = accum ? `${accum}/${seg}` : seg;
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = seg;
-      if (i === segs.length - 1) {
-        btn.classList.add("current");
-      } else {
-        const target = accum;
-        btn.addEventListener("click", () => { setGalleryFolder(target); renderGallery(); });
-      }
-      bc.appendChild(btn);
-    }
-  }
-}
-
-function _renderFolderTile(folderName, folderPath, hasItems) {
-  const tile = document.createElement("div");
-  tile.className = "gallery-tile folder";
-  // thumb 用 folder icon
-  const thumb = document.createElement("div");
-  thumb.className = "gallery-tile-thumb";
-  thumb.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
-  tile.appendChild(thumb);
-  // name row
-  const nameRow = document.createElement("div");
-  nameRow.className = "gallery-tile-name-row";
-  const nm = document.createElement("div");
-  nm.className = "gallery-tile-name";
-  nm.textContent = folderName;
-  nm.title = folderPath;
-  nameRow.appendChild(nm);
-  const meta = document.createElement("div");
-  meta.className = "gallery-tile-meta";
-  meta.textContent = hasItems ? "文件夹" : "空文件夹";
-  nameRow.appendChild(meta);
-  tile.appendChild(nameRow);
-  // ⋯ menu（只显示"删除"，且仅在空时启用）
-  const menuBtn = document.createElement("button");
-  menuBtn.type = "button";
-  menuBtn.className = "gallery-tile-menu-btn";
-  menuBtn.setAttribute("aria-label", "更多操作");
-  menuBtn.textContent = "⋯";
-  tile.appendChild(menuBtn);
-  const popup = document.createElement("div");
-  popup.className = "gallery-tile-menu-popup hidden";
-  const delBtn = document.createElement("button");
-  delBtn.type = "button";
-  delBtn.className = "danger";
-  delBtn.textContent = hasItems ? "删除（请先清空里面）" : "删除空文件夹";
-  delBtn.disabled = hasItems;
-  delBtn.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    popup.classList.add("hidden");
-    if (hasItems) {
-      setStatus("文件夹非空，请先把里面的作品移走或删除", true);
-      return;
-    }
-    await withBusy(`正在删除文件夹 ${folderName}…`, async () => {
-      // 云端真文件夹为准：直接删 OneDrive 上的真文件夹（无旁路要清）。
-      if (isSignedIn() && navigator.onLine !== false) {
-        try {
-          const item = await getItemByPath(folderPath);
-          if (item && item.folder) await deleteItem(item.id);
-          clearFolderCaches();
-        } catch (e) { console.warn("[folder] cloud delete:", e); }
-      }
-      setStatus(`已删除空文件夹：${folderName}`);
-    });
-    renderGallery();
-  });
-  popup.appendChild(delBtn);
-  tile.appendChild(popup);
-  menuBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    for (const p of els.galleryGrid.querySelectorAll(".gallery-tile-menu-popup")) {
-      if (p !== popup) p.classList.add("hidden");
-    }
-    popup.classList.toggle("hidden");
-  });
-  tile.addEventListener("click", (e) => {
-    if (e.target.closest(".gallery-tile-menu-btn")) return;
-    if (e.target.closest(".gallery-tile-menu-popup")) return;
-    setGalleryFolder(folderPath);
-    renderGallery();
-  });
-  els.galleryGrid.appendChild(tile);
-}
-
-// 回收站视图：每条 trash 独立 tile（trashKey / itemId 唯一），不按 name 合并。
-// 同名多次删除显示多个 tile，按删除时间排序；meta 行标"本地"或"云端"区分
-async function renderTrashView() {
-  let local = [], cloud = [];
-  try { local = await listTrashedSessions(); } catch (e) { console.warn("[trash] local list:", e); }
-  if (isSignedIn() && navigator.onLine !== false) {
-    try { cloud = await listCloudTrash(); } catch (e) { console.warn("[trash] cloud list:", e); }
-  }
-
-  // 每条独立 entry，标 source 区分
-  const merged = [];
-  for (const l of local) {
-    merged.push({
-      kind: "local",
-      uid: l.trashKey,
-      name: l.originalName,
-      deletedAt: l.deletedAt,
-      thumb: l.thumb,
-      local: l, cloud: null,
-    });
-  }
-  for (const c of cloud) {
-    // 去 .ora 后缀 + 去冲突时间戳 → 显示原名
-    const name = c.name.replace(/\.ora$/i, "").replace(/ \[\d+\]$/, "");
-    merged.push({
-      kind: "cloud",
-      uid: c.id,
-      name,
-      deletedAt: Date.parse(c.lastModifiedDateTime || 0),
-      thumb: null,
-      local: null, cloud: c,
-    });
-  }
-  merged.sort((a, b) => b.deletedAt - a.deletedAt);
-
-  els.galleryGrid.innerHTML = "";
-  if (merged.length === 0) {
-    els.galleryEmpty.classList.remove("hidden");
-    els.galleryEmpty.textContent = "回收站是空的。";
-    els.galleryGrid.style.display = "none";
-    return;
-  }
-  els.galleryEmpty.classList.add("hidden");
-  els.galleryGrid.style.display = "";
-
-  for (const item of merged) {
-    const tile = document.createElement("div");
-    tile.className = "gallery-tile";
-
-    // thumb：本地有就直接显示；云端走 IntersectionObserver lazy fetch（跟 main view 一样）
-    let thumbEl;
-    if (item.local && item.local.thumb) {
-      thumbEl = document.createElement("img");
-      thumbEl.className = "gallery-tile-thumb";
-      thumbEl.alt = item.name;
-      const url = URL.createObjectURL(item.local.thumb);
-      _galleryUrls.push(url);
-      thumbEl.src = url;
-      thumbEl.loading = "lazy";
-    } else {
-      thumbEl = document.createElement("div");
-      thumbEl.className = "gallery-tile-thumb placeholder";
-      if (item.kind === "cloud" && item.cloud) {
-        thumbEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:48px;height:48px;"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
-        thumbEl.dataset.cloudItemId = item.cloud.id;
-        thumbEl.dataset.cloudEtag = item.cloud.eTag || "";
-        thumbEl.dataset.cloudSize = String(item.cloud.size || 0);
-        thumbEl.dataset.cloudName = item.name;
-        const dl = item.cloud["@microsoft.graph.downloadUrl"];
-        if (dl) _galleryDownloadUrls.set(item.cloud.id, dl);
-      } else {
-        thumbEl.textContent = (item.name.slice(0, 1) || "?");
-      }
-    }
-    tile.appendChild(thumbEl);
-
-    // 名字 + meta（meta 标 kind 区分本地 / 云端）
-    const nameRow = document.createElement("div");
-    nameRow.className = "gallery-tile-name-row";
-    const nm = document.createElement("div");
-    nm.className = "gallery-tile-name";
-    nm.textContent = item.name;
-    nm.title = item.name;
-    nameRow.appendChild(nm);
-    const meta = document.createElement("div");
-    meta.className = "gallery-tile-meta";
-    const source = item.kind === "cloud" ? "云端" : "本地";
-    meta.textContent = `${source} · ${humanTime(item.deletedAt)} 删除`;
-    nameRow.appendChild(meta);
-    tile.appendChild(nameRow);
-
-    // ⋯ 菜单
-    const menuBtn = document.createElement("button");
-    menuBtn.type = "button";
-    menuBtn.className = "gallery-tile-menu-btn";
-    menuBtn.textContent = "⋯";
-    tile.appendChild(menuBtn);
-
-    const popup = document.createElement("div");
-    popup.className = "gallery-tile-menu-popup hidden";
-
-    const addAction = (label, handler, opts = {}) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = label;
-      if (opts.danger) b.className = "danger";
-      b.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        popup.classList.add("hidden");
-        await handler();
-      });
-      popup.appendChild(b);
-    };
-
-    addAction("恢复", async () => {
-      // 走 store.flow.restore：本地先恢复拿到实际落名（撞名自动 (2)）→ 云端按同一名恢复，两端不再失同步。
-      await withBusy(`正在恢复 ${item.name}…`, async () => {
-        try {
-          const res = await _store.flow.restore({
-            trashKey: item.local ? item.local.trashKey : null,
-            fromCloud: !!item.cloud,
-            cloudItemId: item.cloud ? item.cloud.id : null,
-            targetName: item.name,
-          });
-          const restoredName = res.name || item.name;
-          setStatus(`已恢复：${restoredName}${restoredName !== item.name ? `（原名 ${item.name} 已被占用）` : ""}`);
-        } catch (e) {
-          setStatus(`恢复失败：${e && e.message || e}`, true);
-        }
-      });
-      renderGallery();
-    });
-
-    addAction("永久删除", async () => {
-      const ok = await openConfirmSheet(`永久删除 "${item.name}"？`, "不可撤销。");
-      if (!ok) return;
-      // 走 store.flow.purge：本地 trash + 云端 trash 一处删。
-      await withBusy(`正在永久删除 ${item.name}…`, async () => {
-        try {
-          await _store.flow.purge({
-            trashKey: item.local ? item.local.trashKey : null,
-            cloudItemId: item.cloud ? item.cloud.id : null,
-          });
-          setStatus(`已永久删除：${item.name}`);
-        } catch (e) {
-          setStatus(`永久删除失败：${e && e.message || e}`, true);
-        }
-      });
-      renderGallery();
-    }, { danger: true });
-
-    tile.appendChild(popup);
-
-    menuBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      for (const p of els.galleryGrid.querySelectorAll(".gallery-tile-menu-popup")) {
-        if (p !== popup) p.classList.add("hidden");
-      }
-      popup.classList.toggle("hidden");
-    });
-
-    els.galleryGrid.appendChild(tile);
-  }
-
-  els.galleryGrid.addEventListener("click", (e) => {
-    if (e.target.closest(".gallery-tile-menu-btn")) return;
-    if (e.target.closest(".gallery-tile-menu-popup")) return;
-    for (const p of els.galleryGrid.querySelectorAll(".gallery-tile-menu-popup")) {
-      p.classList.add("hidden");
-    }
-  }, { capture: true });
-
-  // 云端 trash 也接 lazy thumb 拉取（跟 main view 同 observer 路径）
-  _galleryThumbObserver = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      const el = e.target;
-      _galleryThumbObserver.unobserve(el);
-      _hydrateCloudThumb(el);
-    }
-  }, { root: els.galleryGrid, rootMargin: "600px 0px", threshold: 0.01 });
-  for (const el of els.galleryGrid.querySelectorAll(".gallery-tile-thumb.placeholder[data-cloud-item-id]")) {
-    _galleryThumbObserver.observe(el);
-  }
-}
-
-// 给一个 placeholder 元素拉云缩略图，成功后原地替换成 <img>
-async function _hydrateCloudThumb(placeholderEl) {
-  const itemId = placeholderEl.dataset.cloudItemId;
-  const etag = placeholderEl.dataset.cloudEtag;
-  const size = Number(placeholderEl.dataset.cloudSize);
-  const dl = _galleryDownloadUrls.get(itemId);
-  if (!itemId || _galleryThumbInflight.has(itemId)) return;
-  _galleryThumbInflight.add(itemId);
-  const t0 = performance.now();
-  try {
-    const { blob, fromCache } = await getOrFetchCloudThumb(itemId, etag, size, dl);
-    const dt = (performance.now() - t0) | 0;
-    const tag = fromCache ? "cache" : "net";
-    console.log(`[thumb] ${tag} ${dt}ms ${(blob.size/1024)|0}KB ${placeholderEl.dataset.cloudName}`);
-    if (!placeholderEl.isConnected) return;  // 列表已重渲染 → 丢弃
-    const url = URL.createObjectURL(blob);
-    _galleryUrls.push(url);
-    const img = document.createElement("img");
-    img.className = "gallery-tile-thumb";
-    img.alt = placeholderEl.dataset.cloudName || "";
-    img.src = url;
-    img.loading = "lazy";
-    placeholderEl.replaceWith(img);
-  } catch (err) {
-    console.warn("[gallery] cloud thumb fail:", err);
-    // placeholder 保持显示（云朵 icon）
-  } finally {
-    _galleryThumbInflight.delete(itemId);
-  }
-}
-
 function humanTime(ts) {
   if (!ts) return "未知";
   const d = new Date(ts);
@@ -5515,12 +4785,12 @@ els.cloudSignOutBtn.addEventListener("click", async () => {
   try { await signOut(); } catch (_) {}
   setLastSessionSignedIn(false);    // 显式登出 → 下次不问
   updateCloudAuthUI();
-  renderGallery();
+  gallery.refresh();
 });
 
 els.galleryTrashBtn?.addEventListener("click", () => {
-  _galleryView = "trash";
-  renderGallery();
+  _galleryChrome("trash");
+  gallery.setView("trash");
 });
 els.galleryTrashMenuBtn?.addEventListener("click", (e) => {
   e.stopPropagation();
@@ -5534,24 +4804,12 @@ document.addEventListener("click", (e) => {
   p.classList.add("hidden");
 });
 els.galleryTrashBack?.addEventListener("click", () => {
-  _galleryView = "files";
-  // 还原 empty 文案
-  if (els.galleryEmpty) els.galleryEmpty.textContent = "还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。";
-  renderGallery();
+  _galleryChrome("files");
+  gallery.setView("files");
 });
-els.galleryEmptyTrashBtn?.addEventListener("click", async () => {
+els.galleryEmptyTrashBtn?.addEventListener("click", () => {
   els.galleryTrashMenuPopup?.classList.add("hidden");
-  const ok = await openConfirmSheet("清空回收站？", "本地和云端的回收站都会清。不可撤销。");
-  if (!ok) return;
-  // 一条 flow：本地 + 云端两端在库内清、失败汇总不静默（取代旧 app 两腿 emptyTrash+循环 purgeCloudTrashItem）。
-  await withBusy("正在清空回收站…", async () => {
-    const res = await _store.flow.emptyTrash({ isOnline: () => isSignedIn() && navigator.onLine !== false });
-    const cloudFails = (res.failed || []).filter((f) => f.where !== "local").length;
-    if (cloudFails) setStatus(`已清本地；${cloudFails} 项云端没清（可能离线），回线再清`, true);
-    else if ((res.failed || []).length) setStatus("清空时部分失败", true);
-    else setStatus("回收站已清空");
-  });
-  renderGallery();
+  gallery.emptyTrash();   // confirm + busy + flow.emptyTrash + reload 全在组件里
 });
 
 els.cloudRefreshBtn.addEventListener("click", async () => {
@@ -5560,7 +4818,7 @@ els.cloudRefreshBtn.addEventListener("click", async () => {
     await retrySilentSignIn();
     updateCloudAuthUI();
   }
-  renderGallery();
+  gallery.refresh();
 });
 
 // 给本地拿一个不冲突的名字（X / X 1 / X 2 / ...）
@@ -5629,7 +4887,7 @@ if (isAuthConfigured()) {
     updateCloudAuthUI();
     // gallery-first: boot 时 gallery 可能已经渲染过（auth 没好 → 只有本地）；
     // auth 完成后 if gallery 还开着 → 重渲染拿云端列表
-    if (!els.galleryFull.classList.contains("hidden")) renderGallery();
+    if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
   }).catch((e) => {
     console.warn("[auth] init failed:", e);
   });
@@ -5640,14 +4898,14 @@ window.addEventListener("wp:auth-changed", () => {
   if (isSignedIn()) setLastSessionSignedIn(true);
   updateCloudAuthUI();
   updateSaveStatus();                                       // 候选2：auth 变化影响 save 图标
-  if (!els.galleryFull.classList.contains("hidden")) renderGallery();
+  if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
 });
 // 在线 / 离线变化时刷新云端 UI（标签 / 按钮可见性）。
 // online 时尝试 silent re-auth：boot 离线 → activeAccount 为 null；有网了主动 retry 一次
 window.addEventListener("online", async () => {
   if (!isSignedIn()) await retrySilentSignIn();
   updateCloudAuthUI();
-  if (!els.galleryFull.classList.contains("hidden")) renderGallery();
+  if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
   showIdleLockIfStale();   // 回到在线 → 闲够了则锁屏（不静默 FF；点继续才 explicit 刷新）
 });
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
