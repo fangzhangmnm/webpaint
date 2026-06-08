@@ -28,8 +28,9 @@ function toZipReader(data) {
   throw new TypeError("zip: 不支持的数据类型");
 }
 
-/** entries: [{ path, data: Blob|Uint8Array|ArrayBuffer|string }, ...]; return Blob */
-export async function zipPack(entries) {
+/** entries: [{ path, data: Blob|Uint8Array|ArrayBuffer|string }, ...]; opts.comment: Uint8Array（写进 EOCD
+ *  comment，家族文件信封身份/meta，见 file-envelope.js）。return Blob */
+export async function zipPack(entries, opts = {}) {
   ensureConfigured();
   const z = Z();
   const writer = new z.ZipWriter(new z.BlobWriter("application/zip"));
@@ -37,21 +38,23 @@ export async function zipPack(entries) {
     // level: 0 = STORE。PNG 已是压缩流，再 deflate 没意义还更慢。
     await writer.add(path, toZipReader(data), { level: 0 });
   }
-  return await writer.close();
+  const closeOpts = {};
+  if (opts.comment) closeOpts.comment = opts.comment;   // EOCD comment（zip-clean 的尾部 trailer）
+  return await writer.close(closeOpts);
 }
 
-/** 返回 { path: Uint8Array } */
+/** 返回 { files: { path: Uint8Array }, comment: Uint8Array|null }（comment = EOCD comment，信封 meta 载体） */
 export async function zipUnpack(blob) {
   ensureConfigured();
   const z = Z();
   const reader = new z.ZipReader(new z.BlobReader(blob));
   try {
     const entries = await reader.getEntries();
-    const out = {};
+    const files = {};
     for (const e of entries) {
       if (e.directory) continue;
-      out[e.filename] = await e.getData(new z.Uint8ArrayWriter());
+      files[e.filename] = await e.getData(new z.Uint8ArrayWriter());
     }
-    return out;
+    return { files, comment: reader.comment || null };
   } finally { await reader.close(); }
 }

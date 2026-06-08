@@ -21,6 +21,7 @@ import { WEBPAINT_VERSION } from "./version.js";
 // arrayBuffer() 转 Uint8Array。
 
 import { zipPack, zipUnpack } from "./zip.js";
+import { buildMetaComment, parseMetaComment } from "./file-envelope.js";
 import { Layer, PaintDoc, computeClipBaseFor } from "./doc.js";
 
 // ---- 工具 ----
@@ -266,7 +267,9 @@ export async function encodeDocToOra(doc, opts = {}) {
     entries.push({ path: "webpaint/state.json", data: jsonText });
   }
 
-  return await zipPack(entries);
+  // 信封 meta（EOCD comment）：opts.meta={g,v,e} → 极简身份 trailer（尾部 byte-range 可读）。
+  // 不传 meta → 无 comment（向后兼容老行为）。绘画态仍在 webpaint/state.json，与身份分离。
+  return await zipPack(entries, opts.meta ? { comment: buildMetaComment(opts.meta) } : {});
 }
 
 // ---- decode：.ora Blob → PaintDoc ----
@@ -299,7 +302,9 @@ function parseStackXml(xmlText) {
 
 /** Blob (.ora) → PaintDoc */
 export async function decodeOraToDoc(blob) {
-  const files = await zipUnpack(blob);
+  const { files, comment } = await zipUnpack(blob);
+  // 信封 meta（EOCD comment）：{g(guid),v,e} 或 null（老文件/外部文件无 → 上层降级走 name 身份）。
+  const _envMeta = parseMetaComment(comment);
   if (!files["stack.xml"]) throw new Error(".ora 缺 stack.xml");
   // mimetype 检验（友好，不强制）
   if (files["mimetype"]) {
@@ -357,6 +362,7 @@ export async function decodeOraToDoc(blob) {
     }
   }
   doc._wroteWith = meta.wroteWith || null;
+  doc._meta = _envMeta;                     // 信封身份 meta {g,v,e}|null（GUID 身份；上层用，缺则降级 name）
   return doc;
 }
 
