@@ -33,6 +33,7 @@ import {
   sliderPosToSize, sizeToSliderPos,
   sliderMaxPos as _sliderMaxPos, stepFor as _stepFor, quantizeSize as _quantizeSize,
 } from "./ui/brush-size.ts";   // candidate 1 · 笔粗分段量化（form + dial 共用）
+import { reactive, computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";   // candidate 1 · 反应式 dial SSoT
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   listTrashedSessions,
@@ -239,8 +240,8 @@ const state = {
   // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
   filterBrush: null,
   color: safeLS("webpaint.color") || "#1b1b1b",
-  // 旧 state.brush（可变 BrushSettings 单例）已收敛成不可变 ResolvedBrush（_currentBrush，
-  //   由 refreshCurrentBrush 从 SSoT 派生）。当前笔的 SSoT = toolStates(dial) + 预设 + color + 下面两个全局压感开关。
+  // 旧 state.brush（可变 BrushSettings 单例）已收敛成不可变 ResolvedBrush（currentBrush computed，
+  //   从反应式 SSoT 纯派生）。当前笔的 SSoT = toolStates(dial) + 预设 + color + 下面两个全局压感开关。
   //   见 docs/reports/20260608-ui-deepening-and-plugin-survey.html 候选 3 / resolved-brush.js。
   // 全局（非 per-tool）压感开关。boot 读 LS（v202 修原始 bug：旧版写 webpaint.pToSize 从不读回 → 重载弹回默认）。
   //   未设过 → DEFAULT(开)；显式 "0" → 关。applyPressureSize/Opacity 仍按 toggle 写 LS。
@@ -255,8 +256,8 @@ const state = {
   // size/strength=左栏 slider；引擎默认 bleed="edge"（见 src/liquify.js / plugins/liquify.js）。
 };
 
-// 颜色同步：旧 syncBrushColor 写 state.brush.color 单例；现在 color 是 ResolvedBrush 的一个字段，
-// 由 refreshCurrentBrush() 整体重派生（setColor 调它）。此处不再有可变单例可写。
+// 颜色同步：旧 syncBrushColor 写 state.brush.color 单例；现在 color 是反应式 SSoT 的一个轴，
+// 当前笔由 currentBrush computed 自动重派生（见下），此处不再有可变单例可写。
 
 // ============ Brush rack + per-tool state（v81→v82）============
 //
@@ -265,9 +266,9 @@ const state = {
 //   2. toolStates —— 每工具的 current size / flow / activeBrushId，**per-doc**
 //      存在 .ora webpaint/state.json，跟 doc 一起走，不跨 doc
 //
-// 当前笔 = _currentBrush（不可变 ResolvedBrush）：从 toolStates(dial) + 活动预设 + color + 全局压感开关
-//   纯函数 refreshCurrentBrush()/resolveBrush() **派生**，整体替换、绝不原地改。BrushEngine 只读它。
-//   （旧 state.brush 可变单例已废，见 resolved-brush.js / CONTEXT [[当前笔]]）。
+// 当前笔 = currentBrush computed（不可变 ResolvedBrush）：从反应式 SSoT [toolStates(dial) + 活动预设 + color
+//   + 全局压感开关] 纯派生（resolveBrush），整体替换、绝不原地改。BrushEngine 只读 currentBrush.value。
+//   （旧 state.brush 可变单例 / refreshCurrentBrush 手动 fan-out 已废，见 resolved-brush.js / CONTEXT [[当前笔]]）。
 //
 // color 是全局（不分工具），跟 doc 走（也存 webpaint/state.json）。
 let _brushRack = null;
@@ -300,6 +301,12 @@ function _findToolBrush(ts) {
   if (b) { ts.activeBrushId = b.id; ts.activeBrushName = b.name; }
   return b;
 }
+// 纯查找（不回写 ts）——给 currentBrush computed 用：computed 内绝不可有副作用（写 reactive 会触发循环/告警）。
+// GUID→name healing 回写留 _findToolBrush，在 applyToolState / selectBrushPresetForTool 等显式路径触发。
+function findToolBrushPure(ts) {
+  if (!ts || !_brushRack) return null;
+  return resolveRef(_brushRack.brushes, { id: ts.activeBrushId, name: ts.activeBrushName });
+}
 
 // state.toolStates：per-tool 持久化（per-doc）。
 // shapes **不**自己存——user：「笔刷和形状用同样的 brush class，就是同一个 ref」
@@ -307,7 +314,9 @@ function _findToolBrush(ts) {
 // v98：toolStates { size, opacity, flow, activeBrushId }
 //   opacity → 左侧栏 slider 2（label「透」）
 //   flow    → 只在 brush settings 里调（默认隐藏到「高级」），preset 决定初值
-state.toolStates = {
+// reactive：dial 是反应式 SSoT（candidate 1）。任何 dial 改动自动重派生当前笔（见下 computed）。
+// 序列化安全：ORA 走 JSON.stringify（ora.js:265），透读 reactive 代理无碍（非 structuredClone）。
+state.toolStates = reactive({
   // brush 的 boot dial 从 LS 兜底（旧 state.brush 从同源 LS 种子，保留「记住上次粗细/透」行为；
   //   rack/doc 载入后会被 preset 默认 / ORA toolStates 覆盖，与旧路径一致）。
   brush:    { size: parseFloat(safeLS("webpaint.size") || "12"), opacity: parseFloat(safeLS("webpaint.opacity") || "1"), flow: 1.0, activeBrushId: null },
@@ -317,7 +326,23 @@ state.toolStates = {
   //   size = radius，opacity = transparency / flow，variantId = 子算法选择（如 blur/sharp）
   //   variantId 由 Filter.brushVariants[].id 索引；空时 = 该 Filter 默认
   filterBrush: { size: 32, opacity: 1.0, flow: 1.0, activeBrushId: null, variantId: null },
-};
+});
+
+// 反应式 dial SSoT 的其余轴：color / 压感开关 / 当前工具 / 笔架版本。
+// color 与压感用 defineProperty 代理回 dialReactive —— app 里 state.color / state.pressureTo* 的读写零改动，背后反应式。
+const dialReactive = reactive({
+  tool: "brush",                 // 镜像 editMode.current()（含 transient）；_syncEditModeUI 同步
+  color: state.color,
+  pressureToSize: state.pressureToSize,
+  pressureToOpacity: state.pressureToOpacity,
+  rackVersion: 0,                // 笔架内容改了（编辑保存/重置）bump，让 computed 重算活动预设
+});
+for (const _k of ["color", "pressureToSize", "pressureToOpacity"]) {
+  Object.defineProperty(state, _k, {
+    get: () => dialReactive[_k], set: (v) => { dialReactive[_k] = v; },
+    configurable: true, enumerable: true,
+  });
+}
 // airbrush 工具 alias 到 brush（user：「喷枪笔架合并到笔刷」）。
 // v120：shapes tool 撤了（user：「以后不要这个 tool 了」），shapes 会变 brush preset 的 toggle。
 // 笔架是一个池子，所有 tool="brush" 的 preset 都在这。spacing.kind="time" 的 preset 就是喷枪。
@@ -397,29 +422,33 @@ if (_sidebarBrushBtn) {
 }
 
 // ============ 当前笔（ResolvedBrush）——引擎唯一吃的不可变值 ============
-// candidate 3（docs/reports/20260608-ui-deepening-and-plugin-survey.html）：
-//   旧 state.brush 可变单例 → 收敛成 _currentBrush（frozen），由 refreshCurrentBrush() 从 SSoT 整体重派生。
-//   SSoT = ① 当前工具 dial（toolStates，per-doc）② 活动预设（笔架）③ 全局 color ④ 全局压感开关。
+// candidate 3 收敛成不可变值；candidate 1（toolStates dial）再把派生收成反应式 computed：
+//   旧 refreshCurrentBrush() 手动 fan-out（8 处）→ currentBrush computed，从反应式 SSoT 自动重算。
+//   SSoT = ① 当前工具 dial（toolStates，per-doc，reactive）② 活动预设（笔架，rackVersion 触发）③ 全局 color ④ 全局压感开关。
 //   getBrushSettings 返回 _currentBrush；rack⟂engine 由「值」结构性保证（见 resolved-brush.js）。
-let _currentBrush = resolveBrush({ color: state.color });   // boot 兜底（无笔架也可画）
-
-// 当前工具的 dial（size/opacity/flow + activeBrushId），shapes/airbrush alias 到 brush。
-function currentDials() {
-  return state.toolStates[getRackToolKey(editMode.current())] || state.toolStates.brush;
-}
-
-// 从 SSoT 重派生当前笔（dial 改 / 切工具 / 选预设 / 改色 / 切压感开关后调）。
-function refreshCurrentBrush() {
-  const ts = currentDials();
-  const preset = _brushRack ? _findToolBrush(ts) : null;   // 无笔架 → null → DEFAULT 兜底
-  _currentBrush = resolveBrush({
+// 当前笔 = 纯 computed（从反应式 SSoT 派生）。引擎只读 currentBrush.value（stroke begin 时取，非每 stamp）。
+// dial(toolStates) / color / 压感 / tool / rackVersion 任一变 → 自动重算 → 下面 watch 同步 invalidateStamp。
+// 各处旧的手动 refreshCurrentBrush() 全删（reactivity 替代散落 fan-out）。
+// **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。
+const currentBrush = computed(() => {
+  void dialReactive.rackVersion;   // 依赖笔架版本（编辑/重置预设后重算活动预设字段）
+  const ts = state.toolStates[getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
+  const preset = _brushRack ? findToolBrushPure(ts) : null;   // 无笔架 → null → DEFAULT 兜底
+  return resolveBrush({
     preset,
     size: ts.size, opacity: ts.opacity ?? 1.0, flow: ts.flow ?? 1.0,
     color: state.color,
     pressureToSize: state.pressureToSize,
     pressureToOpacity: state.pressureToOpacity,
   });
-  if (input?.brush?.invalidateStamp) input.brush.invalidateStamp();
+});
+// 命令/反应桥：当前笔变 → 引擎 stamp 缓存失效（flush:sync 复刻旧 refreshCurrentBrush 的同步时机）。
+// cb 守 input?.（boot 期 input 未建时的 dep 变动 = no-op）。这是「反应式 UI 态 ↔ 裸引擎态」唯一的桥，故意留命令式。
+watch(currentBrush, () => { if (input?.brush?.invalidateStamp) input.brush.invalidateStamp(); }, { flush: "sync" });
+
+// 当前工具的 dial（size/opacity/flow + activeBrushId），shapes/airbrush alias 到 brush。
+function currentDials() {
+  return state.toolStates[getRackToolKey(editMode.current())] || state.toolStates.brush;
 }
 
 // 切到 tool t：dial 写进 toolStates（SSoT），刷新 size/opacity slider UI，重派生当前笔。
@@ -444,7 +473,7 @@ function applyToolState(tool) {
   if (els.opacitySlider) {
     els.opacitySlider.value = String(Math.round((ts.opacity ?? 1.0) * 100));
   }
-  refreshCurrentBrush();
+  // 当前笔由 currentBrush computed 自动派生（toolStates 反应式 + tool 镜像）；不再手动 refreshCurrentBrush。
   updateSidebarBrushIndicator();
   updateSidebarSlider2Label();
 }
@@ -492,7 +521,7 @@ const pixelHistory = new PixelEdit({ doc, history, board });
 
 const input = new InputController(board, doc, {
   getTool: () => editMode.current(),
-  getBrushSettings: () => _currentBrush,
+  getBrushSettings: () => currentBrush.value,
   // v132 filter brush: state.filterBrush = { Filter, params, variantLabel } 或 null
   getFilterBrushState: () => state.filterBrush || null,
   getLongPressPickEnabled: () => state.longPressPick,
@@ -1052,6 +1081,7 @@ function setTool(t) {
 // 逼出"双轴不行"的那个 payoff（双轴的 tool() 仍指向底层工具会误亮）。
 function _syncEditModeUI() {
   const m = editMode.current();
+  dialReactive.tool = m;   // 反应式 dial 镜像当前工具（含 transient）→ currentBrush computed 重算
   const transient = editMode.isTransient();
   // 工具按钮高亮：transient 时一个都不亮；持久工具高亮对应按钮
   for (const b of els.toolBtns) b.setAttribute("aria-pressed", (!transient && b.dataset.tool === m) ? "true" : "false");
@@ -1167,10 +1197,9 @@ const colorWheel = mountColorWheel(els.colorPanelBody, {
   onPick: (hex) => setColor(hex),
 });
 function setColor(hex) {
-  state.color = hex;
+  state.color = hex;   // 反应式（proxy→dialReactive.color）→ currentBrush computed 自动重派生
   safeLSSet("webpaint.color", hex);
   els.activeSwatch.style.background = hex;
-  refreshCurrentBrush();
   colorWheel.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue
 }
 els.activeSwatch.addEventListener("click", () => toggleColorPanel());
@@ -1235,8 +1264,7 @@ function showSizePopup(anchorEl) {
 // v123 加 silent option：boot 时设默认值不弹 popup（user：「新页面 brush preview 没默认隐藏」）
 function setSize(v, opts = {}) {
   v = Math.max(1, Math.round(v));        // v104: clamp to int
-  writeCurrentToolSize(v);               // dial SSoT
-  refreshCurrentBrush();                 // 重派生当前笔
+  writeCurrentToolSize(v);               // dial SSoT（反应式 → currentBrush 自动重派生）
   safeLSSet("webpaint.size", String(v));
   // 同步 slider（log 化）
   const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
@@ -1244,8 +1272,7 @@ function setSize(v, opts = {}) {
   if (!opts.silent) showSizePopup(els.sizeSlider);
 }
 function setOpacity(v, opts = {}) {
-  writeCurrentToolOpacity(v);            // dial SSoT
-  refreshCurrentBrush();
+  writeCurrentToolOpacity(v);            // dial SSoT（反应式 → currentBrush 自动重派生）
   safeLSSet("webpaint.opacity", String(v));
   els.opacitySlider.value = String(Math.round(v * 100));
   if (!opts.silent) showSizePopup(els.opacitySlider);   // v123 共用 size+opacity popup
@@ -1257,8 +1284,7 @@ els.sizeSlider.addEventListener("input", () => {
   const pos = parseFloat(els.sizeSlider.value);
   const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
   const px = sliderPosToSize(pos, maxPx);   // sliderPosToSize 已 round 到 int
-  writeCurrentToolSize(px);                  // dial SSoT
-  refreshCurrentBrush();
+  writeCurrentToolSize(px);                  // dial SSoT（反应式 → currentBrush 自动重派生）
   safeLSSet("webpaint.size", String(px));
   showSizePopup(els.sizeSlider);
 });
@@ -1299,14 +1325,12 @@ function setMenuItem(btn, on, stateLabel = on ? "开" : "关") {
 }
 
 function applyPressureSize(on) {
-  state.pressureToSize = !!on;           // 全局开关 SSoT
-  refreshCurrentBrush();
+  state.pressureToSize = !!on;           // 全局开关 SSoT（反应式 → currentBrush 自动重派生）
   setMenuItem(els.menuPressureSize, on);
   safeLSSet("webpaint.pToSize", on ? "1" : "0");
 }
 function applyPressureOpacity(on) {
-  state.pressureToOpacity = !!on;
-  refreshCurrentBrush();
+  state.pressureToOpacity = !!on;        // 反应式 → currentBrush 自动重派生
   setMenuItem(els.menuPressureOpacity, on);
   safeLSSet("webpaint.pToOpacity", on ? "1" : "0");
 }
@@ -5798,6 +5822,7 @@ function markRackChanged() {
   persistBrushRack();
   rackStore.edit();
   _refreshRackCloudState();   // icon 立刻切 dirty
+  dialReactive.rackVersion++;   // 笔架内容变 → 当前笔 computed 重算（编辑活动预设字段后立刻反映）
 }
 
 function _showRackSheet(tool) {
