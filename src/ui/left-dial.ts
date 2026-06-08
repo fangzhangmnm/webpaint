@@ -57,7 +57,9 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
         const aRect = sliderEl.getBoundingClientRect();
         const right = sidebar ? sidebar.getBoundingClientRect().right : aRect.right;
         const px = size.value, op = opacity.value;
-        popup.dia = Math.max(4, px * opts.getZoom());   // 屏 px = 文档 px × zoom
+        // 1:1 屏幕足迹 = 文档 px × zoom（scale=屏px/文档px）。不 clamp —— 特小笔就该是特小圆，
+        // 与画布上实际落笔 / cursor 一致；旧 Math.max(4,…) 的下限是「小到一定程度卡住」的元凶。
+        popup.dia = px * opts.getZoom();
         popup.opacity = op;
         popup.text = `${px | 0} px · ${Math.round(op * 100)}%`;
         popup.left = right + 12;
