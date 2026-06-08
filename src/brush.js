@@ -78,11 +78,11 @@ export const DEFAULT_SETTINGS = {
   stabilization: 0,
   pullStabilizer: 0,
   motionFilter: 0,
-  // 系统级 anti-spike taper（Apple Pencil 落笔 spike → 萝卜尖补偿）：
-  // 这是硬件信号缺陷补偿，跟 brush 风格 taper 分开；preset 的 taper.in/out 是 stylistic 的
-  taperIn: 1.5,
+  // taper：笔触两端渐细，**纯 stylistic·per-preset**（brushes.js makeBrush 的 taperIn/out → preset.taper）。默认 0=无。
+  //   曾有「系统级 anti-spike 硬件 taper 1.5」的设定，但预设永远覆盖它 → 形同虚设且误导，已删（user 2026-06-08）。
+  taperIn: 0,
   taperOut: 0,        // 末端渐细长度（× 笔径）。0=无。endStroke 时按到末端距离施加（需总笔长）
-  taperFloor: 0.4,
+  taperFloor: 0.4,    // taper 包络最小压感系数（in/out 两端共用）
   // smudge：
   smudgeStrength: 0.8,
   smudgeDryness: 0.1,

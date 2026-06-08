@@ -62,9 +62,7 @@ export function resolveBrush({
     b.shapeRotation = (sh.rotation ?? 0) * Math.PI / 180;   // 度 → 弧度
     b.hardness      = sh.hardness ?? 1.0;
     const tp = preset.taper || {};
-    // 套预设即用 stylistic taper，覆盖 DEFAULT 的硬件 anti-spike 1.5。**有意保留**（user 2026-06-08：
-    //   关了这么久没事、预设本身带 taper）——别再把它当 bug「修复」成两套独立 taper 字段。
-    b.taperIn       = tp.in ?? 0;
+    b.taperIn       = tp.in ?? 0;   // taper 纯 stylistic·per-preset，默认 0（无「硬件 taper」概念）
     b.taperOut      = tp.out ?? 0;
     b.sizeCoeff     = preset.sizeCoeff ?? 0.6;
     b.opaCoeff      = preset.opaCoeff ?? 0.6;
