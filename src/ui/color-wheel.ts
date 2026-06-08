@@ -93,11 +93,21 @@ export const ColorWheel = defineComponent({
     }
     function padDown(e: PointerEvent) {
       dragging = true;
-      pad.value?.setPointerCapture(e.pointerId);
+      try { pad.value?.setPointerCapture(e.pointerId); } catch {}
       padPick(e);
     }
-    function padMove(e: PointerEvent) { if (dragging) padPick(e); }
-    function padUp() { dragging = false; }
+    function padMove(e: PointerEvent) {
+      if (!dragging) return;
+      // 漏掉的 pointerup 兜底：拖动中按键已松（鼠标 buttons=0）→ 结束，别再跟手。
+      // 必要性：reactive 色每帧回灌触发 re-render，某些浏览器会丢 setPointerCapture，
+      // 抬笔若落在 240×180 pad 外则 pointerup 不回到 canvas，dragging 会卡住（用户实测的「一直跟着」）。
+      if (e.buttons === 0) { dragging = false; return; }
+      padPick(e);
+    }
+    function padUp(e: PointerEvent) {
+      dragging = false;
+      try { pad.value?.releasePointerCapture(e.pointerId); } catch {}
+    }
 
     function onHue(e: Event) {
       hsv.h = parseFloat((e.target as HTMLInputElement).value);
