@@ -27,7 +27,7 @@ import { EditMode } from "./edit-mode.js";
 import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
 import {
-  saveSession, loadCurrentSession, openSession, removeSession, listSessions,
+  saveSession, loadCurrentSession, openSession, removeSession, listSessions, renameLocalSession,
   listTrashedSessions,
   getCurrentSessionName, setCurrentSessionName,
   exportOraDownload, exportPsdDownload, shareOrDownloadImage,
@@ -3738,7 +3738,7 @@ document.getElementById("adjustApply").addEventListener("click", () => _closeFil
 
 // v136 POC: 云缩略图 byte-range 拉取 — console 调试
 //   await WebPaint.pocFetchThumb()  默认拉云列表第一个 ora 验证
-import { fetchOraThumbnail } from "./cloud-thumbs.js";
+import { fetchOraThumbnail, fetchOraGuid } from "./cloud-thumbs.js";
 window.WebPaint = window.WebPaint || {};
 window.WebPaint.fetchOraThumbnail = fetchOraThumbnail;
 window.WebPaint.cloudThumbStats = () => ({ cache: { ...cloudThumbStats }, paths: { ...cloudThumbTelemetry } });
@@ -4908,6 +4908,29 @@ async function checkQuotaAndWarn() {
   } catch {}
 }
 
+// 给云端 item 补身份 GUID（ADR-0011）：reconcile by GUID 用。优化（成本模型）：
+//   - 稳态（每个本地都有同名云端）→ **零 fetch**（无改名嫌疑直接 return）。
+//   - 否则只 fetch「云端名未命中本地名」的（=别设备改名后的新名 / 纯云新增），bounded 并发 + memory-cache(itemId@etag)。
+//   - 失败 / 老文件 / 外部文件 → guid=null → mergeLocalCloud 降级 name（绝不误配、绝不阻断渲染）。
+const _cloudGuidCache = new Map();   // itemId@etag → guid|null（session 内存；reload 再拉 4KB 很便宜）
+async function _ensureCloudGuids(cloud, local) {
+  const localNames = new Set(local.map((l) => l.name));
+  const cloudNames = new Set(cloud.map((c) => c.path.replace(/\.ora$/i, "")));
+  if (!local.some((l) => !cloudNames.has(l.name))) return;   // 无「本地有·云端无同名」→ 无改名嫌疑 → 不 fetch
+  const need = cloud.filter((c) => c && c.id && !localNames.has(c.path.replace(/\.ora$/i, "")));
+  const CONC = 6;
+  for (let i = 0; i < need.length; i += CONC) {
+    await Promise.all(need.slice(i, i + CONC).map(async (c) => {
+      const key = c.id + "@" + (c.eTag || "");
+      if (_cloudGuidCache.has(key)) { c.guid = _cloudGuidCache.get(key); return; }
+      const meta = await fetchOraGuid(c.id, c.size || 0, { downloadUrl: c["@microsoft.graph.downloadUrl"] });
+      const g = (meta && meta.g) || null;
+      _cloudGuidCache.set(key, g);
+      c.guid = g;
+    }));
+  }
+}
+
 async function renderGallery() {
   updateCloudAuthUI();
   updateIdbUsage();
@@ -4944,9 +4967,23 @@ async function renderGallery() {
   if (isSignedIn() && navigator.onLine !== false) {
     try { const all = await listCloudAll(); cloud = all.files; _galleryCloudFolders = all.folders; }
     catch (e) { console.warn("[cloud] list failed:", e); }
+    try { await _ensureCloudGuids(cloud, local); } catch (e) { console.warn("[cloud] guid 补全失败:", e); }
   }
   // 合并 local⊕cloud + 切当前文件夹层（folder 模型已下沉 gallery-model.js）
   const allItems = mergeLocalCloud(local, cloud);
+  // 收敛（ADR-0011 GUID↔path resync）：GUID 配对但本地名旧（别设备改名/dedup）→ 本地改名到云端权威名
+  //   （local-only、幂等；目标名本地已存在=不同文件 → 跳过绝不覆盖）。收敛后无 renamedFrom → 不再触发（无循环）。
+  const _diverged = allItems.filter((it) => it.renamedFrom && it.local && it.name !== it.renamedFrom);
+  if (_diverged.length) {
+    const names = new Set(local.map((l) => l.name));
+    let any = false;
+    for (const it of _diverged) {
+      if (names.has(it.name)) continue;   // 撞名 → 不覆盖
+      try { await renameLocalSession(it.renamedFrom, it.name); any = true; }
+      catch (e) { console.warn("[gallery] 本地收敛改名失败:", e); }
+    }
+    if (any) return renderGallery();   // 重渲一次（收敛后不再分歧）
+  }
   const { folderNames, files: filesInFolder } = sliceFolder(allItems, _galleryCloudFolders, _galleryFolder);
 
   // ====== Breadcrumb ======

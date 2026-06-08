@@ -25,3 +25,20 @@ export function parseMetaComment(commentBytes) {
     return (o && typeof o.g === "string" && o.g) ? o : null;
   } catch { return null; }
 }
+
+// 从「文件尾部 byte-range 缓冲」直接读信封 meta（云端 reconcile：不全量下载）。
+// 向前扫 zip EOCD 签名(PK\x05\x06)，读 commentLen，切 comment，parseMetaComment。
+// comment 是 ASCII（WPM1+JSON）不含 EOCD 签名 → 无误命中。窗口装不下/无签名/坏 → null（降级 name，绝不抛）。
+export function readTailMeta(buf) {
+  if (!buf) return null;
+  const u = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  for (let i = u.length - 22; i >= 0; i--) {
+    if (u[i] === 0x50 && u[i + 1] === 0x4b && u[i + 2] === 0x05 && u[i + 3] === 0x06) {
+      const commentLen = u[i + 20] | (u[i + 21] << 8);
+      const start = i + 22;
+      if (start + commentLen > u.length) return null;   // 窗口没装全 comment
+      return parseMetaComment(u.subarray(start, start + commentLen));
+    }
+  }
+  return null;
+}

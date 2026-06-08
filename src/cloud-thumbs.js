@@ -18,6 +18,19 @@
 //   - ZIP 解析：EOCD commentLen sanity 防 false-positive；输出 PNG magic 校验
 
 import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./app-store.js";
+import { readTailMeta } from "./file-envelope.js";
+
+const GUID_TAIL_BYTES = 4096;   // EOCD + comment 在文件最末；4KB 足够（comment 极小）
+// 云端 ora 身份 GUID（ADR-0011）：读最末 ~4KB 的 EOCD comment 信封 meta。
+// **不全量下载**、cloud-agnostic（zip 字节）。失败/老文件/外部文件 → null（上层降级 name，绝不抛）。
+export async function fetchOraGuid(itemId, fileSize, opts = {}) {
+  const dl = opts.downloadUrl || null;
+  const len = Math.min(GUID_TAIL_BYTES, fileSize || GUID_TAIL_BYTES);
+  try {
+    const buf = dl ? await downloadRangeFromUrl(dl, null, len) : await downloadItemRange(itemId, null, len);
+    return readTailMeta(buf);   // {g,v,e} | null
+  } catch { return null; }
+}
 
 // 投机 suffix：last N 字节一次性拿 EOCD + CD +（自家 ora）thumbnail data
 // 80KB budget = thumb 自适应目标 ≤ 70KB + 尾巴 ~10KB（CD + EOCD + sig 扫描余量）

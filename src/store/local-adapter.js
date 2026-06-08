@@ -23,10 +23,10 @@ export function createLocalAdapter() {
       // 解码一次渲 thumb，用**原始 ora bytes** 落盘（不 re-encode，保字节）。
       // 解码 / 渲 thumb 失败**不阻断落盘**：字节是真相，thumb 是派生——宁可少缩略图也绝不丢字节
       //   （否则坏/新格式 ora 会卡死整条 pull/flush，见 docs/reports 候选 4）。
-      let thumb = null;
-      try { thumb = await renderThumbBlob(await decodeOraToDoc(oraBlob), 256); }
-      catch (e) { console.warn("[local] thumb 渲染失败，仅存字节：", e); }
-      await putSessionPkg(name, oraBlob, thumb);   // 与 saveSession 共用唯一落盘原语
+      let thumb = null, guid = null;
+      try { const d = await decodeOraToDoc(oraBlob); thumb = await renderThumbBlob(d, 256); guid = d._meta?.g || null; }
+      catch (e) { console.warn("[local] thumb 渲染失败，仅存字节：", e); }   // 字节是真相；thumb/guid 是派生，失败不阻断
+      await putSessionPkg(name, oraBlob, thumb, guid);   // 与 saveSession 共用唯一落盘原语；冷路径补 guid（ADR-0011）
     },
 
     async get(name) {
