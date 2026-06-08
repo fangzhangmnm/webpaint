@@ -41,7 +41,10 @@
 
 import { StrokeSmoother } from "./stroke-smoother.js";
 
-const DEFAULT_SETTINGS = {
+// 引擎默认参数袋 = ResolvedBrush 的 base（resolved-brush.js import 之）。
+// 当前笔（state.brush 旧单例）已收敛成不可变 ResolvedBrush（见 docs/CONTEXT [[当前笔]]）；
+// 这张表是「无 preset / 无笔架」时也能画的兜底默认（user mental model：console 设工具即可绘画）。
+export const DEFAULT_SETTINGS = {
   type: "round",
   size: 12,
   color: "#1b1b1b",
@@ -161,7 +164,9 @@ export class BrushEngine {
   invalidateStamp() { this._stampCache = null; }
 
   setColor(color) {
-    if (this._stroke) {
+    // 注：当前笔已是不可变 ResolvedBrush（settings 被 freeze）；描边中改色不是现行路径
+    //   （全仓无调用，颜色随 ResolvedBrush 整体替换）。留此守卫=防 frozen 写崩，非功能路径。
+    if (this._stroke && !Object.isFrozen(this._stroke.settings)) {
       this._stroke.settings.color = color;
       // 颜色变 → frozen + tail 都要重画：作废 overlay 强制全幅重建
       this._stroke.overlayCanvas = null;

@@ -14,7 +14,8 @@ import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
 import { InputController, KEYBOARD_SHORTCUTS } from "./input.js";
 import { PixelEdit, compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
-import { BrushSettings } from "./brush.js";
+import { DEFAULT_SETTINGS } from "./brush.js";
+import { resolveBrush } from "./resolved-brush.js";
 import {
   makeDefaultRack, findBrush, defaultBrushForTool, brushesByTool,
   newBrushId, brushToJSON, brushFromJSON, DEFAULT_FOLDER, mergeMissingDefaults, migrateBrush,
@@ -233,12 +234,11 @@ const state = {
   // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
   filterBrush: null,
   color: safeLS("webpaint.color") || "#1b1b1b",
-  brush: new BrushSettings({
-    size: parseFloat(safeLS("webpaint.size") || "12"),
-    opacity: parseFloat(safeLS("webpaint.opacity") || "1"),
-    color: safeLS("webpaint.color") || "#1b1b1b",
-    // v109：smooth 字段 per-preset，删 LS load。applyBrushPresetFrozen 会覆盖
-  }),
+  // 旧 state.brush（可变 BrushSettings 单例）已收敛成不可变 ResolvedBrush（_currentBrush，
+  //   由 refreshCurrentBrush 从 SSoT 派生）。当前笔的 SSoT = toolStates(dial) + 预设 + color + 下面两个全局压感开关。
+  //   见 docs/reports/20260608-ui-deepening-and-plugin-survey.html 候选 3 / resolved-brush.js。
+  pressureToSize: DEFAULT_SETTINGS.pressureToSize,        // 全局（非 per-tool）压感→粗 开关
+  pressureToOpacity: DEFAULT_SETTINGS.pressureToOpacity,  // 全局 压感→透 开关
   longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
   // v125 (user：「透明背景显示棋盘这个设置跟文件走」)
   //   checkerboard 从全局 LS 改 per-doc：保存在 webpaint/state.json，跟文件走
@@ -248,12 +248,8 @@ const state = {
   // size/strength=左栏 slider；引擎默认 bleed="edge"（见 src/liquify.js / plugins/liquify.js）。
 };
 
-// brush settings keep color in sync
-function syncBrushColor() {
-  state.brush.color = state.color;
-  // brush engine 会自动 invalidate stamp（_getStamp key 包含 color）
-}
-syncBrushColor();
+// 颜色同步：旧 syncBrushColor 写 state.brush.color 单例；现在 color 是 ResolvedBrush 的一个字段，
+// 由 refreshCurrentBrush() 整体重派生（setColor 调它）。此处不再有可变单例可写。
 
 // ============ Brush rack + per-tool state（v81→v82）============
 //
@@ -262,9 +258,9 @@ syncBrushColor();
 //   2. toolStates —— 每工具的 current size / flow / activeBrushId，**per-doc**
 //      存在 .ora webpaint/state.json，跟 doc 一起走，不跨 doc
 //
-// state.brush（BrushSettings 单例）是 *当前工具的 working snapshot* —— 给 BrushEngine 用。
-// setTool 切换时 toolStates[oldTool] 已是最新（slider input 时写过），就直接读
-// toolStates[newTool] 应用到 state.brush + UI。
+// 当前笔 = _currentBrush（不可变 ResolvedBrush）：从 toolStates(dial) + 活动预设 + color + 全局压感开关
+//   纯函数 refreshCurrentBrush()/resolveBrush() **派生**，整体替换、绝不原地改。BrushEngine 只读它。
+//   （旧 state.brush 可变单例已废，见 resolved-brush.js / CONTEXT [[当前笔]]）。
 //
 // color 是全局（不分工具），跟 doc 走（也存 webpaint/state.json）。
 let _brushRack = null;
@@ -305,7 +301,9 @@ function _findToolBrush(ts) {
 //   opacity → 左侧栏 slider 2（label「透」）
 //   flow    → 只在 brush settings 里调（默认隐藏到「高级」），preset 决定初值
 state.toolStates = {
-  brush:    { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null },
+  // brush 的 boot dial 从 LS 兜底（旧 state.brush 从同源 LS 种子，保留「记住上次粗细/透」行为；
+  //   rack/doc 载入后会被 preset 默认 / ORA toolStates 覆盖，与旧路径一致）。
+  brush:    { size: parseFloat(safeLS("webpaint.size") || "12"), opacity: parseFloat(safeLS("webpaint.opacity") || "1"), flow: 1.0, activeBrushId: null },
   smudge:   { size: 16, opacity: 1.0, flow: 0.8, activeBrushId: null },
   eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
   // v132 (user：「记得文件持久化 filter brush 的 selection, radius, transparency」)
@@ -391,42 +389,33 @@ if (_sidebarBrushBtn) {
   });
 }
 
-// v99：应用 preset 冻结字段到 state.brush（coeffs + compositeMode + pixelMode + gamma + smooth）
-// user-controlled fields (opacity / flow / size) 不在这里设，applyToolState 后设
-function applyBrushPresetFrozen(brush) {
-  if (!brush) return;
-  state.brush.shapeKind     = brush.shape.kind || "round";
-  state.brush.shapeAspect   = brush.shape.aspect ?? 1.0;
-  state.brush.shapeRotation = (brush.shape.rotation ?? 0) * Math.PI / 180;
-  state.brush.hardness      = brush.shape.hardness ?? 1.0;
-  state.brush.taperIn       = brush.taper.in ?? 0;
-  state.brush.taperOut      = brush.taper.out ?? 0;   // v160 末端 taper（之前漏接，引擎拿不到）
-  // v98 coeff 模型（−1..1 signed）
-  state.brush.sizeCoeff     = brush.sizeCoeff ?? 0.6;
-  state.brush.opaCoeff      = brush.opaCoeff ?? 0.6;
-  state.brush.flowCoeff     = brush.flowCoeff ?? 0;
-  state.brush.pressureGamma = brush.pressureGamma ?? 1.0;
-  state.brush.pressureLPF   = brush.pressureLPF ?? 50;      // v102 时间域压感平滑（v161 默认 50ms：100ms 太钝，抬笔不收=末端不渐细）
-  state.brush.compositeMode = brush.compositeMode || "wash";
-  state.brush.blendMode     = brush.blendMode || "source-over";   // v163 per-brush 混合模式
-  state.brush.spacing       = (typeof brush.spacing === "number")
-    ? brush.spacing
-    : (brush.spacing?.value ?? 0.06);
-  state.brush.pixelMode     = !!brush.pixelMode;
-  // v99：smooth 跟 preset 走（位置平滑也是笔感的一部分，不该是系统全局）
-  const sm = brush.smooth || {};
-  state.brush.streamline     = sm.streamline     ?? 0.3;
-  state.brush.stabilization  = sm.stabilization  ?? 0;
-  state.brush.pullStabilizer = sm.pullStabilizer ?? 0;
-  state.brush.motionFilter   = sm.motionFilter   ?? 0;
-  if (brush.smudge) {
-    state.brush.smudgeStrength = brush.smudge.strength ?? 0.8;
-    state.brush.smudgeDryness  = brush.smudge.dryness  ?? 0.1;
-  }
+// ============ 当前笔（ResolvedBrush）——引擎唯一吃的不可变值 ============
+// candidate 3（docs/reports/20260608-ui-deepening-and-plugin-survey.html）：
+//   旧 state.brush 可变单例 → 收敛成 _currentBrush（frozen），由 refreshCurrentBrush() 从 SSoT 整体重派生。
+//   SSoT = ① 当前工具 dial（toolStates，per-doc）② 活动预设（笔架）③ 全局 color ④ 全局压感开关。
+//   getBrushSettings 返回 _currentBrush；rack⟂engine 由「值」结构性保证（见 resolved-brush.js）。
+let _currentBrush = resolveBrush({ color: state.color });   // boot 兜底（无笔架也可画）
+
+// 当前工具的 dial（size/opacity/flow + activeBrushId），shapes/airbrush alias 到 brush。
+function currentDials() {
+  return state.toolStates[getRackToolKey(editMode.current())] || state.toolStates.brush;
+}
+
+// 从 SSoT 重派生当前笔（dial 改 / 切工具 / 选预设 / 改色 / 切压感开关后调）。
+function refreshCurrentBrush() {
+  const ts = currentDials();
+  const preset = _brushRack ? _findToolBrush(ts) : null;   // 无笔架 → null → DEFAULT 兜底
+  _currentBrush = resolveBrush({
+    preset,
+    size: ts.size, opacity: ts.opacity ?? 1.0, flow: ts.flow ?? 1.0,
+    color: state.color,
+    pressureToSize: state.pressureToSize,
+    pressureToOpacity: state.pressureToOpacity,
+  });
   if (input?.brush?.invalidateStamp) input.brush.invalidateStamp();
 }
 
-// 切到 tool t：从 toolStates[rackKey(t)] 取 size/opacity/flow 应用到 state.brush + UI
+// 切到 tool t：dial 写进 toolStates（SSoT），刷新 size/opacity slider UI，重派生当前笔。
 function applyToolState(tool) {
   if (!_brushRack) return;
   const key = getRackToolKey(tool);
@@ -436,10 +425,6 @@ function applyToolState(tool) {
     Object.assign(ts, defaultToolStateFor(key));
   }
   const brush = _findToolBrush(ts);
-  if (brush) applyBrushPresetFrozen(brush);
-  state.brush.size    = ts.size;
-  state.brush.opacity = ts.opacity ?? 1.0;
-  state.brush.flow    = ts.flow    ?? 1.0;
   // size slider：v124e 分段步长，HTML max 跟随当前 brush.size.max 动态算
   if (els.sizeSlider) {
     const sliderMax = brush?.size?.max || 200;
@@ -452,6 +437,7 @@ function applyToolState(tool) {
   if (els.opacitySlider) {
     els.opacitySlider.value = String(Math.round((ts.opacity ?? 1.0) * 100));
   }
+  refreshCurrentBrush();
   updateSidebarBrushIndicator();
   updateSidebarSlider2Label();
 }
@@ -553,7 +539,7 @@ const pixelHistory = new PixelEdit({ doc, history, board });
 
 const input = new InputController(board, doc, {
   getTool: () => editMode.current(),
-  getBrushSettings: () => state.brush,
+  getBrushSettings: () => _currentBrush,
   // v132 filter brush: state.filterBrush = { Filter, params, variantLabel } 或 null
   getFilterBrushState: () => state.filterBrush || null,
   getLongPressPickEnabled: () => state.longPressPick,
@@ -1229,7 +1215,7 @@ function setColor(hex) {
   state.color = hex;
   safeLSSet("webpaint.color", hex);
   els.activeSwatch.style.background = hex;
-  syncBrushColor();
+  refreshCurrentBrush();
   if (!_suppressPickerSync && !els.colorPanel.classList.contains("hidden")) {
     pickerSetFromHex(hex);
   }
@@ -1271,8 +1257,9 @@ const POPUP_FRAME = 64;
 //   水平 anchor 到 sidebar.right（slider 太瘦不稳）；垂直跟传进的 slider 中心
 function showSizePopup(anchorEl) {
   if (!els.sizePopup) return;
-  const px = state.brush.size;
-  const op = state.brush.opacity;
+  const _d = currentDials();
+  const px = _d.size;
+  const op = _d.opacity ?? 1.0;
   const zoom = board?.viewport?.scale ?? 1;
   const screenPx = px * zoom;
   const r = Math.max(2, screenPx / 2);
@@ -1295,8 +1282,8 @@ function showSizePopup(anchorEl) {
 // v123 加 silent option：boot 时设默认值不弹 popup（user：「新页面 brush preview 没默认隐藏」）
 function setSize(v, opts = {}) {
   v = Math.max(1, Math.round(v));        // v104: clamp to int
-  state.brush.size = v;
-  writeCurrentToolSize(v);
+  writeCurrentToolSize(v);               // dial SSoT
+  refreshCurrentBrush();                 // 重派生当前笔
   safeLSSet("webpaint.size", String(v));
   // 同步 slider（log 化）
   const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
@@ -1304,8 +1291,8 @@ function setSize(v, opts = {}) {
   if (!opts.silent) showSizePopup(els.sizeSlider);
 }
 function setOpacity(v, opts = {}) {
-  state.brush.opacity = v;
-  writeCurrentToolOpacity(v);
+  writeCurrentToolOpacity(v);            // dial SSoT
+  refreshCurrentBrush();
   safeLSSet("webpaint.opacity", String(v));
   els.opacitySlider.value = String(Math.round(v * 100));
   if (!opts.silent) showSizePopup(els.opacitySlider);   // v123 共用 size+opacity popup
@@ -1317,8 +1304,8 @@ els.sizeSlider.addEventListener("input", () => {
   const pos = parseFloat(els.sizeSlider.value);
   const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
   const px = sliderPosToSize(pos, maxPx);   // sliderPosToSize 已 round 到 int
-  state.brush.size = px;
-  writeCurrentToolSize(px);
+  writeCurrentToolSize(px);                  // dial SSoT
+  refreshCurrentBrush();
   safeLSSet("webpaint.size", String(px));
   showSizePopup(els.sizeSlider);
 });
@@ -1326,8 +1313,8 @@ els.opacitySlider.addEventListener("input", () => setOpacity(parseFloat(els.opac
 // boot 初值 (v124e applyToolState 会被笔架 load 后再调一次刷新；这里先给一个合理默认 maxPx 防 NaN)
 els.sizeSlider.dataset.maxPx = "200";
 els.sizeSlider.max = String(_sliderMaxPos(200));
-setSize(state.brush.size, { silent: true });        // boot 不弹 popup
-setOpacity(state.brush.opacity, { silent: true });
+setSize(currentDials().size, { silent: true });        // boot 不弹 popup
+setOpacity(currentDials().opacity ?? 1.0, { silent: true });
 // 键盘 [ ] 调粗（v132: tool-aware dispatch）
 //   - 液化（legacy 路径已废，editMode.current() 不会 "liquify"，留 fallback）
 //   - 笔刷 / 橡皮 / 涂抹 / filter brush → state.brush.size，max 用 sizeSlider.dataset.maxPx
@@ -1339,8 +1326,9 @@ window.addEventListener("wp:adjsize", (e) => {
     const maxPx = parseInt(els.sizeSlider?.dataset.maxPx || "200", 10);
     // v134 [] step 按段量化：20内1, 50内2, 100内5, 200内10, 500内20, 1000内50
     const dir = Math.sign(delta) || 1;
-    const step = _stepFor(state.brush.size);
-    const raw = state.brush.size + dir * step;
+    const curSize = currentDials().size;
+    const step = _stepFor(curSize);
+    const raw = curSize + dir * step;
     const next = Math.max(1, Math.min(maxPx, _quantizeSize(raw)));
     setSize(next);
     if (board._cursor) {
@@ -1358,12 +1346,14 @@ function setMenuItem(btn, on, stateLabel = on ? "开" : "关") {
 }
 
 function applyPressureSize(on) {
-  state.brush.pressureToSize = !!on;
+  state.pressureToSize = !!on;           // 全局开关 SSoT
+  refreshCurrentBrush();
   setMenuItem(els.menuPressureSize, on);
   safeLSSet("webpaint.pToSize", on ? "1" : "0");
 }
 function applyPressureOpacity(on) {
-  state.brush.pressureToOpacity = !!on;
+  state.pressureToOpacity = !!on;
+  refreshCurrentBrush();
   setMenuItem(els.menuPressureOpacity, on);
   safeLSSet("webpaint.pToOpacity", on ? "1" : "0");
 }
@@ -1382,12 +1372,12 @@ function applyCheckerboard(on) {
 }
 
 els.menuPressureSize.addEventListener("click", () => {
-  applyPressureSize(!state.brush.pressureToSize);
-  setStatus(`压·粗 · ${state.brush.pressureToSize ? "开" : "关"}`);
+  applyPressureSize(!state.pressureToSize);
+  setStatus(`压·粗 · ${state.pressureToSize ? "开" : "关"}`);
 });
 els.menuPressureOpacity.addEventListener("click", () => {
-  applyPressureOpacity(!state.brush.pressureToOpacity);
-  setStatus(`压·透 · ${state.brush.pressureToOpacity ? "开" : "关"}`);
+  applyPressureOpacity(!state.pressureToOpacity);
+  setStatus(`压·透 · ${state.pressureToOpacity ? "开" : "关"}`);
 });
 els.menuLongPressPick.addEventListener("click", () => {
   applyLongPressPick(!state.longPressPick);
@@ -1453,8 +1443,8 @@ document.getElementById("menuShortcuts")?.addEventListener("click", () => {
 document.getElementById("shortcutsClose")?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
 _shortcutsBackdrop?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
 
-applyPressureSize(state.brush.pressureToSize);
-applyPressureOpacity(state.brush.pressureToOpacity);
+applyPressureSize(state.pressureToSize);
+applyPressureOpacity(state.pressureToOpacity);
 applyLongPressPick(state.longPressPick);
 applyCheckerboard(state.checkerboard);
 
