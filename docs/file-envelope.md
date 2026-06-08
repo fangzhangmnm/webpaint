@@ -1,3 +1,7 @@
+> ⛔ **已撤（2026-06-07）**：in-file GUID 身份方案回滚——store 必须文件格式无关（mp3/txt 兄弟），且自铸 id 多设备分叉。
+> 身份改 **path/name、零注册表**。见 [sync-identity-decision-2026-06-07.md](sync-identity-decision-2026-06-07.md)。
+> 下文仅留作「为什么不走 in-file-GUID」的历史教训，**勿照此实现**。唯一 salvage = `getTailBytes` 原语思路。
+
 # File envelope — WebPaint implementation (GUID identity, ADR-0011)
 
 > Canonical cross-app spec: `../../20260601 MyPWAPatterns/docs/file-envelope.md`. This is WebPaint's pilot implementation + slicing. WebPaint is name-identified end-to-end today (no doc GUID); this brings ADR-0011 GUID identity in via a **tail-readable EOCD-comment trailer**, robust to legacy/foreign files.

@@ -43,18 +43,17 @@ export async function saveSession(doc, name, opts = {}) {
     encodeDocToOra(doc, {
       referenceImage: opts.referenceImage,
       webpaintState: opts.webpaintState,
-      meta: opts.meta,                       // 信封身份 meta {g,v,e} → .ora EOCD comment（ADR-0011）
     }),
     renderThumbBlob(doc, 256),
   ]);
-  return await putSessionPkg(sessionName, ora, thumb, opts.meta?.g || null);
+  return await putSessionPkg(sessionName, ora, thumb);
 }
 
 /** **单一本地落盘点**：组 pkg（name/updatedAt/ora/thumb）+ 原子 putSession。
  *  两条路共用——saveSession（活 doc 算 ora+thumb，热路径不解码）与 LocalAdapter
  *  （Store 流：bytes 解码渲 thumb，冷路径）。pkg 结构只在这里定义一次。 */
-export async function putSessionPkg(name, ora, thumb = null, guid = null) {
-  const pkg = { name, guid, updatedAt: Date.now(), ora, thumb };   // guid=身份(ADR-0011)；活动存盘路径显式传，冷路径(adapter)暂 null（云端切片再补）
+export async function putSessionPkg(name, ora, thumb = null) {
+  const pkg = { name, updatedAt: Date.now(), ora, thumb };
   await putSession(name, pkg);
   return pkg;
 }
@@ -123,7 +122,6 @@ export async function listSessions() {
     if (!pkg) continue;
     out.push({
       name: id,
-      guid: pkg.guid || null,            // 身份 GUID（ADR-0011）；legacy/冷路径写的为 null → gallery merge 降级 name
       updatedAt: pkg.updatedAt || 0,
       size: (pkg.ora && pkg.ora.size) || 0,
       thumb: pkg.thumb || null,

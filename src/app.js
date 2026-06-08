@@ -27,7 +27,7 @@ import { EditMode } from "./edit-mode.js";
 import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
 import {
-  saveSession, loadCurrentSession, openSession, removeSession, listSessions, renameLocalSession,
+  saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   listTrashedSessions,
   getCurrentSessionName, setCurrentSessionName,
   exportOraDownload, exportPsdDownload, shareOrDownloadImage,
@@ -46,7 +46,6 @@ import { collectFolders, brushesInFolder } from "./brush-rack-view.js";
 import { getFilter, listFilters, registerFilter, onFilterRegistered } from "./filters.js";
 import "./plugins/index.js";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 import { decodeOraToDoc, encodeDocToOra, parseAppVersion } from "./ora.js";
-import { ENVELOPE_VERSION } from "./file-envelope.js";
 import { getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches } from "./app-store.js";
 import { getOrFetchCloudThumb, clearCloudThumbCache, stats as cloudThumbStats, config as cloudThumbConfig, resetStats as cloudThumbResetStats } from "./cloud-thumb-cache.js";
 import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTelemetry } from "./cloud-thumbs.js";
@@ -2717,9 +2716,6 @@ let _docLastSavedAt = 0;
 // 或用户主动 open / new / save-as 后才升级到真实名字。boot 失败时保持
 // safe default "未命名"，避免 save 走 rename-delete-old 路径误删。
 let _activeSessionName = "未命名";
-// 当前 doc 的稳定身份 GUID（ADR-0011；与 name 并行，name 是可变属性）。新建 doc 铸新；load 读 doc._meta.g
-// 缺则铸（legacy 迁移，下次保存落 .ora+pkg）；**rename/move 不变**（同 GUID 新 path）。写进 .ora EOCD comment + 本地 pkg。
-let _activeDocGuid = crypto.randomUUID();
 const AUTOSAVE_MS = 3 * 60 * 1000;
 
 // v45 新语义：
@@ -2863,7 +2859,6 @@ function adoptLoadedDoc(loaded, sessionName) {
   renderLayersPanel();
   _activeSessionName = sessionName;
   setCurrentSessionName(sessionName);
-  _activeDocGuid = loaded._meta?.g || crypto.randomUUID();   // 读身份 GUID；legacy 无 → 铸（下次保存落 .ora+pkg）
   // C4：捕获本 tab 的 base-etag（打开这画时的云端版本）进 Store 内存。
   // 之后 store.flow.push 用它当 If-Match，不读共享 localStorage → 杜绝多 tab 静默覆盖。
   _store.adoptBase(sessionName, getKnownETag(sessionName));
@@ -2974,8 +2969,6 @@ function _buildOraMeta() {
   return {
     referenceImage: referenceWindow.getPersistBlob(),
     webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
-    // 信封身份 meta（→ EOCD comment）：极简 {g,v,e}。绘画态在 webpaintState，身份与之分离。
-    meta: { g: _activeDocGuid, v: ENVELOPE_VERSION, e: WEBPAINT_VERSION },
   };
 }
 function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
@@ -3738,7 +3731,7 @@ document.getElementById("adjustApply").addEventListener("click", () => _closeFil
 
 // v136 POC: 云缩略图 byte-range 拉取 — console 调试
 //   await WebPaint.pocFetchThumb()  默认拉云列表第一个 ora 验证
-import { fetchOraThumbnail, fetchOraGuid } from "./cloud-thumbs.js";
+import { fetchOraThumbnail } from "./cloud-thumbs.js";
 window.WebPaint = window.WebPaint || {};
 window.WebPaint.fetchOraThumbnail = fetchOraThumbnail;
 window.WebPaint.cloudThumbStats = () => ({ cache: { ...cloudThumbStats }, paths: { ...cloudThumbTelemetry } });
@@ -4359,7 +4352,6 @@ async function importImageAsNewDoc(file) {
   const name = await uniqueLocalName(stem);
   _activeSessionName = name;
   setCurrentSessionName(name);
-  _activeDocGuid = crypto.randomUUID();   // 新建作品（导入照片）→ 铸新身份
   input.clearHistory();
   board.invalidateAll();
   board.fitToScreen();
@@ -4834,7 +4826,6 @@ els.newDocConfirm.addEventListener("click", async () => {
   els.canvasSizeLabel.textContent = `${w}×${h}`;
   _activeSessionName = name;
   setCurrentSessionName(name);
-  _activeDocGuid = crypto.randomUUID();   // 新建空白作品 → 铸新身份
   input.clearHistory();
   board.invalidateAll();
   board.fitToScreen();
@@ -4908,29 +4899,6 @@ async function checkQuotaAndWarn() {
   } catch {}
 }
 
-// 给云端 item 补身份 GUID（ADR-0011）：reconcile by GUID 用。优化（成本模型）：
-//   - 稳态（每个本地都有同名云端）→ **零 fetch**（无改名嫌疑直接 return）。
-//   - 否则只 fetch「云端名未命中本地名」的（=别设备改名后的新名 / 纯云新增），bounded 并发 + memory-cache(itemId@etag)。
-//   - 失败 / 老文件 / 外部文件 → guid=null → mergeLocalCloud 降级 name（绝不误配、绝不阻断渲染）。
-const _cloudGuidCache = new Map();   // itemId@etag → guid|null（session 内存；reload 再拉 4KB 很便宜）
-async function _ensureCloudGuids(cloud, local) {
-  const localNames = new Set(local.map((l) => l.name));
-  const cloudNames = new Set(cloud.map((c) => c.path.replace(/\.ora$/i, "")));
-  if (!local.some((l) => !cloudNames.has(l.name))) return;   // 无「本地有·云端无同名」→ 无改名嫌疑 → 不 fetch
-  const need = cloud.filter((c) => c && c.id && !localNames.has(c.path.replace(/\.ora$/i, "")));
-  const CONC = 6;
-  for (let i = 0; i < need.length; i += CONC) {
-    await Promise.all(need.slice(i, i + CONC).map(async (c) => {
-      const key = c.id + "@" + (c.eTag || "");
-      if (_cloudGuidCache.has(key)) { c.guid = _cloudGuidCache.get(key); return; }
-      const meta = await fetchOraGuid(c.id, c.size || 0, { downloadUrl: c["@microsoft.graph.downloadUrl"] });
-      const g = (meta && meta.g) || null;
-      _cloudGuidCache.set(key, g);
-      c.guid = g;
-    }));
-  }
-}
-
 async function renderGallery() {
   updateCloudAuthUI();
   updateIdbUsage();
@@ -4967,23 +4935,9 @@ async function renderGallery() {
   if (isSignedIn() && navigator.onLine !== false) {
     try { const all = await listCloudAll(); cloud = all.files; _galleryCloudFolders = all.folders; }
     catch (e) { console.warn("[cloud] list failed:", e); }
-    try { await _ensureCloudGuids(cloud, local); } catch (e) { console.warn("[cloud] guid 补全失败:", e); }
   }
   // 合并 local⊕cloud + 切当前文件夹层（folder 模型已下沉 gallery-model.js）
   const allItems = mergeLocalCloud(local, cloud);
-  // 收敛（ADR-0011 GUID↔path resync）：GUID 配对但本地名旧（别设备改名/dedup）→ 本地改名到云端权威名
-  //   （local-only、幂等；目标名本地已存在=不同文件 → 跳过绝不覆盖）。收敛后无 renamedFrom → 不再触发（无循环）。
-  const _diverged = allItems.filter((it) => it.renamedFrom && it.local && it.name !== it.renamedFrom);
-  if (_diverged.length) {
-    const names = new Set(local.map((l) => l.name));
-    let any = false;
-    for (const it of _diverged) {
-      if (names.has(it.name)) continue;   // 撞名 → 不覆盖
-      try { await renameLocalSession(it.renamedFrom, it.name); any = true; }
-      catch (e) { console.warn("[gallery] 本地收敛改名失败:", e); }
-    }
-    if (any) return renderGallery();   // 重渲一次（收敛后不再分歧）
-  }
   const { folderNames, files: filesInFolder } = sliceFolder(allItems, _galleryCloudFolders, _galleryFolder);
 
   // ====== Breadcrumb ======
@@ -5214,7 +5168,7 @@ async function renderGallery() {
             if (!loaded) throw new Error("找不到本地 session");
             // 走 store.flow.push：拿到 B1 串行 / B5 自愈 / retry / 冲突 gate（不再裸推）。
             const res = await _store.flow.push(item.name, {
-              encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState, meta: loaded._meta || undefined }),
+              encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
               onConflict: async () => "keep",   // gallery 非 active item：冲突不静默覆盖，提示先改名
             });
             if (res.status === "conflict") setStatus(`云端冲突：${item.name}（先改名再推）`, true);
@@ -5239,7 +5193,7 @@ async function renderGallery() {
               if (!loaded) throw new Error("找不到本地 session");
               _store.adoptBase(item.name, getKnownETag(item.name));   // 重锚 base-etag/parentBase（同打开时 adoptLoadedDoc）
               const res = await _store.flow.push(item.name, {
-                encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState, meta: loaded._meta || undefined }),
+                encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
                 onConflict: async () => "keep",   // 非 active：云端有新版 → 不静默覆盖，提示打开处理
               });
               if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开它处理冲突，或先改名再推）`, true);
