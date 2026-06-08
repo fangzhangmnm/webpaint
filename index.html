@@ -160,38 +160,9 @@
 
     <!-- 左侧栏（drawing 时常驻）：当前笔 + size + flow + undo + redo -->
     <aside class="left-sidebar" id="leftSidebar">
-      <!-- 当前 brush 名（tap = 开 rack；长按 = 进设置） -->
-      <button class="left-sidebar-brush" id="leftSidebarBrush" type="button" title="当前笔刷（tap 切换 / 长按编辑）">
-        <span class="left-sidebar-brush-name" id="leftSidebarBrushName">—</span>
-      </button>
-      <input id="sizeSlider" class="left-sidebar-slider" type="range" min="0" max="1000" step="1" value="60" aria-label="笔粗" orient="vertical" />
-      <!-- v132 粗 icon：< 形（小于号 / 早期"笔刷压感"图标），左尖右厚 -->
-      <span class="left-sidebar-label" title="笔粗" aria-hidden="true">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="12 3, 4 8, 12 13"/>
-        </svg>
-      </span>
-      <div class="size-popup hidden" id="sizePopup" aria-hidden="true">
-        <div class="size-popup-circle-frame">
-          <div class="size-popup-circle" id="sizePopupCircle"></div>
-        </div>
-        <span class="size-popup-text" id="sizePopupText">12 px</span>
-      </div>
-      <!-- v131 (user：「left bar 语义是 opacity 不是 flow」) 改 label：流→透 -->
-      <input id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1" value="100" aria-label="不透明度" orient="vertical" />
-      <!-- v132 透 icon：圆 mask 内 2x2 棋盘 -->
-      <span class="left-sidebar-label" title="不透明度" aria-hidden="true">
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <defs>
-            <clipPath id="opaCircleClip"><circle cx="8" cy="8" r="6.5"/></clipPath>
-          </defs>
-          <g clip-path="url(#opaCircleClip)">
-            <rect x="0" y="0" width="8" height="8" fill="currentColor"/>
-            <rect x="8" y="8" width="8" height="8" fill="currentColor"/>
-          </g>
-          <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        </svg>
-      </span>
+      <!-- 笔指示按钮 + size/opacity 竖滑块 + size popup = <LeftDial> Vue 组件（src/ui/left-dial.ts）挂载于此。
+           display:contents → 组件渲染的节点作为 .left-sidebar 的直接 flex 子项（保留原 gap/居中布局）。 -->
+      <div id="leftDialMount" style="display:contents"></div>
       <button class="tool" id="undoButton" type="button" title="撤销 (Ctrl+Z)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="9 14 4 9 9 4"></polyline>
@@ -958,6 +929,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-df1b4877d090.mjs"></script>
+    <script type="module" src="./dist/webpaint-0fc656d2c73b.mjs"></script>
   </body>
 </html>

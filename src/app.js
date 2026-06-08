@@ -29,10 +29,8 @@ import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
 import { mountColorWheel } from "./ui/color-wheel.ts";   // UI 深化 candidate 1 · Vue pilot
 import { mountBrushSettings } from "./ui/brush-settings.ts";   // candidate 1 · 笔设置编辑器
-import {
-  sliderPosToSize, sizeToSliderPos,
-  sliderMaxPos as _sliderMaxPos, stepFor as _stepFor, quantizeSize as _quantizeSize,
-} from "./ui/brush-size.ts";   // candidate 1 · 笔粗分段量化（form + dial 共用）
+import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
+import { stepFor as _stepFor, quantizeSize as _quantizeSize } from "./ui/brush-size.ts";   // [ ] 键盘调粗用（slider 映射在 <LeftDial>）
 import { reactive, computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";   // candidate 1 · 反应式 dial SSoT
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
@@ -79,11 +77,7 @@ const els = {
   canvasSizeLabel: document.getElementById("canvasSizeLabel"),
   statusLabel: document.getElementById("statusLabel"),
   versionLabel: document.getElementById("versionLabel"),
-  sizeSlider: document.getElementById("sizeSlider"),
-  sizePopup: document.getElementById("sizePopup"),
-  sizePopupCircle: document.getElementById("sizePopupCircle"),
-  sizePopupText: document.getElementById("sizePopupText"),
-  opacitySlider: document.getElementById("opacitySlider"),
+  leftDialMount: document.getElementById("leftDialMount"),   // <LeftDial> Vue 组件挂载点（size/opacity/笔指示/popup）
   undoBtn: document.getElementById("undoButton"),
   redoBtn: document.getElementById("redoButton"),
   layersBtn: document.getElementById("layersButton"),
@@ -336,6 +330,7 @@ const dialReactive = reactive({
   pressureToSize: state.pressureToSize,
   pressureToOpacity: state.pressureToOpacity,
   rackVersion: 0,                // 笔架内容改了（编辑保存/重置）bump，让 computed 重算活动预设
+  canDraw: true,                 // 镜像 editMode.canDraw()；_syncEditModeUI 同步 → <LeftDial> 滑块 disabled
 });
 for (const _k of ["color", "pressureToSize", "pressureToOpacity"]) {
   Object.defineProperty(state, _k, {
@@ -384,42 +379,22 @@ async function persistBrushRack() {
   catch (e) { console.warn("[brush-rack] persist failed:", e); }
 }
 
-// 左侧栏当前 brush 指示器（v93）
-const _sidebarBrushBtn = document.getElementById("leftSidebarBrush");
-const _sidebarBrushName = document.getElementById("leftSidebarBrushName");
-function updateSidebarBrushIndicator() {
-  if (!_brushRack || !_sidebarBrushName) return;
-  const tool = editMode.current();
-  const rackKey = getRackToolKey(tool);
-  const ts = state.toolStates[rackKey];
-  const brush = _findToolBrush(ts);
-  _sidebarBrushName.textContent = brush ? brush.name : "—";
-}
-if (_sidebarBrushBtn) {
-  // tap 切换 rack；长按 600ms 直接进设置
-  let lpTimer = null;
-  _sidebarBrushBtn.addEventListener("pointerdown", () => {
-    lpTimer = setTimeout(() => {
-      lpTimer = null;
-      const rackKey = getRackToolKey(editMode.current());
-      const ts = state.toolStates[rackKey];
-      const b = _findToolBrush(ts);
-      if (b) {
-        closeExclusive();
-        _openBrushSettings(b.id);
-      }
-    }, 600);
-  });
-  const cancelLP = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
-  _sidebarBrushBtn.addEventListener("pointerup", cancelLP);
-  _sidebarBrushBtn.addEventListener("pointerleave", cancelLP);
-  _sidebarBrushBtn.addEventListener("pointercancel", cancelLP);
-  _sidebarBrushBtn.addEventListener("click", () => {
-    const t = editMode.current();
-    const id = RACK_PANEL_BY_TOOL[t];
-    if (id) openExclusive(id);
-  });
-}
+// 左栏 dial = <LeftDial> Vue 组件（src/ui/left-dial.ts）：笔指示按钮(tap=rack/长按=设置) + size/opacity 竖滑块 + size popup。
+// 全绑定反应式 dial SSoT（getter 读 state.toolStates/dialReactive → 组件 computed 自动追踪）。
+// 取代旧的 updateSidebarBrushIndicator / _sidebarBrushBtn 手势 / showSizePopup / 两个 slider 监听 / applyToolState 的 slider-DOM-push。
+const _leftDial = () => state.toolStates[getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
+const leftDial = mountLeftDial(els.leftDialMount, {
+  getSize: () => _leftDial().size,
+  getOpacity: () => _leftDial().opacity ?? 1.0,
+  getSizeMax: () => { void dialReactive.rackVersion; return findToolBrushPure(_leftDial())?.size?.max || 200; },
+  getBrushName: () => { void dialReactive.rackVersion; return findToolBrushPure(_leftDial())?.name || "—"; },
+  getCanDraw: () => dialReactive.canDraw,
+  getZoom: () => board?.viewport?.scale ?? 1,
+  onSize: (px) => setSize(px),
+  onOpacity: (frac) => setOpacity(frac),
+  onBrushTap: () => { const id = RACK_PANEL_BY_TOOL[editMode.current()]; if (id) openExclusive(id); },
+  onBrushLongpress: () => { const b = _findToolBrush(_leftDial()); if (b) { closeExclusive(); _openBrushSettings(b.id); } },
+});
 
 // ============ 当前笔（ResolvedBrush）——引擎唯一吃的不可变值 ============
 // candidate 3 收敛成不可变值；candidate 1（toolStates dial）再把派生收成反应式 computed：
@@ -451,39 +426,22 @@ function currentDials() {
   return state.toolStates[getRackToolKey(editMode.current())] || state.toolStates.brush;
 }
 
-// 切到 tool t：dial 写进 toolStates（SSoT），刷新 size/opacity slider UI，重派生当前笔。
+// 切到 tool t：确保该工具 dial 有活动笔（缺则填默认）+ GUID→name healing。
+// slider/笔指示/当前笔全是反应式（<LeftDial> computed + currentBrush computed），切工具改 dialReactive.tool 即自动跟随，
+// 不再手动 push slider DOM / refreshCurrentBrush（旧 applyToolState 那堆已删）。
 function applyToolState(tool) {
   if (!_brushRack) return;
   const key = getRackToolKey(tool);
   const ts = state.toolStates[key];
   if (!ts) return;
   if (ts.activeBrushId == null) {
-    Object.assign(ts, defaultToolStateFor(key));
+    Object.assign(ts, defaultToolStateFor(key));   // 反应式：组件 + currentBrush 自动跟随
   }
-  const brush = _findToolBrush(ts);
-  // size slider：v124e 分段步长，HTML max 跟随当前 brush.size.max 动态算
-  if (els.sizeSlider) {
-    const sliderMax = brush?.size?.max || 200;
-    els.sizeSlider.max = String(_sliderMaxPos(sliderMax));   // 修 (user：「8 就满了」)
-    els.sizeSlider.min = "0";
-    els.sizeSlider.step = "1";
-    els.sizeSlider.value = String(sizeToSliderPos(ts.size, sliderMax));
-    els.sizeSlider.dataset.maxPx = String(sliderMax);
-  }
-  if (els.opacitySlider) {
-    els.opacitySlider.value = String(Math.round((ts.opacity ?? 1.0) * 100));
-  }
-  // 当前笔由 currentBrush computed 自动派生（toolStates 反应式 + tool 镜像）；不再手动 refreshCurrentBrush。
-  updateSidebarBrushIndicator();
-  updateSidebarSlider2Label();
+  _findToolBrush(ts);   // 显式路径做 healing 回写（computed 用纯版不回写）
 }
 
 // 笔粗分段量化（_segPositions/sliderPosToSize/sizeToSliderPos/_sliderMaxPos/_stepFor/_quantizeSize）
 // 已搬进 src/ui/brush-size.ts（纯 + node 测，form 与 dial 共用），见上方 import。
-function updateSidebarSlider2Label() {
-  // v98：slider 永远标「透」(opacity 语义)。
-  // user：「slider 是 opacity 不是 flow」。flow 在 brush settings 改。
-}
 
 // 滑块改值 → 写回当前工具的 toolState（shapes 写到 brush）
 function writeCurrentToolSize(v) {
@@ -1089,9 +1047,8 @@ function _syncEditModeUI() {
   els.topAdjustBtn?.setAttribute("aria-pressed", (m === "liquify" || m === "filterBrush") ? "true" : "false");
   // 注：body.dataset.tool 保持"持久工具"（在 setTool 里设），不在这改成 transient 名——避免扰乱
   // 依赖 body[data-tool] 的 CSS（且 data-mode 被图库占用）。transient 的 UI 抑制走面板 suppress + 按钮高亮。
-  // slider 禁用：size/opacity 仅 canDraw 模式可调；color 仅 allowsColor 上下文（笔刷/选区）可点。
-  if (els.sizeSlider) els.sizeSlider.disabled = !editMode.canDraw();
-  if (els.opacitySlider) els.opacitySlider.disabled = !editMode.canDraw();
+  // slider 禁用：size/opacity 仅 canDraw 模式可调 → 反应式镜像，<LeftDial> 绑 :disabled。color 仅 allowsColor 可点。
+  dialReactive.canDraw = editMode.canDraw();
   if (els.activeSwatch) els.activeSwatch.disabled = !editMode.allowsColor();
   updateLassoToolbar();             // 选区/变换工具栏跟着重新派生
 }
@@ -1158,7 +1115,7 @@ loadBrushRack().then((rack) => {
     }
   }
   applyToolState(editMode.current());
-  updateSidebarBrushIndicator();
+  dialReactive.rackVersion++;   // 笔架载入 → <LeftDial> 名字/sizeMax 重算（_brushRack 赋值非反应式）
   setTimeout(() => { checkBrushRackCloud().catch(() => {}); _refreshRackCloudState(); }, 2000);
   // v122 r2: default-brushes.json 是 async fetch；先用现有 rack boot（可能是 IDB / emergency
   // 兜底空），fetch 回来后再 retroactively merge 缺失的 default brushes，写 IDB + 刷 UI
@@ -1175,7 +1132,7 @@ loadBrushRack().then((rack) => {
       }
     }
     applyToolState(editMode.current());
-    updateSidebarBrushIndicator();
+    dialReactive.rackVersion++;   // default-brushes 合并后 → 重算
   });
 }).catch((e) => {
   // **关键**：IDB 在 iPad Safari 私密浏览模式下会 throw。loadBrushRack 内部已有
@@ -1184,7 +1141,7 @@ loadBrushRack().then((rack) => {
   console.warn("[brush-rack] init failed:", e);
   _brushRack = makeDefaultRack();
   applyToolState(editMode.current());
-  updateSidebarBrushIndicator();
+  dialReactive.rackVersion++;   // 兜底 rack → 重算
   setStatus("笔架持久化失败（可能私密浏览）：本次 session 可用，重启会重置", true);
 });
 
@@ -1232,77 +1189,25 @@ window.addEventListener("wp:pickerHide", () => {
   clearTimeout(_pickerPinTimer);
 });
 
-let _sizePopupTimer = null;
-const POPUP_FRAME = 64;
-// v134 (user：「popup 位置动态跟 slider，两个 slider 都算」)
-//   anchor 元素由 caller 传：size slider 用 sizeSlider，opacity slider 用 opacitySlider
-//   水平 anchor 到 sidebar.right（slider 太瘦不稳）；垂直跟传进的 slider 中心
-function showSizePopup(anchorEl) {
-  if (!els.sizePopup) return;
-  const _d = currentDials();
-  const px = _d.size;
-  const op = _d.opacity ?? 1.0;
-  const zoom = board?.viewport?.scale ?? 1;
-  const screenPx = px * zoom;
-  const r = Math.max(2, screenPx / 2);
-  els.sizePopupCircle.style.width   = (r * 2) + "px";
-  els.sizePopupCircle.style.height  = (r * 2) + "px";
-  els.sizePopupCircle.style.opacity = String(op);
-  els.sizePopupText.textContent = `${px|0} px · ${Math.round(op * 100)}%`;
-  const a = anchorEl || els.sizeSlider;
-  const aRect = a.getBoundingClientRect();
-  const sidebar = document.getElementById("leftSidebar");
-  const anchorRight = sidebar ? sidebar.getBoundingClientRect().right : aRect.right;
-  els.sizePopup.style.left = (anchorRight + 12) + "px";
-  els.sizePopup.style.top  = (aRect.top + aRect.height / 2 - POPUP_FRAME / 2) + "px";
-  els.sizePopup.classList.remove("hidden");
-  clearTimeout(_sizePopupTimer);
-  _sizePopupTimer = setTimeout(() => els.sizePopup.classList.add("hidden"), 1500);
-}
-
-// v97：setSize 接受 px；slider 转 log；setIntensity 路由 flow/opacity
-// v123 加 silent option：boot 时设默认值不弹 popup（user：「新页面 brush preview 没默认隐藏」）
-function setSize(v, opts = {}) {
+// size/opacity popup + 两个 slider 监听 + slider-DOM 同步已搬进 <LeftDial>（src/ui/left-dial.ts）。
+// setSize/setOpacity 现在只写反应式 dial SSoT + LS；<LeftDial> 绑定 dial 自动反映 + 自闪 popup。
+function setSize(v) {
   v = Math.max(1, Math.round(v));        // v104: clamp to int
-  writeCurrentToolSize(v);               // dial SSoT（反应式 → currentBrush 自动重派生）
+  writeCurrentToolSize(v);               // dial SSoT（反应式 → currentBrush + <LeftDial> 自动跟随）
   safeLSSet("webpaint.size", String(v));
-  // 同步 slider（log 化）
-  const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
-  els.sizeSlider.value = String(sizeToSliderPos(v, maxPx));
-  if (!opts.silent) showSizePopup(els.sizeSlider);
 }
-function setOpacity(v, opts = {}) {
-  writeCurrentToolOpacity(v);            // dial SSoT（反应式 → currentBrush 自动重派生）
+function setOpacity(v) {
+  writeCurrentToolOpacity(v);            // dial SSoT（反应式）
   safeLSSet("webpaint.opacity", String(v));
-  els.opacitySlider.value = String(Math.round(v * 100));
-  if (!opts.silent) showSizePopup(els.opacitySlider);   // v123 共用 size+opacity popup
 }
 // 老 setIntensity alias 给跨 v97 调用兜底
 const setIntensity = setOpacity;
-// v97：size slider log → px。max 100 (slider pos), 实际 px = sliderPosToSize
-els.sizeSlider.addEventListener("input", () => {
-  const pos = parseFloat(els.sizeSlider.value);
-  const maxPx = parseInt(els.sizeSlider.dataset.maxPx, 10) || 200;
-  const px = sliderPosToSize(pos, maxPx);   // sliderPosToSize 已 round 到 int
-  writeCurrentToolSize(px);                  // dial SSoT（反应式 → currentBrush 自动重派生）
-  safeLSSet("webpaint.size", String(px));
-  showSizePopup(els.sizeSlider);
-});
-els.opacitySlider.addEventListener("input", () => setOpacity(parseFloat(els.opacitySlider.value) / 100));
-// boot 初值 (v124e applyToolState 会被笔架 load 后再调一次刷新；这里先给一个合理默认 maxPx 防 NaN)
-els.sizeSlider.dataset.maxPx = "200";
-els.sizeSlider.max = String(_sliderMaxPos(200));
-setSize(currentDials().size, { silent: true });        // boot 不弹 popup
-setOpacity(currentDials().opacity ?? 1.0, { silent: true });
-// 键盘 [ ] 调粗（v132: tool-aware dispatch）
-//   - 液化（legacy 路径已废，editMode.current() 不会 "liquify"，留 fallback）
-//   - 笔刷 / 橡皮 / 涂抹 / filter brush → state.brush.size，max 用 sizeSlider.dataset.maxPx
-//   - 其他模式（lasso / picker / hand）→ no-op
+// 键盘 [ ] 调粗（v132: tool-aware dispatch）。max 从活动预设取（不再读 slider dataset）；popup 经 leftDial.flashSize()。
 window.addEventListener("wp:adjsize", (e) => {
   const delta = e.detail;
   const t = editMode.current();
   if (t === "brush" || t === "eraser" || t === "smudge" || t === "filterBrush") {
-    const maxPx = parseInt(els.sizeSlider?.dataset.maxPx || "200", 10);
+    const maxPx = findToolBrushPure(currentDials())?.size?.max || 200;
     // v134 [] step 按段量化：20内1, 50内2, 100内5, 200内10, 500内20, 1000内50
     const dir = Math.sign(delta) || 1;
     const curSize = currentDials().size;
@@ -1310,6 +1215,7 @@ window.addEventListener("wp:adjsize", (e) => {
     const raw = curSize + dir * step;
     const next = Math.max(1, Math.min(maxPx, _quantizeSize(raw)));
     setSize(next);
+    leftDial.flashSize();   // 闪 size popup（组件自持）
     if (board._cursor) {
       board.setCursor({ ...board._cursor, size: next });
     }
