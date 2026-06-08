@@ -39,6 +39,7 @@
 ## 回滚后单独待办（非本次混入）
 
 - **D ✅ 已修（v200）**：cloud-sync.push 对**无 baseEtag（新建/未基于云版）用 `conflictBehavior:"fail"`**（不再无条件 replace）→ 撞云端同名 → 走 H7 同款大小核验：大小匹配=我方成功上传(末响应丢)/同内容→认；**非空异大小=别人的同名异文件→抛 `CloudNameCollisionError`、绝不覆盖、保持 dirty**；0 字节占位=我方失败上传→保持 dirty 重试。app 提示「云端已有同名（不同作品），已留本地未覆盖，改名再推」。`_retriable` 排除 collision（不重试）。**根因**：path-身份下两设备同名是「写同一 path 无 base」，blind replace = 红线（漏 If-Match）。**与 H7 纠缠**（自己的中断上传占位 vs 别人的异文件，靠大小区分；同大小异内容是已知罕见弱点）。多设备真机验。
+  - **为什么用 size 不用 hash/etag（用户定 2026-06-07，别再想改成 hash）**：① **etag 不行**——是版本令牌、非内容派生（同内容两次传得不同 etag），且 H7 下我方**没有自己这份内容的 baseline etag**（末响应丢了）→ 无从比对。② **hash 不用**——通用云接口**没有标准内容 hash**（OneDrive 的 quickXorHash 是**provider 专有**，违反 store provider-无关原则；sha 不是所有盘/文件都给）；要可靠内容比对就得**下整个文件**，破坏「不全量下载」。③ ⇒ **size 是 provider-无关的务实折中**，同大小异内容的罕见误判可接受（数据不丢前提下的小概率错认）。
 - **F ✅ 已修（v200）**：gallery 改名把**云端撞名检查(listCloud=网络)挪进 withBusy** → 确认即锁屏（原来云检查在锁外 → 锁屏延到网络回来）。
 - **C 0B**：回滚 GUID 后复验是否消失（疑当时 GUID 收敛 side-effect）。
 - **E**：多设备改名裂卡——path-身份接受不修。
