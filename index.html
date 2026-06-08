@@ -935,14 +935,8 @@
         <span class="float-panel-title">颜色</span>
         <button id="colorPanelClose" class="close-x" type="button" aria-label="关闭">×</button>
       </div>
-      <div class="float-panel-body">
-        <canvas id="svPad" class="sv-pad" width="240" height="180" aria-label="饱和度 / 明度面板"></canvas>
-        <input id="hueSlider" type="range" min="0" max="360" step="1" value="0" aria-label="色相" class="hue-slider" />
-        <div class="picker-row">
-          <span id="previewSwatch" class="picker-preview"></span>
-          <input id="hexInput" type="text" maxlength="9" value="#1b1b1b" aria-label="HEX" />
-        </div>
-      </div>
+      <!-- 色轮 = 薄 Vue 组件（src/ui/color-wheel.ts）挂载于此；SV pad / 色相 / HEX / 预览由组件渲染 -->
+      <div class="float-panel-body"></div>
     </div>
 
     <!-- 清空确认（只清当前图层；可撤销） -->
@@ -964,6 +958,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-1c48f2408482.mjs"></script>
+    <script type="module" src="./dist/webpaint-82c2ead8624b.mjs"></script>
   </body>
 </html>

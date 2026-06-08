@@ -27,6 +27,7 @@ import { UndoStack } from "./history.js";
 import { EditMode } from "./edit-mode.js";
 import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
+import { mountColorWheel } from "./ui/color-wheel.ts";   // UI 深化 candidate 1 · Vue pilot
 import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   listTrashedSessions,
@@ -196,10 +197,7 @@ const els = {
   colorPanel: document.getElementById("colorPanel"),
   colorPanelHead: document.getElementById("colorPanelHead"),
   colorPanelClose: document.getElementById("colorPanelClose"),
-  svPad: document.getElementById("svPad"),
-  hueSlider: document.getElementById("hueSlider"),
-  hexInput: document.getElementById("hexInput"),
-  previewSwatch: document.getElementById("previewSwatch"),
+  colorPanelBody: document.querySelector("#colorPanel .float-panel-body"),  // 色轮 Vue 组件挂载点
   // clear sheet
   clearSheet: document.getElementById("clearSheet"),
   clearBackdrop: document.getElementById("clearBackdrop"),
@@ -1210,19 +1208,19 @@ loadBrushRack().then((rack) => {
 });
 
 // ---- 颜色 ----
-// picker 内部触发的 setColor 不要再 round-trip 回 pickerSetFromHex —— 因为
-// HSV→RGB→HSV 在低饱和/低明度处 hue 是 undefined（数学上没定义），
-// hexToHsv 默认返回 h=0，回灌就把 hue slider 弹回去了（旧 bug）。
-// 外部源（吸色、HEX 输入）才需要 sync。
-let _suppressPickerSync = false;
+// 色轮已收成薄 Vue 组件（src/ui/color-wheel.ts）：唯一输出 = onPick(hex) → setColor，
+// 唯一输入 = 当前色（colorWheel.setColor 推进去）。HSV 状态、round-trip 不变式（内部拖动
+// 不弹 hue）全在组件里。drawing app 与色轮只经一个 color 值耦合。
+const colorWheel = mountColorWheel(els.colorPanelBody, {
+  getColor: () => state.color,
+  onPick: (hex) => setColor(hex),
+});
 function setColor(hex) {
   state.color = hex;
   safeLSSet("webpaint.color", hex);
   els.activeSwatch.style.background = hex;
   refreshCurrentBrush();
-  if (!_suppressPickerSync && !els.colorPanel.classList.contains("hidden")) {
-    pickerSetFromHex(hex);
-  }
+  colorWheel.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue
 }
 els.activeSwatch.addEventListener("click", () => toggleColorPanel());
 setColor(state.color);
@@ -1540,14 +1538,11 @@ board.render = function () {
   updateZoomLabel();
 };
 
-// ---- HSV 浮动色板 ----
-let pickerHsv = { h: 0, s: 0, v: 0.1 };
-
+// ---- HSV 浮动色板（面板 chrome：开关 / 拖动 / 位置记忆。内容 = 色轮 Vue 组件）----
 function toggleColorPanel(force) {
   const hidden = els.colorPanel.classList.contains("hidden");
   const show = force === true ? true : force === false ? false : hidden;
   if (show) {
-    pickerSetFromHex(state.color);
     els.colorPanel.classList.remove("hidden");
     // 还原位置；没存过就放到右上角
     const saved = safeLS("webpaint.colorPanel.pos");
@@ -1566,7 +1561,6 @@ function toggleColorPanel(force) {
     top = Math.max(0, Math.min(window.innerHeight - h, top));
     els.colorPanel.style.left = left + "px";
     els.colorPanel.style.top = top + "px";
-    drawSvPad();
   } else {
     els.colorPanel.classList.add("hidden");
   }
@@ -2585,115 +2579,8 @@ history.registerHandler("selectionToLayer", {
   },
   refsLayer: (e, id) => e.newLayerSpec.id === id || e.activeLayerId === id,
 });
-els.hueSlider.addEventListener("input", () => {
-  pickerHsv.h = parseFloat(els.hueSlider.value);
-  drawSvPad();
-  commitPicker();
-});
-els.hexInput.addEventListener("change", () => {
-  let v = els.hexInput.value.trim();
-  if (!v.startsWith("#")) v = "#" + v;
-  if (/^#[0-9a-fA-F]{6}$/.test(v)) {
-    pickerSetFromHex(v);
-    commitPicker();
-  } else {
-    setStatus("HEX 格式不对");
-    els.hexInput.value = state.color;
-  }
-});
-// SV pad pointer
-let svDragging = false;
-els.svPad.addEventListener("pointerdown", (e) => { svDragging = true; els.svPad.setPointerCapture(e.pointerId); pickFromSv(e); });
-els.svPad.addEventListener("pointermove", (e) => { if (svDragging) pickFromSv(e); });
-els.svPad.addEventListener("pointerup", (e) => { svDragging = false; });
-function pickFromSv(e) {
-  const r = els.svPad.getBoundingClientRect();
-  const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
-  const y = Math.max(0, Math.min(r.height, e.clientY - r.top));
-  pickerHsv.s = x / r.width;
-  pickerHsv.v = 1 - y / r.height;
-  drawSvPad();
-  commitPicker();
-}
-function drawSvPad() {
-  const c = els.svPad;
-  const ctx = c.getContext("2d");
-  const w = c.width, h = c.height;
-  // 横向 = saturation，纵向 = 1-value
-  // 用 hue 一种颜色 + 水平白渐 + 垂直黑渐
-  ctx.fillStyle = `hsl(${pickerHsv.h} 100% 50%)`;
-  ctx.fillRect(0, 0, w, h);
-  const gx = ctx.createLinearGradient(0, 0, w, 0);
-  gx.addColorStop(0, "rgba(255,255,255,1)");
-  gx.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = gx;
-  ctx.fillRect(0, 0, w, h);
-  const gy = ctx.createLinearGradient(0, 0, 0, h);
-  gy.addColorStop(0, "rgba(0,0,0,0)");
-  gy.addColorStop(1, "rgba(0,0,0,1)");
-  ctx.fillStyle = gy;
-  ctx.fillRect(0, 0, w, h);
-  // marker
-  const mx = pickerHsv.s * w;
-  const my = (1 - pickerHsv.v) * h;
-  ctx.strokeStyle = "rgba(0,0,0,0.65)";
-  ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.arc(mx, my, 6, 0, Math.PI * 2); ctx.stroke();
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI * 2); ctx.stroke();
-}
-function commitPicker() {
-  const hex = hsvToHex(pickerHsv.h, pickerHsv.s, pickerHsv.v);
-  els.hexInput.value = hex;
-  els.previewSwatch.style.background = hex;
-  _suppressPickerSync = true;
-  setColor(hex);
-  _suppressPickerSync = false;
-}
-function pickerSetFromHex(hex) {
-  const { h, s, v } = hexToHsv(hex);
-  pickerHsv = { h, s, v };
-  els.hueSlider.value = String(Math.round(h));
-  els.hexInput.value = hex;
-  els.previewSwatch.style.background = hex;
-  drawSvPad();         // 不画的话 marker / hue band 都停在旧值，吸色看不出新颜色
-}
-
-// ---- color conv ----
-function hsvToHex(h, s, v) {
-  const c = v * s;
-  const hp = (h / 60) % 6;
-  const x = c * (1 - Math.abs(hp % 2 - 1));
-  let r = 0, g = 0, b = 0;
-  if (0 <= hp && hp < 1) { r = c; g = x; b = 0; }
-  else if (1 <= hp && hp < 2) { r = x; g = c; b = 0; }
-  else if (2 <= hp && hp < 3) { r = 0; g = c; b = x; }
-  else if (3 <= hp && hp < 4) { r = 0; g = x; b = c; }
-  else if (4 <= hp && hp < 5) { r = x; g = 0; b = c; }
-  else { r = c; g = 0; b = x; }
-  const m = v - c;
-  const R = Math.round((r + m) * 255), G = Math.round((g + m) * 255), B = Math.round((b + m) * 255);
-  return "#" + [R, G, B].map((n) => n.toString(16).padStart(2, "0")).join("");
-}
-function hexToHsv(hex) {
-  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return { h: 0, s: 0, v: 0 };
-  const R = parseInt(hex.slice(1, 3), 16) / 255;
-  const G = parseInt(hex.slice(3, 5), 16) / 255;
-  const B = parseInt(hex.slice(5, 7), 16) / 255;
-  const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
-  const d = mx - mn;
-  let h = 0;
-  if (d !== 0) {
-    if (mx === R) h = ((G - B) / d) % 6;
-    else if (mx === G) h = (B - R) / d + 2;
-    else h = (R - G) / d + 4;
-    h *= 60;
-    if (h < 0) h += 360;
-  }
-  const s = mx === 0 ? 0 : d / mx;
-  const v = mx;
-  return { h, s, v };
-}
+// 色轮的 SV pad / 色相条 / HEX 输入 / 颜色换算全部搬进 src/ui/color-wheel.ts + color-model.ts
+// （Vue 组件 + 纯模型）。这里只剩面板 chrome（toggleColorPanel + 拖动，见上）。
 
 // ---- 持久化：IDB 自动 + Ctrl+S + autosave + visibility/pagehide 抢救 ----
 // 抄 AtlasMaker shareback：Ctrl+S 主导 + 3min 兜底 + visibility/pagehide 抢救。
