@@ -237,8 +237,10 @@ const state = {
   // 旧 state.brush（可变 BrushSettings 单例）已收敛成不可变 ResolvedBrush（_currentBrush，
   //   由 refreshCurrentBrush 从 SSoT 派生）。当前笔的 SSoT = toolStates(dial) + 预设 + color + 下面两个全局压感开关。
   //   见 docs/reports/20260608-ui-deepening-and-plugin-survey.html 候选 3 / resolved-brush.js。
-  pressureToSize: DEFAULT_SETTINGS.pressureToSize,        // 全局（非 per-tool）压感→粗 开关
-  pressureToOpacity: DEFAULT_SETTINGS.pressureToOpacity,  // 全局 压感→透 开关
+  // 全局（非 per-tool）压感开关。boot 读 LS（v202 修原始 bug：旧版写 webpaint.pToSize 从不读回 → 重载弹回默认）。
+  //   未设过 → DEFAULT(开)；显式 "0" → 关。applyPressureSize/Opacity 仍按 toggle 写 LS。
+  pressureToSize: safeLS("webpaint.pToSize") !== "0",
+  pressureToOpacity: safeLS("webpaint.pToOpacity") !== "0",
   longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
   // v125 (user：「透明背景显示棋盘这个设置跟文件走」)
   //   checkerboard 从全局 LS 改 per-doc：保存在 webpaint/state.json，跟文件走
