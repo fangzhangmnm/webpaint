@@ -31,7 +31,7 @@ import {
   saveSession, loadCurrentSession, openSession, removeSession, listSessions,
   listTrashedSessions,
   getCurrentSessionName, setCurrentSessionName,
-  exportOraDownload, exportPsdDownload, shareOrDownloadImage,
+  triggerDownload, shareOrDownloadBlob,
   copyImageToClipboard, readImageFromClipboard, writeImageBlobToClipboard,
 } from "./session.js";
 import { Selection } from "./selection.js";
@@ -46,6 +46,8 @@ import { collectFolders, brushesInFolder } from "./brush-rack-view.js";
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
 import { getFilter, listFilters, registerFilter, onFilterRegistered } from "./filters.js";
 import "./plugins/index.js";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
+// candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
+import { getExporter, listExportersByKind, registerExporter, listExporters } from "./exporters.js";
 import { decodeOraToDoc, encodeDocToOra, parseAppVersion } from "./ora.js";
 import { getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches } from "./app-store.js";
 import { getOrFetchCloudThumb, clearCloudThumbCache, stats as cloudThumbStats, config as cloudThumbConfig, resetStats as cloudThumbResetStats } from "./cloud-thumb-cache.js";
@@ -3768,6 +3770,9 @@ window.WebPaint.pocFetchThumb = async function (itemId, fileSize) {
 window.WebPaint = window.WebPaint || {};
 window.WebPaint.registerFilter = registerFilter;
 window.WebPaint.listFilters = listFilters;
+// candidate 2：导出格式同样可插件注册（下载插件 → registerExporter）
+window.WebPaint.registerExporter = registerExporter;
+window.WebPaint.listExporters = listExporters;
 // adjust panel head 拖动
 (function bindAdjustPanelDrag() {
   let drag = null;
@@ -3918,7 +3923,7 @@ function _updateMenuSubLabels() {
   const epEl = document.getElementById("menuExportProjectSub");
   const eiEl = document.getElementById("menuExportImageSub");
   const iiEl = document.getElementById("menuImportImageSub");
-  if (epEl) epEl.textContent = "." + ep.format;
+  if (epEl) epEl.textContent = "." + ((getExporter(ep.format) || getExporter("ora")).ext);
   if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? "当前层" : "合并"} · ${ei.target === "clipboard" ? "剪切板" : "文件"}`;
   if (iiEl) iiEl.textContent = `${ii.source === "clipboard" ? "剪切板" : "文件"} · 新图层`;
 }
@@ -3926,16 +3931,12 @@ _updateMenuSubLabels();
 
 els.menuExportProject.addEventListener("click", async () => {
   setMenuOpen(false);
-  const { format } = _getExpPrj();
+  const exp = getExporter(_getExpPrj().format) || getExporter("ora");
   try {
-    if (format === "psd") {
-      setStatus("PSD 编码中…", true);
-      await exportPsdDownload(doc, `${_activeSessionName}.psd`);
-      setStatus(".psd 已下载");
-    } else {
-      await exportOraDownload(doc, `${_activeSessionName}.ora`);
-      setStatus(".ora 已下载");
-    }
+    if (exp.busyHint) setStatus(exp.busyHint, true);
+    const blob = await exp.encode(doc);
+    triggerDownload(blob, `${_activeSessionName}.${exp.ext}`);
+    setStatus(`.${exp.ext} 已下载`);
   } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
 });
 els.menuExportImage.addEventListener("click", async () => {
@@ -3943,11 +3944,15 @@ els.menuExportImage.addEventListener("click", async () => {
   const c = _getExpImg();
   try {
     if (c.target === "clipboard") {
+      // 剪贴板恒为 PNG（ClipboardItem image/png）——格式选择只作用于文件/分享路径
       await copyImageToClipboard(doc, c.scope);
       setStatus(`已复制 PNG 到剪贴板（${c.scope === "active" ? "当前层" : "合并"}）`);
     } else {
-      const r = await shareOrDownloadImage(doc, c.format, `${_activeSessionName}-${stampNow()}`, c.scope);
-      setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : `${c.format.toUpperCase()} 已下载`);
+      const exp = getExporter(c.format) || getExporter("png");
+      if (exp.busyHint) setStatus(exp.busyHint, true);
+      const blob = await exp.encode(doc, { scope: c.scope });
+      const r = await shareOrDownloadBlob(blob, `${_activeSessionName}-${stampNow()}.${exp.ext}`, exp.mime);
+      setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : `${exp.ext.toUpperCase()} 已下载`);
     }
   } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
 });
@@ -4000,11 +4005,13 @@ function _openMenuConfigPopup(wrenchBtn, html, onApply) {
 els.menuExportProjectConfig.addEventListener("click", (e) => {
   e.stopPropagation();
   const c = _getExpPrj();
+  const fmtRadios = listExportersByKind("project").map((exp) =>
+    `<label><input type="radio" name="fmt" value="${exp.id}" ${c.format === exp.id ? "checked" : ""} /> ${exp.label}</label>`
+  ).join("");
   _openMenuConfigPopup(e.currentTarget, `
     <div class="menu-config-section">
       <div class="menu-config-title">格式</div>
-      <label><input type="radio" name="fmt" value="ora" ${c.format === "ora" ? "checked" : ""} /> .ora（推荐 / 开源）</label>
-      <label><input type="radio" name="fmt" value="psd" ${c.format === "psd" ? "checked" : ""} /> .psd（Photoshop）</label>
+      ${fmtRadios}
     </div>
   `, (popup) => {
     const fmt = popup.querySelector('input[name="fmt"]:checked')?.value || "ora";
@@ -4014,11 +4021,13 @@ els.menuExportProjectConfig.addEventListener("click", (e) => {
 els.menuExportImageConfig.addEventListener("click", (e) => {
   e.stopPropagation();
   const c = _getExpImg();
+  const fmtRadios = listExportersByKind("image").map((exp) =>
+    `<label><input type="radio" name="fmt" value="${exp.id}" ${c.format === exp.id ? "checked" : ""} /> ${exp.label}</label>`
+  ).join("");
   _openMenuConfigPopup(e.currentTarget, `
     <div class="menu-config-section">
       <div class="menu-config-title">格式</div>
-      <label><input type="radio" name="fmt" value="png" ${c.format === "png" ? "checked" : ""} /> PNG</label>
-      <label><input type="radio" name="fmt" value="jpg" ${c.format === "jpg" ? "checked" : ""} /> JPG</label>
+      ${fmtRadios}
     </div>
     <div class="menu-config-section">
       <div class="menu-config-title">范围</div>

@@ -254,7 +254,9 @@ export async function exportPsdDownload(doc, filename = "未命名.psd") {
 // v124 加 scope 参数 (user)：
 //   "merged" (default) = 所有可见层 + doc 背景（兼容旧行为）
 //   "active" = 仅当前 active layer。JPG 仍涂 doc 背景（无 alpha）；PNG 保 alpha
-async function renderMergedBlob(doc, mime = "image/png", quality, scope = "merged") {
+// candidate 2：导出格式（png/jpg exporter）只负责把 doc 渲成 image blob；
+// 去向（分享/下载/剪贴板）是正交的 sink，见 shareOrDownloadBlob。故此函数公开。
+export async function renderDocToImageBlob(doc, mime = "image/png", quality, scope = "merged") {
   const c = document.createElement("canvas");
   c.width = doc.width;
   c.height = doc.height;
@@ -302,15 +304,11 @@ function _prefersShare() {
 /**
  * 分享 / 保存合成图。移动端优先 navigator.share（→ 相册 / Files）；桌面直接下载到 Downloads。
  */
-export async function shareOrDownloadImage(doc, format = "png", filename = "WebPaint", scope = "merged") {
-  const mime = format === "jpg" ? "image/jpeg" : "image/png";
-  const ext  = format === "jpg" ? "jpg" : "png";
-  const quality = format === "jpg" ? 0.92 : undefined;
-  const blob = await renderMergedBlob(doc, mime, quality, scope);
-  const fname = `${filename}.${ext}`;
-  const file = new File([blob], fname, { type: mime });
-
-  // 移动端优先 Web Share Level 2（支持 files）；桌面跳过 → 下载
+// 平台 sink（与格式正交）：移动端优先 navigator.share（→ 相册/Files）；桌面/降级直接下载。
+// candidate 2：exporter 产 blob，这里只决定去哪。filename 含扩展名。
+//   → { method: "share" | "cancel" | "download" }
+export async function shareOrDownloadBlob(blob, filename, mime) {
+  const file = new File([blob], filename, { type: mime || blob.type || "application/octet-stream" });
   if (_prefersShare() && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
     try {
       await navigator.share({ files: [file], title: filename });
@@ -321,8 +319,16 @@ export async function shareOrDownloadImage(doc, format = "png", filename = "WebP
       // 失败 fall through 到 download
     }
   }
-  triggerDownload(blob, fname);
+  triggerDownload(blob, filename);
   return { method: "download" };
+}
+
+export async function shareOrDownloadImage(doc, format = "png", filename = "WebPaint", scope = "merged") {
+  const mime = format === "jpg" ? "image/jpeg" : "image/png";
+  const ext  = format === "jpg" ? "jpg" : "png";
+  const quality = format === "jpg" ? 0.92 : undefined;
+  const blob = await renderDocToImageBlob(doc, mime, quality, scope);
+  return shareOrDownloadBlob(blob, `${filename}.${ext}`, mime);
 }
 
 // ---- 剪贴板 IO ----
@@ -332,7 +338,7 @@ export async function copyImageToClipboard(doc, scope = "merged") {
   if (!navigator.clipboard || !navigator.clipboard.write) {
     throw new Error("浏览器不支持剪贴板写入");
   }
-  const blob = await renderMergedBlob(doc, "image/png", undefined, scope);
+  const blob = await renderDocToImageBlob(doc, "image/png", undefined, scope);
   if (!blob) throw new Error("生成 PNG 失败");
   // ClipboardItem 在 Safari 必须用 lazy promise 写法（write 在 user gesture 内）
   await navigator.clipboard.write([
@@ -368,7 +374,7 @@ export async function readImageFromClipboard() {
 
 // ---- 工具 ----
 
-function triggerDownload(blob, filename) {
+export function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

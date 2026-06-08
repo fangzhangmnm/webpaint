@@ -31,31 +31,28 @@
 // onFilterRegistered(fn) — 监听新 filter，菜单自动加入口
 // 下载插件接口：[docs/backlog.md] AI 远程 / 本地 WASM 段落
 
-const _filters = new Map();
-const _listeners = new Set();
+// registry 原语共享自 registry.js（candidate 2：filter 与 exporter 同一道接缝）。
+import { makeRegistry } from "./registry.js";
+const _reg = makeRegistry({ name: "filter" });
 
 export function registerFilter(FilterClass) {
   if (!FilterClass || !FilterClass.id) {
     throw new Error("Filter 必须有 static id");
   }
-  _filters.set(FilterClass.id, FilterClass);
-  for (const fn of _listeners) {
-    try { fn(FilterClass); } catch (e) { console.warn("[filter listener]", e); }
-  }
+  _reg.register(FilterClass);
 }
 
 export function getFilter(id) {
-  return _filters.get(id) || null;
+  return _reg.get(id);
 }
 
 export function listFilters() {
-  return [..._filters.values()];
+  return _reg.list();
 }
 
 // 监听新 filter 注册；菜单 lazy 渲染 / 插件加载后自动出现入口
 export function onFilterRegistered(fn) {
-  _listeners.add(fn);
-  return () => _listeners.delete(fn);
+  return _reg.onRegistered(fn);
 }
 
 // ============= 共享 helper =============

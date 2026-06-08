@@ -9,6 +9,7 @@ import "./folder-flow.test.mjs";
 import "./folder-store.test.mjs";
 import "./brush-rack-migrate.test.mjs";
 import "./engine-registry.test.mjs";
+import "./registry.test.mjs";
 import "./resolved-brush.test.mjs";
 import "./pointer-gesture.test.mjs";
 import "./crop-geometry.test.mjs";
