@@ -502,8 +502,9 @@
           <button class="brush-rack-close" id="brushRackClose" type="button" aria-label="关闭">×</button>
         </div>
       </div>
-      <div class="brush-rack-folders" id="brushRackFolders"></div>
-      <div class="brush-rack-grid" id="brushRackGrid"></div>
+      <!-- folder tabs + 笔 grid = <RackSheet> Vue 组件（src/ui/rack-sheet.ts）挂载于此。
+           display:contents → 组件节点作 .brush-rack-sheet 的直接子项（保留原布局）。 -->
+      <div id="rackSheetMount" style="display:contents"></div>
     </div>
 
     <!-- Brush settings 全屏 view（v83）：编辑某个 brush preset -->
@@ -929,6 +930,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-b62d5c87e230.mjs"></script>
+    <script type="module" src="./dist/webpaint-43adb0f927cc.mjs"></script>
   </body>
 </html>

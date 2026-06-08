@@ -30,6 +30,7 @@ import { PaletteWindow } from "./palette.js";
 import { mountColorWheel } from "./ui/color-wheel.ts";   // UI 深化 candidate 1 · Vue pilot
 import { mountBrushSettings } from "./ui/brush-settings.ts";   // candidate 1 · 笔设置编辑器
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
+import { mountRackSheet } from "./ui/rack-sheet.ts";   // candidate 1 · 笔架 sheet（folder tabs + 笔 grid）
 import { stepFor as _stepFor, quantizeSize as _quantizeSize } from "./ui/brush-size.ts";   // [ ] 键盘调粗用（slider 映射在 <LeftDial>）
 import { reactive, computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";   // candidate 1 · 反应式 dial SSoT
 import {
@@ -4022,7 +4023,7 @@ els.menuResetBrushRack.addEventListener("click", async () => {
   await persistBrushRack();
   applyToolState(editMode.current());
   // 若 rack sheet 当前开着 → 强制刷一遍
-  if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+  dialReactive.rackVersion++;   // 笔架内容变 → <RackSheet> 反应式重渲（sheet 关着也无妨，cheap）
   setRackDirty(true);
   if (isSignedIn()) pushBrushRackIfSignedIn();
   setStatus(`笔架已重置（${_brushRack.brushes.length} 个 brush）`, true);
@@ -5699,8 +5700,7 @@ const _rackEls = {
   close: document.getElementById("brushRackClose"),
   importBtn: document.getElementById("brushRackImport"),
   newBtn: document.getElementById("brushRackNew"),
-  folders: document.getElementById("brushRackFolders"),
-  grid: document.getElementById("brushRackGrid"),
+  mount: document.getElementById("rackSheetMount"),   // <RackSheet> Vue 组件挂载点（folder tabs + 笔 grid）
   // v99 footer 操作
   exportFolderBtn: document.getElementById("brushRackExportFolder"),
   cloudPushBtn:    document.getElementById("brushRackCloudPush"),
@@ -5718,8 +5718,8 @@ const _settingsEls = {
 const TOOL_LABEL = {
   brush: "笔刷", smudge: "涂抹", eraser: "橡皮",
 };
-let _rackCurrentFolder = DEFAULT_FOLDER;
-let _rackCurrentTool = "brush";   // 当前 rack sheet 显示的工具
+// 笔架 sheet 的 UI 态（哪个工具/文件夹）= 反应式 → <RackSheet> 组件绑定。
+const rackUi = reactive({ tool: "brush", folder: DEFAULT_FOLDER });
 // 「笔架内容变了」单一语义入口：落本地 + 标脏排防抖同步（cadence 归 rackStore，L4 ③b）。
 // 编辑器 / 导入 / 删除 只声明「变了」，**不直接碰 sync**（load+save 与 sync 解耦）。
 // rackStore.edit() = setDirty + 防抖排 sync（停手 ~1.5s；FolderFlow 无损 union、零冲突，频繁推安全；
@@ -5733,11 +5733,14 @@ function markRackChanged() {
 
 function _showRackSheet(tool) {
   if (!_brushRack) return;
-  _rackCurrentTool = tool;
+  rackUi.tool = tool;
+  // 切工具时若当前 folder 不在新工具的 folder 集合里，归位到第一个（folder 校正在这显式做，组件 computed 保持纯）。
+  const folders = collectFolders(brushesByTool(_brushRack, getRackToolKey(tool)), DEFAULT_FOLDER);
+  if (!folders.includes(rackUi.folder)) rackUi.folder = folders[0] || DEFAULT_FOLDER;
   _rackEls.title.textContent = `笔架 · ${TOOL_LABEL[tool] || tool}`;
-  _renderRackSheet();
   _rackEls.sheet.classList.remove("hidden");
   _refreshRackCloudState();        // v134 打开 rack 时刷 icon
+  // grid/folders 由 <RackSheet> 反应式渲染（rackUi + rackVersion + toolStates）；不再 _renderRackSheet。
 }
 function _hideRackSheet() {
   _rackEls.sheet.classList.add("hidden");
@@ -5745,6 +5748,29 @@ function _hideRackSheet() {
   if (rackStore.isDirty()) persistBrushRack();
   rackStore.flush();
 }
+
+// <RackSheet> Vue 组件：folder tabs + 笔 grid。反应式读 _brushRack（gated rackVersion）+ rackUi + toolStates。
+// head 动作条（导入/导出/云/新建/重置/关闭 + 云图标）仍 app 命令式（见下）。
+mountRackSheet(_rackEls.mount, {
+  defaultFolder: DEFAULT_FOLDER,
+  getBrushes: () => { void dialReactive.rackVersion; return _brushRack ? brushesByTool(_brushRack, getRackToolKey(rackUi.tool)) : []; },
+  getRackEmpty: () => { void dialReactive.rackVersion; return !_brushRack || !_brushRack.brushes || _brushRack.brushes.length === 0; },
+  getFolder: () => rackUi.folder,
+  getActiveId: () => state.toolStates[getRackToolKey(rackUi.tool)]?.activeBrushId ?? null,
+  onSelectFolder: (f) => { rackUi.folder = f; },
+  onSelectBrush: (id) => { selectBrushPresetForTool(rackUi.tool, id); closeExclusive(); },
+  onEditBrush: (id) => { closeExclusive(); _openBrushSettings(id); },
+  onReset: () => {
+    _brushRack = makeDefaultRack();
+    for (const t of Object.keys(state.toolStates)) {
+      state.toolStates[t].activeBrushId = null;
+      Object.assign(state.toolStates[t], defaultToolStateFor(t));
+    }
+    markRackChanged();   // 落本地 + 排同步 + bump rackVersion
+    applyToolState(editMode.current());
+    setStatus(`已恢复默认笔架（${_brushRack.brushes.length} 个）`, true);
+  },
+});
 
 // v134 rack cloud 状态机：smart icon + auto push
 //   synced：ETag 匹配 + 没本地未推改动
@@ -5798,7 +5824,7 @@ rackStore.configure({
       { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
       await persistBrushRack();
       applyToolState(editMode.current());
-      if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+      dialReactive.rackVersion++;   // 采纳云端 merge（_brushRack 重新赋值，非反应式）→ <RackSheet> + 当前笔重算
     }
     if (res.status === "synced") setStatus("笔架已同步到云端");
     else if (res.status === "invalid") setStatus("笔架云端数据异常，已留待重试", true);
@@ -5819,101 +5845,6 @@ async function pushBrushRackIfSignedIn() {
 async function checkBrushRackCloud() {
   if (!isAuthConfigured() || !navigator.onLine || !isSignedIn()) return;
   await pushBrushRackIfSignedIn();
-}
-function _renderRackSheet() {
-  // 防护：rack 为空时显「重置笔架」入口而不是空白
-  if (!_brushRack || !_brushRack.brushes || _brushRack.brushes.length === 0) {
-    _rackEls.folders.innerHTML = "";
-    _rackEls.grid.innerHTML = `<div style="padding:20px;text-align:center;color:var(--ink-soft);">
-      笔架是空的。<br><br>
-      <button class="brush-rack-action" id="_rackEmptyResetBtn">恢复默认笔架（8 个）</button>
-    </div>`;
-    const btn = document.getElementById("_rackEmptyResetBtn");
-    if (btn) btn.addEventListener("click", () => {
-      _brushRack = makeDefaultRack();
-      for (const t of Object.keys(state.toolStates)) {
-        state.toolStates[t].activeBrushId = null;
-        Object.assign(state.toolStates[t], defaultToolStateFor(t));
-      }
-      markRackChanged();
-      applyToolState(editMode.current());
-      _renderRackSheet();
-      setStatus(`已恢复默认笔架（${_brushRack.brushes.length} 个）`, true);
-    });
-    return;
-  }
-  const brushes = brushesByTool(_brushRack, _rackCurrentTool);
-  // 当前工具没 brush 也提示
-  if (brushes.length === 0) {
-    _rackEls.folders.innerHTML = "";
-    _rackEls.grid.innerHTML = `<div style="padding:20px;text-align:center;color:var(--ink-soft);">
-      此工具暂无笔刷。点「+ 新建」加一个。
-    </div>`;
-    return;
-  }
-  // 收集 folder 列表（纯派生下沉 brush-rack-view.js）
-  const folders = collectFolders(brushes, DEFAULT_FOLDER);
-  if (!folders.includes(_rackCurrentFolder)) _rackCurrentFolder = folders[0];
-  // 渲 folder tabs
-  _rackEls.folders.innerHTML = "";
-  for (const f of folders) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "brush-rack-folder";
-    btn.textContent = f;
-    btn.setAttribute("aria-pressed", f === _rackCurrentFolder ? "true" : "false");
-    btn.addEventListener("click", () => {
-      _rackCurrentFolder = f;
-      _renderRackSheet();
-    });
-    _rackEls.folders.appendChild(btn);
-  }
-  // 渲 brush tiles
-  const activeId = state.toolStates[_rackCurrentTool]?.activeBrushId;
-  _rackEls.grid.innerHTML = "";
-  for (const b of brushesInFolder(brushes, _rackCurrentFolder, DEFAULT_FOLDER)) {
-    // v96：tile 改 div + 内嵌 gear button（user 不喜欢长按）
-    const tile = document.createElement("div");
-    tile.className = "brush-rack-tile";
-    tile.setAttribute("aria-pressed", b.id === activeId ? "true" : "false");
-    tile.dataset.brushId = b.id;
-    tile.setAttribute("role", "button");
-    tile.tabIndex = 0;
-    const preview = document.createElement("div");
-    preview.className = "brush-rack-tile-preview";
-    if (b.shape.kind === "ellipse") {
-      const ar = b.shape.aspect;
-      preview.style.transform = `rotate(${b.shape.rotation}deg) scaleY(${ar})`;
-    }
-    // v107：smoothstep multi-stop 跟 stamp 真值一致；hardness=1 时 16 stops 全 α=1（solid 不浪费）
-    preview.style.background = _smoothstepRadialGradient(b.shape.hardness);
-    const name = document.createElement("span");
-    name.className = "brush-rack-tile-name";
-    name.textContent = b.name;
-    // v124b (user：「笔刷的扳手改成 ⋯，统一用一个框架」) 扳手 → ⋯ (unicode 在 iOS 一致)
-    const gear = document.createElement("button");
-    gear.type = "button";
-    gear.className = "brush-rack-tile-edit";
-    gear.title = "编辑";
-    gear.textContent = "⋯";
-    gear.addEventListener("click", (e) => {
-      e.stopPropagation();
-      closeExclusive();
-      _openBrushSettings(b.id);
-    });
-    tile.appendChild(preview);
-    tile.appendChild(name);
-    tile.appendChild(gear);
-    // tap tile body → 选中 + 关 sheet
-    // 注意：选笔只动 state.toolStates（per-doc 活动笔），**不**改 _brushRack 内容。
-    // 所以不设 _rackDirty，避免每次切笔都触发云端 push（拿旧 ETag 必然 412 冲突）。
-    tile.addEventListener("click", (e) => {
-      e.stopPropagation();
-      selectBrushPresetForTool(_rackCurrentTool, b.id);
-      closeExclusive();
-    });
-    _rackEls.grid.appendChild(tile);
-  }
 }
 
 // 注册 panel-state
@@ -5944,11 +5875,11 @@ function _nextBrushName() {
 _rackEls.newBtn.addEventListener("click", () => {
   // v107: 新建 = 复制当前笔（user：「笔架加号应该是复制当前笔，找个接近的就行了」）
   // 优先复制当前 active brush，否则当前 tool/folder 第一个，否则 rack 第一个，最后才硬编码模板
-  const activeId = state.toolStates[getRackToolKey(_rackCurrentTool)]?.activeBrushId;
+  const activeId = state.toolStates[getRackToolKey(rackUi.tool)]?.activeBrushId;
   let source = activeId ? findBrush(_brushRack, activeId) : null;
   if (!source) {
-    const inFolder = brushesByTool(_brushRack, _rackCurrentTool)
-      .filter(b => (b.folder || DEFAULT_FOLDER) === _rackCurrentFolder);
+    const inFolder = brushesByTool(_brushRack, rackUi.tool)
+      .filter(b => (b.folder || DEFAULT_FOLDER) === rackUi.folder);
     source = inFolder[0] || _brushRack.brushes[0] || null;
   }
   let newB;
@@ -5956,20 +5887,20 @@ _rackEls.newBtn.addEventListener("click", () => {
     newB = JSON.parse(JSON.stringify(source));         // deep clone
     newB.id = newBrushId();
     newB.name = _nextBrushName();
-    newB.folder = _rackCurrentFolder;
-    newB.tool = _rackCurrentTool;
+    newB.folder = rackUi.folder;
+    newB.tool = rackUi.tool;
   } else {
     // 兜底：rack 整个空时（理论不会到这）
     newB = {
       id: newBrushId(), name: _nextBrushName(),
-      tool: _rackCurrentTool, folder: _rackCurrentFolder,
+      tool: rackUi.tool, folder: rackUi.folder,
       shape: { kind: "round", aspect: 1, rotation: 0, hardness: 1.0, textureB64: null },
       size: { base: 12, max: 200 },
       sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
       pressureGamma: 1.0, pressureLPF: 50, defaultOpa: 1.0,
       compositeMode: "wash", blendMode: "source-over", spacing: 0.06, pixelMode: false,
       taper: { in: 0, out: 0 },
-      smudge: _rackCurrentTool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
+      smudge: rackUi.tool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
       smooth: { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 },
     };
   }
@@ -5990,12 +5921,11 @@ _rackEls.importBtn.addEventListener("click", () => {
     try {
       const txt = await file.text();
       const b = brushFromJSON(txt);
-      b.folder = _rackCurrentFolder;
-      b.tool = _rackCurrentTool;
+      b.folder = rackUi.folder;
+      b.tool = rackUi.tool;
       b.uat = Date.now();             // v2: 导入 = user-action-time
       _brushRack.brushes.push(b);
-      markRackChanged();
-      _renderRackSheet();
+      markRackChanged();   // bump rackVersion → <RackSheet> 反应式重渲
       setStatus(`已导入：${b.name}`);
     } catch (e) { setStatus("导入失败：" + (e.message || e), true); }
     document.body.removeChild(inp);
@@ -6032,25 +5962,6 @@ async function _shareOrDownloadJSON(blob, filename, title) {
 // v107: tile preview 用跟 stamp 一致的 smoothstep falloff (16 stops CSS gradient)
 // 真 stamp 是 putImageData 解析公式（连续），CSS gradient 只能 stop 间 linear interp，
 // 16 stops 视觉上已经平滑（dα 在 stop 处 jump 小到看不见）
-function _smoothstepRadialGradient(hardness, stops = 16) {
-  const hd = Math.max(0, Math.min(1, hardness));
-  const out = [];
-  for (let i = 0; i <= stops; i++) {
-    const t = i / stops;
-    let alpha;
-    if (t <= hd) alpha = 1;
-    else {
-      const u = (t - hd) / (1 - hd);
-      alpha = 1 - u * u * (3 - 2 * u);
-    }
-    const pct = (t * 100).toFixed(1);
-    const apct = (alpha * 100).toFixed(1);
-    out.push(`color-mix(in srgb, var(--ink) ${apct}%, transparent) ${pct}%`);
-  }
-  // v108 BUG FIX：默认 farthest-corner = √2 × 半宽，100% stop 跑框外角 → 视觉框边
-  // 只走 ~70.7% 渐变（user 反映「preview 没变」+ 猜「多了个根号 2」），必须 closest-side
-  return `radial-gradient(circle closest-side, ${out.join(", ")})`;
-}
 
 // v100r2：rack 操作按钮回退 text 标签
 // user：「几个 svg 按钮不好理解什么意思。还是改回文字」
@@ -6058,8 +5969,8 @@ function _smoothstepRadialGradient(hardness, stops = 16) {
 // v99：导出当前文件夹下的所有 brush 为一个 JSON pack（{ folder, brushes: [...] }）
 async function exportRackFolderAsFile() {
   if (!_brushRack) return;
-  const tool = _rackCurrentTool;
-  const folder = _rackCurrentFolder;
+  const tool = rackUi.tool;
+  const folder = rackUi.folder;
   const brushes = brushesByTool(_brushRack, tool).filter(b => (b.folder || DEFAULT_FOLDER) === folder);
   if (brushes.length === 0) { setStatus("本文件夹是空的", true); return; }
   const pack = { version: 1, folder, tool, brushes };
@@ -6132,7 +6043,7 @@ if (_rackEls.resetBtn) _rackEls.resetBtn.addEventListener("click", async () => {
   }
   await persistBrushRack();
   applyToolState(editMode.current());
-  if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+  dialReactive.rackVersion++;   // 笔架内容变 → <RackSheet> 反应式重渲（sheet 关着也无妨，cheap）
   setRackDirty(true);
   if (isSignedIn()) pushBrushRackIfSignedIn();
   setStatus(`笔架已重置（${_brushRack.brushes.length} 个 brush）`, true);
@@ -6178,7 +6089,7 @@ function _closeBrushSettings(save) {
     } else {
       selectBrushPresetForTool(targetTool, _editingBrushDraft.id);
     }
-    if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+    dialReactive.rackVersion++;   // 笔架内容变 → <RackSheet> 反应式重渲（sheet 关着也无妨，cheap）
     setStatus(`已保存：${_editingBrushDraft.name}`);
   }
   _editingBrushId = null;
@@ -6199,7 +6110,7 @@ async function _deleteEditingBrush() {
     if (!Array.isArray(_brushRack.trash)) _brushRack.trash = [];
     _brushRack.trash.push({ id: delId, uat: Date.now() });
     markRackChanged();
-    if (RACK_PANEL_BY_TOOL[editMode.current()] === getCurrentExclusive()) _renderRackSheet();
+    dialReactive.rackVersion++;   // 笔架内容变 → <RackSheet> 反应式重渲（sheet 关着也无妨，cheap）
   }
   // 删一个尚未保存的新笔（idx<0）→ 仅丢 draft，等同 cancel。
   _editingBrushId = null;
