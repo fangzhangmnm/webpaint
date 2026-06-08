@@ -3202,6 +3202,17 @@ function _pushDocTransform(before, after, label) {
   setStatus(label);
 }
 
+// 文档变换的提交信封：把「before 快照 → 改 doc → after 快照 → 压 docTransform」这条
+// 四处重复的脊柱收一处。结构上保证不会漏掉 undo 事务（漏了 = 这步静默不可撤销）。
+// 守卫（无选区/尺寸非法/没变化）留在调用方——helper 只管「已决定要做」的那次变换的提交。
+// applyFn 内改 doc + 可选 viewport shift（必须在 after 快照前完成，故放进 applyFn）。
+function runDocTransform(label, applyFn) {
+  const before = _captureDocBefore();
+  applyFn();
+  const after = _captureDocAfter();
+  _pushDocTransform(before, after, label);
+}
+
 // v114: 裁切后让原 (rect.x, rect.y) 像素在屏上不挪 → viewport.tx/ty 减去 (rect.x, rect.y) × scale
 // 数学：old 屏位 = old_tx + rect.x × scale；new 屏位 = new_tx + 0 × scale = new_tx
 // 要等 → new_tx = old_tx + rect.x × scale
@@ -3220,11 +3231,10 @@ document.getElementById("adjustCropToSelection").addEventListener("click", () =>
   const x = Math.max(0, s.bboxX | 0), y = Math.max(0, s.bboxY | 0);
   const w = Math.min(doc.width - x, s.bboxW | 0), h = Math.min(doc.height - y, s.bboxH | 0);
   if (w < 1 || h < 1) { setStatus("选区太小或在画布外", true); return; }
-  const before = _captureDocBefore();
-  doc.cropTo({ x, y, w, h });
-  _shiftViewportAfterCrop({ x, y });
-  const after = _captureDocAfter();
-  _pushDocTransform(before, after, `已裁到选区：${w}×${h}`);
+  runDocTransform(`已裁到选区：${w}×${h}`, () => {
+    doc.cropTo({ x, y, w, h });
+    _shiftViewportAfterCrop({ x, y });
+  });
 });
 
 // 自由裁切（8-handle）----
@@ -3300,10 +3310,7 @@ if (_menuFlipHBtn) {
   _menuFlipHBtn.addEventListener("click", () => {
     setMenuOpen(false);
     setAdjustOpen(false);
-    const before = _captureDocBefore();
-    doc.flipHorizontal();
-    const after = _captureDocAfter();
-    _pushDocTransform(before, after, "已水平翻转");
+    runDocTransform("已水平翻转", () => doc.flipHorizontal());
   });
 }
 document.getElementById("cropToolbarCancel").addEventListener("click", () => _closeCropMode());
@@ -3312,11 +3319,10 @@ document.getElementById("cropToolbarApply").addEventListener("click", () => {
   // v127 (user：「裁切还可以扩张」)：允许 x/y 负（向左/向上扩），允许 w/h > doc（向右/向下扩）
   //   只保最小 1 + 最大 8192；doc.cropTo 已支持负 dx/dy
   const { x, y, w, h } = cropRectToInts(_cropState.rect, { min: 1, max: 8192 });
-  const before = _captureDocBefore();
-  doc.cropTo({ x, y, w, h });
-  _shiftViewportAfterCrop({ x, y });
-  const after = _captureDocAfter();
-  _pushDocTransform(before, after, `已裁切：${w}×${h}`);
+  runDocTransform(`已裁切：${w}×${h}`, () => {
+    doc.cropTo({ x, y, w, h });
+    _shiftViewportAfterCrop({ x, y });
+  });
   _closeCropMode();
 });
 
@@ -3401,10 +3407,7 @@ els.resampleConfirm.addEventListener("click", () => {
   const mode = els.resampleMode.value || "bicubic";
   if (nw < 1 || nh < 1 || nw > 8192 || nh > 8192) { setStatus("尺寸超出 [1, 8192]", true); return; }
   if (nw === doc.width && nh === doc.height) { _closeResampleDialog(); return; }
-  const before = _captureDocBefore();
-  doc.resampleTo(nw, nh, mode);
-  const after = _captureDocAfter();
-  _pushDocTransform(before, after, `已重采样到 ${nw}×${nh}（${mode}）`);
+  runDocTransform(`已重采样到 ${nw}×${nh}（${mode}）`, () => doc.resampleTo(nw, nh, mode));
   _closeResampleDialog();
 });
 
