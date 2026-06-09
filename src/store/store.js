@@ -517,8 +517,34 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     flush: () => (sub.edits.localDirty() && !_busy.saving) ? _persist() : Promise.resolve(),
   };
 
+  // 单飞守卫（single-flight）：用户态写流（rename/saveAs/del/restore/purge/emptyTrash）同一时刻
+  //   只允许一个在跑，并发的第二个**直接拒**（throw STORE_BUSY），调用方 catch→报状态。
+  // 与 busy 正交、是更硬的护栏：busy 只是 UI 防误点（passBusy / 无 UI 时失效），这道在库内自带、
+  //   不依赖 UI——库被无头复用时也挡得住「两个用户态写同时动手」。数据竞争仍由 serialize2 兜底，
+  //   这道在其上加「全局同一时刻只一个用户态写」的更强语义（user 明确要）。
+  // 安全前提：被守的 6 个流**互不内部调用**（emptyTrash 直接调 adapter，不走 flow.purge；rename 内
+  //   部走 _doPush 而非 flow.saveAs）——否则嵌套会自锁。新增流要进这层守卫前先核这条。
+  let _userWriteInFlight = null;     // 在跑的用户态写 label；null = 空闲
+  const _singleFlight = (label, fn) => (...args) => {
+    if (_userWriteInFlight) {
+      const e = new Error(`有另一项操作进行中（${_userWriteInFlight}），请等它完成再试`);
+      e.code = "STORE_BUSY";
+      return Promise.reject(e);
+    }
+    _userWriteInFlight = label;
+    return Promise.resolve().then(() => fn(...args)).finally(() => { _userWriteInFlight = null; });
+  };
+
   return {
-    flow: { push, open, refresh, delete: del, rename, saveAs, acquire, replayDelete, restore, purge, emptyTrash },
+    flow: {
+      push, open, refresh, acquire, replayDelete,         // 后台 / 读流：不进单飞守卫
+      delete: _singleFlight("删除", del),
+      rename: _singleFlight("重命名", rename),
+      saveAs: _singleFlight("另存为", saveAs),
+      restore: _singleFlight("恢复", restore),
+      purge: _singleFlight("彻底删除", purge),
+      emptyTrash: _singleFlight("清空回收站", emptyTrash),
+    },
     edit,                      // 唯一编辑入口（游标 + 门）（L4 ②）
     busy,                      // transient saving/pushing busy（状态归 store，status 只读）（L4 ②b）
     autosave,                  // 本地落盘节律（configure/start/flush）：cadence 归 store（L4 ②c）

@@ -188,14 +188,18 @@ function makeGallery(host: GalleryHost) {
         const trimmed = input.trim();
         if (!trimmed) { host.status("名字不能空", true); return; }
         if (trimmed === item.name) { host.status("名字未变"); return; }
-        const taken = await nameTaken(trimmed, isCloud);
-        if (taken) { host.status(`${taken}已有同名 "${trimmed}"，换一个`, true); return; }
-        await host.busy(`正在重命名 ${item.name} → ${trimmed}…`, async () => {
+        // 锁屏从确认即开始，把冲突检查（nameTaken 含云端 listCloudSessionsRecursive 网络往返）
+        // 也包进来——否则确认后到锁屏之间有明显空窗（用户：「点了没立刻锁，过一会才锁」）。
+        const taken = await host.busy(`正在重命名 ${item.name} → ${trimmed}…`, async () => {
+          const t = await nameTaken(trimmed, isCloud);
+          if (t) return t;
           try {
             const res = await _store.flow.rename(item.name, trimmed, { cloud: isCloud });
             host.status(res.cloudDeferred ? `已重命名（云端稍后重试）：${trimmed}` : `已重命名：${trimmed}`);
           } catch (e: any) { host.status(`重命名失败：${e?.message || e}`, true); }
+          return null;
         });
+        if (taken) { host.status(`${taken}已有同名 "${trimmed}"，换一个`, true); return; }
         await reload();
       }
 

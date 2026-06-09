@@ -343,17 +343,13 @@ async function renameCurrentSession({ suggested, reason }: any = {}) {
     const trimmed = input2.trim();
     if (!trimmed) { setStatus("名字不能空", true); candidate = ""; continue; }
     if (trimmed === oldName) return oldName;       // 没改 = 等于成功
-    const localNames = (await listSessions()).map((s: any) => s.name);
-    if (localNames.includes(trimmed)) {
-      setStatus(`本地已有同名 "${trimmed}"，换一个`, true);
-      candidate = trimmed;
-      continue;
-    }
-    // 锁屏跑改名（编码 ora + 云端 move/push + 本地存+渲 thumb 都重）。sibling 深模块 op
-    // （saveAndPush/push/unload + 图库非活动改名 host.busy）都强制 busy；此路径过去漏掉 →
-    // 没锁屏期间用户能点刷新/tile 读到改名中途态（本地已改名但云 move 在飞 → 脏徽章；thumb 未渲 → ?；
-    // 字节写到一半 → 打不开退回 reload）。补上 withBusy，与 sibling 对齐。store 窄边界不动（外包）。
-    return await withBusy(`正在重命名 ${oldName} → ${trimmed}…`, async () => {
+    // 锁屏从**确认即开始**，把冲突检查（await listSessions，可能慢）也包进来——否则确认到锁屏
+    // 之间有空窗，用户以为「点了没反应、过一会才锁」。冲突 → 退出锁屏后重新弹名字（continue）。
+    // 锁屏跑改名（编码 ora + 云端 move/push + 本地存+渲 thumb 都重），与 sibling 深模块 op 对齐；
+    // store 现在内部也对 rename 强制 busy（可重入），这里外层 busy 只是为了覆盖冲突检查那段 await。
+    const outcome: any = await withBusy(`正在重命名 ${oldName} → ${trimmed}…`, async () => {
+      const localNames = (await listSessions()).map((s: any) => s.name);
+      if (localNames.includes(trimmed)) return { conflict: true };
       try {
         const cloudOn = isSignedIn() && navigator.onLine !== false;
         const res = await _store.flow.rename(oldName, trimmed, {
@@ -370,12 +366,18 @@ async function renameCurrentSession({ suggested, reason }: any = {}) {
         else if (res.cloudDeferred) setStatus(`已重命名（仅本地）：${oldName} → ${trimmed}（云端稍后 Ctrl+S 推）`);
         else setStatus(`已重命名（含云端）：${oldName} → ${trimmed}`);
         gallery.refresh();
-        return trimmed;
+        return { ok: true };
       } catch (e: any) {
         setStatus("重命名失败：" + (e && e.message || e));
-        return null;
+        return { error: true };
       }
     });
+    if (outcome.conflict) {
+      setStatus(`本地已有同名 "${trimmed}"，换一个`, true);
+      candidate = trimmed;
+      continue;
+    }
+    return outcome.ok ? trimmed : null;
   }
 }
 
