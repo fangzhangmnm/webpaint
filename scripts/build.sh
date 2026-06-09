@@ -37,6 +37,18 @@ fi
 mkdir -p "$OUT_DIR"
 TMP_OUT="$OUT_DIR/webpaint-tmp.mjs"
 
+# 0. 类型检查门（store 深模块被 Uint8Array/Blob 类型 bug 雷击两次 → 把 tsc --noEmit 设成构建前置）。
+#    esbuild 只 strip 类型不检查；这道才是真护栏。tsc 装在 devDependencies（npm i 一次）。
+#    没装 tsc（裸 clone 未 npm i）→ 大声警告但不挡构建（保留 node 直跑的简单性）；装了就强制过。
+TSC="./node_modules/.bin/tsc"
+if [ -x "$TSC" ]; then
+  echo "[build] 类型检查 tsc --noEmit…"
+  "$TSC" --noEmit -p tsconfig.json || { echo "[build] ✗ 类型检查失败，已挡下构建（修类型或先 git stash）。" >&2; exit 1; }
+  echo "[build] ✓ 类型通过"
+else
+  echo "[build] ⚠ 未装 tsc（node_modules 缺）——跳过类型检查。装一下：npm install" >&2
+fi
+
 # 1. esbuild bundle 到临时名
 "$ESBUILD" "$ENTRY" \
   --bundle --format=esm --target=es2020 \

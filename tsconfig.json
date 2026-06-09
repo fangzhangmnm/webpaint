@@ -1,0 +1,32 @@
+{
+  // 类型检查专用（tsc --noEmit）——不产出任何文件；运行时仍由 node 直接 strip-types + esbuild bundle。
+  // 本轮只把 store 深模块（src/store/**）纳入 strict 检查（被 Uint8Array/Blob 类型 bug 雷击两次）；
+  // 其余 src/ 暂不检（增量推进，别一次铺满全仓引爆历史错误）。
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+
+    // Node 24 默认 strip-types 跑 .ts；本仓约定 import 写 .ts 扩展名（见 app.js / test/*.mjs）。
+    // module:preserve + bundler 解析 + allowImportingTsExtensions 才能让 tsc 认 "./x.ts" 这种 specifier。
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "target": "es2022",
+    "lib": ["es2022", "dom", "dom.iterable"],
+
+    // store 边界会 import 到仓里未类型化的 .js（../ora.js / ../session.js / ../storage.js）：
+    // allowJs 让它们能被解析，checkJs:false 让它们不报错（松边界，类型按推断/any 走）。
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true,
+
+    // verbatimModuleSyntax：强制 type-only import 写 `import type`，否则 node strip-types 会把
+    // 纯类型 import 当运行时 import 留下 → 运行时「does not provide an export」。是 node 兼容的硬约束。
+    "verbatimModuleSyntax": true,
+
+    // 不拉 @types/node（没装）；只认上面 lib。
+    "types": [],
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/store/**/*.ts", "src/store/**/*.js"]
+}

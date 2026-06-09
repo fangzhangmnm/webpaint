@@ -1,6 +1,6 @@
 // Substrate 底座验收（L4 ①）：编辑游标 + push-serialize。coalescer 另由 store-coalescer.test 覆盖（经 store.session）。
 import { describe, it, eq, assert } from "./runner.mjs";
-import { createSubstrate, toU8, bytesEqual } from "../src/store/substrate.js";
+import { createSubstrate, toU8, bytesEqual } from "../src/store/substrate.ts";
 
 const defer = () => { let resolve; const p = new Promise((r) => (resolve = r)); return { p, resolve }; };
 const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };   // run() 经 prev.then 排在微任务，非同步启动

@@ -12,7 +12,7 @@
 // 红线：B1 串行 · B2 不丢编辑 · B5 lost-response 自愈 · retry 退避 · A4/A10 备份先于覆盖 ·
 //       E8 跳过离线 · H3 先存后清 · E4 离线 deferred · 三态删除不留双份 · C7 重连收敛 · H2 confirm 强制。
 
-import { toU8, bytesEqual, createSubstrate } from "./substrate.js";
+import { toU8, bytesEqual, createSubstrate } from "./substrate.ts";
 
 const passBusy = (label, fn) => fn();   // 默认 busy：直接跑
 
@@ -469,7 +469,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // phantom-path 保护）。曾在此放过一个 store.active（kv "active:pointer"），与之并存只会双源失同步、
   // 从无调用 → 已删。将来真要 app-agnostic 化，应迁到 session.js 那个键、而非另起炉灶。
 
-  // 编辑游标（④）+ save 合流 coalescer（④）+ push-serialize（B1）下沉 substrate.js（shape-agnostic，
+  // 编辑游标（④）+ save 合流 coalescer（④）+ push-serialize（B1）下沉 substrate.ts（shape-agnostic，
   // WorkFileStore/FolderStore 共享）。这里经 sub.edits / sub.session 暴露，对外接口不变。
 
   // store.edit(name)：work-file 的**唯一编辑入口**（L4 ②）。一处吸两事实：

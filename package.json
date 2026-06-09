@@ -2,9 +2,13 @@
   "name": "webpaint",
   "private": true,
   "type": "module",
-  "comment": "仅声明 src/ 为 ESM，让 node 能直跑 test/ 与 bench/。无依赖、不 npm install（全 vendor）。构建走 scripts/build.sh + tools/esbuild。",
+  "comment": "运行时无依赖、全 vendor（src/ ESM，node 直跑 test/ 与 bench/，构建走 scripts/build.sh + tools/esbuild）。devDependencies 仅供类型检查（tsc --noEmit），不进运行时 bundle、不影响部署。",
   "scripts": {
     "test": "node test/run.mjs",
-    "build": "bash scripts/build.sh"
+    "build": "bash scripts/build.sh",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3"
   }
 }
