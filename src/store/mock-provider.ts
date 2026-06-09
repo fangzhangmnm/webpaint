@@ -12,13 +12,48 @@
 //   - upload 到嵌套 path 自动建中间文件夹（Graph PUT-by-path 行为）
 //   - downloadRange(offset=null, n) 取末尾 n 字节（thumb byte-range 依赖）
 
-function httpError(status, message) {
-  const e = new Error(message || `mock cloud ${status}`);
+import type { Bytes } from "./substrate.ts";
+import type { CloudProvider, CloudItem, UploadOpts, MoveOpts } from "./types.ts";
+
+// 带 .status 的 HTTP 风格错误（与 graph.js err.status 一致）。
+interface HttpError extends Error {
+  status: number;
+}
+
+// 内部节点形状（path → node 索引值）。content=null 表文件夹。
+interface MockNode {
+  id: string;
+  name: string;
+  path: string;
+  isFolder: boolean;
+  eTag: string;
+  content: Bytes | null;
+  contentType?: string;
+  lastModifiedDateTime: string;
+}
+
+// 故障注入规格（test-only）。
+interface Fault {
+  op?: string;
+  kind: "error" | "lostResponse";
+  status?: number;
+  message?: string;
+  times?: number;
+}
+
+// createMockProvider 选项。
+interface MockProviderOpts {
+  now?: number;
+  hook?: (op: string, args: object) => Promise<void> | void;
+}
+
+function httpError(status: number, message?: string): HttpError {
+  const e = new Error(message || `mock cloud ${status}`) as HttpError;
   e.status = status;
   return e;
 }
 
-async function toBytes(blob) {
+async function toBytes(blob: Bytes | Blob | ArrayBuffer | string | null | undefined): Promise<Bytes> {
   if (blob == null) return new Uint8Array(0);
   if (typeof blob === "string") return new TextEncoder().encode(blob);
   if (blob instanceof Uint8Array) return blob;
@@ -27,14 +62,14 @@ async function toBytes(blob) {
   throw new Error("MockCloudProvider: 无法识别的 blob 类型");
 }
 
-function normPath(path) {
+function normPath(path: string): string {
   return String(path || "").split("/").filter(Boolean).join("/");
 }
-function parentOf(path) {
+function parentOf(path: string): string {
   const i = path.lastIndexOf("/");
   return i === -1 ? "" : path.slice(0, i);
 }
-function baseOf(path) {
+function baseOf(path: string): string {
   const i = path.lastIndexOf("/");
   return i === -1 ? path : path.slice(i + 1);
 }
@@ -45,7 +80,14 @@ function baseOf(path) {
  * @param {(op:string, args:object)=>Promise<void>|void} [opts.hook] 每个 mutating 操作开头调用，
  *        可在测试里挂起以模拟并发 / race（slice C 的 race-serialize 测试用）。
  */
-export function createMockProvider(opts = {}) {
+// MockProvider = CloudProvider 契约（类型层验证真 provider 同契约）+ 测试辅助。
+export interface MockProvider extends CloudProvider {
+  injectFault(spec: Fault): MockProvider;
+  _dump(): CloudItem[];
+  _seed(path: string, bytes: Bytes | string): CloudItem;
+}
+
+export function createMockProvider(opts: MockProviderOpts = {}): MockProvider {
   let idSeq = 0;
   const nextId = () => `id-${++idSeq}`;
   let clock = typeof opts.now === "number" ? opts.now : 1_700_000_000_000;
@@ -54,8 +96,8 @@ export function createMockProvider(opts = {}) {
 
   // path → node。root = "" 隐式存在。
   /** node: { id, name, path, isFolder, eTag, content:Uint8Array|null, lastModifiedDateTime } */
-  const byPath = new Map();
-  const byId = new Map();
+  const byPath = new Map<string, MockNode>();
+  const byId = new Map<string, MockNode>();
 
   const ROOT_ID = nextId();
   const root = { id: ROOT_ID, name: "", path: "", isFolder: true, eTag: "0", content: null, lastModifiedDateTime: stamp() };
@@ -72,8 +114,8 @@ export function createMockProvider(opts = {}) {
   //   kind="lostResponse"   → 先真的写入（云端 etag 变了），再抛无 status 的网络错（回执丢失）
   //                           仅 upload / move 支持；其余 op 的 lostResponse 当 error 处理
   // op 省略 = 匹配任意 op。times 默认 1（一次性）。
-  const _faults = [];
-  function consumeFault(op) {
+  const _faults: Fault[] = [];
+  function consumeFault(op: string): Fault | null {
     for (let i = 0; i < _faults.length; i++) {
       const f = _faults[i];
       if (f.op && f.op !== op) continue;
@@ -83,12 +125,12 @@ export function createMockProvider(opts = {}) {
     }
     return null;
   }
-  function faultError(f) {
+  function faultError(f: Fault): Error {
     if (f.kind === "lostResponse") return new Error("mock: 网络中断，回执丢失（写已落盘）"); // 无 .status，模拟 fetch reject
     return httpError(f.status ?? 500, f.message || `mock fault ${f.status ?? 500}`);
   }
 
-  function toItem(node) {
+  function toItem(node: MockNode): CloudItem {
     return {
       id: node.id,
       name: node.name,
@@ -101,7 +143,7 @@ export function createMockProvider(opts = {}) {
     };
   }
 
-  function ensureFolderSync(path) {
+  function ensureFolderSync(path: string): string {
     const p = normPath(path);
     if (p === "") return ROOT_ID;
     const existing = byPath.get(p);
@@ -128,11 +170,11 @@ export function createMockProvider(opts = {}) {
     return parentId;
   }
 
-  function relocateSubtree(node, newPath) {
+  function relocateSubtree(node: MockNode, newPath: string): void {
     // node 自身
     byPath.delete(node.path);
     const oldPrefix = node.path + "/";
-    const moved = [];
+    const moved: MockNode[] = [];
     for (const [pth, n] of byPath) {
       if (pth.startsWith(oldPrefix)) moved.push(n);
     }
@@ -147,14 +189,14 @@ export function createMockProvider(opts = {}) {
     }
   }
 
-  return {
+  const provider: MockProvider = {
     // ---- 只读 ----
     async list(folder = "") {
       const f = normPath(folder);
       const node = byPath.get(f);
       if (f !== "" && (!node || !node.isFolder)) throw httpError(404, `folder 不存在: ${f}`);
       const prefix = f === "" ? "" : f + "/";
-      const out = [];
+      const out: CloudItem[] = [];
       for (const [pth, n] of byPath) {
         if (pth === f) continue;
         if (!pth.startsWith(prefix)) continue;
@@ -165,7 +207,7 @@ export function createMockProvider(opts = {}) {
       return out;
     },
 
-    async getItemByPath(path) {
+    async getItemByPath(path: string) {
       await hook("getItemByPath", { path });   // 读 hook：可在测试里挂起模拟慢网（openSession 跳过用）
       const n = byPath.get(normPath(path));
       return n ? toItem(n) : null;
@@ -175,13 +217,13 @@ export function createMockProvider(opts = {}) {
       return ROOT_ID;
     },
 
-    async download(id) {
+    async download(id: string) {
       const n = byId.get(id);
       if (!n || n.isFolder) throw httpError(404, `item 不存在: ${id}`);
       return new Blob([n.content || new Uint8Array(0)]);
     },
 
-    async downloadRange(id, offset, length) {
+    async downloadRange(id: string, offset: number | null, length: number) {
       const n = byId.get(id);
       if (!n || n.isFolder) throw httpError(404, `item 不存在: ${id}`);
       const buf = n.content || new Uint8Array(0);
@@ -192,14 +234,14 @@ export function createMockProvider(opts = {}) {
     },
 
     // ---- 写 ----
-    async upload(path, blob, { contentType = "application/octet-stream", eTag = null, conflictBehavior = "replace" } = {}) {
+    async upload(path: string, blob: Bytes | Blob, { contentType = "application/octet-stream", eTag = null, conflictBehavior = "replace" }: UploadOpts = {}) {
       await hook("upload", { path, eTag, conflictBehavior });
       const fault = consumeFault("upload");
       if (fault && fault.kind !== "lostResponse") throw faultError(fault); // 写前抛：云端不变
       const p = normPath(path);
       if (p === "") throw httpError(400, "不能上传到根");
       const existing = byPath.get(p);
-      let node;
+      let node: MockNode;
       if (existing) {
         if (existing.isFolder) throw httpError(409, `${p} 是文件夹`);
         if (eTag && existing.eTag !== eTag) throw httpError(412, `If-Match 失败: ${p}`);
@@ -226,12 +268,12 @@ export function createMockProvider(opts = {}) {
       return toItem(node);
     },
 
-    async ensureFolder(path) {
+    async ensureFolder(path: string) {
       await hook("ensureFolder", { path });
       return ensureFolderSync(path);
     },
 
-    async delete(id) {
+    async delete(id: string) {
       await hook("delete", { id });
       const fault = consumeFault("delete");
       if (fault) throw faultError(fault);
@@ -251,7 +293,7 @@ export function createMockProvider(opts = {}) {
       }
     },
 
-    async move(id, targetFolderId, { newName = null, eTag = null, conflictBehavior = "fail" } = {}) {
+    async move(id: string, targetFolderId: string, { newName = null, eTag = null, conflictBehavior = "fail" }: MoveOpts = {}) {
       await hook("move", { id, targetFolderId, newName, conflictBehavior });
       const fault = consumeFault("move");
       if (fault && fault.kind !== "lostResponse") throw faultError(fault);
@@ -274,7 +316,7 @@ export function createMockProvider(opts = {}) {
       return toItem(n);
     },
 
-    async rename(id, newName, eTag = null) {
+    async rename(id: string, newName: string, eTag: string | null = null) {
       await hook("rename", { id, newName });
       const fault = consumeFault("rename");
       if (fault) throw faultError(fault);
@@ -292,15 +334,15 @@ export function createMockProvider(opts = {}) {
     },
 
     // ---- 测试辅助（非契约，调试 / 断言用）----
-    injectFault(spec) { _faults.push(spec); return this; },
+    injectFault(spec: Fault) { _faults.push(spec); return provider; },
     _dump() {
       return [...byPath.values()].filter((n) => n.path !== "").map(toItem);
     },
-    _seed(path, bytes) {
+    _seed(path: string, bytes: Bytes | string) {
       const p = normPath(path);
       const parent = parentOf(p);
       if (parent) ensureFolderSync(parent);
-      const node = {
+      const node: MockNode = {
         id: nextId(), name: baseOf(p), path: p, isFolder: false,
         eTag: newEtag(), content: bytes instanceof Uint8Array ? bytes : new TextEncoder().encode(String(bytes)),
         lastModifiedDateTime: stamp(),
@@ -310,4 +352,5 @@ export function createMockProvider(opts = {}) {
       return toItem(node);
     },
   };
+  return provider;
 }

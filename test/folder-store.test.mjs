@@ -1,6 +1,6 @@
 // Folder Store facade 验收（L4 ③a）：status 态机（含 busy）+ dirty 透传。
 import { describe, it, eq } from "./runner.mjs";
-import { createFolderStore } from "../src/store/folder-store.js";
+import { createFolderStore } from "../src/store/folder-store.ts";
 
 function mkCloud(dirty = false) {
   let d = dirty;

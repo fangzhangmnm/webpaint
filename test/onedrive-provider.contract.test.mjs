@@ -1,8 +1,8 @@
 // OneDriveProvider 适配验收：OneDriveProvider(graphFromProvider(mock)) 应满足 CloudProvider 契约
 // （≈ 恒等还原）。真 graph.js 与 graphFromProvider 同表面，故这等价于验真适配正确。
 import { describe, it, assert, eq, throwsStatus } from "./runner.mjs";
-import { createMockProvider } from "../src/store/mock-provider.js";
-import { graphToCloudProvider } from "../src/store/onedrive-provider.js";
+import { createMockProvider } from "../src/store/mock-provider.ts";
+import { graphToCloudProvider } from "../src/store/onedrive-provider.ts";
 import { graphFromProvider } from "./helpers.mjs";
 
 const bytes = (s) => new TextEncoder().encode(s);

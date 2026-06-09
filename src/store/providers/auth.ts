@@ -9,12 +9,32 @@
 //   有 account 不代表本 app 有 token（本 app 可能从没授权过）。
 // - signOut() 只清本 app cache（clearCache），不 logoutRedirect 把用户 Outlook 一起踢掉。
 
+// MSAL 全局由运行时 vendored 脚本（window.msal）加载，无 @types → 整体 any 松类型。
+// pca = PublicClientApplication 实例；account = AccountInfo。下面统一用 any 兜（见顶部注释）。
+type Msal = any;
+type Pca = any;
+type Account = any;
+
+// window.msal 由 vendored 脚本注入；用 any 桥接（DOM lib 的 Window 不含 msal）。
+declare global {
+  interface Window {
+    msal?: Msal;
+  }
+}
+
+interface AuthConfig {
+  clientId?: string;
+  authority?: string;
+  scopes?: string[];
+  msalUrl?: string | null;
+}
+
 // 配置注入（取代 WebPaint 的 config.js import，去 app 化）。app 调一次 configureOneDriveAuth。
 let CLIENT_ID = "";
 let AUTHORITY = "https://login.microsoftonline.com/common";
 let SCOPES = ["Files.ReadWrite.AppFolder", "offline_access"];
-let MSAL_URL = null;
-export function configureOneDriveAuth({ clientId, authority, scopes, msalUrl } = {}) {
+let MSAL_URL: string | null = null;
+export function configureOneDriveAuth({ clientId, authority, scopes, msalUrl }: AuthConfig = {}): void {
   if (clientId) CLIENT_ID = clientId;
   if (authority) AUTHORITY = authority;
   if (scopes) SCOPES = scopes;
@@ -24,30 +44,40 @@ export function configureOneDriveAuth({ clientId, authority, scopes, msalUrl } =
   }
 }
 
-export function isAuthConfigured() {
+export function isAuthConfigured(): boolean {
   return typeof CLIENT_ID === "string" && CLIENT_ID.length > 0 && !CLIENT_ID.startsWith("REPLACE_ME");
 }
 
 // MSAL_URL 由 configureOneDriveAuth 设（app 传 vendored 脚本相对路径，document.baseURI 解绝对）。
-let msalLoadPromise = null;
-let pca = null;
-let activeAccount = null;
-let initPromise = null;
+let msalLoadPromise: Promise<Msal> | null = null;
+let pca: Pca = null;
+let activeAccount: Account = null;
+let initPromise: Promise<AuthState> | null = null;
+
+// initAuth / getAuthState 返回的状态。
+interface AuthState {
+  signedIn: boolean;
+  account: Account;
+  notConfigured?: boolean;
+  probing?: boolean;
+  probedAccount?: Account;
+}
 
 // ---- auth 状态可观察 seam ----
 // 单一源 = activeAccount。**每个**转变（登录回来 / 后台 silent / 登出 / 过期）都 _emitAuth。
 // UI 订阅一次（onAuthChanged）→ 永不漂移；isSignedIn() 是派生读。治"按钮不变蓝"+ F2 过期假登录。
-const _authSubs = new Set();
-export function onAuthChanged(cb) { _authSubs.add(cb); return () => _authSubs.delete(cb); }
-export function getAuthState() { return { signedIn: !!activeAccount, account: activeAccount }; }
-function _emitAuth() {
+type AuthSub = (st: AuthState) => void;
+const _authSubs = new Set<AuthSub>();
+export function onAuthChanged(cb: AuthSub): () => void { _authSubs.add(cb); return () => _authSubs.delete(cb); }
+export function getAuthState(): AuthState { return { signedIn: !!activeAccount, account: activeAccount }; }
+function _emitAuth(): void {
   const st = getAuthState();
   for (const cb of _authSubs) { try { cb(st); } catch (_) {} }
   try { if (typeof window !== "undefined") window.dispatchEvent(new Event("wp:auth-changed")); } catch (_) {}
 }
 
-function loadScript(url) {
-  return new Promise((resolve, reject) => {
+function loadScript(url: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     const s = document.createElement("script");
     s.src = url;
     s.async = true;
@@ -57,8 +87,8 @@ function loadScript(url) {
   });
 }
 
-async function loadScriptWithRetry(url, attempts = 3) {
-  let lastErr;
+async function loadScriptWithRetry(url: string, attempts = 3): Promise<void> {
+  let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try { await loadScript(url); return; }
     catch (e) {
@@ -67,14 +97,14 @@ async function loadScriptWithRetry(url, attempts = 3) {
       if (i < attempts - 1) await new Promise((r) => setTimeout(r, 300 * (i + 1)));
     }
   }
-  throw new Error(`MSAL load failed ${url}: ${lastErr?.message}`);
+  throw new Error(`MSAL load failed ${url}: ${(lastErr as Error | undefined)?.message}`);
 }
 
-function loadMsal() {
+function loadMsal(): Promise<Msal> {
   if (window.msal) return Promise.resolve(window.msal);
   if (msalLoadPromise) return msalLoadPromise;
   msalLoadPromise = (async () => {
-    await loadScriptWithRetry(MSAL_URL);
+    await loadScriptWithRetry(MSAL_URL as string);
     if (window.msal) return window.msal;
     msalLoadPromise = null;
     throw new Error("MSAL loaded but window.msal didn't appear");
@@ -82,7 +112,7 @@ function loadMsal() {
   return msalLoadPromise;
 }
 
-export async function initAuth() {
+export async function initAuth(): Promise<AuthState> {
   if (!isAuthConfigured()) {
     return { signedIn: false, account: null, notConfigured: true };
   }
@@ -126,7 +156,7 @@ export async function initAuth() {
 }
 
 // 后台 silent token 探测：成功 → 设 activeAccount + 广播。绝不阻塞 init / sign-in（iOS iframe 卡不要紧）。
-async function _probeSilent(account) {
+async function _probeSilent(account: Account): Promise<void> {
   try {
     await pca.acquireTokenSilent({ scopes: SCOPES, account });
     pca.setActiveAccount(account);
@@ -135,7 +165,7 @@ async function _probeSilent(account) {
   } catch (_) { /* 拿不到 token = 未真登录；UI 保持未登录，用户可显式登录 */ }
 }
 
-export async function signIn() {
+export async function signIn(): Promise<unknown> {
   // **iOS 关键**：loginRedirect 必须在同步 user-gesture（点击）里调，**前面不能有 await**，
   // 否则 iOS Safari 把它当非手势导航静默拦截（→ 不弹登录框）。
   // interaction 状态由 boot initAuth 的 handleRedirectPromise 清（silent 探测已移后台不占 interaction），
@@ -144,7 +174,7 @@ export async function signIn() {
   return pca.loginRedirect({ scopes: SCOPES }); // 同步调用，保住 iOS user-gesture
 }
 
-export async function signOut() {
+export async function signOut(): Promise<void> {
   if (!pca || !activeAccount) return;
   const account = activeAccount;
   activeAccount = null;
@@ -154,7 +184,7 @@ export async function signOut() {
   try { pca.setActiveAccount(null); } catch (_) {}
 }
 
-export async function getToken() {
+export async function getToken(): Promise<string> {
   if (!pca || !activeAccount) throw new Error("Not signed in");
   try {
     const result = await pca.acquireTokenSilent({ scopes: SCOPES, account: activeAccount });
@@ -168,13 +198,13 @@ export async function getToken() {
   }
 }
 
-export function getActiveAccount() { return activeAccount; }
-export function isSignedIn() { return !!activeAccount; }
+export function getActiveAccount(): Account { return activeAccount; }
+export function isSignedIn(): boolean { return !!activeAccount; }
 
 // 当从离线变成在线时调一次。boot 时 acquireTokenSilent 因网络抛错 → activeAccount
 // 留空 → 后面有网了 isSignedIn 也还是 false。这个函数显式 retry 一次 silent，
 // 成功就把 activeAccount 设上，UI 该刷新 / cloud list 该重拉的就跟着走。
-export async function retrySilentSignIn() {
+export async function retrySilentSignIn(): Promise<boolean> {
   if (activeAccount) return true;                    // 已签到
   if (!isAuthConfigured()) return false;
   if (!pca) {

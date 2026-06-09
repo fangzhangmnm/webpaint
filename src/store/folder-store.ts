@@ -5,30 +5,60 @@
 //   - status 含 busy（busy>no-auth>offline>dirty>synced），取代 app 手搓 deriveRackCloudState + _rackCloudState="busy"。
 // app 注入（configure）：snapshot()=取当前 folder 数据；onResult(res)=采纳 merge 结果到模型 + 状态提示（doc/UI 语义留 app）；
 //   canSync()=auth/online 门；onBusyChange()=busy 变化时刷 UI（store 不碰 DOM）。dirty 单源=注入的 cloud。
-import { createFolderFlow } from "./folder-flow.js";
+import { createFolderFlow } from "./folder-flow.ts";
+import type { FolderFlow, FolderFlowResult } from "./folder-flow.ts";
+import type { FolderEnvelope, ResolveFn } from "./folder-merge.ts";
+import type { Bytes, CloudSync } from "./types.ts";
 
-export function createFolderStore({ cloud, name, encode, decode, isOnline, flow, syncDelayMs = 1500 }) {
-  const _flow = flow || createFolderFlow({ cloud, name, encode, decode, isOnline });   // flow 可注入（测试）
-  let _syncing = false, _timer = null;
-  let _snapshot = () => null, _onResult = async () => {}, _canSync = () => true, _onBusy = () => {};
-  function configure({ snapshot, onResult, canSync, onBusyChange } = {}) {
+export type FolderStatus = "busy" | "no-auth" | "offline" | "dirty" | "synced";
+
+// createFolderStore 注入配置（cloud/name/encode/decode/isOnline 透传给内置 FolderFlow）。
+export interface FolderStoreConfig {
+  cloud: CloudSync;
+  name: string;
+  encode: (folder: FolderEnvelope) => Bytes | Blob;
+  decode: (text: string) => FolderEnvelope | null;
+  resolve?: ResolveFn;
+  isOnline?: () => boolean;
+  flow?: FolderFlow;            // flow 可注入（测试）
+  syncDelayMs?: number;
+}
+
+// app 经 configure 注入的钩子（模型/UI 语义留 app）。
+export interface FolderStoreHooks {
+  snapshot?: () => FolderEnvelope | null;
+  onResult?: (res: FolderFlowResult) => void | Promise<void>;
+  canSync?: () => boolean;
+  onBusyChange?: () => void;
+}
+
+export function createFolderStore(cfg: FolderStoreConfig) {
+  const { cloud, name, encode, decode, isOnline, flow, syncDelayMs = 1500 } = cfg;
+  const _flow: FolderFlow = flow || createFolderFlow({ cloud, name, encode, decode, isOnline });   // flow 可注入（测试）
+  let _syncing = false;
+  let _timer: ReturnType<typeof setTimeout> | null = null;
+  let _snapshot: () => FolderEnvelope | null = () => null;
+  let _onResult: (res: FolderFlowResult) => void | Promise<void> = async () => {};
+  let _canSync: () => boolean = () => true;
+  let _onBusy: () => void = () => {};
+  function configure({ snapshot, onResult, canSync, onBusyChange }: FolderStoreHooks = {}) {
     if (snapshot) _snapshot = snapshot;
     if (onResult) _onResult = onResult;
     if (canSync) _canSync = canSync;
     if (onBusyChange) _onBusy = onBusyChange;
   }
 
-  const busy = { set: (v) => { _syncing = !!v; _onBusy(); }, syncing: () => _syncing };
+  const busy = { set: (v: boolean) => { _syncing = !!v; _onBusy(); }, syncing: () => _syncing };
 
   // shape-specific 状态机（含 busy）：busy > no-auth > offline > dirty > synced。
-  function status({ signedIn = true, online = true } = {}) {
+  function status({ signedIn = true, online = true }: { signedIn?: boolean; online?: boolean } = {}): FolderStatus {
     if (_syncing) return "busy";
     if (!signedIn) return "no-auth";
     if (!online) return "offline";
     return cloud.isDirty(name) ? "dirty" : "synced";
   }
   function isDirty() { return cloud.isDirty(name); }
-  function setDirty(d) { cloud.setDirty(name, d); }
+  function setDirty(d: boolean) { cloud.setDirty(name, d); }
 
   function _clearTimer() { if (_timer != null) { clearTimeout(_timer); _timer = null; } }
   // edit：标脏 + 防抖排自动同步（停手 ~1.5s 推；切笔 per-doc 不脏 rack，故不会狂推）。

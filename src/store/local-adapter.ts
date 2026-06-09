@@ -14,11 +14,12 @@
 import { getSession, putSession, deleteSession } from "../storage.js";
 import { trashSession, restoreSession, purgeFromTrash, listTrashedSessions, renderThumbBlob, putSessionPkg } from "../session.js";
 import { decodeOraToDoc } from "../ora.js";
-import { LOCAL_BACKUP_PREFIX, asideStamp } from "./move-aside.js";
+import { LOCAL_BACKUP_PREFIX, asideStamp } from "./move-aside.ts";
+import type { Bytes, LocalAdapter, TrashEntry } from "./types.ts";
 
-export function createLocalAdapter() {
+export function createLocalAdapter(): LocalAdapter {
   return {
-    async save(name, oraBlob) {
+    async save(name: string, oraBlob: Bytes | Blob) {
       // app 主存路径用 saveNow（live doc，不解码）；这里给 Store 流（exit flush / pull 覆盖 /
       // rename / push）用，非热路径。
       // **必须归一化成 Blob**：Store 流经 toU8 传进来的是 Uint8Array，但本地持久层契约是 Blob——
@@ -35,16 +36,16 @@ export function createLocalAdapter() {
       await putSessionPkg(name, blob, thumb);   // 与 saveSession 共用唯一落盘原语（落 Blob）
     },
 
-    async get(name) {
+    async get(name: string) {
       const pkg = await getSession(name);
       return pkg ? pkg.ora || null : null;
     },
 
-    async exists(name) {
+    async exists(name: string) {
       return (await getSession(name)) != null;
     },
 
-    async backup(name) {
+    async backup(name: string) {
       // 覆盖前留底：复制到隐藏 .backup-local/ 命名空间（深模块约定，见 move-aside.js）；
       // 名字 yyyymmddhhmmss-guid 防撞；原件不动、不进图库（不 flood 用户文件夹）。
       const pkg = await getSession(name);
@@ -54,25 +55,25 @@ export function createLocalAdapter() {
       return backupKey;
     },
 
-    async trash(name) {
+    async trash(name: string) {
       return await trashSession(name);     // IDB rename name → trash:<ts>:name
     },
 
-    async hardDelete(name) {
+    async hardDelete(name: string) {
       await deleteSession(name);
     },
 
-    async restore(trashKey) {
+    async restore(trashKey: string) {
       return await restoreSession(trashKey);  // rename 回原名，撞名自动 (2)(3)
     },
 
-    async purgeTrash(trashKey) {
+    async purgeTrash(trashKey: string) {
       await purgeFromTrash(trashKey);          // 永久删本地回收站一条
     },
 
-    async listTrash() {
+    async listTrash(): Promise<TrashEntry[]> {
       // 本地回收站清单（给 flow.emptyTrash 枚举用）：{ trashKey, name }。
-      return (await listTrashedSessions()).map((t) => ({ trashKey: t.trashKey, name: t.originalName }));
+      return (await listTrashedSessions()).map((t: { trashKey: string; originalName: string }) => ({ trashKey: t.trashKey, name: t.originalName }));
     },
   };
 }

@@ -10,9 +10,9 @@
 
 export const LOCAL_BACKUP_PREFIX = ".backup-local/";   // 本地隐藏命名空间（镜像云端 .backup/）；不进图库、不 flood 用户文件夹
 
-function pad(n, w = 2) { return String(n).padStart(w, "0"); }
+function pad(n: number, w = 2) { return String(n).padStart(w, "0"); }
 
-function yyyymmddhhmmss(ms) {
+function yyyymmddhhmmss(ms: number) {
   const d = new Date(ms);
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
          `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
@@ -31,4 +31,4 @@ function guid() {
 }
 
 /** move-aside 防撞标：`<yyyymmddhhmmss>-<guid>`。ms 由调用方给（cloud-sync 注入时钟便于测试；local 用 Date.now）。 */
-export function asideStamp(ms) { return `${yyyymmddhhmmss(ms)}-${guid()}`; }
+export function asideStamp(ms: number) { return `${yyyymmddhhmmss(ms)}-${guid()}`; }

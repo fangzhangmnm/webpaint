@@ -17,7 +17,7 @@
 import { encodeDocToOra, decodeOraToDoc } from "./ora.js";
 import { smartResample, canvasToBlob } from "./resample.js";
 import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.js";
-import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.js";   // 深模块的隐藏命名空间约定（backup 不进图库）
+import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）
 
 const LS_CURRENT_NAME = "webpaint.currentSessionName";
 const DEFAULT_NAME = "未命名";

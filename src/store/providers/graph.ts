@@ -14,23 +14,60 @@
 //   - @microsoft.graph.conflictBehavior 在 URL 查询串，不是 header（@ 在 header 非法）。
 //   - 大于 4MB 走 createUploadSession 分块上传。atlas zip 大概率超 4MB。
 
-import { getToken } from "./auth.js";
+import { getToken } from "./auth.ts";
+
+// ---- 实际读到的 Graph JSON 形状（只声明本文件真正访问的字段，其余 Graph 字段忽略）。----
+// driveItem 的 file/folder facet 二选一区分文件/文件夹；@ 前缀字段是 Graph 注解。
+interface GraphDriveItem {
+  id: string;
+  name?: string;
+  size?: number;
+  eTag?: string;
+  createdDateTime?: string;
+  lastModifiedDateTime?: string;
+  file?: unknown;
+  folder?: unknown;
+  parentReference?: { id?: string };
+  downloadUrl?: string;
+  "@microsoft.graph.downloadUrl"?: string;
+}
+// children / list 分页响应。
+interface GraphListResponse {
+  value?: GraphDriveItem[];
+  "@odata.nextLink"?: string;
+}
+// createUploadSession 响应。
+interface GraphUploadSession {
+  uploadUrl: string;
+}
+// graphFetch 抛的错带 HTTP status/body（caller 用 status 判 404 等）。
+interface GraphError extends Error {
+  status?: number;
+  body?: string;
+}
+
+// graphFetch 的请求体：字符串/二进制走原样，其余对象 JSON.stringify。
+type GraphBody = string | ArrayBuffer | ArrayBufferView | Blob | Record<string, unknown> | null;
+interface GraphFetchOpts {
+  headers?: Record<string, string>;
+  body?: GraphBody;
+}
 
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 const SIMPLE_UPLOAD_LIMIT = 4 * 1024 * 1024;
 
-function encodeSeg(name) {
+function encodeSeg(name: string): string {
   return encodeURIComponent(name).replace(/'/g, "%27");
 }
 
-export function encodeApprootPath(path) {
+export function encodeApprootPath(path: string): string {
   return path.split("/").filter(Boolean).map(encodeSeg).join("/");
 }
 
-async function graphFetch(method, pathOrUrl, { headers = {}, body = null } = {}) {
+async function graphFetch(method: string, pathOrUrl: string, { headers = {}, body = null }: GraphFetchOpts = {}): Promise<Response> {
   const token = await getToken();
   const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${GRAPH_BASE}${pathOrUrl}`;
-  const init = { method, headers: { Authorization: `Bearer ${token}`, ...headers } };
+  const init: RequestInit & { headers: Record<string, string> } = { method, headers: { Authorization: `Bearer ${token}`, ...headers } };
   if (body != null) {
     if (
       typeof body === "string" ||
@@ -48,7 +85,7 @@ async function graphFetch(method, pathOrUrl, { headers = {}, body = null } = {})
   if (!response.ok) {
     let detail = "";
     try { detail = await response.text(); } catch (_) {}
-    const err = new Error(`Graph ${method} ${pathOrUrl} → ${response.status}: ${detail}`);
+    const err: GraphError = new Error(`Graph ${method} ${pathOrUrl} → ${response.status}: ${detail}`);
     err.status = response.status;
     err.body = detail;
     throw err;
@@ -57,18 +94,18 @@ async function graphFetch(method, pathOrUrl, { headers = {}, body = null } = {})
 }
 
 // ----- listing -----
-export async function listChildren(subfolder = "") {
+export async function listChildren(subfolder = ""): Promise<GraphDriveItem[]> {
   const pathPart = subfolder ? `:/${encodeApprootPath(subfolder)}:` : "";
-  const items = [];
+  const items: GraphDriveItem[] = [];
   // @microsoft.graph.downloadUrl：1h 短效 CDN URL，加进 $select 让 list 一次性带回
   // → 后续 byte-range 直接打 CDN，省掉每张 thumb 的 metadata RTT
   // 过期后 caller 拿 401/403 → 重新走 getDownloadUrl 申请
-  let next = `/me/drive/special/approot${pathPart}/children?$top=200&$select=id,name,size,eTag,createdDateTime,lastModifiedDateTime,file,folder,@microsoft.graph.downloadUrl`;
+  let next: string | null = `/me/drive/special/approot${pathPart}/children?$top=200&$select=id,name,size,eTag,createdDateTime,lastModifiedDateTime,file,folder,@microsoft.graph.downloadUrl`;
   while (next) {
     let response;
     try { response = await graphFetch("GET", next); }
-    catch (e) { if (e.status === 404 && subfolder) return []; throw e; }
-    const page = await response.json();
+    catch (e) { if ((e as GraphError).status === 404 && subfolder) return []; throw e; }
+    const page = await response.json() as GraphListResponse;
     items.push(...(page.value ?? []));
     next = page["@odata.nextLink"] ?? null;
   }
@@ -76,21 +113,21 @@ export async function listChildren(subfolder = "") {
 }
 
 // ----- 单 item metadata -----
-export async function getItemByPath(path) {
+export async function getItemByPath(path: string): Promise<GraphDriveItem | null> {
   try {
     const r = await graphFetch(
       "GET",
       `/me/drive/special/approot:/${encodeApprootPath(path)}?$select=id,name,size,eTag,@microsoft.graph.downloadUrl`,
     );
-    return await r.json();
+    return await r.json() as GraphDriveItem;
   } catch (e) {
-    if (e.status === 404) return null;
+    if ((e as GraphError).status === 404) return null;
     throw e;
   }
 }
 
 // ----- 二进制下载 -----
-export async function downloadItemBlob(itemId) {
+export async function downloadItemBlob(itemId: string): Promise<Blob> {
   // 优先 @microsoft.graph.downloadUrl（短期签名 CDN）；没有就走 /content
   const dl = await getDownloadUrl(itemId);
   if (dl) {
@@ -106,14 +143,14 @@ export async function downloadItemBlob(itemId) {
 //   offset = null + length 给 suffix range "bytes=-N"（取最后 N 字节）
 //   offset 给 prefix range "bytes=OFFSET-OFFSET+LEN-1"
 //   走 downloadUrl 拿 CDN signed URL（支持 Range header），fallback /content
-export async function downloadItemRange(itemId, offset, length) {
+export async function downloadItemRange(itemId: string, offset: number | null, length: number): Promise<ArrayBuffer> {
   const dl = await getDownloadUrl(itemId);
   if (dl) return await downloadRangeFromUrl(dl, offset, length);
   const r = await graphFetch("GET", `/me/drive/items/${itemId}/content`, { headers: { Range: _rangeHeader(offset, length) } });
   return await r.arrayBuffer();
 }
 
-function _rangeHeader(offset, length) {
+function _rangeHeader(offset: number | null, length: number): string {
   return (offset == null)
     ? `bytes=-${length}`
     : `bytes=${offset}-${offset + length - 1}`;
@@ -121,10 +158,10 @@ function _rangeHeader(offset, length) {
 
 // 直接打已知 CDN URL 的 byte-range（省掉每张 thumb 的 metadata RTT）
 // caller 处理 401/403 = downloadUrl 过期，重申请 getDownloadUrl 重试一次
-export async function downloadRangeFromUrl(downloadUrl, offset, length) {
+export async function downloadRangeFromUrl(downloadUrl: string, offset: number | null, length: number): Promise<ArrayBuffer> {
   const r = await fetch(downloadUrl, { headers: { Range: _rangeHeader(offset, length) } });
   if (!r.ok && r.status !== 206) {
-    const err = new Error(`range download failed ${r.status}`);
+    const err: GraphError = new Error(`range download failed ${r.status}`);
     err.status = r.status;
     throw err;
   }
@@ -132,17 +169,21 @@ export async function downloadRangeFromUrl(downloadUrl, offset, length) {
 }
 
 // 拿一个新的 1h 短效 downloadUrl（过期重申请用）
-export async function getDownloadUrl(itemId) {
+export async function getDownloadUrl(itemId: string): Promise<string | null> {
   const r = await graphFetch("GET", `/me/drive/items/${itemId}?$select=id,@microsoft.graph.downloadUrl`);
-  const j = await r.json();
+  const j = await r.json() as GraphDriveItem;
   return j["@microsoft.graph.downloadUrl"] || null;
 }
 
 // ----- 上传 -----
 // path 相对 approot。eTag 给 If-Match（拿冲突检测）。conflictBehavior:
 //   "replace" 默认覆盖；"fail" 同名拒收（用于 sibling-copy）。
-export async function uploadFileToApproot(path, blob, contentType = "application/octet-stream", { conflictBehavior = "replace", eTag = null } = {}) {
-  const headers = { "Content-Type": contentType };
+interface UploadFileOpts {
+  conflictBehavior?: string;
+  eTag?: string | null;
+}
+export async function uploadFileToApproot(path: string, blob: Blob, contentType = "application/octet-stream", { conflictBehavior = "replace", eTag = null }: UploadFileOpts = {}): Promise<GraphDriveItem | null> {
+  const headers: Record<string, string> = { "Content-Type": contentType };
   if (eTag) headers["If-Match"] = eTag;
   if (blob.size <= SIMPLE_UPLOAD_LIMIT) {
     const r = await graphFetch(
@@ -150,7 +191,7 @@ export async function uploadFileToApproot(path, blob, contentType = "application
       `/me/drive/special/approot:/${encodeApprootPath(path)}:/content?@microsoft.graph.conflictBehavior=${conflictBehavior}`,
       { headers, body: blob },
     );
-    return r.json();
+    return r.json() as Promise<GraphDriveItem>;
   }
   // 大文件分块
   const sessR = await graphFetch(
@@ -166,10 +207,10 @@ export async function uploadFileToApproot(path, blob, contentType = "application
       headers: eTag ? { "If-Match": eTag } : undefined,
     },
   );
-  const { uploadUrl } = await sessR.json();
+  const { uploadUrl } = await sessR.json() as GraphUploadSession;
   const CHUNK = 5 * 1024 * 1024;
   let offset = 0;
-  let last = null;
+  let last: GraphDriveItem | null = null;
   while (offset < blob.size) {
     const end = Math.min(offset + CHUNK, blob.size) - 1;
     const chunk = blob.slice(offset, end + 1);
@@ -182,54 +223,55 @@ export async function uploadFileToApproot(path, blob, contentType = "application
       body: chunk,
     });
     if (!r.ok && r.status !== 202) {
-      const err = new Error(`chunked upload failed ${r.status}`);
+      const err: GraphError = new Error(`chunked upload failed ${r.status}`);
       err.status = r.status;
       throw err;
     }
-    last = await r.json().catch(() => null);
+    last = await r.json().then((j) => j as GraphDriveItem).catch(() => null);
     offset = end + 1;
   }
   return last;
 }
 
 // ----- 删除 -----
-export async function deleteItem(itemId) {
+export async function deleteItem(itemId: string): Promise<void> {
   await graphFetch("DELETE", `/me/drive/items/${itemId}`);
 }
 
 // ----- approot + 子文件夹 ensure / 移动 -----（trash + folder feature 用）
 
-let _approotIdCache = null;
-const _subfolderIdCache = new Map();
+let _approotIdCache: string | null = null;
+const _subfolderIdCache = new Map<string, string>();
 
-export function clearFolderCaches() { _approotIdCache = null; _subfolderIdCache.clear(); }
+export function clearFolderCaches(): void { _approotIdCache = null; _subfolderIdCache.clear(); }
 
-export async function getApprootId() {
+export async function getApprootId(): Promise<string> {
   if (_approotIdCache) return _approotIdCache;
   const r = await graphFetch("GET", "/me/drive/special/approot?$select=id");
-  _approotIdCache = (await r.json()).id;
+  _approotIdCache = (await r.json() as GraphDriveItem).id;
   return _approotIdCache;
 }
 
 // 确保 approot 下有指定子文件夹（name 单段或多段 "a/b/c"），返 folder id。
 // 加缓存：第一次拉 / 建，之后 reuse。
-export async function ensureSubfolder(name) {
+export async function ensureSubfolder(name: string): Promise<string> {
   if (!name) return getApprootId();
-  if (_subfolderIdCache.has(name)) return _subfolderIdCache.get(name);
+  const cached = _subfolderIdCache.get(name);
+  if (cached !== undefined) return cached;
   // 先试拿现有
   try {
     const r = await graphFetch(
       "GET",
       `/me/drive/special/approot:/${encodeApprootPath(name)}?$select=id,name,folder`,
     );
-    const item = await r.json();
+    const item = await r.json() as GraphDriveItem;
     if (item.folder) {
       _subfolderIdCache.set(name, item.id);
       return item.id;
     }
     throw new Error(`${name} 已存在但不是文件夹`);
   } catch (e) {
-    if (e.status !== 404) throw e;
+    if ((e as GraphError).status !== 404) throw e;
   }
   // 不存在 → 逐段建。多段路径用 children POST 每段。
   const segments = name.split("/").filter(Boolean);
@@ -237,15 +279,16 @@ export async function ensureSubfolder(name) {
   let cumulative = "";
   for (const seg of segments) {
     cumulative = cumulative ? `${cumulative}/${seg}` : seg;
-    if (_subfolderIdCache.has(cumulative)) { parentId = _subfolderIdCache.get(cumulative); continue; }
+    const cachedSeg = _subfolderIdCache.get(cumulative);
+    if (cachedSeg !== undefined) { parentId = cachedSeg; continue; }
     try {
       const r = await graphFetch(
         "GET",
         `/me/drive/special/approot:/${encodeApprootPath(cumulative)}?$select=id,folder`,
       );
-      const it = await r.json();
+      const it = await r.json() as GraphDriveItem;
       if (it.folder) { parentId = it.id; _subfolderIdCache.set(cumulative, parentId); continue; }
-    } catch (e) { if (e.status !== 404) throw e; }
+    } catch (e) { if ((e as GraphError).status !== 404) throw e; }
     const r = await graphFetch("POST", `/me/drive/items/${parentId}/children`, {
       body: {
         name: seg,
@@ -253,7 +296,7 @@ export async function ensureSubfolder(name) {
         "@microsoft.graph.conflictBehavior": "fail",
       },
     });
-    const it = await r.json();
+    const it = await r.json() as GraphDriveItem;
     parentId = it.id;
     _subfolderIdCache.set(cumulative, parentId);
   }
@@ -264,25 +307,30 @@ export async function ensureSubfolder(name) {
 // eTag 给 If-Match 防覆盖；newName 不传保持原 name
 // conflictBehavior: "fail" | "replace" | "rename" —— 默认 "fail"（防误覆盖目标位置同名）
 //   trash / restore 用 "fail" 保护数据，caller 自己 fallback 改名
-export async function moveItemToFolder(itemId, targetFolderId, { eTag = null, newName = null, conflictBehavior = "fail" } = {}) {
-  const headers = {};
+interface MoveItemOpts {
+  eTag?: string | null;
+  newName?: string | null;
+  conflictBehavior?: string;
+}
+export async function moveItemToFolder(itemId: string, targetFolderId: string, { eTag = null, newName = null, conflictBehavior = "fail" }: MoveItemOpts = {}): Promise<GraphDriveItem> {
+  const headers: Record<string, string> = {};
   if (eTag) headers["If-Match"] = eTag;
-  const body = {
+  const body: Record<string, unknown> = {
     parentReference: { id: targetFolderId },
     "@microsoft.graph.conflictBehavior": conflictBehavior,
   };
   if (newName) body.name = newName;
   const r = await graphFetch("PATCH", `/me/drive/items/${itemId}`, { headers, body });
-  return r.json();
+  return r.json() as Promise<GraphDriveItem>;
 }
 
 // 改名 only（不移动）
-export async function renameItem(itemId, newName, eTag = null) {
-  const headers = {};
+export async function renameItem(itemId: string, newName: string, eTag: string | null = null): Promise<GraphDriveItem> {
+  const headers: Record<string, string> = {};
   if (eTag) headers["If-Match"] = eTag;
   const r = await graphFetch("PATCH", `/me/drive/items/${itemId}`, {
     headers,
     body: { name: newName },
   });
-  return r.json();
+  return r.json() as Promise<GraphDriveItem>;
 }

@@ -1,7 +1,7 @@
 // Store.session coalescer 验收（④：连按 Ctrl+S 的合流状态机收进 Store 后首次可 node 单测）。
 // 注入 fake doLocal/doPush（可控完成时机）+ edits.mark 模拟期间新编辑。
 import { describe, it, eq } from "./runner.mjs";
-import { createStore } from "../src/store/store.js";
+import { createStore } from "../src/store/store.ts";
 
 function defer() { let resolve; const p = new Promise((r) => (resolve = r)); return { p, resolve }; }
 async function flush() { for (let i = 0; i < 6; i++) await Promise.resolve(); }

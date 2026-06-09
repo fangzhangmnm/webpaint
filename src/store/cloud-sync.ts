@@ -10,10 +10,12 @@
 //   分片末响应无 item→拉权威 etag 不崩不缓存 null（H7）· trash=move-aside 加 [ts] 后缀（A8/C2）·
 //   restore 撞名 (2)(3) 防覆盖。
 
-import { asideStamp } from "./move-aside.js";   // 深模块的 move-aside 命名策略（yyyymmddhhmmss-guid 防撞）
+import { asideStamp } from "./move-aside.ts";   // 深模块的 move-aside 命名策略（yyyymmddhhmmss-guid 防撞）
+import type { Bytes, CloudItem, CloudProvider, CloudSync, Kv, PullResult, PushResult } from "./types.ts";
 
 export class CloudConflictError extends Error {
-  constructor(message, sessionName) {
+  sessionName: string;
+  constructor(message: string, sessionName: string) {
     super(message);
     this.name = "CloudConflictError";
     this.sessionName = sessionName;
@@ -23,7 +25,8 @@ export class CloudConflictError extends Error {
 // ≠ CloudConflictError（那是「同一文件版本分叉」走 keep/pull/branch）。这里是「两个不同文件抢同一个名」，
 // **绝不覆盖**（否则静默吃掉别人的作品 = 数据丢失）→ caller 留本地 + 提示改名。
 export class CloudNameCollisionError extends Error {
-  constructor(sessionName) {
+  sessionName: string;
+  constructor(sessionName: string) {
     super(`云端已有同名「${sessionName}」（不同文件）`);
     this.name = "CloudNameCollisionError";
     this.sessionName = sessionName;
@@ -31,13 +34,37 @@ export class CloudNameCollisionError extends Error {
 }
 
 /** 内存 kv（测试用；WebPaint 传 localStorage 包装）。 */
-export function memKv() {
-  const m = new Map();
+export function memKv(): Kv {
+  const m = new Map<string, string>();
   return {
-    get: (k) => (m.has(k) ? m.get(k) : null),
-    set: (k, v) => m.set(k, String(v)),
-    remove: (k) => m.delete(k),
+    get: (k) => (m.has(k) ? m.get(k)! : null),
+    set: (k, v) => { m.set(k, String(v)); },
+    remove: (k) => { m.delete(k); },
   };
+}
+
+// cloud-sync 的 fetchMeta 返回的形状（store 读 etag/lastModified）。
+// 注意：types.ts 的 CloudSync.fetchMeta 标注为 CloudItem | null，与此不符——
+// 本地以 FetchMetaResult 为准（见最终报告，留给 lead 调和 types.ts）。
+interface FetchMetaResult {
+  etag: string;
+  lastModified: string | number;
+  size: number;
+  item: CloudItem;
+}
+
+// createCloudSync 的配置。
+interface CloudSyncCfg {
+  provider: CloudProvider;
+  kv: Kv;
+  fileName: (name: string) => string;
+  contentType?: string;
+  trashFolder?: string;
+  backupFolder?: string;
+  appKey?: string;
+  now?: () => number;
+  match?: (it: CloudItem) => boolean;
+  toName?: (name: string) => string;
 }
 
 /**
@@ -50,40 +77,42 @@ export function memKv() {
  * @param {string} [cfg.appKey="sync"]  kv key 前缀
  * @param {()=>number} [cfg.now]  时钟（测试注入；默认 Date.now）
  */
-export function createCloudSync(cfg) {
+export function createCloudSync(cfg: CloudSyncCfg) {
   const { provider, kv, fileName, contentType = "application/octet-stream",
     trashFolder = ".trash", backupFolder = ".backup", appKey = "sync" } = cfg;
   const now = cfg.now || (() => Date.now());
   // match(item)：哪些云端文件算"session"（扩展名 agnostic；默认所有非文件夹）。gallery 列表用。
-  const match = cfg.match || ((it) => !it.isFolder);
+  const match = cfg.match || ((it: CloudItem) => !it.isFolder);
   // toName(item)：云端文件名 → session name（fileName 的逆；默认去最后一段扩展名）。
-  const toName = cfg.toName || ((name) => name.replace(/\.[^./]+$/, ""));
+  const toName = cfg.toName || ((name: string) => name.replace(/\.[^./]+$/, ""));
 
-  const etagKey = (n) => `${appKey}.etag:${n}`;
-  const dirtyKey = (n) => `${appKey}.dirty:${n}`;
-  const baseName = (n) => (n.includes("/") ? n.slice(n.lastIndexOf("/") + 1) : n);
+  const etagKey = (n: string) => `${appKey}.etag:${n}`;
+  const dirtyKey = (n: string) => `${appKey}.dirty:${n}`;
+  const baseName = (n: string) => (n.includes("/") ? n.slice(n.lastIndexOf("/") + 1) : n);
   // move-aside（.trash/.backup）的防撞名：<base> [<yyyymmddhhmmss>-<guid>]（命名策略在深模块 move-aside.js）。
   // guid 防同名多次 move-aside 撞（旧版 [ts] 同 ms → conflictBehavior:"fail" 抛错的真 bug）。trash/backup 共用。
-  const stampedName = (n) => fileName(`${baseName(n)} [${asideStamp(now())}]`);
+  const stampedName = (n: string) => fileName(`${baseName(n)} [${asideStamp(now())}]`);
 
-  function getETag(name) { return kv.get(etagKey(name)) || null; }
-  function setETag(name, eTag) { if (eTag) kv.set(etagKey(name), eTag); else kv.remove(etagKey(name)); }
-  function isDirty(name) { const v = kv.get(dirtyKey(name)); return v === null ? true : v === "1"; }
-  function setDirty(name, dirty) { kv.set(dirtyKey(name), dirty ? "1" : "0"); }
-  function clearState(name) { kv.remove(etagKey(name)); kv.remove(dirtyKey(name)); }
+  function getETag(name: string): string | null { return kv.get(etagKey(name)) || null; }
+  function setETag(name: string, eTag: string | null): void { if (eTag) kv.set(etagKey(name), eTag); else kv.remove(etagKey(name)); }
+  function isDirty(name: string): boolean { const v = kv.get(dirtyKey(name)); return v === null ? true : v === "1"; }
+  function setDirty(name: string, dirty: boolean): void { kv.set(dirtyKey(name), dirty ? "1" : "0"); }
+  function clearState(name: string): void { kv.remove(etagKey(name)); kv.remove(dirtyKey(name)); }
 
-  async function push(name, bytes, opts = {}) {
+  async function push(name: string, bytes: Bytes, opts: { baseEtag?: string | null } = {}): Promise<PushResult> {
     const path = fileName(name);
     const baseEtag = ("baseEtag" in opts) ? opts.baseEtag : getETag(name);
-    const wrote = (bytes && (bytes.byteLength ?? bytes.size ?? bytes.length)) || 0;
+    // bytes 是 Uint8Array（Bytes），byteLength 即字节数；?? size/length 是历史兼容兜底（任意来源），故收窄成 any 读。
+    const wrote = (bytes && ((bytes as any).byteLength ?? (bytes as any).size ?? (bytes as any).length)) || 0;
     // conflictBehavior：有 baseEtag → "replace"（If-Match 守，412 才冲突）；**无 baseEtag（新建/未基于云版）→ "fail"**
     //   → 绝不无条件覆盖云端已存在的同名文件（否则静默吃掉别人/旧版的同名作品 = 数据丢失，path-身份红线）。
-    let item = null;
+    let item: CloudItem | null = null;
     try {
       item = await provider.upload(path, bytes, { contentType, eTag: baseEtag, conflictBehavior: baseEtag ? "replace" : "fail" });
     } catch (e) {
-      if (e.status === 412) throw new CloudConflictError(`云端已有更新版本 "${name}"`, name);
-      if (!(e.status === 409 && !baseEtag)) throw e;
+      const status = (e as { status?: number })?.status;
+      if (status === 412) throw new CloudConflictError(`云端已有更新版本 "${name}"`, name);
+      if (!(status === 409 && !baseEtag)) throw e;
       // 409 = conflictBehavior:fail 撞上云端已存在同名 → 落下面核验（大小匹配=我方上次成功上传/同内容→认；否则不覆盖）。
     }
     // H7 / 409 兜底：末响应无 item（分片丢响应）或 fail-409 → 拉权威 meta；**仅大小匹配才认**（防把
@@ -101,7 +130,7 @@ export function createCloudSync(cfg) {
   }
 
   // 永远 duplicate 进本地（caller 决定落地名），不覆盖既存。
-  async function pull(name) {
+  async function pull(name: string): Promise<(PullResult & { suggestedName: string }) | null> {
     const item = await provider.getItemByPath(fileName(name));
     if (!item) return null;
     const blob = await provider.download(item.id);
@@ -110,14 +139,14 @@ export function createCloudSync(cfg) {
     return { blob, item, suggestedName: name };
   }
 
-  async function fetchMeta(name) {
+  async function fetchMeta(name: string): Promise<FetchMetaResult | null> {
     const item = await provider.getItemByPath(fileName(name));
     if (!item) return null;
     return { etag: item.eTag, lastModified: item.lastModifiedDateTime, size: item.size, item };
   }
 
   // move-aside：原文件 → ensureFolder(.trash) → move，**始终加 [ts] 后缀**（多次删同名永不冲突）。
-  async function trash(name) {
+  async function trash(name: string): Promise<CloudItem | null> {
     const item = await provider.getItemByPath(fileName(name));
     if (!item) { clearState(name); return null; }
     const folderId = await provider.ensureFolder(trashFolder);
@@ -128,7 +157,7 @@ export function createCloudSync(cfg) {
   }
 
   // 从 trash 移回；conflictBehavior=fail 防覆盖目标位置同名（关键 data-loss 点）；撞名 (2)(3) 重试。
-  async function restore(itemId, targetName) {
+  async function restore(itemId: string, targetName: string): Promise<CloudItem> {
     const clean = targetName;
     const folder = clean.includes("/") ? clean.slice(0, clean.lastIndexOf("/")) : "";
     const base = baseName(clean);
@@ -138,20 +167,21 @@ export function createCloudSync(cfg) {
       try {
         return await provider.move(itemId, folderId, { newName: fileName(candidate), conflictBehavior: "fail" });
       } catch (e) {
-        if (e.status === 409 || e.status === 412) continue;
+        const status = (e as { status?: number })?.status;
+        if (status === 409 || status === 412) continue;
         throw e;
       }
     }
     return await provider.move(itemId, folderId, { newName: fileName(`${base} [${now()}]`), conflictBehavior: "fail" });
   }
 
-  async function purge(itemId) {
+  async function purge(itemId: string): Promise<void> {
     await provider.delete(itemId);
   }
 
   // weak-override（ADR-0009 / share-file-model）：用本地覆盖云端，但**云端 loser 先 stash 进 .backup 不丢**。
   // 永不 lossy（Work 禁 hard-override / destructive pull；这是 never-lose 的覆盖）。返 { item, backedUp }。
-  async function weakOverride(name, bytes) {
+  async function weakOverride(name: string, bytes: Bytes): Promise<{ item: CloudItem | null; backedUp: string | null }> {
     const path = fileName(name);
     const cur = await provider.getItemByPath(path);
     let backedUp = null;
@@ -162,7 +192,7 @@ export function createCloudSync(cfg) {
       backedUp = `${backupFolder}/${stamped}`;
     }
     // 原 path 现已空 → force-push 本地（无 If-Match）。
-    let item = await provider.upload(path, bytes, { contentType, conflictBehavior: "replace" });
+    let item: CloudItem | null = await provider.upload(path, bytes, { contentType, conflictBehavior: "replace" });
     if (!item || !item.eTag) { const f = await provider.getItemByPath(path).catch(() => null); if (f && f.eTag) item = f; }
     if (item && item.eTag) { setETag(name, item.eTag); setDirty(name, false); }
     return { item, backedUp };
@@ -171,9 +201,9 @@ export function createCloudSync(cfg) {
   // ---- gallery 列表 / rename / 硬删（扩展名 agnostic：match/toName 注入）----
   // folders 非 null 时顺带收集子文件夹路径（含空文件夹）——gallery 文件夹模型「云端真文件夹为准」用。
   // 一次 walk 同时拿文件+文件夹（listAll），省一半 Graph 往返。list() 传 folders=null，语义不变。
-  async function _walk(subpath, out, depth, folders) {
+  async function _walk(subpath: string, out: CloudItem[], depth: number, folders: string[] | null): Promise<void> {
     if (depth > 8) return;
-    let items;
+    let items: CloudItem[];
     try { items = await provider.list(subpath); } catch (_) { return; }
     for (const it of items) {
       // 顶层 .trash / .backup 都是隐藏安全网：整个跳过（不进文件列表、不进文件夹列表、不递归其内容）。
@@ -187,19 +217,19 @@ export function createCloudSync(cfg) {
       else if (match(it)) out.push({ ...it, path: itPath, name: toName(itPath) });
     }
   }
-  async function list() { const out = []; await _walk("", out, 0, null); return out; }
+  async function list(): Promise<CloudItem[]> { const out: CloudItem[] = []; await _walk("", out, 0, null); return out; }
   // gallery 一次取齐：{ files, folders }（folders 含空文件夹）。文件夹模型单一真相源。
-  async function listAll() { const out = [], folders = []; await _walk("", out, 0, folders); return { files: out, folders }; }
-  async function listFolders() { const out = [], folders = []; await _walk("", out, 0, folders); return folders; }
+  async function listAll(): Promise<{ files: CloudItem[]; folders: string[] }> { const out: CloudItem[] = [], folders: string[] = []; await _walk("", out, 0, folders); return { files: out, folders }; }
+  async function listFolders(): Promise<string[]> { const out: CloudItem[] = [], folders: string[] = []; await _walk("", out, 0, folders); return folders; }
 
-  async function listTrash() {
-    let items;
+  async function listTrash(): Promise<CloudItem[]> {
+    let items: CloudItem[];
     try { items = await provider.list(trashFolder); } catch (_) { return []; }
     return items.filter(match);
   }
 
   // 同 folder → rename；跨 folder → ensureFolder + move。caller 保证 newName 不冲突。
-  async function rename(oldName, newName) {
+  async function rename(oldName: string, newName: string): Promise<void> {
     if (oldName === newName) return;
     const item = await provider.getItemByPath(fileName(oldName));
     if (!item) throw new Error(`云端找不到：${oldName}`);
@@ -217,7 +247,7 @@ export function createCloudSync(cfg) {
   }
 
   // 硬删（gallery「彻底删」非 trash 路径用；日常删走 store.flow.delete=trash）。
-  async function remove(name) {
+  async function remove(name: string): Promise<void> {
     const item = await provider.getItemByPath(fileName(name));
     if (item) await provider.delete(item.id);
     clearState(name);

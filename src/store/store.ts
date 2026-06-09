@@ -13,8 +13,54 @@
 //       E8 跳过离线 · H3 先存后清 · E4 离线 deferred · 三态删除不留双份 · C7 重连收敛 · H2 confirm 强制。
 
 import { toU8, bytesEqual, createSubstrate } from "./substrate.ts";
+import type { Bytes } from "./substrate.ts";
+import type { BusyFn, CloudItem, CloudSync, Kv, LocalAdapter } from "./types.ts";
 
-const passBusy = (label, fn) => fn();   // 默认 busy：直接跑
+// busy 包装的统一签名（注入的 _uiBusy / 各 flow 的 opts.busy / 默认 passBusy 共用）。
+type Busy = BusyFn;
+const passBusy: Busy = (label, fn) => fn();   // 默认 busy：直接跑
+
+// createStore 的注入依赖。
+interface StoreDeps {
+  cloud: CloudSync;
+  local?: LocalAdapter;
+  kv: Kv;
+  maxAttempts?: number;
+  backoffMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  busy?: Busy;
+}
+
+// 冲突 / 同步流的状态机返回（status 判别）。app 据此续 UI。
+type ConflictChoice = "keep" | "pull" | "branch" | "weak-override" | "rename" | string;
+interface FlowResult {
+  status?: string;
+  source?: string;
+  reason?: string;
+  resolution?: string;
+  where?: string;
+  newName?: string;
+  branchName?: string;
+  backupName?: string;
+  dirtyAfter?: boolean;
+  choice?: ConflictChoice;
+  cloudEtag?: string;
+  baseEtag?: string | null;
+  backedUp?: string | null;
+  cloudDeferred?: boolean;
+  queuedCloudDelete?: boolean;
+  trashKey?: string | null;
+  trashed?: unknown;
+  push?: unknown;
+  item?: CloudItem | null;
+  local?: boolean;
+  cloud?: boolean;
+  name?: string | null;
+  localName?: string;
+  purged?: number;
+  failed?: unknown[];
+  error?: unknown;
+}
 
 /**
  * @param {object} deps
@@ -48,39 +94,43 @@ const passBusy = (label, fn) => fn();   // 默认 busy：直接跑
  *   锁屏，调用方忘了包也照锁——挡住改名中途点刷新/tile 读到半截态那类竞态（见 0B 三联症）。
  *   后台流（_doPush/autosave/freshness probe）不默认锁（否则自动保存会闪全屏遮罩）。
  */
-export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy } = {}) {
+export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy }: StoreDeps = {} as StoreDeps) {
   const sub = createSubstrate();    // shape-agnostic 底座：编辑游标 + push-serialize + save 合流
-  const _sleep = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const _sleep = sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // cloud-sync 实现了 weakOverride，但 types.ts 的 CloudSync 接口未声明 → 经此扩展视图取（见报告，留 lead 调和）。
+  const _cloudExt = cloud as CloudSync & {
+    weakOverride?: (name: string, bytes: Bytes) => Promise<{ item: CloudItem | null; backedUp: string | null }>;
+  };
 
   // C4：base-etag 归这个 Store 实例（= 这个 tab）的内存，open/adopt 时捕获一次。
   // push 用它当 If-Match、成功只推进**自己的**——绝不每次去读跨 tab 共享的 localStorage etag，
   // 否则别的 tab 推成功后改了共享 etag，本 tab 的陈旧推会被误判成"无冲突"→ 静默覆盖（W2 红线）。
-  const _base = new Map();   // name → etag|null：这个 tab「已见/已采纳」的云版（open/refresh/pull/heal/push 推进）。
+  const _base = new Map<string, string | null>();   // name → etag|null：这个 tab「已见/已采纳」的云版（open/refresh/pull/heal/push 推进）。
   // 采纳一个 item 的云版基准（open/load 时）。若该 item 已是 dirty（未推编辑跨 reload 持久），
   // parentBase 是内存态、reload 后丢了 → 这里补捕：未推编辑派生自这个刚载入的云版，免得下次 push 撞 bypass 守卫。
-  function adoptBase(name, etag) { _base.set(name, etag ?? null); if (cloud.isDirty(name)) captureParent(name); }
+  function adoptBase(name: string, etag: string | null) { _base.set(name, etag ?? null); if (cloud.isDirty(name)) captureParent(name); }
   // 这个 tab 见过的云版。仅在 _base 缺失（刚从图库列出、尚未 adopt）才回退到 kv 里的 etag——
   // **只用于 open/refresh 的「云端动没动」比较**（漏判=少快进一次，非数据丢失），绝不用于 push 的 If-Match。
-  function seenBase(name) { return _base.has(name) ? _base.get(name) : cloud.getETag(name); }
+  function seenBase(name: string): string | null { return _base.has(name) ? _base.get(name)! : cloud.getETag(name); }
 
   // parentBase 权威（ADR-0016 §4）：每条 name「当前未推编辑派生自哪个云版」。
   //   捕获 = clean→dirty 边沿（cloudState.setDirty(name,true)）时取当时的 _base（本 tab 已见版）。
   //   用途 = push 的 If-Match **唯一**来源——绝不回退跨 tab 共享 etag（W2 红线：陈旧推被误判无冲突→静默覆盖）。
   //   清除 = push/pull/heal/refresh 采纳云版后（不再 dirty）。
-  const _parent = new Map();   // name → etag|null（null=新文件/无基准，首推不带 If-Match）
-  function captureParent(name) { if (!_parent.has(name)) _parent.set(name, _base.has(name) ? _base.get(name) : null); }   // episode 内幂等：只在头一次变脏捕获
-  function reparent(name) { _parent.set(name, _base.has(name) ? _base.get(name) : null); }   // 强制重锚到当前 _base（B2：剩余编辑派生自刚推上去的版本）
-  function clearParent(name) { _parent.delete(name); }
-  function hasParent(name) { return _parent.has(name); }
-  function parentFor(name) { return _parent.has(name) ? _parent.get(name) : null; }
+  const _parent = new Map<string, string | null>();   // name → etag|null（null=新文件/无基准，首推不带 If-Match）
+  function captureParent(name: string) { if (!_parent.has(name)) _parent.set(name, _base.has(name) ? _base.get(name)! : null); }   // episode 内幂等：只在头一次变脏捕获
+  function reparent(name: string) { _parent.set(name, _base.has(name) ? _base.get(name)! : null); }   // 强制重锚到当前 _base（B2：剩余编辑派生自刚推上去的版本）
+  function clearParent(name: string) { _parent.delete(name); }
+  function hasParent(name: string) { return _parent.has(name); }
+  function parentFor(name: string): string | null { return _parent.has(name) ? _parent.get(name)! : null; }
 
-  function _retriable(e) {
+  function _retriable(e: any): boolean {
     return !!e && (e.status == null || e.status === 429 || (e.status >= 500 && e.status <= 599))
       && e.name !== "CloudConflictError" && e.name !== "CloudNameCollisionError";   // 撞名异文件不重试（重试只会再撞）
   }
 
   // 412：可能是自己 lost-response 已落盘的写。拉云比对，相等即自愈（B5/W1）。
-  async function _tryHeal(name, bytes) {
+  async function _tryHeal(name: string, bytes: Bytes): Promise<boolean> {
     // ⚠ cloud.pull 有副作用：会 setDirty(name,false)。没自愈（真分叉）时必须还原 dirty——否则
     //   ① 后续 _safePull 的 dirty-gate 看成 clean → 不备份 → 用户版本被覆盖丢失；
     //   ② onConflict 选 no-op 保留本地后，dirty 假性归零 → 下次 push 判 clean 跳过 → 静默丢更新。
@@ -98,14 +148,25 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return false;
   }
 
-  function _finish(name, v0, getEditVersion, status) {
+  function _finish(name: string, v0: number, getEditVersion: () => number, status: string): FlowResult {
     const dirtyAfter = getEditVersion() !== v0;   // B2：PUT 期间又改过 → 仍 unpushed
     if (dirtyAfter) { cloud.setDirty(name, true); reparent(name); }   // 剩余编辑派生自刚推上去的版本（_base 已在 push 成功时推进）
     else clearParent(name);                                            // 干净落地：episode 结束
     return { status, dirtyAfter };
   }
 
-  async function _doPush(name, { encode, getEditVersion = () => sub.edits.version(), onConflict, adopt, saveBranch, now, busy = passBusy } = {}) {
+  // _doPush / push / saveAs 等的编排回调集（doc/UI 注入）。
+  interface PushOpts {
+    encode: () => unknown | Promise<unknown>;
+    getEditVersion?: () => number;
+    onConflict?: (ctx: { name: string }) => ConflictChoice | Promise<ConflictChoice>;
+    adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>;
+    saveBranch?: (blob: Blob, name: string) => unknown | Promise<unknown>;
+    now?: () => number;
+    busy?: Busy;
+  }
+
+  async function _doPush(name: string, { encode, getEditVersion = () => sub.edits.version(), onConflict, adopt, saveBranch, now, busy = passBusy }: PushOpts = {} as PushOpts): Promise<FlowResult> {
     // bypass 守卫（ADR-0016 §4）：已知云版基准 + 内容 dirty + 却没经过 clean→dirty 门捕获 parentBase
     //   → 有编辑路径绕过了门，再推会拿陈旧/跨tab base 静默覆盖。宁可响亮抛错（=失败的测试）也不静默丢更新。
     if (cloud.isDirty(name) && !hasParent(name) && _base.has(name) && _base.get(name) != null) {
@@ -114,16 +175,16 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     // If-Match 唯一来源：parentBase。无 parent 时——dirty=新文件(首推不带 If-Match)；非 dirty=强推用本 tab 已见版。
     const baseEtag = hasParent(name) ? parentFor(name) : (cloud.isDirty(name) ? null : seenBase(name));
     const v0 = getEditVersion();
-    const bytes = await toU8(await encode());      // 只编码一次，重试复用（B5 逐字节比对要相等）
+    const bytes = await toU8(await encode() as Bytes);      // 只编码一次，重试复用（B5 逐字节比对要相等）
     return busy("正在同步…", async () => {
-      let attempt = 0, lastErr;
+      let attempt = 0, lastErr: unknown;
       while (attempt < maxAttempts) {
         attempt++;
         try {
           const { item } = await cloud.push(name, bytes, { baseEtag });
           if (item && item.eTag) _base.set(name, item.eTag);   // 只推进自己的 base
           return _finish(name, v0, getEditVersion, "pushed");
-        } catch (e) {
+        } catch (e: any) {
           if (e && e.name === "CloudConflictError") {
             if (await _tryHeal(name, bytes)) return _finish(name, v0, getEditVersion, "healed");
             const choice = onConflict ? await onConflict({ name }) : "keep";
@@ -138,23 +199,29 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // 同一 name 串行（B1）：每次 push 等前一次跑完才启动（串行机制在 substrate）。
-  function push(name, opts) {
+  function push(name: string, opts?: PushOpts): Promise<FlowResult> {
     return sub.serialize(name, () => _doPush(name, opts));
   }
 
+  // _safePull 的结果（ok 判别）。
+  type SafePullResult =
+    | { ok: true; backupName?: string }
+    | { ok: false; reason: string; backupName?: string; error?: unknown };
+
   // 安全拉取覆盖（A4/A10）：先 local.backup（失败即 abort，绝不 pull/覆盖）→ 拉云 → 覆盖本地 → adopt。
   // 持久状态只在原子点改：备份是复制（原件留着）；覆盖是一次 local.save。强退任一 await 点都可重入。
-  async function _safePull(name, adopt) {
-    let backupName;
+  // 仅在 local 注入时调用（caller 保证）；故内部用 local! 断言非空。
+  async function _safePull(name: string, adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>): Promise<SafePullResult> {
+    let backupName: string | undefined;
     // ADR-0016 §consequences：clean 本地是可从云端重取的已知版本，无未见内容可丢 → 跳过 backup（不再 spam .backup-local）。
     //   仅 dirty——未推（cloud.isDirty）或未落盘（edits.localDirty）——才在覆盖前留底。匹配 ADR-0009「clean switch never spams a backup」。
     if (cloud.isDirty(name) || sub.edits.localDirty()) {
-      try { backupName = await local.backup(name); }
+      try { backupName = await local!.backup(name); }
       catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
     }
     const r = await cloud.pull(name);
     if (!r) return { ok: false, reason: "cloud-vanished", backupName };
-    await local.save(name, r.blob);                // 覆盖本地为云端版（dirty 时原件已备份）
+    await local!.save(name, r.blob);                // 覆盖本地为云端版（dirty 时原件已备份）
     if (r.item && r.item.eTag) _base.set(name, r.item.eTag);  // base 推进到云端版本（多tab/冲突后一致）
     cloud.setDirty(name, false);              // 已采纳云端 → 不再 unpushed
     clearParent(name);                        // episode 结束（已采纳云版）
@@ -166,7 +233,14 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // push 和 open 共用，绝不静默覆盖。
   // 给了执行回调（adopt for pull / saveBranch for branch）→ Store 内执行，返 "resolved"。
   // 没给（或 keep/rename 这类身份变更）→ 返 "conflict"+choice，交 app 处理（向后兼容旧消费代码）。
-  async function _resolveConflict(name, choice, { bytes, adopt, saveBranch, now = () => 0 } = {}) {
+  // _resolveConflict 的执行回调集（push 上下文给 bytes / open 上下文不给）。
+  interface ResolveOpts {
+    bytes?: Bytes | null;
+    adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>;
+    saveBranch?: (blob: Blob, name: string) => unknown | Promise<unknown>;
+    now?: () => number;
+  }
+  async function _resolveConflict(name: string, choice: ConflictChoice, { bytes, adopt, saveBranch, now = () => 0 }: ResolveOpts = {}): Promise<FlowResult> {
     if (choice === "pull" && adopt) {
       const r = await _safePull(name, adopt);
       return r.ok
@@ -174,8 +248,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         : { status: "conflict", choice, resolution: "pull-failed", reason: r.reason, backupName: r.backupName, dirtyAfter: true };
     }
     // weak-override（Work 的 never-lose 覆盖）：云端→.backup，再 force-push 本地。需 bytes（仅 push 上下文有）。
-    if (choice === "weak-override" && bytes != null && cloud.weakOverride) {
-      const r = await cloud.weakOverride(name, bytes);
+    // 注：cloud-sync 实现了 weakOverride，但 types.ts 的 CloudSync 接口未声明它 → 本地经 _cloudExt 取（见报告）。
+    if (choice === "weak-override" && bytes != null && _cloudExt.weakOverride) {
+      const r = await _cloudExt.weakOverride(name, bytes);
       if (r.item && r.item.eTag) _base.set(name, r.item.eTag);
       clearParent(name);                        // 本地已强推上云、loser 进 .backup → episode 结束
       return { status: "resolved", resolution: "weak-override", backedUp: r.backedUp };
@@ -193,21 +268,35 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // C2：开 session 的云端 gate。E8：probe（跳过到离线）与 metadata race，无硬超时。
   // ADR-0016：云端自「本 tab 已见版」后动过时——clean（无未推/未落盘编辑）→ **静默无损快进**（不弹 sheet、_safePull 内部跳 backup）；
   //           dirty → 才弹「拉/留/分支」sheet（真分叉）。绝不静默覆盖 dirty 内容。
-  async function open(name, opts = {}) {
+  // open / refresh 读 fetchMeta 的形状（types.ts CloudSync.fetchMeta 标 CloudItem，与运行时不符 → 本地视图）。
+  type Meta = { etag: string; lastModified: string | number; size: number; item: CloudItem };
+  const _fetchMeta = (n: string): Promise<Meta | null> => cloud.fetchMeta(n) as unknown as Promise<Meta | null>;
+
+  // open 的 UI/env 注入回调。
+  interface OpenOpts {
+    isOnline?: () => boolean;
+    probe?: Promise<unknown> | unknown;
+    onNewer?: (ctx: { name: string; cloudEtag: string; baseEtag: string | null; cloudTime: string | number }) => ConflictChoice | Promise<ConflictChoice>;
+    adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>;
+    busy?: Busy;
+    now?: () => number;
+    localDirty?: () => boolean;
+  }
+  async function open(name: string, opts: OpenOpts = {}): Promise<FlowResult> {
     const { isOnline = () => true, probe, onNewer, adopt, busy = passBusy, now = () => 0, localDirty } = opts;
     if (!isOnline()) return { source: "local", reason: "offline" };
     return busy("检查云端…", async () => {
-      let meta;
+      let meta: Meta | null;
       if (probe) {
         const raced = await Promise.race([
-          cloud.fetchMeta(name).then((m) => ({ k: "meta", m }), (e) => ({ k: "err", e })),
-          Promise.resolve(probe).then(() => ({ k: "skip" })),
+          _fetchMeta(name).then((m) => ({ k: "meta" as const, m }), (e) => ({ k: "err" as const, e })),
+          Promise.resolve(probe).then(() => ({ k: "skip" as const })),
         ]);
         if (raced.k === "skip") return { source: "local", reason: "skipped" };
         if (raced.k === "err") return { source: "local", reason: "cloud-error" };
         meta = raced.m;
       } else {
-        try { meta = await cloud.fetchMeta(name); }
+        try { meta = await _fetchMeta(name); }
         catch (_) { return { source: "local", reason: "cloud-error" }; }
       }
       if (!meta) return { source: "local", reason: "cloud-absent" };
@@ -236,7 +325,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         const r = await cloud.pull(name);
         if (!r) return { source: "local", reason: "cloud-vanished" };
         const branchName = `${name}-cloud-${now()}`;
-        await local.save(branchName, r.blob);
+        await local!.save(branchName, r.blob);
         return { source: "branched", branchName };
       }
       return { source: "local", reason: "kept" };
@@ -247,13 +336,19 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   //   只 metadata（fetchMeta/etag）；etag 真动了且仍 clean 才 _safePull 拉内容（内部因 clean 跳 backup）。
   //   dirty（未推/未落盘）→ no-op（绝不在事件里弹 sheet；后续 push 的 412 会正常 surface 真分叉）。
   //   **硬约束**：绝不每笔/每编辑触发——只由人速的 focus/visibility/online 事件驱动（ADR-0016 §7）。
-  async function refresh(name, opts = {}) {
+  interface RefreshOpts {
+    isOnline?: () => boolean;
+    adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>;
+    localDirty?: () => boolean;
+    busy?: Busy;
+  }
+  async function refresh(name: string, opts: RefreshOpts = {}): Promise<FlowResult> {
     const { isOnline = () => true, adopt, localDirty, busy = passBusy } = opts;
     if (!isOnline()) return { status: "offline" };
     if (cloud.isDirty(name) || (localDirty && localDirty())) return { status: "dirty-skip" };
     return busy("检查云端…", async () => {
-      let meta;
-      try { meta = await cloud.fetchMeta(name); }
+      let meta: Meta | null;
+      try { meta = await _fetchMeta(name); }
       catch (_) { return { status: "cloud-error" }; }
       if (!meta) return { status: "cloud-absent" };
       const base = seenBase(name);
@@ -269,7 +364,13 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // 曾有过一个 flow.close（薄 flush+push）但被 saveAndPush 取代、从无调用 → 已删（别再加回来）。
 
   // C5：删除 = move-aside。三态（仅本地 / 仅云端 / 两者）。两者 → 云端进 .trash + 本地直接删（不留双份）。
-  async function del(name, opts = {}) {
+  interface DelOpts {
+    isOnline?: () => boolean;
+    confirm?: (ctx: { title: string; body: string; danger?: boolean }) => boolean | Promise<boolean>;
+    onDirtyWarn?: (ctx: { name: string }) => boolean | Promise<boolean>;
+    busy?: Busy;
+  }
+  async function del(name: string, opts: DelOpts = {}): Promise<FlowResult> {
     const { isOnline = () => true, confirm, onDirtyWarn, busy = _uiBusy } = opts;
     if (confirm && !(await confirm({ title: "删除", body: name, danger: true }))) return { status: "cancelled" };
     if (cloud.isDirty(name) && onDirtyWarn && !(await onDirtyWarn({ name }))) return { status: "cancelled" };
@@ -277,8 +378,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     const localPresent = local ? await local.exists(name) : false;
     if (!isOnline()) {
       // 离线：本地 move-aside + 排队云删（带 base-etag 供重连重放）。队列须持久化（C1b 接 IDB）。
-      let trashKey = null;
-      if (localPresent) trashKey = await local.trash(name);
+      let trashKey: string | null = null;
+      if (localPresent) trashKey = await local!.trash(name);
       return { status: "trashed", where: "local", queuedCloudDelete: true, baseEtag: cloud.getETag(name), trashKey };
     }
     return busy("删除中…", async () => {
@@ -286,10 +387,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       try { cloudPresent = !!(await cloud.fetchMeta(name)); } catch (_) { cloudPresent = false; }
       if (cloudPresent) {
         const trashed = await cloud.trash(name);       // 先云端进 .trash（失败抛 → 本地不动）
-        if (localPresent) await local.hardDelete(name);            // 再本地直接删（不留双份）
+        if (localPresent) await local!.hardDelete(name);            // 再本地直接删（不留双份）
         return { status: "trashed", where: "cloud", trashed };
       }
-      if (localPresent) { const trashKey = await local.trash(name); return { status: "trashed", where: "local", trashKey }; }
+      if (localPresent) { const trashKey = await local!.trash(name); return { status: "trashed", where: "local", trashKey }; }
       return { status: "noop" };
     });
   }
@@ -297,10 +398,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // C7：离线删除重连重放。按 base-etag 收敛；被别处改过 → delete-vs-edit 默认 edit-wins（不删）。
   // NOT-WIRED（aspirational）：flow.delete 离线时返 queuedCloudDelete，但队列尚未持久化（C1b 接 IDB），
   //   故此函数目前无调用方。保留为 C7 的唯一实现；接队列那轮再启用，别误当死码删掉。
-  async function replayDelete(name, opts = {}) {
+  async function replayDelete(name: string, opts: { baseEtag?: string | null } = {}): Promise<FlowResult> {
     const { baseEtag } = opts;
-    let meta;
-    try { meta = await cloud.fetchMeta(name); }
+    let meta: Meta | null;
+    try { meta = await _fetchMeta(name); }
     catch (_) { return { status: "deferred-offline" }; }
     if (!meta) return { status: "converged", reason: "already-gone" };
     if (baseEtag && meta.etag !== baseEtag) return { status: "conflict-edit-wins" };
@@ -309,19 +410,32 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // 从 trash 恢复：本地先恢复（撞名自动 (2)，拿到实际落名）→ 云端按同一名恢复（撞名自动 (2)，cloud.js 已实现）。
   // 两端都可有可无（local-only / cloud-only / both 一条路）。返回实际恢复的 name。
-  async function restore(opts = {}) {
+  interface RestoreOpts {
+    fromCloud?: boolean;
+    cloudItemId?: string | null;
+    targetName?: string;
+    trashKey?: string | null;
+    busy?: Busy;
+  }
+  async function restore(opts: RestoreOpts = {}): Promise<FlowResult> {
     const { fromCloud, cloudItemId, targetName, trashKey, busy = _uiBusy } = opts;
     return busy("恢复中…", async () => {
-      let name = targetName || null, restoredLocal = false, restoredCloud = false;
+      let name: string | null = targetName || null, restoredLocal = false, restoredCloud = false;
       if (trashKey && local) { const n = await local.restore(trashKey); if (n) { name = n; restoredLocal = true; } }
-      if (fromCloud && cloudItemId != null) { await cloud.restore(cloudItemId, name || targetName); restoredCloud = true; }
+      if (fromCloud && cloudItemId != null) { await cloud.restore(cloudItemId, (name || targetName)!); restoredCloud = true; }
       if (!restoredLocal && !restoredCloud) return { status: "noop" };
       return { status: "restored", name, local: restoredLocal, cloud: restoredCloud };
     });
   }
 
   // 永久删（不可恢复）→ 强制 danger confirm（H2）。两端都可有可无（trashKey 本地 / cloudItemId 云端）。
-  async function purge(opts = {}) {
+  interface PurgeOpts {
+    trashKey?: string | null;
+    cloudItemId?: string | null;
+    confirm?: (ctx: { title: string; body: string; danger?: boolean }) => boolean | Promise<boolean>;
+    busy?: Busy;
+  }
+  async function purge(opts: PurgeOpts = {}): Promise<FlowResult> {
     const { trashKey, cloudItemId, confirm, busy = _uiBusy } = opts;
     if (confirm && !(await confirm({ title: "彻底删除", body: "不可恢复", danger: true }))) return { status: "cancelled" };
     return busy("彻底删除…", async () => {
@@ -338,25 +452,27 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   //   没删的留在 trash；要清剩的得用户**手动再点**清空（针对那时 trash 的现状）。
   //   ⚠ 别做成「自动续上次未完成的清空」——下次 trash 可能已有新 item，自动续会连新 item 一起删 = 灾难。
   // 云端 bounded 并发（默 5，每项仍独立原子），避免大量文件串行太慢。
-  async function emptyTrash(opts = {}) {
+  interface EmptyTrashOpts { isOnline?: () => boolean; busy?: Busy; concurrency?: number; }
+  async function emptyTrash(opts: EmptyTrashOpts = {}): Promise<FlowResult> {
     const { isOnline, busy = _uiBusy, concurrency = 5 } = opts;
     return busy("清空回收站…", async () => {
-      let purged = 0; const failed = [];
+      let purged = 0; const failed: { name?: string; where: string; error: string }[] = [];
+      const errMsg = (e: unknown) => String((e as { message?: unknown })?.message || e);
       if (local && local.listTrash && local.purgeTrash) {
         for (const t of await local.listTrash()) {            // 本地 IDB 删很快，串行即可
           try { await local.purgeTrash(t.trashKey); purged++; }
-          catch (e) { failed.push({ name: t.name, where: "local", error: String(e && e.message || e) }); }
+          catch (e) { failed.push({ name: t.name, where: "local", error: errMsg(e) }); }
         }
       }
       if (!isOnline || isOnline()) {
-        let items = null;
+        let items: CloudItem[] | null = null;
         try { items = await cloud.listTrash(); }
-        catch (e) { failed.push({ where: "cloud-list", error: String(e && e.message || e) }); }
+        catch (e) { failed.push({ where: "cloud-list", error: errMsg(e) }); }
         items = items || [];
         for (let i = 0; i < items.length; i += concurrency) {  // bounded 并发（~5），快约 N×
           await Promise.all(items.slice(i, i + concurrency).map(async (it) => {
             try { await cloud.purge(it.id); purged++; }
-            catch (e) { failed.push({ name: it.name, where: "cloud", error: String(e && e.message || e) }); }
+            catch (e) { failed.push({ name: it.name, where: "cloud", error: errMsg(e) }); }
           }));
         }
       }
@@ -370,19 +486,25 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // 云端：synced（无未推编辑）或纯云端无本地字节 → 服务端 move 保 etag、不重传字节；
   //       dirty 且有本地字节 → push 当前字节到新名 + 旧名进 .trash（非 hard-delete）。
   // 串行 against 两个 name 的 in-flight push。app 只负责取名 + UI；机制全在库内。
-  async function rename(oldName, newName, opts = {}) {
+  interface RenameOpts {
+    encode?: () => unknown | Promise<unknown>;
+    getEditVersion?: () => number;
+    cloud?: boolean;
+    busy?: Busy;
+  }
+  async function rename(oldName: string, newName: string, opts: RenameOpts = {}): Promise<FlowResult> {
     const { encode, getEditVersion, cloud: doCloud = true, busy = _uiBusy } = opts;
     if (!oldName || !newName || oldName === newName) return { status: "noop" };
     // 非 active 改名（无 encode）不该被活 doc 的编辑游标污染 dirtyAfter → 用冻结游标。
     const gev = encode ? (getEditVersion || (() => sub.edits.version())) : () => 0;
     return sub.serialize2(oldName, newName, () => busy("重命名…", async () => {
       const hasLocal = local ? await local.exists(oldName) : false;
-      let bytes = null;
-      if (encode) bytes = await toU8(await encode());
-      else if (hasLocal) bytes = await toU8(await local.get(oldName));
+      let bytes: Bytes | null = null;
+      if (encode) bytes = await toU8(await encode() as Bytes);
+      else if (hasLocal) bytes = await toU8(await local!.get(oldName));
 
       if (local && hasLocal) {
-        await local.save(newName, bytes);                              // 先存新名（含当前字节）
+        await local.save(newName, bytes!);                              // 先存新名（含当前字节）
         await local.hardDelete(oldName);                              // 成功后才删旧名
       }
       if (!doCloud) { _base.delete(oldName); return { status: "renamed", where: "local", newName }; }
@@ -409,10 +531,16 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // 另存为：写新身份，旧的不动（Photoshop 语义，调用方完成后切到新名）。
-  async function saveAs(newName, opts = {}) {
+  interface SaveAsOpts {
+    encode: () => unknown | Promise<unknown>;
+    getEditVersion?: () => number;
+    cloud?: boolean;
+    busy?: Busy;
+  }
+  async function saveAs(newName: string, opts: SaveAsOpts = {} as SaveAsOpts): Promise<FlowResult> {
     const { encode, getEditVersion = () => sub.edits.version(), cloud: doCloud = true, busy = _uiBusy } = opts;
-    const run = async () => {
-      const bytes = await toU8(await encode());
+    const run = async (): Promise<FlowResult> => {
+      const bytes = await toU8(await encode() as Bytes);
       if (local) await local.save(newName, bytes);
       if (!doCloud) return { status: "saved", where: "local", newName };
       try {
@@ -427,7 +555,12 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // 首取：云端 item → 本地（gallery「拉取到本地」，无冲突——本地本来没有）。localName 由 app 去重后传入。
-  async function acquire(cloudName, opts = {}) {
+  interface AcquireOpts {
+    localName?: string;
+    adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>;
+    busy?: Busy;
+  }
+  async function acquire(cloudName: string, opts: AcquireOpts = {}): Promise<FlowResult> {
     const { localName = cloudName, adopt, busy = passBusy } = opts;
     return busy("拉取中…", async () => {
       const r = await cloud.pull(cloudName);
@@ -445,15 +578,15 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // ---- state-as-store（①）：app 不再直碰 localStorage，全走这些 typed 接口 ----
   // 云端同步态（dirty/etag/status）。status 直接喂 save 按钮 icon（local-only vs synced vs dirty）。
   const cloudState = {
-    isDirty: (name) => cloud.isDirty(name),
-    getETag: (name) => cloud.getETag(name),
+    isDirty: (name: string) => cloud.isDirty(name),
+    getETag: (name: string) => cloud.getETag(name),
     // clean→dirty 门（ADR-0016 §4）：app 在编辑落地处标脏时，**唯一**捕获 parentBase 的地方。
-    setDirty: (name, d) => {
+    setDirty: (name: string, d: boolean) => {
       if (d && !cloud.isDirty(name)) captureParent(name);   // 头一次变脏 → 锚定「派生自哪个云版」
       cloud.setDirty(name, d);
     },
     // signedIn/hasLocal 是 app context（auth/本地存在），调用方传入；同步返回，给 UI 高频查。
-    status: (name, { signedIn = true, hasLocal = true } = {}) => {
+    status: (name: string, { signedIn = true, hasLocal = true }: { signedIn?: boolean; hasLocal?: boolean } = {}) => {
       if (!hasLocal) return cloud.getETag(name) ? "cloud-only" : "absent";
       if (!signedIn) return "local-only";
       return cloud.isDirty(name) ? "dirty" : "synced";
@@ -461,9 +594,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   };
   // 通用 app 设置（主题/笔刷尺寸/面板位置…）。app 丢掉自己的 localStorage 调用。
   const settings = {
-    get: (k) => (kv ? kv.get(`settings:${k}`) : null),
-    set: (k, v) => { if (kv) kv.set(`settings:${k}`, v); },
-    remove: (k) => { if (kv) kv.remove(`settings:${k}`); },
+    get: (k: string) => (kv ? kv.get(`settings:${k}`) : null),
+    set: (k: string, v: string) => { if (kv) kv.set(`settings:${k}`, v); },
+    remove: (k: string) => { if (kv) kv.remove(`settings:${k}`); },
   };
   // 活动 item 指针：WebPaint 用 session.js 的 webpaint.currentSessionName（含 boot-load 失败时的
   // phantom-path 保护）。曾在此放过一个 store.active（kv "active:pointer"），与之并存只会双源失同步、
@@ -477,17 +610,17 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // name 空（gallery-first 未绑 session）→ 只推游标、不标云脏。门 = cloudState.setDirty，**绝不暴露给 app 直调**
   //   （ADR-0016 §4 footgun：app 绕过门标脏 = 缺 parentBase → 下次 push 撞 bypass 守卫）。云脏**不 gate signedIn**：
   //   登出/SSO 抖动期间的编辑也必标，登回来才认（isCloudDirty getter 未登录返 false，安全）。
-  function edit(name) {
+  function edit(name?: string | null) {
     sub.edits.mark();
     if (name) cloudState.setDirty(name, true);
   }
 
   // transient busy（saving=本地 IDB 写盘中 / pushing=云端 push 中）：app 的 save 编排置位，status 只读（L4 ②b）。
   // 取代 app 的 _docSaving/_cloudPushing 全局——computeSaveState 从此只读 store，不再碰 app 态。
-  const _busy = { saving: false, pushing: false };
-  let _pushIdleWaiters = [];
+  const _busy: { saving: boolean; pushing: boolean } = { saving: false, pushing: false };
+  let _pushIdleWaiters: Array<() => void> = [];
   const busy = {
-    set: (k, v) => {
+    set: (k: "saving" | "pushing", v: boolean) => {
       _busy[k] = !!v;
       if (k === "pushing" && !_busy.pushing && _pushIdleWaiters.length) {   // push 落地 → 唤醒所有等待者
         const ws = _pushIdleWaiters; _pushIdleWaiters = []; ws.forEach((r) => r());
@@ -497,7 +630,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     pushing: () => _busy.pushing,
     // 等当前 push 跑完（L4 ②d）：取代 app 的 80ms 轮询 _awaitCloudPushIdle = 重抄 store serialize。
     // 无 push 在飞 → 立即 resolve；有 → 等 set("pushing",false) 那刻 resolve。
-    whenPushIdle: () => _busy.pushing ? new Promise((r) => _pushIdleWaiters.push(r)) : Promise.resolve(),
+    whenPushIdle: (): Promise<void> => _busy.pushing ? new Promise<void>((r) => _pushIdleWaiters.push(r)) : Promise.resolve(),
   };
 
   // ---- autosave cadence（L4 ②c）：store 拥「何时写本地」的节律。WebPaint **故意不 debounce-per-edit**
@@ -505,11 +638,11 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   //   取代 app 散落的 4 份 `if(localDirty && !saving) saveNow`。app：configure(persist) + start(ms) 各一次，
   //   visibility/pagehide/beforeunload 转 flush()。persist=app 注入的本地存（含 encode + blank/transient/newer
   //   skip 守卫——doc 语义留 app，store 不碰；store 只决定何时调它）。
-  let _autosaveTimer = null;
-  let _persist = async () => {};
+  let _autosaveTimer: ReturnType<typeof setInterval> | null = null;
+  let _persist: () => Promise<void> = async () => {};
   const autosave = {
-    configure: ({ persist } = {}) => { if (persist) _persist = persist; },
-    start: (intervalMs) => {
+    configure: ({ persist }: { persist?: () => Promise<void> } = {}) => { if (persist) _persist = persist; },
+    start: (intervalMs: number) => {
       if (_autosaveTimer != null) clearInterval(_autosaveTimer);
       _autosaveTimer = setInterval(() => { if (sub.edits.localDirty() && !_busy.saving) _persist(); }, intervalMs);
     },
@@ -524,10 +657,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   //   这道在其上加「全局同一时刻只一个用户态写」的更强语义（user 明确要）。
   // 安全前提：被守的 6 个流**互不内部调用**（emptyTrash 直接调 adapter，不走 flow.purge；rename 内
   //   部走 _doPush 而非 flow.saveAs）——否则嵌套会自锁。新增流要进这层守卫前先核这条。
-  let _userWriteInFlight = null;     // 在跑的用户态写 label；null = 空闲
-  const _singleFlight = (label, fn) => (...args) => {
+  let _userWriteInFlight: string | null = null;     // 在跑的用户态写 label；null = 空闲
+  const _singleFlight = <A extends unknown[], R>(label: string, fn: (...args: A) => Promise<R>) => (...args: A): Promise<R> => {
     if (_userWriteInFlight) {
-      const e = new Error(`有另一项操作进行中（${_userWriteInFlight}），请等它完成再试`);
+      const e = new Error(`有另一项操作进行中（${_userWriteInFlight}），请等它完成再试`) as Error & { code?: string };
       e.code = "STORE_BUSY";
       return Promise.reject(e);
     }

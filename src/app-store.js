@@ -3,11 +3,11 @@
 // 映射到新 lib API），所以 app.js 调用点基本不动。store.flow.push 走真编排（B1/B2/B5/C4）。
 // WebPaint 专属（不 vendor）。lib 是 canonical；这里只做 config 注入 + 装配 + 兼容 shim。
 
-import { createStore, createCloudSync, createOneDriveProvider } from "./store/index.js";
-import { CloudConflictError, CloudNameCollisionError } from "./store/cloud-sync.js";
-import { createFolderStore } from "./store/folder-store.js";
-export { resolveRef } from "./store/folder-merge.js";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
-import { createLocalAdapter } from "./store/local-adapter.js";
+import { createStore, createCloudSync, createOneDriveProvider } from "./store/index.ts";
+import { CloudConflictError, CloudNameCollisionError } from "./store/cloud-sync.ts";
+import { createFolderStore } from "./store/folder-store.ts";
+export { resolveRef } from "./store/folder-merge.ts";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
+import { createLocalAdapter } from "./store/local-adapter.ts";
 import { withBusy } from "./fullscreen-busy.ts";   // 注入给 store：用户态写流深模块强制锁屏（契约见 store.createStore）
 import { listSessions, listTrashedSessions } from "./session.js";
 import { mergeLocalCloud, mergeTrash } from "./gallery-model.js";
@@ -16,7 +16,7 @@ import { CLIENT_ID, SCOPES, sessionFileName } from "./config.js";
 import {
   getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches,
   downloadItemRange, downloadItemBlob, downloadRangeFromUrl, getDownloadUrl,
-} from "./store/providers/graph.js";
+} from "./store/providers/graph.ts";
 
 // localStorage → kv port（lib 不直碰 localStorage；红线 #7）。
 const lsKv = {

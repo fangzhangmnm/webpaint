@@ -10,15 +10,21 @@
 //   });
 //   await auth.initAuth(); if (auth.isSignedIn()) { ...store 用 provider... }
 
-import * as graph from "./graph.js";
+import * as graph from "./graph.ts";
 import {
   configureOneDriveAuth,
   isAuthConfigured, initAuth, signIn, signOut, getToken, isSignedIn,
   getActiveAccount, retrySilentSignIn, onAuthChanged, getAuthState,
-} from "./auth.js";
-import { graphToCloudProvider } from "../onedrive-provider.js";
+} from "./auth.ts";
+import { graphToCloudProvider } from "../onedrive-provider.ts";
 
-export function createOneDriveProvider(config = {}) {
+interface OneDriveConfig {
+  clientId?: string;
+  authority?: string;
+  scopes?: string[];
+  msalUrl?: string | null;
+}
+export function createOneDriveProvider(config: OneDriveConfig = {}) {
   configureOneDriveAuth(config);                  // { clientId, scopes?, authority?, msalUrl? }
   return {
     provider: graphToCloudProvider(graph),        // CloudProvider（喂 createCloudSync）

@@ -3,11 +3,11 @@
 //   rename synced → 服务端 move 保 etag；rename dirty → push 新 + 旧进 .trash（非 hard-delete）；
 //   本地永远先存新名再删旧名；saveAs 不动旧；acquire cloud→local；open onNewer=pull 备份先于覆盖。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { createStore } from "../src/store/store.js";
-import { createCloudSync } from "../src/store/cloud-sync.js";
-import { createMockProvider } from "../src/store/mock-provider.js";
-import { createMockLocal } from "../src/store/mock-local.js";
-import { memKv } from "../src/store/cloud-sync.js";
+import { createStore } from "../src/store/store.ts";
+import { createCloudSync } from "../src/store/cloud-sync.ts";
+import { createMockProvider } from "../src/store/mock-provider.ts";
+import { createMockLocal } from "../src/store/mock-local.ts";
+import { memKv } from "../src/store/cloud-sync.ts";
 
 const bytes = (s) => new TextEncoder().encode(s);
 const txt = async (b) => new TextDecoder().decode(new Uint8Array(await (b.arrayBuffer ? b.arrayBuffer() : Promise.resolve(b))));
