@@ -13,8 +13,8 @@
 //       E8 跳过离线 · H3 先存后清 · E4 离线 deferred · 三态删除不留双份 · C7 重连收敛 · H2 confirm 强制。
 
 import { toU8, bytesEqual, createSubstrate } from "./substrate.ts";
-import type { Bytes } from "./substrate.ts";
-import type { BusyFn, CloudItem, CloudSync, Kv, LocalAdapter } from "./types.ts";
+import type { Bytes, BytesSource } from "./substrate.ts";
+import type { BusyFn, CloudItem, CloudSync, FetchMetaResult, Kv, LocalAdapter } from "./types.ts";
 
 // busy 包装的统一签名（注入的 _uiBusy / 各 flow 的 opts.busy / 默认 passBusy 共用）。
 type Busy = BusyFn;
@@ -97,10 +97,6 @@ interface FlowResult {
 export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy }: StoreDeps = {} as StoreDeps) {
   const sub = createSubstrate();    // shape-agnostic 底座：编辑游标 + push-serialize + save 合流
   const _sleep = sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  // cloud-sync 实现了 weakOverride，但 types.ts 的 CloudSync 接口未声明 → 经此扩展视图取（见报告，留 lead 调和）。
-  const _cloudExt = cloud as CloudSync & {
-    weakOverride?: (name: string, bytes: Bytes) => Promise<{ item: CloudItem | null; backedUp: string | null }>;
-  };
 
   // C4：base-etag 归这个 Store 实例（= 这个 tab）的内存，open/adopt 时捕获一次。
   // push 用它当 If-Match、成功只推进**自己的**——绝不每次去读跨 tab 共享的 localStorage etag，
@@ -157,7 +153,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // _doPush / push / saveAs 等的编排回调集（doc/UI 注入）。
   interface PushOpts {
-    encode: () => unknown | Promise<unknown>;
+    encode: () => BytesSource | Promise<BytesSource>;
     getEditVersion?: () => number;
     onConflict?: (ctx: { name: string }) => ConflictChoice | Promise<ConflictChoice>;
     adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>;
@@ -175,7 +171,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     // If-Match 唯一来源：parentBase。无 parent 时——dirty=新文件(首推不带 If-Match)；非 dirty=强推用本 tab 已见版。
     const baseEtag = hasParent(name) ? parentFor(name) : (cloud.isDirty(name) ? null : seenBase(name));
     const v0 = getEditVersion();
-    const bytes = await toU8(await encode() as Bytes);      // 只编码一次，重试复用（B5 逐字节比对要相等）
+    const bytes = await toU8(await encode());      // 只编码一次，重试复用（B5 逐字节比对要相等）
     return busy("正在同步…", async () => {
       let attempt = 0, lastErr: unknown;
       while (attempt < maxAttempts) {
@@ -248,9 +244,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         : { status: "conflict", choice, resolution: "pull-failed", reason: r.reason, backupName: r.backupName, dirtyAfter: true };
     }
     // weak-override（Work 的 never-lose 覆盖）：云端→.backup，再 force-push 本地。需 bytes（仅 push 上下文有）。
-    // 注：cloud-sync 实现了 weakOverride，但 types.ts 的 CloudSync 接口未声明它 → 本地经 _cloudExt 取（见报告）。
-    if (choice === "weak-override" && bytes != null && _cloudExt.weakOverride) {
-      const r = await _cloudExt.weakOverride(name, bytes);
+    if (choice === "weak-override" && bytes != null) {
+      const r = await cloud.weakOverride(name, bytes);
       if (r.item && r.item.eTag) _base.set(name, r.item.eTag);
       clearParent(name);                        // 本地已强推上云、loser 进 .backup → episode 结束
       return { status: "resolved", resolution: "weak-override", backedUp: r.backedUp };
@@ -268,10 +263,6 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // C2：开 session 的云端 gate。E8：probe（跳过到离线）与 metadata race，无硬超时。
   // ADR-0016：云端自「本 tab 已见版」后动过时——clean（无未推/未落盘编辑）→ **静默无损快进**（不弹 sheet、_safePull 内部跳 backup）；
   //           dirty → 才弹「拉/留/分支」sheet（真分叉）。绝不静默覆盖 dirty 内容。
-  // open / refresh 读 fetchMeta 的形状（types.ts CloudSync.fetchMeta 标 CloudItem，与运行时不符 → 本地视图）。
-  type Meta = { etag: string; lastModified: string | number; size: number; item: CloudItem };
-  const _fetchMeta = (n: string): Promise<Meta | null> => cloud.fetchMeta(n) as unknown as Promise<Meta | null>;
-
   // open 的 UI/env 注入回调。
   interface OpenOpts {
     isOnline?: () => boolean;
@@ -286,17 +277,17 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     const { isOnline = () => true, probe, onNewer, adopt, busy = passBusy, now = () => 0, localDirty } = opts;
     if (!isOnline()) return { source: "local", reason: "offline" };
     return busy("检查云端…", async () => {
-      let meta: Meta | null;
+      let meta: FetchMetaResult | null;
       if (probe) {
         const raced = await Promise.race([
-          _fetchMeta(name).then((m) => ({ k: "meta" as const, m }), (e) => ({ k: "err" as const, e })),
+          cloud.fetchMeta(name).then((m) => ({ k: "meta" as const, m }), (e) => ({ k: "err" as const, e })),
           Promise.resolve(probe).then(() => ({ k: "skip" as const })),
         ]);
         if (raced.k === "skip") return { source: "local", reason: "skipped" };
         if (raced.k === "err") return { source: "local", reason: "cloud-error" };
         meta = raced.m;
       } else {
-        try { meta = await _fetchMeta(name); }
+        try { meta = await cloud.fetchMeta(name); }
         catch (_) { return { source: "local", reason: "cloud-error" }; }
       }
       if (!meta) return { source: "local", reason: "cloud-absent" };
@@ -347,8 +338,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     if (!isOnline()) return { status: "offline" };
     if (cloud.isDirty(name) || (localDirty && localDirty())) return { status: "dirty-skip" };
     return busy("检查云端…", async () => {
-      let meta: Meta | null;
-      try { meta = await _fetchMeta(name); }
+      let meta: FetchMetaResult | null;
+      try { meta = await cloud.fetchMeta(name); }
       catch (_) { return { status: "cloud-error" }; }
       if (!meta) return { status: "cloud-absent" };
       const base = seenBase(name);
@@ -400,8 +391,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   //   故此函数目前无调用方。保留为 C7 的唯一实现；接队列那轮再启用，别误当死码删掉。
   async function replayDelete(name: string, opts: { baseEtag?: string | null } = {}): Promise<FlowResult> {
     const { baseEtag } = opts;
-    let meta: Meta | null;
-    try { meta = await _fetchMeta(name); }
+    let meta: FetchMetaResult | null;
+    try { meta = await cloud.fetchMeta(name); }
     catch (_) { return { status: "deferred-offline" }; }
     if (!meta) return { status: "converged", reason: "already-gone" };
     if (baseEtag && meta.etag !== baseEtag) return { status: "conflict-edit-wins" };
@@ -487,7 +478,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   //       dirty 且有本地字节 → push 当前字节到新名 + 旧名进 .trash（非 hard-delete）。
   // 串行 against 两个 name 的 in-flight push。app 只负责取名 + UI；机制全在库内。
   interface RenameOpts {
-    encode?: () => unknown | Promise<unknown>;
+    encode?: () => BytesSource | Promise<BytesSource>;
     getEditVersion?: () => number;
     cloud?: boolean;
     busy?: Busy;
@@ -500,7 +491,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return sub.serialize2(oldName, newName, () => busy("重命名…", async () => {
       const hasLocal = local ? await local.exists(oldName) : false;
       let bytes: Bytes | null = null;
-      if (encode) bytes = await toU8(await encode() as Bytes);
+      if (encode) bytes = await toU8(await encode());
       else if (hasLocal) bytes = await toU8(await local!.get(oldName));
 
       if (local && hasLocal) {
@@ -532,7 +523,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // 另存为：写新身份，旧的不动（Photoshop 语义，调用方完成后切到新名）。
   interface SaveAsOpts {
-    encode: () => unknown | Promise<unknown>;
+    encode: () => BytesSource | Promise<BytesSource>;
     getEditVersion?: () => number;
     cloud?: boolean;
     busy?: Busy;
@@ -540,7 +531,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   async function saveAs(newName: string, opts: SaveAsOpts = {} as SaveAsOpts): Promise<FlowResult> {
     const { encode, getEditVersion = () => sub.edits.version(), cloud: doCloud = true, busy = _uiBusy } = opts;
     const run = async (): Promise<FlowResult> => {
-      const bytes = await toU8(await encode() as Bytes);
+      const bytes = await toU8(await encode());
       if (local) await local.save(newName, bytes);
       if (!doCloud) return { status: "saved", where: "local", newName };
       try {

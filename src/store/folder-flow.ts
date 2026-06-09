@@ -98,9 +98,8 @@ export function createFolderFlow(cfg: FolderFlowConfig): FolderFlow {
     }
 
     try {
-      // encode 实现返回 Blob（app rackEncode）；CloudSync.push 契约写 Bytes 但实现也吃 Blob
-      //   （cloud-sync 内部 toU8 归一化）。types.ts 契约偏窄，此处 cast 绕过（不改 types.ts）。
-      const res = await withTimeout(cloud.push(name, encode(merged) as Bytes, { baseEtag: pulled?.item?.eTag }), timeoutMs);
+      // CloudSync.push 现收 Bytes|Blob（cloud-sync 内部 toU8 归一化），encode 出 Blob 直接传。
+      const res = await withTimeout(cloud.push(name, encode(merged), { baseEtag: pulled?.item?.eTag }), timeoutMs);
       return { status: "synced", folder: merged, pushed: true, etag: res?.item?.eTag };
     } catch (e) {
       if (is412(e) && depth < 5) return _sync(merged, depth + 1);   // 有人插队 → 重拉重 merge 重推（带上已 merge 的本地）

@@ -11,7 +11,7 @@
 //   restore 撞名 (2)(3) 防覆盖。
 
 import { asideStamp } from "./move-aside.ts";   // 深模块的 move-aside 命名策略（yyyymmddhhmmss-guid 防撞）
-import type { Bytes, CloudItem, CloudProvider, CloudSync, Kv, PullResult, PushResult } from "./types.ts";
+import type { Bytes, CloudItem, CloudProvider, CloudSync, FetchMetaResult, Kv, PullResult, PushResult, WeakOverrideResult } from "./types.ts";
 
 export class CloudConflictError extends Error {
   sessionName: string;
@@ -43,15 +43,7 @@ export function memKv(): Kv {
   };
 }
 
-// cloud-sync 的 fetchMeta 返回的形状（store 读 etag/lastModified）。
-// 注意：types.ts 的 CloudSync.fetchMeta 标注为 CloudItem | null，与此不符——
-// 本地以 FetchMetaResult 为准（见最终报告，留给 lead 调和 types.ts）。
-interface FetchMetaResult {
-  etag: string;
-  lastModified: string | number;
-  size: number;
-  item: CloudItem;
-}
+// FetchMetaResult / WeakOverrideResult / PullResult 形状已收进 types.ts 的 CloudSync 契约。
 
 // createCloudSync 的配置。
 interface CloudSyncCfg {
@@ -77,7 +69,7 @@ interface CloudSyncCfg {
  * @param {string} [cfg.appKey="sync"]  kv key 前缀
  * @param {()=>number} [cfg.now]  时钟（测试注入；默认 Date.now）
  */
-export function createCloudSync(cfg: CloudSyncCfg) {
+export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   const { provider, kv, fileName, contentType = "application/octet-stream",
     trashFolder = ".trash", backupFolder = ".backup", appKey = "sync" } = cfg;
   const now = cfg.now || (() => Date.now());
@@ -99,7 +91,7 @@ export function createCloudSync(cfg: CloudSyncCfg) {
   function setDirty(name: string, dirty: boolean): void { kv.set(dirtyKey(name), dirty ? "1" : "0"); }
   function clearState(name: string): void { kv.remove(etagKey(name)); kv.remove(dirtyKey(name)); }
 
-  async function push(name: string, bytes: Bytes, opts: { baseEtag?: string | null } = {}): Promise<PushResult> {
+  async function push(name: string, bytes: Bytes | Blob, opts: { baseEtag?: string | null } = {}): Promise<PushResult> {
     const path = fileName(name);
     const baseEtag = ("baseEtag" in opts) ? opts.baseEtag : getETag(name);
     // bytes 是 Uint8Array（Bytes），byteLength 即字节数；?? size/length 是历史兼容兜底（任意来源），故收窄成 any 读。
@@ -130,7 +122,7 @@ export function createCloudSync(cfg: CloudSyncCfg) {
   }
 
   // 永远 duplicate 进本地（caller 决定落地名），不覆盖既存。
-  async function pull(name: string): Promise<(PullResult & { suggestedName: string }) | null> {
+  async function pull(name: string): Promise<PullResult | null> {
     const item = await provider.getItemByPath(fileName(name));
     if (!item) return null;
     const blob = await provider.download(item.id);
@@ -181,7 +173,7 @@ export function createCloudSync(cfg: CloudSyncCfg) {
 
   // weak-override（ADR-0009 / share-file-model）：用本地覆盖云端，但**云端 loser 先 stash 进 .backup 不丢**。
   // 永不 lossy（Work 禁 hard-override / destructive pull；这是 never-lose 的覆盖）。返 { item, backedUp }。
-  async function weakOverride(name: string, bytes: Bytes): Promise<{ item: CloudItem | null; backedUp: string | null }> {
+  async function weakOverride(name: string, bytes: Bytes): Promise<WeakOverrideResult> {
     const path = fileName(name);
     const cur = await provider.getItemByPath(path);
     let backedUp = null;
@@ -253,11 +245,12 @@ export function createCloudSync(cfg: CloudSyncCfg) {
     clearState(name);
   }
 
+  // 注：CloudConflictError 仅作为顶层 export class 暴露（无实例消费 cloud.CloudConflictError），
+  //   故不挂在返回对象上——保持返回面与 CloudSync 契约一致（annotate :CloudSync 不报 excess）。
   return {
     push, pull, fetchMeta, weakOverride,
     trash, restore, purge,
     list, listAll, listFolders, listTrash, rename, remove,
     getETag, setETag, isDirty, setDirty, clearState,
-    CloudConflictError,
   };
 }

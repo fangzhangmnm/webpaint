@@ -75,19 +75,34 @@ export interface LocalAdapter {
 }
 
 // ---- cloud-sync（session 级同步 over CloudProvider）：Store 消费的「cloud 后端」 ----
-// pull 返回拉到的字节 + 权威 item（H7：分片末响应无 item 时拉权威 etag）。
+// pull 返回拉到的字节 + 权威 item（H7：分片末响应无 item 时拉权威 etag）+ 建议落地名（撞名 caller 用）。
 export interface PullResult {
   blob: Blob;
   item: CloudItem | null;
+  suggestedName: string;
 }
 export interface PushResult {
   item: CloudItem | null;
 }
+// fetchMeta 只取轻量元信息（store open/refresh 比对 etag 用），不下载内容。
+export interface FetchMetaResult {
+  etag: string;
+  lastModified: string | number;
+  size: number;
+  item: CloudItem;
+}
+// 弱覆盖（冲突解决 weak-override 分支）：覆盖云端 + 留底，返回新 item 与备份名。
+export interface WeakOverrideResult {
+  item: CloudItem | null;
+  backedUp: string | null;
+}
 // cloud-sync 暴露给 store/app 的面（dirty/etag 状态 + push/pull/list/trash 等）。
+// push 收 Bytes|Blob（store 传 toU8 后的 Bytes，folder-flow 传 encode 出的 Blob；内部交 provider.upload）。
 export interface CloudSync {
-  push(name: string, bytes: Bytes, opts?: { baseEtag?: string | null }): Promise<PushResult>;
+  push(name: string, bytes: Bytes | Blob, opts?: { baseEtag?: string | null }): Promise<PushResult>;
   pull(name: string): Promise<PullResult | null>;
-  fetchMeta(name: string): Promise<CloudItem | null>;
+  fetchMeta(name: string): Promise<FetchMetaResult | null>;
+  weakOverride(name: string, bytes: Bytes): Promise<WeakOverrideResult>;
   trash(name: string): Promise<unknown>;
   restore(cloudItemId: string, name: string): Promise<unknown>;
   purge(cloudItemId: string): Promise<unknown>;
