@@ -1,53 +1,49 @@
-// Orchestrator：装配 + UI 绑定 + SW + theme。
+// app.js —— Composition Root（组合根）。**只装配，不实现业务**。
 //
-// 一期约束：固定 2048×2048 doc，单图层，无持久化。手感优先。
-// 后期：layers UI / IDB / OneDrive / brush presets / 选区 / 液化 / ...
+// 职责：构造核心单例（doc / board / input / editMode / history / pixelHistory / rack / currentBrush）→
+//   组一个显式 ctx → 调各深模块的 initX(ctx) 接线 → 挂 boot 加载 / auth / PWA 外壳。
+//   god-file 已肢解：UI 与业务分散到单一职责模块（session-state / editor-state / gallery-shell /
+//   topbar-menu / cloud-freshness / import-image / export-import-menu / side-windows / selection-ops /
+//   layer-undo / transient-panels / save-status / smooth-dev-panel / platform-guards / dev-console /
+//   anchored-popup / fullscreen-busy …）。每个模块 export 函数 + initX(ctx) 绑 app 单例。
 //
-// 状态归属：
-//   PaintDoc        ← 画布像素（layers），由 input/brush 写入
-//   Board           ← 视口 + 渲染
-//   BrushSettings   ← 当前笔刷参数（这里持有，传给 input.brush）
-//   App state       ← 工具 / 颜色 / 主题 / 压感开关
+// 状态归属（SSoT）：
+//   PaintDoc        ← 画布像素（layers）              Board ← 视口 + 渲染
+//   EditMode        ← 工具 / transient 相位            editor-state ← 反应式 RAM dial（color/size/压感）
+//   session-state   ← 活动文档生命周期（存/换/退）     Store(app-store) ← 本地+云同步机制
+//   currentBrush    ← 不可变 ResolvedBrush（从 dial+预设纯派生，引擎唯一吃）
 
 import { WEBPAINT_VERSION } from "./version.js";
 import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
-import { InputController, KEYBOARD_SHORTCUTS } from "./input.js";
+import { InputController } from "./input.js";
 import { PixelEdit } from "./pixel-edit.js";   // compressPixelSnap/applyPixelSnap 切到 layer-undo/topbar-menu
-import { DEFAULT_SETTINGS } from "./brush.js";
 import { resolveBrush } from "./resolved-brush.js";
-import {
-  makeDefaultRack, findBrush, defaultBrushForTool, brushesByTool,
-  newBrushId, brushToJSON, brushFromJSON, DEFAULT_FOLDER, mergeMissingDefaults, migrateBrush,
-  defaultsPromise,
-} from "./brushes.js";
-import { PANELS, registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
+import { makeDefaultRack, mergeMissingDefaults, defaultsPromise } from "./brushes.js";
+import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
 import { UndoStack } from "./history.js";
 import { EditMode } from "./edit-mode.js";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
 import { initDevConsole } from "./dev-console.ts";   // window.WebPaint 调试接口
-import { mountColorWheel } from "./ui/color-wheel.ts";   // UI 深化 candidate 1 · Vue pilot
-import { mountBrushSettings } from "./ui/brush-settings.ts";   // candidate 1 · 笔设置编辑器
 import { mountGallery } from "./ui/gallery.ts";          // candidate 1 · 图库深模块
-import { shareOrDownloadJSON, exportBrush, exportRackFolder, buildRackCode } from "./brush-io.ts";
 import { BrushRack } from "./brush-rack.ts";
 import { PwaShell } from "./pwa-shell.ts";
-import { openInputSheet, openConfirmSheet, lockSyncGate, unlockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
+import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
 import { els } from "./els.ts";
 import { safeLSSet } from "./safe-ls.ts";   // safeLS seeding 已随 editor-state 搬走
-import { applyTheme, cycleTheme, THEME_LABEL, initTheme } from "./theme.ts";
-import { initLayersPanel, renderLayersPanel, toggleLayersPanel, LAYER_MODE_LABEL } from "./layers-panel.ts";
-import { initDocOps, _updateMenuCropLabel } from "./doc-ops.ts";
+import { initTheme } from "./theme.ts";
+import { initLayersPanel, renderLayersPanel, LAYER_MODE_LABEL } from "./layers-panel.ts";
+import { initDocOps } from "./doc-ops.ts";
 import { initCloudAuthUI, updateCloudAuthUI } from "./cloud-auth-ui.ts";
 import { initSettingsMenu, applyCheckerboard } from "./settings-menu.ts";   // setMenuOpen→各菜单模块
-import { initFiltersAdjust, setAdjustOpen } from "./filters-adjust.ts";
-import { initToolbar, setTool, RACK_PANEL_BY_TOOL, updateLassoToolbar } from "./toolbar.ts";
-import { setColor, toggleColorPanel, initColorPanel } from "./color-panel.ts";
+import { initFiltersAdjust } from "./filters-adjust.ts";
+import { initToolbar, RACK_PANEL_BY_TOOL } from "./toolbar.ts";
+import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
 import { createEditorState } from "./editor-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
-import { selectionToNewLayer, _makeFullLayerSelection, initSelectionOps } from "./selection-ops.ts";
+import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
 import { updateSaveStatus, updateNewerBanner, ICON_DISK, ICON_UPLOAD, ICON_CLOUD_CHECK, ICON_CLOUD_BUSY } from "./save-status.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import { initLayerUndo, _afterDocChange, layerSpecFrom } from "./layer-undo.ts";
@@ -56,34 +52,18 @@ import { initImportImage, importImageAsLayer } from "./import-image.ts";   // im
 import { initExportImportMenu } from "./export-import-menu.ts";
 import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueLocalName } from "./gallery-shell.ts";
 import { initTopbarMenu } from "./topbar-menu.ts";
+import { initPlatformGuards } from "./platform-guards.ts";
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
-import { mountRackSheet } from "./ui/rack-sheet.ts";   // candidate 1 · 笔架 sheet（folder tabs + 笔 grid）
 import { stepFor as _stepFor, quantizeSize as _quantizeSize } from "./ui/brush-size.ts";   // [ ] 键盘调粗用（slider 映射在 <LeftDial>）
 import { computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";   // candidate 1 · currentBrush computed + 引擎桥 watch
-import {
-  loadCurrentSession, listSessions,
-  getCurrentSessionName,
-} from "./session.js";   // 剪贴板/下载/分享 → export-import-menu / selection-ops
+import { loadCurrentSession, getCurrentSessionName } from "./session.js";
 // Selection 切到 selection-ops.ts；smooth-config（SMOOTH/saveSmooth/resetSmooth）切到 smooth-dev-panel.ts
-import { fillResampleSelect } from "./resample.js";   // 图片解码/缩放 → import-image / side-windows
-import { pathJoin } from "./gallery-path.js";   // pathFolder/pathBasename 切到 session-state.ts / gallery.ts
-import { mergeLocalCloud, sliceFolder, folderHasContents } from "./gallery-model.js";
-import { collectFolders, brushesInFolder } from "./brush-rack-view.js";
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
 //   filters.js 只剩 Filter 契约 + registry + helper；
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
-import { getFilter, onFilterRegistered } from "./filters.js";   // listFilters/registerFilter → dev-console
 import "./plugins/index.js";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 // candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
-import { getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches } from "./app-store.js";
-import {
-  isAuthConfigured, initAuth, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
-  listCloudAll, listCloudFolders,
-  listCloudTrash,
-  setLastSessionSignedIn,
-  rackStore, setRackDirty, isRackDirty, resolveRef,
-  store as _store,
-} from "./app-store.js";   // cut-over：cloud/auth/graph 全走 lib（app-store shim 保旧名）
+import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, setLastSessionSignedIn, rackStore, setRackDirty, store as _store } from "./app-store.js";   // cut-over：cloud/auth/graph 全走 lib
 
 
 
@@ -197,37 +177,7 @@ const input = new InputController(board, doc, {
 // v111: iPad PWA 双击误触 window 拖动 → finger state 抽风修
 // user：「有时双击时还是会错误拖动 ipad window 然后 finger state 抽风，按钮都按不了」
 // iPad 系统手势抢断 canvas pointer 后偶尔不发 pointercancel 到 canvas，map 里残留 ghost。
-// 全局 capture-phase 监听兜底：window 级 cancel / app 隐藏 / 窗口失焦 都 cancelAllPointers
-window.addEventListener("pointercancel", () => input.cancelAllPointers(), true);
-window.addEventListener("blur", () => input.cancelAllPointers());
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") input.cancelAllPointers();
-});
-
-// v124 iPad 双击 systematic 4 层防御 layer 2 (capture-phase 拦截系统手势)
-// docs/ipad-doubletap-architecture.md。layer 1 (body touch-action) + layer 3 (user-select)
-// 都已在 styles.css 里；layer 4 (pointer 自愈) 上面 v111 已加；这里补 layer 2。
-function _isTextEditableTarget(t) {
-  if (!t) return false;
-  const tag = t.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA") return true;
-  if (t.isContentEditable) return true;
-  return false;
-}
-// capture-phase 拦 dblclick（防 iPad 系统级"双击文本选中 / 双击拖窗"劫持）
-window.addEventListener("dblclick", (e) => {
-  if (_isTextEditableTarget(e.target)) return;
-  e.preventDefault();
-}, { capture: true, passive: false });
-// 3 指及以上 touchstart：拦掉系统 split-view / slide-over 抢手
-window.addEventListener("touchstart", (e) => {
-  if (e.touches.length >= 3 && !_isTextEditableTarget(e.target)) {
-    e.preventDefault();
-  }
-}, { capture: true, passive: false });
-// gesturestart（iOS Safari 多点缩放专属事件）也拦
-window.addEventListener("gesturestart", (e) => e.preventDefault(), { capture: true, passive: false });
-window.addEventListener("gesturechange", (e) => e.preventDefault(), { capture: true, passive: false });
+// pointer 自愈 + iPad/触屏系统手势拦截 = platform-guards.ts initPlatformGuards。
 
 // 笔触 buffer live overlay：board 每帧问 brush 要，layer 之上 composite × s.opacity
 // 预览（实际像素在 endStroke 才烧进 layer）。
@@ -251,29 +201,7 @@ board.setLassoProvider(() => ({
 
 // 蚂蚁线无动画（user 反馈太干扰）；选区改变时 setLassoProvider 已触发 invalidateAll。
 
-// 套索工具栏（v65 重做）。三个 section 按状态切换：
-//   - subToolBar：lasso 工具激活时显（不论有没有选区），含 sub-tool picker / set-op / threshold
-//   - selectionActions：有选区 + 没在 floating 时显，含 变换 / 取消选区
-//   - transformCtrl：floating 状态下显，含 mode picker + 应用 / 取消
-// 两行 toolbar stack（v93）：row1 = 选区方式，row2 = 操作 / 变换
-// 剪贴板 / 复制为浮层 / 选区提取（wp:copy/paste/duplicateFloat + selectionToNewLayer）= selection-ops.ts。
-
-// 桌面拖拽图片到画布（dragover/drop）= import-image.ts initImportImage。
-
-// ---- 主题 ----
-
-// ---- Pending transients 架构级护栏 ----
-// #6 stage 2：transient（未提交的瞬时编辑态：套索浮层 / 调色预览 / crop 框）由 EditMode 全量接管。
-// 旧的 registerPendingTransient/applyAllPendingTransients 注册表已废——改为在各 transient 的入口
-// editMode.enterTransient(name, { apply, abort })，决定性动作调 editMode.applyPendingTransient()。
-// 三个 transient 的 apply/abort 闭包：
-//   transform(lasso 浮层)：apply=commit 浮层，abort=取消浮层（见下两个命名函数）
-//   adjust(调色)：apply/abort = _closeFilterPanel(true/false)（在 _openFilterPanel 处注册）
-//   crop：apply/abort = _closeCropMode（丢弃裁切框；真裁只走 Apply 按钮，在 _openCropMode 处注册）
-// transient 期间结构上 canDraw=false（不可能起 stroke）；面板 suppress/restore 暂仍手动（stage 5 改派生）。
-
-// ---- 工具 ----
-
+// ---- 笔架 boot：异步加载 + toolStates 补齐 ----
 // Brush rack 异步加载：boot 时拿 IDB 缓存，把 toolStates 缺失字段从 rack 补齐
 // 然后应用当前 tool 的 state
 const _backfillToolStates = () => {
@@ -331,6 +259,7 @@ initSmoothDevPanel(ctx);
 initTransientPanels(ctx);
 initLayerUndo(ctx);
 initSideWindows(ctx);
+initPlatformGuards(ctx);
 
 // size/opacity popup + 两个 slider 监听 + slider-DOM 同步已搬进 <LeftDial>（src/ui/left-dial.ts）。
 // setSize/setOpacity 现在只写反应式 dial SSoT + LS；<LeftDial> 绑定 dial 自动反映 + 自闪 popup。
@@ -458,70 +387,7 @@ initGalleryShell(ctx);     // 图库外壳（需 ctx.gallery + late keys）
 initTopbarMenu(ctx);       // 顶栏/菜单/sheet/save 触发 事件接线（需 ctx.gallery）
 initCloudAuthUI(ctx);
 
-// (galleryCloseBtn 已删除 gallery-first，无 close-back-to-canvas 按钮)
-// 加号/云/图库菜单 popup 的开启接线 = gallery-shell.ts initGalleryShell。
-// 动作代理到主菜单已有 handler（.click() 即触发，无需主菜单可见）——不重复逻辑/状态。
-els.galleryMenuForceUpdate?.addEventListener("click", () => {
-  els.galleryMenuPopup.classList.add("hidden");
-  els.menuForcePwaReset?.click();
-});
-els.galleryMenuTheme?.addEventListener("click", () => {
-  els.galleryMenuPopup.classList.add("hidden");
-  els.menuTheme?.click();
-});
-document.addEventListener("pointerdown", (e) => {
-  if (!els.galleryAddPopup.classList.contains("hidden") &&
-      !els.galleryAddPopup.contains(e.target) &&
-      !els.galleryAddBtn.contains(e.target)) {
-    els.galleryAddPopup.classList.add("hidden");
-  }
-  if (!els.cloudAccountPopup.classList.contains("hidden") &&
-      !els.cloudAccountPopup.contains(e.target) &&
-      !els.cloudIconBtn.contains(e.target)) {
-    els.cloudAccountPopup.classList.add("hidden");
-  }
-  if (els.galleryMenuPopup && !els.galleryMenuPopup.classList.contains("hidden") &&
-      !els.galleryMenuPopup.contains(e.target) &&
-      !els.galleryMenuBtn.contains(e.target)) {
-    els.galleryMenuPopup.classList.add("hidden");
-  }
-});
-
-// 加号 popup 的 新建/导入照片/剪贴板新建 接线 = gallery-shell.ts initGalleryShell。
-
-// + 新建文件夹（云端真文件夹为准：在 OneDrive 上建真文件夹，需登录+在线）
-els.addNewFolder?.addEventListener("click", async () => {
-  els.galleryAddPopup.classList.add("hidden");
-  // 文件夹模型「云端真文件夹为准」→ 必须登录+在线才能建（否则无处持久化空文件夹）
-  if (!isSignedIn() || navigator.onLine === false) {
-    setStatus("新建文件夹需先登录云端（空文件夹存在 OneDrive 上）", true);
-    return;
-  }
-  const stem = await openInputSheet("新建文件夹", "新文件夹", { placeholder: "文件夹名" });
-  if (stem == null) return;
-  const trimmed = stem.trim();
-  if (!trimmed) { setStatus("文件夹名不能空", true); return; }
-  if (trimmed.includes("/")) { setStatus("文件夹名不能含 /（要建嵌套请进对应文件夹再点新建）", true); return; }
-  const fullPath = pathJoin(gallery.getFolder(), trimmed);
-  // 已存在 check（本地+云的 item 派生 + 云端真文件夹）
-  let allNames = [], cloudFolders = [];
-  try { allNames = allNames.concat((await listSessions()).map(s => s.name)); } catch {}
-  try {
-    const all = await listCloudAll();
-    allNames = allNames.concat(all.files.map(c => c.path.replace(/\.ora$/i, "")));
-    cloudFolders = all.folders;
-  } catch (e) { console.warn("[folder] cloud list failed:", e); }
-  const fullPrefix = `${fullPath}/`;
-  const exists = allNames.some(n => n === fullPath || n.startsWith(fullPrefix)) || cloudFolders.includes(fullPath);
-  if (exists) { setStatus(`文件夹 "${trimmed}" 已存在`, true); return; }
-  await withBusy(`正在创建文件夹 ${trimmed}…`, async () => {
-    try { await ensureSubfolder(fullPath); setStatus(`已建文件夹：${trimmed}`); }
-    catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus("建文件夹失败：" + (e && e.message || e), true); }
-  });
-  gallery.refresh();
-});
-
-// 新建作品 sheet / IDB 占用 / 配额警告 / humanTime/Size / uniqueLocalName = gallery-shell.ts。
+// 图库 popup 开启/关闭 + 菜单代理 + 新建文件夹 + 新建作品 sheet + IDB 占用/配额 = gallery-shell.ts。
 
 // ---- 启动收尾：尝试加载上次的 session（异步，不阻塞 UI 显示） ----
 setStatus("就绪");

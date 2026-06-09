@@ -19,12 +19,14 @@
 import { session } from "./session-state.ts";
 import { els } from "./els.ts";
 import { listSessions, readImageFromClipboard } from "./session.js";
-import { listCloudSessionsRecursive, isSignedIn } from "./app-store.js";
+import { listCloudSessionsRecursive, listCloudAll, ensureSubfolder, isSignedIn } from "./app-store.js";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
+import { openInputSheet } from "./sheets.ts";
+import { pathJoin } from "./gallery-path.js";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initGalleryShell(ctx) 注入）----
-let editMode: any, board: any, gallery: any, doc: any, _store: any, setStatus: any;
+let editMode: any, board: any, gallery: any, doc: any, _store: any, setStatus: any, withBusy: any;
 
 // trash-bar / add / trash 按钮的可见性随视图（旧 renderGallery 内联，现 app chrome 显式管）。
 function _galleryChrome(view) {
@@ -185,6 +187,7 @@ export function initGalleryShell(ctx) {
   doc = ctx.doc;
   _store = ctx.store;
   setStatus = ctx.setStatus;
+  withBusy = ctx.withBusy;
 
   // 加号 popup
   els.galleryAddBtn.addEventListener("click", (e) => {
@@ -266,5 +269,65 @@ export function initGalleryShell(ctx) {
     // doc 替换 + 落盘 + 切指针 + checkpoint + 关库全在 session.newDoc（session-state.ts）。
     await session.newDoc({ name, w, h });
     setStatus(`新建：${name}（${w}×${h}）`);
+  });
+
+  // 图库菜单 popup 内动作代理到主菜单已有 handler（.click() 即触发，不重复逻辑/状态）。
+  els.galleryMenuForceUpdate?.addEventListener("click", () => {
+    els.galleryMenuPopup.classList.add("hidden");
+    els.menuForcePwaReset?.click();
+  });
+  els.galleryMenuTheme?.addEventListener("click", () => {
+    els.galleryMenuPopup.classList.add("hidden");
+    els.menuTheme?.click();
+  });
+  // 三个 popup 的 outside-click 关闭
+  document.addEventListener("pointerdown", (e: any) => {
+    if (!els.galleryAddPopup.classList.contains("hidden") &&
+        !els.galleryAddPopup.contains(e.target) &&
+        !els.galleryAddBtn.contains(e.target)) {
+      els.galleryAddPopup.classList.add("hidden");
+    }
+    if (!els.cloudAccountPopup.classList.contains("hidden") &&
+        !els.cloudAccountPopup.contains(e.target) &&
+        !els.cloudIconBtn.contains(e.target)) {
+      els.cloudAccountPopup.classList.add("hidden");
+    }
+    if (els.galleryMenuPopup && !els.galleryMenuPopup.classList.contains("hidden") &&
+        !els.galleryMenuPopup.contains(e.target) &&
+        !els.galleryMenuBtn.contains(e.target)) {
+      els.galleryMenuPopup.classList.add("hidden");
+    }
+  });
+
+  // + 新建文件夹（云端真文件夹为准：在 OneDrive 上建真文件夹，需登录+在线）
+  els.addNewFolder?.addEventListener("click", async () => {
+    els.galleryAddPopup.classList.add("hidden");
+    // 文件夹模型「云端真文件夹为准」→ 必须登录+在线才能建（否则无处持久化空文件夹）
+    if (!isSignedIn() || navigator.onLine === false) {
+      setStatus("新建文件夹需先登录云端（空文件夹存在 OneDrive 上）", true);
+      return;
+    }
+    const stem = await openInputSheet("新建文件夹", "新文件夹", { placeholder: "文件夹名" });
+    if (stem == null) return;
+    const trimmed = stem.trim();
+    if (!trimmed) { setStatus("文件夹名不能空", true); return; }
+    if (trimmed.includes("/")) { setStatus("文件夹名不能含 /（要建嵌套请进对应文件夹再点新建）", true); return; }
+    const fullPath = pathJoin(gallery.getFolder(), trimmed);
+    // 已存在 check（本地+云的 item 派生 + 云端真文件夹）
+    let allNames: any[] = [], cloudFolders: any[] = [];
+    try { allNames = allNames.concat((await listSessions()).map((s: any) => s.name)); } catch {}
+    try {
+      const all = await listCloudAll();
+      allNames = allNames.concat(all.files.map((c: any) => c.path.replace(/\.ora$/i, "")));
+      cloudFolders = all.folders;
+    } catch (e) { console.warn("[folder] cloud list failed:", e); }
+    const fullPrefix = `${fullPath}/`;
+    const exists = allNames.some((n) => n === fullPath || n.startsWith(fullPrefix)) || cloudFolders.includes(fullPath);
+    if (exists) { setStatus(`文件夹 "${trimmed}" 已存在`, true); return; }
+    await withBusy(`正在创建文件夹 ${trimmed}…`, async () => {
+      try { await ensureSubfolder(fullPath); setStatus(`已建文件夹：${trimmed}`); }
+      catch (e: any) { console.warn("[folder] cloud ensure failed:", e); setStatus("建文件夹失败：" + (e && e.message || e), true); }
+    });
+    gallery.refresh();
   });
 }
