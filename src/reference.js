@@ -247,9 +247,12 @@ export class ReferenceWindow {
     this.canvas.addEventListener("dblclick", () => this.fitToPanel());
 
     // 窗口大小变 → 重画
+    // v216: canvas.width 赋值立即清空画布；同步 _render 而非 rAF defer，
+    // 避免 resize 时 1 帧空白闪屏。
     const ro = new ResizeObserver(() => {
       this._resizeCanvasToBody();
-      this._invalidate();
+      if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+      this._render();
       this._savePos();
     });
     ro.observe(this.body);
