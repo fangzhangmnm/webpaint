@@ -407,11 +407,12 @@
       <div class="lasso-toolbar hidden" id="lassoToolbarRow2">
         <div class="lasso-section hidden" id="lassoSelectionActions">
           <button class="lasso-tool-btn" id="lassoTransformBtn" type="button" title="变换 / 移动">变换</button>
-          <button class="lasso-tool-btn" id="lassoFillBtn" type="button" title="用当前颜色填选区">填色</button>
-          <button class="lasso-tool-btn" id="lassoClearBtn" type="button" title="清除选区内像素">清除</button>
-          <span class="lasso-tool-sep" aria-hidden="true">|</span>
-          <button class="lasso-tool-btn" id="lassoDuplicateBtn" type="button" title="复制选区到新层">复制层</button>
-          <button class="lasso-tool-btn" id="lassoMoveToLayerBtn" type="button" title="选区移动到新层（旧层清除）">移到层</button>
+          <!-- v218：以下操作需选区；没选区时（变换会隐式全选）整组靠 .transform-only 隐藏 -->
+          <button class="lasso-tool-btn lasso-needs-sel" id="lassoFillBtn" type="button" title="用当前颜色填选区">填色</button>
+          <button class="lasso-tool-btn lasso-needs-sel" id="lassoClearBtn" type="button" title="清除选区内像素">清除</button>
+          <span class="lasso-tool-sep lasso-needs-sel" aria-hidden="true">|</span>
+          <button class="lasso-tool-btn lasso-needs-sel" id="lassoDuplicateBtn" type="button" title="复制选区到新层">复制层</button>
+          <button class="lasso-tool-btn lasso-needs-sel" id="lassoMoveToLayerBtn" type="button" title="选区移动到新层（旧层清除）">移到层</button>
           <!-- v124：反选 / 去选 挪到 Row 1 跟 全选 一起 (user) -->
         </div>
         <div class="lasso-section hidden" id="lassoTransformCtrl">
@@ -929,6 +930,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-8977d5db3a54.mjs"></script>
+    <script type="module" src="./dist/webpaint-2434f7ca187a.mjs"></script>
   </body>
 </html>

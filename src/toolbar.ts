@@ -51,6 +51,8 @@ export function updateLassoToolbar() {
   const showRow2 = showSelectionActions || showTransformCtrl;
   lassoToolbarRow2.classList.toggle("hidden", !showRow2);
   lassoSelectionActions.classList.toggle("hidden", !showSelectionActions);
+  // 没选区时只露"变换"（隐式全选），其余 .lasso-needs-sel 靠此 class 隐藏
+  lassoSelectionActions.classList.toggle("transform-only", !hasSelection);
   lassoTransformCtrl.classList.toggle("hidden", !showTransformCtrl);
 
   // 高亮当前 sub-tool / set-op / transform mode
@@ -215,25 +217,15 @@ export function initToolbar(ctx) {
     updateLassoToolbar();
   });
 
-  // 选区动作：变换。v217：没选区时自动全选当前层（整层 bbox 当 selection）。
+  // 选区动作：变换。v217/218：没选区时让 lasso 用整层做隐式全选（fallbackFullLayer）。
+  // selection 状态全归 lasso 管，toolbar 不直接动 doc.selection。
   (document.getElementById("lassoTransformBtn") as any).addEventListener("click", () => {
-    const layer = doc.activeLayer;
-    if (!layer) return;
-    let tempSel = false;
-    if (!doc.selection) {
-      if (layer.bboxW <= 0 || layer.bboxH <= 0) return;
-      doc.selection = Selection.full(layer.bboxW, layer.bboxH, layer.bboxX, layer.bboxY);
-      tempSel = true;
-    }
-    const ok = input.lasso.liftSelectionForTransform(layer);
+    if (!doc.activeLayer) return;
+    const ok = input.lasso.liftSelectionForTransform(doc.activeLayer, { fallbackFullLayer: true });
     if (ok) {
-      // 全选是隐式的，变换完后取消（不写入 history）
-      if (tempSel) doc.selection = null;
       editMode.enterTransient("transform", { apply: _commitTransform, abort: _cancelTransform });
       updateLassoToolbar();
       _suppressTransientPanels("transform");
-    } else {
-      if (tempSel) doc.selection = null;
     }
   });
 

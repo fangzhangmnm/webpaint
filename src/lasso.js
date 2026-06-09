@@ -175,9 +175,13 @@ export class LassoEngine {
   // 完成后进 floating 状态（transform 子状态）。
   // 默认进入 free 模式（不再走 v56 那种"selected sub-state"）
   // opts.cut: true(默认) = 挖空源层（Ctrl+T 变换）；false = 不挖洞，源层保留（Ctrl+D 复制为浮层）
+  // opts.fallbackFullLayer: 没选区时用整层做隐式全选（v218；selection 局部构造，不写 doc.selection）
   liftSelectionForTransform(layer, opts = {}) {
     if (this._floating) return false;
-    const sel = this.doc?.selection;
+    let sel = this.doc?.selection;
+    if (!sel && opts.fallbackFullLayer && layer && layer.bboxW > 0 && layer.bboxH > 0) {
+      sel = Selection.full(layer.bboxW, layer.bboxH, layer.bboxX, layer.bboxY);
+    }
     if (!sel) return false;
     const lbX = layer.bboxX, lbY = layer.bboxY, lbW = layer.bboxW, lbH = layer.bboxH;
     // 选区可能跨 layer.bbox 外；clip 到交集

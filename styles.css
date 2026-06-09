@@ -208,6 +208,8 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 .lasso-section.hidden { display: none; }
 /* 其他工具模式下有选区：lasso 工具栏只露"取消选区"（选区只是蒙板，不给 lasso 全套） */
 #lassoSubToolBar.lasso-deselect-only > *:not(#lassoDeselectBtn) { display: none !important; }
+/* v218 没选区：选区操作行只露"变换"（点了会隐式全选），其余需选区的按钮藏起来 */
+#lassoSelectionActions.transform-only .lasso-needs-sel { display: none !important; }
 .lasso-tool-threshold {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--ink-soft);
