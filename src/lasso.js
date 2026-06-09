@@ -199,6 +199,29 @@ export class LassoEngine {
     fctx.globalCompositeOperation = "source-over";
     const floatingImageData = fctx.getImageData(0, 0, w, h);
 
+    // v217 (user：「从 lasso 进变换时应 trim 透明像素以决定 bbox」)：
+    // 选区可能是全层选或包含大片透明区域（PNG）；trim 出有像素的紧 bbox，
+    // 这样 mesh 初始大小贴内容，handles 不会空悬在透明区。
+    let tx0 = x0, ty0 = y0, tw = w, th = h;
+    {
+      const d = floatingImageData.data;
+      let mnX = w, mnY = h, mxX = 0, mxY = 0;
+      for (let r = 0; r < h; r++) {
+        for (let c = 0; c < w; c++) {
+          if (d[(r * w + c) * 4 + 3] > 0) {
+            if (c < mnX) mnX = c;
+            if (c > mxX) mxX = c;
+            if (r < mnY) mnY = r;
+            if (r > mxY) mxY = r;
+          }
+        }
+      }
+      if (mnX <= mxX && mnY <= mxY) {
+        tx0 = x0 + mnX; ty0 = y0 + mnY;
+        tw = mxX - mnX + 1; th = mxY - mnY + 1;
+      }
+    }
+
     // 挖空 layer（cut=false 时跳过 → 复制为浮层，源层不动）
     if (opts.cut !== false) {
       const lctx = layer.ctx;
@@ -216,10 +239,10 @@ export class LassoEngine {
       mode: "free",                  // 默认就是 free 模式（不再有 selected sub-state）
       meshN: 2,
       mesh: [
-        [{ x: x0,     y: y0     }, { x: x0 + w, y: y0     }],
-        [{ x: x0,     y: y0 + h }, { x: x0 + w, y: y0 + h }],
+        [{ x: tx0,      y: ty0      }, { x: tx0 + tw, y: ty0      }],
+        [{ x: tx0,      y: ty0 + th }, { x: tx0 + tw, y: ty0 + th }],
       ],
-      uniformAspect: w / Math.max(1, h),
+      uniformAspect: tw / Math.max(1, th),
       _renderCache: null,
     };
     this._state = "floating";

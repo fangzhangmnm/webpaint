@@ -23,10 +23,13 @@ export function setAdjustOpen(open) {
   els.adjustPopup.classList.toggle("hidden", !open);
   els.topAdjustBtn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) {
-    // 锚到按钮下方右对齐
+    // 锚到按钮下方右对齐；v217：若 lasso 工具栏可见，进一步往下挪以免遮挡
     const r = els.topAdjustBtn.getBoundingClientRect();
-    const w = els.adjustPopup.offsetWidth || 200;
-    els.adjustPopup.style.top = (r.bottom + 4) + "px";
+    const stack = document.getElementById("lassoToolbarStack");
+    const stackBottom = (stack && !stack.classList.contains("hidden"))
+      ? stack.getBoundingClientRect().bottom
+      : 0;
+    els.adjustPopup.style.top = (Math.max(r.bottom, stackBottom) + 4) + "px";
     els.adjustPopup.style.right = (window.innerWidth - r.right) + "px";
     els.adjustPopup.style.left = "auto";
   }
