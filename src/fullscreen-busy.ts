@@ -18,8 +18,16 @@ export function hideFullscreenBusy() {
 }
 
 // withBusy: 长 op 包装 → 全屏 spinner + 防误点 + 报状态。统一所有 trash/rename/卸载 等长操作。
+// **可重入（ref-count）**：现在 Store 深模块内部对 rename/del 等用户态写也强制 withBusy，
+//   会嵌在 app 调用方的 withBusy 之内。若不计数，内层 finally 会在外层还在跑时就 hide 遮罩
+//   → 提前解锁。计数后只有最外层结束才 hide。
+let _busyDepth = 0;
 export async function withBusy(label, fn) {
+  _busyDepth++;
   showFullscreenBusy(label);
   try { return await fn(); }
-  finally { hideFullscreenBusy(); }
+  finally {
+    _busyDepth--;
+    if (_busyDepth <= 0) { _busyDepth = 0; hideFullscreenBusy(); }
+  }
 }

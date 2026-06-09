@@ -23,8 +23,32 @@ const passBusy = (label, fn) => fn();   // 默认 busy：直接跑
  * @param {number} [deps.maxAttempts=4]
  * @param {number} [deps.backoffMs=200]
  * @param {(ms:number)=>Promise} [deps.sleep]
+ * @param {(label:string,fn:Function)=>Promise} [deps.busy] 全屏锁包装（app 注入 withBusy）。
+ *
+ *   ── 给后面复用本库的 agent：你要接什么样一个 UI ──
+ *   busy(label, fn) 的契约：
+ *     1. 立刻显示一个**全屏 modal 遮罩**（spinner + label 文案），**吃掉所有用户输入**
+ *        （点击/触摸/键盘都不漏到底层 UI）——这是「防误点」，不是装饰。
+ *     2. `await fn()` 跑真正的活，**原样返回**它的结果 / 透传它的异常。
+ *     3. fn 结束（成功或抛）后**收起遮罩**。
+ *     4. **必须可重入**：本库内部会在 busy 里再调到别的 busy 流（rename→push），app
+ *        调用方往往也已经包了一层 busy。请用 ref-count（进入 +1 / 退出 -1，归零才 hide），
+ *        否则内层一结束就把外层的遮罩收了 → 提前解锁。参见 app 侧 fullscreen-busy.ts。
+ *     不接（留默认 passBusy）也能跑——只是没有锁屏，靠下面的 serialize2 保数据一致。
+ *
+ *   ── 「busy 时深模块要不要拒绝其它接口调用？」——不要，而且不靠 busy 防并发 ──
+ *   busy 纯是 **UI 层**手段（挡住*用户*在长操作中途再点别的）。它**不是**本库的并发原语：
+ *     · 数据竞争的真正护栏是 substrate 的 **serialize2 / push-serialize**（按 name 串行：rename
+ *       挡住对 old/new 两名的 in-flight 写；push 各自链尾串行）。这是 per-identity、细粒度、正确的。
+ *     · 全局「busy 中拒绝一切调用」太粗：后台流（autosave 的 _doPush、freshness probe）本就该
+ *       和某个 trash-empty 并行跑，硬拒会误伤；且 busy=passBusy 时这道全局锁直接消失，不可靠。
+ *   所以：UI 并发 → 交给 busy 遮罩；数据并发 → 交给 serialize2。两者分工，深模块不另设全局互斥。
+ *
+ *   **深模块强制**：用户态写流（rename/saveAs/del/restore/purge/emptyTrash）默认用注入的 busy
+ *   锁屏，调用方忘了包也照锁——挡住改名中途点刷新/tile 读到半截态那类竞态（见 0B 三联症）。
+ *   后台流（_doPush/autosave/freshness probe）不默认锁（否则自动保存会闪全屏遮罩）。
  */
-export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep } = {}) {
+export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy } = {}) {
   const sub = createSubstrate();    // shape-agnostic 底座：编辑游标 + push-serialize + save 合流
   const _sleep = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
 
@@ -246,7 +270,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // C5：删除 = move-aside。三态（仅本地 / 仅云端 / 两者）。两者 → 云端进 .trash + 本地直接删（不留双份）。
   async function del(name, opts = {}) {
-    const { isOnline = () => true, confirm, onDirtyWarn, busy = passBusy } = opts;
+    const { isOnline = () => true, confirm, onDirtyWarn, busy = _uiBusy } = opts;
     if (confirm && !(await confirm({ title: "删除", body: name, danger: true }))) return { status: "cancelled" };
     if (cloud.isDirty(name) && onDirtyWarn && !(await onDirtyWarn({ name }))) return { status: "cancelled" };
 
@@ -286,7 +310,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // 从 trash 恢复：本地先恢复（撞名自动 (2)，拿到实际落名）→ 云端按同一名恢复（撞名自动 (2)，cloud.js 已实现）。
   // 两端都可有可无（local-only / cloud-only / both 一条路）。返回实际恢复的 name。
   async function restore(opts = {}) {
-    const { fromCloud, cloudItemId, targetName, trashKey, busy = passBusy } = opts;
+    const { fromCloud, cloudItemId, targetName, trashKey, busy = _uiBusy } = opts;
     return busy("恢复中…", async () => {
       let name = targetName || null, restoredLocal = false, restoredCloud = false;
       if (trashKey && local) { const n = await local.restore(trashKey); if (n) { name = n; restoredLocal = true; } }
@@ -298,7 +322,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // 永久删（不可恢复）→ 强制 danger confirm（H2）。两端都可有可无（trashKey 本地 / cloudItemId 云端）。
   async function purge(opts = {}) {
-    const { trashKey, cloudItemId, confirm, busy = passBusy } = opts;
+    const { trashKey, cloudItemId, confirm, busy = _uiBusy } = opts;
     if (confirm && !(await confirm({ title: "彻底删除", body: "不可恢复", danger: true }))) return { status: "cancelled" };
     return busy("彻底删除…", async () => {
       if (trashKey && local && local.purgeTrash) await local.purgeTrash(trashKey);
@@ -315,7 +339,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   //   ⚠ 别做成「自动续上次未完成的清空」——下次 trash 可能已有新 item，自动续会连新 item 一起删 = 灾难。
   // 云端 bounded 并发（默 5，每项仍独立原子），避免大量文件串行太慢。
   async function emptyTrash(opts = {}) {
-    const { isOnline, busy = passBusy, concurrency = 5 } = opts;
+    const { isOnline, busy = _uiBusy, concurrency = 5 } = opts;
     return busy("清空回收站…", async () => {
       let purged = 0; const failed = [];
       if (local && local.listTrash && local.purgeTrash) {
@@ -347,7 +371,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   //       dirty 且有本地字节 → push 当前字节到新名 + 旧名进 .trash（非 hard-delete）。
   // 串行 against 两个 name 的 in-flight push。app 只负责取名 + UI；机制全在库内。
   async function rename(oldName, newName, opts = {}) {
-    const { encode, getEditVersion, cloud: doCloud = true, busy = passBusy } = opts;
+    const { encode, getEditVersion, cloud: doCloud = true, busy = _uiBusy } = opts;
     if (!oldName || !newName || oldName === newName) return { status: "noop" };
     // 非 active 改名（无 encode）不该被活 doc 的编辑游标污染 dirtyAfter → 用冻结游标。
     const gev = encode ? (getEditVersion || (() => sub.edits.version())) : () => 0;
@@ -386,7 +410,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // 另存为：写新身份，旧的不动（Photoshop 语义，调用方完成后切到新名）。
   async function saveAs(newName, opts = {}) {
-    const { encode, getEditVersion = () => sub.edits.version(), cloud: doCloud = true, busy = passBusy } = opts;
+    const { encode, getEditVersion = () => sub.edits.version(), cloud: doCloud = true, busy = _uiBusy } = opts;
     const run = async () => {
       const bytes = await toU8(await encode());
       if (local) await local.save(newName, bytes);

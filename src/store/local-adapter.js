@@ -19,14 +19,20 @@ import { LOCAL_BACKUP_PREFIX, asideStamp } from "./move-aside.js";
 export function createLocalAdapter() {
   return {
     async save(name, oraBlob) {
-      // app 主存路径用 saveNow（live doc，不解码）；这里给 Store 流（exit flush / pull 覆盖）用，非热路径。
+      // app 主存路径用 saveNow（live doc，不解码）；这里给 Store 流（exit flush / pull 覆盖 /
+      // rename / push）用，非热路径。
+      // **必须归一化成 Blob**：Store 流经 toU8 传进来的是 Uint8Array，但本地持久层契约是 Blob——
+      //   pkg.ora.size 给图库列大小（Uint8Array 只有 byteLength → undefined → 列「0B」），
+      //   decodeOraToDoc/zipUnpack 的 BlobReader 也只吃 Blob（Uint8Array → 抛 → 打不开 + 渲不出 thumb）。
+      //   rename 后「变 0B / 点进去打不开 / thumb 问号」三联症全是这条漏归一化。
+      const blob = oraBlob instanceof Blob ? oraBlob : new Blob([oraBlob], { type: "application/zip" });
       // 解码一次渲 thumb，用**原始 ora bytes** 落盘（不 re-encode，保字节）。
       // 解码 / 渲 thumb 失败**不阻断落盘**：字节是真相，thumb 是派生——宁可少缩略图也绝不丢字节
       //   （否则坏/新格式 ora 会卡死整条 pull/flush，见 docs/reports 候选 4）。
       let thumb = null;
-      try { thumb = await renderThumbBlob(await decodeOraToDoc(oraBlob), 256); }
+      try { thumb = await renderThumbBlob(await decodeOraToDoc(blob), 256); }
       catch (e) { console.warn("[local] thumb 渲染失败，仅存字节：", e); }
-      await putSessionPkg(name, oraBlob, thumb);   // 与 saveSession 共用唯一落盘原语
+      await putSessionPkg(name, blob, thumb);   // 与 saveSession 共用唯一落盘原语（落 Blob）
     },
 
     async get(name) {

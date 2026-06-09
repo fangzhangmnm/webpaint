@@ -8,6 +8,7 @@ import { CloudConflictError, CloudNameCollisionError } from "./store/cloud-sync.
 import { createFolderStore } from "./store/folder-store.js";
 export { resolveRef } from "./store/folder-merge.js";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.js";
+import { withBusy } from "./fullscreen-busy.ts";   // 注入给 store：用户态写流深模块强制锁屏（契约见 store.createStore）
 import { listSessions, listTrashedSessions } from "./session.js";
 import { mergeLocalCloud, mergeTrash } from "./gallery-model.js";
 import { CLIENT_ID, SCOPES, sessionFileName } from "./config.js";
@@ -43,7 +44,7 @@ export const cloud = createCloudSync({
 const rackSync = createCloudSync({ provider, kv: lsKv, fileName: () => "brush-rack.json", contentType: "application/json", appKey: "webpaint-rack" });
 
 const local = createLocalAdapter();
-export const store = createStore({ cloud, local, kv: lsKv });
+export const store = createStore({ cloud, local, kv: lsKv, busy: withBusy });
 export { CloudConflictError, CloudNameCollisionError };
 
 // ============ 兼容 shim（旧 cloud.js / auth.js / graph.js 名字 → 新 lib）============
