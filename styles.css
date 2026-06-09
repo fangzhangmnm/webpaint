@@ -59,6 +59,9 @@ html, body {
   overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
+  /* v216 (user：「手指长按 iPad 会弹选择菜单」)：全局压死 iOS 长按 callout/放大镜，
+     不止 .board——工具栏/浮窗/handle 长按也别弹。input/textarea 单独豁免见下。 */
+  -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
   /* 全局墙掉浏览器双击 zoom / pinch zoom。canvas 单独 touch-action: none */
   touch-action: manipulation;
@@ -68,6 +71,13 @@ html, body {
    在某些 Safari 版本上 element 默认仍允许 double-tap zoom */
 button, input, .swatch, .tool, .float-panel, .top-bar, .hud, .sheet, .backdrop, .toast {
   touch-action: manipulation;
+}
+
+/* v216：文本输入框豁免全局 callout/select 禁用，否则改名/搜索时长按无法选词/粘贴 */
+input[type="text"], input[type="search"], input:not([type]), textarea, [contenteditable] {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .board {

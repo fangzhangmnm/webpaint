@@ -1330,6 +1330,7 @@ function bicubicSample(sdat, w, h, sx, sy, ddat, dstIdx) {
   // 4 taps: x = ix-1, ix, ix+1, ix+2；t = tap_x - sx
   const kx = [k((ix - 1) - sx), k(ix - sx), k((ix + 1) - sx), k((ix + 2) - sx)];
   const ky = [k((iy - 1) - sy), k(iy - sy), k((iy + 1) - sy), k((iy + 2) - sy)];
+  // v216：同 bilinear，走 premultiplied alpha 防选区边缘黑边
   let r = 0, g = 0, b = 0, a = 0;
   for (let j = 0; j < 4; j++) {
     const yy = iy - 1 + j;
@@ -1339,22 +1340,27 @@ function bicubicSample(sdat, w, h, sx, sy, ddat, dstIdx) {
       if (xx < 0 || xx >= w) continue;
       const p = (yy * w + xx) * 4;
       const ww = kx[i] * ky[j];
-      r += sdat[p]     * ww;
-      g += sdat[p + 1] * ww;
-      b += sdat[p + 2] * ww;
-      a += sdat[p + 3] * ww;
+      const av = sdat[p + 3];
+      r += sdat[p]     * av * ww;
+      g += sdat[p + 1] * av * ww;
+      b += sdat[p + 2] * av * ww;
+      a += av * ww;
     }
   }
-  ddat[dstIdx]     = Math.max(0, Math.min(255, r));
-  ddat[dstIdx + 1] = Math.max(0, Math.min(255, g));
-  ddat[dstIdx + 2] = Math.max(0, Math.min(255, b));
   ddat[dstIdx + 3] = Math.max(0, Math.min(255, a));
+  if (a < 1e-4) { ddat[dstIdx] = ddat[dstIdx + 1] = ddat[dstIdx + 2] = 0; return; }
+  ddat[dstIdx]     = Math.max(0, Math.min(255, r / a));
+  ddat[dstIdx + 1] = Math.max(0, Math.min(255, g / a));
+  ddat[dstIdx + 2] = Math.max(0, Math.min(255, b / a));
 }
 // bilinear sample（同 liquify.js 那份；private copy 避免跨模块依赖）
 // v124 (user：「stamp 时有黑边」BIG bug)：caller 已 clamp u/v∈[0,1] 才进；
 // 但 sx = u·srcW 在边缘可能 = srcW，x1 = ix+1 = srcW 越界 → 老代码 invalid neighbor
 // 被 skip 但 weight 仍计入 → output 被 (1-fx) 拉暗变半透 → 看起来就是黑边 + 半透。
 // **修**：clamp x0/x1/y0/y1 到合法范围（replicate edge）→ 边缘像素值完整，无暗化。
+// v216 (user：「transform 时有黑边 = png 黑边」)：选区边缘外是 (0,0,0,0) 透明黑，
+// 直 alpha 插值会把 RGB 往黑里拉 → 经典 PNG 暗边。改 premultiplied alpha 插值：
+// RGB 先乘各自 alpha 再插值，最后除回 → 透明邻居对 RGB 贡献为 0，无黑边。
 function bilinearSample(sdat, w, h, sx, sy, ddat, dstIdx) {
   const ix = Math.floor(sx);
   const iy = Math.floor(sy);
@@ -1375,9 +1381,16 @@ function bilinearSample(sdat, w, h, sx, sy, ddat, dstIdx) {
   const w10 = fx * (1 - fy);
   const w01 = (1 - fx) * fy;
   const w11 = fx * fy;
-  for (let c = 0; c < 4; c++) {
-    ddat[dstIdx + c] = sdat[p00 + c] * w00 + sdat[p10 + c] * w10
-                     + sdat[p01 + c] * w01 + sdat[p11 + c] * w11;
+  const a00 = sdat[p00 + 3], a10 = sdat[p10 + 3], a01 = sdat[p01 + 3], a11 = sdat[p11 + 3];
+  // alpha 直接插值
+  const a = a00 * w00 + a10 * w10 + a01 * w01 + a11 * w11;
+  ddat[dstIdx + 3] = a;
+  if (a < 1e-4) { ddat[dstIdx] = ddat[dstIdx + 1] = ddat[dstIdx + 2] = 0; return; }
+  // RGB 走 premultiplied：Σ(rgb·alpha·w) / Σ(alpha·w)
+  for (let c = 0; c < 3; c++) {
+    const pm = sdat[p00 + c] * a00 * w00 + sdat[p10 + c] * a10 * w10
+             + sdat[p01 + c] * a01 * w01 + sdat[p11 + c] * a11 * w11;
+    ddat[dstIdx + c] = pm / a;
   }
 }
 
