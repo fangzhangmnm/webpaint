@@ -31,7 +31,7 @@
    空文件夹 = OneDrive 上 `ensureSubfolder` 建的真文件夹，lib 新增 `cloud.listAll()/listFolders()`（一次 walk 带回含空文件夹，排 `.trash`/`.backup`）带回。
    代价：未登录/离线建不了纯本地空文件夹（无处持久化）；删最后一个文件后云端父文件夹仍在 → 空文件夹自然保留。
 2. **本遍只做 card view，做深做对**；list view 留给以后（画图 app card 天然，list 是 pdf/txt 文档类的形态）。**没做 card/list 切换。**
-3. **不做拖拽**（iPad 触屏 drag-drop 不可靠，spec 也把触屏批选标 TBD）→ **卡片菜单加「移动到…」**：lockSyncGate 复用成 folder picker，移动 = 跨文件夹 rename（同 GUID，无副本，ADR-0011）。
+3. **不做拖拽**（iPad 触屏 drag-drop 不可靠，spec 也把触屏批选标 TBD）→ **卡片菜单加「移动到…」**：lockSyncGate 复用成 folder picker，移动 = 跨文件夹 rename（云端服务端 move 保 itemId/etag，无副本；身份 = path/name，GUID 方案 2026-06-07 已回滚，见 sync-identity-decision-2026-06-07.md）。
 
 **另交付**：新建命名 `yyyymmdd / -2 / -3`（替「未命名」，避让本地+云重名）；gallery footer + 菜单显**版本号**；gallery header 加**菜单**（强制更新 + 主题，动作代理到主菜单 handler，不重复状态）。
 

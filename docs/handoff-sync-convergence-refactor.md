@@ -45,12 +45,6 @@
 
 git log（main）：`8a41b89`(backlog) ← `07892ff`(backup 统一, **= 当前 prod**) ← `f52fb91`(0字节) ← `40b5a52` ← `91afb51`(dirty SSoT) ← `56fc903` ← `9843cb2`。
 
-## 协作警告 ⚠️
-
-**另一个 agent 正在并发改 `src/store/`**（已见 store.js / local-adapter.js / store-flow.test.mjs 工作区改动：local adapter 新增了 `listTrash`/`purgeTrash`，flow 可能加了 emptyTrash 等）。`CONTEXT.md`、`docs/gallery-state-rewrite.md` 也有未提交改动（**别动、别 revert**，是有意的）。
-- 动手前 `git status` + 拉最新，按当前真实代码定位（行号会漂）。
-- 提交只 `git add` 你自己改的文件，别把别人未提交的卷进去。
-
 ## 怎么验
 
 - `node test/run.mjs`（截至 `8a41b89` 是 41 passed；另一 agent 动过 store-flow.test.mjs，先重跑拿当前数）。

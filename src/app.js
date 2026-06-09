@@ -22,7 +22,6 @@ import {
   defaultsPromise,
 } from "./brushes.js";
 import { PANELS, registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
-import { getMeta, setMeta } from "./storage.js";
 import { UndoStack } from "./history.js";
 import { EditMode } from "./edit-mode.js";
 import { ReferenceWindow } from "./reference.js";
@@ -30,22 +29,36 @@ import { PaletteWindow } from "./palette.js";
 import { mountColorWheel } from "./ui/color-wheel.ts";   // UI 深化 candidate 1 · Vue pilot
 import { mountBrushSettings } from "./ui/brush-settings.ts";   // candidate 1 · 笔设置编辑器
 import { mountGallery } from "./ui/gallery.ts";          // candidate 1 · 图库深模块
+import { shareOrDownloadJSON, exportBrush, exportRackFolder, buildRackCode } from "./brush-io.ts";
+import { BrushRack } from "./brush-rack.ts";
+import { PwaShell } from "./pwa-shell.ts";
+import { openInputSheet, openConfirmSheet, lockSyncGate, unlockSyncGate, settleSyncGate } from "./sheets.ts";
+import { els } from "./els.ts";
+import { safeLSSet } from "./safe-ls.ts";   // safeLS seeding 已随 editor-state 搬走
+import { applyTheme, cycleTheme, THEME_LABEL, initTheme } from "./theme.ts";
+import { initLayersPanel, renderLayersPanel, toggleLayersPanel, LAYER_MODE_LABEL } from "./layers-panel.ts";
+import { initDocOps, _updateMenuCropLabel } from "./doc-ops.ts";
+import { initCloudAuthUI, updateCloudAuthUI } from "./cloud-auth-ui.ts";
+import { initSettingsMenu, setMenuOpen, applyCheckerboard } from "./settings-menu.ts";
+import { initFiltersAdjust, setAdjustOpen } from "./filters-adjust.ts";
+import { initToolbar, setTool, RACK_PANEL_BY_TOOL, updateLassoToolbar } from "./toolbar.ts";
+import { setColor, toggleColorPanel, initColorPanel } from "./color-panel.ts";
+import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
+import { createEditorState } from "./editor-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
 import { mountRackSheet } from "./ui/rack-sheet.ts";   // candidate 1 · 笔架 sheet（folder tabs + 笔 grid）
 import { stepFor as _stepFor, quantizeSize as _quantizeSize } from "./ui/brush-size.ts";   // [ ] 键盘调粗用（slider 映射在 <LeftDial>）
-import { reactive, computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";   // candidate 1 · 反应式 dial SSoT
+import { computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";   // candidate 1 · currentBrush computed + 引擎桥 watch
 import {
-  saveSession, loadCurrentSession, openSession, removeSession, listSessions,
-  listTrashedSessions,
-  getCurrentSessionName, setCurrentSessionName,
+  loadCurrentSession, listSessions,
+  getCurrentSessionName,
   triggerDownload, shareOrDownloadBlob,
   copyImageToClipboard, readImageFromClipboard, writeImageBlobToClipboard,
-} from "./session.js";
+} from "./session.js";   // saveSession/openSession/removeSession/listTrashedSessions 切到 session-state.ts
 import { Selection } from "./selection.js";
 import { SMOOTH, SMOOTH_DEFAULTS, saveSmooth, resetSmooth } from "./smooth-config.js";
 import { decodeImageFile, fitWithin, canvasToBlob, smartResample, fillResampleSelect } from "./resample.js";
-import { resizeCropRect, cropRectToInts } from "./crop-geometry.js";
-import { pathFolder, pathBasename, pathJoin } from "./gallery-path.js";
+import { pathJoin } from "./gallery-path.js";   // pathFolder/pathBasename 切到 session-state.ts / gallery.ts
 import { mergeLocalCloud, sliceFolder, folderHasContents } from "./gallery-model.js";
 import { collectFolders, brushesInFolder } from "./brush-rack-view.js";
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
@@ -55,7 +68,7 @@ import { getFilter, listFilters, registerFilter, onFilterRegistered } from "./fi
 import "./plugins/index.js";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 // candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
 import { getExporter, listExportersByKind, registerExporter, listExporters } from "./exporters.js";
-import { decodeOraToDoc, encodeDocToOra, parseAppVersion } from "./ora.js";
+import { decodeOraToDoc } from "./ora.js";   // encodeDocToOra/parseAppVersion 切到 session-state.ts
 import { getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches } from "./app-store.js";
 import { getOrFetchCloudThumb, clearCloudThumbCache, stats as cloudThumbStats, config as cloudThumbConfig, resetStats as cloudThumbResetStats } from "./cloud-thumb-cache.js";
 import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTelemetry } from "./cloud-thumbs.js";
@@ -63,155 +76,14 @@ import {
   isAuthConfigured, initAuth, signIn, signOut, isSignedIn, getActiveAccount, retrySilentSignIn,
   listCloudSessionsRecursive, listCloudAll, listCloudFolders,
   listCloudTrash,
-  isCloudDirty, CloudConflictError, CloudNameCollisionError,
-  getLastSessionSignedIn, setLastSessionSignedIn, getKnownETag,
+  isCloudDirty,
+  getLastSessionSignedIn, setLastSessionSignedIn,
   rackStore, setRackDirty, isRackDirty, resolveRef,
   store as _store,
 } from "./app-store.js";   // cut-over：cloud/auth/graph 全走 lib（app-store shim 保旧名）
 
-const THEMES = ["auto", "day", "night"];
-const THEME_LABEL = { auto: "跟随系统", day: "日", night: "夜" };
 
-const els = {
-  board: document.getElementById("board"),
-  topBar: document.getElementById("topBar"),
-  zoomLabel: document.getElementById("zoomLabel"),
-  canvasSizeLabel: document.getElementById("canvasSizeLabel"),
-  statusLabel: document.getElementById("statusLabel"),
-  versionLabel: document.getElementById("versionLabel"),
-  leftDialMount: document.getElementById("leftDialMount"),   // <LeftDial> Vue 组件挂载点（size/opacity/笔指示/popup）
-  undoBtn: document.getElementById("undoButton"),
-  redoBtn: document.getElementById("redoButton"),
-  layersBtn: document.getElementById("layersButton"),
-  layersPanel: document.getElementById("layersPanel"),
-  layersPanelHead: document.getElementById("layersPanelHead"),
-  layersPanelClose: document.getElementById("layersPanelClose"),
-  layersList: document.getElementById("layersList"),
-  layersCountLabel: document.getElementById("layersCountLabel"),
-  layerAddBtn: document.getElementById("layerAddBtn"),
-  // v123：del/up/down 挪进 per-row "⋯" 菜单；footer 只剩 layerAddBtn
-  menuBtn: document.getElementById("menuButton"),
-  menuPanel: document.getElementById("menuPanel"),
-  menuLongPressPick: document.getElementById("menuLongPressPick"),
-  menuPressureSize: document.getElementById("menuPressureSize"),
-  menuPressureOpacity: document.getElementById("menuPressureOpacity"),
-  menuTheme: document.getElementById("menuTheme"),
-  menuClear: document.getElementById("menuClear"),
-  // v120 (user：「导出项目和导出语义分开 + 小扳手」)
-  // 旧 5 项 (menuImport / menuExportPng/Jpg/Ora/Psd / menuClipboardCopy/Paste) → 新 3 行
-  menuExportProject: document.getElementById("menuExportProject"),
-  menuExportProjectConfig: document.getElementById("menuExportProjectConfig"),
-  menuExportImage: document.getElementById("menuExportImage"),
-  menuExportImageConfig: document.getElementById("menuExportImageConfig"),
-  menuImportImage: document.getElementById("menuImportImage"),
-  menuImportImageConfig: document.getElementById("menuImportImageConfig"),
-  menuFit: document.getElementById("menuFit"),
-  menuBrushSettings: document.getElementById("menuBrushSettings"),
-  // v109: brushPanel + brush* sliders 撤了（平滑 per-preset，进 brush settings 调）
-  topSaveBtn: document.getElementById("topSaveBtn"),
-  topAdjustBtn: document.getElementById("topAdjustBtn"),
-  adjustPopup: document.getElementById("adjustPopup"),
-  // v110 crop / resample / adjust
-  resampleBackdrop: document.getElementById("resampleBackdrop"),
-  resampleSheet: document.getElementById("resampleSheet"),
-  resampleW: document.getElementById("resampleW"),
-  resampleH: document.getElementById("resampleH"),
-  resampleLock: document.getElementById("resampleLock"),
-  resampleMode: document.getElementById("resampleMode"),
-  resampleCancel: document.getElementById("resampleCancel"),
-  resampleConfirm: document.getElementById("resampleConfirm"),
-  adjustPanel: document.getElementById("adjustPanel"),
-  adjustPanelHead: document.getElementById("adjustPanelHead"),
-  adjustPanelTitle: document.getElementById("adjustPanelTitle"),
-  adjustParamsBody: document.getElementById("adjustParamsBody"),
-  // v123 topGalleryBtn 撤了，图库挪进菜单 (id=menuGallery)
-  menuGallery: document.getElementById("menuGallery"),
-  menuReference: document.getElementById("menuReference"),
-  menuResetBrushRack: document.getElementById("menuResetBrushRack"),
-  menuForcePwaReset: document.getElementById("menuForcePwaReset"),
-  menuSmoothDev: document.getElementById("menuSmoothDev"),
-  referencePanel: document.getElementById("referencePanel"),
-  referencePanelHead: document.getElementById("referencePanelHead"),
-  referencePanelClose: document.getElementById("referencePanelClose"),
-  referenceBody: document.getElementById("referenceBody"),
-  referenceCanvas: document.getElementById("referenceCanvas"),
-  referenceEmpty: document.getElementById("referenceEmpty"),
-  referenceLoadBtn: document.getElementById("referenceLoadBtn"),
-  referenceLiveBtn: document.getElementById("referenceLiveBtn"),
-  referenceFitBtn: document.getElementById("referenceFitBtn"),
-  referenceFileInput: document.getElementById("referenceFileInput"),
-  galleryFull: document.getElementById("galleryFull"),
-  galleryCloseBtn: document.getElementById("galleryCloseBtn"),
-  galleryAddBtn: document.getElementById("galleryAddBtn"),
-  galleryAddPopup: document.getElementById("galleryAddPopup"),
-  galleryTrashBtn: document.getElementById("galleryTrashBtn"),
-  galleryTrashBar: document.getElementById("galleryTrashBar"),
-  galleryTrashBack: document.getElementById("galleryTrashBack"),
-  galleryTrashMenuBtn: document.getElementById("galleryTrashMenuBtn"),
-  galleryTrashMenuPopup: document.getElementById("galleryTrashMenuPopup"),
-  galleryEmptyTrashBtn: document.getElementById("galleryEmptyTrashBtn"),
-  addNewFolder: document.getElementById("addNewFolder"),
-  addNew: document.getElementById("addNew"),
-  addImportPhoto: document.getElementById("addImportPhoto"),
-  addImportClipboard: document.getElementById("addImportClipboard"),
-  cloudIconBtn: document.getElementById("cloudIconBtn"),
-  cloudAccountPopup: document.getElementById("cloudAccountPopup"),
-  cloudAccountInfo: document.getElementById("cloudAccountInfo"),
-  cloudSignInBtn: document.getElementById("cloudSignInBtn"),
-  cloudSignOutBtn: document.getElementById("cloudSignOutBtn"),
-  cloudRefreshBtn: document.getElementById("cloudRefreshBtn"),
-  galleryFootUsage: document.getElementById("galleryFootUsage"),
-  galleryFootVersion: document.getElementById("galleryFootVersion"),
-  galleryMenuBtn: document.getElementById("galleryMenuBtn"),
-  galleryMenuPopup: document.getElementById("galleryMenuPopup"),
-  galleryMenuVersion: document.getElementById("galleryMenuVersion"),
-  galleryMenuForceUpdate: document.getElementById("galleryMenuForceUpdate"),
-  galleryMenuTheme: document.getElementById("galleryMenuTheme"),
-  newDocBackdrop: document.getElementById("newDocBackdrop"),
-  newDocSheet: document.getElementById("newDocSheet"),
-  newDocName: document.getElementById("newDocName"),
-  newDocPreset: document.getElementById("newDocPreset"),
-  newDocCustomRow: document.getElementById("newDocCustomRow"),
-  newDocW: document.getElementById("newDocW"),
-  newDocH: document.getElementById("newDocH"),
-  newDocConfirm: document.getElementById("newDocConfirm"),
-  newDocCancel: document.getElementById("newDocCancel"),
-  menuRename: document.getElementById("menuRename"),
-  menuSaveAs: document.getElementById("menuSaveAs"),
-  menuRevertToOpen: document.getElementById("menuRevertToOpen"),
-  menuCheckerboard: document.getElementById("menuCheckerboard"),
-  menuPixelGrid: document.getElementById("menuPixelGrid"),
-  menuCheckUpdate: document.getElementById("menuCheckUpdate"),
-  oraFileInput: document.getElementById("oraFileInput"),
-  genericBackdrop: document.getElementById("genericBackdrop"),
-  genericSheet: document.getElementById("genericSheet"),
-  genericSheetTitle: document.getElementById("genericSheetTitle"),
-  genericSheetMessage: document.getElementById("genericSheetMessage"),
-  genericSheetInput: document.getElementById("genericSheetInput"),
-  genericSheetConfirm: document.getElementById("genericSheetConfirm"),
-  genericSheetCancel: document.getElementById("genericSheetCancel"),
-  toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
-  activeSwatch: document.getElementById("activeSwatch"),
-  // 浮动色板
-  colorPanel: document.getElementById("colorPanel"),
-  colorPanelHead: document.getElementById("colorPanelHead"),
-  colorPanelClose: document.getElementById("colorPanelClose"),
-  colorPanelBody: document.querySelector("#colorPanel .float-panel-body"),  // 色轮 Vue 组件挂载点
-  // clear sheet
-  clearSheet: document.getElementById("clearSheet"),
-  clearBackdrop: document.getElementById("clearBackdrop"),
-  // update toast
-  updateToast: document.getElementById("updateToast"),
-  updateReload: document.getElementById("updateToastReload"),
-  updateDismiss: document.getElementById("updateToastDismiss"),
-};
 
-function safeLS(key, fallback) {
-  try { return localStorage.getItem(key); } catch { return fallback; }
-}
-function safeLSSet(key, val) {
-  try { localStorage.setItem(key, val); } catch {}
-}
 
 // cut-over 完成：_store 从 app-store import（接 lib）。explicit 保存恒走 store.flow.push（B1/B2/B5/retry/C4）。
 
@@ -228,171 +100,35 @@ els.versionLabel.textContent = WEBPAINT_VERSION || "?";
 if (els.galleryFootVersion) els.galleryFootVersion.textContent = WEBPAINT_VERSION || "?";
 if (els.galleryMenuVersion) els.galleryMenuVersion.textContent = `版本：${WEBPAINT_VERSION || "?"}`;
 
-const state = {
-  // tool（当前工具）的 SSoT 已搬到 editMode（editMode.current()）。见 edit-mode.js / CONTEXT.md。
-  // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
-  filterBrush: null,
-  color: safeLS("webpaint.color") || "#1b1b1b",
-  // 旧 state.brush（可变 BrushSettings 单例）已收敛成不可变 ResolvedBrush（currentBrush computed，
-  //   从反应式 SSoT 纯派生）。当前笔的 SSoT = toolStates(dial) + 预设 + color + 下面两个全局压感开关。
-  //   见 docs/reports/20260608-ui-deepening-and-plugin-survey.html 候选 3 / resolved-brush.js。
-  // 全局（非 per-tool）压感开关。boot 读 LS（v202 修原始 bug：旧版写 webpaint.pToSize 从不读回 → 重载弹回默认）。
-  //   未设过 → DEFAULT(开)；显式 "0" → 关。applyPressureSize/Opacity 仍按 toggle 写 LS。
-  pressureToSize: safeLS("webpaint.pToSize") !== "0",
-  pressureToOpacity: safeLS("webpaint.pToOpacity") !== "0",
-  longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
-  // v125 (user：「透明背景显示棋盘这个设置跟文件走」)
-  //   checkerboard 从全局 LS 改 per-doc：保存在 webpaint/state.json，跟文件走
-  //   初始 false；adoptLoadedDoc 时按文件值覆盖；新建 doc 默认 false
-  checkerboard: false,
-  // 注：液化设置不在这里——液化 v132 migrate 进 filterBrush，mode=variant 下拉、
-  // size/strength=左栏 slider；引擎默认 bleed="edge"（见 src/liquify.js / plugins/liquify.js）。
-};
-
-// 颜色同步：旧 syncBrushColor 写 state.brush.color 单例；现在 color 是反应式 SSoT 的一个轴，
-// 当前笔由 currentBrush computed 自动重派生（见下），此处不再有可变单例可写。
-
-// ============ Brush rack + per-tool state（v81→v82）============
-//
-// **两层 state**（user：「这个比笔刷预设还重要」）：
-//   1. brushRack —— 全账户共享笔架，preset 定义。IDB + 云同步（v83+）
-//   2. toolStates —— 每工具的 current size / flow / activeBrushId，**per-doc**
-//      存在 .ora webpaint/state.json，跟 doc 一起走，不跨 doc
-//
-// 当前笔 = currentBrush computed（不可变 ResolvedBrush）：从反应式 SSoT [toolStates(dial) + 活动预设 + color
-//   + 全局压感开关] 纯派生（resolveBrush），整体替换、绝不原地改。BrushEngine 只读 currentBrush.value。
-//   （旧 state.brush 可变单例 / refreshCurrentBrush 手动 fan-out 已废，见 resolved-brush.js / CONTEXT [[当前笔]]）。
-//
-// color 是全局（不分工具），跟 doc 走（也存 webpaint/state.json）。
-let _brushRack = null;
-const RACK_META_KEY = "brush-rack";
-
-// 默认 tool state：从 rack preset 拿初值
-// v99：toolStates { size, opacity, flow, activeBrushId }
-//   opacity / flow 选 preset 时都初始化为 1.0 (user：「默认 opacity 默认 flow 两个字段不要，都是 1」)
-function defaultToolStateFor(tool) {
-  if (_brushRack) {
-    const brush = defaultBrushForTool(_brushRack, tool);
-    if (brush) {
-      return {
-        size: brush.size.base,
-        opacity: 1.0,
-        flow:    1.0,
-        activeBrushId: brush.id,
-        activeBrushName: brush.name,
-      };
-    }
-  }
-  return { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null, activeBrushName: null };
-}
-
-// 解析某 toolState 的活动笔 = resolveRef（id→name 兜底）。命中后回填 id/name（healing：跨设备/
-// 重导入换了 GUID 时靠 name 兜，并把本机 GUID 写回 ts）。见 CONTEXT [[活动笔刷引用]]。
-function _findToolBrush(ts) {
-  if (!ts || !_brushRack) return null;
-  const b = resolveRef(_brushRack.brushes, { id: ts.activeBrushId, name: ts.activeBrushName });
-  if (b) { ts.activeBrushId = b.id; ts.activeBrushName = b.name; }
-  return b;
-}
-// 纯查找（不回写 ts）——给 currentBrush computed 用：computed 内绝不可有副作用（写 reactive 会触发循环/告警）。
-// GUID→name healing 回写留 _findToolBrush，在 applyToolState / selectBrushPresetForTool 等显式路径触发。
-function findToolBrushPure(ts) {
-  if (!ts || !_brushRack) return null;
-  return resolveRef(_brushRack.brushes, { id: ts.activeBrushId, name: ts.activeBrushName });
-}
-
-// state.toolStates：per-tool 持久化（per-doc）。
-// shapes **不**自己存——user：「笔刷和形状用同样的 brush class，就是同一个 ref」
-// shapes 路径全部 alias 到 brush（见 getRackToolKey）
-// v98：toolStates { size, opacity, flow, activeBrushId }
-//   opacity → 左侧栏 slider 2（label「透」）
-//   flow    → 只在 brush settings 里调（默认隐藏到「高级」），preset 决定初值
-// reactive：dial 是反应式 SSoT（candidate 1）。任何 dial 改动自动重派生当前笔（见下 computed）。
-// 序列化安全：ORA 走 JSON.stringify（ora.js:265），透读 reactive 代理无碍（非 structuredClone）。
-state.toolStates = reactive({
-  // brush 的 boot dial 从 LS 兜底（旧 state.brush 从同源 LS 种子，保留「记住上次粗细/透」行为；
-  //   rack/doc 载入后会被 preset 默认 / ORA toolStates 覆盖，与旧路径一致）。
-  brush:    { size: parseFloat(safeLS("webpaint.size") || "12"), opacity: parseFloat(safeLS("webpaint.opacity") || "1"), flow: 1.0, activeBrushId: null },
-  smudge:   { size: 16, opacity: 1.0, flow: 0.8, activeBrushId: null },
-  eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
-  // v132 (user：「记得文件持久化 filter brush 的 selection, radius, transparency」)
-  //   size = radius，opacity = transparency / flow，variantId = 子算法选择（如 blur/sharp）
-  //   variantId 由 Filter.brushVariants[].id 索引；空时 = 该 Filter 默认
-  filterBrush: { size: 32, opacity: 1.0, flow: 1.0, activeBrushId: null, variantId: null },
-});
-
-// 反应式 dial SSoT 的其余轴：color / 压感开关 / 当前工具 / 笔架版本。
-// color 与压感用 defineProperty 代理回 dialReactive —— app 里 state.color / state.pressureTo* 的读写零改动，背后反应式。
-const dialReactive = reactive({
-  tool: "brush",                 // 镜像 editMode.current()（含 transient）；_syncEditModeUI 同步
-  color: state.color,
-  pressureToSize: state.pressureToSize,
-  pressureToOpacity: state.pressureToOpacity,
-  rackVersion: 0,                // 笔架内容改了（编辑保存/重置）bump，让 computed 重算活动预设
-  canDraw: true,                 // 镜像 editMode.canDraw()；_syncEditModeUI 同步 → <LeftDial> 滑块 disabled
-});
-for (const _k of ["color", "pressureToSize", "pressureToOpacity"]) {
-  Object.defineProperty(state, _k, {
-    get: () => dialReactive[_k], set: (v) => { dialReactive[_k] = v; },
-    configurable: true, enumerable: true,
-  });
-}
-// airbrush 工具 alias 到 brush（user：「喷枪笔架合并到笔刷」）。
-// v120：shapes tool 撤了（user：「以后不要这个 tool 了」），shapes 会变 brush preset 的 toggle。
-// 笔架是一个池子，所有 tool="brush" 的 preset 都在这。spacing.kind="time" 的 preset 就是喷枪。
-function getRackToolKey(tool) {
-  return tool === "airbrush" ? "brush" : tool;
-}
-
-async function loadBrushRack() {
-  try {
-    let stored = await getMeta(RACK_META_KEY);
-    if (stored && Array.isArray(stored.brushes) && stored.brushes.length > 0) {
-      // 补缺 default brush（解 stale default 问题）；merge 只加缺的，不覆盖
-      // v98 migration：老 schema brushes 转新（sizeMin/flowMin → coeff；
-      // airbrush/bufferMode → compositeMode；opacity → defaultOpa；flow.base → defaultFlow）
-      let migrated = false;
-      for (const b of stored.brushes) {
-        const before = JSON.stringify(b);
-        migrateBrush(b);
-        if (JSON.stringify(b) !== before) migrated = true;
-      }
-      // v122 r2: atomic swap，不 mutate
-      const newRack = mergeMissingDefaults(stored);
-      if (newRack) stored = newRack;
-      if (migrated || newRack) {
-        try { await setMeta(RACK_META_KEY, stored); } catch (_) {}
-      }
-      return stored;
-    }
-  } catch (e) {
-    console.warn("[brush-rack] load failed:", e);
-  }
-  const rack = makeDefaultRack();
-  try { await setMeta(RACK_META_KEY, rack); } catch (e) { console.warn("[brush-rack] save default failed:", e); }
-  return rack;
-}
-async function persistBrushRack() {
-  if (!_brushRack) return;
-  try { await setMeta(RACK_META_KEY, _brushRack); }
-  catch (e) { console.warn("[brush-rack] persist failed:", e); }
-}
+// 编辑器「当前设成什么样」的反应式 RAM SSoT（主色 / 每工具 dial / 压感开关 / 棋盘等）= editor-state.ts。
+// 当前笔（currentBrush computed）从这束 dial + 笔架预设纯派生（见下，组合接线留 app）。
+const { state, dialReactive } = createEditorState();
 
 // 左栏 dial = <LeftDial> Vue 组件（src/ui/left-dial.ts）：笔指示按钮(tap=rack/长按=设置) + size/opacity 竖滑块 + size popup。
 // 全绑定反应式 dial SSoT（getter 读 state.toolStates/dialReactive → 组件 computed 自动追踪）。
 // 取代旧的 updateSidebarBrushIndicator / _sidebarBrushBtn 手势 / showSizePopup / 两个 slider 监听 / applyToolState 的 slider-DOM-push。
-const _leftDial = () => state.toolStates[getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
+// 笔架深模块（src/brush-rack.ts）。editMode 走 thunk（构造早于 editMode）；DOM/icons/panels 晚绑 init()。
+const rack = new BrushRack({
+  state, dialReactive,
+  editMode: () => editMode,
+  setStatus, confirm: openConfirmSheet,
+  openExclusive, closeExclusive, registerPanel,
+  rackStore, setRackDirty,
+  isSignedIn, isOnline: () => navigator.onLine !== false,
+});
+
+const _leftDial = () => state.toolStates[rack.getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
 const leftDial = mountLeftDial(els.leftDialMount, {
   getSize: () => _leftDial().size,
   getOpacity: () => _leftDial().opacity ?? 1.0,
-  getSizeMax: () => { void dialReactive.rackVersion; return findToolBrushPure(_leftDial())?.size?.max || 200; },
-  getBrushName: () => { void dialReactive.rackVersion; return findToolBrushPure(_leftDial())?.name || "—"; },
+  getSizeMax: () => { void dialReactive.rackVersion; return rack.findToolBrushPure(_leftDial())?.size?.max || 200; },
+  getBrushName: () => { void dialReactive.rackVersion; return rack.findToolBrushPure(_leftDial())?.name || "—"; },
   getCanDraw: () => dialReactive.canDraw,
   getZoom: () => board?.viewport?.scale ?? 1,
   onSize: (px) => setSize(px),
   onOpacity: (frac) => setOpacity(frac),
   onBrushTap: () => { const id = RACK_PANEL_BY_TOOL[editMode.current()]; if (id) openExclusive(id); },
-  onBrushLongpress: () => { const b = _findToolBrush(_leftDial()); if (b) { closeExclusive(); _openBrushSettings(b.id); } },
+  onBrushLongpress: () => { const b = rack.findToolBrush(_leftDial()); if (b) { closeExclusive(); rack.openBrushSettings(b.id); } },
 });
 
 // ============ 当前笔（ResolvedBrush）——引擎唯一吃的不可变值 ============
@@ -406,8 +142,8 @@ const leftDial = mountLeftDial(els.leftDialMount, {
 // **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。
 const currentBrush = computed(() => {
   void dialReactive.rackVersion;   // 依赖笔架版本（编辑/重置预设后重算活动预设字段）
-  const ts = state.toolStates[getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
-  const preset = _brushRack ? findToolBrushPure(ts) : null;   // 无笔架 → null → DEFAULT 兜底
+  const ts = state.toolStates[rack.getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
+  const preset = rack.findToolBrushPure(ts);   // 无笔架 → null → DEFAULT 兜底
   return resolveBrush({
     preset,
     size: ts.size, opacity: ts.opacity ?? 1.0, flow: ts.flow ?? 1.0,
@@ -422,49 +158,13 @@ watch(currentBrush, () => { if (input?.brush?.invalidateStamp) input.brush.inval
 
 // 当前工具的 dial（size/opacity/flow + activeBrushId），shapes/airbrush alias 到 brush。
 function currentDials() {
-  return state.toolStates[getRackToolKey(editMode.current())] || state.toolStates.brush;
+  return state.toolStates[rack.getRackToolKey(editMode.current())] || state.toolStates.brush;
 }
 
-// 切到 tool t：确保该工具 dial 有活动笔（缺则填默认）+ GUID→name healing。
-// slider/笔指示/当前笔全是反应式（<LeftDial> computed + currentBrush computed），切工具改 dialReactive.tool 即自动跟随，
-// 不再手动 push slider DOM / refreshCurrentBrush（旧 applyToolState 那堆已删）。
-function applyToolState(tool) {
-  if (!_brushRack) return;
-  const key = getRackToolKey(tool);
-  const ts = state.toolStates[key];
-  if (!ts) return;
-  if (ts.activeBrushId == null) {
-    Object.assign(ts, defaultToolStateFor(key));   // 反应式：组件 + currentBrush 自动跟随
-  }
-  _findToolBrush(ts);   // 显式路径做 healing 回写（computed 用纯版不回写）
-}
 
 // 笔粗分段量化（_segPositions/sliderPosToSize/sizeToSliderPos/_sliderMaxPos/_stepFor/_quantizeSize）
 // 已搬进 src/ui/brush-size.ts（纯 + node 测，form 与 dial 共用），见上方 import。
 
-// 滑块改值 → 写回当前工具的 toolState（shapes 写到 brush）
-function writeCurrentToolSize(v) {
-  const ts = state.toolStates[getRackToolKey(editMode.current())];
-  if (ts) ts.size = v;
-}
-function writeCurrentToolOpacity(v) {
-  const ts = state.toolStates[getRackToolKey(editMode.current())];
-  if (ts) ts.opacity = v;
-}
-function selectBrushPresetForTool(tool, brushId) {
-  const key = getRackToolKey(tool);
-  const ts = state.toolStates[key];
-  if (!ts) return;
-  const brush = findBrush(_brushRack, brushId);
-  if (!brush) return;
-  ts.activeBrushId = brushId;
-  ts.activeBrushName = brush.name;
-  ts.size    = brush.size.base;
-  // v99r2：opacity 从 preset.defaultOpa 取（默 1.0）；flow 永远 1.0（preset 不存 flow）
-  ts.opacity = brush.defaultOpa ?? 1.0;
-  ts.flow    = 1.0;
-  if (key === getRackToolKey(editMode.current())) applyToolState(editMode.current());
-}
 
 // Undo / redo 共享栈（command pattern + 注册 handler，详见
 // docs/undo-architecture.md）。input.js 注册 "stroke" handler；layer
@@ -603,136 +303,6 @@ board.setLassoProvider(() => ({
 //   - selectionActions：有选区 + 没在 floating 时显，含 变换 / 取消选区
 //   - transformCtrl：floating 状态下显，含 mode picker + 应用 / 取消
 // 两行 toolbar stack（v93）：row1 = 选区方式，row2 = 操作 / 变换
-const lassoToolbarStack = document.getElementById("lassoToolbarStack");
-const lassoToolbarRow1 = document.getElementById("lassoToolbarRow1");
-const lassoToolbarRow2 = document.getElementById("lassoToolbarRow2");
-const lassoSubToolBar = document.getElementById("lassoSubToolBar");
-const lassoSelectionActions = document.getElementById("lassoSelectionActions");
-const lassoTransformCtrl = document.getElementById("lassoTransformCtrl");
-const lassoSubBtns = [...lassoSubToolBar.querySelectorAll("[data-lasso-sub]")];
-const lassoSetOpBtns = [...lassoSubToolBar.querySelectorAll("[data-lasso-setop]")];
-const lassoTransformModeBtns = [...lassoTransformCtrl.querySelectorAll("[data-lasso-mode]")];
-const lassoThresholdInput = document.getElementById("lassoThreshold");
-const lassoThresholdVal = document.getElementById("lassoThresholdVal");
-const lassoMagicCfgBtn = document.getElementById("lassoMagicCfgBtn");
-const lassoMagicPopup = document.getElementById("lassoMagicPopup");
-const lassoConstrainBtn = document.getElementById("lassoConstrainBtn");
-const lassoConstrainSep = document.querySelector(".lasso-constrain-sep");
-
-function updateLassoToolbar() {
-  const floating = input.lasso.hasFloating();
-  const hasSelection = !!doc.selection;
-  const lassoActive = editMode.current() === "lasso";
-  const showAny = floating || hasSelection || lassoActive;
-  lassoToolbarStack.classList.toggle("hidden", !showAny);
-  if (!showAny) return;
-
-  // 其他工具模式下有选区：选区只是个蒙板，工具栏只给一个"取消选区"（否则去选还得切回 lasso）。
-  const otherToolSel = hasSelection && !floating && !lassoActive;
-  // Row 1：lasso 模式给全套；其他工具+有选区只露 deselect（加 class，CSS 藏其余）。floating 时都不给。
-  const showRow1 = (lassoActive && !floating) || otherToolSel;
-  lassoToolbarRow1.classList.toggle("hidden", !showRow1);
-  lassoSubToolBar.classList.toggle("hidden", !showRow1);
-  lassoSubToolBar.classList.toggle("lasso-deselect-only", otherToolSel);
-
-  // Row 2：selectionActions（变换/填色/清除/复制/移层）只在 lasso 模式给；其他工具模式不给。floating 显 transformCtrl。
-  const showSelectionActions = hasSelection && !floating && lassoActive;
-  const showTransformCtrl = floating;
-  const showRow2 = showSelectionActions || showTransformCtrl;
-  lassoToolbarRow2.classList.toggle("hidden", !showRow2);
-  lassoSelectionActions.classList.toggle("hidden", !showSelectionActions);
-  lassoTransformCtrl.classList.toggle("hidden", !showTransformCtrl);
-
-  // 高亮当前 sub-tool / set-op / transform mode
-  const sub = input.lasso.getSubTool();
-  for (const b of lassoSubBtns) {
-    b.setAttribute("aria-pressed", b.dataset.lassoSub === sub ? "true" : "false");
-  }
-  lassoMagicCfgBtn.classList.toggle("hidden", sub !== "magic");
-  // 子工具切走 → 关掉魔术棒 popup（油漆桶按工具栏没装；按 ⚙ 仅在 magic 下出）
-  if (sub !== "magic") lassoMagicPopup.classList.add("hidden");
-  // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
-  const showConstrain = sub === "rect" || sub === "ellipse";
-  lassoConstrainBtn.classList.toggle("hidden", !showConstrain);
-  lassoConstrainSep.classList.toggle("hidden", !showConstrain);
-  if (showConstrain) {
-    lassoConstrainBtn.setAttribute("aria-pressed", input.lasso.getConstrainSquare() ? "true" : "false");
-  }
-  const setOp = input.lasso.getSetOpMode();
-  for (const b of lassoSetOpBtns) {
-    b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
-  }
-  if (floating) {
-    const mode = input.lasso.getMode();
-    for (const b of lassoTransformModeBtns) {
-      b.setAttribute("aria-pressed", b.dataset.lassoMode === mode ? "true" : "false");
-    }
-    const sm = input.lasso.getSampleMode();
-    const sel = document.getElementById("lassoSampleSel");
-    if (sel && sel.value !== sm) sel.value = sm;
-  }
-}
-
-// sub-tool picker
-for (const b of lassoSubBtns) {
-  b.addEventListener("click", () => {
-    input.lasso.setSubTool(b.dataset.lassoSub);
-    updateLassoToolbar();
-  });
-}
-// set-op modifier
-for (const b of lassoSetOpBtns) {
-  b.addEventListener("click", () => {
-    input.lasso.setSetOpMode(b.dataset.lassoSetop);
-    updateLassoToolbar();
-  });
-}
-// magic threshold（容隙功能 v71→v79 撤掉，详 docs/lessons-magic-wand-gap-closing.md）
-const lassoExpandInput = document.getElementById("lassoExpand");
-const lassoExpandVal = document.getElementById("lassoExpandVal");
-if (lassoExpandInput) {
-  lassoExpandInput.value = String(input.lasso.getMagicExpand());
-  lassoExpandVal.textContent = String(input.lasso.getMagicExpand());
-  lassoExpandInput.addEventListener("input", () => {
-    const v = parseInt(lassoExpandInput.value, 10) || 0;
-    input.lasso.setMagicExpand(v);
-    lassoExpandVal.textContent = String(v);
-  });
-}
-lassoThresholdInput.addEventListener("input", () => {
-  const v = parseInt(lassoThresholdInput.value, 10) || 0;
-  input.lasso.setMagicThreshold(v);
-  lassoThresholdVal.textContent = String(v);
-});
-// 设置按钮 → popup toggle
-function toggleMagicPopup(e) {
-  e.stopPropagation();
-  lassoMagicPopup.classList.toggle("hidden");
-}
-lassoMagicCfgBtn.addEventListener("click", toggleMagicPopup);
-// 点 popup 外侧 → 关
-document.addEventListener("pointerdown", (e) => {
-  if (lassoMagicPopup.classList.contains("hidden")) return;
-  if (lassoMagicPopup.contains(e.target)) return;
-  if (lassoMagicCfgBtn.contains(e.target)) return;
-  lassoMagicPopup.classList.add("hidden");
-});
-// 1:1 约束 toggle（rect / ellipse 用）
-lassoConstrainBtn.addEventListener("click", () => {
-  input.lasso.setConstrainSquare(!input.lasso.getConstrainSquare());
-  updateLassoToolbar();
-});
-
-// 选区动作
-document.getElementById("lassoTransformBtn").addEventListener("click", () => {
-  if (!doc.selection) return;
-  const ok = input.lasso.liftSelectionForTransform(doc.activeLayer);
-  if (ok) {
-    editMode.enterTransient("transform", { apply: _commitTransform, abort: _cancelTransform });
-    updateLassoToolbar();
-    _suppressTransientPanels("transform");
-  }
-});
 // ===== v156 剪贴板 / 复制为浮层 快捷键 =====
 // 入口在 input.js KEYBOARD_SHORTCUTS（hub）；run 派发 window 事件，逻辑在这（要 doc/import/setColor）。
 // Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
@@ -813,99 +383,6 @@ window.addEventListener("drop", async (e) => {
   catch (err) { setStatus(`拖入失败：${err.message || err}`, true); }
 });
 
-document.getElementById("lassoDeselectBtn").addEventListener("click", () => {
-  const entry = input.lasso.setSelection(null);
-  if (entry && history) history.push(entry);
-  board.invalidateAll();
-  updateLassoToolbar();
-});
-// 填色：选区内填当前颜色（push stroke-type entry，可 Ctrl+Z）
-document.getElementById("lassoFillBtn").addEventListener("click", () => {
-  const layer = doc.activeLayer;
-  if (!layer || !doc.selection) return;
-  const before = layer.snapshot();
-  doc.selection.fillOnLayer(layer, state.color);
-  const after = layer.snapshot();
-  const entry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-  history.push(entry);
-  compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
-  compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
-  board.invalidateAll();
-  setStatus(`已填色：${state.color}`);
-});
-// 清除：选区内 dst-out
-document.getElementById("lassoClearBtn").addEventListener("click", () => {
-  const layer = doc.activeLayer;
-  if (!layer || !doc.selection) return;
-  const before = layer.snapshot();
-  doc.selection.clearOnLayer(layer);
-  const after = layer.snapshot();
-  const entry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-  history.push(entry);
-  compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
-  compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
-  board.invalidateAll();
-  setStatus("已清除选区内像素");
-});
-// v112: 全选（user：「lasso 加全选」）
-document.getElementById("lassoSelectAllBtn").addEventListener("click", () => {
-  const sel = Selection.full(doc.width, doc.height);
-  const entry = input.lasso.setSelection(sel);
-  if (entry && history) history.push(entry);
-  board.invalidateAll();
-  updateLassoToolbar();
-});
-
-// 反选：在 docW×docH 上 mask 取反
-document.getElementById("lassoInvertBtn").addEventListener("click", () => {
-  const inv = doc.selection ? doc.selection.invert(doc.width, doc.height) : Selection.full(doc.width, doc.height);
-  const entry = input.lasso.setSelection(inv);
-  if (entry && history) history.push(entry);
-  board.invalidateAll();
-  updateLassoToolbar();
-});
-
-// transform 模式 picker + 应用 / 取消
-for (const b of lassoTransformModeBtns) {
-  b.addEventListener("click", () => {
-    input.lasso.setMode(b.dataset.lassoMode);
-    updateLassoToolbar();
-  });
-}
-// commit/cancel 按钮 = 薄壳，走 EditMode → 运行 transform transient 的 apply/abort 闭包（_commit/_cancelTransform）
-document.getElementById("lassoCommitBtn").addEventListener("click", () => {
-  editMode.applyPendingTransient();
-});
-document.getElementById("lassoCancelBtn").addEventListener("click", () => {
-  editMode.abortTransient();
-});
-// Stamp：写入图层但保留 float（连击多次叠加盖印）
-document.getElementById("lassoStampBtn").addEventListener("click", () => {
-  if (!input.lasso.hasFloating()) return;
-  if (input.lasso.stamp()) {
-    board.invalidateAll();
-    setStatus("已盖印");
-  }
-});
-// v120: 插值模式 dropdown（旧 3 个按钮 → 1 个 select）
-const lassoSampleSel = document.getElementById("lassoSampleSel");
-// 变换采样 + 调整尺寸 两个 dropdown 都从 resample.js 的 RESAMPLE_MODES SSoT 填（以后加方法/AI 一处生效）
-fillResampleSelect(lassoSampleSel, "warp", "bicubic");
-fillResampleSelect(els.resampleMode, "scale", "bicubic");
-if (lassoSampleSel) {
-  lassoSampleSel.addEventListener("change", () => {
-    input.lasso.setSampleMode(lassoSampleSel.value);
-    board.invalidateAll();
-    updateLassoToolbar();
-  });
-}
-// 选区 → 新层 / 复制层
-document.getElementById("lassoDuplicateBtn").addEventListener("click", () => {
-  selectionToNewLayer({ move: false });
-});
-document.getElementById("lassoMoveToLayerBtn").addEventListener("click", () => {
-  selectionToNewLayer({ move: true });
-});
 function selectionToNewLayer({ move }) {
   const sel = doc.selection;
   if (!sel) { setStatus("没选区"); return; }
@@ -953,31 +430,8 @@ function selectionToNewLayer({ move }) {
   _afterDocChange();
   setStatus(move ? "已移到新层" : "已复制到新层");
 }
-window.addEventListener("wp:lassochange", updateLassoToolbar);
-// 任何 history push/undo/redo 都可能改 doc.selection → 刷新 toolbar 显隐
-window.addEventListener("wp:histchange", updateLassoToolbar);
 
 // ---- 主题 ----
-function readCssColor(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-function applyThemeColorsToBoard() {
-  board.setThemeColors({ voidColor: readCssColor("--void") });
-}
-
-let theme = safeLS("webpaint.theme") || "auto";
-if (!THEMES.includes(theme)) theme = "auto";
-function applyTheme(t) {
-  theme = t;
-  document.documentElement.setAttribute("data-theme", t);
-  safeLSSet("webpaint.theme", t);
-  els.menuTheme.querySelector('[data-state-for="theme"]').textContent = THEME_LABEL[t];
-  requestAnimationFrame(applyThemeColorsToBoard);
-}
-applyTheme(theme);
-window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-  if (theme === "auto") requestAnimationFrame(applyThemeColorsToBoard);
-});
 
 // ---- Pending transients 架构级护栏 ----
 // #6 stage 2：transient（未提交的瞬时编辑态：套索浮层 / 调色预览 / crop 框）由 EditMode 全量接管。
@@ -1005,198 +459,67 @@ function _cancelTransform() {
 }
 
 // ---- 工具 ----
-function setTool(t) {
-  // v96：airbrush 工具不存在了。老 doc 持久化里可能存了 "airbrush" → 透明回退到 brush
-  if (t === "airbrush") t = "brush";
-  // v120：shapes 撤了。老 doc 持久化里可能存了 "shapes" → 透明回退 brush
-  if (t === "shapes") t = "brush";
-  // v110：smudge engine 未真实装（user：「smudge 和 shapes 灰色先不响应」）
-  if (t === "smudge") {
-    setStatus("涂抹 工具暂未启用");
-    return;
-  }
-  // 切工具 = 决定性动作 → editMode.setTool 内部按 onToolSwitch 把停驻 transient apply/cancel（不在这单独调）
-  // v132: 切到非 filterBrush 工具时自动退出 filter brush 模式（藏 toolbar / 清 state）
-  if (state.filterBrush && t !== "filterBrush") {
-    state.filterBrush = null;
-    const tb = document.getElementById("filterBrushToolbar");
-    if (tb) tb.classList.add("hidden");
-  }
-  editMode.setTool(t);   // emit wp:modechange → _syncEditModeUI 派生按钮高亮 / lasso 工具栏
-  document.body.dataset.tool = t;   // 持久工具的 CSS hook（transient 期间保持不变）
-  // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
-  if (t === "brush" || t === "smudge" || t === "eraser" || t === "filterBrush") {
-    applyToolState(t);
-  }
-  if (t === "smudge") {
-    setStatus("smudge engine 待实装；现在按 brush 走");
-  }
-}
-
-// #6 stage 4：UI 从 EditMode 派生（监听 wp:modechange）。setTool / enterTransient / exit 都会触发。
-// transient 期间（current()=transform/crop/adjust）**不高亮任何工具按钮** —— 这正是当初想实现、
-// 逼出"双轴不行"的那个 payoff（双轴的 tool() 仍指向底层工具会误亮）。
-function _syncEditModeUI() {
-  const m = editMode.current();
-  dialReactive.tool = m;   // 反应式 dial 镜像当前工具（含 transient）→ currentBrush computed 重算
-  const transient = editMode.isTransient();
-  // 工具按钮高亮：transient 时一个都不亮；持久工具高亮对应按钮
-  for (const b of els.toolBtns) b.setAttribute("aria-pressed", (!transient && b.dataset.tool === m) ? "true" : "false");
-  // 液化 / filterBrush 没独立 data-tool 按钮，用 adjust 按钮高亮（transient 期间也不亮）
-  els.topAdjustBtn?.setAttribute("aria-pressed", (m === "liquify" || m === "filterBrush") ? "true" : "false");
-  // 注：body.dataset.tool 保持"持久工具"（在 setTool 里设），不在这改成 transient 名——避免扰乱
-  // 依赖 body[data-tool] 的 CSS（且 data-mode 被图库占用）。transient 的 UI 抑制走面板 suppress + 按钮高亮。
-  // slider 禁用：size/opacity 仅 canDraw 模式可调 → 反应式镜像，<LeftDial> 绑 :disabled。color 仅 allowsColor 可点。
-  dialReactive.canDraw = editMode.canDraw();
-  if (els.activeSwatch) els.activeSwatch.disabled = !editMode.allowsColor();
-  updateLassoToolbar();             // 选区/变换工具栏跟着重新派生
-}
-window.addEventListener("wp:modechange", _syncEditModeUI);
-_syncEditModeUI();   // 初始同步（boot setTool 同工具会 early-return 不 emit，这里兜一次）
-
-// Rack 工具 → 对应的 exclusive panel id
-const RACK_PANEL_BY_TOOL = {
-  brush: PANELS.RACK_BRUSH,
-  smudge: PANELS.RACK_SMUDGE,
-  eraser: PANELS.RACK_ERASER,
-  filterBrush: PANELS.RACK_FILTER_BRUSH,    // v132
-};
-let _lastNonLassoTool = "brush";
-for (const b of els.toolBtns) {
-  b.addEventListener("click", () => {
-    const t = b.dataset.tool;
-    // tap-active-again：已激活的 rack 工具再点 → 开/关该工具的笔架 sheet
-    // 详 conversation v79→v80：「tap = 切换 / 已激活 tap = 开 rack」
-    if (editMode.current() === t && RACK_PANEL_BY_TOOL[t]) {
-      openExclusive(RACK_PANEL_BY_TOOL[t]);
-      return;
-    }
-    // v124 (user) 第二次按 lasso = Esc 语义：清选区 + 回上一个非 lasso 工具
-    if (editMode.current() === "lasso" && t === "lasso") {
-      if (doc.selection) {
-        const entry = input.lasso.setSelection(null);
-        if (entry) history.push(entry);
-        board.invalidateAll();
-      }
-      setTool(_lastNonLassoTool || "brush");
-      closeExclusive();
-      return;
-    }
-    if (editMode.current() !== "lasso") _lastNonLassoTool = editMode.current();
-    setTool(t);
-    // 切到新 tool 时关掉之前开的 rack（防止 stale）
-    closeExclusive();
-  });
-}
-window.addEventListener("wp:settool", (e) => setTool(e.detail));
-
-// v120 删：Shapes 子工具栏。shapes tool 撤了 → 以后 shapes 改 brush preset 的 toggle 字段
-// pencil 模式下双击 → 笔↔橡皮。但 floating 选区存在时屏蔽（避免误触切工具 = 自动 apply 变换）
-window.addEventListener("wp:doubletap", () => {
-  if (input.lasso.hasFloating()) {
-    setStatus("套索浮层进行中，双击切换暂停（点应用 / 取消 / 返回工具栏）");
-    return;
-  }
-  const next = editMode.current() === "eraser" ? "brush" : "eraser";
-  setTool(next);
-  setStatus(`双击 · ${next === "eraser" ? "橡皮" : "笔刷"}`);
-});
-setTool(editMode.current());
 
 // Brush rack 异步加载：boot 时拿 IDB 缓存，把 toolStates 缺失字段从 rack 补齐
 // 然后应用当前 tool 的 state
-loadBrushRack().then((rack) => {
-  _brushRack = rack;
+const _backfillToolStates = () => {
   for (const t of Object.keys(state.toolStates)) {
-    if (state.toolStates[t].activeBrushId == null) {
-      const init = defaultToolStateFor(t);
-      Object.assign(state.toolStates[t], init);
-    }
+    if (state.toolStates[t].activeBrushId == null) Object.assign(state.toolStates[t], rack.defaultToolStateFor(t));
   }
-  applyToolState(editMode.current());
-  dialReactive.rackVersion++;   // 笔架载入 → <LeftDial> 名字/sizeMax 重算（_brushRack 赋值非反应式）
-  setTimeout(() => { checkBrushRackCloud().catch(() => {}); _refreshRackCloudState(); }, 2000);
-  // v122 r2: default-brushes.json 是 async fetch；先用现有 rack boot（可能是 IDB / emergency
-  // 兜底空），fetch 回来后再 retroactively merge 缺失的 default brushes，写 IDB + 刷 UI
+};
+rack.load().then(() => {
+  _backfillToolStates();
+  rack.applyToolState(editMode.current());
+  dialReactive.rackVersion++;
+  setTimeout(() => { rack.checkCloud().catch(() => {}); rack.refreshCloudState(); }, 2000);
+  // default-brushes.json 是 async fetch：fetch 回来后 retroactively merge 缺失默认笔。
   defaultsPromise().then(() => {
-    if (!_brushRack) return;
-    const newRack = mergeMissingDefaults(_brushRack);
-    if (!newRack) return;
-    _brushRack = newRack;           // atomic swap
-    persistBrushRack().catch(() => {});
-    for (const t of Object.keys(state.toolStates)) {
-      if (state.toolStates[t].activeBrushId == null) {
-        const init = defaultToolStateFor(t);
-        Object.assign(state.toolStates[t], init);
-      }
-    }
-    applyToolState(editMode.current());
-    dialReactive.rackVersion++;   // default-brushes 合并后 → 重算
+    const cur = rack.get();
+    if (!cur) return;
+    const merged = mergeMissingDefaults(cur);
+    if (!merged) return;
+    rack.setRack(merged);
+    rack.persist().catch(() => {});
+    _backfillToolStates();
+    rack.applyToolState(editMode.current());
+    dialReactive.rackVersion++;
   });
 }).catch((e) => {
-  // **关键**：IDB 在 iPad Safari 私密浏览模式下会 throw。loadBrushRack 内部已有
-  // try/catch fallback；这条 catch 接住极端情况（boot 期 promise 链外 throw）。
-  // 至少给个 in-memory rack 让 user 能画
   console.warn("[brush-rack] init failed:", e);
-  _brushRack = makeDefaultRack();
-  applyToolState(editMode.current());
-  dialReactive.rackVersion++;   // 兜底 rack → 重算
+  rack.setRack(makeDefaultRack());
+  rack.applyToolState(editMode.current());
+  dialReactive.rackVersion++;
   setStatus("笔架持久化失败（可能私密浏览）：本次 session 可用，重启会重置", true);
 });
 
-// ---- 颜色 ----
-// 色轮已收成薄 Vue 组件（src/ui/color-wheel.ts）：唯一输出 = onPick(hex) → setColor，
-// 唯一输入 = 当前色（colorWheel.setColor 推进去）。HSV 状态、round-trip 不变式（内部拖动
-// 不弹 hue）全在组件里。drawing app 与色轮只经一个 color 值耦合。
-const colorWheel = mountColorWheel(els.colorPanelBody, {
-  getColor: () => state.color,
-  onPick: (hex) => setColor(hex),
-});
-function setColor(hex) {
-  state.color = hex;   // 反应式（proxy→dialReactive.color）→ currentBrush computed 自动重派生
-  safeLSSet("webpaint.color", hex);
-  els.activeSwatch.style.background = hex;
-  colorWheel.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue
-}
-els.activeSwatch.addEventListener("click", () => toggleColorPanel());
-setColor(state.color);
 
-// v104 size 滑块 popup；v109 zoom-aware；v123 (user) 改：
-//   - size + opacity 同 popup 复用，任一 slider 拖动都刷
-//   - 圆的半径 = size × zoom，**透明度 = opacity**（视觉看到两个变化）
-//   - 文字"N px · M%"，去掉"屏 px"备注
-//   - 竖排（圆上字下），frame 缩到 64px
-// 圆按真实屏 px 画；超 frame 时 frame overflow:hidden 裁
-// v124 吸色 pin：input.js _doPick 派发 wp:pickerShow，tip 在采样 pixel 屏坐标
-// pin 上浮 (transform translateY(-100%)) 避免被手指挡。1500ms 后自动淡出
-let _pickerPinTimer = null;
-const _pickerPin = document.getElementById("pickerPin");
-const _pickerPinHead = document.getElementById("pickerPinHead");
-window.addEventListener("wp:pickerShow", (e) => {
-  if (!_pickerPin) return;
-  const { sx, sy, hex } = e.detail;
-  _pickerPin.style.left = sx + "px";
-  _pickerPin.style.top = sy + "px";
-  _pickerPin.style.setProperty("--head-color", hex);
-  _pickerPin.classList.remove("hidden");
-  clearTimeout(_pickerPinTimer);
-  _pickerPinTimer = setTimeout(() => _pickerPin.classList.add("hidden"), 1500);
-});
-window.addEventListener("wp:pickerHide", () => {
-  if (!_pickerPin) return;
-  _pickerPin.classList.add("hidden");
-  clearTimeout(_pickerPinTimer);
-});
+// Composition Root：core 单例 + 跨模块函数装进显式 ctx，传给每个 initX(ctx)（取代全局 rt）。
+const ctx = {
+  state, dialReactive, currentBrush, editMode, doc, board, input, history, pixelHistory,
+  rack, store: _store, setStatus, withBusy, leftDial,
+  updateSaveStatus,
+  _suppressTransientPanels, _restoreTransientPanels, layerSpecFrom, _bringPanelTop,
+  _commitTransform, _cancelTransform, selectionToNewLayer,
+  afterDocChange: _afterDocChange,
+  gallery: null,   // 晚绑（gallery 后建）
+};
+initColorPanel(ctx);
+initTheme(ctx);
+initLayersPanel(ctx);
+initDocOps(ctx);
+initSettingsMenu(ctx);
+initFiltersAdjust(ctx);
+initToolbar(ctx);
 
 // size/opacity popup + 两个 slider 监听 + slider-DOM 同步已搬进 <LeftDial>（src/ui/left-dial.ts）。
 // setSize/setOpacity 现在只写反应式 dial SSoT + LS；<LeftDial> 绑定 dial 自动反映 + 自闪 popup。
 function setSize(v) {
   v = Math.max(1, Math.round(v));        // v104: clamp to int
-  writeCurrentToolSize(v);               // dial SSoT（反应式 → currentBrush + <LeftDial> 自动跟随）
+  rack.writeCurrentToolSize(v);               // dial SSoT（反应式 → currentBrush + <LeftDial> 自动跟随）
   safeLSSet("webpaint.size", String(v));
 }
 function setOpacity(v) {
-  writeCurrentToolOpacity(v);            // dial SSoT（反应式）
+  rack.writeCurrentToolOpacity(v);            // dial SSoT（反应式）
   safeLSSet("webpaint.opacity", String(v));
 }
 // 老 setIntensity alias 给跨 v97 调用兜底
@@ -1206,7 +529,7 @@ window.addEventListener("wp:adjsize", (e) => {
   const delta = e.detail;
   const t = editMode.current();
   if (t === "brush" || t === "eraser" || t === "smudge" || t === "filterBrush") {
-    const maxPx = findToolBrushPure(currentDials())?.size?.max || 200;
+    const maxPx = rack.findToolBrushPure(currentDials())?.size?.max || 200;
     // v134 [] step 按段量化：20内1, 50内2, 100内5, 200内10, 500内20, 1000内50
     const dir = Math.sign(delta) || 1;
     const curSize = currentDials().size;
@@ -1222,136 +545,6 @@ window.addEventListener("wp:adjsize", (e) => {
   // 其他工具忽略（液化已 migrate 进 filterBrush）
 });
 
-// ---- 汉堡菜单 ----
-function setMenuItem(btn, on, stateLabel = on ? "开" : "关") {
-  btn.setAttribute("aria-pressed", on ? "true" : "false");
-  const st = btn.querySelector('.menu-item-state');
-  if (st) st.textContent = stateLabel;
-}
-
-function applyPressureSize(on) {
-  state.pressureToSize = !!on;           // 全局开关 SSoT（反应式 → currentBrush 自动重派生）
-  setMenuItem(els.menuPressureSize, on);
-  safeLSSet("webpaint.pToSize", on ? "1" : "0");
-}
-function applyPressureOpacity(on) {
-  state.pressureToOpacity = !!on;        // 反应式 → currentBrush 自动重派生
-  setMenuItem(els.menuPressureOpacity, on);
-  safeLSSet("webpaint.pToOpacity", on ? "1" : "0");
-}
-function applyLongPressPick(on) {
-  state.longPressPick = !!on;
-  setMenuItem(els.menuLongPressPick, on);
-  safeLSSet("webpaint.longPressPick", on ? "1" : "0");
-}
-function applyCheckerboard(on) {
-  // v125: checkerboard per-doc，不再写 localStorage
-  state.checkerboard = !!on;
-  setMenuItem(els.menuCheckerboard, on);
-  board.setShowCheckerboard?.(!!on);
-  board.invalidateAll();
-  board.requestRender();
-}
-
-els.menuPressureSize.addEventListener("click", () => {
-  applyPressureSize(!state.pressureToSize);
-  setStatus(`压·粗 · ${state.pressureToSize ? "开" : "关"}`);
-});
-els.menuPressureOpacity.addEventListener("click", () => {
-  applyPressureOpacity(!state.pressureToOpacity);
-  setStatus(`压·透 · ${state.pressureToOpacity ? "开" : "关"}`);
-});
-els.menuLongPressPick.addEventListener("click", () => {
-  applyLongPressPick(!state.longPressPick);
-  setStatus(`长按吸色 · ${state.longPressPick ? "开" : "关"}`);
-});
-els.menuCheckerboard.addEventListener("click", () => {
-  applyCheckerboard(!state.checkerboard);
-  // v125 per-doc：触发 dirty 让 autosave 把新值写进 webpaint/state.json
-  _store.edits.mark(); updateSaveStatus();
-  setStatus(`透明棋盘 · ${state.checkerboard ? "开" : "关"}`);
-});
-// v163 像素栅格：全局开关（视图辅助，跟设备不跟文件），localStorage 持久化，默认开
-function applyPixelGrid(on) {
-  board.setPixelGridEnabled?.(!!on);
-  setMenuItem(els.menuPixelGrid, !!on);
-  safeLSSet("webpaint.pixelGrid", on ? "1" : "0");
-}
-applyPixelGrid(safeLS("webpaint.pixelGrid") !== "0");   // boot：缺省=开
-if (els.menuPixelGrid) els.menuPixelGrid.addEventListener("click", () => {
-  const next = !board.getPixelGridEnabled();
-  applyPixelGrid(next);
-  setStatus(`像素栅格 · ${next ? "开" : "关"}`);
-});
-els.menuTheme.addEventListener("click", () => {
-  const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
-  applyTheme(next);
-  setStatus(`主题 · ${THEME_LABEL[next]}`);
-});
-// v100：删「检测更新」menu (实测在 iPad PWA 上不可靠，user：「检测更新功能没用」)。
-// 强制更新一律走「强制清缓存重启」（menuForcePwaReset）— 详 docs/pwa-update-detection.md。
-// 老 element 在 HTML 里 hidden，handler 留空保 element exists 防 null deref。
-if (els.menuCheckUpdate) els.menuCheckUpdate.addEventListener("click", () => setMenuOpen(false));
-// v124b: menuClear 撤了（user：「清空内容跟删除重复，删掉」）。stub 留兜底
-if (els.menuClear) els.menuClear.addEventListener("click", () => setMenuOpen(false));
-
-// v124 快捷键 sheet：从 KEYBOARD_SHORTCUTS 自动渲染（input.js 注册的唯一真理源）
-const _shortcutsSheet = document.getElementById("shortcutsSheet");
-const _shortcutsBackdrop = document.getElementById("shortcutsBackdrop");
-const _shortcutsBody = document.getElementById("shortcutsBody");
-function _renderShortcutsSheet() {
-  if (!_shortcutsBody) return;
-  const byCat = new Map();
-  for (const sc of KEYBOARD_SHORTCUTS) {
-    const cat = sc.category || "其它";
-    if (!byCat.has(cat)) byCat.set(cat, []);
-    byCat.get(cat).push(sc);
-  }
-  // 同 combo 多 entry（如 Escape 在 floating / hasSelection 两条）合并展示
-  let html = "";
-  for (const [cat, list] of byCat) {
-    html += `<div class="shortcuts-category">${cat}</div>`;
-    for (const sc of list) {
-      html += `<div class="shortcuts-row"><span>${sc.desc}</span><span class="shortcuts-combo">${sc.combo}</span></div>`;
-    }
-  }
-  _shortcutsBody.innerHTML = html;
-}
-document.getElementById("menuShortcuts")?.addEventListener("click", () => {
-  setMenuOpen(false);
-  _renderShortcutsSheet();
-  openSheet(_shortcutsSheet, _shortcutsBackdrop);
-});
-document.getElementById("shortcutsClose")?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
-_shortcutsBackdrop?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
-
-applyPressureSize(state.pressureToSize);
-applyPressureOpacity(state.pressureToOpacity);
-applyLongPressPick(state.longPressPick);
-applyCheckerboard(state.checkerboard);
-
-function setMenuOpen(open) {
-  els.menuPanel.classList.toggle("hidden", !open);
-  els.menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) {
-    // v124 menu panel 跟随菜单按钮屏坐标（top-bar 居中 transform，
-    // 用 viewport 写死的 left: 12px 在宽屏上对不齐图标）
-    const r = els.menuBtn.getBoundingClientRect();
-    els.menuPanel.style.top = (r.bottom + 6) + "px";
-    els.menuPanel.style.left = r.left + "px";
-    els.menuPanel.style.right = "auto";
-    _updateMenuCropLabel?.();
-  }
-}
-els.menuBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  setMenuOpen(els.menuPanel.classList.contains("hidden"));
-});
-document.addEventListener("pointerdown", (e) => {
-  if (els.menuPanel.classList.contains("hidden")) return;
-  if (els.menuPanel.contains(e.target) || els.menuBtn.contains(e.target)) return;
-  setMenuOpen(false);
-});
 
 // ---- undo / redo / fit ----
 els.undoBtn.addEventListener("click", () => input.ctrlZ());
@@ -1405,7 +598,7 @@ function setStatus(text, persist = false) {
 }
 // 文档版本警告：在 setStatus 之上再呈现一个持久 banner（用 doc.body.dataset 给 CSS 染色）
 function updateNewerBanner() {
-  if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
+  if (session.loadedDocIsNewer && !session.loadedDocNewerConfirmed) {
     document.body.dataset.docNewer = "1";
   } else {
     delete document.body.dataset.docNewer;
@@ -1419,343 +612,9 @@ board.render = function () {
 };
 
 // ---- HSV 浮动色板（面板 chrome：开关 / 拖动 / 位置记忆。内容 = 色轮 Vue 组件）----
-function toggleColorPanel(force) {
-  const hidden = els.colorPanel.classList.contains("hidden");
-  const show = force === true ? true : force === false ? false : hidden;
-  if (show) {
-    els.colorPanel.classList.remove("hidden");
-    // 还原位置；没存过就放到右上角
-    const saved = safeLS("webpaint.colorPanel.pos");
-    const w = els.colorPanel.offsetWidth || 264;
-    const h = els.colorPanel.offsetHeight || 320;
-    let left, top;
-    if (saved) {
-      try {
-        const o = JSON.parse(saved);
-        left = o.left; top = o.top;
-      } catch { left = top = null; }
-    }
-    if (left == null) { left = window.innerWidth - w - 16; top = 60; }
-    // clamp
-    left = Math.max(0, Math.min(window.innerWidth - w, left));
-    top = Math.max(0, Math.min(window.innerHeight - h, top));
-    els.colorPanel.style.left = left + "px";
-    els.colorPanel.style.top = top + "px";
-  } else {
-    els.colorPanel.classList.add("hidden");
-  }
-}
-els.colorPanelClose.addEventListener("click", () => toggleColorPanel(false));
-
-// 拖标题栏移动面板（pointer events，捕获到 head 上 → 不会漏掉移出窗口外的 move）
-let _panelDrag = null;
-els.colorPanelHead.addEventListener("pointerdown", (e) => {
-  if (e.target.closest(".close-x")) return;
-  const r = els.colorPanel.getBoundingClientRect();
-  _panelDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
-  els.colorPanelHead.setPointerCapture(e.pointerId);
-  e.preventDefault();
-});
-els.colorPanelHead.addEventListener("pointermove", (e) => {
-  if (!_panelDrag || e.pointerId !== _panelDrag.id) return;
-  const w = els.colorPanel.offsetWidth;
-  const h = els.colorPanel.offsetHeight;
-  const left = Math.max(0, Math.min(window.innerWidth - w, _panelDrag.ol + (e.clientX - _panelDrag.sx)));
-  const top  = Math.max(0, Math.min(window.innerHeight - h, _panelDrag.ot + (e.clientY - _panelDrag.sy)));
-  els.colorPanel.style.left = left + "px";
-  els.colorPanel.style.top = top + "px";
-  safeLSSet("webpaint.colorPanel.pos", JSON.stringify({ left, top }));
-});
-els.colorPanelHead.addEventListener("pointerup", (e) => {
-  if (_panelDrag && e.pointerId === _panelDrag.id) {
-    try { els.colorPanelHead.releasePointerCapture(e.pointerId); } catch {}
-    _panelDrag = null;
-  }
-});
-
-// 键盘 C 切换
-// v156 窗格快捷键（C/N/R）逻辑：入口在 input.js KEYBOARD_SHORTCUTS hub，run 派发这些事件。
-//   （取代了原来散落在这里的裸 "c" keydown —— 收进 hub，见 docs/backlog.md）
-window.addEventListener("wp:toggleColor", () => toggleColorPanel());
-window.addEventListener("wp:toggleLayers", () => toggleLayersPanel());
 window.addEventListener("wp:toggleReference", () => referenceWindow.toggle());
 
 // ---- 图层面板 ----
-function toggleLayersPanel(force) {
-  const hidden = els.layersPanel.classList.contains("hidden");
-  const show = force === true ? true : force === false ? false : hidden;
-  els.layersPanel.classList.toggle("hidden", !show);
-  els.layersBtn.setAttribute("aria-pressed", show ? "true" : "false");
-  if (show) renderLayersPanel();
-}
-els.layersBtn.addEventListener("click", () => toggleLayersPanel());
-els.layersPanelClose.addEventListener("click", () => toggleLayersPanel(false));
-
-// 拖动 layers 面板（沿用 color panel 模式）
-let _layersDrag = null;
-els.layersPanelHead.addEventListener("pointerdown", (e) => {
-  if (e.target.closest(".float-panel-close")) return;
-  const r = els.layersPanel.getBoundingClientRect();
-  _layersDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
-  els.layersPanelHead.setPointerCapture(e.pointerId);
-  e.preventDefault();
-});
-els.layersPanelHead.addEventListener("pointermove", (e) => {
-  if (!_layersDrag || e.pointerId !== _layersDrag.id) return;
-  const w = els.layersPanel.offsetWidth;
-  const h = els.layersPanel.offsetHeight;
-  const left = Math.max(0, Math.min(window.innerWidth - w, _layersDrag.ol + (e.clientX - _layersDrag.sx)));
-  const top  = Math.max(0, Math.min(window.innerHeight - h, _layersDrag.ot + (e.clientY - _layersDrag.sy)));
-  els.layersPanel.style.left = left + "px";
-  els.layersPanel.style.right = "auto";
-  els.layersPanel.style.top = top + "px";
-  safeLSSet("webpaint.layersPanel.pos", JSON.stringify({ left, top }));
-});
-els.layersPanelHead.addEventListener("pointerup", (e) => {
-  if (_layersDrag && e.pointerId === _layersDrag.id) {
-    try { els.layersPanelHead.releasePointerCapture(e.pointerId); } catch {}
-    _layersDrag = null;
-  }
-});
-// 还原上次位置
-(function restoreLayersPanelPos() {
-  const saved = safeLS("webpaint.layersPanel.pos");
-  if (!saved) return;
-  try {
-    const o = JSON.parse(saved);
-    els.layersPanel.style.left = o.left + "px";
-    els.layersPanel.style.right = "auto";
-    els.layersPanel.style.top = o.top + "px";
-  } catch {}
-})();
-
-// 渲染图层列表（倒序：UI 上 = 最上面图层在面板顶部）
-// 图层模式 → 单字符 badge (Procreate 风格)
-const LAYER_MODE_INITIAL = {
-  "source-over": "N", "multiply": "M", "screen": "S", "overlay": "O",
-  "darken": "Da", "lighten": "Li", "color-dodge": "CD", "color-burn": "CB",
-  "hard-light": "HL", "soft-light": "SL", "difference": "Df", "exclusion": "Ex",
-};
-const LAYER_MODE_LABEL = {
-  "source-over": "正常", "multiply": "正片叠底", "screen": "滤色", "overlay": "叠加",
-  "darken": "变暗", "lighten": "变亮", "color-dodge": "颜色减淡", "color-burn": "颜色加深",
-  "hard-light": "强光", "soft-light": "柔光", "difference": "差值", "exclusion": "排除",
-};
-function modeInitial(m) { return LAYER_MODE_INITIAL[m] || "?"; }
-
-let _expandedLayerId = null;
-
-function renderLayersPanel() {
-  els.layersList.innerHTML = "";
-  const max = doc.maxLayers;
-  els.layersCountLabel.textContent = `${doc.layers.length} / ${max}`;
-  // 倒序：top of UI = top of stack
-  for (let i = doc.layers.length - 1; i >= 0; i--) {
-    const L = doc.layers[i];
-    const row = document.createElement("div");
-    const isRef = doc.referenceLayerId === L.id;
-    row.className = "layer-row"
-      + (i === doc.activeIndex ? " active" : "")
-      + (L.clippingMask ? " clipping" : "")
-      + (isRef ? " reference" : "");
-    row.dataset.layerId = String(L.id);
-
-    const vis = document.createElement("button");
-    vis.type = "button";
-    vis.className = "layer-vis" + (L.visible ? "" : " hidden-icon");
-    vis.title = L.visible ? "可见" : "已隐藏";
-    // v123 眼睛 icon 放大 16→22 (user)
-    vis.innerHTML = L.visible
-      ? '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>'
-      : '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a18.94 18.94 0 0 1 4.06-5.06"/><path d="M1 1l22 22"/></svg>';
-    vis.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const oldVal = L.visible;
-      L.visible = !oldVal;
-      history.push({ type: "setLayerProp", layerId: L.id, prop: "visible", oldVal, newVal: L.visible });
-      renderLayersPanel();
-      board.invalidateAll();
-      board.requestRender();
-    });
-    row.appendChild(vis);
-
-    // 名字：单击 row = setActive（行 click handler 处理）。
-    // v125 (user：「点图层名可以 rename」) active 时再点 name = rename，"⋯" 菜单仍保留入口
-    const name = document.createElement("span");
-    name.className = "layer-name";
-    name.textContent = L.name;
-    name.addEventListener("click", (e) => {
-      if (L.id === doc.activeLayer?.id) {
-        e.stopPropagation();
-        startLayerRename(L, name);
-      }
-      // else 让 row.click 设 active
-    });
-    row.appendChild(name);
-
-    // Clipping mask 视觉提示：剪裁层左侧加 ↘ 标
-    if (L.clippingMask) {
-      const chip = document.createElement("span");
-      chip.className = "layer-clip-chip";
-      chip.textContent = "↘";
-      chip.title = "已剪裁到下方第一颗非剪裁层";
-      row.appendChild(chip);
-    }
-    // 参考层视觉提示：右侧加「参」chip
-    if (isRef) {
-      const chip = document.createElement("span");
-      chip.className = "layer-ref-chip";
-      chip.textContent = "参";
-      chip.title = "参考层：魔棒 / 油漆桶读这一层";
-      row.appendChild(chip);
-    }
-
-    // "⋯" 工具菜单按钮（per-row tools，先放重命名，后续加复制 / 清空内容等）
-    const tools = document.createElement("button");
-    tools.type = "button";
-    tools.className = "layer-tools-btn";
-    tools.title = "图层菜单";
-    tools.textContent = "⋯";
-    tools.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openLayerToolsMenu(L, tools, name);
-    });
-    row.appendChild(tools);
-
-    // Mode / opacity badge：点开折叠区
-    const badge = document.createElement("button");
-    badge.type = "button";
-    badge.className = "layer-mode-badge" + (_expandedLayerId === L.id ? " active" : "");
-    badge.textContent = modeInitial(L.mode);
-    badge.title = `不透明度 ${Math.round(L.opacity * 100)}% · 模式 ${LAYER_MODE_LABEL[L.mode] || L.mode}`;
-    badge.addEventListener("click", (e) => {
-      e.stopPropagation();
-      _expandedLayerId = _expandedLayerId === L.id ? null : L.id;
-      renderLayersPanel();
-    });
-    row.appendChild(badge);
-
-    row.addEventListener("click", () => {
-      // v154 (user)：点别的层 → 收起非选中层的展开折叠区（badge dropdown）；点自己展开着的保留
-      if (_expandedLayerId !== L.id) _expandedLayerId = null;
-      doc.setActiveById(L.id);
-      renderLayersPanel();
-    });
-    els.layersList.appendChild(row);
-
-    // 折叠区（点 badge 才出现）
-    if (_expandedLayerId === L.id) {
-      const expand = document.createElement("div");
-      expand.className = "layer-row-expand";
-      // 不透明度 slider
-      const opaRow = document.createElement("label");
-      opaRow.className = "layer-slider-row";
-      opaRow.innerHTML = `<span>透</span><input type="range" min="0" max="100" value="${Math.round(L.opacity * 100)}"><span class="layer-slider-val">${Math.round(L.opacity * 100)}</span>`;
-      const opaInput = opaRow.querySelector("input");
-      const opaVal = opaRow.querySelector(".layer-slider-val");
-      // Slider **coalescing**：pointerdown 记 oldVal，pointerup 才 push history entry。
-      // input 期间只改 layer.opacity + render，不动 history。一次拖动 = 一个 entry。
-      let opaCoalesceOldVal = null;
-      opaInput.addEventListener("pointerdown", () => { opaCoalesceOldVal = L.opacity; });
-      opaInput.addEventListener("input", () => {
-        const v = parseFloat(opaInput.value) / 100;
-        L.opacity = v;
-        opaVal.textContent = String(Math.round(v * 100));
-        badge.title = `不透明度 ${Math.round(v * 100)}% · 模式 ${LAYER_MODE_LABEL[L.mode] || L.mode}`;
-        board.invalidateAll();
-        board.requestRender();
-      });
-      const opaCommit = () => {
-        if (opaCoalesceOldVal === null) return;
-        if (opaCoalesceOldVal !== L.opacity) {
-          history.push({ type: "setLayerProp", layerId: L.id, prop: "opacity", oldVal: opaCoalesceOldVal, newVal: L.opacity });
-        }
-        opaCoalesceOldVal = null;
-      };
-      opaInput.addEventListener("pointerup", opaCommit);
-      opaInput.addEventListener("pointercancel", opaCommit);
-      opaInput.addEventListener("click", (e) => e.stopPropagation());
-      expand.appendChild(opaRow);
-      // 模式 dropdown：change 是离散事件，直接 push 一个 entry
-      const modeRow = document.createElement("label");
-      modeRow.className = "layer-slider-row";
-      let optsHtml = "";
-      for (const [val, lbl] of Object.entries(LAYER_MODE_LABEL)) {
-        optsHtml += `<option value="${val}"${L.mode === val ? " selected" : ""}>${lbl}</option>`;
-      }
-      modeRow.innerHTML = `<span>模式</span><select style="grid-column: span 2;">${optsHtml}</select>`;
-      const modeSelect = modeRow.querySelector("select");
-      modeSelect.addEventListener("change", () => {
-        const oldVal = L.mode;
-        const newVal = modeSelect.value;
-        L.mode = newVal;
-        history.push({ type: "setLayerProp", layerId: L.id, prop: "mode", oldVal, newVal });
-        badge.textContent = modeInitial(L.mode);
-        badge.title = `不透明度 ${Math.round(L.opacity * 100)}% · 模式 ${LAYER_MODE_LABEL[L.mode] || L.mode}`;
-        board.invalidateAll();
-        board.requestRender();
-      });
-      modeSelect.addEventListener("click", (e) => e.stopPropagation());
-      expand.appendChild(modeRow);
-
-      // Clipping mask 切换：剪裁到下方第一颗非剪裁层（Procreate 行为）
-      const clipRow = document.createElement("div");
-      clipRow.className = "layer-slider-row";
-      clipRow.innerHTML = `
-        <span>剪裁</span>
-        <span class="layer-clip-hint">↘ 跟随下方</span>
-        <button type="button" class="layer-clip-toggle" aria-pressed="${L.clippingMask ? "true" : "false"}">${L.clippingMask ? "开" : "关"}</button>
-      `;
-      const clipBtn = clipRow.querySelector(".layer-clip-toggle");
-      clipBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const oldVal = L.clippingMask;
-        L.clippingMask = !oldVal;
-        history.push({
-          type: "setLayerProp", layerId: L.id,
-          prop: "clippingMask", oldVal, newVal: L.clippingMask,
-        });
-        renderLayersPanel();
-        board.invalidateAll();
-        board.requestRender();
-      });
-      expand.appendChild(clipRow);
-
-      // 参考层 toggle：unique；设这一层时自动清掉旧的
-      const refRow = document.createElement("div");
-      refRow.className = "layer-slider-row";
-      const isRefNow = doc.referenceLayerId === L.id;
-      refRow.innerHTML = `
-        <span>参考</span>
-        <span class="layer-clip-hint">魔棒 / 油漆桶读这层</span>
-        <button type="button" class="layer-clip-toggle" aria-pressed="${isRefNow ? "true" : "false"}">${isRefNow ? "开" : "关"}</button>
-      `;
-      const refBtn = refRow.querySelector(".layer-clip-toggle");
-      refBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const oldVal = doc.referenceLayerId;
-        const newVal = isRefNow ? null : L.id;
-        doc.referenceLayerId = newVal;
-        history.push({ type: "setReferenceLayer", oldVal, newVal });
-        renderLayersPanel();
-      });
-      expand.appendChild(refRow);
-
-      expand.addEventListener("click", (e) => e.stopPropagation());
-      els.layersList.appendChild(expand);
-    }
-  }
-  // 滚动到当前活动层（undo/redo 切了 activeIndex 时让面板跳过去，用户看得见变化）
-  els.layersList.querySelector(".layer-row.active")?.scrollIntoView({ block: "nearest" });
-  // v123 footer 只剩 add（del / up / down 进 per-row "⋯" 菜单）
-  els.layerAddBtn.disabled = doc.layers.length >= max;
-  // v132 global 删除按钮 disable + 灰（user：「删除图层不可用时应该灰色」）
-  const delBtn = document.getElementById("layerDeleteBtn");
-  if (delBtn) delBtn.disabled = doc.layers.length <= 1;
-}
-
-// 各层操作都走 history.push → handler 同时 apply 和 push。这样未来 undo / redo
-// 都自动可以反向 apply。helper：apply 即时效果 + 渲染。
 function _afterDocChange() {
   renderLayersPanel();
   board.invalidateAll();
@@ -1763,19 +622,6 @@ function _afterDocChange() {
 }
 
 // v123 把 layer op 抽成 named 函数：原 4 个 footer 按钮挪进 menu/popup
-function _addEmptyLayer() {
-  if (doc.layers.length >= doc.maxLayers) {
-    setStatus(`图层数已达上限 ${doc.maxLayers}`);
-    return;
-  }
-  const prevActiveId = doc.activeLayer?.id ?? null;   // 持久化：undo 创建时回到创建前的活动层
-  const L = doc.addLayer();
-  if (!L) return;
-  const insertIndex = doc.layers.findIndex((l) => l.id === L.id);
-  const layerSpec = layerSpecFrom(L);
-  history.push({ type: "addLayer", index: insertIndex, layerSpec, prevActiveId });
-  _afterDocChange();
-}
 function _openImagePicker() {
   // v125 修 (user：「图层面板的导入图片不成功」)
   //   图库"导入照片"会 set _addImportAsNewDoc=true，如果用户取消 file picker
@@ -1785,165 +631,11 @@ function _openImagePicker() {
   els.oraFileInput.value = "";
   els.oraFileInput.click();
 }
-function _deleteLayer(L) {
-  if (!L) return;
-  if (doc.layers.length <= 1) { setStatus("至少保留一层"); return; }
-  const index = doc.layers.findIndex((l) => l.id === L.id);
-  const layerSpec = layerSpecFrom(L);
-  doc.removeLayer(L.id);
-  history.push({ type: "removeLayer", index, layerSpec });
-  compressPixelSnap(layerSpec, (blob) => { layerSpec.blob = blob; });
-  _afterDocChange();
-}
-// v132 (user：「··· 菜单加 clear layer」)
-//   清空当前图层像素：保留图层 + 名字 + opacity / mode，bbox 归零
-function _clearLayerPixels(L) {
-  if (!L) return;
-  if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("图层已经是空的"); return; }
-  const before = L.snapshot();
-  // restoreFromSnapshot 用空 spec 把 layer 像素清掉，bbox 归零
-  L.restoreFromSnapshot({ bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null, bitmap: null });
-  const after = L.snapshot();
-  history.push({ type: "stroke", layerId: L.id, before, after, beforeBlob: null, afterBlob: null });
-  compressPixelSnap(before, (blob) => { before.blob = blob; });
-  compressPixelSnap(after,  (blob) => { after.blob  = blob; });
-  _afterDocChange();
-  board.invalidateAll();
-  setStatus(`已清空：${L.name}`);
-}
-// v124b 向下合并 (user 急需，mode-aware)：
-// 用 active 的 mode + opacity 把 active 合到下方层；删 active。
-// **不**改 active 的 mode (因为它要消失了)；下方层保留它原本 mode + opacity。
-// 视觉等价：合并前后画面相同。clippingMask layer 不支持（先返回不做）。
-// 薄 caller：合并数学/画布交换/删层归 doc.mergeDownLayer（模型层）；这里只翻译
-// 不可合并的原因→中文状态、把结果包成 mergeDown undo entry、异步压缩快照、刷新。
-const _MERGE_DOWN_STATUS = {
-  bottom: "已经是最底层，没法向下合",
-  "clipping-active": "剪裁层不支持向下合并（先取消剪裁）",
-  "clipping-under": "下方是剪裁层不支持合并",
-};
-function _mergeDownLayer(L) {
-  if (!L) return;
-  const r = doc.mergeDownLayer(L);
-  if (!r.ok) {
-    if (r.reason === "empty-active") { _deleteLayer(L); return; }   // active 空 → 当删 active
-    setStatus(_MERGE_DOWN_STATUS[r.reason] || "无法向下合并");
-    return;
-  }
-  history.push({
-    type: "mergeDown",
-    underId: r.underId,
-    underBefore: r.underBefore, underAfter: r.underAfter,
-    underBeforeOpacity: r.underBeforeOpacity, underBeforeMode: r.underBeforeMode,
-    activeSpec: r.activeSpec, activeIndex: r.activeIndex,
-  });
-  compressPixelSnap(r.underBefore, (blob) => { r.underBefore.blob = blob; });
-  compressPixelSnap(r.underAfter, (blob) => { r.underAfter.blob = blob; });
-  if (r.activeSpec.imageData) compressPixelSnap(r.activeSpec, (blob) => { r.activeSpec.blob = blob; });
-  _afterDocChange();
-}
-
-function _moveLayerDelta(L, delta) {
-  if (!L) return;
-  const from = doc.layers.findIndex((l) => l.id === L.id);
-  if (!doc.moveLayer(L.id, delta)) return;
-  const to = doc.layers.findIndex((l) => l.id === L.id);
-  history.push({ type: "moveLayer", layerId: L.id, fromIdx: from, toIdx: to });
-  _afterDocChange();
-}
-
-// v124b user 改主意：拆回 2 按钮。"+" 直加空层；相框 直开文件选
-els.layerAddBtn.addEventListener("click", _addEmptyLayer);
 document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);
 // v132 (user：「global 加删除当前图层」) 删当前 active layer
-document.getElementById("layerDeleteBtn")?.addEventListener("click", () => {
-  if (doc.activeLayer) _deleteLayer(doc.activeLayer);
-});
 
 // In-app 通用 sheet：替代 alert / prompt / confirm（详见 feedback-no-system-dialog）。
 // 返回 Promise，resolve 输入值 / true / null（取消）。
-function _resolveAndClose(resolve, value, cleanup) {
-  closeSheet(els.genericSheet, els.genericBackdrop);
-  cleanup();
-  resolve(value);
-}
-function openInputSheet(title, defaultValue = "", { placeholder = "" } = {}) {
-  return new Promise((resolve) => {
-    els.genericSheetTitle.textContent = title;
-    els.genericSheetMessage.classList.add("hidden");
-    els.genericSheetInput.classList.remove("hidden");
-    els.genericSheetInput.value = defaultValue;
-    els.genericSheetInput.placeholder = placeholder;
-    openSheet(els.genericSheet, els.genericBackdrop);
-    setTimeout(() => { els.genericSheetInput.focus(); els.genericSheetInput.select(); }, 0);
-    const onConfirm = () => _resolveAndClose(resolve, els.genericSheetInput.value, cleanup);
-    const onCancel  = () => _resolveAndClose(resolve, null, cleanup);
-    const onKey = (e) => {
-      if (e.key === "Enter") { e.preventDefault(); onConfirm(); }
-      else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
-    };
-    const cleanup = () => {
-      els.genericSheetConfirm.removeEventListener("click", onConfirm);
-      els.genericSheetCancel.removeEventListener("click", onCancel);
-      els.genericBackdrop.removeEventListener("click", onCancel);
-      els.genericSheetInput.removeEventListener("keydown", onKey);
-    };
-    els.genericSheetConfirm.addEventListener("click", onConfirm);
-    els.genericSheetCancel.addEventListener("click", onCancel);
-    els.genericBackdrop.addEventListener("click", onCancel);
-    els.genericSheetInput.addEventListener("keydown", onKey);
-  });
-}
-// ============ Sync gate ============
-// 锁屏 + 同步状态决策。详见 docs/sync-design.md
-//
-// 设计原则：
-//   - 应该连线 → 拦住用户等
-//   - 应该连线但离线 / token 过期 → user 显式 consent（选「离线」/「登录」）
-//   - 未登录 / 一开始就 offline → 直接走，不卡
-//   - 转圈期间 user 可随时点「离线」fall back，不强制等满
-//   - 「离线」选择**不**更新 lastSessionSignedIn → 意图保留，下次进还问
-
-const syncGate = {
-  backdrop: document.getElementById("syncGateBackdrop"),
-  sheet: document.getElementById("syncGateSheet"),
-  title: document.getElementById("syncGateTitle"),
-  message: document.getElementById("syncGateMessage"),
-  spinner: document.getElementById("syncGateSpinner"),
-  actions: document.getElementById("syncGateActions"),
-};
-function lockSyncGate({ title, message, showSpinner, actions }) {
-  syncGate.title.textContent = title;
-  syncGate.message.textContent = message;
-  syncGate.spinner.classList.toggle("hidden", !showSpinner);
-  syncGate.actions.innerHTML = "";
-  return new Promise((resolve) => {
-    for (const a of actions) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = a.label;
-      if (a.primary) btn.classList.add("primary");
-      btn.addEventListener("click", () => { unlockSyncGate(); resolve(a.value); });
-      syncGate.actions.appendChild(btn);
-    }
-    syncGate.backdrop.classList.remove("hidden");
-    syncGate.sheet.classList.remove("hidden");
-    // 暴露 resolve 让 fetch 完成时能从外部 unlock 并返回
-    syncGate._pendingResolve = resolve;
-  });
-}
-function unlockSyncGate() {
-  syncGate.backdrop.classList.add("hidden");
-  syncGate.sheet.classList.add("hidden");
-  syncGate._pendingResolve = null;
-}
-function settleSyncGate(value) {
-  if (syncGate._pendingResolve) {
-    const r = syncGate._pendingResolve;
-    unlockSyncGate();
-    r(value);
-  }
-}
 
 // 主流程：openSession 后调一次
 async function gateCloudSyncOnOpen(sessionName) {
@@ -2034,7 +726,7 @@ async function checkCloudETag(sessionName) {
           ],
         });
       },
-      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
+      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); session.adopt(loaded, nm); },
     });
   } finally {
     settleSyncGate(null);   // 收尾确保 spinner 关（已关则安全 no-op）
@@ -2076,7 +768,7 @@ let _ffInFlight = false;
 async function maybeFastForwardActive({ manual = false } = {}) {
   if (_ffInFlight) return;
   if (!isSignedIn() || navigator.onLine === false) { if (manual) setStatus("离线，暂时无法检查云端", true); return; }
-  const name = _activeSessionName;
+  const name = session.name;
   if (!name || name === "未命名") return;
   if (els.galleryFull && !els.galleryFull.classList.contains("hidden")) return;   // 在图库（无活动画布）不 FF
   if (_store.edits.localDirty() || isCloudDirty(name)) return;                     // 仅干净（refresh 内还会再判，这里先省一次网络）
@@ -2086,7 +778,7 @@ async function maybeFastForwardActive({ manual = false } = {}) {
     const res = await _store.flow.refresh(name, {
       isOnline: () => navigator.onLine !== false,
       localDirty: () => _store.edits.localDirty(),
-      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
+      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); session.adopt(loaded, nm); },
       busy: manual ? withBusy : undefined,   // 手动点 → 锁屏（反馈 + 防刷新中途动笔）；自动轮询 → 静默
     });
     if (res.status === "fast-forwarded") {
@@ -2106,7 +798,7 @@ async function maybeFastForwardActive({ manual = false } = {}) {
 async function showIdleLockIfStale() {
   if (_idleLockShowing) return;
   if (!isSignedIn() || navigator.onLine === false) return;
-  const name = _activeSessionName;
+  const name = session.name;
   if (!name || name === "未命名") return;
   if (els.galleryFull && !els.galleryFull.classList.contains("hidden")) return;   // 图库里不锁
   if (_store.edits.localDirty() || isCloudDirty(name)) return;                     // 有未存/未推编辑 → 不锁（不会 FF，你的活还在）
@@ -2135,138 +827,14 @@ function formatCloudTime(iso) {
   return `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 function getLocalSavedAtLabel() {
-  if (!_docLastSavedAt) return "（未保存）";
-  const d = new Date(_docLastSavedAt);
+  if (!session.docLastSavedAt) return "（未保存）";
+  const d = new Date(session.docLastSavedAt);
   return `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-function openConfirmSheet(title, message) {
-  return new Promise((resolve) => {
-    els.genericSheetTitle.textContent = title;
-    els.genericSheetInput.classList.add("hidden");
-    els.genericSheetMessage.classList.remove("hidden");
-    els.genericSheetMessage.textContent = message;
-    openSheet(els.genericSheet, els.genericBackdrop);
-    const onConfirm = () => _resolveAndClose(resolve, true, cleanup);
-    const onCancel  = () => _resolveAndClose(resolve, false, cleanup);
-    const cleanup = () => {
-      els.genericSheetConfirm.removeEventListener("click", onConfirm);
-      els.genericSheetCancel.removeEventListener("click", onCancel);
-      els.genericBackdrop.removeEventListener("click", onCancel);
-    };
-    els.genericSheetConfirm.addEventListener("click", onConfirm);
-    els.genericSheetCancel.addEventListener("click", onCancel);
-    els.genericBackdrop.addEventListener("click", onCancel);
-  });
-}
 
 // Per-row "⋯" 工具菜单：弹出 in-app popup（**不用** alert / prompt 等系统对话框）。
 // 现在只有重命名一项；之后加复制图层 / 清空内容 / 合并下方 等。
-function openLayerToolsMenu(L, anchorEl, nameEl) {
-  // v124b toggle (user：「图层的 ⋯ 没法关，所有的 ⋯ 都点了能关」)
-  // 同 anchor 再按 = 收回；不同 anchor 替换
-  const existing = document.querySelector(".layer-tools-popup");
-  const sameAnchor = existing && existing.dataset.anchorId === String(L.id);
-  document.querySelectorAll(".layer-tools-popup").forEach((p) => p.remove());
-  if (sameAnchor) return;
-
-  const popup = document.createElement("div");
-  popup.className = "menu-panel layer-tools-popup";
-  popup.dataset.anchorId = String(L.id);
-  // v123 起：del / up / down / 向下合并 都在这里
-  const idx = doc.layers.findIndex((l) => l.id === L.id);
-  const canUp = idx < doc.layers.length - 1;
-  const canDown = idx > 0;
-  const canDel = doc.layers.length > 1;
-  const canMergeDown = idx > 0 && !L.clippingMask && !doc.layers[idx - 1].clippingMask;
-  // v132 (user：「··· 菜单加 clear layer 在删除上面，删除不标红」)
-  const hasPx = L.bboxW > 0 && L.bboxH > 0;
-  popup.innerHTML = `
-    <button class="menu-item" data-act="rename" type="button">
-      <span class="menu-item-label">重命名…</span>
-    </button>
-    <button class="menu-item" data-act="up" type="button"${canUp ? "" : " disabled"}>
-      <span class="menu-item-label">上移</span>
-    </button>
-    <button class="menu-item" data-act="down" type="button"${canDown ? "" : " disabled"}>
-      <span class="menu-item-label">下移</span>
-    </button>
-    <button class="menu-item" data-act="mergeDown" type="button"${canMergeDown ? "" : " disabled"}>
-      <span class="menu-item-label">向下合并</span>
-    </button>
-    <button class="menu-item" data-act="clear" type="button"${hasPx ? "" : " disabled"}>
-      <span class="menu-item-label">清空内容</span>
-    </button>
-    <button class="menu-item menu-danger" data-act="del" type="button"${canDel ? "" : " disabled"}>
-      <span class="menu-item-label">删除</span>
-    </button>
-  `;
-  document.body.appendChild(popup);
-  // 锚到按钮下方，右对齐
-  const r = anchorEl.getBoundingClientRect();
-  const w = popup.offsetWidth || 160;
-  popup.style.position = "fixed";
-  popup.style.top = (r.bottom + 4) + "px";
-  popup.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + "px";
-
-  const cleanup = () => {
-    popup.remove();
-    document.removeEventListener("pointerdown", outside, true);
-  };
-  const outside = (e) => {
-    if (!popup.contains(e.target) && !anchorEl.contains(e.target)) cleanup();
-  };
-  // 异步挂 listener 避开本次点击事件
-  setTimeout(() => document.addEventListener("pointerdown", outside, true), 0);
-
-  popup.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-act]");
-    if (!btn || btn.disabled) return;
-    const act = btn.dataset.act;
-    cleanup();
-    if (act === "rename")           startLayerRename(L, nameEl);
-    else if (act === "up")          _moveLayerDelta(L, 1);
-    else if (act === "down")        _moveLayerDelta(L, -1);
-    else if (act === "mergeDown")   _mergeDownLayer(L);
-    else if (act === "clear")       _clearLayerPixels(L);
-    else if (act === "del")         _deleteLayer(L);
-  });
-}
-
-// Layer rename：把 name span 换成 input，blur / Enter 提交，Esc 撤销
-function startLayerRename(L, nameEl) {
-  const oldName = L.name;
-  const input = document.createElement("input");
-  input.type = "text";
-  input.value = oldName;
-  input.className = "layer-name-input";
-  nameEl.replaceWith(input);
-  input.focus();
-  input.select();
-  let committed = false;
-  const commit = () => {
-    if (committed) return;
-    committed = true;
-    const v = input.value.trim();
-    const newName = v || oldName;
-    if (newName !== oldName) {
-      L.name = newName;
-      history.push({ type: "renameLayer", layerId: L.id, oldName, newName });
-    }
-    renderLayersPanel();
-  };
-  const cancel = () => {
-    if (committed) return;
-    committed = true;
-    renderLayersPanel();
-  };
-  input.addEventListener("blur", commit);
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); commit(); }
-    else if (e.key === "Escape") { e.preventDefault(); cancel(); }
-  });
-  input.addEventListener("click", (e) => e.stopPropagation());
-}
 
 // 从 Layer 拿一份 spec（含 pixel snapshot）—— add/remove handler 都用
 // 「层 → spec」的形状归模型层（doc.layerSpec）；这里只是旧名兜底。
@@ -2468,16 +1036,8 @@ history.registerHandler("selectionToLayer", {
 // 本地未落盘 = store.edits.localDirty()（派生自编辑游标，不再用独立的 _docDirty 标志）。
 // transient busy（saving=IDB 写盘中 / pushing=云端 push 中）归 store（_store.busy，L4 ②b）——
 // app 不再持 saving/pushing 全局变量；computeSaveState 只读 store。
-// 当前 doc 由比自己高的 WebPaint 版本写过 → 编辑保存有降级风险
-let _loadedDocIsNewer = false;
-let _loadedDocWriterVer = null;
-let _loadedDocNewerConfirmed = false;   // user 已经确认过本 session 的降级风险
-let _docLastSavedAt = 0;
-// **幽灵 current path 保护**：内存里 _activeSessionName 只在 boot load 成功
-// 或用户主动 open / new / save-as 后才升级到真实名字。boot 失败时保持
-// safe default "未命名"，避免 save 走 rename-delete-old 路径误删。
-let _activeSessionName = "未命名";
-const AUTOSAVE_MS = 3 * 60 * 1000;
+// 活动文档生命周期 SSoT（指针/lazy/saved-at/newer-guard/autosave 接线）已切到 session-state.ts。
+// 这里只剩 save-btn 4 态渲染（读 session.name + store），不再持任何 session-private 变量。
 
 // v45 新语义：
 //   **Ctrl+S / 点 save 按钮 = "save local + push cloud" 一把梭**（user 显式 consent）。
@@ -2514,14 +1074,14 @@ function computeSaveState() {
   if (_store.busy.pushing()) return "cloud-busy";
   if (_store.busy.saving()) return "saving";
   if (_store.edits.localDirty()) return "dirty";
-  const st = _store.cloud.status(_activeSessionName, { signedIn: isSignedIn(), hasLocal: true });
+  const st = _store.cloud.status(session.name, { signedIn: isSignedIn(), hasLocal: true });
   if (st === "dirty") return "cloud-dirty";     // 本地已存、云端未同步
   if (st === "synced") return "synced";         // 与云端一致
   return "local-only";                          // 未登录（含 cloud-only/absent，对本地视角=只本地）
 }
 function updateSaveStatus() {
   // gallery-first: 没绑 session → 隐藏 save btn（没东西可保存）
-  if (!_activeSessionName) {
+  if (!session.name) {
     els.topSaveBtn.dataset.state = "none";
     els.topSaveBtn.innerHTML = ICON_DISK;
     els.topSaveBtn.title = "未打开作品";
@@ -2530,7 +1090,7 @@ function updateSaveStatus() {
   const state = computeSaveState();
   els.topSaveBtn.dataset.state = state;
   els.topSaveBtn.style.opacity = ""; els.topSaveBtn.style.color = "";   // 永不残留旧的灰/蓝 —— 云=可按态主题色（灰=不可按，禁用）
-  const name = _activeSessionName;
+  const name = session.name;
   if (state === "cloud-busy") { els.topSaveBtn.innerHTML = ICON_CLOUD_BUSY; els.topSaveBtn.title = `上传中… · ${name}`; }
   else if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存中… · ${name}`; }
   else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存 + 推送 (Ctrl+S) · ${name} · 未保存`; }
@@ -2542,359 +1102,27 @@ function updateSaveStatus() {
   }
   else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `已存本地（IDB 易失，登录云端更安全） · ${name}`; }
 }
-// opts.implicit = autosave / visibility / pagehide 这类后台路径。
-// floating 状态下 implicit 路径**完全跳**——不把"layer 有洞"持久化进 IDB。
-// 显式路径（Ctrl+S / 切 session / 进图库 / rename）会自动 commit floating 再保存，
-// 匹配用户语义"save = 当前所见，包含正在变换"
-// v124 (user)：未命名 + 一笔没动 (所有层 bbox 全空) → 跳过保存，避免 IDB 灌一堆"未命名"
-// reset-to-blank 后的 lazy session 标记：name 已 unique 算好 + 占位但 IDB 没 record。
-// 用户画第一笔后下面 _docIsBlankUnnamed 自检：bbox 非空 → 清 flag → 该 session 正常 save 落 IDB
-let _isLazyBlankSession = false;
-function _docIsBlankUnnamed() {
-  if (_isLazyBlankSession) {
-    for (const L of doc.layers) {
-      if (L.bboxW > 0 && L.bboxH > 0) { _isLazyBlankSession = false; return false; }
-    }
-    return true;
-  }
-  if (_activeSessionName && _activeSessionName !== "未命名") return false;
-  for (const L of doc.layers) {
-    if (L.bboxW > 0 && L.bboxH > 0) return false;   // 有像素 → 不算 blank
-  }
-  return true;
-}
-async function saveNow(opts = {}) {
-  if (_store.busy.saving()) return;
-  if (!_activeSessionName) return;       // gallery-first: 在 gallery 没绑 session → 不保存
-  if (_docIsBlankUnnamed()) return;
-  if (editMode.hasPendingTransient()) {
-    if (opts.implicit) return;             // 后台路径：保持 IDB 干净，等用户回来
-    editMode.applyPendingTransient();           // 显式路径：先把变换 / 浮层等都 apply
-  }
-  // 文档来自更新版本 → 用户必须显式确认才能覆盖（每个 session 只问一次）
-  // implicit 路径（autosave / visibility / pagehide）直接 skip 保存——防自动覆盖
-  if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
-    if (opts.implicit) return;
-    const ok = await openConfirmSheet(
-      `覆盖更新版本写的画？`,
-      `这画由 ${_loadedDocWriterVer} 写的，你是 ${WEBPAINT_VERSION}。` +
-      `保存会丢失新版本特有的属性（如新图层 flag 等）。建议先刷新升级。`,
-    );
-    if (!ok) { setStatus("已取消保存"); return; }
-    _loadedDocNewerConfirmed = true;
-    updateNewerBanner();
-  }
-  _store.busy.set("saving", true);
-  updateSaveStatus();
-  try {
-    await saveSession(doc, _activeSessionName, _buildOraMeta());   // 本地/云端字节统一：viewport 不进 .ora（ADR-0016 §6）
-    _store.edits.markSaved();
-    _docLastSavedAt = Date.now();
-    setStatus(`已保存：${_activeSessionName}`);
-    checkQuotaAndWarn();
-  } catch (e) {
-    console.warn("[session] save failed:", e);
-    setStatus("保存失败：" + (e && e.message || e));
-  } finally {
-    _store.busy.set("saving", false);
-    updateSaveStatus();
-  }
-}
+// saveNow / adoptLoadedDoc / saveAndPush / newDoc / rename / exit / pull / checkpoint
+// 全切到 session-state.ts（活动文档生命周期 SSoT）。app 这边只经 session.* 调用。
 
-// 把 loaded doc 的内容塞回 live doc（保持指针，避免到处换引用）
-// **不**调 board.fitToScreen —— 保留用户当前视口（zoom / pan），切 session 不重置
-// 加载/采纳/FF 期间会调 input.clearHistory() → 派发 wp:histchange → dirty 监听器会把刚载入的画误标成
-// **云端 dirty**（markSaved 只复位本地、复位不了云端）→ 刚 FF/打开就又脏、退出即冲突（真机实测「没画却冲突」根因）。
-// _loadingDoc 在整个 adopt 期间挡掉 dirty 标记：保留 adopt 前的云端 dirty 真值（FF/pull=clean、本地脏画=仍脏）。
-let _loadingDoc = false;
-function adoptLoadedDoc(loaded, sessionName) {
-  _loadingDoc = true;
-  try {
-  // 模型层字段（layers/active/尺寸/背景/参考层id/清选区）归 doc.adoptState；
-  // 下面全是 app 编排（UI 刷新 / 工具态 / 参考窗 / 视口 / store base / 版本检测 / checkpoint）。
-  doc.adoptState(loaded);
-  els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-  input.clearHistory();
-  board.invalidateAll();
-  board.requestRender();
-  renderLayersPanel();
-  _activeSessionName = sessionName;
-  setCurrentSessionName(sessionName);
-  // C4：捕获本 tab 的 base-etag（打开这画时的云端版本）进 Store 内存。
-  // 之后 store.flow.push 用它当 If-Match，不读共享 localStorage → 杜绝多 tab 静默覆盖。
-  _store.adoptBase(sessionName, getKnownETag(sessionName));
-  _store.edits.markSaved();
-  _docLastSavedAt = Date.now();
-  _isLazyBlankSession = false;   // 加载了真实 session，不再 lazy
-  updateSaveStatus();
-  // 文档版本检测：写入这画时的 WebPaint 版本 > 当前 → 警告
-  // 防：旧客户端打开新版写的画 → 编辑 → 保存时把新版独有的层属性
-  // （clipping / reference / 未来的扩展）静默吃掉。
-  _loadedDocIsNewer = false;
-  _loadedDocNewerConfirmed = false;
-  const writerN = parseAppVersion(loaded._wroteWith);
-  const selfN   = parseAppVersion(WEBPAINT_VERSION);
-  if (writerN !== null && selfN !== null && writerN > selfN) {
-    _loadedDocIsNewer = true;
-    _loadedDocWriterVer = loaded._wroteWith;
-    setStatus(
-      `这画由 ${loaded._wroteWith} 写的，你是 ${WEBPAINT_VERSION} —— ` +
-      `编辑保存会丢失新版特有的层属性。建议先刷新升级。`,
-      true,
-    );
-  } else {
-    _loadedDocWriterVer = null;
-  }
-  updateNewerBanner();
-  // 恢复 reference 小窗（.ora webpaint/ 扩展）
-  // **先清后设**——防上一画的 ref 在异步路径里残留显示（v95 user 反馈）
-  referenceWindow.clearBitmap();
-  if (loaded._referenceBlob) {
-    createImageBitmap(loaded._referenceBlob).then((bitmap) => {
-      referenceWindow.setBitmap(bitmap, { persistBlob: loaded._referenceBlob });
-      if (loaded._webpaintState?.reference) {
-        referenceWindow.applySerializedState(loaded._webpaintState.reference);
-      }
-    }).catch(() => {});
-  } else if (loaded._webpaintState?.reference) {
-    referenceWindow.applySerializedState(loaded._webpaintState.reference);
-  }
-  // 恢复 per-doc 的 color + per-tool 状态（v82 起）
-  if (loaded._webpaintState?.color) {
-    setColor(loaded._webpaintState.color);
-  }
-  // 恢复调色板（v87 起）
-  if (loaded._webpaintState?.palette) {
-    try { paletteWindow.applySerializedState(loaded._webpaintState.palette); } catch (_) {}
-  }
-  if (loaded._webpaintState?.toolStates && typeof loaded._webpaintState.toolStates === "object") {
-    for (const t of Object.keys(state.toolStates)) {
-      const saved = loaded._webpaintState.toolStates[t];
-      if (saved && typeof saved === "object") {
-        // v98：opacity/flow 分离；老 doc 的 .intensity 当 opacity 兼容
-        const op = typeof saved.opacity === "number" ? saved.opacity
-                 : typeof saved.intensity === "number" ? saved.intensity
-                 : typeof saved.flow === "number" ? saved.flow
-                 : state.toolStates[t].opacity;
-        const fl = typeof saved.flow === "number" && typeof saved.opacity === "number" ? saved.flow
-                 : state.toolStates[t].flow;
-        Object.assign(state.toolStates[t], {
-          size: typeof saved.size === "number" ? saved.size : state.toolStates[t].size,
-          opacity: op,
-          flow: fl,
-          activeBrushId: typeof saved.activeBrushId === "string" ? saved.activeBrushId : state.toolStates[t].activeBrushId,
-          activeBrushName: typeof saved.activeBrushName === "string" ? saved.activeBrushName : state.toolStates[t].activeBrushName,
-          // v132 filterBrush 多 variantId（user：「持久化 filter brush 的 selection」）
-          ...(typeof saved.variantId === "string" ? { variantId: saved.variantId } : {}),
-        });
-      }
-    }
-    applyToolState(editMode.current());
-  }
-  // v125 per-doc checkerboard：按文件值刷新，缺省回 false
-  applyCheckerboard(!!loaded._webpaintState?.checkerboard);
-  // v126 (user：「画布的旋转和位置缩放跟文件」)
-  //   per-doc viewport：有就 restore，没有的话 caller 会 fitToScreen
-  const vp = loaded._webpaintState?.viewport;
-  if (vp && typeof vp.scale === "number") {
-    Object.assign(board.viewport, vp);
-    board.invalidateAll();
-    board.requestRender();
-  }
-  // v133 (user：「revert 回到本次 session 打开时」) 写 checkpoint
-  //   opts.skipCheckpoint = true 给 revert 路径用（revert 后不刷新 checkpoint，user 还能再 revert）
-  if (!_adoptLoadedOpts.skipCheckpoint) {
-    _sessionOpenedAt = Date.now();
-    // 异步写：encode 几百 ms，不阻塞 UI
-    _writeSessionCheckpoint(sessionName).catch((e) => console.warn("[revert] checkpoint 失败:", e));
-  }
-  } finally { _loadingDoc = false; }
-}
-// v133 revert: session-open checkpoint state
-let _sessionOpenedAt = 0;
-// adoptLoadedDoc opts 用全局传（绕开签名兼容）：调前 set，复位
-let _adoptLoadedOpts = {};
-function adoptLoadedDocWithOpts(loaded, name, opts) {
-  _adoptLoadedOpts = opts || {};
-  try { adoptLoadedDoc(loaded, name); }
-  finally { _adoptLoadedOpts = {}; }
-}
-// 当前 doc 的标准持久化 meta（reference + webpaintState）。flow.encode 回调 / checkpoint / saveAndPush 共用，
-// 避免这个形状散抄多份（drift 源）。
-// viewport（zoom/pan）是**设备本地态**，**不进任何 .ora 字节**（本地落盘 / 云端同步一律不带）——
-// ADR-0016 §6：设备态进 .ora 会让两设备同像素产生不同字节 → W1 字节相等自愈跨设备永不命中、纯平移也算冲突。
-// 所有 .ora 字节由此统一（本地==云端），无「同一版本两份字节」的不一致。
-// 取舍（用户定 2026-06-06）：重开（含同设备）一律 fitToScreen，不记忆视口。活动中的事件驱动 FF 仍保留当前视口
-//   （maybeFastForwardActive 在内存里前后存还，不碰字节），别让背景快进把你正看的画面跳掉。
-function _buildOraMeta() {
-  return {
-    referenceImage: referenceWindow.getPersistBlob(),
-    webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
-  };
-}
-function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
-
-async function _writeSessionCheckpoint(name) {
-  if (!name) return;
-  const blob = await _encodeCurrentOra();
-  await setMeta(`revert:${name}:ora`, blob);
-  await setMeta(`revert:${name}:at`, _sessionOpenedAt);
-}
-async function _readSessionCheckpoint(name) {
-  const blob = await getMeta(`revert:${name}:ora`);
-  const at = await getMeta(`revert:${name}:at`);
-  return blob ? { blob, at: at || 0 } : null;
-}
 // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty。这是 work-file 的**唯一编辑门**。
 // store.edit(name) 一处吸：推编辑游标(local-dirty) + 经门标云脏(捕 parentBase；不 gate signedIn)。
 // name 空（gallery-first 未绑 session）→ 只推游标。门机制全在库内（app 不再直调 setCloudDirty，ADR-0016 §4）。
 window.addEventListener("wp:histchange", () => {
-  if (_loadingDoc) return;                    // 加载/采纳/FF 期间 clearHistory 派发的 histchange 不算编辑（不标脏）
-  _store.edit(_activeSessionName || null);
-  if (!_activeSessionName) return;            // gallery-first: 无绑 session 时不刷 save 按钮
+  if (session.loadingDoc) return;             // 加载/采纳/FF 期间 clearHistory 派发的 histchange 不算编辑（不标脏）
+  _store.edit(session.name || null);
+  if (!session.name) return;                  // gallery-first: 无绑 session 时不刷 save 按钮
   updateSaveStatus();
 });
-// **Ctrl+S / 点 save 按钮** = 完全保存（local IDB + push cloud）。
-// user 显式 consent + 在场 → 触云。autosave / visibility / pagehide
-// 走 saveNow（仅 IDB），不触云。详见 docs/persistence-and-encryption-shareback.md。
-// 云推走 _store.flow.push（lib）：内含 B1 串行 / B2 不丢编辑 / B5 lost-response 自愈 / retry / C4 多tab。
-// 真冲突 → flow.push 返回 {status:"conflict", choice}，下面复用既有 primitives 执行 pull/rename/branch。
-async function saveAndPush() {
-  if (_store.busy.saving()) return;
-  if (_store.busy.pushing()) await _awaitCloudPushIdle();
-  if (!_activeSessionName) { setStatus("没打开作品，无法保存", true); return; }
-  if (_store.edits.localDirty()) await saveNow();
-  if (_activeSessionName) {
-    _sessionOpenedAt = Date.now();
-    _writeSessionCheckpoint(_activeSessionName).catch((e) => console.warn("[revert] explicit save checkpoint:", e));
-  }
-  if (isSignedIn() && navigator.onLine === false && isCloudDirty(_activeSessionName)) {
-    setStatus(`已存本地：${_activeSessionName}（离线，回到在线再 Ctrl+S 推云端）`);
-    return;
-  }
-  if (!(isSignedIn() && isCloudDirty(_activeSessionName))) {
-    if (!isSignedIn() && !_store.edits.localDirty()) setStatus(`已存本地：${_activeSessionName}（IDB 易失，登录云端更安全）`);
-    return;
-  }
-  const sessionName = _activeSessionName;
-  let conflictChoice = null;
-  _store.busy.set("pushing", true);
-  updateSaveStatus();
-  try {
-    const result = await _store.flow.push(sessionName, {
-      encode: () => _encodeCurrentOra(),   // 同步字节不带 viewport（ADR-0016 §6；与 checkpoint/flow.encode 共用一处形状）
-      // store 内执行 take-cloud(pull) 需要 adopt 把云端版反映进活编辑器（_safePull：本地先 backup→拉云覆盖→adopt）。
-      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
-      // spec（share-file-model / ADR-0009）：Work 禁 destructive pull。三选项无命名、两个「覆盖」输方都进 backup 不丢：
-      //   no-op 安全默认 / pull=云端赢·我的进本地 .backup / weak-override=我赢·云端原版进云端 .backup。
-      onConflict: async () => await lockSyncGate({
-        title: "云端有更新版本",
-        message: `「${sessionName}」云端已被改过；你本地是 ${getLocalSavedAtLabel()}。`,
-        showSpinner: false,
-        actions: [
-          { label: "保留本地、暂不推（稍后再决定）", value: "no-op", primary: true },
-          { label: "用云端覆盖本地（我的版本存进 .backup，可恢复）", value: "pull" },
-          { label: "用本地覆盖云端（云端原版存进 .backup，可恢复）", value: "weak-override" },
-        ],
-      }),
-    });
-    if (result.status === "conflict") {
-      conflictChoice = result.choice;                 // no-op（app 执行）
-    } else if (result.status === "resolved" && result.resolution === "pull") {
-      setStatus(`已采用云端版本：${sessionName}（你的版本存进本地 .backup，可恢复）`);
-      gallery.refresh();
-    } else if (result.status === "resolved" && result.resolution === "weak-override") {
-      setStatus(`已用本地覆盖云端：${sessionName}（云端原版存进 .backup，可恢复）`);
-      gallery.refresh();
-    } else {
-      setStatus(result.status === "healed"
-        ? `已同步到云端：${sessionName}（云端本已是这份）`
-        : `已同步到云端：${sessionName}`);
-      gallery.refresh();
-    }
-  } catch (e) {
-    console.warn("[cloud] store push failed:", e);
-    if (e instanceof CloudNameCollisionError)
-      setStatus(`云端已有同名「${sessionName}」（不同作品）——已留本地、未覆盖云端，改个名再推`, true);
-    else setStatus("推送失败：" + (e && e.message || e));
-  } finally {
-    _store.busy.set("pushing", false);
-    updateSaveStatus();
-  }
-  // 冲突执行：pull / weak-override 都已由 store 内部完成（备份先于覆盖）；这里只剩 no-op 提示。
-  if (conflictChoice === "no-op") {
-    setStatus(`已保留本地，云端未动；下次推会再确认（${sessionName}）`);
-  }
-}
-
-// 重命名当前 active session。在画画界面也能调（汉堡菜单），云冲突时也会自动弹。
-// 同名循环检查（local 范围）；返回新名（或 null 取消 / 失败）。
-async function renameCurrentSession({ suggested, reason } = {}) {
-  // 重命名 = 用户决定性动作 → apply pending（套索浮层等）
-  editMode.applyPendingTransient();
-  const oldName = _activeSessionName;
-  let candidate = suggested || oldName;
-  // 循环直到 user 给出可用名 / 取消
-  while (true) {
-    const title = reason ? `重命名（${reason}）` : "重命名当前画作";
-    const input = await openInputSheet(title, candidate, { placeholder: "作品名字" });
-    if (input === null) return null;
-    const trimmed = input.trim();
-    if (!trimmed) { setStatus("名字不能空", true); candidate = ""; continue; }
-    if (trimmed === oldName) return oldName;       // 没改 = 等于成功
-    // local 同名检查
-    const localNames = (await listSessions()).map((s) => s.name);
-    if (localNames.includes(trimmed)) {
-      setStatus(`本地已有同名 "${trimmed}"，换一个`, true);
-      candidate = trimmed;
-      continue;
-    }
-    // 干活全交给 store.flow.rename（feedback-phantom-current-path：本地先存新名再删旧名，红线在库内）。
-    //   云端：synced→服务端 move 保 etag；dirty/无云文件→push 新名 + 旧名进 .trash（非 hard-delete）。
-    //   云端 best-effort：失败不回滚本地，新名标脏下次 Ctrl+S 续（res.cloudDeferred）。
-    try {
-      const cloudOn = isSignedIn() && navigator.onLine !== false;
-      const res = await _store.flow.rename(oldName, trimmed, {
-        encode: () => _encodeCurrentOra(),
-        cloud: cloudOn,
-      });
-      _activeSessionName = trimmed;
-      setCurrentSessionName(trimmed);
-      _store.edits.markSaved();
-      _docLastSavedAt = Date.now();
-      updateSaveStatus();
-      if (!cloudOn) setStatus(`已重命名：${oldName} → ${trimmed}`);
-      else if (res.cloudDeferred) setStatus(`已重命名（仅本地）：${oldName} → ${trimmed}（云端稍后 Ctrl+S 推）`);
-      else setStatus(`已重命名（含云端）：${oldName} → ${trimmed}`);
-      gallery.refresh();
-      return trimmed;
-    } catch (e) {
-      setStatus("重命名失败：" + (e && e.message || e));
-      return null;
-    }
-  }
-}
-
-// Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地（不推云）。
-// 合流（coalesce）状态机收进 Store（④）：_store.session.request(type)。逻辑/单测见 store.js + test/store-coalescer。
-// app 只注入两个真·保存动作（doLocal/doPush）。编辑游标也归 Store（_store.edits）——histchange 里 mark 一次。
-_store.session.configure({ doLocal: () => saveNow(), doPush: () => saveAndPush() });
-
+// saveAndPush / renameCurrentSession / coalescer+autosave 接线全切到 session-state.ts。
+// Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地（不推云）。合流状态机在 Store（_store.session）。
 window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
     e.preventDefault();
     _store.session.request(e.shiftKey ? "local" : "push");
   }
 });
-// autosave cadence 归 store（L4 ②c）：app 注入 persist（= dirty-gated 本地存，含 blank/transient/newer 守卫）
-//   + start 3min 兜底 timer 各一次；dirty/busy 判定都在 store.autosave 内（取代散落的 4 份 if-saveNow）。
-_store.autosave.configure({ persist: () => saveNow({ implicit: true }) });
-_store.autosave.start(AUTOSAVE_MS);   // 3 min 兜底
-// visibility / pagehide 抢救（implicit：floating 状态下跳过；layer 留半态在内存，但 IDB 干净）→ store.autosave.flush()
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") _store.autosave.flush();
-});
-window.addEventListener("pagehide", () => { _store.autosave.flush(); });
+// autosave configure/start + visibility/pagehide flush 已切到 session-state.ts initSession。
 // v115: Ctrl+Shift+R / 关 tab / 浏览器返回 前弹挽留 + 偷偷本地备份
 // (user：「可以弹挽留对话框，应该弹」+「挽留的时候偷偷本地备份」)
 // 1. beforeunload 是唯一能 block 浏览器的钩子；对话框内容浏览器自管
@@ -2919,7 +1147,7 @@ function stampNow() {
 // 点 save 按钮 = saveAndPush 一把梭（同 Ctrl+S）。state == "synced" 时
 // 也跑一遍（no-op fast path）让 user 永远不需要"再点一下"。
 els.topSaveBtn.addEventListener("click", () => {
-  const name = _activeSessionName;
+  const name = session.name;
   // synced（无可存可推）→ 按钮兼作「刷新云端态」（ADR-0017，点一下 = 现场查云 + 干净则快进）；否则正常存/推。
   if (name && name !== "未命名" && isSignedIn() && !_store.edits.localDirty() && !isCloudDirty(name)) {
     maybeFastForwardActive({ manual: true });
@@ -2930,570 +1158,6 @@ els.topSaveBtn.addEventListener("click", () => {
 
 // ---- topbar：adjustments popup（液化 / 后续调色 etc）----
 // 单按钮 → 弹一列 menu-item（同 menuPanel 模式）。学 Procreate adjustments icon。
-function setAdjustOpen(open) {
-  els.adjustPopup.classList.toggle("hidden", !open);
-  els.topAdjustBtn.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open) {
-    // 锚到按钮下方右对齐
-    const r = els.topAdjustBtn.getBoundingClientRect();
-    const w = els.adjustPopup.offsetWidth || 200;
-    els.adjustPopup.style.top = (r.bottom + 4) + "px";
-    els.adjustPopup.style.right = (window.innerWidth - r.right) + "px";
-    els.adjustPopup.style.left = "auto";
-  }
-}
-els.topAdjustBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  setAdjustOpen(els.adjustPopup.classList.contains("hidden"));
-});
-document.addEventListener("pointerdown", (e) => {
-  if (els.adjustPopup.classList.contains("hidden")) return;
-  if (els.adjustPopup.contains(e.target) || els.topAdjustBtn.contains(e.target)) return;
-  setAdjustOpen(false);
-});
-
-// ===== v110/114 crop / resample / adjust =====
-// 通用：op 前先 commit floating + 把当前 doc + viewport snapshot 当 before
-function _captureDocBefore() {
-  editMode.applyPendingTransient();
-  return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
-}
-function _captureDocAfter() {
-  return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
-}
-function _pushDocTransform(before, after, label) {
-  history.push({ type: "docTransform", before, after });   // history.push 同步派 wp:histchange → 编辑门已标游标+云脏（无需再标）
-  if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-  board.invalidateAll();
-  renderLayersPanel();
-  setStatus(label);
-}
-
-// 文档变换的提交信封：把「before 快照 → 改 doc → after 快照 → 压 docTransform」这条
-// 四处重复的脊柱收一处。结构上保证不会漏掉 undo 事务（漏了 = 这步静默不可撤销）。
-// 守卫（无选区/尺寸非法/没变化）留在调用方——helper 只管「已决定要做」的那次变换的提交。
-// applyFn 内改 doc + 可选 viewport shift（必须在 after 快照前完成，故放进 applyFn）。
-function runDocTransform(label, applyFn) {
-  const before = _captureDocBefore();
-  applyFn();
-  const after = _captureDocAfter();
-  _pushDocTransform(before, after, label);
-}
-
-// v114: 裁切后让原 (rect.x, rect.y) 像素在屏上不挪 → viewport.tx/ty 减去 (rect.x, rect.y) × scale
-// 数学：old 屏位 = old_tx + rect.x × scale；new 屏位 = new_tx + 0 × scale = new_tx
-// 要等 → new_tx = old_tx + rect.x × scale
-function _shiftViewportAfterCrop(rect) {
-  const v = board.viewport;
-  v.tx = v.tx + rect.x * v.scale;
-  v.ty = v.ty + rect.y * v.scale;
-}
-
-// 裁到选区 ----
-document.getElementById("adjustCropToSelection").addEventListener("click", () => {
-  setMenuOpen(false);
-  setAdjustOpen(false);
-  if (!doc.selection) { setStatus("没选区——画一个 lasso 选区先", true); return; }
-  const s = doc.selection;
-  const x = Math.max(0, s.bboxX | 0), y = Math.max(0, s.bboxY | 0);
-  const w = Math.min(doc.width - x, s.bboxW | 0), h = Math.min(doc.height - y, s.bboxH | 0);
-  if (w < 1 || h < 1) { setStatus("选区太小或在画布外", true); return; }
-  runDocTransform(`已裁到选区：${w}×${h}`, () => {
-    doc.cropTo({ x, y, w, h });
-    _shiftViewportAfterCrop({ x, y });
-  });
-});
-
-// 自由裁切（8-handle）----
-let _cropState = null;     // { rect:{x,y,w,h} in doc, drag:'nw'|'n'|'ne'|...|'move'|null, startMouse, startRect }
-function _docRectToScreen(r) {
-  const { tx, ty, scale } = board.viewport;
-  return { x: r.x * scale + tx, y: r.y * scale + ty, w: r.w * scale, h: r.h * scale };
-}
-function _screenToDocPt(sx, sy) {
-  const { tx, ty, scale } = board.viewport;
-  return { x: (sx - tx) / scale, y: (sy - ty) / scale };
-}
-function _renderCropOverlay() {
-  if (!_cropState) return;
-  const r = _docRectToScreen(_cropState.rect);
-  const el = document.getElementById("cropRect");
-  el.style.left = r.x + "px";
-  el.style.top  = r.y + "px";
-  el.style.width  = Math.max(2, r.w) + "px";
-  el.style.height = Math.max(2, r.h) + "px";
-  // L69：实时显示裁切后分辨率（doc 像素，非屏幕）
-  const dim = document.getElementById("cropDim");
-  if (dim) dim.textContent = `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)}`;
-}
-function _openCropMode() {
-  // v154 (user)：自由裁切要求 rot=0（裁切框是屏幕轴对齐 DOM，doc 旋转会错位）。
-  //   以前弹提示让用户手动按 0；改成自动复位旋转（保 zoom/位置，只归零 rot），直接进。
-  if (board.viewport.rot && Math.abs(board.viewport.rot) > 0.01) {
-    board.setViewport(board.viewport.tx, board.viewport.ty, board.viewport.scale, 0);
-    setStatus("已复位画布旋转以进入自由裁切");
-  }
-  _cropState = {
-    rect: { x: 0, y: 0, w: doc.width, h: doc.height },
-    drag: null, startMouse: null, startRect: null,
-  };
-  document.getElementById("cropOverlay").classList.remove("hidden");
-  document.getElementById("cropToolbar").classList.remove("hidden");
-  _renderCropOverlay();
-  _suppressTransientPanels("crop");
-  // crop transient：apply/abort 都 = 丢弃裁切框（真裁只走 Apply 按钮）。决定性动作/ctrl-z 不会误裁。
-  editMode.enterTransient("crop", { apply: _closeCropMode, abort: _closeCropMode });
-}
-function _closeCropMode() {
-  _cropState = null;
-  document.getElementById("cropOverlay").classList.add("hidden");
-  document.getElementById("cropToolbar").classList.add("hidden");
-  _restoreTransientPanels();
-  editMode.exitTransient();   // sync 点：任何关闭路径（按钮/decisive）都清 EditMode 的 transient
-}
-// crop 时画布 pan/zoom（两指 / 滚轮）→ rect SSoT 是 doc 坐标，重投影到屏幕跟随 viewport
-board.onViewportChange = () => { if (_cropState) _renderCropOverlay(); };
-document.getElementById("adjustCropFree").addEventListener("click", () => {
-  setMenuOpen(false);
-  setAdjustOpen(false);
-  _openCropMode();
-});
-// v124 合并裁切入口：有选区 → 裁到选区；无选区 → 自由裁切。label 在 setMenuOpen(true) 时动态切
-const _menuCropBtn = document.getElementById("menuCrop");
-if (_menuCropBtn) {
-  _menuCropBtn.addEventListener("click", () => {
-    if (doc.selection) document.getElementById("adjustCropToSelection").click();
-    else                document.getElementById("adjustCropFree").click();
-  });
-}
-function _updateMenuCropLabel() {
-  const lbl = document.getElementById("menuCropLabel");
-  if (!lbl) return;
-  lbl.textContent = doc.selection ? "裁切到选区" : "裁切（自由）";
-}
-// 水平翻转整个画布（所有层 + 选区）。一次 docTransform op，可撤销。
-const _menuFlipHBtn = document.getElementById("menuFlipH");
-if (_menuFlipHBtn) {
-  _menuFlipHBtn.addEventListener("click", () => {
-    setMenuOpen(false);
-    setAdjustOpen(false);
-    runDocTransform("已水平翻转", () => doc.flipHorizontal());
-  });
-}
-document.getElementById("cropToolbarCancel").addEventListener("click", () => _closeCropMode());
-document.getElementById("cropToolbarApply").addEventListener("click", () => {
-  if (!_cropState) return;
-  // v127 (user：「裁切还可以扩张」)：允许 x/y 负（向左/向上扩），允许 w/h > doc（向右/向下扩）
-  //   只保最小 1 + 最大 8192；doc.cropTo 已支持负 dx/dy
-  const { x, y, w, h } = cropRectToInts(_cropState.rect, { min: 1, max: 8192 });
-  runDocTransform(`已裁切：${w}×${h}`, () => {
-    doc.cropTo({ x, y, w, h });
-    _shiftViewportAfterCrop({ x, y });
-  });
-  _closeCropMode();
-});
-
-// 裁切 overlay 拖拽 (handle / rect 内 = move)
-(function bindCropOverlayPointer() {
-  const overlay = document.getElementById("cropOverlay");
-  const rect = document.getElementById("cropRect");
-  overlay.addEventListener("pointerdown", (e) => {
-    if (!_cropState) return;
-    e.preventDefault();
-    e.stopPropagation();
-    // v125 (user：「crop 的时候 选区不应该点击空白时可拖动，只有拖动 handler 才行」)
-    //   只有 [data-handle] 命中才进 drag；rect 内空白 → no-op（防误碰整体移动）
-    const handle = e.target?.dataset?.handle || null;
-    if (!handle) return;
-    // 捕获在 handle 上（overlay 现在 pointer-events:none，捕在它身上不稳）。pointerup 自动释放。
-    try { e.target.setPointerCapture(e.pointerId); } catch {}
-    _cropState.drag = handle;
-    _cropState.startMouse = { x: e.clientX, y: e.clientY };
-    _cropState.startRect = { ...(_cropState.rect) };
-  });
-  overlay.addEventListener("pointermove", (e) => {
-    if (!_cropState || !_cropState.drag) return;
-    const dx_screen = e.clientX - _cropState.startMouse.x;
-    const dy_screen = e.clientY - _cropState.startMouse.y;
-    const scale = board.viewport.scale;
-    const dx = dx_screen / scale;
-    const dy = dy_screen / scale;
-    // 8-handle resize 几何（含「缩到下限对边不动」+ v127 向外扩张）抽到 crop-geometry.js
-    _cropState.rect = resizeCropRect(_cropState.drag, _cropState.startRect, dx, dy, { min: 4, max: 8192 });
-    _renderCropOverlay();
-  });
-  overlay.addEventListener("pointerup", (e) => {
-    if (!_cropState) return;
-    try { overlay.releasePointerCapture(e.pointerId); } catch {}
-    _cropState.drag = null;
-  });
-  overlay.addEventListener("pointercancel", (e) => {
-    if (!_cropState) return;
-    try { overlay.releasePointerCapture(e.pointerId); } catch {}
-    _cropState.drag = null;
-  });
-})();
-
-// 重采样对话框 ----
-function _openResampleDialog() {
-  els.resampleBackdrop.classList.remove("hidden");
-  els.resampleSheet.classList.remove("hidden");
-  els.resampleW.value = String(doc.width);
-  els.resampleH.value = String(doc.height);
-  els.resampleW.focus();
-  // 锁比例：变 W 自动改 H
-  const aspect = doc.width / doc.height;
-  const onW = () => {
-    if (!els.resampleLock.checked) return;
-    const w = parseFloat(els.resampleW.value) | 0;
-    if (w > 0) els.resampleH.value = String(Math.max(1, Math.round(w / aspect)));
-  };
-  const onH = () => {
-    if (!els.resampleLock.checked) return;
-    const h = parseFloat(els.resampleH.value) | 0;
-    if (h > 0) els.resampleW.value = String(Math.max(1, Math.round(h * aspect)));
-  };
-  els.resampleW.oninput = onW;
-  els.resampleH.oninput = onH;
-}
-function _closeResampleDialog() {
-  els.resampleBackdrop.classList.add("hidden");
-  els.resampleSheet.classList.add("hidden");
-}
-document.getElementById("adjustResample").addEventListener("click", () => {
-  setMenuOpen(false);
-  setAdjustOpen(false);
-  editMode.applyPendingTransient();   // 决定性命令：先 commit 掉浮动变换/调色，再改 doc 尺寸（否则浮层错位+undo 不一致）
-  _openResampleDialog();
-});
-els.resampleCancel.addEventListener("click", () => _closeResampleDialog());
-els.resampleBackdrop.addEventListener("click", () => _closeResampleDialog());
-els.resampleConfirm.addEventListener("click", () => {
-  const nw = parseFloat(els.resampleW.value) | 0;
-  const nh = parseFloat(els.resampleH.value) | 0;
-  const mode = els.resampleMode.value || "bicubic";
-  if (nw < 1 || nh < 1 || nw > 8192 || nh > 8192) { setStatus("尺寸超出 [1, 8192]", true); return; }
-  if (nw === doc.width && nh === doc.height) { _closeResampleDialog(); return; }
-  runDocTransform(`已重采样到 ${nw}×${nh}（${mode}）`, () => doc.resampleTo(nw, nh, mode));
-  _closeResampleDialog();
-});
-
-// v131 Filter 面板（重构自原 BCSH 颜色调整）
-// 所有 filter 走 src/filters.js 的 Filter 接口（含 id/title/menuId/modes/bleedRadius/defaults/buildBody/bake）
-// _adjustState = { Filter, active, params, beforeSnap, sur, surCtx, srcImg, maskData, _rafId }
-// 入口 _openFilterPanel(filterId)；Reset / Cancel / Apply 共用
-// preview 用 rAF coalesce：slider drag 不堵队列（user：「液化笔刷事件 last commit，slider drag 也是，gaussian blur fps 低 OK，别 queue 卡半天」）
-let _adjustState = null;     // 见上注释
-// === 老 BCSH 实现已迁 src/filters.js HsbFilter，这里只剩 panel infra ===
-
-// 准备 surrogate canvas + 提取 src/mask 数据
-function _initFilterSurrogate(L) {
-  const sur = document.createElement("canvas");
-  sur.width = L.bboxW; sur.height = L.bboxH;
-  const surCtx = sur.getContext("2d");
-  surCtx.drawImage(L.canvas, 0, 0);
-  const srcImg = surCtx.getImageData(0, 0, L.bboxW, L.bboxH);
-  let maskData = null;
-  if (doc.selection) {
-    const m = document.createElement("canvas");
-    m.width = L.bboxW; m.height = L.bboxH;
-    const mctx = m.getContext("2d");
-    mctx.drawImage(doc.selection.maskCanvas,
-      doc.selection.bboxX - L.bboxX, doc.selection.bboxY - L.bboxY);
-    maskData = mctx.getImageData(0, 0, L.bboxW, L.bboxH).data;
-  }
-  return { sur, surCtx, srcImg, maskData };
-}
-
-// v132 opts.picker = [Filter, ...]：在 panel body 顶部插一个 dropdown 切其他 filter
-//   切换 = cancel 当前 → reopen 新 filter（同一 picker）。用于"艺术滤镜"组
-function _openFilterPanel(filterId, opts = {}) {
-  const Filter = getFilter(filterId);
-  if (!Filter) { setStatus(`未知 filter：${filterId}`, true); return; }
-  const L = doc.activeLayer;
-  if (!L) { setStatus("没活动图层", true); return; }
-  if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("活动图层是空的", true); return; }
-  if (_adjustState) _closeFilterPanel(false);
-  const { sur, surCtx, srcImg, maskData } = _initFilterSurrogate(L);
-  _adjustState = {
-    Filter, active: L, params: Filter.defaults(),
-    beforeSnap: L.snapshot(), sur, surCtx, srcImg, maskData,
-    _rafId: 0,
-    picker: opts.picker || null,
-  };
-  if (els.adjustPanelTitle) els.adjustPanelTitle.textContent = opts.picker ? "艺术滤镜" : Filter.title;
-  els.adjustParamsBody.innerHTML = "";
-  // picker 模式：插 dropdown
-  if (opts.picker) {
-    const wrap = document.createElement("label");
-    wrap.className = "brush-slider-row";
-    wrap.innerHTML = `<span class="brush-slider-label">选滤镜</span>`;
-    const sel = document.createElement("select");
-    sel.style.flex = "1";
-    sel.style.font = "inherit";
-    sel.style.padding = "2px 4px";
-    for (const F of opts.picker) {
-      const opt = document.createElement("option");
-      opt.value = F.id;
-      opt.textContent = F.title;
-      if (F.id === filterId) opt.selected = true;
-      sel.appendChild(opt);
-    }
-    sel.addEventListener("change", () => {
-      const newId = sel.value;
-      if (newId === filterId) return;
-      _closeFilterPanel(false);
-      _openFilterPanel(newId, { picker: opts.picker });
-    });
-    wrap.appendChild(sel);
-    wrap.appendChild(document.createElement("span"));
-    els.adjustParamsBody.appendChild(wrap);
-  }
-  Filter.buildBody(els.adjustParamsBody, _adjustState, _onFilterChange);
-  els.adjustPanel.classList.remove("hidden");
-  const w = els.adjustPanel.offsetWidth || 320;
-  els.adjustPanel.style.left = (window.innerWidth - w - 16) + "px";
-  els.adjustPanel.style.top  = "70px";
-  _bringPanelTop(els.adjustPanel);
-  board.setActiveLayerSurrogate?.(L.id, sur);
-  _runFilterPreview();      // 初次渲染（identity）
-  _suppressTransientPanels("adjust-color");
-  // adjust transient：apply=烤进(true)，abort=丢弃(false)。_closeFilterPanel 是 sync 点（见其尾 exitTransient）。
-  editMode.enterTransient("adjust", { apply: () => _closeFilterPanel(true), abort: () => _closeFilterPanel(false) });
-}
-
-// preview coalesce：rAF 保证最多 1 帧 1 次 bake，slider drag 不堵队列
-// (user：「液化笔刷事件 last commit，slider drag 也是，fps 低 OK，别 queue 卡半天」)
-function _onFilterChange() {
-  if (!_adjustState) return;
-  if (_adjustState._rafId) return;
-  _adjustState._rafId = requestAnimationFrame(() => {
-    if (!_adjustState) return;
-    _adjustState._rafId = 0;
-    _runFilterPreview();
-  });
-}
-function _runFilterPreview() {
-  const s = _adjustState;
-  const outImg = s.surCtx.createImageData(s.srcImg.width, s.srcImg.height);
-  s.Filter.bake(s.srcImg.data, outImg.data, s.params, s.maskData, s.srcImg.width, s.srcImg.height);
-  s.surCtx.putImageData(outImg, 0, 0);
-  board.invalidateAll();
-}
-
-function _closeFilterPanel(applied) {
-  if (!_adjustState) return;
-  const L = _adjustState.active;
-  if (_adjustState._rafId) { cancelAnimationFrame(_adjustState._rafId); _adjustState._rafId = 0; }
-  board.setActiveLayerSurrogate?.(null, null);
-  if (applied) {
-    // 烤进 layer（surrogate 已是最终结果，直接拷回）
-    L.ctx.clearRect(0, 0, L.bboxW, L.bboxH);
-    L.ctx.drawImage(_adjustState.sur, 0, 0);
-    const after = L.snapshot();
-    history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });   // history.push 同步派 wp:histchange → 编辑门已标
-    setStatus(`${_adjustState.Filter.title} 已应用：${L.name}`);
-  }
-  _adjustState = null;
-  els.adjustPanel.classList.add("hidden");
-  els.adjustParamsBody.innerHTML = "";
-  _restoreTransientPanels();
-  board.invalidateAll();
-  editMode.exitTransient();   // sync 点：任何关闭路径（OK/cancel/重开/picker/decisive）都清 EditMode transient
-}
-
-// v132 菜单 3 组渲染（user：「3 组 hr 分组：调色 / 液化锐化模糊 / 艺术滤镜」）
-//   - 调色 = adjustment category + 有 region 模式（HSV / ColorBalance / Curves）
-//             左侧 prefix = 旧 adjust SVG（3 条滑块 + 圆点）
-//   - 笔刷类 = 液化 + 所有有 brush 模式的 filter
-//             左侧 prefix = 笔刷 SVG（跟工具栏一致）
-//   - 艺术滤镜 = category="artist"，1 个 picker item（点开 panel 里有 dropdown 切）
-//   - 组之间 hr 分隔，不写类别 label
-const ADJUST_PREFIX_SVG = `<svg class="menu-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
-  <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"/>
-  <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/>
-  <circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"/>
-</svg>`;
-const BRUSH_PREFIX_SVG = `<svg class="menu-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <path d="M14 4l6 6-9 9H5v-6l9-9z"/><path d="M13 5l6 6"/>
-</svg>`;
-function _renderFilterMenu() {
-  const container = document.getElementById("adjustFilterList");
-  if (!container) return;
-  container.innerHTML = "";
-  const all = listFilters();
-  const adjustmentRegion = all.filter((F) => (F.category || "adjustment") === "adjustment" && F.modes.includes("region"));
-  const brushFilters     = all.filter((F) => F.modes.includes("brush"));
-  const artistFilters    = all.filter((F) => F.category === "artist");
-  const addHr = () => {
-    const hr = document.createElement("hr"); hr.className = "menu-sep"; container.appendChild(hr);
-  };
-  const addItem = (label, prefixSvg, onClick) => {
-    const btn = document.createElement("button");
-    btn.className = "menu-item menu-item-with-icon";
-    btn.type = "button";
-    btn.setAttribute("role", "menuitem");
-    btn.innerHTML = `${prefixSvg}<span class="menu-item-label">${label}</span>`;
-    btn.addEventListener("click", onClick);
-    container.appendChild(btn);
-    return btn;
-  };
-  let groupOpened = false;
-  // 1) 调色
-  for (const F of adjustmentRegion) {
-    addItem(F.title, ADJUST_PREFIX_SVG, () => {
-      setAdjustOpen(false);
-      _openFilterPanel(F.id);
-    });
-    groupOpened = true;
-  }
-  // 2) 笔刷类 filter（液化 / 锐化模糊 都是 plugin，自动列出来）
-  if (groupOpened && brushFilters.length > 0) addHr();
-  groupOpened = brushFilters.length > 0;
-  for (const F of brushFilters) {
-    addItem(F.title, BRUSH_PREFIX_SVG, () => {
-      setAdjustOpen(false);
-      _enterFilterBrushMode(F);
-    });
-  }
-  // 3) 艺术滤镜（1 picker item）
-  if (artistFilters.length > 0) {
-    if (groupOpened) addHr();
-    addItem("艺术滤镜", ADJUST_PREFIX_SVG, () => {
-      setAdjustOpen(false);
-      _openArtistPicker();
-    });
-  }
-}
-// 艺术滤镜：开 adjust panel，body 顶部加 dropdown 切具体 filter
-function _openArtistPicker() {
-  const artist = listFilters().filter((F) => F.category === "artist");
-  if (artist.length === 0) { setStatus("没有艺术滤镜"); return; }
-  _openFilterPanel(artist[0].id, { picker: artist });
-}
-_renderFilterMenu();
-onFilterRegistered(_renderFilterMenu);
-
-// v132 进入 / 退出 filter brush 模式
-//   进入：state.filterBrush = { Filter, params, variantId, variantLabel }；setTool("filterBrush")
-//        + openExclusive 弹 filter brush rack（user：「我不是让你做两个新笔吗」）
-//        + variantId 优先用 toolStates.filterBrush.variantId 持久化值
-//        + toolbar 渲染子算法 dropdown（user：「不同算法是 toolbar dropdown」）
-//   退出：清 state.filterBrush；关 rack；setTool 回前一个
-let _filterBrushPreviousTool = null;
-function _enterFilterBrushMode(Filter) {
-  editMode.applyPendingTransient();
-  _filterBrushPreviousTool = editMode.current() === "filterBrush" ? "brush" : editMode.current();
-  // 取持久化的 variantId（user 上次选过的；新 doc 默认第一个）
-  const variants = Filter.brushVariants || [{ id: "default", title: Filter.title, params: Filter.defaults() }];
-  const savedVid = state.toolStates.filterBrush?.variantId;
-  let variant = variants.find((v) => v.id === savedVid) || variants[0];
-  // v147 声明了 boundaryModes 的 filter（液化）→ params 带上持久化的 bleed；其他 filter 不掺这个 key
-  const params = Filter.boundaryModes
-    ? { ...variant.params, bleed: safeLS("webpaint.liquify.bleed") || "edge" }
-    : variant.params;
-  state.filterBrush = { Filter, params, variantId: variant.id, variantLabel: variant.title };
-  if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = variant.id;
-  setTool("filterBrush");
-  _renderFilterBrushToolbar();
-  // v132 (user：「点 filter brush 不要自动弹笔架」) 进入时不开 rack
-  //   user 想换笔点 toolbar 的「笔架」button
-  setStatus(`${Filter.title}（笔刷）`);
-}
-function _exitFilterBrushMode() {
-  state.filterBrush = null;
-  const tb = document.getElementById("filterBrushToolbar");
-  if (tb) tb.classList.add("hidden");
-  closeExclusive();   // 收 rack
-  setTool(_filterBrushPreviousTool || "brush");
-  _filterBrushPreviousTool = null;
-  setStatus("已退出 filter brush");
-}
-// 渲染 toolbar：title + variant dropdown (if multi) + 退出
-function _renderFilterBrushToolbar() {
-  if (!state.filterBrush) return;
-  const { Filter, variantId } = state.filterBrush;
-  const tb = document.getElementById("filterBrushToolbar");
-  const title = document.getElementById("filterBrushTitle");
-  if (!tb || !title) return;
-  tb.classList.remove("hidden");
-  title.textContent = Filter.title;
-  // dropdown：清掉旧的，按 brushVariants 重建
-  let sel = document.getElementById("filterBrushVariantSel");
-  if (sel) sel.remove();
-  const variants = Filter.brushVariants || [];
-  if (variants.length > 1) {
-    sel = document.createElement("select");
-    sel.id = "filterBrushVariantSel";
-    sel.className = "crop-toolbar-btn";
-    sel.style.padding = "2px 6px";
-    for (const v of variants) {
-      const opt = document.createElement("option");
-      opt.value = v.id;
-      opt.textContent = v.title;
-      if (v.id === variantId) opt.selected = true;
-      sel.appendChild(opt);
-    }
-    sel.addEventListener("change", () => {
-      const v = variants.find((x) => x.id === sel.value);
-      if (!v) return;
-      // 切 variant 别丢 bleed（boundaryModes filter 才有这个 key）
-      state.filterBrush.params = Filter.boundaryModes
-        ? { ...v.params, bleed: state.filterBrush.params.bleed }
-        : v.params;
-      state.filterBrush.variantId = v.id;
-      state.filterBrush.variantLabel = v.title;
-      if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = v.id;
-      _store.edits.mark(); updateSaveStatus();
-      setStatus(`已切 ${v.title}`);
-    });
-    // 插在 title 后
-    title.insertAdjacentElement("afterend", sel);
-  }
-  // v147 边界取样下拉：仅当 filter 声明 boundaryModes（液化）且有选区时渲染。
-  // feature 声明数据 + 通用渲染 → 删 filter 即删 UI，不再像旧 #liquifyPanel 那样静态腐烂。
-  let bsel = document.getElementById("filterBrushBleedSel");
-  if (bsel) bsel.remove();
-  if (Filter.boundaryModes && doc.selection) {
-    bsel = document.createElement("select");
-    bsel.id = "filterBrushBleedSel";
-    bsel.className = "crop-toolbar-btn";
-    bsel.style.padding = "2px 6px";
-    bsel.title = "选区边界：位移源落到选区外怎么办";
-    const curBleed = state.filterBrush.params.bleed || "edge";
-    for (const b of Filter.boundaryModes) {
-      const opt = document.createElement("option");
-      opt.value = b.id;
-      opt.textContent = b.title;
-      if (b.id === curBleed) opt.selected = true;
-      bsel.appendChild(opt);
-    }
-    bsel.addEventListener("change", () => {
-      state.filterBrush.params = { ...state.filterBrush.params, bleed: bsel.value };
-      safeLSSet("webpaint.liquify.bleed", bsel.value);
-      const m = Filter.boundaryModes.find((b) => b.id === bsel.value);
-      setStatus(`边界：${m ? m.title : bsel.value}`);
-    });
-    // 插在 variant select 后（没有 variant 就插 title 后）
-    (document.getElementById("filterBrushVariantSel") || title).insertAdjacentElement("afterend", bsel);
-  }
-}
-document.getElementById("filterBrushExit")?.addEventListener("click", _exitFilterBrushMode);
-// v132 笔架 button：再开 rack（user：「ui 里有开笔架，不然关了开不了」）
-document.getElementById("filterBrushOpenRack")?.addEventListener("click", () => {
-  openExclusive(PANELS.RACK_FILTER_BRUSH);
-});
-document.getElementById("adjustReset").addEventListener("click", () => {
-  if (!_adjustState) return;
-  _adjustState.params = _adjustState.Filter.defaults();
-  els.adjustParamsBody.innerHTML = "";
-  _adjustState.Filter.buildBody(els.adjustParamsBody, _adjustState, _onFilterChange);
-  _onFilterChange();
-});
-document.getElementById("adjustCancel").addEventListener("click", () => _closeFilterPanel(false));
-document.getElementById("adjustPanelClose").addEventListener("click", () => _closeFilterPanel(false));
-document.getElementById("adjustApply").addEventListener("click", () => _closeFilterPanel(true));
 
 // v136 POC: 云缩略图 byte-range 拉取 — console 调试
 //   await WebPaint.pocFetchThumb()  默认拉云列表第一个 ora 验证
@@ -3572,13 +1236,13 @@ window.WebPaint.listExporters = listExporters;
 
 // v124 (user) 图库挪回顶栏：topGalleryBtn 直接开图库；menuGallery 留 stub 兜底
 // gallery-first：进图库 = 关闭当前画作（active = null）+ refresh 后停 gallery
-document.getElementById("topGalleryBtn")?.addEventListener("click", () => _exitCanvasToGallery());
-els.menuGallery?.addEventListener("click", () => { setMenuOpen(false); _exitCanvasToGallery(); });
+document.getElementById("topGalleryBtn")?.addEventListener("click", () => session.exit());
+els.menuGallery?.addEventListener("click", () => { setMenuOpen(false); session.exit(); });
 
 // ---- 菜单：导入 / 导出 / 剪贴板 / 适应 ----
 els.menuRename.addEventListener("click", () => {
   setMenuOpen(false);
-  renameCurrentSession();
+  session.rename();
 });
 // v125 (user：「菜单加另存为（画库 + 名字冲突检查）」)
 //   "另存为" = 当前 doc 复制到新名字 session（原 session 保留）。
@@ -3586,7 +1250,7 @@ els.menuRename.addEventListener("click", () => {
 els.menuSaveAs.addEventListener("click", async () => {
   setMenuOpen(false);
   editMode.applyPendingTransient();
-  const oldName = _activeSessionName || "未命名";
+  const oldName = session.name || "未命名";
   let candidate = `${oldName} 副本`;
   while (true) {
     const input = await openInputSheet("另存为", candidate, { placeholder: "新作品名字" });
@@ -3613,13 +1277,12 @@ els.menuSaveAs.addEventListener("click", async () => {
     try {
       const cloudOn = isSignedIn() && navigator.onLine !== false;
       const res = await _store.flow.saveAs(trimmed, {
-        encode: () => _encodeCurrentOra(),
+        encode: () => session.encodeOra(),
         cloud: cloudOn,
       });
-      _activeSessionName = trimmed;
-      setCurrentSessionName(trimmed);
+      session.setName(trimmed);
       _store.edits.markSaved();
-      _docLastSavedAt = Date.now();
+      session.markSavedNow();
       updateSaveStatus();
       if (!cloudOn) setStatus(`已另存为：${trimmed}`);
       else if (res.cloudDeferred) setStatus(`已另存为（仅本地）：${trimmed}（云端稍后 Ctrl+S 推）`);
@@ -3635,13 +1298,13 @@ els.menuSaveAs.addEventListener("click", async () => {
 // v133 revert：从 IDB checkpoint 恢复 session 打开时的状态
 els.menuRevertToOpen?.addEventListener("click", async () => {
   setMenuOpen(false);
-  if (!_activeSessionName) { setStatus("没活动 session", true); return; }
-  const cp = await _readSessionCheckpoint(_activeSessionName);
+  if (!session.name) { setStatus("没活动 session", true); return; }
+  const cp = await session.readCheckpoint(session.name);
   if (!cp || !cp.blob) {
     setStatus("没找到本次打开时的快照", true);
     return;
   }
-  const ageMin = Math.max(1, Math.round((Date.now() - (cp.at || _sessionOpenedAt)) / 60000));
+  const ageMin = Math.max(1, Math.round((Date.now() - (cp.at || session.sessionOpenedAt)) / 60000));
   const choice = await lockSyncGate({
     title: "撤销修改",
     message: `回到约 ${ageMin} 分钟前的快照（本次打开或上次保存时的版本）。\n之后所有修改将丢失。`,
@@ -3654,7 +1317,7 @@ els.menuRevertToOpen?.addEventListener("click", async () => {
   editMode.applyPendingTransient();
   try {
     const loaded = await decodeOraToDoc(cp.blob);
-    adoptLoadedDocWithOpts(loaded, _activeSessionName, { skipCheckpoint: true });
+    session.adoptWithOpts(loaded, session.name, { skipCheckpoint: true });
     _store.edits.mark();     // 跟磁盘内容已经偏离，下次保存把 revert 后的状态写进去
     updateSaveStatus();
     setStatus(`已恢复到本次打开时（${ageMin} 分钟前）`);
@@ -3705,7 +1368,7 @@ els.menuExportProject.addEventListener("click", async () => {
   try {
     if (exp.busyHint) setStatus(exp.busyHint, true);
     const blob = await exp.encode(doc);
-    triggerDownload(blob, `${_activeSessionName}.${exp.ext}`);
+    triggerDownload(blob, `${session.name}.${exp.ext}`);
     setStatus(`.${exp.ext} 已下载`);
   } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
 });
@@ -3721,7 +1384,7 @@ els.menuExportImage.addEventListener("click", async () => {
       const exp = getExporter(c.format) || getExporter("png");
       if (exp.busyHint) setStatus(exp.busyHint, true);
       const blob = await exp.encode(doc, { scope: c.scope });
-      const r = await shareOrDownloadBlob(blob, `${_activeSessionName}-${stampNow()}.${exp.ext}`, exp.mime);
+      const r = await shareOrDownloadBlob(blob, `${session.name}-${stampNow()}.${exp.ext}`, exp.mime);
       setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : `${exp.ext.toUpperCase()} 已下载`);
     }
   } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
@@ -4012,19 +1675,10 @@ els.menuResetBrushRack.addEventListener("click", async () => {
     "会删除全部自定义笔刷 + 改过的默认笔，恢复出厂 8 个 brush。不可撤销。",
   );
   if (!ok) return;
-  _brushRack = makeDefaultRack({ resetAt: Date.now() });   // v2: 恢复出厂 = resetAt watermark（跨设备 merge 也清掉旧自定义笔）
-  // 重置所有 toolStates 的 activeBrushId 让 applyToolState 重选默认
-  for (const t of Object.keys(state.toolStates)) {
-    state.toolStates[t].activeBrushId = null;
-    Object.assign(state.toolStates[t], defaultToolStateFor(t));
-  }
-  await persistBrushRack();
-  applyToolState(editMode.current());
-  // 若 rack sheet 当前开着 → 强制刷一遍
-  dialReactive.rackVersion++;   // 笔架内容变 → <RackSheet> 反应式重渲（sheet 关着也无妨，cheap）
+  rack.reset(true);   // 恢复出厂 resetAt watermark + 重置 toolStates + persist + applyToolState + bump
   setRackDirty(true);
-  if (isSignedIn()) pushBrushRackIfSignedIn();
-  setStatus(`笔架已重置（${_brushRack.brushes.length} 个 brush）`, true);
+  if (isSignedIn()) rack.syncCloud();
+  setStatus(`笔架已重置（${rack.get().brushes.length} 个 brush）`, true);
 });
 
 els.menuReference.addEventListener("click", () => {
@@ -4073,7 +1727,7 @@ els.oraFileInput.addEventListener("change", async (e) => {
     if (isOra) {
       const loaded = await decodeOraToDoc(file);
       const nm = file.name.replace(/\.ora$/i, "") || "未命名";
-      adoptLoadedDoc(loaded, nm);
+      session.adopt(loaded, nm);
       setStatus(`已导入：${nm}`);
       setGalleryOpen(false);
     } else if (isImage) {
@@ -4098,7 +1752,7 @@ async function importImageAsNewDoc(file) {
   const bitmap = await decodeImageFile(file);
   const w = Math.min(8192, bitmap.width);
   const h = Math.min(8192, bitmap.height);
-  if (_store.edits.localDirty()) await saveNow();
+  if (_store.edits.localDirty()) await session.save();
   const fresh = new PaintDoc({ width: w, height: h });
   doc.layers = fresh.layers;
   doc.activeIndex = 0;
@@ -4123,19 +1777,18 @@ async function importImageAsNewDoc(file) {
   applyCheckerboard(false);    // v125: 导入新作品默认关棋盘
   const stem = file.name.replace(/\.[^.]+$/, "") || "导入";
   const name = await uniqueLocalName(stem);
-  _activeSessionName = name;
-  setCurrentSessionName(name);
+  session.setName(name);
   input.clearHistory();
   board.invalidateAll();
   board.fitToScreen();
   renderLayersPanel();
   _store.edits.mark();
-  _docLastSavedAt = 0;
+  session.resetSavedAt();
   updateSaveStatus();
-  await saveNow();
+  await session.save();
   // v133 revert checkpoint
-  _sessionOpenedAt = Date.now();
-  _writeSessionCheckpoint(name).catch((e) => console.warn("[revert] photo-import checkpoint:", e));
+  session.markOpenedNow();
+  session.writeCheckpoint(name).catch((e) => console.warn("[revert] photo-import checkpoint:", e));
   setStatus(`新建（照片）：${name}（${w}×${h}）`);
 }
 
@@ -4279,30 +1932,8 @@ function _makeFullLayerSelection(layer) {
 }
 
 // ---- 图库 全屏（v50 重做：无返回键、底栏 IDB 占用 + 清扫、加号 popup、云图标 popup） ----
-// 进入和退出都触发 saveNow。进入后把主画布 UI 全 disable（body[data-mode="gallery"]）。
-// 退出 = 点 active tile，或选择另一个 tile / 新建 / 导入照片 / 拉云图。
-// gallery-first 设计：删 / 卸载 active session 后，**进 gallery**（不创建新空白 doc）。
-// _activeSessionName 设 null = 未绑定任何 session；画布 hidden。
-// 用户在 gallery 选别的 / 新建 / 关 → 重新绑定。
-async function _exitCanvasToGallery() {
-  // 点退 gallery = explicit consent save：本地 + 云端一起推
-  // user：「这样少一些用户心智负担」—— 不需要先 Ctrl+S 再退
-  if (_activeSessionName) {
-    await withBusy(`正在保存 ${_activeSessionName}…`, async () => {
-      try { await saveAndPush(); } catch (e) { console.warn("[exit-to-gallery] save failed:", e); }
-    });
-    // 退到 gallery 停在 active session 所在 folder（连贯感）
-    gallery.setFolder(pathFolder(_activeSessionName));
-  }
-  _activeSessionName = null;
-  setCurrentSessionName("");
-  _store.edits.markSaved();
-  _isLazyBlankSession = false;
-  updateSaveStatus();
-  await setGalleryOpen(true);
-}
-
-// gallery-first 设计：用 _activeSessionName == null 区分 gallery 状态。
+// 退出画布回图库（保存 + 切指针 + 关库）= session.exit()，定义在 session-state.ts。
+// gallery-first 设计：用 session.name == null 区分 gallery 状态。
 // localStorage.webpaint.currentSessionName 真实持久化 active session name；
 // 空字符串 = "在 gallery 没绑定任何画作"，refresh 后停 gallery。
 
@@ -4350,14 +1981,7 @@ async function withBusy(label, fn) {
   finally { hideFullscreenBusy(); }
 }
 
-// 等云端 push 完成。push 进行中点进图库可能 race（status 报错给错 session 名 / sync-gate sheet 错位）
-// 等当前云端 push 跑完（防 status race）。L4 ②d：不再 80ms 轮询，await store 的真信号 whenPushIdle
-//   （store serialize 落地那刻 resolve）。fullscreen-busy 是 app UI，留这；轮询那段（重抄 store serialize）删了。
-async function _awaitCloudPushIdle() {
-  if (!_store.busy.pushing()) return;
-  showFullscreenBusy("正在同步到云端…");
-  try { await _store.busy.whenPushIdle(); } finally { hideFullscreenBusy(); }
-}
+// 等云端 push 完成（防 status race）= session.awaitCloudPushIdle()，定义在 session-state.ts。
 
 // trash-bar / add / trash 按钮的可见性随视图（旧 renderGallery 内联，现 app chrome 显式管）。
 function _galleryChrome(view) {
@@ -4370,8 +1994,8 @@ async function setGalleryOpen(open) {
   if (open) {
     // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存
     editMode.applyPendingTransient();
-    if (_store.edits.localDirty() && !_store.busy.saving()) await saveNow();
-    await _awaitCloudPushIdle();   // 等 cloud push 完，防 status race
+    if (_store.edits.localDirty() && !_store.busy.saving()) await session.save();
+    await session.awaitCloudPushIdle();   // 等 cloud push 完，防 status race
     document.body.dataset.mode = "gallery";
     els.galleryFull.classList.remove("hidden");
     _galleryChrome("files");      // 每次进默认 files 视图（避免上次留在 trash 里的混乱）
@@ -4379,7 +2003,7 @@ async function setGalleryOpen(open) {
     updateIdbUsage();
   } else {
     editMode.applyPendingTransient();
-    if (_store.edits.localDirty() && !_store.busy.saving()) await saveNow();
+    if (_store.edits.localDirty() && !_store.busy.saving()) await session.save();
     els.galleryFull.classList.add("hidden");
     delete document.body.dataset.mode;
     // 关闭可能打开的 popup
@@ -4395,7 +2019,7 @@ async function setGalleryOpen(open) {
 const gallery = mountGallery(document.getElementById("galleryMount"), {
   signedIn: () => isSignedIn(),
   online: () => navigator.onLine !== false,
-  activeName: () => _activeSessionName,
+  activeName: () => session.name,
   confirm: (t, m) => openConfirmSheet(t, m),
   input: (t, d, o) => openInputSheet(t, d, o),
   chooseFolder: async (title, message, options) => {
@@ -4404,58 +2028,24 @@ const gallery = mountGallery(document.getElementById("galleryMount"), {
   },
   status: (m, e) => setStatus(m, e),
   busy: (label, fn) => withBusy(label, fn),
-  // ---- 画布耦合（app 拥有活动 doc）----
-  openItem: async (item) => {
-    if (item.name === _activeSessionName) { setGalleryOpen(false); return; }
-    if (_store.edits.localDirty()) await saveNow();
-    try {
-      if (item.local) {
-        const loaded = await openSession(item.name);
-        if (!loaded) { setStatus(`找不到：${item.name}`); return; }
-        adoptLoadedDoc(loaded, item.name);
-        setGalleryOpen(false);
-        setStatus(`已打开：${item.name}`);
-        gateCloudSyncOnOpen(item.name).catch((e) => console.warn("[sync-gate]", e));
-      } else if (item.cloud) {
-        setStatus(`正在拉取：${item.name}…`);
-        await pullCloudPath(item.cloud.path);   // 自带 busy + adopt + 关库
-      }
-    } catch (err) { setStatus("打开失败：" + (err && err.message || err)); }
-  },
-  pushItem: async (item) => {
-    await withBusy(`正在推送 ${item.name} 到云端…`, async () => {
-      try {
-        const loaded = await openSession(item.name);
-        if (!loaded) throw new Error("找不到本地 session");
-        if (item.local && item.cloud) _store.adoptBase(item.name, getKnownETag(item.name));  // reloaded 后补锚 If-Match（W2 红线）
-        const res = await _store.flow.push(item.name, {
-          encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
-          onConflict: async () => "keep",
-        });
-        if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开处理 / 先改名）`, true);
-        else setStatus(`已推送：${item.name}`);
-      } catch (err) {
-        if (err instanceof CloudNameCollisionError) setStatus(`云端已有同名「${item.name}」（不同作品）——未覆盖，改名再推`, true);
-        else if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（打开处理）`, true);
-        else setStatus("推送失败：" + (err && err.message || err));
-      }
-    });
-  },
-  unloadItem: async (item) => {
-    const isActive = item.name === _activeSessionName;
-    if (isCloudDirty(item.name)) {
-      const ok = await openConfirmSheet(`卸载本地 "${item.name}"？`, "本地有未推送到云端的修改，卸载会**丢失这些修改**。云端保留旧版本。");
-      if (!ok) return;
-    }
-    await withBusy(`正在卸载本地 ${item.name}…`, async () => {
-      try { await removeSession(item.name); if (isActive) await _exitCanvasToGallery(); setStatus(`已卸载本地：${item.name}（云端保留）`); }
-      catch (err) { setStatus("卸载失败：" + (err && err.message || err)); }
-    });
-  },
-  renameActive: () => renameCurrentSession(),
-  exitActive: () => _exitCanvasToGallery(),
-  setActiveName: (name) => { _activeSessionName = name; setCurrentSessionName(name); },
+  // 画布耦合操作（open/push/unload/rename/exit/setName）gallery.ts 直调 session.*，不再经 host。
 });
+
+// 晚绑 rt（gallery 是 const，非 hoisted）+ 云账号 UI init（src/cloud-auth-ui.ts）
+ctx.gallery = gallery;
+// candidate 3 · 活动文档生命周期：把晚声明的 app-local 协作件补进 ctx 后 init session-state。
+// referenceWindow/paletteWindow 是 const（前面已声明）；其余是 hoisted function 声明，引用安全。
+Object.assign(ctx, {
+  referenceWindow, paletteWindow,
+  updateNewerBanner,
+  setColor, applyCheckerboard, renderLayersPanel,
+  setGalleryOpen, gateCloudSyncOnOpen, checkQuotaAndWarn, uniqueLocalName,
+  getLocalSavedAtLabel,
+  showFullscreenBusy, hideFullscreenBusy,
+});
+setSessionGallery(gallery);   // session 的晚绑 gallery handle
+initSession(ctx);
+initCloudAuthUI(ctx);
 
 // (galleryCloseBtn 已删除 gallery-first，无 close-back-to-canvas 按钮)
 els.galleryAddBtn.addEventListener("click", (e) => {
@@ -4635,33 +2225,8 @@ els.newDocConfirm.addEventListener("click", async () => {
   }
   const name = await uniqueLocalName(nameRaw);
   closeNewDocSheet();
-  if (_store.edits.localDirty()) await saveNow();
-  const fresh = new PaintDoc({ width: w, height: h });
-  doc.layers = fresh.layers;
-  doc.activeIndex = 0;
-  doc.width = w; doc.height = h;
-  doc.selection = null;
-  doc.referenceLayerId = null;
-  els.canvasSizeLabel.textContent = `${w}×${h}`;
-  _activeSessionName = name;
-  setCurrentSessionName(name);
-  input.clearHistory();
-  board.invalidateAll();
-  board.fitToScreen();
-  renderLayersPanel();
-  _store.edits.mark();
-  _docLastSavedAt = 0;
-  updateSaveStatus();
-  // user：「新建作品时参考里面的图没更新」→ 清 reference 小窗
-  referenceWindow.clearBitmap();
-  applyCheckerboard(false);    // v125: 新建 doc 棋盘 reset 关
-  // user (gallery-first)：新画布 color 默认黑（笔刷态保持，user 只 reset 色）
-  setColor("#000000");
-  await saveNow();
-  // v133 revert checkpoint：新建后 = 空白 doc 状态
-  _sessionOpenedAt = Date.now();
-  _writeSessionCheckpoint(name).catch((e) => console.warn("[revert] new-doc checkpoint:", e));
-  setGalleryOpen(false);
+  // doc 替换 + 落盘 + 切指针 + checkpoint + 关库全在 session.newDoc（session-state.ts）。
+  await session.newDoc({ name, w, h });
   setStatus(`新建：${name}（${w}×${h}）`);
 });
 
@@ -4738,88 +2303,6 @@ function humanSize(b) {
   return `${(b / 1073741824).toFixed(2)} GB`;
 }
 
-// ---- 云端 icon 按钮（gallery header 右侧）----
-// 一颗云图标 + 状态色：未登录灰，已登录蓝勾；点开 popup 显示账号 + 登录/退出。
-// 刷新按钮只在登录后显示。
-const ICON_CLOUD_OUT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
-const ICON_CLOUD_IN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
-
-function updateCloudAuthUI() {
-  const signed = isSignedIn();
-  const configured = isAuthConfigured();
-  const offline = navigator.onLine === false;     // navigator.onLine=undefined 当 true
-  if (signed) {
-    const acc = getActiveAccount();
-    els.cloudIconBtn.innerHTML = ICON_CLOUD_IN;
-    els.cloudIconBtn.dataset.cloudState = "signedin";
-    const who = acc?.username || acc?.name || "已登录";
-    els.cloudIconBtn.title = offline ? `云端：${who}（离线，无法推 / 拉）` : `云端：${who}（点开账号菜单）`;
-    els.cloudAccountInfo.textContent = offline ? `云端：${who}（离线）` : `云端：${who}`;
-    els.cloudSignInBtn.classList.add("hidden");
-    els.cloudSignOutBtn.classList.remove("hidden");
-    els.cloudRefreshBtn.classList.toggle("hidden", offline);   // 离线时藏刷新（按了没意义）
-  } else {
-    els.cloudIconBtn.innerHTML = ICON_CLOUD_OUT;
-    els.cloudIconBtn.dataset.cloudState = configured ? "out" : "unconfigured";
-    if (offline && configured) {
-      els.cloudIconBtn.title = "云端：离线（无法登录 / 同步；本地图库正常）";
-      els.cloudAccountInfo.textContent = "云端：离线";
-    } else {
-      els.cloudIconBtn.title = configured ? "云端：未登录（点开登录）" : "云端：未配置";
-      els.cloudAccountInfo.textContent = configured ? "云端：未登录" : "云端：未配置";
-    }
-    els.cloudSignInBtn.classList.toggle("hidden", !configured || offline);    // 离线时登录按钮无意义
-    els.cloudSignOutBtn.classList.add("hidden");
-    els.cloudRefreshBtn.classList.add("hidden");
-  }
-  updateSaveStatus();
-}
-
-els.cloudSignInBtn.addEventListener("click", async () => {
-  els.cloudAccountPopup.classList.add("hidden");
-  if (!isAuthConfigured()) { setStatus("尚未配置 OneDrive 客户端"); return; }
-  try { await signIn(); setLastSessionSignedIn(true); } catch (e) { setStatus("登录失败：" + (e && e.message || e)); }
-});
-els.cloudSignOutBtn.addEventListener("click", async () => {
-  els.cloudAccountPopup.classList.add("hidden");
-  try { await signOut(); } catch (_) {}
-  setLastSessionSignedIn(false);    // 显式登出 → 下次不问
-  updateCloudAuthUI();
-  gallery.refresh();
-});
-
-els.galleryTrashBtn?.addEventListener("click", () => {
-  _galleryChrome("trash");
-  gallery.setView("trash");
-});
-els.galleryTrashMenuBtn?.addEventListener("click", (e) => {
-  e.stopPropagation();
-  els.galleryTrashMenuPopup?.classList.toggle("hidden");
-});
-// 点 popup / btn 之外关闭
-document.addEventListener("click", (e) => {
-  const p = els.galleryTrashMenuPopup;
-  if (!p || p.classList.contains("hidden")) return;
-  if (e.target.closest("#galleryTrashMenuPopup, #galleryTrashMenuBtn")) return;
-  p.classList.add("hidden");
-});
-els.galleryTrashBack?.addEventListener("click", () => {
-  _galleryChrome("files");
-  gallery.setView("files");
-});
-els.galleryEmptyTrashBtn?.addEventListener("click", () => {
-  els.galleryTrashMenuPopup?.classList.add("hidden");
-  gallery.emptyTrash();   // confirm + busy + flow.emptyTrash + reload 全在组件里
-});
-
-els.cloudRefreshBtn.addEventListener("click", async () => {
-  // 离线 → 在线 后第一次按"刷新"：若未签到但有缓存账号，silent retry 一次
-  if (!isSignedIn() && navigator.onLine !== false) {
-    await retrySilentSignIn();
-    updateCloudAuthUI();
-  }
-  gallery.refresh();
-});
 
 // 给本地拿一个不冲突的名字（X / X 1 / X 2 / ...）
 async function uniqueLocalName(stem) {
@@ -4851,28 +2334,7 @@ function hideFullscreenBusy() {
   if (el) el.classList.add("hidden");
 }
 
-async function pullCloudPath(path) {
-  // 云端 → 本地 IDB → 自动打开（user：「下载好了应该自动进去」）。
-  // store.flow.acquire：cloud-only 首取，本地存原始 ora bytes（不 re-encode）+ adopt。
-  showFullscreenBusy(`正在从云端拉取…`);
-  try {
-    const cloudName = String(path).replace(/\.ora$/i, "");
-    const localName = await uniqueLocalName(cloudName);
-    const res = await _store.flow.acquire(cloudName, {
-      localName,
-      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
-    });
-    if (res.status === "absent") { setStatus(`找不到：${path}`); return; }
-    setGalleryOpen(false);
-    setStatus(`已打开：${res.localName}（从云端拉取）`);
-    gateCloudSyncOnOpen(res.localName).catch((e) => console.warn("[sync-gate]", e));
-  } catch (err) {
-    console.warn("[cloud] pull failed:", err);
-    setStatus("拉取失败：" + (err && err.message || err));
-  } finally {
-    hideFullscreenBusy();
-  }
-}
+// 云端拉取 + 自动打开 = session.pull(path)，定义在 session-state.ts。
 
 // ---- 启动收尾：尝试加载上次的 session（异步，不阻塞 UI 显示） ----
 setStatus("就绪");
@@ -4923,7 +2385,7 @@ setInterval(() => { if (document.visibilityState === "visible") showIdleLockIfSt
 (async () => {
   const wantedName = getCurrentSessionName();
   if (!wantedName) {
-    _activeSessionName = null;
+    session.setName(null);
     updateSaveStatus();
     await setGalleryOpen(true);
     return;
@@ -4932,549 +2394,66 @@ setInterval(() => { if (document.visibilityState === "visible") showIdleLockIfSt
     const loaded = await loadCurrentSession();
     if (!loaded) {
       // 上次记录的 name 在 IDB 没了 → 停 gallery
-      _activeSessionName = null;
+      session.setName(null);
       updateSaveStatus();
       await setGalleryOpen(true);
       setStatus(`找不到上次画作 "${wantedName}"，先选一个或新建`);
       return;
     }
-    adoptLoadedDoc(loaded, wantedName);
+    session.adopt(loaded, wantedName);
     setStatus(`已恢复：${wantedName} (${loaded.layers.length} 层)`);
     gateCloudSyncOnOpen(wantedName).catch((e) => console.warn("[sync-gate]", e));
   } catch (e) {
     console.warn("[session] load failed:", e);
-    _activeSessionName = null;
+    session.setName(null);
     updateSaveStatus();
     await setGalleryOpen(true);
     setStatus(`启动加载 "${wantedName}" 失败：${e && e.message || e}`, true);
   }
 })();
 
-// ============ Brush rack sheet + 设置 view（v83）============
-
-const _rackEls = {
-  sheet: document.getElementById("brushRackSheet"),
-  title: document.getElementById("brushRackTitle"),
-  close: document.getElementById("brushRackClose"),
-  importBtn: document.getElementById("brushRackImport"),
-  newBtn: document.getElementById("brushRackNew"),
-  mount: document.getElementById("rackSheetMount"),   // <RackSheet> Vue 组件挂载点（folder tabs + 笔 grid）
-  // v99 footer 操作
-  exportFolderBtn: document.getElementById("brushRackExportFolder"),
-  cloudPushBtn:    document.getElementById("brushRackCloudPush"),
-  resetBtn:        document.getElementById("brushRackReset"),
-  dumpCodeBtn:     document.getElementById("brushRackDumpCode"),
-};
-const _settingsEls = {
-  view: document.getElementById("brushSettingsView"),
-  body: document.getElementById("brushSettingsBody"),
-  save: document.getElementById("brushSettingsSave"),
-  cancel: document.getElementById("brushSettingsCancel"),
-};
-
-// v124 (user：「暂时不用管后向兼容，还没到 alpha」) 删 shapes / airbrush 映射
-const TOOL_LABEL = {
-  brush: "笔刷", smudge: "涂抹", eraser: "橡皮",
-};
-// 笔架 sheet 的 UI 态（哪个工具/文件夹）= 反应式 → <RackSheet> 组件绑定。
-const rackUi = reactive({ tool: "brush", folder: DEFAULT_FOLDER });
-// 「笔架内容变了」单一语义入口：落本地 + 标脏排防抖同步（cadence 归 rackStore，L4 ③b）。
-// 编辑器 / 导入 / 删除 只声明「变了」，**不直接碰 sync**（load+save 与 sync 解耦）。
-// rackStore.edit() = setDirty + 防抖排 sync（停手 ~1.5s；FolderFlow 无损 union、零冲突，频繁推安全；
-//   切笔 per-doc 不脏 rack 故不狂推）。persist 本地仍 app（rackStore 不碰 IDB doc 编码）。
-function markRackChanged() {
-  persistBrushRack();
-  rackStore.edit();
-  _refreshRackCloudState();   // icon 立刻切 dirty
-  dialReactive.rackVersion++;   // 笔架内容变 → 当前笔 computed 重算（编辑活动预设字段后立刻反映）
-}
-
-function _showRackSheet(tool) {
-  if (!_brushRack) return;
-  rackUi.tool = tool;
-  // 切工具时若当前 folder 不在新工具的 folder 集合里，归位到第一个（folder 校正在这显式做，组件 computed 保持纯）。
-  const folders = collectFolders(brushesByTool(_brushRack, getRackToolKey(tool)), DEFAULT_FOLDER);
-  if (!folders.includes(rackUi.folder)) rackUi.folder = folders[0] || DEFAULT_FOLDER;
-  _rackEls.title.textContent = `笔架 · ${TOOL_LABEL[tool] || tool}`;
-  _rackEls.sheet.classList.remove("hidden");
-  _refreshRackCloudState();        // v134 打开 rack 时刷 icon
-  // grid/folders 由 <RackSheet> 反应式渲染（rackUi + rackVersion + toolStates）；不再 _renderRackSheet。
-}
-function _hideRackSheet() {
-  _rackEls.sheet.classList.add("hidden");
-  // 关 sheet 立即 flush（rackStore.flush = 取消防抖 + 若脏即同步）。脏则先落 IDB 再 flush 推云。
-  if (rackStore.isDirty()) persistBrushRack();
-  rackStore.flush();
-}
-
-// <RackSheet> Vue 组件：folder tabs + 笔 grid。反应式读 _brushRack（gated rackVersion）+ rackUi + toolStates。
-// head 动作条（导入/导出/云/新建/重置/关闭 + 云图标）仍 app 命令式（见下）。
-mountRackSheet(_rackEls.mount, {
-  defaultFolder: DEFAULT_FOLDER,
-  getBrushes: () => { void dialReactive.rackVersion; return _brushRack ? brushesByTool(_brushRack, getRackToolKey(rackUi.tool)) : []; },
-  getRackEmpty: () => { void dialReactive.rackVersion; return !_brushRack || !_brushRack.brushes || _brushRack.brushes.length === 0; },
-  getFolder: () => rackUi.folder,
-  getActiveId: () => state.toolStates[getRackToolKey(rackUi.tool)]?.activeBrushId ?? null,
-  onSelectFolder: (f) => { rackUi.folder = f; },
-  onSelectBrush: (id) => { selectBrushPresetForTool(rackUi.tool, id); closeExclusive(); },
-  onEditBrush: (id) => { closeExclusive(); _openBrushSettings(id); },
-  onReset: () => {
-    _brushRack = makeDefaultRack();
-    for (const t of Object.keys(state.toolStates)) {
-      state.toolStates[t].activeBrushId = null;
-      Object.assign(state.toolStates[t], defaultToolStateFor(t));
-    }
-    markRackChanged();   // 落本地 + 排同步 + bump rackVersion
-    applyToolState(editMode.current());
-    setStatus(`已恢复默认笔架（${_brushRack.brushes.length} 个）`, true);
+// 笔架深模块装配：mount sheet/settings 组件 + rackStore.configure + 注册 panel + 绑 DOM 事件。
+rack.init({
+  els: {
+    rack: {
+      sheet: document.getElementById("brushRackSheet"),
+      title: document.getElementById("brushRackTitle"),
+      close: document.getElementById("brushRackClose"),
+      importBtn: document.getElementById("brushRackImport"),
+      newBtn: document.getElementById("brushRackNew"),
+      mount: document.getElementById("rackSheetMount"),
+      exportFolderBtn: document.getElementById("brushRackExportFolder"),
+      cloudPushBtn: document.getElementById("brushRackCloudPush"),
+      resetBtn: document.getElementById("brushRackReset"),
+      dumpCodeBtn: document.getElementById("brushRackDumpCode"),
+    },
+    settings: {
+      view: document.getElementById("brushSettingsView"),
+      body: document.getElementById("brushSettingsBody"),
+      save: document.getElementById("brushSettingsSave"),
+      cancel: document.getElementById("brushSettingsCancel"),
+    },
   },
-});
-
-// v134 rack cloud 状态机：smart icon + auto push
-//   synced：ETag 匹配 + 没本地未推改动
-//   busy：正在推
-//   dirty：本地有未推改动（短暂；auto push 会清掉）
-//   conflict：上次推遇到 412，待 user 选三选
-//   offline：navigator.onLine === false
-//   no-auth：未登录
-let _rackCloudState = "no-auth";
-function updateRackCloudIcon() {
-  const btn = document.getElementById("brushRackCloudPush");
-  if (!btn) return;
-  const name = "笔架";
-  const ICON = {
-    "synced":   ICON_CLOUD_CHECK,
-    "busy":     ICON_CLOUD_BUSY,
-    "dirty":    ICON_UPLOAD,
-    "offline":  ICON_DISK,
-    "no-auth":  ICON_DISK,
-  };
-  const TITLE = {
-    "synced":   `${name} 已同步云端`,
-    "busy":     `${name} 上传中…`,
-    "dirty":    `${name} 待推 — 点推送`,
-    "offline":  `${name} 离线 — 仅本地`,
-    "no-auth":  `${name} 未登录 — 登 OneDrive 自动同步`,
-  };
-  btn.innerHTML = ICON[_rackCloudState] || ICON.synced;
-  btn.title = TITLE[_rackCloudState] || "";
-  btn.dataset.state = _rackCloudState;
-}
-function _refreshRackCloudState() {
-  // 单源派生：rackStore.status（含 busy）取代 app 手搓 deriveRackCloudState + _rackCloudState="busy"（C4）。
-  _rackCloudState = rackStore.status({ signedIn: isSignedIn(), online: navigator.onLine !== false });
-  updateRackCloudIcon();
-}
-
-// 笔架同步编排归 rackStore（L4 ③b）：canSync 门 + snapshot + FolderFlow.sync(无损 union·零冲突) + onResult。
-// app 注入「模型/UI 语义」（采纳 merge 结果 + 状态提示）；busy/cadence/flow 全在 store。
-rackStore.configure({
-  canSync: () => isSignedIn() && navigator.onLine !== false,
-  snapshot: () => _brushRack ? {
-    version: _brushRack.version, items: _brushRack.brushes,
-    trash: _brushRack.trash || [], resetAt: _brushRack.resetAt || 0,
-  } : null,
-  onBusyChange: () => _refreshRackCloudState(),   // busy 变 → 刷 icon（store 不碰 DOM）
-  onResult: async (res) => {
-    // 采纳 merge 结果（可能含云端别设备新增的笔）。正在编辑某把笔时不揪它——挂到关闭再 reconcile。
-    if (res.folder && _editingBrushId == null) {
-      _brushRack = { ...(_brushRack), version: res.folder.version, brushes: res.folder.items, trash: res.folder.trash, resetAt: res.folder.resetAt };
-      { const _n = mergeMissingDefaults(_brushRack); if (_n) _brushRack = _n; }
-      await persistBrushRack();
-      applyToolState(editMode.current());
-      dialReactive.rackVersion++;   // 采纳云端 merge（_brushRack 重新赋值，非反应式）→ <RackSheet> + 当前笔重算
-    }
-    if (res.status === "synced") setStatus("笔架已同步到云端");
-    else if (res.status === "invalid") setStatus("笔架云端数据异常，已留待重试", true);
-    else if (res.status === "dirty") { console.warn("[brush-rack sync]", res.error); setStatus("笔架同步失败，已留待重试", true); }
-    // offline/skipped：静默
-  },
-});
-// 兼容旧调用点（boot / 编辑 / 重置等）：薄壳 → rackStore.sync()。
-async function pushBrushRackIfSignedIn() {
-  await rackStore.sync();
-  _refreshRackCloudState();   // skip（离线/未登录）无 busy 变化 → 这里补刷一次
-}
-// （旧 _resolveRackCloudConflict 三选对话框已删——Folder shape 的 union-merge 让冲突消失，
-//   FolderFlow 自动无损合并，不再有 lossy「拉云端丢本地/覆盖云端丢云端」）。
-
-// Boot 后调一次：背景 reconcile（FolderFlow pull-merge-push）。
-// merge 无损：本地有就 union 上去再推，本地没新就只采纳云端、不白写（folder-flow 的跳推优化）。
-async function checkBrushRackCloud() {
-  if (!isAuthConfigured() || !navigator.onLine || !isSignedIn()) return;
-  await pushBrushRackIfSignedIn();
-}
-
-// 注册 panel-state
-// **bug 修**：多个 tool map 到同 panel id 时（brush + shapes + airbrush → RACK_BRUSH）
-// 后注册的会覆盖前面的 show()。结果点 brush 按钮但 title 显示「形状」/「喷枪」。
-// 修：去重，第一个 tool 赢（canonical）。
-const _registeredPanels = new Set();
-for (const tool of Object.keys(RACK_PANEL_BY_TOOL)) {
-  const id = RACK_PANEL_BY_TOOL[tool];
-  if (_registeredPanels.has(id)) continue;
-  _registeredPanels.add(id);
-  registerPanel(id, {
-    show: () => _showRackSheet(tool),
-    hide: _hideRackSheet,
-  });
-}
-_rackEls.close.addEventListener("click", () => closeExclusive());
-function _nextBrushName() {
-  // conflict-free 新笔名：找现有「新笔 N」最大 N
-  const re = /^新笔\s*(\d+)$/;
-  let max = 0;
-  for (const b of _brushRack.brushes) {
-    const m = re.exec(b.name);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return `新笔 ${max + 1}`;
-}
-_rackEls.newBtn.addEventListener("click", () => {
-  // v107: 新建 = 复制当前笔（user：「笔架加号应该是复制当前笔，找个接近的就行了」）
-  // 优先复制当前 active brush，否则当前 tool/folder 第一个，否则 rack 第一个，最后才硬编码模板
-  const activeId = state.toolStates[getRackToolKey(rackUi.tool)]?.activeBrushId;
-  let source = activeId ? findBrush(_brushRack, activeId) : null;
-  if (!source) {
-    const inFolder = brushesByTool(_brushRack, rackUi.tool)
-      .filter(b => (b.folder || DEFAULT_FOLDER) === rackUi.folder);
-    source = inFolder[0] || _brushRack.brushes[0] || null;
-  }
-  let newB;
-  if (source) {
-    newB = JSON.parse(JSON.stringify(source));         // deep clone
-    newB.id = newBrushId();
-    newB.name = _nextBrushName();
-    newB.folder = rackUi.folder;
-    newB.tool = rackUi.tool;
-  } else {
-    // 兜底：rack 整个空时（理论不会到这）
-    newB = {
-      id: newBrushId(), name: _nextBrushName(),
-      tool: rackUi.tool, folder: rackUi.folder,
-      shape: { kind: "round", aspect: 1, rotation: 0, hardness: 1.0, textureB64: null },
-      size: { base: 12, max: 200 },
-      sizeCoeff: 0.6, opaCoeff: 0.6, flowCoeff: 0,
-      pressureGamma: 1.0, pressureLPF: 50, defaultOpa: 1.0,
-      compositeMode: "wash", blendMode: "source-over", spacing: 0.06, pixelMode: false,
-      taper: { in: 0, out: 0 },
-      smudge: rackUi.tool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
-      smooth: { streamline: 0.3, stabilization: 0, pullStabilizer: 0, motionFilter: 0 },
-    };
-  }
-  // 新建 = 进 draft、**不落 rack**；存才落、cancel/闪退 = 没建过（user：不点保存 = cancel）。
-  newB.uat = Date.now();            // v2: 建笔 user-action-time（存时再刷新）
-  closeExclusive();
-  _openBrushSettings(newB.id, newB);
-});
-// 导入：文件选择 (user：「不应该是粘贴，而是文件上传下载」)
-_rackEls.importBtn.addEventListener("click", () => {
-  const inp = document.createElement("input");
-  inp.type = "file";
-  inp.accept = "application/json,.json";
-  inp.style.display = "none";
-  inp.addEventListener("change", async () => {
-    const file = inp.files?.[0];
-    if (!file) return;
-    try {
-      const txt = await file.text();
-      const b = brushFromJSON(txt);
-      b.folder = rackUi.folder;
-      b.tool = rackUi.tool;
-      b.uat = Date.now();             // v2: 导入 = user-action-time
-      _brushRack.brushes.push(b);
-      markRackChanged();   // bump rackVersion → <RackSheet> 反应式重渲
-      setStatus(`已导入：${b.name}`);
-    } catch (e) { setStatus("导入失败：" + (e.message || e), true); }
-    document.body.removeChild(inp);
-  });
-  document.body.appendChild(inp);
-  inp.click();
-});
-
-// 单 brush 导出（navigator.share 优先，fallback download）
-async function exportBrushAsFile(brush) {
-  const json = brushToJSON(brush);
-  const blob = new Blob([json], { type: "application/json" });
-  const filename = `${brush.name || "brush"}-${brush.tool}.json`;
-  await _shareOrDownloadJSON(blob, filename, brush.name);
-}
-
-async function _shareOrDownloadJSON(blob, filename, title) {
-  if (navigator.canShare && navigator.share) {
-    const file = new File([blob], filename, { type: "application/json" });
-    if (navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title }); return; }
-      catch (_) {/* user cancel / not supported → fallback */}
-    }
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
-}
-
-// v107: tile preview 用跟 stamp 一致的 smoothstep falloff (16 stops CSS gradient)
-// 真 stamp 是 putImageData 解析公式（连续），CSS gradient 只能 stop 间 linear interp，
-// 16 stops 视觉上已经平滑（dα 在 stop 处 jump 小到看不见）
-
-// v100r2：rack 操作按钮回退 text 标签
-// user：「几个 svg 按钮不好理解什么意思。还是改回文字」
-
-// v99：导出当前文件夹下的所有 brush 为一个 JSON pack（{ folder, brushes: [...] }）
-async function exportRackFolderAsFile() {
-  if (!_brushRack) return;
-  const tool = rackUi.tool;
-  const folder = rackUi.folder;
-  const brushes = brushesByTool(_brushRack, tool).filter(b => (b.folder || DEFAULT_FOLDER) === folder);
-  if (brushes.length === 0) { setStatus("本文件夹是空的", true); return; }
-  const pack = { version: 1, folder, tool, brushes };
-  const json = JSON.stringify(pack, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const filename = `${folder || "folder"}-${tool}.json`;
-  await _shareOrDownloadJSON(blob, filename, folder);
-  setStatus(`已导出文件夹「${folder}」（${brushes.length} 笔）`);
-}
-
-// v99r2 dev：把当前 _brushRack 拼成 DEFAULTS_SPEC 代码文件下载（不走剪贴板）
-// user：「我 ipad 调好了你写回默认」+「不要走剪切板，就是文件」
-async function dumpRackAsCode() {
-  if (!_brushRack) return;
-  const lines = [];
-  lines.push("// Auto-dumped from brush rack. 替换 src/brushes.js DEFAULTS_SPEC array 内容。");
-  lines.push("export const DEFAULTS_SPEC = [");
-  for (const b of _brushRack.brushes) {
-    const args = {};
-    args.size = b.size?.base ?? 12;
-    args.sizeBaseMax = b.size?.max ?? 200;
-    args.hardness = b.shape?.hardness ?? 1.0;
-    if (b.shape?.kind && b.shape.kind !== "round") args.shapeKind = b.shape.kind;
-    if (b.shape?.aspect != null && b.shape.aspect !== 1) args.aspect = b.shape.aspect;
-    if (b.shape?.rotation) args.rotation = b.shape.rotation;
-    args.sizeCoeff = b.sizeCoeff ?? 0.6;
-    args.opaCoeff  = b.opaCoeff  ?? 0.6;
-    args.flowCoeff = b.flowCoeff ?? 0;
-    if (b.pressureGamma != null && b.pressureGamma !== 1.0) args.pressureGamma = b.pressureGamma;
-    if (b.defaultOpa != null && b.defaultOpa !== 1.0) args.defaultOpa = b.defaultOpa;
-    args.compositeMode = b.compositeMode || "wash";
-    if (b.blendMode && b.blendMode !== "source-over") args.blendMode = b.blendMode;
-    args.spacingValue = (typeof b.spacing === "number") ? b.spacing : (b.spacing?.value ?? 0.06);
-    if (b.pixelMode) args.pixelMode = true;
-    if (b.taper?.in)  args.taperIn  = b.taper.in;
-    if (b.taper?.out) args.taperOut = b.taper.out;
-    if (b.smudge) args.smudge = b.smudge;
-    const sm = b.smooth || {};
-    if (sm.streamline     != null && sm.streamline     !== 0.3) args.streamline     = sm.streamline;
-    if (sm.stabilization  != null && sm.stabilization  !== 0)   args.stabilization  = sm.stabilization;
-    if (sm.pullStabilizer != null && sm.pullStabilizer !== 0)   args.pullStabilizer = sm.pullStabilizer;
-    if (sm.motionFilter   != null && sm.motionFilter   !== 0)   args.motionFilter   = sm.motionFilter;
-    const argsStr = JSON.stringify(args).replace(/"([a-zA-Z_]\w*)":/g, "$1:");
-    lines.push(`  { id: ${JSON.stringify(b.id)}, name: ${JSON.stringify(b.name)}, tool: ${JSON.stringify(b.tool)},`);
-    lines.push(`    args: ${argsStr} },`);
-  }
-  lines.push("];");
-  const code = lines.join("\n");
-  const blob = new Blob([code], { type: "text/javascript" });
-  await _shareOrDownloadJSON(blob, "default-brushes.js", "笔架代码");
-  setStatus(`已导出 ${_brushRack.brushes.length} 笔的代码文件`);
-}
-
-if (_rackEls.exportFolderBtn) _rackEls.exportFolderBtn.addEventListener("click", () => exportRackFolderAsFile());
-if (_rackEls.cloudPushBtn) _rackEls.cloudPushBtn.addEventListener("click", async () => {
-  if (!isSignedIn()) { setStatus("请先登录云端账号", true); return; }
-  setStatus("正在同步笔架…");
-  await pushBrushRackIfSignedIn();
-});
-if (_rackEls.resetBtn) _rackEls.resetBtn.addEventListener("click", async () => {
-  const ok = await openConfirmSheet(
-    "重置笔架？",
-    "会删除全部自定义笔刷 + 改过的默认笔，恢复出厂默认。不可撤销。",
-  );
-  if (!ok) return;
-  _brushRack = makeDefaultRack({ resetAt: Date.now() });   // v2: 恢复出厂 = resetAt watermark
-  for (const t of Object.keys(state.toolStates)) {
-    state.toolStates[t].activeBrushId = null;
-    Object.assign(state.toolStates[t], defaultToolStateFor(t));
-  }
-  await persistBrushRack();
-  applyToolState(editMode.current());
-  dialReactive.rackVersion++;   // 笔架内容变 → <RackSheet> 反应式重渲（sheet 关着也无妨，cheap）
-  setRackDirty(true);
-  if (isSignedIn()) pushBrushRackIfSignedIn();
-  setStatus(`笔架已重置（${_brushRack.brushes.length} 个 brush）`, true);
-});
-if (_rackEls.dumpCodeBtn) _rackEls.dumpCodeBtn.addEventListener("click", () => dumpRackAsCode());
-
-// ---- brush settings 全屏 view ----
-let _editingBrushId = null;
-let _editingBrushDraft = null;
-
-// brushId 已在 rack → 克隆成 draft 编辑；newDraft 传入 → 编辑一个**尚未落 rack** 的新笔（存才落）。
-// 笔设置编辑器 = 薄 Vue 组件（src/ui/brush-settings.ts）。app 拥有 draft（preset 深拷贝/新笔），
-// 组件原地编辑它（reactive 代理写回同一对象）；保存/取消是 view header 的事（仍在这），
-// 删除/导出按钮在 body 里、经 emit 回这编排（confirm / 落 trash / 下载文件）。
-const brushSettingsUI = mountBrushSettings(_settingsEls.body, {
+  icons: { check: ICON_CLOUD_CHECK, busy: ICON_CLOUD_BUSY, upload: ICON_UPLOAD, disk: ICON_DISK },
   blendModes: LAYER_MODE_LABEL,
-  onDelete: () => _deleteEditingBrush(),
-  onExport: () => { if (_editingBrushDraft) exportBrushAsFile(_editingBrushDraft); },
+  RACK_PANEL_BY_TOOL,
 });
-
-function _openBrushSettings(brushId, newDraft) {
-  let draft;
-  if (newDraft) draft = newDraft;
-  else { const b = findBrush(_brushRack, brushId); if (!b) return; draft = JSON.parse(JSON.stringify(b)); }
-  _editingBrushId = brushId;
-  _editingBrushDraft = draft;
-  brushSettingsUI.open(draft);   // 组件编辑同一对象 → 改动回写 _editingBrushDraft
-  _settingsEls.view.classList.remove("hidden");
-}
-// 编辑全程改的是 draft（深拷贝/新笔）；**只有点保存才落 rack**。cancel / 不点保存闪退 = draft 丢弃 = 没改过/没建过。
-function _closeBrushSettings(save) {
-  if (save && _editingBrushDraft) {
-    _editingBrushDraft.uat = Date.now();   // v2: 保存/更新预设/改名/移 folder = user-action-time
-    const idx = _brushRack.brushes.findIndex((x) => x.id === _editingBrushId);
-    if (idx >= 0) _brushRack.brushes[idx] = _editingBrushDraft;   // 更新现有
-    else _brushRack.brushes.push(_editingBrushDraft);             // 新建落地（draft → rack）
-    markRackChanged();             // 存 = 落本地 + 防抖同步（sheet 不直接碰 sync）
-    // v99r2：保存后自动切到该笔（user：「修改保存后自动切到那一个，回 default size」）。不主动切 tool。
-    const tool = _editingBrushDraft.tool;
-    const targetTool = editMode.current() === "airbrush" ? "brush" : tool;
-    if (getRackToolKey(editMode.current()) === getRackToolKey(targetTool)) {
-      selectBrushPresetForTool(editMode.current(), _editingBrushDraft.id);
-    } else {
-      selectBrushPresetForTool(targetTool, _editingBrushDraft.id);
-    }
-    dialReactive.rackVersion++;   // 笔架内容变 → <RackSheet> 反应式重渲（sheet 关着也无妨，cheap）
-    setStatus(`已保存：${_editingBrushDraft.name}`);
-  }
-  _editingBrushId = null;
-  _editingBrushDraft = null;
-  brushSettingsUI.close();
-  _settingsEls.view.classList.add("hidden");
-}
-// 删除当前编辑的笔（form 的删除按钮 emit 过来）。真在 rack 的笔记 trash（缺席≠删除；merge 靠它判真删）。
-async function _deleteEditingBrush() {
-  const b = _editingBrushDraft;
-  if (!b) return;
-  const ok = await openConfirmSheet("删除这支笔？", `「${b.name}」（不可撤销）`);
-  if (!ok) return;
-  const delId = _editingBrushId;
-  const idx = _brushRack.brushes.findIndex((x) => x.id === delId);
-  if (idx >= 0) {
-    _brushRack.brushes.splice(idx, 1);
-    if (!Array.isArray(_brushRack.trash)) _brushRack.trash = [];
-    _brushRack.trash.push({ id: delId, uat: Date.now() });
-    markRackChanged();
-    dialReactive.rackVersion++;   // 笔架内容变 → <RackSheet> 反应式重渲（sheet 关着也无妨，cheap）
-  }
-  // 删一个尚未保存的新笔（idx<0）→ 仅丢 draft，等同 cancel。
-  _editingBrushId = null;
-  _editingBrushDraft = null;
-  brushSettingsUI.close();
-  _settingsEls.view.classList.add("hidden");
-  setStatus("已删除");
-}
-_settingsEls.save.addEventListener("click", () => _closeBrushSettings(true));
-_settingsEls.cancel.addEventListener("click", () => _closeBrushSettings(false));
-// 旧 _renderBrushSettings（~195 行命令式 form builder，改 shape kind 即 innerHTML 全量重建）
-// 已收成 src/ui/brush-settings.ts（reactive draft + v-if/v-model）+ brush-settings-model.ts（补缺）。
 
 // canvas pointerdown → 关 exclusive panel（user：「画画时别让 panel 挡着」）
 els.board.addEventListener("pointerdown", () => {
   if (getCurrentExclusive()) closeExclusive();
 }, { capture: true });   // capture 在 input.js 处理 stroke 之前
 
-// ---- Service worker + 更新检测 ----
-// 沿用 WebXiaoHeiWu 模式，四条检测路径都挂上，iPad PWA standalone 模式默认
-// 不勤快地 check update —— 每次回到前台再 poke 一下 registration.update()。
-//
-//   1) registration.waiting 在 register 时 → 上次后台装好但没 activate 的，开机直接 toast
-//   2) updatefound + statechange='installed' → 当前 session 内 SW 装了新版本就 toast
-//   3) SW postMessage 'asset-updated' (fetch handler ETag 检测) → 任意一个 asset 变了
-//   4) visibilitychange / focus → registration.update() 主动 poll
 
-const LOCAL_DEV_HOSTS = new Set(["localhost", "127.0.0.1", "::1", ""]);
-let updateDismissed = false;
-function showUpdate() {
-  if (updateDismissed) return;
-  els.updateToast.classList.remove("hidden");
-}
-els.updateReload.addEventListener("click", async () => {
-  // 用户决定性动作 → apply 所有 pending（套索浮层等）+ 保一次（reload 会清掉内存）
-  editMode.applyPendingTransient();
-  if (_store.edits.localDirty() && !_store.busy.saving()) await saveNow();
-  // **v60 修**：必须把 skip-waiting 推给 WAITING SW，不是 controller。
-  // controller = 当前 active SW（旧版本），收到 skipWaiting 无意义；要的是让 waiting
-  // 的新 SW 转 active。然后听 controllerchange 再 reload —— 否则 reload 时旧 SW 还
-  // 在控位，又返一份旧 index.html → 用户体感"toast 一直弹但版本没换"。
-  const reg = _swRegistration || await navigator.serviceWorker?.getRegistration();
-  if (!reg || !reg.waiting) {
-    // 没有 waiting SW（可能已 active 但 page 没 reload）→ 直接刷
-    location.reload();
-    return;
-  }
-  let reloaded = false;
-  const doReload = () => { if (reloaded) return; reloaded = true; location.reload(); };
-  navigator.serviceWorker.addEventListener("controllerchange", doReload, { once: true });
-  reg.waiting.postMessage({ type: "skip-waiting" });
-  // 5s 兜底：controllerchange 不来就硬 reload（不会把状态推得更差）
-  setTimeout(doReload, 5000);
-});
-els.updateDismiss.addEventListener("click", () => {
-  updateDismissed = true;
-  els.updateToast.classList.add("hidden");
-});
-
-let _swRegistration = null;       // 暴露给 menuCheckUpdate 用
-// **v58 修**：之前 register 写在 `window.addEventListener("load", ...)` 里。
-// 但 app.js 是 dynamic `import()` 异步加载（见 index.html 顶部 module script），
-// 等模块跑完时 `load` event 经常已经 fire 过了 → addEventListener 挂的 listener
-// 永远不触发 → SW 从来没注册。iPad PWA 离线就崩，"检测更新"也说"未注册"。
-// 现在改成模块顶层直接 register（同 ScratchPad），不依赖 load event。
-// v121 dev/ 子目录跳 SW 注册：dev bundle 文件名固定 + ?v=epoch 防缓存，无 SW
-// 反而每次刷新都直接拿最新代码，免得 dev 自己也踩"过一会才好"
-// v124b：扩义——任何非 prod-root 路径都算 dev (含 /dev/, /staging/, localhost 等)。
-// HUD 上挂红色 DEV chip 让人一眼看出环境
-const IS_DEV_ROUTE = location.pathname.includes("/dev/")
-  || location.hostname === "localhost"
-  || location.hostname === "127.0.0.1";
-{
-  const chip = document.getElementById("envChip");
-  if (chip && IS_DEV_ROUTE) chip.classList.remove("hidden");
-}
-if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname) && !IS_DEV_ROUTE) {
-  // 路径 3：asset-updated 消息
-  navigator.serviceWorker.addEventListener("message", (e) => {
-    if (e.data?.type === "asset-updated") showUpdate();
-  });
-
-  navigator.serviceWorker.register("./service-worker.js").then((registration) => {
-    _swRegistration = registration;
-    // 路径 1
-    if (registration.waiting && navigator.serviceWorker.controller) {
-      showUpdate();
-    }
-    // 路径 2
-    registration.addEventListener("updatefound", () => {
-      const newWorker = registration.installing;
-      if (!newWorker) return;
-      newWorker.addEventListener("statechange", () => {
-        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-          showUpdate();
-        }
-      });
-    });
-    // 路径 4：回前台 / 焦点 → poke SW 更新 + ADR-0017 闲置锁屏检查（**不静默 FF**，闲够了锁屏等用户点继续）。
-    const pokeUpdate = () => { registration.update().catch(() => {}); };
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") { pokeUpdate(); showIdleLockIfStale(); }
-    });
-    window.addEventListener("focus", () => { pokeUpdate(); showIdleLockIfStale(); });
-    setInterval(pokeUpdate, 10 * 60 * 1000);
-  }).catch((err) => {
-    console.warn("SW register failed", err);
-  });
-}
+// ---- PWA 外壳：service-worker 注册 + 更新 toast + dev chip（src/pwa-shell.ts）----
+new PwaShell({
+  toast: els.updateToast,
+  reloadBtn: els.updateReload,
+  dismissBtn: els.updateDismiss,
+  envChip: document.getElementById("envChip"),
+  onBeforeReload: async () => {
+    editMode.applyPendingTransient();
+    if (_store.edits.localDirty() && !_store.busy.saving()) await session.save();
+  },
+  onForeground: () => showIdleLockIfStale(),
+}).init();

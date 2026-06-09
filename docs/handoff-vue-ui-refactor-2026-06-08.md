@@ -1,5 +1,7 @@
 # Handoff · WebPaint Vue / data-driven UI 重构（2026-06-08）
 
+人类输入：停，这份文档可能存在误导，批判性地读。具体做vue地ai说这篇文档太想当然了
+
 > 给即将做「app.js UI → data-driven 深模块 + 薄 Vue + TS」那个 agent。
 > 读这份**之前**先读三份配套报告（别重新勘探，会被自己的幻觉带偏）：
 > - `docs/reports/20260608-ui-deepening-and-plugin-survey.html` —— 5 个候选 + 接缝裁决

@@ -122,7 +122,7 @@ mock 原本只模拟「快、可靠、原子」的云。补了 **fault 注入面
 | flow.push 退避重试（429/5xx → backoff） | §10.4 | C1 |
 | flow.openSession 慢网无硬超时 + 可跳过到离线 | E8 | C2 |
 | list reconcile：list 返回 0 但缓存有 N 项 → 不 ghost | A2 | 后续（gallery） |
-| trash move lost-response 重连按 GUID 收敛 | C7 | C5 |
+| 离线删除 lost-response 重连按 base-etag 收敛（delete-vs-edit 默认 edit-wins；云端已变=不删） | C7 | C5 |
 
 **不在本层 provider 测试范围**：auth/MSAL（F 系列）、加密（G 系列）、reader 专属（I 系列）——归各自模块。
 

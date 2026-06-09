@@ -5,9 +5,10 @@
 // 恢复·永删·清空）。数据解析走 store.list seam（app-store.listGallery，本地⊕云已 merge），
 // 展示派生走 gallery-view-model（纯·已测）。
 //
-// 接缝（host）= 只有**真·画布耦合**的几件事留给 app（app 拥有活动 doc）：openItem（开/拉+adopt+关库）、
-// pushItem（载 doc + 编码 + flow.push）、unloadItem、renameActive、exitActive、setActiveName，
-// 加上 app 的无系统弹窗 UI（confirm/input/chooseFolder/status/busy）。其余全在本模块。
+// 接缝：**真·画布耦合**的几件事走 session-state 模块（active doc 生命周期 SSoT）——
+// session.open（开/拉+adopt+关库）、session.push（载 doc + 编码 + flow.push）、session.unload、
+// session.rename、session.exit、session.setName。host 只剩 app 的无系统弹窗 UI
+// （signedIn/online/activeName/confirm/input/chooseFolder/status/busy）。其余全在本模块。
 // 旧 app.js 的 renderGallery/renderTrashView/_renderBreadcrumb/_renderFolderTile/_hydrateCloudThumb
 // （~900 行命令式闭包）= 噪音，整体删除，不保留。
 
@@ -24,6 +25,7 @@ import { getOrFetchCloudThumb } from "../cloud-thumb-cache.js";
 import { sliceFolder, folderHasContents } from "../gallery-model.js";
 import { pathFolder, pathBasename, pathJoin } from "../gallery-path.js";
 import { tileFor, breadcrumb, trashTileFor, humanTime, humanSize } from "./gallery-view-model.ts";
+import { session } from "../session-state.ts";
 
 const LS_FOLDER = "webpaint.galleryFolder";
 
@@ -48,13 +50,7 @@ export interface GalleryHost {
   chooseFolder(title: string, msg: string, options: { label: string; value: string }[]): Promise<string | null>;
   status(msg: string, isError?: boolean): void;
   busy<T>(label: string, fn: () => Promise<T>): Promise<T>;
-  // 画布耦合（app 拥有活动 doc）
-  openItem(item: any): Promise<void>;       // 本地开 / 纯云拉 → adopt → 关库 → gate
-  pushItem(item: any): Promise<void>;       // 载 doc + 编码 + flow.push（含 adoptBase）
-  unloadItem(item: any): Promise<void>;     // removeSession（+ active 则 exitCanvas）
-  renameActive(): Promise<string | null>;   // app 的 renameCurrentSession
-  exitActive(): Promise<void>;              // _exitCanvasToGallery（删/卸 active 后）
-  setActiveName(name: string): void;        // move/rename active 后回填
+  // 画布耦合操作已搬到 session-state（session.open/push/unload/rename/exit/setName），不再经 host。
 }
 
 // 缩略图格子：本地 blob 直显；纯云端进视口才 byte-range 拉；都无 → 名字首字。
@@ -173,8 +169,8 @@ function makeGallery(host: GalleryHost) {
 
       async function openTile(item: any) {
         openMenu.value = null;
-        if (item.name === host.activeName()) { await host.openItem(item); return; }  // 已是活动 → host 关库
-        await host.openItem(item);
+        if (item.name === host.activeName()) { await session.open(item); return; }  // 已是活动 → 关库
+        await session.open(item);
         await reload();
       }
       function enterFolder(path: string) { setFolder(path); }
@@ -183,7 +179,7 @@ function makeGallery(host: GalleryHost) {
         openMenu.value = null;
         const isCloud = !!item.cloud;
         if (item.name === host.activeName()) {
-          const nn = await host.renameActive();
+          const nn = await session.rename();
           if (nn && nn !== item.name) host.status(`已重命名：${item.name} → ${nn}`);
           await reload(); return;
         }
@@ -226,15 +222,15 @@ function makeGallery(host: GalleryHost) {
         await host.busy(`正在移动 ${base} → ${target || "根目录"}…`, async () => {
           try {
             const res = await _store.flow.rename(item.name, newName, { cloud: isCloud });
-            if (item.name === host.activeName()) host.setActiveName(newName);
+            if (item.name === host.activeName()) session.setName(newName);
             host.status(res.cloudDeferred ? `已移动（云端稍后重试）：${target || "根目录"}` : `已移动到：${target || "根目录"}`);
           } catch (e: any) { host.status(`移动失败：${e?.message || e}`, true); }
         });
         await reload();
       }
 
-      async function push(item: any) { openMenu.value = null; await host.pushItem(item); await reload(); }
-      async function unload(item: any) { openMenu.value = null; await host.unloadItem(item); await reload(); }
+      async function push(item: any) { openMenu.value = null; await session.push(item); await reload(); }
+      async function unload(item: any) { openMenu.value = null; await session.unload(item); await reload(); }
 
       async function del(item: any) {
         openMenu.value = null;
@@ -249,7 +245,7 @@ function makeGallery(host: GalleryHost) {
         await host.busy(`正在删除 ${item.name}…`, async () => {
           try {
             await _store.flow.delete(item.name, { isOnline: () => host.online() });
-            if (isActive) await host.exitActive();
+            if (isActive) await session.exit();
             host.status(`已删除：${item.name}`);
           } catch (e: any) { host.status(`删除失败：${e?.message || e}`, true); }
         });

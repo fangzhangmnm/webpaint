@@ -42,7 +42,7 @@
 **结论**：抽象成立、但云表面是闭集（~7 项）。下一步落地序：把现有 `src/store` 收成此 facade（status 派生 + freshness + onException 收口 + pin）→ 抽 L3 `gallery-flow.js` → card view 照 API 写（浅 Vue）。
 
 ## 4. 未决 / 给你的注意点
-- **gallery merge name→GUID 分歧**（memory `project_webpaint_gallery_guid_divergence`）：`src/gallery-model.js` 的 `mergeLocalCloud` 按 **name** 配对 local⊕cloud，列表项无 GUID；偏离 ADR-0011 的 GUID 身份（gallery-ux.md L26/41）。**pre-existing**（A2 逐字抽取没引入），但 promote 共享库前必修。重跑勘探时会再看到，**这是真 finding，不是幻觉**。
+- ~~**gallery merge name→GUID 分歧**~~ **已解决（非 bug）—— 2026-06-07 晚 GUID 身份方案回滚，身份 = path/name，见 [sync-identity-decision-2026-06-07.md](sync-identity-decision-2026-06-07.md)。** `src/gallery-model.js` 的 `mergeLocalCloud` 按 **name** 配对 local⊕cloud **就是终局 canonical 实现**，不需要修。原记的「偏离 ADR-0011 GUID 身份」是当天上午的旧判断；当天用户拍板 ADR-0011 的 in-file-GUID 对格式无关共享 store 是 over-reach 并回滚。唯一软肋（多设备改名裂卡 E）是**接受不修**的 UX 疣。
 - app.js 6809→6683 行（净降不大——价值在「困住的逻辑隔离+可测+可复用」，不在行数）。还有可抽的：gallery cloud-thumb 编排 / batch 选择、brush-preset draft 生命周期、sync-gate 决策树。
 - input.js live-dispatch 重构（K3 剩下的真活）= 最高风险（gesture/pen 热路径、iPad-only 验）—— 别 blind 大改。
 
