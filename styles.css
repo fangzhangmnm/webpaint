@@ -579,6 +579,39 @@ input[type=range] {
 .hidden { display: none; }
 .sheet.hidden, .backdrop.hidden { display: block; }
 
+/* v217 新建文件 preset 按钮组（取代 <select>） */
+.new-doc-preset-section { display: flex; flex-direction: column; gap: 4px; }
+.new-doc-preset-label {
+  font-size: 11px;
+  color: var(--ink-soft);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 0 0 2px;
+}
+.preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.preset-chips button {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--ink);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s;
+}
+.preset-chips button:hover { background: var(--line); }
+.preset-chips button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+
 /* 汉堡菜单：低频设置 / 操作集合。文字标签 + 状态字。点空白外面关闭。 */
 .menu-panel {
   position: fixed;

@@ -276,28 +276,28 @@
         <span class="brush-slider-label">名字</span>
         <input id="newDocName" type="text" class="generic-sheet-input" placeholder="未命名" />
       </label>
-      <label class="brush-slider-row" style="grid-template-columns: 80px 1fr;">
-        <span class="brush-slider-label">预设</span>
-        <select id="newDocPreset">
-          <optgroup label="绘画">
-            <option value="2048x2048">2048 × 2048（方·默认）</option>
-            <option value="1024x1024">1024 × 1024（方·轻量）</option>
-            <option value="4096x4096">4096 × 4096（方·高清，慢）</option>
-            <option value="2480x3508">A4 竖（2480 × 3508，300dpi）</option>
-            <option value="3508x2480">A4 横（3508 × 2480，300dpi）</option>
-            <option value="1920x1080">1920 × 1080（桌面横）</option>
-            <option value="2560x1440">2560 × 1440（2K 横）</option>
-            <option value="1080x1920">1080 × 1920（手机竖）</option>
-          </optgroup>
-          <optgroup label="像素画">
-            <option value="16x16">16 × 16</option>
-            <option value="32x32">32 × 32</option>
-            <option value="64x64">64 × 64</option>
-            <option value="128x128">128 × 128</option>
-          </optgroup>
-          <option value="custom">自定义…</option>
-        </select>
-      </label>
+      <div class="new-doc-preset-section">
+        <div class="new-doc-preset-label">绘画</div>
+        <div class="preset-chips">
+          <button type="button" data-preset="2048x2048" aria-pressed="true">2048²</button>
+          <button type="button" data-preset="1024x1024" aria-pressed="false">1024²</button>
+          <button type="button" data-preset="4096x4096" aria-pressed="false">4096²</button>
+          <button type="button" data-preset="2480x3508" aria-pressed="false">A4 竖</button>
+          <button type="button" data-preset="3508x2480" aria-pressed="false">A4 横</button>
+          <button type="button" data-preset="1920x1080" aria-pressed="false">1920×1080</button>
+          <button type="button" data-preset="1080x1920" aria-pressed="false">1080×1920</button>
+        </div>
+        <div class="new-doc-preset-label">像素画</div>
+        <div class="preset-chips">
+          <button type="button" data-preset="16x16" aria-pressed="false">16²</button>
+          <button type="button" data-preset="32x32" aria-pressed="false">32²</button>
+          <button type="button" data-preset="64x64" aria-pressed="false">64²</button>
+          <button type="button" data-preset="128x128" aria-pressed="false">128²</button>
+        </div>
+        <div class="preset-chips">
+          <button type="button" data-preset="custom" aria-pressed="false">自定义…</button>
+        </div>
+      </div>
       <label class="brush-slider-row" id="newDocCustomRow" style="grid-template-columns: 80px 1fr 1fr; display:none;">
         <span class="brush-slider-label">尺寸</span>
         <input id="newDocW" type="number" min="16" max="8192" step="16" value="2048" />
@@ -929,6 +929,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-46c7a4c8454b.mjs"></script>
+    <script type="module" src="./dist/webpaint-8977d5db3a54.mjs"></script>
   </body>
 </html>

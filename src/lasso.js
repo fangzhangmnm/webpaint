@@ -200,12 +200,14 @@ export class LassoEngine {
     const floatingImageData = fctx.getImageData(0, 0, w, h);
 
     // v217 (user：「从 lasso 进变换时应 trim 透明像素以决定 bbox」)：
-    // 选区可能是全层选或包含大片透明区域（PNG）；trim 出有像素的紧 bbox，
-    // 这样 mesh 初始大小贴内容，handles 不会空悬在透明区。
-    let tx0 = x0, ty0 = y0, tw = w, th = h;
+    // 选区可能含大片透明区域（PNG）；trim 到非透明像素的紧 bbox，handles 贴内容。
+    // 关键：同时裁剪 canvas + imageData 使 srcW/srcH = 裁后尺寸，1:1 无缩放。
+    let srcCanvas = floating, srcImageData = floatingImageData;
+    let srcW = w, srcH = h;
+    let tx0 = x0, ty0 = y0;
     {
       const d = floatingImageData.data;
-      let mnX = w, mnY = h, mxX = 0, mxY = 0;
+      let mnX = w, mnY = h, mxX = -1, mxY = -1;
       for (let r = 0; r < h; r++) {
         for (let c = 0; c < w; c++) {
           if (d[(r * w + c) * 4 + 3] > 0) {
@@ -216,9 +218,16 @@ export class LassoEngine {
           }
         }
       }
-      if (mnX <= mxX && mnY <= mxY) {
+      if (mxX >= mnX && mxY >= mnY) {
+        const tw = mxX - mnX + 1, th = mxY - mnY + 1;
         tx0 = x0 + mnX; ty0 = y0 + mnY;
-        tw = mxX - mnX + 1; th = mxY - mnY + 1;
+        srcW = tw; srcH = th;
+        // 裁剪出仅含内容的 canvas，这样 mesh 和 src 是 1:1，不会缩放
+        const cropped = makeBitmap(tw, th);
+        const cctx = cropped.getContext("2d");
+        cctx.drawImage(floating, mnX, mnY, tw, th, 0, 0, tw, th);
+        srcCanvas = cropped;
+        srcImageData = cctx.getImageData(0, 0, tw, th);
       }
     }
 
@@ -232,17 +241,17 @@ export class LassoEngine {
     }
 
     this._floating = {
-      canvas: floating,
-      imageData: floatingImageData,
-      srcW: w, srcH: h,
+      canvas: srcCanvas,
+      imageData: srcImageData,
+      srcW, srcH,
       layer, preSnap,
       mode: "free",                  // 默认就是 free 模式（不再有 selected sub-state）
       meshN: 2,
       mesh: [
-        [{ x: tx0,      y: ty0      }, { x: tx0 + tw, y: ty0      }],
-        [{ x: tx0,      y: ty0 + th }, { x: tx0 + tw, y: ty0 + th }],
+        [{ x: tx0,          y: ty0          }, { x: tx0 + srcW, y: ty0          }],
+        [{ x: tx0,          y: ty0 + srcH   }, { x: tx0 + srcW, y: ty0 + srcH   }],
       ],
-      uniformAspect: tw / Math.max(1, th),
+      uniformAspect: srcW / Math.max(1, srcH),
       _renderCache: null,
     };
     this._state = "floating";

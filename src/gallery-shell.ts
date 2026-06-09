@@ -60,40 +60,34 @@ export async function setGalleryOpen(open) {
 }
 
 // 新建作品 sheet
-// 日期戳 yyyymmdd（取代"未命名"；user）。
-function _todayStamp() {
+// v217: 文件名改成 yyyymmdd-xxxx（4 位随机 hex），同步生成无延迟。
+// 冲突概率 1/65536，可接受；不再需要 async 枚举已有文件。
+function _newDocName() {
   const d = new Date();
-  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const rand = Math.floor(Math.random() * 0x10000).toString(16).padStart(4, "0");
+  return `${stamp}-${rand}`;
 }
-// 下一个可用名：yyyymmdd / yyyymmdd-2 / yyyymmdd-3 …（查本地+云重名自动避让，顺带解决"重名没 detect"）。
-async function _nextDocName(folder) {
-  const base = _todayStamp();
-  const names = new Set();
-  try { (await listSessions()).forEach((s) => names.add(s.name)); } catch {}
-  if (isSignedIn() && navigator.onLine !== false) {
-    try { (await listCloudSessionsRecursive()).forEach((c) => names.add(c.path.replace(/\.ora$/i, ""))); } catch {}
-  }
-  const full = (n) => (folder ? `${folder}/${n}` : n);
-  if (!names.has(full(base))) return base;
-  for (let i = 2; i < 1000; i++) if (!names.has(full(`${base}-${i}`))) return `${base}-${i}`;
-  return `${base}-${Date.now()}`;
-}
-export async function openNewDocSheet() {
-  els.newDocName.value = gallery.getFolder() ? `${gallery.getFolder()}/…` : "…";   // 占位，下面 async 填日期名
-  els.newDocPreset.value = "2048";
+export function openNewDocSheet() {
+  const base = _newDocName();
+  const folder = gallery.getFolder();
+  els.newDocName.value = folder ? `${folder}/${base}` : base;
+  _selectPreset("2048x2048");
   els.newDocCustomRow.style.display = "none";
   els.newDocW.value = doc.width;
   els.newDocH.value = doc.height;
   els.newDocBackdrop.classList.remove("hidden");
   els.newDocSheet.classList.remove("hidden");
-  // yyyymmdd-N（避让本地+云重名）。folder 前缀保留（落当前子文件夹）。
-  const next = await _nextDocName(gallery.getFolder());
-  els.newDocName.value = gallery.getFolder() ? `${gallery.getFolder()}/${next}` : next;
-  setTimeout(() => els.newDocName.focus(), 50);
+  setTimeout(() => { els.newDocName.focus(); els.newDocName.select(); }, 50);
 }
 function closeNewDocSheet() {
   els.newDocBackdrop.classList.add("hidden");
   els.newDocSheet.classList.add("hidden");
+}
+function _selectPreset(val: string) {
+  const btns = (els.newDocSheet as any).querySelectorAll("[data-preset]");
+  btns.forEach((b: any) => b.setAttribute("aria-pressed", b.dataset.preset === val ? "true" : "false"));
+  els.newDocCustomRow.style.display = val === "custom" ? "" : "none";
 }
 
 // 本地占用 = 实际所有 IDB session blob 大小之和（**不**走 storage.estimate —— 它把 SW
@@ -247,20 +241,24 @@ export function initGalleryShell(ctx) {
   });
 
   // 新建作品 sheet 接线
-  els.newDocPreset.addEventListener("change", () => {
-    els.newDocCustomRow.style.display = els.newDocPreset.value === "custom" ? "" : "none";
+  // v217：preset 改成按钮组（_selectPreset + 委托事件）
+  els.newDocSheet.addEventListener("click", (e: any) => {
+    const btn = e.target.closest("[data-preset]");
+    if (!btn) return;
+    _selectPreset(btn.dataset.preset);
   });
   els.newDocBackdrop.addEventListener("click", closeNewDocSheet);
   els.newDocCancel.addEventListener("click", closeNewDocSheet);
   els.newDocConfirm.addEventListener("click", async () => {
     const nameRaw = (els.newDocName.value || "").trim() || "未命名";
     let w, h;
-    if (els.newDocPreset.value === "custom") {
+    const sel = (els.newDocSheet as any).querySelector("[data-preset][aria-pressed='true']");
+    const presetVal = sel ? sel.dataset.preset : "2048x2048";
+    if (presetVal === "custom") {
       w = Math.max(16, Math.min(8192, parseInt(els.newDocW.value, 10) || 2048));
       h = Math.max(16, Math.min(8192, parseInt(els.newDocH.value, 10) || 2048));
     } else {
-      // v163：preset value 改成 "W×H"（支持非正方形 / 像素画 / 纸张比例）
-      const parts = String(els.newDocPreset.value).split("x");
+      const parts = presetVal.split("x");
       w = Math.max(16, Math.min(8192, parseInt(parts[0], 10) || 2048));
       h = Math.max(16, Math.min(8192, parseInt(parts[1], 10) || w));
     }

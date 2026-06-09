@@ -99,7 +99,6 @@ export const els = {
   newDocBackdrop: document.getElementById("newDocBackdrop"),
   newDocSheet: document.getElementById("newDocSheet"),
   newDocName: document.getElementById("newDocName"),
-  newDocPreset: document.getElementById("newDocPreset"),
   newDocCustomRow: document.getElementById("newDocCustomRow"),
   newDocW: document.getElementById("newDocW"),
   newDocH: document.getElementById("newDocH"),
