@@ -1121,6 +1121,16 @@ input[type="range"].color-ramp::-moz-range-thumb {
 .gallery-icon-btn[data-cloud-state="signedin"] { color: #4c8bf5; }
 .gallery-icon-btn[data-cloud-state="unconfigured"] { color: var(--ink-soft); opacity: 0.5; }
 
+/*
+ * #galleryMount = Vue 挂载点：内含 .gallery-breadcrumb(自然高) + .gallery-grid(flex:1 滚动) + .gallery-empty。
+ * 它夹在 header/trash-bar(顶) 与 foot(底) 之间，必须自己 flex:1 撑满剩余高度并 min-height:0，
+ * 否则它按内容撑高、.gallery-grid 的 flex:1/overflow-y 失效，图多了就溢出裁切、滚不动。
+ */
+#galleryMount {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+
 .gallery-foot {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 16px;
@@ -1755,6 +1765,27 @@ body[data-mode="gallery"] .board { display: none !important; }
   gap: 16px;
   align-content: start;
   justify-content: start;
+}
+/*
+ * 滚动条策略：默认（含移动/触摸）走系统 overlay/auto，不常显，保移动端观感。
+ * 仅 Windows 桌面（粗略地 pointer:fine = 鼠标）常显一条窄滚动条，否则桌面上看不出能滚。
+ */
+@media (pointer: fine) {
+  .gallery-grid {
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+  }
+  .gallery-grid::-webkit-scrollbar { width: 10px; }
+  .gallery-grid::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--ink) 22%, transparent);
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .gallery-grid::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--ink) 36%, transparent);
+    background-clip: padding-box;
+  }
 }
 .gallery-tile {
   display: flex; flex-direction: column;

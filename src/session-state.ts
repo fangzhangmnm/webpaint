@@ -349,27 +349,33 @@ async function renameCurrentSession({ suggested, reason }: any = {}) {
       candidate = trimmed;
       continue;
     }
-    try {
-      const cloudOn = isSignedIn() && navigator.onLine !== false;
-      const res = await _store.flow.rename(oldName, trimmed, {
-        encode: () => _encodeCurrentOra(),
-        cloud: cloudOn,
-      });
-      _activeSessionName = trimmed;
-      setCurrentSessionName(trimmed);
-      _recomputePhase();
-      _store.edits.markSaved();
-      _docLastSavedAt = Date.now();
-      updateSaveStatus();
-      if (!cloudOn) setStatus(`已重命名：${oldName} → ${trimmed}`);
-      else if (res.cloudDeferred) setStatus(`已重命名（仅本地）：${oldName} → ${trimmed}（云端稍后 Ctrl+S 推）`);
-      else setStatus(`已重命名（含云端）：${oldName} → ${trimmed}`);
-      gallery.refresh();
-      return trimmed;
-    } catch (e: any) {
-      setStatus("重命名失败：" + (e && e.message || e));
-      return null;
-    }
+    // 锁屏跑改名（编码 ora + 云端 move/push + 本地存+渲 thumb 都重）。sibling 深模块 op
+    // （saveAndPush/push/unload + 图库非活动改名 host.busy）都强制 busy；此路径过去漏掉 →
+    // 没锁屏期间用户能点刷新/tile 读到改名中途态（本地已改名但云 move 在飞 → 脏徽章；thumb 未渲 → ?；
+    // 字节写到一半 → 打不开退回 reload）。补上 withBusy，与 sibling 对齐。store 窄边界不动（外包）。
+    return await withBusy(`正在重命名 ${oldName} → ${trimmed}…`, async () => {
+      try {
+        const cloudOn = isSignedIn() && navigator.onLine !== false;
+        const res = await _store.flow.rename(oldName, trimmed, {
+          encode: () => _encodeCurrentOra(),
+          cloud: cloudOn,
+        });
+        _activeSessionName = trimmed;
+        setCurrentSessionName(trimmed);
+        _recomputePhase();
+        _store.edits.markSaved();
+        _docLastSavedAt = Date.now();
+        updateSaveStatus();
+        if (!cloudOn) setStatus(`已重命名：${oldName} → ${trimmed}`);
+        else if (res.cloudDeferred) setStatus(`已重命名（仅本地）：${oldName} → ${trimmed}（云端稍后 Ctrl+S 推）`);
+        else setStatus(`已重命名（含云端）：${oldName} → ${trimmed}`);
+        gallery.refresh();
+        return trimmed;
+      } catch (e: any) {
+        setStatus("重命名失败：" + (e && e.message || e));
+        return null;
+      }
+    });
   }
 }
 

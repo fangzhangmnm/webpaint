@@ -201,6 +201,23 @@ export function initGalleryShell(ctx) {
     if (hidden) anchorPopupToBtn(els.cloudAccountPopup, els.cloudIconBtn);
     els.cloudIconBtn.setAttribute("aria-expanded", hidden ? "true" : "false");
   });
+  // 回收站视图：进/出 + 清空。v211/v214 把图库收成 Vue 深模块时，trash 按钮的接线漏搬
+  // （setView/getView/emptyTrash 已在 GalleryHandle 上，只是 chrome 这层没人调）→「回收站打不开」。
+  // chrome 可见性 _galleryChrome + 视图切 gallery.setView 两件一起（与 setGalleryOpen 进库同模式）。
+  const _switchView = (view: "files" | "trash") => { _galleryChrome(view); gallery.setView(view); };
+  els.galleryTrashBtn?.addEventListener("click", () => _switchView("trash"));
+  els.galleryTrashBack?.addEventListener("click", () => _switchView("files"));
+  els.galleryTrashMenuBtn?.addEventListener("click", (e: any) => {
+    e.stopPropagation();
+    const hidden = els.galleryTrashMenuPopup.classList.contains("hidden");
+    els.galleryTrashMenuPopup.classList.toggle("hidden", !hidden);
+    if (hidden) anchorPopupToBtn(els.galleryTrashMenuPopup, els.galleryTrashMenuBtn);
+  });
+  els.galleryEmptyTrashBtn?.addEventListener("click", () => {
+    els.galleryTrashMenuPopup.classList.add("hidden");
+    gallery.emptyTrash();
+  });
+
   // 图库菜单 popup（版本号 + 强制更新 + 文件无关设置）
   els.galleryMenuBtn?.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -294,6 +311,11 @@ export function initGalleryShell(ctx) {
         !els.galleryMenuPopup.contains(e.target) &&
         !els.galleryMenuBtn.contains(e.target)) {
       els.galleryMenuPopup.classList.add("hidden");
+    }
+    if (els.galleryTrashMenuPopup && !els.galleryTrashMenuPopup.classList.contains("hidden") &&
+        !els.galleryTrashMenuPopup.contains(e.target) &&
+        !els.galleryTrashMenuBtn.contains(e.target)) {
+      els.galleryTrashMenuPopup.classList.add("hidden");
     }
   });
 

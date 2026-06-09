@@ -29,9 +29,12 @@ async function getCurrentBundleUrl() {
   const res = await fetch("./index.html", { cache: "no-store" });
   if (!res.ok) throw new Error("install: index.html fetch failed " + res.status);
   const html = await res.text();
-  // <script type="module" src="./dist/main-<hash>.mjs"></script>
-  const m = html.match(/src="(\.\/dist\/main-[a-z0-9-]+\.mjs)"/i);
-  if (!m) throw new Error("install: 找不到 ./dist/main-*.mjs 入口 in index.html");
+  // <script type="module" src="./dist/webpaint-<hash>.mjs"></script>
+  // v124 起 bundle 名从 main- 改成 webpaint-；SW 这条 regex 当时漏改 → install 抛错 →
+  // 新 SW 永远装不上，老 SW 继续 cache-first 服旧 bundle/默认笔架 → 提交了也「没同步」。
+  // 兼容 main-（旧）+ webpaint-（现）两种名，避免再被改名咬到。
+  const m = html.match(/src="(\.\/dist\/(?:main|webpaint)-[a-z0-9-]+\.mjs)"/i);
+  if (!m) throw new Error("install: 找不到 ./dist/(main|webpaint)-*.mjs 入口 in index.html");
   return { html, bundleUrl: m[1] };
 }
 

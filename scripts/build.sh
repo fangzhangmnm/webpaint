@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# scripts/build.sh —— src/ → dist/main-<hash>.mjs；in-place 改 index.html 引新 hash
+# scripts/build.sh —— src/ → dist/webpaint-<hash>.mjs；in-place 改 index.html 引新 hash
+# （注：bundle 名是 webpaint-；service-worker.js install regex 必须跟这个名一致）
 #
 # 用法：编辑 src/ → 跑这个 → git commit && git push origin main
 # (push 后 GH Actions 把 main 分支的 dist + 源原样部署到 /dev/ 路径)

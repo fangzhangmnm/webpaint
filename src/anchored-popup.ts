@@ -48,3 +48,31 @@ export function anchorPopupToBtn(popup: any, btn: any) {
   popup.style.right = (window.innerWidth - r.right) + "px";
   popup.style.left = "auto";
 }
+
+// 顶部固定工具栏的最大 bottom（lasso stack / crop toolbar / filter brush toolbar
+// 都 fixed 在顶栏下方）。fx 弹窗锚在按钮下方时要让到这些条以下，否则遮挡。
+// v219：从 setAdjustOpen 的 bespoke lassoToolbarStack 单查抽出，覆盖全部顶栏条。
+const _TOP_TOOLBAR_IDS = ["lassoToolbarStack", "cropToolbar", "filterBrushToolbar"];
+export function topToolbarBottom() {
+  let bottom = 0;
+  for (const id of _TOP_TOOLBAR_IDS) {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains("hidden")) {
+      bottom = Math.max(bottom, el.getBoundingClientRect().bottom);
+    }
+  }
+  return bottom;
+}
+
+// 把 popup 锚到按钮下方右对齐，但让到所有可见顶栏条以下；并夹在视口内（避免顶/底溢出）。
+export function anchorPopupBelowToolbars(popup: any, btn: any, offsetY = 4) {
+  const r = btn.getBoundingClientRect();
+  popup.style.position = "fixed";
+  popup.style.right = (window.innerWidth - r.right) + "px";
+  popup.style.left = "auto";
+  let top = Math.max(r.bottom, topToolbarBottom()) + offsetY;
+  // 底部夹：popup 高度已知时不让它掉出视口底（留 8px 边距）
+  const h = popup.offsetHeight || 0;
+  if (h) top = Math.min(top, Math.max(8, window.innerHeight - h - 8));
+  popup.style.top = top + "px";
+}

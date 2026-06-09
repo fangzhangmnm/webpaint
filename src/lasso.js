@@ -222,17 +222,19 @@ export class LassoEngine {
           }
         }
       }
-      if (mxX >= mnX && mxY >= mnY) {
-        const tw = mxX - mnX + 1, th = mxY - mnY + 1;
-        tx0 = x0 + mnX; ty0 = y0 + mnY;
-        srcW = tw; srcH = th;
-        // 裁剪出仅含内容的 canvas，这样 mesh 和 src 是 1:1，不会缩放
-        const cropped = makeBitmap(tw, th);
-        const cctx = cropped.getContext("2d");
-        cctx.drawImage(floating, mnX, mnY, tw, th, 0, 0, tw, th);
-        srcCanvas = cropped;
-        srcImageData = cctx.getImageData(0, 0, tw, th);
-      }
+      // 选区内全透明（trim bbox 空 / 0×0）→ 没有可变换的像素，干净退出。
+      // 复用上面 w<=0||h<=0 的退出路径：return false，调用方据此不进 transform。
+      // 此处尚未挖空 layer（cut 在后面），所以提前返回不会留破坏。
+      if (mxX < mnX || mxY < mnY) return false;
+      const tw = mxX - mnX + 1, th = mxY - mnY + 1;
+      tx0 = x0 + mnX; ty0 = y0 + mnY;
+      srcW = tw; srcH = th;
+      // 裁剪出仅含内容的 canvas，这样 mesh 和 src 是 1:1，不会缩放
+      const cropped = makeBitmap(tw, th);
+      const cctx = cropped.getContext("2d");
+      cctx.drawImage(floating, mnX, mnY, tw, th, 0, 0, tw, th);
+      srcCanvas = cropped;
+      srcImageData = cctx.getImageData(0, 0, tw, th);
     }
 
     // 挖空 layer（cut=false 时跳过 → 复制为浮层，源层不动）
@@ -907,6 +909,26 @@ export class LassoEngine {
     const newAy = { x: ayU.x * lenAy, y: ayU.y * lenAy };
     const newAx = { x: axU.x * lenAx, y: axU.y * lenAx };
     let origin;
+    if (f.mode === "uniform") {
+      // uniform 拖边：两轴一起缩放，锚点 = 对边中点（antipodal）。
+      // 与 corner 的"对角锚定"一致——edge 的 antipodal 是对边中点。
+      // 新 mesh 角：TL=origin, TR=origin+newAx, BL=origin+newAy, BR=origin+newAx+newAy。
+      // 让对边中点保持原位置，反解 origin：
+      //   drag top   (ay-shrink) → 锚 bottom 中点 = origin + newAx/2 + newAy
+      //   drag bottom(ay-grow)   → 锚 top    中点 = origin + newAx/2
+      //   drag left  (ax-shrink) → 锚 right  中点 = origin + newAx + newAy/2
+      //   drag right (ax-grow)   → 锚 left   中点 = origin + newAy/2
+      const a = (axis === "ay-shrink")      ? { p: mid(m[1][0], m[1][1]), ox: newAx.x / 2 + newAy.x, oy: newAx.y / 2 + newAy.y }   // top
+              : (axis === "ay-grow")        ? { p: mid(m[0][0], m[0][1]), ox: newAx.x / 2,           oy: newAx.y / 2 }             // bottom
+              : (axis === "ax-shrink")      ? { p: mid(m[0][1], m[1][1]), ox: newAx.x + newAy.x / 2, oy: newAx.y + newAy.y / 2 }   // left
+              : /* ax-grow (right) */         { p: mid(m[0][0], m[1][0]), ox: newAy.x / 2,           oy: newAy.y / 2 };            // right
+      origin = { x: a.p.x - a.ox, y: a.p.y - a.oy };
+      f.mesh[0][0] = origin;
+      f.mesh[0][1] = { x: origin.x + newAx.x, y: origin.y + newAx.y };
+      f.mesh[1][0] = { x: origin.x + newAy.x, y: origin.y + newAy.y };
+      f.mesh[1][1] = { x: origin.x + newAx.x + newAy.x, y: origin.y + newAx.y + newAy.y };
+      return;
+    }
     if (axis.startsWith("ay")) {
       if (axis === "ay-grow") {
         // 拖 bottom → 锚 top (TL 不动) → origin = old TL

@@ -10,6 +10,7 @@ import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
 import { getFilter, listFilters, onFilterRegistered } from "./filters.js";
+import { anchorPopupBelowToolbars } from "./anchored-popup.ts";
 
 let state: any, editMode: any, doc: any, board: any, history: any;
 let setStatus: any, store: any, updateSaveStatus: any;
@@ -23,15 +24,11 @@ export function setAdjustOpen(open) {
   els.adjustPopup.classList.toggle("hidden", !open);
   els.topAdjustBtn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) {
-    // 锚到按钮下方右对齐；v217：若 lasso 工具栏可见，进一步往下挪以免遮挡
-    const r = els.topAdjustBtn.getBoundingClientRect();
-    const stack = document.getElementById("lassoToolbarStack");
-    const stackBottom = (stack && !stack.classList.contains("hidden"))
-      ? stack.getBoundingClientRect().bottom
-      : 0;
-    els.adjustPopup.style.top = (Math.max(r.bottom, stackBottom) + 4) + "px";
-    els.adjustPopup.style.right = (window.innerWidth - r.right) + "px";
-    els.adjustPopup.style.left = "auto";
+    // 锚到按钮下方右对齐，让到所有可见顶栏条（lasso / crop / filterBrush）以下并夹进视口。
+    // v219：换共享 anchorPopupBelowToolbars，取代 v217 只查 lassoToolbarStack 的 bespoke 逻辑
+    // （在液化等 filterBrush 模式下顶栏条是 filterBrushToolbar，旧逻辑漏掉 → 遮挡）。
+    // 先 remove hidden（上面 toggle 已做）才能量 offsetHeight 做底部夹。
+    anchorPopupBelowToolbars(els.adjustPopup, els.topAdjustBtn);
   }
 }
 
