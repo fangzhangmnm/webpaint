@@ -299,7 +299,7 @@ function _renderFilterBrushToolbar() {
       state.filterBrush.variantId = v.id;
       state.filterBrush.variantLabel = v.title;
       if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = v.id;
-      store.edits.mark(); updateSaveStatus();
+      // UI 态不 mark dirty（user 2026-06-10）：variant 选择是工具态，保存时顺手捞；真应用滤镜走 histchange 门。
       setStatus(`已切 ${v.title}`);
     });
     // 插在 title 后

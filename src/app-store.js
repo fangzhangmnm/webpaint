@@ -9,7 +9,7 @@ import { createFolderStore } from "./store/folder-store.ts";
 export { resolveRef } from "./store/folder-merge.ts";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.ts";
 import { withBusy } from "./fullscreen-busy.ts";   // 注入给 store：用户态写流深模块强制锁屏（契约见 store.createStore）
-import { listSessions, listTrashedSessions, trashSession } from "./session.js";
+import { listSessions, listTrashedSessions, trashSession, getCurrentSessionName } from "./session.js";
 import { mergeLocalCloud, mergeTrash, classifyCloudGone } from "./gallery-model.js";
 import { CLIENT_ID, SCOPES, sessionFileName } from "./config.js";
 // lib 的 graph（OneDrive transport，单一 auth）—— gallery folder 操作 + thumb byte-range 都走它。
@@ -83,6 +83,9 @@ export const isCloudDirty = (name) => _auth.isSignedIn() && cloud.isDirty(name);
 // clean→dirty 门（parentBase 唯一捕获点，ADR-0016 §4）已收进 store.edit(name)（L4 ②）——
 // app 编辑落地只调 _store.edit()，不再直暴露 setCloudDirty（绕过门 = 缺 parentBase footgun，已删）。
 export const getKnownETag = (name) => cloud.getETag(name);
+// 卸载本地（K3）/类似「本地副本不再存在」场景用：清掉指向云版的 etag+dirty。
+//   留着不清：dirty 残留 → 假徽章；etag 残留 → K6 类 If-Match 误用的使能条件。
+export const clearCloudState = (name) => cloud.clearState(name);
 
 // ---- store.list seam（gallery 数据解析）----
 // 本地⊕云 → 统一 item 列表 + 每项 dirty + 云端真文件夹。store 只做 acquisition+merge+status，
@@ -101,8 +104,14 @@ async function reconcileCloudGone(localItems, cloudFiles, { cloudListOk, signedI
   // 权威闸门：未登录/离线/list 失败/空列表 → authoritative=false → classifyCloudGone 返回全空（不收敛）。
   const authoritative = !!(cloudListOk && signedIn && online && cloudFiles.length > 0);
   const cloudNames = new Set(cloudFiles.map((c) => c.path.replace(/\.ora$/i, "")));
+  // K1（审计 2026-06-10）：**完全跳过当前画布上打开的 doc**——push 成功后的 gallery.refresh 在编辑态
+  //   也会跑到这里，若把活 doc 收进回收站：之后落笔 isDirty 缺省 true → captureParent 被跳过 →
+  //   push 撞 bypass 守卫卡死 + trash/IDB 双份。用共享指针（localStorage currentSessionName）而非
+  //   本 tab 内存——顺带护住别的 tab 正开着的 doc。孤儿处理推迟到它不活跃时（多跳过=安全方向）。
+  const activeName = getCurrentSessionName();
+  const candidates = activeName ? localItems.filter((l) => l.name !== activeName) : localItems;
   const { drop, ghost } = classifyCloudGone(
-    localItems.map((l) => l.name), cloudNames,
+    candidates.map((l) => l.name), cloudNames,
     { hasEtag: (n) => !!cloud.getETag(n), isDirty: (n) => isCloudDirty(n), authoritative },
   );
   const droppedNames = new Set(), ghostNames = new Set(ghost);

@@ -248,7 +248,9 @@ export function initTopbarMenu(ctx) {
     try {
       const loaded = await decodeOraToDoc(cp.blob);
       session.adoptWithOpts(loaded, session.name, { skipCheckpoint: true });
-      _store.edits.mark();     // 跟磁盘内容已经偏离，下次保存把 revert 后的状态写进去
+      // R4：revert 是内容变化（像素回到旧快照）→ 必须走 clean→dirty 门标云脏。
+      //   旧版只 edits.mark() 不标云脏 → 云端永远收不到 revert，且 clean 快进会无备份吃掉 revert 结果。
+      _store.edit(session.name);
       updateSaveStatus();
       setStatus(`已恢复到本次打开时（${ageMin} 分钟前）`);
     } catch (e) {

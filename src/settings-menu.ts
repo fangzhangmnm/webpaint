@@ -115,8 +115,8 @@ export function initSettingsMenu(ctx) {
   });
   els.menuCheckerboard.addEventListener("click", () => {
     applyCheckerboard(!state.checkerboard);
-    // v125 per-doc：触发 dirty 让 autosave 把新值写进 webpaint/state.json
-    store.edits.mark(); updateSaveStatus();
+    // UI 态不 mark dirty（user 2026-06-10）：棋盘是观感开关，下次真编辑保存时顺手捞进 state.json。
+    //   不再 edits.mark()——否则切个棋盘就让已同步的画变「未保存」。
     setStatus(`透明棋盘 · ${state.checkerboard ? "开" : "关"}`);
   });
 

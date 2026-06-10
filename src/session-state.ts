@@ -27,14 +27,14 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEBPAINT_VERSION } from "./version.js";
 import {
-  saveSession, openSession as openSessionLocal, removeSession,
+  saveSession, openSession as openSessionLocal, trashSession,
   listSessions, setCurrentSessionName,
 } from "./session.js";
 import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.js";
 import { getMeta, setMeta } from "./storage.js";
 import { PaintDoc } from "./doc.js";
 import {
-  isSignedIn, isCloudDirty, getKnownETag,
+  isSignedIn, isCloudDirty, getKnownETag, clearCloudState,
   CloudConflictError, CloudNameCollisionError,
   store as _store,
 } from "./app-store.js";
@@ -263,6 +263,12 @@ async function saveAndPush() {
   if (_store.busy.pushing()) await _awaitCloudPushIdle();
   if (!_activeSessionName) { setStatus("没打开作品，无法保存", true); return; }
   if (_store.edits.localDirty()) await saveNow();
+  // R3：「新版本文档」守卫必须也挡 push——saveNow 里用户点了取消只保住了本地；
+  //   这里不复查的话 cloud-dirty 仍为真 → 降级字节照样推上云（覆盖的还是更权威的一端）。
+  if (_loadedDocIsNewer && !_loadedDocNewerConfirmed && isCloudDirty(_activeSessionName)) {
+    setStatus("未推送：这画由更新版本写成，你取消了覆盖（本地与云端都保持原样）", true);
+    return;
+  }
   if (_activeSessionName) {
     _sessionOpenedAt = Date.now();
     _writeSessionCheckpoint(_activeSessionName).catch((e) => console.warn("[revert] explicit save checkpoint:", e));
@@ -387,6 +393,24 @@ async function exitCanvasToGallery() {
     await withBusy(`正在保存 ${_activeSessionName}…`, async () => {
       try { await saveAndPush(); } catch (e) { console.warn("[exit-to-gallery] save failed:", e); }
     });
+    // K2（审计 2026-06-10）：本地落盘没成（保存失败 / 用户取消了新版本覆盖）时**不无条件宣布干净**——
+    //   旧版照样 markSaved → dirty 被清、beforeunload 解除武装、开下一张画时内存编辑被覆盖，零追索。
+    //   现在显式问：重试 / 仍要退出（丢弃）。只有用户亲口选丢才丢。
+    while (_store.edits.localDirty() && !_docIsBlankUnnamed()) {
+      const choice = await lockSyncGate({
+        title: "本地保存未完成",
+        message: `「${_activeSessionName}」的修改还没写进本地存储（保存失败或被取消）。直接退出会丢这些修改。`,
+        showSpinner: false,
+        actions: [
+          { label: "重试保存", value: "retry", primary: true },
+          { label: "仍要退出（丢弃本次修改）", value: "discard" },
+        ],
+      });
+      if (choice !== "retry") break;
+      await withBusy(`正在保存 ${_activeSessionName}…`, async () => {
+        try { await saveAndPush(); } catch (e) { console.warn("[exit-to-gallery] retry failed:", e); }
+      });
+    }
     gallery.setFolder(pathFolder(_activeSessionName));
   }
   _activeSessionName = null;
@@ -492,11 +516,14 @@ async function pushItem(item: any) {
 async function unloadItem(item: any) {
   const isActive = item.name === _activeSessionName;
   if (isCloudDirty(item.name)) {
-    const ok = await openConfirmSheet(`卸载本地 "${item.name}"？`, "本地有未推送到云端的修改，卸载会**丢失这些修改**。云端保留旧版本。");
+    const ok = await openConfirmSheet(`卸载本地 "${item.name}"？`, "本地有未推送到云端的修改——会移进**本地回收站**（可恢复）。云端保留旧版本。");
     if (!ok) return;
   }
   await withBusy(`正在卸载本地 ${item.name}…`, async () => {
-    try { await removeSession(item.name); if (isActive) await exitCanvasToGallery(); setStatus(`已卸载本地：${item.name}（云端保留）`); }
+    // K3（审计 2026-06-10）：进本地回收站而非硬删（红线「删除=移到.trash」——dirty 的未推字节可救回）。
+    //   清同步态：① dirty 残留会让 cloud-only 项挂假「未推」徽章；② 残留 etag 是 K6 类
+    //   「saveAs/rename 拿受害者 etag 当 If-Match 静默覆盖」的使能条件。
+    try { await trashSession(item.name); clearCloudState(item.name); if (isActive) await exitCanvasToGallery(); setStatus(`已卸载本地：${item.name}（修改在本地回收站，云端保留）`); }
     catch (err: any) { setStatus("卸载失败：" + (err && err.message || err)); }
   });
 }
