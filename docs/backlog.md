@@ -624,3 +624,23 @@ jitter, scattering, h/s/v variation, texture, rotation/size variation
 新点子来了 → 先写这里，标 P0/P1/P2/❄。等积累到自然想做某件，再单独开个 docs/lesson-*.md / 设计 doc 论证。
 
 P0 永远是路线上**下一个**该做的，不堆。
+
+---
+
+## 云同步审计 2026-06-09（store 传播到兄弟前的清单）
+
+> 出处：`docs/reports/2026-06-09-store-cloud-sync-audit.md`（gitignored，细节带 file:line）。主干（If-Match/412-heal/push-serialize/move-aside）已验扎实；弱点全在 rename / 删除传播 / re-entry 边沿。
+
+**P0（修完才发布 sync-store v1）**
+- [ ] N1 rename 丢弃 provider 返回的新 etag + 新名 dirty 默认 true（`cloud-sync.ts:224-239`）——「改名弹假冲突」「backup 刷屏」的根因，一屏可修
+- [ ] S2/N3 reconcile 无存在性模型：无 ghost/tombstone；离线删除队列 `replayDelete` 无 caller 但 UI 报「已删除」——至少 list-merge 时查云 `.trash` 当 tombstone
+- [ ] N2 clean fast-forward 采纳云字节无任何校验（zip magic 都不查）——captive-portal 200-HTML 会覆盖唯一好本地副本；resume-with-editor-open 无 ready-gate（`cloud-freshness.ts:190-246` dirty-skip + 30s tick 竞态）
+
+**P1**
+- [ ] N4 驱逐 cloud-dirty 副本无 `.backup` stash（只有 UI confirm），guard 不在深模块（`session-state.ts:492-502`）
+- [ ] N5 `flow.delete` 的 `onDirtyWarn` caller 没传——其他调用路径会静默丢 dirty 字节
+- [ ] N6 lost-response 仅按 size 相等认领云 item（`cloud-sync.ts:112-118`）——全场唯一真·静默丢失路径
+- [ ] chunked upload 只在 createUploadSession 带 If-Match，commit 不复查；`weakOverride` force-push 无 If-Match
+
+**P2**
+- [ ] N7 dirty-rename 后 `cloud.trash(oldName)` 失败被吞 · N8 restore 丢 etag → 假 NameCollision · N9 `folderDelete` 吞错报成功 · N10 refresh 防落笔靠 UI 约定 · N11 folder-merge 的 uat-LWW 需对 ADR-0011 验明正身
