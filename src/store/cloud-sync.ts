@@ -193,10 +193,13 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   // ---- gallery 列表 / rename / 硬删（扩展名 agnostic：match/toName 注入）----
   // folders 非 null 时顺带收集子文件夹路径（含空文件夹）——gallery 文件夹模型「云端真文件夹为准」用。
   // 一次 walk 同时拿文件+文件夹（listAll），省一半 Graph 往返。list() 传 folders=null，语义不变。
-  async function _walk(subpath: string, out: CloudItem[], depth: number, folders: string[] | null): Promise<void> {
+  // status.partial：任一子树 provider.list 抛错被吞 → 这次 walk **不完整**（返回的 files 缺了那棵子树）。
+  //   cloud-gone reconciliation 的命门：partial 列表里「缺失」≠「云端真没了」，绝不能据此 drop 本地缓存
+  //   （否则一个子文件夹列举失败 = 误删一整棵子树的本地缓存）。listAll 据此返 complete 标志。
+  async function _walk(subpath: string, out: CloudItem[], depth: number, folders: string[] | null, status: { partial: boolean }): Promise<void> {
     if (depth > 8) return;
     let items: CloudItem[];
-    try { items = await provider.list(subpath); } catch (_) { return; }
+    try { items = await provider.list(subpath); } catch (_) { status.partial = true; return; }
     for (const it of items) {
       // 顶层 .trash / .backup 都是隐藏安全网：整个跳过（不进文件列表、不进文件夹列表、不递归其内容）。
       // 旧版只把 .backup 排出 folders 却仍递归进去 → 备份文件会漏进 gallery 文件列表（与 .trash 不一致的 bug）。
@@ -204,15 +207,20 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
       const itPath = subpath ? `${subpath}/${it.name}` : it.name;
       if (it.isFolder) {
         if (folders) folders.push(itPath);
-        await _walk(itPath, out, depth + 1, folders);
+        await _walk(itPath, out, depth + 1, folders, status);
       }
       else if (match(it)) out.push({ ...it, path: itPath, name: toName(itPath) });
     }
   }
-  async function list(): Promise<CloudItem[]> { const out: CloudItem[] = []; await _walk("", out, 0, null); return out; }
-  // gallery 一次取齐：{ files, folders }（folders 含空文件夹）。文件夹模型单一真相源。
-  async function listAll(): Promise<{ files: CloudItem[]; folders: string[] }> { const out: CloudItem[] = [], folders: string[] = []; await _walk("", out, 0, folders); return { files: out, folders }; }
-  async function listFolders(): Promise<string[]> { const out: CloudItem[] = [], folders: string[] = []; await _walk("", out, 0, folders); return folders; }
+  async function list(): Promise<CloudItem[]> { const out: CloudItem[] = []; await _walk("", out, 0, null, { partial: false }); return out; }
+  // gallery 一次取齐：{ files, folders, complete }（folders 含空文件夹）。文件夹模型单一真相源。
+  //   complete=false → 这次列举有子树失败（partial），调用方（reconcile）必须当「列表不权威」处理。
+  async function listAll(): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }> {
+    const out: CloudItem[] = [], folders: string[] = [], status = { partial: false };
+    await _walk("", out, 0, folders, status);
+    return { files: out, folders, complete: !status.partial };
+  }
+  async function listFolders(): Promise<string[]> { const out: CloudItem[] = [], folders: string[] = []; await _walk("", out, 0, folders, { partial: false }); return folders; }
 
   async function listTrash(): Promise<CloudItem[]> {
     let items: CloudItem[];

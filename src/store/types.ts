@@ -107,7 +107,7 @@ export interface CloudSync {
   restore(cloudItemId: string, name: string): Promise<unknown>;
   purge(cloudItemId: string): Promise<unknown>;
   list(): Promise<CloudItem[]>;
-  listAll(): Promise<{ files: CloudItem[]; folders: string[] }>;
+  listAll(): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }>;
   listFolders(): Promise<string[]>;
   listTrash(): Promise<CloudItem[]>;
   rename(oldName: string, newName: string): Promise<unknown>;

@@ -9,7 +9,7 @@ import { createFolderStore } from "./store/folder-store.ts";
 export { resolveRef } from "./store/folder-merge.ts";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.ts";
 import { withBusy } from "./fullscreen-busy.ts";   // 注入给 store：用户态写流深模块强制锁屏（契约见 store.createStore）
-import { listSessions, listTrashedSessions, removeSession } from "./session.js";
+import { listSessions, listTrashedSessions, trashSession } from "./session.js";
 import { mergeLocalCloud, mergeTrash, classifyCloudGone } from "./gallery-model.js";
 import { CLIENT_ID, SCOPES, sessionFileName } from "./config.js";
 // lib 的 graph（OneDrive transport，单一 auth）—— gallery folder 操作 + thumb byte-range 都走它。
@@ -106,9 +106,12 @@ async function reconcileCloudGone(localItems, cloudFiles, { cloudListOk, signedI
     { hasEtag: (n) => !!cloud.getETag(n), isDirty: (n) => isCloudDirty(n), authoritative },
   );
   const droppedNames = new Set(), ghostNames = new Set(ghost);
-  for (const name of drop) {   // clean 孤儿 → 删本地缓存 + 清同步态（副作用只在这里）
-    try { await removeSession(name); cloud.clearState(name); droppedNames.add(name); }
-    catch (e) { console.warn("[gallery] cloud-gone drop failed:", name, e); }
+  for (const name of drop) {
+    // clean 孤儿 → **移到本地回收站**（非硬删）：红线「删除=移到.trash」+ 可恢复。
+    //   堵住窄丢失路径：若云端被删且云回收站也被清空，本地这份是最后副本，硬删=真丢；进回收站可救。
+    //   clearState 清掉指向已消失云版的 etag（防再触发；恢复后变纯本地 item，reconcile 不再碰）。
+    try { await trashSession(name); cloud.clearState(name); droppedNames.add(name); }
+    catch (e) { console.warn("[gallery] cloud-gone reconcile failed:", name, e); }
   }
   return { droppedNames, ghostNames };
 }
@@ -119,7 +122,9 @@ export async function listGallery({ signedIn, online } = {}) {
   catch (e) { localError = e; }
   let files = [], cloudFolders = [], cloudListOk = false;
   if (signedIn && online) {
-    try { const all = await listCloudAll(); files = all.files; cloudFolders = all.folders; cloudListOk = true; }
+    // cloudListOk 取 all.complete（**不是**「没抛错」）：listAll 内任一子树列举失败 → complete=false →
+    //   partial 列表，reconcile 必须当不权威处理（partial 里「缺失」≠云端真没了，绝不据此 drop 缓存）。
+    try { const all = await listCloudAll(); files = all.files; cloudFolders = all.folders; cloudListOk = all.complete; }
     catch (e) { console.warn("[gallery] cloud list failed:", e); }
   }
   // cloud-gone 收敛：drop clean 孤儿、标 dirty 孤儿为 ghost（护栏在函数内；列表不权威时整体跳过）
