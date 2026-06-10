@@ -228,13 +228,19 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     const oldFolder = oldName.includes("/") ? oldName.slice(0, oldName.lastIndexOf("/")) : "";
     const newFolder = newName.includes("/") ? newName.slice(0, newName.lastIndexOf("/")) : "";
     const newBase = fileName(newName.includes("/") ? newName.slice(newName.lastIndexOf("/") + 1) : newName);
+    let moved: CloudItem | null;
     if (oldFolder === newFolder) {
-      await provider.rename(item.id, newBase);
+      moved = await provider.rename(item.id, newBase);
     } else {
       const targetId = newFolder ? await provider.ensureFolder(newFolder) : await provider.getApprootId();
-      await provider.move(item.id, targetId, { newName: newBase, conflictBehavior: "fail" });
+      moved = await provider.move(item.id, targetId, { newName: newBase, conflictBehavior: "fail" });
     }
-    const e = getETag(oldName); if (e) setETag(newName, e);
+    // S1 根因：OneDrive 的 rename/move 是 metadata PATCH → **etag 一定会变**。绝不把新名锚在旧 etag 上
+    //   （旧 bug：setETag(new, getETag(old)) → base 永久过期 → 下次 open 必弹假「云端有新版本」）。
+    //   采纳服务端返回的新 etag；只有异常 provider 返回缺 etag 才回退旧 etag 兜底。
+    const newETag = (moved && moved.eTag) || getETag(oldName);
+    setETag(newName, newETag);
+    setDirty(newName, false);   // 刚改完名即干净——否则 isDirty 默认 true 把它当 cloud-dirty（叠加假冲突 + bypass 守卫误抛）
     clearState(oldName);
   }
 
@@ -245,12 +251,31 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     clearState(name);
   }
 
+  // ---- 空文件夹（gallery 文件夹模型：OneDrive 真文件夹为单一真相源）----
+  // 新建：idempotent（已存在则复用 id，不报错）。
+  async function ensureFolder(path: string): Promise<void> {
+    await provider.ensureFolder(path);
+  }
+  // 删除：**深模块内强制「必须空」**——云端侧 list 子项，非空拒删（防级联删整棵子树；
+  //   是 UI guard 之上的硬兜底，库被无头复用/UI 绕过时也挡得住）。返回 false=云端已无此夹（noop，不报错）。
+  async function removeFolder(path: string): Promise<boolean> {
+    const item = await provider.getItemByPath(path);
+    if (!item) return false;
+    if (!item.isFolder) throw new Error(`不是文件夹，拒绝删除：${path}`);
+    let children: CloudItem[] = [];
+    try { children = await provider.list(path); } catch (_) { children = []; }
+    if (children.length) throw new Error(`文件夹非空，拒绝删除：${path}`);
+    await provider.delete(item.id);
+    return true;
+  }
+
   // 注：CloudConflictError 仅作为顶层 export class 暴露（无实例消费 cloud.CloudConflictError），
   //   故不挂在返回对象上——保持返回面与 CloudSync 契约一致（annotate :CloudSync 不报 excess）。
   return {
     push, pull, fetchMeta, weakOverride,
     trash, restore, purge,
     list, listAll, listFolders, listTrash, rename, remove,
+    ensureFolder, removeFolder,
     getETag, setETag, isDirty, setDirty, clearState,
   };
 }

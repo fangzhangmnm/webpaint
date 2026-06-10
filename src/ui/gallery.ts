@@ -17,7 +17,7 @@ import {
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import {
   store as _store, isCloudDirty, listCloudSessionsRecursive,
-  getItemByPath, deleteItem, clearFolderCaches,
+  clearFolderCaches,
   listGallery, listGalleryTrash,
 } from "../app-store.js";
 import { listSessions } from "../session.js";
@@ -259,16 +259,14 @@ function makeGallery(host: GalleryHost) {
       async function folderDelete(ft: any) {
         openMenu.value = null;
         if (!ft.empty) { host.status("文件夹非空，请先把里面的作品移走或删除", true); return; }
-        await host.busy(`正在删除文件夹 ${ft.name}…`, async () => {
-          if (host.signedIn() && host.online()) {
-            try {
-              const item = await getItemByPath(ft.path);
-              if (item && item.folder) await deleteItem(item.id);
-              clearFolderCaches();
-            } catch (e) { console.warn("[gallery] folder delete:", e); }
-          }
-          host.status(`已删除空文件夹：${ft.name}`);
-        });
+        if (!host.signedIn() || !host.online()) { host.status("删除文件夹需先登录云端", true); return; }
+        // 走 store.flow.deleteFolder：库内强制锁屏 + 「必须空」兜底 + 不吞错（旧版 getItemByPath 没选 folder facet
+        //   → item.folder 永远 undefined → 根本没删却照报「已删除」= N9 + 用户「删空夹不可用」）。
+        try {
+          const res = await _store.flow.deleteFolder(ft.path, { isOnline: () => host.online() });
+          clearFolderCaches();
+          host.status(res.status === "folder-deleted" ? `已删除空文件夹：${ft.name}` : `文件夹已不存在：${ft.name}`);
+        } catch (e: any) { host.status(`删除文件夹失败：${e?.message || e}`, true); }
         await reload();
       }
 

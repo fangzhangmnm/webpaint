@@ -117,7 +117,7 @@ export async function getItemByPath(path: string): Promise<GraphDriveItem | null
   try {
     const r = await graphFetch(
       "GET",
-      `/me/drive/special/approot:/${encodeApprootPath(path)}?$select=id,name,size,eTag,@microsoft.graph.downloadUrl`,
+      `/me/drive/special/approot:/${encodeApprootPath(path)}?$select=id,name,size,eTag,lastModifiedDateTime,folder,@microsoft.graph.downloadUrl`,
     );
     return await r.json() as GraphDriveItem;
   } catch (e) {

@@ -1,6 +1,6 @@
 // Store flow 编排验收（③：把 rename / saveAs / acquire / open 收进库内）。
 // 真 store.js + 真 cloud-sync.js 跑在 MockCloudProvider + MockLocal 上。验红线：
-//   rename synced → 服务端 move 保 etag；rename dirty → push 新 + 旧进 .trash（非 hard-delete）；
+//   rename synced → 服务端 move 采纳新 etag（S1：move 会变 etag，不锚旧）；rename dirty → push 新 + 旧进 .trash（非 hard-delete）；
 //   本地永远先存新名再删旧名；saveAs 不动旧；acquire cloud→local；open onNewer=pull 备份先于覆盖。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { createStore } from "../src/store/store.ts";
@@ -33,12 +33,17 @@ async function seedSynced(env, name, body) {
 }
 
 describe("Store.flow.rename", () => {
-  it("synced → 服务端 move 保 etag、字节不重传、旧名清空", async () => {
+  it("synced → 服务端 move 采纳新 etag（move 会变 etag）、字节不重传、旧名清空", async () => {
     const env = mk();
     const it0 = await seedSynced(env, "猫", "v1");
     const res = await env.store.flow.rename("猫", "狗", { encode: () => bytes("v1") });
     eq(res.where, "cloud-move");
-    eq(env.cloud.getETag("狗"), it0.eTag, "etag 顺延到新名");
+    const moved = await env.provider.getItemByPath("狗.ora");
+    assert(moved.eTag !== it0.eTag, "move 后 etag 变了（OneDrive metadata PATCH）");
+    // S1 回归：采纳服务端返回的新 etag（绝不锚旧 etag）+ 刚改完即干净 + base 推进 → 再 open 不弹假冲突
+    eq(env.cloud.getETag("狗"), moved.eTag, "采纳新 etag（S1：不锚旧 etag）");
+    eq(env.cloud.isDirty("狗"), false, "刚改完名即干净（不被 isDirty 默认 true 当 cloud-dirty）");
+    eq(env.store._internal.seenBase("狗"), moved.eTag, "本 tab base 推进到新 etag");
     eq(await env.provider.getItemByPath("猫.ora"), null, "云端旧名没了");
     assert(await env.provider.getItemByPath("狗.ora"), "云端新名在");
     eq(u8txt(await env.local.get("狗")), "v1", "本地新名在");
@@ -92,12 +97,15 @@ describe("Store.flow.rename", () => {
 });
 
 describe("Store.flow.rename（图库非活动 item：无 encode，字节取自 local）", () => {
-  it("synced 非活动 → 不传 encode，从 local.get 取字节，服务端 move 保 etag", async () => {
+  it("synced 非活动 → 不传 encode，从 local.get 取字节，服务端 move 采纳新 etag", async () => {
     const env = mk();
     const it0 = await seedSynced(env, "猫", "v1");
     const res = await env.store.flow.rename("猫", "狗", {});   // 无 encode
     eq(res.where, "cloud-move");
-    eq(env.cloud.getETag("狗"), it0.eTag, "etag 顺延");
+    const moved = await env.provider.getItemByPath("狗.ora");
+    assert(moved.eTag !== it0.eTag, "move 后 etag 变了");
+    eq(env.cloud.getETag("狗"), moved.eTag, "采纳新 etag（S1）");
+    eq(env.cloud.isDirty("狗"), false, "干净");
     eq(u8txt(await env.local.get("狗")), "v1", "本地新名 = 既存字节");
     eq(await env.local.get("猫"), null, "本地旧名删了");
   });
@@ -570,5 +578,55 @@ describe("Store.flow.emptyTrash（批量彻底删，两端在库内一处清）"
     eq(res.failed.length, 0);
     eq((await env.local.listTrash()).length, 0, "本地清空");
     eq((await env.cloud.listTrash()).length, 1, "云端 trash 离线应保留");
+  });
+});
+
+describe("Store.flow 空文件夹（newFolder / deleteFolder：深模块窄接口）", () => {
+  it("newFolder → 云端建真文件夹（list 能见、isFolder）", async () => {
+    const env = mk();
+    const res = await env.store.flow.newFolder("作品集");
+    eq(res.status, "folder-created");
+    eq(res.name, "作品集");
+    const folders = await env.cloud.listFolders();
+    assert(folders.includes("作品集"), "云端真文件夹存在");
+  });
+
+  it("newFolder 嵌套 → 逐段建", async () => {
+    const env = mk();
+    await env.store.flow.newFolder("a/b/c");
+    const folders = await env.cloud.listFolders();
+    assert(folders.includes("a/b/c"), "嵌套文件夹存在");
+  });
+
+  it("newFolder 离线 → offline no-op，不碰云", async () => {
+    const env = mk();
+    const res = await env.store.flow.newFolder("x", { isOnline: () => false });
+    eq(res.status, "offline");
+    eq((await env.cloud.listFolders()).length, 0, "云端没建");
+  });
+
+  it("deleteFolder 空文件夹 → 真删（旧 bug：getItemByPath 没选 folder facet 导致根本没删却报成功）", async () => {
+    const env = mk();
+    await env.store.flow.newFolder("空夹");
+    assert((await env.cloud.listFolders()).includes("空夹"), "前置：文件夹在");
+    const res = await env.store.flow.deleteFolder("空夹");
+    eq(res.status, "folder-deleted");
+    eq((await env.cloud.listFolders()).includes("空夹"), false, "文件夹真的没了");
+  });
+
+  it("deleteFolder 非空 → 深模块强制拒删（抛错，绝不级联删子树）", async () => {
+    const env = mk();
+    await env.cloud.push("夹/作品", bytes("art"));   // 文件夹内有内容
+    let threw = false;
+    try { await env.store.flow.deleteFolder("夹"); }
+    catch (e) { threw = true; assert(/非空/.test(String(e.message)), "错误提示非空"); }
+    assert(threw, "非空文件夹应拒删");
+    assert(await env.provider.getItemByPath("夹/作品.ora"), "子文件仍在（没被级联删）");
+  });
+
+  it("deleteFolder 云端已无此夹 → noop 不报错", async () => {
+    const env = mk();
+    const res = await env.store.flow.deleteFolder("不存在的夹");
+    eq(res.status, "noop");
   });
 });

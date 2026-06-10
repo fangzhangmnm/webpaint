@@ -19,7 +19,7 @@
 import { session } from "./session-state.ts";
 import { els } from "./els.ts";
 import { listSessions, readImageFromClipboard } from "./session.js";
-import { listCloudSessionsRecursive, listCloudAll, ensureSubfolder, isSignedIn } from "./app-store.js";
+import { listCloudSessionsRecursive, listCloudAll, isSignedIn } from "./app-store.js";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.js";
@@ -333,19 +333,22 @@ export function initGalleryShell(ctx) {
     if (!trimmed) { setStatus("文件夹名不能空", true); return; }
     if (trimmed.includes("/")) { setStatus("文件夹名不能含 /（要建嵌套请进对应文件夹再点新建）", true); return; }
     const fullPath = pathJoin(gallery.getFolder(), trimmed);
-    // 已存在 check（本地+云的 item 派生 + 云端真文件夹）
-    let allNames: any[] = [], cloudFolders: any[] = [];
-    try { allNames = allNames.concat((await listSessions()).map((s: any) => s.name)); } catch {}
-    try {
-      const all = await listCloudAll();
-      allNames = allNames.concat(all.files.map((c: any) => c.path.replace(/\.ora$/i, "")));
-      cloudFolders = all.folders;
-    } catch (e) { console.warn("[folder] cloud list failed:", e); }
-    const fullPrefix = `${fullPath}/`;
-    const exists = allNames.some((n) => n === fullPath || n.startsWith(fullPrefix)) || cloudFolders.includes(fullPath);
-    if (exists) { setStatus(`文件夹 "${trimmed}" 已存在`, true); return; }
+    // 点确定即刻锁屏（含「已存在」预检的网络往返也在锁内）——修「新建文件夹延迟锁屏 F」。
+    //   withBusy 可重入（ref-count），内层 store.flow.newFolder 再包一层 busy 不会提前解锁。
     await withBusy(`正在创建文件夹 ${trimmed}…`, async () => {
-      try { await ensureSubfolder(fullPath); setStatus(`已建文件夹：${trimmed}`); }
+      // 已存在 check（本地+云的 item 派生 + 云端真文件夹）
+      let allNames: any[] = [], cloudFolders: any[] = [];
+      try { allNames = allNames.concat((await listSessions()).map((s: any) => s.name)); } catch {}
+      try {
+        const all = await listCloudAll();
+        allNames = allNames.concat(all.files.map((c: any) => c.path.replace(/\.ora$/i, "")));
+        cloudFolders = all.folders;
+      } catch (e) { console.warn("[folder] cloud list failed:", e); }
+      const fullPrefix = `${fullPath}/`;
+      const exists = allNames.some((n) => n === fullPath || n.startsWith(fullPrefix)) || cloudFolders.includes(fullPath);
+      if (exists) { setStatus(`文件夹 "${trimmed}" 已存在`, true); return; }
+      // 走 store.flow.newFolder（深模块窄接口）而非裸 ensureSubfolder——锁屏/单飞守卫由库内强制。
+      try { await _store.flow.newFolder(fullPath, { isOnline: () => isSignedIn() && navigator.onLine !== false }); setStatus(`已建文件夹：${trimmed}`); }
       catch (e: any) { console.warn("[folder] cloud ensure failed:", e); setStatus("建文件夹失败：" + (e && e.message || e), true); }
     });
     gallery.refresh();

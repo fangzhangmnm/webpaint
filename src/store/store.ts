@@ -641,13 +641,37 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     flush: () => (sub.edits.localDirty() && !_busy.saving) ? _persist() : Promise.resolve(),
   };
 
-  // 单飞守卫（single-flight）：用户态写流（rename/saveAs/del/restore/purge/emptyTrash）同一时刻
-  //   只允许一个在跑，并发的第二个**直接拒**（throw STORE_BUSY），调用方 catch→报状态。
+  // 空文件夹（gallery 文件夹模型：OneDrive 真文件夹为单一真相源）。新建/删除都走深模块——
+  //   ① 强制锁屏（默认 _uiBusy，调用方点了即刻看到遮罩，修「改名/新建延迟锁屏 F」）；
+  //   ② 删除的「必须空」在 cloud.removeFolder 内强制（非空抛错，不静默级联删子树）；
+  //   ③ 进单飞守卫，与 rename/del 一致。app 不再裸调 graph.ensureSubfolder/deleteItem（绕过 busy/守卫/吞错 = N9 根因）。
+  interface FolderOpOpts { isOnline?: () => boolean; busy?: Busy; }
+  async function newFolder(path: string, opts: FolderOpOpts = {}): Promise<FlowResult> {
+    const { isOnline = () => true, busy = _uiBusy } = opts;
+    if (!path) return { status: "noop" };
+    if (!isOnline()) return { status: "offline" };
+    return busy("新建文件夹…", async () => {
+      await cloud.ensureFolder(path);
+      return { status: "folder-created", name: path };
+    });
+  }
+  async function deleteFolder(path: string, opts: FolderOpOpts = {}): Promise<FlowResult> {
+    const { isOnline = () => true, busy = _uiBusy } = opts;
+    if (!path) return { status: "noop" };
+    if (!isOnline()) return { status: "offline" };
+    return busy("删除文件夹…", async () => {
+      const removed = await cloud.removeFolder(path);   // 非空 → 抛错（深模块强制必须空），调用方报状态
+      return { status: removed ? "folder-deleted" : "noop", name: path };
+    });
+  }
+
+  // 单飞守卫（single-flight）：用户态写流（rename/saveAs/del/restore/purge/emptyTrash/newFolder/deleteFolder）
+  //   同一时刻只允许一个在跑，并发的第二个**直接拒**（throw STORE_BUSY），调用方 catch→报状态。
   // 与 busy 正交、是更硬的护栏：busy 只是 UI 防误点（passBusy / 无 UI 时失效），这道在库内自带、
   //   不依赖 UI——库被无头复用时也挡得住「两个用户态写同时动手」。数据竞争仍由 serialize2 兜底，
   //   这道在其上加「全局同一时刻只一个用户态写」的更强语义（user 明确要）。
-  // 安全前提：被守的 6 个流**互不内部调用**（emptyTrash 直接调 adapter，不走 flow.purge；rename 内
-  //   部走 _doPush 而非 flow.saveAs）——否则嵌套会自锁。新增流要进这层守卫前先核这条。
+  // 安全前提：被守的 8 个流**互不内部调用**（emptyTrash 直接调 adapter，不走 flow.purge；rename 内
+  //   部走 _doPush 而非 flow.saveAs；newFolder/deleteFolder 直接调 cloud.*）——否则嵌套会自锁。新增流要进这层守卫前先核这条。
   let _userWriteInFlight: string | null = null;     // 在跑的用户态写 label；null = 空闲
   const _singleFlight = <A extends unknown[], R>(label: string, fn: (...args: A) => Promise<R>) => (...args: A): Promise<R> => {
     if (_userWriteInFlight) {
@@ -668,6 +692,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       restore: _singleFlight("恢复", restore),
       purge: _singleFlight("彻底删除", purge),
       emptyTrash: _singleFlight("清空回收站", emptyTrash),
+      newFolder: _singleFlight("新建文件夹", newFolder),
+      deleteFolder: _singleFlight("删除文件夹", deleteFolder),
     },
     edit,                      // 唯一编辑入口（游标 + 门）（L4 ②）
     busy,                      // transient saving/pushing busy（状态归 store，status 只读）（L4 ②b）

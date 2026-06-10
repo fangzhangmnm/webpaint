@@ -112,6 +112,8 @@ export interface CloudSync {
   listTrash(): Promise<CloudItem[]>;
   rename(oldName: string, newName: string): Promise<unknown>;
   remove(name: string): Promise<unknown>;
+  ensureFolder(path: string): Promise<void>;
+  removeFolder(path: string): Promise<boolean>;
   isDirty(name: string): boolean;
   setDirty(name: string, dirty: boolean): void;
   getETag(name: string): string | null;
