@@ -10,8 +10,8 @@
 import { pathBasename } from "../gallery-path.js";
 import { itemTime } from "../gallery-model.js";
 
-// 文件 tile 的同步徽章 4 态（图标 SVG 在组件 template 里按 kind 渲）。
-export type BadgeKind = "syncedBoth" | "dirtyBoth" | "cloudOnly" | "localOnly";
+// 文件 tile 的同步徽章（图标 SVG 在组件 template 里按 kind 渲）。ghost = cloud-gone dirty 孤儿。
+export type BadgeKind = "syncedBoth" | "dirtyBoth" | "cloudOnly" | "localOnly" | "ghost";
 
 export interface GalleryTile {
   name: string;          // 全 path-name（key / 移动改名用）
@@ -21,6 +21,7 @@ export interface GalleryTile {
   size: number;          // bytes
   badge: BadgeKind;
   badgeTitle: string;
+  ghost: boolean;        // cloud-gone dirty 孤儿（云端 path 被别的设备改名/删，本地有未推编辑）→ UI surface
   hasLocalThumb: boolean;
   cloud: any | null;     // {id,eTag,size,downloadUrl?} 给 thumb provider；纯本地 = null
   isActive: boolean;
@@ -32,7 +33,11 @@ export function tileFor(
 ): GalleryTile {
   const isLocal = !!item.local, isCloud = !!item.cloud;
   let badge: BadgeKind, badgeTitle: string;
-  if (isLocal && isCloud) {
+  if (item.ghost) {
+    // ghost 优先：dirty 孤儿（曾 synced，云端 path 被别的设备改名/移动/删，本地有未推编辑）。
+    //   不当普通 localOnly——明确 surface；badge≠localOnly 顺带让「推送到云端」按钮消失（防复活已删路径）。
+    badge = "ghost"; badgeTitle = "云端副本已被移动或删除，本地有未推送的修改 —— 可「重命名留存」或「丢弃」";
+  } else if (isLocal && isCloud) {
     if (opts.signedIn && item.dirty) { badge = "dirtyBoth"; badgeTitle = "本地+云端 · 本地有未推改动"; }
     else { badge = "syncedBoth"; badgeTitle = "本地+云端（已同步）"; }
   } else if (isCloud) {
@@ -47,6 +52,7 @@ export function tileFor(
     time: itemTime(item),
     size: (item.local?.size) || (item.cloud?.size) || 0,
     badge, badgeTitle,
+    ghost: !!item.ghost,
     hasLocalThumb: !!(item.local && item.local.thumb),
     cloud: item.cloud || null,
     isActive: !!opts.activeName && item.name === opts.activeName,

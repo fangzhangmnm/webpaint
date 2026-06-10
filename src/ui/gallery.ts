@@ -39,6 +39,7 @@ const ICON = {
   dirtyBoth: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><line x1="12" y1="17" x2="12" y2="11"/><polyline points="9 14 12 11 15 14"/>'),
   folder: SVG('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', "1.6"),
   cloudBig: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>', "1.6"),
+  ghost: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><line x1="3" y1="3" x2="21" y2="21"/>'),
 };
 
 export interface GalleryHost {
@@ -354,13 +355,20 @@ function makeGallery(host: GalleryHost) {
             </div>
             <button type="button" class="gallery-tile-menu-btn" aria-label="更多操作" @click.stop="toggleMenu(row.t.name)">⋯</button>
             <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!==row.t.name }" @click.stop>
-              <button type="button" @click="rename(row.item)">重命名</button>
-              <button type="button" @click="move(row.item)">移动到…</button>
-              <button v-if="row.t.badge==='cloudOnly'" type="button" @click="openTile(row.item)">拉取到本地</button>
-              <button v-if="row.t.badge==='localOnly'" type="button" @click="push(row.item)">推送到云端</button>
-              <button v-if="row.t.badge==='dirtyBoth'" type="button" @click="push(row.item)">推送到云端</button>
-              <button v-if="row.item.local && row.item.cloud" type="button" @click="unload(row.item)">卸载本地</button>
-              <button type="button" class="danger" @click="del(row.item)">送到回收站</button>
+              <template v-if="row.t.ghost">
+                <div class="gallery-menu-note">云端副本已被别的设备移动或删除；本地这份有未推送的修改。</div>
+                <button type="button" @click="rename(row.item)">重命名留存</button>
+                <button type="button" class="danger" @click="del(row.item)">丢弃（送回收站）</button>
+              </template>
+              <template v-else>
+                <button type="button" @click="rename(row.item)">重命名</button>
+                <button type="button" @click="move(row.item)">移动到…</button>
+                <button v-if="row.t.badge==='cloudOnly'" type="button" @click="openTile(row.item)">拉取到本地</button>
+                <button v-if="row.t.badge==='localOnly'" type="button" @click="push(row.item)">推送到云端</button>
+                <button v-if="row.t.badge==='dirtyBoth'" type="button" @click="push(row.item)">推送到云端</button>
+                <button v-if="row.item.local && row.item.cloud" type="button" @click="unload(row.item)">卸载本地</button>
+                <button type="button" class="danger" @click="del(row.item)">送到回收站</button>
+              </template>
             </div>
           </div>
         </template>

@@ -9,8 +9,8 @@ import { createFolderStore } from "./store/folder-store.ts";
 export { resolveRef } from "./store/folder-merge.ts";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.ts";
 import { withBusy } from "./fullscreen-busy.ts";   // 注入给 store：用户态写流深模块强制锁屏（契约见 store.createStore）
-import { listSessions, listTrashedSessions } from "./session.js";
-import { mergeLocalCloud, mergeTrash } from "./gallery-model.js";
+import { listSessions, listTrashedSessions, removeSession } from "./session.js";
+import { mergeLocalCloud, mergeTrash, classifyCloudGone } from "./gallery-model.js";
 import { CLIENT_ID, SCOPES, sessionFileName } from "./config.js";
 // lib 的 graph（OneDrive transport，单一 auth）—— gallery folder 操作 + thumb byte-range 都走它。
 import {
@@ -89,17 +89,47 @@ export const getKnownETag = (name) => cloud.getETag(name);
 // **不懂「当前文件夹」**（那是 UI 概念，view-model 切片）。离线/未登录 → 只本地（cloud 留空，
 // 绝不阻断）。本地读失败 → 标 localError，app 报状态。返回的 item = { name, local|null, cloud|null, dirty }，
 // item.cloud 自带 { id, eTag, size, lastModifiedDateTime, path, downloadUrl? }（thumb provider 直接读）。
+// cloud-gone reconciliation（ADR-0014 👻 ghost · etag-tombstone · 无 GUID；见
+//   docs/reports/2026-06-10-cloud-gone-reconciliation-proposal.md）。
+// 本地有 etag（曾 synced）但云端 path 没了 = 被别的设备改名/移动/删 → 孤儿：
+//   · clean（无未推编辑）→ **自动收敛 drop 本地缓存 + clearState**（改名/删除有效传播、零 duplicate、无复活；
+//     clean == 等同某个仍在云端改名后/或 .trash 里的版本，本地无未见字节可丢）。
+//   · dirty（有未推编辑）→ 绝不 drop，标 ghost 交 UI surface（用户在重命名留存 / 丢弃间选）。
+// **硬护栏**（否则一次网络抖动会全量误删）：只在云端列表权威时跑——signedIn ∧ online ∧ list 成功 ∧ 非空；
+//   且 etag-presence 是唯一闸门（无 etag = 真本地文件，永不碰）。
+async function reconcileCloudGone(localItems, cloudFiles, { cloudListOk, signedIn, online }) {
+  // 权威闸门：未登录/离线/list 失败/空列表 → authoritative=false → classifyCloudGone 返回全空（不收敛）。
+  const authoritative = !!(cloudListOk && signedIn && online && cloudFiles.length > 0);
+  const cloudNames = new Set(cloudFiles.map((c) => c.path.replace(/\.ora$/i, "")));
+  const { drop, ghost } = classifyCloudGone(
+    localItems.map((l) => l.name), cloudNames,
+    { hasEtag: (n) => !!cloud.getETag(n), isDirty: (n) => isCloudDirty(n), authoritative },
+  );
+  const droppedNames = new Set(), ghostNames = new Set(ghost);
+  for (const name of drop) {   // clean 孤儿 → 删本地缓存 + 清同步态（副作用只在这里）
+    try { await removeSession(name); cloud.clearState(name); droppedNames.add(name); }
+    catch (e) { console.warn("[gallery] cloud-gone drop failed:", name, e); }
+  }
+  return { droppedNames, ghostNames };
+}
+
 export async function listGallery({ signedIn, online } = {}) {
   let local = [], localError = null;
   try { local = await listSessions(); }
   catch (e) { localError = e; }
-  let files = [], cloudFolders = [];
+  let files = [], cloudFolders = [], cloudListOk = false;
   if (signedIn && online) {
-    try { const all = await listCloudAll(); files = all.files; cloudFolders = all.folders; }
+    try { const all = await listCloudAll(); files = all.files; cloudFolders = all.folders; cloudListOk = true; }
     catch (e) { console.warn("[gallery] cloud list failed:", e); }
   }
+  // cloud-gone 收敛：drop clean 孤儿、标 dirty 孤儿为 ghost（护栏在函数内；列表不权威时整体跳过）
+  const { droppedNames, ghostNames } = await reconcileCloudGone(local, files, { cloudListOk, signedIn, online });
+  if (droppedNames.size) local = local.filter((l) => !droppedNames.has(l.name));
   const items = mergeLocalCloud(local, files);
-  for (const it of items) it.dirty = !!(it.cloud && isCloudDirty(it.name));
+  for (const it of items) {
+    it.dirty = !!(it.cloud && isCloudDirty(it.name));
+    it.ghost = ghostNames.has(it.name);   // dirty 孤儿（云端 path 没了但本地有未推编辑）→ UI surface
+  }
   return { items, cloudFolders, localError };
 }
 

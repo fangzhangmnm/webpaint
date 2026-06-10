@@ -70,6 +70,24 @@ export function sliceFolder(allItems, cloudFolders, folder) {
   return { folderNames, files };
 }
 
+// cloud-gone 分类（纯）：哪些本地名是「曾 synced 但云端 path 没了」的孤儿，且该收敛还是 surface。
+//   drop  = clean 孤儿（有 etag = 曾 synced、云端无此 path、无未推编辑）→ 调用方删本地缓存（改名/删除有效传播）。
+//   ghost = dirty 孤儿（有未推编辑）→ surface 让用户选，**绝不删**。
+//   无 etag = 真本地文件（从没上传）→ 永不碰。
+// **硬护栏**：authoritative=false（云列表不权威：未登录/离线/list 失败/空列表）→ 返回全空，绝不收敛
+//   （否则一次网络抖动会把所有本地缓存误判成 cloud-gone 全量删）。决策纯、可穷举测；副作用留 app 接缝。
+export function classifyCloudGone(localNames, cloudNameSet, { hasEtag, isDirty, authoritative }) {
+  const drop = [], ghost = [];
+  if (!authoritative) return { drop, ghost };
+  for (const name of localNames) {
+    if (cloudNameSet.has(name)) continue;   // 云端还在 → 不是孤儿
+    if (!hasEtag(name)) continue;           // 无 etag = 真本地文件 → 永不碰
+    if (isDirty(name)) ghost.push(name);    // dirty 孤儿 → surface
+    else drop.push(name);                   // clean 孤儿 → 收敛
+  }
+  return { drop, ghost };
+}
+
 // 文件夹是否有内容（item 或子夹以它为 prefix）—— 非空时禁删，避免级联删整棵子树。
 export function folderHasContents(allItems, cloudFolders, folderPath) {
   const fullPrefix = `${folderPath}/`;

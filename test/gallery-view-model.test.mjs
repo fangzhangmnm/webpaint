@@ -42,6 +42,15 @@ describe("gallery-view-model · tileFor 徽章 4 态", () => {
     eq(tileFor({ name: "a", local }, { signedIn: true, activeName: "a" }).isActive, true);
     eq(tileFor({ name: "a", local }, { signedIn: true, activeName: "b" }).isActive, false);
   });
+  it("ghost（cloud-gone dirty 孤儿）→ ghost badge，优先于 localOnly（顺带让推送按钮消失）", () => {
+    const t = tileFor({ name: "a", local, cloud: null, ghost: true }, { signedIn: true, activeName: null });
+    eq(t.badge, "ghost");
+    eq(t.ghost, true);
+    assert(/移动或删除/.test(t.badgeTitle), "标题说明 cloud-gone");
+  });
+  it("非 ghost → ghost 字段 false", () => {
+    eq(tileFor({ name: "a", local, cloud: null }, { signedIn: true, activeName: null }).ghost, false);
+  });
 });
 
 describe("gallery-view-model · breadcrumb", () => {

@@ -1862,6 +1862,16 @@ body[data-mode="gallery"] .board { display: none !important; }
 .gallery-tile-menu-popup button:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .gallery-tile-menu-popup button.danger { color: #c0392b; }
 .gallery-tile-menu-popup button.danger:hover { background: color-mix(in srgb, #c0392b 12%, transparent); }
+/* cloud-gone ghost 菜单的解释行（非按钮）：窄、灰、可折行 */
+.gallery-menu-note {
+  padding: 8px 12px;
+  max-width: 200px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  white-space: normal;
+  border-bottom: 1px solid var(--line);
+}
 /* 第 1 行名字（ellipsis tooltip 兜底）+ 第 2 行 meta 备注（淡色） */
 .gallery-tile-name-row {
   padding: 8px 10px 10px;
