@@ -659,3 +659,62 @@ describe("cloud-sync.listAll complete 标志（cloud-gone reconciliation 的 par
     eq(r.complete, false);
   });
 });
+
+describe("pull 纯读化 + 采纳后置（R1 根治 · 审计 2026-06-10）", () => {
+  it("heal 失败（真分叉）→ kv etag 不被污染、dirty 保留（旧版 pull 把 etag 写成云端新版 → 重启后静默覆盖）", async () => {
+    const env = mk();
+    const it0 = await seedSynced(env, "猫", "v1");
+    await env.provider.upload("猫.ora", bytes("v2-other"), { eTag: it0.eTag, conflictBehavior: "replace" });  // 另一设备推了分叉版
+    env.store.edit("猫");                                    // 本机编辑：dirty + parent=e1
+    const res = await env.store.flow.push("猫", { encode: () => bytes("v1-mine"), onConflict: () => "keep" });
+    eq(res.status, "conflict");
+    eq(env.cloud.getETag("猫"), it0.eTag, "kv etag 未被 heal 的 pull 污染（仍是本机已见版）");
+    eq(env.cloud.isDirty("猫"), true, "dirty 保留");
+  });
+
+  it("clean 快进落盘失败 → kv etag 不推进（采纳后置；旧版先写 kv 再落盘 = 强退后静默覆盖窗口）", async () => {
+    const provider = createMockProvider();
+    let t = 1000;
+    const cloud = createCloudSync({ provider, kv: memKv(), fileName: (n) => n + ".ora", appKey: "wp", now: () => ++t });
+    const realLocal = createMockLocal();
+    let failSave = false;
+    const flakyLocal = { ...realLocal, save: (n, b) => failSave ? Promise.reject(new Error("disk full")) : realLocal.save(n, b) };
+    const store = createStore({ cloud, local: flakyLocal, kv: memKv(), backoffMs: 1 });
+    await flakyLocal.save("猫", bytes("v1"));
+    const { item } = await cloud.push("猫", bytes("v1"));
+    store.adoptBase("猫", item.eTag);
+    await provider.upload("猫.ora", bytes("v2"), { eTag: item.eTag, conflictBehavior: "replace" });   // 云端前进到 e2
+    failSave = true;
+    let threw = false;
+    try { await store.flow.open("猫", { localDirty: () => false }); } catch { threw = true; }
+    assert(threw, "落盘失败应冒泡");
+    eq(cloud.getETag("猫"), item.eTag, "kv etag 停在旧版（重启后会正确重新 FF，而非假 in-sync）");
+  });
+
+  it("分支（branch）保留本机 dirty 与 etag（旧版 pull 顺手清 dirty → 未推编辑被假性归零）", async () => {
+    const env = mk();
+    const it0 = await seedSynced(env, "猫", "v1");
+    await env.provider.upload("猫.ora", bytes("v2-other"), { eTag: it0.eTag, conflictBehavior: "replace" });
+    env.store.edit("猫");
+    const res = await env.store.flow.open("猫", { onNewer: () => "branch", localDirty: () => false, now: () => 7 });
+    eq(res.source, "branched");
+    assert(await env.local.get(res.branchName), "云端版存进分支名");
+    eq(env.cloud.isDirty("猫"), true, "本机未推编辑仍标脏");
+    eq(env.cloud.getETag("猫"), it0.eTag, "etag 未被 pull 污染");
+  });
+});
+
+describe("dirty per-tab（R2/K11 · 审计 2026-06-10）", () => {
+  it("tab A 清 dirty 不抹掉 tab B 内存里的未推事实；新 tab 回退 kv", () => {
+    const provider = createMockProvider();
+    const kv = memKv();
+    const mkc = () => createCloudSync({ provider, kv, fileName: (n) => n + ".ora", appKey: "wp" });
+    const tabA = mkc(), tabB = mkc();
+    tabB.setDirty("猫", true);          // B 编辑
+    tabA.setDirty("猫", false);         // A 推送成功清（共享 kv 被清）
+    eq(tabB.isDirty("猫"), true, "B 的内存观点保留——refresh gate 仍挡快进");
+    eq(tabA.isDirty("猫"), false);
+    const tabC = mkc();                  // 重载（新实例无内存）
+    eq(tabC.isDirty("猫"), false, "回退 kv（已知残留窗口，user 接受）");
+  });
+});

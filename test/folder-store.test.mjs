@@ -81,3 +81,19 @@ describe("folder-store · sync/flush/edit cadence（③b）", () => {
     eq(flow.calls.length, 1, "防抖窗后自动同步一次");
   });
 });
+
+describe("folder-store · K12：push 失败 dirty 保留（审计 2026-06-10）", () => {
+  it("status dirty → 不清 dirty（旧版被 pull 顺手清掉=谎报 synced、flush 永不重试）；synced 才清", async () => {
+    let d = true;
+    const cloudMock = { isDirty: () => d, setDirty: (_n, v) => { d = !!v; }, setETag: () => {} };
+    let fail = true;
+    const flow = { sync: async (f) => fail ? { status: "dirty", folder: f } : { status: "synced", folder: f, pushed: true, etag: "e9" } };
+    const s = createFolderStore({ cloud: cloudMock, name: "rack", flow });
+    s.configure({ snapshot: () => ({ version: 2, items: [], trash: [], resetAt: 0 }) });
+    await s.sync();
+    eq(s.isDirty(), true, "失败后 dirty 保留 → flush()/下次 sync 真会重试");
+    fail = false;
+    await s.sync();
+    eq(s.isDirty(), false, "成功才清");
+  });
+});

@@ -66,6 +66,10 @@ export function createFolderStore(cfg: FolderStoreConfig) {
   // flush：取消防抖、若脏立即同步（关 sheet 等显式点）。
   function flush() { _clearTimer(); return isDirty() ? sync() : Promise.resolve(); }
   // sync：canSync 门 → snapshot → FolderFlow.sync（merge）→ onResult（app 采纳 + 提示）。busy 自管。
+  // dirty 收尾（K12，审计 2026-06-10）：cloud.pull 已纯读不再顺手清 dirty，收尾归这里——
+  //   "synced" 才清（pushed:true 时 push 已清，pushed:false=本地贡献已在云端，这里显式清）；
+  //   "dirty"/"offline"/"invalid" 一律保留 dirty → status 不再谎报 synced、flush()/下次 sync 真会重试。
+  //   旧版 bug：pull 先清 dirty、push 失败无人恢复 → 「已留待重试」是谎报，本机笔刷贡献永滞本机。
   async function sync() {
     if (!_canSync()) return { status: "skipped" };
     const folder = _snapshot();
@@ -73,6 +77,10 @@ export function createFolderStore(cfg: FolderStoreConfig) {
     busy.set(true);
     try {
       const res = await _flow.sync(folder);
+      if (res.status === "synced") {
+        if (res.etag) cloud.setETag(name, res.etag);   // pull 纯读后 kv etag 也归这里推进
+        cloud.setDirty(name, false);
+      }
       await _onResult(res);
       return res;
     } finally { busy.set(false); }

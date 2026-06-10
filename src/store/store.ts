@@ -126,21 +126,18 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   }
 
   // 412：可能是自己 lost-response 已落盘的写。拉云比对，相等即自愈（B5/W1）。
+  // cloud.pull 已纯读（R1 根治）：失败/真分叉路径**零持久副作用**——kv etag/dirty 原样，
+  //   用户选「留」后重启也不会拿污染 etag 当 If-Match 静默覆盖分叉版。只有字节级相等才采纳。
   async function _tryHeal(name: string, bytes: Bytes): Promise<boolean> {
-    // ⚠ cloud.pull 有副作用：会 setDirty(name,false)。没自愈（真分叉）时必须还原 dirty——否则
-    //   ① 后续 _safePull 的 dirty-gate 看成 clean → 不备份 → 用户版本被覆盖丢失；
-    //   ② onConflict 选 no-op 保留本地后，dirty 假性归零 → 下次 push 判 clean 跳过 → 静默丢更新。
-    const wasDirty = cloud.isDirty(name);
     let pulled;
-    try { pulled = await cloud.pull(name); } catch (_) { if (wasDirty) cloud.setDirty(name, true); return false; }
-    if (!pulled) { if (wasDirty) cloud.setDirty(name, true); return false; }
+    try { pulled = await cloud.pull(name); } catch (_) { return false; }
+    if (!pulled) return false;
     if (bytesEqual(await toU8(pulled.blob), bytes)) {
+      if (pulled.item && pulled.item.eTag) { cloud.setETag(name, pulled.item.eTag); _base.set(name, pulled.item.eTag); }  // 自愈 → 显式采纳
       cloud.setDirty(name, false);
-      if (pulled.item && pulled.item.eTag) _base.set(name, pulled.item.eTag);  // 自愈后 base 推进到云端版本
       clearParent(name);                                                       // episode 落地（这次推等价于已在云端）
       return true;
     }
-    if (wasDirty) cloud.setDirty(name, true);                                   // 真分叉 → 还原 dirty（撤销 pull 的副作用）
     return false;
   }
 
@@ -218,7 +215,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     const r = await cloud.pull(name);
     if (!r) return { ok: false, reason: "cloud-vanished", backupName };
     await local!.save(name, r.blob);                // 覆盖本地为云端版（dirty 时原件已备份）
-    if (r.item && r.item.eTag) _base.set(name, r.item.eTag);  // base 推进到云端版本（多tab/冲突后一致）
+    // 采纳后置（R1 根治）：etag/dirty 只在 local.save **成功之后**推进——落盘前强退不再留下
+    //   「kv 指新版、本地是旧字节」的静默覆盖窗口（重启后 open 会正确判定云端更新、重新 FF）。
+    if (r.item && r.item.eTag) { cloud.setETag(name, r.item.eTag); _base.set(name, r.item.eTag); }
     cloud.setDirty(name, false);              // 已采纳云端 → 不再 unpushed
     clearParent(name);                        // episode 结束（已采纳云版）
     if (adopt) await adopt(r.blob, name);          // 反映到活编辑器
@@ -557,9 +556,11 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       const r = await cloud.pull(cloudName);
       if (!r) return { status: "absent" };
       if (local) await local.save(localName, r.blob);
+      // pull 已纯读 → 这里对**落地名**显式采纳（旧版靠 pull 给 cloudName 写 kv、撞名改名时再补写 localName）。
       if (r.item && r.item.eTag) {
         _base.set(localName, r.item.eTag);
-        if (localName !== cloudName) { cloud.setETag(localName, r.item.eTag); cloud.setDirty(localName, false); }
+        cloud.setETag(localName, r.item.eTag);
+        cloud.setDirty(localName, false);
       }
       if (adopt) await adopt(r.blob, localName);
       return { status: "acquired", localName, item: r.item };

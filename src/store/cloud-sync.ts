@@ -87,9 +87,18 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
 
   function getETag(name: string): string | null { return kv.get(etagKey(name)) || null; }
   function setETag(name: string, eTag: string | null): void { if (eTag) kv.set(etagKey(name), eTag); else kv.remove(etagKey(name)); }
-  function isDirty(name: string): boolean { const v = kv.get(dirtyKey(name)); return v === null ? true : v === "1"; }
-  function setDirty(name: string, dirty: boolean): void { kv.set(dirtyKey(name), dirty ? "1" : "0"); }
-  function clearState(name: string): void { kv.remove(etagKey(name)); kv.remove(dirtyKey(name)); }
+  // dirty per-tab 化（R2/K11，审计 2026-06-10）：本实例（=本 tab）对 dirty 的观点住内存，kv 只做
+  //   持久兜底（reload/强退后重推靠它）。旧版纯共享 kv：tab A push 成功清共享 flag = 把 tab B 的
+  //   未推编辑宣布干净 → B 的 refresh 判 clean → 快进无留底覆盖 B 字节。现在 A 清的是自己的内存+kv，
+  //   B 内存里的 true 还在 → B 的 gate 仍挡。已知残留（user 2026-06-10 接受）：B 重载后内存丢、
+  //   回退到被 A 清过的 kv——多 tab 同画本就不支持（IDB 层互踩），残留窗口需四连巧合。
+  const _dirtyMem = new Map<string, boolean>();
+  function isDirty(name: string): boolean {
+    if (_dirtyMem.has(name)) return _dirtyMem.get(name)!;
+    const v = kv.get(dirtyKey(name)); return v === null ? true : v === "1";
+  }
+  function setDirty(name: string, dirty: boolean): void { _dirtyMem.set(name, dirty); kv.set(dirtyKey(name), dirty ? "1" : "0"); }
+  function clearState(name: string): void { _dirtyMem.delete(name); kv.remove(etagKey(name)); kv.remove(dirtyKey(name)); }
 
   async function push(name: string, bytes: Bytes | Blob, opts: { baseEtag?: string | null } = {}): Promise<PushResult> {
     const path = fileName(name);
@@ -121,13 +130,14 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     return { item };
   }
 
-  // 永远 duplicate 进本地（caller 决定落地名），不覆盖既存。
+  // **纯读**（R1 根治，审计 2026-06-10）：pull 只取字节+item，**绝不**写 etag/dirty。
+  //   采纳（setETag/setDirty(false)）由 caller 在**字节真正落地成功后**显式提交——旧版 pull 先污染 kv
+  //   再交字节，heal 失败/落盘前强退都会留下「kv 指新版、本地是旧字节」→ 下次 push If-Match 通过 =
+  //   静默覆盖云端分叉版（R1 两条 trace）；branch/heal 路径还会顺手清掉用户的 dirty（K12 同根因）。
   async function pull(name: string): Promise<PullResult | null> {
     const item = await provider.getItemByPath(fileName(name));
     if (!item) return null;
     const blob = await provider.download(item.id);
-    setETag(name, item.eTag);
-    setDirty(name, false);
     return { blob, item, suggestedName: name };
   }
 
