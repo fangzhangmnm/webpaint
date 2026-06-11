@@ -26,7 +26,7 @@ import { Layer, PaintDoc, computeClipBaseFor } from "./doc.js";
 // （save / push / pull / checkpoint / revert / import / local-adapter）自动获得加密能力。
 // doc._encGuid != null 即「这是加密作品」（decode 时从容器读出 / 加密动作时生成）。
 // encode 永不弹窗（密码不在内存 → 明确 throw）；decode 才交互（unpackContainerInteractive）。
-import { looksEncryptedContainer, packContainer } from "./crypto-container.js";
+import { looksEncryptedContainer, packContainer } from "./store/crypto-container.ts";
 import { getPassword, unpackContainerInteractive } from "./crypto-state.js";
 
 // ---- 工具 ----
@@ -283,10 +283,10 @@ export async function encodeDocToOra(doc, opts = {}) {
   // 密码必须已在内存（doc 是解密打开的 / 刚设的）——不在就 throw，绝不静默降级成明文。
   const pw = getPassword();
   if (!pw) throw new Error("图库已锁定，无法加密保存（先解锁加密作品再存）");
-  const oraBytes = new Uint8Array(await plain.arrayBuffer());
   return await packContainer({
-    oraBytes,
+    dataBytes: new Uint8Array(await plain.arrayBuffer()),
     fileName: opts.fileName || null,
+    ext: "ora",
     guid: doc._encGuid,
     thumbPng,
     password: pw,
@@ -326,8 +326,8 @@ function parseStackXml(xmlText) {
  *  解出的 doc 带 _encGuid —— 之后 encode 自动保持加密。 */
 export async function decodeOraToDoc(blob) {
   if (await looksEncryptedContainer(blob)) {
-    const { oraBlob, guid } = await unpackContainerInteractive(blob);
-    const doc = await _decodePlainOra(oraBlob);
+    const { dataBlob, guid } = await unpackContainerInteractive(blob);
+    const doc = await _decodePlainOra(dataBlob);
     doc._encGuid = guid;
     return doc;
   }

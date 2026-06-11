@@ -6,7 +6,7 @@
 //   payload 靠 WinZip-AES header 的 2 字节 verifier（zip.js 错密码快速 throw）；
 //   thumb 靠 AES-GCM tag（解不开 = 密码错）。错了 lock() + 重问。
 
-import { unpackContainer } from "./crypto-container.js";
+import { unpackContainer } from "./store/crypto-container.ts";
 
 let _password = null;
 let _prompt = null;          // async ({title, message}) => string | null（取消）

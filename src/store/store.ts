@@ -15,6 +15,8 @@
 import { toU8, bytesEqual, createSubstrate } from "./substrate.ts";
 import type { Bytes, BytesSource } from "./substrate.ts";
 import type { BusyFn, CloudItem, CloudSync, FetchMetaResult, Kv, LocalAdapter } from "./types.ts";
+// 加密容器（ADR-0012）：flow.encrypt/decrypt 的机制层。app-agnostic（data.bin 不透明字节）。
+import { looksEncryptedContainer, packContainer, unpackContainer, makeGuid } from "./crypto-container.ts";
 
 // busy 包装的统一签名（注入的 _uiBusy / 各 flow 的 opts.busy / 默认 passBusy 共用）。
 type Busy = BusyFn;
@@ -666,6 +668,92 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
+  // ---- 加密 transform（ADR-0012：flow.encrypt / flow.decrypt）----
+  // 「换文件体」的用户态写流：本地与云端的字节**一起**换成密文/明文。深模块强制的红线：
+  //   ① 本地先落盘（字节真相；authority dirty→local）——云端没跟上时本地版本是权威端；
+  //   ② 云端跟进失败（412 真分叉 / 网络）→ **标脏 + 锚 parentBase=换前云版**，交给正常 push 流
+  //      接力收敛（下次推 If-Match 旧云版：没人动过→换成功；动过→412 surface），绝不静默分叉
+  //      （v233 教训：app 层只推云不换本地 → 下次保存把明文又推上去 = 加密被静默撤销）；
+  //   ③ 已同步过云端（有 etag）但离线 → 拒绝（status:"offline"），防止"只换了一端"的隐藏分叉；
+  //   ④ 错密码在任何持久改动**之前**抛（unpackContainer 先行）。
+  // 缩略图 store 不懂：encrypt 收 app 渲好的 thumbPng（容器尾部 blob 必备件——兼任容器探测标记 +
+  //   byte-range 预览源）；预览解密 app 经 getTailBytes 自取。密码策略（统一/每文件）也归 app。
+  interface EncryptOpts {
+    password: string;
+    thumbPng: Uint8Array;
+    fileName?: string | null;   // meta.bin 真名（默认 name）
+    ext?: string;               // meta.bin 真扩展名（如 "ora"）
+    isOnline?: () => boolean;
+    busy?: Busy;
+  }
+  interface DecryptOpts {
+    password: string;
+    isOnline?: () => boolean;
+    busy?: Busy;
+  }
+
+  // 字节替换共用流。tracked = 曾与云同步（有 etag）。
+  async function _swapBytes(name: string, bytes: Bytes, isOnline: () => boolean): Promise<FlowResult> {
+    const prevEtag = cloud.getETag(name);
+    const tracked = prevEtag != null;
+    if (tracked && !isOnline()) return { status: "offline" };
+    await local!.save(name, bytes);                       // ① 字节真相先落地
+    if (!tracked) return { status: "swapped", cloud: false };
+    try {
+      const { item } = await cloud.push(name, bytes, { baseEtag: seenBase(name) });   // If-Match：本 tab 已见版（kv 兜底）
+      if (item && item.eTag) _base.set(name, item.eTag);  // cloud.push 内已 setETag+setDirty(false)；这里推进本 tab base
+      clearParent(name);                                  // episode 落地
+      return { status: "swapped", cloud: true };
+    } catch (e: any) {
+      // ② 本地已换、云端没跟上 → 标脏 + 锚 parent=换前云版，正常 push 流接力收敛
+      _parent.set(name, prevEtag);
+      cloud.setDirty(name, true);
+      if (e && e.name === "CloudConflictError") return { status: "conflict", dirtyAfter: true };
+      return { status: "cloud-deferred", dirtyAfter: true, error: e };
+    }
+  }
+
+  async function encryptFile(name: string, opts: EncryptOpts): Promise<FlowResult> {
+    const { password, thumbPng, fileName, ext, isOnline = () => true, busy = _uiBusy } = opts || ({} as EncryptOpts);
+    if (!local) throw new Error("Store: 未注入 local adapter，无法加密");
+    return busy(`正在加密 ${name}…`, () => sub.serialize(name, async () => {
+      const blob = await local!.get(name);
+      if (!blob) return { status: "no-local" };
+      if (await looksEncryptedContainer(blob as Blob | Uint8Array)) return { status: "already" };
+      if (cloud.getETag(name) != null && !isOnline()) return { status: "offline" };   // 早退：还没打包就知道两端换不齐
+      const container = await packContainer({
+        dataBytes: await toU8(blob), fileName: fileName ?? name, ext,
+        guid: makeGuid(), thumbPng, password,
+      });
+      return await _swapBytes(name, await toU8(container), isOnline);
+    }));
+  }
+
+  async function decryptFile(name: string, opts: DecryptOpts): Promise<FlowResult> {
+    const { password, isOnline = () => true, busy = _uiBusy } = opts || ({} as DecryptOpts);
+    if (!local) throw new Error("Store: 未注入 local adapter，无法解除加密");
+    return busy(`正在解除加密 ${name}…`, () => sub.serialize(name, async () => {
+      const blob = await local!.get(name);
+      if (!blob) return { status: "no-local" };
+      if (!(await looksEncryptedContainer(blob as Blob | Uint8Array))) return { status: "not-encrypted" };
+      if (cloud.getETag(name) != null && !isOnline()) return { status: "offline" };
+      const { dataBlob } = await unpackContainer(blob as Blob, password);   // ④ 错密码这里抛（code=WRONG_PASSWORD），零持久副作用
+      return await _swapBytes(name, await toU8(dataBlob), isOnline);
+    }));
+  }
+
+  // 尾部字节原语（file-envelope.md salvage：「store 暴露取尾部 N 字节，app 自取 thumb」）。
+  // 加密缩略图导航用：app 拿尾片自己 scan MAGIC + 解密；store 不懂 thumb。
+  // IDB Blob.slice 是惰性引用，不整读；Mock（Uint8Array）同名 slice 兼容。
+  async function getTailBytes(name: string, n: number): Promise<Blob | null> {
+    if (!local) return null;
+    const blob = await local.get(name);
+    if (!blob) return null;
+    const size = (blob as any).size ?? (blob as any).length ?? 0;
+    const sliced = (blob as any).slice(Math.max(0, size - n));
+    return sliced instanceof Blob ? sliced : new Blob([sliced]);
+  }
+
   // 单飞守卫（single-flight）：用户态写流（rename/saveAs/del/restore/purge/emptyTrash/newFolder/deleteFolder）
   //   同一时刻只允许一个在跑，并发的第二个**直接拒**（throw STORE_BUSY），调用方 catch→报状态。
   // 与 busy 正交、是更硬的护栏：busy 只是 UI 防误点（passBusy / 无 UI 时失效），这道在库内自带、
@@ -695,7 +783,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       emptyTrash: _singleFlight("清空回收站", emptyTrash),
       newFolder: _singleFlight("新建文件夹", newFolder),
       deleteFolder: _singleFlight("删除文件夹", deleteFolder),
+      encrypt: _singleFlight("加密", encryptFile),         // 换文件体（ADR-0012）；内部只调 cloud.push/local，不嵌套被守流
+      decrypt: _singleFlight("解除加密", decryptFile),
     },
+    getTailBytes,              // 尾部 N 字节原语（app 自取加密 thumb；store 不懂缩略图）
     edit,                      // 唯一编辑入口（游标 + 门）（L4 ②）
     busy,                      // transient saving/pushing busy（状态归 store，status 只读）（L4 ②b）
     autosave,                  // 本地落盘节律（configure/start/flush）：cadence 归 store（L4 ②c）

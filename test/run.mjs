@@ -2,6 +2,7 @@
 import { run } from "./runner.mjs";
 import "./onedrive-provider.contract.test.mjs";
 import "./crypto-container.test.mjs";
+import "./store-crypt.test.mjs";
 import "./substrate.test.mjs";
 import "./store-flow.test.mjs";
 import "./store-coalescer.test.mjs";

@@ -17,15 +17,16 @@ import {
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import {
   store as _store, isCloudDirty, listCloudSessionsRecursive,
-  clearFolderCaches, getKnownETag,
+  clearFolderCaches,
   listGallery, listGalleryTrash,
 } from "../app-store.js";
-import { listSessions, putSessionPkg, renderThumbBlob } from "../session.js";
+import { listSessions, renderThumbBlob } from "../session.js";
 import { getSession, setMeta } from "../storage.js";
 import { decodeOraToDoc } from "../ora.js";
 import { getOrFetchCloudThumb } from "../cloud-thumb-cache.js";
-// 加密（ADR-0012）：tile 锁样式 + 解锁浏览 + 「加密保护/解除加密」文件 intent
-import { looksEncryptedContainer, unpackContainer, packContainer, makeGuid, ENC_THUMB_MIME } from "../crypto-container.js";
+// 加密（ADR-0012）：tile 锁样式 + 解锁浏览；加密/解除 transform 在 store（flow.encrypt/decrypt），
+// 图库只做 per-app 的部分：密码 UX、thumbPng 渲制、活动项预检、明文残留清理。
+import { ENC_THUMB_MIME } from "../store/crypto-container.ts";
 import { isUnlocked, onLockChange, getPassword, setPassword, lock, promptPassword } from "../crypto-state.js";
 import { localEncTail, decryptEncThumbBlob, unlockInteractive, ensureNewPassword } from "../enc-thumbs.js";
 import { sliceFolder, folderHasContents } from "../gallery-model.js";
@@ -277,24 +278,22 @@ function makeGallery(host: GalleryHost) {
       async function push(item: any) { openMenu.value = null; await session.push(item); await reload(); }
       async function unload(item: any) { openMenu.value = null; await session.unload(item); await reload(); }
 
-      // ---- 加密 intent（ADR-0012；只动文件字节，store 引擎不知情）----
-      // 限非活动 item：活动 doc 的内存态/同步 base 正被 session 编排，图库越过它改字节 = 竞态。
-      // 云端有副本时必须在线（本地+云端要一次换成同种字节；离线只换本地会让 dirty 标记绕过引擎）。
+      // ---- 加密 intent（ADR-0012）。transform 本体在 store（flow.encrypt/decrypt：本地+云端字节
+      //   一起换、If-Match、失败标脏接力收敛——红线在库内）。图库只做 per-app 的部分：
+      //   活动项预检（活动 doc 的内存态/同步 base 正被 session 编排，图库越过它改字节=竞态）、
+      //   密码 UX（统一密码=WebPaint 的选择）、thumbPng 渲制（store 不懂缩略图）、明文残留清理。
       function _encPrecheck(item: any, verb: string): boolean {
         if (item.name === host.activeName()) { host.status(`这画正开着 —— 先退出到图库再${verb}`, true); return false; }
         if (!item.local) { host.status(`纯云端作品先拉取到本地再${verb}`, true); return false; }
-        if (item.cloud && !(host.signedIn() && host.online())) { host.status(`已同步过云端的作品需在线${verb}（本地与云端要一起换）`, true); return false; }
         return true;
       }
-      // 字节推进：有云副本走 flow.push（If-Match + 落盘合一 + 412 surface）；纯本地直接落 IDB。
-      async function _pushBytes(item: any, bytes: Blob, thumb: Blob | null): Promise<boolean> {
-        if (item.cloud) {
-          _store.adoptBase(item.name, getKnownETag(item.name));
-          const res = await _store.flow.push(item.name, { encode: () => bytes, onConflict: async () => "keep" });
-          if (res.status === "conflict") { host.status(`云端有更新版本：${item.name} —— 未改动。先打开同步后再试`, true); return false; }
-        } else {
-          await putSessionPkg(item.name, bytes, thumb);
-        }
+      // store transform 的共同收尾：状态文案 + 残留清理。返回是否成功换体。
+      async function _afterSwap(item: any, res: any, okMsg: string): Promise<boolean> {
+        if (res.status === "offline") { host.status(`已同步过云端的作品需在线操作（本地与云端要一起换）`, true); return false; }
+        if (res.status === "no-local") { host.status("本地字节缺失", true); return false; }
+        if (res.status === "conflict") { host.status(`云端有更新版本：${item.name} —— 本地已换、已标未推送；打开后按冲突流程处理`, true); }
+        else if (res.status === "cloud-deferred") { host.status(`${okMsg}（本地完成；云端暂未跟上，已标未推送，回线后推送即同步）`, true); }
+        else host.status(okMsg);
         // 旧 etag 的云 thumb 缓存条目立即作废（明文/密文残留都清）
         if (item.cloud?.id) { try { await setMeta(`cloud-thumb:${item.cloud.id}`, null); } catch (_) {} }
         return true;
@@ -305,24 +304,23 @@ function makeGallery(host: GalleryHost) {
         if (!_encPrecheck(item, "加密")) return;
         const pw = await ensureNewPassword();
         if (pw == null) { host.status("已取消"); return; }
-        await host.busy(`正在加密 ${item.name}…`, async () => {
-          try {
-            const pkg = await getSession(item.name);
-            if (!pkg || !pkg.ora) { host.status("本地字节缺失，无法加密", true); return; }
-            if (await looksEncryptedContainer(pkg.ora)) { host.status("已是加密作品"); return; }
-            // 容器尾部 thumb 必备：优先现成 pkg.thumb，没有就解码渲一张
-            const thumbPng = pkg.thumb
-              ? new Uint8Array(await pkg.thumb.arrayBuffer())
-              : new Uint8Array(await (await renderThumbBlob(await decodeOraToDoc(pkg.ora), 256)).arrayBuffer());
-            const oraBytes = new Uint8Array(await pkg.ora.arrayBuffer());
-            const container = await packContainer({ oraBytes, fileName: item.name, guid: makeGuid(), thumbPng, password: pw });
-            if (!(await _pushBytes(item, container, null))) return;
-            setPassword(pw);   // 加密成功才上位为统一图库密码
-            // 清明文残留：revert checkpoint（旧内容的明文快照）
-            try { await setMeta(`revert:${item.name}:ora`, null); await setMeta(`revert:${item.name}:at`, null); } catch (_) {}
-            host.status(`已加密：${item.name}（7-Zip 输此密码可恢复；忘记密码内容永久找不回）`);
-          } catch (e: any) { host.status(`加密失败：${e?.message || e}`, true); }
-        });
+        try {
+          // thumbPng：容器尾部必备件（store 不懂 thumb，app 渲）。优先现成 pkg.thumb，没有就解码渲一张。
+          const pkg = await getSession(item.name);
+          if (!pkg || !pkg.ora) { host.status("本地字节缺失，无法加密", true); return; }
+          const thumbPng = pkg.thumb
+            ? new Uint8Array(await pkg.thumb.arrayBuffer())
+            : new Uint8Array(await (await renderThumbBlob(await decodeOraToDoc(pkg.ora), 256)).arrayBuffer());
+          const res = await _store.flow.encrypt(item.name, {
+            password: pw, thumbPng, fileName: item.name, ext: "ora",
+            isOnline: () => host.signedIn() && host.online(),
+          });
+          if (res.status === "already") { host.status("已是加密作品"); return; }
+          if (!(await _afterSwap(item, res, `已加密：${item.name}（7-Zip 输此密码可恢复；忘记密码内容永久找不回）`))) return;
+          setPassword(pw);   // 加密成功才上位为统一图库密码
+          // 清明文残留：revert checkpoint（旧内容的明文快照）
+          try { await setMeta(`revert:${item.name}:ora`, null); await setMeta(`revert:${item.name}:at`, null); } catch (_) {}
+        } catch (e: any) { host.status(`加密失败：${e?.message || e}`, true); }
         await reload();
       }
 
@@ -331,29 +329,29 @@ function makeGallery(host: GalleryHost) {
         if (!_encPrecheck(item, "解除加密")) return;
         if (!(await host.confirm(`解除「${pathBasename(item.name)}」的加密？`,
           "内容将以明文存放在本机与云端，任何能访问此设备或云账号的人都能查看。"))) return;
-        await host.busy(`正在解除加密 ${item.name}…`, async () => {
+        // 内存密码先试；不对/没有 → in-app 弹窗循环（取消即退）。错密码由 store 在任何持久改动前抛出。
+        for (let attempt = 0; ; attempt++) {
+          let pw = getPassword(), fromPrompt = false;
+          if (!pw) {
+            pw = await promptPassword({ title: "输入密码以解除加密", message: attempt > 0 ? "密码不对，再试一次" : "" });
+            if (pw == null) { host.status("已取消"); return; }
+            fromPrompt = true;
+          }
           try {
-            const pkg = await getSession(item.name);
-            if (!pkg || !pkg.ora) { host.status("本地字节缺失", true); return; }
-            if (!(await looksEncryptedContainer(pkg.ora))) { host.status("这不是加密作品"); return; }
-            // 内存密码先试；不对/没有 → in-app 弹窗循环（取消即退）
-            let oraBlob: Blob | null = null;
-            for (let attempt = 0; ; attempt++) {
-              let pw = getPassword(), fromPrompt = false;
-              if (!pw) {
-                pw = await promptPassword({ title: "输入密码以解除加密", message: attempt > 0 ? "密码不对，再试一次" : "" });
-                if (pw == null) { host.status("已取消"); return; }
-                fromPrompt = true;
-              }
-              try { ({ oraBlob } = await unpackContainer(pkg.ora, pw)); setPassword(pw); break; }
-              catch (_) { lock(); if (!fromPrompt) continue; }
-            }
-            let thumb: Blob | null = null;
-            try { thumb = await renderThumbBlob(await decodeOraToDoc(oraBlob!), 256); } catch (_) {}
-            if (!(await _pushBytes(item, oraBlob!, thumb))) return;
-            host.status(`已解除加密：${item.name}`);
-          } catch (e: any) { host.status(`解除加密失败：${e?.message || e}`, true); }
-        });
+            const res = await _store.flow.decrypt(item.name, {
+              password: pw,
+              isOnline: () => host.signedIn() && host.online(),
+            });
+            if (res.status === "not-encrypted") { host.status("这不是加密作品"); return; }
+            setPassword(pw);
+            await _afterSwap(item, res, `已解除加密：${item.name}`);
+            break;
+          } catch (e: any) {
+            if (e?.code === "WRONG_PASSWORD") { lock(); if (!fromPrompt) continue; continue; }
+            host.status(`解除加密失败：${e?.message || e}`, true);
+            return;
+          }
+        }
         await reload();
       }
 

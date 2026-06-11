@@ -21,7 +21,7 @@ import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./app
 // 加密容器（ADR-0012）：尾部是 [MAGIC][ver][salt][iv][len][AES-GCM(png)] 加密 thumb blob，
 // PNG 硬扫自然落空 → 扫 MAGIC。命中返**密文** Blob（type=ENC_THUMB_MIME），解密归 caller
 // （图库按锁态决定解不解；cache 层原样缓存密文 → 明文 thumb 不落 IDB）。
-import { scanEncThumbFromEnd, ENC_THUMB_MIME } from "./crypto-container.js";
+import { scanEncThumbFromEnd, ENC_THUMB_MIME } from "./store/crypto-container.ts";
 
 // 投机 suffix：last N 字节一次性拿 EOCD + CD +（自家 ora）thumbnail data
 // 80KB budget = thumb 自适应目标 ≤ 70KB + 尾巴 ~10KB（CD + EOCD + sig 扫描余量）

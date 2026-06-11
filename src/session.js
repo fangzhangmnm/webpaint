@@ -15,7 +15,7 @@
 //     把"加载失败的 path"当 oldName 删掉
 
 import { encodeDocToOra, decodeOraToDoc } from "./ora.js";
-import { looksEncryptedContainer } from "./crypto-container.js";
+import { looksEncryptedContainer } from "./store/crypto-container.ts";
 import { smartResample, canvasToBlob } from "./resample.js";
 import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.js";
 import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）

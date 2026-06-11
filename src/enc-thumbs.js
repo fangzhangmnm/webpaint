@@ -5,18 +5,17 @@
 //   ③ 图库的「解锁」交互（可带验证字节：解得开某个 thumb = 密码对）
 // 解出的 PNG 只活在内存 objectURL —— 永不写回 IDB（加密文件的明文 thumb 不落盘）。
 
-import { getSession } from "./storage.js";
+import { store } from "./app-store.js";
 import {
   scanEncThumbFromEnd, decryptThumbParsed, THUMB_TAIL_WINDOW,
-} from "./crypto-container.js";
+} from "./store/crypto-container.ts";
 import { getPassword, isUnlocked, setPassword, promptPassword } from "./crypto-state.js";
 
-/** 本地加密作品的容器尾部切片（拿来解 thumb / 当解锁验证字节）。没有 → null */
+/** 本地加密作品的容器尾部切片（拿来解 thumb / 当解锁验证字节）。没有 → null。
+ *  走 store.getTailBytes 原语（store 不懂 thumb，只给尾片）—— 兄弟 app 同一表面。 */
 export async function localEncTail(name) {
   try {
-    const pkg = await getSession(name);
-    if (!pkg || !pkg.ora) return null;
-    return pkg.ora.slice(Math.max(0, pkg.ora.size - THUMB_TAIL_WINDOW));
+    return await store.getTailBytes(name, THUMB_TAIL_WINDOW);
   } catch (_) { return null; }
 }
 

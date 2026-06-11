@@ -71,7 +71,10 @@ export async function zipUnpackEncrypted(blob, password) {
     }
     return out;
   } catch (e) {
-    throw new Error("密码不对或文件已损坏");
+    // zip.js 错密码/坏文件都走这里，区分不了 → 统一 code（caller 据此循环重问而非崩流程）
+    const err = new Error("密码不对或文件已损坏");
+    err.code = "WRONG_PASSWORD";
+    throw err;
   } finally { await reader.close(); }
 }
 

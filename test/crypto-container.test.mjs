@@ -6,24 +6,17 @@
 // 解开 zip.js 产出的 payload —— 两个独立实现互通 = 格式是标准的 = 7-zip 能开。
 // 真 7-zip 实测仍留给 PC 真机批（见 docs/encryption.md 待验清单）。
 
-import fs from "node:fs";
 import nodeCrypto from "node:crypto";
 import { describe, it, assert, eq } from "./runner.mjs";
+import { ensureZipLoaded } from "./zip-node.mjs";
 
-// ---- zip.js UMD → window.zip（src/zip.js 的 Z() 在 call-time 查 window）----
-// node 下 require/import 该 UMD 两条分支都摸不到产物 → 显式喂 exports 强制 CJS 分支。
-const _zipCode = fs.readFileSync(new URL("../vendor/zip-js/zip-full.min.js", import.meta.url), "utf8");
-const _zipExports = {};
-new Function("exports", "module", "define", _zipCode).call(globalThis, _zipExports, { exports: _zipExports }, undefined);
-globalThis.window = globalThis;
-window.zip = _zipExports;
-assert(window.zip && window.zip.ZipWriter, "vendored zip.js 没加载成");
+ensureZipLoaded();
 
 const {
   packContainer, unpackContainer, looksEncryptedContainer,
   scanEncThumbFromEnd, decryptThumbParsed, encryptThumb,
   makeGuid, THUMB_TAIL_WINDOW,
-} = await import("../src/crypto-container.js");
+} = await import("../src/store/crypto-container.ts");
 const { zipPack } = await import("../src/zip.js");
 const cryptoState = await import("../src/crypto-state.js");
 
@@ -34,7 +27,7 @@ const PW = "测试密码123";
 
 async function makeFixture(name = "文件夹/我的画") {
   const guid = makeGuid();
-  const blob = await packContainer({ oraBytes: ORA_STUB, fileName: name, guid, thumbPng: PNG_STUB, password: PW });
+  const blob = await packContainer({ dataBytes: ORA_STUB, fileName: name, ext: "ora", guid, thumbPng: PNG_STUB, password: PW });
   return { guid, blob, bytes: new Uint8Array(await blob.arrayBuffer()) };
 }
 function bytesEq(a, b) {
@@ -50,7 +43,7 @@ describe("crypto-container · 容器往返", () => {
     eq(res.guid, guid, "guid 是外层明文 entry 名");
     eq(res.meta.name, "文件夹/我的画", "meta.bin 带真名");
     eq(res.meta.ext, "ora");
-    const ora = new Uint8Array(await res.oraBlob.arrayBuffer());
+    const ora = new Uint8Array(await res.dataBlob.arrayBuffer());
     assert(bytesEq(ora, ORA_STUB), "data.bin 字节逐位还原");
   });
 
@@ -103,7 +96,7 @@ describe("crypto-state · 统一密码 + 交互解包", () => {
     cryptoState.setPasswordPrompt(async () => { prompted++; return null; });
     const res = await cryptoState.unpackContainerInteractive(blob);
     eq(prompted, 0, "有内存密码不该弹");
-    assert(res.oraBlob, "解出 ora");
+    assert(res.dataBlob, "解出 ora");
     cryptoState.lock();
   });
 
@@ -113,7 +106,7 @@ describe("crypto-state · 统一密码 + 交互解包", () => {
     const answers = ["wrong-again", PW];
     cryptoState.setPasswordPrompt(async () => answers.shift());
     const res = await cryptoState.unpackContainerInteractive(blob);
-    assert(res.oraBlob);
+    assert(res.dataBlob);
     eq(cryptoState.getPassword(), PW, "验证通过的密码上位");
   });
 

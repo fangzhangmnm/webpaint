@@ -14,7 +14,7 @@
 import { getSession, putSession, deleteSession } from "../storage.js";
 import { trashSession, restoreSession, purgeFromTrash, listTrashedSessions, renderThumbBlob, putSessionPkg } from "../session.js";
 import { decodeOraToDoc } from "../ora.js";
-import { looksEncryptedContainer } from "../crypto-container.js";
+import { looksEncryptedContainer } from "./crypto-container.ts";
 import { LOCAL_BACKUP_PREFIX, asideStamp } from "./move-aside.ts";
 import type { Bytes, LocalAdapter, TrashEntry } from "./types.ts";
 
