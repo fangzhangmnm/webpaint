@@ -33,3 +33,5 @@ tools/esbuild/
 # v122 build 中间产物
 dist/main-tmp.mjs
 dist/main-tmp.mjs.map
+# Claude Code session 区（worktree / 本地设置），不入库
+.claude/
