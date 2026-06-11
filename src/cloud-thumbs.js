@@ -18,6 +18,10 @@
 //   - ZIP 解析：EOCD commentLen sanity 防 false-positive；输出 PNG magic 校验
 
 import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./app-store.js";
+// 加密容器（ADR-0012）：尾部是 [MAGIC][ver][salt][iv][len][AES-GCM(png)] 加密 thumb blob，
+// PNG 硬扫自然落空 → 扫 MAGIC。命中返**密文** Blob（type=ENC_THUMB_MIME），解密归 caller
+// （图库按锁态决定解不解；cache 层原样缓存密文 → 明文 thumb 不落 IDB）。
+import { scanEncThumbFromEnd, ENC_THUMB_MIME } from "./crypto-container.js";
 
 // 投机 suffix：last N 字节一次性拿 EOCD + CD +（自家 ora）thumbnail data
 // 80KB budget = thumb 自适应目标 ≤ 70KB + 尾巴 ~10KB（CD + EOCD + sig 扫描余量）
@@ -31,12 +35,13 @@ const PNG_SIG = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 export const telemetry = {
   small: 0,         // 路径 0：< 80KB 整下载
   hardScan: 0,      // 路径 1：1 request hardscan 命中（理想）
+  encScan: 0,       // 路径 1e：加密容器 MAGIC 命中（1 request，返密文）
   zip2: 0,          // 路径 2：ZIP 解析 2 request
   zip3: 0,          // 路径 3：ZIP 解析 3 request（CD 也不在 suffix）
   errors: 0,
 };
 export function resetTelemetry() {
-  telemetry.small = telemetry.hardScan = telemetry.zip2 = telemetry.zip3 = telemetry.errors = 0;
+  telemetry.small = telemetry.hardScan = telemetry.encScan = telemetry.zip2 = telemetry.zip3 = telemetry.errors = 0;
 }
 // IHDR chunk: length(4)=0x0000000D + "IHDR"
 const IHDR_HEAD = [0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52];
@@ -185,6 +190,8 @@ export async function fetchOraThumbnail(itemId, fileSize, opts = {}) {
     const buf = await blob.arrayBuffer();
     const scanned = _scanPngFromEnd(buf);
     if (scanned && _isPng(scanned)) { telemetry.small++; return new Blob([scanned], { type: "image/png" }); }
+    const encSmall = _scanEncThumb(buf);
+    if (encSmall) { telemetry.small++; return encSmall; }
     telemetry.small++;
     return _extractFromBuffer(buf, 0);
   }
@@ -195,6 +202,10 @@ export async function fetchOraThumbnail(itemId, fileSize, opts = {}) {
   const tailStartOffset = fileSize - tailBuf.byteLength;
   const fastScan = _scanPngFromEnd(tailBuf);
   if (fastScan && _isPng(fastScan)) { telemetry.hardScan++; return new Blob([fastScan], { type: "image/png" }); }
+
+  // 路径 1e：加密容器（thumb blob 在外层 zip 末 + STORE，与明文 thumb 同一 80KB 预算内命中）
+  const encHit = _scanEncThumb(tailBuf);
+  if (encHit) { telemetry.encScan++; return encHit; }
 
   // 路径 2+3：ZIP 解析 fallback（外部 ora / 老 ora / deflate 压 thumbnail）
   // 复用同一个 tailBuf 找 EOCD
@@ -239,6 +250,13 @@ export async function fetchOraThumbnail(itemId, fileSize, opts = {}) {
   if (extraRequests >= 2) telemetry.zip3++;
   else telemetry.zip2++;
   return new Blob([pngBytes], { type: "image/png" });
+}
+
+// 加密 thumb：buf 尾扫 MAGIC，命中切出完整密文段（含头），打 ENC_THUMB_MIME 标记。
+function _scanEncThumb(buf) {
+  const parsed = scanEncThumbFromEnd(new Uint8Array(buf));
+  if (!parsed) return null;
+  return new Blob([new Uint8Array(buf).slice(parsed.start, parsed.end)], { type: ENC_THUMB_MIME });
 }
 
 // ============= 提取 helper（小文件路径用）=============

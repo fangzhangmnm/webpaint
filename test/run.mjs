@@ -1,6 +1,7 @@
 // WebPaint 专属测试入口（store/cloud-sync/provider 契约在 lib 的 test/，这里只留 WebPaint vendored adapter）。
 import { run } from "./runner.mjs";
 import "./onedrive-provider.contract.test.mjs";
+import "./crypto-container.test.mjs";
 import "./substrate.test.mjs";
 import "./store-flow.test.mjs";
 import "./store-coalescer.test.mjs";

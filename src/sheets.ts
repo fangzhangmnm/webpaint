@@ -28,11 +28,15 @@ function resolveAndClose(resolve: (v: any) => void, value: any, cleanup: () => v
 }
 
 // 输入框对话框 → Promise<string|null>（取消 = null）。
-export function openInputSheet(title: string, defaultValue = "", { placeholder = "" } = {}): Promise<string | null> {
+// opts.password：输入框打码（type=password，关闭时还原）；opts.message：输入框上方说明行。
+export function openInputSheet(title: string, defaultValue = "", { placeholder = "", password = false, message = "" } = {}): Promise<string | null> {
   return new Promise((resolve) => {
     g.title().textContent = title;
-    g.message().classList.add("hidden");
+    if (message) { g.message().classList.remove("hidden"); g.message().textContent = message; }
+    else g.message().classList.add("hidden");
     g.input().classList.remove("hidden");
+    g.input().type = password ? "password" : "text";
+    g.input().autocomplete = password ? "new-password" : "off";
     g.input().value = defaultValue;
     g.input().placeholder = placeholder;
     openSheet(g.sheet(), g.backdrop());
@@ -48,6 +52,8 @@ export function openInputSheet(title: string, defaultValue = "", { placeholder =
       g.cancel().removeEventListener("click", onCancel);
       g.backdrop().removeEventListener("click", onCancel);
       g.input().removeEventListener("keydown", onKey as any);
+      g.input().type = "text";   // 密码态不残留到下一个输入框
+      g.input().value = "";
     };
     g.confirm().addEventListener("click", onConfirm);
     g.cancel().addEventListener("click", onCancel);

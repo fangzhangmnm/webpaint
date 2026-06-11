@@ -14,6 +14,7 @@
 import { getSession, putSession, deleteSession } from "../storage.js";
 import { trashSession, restoreSession, purgeFromTrash, listTrashedSessions, renderThumbBlob, putSessionPkg } from "../session.js";
 import { decodeOraToDoc } from "../ora.js";
+import { looksEncryptedContainer } from "../crypto-container.js";
 import { LOCAL_BACKUP_PREFIX, asideStamp } from "./move-aside.ts";
 import type { Bytes, LocalAdapter, TrashEntry } from "./types.ts";
 
@@ -31,7 +32,14 @@ export function createLocalAdapter(): LocalAdapter {
       // 解码 / 渲 thumb 失败**不阻断落盘**：字节是真相，thumb 是派生——宁可少缩略图也绝不丢字节
       //   （否则坏/新格式 ora 会卡死整条 pull/flush，见 docs/reports 候选 4）。
       let thumb = null;
-      try { thumb = await renderThumbBlob(await decodeOraToDoc(blob), 256); }
+      try {
+        // APP-DIVERGENCE(webpaint)：加密容器（ADR-0012）不渲明文 thumb——
+        //   ① 明文缩略图不落 IDB；② decodeOraToDoc 对容器会弹密码（pull 流里弹窗 = 伏击）。
+        //   图库解锁后从容器尾部的加密 thumb blob 解密预览。
+        if (!(await looksEncryptedContainer(blob))) {
+          thumb = await renderThumbBlob(await decodeOraToDoc(blob), 256);
+        }
+      }
       catch (e) { console.warn("[local] thumb 渲染失败，仅存字节：", e); }
       await putSessionPkg(name, blob, thumb);   // 与 saveSession 共用唯一落盘原语（落 Blob）
     },

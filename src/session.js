@@ -15,6 +15,7 @@
 //     把"加载失败的 path"当 oldName 删掉
 
 import { encodeDocToOra, decodeOraToDoc } from "./ora.js";
+import { looksEncryptedContainer } from "./crypto-container.js";
 import { smartResample, canvasToBlob } from "./resample.js";
 import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.js";
 import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）
@@ -39,12 +40,15 @@ export function setCurrentSessionName(name) {
  */
 export async function saveSession(doc, name, opts = {}) {
   const sessionName = name || getCurrentSessionName();
+  // 加密作品：pkg.thumb 永远 null（明文缩略图不落 IDB）——图库解锁后从容器尾部解密预览。
+  const enc = !!doc._encGuid;
   const [ora, thumb] = await Promise.all([
     encodeDocToOra(doc, {
       referenceImage: opts.referenceImage,
       webpaintState: opts.webpaintState,
+      fileName: sessionName,
     }),
-    renderThumbBlob(doc, 256),
+    enc ? Promise.resolve(null) : renderThumbBlob(doc, 256),
   ]);
   return await putSessionPkg(sessionName, ora, thumb);
 }
@@ -109,8 +113,20 @@ export async function renameLocalSession(oldName, newName) {
   await renameSessionKey(oldName, newName);
 }
 
-/** 列所有 session 元信息（name + updatedAt + size + thumb Blob）。不解码 .ora。
+/** 列所有 session 元信息（name + updatedAt + size + thumb Blob + encrypted）。不解码 .ora。
  *  默认过滤 trash:* keys；要看 trash 用 listTrashedSessions */
+// 加密探测 memo：尾部 96KB 扫一次 MAGIC 就够，但图库每次 reload 都列 → 按 (name, updatedAt, size) 缓存
+const _encDetectMemo = new Map();
+async function _detectEncrypted(id, pkg) {
+  if (!pkg.ora) return false;
+  const key = `${id}\x00${pkg.updatedAt || 0}\x00${pkg.ora.size || 0}`;
+  const hit = _encDetectMemo.get(key);
+  if (hit !== undefined) return hit;
+  let enc = false;
+  try { enc = await looksEncryptedContainer(pkg.ora); } catch (_) {}
+  _encDetectMemo.set(key, enc);
+  return enc;
+}
 export async function listSessions() {
   const ids = await listSessionIds();
   const out = [];
@@ -125,6 +141,7 @@ export async function listSessions() {
       updatedAt: pkg.updatedAt || 0,
       size: (pkg.ora && pkg.ora.size) || 0,
       thumb: pkg.thumb || null,
+      encrypted: await _detectEncrypted(id, pkg),
     });
   }
   out.sort((a, b) => b.updatedAt - a.updatedAt);

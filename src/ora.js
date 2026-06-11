@@ -22,6 +22,12 @@ import { WEBPAINT_VERSION } from "./version.js";
 
 import { zipPack, zipUnpack } from "./zip.js";
 import { Layer, PaintDoc, computeClipBaseFor } from "./doc.js";
+// 加密（ADR-0012）：encode/decode 在这层**透明**处理三层容器 —— 所有调用方
+// （save / push / pull / checkpoint / revert / import / local-adapter）自动获得加密能力。
+// doc._encGuid != null 即「这是加密作品」（decode 时从容器读出 / 加密动作时生成）。
+// encode 永不弹窗（密码不在内存 → 明确 throw）；decode 才交互（unpackContainerInteractive）。
+import { looksEncryptedContainer, packContainer } from "./crypto-container.js";
+import { getPassword, unpackContainerInteractive } from "./crypto-state.js";
 
 // ---- 工具 ----
 
@@ -220,6 +226,10 @@ function canvasModeFromOra(op) {
  *
  * opts.referenceImage: optional Blob
  * opts.webpaintState:  optional object（直接 JSON.stringify）
+ * opts.fileName:       optional string —— 加密容器 meta.bin 记真名（无 app 恢复时改回真名用）
+ *
+ * doc._encGuid 非空 → 产出加密容器（外层明文 zip + WinZip-AES payload + 尾部加密 thumb）
+ * 而非裸 .ora。密码取统一图库密码（内存）；不在 → throw，**不**静默存明文。
  */
 export async function encodeDocToOra(doc, opts = {}) {
   const merged = renderMerged(doc);
@@ -266,7 +276,21 @@ export async function encodeDocToOra(doc, opts = {}) {
     entries.push({ path: "webpaint/state.json", data: jsonText });
   }
 
-  return await zipPack(entries);
+  const plain = await zipPack(entries);
+  if (!doc._encGuid) return plain;
+
+  // 加密作品：裸 ora 进 data.bin，thumb（同一张自适应 PNG）加密后挂外层尾部。
+  // 密码必须已在内存（doc 是解密打开的 / 刚设的）——不在就 throw，绝不静默降级成明文。
+  const pw = getPassword();
+  if (!pw) throw new Error("图库已锁定，无法加密保存（先解锁加密作品再存）");
+  const oraBytes = new Uint8Array(await plain.arrayBuffer());
+  return await packContainer({
+    oraBytes,
+    fileName: opts.fileName || null,
+    guid: doc._encGuid,
+    thumbPng,
+    password: pw,
+  });
 }
 
 // ---- decode：.ora Blob → PaintDoc ----
@@ -297,8 +321,20 @@ function parseStackXml(xmlText) {
   return { w, h, layers, wroteWith };
 }
 
-/** Blob (.ora) → PaintDoc */
+/** Blob (.ora | 加密容器) → PaintDoc。
+ *  加密容器：先交互解包（内存密码直用；没有/不对 → in-app 弹窗循环，取消 throw），
+ *  解出的 doc 带 _encGuid —— 之后 encode 自动保持加密。 */
 export async function decodeOraToDoc(blob) {
+  if (await looksEncryptedContainer(blob)) {
+    const { oraBlob, guid } = await unpackContainerInteractive(blob);
+    const doc = await _decodePlainOra(oraBlob);
+    doc._encGuid = guid;
+    return doc;
+  }
+  return await _decodePlainOra(blob);
+}
+
+async function _decodePlainOra(blob) {
   const files = await zipUnpack(blob);
   if (!files["stack.xml"]) throw new Error(".ora 缺 stack.xml");
   // mimetype 检验（友好，不强制）

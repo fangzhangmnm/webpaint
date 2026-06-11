@@ -96,6 +96,7 @@ export const els = {
   galleryMenuVersion: document.getElementById("galleryMenuVersion"),
   galleryMenuForceUpdate: document.getElementById("galleryMenuForceUpdate"),
   galleryMenuTheme: document.getElementById("galleryMenuTheme"),
+  galleryMenuLock: document.getElementById("galleryMenuLock"),
   newDocBackdrop: document.getElementById("newDocBackdrop"),
   newDocSheet: document.getElementById("newDocSheet"),
   newDocName: document.getElementById("newDocName"),

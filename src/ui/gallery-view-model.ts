@@ -25,6 +25,7 @@ export interface GalleryTile {
   hasLocalThumb: boolean;
   cloud: any | null;     // {id,eTag,size,downloadUrl?} 给 thumb provider；纯本地 = null
   isActive: boolean;
+  encrypted: boolean;    // 本地字节是加密容器（ADR-0012）。纯云端项未知（thumb 拉回时按 MIME 现场识别）
 }
 
 export function tileFor(
@@ -56,6 +57,7 @@ export function tileFor(
     hasLocalThumb: !!(item.local && item.local.thumb),
     cloud: item.cloud || null,
     isActive: !!opts.activeName && item.name === opts.activeName,
+    encrypted: !!(item.local && item.local.encrypted),
   };
 }
 

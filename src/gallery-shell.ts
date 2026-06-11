@@ -24,6 +24,8 @@ import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.js";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
+import { isUnlocked, lock } from "./crypto-state.js";
+import { localEncTail, unlockInteractive } from "./enc-thumbs.js";
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initGalleryShell(ctx) 注入）----
 let editMode: any, board: any, gallery: any, doc: any, _store: any, setStatus: any, withBusy: any;
@@ -227,6 +229,30 @@ export function initGalleryShell(ctx) {
     els.galleryMenuPopup.classList.toggle("hidden", !hidden);
     if (hidden) anchorPopupToBtn(els.galleryMenuPopup, els.galleryMenuBtn);
     els.galleryMenuBtn.setAttribute("aria-expanded", hidden ? "true" : "false");
+    // 解锁/锁定按钮的标签随锁态（每次开菜单刷一次即可）
+    const lockLabel = els.galleryMenuLock?.querySelector(".menu-item-label");
+    if (lockLabel) lockLabel.textContent = isUnlocked() ? "锁定加密作品（忘掉密码）" : "解锁加密作品…";
+  });
+
+  // 加密作品 解锁/锁定（ADR-0012 统一图库密码；密码只在内存，锁定 = 清掉）
+  els.galleryMenuLock?.addEventListener("click", async () => {
+    els.galleryMenuPopup.classList.add("hidden");
+    if (isUnlocked()) {
+      lock();
+      setStatus("已锁定加密作品（密码已从内存清除）");
+      gallery.refresh();
+      return;
+    }
+    // 找一件本地加密作品的密文 thumb 当验证字节 —— 错密码当场打回；一件都没有就先收下，用到时再验
+    let validate: Blob | null = null;
+    try {
+      const enc = (await listSessions()).find((s: any) => s.encrypted);
+      if (enc) validate = await localEncTail(enc.name);
+    } catch (_) {}
+    if (await unlockInteractive(validate)) {
+      setStatus("已解锁加密作品（密码只在内存，关页即忘）");
+      gallery.refresh();
+    }
   });
 
   // 加号 → 新建：弹 sheet 选名字 + 分辨率

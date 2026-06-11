@@ -1833,6 +1833,12 @@ body[data-mode="gallery"] .board { display: none !important; }
   color: rgba(0,0,0,0.35);
   font-size: 32px;
 }
+/* 加密作品锁定态：点锁可解锁预览（ADR-0012） */
+.gallery-tile-thumb.placeholder.locked {
+  cursor: pointer;
+  color: rgba(0,0,0,0.45);
+  background: repeating-linear-gradient(45deg, #f4f4f4 0 12px, #ececec 12px 24px);
+}
 /* ⋯ 菜单按钮叠在 thumb 右上：半透明白底 + 深字 + 模糊背景 → 跨日 / 夜主题都清楚 */
 .gallery-tile-menu-btn {
   position: absolute; right: 5px; top: 5px;

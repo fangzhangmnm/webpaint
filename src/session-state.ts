@@ -85,7 +85,7 @@ function _buildOraMeta() {
     webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
   };
 }
-function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
+function _encodeCurrentOra() { return encodeDocToOra(doc, { ..._buildOraMeta(), fileName: _activeSessionName }); }
 async function _writeSessionCheckpoint(name: any) {
   if (!name) return;
   const blob = await _encodeCurrentOra();
@@ -159,6 +159,9 @@ function adoptLoadedDoc(loaded: any, sessionName: any) {
   // 模型层字段（layers/active/尺寸/背景/参考层id/清选区）归 doc.adoptState；
   // 下面全是 app 编排（UI 刷新 / 工具态 / 参考窗 / 视口 / store base / 版本检测 / checkpoint）。
   doc.adoptState(loaded);
+  // 加密标记跟 _referenceBlob 一样是 app 私有 _ 字段，adoptState 不搬 —— 这里显式带过来
+  //（丢了它，下次保存会把加密作品静默存成明文）。
+  doc._encGuid = loaded._encGuid || null;
   els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   input.clearHistory();
   board.invalidateAll();
@@ -432,6 +435,8 @@ async function newDoc({ name, w, h }: any) {
   doc.width = w; doc.height = h;
   doc.selection = null;
   doc.referenceLayerId = null;
+  doc._encGuid = null;   // 新建一律明文（加密在图库对文件操作）
+
   els.canvasSizeLabel.textContent = `${w}×${h}`;
   _activeSessionName = name;
   setCurrentSessionName(name);
@@ -500,7 +505,7 @@ async function pushItem(item: any) {
       if (!loaded) throw new Error("找不到本地 session");
       if (item.local && item.cloud) _store.adoptBase(item.name, getKnownETag(item.name));  // reloaded 后补锚 If-Match（W2 红线）
       const res = await _store.flow.push(item.name, {
-        encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
+        encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState, fileName: item.name }),
         onConflict: async () => "keep",
       });
       if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开处理 / 先改名）`, true);
