@@ -9,6 +9,12 @@
 // 发射方不再 reference 本面板。组件的 computed 读 docVersion.value 后快照 doc.layers + activeIndex +
 // referenceLayerId → 自动重算。app.js 仍可调导出的 renderLayersPanel()（垫片转 bumpDoc）零改动。
 //
+// **leaf-by-value 硬规则（v231 教训）**：非反应式活对象绝不直接当 props 过 Vue 边界。rows 重算时
+// 必须把每层 leaf 值（name/visible/opacity/mode/clippingMask）拷成**新对象**传下去——否则
+// props 引用不变 → Vue 判 props 相等跳过子组件更新，且子组件 computed 只追踪到 props.layer 引用、
+// 追踪不到裸对象字段 → 永久冻结在首次求值。版本信号只负责触发快照重算，穿透靠引用变化。
+// mutation 一律经 live()（findLayer by id）回写 doc 活对象，快照只读。
+//
 // 面板外的 chrome（计数标签 / 加按钮禁用 / 删按钮禁用 / 滚到活动层）不在 mount 容器内，
 // 由 watch(docVersion) 副作用同步。
 //
@@ -139,7 +145,9 @@ function _moveLayerDelta(L: any, delta: number) {
 }
 
 // ---- 每层属性变更（可见性 / 透明度 / 模式 / 剪裁 / 参考层），逐字保留旧 history 路径 ----
+// 这些函数收的是 doc 活对象（live()），不是 row 快照；null 守卫兜「层在回调前被删」的竞态。
 function _toggleVisible(L: any) {
+  if (!L) return;
   const oldVal = L.visible;
   L.visible = !oldVal;
   history.push({ type: "setLayerProp", layerId: L.id, prop: "visible", oldVal, newVal: L.visible });
@@ -148,6 +156,7 @@ function _toggleVisible(L: any) {
   board.requestRender();
 }
 function _setMode(L: any, newVal: string) {
+  if (!L) return;
   const oldVal = L.mode;
   L.mode = newVal;
   history.push({ type: "setLayerProp", layerId: L.id, prop: "mode", oldVal, newVal });
@@ -156,6 +165,7 @@ function _setMode(L: any, newVal: string) {
   board.requestRender();
 }
 function _toggleClipping(L: any) {
+  if (!L) return;
   const oldVal = L.clippingMask;
   L.clippingMask = !oldVal;
   history.push({ type: "setLayerProp", layerId: L.id, prop: "clippingMask", oldVal, newVal: L.clippingMask });
@@ -164,6 +174,7 @@ function _toggleClipping(L: any) {
   board.requestRender();
 }
 function _toggleReference(L: any) {
+  if (!L) return;
   const isRefNow = doc.referenceLayerId === L.id;
   const oldVal = doc.referenceLayerId;
   const newVal = isRefNow ? null : L.id;
@@ -172,6 +183,7 @@ function _toggleReference(L: any) {
   renderLayersPanel();
 }
 function _commitRename(L: any, raw: string) {
+  if (!L) return;
   const oldName = L.name;
   const v = (raw ?? "").trim();
   const newName = v || oldName;
@@ -182,18 +194,16 @@ function _commitRename(L: any, raw: string) {
   renderLayersPanel();
 }
 
-// 透明度 slider coalescing：拖动开始记 oldVal，input 期间只改 layer.opacity + render（不动 history），
-// 拖动结束才 push 一个 entry —— 一次拖动 = 一个 undo entry（逐字保留旧语义）。
+// 透明度 slider coalescing：**首个 input** 记 oldVal（覆盖指针拖动 + 键盘步进，后者没有 pointerdown），
+// input 期间只改 layer.opacity + render + bumpDoc（百分比标签实时跟随，不动 history），
+// change / pointerup / pointercancel 提交一次 —— 提交即清 oldVal，多事件到达只生效第一个。
+// 一次拖动 = 一个 undo entry；键盘每步 = 一个 entry。
 function _opacityLive(L: any, pct: number) {
+  if (!L) return;
   L.opacity = pct / 100;
+  bumpDoc();
   board.invalidateAll();
   board.requestRender();
-}
-function _opacityCommit(L: any, oldVal: number) {
-  if (oldVal === null || oldVal === undefined) return;
-  if (oldVal !== L.opacity) {
-    history.push({ type: "setLayerProp", layerId: L.id, prop: "opacity", oldVal, newVal: L.opacity });
-  }
 }
 
 // ---- 递归就绪的行子组件 ----
@@ -216,33 +226,36 @@ const LayerRow = defineComponent({
     children: { type: Array, default: () => [] },   // 递归预留（今天恒空）
   },
   setup(props: any) {
-    const L = () => props.layer;
-    const modeBadge = computed(() => modeInitial(L().mode));
-    const opacityPct = computed(() => Math.round(L().opacity * 100));
-    const badgeTitle = computed(() => `不透明度 ${Math.round(L().opacity * 100)}% · 模式 ${LAYER_MODE_LABEL[L().mode] || L().mode}`);
+    // snap = rows 重算时拷出的 leaf 快照（只读显示值，引用每次 bump 必变 → 反应式穿透）；
+    // live = doc 里的活对象（mutation 必须走它；可能为 null —— 层已被删）。
+    const snap = () => props.layer;
+    const live = () => doc.findLayer(props.layer.id);
+    const modeBadge = computed(() => modeInitial(snap().mode));
+    const opacityPct = computed(() => Math.round(snap().opacity * 100));
+    const badgeTitle = computed(() => `不透明度 ${Math.round(snap().opacity * 100)}% · 模式 ${LAYER_MODE_LABEL[snap().mode] || snap().mode}`);
 
     // 行 click = setActive（v154：切层时收起非选中层的折叠区）
     function onRowClick() {
-      if (layersUi.expandedId !== L().id) layersUi.expandedId = null;
+      if (layersUi.expandedId !== snap().id) layersUi.expandedId = null;
       layersUi.menuId = null;
-      doc.setActiveById(L().id);
+      doc.setActiveById(snap().id);
       renderLayersPanel();
     }
     // 名字 click：active 时再点 = 进入内联重命名；否则交给 row click 设 active
     function onNameClick(e: Event) {
-      if (L().id === doc.activeLayer?.id) {
+      if (snap().id === doc.activeLayer?.id) {
         e.stopPropagation();
-        layersUi.renameId = L().id;
+        layersUi.renameId = snap().id;
         nextTick(() => {
-          const inp = document.querySelector(`.layer-row[data-layer-id="${L().id}"] .layer-name-input`) as HTMLInputElement;
+          const inp = document.querySelector(`.layer-row[data-layer-id="${snap().id}"] .layer-name-input`) as HTMLInputElement;
           if (inp) { inp.focus(); inp.select(); }
         });
       }
     }
     function onRenameCommit(e: any) {
-      if (layersUi.renameId !== L().id) return;
+      if (layersUi.renameId !== snap().id) return;
       layersUi.renameId = null;
-      _commitRename(L(), e.target.value);
+      _commitRename(live(), e.target.value);
     }
     function onRenameKey(e: KeyboardEvent) {
       if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
@@ -255,48 +268,59 @@ const LayerRow = defineComponent({
 
     function toggleBadge(e: Event) {
       e.stopPropagation();
-      layersUi.expandedId = layersUi.expandedId === L().id ? null : L().id;
+      layersUi.expandedId = layersUi.expandedId === snap().id ? null : snap().id;
     }
     function toggleMenu(e: Event) {
       e.stopPropagation();
-      layersUi.menuId = layersUi.menuId === L().id ? null : L().id;
+      layersUi.menuId = layersUi.menuId === snap().id ? null : snap().id;
     }
-    function vis(e: Event) { e.stopPropagation(); _toggleVisible(L()); }
+    function vis(e: Event) { e.stopPropagation(); _toggleVisible(live()); }
 
-    // 透明度 slider（coalescing）
+    // 透明度 slider（coalescing：首个 input 记 old —— 键盘步进没有 pointerdown 也照样进 history）
     let opaOld: any = null;
-    function opaDown() { opaOld = L().opacity; }
-    function opaInput(e: Event) { _opacityLive(L(), parseFloat((e.target as HTMLInputElement).value)); }
-    function opaUp() { _opacityCommit(L(), opaOld); opaOld = null; }
-    function modeChange(e: Event) { _setMode(L(), (e.target as HTMLSelectElement).value); }
+    function opaInput(e: Event) {
+      const lv = live();
+      if (!lv) return;
+      if (opaOld === null) opaOld = lv.opacity;
+      _opacityLive(lv, parseFloat((e.target as HTMLInputElement).value));
+    }
+    function opaCommit() {
+      if (opaOld === null) return;
+      const lv = live();
+      if (lv && opaOld !== lv.opacity) {
+        history.push({ type: "setLayerProp", layerId: lv.id, prop: "opacity", oldVal: opaOld, newVal: lv.opacity });
+      }
+      opaOld = null;
+    }
+    function modeChange(e: Event) { _setMode(live(), (e.target as HTMLSelectElement).value); }
 
     // ⋯ 菜单动作
     function act(a: string) {
       layersUi.menuId = null;
       if (a === "rename") {
-        layersUi.renameId = L().id;
+        layersUi.renameId = snap().id;
         nextTick(() => {
-          const inp = document.querySelector(`.layer-row[data-layer-id="${L().id}"] .layer-name-input`) as HTMLInputElement;
+          const inp = document.querySelector(`.layer-row[data-layer-id="${snap().id}"] .layer-name-input`) as HTMLInputElement;
           if (inp) { inp.focus(); inp.select(); }
         });
       }
-      else if (a === "up")        _moveLayerDelta(L(), 1);
-      else if (a === "down")      _moveLayerDelta(L(), -1);
-      else if (a === "mergeDown") _mergeDownLayer(L());
-      else if (a === "clear")     _clearLayerPixels(L());
-      else if (a === "del")       _deleteLayer(L());
+      else if (a === "up")        _moveLayerDelta(live(), 1);
+      else if (a === "down")      _moveLayerDelta(live(), -1);
+      else if (a === "mergeDown") _mergeDownLayer(live());
+      else if (a === "clear")     _clearLayerPixels(live());
+      else if (a === "del")       _deleteLayer(live());
     }
 
     // 层重排 = ⋯ 菜单的「上移/下移」（_moveLayerDelta）。早先定：不做行拖拽（iPad 触屏 drag-drop 不可靠）。
-    function toggleClip(e: Event) { e.stopPropagation(); _toggleClipping(L()); }
-    function toggleRef(e: Event) { e.stopPropagation(); _toggleReference(L()); }
+    function toggleClip(e: Event) { e.stopPropagation(); _toggleClipping(live()); }
+    function toggleRef(e: Event) { e.stopPropagation(); _toggleReference(live()); }
 
     return {
       modeBadge, opacityPct, badgeTitle, layersUi,
       EYE_OPEN, EYE_OFF, LAYER_MODE_LABEL,
       onRowClick, onNameClick, onRenameCommit, onRenameKey,
       toggleBadge, toggleMenu, vis,
-      opaDown, opaInput, opaUp, modeChange, act,
+      opaInput, opaCommit, modeChange, act,
       toggleClip, toggleRef,
     };
   },
@@ -338,7 +362,7 @@ const LayerRow = defineComponent({
       <label class="layer-slider-row">
         <span>透</span>
         <input type="range" min="0" max="100" :value="opacityPct"
-          @pointerdown="opaDown" @input="opaInput" @pointerup="opaUp" @pointercancel="opaUp" @click.stop />
+          @input="opaInput" @change="opaCommit" @pointerup="opaCommit" @pointercancel="opaCommit" @click.stop />
         <span class="layer-slider-val">{{ opacityPct }}</span>
       </label>
       <label class="layer-slider-row">
@@ -372,6 +396,9 @@ const LayersPanel = defineComponent({
   components: { LayerRow },
   setup() {
     // 倒序行视图（含每行能力位），gated on version 信号。
+    // layer 传 **leaf 快照**而非活引用（leaf-by-value 硬规则，见文件头）：每次 bump 拷新对象，
+    // props 引用必变 → 子组件必更新、子组件 computed 必失效。活引用会被 Vue 的 props
+    // 相等性检查 + computed 依赖缓存双重截断 → UI 永久冻结在首次求值（v230 及之前的实况）。
     const rows = computed(() => {
       void docVersion.value;   // 依赖跨切面信号：bumpDoc() 即重算
       const out: any[] = [];
@@ -379,7 +406,7 @@ const LayersPanel = defineComponent({
       for (let i = n - 1; i >= 0; i--) {
         const L = doc.layers[i];
         out.push({
-          layer: L,
+          layer: { id: L.id, name: L.name, visible: L.visible, opacity: L.opacity, mode: L.mode, clippingMask: L.clippingMask },
           active: i === doc.activeIndex,
           isRef: doc.referenceLayerId === L.id,
           canUp: i < n - 1,

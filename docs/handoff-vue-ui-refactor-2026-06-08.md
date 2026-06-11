@@ -78,3 +78,12 @@ mix ts/js，类型**只钉在深接缝**：`Contribution` 契约（Exporter/Op/T
 - `grill-with-docs` —— 动 SSoT 形状 / 响应式边界前，先把「哪些 state 进图、computed 的依赖图、edit→flush 的 consent 点」grill 清楚，并就地更新 `CONTEXT.md`（新词如「响应式 SSoT」「Contribution」该进词表）。
 - `improve-codebase-architecture` —— 每轮重构后 start-fresh 重勘，对抗 vibe-coding 熵（用户既定工作法）。
 - `prototype` —— 若对「响应式核 vs Vue reactive vs 裸 signal」拿不准，先做一个抛弃型 SSoT 原型验证绑定是否真蒸发，再动主仓（参 `tmp/gallery-vue-proto/`）。
+
+## 8. 追加教训：leaf-by-value 是硬规则，不是风格偏好（> as-of v231 / 2026-06-11）
+
+图层面板（layers-panel.ts）v(Vue) 重写曾把 doc 的**非反应式活 layer 对象**直接当 `:layer` prop 传给 `<LayerRow>`，指望顶层 `docVersion` 信号穿透。实况：信号被两道门截断 ——
+
+1. **props 相等性门**：bumpDoc → 父 rows 重算，但活引用不变、布尔 props 不变 → Vue 判「props 没变」跳过子组件更新，模板直读的 `layer.visible/name/mode` 全部不刷。
+2. **computed 依赖门**：`computed(() => props.layer.opacity)` 只追踪到 `props.layer` 这个引用（裸对象字段不被追踪）→ 引用永不变 → **永久冻结在首次求值**。v-if 重建 slider 时把冻结旧值灌回 `:value` = 用户看到的「乱跳」。doc 数据与 history entry 全程是对的，纯显示层断流。
+
+规则：**非反应式对象绝不直接当 props 过 Vue 边界。过界必须拷 leaf 值快照（每次重算新对象，引用必变）；版本信号只负责触发快照重算；mutation 经 id 找活对象回写（snap 只读 / live 可写两条通道）。** 这是 §「leaf-by-value vs reactive-SSoT」判据的补充：leaf-by-value 的「value」是字面意思——传值，不是传一个碰巧叫 leaf 的引用。
