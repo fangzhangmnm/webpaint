@@ -25,6 +25,7 @@ import { createApp, defineComponent, reactive, computed, watch, nextTick } from 
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
+import { raiseWindow } from "./surfaces.ts";
 import { compressPixelSnap } from "./pixel-edit.js";
 
 let doc: any, board: any, history: any, setStatus: any;
@@ -62,7 +63,7 @@ export function toggleLayersPanel(force?: boolean) {
   const show = force === true ? true : force === false ? false : hidden;
   els.layersPanel.classList.toggle("hidden", !show);
   els.layersBtn.setAttribute("aria-pressed", show ? "true" : "false");
-  if (show) renderLayersPanel();
+  if (show) { raiseWindow(els.layersPanel); renderLayersPanel(); }
 }
 
 // 兼容垫片：app.js 仍调它（导出名保留）—— 现在只 bumpDoc() → docVersion 信号驱动 Vue 重算。

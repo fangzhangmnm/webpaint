@@ -291,15 +291,17 @@ export class InputController {
       this.board.setCursor(null);
       return;
     }
-    let size;
+    let size, square = false;
     if (cur === "ring") {
       const q = this.getLiquifySettings();
       size = (q && q.size) ? q.size * 2 : 100;     // size 是半径 → 直径 = ×2
     } else {
       const settings = this.getBrushSettings();
       size = settings ? settings.size : 12;
+      // v232：像素笔 stamp 是方的（fillRect），preview 跟着方，别用圆误导
+      square = !!(settings && settings.pixelMode);
     }
-    this.board.setCursor({ x: e.clientX, y: e.clientY, size });
+    this.board.setCursor({ x: e.clientX, y: e.clientY, size, square });
   }
 
   _down(e) {

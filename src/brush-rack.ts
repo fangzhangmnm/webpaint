@@ -210,6 +210,18 @@ export class BrushRack {
     for (const b of this._rack.brushes) { const m = re.exec(b.name); if (m) max = Math.max(max, parseInt(m[1], 10)); }
     return `新笔 ${max + 1}`;
   }
+  // v232 (user：「新建笔从当前 active 笔拷贝，名字也从原名派生」)：「水彩」→「水彩 2」→「水彩 3」。
+  // 去掉原名尾部数字得 base，扫全架同 base 的最大序号 +1（base 本身算 1）。
+  _deriveBrushName(srcName: string) {
+    const base = String(srcName || "").replace(/\s*\d+$/, "").trim() || "新笔";
+    const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(\\d+)$`);
+    let max = 1;
+    for (const b of this._rack.brushes) {
+      const m = re.exec(b.name);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return `${base} ${max + 1}`;
+  }
 
   // ---- 笔设置编辑器（draft → 存才落 rack）----
   openBrushSettings(brushId: string, newDraft?: any) {
@@ -355,7 +367,7 @@ export class BrushRack {
     if (source) {
       newB = JSON.parse(JSON.stringify(source));
       newB.id = newBrushId();
-      newB.name = this._nextBrushName();
+      newB.name = this._deriveBrushName(source.name);
       newB.folder = this.ui.folder;
       newB.tool = this.ui.tool;
     } else {

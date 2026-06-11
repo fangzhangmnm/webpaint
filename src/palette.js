@@ -11,6 +11,8 @@
 //   .clear()
 //   .getSerializedState() / .applySerializedState(s)  ← 持久化 to webpaint/state.json
 
+import { raiseWindow } from "./surfaces.ts";
+
 const CANVAS_SIZE = 256;
 
 export class PaletteWindow {
@@ -36,7 +38,7 @@ export class PaletteWindow {
   }
   clear() { this._fillBackground(); }
 
-  open() { this.root.classList.remove("hidden"); this._open = true; }
+  open() { this.root.classList.remove("hidden"); this._open = true; raiseWindow(this.root); }
   close() { this.root.classList.add("hidden"); this._open = false; }
   toggle() { this._open ? this.close() : this.open(); }
   isOpen() { return this._open; }

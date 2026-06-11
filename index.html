@@ -205,9 +205,12 @@
               <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
           </button>
+          <!-- v232 (user)：图标改三条横线，跟 toolbar 主菜单一致 -->
           <button class="gallery-icon-btn" id="galleryMenuBtn" type="button" title="图库菜单（更新 / 设置）" aria-haspopup="true" aria-expanded="false">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>
+              <line x1="4" y1="7" x2="20" y2="7"></line>
+              <line x1="4" y1="12" x2="20" y2="12"></line>
+              <line x1="4" y1="17" x2="20" y2="17"></line>
             </svg>
           </button>
         </div>
@@ -930,6 +933,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-d5f675773190.mjs"></script>
+    <script type="module" src="./dist/webpaint-301be9aee76d.mjs"></script>
   </body>
 </html>

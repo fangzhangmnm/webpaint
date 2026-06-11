@@ -19,6 +19,7 @@
 // 参考窗用独立 viewport（image-origin 约定），但双指变换的三角与主画布同一套：
 // 共享 pinchScaleRot + solveAnchorTranslation（见 pointer-gesture.js / K3）。
 import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.js";
+import { raiseWindow } from "./surfaces.ts";
 
 const LS_POS = "webpaint.refPanel.pos";       // {left, top, width, height}
 const LS_VP  = "webpaint.refPanel.vp";        // {tx, ty, scale, rot}
@@ -167,6 +168,7 @@ export class ReferenceWindow {
   }
   open() {
     this.panel.classList.remove("hidden");
+    raiseWindow(this.panel);   // v232：开窗即置顶（surfaces window band）
     // v112: 默认位置避开 topbar + 左 sidebar（user：「不要 spawn 在左上角贴顶，那样难点」）
     // 仅在 panel 没被拖过 / 没 applySerializedState 时设默认；保留 user 调过的位置
     if (!this.panel.style.left || !this.panel.style.top) {

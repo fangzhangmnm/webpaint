@@ -1,5 +1,5 @@
 // 职责（单一）：锚定 popup 定位 + outside-click 关闭——纯 DOM helper，无 app 状态依赖。
-// anchor 下方 / 右对齐定位 + 高 z-index（200 永远 > 所有 modal）+ outside-click 关闭。
+// anchor 下方 / 右对齐定位 + popout band（--z-popout 永远 > 所有 modal）+ outside-click 关闭。
 // 用 fixed 定位（脱离父 container 限制）。避免每个 popup 个别调 z-index / position。
 
 const _openPopups = new WeakSet();
@@ -20,7 +20,7 @@ export function openAnchoredPopup(
     popupEl.style.left = rect.left + "px";
     popupEl.style.right = "auto";
   }
-  popupEl.style.zIndex = "200";
+  popupEl.style.zIndex = "var(--z-popout)";   // band 表见 styles.css :root（v232）
   popupEl.classList.remove("hidden");
   _openPopups.add(popupEl);
   // outside click 关闭（一帧后挂，避免本次 click 立刻关）

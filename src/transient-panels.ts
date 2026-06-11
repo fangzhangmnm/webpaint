@@ -6,6 +6,7 @@
 // 经 ctx 被 toolbar / selection-ops / doc-ops / filters-adjust 消费，故全部 export。
 import { closeExclusive } from "./panel-state.js";
 import { updateLassoToolbar } from "./toolbar.ts";
+import { raiseWindow, registerWindow } from "./surfaces.ts";
 
 let input: any, board: any;
 
@@ -41,14 +42,9 @@ export function _restoreTransientPanels() {
   _suppressedDuringTransient = [];
 }
 
-// v113: panel z-order —— 点击 panel 把它带到同 panel 层内最高 z
-// user：「adjust panel 点出来之后在 color panel 下面，导致我以为坏了，能不能点开谁谁到这一层的 top」
-let _panelTopZ = 15;     // float-panel 默认 z = 15；递增不限上限
-export function _bringPanelTop(el) {
-  if (!el) return;
-  _panelTopZ++;
-  el.style.zIndex = _panelTopZ;
-}
+// v113 起源 user：「adjust panel 点出来之后在 color panel 下面，导致我以为坏了，能不能点开谁谁到这一层的 top」
+// v232：实现移进 surfaces.ts（band 内归一化，取代无上限递增计数器）。导出名保留给老调用方。
+export const _bringPanelTop = raiseWindow;
 
 // transform 浮层的 commit / cancel（lasso commit/cancel 按钮 + 决定性动作都走这两个）
 export function _commitTransform() {
@@ -69,13 +65,13 @@ export function initTransientPanels(ctx) {
   input = ctx.input;
   board = ctx.board;
 
-  // 给每个可能弹出来的 float panel 在 pointerdown 时 bringTop
+  // 所有浮窗注册进 surfaces 的 window band（pointerdown 置顶；open 路径各自调 raiseWindow）
+  // v232：补上 layersPanel（user：「toggle layers 之后 layers 应该 pop up 到 reference 上面」）
   const panels = [
     "colorPanel", "paletteWindow", "referencePanel",
-    "adjustPanel",
+    "adjustPanel", "layersPanel",
   ];
   for (const id of panels) {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener("pointerdown", () => _bringPanelTop(el), true);
+    registerWindow(document.getElementById(id));
   }
 }

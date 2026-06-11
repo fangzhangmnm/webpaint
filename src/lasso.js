@@ -227,6 +227,9 @@ export class LassoEngine {
       // 此处尚未挖空 layer（cut 在后面），所以提前返回不会留破坏。
       if (mxX < mnX || mxY < mnY) return false;
       const tw = mxX - mnX + 1, th = mxY - mnY + 1;
+      // v232 (user：「选中像素太小或者是 0 就退出变换」)：不足 2×2 的内容是误触级别，
+      // handles 都捏不住，按"没东西可变换"同路径退出（调用方据 false 清选区）。
+      if (tw * th < 4) return false;
       tx0 = x0 + mnX; ty0 = y0 + mnY;
       srcW = tw; srcH = th;
       // 裁剪出仅含内容的 canvas，这样 mesh 和 src 是 1:1，不会缩放

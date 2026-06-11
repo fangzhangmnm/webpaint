@@ -41,4 +41,23 @@ export function initPlatformGuards(ctx: any) {
   // gesturestart（iOS Safari 多点缩放专属事件）也拦
   window.addEventListener("gesturestart", (e) => e.preventDefault(), { capture: true, passive: false });
   window.addEventListener("gesturechange", (e) => e.preventDefault(), { capture: true, passive: false });
+
+  // v232 (user：「画画误触还是会弹 拷贝/翻译/共享 系统菜单」)：CSS user-select:none 之外的双保险。
+  // ① selectstart 拦截：非文本输入元素一律不许起文本选择（callout 菜单的前置条件就是有 selection）。
+  document.addEventListener("selectstart", (e) => {
+    if (isTextEditableTarget(e.target)) return;
+    e.preventDefault();
+  }, { capture: true });
+  // ② selectionchange 兜底：iOS 偶发无视 preventDefault / 从 WKWebView 层面起选择。
+  //    出现落在非输入区的非空 selection → 立刻清 ranges，系统菜单失去依附就不弹（或一闪而灭）。
+  document.addEventListener("selectionchange", () => {
+    const sel = document.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    let n: any = sel.anchorNode;
+    if (n && n.nodeType === Node.TEXT_NODE) n = n.parentElement;
+    for (let el = n; el; el = el.parentElement) {
+      if (isTextEditableTarget(el)) return;   // 输入框内的选择放行（改名/搜索要选词粘贴）
+    }
+    sel.removeAllRanges();
+  });
 }

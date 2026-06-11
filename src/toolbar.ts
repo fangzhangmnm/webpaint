@@ -226,6 +226,16 @@ export function initToolbar(ctx) {
       editMode.enterTransient("transform", { apply: _commitTransform, abort: _cancelTransform });
       updateLassoToolbar();
       _suppressTransientPanels("transform");
+    } else if (doc.selection) {
+      // v232 (user)：选区里没有可变换的像素（全透明 / 与图层无交集 / 小于 2×2）→ 不进变换，
+      // 顺手清掉这个没用的选区，别让它卡在那。
+      const entry = input.lasso.setSelection(null);
+      if (entry && history) history.push(entry);
+      board.invalidateAll();
+      updateLassoToolbar();
+      setStatus("选区里没有可变换的像素，已取消选区");
+    } else {
+      setStatus("图层是空的，没东西可变换");
     }
   });
 

@@ -69,6 +69,10 @@ function _openFilterPanel(filterId, opts = {}) {
   const L = doc.activeLayer;
   if (!L) { setStatus("没活动图层", true); return; }
   if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("活动图层是空的", true); return; }
+  // v232 (user：「液化状态下调出色彩平衡，液化没自动关掉」)：filterBrush（液化/锐化模糊）是持久
+  // 模式，enterTransient 只捕获 _returnTool、不收它的 toolbar → UI 留着但笔禁用，像坏了。
+  // 开任何滤镜面板前先整个退出 filterBrush 模式（收 toolbar / 清 state / 回前一工具）。
+  if (state.filterBrush) _exitFilterBrushMode();
   if (_adjustState) _closeFilterPanel(false);
   const { sur, surCtx, srcImg, maskData } = _initFilterSurrogate(L);
   _adjustState = {

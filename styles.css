@@ -1,6 +1,27 @@
 /* WebPaint — 和兄弟项目同款米色 / 夜黑 + 全屏画布 + 浮动顶栏 */
 
 :root {
+  /* ---- Surface 层级表（z-order SSoT，v232；详 docs/surfaces-z-order.md）----
+     全仓唯一允许出现 z-index 数字的地方。band 间不变量（结构性，不靠手填数字）：
+       chrome < toolbar < window < sheet < overlay < menu < toast < modal < gate < busy < popout < dev < error
+     「菜单/popup 永远在浮窗和全屏 overlay 上面」由 band 序保证。
+     新 UI 选 band 用 var(--z-*)；浮窗（window band）内的动态顺序归 src/surfaces.ts 管。
+     例外（不在表内）：board-grid/board-cursor（1/2，垫底）、局部 stacking context 内的相对值
+     （menu-config-popup、gallery tile 内 ⋯popup 等）。 */
+  --z-chrome: 10;    /* 顶栏 / 左栏 / HUD */
+  --z-toolbar: 25;   /* lasso / crop / filterBrush 顶栏条（crop-overlay = -1） */
+  --z-window: 100;   /* 浮窗 band 基底：100.. 由 surfaces.ts 分配（参考/图层/颜色/调整/色板） */
+  --z-sheet: 220;    /* 笔架 sheet；笔设置全屏 view = +10 */
+  --z-overlay: 300;  /* 全屏 overlay：图库 / 云端 */
+  --z-menu: 400;     /* 一切菜单 / popup（汉堡 / 调整 / 图库 / size popup / 回收站⋯） */
+  --z-toast: 450;
+  --z-modal: 500;    /* .backdrop / .sheet 确认对话（resample = -2/-1，确认能盖住它） */
+  --z-gate: 520;     /* sync gate 锁屏 */
+  --z-busy: 540;     /* fullscreen-busy 防误点锁 */
+  --z-popout: 600;   /* anchored-popup / picker-pin：永远在 modal 之上 */
+  --z-dev: 700;
+  --z-error: 9999;   /* index.html __errBar 的 inline 值与此对齐 */
+
   --bg: #f6f4ef;
   --bg-soft: #efece4;
   --ink: #1b1b1b;
@@ -119,6 +140,8 @@ body[data-mode="gallery"] .board-grid { display: none !important; }
   will-change: transform;
 }
 body[data-mode="gallery"] .board-cursor { display: none !important; }
+/* v232：像素笔（pixelMode）的 stamp 是方的，preview 跟着方，不再用圆误导 */
+.board-cursor.square { border-radius: 0; }
 
 body[data-tool="hand"] .board { cursor: grab; }
 body[data-panning="1"] .board { cursor: grabbing !important; }
@@ -138,7 +161,7 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   align-items: center;
   /* 两行间距也收 8 → 4 */
   gap: 4px;
-  z-index: 25;
+  z-index: var(--z-toolbar);
   max-width: calc(100vw - 24px);
 }
 .lasso-toolbar-stack.hidden { display: none; }
@@ -232,7 +255,7 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: var(--shadow);
-  z-index: 26;            /* 高于 lasso-toolbar */
+  z-index: var(--z-menu);  /* 菜单 band：高于 toolbar 和一切浮窗 */
   font-size: 12px;
   color: var(--ink);
   min-width: 220px;
@@ -265,7 +288,7 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   border: 1px solid var(--line);
   border-radius: 999px;
   box-shadow: var(--shadow);
-  z-index: 10;
+  z-index: var(--z-chrome);
   max-width: calc(100% - 24px);
   flex-wrap: nowrap;
   overflow-x: auto;
@@ -314,7 +337,7 @@ body[data-input-touchscreen="1"] .tool-hand-conditional { display: none; }
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: var(--shadow);
-  z-index: 9;            /* < top-bar 10 */
+  z-index: calc(var(--z-chrome) - 1);   /* < top-bar */
   width: 40px;
   box-sizing: border-box;
 }
@@ -467,7 +490,7 @@ input[type=range] {
   border-radius: 999px;
   font-size: 12px;
   color: var(--ink-soft);
-  z-index: 10;
+  z-index: var(--z-chrome);
   pointer-events: none;
 }
 .hud .sep { opacity: 0.5; }
@@ -478,8 +501,8 @@ input[type=range] {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
-  /* 必须高于 .gallery-full (50) —— 否则在图库里点新建/改名看不到 sheet */
-  z-index: 60;
+  /* modal band > overlay band —— 在图库里点新建/改名也看得到 sheet */
+  z-index: var(--z-modal);
   opacity: 1;
   transition: opacity 0.18s ease;
 }
@@ -502,7 +525,7 @@ input[type=range] {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 61;
+  z-index: calc(var(--z-modal) + 1);
   transition: transform 0.22s ease, opacity 0.18s ease;
 }
 .sheet.hidden {
@@ -630,7 +653,7 @@ input[type=range] {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 30;     /* > lasso 25；user：「主菜单 zorder 应该在 lasso 等的菜单上面」 */
+  z-index: var(--z-menu);  /* user：「主菜单 zorder 应该在 lasso 等的菜单上面」；菜单 band 结构性高于窗口/overlay */
   padding: 6px;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -1077,7 +1100,7 @@ input[type="range"].color-ramp::-moz-range-thumb {
 /* 图库 / 云端：全屏 grid */
 .gallery-full,
 .cloud-full {
-  position: fixed; inset: 0; z-index: 50;
+  position: fixed; inset: 0; z-index: var(--z-overlay);
   background: var(--bg);
   display: flex; flex-direction: column;
   padding-top: env(safe-area-inset-top, 0);
@@ -1085,18 +1108,8 @@ input[type="range"].color-ramp::-moz-range-thumb {
 }
 .gallery-full.hidden,
 .cloud-full.hidden { display: none; }
-/*
- * z-index 层级表（项目约定，新加 UI 看这里）：
- *   10  top-bar / HUD
- *   15  .float-panel (图层 / 笔刷 / 液化 / 参考 / 色板)
- *   20  .menu-panel (汉堡 / 调整 / 图层 ⋯)
- *   30  .toast
- *   50  .gallery-full（全屏模态）
- *   55  gallery 内部 popup（加号 / 云端账号）—— 必须 > 50
- *   60  .backdrop（sheet 背后蒙层）
- *   61  .sheet（关键确认对话）
- */
-#galleryAddPopup, #cloudAccountPopup { z-index: 55; }
+/* z-index 层级表已收敛到文件顶部 :root 的 --z-* band 变量（v232 surfaces 深模块）。
+   图库内的 popup（加号 / 云端账号 / 图库菜单）都是 .menu-panel → menu band，天然 > overlay。 */
 
 /* v50 重做：左标题 + 右对齐 icon 组。无返回键，点 active tile 关闭。 */
 .gallery-header {
@@ -1161,7 +1174,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: var(--shadow);
-  z-index: 30;          /* > top-bar 10 + lasso 25 */
+  z-index: var(--z-sheet);
   display: grid;
   grid-template-rows: auto auto 1fr;
   overflow: hidden;
@@ -1289,7 +1302,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   height: 100dvh;
   width: 100vw;
   background: var(--bg);
-  z-index: 40;          /* > brush-rack 30 */
+  z-index: calc(var(--z-sheet) + 10);   /* > 笔架 sheet */
   display: grid;
   grid-template-rows: auto 1fr;
   overflow: hidden;
@@ -1365,11 +1378,11 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 .resample-backdrop {
   position: fixed; inset: 0;
   background: rgba(0, 0, 0, 0.45);
-  z-index: 50;
+  z-index: calc(var(--z-modal) - 2);   /* 低于确认 sheet，resample 上还能弹确认 */
 }
 .resample-backdrop.hidden { display: none; }
 .resample-sheet {
-  position: fixed; z-index: 51;
+  position: fixed; z-index: calc(var(--z-modal) - 1);
   top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: min(360px, calc(100% - 32px));
   background: var(--bg);
@@ -1414,7 +1427,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 /* v110 颜色调整面板 (float)；adjust-panel + foot */
 .adjust-panel {
   position: fixed;
-  z-index: 11;
+  z-index: var(--z-window);
   width: 280px;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -1477,7 +1490,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 .crop-overlay {
   position: fixed;
   inset: 0;
-  z-index: 24;                /* < crop-toolbar 25，< brush-rack 30 */
+  z-index: calc(var(--z-toolbar) - 1);  /* < crop-toolbar */
   touch-action: none;
   /* crop 时仍可两指缩放/平移画布 + 滚轮缩放：overlay 透传，只有 handle 捕获。
      空白/单指落到 canvas 由 EditMode canDraw gate（crop→false）拦掉，不会误起笔触。 */
@@ -1546,7 +1559,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 .crop-toolbar {
   position: fixed;
   top: 56px; left: 50%; transform: translateX(-50%);
-  z-index: 25;
+  z-index: var(--z-toolbar);
   display: flex; align-items: center; gap: 10px;
   padding: 6px 12px;
   background: var(--bg);
@@ -1569,7 +1582,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 /* v124 吸色 pin (Google Maps 风格)：head 圆显采样色 + 下方 triangle 尖端指 pixel */
 .picker-pin {
   position: fixed;
-  z-index: 200;
+  z-index: var(--z-popout);
   pointer-events: none;
   /* v124 修 (user：「pin 尖尖头位置没扎对」)：
      ::after triangle 用 bottom:-8 凸到 pin div 之外，tip 比 pin div 底再下 8px。
@@ -1606,7 +1619,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 6px 8px;
-  z-index: 100;
+  z-index: var(--z-menu);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1643,7 +1656,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: var(--shadow);
-  z-index: 11;
+  z-index: var(--z-window);
   display: flex; flex-direction: column;
 }
 .palette-window.hidden { display: none; }
@@ -1687,8 +1700,8 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 }
 
 /* Sync gate ——— 锁屏 + 决策 sheet（见 docs/sync-design.md） */
-.sync-gate-backdrop { z-index: 100; background: rgba(0, 0, 0, 0.45); }
-.sync-gate-sheet { z-index: 101; max-width: 320px; }
+.sync-gate-backdrop { z-index: var(--z-gate); background: rgba(0, 0, 0, 0.45); }
+.sync-gate-sheet { z-index: calc(var(--z-gate) + 1); max-width: 320px; }
 .sync-gate-spinner {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 0; color: var(--ink-soft); font-size: 12px;
@@ -1964,7 +1977,8 @@ body[data-mode="gallery"] .board { display: none !important; }
 /* Folder tile（gallery 内显示为文件夹的特殊 tile） */
 .gallery-tile.folder .gallery-tile-thumb {
   display: flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--accent, #4c8bf5) 8%, white);
+  /* v232：跟日夜配色走（之前混 white，夜间模式文件夹刺眼） */
+  background: color-mix(in srgb, var(--accent, #4c8bf5) 8%, var(--bg));
   color: var(--accent, #4c8bf5);
 }
 .gallery-tile.folder .gallery-tile-thumb svg {
@@ -2009,7 +2023,7 @@ body[data-mode="gallery"] .board { display: none !important; }
   border-radius: 6px;
   box-shadow: var(--shadow);
   min-width: 140px;
-  z-index: 60;
+  z-index: var(--z-menu);
   display: flex; flex-direction: column;
   overflow: hidden;
 }
@@ -2034,7 +2048,7 @@ body[data-mode="gallery"] .board { display: none !important; }
   background: rgba(0, 0, 0, 0.6);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 16px;
-  z-index: 100;
+  z-index: var(--z-busy);
   color: white;
 }
 .fullscreen-busy.hidden { display: none; }
@@ -2068,7 +2082,7 @@ body[data-mode="gallery"] .board { display: none !important; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 15;
+  z-index: var(--z-window);
 }
 .float-panel.hidden { display: none; }
 .float-panel-head {
@@ -2165,7 +2179,7 @@ body[data-mode="gallery"] .board { display: none !important; }
   color: var(--bg);
   border-radius: 999px;
   box-shadow: var(--shadow);
-  z-index: 30;
+  z-index: var(--z-toast);
   font-size: 13px;
 }
 .toast.hidden { display: none; }

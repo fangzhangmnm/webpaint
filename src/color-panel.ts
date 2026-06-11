@@ -4,6 +4,7 @@
 
 import { els } from "./els.ts";
 import { mountColorWheel } from "./ui/color-wheel.ts";
+import { raiseWindow } from "./surfaces.ts";
 
 const safeLS = (k: string, f?: any) => { try { return localStorage.getItem(k) ?? f; } catch { return f; } };
 const safeLSSet = (k: string, v: any) => { try { localStorage.setItem(k, String(v)); } catch {} };
@@ -22,6 +23,7 @@ export function toggleColorPanel(force?: boolean) {
   const show = force === true ? true : force === false ? false : hidden;
   if (show) {
     els.colorPanel.classList.remove("hidden");
+    raiseWindow(els.colorPanel);
     const saved = safeLS("webpaint.colorPanel.pos");
     const w = els.colorPanel.offsetWidth || 264;
     const h = els.colorPanel.offsetHeight || 320;

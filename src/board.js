@@ -454,6 +454,7 @@ export class Board {
       const r = Math.max(2, this._cursor.size * this.viewport.scale / 2);
       el.style.width = el.style.height = (2 * r) + "px";
       el.style.transform = `translate(${this._cursor.x - r}px, ${this._cursor.y - r}px)`;
+      el.classList.toggle("square", !!this._cursor.square);   // v232：像素笔方形 preview
       el.style.display = "block";
     } else {
       el.style.display = "none";
