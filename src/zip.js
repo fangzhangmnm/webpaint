@@ -39,27 +39,9 @@ export async function zipPack(entries) {
   return await writer.close();
 }
 
-// payload 加密已从 WinZip-AES（弱 KDF）迁到 .7z 强 KDF（见 src/sevenzip.js + crypto-container）。
-// 写出只用 .7z；zipUnpackEncrypted **只读保留**——v233-235 的老容器 payload 是 WinZip-AES zip，
-// 要能打开（打开后下次保存自动重打成 .7z 迁移）。zipPackEncrypted 已删（不再写 WinZip-AES）。
-
-/** 解 WinZip-AES zip（**只读，向后兼容 v233-235 老容器**）。返回 { path: Uint8Array }；密码错/坏 → throw code=WRONG_PASSWORD。 */
-export async function zipUnpackEncrypted(blob, password) {
-  ensureConfigured();
-  const z = Z();
-  const reader = new z.ZipReader(new z.BlobReader(blob), { password });
-  try {
-    const entries = await reader.getEntries();
-    const out = {};
-    for (const e of entries) {
-      if (e.directory) continue;
-      out[e.filename] = await e.getData(new z.Uint8ArrayWriter(), { password });
-    }
-    return out;
-  } catch (e) {
-    const err = new Error("密码不对或文件已损坏"); err.code = "WRONG_PASSWORD"; throw err;
-  } finally { await reader.close(); }
-}
+// zip.js 只管**明文** zip（ora 本体 + 外层容器壳 + makePeek 抽缩略图）。
+// **加解密一律走 .7z（src/sevenzip.js = 7z-wasm）**——7z-wasm 是真 7-Zip，连 v233-235 的老
+// WinZip-AES **zip** payload 也能直接读（实测逐位还原），所以 zip.js 不需要任何加密 reader/writer。
 
 /** 只读 zip 里**一个** entry（不解其余大块；CD 读目录 + 单 entry getData）。
  *  没有该 entry → null。makePeek（从 ora 抽缩略图）这类「大 zip 取小件」用。 */

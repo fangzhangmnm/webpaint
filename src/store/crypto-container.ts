@@ -30,12 +30,12 @@
 // 无密钥托管、无 salt 文件：salt 在各自 header（.7z header / peek header），换/丢设备零迁移。
 
 import { zipPack, zipUnpack } from "../zip.js";
-import { zipUnpackEncrypted } from "../zip.js";   // 只读：老 WinZip-AES payload 向后兼容
 import { pack7z, unpack7z } from "../sevenzip.js";
 
-// payload 格式 magic（按内容路由解包，向后兼容 + 容错）：
+// payload 永远走 unpack7z（7z-wasm = 真 7-Zip）——它**既认 .7z 也认老 WinZip-AES zip**（实测逐位还原），
+// 所以加解密一概不碰 zip.js，向后兼容 v233-235 老容器零特例。下面 magic 仅用于「识别这块是不是加密 payload」。
 const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c];   // .7z（v236+ payload / 裸 7z mock）
-const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];                  // PK（外层容器 / 老 WinZip-AES payload）
+const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];                  // PK（外层壳 / 老 WinZip-AES payload）
 function _startsWith(u8: Uint8Array, sig: number[]): boolean {
   if (u8.length < sig.length) return false;
   for (let i = 0; i < sig.length; i++) if (u8[i] !== sig[i]) return false;
@@ -199,13 +199,6 @@ export async function packContainer({ dataBytes, fileName, ext = "bin", guid, pe
 
 export interface UnpackResult { dataBlob: Blob; meta: ContainerMeta | null; guid: string; }
 
-// 解一段加密 payload（.7z 或老 WinZip-AES zip，按 magic 路由）→ { path: Uint8Array }。
-async function _unpackPayload(payload: Uint8Array, password: string): Promise<Record<string, Uint8Array>> {
-  if (_startsWith(payload, SEVENZ_MAGIC)) return await unpack7z(payload, password);            // v236+ / 裸 7z
-  if (_startsWith(payload, ZIP_MAGIC)) return await zipUnpackEncrypted(new Blob([payload as BlobPart]), password);  // v233-235 WinZip-AES
-  // 未知 magic：尽量当 7z 试一把（7z-wasm 也认无扩展名输入）；不行 unpack7z 自己抛 WRONG_PASSWORD
-  return await unpack7z(payload, password);
-}
 // 从解出的 inner entries 里挑「数据本体」：优先 data.bin；否则唯一/首个非 meta entry（容错手工 mock）。
 function _pickData(inner: Record<string, Uint8Array>): Uint8Array | null {
   if (inner["data.bin"]) return inner["data.bin"];
@@ -222,41 +215,29 @@ function _readMeta(inner: Record<string, Uint8Array>): ContainerMeta | null {
 }
 
 /** 解包加密容器 → { dataBlob, meta, guid }。密码错 → throw code=WRONG_PASSWORD。
- *  **向后兼容 + 容错**：
- *   - 外壳 = 我们的明文 zip（[<GUID>, peek]）：payload 按 magic 路由（.7z / 老 WinZip-AES zip）。
- *   - 整文件就是裸 .7z / 裸 WinZip-AES zip（用户手工 mock，无外壳无 peek）：直接当 payload 解。
+ *  **加解密一律 unpack7z**（7z-wasm 认 .7z + 老 WinZip-AES zip）。**向后兼容 + 容错**：
+ *   - 外壳 = 我们的明文 zip（[<GUID>, peek]）：取 <GUID> payload → unpack7z（.7z 或老 WinZip-AES 都行）。
+ *   - 整文件就是裸 .7z / 裸 WinZip-AES zip（用户手工 mock，无外壳无 peek）：整块 → unpack7z。
  *   - 内层 data.bin 缺失（手工 mock）→ 取唯一/首个非 meta entry 当本体；meta.bin 缺失 → name/ext 未知。 */
 export async function unpackContainer(blob: Blob | Uint8Array, password: string): Promise<UnpackResult> {
-  const head = blob instanceof Uint8Array ? blob.slice(0, 8) : new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+  const whole = blob instanceof Uint8Array ? blob : new Uint8Array(await blob.arrayBuffer());
 
-  // 裸 .7z（offset 0 = 7z magic）：整文件就是加密 payload，无外壳/无 meta（手工 mock 常见形态）。
-  if (_startsWith(head, SEVENZ_MAGIC)) {
-    const bytes = blob instanceof Uint8Array ? blob : new Uint8Array(await blob.arrayBuffer());
-    const inner = await unpack7z(bytes, password);
-    const data = _pickData(inner);
-    if (!data) throw new Error("加密文件里没有可读内容");
-    return { dataBlob: new Blob([data as BlobPart], { type: "application/zip" }), meta: _readMeta(inner), guid: "" };
+  // 我们的外壳容器 = 明文 zip（offset0=PK），且解出来有非 peek 的 payload entry（自身是 .7z/PK 加密块）。
+  //   注意：裸 WinZip-AES zip 也是 PK，但 zipUnpack 会在 getData 加密 entry 时抛 → 落到下面整块 unpack7z。
+  let payload: Uint8Array | null = null, guid = "";
+  if (_startsWith(whole, ZIP_MAGIC)) {
+    try {
+      const outer = await zipUnpack(blob instanceof Blob ? blob : new Blob([whole as BlobPart]));
+      const g = Object.keys(outer).find((n) => n !== "peek" && n !== "thumb");   // "thumb"=v233/234 兼容
+      if (g && outer[g] && (_startsWith(outer[g], SEVENZ_MAGIC) || _startsWith(outer[g], ZIP_MAGIC))) {
+        payload = outer[g]; guid = g;
+      }
+    } catch (_) { /* 外层 entries 加密（裸 WinZip-AES）→ payload 留 null，整块解 */ }
   }
 
-  // PK zip：可能是我们的明文外壳容器，也可能是裸 WinZip-AES zip（手工 mock，外层 entries 直接加密）。
-  const asBlob = blob instanceof Blob ? blob : new Blob([blob as BlobPart]);
-  let outer: Record<string, Uint8Array> | null = null;
-  try { outer = await zipUnpack(asBlob); }   // 外层加密（裸 WinZip-AES）→ getData 抛 → 走下面 fallback
-  catch (_) { outer = null; }
-  if (outer) {
-    const names = Object.keys(outer);
-    const guid = names.find((n) => n !== "peek" && n !== "thumb");   // "thumb" = v233/234 旧容器兼容
-    // 外壳容器：<GUID> 是嵌套的加密 payload（7z / 老 WinZip-AES zip）。
-    if (guid && outer[guid] && (_startsWith(outer[guid], SEVENZ_MAGIC) || _startsWith(outer[guid], ZIP_MAGIC))) {
-      const inner = await _unpackPayload(outer[guid], password);
-      const data = _pickData(inner);
-      if (!data) throw new Error("容器结构不对（payload 内无可读内容）");
-      return { dataBlob: new Blob([data as BlobPart], { type: "application/zip" }), meta: _readMeta(inner), guid };
-    }
-  }
-  // 裸 WinZip-AES zip（无外壳，整 zip 直接 AES 加密）：手工 mock。
-  const inner = await zipUnpackEncrypted(asBlob, password);
+  // 无外壳（裸 .7z / 裸 WinZip-AES）→ 整块就是加密 payload。两路最终都 7z-wasm 解，零格式特例。
+  const inner = await unpack7z(payload ?? whole, password);
   const data = _pickData(inner);
   if (!data) throw new Error("加密文件里没有可读内容");
-  return { dataBlob: new Blob([data as BlobPart], { type: "application/zip" }), meta: _readMeta(inner), guid: "" };
+  return { dataBlob: new Blob([data as BlobPart], { type: "application/zip" }), meta: _readMeta(inner), guid };
 }
