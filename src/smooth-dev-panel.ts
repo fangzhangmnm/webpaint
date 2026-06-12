@@ -13,7 +13,6 @@ let setStatus: any;
 
 const _SMOOTH_LABELS = {
   lookaheadCap: "窗口上限 W (screen px @ streamline=1)",
-  dwellMs:      "dwell 时间门 T (ms)",
   smoothBoost:  "轻压平滑增益 (0=关, 1=轻按窗口×2)",
   deflate:      "内缩/毛笔甩尖 (开=0阶 / 关=保曲率)",
   vref:         "V_REF 旧四件套 (疑似对主笔刷无效)",

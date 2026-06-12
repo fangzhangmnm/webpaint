@@ -1,5 +1,9 @@
 # 笔刷平滑：frozen / tail 模型
 
+> **as-of v240：时间门已移除**，退回纯弧长窗（+ v162 boost 压感轴）。下面 v158 的「时间维度」段落
+> 仅作背景；不再生效。为什么移除见 [docs/stroke-smoother-time-gate.md](stroke-smoother-time-gate.md) 顶部
+> 的 Superseded 标注。棱角/顿角保护另想（待新 ADR）。当前实现以 `src/stroke-smoother.js` 为准。
+
 > **v158 现状（iPad 实测有效，转角问题解决）**：在 frozen/tail 的弧长窗口二次平滑上**加了时间维度**——
 > 决定与论证见 **[docs/stroke-smoother-time-gate.md](stroke-smoother-time-gate.md)**。一句话演进：
 >

@@ -184,8 +184,8 @@ export class BrushEngine {
     return Math.max(0.5, effSize * s.spacing);
   }
 
-  // smooth: { W:弧长窗口(doc px), T:dwell 时间门(ms), deflate:bool, t:落笔时间戳 }
-  //   W=0 → 不平滑（立即冻结，退化 raw）。详 docs/stroke-smoother-time-gate.md。
+  // smooth: { W:弧长窗口(doc px), deflate:bool, boost:轻压平滑增益 }
+  //   W=0 → 不平滑（立即冻结，退化 raw）。详 docs/brush-frozen-tail-smoothing.md。
   beginStroke(layer, settings, x, y, pressure, mode = "brush", smooth = {}) {
     let loaded = null;
     if (mode === "smudge") loaded = this._sampleLayerColor(layer, x, y);
@@ -211,8 +211,8 @@ export class BrushEngine {
       overlayCtx: null,
       _composeAtCount: -1,                      // 上次 compose 时的 sm.count（同帧缓存用）
       _taperTotal: null,                        // endStroke 时填总笔长，给出端 taper 用（live 为 null=不 taper）
-      // --- v148 frozen/tail · v158 时间门 ---
-      sm: buffered ? new StrokeSmoother({ W: smooth.W || 0, T: smooth.T, deflate: smooth.deflate, boost: smooth.boost }) : null,
+      // --- v148 frozen/tail · v240 纯弧长(时间门已移除) ---
+      sm: buffered ? new StrokeSmoother({ W: smooth.W || 0, deflate: smooth.deflate, boost: smooth.boost }) : null,
       // frozen 撒点游标（沿平滑中心线 C 的连续走样）
       frozenWalk: { ci: 0, started: false, accumDist: 0, lastP: pLPF0, strokeDist: 0 },
       // tail buffer（预分配 grow-only，覆盖 tail bbox 子区）
@@ -224,7 +224,7 @@ export class BrushEngine {
       frozenDirty: null,                       // 自上次 compose 起冻结新烤的区域（overlay 刷新用）
     };
     if (buffered) {
-      this._stroke.sm.push(x, y, pressure, smooth.t);   // 第一颗由 tail / endStroke 渲染，begin 不烤
+      this._stroke.sm.push(x, y, pressure);   // 第一颗由 tail / endStroke 渲染，begin 不烤
     } else {
       this._stampOne(x, y, pressure);
     }
@@ -303,13 +303,13 @@ export class BrushEngine {
     return st.pLPF;
   }
 
-  extendStroke(x, y, pressure, t) {
+  extendStroke(x, y, pressure) {
     const st = this._stroke;
     if (!st) return;
     // NaN/inf 护栏：甩太快 / 坏事件可能传入非有限坐标 → 跳过
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     const pEff = this._pressureLPF(pressure);
-    if (st.buffered) this._extendBuffered(x, y, pEff, t);
+    if (st.buffered) this._extendBuffered(x, y, pEff);
     else this._extendImmediate(x, y, pEff);
   }
 
@@ -341,9 +341,9 @@ export class BrushEngine {
 
   // brush / erase：raw 进 smoother，把新冻结的中心线段烤进 frozen buffer。
   // tail 不在这里画（每帧 getLiveOverlay 时画）。
-  _extendBuffered(x, y, pEff, t) {
+  _extendBuffered(x, y, pEff) {
     const st = this._stroke;
-    st.sm.push(x, y, pEff, t);
+    st.sm.push(x, y, pEff);
     st.sm.update();
     const fi = st.sm.frozenIndex();
     if (fi >= 0) this._walkStamps(st.frozenWalk, fi, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));

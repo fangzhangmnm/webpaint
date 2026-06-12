@@ -42,7 +42,6 @@ const DOUBLETAP_MAX_GAP = 80;
 //   SMOOTH.pressureAlpha 压感 smP 一阶 EMA α
 //   SMOOTH.vref          V_REF（旧四件套；对主笔刷已无效，暴露以自证）
 //   SMOOTH.lookaheadCap  streamline=1 时窗口上限 (screen px)
-//   SMOOTH.dwellMs       T：dwell 时间门 (ms)
 //   SMOOTH.deflate       内缩/毛笔甩尖开关
 // Undo 通过 history.UndoStack（v44 起 command pattern + 注册 handler）。
 // 这里只注册 "stroke" type 的 handler，layer 操作的 handler 在 app.js 注册。
@@ -533,7 +532,7 @@ export class InputController {
         const { x: dx, y: dy } = this.board.screenToDoc(psx, psy);
         // 活动 engine 统一接口：liquify/filterBrush 忽略多余的 pressure/时间戳参数
         const pressure = effectivePressureFor(rec, ev);
-        this._activeStroke?.engine.extendStroke(dx, dy, pressure, ev.timeStamp);
+        this._activeStroke?.engine.extendStroke(dx, dy, pressure);
       }
       // 把活动 engine 累的 dirty bbox 送进 board
       const bbox = this._activeStroke?.engine.flushDirty();
@@ -660,13 +659,11 @@ export class InputController {
     const buffered = mode !== "smudge" && !settings.pixelMode;
     rec.rawToEngine = buffered;
     const scale = this.board.viewport.scale || 1;
-    // v158 时间门：W=弧长窗(doc px)、T=dwell 时间门(ms)、deflate=内缩开关。详 docs/stroke-smoother-time-gate.md。
+    // v240：纯弧长窗（时间门已移除）。W=弧长窗(doc px)、deflate=内缩开关、boost=轻压平滑增益。
     const smooth = buffered ? {
       W: _streamlineToLookaheadPx(settings.streamline) / scale,
-      T: SMOOTH.dwellMs,
       deflate: SMOOTH.deflate,
       boost: SMOOTH.smoothBoost,
-      t: e.timeStamp,
     } : {};
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth);
     const bbox = this.brush.flushDirty();
