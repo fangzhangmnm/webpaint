@@ -2,6 +2,19 @@
 // 守红线「不用系统 alert/prompt/confirm」（iPad PWA 全屏体验烂）。纯 DOM，自持元素引用。
 // sync 决策编排（gateCloudSyncOnOpen / checkCloudETag / 闲置锁屏）= store-coupled，留在 app，调本模块的 lockSyncGate。
 
+import { isBusyActive } from "./fullscreen-busy.ts";
+
+// **busy/sheet 互斥护栏（2026-06-12 死锁修复）**：fullscreen-busy 遮罩 z(540) 高于 input/confirm
+//   sheet z(500)，busy 激活时弹输入框 = 框被盖住、用户点不到 → await 永不 resolve → 无限转圈。
+//   这是**编程错误**（"我在忙" 与 "请输入" 自相矛盾）：交互输入必须在 withBusy 之外做。
+//   → 这里**响亮 throw**，把静默转圈变成定位到调用栈的报错。（lockSyncGate 不受此限——它是 sync
+//   冲突 gate，自带 spinner、设计上与 busy 协同，不走这条。）
+function _assertNotBusy(kind: string) {
+  if (isBusyActive()) {
+    throw new Error(`不能在 withBusy 期间打开${kind}（会被全屏遮罩盖住→死锁）。把交互输入移到 withBusy 之外。`);
+  }
+}
+
 const $ = (id: string) => document.getElementById(id) as HTMLElement;
 const g = {
   sheet: () => $("genericSheet"),
@@ -30,6 +43,7 @@ function resolveAndClose(resolve: (v: any) => void, value: any, cleanup: () => v
 // 输入框对话框 → Promise<string|null>（取消 = null）。
 // opts.password：输入框打码（type=password，关闭时还原）；opts.message：输入框上方说明行。
 export function openInputSheet(title: string, defaultValue = "", { placeholder = "", password = false, message = "" } = {}): Promise<string | null> {
+  _assertNotBusy("输入框");
   return new Promise((resolve) => {
     g.title().textContent = title;
     if (message) { g.message().classList.remove("hidden"); g.message().textContent = message; }
@@ -64,6 +78,7 @@ export function openInputSheet(title: string, defaultValue = "", { placeholder =
 
 // 确认对话框 → Promise<boolean>。
 export function openConfirmSheet(title: string, message: string): Promise<boolean> {
+  _assertNotBusy("确认框");
   return new Promise((resolve) => {
     g.title().textContent = title;
     g.input().classList.add("hidden");

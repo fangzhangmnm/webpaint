@@ -37,16 +37,17 @@ interface StoreDeps {
   /** 加密（ADR-0012）的 app 接缝——装配时注入一次，之后 save/load/push/pull 对调用方**完全透明**
    *  （encode 永远出明文、adopt/load 永远收明文，包壳/解壳全在 flow 里）。store 格式盲：
    *  makePeek 进出都是不透明字节（WebPaint 的解释=缩略图 PNG，文本 app 可以是摘要——store 不看）。
-   *  密码记忆完全归 app（统一密码 / per-file keyring / 全局+per-name 覆盖，三种政策一个形状吃掉）：
-   *    getPassword(name)        同步、非交互（批量渲染路径绝不弹窗）
-   *    requestPassword(name)    交互兜底；store 在解壳路径循环它（retry=上一个候选验证失败）
-   *    onPasswordVerified       store 验证通过（解壳成功 / GCM tag 对）后回调，app 决定记到哪 */
+   *
+   *  **密码彻底非交互（2026-06-12 死锁修复）**：store **永不开 UI、永不弹密码框**。
+   *    getPassword(name)  同步只读内存。null/错 → flow 返 `status:"locked"`（不阻塞、不转圈）。
+   *  「没密码就弹框、验证、重试」是 **UI 层的事**，且**必须在 withBusy 之外做**（busy 遮罩 z 高于
+   *  sheet，会盖住密码框 → 无限转圈死锁）。UI 用 store.verifyPassword(name,pw) 便宜地验（解 peek，
+   *  不碰 7z），验过自己 setPassword，再调本 flow（此时 getPassword 命中）。密码记忆/弹窗政策全归 app
+   *  （统一 / per-file / 全局+per-name 覆盖，一个 getPassword 形状吃掉）。 */
   crypt?: {
     ext?: string;                                              // 真扩展名，进 meta.bin（"ora"/"txt"/…）
     makePeek?: (data: Blob) => Promise<Uint8Array | null>;     // 明文 → 明文不透明字节；加密深模块做
-    getPassword?: (name: string) => string | null;
-    requestPassword?: (name: string, ctx: { retry: boolean }) => Promise<string | null>;
-    onPasswordVerified?: (name: string, password: string) => void;
+    getPassword?: (name: string) => string | null;            // 同步、非交互、只读内存（唯一密码来源）
   };
 }
 
@@ -689,27 +690,45 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
-  // ==== 加密（ADR-0012）：调用方零感知，密码经 crypt seam，store 格式盲 ====
+  // ==== 加密（ADR-0012）：调用方零感知，store **对密码彻底非交互**、格式盲 ====
 
-  // 密码解析循环：getPassword（非交互）先试 → interactive 时 requestPassword 循环
-  //   （retry=上一个候选验证失败）。attempt 抛 code=WRONG_PASSWORD → 换下一个候选；
-  //   其他错误原样上抛。验证通过 → onPasswordVerified（app 决定记到哪——全局/每文件）。
-  //   拿不到/取消 → null。**密码字符串绝不在 store 持久/留存。**
-  async function _withPassword<T>(name: string, attempt: (pw: string) => Promise<T>, { interactive = false } = {}): Promise<T | null> {
-    let retried = false;
-    const first = crypt.getPassword ? crypt.getPassword(name) : null;
-    if (first) {
-      try { const v = await attempt(first); crypt.onPasswordVerified?.(name, first); return v; }
-      catch (e: any) { if (e?.code !== "WRONG_PASSWORD") throw e; retried = true; }
-    }
-    if (!interactive || !crypt.requestPassword) return null;
-    for (;;) {
-      const pw = await crypt.requestPassword(name, { retry: retried });
-      if (pw == null) return null;
-      try { const v = await attempt(pw); crypt.onPasswordVerified?.(name, pw); return v; }
-      catch (e: any) { if (e?.code !== "WRONG_PASSWORD") throw e; retried = true; }
-    }
+  // 用内存密码（getPassword，同步）跑一次 attempt。没密码 / 错密码（code=WRONG_PASSWORD）→ null。
+  //   **store 永不弹窗、永不循环**——「弹密码框 + 重试」是 UI 层的事，且必须在 withBusy 之外做
+  //   （见 verifyPassword + StoreDeps.crypt 注释）。其它错误原样上抛。
+  async function _withPassword<T>(name: string, attempt: (pw: string) => Promise<T>): Promise<T | null> {
+    const pw = crypt.getPassword ? crypt.getPassword(name) : null;
+    if (!pw) return null;
+    try { return await attempt(pw); }
+    catch (e: any) { if (e?.code === "WRONG_PASSWORD") return null; throw e; }
   }
+
+  // UI 解锁循环的便宜验证器：解 name 的 peek（AES-GCM，快，不碰 7z、不开 UI、不进 busy）→ 密码对否。
+  //   UI 在 withBusy **之外**循环 prompt → verifyPassword → 自己 setPassword，再调 flow（getPassword 命中）。
+  //   peek 与 payload 同一密码加密 → peek 验过 = payload 也能开。本地无字节/无 peek → false（调用方另判）。
+  async function verifyPassword(name: string, pw: string): Promise<boolean> {
+    if (!pw) return false;
+    const tail = await getTailBytes(name, PEEK_TAIL_WINDOW, { cloud: true });   // 本地无字节→云端 peek（拉取前解锁用）
+    if (!tail) return false;
+    const parsed = scanEncPeekFromEnd(new Uint8Array(await tail.arrayBuffer()));
+    if (!parsed) return false;
+    try { await decryptPeek(parsed, pw); return true; } catch { return false; }
+  }
+  // 验证一段明文容器字节的密码（导入外来加密文件用——文件还没进 store，没 name 可查）。
+  async function verifyContainer(blob: Blob, pw: string): Promise<boolean> {
+    if (!pw) return false;
+    try { await unpackContainer(blob, pw); return true; } catch { return false; }
+  }
+  // 用**显式密码**解一段字节（导入外来文件用：可能与图库统一密码不同，不走 getPassword/不污染全局）。
+  //   明文原样返回；容器+对密码→明文 blob；容器+错密码→null。
+  async function unsealWith(blob: Blob, pw: string): Promise<Blob | null> {
+    if (!(await looksEncryptedContainer(blob))) return blob;
+    try { return (await unpackContainer(blob, pw)).dataBlob; } catch { return null; }
+  }
+  // blob 是不是加密容器（导入分流用）。
+  async function looksEncrypted(blob: Blob | Uint8Array): Promise<boolean> {
+    return await looksEncryptedContainer(blob);
+  }
+
   function _lockedErr(name: string): Error & { code?: string } {
     const e = new Error(`「${name}」已加密且未解锁（需要密码）`) as Error & { code?: string };
     e.code = "LOCKED";
@@ -734,15 +753,16 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return await toU8(container);
   }
 
-  // 解壳：明文原样返回；容器 → 密码循环解包。锁定/取消 → null（_unsealOrThrow 抛 LOCKED）。
-  async function _unseal(name: string, blob: Blob, { interactive = true } = {}): Promise<Blob | null> {
+  // 解壳：明文原样返回；容器 → 用内存密码解包。锁定（无/错密码）→ null。
+  //   **非交互**：调用方若想"解不开就弹框"，须先在 withBusy 外 ensureUnlocked 把密码放进内存再调。
+  async function _unseal(name: string, blob: Blob): Promise<Blob | null> {
     if (!(await looksEncryptedContainer(blob))) return blob;
-    const res = await _withPassword(name, (pw) => unpackContainer(blob, pw), { interactive });
+    const res = await _withPassword(name, (pw) => unpackContainer(blob, pw));
     return res ? res.dataBlob : null;
   }
   async function _unsealOrThrow(name: string, blob: Blob): Promise<Blob> {
-    const plain = await _unseal(name, blob, { interactive: true });
-    if (!plain) throw _lockedErr(name);
+    const plain = await _unseal(name, blob);
+    if (!plain) throw _lockedErr(name);   // pull/open 的 adopt 路径：UI 应已 ensureUnlocked，仍锁=异常
     return plain;
   }
 
@@ -759,14 +779,15 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       return { status: "saved", local: true };
     });
   }
-  // load：local.get → 自动解壳 → 明文 blob。加密且解不开（锁定/取消）→ status:"locked"。
-  async function load(name: string, { interactive = true } = {}): Promise<FlowResult & { blob?: Blob; encrypted?: boolean }> {
+  // load：local.get → 自动解壳 → 明文 blob。加密且内存无/错密码 → status:"locked"（**不弹窗**）。
+  //   UI 拿到 "locked" → 在 withBusy **之外** ensureUnlocked（prompt+verifyPassword+setPassword）→ 重 load。
+  async function load(name: string): Promise<FlowResult & { blob?: Blob; encrypted?: boolean }> {
     if (!local) throw new Error("Store: 未注入 local adapter");
     const raw = await local.get(name);
     if (!raw) return { status: "absent" };
     const encrypted = await looksEncryptedContainer(raw as Blob | Uint8Array);
     if (!encrypted) return { status: "loaded", blob: raw as Blob, encrypted: false };
-    const plain = await _unseal(name, raw as Blob, { interactive });
+    const plain = await _unseal(name, raw as Blob);
     if (!plain) return { status: "locked", encrypted: true };
     return { status: "loaded", blob: plain, encrypted: true };
   }
@@ -831,8 +852,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       if (!blob) return { status: "no-local" };
       if (!(await looksEncryptedContainer(blob as Blob | Uint8Array))) return { status: "not-encrypted" };
       if (cloud.getETag(name) != null && !isOnline()) return { status: "offline" };
-      // ④ 密码循环（交互）在任何持久改动之前；锁定/取消 → 干净退出
-      const res = await _withPassword(name, (pw) => unpackContainer(blob as Blob, pw), { interactive: true });
+      // ④ 用内存密码解（非交互）；无/错密码 → locked（UI 应已在 busy 外 ensureUnlocked）。任何持久改动之前出局。
+      const res = await _withPassword(name, (pw) => unpackContainer(blob as Blob, pw));
       if (!res) return { status: "locked" };
       return await _swapBytes(name, await toU8(res.dataBlob), isOnline, false);
     }));
@@ -858,20 +879,20 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return null;
   }
 
-  // 解一段尾片里的加密 peek → 不透明明文字节。非交互缺省（图库批量渲染绝不弹窗伏击）；
-  //   interactive=true 才进 requestPassword 循环（点锁解锁那个动作）。解不开/没有 → null。
-  async function decryptPeekBytes(name: string, tail: Blob | Uint8Array, { interactive = false } = {}): Promise<Uint8Array | null> {
+  // 解一段尾片里的加密 peek → 不透明明文字节。**非交互**（用内存密码；图库批量渲染绝不弹窗伏击）。
+  //   锁定/解不开 → null（UI 显示锁样式；要解锁走 ensureUnlocked + verifyPassword 在 busy 外）。
+  async function decryptPeekBytes(name: string, tail: Blob | Uint8Array): Promise<Uint8Array | null> {
     const u8 = tail instanceof Uint8Array ? tail : new Uint8Array(await tail.arrayBuffer());
     const parsed = scanEncPeekFromEnd(u8);
     if (!parsed) return null;
-    return await _withPassword(name, (pw) => decryptPeek(parsed, pw), { interactive });
+    return await _withPassword(name, (pw) => decryptPeek(parsed, pw));
   }
 
   // 便捷组合：本地（或 cloud:true 时云端）尾片 → peek 明文字节。锁定 → null（app 显示锁样式）。
-  async function readPeek(name: string, { interactive = false, cloud: tryCloud = false } = {}): Promise<Uint8Array | null> {
+  async function readPeek(name: string, { cloud: tryCloud = false } = {}): Promise<Uint8Array | null> {
     const tail = await getTailBytes(name, PEEK_TAIL_WINDOW, { cloud: tryCloud });
     if (!tail) return null;
-    return await decryptPeekBytes(name, tail, { interactive });
+    return await decryptPeekBytes(name, tail);
   }
 
   // 加密态查询（按本地字节尾扫；SSoT=字节）与原始字节读取（导出密文容器等场景）。
@@ -919,12 +940,16 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       load,                    // 本地读取（自动解壳出明文；锁定 → status:"locked"）
     },
     seal: _seal,               // 旁路字节按 name 加密态包壳（app 的 checkpoint/导出等自管存储用；不透明）
-    unseal: (name: string, blob: Blob, opts?: { interactive?: boolean }) => _unseal(name, blob, opts),
+    unseal: (name: string, blob: Blob) => _unseal(name, blob),   // 非交互解壳（明文原样 / 内存密码解 / 锁定 null）
+    verifyPassword,            // UI 解锁循环用：解 peek 验密码（便宜、不开 UI、不进 busy）
+    verifyContainer,           // 同上但验一段明文容器字节（导入外来加密文件用，文件未进 store）
+    unsealWith,                // 用显式密码解一段字节（导入：不走 getPassword、不污染全局）
+    looksEncrypted,            // blob 是否加密容器（导入分流）
     isEncrypted,               // 加密态查询（SSoT=本地字节尾扫）
     loadRaw,                   // 原始字节不解壳（导出密文容器用）
     getTailBytes,              // 尾部 N 字节原语（本地/云端自动路由；peek 解释归 app）
-    decryptPeekBytes,          // 尾片 → peek 明文字节（密码经 seam；非交互缺省）
-    readPeek,                  // getTailBytes + decryptPeekBytes 便捷组合
+    decryptPeekBytes,          // 尾片 → peek 明文字节（非交互；锁定 → null）
+    readPeek,                  // getTailBytes + decryptPeekBytes 便捷组合（非交互）
     edit,                      // 唯一编辑入口（游标 + 门）（L4 ②）
     busy,                      // transient saving/pushing busy（状态归 store，status 只读）（L4 ②b）
     autosave,                  // 本地落盘节律（configure/start/flush）：cadence 归 store（L4 ②c）

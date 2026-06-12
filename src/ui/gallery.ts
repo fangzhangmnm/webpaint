@@ -28,7 +28,7 @@ import { getOrFetchCloudThumb } from "../cloud-thumb-cache.js";
 // 以及把 peek 字节解释成缩略图（enc-thumbs）。
 import { ENC_PEEK_MIME } from "../store/crypto-container.ts";
 import { isUnlocked, onLockChange, setPassword } from "../crypto-state.js";
-import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword } from "../enc-thumbs.js";
+import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword, ensureUnlocked } from "../enc-thumbs.js";
 import { sliceFolder, folderHasContents } from "../gallery-model.js";
 import { pathFolder, pathBasename, pathJoin } from "../gallery-path.js";
 import { stripSessionExt } from "../config.js";
@@ -322,8 +322,9 @@ function makeGallery(host: GalleryHost) {
         if (!_encPrecheck(item, "解除加密")) return;
         if (!(await host.confirm(`解除「${pathBasename(item.name)}」的加密？`,
           "内容将以明文存放在本机与云端，任何能访问此设备或云账号的人都能查看。"))) return;
+        // **解锁在 busy 之前**（flow.decrypt 自带 busy；密码框不能在 busy 里弹→死锁）
+        if (!(await ensureUnlocked(item.name))) { host.status("已取消（需要密码）", true); return; }
         try {
-          // 密码循环（内存先试→弹窗重问→验证→记忆）全在 store 的 crypt seam 里
           const res = await _store.flow.decrypt(item.name, { isOnline: () => host.signedIn() && host.online() });
           if (res.status === "not-encrypted") { host.status("这不是加密作品"); return; }
           await _afterSwap(item, res, `已解除加密：${item.name}`);
@@ -331,10 +332,9 @@ function makeGallery(host: GalleryHost) {
         await reload();
       }
 
-      // 锁 icon 点击：交互解锁（store 密码循环 + GCM 验证 + onPasswordVerified 记忆；本地/云端自动路由）
+      // 锁 icon 点击：解锁（busy 外 ensureUnlocked = prompt + verifyPassword + 记忆；本地/云端 peek 自动路由）
       async function onUnlock(name: string) {
-        const bytes = await _store.readPeek(name, { interactive: true, cloud: true });
-        if (bytes) { host.status("已解锁加密作品（密码只在内存，关页即忘）"); await reload(); }
+        if (await ensureUnlocked(name)) { host.status("已解锁加密作品（密码只在内存，关页即忘）"); await reload(); }
       }
 
       async function del(item: any) {

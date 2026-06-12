@@ -13,7 +13,7 @@ import { listSessions, listTrashedSessions, trashSession, getCurrentSessionName 
 import { mergeLocalCloud, mergeTrash, classifyCloudGone } from "./gallery-model.js";
 import { CLIENT_ID, SCOPES, sessionFileName, encSessionFileName, stripSessionExt } from "./config.js";
 import { zipReadEntry } from "./zip.js";
-import { getPassword, requestPassword, onPasswordVerified } from "./crypto-state.js";
+import { getPassword } from "./crypto-state.js";
 // lib 的 graph（OneDrive transport，单一 auth）—— gallery folder 操作 + thumb byte-range 都走它。
 import {
   getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches,
@@ -54,7 +54,7 @@ export const store = createStore({
   crypt: {
     ext: "ora",
     makePeek: async (blob) => { try { return await zipReadEntry(blob, "Thumbnails/thumbnail.png"); } catch (_) { return null; } },
-    getPassword, requestPassword, onPasswordVerified,   // 密码政策在 crypto-state（统一密码 + per-name 覆盖）
+    getPassword,   // store 对密码非交互：唯一 seam=读内存；弹窗/验证/重试在 enc-thumbs.ensureUnlocked（busy 外）
   },
 });
 export { CloudConflictError, CloudNameCollisionError };

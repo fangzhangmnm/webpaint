@@ -26,6 +26,7 @@ import { pathJoin } from "./gallery-path.js";
 import { stripSessionExt } from "./config.js";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.js";
+import { ensureUnlocked } from "./enc-thumbs.js";
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initGalleryShell(ctx) 注入）----
 let editMode: any, board: any, gallery: any, doc: any, _store: any, setStatus: any, withBusy: any;
@@ -243,13 +244,12 @@ export function initGalleryShell(ctx) {
       gallery.refresh();
       return;
     }
-    // 找一件本地加密作品 → store.readPeek 交互解锁（密码循环 + GCM 验证 + 记忆全在深模块）。
+    // 找一件本地加密作品 → ensureUnlocked（busy 外 prompt + verifyPassword 验 peek + 记忆）。
     // 一件都没有 → 收下未验证的密码当统一密码（用到时自然验证，错了会重问）。
     try {
       const enc = (await listSessions()).find((s: any) => s.encrypted);
       if (enc) {
-        const bytes = await _store.readPeek(enc.name, { interactive: true });
-        if (bytes) { setStatus("已解锁加密作品（密码只在内存，关页即忘）"); gallery.refresh(); }
+        if (await ensureUnlocked(enc.name)) { setStatus("已解锁加密作品（密码只在内存，关页即忘）"); gallery.refresh(); }
         return;
       }
     } catch (_) {}

@@ -22,6 +22,13 @@ export function hideFullscreenBusy() {
 //   会嵌在 app 调用方的 withBusy 之内。若不计数，内层 finally 会在外层还在跑时就 hide 遮罩
 //   → 提前解锁。计数后只有最外层结束才 hide。
 let _busyDepth = 0;
+// 全屏 busy 遮罩当前是否激活（sheets 护栏用：busy 期间禁开 input/confirm sheet——会被盖住死锁）。
+// **按遮罩 DOM 可见性判**，不只看 _busyDepth——showFullscreenBusy/hideFullscreenBusy（手动对，pull
+//   等用）不走 withBusy 的计数，但同样拉起同一个 z-540 遮罩，也得算 busy。
+export function isBusyActive() {
+  const el = document.getElementById("fullscreenBusy");
+  return !!el && !el.classList.contains("hidden");
+}
 export async function withBusy(label, fn) {
   _busyDepth++;
   showFullscreenBusy(label);

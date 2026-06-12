@@ -14,6 +14,8 @@ import { decodeImageFile, smartResample } from "./resample.js";
 import { decodeOraToDoc } from "./ora.js";
 import { store as _store } from "./app-store.js";
 import { stripSessionExt } from "./config.js";
+import { ensureUnlockedForBlob } from "./enc-thumbs.js";
+import { onPasswordVerified } from "./crypto-state.js";
 import { setTool, updateLassoToolbar } from "./toolbar.ts";
 import { _makeFullLayerSelection } from "./selection-ops.ts";
 import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./transient-panels.ts";
@@ -244,9 +246,17 @@ export function initImportImage(ctx: any) {
     try {
       if (isOra) {
         const nm = stripSessionExt(file.name) || "未命名";
-        // 外来文件可能是加密容器 → 先 unseal（明文原样过；容器走密码循环，取消返 null）
-        const plain = await _store.unseal(nm, file, { interactive: true });
-        if (!plain) { setStatus("已取消导入（需要密码）", true); return; }
+        // 外来文件可能是加密容器（可能用与图库不同的密码）→ busy 外解锁 + 显式密码解，
+        //   再按落库 name 记忆（onPasswordVerified：全局空→上位 / 否则 per-name 覆盖）。
+        let plain: Blob = file;
+        if (await _store.looksEncrypted(file)) {
+          const pw = await ensureUnlockedForBlob(file);
+          if (pw == null) { setStatus("已取消导入（需要密码）", true); return; }
+          const out = await _store.unsealWith(file, pw);
+          if (!out) { setStatus("导入失败（密码不对）", true); return; }
+          plain = out;
+          onPasswordVerified(nm, pw);
+        }
         const loaded = await decodeOraToDoc(plain);
         session.adopt(loaded, nm);
         setStatus(`已导入：${nm}`);

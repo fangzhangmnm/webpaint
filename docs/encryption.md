@@ -71,7 +71,13 @@ store 不能对文件格式有任何预设」）。
 
 - **save/load/push/pull 对 app 全透明**：encode 出明文、adopt/load 收明文，包壳解壳全在 store。
   本地 IDB 也走 `flow.save/load`（缝上「本地持久化绕过深模块」的历史裂缝）。
-- **密码内存 only，关页即忘**；保存路径密码不在 → store 抛 `LOCKED`，**绝不静默存明文**；解壳路径才交互弹窗。
+- **密码内存 only，关页即忘**；保存路径密码不在 → store 抛 `LOCKED`，**绝不静默存明文**。
+- **store 对密码彻底非交互（v237 死锁修复）**：seam 只有 `getPassword`（读内存），flow 拿不到/错
+  → 返 `status:"locked"`，**store 永不弹窗**。「弹密码框 + 验证 + 重试」是 UI 层的事，且**必须在
+  `withBusy` 之外**做（busy 遮罩 z=540 高于 input sheet z=500，盖住密码框→无限转圈死锁）。UI 用
+  `store.verifyPassword(name,pw)`（解 peek，便宜、不开 UI、不进 busy）验，`enc-thumbs.ensureUnlocked`
+  在 busy 外循环 prompt→verify→setPassword→重调 flow。**护栏**：`sheets.openInputSheet/openConfirmSheet`
+  在 busy 激活时 throw（按遮罩 DOM 可见性判，覆盖 withBusy + showFullscreenBusy 两条），把静默转圈变响亮报错。
 - **解锁后 thumbs 全亮**（统一密码 → 一把钥匙开全部预览，导航不瞎）；批量渲染非交互（锁定→锁样式，不弹窗伏击）。
 - **明文 ora / 明文缩略图永不落盘，密文落盘**（离线照常可用）：IDB 文件体=容器，`pkg.thumb=null`，
   cloud-thumb cache 缓存密文，解出 PNG 只进 objectURL。

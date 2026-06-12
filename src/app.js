@@ -30,6 +30,7 @@ import { BrushRack } from "./brush-rack.ts";
 import { PwaShell } from "./pwa-shell.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
 import { setPasswordPrompt } from "./crypto-state.js";   // 加密：密码弹窗注入（ADR-0012）
+import { ensureUnlocked } from "./enc-thumbs.js";        // boot load 加密作品：busy 外解锁
 import { els } from "./els.ts";
 import { safeLSSet } from "./safe-ls.ts";   // safeLS seeding 已随 editor-state 搬走
 import { initTheme } from "./theme.ts";
@@ -453,9 +454,11 @@ window.addEventListener("offline", () => { updateCloudAuthUI(); });
     return;
   }
   try {
-    // v235：boot load 走 store.flow.load（加密容器自动解壳 + in-app 密码弹窗；明文原样）。
-    // 旧 v35 单 slot 迁移随之退役（所有设备 ≥ v36 已久）。
-    const r = await _store.flow.load(wantedName);
+    // boot load 走 store.flow.load（明文原样；加密容器需先解锁）。boot 不在 busy → 可弹密码框。
+    let r = await _store.flow.load(wantedName);
+    if (r.status === "locked") {
+      if (await ensureUnlocked(wantedName)) r = await _store.flow.load(wantedName);
+    }
     if (r.status !== "loaded") {
       // IDB 没了 / 加密未解锁（取消）→ 停 gallery
       session.setName(null);

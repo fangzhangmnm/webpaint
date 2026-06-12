@@ -41,7 +41,7 @@ import {
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.js";
 import { stripSessionExt } from "./config.js";
-import { ensureNewPassword } from "./enc-thumbs.js";
+import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.js";
 import { setPassword } from "./crypto-state.js";
 import { els } from "./els.ts";
 
@@ -381,6 +381,8 @@ async function decryptCurrent() {
   if (!(await _store.isEncrypted(_activeSessionName))) { setStatus("这不是加密作品"); return; }
   const ok = await openConfirmSheet("解除当前作品的加密？", "内容将以明文存放在本机与云端，任何能访问此设备或云账号的人都能查看。");
   if (!ok) return;
+  // **必须在 withBusy 之前解锁**（密码框会被 busy 遮罩盖住→死锁；flow.decrypt 非交互拿不到密码会返 locked）
+  if (!(await ensureUnlocked(_activeSessionName))) { setStatus("已取消（需要密码）", true); return; }
   await withBusy(`正在解除加密 ${_activeSessionName}…`, async () => {
     try {
       if (_store.edits.localDirty()) await saveNow();
@@ -524,9 +526,14 @@ async function newDoc({ name, w, h }: any) {
 
 // ---- pull → pullCloudPath（verbatim；store.flow.acquire 不动）----
 async function pullCloudPath(path: any) {
+  const cloudName = stripSessionExt(path);
+  // 加密容器云端名 = .zip（约定）。拉取前先在 busy 外解锁（验证用云端 peek byte-range）——
+  //   acquire 内部 adopt 会 unseal，密码不在内存会抛 LOCKED；且 busy 起来后弹密码框死锁。
+  if (/\.zip$/i.test(String(path))) {
+    if (!(await ensureUnlocked(cloudName))) { setStatus("未拉取：需要密码解锁（已取消）", true); return; }
+  }
   showFullscreenBusy(`正在从云端拉取…`);
   try {
-    const cloudName = stripSessionExt(path);
     const localName = await uniqueLocalName(cloudName);
     const res = await _store.flow.acquire(cloudName, {
       localName,
@@ -550,10 +557,15 @@ async function openItem(item: any) {
   if (_store.edits.localDirty()) await saveNow();
   try {
     if (item.local) {
-      // v235：本地读取走 store.flow.load（加密容器自动解壳 + in-app 密码循环；明文原样）。
-      const r: any = await _store.flow.load(item.name);
+      // 本地读取走 store.flow.load（自动解壳，明文原样）。加密且未解锁 → locked →
+      // 在这里（非 busy）ensureUnlocked 后重 load。openItem 不在 withBusy 内，弹密码框安全。
+      let r: any = await _store.flow.load(item.name);
+      if (r.status === "locked") {
+        if (!(await ensureUnlocked(item.name))) { setStatus("未打开：需要密码解锁（已取消）", true); return; }
+        r = await _store.flow.load(item.name);
+      }
       if (r.status === "absent") { setStatus(`找不到：${item.name}`); return; }
-      if (r.status === "locked") { setStatus("未打开：需要密码解锁（已取消）", true); return; }
+      if (r.status === "locked") { setStatus("未打开：需要密码解锁", true); return; }
       const loaded = await decodeOraToDoc(r.blob);
       adoptLoadedDoc(loaded, item.name);
       setGalleryOpen(false);
@@ -567,9 +579,13 @@ async function openItem(item: any) {
 }
 
 async function pushItem(item: any) {
+  // 加密文件先在 busy 外解锁（push 内 load 要解壳；密码框不能在 busy 里弹）
+  if (await _store.isEncrypted(item.name)) {
+    if (!(await ensureUnlocked(item.name))) { setStatus("未推送：需要密码解锁（已取消）", true); return; }
+  }
   await withBusy(`正在推送 ${item.name} 到云端…`, async () => {
     try {
-      const r: any = await _store.flow.load(item.name);   // v235：解壳读取（加密文件先解锁）
+      const r: any = await _store.flow.load(item.name);   // 解壳读取（密码已在内存）
       if (r.status === "absent") throw new Error("找不到本地 session");
       if (r.status === "locked") throw new Error("需要密码解锁");
       const loaded = await decodeOraToDoc(r.blob);

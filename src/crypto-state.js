@@ -1,9 +1,10 @@
 // WebPaint 的密码**政策**模块（ADR-0012 / encryption-model：WebPaint = unified password）。
-// 加密机制全在 store 深模块；这里只回答 store 的 crypt seam 三问：
-//   getPassword(name)        → 统一图库密码（per-name 覆盖表兜底——别的库导入的文件密码可以不同）
-//   requestPassword(name)    → in-app 输入 sheet（弹窗实现由 composition root 注入，无 DOM 依赖）
-//   onPasswordVerified(name) → store 验证通过后回来记忆（全局空着就上位为全局；否则记 per-name）
-// **密码永不持久化**：只活在这个模块的变量里，关 tab / 锁定即忘。
+// store 对密码非交互（seam 只要 getPassword）；本模块持有内存密码 + 弹窗 + 记忆政策。
+//   getPassword(name)        → store seam 唯一接口：统一图库密码（per-name 覆盖兜底）
+//   promptPassword(opts)     → in-app 输入 sheet（弹窗实现由 composition root 注入，无 DOM 依赖）
+//   onPasswordVerified(name) → UI 解锁循环验证通过后调（全局空着就上位为全局；否则记 per-name）
+// 「弹框 + 验证 + 重试」的循环在 enc-thumbs.ensureUnlocked（**必须在 withBusy 之外**——busy 遮罩盖
+//   密码框会死锁，sheets 护栏也会 throw）。**密码永不持久化**：只活内存，关 tab / 锁定即忘。
 
 let _password = null;                 // 统一图库密码
 const _perName = new Map();           // 别的密码的文件（导入件）的 per-name 覆盖；锁定时一并清
@@ -27,20 +28,11 @@ export async function promptPassword(opts = {}) {
   return pw == null || pw === "" ? null : pw;
 }
 
-// ---- store crypt seam 的三件（app-store 装配时接入）----
+// ---- store crypt seam（app-store 装配只注入 getPassword）----
 
 export function getPassword(name) {
   if (name != null && _perName.has(name)) return _perName.get(name);
   return _password;
-}
-
-export async function requestPassword(name, { retry } = {}) {
-  return await promptPassword({
-    title: "解锁加密作品",
-    message: retry
-      ? "密码不对，再试一次"
-      : `这是加密作品${name ? `（${name}）` : ""}。密码只存在内存里，关页即忘。`,
-  });
 }
 
 export function onPasswordVerified(name, pw) {

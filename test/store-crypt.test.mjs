@@ -23,21 +23,15 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 8, 7, 6]);
 // flow.load 的 blob：真 adapter 出 Blob，MockLocal 出 Uint8Array → 统一成字节
 const blobU8 = async (b) => (b instanceof Uint8Array ? b : new Uint8Array(await b.arrayBuffer()));
 
-// 统一密码政策替身（≈ crypto-state）：一个全局密码 + per-name 覆盖 + 可控弹窗队列。
+// 密码政策替身（≈ crypto-state）：store seam **只有 getPassword**（非交互）。
+//   弹窗/验证/重试是 UI 层的事（这里用 _set 模拟「app 在 busy 外 ensureUnlocked 后把密码放进内存」）。
 function makeCrypt(initial = null) {
   let pw = initial;
-  const perName = new Map();
-  let queue = [];                       // requestPassword 依次返回
-  const verified = [];
   return {
     ext: "ora",
     makePeek: async () => PNG,          // app 解释为缩略图；store 不看
-    getPassword: (n) => (n != null && perName.has(n) ? perName.get(n) : pw),
-    requestPassword: async () => (queue.length ? queue.shift() : null),
-    onPasswordVerified: (n, p) => { verified.push([n, p]); if (pw == null) pw = p; else if (p !== pw) perName.set(n, p); },
-    _set: (p) => { pw = p; },
-    _queue: (...a) => { queue = a; },
-    _verified: verified,
+    getPassword: () => pw,
+    _set: (p) => { pw = p; },           // 模拟 UI 解锁后 setPassword
   };
 }
 
@@ -99,27 +93,39 @@ describe("Store.flow.save/load · 加密透明", () => {
     assert(txt(await localU8(env, "画")).indexOf("v2") < 0, "落盘字节没被明文污染");
   });
 
-  it("load 锁定（取消密码）→ status:locked，不返回密文", async () => {
+  it("load 锁定（内存无密码）→ status:locked，不返回密文、**不弹窗**", async () => {
     const crypt = makeCrypt("pw");
     const env = mk(crypt);
     await env.store.flow.save("画", { encode: () => bytes("v1") });
     await env.store.flow.encrypt("画", {});
-    crypt._set(null); crypt._queue(null);
+    crypt._set(null);   // 锁定（store 非交互：直接返 locked，绝不弹窗死锁）
     const r = await env.store.flow.load("画");
     eq(r.status, "locked");
     assert(!r.blob, "锁定不返回任何 blob");
   });
 
-  it("load 密码循环：内存错→弹窗重问→对→onPasswordVerified 记忆", async () => {
+  it("load 内存密码错 → locked（store 不循环重问，重问是 UI 的事）", async () => {
     const crypt = makeCrypt("right");
     const env = mk(crypt);
     await env.store.flow.save("画", { encode: () => bytes("secret") });
     await env.store.flow.encrypt("画", {});
-    crypt._set("stale-wrong"); crypt._queue("still-wrong", "right");
+    crypt._set("wrong");
+    eq((await env.store.flow.load("画")).status, "locked");
+    // UI 解锁后（把对的放进内存）重 load → loaded
+    crypt._set("right");
     const r = await env.store.flow.load("画");
     eq(r.status, "loaded");
     eq(txt(await blobU8(r.blob)), "secret");
-    assert(crypt._verified.some(([, p]) => p === "right"), "验证通过的密码回调给 app");
+  });
+
+  it("verifyPassword：UI 解锁循环的便宜验证器（解 peek，对→true 错→false）", async () => {
+    const crypt = makeCrypt("pw");
+    const env = mk(crypt);
+    await env.store.flow.save("画", { encode: () => bytes("v1") });
+    await env.store.flow.encrypt("画", {});
+    eq(await env.store.verifyPassword("画", "pw"), true, "对密码 → true");
+    eq(await env.store.verifyPassword("画", "wrong"), false, "错密码 → false");
+    eq(await env.store.verifyPassword("不存在", "pw"), false, "无字节 → false");
   });
 });
 
@@ -161,7 +167,7 @@ describe("Store.flow.encrypt/decrypt · 两端一起换 + .zip 翻转", () => {
     await env.store.flow.save("画", { encode: () => bytes("v1") });
     await env.store.flow.encrypt("画", {});
     const before = await localU8(env, "画");
-    crypt._set("wrong"); crypt._queue(null);
+    crypt._set("wrong");   // 锁定（无对密码）
     const res = await env.store.flow.decrypt("画", {});
     eq(res.status, "locked");
     assert(await looksEncryptedContainer(await localU8(env, "画")), "仍是容器");
@@ -184,8 +190,8 @@ describe("Store.readPeek / getTailBytes", () => {
     const env = mk(crypt);
     await env.store.flow.save("画", { encode: () => bytes("x") });
     await env.store.flow.encrypt("画", {});
-    crypt._set(null); crypt._queue("pw");
-    eq(await env.store.readPeek("画", { interactive: false }), null, "非交互不弹窗，锁定返 null");
+    crypt._set(null);
+    eq(await env.store.readPeek("画"), null, "非交互不弹窗，锁定返 null");
   });
 
   it("getTailBytes：本地尾片；不存在 → null", async () => {
