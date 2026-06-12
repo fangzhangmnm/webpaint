@@ -6,9 +6,10 @@
 //   ⑦ 云端文件名翻转成 .zip；⑧ peek 经 readPeek（非交互批量 / 交互解锁）。
 
 import { describe, it, assert, eq } from "./runner.mjs";
-import { ensureZipLoaded } from "./zip-node.mjs";
+import { ensureZipLoaded, ensure7zLoaded } from "./zip-node.mjs";
 
 ensureZipLoaded();
+await ensure7zLoaded();
 
 const { createStore } = await import("../src/store/store.ts");
 const { createCloudSync, memKv } = await import("../src/store/cloud-sync.ts");

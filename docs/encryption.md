@@ -1,6 +1,6 @@
-# WebPaint 加密（ADR-0012 三层容器 + 统一图库密码 + store operator）
+# WebPaint 加密（ADR-0012 三层容器 + 统一图库密码 + store operator + .7z 强 KDF）
 
-> as-of v235 / 2026-06-12。规范出处：`MyPWAPatterns/docs/encryption-model.md` + ADR-0012（含 2026-06-12 修订）。
+> as-of v236 / 2026-06-12。规范出处：`MyPWAPatterns/docs/encryption-model.md` + ADR-0012（含 2026-06-12 修订）。
 > 本文记 WebPaint 落地的实现形态、决定与待验项。代码与本文矛盾时信代码。
 
 ## 字节布局（文件名明文 + .zip，文件体换壳）
@@ -14,8 +14,8 @@ store 不能对文件格式有任何预设」）。
 ```
 <name>.zip（加密容器；明文文件仍是 <name>.ora）
   outer zip（明文 STORE，CD 干净，扫描器只见 zip 套 zip）
-    ├── <GUID>      加密 payload zip（标准格式，7-Zip 输密码可开）
-    │     ├── data.bin   原始 .ora **逐字节不动**（自带 Thumbnails/thumbnail.png → 7z 解出即正常带缩略图文件）
+    ├── <GUID>      加密 .7z payload（AES-256 + 强 KDF + 加密头 -mhe，vendored 7z-wasm 造）
+    │     ├── data.bin   原始 .ora **逐字节不动**（自带 Thumbnails/thumbnail.png → 7-Zip 解出即正常带缩略图文件）
     │     └── meta.bin   "WPMETA1\n" + {v,name,ext}（无 app 恢复：解出→按 meta 改回真名）
     └── peek        [MAGIC 8][ver 1][salt 16][iv 12][len 4LE][AES-GCM(不透明字节)]  ← 最后 entry
 ```
@@ -23,11 +23,15 @@ store 不能对文件格式有任何预设」）。
 - **peek = 不透明字节**（store 永不解释）。WebPaint 的解释 = 缩略图 PNG（装配时 `makePeek` 从 ora 抽
   `Thumbnails/thumbnail.png`）；文本类 app 可放摘要。peek blob 兼任容器探测标记（尾扫 MAGIC）+
   byte-range 预览（80KB suffix 一发命中）。**空 peek 也写**（探测标记必须在）。
-- 密码学：payload AES-256；peek 用强 KDF（PBKDF2-SHA256×250k）+ AES-GCM（GCM tag 兼任密码验证器）。
-  salt per-file 在各自 header；无 verifier 文件、无密钥托管、无新增同步面。
-- **KDF 目标 = 强（.7z）**（user 2026-06-12「用那个好的，7z 能打开就行，不用兼容 winzip」）。
-  当前 payload 仍是 WinZip-AES-256（zip.js）作**过渡**——`.7z` 强 KDF 需在浏览器内生成 `.7z`
-  （vendored 7z-wasm，未做）；架构不变，只换 `zip.js` 的 `zipPackEncrypted/zipUnpackEncrypted` 两函数。详见 ADR-0012。
+- 密码学：**payload = .7z AES-256 + 强 KDF**（7-Zip 默认 SHA-256 多轮）+ 加密头，7-Zip 输密码直开；
+  peek 强 KDF（PBKDF2-SHA256×250k）+ AES-GCM（GCM tag 兼任密码验证器）。salt 在各自 header；
+  无 verifier 文件、无密钥托管、无新增同步面。
+- **vendored 7z-wasm**（`vendor/7z-wasm/`，~1.6MB，user 2026-06-12「还是 vendor 7z，兄弟项目有高安全需求」）：
+  **惰性 + 不进 bundle + 不 precache**——`src/sevenzip.js` 首次加密/解密才注入 UMD + fetch wasm，
+  SW 运行时缓存（msal 同款）→ 用过一次即离线可用，不加密的用户零下载。HOST-SEAM：crypto-container
+  调 `../sevenzip.js` 的 pack7z/unpack7z（同 zip.js 注入方式），node 测经 setSevenZipLoader 注入。
+- 为什么不直接 bare .7z（一步恢复）：整文件得是 zip 才能塞尾部 byte-range peek（云端加密缩略图）。
+  user 2026-06-12 选「保 peek，恢复两步」。恢复：7-Zip 开 .zip → 取 <GUID> → 改名 .7z → 输密码。
 
 ## 模块图（store 底座 / app 层两段）
 
@@ -52,8 +56,16 @@ store 不能对文件格式有任何预设」）。
 | `src/ora.js` | **纯 codec**：encode 永远出明文 ora、decode 永远收明文 ora（加密完全不可见） |
 | `src/enc-thumbs.js` | 把 store 解出的不透明 peek 字节解释成 image/png Blob + 设新密码双输 UX |
 | `src/cloud-thumbs.js` | PNG 硬扫落空 → MAGIC 扫描，命中返密文 Blob（`ENC_PEEK_MIME`），解密归 caller |
-| `src/ui/gallery.ts` | 锁样式 tile（readPeek 非交互）、点锁解锁（readPeek 交互）、菜单 intent（调 flow.encrypt/decrypt） |
+| `src/ui/gallery.ts` | 锁样式 tile（readPeek 非交互）、点锁解锁（readPeek 交互）、菜单 intent（调 flow.encrypt/decrypt）、**常驻加密徽章**（解锁后也显示小锁） |
 | `src/config.js` | `encSessionFileName`（.zip）+ `stripSessionExt`（.ora/.zip 都剥；所有去扩展名走这里） |
+| `src/sevenzip.js` | .7z 加密原语（vendored 7z-wasm 惰性加载）：pack7z/unpack7z + setSevenZipLoader（node 测注入） |
+| `src/session-state.ts` | **画板加密**：encryptCurrent/decryptCurrent（saveNow→flow.encrypt/decrypt）+ 反应式 `enc.encrypted` |
+
+## UI（v236：图库 + 画板都可见）
+
+- **画板菜单**：「加密保护…/解除加密…」（label 随当前画作加密态切）。
+- **画板顶栏**：当前画作加密时常驻小锁（点它=解除加密）。明文时 hidden。反应式跟 `session.enc.encrypted`。
+- **图库 tile**：未解锁→锁样式占位 + 点锁解锁；**解锁后**缩略图旁常驻小锁徽章（一眼看出加密，不只靠锁定态）。
 
 ## 行为决定（与理由）
 
@@ -73,16 +85,19 @@ store 不能对文件格式有任何预设」）。
 - ✅ node 24 测全过（269；crypto-container 13 + store-crypt 14）：容器往返/空 peek/错密码零副作用/探测/
   尾窗口 + operator 透明 save/load（明文不落盘、LOCKED、密码循环+记忆）/两端一起换 + .zip 翻转/
   离线拒/readPeek 非交互不弹窗/isEncrypted。
-- ✅ **互操作性**：测试内含不依赖 zip.js 的独立 WinZip-AES 解密器（node:crypto 按 AE-2 规范），
-  逐位解出 data.bin == 原 ora —— 两实现互通 ⇒ 格式标准 ⇒ 7-Zip 同理可开。
-- ⏳ **真 7-Zip 实测未做**（本机无 7z 二进制）：PC 从 OneDrive 下 `<name>.zip` → 7-Zip 解外层 →
-  对 `<GUID>` 输密码 → data.bin（即完整 ora，自带缩略图）改名 .ora 能开。
-- ⏳ **`.7z` 强 KDF 切换未做**：需 vendored 7z-wasm（~700KB），换 zip.js 两函数即可；架构已就位。
+- ✅ **7z 互操作（node 内）**：测试用**全新 7z-wasm 实例**（= 另一台机器的 7-Zip）输密码解 payload →
+  data.bin 逐位 == 原 ora，且 payload 头是 .7z magic（`37 7a bc af 27 1c`）⇒ 真 .7z，7-Zip 可开。
+- ✅ build 验证：1.6MB wasm **不在 bundle 里**（esbuild 只见字符串路径），惰性加载保住。
+- ⏳ **真桌面 7-Zip 实测未做**（本机无 7z 二进制）：PC 从 OneDrive 下 `<name>.zip` → 7-Zip 解外层 →
+  对 `<GUID>` 改名 .7z → 输密码 → data.bin（完整 ora，自带缩略图）改名 .ora 能开。
+- ⏳ **承诺的「一步恢复」单文件解密 HTML 未做**（避免上线未测的数据安全工具；先文档化手动两步）。
 - ⏳ 真机/桌面待验清单：
-  1. 「加密保护…」→ tile 变锁；解锁后看到缩略图；锁定后回锁样式；云端文件名变 .zip
-  2. 打开加密作品 → 密码 sheet → 画正常；Ctrl+S / 自动保存 / 退出图库不报错；boot 恢复加密作品弹密码
-  3. 错密码 → 「密码不对，再试一次」循环；取消 → 失败状态条，不丢数据
-  4. 云端纯 cloud 加密项：缩略图锁样式（byte-range 密文路径）+ 拉取打开
+  1. **wasm 惰性加载 + SW 离线缓存**：首次加密在线触发 1.6MB 下载；之后离线能加密/解密（cache 命中）
+  2. 「加密保护…」（图库 + 画板菜单）→ tile/顶栏出锁；解锁后缩略图 + 常驻锁徽章；云端文件名变 .zip
+  3. 打开加密作品 → 密码 sheet → 画正常；Ctrl+S / 自动保存 / 退出图库不报错；boot 恢复加密作品弹密码
+  4. 错密码 → 「密码不对，再试一次」循环；取消 → 失败状态条，不丢数据
+  5. 云端纯 cloud 加密项：缩略图锁样式（byte-range 密文路径）+ 拉取打开
+  6. 7z 加解密耗时（1.6MB wasm spin-up + AES）在 iPad 上可接受否
   5. 解除加密（含云端在线推送）→ tile 回明文 thumb，云端名翻回 .ora
   6. revert 对加密作品（checkpoint 密文往返）；导入外来 .zip 容器（unseal 弹密码）；导出加密作品 = .zip 密文
   7. 双 tab / iPad resume 下打开加密作品

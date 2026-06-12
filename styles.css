@@ -1839,6 +1839,12 @@ body[data-mode="gallery"] .board { display: none !important; }
   color: rgba(0,0,0,0.45);
   background: repeating-linear-gradient(45deg, #f4f4f4 0 12px, #ececec 12px 24px);
 }
+/* 加密常驻徽章（解锁后也显示，一眼看出这张是加密的） */
+.gallery-tile-state-icon.enc { color: #c98a00; }
+.gallery-tile-state-icon.enc svg { width: 14px; height: 14px; }
+/* 顶栏加密指示：当前画作加密时显示的小锁（点它解除加密） */
+.top-enc-lock { color: #c98a00; }
+.top-enc-lock svg { width: 20px; height: 20px; }
 /* ⋯ 菜单按钮叠在 thumb 右上：半透明白底 + 深字 + 模糊背景 → 跨日 / 夜主题都清楚 */
 .gallery-tile-menu-btn {
   position: absolute; right: 5px; top: 5px;

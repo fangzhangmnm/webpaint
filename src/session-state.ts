@@ -41,6 +41,8 @@ import {
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.js";
 import { stripSessionExt } from "./config.js";
+import { ensureNewPassword } from "./enc-thumbs.js";
+import { setPassword } from "./crypto-state.js";
 import { els } from "./els.ts";
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initSession(ctx) 注入）----
@@ -75,6 +77,13 @@ const AUTOSAVE_MS = 3 * 60 * 1000;
 const _phase = reactive<{ current: "gallery" | "editing" | "lazyblank" }>({ current: "gallery" });
 function _recomputePhase() {
   _phase.current = !_activeSessionName ? "gallery" : _isLazyBlankSession ? "lazyblank" : "editing";
+}
+
+// 当前画作是否加密（at-rest 字节判定，SSoT=store）。顶栏锁指示 + 菜单 label 反应式读它。
+const _enc = reactive<{ encrypted: boolean }>({ encrypted: false });
+async function _refreshEncrypted() {
+  try { _enc.encrypted = _activeSessionName ? await _store.isEncrypted(_activeSessionName) : false; }
+  catch { _enc.encrypted = false; }
 }
 
 // ---- 私有：ora-meta + checkpoint（co-used，一处形状防 drift；从 app.js verbatim 搬）----
@@ -176,6 +185,7 @@ function adoptLoadedDoc(loaded: any, sessionName: any) {
   _activeSessionName = sessionName;
   setCurrentSessionName(sessionName);
   _recomputePhase();
+  _refreshEncrypted();   // 顶栏锁指示按新打开的画刷新（不阻塞 adopt）
   // C4：捕获本 tab 的 base-etag（打开这画时的云端版本）进 Store 内存。
   // 之后 store.flow.push 用它当 If-Match，不读共享 localStorage → 杜绝多 tab 静默覆盖。
   _store.adoptBase(sessionName, getKnownETag(sessionName));
@@ -337,6 +347,55 @@ async function saveAndPush() {
   }
 }
 
+// ---- 当前画作加密 / 解除（ADR-0012；编辑态对活动 doc 操作）----
+// 与图库 intent 同 store operator，差别：先 saveNow flush 活 doc 的明文 → flow.encrypt 读它打包换两端。
+// 活动 doc 内存态不动（at-rest 字节变容器，后续 save 自动包壳——透明）。需在线（有云副本时）。
+async function encryptCurrent() {
+  if (!_activeSessionName || _isLazyBlankSession) { setStatus("先打开或保存一张画再加密", true); return; }
+  const online = () => isSignedIn() && navigator.onLine !== false;
+  if (await _store.isEncrypted(_activeSessionName)) { setStatus("已是加密作品"); return; }
+  const pw = await ensureNewPassword();
+  if (pw == null) { setStatus("已取消"); return; }
+  setPassword(pw);
+  await withBusy(`正在加密 ${_activeSessionName}…`, async () => {
+    try {
+      await saveNow();   // flush 活 doc 明文 → store 读它打包
+      const res: any = await _store.flow.encrypt(_activeSessionName, { isOnline: online });
+      if (res.status === "offline") { setStatus("已同步过云端的作品需在线加密", true); return; }
+      if (res.status === "already") { setStatus("已是加密作品"); return; }
+      // 清明文残留（旧 checkpoint 明文快照）+ 重写成密文 checkpoint
+      try { await setMeta(`revert:${_activeSessionName}:ora`, null); await setMeta(`revert:${_activeSessionName}:at`, null); } catch {}
+      await _refreshEncrypted();
+      updateSaveStatus();
+      setStatus(res.status === "cloud-deferred"
+        ? `已加密（本地完成；云端回线后推）：${_activeSessionName}`
+        : `已加密：${_activeSessionName}（7-Zip 输此密码可恢复；忘记密码内容永久找不回）`,
+        res.status === "cloud-deferred");
+      gallery?.refresh?.();
+    } catch (e: any) { setStatus("加密失败：" + (e && e.message || e), true); }
+  });
+}
+async function decryptCurrent() {
+  if (!_activeSessionName) { setStatus("没打开作品", true); return; }
+  const online = () => isSignedIn() && navigator.onLine !== false;
+  if (!(await _store.isEncrypted(_activeSessionName))) { setStatus("这不是加密作品"); return; }
+  const ok = await openConfirmSheet("解除当前作品的加密？", "内容将以明文存放在本机与云端，任何能访问此设备或云账号的人都能查看。");
+  if (!ok) return;
+  await withBusy(`正在解除加密 ${_activeSessionName}…`, async () => {
+    try {
+      if (_store.edits.localDirty()) await saveNow();
+      const res: any = await _store.flow.decrypt(_activeSessionName, { isOnline: online });
+      if (res.status === "offline") { setStatus("已同步过云端的作品需在线解除加密", true); return; }
+      if (res.status === "locked") { setStatus("已取消（需要密码）", true); return; }
+      if (res.status === "not-encrypted") { setStatus("这不是加密作品"); return; }
+      await _refreshEncrypted();
+      updateSaveStatus();
+      setStatus(`已解除加密：${_activeSessionName}`);
+      gallery?.refresh?.();
+    } catch (e: any) { setStatus("解除加密失败：" + (e && e.message || e), true); }
+  });
+}
+
 // 等当前云端 push 跑完（防 status race）。L4 ②d：await store 的真信号 whenPushIdle。
 // fullscreen-busy 是 app UI（showFullscreenBusy/hideFullscreenBusy 留 app，经 ctx 绑）。
 let showFullscreenBusy: any, hideFullscreenBusy: any;
@@ -425,6 +484,7 @@ async function exitCanvasToGallery() {
   _activeSessionName = null;
   setCurrentSessionName("");
   _recomputePhase();
+  _enc.encrypted = false;   // 回图库无活动画，清锁指示
   _store.edits.markSaved();
   _isLazyBlankSession = false;
   updateSaveStatus();
@@ -445,6 +505,7 @@ async function newDoc({ name, w, h }: any) {
   _activeSessionName = name;
   setCurrentSessionName(name);
   _recomputePhase();
+  _enc.encrypted = false;   // 新建一律明文
   input.clearHistory();
   board.invalidateAll();
   board.fitToScreen();
@@ -548,6 +609,9 @@ function setName(name: any) { _activeSessionName = name; setCurrentSessionName(n
 export const session = {
   // 反应式相位
   current: _phase,                              // { current: "gallery"|"editing"|"lazyblank" }
+  enc: _enc,                                    // { encrypted } 反应式：顶栏锁指示 + 菜单 label 读它
+  encryptCurrent, decryptCurrent,              // 编辑态加密/解除（画板菜单）
+  refreshEncrypted: _refreshEncrypted,
   // app.js 兼容读取面（取代散落的 _activeSessionName / 状态变量读）
   get name() { return _activeSessionName; },
   get lazyBlank() { return _isLazyBlankSession; },

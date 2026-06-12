@@ -262,6 +262,13 @@ export function initTopbarMenu(ctx) {
     }
   });
 
+  // v236 加密：当前画作加密 / 解除（label 随 session.enc.encrypted 切；编排在 session-state）
+  els.menuEncrypt?.addEventListener("click", async () => {
+    setMenuOpen(false);
+    if (session.enc.encrypted) await session.decryptCurrent();
+    else await session.encryptCurrent();
+  });
+
   els.menuFit.addEventListener("click", () => {
     setMenuOpen(false);
     board.fitToScreen();

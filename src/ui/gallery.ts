@@ -450,6 +450,7 @@ function makeGallery(host: GalleryHost) {
             <div class="gallery-tile-name-row">
               <div class="gallery-tile-name" :title="row.t.fullPath">{{ row.t.displayName }}</div>
               <div class="gallery-tile-meta">
+                <span v-if="row.t.encrypted" class="gallery-tile-state-icon enc" title="已加密" v-html="ICON.lock"></span>
                 <span class="gallery-tile-state-icon" :title="row.t.badgeTitle" v-html="badgeIcon(row.t.badge)"></span>
                 <span>{{ fmtMeta(row.t) }}</span>
               </div>

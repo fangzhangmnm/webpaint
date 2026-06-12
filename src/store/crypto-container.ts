@@ -4,33 +4,33 @@
 // 可放正文摘要），store/容器层从不解释它。peek blob 同时兼任「这是加密容器」的尾部探测标记，
 // 所以**永远写**（app 没给 peek 就加密空串——GCM of "" = 16 字节 tag，探测不变量照样成立）。
 //
-// HOST-SEAM：依赖宿主提供 `../zip.js`（vendored zip.js 的包装：zipPack / zipUnpack /
-//   zipPackEncrypted / zipUnpackEncrypted）。家族各兄弟都以同样方式 vendor zip.js。
+// HOST-SEAM：依赖宿主提供 `../zip.js`（外层明文 zip：zipPack/zipUnpack）+ `../sevenzip.js`
+//   （payload 加密：pack7z/unpack7z = vendored 7z-wasm）。家族各兄弟同样方式 vendor。
 //
-// 加密文件的字节布局（路径身份明文；**云端文件名 = <name>.zip**——容器本来就是标准 zip，
+// 加密文件的字节布局（路径身份明文；**云端文件名 = <name>.zip**——外层容器是标准 zip，
 // 名实相符、防软件按 .ora/.txt 误认；命名翻转在 cloud-sync 的 encFileName）：
 //
 //   <name>.zip           ← 外层：明文 STORE zip。central directory 100% 干净
-//     ├── <GUID>            （加密 flag 藏在下一层里，扫描器只看到 "zip 里有个 zip"）
-//     │     payload = WinZip-AES-256 zip（标准格式，7-zip/WinRAR 输密码可开）：
+//     ├── <GUID>            （加密在下一层；扫描器只看到 "zip 里有一坨不透明字节"）
+//     │     payload = 加密 .7z（AES-256 + 强 KDF + 加密头 -mhe）：
 //     │       ├── data.bin     原始文件字节，扩展名混淆
 //     │       └── meta.bin     "WPMETA1\n" + JSON {v,name,ext}（恢复时改回真名用）
 //     └── peek              ← 加密旁路小块，**最后一个 entry**：
 //           [MAGIC 8][ver 1][salt 16][iv 12][len 4LE][AES-GCM(不透明字节)]
 //           一次 byte-range 拉尾部 → 扫 MAGIC → 解密，无需全量下载。
 //
-// 为什么三层不是两层：标准 zip 的加密 flag 写在 central directory（明文可扫），
-//   外层多包一层明文 STORE 就把 flag 藏进了 payload 内部。AtlasMaker 同款。
-// GUID 只是混淆名/不透明 token，**不是**身份（GUID 身份方案已否决 2026-06-07）——
-//   每次重打包重新生成，无需稳定。
-// KDF 双轨（ADR-0012 的核心取舍）：
-//   - payload 用 WinZip-AES 标准 KDF（PBKDF2-SHA1×1000，弱）—— 换 7-zip 可打开性，不预拉伸
-//     （拉伸了密码就没法在 7-zip 里敲了，恢复路径断掉）。强密码自己防暴力破解。
-//   - peek blob 是 app 专属 → 用强 KDF（PBKDF2-SHA256 × 250k）+ AES-GCM（自带完整性校验，
-//     顺带当密码验证器用：GCM tag 不对 = 密码错（throw code=WRONG_PASSWORD），碰不到用户文件就能拒绝）。
-// 无密钥托管、无 salt 文件：salt per-file 在各自 header 里，换设备/丢设备零迁移成本。
+// 为什么 .7z 不直接当文件：① 整文件得是 zip 才能塞尾部 byte-range peek（云端缩略图）；
+//   ② 外层明文 zip 让 central directory 100% 干净（加密结构藏在 <GUID> 不透明字节里）。
+//   恢复：7-Zip 开 <name>.zip → 取 <GUID> → 改名 .7z → 输密码 → data.bin（按 meta 改回真名）。
+// GUID 只是混淆名/不透明 token，**不是**身份（GUID 身份方案已否决 2026-06-07）——每次重打包重生成。
+// KDF（ADR-0012 2026-06-12「用强的，vendor 7z」）：
+//   - payload = .7z AES-256，**强 KDF**（7-Zip 默认 SHA-256 多轮）+ 加密头 → 7-Zip 输密码直开。
+//   - peek = app 专属强 KDF（PBKDF2-SHA256 × 250k）+ AES-GCM（GCM tag 兼任密码验证器，
+//     碰不到用户文件就能拒错密码 → throw code=WRONG_PASSWORD）。
+// 无密钥托管、无 salt 文件：salt 在各自 header（.7z header / peek header），换/丢设备零迁移。
 
-import { zipPack, zipUnpack, zipPackEncrypted, zipUnpackEncrypted } from "../zip.js";
+import { zipPack, zipUnpack } from "../zip.js";
+import { pack7z, unpack7z } from "../sevenzip.js";
 
 // 尾部 peek blob 的 MAGIC（8 字节；首字节非文本防 false-match，"WPTH" 可读性——格式 v1 沿用）
 export const PEEK_MAGIC = [0x9e, 0x57, 0x50, 0x54, 0x48, 0x0d, 0x0a, 0x1a];
@@ -168,11 +168,10 @@ export interface PackOpts {
 export async function packContainer({ dataBytes, fileName, ext = "bin", guid, peek = null, password }: PackOpts): Promise<Blob> {
   if (!password) throw new Error("没有密码，无法加密");
   const metaJson = JSON.stringify({ v: 1, name: fileName || null, ext });
-  const payload = await zipPackEncrypted([
+  const payloadBytes = await pack7z([
     { path: "data.bin", data: dataBytes },
     { path: "meta.bin", data: META_MAGIC + metaJson },
   ], password);
-  const payloadBytes = new Uint8Array(await payload.arrayBuffer());
   const peekEnc = await encryptPeek(peek, password);
   // peek 必须最后（byte-range 尾部一发命中 + 容器探测）；外层全 STORE（zipPack level:0）
   return await zipPack([
@@ -190,7 +189,7 @@ export async function unpackContainer(blob: Blob | Uint8Array, password: string)
   const names = Object.keys(outer);
   const guid = names.find((n) => n !== "peek" && n !== "thumb");   // "thumb" = v233/234 旧容器兼容
   if (!guid || !outer[guid]) throw new Error("容器结构不对（缺 payload）");
-  const inner = await zipUnpackEncrypted(new Blob([outer[guid] as BlobPart], { type: "application/zip" }), password);
+  const inner = await unpack7z(outer[guid], password);
   const data = inner["data.bin"];
   if (!data) throw new Error("容器结构不对（缺 data.bin）");
   let meta: ContainerMeta | null = null;

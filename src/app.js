@@ -394,6 +394,13 @@ initGalleryShell(ctx);     // 图库外壳（需 ctx.gallery + late keys）
 initTopbarMenu(ctx);       // 顶栏/菜单/sheet/save 触发 事件接线（需 ctx.gallery）
 initCloudAuthUI(ctx);
 
+// v236 加密常驻指示（顶栏小锁 + 菜单 label）：反应式跟 session.enc.encrypted。
+watch(() => session.enc.encrypted, (enc) => {
+  els.topEncLock?.classList.toggle("hidden", !enc);
+  if (els.menuEncryptLabel) els.menuEncryptLabel.textContent = enc ? "解除加密…" : "加密保护…";
+}, { immediate: true });
+els.topEncLock?.addEventListener("click", () => session.decryptCurrent());
+
 // 图库 popup 开启/关闭 + 菜单代理 + 新建文件夹 + 新建作品 sheet + IDB 占用/配额 = gallery-shell.ts。
 
 // ---- 启动收尾：尝试加载上次的 session（异步，不阻塞 UI 显示） ----

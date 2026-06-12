@@ -81,6 +81,13 @@
       </button>
       <!-- 智能保存：operator。data-state 由 app.js 切 -->
       <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
+      <!-- v236 加密常驻指示：当前画作加密时显示小锁（点它进解除加密）。明文时 hidden。 -->
+      <button class="tool top-enc-lock hidden" id="topEncLock" type="button" title="已加密 · 点击解除加密" aria-label="已加密">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="5" y="11" width="14" height="9" rx="2"></rect>
+          <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+        </svg>
+      </button>
 
       <span class="top-bar-sep" aria-hidden="true"></span>
 
@@ -814,6 +821,10 @@
       <button class="menu-item" id="menuRevertToOpen" type="button" role="menuitem">
         <span class="menu-item-label">撤销修改…</span>
       </button>
+      <!-- v236 加密：当前画作加密/解除（ADR-0012）。label 随加密态切换 -->
+      <button class="menu-item" id="menuEncrypt" type="button" role="menuitem">
+        <span class="menu-item-label" id="menuEncryptLabel">加密保护…</span>
+      </button>
       <!-- v124 裁切合并：有选区 → 裁切到选区；否则 → 自由裁切 8 handle -->
       <button class="menu-item" id="menuCrop" type="button" role="menuitem">
         <span class="menu-item-label" id="menuCropLabel">裁切</span>
@@ -936,6 +947,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-16c1f2921e57.mjs"></script>
+    <script type="module" src="./dist/webpaint-365064e4da6c.mjs"></script>
   </body>
 </html>
