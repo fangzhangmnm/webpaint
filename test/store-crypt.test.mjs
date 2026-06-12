@@ -16,6 +16,21 @@ const { createCloudSync, memKv } = await import("../src/store/cloud-sync.ts");
 const { createMockProvider } = await import("../src/store/mock-provider.ts");
 const { createMockLocal } = await import("../src/store/mock-local.ts");
 const { looksEncryptedContainer } = await import("../src/store/crypto-container.ts");
+const { zipPack } = await import("../src/zip.js");
+const { encryptPeek } = await import("../src/store/crypto-container.ts");
+
+const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c];
+// 造一个 v233-235 老容器（外壳明文 zip + WinZip-AES payload + peek）放进本地，验「读得回 + 存成 7z」。
+async function makeOldWinzipContainer(ora, pw) {
+  const z = globalThis.window.zip;
+  const w = new z.ZipWriter(new z.BlobWriter("application/zip"), { password: pw, encryptionStrength: 3 });
+  await w.add("data.bin", new z.Uint8ArrayReader(ora), { level: 0 });
+  await w.add("meta.bin", new z.TextReader("WPMETA1\n" + JSON.stringify({ v: 1, name: "x", ext: "ora" })), { level: 0 });
+  const payload = new Uint8Array(await (await w.close()).arrayBuffer());
+  const peek = await encryptPeek(PNG, pw);
+  const outer = await zipPack([{ path: "GUID-OLD", data: payload }, { path: "peek", data: peek }]);
+  return new Uint8Array(await outer.arrayBuffer());
+}
 
 const bytes = (s) => new TextEncoder().encode(s);
 const txt = (u8) => new TextDecoder().decode(u8 instanceof Uint8Array ? u8 : new Uint8Array(u8));
@@ -210,5 +225,33 @@ describe("Store.isEncrypted", () => {
     eq(await env.store.isEncrypted("画"), false);
     await env.store.flow.encrypt("画", {});
     eq(await env.store.isEncrypted("画"), true);
+  });
+});
+
+describe("向后兼容：老 WinZip-AES 容器 → 读得回 + 下次保存迁成 7z", () => {
+  function payloadMagicOf(container) {
+    // 解外层 zip 拿 <GUID> payload 的头 6 字节（粗暴：找首个 local file header 数据）。用 store 读更稳——
+    // 这里直接验「load 出明文」+「save 后 at-rest 的 payload 是 7z magic」。
+    return container;
+  }
+  it("flow.load 读出老容器明文；flow.save 后 at-rest payload 变 .7z", async () => {
+    const env = mk(makeCrypt("pw"));
+    const old = await makeOldWinzipContainer(bytes("我的老画内容"), "pw");
+    await env.local.save("老画", old);                       // 直接塞老容器进本地
+    eq(await env.store.isEncrypted("老画"), true, "老容器探测为加密");
+    const r = await env.store.flow.load("老画");
+    eq(r.status, "loaded");
+    eq(txt(await blobU8(r.blob)), "我的老画内容", "WinZip-AES payload 读出明文（向后兼容）");
+    // 改点内容再存 → _seal 用 pack7z 重打成 7z 容器
+    await env.store.flow.save("老画", { encode: () => bytes("我的老画内容-改") });
+    const after = await localU8(env, "老画");
+    assert(await looksEncryptedContainer(after), "存后仍是加密容器");
+    // at-rest 外壳仍是明文 zip，但内层 <GUID> payload 现在是 .7z（找 7z magic 出现在字节里即证明迁移）
+    let has7z = false;
+    for (let i = 0; i + 6 <= after.length; i++) { if (SEVENZ_MAGIC.every((b, k) => after[i + k] === b)) { has7z = true; break; } }
+    assert(has7z, "迁移后 payload 是 .7z（出现 7z magic）");
+    // 再 load 验明文还在
+    const r2 = await env.store.flow.load("老画");
+    eq(txt(await blobU8(r2.blob)), "我的老画内容-改", "迁移后仍读得回");
   });
 });

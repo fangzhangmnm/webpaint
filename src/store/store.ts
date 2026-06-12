@@ -708,10 +708,13 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   async function verifyPassword(name: string, pw: string): Promise<boolean> {
     if (!pw) return false;
     const tail = await getTailBytes(name, PEEK_TAIL_WINDOW, { cloud: true });   // 本地无字节→云端 peek（拉取前解锁用）
-    if (!tail) return false;
-    const parsed = scanEncPeekFromEnd(new Uint8Array(await tail.arrayBuffer()));
-    if (!parsed) return false;
-    try { await decryptPeek(parsed, pw); return true; } catch { return false; }
+    if (tail) {
+      const parsed = scanEncPeekFromEnd(new Uint8Array(await tail.arrayBuffer()));
+      if (parsed) { try { await decryptPeek(parsed, pw); return true; } catch { return false; } }
+    }
+    // 无 peek（裸 .7z / 手工 mock）→ 退回整字节解一把验（贵，仅无 peek 时）。本地无字节 → false。
+    const full = local ? await local.get(name) : null;
+    return full ? await verifyContainer(full as Blob, pw) : false;
   }
   // 验证一段明文容器字节的密码（导入外来加密文件用——文件还没进 store，没 name 可查）。
   async function verifyContainer(blob: Blob, pw: string): Promise<boolean> {

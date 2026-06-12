@@ -17,6 +17,7 @@ const {
   makeGuid, PEEK_TAIL_WINDOW,
 } = await import("../src/store/crypto-container.ts");
 const { zipPack } = await import("../src/zip.js");
+const { pack7z } = await import("../src/sevenzip.js");
 
 // ---- 测试素材 ----
 const PNG_STUB = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4, 5, 6, 7, 8]);
@@ -58,6 +59,79 @@ describe("crypto-container · 容器往返", () => {
     const plain = await zipPack([{ path: "stack.xml", data: "<image/>" }, { path: "Thumbnails/thumbnail.png", data: PNG_STUB }]);
     assert(!(await looksEncryptedContainer(plain)), "明文 ora 形 zip → false");
     assert(!(await looksEncryptedContainer(new Uint8Array(1000))), "垃圾 → false");
+  });
+});
+
+describe("crypto-container · 向后兼容 + 容错读取", () => {
+  // 模拟 v233-235 老容器：外壳明文 zip { <GUID>=WinZip-AES zip, peek }。zip.js 不再写 WinZip-AES，
+  // 这里用一段预生成的 WinZip-AES payload 验「读得回」——改用「外壳里塞一个 7z payload 但没 peek」+
+  // 「裸 7z」+「缺 meta/data.bin」覆盖主要容错路径（WinZip-AES 读路径靠 zipUnpackEncrypted 单测兜）。
+
+  it("裸 .7z（无外壳无 peek，手工 mock）→ 探测为加密 + 解出内容", async () => {
+    const sevenz = await pack7z([{ path: "data.bin", data: ORA_STUB }, { path: "meta.bin", data: "WPMETA1\n" + JSON.stringify({ v: 1, name: "手工", ext: "ora" }) }], PW);
+    assert(await looksEncryptedContainer(sevenz), "裸 .7z 首字节 magic → 探测 true");
+    const res = await unpackContainer(new Blob([sevenz]), PW);
+    assert(bytesEq(new Uint8Array(await res.dataBlob.arrayBuffer()), ORA_STUB), "裸 .7z 解出 data.bin");
+    eq(res.meta.name, "手工", "meta 仍读出");
+  });
+
+  it("裸 .7z 缺 meta.bin → 仍解出（name/ext 未知，data 取唯一 entry）", async () => {
+    const sevenz = await pack7z([{ path: "data.bin", data: ORA_STUB }], PW);
+    const res = await unpackContainer(new Blob([sevenz]), PW);
+    assert(bytesEq(new Uint8Array(await res.dataBlob.arrayBuffer()), ORA_STUB), "无 meta 也解出");
+    eq(res.meta, null, "meta 缺失 → null");
+  });
+
+  it("裸 .7z 把 ora 直接当 entry（不叫 data.bin）→ 取首个非 meta entry 当本体", async () => {
+    const sevenz = await pack7z([{ path: "我的画.ora", data: ORA_STUB }], PW);
+    const res = await unpackContainer(new Blob([sevenz]), PW);
+    assert(bytesEq(new Uint8Array(await res.dataBlob.arrayBuffer()), ORA_STUB), "data.bin 缺失 → fallback 首个 entry");
+  });
+
+  it("外壳容器内 payload 是 7z（缺 meta.bin）→ 解出 data 本体", async () => {
+    const payload7z = await pack7z([{ path: "data.bin", data: ORA_STUB }], PW);
+    const peek = await encryptPeek(PNG_STUB, PW);
+    const container = await zipPack([{ path: makeGuid(), data: payload7z }, { path: "peek", data: peek }]);
+    assert(await looksEncryptedContainer(container), "带 peek 容器 → true");
+    const res = await unpackContainer(container, PW);
+    assert(bytesEq(new Uint8Array(await res.dataBlob.arrayBuffer()), ORA_STUB), "外壳+7z payload 解出");
+  });
+
+  it("裸 .7z 错密码 → throw", async () => {
+    const sevenz = await pack7z([{ path: "data.bin", data: ORA_STUB }], PW);
+    let threw = false;
+    try { await unpackContainer(new Blob([sevenz]), "wrong"); } catch (_) { threw = true; }
+    assert(threw);
+  });
+
+  // v233-235 真实老容器：payload = WinZip-AES zip（用 zip.js 直接造，模拟当年 zipPackEncrypted 产物）。
+  async function makeWinzipAesZip(entries, pw) {
+    const z = globalThis.window.zip;
+    const w = new z.ZipWriter(new z.BlobWriter("application/zip"), { password: pw, encryptionStrength: 3 });
+    for (const { path, data } of entries) {
+      const u8 = data instanceof Uint8Array ? data : new TextEncoder().encode(data);
+      await w.add(path, new z.Uint8ArrayReader(u8), { level: 0 });
+    }
+    return new Uint8Array(await (await w.close()).arrayBuffer());
+  }
+
+  it("v233-235 老容器（外壳 + WinZip-AES payload + peek）→ 7z 代码也能读出", async () => {
+    const aesPayload = await makeWinzipAesZip([
+      { path: "data.bin", data: ORA_STUB },
+      { path: "meta.bin", data: "WPMETA1\n" + JSON.stringify({ v: 1, name: "老画", ext: "ora" }) },
+    ], PW);
+    const peek = await encryptPeek(PNG_STUB, PW);
+    const container = await zipPack([{ path: makeGuid(), data: aesPayload }, { path: "peek", data: peek }]);
+    assert(await looksEncryptedContainer(container), "老容器仍探测为加密（peek 不变）");
+    const res = await unpackContainer(container, PW);
+    assert(bytesEq(new Uint8Array(await res.dataBlob.arrayBuffer()), ORA_STUB), "WinZip-AES payload 逐位解出（向后兼容）");
+    eq(res.meta.name, "老画", "老 meta 读出");
+  });
+
+  it("裸 WinZip-AES zip（无外壳，手工 mock）→ 解出", async () => {
+    const aesZip = await makeWinzipAesZip([{ path: "data.bin", data: ORA_STUB }], PW);
+    const res = await unpackContainer(new Blob([aesZip]), PW);
+    assert(bytesEq(new Uint8Array(await res.dataBlob.arrayBuffer()), ORA_STUB), "裸 WinZip-AES 解出");
   });
 });
 

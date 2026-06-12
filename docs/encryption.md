@@ -32,6 +32,13 @@ store 不能对文件格式有任何预设」）。
   调 `../sevenzip.js` 的 pack7z/unpack7z（同 zip.js 注入方式），node 测经 setSevenZipLoader 注入。
 - 为什么不直接 bare .7z（一步恢复）：整文件得是 zip 才能塞尾部 byte-range peek（云端加密缩略图）。
   user 2026-06-12 选「保 peek，恢复两步」。恢复：7-Zip 开 .zip → 取 <GUID> → 改名 .7z → 输密码。
+- **向后兼容 + 容错读取（v238）**：`unpackContainer` 按 magic 路由解 payload，**老文件不变砖**：
+  - **v233-235 老容器**（payload = WinZip-AES zip）→ `zip.js zipUnpackEncrypted`（只读保留）解；
+    打开后**下次保存自动迁成 .7z**（`_seal` 恒用 pack7z）。`zipPackEncrypted`（写）已删，不再产弱 KDF。
+  - **裸 .7z**（用户手工 `7z a -p`，无外壳无 peek）→ 探测靠 offset 0 的 7z magic；直接解。
+  - **缺 meta.bin** → name/ext 未知但 data 本体照读；**data.bin 命名不对** → 取唯一/首个非 meta entry。
+  - 无 peek 的文件 `verifyPassword` 退回整本地字节解一把验（贵，仅无 peek 时）。
+  - 注：裸 WinZip-AES zip（PK 开头无 peek）无法靠 magic 与明文 ora 区分 → 不自动识别（用 7z mock 即可）。
 
 ## 模块图（store 底座 / app 层两段）
 
