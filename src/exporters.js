@@ -21,6 +21,8 @@
 import { makeRegistry } from "./registry.js";
 import { encodeDocToOra } from "./ora.js";
 import { renderDocToImageBlob } from "./session.js";
+import { store as _store } from "./app-store.js";
+import { session } from "./session-state.ts";
 
 const _reg = makeRegistry({ name: "exporter" });
 
@@ -40,7 +42,15 @@ export function onExporterRegistered(fn) { return _reg.onRegistered(fn); }
 // ============= 第一方内建导出器 =============
 registerExporter({
   id: "ora", label: ".ora（推荐 / 开源）", ext: "ora", kind: "project",
-  encode: (doc) => encodeDocToOra(doc),
+  // 加密作品导出 = 密文容器（store.seal 按当前文件加密态包壳；明文作品原样）——
+  // 防「导出」变成无声的明文泄漏口。要明文导出：先在图库解除加密。
+  // 下载扩展名由 export-import-menu 按字节判（容器 → .zip）。
+  encode: async (doc) => {
+    const plain = await encodeDocToOra(doc);
+    if (!session.name) return plain;
+    const sealed = await _store.seal(session.name, new Uint8Array(await plain.arrayBuffer()));
+    return new Blob([sealed], { type: "application/zip" });
+  },
 });
 registerExporter({
   id: "psd", label: ".psd（Photoshop）", ext: "psd", kind: "project", busyHint: "PSD 编码中…",

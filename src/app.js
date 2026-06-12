@@ -57,7 +57,8 @@ import { initPlatformGuards } from "./platform-guards.ts";
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
 import { stepFor as _stepFor, quantizeSize as _quantizeSize } from "./ui/brush-size.ts";   // [ ] 键盘调粗用（slider 映射在 <LeftDial>）
 import { computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";   // candidate 1 · currentBrush computed + 引擎桥 watch
-import { loadCurrentSession, getCurrentSessionName } from "./session.js";
+import { getCurrentSessionName } from "./session.js";
+import { decodeOraToDoc } from "./ora.js";   // boot 恢复：flow.load 解壳后的明文 → doc
 // Selection 切到 selection-ops.ts；smooth-config（SMOOTH/saveSmooth/resetSmooth）切到 smooth-dev-panel.ts
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
 //   filters.js 只剩 Filter 契约 + registry + helper；
@@ -445,15 +446,20 @@ window.addEventListener("offline", () => { updateCloudAuthUI(); });
     return;
   }
   try {
-    const loaded = await loadCurrentSession();
-    if (!loaded) {
-      // 上次记录的 name 在 IDB 没了 → 停 gallery
+    // v235：boot load 走 store.flow.load（加密容器自动解壳 + in-app 密码弹窗；明文原样）。
+    // 旧 v35 单 slot 迁移随之退役（所有设备 ≥ v36 已久）。
+    const r = await _store.flow.load(wantedName);
+    if (r.status !== "loaded") {
+      // IDB 没了 / 加密未解锁（取消）→ 停 gallery
       session.setName(null);
       updateSaveStatus();
       await setGalleryOpen(true);
-      setStatus(`找不到上次画作 "${wantedName}"，先选一个或新建`);
+      setStatus(r.status === "locked"
+        ? `「${wantedName}」是加密作品（已取消解锁）——从图库再打开`
+        : `找不到上次画作 "${wantedName}"，先选一个或新建`);
       return;
     }
+    const loaded = await decodeOraToDoc(r.blob);
     session.adopt(loaded, wantedName);
     setStatus(`已恢复：${wantedName} (${loaded.layers.length} 层)`);
     gateCloudSyncOnOpen(wantedName).catch((e) => console.warn("[sync-gate]", e));

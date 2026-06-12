@@ -15,8 +15,11 @@
 import { toU8, bytesEqual, createSubstrate } from "./substrate.ts";
 import type { Bytes, BytesSource } from "./substrate.ts";
 import type { BusyFn, CloudItem, CloudSync, FetchMetaResult, Kv, LocalAdapter } from "./types.ts";
-// 加密容器（ADR-0012）：flow.encrypt/decrypt 的机制层。app-agnostic（data.bin 不透明字节）。
-import { looksEncryptedContainer, packContainer, unpackContainer, makeGuid } from "./crypto-container.ts";
+// 加密容器（ADR-0012）：机制层，格式盲（data.bin / peek 都是不透明字节）。
+import {
+  looksEncryptedContainer, packContainer, unpackContainer,
+  scanEncPeekFromEnd, decryptPeek, PEEK_TAIL_WINDOW,
+} from "./crypto-container.ts";
 
 // busy 包装的统一签名（注入的 _uiBusy / 各 flow 的 opts.busy / 默认 passBusy 共用）。
 type Busy = BusyFn;
@@ -31,6 +34,20 @@ interface StoreDeps {
   backoffMs?: number;
   sleep?: (ms: number) => Promise<void>;
   busy?: Busy;
+  /** 加密（ADR-0012）的 app 接缝——装配时注入一次，之后 save/load/push/pull 对调用方**完全透明**
+   *  （encode 永远出明文、adopt/load 永远收明文，包壳/解壳全在 flow 里）。store 格式盲：
+   *  makePeek 进出都是不透明字节（WebPaint 的解释=缩略图 PNG，文本 app 可以是摘要——store 不看）。
+   *  密码记忆完全归 app（统一密码 / per-file keyring / 全局+per-name 覆盖，三种政策一个形状吃掉）：
+   *    getPassword(name)        同步、非交互（批量渲染路径绝不弹窗）
+   *    requestPassword(name)    交互兜底；store 在解壳路径循环它（retry=上一个候选验证失败）
+   *    onPasswordVerified       store 验证通过（解壳成功 / GCM tag 对）后回调，app 决定记到哪 */
+  crypt?: {
+    ext?: string;                                              // 真扩展名，进 meta.bin（"ora"/"txt"/…）
+    makePeek?: (data: Blob) => Promise<Uint8Array | null>;     // 明文 → 明文不透明字节；加密深模块做
+    getPassword?: (name: string) => string | null;
+    requestPassword?: (name: string, ctx: { retry: boolean }) => Promise<string | null>;
+    onPasswordVerified?: (name: string, password: string) => void;
+  };
 }
 
 // 冲突 / 同步流的状态机返回（status 判别）。app 据此续 UI。
@@ -96,7 +113,7 @@ interface FlowResult {
  *   锁屏，调用方忘了包也照锁——挡住改名中途点刷新/tile 读到半截态那类竞态（见 0B 三联症）。
  *   后台流（_doPush/autosave/freshness probe）不默认锁（否则自动保存会闪全屏遮罩）。
  */
-export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy }: StoreDeps = {} as StoreDeps) {
+export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy, crypt = {} }: StoreDeps = {} as StoreDeps) {
   const sub = createSubstrate();    // shape-agnostic 底座：编辑游标 + push-serialize + save 合流
   const _sleep = sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
@@ -170,13 +187,17 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     // If-Match 唯一来源：parentBase。无 parent 时——dirty=新文件(首推不带 If-Match)；非 dirty=强推用本 tab 已见版。
     const baseEtag = hasParent(name) ? parentFor(name) : (cloud.isDirty(name) ? null : seenBase(name));
     const v0 = getEditVersion();
-    const bytes = await toU8(await encode());      // 只编码一次，重试复用（B5 逐字节比对要相等）
+    // encode 出**明文**；按 name 的 at-rest 加密态在这里统一包壳（调用方对加密零感知）。
+    // 只编码+包壳一次，重试复用（B5 逐字节比对要相等）。
+    const bytes = await _seal(name, await toU8(await encode()));
+    // 扩展名跟字节内容走（ADR-0012：加密容器在云端叫 .zip）——cloud-sync 据此选路径。
+    const isEnc = await looksEncryptedContainer(bytes);
     return busy("正在同步…", async () => {
       let attempt = 0, lastErr: unknown;
       while (attempt < maxAttempts) {
         attempt++;
         try {
-          const { item } = await cloud.push(name, bytes, { baseEtag });
+          const { item } = await cloud.push(name, bytes, { baseEtag, encrypted: isEnc });
           if (item && item.eTag) _base.set(name, item.eTag);   // 只推进自己的 base
           return _finish(name, v0, getEditVersion, "pushed");
         } catch (e: any) {
@@ -222,7 +243,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     if (r.item && r.item.eTag) { cloud.setETag(name, r.item.eTag); _base.set(name, r.item.eTag); }
     cloud.setDirty(name, false);              // 已采纳云端 → 不再 unpushed
     clearParent(name);                        // episode 结束（已采纳云版）
-    if (adopt) await adopt(r.blob, name);          // 反映到活编辑器
+    if (adopt) await adopt(await _unsealOrThrow(name, r.blob), name);   // 反映到活编辑器（已解壳为明文）
     return { ok: true, backupName };
   }
 
@@ -246,7 +267,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     }
     // weak-override（Work 的 never-lose 覆盖）：云端→.backup，再 force-push 本地。需 bytes（仅 push 上下文有）。
     if (choice === "weak-override" && bytes != null) {
-      const r = await cloud.weakOverride(name, bytes);
+      const r = await cloud.weakOverride(name, bytes, { encrypted: await looksEncryptedContainer(bytes) });
       if (r.item && r.item.eTag) _base.set(name, r.item.eTag);
       clearParent(name);                        // 本地已强推上云、loser 进 .backup → episode 结束
       return { status: "resolved", resolution: "weak-override", backedUp: r.backedUp };
@@ -564,7 +585,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         cloud.setETag(localName, r.item.eTag);
         cloud.setDirty(localName, false);
       }
-      if (adopt) await adopt(r.blob, localName);
+      if (adopt) await adopt(await _unsealOrThrow(localName, r.blob), localName);
       return { status: "acquired", localName, item: r.item };
     });
   }
@@ -668,39 +689,107 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
-  // ---- 加密 transform（ADR-0012：flow.encrypt / flow.decrypt）----
+  // ==== 加密（ADR-0012）：调用方零感知，密码经 crypt seam，store 格式盲 ====
+
+  // 密码解析循环：getPassword（非交互）先试 → interactive 时 requestPassword 循环
+  //   （retry=上一个候选验证失败）。attempt 抛 code=WRONG_PASSWORD → 换下一个候选；
+  //   其他错误原样上抛。验证通过 → onPasswordVerified（app 决定记到哪——全局/每文件）。
+  //   拿不到/取消 → null。**密码字符串绝不在 store 持久/留存。**
+  async function _withPassword<T>(name: string, attempt: (pw: string) => Promise<T>, { interactive = false } = {}): Promise<T | null> {
+    let retried = false;
+    const first = crypt.getPassword ? crypt.getPassword(name) : null;
+    if (first) {
+      try { const v = await attempt(first); crypt.onPasswordVerified?.(name, first); return v; }
+      catch (e: any) { if (e?.code !== "WRONG_PASSWORD") throw e; retried = true; }
+    }
+    if (!interactive || !crypt.requestPassword) return null;
+    for (;;) {
+      const pw = await crypt.requestPassword(name, { retry: retried });
+      if (pw == null) return null;
+      try { const v = await attempt(pw); crypt.onPasswordVerified?.(name, pw); return v; }
+      catch (e: any) { if (e?.code !== "WRONG_PASSWORD") throw e; retried = true; }
+    }
+  }
+  function _lockedErr(name: string): Error & { code?: string } {
+    const e = new Error(`「${name}」已加密且未解锁（需要密码）`) as Error & { code?: string };
+    e.code = "LOCKED";
+    return e;
+  }
+
+  // 包壳（encode 边界统一调）：按 name 的 at-rest 字节判断加密态——SSoT 是字节本身，无登记表可漂移。
+  //   明文文件 / 输入已是容器（rename 原样搬运路径）→ 原样返回。
+  //   加密文件 + 密码不在 → 响亮抛 LOCKED（保存路径绝不弹窗、绝不静默存明文）。
+  async function _seal(name: string, plain: Bytes): Promise<Bytes> {
+    if (await looksEncryptedContainer(plain)) return plain;          // 已是容器（原样字节搬运路径）→ 不二次包
+    if (!local) return plain;
+    const prev = await local.get(name);
+    if (!prev || !(await looksEncryptedContainer(prev as Blob | Uint8Array))) return plain;   // 明文文件
+    const pw = crypt.getPassword ? crypt.getPassword(name) : null;
+    if (!pw) throw _lockedErr(name);
+    let peek: Uint8Array | null = null;
+    if (crypt.makePeek) {
+      try { peek = await crypt.makePeek(new Blob([plain as BlobPart])); } catch (_) { peek = null; }
+    }
+    const container = await packContainer({ dataBytes: plain, fileName: name, ext: crypt.ext, peek, password: pw });
+    return await toU8(container);
+  }
+
+  // 解壳：明文原样返回；容器 → 密码循环解包。锁定/取消 → null（_unsealOrThrow 抛 LOCKED）。
+  async function _unseal(name: string, blob: Blob, { interactive = true } = {}): Promise<Blob | null> {
+    if (!(await looksEncryptedContainer(blob))) return blob;
+    const res = await _withPassword(name, (pw) => unpackContainer(blob, pw), { interactive });
+    return res ? res.dataBlob : null;
+  }
+  async function _unsealOrThrow(name: string, blob: Blob): Promise<Blob> {
+    const plain = await _unseal(name, blob, { interactive: true });
+    if (!plain) throw _lockedErr(name);
+    return plain;
+  }
+
+  // ---- flow.save / flow.load：本地持久化也走深模块（明文绝不落盘）----
+  // save：encode 出明文 → 按加密态包壳 → local.save。hint 是给 LocalAdapter 的 app 旁路
+  //   （如 WebPaint 把活 doc 现成的缩略图带过去省一次解码），store 不解释、原样透传。
+  interface SaveOpts { encode: () => BytesSource | Promise<BytesSource>; hint?: unknown; }
+  async function save(name: string, { encode, hint }: SaveOpts): Promise<FlowResult> {
+    if (!local) throw new Error("Store: 未注入 local adapter");
+    return sub.serialize(name, async () => {
+      const plain = await toU8(await encode());
+      const sealed = await _seal(name, plain);
+      await (local!.save as any)(name, sealed, hint);
+      return { status: "saved", local: true };
+    });
+  }
+  // load：local.get → 自动解壳 → 明文 blob。加密且解不开（锁定/取消）→ status:"locked"。
+  async function load(name: string, { interactive = true } = {}): Promise<FlowResult & { blob?: Blob; encrypted?: boolean }> {
+    if (!local) throw new Error("Store: 未注入 local adapter");
+    const raw = await local.get(name);
+    if (!raw) return { status: "absent" };
+    const encrypted = await looksEncryptedContainer(raw as Blob | Uint8Array);
+    if (!encrypted) return { status: "loaded", blob: raw as Blob, encrypted: false };
+    const plain = await _unseal(name, raw as Blob, { interactive });
+    if (!plain) return { status: "locked", encrypted: true };
+    return { status: "loaded", blob: plain, encrypted: true };
+  }
+
+  // ---- 加密 transform（flow.encrypt / flow.decrypt：切换 at-rest 加密态）----
   // 「换文件体」的用户态写流：本地与云端的字节**一起**换成密文/明文。深模块强制的红线：
   //   ① 本地先落盘（字节真相；authority dirty→local）——云端没跟上时本地版本是权威端；
   //   ② 云端跟进失败（412 真分叉 / 网络）→ **标脏 + 锚 parentBase=换前云版**，交给正常 push 流
   //      接力收敛（下次推 If-Match 旧云版：没人动过→换成功；动过→412 surface），绝不静默分叉
   //      （v233 教训：app 层只推云不换本地 → 下次保存把明文又推上去 = 加密被静默撤销）；
   //   ③ 已同步过云端（有 etag）但离线 → 拒绝（status:"offline"），防止"只换了一端"的隐藏分叉；
-  //   ④ 错密码在任何持久改动**之前**抛（unpackContainer 先行）。
-  // 缩略图 store 不懂：encrypt 收 app 渲好的 thumbPng（容器尾部 blob 必备件——兼任容器探测标记 +
-  //   byte-range 预览源）；预览解密 app 经 getTailBytes 自取。密码策略（统一/每文件）也归 app。
-  interface EncryptOpts {
-    password: string;
-    thumbPng: Uint8Array;
-    fileName?: string | null;   // meta.bin 真名（默认 name）
-    ext?: string;               // meta.bin 真扩展名（如 "ora"）
-    isOnline?: () => boolean;
-    busy?: Busy;
-  }
-  interface DecryptOpts {
-    password: string;
-    isOnline?: () => boolean;
-    busy?: Busy;
-  }
+  //   ④ 错密码在任何持久改动**之前**出局（解包/密码循环先行，零副作用）。
+  interface CryptOpOpts { isOnline?: () => boolean; busy?: Busy; }
 
-  // 字节替换共用流。tracked = 曾与云同步（有 etag）。
-  async function _swapBytes(name: string, bytes: Bytes, isOnline: () => boolean): Promise<FlowResult> {
+  // 字节替换共用流。tracked = 曾与云同步（有 etag）。encrypted 显式传（决定云端扩展名）。
+  async function _swapBytes(name: string, bytes: Bytes, isOnline: () => boolean, encrypted: boolean): Promise<FlowResult> {
     const prevEtag = cloud.getETag(name);
     const tracked = prevEtag != null;
     if (tracked && !isOnline()) return { status: "offline" };
     await local!.save(name, bytes);                       // ① 字节真相先落地
     if (!tracked) return { status: "swapped", cloud: false };
     try {
-      const { item } = await cloud.push(name, bytes, { baseEtag: seenBase(name) });   // If-Match：本 tab 已见版（kv 兜底）
+      const { item } = await cloud.push(name, bytes, { baseEtag: seenBase(name), encrypted });   // If-Match：本 tab 已见版（kv 兜底）；含扩展名翻转
       if (item && item.eTag) _base.set(name, item.eTag);  // cloud.push 内已 setETag+setDirty(false)；这里推进本 tab base
       clearParent(name);                                  // episode 落地
       return { status: "swapped", cloud: true };
@@ -713,45 +802,86 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     }
   }
 
-  async function encryptFile(name: string, opts: EncryptOpts): Promise<FlowResult> {
-    const { password, thumbPng, fileName, ext, isOnline = () => true, busy = _uiBusy } = opts || ({} as EncryptOpts);
+  async function encryptFile(name: string, opts: CryptOpOpts = {}): Promise<FlowResult> {
+    const { isOnline = () => true, busy = _uiBusy } = opts;
     if (!local) throw new Error("Store: 未注入 local adapter，无法加密");
     return busy(`正在加密 ${name}…`, () => sub.serialize(name, async () => {
       const blob = await local!.get(name);
       if (!blob) return { status: "no-local" };
       if (await looksEncryptedContainer(blob as Blob | Uint8Array)) return { status: "already" };
       if (cloud.getETag(name) != null && !isOnline()) return { status: "offline" };   // 早退：还没打包就知道两端换不齐
-      const container = await packContainer({
-        dataBytes: await toU8(blob), fileName: fileName ?? name, ext,
-        guid: makeGuid(), thumbPng, password,
-      });
-      return await _swapBytes(name, await toU8(container), isOnline);
+      // 首次加密的密码 = app 在调用前经自己的设密码 UX 放进 seam（store 这里只取，不问）
+      const pw = crypt.getPassword ? crypt.getPassword(name) : null;
+      if (!pw) return { status: "locked" };
+      let peek: Uint8Array | null = null;
+      if (crypt.makePeek) {
+        const asBlob = blob instanceof Blob ? blob : new Blob([blob as BlobPart]);
+        try { peek = await crypt.makePeek(asBlob); } catch (_) { peek = null; }
+      }
+      const container = await packContainer({ dataBytes: await toU8(blob), fileName: name, ext: crypt.ext, peek, password: pw });
+      return await _swapBytes(name, await toU8(container), isOnline, true);
     }));
   }
 
-  async function decryptFile(name: string, opts: DecryptOpts): Promise<FlowResult> {
-    const { password, isOnline = () => true, busy = _uiBusy } = opts || ({} as DecryptOpts);
+  async function decryptFile(name: string, opts: CryptOpOpts = {}): Promise<FlowResult> {
+    const { isOnline = () => true, busy = _uiBusy } = opts;
     if (!local) throw new Error("Store: 未注入 local adapter，无法解除加密");
     return busy(`正在解除加密 ${name}…`, () => sub.serialize(name, async () => {
       const blob = await local!.get(name);
       if (!blob) return { status: "no-local" };
       if (!(await looksEncryptedContainer(blob as Blob | Uint8Array))) return { status: "not-encrypted" };
       if (cloud.getETag(name) != null && !isOnline()) return { status: "offline" };
-      const { dataBlob } = await unpackContainer(blob as Blob, password);   // ④ 错密码这里抛（code=WRONG_PASSWORD），零持久副作用
-      return await _swapBytes(name, await toU8(dataBlob), isOnline);
+      // ④ 密码循环（交互）在任何持久改动之前；锁定/取消 → 干净退出
+      const res = await _withPassword(name, (pw) => unpackContainer(blob as Blob, pw), { interactive: true });
+      if (!res) return { status: "locked" };
+      return await _swapBytes(name, await toU8(res.dataBlob), isOnline, false);
     }));
   }
 
-  // 尾部字节原语（file-envelope.md salvage：「store 暴露取尾部 N 字节，app 自取 thumb」）。
-  // 加密缩略图导航用：app 拿尾片自己 scan MAGIC + 解密；store 不懂 thumb。
-  // IDB Blob.slice 是惰性引用，不整读；Mock（Uint8Array）同名 slice 兼容。
-  async function getTailBytes(name: string, n: number): Promise<Blob | null> {
-    if (!local) return null;
+  // ---- 读侧原语（格式盲；peek 字节的解释归 app）----
+
+  // 尾部字节（file-envelope.md salvage）。自动路由：本地有 → blob 尾切片（IDB Blob.slice 惰性）；
+  //   没有且 opts.cloud → 云端 byte-range（peek 预览纯云端文件用）。
+  async function getTailBytes(name: string, n: number, { cloud: tryCloud = false } = {}): Promise<Blob | null> {
+    if (local) {
+      const blob = await local.get(name);
+      if (blob) {
+        const size = (blob as any).size ?? (blob as any).length ?? 0;
+        const sliced = (blob as any).slice(Math.max(0, size - n));
+        return sliced instanceof Blob ? sliced : new Blob([sliced]);
+      }
+    }
+    if (tryCloud && (cloud as any).pullTail) {
+      const t = await (cloud as any).pullTail(name, n);
+      return t ? new Blob([t.bytes as BlobPart]) : null;
+    }
+    return null;
+  }
+
+  // 解一段尾片里的加密 peek → 不透明明文字节。非交互缺省（图库批量渲染绝不弹窗伏击）；
+  //   interactive=true 才进 requestPassword 循环（点锁解锁那个动作）。解不开/没有 → null。
+  async function decryptPeekBytes(name: string, tail: Blob | Uint8Array, { interactive = false } = {}): Promise<Uint8Array | null> {
+    const u8 = tail instanceof Uint8Array ? tail : new Uint8Array(await tail.arrayBuffer());
+    const parsed = scanEncPeekFromEnd(u8);
+    if (!parsed) return null;
+    return await _withPassword(name, (pw) => decryptPeek(parsed, pw), { interactive });
+  }
+
+  // 便捷组合：本地（或 cloud:true 时云端）尾片 → peek 明文字节。锁定 → null（app 显示锁样式）。
+  async function readPeek(name: string, { interactive = false, cloud: tryCloud = false } = {}): Promise<Uint8Array | null> {
+    const tail = await getTailBytes(name, PEEK_TAIL_WINDOW, { cloud: tryCloud });
+    if (!tail) return null;
+    return await decryptPeekBytes(name, tail, { interactive });
+  }
+
+  // 加密态查询（按本地字节尾扫；SSoT=字节）与原始字节读取（导出密文容器等场景）。
+  async function isEncrypted(name: string): Promise<boolean> {
+    if (!local) return false;
     const blob = await local.get(name);
-    if (!blob) return null;
-    const size = (blob as any).size ?? (blob as any).length ?? 0;
-    const sliced = (blob as any).slice(Math.max(0, size - n));
-    return sliced instanceof Blob ? sliced : new Blob([sliced]);
+    return blob ? await looksEncryptedContainer(blob as Blob | Uint8Array) : false;
+  }
+  async function loadRaw(name: string): Promise<Blob | null> {
+    return local ? await local.get(name) : null;
   }
 
   // 单飞守卫（single-flight）：用户态写流（rename/saveAs/del/restore/purge/emptyTrash/newFolder/deleteFolder）
@@ -785,8 +915,16 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       deleteFolder: _singleFlight("删除文件夹", deleteFolder),
       encrypt: _singleFlight("加密", encryptFile),         // 换文件体（ADR-0012）；内部只调 cloud.push/local，不嵌套被守流
       decrypt: _singleFlight("解除加密", decryptFile),
+      save,                    // 本地落盘（encode 出明文，加密态自动包壳）——热路径，不进单飞守卫
+      load,                    // 本地读取（自动解壳出明文；锁定 → status:"locked"）
     },
-    getTailBytes,              // 尾部 N 字节原语（app 自取加密 thumb；store 不懂缩略图）
+    seal: _seal,               // 旁路字节按 name 加密态包壳（app 的 checkpoint/导出等自管存储用；不透明）
+    unseal: (name: string, blob: Blob, opts?: { interactive?: boolean }) => _unseal(name, blob, opts),
+    isEncrypted,               // 加密态查询（SSoT=本地字节尾扫）
+    loadRaw,                   // 原始字节不解壳（导出密文容器用）
+    getTailBytes,              // 尾部 N 字节原语（本地/云端自动路由；peek 解释归 app）
+    decryptPeekBytes,          // 尾片 → peek 明文字节（密码经 seam；非交互缺省）
+    readPeek,                  // getTailBytes + decryptPeekBytes 便捷组合
     edit,                      // 唯一编辑入口（游标 + 门）（L4 ②）
     busy,                      // transient saving/pushing busy（状态归 store，status 只读）（L4 ②b）
     autosave,                  // 本地落盘节律（configure/start/flush）：cadence 归 store（L4 ②c）

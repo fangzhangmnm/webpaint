@@ -1,77 +1,88 @@
 # WebPaint 加密（ADR-0012 三层容器 + 统一图库密码 + store operator）
 
-> as-of v234 / 2026-06-11。规范出处：`MyPWAPatterns/docs/encryption-model.md` + ADR-0012（2026-06-02 resolved）。
+> as-of v235 / 2026-06-12。规范出处：`MyPWAPatterns/docs/encryption-model.md` + ADR-0012（含 2026-06-12 修订）。
 > 本文记 WebPaint 落地的实现形态、决定与待验项。代码与本文矛盾时信代码。
 
-## 字节布局（文件名明文，文件体换壳）
+## 字节布局（文件名明文 + .zip，文件体换壳）
 
-身份 = path/name（GUID 身份方案 2026-06-07 已否决）——所以**云端/本地文件名保持明文**，
-加密只换文件体。日常同步（push/pull/trash/backup）对容器零感知（就是普通字节原样搬）；
-「加密/解除」transform 是 **store 底座的 operator**（v234，user 拍板「app-agnostic，不重复造轮子」）。
+身份 = path/name（GUID 身份方案 2026-06-07 已否决）——**文件名保持明文**，加密只换文件体。
+加密文件的外部扩展名 = **`.zip`**（容器本来就是标准 zip，名实相符、防软件按 .ora 误认；
+txt 加密了也是 .zip）。日常同步（push/pull/trash/backup/rename）对容器零感知（普通字节原样搬）；
+「加密/解除」与「包壳/解壳」全是 **store 底座 operator**（user 拍板「app-agnostic，不重复造轮子；
+store 不能对文件格式有任何预设」）。
 
 ```
-<name>.ora（加密时实为容器）
+<name>.zip（加密容器；明文文件仍是 <name>.ora）
   outer zip（明文 STORE，CD 干净，扫描器只见 zip 套 zip）
-    ├── <GUID>      WinZip-AES-256 zip（zip.js encryptionStrength:3 —— 7-Zip/WinRAR 输密码可开）
-    │     ├── data.bin   原始 .ora（扩展名混淆）
+    ├── <GUID>      加密 payload zip（标准格式，7-Zip 输密码可开）
+    │     ├── data.bin   原始 .ora **逐字节不动**（自带 Thumbnails/thumbnail.png → 7z 解出即正常带缩略图文件）
     │     └── meta.bin   "WPMETA1\n" + {v,name,ext}（无 app 恢复：解出→按 meta 改回真名）
-    └── thumb       [MAGIC 8][ver 1][salt 16][iv 12][len 4LE][AES-GCM(png)]  ← 最后 entry
+    └── peek        [MAGIC 8][ver 1][salt 16][iv 12][len 4LE][AES-GCM(不透明字节)]  ← 最后 entry
 ```
 
-- thumb blob = 容器探测标记（尾部扫 MAGIC）+ byte-range 预览（80KB suffix 一发命中），**必备**。
-- KDF 双轨：payload 用 WinZip 标准弱 KDF（换 7z 可开性，不预拉伸）；thumb 用 PBKDF2-SHA256×250k + AES-GCM（GCM tag 兼任密码验证器）。
-- salt per-file 在各自 header；无 verifier 文件、无密钥托管、无新增同步面。
+- **peek = 不透明字节**（store 永不解释）。WebPaint 的解释 = 缩略图 PNG（装配时 `makePeek` 从 ora 抽
+  `Thumbnails/thumbnail.png`）；文本类 app 可放摘要。peek blob 兼任容器探测标记（尾扫 MAGIC）+
+  byte-range 预览（80KB suffix 一发命中）。**空 peek 也写**（探测标记必须在）。
+- 密码学：payload AES-256；peek 用强 KDF（PBKDF2-SHA256×250k）+ AES-GCM（GCM tag 兼任密码验证器）。
+  salt per-file 在各自 header；无 verifier 文件、无密钥托管、无新增同步面。
+- **KDF 目标 = 强（.7z）**（user 2026-06-12「用那个好的，7z 能打开就行，不用兼容 winzip」）。
+  当前 payload 仍是 WinZip-AES-256（zip.js）作**过渡**——`.7z` 强 KDF 需在浏览器内生成 `.7z`
+  （vendored 7z-wasm，未做）；架构不变，只换 `zip.js` 的 `zipPackEncrypted/zipUnpackEncrypted` 两函数。详见 ADR-0012。
 
-## 模块图（store 底座 / app 层两段，v234 下沉后）
+## 模块图（store 底座 / app 层两段）
 
 **sync-store 底座（`src/store/`，shared-lib dev face —— AtlasMaker/WXHW 迁底座后直接复用）：**
 
+| 文件 / 表面 | 职责 |
+|---|---|
+| `store/crypto-container.ts` | 容器纯机制：pack/unpack/探测 + peek 加解密 + MAGIC 扫描。**格式盲**（data.bin/peek 都是不透明字节、ext 参数化）。HOST-SEAM：宿主供 `../zip.js` |
+| `flow.save / flow.load` | 本地落盘/读取**透明**：encode 出明文→按加密态自动包壳；load 自动解壳出明文（锁定→status:locked）。明文绝不落盘 |
+| `flow.push / open / acquire` | 同步路径同样透明：encode 出明文 store 包壳后推；adopt 收到的已解壳为明文 |
+| `flow.encrypt / decrypt` | 切换加密态：本地先落盘→云端 If-Match push（.zip 翻转）→失败/412 标脏+锚 parentBase 接力收敛；离线+已同步拒 |
+| 密码 seam（注入） | `getPassword`(同步非交互) / `requestPassword`(交互兜底，store 在解壳路径循环) / `onPasswordVerified`(验证通过回调 app 记忆)。**store 不存密码** |
+| `getTailBytes / decryptPeekBytes / readPeek` | 读侧原语：tail 本地/云端自动路由；peek 解密走密码 seam（非交互缺省）。`isEncrypted` / `loadRaw` / `seal` / `unseal` |
+
+**app 层（per-app 的部分；解释/政策都在这）：**
+
 | 文件 | 职责 |
 |---|---|
-| `store/crypto-container.ts` | 容器纯机制：pack/unpack/探测/thumb blob 加解密/MAGIC 扫描。app-agnostic（data.bin 不透明、ext 参数化）。HOST-SEAM：宿主供 `../zip.js` |
-| `store/store.ts` `flow.encrypt/decrypt` | 换文件体 operator：本地先落盘（字节真相）→ 云端 push（If-Match=已见版）→ 失败/412 → **标脏+锚 parentBase=换前云版**，正常 push 流接力收敛。离线+已同步 → 拒（status:offline）。错密码在任何持久改动前抛（code=WRONG_PASSWORD）。单飞守卫 + per-name serialize |
-| `store/store.ts` `getTailBytes(name,n)` | 尾部字节原语（file-envelope.md salvage 兑现）——store 不懂缩略图，app 拿尾片自己 scan+解密 |
-
-**app 层（per-app 的部分）：**
-
-| 文件 | 职责 |
-|---|---|
-| `src/crypto-state.js` | **统一密码**（WebPaint 的 per-app choice）内存态 + 弹窗注入 + `unpackContainerInteractive` |
-| `src/zip.js` | + `zipPackEncrypted/zipUnpackEncrypted`（WinZip-AES-256；HOST-SEAM 的提供方） |
-| `src/ora.js` | encode/decode **透明**处理容器：`doc._encGuid` 非空 → encode 出容器；decode 见容器 → 交互解锁 |
-| `src/enc-thumbs.js` | 图库胶水：`store.getTailBytes` 尾片/云密文 thumb 解密、解锁交互、新密码双输 |
-| `src/cloud-thumbs.js` | PNG 硬扫落空 → MAGIC 扫描，命中返**密文** Blob（`ENC_THUMB_MIME`） |
-| `src/ui/gallery.ts` | 锁样式 tile、点锁解锁、菜单 intent（调 flow.encrypt/decrypt + 密码 UX + thumbPng 渲制 + 残留清理） |
-| `src/gallery-shell.ts` | 图库菜单「解锁/锁定加密作品」 |
+| `src/crypto-state.js` | 密码**政策** = 统一密码 + per-name 覆盖（导入别库文件密码不同）；`getPassword/requestPassword/onPasswordVerified` 三件喂给 store seam；弹窗实现由 composition root 注入 |
+| `src/zip.js` | + `zipPackEncrypted/zipUnpackEncrypted`（HOST-SEAM）+ `zipReadEntry`（makePeek 从 ora 抽缩略图） |
+| `src/app-store.js` | 装配点：注入 `crypt:{ext:"ora", makePeek, getPassword, requestPassword, onPasswordVerified}` + cloud 的 `encFileName`（.zip） |
+| `src/ora.js` | **纯 codec**：encode 永远出明文 ora、decode 永远收明文 ora（加密完全不可见） |
+| `src/enc-thumbs.js` | 把 store 解出的不透明 peek 字节解释成 image/png Blob + 设新密码双输 UX |
+| `src/cloud-thumbs.js` | PNG 硬扫落空 → MAGIC 扫描，命中返密文 Blob（`ENC_PEEK_MIME`），解密归 caller |
+| `src/ui/gallery.ts` | 锁样式 tile（readPeek 非交互）、点锁解锁（readPeek 交互）、菜单 intent（调 flow.encrypt/decrypt） |
+| `src/config.js` | `encSessionFileName`（.zip）+ `stripSessionExt`（.ora/.zip 都剥；所有去扩展名走这里） |
 
 ## 行为决定（与理由）
 
-- **密码内存 only，关页即忘**；encode 永不弹窗（密码不在 → throw「图库已锁定」，绝不静默存明文）；decode 才交互。
-- **解锁后 thumbs 全亮**（统一密码 → 一把钥匙开全部预览，导航不瞎）；锁定/未解锁 → 锁样式。
-- **明文 ora / 明文缩略图永不落盘，密文落盘**：IDB 里文件体=容器（离线照常可用），`pkg.thumb=null`、cloud-thumb cache 缓存密文、解出的 PNG 只进 objectURL。
-- **加密/解除 = store operator**（图库限非活动 item；活动 doc 的内存态/base 正被 session 编排）。
-  v233 教训（已修）：app 层只 `flow.push` 容器不换本地 → 本地留明文 + etag 已采纳 → 下次保存把明文
-  又推上去 = **加密被静默撤销**。operator 把「本地+云端一起换」收进深模块强制。
-- 加密成功顺手清明文残留：revert checkpoint（`revert:<name>:*`）+ 旧 etag 的 cloud-thumb 缓存。
-- **导出（导出项目→ora）对加密作品导出的是容器**（防误导出明文；7z 输密码可恢复）。要明文：先「解除加密」。
-- 改名/移动不重写容器 → meta.bin 里的真名滞后到下次保存，只是恢复辅助信息，接受。
-- 不强制强密码（规范明文规定）：设密码 sheet 一次性说明「忘记=找不回；弱密码可被暴破；7-Zip 可开」。
-- 多密码混库（导入别的库的加密文件）：内存只持最后验证成功的一个，另一密码的文件保持锁样式，打开时重问。
+- **save/load/push/pull 对 app 全透明**：encode 出明文、adopt/load 收明文，包壳解壳全在 store。
+  本地 IDB 也走 `flow.save/load`（缝上「本地持久化绕过深模块」的历史裂缝）。
+- **密码内存 only，关页即忘**；保存路径密码不在 → store 抛 `LOCKED`，**绝不静默存明文**；解壳路径才交互弹窗。
+- **解锁后 thumbs 全亮**（统一密码 → 一把钥匙开全部预览，导航不瞎）；批量渲染非交互（锁定→锁样式，不弹窗伏击）。
+- **明文 ora / 明文缩略图永不落盘，密文落盘**（离线照常可用）：IDB 文件体=容器，`pkg.thumb=null`，
+  cloud-thumb cache 缓存密文，解出 PNG 只进 objectURL。
+- **encrypt/decrypt 两端一起换**（图库限非活动 item）。v233/234 教训（已修）：只换一端 = 下次保存把明文推回 = 加密被静默撤销 → operator 强制两端一起换。
+- checkpoint（revert）走 `store.seal` 包壳存、`store.unseal` 解壳读 → 加密作品的明文快照也不落盘。
+- 导出（导出项目）对加密作品导出**密文容器**，下载名 .zip（防明文泄漏口；7z 输密码可恢复）。要明文先解除加密。
+- 密码政策一个 seam 吃三种：统一（WebPaint/WXHW）、per-file（AtlasMaker）、全局+per-name 覆盖（混库导入件）。
 
 ## 验证状态
 
-- ✅ node 24 测（crypto-container 12 + store-crypt 12）：往返/错密码零副作用/探测/尾部窗口/统一密码流/
-  operator 两端一起换/离线拒/412 标脏接力收敛/getTailBytes。
-- ✅ **互操作性**：测试内含一个不依赖 zip.js 的独立 WinZip-AES 解密器（node:crypto 按 AE-2 规范：
-  PBKDF2-SHA1×1000 → AES-256-CTR(LE counter) → HMAC-SHA1 + pwv），逐位解出 data.bin == 原 ora
-  —— 两个独立实现互通 ⇒ 格式标准 ⇒ 7-Zip 同理可开。
-- ⏳ **真 7-Zip 实测未做**（本机无 7z 二进制）：PC 上从 OneDrive 下载加密 .ora → 7-Zip 解外层 →
-  对 `<GUID>` 输密码 → data.bin 改名 .ora 能开。
+- ✅ node 24 测全过（269；crypto-container 13 + store-crypt 14）：容器往返/空 peek/错密码零副作用/探测/
+  尾窗口 + operator 透明 save/load（明文不落盘、LOCKED、密码循环+记忆）/两端一起换 + .zip 翻转/
+  离线拒/readPeek 非交互不弹窗/isEncrypted。
+- ✅ **互操作性**：测试内含不依赖 zip.js 的独立 WinZip-AES 解密器（node:crypto 按 AE-2 规范），
+  逐位解出 data.bin == 原 ora —— 两实现互通 ⇒ 格式标准 ⇒ 7-Zip 同理可开。
+- ⏳ **真 7-Zip 实测未做**（本机无 7z 二进制）：PC 从 OneDrive 下 `<name>.zip` → 7-Zip 解外层 →
+  对 `<GUID>` 输密码 → data.bin（即完整 ora，自带缩略图）改名 .ora 能开。
+- ⏳ **`.7z` 强 KDF 切换未做**：需 vendored 7z-wasm（~700KB），换 zip.js 两函数即可；架构已就位。
 - ⏳ 真机/桌面待验清单：
-  1. 图库菜单「加密保护…」→ tile 变锁；解锁后看到缩略图；锁定后回锁样式
-  2. 打开加密作品 → 密码 sheet → 画正常；Ctrl+S / 自动保存 / 退出图库不报错；云端字节确为容器（OneDrive 网页下载验 zip 套 zip）
-  3. 错密码 → 「密码不对，再试一次」循环；取消 → 打开失败状态条，不丢数据
+  1. 「加密保护…」→ tile 变锁；解锁后看到缩略图；锁定后回锁样式；云端文件名变 .zip
+  2. 打开加密作品 → 密码 sheet → 画正常；Ctrl+S / 自动保存 / 退出图库不报错；boot 恢复加密作品弹密码
+  3. 错密码 → 「密码不对，再试一次」循环；取消 → 失败状态条，不丢数据
   4. 云端纯 cloud 加密项：缩略图锁样式（byte-range 密文路径）+ 拉取打开
-  5. 解除加密（含云端在线推送）→ tile 回明文 thumb
-  6. revert（恢复到打开时）对加密作品工作（checkpoint 也是容器）
-  7. 双 tab / iPad resume 下打开加密作品（ready-gate 流里弹密码的体验）
+  5. 解除加密（含云端在线推送）→ tile 回明文 thumb，云端名翻回 .ora
+  6. revert 对加密作品（checkpoint 密文往返）；导入外来 .zip 容器（unseal 弹密码）；导出加密作品 = .zip 密文
+  7. 双 tab / iPad resume 下打开加密作品

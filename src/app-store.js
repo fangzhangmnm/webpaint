@@ -11,7 +11,9 @@ import { createLocalAdapter } from "./store/local-adapter.ts";
 import { withBusy } from "./fullscreen-busy.ts";   // 注入给 store：用户态写流深模块强制锁屏（契约见 store.createStore）
 import { listSessions, listTrashedSessions, trashSession, getCurrentSessionName } from "./session.js";
 import { mergeLocalCloud, mergeTrash, classifyCloudGone } from "./gallery-model.js";
-import { CLIENT_ID, SCOPES, sessionFileName } from "./config.js";
+import { CLIENT_ID, SCOPES, sessionFileName, encSessionFileName, stripSessionExt } from "./config.js";
+import { zipReadEntry } from "./zip.js";
+import { getPassword, requestPassword, onPasswordVerified } from "./crypto-state.js";
 // lib 的 graph（OneDrive transport，单一 auth）—— gallery folder 操作 + thumb byte-range 都走它。
 import {
   getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches,
@@ -34,17 +36,27 @@ const _auth = od.auth;
 export const cloud = createCloudSync({
   provider, kv: lsKv,
   fileName: sessionFileName,
+  encFileName: encSessionFileName,   // 加密容器在云端叫 <name>.zip（ADR-0012；翻转/双路径在 cloud-sync）
   contentType: "application/zip",
   appKey: "webpaint",
-  match: (it) => /\.ora$/i.test(it.name || ""),
-  toName: (path) => path.replace(/\.ora$/i, ""),
+  match: (it) => /\.(ora|zip)$/i.test(it.name || ""),
+  toName: stripSessionExt,
 });
 
 // brush-rack 单文件同步（复用 lib，fileName 固定）。
 const rackSync = createCloudSync({ provider, kv: lsKv, fileName: () => "brush-rack.json", contentType: "application/json", appKey: "webpaint-rack" });
 
 const local = createLocalAdapter();
-export const store = createStore({ cloud, local, kv: lsKv, busy: withBusy });
+export const store = createStore({
+  cloud, local, kv: lsKv, busy: withBusy,
+  // 加密 seam（ADR-0012）：之后 save/load/push/pull 对调用方全透明。store 格式盲——
+  // 「ora 是 zip、里面有 Thumbnails/thumbnail.png、peek=缩略图 PNG」这些知识只活在 makePeek 这一行。
+  crypt: {
+    ext: "ora",
+    makePeek: async (blob) => { try { return await zipReadEntry(blob, "Thumbnails/thumbnail.png"); } catch (_) { return null; } },
+    getPassword, requestPassword, onPasswordVerified,   // 密码政策在 crypto-state（统一密码 + per-name 覆盖）
+  },
+});
 export { CloudConflictError, CloudNameCollisionError };
 
 // ============ 兼容 shim（旧 cloud.js / auth.js / graph.js 名字 → 新 lib）============
@@ -103,7 +115,7 @@ export const clearCloudState = (name) => cloud.clearState(name);
 async function reconcileCloudGone(localItems, cloudFiles, { cloudListOk, signedIn, online }) {
   // 权威闸门：未登录/离线/list 失败/空列表 → authoritative=false → classifyCloudGone 返回全空（不收敛）。
   const authoritative = !!(cloudListOk && signedIn && online && cloudFiles.length > 0);
-  const cloudNames = new Set(cloudFiles.map((c) => c.path.replace(/\.ora$/i, "")));
+  const cloudNames = new Set(cloudFiles.map((c) => stripSessionExt(c.path)));
   // K1（审计 2026-06-10）：**完全跳过当前画布上打开的 doc**——push 成功后的 gallery.refresh 在编辑态
   //   也会跑到这里，若把活 doc 收进回收站：之后落笔 isDirty 缺省 true → captureParent 被跳过 →
   //   push 撞 bypass 守卫卡死 + trash/IDB 双份。用共享指针（localStorage currentSessionName）而非

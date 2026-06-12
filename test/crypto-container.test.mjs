@@ -14,20 +14,19 @@ ensureZipLoaded();
 
 const {
   packContainer, unpackContainer, looksEncryptedContainer,
-  scanEncThumbFromEnd, decryptThumbParsed, encryptThumb,
-  makeGuid, THUMB_TAIL_WINDOW,
+  scanEncPeekFromEnd, decryptPeek, encryptPeek,
+  makeGuid, PEEK_TAIL_WINDOW,
 } = await import("../src/store/crypto-container.ts");
 const { zipPack } = await import("../src/zip.js");
-const cryptoState = await import("../src/crypto-state.js");
 
 // ---- 测试素材 ----
 const PNG_STUB = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4, 5, 6, 7, 8]);
 const ORA_STUB = new TextEncoder().encode("fake-ora-bytes-".repeat(1000));   // ~15KB
 const PW = "测试密码123";
 
-async function makeFixture(name = "文件夹/我的画") {
+async function makeFixture(name = "文件夹/我的画", peek = PNG_STUB) {
   const guid = makeGuid();
-  const blob = await packContainer({ dataBytes: ORA_STUB, fileName: name, ext: "ora", guid, thumbPng: PNG_STUB, password: PW });
+  const blob = await packContainer({ dataBytes: ORA_STUB, fileName: name, ext: "ora", guid, peek, password: PW });
   return { guid, blob, bytes: new Uint8Array(await blob.arrayBuffer()) };
 }
 function bytesEq(a, b) {
@@ -63,62 +62,41 @@ describe("crypto-container · 容器往返", () => {
   });
 });
 
-describe("crypto-container · 尾部加密 thumb（byte-range 路径）", () => {
-  it("只拿尾部窗口就能扫到 + 解密回 PNG", async () => {
+describe("crypto-container · 尾部加密 peek（byte-range 路径，格式盲）", () => {
+  it("只拿尾部窗口就能扫到 + 解密回不透明字节", async () => {
     const { bytes } = await makeFixture();
-    const tail = bytes.slice(Math.max(0, bytes.length - THUMB_TAIL_WINDOW));
-    const parsed = scanEncThumbFromEnd(tail);
-    assert(parsed, "尾部窗口内必须扫到 MAGIC（thumb 是外层最后 entry）");
-    const png = await decryptThumbParsed(parsed, PW);
-    assert(bytesEq(png, PNG_STUB), "解密 == 原 PNG");
+    const tail = bytes.slice(Math.max(0, bytes.length - PEEK_TAIL_WINDOW));
+    const parsed = scanEncPeekFromEnd(tail);
+    assert(parsed, "尾部窗口内必须扫到 MAGIC（peek 是外层最后 entry）");
+    const out = await decryptPeek(parsed, PW);
+    assert(bytesEq(out, PNG_STUB), "解密 == 原 peek 字节");
   });
 
-  it("80KB suffix（cloud-thumbs 预算）也命中", async () => {
+  it("80KB suffix（byte-range 预算）也命中", async () => {
     const { bytes } = await makeFixture();
     const tail = bytes.slice(Math.max(0, bytes.length - 81920));
-    assert(scanEncThumbFromEnd(tail), "80KB suffix 命中");
+    assert(scanEncPeekFromEnd(tail), "80KB suffix 命中");
   });
 
-  it("thumb 错密码 → throw（AES-GCM tag 即验证器）", async () => {
-    const enc = await encryptThumb(PNG_STUB, PW);
-    const parsed = scanEncThumbFromEnd(enc);
-    let threw = false;
-    try { await decryptThumbParsed(parsed, "wrong"); } catch (_) { threw = true; }
-    assert(threw);
+  it("空 peek 也是合法容器（探测标记必须在）", async () => {
+    const { bytes } = await makeFixture("空peek件", null);
+    assert(await looksEncryptedContainer(bytes), "空 peek 容器仍探测为 true");
+    const parsed = scanEncPeekFromEnd(bytes);
+    const out = await decryptPeek(parsed, PW);
+    eq(out.length, 0, "解出空字节");
+  });
+
+  it("peek 错密码 → throw code=WRONG_PASSWORD（AES-GCM tag 即验证器）", async () => {
+    const enc = await encryptPeek(PNG_STUB, PW);
+    const parsed = scanEncPeekFromEnd(enc);
+    let code = null;
+    try { await decryptPeek(parsed, "wrong"); } catch (e) { code = e.code; }
+    eq(code, "WRONG_PASSWORD");
   });
 });
 
-describe("crypto-state · 统一密码 + 交互解包", () => {
-  it("内存密码直接解，无弹窗", async () => {
-    const { blob } = await makeFixture();
-    cryptoState.setPassword(PW);
-    let prompted = 0;
-    cryptoState.setPasswordPrompt(async () => { prompted++; return null; });
-    const res = await cryptoState.unpackContainerInteractive(blob);
-    eq(prompted, 0, "有内存密码不该弹");
-    assert(res.dataBlob, "解出 ora");
-    cryptoState.lock();
-  });
-
-  it("内存密码失效 → 弹窗重问；输对后记为统一密码", async () => {
-    const { blob } = await makeFixture();
-    cryptoState.setPassword("stale-pw-from-another-gallery");
-    const answers = ["wrong-again", PW];
-    cryptoState.setPasswordPrompt(async () => answers.shift());
-    const res = await cryptoState.unpackContainerInteractive(blob);
-    assert(res.dataBlob);
-    eq(cryptoState.getPassword(), PW, "验证通过的密码上位");
-  });
-
-  it("取消弹窗 → throw（绝不静默吞）", async () => {
-    const { blob } = await makeFixture();
-    cryptoState.lock();
-    cryptoState.setPasswordPrompt(async () => null);
-    let threw = false;
-    try { await cryptoState.unpackContainerInteractive(blob); } catch (e) { threw = /取消/.test(e.message); }
-    assert(threw, "取消必须抛带「取消」的错");
-  });
-});
+// 密码循环（getPassword/requestPassword/onPasswordVerified）已移进 store 的 crypt seam，
+// 验收在 test/store-crypt.test.mjs（store.flow.load / decrypt 的密码循环）。
 
 // ============ 互操作性：独立 WinZip-AES 解密器（≈ 7-zip 做的事）============
 //
@@ -196,7 +174,7 @@ describe("互操作性 · 独立 WinZip-AES 实现（无 zip.js）解开容器",
     const outer = parseZipEntries(bytes);
     eq(outer.length, 2);
     eq(outer[0].name, guid, "payload entry 名 = GUID");
-    eq(outer[1].name, "thumb", "thumb 最后");
+    eq(outer[1].name, "peek", "peek 最后");
     eq(outer[0].method, 0, "外层 STORE 明文（扫描器看不到加密 flag）");
     eq(outer[1].method, 0);
   });

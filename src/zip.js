@@ -78,6 +78,20 @@ export async function zipUnpackEncrypted(blob, password) {
   } finally { await reader.close(); }
 }
 
+/** 只读 zip 里**一个** entry（不解其余大块；CD 读目录 + 单 entry getData）。
+ *  没有该 entry → null。makePeek（从 ora 抽缩略图）这类「大 zip 取小件」用。 */
+export async function zipReadEntry(blob, path) {
+  ensureConfigured();
+  const z = Z();
+  const reader = new z.ZipReader(new z.BlobReader(blob));
+  try {
+    const entries = await reader.getEntries();
+    const e = entries.find((x) => !x.directory && x.filename === path);
+    if (!e) return null;
+    return await e.getData(new z.Uint8ArrayWriter());
+  } finally { await reader.close(); }
+}
+
 /** 返回 { path: Uint8Array } */
 export async function zipUnpack(blob) {
   ensureConfigured();

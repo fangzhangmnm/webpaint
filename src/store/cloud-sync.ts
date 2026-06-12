@@ -50,6 +50,9 @@ interface CloudSyncCfg {
   provider: CloudProvider;
   kv: Kv;
   fileName: (name: string) => string;
+  /** 加密容器的云端命名（ADR-0012：加密文件外部扩展名 = .zip，防软件按 .ora/.txt 误认；
+   *  容器本来就是标准 zip，名实相符）。不配置 = 扩展名翻转关（兄弟 app 未接加密时零影响）。 */
+  encFileName?: (name: string) => string;
   contentType?: string;
   trashFolder?: string;
   backupFolder?: string;
@@ -70,9 +73,23 @@ interface CloudSyncCfg {
  * @param {()=>number} [cfg.now]  时钟（测试注入；默认 Date.now）
  */
 export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
-  const { provider, kv, fileName, contentType = "application/octet-stream",
+  const { provider, kv, fileName, encFileName = null, contentType = "application/octet-stream",
     trashFolder = ".trash", backupFolder = ".backup", appKey = "sync" } = cfg;
   const now = cfg.now || (() => Date.now());
+
+  // name → 云端实际 item（同一 name 在任一时刻只住一个扩展名下；明文路径先试 = 多数命中 1 RTT）。
+  // 找不到时返回明文路径（新建落明文名；加密字节的新建在 push 里按字节选 enc 路径）。
+  async function _find(name: string): Promise<{ item: CloudItem | null; path: string; enc: boolean }> {
+    const p = fileName(name);
+    let item = await provider.getItemByPath(p);
+    if (item) return { item, path: p, enc: false };
+    if (encFileName) {
+      const pe = encFileName(name);
+      item = await provider.getItemByPath(pe);
+      if (item) return { item, path: pe, enc: true };
+    }
+    return { item: null, path: p, enc: false };
+  }
   // match(item)：哪些云端文件算"session"（扩展名 agnostic；默认所有非文件夹）。gallery 列表用。
   const match = cfg.match || ((it: CloudItem) => !it.isFolder);
   // toName(item)：云端文件名 → session name（fileName 的逆；默认去最后一段扩展名）。
@@ -83,7 +100,8 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   const baseName = (n: string) => (n.includes("/") ? n.slice(n.lastIndexOf("/") + 1) : n);
   // move-aside（.trash/.backup）的防撞名：<base> [<yyyymmddhhmmss>-<guid>]（命名策略在深模块 move-aside.js）。
   // guid 防同名多次 move-aside 撞（旧版 [ts] 同 ms → conflictBehavior:"fail" 抛错的真 bug）。trash/backup 共用。
-  const stampedName = (n: string) => fileName(`${baseName(n)} [${asideStamp(now())}]`);
+  const stampedName = (n: string, enc = false) =>
+    (enc && encFileName ? encFileName : fileName)(`${baseName(n)} [${asideStamp(now())}]`);
 
   function getETag(name: string): string | null { return kv.get(etagKey(name)) || null; }
   function setETag(name: string, eTag: string | null): void { if (eTag) kv.set(etagKey(name), eTag); else kv.remove(etagKey(name)); }
@@ -100,9 +118,27 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   function setDirty(name: string, dirty: boolean): void { _dirtyMem.set(name, dirty); kv.set(dirtyKey(name), dirty ? "1" : "0"); }
   function clearState(name: string): void { _dirtyMem.delete(name); kv.remove(etagKey(name)); kv.remove(dirtyKey(name)); }
 
-  async function push(name: string, bytes: Bytes | Blob, opts: { baseEtag?: string | null } = {}): Promise<PushResult> {
-    const path = fileName(name);
-    const baseEtag = ("baseEtag" in opts) ? opts.baseEtag : getETag(name);
+  async function push(name: string, bytes: Bytes | Blob, opts: { baseEtag?: string | null; encrypted?: boolean } = {}): Promise<PushResult> {
+    // 目标扩展名按**字节内容**走（caller——store——按尾部探测传 encrypted；加密=容器=.zip 名实相符）。
+    const enc = !!(encFileName && opts.encrypted);
+    const path = enc ? encFileName!(name) : fileName(name);
+    let baseEtag = ("baseEtag" in opts) ? opts.baseEtag : getETag(name);
+    // 扩展名翻转（encrypt/decrypt 后的首推）：基准版本住在另一个扩展名下 →
+    //   先 If-Match **rename** 翻过来（412 守卫不破），再对返回的新 etag 做内容上传。
+    //   rename 是 metadata PATCH → etag 必变（S1），所以 If-Match 链要接力到 renamed.eTag。
+    if (encFileName && baseEtag) {
+      const otherPath = enc ? fileName(name) : encFileName!(name);
+      const target = await provider.getItemByPath(path).catch(() => null);
+      if (!target) {
+        const other = await provider.getItemByPath(otherPath).catch(() => null);
+        if (other) {
+          if (other.eTag !== baseEtag) throw new CloudConflictError(`云端已有更新版本 "${name}"`, name);
+          const newBase = baseName(path);
+          const renamed = await provider.rename(other.id, newBase, baseEtag);   // If-Match 守卫的翻转
+          baseEtag = renamed.eTag;
+        }
+      }
+    }
     // bytes 是 Uint8Array（Bytes），byteLength 即字节数；?? size/length 是历史兼容兜底（任意来源），故收窄成 any 读。
     const wrote = (bytes && ((bytes as any).byteLength ?? (bytes as any).size ?? (bytes as any).length)) || 0;
     // conflictBehavior：有 baseEtag → "replace"（If-Match 守，412 才冲突）；**无 baseEtag（新建/未基于云版）→ "fail"**
@@ -135,24 +171,36 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   //   再交字节，heal 失败/落盘前强退都会留下「kv 指新版、本地是旧字节」→ 下次 push If-Match 通过 =
   //   静默覆盖云端分叉版（R1 两条 trace）；branch/heal 路径还会顺手清掉用户的 dirty（K12 同根因）。
   async function pull(name: string): Promise<PullResult | null> {
-    const item = await provider.getItemByPath(fileName(name));
+    const { item } = await _find(name);
     if (!item) return null;
     const blob = await provider.download(item.id);
     return { blob, item, suggestedName: name };
   }
 
   async function fetchMeta(name: string): Promise<FetchMetaResult | null> {
-    const item = await provider.getItemByPath(fileName(name));
+    const { item } = await _find(name);
     if (!item) return null;
     return { etag: item.eTag, lastModified: item.lastModifiedDateTime, size: item.size, item };
   }
 
+  // 尾部 byte-range（纯读）：peek 预览纯云端文件用。store.getTailBytes 的云端腿。
+  async function pullTail(name: string, n: number): Promise<{ bytes: Uint8Array; item: CloudItem } | null> {
+    const { item } = await _find(name);
+    if (!item) return null;
+    const offset = Math.max(0, (item.size || 0) - n);
+    const raw = await provider.downloadRange(item.id, offset, Math.min(n, item.size || n));
+    const bytes = raw instanceof Uint8Array ? raw
+      : raw instanceof ArrayBuffer ? new Uint8Array(raw)
+      : new Uint8Array(await (raw as Blob).arrayBuffer());
+    return { bytes, item };
+  }
+
   // move-aside：原文件 → ensureFolder(.trash) → move，**始终加 [ts] 后缀**（多次删同名永不冲突）。
   async function trash(name: string): Promise<CloudItem | null> {
-    const item = await provider.getItemByPath(fileName(name));
+    const { item, enc } = await _find(name);
     if (!item) { clearState(name); return null; }
     const folderId = await provider.ensureFolder(trashFolder);
-    const stamped = stampedName(name);   // basename + ts-counter（trash 内丢 folder context；防同名撞）
+    const stamped = stampedName(name, enc);   // basename + ts-counter（trash 内丢 folder context；防同名撞）；保留加密扩展名
     const moved = await provider.move(item.id, folderId, { newName: stamped, conflictBehavior: "fail" });
     clearState(name);
     return moved;
@@ -183,14 +231,14 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
 
   // weak-override（ADR-0009 / share-file-model）：用本地覆盖云端，但**云端 loser 先 stash 进 .backup 不丢**。
   // 永不 lossy（Work 禁 hard-override / destructive pull；这是 never-lose 的覆盖）。返 { item, backedUp }。
-  async function weakOverride(name: string, bytes: Bytes): Promise<WeakOverrideResult> {
-    const path = fileName(name);
-    const cur = await provider.getItemByPath(path);
+  async function weakOverride(name: string, bytes: Bytes, opts: { encrypted?: boolean } = {}): Promise<WeakOverrideResult> {
+    const path = (encFileName && opts.encrypted) ? encFileName(name) : fileName(name);
+    const cur = await _find(name);
     let backedUp = null;
-    if (cur) {
+    if (cur.item) {
       const folderId = await provider.ensureFolder(backupFolder);
-      const stamped = stampedName(name);   // ts-counter 防同名多次备份撞（旧版同 ms 会 fail 抛错）
-      await provider.move(cur.id, folderId, { newName: stamped, conflictBehavior: "fail" });
+      const stamped = stampedName(name, cur.enc);   // ts-counter 防同名多次备份撞（旧版同 ms 会 fail 抛错）；loser 保留其扩展名
+      await provider.move(cur.item.id, folderId, { newName: stamped, conflictBehavior: "fail" });
       backedUp = `${backupFolder}/${stamped}`;
     }
     // 原 path 现已空 → force-push 本地（无 If-Match）。
@@ -241,11 +289,14 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   // 同 folder → rename；跨 folder → ensureFolder + move。caller 保证 newName 不冲突。
   async function rename(oldName: string, newName: string): Promise<void> {
     if (oldName === newName) return;
-    const item = await provider.getItemByPath(fileName(oldName));
+    const found = await _find(oldName);
+    const item = found.item;
     if (!item) throw new Error(`云端找不到：${oldName}`);
     const oldFolder = oldName.includes("/") ? oldName.slice(0, oldName.lastIndexOf("/")) : "";
     const newFolder = newName.includes("/") ? newName.slice(0, newName.lastIndexOf("/")) : "";
-    const newBase = fileName(newName.includes("/") ? newName.slice(newName.lastIndexOf("/") + 1) : newName);
+    // 改名保留当前扩展名（加密文件改名后仍是 .zip——扩展名跟字节内容走，不跟操作走）
+    const mkName = found.enc && encFileName ? encFileName : fileName;
+    const newBase = mkName(newName.includes("/") ? newName.slice(newName.lastIndexOf("/") + 1) : newName);
     let moved: CloudItem | null;
     if (oldFolder === newFolder) {
       moved = await provider.rename(item.id, newBase);
@@ -264,7 +315,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
 
   // 硬删（gallery「彻底删」非 trash 路径用；日常删走 store.flow.delete=trash）。
   async function remove(name: string): Promise<void> {
-    const item = await provider.getItemByPath(fileName(name));
+    const { item } = await _find(name);
     if (item) await provider.delete(item.id);
     clearState(name);
   }
@@ -290,7 +341,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   // 注：CloudConflictError 仅作为顶层 export class 暴露（无实例消费 cloud.CloudConflictError），
   //   故不挂在返回对象上——保持返回面与 CloudSync 契约一致（annotate :CloudSync 不报 excess）。
   return {
-    push, pull, fetchMeta, weakOverride,
+    push, pull, fetchMeta, pullTail, weakOverride,
     trash, restore, purge,
     list, listAll, listFolders, listTrash, rename, remove,
     ensureFolder, removeFolder,

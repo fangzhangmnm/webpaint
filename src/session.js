@@ -34,21 +34,20 @@ export function setCurrentSessionName(name) {
   try { localStorage.setItem(LS_CURRENT_NAME, name); } catch {}
 }
 
-/** 把 doc 序列化进指定 session（默认当前），同时生成 thumb jpg 存进 pkg。
+/** 把 doc 序列化进指定 session（默认当前），同时生成 thumb 存进 pkg。
+ *  **仅限明文新建路径**（newDoc / saveAs 的新名字天然明文）——活动 doc 的常规保存
+ *  走 store.flow.save（v235：加密包壳在深模块，这里不感知加密）。
  *  opts.referenceImage: optional Blob —— 嵌进 .ora 跟着文件走（webpaint/reference.png）。
  *  opts.webpaintState:  optional 对象，进 webpaint/state.json
  */
 export async function saveSession(doc, name, opts = {}) {
   const sessionName = name || getCurrentSessionName();
-  // 加密作品：pkg.thumb 永远 null（明文缩略图不落 IDB）——图库解锁后从容器尾部解密预览。
-  const enc = !!doc._encGuid;
   const [ora, thumb] = await Promise.all([
     encodeDocToOra(doc, {
       referenceImage: opts.referenceImage,
       webpaintState: opts.webpaintState,
-      fileName: sessionName,
     }),
-    enc ? Promise.resolve(null) : renderThumbBlob(doc, 256),
+    renderThumbBlob(doc, 256),
   ]);
   return await putSessionPkg(sessionName, ora, thumb);
 }
@@ -208,35 +207,9 @@ export async function emptyTrash() {
   }
 }
 
-/**
- * 启动时加载当前 session。
- * - currentName 在 IDB 有 → 返回 decoded doc
- * - currentName 在 IDB 没 → 尝试 legacy "current" slot 迁移
- * - 都没 → 返回 null
- */
-export async function loadCurrentSession() {
-  const name = getCurrentSessionName();
-  let pkg = await getSession(name);
-  if (!pkg) {
-    // v35 → v36 迁移：从旧 "current" key 拉一次，写到 DEFAULT_NAME 下，删旧 key
-    pkg = await getSession(LEGACY_SLOT);
-    if (pkg) {
-      pkg.name = DEFAULT_NAME;
-      await putSession(DEFAULT_NAME, pkg);
-      await deleteSession(LEGACY_SLOT);
-      setCurrentSessionName(DEFAULT_NAME);
-    }
-  }
-  if (!pkg || !pkg.ora) return null;
-  return await decodeOraToDoc(pkg.ora);
-}
-
-/** 主动按 name 打开。返回 decoded doc 或 null（不存在）。 */
-export async function openSession(name) {
-  const pkg = await getSession(name);
-  if (!pkg || !pkg.ora) return null;
-  return await decodeOraToDoc(pkg.ora);
-}
+// loadCurrentSession / openSession 已退役（v235）：本地读取统一走 store.flow.load
+// （加密容器自动解壳）。boot 在 app.js、打开在 session-state.openItem。
+// 旧 v35 单 slot 迁移随之退役（所有设备 ≥ v36 已久；LEGACY_SLOT 常量留 listSessions 过滤用）。
 
 export async function removeSession(name) {
   await deleteSession(name);

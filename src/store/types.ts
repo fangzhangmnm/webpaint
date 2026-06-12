@@ -63,7 +63,8 @@ export interface TrashEntry {
   name: string;
 }
 export interface LocalAdapter {
-  save(name: string, oraBytes: Bytes | Blob): Promise<unknown>;
+  /** hint：flow.save 透传的 app 旁路（store 不解释；如 WebPaint 带活 doc 现成缩略图省一次解码）。 */
+  save(name: string, oraBytes: Bytes | Blob, hint?: unknown): Promise<unknown>;
   get(name: string): Promise<Blob | null>;
   exists(name: string): Promise<boolean>;
   backup(name: string): Promise<string>;
@@ -99,10 +100,13 @@ export interface WeakOverrideResult {
 // cloud-sync 暴露给 store/app 的面（dirty/etag 状态 + push/pull/list/trash 等）。
 // push 收 Bytes|Blob（store 传 toU8 后的 Bytes，folder-flow 传 encode 出的 Blob；内部交 provider.upload）。
 export interface CloudSync {
-  push(name: string, bytes: Bytes | Blob, opts?: { baseEtag?: string | null }): Promise<PushResult>;
+  // encrypted：字节是加密容器（ADR-0012）→ 落 encFileName（.zip）路径；未配 encFileName 时忽略。
+  push(name: string, bytes: Bytes | Blob, opts?: { baseEtag?: string | null; encrypted?: boolean }): Promise<PushResult>;
   pull(name: string): Promise<PullResult | null>;
   fetchMeta(name: string): Promise<FetchMetaResult | null>;
-  weakOverride(name: string, bytes: Bytes): Promise<WeakOverrideResult>;
+  /** 尾部 byte-range 纯读（peek 预览纯云端文件用；store.getTailBytes 的云端腿）。 */
+  pullTail(name: string, n: number): Promise<{ bytes: Bytes; item: CloudItem } | null>;
+  weakOverride(name: string, bytes: Bytes, opts?: { encrypted?: boolean }): Promise<WeakOverrideResult>;
   trash(name: string): Promise<unknown>;
   restore(cloudItemId: string, name: string): Promise<unknown>;
   purge(cloudItemId: string): Promise<unknown>;

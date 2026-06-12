@@ -546,7 +546,7 @@
     <!-- 统一导入入口：iPad 上 accept="image/*,.ora" 会同时给出 "Photo Library"
          / "Take Photo" / "Choose File" 三选项；桌面是标准 file picker。
          .ora 走 decodeOraToDoc，image/* 走 "新建图层并 drawImage" 路径 (photobash)。 -->
-    <input type="file" id="oraFileInput" accept=".ora,image/png,image/jpeg,image/webp" style="display:none" />
+    <input type="file" id="oraFileInput" accept=".ora,.zip,image/png,image/jpeg,image/webp" style="display:none" />
 
     <!-- 图层面板：浮动可拖（沿用 .float-panel）。每行 = 一个 layer，倒序显示
          (UI 习惯：上面在画面上面)。新建按钮在 footer。 -->
@@ -936,6 +936,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-fde4326c82d1.mjs"></script>
+    <script type="module" src="./dist/webpaint-16c1f2921e57.mjs"></script>
   </body>
 </html>

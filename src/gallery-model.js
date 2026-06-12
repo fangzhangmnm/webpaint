@@ -3,13 +3,13 @@
 // 过去内联在 app.js 的 renderGallery —— 「按 name 合并 local/cloud」「按当前文件夹切 immediate
 // 子夹 vs 直属文件」是真领域逻辑、跟 DOM 渲染无关，抽出可单测。
 
-// 合并本地 session 列表 + 云端文件列表，按 name（云端去 .ora 后缀）当 key → 统一 item 列表。
-//   item = { name, local|null, cloud|null }
+// 合并本地 session 列表 + 云端文件列表，按 name（云端去 .ora/.zip 后缀——.zip=加密容器）当 key。
+//   item = { name, local|null, cloud|null }（本模块保持零依赖纯函数，后缀剥离与 config.stripSessionExt 同步）
 export function mergeLocalCloud(local, cloud) {
   const byName = new Map();
   for (const l of local) byName.set(l.name, { name: l.name, local: l, cloud: null });
   for (const c of cloud) {
-    const name = c.path.replace(/\.ora$/i, "");
+    const name = c.path.replace(/\.(ora|zip)$/i, "");
     const ent = byName.get(name);
     if (ent) ent.cloud = c;
     else byName.set(name, { name, local: null, cloud: c });
@@ -31,7 +31,7 @@ export function mergeTrash(localTrash, cloudTrash) {
     byName.set(t.originalName, { name: t.originalName, local: t, cloud: null, deletedAt: t.deletedAt || 0 });
   }
   for (const c of cloudTrash) {
-    const name = (c.name || c.path || "").replace(/\.ora$/i, "").replace(/ \[\d+\]$/, "");
+    const name = (c.name || c.path || "").replace(/\.(ora|zip)$/i, "").replace(/ \[\d+\]$/, "");
     const dAt = Date.parse(c.lastModifiedDateTime || 0) || 0;
     const ent = byName.get(name);
     if (ent) { ent.cloud = c; ent.deletedAt = Math.max(ent.deletedAt, dAt); }

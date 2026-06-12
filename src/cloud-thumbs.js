@@ -18,10 +18,10 @@
 //   - ZIP 解析：EOCD commentLen sanity 防 false-positive；输出 PNG magic 校验
 
 import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./app-store.js";
-// 加密容器（ADR-0012）：尾部是 [MAGIC][ver][salt][iv][len][AES-GCM(png)] 加密 thumb blob，
-// PNG 硬扫自然落空 → 扫 MAGIC。命中返**密文** Blob（type=ENC_THUMB_MIME），解密归 caller
-// （图库按锁态决定解不解；cache 层原样缓存密文 → 明文 thumb 不落 IDB）。
-import { scanEncThumbFromEnd, ENC_THUMB_MIME } from "./store/crypto-container.ts";
+// 加密容器（ADR-0012）：尾部是加密 peek blob（WebPaint 的 peek=缩略图 PNG），
+// PNG 硬扫自然落空 → 扫 MAGIC。命中返**密文** Blob（type=ENC_PEEK_MIME），解密归 caller
+// （图库经 store.decryptPeekBytes 按锁态解；cache 层原样缓存密文 → 明文 thumb 不落 IDB）。
+import { scanEncPeekFromEnd, ENC_PEEK_MIME } from "./store/crypto-container.ts";
 
 // 投机 suffix：last N 字节一次性拿 EOCD + CD +（自家 ora）thumbnail data
 // 80KB budget = thumb 自适应目标 ≤ 70KB + 尾巴 ~10KB（CD + EOCD + sig 扫描余量）
@@ -252,11 +252,11 @@ export async function fetchOraThumbnail(itemId, fileSize, opts = {}) {
   return new Blob([pngBytes], { type: "image/png" });
 }
 
-// 加密 thumb：buf 尾扫 MAGIC，命中切出完整密文段（含头），打 ENC_THUMB_MIME 标记。
+// 加密 thumb：buf 尾扫 MAGIC，命中切出完整密文段（含头），打 ENC_PEEK_MIME 标记。
 function _scanEncThumb(buf) {
-  const parsed = scanEncThumbFromEnd(new Uint8Array(buf));
+  const parsed = scanEncPeekFromEnd(new Uint8Array(buf));
   if (!parsed) return null;
-  return new Blob([new Uint8Array(buf).slice(parsed.start, parsed.end)], { type: ENC_THUMB_MIME });
+  return new Blob([new Uint8Array(buf).slice(parsed.start, parsed.end)], { type: ENC_PEEK_MIME });
 }
 
 // ============= 提取 helper（小文件路径用）=============

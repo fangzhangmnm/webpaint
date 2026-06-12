@@ -23,9 +23,9 @@ import { listCloudSessionsRecursive, listCloudAll, isSignedIn } from "./app-stor
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.js";
+import { stripSessionExt } from "./config.js";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
-import { isUnlocked, lock } from "./crypto-state.js";
-import { localEncTail, unlockInteractive } from "./enc-thumbs.js";
+import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.js";
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initGalleryShell(ctx) 注入）----
 let editMode: any, board: any, gallery: any, doc: any, _store: any, setStatus: any, withBusy: any;
@@ -243,16 +243,18 @@ export function initGalleryShell(ctx) {
       gallery.refresh();
       return;
     }
-    // 找一件本地加密作品的密文 thumb 当验证字节 —— 错密码当场打回；一件都没有就先收下，用到时再验
-    let validate: Blob | null = null;
+    // 找一件本地加密作品 → store.readPeek 交互解锁（密码循环 + GCM 验证 + 记忆全在深模块）。
+    // 一件都没有 → 收下未验证的密码当统一密码（用到时自然验证，错了会重问）。
     try {
       const enc = (await listSessions()).find((s: any) => s.encrypted);
-      if (enc) validate = await localEncTail(enc.name);
+      if (enc) {
+        const bytes = await _store.readPeek(enc.name, { interactive: true });
+        if (bytes) { setStatus("已解锁加密作品（密码只在内存，关页即忘）"); gallery.refresh(); }
+        return;
+      }
     } catch (_) {}
-    if (await unlockInteractive(validate)) {
-      setStatus("已解锁加密作品（密码只在内存，关页即忘）");
-      gallery.refresh();
-    }
+    const pw = await promptPassword({ title: "解锁加密作品", message: "本地暂无加密作品可验证——密码先收下，用到时自动验证" });
+    if (pw != null) { setPassword(pw); setStatus("已记下密码（打开加密作品时验证）"); gallery.refresh(); }
   });
 
   // 加号 → 新建：弹 sheet 选名字 + 分辨率
@@ -367,7 +369,7 @@ export function initGalleryShell(ctx) {
       try { allNames = allNames.concat((await listSessions()).map((s: any) => s.name)); } catch {}
       try {
         const all = await listCloudAll();
-        allNames = allNames.concat(all.files.map((c: any) => c.path.replace(/\.ora$/i, "")));
+        allNames = allNames.concat(all.files.map((c: any) => stripSessionExt(c.path)));
         cloudFolders = all.folders;
       } catch (e) { console.warn("[folder] cloud list failed:", e); }
       const fullPrefix = `${fullPath}/`;

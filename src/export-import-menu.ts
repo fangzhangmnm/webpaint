@@ -15,6 +15,7 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard } from "./session.js";
 import { importImageAsLayer } from "./import-image.ts";
+import { looksEncryptedContainer } from "./store/crypto-container.ts";
 
 let doc: any, setStatus: any;
 
@@ -97,8 +98,10 @@ export function initExportImportMenu(ctx) {
     try {
       if (exp.busyHint) setStatus(exp.busyHint, true);
       const blob = await exp.encode(doc);
-      triggerDownload(blob, `${session.name}.${exp.ext}`);
-      setStatus(`.${exp.ext} 已下载`);
+      // 加密作品的 ora 导出件是密文容器 → 下载名用 .zip（名实相符，7-Zip 输密码可开）
+      const ext = (await looksEncryptedContainer(blob)) ? "zip" : exp.ext;
+      triggerDownload(blob, `${session.name}.${ext}`);
+      setStatus(`.${ext} 已下载`);
     } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
   });
   els.menuExportImage.addEventListener("click", async () => {

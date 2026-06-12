@@ -27,7 +27,7 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEBPAINT_VERSION } from "./version.js";
 import {
-  saveSession, openSession as openSessionLocal, trashSession,
+  trashSession, renderThumbBlob,
   listSessions, setCurrentSessionName,
 } from "./session.js";
 import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.js";
@@ -40,6 +40,7 @@ import {
 } from "./app-store.js";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.js";
+import { stripSessionExt } from "./config.js";
 import { els } from "./els.ts";
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initSession(ctx) 注入）----
@@ -85,11 +86,14 @@ function _buildOraMeta() {
     webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
   };
 }
-function _encodeCurrentOra() { return encodeDocToOra(doc, { ..._buildOraMeta(), fileName: _activeSessionName }); }
+function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
 async function _writeSessionCheckpoint(name: any) {
   if (!name) return;
+  // checkpoint 是 app 自管的旁路存储 → 过 store.seal 按文件加密态包壳（加密作品的明文绝不落盘；
+  //   明文作品原样通过）。seal 对加密文件要密码在内存——checkpoint 都写在 adopt/显式存时，密码必在。
   const blob = await _encodeCurrentOra();
-  await setMeta(`revert:${name}:ora`, blob);
+  const sealed = await _store.seal(name, new Uint8Array(await blob.arrayBuffer()));
+  await setMeta(`revert:${name}:ora`, new Blob([sealed as any], { type: "application/zip" }));
   await setMeta(`revert:${name}:at`, _sessionOpenedAt);
 }
 async function _readSessionCheckpoint(name: any) {
@@ -138,7 +142,12 @@ async function saveNow(opts: any = {}) {
   _store.busy.set("saving", true);
   updateSaveStatus();
   try {
-    await saveSession(doc, _activeSessionName, _buildOraMeta());   // 本地/云端字节统一：viewport 不进 .ora（ADR-0016 §6）
+    // v235：本地落盘走 store.flow.save（encode 出明文，加密态由 store 自动包壳——明文绝不落盘）。
+    // hint.thumb = 活 doc 现成渲的缩略图（省 adapter 一次全量解码；加密文件 adapter 会自己丢弃）。
+    await _store.flow.save(_activeSessionName, {
+      encode: () => _encodeCurrentOra(),
+      hint: { thumb: await renderThumbBlob(doc, 256) },
+    });
     _store.edits.markSaved();
     _docLastSavedAt = Date.now();
     setStatus(`已保存：${_activeSessionName}`);
@@ -159,9 +168,6 @@ function adoptLoadedDoc(loaded: any, sessionName: any) {
   // 模型层字段（layers/active/尺寸/背景/参考层id/清选区）归 doc.adoptState；
   // 下面全是 app 编排（UI 刷新 / 工具态 / 参考窗 / 视口 / store base / 版本检测 / checkpoint）。
   doc.adoptState(loaded);
-  // 加密标记跟 _referenceBlob 一样是 app 私有 _ 字段，adoptState 不搬 —— 这里显式带过来
-  //（丢了它，下次保存会把加密作品静默存成明文）。
-  doc._encGuid = loaded._encGuid || null;
   els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   input.clearHistory();
   board.invalidateAll();
@@ -435,8 +441,6 @@ async function newDoc({ name, w, h }: any) {
   doc.width = w; doc.height = h;
   doc.selection = null;
   doc.referenceLayerId = null;
-  doc._encGuid = null;   // 新建一律明文（加密在图库对文件操作）
-
   els.canvasSizeLabel.textContent = `${w}×${h}`;
   _activeSessionName = name;
   setCurrentSessionName(name);
@@ -461,7 +465,7 @@ async function newDoc({ name, w, h }: any) {
 async function pullCloudPath(path: any) {
   showFullscreenBusy(`正在从云端拉取…`);
   try {
-    const cloudName = String(path).replace(/\.ora$/i, "");
+    const cloudName = stripSessionExt(path);
     const localName = await uniqueLocalName(cloudName);
     const res = await _store.flow.acquire(cloudName, {
       localName,
@@ -485,8 +489,11 @@ async function openItem(item: any) {
   if (_store.edits.localDirty()) await saveNow();
   try {
     if (item.local) {
-      const loaded = await openSessionLocal(item.name);
-      if (!loaded) { setStatus(`找不到：${item.name}`); return; }
+      // v235：本地读取走 store.flow.load（加密容器自动解壳 + in-app 密码循环；明文原样）。
+      const r: any = await _store.flow.load(item.name);
+      if (r.status === "absent") { setStatus(`找不到：${item.name}`); return; }
+      if (r.status === "locked") { setStatus("未打开：需要密码解锁（已取消）", true); return; }
+      const loaded = await decodeOraToDoc(r.blob);
       adoptLoadedDoc(loaded, item.name);
       setGalleryOpen(false);
       setStatus(`已打开：${item.name}`);
@@ -501,11 +508,13 @@ async function openItem(item: any) {
 async function pushItem(item: any) {
   await withBusy(`正在推送 ${item.name} 到云端…`, async () => {
     try {
-      const loaded = await openSessionLocal(item.name);
-      if (!loaded) throw new Error("找不到本地 session");
+      const r: any = await _store.flow.load(item.name);   // v235：解壳读取（加密文件先解锁）
+      if (r.status === "absent") throw new Error("找不到本地 session");
+      if (r.status === "locked") throw new Error("需要密码解锁");
+      const loaded = await decodeOraToDoc(r.blob);
       if (item.local && item.cloud) _store.adoptBase(item.name, getKnownETag(item.name));  // reloaded 后补锚 If-Match（W2 红线）
       const res = await _store.flow.push(item.name, {
-        encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState, fileName: item.name }),
+        encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }),
         onConflict: async () => "keep",
       });
       if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开处理 / 先改名）`, true);

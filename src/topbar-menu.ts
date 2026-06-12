@@ -31,6 +31,7 @@ import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { listSessions } from "./session.js";
 import { decodeOraToDoc } from "./ora.js";
+import { stripSessionExt } from "./config.js";
 import { compressPixelSnap } from "./pixel-edit.js";
 import { maybeFastForwardActive } from "./cloud-freshness.ts";
 
@@ -196,7 +197,7 @@ export function initTopbarMenu(ctx) {
       if (isSignedIn() && navigator.onLine !== false) {
         try {
           const cloud = await listCloudSessionsRecursive();
-          const cloudNames = cloud.map((c) => c.path.replace(/\.ora$/i, ""));
+          const cloudNames = cloud.map((c) => stripSessionExt(c.path));
           if (cloudNames.includes(trimmed)) {
             setStatus(`云端已有同名 "${trimmed}"，换一个`, true);
             candidate = trimmed; continue;
@@ -246,7 +247,10 @@ export function initTopbarMenu(ctx) {
     if (choice !== "ok") return;
     editMode.applyPendingTransient();
     try {
-      const loaded = await decodeOraToDoc(cp.blob);
+      // checkpoint 字节按文件加密态包过壳 → 先 unseal（明文原样过；密码在内存则无感）
+      const plain = await _store.unseal(session.name, cp.blob);
+      if (!plain) { setStatus("恢复失败：需要密码解锁", true); return; }
+      const loaded = await decodeOraToDoc(plain);
       session.adoptWithOpts(loaded, session.name, { skipCheckpoint: true });
       // R4：revert 是内容变化（像素回到旧快照）→ 必须走 clean→dirty 门标云脏。
       //   旧版只 edits.mark() 不标云脏 → 云端永远收不到 revert，且 clean 快进会无备份吃掉 revert 结果。

@@ -29,3 +29,15 @@ export function sessionFileName(sessionName) {
   if (!segments.length) segments.push("未命名");
   return `${segments.join("/")}.ora`;
 }
+
+// 加密容器的云端文件名（ADR-0012：加密文件外部扩展名 = .zip——容器本来就是标准 zip，
+// 名实相符、防软件按 .ora 误认）。同一 name 任一时刻只住一个扩展名下，cloud-sync 负责翻转。
+export function encSessionFileName(sessionName) {
+  return sessionFileName(sessionName).replace(/\.ora$/, ".zip");
+}
+
+// 云端 path → session name（sessionFileName/encSessionFileName 的逆）。
+// 所有「path 去扩展名」的地方都走这里，别再散落 \.ora$ 正则（加密文件是 .zip）。
+export function stripSessionExt(path) {
+  return String(path).replace(/\.(ora|zip)$/i, "");
+}

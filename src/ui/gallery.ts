@@ -20,17 +20,18 @@ import {
   clearFolderCaches,
   listGallery, listGalleryTrash,
 } from "../app-store.js";
-import { listSessions, renderThumbBlob } from "../session.js";
-import { getSession, setMeta } from "../storage.js";
-import { decodeOraToDoc } from "../ora.js";
+import { listSessions } from "../session.js";
+import { setMeta } from "../storage.js";
 import { getOrFetchCloudThumb } from "../cloud-thumb-cache.js";
-// 加密（ADR-0012）：tile 锁样式 + 解锁浏览；加密/解除 transform 在 store（flow.encrypt/decrypt），
-// 图库只做 per-app 的部分：密码 UX、thumbPng 渲制、活动项预检、明文残留清理。
-import { ENC_THUMB_MIME } from "../store/crypto-container.ts";
-import { isUnlocked, onLockChange, getPassword, setPassword, lock, promptPassword } from "../crypto-state.js";
-import { localEncTail, decryptEncThumbBlob, unlockInteractive, ensureNewPassword } from "../enc-thumbs.js";
+// 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
+// crypt seam）。图库只做 per-app 的部分：首次设密码双输 UX、活动项预检、明文残留清理、
+// 以及把 peek 字节解释成缩略图（enc-thumbs）。
+import { ENC_PEEK_MIME } from "../store/crypto-container.ts";
+import { isUnlocked, onLockChange, setPassword } from "../crypto-state.js";
+import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword } from "../enc-thumbs.js";
 import { sliceFolder, folderHasContents } from "../gallery-model.js";
 import { pathFolder, pathBasename, pathJoin } from "../gallery-path.js";
+import { stripSessionExt } from "../config.js";
 import { tileFor, breadcrumb, trashTileFor, humanTime, humanSize } from "./gallery-view-model.ts";
 import { session } from "../session-state.ts";
 
@@ -68,14 +69,15 @@ export interface GalleryHost {
 
 // 缩略图格子：本地 blob 直显；纯云端进视口才 byte-range 拉；都无 → 名字首字。
 // 对象 URL 生命周期归自己（onUnmounted revoke）——取代旧 _galleryUrls 全局数组手动 revoke。
-// 加密：本地加密作品（encLocalName）从 IDB blob 尾切片解 thumb；云端拉回 ENC_THUMB_MIME 同理。
-// 锁定 → 锁 icon（点它 = 解锁浏览，emit('unlock', 验证字节)）；解锁事件 → watch 原地重试解密。
+// 加密：本地加密作品（encName）经 store.readPeek（非交互——批量渲染绝不弹窗伏击）；
+// 云端拉回 ENC_PEEK_MIME 密文 → store.decryptPeekBytes。锁定 → 锁 icon
+// （点它 emit('unlock', name) → 图库走交互解锁）；解锁 → watch 锁态原地重试。
 // 解出的 PNG 只进 objectURL，永不写 IDB。
 const ThumbCell = defineComponent({
   name: "ThumbCell",
   props: {
     localThumb: { default: null },
-    encLocalName: { type: String, default: null },
+    encName: { type: String, default: null },    // 本地加密作品的 name（走 store.readPeek）
     cloud: { default: null },
     fallback: { type: String, default: "?" },
     alt: { type: String, default: "" },
@@ -85,27 +87,25 @@ const ThumbCell = defineComponent({
     const url = ref<string | null>(null);
     const showCloud = ref(false);
     const locked = ref(false);
-    const encBlob = ref<Blob | null>(null);   // 容器尾切片 / 云端密文 thumb（解锁验证字节）
     const root = ref<HTMLElement | null>(null);
+    let cloudEncBlob: Blob | null = null;        // 云端密文 peek（解锁后原地重解）
     let objUrl: string | null = null;
     let obs: IntersectionObserver | null = null;
     const setBlob = (blob: Blob) => {
       if (objUrl) URL.revokeObjectURL(objUrl);
       objUrl = URL.createObjectURL(blob); url.value = objUrl;
     };
-    const tryDecryptEnc = async () => {
-      if (!encBlob.value) return;
-      const png = await decryptEncThumbBlob(encBlob.value);
+    const tryDecrypt = async () => {
+      let png: Blob | null = null;
+      if (props.encName) png = await localPeekThumb(props.encName);
+      else if (cloudEncBlob) png = await decryptCloudPeekThumb(props.alt, cloudEncBlob);
       if (png) { locked.value = false; setBlob(png); }
       else locked.value = true;
     };
 
     onMounted(() => {
       if (props.localThumb) { setBlob(props.localThumb); return; }
-      if (props.encLocalName) {
-        localEncTail(props.encLocalName).then((tail: Blob | null) => { encBlob.value = tail; return tryDecryptEnc(); });
-        return;
-      }
+      if (props.encName) { tryDecrypt(); return; }
       if (props.cloud) {
         showCloud.value = true;
         obs = new IntersectionObserver((entries) => {
@@ -116,7 +116,7 @@ const ThumbCell = defineComponent({
             getOrFetchCloudThumb(c.id, c.eTag || "", c.size || 0, c["@microsoft.graph.downloadUrl"])
               .then(({ blob }: any) => {
                 showCloud.value = false;
-                if (blob && blob.type === ENC_THUMB_MIME) { encBlob.value = blob; return tryDecryptEnc(); }
+                if (blob && blob.type === ENC_PEEK_MIME) { cloudEncBlob = blob; return tryDecrypt(); }
                 setBlob(blob);
               })
               .catch((err: any) => console.warn("[gallery] thumb:", err));
@@ -125,14 +125,14 @@ const ThumbCell = defineComponent({
         nextTick(() => { if (obs && root.value) obs.observe(root.value); });
       }
     });
-    watch(() => _lockState.unlocked, () => { tryDecryptEnc(); });
+    watch(() => _lockState.unlocked, () => { if (locked.value || props.encName) tryDecrypt(); });
     onUnmounted(() => { obs?.disconnect(); if (objUrl) URL.revokeObjectURL(objUrl); });
-    return { url, showCloud, locked, encBlob, root, ICON };
+    return { url, showCloud, locked, root, ICON };
   },
   template: `
     <img v-if="url" class="gallery-tile-thumb" :src="url" :alt="alt" loading="lazy" />
     <div v-else-if="locked" class="gallery-tile-thumb placeholder locked" title="已加密 —— 点锁解锁预览"
-         @click.stop="$emit('unlock', encBlob)">
+         @click.stop="$emit('unlock', encName || alt)">
       <span style="width:42px;height:42px;display:inline-block" v-html="ICON.lock"></span>
     </div>
     <div v-else class="gallery-tile-thumb placeholder" ref="root">
@@ -199,7 +199,7 @@ function makeGallery(host: GalleryHost) {
         if (localNames.has(name)) return "本地";
         if (alsoCloud) {
           try {
-            const cloudNames = new Set((await listCloudSessionsRecursive()).map((c: any) => c.path.replace(/\.ora$/i, "")));
+            const cloudNames = new Set((await listCloudSessionsRecursive()).map((c: any) => stripSessionExt(c.path)));
             if (cloudNames.has(name)) return "云端";
           } catch (e) { console.warn("[gallery] cloud names:", e); }
         }
@@ -278,10 +278,10 @@ function makeGallery(host: GalleryHost) {
       async function push(item: any) { openMenu.value = null; await session.push(item); await reload(); }
       async function unload(item: any) { openMenu.value = null; await session.unload(item); await reload(); }
 
-      // ---- 加密 intent（ADR-0012）。transform 本体在 store（flow.encrypt/decrypt：本地+云端字节
-      //   一起换、If-Match、失败标脏接力收敛——红线在库内）。图库只做 per-app 的部分：
-      //   活动项预检（活动 doc 的内存态/同步 base 正被 session 编排，图库越过它改字节=竞态）、
-      //   密码 UX（统一密码=WebPaint 的选择）、thumbPng 渲制（store 不懂缩略图）、明文残留清理。
+      // ---- 加密 intent（ADR-0012）。transform 与密码循环都在 store（flow.encrypt/decrypt +
+      //   crypt seam：本地+云端字节一起换、If-Match、失败标脏接力收敛、密码验证/记忆）。
+      //   图库只剩 per-app 的部分：活动项预检（活动 doc 的内存态/同步 base 正被 session 编排，
+      //   图库越过它改字节=竞态）、首次设密码的双输 UX、明文残留清理。
       function _encPrecheck(item: any, verb: string): boolean {
         if (item.name === host.activeName()) { host.status(`这画正开着 —— 先退出到图库再${verb}`, true); return false; }
         if (!item.local) { host.status(`纯云端作品先拉取到本地再${verb}`, true); return false; }
@@ -291,6 +291,7 @@ function makeGallery(host: GalleryHost) {
       async function _afterSwap(item: any, res: any, okMsg: string): Promise<boolean> {
         if (res.status === "offline") { host.status(`已同步过云端的作品需在线操作（本地与云端要一起换）`, true); return false; }
         if (res.status === "no-local") { host.status("本地字节缺失", true); return false; }
+        if (res.status === "locked") { host.status("已取消（需要密码）", true); return false; }
         if (res.status === "conflict") { host.status(`云端有更新版本：${item.name} —— 本地已换、已标未推送；打开后按冲突流程处理`, true); }
         else if (res.status === "cloud-deferred") { host.status(`${okMsg}（本地完成；云端暂未跟上，已标未推送，回线后推送即同步）`, true); }
         else host.status(okMsg);
@@ -302,22 +303,14 @@ function makeGallery(host: GalleryHost) {
       async function encryptItem(item: any) {
         openMenu.value = null;
         if (!_encPrecheck(item, "加密")) return;
+        // 首次设密码（已解锁则复用统一密码）——放进 crypto-state，flow.encrypt 经 seam 自取
         const pw = await ensureNewPassword();
         if (pw == null) { host.status("已取消"); return; }
+        setPassword(pw);
         try {
-          // thumbPng：容器尾部必备件（store 不懂 thumb，app 渲）。优先现成 pkg.thumb，没有就解码渲一张。
-          const pkg = await getSession(item.name);
-          if (!pkg || !pkg.ora) { host.status("本地字节缺失，无法加密", true); return; }
-          const thumbPng = pkg.thumb
-            ? new Uint8Array(await pkg.thumb.arrayBuffer())
-            : new Uint8Array(await (await renderThumbBlob(await decodeOraToDoc(pkg.ora), 256)).arrayBuffer());
-          const res = await _store.flow.encrypt(item.name, {
-            password: pw, thumbPng, fileName: item.name, ext: "ora",
-            isOnline: () => host.signedIn() && host.online(),
-          });
+          const res = await _store.flow.encrypt(item.name, { isOnline: () => host.signedIn() && host.online() });
           if (res.status === "already") { host.status("已是加密作品"); return; }
           if (!(await _afterSwap(item, res, `已加密：${item.name}（7-Zip 输此密码可恢复；忘记密码内容永久找不回）`))) return;
-          setPassword(pw);   // 加密成功才上位为统一图库密码
           // 清明文残留：revert checkpoint（旧内容的明文快照）
           try { await setMeta(`revert:${item.name}:ora`, null); await setMeta(`revert:${item.name}:at`, null); } catch (_) {}
         } catch (e: any) { host.status(`加密失败：${e?.message || e}`, true); }
@@ -329,35 +322,19 @@ function makeGallery(host: GalleryHost) {
         if (!_encPrecheck(item, "解除加密")) return;
         if (!(await host.confirm(`解除「${pathBasename(item.name)}」的加密？`,
           "内容将以明文存放在本机与云端，任何能访问此设备或云账号的人都能查看。"))) return;
-        // 内存密码先试；不对/没有 → in-app 弹窗循环（取消即退）。错密码由 store 在任何持久改动前抛出。
-        for (let attempt = 0; ; attempt++) {
-          let pw = getPassword(), fromPrompt = false;
-          if (!pw) {
-            pw = await promptPassword({ title: "输入密码以解除加密", message: attempt > 0 ? "密码不对，再试一次" : "" });
-            if (pw == null) { host.status("已取消"); return; }
-            fromPrompt = true;
-          }
-          try {
-            const res = await _store.flow.decrypt(item.name, {
-              password: pw,
-              isOnline: () => host.signedIn() && host.online(),
-            });
-            if (res.status === "not-encrypted") { host.status("这不是加密作品"); return; }
-            setPassword(pw);
-            await _afterSwap(item, res, `已解除加密：${item.name}`);
-            break;
-          } catch (e: any) {
-            if (e?.code === "WRONG_PASSWORD") { lock(); if (!fromPrompt) continue; continue; }
-            host.status(`解除加密失败：${e?.message || e}`, true);
-            return;
-          }
-        }
+        try {
+          // 密码循环（内存先试→弹窗重问→验证→记忆）全在 store 的 crypt seam 里
+          const res = await _store.flow.decrypt(item.name, { isOnline: () => host.signedIn() && host.online() });
+          if (res.status === "not-encrypted") { host.status("这不是加密作品"); return; }
+          await _afterSwap(item, res, `已解除加密：${item.name}`);
+        } catch (e: any) { host.status(`解除加密失败：${e?.message || e}`, true); }
         await reload();
       }
 
-      // 锁 icon 点击：解锁浏览（带该 tile 的密文做验证 —— 错密码当场打回，不污染统一密码）
-      async function onUnlock(validateBlob: Blob | null) {
-        if (await unlockInteractive(validateBlob)) { host.status("已解锁加密作品（密码只在内存，关页即忘）"); await reload(); }
+      // 锁 icon 点击：交互解锁（store 密码循环 + GCM 验证 + onPasswordVerified 记忆；本地/云端自动路由）
+      async function onUnlock(name: string) {
+        const bytes = await _store.readPeek(name, { interactive: true, cloud: true });
+        if (bytes) { host.status("已解锁加密作品（密码只在内存，关页即忘）"); await reload(); }
       }
 
       async function del(item: any) {
@@ -469,7 +446,7 @@ function makeGallery(host: GalleryHost) {
           </div>
 
           <div v-for="row in fileTiles" :key="row.t.name" class="gallery-tile" :class="{ active: row.t.isActive }" @click="openTile(row.item)">
-            <ThumbCell :local-thumb="row.t.hasLocalThumb ? row.item.local.thumb : null" :enc-local-name="row.t.encrypted ? row.t.name : null" :cloud="row.t.encrypted ? null : row.t.cloud" :fallback="row.t.displayName.slice(0,1) || '?'" :alt="row.t.name" @unlock="onUnlock" />
+            <ThumbCell :local-thumb="row.t.hasLocalThumb ? row.item.local.thumb : null" :enc-name="row.t.encrypted ? row.t.name : null" :cloud="row.t.encrypted ? null : row.t.cloud" :fallback="row.t.displayName.slice(0,1) || '?'" :alt="row.t.name" @unlock="onUnlock" />
             <div class="gallery-tile-name-row">
               <div class="gallery-tile-name" :title="row.t.fullPath">{{ row.t.displayName }}</div>
               <div class="gallery-tile-meta">

@@ -20,27 +20,27 @@ import type { Bytes, LocalAdapter, TrashEntry } from "./types.ts";
 
 export function createLocalAdapter(): LocalAdapter {
   return {
-    async save(name: string, oraBlob: Bytes | Blob) {
-      // app 主存路径用 saveNow（live doc，不解码）；这里给 Store 流（exit flush / pull 覆盖 /
-      // rename / push）用，非热路径。
+    async save(name: string, oraBlob: Bytes | Blob, hint?: any) {
+      // 给 Store 流（flow.save / pull 覆盖 / rename / push）用。
       // **必须归一化成 Blob**：Store 流经 toU8 传进来的是 Uint8Array，但本地持久层契约是 Blob——
       //   pkg.ora.size 给图库列大小（Uint8Array 只有 byteLength → undefined → 列「0B」），
       //   decodeOraToDoc/zipUnpack 的 BlobReader 也只吃 Blob（Uint8Array → 抛 → 打不开 + 渲不出 thumb）。
       //   rename 后「变 0B / 点进去打不开 / thumb 问号」三联症全是这条漏归一化。
       const blob = oraBlob instanceof Blob ? oraBlob : new Blob([oraBlob], { type: "application/zip" });
-      // 解码一次渲 thumb，用**原始 ora bytes** 落盘（不 re-encode，保字节）。
-      // 解码 / 渲 thumb 失败**不阻断落盘**：字节是真相，thumb 是派生——宁可少缩略图也绝不丢字节
-      //   （否则坏/新格式 ora 会卡死整条 pull/flush，见 docs/reports 候选 4）。
+      // thumb 来源（按优先级）：
+      //   ① hint.thumb —— flow.save 透传的活 doc 现成缩略图（热路径 Ctrl+S 免解码）；
+      //   ② 解码一次渲（pull/rename 等冷路径）；失败**不阻断落盘**（字节是真相，thumb 是派生）。
+      // APP-DIVERGENCE(webpaint)：加密容器不渲/不存明文 thumb（① 明文缩略图不落 IDB；
+      //   ② 解码容器会弹密码 = pull 流里伏击）。图库解锁后经 store.readPeek 解密预览。
       let thumb = null;
-      try {
-        // APP-DIVERGENCE(webpaint)：加密容器（ADR-0012）不渲明文 thumb——
-        //   ① 明文缩略图不落 IDB；② decodeOraToDoc 对容器会弹密码（pull 流里弹窗 = 伏击）。
-        //   图库解锁后从容器尾部的加密 thumb blob 解密预览。
-        if (!(await looksEncryptedContainer(blob))) {
-          thumb = await renderThumbBlob(await decodeOraToDoc(blob), 256);
+      const isEnc = await looksEncryptedContainer(blob);
+      if (!isEnc) {
+        if (hint && hint.thumb instanceof Blob) thumb = hint.thumb;
+        else {
+          try { thumb = await renderThumbBlob(await decodeOraToDoc(blob), 256); }
+          catch (e) { console.warn("[local] thumb 渲染失败，仅存字节：", e); }
         }
       }
-      catch (e) { console.warn("[local] thumb 渲染失败，仅存字节：", e); }
       await putSessionPkg(name, blob, thumb);   // 与 saveSession 共用唯一落盘原语（落 Blob）
     },
 
