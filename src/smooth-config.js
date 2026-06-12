@@ -9,7 +9,7 @@
 const LS_KEY = "webpaint.smooth.v1";
 
 export const SMOOTH_DEFAULTS = Object.freeze({
-  lookaheadCap: 240,   // streamline=1 时的窗口上限（screen px）；W_doc = streamline × cap ÷ scale。v240 90→240：长尾跟笔
+  lookaheadCap: 90,    // streamline=1 时的窗口上限（screen px）；W_doc = streamline × cap ÷ scale。（v240 试过 240 太大，v241 改回 90）
   smoothBoost:  1,     // 轻压平滑增益：W_i = W×(1+boost×(1−p))。轻按(p→0)窗口×(1+boost) → 治提笔/轻描抖。0=关
   deflate:      false, // 内缩/毛笔甩尖：false→2 阶(保曲率,默认) / true→0 阶(内缩)
   vref:         0.1,   // V_REF（旧四件套速度自适应；已知对主笔刷无效，暴露以自证）
