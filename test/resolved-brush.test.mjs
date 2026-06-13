@@ -44,7 +44,7 @@ describe("resolveBrush · 预设字段映射（对齐旧 applyBrushPresetFrozen�
     pressureGamma: 2.0, pressureLPF: 80,
     compositeMode: "buildup", blendMode: "multiply",
     spacing: { value: 0.25 }, pixelMode: true,
-    smooth: { streamline: 0.7, streamlinePressure: 0.4, stabilization: 0.2 },
+    smooth: { streamline: 0.7, stabilization: 0.2 },
     smudge: { strength: 0.6, dryness: 0.3 },
   };
   const b = resolveBrush({ preset, size: 33, opacity: 0.9, flow: 1.0, color: "#112233" });
@@ -61,8 +61,8 @@ describe("resolveBrush · 预设字段映射（对齐旧 applyBrushPresetFrozen�
     eq(b.compositeMode, "buildup"); eq(b.blendMode, "multiply");
     eq(b.spacing, 0.25); eq(b.pixelMode, true);
   });
-  it("smooth 三参 + smudge", () => {
-    eq(b.streamline, 0.7); eq(b.streamlinePressure, 0.4); eq(b.stabilization, 0.2);
+  it("smooth 两参 + smudge", () => {
+    eq(b.streamline, 0.7); eq(b.stabilization, 0.2);
     eq(b.smudgeStrength, 0.6); eq(b.smudgeDryness, 0.3);
   });
   it("dial（size/opacity/flow）+ color 覆盖", () => {

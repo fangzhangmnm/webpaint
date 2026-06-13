@@ -42,7 +42,6 @@ const DOUBLETAP_MAX_GAP = 80;
 //   SMOOTH.pressureAlpha      压感 smP 一阶 EMA α（input 端去尖刺）
 //   SMOOTH.resampleStepPx     弧长重采样间隔 Δ
 //   SMOOTH.streamlineMaxLagPx streamline=1 时目标滞后
-//   SMOOTH.pressureMaxLagPx   streamlinePressure=1 时压感 EMA 滞后
 //   SMOOTH.stabMaxPx          stabilization=1 时死区半径
 // Undo 通过 history.UndoStack（v44 起 command pattern + 注册 handler）。
 // 这里只注册 "stroke" type 的 handler，layer 操作的 handler 在 app.js 注册。
@@ -56,19 +55,14 @@ const GESTURE_TAP_MAX_MOVE_SQ = 256;     // 16 px²
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
-// v243: 三参 → 引擎平滑参数（Procreate EMA + 死区，详 docs/brush-procreate-smoothing.md）。
-//   screen px 量纲 ÷ scale → doc px，让手感随缩放一致。
-//   a = L/(L+Δ)：按目标滞后长度反解 EMA 系数（直取 a=streamline 在 a→1 处暴冲，不线性）。
+// v243: 两参 → 引擎平滑参数（Procreate SmoothDamp + 死区，详 docs/brush-procreate-smoothing.md）。
+//   screen px 量纲 ÷ scale → doc px，让手感随缩放一致。lag = 目标滞后(doc px)，引擎内 T=lag/step。
 function _resolveSmooth(settings, scale) {
   const sc = scale || 1;
-  const step = (SMOOTH.resampleStepPx > 0 ? SMOOTH.resampleStepPx : 2) / sc;
   const clamp01 = (v) => Math.max(0, Math.min(1, v || 0));
-  const L  = clamp01(settings.streamline)         * SMOOTH.streamlineMaxLagPx / sc;
-  const Lp = clamp01(settings.streamlinePressure) * SMOOTH.pressureMaxLagPx   / sc;
   return {
-    step,
-    a:        L  > 0 ? L  / (L  + step) : 0,
-    aP:       Lp > 0 ? Lp / (Lp + step) : 0,
+    step:     (SMOOTH.resampleStepPx > 0 ? SMOOTH.resampleStepPx : 2) / sc,
+    lag:      clamp01(settings.streamline) * SMOOTH.streamlineMaxLagPx / sc,
     deadzone: clamp01(settings.stabilization) * SMOOTH.stabMaxPx / sc,
   };
 }
@@ -668,7 +662,7 @@ export class InputController {
     const buffered = mode !== "smudge" && !settings.pixelMode;
     rec.rawToEngine = buffered;
     const scale = this.board.viewport.scale || 1;
-    // v243：Procreate 三参（EMA 拉绳 + 死区 + 贴笔尖 catch-up）。{step, a, aP, deadzone}（doc px）。
+    // v243：Procreate 两参（EMA 拉绳 + 死区 + 贴笔尖 catch-up）。{step, a, deadzone}（doc px）。
     const smooth = buffered ? _resolveSmooth(settings, scale) : {};
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth);
     const bbox = this.brush.flushDirty();

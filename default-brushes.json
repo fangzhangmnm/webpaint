@@ -9,7 +9,7 @@
               "pressureGamma": 0.5, "pressureLPF": 50,
               "spacingValue": 0.06, "compositeMode": "wash",
               "taperIn": 0.3, "taperOut": 0.3,
-              "streamline": 0.9 } },
+              "streamline": 0.45 } },
   { "id": "default-brush-fill", "name": "平涂", "tool": "brush",
     "args": { "size": 50, "sizeBaseMax": 800, "hardness": 0.9,
               "sizeCoeff": 1.0, "opaCoeff": 0, "flowCoeff": 0,

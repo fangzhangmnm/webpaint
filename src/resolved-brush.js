@@ -25,7 +25,7 @@ import { DEFAULT_SETTINGS } from "./brush.js";
  * @property {number} [pressureGamma] @property {number} [pressureLPF]
  * @property {string} [compositeMode] @property {string} [blendMode]
  * @property {number|{value?:number}} [spacing] @property {boolean} [pixelMode]
- * @property {{streamline?:number, streamlinePressure?:number, stabilization?:number}} [smooth]
+ * @property {{streamline?:number, stabilization?:number}} [smooth]
  * @property {{strength?:number, dryness?:number}} [smudge]
  */
 
@@ -76,9 +76,8 @@ export function resolveBrush({
       : (preset.spacing?.value ?? 0.06);
     b.pixelMode     = !!preset.pixelMode;
     const sm = preset.smooth || {};
-    b.streamline         = sm.streamline         ?? 0.3;
-    b.streamlinePressure = sm.streamlinePressure ?? 0;
-    b.stabilization      = sm.stabilization      ?? 0;
+    b.streamline    = sm.streamline    ?? 0.15;
+    b.stabilization = sm.stabilization ?? 0;
     if (preset.smudge) {
       b.smudgeStrength = preset.smudge.strength ?? 0.8;
       b.smudgeDryness  = preset.smudge.dryness  ?? 0.1;

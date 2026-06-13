@@ -62,8 +62,7 @@ export function buildRackCode(rack: any): string {
     if (b.taper?.out) args.taperOut = b.taper.out;
     if (b.smudge) args.smudge = b.smudge;
     const sm = b.smooth || {};
-    if (sm.streamline != null && sm.streamline !== 0.3) args.streamline = sm.streamline;
-    if (sm.streamlinePressure != null && sm.streamlinePressure !== 0) args.streamlinePressure = sm.streamlinePressure;
+    if (sm.streamline != null && sm.streamline !== 0.15) args.streamline = sm.streamline;
     if (sm.stabilization != null && sm.stabilization !== 0) args.stabilization = sm.stabilization;
     const argsStr = JSON.stringify(args).replace(/"([a-zA-Z_]\w*)":/g, "$1:");
     lines.push(`  { id: ${JSON.stringify(b.id)}, name: ${JSON.stringify(b.name)}, tool: ${JSON.stringify(b.tool)},`);

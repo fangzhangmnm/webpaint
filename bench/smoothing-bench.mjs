@@ -52,18 +52,18 @@ function divergence(a, b) {
 const STEP = 2;
 console.log("\n===== ① 帧率无关（R=100 半圆，1× vs 3× 事件密度，max 锚点偏差应≈0）=====");
 for (const sl of [0.3, 0.6, 0.9]) {
-  const L = sl * 24, a = L / (L + STEP);
+  const lag = sl * 48;
   const base = arc(100, 180, 120);
-  const A = anchorsAtArcLen(run(base, { step: STEP, a }));
-  const B = anchorsAtArcLen(run(densify(base, 3), { step: STEP, a }));
-  console.log(`  streamline=${sl} (a=${a.toFixed(3)}): max 偏差 = ${divergence(A, B).toFixed(4)} px`);
+  const A = anchorsAtArcLen(run(base, { step: STEP, lag }));
+  const B = anchorsAtArcLen(run(densify(base, 3), { step: STEP, lag }));
+  console.log(`  streamline=${sl} (lag=${lag}px): max 偏差 = ${divergence(A, B).toFixed(4)} px`);
 }
 
-console.log("\n===== ② 贴笔尖（笔尖滞后恒 0；锚点滞后随 a 增）=====");
+console.log("\n===== ② 贴笔尖（笔尖滞后恒 0；锚点滞后随 lag 增）=====");
 for (const sl of [0, 0.3, 0.6, 0.9]) {
-  const L = sl * 24, a = L / (L + STEP);
+  const lag = sl * 48;
   const line = []; for (let x = 0; x <= 200; x += 4) line.push([x, 0]);
-  const sm = run(line, { step: STEP, a });
+  const sm = run(line, { step: STEP, lag });
   const tip = sm.cx[sm.count - 1];
   const lastAnchor = sm._committed > 0 ? sm.cx[sm._committed - 1] : tip;
   console.log(`  streamline=${sl}: 笔尖滞后=${(200 - tip).toFixed(2)}px(应0)  末锚滞后笔尖=${(tip - lastAnchor).toFixed(2)}px`);
@@ -71,10 +71,26 @@ for (const sl of [0, 0.3, 0.6, 0.9]) {
 
 console.log("\n===== ③ 去抖（噪声=1.5px 直线，残余偏离 RMS 越小越稳）=====");
 for (const [sl, stab] of [[0, 0], [0.3, 0], [0.6, 0], [0, 0.5], [0.6, 0.5]]) {
-  const L = sl * 24, a = L / (L + STEP);
   const line = []; for (let x = 0; x <= 200; x += 3) line.push([x, noise(x, 1.5)]);
-  const sm = run(line, { step: STEP, a, deadzone: stab * 8 });
+  const sm = run(line, { step: STEP, lag: sl * 48, deadzone: stab * 8 });
   let sq = 0; for (let i = 0; i < sm._committed; i++) sq += sm.cy[i] * sm.cy[i];
   const rms = sm._committed ? Math.sqrt(sq / sm._committed) : 0;
   console.log(`  streamline=${sl} stabilization=${stab}: 残余 RMS = ${rms.toFixed(3)} px`);
+}
+
+console.log("\n===== ④ 收笔弧线（finish 锚点离[起锚→终点]弦的最大垂距；直线应≈0、弯笔应>0）=====");
+function chordDev(sm, a0) {
+  const tip = sm.count - 1, ax = sm.cx[a0], ay = sm.cy[a0], bx = sm.cx[tip], by = sm.cy[tip];
+  const len = Math.hypot(bx - ax, by - ay) || 1; let max = 0;
+  for (let i = a0 + 1; i < sm._committed; i++)
+    max = Math.max(max, Math.abs((bx - ax) * (ay - sm.cy[i]) - (ax - sm.cx[i]) * (by - ay)) / len);
+  return max;
+}
+for (const sl of [0.3, 0.6, 0.9]) {
+  const lag = sl * 48;
+  const straight = []; for (let x = 0; x <= 200; x += 5) straight.push([x, 0]);
+  const sA = run(straight, { step: STEP, lag }); const a0 = sA._committed - 1; sA.finish();
+  const curve = []; for (let k = 0; k <= 80; k++) { const t = k / 80 * Math.PI / 2; curve.push([100 * Math.cos(t), 100 * Math.sin(t)]); }
+  const sB = run(curve, { step: STEP, lag }); const b0 = sB._committed - 1; sB.finish();
+  console.log(`  streamline=${sl}: 直线收笔弧=${chordDev(sA, a0).toFixed(2)}px  弯笔收笔弧=${chordDev(sB, b0).toFixed(2)}px`);
 }

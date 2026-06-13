@@ -33,9 +33,9 @@
 //   smudge / pixelMode: 都直接进 layer（不进 buffer）
 //
 // **frozen/tail 渲染**（平滑核 v243 换成 Procreate EMA，详 docs/brush-procreate-smoothing.md）：
-//   buffered（brush/erase，非 pixel）的平滑中心线由 stroke-smoother.js 给（EMA 锚点 + 笔尖）：
-//     - frozen 段（已提交 EMA 锚点，因果终值）→ 烤进 stroke buffer，永不再画
-//     - tail 段（最后锚点 → 笔尖的直线桥）→ 每帧清掉重画到 tail buffer，钉到笔尖（贴指 + 抬笔 catch-up）
+//   buffered（brush/erase，非 pixel）的平滑中心线由 stroke-smoother.js 给（SmoothDamp 锚点 + 笔尖）：
+//     - frozen 段（已提交锚点，因果终值）→ 烤进 stroke buffer，永不再画
+//     - tail 段（最后锚点 → 笔尖的直线桥）→ 每帧清掉重画到 tail buffer，钉到笔尖（贴指）；抬笔 finish() 出弧尾
 //     - overlay = frozen ⊕ tail（wash:max / buildup:over），opacity 只在 composite 时乘一次
 //   smudge / pixel 仍走 immediate 路径（直接进 layer，无法重画）。
 
@@ -73,9 +73,8 @@ export const DEFAULT_SETTINGS = {
   blendMode: "source-over",
   // pixel mode：
   pixelMode: false,
-  // 位置平滑（Procreate 三参，详 docs/brush-procreate-smoothing.md）：
-  streamline: 0.3,          // EMA 拉绳：低频曲线重塑（带滞后）
-  streamlinePressure: 0,    // 同一套 EMA 套到压感通道（默认关，不动既有压感手感）
+  // 位置平滑（Procreate 两参，详 docs/brush-procreate-smoothing.md）：
+  streamline: 0.15,         // EMA 拉绳：低频曲线重塑（带滞后）。v243b 标定：0.5=满劲 → 默认 0.15=轻
   stabilization: 0,         // 死区拉绳：高频手抖去噪
   // taper：笔触两端渐细，**纯 stylistic·per-preset**（brushes.js makeBrush 的 taperIn/out → preset.taper）。默认 0=无。
   //   曾有「系统级 anti-spike 硬件 taper 1.5」的设定，但预设永远覆盖它 → 形同虚设且误导，已删（user 2026-06-08）。
@@ -183,7 +182,7 @@ export class BrushEngine {
     return Math.max(0.5, effSize * s.spacing);
   }
 
-  // smooth: { step, a, aP, deadzone }（doc px / EMA 系数）。详 docs/brush-procreate-smoothing.md。
+  // smooth: { step, a, deadzone }（doc px / EMA 系数）。详 docs/brush-procreate-smoothing.md。
   //   a=0 & deadzone=0 → 不平滑（重采样直通 raw）。
   beginStroke(layer, settings, x, y, pressure, mode = "brush", smooth = {}) {
     let loaded = null;
@@ -402,6 +401,7 @@ export class BrushEngine {
     const st = this._stroke;
     if (st && st.buffered) {
       st.sm.update();
+      st.sm.finish();                    // 抬笔收尾：把直线桥换成带动量的弧尾、钉终点（画到头）
       const last = st.sm.count - 1;
       if (last >= 0) {
         // 出端 taper 需总笔长 → 先用 frozenWalk 拷贝干走一遍量 total（不烤），再设 _taperTotal 真烤。

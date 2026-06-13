@@ -90,7 +90,6 @@ export const BrushSettings = defineComponent({
     <div class="${SECTION}">
       <div class="${TITLE}">笔画平滑</div>
       <div class="${ROW}"><label>streamline</label><input type="range" min="0" max="1" step="0.05" v-model.number="draft.smooth.streamline"><span class="${VAL}">{{ draft.smooth.streamline.toFixed(2) }}</span></div>
-      <div class="${ROW}"><label>streamline 压感</label><input type="range" min="0" max="1" step="0.05" v-model.number="draft.smooth.streamlinePressure"><span class="${VAL}">{{ draft.smooth.streamlinePressure.toFixed(2) }}</span></div>
       <div class="${ROW}"><label>stabilization</label><input type="range" min="0" max="1" step="0.05" v-model.number="draft.smooth.stabilization"><span class="${VAL}">{{ draft.smooth.stabilization.toFixed(2) }}</span></div>
       <div class="${ROW}"><label>pressure LPF</label><input type="range" min="0" max="200" step="5" v-model.number="draft.pressureLPF"><span class="${VAL}">{{ Math.round(draft.pressureLPF) }} ms</span></div>
     </div>

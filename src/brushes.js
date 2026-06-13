@@ -12,7 +12,7 @@
 //   （user：「默认 opacity 默认 flow 两个字段不要，都是 1」）。user 自己拉 slider / brush settings 调。
 // - **airbrush flag 没了**：buildup + opaCoeff=0 就是喷枪 feel，user 自己拉低 flow slider。
 // - **pressureGamma**：p' = p^gamma，统一 power 曲线（默 1.0）。
-// - **smooth**：per-preset 位置平滑参数（Procreate 三参：streamline / streamlinePressure / stabilization）。
+// - **smooth**：per-preset 位置平滑参数（Procreate 两参：streamline / stabilization）。
 //   v98 之前是全局 state.brush 上的，user：「smooth 没进笔刷，这个不是系统参数」。
 //
 // **不冻结字段**（user 当场调，不回写预设）：
@@ -50,8 +50,8 @@ function makeBrush({
   pixelMode = false,
   taperIn = 0, taperOut = 0,
   smudge = null,
-  // 位置平滑（per-brush，Procreate 三参，详 docs/brush-procreate-smoothing.md）
-  streamline = 0.3, streamlinePressure = 0, stabilization = 0,
+  // 位置平滑（per-brush，Procreate 两参，详 docs/brush-procreate-smoothing.md）
+  streamline = 0.15, stabilization = 0,
   // v99r2：defaultOpa 留着，默认 1.0；user 编辑笔可以改成 0.6 当 sketch 默认
   defaultOpa = 1.0,
   // v2: last user-action-time —— FolderFlow 合并键（见 src/store/folder-merge.js）。
@@ -71,7 +71,7 @@ function makeBrush({
     pixelMode,
     taper: { in: taperIn, out: taperOut },
     smudge,
-    smooth: { streamline, streamlinePressure, stabilization },
+    smooth: { streamline, stabilization },
   };
 }
 
@@ -159,9 +159,9 @@ export function migrateBrush(b) {
   }
   delete b.airbrush;
   delete b.bufferMode;
-  // v99 smooth：之前在 system state.brush 上的字段挪进 preset（v243 收成三参）
+  // v99 smooth：之前在 system state.brush 上的字段挪进 preset（v243 收成两参）
   if (!b.smooth) {
-    b.smooth = { streamline: 0.3, streamlinePressure: 0, stabilization: 0 };
+    b.smooth = { streamline: 0.15, stabilization: 0 };
   }
   // v2: 老笔无 uat → pre-history 基准（任何真实编辑都胜过它）
   if (b.uat == null) b.uat = PRE_HISTORY_UAT;

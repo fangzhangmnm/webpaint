@@ -13,7 +13,7 @@ describe("ensureBrushDraftDefaults", () => {
     eq(b.compositeMode, "wash");
     eq(b.blendMode, "source-over");
     eq(b.pixelMode, false);
-    eq(b.smooth.streamline, 0.3);
+    eq(b.smooth.streamline, 0.15);
     eq(b.taper.in, 0);
     eq(b.smudge.strength, 0.8, "smudge 永远补（切 smudge 工具时 v-if 段要字段在场）");
     eq(b.spacing, 0.06, "spacing 缺省 fraction");
