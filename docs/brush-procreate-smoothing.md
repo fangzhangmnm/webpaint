@@ -68,45 +68,50 @@ v148–v242）。数学甜点没错，但：
 - **注**：临界阻尼 under-bow（弧比真曲线浅，bench sl=0.9 约 0.8px vs 真弧 ~2px）；要更夸张的 Procreate 弧就
   把 finish/tail 阻尼调松（增大动量）——device 手感终判。
 
-## 转角门控（保棱角，edge-preserving，v246b）
+## 连续曲率门控（保形/保棱角，v248）
 
-低通滤波分不清「有意转角」和「无意手抖」（都是高频）→ 全局调强永远两难。解法：**局部自适应，
-转角处让路**（双边滤波思路：跨过边缘的不混合）。我们沿折线 stamp、**无渲染样条** → 不用管「样条
-再圆一次」（doc 提的第二处圆角对我们不适用，省一半）。
+> **v247 的阈值+硬锚点方案被废弃**——用户实测它在小半径弧上产**多边形**：`if cosA<阈值 then 当成角`
+> 把连续的曲率硬切成二值，紧弧上每点都在阈值附近 → 逐个判成角、各自插锚 → 紧弧被剁成多边形。
+> **只要有阈值+锚点吸附，这问题就消不掉**（跟用速度还是曲率当信号无关）。根因是**阈值化本身**。
+
+解法：**全程去阈值、去锚点，改连续映射**。设计目标 = **R_min**（系统能平滑表示的最小弧半径）：
+**转角就是 R_min 的那条弧，永远不是几何顶点**。角和紧弯是同一连续谱的两端，没有任何「是不是角」
+的判断 → 不退化成多边形。R_min 设小 → 直角够利落，但底层始终是弧。
 
 ```
-每攒够一个 cornerSpan 跨度的输入位移：
-  dirNew = normalize(此跨度位移)
-  if dot(dirNew, dirPrev) < cos(cornerDeg):       # 相邻跨度夹角 > cornerDeg = 转角
-      把跨度起点(≈顶点)钉成硬锚点：emit 它；pos 复位到它、vel 清零
-  dirPrev = dirNew
+每个重采样点 q：
+  κ_raw = mengerCurvature(q_prev2, q_prev, q)   # 三点 Menger 曲率
+  κ    += curvAlpha · (κ_raw − κ)               # κ 标量先低通去噪（raw 曲率很噪）
+  R = 1/κ                                        # 直线 → ∞
+  t = smoothstep(R_min, R_smooth, R)            # 紧弧→0, 直线/松弧→1。连续，无阈值
+  T_eff = lerp(T_tight, T, t)                   # 紧弧→近瞬跟(保形), 直线→满平滑
+  SmoothDamp(pos, vel → q, T_eff)
 ```
 
-**关键设计抉择**：
-- **用 input-dir 变化检测、不用 vel-vs-(q−pos)**：后者是 doc 给的式子，但**大 lag 下检测不到角**
-  ——pos 滞后几十 px 时 `q−pos` 仍指向旧腿方向（实测圆角不降）。input-dir 与 lag 无关。
-- **span 跨度（默认 6px）是 jitter robust 的关键**：在 6px 跨度上测方向，sub-span 手抖的净位移被
-  前进方向淹没（±1.5px / 6px ≈ 14° < 阈值）→ 不误判成角。**逐 2px 步测会把手抖当角 → 线变锯齿**
-  （实测噪声残余 RMS 0.17→0.93）。span=6 实测：直角圆角 9.1→3.6px、噪声 RMS 不变（0.17）。
-- **硬锚点 = 复位 pos 到顶点 + vel 清零**：滞后的 pos「跳」到顶点是**沿来腿方向**（共线）→ 不是
-  artifact，是把腿补直到角；然后从顶点 vel=0 平滑出新腿。两腿在顶点 crisp 相交。
-- span 让顶点定位糊 ~span → 圆角降到 ~3.6px 而非 0（取舍：更小 span 更尖但更易把抖当角）。
+`R_smooth = lag`（比 lag 紧的弧才放开平滑）。`T_tight = R_min/Δ`（紧弧滞后≈R_min → 角是 R_min 的弧）。
+无锚点、无 vel 复位 → pos 连续流动 → 紧弧是平滑弧（bench：R=8 紧弧逐步转角 max≈avg，非多边形尖峰）。
+实测：直角圆角 9.1→4.0px（R_min=4），噪声残余 RMS 基本不变（κ 低通 + R_min 下限镇住手抖）。
+
+**顿感另走线宽（待做）**：紧弯手自然变慢（2/3 幂律），让线宽随手速（慢→粗）→ 角上鼓一下 = 马克笔
+积墨的实体顿（有限半径，非几何角）。这步动引擎 size 路径，单独做（见 backlog）。
 
 ## 参数映射（`input.js`，scale 已知处算）
 
 screen px 量纲 → doc px（÷scale），让手感随缩放一致：
 
 ```
-Δ_doc     = SMOOTH.resampleStepPx / scale
-lag_doc   = streamline    · SMOOTH.streamlineMaxLagPx / scale   # 目标滞后(弧长)；引擎内 T = lag/Δ
-r_doc     = stabilization · SMOOTH.stabMaxPx / scale            # 死区半径
-cornerCos = cos(SMOOTH.cornerDeg)                              # 纯角度，scale 无关；<=0 → null 关门控
-cornerSpan_doc = SMOOTH.cornerSpanPx / scale                   # 转角检测跨度
+Δ_doc        = SMOOTH.resampleStepPx / scale
+lag_doc      = streamline    · SMOOTH.streamlineMaxLagPx / scale   # 目标滞后；引擎内 T = lag/Δ、R_smooth = lag
+r_doc        = stabilization · SMOOTH.stabMaxPx / scale            # 死区半径
+cornerRadius = lerp(lag_doc, SMOOTH.cornerFloorPx/scale, cornerKeep)  # R_min；cornerKeep∈[0,1] 单调
+              # keep=0 → R_min=lag(=R_smooth) → 门控关(圆)；keep=1 → R_min=floor(最尖)
+curvAlpha    = SMOOTH.curvatureAlpha
 ```
 
-`SMOOTH`（dev 面板 live 可调、自测）默认：`resampleStepPx=2, streamlineMaxLagPx=48, cornerDeg=35,
-cornerSpanPx=6, stabMaxPx=8`。`streamlineMaxLagPx=48` 标定：slider 0.5 → 24px 滞后（= 旧 24 标定的
-满格）、0.9 → 43px。出厂默认 streamline 相应折半（0.3→0.15、勾线 0.9→0.45）保持出厂手感不变。
+`cornerKeep` 是 **per-brush**（笔刷设置里，用户要求）：保形强度，默认 0.7。`SMOOTH`（dev 面板 live 可调）
+默认：`resampleStepPx=2, streamlineMaxLagPx=48, cornerFloorPx=2, curvatureAlpha=0.5, stabMaxPx=8`。
+`streamlineMaxLagPx=48` 标定：slider 0.5 → 24px 滞后（= 旧 24 标定满格）、0.9 → 43px。出厂默认 streamline
+相应折半（0.3→0.15、勾线 0.9→0.45）保持出厂手感不变。
 
 ## 分档
 

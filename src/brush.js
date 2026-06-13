@@ -73,9 +73,10 @@ export const DEFAULT_SETTINGS = {
   blendMode: "source-over",
   // pixel mode：
   pixelMode: false,
-  // 位置平滑（Procreate 两参，详 docs/brush-procreate-smoothing.md）：
-  streamline: 0.15,         // EMA 拉绳：低频曲线重塑（带滞后）。v243b 标定：0.5=满劲 → 默认 0.15=轻
+  // 位置平滑（Procreate，详 docs/brush-procreate-smoothing.md）：
+  streamline: 0.15,         // SmoothDamp 拉绳：低频曲线重塑（带滞后）。v243b 标定：0.5=满劲 → 默认 0.15=轻
   stabilization: 0,         // 死区拉绳：高频手抖去噪
+  cornerKeep: 0.7,          // 连续曲率门控保形：0=圆(不门控) / 1=最尖。紧弯/角跟手保形（始终是弧不退化多边形）
   // taper：笔触两端渐细，**纯 stylistic·per-preset**（brushes.js makeBrush 的 taperIn/out → preset.taper）。默认 0=无。
   //   曾有「系统级 anti-spike 硬件 taper 1.5」的设定，但预设永远覆盖它 → 形同虚设且误导，已删（user 2026-06-08）。
   taperIn: 0,

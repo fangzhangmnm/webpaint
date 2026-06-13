@@ -13,10 +13,9 @@ export const SMOOTH_DEFAULTS = Object.freeze({
   resampleStepPx:     2,   // 弧长重采样间隔 Δ（screen px）。EMA 跑在重采样点上 → 帧率无关。
   streamlineMaxLagPx: 48,  // streamline=1 时的目标滞后（screen px）；a = L/(L+Δ)，L = streamline × 此值 ÷ scale。
                            //   线性 → sl=0.5 给 24px（半格已满劲）、0.9→43px（更夸张）。嫌不够狠就调大此值。
-  cornerDeg:          35,  // 转角门控：输入方向在 cornerSpanPx 跨度上的相邻夹角 > 此角度 → 钉硬锚点保棱角。
-                           //   越小越敏感（更多角被保）；>=90 只保直角级硬转；<=0 关闭门控（全程满平滑）。
-  cornerSpanPx:       6,   // 转角检测跨度（screen px）：在这么长的跨度上测方向 → sub-span 手抖不会被误判成角。
-                           //   越大越抗抖但顶点定位越糊（角圆一点）；越小越尖但易把抖动当角。6 是去抖/保尖的甜点。
+  cornerFloorPx:      2,   // 连续曲率门控的最小弧半径下限 R_floor（screen px）：cornerKeep=1 时角是这么大的弧。
+                           //   越小角越利落（但始终是弧、不退化成多边形）。per-brush cornerKeep 在它与 lag 间插值。
+  curvatureAlpha:     0.5, // 曲率 κ 标量低通 α（0..1）：raw 曲率很噪，先低通再映射平滑强度。越大越跟手但越抖。
   stabMaxPx:          8,   // stabilization=1 时死区半径（screen px）；半径内 raw 不拉动落点
   rawStaticSq:        0.005, // raw 静止门限（screen px²）：动得比这小的 event 跳过
   pressureAlpha:      0.4,   // 压感 smP 一阶 EMA α（input 端传感器去尖刺）

@@ -1,53 +1,52 @@
-// 位置平滑 — Procreate 两参（二阶临界阻尼 SmoothDamp + 死区 + 贴笔尖 + 弧线 tail）。
+// 位置平滑 — Procreate（SmoothDamp + 死区 + 贴笔尖 + 弧线 tail + 连续曲率门控保形）。
 // 详 docs/brush-procreate-smoothing.md。
 //
 // 为什么二阶：一阶 EMA 收笔朝单点逼近 = 直弦 → 直尾巴。SmoothDamp 带 vel 状态，落点有切向动量 →
 // 收笔顺动量冲出再弯回 = 自然弧线（直线段切向=指向终点 → 仍直收）。临界阻尼 → body 不抖。
 //
-// 模型：raw → ① 死区 → ② 固定弧长 Δ 重采样 → ③ SmoothDamp 跟随（提交锚点，因果不回改、帧率无关）。
+// 模型：raw → ① 死区 → ② 固定弧长 Δ 重采样 → ③ 连续曲率门控的 SmoothDamp 跟随（提交锚点，帧率无关）。
 //
-// **弧线 tail（v244b）**：tail 不再是「最后锚点→光标」的直线桥，而是每 push 从落点(带 vel)非破坏地
-// SmoothDamp flush 到光标得到的**一段弧**（= 抬笔会得到的形状），挂在锚点串后面当 transient 预览。
-// 这样画途中预览 = 最终落定。抬笔 finish() = 把当前这段预览弧整段转正 → 预览与结果必然一致。
+// **连续曲率门控（v248，保形/保棱角）**：转角不是几何顶点、而是「系统能平滑表示的最小弧半径 R_min」
+//   的那条弧。读三点 Menger 曲率 → 连续映射 smoothTime：紧弧(R≤R_min)→近瞬跟(保形)、直线(R≥R_smooth)→
+//   满平滑。**全程无阈值、无硬锚点** → 紧弧不退化成多边形（阈值+锚点那套的根本错误）。κ 先低通去噪。
+//
+// **弧线 tail**：tail = 每 push 从落点(带 vel)非破坏 SmoothDamp flush 到光标的一段弧（= 抬笔会得到的形状）。
+//   抬笔 finish() = 把当前预览弧整段转正 → 预览所见即所得。
 //
 // 契约（brush.js 用）：push / update(空) / finish / frozenIndex / count / seq / cx,cy,cp。
-//   cx/cy/cp = [已提交锚点(0.._committed-1) … transient 弧 tail(_committed..end，末点=光标)]。
-//   frozenIndex() = _committed-1（弧 tail 永不冻，每 push 重建）。
+//   cx/cy/cp = [已提交锚点(0.._committed-1) … transient 弧 tail(末点=光标)]。frozenIndex() = _committed-1。
 
 export class StrokeSmoother {
-  // opts: { step:重采样间隔(doc px), lag:目标滞后(doc px), deadzone:死区半径(doc px) }
-  //   lag=0 & deadzone=0 → 不平滑（重采样直通）。smoothTime T = lag/step。
+  // opts: { step, lag, deadzone, cornerRadius:R_min(doc px,曲率门控下限,0=关), curvAlpha:κ低通α }
   constructor(opts = {}) {
     this.step = Math.max(0.25, opts.step || 2);
     const lag = Math.max(0, opts.lag || 0);
-    this.T = lag > 0 ? lag / this.step : 0;
+    this.T = lag > 0 ? lag / this.step : 0;       // 直线段满 smoothTime
     this.r = Math.max(0, opts.deadzone || 0);
-    // 转角门控（edge-preserving，双边滤波思路）：输入方向在 cornerSpan 跨度上的相邻夹角 > cornerDeg
-    //   时，把转角顶点钉成**硬锚点**（pos 复位到顶点、vel 清零）→ 棱角 crisp、两腿各自平滑。
-    //   用 input-dir 变化检测（与 lag 无关；vel-vs-(q-pos) 在大 lag 下检测不到角）。
-    //   **span 跨度**是关键：在 ~6px 跨度上测方向 → sub-span 手抖不会被误判成角（jitter robust）。
-    //   cornerCos = cos(cornerDeg)。null/undefined = 不门控（旧行为；测试不传则全程满平滑）。
-    this.cornerCos = (opts.cornerCos == null) ? null : opts.cornerCos;
-    this.cornerSpan = Math.max(opts.cornerSpan || 0, this.step);
+    this.Rmin = Math.max(0, opts.cornerRadius || 0);   // 最小弧半径（doc px）；0 → 不门控
+    this.Rsmooth = this.T * this.step;            // = lag：R≥此值 → 满平滑（紧于它才放开）
+    this.curvAlpha = Math.max(0, Math.min(1, opts.curvAlpha == null ? 0.5 : opts.curvAlpha));
+    this.Ttight = this.Rmin / this.step;          // 紧弧处的 smoothTime（滞后≈R_min → 角是 R_min 的弧）
 
     this.cx = []; this.cy = []; this.cp = [];
-    this._committed = 0;        // 已提交锚点数；其后是 transient 弧 tail
-    this._tailLen = 0;          // 当前 transient 点数（弧 tail，每 push 弹掉重建）
+    this._committed = 0;
+    this._tailLen = 0;
     this.seq = 0;
 
-    this._px = 0; this._py = 0; // 平滑落点 pos
-    this._vx = 0; this._vy = 0; // 速度（二阶状态，动量来源）
+    this._px = 0; this._py = 0;
+    this._vx = 0; this._vy = 0;
     this._stabX = 0; this._stabY = 0;
     this._lastSX = 0; this._lastSY = 0;
     this._lastInP = 0;
     this._accum = 0;
     this._started = false;
-    // 转角检测：span 锚点 + 上段输入方向（跨 push 持续）
-    this._cqx = 0; this._cqy = 0;
-    this._dirX = 0; this._dirY = 0; this._haveDir = false;
+    // 曲率门控：最近两个重采样输入点（跨 push 持续）+ 低通后的 κ
+    this._q1x = 0; this._q1y = 0; this._q2x = 0; this._q2y = 0; this._qn = 0;
+    this._kappa = 0;
   }
 
   get count() { return this.cx.length; }
+  get _gating() { return this.Rmin > 0 && this.T > 0 && this.Rsmooth > this.Rmin; }
 
   push(x, y, p) {
     this.seq++;
@@ -57,12 +56,10 @@ export class StrokeSmoother {
       this._stabX = x; this._stabY = y;
       this._lastSX = x; this._lastSY = y; this._lastInP = p;
       this._accum = 0;
-      this._cqx = x; this._cqy = y;                        // 转角 span 锚点起点
       this.cx.push(x); this.cy.push(y); this.cp.push(p);   // 笔尖
       this._committed = 0; this._tailLen = 1;
       return;
     }
-    // 弹掉上一帧的 transient 弧 tail（永不冻、不入提交）
     for (let i = 0; i < this._tailLen; i++) { this.cx.pop(); this.cy.pop(); this.cp.pop(); }
 
     // ① stabilization 死区
@@ -73,7 +70,7 @@ export class StrokeSmoother {
     } else { this._stabX = x; this._stabY = y; }
     const sx = this._stabX, sy = this._stabY;
 
-    // ② 重采样 lastS→s；③ 每采样点 q 做 SmoothDamp（推进真 pos/vel）→ 提交锚点
+    // ② 重采样 lastS→s；③ 每采样点 q：曲率门控算 T_eff → SmoothDamp → 提交锚点
     const segdx = sx - this._lastSX, segdy = sy - this._lastSY;
     const L = Math.hypot(segdx, segdy);
     let pos = 0;
@@ -84,30 +81,29 @@ export class StrokeSmoother {
       const qx = this._lastSX + segdx * t;
       const qy = this._lastSY + segdy * t;
       const qp = this._lastInP + (p - this._lastInP) * t;
-      // 转角检测（input-dir 在 cornerSpan 跨度上变化，lag 无关 + jitter robust）：
-      //   走够一个 span 就比相邻 span 方向；夹角 > cornerDeg → span 起点(顶点) 钉硬锚点。
-      if (this.cornerCos != null) {
-        const ax = qx - this._cqx, ay = qy - this._cqy, al = Math.hypot(ax, ay);
-        if (al >= this.cornerSpan) {
-          const ndx = ax / al, ndy = ay / al;
-          if (this._haveDir && (ndx * this._dirX + ndy * this._dirY) < this.cornerCos) {
-            this.cx.push(this._cqx); this.cy.push(this._cqy); this.cp.push(qp);   // 硬锚顶点
-            this._px = this._cqx; this._py = this._cqy; this._vx = 0; this._vy = 0;
-          }
-          this._dirX = ndx; this._dirY = ndy; this._haveDir = true;
-          this._cqx = qx; this._cqy = qy;
-        }
-      }
-      const s = dampStep(this._px, this._py, this._vx, this._vy, qx, qy, this.T);
+      const Te = this._gateT(qx, qy);
+      const s = dampStep(this._px, this._py, this._vx, this._vy, qx, qy, Te);
       this._px = s[0]; this._py = s[1]; this._vx = s[2]; this._vy = s[3];
       this.cx.push(this._px); this.cy.push(this._py); this.cp.push(qp);
+      this._q2x = this._q1x; this._q2y = this._q1y; this._q1x = qx; this._q1y = qy; this._qn++;
     }
     this._accum += L - pos;
     this._lastSX = sx; this._lastSY = sy; this._lastInP = p;
     this._committed = this.cx.length;
 
-    // 重建 transient 弧 tail：从真 pos/vel 的**拷贝** flush 到光标，末点钉光标（贴指）
     this._tailLen = this._buildTail(sx, sy, p);
+  }
+
+  // 连续曲率门控：读三点 Menger 曲率(低通) → R → smoothstep(R_min,R_smooth) → 连续插值 smoothTime。
+  //   紧弧(R 小) → 近 T_tight(跟手保形)；直线(R 大) → 满 T。无阈值无锚点 → 紧弧不退化成多边形。
+  _gateT(qx, qy) {
+    if (!this._gating) return this.T;
+    let kRaw = 0;
+    if (this._qn >= 2) kRaw = menger(this._q2x, this._q2y, this._q1x, this._q1y, qx, qy);
+    this._kappa += this.curvAlpha * (kRaw - this._kappa);    // κ 标量低通去噪
+    const R = this._kappa > 1e-9 ? 1 / this._kappa : Infinity;
+    const tt = smoothstep(this.Rmin, this.Rsmooth, R);       // 0=紧弧, 1=直线/松弧
+    return this.Ttight + (this.T - this.Ttight) * tt;
   }
 
   // 从 (pos,vel) 的拷贝 SmoothDamp flush 到 (tx,ty)，追加弧点，末点 = (tx,ty)。返回追加点数。
@@ -119,9 +115,9 @@ export class StrokeSmoother {
       const MAX = Math.ceil(this.T * 6) + 64;
       for (let i = 0; i < MAX; i++) {
         if (Math.hypot(px - tx, py - ty) < 0.2 && Math.hypot(vx, vy) < 0.2) break;
-        const s = dampStep(px, py, vx, vy, tx, ty, this.T);   // tail = 到光标的平滑 catch-up（转角已在提交段硬锚）
+        const s = dampStep(px, py, vx, vy, tx, ty, this.T);   // tail = 到光标的平滑 catch-up
         px = s[0]; py = s[1]; vx = s[2]; vy = s[3];
-        if (Math.hypot(px - lax, py - lay) >= 0.15) {     // 去冗余（settle 处别堆点）
+        if (Math.hypot(px - lax, py - lay) >= 0.15) {
           this.cx.push(px); this.cy.push(py); this.cp.push(tp); n++; lax = px; lay = py;
         }
       }
@@ -137,9 +133,8 @@ export class StrokeSmoother {
     this._tailLen = 0;
   }
 
-  frozenIndex() { return this._committed - 1; }   // 弧 tail 永不冻
-
-  update() {}                                     // 因果、锚点不回改 → 无需重算
+  frozenIndex() { return this._committed - 1; }
+  update() {}
 }
 
 // 一步 SmoothDamp（临界阻尼，Game Programming Gems 4 有理近似；dt=1/步）。T<=0 → 直接吸到 target。
@@ -150,4 +145,20 @@ function dampStep(px, py, vx, vy, tx, ty, T) {
   const cdx = px - tx, cdy = py - ty;
   const tmx = vx + omega * cdx, tmy = vy + omega * cdy;
   return [tx + (cdx + tmx) * exp, ty + (cdy + tmy) * exp, (vx - omega * tmx) * exp, (vy - omega * tmy) * exp];
+}
+
+// Menger 曲率 κ = 4·area / (|P0P1|·|P1P2|·|P2P0|)。三点共线 → 0。
+function menger(x0, y0, x1, y1, x2, y2) {
+  const a = Math.hypot(x1 - x0, y1 - y0), b = Math.hypot(x2 - x1, y2 - y1), c = Math.hypot(x2 - x0, y2 - y0);
+  if (a < 1e-9 || b < 1e-9 || c < 1e-9) return 0;
+  const area2 = Math.abs((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0));   // = 2·area
+  return 2 * area2 / (a * b * c);
+}
+
+// smoothstep(a,b,x) → [0,1]（C¹）。b<=a → 退化为阶跃。
+function smoothstep(a, b, x) {
+  if (b <= a) return x >= b ? 1 : 0;
+  let t = (x - a) / (b - a);
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return t * t * (3 - 2 * t);
 }

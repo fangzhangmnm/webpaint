@@ -50,8 +50,8 @@ function makeBrush({
   pixelMode = false,
   taperIn = 0, taperOut = 0,
   smudge = null,
-  // 位置平滑（per-brush，Procreate 两参，详 docs/brush-procreate-smoothing.md）
-  streamline = 0.15, stabilization = 0,
+  // 位置平滑（per-brush，Procreate，详 docs/brush-procreate-smoothing.md）
+  streamline = 0.15, stabilization = 0, cornerKeep = 0.7,
   // v99r2：defaultOpa 留着，默认 1.0；user 编辑笔可以改成 0.6 当 sketch 默认
   defaultOpa = 1.0,
   // v2: last user-action-time —— FolderFlow 合并键（见 src/store/folder-merge.js）。
@@ -71,7 +71,7 @@ function makeBrush({
     pixelMode,
     taper: { in: taperIn, out: taperOut },
     smudge,
-    smooth: { streamline, stabilization },
+    smooth: { streamline, stabilization, cornerKeep },
   };
 }
 
@@ -159,9 +159,9 @@ export function migrateBrush(b) {
   }
   delete b.airbrush;
   delete b.bufferMode;
-  // v99 smooth：之前在 system state.brush 上的字段挪进 preset（v243 收成两参）
+  // v99 smooth：之前在 system state.brush 上的字段挪进 preset（v243 收两参 + v248 cornerKeep）
   if (!b.smooth) {
-    b.smooth = { streamline: 0.15, stabilization: 0 };
+    b.smooth = { streamline: 0.15, stabilization: 0, cornerKeep: 0.7 };
   }
   // v2: 老笔无 uat → pre-history 基准（任何真实编辑都胜过它）
   if (b.uat == null) b.uat = PRE_HISTORY_UAT;

@@ -93,26 +93,42 @@ describe("stroke-smoother · StrokeSmoother（SmoothDamp + 死区 + 弧线收笔
     for (let i = 0; i < snapX.length; i++) assert(near(sm.cx[i], snapX[i]) && near(sm.cy[i], snapY[i]), `finish 改了点 ${i}`);
   });
 
-  it("转角门控：直角变尖（圆角半径骤降）；不门控时被磨圆", () => {
-    const cc = Math.cos(35 * Math.PI / 180);
+  it("连续曲率门控：直角变尖（R_min 越小越尖）；cornerRadius=0 = 不门控被磨圆", () => {
     const L = []; for (let x = 0; x <= 100; x += 2) L.push([x, 0]); for (let y = 2; y <= 100; y += 2) L.push([100, y]);
     const cornerRound = (opts) => { const sm = new StrokeSmoother(opts); feed(sm, L); sm.finish();
       let m = Infinity; for (let i = 0; i < sm._committed; i++) m = Math.min(m, Math.hypot(sm.cx[i] - 100, sm.cy[i])); return m; };
-    const off = cornerRound({ step: 2, lag: 24 });
-    const on  = cornerRound({ step: 2, lag: 24, cornerCos: cc, cornerSpan: 6 });
+    const off = cornerRound({ step: 2, lag: 24, cornerRadius: 0 });            // 不门控
+    const on  = cornerRound({ step: 2, lag: 24, cornerRadius: 4, curvAlpha: 0.5 });
     assert(off > 6, `不门控直角应被磨圆(>6px)，实得 ${off.toFixed(2)}`);
-    assert(on < off * 0.6, `门控应让直角更尖(<0.6×不门控)，实得 ${on.toFixed(2)} vs ${off.toFixed(2)}`);
+    assert(on < off * 0.7, `R_min=4 应让直角更尖，实得 ${on.toFixed(2)} vs ${off.toFixed(2)}`);
   });
 
-  it("转角门控 jitter robust：手抖不被误判成角（残余 RMS 不升）", () => {
-    const cc = Math.cos(35 * Math.PI / 180);
+  it("连续曲率门控：紧弧保持平滑、不退化成多边形（无锚点 → 转角连续，非尖峰）", () => {
+    // R=8 紧弧（半圆，密采样），门控开。多边形 = 相邻步转角出尖峰；平滑弧 = 转角均匀。
+    // 量提交段 body（不 finish，跳起笔瞬态 + 末点），看弧身是否平滑。
+    const A = []; for (let k = 0; k <= 80; k++) { const a = Math.PI * k / 80; A.push([8 + 8 * Math.cos(a), 8 * Math.sin(a)]); }
+    const sm = new StrokeSmoother({ step: 2, lag: 24, cornerRadius: 4, curvAlpha: 0.5 }); feed(sm, A);
+    let mx = 0, sum = 0, cnt = 0;
+    for (let i = 8; i < sm._committed - 1; i++) {   // 跳过起笔曲率瞬态；body 内（< _committed 不含 transient tail）
+      const ax = sm.cx[i] - sm.cx[i - 1], ay = sm.cy[i] - sm.cy[i - 1];
+      const bx = sm.cx[i + 1] - sm.cx[i], by = sm.cy[i + 1] - sm.cy[i];
+      const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+      if (la < 1e-6 || lb < 1e-6) continue;
+      let c = (ax * bx + ay * by) / (la * lb); c = Math.max(-1, Math.min(1, c));
+      const ang = Math.acos(c) * 180 / Math.PI; mx = Math.max(mx, ang); sum += ang; cnt++;
+    }
+    const avg = sum / cnt;
+    assert(mx < avg * 2.5 + 5, `紧弧应平滑(转角均匀)，非多边形尖峰：max=${mx.toFixed(1)}° avg=${avg.toFixed(1)}°`);
+  });
+
+  it("曲率门控 jitter robust：手抖不被显著放大（残余 RMS 不显著升）", () => {
     const noise = (k) => 1.5 * (Math.sin(k * 2.3) + Math.sin(k * 5.1 + 1.7)) / 2;
     const Nz = []; for (let x = 0; x <= 200; x += 2) Nz.push([x, noise(x)]);
     const rms = (opts) => { const sm = new StrokeSmoother(opts); feed(sm, Nz); sm.finish();
       let s = 0; for (let i = 0; i < sm._committed; i++) s += sm.cy[i] * sm.cy[i]; return Math.sqrt(s / sm._committed); };
-    const off = rms({ step: 2, lag: 24 });
-    const on  = rms({ step: 2, lag: 24, cornerCos: cc, cornerSpan: 6 });
-    assert(on <= off * 1.1, `span 检测应让手抖不触发硬锚（RMS 不升），实得 ${on.toFixed(3)} vs ${off.toFixed(3)}`);
+    const off = rms({ step: 2, lag: 24, cornerRadius: 0 });
+    const on  = rms({ step: 2, lag: 24, cornerRadius: 4, curvAlpha: 0.5 });
+    assert(on <= off * 1.3, `κ 低通应让手抖不被显著放大，实得 ${on.toFixed(3)} vs ${off.toFixed(3)}`);
   });
 
   it("收笔 finish：钉终点（画到头）", () => {

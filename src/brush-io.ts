@@ -64,6 +64,7 @@ export function buildRackCode(rack: any): string {
     const sm = b.smooth || {};
     if (sm.streamline != null && sm.streamline !== 0.15) args.streamline = sm.streamline;
     if (sm.stabilization != null && sm.stabilization !== 0) args.stabilization = sm.stabilization;
+    if (sm.cornerKeep != null && sm.cornerKeep !== 0.7) args.cornerKeep = sm.cornerKeep;
     const argsStr = JSON.stringify(args).replace(/"([a-zA-Z_]\w*)":/g, "$1:");
     lines.push(`  { id: ${JSON.stringify(b.id)}, name: ${JSON.stringify(b.name)}, tool: ${JSON.stringify(b.tool)},`);
     lines.push(`    args: ${argsStr} },`);

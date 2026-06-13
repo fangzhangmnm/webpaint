@@ -95,18 +95,21 @@ for (const sl of [0.3, 0.6, 0.9]) {
   console.log(`  streamline=${sl}: 直线收笔弧=${chordDev(sA, a0).toFixed(2)}px  弯笔收笔弧=${chordDev(sB, b0).toFixed(2)}px`);
 }
 
-console.log("\n===== ⑤ 转角门控（edge-preserving）：直角变尖 + 手抖不被误判成角 =====");
+console.log("\n===== ⑤ 连续曲率门控（保形，无阈值/无锚点）：直角变尖 + 紧弧不退化多边形 + 手抖不放大 =====");
 {
-  const noiseFn = (k) => noise(k, 1.5);
   const L = []; for (let x = 0; x <= 100; x += STEP) L.push([x, 0]); for (let y = STEP; y <= 100; y += STEP) L.push([100, y]);
-  const Nz = []; for (let x = 0; x <= 200; x += STEP) Nz.push([x, noiseFn(x)]);
+  const Nz = []; for (let x = 0; x <= 200; x += STEP) Nz.push([x, noise(x, 1.5)]);
+  const A8 = []; for (let k = 0; k <= 80; k++) { const a = Math.PI * k / 80; A8.push([8 + 8 * Math.cos(a), 8 * Math.sin(a)]); }
   const cornerRound = (sm) => { let m = Infinity; for (let i = 0; i < sm._committed; i++) m = Math.min(m, Math.hypot(sm.cx[i] - 100, sm.cy[i])); return m; };
   const residRms = (sm) => { let s = 0; for (let i = 0; i < sm._committed; i++) s += sm.cy[i] * sm.cy[i]; return Math.sqrt(s / sm._committed); };
-  for (const cd of [0, 35]) {
-    const cc = cd > 0 ? Math.cos(cd * Math.PI / 180) : null;
-    const lag = 24, span = 6;
-    const cR = cornerRound(run(L, { step: STEP, lag, cornerCos: cc, cornerSpan: span }));
-    const nR = residRms(run(Nz, { step: STEP, lag, cornerCos: cc, cornerSpan: span }));
-    console.log(`  cornerDeg=${cd || "关"}: 直角圆角=${cR.toFixed(2)}px(越小越尖)  噪声残余RMS=${nR.toFixed(3)}px(越小越没误判)`);
+  const turnMaxAvg = (sm) => { let mx = 0, sum = 0, cnt = 0; for (let i = 8; i < sm._committed - 1; i++) {
+    const ax = sm.cx[i] - sm.cx[i - 1], ay = sm.cy[i] - sm.cy[i - 1], bx = sm.cx[i + 1] - sm.cx[i], by = sm.cy[i + 1] - sm.cy[i];
+    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by); if (la < 1e-6 || lb < 1e-6) continue;
+    let c = (ax * bx + ay * by) / (la * lb); c = Math.max(-1, Math.min(1, c)); const ang = Math.acos(c) * 180 / Math.PI;
+    mx = Math.max(mx, ang); sum += ang; cnt++; } return [mx, sum / cnt]; };
+  for (const cr of [0, 4, 10]) {
+    const o = { step: STEP, lag: 24, cornerRadius: cr, curvAlpha: 0.5 };
+    const [mx, av] = turnMaxAvg(run(A8, o));
+    console.log(`  R_min=${cr}px: 直角圆角=${cornerRound(run(L, o)).toFixed(2)}px(小=尖)  紧弧R8转角 max/avg=${mx.toFixed(1)}/${av.toFixed(1)}°(多边形→max≫avg)  噪声RMS=${residRms(run(Nz, o)).toFixed(3)}`);
   }
 }

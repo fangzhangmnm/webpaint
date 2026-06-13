@@ -14,8 +14,8 @@ let setStatus: any;
 const _SMOOTH_LABELS = {
   resampleStepPx:     "重采样间隔 Δ (screen px)",
   streamlineMaxLagPx: "streamline=1 目标滞后 (screen px)",
-  cornerDeg:          "转角门控阈值 (度, 越小越保棱角, <=0 关)",
-  cornerSpanPx:       "转角检测跨度 (screen px, 越大越抗抖/角越圆)",
+  cornerFloorPx:      "转角最小弧半径 R_floor (screen px, 越小角越利落)",
+  curvatureAlpha:     "曲率 κ 低通 α (0..1, 越大越跟手越抖)",
   stabMaxPx:          "stabilization=1 死区半径 (screen px)",
   rawStaticSq:        "raw 静止门限 (screen px²)",
   pressureAlpha:      "压感 EMA α (input 端去尖刺, 0..1)",

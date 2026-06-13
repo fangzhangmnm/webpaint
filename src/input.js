@@ -60,14 +60,17 @@ const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw �
 function _resolveSmooth(settings, scale) {
   const sc = scale || 1;
   const clamp01 = (v) => Math.max(0, Math.min(1, v || 0));
-  const cd = SMOOTH.cornerDeg;
+  const lag = clamp01(settings.streamline) * SMOOTH.streamlineMaxLagPx / sc;
+  // 连续曲率门控：cornerKeep∈[0,1] 单调（0=圆/不门控，1=最尖）→ R_min。
+  //   R_min = lerp(lag, cornerFloorPx, cornerKeep)：keep=0 → R_min=lag(=R_smooth)→门控关；keep=1 → R_min=floor(最尖)。
+  const keep = clamp01(settings.cornerKeep);
+  const floorDoc = (SMOOTH.cornerFloorPx > 0 ? SMOOTH.cornerFloorPx : 2) / sc;
   return {
     step:     (SMOOTH.resampleStepPx > 0 ? SMOOTH.resampleStepPx : 2) / sc,
-    lag:      clamp01(settings.streamline) * SMOOTH.streamlineMaxLagPx / sc,
+    lag,
     deadzone: clamp01(settings.stabilization) * SMOOTH.stabMaxPx / sc,
-    // 转角门控阈值（cos）；cornerDeg<=0 → 关闭（null）。cornerSpan 跨度 ÷scale → doc px。
-    cornerCos: (cd > 0 && cd < 180) ? Math.cos(cd * Math.PI / 180) : null,
-    cornerSpan: (SMOOTH.cornerSpanPx > 0 ? SMOOTH.cornerSpanPx : 6) / sc,
+    cornerRadius: lag + (floorDoc - lag) * keep,
+    curvAlpha: SMOOTH.curvatureAlpha,
   };
 }
 
