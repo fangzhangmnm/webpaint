@@ -14,12 +14,8 @@
 `vel` 动量状态** → 贴笔尖弧 tail 没法白嫖动量、只能用几何回看重建 heading（`d=速度×tau` 随速度跳 → 弧
 **乱闪**，v250 的坑）。升回二阶（时间制）→ `vel` 是平滑积分的连续状态 → 弧帧间稳、自然，且时间常数的全部
 好处（下）一个不丢。**这就是 v244-246「完美」那版的弧线方案，再嫁接 v249 的时间基。**
-
-> **A/B 双路径（v252，dev 面板 `firstOrder` live 切换，对比手感）**：
-> - **A（二阶 SmoothDamp）**：body 带 `vel` 动量 → 转角处 body 自身略带动量冲出（更"圆润流畅"）；弧 = vel 动量 flush。
-> - **B（一阶 EMA + heading）**：body 纯一阶，**转角更干净不冲**；弧 = 二次 Bézier，控制点沿 **heading**（out 速度
->   的低通，时间常数 tau；弯笔 heading 滞后于 chord → 出弧，且 heading 是平滑状态 → 弧也稳）。同 `tailBow` 下 B 的弧更鼓。
-> 二者滞后都 ≈ 速度×tau、去抖/帧率无关一致；差别在**转角 body 手感**（A 流畅带动量 / B 干净）与弧的味道。选定后删另一路。
+（v252 曾并存一个一阶变体 B（EMA + heading 估算 Bézier 弧）做对比，用户裁定 B 转角手感不好 → v254 删除，只留 A。
+一阶不靠估算就只能出直线 tail；二阶的 vel 是真状态、弧白嫖，不用估算，这是选 A 的根。）
 
 ## 为什么时间常数是对的基元（前四版都在重建它）
 
@@ -74,7 +70,7 @@ deadzone = stabilization · SMOOTH.stabMaxPx / scale  # 死区半径(doc px)
 ```
 
 **两参 per-brush**（笔刷设置）：`streamline`(→tau)、`stabilization`(→deadzone)。`SMOOTH`（dev 面板 live 可调）
-默认：`tauMaxMs=160`（0.5→80ms，tremor 截止 ~2Hz）、`tailBow=1`（动量弧增益，1=自然）、`stabMaxPx=8`、`rawStaticSq`、`pressureAlpha`。
+默认：`tauMaxMs=500`（0.5→250ms）、`tailBow=1`（动量弧增益，1=自然）、`stabMaxPx=8`、`rawStaticSq`、`pressureAlpha`。
 出厂默认 streamline 0.15（轻）、勾线 0.45。**压感**走引擎侧 `pressureLPF`（per-brush ms，本就是同一类时间
 滤波器，= Procreate 的 StreamLine-Pressure 子滑块），不在本模块重复。
 

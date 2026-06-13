@@ -100,28 +100,6 @@ describe("stroke-smoother · StrokeSmoother（时间常数指数追踪）", () =
     assert(tailDev(curve, 2) > 1, `弯笔 tail 应鼓成动量弧，离弦=${tailDev(curve, 2).toFixed(2)}`);
   });
 
-  it("方案B（一阶 EMA + heading Bézier）：滞后≈v·tau；直行直 / 弯笔弧；末点=pen", () => {
-    // 滞后
-    const sm = new StrokeSmoother({ tau: 50, firstOrder: true });
-    let t = 0, x = 0; for (; x <= 400; x += 10) { sm.push(x, 0, 0.5, t); t += 10; }
-    const lag = (x - 10) - sm._ox;
-    assert(lag > 40 && lag < 70, `B 稳态滞后应 ≈v·tau，实得 ${lag.toFixed(1)}`);
-    // 直行直 / 弯笔弧
-    const tailDev = (pts, bow) => {
-      const s = new StrokeSmoother({ tau: 100, tailBow: bow, firstOrder: true });
-      let tt = 0; for (const [px, py] of pts) { s.push(px, py, 0.5, tt); tt += 8; }
-      const ax = s.cx[s._committed - 1], ay = s.cy[s._committed - 1], bx = s.cx[s.count - 1], by = s.cy[s.count - 1];
-      assert(near(bx, pts[pts.length - 1][0], 1e-6) && near(by, pts[pts.length - 1][1], 1e-6), "B tail 末点应=pen");
-      const len = Math.hypot(bx - ax, by - ay) || 1; let m = 0;
-      for (let i = s._committed; i < s.count - 1; i++) m = Math.max(m, Math.abs((bx - ax) * (ay - s.cy[i]) - (ax - s.cx[i]) * (by - ay)) / len);
-      return m;
-    };
-    const straight = []; for (let px = 0; px <= 200; px += 8) straight.push([px, 0]);
-    const curve = []; for (let k = 0; k <= 40; k++) { const a = k / 40 * Math.PI / 2; curve.push([100 * Math.cos(a), 100 * Math.sin(a)]); }
-    assert(tailDev(straight, 1) < 0.5, `B 直行 tail 应直，离弦=${tailDev(straight, 1).toFixed(2)}`);
-    assert(tailDev(curve, 2) > 1, `B 弯笔 tail 应鼓，离弦=${tailDev(curve, 2).toFixed(2)}`);
-  });
-
   it("finish = 弧 tail 整段转正（预览所见即所得，点不动）", () => {
     const sm = new StrokeSmoother({ tau: 80 });
     let t = 0; for (let x = 0; x <= 150; x += 10) { sm.push(x, x * 0.3, 0.5, t); t += 8; }

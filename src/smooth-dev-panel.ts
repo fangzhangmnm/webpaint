@@ -14,7 +14,6 @@ let setStatus: any;
 const _SMOOTH_LABELS = {
   tauMaxMs:           "streamline=1 时间常数 tau (ms, 越大越平滑/越拖)",
   tailBow:            "弧 tail 增益 (1=自然, >1 更鼓, 0=直)",
-  firstOrder:         "核: 勾=方案B(一阶+heading) / 取消=方案A(二阶动量)",
   stabMaxPx:          "stabilization=1 死区半径 (screen px)",
   rawStaticSq:        "raw 静止门限 (screen px²)",
   pressureAlpha:      "压感 EMA α (input 端去尖刺, 0..1)",
