@@ -379,7 +379,7 @@ export class BrushRack {
         compositeMode: "wash", blendMode: "source-over", spacing: 0.06, pixelMode: false,
         taper: { in: 0, out: 0 },
         smudge: this.ui.tool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
-        smooth: { streamline: 0.15, stabilization: 0, cornerKeep: 0.7 },
+        smooth: { streamline: 0.15, stabilization: 0 },
       };
     }
     newB.uat = Date.now();

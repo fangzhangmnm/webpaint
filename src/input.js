@@ -38,11 +38,10 @@ const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
 const DOUBLETAP_MAX_GAP = 80;
 // 平滑管线魔数已移到 src/smooth-config.js (SMOOTH)，dev 面板可 live 调 + 自测：
-//   SMOOTH.rawStaticSq        raw 静止门限（screen px²）
-//   SMOOTH.pressureAlpha      压感 smP 一阶 EMA α（input 端去尖刺）
-//   SMOOTH.resampleStepPx     弧长重采样间隔 Δ
-//   SMOOTH.streamlineMaxLagPx streamline=1 时目标滞后
-//   SMOOTH.stabMaxPx          stabilization=1 时死区半径
+//   SMOOTH.rawStaticSq   raw 静止门限（screen px²）
+//   SMOOTH.pressureAlpha 压感 smP 一阶 EMA α（input 端去尖刺）
+//   SMOOTH.tauMaxMs      streamline=1 时的时间常数 tau（ms）
+//   SMOOTH.stabMaxPx     stabilization=1 时死区半径
 // Undo 通过 history.UndoStack（v44 起 command pattern + 注册 handler）。
 // 这里只注册 "stroke" type 的 handler，layer 操作的 handler 在 app.js 注册。
 // 详见 docs/undo-architecture.md。
@@ -55,22 +54,14 @@ const GESTURE_TAP_MAX_MOVE_SQ = 256;     // 16 px²
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
-// v243: 两参 → 引擎平滑参数（Procreate SmoothDamp + 死区，详 docs/brush-procreate-smoothing.md）。
-//   screen px 量纲 ÷ scale → doc px，让手感随缩放一致。lag = 目标滞后(doc px)，引擎内 T=lag/step。
+// v249: 两参 → 引擎平滑参数（时间常数指数追踪 + 死区，详 docs/brush-procreate-smoothing.md）。
+//   tau = streamline × tauMaxMs（时间，scale 无关）；deadzone = stabilization × stabMaxPx ÷scale（doc px）。
 function _resolveSmooth(settings, scale) {
   const sc = scale || 1;
   const clamp01 = (v) => Math.max(0, Math.min(1, v || 0));
-  const lag = clamp01(settings.streamline) * SMOOTH.streamlineMaxLagPx / sc;
-  // 连续曲率门控：cornerKeep∈[0,1] 单调（0=圆/不门控，1=最尖）→ R_min。
-  //   R_min = lerp(lag, cornerFloorPx, cornerKeep)：keep=0 → R_min=lag(=R_smooth)→门控关；keep=1 → R_min=floor(最尖)。
-  const keep = clamp01(settings.cornerKeep);
-  const floorDoc = (SMOOTH.cornerFloorPx > 0 ? SMOOTH.cornerFloorPx : 2) / sc;
   return {
-    step:     (SMOOTH.resampleStepPx > 0 ? SMOOTH.resampleStepPx : 2) / sc,
-    lag,
+    tau:      clamp01(settings.streamline) * SMOOTH.tauMaxMs,
     deadzone: clamp01(settings.stabilization) * SMOOTH.stabMaxPx / sc,
-    cornerRadius: lag + (floorDoc - lag) * keep,
-    curvAlpha: SMOOTH.curvatureAlpha,
   };
 }
 
@@ -540,9 +531,10 @@ export class InputController {
           psx = sp.x; psy = sp.y;
         }
         const { x: dx, y: dy } = this.board.screenToDoc(psx, psy);
-        // 活动 engine 统一接口：liquify/filterBrush 忽略多余的 pressure/时间戳参数
+        // 活动 engine 统一接口：liquify/filterBrush/像素 忽略多余的 pressure/时间戳参数
+        //   ev.timeStamp 给主笔刷时间常数平滑用（dt 取真实事件间隔，含 coalesced）
         const pressure = effectivePressureFor(rec, ev);
-        this._activeStroke?.engine.extendStroke(dx, dy, pressure);
+        this._activeStroke?.engine.extendStroke(dx, dy, pressure, ev.timeStamp);
       }
       // 把活动 engine 累的 dirty bbox 送进 board
       const bbox = this._activeStroke?.engine.flushDirty();
@@ -669,9 +661,9 @@ export class InputController {
     const buffered = mode !== "smudge" && !settings.pixelMode;
     rec.rawToEngine = buffered;
     const scale = this.board.viewport.scale || 1;
-    // v243：Procreate 两参（EMA 拉绳 + 死区 + 贴笔尖 catch-up）。{step, a, deadzone}（doc px）。
+    // v249：时间常数指数追踪 + 死区。{tau, deadzone}。
     const smooth = buffered ? _resolveSmooth(settings, scale) : {};
-    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth);
+    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
     const bbox = this.brush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();

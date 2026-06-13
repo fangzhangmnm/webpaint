@@ -5,18 +5,14 @@
 // 自测每个参数是否真起作用（×100 没变化 = 死参数），杀「饱和假阴性」式煤气灯。
 //
 // 注：这些是**全局**常数；per-preset 的两参（streamline / stabilization）在 brush settings。
-// 两参滑块∈[0,1] × 下面的 *MaxLagPx/*MaxPx 上限 → 实际 EMA 滞后 / 死区半径。
 
-const LS_KEY = "webpaint.smooth.v3";
+const LS_KEY = "webpaint.smooth.v4";
 
 export const SMOOTH_DEFAULTS = Object.freeze({
-  resampleStepPx:     2,   // 弧长重采样间隔 Δ（screen px）。EMA 跑在重采样点上 → 帧率无关。
-  streamlineMaxLagPx: 48,  // streamline=1 时的目标滞后（screen px）；a = L/(L+Δ)，L = streamline × 此值 ÷ scale。
-                           //   线性 → sl=0.5 给 24px（半格已满劲）、0.9→43px（更夸张）。嫌不够狠就调大此值。
-  cornerFloorPx:      2,   // 连续曲率门控的最小弧半径下限 R_floor（screen px）：cornerKeep=1 时角是这么大的弧。
-                           //   越小角越利落（但始终是弧、不退化成多边形）。per-brush cornerKeep 在它与 lag 间插值。
-  curvatureAlpha:     0.5, // 曲率 κ 标量低通 α（0..1）：raw 曲率很噪，先低通再映射平滑强度。越大越跟手但越抖。
-  stabMaxPx:          8,   // stabilization=1 时死区半径（screen px）；半径内 raw 不拉动落点
+  tauMaxMs:           160, // streamline=1 时的时间常数 tau（ms）。out += (pen−out)·(1−exp(−dt/tau))。
+                           //   滞后恒 = tau 时长（与笔速/采样率/几何无关）；空间滞后=速度×tau，转角自然减速→顿涌现。
+                           //   0.5→80ms（tremor 截止 ~2Hz，去抖好）；嫌拖就调小、嫌抖就调大此值。
+  stabMaxPx:          8,   // stabilization=1 时死区半径（screen px）；半径内 raw 不拉动落点（与 tau 正交的硬阈值）
   rawStaticSq:        0.005, // raw 静止门限（screen px²）：动得比这小的 event 跳过
   pressureAlpha:      0.4,   // 压感 smP 一阶 EMA α（input 端传感器去尖刺）
 });

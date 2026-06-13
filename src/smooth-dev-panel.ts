@@ -12,10 +12,7 @@ import { setMenuOpen } from "./settings-menu.ts";
 let setStatus: any;
 
 const _SMOOTH_LABELS = {
-  resampleStepPx:     "重采样间隔 Δ (screen px)",
-  streamlineMaxLagPx: "streamline=1 目标滞后 (screen px)",
-  cornerFloorPx:      "转角最小弧半径 R_floor (screen px, 越小角越利落)",
-  curvatureAlpha:     "曲率 κ 低通 α (0..1, 越大越跟手越抖)",
+  tauMaxMs:           "streamline=1 时间常数 tau (ms, 越大越平滑/越拖)",
   stabMaxPx:          "stabilization=1 死区半径 (screen px)",
   rawStaticSq:        "raw 静止门限 (screen px²)",
   pressureAlpha:      "压感 EMA α (input 端去尖刺, 0..1)",

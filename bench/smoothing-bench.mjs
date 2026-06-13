@@ -1,115 +1,64 @@
-// 平滑台架 — 验真实生产 StrokeSmoother（Procreate EMA + 死区 + 贴笔尖）的三条主张。
+// 平滑台架 — 验时间常数指数追踪 out += (pen−out)·(1−exp(−dt/tau)) 的几条主张。
 // 详 docs/brush-procreate-smoothing.md。跑：node bench/smoothing-bench.mjs
 //
-//   ① 帧率无关  —— 同几何、不同事件密度 → 提交锚点应几乎重合（重采样跑在固定弧长上）。
-//   ② 贴笔尖    —— 笔尖顶点恒 = 最新 raw（滞后 0）；锚点滞后随 a 增大，量出来核对。
-//   ③ 去抖      —— 噪声直线，量平滑后残余偏离随 streamline / stabilization 下降。
+//   ① 固定时间滞后 + 采样率无关 —— 滞后 ≈ v·tau，dt 不同（240Hz vs 60Hz）滞后接近。
+//   ② 顿涌现 —— 滞后 = 速度×tau：慢→贴笔、快→重平滑。零检测。
+//   ③ 转角涌现 —— L 角处自然减速 → 滞后缩小 → 角被保成紧而平滑的弯（无阈值/无锚点 → 无多边形）。
+//   ④ 去抖 —— tau 是频域滤波：手抖在任何速度下都被衰减。
 
 import { StrokeSmoother } from "../src/stroke-smoother.js";
 
-// 固定伪噪声（无 Math.random）：高频正弦叠加
 const noise = (k, amp) => amp * (Math.sin(k * 2.3) + Math.sin(k * 5.1 + 1.7)) / 2;
 
-// 采样一条圆弧（半径 R，扫 deg 度，n 点），可叠噪声
-function arc(R, deg, n, amp = 0) {
-  const pts = [];
-  for (let k = 0; k < n; k++) {
-    const a = (deg * Math.PI / 180) * k / (n - 1);
-    pts.push([R * Math.cos(a) + noise(k, amp), R * Math.sin(a) + noise(k + 100, amp)]);
-  }
-  return pts;
-}
-function densify(pts, factor) {                 // 线性插值加密事件（同几何、更多点）
-  const out = [pts[0]];
-  for (let i = 1; i < pts.length; i++)
-    for (let j = 1; j <= factor; j++) {
-      const t = j / factor;
-      out.push([pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t]);
-    }
-  return out;
-}
-function run(pts, opts) { const sm = new StrokeSmoother(opts); for (const [x, y] of pts) sm.push(x, y, 0.5); return sm; }
-function anchorsAtArcLen(sm) {                   // 提交锚点 + 各自累积弧长
-  const out = []; let s = 0;
-  for (let i = 0; i < sm._committed; i++) {
-    if (i > 0) s += Math.hypot(sm.cx[i] - sm.cx[i - 1], sm.cy[i] - sm.cy[i - 1]);
-    out.push([s, sm.cx[i], sm.cy[i]]);
-  }
-  return out;
-}
-// 把 B 的锚点按弧长插到 A 的弧长上，量逐点偏差（帧率无关 metric）
-function divergence(a, b) {
-  let max = 0;
-  for (const [s, ax, ay] of a) {
-    let j = 0; while (j < b.length - 1 && b[j + 1][0] < s) j++;
-    const [s0, x0, y0] = b[j], [s1, x1, y1] = b[Math.min(j + 1, b.length - 1)];
-    const t = s1 > s0 ? (s - s0) / (s1 - s0) : 0;
-    max = Math.max(max, Math.hypot(ax - (x0 + (x1 - x0) * t), ay - (y0 + (y1 - y0) * t)));
-  }
-  return max;
+// 沿 +x 匀速 v(px/ms)、步长 dt(ms) 喂到 X；返回稳态滞后
+function rampLag(tau, v, dt, X) {
+  const sm = new StrokeSmoother({ tau }); let t = 0, x = 0;
+  for (; x <= X; x += v * dt) { sm.push(x, 0, 0.5, t); t += dt; }
+  return (x - v * dt) - sm._ox;
 }
 
-const STEP = 2;
-console.log("\n===== ① 帧率无关（R=100 半圆，1× vs 3× 事件密度，max 锚点偏差应≈0）=====");
-for (const sl of [0.3, 0.6, 0.9]) {
-  const lag = sl * 48;
-  const base = arc(100, 180, 120);
-  const A = anchorsAtArcLen(run(base, { step: STEP, lag }));
-  const B = anchorsAtArcLen(run(densify(base, 3), { step: STEP, lag }));
-  console.log(`  streamline=${sl} (lag=${lag}px): max 偏差 = ${divergence(A, B).toFixed(4)} px`);
+console.log("\n===== ① 固定时间滞后（≈ v·tau）+ 采样率无关 =====");
+for (const tau of [40, 80, 160]) {
+  const a = rampLag(tau, 1, 4, 800), b = rampLag(tau, 1, 16, 800);   // 240Hz vs 60Hz 量级
+  console.log(`  tau=${tau}ms, v=1px/ms: 滞后 dt4=${a.toFixed(1)}px dt16=${b.toFixed(1)}px (≈v·tau=${tau}; 两者差 ${(Math.abs(a - b) / a * 100).toFixed(1)}%)`);
 }
 
-console.log("\n===== ② 贴笔尖（笔尖滞后恒 0；锚点滞后随 lag 增）=====");
-for (const sl of [0, 0.3, 0.6, 0.9]) {
-  const lag = sl * 48;
-  const line = []; for (let x = 0; x <= 200; x += 4) line.push([x, 0]);
-  const sm = run(line, { step: STEP, lag });
-  const tip = sm.cx[sm.count - 1];
-  const lastAnchor = sm._committed > 0 ? sm.cx[sm._committed - 1] : tip;
-  console.log(`  streamline=${sl}: 笔尖滞后=${(200 - tip).toFixed(2)}px(应0)  末锚滞后笔尖=${(tip - lastAnchor).toFixed(2)}px`);
+console.log("\n===== ② 顿涌现：滞后 = 速度×tau（慢贴笔 / 快重平滑），零检测 =====");
+for (const v of [0.2, 0.5, 1, 2]) {
+  console.log(`  tau=80ms, v=${v}px/ms: 稳态滞后 = ${rampLag(80, v, 8, 1000).toFixed(1)}px`);
 }
 
-console.log("\n===== ③ 去抖（噪声=1.5px 直线，残余偏离 RMS 越小越稳）=====");
-for (const [sl, stab] of [[0, 0], [0.3, 0], [0.6, 0], [0, 0.5], [0.6, 0.5]]) {
-  const line = []; for (let x = 0; x <= 200; x += 3) line.push([x, noise(x, 1.5)]);
-  const sm = run(line, { step: STEP, lag: sl * 48, deadzone: stab * 8 });
-  let sq = 0; for (let i = 0; i < sm._committed; i++) sq += sm.cy[i] * sm.cy[i];
-  const rms = sm._committed ? Math.sqrt(sq / sm._committed) : 0;
-  console.log(`  streamline=${sl} stabilization=${stab}: 残余 RMS = ${rms.toFixed(3)} px`);
-}
-
-console.log("\n===== ④ 收笔弧线（finish 锚点离[起锚→终点]弦的最大垂距；直线应≈0、弯笔应>0）=====");
-function chordDev(sm, a0) {
-  const tip = sm.count - 1, ax = sm.cx[a0], ay = sm.cy[a0], bx = sm.cx[tip], by = sm.cy[tip];
-  const len = Math.hypot(bx - ax, by - ay) || 1; let max = 0;
-  for (let i = a0 + 1; i < sm._committed; i++)
-    max = Math.max(max, Math.abs((bx - ax) * (ay - sm.cy[i]) - (ax - sm.cx[i]) * (by - ay)) / len);
-  return max;
-}
-for (const sl of [0.3, 0.6, 0.9]) {
-  const lag = sl * 48;
-  const straight = []; for (let x = 0; x <= 200; x += 5) straight.push([x, 0]);
-  const sA = run(straight, { step: STEP, lag }); const a0 = sA._committed - 1; sA.finish();
-  const curve = []; for (let k = 0; k <= 80; k++) { const t = k / 80 * Math.PI / 2; curve.push([100 * Math.cos(t), 100 * Math.sin(t)]); }
-  const sB = run(curve, { step: STEP, lag }); const b0 = sB._committed - 1; sB.finish();
-  console.log(`  streamline=${sl}: 直线收笔弧=${chordDev(sA, a0).toFixed(2)}px  弯笔收笔弧=${chordDev(sB, b0).toFixed(2)}px`);
-}
-
-console.log("\n===== ⑤ 连续曲率门控（保形，无阈值/无锚点）：直角变尖 + 紧弧不退化多边形 + 手抖不放大 =====");
+console.log("\n===== ③ 转角涌现：L 角处减速 → 滞后缩小 → 角紧而平滑（无多边形）=====");
 {
-  const L = []; for (let x = 0; x <= 100; x += STEP) L.push([x, 0]); for (let y = STEP; y <= 100; y += STEP) L.push([100, y]);
-  const Nz = []; for (let x = 0; x <= 200; x += STEP) Nz.push([x, noise(x, 1.5)]);
-  const A8 = []; for (let k = 0; k <= 80; k++) { const a = Math.PI * k / 80; A8.push([8 + 8 * Math.cos(a), 8 * Math.sin(a)]); }
-  const cornerRound = (sm) => { let m = Infinity; for (let i = 0; i < sm._committed; i++) m = Math.min(m, Math.hypot(sm.cx[i] - 100, sm.cy[i])); return m; };
-  const residRms = (sm) => { let s = 0; for (let i = 0; i < sm._committed; i++) s += sm.cy[i] * sm.cy[i]; return Math.sqrt(s / sm._committed); };
-  const turnMaxAvg = (sm) => { let mx = 0, sum = 0, cnt = 0; for (let i = 8; i < sm._committed - 1; i++) {
-    const ax = sm.cx[i] - sm.cx[i - 1], ay = sm.cy[i] - sm.cy[i - 1], bx = sm.cx[i + 1] - sm.cx[i], by = sm.cy[i + 1] - sm.cy[i];
-    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by); if (la < 1e-6 || lb < 1e-6) continue;
-    let c = (ax * bx + ay * by) / (la * lb); c = Math.max(-1, Math.min(1, c)); const ang = Math.acos(c) * 180 / Math.PI;
-    mx = Math.max(mx, ang); sum += ang; cnt++; } return [mx, sum / cnt]; };
-  for (const cr of [0, 4, 10]) {
-    const o = { step: STEP, lag: 24, cornerRadius: cr, curvAlpha: 0.5 };
-    const [mx, av] = turnMaxAvg(run(A8, o));
-    console.log(`  R_min=${cr}px: 直角圆角=${cornerRound(run(L, o)).toFixed(2)}px(小=尖)  紧弧R8转角 max/avg=${mx.toFixed(1)}/${av.toFixed(1)}°(多边形→max≫avg)  噪声RMS=${residRms(run(Nz, o)).toFixed(3)}`);
+  // 真实手感：进/出角各匀速，角附近按高斯减速（幂律的近似）。带时间戳喂。
+  function lcorner(tau, slowAtCorner) {
+    const sm = new StrokeSmoother({ tau }); let t = 0;
+    const emit = (x, y, dt) => { sm.push(x, y, 0.5, t); t += dt; };
+    const speed = (d) => slowAtCorner ? (0.3 + 1.7 * Math.min(1, Math.abs(d) / 40)) : 1.2;  // 距角 d，近角慢
+    let x = 0; while (x <= 100) { emit(x, 0, 2 / speed(100 - x)); x += 2; }      // +x 进角
+    let y = 2; while (y <= 100) { emit(100, y, 2 / speed(y)); y += 2; }          // +y 出角
+    sm.finish();
+    let m = Infinity; for (let i = 0; i < sm._committed; i++) m = Math.min(m, Math.hypot(sm.cx[i] - 100, sm.cy[i]));
+    // 多边形检测：角邻域相邻步转角 max/avg
+    let mx = 0, sum = 0, cnt = 0;
+    for (let i = 1; i < sm._committed - 1; i++) {
+      const ax = sm.cx[i] - sm.cx[i - 1], ay = sm.cy[i] - sm.cy[i - 1], bx = sm.cx[i + 1] - sm.cx[i], by = sm.cy[i + 1] - sm.cy[i];
+      const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by); if (la < 1e-6 || lb < 1e-6) continue;
+      let c = (ax * bx + ay * by) / (la * lb); c = Math.max(-1, Math.min(1, c)); const ang = Math.acos(c) * 180 / Math.PI;
+      mx = Math.max(mx, ang); sum += ang; cnt++;
+    }
+    return { round: m, turnMax: mx, turnAvg: sum / cnt };
   }
+  for (const tau of [40, 80]) {
+    const s = lcorner(tau, true), c = lcorner(tau, false);
+    console.log(`  tau=${tau}ms 角处减速: 圆角=${s.round.toFixed(1)}px(小=尖)  转角max/avg=${s.turnMax.toFixed(0)}/${s.turnAvg.toFixed(0)}°  | 不减速(匀速): 圆角=${c.round.toFixed(1)}px`);
+  }
+}
+
+console.log("\n===== ④ 去抖：tau 频域衰减手抖（与速度无关）=====");
+for (const [tau, v] of [[0, 1], [80, 1], [80, 0.3]]) {
+  const sm = new StrokeSmoother({ tau }); let t = 0, x = 0;
+  while (x <= 300) { sm.push(x, noise(x, 1.5), 0.5, t); x += v * 8; t += 8; }
+  let s = 0; for (let i = 0; i < sm._committed; i++) s += sm.cy[i] * sm.cy[i];
+  console.log(`  tau=${tau}ms v=${v}: 残余RMS = ${Math.sqrt(s / sm._committed).toFixed(3)}px`);
 }

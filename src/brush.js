@@ -32,10 +32,10 @@
 //             shape α 解析公式 (round / ellipse)，endStroke 转 RGBA canvas 上 layer
 //   smudge / pixelMode: 都直接进 layer（不进 buffer）
 //
-// **frozen/tail 渲染**（平滑核 v243 换成 Procreate EMA，详 docs/brush-procreate-smoothing.md）：
-//   buffered（brush/erase，非 pixel）的平滑中心线由 stroke-smoother.js 给（SmoothDamp 锚点 + 笔尖）：
-//     - frozen 段（已提交锚点，因果终值）→ 烤进 stroke buffer，永不再画
-//     - tail 段（最后锚点 → 笔尖的直线桥）→ 每帧清掉重画到 tail buffer，钉到笔尖（贴指）；抬笔 finish() 出弧尾
+// **frozen/tail 渲染**（平滑核 v249 = 时间常数指数追踪，详 docs/brush-procreate-smoothing.md）：
+//   buffered（brush/erase，非 pixel）的平滑中心线由 stroke-smoother.js 给（out 点串 + 末点 tip）：
+//     - frozen 段（已提交 out，因果终值）→ 烤进 stroke buffer，永不再画
+//     - tail 段（最近一段 out → tip）→ 每帧清掉重画到 tail buffer；抬笔 finish() 收尾钉终点
 //     - overlay = frozen ⊕ tail（wash:max / buildup:over），opacity 只在 composite 时乘一次
 //   smudge / pixel 仍走 immediate 路径（直接进 layer，无法重画）。
 
@@ -73,10 +73,9 @@ export const DEFAULT_SETTINGS = {
   blendMode: "source-over",
   // pixel mode：
   pixelMode: false,
-  // 位置平滑（Procreate，详 docs/brush-procreate-smoothing.md）：
-  streamline: 0.15,         // SmoothDamp 拉绳：低频曲线重塑（带滞后）。v243b 标定：0.5=满劲 → 默认 0.15=轻
-  stabilization: 0,         // 死区拉绳：高频手抖去噪
-  cornerKeep: 0.7,          // 连续曲率门控保形：0=圆(不门控) / 1=最尖。紧弯/角跟手保形（始终是弧不退化多边形）
+  // 位置平滑（时间常数指数追踪，详 docs/brush-procreate-smoothing.md）：
+  streamline: 0.15,         // → 时间常数 tau：滞后恒 tau 时长（跟笔/可控/顿涌现）。0.5=满劲 → 默认 0.15=轻
+  stabilization: 0,         // 死区拉绳：硬空间阈值去抖（与 tau 频域去抖正交）
   // taper：笔触两端渐细，**纯 stylistic·per-preset**（brushes.js makeBrush 的 taperIn/out → preset.taper）。默认 0=无。
   //   曾有「系统级 anti-spike 硬件 taper 1.5」的设定，但预设永远覆盖它 → 形同虚设且误导，已删（user 2026-06-08）。
   taperIn: 0,
@@ -183,9 +182,9 @@ export class BrushEngine {
     return Math.max(0.5, effSize * s.spacing);
   }
 
-  // smooth: { step, a, deadzone }（doc px / EMA 系数）。详 docs/brush-procreate-smoothing.md。
-  //   a=0 & deadzone=0 → 不平滑（重采样直通 raw）。
-  beginStroke(layer, settings, x, y, pressure, mode = "brush", smooth = {}) {
+  // smooth: { tau(ms), deadzone(doc px) }。t = 起手事件时间戳(ms)。详 docs/brush-procreate-smoothing.md。
+  //   tau=0 & deadzone=0 → 不平滑（直通 raw）。
+  beginStroke(layer, settings, x, y, pressure, mode = "brush", smooth = {}, t = null) {
     let loaded = null;
     if (mode === "smudge") loaded = this._sampleLayerColor(layer, x, y);
     const isBuildup = (settings.compositeMode || "wash") === "buildup";
@@ -223,7 +222,7 @@ export class BrushEngine {
       frozenDirty: null,                       // 自上次 compose 起冻结新烤的区域（overlay 刷新用）
     };
     if (buffered) {
-      this._stroke.sm.push(x, y, pressure);   // 第一颗由 tail / endStroke 渲染，begin 不烤
+      this._stroke.sm.push(x, y, pressure, t);   // 第一颗由 tail / endStroke 渲染，begin 不烤
     } else {
       this._stampOne(x, y, pressure);
     }
@@ -302,13 +301,13 @@ export class BrushEngine {
     return st.pLPF;
   }
 
-  extendStroke(x, y, pressure) {
+  extendStroke(x, y, pressure, t = null) {
     const st = this._stroke;
     if (!st) return;
     // NaN/inf 护栏：甩太快 / 坏事件可能传入非有限坐标 → 跳过
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     const pEff = this._pressureLPF(pressure);
-    if (st.buffered) this._extendBuffered(x, y, pEff);
+    if (st.buffered) this._extendBuffered(x, y, pEff, t);
     else this._extendImmediate(x, y, pEff);
   }
 
@@ -340,9 +339,9 @@ export class BrushEngine {
 
   // brush / erase：raw 进 smoother，把新冻结的中心线段烤进 frozen buffer。
   // tail 不在这里画（每帧 getLiveOverlay 时画）。
-  _extendBuffered(x, y, pEff) {
+  _extendBuffered(x, y, pEff, t = null) {
     const st = this._stroke;
-    st.sm.push(x, y, pEff);
+    st.sm.push(x, y, pEff, t);
     st.sm.update();
     const fi = st.sm.frozenIndex();
     if (fi >= 0) this._walkStamps(st.frozenWalk, fi, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));
