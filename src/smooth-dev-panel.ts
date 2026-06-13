@@ -55,11 +55,13 @@ function _buildSmoothDevPanel() {
       const tb = document.createElement("input");
       tb.type = "text"; tb.inputMode = "decimal"; tb.dataset.skey = k; tb.value = String(SMOOTH[k]);
       tb.style.cssText = "width:74px;text-align:right;font:inherit";
-      tb.addEventListener("change", () => {
+      const commit = (resetIfBad: boolean) => {
         const v = parseFloat(tb.value);
-        if (Number.isFinite(v)) { SMOOTH[k] = v; saveSmooth(); }
-        else tb.value = String(SMOOTH[k]);
-      });
+        if (Number.isFinite(v)) { SMOOTH[k] = v; saveSmooth(); }   // 合法即生效（下一笔用）
+        else if (resetIfBad) tb.value = String(SMOOTH[k]);          // 失焦时非法才回填，打字途中不打断
+      };
+      tb.addEventListener("input", () => commit(false));   // 边打边生效（不靠回车/失焦）
+      tb.addEventListener("change", () => commit(true));    // 回车 / 失焦提交 + 非法回填
       row.appendChild(tb);
     }
     p.appendChild(row);
