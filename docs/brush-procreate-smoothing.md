@@ -68,19 +68,45 @@ v148–v242）。数学甜点没错，但：
 - **注**：临界阻尼 under-bow（弧比真曲线浅，bench sl=0.9 约 0.8px vs 真弧 ~2px）；要更夸张的 Procreate 弧就
   把 finish/tail 阻尼调松（增大动量）——device 手感终判。
 
+## 转角门控（保棱角，edge-preserving，v246b）
+
+低通滤波分不清「有意转角」和「无意手抖」（都是高频）→ 全局调强永远两难。解法：**局部自适应，
+转角处让路**（双边滤波思路：跨过边缘的不混合）。我们沿折线 stamp、**无渲染样条** → 不用管「样条
+再圆一次」（doc 提的第二处圆角对我们不适用，省一半）。
+
+```
+每攒够一个 cornerSpan 跨度的输入位移：
+  dirNew = normalize(此跨度位移)
+  if dot(dirNew, dirPrev) < cos(cornerDeg):       # 相邻跨度夹角 > cornerDeg = 转角
+      把跨度起点(≈顶点)钉成硬锚点：emit 它；pos 复位到它、vel 清零
+  dirPrev = dirNew
+```
+
+**关键设计抉择**：
+- **用 input-dir 变化检测、不用 vel-vs-(q−pos)**：后者是 doc 给的式子，但**大 lag 下检测不到角**
+  ——pos 滞后几十 px 时 `q−pos` 仍指向旧腿方向（实测圆角不降）。input-dir 与 lag 无关。
+- **span 跨度（默认 6px）是 jitter robust 的关键**：在 6px 跨度上测方向，sub-span 手抖的净位移被
+  前进方向淹没（±1.5px / 6px ≈ 14° < 阈值）→ 不误判成角。**逐 2px 步测会把手抖当角 → 线变锯齿**
+  （实测噪声残余 RMS 0.17→0.93）。span=6 实测：直角圆角 9.1→3.6px、噪声 RMS 不变（0.17）。
+- **硬锚点 = 复位 pos 到顶点 + vel 清零**：滞后的 pos「跳」到顶点是**沿来腿方向**（共线）→ 不是
+  artifact，是把腿补直到角；然后从顶点 vel=0 平滑出新腿。两腿在顶点 crisp 相交。
+- span 让顶点定位糊 ~span → 圆角降到 ~3.6px 而非 0（取舍：更小 span 更尖但更易把抖当角）。
+
 ## 参数映射（`input.js`，scale 已知处算）
 
 screen px 量纲 → doc px（÷scale），让手感随缩放一致：
 
 ```
-Δ_doc   = SMOOTH.resampleStepPx / scale
-lag_doc = streamline    · SMOOTH.streamlineMaxLagPx / scale   # 目标滞后(弧长)；引擎内 T = lag/Δ
-r_doc   = stabilization · SMOOTH.stabMaxPx / scale            # 死区半径
+Δ_doc     = SMOOTH.resampleStepPx / scale
+lag_doc   = streamline    · SMOOTH.streamlineMaxLagPx / scale   # 目标滞后(弧长)；引擎内 T = lag/Δ
+r_doc     = stabilization · SMOOTH.stabMaxPx / scale            # 死区半径
+cornerCos = cos(SMOOTH.cornerDeg)                              # 纯角度，scale 无关；<=0 → null 关门控
+cornerSpan_doc = SMOOTH.cornerSpanPx / scale                   # 转角检测跨度
 ```
 
-`SMOOTH`（dev 面板 live 可调、自测）默认：`resampleStepPx=2, streamlineMaxLagPx=48, stabMaxPx=8`。
-`streamlineMaxLagPx=48` 标定：slider 0.5 → 24px 滞后（= 旧 24 标定的满格）、0.9 → 43px（更夸张）。
-出厂默认 streamline 相应折半（0.3→0.15、勾线 0.9→0.45）保持出厂手感不变。
+`SMOOTH`（dev 面板 live 可调、自测）默认：`resampleStepPx=2, streamlineMaxLagPx=48, cornerDeg=35,
+cornerSpanPx=6, stabMaxPx=8`。`streamlineMaxLagPx=48` 标定：slider 0.5 → 24px 滞后（= 旧 24 标定的
+满格）、0.9 → 43px。出厂默认 streamline 相应折半（0.3→0.15、勾线 0.9→0.45）保持出厂手感不变。
 
 ## 分档
 

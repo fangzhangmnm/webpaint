@@ -94,3 +94,19 @@ for (const sl of [0.3, 0.6, 0.9]) {
   const sB = run(curve, { step: STEP, lag }); const b0 = sB._committed - 1; sB.finish();
   console.log(`  streamline=${sl}: 直线收笔弧=${chordDev(sA, a0).toFixed(2)}px  弯笔收笔弧=${chordDev(sB, b0).toFixed(2)}px`);
 }
+
+console.log("\n===== ⑤ 转角门控（edge-preserving）：直角变尖 + 手抖不被误判成角 =====");
+{
+  const noiseFn = (k) => noise(k, 1.5);
+  const L = []; for (let x = 0; x <= 100; x += STEP) L.push([x, 0]); for (let y = STEP; y <= 100; y += STEP) L.push([100, y]);
+  const Nz = []; for (let x = 0; x <= 200; x += STEP) Nz.push([x, noiseFn(x)]);
+  const cornerRound = (sm) => { let m = Infinity; for (let i = 0; i < sm._committed; i++) m = Math.min(m, Math.hypot(sm.cx[i] - 100, sm.cy[i])); return m; };
+  const residRms = (sm) => { let s = 0; for (let i = 0; i < sm._committed; i++) s += sm.cy[i] * sm.cy[i]; return Math.sqrt(s / sm._committed); };
+  for (const cd of [0, 35]) {
+    const cc = cd > 0 ? Math.cos(cd * Math.PI / 180) : null;
+    const lag = 24, span = 6;
+    const cR = cornerRound(run(L, { step: STEP, lag, cornerCos: cc, cornerSpan: span }));
+    const nR = residRms(run(Nz, { step: STEP, lag, cornerCos: cc, cornerSpan: span }));
+    console.log(`  cornerDeg=${cd || "关"}: 直角圆角=${cR.toFixed(2)}px(越小越尖)  噪声残余RMS=${nR.toFixed(3)}px(越小越没误判)`);
+  }
+}

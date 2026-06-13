@@ -22,6 +22,13 @@ export class StrokeSmoother {
     const lag = Math.max(0, opts.lag || 0);
     this.T = lag > 0 ? lag / this.step : 0;
     this.r = Math.max(0, opts.deadzone || 0);
+    // 转角门控（edge-preserving，双边滤波思路）：输入方向在 cornerSpan 跨度上的相邻夹角 > cornerDeg
+    //   时，把转角顶点钉成**硬锚点**（pos 复位到顶点、vel 清零）→ 棱角 crisp、两腿各自平滑。
+    //   用 input-dir 变化检测（与 lag 无关；vel-vs-(q-pos) 在大 lag 下检测不到角）。
+    //   **span 跨度**是关键：在 ~6px 跨度上测方向 → sub-span 手抖不会被误判成角（jitter robust）。
+    //   cornerCos = cos(cornerDeg)。null/undefined = 不门控（旧行为；测试不传则全程满平滑）。
+    this.cornerCos = (opts.cornerCos == null) ? null : opts.cornerCos;
+    this.cornerSpan = Math.max(opts.cornerSpan || 0, this.step);
 
     this.cx = []; this.cy = []; this.cp = [];
     this._committed = 0;        // 已提交锚点数；其后是 transient 弧 tail
@@ -35,6 +42,9 @@ export class StrokeSmoother {
     this._lastInP = 0;
     this._accum = 0;
     this._started = false;
+    // 转角检测：span 锚点 + 上段输入方向（跨 push 持续）
+    this._cqx = 0; this._cqy = 0;
+    this._dirX = 0; this._dirY = 0; this._haveDir = false;
   }
 
   get count() { return this.cx.length; }
@@ -47,6 +57,7 @@ export class StrokeSmoother {
       this._stabX = x; this._stabY = y;
       this._lastSX = x; this._lastSY = y; this._lastInP = p;
       this._accum = 0;
+      this._cqx = x; this._cqy = y;                        // 转角 span 锚点起点
       this.cx.push(x); this.cy.push(y); this.cp.push(p);   // 笔尖
       this._committed = 0; this._tailLen = 1;
       return;
@@ -73,6 +84,20 @@ export class StrokeSmoother {
       const qx = this._lastSX + segdx * t;
       const qy = this._lastSY + segdy * t;
       const qp = this._lastInP + (p - this._lastInP) * t;
+      // 转角检测（input-dir 在 cornerSpan 跨度上变化，lag 无关 + jitter robust）：
+      //   走够一个 span 就比相邻 span 方向；夹角 > cornerDeg → span 起点(顶点) 钉硬锚点。
+      if (this.cornerCos != null) {
+        const ax = qx - this._cqx, ay = qy - this._cqy, al = Math.hypot(ax, ay);
+        if (al >= this.cornerSpan) {
+          const ndx = ax / al, ndy = ay / al;
+          if (this._haveDir && (ndx * this._dirX + ndy * this._dirY) < this.cornerCos) {
+            this.cx.push(this._cqx); this.cy.push(this._cqy); this.cp.push(qp);   // 硬锚顶点
+            this._px = this._cqx; this._py = this._cqy; this._vx = 0; this._vy = 0;
+          }
+          this._dirX = ndx; this._dirY = ndy; this._haveDir = true;
+          this._cqx = qx; this._cqy = qy;
+        }
+      }
       const s = dampStep(this._px, this._py, this._vx, this._vy, qx, qy, this.T);
       this._px = s[0]; this._py = s[1]; this._vx = s[2]; this._vy = s[3];
       this.cx.push(this._px); this.cy.push(this._py); this.cp.push(qp);
@@ -94,7 +119,7 @@ export class StrokeSmoother {
       const MAX = Math.ceil(this.T * 6) + 64;
       for (let i = 0; i < MAX; i++) {
         if (Math.hypot(px - tx, py - ty) < 0.2 && Math.hypot(vx, vy) < 0.2) break;
-        const s = dampStep(px, py, vx, vy, tx, ty, this.T);
+        const s = dampStep(px, py, vx, vy, tx, ty, this.T);   // tail = 到光标的平滑 catch-up（转角已在提交段硬锚）
         px = s[0]; py = s[1]; vx = s[2]; vy = s[3];
         if (Math.hypot(px - lax, py - lay) >= 0.15) {     // 去冗余（settle 处别堆点）
           this.cx.push(px); this.cy.push(py); this.cp.push(tp); n++; lax = px; lay = py;
