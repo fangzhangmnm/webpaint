@@ -60,9 +60,10 @@ function _resolveSmooth(settings, scale) {
   const sc = scale || 1;
   const clamp01 = (v) => Math.max(0, Math.min(1, v || 0));
   return {
-    tau:      clamp01(settings.streamline) * SMOOTH.tauMaxMs,
-    deadzone: clamp01(settings.stabilization) * SMOOTH.stabMaxPx / sc,
-    tailBow:  SMOOTH.tailBow,
+    tau:        clamp01(settings.streamline) * SMOOTH.tauMaxMs,
+    deadzone:   clamp01(settings.stabilization) * SMOOTH.stabMaxPx / sc,
+    tailBow:    SMOOTH.tailBow,
+    firstOrder: SMOOTH.firstOrder,
   };
 }
 

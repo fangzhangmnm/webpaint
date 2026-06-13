@@ -12,7 +12,8 @@ export const SMOOTH_DEFAULTS = Object.freeze({
   tauMaxMs:           160, // streamline=1 时的时间常数 tau（ms）。out += (pen−out)·(1−exp(−dt/tau))。
                            //   滞后恒 = tau 时长（与笔速/采样率/几何无关）；空间滞后=速度×tau，转角自然减速→顿涌现。
                            //   0.5→80ms（tremor 截止 ~2Hz，去抖好）；嫌拖就调小、嫌抖就调大此值。
-  tailBow:            1,   // 动量弧 tail 的动量增益：1=自然(= 完美那版的弧)、>1 更鼓、0=直连光标。直行段恒直线。
+  tailBow:            1,   // 弧 tail 增益：1=自然、>1 更鼓、0=直连光标。直行段恒直线。
+  firstOrder:         true,// 平滑核：true=方案B(一阶 EMA 体+heading Bézier 弧,转角更干净) / false=方案A(二阶 SmoothDamp+动量弧)。live 切换对比手感。
   stabMaxPx:          8,   // stabilization=1 时死区半径（screen px）；半径内 raw 不拉动落点（与 tau 正交的硬阈值）
   rawStaticSq:        0.005, // raw 静止门限（screen px²）：动得比这小的 event 跳过
   pressureAlpha:      0.4,   // 压感 smP 一阶 EMA α（input 端传感器去尖刺）
