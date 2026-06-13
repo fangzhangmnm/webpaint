@@ -12,12 +12,12 @@ import { setMenuOpen } from "./settings-menu.ts";
 let setStatus: any;
 
 const _SMOOTH_LABELS = {
-  lookaheadCap: "窗口上限 W (screen px @ streamline=1)",
-  smoothBoost:  "轻压平滑增益 (0=关, 1=轻按窗口×2)",
-  deflate:      "内缩/毛笔甩尖 (开=0阶 / 关=保曲率)",
-  vref:         "V_REF 旧四件套 (疑似对主笔刷无效)",
-  rawStaticSq:  "raw 静止门限 (screen px²)",
-  pressureAlpha:"压感 EMA α (0..1)",
+  resampleStepPx:     "重采样间隔 Δ (screen px)",
+  streamlineMaxLagPx: "streamline=1 目标滞后 (screen px)",
+  pressureMaxLagPx:   "streamline压感=1 滞后 (screen px)",
+  stabMaxPx:          "stabilization=1 死区半径 (screen px)",
+  rawStaticSq:        "raw 静止门限 (screen px²)",
+  pressureAlpha:      "压感 EMA α (input 端去尖刺, 0..1)",
 };
 let _smoothDevPanel = null;
 function _refreshSmoothInputs(p) {

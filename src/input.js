@@ -28,7 +28,7 @@ import { FilterBrushEngine } from "./filter-brush.js";
 import { isPixelStroke, pixelStrokeSpec, isDrawGated } from "./engine-registry.js";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./pointer-gesture.js";
 import { assignRole } from "./pointer-route.js";
-import { fourStageSmooth } from "./stroke-input-smooth.js";
+import { inputSmooth } from "./stroke-input-smooth.js";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
 import { SMOOTH } from "./smooth-config.js";
 
@@ -38,11 +38,12 @@ const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
 const DOUBLETAP_MAX_GAP = 80;
 // 平滑管线魔数已移到 src/smooth-config.js (SMOOTH)，dev 面板可 live 调 + 自测：
-//   SMOOTH.rawStaticSq   raw 静止门限（screen px²）
-//   SMOOTH.pressureAlpha 压感 smP 一阶 EMA α
-//   SMOOTH.vref          V_REF（旧四件套；对主笔刷已无效，暴露以自证）
-//   SMOOTH.lookaheadCap  streamline=1 时窗口上限 (screen px)
-//   SMOOTH.deflate       内缩/毛笔甩尖开关
+//   SMOOTH.rawStaticSq        raw 静止门限（screen px²）
+//   SMOOTH.pressureAlpha      压感 smP 一阶 EMA α（input 端去尖刺）
+//   SMOOTH.resampleStepPx     弧长重采样间隔 Δ
+//   SMOOTH.streamlineMaxLagPx streamline=1 时目标滞后
+//   SMOOTH.pressureMaxLagPx   streamlinePressure=1 时压感 EMA 滞后
+//   SMOOTH.stabMaxPx          stabilization=1 时死区半径
 // Undo 通过 history.UndoStack（v44 起 command pattern + 注册 handler）。
 // 这里只注册 "stroke" type 的 handler，layer 操作的 handler 在 app.js 注册。
 // 详见 docs/undo-architecture.md。
@@ -55,11 +56,21 @@ const GESTURE_TAP_MAX_MOVE_SQ = 256;     // 16 px²
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
-// v148: streamline → lookahead 平滑窗口（screen px）。引擎按 doc px 用（÷scale）。
-// 上限 = SMOOTH.lookaheadCap（dev 面板可调）。
-function _streamlineToLookaheadPx(streamline) {
-  const sl = Math.max(0, Math.min(1, streamline || 0));
-  return sl * (SMOOTH.lookaheadCap > 0 ? SMOOTH.lookaheadCap : 90);
+// v243: 三参 → 引擎平滑参数（Procreate EMA + 死区，详 docs/brush-procreate-smoothing.md）。
+//   screen px 量纲 ÷ scale → doc px，让手感随缩放一致。
+//   a = L/(L+Δ)：按目标滞后长度反解 EMA 系数（直取 a=streamline 在 a→1 处暴冲，不线性）。
+function _resolveSmooth(settings, scale) {
+  const sc = scale || 1;
+  const step = (SMOOTH.resampleStepPx > 0 ? SMOOTH.resampleStepPx : 2) / sc;
+  const clamp01 = (v) => Math.max(0, Math.min(1, v || 0));
+  const L  = clamp01(settings.streamline)         * SMOOTH.streamlineMaxLagPx / sc;
+  const Lp = clamp01(settings.streamlinePressure) * SMOOTH.pressureMaxLagPx   / sc;
+  return {
+    step,
+    a:        L  > 0 ? L  / (L  + step) : 0,
+    aP:       Lp > 0 ? Lp / (Lp + step) : 0,
+    deadzone: clamp01(settings.stabilization) * SMOOTH.stabMaxPx / sc,
+  };
 }
 
 // v124 (user：「统一快捷键注册收集，不会改了这里忘了那里」+「Gallery 等 transient 要小心不要误触」)
@@ -396,17 +407,16 @@ export class InputController {
     if (isPixelStroke(role)) {
       // 画 / 液化 / filter brush 的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
       this.board.setCursor(null);
-      // 锚 smoothing / raw / 压感 状态到 down 点。液化也走同一套 smoothing 拿
-      // 防 dx 坑（timeStamp 单调 + 四件套），见 docs/ipad-coalesced-events.md
+      // 锚 smoothing / raw / 压感 状态到 down 点。
+      // 防 dx 坑（timeStamp 单调），见 docs/ipad-coalesced-events.md
       rec.lastRawX = x;
       rec.lastRawY = y;
       rec.lastP = null;
       rec.smP = -1;
       rec.lastEventTs = -Infinity;
-      rec.stabBuf = [];
-      rec.pullX = x; rec.pullY = y;
-      rec.lastDirX = 0; rec.lastDirY = 0;
-      rec.filtX = x; rec.filtY = y;
+      // 即时笔（smudge/pixel）二参平滑状态：累积 raw / 死区锚 / EMA 输出(smX/Y 已在 rec 字面量锚为起点)
+      rec.rawSX = x; rec.rawSY = y;
+      rec.stabX = x; rec.stabY = y;
       if (role === "liquify") this._beginLiquify(rec);
       else if (role === "filterBrush") this._beginFilterBrush(rec);
       else {
@@ -519,14 +529,13 @@ export class InputController {
         rec.lastRawX = ev.clientX;
         rec.lastRawY = ev.clientY;
         if (drx * drx + dry * dry < SMOOTH.rawStaticSq) continue;
-        // v148: buffered 笔触（brush/erase 非 pixel）位置平滑改由引擎做（lookahead/
-        //   frozen/tail，线到笔尖）→ input 直传 raw。smudge/pixel/liquify/filterBrush
-        //   仍走四件套（_fourStageSmooth），保持原手感。
+        // v148/v243: buffered 笔触（brush/erase 非 pixel）位置平滑由引擎做（EMA + 贴笔尖 catch-up）
+        //   → input 直传 raw。smudge/pixel/liquify/filterBrush 走即时 inputSmooth（死区 + EMA）。
         let psx, psy;
         if (rec.rawToEngine) {
           psx = ev.clientX; psy = ev.clientY;
         } else {
-          const sp = fourStageSmooth(rec, ev, settings, drx, dry);
+          const sp = inputSmooth(rec, settings, drx, dry);
           psx = sp.x; psy = sp.y;
         }
         const { x: dx, y: dy } = this.board.screenToDoc(psx, psy);
@@ -642,7 +651,7 @@ export class InputController {
   // - before/after = Layer.snapshot()（bboxX/Y/W/H + imageData）
   // - blob 字段 push 后异步 toBlob 填，填好后释放 imageData
   // 详见 docs/undo-architecture.md。
-  // 四件套位置平滑已抽到 stroke-input-smooth.js（fourStageSmooth，pure·可测）。
+  // 即时笔位置平滑在 stroke-input-smooth.js（inputSmooth，死区+EMA，pure·可测）；主笔刷走引擎 stroke-smoother.js。
 
   _beginStroke(e, rec, mode) {
     const settings = this.getBrushSettings();
@@ -659,12 +668,8 @@ export class InputController {
     const buffered = mode !== "smudge" && !settings.pixelMode;
     rec.rawToEngine = buffered;
     const scale = this.board.viewport.scale || 1;
-    // v240：纯弧长窗（时间门已移除）。W=弧长窗(doc px)、deflate=内缩开关、boost=轻压平滑增益。
-    const smooth = buffered ? {
-      W: _streamlineToLookaheadPx(settings.streamline) / scale,
-      deflate: SMOOTH.deflate,
-      boost: SMOOTH.smoothBoost,
-    } : {};
+    // v243：Procreate 三参（EMA 拉绳 + 死区 + 贴笔尖 catch-up）。{step, a, aP, deadzone}（doc px）。
+    const smooth = buffered ? _resolveSmooth(settings, scale) : {};
     this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth);
     const bbox = this.brush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);

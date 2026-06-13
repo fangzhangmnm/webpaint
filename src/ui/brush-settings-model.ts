@@ -14,7 +14,7 @@ export interface BrushDraft {
   defaultOpa?: number; pixelMode?: boolean;
   spacing?: number | { value?: number };
   taper?: { in?: number; out?: number };
-  smooth?: { streamline?: number; stabilization?: number; pullStabilizer?: number; motionFilter?: number };
+  smooth?: { streamline?: number; streamlinePressure?: number; stabilization?: number };
   smudge?: { strength?: number; dryness?: number };
   [k: string]: unknown;
 }
@@ -44,9 +44,8 @@ export function ensureBrushDraftDefaults(b: BrushDraft): BrushDraft {
 
   if (!b.smooth) b.smooth = {};
   if (b.smooth.streamline == null) b.smooth.streamline = 0.3;
+  if (b.smooth.streamlinePressure == null) b.smooth.streamlinePressure = 0;
   if (b.smooth.stabilization == null) b.smooth.stabilization = 0;
-  if (b.smooth.pullStabilizer == null) b.smooth.pullStabilizer = 0;
-  if (b.smooth.motionFilter == null) b.smooth.motionFilter = 0;
 
   if (!b.taper) b.taper = {};
   if (b.taper.in == null) b.taper.in = 0;

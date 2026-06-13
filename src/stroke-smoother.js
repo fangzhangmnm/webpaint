@@ -1,120 +1,94 @@
-// 位置平滑：纯弧长窗口 + 边缘 ramp。给 frozen/tail 分段提供平滑中心线。
-// 详 docs/brush-frozen-tail-smoothing.md。
+// 位置平滑 — Procreate 三参模型（v243 重写，取代弧长二次 WLS quad）。
+// 详 docs/brush-procreate-smoothing.md。
 //
-// 模型：
-//   raw[i]   —— 输入点（doc 坐标 x/y + 压感 p + 累积弧长 s_i）
-//   窗口     —— 满足 |Δs| ≤ W（弧长）的样本；权重 = 弧长三角权 (1−|Δs|/W)
-//   估计子   —— degree 2：局部二次 WLS 取中心（保曲率/不内缩，默认）；degree 0：加权均值（内缩/毛笔甩尖）
-//   C[i]     —— raw[i] + r_i·(fit − raw[i])
+// 模型：raw 点流 → ① stabilization 死区拉绳 → ② 按固定弧长 Δ 重采样 → ③ streamline EMA。
+//   EMA 因果 → 锚点落定即终值、永不回改（不用每帧重算后缀，这是比 quad 简单的关键）。
+//   重采样在固定弧长上 → 帧率/事件密度无关。
 //
-//   ramp r_i = clamp((tip_s − s_i)/Wi, 0, 1)：
-//     笔尖处→0 → r=0 → C=raw（钉笔尖，线到手）；其余 r=1 用平滑值。
-//     v159：**不再钉起笔**（Procreate 落地即平滑）。起笔单边窗口的二次外插 overshoot 由二次估计子在
-//     单边窗口仍无偏兜底（直线外插回起点=原位，不拖）。
+// 贴笔尖：cx/cy/cp = [已提交锚点…, 笔尖]。frozenIndex() = 锚点数−1（笔尖永不冻）。
+//   tail 段 = 最后锚点 → 笔尖（直线，brush.js 每帧重画 → 贴指）。抬笔时整段转正 = catch-up。
+//   笔尖 = 死区输出（stab=0 → = raw 精确贴指）。
 //
-//   frozenIndex —— tip_s − s_i ≥ Wmax 的最大 i：窗口不再可能进新样本 → 定型可冻。
-//
-//   v240：**移除时间门**。原 v158 的时间门（|Δt|≤T 取交集 + 按时冻结）语义是「笔速 < W/T 时缩窗保顿角」，
-//     即「慢=故意=少平滑」。但慢画时生物力学手抖更甚、勾线笔恰恰要更多平滑 → 时间门反号、把 W 毁掉。
-//     现退回纯弧长窗（= v148 行为 + boost 压感轴）。顿角/棱角的保护另想（见 docs/stroke-smoother-time-gate.md
-//     的 superseded 标注），不再用全局时间门压所有笔。
-//
-// 纯几何，无 canvas。压感原样挂 C[i].p（引擎侧已过 pressureLPF）。
+// 与 brush.js 的契约（仅这些）：push / update(空) / frozenIndex / count / seq / cx,cy,cp。
 
 export class StrokeSmoother {
-  // opts: { W (弧长 doc px), deflate (bool), boost (轻压平滑增益) }
+  // opts: { step:弧长重采样间隔(doc px), a:streamline EMA 保留系数∈[0,1), aP:压感 EMA, deadzone:死区半径(doc px) }
   constructor(opts = {}) {
-    this.W = Math.max(0, opts.W || 0);
-    this.deflate = !!opts.deflate;             // true → 0 阶（内缩）；false → 2 阶（保曲率）
-    // v162 压感轴自适应：轻压 → 窗口更大 → 平滑更强（治提笔/轻描抖）。W_i = W×(1+boost×(1−p))。
-    this.boost = Math.max(0, opts.boost || 0);
-    this.Wmax = this.W * (1 + this.boost);     // 冻结用保守上界（保前缀缓存单调）
-    this.rx = []; this.ry = []; this.rp = []; this.rs = [];
-    this.cx = []; this.cy = []; this.cp = [];
-    this.cFrozenCount = 0;
+    this.step = Math.max(0.25, opts.step || 2);
+    this.a  = clamp01x(opts.a  || 0);     // 0 = 不平滑（重采样直通）
+    this.aP = clamp01x(opts.aP || 0);
+    this.r  = Math.max(0, opts.deadzone || 0);
+
+    this.cx = []; this.cy = []; this.cp = [];   // 锚点串 + 末尾笔尖
+    this._committed = 0;                         // 已提交锚点数（cx[0.._committed-1]）；笔尖 = cx[_committed]
+    this.seq = 0;                                // push 序号（brush.js overlay 缓存失效用，每 push +1）
+
+    // EMA / 死区 / 重采样状态
+    this._emaX = 0; this._emaY = 0; this._emaP = 0;
+    this._stabX = 0; this._stabY = 0;            // 死区锚（滞后 raw 半径 r）
+    this._lastSX = 0; this._lastSY = 0;          // 上次去抖点（重采样起点）
+    this._lastInP = 0;                           // 上次 raw 压感（段内压感插值用）
+    this._accum = 0;                             // 重采样累积弧长余量
+    this._started = false;
   }
 
-  // 点 i 的窗口（弧长）：轻压 p→0 时 ×(1+boost)，重压 p→1 时 = W。
-  _Wat(i) {
-    if (this.boost <= 0) return this.W;
-    const p = Math.max(0, Math.min(1, this.rp[i]));
-    return this.W * (1 + this.boost * (1 - p));
-  }
-
-  get count() { return this.rx.length; }
-  get tipS()  { return this.rs.length ? this.rs[this.rs.length - 1] : 0; }
+  get count() { return this.cx.length; }
 
   push(x, y, p) {
-    const n = this.rx.length;
-    let s;
-    if (n === 0) s = 0;
-    else { const dx = x - this.rx[n - 1], dy = y - this.ry[n - 1]; s = this.rs[n - 1] + Math.hypot(dx, dy); }
-    this.rx.push(x); this.ry.push(y); this.rp.push(p); this.rs.push(s);
-  }
-
-  // 升序数组 arr 里 arr[i] ≤ thresh 的最大 i（没有 → −1）
-  _lastLE(arr, thresh) {
-    let lo = 0, hi = arr.length - 1, ans = -1;
-    while (lo <= hi) { const mid = (lo + hi) >> 1; if (arr[mid] <= thresh) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
-    return ans;
-  }
-
-  // tip_s − s_i ≥ Wmax 的最大 i。
-  // 用 Wmax 保守冻结：任意点的 W_i ≤ Wmax → tip 过了 Wmax 其窗口必闭，且 tip_s−s_i 单调 → 前缀。
-  frozenIndex() {
-    if (this.W <= 0) return this.rx.length - 1;     // 无平滑 → 全可冻
-    return this._lastLE(this.rs, this.tipS - this.Wmax);
-  }
-
-  _computeC(i) {
-    const W = this.W;
-    const xi = this.rx[i], yi = this.ry[i];
-    if (W <= 0) { this.cx[i] = xi; this.cy[i] = yi; this.cp[i] = this.rp[i]; return; }
-    const Wi = this._Wat(i);                     // 该点窗口（轻压更大）
-    const si = this.rs[i];
-    let m0 = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0;
-    let bx0 = 0, bx1 = 0, bx2 = 0, by0 = 0, by1 = 0, by2 = 0;
-    const acc = (j) => {
-      const u = (this.rs[j] - si) / Wi;         // ∈[−1,1]
-      const w = 1 - Math.abs(u);                 // 弧长三角权
-      const u2 = u * u;
-      m0 += w; m1 += w * u; m2 += w * u2; m3 += w * u2 * u; m4 += w * u2 * u2;
-      const X = this.rx[j], Y = this.ry[j];
-      bx0 += w * X; bx1 += w * u * X; bx2 += w * u2 * X;
-      by0 += w * Y; by1 += w * u * Y; by2 += w * u2 * Y;
-    };
-    // 窗口 = 弧长(W_i)；超界即停（s 单调 → 越远只会更超）
-    for (let j = i; j >= 0; j--) { if (si - this.rs[j] > Wi) break; acc(j); }
-    for (let j = i + 1, n = this.rx.length; j < n; j++) { if (this.rs[j] - si > Wi) break; acc(j); }
-
-    let fx, fy;
-    if (this.deflate) {                          // 0 阶：加权均值（内缩/毛笔甩尖）
-      fx = m0 > 0 ? bx0 / m0 : xi; fy = m0 > 0 ? by0 / m0 : yi;
-    } else {                                     // 2 阶：局部二次 WLS 取中心（保曲率）
-      // 关键：二次在**单边窗口**(起笔)仍**无偏**——直线外插回起点=原位，不拖。
-      // （0 阶均值在单边窗口偏向前向质心 ~+W/3 → 把起笔往前拖成团/钉子，故起笔绝不能用均值。）
-      const c00 = m2 * m4 - m3 * m3, c01 = m2 * m3 - m1 * m4, c02 = m1 * m3 - m2 * m2;
-      const det = m0 * c00 + m1 * c01 + m2 * c02;
-      if (Math.abs(det) > 1e-9 && m0 > 0) {
-        fx = (c00 * bx0 + c01 * bx1 + c02 * bx2) / det;
-        fy = (c00 * by0 + c01 * by1 + c02 * by2) / det;
-      } else { fx = m0 > 0 ? bx0 / m0 : xi; fy = m0 > 0 ? by0 / m0 : yi; }  // <3 点 → 均值兜底
+    this.seq++;
+    if (!this._started) {
+      this._started = true;
+      this._emaX = x; this._emaY = y; this._emaP = p;
+      this._stabX = x; this._stabY = y;
+      this._lastSX = x; this._lastSY = y; this._lastInP = p;
+      this._accum = 0;
+      // 笔尖（暂无锚点，count=1，frozenIndex=-1）
+      this.cx.push(x); this.cy.push(y); this.cp.push(p);
+      this._committed = 0;
+      return;
     }
-    // ramp：v159 起**不再钉死起笔**（Procreate 落地即平滑：起点用前向 lookahead 的二次拟合，无偏不拖）。
-    //   只保**笔尖**钉 raw（贴指）。笔尖 reach = (tip_s − s_i)/Wi，刚画的→0 → r→0 → C=raw。
-    const rightFrac = (this.tipS - si) / Wi;
-    const r = Math.max(0, Math.min(1, rightFrac));
-    this.cx[i] = xi + r * (fx - xi);
-    this.cy[i] = yi + r * (fy - yi);
-    this.cp[i] = this.rp[i];
+    // 去掉旧笔尖（笔尖不提交，每 push 重置）
+    this.cx.pop(); this.cy.pop(); this.cp.pop();
+
+    // ① stabilization 死区：半径 r 内不动，超出才拉
+    if (this.r > 0) {
+      const dx = x - this._stabX, dy = y - this._stabY;
+      const d = Math.hypot(dx, dy);
+      if (d > this.r) { const k = (d - this.r) / d; this._stabX += dx * k; this._stabY += dy * k; }
+    } else {
+      this._stabX = x; this._stabY = y;
+    }
+    const sx = this._stabX, sy = this._stabY;
+
+    // ② 重采样去抖点段 lastS→s，每 step 落 q；③ 对 q 做 EMA → 提交锚点
+    const segdx = sx - this._lastSX, segdy = sy - this._lastSY;
+    const L = Math.hypot(segdx, segdy);
+    let pos = 0;
+    while (this._accum + (L - pos) >= this.step) {
+      pos += this.step - this._accum;
+      this._accum = 0;
+      const t = L > 0 ? pos / L : 1;
+      const qx = this._lastSX + segdx * t;
+      const qy = this._lastSY + segdy * t;
+      const qp = this._lastInP + (p - this._lastInP) * t;
+      this._emaX += (qx - this._emaX) * (1 - this.a);
+      this._emaY += (qy - this._emaY) * (1 - this.a);
+      this._emaP += (qp - this._emaP) * (1 - this.aP);
+      this.cx.push(this._emaX); this.cy.push(this._emaY); this.cp.push(this._emaP);
+    }
+    this._accum += L - pos;
+    this._lastSX = sx; this._lastSY = sy; this._lastInP = p;
+    this._committed = this.cx.length;
+
+    // 重挂笔尖（= 去抖点，stab=0 时即 raw）
+    this.cx.push(sx); this.cy.push(sy); this.cp.push(p);
   }
 
-  // 重算 [cFrozenCount, n) 的 C（frozen 前缀缓存）。每次 O(tail 长度)。
-  update() {
-    const n = this.rx.length;
-    for (let i = this.cFrozenCount; i < n; i++) this._computeC(i);
-    const fi = this.frozenIndex();
-    if (fi + 1 > this.cFrozenCount) this.cFrozenCount = fi + 1;
-    this.cx.length = n; this.cy.length = n; this.cp.length = n;
-  }
+  // 已提交锚点的最大下标（笔尖 = _committed 永不冻）。无锚点 → -1。
+  frozenIndex() { return this._committed - 1; }
+
+  // EMA 因果、锚点不回改 → 无需重算。留空保持契约。
+  update() {}
 }
+
+function clamp01x(v) { return v < 0 ? 0 : v >= 1 ? 0.999 : v; }

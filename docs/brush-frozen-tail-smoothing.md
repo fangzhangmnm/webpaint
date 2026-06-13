@@ -1,8 +1,11 @@
 # 笔刷平滑：frozen / tail 模型
 
-> **as-of v240：时间门已移除**，退回纯弧长窗（+ v162 boost 压感轴）。下面 v158 的「时间维度」段落
-> 仅作背景；不再生效。为什么移除见 [docs/stroke-smoother-time-gate.md](stroke-smoother-time-gate.md) 顶部
-> 的 Superseded 标注。棱角/顿角保护另想（待新 ADR）。当前实现以 `src/stroke-smoother.js` 为准。
+> **SUPERSEDED · v243 / 2026-06-13**：平滑核（弧长二次 WLS quad）**已整体替换**为 Procreate
+> EMA + 死区模型，见 [docs/brush-procreate-smoothing.md](brush-procreate-smoothing.md)。本文档**只剩
+> frozen/tail 渲染分段的描述仍有效**（那套双 buffer / overlay 机制 v243 保留）；所有 quad / lookahead 窗口 /
+> 二次回归 / 内缩 deflate / boost 的**算法描述已失效**。当前实现以 `src/stroke-smoother.js` 为准。
+>
+> （旧 as-of v240 注：时间门已移除，也一并被 v243 取代。）
 
 > **v158 现状（iPad 实测有效，转角问题解决）**：在 frozen/tail 的弧长窗口二次平滑上**加了时间维度**——
 > 决定与论证见 **[docs/stroke-smoother-time-gate.md](stroke-smoother-time-gate.md)**。一句话演进：

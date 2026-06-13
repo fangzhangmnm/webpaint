@@ -32,10 +32,10 @@
 //             shape α 解析公式 (round / ellipse)，endStroke 转 RGBA canvas 上 layer
 //   smudge / pixelMode: 都直接进 layer（不进 buffer）
 //
-// **v148 frozen/tail 平滑**（详 docs/brush-frozen-tail-smoothing.md）：
-//   buffered（brush/erase，非 pixel）走 lookahead 窗口平滑：
-//     - frozen 段（已有足够 lookahead，中心线定型）→ 烤进 stroke buffer，永不再画
-//     - tail 段（靠近笔尖、缺 lookahead）→ 每帧清掉重画到 tail buffer，钉到笔尖（线到手）
+// **frozen/tail 渲染**（平滑核 v243 换成 Procreate EMA，详 docs/brush-procreate-smoothing.md）：
+//   buffered（brush/erase，非 pixel）的平滑中心线由 stroke-smoother.js 给（EMA 锚点 + 笔尖）：
+//     - frozen 段（已提交 EMA 锚点，因果终值）→ 烤进 stroke buffer，永不再画
+//     - tail 段（最后锚点 → 笔尖的直线桥）→ 每帧清掉重画到 tail buffer，钉到笔尖（贴指 + 抬笔 catch-up）
 //     - overlay = frozen ⊕ tail（wash:max / buildup:over），opacity 只在 composite 时乘一次
 //   smudge / pixel 仍走 immediate 路径（直接进 layer，无法重画）。
 
@@ -73,11 +73,10 @@ export const DEFAULT_SETTINGS = {
   blendMode: "source-over",
   // pixel mode：
   pixelMode: false,
-  // 位置平滑（input.js 用，不在引擎）：
-  streamline: 0.3,
-  stabilization: 0,
-  pullStabilizer: 0,
-  motionFilter: 0,
+  // 位置平滑（Procreate 三参，详 docs/brush-procreate-smoothing.md）：
+  streamline: 0.3,          // EMA 拉绳：低频曲线重塑（带滞后）
+  streamlinePressure: 0,    // 同一套 EMA 套到压感通道（默认关，不动既有压感手感）
+  stabilization: 0,         // 死区拉绳：高频手抖去噪
   // taper：笔触两端渐细，**纯 stylistic·per-preset**（brushes.js makeBrush 的 taperIn/out → preset.taper）。默认 0=无。
   //   曾有「系统级 anti-spike 硬件 taper 1.5」的设定，但预设永远覆盖它 → 形同虚设且误导，已删（user 2026-06-08）。
   taperIn: 0,
@@ -170,7 +169,7 @@ export class BrushEngine {
       this._stroke.settings.color = color;
       // 颜色变 → frozen + tail 都要重画：作废 overlay 强制全幅重建
       this._stroke.overlayCanvas = null;
-      this._stroke._composeAtCount = -1;
+      this._stroke._composeAtSeq = -1;
     }
     this.invalidateStamp();
   }
@@ -184,8 +183,8 @@ export class BrushEngine {
     return Math.max(0.5, effSize * s.spacing);
   }
 
-  // smooth: { W:弧长窗口(doc px), deflate:bool, boost:轻压平滑增益 }
-  //   W=0 → 不平滑（立即冻结，退化 raw）。详 docs/brush-frozen-tail-smoothing.md。
+  // smooth: { step, a, aP, deadzone }（doc px / EMA 系数）。详 docs/brush-procreate-smoothing.md。
+  //   a=0 & deadzone=0 → 不平滑（重采样直通 raw）。
   beginStroke(layer, settings, x, y, pressure, mode = "brush", smooth = {}) {
     let loaded = null;
     if (mode === "smudge") loaded = this._sampleLayerColor(layer, x, y);
@@ -209,10 +208,10 @@ export class BrushEngine {
       bufBboxX: layer.bboxX, bufBboxY: layer.bboxY, bufBboxW: 0, bufBboxH: 0,
       overlayCanvas: null,                     // 合成显示 (frozen ⊕ tail) RGBA
       overlayCtx: null,
-      _composeAtCount: -1,                      // 上次 compose 时的 sm.count（同帧缓存用）
+      _composeAtSeq: -1,                        // 上次 compose 时的 sm.seq（同帧缓存用）
       _taperTotal: null,                        // endStroke 时填总笔长，给出端 taper 用（live 为 null=不 taper）
-      // --- v148 frozen/tail · v240 纯弧长(时间门已移除) ---
-      sm: buffered ? new StrokeSmoother({ W: smooth.W || 0, deflate: smooth.deflate, boost: smooth.boost }) : null,
+      // --- v243 Procreate EMA + 死区 + 贴笔尖（详 docs/brush-procreate-smoothing.md）---
+      sm: buffered ? new StrokeSmoother(smooth) : null,
       // frozen 撒点游标（沿平滑中心线 C 的连续走样）
       frozenWalk: { ci: 0, started: false, accumDist: 0, lastP: pLPF0, strokeDist: 0 },
       // tail buffer（预分配 grow-only，覆盖 tail bbox 子区）
@@ -483,12 +482,13 @@ export class BrushEngine {
   getLiveOverlay() {
     const st = this._stroke;
     if (!st || !st.buffered) return null;
-    // board 一帧会调多次（partial/full 判定 + _renderLayers）。tail 只随 raw 点数变 →
-    // 同帧（点数没变 + overlay 在）直接返回缓存，不重算 tail/compose。
-    if (st.sm.count !== st._composeAtCount || !st.overlayCanvas) {
+    // board 一帧会调多次（partial/full 判定 + _renderLayers）。tail 只随每个 raw push 变（笔尖移动）→
+    // 用 sm.seq（每 push +1）当缓存键：同 seq + overlay 在 → 直接返回缓存，不重算 tail/compose。
+    // （不能用 sm.count：慢速 raw 不落新锚点时 count 不变，但笔尖动了、tail 仍需重画。）
+    if (st.sm.seq !== st._composeAtSeq || !st.overlayCanvas) {
       this._renderTail();
       this._composeOverlay();
-      st._composeAtCount = st.sm.count;
+      st._composeAtSeq = st.sm.seq;
     }
     if (!st.overlayCanvas) return null;
     return {

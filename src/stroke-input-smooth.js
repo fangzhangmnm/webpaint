@@ -1,80 +1,37 @@
-// 四件套位置平滑（K3 live·切片2，从 input.js 抽出）。
-// Procreate 链式：raw → Motion Filter(角速度) → Stabilization(滑动平均) → Pull-Stabilizer(速度上限) → StreamLine(IIR LPF)。
-// v148: 只剩 smudge/pixel/liquify/filterBrush 走这条；buffered brush/erase 改引擎 lookahead（stroke-smoother.js）。
+// 即时路径位置平滑（smudge / 像素笔）——Procreate 二参 per-event 版。
+// 详 docs/brush-procreate-smoothing.md。
 //
-// 纯函数（唯一外部依赖 = SMOOTH.vref 配置）：**mutates rec 的平滑状态**
-// （lastDirX/Y, filtX/Y, stabBuf, pullX/Y, smX/Y, _prevEvtTs），返回平滑后的 screen 点 {x,y}。
-// 调用前 rec 须已锚（input._down 起手时 filtX/Y=raw、smX/Y=raw、stabBuf=[] 等）。
-// drx/dry = 本 event 的 raw screen 位移。原是 input.js 的方法、无 this 依赖、零测——抽出可单测。
+// 主笔刷（buffered brush/erase）走引擎侧 stroke-smoother.js（重采样 EMA + 贴笔尖 catch-up）。
+// 这里只服务**即时笔**：它们直接写 layer、无法重画 tail，所以不做 lookahead/catch-up，
+// 只做 ① stabilization 死区去抖 + ② streamline EMA 拉绳。motionFilter / pullStabilizer 已剃除。
+//
+// 纯函数（唯一外部依赖 = SMOOTH 配置）：**mutates rec 的平滑状态**（rawSX/Y, stabX/Y, smX/Y），
+// 返回平滑后 screen 点 {x,y}。调用前 rec 须已锚（input._down 起手 rawS/stab/sm = raw 起点）。
+// drx/dry = 本 event 的 raw screen 位移。
 import { SMOOTH } from "./smooth-config.js";
 
-export function fourStageSmooth(rec, ev, settings, drx, dry) {
-  const sl = settings?.streamline ?? 0;
-  const stab = settings?.stabilization ?? 0;
-  const pull = settings?.pullStabilizer ?? 0;
-  const mf = settings?.motionFilter ?? 0;
+export function inputSmooth(rec, settings, drx, dry) {
+  const clamp01 = (v) => Math.max(0, Math.min(1, v || 0));
+  const sl   = clamp01(settings?.streamline);
+  const stab = clamp01(settings?.stabilization);
 
-  // 1) Motion Filter：限制 (drx, dry) 相对 (lastDirX, lastDirY) 的角度。mf=1 → 硬锁方向。
-  let fdx = drx, fdy = dry;
-  if (mf > 0) {
-    const nLen = Math.hypot(fdx, fdy);
-    const oLen = Math.hypot(rec.lastDirX, rec.lastDirY);
-    if (nLen > 0 && oLen > 0) {
-      const dot = (fdx * rec.lastDirX + fdy * rec.lastDirY) / (nLen * oLen);
-      const ang = Math.acos(Math.max(-1, Math.min(1, dot)));
-      const maxAng = (1 - mf) * Math.PI;
-      if (ang > maxAng && maxAng > 0.001) {
-        const cross = fdx * rec.lastDirY - fdy * rec.lastDirX;
-        const sign = cross < 0 ? 1 : -1;
-        const ca = Math.cos(maxAng), sa = sign * Math.sin(maxAng);
-        const ux = rec.lastDirX / oLen, uy = rec.lastDirY / oLen;
-        fdx = (ux * ca - uy * sa) * nLen;
-        fdy = (ux * sa + uy * ca) * nLen;
-      }
-    }
-  }
-  rec.lastDirX = fdx;
-  rec.lastDirY = fdy;
-  rec.filtX += fdx;
-  rec.filtY += fdy;
-  const rx = rec.filtX, ry = rec.filtY;
+  // 累积 raw（screen px）
+  rec.rawSX += drx;
+  rec.rawSY += dry;
 
-  // 2) Stabilization：滑动平均，window = 1 + stab × 16
-  let sx = rx, sy = ry;
-  if (stab > 0) {
-    const cap = 1 + Math.round(stab * 16);
-    rec.stabBuf.push([rx, ry]);
-    if (rec.stabBuf.length > cap) rec.stabBuf.shift();
-    let mx = 0, my = 0;
-    for (const p of rec.stabBuf) { mx += p[0]; my += p[1]; }
-    sx = mx / rec.stabBuf.length;
-    sy = my / rec.stabBuf.length;
-  } else if (rec.stabBuf.length) {
-    rec.stabBuf.length = 0;
-  }
-
-  // 3) Pull-Stabilizer：速度上限 follower。pull→1 时 maxStep → 0.5 px/event
-  if (pull > 0) {
-    const maxStep = Math.max(0.5, (1 - pull) * 64);
-    const ddx = sx - rec.pullX, ddy = sy - rec.pullY;
-    const d = Math.hypot(ddx, ddy);
-    if (d > maxStep) { rec.pullX += ddx * maxStep / d; rec.pullY += ddy * maxStep / d; }
-    else { rec.pullX = sx; rec.pullY = sy; }
+  // ① stabilization 死区：半径 r 内 raw 不拉动落点（杀手抖）
+  const r = stab * SMOOTH.stabMaxPx;
+  if (r > 0) {
+    const dx = rec.rawSX - rec.stabX, dy = rec.rawSY - rec.stabY;
+    const d = Math.hypot(dx, dy);
+    if (d > r) { const k = (d - r) / d; rec.stabX += dx * k; rec.stabY += dy * k; }
   } else {
-    rec.pullX = sx; rec.pullY = sy;
+    rec.stabX = rec.rawSX; rec.stabY = rec.rawSY;
   }
 
-  // 4) StreamLine：一阶 IIR LPF + 速度自适应（详 docs/streamline-velocity-math.md，已漂移）
-  const V_REF = (SMOOTH.vref > 0) ? SMOOTH.vref : 0.1;
-  const alphaBase = Math.max(0.05, 1 - sl);
-  const _evtDt = Math.max(1, ev.timeStamp - (rec._prevEvtTs ?? ev.timeStamp - 16));
-  rec._prevEvtTs = ev.timeStamp;
-  const v = Math.hypot(fdx, fdy) / _evtDt;
-  const t = Math.min(1, v / V_REF);
-  const ramp = t * t * (3 - 2 * t);
-  const adaptStrength = Math.max(0, 1 - sl);
-  const alphaPos = alphaBase + adaptStrength * (1 - ramp) * (1 - alphaBase);
-  rec.smX = rec.smX + alphaPos * (rec.pullX - rec.smX);
-  rec.smY = rec.smY + alphaPos * (rec.pullY - rec.smY);
+  // ② streamline EMA 拉绳（per-event；即时笔非精度笔，帧率无关性让步给简单）
+  const a = sl * 0.9;                 // slider → EMA 保留系数
+  rec.smX += (rec.stabX - rec.smX) * (1 - a);
+  rec.smY += (rec.stabY - rec.smY) * (1 - a);
   return { x: rec.smX, y: rec.smY };
 }

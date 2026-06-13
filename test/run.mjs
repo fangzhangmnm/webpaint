@@ -23,6 +23,7 @@ import "./brush-settings-model.test.mjs";
 import "./brush-rack-view.test.mjs";
 import "./pointer-route.test.mjs";
 import "./stroke-input-smooth.test.mjs";
+import "./stroke-smoother.test.mjs";
 import "./selection-morph.test.mjs";
 
 console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
