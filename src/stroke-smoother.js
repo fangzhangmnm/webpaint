@@ -1,58 +1,43 @@
-// 位置平滑 — Procreate 两参模型（v243b：一阶 EMA → 二阶临界阻尼 SmoothDamp，出弧线收笔）。
+// 位置平滑 — Procreate 两参（二阶临界阻尼 SmoothDamp + 死区 + 贴笔尖 + 弧线 tail）。
 // 详 docs/brush-procreate-smoothing.md。
 //
-// 为什么二阶：一阶 EMA（拉绳）收笔时朝**单个终点**指数逼近 = 一根直弦 → 直尾巴。SmoothDamp 带
-// **速度状态**，抬笔时落点仍有切向动量，弹簧把它拉向终点时会顺动量冲出再弯回 → 自然弧线收笔
-// （直线段则切向 = 指向终点 → 仍直收，正确）。临界阻尼 → body 不抖不振铃。
+// 为什么二阶：一阶 EMA 收笔朝单点逼近 = 直弦 → 直尾巴。SmoothDamp 带 vel 状态，落点有切向动量 →
+// 收笔顺动量冲出再弯回 = 自然弧线（直线段切向=指向终点 → 仍直收）。临界阻尼 → body 不抖。
 //
-// 模型：raw 点流 → ① stabilization 死区 → ② 固定弧长 Δ 重采样 → ③ SmoothDamp（朝重采样点 q 跟随）。
-//   SmoothDamp 因果 → 锚点落定即终值、永不回改；重采样在固定弧长 → 帧率/事件密度无关。
+// 模型：raw → ① 死区 → ② 固定弧长 Δ 重采样 → ③ SmoothDamp 跟随（提交锚点，因果不回改、帧率无关）。
 //
-// 贴笔尖：cx/cy/cp = [已提交锚点…, 笔尖]。frozenIndex()=锚点数−1（笔尖永不冻）。tail = 最后锚点→笔尖
-//   的直线桥（live 时贴指）。**抬笔 finish()**：从落点带动量 SmoothDamp 到终点、把弧尾的锚点补出来。
+// **弧线 tail（v244b）**：tail 不再是「最后锚点→光标」的直线桥，而是每 push 从落点(带 vel)非破坏地
+// SmoothDamp flush 到光标得到的**一段弧**（= 抬笔会得到的形状），挂在锚点串后面当 transient 预览。
+// 这样画途中预览 = 最终落定。抬笔 finish() = 把当前这段预览弧整段转正 → 预览与结果必然一致。
 //
 // 契约（brush.js 用）：push / update(空) / finish / frozenIndex / count / seq / cx,cy,cp。
+//   cx/cy/cp = [已提交锚点(0.._committed-1) … transient 弧 tail(_committed..end，末点=光标)]。
+//   frozenIndex() = _committed-1（弧 tail 永不冻，每 push 重建）。
 
 export class StrokeSmoother {
   // opts: { step:重采样间隔(doc px), lag:目标滞后(doc px), deadzone:死区半径(doc px) }
-  //   lag=0 & deadzone=0 → 不平滑（重采样直通 raw）。smoothTime T = lag/step（步为单位，dt=1/步）。
+  //   lag=0 & deadzone=0 → 不平滑（重采样直通）。smoothTime T = lag/step。
   constructor(opts = {}) {
     this.step = Math.max(0.25, opts.step || 2);
     const lag = Math.max(0, opts.lag || 0);
-    this.T = lag > 0 ? lag / this.step : 0;       // smoothTime（步）；0 = 直通
+    this.T = lag > 0 ? lag / this.step : 0;
     this.r = Math.max(0, opts.deadzone || 0);
 
-    this.cx = []; this.cy = []; this.cp = [];     // 锚点串 + 末尾笔尖
-    this._committed = 0;                           // 已提交锚点数；笔尖 = cx[_committed]
-    this.seq = 0;                                  // push 序号（brush.js overlay 缓存键，每 push +1）
+    this.cx = []; this.cy = []; this.cp = [];
+    this._committed = 0;        // 已提交锚点数；其后是 transient 弧 tail
+    this._tailLen = 0;          // 当前 transient 点数（弧 tail，每 push 弹掉重建）
+    this.seq = 0;
 
-    // SmoothDamp / 死区 / 重采样状态
-    this._px = 0; this._py = 0;                    // 平滑落点 pos
-    this._vx = 0; this._vy = 0;                    // 速度（二阶状态，动量来源）
-    this._stabX = 0; this._stabY = 0;              // 死区锚
-    this._lastSX = 0; this._lastSY = 0;            // 上次去抖点（重采样起点）
-    this._lastInP = 0;                             // 上次 raw 压感
-    this._accum = 0;                               // 重采样累积弧长余量
-    this._lastAX = 0; this._lastAY = 0;            // 上次追加的锚点（finish 去冗余用）
+    this._px = 0; this._py = 0; // 平滑落点 pos
+    this._vx = 0; this._vy = 0; // 速度（二阶状态，动量来源）
+    this._stabX = 0; this._stabY = 0;
+    this._lastSX = 0; this._lastSY = 0;
+    this._lastInP = 0;
+    this._accum = 0;
     this._started = false;
   }
 
   get count() { return this.cx.length; }
-
-  // 一步 SmoothDamp（临界阻尼，Game Programming Gems 4 的有理近似；dt=1/步）。T=0 → 直接吸到 target。
-  _damp(tx, ty) {
-    if (this.T <= 0) { this._px = tx; this._py = ty; this._vx = 0; this._vy = 0; return; }
-    const omega = 2 / this.T;
-    const x = omega;                               // omega·dt，dt=1
-    const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
-    let cdx = this._px - tx, cdy = this._py - ty;
-    const tmx = (this._vx + omega * cdx);
-    const tmy = (this._vy + omega * cdy);
-    this._vx = (this._vx - omega * tmx) * exp;
-    this._vy = (this._vy - omega * tmy) * exp;
-    this._px = tx + (cdx + tmx) * exp;
-    this._py = ty + (cdy + tmy) * exp;
-  }
 
   push(x, y, p) {
     this.seq++;
@@ -61,13 +46,13 @@ export class StrokeSmoother {
       this._px = x; this._py = y; this._vx = 0; this._vy = 0;
       this._stabX = x; this._stabY = y;
       this._lastSX = x; this._lastSY = y; this._lastInP = p;
-      this._lastAX = x; this._lastAY = y;
       this._accum = 0;
-      this.cx.push(x); this.cy.push(y); this.cp.push(p);   // 笔尖（暂无锚点）
-      this._committed = 0;
+      this.cx.push(x); this.cy.push(y); this.cp.push(p);   // 笔尖
+      this._committed = 0; this._tailLen = 1;
       return;
     }
-    this.cx.pop(); this.cy.pop(); this.cp.pop();           // 去旧笔尖
+    // 弹掉上一帧的 transient 弧 tail（永不冻、不入提交）
+    for (let i = 0; i < this._tailLen; i++) { this.cx.pop(); this.cy.pop(); this.cp.pop(); }
 
     // ① stabilization 死区
     if (this.r > 0) {
@@ -77,7 +62,7 @@ export class StrokeSmoother {
     } else { this._stabX = x; this._stabY = y; }
     const sx = this._stabX, sy = this._stabY;
 
-    // ② 重采样 lastS→s；③ 每个采样点 q 做 SmoothDamp → 提交锚点
+    // ② 重采样 lastS→s；③ 每采样点 q 做 SmoothDamp（推进真 pos/vel）→ 提交锚点
     const segdx = sx - this._lastSX, segdy = sy - this._lastSY;
     const L = Math.hypot(segdx, segdy);
     let pos = 0;
@@ -88,44 +73,56 @@ export class StrokeSmoother {
       const qx = this._lastSX + segdx * t;
       const qy = this._lastSY + segdy * t;
       const qp = this._lastInP + (p - this._lastInP) * t;
-      this._damp(qx, qy);
+      const s = dampStep(this._px, this._py, this._vx, this._vy, qx, qy, this.T);
+      this._px = s[0]; this._py = s[1]; this._vx = s[2]; this._vy = s[3];
       this.cx.push(this._px); this.cy.push(this._py); this.cp.push(qp);
-      this._lastAX = this._px; this._lastAY = this._py;
     }
     this._accum += L - pos;
     this._lastSX = sx; this._lastSY = sy; this._lastInP = p;
     this._committed = this.cx.length;
 
-    this.cx.push(sx); this.cy.push(sy); this.cp.push(p);   // 重挂笔尖（去抖点）
+    // 重建 transient 弧 tail：从真 pos/vel 的**拷贝** flush 到光标，末点钉光标（贴指）
+    this._tailLen = this._buildTail(sx, sy, p);
   }
 
-  // 抬笔收尾：从带动量的落点 SmoothDamp 到终点，把弧尾锚点补出来（取代直线桥）。
-  // 直线段收笔仍直（切向=指向终点）；弯笔收笔出弧（动量冲出再弯回）。最后钉终点 = 画到头。
-  finish() {
-    if (!this._started) return;
-    if (this.T <= 0 || this.cx.length === 0) return;       // 无平滑 → 直通，笔尖已在终点
-    // 取终点 = 当前笔尖（去抖后的最后落点），先摘掉
-    const tx = this.cx[this.cx.length - 1];
-    const ty = this.cy[this.cy.length - 1];
-    const tp = this.cp[this.cp.length - 1];
-    this.cx.pop(); this.cy.pop(); this.cp.pop();
-    const MAX = Math.ceil(this.T * 6) + 64;                // 收敛上界（防极端参数死循环）
-    for (let i = 0; i < MAX; i++) {
-      const settled = Math.hypot(this._px - tx, this._py - ty) < 0.2 && Math.hypot(this._vx, this._vy) < 0.2;
-      if (settled) break;
-      this._damp(tx, ty);
-      if (Math.hypot(this._px - this._lastAX, this._py - this._lastAY) >= 0.15) {  // 去冗余（settle 处别堆点）
-        this.cx.push(this._px); this.cy.push(this._py); this.cp.push(tp);
-        this._lastAX = this._px; this._lastAY = this._py;
+  // 从 (pos,vel) 的拷贝 SmoothDamp flush 到 (tx,ty)，追加弧点，末点 = (tx,ty)。返回追加点数。
+  _buildTail(tx, ty, tp) {
+    let n = 0;
+    if (this.T > 0) {
+      let px = this._px, py = this._py, vx = this._vx, vy = this._vy;
+      let lax = px, lay = py;
+      const MAX = Math.ceil(this.T * 6) + 64;
+      for (let i = 0; i < MAX; i++) {
+        if (Math.hypot(px - tx, py - ty) < 0.2 && Math.hypot(vx, vy) < 0.2) break;
+        const s = dampStep(px, py, vx, vy, tx, ty, this.T);
+        px = s[0]; py = s[1]; vx = s[2]; vy = s[3];
+        if (Math.hypot(px - lax, py - lay) >= 0.15) {     // 去冗余（settle 处别堆点）
+          this.cx.push(px); this.cy.push(py); this.cp.push(tp); n++; lax = px; lay = py;
+        }
       }
     }
-    this._committed = this.cx.length;
-    this.cx.push(tx); this.cy.push(ty); this.cp.push(tp);  // 钉终点（画到头）
+    this.cx.push(tx); this.cy.push(ty); this.cp.push(tp); n++;   // 钉光标（画到头/贴指）
+    return n;
   }
 
-  // 已提交锚点的最大下标（笔尖永不冻）。无锚点 → -1。
-  frozenIndex() { return this._committed - 1; }
+  // 抬笔收尾：把当前预览弧 tail 整段转正（= 预览所见即所得）。
+  finish() {
+    if (!this._started) return;
+    this._committed = this.cx.length;
+    this._tailLen = 0;
+  }
 
-  // 因果、锚点不回改 → 无需重算。留空保持契约。
-  update() {}
+  frozenIndex() { return this._committed - 1; }   // 弧 tail 永不冻
+
+  update() {}                                     // 因果、锚点不回改 → 无需重算
+}
+
+// 一步 SmoothDamp（临界阻尼，Game Programming Gems 4 有理近似；dt=1/步）。T<=0 → 直接吸到 target。
+function dampStep(px, py, vx, vy, tx, ty, T) {
+  if (T <= 0) return [tx, ty, 0, 0];
+  const omega = 2 / T, x = omega;
+  const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+  const cdx = px - tx, cdy = py - ty;
+  const tmx = vx + omega * cdx, tmy = vy + omega * cdy;
+  return [tx + (cdx + tmx) * exp, ty + (cdy + tmy) * exp, (vx - omega * tmx) * exp, (vy - omega * tmy) * exp];
 }

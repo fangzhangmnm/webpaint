@@ -58,15 +58,15 @@ v148–v242）。数学甜点没错，但：
 
 ## 贴笔尖 + 弧线收笔
 
-渲染线 = **已提交锚点串** ⊕ **一条从「最后锚点」直连「真实笔尖」的活动 tail**（live 时直线桥，贴指）。
+渲染线 = **已提交锚点串** ⊕ **transient 弧 tail**（画途中预览 = 抬笔会得到的弧，贴指）。
 
-- `cx/cy/cp = [锚点₀ … 锚点_{m−1}, 笔尖]`，`count = m+1`，`frozenIndex() = m−1`。
-- frozen 段（`[0, m−1]`）= SmoothDamp 锚点，烤进 stroke buffer，永不再画。
-- tail 段 = `锚点_{m−1} → 笔尖`，**每帧清掉重画**（笔尖随手移动 → 贴指）。
-- 笔尖 = 死区输出（stab=0 时 = raw 精确贴指；stab>0 时滞后半径 r）。
-- **抬笔 `finish()`**：从带动量的落点继续 SmoothDamp 到终点，把**弧尾锚点补出来**（取代 live 直线桥），
-  最后钉终点 → 画到头。弯笔出弧、直笔仍直。**注**：临界阻尼 under-bow（弧比真曲线浅，bench sl=0.9 约
-  0.8px vs 真弧 ~2px）；要更夸张的 Procreate 弧就把 finish 阻尼调松（增大动量）——device 手感终判。
+- `cx/cy/cp = [已提交锚点(0.._committed−1) … 弧 tail(_committed..end，末点=光标)]`，`frozenIndex() = _committed−1`。
+- frozen 段 = SmoothDamp 提交锚点（因果终值），烤进 stroke buffer，永不再画。
+- **弧 tail（v244b）**：**每 push** 从带动量的落点(pos,vel 的拷贝)非破坏地 SmoothDamp flush 到光标 →
+  得到一段弧，挂在提交锚点串后面、末点钉光标。弯笔出弧、直笔仍直。frozenIndex 不含它 → 永不冻、每帧重建。
+- **抬笔 `finish()`** = 把当前这段预览弧**整段转正**（`_committed = count`）→ **预览所见即所得**（不重算，点不动）。
+- **注**：临界阻尼 under-bow（弧比真曲线浅，bench sl=0.9 约 0.8px vs 真弧 ~2px）；要更夸张的 Procreate 弧就
+  把 finish/tail 阻尼调松（增大动量）——device 手感终判。
 
 ## 参数映射（`input.js`，scale 已知处算）
 

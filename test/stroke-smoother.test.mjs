@@ -14,10 +14,11 @@ describe("stroke-smoother · StrokeSmoother（SmoothDamp + 死区 + 弧线收笔
     assert(near(sm.cx[last], 88) && near(sm.cy[last], 0), `笔尖应 = raw(88,0)，实得(${sm.cx[last]},${sm.cy[last]})`);
   });
 
-  it("frozenIndex = 提交锚点数−1（笔尖永不冻）", () => {
+  it("frozenIndex = 提交锚点数−1（弧 tail 永不冻）", () => {
     const sm = new StrokeSmoother({ step: 10, lag: 20 });
     feed(sm, [[0, 0], [100, 0]]);
-    assert(sm.frozenIndex() === sm.count - 2, `frozenIndex 应 = count-2，实得 ${sm.frozenIndex()} / count ${sm.count}`);
+    assert(sm.frozenIndex() === sm._committed - 1, `frozenIndex 应 = _committed-1，实得 ${sm.frozenIndex()} / _committed ${sm._committed}`);
+    assert(sm.count > sm._committed, `弧 tail 应在提交段之后（count ${sm.count} > _committed ${sm._committed}）`);
   });
 
   it("单点 tap：count=1，frozenIndex=−1（无可冻锚点）", () => {
@@ -70,6 +71,26 @@ describe("stroke-smoother · StrokeSmoother（SmoothDamp + 死区 + 弧线收笔
     sm.push(0, 0); sm.push(20, 0);                          // d=20>r=5 → 去抖点到 15
     const last = sm.count - 1;
     assert(near(sm.cx[last], 15), `去抖笔尖应到 15，实得 ${sm.cx[last]}`);
+  });
+
+  it("live 预览 tail = 弧（弯笔途中 transient tail 多点、末点钉光标、离弦>0）", () => {
+    const sm = new StrokeSmoother({ step: 8, lag: 40 });
+    for (let k = 0; k <= 60; k++) { const t = k / 60 * Math.PI / 2; sm.push(100 * Math.cos(t), 100 * Math.sin(t), 0.5); }
+    // 未抬笔：transient 弧 tail = cx[_committed .. count-1]
+    const tailN = sm.count - sm._committed;
+    assert(tailN > 2, `弯笔预览 tail 应是多点弧，实得 ${tailN} 点`);
+    const cur = [sm.cx[sm.count - 1], sm.cy[sm.count - 1]];        // 末点 = 光标（四分圆终点 (0,100)）
+    assert(near(cur[0], 0, 1e-6) && near(cur[1], 100, 1e-6), `预览 tail 末点应钉光标(0,100)，实得(${cur[0]},${cur[1]})`);
+    const a0 = sm._committed - 1;                                  // 弧起点（最后提交锚点）
+    const ax = sm.cx[a0], ay = sm.cy[a0], len = Math.hypot(cur[0] - ax, cur[1] - ay) || 1;
+    let dev = 0;
+    for (let i = a0 + 1; i < sm.count - 1; i++)
+      dev = Math.max(dev, Math.abs((cur[0] - ax) * (ay - sm.cy[i]) - (ax - sm.cx[i]) * (cur[1] - ay)) / len);
+    assert(dev > 0.5, `预览 tail 应弯（离弦>0.5），实得 ${dev.toFixed(2)}`);
+    // 抬笔即所见：finish 只是把这段弧转正，点不变
+    const snapX = sm.cx.slice(), snapY = sm.cy.slice();
+    sm.finish();
+    for (let i = 0; i < snapX.length; i++) assert(near(sm.cx[i], snapX[i]) && near(sm.cy[i], snapY[i]), `finish 改了点 ${i}`);
   });
 
   it("收笔 finish：钉终点（画到头）", () => {
