@@ -23,9 +23,9 @@ describe("stroke-smoother · StrokeSmoother（时间常数指数追踪）", () =
     assert(near(sm.cx[last], 37) && near(sm.cy[last], 0), `tau=0 应直通，实得(${sm.cx[last]},${sm.cy[last]})`);
   });
 
-  it("固定时间滞后：匀速时稳态滞后 ≈ v·dt/(1−e^(−dt/tau))（≈ v·tau）", () => {
-    const lag = rampLag(50, 1, 10, 400);       // 预期 10/(1−e^-0.2)=55.2px
-    assert(lag > 45 && lag < 65, `稳态滞后应 ≈55px，实得 ${lag.toFixed(1)}`);
+  it("固定时间滞后：匀速时稳态滞后 ≈ v·tau（二阶 SmoothDamp，时间制）", () => {
+    const lag = rampLag(50, 1, 10, 400);       // 二阶临界阻尼跟 ramp 滞后 ≈ v·smoothTime = 50px
+    assert(lag > 35 && lag < 60, `稳态滞后应 ≈ v·tau=50px，实得 ${lag.toFixed(1)}`);
   });
 
   it("滞后随 tau 线性（tau 翻倍 → 滞后≈翻倍）", () => {
@@ -96,8 +96,8 @@ describe("stroke-smoother · StrokeSmoother（时间常数指数追踪）", () =
     };
     const straight = []; for (let x = 0; x <= 200; x += 8) straight.push([x, 0]);
     const curve = []; for (let k = 0; k <= 40; k++) { const a = k / 40 * Math.PI / 2; curve.push([100 * Math.cos(a), 100 * Math.sin(a)]); }
-    assert(tailDev(straight, 0.5) < 0.5, `直行 tail 应是直线，离弦=${tailDev(straight, 0.5).toFixed(2)}`);
-    assert(tailDev(curve, 0.5) > 1, `弯笔 tail 应鼓成弧，离弦=${tailDev(curve, 0.5).toFixed(2)}`);
+    assert(tailDev(straight, 1) < 0.5, `直行 tail 应是直线，离弦=${tailDev(straight, 1).toFixed(2)}`);
+    assert(tailDev(curve, 2) > 1, `弯笔 tail 应鼓成动量弧，离弦=${tailDev(curve, 2).toFixed(2)}`);
   });
 
   it("finish = 弧 tail 整段转正（预览所见即所得，点不动）", () => {
