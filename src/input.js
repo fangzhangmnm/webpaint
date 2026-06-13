@@ -62,6 +62,7 @@ function _resolveSmooth(settings, scale) {
   return {
     tau:      clamp01(settings.streamline) * SMOOTH.tauMaxMs,
     deadzone: clamp01(settings.stabilization) * SMOOTH.stabMaxPx / sc,
+    tailBow:  SMOOTH.tailBow,
   };
 }
 

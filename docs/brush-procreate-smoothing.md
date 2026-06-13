@@ -41,22 +41,24 @@ out += (pen − out) · (1 − exp(−dt / tau))
   ① stabilization 死区（与 tau 正交：硬空间阈值 vs 频域）：
        d = dist(raw, stabAnchor); if d>r: stabAnchor += (raw−stabAnchor)·(d−r)/d
        s = stabAnchor                                    # 去抖后的 raw
-  ② 时间常数指数追踪：
+  ② 时间缓冲（committed）：时间常数指数追踪
        dt = t − lastT;  alpha = 1 − exp(−dt/tau)         # tau=0 → alpha=1 直通
        out += (s − out) · alpha
-       → out 追加进 cx/cy/cp（因果终值，永不回改）
+       → out 追加进 cx（因果终值，逐点烤进 frozen buffer）
+  ③ 贴笔尖弧 tail（transient 预览，每 push 重画）：从 out → pen 画一段二次 Bézier
+       来向 = committed 路径上「~d 弧长之前」的 heading（动量方向，d=|pen−out|）
+       control = out + 来向̂ · d · tailBow；末点钉 pen（贴指）
+       直行→来向朝 pen→退化直线；弯笔→来向≠chord→鼓成动量弧
 ```
 
-`cx/cy/cp = [已提交 out…, 最新 out(=tip)]`，`frozenIndex() = _committed−1`（末点留作 tip 渲染，其余冻）。
-**每个 out 因果终值** → 全部可立即烤进 frozen buffer，无 transient tail 重算、无 overlay 复杂度。
+`cx/cy/cp = [committed out(0.._committed−1) … 贴笔尖弧 tail(_committed..end，末点=pen)]`，`frozenIndex()=_committed−1`。
 
-**抬笔 `finish()`**：朝最后 raw(去抖 s) 跑几个 tick 直到 settle，再钉终点（画到头）。收尾段速度本就慢
-→ 滞后(=速度×tau)小 → 尾巴是一小段、不甩直线（Krita 那种直甩尾来自固定终点 lerp + 高速；这里高速段
-滞后大但你收笔时在减速，所以尾短）。
-
-**注：贴笔尖的取舍**。本模型笔尖恒滞后 `速度×tau`（一致、可控），**不再**画「直连光标的 tail」去贴指
-（那是 SmoothDamp 版的做法）。一致滞后是用户要的「可控」手感；要回贴指就 finish-style 每帧补 tail，
-但会牺牲一致性。device 上判。
+**两层 = 「时间缓冲 + 重画最后一段」≈ Procreate 的动作**：
+- **时间缓冲**（committed out）= 一致滞后 `速度×tau` 的平滑骨架，因果终值、逐点烤死。
+- **贴笔尖弧 tail** = 每 push 从滞后 out 弯到光标的预览（跟笔、弯笔出弧）。**抬笔 `finish()` = 把这段弧整段
+  转正**（`_committed=count`，点不动）→ **预览所见即所得、画到头**。
+- 关键坑：tail 的「来向」不能用 out 的瞬时速度（EMA 的 out 永远朝 pen 追 = chord 方向 → 永不鼓）；要用
+  committed 路径**往回 ~d 弧长的 heading**（动量/来向），它对弯笔才 ≠ chord → 出弧。`tailBow` 控鼓度。
 
 ## 参数映射（`input.js`）
 
@@ -66,13 +68,13 @@ deadzone = stabilization · SMOOTH.stabMaxPx / scale  # 死区半径(doc px)
 ```
 
 **两参 per-brush**（笔刷设置）：`streamline`(→tau)、`stabilization`(→deadzone)。`SMOOTH`（dev 面板 live 可调）
-默认：`tauMaxMs=160`（0.5→80ms，tremor 截止 ~2Hz）、`stabMaxPx=8`、`rawStaticSq`、`pressureAlpha`。
+默认：`tauMaxMs=160`（0.5→80ms，tremor 截止 ~2Hz）、`tailBow=0.5`（弧 tail 鼓度）、`stabMaxPx=8`、`rawStaticSq`、`pressureAlpha`。
 出厂默认 streamline 0.15（轻）、勾线 0.45。**压感**走引擎侧 `pressureLPF`（per-brush ms，本就是同一类时间
 滤波器，= Procreate 的 StreamLine-Pressure 子滑块），不在本模块重复。
 
 ## 分档
 
-- **画笔 / 橡皮（buffered）**：本模块（时间常数追踪 + 死区 + 收尾）。
+- **画笔 / 橡皮（buffered）**：本模块（时间缓冲 + 死区 + 贴笔尖弧 tail）。
 - **smudge / 像素**：`stroke-input-smooth.js`（死区 + 一阶 EMA per-event）。**TODO**：未改成时间常数版
   （仍是固定 k，采样率相关）；这类笔非精度追踪，暂可接受，要严谨可同样改 dt 版。
 - **液化 / filter brush**：raw 无位置平滑。
@@ -87,8 +89,9 @@ deadzone = stabilization · SMOOTH.stabMaxPx / scale  # 死区半径(doc px)
 
 ## 砍掉的东西（别再找 / 别复活）
 
-四版机器全删：quad WLS（`_computeC`/m0..m4）、frozen/tail lookahead、二阶 SmoothDamp（`dampStep`/弧线
-收笔/transient 弧 tail）、连续曲率门控（Menger `κ`/`smoothstep`/`cornerKeep`/`R_min`）、内缩 deflate、
-轻压 boost、时间门 dwellMs、速度自适应 V_REF、streamline-pressure、转角阈值+硬锚点。
+四版机器全删：quad WLS（`_computeC`/m0..m4）、frozen/tail lookahead、二阶 SmoothDamp（`dampStep`/弧线收笔，
+**注：贴笔尖弧 tail 用 Bézier 重新做回来了，但不再是 SmoothDamp 二阶**）、连续曲率门控（Menger `κ`/
+`smoothstep`/`cornerKeep`/`R_min`）、内缩 deflate、轻压 boost、时间门 dwellMs、速度自适应 V_REF、
+streamline-pressure、转角阈值+硬锚点。
 配置项删：`resampleStepPx/streamlineMaxLagPx/cornerFloorPx/curvatureAlpha/lookaheadCap/...`。
 **经验（为什么走了四版弯路）见 `docs/lessons-brush-smoothing.md`。**

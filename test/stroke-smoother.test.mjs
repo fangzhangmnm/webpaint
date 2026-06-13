@@ -69,9 +69,44 @@ describe("stroke-smoother · StrokeSmoother（时间常数指数追踪）", () =
   it("seq 每 push +1；frozenIndex=_committed−1；单点 tap", () => {
     const sm = new StrokeSmoother({ tau: 50 });
     sm.push(5, 5, 0.8, 0);
-    assert(sm.seq === 1 && sm.count === 1 && sm.frozenIndex() === -1, `tap 应 seq1/count1/fi-1，实得 ${sm.seq}/${sm.count}/${sm.frozenIndex()}`);
+    assert(sm.seq === 1 && sm.count === 1 && sm.frozenIndex() === 0, `tap 应 seq1/count1/fi0，实得 ${sm.seq}/${sm.count}/${sm.frozenIndex()}`);
     sm.push(6, 5, 0.8, 10); sm.push(7, 5, 0.8, 20);
-    assert(sm.seq === 3 && sm.frozenIndex() === sm._committed - 1, `frozenIndex 应 = _committed-1`);
+    assert(sm.frozenIndex() === sm._committed - 1, `frozenIndex 应 = _committed-1`);
+  });
+
+  it("贴笔尖弧 tail：画途中末点 = pen（线贴到光标）", () => {
+    const sm = new StrokeSmoother({ tau: 100 });   // 重平滑 → out 明显滞后 → 有 tail
+    let t = 0; for (let x = 0; x <= 200; x += 10) { sm.push(x, 0, 0.5, t); t += 8; }
+    const last = sm.count - 1;
+    assert(near(sm.cx[last], 200, 1e-6) && near(sm.cy[last], 0, 1e-6), `tail 末点应=pen(200,0)，实得(${sm.cx[last]},${sm.cy[last]})`);
+    assert(sm.count > sm._committed, `应有 transient tail（count ${sm.count} > _committed ${sm._committed}）`);
+    assert(sm._ox < 200, `out（时间缓冲）应滞后于 pen（${sm._ox.toFixed(1)} < 200）`);
+  });
+
+  it("弧 tail：直行 → 直线 tail；弯笔 → 鼓向外的弧", () => {
+    const tailDev = (pts, bow) => {
+      const sm = new StrokeSmoother({ tau: 100, tailBow: bow });
+      let t = 0; for (const [x, y] of pts) { sm.push(x, y, 0.5, t); t += 8; }
+      const ax = sm.cx[sm._committed - 1], ay = sm.cy[sm._committed - 1];   // out（tail 起点）
+      const bx = sm.cx[sm.count - 1], by = sm.cy[sm.count - 1];             // pen（tail 末点）
+      const len = Math.hypot(bx - ax, by - ay) || 1; let max = 0;
+      for (let i = sm._committed; i < sm.count - 1; i++)
+        max = Math.max(max, Math.abs((bx - ax) * (ay - sm.cy[i]) - (ax - sm.cx[i]) * (by - ay)) / len);
+      return max;
+    };
+    const straight = []; for (let x = 0; x <= 200; x += 8) straight.push([x, 0]);
+    const curve = []; for (let k = 0; k <= 40; k++) { const a = k / 40 * Math.PI / 2; curve.push([100 * Math.cos(a), 100 * Math.sin(a)]); }
+    assert(tailDev(straight, 0.5) < 0.5, `直行 tail 应是直线，离弦=${tailDev(straight, 0.5).toFixed(2)}`);
+    assert(tailDev(curve, 0.5) > 1, `弯笔 tail 应鼓成弧，离弦=${tailDev(curve, 0.5).toFixed(2)}`);
+  });
+
+  it("finish = 弧 tail 整段转正（预览所见即所得，点不动）", () => {
+    const sm = new StrokeSmoother({ tau: 80 });
+    let t = 0; for (let x = 0; x <= 150; x += 10) { sm.push(x, x * 0.3, 0.5, t); t += 8; }
+    const snapX = sm.cx.slice(), snapY = sm.cy.slice();
+    sm.finish();
+    assert(sm.count === snapX.length, `finish 不应改点数（${sm.count} vs ${snapX.length}）`);
+    for (let i = 0; i < snapX.length; i++) assert(near(sm.cx[i], snapX[i]) && near(sm.cy[i], snapY[i]), `finish 改了点 ${i}`);
   });
 
   it("无时间戳（合成笔触）：用名义 dt 兜底，不崩、仍平滑", () => {
