@@ -414,6 +414,13 @@
           <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
           <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" title="约束 1:1（正方 / 圆）">1:1</button>
           <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒阈值">设置</button>
+          <!-- v242 选区编辑齿轮（op 不是 tool）：有选区才亮。点开 → 扩张/收缩菜单 → 实时预览 modal -->
+          <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoSelEditBtn" type="button" title="编辑选区：扩张 / 收缩" aria-haspopup="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
         </div>
       </div>
       <!-- Row 2: 选区操作 / 变换控制 -->
@@ -446,17 +453,34 @@
     </div>
 
     <!-- 魔术棒设置 popup（点设置弹出，再点别处关）—— 独立于 toolbar stack -->
+    <!-- v242：只剩阈值；扩展/收缩拆成选区编辑 op（见下 lassoSelEditMenu / lassoSelOpPopup） -->
     <div class="lasso-popup hidden" id="lassoMagicPopup" role="dialog" aria-label="魔术棒设置">
       <label class="lasso-popup-row">
         <span>阈值</span>
         <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" />
         <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
       </label>
-      <label class="lasso-popup-row">
-        <span>扩展</span>
-        <input type="range" id="lassoExpand" min="-10" max="10" step="1" value="2" />
-        <span id="lassoExpandVal" class="lasso-popup-val">2</span>
-      </label>
+    </div>
+
+    <!-- v242 选区编辑：齿轮 → 这个菜单 → 选扩张/收缩 → 开 lassoSelOpPopup 实时预览 -->
+    <div class="lasso-popup hidden" id="lassoSelEditMenu" role="menu" aria-label="编辑选区">
+      <button class="lasso-tool-btn" id="lassoSelExpandBtn" type="button" role="menuitem" style="justify-content:flex-start;">扩张…</button>
+      <button class="lasso-tool-btn" id="lassoSelShrinkBtn" type="button" role="menuitem" style="justify-content:flex-start;">收缩…</button>
+    </div>
+
+    <!-- v242 选区扩张/收缩 modal：走 adjust 逻辑（transient + 实时预览），数字输入 -->
+    <div class="lasso-popup hidden" id="lassoSelOpPopup" role="dialog" aria-label="扩张 / 收缩选区">
+      <div class="lasso-popup-row" style="grid-template-columns: 1fr auto auto;">
+        <span id="lassoSelOpTitle">扩张选区</span>
+        <input type="text" inputmode="numeric" id="lassoSelOpAmount" value="2"
+          style="width:56px;text-align:right;" aria-label="像素数" />
+        <span>px</span>
+      </div>
+      <div class="lasso-popup-row" style="grid-template-columns: 1fr auto auto; gap:10px;">
+        <span></span>
+        <button class="lasso-tool-btn lasso-tool-cancel" id="lassoSelOpCancel" type="button">取消</button>
+        <button class="lasso-tool-btn lasso-tool-confirm" id="lassoSelOpApply" type="button">应用</button>
+      </div>
     </div>
 
     <!-- v120 删除：shapes tool 撤了。以后 shapes 改成 brush preset 的 toggle，在画架里挑。 -->
@@ -947,6 +971,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-9ffe2d1cde15.mjs"></script>
+    <script type="module" src="./dist/webpaint-7f102aa4906b.mjs"></script>
   </body>
 </html>

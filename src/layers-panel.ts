@@ -174,6 +174,14 @@ function _toggleClipping(L: any) {
   board.invalidateAll();
   board.requestRender();
 }
+// v242 锁定不透明度（alpha lock）：纯绘制约束，不改像素/合成 → 不必 invalidate 渲染，render panel 即可。
+function _toggleLockAlpha(L: any) {
+  if (!L) return;
+  const oldVal = L.lockAlpha;
+  L.lockAlpha = !oldVal;
+  history.push({ type: "setLayerProp", layerId: L.id, prop: "lockAlpha", oldVal, newVal: L.lockAlpha });
+  renderLayersPanel();
+}
 function _toggleReference(L: any) {
   if (!L) return;
   const isRefNow = doc.referenceLayerId === L.id;
@@ -315,6 +323,7 @@ const LayerRow = defineComponent({
     // 层重排 = ⋯ 菜单的「上移/下移」（_moveLayerDelta）。早先定：不做行拖拽（iPad 触屏 drag-drop 不可靠）。
     function toggleClip(e: Event) { e.stopPropagation(); _toggleClipping(live()); }
     function toggleRef(e: Event) { e.stopPropagation(); _toggleReference(live()); }
+    function toggleLock(e: Event) { e.stopPropagation(); _toggleLockAlpha(live()); }
 
     return {
       modeBadge, opacityPct, badgeTitle, layersUi,
@@ -322,7 +331,7 @@ const LayerRow = defineComponent({
       onRowClick, onNameClick, onRenameCommit, onRenameKey,
       toggleBadge, toggleMenu, vis,
       opaInput, opaCommit, modeChange, act,
-      toggleClip, toggleRef,
+      toggleClip, toggleRef, toggleLock,
     };
   },
   template: `
@@ -342,6 +351,9 @@ const LayerRow = defineComponent({
       <span v-else class="layer-name" @click="onNameClick">{{ layer.name }}</span>
 
       <span v-if="layer.clippingMask" class="layer-clip-chip" title="已剪裁到下方第一颗非剪裁层">↘</span>
+      <span v-if="layer.lockAlpha" class="layer-lock-chip" title="锁定不透明度：笔只改已有像素的颜色">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </span>
       <span v-if="isRef" class="layer-ref-chip" title="参考层：魔棒 / 油漆桶读这一层">参</span>
 
       <button type="button" class="layer-tools-btn" title="图层菜单" @click="toggleMenu">⋯</button>
@@ -379,6 +391,12 @@ const LayerRow = defineComponent({
           @click="toggleClip">{{ layer.clippingMask ? '开' : '关' }}</button>
       </div>
       <div class="layer-slider-row">
+        <span>锁α</span>
+        <span class="layer-clip-hint">笔只改色不增删 alpha</span>
+        <button type="button" class="layer-clip-toggle" :aria-pressed="layer.lockAlpha ? 'true' : 'false'"
+          @click="toggleLock">{{ layer.lockAlpha ? '开' : '关' }}</button>
+      </div>
+      <div class="layer-slider-row">
         <span>参考</span>
         <span class="layer-clip-hint">魔棒 / 油漆桶读这层</span>
         <button type="button" class="layer-clip-toggle" :aria-pressed="isRef ? 'true' : 'false'"
@@ -407,7 +425,7 @@ const LayersPanel = defineComponent({
       for (let i = n - 1; i >= 0; i--) {
         const L = doc.layers[i];
         out.push({
-          layer: { id: L.id, name: L.name, visible: L.visible, opacity: L.opacity, mode: L.mode, clippingMask: L.clippingMask },
+          layer: { id: L.id, name: L.name, visible: L.visible, opacity: L.opacity, mode: L.mode, clippingMask: L.clippingMask, lockAlpha: L.lockAlpha },
           active: i === doc.activeIndex,
           isRef: doc.referenceLayerId === L.id,
           canUp: i < n - 1,

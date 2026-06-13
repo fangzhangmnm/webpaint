@@ -24,7 +24,8 @@ let lassoToolbarStack: any, lassoToolbarRow1: any, lassoToolbarRow2: any,
     lassoSubToolBar: any, lassoSelectionActions: any, lassoTransformCtrl: any,
     lassoSubBtns: any, lassoSetOpBtns: any, lassoTransformModeBtns: any,
     lassoThresholdInput: any, lassoThresholdVal: any, lassoMagicCfgBtn: any,
-    lassoMagicPopup: any, lassoConstrainBtn: any, lassoConstrainSep: any;
+    lassoMagicPopup: any, lassoConstrainBtn: any, lassoConstrainSep: any,
+    lassoSelEditBtn: any;   // v242 选区编辑齿轮（有选区才亮；扩张/收缩 op）
 
 // ===== 套索/选区工具栏（v65 重做）=====
 // 三个 section 按状态切换：subToolBar（lasso 激活）/ selectionActions（有选区且非 floating）/ transformCtrl（floating）
@@ -63,6 +64,11 @@ export function updateLassoToolbar() {
   lassoMagicCfgBtn.classList.toggle("hidden", sub !== "magic");
   // 子工具切走 → 关掉魔术棒 popup（油漆桶按工具栏没装；按 ⚙ 仅在 magic 下出）
   if (sub !== "magic") lassoMagicPopup.classList.add("hidden");
+  // v242 选区编辑齿轮：有选区 + lasso 模式 + 非 floating 才亮（扩张/收缩对任何来源的选区都能用）。
+  //   modal 开着时(_selEdit)恒亮——预览 shrink 到空会让 doc.selection=null，不能因此把 modal 撕掉。
+  const showSelEdit = !!_selEdit || (hasSelection && showRow1 && !otherToolSel);
+  lassoSelEditBtn.classList.toggle("hidden", !showSelEdit);
+  if (!showSelEdit) closeSelEditUI();   // 选区没了 / 切走 → 收起齿轮菜单（此时 _selEdit 必为 null）
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
   lassoConstrainBtn.classList.toggle("hidden", !showConstrain);
@@ -133,6 +139,107 @@ export function _syncEditModeUI() {
   updateLassoToolbar();             // 选区/变换工具栏跟着重新派生
 }
 
+// ===== v242 选区编辑 op：扩张 / 收缩（走 adjust transient + 实时预览）=====
+// 齿轮 → 菜单(扩张/收缩) → modal：数字输入，蚂蚁线随输入实时变；应用/取消。
+//   预览 = 直接改 doc.selection（不 push history）；应用 = push 一条 selectionChange(before→after)；
+//   取消 / ctrl-z / 切工具 = 还原 before。硬边（Selection.morphed），不羽化——羽化是以后的事。
+// 设计照搬 filters-adjust 的 transient 生命周期（enterTransient("adjust") + 统一 exit 同步点）。
+let _selEdit: any = null;   // { before, op:'expand'|'shrink', rafId } —— 仅 modal 开着时非 null
+
+function _selEditEls() {
+  return {
+    menu: document.getElementById("lassoSelEditMenu"),
+    popup: document.getElementById("lassoSelOpPopup"),
+    title: document.getElementById("lassoSelOpTitle"),
+    amount: document.getElementById("lassoSelOpAmount") as HTMLInputElement | null,
+  };
+}
+// 读数字输入：非负整数，0..100（形态学 O(area×r)，且白边修正用不到更大）
+function _selEditAmount(): number {
+  const { amount } = _selEditEls();
+  let v = parseInt((amount?.value || "0").replace(/[^0-9]/g, ""), 10);
+  if (!isFinite(v) || v < 0) v = 0;
+  if (v > 100) v = 100;
+  return v;
+}
+function _runSelEditPreview() {
+  const s = _selEdit;
+  if (!s) return;
+  const amt = _selEditAmount();
+  const signed = s.op === "expand" ? amt : -amt;
+  doc.selection = s.before.morphed(signed, doc.width, doc.height);
+  input.lasso.onChange?.();   // requestRender（重画蚂蚁线）+ wp:lassochange（派生工具栏，已对 _selEdit 免疫）
+}
+function _onSelEditInput() {
+  if (!_selEdit) return;
+  if (_selEdit.rafId) return;     // rAF coalesce：连打数字不堵队列（同 _onFilterChange）
+  _selEdit.rafId = requestAnimationFrame(() => {
+    if (!_selEdit) return;
+    _selEdit.rafId = 0;
+    _runSelEditPreview();
+  });
+}
+function _openSelEdit(op: "expand" | "shrink") {
+  if (!doc.selection) return;
+  const { menu, popup, title, amount } = _selEditEls();
+  menu?.classList.add("hidden");
+  if (_selEdit) _finishSelEdit(false);    // 已开着另一个 → 先取消旧的（还原）再开新的
+  _selEdit = { before: doc.selection, op, rafId: 0 };
+  if (title) title.textContent = op === "expand" ? "扩张选区" : "收缩选区";
+  if (amount) amount.value = "2";         // 默认 2px（白边场景常用量）
+  popup?.classList.remove("hidden");
+  _runSelEditPreview();                    // 初次预览
+  // adjust transient：apply=采纳预览，abort=还原。切工具/ctrl-z 都经此（onToolSwitch=apply）。
+  editMode.enterTransient("adjust", { apply: () => _finishSelEdit(true), abort: () => _finishSelEdit(false) });
+  amount?.focus();
+  (amount as any)?.select?.();
+}
+// 收尾同步点（所有关闭路径都过这里）：清 raf、出终值、藏 popup、退 transient、刷 UI。
+function _finishSelEdit(applied: boolean) {
+  const s = _selEdit;
+  if (!s) return;
+  if (s.rafId) { cancelAnimationFrame(s.rafId); s.rafId = 0; }
+  const { popup } = _selEditEls();
+  _selEdit = null;                          // 先清，防 exitTransient → updateLassoToolbar 重入
+  if (applied) {
+    const before = s.before, after = doc.selection;
+    if (after !== before && history) history.push({ type: "selectionChange", before, after });
+    setStatus(s.op === "expand" ? "选区已扩张" : "选区已收缩");
+  } else {
+    doc.selection = s.before;               // 还原
+  }
+  popup?.classList.add("hidden");
+  input.lasso.onChange?.();
+  updateLassoToolbar();
+  editMode.exitTransient();                 // 同步点：清 EditMode transient（同 _closeFilterPanel 尾）
+}
+// 收起齿轮菜单（updateLassoToolbar 在选区没了/切走时调；此时 _selEdit 必为 null，不碰 modal）
+function closeSelEditUI() {
+  _selEditEls().menu?.classList.add("hidden");
+}
+function initSelEditUI() {
+  const { menu, amount } = _selEditEls();
+  lassoSelEditBtn.addEventListener("click", (e: any) => {
+    e.stopPropagation();
+    if (_selEdit) return;                   // modal 开着时齿轮不响应
+    menu?.classList.toggle("hidden");
+  });
+  document.getElementById("lassoSelExpandBtn")?.addEventListener("click", () => _openSelEdit("expand"));
+  document.getElementById("lassoSelShrinkBtn")?.addEventListener("click", () => _openSelEdit("shrink"));
+  amount?.addEventListener("input", _onSelEditInput);
+  amount?.addEventListener("keydown", (e: any) => {
+    if (e.key === "Enter") { e.preventDefault(); _finishSelEdit(true); }
+  });
+  document.getElementById("lassoSelOpApply")?.addEventListener("click", () => _finishSelEdit(true));
+  document.getElementById("lassoSelOpCancel")?.addEventListener("click", () => _finishSelEdit(false));
+  // 点菜单外侧 → 关菜单（modal 自有 apply/cancel，不在此关）
+  document.addEventListener("pointerdown", (e: any) => {
+    if (!menu || menu.classList.contains("hidden")) return;
+    if (menu.contains(e.target) || lassoSelEditBtn.contains(e.target)) return;
+    menu.classList.add("hidden");
+  });
+}
+
 // Rack 工具 → 对应的 exclusive panel id
 export const RACK_PANEL_BY_TOOL: Record<string, any> = {
   brush: PANELS.RACK_BRUSH,
@@ -166,6 +273,7 @@ export function initToolbar(ctx) {
   lassoMagicPopup = document.getElementById("lassoMagicPopup");
   lassoConstrainBtn = document.getElementById("lassoConstrainBtn");
   lassoConstrainSep = document.querySelector(".lasso-constrain-sep");
+  lassoSelEditBtn = document.getElementById("lassoSelEditBtn");
 
   // sub-tool picker
   for (const b of lassoSubBtns) {
@@ -181,18 +289,7 @@ export function initToolbar(ctx) {
       updateLassoToolbar();
     });
   }
-  // magic threshold（容隙功能 v71→v79 撤掉，详 docs/lessons-magic-wand-gap-closing.md）
-  const lassoExpandInput = document.getElementById("lassoExpand") as any;
-  const lassoExpandVal = document.getElementById("lassoExpandVal");
-  if (lassoExpandInput) {
-    lassoExpandInput.value = String(input.lasso.getMagicExpand());
-    (lassoExpandVal as any).textContent = String(input.lasso.getMagicExpand());
-    lassoExpandInput.addEventListener("input", () => {
-      const v = parseInt(lassoExpandInput.value, 10) || 0;
-      input.lasso.setMagicExpand(v);
-      (lassoExpandVal as any).textContent = String(v);
-    });
-  }
+  // v242：扩展滑块从魔术棒拆走（改成选区编辑 op，见 initSelEditUI）。魔术棒只剩阈值。
   (lassoThresholdInput as any).addEventListener("input", () => {
     const v = parseInt((lassoThresholdInput as any).value, 10) || 0;
     input.lasso.setMagicThreshold(v);
@@ -216,6 +313,7 @@ export function initToolbar(ctx) {
     input.lasso.setConstrainSquare(!input.lasso.getConstrainSquare());
     updateLassoToolbar();
   });
+  initSelEditUI();   // v242 选区编辑（扩张/收缩）齿轮 + 菜单 + 实时预览 modal
 
   // 选区动作：变换。v217/218：没选区时让 lasso 用整层做隐式全选（fallbackFullLayer）。
   // selection 状态全归 lasso 管，toolbar 不直接动 doc.selection。

@@ -37,6 +37,8 @@ export class Layer {
     this.mode = "source-over";       // Canvas2D globalCompositeOperation
     this.clippingMask = false;       // true → 被剪裁到「下方第一颗非剪裁层」alpha；
                                      //         连续剪裁层链共用同一颗基底（Procreate）
+    this.lockAlpha = false;          // v242 锁定不透明度（preserve alpha）：true → 笔只改已有像素的颜色，
+                                     //         不增删 alpha（线稿重着色）。draw 时走 source-atop（见 brush.js）
     this.docW = width;
     this.docH = height;
     if (empty) {
@@ -429,6 +431,7 @@ export class PaintDoc {
         opacity: L.opacity,
         mode: L.mode,
         clippingMask: L.clippingMask,
+        lockAlpha: L.lockAlpha,
         snap: L.snapshot(),
       })),
     };
@@ -447,6 +450,7 @@ export class PaintDoc {
       L.opacity = s.opacity;
       L.mode = s.mode;
       L.clippingMask = s.clippingMask;
+      L.lockAlpha = !!s.lockAlpha;
       L.docW = snap.width;
       L.docH = snap.height;
       L.restoreFromSnapshot(s.snap);

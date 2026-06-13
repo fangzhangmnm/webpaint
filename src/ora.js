@@ -171,8 +171,9 @@ function buildStackXml(doc) {
       `opacity="${L.opacity.toFixed(4)}"`,
       `visibility="${L.visible ? "visible" : "hidden"}"`,
       `composite-op="${oraCompositeOp(L.mode || "source-over")}"`,
-      // 私有属性：clipping mask + reference layer 标记
+      // 私有属性：clipping mask + 锁定 alpha + reference layer 标记
       ...(L.clippingMask ? [`webpaint:clipping="true"`] : []),
+      ...(L.lockAlpha ? [`webpaint:lock-alpha="true"`] : []),
       ...(doc.referenceLayerId === L.id ? [`webpaint:reference="true"`] : []),
     ];
     layers.push(`    <layer ${attrs.join(" ")} />`);
@@ -294,6 +295,7 @@ function parseStackXml(xmlText) {
     visible: (n.getAttribute("visibility") || "visible") === "visible",
     mode: canvasModeFromOra(n.getAttribute("composite-op") || "svg:src-over"),
     clippingMask: n.getAttribute("webpaint:clipping") === "true",
+    lockAlpha: n.getAttribute("webpaint:lock-alpha") === "true",
     isReference: n.getAttribute("webpaint:reference") === "true",
   }));
   const wroteWith = image.getAttribute("webpaint:wrote-with") || null;
@@ -330,6 +332,7 @@ export async function decodeOraToDoc(blob) {
     layer.opacity = L.opacity;
     layer.mode = L.mode;
     layer.clippingMask = !!L.clippingMask;
+    layer.lockAlpha = !!L.lockAlpha;
     layer.bboxX = L.x;
     layer.bboxY = L.y;
     layer.bboxW = bitmap.width;

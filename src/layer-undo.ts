@@ -139,7 +139,7 @@ export function initLayerUndo(ctx) {
     refsLayer: (e, id) => e.layerId === id,
   });
   // setLayerProp：visibility / opacity / mode
-  const _LP_LABEL = { visible: "可见", opacity: "不透明度", mode: "混合", clippingMask: "剪裁" };
+  const _LP_LABEL = { visible: "可见", opacity: "不透明度", mode: "混合", clippingMask: "剪裁", lockAlpha: "锁定不透明度" };
   history.registerHandler("setLayerProp", {
     undo: (e) => {
       const L = doc.findLayer(e.layerId);

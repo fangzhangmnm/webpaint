@@ -1053,6 +1053,13 @@ input[type="range"].color-ramp::-moz-range-thumb {
   user-select: none;
 }
 .layer-clip-hint { color: var(--ink-soft); font-size: 11px; }
+.layer-lock-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
+  color: var(--accent, #4c8bf5);
+  margin-left: 4px;
+  user-select: none;
+}
 .layer-ref-chip {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px;

@@ -19,6 +19,40 @@ function makeBitmap(w, h) {
     : (() => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; })();
 }
 
+// 硬形态学（pixel-art 逻辑）：grid 上 8-连通 膨胀(grow)/腐蚀(!grow)，radius 轮。
+//   每轮「先收集再应用」(double-buffer) 保证恰好 radius 像素环，不在同轮内自传播。
+//   grid 外侧：膨胀时当「空」(continue)，腐蚀时当「非选区」(touch=把贴边的腐蚀掉)。
+//   ← 从 lasso.js _morphMask 搬来（v242：expand/shrink 改成选区编辑 op，不再 bake 进魔术棒）。
+function morphBinary(grid, w, h, radius, grow) {
+  if (radius <= 0) return;
+  for (let k = 0; k < radius; k++) {
+    const changes = [];
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        const p = row + x;
+        const isAcc = grid[p] === 1;
+        if (grow ? isAcc : !isAcc) continue;
+        let touch = false;
+        for (let dy = -1; dy <= 1 && !touch; dy++) {
+          const ny = y + dy;
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx;
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h) { if (!grow) { touch = true; break; } continue; }
+            const nAcc = grid[ny * w + nx] === 1;
+            if (grow ? nAcc : !nAcc) { touch = true; break; }
+          }
+        }
+        if (touch) changes.push(p);
+      }
+    }
+    if (!changes.length) break;
+    const val = grow ? 1 : 0;
+    for (let i = 0; i < changes.length; i++) grid[changes[i]] = val;
+  }
+}
+
 export class Selection {
   constructor(bboxX, bboxY, bboxW, bboxH, maskCanvas) {
     this.bboxX = bboxX; this.bboxY = bboxY;
@@ -93,6 +127,53 @@ export class Selection {
     ctx.drawImage(this.maskCanvas, this.bboxX, this.bboxY);
     ctx.globalCompositeOperation = "source-over";
     return new Selection(0, 0, docW, docH, canvas);
+  }
+
+  // 硬形态学 扩张(radius>0)/收缩(radius<0)：选区编辑 op。返回新 Selection（或 null=收没了）。
+  //   - 二值化阈值 128（与蚂蚁线 outline 的 >128 一致——选区"在不在"按半透明分界）。
+  //   - 8-连通（Chebyshev/方形增长），|radius| 轮，pixel-art 逻辑（硬边，不羽化）。
+  //   - 膨胀时 bbox 每边外扩 radius 并 clamp 到 doc；收缩沿用原 bbox。
+  //   白边场景：魔术棒停在线稿 AA 半透明处 → 对选区 expand 几 px 钻到线下 → 填色无白边。
+  morphed(radius, docW, docH) {
+    const r = Math.round(radius);
+    if (r === 0) return this;
+    if (this.bboxW <= 0 || this.bboxH <= 0) return this;
+    const grow = r > 0;
+    const a = Math.abs(r);
+    const pad = grow ? a : 0;
+    let nx0 = this.bboxX - pad, ny0 = this.bboxY - pad;
+    let nx1 = this.bboxX + this.bboxW + pad, ny1 = this.bboxY + this.bboxH + pad;
+    nx0 = Math.max(0, nx0); ny0 = Math.max(0, ny0);
+    nx1 = Math.min(docW, nx1); ny1 = Math.min(docH, ny1);
+    const nw = nx1 - nx0, nh = ny1 - ny0;
+    if (nw <= 0 || nh <= 0) return null;
+    // 旧 mask → 二值网格（放进新 bbox 的对应位置）
+    const srcCtx = this.maskCanvas.getContext("2d");
+    const srcData = srcCtx.getImageData(0, 0, this.bboxW, this.bboxH).data;
+    const grid = new Uint8Array(nw * nh);
+    for (let y = 0; y < this.bboxH; y++) {
+      for (let x = 0; x < this.bboxW; x++) {
+        if (srcData[(y * this.bboxW + x) * 4 + 3] >= 128) {
+          const gx = this.bboxX + x - nx0, gy = this.bboxY + y - ny0;
+          if (gx >= 0 && gx < nw && gy >= 0 && gy < nh) grid[gy * nw + gx] = 1;
+        }
+      }
+    }
+    morphBinary(grid, nw, nh, a, grow);
+    // 网格 → mask canvas（硬边 0/255）
+    const m = makeBitmap(nw, nh);
+    const mctx = m.getContext("2d");
+    const out = mctx.createImageData(nw, nh);
+    const od = out.data;
+    let any = false;
+    for (let i = 0; i < nw * nh; i++) {
+      const al = grid[i] ? 255 : 0;
+      if (al) any = true;
+      od[i * 4] = 255; od[i * 4 + 1] = 255; od[i * 4 + 2] = 255; od[i * 4 + 3] = al;
+    }
+    if (!any) return null;          // 收缩到空 = 没选区
+    mctx.putImageData(out, 0, 0);
+    return new Selection(nx0, ny0, nw, nh, m);
   }
 
   // ---- 行军蚁描边（懒算缓存）----

@@ -280,21 +280,29 @@ export class Board {
     }
     return this._overlayClipTmp;
   }
-  // 把笔刷 live overlay 按 doc.selection mask 裁一遍，让画中实时看到选区限制。
+  // 把笔刷 live overlay 按 选区 mask + 锁α layer alpha 裁，让画中实时看到限制范围。
   // 返回一个**新 overlay 描述**，canvas 指向裁过的临时 canvas；bbox 保持不变（局部坐标不变）。
-  // 落笔后 Selection.applyMaskPostStroke 会做最终持久化裁；这里只是 preview。
-  _clipOverlayToSelection(overlay, selection) {
+  // 落笔后 Selection.applyMaskPostStroke / source-atop 做最终持久化裁；这里只是 preview。
+  //   单 tmp 内多个 dst-in 顺序求交（先读原 overlay 一次，再叠 mask）——不会自绘清空。
+  _clipOverlayMasks(overlay, selection, lockLayer) {
     const tmp = this._getOverlayClipTmp(overlay.bboxW, overlay.bboxH);
     const tctx = tmp.getContext("2d");
     tctx.setTransform(1, 0, 0, 1, 0, 0);
     tctx.clearRect(0, 0, overlay.bboxW, overlay.bboxH);
     tctx.drawImage(overlay.canvas, 0, 0);
-    tctx.globalCompositeOperation = "destination-in";
-    tctx.drawImage(
-      selection.maskCanvas,
-      selection.bboxX - overlay.bboxX,
-      selection.bboxY - overlay.bboxY,
-    );
+    if (selection) {
+      tctx.globalCompositeOperation = "destination-in";
+      tctx.drawImage(selection.maskCanvas, selection.bboxX - overlay.bboxX, selection.bboxY - overlay.bboxY);
+    }
+    if (lockLayer) {
+      // 锁α：dst-in layer 现有像素的 alpha。空层（无像素）→ 清空（没有可着色的地方）。
+      if (lockLayer.bboxW > 0 && lockLayer.bboxH > 0) {
+        tctx.globalCompositeOperation = "destination-in";
+        tctx.drawImage(lockLayer.canvas, lockLayer.bboxX - overlay.bboxX, lockLayer.bboxY - overlay.bboxY);
+      } else {
+        tctx.clearRect(0, 0, overlay.bboxW, overlay.bboxH);
+      }
+    }
     tctx.globalCompositeOperation = "source-over";
     return { ...overlay, canvas: tmp };
   }
@@ -613,9 +621,10 @@ export class Board {
       const prevComp = ctx.globalCompositeOperation;
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.mode || "source-over";
-      // 笔刷 live overlay 也要 respect 选区：在画里实时看到限制范围
-      if (lOverlay && this.doc.selection) {
-        lOverlay = this._clipOverlayToSelection(lOverlay, this.doc.selection);
+      // 笔刷 live overlay 也要 respect 选区 + 锁定不透明度：画里实时看到限制范围
+      //   v242：锁α 时按 layer 现有 alpha 裁，预览与 pen-up 的 source-atop 一致（不再"先溢出后回缩"）
+      if (lOverlay && (this.doc.selection || layer.lockAlpha)) {
+        lOverlay = this._clipOverlayMasks(lOverlay, this.doc.selection, layer.lockAlpha ? layer : null);
       }
       const baseIdx = baseFor[i];
       if (baseIdx < 0) {

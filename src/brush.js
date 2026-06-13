@@ -436,9 +436,11 @@ export class BrushEngine {
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
     ctx.globalAlpha = Math.max(0, Math.min(1, st.settings.opacity ?? 1.0));   // Π 外 × opacity
+    // v242 锁定不透明度：source-atop = 只在已有 alpha 上画、保留目标 alpha（不增不删透明度）。
+    //   覆盖 per-brush blendMode（锁 alpha 时"在已有像素里改色"优先于混合模式；线稿重着色用）。橡皮不锁。
     ctx.globalCompositeOperation = st.mode === "erase"
       ? "destination-out"
-      : (st.settings.blendMode || "source-over");   // v163 per-brush 混合模式
+      : (layer.lockAlpha ? "source-atop" : (st.settings.blendMode || "source-over"));   // v163 per-brush 混合模式
     ctx.drawImage(composeCanvas, st.bufBboxX - layer.bboxX, st.bufBboxY - layer.bboxY);
     ctx.globalAlpha = prevA;
     ctx.globalCompositeOperation = prevC;
@@ -842,9 +844,12 @@ export class BrushEngine {
     const lx = x - layer.bboxX;
     const ly = y - layer.bboxY;
     const prevA = ctx.globalAlpha;
+    const prevC = ctx.globalCompositeOperation;
     ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));   // smudge 不走 buffer，opacity 这里乘
+    if (layer.lockAlpha) ctx.globalCompositeOperation = "source-atop";   // v242 锁定不透明度：只改色不增删 alpha
     ctx.drawImage(stamp.canvas, lx - drawR, ly - drawR, drawD, drawD);
     ctx.globalAlpha = prevA;
+    ctx.globalCompositeOperation = prevC;
   }
 
   _pixelStampDirect(x, y, size, stampAlpha) {
@@ -863,7 +868,8 @@ export class BrushEngine {
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
     ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));   // pixel 不走 buffer，opacity 这里乘
-    ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : "source-over";
+    // v242 锁定不透明度：非橡皮走 source-atop（只改已有像素颜色，不增删 alpha）
+    ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : (layer.lockAlpha ? "source-atop" : "source-over");
     ctx.fillStyle = st.mode === "erase" ? "#000" : (s.color || "#000");
     ctx.imageSmoothingEnabled = false;
     ctx.fillRect(ix, iy, intSize, intSize);
