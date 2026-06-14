@@ -5,11 +5,11 @@
 //   importImageAsLayer()    photobash / Ctrl+V 粘贴 / 桌面拖拽：图片叠为当前 doc 的新层（含自动 lift transform）
 // oraFileInput change-handler 按文件类型分流（.ora→session.adopt / image→As{NewDoc|Layer}）。
 // 大图（> 画布）走 _openBigImportSheet 询问 fit / 保原 / 自定义尺寸。
-// 与 app 经 ctx 绑核心单例（doc/board/input/...）；leaf 依赖直接 import（session/PaintDoc/resample/ora/els）。
+// 与 app 经 ctx 绑核心单例（doc/board/input/...）；leaf 依赖直接 import（session/resample/ora/els）。
+// 「导入照片(新建)」复用 session.newDoc 骨架（fillLayer0 画照片），不再自建 PaintDoc/做 doc 替换。
 
 import { els } from "./els.ts";
 import { session } from "./session-state.ts";
-import { PaintDoc } from "./doc.js";
 import { decodeImageFile, smartResample } from "./resample.js";
 import { decodeOraToDoc } from "./ora.js";
 import { store as _store } from "./app-store.js";
@@ -23,7 +23,7 @@ import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./
 // app 单例 / 跨模块函数（initImportImage(ctx) 装入）。
 let doc: any, board: any, input: any, editMode: any;
 let setStatus: any, updateSaveStatus: any;
-let applyCheckerboard: any, renderLayersPanel: any, setGalleryOpen: any, uniqueLocalName: any;
+let renderLayersPanel: any, setGalleryOpen: any, uniqueLocalName: any;
 
 // 图库「导入照片」会 set 此 flag=true，oraFileInput change 读后立即复位（语义：照片打底新 doc）。
 let _addImportAsNewDoc = false;
@@ -45,43 +45,27 @@ export async function importImageAsNewDoc(file: any) {
   const bitmap = await decodeImageFile(file);
   const w = Math.min(8192, bitmap.width);
   const h = Math.min(8192, bitmap.height);
-  if (_store.edits.localDirty()) await session.save();
-  const fresh = new PaintDoc({ width: w, height: h });
-  doc.layers = fresh.layers;
-  doc.activeIndex = 0;
-  doc.width = w; doc.height = h;
-  els.canvasSizeLabel.textContent = `${w}×${h}`;
-  // 把照片直接画到 base layer 全图（覆盖 bbox 到整 doc）
-  const layer = doc.layers[0];
-  layer.name = file.name.replace(/\.[^.]+$/, "") || "图像";
-  layer.bboxX = 0; layer.bboxY = 0;
-  layer.bboxW = w; layer.bboxH = h;
-  const c = (typeof OffscreenCanvas !== "undefined")
-    ? new OffscreenCanvas(w, h)
-    : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
-  layer.canvas = c;
-  layer.ctx = c.getContext("2d", { willReadFrequently: false });
-  layer.ctx.imageSmoothingEnabled = true;
-  layer.ctx.imageSmoothingQuality = "high";
-  // 超 8192 缩小走 step-halving 抗锯齿；否则原样画
-  const src = (w < bitmap.width || h < bitmap.height) ? smartResample(bitmap, w, h) : bitmap;
-  layer.ctx.drawImage(src, 0, 0, w, h);
-  bitmap.close?.();
-  applyCheckerboard(false);    // v125: 导入新作品默认关棋盘
   const stem = file.name.replace(/\.[^.]+$/, "") || "导入";
   const name = await uniqueLocalName(stem);
-  session.setName(name);
-  input.clearHistory();
-  board.invalidateAll();
-  board.fitToScreen();
-  renderLayersPanel();
-  _store.edits.mark();
-  session.resetSavedAt();
-  updateSaveStatus();
-  await session.save();
-  // v133 revert checkpoint
-  session.markOpenedNow();
-  session.writeCheckpoint(name).catch((e: any) => console.warn("[revert] photo-import checkpoint:", e));
+  // 共用 session.newDoc 骨架（消 survey rec #4 孪生）：照片绘制 = fillLayer0；doc 替换/全部重置/
+  // 落盘/checkpoint 归 session。照片导入因此与空白新建完全对齐（清 selection/参考窗 + color 归黑 +
+  // 加密归明文 + 关图库）——human 定：之前不重置这些反而是小 bug。
+  await session.newDoc({ name, w, h, fillLayer0: (layer: any) => {
+    layer.name = file.name.replace(/\.[^.]+$/, "") || "图像";
+    layer.bboxX = 0; layer.bboxY = 0;
+    layer.bboxW = w; layer.bboxH = h;
+    const c = (typeof OffscreenCanvas !== "undefined")
+      ? new OffscreenCanvas(w, h)
+      : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
+    layer.canvas = c;
+    layer.ctx = c.getContext("2d", { willReadFrequently: false });
+    layer.ctx.imageSmoothingEnabled = true;
+    layer.ctx.imageSmoothingQuality = "high";
+    // 超 8192 缩小走 step-halving 抗锯齿；否则原样画
+    const src = (w < bitmap.width || h < bitmap.height) ? smartResample(bitmap, w, h) : bitmap;
+    layer.ctx.drawImage(src, 0, 0, w, h);
+    bitmap.close?.();
+  } });
   setStatus(`新建（照片）：${name}（${w}×${h}）`);
 }
 
@@ -226,7 +210,6 @@ export function initImportImage(ctx: any) {
   editMode = ctx.editMode;
   setStatus = ctx.setStatus;
   updateSaveStatus = ctx.updateSaveStatus;
-  applyCheckerboard = ctx.applyCheckerboard;
   renderLayersPanel = ctx.renderLayersPanel;
   setGalleryOpen = ctx.setGalleryOpen;
   uniqueLocalName = ctx.uniqueLocalName;

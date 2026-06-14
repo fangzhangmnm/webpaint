@@ -495,7 +495,10 @@ async function exitCanvasToGallery() {
 
 // ---- newDoc（从 newDocConfirm handler 的 doc-replacing 部分 verbatim 搬）----
 // 尺寸/名字由 caller（app 的 newDoc sheet）算好后传入；session 负责 doc 替换 + 落盘 + 切指针。
-async function newDoc({ name, w, h }: any) {
+// fillLayer0(layer)：可选，新 doc 建好后、渲染/fit/落盘前调，往 base layer 画内容（导入照片用）。
+// 缺省 = 空白新建。照片导入经此共用骨架（消 survey rec #4 孪生），故同享全部重置（selection/参考窗/
+// color 归黑/加密归明文/关图库）——human 定「导入照片完全对齐空白新建」。
+async function newDoc({ name, w, h, fillLayer0 }: any) {
   if (_store.edits.localDirty()) await saveNow();
   const fresh = new PaintDoc({ width: w, height: h });
   doc.layers = fresh.layers;
@@ -504,6 +507,7 @@ async function newDoc({ name, w, h }: any) {
   doc.selection = null;
   doc.referenceLayerId = null;
   els.canvasSizeLabel.textContent = `${w}×${h}`;
+  if (fillLayer0) fillLayer0(doc.layers[0]);
   _activeSessionName = name;
   setCurrentSessionName(name);
   _recomputePhase();
