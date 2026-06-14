@@ -261,14 +261,56 @@ export async function renderDocToImageBlob(doc, mime = "image/png", quality, sco
   const layers = scope === "active"
     ? (doc.activeLayer ? [doc.activeLayer] : [])
     : doc.layers;
-  for (const L of layers) {
-    if (!L.visible) continue;
-    if (L.bboxW <= 0 || L.bboxH <= 0) continue;
+  // v258：导出合成 respect 剪裁蒙版（对齐屏幕渲染 board.js）。
+  //   剪裁基底解析同 doc.computeClipBaseFor：剪裁层往下找最近的「非剪裁、可见、非空」层当基底，
+  //   连续剪裁链共用同一基底，无基底则当普通层。基底必须可见且非空。
+  //   合成时剪裁层先 dst-in 裁到其基底 canvas 的 alpha（只在基底不透明处可见），再按 mode×opacity 叠。
+  //   scope==="active" 单层导出：列表里没有基底 → 剪裁层当普通层画（最简单语义）。
+  const drawNormal = (L) => {
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
     ctx.globalAlpha = L.opacity;
     ctx.globalCompositeOperation = L.mode || "source-over";
     ctx.drawImage(L.canvas, L.bboxX, L.bboxY);
+    ctx.globalAlpha = prevA;
+    ctx.globalCompositeOperation = prevC;
+  };
+  // 解析每个 layer 的剪裁基底（-1 = 无基底，按普通层画）。仅在多层 scope 下生效。
+  const clipBase = new Array(layers.length).fill(-1);
+  if (scope !== "active") {
+    let currentBase = -1;
+    for (let i = 0; i < layers.length; i++) {
+      const L = layers[i];
+      const nonEmptyVisible = L.visible && L.bboxW > 0 && L.bboxH > 0;
+      if (L.clippingMask && currentBase >= 0) {
+        clipBase[i] = currentBase;
+      } else {
+        clipBase[i] = -1;
+        if (!L.clippingMask && nonEmptyVisible) currentBase = i;
+      }
+    }
+  }
+  for (let i = 0; i < layers.length; i++) {
+    const L = layers[i];
+    if (!L.visible) continue;
+    if (L.bboxW <= 0 || L.bboxH <= 0) continue;
+    const baseIdx = clipBase[i];
+    if (baseIdx < 0) { drawNormal(L); continue; }
+    // 剪裁层：在离屏上画 L → dst-in 基底 alpha → 把结果按 L.mode×opacity 叠到输出。
+    const base = layers[baseIdx];
+    const off = document.createElement("canvas");
+    off.width = doc.width;
+    off.height = doc.height;
+    const octx = off.getContext("2d");
+    octx.drawImage(L.canvas, L.bboxX, L.bboxY);
+    octx.globalCompositeOperation = "destination-in";
+    octx.drawImage(base.canvas, base.bboxX, base.bboxY);
+    octx.globalCompositeOperation = "source-over";
+    const prevA = ctx.globalAlpha;
+    const prevC = ctx.globalCompositeOperation;
+    ctx.globalAlpha = L.opacity;
+    ctx.globalCompositeOperation = L.mode || "source-over";
+    ctx.drawImage(off, 0, 0);
     ctx.globalAlpha = prevA;
     ctx.globalCompositeOperation = prevC;
   }

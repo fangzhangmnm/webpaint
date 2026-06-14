@@ -29,7 +29,8 @@ import { getOrFetchCloudThumb } from "../cloud-thumb-cache.js";
 import { ENC_PEEK_MIME } from "../crypto-format.js";
 import { isUnlocked, onLockChange, setPassword } from "../crypto-state.js";
 import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword, ensureUnlocked } from "../enc-thumbs.js";
-import { sliceFolder, folderHasContents } from "../gallery-model.js";
+import { sliceFolder, folderHasContents, copyTargetName } from "../gallery-model.js";
+import { cloud } from "../app-store.js";
 import { pathFolder, pathBasename, pathJoin } from "../gallery-path.js";
 import { stripSessionExt } from "../config.js";
 import { tileFor, breadcrumb, trashTileFor, humanTime, humanSize } from "./gallery-view-model.ts";
@@ -275,6 +276,45 @@ function makeGallery(host: GalleryHost) {
         await reload();
       }
 
+      // 复制项目：源字节 → 新名（同文件夹「<名> 副本」自动去重）。app 层组合 _store.flow.saveAs，
+      //   不碰红线 store 内部。源字节走**原始字节**（loadRaw / cloud.pull）原样搬运：
+      //   · 加密源 → 拷贝的是同一个加密容器（saveAs→_doPush→_seal 见 plain 已是容器即透传，**无需密码**）；
+      //   · 纯云端源（无本地副本）→ cloud.pull 拉原始容器字节（同样原样，不解壳）；
+      //   · 明文源 → 明文拷贝。新名是全新身份 → _seal 里 local.get(newName)=null → 当明文文件透传。
+      async function copy(item: any) {
+        openMenu.value = null;
+        const isCloud = !!item.cloud;
+        const cloudOn = host.signedIn() && host.online();
+        await host.busy(`正在复制 ${pathBasename(item.name)}…`, async () => {
+          try {
+            // 取源原始字节：有本地副本 → loadRaw（离线可用、不弹密码）；纯云端 → 拉云端原始容器。
+            let bytes: Blob | null = null;
+            if (item.local) {
+              bytes = await _store.loadRaw(item.name);
+            } else if (isCloud) {
+              if (!cloudOn) { host.status("纯云端作品复制需先登录并联网", true); return; }
+              const r = await cloud.pull(item.name);
+              bytes = r ? r.blob : null;
+            }
+            if (!bytes) { host.status("找不到源作品的字节，复制失败", true); return; }
+            // 目标名：同文件夹下「<名> 副本」「<名> 副本2」…取首个本地⊕云端都不占用的。
+            const localNames = new Set((await listSessions()).map((s: any) => s.name));
+            let cloudNames = new Set<string>();
+            if (cloudOn) {
+              try { cloudNames = new Set((await listCloudSessionsRecursive()).map((c: any) => stripSessionExt(c.path))); }
+              catch (e) { console.warn("[gallery] copy cloud names:", e); }
+            }
+            const newName = copyTargetName(item.name, (n: string) => localNames.has(n) || cloudNames.has(n));
+            // 写新身份：本地存 + 云端 push（云端 best-effort，离线/失败标未推送，下次 Ctrl+S 续）。
+            const res = await _store.flow.saveAs(newName, { encode: () => bytes, cloud: cloudOn });
+            if (!cloudOn) host.status(`已复制为：${pathBasename(newName)}（仅本地）`);
+            else if (res.cloudDeferred) host.status(`已复制为：${pathBasename(newName)}（本地完成；云端稍后推）`);
+            else host.status(`已复制为：${pathBasename(newName)}`);
+          } catch (e: any) { host.status(`复制失败：${e?.message || e}`, true); }
+        });
+        await reload();
+      }
+
       async function push(item: any) { openMenu.value = null; await session.push(item); await reload(); }
       async function unload(item: any) { openMenu.value = null; await session.unload(item); await reload(); }
 
@@ -416,7 +456,7 @@ function makeGallery(host: GalleryHost) {
         view, folder, loading, openMenu, isEmpty, emptyText,
         folderTiles, fileTiles, trashTiles, crumbs,
         badgeIcon, fmtMeta, ICON, toggleMenu, setFolder, enterFolder,
-        openTile, rename, move, push, unload, del, folderDelete, trashRestore, trashPurge, emptyTrash,
+        openTile, rename, move, copy, push, unload, del, folderDelete, trashRestore, trashPurge, emptyTrash,
         encryptItem, decryptItem, onUnlock,
         reload, setView: (v: "files" | "trash") => { view.value = v; reload(); },
       };
@@ -465,6 +505,7 @@ function makeGallery(host: GalleryHost) {
               <template v-else>
                 <button type="button" @click="rename(row.item)">重命名</button>
                 <button type="button" @click="move(row.item)">移动到…</button>
+                <button type="button" @click="copy(row.item)">复制</button>
                 <button v-if="row.t.badge==='cloudOnly'" type="button" @click="openTile(row.item)">拉取到本地</button>
                 <button v-if="row.t.badge==='localOnly'" type="button" @click="push(row.item)">推送到云端</button>
                 <button v-if="row.t.badge==='dirtyBoth'" type="button" @click="push(row.item)">推送到云端</button>

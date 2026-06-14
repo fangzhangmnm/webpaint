@@ -69,7 +69,7 @@ export function initLayerUndo(ctx) {
     },
     refsLayer: (e, id) => e.layerSpec.id === id,
   });
-  // v124b mergeDown：undo 还原 under 像素 + opacity/mode，再 insert active 回 activeIndex；redo 应用 underAfter + 删 active
+  // v124b mergeDown：undo 还原 under 像素 + opacity/mode（+ v258 clippingMask），再 insert active 回 activeIndex；redo 应用 underAfter + 删 active
   history.registerHandler("mergeDown", {
     undo: async (e) => {
       const under = doc.findLayer(e.underId);
@@ -77,6 +77,7 @@ export function initLayerUndo(ctx) {
         applyPixelSnap(doc, e.underId, e.underBefore, e.underBefore.blob, board);
         under.opacity = e.underBeforeOpacity;
         under.mode = e.underBeforeMode;
+        if (typeof e.underBeforeClipping === "boolean") under.clippingMask = e.underBeforeClipping;
       }
       // 把 active 插回原 index
       const spec = e.activeSpec;
@@ -98,6 +99,7 @@ export function initLayerUndo(ctx) {
         applyPixelSnap(doc, e.underId, e.underAfter, e.underAfter.blob, board);
         under.opacity = 1;
         under.mode = "source-over";
+        under.clippingMask = !!e.resultClipping;   // 链内合并结果仍剪裁；基底合并结果转普通层
       }
       doc.removeLayer(e.activeSpec.id);
       doc.setActiveById(e.underId);

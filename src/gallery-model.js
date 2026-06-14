@@ -88,6 +88,24 @@ export function classifyCloudGone(localNames, cloudNameSet, { hasEtag, isDirty, 
   return { drop, ghost };
 }
 
+// 复制项目的目标名（纯）：源全路径 → 同文件夹下「<basename> 副本」/「<basename> 副本2」…首个不撞的。
+//   sourceName = 源 item 的完整 name（含文件夹前缀，如 "插画/猫"）；taken(name) = 该全路径名是否已被占用
+//   （本地⊕云端的并集，调用方传入；同步谓词，无网络）。副本保持在源同一文件夹（path 前缀不变）。
+//   后缀策略：第一份不带数字（"猫 副本"），之后递增（"猫 副本2"、"猫 副本3"…）；护栏上限防 taken 恒 true 死循环。
+export function copyTargetName(sourceName, taken) {
+  const slash = sourceName.lastIndexOf("/");
+  const folder = slash < 0 ? "" : sourceName.slice(0, slash);
+  const base = slash < 0 ? sourceName : sourceName.slice(slash + 1);
+  const join = (stem) => (folder ? `${folder}/${stem}` : stem);
+  let candidate = join(`${base} 副本`);
+  if (!taken(candidate)) return candidate;
+  for (let i = 2; i < 1000; i++) {
+    candidate = join(`${base} 副本${i}`);
+    if (!taken(candidate)) return candidate;
+  }
+  return join(`${base} 副本${Date.now()}`);
+}
+
 // 文件夹是否有内容（item 或子夹以它为 prefix）—— 非空时禁删，避免级联删整棵子树。
 export function folderHasContents(allItems, cloudFolders, folderPath) {
   const fullPrefix = `${folderPath}/`;

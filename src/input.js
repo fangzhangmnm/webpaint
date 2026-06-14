@@ -430,7 +430,7 @@ export class InputController {
     // 单指长按 → picker（如开启）。pen 不参与；hand 工具下也不触发；
     // 第二根手指进来时 gesture 路径会清掉 timer
     const wantLongPress = e.pointerType === "touch" && tool !== "hand" &&
-      (role === "draw" || role === "erase" || role === "pan") &&
+      (role === "draw" || role === "erase" || role === "pan" || role === "hold") &&
       this.getLongPressPickEnabled();
     if (wantLongPress) {
       rec.longPressTimer = setTimeout(() => {
@@ -925,19 +925,15 @@ export class InputController {
     this.gestureStart = null;
     delete document.body.dataset.panning;
     // 松手时旋转吸附（±5° 内吸到 0/90/180/270°；进行中不吸=不粘手）。判定见 pointer-gesture.js。
-    const snapped = snapRotation(this.board.viewport.rot, 5);
+    const cur = this.board.viewport.rot;
+    const snapped = snapRotation(cur, 5);
     if (snapped !== null) {
-      // 以画布中心为锚，保持画面中心稳定地吸到正角度
-      const W = this.board.doc.width, H = this.board.doc.height;
-      const vp = this.board.viewport;
-      const cxScreen = vp.tx + W * vp.scale / 2;
-      const cyScreen = vp.ty + H * vp.scale / 2;
-      this.board.setViewport(
-        cxScreen - W * vp.scale / 2,
-        cyScreen - H * vp.scale / 2,
-        vp.scale,
-        snapped,
-      );
+      // pivot 用**屏幕中心**而非 doc 原点：旧实现 tx/ty 不变只改 rot = 绕 doc 原点转，
+      // 放大很多时 5° 吸附会把可见内容平移一大段（"弹一下"）。rotateAt 绕 screen anchor 转、
+      // 自动补 tx/ty，屏幕中心点保持不动，吸附只是把画面摆正、不平移。
+      const w = this.board.canvas.clientWidth || window.innerWidth;
+      const h = this.board.canvas.clientHeight || window.innerHeight;
+      this.board.rotateAt(w / 2, h / 2, snapped - cur);
     }
   }
 

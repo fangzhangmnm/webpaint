@@ -283,27 +283,66 @@ export class PaintDoc {
   // v124b 向下合并（mode-aware）：用 active 的 mode×opacity 把 active 烤进下方层、删 active。
   // **视觉等价**：合并前后画面相同（active.mode×active.opacity 已烤进像素 → under 归一化 source-over/α=1）。
   // 纯模型操作（无 DOM / 无 history / 无 status）：成功返回 undo 所需数据，caller 负责入栈+刷新+压缩。
-  //   成功 → { ok:true, underId, underBefore, underAfter, underBeforeOpacity, underBeforeMode, activeSpec, activeIndex }
-  //   不可合并 → { ok:false, reason }；reason ∈ bottom | clipping-active | clipping-under | empty-active
+  //   成功 → { ok:true, underId, underBefore, underBeforeOpacity, underBeforeMode,
+  //            underBeforeClipping, underAfter, activeSpec, activeIndex }
+  //   不可合并 → { ok:false, reason }；reason ∈ bottom | clipping-under | empty-active
   //   （empty-active = active 无像素，caller 应改走「删 active」；语义不同，不在此处删）
+  //
+  // 剪裁层向下合并语义（Procreate 兼容，v258 起支持）：
+  //   - active 是剪裁层（clippingMask=true），under 是它的剪裁基底（非剪裁层）：
+  //       active 像素先 **dst-in 裁到 under 的 alpha**（剪裁层只在基底不透明处可见），
+  //       再按 active.mode×opacity 烤进 under。结果 under 保持非剪裁，视觉与合并前一致。
+  //   - 剪裁链边界（active 与 under 都 clippingMask=true，共用同一基底）：合并后结果保持
+  //       clippingMask=true（仍剪到同一基底），不在此处对基底再裁（那是渲染时的事）。
+  //   - 反向（under 是剪裁层、active 普通）= "clipping-under"：语义不清，拒绝并给中文提示。
   mergeDownLayer(L) {
     if (!L) return { ok: false, reason: "bottom" };
     const idx = this.layers.findIndex((l) => l.id === L.id);
     if (idx <= 0) return { ok: false, reason: "bottom" };
-    if (L.clippingMask) return { ok: false, reason: "clipping-active" };
     const under = this.layers[idx - 1];
-    if (under.clippingMask) return { ok: false, reason: "clipping-under" };
+    // under 是剪裁层而 active 不是 → 语义不清（active 会被 under 的基底裁掉一半）：拒绝。
+    if (under.clippingMask && !L.clippingMask) return { ok: false, reason: "clipping-under" };
 
     const aHasPx = L.bboxW > 0 && L.bboxH > 0;
     const uHasPx = under.bboxW > 0 && under.bboxH > 0;
     if (!aHasPx) return { ok: false, reason: "empty-active" };
 
-    // 合并后 bbox = active ∪ under
+    // active 是剪裁层、under 是它的基底（under 非剪裁）→ 合并时把 active dst-in 裁到 under alpha。
+    // active 与 under 都剪裁（剪裁链内部）→ 不裁（两者共用更下方的同一基底），合并后仍剪裁。
+    const clipActiveToUnder = L.clippingMask && !under.clippingMask;
+    // 合并结果是否仍是剪裁层：仅当 active 与 under 都剪裁（链内合并，仍剪到同一基底）。
+    const resultClipping = L.clippingMask && under.clippingMask;
+
+    // 合并后 bbox = active ∪ under。注意：active 裁到 under alpha 后实际可见区 ⊆ under，
+    // 但 bbox 取并集是安全的上界（多出来的边角是透明像素，不影响视觉，bbox trim 是 P2）。
     const x0 = uHasPx ? Math.min(under.bboxX, L.bboxX) : L.bboxX;
     const y0 = uHasPx ? Math.min(under.bboxY, L.bboxY) : L.bboxY;
     const x1 = uHasPx ? Math.max(under.bboxX + under.bboxW, L.bboxX + L.bboxW) : L.bboxX + L.bboxW;
     const y1 = uHasPx ? Math.max(under.bboxY + under.bboxH, L.bboxY + L.bboxH) : L.bboxY + L.bboxH;
     const newW = x1 - x0, newH = y1 - y0;
+
+    // active 的「待烤层」：剪裁基底 case 先把 active dst-in 裁到 under 的 alpha。
+    // 用一张和合并 bbox 同尺寸的离屏：画 active → dst-in under（只留 under 不透明处的 active 像素）。
+    let activeSrcCanvas = L.canvas;
+    let activeSrcX = L.bboxX - x0;     // active 在 srcCanvas 上对应 tmp 的偏移
+    let activeSrcY = L.bboxY - y0;
+    if (clipActiveToUnder) {
+      const clipTmp = makeBitmap(newW, newH);
+      const cctx = clipTmp.getContext("2d");
+      cctx.drawImage(L.canvas, L.bboxX - x0, L.bboxY - y0);
+      if (uHasPx) {
+        cctx.globalCompositeOperation = "destination-in";
+        cctx.drawImage(under.canvas, under.bboxX - x0, under.bboxY - y0);
+        cctx.globalCompositeOperation = "source-over";
+      } else {
+        // under 无像素（空基底）→ 整层裁没（dst-in 到全透明），剪裁层不可见。清空。
+        cctx.clearRect(0, 0, newW, newH);
+      }
+      activeSrcCanvas = clipTmp;
+      activeSrcX = 0;
+      activeSrcY = 0;
+    }
+
     // 离屏：under (source-over) → active (active.mode × active.opacity)
     const tmp = makeBitmap(newW, newH);
     const tctx = tmp.getContext("2d");
@@ -314,7 +353,7 @@ export class PaintDoc {
     }
     tctx.globalAlpha = L.opacity;
     tctx.globalCompositeOperation = L.mode || "source-over";
-    tctx.drawImage(L.canvas, L.bboxX - x0, L.bboxY - y0);
+    tctx.drawImage(activeSrcCanvas, activeSrcX, activeSrcY);
     tctx.globalAlpha = 1;
     tctx.globalCompositeOperation = "source-over";
 
@@ -322,20 +361,24 @@ export class PaintDoc {
     const underBefore = under.snapshot();
     const underBeforeOpacity = under.opacity;
     const underBeforeMode = under.mode;
+    const underBeforeClipping = under.clippingMask;
     const activeSpec = this.layerSpec(L);
+    activeSpec.clippingMask = L.clippingMask;   // redo 还原 active 的剪裁标志
     // 替换 under 画布 + 归一化（active.mode×active.opacity 已烤进 tmp）
     under.canvas = tmp;
     under.ctx = tmp.getContext("2d", { willReadFrequently: false });
     under.bboxX = x0; under.bboxY = y0; under.bboxW = newW; under.bboxH = newH;
     under.opacity = 1;
     under.mode = "source-over";
+    // 链内合并：结果仍剪裁到同一基底；基底 case：结果是普通基底层（非剪裁）。
+    under.clippingMask = resultClipping;
     this.removeLayer(L.id);
     const underAfter = under.snapshot();
     this.setActiveById(under.id);
     return {
       ok: true, underId: under.id,
-      underBefore, underAfter, underBeforeOpacity, underBeforeMode,
-      activeSpec, activeIndex: idx,
+      underBefore, underAfter, underBeforeOpacity, underBeforeMode, underBeforeClipping,
+      resultClipping, activeSpec, activeIndex: idx,
     };
   }
 
@@ -355,6 +398,8 @@ export class PaintDoc {
     if (typeof spec.visible === "boolean") L.visible = spec.visible;
     if (typeof spec.opacity === "number") L.opacity = spec.opacity;
     if (typeof spec.mode === "string") L.mode = spec.mode;
+    if (typeof spec.clippingMask === "boolean") L.clippingMask = spec.clippingMask;
+    if (typeof spec.lockAlpha === "boolean") L.lockAlpha = spec.lockAlpha;
     L.restoreFromSnapshot({
       bboxX: spec.bboxX | 0, bboxY: spec.bboxY | 0,
       bboxW: spec.bboxW | 0, bboxH: spec.bboxH | 0,
@@ -529,6 +574,45 @@ export class PaintDoc {
     if (this.selection) {
       this.selection = this.selection.flippedHorizontal(W);
     }
+  }
+
+  // v258: 逆时针旋转整个 doc 90°（所有 layer + selection）。doc 尺寸 W↔H 互换。
+  // 坐标变换（CCW 90°，已用角点验证方向）：旧 doc 点 (x,y) → 新 doc 点 (y, W-x)，W=旧宽。
+  //   验证：旧左上 (0,0)→(0,W)=新左下；旧右上 (W,0)→(0,0)=新左上 → 确为逆时针。
+  // 每层 bbox：newX=bboxY, newY=W-(bboxX+bboxW), newW=bboxH, newH=bboxW。
+  // 每层 canvas：旧 (bboxW×bboxH) → 新 (bboxH×bboxW)。局部旋转：旧局部 (lx,ly)→新局部 (ly, bboxW-lx)。
+  //   仿射矩阵 setTransform(a,b,c,d,e,f) 把 (x,y)→(a·x+c·y+e, b·x+d·y+f)。
+  //   要 newX=ly, newY=bboxW-lx → (a,b,c,d,e,f)=(0,-1,1,0,0,bboxW)。
+  //   （注意 e=0,f=bboxW；写成 (…,bboxW,0) 会把内容平移出界——这是常见照抄错。）
+  rotate90CCW() {
+    const W = this.width;
+    const H = this.height;
+    for (const L of this.layers) {
+      L.docW = H;        // 新 doc 宽 = 旧高
+      L.docH = W;        // 新 doc 高 = 旧宽
+      if (L.bboxW > 0 && L.bboxH > 0) {
+        const oldBX = L.bboxX, oldBY = L.bboxY, oldBW = L.bboxW, oldBH = L.bboxH;
+        const nc = makeBitmap(oldBH, oldBW);   // 新 canvas = (bboxH × bboxW)
+        const nctx = nc.getContext("2d", { willReadFrequently: false });
+        nctx.imageSmoothingEnabled = false;     // 保像素锐利
+        nctx.setTransform(0, -1, 1, 0, 0, oldBW);
+        nctx.drawImage(L.canvas, 0, 0);
+        nctx.setTransform(1, 0, 0, 1, 0, 0);    // 还原，后续 brush 直接画不带旋转
+        nctx.imageSmoothingEnabled = true;
+        nctx.imageSmoothingQuality = "low";
+        L.canvas = nc;
+        L.ctx = nctx;
+        L.bboxX = oldBY;
+        L.bboxY = W - (oldBX + oldBW);
+        L.bboxW = oldBH;
+        L.bboxH = oldBW;
+      }
+    }
+    if (this.selection) {
+      this.selection = this.selection.rotated90CCW(W, H);
+    }
+    this.width = H;
+    this.height = W;
   }
 
   // v110: 重采样 doc 到 newW × newH。mode: "nearest" | "bilinear" | "bicubic"

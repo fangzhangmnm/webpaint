@@ -113,8 +113,7 @@ function _clearLayerPixels(L: any) {
 // 包成 mergeDown undo entry + 异步压缩快照 + 刷新。
 const _MERGE_DOWN_STATUS: Record<string, string> = {
   bottom: "已经是最底层，没法向下合",
-  "clipping-active": "剪裁层不支持向下合并（先取消剪裁）",
-  "clipping-under": "下方是剪裁层不支持合并",
+  "clipping-under": "下方是剪裁层，不能合到它上面（先取消下方的剪裁）",
 };
 function _mergeDownLayer(L: any) {
   if (!L) return;
@@ -129,6 +128,7 @@ function _mergeDownLayer(L: any) {
     underId: r.underId,
     underBefore: r.underBefore, underAfter: r.underAfter,
     underBeforeOpacity: r.underBeforeOpacity, underBeforeMode: r.underBeforeMode,
+    underBeforeClipping: r.underBeforeClipping, resultClipping: r.resultClipping,
     activeSpec: r.activeSpec, activeIndex: r.activeIndex,
   });
   compressPixelSnap(r.underBefore, (blob: any) => { r.underBefore.blob = blob; });
@@ -431,7 +431,8 @@ const LayersPanel = defineComponent({
           canUp: i < n - 1,
           canDown: i > 0,
           canDel: n > 1,
-          canMergeDown: i > 0 && !L.clippingMask && !doc.layers[i - 1].clippingMask,
+          // v258：剪裁层可向下合并（裁到基底）。唯一禁止：下方是剪裁层而本层不是（语义不清）。
+          canMergeDown: i > 0 && !(doc.layers[i - 1].clippingMask && !L.clippingMask),
           hasPx: L.bboxW > 0 && L.bboxH > 0,
         });
       }

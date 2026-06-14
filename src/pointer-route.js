@@ -31,6 +31,6 @@ export function assignRole({ tool, pointerType, button, buttons, spaceDown, altD
   const et = effectiveTool(tool, altDown);
   if (pointerType === "mouse") return button === 0 ? toolToRole(et) : "pan";          // 中/右键 = pan
   if (pointerType === "pen")   return (button === 2 || (buttons & 2)) ? "erase" : toolToRole(et);  // 副按钮强制橡皮
-  if (pointerType === "touch") return penEverSeen ? "pan" : toolToRole(et);           // 见过 pen 的设备：手指只 pan
+  if (pointerType === "touch") return penEverSeen ? "hold" : toolToRole(et);          // 见过 pen 的设备：单指不拖画布（=hold，空操作），双指才 pan/zoom/rotate
   return null;
 }

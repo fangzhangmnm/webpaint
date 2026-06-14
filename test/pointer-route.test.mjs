@@ -42,8 +42,8 @@ describe("pointer-route · assignRole", () => {
     eq(role({ pointerType: "pen", tool: "picker", button: 0, buttons: 1 }), "pick");
   });
 
-  it("touch：见过 pen 的设备只 pan；没见过 = toolToRole", () => {
-    eq(role({ pointerType: "touch", penEverSeen: true }), "pan");
+  it("touch：见过 pen 的设备单指=hold（不拖画布，双指才 pan）；没见过 = toolToRole", () => {
+    eq(role({ pointerType: "touch", penEverSeen: true }), "hold");
     eq(role({ pointerType: "touch", penEverSeen: false, tool: "lasso" }), "lasso");
     eq(role({ pointerType: "touch", penEverSeen: false, tool: "brush" }), "draw");
   });

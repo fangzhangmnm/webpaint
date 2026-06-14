@@ -1,7 +1,7 @@
 // Gallery 路径代数 + 文件夹模型验收（A2）。纯数据。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { pathFolder, pathBasename, pathJoin } from "../src/gallery-path.js";
-import { mergeLocalCloud, sliceFolder, folderHasContents, itemTime, classifyCloudGone } from "../src/gallery-model.js";
+import { mergeLocalCloud, sliceFolder, folderHasContents, itemTime, classifyCloudGone, copyTargetName } from "../src/gallery-model.js";
 
 describe("gallery-path", () => {
   it("pathFolder", () => { eq(pathFolder("a"), ""); eq(pathFolder("f/a"), "f"); eq(pathFolder("f/g/a"), "f/g"); });
@@ -51,6 +51,29 @@ describe("gallery-model · folderHasContents", () => {
   it("有 item 以它为 prefix → 非空", () => assert(folderHasContents(items, [], "f1")));
   it("仅云端子夹以它为 prefix → 非空", () => assert(folderHasContents([], ["f2/sub"], "f2")));
   it("都没有 → 空", () => assert(!folderHasContents(items, [], "f9")));
+});
+
+describe("gallery-model · copyTargetName（复制项目目标名）", () => {
+  it("首份「<名> 副本」（不带数字）", () => {
+    eq(copyTargetName("猫", () => false), "猫 副本");
+  });
+  it("「副本」已占 → 「副本2」起递增", () => {
+    const taken = new Set(["猫 副本", "猫 副本2"]);
+    eq(copyTargetName("猫", (n) => taken.has(n)), "猫 副本3");
+  });
+  it("保持源同一文件夹（path 前缀不变）", () => {
+    eq(copyTargetName("插画/猫", () => false), "插画/猫 副本");
+    const taken = new Set(["插画/猫 副本"]);
+    eq(copyTargetName("插画/猫", (n) => taken.has(n)), "插画/猫 副本2");
+  });
+  it("复制的复制：「猫 副本」→「猫 副本 副本」", () => {
+    eq(copyTargetName("猫 副本", () => false), "猫 副本 副本");
+  });
+  it("taken 同时查本地⊕云端并集（任一占用都跳过）", () => {
+    const local = new Set(["猫 副本"]);
+    const cloud = new Set(["猫 副本2"]);
+    eq(copyTargetName("猫", (n) => local.has(n) || cloud.has(n)), "猫 副本3");
+  });
 });
 
 describe("classifyCloudGone（cloud-gone 收敛分类 · 数据安全护栏）", () => {

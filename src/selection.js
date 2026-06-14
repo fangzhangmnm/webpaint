@@ -291,6 +291,25 @@ export class Selection {
     return new Selection(docW - (this.bboxX + this.bboxW), this.bboxY, this.bboxW, this.bboxH, m);
   }
 
+  // 逆时针旋转 90°：mask 旋转，bbox 按 doc 旋转公式变换。docW/docH = **旧** doc 尺寸。返回新 Selection。
+  //   局部旋转与 doc.rotate90CCW 一致：旧局部 (lx,ly)→新局部 (ly, bboxW-lx)，矩阵 (0,-1,1,0,0,bboxW)。
+  //   新 bbox：newX=bboxY, newY=docW-(bboxX+bboxW), newW=bboxH, newH=bboxW。
+  rotated90CCW(docW, docH) {
+    const m = makeBitmap(this.bboxH, this.bboxW);   // 新 mask = (bboxH × bboxW)
+    const mctx = m.getContext("2d");
+    mctx.imageSmoothingEnabled = false;
+    mctx.setTransform(0, -1, 1, 0, 0, this.bboxW);
+    mctx.drawImage(this.maskCanvas, 0, 0);
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    return new Selection(
+      this.bboxY,
+      docW - (this.bboxX + this.bboxW),
+      this.bboxH,
+      this.bboxW,
+      m,
+    );
+  }
+
   // 重采样：mask 同步缩放 (sx,sy)。
   resampledTo(sx, sy, smooth, quality) {
     const oW = this.bboxW, oH = this.bboxH;

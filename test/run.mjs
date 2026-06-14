@@ -26,6 +26,8 @@ import "./pointer-route.test.mjs";
 import "./stroke-input-smooth.test.mjs";
 import "./stroke-smoother.test.mjs";
 import "./selection-morph.test.mjs";
+import "./doc-rotate.test.mjs";             // v258 逆时针旋转 90°（bbox 公式 + 4 次恒等 + 方向）
+import "./doc-mergedown-clip.test.mjs";     // v258 剪裁层向下合并（dst-in 裁基底 + 链内保剪裁 + 拒绝反向）
 // app-boot 必须是套件里**第一个**触发 Vue 求值的测试：Vue（vue.esm-browser）在 module-eval 时把
 // document 缓存成 module 级 const（createText 等用它）。boot-smoke 装了 DOM shim 后才 import app.js，
 // 故 Vue 求值时 document 有效（=shim doc）；若让别的 import-Vue 的测试先跑（node 无 document），

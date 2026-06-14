@@ -178,6 +178,21 @@ export function initDocOps(ctx) {
     });
   }
 
+  // 逆时针旋转画布 90°（所有层 + 选区）。doc 尺寸 W↔H 互换 → 必须重设视口（否则内容飞出屏幕）。
+  // 选最简单正确方案：旋转后 fitToScreen() 重新居中铺满（rot 复位为 0）；它在 applyFn 内执行，
+  // after 快照含新视口，undo 还原旧视口 → 往返正确。
+  const _menuRotate90Btn = document.getElementById("menuRotate90");
+  if (_menuRotate90Btn) {
+    _menuRotate90Btn.addEventListener("click", () => {
+      setMenuOpen(false);
+      setAdjustOpen(false);
+      runDocTransform("已逆时针旋转 90°", () => {
+        doc.rotate90CCW();
+        board.fitToScreen();
+      });
+    });
+  }
+
   document.getElementById("cropToolbarCancel")!.addEventListener("click", () => _closeCropMode());
   document.getElementById("cropToolbarApply")!.addEventListener("click", () => {
     if (!_cropState) return;
