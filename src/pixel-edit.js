@@ -6,7 +6,7 @@
 //   build entry → push → 异步压缩 before/after" + 一对 _<tool>LayerId/_<tool>PreSnap 字段。
 //   塌缩成事务：begin(layer,type) 拍 before，commit(finalize) 拍 after+入栈+压缩，abort() 还原。
 // - 纯 in-process（内存 canvas，无 I/O）。可拿 fake Layer + 真 UndoStack 独立测，不碰 Board/pointer。
-// - 只管纯像素三类（stroke / liquify；filterBrush、shapes 复用 "stroke" type）。
+// - 只管纯像素两类（stroke / liquify；filterBrush 复用 "stroke" type）。
 //   lasso 的复合 entry（像素 + 选区，一步 undo）与 selectionChange 不归这里——它们用下面的原语。
 // - render 策略留在 caller（各工具 partial / full 不同），commit/abort 不替 caller 决定刷新粒度。
 
@@ -95,7 +95,7 @@ export class PixelEdit {
     this.history = history;
     this.board = board || null;
     // 自己注册纯像素 entry 的 undo/redo handler（input.js 不再注册 stroke/liquify）。
-    // filterBrush / shapes 复用 "stroke"；都是 before/after 像素 snap，handler 一致。
+    // filterBrush 复用 "stroke"；都是 before/after 像素 snap，handler 一致。
     for (const type of ["stroke", "liquify"]) {
       history.registerHandler(type, {
         undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),

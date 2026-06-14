@@ -11,7 +11,7 @@
 // extend / end / flushDirty 在 input.js 早已统一走 _activeStroke.engine.*（不按 role 重新分支），
 // 所以这里只覆盖**仍然分支的那部分**：成员判定 + begin 期策略。
 //
-// 不在此表内的 role（lasso / shapes / pick / pan / gesture）**不是 pixel-stroke**：
+// 不在此表内的 role（lasso / pick / pan / gesture）**不是 pixel-stroke**：
 // 它们生命周期不同（路径 / gizmo / 取色 / 平移），各有专门分支，不应假装成 stamp 引擎。
 //
 // 每个 spec 字段（纯数据，与具体 engine 实例无关）：
@@ -37,11 +37,4 @@ export function isPixelStroke(role) {
 // 取某 role 的 spec；非 pixel-stroke 返回 null。
 export function pixelStrokeSpec(role) {
   return PIXEL_STROKE_SPECS[role] || null;
-}
-
-// "draw-gated" role 集合 = pixel-stroke ∪ {shapes}。
-// EditMode.canDraw() / 隐藏图层守卫对这一集合统一拒绝：它们都会改 activeLayer 像素，
-// 但 shapes 不是 stamp-stroke（begin/end 自管，不进 _activeStroke），故不在 PIXEL_STROKE_SPECS。
-export function isDrawGated(role) {
-  return isPixelStroke(role) || role === "shapes";
 }

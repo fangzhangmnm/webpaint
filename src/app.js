@@ -163,7 +163,7 @@ function currentDials() {
 const history = new UndoStack({ max: 50 });
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。
 const editMode = new EditMode({ initialTool: "brush" });
-// PixelEdit：纯像素三件套（stroke/liquify/filterBrush/shapes）的 undo 事务 + handler。
+// PixelEdit：纯像素（stroke/liquify/filterBrush）的 undo 事务 + handler。
 // 和 UndoStack 平级，注入 input。见 pixel-edit.js / CONTEXT.md。
 const pixelHistory = new PixelEdit({ doc, history, board });
 

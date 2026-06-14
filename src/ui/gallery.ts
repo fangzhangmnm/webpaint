@@ -26,7 +26,7 @@ import { getOrFetchCloudThumb } from "../cloud-thumb-cache.js";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
 // crypt seam）。图库只做 per-app 的部分：首次设密码双输 UX、活动项预检、明文残留清理、
 // 以及把 peek 字节解释成缩略图（enc-thumbs）。
-import { ENC_PEEK_MIME } from "../store/crypto-container.ts";
+import { ENC_PEEK_MIME } from "../crypto-format.js";
 import { isUnlocked, onLockChange, setPassword } from "../crypto-state.js";
 import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword, ensureUnlocked } from "../enc-thumbs.js";
 import { sliceFolder, folderHasContents } from "../gallery-model.js";

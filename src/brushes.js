@@ -80,7 +80,7 @@ function makeBrush({
 // 什么时候拿到什么时候填，之前填空」）。SW precache 离线兜底；fetch 失败也不卡 boot。
 // **stable ID**：以 "default-{tool}-{slug}" 形式固定。bump 时新 default 通过 id 比对
 // merge 到用户 rack（不覆盖用户改过的 brush，但缺失的会补上）。
-// **shapes 不在 rack 里**——shapes 工具复用 brush rack（getRackToolKey）。
+// **shapes/airbrush 工具已撤**（v96/v120）——BRUSH_GROUP 仍含其 tool 值，仅为老 preset 数据向后兼容。
 let _defaultsSpec = [];      // fetch 回来前是空，回来后就是 default-brushes.json 内容
 const _defaultsPromise = (async () => {
   try {
@@ -242,7 +242,7 @@ export function brushFromJSON(text) {
 export function findBrush(rack, id) {
   return rack.brushes.find((b) => b.id === id) || null;
 }
-// brush 工具池子包含 airbrush + shapes 老笔（共享 brush rack）
+// brush 工具池子含已撤工具的老 preset（airbrush/shapes 工具撤了，但用户老 rack 里的 preset 仍要可见）
 const BRUSH_GROUP = ["brush", "airbrush", "shapes"];
 export function brushesByTool(rack, tool) {
   if (tool === "brush") {

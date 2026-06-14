@@ -23,9 +23,8 @@
 import { BrushEngine } from "./brush.js";
 import { LiquifyEngine } from "./liquify.js";
 import { LassoEngine } from "./lasso.js";
-import { ShapesEngine } from "./shapes.js";
 import { FilterBrushEngine } from "./filter-brush.js";
-import { isPixelStroke, pixelStrokeSpec, isDrawGated } from "./engine-registry.js";
+import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.js";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./pointer-gesture.js";
 import { assignRole } from "./pointer-route.js";
 import { inputSmooth } from "./stroke-input-smooth.js";
@@ -199,7 +198,6 @@ export class InputController {
     this.doc = doc;
     this.canvas = board.canvas;
     this.brush = new BrushEngine();
-    this.shapes = new ShapesEngine();
     this.liquify = new LiquifyEngine();
     this.lasso = new LassoEngine();
     // v132 filter brush（user：「blur/sharpen/液化 走 filter brush engine」）
@@ -380,7 +378,7 @@ export class InputController {
 
     // #6 EditMode gate（fail-safe）：transient/非绘画 mode 下，draw 类 role 一律拒绝。
     // 防 role 决策对未知 mode（crop/adjust）fall-through 到 "draw" 而误触 stroke 污染 undo。
-    const _isDrawRole = isDrawGated(role);
+    const _isDrawRole = isPixelStroke(role);
     if (_isDrawRole && this.editMode && !this.editMode.canDraw()) {
       rec.role = null;
       this.pointers.delete(e.pointerId);
@@ -388,7 +386,7 @@ export class InputController {
     }
 
     // v125 (user：「在隐藏图层上动笔会 reject 并警告」)
-    // 画 / 擦 / 液化 / 形状 都改 activeLayer 像素；hidden 时一律拒绝
+    // 画 / 擦 / 液化 都改 activeLayer 像素；hidden 时一律拒绝
     if (_isDrawRole
         && this.doc.activeLayer && !this.doc.activeLayer.visible) {
       this.status("当前图层已隐藏，无法绘制");
@@ -423,9 +421,6 @@ export class InputController {
     } else if (role === "lasso") {
       this.board.setCursor(null);
       this._beginLasso(rec);
-    } else if (role === "shapes") {
-      this.board.setCursor(null);
-      this._beginShapes(rec);
     } else if (role === "pick") {
       this._doPick(x, y);
     } else if (role === "pan") {
@@ -749,45 +744,6 @@ export class InputController {
   //     freehand → drawing-freehand
   //     rect     → drawing-rect
   //     magic    → magic-tentative（pointerup 时立即 flood fill）
-  // ---- shapes ----
-  _beginShapes(rec) {
-    if (!this.doc.activeLayer) { rec.role = null; return; }
-    const { x, y } = this.board.screenToDoc(rec.x, rec.y);
-    this.shapes.begin(this.doc.activeLayer, x, y);
-  }
-  _endShapes() {
-    const layer = this.doc.activeLayer;
-    if (!layer) return;
-    const settings = this.getBrushSettings();
-    const tx = this.pixelHistory.begin(layer, "stroke");
-    try {
-      const subtool = this.shapes.getSubtool();
-      // line：复用 BrushEngine 沿线 stamp，吃 hardness / shape / spacing / 未来纹理
-      // （user：「线条预设应该也有硬度...直接走复用笔刷库里面的绘制笔刷」）
-      // rect / ellipse：仍走 fill（实心形状），不用 stamp
-      if (subtool === "line" && this.shapes.getState()) {
-        const st = this.shapes.getState();
-        // Pressure = 1.0（直线没压感），taperIn 跟 preset 走；想纯硬线就把 preset taperIn=0
-        this.brush.beginStroke(layer, settings, st.x0, st.y0, 1.0, "brush");
-        this.brush.extendStroke(st.x1, st.y1, 1.0);
-        this.brush.endStroke();
-        this.shapes.resetState();
-      } else {
-        const bbox = this.shapes.end({
-          color: (settings && settings.color) || "#000",
-          size: (settings && settings.size) || 4,
-          selection: this.doc.selection,
-        });
-        if (!bbox) return;
-      }
-      tx.commit();
-      this.board.invalidateAll();
-    } catch (e) {
-      console.error("[shapes]", e);
-      this.status("形状出错：" + (e.message || e));
-    }
-  }
-
   _beginLasso(rec) {
     if (!this.doc.activeLayer) { rec.role = null; return; }
     const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);

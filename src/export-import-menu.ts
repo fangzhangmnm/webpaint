@@ -15,7 +15,7 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard } from "./session.js";
 import { importImageAsLayer } from "./import-image.ts";
-import { looksEncryptedContainer } from "./store/crypto-container.ts";
+import { looksEncryptedContainer } from "./crypto-format.js";
 
 let doc: any, setStatus: any;
 

@@ -3,21 +3,19 @@
 // 所以决策本身就是测试面。纯数据 + 谓词，无需 canvas / DOM。
 import { describe, it, assert, eq } from "./runner.mjs";
 import {
-  PIXEL_STROKE_SPECS, isPixelStroke, pixelStrokeSpec, isDrawGated,
+  PIXEL_STROKE_SPECS, isPixelStroke, pixelStrokeSpec,
 } from "../src/engine-registry.js";
 
 // 重构前散在 input.js 各处的字面成员集合（_down/_move/_up/_discardPointer/gesture-abort）。
 // 把它们当 oracle：新谓词必须对**所有可能 role**与旧字面表达式逐一相等（回归锁）。
 const ALL_ROLES = [
   "draw", "erase", "liquify", "filterBrush",   // pixel-stroke
-  "lasso", "shapes",                            // 各有专门生命周期
+  "lasso",                                      // 各有专门生命周期
   "pick", "pan", "gesture", "ignore",           // 非绘制
   null, undefined, "",                          // 边界（pointer 还没定角色 / 被清）
 ];
 const oldPixelStrokeChain = (r) =>
   r === "draw" || r === "erase" || r === "liquify" || r === "filterBrush";
-const oldDrawRoleChain = (r) =>
-  r === "draw" || r === "erase" || r === "liquify" || r === "shapes" || r === "filterBrush";
 const oldCoalesceLatest = (r) => r === "liquify" || r === "filterBrush";
 const oldUsesBrushSettings = (r) => !(r === "liquify" || r === "filterBrush");
 
@@ -26,15 +24,6 @@ describe("engine-registry · dispatch 决策", () => {
     for (const r of ALL_ROLES) {
       eq(isPixelStroke(r), oldPixelStrokeChain(r), `isPixelStroke(${JSON.stringify(r)})`);
     }
-  });
-
-  it("isDrawGated 与旧 _isDrawRole 链相等（含 shapes，不含 pick/pan）", () => {
-    for (const r of ALL_ROLES) {
-      eq(isDrawGated(r), oldDrawRoleChain(r), `isDrawGated(${JSON.stringify(r)})`);
-    }
-    // shapes 受绘制 gate 约束，但**不是** pixel-stroke（不进 _activeStroke 生命周期）
-    eq(isDrawGated("shapes"), true, "shapes 进 draw-gate");
-    eq(isPixelStroke("shapes"), false, "shapes 不进 pixel-stroke");
   });
 
   it("spec.coalesceLatest（丢帧策略）只对液化 / filterBrush 为真", () => {
@@ -74,7 +63,7 @@ describe("engine-registry · dispatch 决策", () => {
   });
 
   it("pixelStrokeSpec 对非 pixel-stroke role 返回 null", () => {
-    for (const r of ["lasso", "shapes", "pick", "pan", null, "nope"]) {
+    for (const r of ["lasso", "pick", "pan", null, "nope"]) {
       eq(pixelStrokeSpec(r), null, `pixelStrokeSpec(${JSON.stringify(r)})`);
     }
   });
