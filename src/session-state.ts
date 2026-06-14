@@ -88,15 +88,77 @@ async function _refreshEncrypted() {
   catch { _enc.encrypted = false; }
 }
 
+// ============ 编辑器状态 I/O 深模块（v267b, user）============
+// 编辑器「当前设成什么样」（小窗 / 主色 / per-tool dial / 棋盘 / 选中层）的存档 ↔ 内存三个统一入口。
+// 进文件 / 新建 / 启动 init **一律**先 resetEditorState() 打回新文件基线，再（开文件时）
+// restoreEditorStateFromOra() 反序列化恢复 —— 杜绝上一个 doc 的 RAM 态泄漏到下一个（如调色板内容、
+// 参考图、棋盘）。存档统一走 storeEditorStateToOra()。
+// 不含：doc 模型（layers/尺寸/选区/参考层 id 归 doc.adoptState）、viewport（设备本地态，不进 .ora）。
+
+// ① 序列化：当前编辑器状态 → .ora webpaintState（_buildOraMeta / checkpoint / saveAndPush 共用）
+function storeEditorStateToOra() {
+  return {
+    reference: referenceWindow.getSerializedState(),
+    color: state.color,
+    toolStates: state.toolStates,
+    palette: paletteWindow.getSerializedState(),
+    checkerboard: state.checkerboard,
+    // 当前选中图层搭便车（dirty 上算 viewport 级——不单独触发存盘，随其它编辑落盘）。
+    // 存 **index** 不存 id：Layer.id 是运行时计数器、不进 .ora，load 后层拿全新 id 按 id 恢复永远 miss；
+    // 图层顺序在 .ora 里稳定 → index 才是可跨存档对齐的身份。
+    activeLayerIndex: doc.activeIndex,
+  };
+}
+
+// ② 重置：所有编辑器状态打回「新文件」基线（进文件 / 新建 / init 统一调）。
+//    清小窗内容 + 收起、主色回默认、棋盘关、退 filterBrush 瞬态。dial(toolStates) 故意保留
+//    （= 新文件也记住上次粗细/透，跨文件 dial 记忆是 feature）。
+function resetEditorState() {
+  referenceWindow.clearBitmap();
+  referenceWindow.close?.();
+  paletteWindow.clear?.();
+  paletteWindow.close?.();
+  setColor("#000000");          // gallery-first：默认黑
+  applyCheckerboard(false);
+  state.filterBrush = null;
+}
+
+// ③ 反序列化：把 .ora 的 _webpaintState 覆盖到已 reset 的基线之上（仅在开文件时调）。
+function restoreEditorStateFromOra(loaded: any) {
+  const ws = loaded?._webpaintState;
+  // 参考图：先设 bitmap（异步），再套序列化的位置/变换
+  if (loaded?._referenceBlob) {
+    createImageBitmap(loaded._referenceBlob).then((bitmap: any) => {
+      referenceWindow.setBitmap(bitmap, { persistBlob: loaded._referenceBlob });
+      if (ws?.reference) referenceWindow.applySerializedState(ws.reference);
+    }).catch(() => {});
+  } else if (ws?.reference) {
+    referenceWindow.applySerializedState(ws.reference);
+  }
+  if (ws?.color) setColor(ws.color);
+  if (ws?.palette) { try { paletteWindow.applySerializedState(ws.palette); } catch (_) {} }
+  if (ws?.toolStates && typeof ws.toolStates === "object") {
+    // 反序列化细节（v98 兼容字段映射）下沉在 editor-state.serializedToolStatePatch；这里只编排循环。
+    for (const t of Object.keys(state.toolStates)) {
+      const patch = serializedToolStatePatch(state.toolStates[t], ws.toolStates[t]);
+      if (patch) Object.assign(state.toolStates[t], patch);   // Object.assign 保留 reactive
+    }
+    rack.applyToolState(editMode.current());
+  }
+  applyCheckerboard(!!ws?.checkerboard);   // 缺省回 false（reset 已设，这里按文件值再覆盖）
+  // 当前选中图层（越界静默忽略）；doc.layers 此时已由 adoptState 就位
+  if (typeof ws?.activeLayerIndex === "number" && doc.setActive(ws.activeLayerIndex)) {
+    renderLayersPanel();
+  }
+}
+
 // ---- 私有：ora-meta + checkpoint（co-used，一处形状防 drift；从 app.js verbatim 搬）----
 // 当前 doc 的标准持久化 meta（reference + webpaintState）。flow.encode 回调 / checkpoint / saveAndPush 共用。
 // viewport（zoom/pan）是设备本地态，不进任何 .ora 字节（ADR-0016 §6）。
 function _buildOraMeta() {
   return {
     referenceImage: referenceWindow.getPersistBlob(),
-    // v267 (user)：当前选中图层也搭便车进 editor state（dirty 上算 viewport 级——不单独
-    //   触发存盘，随其它编辑一起落盘，下次打开恢复选中层）。
-    webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, activeLayerId: doc.activeLayer?.id },
+    webpaintState: storeEditorStateToOra(),
   };
 }
 function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
@@ -181,6 +243,7 @@ function adoptLoadedDoc(loaded: any, sessionName: any) {
   // 模型层字段（layers/active/尺寸/背景/参考层id/清选区）归 doc.adoptState；
   // 下面全是 app 编排（UI 刷新 / 工具态 / 参考窗 / 视口 / store base / 版本检测 / checkpoint）。
   doc.adoptState(loaded);
+  resetEditorState();   // v267b：进文件先打回新文件基线（清小窗/色/棋盘），再 restore 反序列化恢复
   els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   input.clearHistory();
   board.invalidateAll();
@@ -214,41 +277,9 @@ function adoptLoadedDoc(loaded: any, sessionName: any) {
     _loadedDocWriterVer = null;
   }
   updateNewerBanner();
-  // 恢复 reference 小窗（.ora webpaint/ 扩展）。先清后设——防上一画的 ref 残留显示（v95）
-  referenceWindow.clearBitmap();
-  if (loaded._referenceBlob) {
-    createImageBitmap(loaded._referenceBlob).then((bitmap) => {
-      referenceWindow.setBitmap(bitmap, { persistBlob: loaded._referenceBlob });
-      if (loaded._webpaintState?.reference) {
-        referenceWindow.applySerializedState(loaded._webpaintState.reference);
-      }
-    }).catch(() => {});
-  } else if (loaded._webpaintState?.reference) {
-    referenceWindow.applySerializedState(loaded._webpaintState.reference);
-  }
-  // 恢复 per-doc 的 color + per-tool 状态（v82 起）
-  if (loaded._webpaintState?.color) {
-    setColor(loaded._webpaintState.color);
-  }
-  // 恢复调色板（v87 起）
-  if (loaded._webpaintState?.palette) {
-    try { paletteWindow.applySerializedState(loaded._webpaintState.palette); } catch (_) {}
-  }
-  if (loaded._webpaintState?.toolStates && typeof loaded._webpaintState.toolStates === "object") {
-    // 反序列化细节（v98 兼容字段映射）已下沉 editor-state.serializedToolStatePatch；这里只编排循环。
-    for (const t of Object.keys(state.toolStates)) {
-      const patch = serializedToolStatePatch(state.toolStates[t], loaded._webpaintState.toolStates[t]);
-      if (patch) Object.assign(state.toolStates[t], patch);   // Object.assign 保留 reactive
-    }
-    rack.applyToolState(editMode.current());
-  }
-  // v125 per-doc checkerboard：按文件值刷新，缺省回 false
-  applyCheckerboard(!!loaded._webpaintState?.checkerboard);
-  // v267 (user)：恢复上次保存时选中的图层（editor state，非 .ora 标准字段；找不到 id 静默忽略）
-  const savedActiveId = loaded._webpaintState?.activeLayerId;
-  if (savedActiveId != null && doc.setActiveById(savedActiveId)) {
-    renderLayersPanel();
-  }
+  // v267b：编辑器状态（参考窗 / 主色 / per-tool dial / 棋盘 / 选中层）反序列化恢复——
+  //   统一走深模块（已先 resetEditorState 打回基线，这里覆盖恢复）。
+  restoreEditorStateFromOra(loaded);
   // v126 per-doc viewport：有就 restore，没有的话 caller 会 fitToScreen
   const vp = loaded._webpaintState?.viewport;
   if (vp && typeof vp.scale === "number") {
@@ -513,9 +544,7 @@ async function newDoc({ name, w, h, fillLayer0 }: any) {
   _store.edits.mark();
   _docLastSavedAt = 0;
   updateSaveStatus();
-  referenceWindow.clearBitmap();
-  applyCheckerboard(false);    // v125: 新建 doc 棋盘 reset 关
-  setColor("#000000");         // gallery-first：新画布 color 默认黑
+  resetEditorState();   // v267b：新建 = 编辑器状态打回基线（清小窗/棋盘关/色归黑），与开文件同一入口
   await saveNow();
   _sessionOpenedAt = Date.now();
   _writeSessionCheckpoint(name).catch((e) => console.warn("[revert] new-doc checkpoint:", e));
@@ -677,6 +706,7 @@ export function initSession(ctx: any) {
   showFullscreenBusy = ctx.showFullscreenBusy; hideFullscreenBusy = ctx.hideFullscreenBusy;
   gallery = ctx.gallery;   // 可能晚绑：init 时若为 null，下面 setGallery 回填
   _recomputePhase();
+  resetEditorState();   // v267b：启动也走统一入口，保证编辑器状态从干净基线起步（进文件/新建/init 三处同源）
 
   // ---- autosave + coalescer 接线（**verbatim**，store 调用一字不改）----
   // Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地。合流状态机在 Store（_store.session）。

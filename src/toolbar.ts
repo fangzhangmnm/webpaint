@@ -191,8 +191,8 @@ function _openSelEdit(op: "expand" | "shrink") {
   _runSelEditPreview();                    // 初次预览
   // adjust transient：apply=采纳预览，abort=还原。切工具/ctrl-z 都经此（onToolSwitch=apply）。
   editMode.enterTransient("adjust", { apply: () => _finishSelEdit(true), abort: () => _finishSelEdit(false) });
-  amount?.focus();
-  (amount as any)?.select?.();
+  // v267b (user)：不自动 focus/select 输入框——大多数时候无脑 1px 直接「应用」即可，
+  //   自动选中会在 iPad 弹出键盘挡视野。要改数值用户自己点输入框。
 }
 // 收尾同步点（所有关闭路径都过这里）：清 raf、出终值、藏 popup、退 transient、刷 UI。
 function _finishSelEdit(applied: boolean) {
