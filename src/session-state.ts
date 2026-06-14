@@ -28,7 +28,7 @@ import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEBPAINT_VERSION } from "./version.js";
 import {
   trashSession, renderThumbBlob,
-  listSessions, setCurrentSessionName,
+  setCurrentSessionName,
 } from "./session.js";
 import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.js";
 import { getMeta, setMeta } from "./storage.js";
@@ -41,6 +41,7 @@ import {
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.js";
 import { stripSessionExt } from "./config.js";
+import { sessionNameConflict } from "./session-name.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.js";
 import { setPassword } from "./crypto-state.js";
 import { els } from "./els.ts";
@@ -424,8 +425,7 @@ async function renameCurrentSession({ suggested, reason }: any = {}) {
     // 锁屏跑改名（编码 ora + 云端 move/push + 本地存+渲 thumb 都重），与 sibling 深模块 op 对齐；
     // store 现在内部也对 rename 强制 busy（可重入），这里外层 busy 只是为了覆盖冲突检查那段 await。
     const outcome: any = await withBusy(`正在重命名 ${oldName} → ${trimmed}…`, async () => {
-      const localNames = (await listSessions()).map((s: any) => s.name);
-      if (localNames.includes(trimmed)) return { conflict: true };
+      if (await sessionNameConflict(trimmed)) return { conflict: true };   // 本地查（共用 helper）；rename 不预检云端（store.flow.rename 管云端 move）
       try {
         const cloudOn = isSignedIn() && navigator.onLine !== false;
         const res = await _store.flow.rename(oldName, trimmed, {

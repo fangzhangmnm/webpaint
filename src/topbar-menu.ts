@@ -24,14 +24,12 @@ import {
   isSignedIn,
   isCloudDirty,
   setRackDirty,
-  listCloudSessionsRecursive,
 } from "./app-store.js";
 import { els } from "./els.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
-import { listSessions } from "./session.js";
+import { sessionNameConflict } from "./session-name.ts";
 import { decodeOraToDoc } from "./ora.js";
-import { stripSessionExt } from "./config.js";
 import { compressPixelSnap } from "./pixel-edit.js";
 import { maybeFastForwardActive } from "./cloud-freshness.ts";
 
@@ -189,21 +187,9 @@ export function initTopbarMenu(ctx) {
       const trimmed = input.trim();
       if (!trimmed) { setStatus("名字不能空", true); candidate = ""; continue; }
       if (trimmed === oldName) { setStatus("名字和当前一样，换一个", true); candidate = trimmed; continue; }
-      const localNames = (await listSessions()).map((s) => s.name);
-      if (localNames.includes(trimmed)) {
-        setStatus(`本地已有同名 "${trimmed}"，换一个`, true);
-        candidate = trimmed; continue;
-      }
-      if (isSignedIn() && navigator.onLine !== false) {
-        try {
-          const cloud = await listCloudSessionsRecursive();
-          const cloudNames = cloud.map((c) => stripSessionExt(c.path));
-          if (cloudNames.includes(trimmed)) {
-            setStatus(`云端已有同名 "${trimmed}"，换一个`, true);
-            candidate = trimmed; continue;
-          }
-        } catch (e) { console.warn("[saveAs] cloud list failed:", e); }
-      }
+      const conflict = await sessionNameConflict(trimmed, { cloud: isSignedIn() && navigator.onLine !== false });
+      if (conflict === "local") { setStatus(`本地已有同名 "${trimmed}"，换一个`, true); candidate = trimmed; continue; }
+      if (conflict === "cloud") { setStatus(`云端已有同名 "${trimmed}"，换一个`, true); candidate = trimmed; continue; }
       // 另存为 = 写新身份、旧的不动（store.flow.saveAs：本地存 + 云端 push，云端 best-effort）。
       try {
         const cloudOn = isSignedIn() && navigator.onLine !== false;
