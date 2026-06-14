@@ -25,6 +25,7 @@ import "./pointer-route.test.mjs";
 import "./stroke-input-smooth.test.mjs";
 import "./stroke-smoother.test.mjs";
 import "./selection-morph.test.mjs";
+import "./app-boot.test.mjs";   // 组合根 boot smoke（接线零覆盖缺口，见该文件头注释）。放最后：包了 global timer。
 
 console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
 await run();
