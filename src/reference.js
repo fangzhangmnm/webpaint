@@ -459,8 +459,11 @@ export class ReferenceWindow {
       const s = localStorage.getItem(LS_POS);
       if (!s) return;
       const o = JSON.parse(s);
-      if (o.left != null) this.panel.style.left = o.left + "px";
-      if (o.top != null) this.panel.style.top = o.top + "px";
+      // v268b (user)：钳进安全区——旧的(或越界的)持久化位置会把窗停在左上角，和 iPad 顶部
+      //   日期栏 + 左侧工具栏打架。floor 清掉 topbar(56)/左栏(80)/safe-area 余量。
+      const MIN_LEFT = 96, MIN_TOP = 96;
+      if (o.left != null) this.panel.style.left = Math.max(MIN_LEFT, o.left) + "px";
+      if (o.top != null) this.panel.style.top = Math.max(MIN_TOP, o.top) + "px";
       if (o.width)  this.panel.style.width = o.width + "px";
       if (o.height) this.panel.style.height = o.height + "px";
     } catch {}
