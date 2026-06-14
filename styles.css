@@ -241,6 +241,16 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 .lasso-tool-threshold.hidden { display: none; }
 .lasso-tool-threshold input[type="range"] { width: 100px; }
 /* 魔术棒设置弹出小卡片：位于 lasso-toolbar 下方居中 */
+/* v271 (user)：弹框外观统一成「实底」——所有锚定/菜单类弹框共享这一套观感（去毛玻璃）。
+   坐标走 positionPopup(JS)，外观走这里(CSS)；各 popup 规则只留 position/layout 特化。
+   .menu-panel 覆盖了图层 ⋯/+ 菜单、图库各菜单（都带 menu-panel 类）。 */
+.lasso-popup, .menu-panel, .menu-config-popup, .size-popup, .gallery-tile-menu-popup {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  color: var(--ink);
+}
 .lasso-popup {
   position: fixed;
   top: calc(max(env(safe-area-inset-top, 0px), 8px) + 116px);
@@ -249,12 +259,6 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   display: flex; flex-direction: column;
   gap: 8px;
   padding: 10px 14px;
-  background: color-mix(in srgb, var(--bg) 94%, transparent);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
   z-index: var(--z-menu);  /* 菜单 band：高于 toolbar 和一切浮窗 */
   font-size: 12px;
   color: var(--ink);
@@ -647,12 +651,7 @@ input[type=range] {
   /* 长菜单 + iPad mini 竖屏：限高 + 滚动 */
   max-height: calc(100vh - 80px);
   overflow-y: auto;
-  background: color-mix(in srgb, var(--bg) 94%, transparent);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  /* 外观（实底 bg/border/radius/shadow）走共享规则 */
   z-index: var(--z-menu);  /* user：「主菜单 zorder 应该在 lasso 等的菜单上面」；菜单 band 结构性高于窗口/overlay */
   padding: 6px;
   -webkit-overflow-scrolling: touch;
@@ -722,14 +721,7 @@ input[type=range] {
 .menu-config-popup {
   position: absolute; right: 0; top: 100%; z-index: 50;
   margin-top: 4px; padding: 10px 12px;
-  /* v124 跟主题 (user：「没跟随 theme 配色」)：用 --bg / --line / --ink 系列 */
-  background: color-mix(in srgb, var(--bg) 96%, transparent);
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
-  border: 1px solid var(--line);
-  color: var(--ink);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+  /* 外观（实底）走共享规则 */
   min-width: 180px;
   display: flex; flex-direction: column; gap: 8px;
 }
@@ -1645,9 +1637,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
    v123: user「太大太长，位置不对，px 放下面，不用屏 px」→ 改竖排（圆上字下），缩小 frame */
 .size-popup {
   position: fixed;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  /* 外观（实底）走共享规则 */
   padding: 6px 8px;
   z-index: var(--z-menu);
   display: flex;
@@ -1655,7 +1645,6 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   align-items: center;
   gap: 4px;
   pointer-events: none;
-  box-shadow: var(--shadow);
 }
 .size-popup.hidden { display: none; }
 .size-popup-circle-frame {
@@ -1894,10 +1883,7 @@ body[data-mode="gallery"] .board { display: none !important; }
 .gallery-tile-menu-btn:hover { background: rgba(255, 255, 255, 1); }
 .gallery-tile-menu-popup {
   position: absolute; right: 4px; top: 34px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+  /* 外观（实底）走共享规则；圆角 6→8 随统一 */
   min-width: 140px;
   z-index: 5;
   display: flex; flex-direction: column;
