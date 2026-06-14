@@ -22,6 +22,7 @@ export const els = {
   menuBtn: document.getElementById("menuButton"),
   menuPanel: document.getElementById("menuPanel"),
   menuLongPressPick: document.getElementById("menuLongPressPick"),
+  menuSingleFingerDraw: document.getElementById("menuSingleFingerDraw"),
   menuPressureSize: document.getElementById("menuPressureSize"),
   menuPressureOpacity: document.getElementById("menuPressureOpacity"),
   menuTheme: document.getElementById("menuTheme"),

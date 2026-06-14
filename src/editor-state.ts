@@ -34,6 +34,7 @@ export function createEditorState(): EditorState {
     pressureToSize: safeLS("webpaint.pToSize") !== "0",
     pressureToOpacity: safeLS("webpaint.pToOpacity") !== "0",
     longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
+    singleFingerDraw: safeLS("webpaint.singleFingerDraw") === "1",  // 默认关——用户要单指默认不作画
     // v125 (user：「透明背景显示棋盘这个设置跟文件走」)
     //   checkerboard 从全局 LS 改 per-doc：保存在 webpaint/state.json，跟文件走。
     //   初始 false；adoptLoadedDoc 时按文件值覆盖；新建 doc 默认 false

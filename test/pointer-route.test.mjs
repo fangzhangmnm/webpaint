@@ -42,10 +42,17 @@ describe("pointer-route · assignRole", () => {
     eq(role({ pointerType: "pen", tool: "picker", button: 0, buttons: 1 }), "pick");
   });
 
-  it("touch：见过 pen 的设备单指=hold（不拖画布，双指才 pan）；没见过 = toolToRole", () => {
+  it("touch：单指作画 ⟺ 无笔 + 开关ON；pen 路径恒 hold；开关默认OFF=hold", () => {
+    // 见过 pen 的设备：恒 hold，不论开关
     eq(role({ pointerType: "touch", penEverSeen: true }), "hold");
-    eq(role({ pointerType: "touch", penEverSeen: false, tool: "lasso" }), "lasso");
-    eq(role({ pointerType: "touch", penEverSeen: false, tool: "brush" }), "draw");
+    eq(role({ pointerType: "touch", penEverSeen: true, singleFingerDraw: true }), "hold");
+    eq(role({ pointerType: "touch", penEverSeen: true, singleFingerDraw: true, tool: "brush" }), "hold");
+    // 无笔 + 开关 OFF（默认）：hold
+    eq(role({ pointerType: "touch", penEverSeen: false, tool: "brush" }), "hold");
+    eq(role({ pointerType: "touch", penEverSeen: false, singleFingerDraw: false, tool: "lasso" }), "hold");
+    // 无笔 + 开关 ON：toolToRole（作画）
+    eq(role({ pointerType: "touch", penEverSeen: false, singleFingerDraw: true, tool: "lasso" }), "lasso");
+    eq(role({ pointerType: "touch", penEverSeen: false, singleFingerDraw: true, tool: "brush" }), "draw");
   });
 
   it("transform → lasso；alt+brush → pick（经 effectiveTool）", () => {
@@ -58,7 +65,7 @@ describe("pointer-route · assignRole", () => {
       const expected = toolToRole(effectiveTool(t, false));
       eq(role({ tool: t, pointerType: "mouse", button: 0 }), expected, `mouse ${t}`);
       eq(role({ tool: t, pointerType: "pen", button: 0, buttons: 1 }), expected, `pen ${t}`);
-      eq(role({ tool: t, pointerType: "touch", penEverSeen: false }), expected, `touch ${t}`);
+      eq(role({ tool: t, pointerType: "touch", penEverSeen: false, singleFingerDraw: true }), expected, `touch ${t}`);
     }
   });
 });

@@ -883,6 +883,10 @@
         <span class="menu-item-label">单指长按吸色</span>
         <span class="menu-item-state" data-state-for="longPressPick">关</span>
       </button>
+      <button class="menu-item" id="menuSingleFingerDraw" type="button" role="menuitemcheckbox" aria-pressed="false">
+        <span class="menu-item-label">单指绘画</span>
+        <span class="menu-item-state" data-state-for="singleFingerDraw">关</span>
+      </button>
       <button class="menu-item" id="menuPixelGrid" type="button" role="menuitemcheckbox" aria-pressed="true">
         <span class="menu-item-label">像素栅格（放大时）</span>
         <span class="menu-item-state" data-state-for="pixelGrid">开</span>
@@ -973,6 +977,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-50a2c2e19f1a.mjs"></script>
+    <script type="module" src="./dist/webpaint-2bd07e5ab9e2.mjs"></script>
   </body>
 </html>

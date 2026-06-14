@@ -45,6 +45,11 @@ function applyLongPressPick(on: any) {
   setMenuItem(els.menuLongPressPick, on);
   safeLSSet("webpaint.longPressPick", on ? "1" : "0");
 }
+function applySingleFingerDraw(on: any) {
+  state.singleFingerDraw = !!on;
+  setMenuItem(els.menuSingleFingerDraw, on);
+  safeLSSet("webpaint.singleFingerDraw", on ? "1" : "0");
+}
 export function applyCheckerboard(on: any) {
   // v125: checkerboard per-doc，不再写 localStorage
   state.checkerboard = !!on;
@@ -113,6 +118,10 @@ export function initSettingsMenu(ctx) {
     applyLongPressPick(!state.longPressPick);
     setStatus(`长按吸色 · ${state.longPressPick ? "开" : "关"}`);
   });
+  els.menuSingleFingerDraw.addEventListener("click", () => {
+    applySingleFingerDraw(!state.singleFingerDraw);
+    setStatus(`单指绘画 · ${state.singleFingerDraw ? "开" : "关"}`);
+  });
   els.menuCheckerboard.addEventListener("click", () => {
     applyCheckerboard(!state.checkerboard);
     // UI 态不 mark dirty（user 2026-06-10）：棋盘是观感开关，下次真编辑保存时顺手捞进 state.json。
@@ -149,6 +158,7 @@ export function initSettingsMenu(ctx) {
   applyPressureSize(state.pressureToSize);
   applyPressureOpacity(state.pressureToOpacity);
   applyLongPressPick(state.longPressPick);
+  applySingleFingerDraw(state.singleFingerDraw);
   applyCheckerboard(state.checkerboard);
 
   els.menuBtn.addEventListener("click", (e: any) => {

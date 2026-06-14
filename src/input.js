@@ -214,6 +214,7 @@ export class InputController {
     // v132 filter brush 当前激活的 { Filter, params } 或 null
     this.getFilterBrushState = opts.getFilterBrushState || (() => null);
     this.getLongPressPickEnabled = opts.getLongPressPickEnabled || (() => false);
+    this.getSingleFingerDraw = opts.getSingleFingerDraw || (() => false);
     this.onColorSampled = opts.onColorSampled || (() => {});
     this.status = opts.status || (() => {});
 
@@ -364,6 +365,7 @@ export class InputController {
     const role = assignRole({
       tool, pointerType: e.pointerType, button: e.button, buttons: e.buttons,
       spaceDown: this.spaceDown, altDown: this.altDown, penEverSeen: this.penEverSeen,
+      singleFingerDraw: this.getSingleFingerDraw(),
     });
 
     const now = performance.now();
@@ -380,6 +382,9 @@ export class InputController {
     // 防 role 决策对未知 mode（crop/adjust）fall-through 到 "draw" 而误触 stroke 污染 undo。
     const _isDrawRole = isPixelStroke(role);
     if (_isDrawRole && this.editMode && !this.editMode.canDraw()) {
+      // touch：保留 pointer 降级成 hold（不画），让后续手指仍能凑成双指/三指手势（undo/redo）。
+      //   删 pointer 会让第二指的 activeTouches 计 0 → 手势永远凑不起来。mouse/pen 无多指手势，直接拒。
+      if (e.pointerType === "touch") { rec.role = "hold"; return; }
       rec.role = null;
       this.pointers.delete(e.pointerId);
       return;
@@ -389,6 +394,10 @@ export class InputController {
     // 画 / 擦 / 液化 都改 activeLayer 像素；hidden 时一律拒绝
     if (_isDrawRole
         && this.doc.activeLayer && !this.doc.activeLayer.visible) {
+      // touch：别在 down 立刻弹警告+删 pointer——那会拦掉双指 undo / 三指 redo（第一指被删→手势凑不起来），
+      //   且每根手指各弹一次。改：降级成 hold 保留 pointer（可升级成手势），把"图层已隐藏"警告推迟到
+      //   确实单指移动作画时（_move 里 hold 分支）才弹。mouse/pen 无多指手势 → 维持 down 即拒+警告。
+      if (e.pointerType === "touch") { rec.role = "hold"; rec._deferHiddenWarn = true; return; }
       this.status("当前图层已隐藏，无法绘制");
       rec.role = null;
       this.pointers.delete(e.pointerId);
@@ -567,6 +576,16 @@ export class InputController {
       rec._lastX = e.clientX;
       rec._lastY = e.clientY;
       this.board.pan(dx, dy);
+    } else if (rec.role === "hold") {
+      // 隐藏图层 + 单指移动 = 确实想画 → 此刻才弹"图层已隐藏"（down 时推迟到这，避免双指 undo
+      //   的第一指在 down 误弹/拦手势）。移动超 tap 阈值才算作画，纯 tap 不弹。
+      if (rec._deferHiddenWarn) {
+        const dx = e.clientX - rec.startX, dy = e.clientY - rec.startY;
+        if (dx * dx + dy * dy > GESTURE_TAP_MAX_MOVE_SQ) {
+          rec._deferHiddenWarn = false;
+          this.status("当前图层已隐藏，无法绘制");
+        }
+      }
     }
     e.preventDefault();
   }

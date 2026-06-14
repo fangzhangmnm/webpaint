@@ -24,13 +24,17 @@ export function toolToRole(et) {
 }
 
 // 完整 pointerdown 角色决策。输入位：
-//   tool, pointerType('mouse'|'pen'|'touch'), button, buttons, spaceDown, altDown, penEverSeen
+//   tool, pointerType('mouse'|'pen'|'touch'), button, buttons, spaceDown, altDown, penEverSeen, singleFingerDraw
 // 顺序与设备语义沿用原 _down：hand/space=pan 优先 → 按 pointerType 分支。
-export function assignRole({ tool, pointerType, button, buttons, spaceDown, altDown, penEverSeen }) {
+// 单指语义（touch）：单指走当前工具作画 ⟺ 无笔路径(penEverSeen=false) 且「单指绘画」开关 ON；
+//   否则一律 hold（不画不 pan，仍计入双指手势 + 长按吸色）。开关默认 OFF → 单指永不作画。
+//   pen 路径永远屏蔽（见过 pen 的设备恒 hold），开关只影响无笔路径。
+export function assignRole({ tool, pointerType, button, buttons, spaceDown, altDown, penEverSeen, singleFingerDraw }) {
   if (tool === "hand" || spaceDown) return "pan";
   const et = effectiveTool(tool, altDown);
   if (pointerType === "mouse") return button === 0 ? toolToRole(et) : "pan";          // 中/右键 = pan
   if (pointerType === "pen")   return (button === 2 || (buttons & 2)) ? "erase" : toolToRole(et);  // 副按钮强制橡皮
-  if (pointerType === "touch") return penEverSeen ? "hold" : toolToRole(et);          // 见过 pen 的设备：单指不拖画布（=hold，空操作），双指才 pan/zoom/rotate
+  // touch：无笔 + 开关 ON 才作画；否则 hold（不画不 pan，双指才 pan/zoom/rotate；长按吸色仍生效）
+  if (pointerType === "touch") return (!penEverSeen && singleFingerDraw) ? toolToRole(et) : "hold";
   return null;
 }
