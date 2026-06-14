@@ -278,6 +278,13 @@ export class InputController {
     c.addEventListener("pointercancel", (e) => this._up(e, true));
     c.addEventListener("pointerleave", (e) => this._up(e, true));
     c.addEventListener("contextmenu", (e) => e.preventDefault());
+    // iOS：长按 callout / 放大镜 / "存储图像" 在 touchstart 长按计时器上 arm，contextmenu(iOS 基本不发)
+    //   + pointerdown.preventDefault(错事件类型) 都拦不住。唯一可靠拦法 = 非 passive touchstart
+    //   preventDefault。只绑在画布上（不碰可滚动 UI 面板）、只单指拦（多指缩放/平移走 pointer 路径，
+    //   preventDefault touchstart 不影响 pointer 事件）。canvas 已 touch-action:none，本就不滚。
+    c.addEventListener("touchstart", (e) => {
+      if (e.touches.length === 1) e.preventDefault();
+    }, { passive: false });
     c.addEventListener("wheel", (e) => this._wheel(e), { passive: false });
     window.addEventListener("keydown", (e) => this._keydown(e));
     window.addEventListener("keyup", (e) => this._keyup(e));

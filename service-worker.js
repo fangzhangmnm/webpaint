@@ -41,7 +41,9 @@ async function getCurrentBundleUrl() {
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const { bundleUrl } = await getCurrentBundleUrl();
-    const bundleHash = bundleUrl.match(/main-([a-z0-9-]+)\.mjs/i)?.[1] || "boot";
+    // 必须跟 line 36 入口 regex 同步认 main-（旧）+ webpaint-（现）两种名 —— 否则抽不出 hash
+    // → fallback "boot" → CACHE_NAME 恒为 webpaint-boot → cache 永不随 build 失效（离线/更新坏）
+    const bundleHash = bundleUrl.match(/(?:main|webpaint)-([a-z0-9-]+)\.mjs/i)?.[1] || "boot";
     CACHE_NAME = `webpaint-${bundleHash}`;
     const cache = await caches.open(CACHE_NAME);
     const urls = [...STATIC_PRECACHE, bundleUrl, bundleUrl + ".map"];

@@ -367,15 +367,12 @@ export async function shareOrDownloadImage(doc, format = "png", filename = "WebP
 
 /** 把 doc 合成图复制到剪贴板（PNG）。iPad Safari / 桌面都支持。 */
 export async function copyImageToClipboard(doc, scope = "merged") {
-  if (!navigator.clipboard || !navigator.clipboard.write) {
-    throw new Error("浏览器不支持剪贴板写入");
-  }
-  const blob = await renderDocToImageBlob(doc, "image/png", undefined, scope);
-  if (!blob) throw new Error("生成 PNG 失败");
-  // ClipboardItem 在 Safari 必须用 lazy promise 写法（write 在 user gesture 内）
-  await navigator.clipboard.write([
-    new ClipboardItem({ "image/png": blob }),
-  ]);
+  // iOS Safari 要求 clipboard.write 在 user gesture 内"同步"触达；**不能**先 await blob 再 write
+  // （那个 await 跨过 gesture 窗口 → NotAllowedError）。把 renderDocToImageBlob 的 Promise<Blob>
+  // 直接交给 ClipboardItem（lazy promise 写法），复用 writeImageBlobToClipboard 同款路径。
+  const blobPromise = renderDocToImageBlob(doc, "image/png", undefined, scope)
+    .then((blob) => { if (!blob) throw new Error("生成 PNG 失败"); return blob; });
+  await writeImageBlobToClipboard(blobPromise);
 }
 
 /** 把任意 PNG blob（或 Promise<Blob>，Safari lazy 写法）复制到剪贴板。 */
