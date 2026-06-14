@@ -19,7 +19,6 @@ import { Board } from "./board.js";
 import { InputController } from "./input.js";
 import { PixelEdit } from "./pixel-edit.js";   // compressPixelSnap/applyPixelSnap 切到 layer-undo/topbar-menu
 import { resolveBrush } from "./resolved-brush.js";
-import { makeDefaultRack, mergeMissingDefaults, defaultsPromise } from "./brushes.js";
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
 import { UndoStack } from "./history.js";
 import { EditMode } from "./edit-mode.js";
@@ -30,7 +29,6 @@ import { BrushRack } from "./brush-rack.ts";
 import { PwaShell } from "./pwa-shell.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
 import { setPasswordPrompt } from "./crypto-state.js";   // 加密：密码弹窗注入（ADR-0012）
-import { ensureUnlocked } from "./enc-thumbs.js";        // boot load 加密作品：busy 外解锁
 import { els } from "./els.ts";
 import { safeLSSet } from "./safe-ls.ts";   // safeLS seeding 已随 editor-state 搬走
 import { initTheme } from "./theme.ts";
@@ -58,8 +56,7 @@ import { initPlatformGuards } from "./platform-guards.ts";
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
 import { stepFor as _stepFor, quantizeSize as _quantizeSize } from "./ui/brush-size.ts";   // [ ] 键盘调粗用（slider 映射在 <LeftDial>）
 import { computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";   // candidate 1 · currentBrush computed + 引擎桥 watch
-import { getCurrentSessionName } from "./session.js";
-import { decodeOraToDoc } from "./ora.js";   // boot 恢复：flow.load 解壳后的明文 → doc
+import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排：笔架异步 boot + gallery-first 恢复
 // Selection 切到 selection-ops.ts；smooth-config（SMOOTH/saveSmooth/resetSmooth）切到 smooth-dev-panel.ts
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
 //   filters.js 只剩 Filter 契约 + registry + helper；
@@ -209,38 +206,7 @@ board.setLassoProvider(() => ({
 
 // 蚂蚁线无动画（user 反馈太干扰）；选区改变时 setLassoProvider 已触发 invalidateAll。
 
-// ---- 笔架 boot：异步加载 + toolStates 补齐 ----
-// Brush rack 异步加载：boot 时拿 IDB 缓存，把 toolStates 缺失字段从 rack 补齐
-// 然后应用当前 tool 的 state
-const _backfillToolStates = () => {
-  for (const t of Object.keys(state.toolStates)) {
-    if (state.toolStates[t].activeBrushId == null) Object.assign(state.toolStates[t], rack.defaultToolStateFor(t));
-  }
-};
-rack.load().then(() => {
-  _backfillToolStates();
-  rack.applyToolState(editMode.current());
-  dialReactive.rackVersion++;
-  setTimeout(() => { rack.checkCloud().catch(() => {}); rack.refreshCloudState(); }, 2000);
-  // default-brushes.json 是 async fetch：fetch 回来后 retroactively merge 缺失默认笔。
-  defaultsPromise().then(() => {
-    const cur = rack.get();
-    if (!cur) return;
-    const merged = mergeMissingDefaults(cur);
-    if (!merged) return;
-    rack.setRack(merged);
-    rack.persist().catch(() => {});
-    _backfillToolStates();
-    rack.applyToolState(editMode.current());
-    dialReactive.rackVersion++;
-  });
-}).catch((e) => {
-  console.warn("[brush-rack] init failed:", e);
-  rack.setRack(makeDefaultRack());
-  rack.applyToolState(editMode.current());
-  dialReactive.rackVersion++;
-  setStatus("笔架持久化失败（可能私密浏览）：本次 session 可用，重启会重置", true);
-});
+// 笔架 boot（异步加载 IDB + toolStates 补齐 + 默认笔 merge）= boot.ts initRackBoot，ctx 建好后调（见下）。
 
 
 // Composition Root：core 单例 + 跨模块函数装进显式 ctx，传给每个 initX(ctx)（取代全局 rt）。
@@ -287,6 +253,9 @@ initTransientPanels(ctx);
 initLayerUndo(ctx);
 initSideWindows(ctx);
 initPlatformGuards(ctx);
+
+// 笔架异步 boot（fire-and-forget；ctx 已建好）。
+initRackBoot(ctx);
 
 // size/opacity popup + 两个 slider 监听 + slider-DOM 同步已搬进 <LeftDial>（src/ui/left-dial.ts）。
 // setSize/setOpacity 现在只写反应式 dial SSoT + LS；<LeftDial> 绑定 dial 自动反映 + 自闪 popup。
@@ -450,46 +419,8 @@ window.addEventListener("online", async () => {
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
 
 // 前台新鲜度活动监听 + idle tick 接线已切到 cloud-freshness.ts initCloudFreshness。
-// Gallery-first 启动：
-//   1) galleryOpen flag = true（上次退出在 gallery） → 停 gallery
-//   2) 否则有上次 session 名 → load → 成功 adopt + 进画布；失败 → 停 gallery
-//   3) 失败保留 currentSessionName 不清（用户下次冷启动还能 retry）
-(async () => {
-  const wantedName = getCurrentSessionName();
-  if (!wantedName) {
-    session.setName(null);
-    updateSaveStatus();
-    await setGalleryOpen(true);
-    return;
-  }
-  try {
-    // boot load 走 store.flow.load（明文原样；加密容器需先解锁）。boot 不在 busy → 可弹密码框。
-    let r = await _store.flow.load(wantedName);
-    if (r.status === "locked") {
-      if (await ensureUnlocked(wantedName)) r = await _store.flow.load(wantedName);
-    }
-    if (r.status !== "loaded") {
-      // IDB 没了 / 加密未解锁（取消）→ 停 gallery
-      session.setName(null);
-      updateSaveStatus();
-      await setGalleryOpen(true);
-      setStatus(r.status === "locked"
-        ? `「${wantedName}」是加密作品（已取消解锁）——从图库再打开`
-        : `找不到上次画作 "${wantedName}"，先选一个或新建`);
-      return;
-    }
-    const loaded = await decodeOraToDoc(r.blob);
-    session.adopt(loaded, wantedName);
-    setStatus(`已恢复：${wantedName} (${loaded.layers.length} 层)`);
-    gateCloudSyncOnOpen(wantedName).catch((e) => console.warn("[sync-gate]", e));
-  } catch (e) {
-    console.warn("[session] load failed:", e);
-    session.setName(null);
-    updateSaveStatus();
-    await setGalleryOpen(true);
-    setStatus(`启动加载 "${wantedName}" 失败：${e && e.message || e}`, true);
-  }
-})();
+// Gallery-first 启动恢复（加载上次 session 或停 gallery）= boot.ts bootRestoreSession。
+bootRestoreSession(ctx);
 
 // 笔架深模块装配：mount sheet/settings 组件 + rackStore.configure + 注册 panel + 绑 DOM 事件。
 rack.init({
