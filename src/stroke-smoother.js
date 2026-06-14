@@ -1,32 +1,29 @@
-// 位置平滑 — 时间制二阶临界阻尼 SmoothDamp（时间缓冲）+ 动量弧 tail。详 docs/brush-procreate-smoothing.md。
+// 位置平滑 — 时间常数追踪 + tail。双路径 A/B（dev 面板 firstOrder live 切换对比）。
+// 详 docs/brush-procreate-smoothing.md。
 //
-// 两层：
-//   【时间缓冲 committed】二阶临界阻尼 SmoothDamp，**smoothTime = tau（时间制，用真实 dt）**：
-//     状态 = pos(out) + vel。稳态滞后 ≈ 速度×tau（一致时间滞后，与采样率/笔速/几何无关）→ 跟笔、可控、
-//     顿涌现（转角自然减速→滞后缩小→角紧、无多边形）、去抖（二阶低通，全速一致衰减）、帧率无关（真实 dt）。
-//     比一阶 EMA 多一个 **vel 动量状态**——弧白嫖它、不用估算 heading（一阶不估算只能出直线 tail，故弃）。
-//   【动量弧 tail】每 push 从 (pos, vel·bow) 的拷贝**非破坏地继续跑 SmoothDamp 飞向光标** → 一段弧（贴笔尖预览）。
-//     弧来自 vel 的切向动量；直行 vel 朝光标 → 退化直线。vel 是平滑积分的连续状态 → 弧帧间稳、**不闪**。
-//     抬笔 finish() = 把这段弧整段转正 → 预览所见即所得（≈ Procreate 的动作）。
+// 共同：committed out = 笔尖以固定时间常数 tau 追踪 pen（用真实 dt）→ 滞后≈速度×tau（一致、跟笔、可控、
+//   顿涌现、去抖、帧率无关）。先死区(stabilization)、再追踪。tail = 每 push 重画到光标的贴笔尖预览，
+//   抬笔 finish() 整段转正。cx=[committed out…, tail(末点=pen)]，frozenIndex=_committed-1。
 //
-// 缩放一致：tau 是时间、scale 无关；deadzone 才 ÷scale。
-//
-// 契约（brush.js 用）：push(x,y,p,t) / update(空) / finish / frozenIndex / count / seq / cx,cy,cp。
-//   cx/cy/cp = [committed out(0.._committed-1) … 动量弧 tail(_committed..end，末点=pen)]，frozenIndex=_committed-1。
+// 【A 二阶 SmoothDamp（默认 false=A）】body = 临界阻尼 SmoothDamp(pos+vel,smoothTime=tau,真实 dt)。
+//   tail = 从 (pos, vel·bow) 非破坏继续 flush 到光标 = **动量弧**（vel 真状态→弧白嫖、不估算、帧间稳）。
+// 【B 一阶线性（firstOrder=true）】body = 一阶 `out += (pen−out)(1−exp(−dt/tau))`（无 vel 状态）。
+//   tail = out→pen 的**直线**（不估算 heading → 只能线性；要弧得靠估算，效果不好，故 B 就保持纯线性给对比）。
 
 const FALLBACK_DT = 16;   // 无时间戳（形状工具合成笔触）兜底 dt(ms)
-const FLUSH_DT = 6;       // tail flush 每 tick dt(ms)（只决定弧采样密度，不决定弧形）
+const FLUSH_DT = 6;       // A 的 tail flush 每 tick dt(ms)（只决定采样密度）
 
 export class StrokeSmoother {
-  // opts: { tau:时间常数(ms,0=不平滑), deadzone:死区半径(doc px), tailBow:弧动量增益(1=自然,>1 更鼓,0=直) }
+  // opts: { tau(ms), deadzone(doc px), tailBow(A 弧增益,1=自然), firstOrder(true=B 一阶线性/false=A 二阶动量弧) }
   constructor(opts = {}) {
     this.tau = Math.max(0, opts.tau || 0);
     this.r = Math.max(0, opts.deadzone || 0);
     this.bow = opts.tailBow == null ? 1 : Math.max(0, opts.tailBow);
+    this.firstOrder = !!opts.firstOrder;
     this.cx = []; this.cy = []; this.cp = [];
     this._committed = 0; this._tailLen = 0;
     this.seq = 0;
-    this._ox = 0; this._oy = 0; this._vx = 0; this._vy = 0;   // pos + vel（二阶动量状态）
+    this._ox = 0; this._oy = 0; this._vx = 0; this._vy = 0;   // pos(+ A:vel)
     this._sx = 0; this._sy = 0;        // 死区锚（去抖后的 pen）
     this._lastT = null; this._lastP = 0;
     this._started = false;
@@ -52,27 +49,39 @@ export class StrokeSmoother {
       if (d > this.r) { const k = (d - this.r) / d; this._sx += dx * k; this._sy += dy * k; }
     } else { this._sx = x; this._sy = y; }
 
-    // ② 时间缓冲：二阶时间制 SmoothDamp（推进 pos + vel）
+    // ② 时间缓冲追踪
     let dt = FALLBACK_DT;
     if (t != null) { dt = this._lastT == null ? FALLBACK_DT : Math.max(0.001, t - this._lastT); this._lastT = t; }
-    if (this.tau > 0) {
+    if (this.tau <= 0) {
+      this._ox = this._sx; this._oy = this._sy; this._vx = 0; this._vy = 0;
+    } else if (this.firstOrder) {                       // B：一阶 EMA（无动量）
+      const a = 1 - Math.exp(-dt / this.tau);
+      this._ox += (this._sx - this._ox) * a; this._oy += (this._sy - this._oy) * a;
+    } else {                                            // A：二阶时间制 SmoothDamp
       const s = smoothDamp(this._ox, this._oy, this._vx, this._vy, this._sx, this._sy, this.tau, dt);
       this._ox = s[0]; this._oy = s[1]; this._vx = s[2]; this._vy = s[3];
-    } else { this._ox = this._sx; this._oy = this._sy; this._vx = 0; this._vy = 0; }
+    }
     this.cx.push(this._ox); this.cy.push(this._oy); this.cp.push(p);
     this._committed = this.cx.length;
     this._lastP = p;
 
-    // ③ 动量弧 tail：从 (pos, vel·bow) 继续 flush 到 pen
     this._tailLen = this._buildTail(p);
   }
 
-  // 非破坏地从 (pos, vel·bow) 继续 SmoothDamp 飞向 pen，收集弧点，末点钉 pen。返回点数。
   _buildTail(tp) {
     if (this.tau <= 0) return 0;
-    let px = this._ox, py = this._oy, vx = this._vx * this.bow, vy = this._vy * this.bow;
-    const sx = this._sx, sy = this._sy;
-    if (Math.hypot(px - sx, py - sy) < 0.5 && Math.hypot(vx, vy) < 0.5) return 0;   // 笔尖≈光标且无动量 → 无 tail
+    const ox = this._ox, oy = this._oy, sx = this._sx, sy = this._sy;
+    const dx = sx - ox, dy = sy - oy, d = Math.hypot(dx, dy);
+    if (this.firstOrder) {
+      // B：out→pen 直线（不估算 → 线性 tail），等距采样
+      if (d < 0.5) return 0;
+      const N = Math.max(1, Math.ceil(d / 2)); let n = 0;
+      for (let i = 1; i <= N; i++) { const u = i / N; this.cx.push(ox + dx * u); this.cy.push(oy + dy * u); this.cp.push(tp); n++; }
+      return n;
+    }
+    // A：从 (pos, vel·bow) 继续 SmoothDamp flush 到 pen = 动量弧
+    let px = ox, py = oy, vx = this._vx * this.bow, vy = this._vy * this.bow;
+    if (d < 0.5 && Math.hypot(vx, vy) < 0.5) return 0;
     let n = 0, lax = px, lay = py;
     const MAX = Math.ceil(this.tau / FLUSH_DT * 6) + 64;
     for (let i = 0; i < MAX; i++) {
@@ -81,11 +90,11 @@ export class StrokeSmoother {
       px = s[0]; py = s[1]; vx = s[2]; vy = s[3];
       if (Math.hypot(px - lax, py - lay) >= 0.15) { this.cx.push(px); this.cy.push(py); this.cp.push(tp); n++; lax = px; lay = py; }
     }
-    this.cx.push(sx); this.cy.push(sy); this.cp.push(tp); n++;   // 钉光标（贴指/画到头）
+    this.cx.push(sx); this.cy.push(sy); this.cp.push(tp); n++;
     return n;
   }
 
-  // 抬笔收尾：动量弧 tail 已抵光标 → 整段转正（预览所见即所得）。
+  // 抬笔收尾：tail 已抵光标 → 整段转正（预览所见即所得）。
   finish() {
     if (!this._started) return;
     this._committed = this.cx.length;
