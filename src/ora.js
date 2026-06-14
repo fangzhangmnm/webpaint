@@ -21,22 +21,15 @@ import { WEBPAINT_VERSION } from "./version.js";
 // arrayBuffer() 转 Uint8Array。
 
 import { zipPack, zipUnpack } from "./zip.js";
-import { Layer, PaintDoc, computeClipBaseFor } from "./doc.js";
+import { Layer, PaintDoc } from "./doc.js";
+import { compositeLayers } from "./layer-composite.js";
 import { smartResample } from "./resample.js";
+import { makeBitmap } from "./bitmap.js";
 // 加密对本 codec **不可见**（v235 起）：encode 永远出明文 ora、decode 永远收明文 ora。
 // 包壳/解壳全在 store 深模块（flow.save/load/push/pull 自动处理；密码经 crypt seam）。
 // 拿到加密容器字节请先走 store.unseal / flow.load，别直接喂这里（会报「缺 stack.xml」）。
 
 // ---- 工具 ----
-
-function makeBitmap(w, h) {
-  if (typeof OffscreenCanvas !== "undefined") {
-    try { return new OffscreenCanvas(w, h); } catch (_) {}
-  }
-  const c = document.createElement("canvas");
-  c.width = w; c.height = h;
-  return c;
-}
 
 async function canvasToPngBytes(canvas) {
   // OffscreenCanvas 用 convertToBlob，HTMLCanvasElement 用 toBlob —— 分支
@@ -71,33 +64,9 @@ function renderMerged(doc) {
   const c = makeBitmap(doc.width, doc.height);
   const ctx = c.getContext("2d");
   // v134 (user：「即使 merged 也保留 alpha；ora 里 merged 同处理」)
-  //   不再涂 doc.backgroundColor 作 base —— ora 的 mergedimage.png 也保 alpha
-  //   user 想要白底自己加图层
-  // Clipping mask：详细算法见 doc.js computeClipBaseFor + board.js _renderLayer*
-  const baseFor = computeClipBaseFor(doc.layers);
-  for (let i = 0; i < doc.layers.length; i++) {
-    const L = doc.layers[i];
-    if (!L.visible) continue;
-    if (L.bboxW <= 0 || L.bboxH <= 0) continue;
-    const baseIdx = baseFor[i];
-    const prevA = ctx.globalAlpha;
-    const prevC = ctx.globalCompositeOperation;
-    ctx.globalAlpha = L.opacity;
-    ctx.globalCompositeOperation = L.mode || "source-over";
-    if (baseIdx < 0) {
-      ctx.drawImage(L.canvas, L.bboxX, L.bboxY);
-    } else {
-      const base = doc.layers[baseIdx];
-      const tmp = makeBitmap(L.bboxW, L.bboxH);
-      const tctx = tmp.getContext("2d");
-      tctx.drawImage(L.canvas, 0, 0);
-      tctx.globalCompositeOperation = "destination-in";
-      tctx.drawImage(base.canvas, base.bboxX - L.bboxX, base.bboxY - L.bboxY);
-      ctx.drawImage(tmp, L.bboxX, L.bboxY);
-    }
-    ctx.globalAlpha = prevA;
-    ctx.globalCompositeOperation = prevC;
-  }
+  //   不涂 doc.backgroundColor 作 base —— ora 的 mergedimage.png 保 alpha，user 想要白底自己加层。
+  // 合成走规范合成器（deep module A，含 clip + 组隔离）。ctx 已在 doc 坐标 1:1。无 live overlay。
+  compositeLayers(ctx, doc.layers);
   return c;
 }
 

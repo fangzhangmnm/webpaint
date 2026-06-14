@@ -20,6 +20,8 @@
 //   const blob = await encodeDocToPsd(doc);
 //   // → image/vnd.adobe.photoshop blob，触发下载或 share
 
+import { compositeLayers } from "./layer-composite.js";
+
 // ---- BinaryWriter：动态增长 Uint8Array + big-endian + delayed fill ----
 class BinaryWriter {
   constructor(initialCap = 1024) {
@@ -363,17 +365,9 @@ function writeMergedImage(w, doc, docW, docH) {
   const ctx = c.getContext("2d");
   // 透明背景；merged 自带 alpha
   ctx.clearRect(0, 0, docW, docH);
-  for (const layer of doc.layers) {
-    if (!layer.visible) continue;
-    if (!(layer.bboxW > 0 && layer.bboxH > 0)) continue;
-    const prevAlpha = ctx.globalAlpha;
-    const prevComp = ctx.globalCompositeOperation;
-    ctx.globalAlpha = layer.opacity ?? 1;
-    ctx.globalCompositeOperation = layer.mode || "source-over";
-    ctx.drawImage(layer.canvas, layer.bboxX, layer.bboxY);
-    ctx.globalAlpha = prevAlpha;
-    ctx.globalCompositeOperation = prevComp;
-  }
+  // 走规范合成器（deep module A）：respect clip + mode + 组隔离（修旧实现无视 clip 的 bug）。
+  // ctx 在 doc 坐标 1:1。组在 PSD 子集里没有原生表达 → 合成器把组拍平进 merged 通道（视觉一致）。
+  compositeLayers(ctx, doc.layers);
   const img = ctx.getImageData(0, 0, docW, docH);
   const ch = splitRGBAChannels(img.data, docW, docH);
 

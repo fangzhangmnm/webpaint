@@ -875,23 +875,18 @@ export class InputController {
       window.dispatchEvent(new CustomEvent("wp:pickerHide"));
       return;
     }
-    // 吸的是"合成后的可见颜色"。从所有可见图层底向上 alpha-blend。
-    let r = 0, g = 0, b = 0, a = 0;
-    // doc 背景作为底
+    // 吸"最终合成可见颜色"——直接读 board 的 1:1 doc 合成缓存（deep module A 的产物，
+    //   respect mode + clip + 组隔离，修旧实现无视 mode/clip 的 bug）。再 over doc 背景得不透明色。
+    const off = this.board.ensureCompositeCache();
+    const octx = off.getContext("2d", { willReadFrequently: true });
+    let px;
+    try { px = octx.getImageData(ix, iy, 1, 1).data; } catch { px = [0, 0, 0, 0]; }
     const bg = parseHex(this.doc.backgroundColor || "#ffffff");
-    r = bg.r; g = bg.g; b = bg.b; a = 1;
-    for (const layer of this.doc.layers) {
-      if (!layer.visible) continue;
-      const px = layer.sampleAt(ix, iy);
-      const la = (px[3] / 255) * layer.opacity;
-      if (la <= 0) continue;
-      // source-over 合成（其他 mode 简化处理，吸色按 over 也是惯例）
-      const inv = 1 - la;
-      r = px[0] * la + r * inv;
-      g = px[1] * la + g * inv;
-      b = px[2] * la + b * inv;
-      a = la + a * inv;
-    }
+    const la = px[3] / 255;
+    const inv = 1 - la;
+    const r = px[0] * la + bg.r * inv;
+    const g = px[1] * la + bg.g * inv;
+    const b = px[2] * la + bg.b * inv;
     const hex = "#" +
       [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
     this.onColorSampled(hex);

@@ -1,6 +1,7 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
 import { drawMesh, renderQuadPerPixel } from "./lasso.js";
-import { computeClipBaseFor } from "./doc.js";
+import { compositeLayers } from "./layer-composite.js";
+import { makeBitmap } from "./bitmap.js";
 //
 // 坐标系：
 //   doc 坐标 = 像素左上原点，单位 = doc 像素（document px）
@@ -335,96 +336,8 @@ export class Board {
     tctx.globalCompositeOperation = "source-over";
     return { ...overlay, canvas: tmp };
   }
-  // 给一颗 clipping mask 层做 dst-in 剪裁 + composite 到 ctx。
-  // 算法：在 tmp 上先以 layer.bbox 局部坐标渲染 (layer + overlay) → dst-in base alpha
-  //       → 把 tmp 当一张 (bboxW × bboxH) image drawImage 到 ctx 的 doc 坐标 bbox 位置。
-  // 注意：tmp 复用，先 clearRect(0, 0, bboxW, bboxH) 防上一次脏数据残留。
-  _renderLayerClipped(ctx, layer, baseLayer, overlay) {
-    // 区域 = layer bbox ∪ overlay bbox。layer 空(第一笔)、或 overlay 超出 layer bbox(笔触进行中
-    //   buffer 比 layer 大) 时，都要让区域覆盖 overlay，否则 overlay 被 tmp 尺寸裁掉。
-    let rx0 = Infinity, ry0 = Infinity, rx1 = -Infinity, ry1 = -Infinity;
-    if (layer.bboxW > 0 && layer.bboxH > 0) {
-      rx0 = layer.bboxX; ry0 = layer.bboxY; rx1 = layer.bboxX + layer.bboxW; ry1 = layer.bboxY + layer.bboxH;
-    }
-    if (overlay) {
-      rx0 = Math.min(rx0, overlay.bboxX); ry0 = Math.min(ry0, overlay.bboxY);
-      rx1 = Math.max(rx1, overlay.bboxX + overlay.bboxW); ry1 = Math.max(ry1, overlay.bboxY + overlay.bboxH);
-    }
-    const rw = rx1 - rx0, rh = ry1 - ry0;
-    if (rw <= 0 || rh <= 0) return;
-    const tmp = this._getClipTmp(rw, rh);
-    const tctx = tmp.getContext("2d");
-    tctx.setTransform(1, 0, 0, 1, 0, 0);
-    tctx.clearRect(0, 0, rw, rh);
-    // 平移使区域左上 (rx0,ry0) 对齐到 tmp (0,0) → _drawLayerWithOverlay 用 doc 绝对坐标画
-    tctx.setTransform(1, 0, 0, 1, -rx0, -ry0);
-    this._drawLayerWithOverlay(tctx, layer, overlay);
-    tctx.setTransform(1, 0, 0, 1, 0, 0);
-    tctx.globalCompositeOperation = "destination-in";
-    tctx.drawImage(baseLayer.canvas, baseLayer.bboxX - rx0, baseLayer.bboxY - ry0);
-    tctx.globalCompositeOperation = "source-over";
-    ctx.drawImage(tmp, 0, 0, rw, rh, rx0, ry0, rw, rh);
-  }
-
-  // 把 (layer, overlay) 在 ctx 上 composite。ctx 已经被调用方 setTransform
-  // 到 **doc 坐标系**（doc (0,0) = ctx origin，doc (W,H) = (W,H) in ctx）。
-  // 所以这里 drawImage 的 dest 直接用 layer.bboxX/Y/W/H（doc 坐标）。
-  _drawLayerWithOverlay(ctx, layer, overlay) {
-    // v113: 颜色调整 live preview 走 surrogate canvas（per-pixel BCSH 烤好的）
-    const sourceCanvas = (this._activeSurrogateLayerId === layer.id && this._activeSurrogateCanvas)
-      ? this._activeSurrogateCanvas : layer.canvas;
-    // 空 layer(bbox=0) 没像素：drawImage 0 宽会抛 IndexSizeError → 跳过层像素，只画 overlay
-    const hasLayerPixels = layer.bboxW > 0 && layer.bboxH > 0;
-    // overlay 落到本层的合成算子：erase=destination-out；否则 per-brush blendMode（默认 source-over）。
-    const overlayOp = !overlay ? "source-over"
-      : overlay.mode === "erase" ? "destination-out"
-      : (overlay.blendMode || "source-over");
-    // 快通路：无 overlay，或普通叠加 → 直接落到 ctx
-    if (overlayOp === "source-over") {
-      if (hasLayerPixels) {
-        ctx.drawImage(
-          sourceCanvas, 0, 0, layer.bboxW, layer.bboxH,
-          layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH,
-        );
-      }
-      if (overlay) {
-        const prevA = ctx.globalAlpha;
-        ctx.globalAlpha = ctx.globalAlpha * overlay.opacity;
-        ctx.drawImage(
-          overlay.canvas, 0, 0, overlay.bboxW, overlay.bboxH,
-          overlay.bboxX, overlay.bboxY, overlay.bboxW, overlay.bboxH,
-        );
-        ctx.globalAlpha = prevA;
-      }
-      return;
-    }
-    // 复合通路（erase / 混合模式）：overlay 必须只对**本层像素**做合成（不能直接落 ctx——
-    //   ctx 已带 layer.mode + 下方所有层）。在临时画布上 (layer ⊕ overlay) 烤好，再整体按 ctx 当前
-    //   (layer.mode / opacity) blit。结果 = commit 后的样子（_compositeBufferToLayer 同 op）。
-    // erase 空 layer 没像素可擦 → 跳过；混合模式在空 layer 上 = 直接显示 stroke（仍要画）。
-    if (!hasLayerPixels && overlay.mode === "erase") return;
-    // 区域 = layer bbox ∪ overlay bbox（overlay 可能比 layer 大 / layer 空）
-    let rx0 = Infinity, ry0 = Infinity, rx1 = -Infinity, ry1 = -Infinity;
-    if (hasLayerPixels) {
-      rx0 = layer.bboxX; ry0 = layer.bboxY; rx1 = layer.bboxX + layer.bboxW; ry1 = layer.bboxY + layer.bboxH;
-    }
-    rx0 = Math.min(rx0, overlay.bboxX); ry0 = Math.min(ry0, overlay.bboxY);
-    rx1 = Math.max(rx1, overlay.bboxX + overlay.bboxW); ry1 = Math.max(ry1, overlay.bboxY + overlay.bboxH);
-    const rw = rx1 - rx0, rh = ry1 - ry0;
-    if (rw <= 0 || rh <= 0) return;
-    const ec = this._getEraseComposite(rw, rh);
-    const ectx = ec.getContext("2d");
-    ectx.setTransform(1, 0, 0, 1, 0, 0);
-    ectx.clearRect(0, 0, rw, rh);
-    ectx.globalCompositeOperation = "source-over";
-    if (hasLayerPixels) ectx.drawImage(sourceCanvas, layer.bboxX - rx0, layer.bboxY - ry0);
-    ectx.globalAlpha = overlay.opacity;
-    ectx.globalCompositeOperation = overlayOp;
-    ectx.drawImage(overlay.canvas, overlay.bboxX - rx0, overlay.bboxY - ry0);
-    ectx.globalAlpha = 1;
-    ectx.globalCompositeOperation = "source-over";
-    ctx.drawImage(ec, 0, 0, rw, rh, rx0, ry0, rw, rh);
-  }
+  // 注：层合成（含 clip dst-in 基底、erase/混合 overlay 复合通路）已下沉到 src/layer-composite.js
+  //   （deep module A）。board 经 _renderLayers 的 opts 注入 surrogate / overlay 裁剪 / tmp 池。
 
   // 把 ctx 设到 "doc 坐标系"：doc (0,0) 映射到 ctx 当前 origin，含 dpr +
   // viewport (tx,ty,scale,rot) 全部。setTransform 接 6 浮点 a,b,c,d,e,f：
@@ -500,6 +413,8 @@ export class Board {
 
   render() {
     if (!this.doc) return;
+    // 内容脏（非纯视口变）→ 作废 1:1 合成缓存。pan/zoom 不置 dirty → 缓存留存只 re-blit。
+    if (this._dirtyFull || this._dirtyDocRect) this._compositeCacheDirty = true;
     if (this._dirtyFull || !this._dirtyDocRect) {
       this._renderFull();
     } else {
@@ -540,8 +455,14 @@ export class Board {
       ctx.fillRect(0, 0, this.doc.width, this.doc.height);
     }
 
-    // 逐 layer（带 clipping mask 处理）
-    this._renderLayers(ctx);
+    // 逐 layer（带 clipping mask 处理）。
+    //   白边修：静态视图走 1:1 doc 合成缓存 + 单次缩放 blit（消层间亚像素缝）；
+    //   实时（描边/调整预览）走直接合成到屏幕（保描边手感 = 旧行为）。
+    if (this._isLivePreview()) {
+      this._renderLayers(ctx);
+    } else {
+      this._blitCompositeCache(ctx);
+    }
 
     // 套索 overlay（蚂蚁线 / drawing path / floating / handles，doc 坐标系）
     this._drawLassoOverlay(ctx, scale);
@@ -634,36 +555,62 @@ export class Board {
   }
   // 一段逻辑两处用（_renderFull / _renderPartial）。带 clipping mask 处理。
   // ctx 已经在 doc 坐标系（drawImage 的 dest 用 doc 坐标）。
-  _renderLayers(ctx) {
+  // board 注入规范合成器（deep module A）的实时特性 opts：
+  //   - source: 颜色调整 live preview 的 surrogate canvas 替换
+  //   - overlayFor: 笔刷 live overlay（含 选区 + 锁α 的 preview 裁剪，与 pen-up 的 source-atop 一致）
+  //   - clipTmp / eraseTmp: board 的复用离屏池（grow-only，避免每帧分配）
+  _layerCompositeOpts() {
     const overlay = this._overlayProvider?.();
-    const layers = this.doc.layers;
-    const baseFor = computeClipBaseFor(layers);
-    for (let i = 0; i < layers.length; i++) {
-      const layer = layers[i];
-      if (!layer.visible) continue;
-      let lOverlay = overlay && overlay.layer === layer ? overlay : null;
-      // v154 修：空 layer(bbox=0) 也要画 live overlay。新 buffered beginStroke 不碰 layer →
-      //   新建层 / 新作品的**第一笔**画时 layer 仍空；旧逻辑在这 continue 掉 → 第一笔画时不显示、
-      //   抬笔 commit 才出。overlay 是 doc 坐标的，不依赖 layer bbox。空 layer 且无 overlay 才真没东西画。
-      if ((layer.bboxW <= 0 || layer.bboxH <= 0) && !lOverlay) continue;
-      const prevAlpha = ctx.globalAlpha;
-      const prevComp = ctx.globalCompositeOperation;
-      ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = layer.mode || "source-over";
-      // 笔刷 live overlay 也要 respect 选区 + 锁定不透明度：画里实时看到限制范围
-      //   v242：锁α 时按 layer 现有 alpha 裁，预览与 pen-up 的 source-atop 一致（不再"先溢出后回缩"）
-      if (lOverlay && (this.doc.selection || layer.lockAlpha)) {
-        lOverlay = this._clipOverlayMasks(lOverlay, this.doc.selection, layer.lockAlpha ? layer : null);
-      }
-      const baseIdx = baseFor[i];
-      if (baseIdx < 0) {
-        this._drawLayerWithOverlay(ctx, layer, lOverlay);
-      } else {
-        this._renderLayerClipped(ctx, layer, layers[baseIdx], lOverlay);
-      }
-      ctx.globalAlpha = prevAlpha;
-      ctx.globalCompositeOperation = prevComp;
+    return {
+      source: (layer) =>
+        (this._activeSurrogateLayerId === layer.id && this._activeSurrogateCanvas)
+          ? this._activeSurrogateCanvas : layer.canvas,
+      overlayFor: (layer) => {
+        let lOverlay = overlay && overlay.layer === layer ? overlay : null;
+        if (lOverlay && (this.doc.selection || layer.lockAlpha)) {
+          lOverlay = this._clipOverlayMasks(lOverlay, this.doc.selection, layer.lockAlpha ? layer : null);
+        }
+        return lOverlay;
+      },
+      clipTmp: (w, h) => this._getClipTmp(w, h),
+      eraseTmp: (w, h) => this._getEraseComposite(w, h),
+    };
+  }
+  // 直接合成到 ctx（ctx 已在 doc 坐标）。实时（描边/调整预览）路径用。
+  _renderLayers(ctx) {
+    compositeLayers(ctx, this.doc.layers, this._layerCompositeOpts());
+  }
+  // 实时预览中？= 有笔刷 overlay / 调整 surrogate / stroke 进行中。实时走直接合成（保手感）；
+  //   静态走 1:1 缓存（白边修）。
+  _isLivePreview() {
+    return !!(this._overlayProvider?.() || this._activeSurrogateCanvas
+      || (this._strokeActiveHint && this._strokeActiveHint()));
+  }
+  // 白边修：把全 doc 合成到 1:1 doc 像素离屏缓存（层间整数对齐，无亚像素缝），再单次缩放 blit。
+  //   缓存只在内容脏时重建；pan/zoom（视口变、内容没变）→ 命中缓存只 re-blit（比旧逐层缩放更快）。
+  //   吸管取色也读这块缓存（= 最终合成像素，respect mode/clip）。
+  ensureCompositeCache() {
+    const W = this.doc.width, H = this.doc.height;
+    let off = this._compositeCache;
+    if (!off || off.width !== W || off.height !== H) {
+      off = this._compositeCache = makeBitmap(W, H);
+      this._compositeCacheDirty = true;
     }
+    if (this._compositeCacheDirty) {
+      const octx = off.getContext("2d", { willReadFrequently: true });
+      octx.setTransform(1, 0, 0, 1, 0, 0);
+      octx.clearRect(0, 0, W, H);
+      octx.imageSmoothingEnabled = true;
+      octx.imageSmoothingQuality = "low";
+      compositeLayers(octx, this.doc.layers, this._layerCompositeOpts());
+      this._compositeCacheDirty = false;
+    }
+    return off;
+  }
+  _blitCompositeCache(ctx) {
+    const off = this.ensureCompositeCache();
+    // ctx 已在 doc 坐标（含 dpr/scale/rot）；off 是 doc 1:1 → 单次缩放 blit，层间已整数对齐 = 无白缝。
+    ctx.drawImage(off, 0, 0);
   }
 
   // 套索 overlay：

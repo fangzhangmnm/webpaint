@@ -21,12 +21,21 @@
 //   按报错往 dom-shim.mjs 补一个 stub 即可（不是测试坏了，是 boot 摸到了新面）。
 
 import { describe, it, assert } from "./runner.mjs";
-import { installDomShim } from "./dom-shim.mjs";
+import { installDomShim, makeNode } from "./dom-shim.mjs";
 
 describe("app.js 组合根 boot smoke", () => {
   it("import app.js：22×initX + 5×Vue mount + reactive flush 全程不抛", async () => {
     // hermetic：测完复原全局，否则假 window 会顶掉后续 crypto/store 测试依赖的 globalThis.window.zip。
     const uninstallDomShim = installDomShim();
+
+    // board 的 1:1 合成缓存（白边修）在 boot 期即建离屏 → 用 OffscreenCanvas。前面 selection-morph /
+    // doc-* 测试会往 globalThis.OffscreenCanvas 漏一个极简 stub（无 setTransform/clearRect），boot 摸到就炸。
+    // 这里装一个 shim 撑起的完整 OffscreenCanvas（getContext 走 makeCtx2d，全 NOOP 但方法齐），finally 复原。
+    const prevOSC = globalThis.OffscreenCanvas;
+    globalThis.OffscreenCanvas = class OffscreenCanvasShim {
+      constructor(w, h) { this.width = w; this.height = h; this._n = makeNode("canvas"); }
+      getContext(type, opts) { return this._n.getContext(type, opts); }
+    };
 
     // app boot 会起常驻 timer（cloud-freshness idle tick 的 setInterval、RAF、2s 后的 cloud check）。
     // 包住 global timer 工厂，settle 后全清——否则 `node test/run.mjs` 跑完套件不退出。
@@ -55,6 +64,7 @@ describe("app.js 组合根 boot smoke", () => {
       globalThis.setInterval = origSI; globalThis.setTimeout = origST;
       for (const h of intervals) clearInterval(h);
       for (const h of timeouts) clearTimeout(h);
+      globalThis.OffscreenCanvas = prevOSC;
       uninstallDomShim();
     }
 
