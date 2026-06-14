@@ -18,7 +18,7 @@ import { PaintDoc } from "./doc.js";
 import { Board } from "./board.js";
 import { InputController } from "./input.js";
 import { PixelEdit } from "./pixel-edit.js";   // compressPixelSnap/applyPixelSnap 切到 layer-undo/topbar-menu
-import { resolveBrush } from "./resolved-brush.js";
+import { makeCurrentBrush } from "./current-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolved-brush.js）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
 import { UndoStack } from "./history.js";
 import { EditMode } from "./edit-mode.js";
@@ -55,7 +55,7 @@ import { initTopbarMenu } from "./topbar-menu.ts";
 import { initPlatformGuards } from "./platform-guards.ts";
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
 import { stepFor as _stepFor, quantizeSize as _quantizeSize } from "./ui/brush-size.ts";   // [ ] 键盘调粗用（slider 映射在 <LeftDial>）
-import { computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";   // candidate 1 · currentBrush computed + 引擎桥 watch
+import { watch } from "../vendor/vue/vue.esm-browser.prod.js";   // 加密常驻指示 watch（currentBrush computed + 引擎桥已下沉 current-brush.ts）
 import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排：笔架异步 boot + gallery-first 恢复
 // Selection 切到 selection-ops.ts；smooth-config（SMOOTH/saveSmooth/resetSmooth）切到 smooth-dev-panel.ts
 // v132 (user：「所有 color adjustment 做成第一方默认安装的插件」)
@@ -119,35 +119,8 @@ const leftDial = mountLeftDial(els.leftDialMount, {
   onBrushLongpress: () => { const b = rack.findToolBrush(_leftDial()); if (b) { closeExclusive(); rack.openBrushSettings(b.id); } },
 });
 
-// ============ 当前笔（ResolvedBrush）——引擎唯一吃的不可变值 ============
-// candidate 3 收敛成不可变值；candidate 1（toolStates dial）再把派生收成反应式 computed：
-//   旧 refreshCurrentBrush() 手动 fan-out（8 处）→ currentBrush computed，从反应式 SSoT 自动重算。
-//   SSoT = ① 当前工具 dial（toolStates，per-doc，reactive）② 活动预设（笔架，rackVersion 触发）③ 全局 color ④ 全局压感开关。
-//   getBrushSettings 返回 _currentBrush；rack⟂engine 由「值」结构性保证（见 resolved-brush.js）。
-// 当前笔 = 纯 computed（从反应式 SSoT 派生）。引擎只读 currentBrush.value（stroke begin 时取，非每 stamp）。
-// dial(toolStates) / color / 压感 / tool / rackVersion 任一变 → 自动重算 → 下面 watch 同步 invalidateStamp。
-// 各处旧的手动 refreshCurrentBrush() 全删（reactivity 替代散落 fan-out）。
-// **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。
-const currentBrush = computed(() => {
-  void dialReactive.rackVersion;   // 依赖笔架版本（编辑/重置预设后重算活动预设字段）
-  const ts = state.toolStates[rack.getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
-  const preset = rack.findToolBrushPure(ts);   // 无笔架 → null → DEFAULT 兜底
-  return resolveBrush({
-    preset,
-    size: ts.size, opacity: ts.opacity ?? 1.0, flow: ts.flow ?? 1.0,
-    color: state.color,
-    pressureToSize: state.pressureToSize,
-    pressureToOpacity: state.pressureToOpacity,
-  });
-});
-// 命令/反应桥：当前笔变 → 引擎 stamp 缓存失效（flush:sync 复刻旧 refreshCurrentBrush 的同步时机）。
-// cb 守 input?.（boot 期 input 未建时的 dep 变动 = no-op）。这是「反应式 UI 态 ↔ 裸引擎态」唯一的桥，故意留命令式。
-watch(currentBrush, () => { if (input?.brush?.invalidateStamp) input.brush.invalidateStamp(); }, { flush: "sync" });
-
-// 当前工具的 dial（size/opacity/flow + activeBrushId），shapes/airbrush alias 到 brush。
-function currentDials() {
-  return state.toolStates[rack.getRackToolKey(editMode.current())] || state.toolStates.brush;
-}
+// 当前笔（ResolvedBrush，引擎唯一吃的不可变值）派生 + 引擎桥 = current-brush.ts makeCurrentBrush，
+// 在 editMode 构造后调（currentDials 需 editMode），见下方。手感数学全在 resolveBrush，这里只装配。
 
 
 // 笔粗分段量化（_segPositions/sliderPosToSize/sizeToSliderPos/_sliderMaxPos/_stepFor/_quantizeSize）
@@ -160,6 +133,9 @@ function currentDials() {
 const history = new UndoStack({ max: 50 });
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。
 const editMode = new EditMode({ initialTool: "brush" });
+// 当前笔派生（dial+预设+color+压感 → ResolvedBrush）+ 当前 dial + 引擎桥（current-brush.ts）。
+// 必须在 editMode 后、input 前（input.getBrushSettings 读 currentBrush.value）。
+const { currentBrush, currentDials, bindEngine } = makeCurrentBrush({ state, dialReactive, rack, editMode });
 // PixelEdit：纯像素（stroke/liquify/filterBrush）的 undo 事务 + handler。
 // 和 UndoStack 平级，注入 input。见 pixel-edit.js / CONTEXT.md。
 const pixelHistory = new PixelEdit({ doc, history, board });
@@ -176,6 +152,8 @@ const input = new InputController(board, doc, {
   pixelHistory,
   editMode,
 });
+// 引擎桥：currentBrush 变 → input.brush.invalidateStamp（flush:"sync"）。input 现已建好。
+bindEngine(input);
 
 // transient 面板抑制·复原 + panel z-order bringTop + transform commit/cancel 护栏 = transient-panels.ts。
 

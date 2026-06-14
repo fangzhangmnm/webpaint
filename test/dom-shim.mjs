@@ -247,7 +247,8 @@ function makeStorage() {
 // 安装全局，返回 uninstall()。**必须 hermetic**：本套件其他测试（crypto/store）靠 globalThis.window.zip
 // 等全局；垫片把 window 换成假对象会污染它们（曾 24 个 crypto 测试因此假红）。故快照原值、测试 finally 里复原。
 export function installDomShim() {
-  if (globalThis.__domShimInstalled) return globalThis.__domShimUninstall || (() => {});
+  // 已装（含套件级 dom-shim-first 装的）→ 返回 no-op uninstall，调用方的 finally 不会误拆套件 shim。
+  if (globalThis.__domShimInstalled) return () => {};
   const document = makeDocument();
   _storage = makeStorage();
 
