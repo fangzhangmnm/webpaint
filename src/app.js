@@ -244,16 +244,35 @@ rack.load().then(() => {
 
 
 // Composition Root：core 单例 + 跨模块函数装进显式 ctx，传给每个 initX(ctx)（取代全局 rt）。
-const ctx = {
+// ctx 一次构造、即刻冻结（survey S1/S2 + boot-smoke 的搭档）。两道守卫，各有边界：
+//   · Object.freeze：ESM strict 下任何 `ctx.x = …` 二次突变即抛——杜绝肢解时那套
+//     「null 占位 + 晚期 Object.assign」两阶段突变复活。ctx 自此不可变、一次成形。
+//   · 构造期断言：键在场但值为 undefined（import 名写错 / 引用未定义）→ boot 即响亮报错。
+// 抓不到的（固有盲区，归 survey rec #2(a) 的「每 initX 声明自用 key」）：键整个漏写进字面量——
+//   消费方只在事件 handler 里读到 undefined（boot 不触及，故 boot-smoke 也抓不到，仍是「点到才炸」）。
+// 全部键早绑（import / hoisted function / 上方 const）；唯一晚绑是 gallery：用 getter 透传下方
+// const（init 体只「存」不「解引用」，晚 init 在 gallery 构造后跑→读到真值，故无需 null 占位/二次 assign）。
+function freezeCtx(obj) {
+  for (const k of Object.keys(obj)) {
+    if (Object.getOwnPropertyDescriptor(obj, k).get) continue;   // getter（gallery）懒求值，构造期跳过
+    if (obj[k] === undefined) throw new Error(`[ctx] 组合根键 "${k}" 构造时值为 undefined（import 名写错或引用未定义）`);
+  }
+  return Object.freeze(obj);
+}
+const ctx = freezeCtx({
   state, dialReactive, currentBrush, editMode, doc, board, input, history, pixelHistory,
   rack, store: _store, setStatus, withBusy, leftDial,
-  updateSaveStatus, updateZoomLabel,
+  updateSaveStatus, updateZoomLabel, updateNewerBanner,
   _suppressTransientPanels, _restoreTransientPanels, layerSpecFrom, _bringPanelTop,
   _commitTransform, _cancelTransform, selectionToNewLayer,
   importImageAsLayer,   // selection-ops 的 Ctrl+V 粘贴 / drop 用（hoisted function）
   afterDocChange: _afterDocChange,
-  gallery: null,   // 晚绑（gallery 后建）
-};
+  referenceWindow, paletteWindow,   // side-windows.ts 的 import（module-eval 即构造，早可用）
+  setColor, applyCheckerboard, renderLayersPanel,
+  setGalleryOpen, gateCloudSyncOnOpen, checkQuotaAndWarn, uniqueLocalName,
+  getLocalSavedAtLabel, showFullscreenBusy, hideFullscreenBusy,
+  get gallery() { return gallery; },   // 晚绑：gallery const 在下方 mountGallery 处构造
+});
 initColorPanel(ctx);
 initTheme(ctx);
 initLayersPanel(ctx);
@@ -375,19 +394,9 @@ const gallery = mountGallery(document.getElementById("galleryMount"), {
   // 画布耦合操作（open/push/unload/rename/exit/setName）gallery.ts 直调 session.*，不再经 host。
 });
 
-// 晚绑 rt（gallery 是 const，非 hoisted）+ 云账号 UI init（src/cloud-auth-ui.ts）
-ctx.gallery = gallery;
-// candidate 3 · 活动文档生命周期：把晚声明的 app-local 协作件补进 ctx 后 init session-state。
-// referenceWindow/paletteWindow 是 const（前面已声明）；其余是 hoisted function 声明，引用安全。
-Object.assign(ctx, {
-  referenceWindow, paletteWindow,
-  updateNewerBanner,
-  setColor, applyCheckerboard, renderLayersPanel,
-  setGalleryOpen, gateCloudSyncOnOpen, checkQuotaAndWarn, uniqueLocalName,
-  getLocalSavedAtLabel,
-  showFullscreenBusy, hideFullscreenBusy,
-});
-setSessionGallery(gallery);   // session 的晚绑 gallery handle
+// gallery 现由 ctx 的 getter 透传（不再 ctx.gallery= / Object.assign 二次突变——ctx 已冻结、一次构造）。
+// 晚 init 在此之后跑，故各模块 init 体里的 `x = ctx.gallery` 读到真值。
+setSessionGallery(gallery);   // session 的晚绑 gallery handle（getter 已使其 init 期即读到真值；此调用保持幂等冗余）
 initSession(ctx);
 initCloudFreshness(ctx);   // 前台云端新鲜度（需 board/withBusy/setStatus/updateSaveStatus）
 initImportImage(ctx);      // 图片/.ora 导入（需 late ctx：applyCheckerboard/renderLayersPanel/setGalleryOpen/uniqueLocalName）
