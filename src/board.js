@@ -484,21 +484,14 @@ export class Board {
       ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
     }
 
-    // doc 背景：默认 backgroundColor；开了棋盘则画半透明灰白格（Procreate 透明背景同款）
-    if (this._showCheckerboard) {
-      this._drawCheckerboard(ctx, this.doc.width, this.doc.height);
-    } else {
-      ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
-      ctx.fillRect(0, 0, this.doc.width, this.doc.height);
-    }
-
-    // 逐 layer（带 clipping mask 处理）。
-    //   白边修：静态视图走 1:1 doc 合成缓存 + 单次缩放 blit（消层间亚像素缝）；
-    //   实时（描边/调整预览）走直接合成到屏幕（保描边手感 = 旧行为）。
+    // doc 背景 + 图层。**一致性铁律**：实时与缓存都让 layer blend 落在**同一底**（doc bg）上，
+    //   否则混合模式（multiply 等）实时(over bg) ≠ 缓存(over 透明) → 抬笔"弹回"（v275 回归 bug）。
+    //   白边修：静态走 1:1 doc 合成缓存（bg+layers 整数对齐）+ 单次缩放 blit；实时直接合成保手感。
     if (this._isLivePreview()) {
+      this._drawDocBg(ctx);
       this._renderLayers(ctx);
     } else {
-      this._blitCompositeCache(ctx);
+      this._blitCompositeCache(ctx);   // 缓存已含 doc bg（与实时同底）
     }
 
     // 套索 overlay（蚂蚁线 / drawing path / floating / handles，doc 坐标系）
@@ -509,6 +502,17 @@ export class Board {
     ctx.strokeStyle = "rgba(0,0,0,0.18)";
     ctx.lineWidth = 1 / scale;
     ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+  }
+
+  // doc 底色（棋盘 = 透明指示；否则 backgroundColor）。实时路径画到屏幕、缓存路径画到离屏——
+  //   两处用同一底，保混合模式合成一致（见 _renderFull / ensureCompositeCache）。
+  _drawDocBg(ctx) {
+    if (this._showCheckerboard) {
+      this._drawCheckerboard(ctx, this.doc.width, this.doc.height);
+    } else {
+      ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
+      ctx.fillRect(0, 0, this.doc.width, this.doc.height);
+    }
   }
 
   // （旧 _renderPartial / clip-window + Windows 黑缝 floor-ceil 补丁已删：v275 拥抱 full-composite，
@@ -561,6 +565,7 @@ export class Board {
       octx.clearRect(0, 0, W, H);
       octx.imageSmoothingEnabled = true;
       octx.imageSmoothingQuality = "low";
+      this._drawDocBg(octx);   // 缓存含 doc bg → 混合模式 over bg，与实时同底（修抬笔"弹回"）
       compositeLayers(octx, this.doc.layers, this._layerCompositeOpts());
       this._compositeCacheDirty = false;
     }
