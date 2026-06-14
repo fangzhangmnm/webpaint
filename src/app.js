@@ -289,7 +289,7 @@ initDevConsole();
 // localStorage.webpaint.currentSessionName 真实持久化 active session name；
 // 空字符串 = "在 gallery 没绑定任何画作"，refresh 后停 gallery。
 
-// 锚定 popup 定位 helper（openAnchoredPopup/closeAnchoredPopup/toggleAnchoredPopup/anchorPopupToBtn）= anchored-popup.ts。
+// 锚定 popup 定位 helper（positionPopup 核心 + anchorPopupToBtn/anchorPopupBelowToolbars wrapper）= anchored-popup.ts。
 // withBusy / showFullscreenBusy / hideFullscreenBusy = fullscreen-busy.ts。
 // 等云端 push 完成（防 status race）= session.awaitCloudPushIdle()，定义在 session-state.ts。
 

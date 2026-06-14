@@ -11,6 +11,7 @@ import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { applyTheme, cycleTheme, THEME_LABEL } from "./theme.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.js";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
+import { positionPopup } from "./anchored-popup.ts";
 
 let state: any, board: any, setStatus: any, store: any, updateSaveStatus: any;
 
@@ -93,12 +94,9 @@ export function setMenuOpen(open: any) {
   els.menuPanel.classList.toggle("hidden", !open);
   els.menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) {
-    // v124 menu panel 跟随菜单按钮屏坐标（top-bar 居中 transform，
-    // 用 viewport 写死的 left: 12px 在宽屏上对不齐图标）
-    const r = els.menuBtn.getBoundingClientRect();
-    els.menuPanel.style.top = (r.bottom + 6) + "px";
-    els.menuPanel.style.left = r.left + "px";
-    els.menuPanel.style.right = "auto";
+    // v124 menu panel 跟随菜单按钮屏坐标（top-bar 居中 transform，写死 left 在宽屏对不齐图标）。
+    // v270：改走统一 positionPopup（左对齐到按钮 + safe-area + 夹视口），不再手搓坐标。
+    positionPopup(els.menuPanel, { anchor: els.menuBtn, align: "left", offsetY: 6 });
     _updateMenuCropLabel?.();
   }
 }
