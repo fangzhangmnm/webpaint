@@ -95,6 +95,7 @@ export class Board {
   setDoc(doc) {
     this.doc = doc;
     this._dirtyFull = true;
+    this._compositeCacheDirty = true;   // 新 doc → 合成缓存作废
     this.fitToScreen();
   }
 
@@ -116,6 +117,7 @@ export class Board {
 
   // 由 BrushEngine 报告："这一帧 layer 像素被改在这片 doc-px bbox 里"
   markDocDirty(x0, y0, x1, y1) {
+    this._compositeCacheDirty = true;   // 像素改 → 合成缓存作废（描边中走直接合成，commit 后才重建）
     if (this._dirtyDocRect) {
       const d = this._dirtyDocRect;
       if (x0 < d[0]) d[0] = x0;
@@ -252,6 +254,7 @@ export class Board {
   // 公共 API：layer 像素被改了（图层结构变 / 切换 / putImageData 等）
   invalidateAll() {
     this._dirtyFull = true;
+    this._compositeCacheDirty = true;   // 图层/结构/doc-transform 变 → 合成缓存作废
     this.requestRender();
   }
 
@@ -413,16 +416,50 @@ export class Board {
 
   render() {
     if (!this.doc) return;
-    // 内容脏（非纯视口变）→ 作废 1:1 合成缓存。pan/zoom 不置 dirty → 缓存留存只 re-blit。
-    if (this._dirtyFull || this._dirtyDocRect) this._compositeCacheDirty = true;
-    if (this._dirtyFull || !this._dirtyDocRect) {
-      this._renderFull();
-    } else {
-      this._renderPartial(this._dirtyDocRect);
-    }
+    // v275：拥抱 full-composite —— 删 partial/clip-window + 黑缝补丁。每帧 _renderFull：
+    //   实时（描边/调整预览）直接合成到屏幕；静态走 1:1 doc 合成缓存（命中只 blit）。
+    //   **缓存失效只跟内容/结构变**（markDocDirty / invalidateAll / setDoc 置 _compositeCacheDirty），
+    //   不跟视口变 → pan/zoom 不重建缓存（修卡顿根因：旧版 _dirtyFull 含视口 → 每帧重建 2048²）。
+    this._renderFull();
     this._dirtyDocRect = null;
     this._dirtyFull = false;
     this._syncGrid();   // 每帧一次：sig 守卫，视口没变（如 stroke 中）→ 立即 no-op
+    this._tickFps();
+  }
+
+  // ---- FPS 计（dev 性能读数，防煤气灯）----
+  setShowFps(on) {
+    this._showFps = !!on;
+    this._lastFrameT = null;            // 重置 → 第一帧 dt 不算
+    if (this._showFps) { this._ensureFpsEl().style.display = "block"; this.requestRender(); }
+    else if (this._fpsEl) this._fpsEl.style.display = "none";
+  }
+  getShowFps() { return !!this._showFps; }
+  _ensureFpsEl() {
+    if (this._fpsEl) return this._fpsEl;
+    const el = document.createElement("div");
+    el.id = "fpsMeter";
+    el.style.cssText = "position:fixed;top:4px;left:4px;z-index:99999;pointer-events:none;"
+      + "font:11px/1.3 ui-monospace,monospace;color:#0f0;background:rgba(0,0,0,.55);"
+      + "padding:1px 6px;border-radius:4px;white-space:pre;";
+    document.body.appendChild(el);
+    this._fpsEl = el;
+    return el;
+  }
+  // render() 末尾调。只在开了 FPS 时计：render 是 rAF 驱动 → 交互（pan/draw）时每帧跑一次，
+  //   dt 的 EMA = 交互帧率。空闲无 render → 读数冻在上次（我们只关心交互帧率）。
+  _tickFps() {
+    if (!this._showFps) return;
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    if (this._lastFrameT != null) {
+      const dt = now - this._lastFrameT;
+      if (dt > 0) {
+        const inst = 1000 / dt;
+        this._fps = this._fps == null ? inst : this._fps * 0.8 + inst * 0.2;
+      }
+    }
+    this._lastFrameT = now;
+    this._ensureFpsEl().textContent = `${this._fps ? this._fps.toFixed(0) : "--"} fps`;
   }
 
   _renderFull() {
@@ -474,87 +511,9 @@ export class Board {
     ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
   }
 
-  // 只重画 docRect 覆盖的区域。**rot != 0 时直接走 full**（旋转 dirty rect
-  // 在 screen 上是斜矩形，clip + 算屏幕 bbox 复杂度不值，stamp 路径少见旋转后画）
-  _renderPartial(docRect) {
-    // 套索浮层 / drawing path / **选区** 走全屏。
-    // 选区也要：否则蚂蚁线在 partial 区域里被擦掉（_drawLassoOverlay 不在 partial 路径）
-    if (this._lassoProvider) {
-      const info = this._lassoProvider();
-      if (info && (info.drawingPath?.length || info.floating || info.selection)) {
-        this._renderFull(); return;
-      }
-    }
-    if (this.viewport.rot !== 0) {
-      this._renderFull();
-      return;
-    }
-    // v124 (user：「windows stamps 出现小黑框」第二尝试)：
-    // 第一招 (clip 边界 floor/ceil) 失败。**兜底**：有 live overlay (= stroke 进行中) 直接全屏。
-    // 一帧多个 fillRect 在 hidpi 上微秒级，不会影响 60fps；换 partial render clip 边沿 sliver bug 不再可能。
-    // v131 (user：「液化又出现白框」)：液化没用 overlayProvider（直接改 layer 像素），
-    //   regression。补 strokeActiveHint：任何 stroke-in-progress 都强 full。
-    if (this._overlayProvider?.() || this._strokeActiveHint?.()) {
-      this._renderFull(); return;
-    }
-    const ctx = this.ctx;
-    const { tx, ty, scale } = this.viewport;
+  // （旧 _renderPartial / clip-window + Windows 黑缝 floor-ceil 补丁已删：v275 拥抱 full-composite，
+  //   静态走 1:1 缓存、实时直接合成。partial 的两类缝隙问题（白缝/黑缝）随之消失。）
 
-    const pad = Math.max(1, 2 / scale);
-    const dx0 = docRect[0] - pad;
-    const dy0 = docRect[1] - pad;
-    const dx1 = docRect[2] + pad;
-    const dy1 = docRect[3] + pad;
-
-    // v124 (user：「Windows 上画画 stamps 出现小黑框，commit 后消失」)
-    // 根因：浮点 sx/sw 让 clip 与 fillRect 的边界落到亚像素 → Windows Skia GPU 在
-    // DPR>1 时 clip rounds outward 但 fillRect rounds inward (或反过来) → 1 px sliver
-    // 没被任何东西画过 → 主 canvas {alpha:false} 初始黑色露出 = 黑色边线
-    // 修：整 pixel 取整 + 1 px 外扩，让 clip 与 fill 都严格覆盖到底
-    const rawSx = dx0 * scale + tx;
-    const rawSy = dy0 * scale + ty;
-    const rawSx1 = dx1 * scale + tx;
-    const rawSy1 = dy1 * scale + ty;
-    const sx = Math.floor(rawSx) - 1;
-    const sy = Math.floor(rawSy) - 1;
-    const sw = Math.ceil(rawSx1) - sx + 1;
-    const sh = Math.ceil(rawSy1) - sy + 1;
-
-    const w = this.canvas.clientWidth || this.canvas.width / this.dpr;
-    const h = this.canvas.clientHeight || this.canvas.height / this.dpr;
-    if (sx + sw < 0 || sy + sh < 0 || sx > w || sy > h) return;
-
-    ctx.save();
-    // Clip 用 screen 坐标
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.beginPath();
-    ctx.rect(sx, sy, sw, sh);
-    ctx.clip();
-    // 重底色 (screen)
-    ctx.fillStyle = this._voidColor;
-    ctx.fillRect(sx, sy, sw, sh);
-
-    // 切到 doc 坐标系画 layer
-    this._applyDocTransform(ctx);
-    // v100：scale > 1 走 nearest-neighbor 同 _renderFull
-    if (scale > 1) {
-      ctx.imageSmoothingEnabled = false;
-    } else {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
-    }
-    if (this._showCheckerboard) {
-      this._drawCheckerboard(ctx, this.doc.width, this.doc.height);
-    } else {
-      ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
-      ctx.fillRect(0, 0, this.doc.width, this.doc.height);
-    }
-    this._renderLayers(ctx);
-
-    ctx.restore();
-  }
-  // 一段逻辑两处用（_renderFull / _renderPartial）。带 clipping mask 处理。
-  // ctx 已经在 doc 坐标系（drawImage 的 dest 用 doc 坐标）。
   // board 注入规范合成器（deep module A）的实时特性 opts：
   //   - source: 颜色调整 live preview 的 surrogate canvas 替换
   //   - overlayFor: 笔刷 live overlay（含 选区 + 锁α 的 preview 裁剪，与 pen-up 的 source-atop 一致）

@@ -135,7 +135,33 @@ function _compositeGroup(ctx, group, base, opts) {
 function _drawNodeAlpha(tctx, node, originX, originY, opts) {
   if (!node.isGroup) {
     const src = (opts.source ? opts.source(node) : node.canvas);
-    tctx.drawImage(src, node.bboxX - originX, node.bboxY - originY);
+    const overlay = opts.overlayFor ? opts.overlayFor(node) : null;
+    if (!overlay) {
+      tctx.drawImage(src, node.bboxX - originX, node.bboxY - originY);
+      return;
+    }
+    // 基底正被实时编辑（描边/erase）→ 用 base⊕overlay 的 **live alpha** 当上方 clip 层的蒙版，
+    //   让 clip 层描边中实时跟着重蒙（不是抬笔 commit 才更新）。tctx 已是 dst-in 模式，
+    //   故先在独立 temp 烤好 (base⊕overlay) 再整块画进 tctx。
+    let rx0 = Infinity, ry0 = Infinity, rx1 = -Infinity, ry1 = -Infinity;
+    const hasBasePx = node.bboxW > 0 && node.bboxH > 0;
+    if (hasBasePx) { rx0 = node.bboxX; ry0 = node.bboxY; rx1 = node.bboxX + node.bboxW; ry1 = node.bboxY + node.bboxH; }
+    rx0 = Math.min(rx0, overlay.bboxX); ry0 = Math.min(ry0, overlay.bboxY);
+    rx1 = Math.max(rx1, overlay.bboxX + overlay.bboxW); ry1 = Math.max(ry1, overlay.bboxY + overlay.bboxH);
+    const rw = rx1 - rx0, rh = ry1 - ry0;
+    if (rw <= 0 || rh <= 0) return;
+    const ec = (opts.eraseTmp ? opts.eraseTmp(rw, rh) : makeBitmap(rw, rh));
+    const ectx = ec.getContext("2d");
+    ectx.setTransform(1, 0, 0, 1, 0, 0);
+    ectx.clearRect(0, 0, rw, rh);
+    ectx.globalCompositeOperation = "source-over";
+    if (hasBasePx) ectx.drawImage(src, node.bboxX - rx0, node.bboxY - ry0);
+    ectx.globalAlpha = overlay.opacity;
+    ectx.globalCompositeOperation = overlay.mode === "erase" ? "destination-out" : (overlay.blendMode || "source-over");
+    ectx.drawImage(overlay.canvas, overlay.bboxX - rx0, overlay.bboxY - ry0);
+    ectx.globalAlpha = 1;
+    ectx.globalCompositeOperation = "source-over";
+    tctx.drawImage(ec, 0, 0, rw, rh, rx0 - originX, ry0 - originY, rw, rh);
     return;
   }
   // 组基底：合到临时 buffer 取其 alpha（不带组自身 opacity/mode——只要形状）

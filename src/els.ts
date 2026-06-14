@@ -113,6 +113,7 @@ export const els = {
   topEncLock: document.getElementById("topEncLock"),
   menuCheckerboard: document.getElementById("menuCheckerboard"),
   menuPixelGrid: document.getElementById("menuPixelGrid"),
+  menuFps: document.getElementById("menuFps"),
   menuCheckUpdate: document.getElementById("menuCheckUpdate"),
   oraFileInput: document.getElementById("oraFileInput"),
   genericBackdrop: document.getElementById("genericBackdrop"),

@@ -67,6 +67,13 @@ function applyPixelGrid(on: any) {
   safeLSSet("webpaint.pixelGrid", on ? "1" : "0");
 }
 
+// v275 FPS 计：dev 性能读数（角落 overlay；设备级开关，localStorage 持久化，默认关）。防煤气灯。
+function applyFps(on: any) {
+  board.setShowFps?.(!!on);
+  setMenuItem(els.menuFps, !!on);
+  safeLSSet("webpaint.fps", on ? "1" : "0");
+}
+
 // v124 快捷键 sheet：从 KEYBOARD_SHORTCUTS 自动渲染（input.js 注册的唯一真理源）
 const _shortcutsSheet = document.getElementById("shortcutsSheet");
 const _shortcutsBackdrop = document.getElementById("shortcutsBackdrop");
@@ -132,6 +139,13 @@ export function initSettingsMenu(ctx) {
     const next = !board.getPixelGridEnabled();
     applyPixelGrid(next);
     setStatus(`像素栅格 · ${next ? "开" : "关"}`);
+  });
+
+  applyFps(safeLS("webpaint.fps") === "1");   // boot：缺省=关
+  if (els.menuFps) els.menuFps.addEventListener("click", () => {
+    const next = !board.getShowFps?.();
+    applyFps(next);
+    setStatus(`FPS 计 · ${next ? "开" : "关"}`);
   });
   els.menuTheme.addEventListener("click", () => {
     const next = cycleTheme();
