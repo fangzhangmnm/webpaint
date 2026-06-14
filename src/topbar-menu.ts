@@ -276,10 +276,8 @@ export function initTopbarMenu(ctx) {
     setStatus("适应屏幕");
   });
 
-  // v109: 撤「笔刷平滑设置」浮动面板 —— 平滑参数 v99 起 per-preset，进 brush settings 调
-  // 删了：toggleBrushPanel / syncBrushPanelFromState / bindBrushSlider / brushPanelHead 拖动 handler
-  // menuBrushSettings element hidden 保兼容（HTML 不报 null），handler no-op
-  if (els.menuBrushSettings) els.menuBrushSettings.addEventListener("click", () => setMenuOpen(false));
+  // v109: 撤「笔刷平滑设置」浮动面板 —— 平滑参数 v99 起 per-preset，进 brush settings 调。
+  // menuBrushSettings 僵尸（hidden 空 button + no-op handler）已删 2026-06（HTML/els/listener 一并清）。
 
   els.menuForcePwaReset.addEventListener("click", async () => {
     els.menuPanel?.classList.add("hidden");

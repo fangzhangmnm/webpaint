@@ -146,17 +146,7 @@ export async function checkQuotaAndWarn() {
   } catch {}
 }
 
-function humanTime(ts) {
-  if (!ts) return "未知";
-  const d = new Date(ts);
-  const now = Date.now();
-  const dt = now - ts;
-  if (dt < 60 * 1000) return "刚刚";
-  if (dt < 60 * 60 * 1000) return `${Math.floor(dt / 60000)} 分钟前`;
-  if (dt < 24 * 60 * 60 * 1000) return `${Math.floor(dt / 3600000)} 小时前`;
-  if (dt < 7 * 24 * 60 * 60 * 1000) return `${Math.floor(dt / 86400000)} 天前`;
-  return d.toLocaleDateString();
-}
+// （humanTime 死码已删 2026-06：gallery-shell 无调用者；展示用的 humanTime 在 gallery-view-model.ts。）
 function humanSize(b) {
   if (b == null) return "?";
   if (b === 0) return "0 B";

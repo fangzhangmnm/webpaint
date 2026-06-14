@@ -35,7 +35,6 @@ export const els = {
   menuImportImage: document.getElementById("menuImportImage"),
   menuImportImageConfig: document.getElementById("menuImportImageConfig"),
   menuFit: document.getElementById("menuFit"),
-  menuBrushSettings: document.getElementById("menuBrushSettings"),
   // v109: brushPanel + brush* sliders 撤了（平滑 per-preset，进 brush settings 调）
   topSaveBtn: document.getElementById("topSaveBtn"),
   topAdjustBtn: document.getElementById("topAdjustBtn"),
