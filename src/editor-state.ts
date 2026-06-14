@@ -74,3 +74,26 @@ export function createEditorState(): EditorState {
 
   return { state, dialReactive };
 }
+
+// 把存档的 per-tool dial（ORA _webpaintState.toolStates[tool]）按 v98 兼容映射成 patch 对象，
+// caller Object.assign 到 reactive toolStates[tool]（保留反应式）。saved 无效 → null（不动）。
+// 反序列化细节下沉到 editor-state（toolState 形状的所有者；survey rec #5 part b）：
+//   v98 起 opacity/flow 分离——老 doc 只有 .intensity 当 opacity；只有 flow 没 opacity 时 flow 也当 opacity。
+export function serializedToolStatePatch(current: any, saved: any): any | null {
+  if (!saved || typeof saved !== "object") return null;
+  const op = typeof saved.opacity === "number" ? saved.opacity
+           : typeof saved.intensity === "number" ? saved.intensity
+           : typeof saved.flow === "number" ? saved.flow
+           : current.opacity;
+  const fl = typeof saved.flow === "number" && typeof saved.opacity === "number" ? saved.flow
+           : current.flow;
+  return {
+    size: typeof saved.size === "number" ? saved.size : current.size,
+    opacity: op,
+    flow: fl,
+    activeBrushId: typeof saved.activeBrushId === "string" ? saved.activeBrushId : current.activeBrushId,
+    activeBrushName: typeof saved.activeBrushName === "string" ? saved.activeBrushName : current.activeBrushName,
+    // v132 filterBrush 多 variantId
+    ...(typeof saved.variantId === "string" ? { variantId: saved.variantId } : {}),
+  };
+}

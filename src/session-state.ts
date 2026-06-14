@@ -42,6 +42,7 @@ import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.js";
 import { stripSessionExt } from "./config.js";
 import { sessionNameConflict } from "./session-name.ts";
+import { serializedToolStatePatch } from "./editor-state.ts";   // 反序列化细节下沉（rec #5 part b）
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.js";
 import { setPassword } from "./crypto-state.js";
 import { els } from "./els.ts";
@@ -232,26 +233,10 @@ function adoptLoadedDoc(loaded: any, sessionName: any) {
     try { paletteWindow.applySerializedState(loaded._webpaintState.palette); } catch (_) {}
   }
   if (loaded._webpaintState?.toolStates && typeof loaded._webpaintState.toolStates === "object") {
+    // 反序列化细节（v98 兼容字段映射）已下沉 editor-state.serializedToolStatePatch；这里只编排循环。
     for (const t of Object.keys(state.toolStates)) {
-      const saved = loaded._webpaintState.toolStates[t];
-      if (saved && typeof saved === "object") {
-        // v98：opacity/flow 分离；老 doc 的 .intensity 当 opacity 兼容
-        const op = typeof saved.opacity === "number" ? saved.opacity
-                 : typeof saved.intensity === "number" ? saved.intensity
-                 : typeof saved.flow === "number" ? saved.flow
-                 : state.toolStates[t].opacity;
-        const fl = typeof saved.flow === "number" && typeof saved.opacity === "number" ? saved.flow
-                 : state.toolStates[t].flow;
-        Object.assign(state.toolStates[t], {
-          size: typeof saved.size === "number" ? saved.size : state.toolStates[t].size,
-          opacity: op,
-          flow: fl,
-          activeBrushId: typeof saved.activeBrushId === "string" ? saved.activeBrushId : state.toolStates[t].activeBrushId,
-          activeBrushName: typeof saved.activeBrushName === "string" ? saved.activeBrushName : state.toolStates[t].activeBrushName,
-          // v132 filterBrush 多 variantId
-          ...(typeof saved.variantId === "string" ? { variantId: saved.variantId } : {}),
-        });
-      }
+      const patch = serializedToolStatePatch(state.toolStates[t], loaded._webpaintState.toolStates[t]);
+      if (patch) Object.assign(state.toolStates[t], patch);   // Object.assign 保留 reactive
     }
     rack.applyToolState(editMode.current());
   }

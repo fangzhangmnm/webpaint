@@ -33,6 +33,7 @@ import "./selection-morph.test.mjs";
 import "./app-boot.test.mjs";   // 组合根 boot smoke（接线零覆盖缺口，见该文件头注释）。包了 global timer。
 import "./current-brush.test.mjs";   // 当前笔反应式接线（守 boot-smoke 抓不到的依赖断裂）。不 mount DOM，无 shim 也跑。
 import "./dial-controls.test.mjs";   // dial 写入 setSize/setOpacity + 键盘 [ ] 段量化调粗。
+import "./editor-state-restore.test.mjs";   // adoptLoadedDoc 的 toolStates 反序列化下沉（v98 兼容）。
 
 console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
 await run();
