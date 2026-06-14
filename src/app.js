@@ -30,7 +30,7 @@ import { PwaShell } from "./pwa-shell.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
 import { setPasswordPrompt } from "./crypto-state.js";   // 加密：密码弹窗注入（ADR-0012）
 import { els } from "./els.ts";
-import { safeLSSet } from "./safe-ls.ts";   // safeLS seeding 已随 editor-state 搬走
+import { makeDialControls } from "./dial-controls.ts";   // dial 写入（setSize/setOpacity）+ 当前 dial + 键盘 [ ] 调粗
 import { initTheme } from "./theme.ts";
 import { initLayersPanel, renderLayersPanel, LAYER_MODE_LABEL } from "./layers-panel.ts";
 import { initDocOps } from "./doc-ops.ts";
@@ -54,7 +54,6 @@ import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueLocalName } 
 import { initTopbarMenu } from "./topbar-menu.ts";
 import { initPlatformGuards } from "./platform-guards.ts";
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
-import { stepFor as _stepFor, quantizeSize as _quantizeSize } from "./ui/brush-size.ts";   // [ ] 键盘调粗用（slider 映射在 <LeftDial>）
 import { watch } from "../vendor/vue/vue.esm-browser.prod.js";   // 加密常驻指示 watch（currentBrush computed + 引擎桥已下沉 current-brush.ts）
 import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排：笔架异步 boot + gallery-first 恢复
 // Selection 切到 selection-ops.ts；smooth-config（SMOOTH/saveSmooth/resetSmooth）切到 smooth-dev-panel.ts
@@ -105,6 +104,10 @@ const rack = new BrushRack({
   isSignedIn, isOnline: () => navigator.onLine !== false,
 });
 
+// dial 写入（setSize/setOpacity 写 dial SSoT + LS）+ 当前 dial + 键盘 [ ] 调粗 = dial-controls.ts。
+// editMode thunk：setSize 要早于 leftDial 可用，editMode const 晚声明。bindKeyboard 待 board/leftDial 后调。
+const { setSize, setOpacity, currentDials, bindKeyboard: bindSizeKeyboard } = makeDialControls({ state, rack, getEditMode: () => editMode });
+
 const _leftDial = () => state.toolStates[rack.getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
 const leftDial = mountLeftDial(els.leftDialMount, {
   getSize: () => _leftDial().size,
@@ -118,13 +121,10 @@ const leftDial = mountLeftDial(els.leftDialMount, {
   onBrushTap: () => { const id = RACK_PANEL_BY_TOOL[editMode.current()]; if (id) openExclusive(id); },
   onBrushLongpress: () => { const b = rack.findToolBrush(_leftDial()); if (b) { closeExclusive(); rack.openBrushSettings(b.id); } },
 });
+// 键盘 [ ] 调粗接线（需 board/leftDial，已建好）。
+bindSizeKeyboard({ board, leftDial });
 
-// 当前笔（ResolvedBrush，引擎唯一吃的不可变值）派生 + 引擎桥 = current-brush.ts makeCurrentBrush，
-// 在 editMode 构造后调（currentDials 需 editMode），见下方。手感数学全在 resolveBrush，这里只装配。
-
-
-// 笔粗分段量化（_segPositions/sliderPosToSize/sizeToSliderPos/_sliderMaxPos/_stepFor/_quantizeSize）
-// 已搬进 src/ui/brush-size.ts（纯 + node 测，form 与 dial 共用），见上方 import。
+// 当前笔（ResolvedBrush）派生 + 引擎桥 = current-brush.ts makeCurrentBrush，input 前构造（见下）。手感数学全在 resolveBrush。
 
 
 // Undo / redo 共享栈（command pattern + 注册 handler，详见
@@ -133,9 +133,8 @@ const leftDial = mountLeftDial(els.leftDialMount, {
 const history = new UndoStack({ max: 50 });
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。
 const editMode = new EditMode({ initialTool: "brush" });
-// 当前笔派生（dial+预设+color+压感 → ResolvedBrush）+ 当前 dial + 引擎桥（current-brush.ts）。
-// 必须在 editMode 后、input 前（input.getBrushSettings 读 currentBrush.value）。
-const { currentBrush, currentDials, bindEngine } = makeCurrentBrush({ state, dialReactive, rack, editMode });
+// 当前笔派生（dial+预设+color+压感 → ResolvedBrush）+ 引擎桥（current-brush.ts）。input 前建（getBrushSettings 读它）。
+const { currentBrush, bindEngine } = makeCurrentBrush({ state, dialReactive, rack });
 // PixelEdit：纯像素（stroke/liquify/filterBrush）的 undo 事务 + handler。
 // 和 UndoStack 平级，注入 input。见 pixel-edit.js / CONTEXT.md。
 const pixelHistory = new PixelEdit({ doc, history, board });
@@ -235,39 +234,8 @@ initPlatformGuards(ctx);
 // 笔架异步 boot（fire-and-forget；ctx 已建好）。
 initRackBoot(ctx);
 
-// size/opacity popup + 两个 slider 监听 + slider-DOM 同步已搬进 <LeftDial>（src/ui/left-dial.ts）。
-// setSize/setOpacity 现在只写反应式 dial SSoT + LS；<LeftDial> 绑定 dial 自动反映 + 自闪 popup。
-function setSize(v) {
-  v = Math.max(1, Math.round(v));        // v104: clamp to int
-  rack.writeCurrentToolSize(v);               // dial SSoT（反应式 → currentBrush + <LeftDial> 自动跟随）
-  safeLSSet("webpaint.size", String(v));
-}
-function setOpacity(v) {
-  rack.writeCurrentToolOpacity(v);            // dial SSoT（反应式）
-  safeLSSet("webpaint.opacity", String(v));
-}
-// 老 setIntensity alias 给跨 v97 调用兜底
-const setIntensity = setOpacity;
-// 键盘 [ ] 调粗（v132: tool-aware dispatch）。max 从活动预设取（不再读 slider dataset）；popup 经 leftDial.flashSize()。
-window.addEventListener("wp:adjsize", (e) => {
-  const delta = e.detail;
-  const t = editMode.current();
-  if (t === "brush" || t === "eraser" || t === "smudge" || t === "filterBrush") {
-    const maxPx = rack.findToolBrushPure(currentDials())?.size?.max || 200;
-    // v134 [] step 按段量化：20内1, 50内2, 100内5, 200内10, 500内20, 1000内50
-    const dir = Math.sign(delta) || 1;
-    const curSize = currentDials().size;
-    const step = _stepFor(curSize);
-    const raw = curSize + dir * step;
-    const next = Math.max(1, Math.min(maxPx, _quantizeSize(raw)));
-    setSize(next);
-    leftDial.flashSize();   // 闪 size popup（组件自持）
-    if (board._cursor) {
-      board.setCursor({ ...board._cursor, size: next });
-    }
-  }
-  // 其他工具忽略（液化已 migrate 进 filterBrush）
-});
+// dial 写入（setSize/setOpacity）+ 当前 dial + 键盘 [ ] 调粗 已下沉 dial-controls.ts（见上方构造）。
+// size/opacity popup + slider 监听 + slider-DOM 同步在 <LeftDial>（src/ui/left-dial.ts）。
 
 
 // ---- undo / redo / fit ----

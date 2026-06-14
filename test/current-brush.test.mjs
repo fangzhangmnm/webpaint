@@ -13,12 +13,11 @@ import { createEditorState } from "../src/editor-state.ts";
 function fakeRack(preset = null) {
   return { getRackToolKey: (t) => t, findToolBrushPure: () => preset };
 }
-const fakeEditMode = (tool = "brush") => ({ current: () => tool });
 
 describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖断裂）", () => {
   it("改 dial.size → currentBrush.value.size 跟随重算", () => {
     const { state, dialReactive } = createEditorState();
-    const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack(), editMode: fakeEditMode() });
+    const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack() });
     state.toolStates.brush.size = 17;
     eq(currentBrush.value.size, 17, "size dial 改了笔没跟");
     state.toolStates.brush.size = 88;
@@ -27,14 +26,14 @@ describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖�
 
   it("改全局 color → currentBrush.value.color 跟随", () => {
     const { state, dialReactive } = createEditorState();
-    const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack(), editMode: fakeEditMode() });
+    const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack() });
     state.color = "#123456";
     eq(currentBrush.value.color, "#123456", "color 改了笔没跟");
   });
 
   it("computed 缓存：dep 不变则同一冻结值；dep 变则新值", () => {
     const { state, dialReactive } = createEditorState();
-    const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack(), editMode: fakeEditMode() });
+    const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack() });
     const v1 = currentBrush.value;
     assert(v1 === currentBrush.value, "dep 没变应返回缓存的同一值");
     assert(Object.isFrozen(v1), "ResolvedBrush 应是冻结值");
@@ -44,7 +43,7 @@ describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖�
 
   it("依赖 dialReactive.rackVersion：bump → 重算（编辑/重置预设后活动预设字段刷新）", () => {
     const { state, dialReactive } = createEditorState();
-    const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack(), editMode: fakeEditMode() });
+    const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack() });
     const v1 = currentBrush.value;
     dialReactive.rackVersion++;
     assert(currentBrush.value !== v1, "rackVersion bump 没触发重算（依赖漏了？）");
@@ -52,18 +51,11 @@ describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖�
 
   it("bindEngine：currentBrush 变 → input.brush.invalidateStamp 被调（引擎桥未断）", () => {
     const { state, dialReactive } = createEditorState();
-    const { currentBrush, bindEngine } = makeCurrentBrush({ state, dialReactive, rack: fakeRack(), editMode: fakeEditMode() });
+    const { currentBrush, bindEngine } = makeCurrentBrush({ state, dialReactive, rack: fakeRack() });
     let calls = 0;
     bindEngine({ brush: { invalidateStamp: () => { calls++; } } });
     state.toolStates.brush.size = 42;
     void currentBrush.value;   // flush:"sync" 下 watch 在 dep 变时即触发；读一次确保 computed 求值
     assert(calls >= 1, "currentBrush 变了但引擎桥没 invalidateStamp");
-  });
-
-  it("currentDials：按 editMode 当前工具返回对应 dial", () => {
-    const { state, dialReactive } = createEditorState();
-    const { currentDials } = makeCurrentBrush({ state, dialReactive, rack: fakeRack(), editMode: fakeEditMode("eraser") });
-    state.toolStates.eraser.size = 55;
-    eq(currentDials().size, 55, "currentDials 没返回当前工具(eraser)的 dial");
   });
 });

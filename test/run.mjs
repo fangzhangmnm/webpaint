@@ -32,6 +32,7 @@ import "./selection-morph.test.mjs";
 // Vue 缓存 doc=null，boot-smoke 里 Vue mount 即 `null.createTextNode` 炸。current-brush 故排其后。
 import "./app-boot.test.mjs";   // 组合根 boot smoke（接线零覆盖缺口，见该文件头注释）。包了 global timer。
 import "./current-brush.test.mjs";   // 当前笔反应式接线（守 boot-smoke 抓不到的依赖断裂）。不 mount DOM，无 shim 也跑。
+import "./dial-controls.test.mjs";   // dial 写入 setSize/setOpacity + 键盘 [ ] 段量化调粗。
 
 console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
 await run();

@@ -13,7 +13,7 @@
 import { computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";
 import { resolveBrush } from "./resolved-brush.js";
 
-export function makeCurrentBrush({ state, dialReactive, rack, editMode }: any) {
+export function makeCurrentBrush({ state, dialReactive, rack }: any) {
   // **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。
   const currentBrush = computed(() => {
     void dialReactive.rackVersion;   // 依赖笔架版本（编辑/重置预设后重算活动预设字段）
@@ -28,13 +28,10 @@ export function makeCurrentBrush({ state, dialReactive, rack, editMode }: any) {
     });
   });
 
-  // 当前工具的 dial（size/opacity/flow + activeBrushId），shapes/airbrush alias 到 brush。
-  const currentDials = () => state.toolStates[rack.getRackToolKey(editMode.current())] || state.toolStates.brush;
-
   // 命令/反应桥：当前笔变 → 引擎 stamp 缓存失效（flush:"sync" 复刻旧 refreshCurrentBrush 的同步时机）。
   // input 晚于本工厂构造 → bindEngine 分离调用；cb 仍守 input?.（防御）。这是「反应式 UI 态 ↔ 裸引擎态」唯一的桥。
   const bindEngine = (input: any) =>
     watch(currentBrush, () => { if (input?.brush?.invalidateStamp) input.brush.invalidateStamp(); }, { flush: "sync" });
 
-  return { currentBrush, currentDials, bindEngine };
+  return { currentBrush, bindEngine };
 }
