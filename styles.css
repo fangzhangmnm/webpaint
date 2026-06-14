@@ -968,6 +968,9 @@ input[type="range"].color-ramp::-moz-range-thumb {
    v124：覆盖 .menu-panel 的 right: 12px / top: 56px（不然 JS 设 left 也会被 right 拉宽到全屏） */
 .layer-tools-popup { padding: 4px; min-width: auto; right: auto; top: auto; }
 .layer-tools-popup .menu-item { padding: 6px 14px; }
+/* v267 ⋯ 菜单里的层属性 toggle：勾选标记 + 标签 */
+.layer-menu-toggle { display: flex; align-items: center; gap: 8px; }
+.layer-menu-check { font-size: 14px; line-height: 1; width: 16px; text-align: center; flex: 0 0 auto; }
 
 /* 通用 in-app sheet input */
 .generic-sheet-input {
@@ -1103,6 +1106,14 @@ input[type="range"].color-ramp::-moz-range-thumb {
 .layers-foot-btn svg { width: 18px; height: 18px; display: block; }
 .layers-foot-btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
 .layers-foot-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+/* v267 "+" 弹出菜单：浮在底栏上方、左对齐（layers-panel 是 position:fixed → 作绝对定位容器） */
+.layer-add-popup {
+  position: absolute;
+  bottom: 48px; left: 6px;
+  min-width: auto; right: auto; top: auto;
+  padding: 4px;
+}
+.layer-add-popup .menu-item { padding: 6px 14px; }
 
 /* 图库 / 云端：全屏 grid */
 .gallery-full,
@@ -1594,8 +1605,10 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   /* v124 修 (user：「pin 尖尖头位置没扎对」)：
      ::after triangle 用 bottom:-8 凸到 pin div 之外，tip 比 pin div 底再下 8px。
      translate(-50%, -100%) 让 pin div 底贴 (sx, sy) → tip 实际在 sy+8。
-     补偿：再上移 8px 让 tip 落在 (sx, sy) */
+     补偿：再上移 8px 让 tip 落在 (sx, sy)。
+     padding-bottom 拉开 head 与 tip 的距离（加长杆），让 head 抬离手指不被挡。 */
   transform: translate(-50%, calc(-100% - 8px));
+  padding-bottom: 56px;
   transition: opacity 0.15s ease-out;
 }
 .picker-pin.hidden { display: none; }
@@ -1604,6 +1617,16 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   background: var(--head-color, #fff);
   border: 3px solid var(--bg);
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+/* 连接 head 与 tip 的细杆（让加长后的悬浮 head 视觉上仍指向采样点） */
+.picker-pin::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 36px; bottom: 2px;
+  transform: translateX(-50%);
+  width: 2px;
+  background: #000;
+  filter: drop-shadow(0 0 1px rgba(255,255,255,0.6));
 }
 /* tip triangle 指向 pixel。v124 user：「小三角放圆下面，黑色」固定黑色不跟色 */
 .picker-pin::after {

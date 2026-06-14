@@ -186,7 +186,7 @@ function _openSelEdit(op: "expand" | "shrink") {
   if (_selEdit) _finishSelEdit(false);    // 已开着另一个 → 先取消旧的（还原）再开新的
   _selEdit = { before: doc.selection, op, rafId: 0 };
   if (title) title.textContent = op === "expand" ? "扩张选区" : "收缩选区";
-  if (amount) amount.value = "2";         // 默认 2px（白边场景常用量）
+  if (amount) amount.value = "1";         // 默认 1px（最常用的轻微扩缩）
   popup?.classList.remove("hidden");
   _runSelEditPreview();                    // 初次预览
   // adjust transient：apply=采纳预览，abort=还原。切工具/ctrl-z 都经此（onToolSwitch=apply）。

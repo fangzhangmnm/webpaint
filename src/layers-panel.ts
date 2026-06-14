@@ -144,6 +144,22 @@ function _moveLayerDelta(L: any, delta: number) {
   history.push({ type: "moveLayer", layerId: L.id, fromIdx: from, toIdx: to });
   _afterDocChange();
 }
+// v267 复制图层：模型 op 归 doc.duplicateLayer；这里包成 addLayer undo entry（undo 删新层、
+//   redo 经 insertLayerAt 连像素恢复）+ 异步压缩快照。spec 显式带 clip/lockAlpha（doc.layerSpec
+//   不含这两项，否则 redo 会丢）。
+function _duplicateLayer(L: any) {
+  if (!L) return;
+  if (doc.layers.length >= doc.maxLayers) { setStatus(`图层数已达上限 ${doc.maxLayers}`); return; }
+  const prevActiveId = doc.activeLayer?.id ?? null;
+  const r = doc.duplicateLayer(L.id);
+  if (!r.ok) return;
+  const insertIndex = doc.layers.findIndex((l: any) => l.id === r.newLayer.id);
+  const layerSpec = { ...layerSpecFrom(r.newLayer), clippingMask: r.newLayer.clippingMask, lockAlpha: r.newLayer.lockAlpha };
+  history.push({ type: "addLayer", index: insertIndex, layerSpec, prevActiveId });
+  compressPixelSnap(layerSpec, (blob: any) => { layerSpec.blob = blob; });
+  _afterDocChange();
+  setStatus(`已复制：${L.name}`);
+}
 
 // ---- 每层属性变更（可见性 / 透明度 / 模式 / 剪裁 / 参考层），逐字保留旧 history 路径 ----
 // 这些函数收的是 doc 活对象（live()），不是 row 快照；null 守卫兜「层在回调前被删」的竞态。
@@ -230,6 +246,7 @@ const LayerRow = defineComponent({
     canUp: { type: Boolean, default: false },
     canDown: { type: Boolean, default: false },
     canDel: { type: Boolean, default: false },
+    canDuplicate: { type: Boolean, default: false },
     canMergeDown: { type: Boolean, default: false },
     hasPx: { type: Boolean, default: false },
     children: { type: Array, default: () => [] },   // 递归预留（今天恒空）
@@ -313,8 +330,7 @@ const LayerRow = defineComponent({
           if (inp) { inp.focus(); inp.select(); }
         });
       }
-      else if (a === "up")        _moveLayerDelta(live(), 1);
-      else if (a === "down")      _moveLayerDelta(live(), -1);
+      else if (a === "duplicate") _duplicateLayer(live());   // v267：上移/下移已移到底栏指令栏
       else if (a === "mergeDown") _mergeDownLayer(live());
       else if (a === "clear")     _clearLayerPixels(live());
       else if (a === "del")       _deleteLayer(live());
@@ -363,8 +379,13 @@ const LayerRow = defineComponent({
 
       <div v-if="menuOpen" class="menu-panel layer-tools-popup" @click.stop>
         <button class="menu-item" type="button" @click="act('rename')"><span class="menu-item-label">重命名…</span></button>
-        <button class="menu-item" type="button" :disabled="!canUp" @click="act('up')"><span class="menu-item-label">上移</span></button>
-        <button class="menu-item" type="button" :disabled="!canDown" @click="act('down')"><span class="menu-item-label">下移</span></button>
+        <button class="menu-item" type="button" :disabled="!canDuplicate" @click="act('duplicate')"><span class="menu-item-label">复制图层</span></button>
+        <hr class="menu-sep" />
+        <!-- v267 (user)：层属性 toggle 收进 ⋯ 菜单（点了不关菜单，可连续切） -->
+        <button class="menu-item layer-menu-toggle" type="button" @click="toggleLock"><span class="layer-menu-check">{{ layer.lockAlpha ? '☑' : '☐' }}</span><span class="menu-item-label">锁定不透明度</span></button>
+        <button class="menu-item layer-menu-toggle" type="button" @click="toggleClip"><span class="layer-menu-check">{{ layer.clippingMask ? '☑' : '☐' }}</span><span class="menu-item-label">剪裁</span></button>
+        <button class="menu-item layer-menu-toggle" type="button" @click="toggleRef"><span class="layer-menu-check">{{ isRef ? '☑' : '☐' }}</span><span class="menu-item-label">参考层</span></button>
+        <hr class="menu-sep" />
         <button class="menu-item" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><span class="menu-item-label">向下合并</span></button>
         <button class="menu-item" type="button" :disabled="!hasPx" @click="act('clear')"><span class="menu-item-label">清空内容</span></button>
         <button class="menu-item menu-danger" type="button" :disabled="!canDel" @click="act('del')"><span class="menu-item-label">删除</span></button>
@@ -384,24 +405,7 @@ const LayerRow = defineComponent({
           <option v-for="(lbl, val) in LAYER_MODE_LABEL" :key="val" :value="val">{{ lbl }}</option>
         </select>
       </label>
-      <div class="layer-slider-row">
-        <span>剪裁</span>
-        <span class="layer-clip-hint">↘ 跟随下方</span>
-        <button type="button" class="layer-clip-toggle" :aria-pressed="layer.clippingMask ? 'true' : 'false'"
-          @click="toggleClip">{{ layer.clippingMask ? '开' : '关' }}</button>
-      </div>
-      <div class="layer-slider-row">
-        <span>锁α</span>
-        <span class="layer-clip-hint">笔只改色不增删 alpha</span>
-        <button type="button" class="layer-clip-toggle" :aria-pressed="layer.lockAlpha ? 'true' : 'false'"
-          @click="toggleLock">{{ layer.lockAlpha ? '开' : '关' }}</button>
-      </div>
-      <div class="layer-slider-row">
-        <span>参考</span>
-        <span class="layer-clip-hint">魔棒 / 油漆桶读这层</span>
-        <button type="button" class="layer-clip-toggle" :aria-pressed="isRef ? 'true' : 'false'"
-          @click="toggleRef">{{ isRef ? '开' : '关' }}</button>
-      </div>
+      <!-- v267 (user)：剪裁 / 锁α / 参考 toggle 已收进 ⋯ 菜单，折叠区只留 透明度 + 模式 -->
     </div>
 
     <!-- 递归预留：今天 children 恒空；未来层有 children 即在此嵌套渲染子行 -->
@@ -431,6 +435,7 @@ const LayersPanel = defineComponent({
           canUp: i < n - 1,
           canDown: i > 0,
           canDel: n > 1,
+          canDuplicate: n < doc.maxLayers,
           // v258：剪裁层可向下合并（裁到基底）。唯一禁止：下方是剪裁层而本层不是（语义不清）。
           canMergeDown: i > 0 && !(doc.layers[i - 1].clippingMask && !L.clippingMask),
           hasPx: L.bboxW > 0 && L.bboxH > 0,
@@ -450,7 +455,7 @@ const LayersPanel = defineComponent({
         :menu-open="layersUi.menuId === r.layer.id"
         :renaming="layersUi.renameId === r.layer.id"
         :can-up="r.canUp" :can-down="r.canDown" :can-del="r.canDel"
-        :can-merge-down="r.canMergeDown" :has-px="r.hasPx"
+        :can-duplicate="r.canDuplicate" :can-merge-down="r.canMergeDown" :has-px="r.hasPx"
       />
     </template>
   `,
@@ -466,6 +471,11 @@ function _syncChrome() {
   els.layerAddBtn.disabled = doc.layers.length >= max;
   const delBtn = document.getElementById("layerDeleteBtn") as HTMLButtonElement;
   if (delBtn) delBtn.disabled = doc.layers.length <= 1;
+  // v267 上移/下移按钮按活动层位置禁用（top 不能再上移、bottom 不能再下移）
+  const upBtn = document.getElementById("layerMoveUpBtn") as HTMLButtonElement;
+  const downBtn = document.getElementById("layerMoveDownBtn") as HTMLButtonElement;
+  if (upBtn) upBtn.disabled = doc.activeIndex >= doc.layers.length - 1;
+  if (downBtn) downBtn.disabled = doc.activeIndex <= 0;
   nextTick(() => {
     els.layersList.querySelector(".layer-row.active")?.scrollIntoView({ block: "nearest" });
   });
@@ -532,8 +542,28 @@ export function initLayersPanel(ctx) {
     } catch {}
   }
 
-  // v124b：footer 2 按钮。"+" 直加空层；删除当前 active layer。
-  els.layerAddBtn.addEventListener("click", _addEmptyLayer);
+  // v267 指令栏：+（弹菜单：新图层 / 导入图片）· 上移 · 下移 · 删除。命令全走深模块 caller，UI 只调。
+  const addPopup = document.getElementById("layerAddPopup");
+  const closeAddPopup = () => addPopup?.classList.add("hidden");
+  els.layerAddBtn.addEventListener("click", (e: any) => {
+    e.stopPropagation();
+    addPopup?.classList.toggle("hidden");
+  });
+  document.getElementById("layerAddNewBtn")?.addEventListener("click", () => { closeAddPopup(); _addEmptyLayer(); });
+  // 导入图片到新层：实际逻辑由 import-image.ts 给 layerImportPhotoBtn 接线，这里只负责收起菜单。
+  document.getElementById("layerImportPhotoBtn")?.addEventListener("click", closeAddPopup);
+  // 点别处收起 "+" 菜单
+  document.addEventListener("pointerdown", (e: any) => {
+    if (addPopup?.classList.contains("hidden")) return;
+    if (!e.target.closest("#layerAddPopup") && !e.target.closest("#layerAddBtn")) closeAddPopup();
+  }, true);
+
+  document.getElementById("layerMoveUpBtn")?.addEventListener("click", () => {
+    if (doc.activeLayer) _moveLayerDelta(doc.activeLayer, 1);
+  });
+  document.getElementById("layerMoveDownBtn")?.addEventListener("click", () => {
+    if (doc.activeLayer) _moveLayerDelta(doc.activeLayer, -1);
+  });
   document.getElementById("layerDeleteBtn")?.addEventListener("click", () => {
     if (doc.activeLayer) _deleteLayer(doc.activeLayer);
   });

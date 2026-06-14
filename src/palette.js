@@ -38,7 +38,16 @@ export class PaletteWindow {
   }
   clear() { this._fillBackground(); }
 
-  open() { this.root.classList.remove("hidden"); this._open = true; raiseWindow(this.root); }
+  open() {
+    this.root.classList.remove("hidden"); this._open = true; raiseWindow(this.root);
+    // v267 (user)：默认别 spawn 在左上角（贴 iPad 日期栏）。没拖过/没反序列化才设默认。
+    if (!this.root.style.left || !this.root.style.top) {
+      this.root.style.left = "112px";
+      this.root.style.top  = "104px";
+      this.root.style.right = "auto";
+      this.root.style.bottom = "auto";
+    }
+  }
   close() { this.root.classList.add("hidden"); this._open = false; }
   toggle() { this._open ? this.close() : this.open(); }
   isOpen() { return this._open; }

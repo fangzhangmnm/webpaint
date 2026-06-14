@@ -434,6 +434,31 @@ export class PaintDoc {
     return true;
   }
 
+  // v267 复制图层：深拷贝像素（getImageData→putImageData）+ 全部属性（含 clip / lockAlpha），
+  //   插在源层之上并设为 active。纯模型操作（无 history）：caller 负责入栈 + 压缩快照 + 刷新。
+  //   成功 → { ok:true, newLayer, index }；失败 → { ok:false, reason: max | missing }
+  duplicateLayer(id) {
+    if (this.layers.length >= this.maxLayers) return { ok: false, reason: "max" };
+    const i = this.layers.findIndex((l) => l.id === id);
+    if (i < 0) return { ok: false, reason: "missing" };
+    const src = this.layers[i];
+    const snap = src.snapshot();   // getImageData → 全新像素 buffer（不与源共享）
+    const L = new Layer({ width: this.width, height: this.height, name: `${src.name} 副本`, empty: true });
+    L.visible = src.visible;
+    L.opacity = src.opacity;
+    L.mode = src.mode;
+    L.clippingMask = src.clippingMask;
+    L.lockAlpha = src.lockAlpha;
+    L.restoreFromSnapshot({
+      bboxX: snap.bboxX, bboxY: snap.bboxY, bboxW: snap.bboxW, bboxH: snap.bboxH,
+      imageData: snap.imageData || null,
+    });
+    const insertAt = i + 1;
+    this.layers.splice(insertAt, 0, L);
+    this.activeIndex = insertAt;
+    return { ok: true, newLayer: L, index: insertAt };
+  }
+
   // 清空当前 layer 像素（不删 layer）。bbox 复位为 empty（释放 canvas）。
   clearActiveLayer() {
     const L = this.activeLayer;

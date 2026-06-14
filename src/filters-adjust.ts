@@ -10,7 +10,7 @@ import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
 import { getFilter, listFilters, onFilterRegistered } from "./filters.js";
-import { anchorPopupBelowToolbars } from "./anchored-popup.ts";
+import { anchorPopupBelowToolbars, topToolbarBottom } from "./anchored-popup.ts";
 
 let state: any, editMode: any, doc: any, board: any, history: any;
 let setStatus: any, store: any, updateSaveStatus: any;
@@ -113,7 +113,9 @@ function _openFilterPanel(filterId, opts = {}) {
   els.adjustPanel.classList.remove("hidden");
   const w = els.adjustPanel.offsetWidth || 320;
   els.adjustPanel.style.left = (window.innerWidth - w - 16) + "px";
-  els.adjustPanel.style.top  = "70px";
+  // v267 (user)：液化等滤镜面板原来硬编码 top:70 会和 filterBrushToolbar(top:56,bottom≈96)
+  //   挤在一起。改成让到顶栏条以下（同 lasso 选单逻辑），floor 104 兜底（toolbar 未测到时）。
+  els.adjustPanel.style.top  = Math.max(104, topToolbarBottom() + 8) + "px";
   _bringPanelTop(els.adjustPanel);
   board.setActiveLayerSurrogate?.(L.id, sur);
   _runFilterPreview();      // 初次渲染（identity）

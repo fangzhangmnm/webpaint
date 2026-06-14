@@ -650,7 +650,12 @@ export class InputController {
         delete document.body.dataset.panning;
       }
     }
-    // role === "pick"（包括长按转过来的）不需要额外动作
+    // role === "pick"：长按从 brush/eraser 转来的保持原工具不动；
+    // 但若是「显式吸管工具」吸完色，弹回 brush（user：吸好色就回笔）。
+    else if (rec.role === "pick" && !cancelled &&
+             this.editMode && this.editMode.current() === "picker") {
+      this._emitTool("brush");
+    }
   }
 
   // ---- 笔画 ----

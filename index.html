@@ -69,16 +69,7 @@
           <line x1="4" y1="17" x2="20" y2="17"></line>
         </svg>
       </button>
-      <!-- v124 (user) 图库挪回菜单按钮右边 -->
-      <button class="tool" id="topGalleryBtn" type="button" title="图库" aria-label="图库">
-        <!-- v124 webui 迭代 (双相框堆叠) -->
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M7.5 6.2 V5 a1.8 1.8 0 0 1 1.8 -1.8 H20 a1.8 1.8 0 0 1 1.8 1.8 V15.5 a1.8 1.8 0 0 1 -1.8 1.8 H17"/>
-          <rect x="2.5" y="6.5" width="13" height="13" rx="2"/>
-          <circle cx="6.3" cy="10.3" r="1.2"/>
-          <path d="M2.9 16.6 L6.6 13 L9.4 15.8 L12 13.2 L15.3 16.5"/>
-        </svg>
-      </button>
+      <!-- v267 (user) 图库挪回三条杠菜单（见 menuPanel 的 menuGallery） -->
       <!-- 智能保存：operator。data-state 由 app.js 切 -->
       <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
       <!-- v236 加密常驻指示：当前画作加密时显示小锁（点它进解除加密）。明文时 hidden。 -->
@@ -413,14 +404,15 @@
           </button>
           <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
           <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" title="约束 1:1（正方 / 圆）">1:1</button>
-          <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒阈值">设置</button>
           <!-- v242 选区编辑齿轮（op 不是 tool）：有选区才亮。点开 → 扩张/收缩菜单 → 实时预览 modal -->
+          <!-- v267 (user)：放到「设置」左边，图标换成「选区扩缩」直观图（嵌套虚线框）而非通用齿轮 -->
           <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoSelEditBtn" type="button" title="编辑选区：扩张 / 收缩" aria-haspopup="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2"/>
+              <rect x="8" y="8" width="8" height="8" rx="1.5"/>
             </svg>
           </button>
+          <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒阈值">设置</button>
         </div>
       </div>
       <!-- Row 2: 选区操作 / 变换控制 -->
@@ -472,7 +464,7 @@
     <div class="lasso-popup hidden" id="lassoSelOpPopup" role="dialog" aria-label="扩张 / 收缩选区">
       <div class="lasso-popup-row" style="grid-template-columns: 1fr auto auto;">
         <span id="lassoSelOpTitle">扩张选区</span>
-        <input type="text" inputmode="numeric" id="lassoSelOpAmount" value="2"
+        <input type="text" inputmode="numeric" id="lassoSelOpAmount" value="1"
           style="width:56px;text-align:right;" aria-label="像素数" />
         <span>px</span>
       </div>
@@ -587,19 +579,25 @@
         <button class="float-panel-close" id="layersPanelClose" type="button" aria-label="关闭">×</button>
       </div>
       <div class="layers-list" id="layersList"><!-- rows rendered by JS --></div>
-      <!-- v124b user 改主意：拆回 2 按钮（"+" 直加 空层 / 相框图标 导入图片）。下拉太烦 -->
+      <!-- v267 (user) 指令栏：+（弹菜单：新图层 / 导入图片到新层） · 上移 · 下移 · 删除。
+           （user 改主意：加号重新弹菜单——本轮明确要求；导入图片收进菜单不再占独立按钮） -->
       <div class="layers-foot">
-        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建空图层" aria-label="新建空图层">
+        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建 / 导入" aria-label="新建 / 导入" aria-haspopup="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"/>
             <line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
         </button>
-        <button class="layers-foot-btn" id="layerImportPhotoBtn" type="button" title="导入图片为新图层" aria-label="导入图片">
+        <button class="layers-foot-btn" id="layerMoveUpBtn" type="button" title="上移图层" aria-label="上移图层">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="5" width="18" height="14" rx="2"/>
-            <circle cx="8" cy="10" r="1.5"/>
-            <polyline points="3 17 9 12 14 17 21 11"/>
+            <line x1="12" y1="19" x2="12" y2="5"/>
+            <polyline points="6 11 12 5 18 11"/>
+          </svg>
+        </button>
+        <button class="layers-foot-btn" id="layerMoveDownBtn" type="button" title="下移图层" aria-label="下移图层">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <polyline points="6 13 12 19 18 13"/>
           </svg>
         </button>
         <!-- v132 (user：「global 加删除当前图层 垃圾桶 svg」) -->
@@ -612,6 +610,11 @@
             <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
           </svg>
         </button>
+      </div>
+      <!-- "+" 弹出菜单：新图层 / 导入图片到新层（layerImportPhotoBtn 仍由 import-image 接线） -->
+      <div class="menu-panel layer-add-popup hidden" id="layerAddPopup" role="menu">
+        <button class="menu-item" id="layerAddNewBtn" type="button" role="menuitem"><span class="menu-item-label">新图层</span></button>
+        <button class="menu-item" id="layerImportPhotoBtn" type="button" role="menuitem"><span class="menu-item-label">导入图片到新层</span></button>
       </div>
     </div>
 
@@ -798,8 +801,10 @@
       <!-- v94 重组：清晰分组，操作 / 导入 / 导出 / 设置 / 调试 / 危险
            user：「主菜单分导入，导出，调试等子菜单」
            user：「压感 -> 颜色，不透明度 这些应该只在笔刷设置页出现」→ 删 -->
-      <!-- v124 (user) 图库挪回顶栏；menuGallery 留 hidden stub 给 app.js 兜底 -->
-      <button id="menuGallery" type="button" hidden></button>
+      <!-- v267 (user) 图库挪回三条杠菜单顶部 -->
+      <button class="menu-item" id="menuGallery" type="button" role="menuitem">
+        <span class="menu-item-label">图库</span>
+      </button>
 
       <hr class="menu-sep" />
       <!-- v124 (user) 文件操作扁平化：删 section label / inner separator / 居中画布；
@@ -868,8 +873,11 @@
       <button class="menu-item" id="menuShortcuts" type="button" role="menuitem">
         <span class="menu-item-label">快捷键</span>
       </button>
+      <!-- v267 (user)：视口复位（画布拖出屏幕时一键找回）= fitToScreen -->
+      <button class="menu-item" id="menuFit" type="button" role="menuitem">
+        <span class="menu-item-label">视口复位</span>
+      </button>
       <!-- v124 隐藏 stub：删了的旧入口 id 留着防 app.js getElementById 崩 -->
-      <button id="menuFit" type="button" hidden></button>
       <button id="adjustCropToSelection" type="button" hidden></button>
       <button id="adjustCropFree" type="button" hidden></button>
 
@@ -977,6 +985,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-2bd07e5ab9e2.mjs"></script>
+    <script type="module" src="./dist/webpaint-f1ecef2043b8.mjs"></script>
   </body>
 </html>

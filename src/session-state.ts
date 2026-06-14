@@ -94,7 +94,9 @@ async function _refreshEncrypted() {
 function _buildOraMeta() {
   return {
     referenceImage: referenceWindow.getPersistBlob(),
-    webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard },
+    // v267 (user)：当前选中图层也搭便车进 editor state（dirty 上算 viewport 级——不单独
+    //   触发存盘，随其它编辑一起落盘，下次打开恢复选中层）。
+    webpaintState: { reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates, palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard, activeLayerId: doc.activeLayer?.id },
   };
 }
 function _encodeCurrentOra() { return encodeDocToOra(doc, _buildOraMeta()); }
@@ -242,6 +244,11 @@ function adoptLoadedDoc(loaded: any, sessionName: any) {
   }
   // v125 per-doc checkerboard：按文件值刷新，缺省回 false
   applyCheckerboard(!!loaded._webpaintState?.checkerboard);
+  // v267 (user)：恢复上次保存时选中的图层（editor state，非 .ora 标准字段；找不到 id 静默忽略）
+  const savedActiveId = loaded._webpaintState?.activeLayerId;
+  if (savedActiveId != null && doc.setActiveById(savedActiveId)) {
+    renderLayersPanel();
+  }
   // v126 per-doc viewport：有就 restore，没有的话 caller 会 fitToScreen
   const vp = loaded._webpaintState?.viewport;
   if (vp && typeof vp.scale === "number") {
@@ -398,12 +405,13 @@ async function renameCurrentSession({ suggested, reason }: any = {}) {
   editMode.applyPendingTransient();
   const oldName = _activeSessionName;
   let candidate = suggested || oldName;
+  let note = "";   // v267：把上一轮的错误（重名/空名）写进重弹标题，保证用户看得到
   while (true) {
-    const title = reason ? `重命名（${reason}）` : "重命名当前画作";
+    const title = note ? `重命名（${note}）` : (reason ? `重命名（${reason}）` : "重命名当前画作");
     const input2 = await openInputSheet(title, candidate, { placeholder: "作品名字" });
     if (input2 === null) return null;
     const trimmed = input2.trim();
-    if (!trimmed) { setStatus("名字不能空", true); candidate = ""; continue; }
+    if (!trimmed) { note = "名字不能空"; candidate = ""; continue; }
     if (trimmed === oldName) return oldName;       // 没改 = 等于成功
     // 锁屏从**确认即开始**，把冲突检查（await listSessions，可能慢）也包进来——否则确认到锁屏
     // 之间有空窗，用户以为「点了没反应、过一会才锁」。冲突 → 退出锁屏后重新弹名字（continue）。
@@ -435,6 +443,7 @@ async function renameCurrentSession({ suggested, reason }: any = {}) {
     });
     if (outcome.conflict) {
       setStatus(`本地已有同名 "${trimmed}"，换一个`, true);
+      note = `已有同名 "${trimmed}"，换一个`;
       candidate = trimmed;
       continue;
     }

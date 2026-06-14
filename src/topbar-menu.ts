@@ -163,7 +163,8 @@ export function initTopbarMenu(ctx) {
     });
   })();
 
-  // v124 (user) 图库挪回顶栏：topGalleryBtn 直接开图库；menuGallery 留 stub 兜底
+  // v267 (user) 图库挪回三条杠菜单（menuGallery）。topGalleryBtn 已从顶栏删除，
+  //   留 getElementById?. 兜底防旧缓存 DOM（有就接上，无则 no-op）。
   // gallery-first：进图库 = 关闭当前画作（active = null）+ refresh 后停 gallery
   document.getElementById("topGalleryBtn")?.addEventListener("click", () => session.exit());
   els.menuGallery?.addEventListener("click", () => { setMenuOpen(false); session.exit(); });
@@ -259,7 +260,7 @@ export function initTopbarMenu(ctx) {
     setMenuOpen(false);
     board.fitToScreen();
     updateZoomLabel();
-    setStatus("适应屏幕");
+    setStatus("视口已复位");
   });
 
   // v109: 撤「笔刷平滑设置」浮动面板 —— 平滑参数 v99 起 per-preset，进 brush settings 调。

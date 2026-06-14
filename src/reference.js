@@ -172,10 +172,11 @@ export class ReferenceWindow {
     // v112: 默认位置避开 topbar + 左 sidebar（user：「不要 spawn 在左上角贴顶，那样难点」）
     // 仅在 panel 没被拖过 / 没 applySerializedState 时设默认；保留 user 调过的位置
     if (!this.panel.style.left || !this.panel.style.top) {
+      // v267 (user)：再往里收一点，避开 iPad 顶部日期/状态栏（左上角）。
       const topbarH = 56;
       const sidebarW = 80;
-      this.panel.style.left = (sidebarW + 16) + "px";
-      this.panel.style.top  = (topbarH + 24) + "px";
+      this.panel.style.left = (sidebarW + 32) + "px";   // = 112
+      this.panel.style.top  = (topbarH + 48) + "px";    // = 104
     }
     this._resizeCanvasToBody();
     this._updateEmptyHint();

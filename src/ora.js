@@ -22,6 +22,7 @@ import { WEBPAINT_VERSION } from "./version.js";
 
 import { zipPack, zipUnpack } from "./zip.js";
 import { Layer, PaintDoc, computeClipBaseFor } from "./doc.js";
+import { smartResample } from "./resample.js";
 // 加密对本 codec **不可见**（v235 起）：encode 永远出明文 ora、decode 永远收明文 ora。
 // 包壳/解壳全在 store 深模块（flow.save/load/push/pull 自动处理；密码经 crypt seam）。
 // 拿到加密容器字节请先走 store.unseal / flow.load，别直接喂这里（会报「缺 stack.xml」）。
@@ -119,39 +120,16 @@ async function renderThumbnailAdaptive(merged, maxBytes = 71680) {
 
 /** 缩略图：最长边 = maxSide 的小图。
  *
- * Step-down 多 pass 1/2 缩：浏览器 drawImage("high") 单次 4x+ 缩有狗牙；
- * 每次缩 1/2 + 高质量 bilinear ≈ box filter 多次叠加，等效抗锯齿。
- * 最后一步缩到精确目标。
+ * step-halving 抗锯齿（细线稿单次大比例 drawImage 会出狗牙）统一收在 resample.js
+ * 的 smartResample——之前这里抄了一份且循环条件写成 && 导致细长画布退化成单次缩，
+ * 现删除重复实现直接复用 SSoT。
  */
 function renderThumbnail(merged, maxSide = 256) {
   const srcW = merged.width, srcH = merged.height;
   const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
   const tw = Math.max(1, Math.round(srcW * scale));
   const th = Math.max(1, Math.round(srcH * scale));
-  // 比例 ≤ 2x → 直接一次缩
-  if (Math.max(srcW, srcH) <= maxSide * 2) {
-    return _drawScaled(merged, tw, th);
-  }
-  // step-down：每次缩半直到下一步会过头
-  let cur = merged;
-  let curW = srcW, curH = srcH;
-  while (curW > tw * 2 && curH > th * 2) {
-    const nw = Math.max(1, Math.floor(curW / 2));
-    const nh = Math.max(1, Math.floor(curH / 2));
-    cur = _drawScaled(cur, nw, nh);
-    curW = nw; curH = nh;
-  }
-  // 最后一步精确到 tw × th
-  return _drawScaled(cur, tw, th);
-}
-
-function _drawScaled(src, w, h) {
-  const c = makeBitmap(w, h);
-  const ctx = c.getContext("2d");
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(src, 0, 0, w, h);
-  return c;
+  return smartResample(merged, tw, th);
 }
 
 function buildStackXml(doc) {

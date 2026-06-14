@@ -226,23 +226,31 @@ function makeGallery(host: GalleryHost) {
           if (nn && nn !== item.name) host.status(`已重命名：${item.name} → ${nn}`);
           await reload(); return;
         }
-        const input = await host.input("重命名", item.name, { placeholder: "新名字" });
-        if (input == null) { host.status("已取消"); return; }
-        const trimmed = input.trim();
-        if (!trimmed) { host.status("名字不能空", true); return; }
-        if (trimmed === item.name) { host.status("名字未变"); return; }
-        // 锁屏从确认即开始，把冲突检查（nameTaken 含云端 listCloudSessionsRecursive 网络往返）
-        // 也包进来——否则确认后到锁屏之间有明显空窗（用户：「点了没立刻锁，过一会才锁」）。
-        const taken = await host.busy(`正在重命名 ${item.name} → ${trimmed}…`, async () => {
-          const t = await nameTaken(trimmed, isCloud);
-          if (t) return t;
-          try {
-            const res = await _store.flow.rename(item.name, trimmed, { cloud: isCloud });
-            host.status(res.cloudDeferred ? `已重命名（云端稍后重试）：${trimmed}` : `已重命名：${trimmed}`);
-          } catch (e: any) { host.status(`重命名失败：${e?.message || e}`, true); }
-          return null;
-        });
-        if (taken) { host.status(`${taken}已有同名 "${trimmed}"，换一个`, true); return; }
+        // v267 (user)：重名/失败要 surface。图库屏的状态条(canvas HUD)不可见，故把错误
+        //   写进重弹的输入框标题（始终可见）并循环重试，而不是只 setStatus 后默默返回。
+        let candidate = item.name;
+        let note = "";
+        while (true) {
+          const input = await host.input(note ? `重命名（${note}）` : "重命名", candidate, { placeholder: "新名字" });
+          if (input == null) { host.status("已取消"); return; }
+          const trimmed = input.trim();
+          if (!trimmed) { candidate = ""; note = "名字不能空"; continue; }
+          if (trimmed === item.name) { host.status("名字未变"); return; }
+          // 锁屏从确认即开始，把冲突检查（nameTaken 含云端 listCloudSessionsRecursive 网络往返）
+          // 也包进来——否则确认后到锁屏之间有明显空窗（用户：「点了没立刻锁，过一会才锁」）。
+          const result: any = await host.busy(`正在重命名 ${item.name} → ${trimmed}…`, async () => {
+            const t = await nameTaken(trimmed, isCloud);
+            if (t) return { taken: t };
+            try {
+              const res = await _store.flow.rename(item.name, trimmed, { cloud: isCloud });
+              host.status(res.cloudDeferred ? `已重命名（云端稍后重试）：${trimmed}` : `已重命名：${trimmed}`);
+              return { ok: true };
+            } catch (e: any) { return { error: e?.message || e }; }
+          });
+          if (result.taken) { candidate = trimmed; note = `${result.taken}已有同名，换一个`; continue; }
+          if (result.error) { candidate = trimmed; note = `失败：${result.error}`; continue; }
+          break;
+        }
         await reload();
       }
 
@@ -285,7 +293,7 @@ function makeGallery(host: GalleryHost) {
         openMenu.value = null;
         const isCloud = !!item.cloud;
         const cloudOn = host.signedIn() && host.online();
-        await host.busy(`正在复制 ${pathBasename(item.name)}…`, async () => {
+        await host.busy(`正在创建副本 ${pathBasename(item.name)}…`, async () => {
           try {
             // 取源原始字节：有本地副本 → loadRaw（离线可用、不弹密码）；纯云端 → 拉云端原始容器。
             let bytes: Blob | null = null;
@@ -307,10 +315,10 @@ function makeGallery(host: GalleryHost) {
             const newName = copyTargetName(item.name, (n: string) => localNames.has(n) || cloudNames.has(n));
             // 写新身份：本地存 + 云端 push（云端 best-effort，离线/失败标未推送，下次 Ctrl+S 续）。
             const res = await _store.flow.saveAs(newName, { encode: () => bytes, cloud: cloudOn });
-            if (!cloudOn) host.status(`已复制为：${pathBasename(newName)}（仅本地）`);
-            else if (res.cloudDeferred) host.status(`已复制为：${pathBasename(newName)}（本地完成；云端稍后推）`);
-            else host.status(`已复制为：${pathBasename(newName)}`);
-          } catch (e: any) { host.status(`复制失败：${e?.message || e}`, true); }
+            if (!cloudOn) host.status(`已创建副本：${pathBasename(newName)}（仅本地）`);
+            else if (res.cloudDeferred) host.status(`已创建副本：${pathBasename(newName)}（本地完成；云端稍后推）`);
+            else host.status(`已创建副本：${pathBasename(newName)}`);
+          } catch (e: any) { host.status(`创建副本失败：${e?.message || e}`, true); }
         });
         await reload();
       }
@@ -505,7 +513,7 @@ function makeGallery(host: GalleryHost) {
               <template v-else>
                 <button type="button" @click="rename(row.item)">重命名</button>
                 <button type="button" @click="move(row.item)">移动到…</button>
-                <button type="button" @click="copy(row.item)">复制</button>
+                <button type="button" @click="copy(row.item)">创建副本</button>
                 <button v-if="row.t.badge==='cloudOnly'" type="button" @click="openTile(row.item)">拉取到本地</button>
                 <button v-if="row.t.badge==='localOnly'" type="button" @click="push(row.item)">推送到云端</button>
                 <button v-if="row.t.badge==='dirtyBoth'" type="button" @click="push(row.item)">推送到云端</button>
