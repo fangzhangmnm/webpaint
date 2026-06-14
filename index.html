@@ -395,6 +395,14 @@
               <path d="M4.2 4.2 L19.8 19.8" stroke-width="1.5"/>
             </svg>
           </button>
+          <!-- v242 选区编辑齿轮（op 不是 tool）：有选区才亮。点开 → 扩张/收缩菜单 → 实时预览 modal -->
+          <!-- v269 (user)：放在 反选 右边、取消选区 左边。图标=「选区扩缩」嵌套虚线框（非通用齿轮） -->
+          <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoSelEditBtn" type="button" title="编辑选区：扩张 / 收缩" aria-haspopup="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2"/>
+              <rect x="8" y="8" width="8" height="8" rx="1.5"/>
+            </svg>
+          </button>
           <button class="lasso-tool-btn lasso-tool-icon lasso-tool-cancel" id="lassoDeselectBtn" type="button" title="取消选区 (Ctrl+D)" aria-label="取消选区">
             <!-- v124 webui 迭代 -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -404,14 +412,6 @@
           </button>
           <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
           <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" title="约束 1:1（正方 / 圆）">1:1</button>
-          <!-- v242 选区编辑齿轮（op 不是 tool）：有选区才亮。点开 → 扩张/收缩菜单 → 实时预览 modal -->
-          <!-- v267 (user)：放到「设置」左边，图标换成「选区扩缩」直观图（嵌套虚线框）而非通用齿轮 -->
-          <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoSelEditBtn" type="button" title="编辑选区：扩张 / 收缩" aria-haspopup="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2"/>
-              <rect x="8" y="8" width="8" height="8" rx="1.5"/>
-            </svg>
-          </button>
           <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒阈值">设置</button>
         </div>
       </div>
@@ -985,6 +985,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-679bb7cb14dc.mjs"></script>
+    <script type="module" src="./dist/webpaint-5eafda2566c7.mjs"></script>
   </body>
 </html>
