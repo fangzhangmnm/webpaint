@@ -22,6 +22,7 @@ const BBOX_GROW_MARGIN = 32;
 export class Layer {
   constructor({ width, height, name, empty = false } = {}) {
     this.id = _layerIdCounter++;
+    this.isGroup = false;            // 树节点判别：Layer=叶。LayerGroup 覆为 true。
     this.name = name || `图层 ${this.id}`;
     this.visible = true;
     this.opacity = 1;
@@ -160,12 +161,74 @@ export class Layer {
   }
 }
 
+// 图层组（文件夹）。容器节点：无 canvas/bbox，持 children（节点数组，0=底）。
+// 组也有 visible/opacity/mode/clippingMask —— 合成器对「隔离组」先把子树合到独立 buffer 再整体混
+// （见 layer-composite._compositeGroup）。pass-through 组（normal+opacity1+非clip）摊进父级。
+export class LayerGroup {
+  constructor({ name, children = [] } = {}) {
+    this.id = _layerIdCounter++;
+    this.isGroup = true;
+    this.name = name || `组 ${this.id}`;
+    this.visible = true;
+    this.opacity = 1;
+    this.mode = "source-over";
+    this.clippingMask = false;
+    this.collapsed = false;         // UI 折叠态（不影响渲染）
+    this.children = children;
+  }
+}
+
+// ---- 树工具（doc / board / panel / ora / undo 复用；节点 = Layer|LayerGroup）----
+
+// 叶序遍历（per-leaf 变换用：crop/flip/rotate/resample 等结构无关操作）。
+export function eachLeaf(nodes, fn) {
+  for (const n of nodes) {
+    if (n.isGroup) eachLeaf(n.children, fn);
+    else fn(n);
+  }
+}
+export function flattenLeaves(nodes) {
+  const out = [];
+  eachLeaf(nodes, (L) => out.push(L));
+  return out;
+}
+// 递归按 id 找节点（叶或组）。
+export function findNodeById(nodes, id) {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    if (n.isGroup) {
+      const f = findNodeById(n.children, id);
+      if (f) return f;
+    }
+  }
+  return null;
+}
+// 递归找节点的父数组 + index。返回 { parent, parentNode, index, node } 或 null。
+//   parent = 持有该节点的数组（根=doc.layers）；parentNode = 持有它的组节点（根层=null）。
+export function findParentOf(nodes, id, parentNode = null) {
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    if (n.id === id) return { parent: nodes, parentNode, index: i, node: n };
+    if (n.isGroup) {
+      const f = findParentOf(n.children, id, n);
+      if (f) return f;
+    }
+  }
+  return null;
+}
+// 递归数叶子（容量/计数用；组不计）。
+export function countLeaves(nodes) {
+  let n = 0;
+  eachLeaf(nodes, () => n++);
+  return n;
+}
+
 export class PaintDoc {
   constructor({ width = DEFAULT_DOC_SIZE, height = DEFAULT_DOC_SIZE } = {}) {
     this.width = width;
     this.height = height;
     this.layers = [new Layer({ width, height, name: "图层 1" })];
-    this.activeIndex = 0;
+    this.activeId = this.layers[0].id;   // active = 节点 id（可叶可组）。activeIndex 是扁平叶序兼容垫片。
     // 背景色：手感期固定白纸。后期开 doc.background 概念时再补。
     this.backgroundColor = "#ffffff";
     // 选区（一等公民）。null = 没选区 = 所有像素都可作用。详见 docs/lasso-and-selection.md。
@@ -180,7 +243,11 @@ export class PaintDoc {
   // （PaintDoc 不知道它们；见 CONTEXT.md）。跨 session 不沿用选区 → selection 清空。
   adoptState(loaded) {
     this.layers = loaded.layers;
-    this.activeIndex = loaded.activeIndex;
+    if (loaded.activeId != null && findNodeById(this.layers, loaded.activeId)) {
+      this.activeId = loaded.activeId;
+    } else {
+      this.activeIndex = loaded.activeIndex || 0;   // 兼容旧（扁平叶序 index）
+    }
     this.width = loaded.width;
     this.height = loaded.height;
     this.backgroundColor = loaded.backgroundColor;
@@ -191,31 +258,46 @@ export class PaintDoc {
   // 取参考层 / 没有就返回 null（不是 active；调用方按需 fallback）
   getReferenceLayer() {
     if (this.referenceLayerId == null) return null;
-    return this.layers.find((L) => L.id === this.referenceLayerId) || null;
+    return findNodeById(this.layers, this.referenceLayerId) || null;
   }
-  // 魔棒 / 油漆桶用的 source：reference 优先，否则 active
+  // 魔棒 / 油漆桶用的 source：reference 优先，否则 active（组不可作源 → null）
   getFloodSourceLayer() {
-    return this.getReferenceLayer() || this.activeLayer;
+    const ref = this.getReferenceLayer();
+    if (ref && !ref.isGroup) return ref;
+    const a = this.activeLayer;
+    return a && !a.isGroup ? a : null;
   }
 
+  // active 节点（叶或组）。绘画路径需用 isGroup 护栏（组不可画）。
   get activeLayer() {
-    return this.layers[this.activeIndex] || null;
+    return findNodeById(this.layers, this.activeId) || null;
+  }
+  // 兼容垫片：扁平**叶序** index ↔ activeId。旧 consumer（panel 高亮 / session-state 持久化 /
+  //   undo 结构 entry）无组时照常用 index；树化后逐个迁到 id。
+  get activeIndex() {
+    return flattenLeaves(this.layers).findIndex((L) => L.id === this.activeId);
+  }
+  set activeIndex(i) {
+    const leaves = flattenLeaves(this.layers);
+    const L = leaves[i] || leaves[leaves.length - 1] || null;
+    this.activeId = L ? L.id : null;
   }
 
   get maxLayers() {
     return computeMaxLayers(this.width, this.height);
   }
 
+  // 兼容：按扁平叶序 index 设 active（老 ORA state 存的是 index）。
   setActive(index) {
-    if (index < 0 || index >= this.layers.length) return false;
-    this.activeIndex = index;
+    const L = flattenLeaves(this.layers)[index];
+    if (!L) return false;
+    this.activeId = L.id;
     return true;
   }
 
   setActiveById(id) {
-    const i = this.layers.findIndex((l) => l.id === id);
-    if (i < 0) return false;
-    this.activeIndex = i;
+    if (!findNodeById(this.layers, id)) return false;
+    this.activeId = id;
     return true;
   }
 
@@ -223,7 +305,7 @@ export class PaintDoc {
   // v97 命名 conflict-free（user：「图层和笔重命名数字总是很怪，而且反而会发生冲突」）：
   // 找现有「图层 N」最大 N，新层 = N+1。避免 _layerIdCounter 跨 session 重启导致碰撞
   addLayer(name) {
-    if (this.layers.length >= this.maxLayers) return null;
+    if (countLeaves(this.layers) >= this.maxLayers) return null;
     const finalName = name || this._nextLayerName();
     const L = new Layer({
       width: this.width,
@@ -231,30 +313,35 @@ export class PaintDoc {
       name: finalName,
       empty: true,
     });
-    const insertAt = this.activeIndex + 1;
-    this.layers.splice(insertAt, 0, L);
-    this.activeIndex = insertAt;
+    // 插在 active 节点的**同级**、active 之上（active 是组 → 插在组之上同级，不进组内）
+    const loc = findParentOf(this.layers, this.activeId);
+    if (loc) loc.parent.splice(loc.index + 1, 0, L);
+    else this.layers.push(L);
+    this.activeId = L.id;
     return L;
   }
 
   _nextLayerName() {
     const re = /^图层\s*(\d+)$/;
     let max = 0;
-    for (const L of this.layers) {
+    for (const L of flattenLeaves(this.layers)) {
       const m = re.exec(L.name);
       if (m) max = Math.max(max, parseInt(m[1], 10));
     }
     return `图层 ${max + 1}`;
   }
 
-  // 删除指定层（id）。最后一层不可删（doc 永远至少 1 层）。
+  // 删除指定节点（id；叶或组——组连带 children）。doc 永远至少留 1 个叶。
   removeLayer(id) {
-    if (this.layers.length <= 1) return false;
-    const i = this.layers.findIndex((l) => l.id === id);
-    if (i < 0) return false;
-    this.layers.splice(i, 1);
-    if (this.activeIndex >= this.layers.length) this.activeIndex = this.layers.length - 1;
-    if (this.activeIndex < 0) this.activeIndex = 0;
+    const loc = findParentOf(this.layers, id);
+    if (!loc) return false;
+    const removingLeaves = countLeaves([loc.node]);
+    if (countLeaves(this.layers) - removingLeaves < 1) return false;
+    loc.parent.splice(loc.index, 1);
+    if (!findNodeById(this.layers, this.activeId)) {   // active 被删（或在被删组内）→ 重选末叶
+      const leaves = flattenLeaves(this.layers);
+      this.activeId = leaves.length ? leaves[leaves.length - 1].id : null;
+    }
     return true;
   }
 
@@ -287,10 +374,12 @@ export class PaintDoc {
   //       clippingMask=true（仍剪到同一基底），不在此处对基底再裁（那是渲染时的事）。
   //   - 反向（under 是剪裁层、active 普通）= "clipping-under"：语义不清，拒绝并给中文提示。
   mergeDownLayer(L) {
-    if (!L) return { ok: false, reason: "bottom" };
-    const idx = this.layers.findIndex((l) => l.id === L.id);
-    if (idx <= 0) return { ok: false, reason: "bottom" };
-    const under = this.layers[idx - 1];
+    if (!L || L.isGroup) return { ok: false, reason: "bottom" };
+    const aIdxFlat = flattenLeaves(this.layers).findIndex((x) => x === L);   // undo 复位（扁平叶序）
+    const loc = findParentOf(this.layers, L.id);
+    if (!loc || loc.index <= 0) return { ok: false, reason: "bottom" };
+    const under = loc.parent[loc.index - 1];   // **同级**下方节点
+    if (under.isGroup) return { ok: false, reason: "merge-into-group" };
     // under 是剪裁层而 active 不是 → 语义不清（active 会被 under 的基底裁掉一半）：拒绝。
     if (under.clippingMask && !L.clippingMask) return { ok: false, reason: "clipping-under" };
 
@@ -369,7 +458,7 @@ export class PaintDoc {
     return {
       ok: true, underId: under.id,
       underBefore, underAfter, underBeforeOpacity, underBeforeMode, underBeforeClipping,
-      resultClipping, activeSpec, activeIndex: idx,
+      resultClipping, activeSpec, activeIndex: aIdxFlat,
     };
   }
 
@@ -377,8 +466,9 @@ export class PaintDoc {
   // 给 history undo "removeLayer" / redo "addLayer" 用。
   // layerSpec: { id, name, visible, opacity, mode, bboxX, bboxY, bboxW, bboxH,
   //   imageData?, bitmap? }   —— 像素数据走 Layer.restoreFromSnapshot 同形 snap
+  // 注：index = **根层级**扁平 index（无组时 = 叶序）。组内插入用 insertNodeAt（撤销树化时上）。
   insertLayerAt(index, spec) {
-    if (this.layers.length >= this.maxLayers) return false;
+    if (countLeaves(this.layers) >= this.maxLayers) return false;
     const L = new Layer({
       width: this.width,
       height: this.height,
@@ -405,23 +495,20 @@ export class PaintDoc {
     return true;
   }
 
-  // 给 setLayerProp / renameLayer 用：按 id 查 layer
+  // 给 setLayerProp / renameLayer 用：按 id 查节点（递归，叶或组）
   findLayer(id) {
-    return this.layers.find((l) => l.id === id) || null;
+    return findNodeById(this.layers, id) || null;
   }
 
-  // 上移 / 下移（toward = +1 上，-1 下）。bottom 是 layers[0]，top 是末尾。
-  // 注意：UI 里"图层 1 在最上面"是常见 anime 工作流；但 doc.layers 数组 0 是底，
-  // 用 UI 渲染时倒序即可，doc 本身不翻。
+  // 上移 / 下移（toward = +1 上，-1 下）——在节点**同级**内。active 按 id 不需调整。
+  // bottom = 同级 [0]，top = 同级末尾。跨组边界移动 = reparent（见 moveIntoGroup/moveOutOfGroup）。
   moveLayer(id, toward) {
-    const i = this.layers.findIndex((l) => l.id === id);
-    if (i < 0) return false;
-    const j = i + toward;
-    if (j < 0 || j >= this.layers.length) return false;
-    const [L] = this.layers.splice(i, 1);
-    this.layers.splice(j, 0, L);
-    if (this.activeIndex === i) this.activeIndex = j;
-    else if (this.activeIndex === j) this.activeIndex = i;
+    const loc = findParentOf(this.layers, id);
+    if (!loc) return false;
+    const j = loc.index + toward;
+    if (j < 0 || j >= loc.parent.length) return false;
+    const [n] = loc.parent.splice(loc.index, 1);
+    loc.parent.splice(j, 0, n);
     return true;
   }
 
@@ -429,10 +516,11 @@ export class PaintDoc {
   //   插在源层之上并设为 active。纯模型操作（无 history）：caller 负责入栈 + 压缩快照 + 刷新。
   //   成功 → { ok:true, newLayer, index }；失败 → { ok:false, reason: max | missing }
   duplicateLayer(id) {
-    if (this.layers.length >= this.maxLayers) return { ok: false, reason: "max" };
-    const i = this.layers.findIndex((l) => l.id === id);
-    if (i < 0) return { ok: false, reason: "missing" };
-    const src = this.layers[i];
+    if (countLeaves(this.layers) >= this.maxLayers) return { ok: false, reason: "max" };
+    const loc = findParentOf(this.layers, id);
+    if (!loc) return { ok: false, reason: "missing" };
+    const src = loc.node;
+    if (src.isGroup) return { ok: false, reason: "missing" };   // 组复制留 P2（深拷整子树）
     const snap = src.snapshot();   // getImageData → 全新像素 buffer（不与源共享）
     const L = new Layer({ width: this.width, height: this.height, name: `${src.name} 副本`, empty: true });
     L.visible = src.visible;
@@ -444,16 +532,64 @@ export class PaintDoc {
       bboxX: snap.bboxX, bboxY: snap.bboxY, bboxW: snap.bboxW, bboxH: snap.bboxH,
       imageData: snap.imageData || null,
     });
-    const insertAt = i + 1;
-    this.layers.splice(insertAt, 0, L);
-    this.activeIndex = insertAt;
-    return { ok: true, newLayer: L, index: insertAt };
+    loc.parent.splice(loc.index + 1, 0, L);   // 源**同级**之上
+    this.activeId = L.id;
+    // index = 新层在根层级的扁平 index（撤销 insertLayerAt 用；无组时 = 叶序，组内 P2）
+    return { ok: true, newLayer: L, index: flattenLeaves(this.layers).findIndex((x) => x === L) };
+  }
+
+  // ---- 图层组 op（纯模型，无 history/DOM；caller 入栈 + 刷新。撤销底座 = snapshotAll）----
+
+  // 把节点（id）包进一个新组，替换其在 parent 的原位。返回 { ok, group } 或 { ok:false }。
+  groupSelection(id) {
+    const loc = findParentOf(this.layers, id);
+    if (!loc) return { ok: false, reason: "missing" };
+    const g = new LayerGroup({ children: [loc.node] });
+    loc.parent.splice(loc.index, 1, g);
+    this.activeId = g.id;
+    return { ok: true, group: g };
+  }
+
+  // 解组：组的 children 提到组在 parent 的原位（保序），删组。返回 { ok, childIds } 或 { ok:false }。
+  ungroup(groupId) {
+    const loc = findParentOf(this.layers, groupId);
+    if (!loc || !loc.node.isGroup) return { ok: false, reason: "not-group" };
+    const kids = loc.node.children;
+    loc.parent.splice(loc.index, 1, ...kids);
+    if (!findNodeById(this.layers, this.activeId)) {
+      this.activeId = kids[0] ? kids[0].id : (flattenLeaves(this.layers).slice(-1)[0]?.id ?? null);
+    }
+    return { ok: true, childIds: kids.map((k) => k.id) };
+  }
+
+  // 把节点移入组（到组内顶部 = children 末尾）。拒绝把组移进自己的子孙。返回 ok。
+  moveIntoGroup(id, groupId) {
+    if (id === groupId) return false;
+    const g = findNodeById(this.layers, groupId);
+    const node = findNodeById(this.layers, id);
+    if (!g || !g.isGroup || !node) return false;
+    if (node.isGroup && findNodeById(node.children, groupId)) return false;   // g 是 node 后代 → 环
+    const loc = findParentOf(this.layers, id);
+    loc.parent.splice(loc.index, 1);
+    g.children.push(node);
+    return true;
+  }
+
+  // 把节点移出其所在组（提到组的同级、组之上）。已在根 → no-op。返回 ok。
+  moveOutOfGroup(id) {
+    const loc = findParentOf(this.layers, id);
+    if (!loc || !loc.parentNode) return false;
+    const gloc = findParentOf(this.layers, loc.parentNode.id);
+    if (!gloc) return false;
+    const [n] = loc.parent.splice(loc.index, 1);
+    gloc.parent.splice(gloc.index + 1, 0, n);
+    return true;
   }
 
   // 清空当前 layer 像素（不删 layer）。bbox 复位为 empty（释放 canvas）。
   clearActiveLayer() {
     const L = this.activeLayer;
-    if (!L) return;
+    if (!L || L.isGroup) return;
     L.bboxX = 0;
     L.bboxY = 0;
     L.bboxW = 0;
@@ -478,45 +614,57 @@ export class PaintDoc {
 
   // v110: doc 整状态 snapshot（给 crop / resample 等 doc-level transform 的 undo 用）
   // 比单层 snapshot 重得多——含每层 imageData + bbox + 元信息 + selection mask 副本
+  // 节点 ↔ spec 递归（组含 children specs；叶含像素 snap）。给 snapshotAll 树往返用。
+  _nodeSnap(n) {
+    if (n.isGroup) {
+      return {
+        isGroup: true, id: n.id, name: n.name, visible: n.visible, opacity: n.opacity,
+        mode: n.mode, clippingMask: n.clippingMask, collapsed: n.collapsed,
+        children: n.children.map((c) => this._nodeSnap(c)),
+      };
+    }
+    return {
+      isGroup: false, id: n.id, name: n.name, visible: n.visible, opacity: n.opacity,
+      mode: n.mode, clippingMask: n.clippingMask, lockAlpha: n.lockAlpha, snap: n.snapshot(),
+    };
+  }
+  _nodeFromSnap(s) {
+    if (s.isGroup) {
+      const g = new LayerGroup({ name: s.name });
+      g.id = s.id; g.visible = s.visible; g.opacity = s.opacity; g.mode = s.mode;
+      g.clippingMask = s.clippingMask; g.collapsed = !!s.collapsed;
+      g.children = (s.children || []).map((c) => this._nodeFromSnap(c));
+      if (s.id >= _layerIdCounter) _layerIdCounter = s.id + 1;
+      return g;
+    }
+    const L = new Layer({ width: this.width, height: this.height, name: s.name, empty: true });
+    L.id = s.id; L.visible = s.visible; L.opacity = s.opacity; L.mode = s.mode;
+    L.clippingMask = s.clippingMask; L.lockAlpha = !!s.lockAlpha;
+    L.docW = this.width; L.docH = this.height;
+    L.restoreFromSnapshot(s.snap);
+    if (s.id >= _layerIdCounter) _layerIdCounter = s.id + 1;
+    return L;
+  }
   snapshotAll() {
     return {
       width: this.width,
       height: this.height,
-      activeIndex: this.activeIndex,
+      activeId: this.activeId,
+      activeIndex: this.activeIndex,   // 兼容：旧 restore 走 index
       referenceLayerId: this.referenceLayerId,
       selection: this.selection,   // 不可变 → 存引用，不深拷
-      layers: this.layers.map((L) => ({
-        id: L.id,
-        name: L.name,
-        visible: L.visible,
-        opacity: L.opacity,
-        mode: L.mode,
-        clippingMask: L.clippingMask,
-        lockAlpha: L.lockAlpha,
-        snap: L.snapshot(),
-      })),
+      layers: this.layers.map((n) => this._nodeSnap(n)),
     };
   }
   restoreSnapshotAll(snap) {
     if (!snap) return;
     this.width = snap.width;
     this.height = snap.height;
-    this.activeIndex = snap.activeIndex;
     this.referenceLayerId = snap.referenceLayerId;
     this.selection = snap.selection;   // 不可变引用
-    this.layers = snap.layers.map((s) => {
-      const L = new Layer({ width: snap.width, height: snap.height, name: s.name, empty: true });
-      L.id = s.id;
-      L.visible = s.visible;
-      L.opacity = s.opacity;
-      L.mode = s.mode;
-      L.clippingMask = s.clippingMask;
-      L.lockAlpha = !!s.lockAlpha;
-      L.docW = snap.width;
-      L.docH = snap.height;
-      L.restoreFromSnapshot(s.snap);
-      return L;
-    });
+    this.layers = snap.layers.map((s) => this._nodeFromSnap(s));
+    if (snap.activeId != null && findNodeById(this.layers, snap.activeId)) this.activeId = snap.activeId;
+    else this.activeIndex = snap.activeIndex || 0;
   }
 
   // v112: 裁切 doc 到 rect（doc 坐标 {x, y, w, h}）。
@@ -524,7 +672,7 @@ export class PaintDoc {
   // → user 画的东西落在新 doc 外 (实际是落在旧 bbox 区域)。修：真 clip layer canvas。
   cropTo(rect) {
     const dx = rect.x | 0, dy = rect.y | 0, nw = Math.max(1, rect.w | 0), nh = Math.max(1, rect.h | 0);
-    for (const L of this.layers) {
+    for (const L of flattenLeaves(this.layers)) {
       L.docW = nw;
       L.docH = nh;
       if (L.bboxW <= 0 || L.bboxH <= 0) {
@@ -572,7 +720,7 @@ export class PaintDoc {
   // 每层：canvas 内容左右镜像；bbox 左上角 x → docW - (bboxX + bboxW)。
   flipHorizontal() {
     const W = this.width;
-    for (const L of this.layers) {
+    for (const L of flattenLeaves(this.layers)) {
       if (L.bboxW > 0 && L.bboxH > 0) {
         const nc = makeBitmap(L.bboxW, L.bboxH);
         const nctx = nc.getContext("2d", { willReadFrequently: false });
@@ -603,7 +751,7 @@ export class PaintDoc {
   rotate90CCW() {
     const W = this.width;
     const H = this.height;
-    for (const L of this.layers) {
+    for (const L of flattenLeaves(this.layers)) {
       L.docW = H;        // 新 doc 宽 = 旧高
       L.docH = W;        // 新 doc 高 = 旧宽
       if (L.bboxW > 0 && L.bboxH > 0) {
@@ -640,7 +788,7 @@ export class PaintDoc {
     const sy = nh / this.height;
     const smooth = mode !== "nearest";
     const quality = mode === "bicubic" ? "high" : "low";
-    for (const L of this.layers) {
+    for (const L of flattenLeaves(this.layers)) {
       L.docW = nw;
       L.docH = nh;
       if (L.bboxW <= 0 || L.bboxH <= 0) continue;
