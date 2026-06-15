@@ -937,6 +937,10 @@ input[type="range"].color-ramp::-moz-range-thumb {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
+/* 「移入图层组」dropdown：一行 label + select，不像 N 个菜单项那样挤占空间 */
+.layer-move-into { display: flex; align-items: center; gap: 8px; cursor: default; }
+.layer-move-into .menu-item-label { flex: 0 0 auto; }
+.layer-move-select { flex: 1 1 auto; min-width: 0; max-width: 110px; }
 .layer-vis {
   width: 20px;
   height: 20px;

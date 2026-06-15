@@ -404,8 +404,13 @@ const LayerRow = defineComponent({
       else if (a === "ungroup")   _ungroupLayer(live());
       else if (a === "moveOut")   _moveOutOfGroup(live());
     }
-    // 移入指定的已有组（high：把外面的层加入已知组，不限于上方相邻）
-    function moveInto(groupId: any) { layersUi.menuId = null; _moveIntoGroup(live(), groupId); }
+    // 移入选中的已有组（high：把外面的层加入已知组，不限上方相邻；dropdown 不挤占菜单）
+    function onMoveSelect(e: any) {
+      const v = (e.target as HTMLSelectElement).value;
+      if (!v) return;
+      layersUi.menuId = null;
+      _moveIntoGroup(live(), parseInt(v, 10));
+    }
 
     // 层重排 = ⋯ 菜单的「上移/下移」（_moveLayerDelta）。早先定：不做行拖拽（iPad 触屏 drag-drop 不可靠）。
     function toggleClip(e: Event) { e.stopPropagation(); _toggleClipping(live()); }
@@ -421,7 +426,7 @@ const LayerRow = defineComponent({
       EYE_OPEN, EYE_OFF, FOLDER_OPEN, FOLDER_CLOSED, LAYER_MODE_LABEL,
       onRowClick, onNameClick, onRenameCommit, onRenameKey,
       toggleBadge, toggleMenu, vis, toggleCollapse,
-      opaInput, opaCommit, modeChange, act, moveInto,
+      opaInput, opaCommit, modeChange, act, onMoveSelect,
       toggleClip, toggleRef, toggleLock,
     };
   },
@@ -433,14 +438,15 @@ const LayerRow = defineComponent({
       :data-layer-id="String(layer.id)"
       @click="onRowClick"
     >
-      <!-- 组：文件夹图标点击折叠（去三角）；叶不显图标。不缩进，组内层靠 .layer-nested 的左竖条标归属。 -->
-      <button v-if="isGroup" type="button" class="layer-folder" :title="collapsed ? '展开组' : '折叠组'"
-        @click="toggleCollapse" v-html="collapsed ? FOLDER_CLOSED : FOLDER_OPEN"></button>
-
+      <!-- 眼睛**始终第一**（组/叶都是）→ 眼睛列对齐，组不再有误导性缩进。 -->
       <button type="button" class="layer-vis" :class="{ 'hidden-icon': !layer.visible }"
         :title="layer.visible ? '可见' : '已隐藏'"
         @click="vis"
         v-html="layer.visible ? EYE_OPEN : EYE_OFF"></button>
+
+      <!-- 组：文件夹图标点击折叠（去三角），排在眼睛之后。叶不显。不缩进，组内层靠 .layer-nested 左竖条标归属。 -->
+      <button v-if="isGroup" type="button" class="layer-folder" :title="collapsed ? '展开组' : '折叠组'"
+        @click="toggleCollapse" v-html="collapsed ? FOLDER_CLOSED : FOLDER_OPEN"></button>
 
       <input v-if="renaming" type="text" class="layer-name-input" :value="layer.name"
         @click.stop @blur="onRenameCommit" @keydown="onRenameKey" />
@@ -463,10 +469,16 @@ const LayerRow = defineComponent({
         <!-- 叶专属：复制 -->
         <button v-if="!isGroup" class="menu-item" type="button" :disabled="!canDuplicate" @click="act('duplicate')"><span class="menu-item-label">复制图层</span></button>
 
-        <!-- 图层组 reparent：解组（仅组）/ 移入「某组」（所有可选已有组，high）/ 移出组。编组 = 「+」里新建空组 -->
+        <!-- 图层组 reparent：解组（仅组）/ 移入某组（dropdown，不挤占菜单空间）/ 移出组。编组 = 「+」里新建空组 -->
         <hr class="menu-sep" v-if="isGroup || moveTargets.length || canMoveOut" />
         <button v-if="isGroup" class="menu-item" type="button" @click="act('ungroup')"><span class="menu-item-label">解组</span></button>
-        <button v-for="g in moveTargets" :key="'mi'+g.id" class="menu-item" type="button" @click="moveInto(g.id)"><span class="menu-item-label">移入「{{ g.name }}」</span></button>
+        <label v-if="moveTargets.length" class="menu-item layer-move-into" @click.stop>
+          <span class="menu-item-label">移入图层组</span>
+          <select class="layer-move-select" @change="onMoveSelect" @click.stop>
+            <option value="" selected>选择…</option>
+            <option v-for="g in moveTargets" :key="'mi'+g.id" :value="String(g.id)">{{ g.name }}</option>
+          </select>
+        </label>
         <button v-if="canMoveOut" class="menu-item" type="button" @click="act('moveOut')"><span class="menu-item-label">移出组</span></button>
 
         <hr class="menu-sep" />
@@ -582,6 +594,16 @@ const LayersPanel = defineComponent({
 
 let _vueApp: any = null;
 
+// 把图层列表的 max-height 钉到「列表顶 → 视口底」可用空间，列表内部 overflow 滚动。
+//   修：层多 / 面板被拖到屏幕下半 时，最底 item 掉出视口够不着。CSS 的 50vh 是固定上限、不跟位置走。
+function _clampListHeight() {
+  const list = els.layersList;
+  if (!list || els.layersPanel.classList.contains("hidden")) return;
+  const top = list.getBoundingClientRect().top;
+  const avail = window.innerHeight - top - 12;   // 留 12px 余量
+  list.style.maxHeight = Math.max(96, avail) + "px";
+}
+
 // 面板外 chrome 同步（计数标签 / 加按钮禁用 / 删按钮禁用 / 滚到活动层）—— 这些 DOM 不在 mount
 // 容器内，由 docVersion watch 驱动（取代旧 renderLayersPanel 末尾的命令式赋值）。
 function _syncChrome() {
@@ -597,6 +619,7 @@ function _syncChrome() {
   if (upBtn) upBtn.disabled = !doc.canMoveLayer(doc.activeId, 1);
   if (downBtn) downBtn.disabled = !doc.canMoveLayer(doc.activeId, -1);
   nextTick(() => {
+    _clampListHeight();   // 列表高度跟位置/层数走，保证最底 item 可滚到
     els.layersList.querySelector(".layer-row.active")?.scrollIntoView({ block: "nearest" });
   });
 }
@@ -612,6 +635,8 @@ export function initLayersPanel(ctx) {
   // chrome 副作用：docVersion 变即同步面板外 DOM（+ 初始同步一次）
   watch(() => docVersion.value, _syncChrome);
   _syncChrome();
+  // 视口变（旋转 / 键盘弹出 / resize）也要重钉列表高度
+  window.addEventListener("resize", _clampListHeight);
 
   // 点击别处收起打开的 ⋯ 菜单（取代旧 popup 的 outside-pointerdown）
   document.addEventListener("pointerdown", (e: any) => {
@@ -643,6 +668,7 @@ export function initLayersPanel(ctx) {
     els.layersPanel.style.left = left + "px";
     els.layersPanel.style.right = "auto";
     els.layersPanel.style.top = top + "px";
+    _clampListHeight();   // 拖动改了面板顶 → 重钉列表高度，底部 item 始终够得着
     safeLSSet("webpaint.layersPanel.pos", JSON.stringify({ left, top }));
   });
   els.layersPanelHead.addEventListener("pointerup", (e: any) => {
