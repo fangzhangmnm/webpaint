@@ -236,3 +236,16 @@ describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
     assert(dup.ok && dup.loc && typeof dup.loc.index === "number", "duplicate 返回 loc");
   });
 });
+
+describe("layer-tree · addGroup 空组（v278）", () => {
+  T("建空组：默认 pass-through、插 active 之上、设 active、不计叶", () => {
+    const d = new PaintDoc();
+    const L0 = d.layers[0];
+    const g = d.addGroup();
+    assert(g.isGroup && g.children.length === 0, "空组无 children");
+    assert(g.mode === "pass-through", "默认穿透");
+    assert(d.layers.length === 2 && d.layers[1] === g, "插在 L0 之上");
+    assert(d.activeId === g.id, "active=新组");
+    assert(countLeaves(d.layers) === 1, "空组不计叶（仍 1 叶）");
+  });
+});

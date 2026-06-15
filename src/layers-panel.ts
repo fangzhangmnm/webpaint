@@ -22,7 +22,7 @@
 // + _afterDocChange（lasso / history handler 也调）+ layerSpecFrom（lasso 也调）。
 
 import { createApp, defineComponent, reactive, computed, watch, nextTick } from "../vendor/vue/vue.esm-browser.prod.js";
-import { countLeaves } from "./doc.js";
+import { countLeaves, findNodeById } from "./doc.js";
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
@@ -33,8 +33,9 @@ let doc: any, board: any, history: any, setStatus: any;
 // 留在 app.js、经 ctx 绑入的协作件（被非图层代码也调用）
 let _afterDocChange: any, layerSpecFrom: any;
 
-// 图层模式 → 单字符 badge (Procreate 风格)
+// 图层模式 → 单字符 badge (Procreate 风格)。"pass-through" 仅组可用（穿透）。
 const LAYER_MODE_INITIAL: Record<string, string> = {
+  "pass-through": "穿",
   "source-over": "N", "multiply": "M", "screen": "S", "overlay": "O",
   "darken": "Da", "lighten": "Li", "color-dodge": "CD", "color-burn": "CB",
   "hard-light": "HL", "soft-light": "SL", "difference": "Df", "exclusion": "Ex",
@@ -44,11 +45,18 @@ export const LAYER_MODE_LABEL: Record<string, string> = {
   "darken": "变暗", "lighten": "变亮", "color-dodge": "颜色减淡", "color-burn": "颜色加深",
   "hard-light": "强光", "soft-light": "柔光", "difference": "差值", "exclusion": "排除",
 };
+// 组的模式下拉：穿透（默认/非隔离）置顶，其余 = 正常(隔离) + 各混合模式。对齐 PS 组下拉。
+export const GROUP_MODE_LABEL: Record<string, string> = {
+  "pass-through": "穿透", ...LAYER_MODE_LABEL,
+};
 function modeInitial(m: string) { return LAYER_MODE_INITIAL[m] || "?"; }
 
 // 眼睛 icon SVG（v123 16→22）
 const EYE_OPEN = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a18.94 18.94 0 0 1 4.06-5.06"/><path d="M1 1l22 22"/></svg>';
+// 组折叠图标 SVG（去三角，点文件夹切折叠）：展开 = 打开的文件夹；折叠 = 合上的文件夹。
+const FOLDER_OPEN = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1H7l-3 7a1 1 0 0 1-1-1V7z"/><path d="M4 17l2.5-6.5h15L19 17a1 1 0 0 1-1 .9H5a1 1 0 0 1-1-.9z"/></svg>';
+const FOLDER_CLOSED = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
 
 // ---- 面板-UI-本地反应式状态（折叠 / 内联重命名 / ⋯菜单）----
 // 注：doc/图层结构变更的版本信号已外迁到 signals.ts 的 docVersion（跨切面共享）。
@@ -107,15 +115,14 @@ function _deleteLayer(L: any) {
   _afterDocChange();
 }
 // ---- 图层组 op caller（都走 snapshotTree 结构撤销；纯结构变、零像素拷贝）----
-function _groupLayer(L: any) {
-  if (!L) return;
+// 新建**空**图层组（创建入口 = 「+」菜单；编组当前层已砍，靠空组 + 移入「某组」达成）。
+function _addEmptyGroup() {
   const before = doc.snapshotTree();
-  const r = doc.groupSelection(L.id);
-  if (!r.ok) return;
+  const g = doc.addGroup();
   history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
-    undoStatus: "已解组", redoStatus: "已编组" });
+    undoStatus: `已删除组「${g.name}」`, redoStatus: `已新建组「${g.name}」` });
   _afterDocChange();
-  setStatus(`已编组：${r.group.name}`);
+  setStatus(`已新建图层组：${g.name}`);
 }
 function _ungroupLayer(L: any) {
   if (!L || !L.isGroup) return;
@@ -287,6 +294,7 @@ const LayerRow = defineComponent({
     depth: { type: Number, default: 0 },
     isGroup: { type: Boolean, default: false },
     collapsed: { type: Boolean, default: false },
+    childLeafCount: { type: Number, default: 0 },
     active: { type: Boolean, default: false },
     isRef: { type: Boolean, default: false },
     expanded: { type: Boolean, default: false },
@@ -299,7 +307,7 @@ const LayerRow = defineComponent({
     canMergeDown: { type: Boolean, default: false },
     hasPx: { type: Boolean, default: false },
     canMoveOut: { type: Boolean, default: false },
-    aboveGroupId: { default: null },
+    moveTargets: { type: Array, default: () => [] },   // 可移入的已有组 [{id,name}]
   },
   setup(props: any) {
     // snap = rows 重算时拷出的 leaf 快照（只读显示值，引用每次 bump 必变 → 反应式穿透）；
@@ -392,39 +400,42 @@ const LayerRow = defineComponent({
       else if (a === "mergeDown") _mergeDownLayer(live());
       else if (a === "clear")     _clearLayerPixels(live());
       else if (a === "del")       _deleteLayer(live());
-      // 图层组动作
-      else if (a === "group")     _groupLayer(live());
+      // 图层组动作（编组已移到「+」菜单 = 新建空组；这里只留 reparent）
       else if (a === "ungroup")   _ungroupLayer(live());
-      else if (a === "moveIn")    _moveIntoGroup(live(), props.aboveGroupId);
       else if (a === "moveOut")   _moveOutOfGroup(live());
     }
+    // 移入指定的已有组（high：把外面的层加入已知组，不限于上方相邻）
+    function moveInto(groupId: any) { layersUi.menuId = null; _moveIntoGroup(live(), groupId); }
 
     // 层重排 = ⋯ 菜单的「上移/下移」（_moveLayerDelta）。早先定：不做行拖拽（iPad 触屏 drag-drop 不可靠）。
     function toggleClip(e: Event) { e.stopPropagation(); _toggleClipping(live()); }
     function toggleRef(e: Event) { e.stopPropagation(); _toggleReference(live()); }
     function toggleLock(e: Event) { e.stopPropagation(); _toggleLockAlpha(live()); }
 
-    const rowStyle = computed(() => ({ paddingLeft: (4 + props.depth * 18) + "px" }));
+    // 不缩进（Q2：左竖条方案）：组内层（depth>0）靠左竖色条标归属，只留极小的每级位移（rail 宽）。
+    const railPad = computed(() => 6 + props.depth * 9);    // px：rail 自身宽，非传统缩进
+    const modeOptions = computed(() => (props.isGroup ? GROUP_MODE_LABEL : LAYER_MODE_LABEL));
 
     return {
-      modeBadge, opacityPct, badgeTitle, layersUi, rowStyle,
-      EYE_OPEN, EYE_OFF, LAYER_MODE_LABEL,
+      modeBadge, opacityPct, badgeTitle, layersUi, railPad, modeOptions,
+      EYE_OPEN, EYE_OFF, FOLDER_OPEN, FOLDER_CLOSED, LAYER_MODE_LABEL,
       onRowClick, onNameClick, onRenameCommit, onRenameKey,
       toggleBadge, toggleMenu, vis, toggleCollapse,
-      opaInput, opaCommit, modeChange, act,
+      opaInput, opaCommit, modeChange, act, moveInto,
       toggleClip, toggleRef, toggleLock,
     };
   },
   template: `
     <div
       class="layer-row"
-      :class="{ active, clipping: layer.clippingMask, reference: isRef, 'layer-group-row': isGroup }"
-      :style="rowStyle"
+      :class="{ active, clipping: layer.clippingMask, reference: isRef, 'layer-group-row': isGroup, 'layer-nested': depth > 0 }"
+      :style="{ marginLeft: railPad + 'px' }"
       :data-layer-id="String(layer.id)"
       @click="onRowClick"
     >
-      <!-- 组：折叠三角；叶：占位对齐（depth 缩进已在 rowStyle） -->
-      <button v-if="isGroup" type="button" class="layer-collapse" :title="collapsed ? '展开组' : '折叠组'" @click="toggleCollapse">{{ collapsed ? '▸' : '▾' }}</button>
+      <!-- 组：文件夹图标点击折叠（去三角）；叶不显图标。不缩进，组内层靠 .layer-nested 的左竖条标归属。 -->
+      <button v-if="isGroup" type="button" class="layer-folder" :title="collapsed ? '展开组' : '折叠组'"
+        @click="toggleCollapse" v-html="collapsed ? FOLDER_CLOSED : FOLDER_OPEN"></button>
 
       <button type="button" class="layer-vis" :class="{ 'hidden-icon': !layer.visible }"
         :title="layer.visible ? '可见' : '已隐藏'"
@@ -433,7 +444,7 @@ const LayerRow = defineComponent({
 
       <input v-if="renaming" type="text" class="layer-name-input" :value="layer.name"
         @click.stop @blur="onRenameCommit" @keydown="onRenameKey" />
-      <span v-else class="layer-name" @click="onNameClick">{{ isGroup ? '▢ ' + layer.name : layer.name }}</span>
+      <span v-else class="layer-name" @click="onNameClick">{{ layer.name }}<span v-if="isGroup && collapsed" class="layer-group-count"> ({{ childLeafCount }})</span></span>
 
       <span v-if="layer.clippingMask" class="layer-clip-chip" title="已剪裁到下方第一颗非剪裁层">↘</span>
       <span v-if="!isGroup && layer.lockAlpha" class="layer-lock-chip" title="锁定不透明度：笔只改已有像素的颜色">
@@ -449,20 +460,19 @@ const LayerRow = defineComponent({
       <div v-if="menuOpen" class="menu-panel layer-tools-popup" @click.stop>
         <button class="menu-item" type="button" @click="act('rename')"><span class="menu-item-label">重命名…</span></button>
 
-        <!-- 叶专属：复制 / 锁α / 参考 -->
+        <!-- 叶专属：复制 -->
         <button v-if="!isGroup" class="menu-item" type="button" :disabled="!canDuplicate" @click="act('duplicate')"><span class="menu-item-label">复制图层</span></button>
 
-        <hr class="menu-sep" />
-        <!-- 图层组：编组（叶/组都可，包成新组，支持嵌套）/ 解组（仅组）/ 移入上方组 / 移出组 -->
-        <button class="menu-item" type="button" @click="act('group')"><span class="menu-item-label">编组</span></button>
+        <!-- 图层组 reparent：解组（仅组）/ 移入「某组」（所有可选已有组，high）/ 移出组。编组 = 「+」里新建空组 -->
+        <hr class="menu-sep" v-if="isGroup || moveTargets.length || canMoveOut" />
         <button v-if="isGroup" class="menu-item" type="button" @click="act('ungroup')"><span class="menu-item-label">解组</span></button>
-        <button v-if="aboveGroupId != null" class="menu-item" type="button" @click="act('moveIn')"><span class="menu-item-label">移入上方组</span></button>
+        <button v-for="g in moveTargets" :key="'mi'+g.id" class="menu-item" type="button" @click="moveInto(g.id)"><span class="menu-item-label">移入「{{ g.name }}」</span></button>
         <button v-if="canMoveOut" class="menu-item" type="button" @click="act('moveOut')"><span class="menu-item-label">移出组</span></button>
 
         <hr class="menu-sep" />
         <!-- v267 (user)：层属性 toggle 收进 ⋯ 菜单（点了不关菜单，可连续切） -->
         <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleLock"><span class="layer-menu-check">{{ layer.lockAlpha ? '☑' : '☐' }}</span><span class="menu-item-label">锁定不透明度</span></button>
-        <button class="menu-item layer-menu-toggle" type="button" @click="toggleClip"><span class="layer-menu-check">{{ layer.clippingMask ? '☑' : '☐' }}</span><span class="menu-item-label">剪裁</span></button>
+        <button class="menu-item layer-menu-toggle" type="button" @click="toggleClip"><span class="layer-menu-check">{{ layer.clippingMask ? '☑' : '☐' }}</span><span class="menu-item-label">剪裁{{ isGroup ? '组' : '' }}</span></button>
         <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleRef"><span class="layer-menu-check">{{ isRef ? '☑' : '☐' }}</span><span class="menu-item-label">参考层</span></button>
 
         <hr class="menu-sep" />
@@ -472,7 +482,7 @@ const LayerRow = defineComponent({
       </div>
     </div>
 
-    <div v-if="expanded" class="layer-row-expand" :style="rowStyle" @click.stop>
+    <div v-if="expanded" class="layer-row-expand" :style="{ marginLeft: railPad + 'px' }" @click.stop>
       <label class="layer-slider-row">
         <span>透</span>
         <input type="range" min="0" max="100" :value="opacityPct"
@@ -482,7 +492,7 @@ const LayerRow = defineComponent({
       <label class="layer-slider-row">
         <span>模式</span>
         <select style="grid-column: span 2;" :value="layer.mode" @change="modeChange" @click.stop>
-          <option v-for="(lbl, val) in LAYER_MODE_LABEL" :key="val" :value="val">{{ lbl }}</option>
+          <option v-for="(lbl, val) in modeOptions" :key="val" :value="val">{{ lbl }}</option>
         </select>
       </label>
       <!-- v267 (user)：剪裁 / 锁α / 参考 toggle 已收进 ⋯ 菜单，折叠区只留 透明度 + 模式 -->
@@ -506,10 +516,17 @@ const LayersPanel = defineComponent({
       const out: any[] = [];
       const activeId = doc.activeId;
       const totalLeaves = countLeaves(doc.layers);
-      const walk = (nodes: any[], depth: number) => {
+      // 全部组（id+name+node ref）：给「移入组」列表用。算一次，每行再按「非自身/非后代/非当前父」过滤。
+      const allGroups: any[] = [];
+      const collect = (nodes: any[]) => { for (const n of nodes) if (n.isGroup) { allGroups.push(n); collect(n.children); } };
+      collect(doc.layers);
+      const walk = (nodes: any[], depth: number, parentNode: any) => {
         for (let i = nodes.length - 1; i >= 0; i--) {
           const n = nodes[i];
-          const aboveSib = i + 1 < nodes.length ? nodes[i + 1] : null;   // UI 上方同级
+          // 该节点可移入的目标组：排除自身、自身后代（防环）、当前所在组（已在里面）。
+          const moveTargets = allGroups
+            .filter((g) => g.id !== n.id && g !== parentNode && !(n.isGroup && findNodeById(n.children, g.id)))
+            .map((g) => ({ id: g.id, name: g.name }));
           const base = {
             depth,
             isGroup: !!n.isGroup,
@@ -518,13 +535,13 @@ const LayersPanel = defineComponent({
             canDown: i > 0,
             canDel: totalLeaves > 1,
             canMoveOut: depth > 0,                                       // 在组内 → 可移出
-            aboveGroupId: aboveSib && aboveSib.isGroup ? aboveSib.id : null,  // 上方是组 → 可移入
+            moveTargets,                                                 // 可移入的已有组（high：把外面的层加入已知组）
             layer: { id: n.id, name: n.name, visible: n.visible, opacity: n.opacity, mode: n.mode, clippingMask: n.clippingMask, lockAlpha: n.lockAlpha, isGroup: !!n.isGroup },
           };
           if (n.isGroup) {
             const collapsed = layersUi.collapsedIds.has(n.id);
-            out.push({ ...base, collapsed, isRef: false, canDuplicate: false, canMergeDown: false, hasPx: false });
-            if (!collapsed) walk(n.children, depth + 1);
+            out.push({ ...base, collapsed, isRef: false, canDuplicate: false, canMergeDown: false, hasPx: false, childLeafCount: countLeaves(n.children) });
+            if (!collapsed) walk(n.children, depth + 1, n);
           } else {
             out.push({
               ...base, collapsed: false,
@@ -537,7 +554,7 @@ const LayersPanel = defineComponent({
           }
         }
       };
-      walk(doc.layers, 0);
+      walk(doc.layers, 0, null);
       return out;
     });
     return { rows, layersUi };
@@ -549,6 +566,7 @@ const LayersPanel = defineComponent({
         :depth="r.depth"
         :is-group="r.isGroup"
         :collapsed="r.collapsed"
+        :child-leaf-count="r.childLeafCount"
         :active="r.active"
         :is-ref="r.isRef"
         :expanded="layersUi.expandedId === r.layer.id"
@@ -556,7 +574,7 @@ const LayersPanel = defineComponent({
         :renaming="layersUi.renameId === r.layer.id"
         :can-up="r.canUp" :can-down="r.canDown" :can-del="r.canDel"
         :can-duplicate="r.canDuplicate" :can-merge-down="r.canMergeDown" :has-px="r.hasPx"
-        :can-move-out="r.canMoveOut" :above-group-id="r.aboveGroupId"
+        :can-move-out="r.canMoveOut" :move-targets="r.moveTargets"
       />
     </template>
   `,
@@ -652,6 +670,7 @@ export function initLayersPanel(ctx) {
     addPopup?.classList.toggle("hidden");
   });
   document.getElementById("layerAddNewBtn")?.addEventListener("click", () => { closeAddPopup(); _addEmptyLayer(); });
+  document.getElementById("layerAddGroupBtn")?.addEventListener("click", () => { closeAddPopup(); _addEmptyGroup(); });
   // 导入图片到新层：实际逻辑由 import-image.ts 给 layerImportPhotoBtn 接线，这里只负责收起菜单。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", closeAddPopup);
   // 点别处收起 "+" 菜单

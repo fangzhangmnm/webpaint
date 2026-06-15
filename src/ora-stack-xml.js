@@ -60,13 +60,21 @@ function nodeToXml(node, doc, indent) {
     ...(doc.activeId === node.id ? [`webpaint:active="true"`] : []),
   ];
   if (node.isGroup) {
+    // ORA baseline 组隔离模型（与我们 layer-composite.groupNeedsIsolation 一致，故用**标准** isolation 属性，
+    //   不用私有扩展 → 全合规 + 和 Krita/GIMP/MyPaint 互通）：
+    //   隔离 ⟺ isolation="isolate" ‖ opacity<1 ‖ composite-op≠svg:src-over；非隔离时 composite-op 被忽略。
+    //   映射：穿透 → src-over + isolation="auto"；正常(隔离) → src-over + isolation="isolate"；其它混合模式 → svg:<mode>。
+    const groupAttrs = [
+      ...common,
+      `isolation="${node.mode === "pass-through" ? "auto" : "isolate"}"`,
+    ];
     // children top-first（与 spec 一致）：同级倒序输出。
     const kids = [];
     for (let i = node.children.length - 1; i >= 0; i--) {
       kids.push(nodeToXml(node.children[i], doc, indent + 1));
     }
     const inner = kids.length ? `\n${kids.join("\n")}\n${pad}` : "";
-    return `${pad}<stack ${common.join(" ")}>${inner}</stack>`;
+    return `${pad}<stack ${groupAttrs.join(" ")}>${inner}</stack>`;
   }
   const attrs = [
     common[0],                                  // name
@@ -121,7 +129,14 @@ function parseNode(el) {
     isActive: el.getAttribute("webpaint:active") === "true",
   };
   if (elemTag(el) === "stack") {
-    return { ...common, isGroup: true, children: parseChildren(el) };
+    // 组 mode 按 ORA baseline 隔离规则反推（standard isolation 属性）：
+    //   composite-op≠src-over → 该混合模式（本就隔离）；src-over 时 isolation=isolate→正常(隔离)、auto/缺→穿透。
+    const compositeOp = el.getAttribute("composite-op") || "svg:src-over";
+    const isolation = el.getAttribute("isolation") || "auto";
+    const mode = compositeOp !== "svg:src-over"
+      ? canvasModeFromOra(compositeOp)
+      : (isolation === "isolate" ? "source-over" : "pass-through");
+    return { ...common, mode, isGroup: true, children: parseChildren(el) };
   }
   return {
     ...common,

@@ -174,3 +174,43 @@ describe("ora-tree · 向后兼容（旧扁平 .ora）", () => {
     eq(nodes[1].isActive, false, "无 active 标记");
   });
 });
+
+describe("ora-tree · 组隔离 ↔ ORA 标准 isolation（v278 穿透）", () => {
+  T("穿透→isolation=auto；正常(隔离)→isolation=isolate；混合模式→composite-op", () => {
+    const d = new PaintDoc();
+    const L1 = d.addLayer();
+    d.groupSelection(L1.id);                 // 新组默认 = pass-through
+    const G = d.layers[1];
+    eq(G.mode, "pass-through", "新组默认穿透");
+
+    let xml = buildStackXml(d);
+    assert(/isolation="auto"/.test(xml), "穿透写 isolation=auto");
+    assert(/composite-op="svg:src-over"/.test(xml), "穿透 composite-op=src-over");
+    eq(parseStackXml(xml).nodes[1].mode, "pass-through", "读回穿透");
+
+    G.mode = "source-over";                   // 正常 = 隔离
+    xml = buildStackXml(d);
+    assert(/isolation="isolate"/.test(xml), "正常写 isolation=isolate");
+    eq(parseStackXml(xml).nodes[1].mode, "source-over", "读回正常(隔离)");
+
+    G.mode = "multiply";
+    xml = buildStackXml(d);
+    assert(/composite-op="svg:multiply"/.test(xml), "混合模式写 composite-op");
+    eq(parseStackXml(xml).nodes[1].mode, "multiply", "读回 multiply");
+  });
+
+  T("互通：外部 ORA（无 isolation 属性）→ 按 baseline 缺省 auto = 穿透", () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<image version="0.0.3" w="100" h="100">
+  <stack name="root">
+    <stack name="组" opacity="1.0000" visibility="visible" composite-op="svg:src-over">
+      <layer name="里" src="data/layer1.png" x="0" y="0" opacity="1.0000" visibility="visible" composite-op="svg:src-over" />
+    </stack>
+  </stack>
+</image>`;
+    const { nodes } = parseStackXml(xml);
+    eq(nodes.length, 1, "1 组");
+    eq(nodes[0].isGroup, true, "是组");
+    eq(nodes[0].mode, "pass-through", "src-over + 无 isolation → 穿透（baseline 缺省 auto）");
+  });
+});

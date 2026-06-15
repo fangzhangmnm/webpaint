@@ -37,12 +37,13 @@ export function computeClipBaseForNodes(nodes) {
   return out;
 }
 
-// 组是否需要隔离（先合 buffer 再整体混）。pass-through 组直接落 ctx。
+// 组是否需要隔离（先合 buffer 再整体混）。**pass-through 是唯一非隔离态**（PS 的两挡：
+//   Pass Through = 纯收纳，子层直接和组下方背景混；Normal/任意模式/opacity<1/clip = 隔离=拍平再混）。
+//   v278 起 group.mode==="pass-through" 是显式默认；其余一切（含 source-over/"正常"）都隔离。
 function groupNeedsIsolation(group) {
-  return (group.mode && group.mode !== "source-over")
+  return group.mode !== "pass-through"
     || group.opacity < 1
-    || group.clippingMask
-    || !!group.isolate;
+    || group.clippingMask;
 }
 
 // 节点（叶或组）在 doc 坐标的内容包围盒，给隔离 buffer 定尺寸。组 = 子树并集。
@@ -125,7 +126,8 @@ function _compositeGroup(ctx, group, base, opts) {
   const prevA = ctx.globalAlpha;
   const prevC = ctx.globalCompositeOperation;
   ctx.globalAlpha = group.opacity;
-  ctx.globalCompositeOperation = group.mode || "source-over";
+  // pass-through 组被 opacity<1/clip 逼到隔离时，整体混仍按 Normal（穿透≠某种混合模式）。
+  ctx.globalCompositeOperation = (group.mode === "pass-through") ? "source-over" : (group.mode || "source-over");
   ctx.drawImage(buf, 0, 0, w, h, ox, oy, w, h);
   ctx.globalAlpha = prevA;
   ctx.globalCompositeOperation = prevC;

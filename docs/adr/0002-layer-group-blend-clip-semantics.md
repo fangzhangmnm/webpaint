@@ -1,6 +1,6 @@
 # 图层组的 blend / clip 语义：对齐 PS/Procreate 的隔离模型，且刻意超出两处
 
-**Status:** accepted（2026-06-14，v277 图层组落地后 grounded 复核）
+**Status:** accepted（2026-06-14，v277 落地后 grounded 复核；**v278 加 pass-through + 改用 ORA 标准 isolation**）
 
 嵌套图层组（folder）落地（batch 2，v277）。组的 blend mode / opacity / clip 怎么作用，按什么模型？
 结论：**核心隔离模型对齐 Photoshop / Procreate**，并**刻意**在两处超出 PS（更接近 Clip Studio Paint）。
@@ -24,29 +24,36 @@
    （[十年老需求](https://community.adobe.com/t5/photoshop-ecosystem-ideas/photoshop-clipping-mask-to-a-layer-group/idi-p/12250414)）；Clip Studio Paint 支持。我们偏 CSP，更强。
 2. （隐含）clip 语义统一走规范合成器一处，叶 / 组同一套 per-level 解析。
 
-## 已知缺口：没有独立的 "Pass Through vs Normal" 两挡
+## Pass Through vs Normal 两挡（v278 已加，缺口已闭）
 
-PS/Procreate 把 **Pass Through** 与 **Normal** 当**两个独立的组模式**；我们是**从 mode/opacity/clip 推导**隔离，
-所以 `source-over + opacity1 + 无clip` **永远** pass-through ——**无法表达"隔离 + 仍用 Normal 混"**。
-- 影响：组里一个 Multiply 叶，pass-through 下会和**背景**相乘；PS 的隔离-Normal 下只在**组内**相乘。我们没有后者这个挡位。
-- 多数人用不到，故 v277 不做。**用户已拍板：有必要可以加**（加一个显式 pass-through / isolate 开关，把隔离从"推导"变"可声明"）。
-  模型里 `group.isolate` 字段已存在（`_groupNeedsIsolation` 已读它），只是 UI 没暴露、序列化没写 → 加的时候接这个 hook。
+v277 是**从 mode/opacity/clip 推导**隔离，没有独立的「穿透 vs 正常」两挡。**v278 补上**（用户拍板）：
+- 组的模式下拉**置顶加「穿透」**，且**新建组默认 = 穿透**（`LayerGroup.mode="pass-through"`）。叶层不加此项。
+- 「正常」对组的含义 = **隔离**（先拍平再 Normal 混）。这就是 PS 的两挡。
+- `_groupNeedsIsolation` 判定从「mode≠source-over」改成 **「mode≠"pass-through"」**（穿透是**唯一**非隔离态；opacity<1 / clip 仍强制隔离）。
+  隔离回混时把 `"pass-through"` 映射成 `source-over`（穿透≠某种混合模式）。
+- 实现走 **mode 值**（不是 isolate bool）→ 一个字段表达整套 blend 状态、和 PS 单下拉一致。`group.isolate` 字段弃用。
+- 影响（现在能表达了）：组里一个 Multiply 叶，**穿透组**下和背景相乘、**正常(隔离)组**下只在组内相乘。
 
-## 未来文件格式对齐的坑（ORA / 跨 app —— 用户点名提醒）
+**好消息**：这套 = **OpenRaster baseline 的隔离模型本身**——[ORA Layer Stack Spec](https://www.openraster.org/baseline/layer-stack-spec.html)：
+非根 stack 隔离 ⟺ `isolation="isolate"` ‖ opacity<1 ‖ composite-op≠src-over；非隔离时 composite-op 被忽略、子层与背景混。
+三方（PS / Procreate / ORA）一致。
 
-存档 = ORA（`<stack>` = 组，`composite-op` / `opacity` 标准属性；`webpaint:*` 私有扩展）。对齐 / round-trip 时注意：
+## 文件格式对齐（v278 复核：ORA 全合规 + 互通）
 
-1. **组-clip 不可移植**：`webpaint:clipping` 挂 `<stack>` 是私有命名空间属性，别的 ORA reader（Krita/GIMP/...）**直接忽略**
-   → 在它们里渲染成**普通组**（clip 丢失，视觉发散）。**唯一跨 app 忠实的产物是 merged PNG。** 反向读外部 ORA 安全（没人产 clipped-stack）。
-2. **pass-through ⇄ ORA 语义不对齼**：ORA baseline **没有** pass-through 这个 composite-op，`<stack>` 默认 `svg:src-over`。
-   - 我们把 pass-through 组写成 `<stack composite-op="svg:src-over">`；**别的 app 可能把 src-over stack 当成隔离-Normal**（先拍平再 Normal 混），不是 pass-through → 内部带 blend mode 的子层在对方渲染器里**到不了背景** = 发散。
-   - 读 Krita 等的 ORA：它们的隔离 / pass-through 用的是 **Krita 私有标记**（如 `composite-op="krita:pass through"` / isolation 属性），我们不解析 → 一律按我们的推导规则走，可能误读。
-3. **加 pass-through 时的兼容**：若将来加显式挡位，ORA 里**没有标准表示**——要么 `webpaint:passthrough`/`webpaint:isolate`（私有），
-   要么对齐 Krita 的写法。**且要保证旧 .ora 的 `src-over` 组继续按 pass-through 加载**（别让新挡位改变老文件语义）；序列化补上 `group.isolate`。
-4. **PSD**（导出 only，已 lossy）：组直接拍平进 merged，per-layer records 走 flattenLeaves；PSD `lsct` 真组 + pass-through(`lsct` 的 "passthrough" 标志) 留 P2。
+存档 = ORA。`<stack>` = 组（嵌套 = baseline 支持）；用 **ORA 标准属性**，不再私有：
+- **穿透 → `composite-op="svg:src-over"` + `isolation="auto"`**；**正常(隔离) → `+ isolation="isolate"`**；其它混合模式 → `composite-op="svg:<mode>"`。
+  读回按 baseline 规则反推（见 `parseStackXml`）。→ **完全合规，且和 Krita/GIMP/MyPaint 双向互通**（先前 ADR 担心的「pass-through⇄ORA 语义不对齐」坑 **已消解**：用了标准 isolation，不再赌别人怎么解释 src-over stack）。
+- 向后兼容：旧 .ora / 外部 .ora 的 `<stack composite-op=src-over>` 无 isolation → 缺省 `auto` → 读成穿透（PS/baseline 默认，也 = v277 行为）。无破坏。
+- `webpaint:id`/`webpaint:active`/`webpaint:clipping` 仍是私有命名空间属性 = **spec 允许**的扩展，别的 reader 忽略 → 仍是合法 ORA。
+
+**仍属私有 / 仍是坑的只剩一处**：
+1. **组-clip 不可移植**（我们超出 PS 的特性）：`webpaint:clipping` 挂 `<stack>` 别的 reader 忽略 → 在它们里成普通组（clip 丢失）。这是**有意的取舍**（PS 也没这功能），跨 app 忠实产物 = merged PNG。
+2. **PSD**（导出 only，本就 lossy——连叶的 clippingMask 都丢）：组**拍平**进 merged，per-layer records 走 flattenLeaves → **是合法 PSD（所有叶在、可打开），但不保留组文件夹结构**。PSD `lsct` 真组（含 passthrough 标志）= P2，要保留结构再做。
 
 ## 落地
 
-- 语义代码：`src/layer-composite.js`（`_groupNeedsIsolation` / `_compositeGroup` / 同级 clip 基底解析）。
-- 序列化：`src/ora-stack-xml.js`（组 = `<stack>` + `composite-op`/`opacity`/`webpaint:clipping`；**未写 `isolate`** ← 加 pass-through 时补）。
+- 语义代码：`src/layer-composite.js`（`groupNeedsIsolation` = `mode!=="pass-through"||opacity<1||clip`；`_compositeGroup` pass-through→source-over 映射 + 同级 clip）。
+- 模型：`src/doc.js`（`LayerGroup.mode` 默认 `"pass-through"`；`addGroup()` 空组）。
+- 序列化：`src/ora-stack-xml.js`（组写/读标准 `isolation`；穿透/正常/混合模式三态往返，node 测覆盖）。
+- 面板：`src/layers-panel.ts`（组模式下拉 = `GROUP_MODE_LABEL` 穿透置顶）。
 - 状态文档：`docs/layer-groups.md`。

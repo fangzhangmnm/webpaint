@@ -171,7 +171,9 @@ export class LayerGroup {
     this.name = name || `组 ${this.id}`;
     this.visible = true;
     this.opacity = 1;
-    this.mode = "source-over";
+    // 默认 "pass-through"（穿透）= PS 组默认：纯收纳、子层和组下方背景混、不隔离。
+    // 改成 "source-over"(正常) 或任意混合模式 = 隔离（拍平再混）。见 ADR-0002 + layer-composite.groupNeedsIsolation。
+    this.mode = "pass-through";
     this.clippingMask = false;
     this.collapsed = false;         // UI 折叠态（不影响渲染）
     this.children = children;
@@ -573,7 +575,18 @@ export class PaintDoc {
     };
   }
 
-  // ---- 图层组 op（纯模型，无 history/DOM；caller 入栈 + 刷新。撤销底座 = snapshotAll）----
+  // ---- 图层组 op（纯模型，无 history/DOM；caller 入栈 + 刷新。撤销底座 = snapshotTree）----
+
+  // 新建**空**组，插在 active 节点的同级、active 之上，设为 active。返回新组。
+  //   组不计入 maxLayers（只数叶）。创建入口走「+」菜单（编组当前层已砍，靠空组 + 移入上方组）。
+  addGroup(name) {
+    const g = new LayerGroup({ name });
+    const loc = findParentOf(this.layers, this.activeId);
+    if (loc) loc.parent.splice(loc.index + 1, 0, g);
+    else this.layers.push(g);
+    this.activeId = g.id;
+    return g;
+  }
 
   // 把节点（id）包进一个新组，替换其在 parent 的原位。返回 { ok, group } 或 { ok:false }。
   groupSelection(id) {

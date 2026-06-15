@@ -611,9 +611,10 @@
           </svg>
         </button>
       </div>
-      <!-- "+" 弹出菜单：新图层 / 导入图片到新层（layerImportPhotoBtn 仍由 import-image 接线） -->
+      <!-- "+" 弹出菜单：新图层 / 新建图层组(空) / 导入图片到新层（layerImportPhotoBtn 仍由 import-image 接线） -->
       <div class="menu-panel layer-add-popup hidden" id="layerAddPopup" role="menu">
         <button class="menu-item" id="layerAddNewBtn" type="button" role="menuitem"><span class="menu-item-label">新图层</span></button>
+        <button class="menu-item" id="layerAddGroupBtn" type="button" role="menuitem"><span class="menu-item-label">新建图层组</span></button>
         <button class="menu-item" id="layerImportPhotoBtn" type="button" role="menuitem"><span class="menu-item-label">导入图片到新层</span></button>
       </div>
     </div>
@@ -989,6 +990,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-256f9f74e5d3.mjs"></script>
+    <script type="module" src="./dist/webpaint-5185fd31059c.mjs"></script>
   </body>
 </html>
