@@ -923,7 +923,6 @@ input[type="range"].color-ramp::-moz-range-thumb {
 .layer-group-row {
   background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
-.layer-group-row .layer-name { font-weight: 600; }
 .layer-group-count { opacity: 0.55; font-weight: 400; font-size: 12px; }
 .layer-folder {
   width: 22px; height: 22px;
