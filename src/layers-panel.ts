@@ -98,9 +98,11 @@ function _addEmptyLayer() {
 function _deleteLayer(L: any) {
   if (!L) return;
   // 组删除：连带 children，撤销底座 = snapshotTree（保叶活引用）。
+  // 允许删非空组（含删到 0 叶）—— 删空了就补一张空层保 ≥1 叶（不卡在「非空组删不掉」）。
   if (L.isGroup) {
     const before = doc.snapshotTree();
-    if (!doc.removeLayer(L.id)) { setStatus("至少保留一层"); return; }
+    doc.removeLayer(L.id, true);
+    if (countLeaves(doc.layers) === 0) doc.addLayer();   // 清空 → 补空层
     const after = doc.snapshotTree();
     history.push({ type: "treeStructure", before, after,
       undoStatus: `已恢复组「${L.name}」`, redoStatus: `已删除组「${L.name}」` });
@@ -545,7 +547,8 @@ const LayersPanel = defineComponent({
             active: n.id === activeId,
             canUp: i < nodes.length - 1,
             canDown: i > 0,
-            canDel: totalLeaves > 1,
+            // 叶：留底（≥1 叶）才可删；组：永远可删（删空补空层）。
+            canDel: n.isGroup || totalLeaves > 1,
             canMoveOut: depth > 0,                                       // 在组内 → 可移出
             moveTargets,                                                 // 可移入的已有组（high：把外面的层加入已知组）
             layer: { id: n.id, name: n.name, visible: n.visible, opacity: n.opacity, mode: n.mode, clippingMask: n.clippingMask, lockAlpha: n.lockAlpha, isGroup: !!n.isGroup },
@@ -612,7 +615,8 @@ function _syncChrome() {
   els.layersCountLabel.textContent = `${leaves} / ${max}`;
   els.layerAddBtn.disabled = leaves >= max;
   const delBtn = document.getElementById("layerDeleteBtn") as HTMLButtonElement;
-  if (delBtn) delBtn.disabled = leaves <= 1;
+  // 组永远可删（删空补空层）；叶要留底（≥1 叶）。
+  if (delBtn) delBtn.disabled = !doc.activeLayer?.isGroup && leaves <= 1;
   // v267 上移/下移按钮按活动节点的**同级**边界禁用（树化：top/bottom 按同级算）
   const upBtn = document.getElementById("layerMoveUpBtn") as HTMLButtonElement;
   const downBtn = document.getElementById("layerMoveDownBtn") as HTMLButtonElement;

@@ -84,20 +84,21 @@ const useStub = () => { globalThis.OffscreenCanvas = StubCanvas; globalThis.DOMP
 const T = (name, fn) => it(name, () => { useStub(); fn(); });
 
 // 构造：[L0, G{ L1, L1b }, L2]，active=L1，ref=L2。
+//   注：v281 起「active 是组 → 新层进组内」，故 L2 在「flat 阶段」先建好（active=叶），避免进 G。
 function buildTreeDoc() {
   const d = new PaintDoc();
   const L0 = d.layers[0];
   L0.bboxX = 5; L0.bboxY = 7; L0.bboxW = 10; L0.bboxH = 10;
-  const L1 = d.addLayer();
-  d.groupSelection(L1.id);
+  const L2 = d.addLayer();               // [L0, L2]，active=L2（root 顶，最后留在顶）
+  d.setActiveById(L0.id);
+  const L1 = d.addLayer();               // [L0, L1, L2]，active=L1
+  d.groupSelection(L1.id);               // [L0, G{L1}, L2]，active=G
   const G = d.layers[1];
   G.opacity = 0.5; G.mode = "multiply"; G.name = "组A";
   d.setActiveById(L1.id);
-  const L1b = d.addLayer();              // 进 G（active=L1 的同级之上）
+  const L1b = d.addLayer();              // active=L1（组内叶）→ 进 G 同级之上 → G{L1, L1b}
   L1.lockAlpha = true;
   L1b.clippingMask = true;
-  d.setActiveById(G.id);
-  const L2 = d.addLayer();               // 进根（active=G 的同级之上）
   d.referenceLayerId = L2.id;
   d.setActiveById(L1.id);                // active = 组内叶
   return { d, L0, L1, L1b, L2, G };

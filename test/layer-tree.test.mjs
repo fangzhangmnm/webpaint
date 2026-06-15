@@ -249,3 +249,42 @@ describe("layer-tree · addGroup 空组（v278）", () => {
     assert(countLeaves(d.layers) === 1, "空组不计叶（仍 1 叶）");
   });
 });
+
+describe("layer-tree · 选中组时新建进组内 + 组删除允许清空（v281）", () => {
+  T("addLayer：active=组 → 进组内顶部（子组同理）", () => {
+    const d = new PaintDoc();
+    const L1 = d.addLayer();
+    d.groupSelection(L1.id);           // [L0, G{L1}], active=G
+    const G = d.layers[1];
+    d.setActiveById(G.id);
+    const N = d.addLayer();            // active=G → 进 G 内顶部
+    assert(findParentOf(d.layers, N.id).parentNode === G, "新层在 G 内");
+    assert(G.children[G.children.length - 1] === N, "在组内顶部");
+    // 子组：G 里再建子组，选中子组建层 → 进子组
+    d.setActiveById(N.id);
+    const sub = d.groupSelection(N.id).group;   // G{ sub{N} }... 实际 sub 替换 N 位置
+    d.setActiveById(sub.id);
+    const M = d.addLayer();
+    assert(findParentOf(d.layers, M.id).parentNode === sub, "子组里新建进子组");
+  });
+
+  T("addGroup：active=组 → 嵌进去", () => {
+    const d = new PaintDoc();
+    const L1 = d.addLayer();
+    d.groupSelection(L1.id);
+    const G = d.layers[1];
+    d.setActiveById(G.id);
+    const g2 = d.addGroup();
+    assert(findParentOf(d.layers, g2.id).parentNode === G, "新组嵌进 G");
+  });
+
+  T("removeLayer(group, allowEmpty)：删非空组可清空（caller 补层）", () => {
+    const d = new PaintDoc();
+    const L0 = d.layers[0];
+    d.groupSelection(L0.id);           // [G{L0}]，组含 doc 唯一叶
+    const G = d.layers[0];
+    assert(d.removeLayer(G.id) === false, "默认守底：含唯一叶的组删不掉");
+    assert(d.removeLayer(G.id, true) === true, "allowEmpty：删得掉");
+    assert(countLeaves(d.layers) === 0, "删空 → 0 叶（caller 负责补）");
+  });
+});

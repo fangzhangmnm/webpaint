@@ -319,6 +319,19 @@ export class PaintDoc {
   // 新建 empty 层，插在 active 之上。返回新层 / null（封顶或非法）。
   // v97 命名 conflict-free（user：「图层和笔重命名数字总是很怪，而且反而会发生冲突」）：
   // 找现有「图层 N」最大 N，新层 = N+1。避免 _layerIdCounter 跨 session 重启导致碰撞
+  // 新节点的落点：**active 是组 → 插进组内顶部**（子组同理）；否则 active 同级、active 之上。
+  //   （user：选中图层组时新建的图层应进组里。）
+  _insertAtActive(node) {
+    const active = findNodeById(this.layers, this.activeId);
+    if (active && active.isGroup) {
+      active.children.push(node);                       // 组内顶部（children 末尾 = 栈顶）
+    } else {
+      const loc = findParentOf(this.layers, this.activeId);
+      if (loc) loc.parent.splice(loc.index + 1, 0, node);
+      else this.layers.push(node);
+    }
+  }
+
   addLayer(name) {
     if (countLeaves(this.layers) >= this.maxLayers) return null;
     const finalName = name || this._nextLayerName();
@@ -328,10 +341,7 @@ export class PaintDoc {
       name: finalName,
       empty: true,
     });
-    // 插在 active 节点的**同级**、active 之上（active 是组 → 插在组之上同级，不进组内）
-    const loc = findParentOf(this.layers, this.activeId);
-    if (loc) loc.parent.splice(loc.index + 1, 0, L);
-    else this.layers.push(L);
+    this._insertAtActive(L);
     this.activeId = L.id;
     return L;
   }
@@ -346,12 +356,13 @@ export class PaintDoc {
     return `图层 ${max + 1}`;
   }
 
-  // 删除指定节点（id；叶或组——组连带 children）。doc 永远至少留 1 个叶。
-  removeLayer(id) {
+  // 删除指定节点（id；叶或组——组连带 children）。默认 doc 至少留 1 个叶（守底）。
+  //   allowEmpty=true：允许删到 0 叶（组删除用——清空后 caller 补一张空层，保证不卡在「非空组删不掉」）。
+  removeLayer(id, allowEmpty = false) {
     const loc = findParentOf(this.layers, id);
     if (!loc) return false;
     const removingLeaves = countLeaves([loc.node]);
-    if (countLeaves(this.layers) - removingLeaves < 1) return false;
+    if (!allowEmpty && countLeaves(this.layers) - removingLeaves < 1) return false;
     loc.parent.splice(loc.index, 1);
     if (!findNodeById(this.layers, this.activeId)) {   // active 被删（或在被删组内）→ 重选末叶
       const leaves = flattenLeaves(this.layers);
@@ -581,9 +592,7 @@ export class PaintDoc {
   //   组不计入 maxLayers（只数叶）。创建入口走「+」菜单（编组当前层已砍，靠空组 + 移入上方组）。
   addGroup(name) {
     const g = new LayerGroup({ name });
-    const loc = findParentOf(this.layers, this.activeId);
-    if (loc) loc.parent.splice(loc.index + 1, 0, g);
-    else this.layers.push(g);
+    this._insertAtActive(g);          // active 是组 → 嵌进去；否则同级之上
     this.activeId = g.id;
     return g;
   }
