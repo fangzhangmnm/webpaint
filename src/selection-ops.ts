@@ -7,6 +7,7 @@
 //     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
 import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.js";
 import { Selection } from "./selection.js";
+import { countLeaves } from "./doc.js";
 import { compressPixelSnap } from "./pixel-edit.js";
 import { updateLassoToolbar } from "./toolbar.ts";
 
@@ -37,9 +38,10 @@ function _extractSelectionRegionCanvas(layer, sel) {
 export function selectionToNewLayer({ move }) {
   const sel = doc.selection;
   if (!sel) { setStatus("没选区"); return; }
-  if (doc.layers.length >= doc.maxLayers) { setStatus(`图层数已达上限 ${doc.maxLayers}`); return; }
+  if (countLeaves(doc.layers) >= doc.maxLayers) { setStatus(`图层数已达上限 ${doc.maxLayers}`); return; }
   const src = doc.activeLayer;
   if (!src) return;
+  if (src.isGroup) { setStatus("请先选择一个图层（组不能这样操作）"); return; }
   const beforeActive = move ? src.snapshot() : null;
   const newL = doc.addLayer(move ? "移到新层" : "复制层");
   if (!newL) return;
@@ -64,13 +66,13 @@ export function selectionToNewLayer({ move }) {
     src.ctx.drawImage(sel.maskCanvas, sel.bboxX - src.bboxX, sel.bboxY - src.bboxY);
     src.ctx.restore();
   }
-  const insertIndex = doc.layers.findIndex((l) => l.id === newL.id);
+  const loc = doc.locateNode(newL.id);   // {parentId, index}：组内也精确（撤销 insertLayerAt 用）
   const newLayerSpec = layerSpecFrom(newL);
   const afterActive = move ? src.snapshot() : null;
   history.push({
     type: "selectionToLayer",
     isMove: move,
-    newLayerSpec, insertIndex,
+    newLayerSpec, insertIndex: loc.index, parentId: loc.parentId,
     activeLayerId: src.id,
     beforeActive, afterActive,
   });

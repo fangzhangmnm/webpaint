@@ -21,6 +21,7 @@
 //   // → image/vnd.adobe.photoshop blob，触发下载或 share
 
 import { compositeLayers } from "./layer-composite.js";
+import { flattenLeaves } from "./doc.js";
 
 // ---- BinaryWriter：动态增长 Uint8Array + big-endian + delayed fill ----
 class BinaryWriter {
@@ -213,7 +214,9 @@ export async function encodeDocToPsd(doc) {
   w.writeUInt32(0);                    // 占位
 
   // Layer count（正数 = 普通；负数 = 第一个 alpha channel 是 doc 的合成透明，我们不用）
-  const layers = doc.layers;
+  // 图层组（batch 2）：PSD per-layer records 仍是**扁平叶**（组拍平进 merged，lsct 真组留 P2）。
+  //   组本身无像素 canvas → 用 flattenLeaves 取所有叶，组结构丢失但像素不丢。
+  const layers = flattenLeaves(doc.layers);
   w.writeInt16(layers.length);
 
   // 预先编码所有 layer 通道，记下每通道字节长度供 layer record 写入

@@ -104,8 +104,9 @@ function storeEditorStateToOra() {
     palette: paletteWindow.getSerializedState(),
     checkerboard: state.checkerboard,
     // 当前选中图层搭便车（dirty 上算 viewport 级——不单独触发存盘，随其它编辑落盘）。
-    // 存 **index** 不存 id：Layer.id 是运行时计数器、不进 .ora，load 后层拿全新 id 按 id 恢复永远 miss；
-    // 图层顺序在 .ora 里稳定 → index 才是可跨存档对齐的身份。
+    // batch 2 起 id 持久化进 .ora（webpaint:id，load 后 reseed）→ activeId 跨存档稳定，存 id 才能
+    // 表达「active = 组」。仍写 activeLayerIndex 作老 app 读新文件的降级兜底（叶序）。
+    activeId: doc.activeId,
     activeLayerIndex: doc.activeIndex,
   };
 }
@@ -146,8 +147,11 @@ function restoreEditorStateFromOra(loaded: any) {
     rack.applyToolState(editMode.current());
   }
   applyCheckerboard(!!ws?.checkerboard);   // 缺省回 false（reset 已设，这里按文件值再覆盖）
-  // 当前选中图层（越界静默忽略）；doc.layers 此时已由 adoptState 就位
-  if (typeof ws?.activeLayerIndex === "number" && doc.setActive(ws.activeLayerIndex)) {
+  // 当前选中图层；doc.layers 此时已由 adoptState 就位。优先 activeId（可指向组）；
+  // 老文件无 activeId → 回退 activeLayerIndex（叶序）。越界/不存在静默忽略。
+  if (ws?.activeId != null && doc.setActiveById(ws.activeId)) {
+    renderLayersPanel();
+  } else if (typeof ws?.activeLayerIndex === "number" && doc.setActive(ws.activeLayerIndex)) {
     renderLayersPanel();
   }
 }

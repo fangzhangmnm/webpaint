@@ -397,6 +397,16 @@ export class InputController {
       return;
     }
 
+    // batch 2 图层组：active 是组 → 不可画（组无像素 canvas）。与 hidden 同处理：touch 降级 hold
+    //   保留多指手势（undo/redo），单指真作画时才弹；mouse/pen 即拒。
+    if (_isDrawRole && this.doc.activeLayer && this.doc.activeLayer.isGroup) {
+      if (e.pointerType === "touch") { rec.role = "hold"; rec._deferGroupWarn = true; return; }
+      this.status("当前选中的是图层组，请选择一个图层再绘制");
+      rec.role = null;
+      this.pointers.delete(e.pointerId);
+      return;
+    }
+
     // v125 (user：「在隐藏图层上动笔会 reject 并警告」)
     // 画 / 擦 / 液化 都改 activeLayer 像素；hidden 时一律拒绝
     if (_isDrawRole
@@ -586,11 +596,11 @@ export class InputController {
     } else if (rec.role === "hold") {
       // 隐藏图层 + 单指移动 = 确实想画 → 此刻才弹"图层已隐藏"（down 时推迟到这，避免双指 undo
       //   的第一指在 down 误弹/拦手势）。移动超 tap 阈值才算作画，纯 tap 不弹。
-      if (rec._deferHiddenWarn) {
+      if (rec._deferHiddenWarn || rec._deferGroupWarn) {
         const dx = e.clientX - rec.startX, dy = e.clientY - rec.startY;
         if (dx * dx + dy * dy > GESTURE_TAP_MAX_MOVE_SQ) {
-          rec._deferHiddenWarn = false;
-          this.status("当前图层已隐藏，无法绘制");
+          if (rec._deferGroupWarn) { rec._deferGroupWarn = false; this.status("当前选中的是图层组，请选择一个图层再绘制"); }
+          else { rec._deferHiddenWarn = false; this.status("当前图层已隐藏，无法绘制"); }
         }
       }
     }

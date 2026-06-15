@@ -37,26 +37,27 @@ export function initLayerUndo(ctx) {
       setStatus(`已撤销创建图层「${e.layerSpec.name || ""}」`);
     },
     redo: (e) => {
-      doc.insertLayerAt(e.index, e.layerSpec);
+      doc.insertLayerAt(e.index, e.layerSpec, e.parentId ?? null);
       doc.setActiveById(e.layerSpec.id);
       _afterDocChange();
       setStatus(`已恢复图层「${e.layerSpec.name || ""}」`);
     },
     refsLayer: (e, id) => e.layerSpec.id === id,
   });
-  // removeLayer：undo 在 index 处恢复层（含 pixel）；redo 再删
+  // removeLayer：undo 在 (parentId, index) 处恢复层（含 pixel）；redo 再删
   // v125: 一律 setActive 到恢复的图层 + toast
   history.registerHandler("removeLayer", {
     undo: async (e) => {
       const spec = e.layerSpec;
+      const pid = e.parentId ?? null;
       if (spec.imageData || (!spec.blob && (spec.bboxW <= 0 || spec.bboxH <= 0))) {
-        doc.insertLayerAt(e.index, spec);
+        doc.insertLayerAt(e.index, spec, pid);
       } else if (spec.blob) {
         const bitmap = await createImageBitmap(spec.blob);
-        doc.insertLayerAt(e.index, { ...spec, bitmap });
+        doc.insertLayerAt(e.index, { ...spec, bitmap }, pid);
         bitmap.close?.();
       } else {
-        doc.insertLayerAt(e.index, spec);
+        doc.insertLayerAt(e.index, spec, pid);
       }
       doc.setActiveById(spec.id);
       _afterDocChange();
@@ -79,15 +80,16 @@ export function initLayerUndo(ctx) {
         under.mode = e.underBeforeMode;
         if (typeof e.underBeforeClipping === "boolean") under.clippingMask = e.underBeforeClipping;
       }
-      // 把 active 插回原 index
+      // 把 active 插回原**同级**位置（组内合并也精确复位）
       const spec = e.activeSpec;
+      const al = e.activeLoc || { parentId: null, index: e.activeIndex ?? 0 };
       if (spec.imageData || spec.bboxW <= 0 || spec.bboxH <= 0) {
-        doc.insertLayerAt(e.activeIndex, spec);
+        doc.insertLayerAt(al.index, spec, al.parentId);
       } else if (spec.blob) {
         const bitmap = await createImageBitmap(spec.blob);
-        doc.insertLayerAt(e.activeIndex, { ...spec, bitmap });
+        doc.insertLayerAt(al.index, { ...spec, bitmap }, al.parentId);
       } else {
-        doc.insertLayerAt(e.activeIndex, spec);
+        doc.insertLayerAt(al.index, spec, al.parentId);
       }
       doc.setActiveById(spec.id);
       _afterDocChange();
@@ -108,25 +110,29 @@ export function initLayerUndo(ctx) {
     },
     refsLayer: (e, id) => e.underId === id || e.activeSpec.id === id,
   });
-  // moveLayer：undo 从 toIdx 移回 fromIdx；redo 从 fromIdx 移到 toIdx
+  // moveLayer：同级 ±delta 移动。undo = 反向 delta；redo = 原 delta（树安全：moveLayer 自身按同级解析）。
   history.registerHandler("moveLayer", {
     undo: (e) => {
-      const cur = doc.layers.findIndex((l) => l.id === e.layerId);
-      if (cur < 0) return;
-      doc.moveLayer(e.layerId, e.fromIdx - cur);
+      doc.moveLayer(e.layerId, -e.delta);
       _afterDocChange();
       const L = doc.findLayer(e.layerId);
       setStatus(`图层「${L?.name || ""}」移回原位`);
     },
     redo: (e) => {
-      const cur = doc.layers.findIndex((l) => l.id === e.layerId);
-      if (cur < 0) return;
-      doc.moveLayer(e.layerId, e.toIdx - cur);
+      doc.moveLayer(e.layerId, e.delta);
       _afterDocChange();
       const L = doc.findLayer(e.layerId);
       setStatus(`图层「${L?.name || ""}」已移动`);
     },
     refsLayer: (e, id) => e.layerId === id,
+  });
+  // treeStructure：组结构变（编组/解组/移入移出/删组）的撤销底座 —— snapshotTree（保叶活引用、零像素拷贝）
+  //   前后两张结构快照，undo/redo 直接 restoreTree。像素历史不受影响（叶对象 id 不变）。
+  history.registerHandler("treeStructure", {
+    undo: (e) => { doc.restoreTree(e.before); _afterDocChange(); if (e.undoStatus) setStatus(e.undoStatus); },
+    redo: (e) => { doc.restoreTree(e.after); _afterDocChange(); if (e.redoStatus) setStatus(e.redoStatus); },
+    // 结构快照里可能含任意 id（叶或组）→ 保守返 true（撤销/重做都全量重挂）。
+    refsLayer: () => true,
   });
   // renameLayer：oldName / newName
   history.registerHandler("renameLayer", {
@@ -197,12 +203,13 @@ export function initLayerUndo(ctx) {
     },
     redo: async (e) => {
       const spec = e.newLayerSpec;
+      const pid = e.parentId ?? null;
       if (spec.blob && !spec.imageData) {
         const bitmap = await createImageBitmap(spec.blob);
-        doc.insertLayerAt(e.insertIndex, { ...spec, bitmap });
+        doc.insertLayerAt(e.insertIndex, { ...spec, bitmap }, pid);
         bitmap.close?.();
       } else {
-        doc.insertLayerAt(e.insertIndex, spec);
+        doc.insertLayerAt(e.insertIndex, spec, pid);
       }
       if (e.isMove && e.afterActive) {
         const L = doc.findLayer(e.activeLayerId);

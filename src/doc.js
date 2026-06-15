@@ -388,9 +388,10 @@ export class PaintDoc {
   //   - 反向（under 是剪裁层、active 普通）= "clipping-under"：语义不清，拒绝并给中文提示。
   mergeDownLayer(L) {
     if (!L || L.isGroup) return { ok: false, reason: "bottom" };
-    const aIdxFlat = flattenLeaves(this.layers).findIndex((x) => x === L);   // undo 复位（扁平叶序）
     const loc = findParentOf(this.layers, L.id);
     if (!loc || loc.index <= 0) return { ok: false, reason: "bottom" };
+    // undo 复位用 active 的**同级**位置（组内合并也能精确插回）。
+    const activeLoc = { parentId: loc.parentNode ? loc.parentNode.id : null, index: loc.index };
     const under = loc.parent[loc.index - 1];   // **同级**下方节点
     if (under.isGroup) return { ok: false, reason: "merge-into-group" };
     // under 是剪裁层而 active 不是 → 语义不清（active 会被 under 的基底裁掉一半）：拒绝。
@@ -471,17 +472,21 @@ export class PaintDoc {
     return {
       ok: true, underId: under.id,
       underBefore, underAfter, underBeforeOpacity, underBeforeMode, underBeforeClipping,
-      resultClipping, activeSpec, activeIndex: aIdxFlat,
+      resultClipping, activeSpec, activeLoc,
     };
   }
 
-  // 按 layerSpec 在 index 处插入一层（**用 spec.id**，不走 auto-increment）。
+  // 按 layerSpec 在 (parentId 的同级数组的) index 处插入一层（**用 spec.id**，不走 auto-increment）。
   // 给 history undo "removeLayer" / redo "addLayer" 用。
   // layerSpec: { id, name, visible, opacity, mode, bboxX, bboxY, bboxW, bboxH,
   //   imageData?, bitmap? }   —— 像素数据走 Layer.restoreFromSnapshot 同形 snap
-  // 注：index = **根层级**扁平 index（无组时 = 叶序）。组内插入用 insertNodeAt（撤销树化时上）。
-  insertLayerAt(index, spec) {
+  // parentId = 目标父组 id（null = 根层级）；index = 该同级数组内的 index。撤销树化（batch 2）后
+  //   caller 传 locateNode() 拿到的 {parentId, index}，组内删除/新建也能精确复位。active 不在此调整
+  //   （所有 caller 插入后显式 setActiveById）。
+  insertLayerAt(index, spec, parentId = null) {
     if (countLeaves(this.layers) >= this.maxLayers) return false;
+    const parentNode = parentId == null ? null : findNodeById(this.layers, parentId);
+    const parent = parentNode && parentNode.isGroup ? parentNode.children : this.layers;
     const L = new Layer({
       width: this.width,
       height: this.height,
@@ -500,12 +505,26 @@ export class PaintDoc {
       imageData: spec.imageData || null,
       bitmap: spec.bitmap || null,
     });
-    const i = Math.max(0, Math.min(index, this.layers.length));
-    this.layers.splice(i, 0, L);
-    if (this.activeIndex >= i) this.activeIndex++;
+    const i = Math.max(0, Math.min(index, parent.length));
+    parent.splice(i, 0, L);
     // 防止 _layerIdCounter 撞到一个 spec.id（避免后续 addLayer 复用 id）
     if (spec.id >= _layerIdCounter) _layerIdCounter = spec.id + 1;
     return true;
+  }
+
+  // 节点（id）的同级位置 → { parentId, index }（parentId=null 表根）。撤销结构 entry 用。
+  locateNode(id) {
+    const loc = findParentOf(this.layers, id);
+    if (!loc) return null;
+    return { parentId: loc.parentNode ? loc.parentNode.id : null, index: loc.index };
+  }
+
+  // active 能否在**同级**内沿 toward（+1 上 / -1 下）移动（给上下移按钮禁用判定）。
+  canMoveLayer(id, toward) {
+    const loc = findParentOf(this.layers, id);
+    if (!loc) return false;
+    const j = loc.index + toward;
+    return j >= 0 && j < loc.parent.length;
   }
 
   // 给 setLayerProp / renameLayer 用：按 id 查节点（递归，叶或组）
@@ -547,8 +566,11 @@ export class PaintDoc {
     });
     loc.parent.splice(loc.index + 1, 0, L);   // 源**同级**之上
     this.activeId = L.id;
-    // index = 新层在根层级的扁平 index（撤销 insertLayerAt 用；无组时 = 叶序，组内 P2）
-    return { ok: true, newLayer: L, index: flattenLeaves(this.layers).findIndex((x) => x === L) };
+    // loc = 新层在**同级**的插入位（撤销 insertLayerAt(parentId,index) 用；组内也精确）。
+    return {
+      ok: true, newLayer: L,
+      loc: { parentId: loc.parentNode ? loc.parentNode.id : null, index: loc.index + 1 },
+    };
   }
 
   // ---- 图层组 op（纯模型，无 history/DOM；caller 入栈 + 刷新。撤销底座 = snapshotAll）----
@@ -597,6 +619,37 @@ export class PaintDoc {
     const [n] = loc.parent.splice(loc.index, 1);
     gloc.parent.splice(gloc.index + 1, 0, n);
     return true;
+  }
+
+  // ---- 结构撤销底座：保叶子**活引用**（零像素拷贝）+ 组记录 ----
+  // 给 group/ungroup/reparent/组删除 的撤销用。纯结构变（不改像素）→ 不必像 snapshotAll 那样
+  // dump 每层 imageData（iPad 内存紧）。叶子存活对象引用：撤销重挂同一 Layer，id/像素历史不变。
+  snapshotTree() {
+    const snapNode = (n) => n.isGroup
+      ? { isGroup: true, id: n.id, name: n.name, visible: n.visible, opacity: n.opacity,
+          mode: n.mode, clippingMask: n.clippingMask, collapsed: n.collapsed,
+          children: n.children.map(snapNode) }
+      : { isGroup: false, ref: n };
+    return { activeId: this.activeId, nodes: this.layers.map(snapNode) };
+  }
+  restoreTree(snap) {
+    if (!snap) return;
+    const build = (rec) => {
+      if (!rec.isGroup) return rec.ref;     // 同一个活 Layer 对象
+      const g = new LayerGroup({ name: rec.name });
+      g.id = rec.id; g.visible = rec.visible; g.opacity = rec.opacity; g.mode = rec.mode;
+      g.clippingMask = rec.clippingMask; g.collapsed = !!rec.collapsed;
+      g.children = rec.children.map(build);
+      return g;
+    };
+    this.layers = snap.nodes.map(build);
+    reseedLayerIdCounter(this.layers);
+    if (snap.activeId != null && findNodeById(this.layers, snap.activeId)) {
+      this.activeId = snap.activeId;
+    } else {
+      const lv = flattenLeaves(this.layers);
+      this.activeId = lv.length ? lv[lv.length - 1].id : null;
+    }
   }
 
   // 清空当前 layer 像素（不删 layer）。bbox 复位为 empty（释放 canvas）。

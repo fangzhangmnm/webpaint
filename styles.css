@@ -919,6 +919,18 @@ input[type="range"].color-ramp::-moz-range-thumb {
   background: color-mix(in srgb, var(--accent, #4c8bf5) 14%, transparent);
   border-color: color-mix(in srgb, var(--accent, #4c8bf5) 40%, transparent);
 }
+/* 图层组（batch 2）：组行底色微异 + 折叠三角 */
+.layer-group-row {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.layer-group-row .layer-name { font-weight: 600; }
+.layer-collapse {
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--ink); font-size: 11px; line-height: 1;
+  flex: 0 0 auto; padding: 0;
+}
 .layer-vis {
   width: 20px;
   height: 20px;

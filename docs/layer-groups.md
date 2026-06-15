@@ -1,6 +1,6 @@
-# 图层组（嵌套树）— 进行中
+# 图层组（嵌套树）— 全 6 步落地，待真机验
 
-> as-of v276 / 2026-06-14。目标：嵌套图层组（文件夹），**correctness-first**（perf/内存见
+> as-of v277 / 2026-06-14。目标：嵌套图层组（文件夹），**correctness-first**（perf/内存见
 > `docs/perf-webgl-memory-clip.md`）。**详细可执行 spec 在工作计划文件**
 > `~/.claude/plans/abundant-tinkering-newell.md`「Batch 2」节——本文只记状态 + 决策，不重复 spec。
 
@@ -25,15 +25,26 @@
   - `src/doc.js`：+ `reseedLayerIdCounter(nodes)` 导出。
   - 测试：`test/ora-tree.test.mjs`（+3，自带极简 XML parser polyfill；**单 await 回合**——多一个
     await 会扰动 run.mjs 一众 TLA 模块的微任务交错、毒 selection-morph 的 OSC-stub，实测）。全套 **351 passed**，build OK。
-- **剩余（顺序 + 细节见 plan 文件 Batch 2；均需 iPad 真机验，整批不可中途 ship）**：
-  - **step 2 迁移面**：panel/undo/session-state 里 `doc.layers.findIndex`/`activeIndex`/`doc.layers[i-1]`
-    等扁平假设 → tree-aware（`findParentOf`/`countLeaves`/同级边界）。
-  - **step 4 panel**（最大块，UI）：`rows` computed 递归建树（组行+缩进+children 填 `LayerRow` 已有的 children
-    v-for）+ 组行 UI（折叠箭头/组名/可见·opacity·mode/⋯菜单解组·删组）+ 命令栏接线（新建组/编组当前/
-    移入上方组/移出组/解组 → 调 doc 组 op + history.push + `_afterDocChange`）→ **groups 在此变 UI-可达**。
-  - **step 5 undo**：结构 entry 扁平 index → `{parentId, index}`；新 `group`/`ungroup`/`reparent` handler
-    （最省底座 = snapshotAll/restoreSnapshotAll 递归版，已就位）。
-  - **step 6 护栏**：`_beginStroke`/liquify/filterBrush + `getFloodSourceLayer` 的 `isGroup` 护栏；psd 走 flattenLeaves。
+- **step 2/4/5/6：✅ 完成**（v277，未 push 时 = local main；node 测 357 passed + build OK；**待 iPad 真机验**）。
+  - **step 2 迁移面**：`pixel-edit.js`（recursive findNodeById）、`session-state.ts`（activeId 持久化 + 老 index 兜底）、
+    `selection-ops.ts`（locateNode 插入 + 组 guard）、`session.js`（缩略图走 compositeLayers，不再手抄扁平 loop）、
+    `psd.js`（per-layer records 走 flattenLeaves）、panel/undo 全 tree-aware。board.js 本就走合成器无需改。
+  - **step 4 panel**（`layers-panel.ts`）：`rows` computed 递归建**扁平+depth**行；组行（折叠三角▾/▸ + 组名 + 可见 +
+    opacity/mode + ⋯菜单：解组/删组/剪裁/重命名）；⋯菜单接线 编组(叶/组都可，可嵌套)/解组/移入上方组/移出组；
+    `collapsedIds:Set` 折叠态；计数/上下移禁用走 `countLeaves`/`canMoveLayer`(同级边界)。CSS：`.layer-group-row`/`.layer-collapse`。
+  - **step 5 undo**：结构 entry 扁平 index → `{parentId, index}`（`insertLayerAt(index,spec,parentId)` + `locateNode`）；
+    moveLayer 改 delta 制；组 op（编组/解组/移入移出/删组）走新 `treeStructure` handler，底座 = `snapshotTree`/`restoreTree`
+    （**保叶活引用、零像素拷贝** → iPad 内存友好；像素历史靠 id 不变保活）。mergeDown/duplicate 返回同级位。
+  - **step 6 护栏**：input.js 单一 chokepoint isGroup 拒画（touch 降级 hold 不拦多指手势，单指真画才弹中文）；
+    `getFloodSourceLayer` 组→null（doc 层已做）；吸管走合成缓存（组安全，无需改）。
+
+### 真机待验清单（按批，反煤气灯）
+- 建组（叶 ⋯→编组）/ 嵌套（组 ⋯→编组）/ 折叠箭头 / 移入上方组 / 移出组 / 解组 / 删组（连带 children）。
+- 组 opacity·mode·可见性·剪裁 改了画面对 + 抬笔不弹回。组内叶 clip 到组内基底；基底隐显跟随。
+- 组内画图：选叶可画、选组拒画（弹「图层组…」中文，多指 undo/redo 不被拦）。
+- 存 .ora → 重载：树结构完整 + 组 props + active 还原（含 active=组）。导出 PNG / 缩略图与屏一致（组内层不丢）。
+- 撤销/重做：编组/解组/移入移出/删组（叶回到原组同级位）/ 组内删叶 + 普通增删移合并。
+- PSD 导出：组拍平、所有叶在（per-layer records 扁平）。float 仍正常（本批没动）。
 
 ## 已定设计决策（避免用户点名的 5 类错误）
 - **active = 叶或组**；绘画路径 isGroup 护栏（组不可画）→ 避免笔刷错误。

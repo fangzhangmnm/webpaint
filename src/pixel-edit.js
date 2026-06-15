@@ -10,6 +10,8 @@
 //   lasso 的复合 entry（像素 + 选区，一步 undo）与 selectionChange 不归这里——它们用下面的原语。
 // - render 策略留在 caller（各工具 partial / full 不同），commit/abort 不替 caller 决定刷新粒度。
 
+import { findNodeById } from "./doc.js";   // 递归按 id 找叶（图层树：层可能在组内）
+
 // ---- 低层原语（export；lasso 复合 handler + app.js 图层 handler 都复用这套）----
 
 // 取 Layer.snapshot() 出来的 { bboxX/Y/W/H, imageData } 异步压成 PNG Blob。
@@ -31,7 +33,7 @@ export function compressPixelSnap(snap, onBlob) {
 // 把 { snap, blob } 应用到指定 layer。imageData 优先（同步），否则解 blob（异步）。
 // invalidateAll 在像素到位后才调，避免渲染 stale 帧 flash。
 export function applyPixelSnap(doc, layerId, snap, blob, board) {
-  const layer = doc.layers.find((l) => l.id === layerId);
+  const layer = findNodeById(doc.layers, layerId);
   if (!layer) return Promise.resolve();
   if (snap && snap.imageData) {
     layer.restoreFromSnapshot(snap);
@@ -62,7 +64,7 @@ class PixelEditTx {
   }
   // 入栈成功返回 true；layer 中途没了（删层）→ 不入栈返回 false。
   commit(finalize) {
-    const layer = this._owner.doc.layers.find((l) => l.id === this._layerId);
+    const layer = findNodeById(this._owner.doc.layers, this._layerId);
     if (!layer) return false;
     if (finalize) finalize(layer, this._pre);
     const entry = {
@@ -80,7 +82,7 @@ class PixelEditTx {
   }
   // 还原到 preSnap，不入栈。always invalidateAll（像素回退要全刷）。
   abort() {
-    const layer = this._owner.doc.layers.find((l) => l.id === this._layerId);
+    const layer = findNodeById(this._owner.doc.layers, this._layerId);
     if (layer) {
       layer.restoreFromSnapshot(this._pre);
       this._owner.board?.invalidateAll();

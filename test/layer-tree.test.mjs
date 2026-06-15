@@ -150,3 +150,89 @@ describe("layer-tree · snapshotAll 树往返", () => {
     assert(d2.activeId === d.activeId, "activeId 还原");
   });
 });
+
+describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
+  T("locateNode：根层级 + 组内", () => {
+    const d = new PaintDoc();
+    const L1 = d.addLayer();              // [L0, L1]
+    const root = d.locateNode(L1.id);
+    assert(root.parentId === null && root.index === 1, "L1 根层 index1");
+    d.groupSelection(L1.id);             // [L0, G{L1}]
+    const g = d.layers[1];
+    const inner = d.locateNode(L1.id);
+    assert(inner.parentId === g.id && inner.index === 0, "L1 组内 index0");
+  });
+
+  T("insertLayerAt(parentId)：插进组内同级", () => {
+    const d = new PaintDoc();
+    const L1 = d.addLayer();
+    d.groupSelection(L1.id);             // [L0, G{L1}]
+    const g = d.layers[1];
+    const spec = { id: 999, name: "插入", visible: true, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
+    assert(d.insertLayerAt(0, spec, g.id), "插入 ok");
+    assert(g.children.length === 2 && g.children[0].id === 999, "新叶在组内 index0");
+    assert(findParentOf(d.layers, 999).parentNode === g, "父是组");
+  });
+
+  T("canMoveLayer：同级边界", () => {
+    const d = new PaintDoc();
+    const L1 = d.addLayer();             // [L0, L1]
+    assert(d.canMoveLayer(L1.id, 1) === false, "L1 已在顶，不能上");
+    assert(d.canMoveLayer(L1.id, -1) === true, "L1 能下");
+    assert(d.canMoveLayer(d.layers[0].id, -1) === false, "L0 在底，不能下");
+  });
+
+  T("snapshotTree/restoreTree：结构往返 + 叶活引用保持", () => {
+    const d = new PaintDoc();
+    const L0 = d.layers[0];
+    const L1 = d.addLayer();
+    d.groupSelection(L1.id);            // [L0, G{L1}]
+    const g = d.layers[1];
+    g.name = "组X"; g.opacity = 0.3;
+    d.setActiveById(L1.id);
+    const snap = d.snapshotTree();
+    // 打乱：解组（结构变）
+    d.ungroup(g.id);                   // [L0, L1] 扁平
+    assert(!d.layers.some((n) => n.isGroup), "已解组");
+    // 还原
+    d.restoreTree(snap);
+    assert(d.layers.length === 2 && d.layers[1].isGroup, "结构回到 [叶,组]");
+    assert(d.layers[1].children[0] === L1, "叶是**同一个** Layer 对象（活引用）");
+    assert(d.layers[0] === L0, "L0 同一对象");
+    assert(d.layers[1].name === "组X" && d.layers[1].opacity === 0.3, "组 props 还原");
+    assert(d.activeId === L1.id, "activeId 还原");
+  });
+
+  T("删组内叶 → insertLayerAt(parentId) 复位回组", () => {
+    const d = new PaintDoc();
+    const L1 = d.addLayer();
+    d.setActiveById(L1.id);
+    const L2 = d.addLayer();           // [L0, L1, L2]
+    d.groupSelection(L2.id);          // active=G... 重新组 L1+L2 手动
+    // 造 G{L1, L2}
+    const d2 = new PaintDoc();
+    const a = d2.addLayer();          // L0,a
+    d2.groupSelection(a.id);          // [L0, G{a}]
+    const G = d2.layers[1];
+    d2.setActiveById(a.id);
+    const b = d2.addLayer();          // G{a,b}
+    assert(G.children.length === 2, "组内 2 叶");
+    const loc = d2.locateNode(b.id);
+    assert(d2.removeLayer(b.id), "删组内叶 b");
+    assert(G.children.length === 1, "组内剩 1");
+    const spec = { id: b.id, name: b.name, visible: true, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
+    d2.insertLayerAt(loc.index, spec, loc.parentId);
+    assert(G.children.length === 2 && findParentOf(d2.layers, b.id).parentNode === G, "b 复位回组");
+  });
+
+  T("mergeDownLayer 返回 activeLoc；duplicateLayer 返回 loc", () => {
+    const d = new PaintDoc();
+    const L1 = d.addLayer();
+    L1.ensureBbox(0, 0, 4, 4);        // 给点像素让 mergeDown 不走 empty-active
+    L1.bboxW = 4; L1.bboxH = 4;
+    const r = d.mergeDownLayer(L1);
+    assert(r.ok && r.activeLoc && r.activeLoc.parentId === null && r.activeLoc.index === 1, "activeLoc 同级位");
+    const dup = d.duplicateLayer(d.layers[0].id);
+    assert(dup.ok && dup.loc && typeof dup.loc.index === "number", "duplicate 返回 loc");
+  });
+});

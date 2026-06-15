@@ -22,6 +22,7 @@
 // + _afterDocChange（lasso / history handler 也调）+ layerSpecFrom（lasso 也调）。
 
 import { createApp, defineComponent, reactive, computed, watch, nextTick } from "../vendor/vue/vue.esm-browser.prod.js";
+import { countLeaves } from "./doc.js";
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
@@ -53,9 +54,10 @@ const EYE_OFF = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" str
 // 注：doc/图层结构变更的版本信号已外迁到 signals.ts 的 docVersion（跨切面共享）。
 const layersUi = reactive<{
   expandedId: any;
-  menuId: any;        // 打开 ⋯ 菜单的层 id（null = 无）
-  renameId: any;      // 正在内联重命名的层 id（null = 无）
-}>({ expandedId: null, menuId: null, renameId: null });
+  menuId: any;            // 打开 ⋯ 菜单的层 id（null = 无）
+  renameId: any;          // 正在内联重命名的层 id（null = 无）
+  collapsedIds: Set<any>; // 折叠的组 id 集合（折叠 = 不渲染 children，不影响合成）
+}>({ expandedId: null, menuId: null, renameId: null, collapsedIds: new Set() });
 
 // ---- 图层面板开关 ----
 export function toggleLayersPanel(force?: boolean) {
@@ -73,27 +75,74 @@ export function renderLayersPanel() {
 
 // ---- 每层操作（逐字保留旧行为；经 ctx 绑入的 doc/history/board/setStatus）----
 function _addEmptyLayer() {
-  if (doc.layers.length >= doc.maxLayers) {
+  if (countLeaves(doc.layers) >= doc.maxLayers) {
     setStatus(`图层数已达上限 ${doc.maxLayers}`);
     return;
   }
   const prevActiveId = doc.activeLayer?.id ?? null;   // 持久化：undo 创建时回到创建前的活动层
   const L = doc.addLayer();
   if (!L) return;
-  const insertIndex = doc.layers.findIndex((l: any) => l.id === L.id);
+  const loc = doc.locateNode(L.id);                   // {parentId, index}：组内新建也精确复位
   const layerSpec = layerSpecFrom(L);
-  history.push({ type: "addLayer", index: insertIndex, layerSpec, prevActiveId });
+  history.push({ type: "addLayer", index: loc.index, parentId: loc.parentId, layerSpec, prevActiveId });
   _afterDocChange();
 }
 function _deleteLayer(L: any) {
   if (!L) return;
-  if (doc.layers.length <= 1) { setStatus("至少保留一层"); return; }
-  const index = doc.layers.findIndex((l: any) => l.id === L.id);
+  // 组删除：连带 children，撤销底座 = snapshotTree（保叶活引用）。
+  if (L.isGroup) {
+    const before = doc.snapshotTree();
+    if (!doc.removeLayer(L.id)) { setStatus("至少保留一层"); return; }
+    const after = doc.snapshotTree();
+    history.push({ type: "treeStructure", before, after,
+      undoStatus: `已恢复组「${L.name}」`, redoStatus: `已删除组「${L.name}」` });
+    _afterDocChange();
+    return;
+  }
+  const loc = doc.locateNode(L.id);                   // 先记位置（removeLayer 后就找不到了）
   const layerSpec = layerSpecFrom(L);
-  doc.removeLayer(L.id);
-  history.push({ type: "removeLayer", index, layerSpec });
+  if (!doc.removeLayer(L.id)) { setStatus("至少保留一层"); return; }
+  history.push({ type: "removeLayer", index: loc.index, parentId: loc.parentId, layerSpec });
   compressPixelSnap(layerSpec, (blob: any) => { layerSpec.blob = blob; });
   _afterDocChange();
+}
+// ---- 图层组 op caller（都走 snapshotTree 结构撤销；纯结构变、零像素拷贝）----
+function _groupLayer(L: any) {
+  if (!L) return;
+  const before = doc.snapshotTree();
+  const r = doc.groupSelection(L.id);
+  if (!r.ok) return;
+  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
+    undoStatus: "已解组", redoStatus: "已编组" });
+  _afterDocChange();
+  setStatus(`已编组：${r.group.name}`);
+}
+function _ungroupLayer(L: any) {
+  if (!L || !L.isGroup) return;
+  const before = doc.snapshotTree();
+  if (!doc.ungroup(L.id).ok) return;
+  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
+    undoStatus: "已重新编组", redoStatus: "已解组" });
+  _afterDocChange();
+  setStatus(`已解组：${L.name}`);
+}
+function _moveIntoGroup(L: any, groupId: any) {
+  if (!L || groupId == null) return;
+  const before = doc.snapshotTree();
+  if (!doc.moveIntoGroup(L.id, groupId)) return;
+  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
+    undoStatus: "已移出组", redoStatus: "已移入组" });
+  _afterDocChange();
+  setStatus(`已移入组：${L.name}`);
+}
+function _moveOutOfGroup(L: any) {
+  if (!L) return;
+  const before = doc.snapshotTree();
+  if (!doc.moveOutOfGroup(L.id)) return;
+  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
+    undoStatus: "已移回组", redoStatus: "已移出组" });
+  _afterDocChange();
+  setStatus(`已移出组：${L.name}`);
 }
 // v132：清空当前图层像素，保留图层 + 名字 + opacity / mode，bbox 归零
 function _clearLayerPixels(L: any) {
@@ -129,7 +178,7 @@ function _mergeDownLayer(L: any) {
     underBefore: r.underBefore, underAfter: r.underAfter,
     underBeforeOpacity: r.underBeforeOpacity, underBeforeMode: r.underBeforeMode,
     underBeforeClipping: r.underBeforeClipping, resultClipping: r.resultClipping,
-    activeSpec: r.activeSpec, activeIndex: r.activeIndex,
+    activeSpec: r.activeSpec, activeLoc: r.activeLoc,
   });
   compressPixelSnap(r.underBefore, (blob: any) => { r.underBefore.blob = blob; });
   compressPixelSnap(r.underAfter, (blob: any) => { r.underAfter.blob = blob; });
@@ -138,10 +187,8 @@ function _mergeDownLayer(L: any) {
 }
 function _moveLayerDelta(L: any, delta: number) {
   if (!L) return;
-  const from = doc.layers.findIndex((l: any) => l.id === L.id);
-  if (!doc.moveLayer(L.id, delta)) return;
-  const to = doc.layers.findIndex((l: any) => l.id === L.id);
-  history.push({ type: "moveLayer", layerId: L.id, fromIdx: from, toIdx: to });
+  if (!doc.moveLayer(L.id, delta)) return;   // 同级 ±delta；撤销靠反向 delta（树安全）
+  history.push({ type: "moveLayer", layerId: L.id, delta });
   _afterDocChange();
 }
 // v267 复制图层：模型 op 归 doc.duplicateLayer；这里包成 addLayer undo entry（undo 删新层、
@@ -149,13 +196,12 @@ function _moveLayerDelta(L: any, delta: number) {
 //   不含这两项，否则 redo 会丢）。
 function _duplicateLayer(L: any) {
   if (!L) return;
-  if (doc.layers.length >= doc.maxLayers) { setStatus(`图层数已达上限 ${doc.maxLayers}`); return; }
+  if (countLeaves(doc.layers) >= doc.maxLayers) { setStatus(`图层数已达上限 ${doc.maxLayers}`); return; }
   const prevActiveId = doc.activeLayer?.id ?? null;
   const r = doc.duplicateLayer(L.id);
   if (!r.ok) return;
-  const insertIndex = doc.layers.findIndex((l: any) => l.id === r.newLayer.id);
   const layerSpec = { ...layerSpecFrom(r.newLayer), clippingMask: r.newLayer.clippingMask, lockAlpha: r.newLayer.lockAlpha };
-  history.push({ type: "addLayer", index: insertIndex, layerSpec, prevActiveId });
+  history.push({ type: "addLayer", index: r.loc.index, parentId: r.loc.parentId, layerSpec, prevActiveId });
   compressPixelSnap(layerSpec, (blob: any) => { layerSpec.blob = blob; });
   _afterDocChange();
   setStatus(`已复制：${L.name}`);
@@ -231,13 +277,16 @@ function _opacityLive(L: any, pct: number) {
   board.requestRender();
 }
 
-// ---- 递归就绪的行子组件 ----
-// 今天 doc.layers 是平铺数组；本组件按「行渲染自己的控件 + 可渲染子行」结构写 —— 未来层加
-// children 数组即递归（<LayerRow v-for="c in layer.children"> ），不是重写。
+// ---- 行子组件（叶 + 组）----
+// 顶层 rows 已展平成 **扁平 + depth** 列表（组行 + 其 children 各占一行，按 depth 缩进），
+// 本组件只渲染「一行」——组行多一个折叠三角 + 组专属 ⋯ 菜单（解组），叶行同旧。
 const LayerRow = defineComponent({
   name: "LayerRow",
   props: {
     layer: { type: Object, required: true },
+    depth: { type: Number, default: 0 },
+    isGroup: { type: Boolean, default: false },
+    collapsed: { type: Boolean, default: false },
     active: { type: Boolean, default: false },
     isRef: { type: Boolean, default: false },
     expanded: { type: Boolean, default: false },
@@ -249,7 +298,8 @@ const LayerRow = defineComponent({
     canDuplicate: { type: Boolean, default: false },
     canMergeDown: { type: Boolean, default: false },
     hasPx: { type: Boolean, default: false },
-    children: { type: Array, default: () => [] },   // 递归预留（今天恒空）
+    canMoveOut: { type: Boolean, default: false },
+    aboveGroupId: { default: null },
   },
   setup(props: any) {
     // snap = rows 重算时拷出的 leaf 快照（只读显示值，引用每次 bump 必变 → 反应式穿透）；
@@ -320,6 +370,14 @@ const LayerRow = defineComponent({
     }
     function modeChange(e: Event) { _setMode(live(), (e.target as HTMLSelectElement).value); }
 
+    // 组折叠三角（仅组行）。折叠态在 layersUi.collapsedIds（不影响合成，纯 UI）。
+    function toggleCollapse(e: Event) {
+      e.stopPropagation();
+      const id = snap().id;
+      if (layersUi.collapsedIds.has(id)) layersUi.collapsedIds.delete(id);
+      else layersUi.collapsedIds.add(id);
+    }
+
     // ⋯ 菜单动作
     function act(a: string) {
       layersUi.menuId = null;
@@ -334,6 +392,11 @@ const LayerRow = defineComponent({
       else if (a === "mergeDown") _mergeDownLayer(live());
       else if (a === "clear")     _clearLayerPixels(live());
       else if (a === "del")       _deleteLayer(live());
+      // 图层组动作
+      else if (a === "group")     _groupLayer(live());
+      else if (a === "ungroup")   _ungroupLayer(live());
+      else if (a === "moveIn")    _moveIntoGroup(live(), props.aboveGroupId);
+      else if (a === "moveOut")   _moveOutOfGroup(live());
     }
 
     // 层重排 = ⋯ 菜单的「上移/下移」（_moveLayerDelta）。早先定：不做行拖拽（iPad 触屏 drag-drop 不可靠）。
@@ -341,11 +404,13 @@ const LayerRow = defineComponent({
     function toggleRef(e: Event) { e.stopPropagation(); _toggleReference(live()); }
     function toggleLock(e: Event) { e.stopPropagation(); _toggleLockAlpha(live()); }
 
+    const rowStyle = computed(() => ({ paddingLeft: (4 + props.depth * 18) + "px" }));
+
     return {
-      modeBadge, opacityPct, badgeTitle, layersUi,
+      modeBadge, opacityPct, badgeTitle, layersUi, rowStyle,
       EYE_OPEN, EYE_OFF, LAYER_MODE_LABEL,
       onRowClick, onNameClick, onRenameCommit, onRenameKey,
-      toggleBadge, toggleMenu, vis,
+      toggleBadge, toggleMenu, vis, toggleCollapse,
       opaInput, opaCommit, modeChange, act,
       toggleClip, toggleRef, toggleLock,
     };
@@ -353,10 +418,14 @@ const LayerRow = defineComponent({
   template: `
     <div
       class="layer-row"
-      :class="{ active, clipping: layer.clippingMask, reference: isRef }"
+      :class="{ active, clipping: layer.clippingMask, reference: isRef, 'layer-group-row': isGroup }"
+      :style="rowStyle"
       :data-layer-id="String(layer.id)"
       @click="onRowClick"
     >
+      <!-- 组：折叠三角；叶：占位对齐（depth 缩进已在 rowStyle） -->
+      <button v-if="isGroup" type="button" class="layer-collapse" :title="collapsed ? '展开组' : '折叠组'" @click="toggleCollapse">{{ collapsed ? '▸' : '▾' }}</button>
+
       <button type="button" class="layer-vis" :class="{ 'hidden-icon': !layer.visible }"
         :title="layer.visible ? '可见' : '已隐藏'"
         @click="vis"
@@ -364,10 +433,10 @@ const LayerRow = defineComponent({
 
       <input v-if="renaming" type="text" class="layer-name-input" :value="layer.name"
         @click.stop @blur="onRenameCommit" @keydown="onRenameKey" />
-      <span v-else class="layer-name" @click="onNameClick">{{ layer.name }}</span>
+      <span v-else class="layer-name" @click="onNameClick">{{ isGroup ? '▢ ' + layer.name : layer.name }}</span>
 
       <span v-if="layer.clippingMask" class="layer-clip-chip" title="已剪裁到下方第一颗非剪裁层">↘</span>
-      <span v-if="layer.lockAlpha" class="layer-lock-chip" title="锁定不透明度：笔只改已有像素的颜色">
+      <span v-if="!isGroup && layer.lockAlpha" class="layer-lock-chip" title="锁定不透明度：笔只改已有像素的颜色">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       </span>
       <span v-if="isRef" class="layer-ref-chip" title="参考层：魔棒 / 油漆桶读这一层">参</span>
@@ -379,20 +448,31 @@ const LayerRow = defineComponent({
 
       <div v-if="menuOpen" class="menu-panel layer-tools-popup" @click.stop>
         <button class="menu-item" type="button" @click="act('rename')"><span class="menu-item-label">重命名…</span></button>
-        <button class="menu-item" type="button" :disabled="!canDuplicate" @click="act('duplicate')"><span class="menu-item-label">复制图层</span></button>
+
+        <!-- 叶专属：复制 / 锁α / 参考 -->
+        <button v-if="!isGroup" class="menu-item" type="button" :disabled="!canDuplicate" @click="act('duplicate')"><span class="menu-item-label">复制图层</span></button>
+
+        <hr class="menu-sep" />
+        <!-- 图层组：编组（叶/组都可，包成新组，支持嵌套）/ 解组（仅组）/ 移入上方组 / 移出组 -->
+        <button class="menu-item" type="button" @click="act('group')"><span class="menu-item-label">编组</span></button>
+        <button v-if="isGroup" class="menu-item" type="button" @click="act('ungroup')"><span class="menu-item-label">解组</span></button>
+        <button v-if="aboveGroupId != null" class="menu-item" type="button" @click="act('moveIn')"><span class="menu-item-label">移入上方组</span></button>
+        <button v-if="canMoveOut" class="menu-item" type="button" @click="act('moveOut')"><span class="menu-item-label">移出组</span></button>
+
         <hr class="menu-sep" />
         <!-- v267 (user)：层属性 toggle 收进 ⋯ 菜单（点了不关菜单，可连续切） -->
-        <button class="menu-item layer-menu-toggle" type="button" @click="toggleLock"><span class="layer-menu-check">{{ layer.lockAlpha ? '☑' : '☐' }}</span><span class="menu-item-label">锁定不透明度</span></button>
+        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleLock"><span class="layer-menu-check">{{ layer.lockAlpha ? '☑' : '☐' }}</span><span class="menu-item-label">锁定不透明度</span></button>
         <button class="menu-item layer-menu-toggle" type="button" @click="toggleClip"><span class="layer-menu-check">{{ layer.clippingMask ? '☑' : '☐' }}</span><span class="menu-item-label">剪裁</span></button>
-        <button class="menu-item layer-menu-toggle" type="button" @click="toggleRef"><span class="layer-menu-check">{{ isRef ? '☑' : '☐' }}</span><span class="menu-item-label">参考层</span></button>
+        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleRef"><span class="layer-menu-check">{{ isRef ? '☑' : '☐' }}</span><span class="menu-item-label">参考层</span></button>
+
         <hr class="menu-sep" />
-        <button class="menu-item" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><span class="menu-item-label">向下合并</span></button>
-        <button class="menu-item" type="button" :disabled="!hasPx" @click="act('clear')"><span class="menu-item-label">清空内容</span></button>
-        <button class="menu-item menu-danger" type="button" :disabled="!canDel" @click="act('del')"><span class="menu-item-label">删除</span></button>
+        <button v-if="!isGroup" class="menu-item" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><span class="menu-item-label">向下合并</span></button>
+        <button v-if="!isGroup" class="menu-item" type="button" :disabled="!hasPx" @click="act('clear')"><span class="menu-item-label">清空内容</span></button>
+        <button class="menu-item menu-danger" type="button" :disabled="!canDel" @click="act('del')"><span class="menu-item-label">{{ isGroup ? '删除组' : '删除' }}</span></button>
       </div>
     </div>
 
-    <div v-if="expanded" class="layer-row-expand" @click.stop>
+    <div v-if="expanded" class="layer-row-expand" :style="rowStyle" @click.stop>
       <label class="layer-slider-row">
         <span>透</span>
         <input type="range" min="0" max="100" :value="opacityPct"
@@ -407,9 +487,6 @@ const LayerRow = defineComponent({
       </label>
       <!-- v267 (user)：剪裁 / 锁α / 参考 toggle 已收进 ⋯ 菜单，折叠区只留 透明度 + 模式 -->
     </div>
-
-    <!-- 递归预留：今天 children 恒空；未来层有 children 即在此嵌套渲染子行 -->
-    <LayerRow v-for="c in children" :key="c.id" :layer="c" />
   `,
 });
 
@@ -422,25 +499,45 @@ const LayersPanel = defineComponent({
     // layer 传 **leaf 快照**而非活引用（leaf-by-value 硬规则，见文件头）：每次 bump 拷新对象，
     // props 引用必变 → 子组件必更新、子组件 computed 必失效。活引用会被 Vue 的 props
     // 相等性检查 + computed 依赖缓存双重截断 → UI 永久冻结在首次求值（v230 及之前的实况）。
+    // 递归建**扁平 + depth** 行视图（UI 顶 = 栈顶 → 每级倒序）。组行 + 其 children（未折叠时）。
+    // 每行 leaf-by-value 快照（含 isGroup）；能力位按**同级**边界算。
     const rows = computed(() => {
       void docVersion.value;   // 依赖跨切面信号：bumpDoc() 即重算
       const out: any[] = [];
-      const n = doc.layers.length;
-      for (let i = n - 1; i >= 0; i--) {
-        const L = doc.layers[i];
-        out.push({
-          layer: { id: L.id, name: L.name, visible: L.visible, opacity: L.opacity, mode: L.mode, clippingMask: L.clippingMask, lockAlpha: L.lockAlpha },
-          active: i === doc.activeIndex,
-          isRef: doc.referenceLayerId === L.id,
-          canUp: i < n - 1,
-          canDown: i > 0,
-          canDel: n > 1,
-          canDuplicate: n < doc.maxLayers,
-          // v258：剪裁层可向下合并（裁到基底）。唯一禁止：下方是剪裁层而本层不是（语义不清）。
-          canMergeDown: i > 0 && !(doc.layers[i - 1].clippingMask && !L.clippingMask),
-          hasPx: L.bboxW > 0 && L.bboxH > 0,
-        });
-      }
+      const activeId = doc.activeId;
+      const totalLeaves = countLeaves(doc.layers);
+      const walk = (nodes: any[], depth: number) => {
+        for (let i = nodes.length - 1; i >= 0; i--) {
+          const n = nodes[i];
+          const aboveSib = i + 1 < nodes.length ? nodes[i + 1] : null;   // UI 上方同级
+          const base = {
+            depth,
+            isGroup: !!n.isGroup,
+            active: n.id === activeId,
+            canUp: i < nodes.length - 1,
+            canDown: i > 0,
+            canDel: totalLeaves > 1,
+            canMoveOut: depth > 0,                                       // 在组内 → 可移出
+            aboveGroupId: aboveSib && aboveSib.isGroup ? aboveSib.id : null,  // 上方是组 → 可移入
+            layer: { id: n.id, name: n.name, visible: n.visible, opacity: n.opacity, mode: n.mode, clippingMask: n.clippingMask, lockAlpha: n.lockAlpha, isGroup: !!n.isGroup },
+          };
+          if (n.isGroup) {
+            const collapsed = layersUi.collapsedIds.has(n.id);
+            out.push({ ...base, collapsed, isRef: false, canDuplicate: false, canMergeDown: false, hasPx: false });
+            if (!collapsed) walk(n.children, depth + 1);
+          } else {
+            out.push({
+              ...base, collapsed: false,
+              isRef: doc.referenceLayerId === n.id,
+              canDuplicate: totalLeaves < doc.maxLayers,
+              // v258：剪裁层可向下合并（裁到基底）。禁止：下方是剪裁层而本层不是；下方是组（不能合进组）。
+              canMergeDown: i > 0 && !nodes[i - 1].isGroup && !(nodes[i - 1].clippingMask && !n.clippingMask),
+              hasPx: n.bboxW > 0 && n.bboxH > 0,
+            });
+          }
+        }
+      };
+      walk(doc.layers, 0);
       return out;
     });
     return { rows, layersUi };
@@ -449,6 +546,9 @@ const LayersPanel = defineComponent({
     <template v-for="r in rows" :key="r.layer.id">
       <LayerRow
         :layer="r.layer"
+        :depth="r.depth"
+        :is-group="r.isGroup"
+        :collapsed="r.collapsed"
         :active="r.active"
         :is-ref="r.isRef"
         :expanded="layersUi.expandedId === r.layer.id"
@@ -456,6 +556,7 @@ const LayersPanel = defineComponent({
         :renaming="layersUi.renameId === r.layer.id"
         :can-up="r.canUp" :can-down="r.canDown" :can-del="r.canDel"
         :can-duplicate="r.canDuplicate" :can-merge-down="r.canMergeDown" :has-px="r.hasPx"
+        :can-move-out="r.canMoveOut" :above-group-id="r.aboveGroupId"
       />
     </template>
   `,
@@ -467,15 +568,16 @@ let _vueApp: any = null;
 // 容器内，由 docVersion watch 驱动（取代旧 renderLayersPanel 末尾的命令式赋值）。
 function _syncChrome() {
   const max = doc.maxLayers;
-  els.layersCountLabel.textContent = `${doc.layers.length} / ${max}`;
-  els.layerAddBtn.disabled = doc.layers.length >= max;
+  const leaves = countLeaves(doc.layers);
+  els.layersCountLabel.textContent = `${leaves} / ${max}`;
+  els.layerAddBtn.disabled = leaves >= max;
   const delBtn = document.getElementById("layerDeleteBtn") as HTMLButtonElement;
-  if (delBtn) delBtn.disabled = doc.layers.length <= 1;
-  // v267 上移/下移按钮按活动层位置禁用（top 不能再上移、bottom 不能再下移）
+  if (delBtn) delBtn.disabled = leaves <= 1;
+  // v267 上移/下移按钮按活动节点的**同级**边界禁用（树化：top/bottom 按同级算）
   const upBtn = document.getElementById("layerMoveUpBtn") as HTMLButtonElement;
   const downBtn = document.getElementById("layerMoveDownBtn") as HTMLButtonElement;
-  if (upBtn) upBtn.disabled = doc.activeIndex >= doc.layers.length - 1;
-  if (downBtn) downBtn.disabled = doc.activeIndex <= 0;
+  if (upBtn) upBtn.disabled = !doc.canMoveLayer(doc.activeId, 1);
+  if (downBtn) downBtn.disabled = !doc.canMoveLayer(doc.activeId, -1);
   nextTick(() => {
     els.layersList.querySelector(".layer-row.active")?.scrollIntoView({ block: "nearest" });
   });
