@@ -40,8 +40,10 @@ export function mergeTrash(localTrash, cloudTrash) {
   return [...byName.values()].sort((a, b) => b.deletedAt - a.deletedAt);
 }
 
-// 切当前文件夹层 → { folderNames（immediate 子夹，字母序）, files（直属文件，新→旧） }。
+// 切当前文件夹层 → { folderNames（immediate 子夹，字母序）, files（直属文件，按文件名倒序） }。
 //   allItems = mergeLocalCloud 结果；cloudFolders = 云端真文件夹路径（含空夹）；folder = 当前路径（""=根）
+//   文件排序按 name 倒序（localeCompare，numeric）：新文档名是 yyyymmdd-xxxx，倒序 = 新日期在前，
+//   且稳定——不像旧的 updatedAt 排序那样，一存盘就把旧文件顶到最前（用户感知为「按上次访问」）。
 export function sliceFolder(allItems, cloudFolders, folder) {
   const prefix = folder ? `${folder}/` : "";
   const folderSet = new Set();    // 当前层 immediate sub-folder name
@@ -65,7 +67,7 @@ export function sliceFolder(allItems, cloudFolders, folder) {
       if (first) folderSet.add(first);
     }
   }
-  files.sort((a, b) => itemTime(b) - itemTime(a));
+  files.sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true }));
   const folderNames = [...folderSet].sort((a, b) => a.localeCompare(b));
   return { folderNames, files };
 }

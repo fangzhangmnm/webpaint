@@ -22,19 +22,33 @@ describe("gallery-model · mergeLocalCloud", () => {
 });
 
 describe("gallery-model · sliceFolder", () => {
+  // 排序按 name 倒序（yyyymmdd-xxxx，新日期在前）；updatedAt 故意逆着名字，验证不再看存盘时间。
   const items = mergeLocalCloud(
-    [{ name: "x", updatedAt: 30 }, { name: "y", updatedAt: 10 }, { name: "f1/a", updatedAt: 20 }, { name: "f2/c", updatedAt: 5 }],
+    [
+      { name: "20260101-old", updatedAt: 30 },   // 名字旧、updatedAt 新
+      { name: "20260615-new", updatedAt: 10 },   // 名字新、updatedAt 旧
+      { name: "f1/20260301-a", updatedAt: 20 },
+      { name: "f2/20260201-c", updatedAt: 5 },
+    ],
     [],
   );
-  it("根层：immediate 子夹（字母序）+ 直属文件（新→旧）", () => {
+  it("根层：immediate 子夹（字母序）+ 直属文件（按名字倒序，不看 updatedAt）", () => {
     const { folderNames, files } = sliceFolder(items, [], "");
     eq(JSON.stringify(folderNames), JSON.stringify(["f1", "f2"]));
-    eq(JSON.stringify(files.map((f) => f.name)), JSON.stringify(["x", "y"]));   // 30 > 10
+    eq(JSON.stringify(files.map((f) => f.name)), JSON.stringify(["20260615-new", "20260101-old"]));
   });
   it("进 f1：只剩 f1 直属文件、无子夹", () => {
     const { folderNames, files } = sliceFolder(items, [], "f1");
     eq(folderNames.length, 0);
-    eq(JSON.stringify(files.map((f) => f.name)), JSON.stringify(["f1/a"]));
+    eq(JSON.stringify(files.map((f) => f.name)), JSON.stringify(["f1/20260301-a"]));
+  });
+  it("数字智能排序：副本10 排在副本2 后面（非字典序）", () => {
+    const nums = mergeLocalCloud(
+      [{ name: "猫 副本2" }, { name: "猫 副本10" }, { name: "猫 副本" }],
+      [],
+    );
+    const { files } = sliceFolder(nums, [], "");
+    eq(JSON.stringify(files.map((f) => f.name)), JSON.stringify(["猫 副本10", "猫 副本2", "猫 副本"]));
   });
   it("云端空文件夹也现身（单一真相源）", () => {
     const { folderNames } = sliceFolder(items, ["emptyDir", "f1/onlycloudsub"], "");
