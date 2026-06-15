@@ -46,6 +46,12 @@
 - 撤销/重做：编组/解组/移入移出/删组（叶回到原组同级位）/ 组内删叶 + 普通增删移合并。
 - PSD 导出：组拍平、所有叶在（per-layer records 扁平）。float 仍正常（本批没动）。
 
+## blend / clip 语义 + 跨格式对齐的坑 → 见 ADR-0002
+`docs/adr/0002-layer-group-blend-clip-semantics.md`：隔离/压平模型对齐 PS/Procreate（folder=拍平的图 **当且仅当**
+非Normal/有透明度/有蒙版，否则 pass-through 不压平）；**刻意超出 PS 两处**（组可当 clip 层/基底，偏 CSP）；
+**已知缺口**：没有独立 "Pass Through vs Normal" 两挡（隔离靠推导）——**用户已拍板有必要可加**（接 `group.isolate` hook + 序列化）；
+**ORA/跨app 互通坑**：`webpaint:clipping` 挂 `<stack>` 私有不可移植、pass-through⇄ORA 语义不对齐（src-over stack 可能被别的 app 当隔离-Normal）。
+
 ## 已定设计决策（避免用户点名的 5 类错误）
 - **active = 叶或组**；绘画路径 isGroup 护栏（组不可画）→ 避免笔刷错误。
 - **clip = 按同 parent 级**（clip 到同组内下方最近「非clip/可见/有内容」节点；不跨组）；组可为 clip 层/基底；
