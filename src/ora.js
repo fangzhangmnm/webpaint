@@ -1,4 +1,3 @@
-import { WEBPAINT_VERSION } from "./version.js";
 // OpenRaster (.ora) encode / decode。
 //
 // 标准：https://www.openraster.org/baseline/file-layout-spec.html
@@ -21,10 +20,12 @@ import { WEBPAINT_VERSION } from "./version.js";
 // arrayBuffer() 转 Uint8Array。
 
 import { zipPack, zipUnpack } from "./zip.js";
-import { Layer, PaintDoc } from "./doc.js";
+import { Layer, LayerGroup, PaintDoc, flattenLeaves, findNodeById, reseedLayerIdCounter } from "./doc.js";
 import { compositeLayers } from "./layer-composite.js";
 import { smartResample } from "./resample.js";
 import { makeBitmap } from "./bitmap.js";
+// 纯树↔stack.xml 序列化（嵌套组 + id + active）抽到独立深模块（无 canvas 依赖，可纯 node 测）。
+import { buildStackXml, parseStackXml } from "./ora-stack-xml.js";
 // 加密对本 codec **不可见**（v235 起）：encode 永远出明文 ora、decode 永远收明文 ora。
 // 包壳/解壳全在 store 深模块（flow.save/load/push/pull 自动处理；密码经 crypt seam）。
 // 拿到加密容器字节请先走 store.unseal / flow.load，别直接喂这里（会报「缺 stack.xml」）。
@@ -47,12 +48,6 @@ async function canvasToPngBytes(canvas) {
 
 function bytesToString(bytes) {
   return new TextDecoder("utf-8").decode(bytes);
-}
-
-function escapeXml(s) {
-  return String(s).replace(/[<>&"']/g, (c) => ({
-    "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;",
-  })[c]);
 }
 
 // ---- encode：PaintDoc → .ora Blob ----
@@ -101,68 +96,6 @@ function renderThumbnail(merged, maxSide = 256) {
   return smartResample(merged, tw, th);
 }
 
-function buildStackXml(doc) {
-  const layers = [];
-  // OpenRaster spec：layer 顺序 = top first（top of stack 在 XML 前）。
-  // doc.layers[0] 是 bottom，所以倒序输出。
-  for (let i = doc.layers.length - 1; i >= 0; i--) {
-    const L = doc.layers[i];
-    if (L.bboxW <= 0 || L.bboxH <= 0) {
-      // 空层：spec 允许 empty layer。仍输出占位 png（1×1 透明）
-    }
-    const attrs = [
-      `name="${escapeXml(L.name)}"`,
-      `src="data/layer${L.id}.png"`,
-      `x="${L.bboxX}"`,
-      `y="${L.bboxY}"`,
-      `opacity="${L.opacity.toFixed(4)}"`,
-      `visibility="${L.visible ? "visible" : "hidden"}"`,
-      `composite-op="${oraCompositeOp(L.mode || "source-over")}"`,
-      // 私有属性：clipping mask + 锁定 alpha + reference layer 标记
-      ...(L.clippingMask ? [`webpaint:clipping="true"`] : []),
-      ...(L.lockAlpha ? [`webpaint:lock-alpha="true"`] : []),
-      ...(doc.referenceLayerId === L.id ? [`webpaint:reference="true"`] : []),
-    ];
-    layers.push(`    <layer ${attrs.join(" ")} />`);
-  }
-  // wrote-with：记录写入这份 .ora 时的 WebPaint 版本号。
-  // 用途：读取端若发现比自己版本高 → 警告（避免旧版客户端静默吃掉新版图层属性）
-  // 论证见 conversation v71→v72。
-  const wroteWith = WEBPAINT_VERSION;
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<image version="0.0.3" w="${doc.width}" h="${doc.height}" xres="72" yres="72" xmlns:webpaint="https://github.com/fangzhangmnm/webpaint/ns" webpaint:wrote-with="${escapeXml(wroteWith)}">
-  <stack name="root">
-${layers.join("\n")}
-  </stack>
-</image>
-`;
-  return xml;
-}
-
-const MODE_TO_ORA = {
-  "source-over": "svg:src-over",
-  "multiply":    "svg:multiply",
-  "screen":      "svg:screen",
-  "overlay":     "svg:overlay",
-  "darken":      "svg:darken",
-  "lighten":     "svg:lighten",
-  "color-dodge": "svg:color-dodge",
-  "color-burn":  "svg:color-burn",
-  "hard-light":  "svg:hard-light",
-  "soft-light":  "svg:soft-light",
-  "difference":  "svg:difference",
-  "exclusion":   "svg:exclusion",
-};
-function oraCompositeOp(canvasMode) {
-  return MODE_TO_ORA[canvasMode] || "svg:src-over";
-}
-const ORA_TO_MODE = Object.fromEntries(
-  Object.entries(MODE_TO_ORA).map(([k, v]) => [v, k]),
-);
-function canvasModeFromOra(op) {
-  return ORA_TO_MODE[op] || "source-over";
-}
-
 /** doc → Blob (.ora)
  *
  * WebPaint 私有扩展（都在 webpaint/ 命名空间下，第三方 reader 会忽略或剥离）：
@@ -189,7 +122,8 @@ export async function encodeDocToOra(doc, opts = {}) {
     { path: "mergedimage.png", data: mergedPng },
   ];
 
-  for (const L of doc.layers) {
+  // 只有叶（Layer）有像素 canvas；组（LayerGroup）无 PNG，结构全在 stack.xml。
+  for (const L of flattenLeaves(doc.layers)) {
     let png;
     if (L.bboxW > 0 && L.bboxH > 0) {
       png = await canvasToPngBytes(L.canvas);
@@ -222,33 +156,6 @@ export async function encodeDocToOra(doc, opts = {}) {
 
 // ---- decode：.ora Blob → PaintDoc ----
 
-function parseStackXml(xmlText) {
-  const dom = new DOMParser().parseFromString(xmlText, "application/xml");
-  const err = dom.querySelector("parsererror");
-  if (err) throw new Error("stack.xml 解析失败：" + err.textContent);
-  const image = dom.querySelector("image");
-  if (!image) throw new Error("stack.xml 缺 <image>");
-  const w = parseInt(image.getAttribute("w") || "0", 10);
-  const h = parseInt(image.getAttribute("h") || "0", 10);
-  if (!w || !h) throw new Error("stack.xml <image> w/h 无效");
-  // 取所有 <layer>。spec 是 top-first 顺序，doc.layers[0] = bottom，所以反转。
-  const layerNodes = [...dom.querySelectorAll("stack > layer")].reverse();
-  const layers = layerNodes.map((n) => ({
-    name: n.getAttribute("name") || "图层",
-    src: n.getAttribute("src") || "",
-    x: parseInt(n.getAttribute("x") || "0", 10),
-    y: parseInt(n.getAttribute("y") || "0", 10),
-    opacity: parseFloat(n.getAttribute("opacity") || "1"),
-    visible: (n.getAttribute("visibility") || "visible") === "visible",
-    mode: canvasModeFromOra(n.getAttribute("composite-op") || "svg:src-over"),
-    clippingMask: n.getAttribute("webpaint:clipping") === "true",
-    lockAlpha: n.getAttribute("webpaint:lock-alpha") === "true",
-    isReference: n.getAttribute("webpaint:reference") === "true",
-  }));
-  const wroteWith = image.getAttribute("webpaint:wrote-with") || null;
-  return { w, h, layers, wroteWith };
-}
-
 /** Blob (.ora 明文) → PaintDoc */
 export async function decodeOraToDoc(blob) {
   const files = await zipUnpack(blob);
@@ -265,23 +172,40 @@ export async function decodeOraToDoc(blob) {
 
   const doc = new PaintDoc({ width: meta.w, height: meta.h });
   doc.layers = [];                                // 清掉 ctor 默认的 1 层
-  for (const L of meta.layers) {
-    const png = files[L.src];
-    if (!png) throw new Error(`.ora 缺图层 PNG：${L.src}`);
+  let activeId = null;
+
+  // spec 树 → 真节点（递归）。叶按 src 载 PNG；组递归建 children。
+  //   持久化 id 直接覆盖（旧 .ora 无 id → spec.id=null → 留 ctor 发的新 id）。
+  const buildNode = async (spec) => {
+    if (spec.isGroup) {
+      const g = new LayerGroup({ name: spec.name });
+      if (spec.id != null) g.id = spec.id;
+      g.visible = spec.visible;
+      g.opacity = spec.opacity;
+      g.mode = spec.mode;
+      g.clippingMask = !!spec.clippingMask;
+      g.children = [];
+      for (const c of spec.children) g.children.push(await buildNode(c));
+      if (spec.isActive) activeId = g.id;
+      return g;
+    }
+    const png = files[spec.src];
+    if (!png) throw new Error(`.ora 缺图层 PNG：${spec.src}`);
     const bitmap = await createImageBitmap(new Blob([png], { type: "image/png" }));
     const layer = new Layer({
       width: meta.w,
       height: meta.h,
-      name: L.name,
+      name: spec.name,
       empty: true,            // 起空，下面手填 bbox + canvas
     });
-    layer.visible = L.visible;
-    layer.opacity = L.opacity;
-    layer.mode = L.mode;
-    layer.clippingMask = !!L.clippingMask;
-    layer.lockAlpha = !!L.lockAlpha;
-    layer.bboxX = L.x;
-    layer.bboxY = L.y;
+    if (spec.id != null) layer.id = spec.id;
+    layer.visible = spec.visible;
+    layer.opacity = spec.opacity;
+    layer.mode = spec.mode;
+    layer.clippingMask = !!spec.clippingMask;
+    layer.lockAlpha = !!spec.lockAlpha;
+    layer.bboxX = spec.x;
+    layer.bboxY = spec.y;
     layer.bboxW = bitmap.width;
     layer.bboxH = bitmap.height;
     layer.canvas = makeBitmap(bitmap.width, bitmap.height);
@@ -290,14 +214,26 @@ export async function decodeOraToDoc(blob) {
     layer.ctx.imageSmoothingQuality = "low";
     layer.ctx.drawImage(bitmap, 0, 0);
     bitmap.close?.();
-    doc.layers.push(layer);
-    if (L.isReference) doc.referenceLayerId = layer.id;
-  }
+    if (spec.isActive) activeId = layer.id;
+    if (spec.isReference) doc.referenceLayerId = layer.id;
+    return layer;
+  };
+
+  for (const spec of meta.nodes) doc.layers.push(await buildNode(spec));
+
   if (doc.layers.length === 0) {
     // 防御：完全空 .ora → 给个默认层
     doc.layers.push(new Layer({ width: meta.w, height: meta.h, name: "图层 1" }));
   }
-  doc.activeIndex = Math.max(0, doc.layers.length - 1);
+  // 持久化 id 可能高于运行时计数器 → 抬过最大值，防新建层撞号。
+  reseedLayerIdCounter(doc.layers);
+  // active 还原：优先 webpaint:active 标记节点；无标记（旧 .ora）→ 末叶（栈顶）。
+  if (activeId != null && findNodeById(doc.layers, activeId)) {
+    doc.activeId = activeId;
+  } else {
+    const leaves = flattenLeaves(doc.layers);
+    doc.activeId = leaves.length ? leaves[leaves.length - 1].id : null;
+  }
   // WebPaint 扩展：reference 小窗的图 + state JSON（可有可无）
   if (files["webpaint/reference.png"]) {
     doc._referenceBlob = new Blob([files["webpaint/reference.png"]], { type: "image/png" });

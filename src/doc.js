@@ -222,6 +222,19 @@ export function countLeaves(nodes) {
   eachLeaf(nodes, () => n++);
   return n;
 }
+// 加载持久化 id 的树（ORA / snapshot）后，把模块级 id 计数器抬过树里最大 id，
+// 防止后续 addLayer/groupSelection 复用一个已存在的 id。递归覆盖叶 + 组。
+export function reseedLayerIdCounter(nodes) {
+  let max = 0;
+  const walk = (ns) => {
+    for (const n of ns) {
+      if (typeof n.id === "number" && n.id > max) max = n.id;
+      if (n.isGroup) walk(n.children);
+    }
+  };
+  walk(nodes);
+  if (max >= _layerIdCounter) _layerIdCounter = max + 1;
+}
 
 export class PaintDoc {
   constructor({ width = DEFAULT_DOC_SIZE, height = DEFAULT_DOC_SIZE } = {}) {
