@@ -206,9 +206,13 @@ export function initGalleryShell(ctx) {
     els.galleryTrashMenuPopup.classList.toggle("hidden", !hidden);
     if (hidden) anchorPopupToBtn(els.galleryTrashMenuPopup, els.galleryTrashMenuBtn);
   });
-  els.galleryEmptyTrashBtn?.addEventListener("click", () => {
+  els.galleryEmptyTrashLocalBtn?.addEventListener("click", () => {
     els.galleryTrashMenuPopup.classList.add("hidden");
-    gallery.emptyTrash();
+    gallery.emptyTrash("local");
+  });
+  els.galleryEmptyTrashCloudBtn?.addEventListener("click", () => {
+    els.galleryTrashMenuPopup.classList.add("hidden");
+    gallery.emptyTrash("cloud");
   });
 
   // 图库菜单 popup（版本号 + 强制更新 + 文件无关设置）

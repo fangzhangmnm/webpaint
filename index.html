@@ -219,7 +219,8 @@
         <div class="gallery-trash-menu-wrap">
           <button class="gallery-trash-menu-btn" id="galleryTrashMenuBtn" type="button" title="回收站操作" aria-haspopup="true">⋯</button>
           <div class="gallery-trash-menu-popup hidden" id="galleryTrashMenuPopup" role="menu">
-            <button class="gallery-trash-menu-item danger" id="galleryEmptyTrashBtn" type="button" role="menuitem">清空回收站</button>
+            <button class="gallery-trash-menu-item danger" id="galleryEmptyTrashLocalBtn" type="button" role="menuitem">清空本地回收站</button>
+            <button class="gallery-trash-menu-item danger" id="galleryEmptyTrashCloudBtn" type="button" role="menuitem">清空云端回收站</button>
           </div>
         </div>
       </div>
@@ -990,6 +991,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-3e1bed42e098.mjs"></script>
+    <script type="module" src="./dist/webpaint-7bf85d59eafd.mjs"></script>
   </body>
 </html>

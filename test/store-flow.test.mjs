@@ -579,6 +579,28 @@ describe("Store.flow.emptyTrash（批量彻底删，两端在库内一处清）"
     eq((await env.local.listTrash()).length, 0, "本地清空");
     eq((await env.cloud.listTrash()).length, 1, "云端 trash 离线应保留");
   });
+
+  it("scope='local'：只清本地、云端 trash 原封不动（在线也不碰云）", async () => {
+    const env = mk();
+    await env.local.save("a", bytes("A")); await env.local.trash("a");
+    await env.cloud.push("c", bytes("C")); await env.cloud.trash("c");
+    const res = await env.store.flow.emptyTrash({ scope: "local", isOnline: () => true });
+    eq(res.status, "emptied");
+    eq(res.failed.length, 0);
+    eq((await env.local.listTrash()).length, 0, "本地清空");
+    eq((await env.cloud.listTrash()).length, 1, "云端 trash 应保留（scope=local 不碰云）");
+  });
+
+  it("scope='cloud'：只清云端、本地 trash 原封不动", async () => {
+    const env = mk();
+    await env.local.save("a", bytes("A")); await env.local.trash("a");
+    await env.cloud.push("c", bytes("C")); await env.cloud.trash("c");
+    const res = await env.store.flow.emptyTrash({ scope: "cloud", isOnline: () => true });
+    eq(res.status, "emptied");
+    eq(res.failed.length, 0);
+    eq((await env.local.listTrash()).length, 1, "本地 trash 应保留（scope=cloud 不碰本地）");
+    eq((await env.cloud.listTrash()).length, 0, "云端清空");
+  });
 });
 
 describe("Store.flow 空文件夹（newFolder / deleteFolder：深模块窄接口）", () => {

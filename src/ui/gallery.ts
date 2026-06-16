@@ -448,14 +448,17 @@ function makeGallery(host: GalleryHost) {
         await reload();
       }
 
-      async function emptyTrash() {
-        if (!(await host.confirm("清空回收站？", "本地和云端的回收站都会清。不可撤销。"))) return;
-        await host.busy("正在清空回收站…", async () => {
-          const res = await _store.flow.emptyTrash({ isOnline: () => host.signedIn() && host.online() });
+      // scope：清哪一端。"local"=仅本地、"cloud"=仅云端、"both"=两端（API 保留，UI 只暴露前两个按钮）。
+      async function emptyTrash(scope: "local" | "cloud" | "both" = "both") {
+        const label = scope === "local" ? "本地" : scope === "cloud" ? "云端" : "本地和云端";
+        if (scope === "cloud" && !(host.signedIn() && host.online())) { host.status("清空云端回收站需先登录并联网", true); return; }
+        if (!(await host.confirm(`清空${label}回收站？`, `${label}回收站会被彻底清空，不可撤销。`))) return;
+        await host.busy(`正在清空${label}回收站…`, async () => {
+          const res = await _store.flow.emptyTrash({ scope, isOnline: () => host.signedIn() && host.online() });
           const cloudFails = (res.failed || []).filter((f: any) => f.where !== "local").length;
-          if (cloudFails) host.status(`已清本地；${cloudFails} 项云端没清（可能离线），回线再清`, true);
+          if (scope !== "local" && cloudFails) host.status(`${cloudFails} 项云端没清（可能离线），回线再清`, true);
           else if ((res.failed || []).length) host.status("清空时部分失败", true);
-          else host.status("回收站已清空");
+          else host.status(`已清空${label}回收站`);
         });
         await reload();
       }
@@ -553,7 +556,7 @@ export interface GalleryHandle {
   getView(): "files" | "trash";
   setFolder(path: string): void;
   getFolder(): string;
-  emptyTrash(): void;
+  emptyTrash(scope?: "local" | "cloud" | "both"): void;
   unmount(): void;
 }
 
@@ -566,7 +569,7 @@ export function mountGallery(el: HTMLElement, host: GalleryHost): GalleryHandle 
     getView: () => vm.view,
     setFolder: (p) => vm.setFolder(p),
     getFolder: () => vm.folder,
-    emptyTrash: () => vm.emptyTrash(),
+    emptyTrash: (scope) => vm.emptyTrash(scope),
     unmount: () => app.unmount(),
   };
 }

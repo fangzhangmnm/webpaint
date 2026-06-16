@@ -459,26 +459,29 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
-  // 清空回收站（批量彻底删）：本地 + 云端两端在库内一处清，逐项独立 try、失败汇总不静默。
-  // 不按 GUID 配对 local↔cloud——两端都要清空，配对无意义（≠ restore）。
+  // 清空回收站（批量彻底删）：本地 / 云端在库内一处清，逐项独立 try、失败汇总不静默。
+  //   scope 选清哪端（见下方 EmptyTrashOpts）——UI 拆成「清空本地」「清空云端」两按钮。
+  // 不按 GUID 配对 local↔cloud——清空是按端整片清，配对无意义（≠ restore）。
   // 离线（isOnline()=false）→ 这次只清本地、云端清不了；要清云端得回线后用户**再点一次**清空。
   // **强退 = cancel（一次性操作，绝不持久化 / 不自动续）**：中途强退 = 已删的永久没了（彻底删本不可逆）、
   //   没删的留在 trash；要清剩的得用户**手动再点**清空（针对那时 trash 的现状）。
   //   ⚠ 别做成「自动续上次未完成的清空」——下次 trash 可能已有新 item，自动续会连新 item 一起删 = 灾难。
   // 云端 bounded 并发（默 5，每项仍独立原子），避免大量文件串行太慢。
-  interface EmptyTrashOpts { isOnline?: () => boolean; busy?: Busy; concurrency?: number; }
+  // scope：清哪一端。"local"=仅本地、"cloud"=仅云端、"both"=两端（默认，保旧调用语义）。
+  //   UI 把它拆成「清空本地」「清空云端」两个按钮；"both" 仍保留给 API/将来"全部清空"。
+  interface EmptyTrashOpts { isOnline?: () => boolean; busy?: Busy; concurrency?: number; scope?: "local" | "cloud" | "both"; }
   async function emptyTrash(opts: EmptyTrashOpts = {}): Promise<FlowResult> {
-    const { isOnline, busy = _uiBusy, concurrency = 5 } = opts;
+    const { isOnline, busy = _uiBusy, concurrency = 5, scope = "both" } = opts;
     return busy("清空回收站…", async () => {
       let purged = 0; const failed: { name?: string; where: string; error: string }[] = [];
       const errMsg = (e: unknown) => String((e as { message?: unknown })?.message || e);
-      if (local && local.listTrash && local.purgeTrash) {
+      if (scope !== "cloud" && local && local.listTrash && local.purgeTrash) {
         for (const t of await local.listTrash()) {            // 本地 IDB 删很快，串行即可
           try { await local.purgeTrash(t.trashKey); purged++; }
           catch (e) { failed.push({ name: t.name, where: "local", error: errMsg(e) }); }
         }
       }
-      if (!isOnline || isOnline()) {
+      if (scope !== "local" && (!isOnline || isOnline())) {
         let items: CloudItem[] | null = null;
         try { items = await cloud.listTrash(); }
         catch (e) { failed.push({ where: "cloud-list", error: errMsg(e) }); }
