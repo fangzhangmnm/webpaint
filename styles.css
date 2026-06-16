@@ -1813,14 +1813,12 @@ body[data-mode="gallery"] .board { display: none !important; }
   flex: 1; overflow-y: auto;
   padding: 16px;
   display: grid;
-  /* 流式列（大厂做法）：auto-fill 按容器宽塞下尽量多列，minmax(150,1fr) 让每列把行内剩余宽**均摊**
-   *   撑开 → 不再在右侧留一大截空白（旧 `repeat(auto-fill, 180px)` 固定宽 + 左对齐，余量全堆右边：
-   *   iPhone SE2 竖屏 343px 只放 1 列、右边空 ~160px；iPad mini 也各留一截）。
-   * 1fr 只均摊「不足一列的余量」，所以卡片宽落在 [150, ~166] 窄区间，桌面也不会撑得过大。
-   * ⚠ 高度**不**跟宽走（不用 aspect-ratio）：缩略图固定像素高（见 .gallery-tile-thumb）。
-   *   试过 width:100%+aspect-ratio 让缩略图随列宽变成方块——在「grid 列 1fr + 内层 flex」这套里
-   *   百分比宽撑不起 aspect 高，缩略图被压扁成一条、整片当成「全 fit 进视口」而非按内容撑高滚动
-   *   （v284-286 三连栽）。固定像素高 = 内容高确定 → 多了必然溢出 → 正常竖向滚。 */
+  /* 只把**宽**改流式（消右侧空白），**高度机制完全保留 v281 的固定像素**（rigid tile）。
+   * 列：minmax(150,1fr) auto-fill —— 塞尽量多列 + 1fr 均摊不足一列的余量撑开，无右侧空一大截
+   *   （旧 `repeat(auto-fill,180px)` 固定宽左对齐，余量全堆右边：SE2 竖屏只 1 列、右空 ~160px）。
+   * ⚠ tile/thumb 高度仍写死像素（238/180，见下）——别再动。
+   *   v284-287 把高度改成「跟宽 aspect-ratio / 内容自适应」全部栽：grid 多行时容器把内容
+   *   强行 fit-all、把不-rigid 的卡片高压扁成一条、滚不动。**唯一稳的是 rigid 高**（v281 本来就对）。 */
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 16px;
   align-content: start;
@@ -1847,8 +1845,10 @@ body[data-mode="gallery"] .board { display: none !important; }
   }
 }
 .gallery-tile {
-  /* 宽由 grid 列定（流式，跟着列宽变）；高由内容定 = 固定高缩略图 + 两行文字 → 每卡定高、行可滚。 */
+  /* 宽由 grid 列定（流式）；**高写死 238px（rigid，照搬 v281）**——这是能正常滚动、不被容器压扁的关键，
+   *   别改成内容自适应（v287 栽过：图多了被强行 fit-all 压扁）。238 = thumb 180 + 两行字 + padding。 */
   display: flex; flex-direction: column;
+  height: 238px;
   background: var(--bg-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1867,9 +1867,9 @@ body[data-mode="gallery"] .board { display: none !important; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #4c8bf5) 30%, transparent);
 }
 .gallery-tile-thumb {
-  /* 宽随卡片流式（100%），高固定像素：高度确定不依赖宽 → 不会被压扁、内容多了必然溢出可滚。
-   * flex:none 防 column flex 把它压缩；object-fit:contain 让方图整张可见（宽卡片两侧露白底，OK）。 */
-  width: 100%; height: 160px;
+  /* 宽随卡片流式（100%），**高写死 180px（照搬 v281）**。flex:none 防被 column flex 压缩。
+   * object-fit:contain：方图整张可见、比例正确（宽卡片两侧露白底，OK）。 */
+  width: 100%; height: 180px;
   flex: none;
   display: block;
   object-fit: contain;
