@@ -1173,6 +1173,11 @@ input[type="range"].color-ramp::-moz-range-thumb {
 #galleryMount {
   flex: 1; min-height: 0;
   display: flex; flex-direction: column;
+  /* **滚动视口在这一层**（不在 .gallery-grid）：网格本身做内容高、不收缩，行永不被压扁
+   *   → 内容超高就在本层溢出滚动。把「滚动器」和「网格内容」分离，是 aspect-ratio 卡片能正常滚的关键
+   *   （aspect-ratio 元素在会收缩的受限上下文里会**丢比例自我压扁以避免溢出**，故网格不能既是网格又是
+   *   会收缩的滚动器——v284-289 的压扁根因）。 */
+  overflow-y: auto;
 }
 
 .gallery-foot {
@@ -1810,7 +1815,8 @@ body[data-mode="gallery"] .board { display: none !important; }
 .tool[data-state="synced"] { color: #8a8a8a; }
 .tool[data-state="saved"] { color: var(--ink-soft); }
 .gallery-grid {
-  flex: 1; min-height: 0; overflow-y: auto;
+  /* 内容高、不伸不缩（flex:none）——滚动交给 #galleryMount。这样 aspect-ratio 卡片行不会被收缩压扁。 */
+  flex: none;
   padding: 16px;
   display: grid;
   /* 宽流式（消右侧空白）；高用 aspect-ratio 跟宽走成方块（大厂现行做法，见 .gallery-tile-thumb）。
@@ -1828,18 +1834,18 @@ body[data-mode="gallery"] .board { display: none !important; }
  * 仅 Windows 桌面（粗略地 pointer:fine = 鼠标）常显一条窄滚动条，否则桌面上看不出能滚。
  */
 @media (pointer: fine) {
-  .gallery-grid {
+  #galleryMount {
     scrollbar-width: thin;
     scrollbar-gutter: stable;
   }
-  .gallery-grid::-webkit-scrollbar { width: 10px; }
-  .gallery-grid::-webkit-scrollbar-thumb {
+  #galleryMount::-webkit-scrollbar { width: 10px; }
+  #galleryMount::-webkit-scrollbar-thumb {
     background: color-mix(in srgb, var(--ink) 22%, transparent);
     border-radius: 6px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
-  .gallery-grid::-webkit-scrollbar-thumb:hover {
+  #galleryMount::-webkit-scrollbar-thumb:hover {
     background: color-mix(in srgb, var(--ink) 36%, transparent);
     background-clip: padding-box;
   }
@@ -1997,8 +2003,10 @@ body[data-mode="gallery"] .board { display: none !important; }
   font-size: 14px;
 }
 
-/* 面包屑 */
+/* 面包屑 —— 现在它和网格同在 #galleryMount 滚动层内，sticky 钉顶不随网格滚走 */
 .gallery-breadcrumb {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg);
   display: flex; flex-wrap: wrap; align-items: center;
   gap: 4px;
   padding: 8px 16px;
