@@ -1864,7 +1864,11 @@ body[data-mode="gallery"] .board { display: none !important; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #4c8bf5) 30%, transparent);
 }
 .gallery-tile-thumb {
-  width: 100%; height: auto; aspect-ratio: 1 / 1;   /* 高随卡片宽走（流式）；同行等宽=等高 */
+  /* 高随卡片宽走（流式）；同行等宽=等高。
+   * flex:none 关键：thumb 是 .gallery-tile（column flex）的直接子项，img+aspect-ratio 做 flex item 时
+   *   flex 主轴（高）会被算法压成 0 → 缩略图被压扁。flex:none 让它退出 flex 伸缩、高度用自己 aspect 盒子。 */
+  width: 100%; aspect-ratio: 1 / 1; height: auto;
+  flex: none;
   display: block;
   object-fit: contain;
   /* 白纸：alpha 区露白底，跟画在白纸上一样 */
