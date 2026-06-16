@@ -1844,8 +1844,12 @@ body[data-mode="gallery"] .board { display: none !important; }
   }
 }
 .gallery-tile {
-  display: flex; flex-direction: column;
-  /* 宽由 grid 列定（流式）；高由内容定（缩略图 aspect-ratio + 两行文字）。同一行卡片等宽→等高。 */
+  /* display:block（非 flex）：子项（缩略图 + 名字行）天然块级堆叠即可。
+   * **关键**：缩略图 img 用 width:100% + aspect-ratio 求高，须在**块布局**里——flex column 下 img 当
+   *   flex item，百分比宽无法在 flex 定高阶段解析 → 高塌成 0、行被压扁、方图被 overflow 裁成一条
+   *   （v284/285 的压扁根因）。块布局先定宽再由 aspect 求高，可靠。
+   * 宽由 grid 列定（流式）；高由内容定（缩略图方块 + 两行文字）。同一行卡片等宽→等高。 */
+  display: block;
   background: var(--bg-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1864,11 +1868,8 @@ body[data-mode="gallery"] .board { display: none !important; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #4c8bf5) 30%, transparent);
 }
 .gallery-tile-thumb {
-  /* 高随卡片宽走（流式）；同行等宽=等高。
-   * flex:none 关键：thumb 是 .gallery-tile（column flex）的直接子项，img+aspect-ratio 做 flex item 时
-   *   flex 主轴（高）会被算法压成 0 → 缩略图被压扁。flex:none 让它退出 flex 伸缩、高度用自己 aspect 盒子。 */
+  /* 高随卡片宽走（流式）：块布局里 width:100% 先定宽，aspect-ratio 求出等高方块。同行等宽=等高。 */
   width: 100%; aspect-ratio: 1 / 1; height: auto;
-  flex: none;
   display: block;
   object-fit: contain;
   /* 白纸：alpha 区露白底，跟画在白纸上一样 */
