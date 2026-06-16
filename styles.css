@@ -1785,7 +1785,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
 body[data-mode="gallery"] .top-bar,
 body[data-mode="gallery"] .hud,
 body[data-mode="gallery"] .float-panel,
-body[data-mode="gallery"] .menu-panel:not(#galleryAddPopup):not(#cloudAccountPopup),
+body[data-mode="gallery"] .menu-panel:not(#galleryAddPopup):not(#cloudAccountPopup):not(#galleryMenuPopup),
 body[data-mode="gallery"] .adjust-popup,
 body[data-mode="gallery"] .board { display: none !important; }
 

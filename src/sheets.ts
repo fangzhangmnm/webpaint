@@ -49,8 +49,12 @@ export function openInputSheet(title: string, defaultValue = "", { placeholder =
     if (message) { g.message().classList.remove("hidden"); g.message().textContent = message; }
     else g.message().classList.add("hidden");
     g.input().classList.remove("hidden");
-    g.input().type = password ? "password" : "text";
-    g.input().autocomplete = password ? "new-password" : "off";
+    // 密码态**不用** type=password —— 兄弟项目各 shared-file 各密码，浏览器「记住/更新密码」
+    //   弹窗会把它们串味、误填。改用 type=text + -webkit-text-security 打码（Safari/Chrome/新版
+    //   Firefox 都支持），绕开浏览器密码管理器的启发式探测，从根上不触发记密码弹窗。
+    g.input().type = "text";
+    (g.input().style as any).webkitTextSecurity = password ? "disc" : "";
+    g.input().autocomplete = "off";
     g.input().value = defaultValue;
     g.input().placeholder = placeholder;
     openSheet(g.sheet(), g.backdrop());
@@ -66,7 +70,8 @@ export function openInputSheet(title: string, defaultValue = "", { placeholder =
       g.cancel().removeEventListener("click", onCancel);
       g.backdrop().removeEventListener("click", onCancel);
       g.input().removeEventListener("keydown", onKey as any);
-      g.input().type = "text";   // 密码态不残留到下一个输入框
+      g.input().type = "text";
+      (g.input().style as any).webkitTextSecurity = "";   // 打码态不残留到下一个输入框
       g.input().value = "";
     };
     g.confirm().addEventListener("click", onConfirm);
