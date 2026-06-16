@@ -1813,11 +1813,14 @@ body[data-mode="gallery"] .board { display: none !important; }
   flex: 1; overflow-y: auto;
   padding: 16px;
   display: grid;
-  /* 固定 tile 宽度 180px（不再 1fr 撑满）→ tile 高度也固定，按钮永不被挤出 */
-  grid-template-columns: repeat(auto-fill, 180px);
+  /* 流式列（大厂做法）：auto-fill 按容器宽塞下尽量多列，minmax(150,1fr) 让每列把行内剩余宽**均摊**
+   *   撑开 → 不再在右侧留一大截空白（旧 `repeat(auto-fill, 180px)` 固定宽 + 左对齐，余量全堆右边：
+   *   iPhone SE2 竖屏 343px 只放 1 列、右边空 ~160px；iPad mini 也各留一截）。
+   * 1fr 只均摊「不足一列的余量」，所以卡片宽落在 [150, ~166] 窄区间，桌面也不会撑得过大。
+   * 卡片宽随列变 → 缩略图用 aspect-ratio 跟宽走（同一行等宽=等高），故 tile / thumb 都不再写死像素。 */
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 16px;
   align-content: start;
-  justify-content: start;
 }
 /*
  * 滚动条策略：默认（含移动/触摸）走系统 overlay/auto，不常显，保移动端观感。
@@ -1842,8 +1845,7 @@ body[data-mode="gallery"] .board { display: none !important; }
 }
 .gallery-tile {
   display: flex; flex-direction: column;
-  width: 180px;
-  height: 238px;             /* thumb 180 + name 18 + meta 16 + padding 18 + border 4 */
+  /* 宽由 grid 列定（流式）；高由内容定（缩略图 aspect-ratio + 两行文字）。同一行卡片等宽→等高。 */
   background: var(--bg-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1862,7 +1864,7 @@ body[data-mode="gallery"] .board { display: none !important; }
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #4c8bf5) 30%, transparent);
 }
 .gallery-tile-thumb {
-  width: 180px; height: 180px;
+  width: 100%; height: auto; aspect-ratio: 1 / 1;   /* 高随卡片宽走（流式）；同行等宽=等高 */
   display: block;
   object-fit: contain;
   /* 白纸：alpha 区露白底，跟画在白纸上一样 */
