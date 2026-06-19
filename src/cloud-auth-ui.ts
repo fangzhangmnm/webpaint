@@ -8,13 +8,16 @@
 // auth 是公共面：直接 import 自 app-store.js。setStatus / updateSaveStatus / gallery
 // 经 ctx 注册表晚绑（拆分期权宜）。
 
+import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
 import {
   isSignedIn, isAuthConfigured, signIn, signOut,
   getActiveAccount, retrySilentSignIn, setLastSessionSignedIn,
 } from "./app-store.js";
 
-let setStatus: any, updateSaveStatus: any, gallery: any;
+let setStatus: AppContext["setStatus"];
+let updateSaveStatus: AppContext["updateSaveStatus"];
+let gallery: AppContext["gallery"];
 
 const ICON_CLOUD_OUT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
 const ICON_CLOUD_IN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
@@ -50,7 +53,7 @@ export function updateCloudAuthUI() {
   updateSaveStatus();
 }
 
-export function initCloudAuthUI(ctx) {
+export function initCloudAuthUI(ctx: AppContext) {
   ({ setStatus, updateSaveStatus, gallery } = ctx);
 
   // 云 icon popup（anchorPopupToBtn 在 app；toggle 其它 popup 也在 app 的 handler 里——
@@ -59,7 +62,7 @@ export function initCloudAuthUI(ctx) {
   els.cloudSignInBtn.addEventListener("click", async () => {
     els.cloudAccountPopup.classList.add("hidden");
     if (!isAuthConfigured()) { setStatus("尚未配置 OneDrive 客户端"); return; }
-    try { await signIn(); setLastSessionSignedIn(true); } catch (e: any) { setStatus("登录失败：" + (e && e.message || e)); }
+    try { await signIn(); setLastSessionSignedIn(true); } catch (e) { setStatus("登录失败：" + String((e as Error)?.message || e)); }
   });
   els.cloudSignOutBtn.addEventListener("click", async () => {
     els.cloudAccountPopup.classList.add("hidden");

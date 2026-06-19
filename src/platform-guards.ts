@@ -7,17 +7,20 @@
 //   - gesturestart/gesturechange 拦截：iOS Safari 多点缩放专属事件。
 // 文本输入元素（INPUT/TEXTAREA/contenteditable）一律放行，不拦。
 
-let input: any;
+import type { AppContext } from "./app-context.ts";
 
-function isTextEditableTarget(t: any) {
-  if (!t) return false;
-  const tag = t.tagName;
+let input: AppContext["input"];
+
+function isTextEditableTarget(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA") return true;
-  if (t.isContentEditable) return true;
+  if (el.isContentEditable) return true;
   return false;
 }
 
-export function initPlatformGuards(ctx: any) {
+export function initPlatformGuards(ctx: AppContext) {
   input = ctx.input;
 
   // pointer 自愈兜底：window 级 cancel / app 隐藏 / 窗口失焦 都 cancelAllPointers。
@@ -53,7 +56,7 @@ export function initPlatformGuards(ctx: any) {
   document.addEventListener("selectionchange", () => {
     const sel = document.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-    let n: any = sel.anchorNode;
+    let n: Node | null = sel.anchorNode;
     if (n && n.nodeType === Node.TEXT_NODE) n = n.parentElement;
     for (let el = n; el; el = el.parentElement) {
       if (isTextEditableTarget(el)) return;   // 输入框内的选择放行（改名/搜索要选词粘贴）

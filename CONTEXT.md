@@ -21,6 +21,10 @@ _Avoid_: viewport, view, renderer
 pointer/wheel/键盘 → 行为。屏幕坐标转 doc 坐标，驱动各引擎。
 _Avoid_: controller, handler
 
+**AppContext（组合根装配上下文）**:
+[[PaintDoc]]/[[Board]]/[[Input / InputController]]/EditMode/history/rack… 这些核心单例 + 跨模块函数，由组合根（`app.js`）一次构造、即刻冻结成一个显式 `ctx`，传给每个深模块的 `initX(ctx)` 接线。是 app 层布线的**单一类型契约**（`src/app-context.ts` 的 `AppContext` interface）——取代肢解期那套 `let doc:any …; initX(ctx)` 各抄一份的散落约定。改 ctx 形状 → 编译器即点出受影响模块。
+_Avoid_: rt（旧全局占位）, DI container / service locator（这只是显式参数对象，不是框架）, god-object
+
 **Engine**:
 把一笔落到 layer 像素上的东西（BrushEngine / LiquifyEngine / FilterBrushEngine / ShapesEngine / LassoEngine）。统一节律 begin/extend/end/cancel。
 _Avoid_: tool (tool 是 UI 层的工具选择), brush (brush 专指圆笔引擎)

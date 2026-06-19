@@ -1,6 +1,6 @@
 // 职责（单一）：全屏 busy 遮罩 + withBusy 长操作包装——纯 DOM，无 app-state 依赖。
 // 全屏 block overlay：拉云端时显示 spinner + 文字，防误操作
-export function showFullscreenBusy(msg) {
+export function showFullscreenBusy(msg?: string): void {
   let el = document.getElementById("fullscreenBusy");
   if (!el) {
     el = document.createElement("div");
@@ -9,7 +9,8 @@ export function showFullscreenBusy(msg) {
     el.innerHTML = '<div class="fullscreen-busy-spinner"></div><div class="fullscreen-busy-msg"></div>';
     document.body.appendChild(el);
   }
-  el.querySelector(".fullscreen-busy-msg").textContent = msg || "处理中…";
+  const m = el.querySelector(".fullscreen-busy-msg");
+  if (m) m.textContent = msg || "处理中…";
   el.classList.remove("hidden");
 }
 export function hideFullscreenBusy() {
@@ -29,7 +30,7 @@ export function isBusyActive() {
   const el = document.getElementById("fullscreenBusy");
   return !!el && !el.classList.contains("hidden");
 }
-export async function withBusy(label, fn) {
+export async function withBusy<T>(label: string, fn: () => Promise<T> | T): Promise<T> {
   _busyDepth++;
   showFullscreenBusy(label);
   try { return await fn(); }
