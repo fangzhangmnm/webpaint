@@ -3,7 +3,7 @@
 // 这里只压**clip 基底解析**（survey 标记的「最大语义地雷」）：同级最近非clip可见有内容层、
 // 链共基底、基底隐藏/无基底 → null、组可作基底。
 import { describe, it, assert } from "./runner.mjs";
-import { computeClipBaseForNodes } from "../src/layer-composite.js";
+import { computeClipBaseForNodes, compositeLayers } from "../src/layer-composite.js";
 
 // 假节点：叶 = {clippingMask, visible, bboxW, bboxH}；组 = {isGroup:true, clippingMask, visible}
 const leaf = (o = {}) => ({ clippingMask: false, visible: true, bboxW: 10, bboxH: 10, isGroup: false, ...o });
@@ -66,5 +66,51 @@ describe("layer-composite · computeClipBaseForNodes", () => {
     const b0 = leaf(), c0 = leaf({ clippingMask: true }), b1 = leaf(), c1 = leaf({ clippingMask: true });
     const out = computeClipBaseForNodes([b0, c0, b1, c1]);
     assert(out[1] === b0 && out[3] === b1, "c0→b0, c1→b1");
+  });
+});
+
+// Slice 2：floatFor 接缝 = 浮层骑在源层 z（note #2）。DOM-shim drawImage 是 no-op，
+//   故用**记录 ctx** 验 drawImage **顺序**（不验像素）：浮层画在源层之后、上方层之前。
+describe("layer-composite · floatFor z-order 接缝", () => {
+  // 记录每次 drawImage 的第一个参数的 __tag（画布身份），按调用顺序。
+  const recCtx = () => {
+    const order = [];
+    return {
+      order,
+      globalAlpha: 1, globalCompositeOperation: "source-over",
+      save() {}, restore() {}, setTransform() {}, clearRect() {},
+      drawImage(img) { order.push(img && img.__tag ? img.__tag : "?"); },
+    };
+  };
+  // 叶节点：带 __tag 画布；非 clip、可见、有内容。
+  const pxLeaf = (tag, o = {}) => ({
+    clippingMask: false, visible: true, isGroup: false,
+    bboxX: 0, bboxY: 0, bboxW: 10, bboxH: 10, opacity: 1, mode: "source-over",
+    canvas: { __tag: tag }, ...o,
+  });
+
+  it("浮层画在源层之后、上方层之前（A,B,float,C）", () => {
+    const A = pxLeaf("A"), B = pxLeaf("B"), C = pxLeaf("C");   // 底→顶
+    const floatRender = { canvas: { __tag: "float" }, dstX: 0, dstY: 0 };
+    const ctx = recCtx();
+    compositeLayers(ctx, [A, B, C], { floatFor: (n) => (n === B ? floatRender : null) });
+    assert(ctx.order.join(",") === "A,B,float,C",
+      `期望 A,B,float,C 实得 ${ctx.order.join(",")}`);
+  });
+
+  it("无 floatFor → 不画浮层（A,B,C）", () => {
+    const A = pxLeaf("A"), B = pxLeaf("B"), C = pxLeaf("C");
+    const ctx = recCtx();
+    compositeLayers(ctx, [A, B, C], {});
+    assert(ctx.order.join(",") === "A,B,C", `期望 A,B,C 实得 ${ctx.order.join(",")}`);
+  });
+
+  it("源层被浮层挖空（空 bbox）仍画浮层", () => {
+    const A = pxLeaf("A");
+    const empty = pxLeaf("B", { bboxW: 0, bboxH: 0 });          // 浮层把源层挖空
+    const floatRender = { canvas: { __tag: "float" }, dstX: 0, dstY: 0 };
+    const ctx = recCtx();
+    compositeLayers(ctx, [A, empty], { floatFor: (n) => (n === empty ? floatRender : null) });
+    assert(ctx.order.join(",") === "A,float", `期望 A,float 实得 ${ctx.order.join(",")}`);
   });
 });

@@ -12,6 +12,7 @@ import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
 import { Selection } from "./selection.js";
 import { compressPixelSnap } from "./pixel-edit.js";
+import { requireEditableLeaf } from "./editable-leaf.js";
 import { fillResampleSelect } from "./resample.js";
 
 let editMode: any, state: any, doc: any, board: any, input: any, history: any,
@@ -345,7 +346,7 @@ export function initToolbar(ctx) {
   });
   // 填色：选区内填当前颜色（push stroke-type entry，可 Ctrl+Z）
   (document.getElementById("lassoFillBtn") as any).addEventListener("click", () => {
-    const layer = doc.activeLayer;
+    const layer = requireEditableLeaf(doc, setStatus);
     if (!layer || !doc.selection) return;
     const before = layer.snapshot();
     doc.selection.fillOnLayer(layer, state.color);
@@ -359,7 +360,7 @@ export function initToolbar(ctx) {
   });
   // 清除：选区内 dst-out
   (document.getElementById("lassoClearBtn") as any).addEventListener("click", () => {
-    const layer = doc.activeLayer;
+    const layer = requireEditableLeaf(doc, setStatus);
     if (!layer || !doc.selection) return;
     const before = layer.snapshot();
     doc.selection.clearOnLayer(layer);
@@ -414,7 +415,7 @@ export function initToolbar(ctx) {
   // v120: 插值模式 dropdown（旧 3 个按钮 → 1 个 select）
   const lassoSampleSel = document.getElementById("lassoSampleSel") as any;
   // 变换采样 + 调整尺寸 两个 dropdown 都从 resample.js 的 RESAMPLE_MODES SSoT 填（以后加方法/AI 一处生效）
-  fillResampleSelect(lassoSampleSel, "warp", "bicubic");
+  fillResampleSelect(lassoSampleSel, "transform", "bicubic");
   fillResampleSelect(els.resampleMode, "scale", "bicubic");
   if (lassoSampleSel) {
     lassoSampleSel.addEventListener("change", () => {

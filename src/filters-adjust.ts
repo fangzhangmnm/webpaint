@@ -17,6 +17,7 @@ let setStatus: any, store: any, updateSaveStatus: any;
 let _bringPanelTop: any;
 let _suppressTransientPanels: any, _restoreTransientPanels: any;
 import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式 import）
+import { requireEditableLeaf } from "./editable-leaf.js";
 
 // ---- topbar：adjustments popup（液化 / 后续调色 etc）----
 // 单按钮 → 弹一列 menu-item（同 menuPanel 模式）。学 Procreate adjustments icon。
@@ -66,8 +67,8 @@ function _initFilterSurrogate(L) {
 function _openFilterPanel(filterId, opts = {}) {
   const Filter = getFilter(filterId);
   if (!Filter) { setStatus(`未知 filter：${filterId}`, true); return; }
-  const L = doc.activeLayer;
-  if (!L) { setStatus("没活动图层", true); return; }
+  const L = requireEditableLeaf(doc, setStatus);   // 组/隐藏 → 标准状态行 + 退出（取代旧的只查 !L）
+  if (!L) return;
   if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("活动图层是空的", true); return; }
   // v232 (user：「液化状态下调出色彩平衡，液化没自动关掉」)：filterBrush（液化/锐化模糊）是持久
   // 模式，enterTransient 只捕获 _returnTool、不收它的 toolbar → UI 留着但笔禁用，像坏了。

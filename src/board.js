@@ -1,5 +1,5 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
-import { drawMesh, renderQuadPerPixel } from "./lasso.js";
+import { renderSource } from "./floating-transform.js";
 import { compositeLayers } from "./layer-composite.js";
 import { makeBitmap } from "./bitmap.js";
 //
@@ -524,6 +524,10 @@ export class Board {
   //   - clipTmp / eraseTmp: board 的复用离屏池（grow-only，避免每帧分配）
   _layerCompositeOpts() {
     const overlay = this._overlayProvider?.();
+    // 自由变换浮层：渲染插在源层 z 位（compositeLayers 的 floatFor 接缝）。render 缓存到 f._renderCache，
+    //   mesh 变了 FloatingTransform 那边 invalidate。Slice 3 起 float 可有多 source → 按 node 匹配多次返回。
+    const lassoInfo = this._lassoProvider?.();
+    const float = (lassoInfo && lassoInfo.floating) ? lassoInfo.floating : null;
     return {
       source: (layer) =>
         (this._activeSurrogateLayerId === layer.id && this._activeSurrogateCanvas)
@@ -535,6 +539,15 @@ export class Board {
         }
         return lOverlay;
       },
+      floatFor: float ? (node) => {
+        // 多 source（组变换）：按 node 找它的 source；各 source 渲染缓存在自己身上（mesh 变了 FT invalidate）。
+        const src = float.sources.find((s) => s.layer === node);
+        if (!src) return null;
+        if (!src._renderCache) {
+          src._renderCache = renderSource(src, float.gizmoBbox, float.mesh, lassoInfo.sampleMode);
+        }
+        return src._renderCache;
+      } : undefined,
       clipTmp: (w, h) => this._getClipTmp(w, h),
       eraseTmp: (w, h) => this._getEraseComposite(w, h),
     };
@@ -547,7 +560,9 @@ export class Board {
   //   静态走 1:1 缓存（白边修）。
   _isLivePreview() {
     return !!(this._overlayProvider?.() || this._activeSurrogateCanvas
-      || (this._strokeActiveHint && this._strokeActiveHint()));
+      || (this._strokeActiveHint && this._strokeActiveHint())
+      // 活动浮层（自由变换）→ 走实时合成（浮层经 floatFor 插在源层 z；mesh 每帧变，不能用静态缓存）。
+      || this._lassoProvider?.()?.floating);
   }
   // 白边修：把全 doc 合成到 1:1 doc 像素离屏缓存（层间整数对齐，无亚像素缝），再单次缩放 blit。
   //   缓存只在内容脏时重建；pan/zoom（视口变、内容没变）→ 命中缓存只 re-blit（比旧逐层缩放更快）。
@@ -660,23 +675,10 @@ export class Board {
     }
     if (info.floating) {
       const f = info.floating;
-      const isWarp = f.mode === "warp";
       ctx.save();
-      // 1) 浮层像素
-      //   - 2×2 mesh：per-pixel inverse homography（math-exact，~50ms / 帧 in drag）
-      //     缓存到 f._renderCache；mesh 变了 lasso.js 那边 invalidate
-      //   - 4×4 mesh (warp)：暂走 Catmull-Rom + 三角化。下个 PR 替成 forward splat
-      if (f.meshN === 2) {
-        if (!f._renderCache) {
-          f._renderCache = renderQuadPerPixel(f.imageData, f.srcW, f.srcH, f.mesh, info.sampleMode);
-        }
-        if (f._renderCache) {
-          ctx.drawImage(f._renderCache.canvas, f._renderCache.dstX, f._renderCache.dstY);
-        }
-      } else {
-        drawMesh(ctx, f.canvas, f.srcW, f.srcH, f.mesh, { smooth: info.sampleMode !== "nearest" });
-      }
-      // 2) mesh 网格线 + 外框
+      // 浮层**像素**已移到规范合成器（compositeLayers 的 floatFor，插在源层 z；note #2）。
+      //   这里只画 gizmo chrome（框线 + handles）——工具 UI 永在所有层之上。
+      // 1) mesh 网格线 + 外框
       const N = f.meshN;
       // 外框（4 角连成的"包络"），所有模式都画一条主线
       ctx.lineWidth = Math.max(1, 1.5 / scale);
@@ -693,41 +695,14 @@ export class Board {
       ctx.strokeStyle = "rgba(255,255,255,0.7)";
       ctx.lineDashOffset = 5 / scale;
       ctx.stroke();
-      // warp 内部网格：低调（细 + 半透明 + 无 dash），不要抢戏
-      if (isWarp && f.mode !== null) {
-        ctx.setLineDash([]);
-        ctx.lineWidth = Math.max(0.5, 0.75 / scale);
-        ctx.strokeStyle = "rgba(128,128,128,0.35)";
-        ctx.beginPath();
-        for (let i = 1; i < N - 1; i++) {
-          ctx.moveTo(f.mesh[i][0].x, f.mesh[i][0].y);
-          for (let j = 1; j < N; j++) ctx.lineTo(f.mesh[i][j].x, f.mesh[i][j].y);
-        }
-        for (let j = 1; j < N - 1; j++) {
-          ctx.moveTo(f.mesh[0][j].x, f.mesh[0][j].y);
-          for (let i = 1; i < N; i++) ctx.lineTo(f.mesh[i][j].x, f.mesh[i][j].y);
-        }
-        ctx.stroke();
-      }
       ctx.restore();
-      // 3) handles 切屏幕坐标画。warp 用小填点（不画圈），其余画白圆+黑边
+      // 3) handles 切屏幕坐标画：白圆 + 黑边；rotate handle 带连接线
       if (info.handles && info.handles.length) {
         ctx.save();
         ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
         for (const h of info.handles) {
           const s = this.docToScreen(h.pos.x, h.pos.y);
-          if (h.kind === "warp-point") {
-            // 小填点 + 极细外圈，不抢眼
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, 3, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(0,0,0,0.6)";
-            ctx.fill();
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, 3, 0, Math.PI * 2);
-            ctx.strokeStyle = "rgba(255,255,255,0.8)";
-            ctx.lineWidth = 1;
-            ctx.stroke();
-          } else if (h.kind === "rotate") {
+          if (h.kind === "rotate") {
             // v117/118 rotate handle：白圆 + 黑边 + 从 anchor (top mid) 画一条连接线
             // v118: 删内部小弧 icon (user：「rotation handle 上面不需要那个小弧线 icon」)
             if (h.anchor) {

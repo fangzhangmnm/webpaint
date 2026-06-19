@@ -5,13 +5,13 @@
 // 收进这里：调用方只说"缩到这么大"，怎么缩干净是实现细节。PS 缩小推荐 Bicubic Sharper，我们用 step-halving + high smoothing 近似。
 
 // 重采样方法 SSoT。所有 dropdown（变换采样 / 调整尺寸 / 导入 sheet）从这拉，加新方法（以后 AI）只改这。
-// contexts：warp = 变换的逐像素采样（renderQuadPerPixel 支持）；scale = 轴对齐缩放（drawImage / smartResample）。
+// contexts：transform = 自由变换的逐像素采样（renderQuadPerPixel 支持）；scale = 轴对齐缩放（drawImage / smartResample）。
 // 以后 AI 放大多半只属于 scale（神经网络整图，非逐像素 kernel）→ contexts: ["scale"]。
 export const RESAMPLE_MODES = [
-  { id: "bicubic",  label: "双三次（高质量）",     contexts: ["warp", "scale"] },
+  { id: "bicubic",  label: "双三次（高质量）",     contexts: ["transform", "scale"] },
   { id: "sharper",  label: "缩小优化（清晰）",     contexts: ["scale"] },         // step-halving，= PS Bicubic Sharper（适合缩小）；放大退回 bicubic
-  { id: "bilinear", label: "双线性（软）",         contexts: ["warp", "scale"] },
-  { id: "nearest",  label: "最近邻（像素画）",     contexts: ["warp", "scale"] },
+  { id: "bilinear", label: "双线性（软）",         contexts: ["transform", "scale"] },
+  { id: "nearest",  label: "最近邻（像素画）",     contexts: ["transform", "scale"] },
   // 以后：{ id: "ai", label: "AI 放大", contexts: ["scale"] }
 ];
 

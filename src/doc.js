@@ -287,6 +287,16 @@ export class PaintDoc {
   get activeLayer() {
     return findNodeById(this.layers, this.activeId) || null;
   }
+  // 「能否在当前 active 写像素」单谓词（CONTEXT「requireEditableLeaf」）。所有写/读单叶像素的命令穿它。
+  //   返回 {leaf, reason}：reason = null(可写) | "none"(无 active) | "group"(组=硬拒) | "hidden"(隐藏叶=软拒)。
+  //   allowHidden=true 放行隐藏叶。变换 / Ctrl+D 不走此谓词（组合法，本就是浮层变换的目的）。
+  activeEditableLeaf({ allowHidden = false } = {}) {
+    const a = this.activeLayer;
+    if (!a) return { leaf: null, reason: "none" };
+    if (a.isGroup) return { leaf: null, reason: "group" };
+    if (!a.visible && !allowHidden) return { leaf: null, reason: "hidden" };
+    return { leaf: a, reason: null };
+  }
   // 兼容垫片：扁平**叶序** index ↔ activeId。旧 consumer（panel 高亮 / session-state 持久化 /
   //   undo 结构 entry）无组时照常用 index；树化后逐个迁到 id。
   get activeIndex() {

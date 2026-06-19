@@ -66,6 +66,9 @@ function nodeContentBbox(node) {
 // 合成一个层级的兄弟节点到 ctx（ctx 在 doc 坐标）。opts:
 //   source(layer)    -> 用于该叶的源 canvas（board: surrogate 替换；默认 layer.canvas）
 //   overlayFor(layer)-> 该叶的 live overlay（board 实时笔；已做过 selection/lockAlpha 裁剪）或 null
+//   floatFor(node)   -> 该节点的自由变换浮层 render（{canvas,dstX,dstY}）或 null。画在**该节点之上、同级 z 位**
+//                       （= 浮层骑在源层 z，不再盖所有层；note #2）。source-over/alpha1（同旧浮层外观，
+//                       忽略源层 opacity/mode；commit 后才入层取层的 opacity/mode）。Slice 3 起可对多节点返回。
 //   clipTmp(w,h)     -> 复用的剪裁离屏（board 有池；默认新建）
 //   eraseTmp(w,h)    -> 复用的 erase/混合离屏（默认新建）
 export function compositeLayers(ctx, nodes, opts = {}) {
@@ -85,8 +88,10 @@ export function compositeLayers(ctx, nodes, opts = {}) {
 
     // 叶
     const overlay = opts.overlayFor ? opts.overlayFor(node) : null;
-    // 空层（bbox=0）且无 overlay → 没东西画（overlay 是 doc 坐标，不依赖 layer bbox，故空层也要画 overlay）
-    if ((node.bboxW <= 0 || node.bboxH <= 0) && !overlay) continue;
+    const float = opts.floatFor ? opts.floatFor(node) : null;
+    // 空层（bbox=0）且无 overlay/浮层 → 没东西画（overlay/float 是 doc 坐标，不依赖 layer bbox；
+    //   浮层把源层挖空成空层时仍要画浮层）。
+    if ((node.bboxW <= 0 || node.bboxH <= 0) && !overlay && !float) continue;
 
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
@@ -96,6 +101,11 @@ export function compositeLayers(ctx, nodes, opts = {}) {
     else _drawLayerWithOverlay(ctx, node, overlay, opts);
     ctx.globalAlpha = prevA;
     ctx.globalCompositeOperation = prevC;
+    // 浮层（自由变换瞬态）：在源层 z 位、prevA/prevC 还原后画（source-over/源层外的 base 合成）。
+    //   → 骑在源层之上、被更上方的层正常覆盖（note #2 修「浮层盖在所有层之上」）。
+    if (float && float.canvas) {
+      ctx.drawImage(float.canvas, float.dstX, float.dstY);
+    }
   }
 }
 

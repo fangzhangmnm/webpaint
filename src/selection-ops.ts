@@ -9,6 +9,7 @@ import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.js"
 import { Selection } from "./selection.js";
 import { countLeaves } from "./doc.js";
 import { compressPixelSnap } from "./pixel-edit.js";
+import { requireEditableLeaf } from "./editable-leaf.js";
 import { updateLassoToolbar } from "./toolbar.ts";
 
 // app 单例 / 跨模块函数（initSelectionOps 注入）
@@ -105,8 +106,8 @@ export function initSelectionOps(ctx) {
 
   // Ctrl+C：当前层 ∩ 选区（无选区 → 整层）→ 系统剪贴板 PNG
   window.addEventListener("wp:copy", async () => {
-    const layer = doc.activeLayer;
-    if (!layer) { setStatus("没有活动图层", true); return; }
+    const layer = requireEditableLeaf(doc, setStatus);   // 组 → 标准状态行（组 composite 复制是后话，先拒）
+    if (!layer) return;
     let canvas;
     if (doc.selection) {
       canvas = _extractSelectionRegionCanvas(layer, doc.selection);

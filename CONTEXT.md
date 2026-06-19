@@ -38,6 +38,22 @@ _Avoid_: pause / stop（泛词）, hover
 _Avoid_: mask (mask 是 Selection 的实现细节), marquee, selection state
 **已完成的整合·别再提议搬**：compose/invert/outline/applyMaskPostStroke/fill/clear/crop 等 mask 代数**早已全在 selection.js**（见 `lasso.js:30` 注释）；lasso.js 只**构造** Selection（freehand/rect/ellipse/magic）并 `Selection.compose` 委托，不重复实现代数。lasso.js 大（63KB）是因为浮动 gizmo 的透视/单应矩阵数学（`invertMat3`=3×3 矩阵求逆，≠ 选区反选）+ 选区构造，不是冗余代数。历轮 AI（含 fresh explorer）反复幻觉「lasso 该把 mask 操作收回 selection」——那是 2026-05 就做完的事，勘探到此即可停。
 
+**浮层变换（Float / FloatingTransform）**:
+选区像素被「抬起 → 自由变换（移动/缩放/旋转/透视）→ 落回」的瞬态。**深模块 `src/floating-transform.js`（v291 落地 Slice 0-4，node 测 388 过、未真机；从 lasso.js 抽出——lasso 1077→370 行，只产 Selection + 经 facade 驱动 Float）**。
+- **复数 source**：active 是单叶 → 1 个 source（= 今日行为）；active 是**组** → 组内**所有叶子和子树（含隐藏）各一个 source**（语义 = 整组一起动；图层无多选，**组是唯一多层语义**）。
+- **一个 gizmo / 一个 transform** 驱动全部 source。gizmo 包围盒 = 调**规范合成器**画**组的可见 composite** 再 trim-to-content（隐藏叶**不参与定框**，但**参与变换** = 随组移动、落回各自层）。每个 source = `{layer, canvas, srcRect, preSnap}`，commit **各自写回自己的 layer**（一条**多层 undo entry** `[{layerId,before,after}]`）。
+- **渲染接缝**：合成器新增 `floatFor(node)`（与 [[Board]] 注入的 `overlayFor` 平级），把浮层像素插在**源层 z 位**（修「浮层盖在所有层之上」的旧 board overlay 行为）；gizmo 框线/handles **仍是 board overlay**（工具 UI 永在最上）。2×2 homography（`renderQuadPerPixel`/`invertMat3`）**不变**——多 source 时每 source 各自的 dest quad = 同一 H 作用到该 source 的 srcRect 四角；只改「在哪合成、有几份」。
+- **变形模式 = 深模块 adapter**（[[TransformMode]]）：free/uniform/distort/(warp) 各自一个 adapter 满足共同 `TransformMode` 接口（handles / 约束 drag / meshN），Float 持当前 adapter。**warp 当前实现是错数学屎山，2026-06-19 删除**；以后用正确数学重加（届时也支持组）。v1 只 free/uniform/distort（均 2×2 单 homography）。
+_Avoid_: 单层 float（旧 premise，已被复数 source 取代）, 把浮层画在所有层之上（旧 board overlay 行为）, 旧 4×4 warp / drawMesh / Catmull-Rom 升采样（已删的错数学）
+
+**TransformMode（变形模式）**:
+[[浮层变换（Float / FloatingTransform）]] 的变形约束策略，深模块 adapter（Strategy）。接口 = `handles(mesh)`（露哪些把手）+ `applyHandleDrag(mesh, handleId, dx, dy) → newMesh`（约束数学，**纯函数·node 可测**）+ `meshN`。free=平行四边形仿射 TRS、uniform=锁长宽比、distort=自由四边形/透视；warp=逐点（待重加）。Float 只持「当前 adapter + mesh + sources」，约束逻辑下沉各 adapter。
+_Avoid_: mode 字符串大 switch（旧 drag handler 的分支地狱）
+
+**requireEditableLeaf（可写叶谓词）**:
+「能否在当前 active 节点写像素」的**唯一**判定（`doc` 上）。`requireEditableLeaf({allowHidden}) → leaf | null(+标准状态行)`：active 是组 → 硬拒「请选择一个图层」；active 隐藏叶 → 默认软拒「图层已隐藏」（`allowHidden` 放行）。**所有写/读单叶像素的命令穿它一处**（填充/清除/调整/滤镜/拷贝/魔术棒/吸色 raw/nudge…），取代散在 input.js:402、selection-ops.ts:44、filters 漏查的 ad-hoc `isGroup`/`!visible`。例外 = 变换/Ctrl+D（组合法，深化目的）+ doc 级命令（裁剪/合并）。EditMode CAPS 精神往「目标轴」延伸。
+_Avoid_: 各命令各抄一句 isGroup/!visible（面条 + 漂移源）
+
 **Snapshot**:
 某一刻 layer 像素的拷贝 `{ bboxX/Y/W/H, imageData }`，空层 imageData=null。undo 的原子。
 _Avoid_: backup, capture

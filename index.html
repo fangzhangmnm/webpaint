@@ -432,7 +432,6 @@
           <button class="lasso-tool-btn" data-lasso-mode="free" type="button" title="自由变换">自由</button>
           <button class="lasso-tool-btn" data-lasso-mode="uniform" type="button" title="等比缩放">等比</button>
           <button class="lasso-tool-btn" data-lasso-mode="distort" type="button" title="透视变换">透视</button>
-          <button class="lasso-tool-btn hidden" data-lasso-mode="warp" type="button" title="变形">变形</button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <!-- v120: 3 个按钮意义不明，改 dropdown；nearest 改成「像素画」直说语义 -->
           <!-- 选项由 JS 从 resample.js RESAMPLE_MODES (SSoT) 填，见 fillResampleSelect -->
@@ -991,6 +990,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-ecb467fa2234.mjs"></script>
+    <script type="module" src="./dist/webpaint-989ecc90304d.mjs"></script>
   </body>
 </html>

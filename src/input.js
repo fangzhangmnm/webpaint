@@ -240,22 +240,23 @@ export class InputController {
     if (this.history) {
       // 套索 transform commit 是 raster snap：lift + transform + commit 整体作为单步 undo
       // v119: commit 时清了 selection，undo 时把它恢复回来
+      // 多层 entry：e.layers = [{layerId, before, after, beforeBlob, afterBlob}]（组变换 = 多层；单层 = 1 项）。
       this.history.registerHandler("lasso", {
         undo: (e) => {
-          applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board);
+          for (const L of e.layers) applyPixelSnap(this.doc, L.layerId, L.before, L.beforeBlob, this.board);
           if (e.prevSelection !== undefined) {
             this.doc.selection = e.prevSelection;
             this.board.invalidateAll();
           }
         },
         redo: (e) => {
-          applyPixelSnap(this.doc, e.layerId, e.after, e.afterBlob, this.board);
+          for (const L of e.layers) applyPixelSnap(this.doc, L.layerId, L.after, L.afterBlob, this.board);
           if (e.prevSelection !== undefined) {
             this.doc.selection = null;       // redo 后再清
             this.board.invalidateAll();
           }
         },
-        refsLayer: (e, id) => e.layerId === id,
+        refsLayer: (e, id) => e.layers.some((L) => L.layerId === id),
       });
       // 选区变化（lasso 圈 / 取消选区 / 反选 等）也进 undo，但不动像素
       this.history.registerHandler("selectionChange", {
@@ -397,28 +398,23 @@ export class InputController {
       return;
     }
 
-    // batch 2 图层组：active 是组 → 不可画（组无像素 canvas）。与 hidden 同处理：touch 降级 hold
-    //   保留多指手势（undo/redo），单指真作画时才弹；mouse/pen 即拒。
-    if (_isDrawRole && this.doc.activeLayer && this.doc.activeLayer.isGroup) {
-      if (e.pointerType === "touch") { rec.role = "hold"; rec._deferGroupWarn = true; return; }
-      this.status("当前选中的是图层组，请选择一个图层再绘制");
-      rec.role = null;
-      this.pointers.delete(e.pointerId);
-      return;
-    }
-
-    // v125 (user：「在隐藏图层上动笔会 reject 并警告」)
-    // 画 / 擦 / 液化 都改 activeLayer 像素；hidden 时一律拒绝
-    if (_isDrawRole
-        && this.doc.activeLayer && !this.doc.activeLayer.visible) {
-      // touch：别在 down 立刻弹警告+删 pointer——那会拦掉双指 undo / 三指 redo（第一指被删→手势凑不起来），
-      //   且每根手指各弹一次。改：降级成 hold 保留 pointer（可升级成手势），把"图层已隐藏"警告推迟到
-      //   确实单指移动作画时（_move 里 hold 分支）才弹。mouse/pen 无多指手势 → 维持 down 即拒+警告。
-      if (e.pointerType === "touch") { rec.role = "hold"; rec._deferHiddenWarn = true; return; }
-      this.status("当前图层已隐藏，无法绘制");
-      rec.role = null;
-      this.pointers.delete(e.pointerId);
-      return;
+    // 像素描边前的「可写叶」判定：单谓词 doc.activeEditableLeaf（CONTEXT「requireEditableLeaf」）。
+    //   组 = 硬拒（组无像素 canvas）；隐藏叶 = 软拒（v125）。touch 降级 hold + defer 警告（不拦多指
+    //   undo/redo 手势——第一指被删则手势凑不起来），单指真作画时（_move hold 分支）才弹；mouse/pen 即拒。
+    if (_isDrawRole) {
+      const { reason } = this.doc.activeEditableLeaf();
+      if (reason === "group" || reason === "hidden") {
+        const msg = reason === "group" ? "当前选中的是图层组，请选择一个图层再绘制" : "当前图层已隐藏，无法绘制";
+        if (e.pointerType === "touch") {
+          rec.role = "hold";
+          if (reason === "group") rec._deferGroupWarn = true; else rec._deferHiddenWarn = true;
+          return;
+        }
+        this.status(msg);
+        rec.role = null;
+        this.pointers.delete(e.pointerId);
+        return;
+      }
     }
 
     if (isPixelStroke(role)) {
@@ -858,8 +854,11 @@ export class InputController {
     if (!entry) return;
     if (this.history) this.history.push(entry);
     this.board.invalidateAll();
-    compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
+    // 各层 before/after 懒压缩成 blob（多层 entry：组变换 = 多层）。
+    for (const L of entry.layers) {
+      compressPixelSnap(L.before, (blob) => { L.beforeBlob = blob; });
+      compressPixelSnap(L.after,  (blob) => { L.afterBlob  = blob; });
+    }
   }
   _abortLasso() {
     // floating（变换中）→ 还原 pre-snapshot
