@@ -25,12 +25,17 @@ import {
 import { lockSyncGate, settleSyncGate } from "./sheets.ts";
 import { decodeOraToDoc } from "./ora.js";
 import { els } from "./els.ts";
+import type { AppContext } from "./app-context.ts";
+
+// 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
+const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initCloudFreshness(ctx) 注入）----
-let board: any, withBusy: any, setStatus: any, updateSaveStatus: any;
+let board: AppContext["board"], withBusy: AppContext["withBusy"];
+let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"];
 
 // 主流程：openSession 后调一次
-async function gateCloudSyncOnOpen(sessionName) {
+async function gateCloudSyncOnOpen(sessionName: string) {
   // 未登录过 / 没开 OneDrive 配置 → 不卡
   if (!isAuthConfigured() || !getLastSessionSignedIn()) return;
 
@@ -69,7 +74,7 @@ async function gateCloudSyncOnOpen(sessionName) {
     });
     if (choice === "signin") {
       try { await signIn(); setStatus("已登录"); }
-      catch (e) { setStatus("登录失败：" + (e.message || e), true); return; }
+      catch (e) { setStatus("登录失败：" + errMsg(e), true); return; }
       // 登录成功 → 重入流程
       return gateCloudSyncOnOpen(sessionName);
     }
@@ -82,12 +87,12 @@ async function gateCloudSyncOnOpen(sessionName) {
 
 // 拉 etag 比对 + 冲突决断 —— 整套（备份先于覆盖 / keep-pull-branch）已收进 store.flow.open。
 // 这里只剩 UI：spinner 锁屏 + 「跳过到离线」probe + 弹「拉/留/分支」+ 状态提示。
-async function checkCloudETag(sessionName) {
+async function checkCloudETag(sessionName: string) {
   if (!sessionName) return;
   // spinner 锁屏；点「跳过到离线」→ resolve probe（flow.open 内部 race 到 skip）。
   // 注意：settleSyncGate(null)（fetch 赢 / onNewer 弹窗时）也会 resolve 这个 promise，值是 null——
   //       只有 value.kind==="skip"（用户真点了按钮）才算跳过，避免误判。
-  let onSkip;
+  let onSkip!: (value?: unknown) => void;
   const probe = new Promise((res) => { onSkip = res; });
   let skipped = false;
   lockSyncGate({
@@ -211,10 +216,10 @@ async function showIdleLockIfStale() {
   await maybeFastForwardActive({ manual: true });   // explicit：查云 + 干净则快进（withBusy 锁着拉，拉完才放手）
 }
 
-function formatCloudTime(iso) {
+function formatCloudTime(iso: string | number) {
   if (!iso) return "?";
-  const t = Date.parse(iso);
-  if (!t) return iso;
+  const t = Date.parse(String(iso));
+  if (!t) return String(iso);
   const d = new Date(t);
   return `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
@@ -235,7 +240,7 @@ export {
 // ADR-0017（修订）前台新鲜度 —— **不静默 FF**，超时 explicit 锁屏：
 //   · 活动监听：动笔/操作重置闲置计时（pointerdown/keydown 全局 capture）。
 //   · idle 检查 tick：前台时每 30s 看闲够没 → 锁屏（像 iPad 闲置熄屏；suspend 时 timer 冻结，回前台靠 visibility 现算）。
-export function initCloudFreshness(ctx) {
+export function initCloudFreshness(ctx: AppContext) {
   board = ctx.board;
   withBusy = ctx.withBusy;
   setStatus = ctx.setStatus;

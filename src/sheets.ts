@@ -104,11 +104,13 @@ export function openConfirmSheet(title: string, message: string): Promise<boolea
 }
 
 // ---- Sync gate（锁屏覆盖 + 动作按钮）：纯 DOM 原语。决策编排在 app。----
-interface SyncGateAction { label: string; value: string; primary?: boolean; }
-interface SyncGateOpts { title: string; message: string; showSpinner?: boolean; actions: SyncGateAction[]; }
+// 动作 value 多态：多数是选择字符串（store onConflict / 文件夹名），cloud-freshness 用 { kind:"skip" } 哨兵。
+// → lockSyncGate<T>；外部 settleSyncGate 可用任意值兜底关闭（pending resolve 因此擦成 unknown）。
+interface SyncGateAction<T = string> { label: string; value: T; primary?: boolean; }
+interface SyncGateOpts<T = string> { title: string; message: string; showSpinner?: boolean; actions: SyncGateAction<T>[]; }
 const syncGate: {
   backdrop: HTMLElement; sheet: HTMLElement; title: HTMLElement; message: HTMLElement;
-  spinner: HTMLElement; actions: HTMLElement; _pendingResolve: ((value: string) => void) | null;
+  spinner: HTMLElement; actions: HTMLElement; _pendingResolve: ((value: unknown) => void) | null;
 } = {
   backdrop: $("syncGateBackdrop"),
   sheet: $("syncGateSheet"),
@@ -119,12 +121,12 @@ const syncGate: {
   _pendingResolve: null,
 };
 
-export function lockSyncGate({ title, message, showSpinner, actions }: SyncGateOpts): Promise<string> {
+export function lockSyncGate<T = string>({ title, message, showSpinner, actions }: SyncGateOpts<T>): Promise<T> {
   syncGate.title.textContent = title;
   syncGate.message.textContent = message;
   syncGate.spinner.classList.toggle("hidden", !showSpinner);
   syncGate.actions.innerHTML = "";
-  return new Promise((resolve) => {
+  return new Promise<T>((resolve) => {
     for (const a of actions) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -135,7 +137,7 @@ export function lockSyncGate({ title, message, showSpinner, actions }: SyncGateO
     }
     syncGate.backdrop.classList.remove("hidden");
     syncGate.sheet.classList.remove("hidden");
-    syncGate._pendingResolve = resolve;   // 让 fetch 完成时从外部 unlock 并返回
+    syncGate._pendingResolve = resolve as (value: unknown) => void;   // 让 fetch 完成时从外部 unlock 并返回
   });
 }
 export function unlockSyncGate() {
@@ -143,7 +145,7 @@ export function unlockSyncGate() {
   syncGate.sheet.classList.add("hidden");
   syncGate._pendingResolve = null;
 }
-export function settleSyncGate(value: string) {
+export function settleSyncGate(value: unknown) {
   if (syncGate._pendingResolve) {
     const r = syncGate._pendingResolve;
     unlockSyncGate();

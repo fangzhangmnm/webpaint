@@ -10,10 +10,11 @@ import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.js";
 import { ensureUnlocked } from "./enc-thumbs.js";
 import { decodeOraToDoc } from "./ora.js";
+import type { AppContext } from "./app-context.ts";
 
 // 笔架 boot：异步加载 IDB 缓存 → toolStates 缺失字段从 rack 补齐 → 应用当前 tool 的 state。
 // default-brushes.json 是 async fetch：回来后 retroactively merge 缺失默认笔。
-export function initRackBoot(ctx: any) {
+export function initRackBoot(ctx: AppContext) {
   const { rack, state, editMode, dialReactive, setStatus } = ctx;
   const backfillToolStates = () => {
     for (const t of Object.keys(state.toolStates)) {
@@ -36,7 +37,7 @@ export function initRackBoot(ctx: any) {
       rack.applyToolState(editMode.current());
       dialReactive.rackVersion++;
     });
-  }).catch((e: any) => {
+  }).catch((e: unknown) => {
     console.warn("[brush-rack] init failed:", e);
     rack.setRack(makeDefaultRack());
     rack.applyToolState(editMode.current());
@@ -49,7 +50,7 @@ export function initRackBoot(ctx: any) {
 //   1) 无上次 session 名 → 停 gallery
 //   2) 有 → load → 成功 adopt + 进画布；失败 → 停 gallery
 //   3) 失败保留 currentSessionName 不清（用户下次冷启动还能 retry）
-export async function bootRestoreSession(ctx: any) {
+export async function bootRestoreSession(ctx: AppContext) {
   const { store: _store, setGalleryOpen, updateSaveStatus, setStatus, gateCloudSyncOnOpen } = ctx;
   const wantedName = getCurrentSessionName();
   if (!wantedName) {
@@ -77,12 +78,12 @@ export async function bootRestoreSession(ctx: any) {
     const loaded = await decodeOraToDoc(r.blob);
     session.adopt(loaded, wantedName);
     setStatus(`已恢复：${wantedName} (${loaded.layers.length} 层)`);
-    gateCloudSyncOnOpen(wantedName).catch((e: any) => console.warn("[sync-gate]", e));
-  } catch (e: any) {
+    gateCloudSyncOnOpen(wantedName).catch((e: unknown) => console.warn("[sync-gate]", e));
+  } catch (e) {
     console.warn("[session] load failed:", e);
     session.setName(null);
     updateSaveStatus();
     await setGalleryOpen(true);
-    setStatus(`启动加载 "${wantedName}" 失败：${e && e.message || e}`, true);
+    setStatus(`启动加载 "${wantedName}" 失败：${String((e as Error)?.message || e)}`, true);
   }
 }

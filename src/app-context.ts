@@ -59,6 +59,14 @@ export interface RackHandle {
   findToolBrushPure(dial: ToolDial): { name?: string; size?: { max?: number } } | null;
   openBrushSettings(id: string): void;
   applyToolState(tool: string): void;
+  // boot 编排（initRackBoot）用到的：
+  load(): Promise<unknown>;
+  defaultToolStateFor(tool: string): Partial<ToolDial>;
+  checkCloud(): Promise<unknown>;
+  refreshCloudState(): void;
+  get(): unknown;
+  setRack(rack: unknown): void;
+  persist(): Promise<unknown>;
   [k: string]: unknown;
 }
 // 浮窗（side-windows.ts）：参考窗 / 调色板窗——方法集不同，分两个句柄。
@@ -107,7 +115,7 @@ export interface AppContext {
   rack: RackHandle;
 
   // 同步存储 / HUD
-  store: unknown;                                   // app-store.js 红线接缝，迁移前按 unknown（不假装类型）
+  store: typeof import("./app-store.js").store;     // app-store.js re-export store/** 的真 store（类型穿 .js 存活，batch 4 验证）
   setStatus: (text: string, persist?: boolean) => void;
   withBusy: <T>(label: string, fn: () => Promise<T> | T) => Promise<T>;
   leftDial: LeftDialHandle;

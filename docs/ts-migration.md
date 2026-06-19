@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v297 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v298 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -116,12 +116,30 @@ typecheck + 388 测试全绿、bundle 通过。
   在 `_encodeCurrentOra(): Promise<Blob>` 一处断言（candidate 3 给 ora.js 真类型时移除）。
 - **session-state/editor-state 无单测**（survey）：类型绿 + 行为 type-erased 是最强静态保证，但属真机测试批（「我只测一次」）。
 
+### ✅ batch 5 · cloud-freshness + boot 消费方（v298，2026-06-19）
+session-state 级联通后，两个 store-orchestration 红线消费方入门。typecheck + 388 测试全绿、bundle 通过。
+
+| 文件 | 做了什么 |
+|---|---|
+| `cloud-freshness.ts` | ctx 单例 → `AppContext[...]`；`gateCloudSyncOnOpen/checkCloudETag(sessionName: string)`；`formatCloudTime(iso: string\|number)`（`cloudTime` 是 union → `Date.parse(String(iso))`，行为等价）；`onSkip!` 定赋；`errMsg`。 |
+| `boot.ts` | `initX(ctx: AppContext)`；`catch (e)` + `errMsg`。`_store` 经升级后的 `ctx.store` 拿真类型。 |
+| `app-context.ts` | `store: unknown` → `typeof import("./app-store.js").store`（store 真类型，batch 4 已验证；帮所有用 `ctx.store` 的消费方）。`RackHandle` 补 boot 用的 `load/defaultToolStateFor/checkCloud/refreshCloudState/get/setRack/persist`。 |
+| `sheets.ts` | `lockSyncGate` 泛型化 `<T = string>`：多数 value 是选择字符串（满足 store onConflict 的 `Promise<string>`），但 cloud-freshness 用 `{kind:"skip"}` 哨兵——泛型让两者都成立。修正 batch 4 把 value 钉死 string 过窄。`settleSyncGate(value: unknown)`、`_pendingResolve` 擦成 `unknown`（外部 settle 兜底关闭）。 |
+
+**关键发现**：
+- **gate value 多态**：`lockSyncGate` 的 action value 不止字符串（cloud-freshness 传对象哨兵）。泛型 `<T=string>` 比钉死 string
+  更诚实——每个调用点 infer 自己的 T；外部 `settleSyncGate(null)` 兜底关闭走 `unknown` 擦除。
+- **红线消费方同样只做类型**：cloud-freshness/boot 也是 store-orchestration 红线；改动 type-erased 或行为等价
+  （`Date.parse(String(iso))` ≡ `Date.parse(iso)`，Date.parse 本就 ToString）。
+
 ## 待迁（按风险，勿盲目铺开）
 
-- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子层 + session-state/editor-state hub 已 gated（batch 3-4）。
-  现在 `cloud-freshness`/`topbar-menu`/`boot`/`import-image`/`gallery-shell` 的 session-state 级联已通，可按 **`.ts` 依赖闭包**
-  成簇 gate（剩余 ~14 个 `initX`）。`editor-state` 已把 `AppContext.state` 占位升级成真 `EditorRuntimeState`。
-  屎山（`toolbar.ts` 72 / `layers-panel.ts` 50 / `ui/gallery.ts` 38 / `import-image.ts` 26）内部按「诚实描述现状」类型化（北极星：少熵）。
+- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子 + hub + cloud-freshness/boot 已 gated（batch 3-5）。剩 ~12 个 `initX`。
+  **两个 keystone（closure 已 clean、gate 它们解锁最多下游）**：
+  - `toolbar.ts`(72 any) → 解锁 `selection-ops`/`filters-adjust`/`transient-panels`/`import-image`。最重，单独成批。
+  - `layers-panel.ts`(49 any) → 解锁 `layer-undo`。
+  其余（`settings-menu`/`doc-ops`/`side-windows`/`topbar-menu`/`smooth-dev-panel`/`export-import-menu`/`gallery-shell`）
+  的闭包仍含 toolbar/settings-menu/import-image，须先 gate keystone。屎山内部按「诚实描述现状」类型化（北极星：少熵）。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。
 - **手感红区**（`input.js` 1171 行未测 · `brush.js` · `stroke-smoother.js`）= 用户钉死区。
