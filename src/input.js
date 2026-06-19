@@ -26,7 +26,7 @@ import { LassoEngine } from "./lasso.js";
 import { FilterBrushEngine } from "./filter-brush.js";
 import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.js";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./pointer-gesture.js";
-import { assignRole } from "./pointer-route.js";
+import { assignRole, effectiveTool, toolToRole } from "./pointer-route.js";
 import { inputSmooth } from "./stroke-input-smooth.js";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.js";
 import { SMOOTH } from "./smooth-config.js";
@@ -401,7 +401,12 @@ export class InputController {
     // 像素描边前的「可写叶」判定：单谓词 doc.activeEditableLeaf（CONTEXT「requireEditableLeaf」）。
     //   组 = 硬拒（组无像素 canvas）；隐藏叶 = 软拒（v125）。touch 降级 hold + defer 警告（不拦多指
     //   undo/redo 手势——第一指被删则手势凑不起来），单指真作画时（_move hold 分支）才弹；mouse/pen 即拒。
-    if (_isDrawRole) {
+    // **绘画意图**判定用工具而非 role：touch 单指作画关时 brush/橡皮 down 的 role 被降级成 "hold"
+    //   （非 _isDrawRole），若只看 role 会漏判 → 落到下方长按吸色，组上画笔"跳成 eyedropper"（无反馈）。
+    //   故 hold 也按当前工具的本意（toolToRole）判：是绘画工具就一并拦，给和隐藏层一致的提示。
+    const _paintIntent = _isDrawRole
+      || (role === "hold" && isPixelStroke(toolToRole(effectiveTool(tool, this.altDown))));
+    if (_paintIntent) {
       const { reason } = this.doc.activeEditableLeaf();
       if (reason === "group" || reason === "hidden") {
         const msg = reason === "group" ? "当前选中的是图层组，请选择一个图层再绘制" : "当前图层已隐藏，无法绘制";
