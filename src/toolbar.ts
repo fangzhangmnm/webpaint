@@ -12,7 +12,7 @@ import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
 import { Selection } from "./selection.js";
 import { compressPixelSnap } from "./pixel-edit.js";
-import { requireEditableLeaf } from "./editable-leaf.js";
+import { requireEditableLeaf } from "./editable-leaf.ts";
 import { safeLSSet } from "./safe-ls.ts";
 import { fillResampleSelect } from "./resample.js";
 

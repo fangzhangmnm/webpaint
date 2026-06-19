@@ -18,7 +18,7 @@
 // 去向（文件下载 / 分享 / 剪贴板）是**正交的 sink**，不进 exporter——见 session.js
 // shareOrDownloadBlob / triggerDownload。exporter 只管「doc → 该格式的字节」。
 
-import { makeRegistry } from "./registry.js";
+import { makeRegistry } from "./registry.ts";
 import { encodeDocToOra } from "./ora.js";
 import { renderDocToImageBlob } from "./session.js";
 import { store as _store } from "./app-store.js";

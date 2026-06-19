@@ -7,7 +7,7 @@
 
 import { els } from "./els.ts";
 import { bumpDoc } from "./signals.ts";
-import { resizeCropRect, cropRectToInts } from "./crop-geometry.js";
+import { resizeCropRect, cropRectToInts } from "./crop-geometry.ts";
 
 // ctx 绑入：core 单例
 let editMode: any, doc: any, board: any, history: any, setStatus: any;

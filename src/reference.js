@@ -18,7 +18,7 @@
 
 // 参考窗用独立 viewport（image-origin 约定），但双指变换的三角与主画布同一套：
 // 共享 pinchScaleRot + solveAnchorTranslation（见 pointer-gesture.js / K3）。
-import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.js";
+import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.ts";
 import { raiseWindow } from "./surfaces.ts";
 
 const LS_POS = "webpaint.refPanel.pos";       // {left, top, width, height}

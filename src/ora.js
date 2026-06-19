@@ -25,7 +25,7 @@ import { compositeLayers } from "./layer-composite.js";
 import { smartResample } from "./resample.js";
 import { makeBitmap } from "./bitmap.js";
 // 纯树↔stack.xml 序列化（嵌套组 + id + active）抽到独立深模块（无 canvas 依赖，可纯 node 测）。
-import { buildStackXml, parseStackXml } from "./ora-stack-xml.js";
+import { buildStackXml, parseStackXml } from "./ora-stack-xml.ts";
 // 加密对本 codec **不可见**（v235 起）：encode 永远出明文 ora、decode 永远收明文 ora。
 // 包壳/解壳全在 store 深模块（flow.save/load/push/pull 自动处理；密码经 crypt seam）。
 // 拿到加密容器字节请先走 store.unseal / flow.load，别直接喂这里（会报「缺 stack.xml」）。

@@ -3,10 +3,17 @@
 // 过去内联在 app.js 的 renderGallery —— 「按 name 合并 local/cloud」「按当前文件夹切 immediate
 // 子夹 vs 直属文件」是真领域逻辑、跟 DOM 渲染无关，抽出可单测。
 
+// 本模块只读这些字段；local session / cloud file / trash 本体仍是未类型化 .js。
+export interface LocalSession { name: string; updatedAt?: number; }
+export interface CloudFile { path: string; name?: string; lastModifiedDateTime?: string; }
+export interface GalleryItem { name: string; local: LocalSession | null; cloud: CloudFile | null; deletedAt?: number; }
+export interface LocalTrash { originalName: string; deletedAt?: number; }
+export interface TrashItem { name: string; local: LocalTrash | null; cloud: CloudFile | null; deletedAt: number; }
+
 // 合并本地 session 列表 + 云端文件列表，按 name（云端去 .ora/.zip 后缀——.zip=加密容器）当 key。
 //   item = { name, local|null, cloud|null }（本模块保持零依赖纯函数，后缀剥离与 config.stripSessionExt 同步）
-export function mergeLocalCloud(local, cloud) {
-  const byName = new Map();
+export function mergeLocalCloud(local: LocalSession[], cloud: CloudFile[]): GalleryItem[] {
+  const byName = new Map<string, GalleryItem>();
   for (const l of local) byName.set(l.name, { name: l.name, local: l, cloud: null });
   for (const c of cloud) {
     const name = c.path.replace(/\.(ora|zip)$/i, "");
@@ -18,21 +25,21 @@ export function mergeLocalCloud(local, cloud) {
 }
 
 // item 的展示时间（本地 updatedAt 优先，否则云端 lastModifiedDateTime）。
-export function itemTime(it) {
-  return (it.local?.updatedAt) || Date.parse(it.cloud?.lastModifiedDateTime || 0);
+export function itemTime(it: GalleryItem): number {
+  return (it.local?.updatedAt) || Date.parse(String(it.cloud?.lastModifiedDateTime || 0));
 }
 
 // 回收站合并：本地 trash（{trashKey,originalName,deletedAt,thumb,size}）⊕ 云端 trash 文件，
 // 按 originalName 配对 → 统一 item { name, local|null, cloud|null, deletedAt }，新→旧。
 // 云端名要剥两层：.ora 后缀 + move-aside 撞名加的 ` [N]` 尾标。
-export function mergeTrash(localTrash, cloudTrash) {
-  const byName = new Map();
+export function mergeTrash(localTrash: LocalTrash[], cloudTrash: CloudFile[]): TrashItem[] {
+  const byName = new Map<string, TrashItem>();
   for (const t of localTrash) {
     byName.set(t.originalName, { name: t.originalName, local: t, cloud: null, deletedAt: t.deletedAt || 0 });
   }
   for (const c of cloudTrash) {
     const name = (c.name || c.path || "").replace(/\.(ora|zip)$/i, "").replace(/ \[\d+\]$/, "");
-    const dAt = Date.parse(c.lastModifiedDateTime || 0) || 0;
+    const dAt = Date.parse(String(c.lastModifiedDateTime || 0)) || 0;
     const ent = byName.get(name);
     if (ent) { ent.cloud = c; ent.deletedAt = Math.max(ent.deletedAt, dAt); }
     else byName.set(name, { name, local: null, cloud: c, deletedAt: dAt });
@@ -44,10 +51,10 @@ export function mergeTrash(localTrash, cloudTrash) {
 //   allItems = mergeLocalCloud 结果；cloudFolders = 云端真文件夹路径（含空夹）；folder = 当前路径（""=根）
 //   文件排序按 name 倒序（localeCompare，numeric）：新文档名是 yyyymmdd-xxxx，倒序 = 新日期在前，
 //   且稳定——不像旧的 updatedAt 排序那样，一存盘就把旧文件顶到最前（用户感知为「按上次访问」）。
-export function sliceFolder(allItems, cloudFolders, folder) {
+export function sliceFolder(allItems: GalleryItem[], cloudFolders: string[], folder: string): { folderNames: string[]; files: GalleryItem[] } {
   const prefix = folder ? `${folder}/` : "";
-  const folderSet = new Set();    // 当前层 immediate sub-folder name
-  const files = [];                // 当前层 direct child files
+  const folderSet = new Set<string>();    // 当前层 immediate sub-folder name
+  const files: GalleryItem[] = [];        // 当前层 direct child files
   for (const it of allItems) {
     if (folder && !it.name.startsWith(prefix)) continue;
     const rest = it.name.slice(prefix.length);
@@ -78,8 +85,12 @@ export function sliceFolder(allItems, cloudFolders, folder) {
 //   无 etag = 真本地文件（从没上传）→ 永不碰。
 // **硬护栏**：authoritative=false（云列表不权威：未登录/离线/list 失败/空列表）→ 返回全空，绝不收敛
 //   （否则一次网络抖动会把所有本地缓存误判成 cloud-gone 全量删）。决策纯、可穷举测；副作用留 app 接缝。
-export function classifyCloudGone(localNames, cloudNameSet, { hasEtag, isDirty, authoritative }) {
-  const drop = [], ghost = [];
+export function classifyCloudGone(
+  localNames: string[],
+  cloudNameSet: Set<string>,
+  { hasEtag, isDirty, authoritative }: { hasEtag: (name: string) => boolean; isDirty: (name: string) => boolean; authoritative: boolean },
+): { drop: string[]; ghost: string[] } {
+  const drop: string[] = [], ghost: string[] = [];
   if (!authoritative) return { drop, ghost };
   for (const name of localNames) {
     if (cloudNameSet.has(name)) continue;   // 云端还在 → 不是孤儿
@@ -94,11 +105,11 @@ export function classifyCloudGone(localNames, cloudNameSet, { hasEtag, isDirty, 
 //   sourceName = 源 item 的完整 name（含文件夹前缀，如 "插画/猫"）；taken(name) = 该全路径名是否已被占用
 //   （本地⊕云端的并集，调用方传入；同步谓词，无网络）。副本保持在源同一文件夹（path 前缀不变）。
 //   后缀策略：第一份不带数字（"猫 副本"），之后递增（"猫 副本2"、"猫 副本3"…）；护栏上限防 taken 恒 true 死循环。
-export function copyTargetName(sourceName, taken) {
+export function copyTargetName(sourceName: string, taken: (name: string) => boolean): string {
   const slash = sourceName.lastIndexOf("/");
   const folder = slash < 0 ? "" : sourceName.slice(0, slash);
   const base = slash < 0 ? sourceName : sourceName.slice(slash + 1);
-  const join = (stem) => (folder ? `${folder}/${stem}` : stem);
+  const join = (stem: string) => (folder ? `${folder}/${stem}` : stem);
   let candidate = join(`${base} 副本`);
   if (!taken(candidate)) return candidate;
   for (let i = 2; i < 1000; i++) {
@@ -109,7 +120,7 @@ export function copyTargetName(sourceName, taken) {
 }
 
 // 文件夹是否有内容（item 或子夹以它为 prefix）—— 非空时禁删，避免级联删整棵子树。
-export function folderHasContents(allItems, cloudFolders, folderPath) {
+export function folderHasContents(allItems: GalleryItem[], cloudFolders: string[], folderPath: string): boolean {
   const fullPrefix = `${folderPath}/`;
   return allItems.some((it) => it.name.startsWith(fullPrefix)) ||
     cloudFolders.some((f) => f.startsWith(fullPrefix));

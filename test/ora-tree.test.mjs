@@ -74,7 +74,7 @@ globalThis.DOMParser = FakeDOMParser;
 //   ora-stack-xml.js 无 canvas 依赖，本就不该碰 OSC，但 await 回合数本身是雷 → 收成 1 个。
 const [_docMod, _oraXmlMod] = await Promise.all([
   import("../src/doc.js"),
-  import("../src/ora-stack-xml.js"),
+  import("../src/ora-stack-xml.ts"),
 ]);
 const { PaintDoc } = _docMod;
 const { buildStackXml, parseStackXml } = _oraXmlMod;

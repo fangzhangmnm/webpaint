@@ -1,6 +1,6 @@
 // 指针路由决策验收（K3 live-dispatch 切片）。纯函数，过去内联在 _down 且 map 抄 3 份、零测。
 import { describe, it, eq } from "./runner.mjs";
-import { effectiveTool, toolToRole, assignRole } from "../src/pointer-route.js";
+import { effectiveTool, toolToRole, assignRole } from "../src/pointer-route.ts";
 
 describe("pointer-route · effectiveTool", () => {
   it("transform → lasso（抢画布路由走 gizmo）", () => eq(effectiveTool("transform", false), "lasso"));

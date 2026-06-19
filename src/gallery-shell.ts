@@ -22,7 +22,7 @@ import { listSessions, readImageFromClipboard } from "./session.js";
 import { listCloudSessionsRecursive, listCloudAll, isSignedIn } from "./app-store.js";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
-import { pathJoin } from "./gallery-path.js";
+import { pathJoin } from "./gallery-path.ts";
 import { stripSessionExt } from "./config.js";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.js";

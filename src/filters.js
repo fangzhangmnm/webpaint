@@ -32,7 +32,7 @@
 // 下载插件接口：[docs/backlog.md] AI 远程 / 本地 WASM 段落
 
 // registry 原语共享自 registry.js（candidate 2：filter 与 exporter 同一道接缝）。
-import { makeRegistry } from "./registry.js";
+import { makeRegistry } from "./registry.ts";
 const _reg = makeRegistry({ name: "filter" });
 
 export function registerFilter(FilterClass) {

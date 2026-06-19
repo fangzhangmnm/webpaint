@@ -17,17 +17,31 @@
 //
 // idKey 默认 "id"；支持 static getter（如 FilterClass.id 是 static 字段，传 "id" 即可）。
 
-export function makeRegistry({ name = "registry", idKey = "id" } = {}) {
-  const items = new Map();
-  const listeners = new Set();
+export interface RegistryOpts {
+  name?: string;
+  idKey?: string;
+}
 
-  function idOf(item) {
-    const raw = item == null ? undefined : item[idKey];
-    return typeof raw === "function" ? raw.call(item) : raw;
+export interface Registry<T> {
+  register(item: T): T;
+  get(id: unknown): T | null;
+  has(id: unknown): boolean;
+  list(): T[];
+  onRegistered(fn: (item: T) => void): () => void;
+}
+
+export function makeRegistry<T>({ name = "registry", idKey = "id" }: RegistryOpts = {}): Registry<T> {
+  const items = new Map<unknown, T>();
+  const listeners = new Set<(item: T) => void>();
+
+  function idOf(item: T): unknown {
+    const rec = item as unknown as Record<string, unknown>;
+    const raw = item == null ? undefined : rec[idKey];
+    return typeof raw === "function" ? (raw as () => unknown).call(item) : raw;
   }
 
   return {
-    register(item) {
+    register(item: T): T {
       const id = idOf(item);
       if (!id) throw new Error(`${name}: 注册项缺少 ${idKey}`);
       items.set(id, item);
@@ -36,10 +50,10 @@ export function makeRegistry({ name = "registry", idKey = "id" } = {}) {
       }
       return item;
     },
-    get(id) { return items.get(id) || null; },
-    has(id) { return items.has(id); },
-    list() { return [...items.values()]; },
-    onRegistered(fn) {
+    get(id: unknown): T | null { return items.get(id) || null; },
+    has(id: unknown): boolean { return items.has(id); },
+    list(): T[] { return [...items.values()]; },
+    onRegistered(fn: (item: T) => void): () => void {
       listeners.add(fn);
       return () => listeners.delete(fn);
     },

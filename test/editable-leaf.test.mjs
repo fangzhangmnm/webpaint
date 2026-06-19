@@ -1,7 +1,7 @@
 // requireEditableLeaf 单谓词（Slice 4）：「能否在当前 active 写像素」一处判定。
 // 纯逻辑，无 canvas。守的是所有像素命令穿同一判定（组硬拒 / 隐藏软拒 / 叶放行）。
 import { describe, it, assert } from "./runner.mjs";
-import { requireEditableLeaf } from "../src/editable-leaf.js";
+import { requireEditableLeaf } from "../src/editable-leaf.ts";
 
 // 假 doc：只实现 activeEditableLeaf 依赖的 activeLayer + 谓词本体（拷自 doc.js 逻辑以独立验包装层），
 //   但更稳的是直接用真 doc 的谓词。这里复用真逻辑：构造带 activeLayer 的极简 doc + 真 activeEditableLeaf。

@@ -4,7 +4,7 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 import {
   PIXEL_STROKE_SPECS, isPixelStroke, pixelStrokeSpec,
-} from "../src/engine-registry.js";
+} from "../src/engine-registry.ts";
 
 // 重构前散在 input.js 各处的字面成员集合（_down/_move/_up/_discardPointer/gesture-abort）。
 // 把它们当 oracle：新谓词必须对**所有可能 role**与旧字面表达式逐一相等（回归锁）。

@@ -4,14 +4,14 @@
 // 行为矩阵沿用 ScratchPad（见 input.js 顶部注释）；live 事件流 / pointers Map / 手势仍在 input.js。
 
 // 当前工具 → 有效工具：transform 抢画布路由走 gizmo（机械上 role=lasso）；alt+brush 临时取色。
-export function effectiveTool(tool, altDown) {
+export function effectiveTool(tool: string, altDown: boolean): string {
   if (tool === "transform") return "lasso";
   if (altDown && tool === "brush") return "picker";
   return tool;   // crop/adjust 等 fall-through，由 input 的 canDraw gate 兜
 }
 
 // 有效工具 → 引擎 role（mouse 左键 / pen 主笔 / touch 无 pen 时共用这张表）。
-export function toolToRole(et) {
+export function toolToRole(et: string): string {
   switch (et) {
     case "eraser": return "erase";
     case "picker": return "pick";
@@ -23,13 +23,24 @@ export function toolToRole(et) {
   }
 }
 
+export interface PointerDownInput {
+  tool: string;
+  pointerType: string;       // 'mouse' | 'pen' | 'touch'
+  button: number;
+  buttons: number;
+  spaceDown: boolean;
+  altDown: boolean;
+  penEverSeen: boolean;
+  singleFingerDraw: boolean;
+}
+
 // 完整 pointerdown 角色决策。输入位：
 //   tool, pointerType('mouse'|'pen'|'touch'), button, buttons, spaceDown, altDown, penEverSeen, singleFingerDraw
 // 顺序与设备语义沿用原 _down：hand/space=pan 优先 → 按 pointerType 分支。
 // 单指语义（touch）：单指走当前工具作画 ⟺ 无笔路径(penEverSeen=false) 且「单指绘画」开关 ON；
 //   否则一律 hold（不画不 pan，仍计入双指手势 + 长按吸色）。开关默认 OFF → 单指永不作画。
 //   pen 路径永远屏蔽（见过 pen 的设备恒 hold），开关只影响无笔路径。
-export function assignRole({ tool, pointerType, button, buttons, spaceDown, altDown, penEverSeen, singleFingerDraw }) {
+export function assignRole({ tool, pointerType, button, buttons, spaceDown, altDown, penEverSeen, singleFingerDraw }: PointerDownInput): string | null {
   if (tool === "hand" || spaceDown) return "pan";
   const et = effectiveTool(tool, altDown);
   if (pointerType === "mouse") return button === 0 ? toolToRole(et) : "pan";          // 中/右键 = pan

@@ -39,7 +39,7 @@ import {
   store as _store,
 } from "./app-store.js";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
-import { pathFolder } from "./gallery-path.js";
+import { pathFolder } from "./gallery-path.ts";
 import { stripSessionExt } from "./config.js";
 import { sessionNameConflict } from "./session-name.ts";
 import { serializedToolStatePatch } from "./editor-state.ts";   // 反序列化细节下沉（rec #5 part b）

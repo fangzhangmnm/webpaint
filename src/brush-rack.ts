@@ -16,7 +16,7 @@ import {
   brushesByTool, findBrush, newBrushId, brushFromJSON, DEFAULT_FOLDER,
 } from "./brushes.js";
 import { resolveRef } from "./app-store.js";
-import { collectFolders } from "./brush-rack-view.js";
+import { collectFolders } from "./brush-rack-view.ts";
 import { mountRackSheet } from "./ui/rack-sheet.ts";
 import { mountBrushSettings } from "./ui/brush-settings.ts";
 import { exportBrush, exportRackFolder, buildRackCode, shareOrDownloadJSON } from "./brush-io.ts";

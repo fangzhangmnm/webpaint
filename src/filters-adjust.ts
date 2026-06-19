@@ -17,7 +17,7 @@ let setStatus: any, store: any, updateSaveStatus: any;
 let _bringPanelTop: any;
 let _suppressTransientPanels: any, _restoreTransientPanels: any;
 import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式 import）
-import { requireEditableLeaf } from "./editable-leaf.js";
+import { requireEditableLeaf } from "./editable-leaf.ts";
 
 // ---- topbar：adjustments popup（液化 / 后续调色 etc）----
 // 单按钮 → 弹一列 menu-item（同 menuPanel 模式）。学 Procreate adjustments icon。

@@ -1,7 +1,7 @@
 // Gallery 展示派生测试（UI 深化 candidate 1 · gallery）。
 import { describe, it, eq, assert } from "./runner.mjs";
 import { tileFor, breadcrumb, trashTileFor } from "../src/ui/gallery-view-model.ts";
-import { mergeTrash } from "../src/gallery-model.js";
+import { mergeTrash } from "../src/gallery-model.ts";
 
 describe("gallery-view-model · tileFor 徽章 4 态", () => {
   const local = { name: "a", updatedAt: 100, size: 10, thumb: {} };

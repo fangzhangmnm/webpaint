@@ -1,7 +1,7 @@
 // Contribution 注册表原语验收（candidate 2）。
 // registry 是新深模块的接缝：register/get/list/has/onRegistered。filter 与 exporter 都建在其上。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { makeRegistry } from "../src/registry.js";
+import { makeRegistry } from "../src/registry.ts";
 
 describe("registry · makeRegistry", () => {
   it("register/get/list/has 基本路径", () => {

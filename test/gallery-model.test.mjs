@@ -1,7 +1,7 @@
 // Gallery 路径代数 + 文件夹模型验收（A2）。纯数据。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { pathFolder, pathBasename, pathJoin } from "../src/gallery-path.js";
-import { mergeLocalCloud, sliceFolder, folderHasContents, itemTime, classifyCloudGone, copyTargetName } from "../src/gallery-model.js";
+import { pathFolder, pathBasename, pathJoin } from "../src/gallery-path.ts";
+import { mergeLocalCloud, sliceFolder, folderHasContents, itemTime, classifyCloudGone, copyTargetName } from "../src/gallery-model.ts";
 
 describe("gallery-path", () => {
   it("pathFolder", () => { eq(pathFolder("a"), ""); eq(pathFolder("f/a"), "f"); eq(pathFolder("f/g/a"), "f/g"); });

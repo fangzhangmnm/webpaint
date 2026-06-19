@@ -5,7 +5,7 @@ import { describe, it, assert } from "./runner.mjs";
 import {
   computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction,
   pinchScaleRot, solveAnchorTranslation,
-} from "../src/pointer-gesture.js";
+} from "../src/pointer-gesture.ts";
 
 const approx = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 const W = 1000, H = 1000;

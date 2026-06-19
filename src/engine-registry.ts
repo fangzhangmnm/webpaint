@@ -22,7 +22,15 @@
 //   finalize          endStroke 时是否按选区 applyMaskPostStroke
 //                     （filterBrush 在 begin 已吃 selection，故 false）。
 //   historyType       PixelEdit.begin 的事务类型（handler 见 pixel-edit.js）。
-export const PIXEL_STROKE_SPECS = Object.freeze({
+export interface PixelStrokeSpec {
+  engineKey: string;
+  coalesceLatest: boolean;
+  usesBrushSettings: boolean;
+  finalize: boolean;
+  historyType: string;
+}
+
+export const PIXEL_STROKE_SPECS: Readonly<Record<string, PixelStrokeSpec>> = Object.freeze({
   draw:        Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesBrushSettings: true,  finalize: true,  historyType: "stroke" }),
   erase:       Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesBrushSettings: true,  finalize: true,  historyType: "stroke" }),
   liquify:     Object.freeze({ engineKey: "liquify",     coalesceLatest: true,  usesBrushSettings: false, finalize: true,  historyType: "liquify" }),
@@ -30,11 +38,11 @@ export const PIXEL_STROKE_SPECS = Object.freeze({
 });
 
 // role 是否走 pixel-stroke 生命周期（begin → extend×N → end/abort，落 layer 像素 + PixelEdit 事务）。
-export function isPixelStroke(role) {
+export function isPixelStroke(role: string): boolean {
   return Object.prototype.hasOwnProperty.call(PIXEL_STROKE_SPECS, role);
 }
 
 // 取某 role 的 spec；非 pixel-stroke 返回 null。
-export function pixelStrokeSpec(role) {
+export function pixelStrokeSpec(role: string): PixelStrokeSpec | null {
   return PIXEL_STROKE_SPECS[role] || null;
 }

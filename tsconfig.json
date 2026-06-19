@@ -28,5 +28,22 @@
     "types": [],
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/store/**/*.ts", "src/store/**/*.js"]
+  // include = 受 tsc 检查的显式准入名单（不是「全 src/」）。store 深模块 + 逐批迁入的叶子。
+  // 加新文件进来 = 把它纳入硬门：从此它的类型契约被持续验证（见 docs/ts-migration.md）。
+  // batch 1（v294，2026-06-19）：11 个纯·已测·低耦合叶子（无 DOM 副作用 / 无领域写）。
+  "include": [
+    "src/store/**/*.ts",
+    "src/store/**/*.js",
+    "src/gallery-path.ts",
+    "src/crop-geometry.ts",
+    "src/pointer-route.ts",
+    "src/registry.ts",
+    "src/editable-leaf.ts",
+    "src/engine-registry.ts",
+    "src/gallery-model.ts",
+    "src/brush-rack-view.ts",
+    "src/pointer-gesture.ts",
+    "src/resolved-brush.ts",
+    "src/ora-stack-xml.ts"
+  ]
 }

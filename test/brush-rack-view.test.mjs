@@ -1,6 +1,6 @@
 // 笔架 view-model 验收（A3）。纯派生。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { collectFolders, brushesInFolder, smoothstepRadialGradient } from "../src/brush-rack-view.js";
+import { collectFolders, brushesInFolder, smoothstepRadialGradient } from "../src/brush-rack-view.ts";
 
 describe("brush-rack-view · collectFolders", () => {
   const D = "默认";

@@ -1,4 +1,3 @@
-// @ts-check
 // 当前笔（ResolvedBrush）—— drawing engine 唯一吃的**不可变值**。
 //
 // 设计（2026-06-08 grill，candidate 3 / docs/reports/20260608-ui-deepening-and-plugin-survey.html）：
@@ -17,42 +16,78 @@
 
 import { DEFAULT_SETTINGS } from "./brush.js";
 
-/**
- * @typedef {Object} BrushPreset 笔架里的一把预设（黑盒；只读这里用到的字段）。
- * @property {{kind?:string, aspect?:number, rotation?:number, hardness?:number}} [shape]
- * @property {{in?:number, out?:number}} [taper]
- * @property {number} [sizeCoeff] @property {number} [opaCoeff] @property {number} [flowCoeff]
- * @property {number} [pressureGamma] @property {number} [pressureLPF]
- * @property {string} [compositeMode] @property {string} [blendMode]
- * @property {number|{value?:number}} [spacing] @property {boolean} [pixelMode]
- * @property {{streamline?:number, stabilization?:number}} [smooth]
- * @property {{strength?:number, dryness?:number}} [smudge]
- */
+// 笔架里的一把预设（黑盒；只读这里用到的字段）。
+export interface BrushPreset {
+  shape?: { kind?: string; aspect?: number; rotation?: number; hardness?: number };
+  taper?: { in?: number; out?: number };
+  sizeCoeff?: number;
+  opaCoeff?: number;
+  flowCoeff?: number;
+  pressureGamma?: number;
+  pressureLPF?: number;
+  compositeMode?: string;
+  blendMode?: string;
+  spacing?: number | { value?: number };
+  pixelMode?: boolean;
+  smooth?: { streamline?: number; stabilization?: number };
+  smudge?: { strength?: number; dryness?: number };
+}
 
-/**
- * @typedef {Readonly<Object>} ResolvedBrush
- *   引擎吃的扁平不可变笔。字段集 = DEFAULT_SETTINGS 全集（size, opacity, flow, color,
- *   shape 字段, 各 coeff, spacing, compositeMode, blendMode, pixelMode, smooth 四件套,
- *   taper 段, smudge 段, pressureToSize, pressureToOpacity）。
- */
+// 引擎吃的扁平笔。字段集 = DEFAULT_SETTINGS 全集；index 签名兜住本模块不显式列举的默认字段
+// （type / taperFloor 等旧 applyBrushPresetFrozen 不碰、但 spread 保留下来的）。
+export interface BrushSettings {
+  size: number;
+  opacity: number;
+  flow: number;
+  color: string;
+  shapeKind: string;
+  shapeAspect: number;
+  shapeRotation: number;
+  hardness: number;
+  taperIn: number;
+  taperOut: number;
+  sizeCoeff: number;
+  opaCoeff: number;
+  flowCoeff: number;
+  pressureGamma: number;
+  pressureLPF: number;
+  compositeMode: string;
+  blendMode: string;
+  spacing: number;
+  pixelMode: boolean;
+  streamline: number;
+  stabilization: number;
+  smudgeStrength?: number;
+  smudgeDryness?: number;
+  pressureToSize: boolean;
+  pressureToOpacity: boolean;
+  [k: string]: unknown;
+}
 
-/**
- * 从 SSoT 解析出当前笔。**等价于旧 applyBrushPresetFrozen ⊕ applyToolState ⊕ syncBrushColor**，
- * 但输出是 Object.freeze 的新值（绝不复用/原地改）。
- *
- * @param {Object} [args]
- * @param {BrushPreset|null} [args.preset] 活动预设；null = 无笔架，走 DEFAULT 兜底。
- * @param {number} [args.size] per-tool dial（toolState.size）。缺省保留 DEFAULT。
- * @param {number} [args.opacity] @param {number} [args.flow]
- * @param {string} [args.color] 全局色（#rrggbb）。
- * @param {boolean} [args.pressureToSize] @param {boolean} [args.pressureToOpacity] 全局开关。
- * @returns {ResolvedBrush}
- */
+// 引擎只读这个不可变值。
+export type ResolvedBrush = Readonly<BrushSettings>;
+
+export interface ResolveBrushArgs {
+  preset?: BrushPreset | null;
+  size?: number;
+  opacity?: number;
+  flow?: number;
+  color?: string;
+  pressureToSize?: boolean;
+  pressureToOpacity?: boolean;
+}
+
+// 从 SSoT 解析出当前笔。**等价于旧 applyBrushPresetFrozen ⊕ applyToolState ⊕ syncBrushColor**，
+// 但输出是 Object.freeze 的新值（绝不复用/原地改）。
+//   preset：活动预设；null = 无笔架，走 DEFAULT 兜底。
+//   size/opacity/flow：per-tool dial（toolState）；缺省保留 DEFAULT。
+//   color：全局色（#rrggbb）。pressureToSize/pressureToOpacity：全局开关。
 export function resolveBrush({
   preset = null, size, opacity, flow, color, pressureToSize, pressureToOpacity,
-} = {}) {
+}: ResolveBrushArgs = {}): ResolvedBrush {
   // base = 引擎默认全集（type / taperFloor 等旧 applyBrushPresetFrozen 不碰的字段一并保留）。
-  const b = { ...DEFAULT_SETTINGS };
+  // DEFAULT_SETTINGS 来自未类型化的 brush.js（手感红区，本轮不迁）——在此唯一的领域接缝处断言其形状。
+  const b = { ...(DEFAULT_SETTINGS as Record<string, unknown>) } as BrushSettings;
 
   if (preset) {
     // —— 预设冻结字段（逐字段映射，?? 默认值与旧 applyBrushPresetFrozen 逐字对齐）——

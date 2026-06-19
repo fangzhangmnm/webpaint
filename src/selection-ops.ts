@@ -9,7 +9,7 @@ import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.js"
 import { Selection } from "./selection.js";
 import { countLeaves } from "./doc.js";
 import { compressPixelSnap } from "./pixel-edit.js";
-import { requireEditableLeaf } from "./editable-leaf.js";
+import { requireEditableLeaf } from "./editable-leaf.ts";
 import { updateLassoToolbar } from "./toolbar.ts";
 
 // app 单例 / 跨模块函数（initSelectionOps 注入）

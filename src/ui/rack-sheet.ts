@@ -10,7 +10,7 @@
 // 纯派生（collectFolders/brushesInFolder/smoothstepRadialGradient）在 brush-rack-view.js（node 可测）。
 
 import { createApp, defineComponent, computed } from "../../vendor/vue/vue.esm-browser.prod.js";
-import { collectFolders, brushesInFolder, smoothstepRadialGradient } from "../brush-rack-view.js";
+import { collectFolders, brushesInFolder, smoothstepRadialGradient } from "../brush-rack-view.ts";
 
 export interface RackSheetOpts {
   defaultFolder: string;

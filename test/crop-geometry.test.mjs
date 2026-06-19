@@ -1,6 +1,6 @@
 // Crop 几何验收（A1）。纯数学，重点压 handle 的 anchor 钳制与扩张语义。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { resizeCropRect, cropRectToInts } from "../src/crop-geometry.js";
+import { resizeCropRect, cropRectToInts } from "../src/crop-geometry.ts";
 
 const R = { x: 100, y: 100, w: 200, h: 200 };   // 起手框
 const rectEq = (r, x, y, w, h, msg) => assert(r.x === x && r.y === y && r.w === w && r.h === h,

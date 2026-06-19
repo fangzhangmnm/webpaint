@@ -7,8 +7,8 @@
 //
 // 复用形状：item 形状通用、徽章/面包屑无 ORA 依赖 → 整块可抬给 AtlasMaker/RealHome（WebPaint 专用 example）。
 
-import { pathBasename } from "../gallery-path.js";
-import { itemTime } from "../gallery-model.js";
+import { pathBasename } from "../gallery-path.ts";
+import { itemTime } from "../gallery-model.ts";
 
 // 文件 tile 的同步徽章（图标 SVG 在组件 template 里按 kind 渲）。ghost = cloud-gone dirty 孤儿。
 export type BadgeKind = "syncedBoth" | "dirtyBoth" | "cloudOnly" | "localOnly" | "ghost";

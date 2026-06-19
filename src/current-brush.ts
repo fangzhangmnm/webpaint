@@ -11,7 +11,7 @@
 // 「功能不响应」级 bug，不是手感漂移。故 current-brush.test.mjs 验「改 dep → currentBrush 重算」。
 
 import { computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";
-import { resolveBrush } from "./resolved-brush.js";
+import { resolveBrush } from "./resolved-brush.ts";
 
 export function makeCurrentBrush({ state, dialReactive, rack }: any) {
   // **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。

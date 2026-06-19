@@ -10,15 +10,52 @@ import { WEBPAINT_VERSION } from "./version.js";
 //   组 LayerGroup：{ isGroup:true, id, name, visible, opacity, mode, clippingMask, children:[] }
 // 写入端额外读 doc.activeId / doc.referenceLayerId 决定 active / reference 标记。
 
-function escapeXml(s) {
-  return String(s).replace(/[<>&"']/g, (c) => ({
-    "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;",
-  })[c]);
+// 写入端读到的节点 / doc 的最小结构（doc.js 本体仍未类型化）。
+export interface OraNode {
+  id: number;
+  name: string;
+  visible: boolean;
+  opacity?: number;
+  mode?: string;
+  clippingMask?: boolean;
+  isGroup: boolean;
+  children?: OraNode[];
+  bboxX?: number;
+  bboxY?: number;
+  lockAlpha?: boolean;
+}
+export interface OraDoc {
+  layers: OraNode[];
+  width: number;
+  height: number;
+  activeId?: number;
+  referenceLayerId?: number;
+}
+
+// 读取端产出的 spec 节点（id 可能为 null：旧 .ora 无 webpaint:id，decode 时再发新 id）。
+interface ParsedCommon {
+  id: number | null;
+  name: string;
+  opacity: number;
+  visible: boolean;
+  mode: string;
+  clippingMask: boolean;
+  isActive: boolean;
+}
+export type ParsedNode =
+  | (ParsedCommon & { isGroup: true; children: ParsedNode[] })
+  | (ParsedCommon & { isGroup: false; src: string; x: number; y: number; lockAlpha: boolean; isReference: boolean });
+
+const XML_ENT: Record<string, string> = {
+  "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;",
+};
+function escapeXml(s: string): string {
+  return String(s).replace(/[<>&"']/g, (c) => XML_ENT[c]);
 }
 
 // ---- canvas composite mode ↔ ORA composite-op ----
 
-const MODE_TO_ORA = {
+const MODE_TO_ORA: Record<string, string> = {
   "source-over": "svg:src-over",
   "multiply":    "svg:multiply",
   "screen":      "svg:screen",
@@ -32,13 +69,13 @@ const MODE_TO_ORA = {
   "difference":  "svg:difference",
   "exclusion":   "svg:exclusion",
 };
-export function oraCompositeOp(canvasMode) {
+export function oraCompositeOp(canvasMode: string): string {
   return MODE_TO_ORA[canvasMode] || "svg:src-over";
 }
-const ORA_TO_MODE = Object.fromEntries(
+const ORA_TO_MODE: Record<string, string> = Object.fromEntries(
   Object.entries(MODE_TO_ORA).map(([k, v]) => [v, k]),
 );
-export function canvasModeFromOra(op) {
+export function canvasModeFromOra(op: string): string {
   return ORA_TO_MODE[op] || "source-over";
 }
 
@@ -48,7 +85,7 @@ export function canvasModeFromOra(op) {
 //   Layer → 自闭合 <layer ... />；LayerGroup → <stack ...>children</stack>。
 //   组与叶共享 name/opacity/visibility/composite-op/webpaint:id/clipping/active；
 //   叶独有 src/x/y/lock-alpha/reference。
-function nodeToXml(node, doc, indent) {
+function nodeToXml(node: OraNode, doc: OraDoc, indent: number): string {
   const pad = "  ".repeat(indent);
   const common = [
     `name="${escapeXml(node.name)}"`,
@@ -69,9 +106,10 @@ function nodeToXml(node, doc, indent) {
       `isolation="${node.mode === "pass-through" ? "auto" : "isolate"}"`,
     ];
     // children top-first（与 spec 一致）：同级倒序输出。
-    const kids = [];
-    for (let i = node.children.length - 1; i >= 0; i--) {
-      kids.push(nodeToXml(node.children[i], doc, indent + 1));
+    const ch = node.children || [];
+    const kids: string[] = [];
+    for (let i = ch.length - 1; i >= 0; i--) {
+      kids.push(nodeToXml(ch[i], doc, indent + 1));
     }
     const inner = kids.length ? `\n${kids.join("\n")}\n${pad}` : "";
     return `${pad}<stack ${groupAttrs.join(" ")}>${inner}</stack>`;
@@ -88,10 +126,10 @@ function nodeToXml(node, doc, indent) {
   return `${pad}<layer ${attrs.join(" ")} />`;
 }
 
-export function buildStackXml(doc) {
+export function buildStackXml(doc: OraDoc): string {
   // OpenRaster spec：layer 顺序 = top first（top of stack 在 XML 前）。
   // doc.layers[0] 是 bottom，所以同级倒序输出（递归在 nodeToXml 内）。
-  const nodes = [];
+  const nodes: string[] = [];
   for (let i = doc.layers.length - 1; i >= 0; i--) {
     nodes.push(nodeToXml(doc.layers[i], doc, 2));
   }
@@ -112,14 +150,14 @@ ${nodes.join("\n")}
 // ---- 读：stack.xml 字符串 → spec 树（bottom-first）----
 
 // 元素标签（去命名空间前缀、小写）。
-function elemTag(el) {
+function elemTag(el: Element): string {
   return (el.tagName || el.nodeName || "").toLowerCase().replace(/^.*:/, "");
 }
 // 单 DOM 元素 → spec（递归）。<layer> → 叶 spec；<stack> → 组 spec（含 children）。
 //   id 解析自 webpaint:id（旧 .ora 无此属性 → null，decode 时发新 id）。
-function parseNode(el) {
+function parseNode(el: Element): ParsedNode {
   const idAttr = el.getAttribute("webpaint:id");
-  const common = {
+  const common: ParsedCommon = {
     id: idAttr != null && idAttr !== "" ? parseInt(idAttr, 10) : null,
     name: el.getAttribute("name") || "图层",
     opacity: parseFloat(el.getAttribute("opacity") || "1"),
@@ -150,7 +188,7 @@ function parseNode(el) {
 }
 // 一个 stack 的直接子节点 → bottom-first spec 数组。
 //   XML 是 top-first（spec 顺序），doc 内部 [0]=bottom，所以 reverse。
-function parseChildren(stackEl) {
+function parseChildren(stackEl: Element): ParsedNode[] {
   const kids = [...stackEl.children].filter((c) => {
     const t = elemTag(c);
     return t === "layer" || t === "stack";
@@ -159,7 +197,7 @@ function parseChildren(stackEl) {
   return kids.map(parseNode);
 }
 
-export function parseStackXml(xmlText) {
+export function parseStackXml(xmlText: string): { w: number; h: number; nodes: ParsedNode[]; wroteWith: string | null } {
   const dom = new DOMParser().parseFromString(xmlText, "application/xml");
   const err = dom.querySelector("parsererror");
   if (err) throw new Error("stack.xml 解析失败：" + err.textContent);
