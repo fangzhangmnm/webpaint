@@ -34,10 +34,13 @@
   // batch 2（v295，2026-06-19）：AppContext seam（组合根装配契约）+ 首批 initX 消费方入门。
   // batch 3（v296，2026-06-19）：app 层基础叶子（surfaces/signals/sheets/anchored-popup/session-name）
   //   + color-panel 消费方（带 ui/color-wheel·color-model 级联）。
+  // batch 4（v297，2026-06-19）：session-state + editor-state hub（解锁多数消费方闭包；EditorRuntimeState 收紧）。
   "include": [
     "src/store/**/*.ts",
     "src/store/**/*.js",
     "src/app-context.ts",
+    "src/editor-state.ts",
+    "src/session-state.ts",
     "src/surfaces.ts",
     "src/signals.ts",
     "src/session-name.ts",

@@ -27,6 +27,7 @@ export interface ToolDial {
   opacity?: number;
   flow?: number;
   activeBrushId?: string | null;
+  activeBrushName?: string | null;
   variantId?: string | null;
 }
 export interface EditorRuntimeState {
@@ -57,13 +58,30 @@ export interface RackHandle {
   findToolBrush(dial: ToolDial): { id: string; name?: string } | null;
   findToolBrushPure(dial: ToolDial): { name?: string; size?: { max?: number } } | null;
   openBrushSettings(id: string): void;
+  applyToolState(tool: string): void;
   [k: string]: unknown;
 }
-// 浮窗（side-windows.ts 的参考窗/调色板窗）。
-export interface FloatingWindowHandle { [k: string]: unknown; }
+// 浮窗（side-windows.ts）：参考窗 / 调色板窗——方法集不同，分两个句柄。
+export interface ReferenceWindowHandle {
+  getSerializedState(): unknown;
+  applySerializedState(s: unknown): void;
+  clearBitmap(): void;
+  setBitmap(bitmap: ImageBitmap, opts?: { persistBlob?: Blob | null }): void;
+  getPersistBlob(): Blob | null;
+  close?(): void;
+  [k: string]: unknown;
+}
+export interface PaletteWindowHandle {
+  getSerializedState(): unknown;
+  applySerializedState(s: unknown): void;
+  clear?(): void;
+  close?(): void;
+  [k: string]: unknown;
+}
 // 图库（ui/gallery.ts mountGallery 返回）。
 export interface GalleryHandle {
   refresh(): void;
+  setFolder(folder: string): void;
   [k: string]: unknown;
 }
 // 左栏 dial 组件句柄（ui/left-dial.ts）。
@@ -109,15 +127,15 @@ export interface AppContext {
   afterDocChange: (...args: unknown[]) => void;
 
   // 浮窗（side-windows.ts，module-eval 即构造）
-  referenceWindow: FloatingWindowHandle;
-  paletteWindow: FloatingWindowHandle;
+  referenceWindow: ReferenceWindowHandle;
+  paletteWindow: PaletteWindowHandle;
 
   // 跨模块函数
   setColor: (hex: string) => void;
   applyCheckerboard: (...args: unknown[]) => void;
   renderLayersPanel: () => void;
   setGalleryOpen: (open: boolean) => void;
-  gateCloudSyncOnOpen: (...args: unknown[]) => unknown;
+  gateCloudSyncOnOpen: (...args: unknown[]) => Promise<unknown>;
   checkQuotaAndWarn: (...args: unknown[]) => unknown;
   uniqueLocalName: (...args: unknown[]) => string;
   getLocalSavedAtLabel: (...args: unknown[]) => string;

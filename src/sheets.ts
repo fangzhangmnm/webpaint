@@ -104,11 +104,11 @@ export function openConfirmSheet(title: string, message: string): Promise<boolea
 }
 
 // ---- Sync gate（锁屏覆盖 + 动作按钮）：纯 DOM 原语。决策编排在 app。----
-interface SyncGateAction { label: string; value: unknown; primary?: boolean; }
+interface SyncGateAction { label: string; value: string; primary?: boolean; }
 interface SyncGateOpts { title: string; message: string; showSpinner?: boolean; actions: SyncGateAction[]; }
 const syncGate: {
   backdrop: HTMLElement; sheet: HTMLElement; title: HTMLElement; message: HTMLElement;
-  spinner: HTMLElement; actions: HTMLElement; _pendingResolve: ((value: unknown) => void) | null;
+  spinner: HTMLElement; actions: HTMLElement; _pendingResolve: ((value: string) => void) | null;
 } = {
   backdrop: $("syncGateBackdrop"),
   sheet: $("syncGateSheet"),
@@ -119,7 +119,7 @@ const syncGate: {
   _pendingResolve: null,
 };
 
-export function lockSyncGate({ title, message, showSpinner, actions }: SyncGateOpts): Promise<unknown> {
+export function lockSyncGate({ title, message, showSpinner, actions }: SyncGateOpts): Promise<string> {
   syncGate.title.textContent = title;
   syncGate.message.textContent = message;
   syncGate.spinner.classList.toggle("hidden", !showSpinner);
@@ -143,7 +143,7 @@ export function unlockSyncGate() {
   syncGate.sheet.classList.add("hidden");
   syncGate._pendingResolve = null;
 }
-export function settleSyncGate(value: unknown) {
+export function settleSyncGate(value: string) {
   if (syncGate._pendingResolve) {
     const r = syncGate._pendingResolve;
     unlockSyncGate();

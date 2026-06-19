@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v296 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v297 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -94,12 +94,34 @@ typecheck + 388 测试全绿、bundle 通过。新 gated 8 个：
 > 唯一 `as`：`mountColorWheel(els.colorPanelBody as HTMLElement)`——`colorPanelBody` 是 `querySelector`（非 byId）故 `Element|null`，
 > 但它是必存在的挂载点。byId 体系外的 querySelector 元素，到用处再断言。
 
+### ✅ batch 4 · session-state + editor-state hub（v297，2026-06-19）
+活动文档生命周期 hub（`session-state.ts` 729 行 / 46 any）+ 编辑器 RAM SSoT（`editor-state.ts`）入门。
+解锁多数消费方闭包的底部（`cloud-freshness`/`topbar-menu`/`boot`/`import-image`/`gallery-shell` 全向 session-state 级联）。
+typecheck + 388 测试全绿、bundle 通过。
+
+| 文件 | 做了什么 |
+|---|---|
+| `editor-state.ts` | `state: any/dialReactive: any` → 真 `EditorRuntimeState`/`DialReactive`（owner 构造、契约在 [[AppContext]]）。重构构造序（toolStates 先建 → state 字面量一次成形）+ 逐属性显式 `defineProperty`。`serializedToolStatePatch(current: ToolDial, saved: unknown)`。 |
+| `session-state.ts` | ctx 单例 → `AppContext[...]`；SSoT 变量（`_activeSessionName: string\|null` 等）；函数参数（`GalleryItem` / `LoadedDoc` / ORA-meta 形状）；`catch (e)` + `errMsg(e)` 辅助；`initSession(ctx: AppContext)`。 |
+| `app-context.ts` | hub 用到的句柄收紧：`ReferenceWindowHandle`/`PaletteWindowHandle`（分参考/调色板）、`RackHandle.applyToolState`、`GalleryHandle.setFolder`、`gateCloudSyncOnOpen` 返 `Promise`。 |
+| `sheets.ts` | `lockSyncGate`/`settleSyncGate` 的 value `unknown` → `string`（gate 永远吐选择字符串；满足 store onConflict 的 `Promise<string>`）。 |
+
+**关键发现**：
+- **`_store` 其实是 typed 的**：`app-store.js`（.js 不检）re-export `store/index.ts` 的 store，类型穿过 .js 存活 →
+  `_store.flow.*` 带 store/** 的真签名（`encode: () => BytesSource | Promise<BytesSource>` 等）。原先 `: any` 把它全遮了。
+  教训：别自定义与 store 同名的结果类型（会撞「two FlowResult」），让结果变量 **infer 真类型**。
+- **红线区只做类型、零行为改动**：session-state 是 store-orchestration 红线（CLAUDE.md）。所有改动 type-erased
+  （注解 / `!` 断言 / `as`）或行为等价（`errMsg` ≡ `e && e.message || e`）；`_store.*` 调用编译后字节不变。
+- **未类型 JS-seam 的断言**：`encodeDocToOra`（ora.js 未类型化）推断 `Promise<unknown>` 不满足 `BytesSource`，
+  在 `_encodeCurrentOra(): Promise<Blob>` 一处断言（candidate 3 给 ora.js 真类型时移除）。
+- **session-state/editor-state 无单测**（survey）：类型绿 + 行为 type-erased 是最强静态保证，但属真机测试批（「我只测一次」）。
+
 ## 待迁（按风险，勿盲目铺开）
 
-- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子层已 gated（batch 3）。**下一个大解锁 = `session-state.ts`(66)
-  + `editor-state.ts`**——它们在多数消费方闭包的底部（`cloud-freshness`/`topbar-menu`/`boot`/`import-image`/`gallery-shell`
-  全向 session-state 级联）。gate 它俩后，那批消费方的闭包才塌成可单独 gate。editor-state 类型化还能把 `AppContext.state`
-  从占位升级成真类型。屎山内部按「诚实描述现状」类型化（北极星：少熵）。剩余轻消费方按 **`.ts` 依赖闭包**成簇 gate。
+- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子层 + session-state/editor-state hub 已 gated（batch 3-4）。
+  现在 `cloud-freshness`/`topbar-menu`/`boot`/`import-image`/`gallery-shell` 的 session-state 级联已通，可按 **`.ts` 依赖闭包**
+  成簇 gate（剩余 ~14 个 `initX`）。`editor-state` 已把 `AppContext.state` 占位升级成真 `EditorRuntimeState`。
+  屎山（`toolbar.ts` 72 / `layers-panel.ts` 50 / `ui/gallery.ts` 38 / `import-image.ts` 26）内部按「诚实描述现状」类型化（北极星：少熵）。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。
 - **手感红区**（`input.js` 1171 行未测 · `brush.js` · `stroke-smoother.js`）= 用户钉死区。
