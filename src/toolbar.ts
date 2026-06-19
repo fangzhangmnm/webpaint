@@ -15,20 +15,35 @@ import { compressPixelSnap } from "./pixel-edit.js";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { safeLSSet } from "./safe-ls.ts";
 import { fillResampleSelect } from "./resample.js";
+import type { AppContext } from "./app-context.ts";
 
-let editMode: any, state: any, doc: any, board: any, input: any, history: any,
-    dialReactive: any, rack: any, setStatus: any, leftDial: any,
-    _suppressTransientPanels: any,
-    _commitTransform: any, _cancelTransform: any, selectionToNewLayer: any;
+// 静态存在的工具栏元素查表 helper（initToolbar 在 DOM 就绪后调）。
+const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-// 套索工具栏 DOM（initToolbar 里查表，故置为 module-level let）
-let lassoToolbarStack: any, lassoToolbarRow1: any, lassoToolbarRow2: any,
-    lassoSubToolBar: any, lassoSelectionActions: any, lassoTransformCtrl: any,
-    lassoSubBtns: any, lassoSetOpBtns: any, lassoTransformModeBtns: any,
-    lassoThresholdInput: any, lassoThresholdVal: any, lassoMagicCfgBtn: any,
-    lassoMagicPopup: any, lassoConstrainBtn: any, lassoConstrainSep: any,
-    lassoSelEditBtn: any,   // v242 选区编辑齿轮（有选区才亮；扩张/收缩 op）
-    pickerToolbar: any, pickModeSel: any;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
+// requireEditableLeaf / transform 收到的 doc 活层（doc/selection.js 未类型化 → 只描述本文件用到的）。
+interface LayerLike { id: number; snapshot(): unknown; }
+// fill/clear 的 stroke undo entry（异步压缩回填 blob）。
+interface StrokeEntry { type: string; layerId: number; before: unknown; after: unknown; beforeBlob: Blob | null; afterBlob: Blob | null; }
+// 选区编辑 modal 态（仅 modal 开着时非 null）。Selection 取自 selection.js 的 class（值导入兼作类型）。
+interface SelEditState { before: Selection; op: "expand" | "shrink"; rafId: number; }
+// editMode.enterTransient 的 apply/abort 回调（edit-mode.js 未类型化，默认 null 把推断窄成 null|undefined → 在调用处断言真签名）。
+interface TransientOpts { apply?: () => void; abort?: () => void; }
+
+let editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"], board: AppContext["board"];
+let input: AppContext["input"], history: AppContext["history"], dialReactive: AppContext["dialReactive"];
+let rack: AppContext["rack"], setStatus: AppContext["setStatus"], leftDial: AppContext["leftDial"];
+let _suppressTransientPanels: AppContext["_suppressTransientPanels"];
+let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"];
+let selectionToNewLayer: AppContext["selectionToNewLayer"];
+
+// 套索工具栏 DOM（initToolbar 里查表）。静态元素 → 非空；btn 组 → 数组；下拉 → select。
+let lassoToolbarStack: HTMLElement, lassoToolbarRow1: HTMLElement, lassoToolbarRow2: HTMLElement;
+let lassoSubToolBar: HTMLElement, lassoSelectionActions: HTMLElement, lassoTransformCtrl: HTMLElement;
+let lassoSubBtns: HTMLElement[], lassoSetOpBtns: HTMLElement[], lassoTransformModeBtns: HTMLElement[];
+let lassoThresholdInput: HTMLInputElement, lassoThresholdVal: HTMLElement, lassoMagicCfgBtn: HTMLElement;
+let lassoMagicPopup: HTMLElement, lassoConstrainBtn: HTMLElement, lassoConstrainSep: HTMLElement;
+let lassoSelEditBtn: HTMLElement;   // v242 选区编辑齿轮（有选区才亮；扩张/收缩 op）
+let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
 
 // ===== 套索/选区工具栏（v65 重做）=====
 // 三个 section 按状态切换：subToolBar（lasso 激活）/ selectionActions（有选区且非 floating）/ transformCtrl（floating）
@@ -96,7 +111,7 @@ export function updateLassoToolbar() {
       b.setAttribute("aria-pressed", b.dataset.lassoMode === mode ? "true" : "false");
     }
     const sm = input.lasso.getSampleMode();
-    const sel = document.getElementById("lassoSampleSel") as any;
+    const sel = document.getElementById("lassoSampleSel") as HTMLSelectElement | null;
     if (sel && sel.value !== sm) sel.value = sm;
   }
 }
@@ -145,7 +160,7 @@ export function _syncEditModeUI() {
   // 依赖 body[data-tool] 的 CSS（且 data-mode 被图库占用）。transient 的 UI 抑制走面板 suppress + 按钮高亮。
   // slider 禁用：size/opacity 仅 canDraw 模式可调 → 反应式镜像，<LeftDial> 绑 :disabled。color 仅 allowsColor 可点。
   dialReactive.canDraw = editMode.canDraw();
-  if (els.activeSwatch) (els.activeSwatch as any).disabled = !editMode.allowsColor();
+  if (els.activeSwatch) (els.activeSwatch as HTMLButtonElement).disabled = !editMode.allowsColor();
   updateLassoToolbar();             // 选区/变换工具栏跟着重新派生
 }
 
@@ -154,7 +169,7 @@ export function _syncEditModeUI() {
 //   预览 = 直接改 doc.selection（不 push history）；应用 = push 一条 selectionChange(before→after)；
 //   取消 / ctrl-z / 切工具 = 还原 before。硬边（Selection.morphed），不羽化——羽化是以后的事。
 // 设计照搬 filters-adjust 的 transient 生命周期（enterTransient("adjust") + 统一 exit 同步点）。
-let _selEdit: any = null;   // { before, op:'expand'|'shrink', rafId } —— 仅 modal 开着时非 null
+let _selEdit: SelEditState | null = null;   // { before, op:'expand'|'shrink', rafId } —— 仅 modal 开着时非 null
 
 function _selEditEls() {
   return {
@@ -200,7 +215,7 @@ function _openSelEdit(op: "expand" | "shrink") {
   popup?.classList.remove("hidden");
   _runSelEditPreview();                    // 初次预览
   // adjust transient：apply=采纳预览，abort=还原。切工具/ctrl-z 都经此（onToolSwitch=apply）。
-  editMode.enterTransient("adjust", { apply: () => _finishSelEdit(true), abort: () => _finishSelEdit(false) });
+  (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("adjust", { apply: () => _finishSelEdit(true), abort: () => _finishSelEdit(false) });
   // v267b (user)：不自动 focus/select 输入框——大多数时候无脑 1px 直接「应用」即可，
   //   自动选中会在 iPad 弹出键盘挡视野。要改数值用户自己点输入框。
 }
@@ -229,7 +244,7 @@ function closeSelEditUI() {
 }
 function initSelEditUI() {
   const { menu, amount } = _selEditEls();
-  lassoSelEditBtn.addEventListener("click", (e: any) => {
+  lassoSelEditBtn.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     if (_selEdit) return;                   // modal 开着时齿轮不响应
     menu?.classList.toggle("hidden");
@@ -237,21 +252,21 @@ function initSelEditUI() {
   document.getElementById("lassoSelExpandBtn")?.addEventListener("click", () => _openSelEdit("expand"));
   document.getElementById("lassoSelShrinkBtn")?.addEventListener("click", () => _openSelEdit("shrink"));
   amount?.addEventListener("input", _onSelEditInput);
-  amount?.addEventListener("keydown", (e: any) => {
+  amount?.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter") { e.preventDefault(); _finishSelEdit(true); }
   });
   document.getElementById("lassoSelOpApply")?.addEventListener("click", () => _finishSelEdit(true));
   document.getElementById("lassoSelOpCancel")?.addEventListener("click", () => _finishSelEdit(false));
   // 点菜单外侧 → 关菜单（modal 自有 apply/cancel，不在此关）
-  document.addEventListener("pointerdown", (e: any) => {
+  document.addEventListener("pointerdown", (e: Event) => {
     if (!menu || menu.classList.contains("hidden")) return;
-    if (menu.contains(e.target) || lassoSelEditBtn.contains(e.target)) return;
+    if (menu.contains(e.target as Node) || lassoSelEditBtn.contains(e.target as Node)) return;
     menu.classList.add("hidden");
   });
 }
 
 // Rack 工具 → 对应的 exclusive panel id
-export const RACK_PANEL_BY_TOOL: Record<string, any> = {
+export const RACK_PANEL_BY_TOOL: Record<string, string> = {
   brush: PANELS.RACK_BRUSH,
   smudge: PANELS.RACK_SMUDGE,
   eraser: PANELS.RACK_ERASER,
@@ -259,7 +274,7 @@ export const RACK_PANEL_BY_TOOL: Record<string, any> = {
 };
 let _lastNonLassoTool = "brush";
 
-export function initToolbar(ctx) {
+export function initToolbar(ctx: AppContext) {
   ({
     editMode, state, doc, board, input, history, dialReactive, rack, setStatus, leftDial,
     _suppressTransientPanels, _commitTransform, _cancelTransform,
@@ -268,22 +283,22 @@ export function initToolbar(ctx) {
 
   // ---- 套索/选区工具栏 DOM ----
   // 两行 toolbar stack（v93）：row1 = 选区方式，row2 = 操作 / 变换
-  lassoToolbarStack = document.getElementById("lassoToolbarStack");
-  lassoToolbarRow1 = document.getElementById("lassoToolbarRow1");
-  lassoToolbarRow2 = document.getElementById("lassoToolbarRow2");
-  lassoSubToolBar = document.getElementById("lassoSubToolBar");
-  lassoSelectionActions = document.getElementById("lassoSelectionActions");
-  lassoTransformCtrl = document.getElementById("lassoTransformCtrl");
-  lassoSubBtns = [...(lassoSubToolBar as any).querySelectorAll("[data-lasso-sub]")];
-  lassoSetOpBtns = [...(lassoSubToolBar as any).querySelectorAll("[data-lasso-setop]")];
-  lassoTransformModeBtns = [...(lassoTransformCtrl as any).querySelectorAll("[data-lasso-mode]")];
-  lassoThresholdInput = document.getElementById("lassoThreshold");
-  lassoThresholdVal = document.getElementById("lassoThresholdVal");
-  lassoMagicCfgBtn = document.getElementById("lassoMagicCfgBtn");
-  lassoMagicPopup = document.getElementById("lassoMagicPopup");
-  lassoConstrainBtn = document.getElementById("lassoConstrainBtn");
-  lassoConstrainSep = document.querySelector(".lasso-constrain-sep");
-  lassoSelEditBtn = document.getElementById("lassoSelEditBtn");
+  lassoToolbarStack = byId("lassoToolbarStack");
+  lassoToolbarRow1 = byId("lassoToolbarRow1");
+  lassoToolbarRow2 = byId("lassoToolbarRow2");
+  lassoSubToolBar = byId("lassoSubToolBar");
+  lassoSelectionActions = byId("lassoSelectionActions");
+  lassoTransformCtrl = byId("lassoTransformCtrl");
+  lassoSubBtns = [...lassoSubToolBar.querySelectorAll<HTMLElement>("[data-lasso-sub]")];
+  lassoSetOpBtns = [...lassoSubToolBar.querySelectorAll<HTMLElement>("[data-lasso-setop]")];
+  lassoTransformModeBtns = [...lassoTransformCtrl.querySelectorAll<HTMLElement>("[data-lasso-mode]")];
+  lassoThresholdInput = byId<HTMLInputElement>("lassoThreshold");
+  lassoThresholdVal = byId("lassoThresholdVal");
+  lassoMagicCfgBtn = byId("lassoMagicCfgBtn");
+  lassoMagicPopup = byId("lassoMagicPopup");
+  lassoConstrainBtn = byId("lassoConstrainBtn");
+  lassoConstrainSep = document.querySelector(".lasso-constrain-sep") as HTMLElement;
+  lassoSelEditBtn = byId("lassoSelEditBtn");
 
   // sub-tool picker
   for (const b of lassoSubBtns) {
@@ -300,26 +315,26 @@ export function initToolbar(ctx) {
     });
   }
   // v242：扩展滑块从魔术棒拆走（改成选区编辑 op，见 initSelEditUI）。魔术棒只剩阈值。
-  (lassoThresholdInput as any).addEventListener("input", () => {
-    const v = parseInt((lassoThresholdInput as any).value, 10) || 0;
+  lassoThresholdInput.addEventListener("input", () => {
+    const v = parseInt(lassoThresholdInput.value, 10) || 0;
     input.lasso.setMagicThreshold(v);
-    (lassoThresholdVal as any).textContent = String(v);
+    lassoThresholdVal.textContent = String(v);
   });
   // 设置按钮 → popup toggle
-  function toggleMagicPopup(e: any) {
+  function toggleMagicPopup(e: Event) {
     e.stopPropagation();
-    (lassoMagicPopup as any).classList.toggle("hidden");
+    lassoMagicPopup.classList.toggle("hidden");
   }
-  (lassoMagicCfgBtn as any).addEventListener("click", toggleMagicPopup);
+  lassoMagicCfgBtn.addEventListener("click", toggleMagicPopup);
   // 点 popup 外侧 → 关
-  document.addEventListener("pointerdown", (e: any) => {
-    if ((lassoMagicPopup as any).classList.contains("hidden")) return;
-    if ((lassoMagicPopup as any).contains(e.target)) return;
-    if ((lassoMagicCfgBtn as any).contains(e.target)) return;
-    (lassoMagicPopup as any).classList.add("hidden");
+  document.addEventListener("pointerdown", (e: Event) => {
+    if (lassoMagicPopup.classList.contains("hidden")) return;
+    if (lassoMagicPopup.contains(e.target as Node)) return;
+    if (lassoMagicCfgBtn.contains(e.target as Node)) return;
+    lassoMagicPopup.classList.add("hidden");
   });
   // 1:1 约束 toggle（rect / ellipse 用）
-  (lassoConstrainBtn as any).addEventListener("click", () => {
+  lassoConstrainBtn.addEventListener("click", () => {
     input.lasso.setConstrainSquare(!input.lasso.getConstrainSquare());
     updateLassoToolbar();
   });
@@ -327,11 +342,11 @@ export function initToolbar(ctx) {
 
   // 选区动作：变换。v217/218：没选区时让 lasso 用整层做隐式全选（fallbackFullLayer）。
   // selection 状态全归 lasso 管，toolbar 不直接动 doc.selection。
-  (document.getElementById("lassoTransformBtn") as any).addEventListener("click", () => {
+  byId("lassoTransformBtn").addEventListener("click", () => {
     if (!doc.activeLayer) return;
     const ok = input.lasso.liftSelectionForTransform(doc.activeLayer, { fallbackFullLayer: true });
     if (ok) {
-      editMode.enterTransient("transform", { apply: _commitTransform, abort: _cancelTransform });
+      (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("transform", { apply: _commitTransform, abort: _cancelTransform });
       updateLassoToolbar();
       _suppressTransientPanels("transform");
     } else if (doc.selection) {
@@ -347,42 +362,42 @@ export function initToolbar(ctx) {
     }
   });
 
-  (document.getElementById("lassoDeselectBtn") as any).addEventListener("click", () => {
+  byId("lassoDeselectBtn").addEventListener("click", () => {
     const entry = input.lasso.setSelection(null);
     if (entry && history) history.push(entry);
     board.invalidateAll();
     updateLassoToolbar();
   });
   // 填色：选区内填当前颜色（push stroke-type entry，可 Ctrl+Z）
-  (document.getElementById("lassoFillBtn") as any).addEventListener("click", () => {
-    const layer = requireEditableLeaf(doc, setStatus);
+  byId("lassoFillBtn").addEventListener("click", () => {
+    const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
     const before = layer.snapshot();
     doc.selection.fillOnLayer(layer, state.color);
     const after = layer.snapshot();
-    const entry: any = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
+    const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
     history.push(entry);
-    compressPixelSnap(entry.before, (blob: any) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob: any) => { entry.afterBlob  = blob; });
+    compressPixelSnap(entry.before, (blob: Blob) => { entry.beforeBlob = blob; });
+    compressPixelSnap(entry.after,  (blob: Blob) => { entry.afterBlob  = blob; });
     board.invalidateAll();
     setStatus(`已填色：${state.color}`);
   });
   // 清除：选区内 dst-out
-  (document.getElementById("lassoClearBtn") as any).addEventListener("click", () => {
-    const layer = requireEditableLeaf(doc, setStatus);
+  byId("lassoClearBtn").addEventListener("click", () => {
+    const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
     const before = layer.snapshot();
     doc.selection.clearOnLayer(layer);
     const after = layer.snapshot();
-    const entry: any = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
+    const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
     history.push(entry);
-    compressPixelSnap(entry.before, (blob: any) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob: any) => { entry.afterBlob  = blob; });
+    compressPixelSnap(entry.before, (blob: Blob) => { entry.beforeBlob = blob; });
+    compressPixelSnap(entry.after,  (blob: Blob) => { entry.afterBlob  = blob; });
     board.invalidateAll();
     setStatus("已清除选区内像素");
   });
   // v112: 全选（user：「lasso 加全选」）
-  (document.getElementById("lassoSelectAllBtn") as any).addEventListener("click", () => {
+  byId("lassoSelectAllBtn").addEventListener("click", () => {
     const sel = Selection.full(doc.width, doc.height);
     const entry = input.lasso.setSelection(sel);
     if (entry && history) history.push(entry);
@@ -391,7 +406,7 @@ export function initToolbar(ctx) {
   });
 
   // 反选：在 docW×docH 上 mask 取反
-  (document.getElementById("lassoInvertBtn") as any).addEventListener("click", () => {
+  byId("lassoInvertBtn").addEventListener("click", () => {
     const inv = doc.selection ? doc.selection.invert(doc.width, doc.height) : Selection.full(doc.width, doc.height);
     const entry = input.lasso.setSelection(inv);
     if (entry && history) history.push(entry);
@@ -407,14 +422,14 @@ export function initToolbar(ctx) {
     });
   }
   // commit/cancel 按钮 = 薄壳，走 EditMode → 运行 transform transient 的 apply/abort 闭包（_commit/_cancelTransform）
-  (document.getElementById("lassoCommitBtn") as any).addEventListener("click", () => {
+  byId("lassoCommitBtn").addEventListener("click", () => {
     editMode.applyPendingTransient();
   });
-  (document.getElementById("lassoCancelBtn") as any).addEventListener("click", () => {
+  byId("lassoCancelBtn").addEventListener("click", () => {
     editMode.abortTransient();
   });
   // Stamp：写入图层但保留 float（连击多次叠加盖印）
-  (document.getElementById("lassoStampBtn") as any).addEventListener("click", () => {
+  byId("lassoStampBtn").addEventListener("click", () => {
     if (!input.lasso.hasFloating()) return;
     if (input.lasso.stamp()) {
       board.invalidateAll();
@@ -422,7 +437,7 @@ export function initToolbar(ctx) {
     }
   });
   // v120: 插值模式 dropdown（旧 3 个按钮 → 1 个 select）
-  const lassoSampleSel = document.getElementById("lassoSampleSel") as any;
+  const lassoSampleSel = document.getElementById("lassoSampleSel") as HTMLSelectElement | null;
   // 变换采样 + 调整尺寸 两个 dropdown 都从 resample.js 的 RESAMPLE_MODES SSoT 填（以后加方法/AI 一处生效）
   fillResampleSelect(lassoSampleSel, "transform", "bicubic");
   fillResampleSelect(els.resampleMode, "scale", "bicubic");
@@ -435,19 +450,20 @@ export function initToolbar(ctx) {
   }
   // 吸色取样模式 dropdown（composite 合并 / layer 当前图层 raw）。持久化到 LS；input._doPick 经 getPickMode 读。
   pickerToolbar = document.getElementById("pickerToolbar");
-  pickModeSel = document.getElementById("pickModeSel");
+  pickModeSel = document.getElementById("pickModeSel") as HTMLSelectElement | null;
   if (pickModeSel) {
-    pickModeSel.value = state.pickMode;
-    pickModeSel.addEventListener("change", () => {
-      state.pickMode = pickModeSel.value;
-      safeLSSet("webpaint.pickMode", pickModeSel.value);
+    const psel = pickModeSel;
+    psel.value = state.pickMode;
+    psel.addEventListener("change", () => {
+      state.pickMode = psel.value;
+      safeLSSet("webpaint.pickMode", psel.value);
     });
   }
   // 选区 → 新层 / 复制层
-  (document.getElementById("lassoDuplicateBtn") as any).addEventListener("click", () => {
+  byId("lassoDuplicateBtn").addEventListener("click", () => {
     selectionToNewLayer({ move: false });
   });
-  (document.getElementById("lassoMoveToLayerBtn") as any).addEventListener("click", () => {
+  byId("lassoMoveToLayerBtn").addEventListener("click", () => {
     selectionToNewLayer({ move: true });
   });
   window.addEventListener("wp:lassochange", updateLassoToolbar);
@@ -461,7 +477,7 @@ export function initToolbar(ctx) {
   // ---- 工具按钮 ----
   for (const b of els.toolBtns) {
     b.addEventListener("click", () => {
-      const t = b.dataset.tool;
+      const t = b.dataset.tool!;   // .tool[data-tool] 选择器保证存在
       // tap-active-again：已激活的 rack 工具再点 → 开/关该工具的笔架 sheet
       // 详 conversation v79→v80：「tap = 切换 / 已激活 tap = 开 rack」
       if (editMode.current() === t && RACK_PANEL_BY_TOOL[t]) {
@@ -485,7 +501,7 @@ export function initToolbar(ctx) {
       closeExclusive();
     });
   }
-  window.addEventListener("wp:settool", (e: any) => setTool(e.detail));
+  window.addEventListener("wp:settool", (e: Event) => setTool((e as CustomEvent).detail));
 
   // v120 删：Shapes 子工具栏。shapes tool 撤了 → 以后 shapes 改 brush preset 的 toggle 字段
   // pencil 模式下双击 → 笔↔橡皮。但 floating 选区存在时屏蔽（避免误触切工具 = 自动 apply 变换）

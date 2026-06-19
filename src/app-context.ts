@@ -124,7 +124,7 @@ export interface AppContext {
   updateNewerBanner: (...args: unknown[]) => void;
 
   // transient 面板 / 变换护栏（transient-panels.ts / layer-undo.ts）
-  _suppressTransientPanels: () => void;
+  _suppressTransientPanels: (reason?: string) => void;
   _restoreTransientPanels: () => void;
   layerSpecFrom: (...args: unknown[]) => unknown;
   _bringPanelTop: (...args: unknown[]) => void;

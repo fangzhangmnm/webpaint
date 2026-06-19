@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v299 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v300 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -147,12 +147,27 @@ typecheck + 388 测试全绿、bundle 通过。零 any 出门。
 - **vendored vue 的 `.d.ts` 是手写 stub、不全**：缺 `nextTick` → 补一行 `export function nextTick(...)`（描述 runtime 已有的导出，非改 vue 本体）。后续 UI 组件入门遇缺啥补啥。
 - **app-UI 屎山可纯类型化**：layers-panel 非 store 红线，但仍全程 type-erased / 行为等价（`reason ?? ""` 索引、`?.closest` 兜 null）——印证北极星「type 屎山而不改行为」可行。
 
+### ✅ batch 7 · toolbar keystone（v300，2026-06-19）
+工具选择 + EditMode→UI 派生 + 套索/选区工具栏（`toolbar.ts` 502 行 / 51 any · 重 DOM）入门 —— 最后一个 keystone，
+解锁 `selection-ops`/`filters-adjust`/`transient-panels`/`import-image`。零 any 出门。typecheck + 388 测试全绿、bundle 通过。
 
-- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子 + hub + cloud-freshness/boot + layers-panel 已 gated（batch 3-6）。剩 ~11 个 `initX`。
-  - `layer-undo.ts`(4) 现已可 gate（唯一 .ts 依赖 layers-panel 已入门）。
-  - **剩下的 keystone = `toolbar.ts`(72 any)** → 解锁 `selection-ops`/`filters-adjust`/`transient-panels`/`import-image`。最重，单独成批。
-  其余（`settings-menu`/`doc-ops`/`side-windows`/`topbar-menu`/`smooth-dev-panel`/`export-import-menu`/`gallery-shell`）
-  的闭包仍含 toolbar/settings-menu/import-image，须先 gate toolbar keystone。屎山内部按「诚实描述现状」类型化（北极星：少熵）。
+| 做了什么 | 细节 |
+|---|---|
+| ctx 单例 → `AppContext[...]` | 含 `state`/`editMode`/`input`/`rack` 等 14 个。 |
+| DOM refs typed | 一个泛型 `byId<T>()` helper；套索工具栏 lets 全 `HTMLElement`/`HTMLElement[]`/`HTMLSelectElement`——**删掉 ~20 处 use-site `as any`**。`els.toolBtns` 收窄 `HTMLElement[]`（candidate 4）。 |
+| 本地 interface | `LayerLike`/`StrokeEntry`/`SelEditState`/`TransientOpts`。 |
+| 未类型 JS-seam 断言 | `requireEditableLeaf(...) as LayerLike`、`b.dataset.tool!`；`editMode.enterTransient` 推断被 edit-mode.js 的 null 默认窄成 `null\|undefined` → 在调用处把方法断言成真签名 `(n, o?: TransientOpts)=>void`。 |
+| app-context | `_suppressTransientPanels: () => void` → `(reason?: string) => void`（toolbar 带 "transform" reason 调）。 |
+
+**关键发现**：
+- **DOM 类型化是负 any**：把 module-level DOM lets 从 `any` 改成真元素类型后，散在各处的 `(x as any)` use-site cast 一次性消失（51 any 里很大一块是这种）。typed-at-source > cast-at-use。
+- **未类型 .js 的「默认 null 收窄」陷阱**：edit-mode.js `enterTransient(name, {apply=null, abort=null}={})` 被 tsc 推断成 apply/abort: `null` → 传函数报错。在调用处断言方法签名是最小修（candidate 3 给 edit-mode.js 真类型时移除）。
+
+- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子 + hub + cloud-freshness/boot + layers-panel + toolbar 已 gated（batch 3-7）。剩 ~10 个 `initX`。
+  - `layer-undo.ts`(4)、`selection-ops.ts`(12)、`transient-panels.ts`(2)、`filters-adjust.ts`(11) 现已**全部可 gate**（.ts 依赖闭包 = layers-panel/toolbar/editable-leaf 已入门）。
+  - `import-image.ts`(26) 还差 `selection-ops`；之后 `gallery-shell`/`export-import-menu` 解锁。
+  - `settings-menu`/`doc-ops`/`side-windows`/`topbar-menu`/`smooth-dev-panel` 互相 + 向 settings-menu 级联，是下一个小簇。
+  屎山内部按「诚实描述现状」类型化（北极星：少熵）。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。
 - **手感红区**（`input.js` 1171 行未测 · `brush.js` · `stroke-smoother.js`）= 用户钉死区。

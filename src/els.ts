@@ -131,7 +131,7 @@ export const els = {
   genericSheetInput: byId("genericSheetInput"),
   genericSheetConfirm: byId("genericSheetConfirm"),
   genericSheetCancel: byId("genericSheetCancel"),
-  toolBtns: [...document.querySelectorAll(".tool[data-tool]")],
+  toolBtns: [...document.querySelectorAll<HTMLElement>(".tool[data-tool]")],
   activeSwatch: byId("activeSwatch"),
   // 浮动色板
   colorPanel: byId("colorPanel"),
