@@ -79,6 +79,7 @@ export async function pack7z(entries, password) {
 /**
  * 解 .7z → { path: Uint8Array }。密码错 / 文件坏 → throw code=WRONG_PASSWORD。
  * -mhe 加密头：密码错时连目录都列不出 → 产物缺失即判错密码。
+ * @returns {Promise<Record<string, Uint8Array>>}
  */
 export async function unpack7z(bytes, password) {
   const sz = await _instance();
@@ -92,6 +93,7 @@ export async function unpack7z(bytes, password) {
   if (!files.length) {
     const e = new Error("密码不对或文件已损坏"); e.code = "WRONG_PASSWORD"; throw e;
   }
+  /** @type {Record<string, Uint8Array>} */
   const out = {};
   for (const name of files) {
     try {

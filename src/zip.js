@@ -57,13 +57,14 @@ export async function zipReadEntry(blob, path) {
   } finally { await reader.close(); }
 }
 
-/** 返回 { path: Uint8Array } */
+/** @returns {Promise<Record<string, Uint8Array>>} { path: Uint8Array } */
 export async function zipUnpack(blob) {
   ensureConfigured();
   const z = Z();
   const reader = new z.ZipReader(new z.BlobReader(blob));
   try {
     const entries = await reader.getEntries();
+    /** @type {Record<string, Uint8Array>} */
     const out = {};
     for (const e of entries) {
       if (e.directory) continue;
