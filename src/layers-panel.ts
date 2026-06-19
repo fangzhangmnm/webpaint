@@ -28,10 +28,37 @@ import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { raiseWindow } from "./surfaces.ts";
 import { compressPixelSnap } from "./pixel-edit.js";
+import type { AppContext } from "./app-context.ts";
 
-let doc: any, board: any, history: any, setStatus: any;
+// doc 图层活对象（doc.js 未类型化 → 描述本面板用到的字段/方法）。null 守卫兜「层在回调前被删」。
+interface LayerNode {
+  id: number; name: string; visible: boolean; opacity: number; mode: string;
+  clippingMask: boolean; lockAlpha: boolean; isGroup: boolean;
+  bboxW: number; bboxH: number; children?: LayerNode[];
+  snapshot(): LayerSpec; restoreFromSnapshot(snap: LayerSpec): void;
+}
+// layer-undo.layerSpecFrom / L.snapshot() 产出的可变 spec（异步压缩回填 .blob）。
+interface LayerSpec { blob?: Blob | null; imageData?: unknown; [k: string]: unknown; }
+
+// 传过 Vue 边界的 leaf-by-value 快照（每次 bump 拷新对象，见文件头硬规则）。
+interface LayerLeafSnap {
+  id: number; name: string; visible: boolean; opacity: number; mode: string;
+  clippingMask: boolean; lockAlpha: boolean; isGroup: boolean;
+}
+interface MoveTarget { id: number; name: string; }
+// 一行的数据（rows computed 的元素）。
+interface LayerRowData {
+  depth: number; isGroup: boolean; active: boolean; canUp: boolean; canDown: boolean;
+  canDel: boolean; canMoveOut: boolean; moveTargets: MoveTarget[]; layer: LayerLeafSnap;
+  collapsed: boolean; isRef: boolean; canDuplicate: boolean; canMergeDown: boolean;
+  hasPx: boolean; childLeafCount?: number;
+}
+// <LayerRow> setup 里读到的 props（其余 props 只在 template 用）。
+interface LayerRowProps { layer: LayerLeafSnap; depth: number; isGroup: boolean; }
+
+let doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
 // 留在 app.js、经 ctx 绑入的协作件（被非图层代码也调用）
-let _afterDocChange: any, layerSpecFrom: any;
+let _afterDocChange: AppContext["afterDocChange"], layerSpecFrom: AppContext["layerSpecFrom"];
 
 // 图层模式 → 单字符 badge (Procreate 风格)。"pass-through" 仅组可用（穿透）。
 const LAYER_MODE_INITIAL: Record<string, string> = {
@@ -61,10 +88,10 @@ const FOLDER_CLOSED = '<svg width="20" height="20" viewBox="0 0 24 24" fill="non
 // ---- 面板-UI-本地反应式状态（折叠 / 内联重命名 / ⋯菜单）----
 // 注：doc/图层结构变更的版本信号已外迁到 signals.ts 的 docVersion（跨切面共享）。
 const layersUi = reactive<{
-  expandedId: any;
-  menuId: any;            // 打开 ⋯ 菜单的层 id（null = 无）
-  renameId: any;          // 正在内联重命名的层 id（null = 无）
-  collapsedIds: Set<any>; // 折叠的组 id 集合（折叠 = 不渲染 children，不影响合成）
+  expandedId: number | null;
+  menuId: number | null;            // 打开 ⋯ 菜单的层 id（null = 无）
+  renameId: number | null;          // 正在内联重命名的层 id（null = 无）
+  collapsedIds: Set<number>; // 折叠的组 id 集合（折叠 = 不渲染 children，不影响合成）
 }>({ expandedId: null, menuId: null, renameId: null, collapsedIds: new Set() });
 
 // ---- 图层面板开关 ----
@@ -90,12 +117,12 @@ function _addEmptyLayer() {
   const prevActiveId = doc.activeLayer?.id ?? null;   // 持久化：undo 创建时回到创建前的活动层
   const L = doc.addLayer();
   if (!L) return;
-  const loc = doc.locateNode(L.id);                   // {parentId, index}：组内新建也精确复位
-  const layerSpec = layerSpecFrom(L);
+  const loc = doc.locateNode(L.id)!;                   // {parentId, index}：组内新建也精确复位
+  const layerSpec = layerSpecFrom(L) as LayerSpec;
   history.push({ type: "addLayer", index: loc.index, parentId: loc.parentId, layerSpec, prevActiveId });
   _afterDocChange();
 }
-function _deleteLayer(L: any) {
+function _deleteLayer(L: LayerNode | null) {
   if (!L) return;
   // 组删除：连带 children，撤销底座 = snapshotTree（保叶活引用）。
   // 允许删非空组（含删到 0 叶）—— 删空了就补一张空层保 ≥1 叶（不卡在「非空组删不掉」）。
@@ -109,11 +136,11 @@ function _deleteLayer(L: any) {
     _afterDocChange();
     return;
   }
-  const loc = doc.locateNode(L.id);                   // 先记位置（removeLayer 后就找不到了）
-  const layerSpec = layerSpecFrom(L);
+  const loc = doc.locateNode(L.id)!;                   // 先记位置（removeLayer 后就找不到了）
+  const layerSpec = layerSpecFrom(L) as LayerSpec;
   if (!doc.removeLayer(L.id)) { setStatus("至少保留一层"); return; }
   history.push({ type: "removeLayer", index: loc.index, parentId: loc.parentId, layerSpec });
-  compressPixelSnap(layerSpec, (blob: any) => { layerSpec.blob = blob; });
+  compressPixelSnap(layerSpec, (blob: Blob) => { layerSpec.blob = blob; });
   _afterDocChange();
 }
 // ---- 图层组 op caller（都走 snapshotTree 结构撤销；纯结构变、零像素拷贝）----
@@ -126,7 +153,7 @@ function _addEmptyGroup() {
   _afterDocChange();
   setStatus(`已新建图层组：${g.name}`);
 }
-function _ungroupLayer(L: any) {
+function _ungroupLayer(L: LayerNode | null) {
   if (!L || !L.isGroup) return;
   const before = doc.snapshotTree();
   if (!doc.ungroup(L.id).ok) return;
@@ -135,7 +162,7 @@ function _ungroupLayer(L: any) {
   _afterDocChange();
   setStatus(`已解组：${L.name}`);
 }
-function _moveIntoGroup(L: any, groupId: any) {
+function _moveIntoGroup(L: LayerNode | null, groupId: number) {
   if (!L || groupId == null) return;
   const before = doc.snapshotTree();
   if (!doc.moveIntoGroup(L.id, groupId)) return;
@@ -144,7 +171,7 @@ function _moveIntoGroup(L: any, groupId: any) {
   _afterDocChange();
   setStatus(`已移入组：${L.name}`);
 }
-function _moveOutOfGroup(L: any) {
+function _moveOutOfGroup(L: LayerNode | null) {
   if (!L) return;
   const before = doc.snapshotTree();
   if (!doc.moveOutOfGroup(L.id)) return;
@@ -154,15 +181,15 @@ function _moveOutOfGroup(L: any) {
   setStatus(`已移出组：${L.name}`);
 }
 // v132：清空当前图层像素，保留图层 + 名字 + opacity / mode，bbox 归零
-function _clearLayerPixels(L: any) {
+function _clearLayerPixels(L: LayerNode | null) {
   if (!L) return;
   if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("图层已经是空的"); return; }
   const before = L.snapshot();
   L.restoreFromSnapshot({ bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null, bitmap: null });
   const after = L.snapshot();
   history.push({ type: "stroke", layerId: L.id, before, after, beforeBlob: null, afterBlob: null });
-  compressPixelSnap(before, (blob: any) => { before.blob = blob; });
-  compressPixelSnap(after,  (blob: any) => { after.blob  = blob; });
+  compressPixelSnap(before, (blob: Blob) => { before.blob = blob; });
+  compressPixelSnap(after,  (blob: Blob) => { after.blob  = blob; });
   _afterDocChange();
   board.invalidateAll();
   setStatus(`已清空：${L.name}`);
@@ -173,12 +200,12 @@ const _MERGE_DOWN_STATUS: Record<string, string> = {
   bottom: "已经是最底层，没法向下合",
   "clipping-under": "下方是剪裁层，不能合到它上面（先取消下方的剪裁）",
 };
-function _mergeDownLayer(L: any) {
+function _mergeDownLayer(L: LayerNode | null) {
   if (!L) return;
   const r = doc.mergeDownLayer(L);
   if (!r.ok) {
     if (r.reason === "empty-active") { _deleteLayer(L); return; }   // active 空 → 当删 active
-    setStatus(_MERGE_DOWN_STATUS[r.reason] || "无法向下合并");
+    setStatus(_MERGE_DOWN_STATUS[r.reason ?? ""] || "无法向下合并");
     return;
   }
   history.push({
@@ -189,12 +216,13 @@ function _mergeDownLayer(L: any) {
     underBeforeClipping: r.underBeforeClipping, resultClipping: r.resultClipping,
     activeSpec: r.activeSpec, activeLoc: r.activeLoc,
   });
-  compressPixelSnap(r.underBefore, (blob: any) => { r.underBefore.blob = blob; });
-  compressPixelSnap(r.underAfter, (blob: any) => { r.underAfter.blob = blob; });
-  if (r.activeSpec.imageData) compressPixelSnap(r.activeSpec, (blob: any) => { r.activeSpec.blob = blob; });
+  compressPixelSnap(r.underBefore, (blob: Blob) => { r.underBefore.blob = blob; });
+  compressPixelSnap(r.underAfter, (blob: Blob) => { r.underAfter.blob = blob; });
+  const aspec = r.activeSpec as LayerSpec;   // mergeDown 结果 spec（doc.js 未类型化，blob 初始 null）
+  if (aspec.imageData) compressPixelSnap(aspec, (blob: Blob) => { aspec.blob = blob; });
   _afterDocChange();
 }
-function _moveLayerDelta(L: any, delta: number) {
+function _moveLayerDelta(L: LayerNode | null, delta: number) {
   if (!L) return;
   if (!doc.moveLayer(L.id, delta)) return;   // 同级 ±delta；撤销靠反向 delta（树安全）
   history.push({ type: "moveLayer", layerId: L.id, delta });
@@ -203,22 +231,23 @@ function _moveLayerDelta(L: any, delta: number) {
 // v267 复制图层：模型 op 归 doc.duplicateLayer；这里包成 addLayer undo entry（undo 删新层、
 //   redo 经 insertLayerAt 连像素恢复）+ 异步压缩快照。spec 显式带 clip/lockAlpha（doc.layerSpec
 //   不含这两项，否则 redo 会丢）。
-function _duplicateLayer(L: any) {
+function _duplicateLayer(L: LayerNode | null) {
   if (!L) return;
   if (countLeaves(doc.layers) >= doc.maxLayers) { setStatus(`图层数已达上限 ${doc.maxLayers}`); return; }
   const prevActiveId = doc.activeLayer?.id ?? null;
   const r = doc.duplicateLayer(L.id);
   if (!r.ok) return;
-  const layerSpec = { ...layerSpecFrom(r.newLayer), clippingMask: r.newLayer.clippingMask, lockAlpha: r.newLayer.lockAlpha };
-  history.push({ type: "addLayer", index: r.loc.index, parentId: r.loc.parentId, layerSpec, prevActiveId });
-  compressPixelSnap(layerSpec, (blob: any) => { layerSpec.blob = blob; });
+  const newLayer = r.newLayer!;
+  const layerSpec = { ...(layerSpecFrom(newLayer) as LayerSpec), clippingMask: newLayer.clippingMask, lockAlpha: newLayer.lockAlpha };
+  history.push({ type: "addLayer", index: r.loc!.index, parentId: r.loc!.parentId, layerSpec, prevActiveId });
+  compressPixelSnap(layerSpec, (blob: Blob) => { layerSpec.blob = blob; });
   _afterDocChange();
   setStatus(`已复制：${L.name}`);
 }
 
 // ---- 每层属性变更（可见性 / 透明度 / 模式 / 剪裁 / 参考层），逐字保留旧 history 路径 ----
 // 这些函数收的是 doc 活对象（live()），不是 row 快照；null 守卫兜「层在回调前被删」的竞态。
-function _toggleVisible(L: any) {
+function _toggleVisible(L: LayerNode | null) {
   if (!L) return;
   const oldVal = L.visible;
   L.visible = !oldVal;
@@ -227,7 +256,7 @@ function _toggleVisible(L: any) {
   board.invalidateAll();
   board.requestRender();
 }
-function _setMode(L: any, newVal: string) {
+function _setMode(L: LayerNode | null, newVal: string) {
   if (!L) return;
   const oldVal = L.mode;
   L.mode = newVal;
@@ -236,7 +265,7 @@ function _setMode(L: any, newVal: string) {
   board.invalidateAll();
   board.requestRender();
 }
-function _toggleClipping(L: any) {
+function _toggleClipping(L: LayerNode | null) {
   if (!L) return;
   const oldVal = L.clippingMask;
   L.clippingMask = !oldVal;
@@ -246,14 +275,14 @@ function _toggleClipping(L: any) {
   board.requestRender();
 }
 // v242 锁定不透明度（alpha lock）：纯绘制约束，不改像素/合成 → 不必 invalidate 渲染，render panel 即可。
-function _toggleLockAlpha(L: any) {
+function _toggleLockAlpha(L: LayerNode | null) {
   if (!L) return;
   const oldVal = L.lockAlpha;
   L.lockAlpha = !oldVal;
   history.push({ type: "setLayerProp", layerId: L.id, prop: "lockAlpha", oldVal, newVal: L.lockAlpha });
   renderLayersPanel();
 }
-function _toggleReference(L: any) {
+function _toggleReference(L: LayerNode | null) {
   if (!L) return;
   const isRefNow = doc.referenceLayerId === L.id;
   const oldVal = doc.referenceLayerId;
@@ -262,7 +291,7 @@ function _toggleReference(L: any) {
   history.push({ type: "setReferenceLayer", oldVal, newVal });
   renderLayersPanel();
 }
-function _commitRename(L: any, raw: string) {
+function _commitRename(L: LayerNode | null, raw: string) {
   if (!L) return;
   const oldName = L.name;
   const v = (raw ?? "").trim();
@@ -278,7 +307,7 @@ function _commitRename(L: any, raw: string) {
 // input 期间只改 layer.opacity + render + bumpDoc（百分比标签实时跟随，不动 history），
 // change / pointerup / pointercancel 提交一次 —— 提交即清 oldVal，多事件到达只生效第一个。
 // 一次拖动 = 一个 undo entry；键盘每步 = 一个 entry。
-function _opacityLive(L: any, pct: number) {
+function _opacityLive(L: LayerNode | null, pct: number) {
   if (!L) return;
   L.opacity = pct / 100;
   bumpDoc();
@@ -311,7 +340,7 @@ const LayerRow = defineComponent({
     canMoveOut: { type: Boolean, default: false },
     moveTargets: { type: Array, default: () => [] },   // 可移入的已有组 [{id,name}]
   },
-  setup(props: any) {
+  setup(props: LayerRowProps) {
     // snap = rows 重算时拷出的 leaf 快照（只读显示值，引用每次 bump 必变 → 反应式穿透）；
     // live = doc 里的活对象（mutation 必须走它；可能为 null —— 层已被删）。
     const snap = () => props.layer;
@@ -338,10 +367,10 @@ const LayerRow = defineComponent({
         });
       }
     }
-    function onRenameCommit(e: any) {
+    function onRenameCommit(e: Event) {
       if (layersUi.renameId !== snap().id) return;
       layersUi.renameId = null;
-      _commitRename(live(), e.target.value);
+      _commitRename(live(), (e.target as HTMLInputElement).value);
     }
     function onRenameKey(e: KeyboardEvent) {
       if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
@@ -363,7 +392,7 @@ const LayerRow = defineComponent({
     function vis(e: Event) { e.stopPropagation(); _toggleVisible(live()); }
 
     // 透明度 slider（coalescing：首个 input 记 old —— 键盘步进没有 pointerdown 也照样进 history）
-    let opaOld: any = null;
+    let opaOld: number | null = null;
     function opaInput(e: Event) {
       const lv = live();
       if (!lv) return;
@@ -407,7 +436,7 @@ const LayerRow = defineComponent({
       else if (a === "moveOut")   _moveOutOfGroup(live());
     }
     // 移入选中的已有组（high：把外面的层加入已知组，不限上方相邻；dropdown 不挤占菜单）
-    function onMoveSelect(e: any) {
+    function onMoveSelect(e: Event) {
       const v = (e.target as HTMLSelectElement).value;
       if (!v) return;
       layersUi.menuId = null;
@@ -527,14 +556,14 @@ const LayersPanel = defineComponent({
     // 每行 leaf-by-value 快照（含 isGroup）；能力位按**同级**边界算。
     const rows = computed(() => {
       void docVersion.value;   // 依赖跨切面信号：bumpDoc() 即重算
-      const out: any[] = [];
+      const out: LayerRowData[] = [];
       const activeId = doc.activeId;
       const totalLeaves = countLeaves(doc.layers);
       // 全部组（id+name+node ref）：给「移入组」列表用。算一次，每行再按「非自身/非后代/非当前父」过滤。
-      const allGroups: any[] = [];
-      const collect = (nodes: any[]) => { for (const n of nodes) if (n.isGroup) { allGroups.push(n); collect(n.children); } };
+      const allGroups: LayerNode[] = [];
+      const collect = (nodes: LayerNode[]) => { for (const n of nodes) if (n.isGroup) { allGroups.push(n); collect(n.children!); } };
       collect(doc.layers);
-      const walk = (nodes: any[], depth: number, parentNode: any) => {
+      const walk = (nodes: LayerNode[], depth: number, parentNode: LayerNode | null) => {
         for (let i = nodes.length - 1; i >= 0; i--) {
           const n = nodes[i];
           // 该节点可移入的目标组：排除自身、自身后代（防环）、当前所在组（已在里面）。
@@ -556,7 +585,7 @@ const LayersPanel = defineComponent({
           if (n.isGroup) {
             const collapsed = layersUi.collapsedIds.has(n.id);
             out.push({ ...base, collapsed, isRef: false, canDuplicate: false, canMergeDown: false, hasPx: false, childLeafCount: countLeaves(n.children) });
-            if (!collapsed) walk(n.children, depth + 1, n);
+            if (!collapsed) walk(n.children!, depth + 1, n);
           } else {
             out.push({
               ...base, collapsed: false,
@@ -595,7 +624,7 @@ const LayersPanel = defineComponent({
   `,
 });
 
-let _vueApp: any = null;
+let _vueApp: { mount(el: Element): unknown } | null = null;
 
 // 把图层列表的 max-height 钉到「列表顶 → 视口底」可用空间，列表内部 overflow 滚动。
 //   修：层多 / 面板被拖到屏幕下半 时，最底 item 掉出视口够不着。CSS 的 50vh 是固定上限、不跟位置走。
@@ -628,9 +657,9 @@ function _syncChrome() {
   });
 }
 
-let _layersDrag: any = null;
+let _layersDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
 
-export function initLayersPanel(ctx) {
+export function initLayersPanel(ctx: AppContext) {
   ({ doc, board, history, setStatus, afterDocChange: _afterDocChange, layerSpecFrom } = ctx);
 
   // 挂 Vue 应用到图层列表容器（旧 renderLayersPanel 渲染进的 #layersList）。
@@ -643,9 +672,10 @@ export function initLayersPanel(ctx) {
   window.addEventListener("resize", _clampListHeight);
 
   // 点击别处收起打开的 ⋯ 菜单（取代旧 popup 的 outside-pointerdown）
-  document.addEventListener("pointerdown", (e: any) => {
+  document.addEventListener("pointerdown", (e: Event) => {
     if (layersUi.menuId == null) return;
-    if (!e.target.closest(".layer-tools-popup") && !e.target.closest(".layer-tools-btn")) {
+    const tgt = e.target as HTMLElement | null;
+    if (!tgt?.closest(".layer-tools-popup") && !tgt?.closest(".layer-tools-btn")) {
       layersUi.menuId = null;
     }
   }, true);
@@ -656,14 +686,14 @@ export function initLayersPanel(ctx) {
   els.layersPanelClose.addEventListener("click", () => toggleLayersPanel(false));
 
   // 拖动 layers 面板（沿用 color panel 模式）
-  els.layersPanelHead.addEventListener("pointerdown", (e: any) => {
-    if (e.target.closest(".float-panel-close")) return;
+  els.layersPanelHead.addEventListener("pointerdown", (e: PointerEvent) => {
+    if ((e.target as HTMLElement | null)?.closest(".float-panel-close")) return;
     const r = els.layersPanel.getBoundingClientRect();
     _layersDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
     els.layersPanelHead.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
-  els.layersPanelHead.addEventListener("pointermove", (e: any) => {
+  els.layersPanelHead.addEventListener("pointermove", (e: PointerEvent) => {
     if (!_layersDrag || e.pointerId !== _layersDrag.id) return;
     const w = els.layersPanel.offsetWidth;
     const h = els.layersPanel.offsetHeight;
@@ -675,7 +705,7 @@ export function initLayersPanel(ctx) {
     _clampListHeight();   // 拖动改了面板顶 → 重钉列表高度，底部 item 始终够得着
     safeLSSet("webpaint.layersPanel.pos", JSON.stringify({ left, top }));
   });
-  els.layersPanelHead.addEventListener("pointerup", (e: any) => {
+  els.layersPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
     if (_layersDrag && e.pointerId === _layersDrag.id) {
       try { els.layersPanelHead.releasePointerCapture(e.pointerId); } catch {}
       _layersDrag = null;
@@ -695,7 +725,7 @@ export function initLayersPanel(ctx) {
   // v267 指令栏：+（弹菜单：新图层 / 导入图片）· 上移 · 下移 · 删除。命令全走深模块 caller，UI 只调。
   const addPopup = document.getElementById("layerAddPopup");
   const closeAddPopup = () => addPopup?.classList.add("hidden");
-  els.layerAddBtn.addEventListener("click", (e: any) => {
+  els.layerAddBtn.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     addPopup?.classList.toggle("hidden");
   });
@@ -704,9 +734,10 @@ export function initLayersPanel(ctx) {
   // 导入图片到新层：实际逻辑由 import-image.ts 给 layerImportPhotoBtn 接线，这里只负责收起菜单。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", closeAddPopup);
   // 点别处收起 "+" 菜单
-  document.addEventListener("pointerdown", (e: any) => {
+  document.addEventListener("pointerdown", (e: Event) => {
     if (addPopup?.classList.contains("hidden")) return;
-    if (!e.target.closest("#layerAddPopup") && !e.target.closest("#layerAddBtn")) closeAddPopup();
+    const tgt = e.target as HTMLElement | null;
+    if (!tgt?.closest("#layerAddPopup") && !tgt?.closest("#layerAddBtn")) closeAddPopup();
   }, true);
 
   document.getElementById("layerMoveUpBtn")?.addEventListener("click", () => {

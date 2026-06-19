@@ -24,7 +24,7 @@ export const els = {
   layersPanelClose: byId("layersPanelClose"),
   layersList: byId("layersList"),
   layersCountLabel: byId("layersCountLabel"),
-  layerAddBtn: byId("layerAddBtn"),
+  layerAddBtn: byId<HTMLButtonElement>("layerAddBtn"),
   // v123：del/up/down 挪进 per-row "⋯" 菜单；footer 只剩 layerAddBtn
   menuBtn: byId("menuButton"),
   menuPanel: byId("menuPanel"),

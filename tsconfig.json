@@ -41,6 +41,7 @@
     "src/app-context.ts",
     "src/editor-state.ts",
     "src/session-state.ts",
+    "src/layers-panel.ts",
     "src/cloud-freshness.ts",
     "src/boot.ts",
     "src/surfaces.ts",

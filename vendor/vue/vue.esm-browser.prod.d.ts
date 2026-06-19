@@ -13,6 +13,7 @@ export function watch(
   opts?: { flush?: "pre" | "post" | "sync"; deep?: boolean; immediate?: boolean },
 ): () => void;
 export function onMounted(cb: () => void): void;
+export function nextTick(cb?: () => void): Promise<void>;
 
 // 组件 / app 工厂用宽松类型即可（深契约在调用方的 props/emits + mount handle interface 里）。
 export function defineComponent(options: any): any;

@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v298 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v299 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -132,14 +132,27 @@ session-state 级联通后，两个 store-orchestration 红线消费方入门。
 - **红线消费方同样只做类型**：cloud-freshness/boot 也是 store-orchestration 红线；改动 type-erased 或行为等价
   （`Date.parse(String(iso))` ≡ `Date.parse(iso)`，Date.parse 本就 ToString）。
 
-## 待迁（按风险，勿盲目铺开）
+### ✅ batch 6 · layers-panel keystone（v299，2026-06-19）
+图层面板 UI（`layers-panel.ts` 721 行 / 43 any · Vue 组件 + 深 doc 操作）入门 —— keystone，解锁 `layer-undo`。
+typecheck + 388 测试全绿、bundle 通过。零 any 出门。
 
-- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子 + hub + cloud-freshness/boot 已 gated（batch 3-5）。剩 ~12 个 `initX`。
-  **两个 keystone（closure 已 clean、gate 它们解锁最多下游）**：
-  - `toolbar.ts`(72 any) → 解锁 `selection-ops`/`filters-adjust`/`transient-panels`/`import-image`。最重，单独成批。
-  - `layers-panel.ts`(49 any) → 解锁 `layer-undo`。
+| 做了什么 | 细节 |
+|---|---|
+| ctx 单例 → `AppContext[...]` | `doc`(PaintDoc)/`board`/`history`/`setStatus`/`afterDocChange`/`layerSpecFrom`。doc 方法（layers/addLayer/locateNode/snapshotTree/mergeDownLayer…）全过——doc.js 推断够用。 |
+| 本地 interface 描述未类型化 doc 对象 | `LayerNode`（活层）、`LayerSpec`（可变快照 spec，`blob?: Blob\|null`）、`LayerLeafSnap`/`LayerRowData`/`MoveTarget`（Vue 边界 leaf-by-value 数据）、`LayerRowProps`。 |
+| Vue / DOM | `setup(props: LayerRowProps)`；event handler `PointerEvent`/`Event` + `(e.target as HTMLElement\|null)?.closest`；`els.layerAddBtn` 收窄成 `HTMLButtonElement`（candidate 4）。 |
+| 未类型 doc-seam 断言 | `doc.locateNode(...)!`、`r.newLayer!`/`r.loc!`、`n.children!`（组必有 children）、mergeDown/duplicate 结果 spec `as LayerSpec`——doc.js/pixel-edit.js 类型化时收紧。 |
+
+**关键发现**：
+- **vendored vue 的 `.d.ts` 是手写 stub、不全**：缺 `nextTick` → 补一行 `export function nextTick(...)`（描述 runtime 已有的导出，非改 vue 本体）。后续 UI 组件入门遇缺啥补啥。
+- **app-UI 屎山可纯类型化**：layers-panel 非 store 红线，但仍全程 type-erased / 行为等价（`reason ?? ""` 索引、`?.closest` 兜 null）——印证北极星「type 屎山而不改行为」可行。
+
+
+- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子 + hub + cloud-freshness/boot + layers-panel 已 gated（batch 3-6）。剩 ~11 个 `initX`。
+  - `layer-undo.ts`(4) 现已可 gate（唯一 .ts 依赖 layers-panel 已入门）。
+  - **剩下的 keystone = `toolbar.ts`(72 any)** → 解锁 `selection-ops`/`filters-adjust`/`transient-panels`/`import-image`。最重，单独成批。
   其余（`settings-menu`/`doc-ops`/`side-windows`/`topbar-menu`/`smooth-dev-panel`/`export-import-menu`/`gallery-shell`）
-  的闭包仍含 toolbar/settings-menu/import-image，须先 gate keystone。屎山内部按「诚实描述现状」类型化（北极星：少熵）。
+  的闭包仍含 toolbar/settings-menu/import-image，须先 gate toolbar keystone。屎山内部按「诚实描述现状」类型化（北极星：少熵）。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。
 - **手感红区**（`input.js` 1171 行未测 · `brush.js` · `stroke-smoother.js`）= 用户钉死区。
