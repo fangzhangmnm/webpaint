@@ -37,7 +37,7 @@ export function topToolbarBottom(): number {
 }
 
 interface PositionOpts {
-  anchor?: any;            // 锚按钮（量其 bottom/left/right）；null = 不锚按钮，钉视口边
+  anchor?: HTMLElement | null;  // 锚按钮（量其 bottom/left/right）；null = 不锚按钮，钉视口边
   align?: "left" | "right"; // 右对齐到 anchor.right / 视口右（默认 right）；左同理
   offsetY?: number;        // 锚点下方间距（默认 4）
   edgeMargin?: number;     // 无 anchor 时离视口边的距离（默认 8）
@@ -46,7 +46,7 @@ interface PositionOpts {
 }
 
 // 唯一定位核心。所有按钮锚定 / 边钉的 popup 都走它。
-export function positionPopup(popupEl: any, opts: PositionOpts = {}) {
+export function positionPopup(popupEl: HTMLElement | null, opts: PositionOpts = {}) {
   if (!popupEl) return;
   const {
     anchor = null, align = "right", offsetY = 4,
@@ -76,10 +76,10 @@ export function positionPopup(popupEl: any, opts: PositionOpts = {}) {
 
 // ---- 兼容 wrapper：老调用点零改动 ----
 // 锚到按钮下方右对齐（图库 新建/云账号/回收站/菜单 popup）。
-export function anchorPopupToBtn(popup: any, btn: any, opts: PositionOpts = {}) {
+export function anchorPopupToBtn(popup: HTMLElement | null, btn: HTMLElement | null, opts: PositionOpts = {}) {
   positionPopup(popup, { anchor: btn, align: "right", ...opts });
 }
 // 锚到按钮下方右对齐，但让到所有可见顶栏条以下（fx 选单）。
-export function anchorPopupBelowToolbars(popup: any, btn: any, offsetY = 4) {
+export function anchorPopupBelowToolbars(popup: HTMLElement | null, btn: HTMLElement | null, offsetY = 4) {
   positionPopup(popup, { anchor: btn, align: "right", belowToolbars: true, offsetY });
 }

@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v295 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v296 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -78,11 +78,28 @@
 - **`any` 数严重低估 strict 摩擦**：消费方一旦 gate，每个 `els.*` 的 `|null`、每个未类型 event handler 都点亮——
   故先做 `els.ts` 非空（candidate 4）= **mass 消费方入门的前置**（否则人人淹在 `!` 里）。
 
+### ✅ batch 3 · app 层基础叶子 + color-panel 消费方（v296，2026-06-19）
+gate 一批**被多个消费方依赖的基础叶子**——它们在很多消费方的 `.ts` 闭包里，先 gate 它们 = 缩小后续每个消费方的闭包。
+typecheck + 388 测试全绿、bundle 通过。新 gated 8 个：
+
+| 文件 | 做了什么 |
+|---|---|
+| `surfaces.ts` · `signals.ts` | 本就全 typed，零改动入门（z-order 栈 / 反应式 docVersion）。 |
+| `session-name.ts` | `(s:any)` → `(s:{name:string})` 等小修。 |
+| `anchored-popup.ts` | 6 个 DOM `any` → `HTMLElement \| null`。 |
+| `sheets.ts` | 泛型 `resolveAndClose<T>`；非标 CSS 走 `style.setProperty("-webkit-text-security")`（去 `as any`）；`syncGate`/`lockSyncGate`/`settleSyncGate` typed。 |
+| `color-panel.ts` | `initX(ctx: AppContext)` + `state: AppContext["state"]` + `colorWheel: ReturnType<typeof mountColorWheel>`；event handler typed（`PointerEvent`/`CustomEvent`）。 |
+| `ui/color-wheel.ts` · `ui/color-model.ts` | 经 color-panel 级联带入门（本就 well-typed，零改动）——顺带推进 candidate 1（UI）。 |
+
+> 唯一 `as`：`mountColorWheel(els.colorPanelBody as HTMLElement)`——`colorPanelBody` 是 `querySelector`（非 byId）故 `Element|null`，
+> 但它是必存在的挂载点。byId 体系外的 querySelector 元素，到用处再断言。
+
 ## 待迁（按风险，勿盲目铺开）
 
-- **AppContext 消费方 rollout（candidate 2 续）**：剩 ~18 个 `initX`。**先做 candidate 4**（els 收窄到具体元素类型
-  + 其余非空），再按 **`.ts` 依赖闭包**成簇 gate（一簇 = 一个连通子图一起入门）。每簇：`initX(ctx: AppContext)` +
-  模块单例 typed + 修 strict-null/event 类型。屎山内部按「诚实描述现状」类型化（北极星：少熵）。
+- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子层已 gated（batch 3）。**下一个大解锁 = `session-state.ts`(66)
+  + `editor-state.ts`**——它们在多数消费方闭包的底部（`cloud-freshness`/`topbar-menu`/`boot`/`import-image`/`gallery-shell`
+  全向 session-state 级联）。gate 它俩后，那批消费方的闭包才塌成可单独 gate。editor-state 类型化还能把 `AppContext.state`
+  从占位升级成真类型。屎山内部按「诚实描述现状」类型化（北极星：少熵）。剩余轻消费方按 **`.ts` 依赖闭包**成簇 gate。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。
 - **手感红区**（`input.js` 1171 行未测 · `brush.js` · `stroke-smoother.js`）= 用户钉死区。

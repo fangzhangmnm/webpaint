@@ -32,10 +32,20 @@
   // 加新文件进来 = 把它纳入硬门：从此它的类型契约被持续验证（见 docs/ts-migration.md）。
   // batch 1（v294，2026-06-19）：11 个纯·已测·低耦合叶子（无 DOM 副作用 / 无领域写）。
   // batch 2（v295，2026-06-19）：AppContext seam（组合根装配契约）+ 首批 initX 消费方入门。
+  // batch 3（v296，2026-06-19）：app 层基础叶子（surfaces/signals/sheets/anchored-popup/session-name）
+  //   + color-panel 消费方（带 ui/color-wheel·color-model 级联）。
   "include": [
     "src/store/**/*.ts",
     "src/store/**/*.js",
     "src/app-context.ts",
+    "src/surfaces.ts",
+    "src/signals.ts",
+    "src/session-name.ts",
+    "src/anchored-popup.ts",
+    "src/sheets.ts",
+    "src/color-panel.ts",
+    "src/ui/color-wheel.ts",
+    "src/ui/color-model.ts",
     "src/els.ts",
     "src/safe-ls.ts",
     "src/fullscreen-busy.ts",

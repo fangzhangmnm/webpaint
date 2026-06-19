@@ -9,12 +9,12 @@ import { stripSessionExt } from "./config.js";
 
 // 返回冲突类型 "local" | "cloud" | null。cloud 列举失败不算冲突（best-effort，吞并 warn）。
 export async function sessionNameConflict(name: string, { cloud = false }: { cloud?: boolean } = {}): Promise<"local" | "cloud" | null> {
-  const localNames = (await listSessions()).map((s: any) => s.name);
+  const localNames = (await listSessions()).map((s: { name: string }) => s.name);
   if (localNames.includes(name)) return "local";
   if (cloud) {
     try {
       const list = await listCloudSessionsRecursive();
-      if (list.map((c: any) => stripSessionExt(c.path)).includes(name)) return "cloud";
+      if (list.map((c: { path: string }) => stripSessionExt(c.path)).includes(name)) return "cloud";
     } catch (e) { console.warn("[session-name] cloud list failed:", e); }
   }
   return null;

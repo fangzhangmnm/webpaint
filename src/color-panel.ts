@@ -2,14 +2,15 @@
 // 色轮渲染/HSV 在 ui/color-wheel.ts；本模块只管「当前色 + 面板 chrome + 吸色提示」。
 // drawing app 与色彩只经一个 color 值耦合（setColor 写 state.color → 反应式 → currentBrush 重派生）。
 
+import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
 import { mountColorWheel } from "./ui/color-wheel.ts";
 import { raiseWindow } from "./surfaces.ts";
 
-const safeLS = (k: string, f?: any) => { try { return localStorage.getItem(k) ?? f; } catch { return f; } };
-const safeLSSet = (k: string, v: any) => { try { localStorage.setItem(k, String(v)); } catch {} };
+const safeLS = (k: string, f?: string) => { try { return localStorage.getItem(k) ?? f; } catch { return f; } };
+const safeLSSet = (k: string, v: unknown) => { try { localStorage.setItem(k, String(v)); } catch {} };
 
-let state: any, colorWheel: any;
+let state: AppContext["state"], colorWheel: ReturnType<typeof mountColorWheel>;
 
 export function setColor(hex: string) {
   state.color = hex;   // 反应式（proxy→dialReactive.color）→ currentBrush computed 自动重派生
@@ -42,12 +43,12 @@ export function toggleColorPanel(force?: boolean) {
   }
 }
 
-let _panelDrag: any = null;
-let _pickerPinTimer: any = null;
+let _panelDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
+let _pickerPinTimer: ReturnType<typeof setTimeout> | undefined;
 
-export function initColorPanel(ctx) {
+export function initColorPanel(ctx: AppContext) {
   state = ctx.state;
-  colorWheel = mountColorWheel(els.colorPanelBody, {
+  colorWheel = mountColorWheel(els.colorPanelBody as HTMLElement, {
     getColor: () => state.color,
     onPick: (hex: string) => setColor(hex),
   });
@@ -56,14 +57,14 @@ export function initColorPanel(ctx) {
   els.colorPanelClose.addEventListener("click", () => toggleColorPanel(false));
 
   // 拖标题栏移动面板
-  els.colorPanelHead.addEventListener("pointerdown", (e: any) => {
-    if (e.target.closest(".close-x")) return;
+  els.colorPanelHead.addEventListener("pointerdown", (e: PointerEvent) => {
+    if ((e.target as HTMLElement | null)?.closest(".close-x")) return;
     const r = els.colorPanel.getBoundingClientRect();
     _panelDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
     els.colorPanelHead.setPointerCapture(e.pointerId);
     e.preventDefault();
   });
-  els.colorPanelHead.addEventListener("pointermove", (e: any) => {
+  els.colorPanelHead.addEventListener("pointermove", (e: PointerEvent) => {
     if (!_panelDrag || e.pointerId !== _panelDrag.id) return;
     const w = els.colorPanel.offsetWidth;
     const h = els.colorPanel.offsetHeight;
@@ -73,7 +74,7 @@ export function initColorPanel(ctx) {
     els.colorPanel.style.top = top + "px";
     safeLSSet("webpaint.colorPanel.pos", JSON.stringify({ left, top }));
   });
-  els.colorPanelHead.addEventListener("pointerup", (e: any) => {
+  els.colorPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
     if (_panelDrag && e.pointerId === _panelDrag.id) {
       try { els.colorPanelHead.releasePointerCapture(e.pointerId); } catch {}
       _panelDrag = null;
@@ -83,9 +84,9 @@ export function initColorPanel(ctx) {
 
   // 吸色 pin tooltip（input.js _doPick 派发 wp:pickerShow，pin 在采样像素屏坐标，1.5s 自动淡出）
   const pin = document.getElementById("pickerPin");
-  window.addEventListener("wp:pickerShow", (e: any) => {
+  window.addEventListener("wp:pickerShow", (e: Event) => {
     if (!pin) return;
-    const { sx, sy, hex } = e.detail;
+    const { sx, sy, hex } = (e as CustomEvent).detail;
     pin.style.left = sx + "px";
     pin.style.top = sy + "px";
     pin.style.setProperty("--head-color", hex);

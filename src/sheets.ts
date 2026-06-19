@@ -34,7 +34,7 @@ function closeSheet(sheet: HTMLElement, backdrop: HTMLElement) {
   backdrop.classList.add("hidden");
   sheet.classList.add("hidden");
 }
-function resolveAndClose(resolve: (v: any) => void, value: any, cleanup: () => void) {
+function resolveAndClose<T>(resolve: (v: T) => void, value: T, cleanup: () => void) {
   cleanup();
   closeSheet(g.sheet(), g.backdrop());
   resolve(value);
@@ -53,7 +53,7 @@ export function openInputSheet(title: string, defaultValue = "", { placeholder =
     //   弹窗会把它们串味、误填。改用 type=text + -webkit-text-security 打码（Safari/Chrome/新版
     //   Firefox 都支持），绕开浏览器密码管理器的启发式探测，从根上不触发记密码弹窗。
     g.input().type = "text";
-    (g.input().style as any).webkitTextSecurity = password ? "disc" : "";
+    g.input().style.setProperty("-webkit-text-security", password ? "disc" : "");
     g.input().autocomplete = "off";
     g.input().value = defaultValue;
     g.input().placeholder = placeholder;
@@ -69,15 +69,15 @@ export function openInputSheet(title: string, defaultValue = "", { placeholder =
       g.confirm().removeEventListener("click", onConfirm);
       g.cancel().removeEventListener("click", onCancel);
       g.backdrop().removeEventListener("click", onCancel);
-      g.input().removeEventListener("keydown", onKey as any);
+      g.input().removeEventListener("keydown", onKey);
       g.input().type = "text";
-      (g.input().style as any).webkitTextSecurity = "";   // 打码态不残留到下一个输入框
+      g.input().style.setProperty("-webkit-text-security", "");   // 打码态不残留到下一个输入框
       g.input().value = "";
     };
     g.confirm().addEventListener("click", onConfirm);
     g.cancel().addEventListener("click", onCancel);
     g.backdrop().addEventListener("click", onCancel);
-    g.input().addEventListener("keydown", onKey as any);
+    g.input().addEventListener("keydown", onKey);
   });
 }
 
@@ -104,7 +104,12 @@ export function openConfirmSheet(title: string, message: string): Promise<boolea
 }
 
 // ---- Sync gate（锁屏覆盖 + 动作按钮）：纯 DOM 原语。决策编排在 app。----
-const syncGate: any = {
+interface SyncGateAction { label: string; value: unknown; primary?: boolean; }
+interface SyncGateOpts { title: string; message: string; showSpinner?: boolean; actions: SyncGateAction[]; }
+const syncGate: {
+  backdrop: HTMLElement; sheet: HTMLElement; title: HTMLElement; message: HTMLElement;
+  spinner: HTMLElement; actions: HTMLElement; _pendingResolve: ((value: unknown) => void) | null;
+} = {
   backdrop: $("syncGateBackdrop"),
   sheet: $("syncGateSheet"),
   title: $("syncGateTitle"),
@@ -114,7 +119,7 @@ const syncGate: any = {
   _pendingResolve: null,
 };
 
-export function lockSyncGate({ title, message, showSpinner, actions }: any): Promise<any> {
+export function lockSyncGate({ title, message, showSpinner, actions }: SyncGateOpts): Promise<unknown> {
   syncGate.title.textContent = title;
   syncGate.message.textContent = message;
   syncGate.spinner.classList.toggle("hidden", !showSpinner);
@@ -138,7 +143,7 @@ export function unlockSyncGate() {
   syncGate.sheet.classList.add("hidden");
   syncGate._pendingResolve = null;
 }
-export function settleSyncGate(value: any) {
+export function settleSyncGate(value: unknown) {
   if (syncGate._pendingResolve) {
     const r = syncGate._pendingResolve;
     unlockSyncGate();
