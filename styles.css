@@ -222,6 +222,7 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   font-weight: 600;
 }
 .lasso-tool-sep { color: var(--ink-soft); margin: 0 4px; opacity: 0.4; }
+.lasso-tool-text { color: var(--ink-soft); font-size: 12px; padding: 0 2px; white-space: nowrap; }
 .lasso-tool-confirm { color: var(--accent, #4c8bf5); font-weight: 600; }
 .lasso-tool-cancel { color: var(--ink-soft); }
 .lasso-tool-label { font-size: 13px; color: var(--ink); font-weight: 600; padding: 0 8px; }

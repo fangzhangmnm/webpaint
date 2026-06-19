@@ -215,6 +215,7 @@ export class InputController {
     this.getFilterBrushState = opts.getFilterBrushState || (() => null);
     this.getLongPressPickEnabled = opts.getLongPressPickEnabled || (() => false);
     this.getSingleFingerDraw = opts.getSingleFingerDraw || (() => false);
+    this.getPickMode = opts.getPickMode || (() => "composite");   // 吸色取样：composite | layer
     this.onColorSampled = opts.onColorSampled || (() => {});
     this.status = opts.status || (() => {});
 
@@ -884,17 +885,24 @@ export class InputController {
   _doPick(sx, sy) {
     const { x: dx, y: dy } = this.board.screenToDoc(sx, sy);
     const ix = Math.floor(dx), iy = Math.floor(dy);
-    if (!this.doc.activeLayer) return;
     if (ix < 0 || iy < 0 || ix >= this.doc.width || iy >= this.doc.height) {
       window.dispatchEvent(new CustomEvent("wp:pickerHide"));
       return;
     }
-    // 吸"最终合成可见颜色"——直接读 board 的 1:1 doc 合成缓存（deep module A 的产物，
-    //   respect mode + clip + 组隔离，修旧实现无视 mode/clip 的 bug）。再 over doc 背景得不透明色。
-    const off = this.board.ensureCompositeCache();
-    const octx = off.getContext("2d", { willReadFrequently: true });
+    // 两种取样模式（吸色 context toolbar 的下拉，state.pickMode）：
+    //   "layer"     = 当前编辑图层的 **raw 像素**（无视该层叠加模式 / clip / 图层 opacity）；
+    //                 active 是组 / 无可取叶 → 退回 composite。
+    //   "composite" = **最终合成可见颜色**（board 1:1 合成缓存 = 规范合成器产物，respect mode+clip+组隔离）。
+    // 两路都 over doc 背景得不透明色。
     let px;
-    try { px = octx.getImageData(ix, iy, 1, 1).data; } catch { px = [0, 0, 0, 0]; }
+    const active = this.doc.activeLayer;
+    if (this.getPickMode() === "layer" && active && !active.isGroup && active.sampleAt) {
+      px = active.sampleAt(ix, iy);
+    } else {
+      const off = this.board.ensureCompositeCache();
+      const octx = off.getContext("2d", { willReadFrequently: true });
+      try { px = octx.getImageData(ix, iy, 1, 1).data; } catch { px = [0, 0, 0, 0]; }
+    }
     const bg = parseHex(this.doc.backgroundColor || "#ffffff");
     const la = px[3] / 255;
     const inv = 1 - la;

@@ -13,6 +13,7 @@ import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
 import { Selection } from "./selection.js";
 import { compressPixelSnap } from "./pixel-edit.js";
 import { requireEditableLeaf } from "./editable-leaf.js";
+import { safeLSSet } from "./safe-ls.ts";
 import { fillResampleSelect } from "./resample.js";
 
 let editMode: any, state: any, doc: any, board: any, input: any, history: any,
@@ -26,15 +27,23 @@ let lassoToolbarStack: any, lassoToolbarRow1: any, lassoToolbarRow2: any,
     lassoSubBtns: any, lassoSetOpBtns: any, lassoTransformModeBtns: any,
     lassoThresholdInput: any, lassoThresholdVal: any, lassoMagicCfgBtn: any,
     lassoMagicPopup: any, lassoConstrainBtn: any, lassoConstrainSep: any,
-    lassoSelEditBtn: any;   // v242 选区编辑齿轮（有选区才亮；扩张/收缩 op）
+    lassoSelEditBtn: any,   // v242 选区编辑齿轮（有选区才亮；扩张/收缩 op）
+    pickerToolbar: any, pickModeSel: any;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
 
 // ===== 套索/选区工具栏（v65 重做）=====
 // 三个 section 按状态切换：subToolBar（lasso 激活）/ selectionActions（有选区且非 floating）/ transformCtrl（floating）
 export function updateLassoToolbar() {
+  // 吸色 context toolbar：吸色工具激活时显示。两 stack 同位 fixed → 必须互斥（picker 在场则 lasso stack 让位，
+  //   即便有选区也不露 deselect-only；Ctrl+D 仍可去选）。本函数 = 上下文工具栏统一同步点。
+  const pickerActive = editMode.current() === "picker";
+  if (pickerToolbar) {
+    pickerToolbar.classList.toggle("hidden", !pickerActive);
+    if (pickerActive && pickModeSel && pickModeSel.value !== state.pickMode) pickModeSel.value = state.pickMode;
+  }
   const floating = input.lasso.hasFloating();
   const hasSelection = !!doc.selection;
   const lassoActive = editMode.current() === "lasso";
-  const showAny = floating || hasSelection || lassoActive;
+  const showAny = (floating || hasSelection || lassoActive) && !pickerActive;
   lassoToolbarStack.classList.toggle("hidden", !showAny);
   if (!showAny) return;
 
@@ -422,6 +431,16 @@ export function initToolbar(ctx) {
       input.lasso.setSampleMode(lassoSampleSel.value);
       board.invalidateAll();
       updateLassoToolbar();
+    });
+  }
+  // 吸色取样模式 dropdown（composite 合并 / layer 当前图层 raw）。持久化到 LS；input._doPick 经 getPickMode 读。
+  pickerToolbar = document.getElementById("pickerToolbar");
+  pickModeSel = document.getElementById("pickModeSel");
+  if (pickModeSel) {
+    pickModeSel.value = state.pickMode;
+    pickModeSel.addEventListener("change", () => {
+      state.pickMode = pickModeSel.value;
+      safeLSSet("webpaint.pickMode", pickModeSel.value);
     });
   }
   // 选区 → 新层 / 复制层

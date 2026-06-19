@@ -146,6 +146,7 @@ const input = new InputController(board, doc, {
   getFilterBrushState: () => state.filterBrush || null,
   getLongPressPickEnabled: () => state.longPressPick,
   getSingleFingerDraw: () => state.singleFingerDraw,
+  getPickMode: () => state.pickMode,
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
   history,

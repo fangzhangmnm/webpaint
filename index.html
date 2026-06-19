@@ -444,6 +444,20 @@
       </div>
     </div>
 
+    <!-- 吸色工具 context toolbar（复用 lasso stack 的 context-toolbar 视觉类）：吸色取样模式。
+         与 lassoToolbarStack 互斥（吸色 ⊻ 套索），同位显示。 -->
+    <div class="lasso-toolbar-stack hidden" id="pickerToolbar" role="toolbar" aria-label="吸色取样">
+      <div class="lasso-toolbar">
+        <div class="lasso-section">
+          <span class="lasso-tool-text" aria-hidden="true">取样</span>
+          <select class="lasso-tool-select" id="pickModeSel" title="吸色取样：合并最终颜色 / 当前图层原色">
+            <option value="composite">合并颜色</option>
+            <option value="layer">当前图层</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
     <!-- 魔术棒设置 popup（点设置弹出，再点别处关）—— 独立于 toolbar stack -->
     <!-- v242：只剩阈值；扩展/收缩拆成选区编辑 op（见下 lassoSelEditMenu / lassoSelOpPopup） -->
     <div class="lasso-popup hidden" id="lassoMagicPopup" role="dialog" aria-label="魔术棒设置">
@@ -990,6 +1004,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-b1eec09de5c7.mjs"></script>
+    <script type="module" src="./dist/webpaint-9e092dba8ee5.mjs"></script>
   </body>
 </html>
