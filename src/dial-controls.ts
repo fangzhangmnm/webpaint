@@ -33,7 +33,7 @@ export function makeDialControls({ state, rack, getEditMode }: DialControlsDeps)
   const bindKeyboard = ({ board, leftDial }: DialKeyboardDeps) => {
     window.addEventListener("wp:adjsize", (e: Event) => {
       const t = getEditMode().current();
-      if (t === "brush" || t === "eraser" || t === "smudge" || t === "filterBrush") {
+      if (t === "brush" || t === "eraser" || t === "filterBrush") {
         const maxPx = rack.findToolBrushPure(currentDials())?.size?.max || 200;
         const dir = Math.sign((e as CustomEvent<number>).detail) || 1;
         const curSize = currentDials().size;

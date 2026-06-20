@@ -1,4 +1,4 @@
-// 调色板小窗：256×256 浮动 canvas + 3 个迷你工具（刷 / 涂 / 吸）
+// 调色板小窗：256×256 浮动 canvas + 3 个迷你工具（刷 / 混 / 吸）
 // user 场景：在小窗里混色（不要拖 HSV），吸到主画。
 // 实现：独立 mini 画布，不走主 BrushEngine（避免污染主画图层 / 历史）。
 //
@@ -7,7 +7,7 @@
 //     onColorSampled(hex): 吸色时回调，通常 setColor 主画
 //     getCurrentColor(): 拿当前主色用于"刷"模式
 //   .open() / .close() / .isOpen()
-//   .setMode("brush" | "smudge" | "picker")
+//   .setMode("brush" | "mix" | "picker")
 //   .clear()
 //   .getSerializedState() / .applySerializedState(s)  ← 持久化 to webpaint/state.json
 
@@ -44,7 +44,8 @@ export class PaletteWindow {
   isOpen() { return this._open; }
 
   setMode(m) {
-    if (m !== "brush" && m !== "smudge" && m !== "picker") return;
+    if (m === "smudge") m = "mix";   // v309：旧持久值「涂抹」→「混色」迁移
+    if (m !== "brush" && m !== "mix" && m !== "picker") return;
     this.mode = m;
     this._refreshToolButtons();
   }
@@ -91,7 +92,7 @@ export class PaletteWindow {
       const { x, y } = this._toLocal(e);
       if (this.mode === "picker") { this.onColorSampled(this._toHex(this._sample(x, y))); return; }
       active = true; lastX = x; lastY = y;
-      if (this.mode === "smudge") loaded = this._sample(x, y);
+      if (this.mode === "mix") loaded = this._sample(x, y);
       this._paint(x, y, loaded);
       e.preventDefault();
     };
@@ -128,7 +129,7 @@ export class PaletteWindow {
       ctx.beginPath();
       ctx.arc(x, y, 10, 0, Math.PI * 2);
       ctx.fill();
-    } else if (this.mode === "smudge" && loaded) {
+    } else if (this.mode === "mix" && loaded) {
       const cur = this._sample(x, y);
       const strength = 0.85, dryness = 0.05;
       const out = {

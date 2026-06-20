@@ -29,7 +29,6 @@ export interface Brush {
   spacing?: number | { value?: number };
   pixelMode?: boolean;
   taper?: BrushTaper;
-  smudge?: unknown;
   smooth?: BrushSmooth;
   uat?: number;
   [k: string]: unknown;

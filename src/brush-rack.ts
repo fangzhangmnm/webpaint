@@ -25,7 +25,7 @@ import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.t
 import type { EditMode } from "./edit-mode.ts";
 
 const RACK_META_KEY = "brush-rack";
-const TOOL_LABEL: Record<string, string> = { brush: "笔刷", smudge: "涂抹", eraser: "橡皮" };
+const TOOL_LABEL: Record<string, string> = { brush: "笔刷", eraser: "橡皮" };
 
 // 笔架同步编排句柄（folder-sync store；诚实描述本类调到的成员）。
 interface RackSyncResult {
@@ -410,7 +410,6 @@ export class BrushRack {
         pressureGamma: 1.0, pressureLPF: 50, defaultOpa: 1.0,
         compositeMode: "wash", blendMode: "source-over", spacing: 0.06, pixelMode: false,
         taper: { in: 0, out: 0 },
-        smudge: this.ui.tool === "smudge" ? { strength: 0.8, dryness: 0.1 } : null,
         smooth: { streamline: 0.15, stabilization: 0 },
       };
     }

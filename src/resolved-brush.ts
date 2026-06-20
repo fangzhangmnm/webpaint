@@ -30,7 +30,6 @@ export interface BrushPreset {
   spacing?: number | { value?: number };
   pixelMode?: boolean;
   smooth?: { streamline?: number; stabilization?: number };
-  smudge?: { strength?: number; dryness?: number };
 }
 
 // 引擎吃的扁平笔。字段集 = DEFAULT_SETTINGS 全集；index 签名兜住本模块不显式列举的默认字段
@@ -57,8 +56,6 @@ export interface BrushSettings {
   pixelMode: boolean;
   streamline: number;
   stabilization: number;
-  smudgeStrength?: number;
-  smudgeDryness?: number;
   pressureToSize: boolean;
   pressureToOpacity: boolean;
   [k: string]: unknown;
@@ -113,10 +110,6 @@ export function resolveBrush({
     const sm = preset.smooth || {};
     b.streamline    = sm.streamline    ?? 0.15;
     b.stabilization = sm.stabilization ?? 0;
-    if (preset.smudge) {
-      b.smudgeStrength = preset.smudge.strength ?? 0.8;
-      b.smudgeDryness  = preset.smudge.dryness  ?? 0.1;
-    }
   }
 
   // —— 用户旋钮 + 全局色 + 全局压感（缺省 = 保留 base 默认）——

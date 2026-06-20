@@ -89,12 +89,7 @@
             <path d="M13 5l6 6"></path>
           </svg>
         </button>
-        <button class="tool tool-disabled" id="toolSmudge" type="button" data-tool="smudge" title="涂抹（engine 待实装）" aria-disabled="true">
-          <!-- v124 webui 迭代 + user 手编 path -->
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M17.09 2.5 C15.99 2.18 15.7 4.1 14.34 4.51 C12.98 4.92 10.24 4.44 8.92 4.98 C7.6 5.52 7.04 6.86 6.45 7.76 C5.86 8.66 5.31 9.26 5.36 10.36 C5.35 13.2 7.34 13.88 7.26 15.29 C6.88 16.81 5.22 18.15 4.37 19.09 C3.6 20.25 3.36 21.21 3.84 21.95 C4.61 22.35 5.01 22.48 6.65 21.21 C8.63 19.75 13.96 13.99 15.56 12.75 C16.79 11.2 13.95 13.97 13.4 14.9 C12.85 15.83 12.25 15.91 11.9 16.64 C11.89 17.45 12.69 18.05 14.37 17.55 C15.32 17.01 17.13 16.09 17.94 15.08 C18.75 14.07 18.92 13.32 19.1 12.29 C19.28 11.26 18.72 9.89 19.02 8.92 C19.32 7.95 21.24 7.52 20.92 6.45 C20.6 5.38 18.19 2.82 17.09 2.5 Z"/>
-          </svg>
-        </button>
+        <!-- v309: smudge 工具（一直 disabled、从未实装）已 purge，待将来重写时连按钮一起加回 -->
         <button class="tool" id="toolEraser" type="button" data-tool="eraser" title="橡皮 (E)">
           <!-- v124 webui 迭代 -->
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -503,7 +498,7 @@
       </div>
       <div class="palette-tools">
         <button class="palette-tool" data-palette-tool="brush" type="button" title="刷（用当前色）">笔</button>
-        <button class="palette-tool" data-palette-tool="smudge" type="button" title="涂抹">涂</button>
+        <button class="palette-tool" data-palette-tool="mix" type="button" title="混色">混</button>
         <button class="palette-tool" data-palette-tool="picker" type="button" title="吸到主画">吸</button>
         <button class="palette-clear" type="button" title="清空">清</button>
       </div>

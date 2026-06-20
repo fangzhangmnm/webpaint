@@ -68,7 +68,6 @@ export function buildRackCode(rack: BrushRackData): string {
     if (b.pixelMode) args.pixelMode = true;
     if (b.taper?.in) args.taperIn = b.taper.in;
     if (b.taper?.out) args.taperOut = b.taper.out;
-    if (b.smudge) args.smudge = b.smudge;
     const sm = b.smooth || {};
     if (sm.streamline != null && sm.streamline !== 0.15) args.streamline = sm.streamline;
     if (sm.stabilization != null && sm.stabilization !== 0) args.stabilization = sm.stabilization;

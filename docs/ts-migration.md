@@ -1,6 +1,7 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v308 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v309 / 2026-06-20。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> v309 cleanup（非迁移批）：① purge 从未实装的 canvas smudge 工具（engine/UI/tool/data 全删，留 toolbar/palette 两处旧值迁移 fallback，待将来重写）。② liquify 引擎 `src/liquify.ts` → `src/plugins/liquify-engine.ts`（与其 filter 插件 `plugins/liquify.js` 同处；gate 路径同步更新）。③ palette 的 mini「涂抹」混色模式 id `smudge`→`mix`（避免与 canvas smudge 混淆；这是独立的调色板混色功能，非画布工具）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）

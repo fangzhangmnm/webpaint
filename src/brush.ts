@@ -30,14 +30,14 @@
 //             cached colored radial-gradient stamp 跟 v97 一样
 //   Wash:     走 JS per-pixel max，bufferData Uint8 (α only)，
 //             shape α 解析公式 (round / ellipse)，endStroke 转 RGBA canvas 上 layer
-//   smudge / pixelMode: 都直接进 layer（不进 buffer）
+//   pixelMode: 直接进 layer（不进 buffer）
 //
 // **frozen/tail 渲染**（平滑核 v249 = 时间常数指数追踪，详 docs/brush-procreate-smoothing.md）：
 //   buffered（brush/erase，非 pixel）的平滑中心线由 stroke-smoother.js 给（out 点串 + 末点 tip）：
 //     - frozen 段（已提交 out，因果终值）→ 烤进 stroke buffer，永不再画
 //     - tail 段（最近一段 out → tip）→ 每帧清掉重画到 tail buffer；抬笔 finish() 收尾钉终点
 //     - overlay = frozen ⊕ tail（wash:max / buildup:over），opacity 只在 composite 时乘一次
-//   smudge / pixel 仍走 immediate 路径（直接进 layer，无法重画）。
+//   pixel 仍走 immediate 路径（直接进 layer，无法重画）。
 
 import { StrokeSmoother } from "./stroke-smoother.ts";
 import type { Layer } from "./doc.ts";
@@ -48,7 +48,6 @@ type Ctx2D = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 type AnyCanvas = OffscreenCanvas | HTMLCanvasElement;
 
 interface RgbColor { r: number; g: number; b: number; }
-interface RgbaColor { r: number; g: number; b: number; a: number; }
 
 // Build-Up colored stamp cache（按 baseSize 烤一次，drawImage 缩到目标 size）
 interface StampCache {
@@ -113,7 +112,6 @@ interface StrokeState {
   prevTailW: number;
   prevTailH: number;
   frozenDirty: Rect | null;
-  loaded?: RgbaColor | null;
 }
 
 // 引擎默认参数袋 = ResolvedBrush 的 base（resolved-brush.js import 之）。
@@ -156,9 +154,6 @@ export const DEFAULT_SETTINGS = {
   taperIn: 0,
   taperOut: 0,        // 末端渐细长度（× 笔径）。0=无。endStroke 时按到末端距离施加（需总笔长）
   taperFloor: 0.4,    // taper 包络最小压感系数（in/out 两端共用）
-  // smudge：
-  smudgeStrength: 0.8,
-  smudgeDryness: 0.1,
   // legacy 字段（applyBrushPresetFrozen 老路径可能 reference，no-op）：
   pressureToSize: true,
   pressureToOpacity: true,
@@ -265,11 +260,9 @@ export class BrushEngine {
   // smooth: { tau(ms), deadzone(doc px) }。t = 起手事件时间戳(ms)。详 docs/brush-procreate-smoothing.md。
   //   tau=0 & deadzone=0 → 不平滑（直通 raw）。
   beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, pressure: number, mode: string = "brush", smooth: { tau?: number; deadzone?: number; tailBow?: number } = {}, t: number | null = null) {
-    let loaded: RgbaColor | null = null;
-    if (mode === "smudge") loaded = this._sampleLayerColor(layer, x, y);
     const isBuildup = (settings.compositeMode || "wash") === "buildup";
-    // buffered = 走 frozen/tail 平滑（进 buffer）；smudge / pixel = immediate（直接进 layer）
-    const buffered = mode !== "smudge" && !settings.pixelMode;
+    // buffered = 走 frozen/tail 平滑（进 buffer）；pixel = immediate（直接进 layer）
+    const buffered = !settings.pixelMode;
     const pLPF0 = pressure;
     this._stroke = {
       layer, settings, mode,
@@ -391,7 +384,7 @@ export class BrushEngine {
     else this._extendImmediate(x, y, pEff);
   }
 
-  // smudge / pixel：raw 点直接沿段等距撒进 layer（无 frozen/tail，无法重画）
+  // pixel：raw 点直接沿段等距撒进 layer（无 frozen/tail，无法重画）
   _extendImmediate(x: number, y: number, pEff: number) {
     const st = this._stroke!;
     const dx = x - st.lastX, dy = y - st.lastY;
@@ -558,7 +551,7 @@ export class BrushEngine {
   // board 每帧调；返回 {canvas, bboxX/Y/W/H, layer, opacity, mode}。
   // opacity 是 user.opacity（Π 外那一层）；board 渲染时会 globalAlpha *= opacity。
   // buffered：每帧重画 tail + 合成 overlay = frozen ⊕ tail（只补 tail/frozenDirty 区域）。
-  // immediate（smudge/pixel）：无 buffer，返回 null。
+  // immediate（pixel）：无 buffer，返回 null。
   getLiveOverlay() {
     const st = this._stroke;
     if (!st || !st.buffered) return null;
@@ -753,18 +746,6 @@ export class BrushEngine {
     return d;
   }
 
-  _sampleLayerColor(layer: Layer, x: number, y: number): RgbaColor {
-    const ix = Math.floor(x - layer.bboxX);
-    const iy = Math.floor(y - layer.bboxY);
-    if (ix < 0 || iy < 0 || ix >= layer.bboxW || iy >= layer.bboxH) {
-      return { r: 0, g: 0, b: 0, a: 0 };
-    }
-    try {
-      const d = layer.ctx.getImageData(ix, iy, 1, 1).data;
-      return { r: d[0], g: d[1], b: d[2], a: d[3] };
-    } catch (_) { return { r: 0, g: 0, b: 0, a: 0 }; }
-  }
-
   // pressure → {size, stampAlpha}（taper / signedLerp dynamics）。null = 太淡跳过。
   // strokeDist 决定 anti-spike taper 包络（frozen / tail walk 各传自己的）。
   _stampParams(pressure: number, strokeDist: number): StampParams | null {
@@ -795,7 +776,7 @@ export class BrushEngine {
     return { size, stampAlpha };
   }
 
-  // immediate 路径（smudge / pixel）：算 params + 直接进 layer。
+  // immediate 路径（pixel）：算 params + 直接进 layer。
   _stampOne(x: number, y: number, pressure: number) {
     const st = this._stroke;
     if (!st) return;
@@ -806,9 +787,7 @@ export class BrushEngine {
     const radius = size / 2;
     const x0 = x - radius - 1, y0 = y - radius - 1, x1 = x + radius + 1, y1 = y + radius + 1;
     st.layer.ensureBbox(x0, y0, x1, y1);
-    if (st.mode === "smudge" && st.loaded) {
-      this._smudgeStampDirect(x, y, size, stampAlpha);
-    } else if (s.pixelMode) {
+    if (s.pixelMode) {
       this._pixelStampDirect(x, y, size, stampAlpha);
     }
     this._markDirty(x0, y0, x1, y1);
@@ -898,42 +877,6 @@ export class BrushEngine {
     }
   }
 
-  _smudgeStampDirect(x: number, y: number, size: number, stampAlpha: number) {
-    const st = this._stroke!;
-    const s = st.settings;
-    const cur = this._sampleLayerColor(st.layer, x, y);
-    const strength = s.smudgeStrength ?? 0.8;
-    const dryness = s.smudgeDryness ?? 0.1;
-    const outCol = {
-      r: st.loaded!.r * strength + cur.r * (1 - strength),
-      g: st.loaded!.g * strength + cur.g * (1 - strength),
-      b: st.loaded!.b * strength + cur.b * (1 - strength),
-      a: Math.max(st.loaded!.a, cur.a),
-    };
-    const hex = "#" + [outCol.r, outCol.g, outCol.b]
-      .map(v => Math.max(0, Math.min(255, v|0)).toString(16).padStart(2, "0")).join("");
-    st.loaded = {
-      r: st.loaded!.r * (1 - dryness) + cur.r * dryness,
-      g: st.loaded!.g * (1 - dryness) + cur.g * dryness,
-      b: st.loaded!.b * (1 - dryness) + cur.b * dryness,
-      a: st.loaded!.a * (1 - dryness) + cur.a * dryness,
-    };
-    const stamp = makeRadialStamp(size, s.hardness, hex);
-    const drawD = stamp.size;
-    const drawR = drawD / 2;
-    const layer = st.layer;
-    const ctx = layer.ctx;
-    const lx = x - layer.bboxX;
-    const ly = y - layer.bboxY;
-    const prevA = ctx.globalAlpha;
-    const prevC = ctx.globalCompositeOperation;
-    ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));   // smudge 不走 buffer，opacity 这里乘
-    if (layer.lockAlpha) ctx.globalCompositeOperation = "source-atop";   // v242 锁定不透明度：只改色不增删 alpha
-    ctx.drawImage(stamp.canvas, lx - drawR, ly - drawR, drawD, drawD);
-    ctx.globalAlpha = prevA;
-    ctx.globalCompositeOperation = prevC;
-  }
-
   _pixelStampDirect(x: number, y: number, size: number, stampAlpha: number) {
     const st = this._stroke!;
     const s = st.settings;
@@ -971,22 +914,6 @@ export class BrushEngine {
       st.dirty = [x0, y0, x1, y1];
     }
   }
-}
-
-// smudge 用的小 radial gradient stamp（每颗 color 不同，不 cache）
-function makeRadialStamp(size: number, hardness: number, color: string) {
-  const d = Math.max(4, Math.ceil(size + 2));
-  const r = d / 2;
-  const c = document.createElement("canvas");
-  c.width = d; c.height = d;
-  const cx = c.getContext("2d")!;
-  const hd = Math.max(0, Math.min(0.999, hardness));
-  const g = cx.createRadialGradient(r, r, hd * r, r, r, r);
-  g.addColorStop(0, color);
-  g.addColorStop(1, hexToRgba(color, 0));
-  cx.fillStyle = g;
-  cx.fillRect(0, 0, d, d);
-  return { canvas: c, size: d };
 }
 
 function hexToRgbObj(hex: string): RgbColor {

@@ -1,4 +1,4 @@
-// 即时路径位置平滑（smudge / 像素笔）——Procreate 二参 per-event 版。
+// 即时路径位置平滑（像素笔）——Procreate 二参 per-event 版。
 // 详 docs/brush-procreate-smoothing.md。
 //
 // 主笔刷（buffered brush/erase）走引擎侧 stroke-smoother.js（重采样 EMA + 贴笔尖 catch-up）。

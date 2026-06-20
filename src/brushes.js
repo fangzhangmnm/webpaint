@@ -19,7 +19,7 @@
 //   size.base / color  + per-tool 的 opacity / flow
 // **冻结字段**（显式「保存为预设」/「更新预设」才动）：
 //   shape / coeffs / pressureGamma / compositeMode /
-//   spacing / pixelMode / taper / hardness / 椭圆参数 / smudge / smooth
+//   spacing / pixelMode / taper / hardness / 椭圆参数 / smooth
 
 export const RACK_VERSION = 2;     // v2: brush 加 uat；rack 加 trash[]/resetAt；删 activeByTool（活动笔归 per-doc toolStates）。Folder shape，见 docs/folderflow-build-plan.md
 export const DEFAULT_FOLDER = "我的常用";
@@ -49,7 +49,6 @@ function makeBrush({
   spacingValue = 0.06,
   pixelMode = false,
   taperIn = 0, taperOut = 0,
-  smudge = null,
   // 位置平滑（per-brush，Procreate，详 docs/brush-procreate-smoothing.md）
   streamline = 0.15, stabilization = 0,
   // v99r2：defaultOpa 留着，默认 1.0；user 编辑笔可以改成 0.6 当 sketch 默认
@@ -70,7 +69,6 @@ function makeBrush({
     spacing: spacingValue,
     pixelMode,
     taper: { in: taperIn, out: taperOut },
-    smudge,
     smooth: { streamline, stabilization },
   };
 }

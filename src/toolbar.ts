@@ -122,11 +122,9 @@ export function setTool(t: string) {
   if (t === "airbrush") t = "brush";
   // v120：shapes 撤了。老 doc 持久化里可能存了 "shapes" → 透明回退 brush
   if (t === "shapes") t = "brush";
-  // v110：smudge engine 未真实装（user：「smudge 和 shapes 灰色先不响应」）
-  if (t === "smudge") {
-    setStatus("涂抹 工具暂未启用");
-    return;
-  }
+  // v309：smudge 工具（一直只是 disabled 占位、从未实装）整体 purge，待将来重写。
+  //   老 doc 持久化里可能存了 "smudge" → 透明回退 brush（同 airbrush/shapes）
+  if (t === "smudge") t = "brush";
   // 切工具 = 决定性动作 → editMode.setTool 内部按 onToolSwitch 把停驻 transient apply/cancel（不在这单独调）
   // v132: 切到非 filterBrush 工具时自动退出 filter brush 模式（藏 toolbar / 清 state）
   if (state.filterBrush && t !== "filterBrush") {
@@ -137,11 +135,8 @@ export function setTool(t: string) {
   editMode.setTool(t);   // emit wp:modechange → _syncEditModeUI 派生按钮高亮 / lasso 工具栏
   document.body.dataset.tool = t;   // 持久工具的 CSS hook（transient 期间保持不变）
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
-  if (t === "brush" || t === "smudge" || t === "eraser" || t === "filterBrush") {
+  if (t === "brush" || t === "eraser" || t === "filterBrush") {
     rack.applyToolState(t);
-  }
-  if (t === "smudge") {
-    setStatus("smudge engine 待实装；现在按 brush 走");
   }
 }
 
@@ -268,7 +263,6 @@ function initSelEditUI() {
 // Rack 工具 → 对应的 exclusive panel id
 export const RACK_PANEL_BY_TOOL: Record<string, string> = {
   brush: PANELS.RACK_BRUSH,
-  smudge: PANELS.RACK_SMUDGE,
   eraser: PANELS.RACK_ERASER,
   filterBrush: PANELS.RACK_FILTER_BRUSH,    // v132
 };

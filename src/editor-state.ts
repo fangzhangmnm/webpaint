@@ -27,7 +27,6 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
   const toolStates: Record<string, ToolDial> = reactive({
     // brush 的 boot dial 从 LS 兜底（保留「记住上次粗细/透」；rack/doc 载入后被 preset/ORA toolStates 覆盖）。
     brush:    { size: parseFloat(safeLS("webpaint.size") || "12"), opacity: parseFloat(safeLS("webpaint.opacity") || "1"), flow: 1.0, activeBrushId: null },
-    smudge:   { size: 16, opacity: 1.0, flow: 0.8, activeBrushId: null },
     eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
     // v132：size=radius，opacity=transparency/flow，variantId=子算法选择（Filter.brushVariants[].id），空=默认
     filterBrush: { size: 32, opacity: 1.0, flow: 1.0, activeBrushId: null, variantId: null },

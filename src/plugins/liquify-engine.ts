@@ -37,8 +37,8 @@
 // dx 坑保护：跟 v46/v47 一样，extendStroke 拿 input.js 已过 timeStamp + 平滑
 // 管线的 (x, y)，自身不再过滤 raw。
 
-import type { Layer } from "./doc.ts";
-import type { Selection } from "./selection.ts";
+import type { Layer } from "../doc.ts";
+import type { Selection } from "../selection.ts";
 
 interface LiquifySettings {
   bleed?: string;

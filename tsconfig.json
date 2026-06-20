@@ -46,7 +46,7 @@
   //   selection.ts 真类型 → doc.ts 弃本地 SelectionLike 镜像直接 import Selection。
   "include": [
     "src/brush.ts",
-    "src/liquify.ts",
+    "src/plugins/liquify-engine.ts",
     "src/filter-brush.ts",
     "src/stroke-smoother.ts",
     "src/stroke-input-smooth.ts",

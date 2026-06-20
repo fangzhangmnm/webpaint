@@ -15,7 +15,6 @@ export interface BrushDraft {
   spacing?: number | { value?: number };
   taper?: { in?: number; out?: number };
   smooth?: { streamline?: number; stabilization?: number };
-  smudge?: { strength?: number; dryness?: number };
   [k: string]: unknown;
 }
 
@@ -49,11 +48,6 @@ export function ensureBrushDraftDefaults(b: BrushDraft): BrushDraft {
   if (!b.taper) b.taper = {};
   if (b.taper.in == null) b.taper.in = 0;
   if (b.taper.out == null) b.taper.out = 0;
-
-  // smudge 永远补（编辑器里可把 tool 切成 smudge，v-if 段需要字段在场）
-  if (!b.smudge) b.smudge = {};
-  if (b.smudge.strength == null) b.smudge.strength = 0.8;
-  if (b.smudge.dryness == null) b.smudge.dryness = 0.1;
 
   // spacing 归一成 number（fraction）：旧值可能是 number 或 {value}
   b.spacing = (typeof b.spacing === "number") ? b.spacing : (b.spacing?.value ?? 0.06);

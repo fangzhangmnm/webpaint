@@ -40,7 +40,7 @@ export const BrushSettings = defineComponent({
       <div class="${ROW_FULL}"><label>名字</label><input type="text" v-model="draft.name"></div>
       <div class="${ROW_FULL}"><label>工具</label>
         <select v-model="draft.tool">
-          <option value="brush">笔刷</option><option value="smudge">涂抹</option><option value="eraser">橡皮</option>
+          <option value="brush">笔刷</option><option value="eraser">橡皮</option>
         </select>
       </div>
       <div class="${ROW_FULL}"><label>混合模式</label>
@@ -122,13 +122,6 @@ export const BrushSettings = defineComponent({
       <div class="${TITLE}">收尾</div>
       <div class="${ROW}"><label>入端</label><input type="range" min="0" max="5" step="0.1" v-model.number="draft.taper.in"><span class="${VAL}">{{ draft.taper.in.toFixed(1) }}</span></div>
       <div class="${ROW}"><label>出端</label><input type="range" min="0" max="5" step="0.1" v-model.number="draft.taper.out"><span class="${VAL}">{{ draft.taper.out.toFixed(1) }}</span></div>
-    </div>
-
-    <!-- 涂抹（仅 smudge） -->
-    <div class="${SECTION}" v-if="draft.tool === 'smudge'">
-      <div class="${TITLE}">涂抹</div>
-      <div class="${ROW}"><label>强度</label><input type="range" min="0" max="1" step="0.05" v-model.number="draft.smudge.strength"><span class="${VAL}">{{ draft.smudge.strength.toFixed(2) }}</span></div>
-      <div class="${ROW}"><label>干燥度</label><input type="range" min="0" max="1" step="0.05" v-model.number="draft.smudge.dryness"><span class="${VAL}">{{ draft.smudge.dryness.toFixed(2) }}</span></div>
     </div>
 
     <!-- 导出 / 删除（编排在 app：confirm / 落 trash / 下载文件） -->

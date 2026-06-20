@@ -21,7 +21,7 @@
 //     else                   → 平移
 
 import { BrushEngine } from "./brush.ts";
-import { LiquifyEngine } from "./liquify.ts";
+import { LiquifyEngine } from "./plugins/liquify-engine.ts";
 import { LassoEngine } from "./lasso.ts";
 import { FilterBrushEngine } from "./filter-brush.ts";
 import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
@@ -602,17 +602,14 @@ export class InputController {
       rec.lastP = null;
       rec.smP = -1;
       rec.lastEventTs = -Infinity;
-      // 即时笔（smudge/pixel）二参平滑状态：累积 raw / 死区锚 / EMA 输出(smX/Y 已在 rec 字面量锚为起点)
+      // 即时笔（pixel）二参平滑状态：累积 raw / 死区锚 / EMA 输出(smX/Y 已在 rec 字面量锚为起点)
       rec.rawSX = x; rec.rawSY = y;
       rec.stabX = x; rec.stabY = y;
       if (role === "liquify") this._beginLiquify(rec);
       else if (role === "filterBrush") this._beginFilterBrush(rec);
       else {
-        // mode 推断：tool=smudge → "smudge"；其他按 erase/brush 走
-        const tool = this.getTool();
-        const mode = role === "erase" ? "erase"
-          : tool === "smudge" ? "smudge"
-          : "brush";
+        // mode 推断：erase / brush
+        const mode = role === "erase" ? "erase" : "brush";
         this._beginStroke(e, rec, mode);
       }
     } else if (role === "lasso") {
@@ -715,7 +712,7 @@ export class InputController {
         rec.lastRawY = ev.clientY;
         if (drx * drx + dry * dry < SMOOTH.rawStaticSq) continue;
         // v148/v243: buffered 笔触（brush/erase 非 pixel）位置平滑由引擎做（EMA + 贴笔尖 catch-up）
-        //   → input 直传 raw。smudge/pixel/liquify/filterBrush 走即时 inputSmooth（死区 + EMA）。
+        //   → input 直传 raw。pixel/liquify/filterBrush 走即时 inputSmooth（死区 + EMA）。
         let psx, psy;
         if (rec.rawToEngine) {
           psx = ev.clientX; psy = ev.clientY;
@@ -865,8 +862,8 @@ export class InputController {
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, e);
     // v148: buffered（brush/erase 非 pixel）位置平滑由引擎做（lookahead/frozen/tail），
-    //   input 直传 raw（见 pointermove 的 rec.rawToEngine 分支）。smudge/pixel 仍走四件套。
-    const buffered = mode !== "smudge" && !settings.pixelMode;
+    //   input 直传 raw（见 pointermove 的 rec.rawToEngine 分支）。pixel 仍走四件套。
+    const buffered = !settings.pixelMode;
     rec.rawToEngine = buffered;
     const scale = this.board.viewport.scale || 1;
     // v249：时间常数指数追踪 + 死区。{tau, deadzone}。
@@ -901,7 +898,7 @@ export class InputController {
     as.engine.cancelStroke();
     as.tx.abort();
   }
-  // 任一像素笔画进行中（brush / 像素笔 / smudge / liquify / filterBrush 都设 _activeStroke）。
+  // 任一像素笔画进行中（brush / 像素笔 / liquify / filterBrush 都设 _activeStroke）。
   // board partial-render 守卫用它强走全屏 → 避开 Windows clip-sliver 黑框（docs/lessons-canvas-edge-bugs.md 坑2）。
   // 原来 strokeActiveHint 只兜 filterBrush，**像素笔直接写 layer、无 buffered overlay、又非 filterBrush → 漏出黑框**。
   isStrokeActive() { return !!this._activeStroke; }

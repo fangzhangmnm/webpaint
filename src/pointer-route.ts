@@ -18,7 +18,6 @@ export function toolToRole(et: string): string {
     case "liquify": return "liquify";
     case "filterBrush": return "filterBrush";
     case "lasso": return "lasso";
-    case "smudge": return "draw";   // v85+ smudge 引擎实装前先按 draw 走
     default: return "draw";         // brush / 未知 → draw
   }
 }

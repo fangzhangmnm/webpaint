@@ -20,7 +20,6 @@ const listeners = new Set();
 
 export const PANELS = {
   RACK_BRUSH: "rack-brush",
-  RACK_SMUDGE: "rack-smudge",
   RACK_ERASER: "rack-eraser",
   RACK_AIRBRUSH: "rack-airbrush",
   RACK_FILTER_BRUSH: "rack-filter-brush",   // v132 filter brush 用的 rack
