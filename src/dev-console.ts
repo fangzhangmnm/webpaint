@@ -2,7 +2,7 @@
 //   纯调试面：console 里手敲 WebPaint.* 验证云缩略图 byte-range 拉取、看缓存命中、给插件挂注册口。
 //   非业务逻辑，所有依赖直接 import（无 ctx），由 app 启动时调一次 initDevConsole()。
 import { fetchOraThumbnail } from "./cloud-thumbs.ts";
-import { isSignedIn, listCloudSessionsRecursive } from "./app-store.js";
+import { isSignedIn, listCloudSessionsRecursive } from "./app-store.ts";
 import { registerFilter, listFilters } from "./filters.ts";
 import { registerExporter, listExporters } from "./exporters.ts";
 import {

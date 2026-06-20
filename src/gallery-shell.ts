@@ -19,7 +19,7 @@
 import { session } from "./session-state.ts";
 import { els } from "./els.ts";
 import { listSessions, readImageFromClipboard } from "./session.ts";
-import { listCloudSessionsRecursive, listCloudAll, isSignedIn } from "./app-store.js";
+import { listCloudSessionsRecursive, listCloudAll, isSignedIn } from "./app-store.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.ts";

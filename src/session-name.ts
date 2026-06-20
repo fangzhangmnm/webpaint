@@ -4,7 +4,7 @@
 // （rename 把检查包进 withBusy 覆盖空窗；saveAs 在 busy 前查），故只抽**检查本身**，调用点结构不动。
 
 import { listSessions } from "./session.ts";
-import { listCloudSessionsRecursive } from "./app-store.js";
+import { listCloudSessionsRecursive } from "./app-store.ts";
 import { stripSessionExt } from "./config.ts";
 
 // 返回冲突类型 "local" | "cloud" | null。cloud 列举失败不算冲突（best-effort，吞并 warn）。

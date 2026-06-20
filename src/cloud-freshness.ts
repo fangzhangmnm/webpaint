@@ -21,7 +21,7 @@ import {
   isSignedIn, isCloudDirty,
   isAuthConfigured, getLastSessionSignedIn, retrySilentSignIn, signIn,
   store as _store,
-} from "./app-store.js";
+} from "./app-store.ts";
 import { lockSyncGate, settleSyncGate } from "./sheets.ts";
 import { decodeOraToDoc } from "./ora.ts";
 import type { PaintDoc } from "./doc.ts";

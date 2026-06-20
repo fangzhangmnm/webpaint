@@ -12,7 +12,7 @@ import { els } from "./els.ts";
 import { session } from "./session-state.ts";
 import { decodeImageFile, smartResample } from "./resample.ts";
 import { decodeOraToDoc } from "./ora.ts";
-import { store as _store } from "./app-store.js";
+import { store as _store } from "./app-store.ts";
 import { stripSessionExt } from "./config.ts";
 import { ensureUnlockedForBlob } from "./enc-thumbs.ts";
 import { onPasswordVerified } from "./crypto-state.ts";

@@ -6,7 +6,7 @@
 // 注：ICON_DISK/ICON_UPLOAD/ICON_CLOUD_CHECK/ICON_CLOUD_BUSY 也被 app.js 的 rack.init({icons}) 消费，
 //   故在此 export，app.js 改为从本模块 import（单一定义源）。
 import { els } from "./els.ts";
-import { store as _store, isSignedIn } from "./app-store.js";
+import { store as _store, isSignedIn } from "./app-store.ts";
 import { session } from "./session-state.ts";
 
 // 文档版本警告：在 setStatus 之上再呈现一个持久 banner（用 doc.body.dataset 给 CSS 染色）

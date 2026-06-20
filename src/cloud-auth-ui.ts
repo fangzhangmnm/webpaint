@@ -13,7 +13,7 @@ import { els } from "./els.ts";
 import {
   isSignedIn, isAuthConfigured, signIn, signOut,
   getActiveAccount, retrySilentSignIn, setLastSessionSignedIn,
-} from "./app-store.js";
+} from "./app-store.ts";
 
 let setStatus: AppContext["setStatus"];
 let updateSaveStatus: AppContext["updateSaveStatus"];

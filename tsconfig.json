@@ -48,6 +48,8 @@
   //   exporters/zip/sevenzip/cloud-thumbs*/enc-thumbs/reference/palette/psd/smooth-config/panel-state）。
   //   剩 app-store.js（红线门面）+ app.js（god-file 根）+ version.js（构建 sed 路径，保 .js）。
   "include": [
+    "src/app.ts",
+    "src/app-store.ts",
     "src/brushes.ts",
     "src/cloud-thumb-cache.ts",
     "src/cloud-thumbs.ts",

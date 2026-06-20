@@ -15,7 +15,7 @@
 
 import { getMeta, setMeta } from "./storage.ts";
 import { fetchOraThumbnail } from "./cloud-thumbs.ts";
-import { getDownloadUrl } from "./app-store.js";
+import { getDownloadUrl } from "./app-store.ts";
 
 const KEY_PREFIX = "cloud-thumb:";
 

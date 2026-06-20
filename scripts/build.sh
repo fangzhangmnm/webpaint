@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ENTRY="./src/app.js"
+ENTRY="./src/app.ts"
 OUT_DIR="./dist"
 ESBUILD_VER="0.24.0"
 ESBUILD="./tools/esbuild/esbuild"

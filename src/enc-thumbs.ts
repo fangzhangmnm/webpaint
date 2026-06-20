@@ -2,7 +2,7 @@
 // store 对密码非交互——「弹密码框 + 验证 + 重试」的循环住这里，且**必须在 withBusy 之外调用**
 // （busy 遮罩 z 高于 sheet，盖住密码框 = 无限转圈死锁；sheets 护栏也会 throw）。
 
-import { store } from "./app-store.js";
+import { store } from "./app-store.ts";
 import { isUnlocked, getPassword, setPassword, onPasswordVerified, promptPassword } from "./crypto-state.ts";
 
 /** 本地加密作品的缩略图（内存密码解得开→PNG Blob；锁定/没有→null）。非交互——批量渲染不弹窗。 */

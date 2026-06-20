@@ -24,7 +24,7 @@ import {
   isSignedIn,
   isCloudDirty,
   setRackDirty,
-} from "./app-store.js";
+} from "./app-store.ts";
 import { els } from "./els.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";

@@ -53,7 +53,7 @@ describe("app.js 组合根 boot smoke", () => {
 
     try {
       // 同步 boot：抛了直接冒泡成测试失败（这正是「initX 不抛」的断言）。
-      await import("../src/app.js");
+      await import("../src/app.ts");
 
       // settle：让 boot 收尾的 async IIFE（gallery-first 加载分支）、Vue 调度器 flush、
       // immediate watch 跑完，捕获其中的异步抛错。用原始 setTimeout（不被下面清理误杀）。

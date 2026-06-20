@@ -8,6 +8,9 @@ import { CloudConflictError, CloudNameCollisionError } from "./store/cloud-sync.
 import { createFolderStore } from "./store/folder-store.ts";
 export { resolveRef } from "./store/folder-merge.ts";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.ts";
+import type { Kv, CloudItem } from "./store/types.ts";
+import type { FolderEnvelope } from "./store/folder-merge.ts";
+import type { LocalSession, CloudFile, GalleryItem, LocalTrash } from "./gallery-model.ts";
 import { withBusy } from "./fullscreen-busy.ts";   // 注入给 store：用户态写流深模块强制锁屏（契约见 store.createStore）
 import { listSessions, listTrashedSessions, trashSession, getCurrentSessionName } from "./session.ts";
 import { mergeLocalCloud, mergeTrash, classifyCloudGone } from "./gallery-model.ts";
@@ -21,10 +24,10 @@ import {
 } from "./store/providers/graph.ts";
 
 // localStorage → kv port（lib 不直碰 localStorage；红线 #7）。
-const lsKv = {
-  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
-  set: (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} },
-  remove: (k) => { try { localStorage.removeItem(k); } catch {} },
+const lsKv: Kv = {
+  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, String(v)); } catch {} },
+  remove: (k: string) => { try { localStorage.removeItem(k); } catch {} },
 };
 
 // OneDrive provider + auth（config：clientId + vendored MSAL 脚本）。
@@ -64,19 +67,19 @@ export { CloudConflictError, CloudNameCollisionError };
 
 // ---- auth（名字不变，直接转发）----
 export const isAuthConfigured = () => _auth.isAuthConfigured();
-export const initAuth = (...a) => _auth.initAuth(...a);
-export const signIn = (...a) => _auth.signIn(...a);
-export const signOut = (...a) => _auth.signOut(...a);
+export const initAuth = (...a: Parameters<typeof _auth.initAuth>) => _auth.initAuth(...a);
+export const signIn = (...a: Parameters<typeof _auth.signIn>) => _auth.signIn(...a);
+export const signOut = (...a: Parameters<typeof _auth.signOut>) => _auth.signOut(...a);
 export const isSignedIn = () => _auth.isSignedIn();
 export const getActiveAccount = () => _auth.getActiveAccount();
-export const retrySilentSignIn = (...a) => _auth.retrySilentSignIn(...a);
-export const getToken = (...a) => _auth.getToken(...a);
-export const onAuthChanged = (cb) => _auth.onAuthChanged(cb);   // auth 可观察 seam（候选1）
+export const retrySilentSignIn = (...a: Parameters<typeof _auth.retrySilentSignIn>) => _auth.retrySilentSignIn(...a);
+export const getToken = (...a: Parameters<typeof _auth.getToken>) => _auth.getToken(...a);
+export const onAuthChanged = (cb: Parameters<typeof _auth.onAuthChanged>[0]) => _auth.onAuthChanged(cb);   // auth 可观察 seam（候选1）
 export const getAuthState = () => _auth.getAuthState();
 
 // ---- 上次登录 flag ----
 export const getLastSessionSignedIn = () => lsKv.get("webpaint.lastSessionSignedIn") === "1";
-export const setLastSessionSignedIn = (v) => lsKv.set("webpaint.lastSessionSignedIn", v ? "1" : "0");
+export const setLastSessionSignedIn = (v: unknown) => lsKv.set("webpaint.lastSessionSignedIn", v ? "1" : "0");
 
 // ---- session 云同步（旧名 → cloud.*）----
 // ③ 完成：push / pull / fetchMeta / hard-delete 不再裸暴露——身份/持久化流全走 store.flow.*
@@ -91,13 +94,13 @@ export const listCloudTrash = () => cloud.listTrash();
 // purgeCloudTrashItem / renameCloudSession，均 0 调用方）：删/改名/还原/彻底删/清空回收站
 // 全走 store.flow.*（含新 flow.emptyTrash）。缩小「能绕过 flow 的表面积」——绕过做成不可能而非靠自觉。
 // 旧 isCloudDirty 在未登录时返 false（app 多处 `isSignedIn() && isCloudDirty()`，保此语义）。
-export const isCloudDirty = (name) => _auth.isSignedIn() && cloud.isDirty(name);
+export const isCloudDirty = (name: string) => _auth.isSignedIn() && cloud.isDirty(name);
 // clean→dirty 门（parentBase 唯一捕获点，ADR-0016 §4）已收进 store.edit(name)（L4 ②）——
 // app 编辑落地只调 _store.edit()，不再直暴露 setCloudDirty（绕过门 = 缺 parentBase footgun，已删）。
-export const getKnownETag = (name) => cloud.getETag(name);
+export const getKnownETag = (name: string) => cloud.getETag(name);
 // 卸载本地（K3）/类似「本地副本不再存在」场景用：清掉指向云版的 etag+dirty。
 //   留着不清：dirty 残留 → 假徽章；etag 残留 → K6 类 If-Match 误用的使能条件。
-export const clearCloudState = (name) => cloud.clearState(name);
+export const clearCloudState = (name: string) => cloud.clearState(name);
 
 // ---- store.list seam（gallery 数据解析）----
 // 本地⊕云 → 统一 item 列表 + 每项 dirty + 云端真文件夹。store 只做 acquisition+merge+status，
@@ -112,18 +115,22 @@ export const clearCloudState = (name) => cloud.clearState(name);
 //   · dirty（有未推编辑）→ 绝不 drop，标 ghost 交 UI surface（用户在重命名留存 / 丢弃间选）。
 // **硬护栏**（否则一次网络抖动会全量误删）：只在云端列表权威时跑——signedIn ∧ online ∧ list 成功 ∧ 非空；
 //   且 etag-presence 是唯一闸门（无 etag = 真本地文件，永不碰）。
-async function reconcileCloudGone(localItems, cloudFiles, { cloudListOk, signedIn, online }) {
+async function reconcileCloudGone(
+  localItems: LocalSession[],
+  cloudFiles: CloudItem[],
+  { cloudListOk, signedIn, online }: { cloudListOk: boolean; signedIn?: boolean; online?: boolean },
+) {
   // 权威闸门：未登录/离线/list 失败/空列表 → authoritative=false → classifyCloudGone 返回全空（不收敛）。
   const authoritative = !!(cloudListOk && signedIn && online && cloudFiles.length > 0);
-  const cloudNames = new Set(cloudFiles.map((c) => stripSessionExt(c.path)));
+  const cloudNames = new Set(cloudFiles.map((c: CloudItem) => stripSessionExt(c.path)));
   // K1（审计 2026-06-10）：**完全跳过当前画布上打开的 doc**——push 成功后的 gallery.refresh 在编辑态
   //   也会跑到这里，若把活 doc 收进回收站：之后落笔 isDirty 缺省 true → captureParent 被跳过 →
   //   push 撞 bypass 守卫卡死 + trash/IDB 双份。用共享指针（localStorage currentSessionName）而非
   //   本 tab 内存——顺带护住别的 tab 正开着的 doc。孤儿处理推迟到它不活跃时（多跳过=安全方向）。
   const activeName = getCurrentSessionName();
-  const candidates = activeName ? localItems.filter((l) => l.name !== activeName) : localItems;
+  const candidates = activeName ? localItems.filter((l: LocalSession) => l.name !== activeName) : localItems;
   const { drop, ghost } = classifyCloudGone(
-    candidates.map((l) => l.name), cloudNames,
+    candidates.map((l: LocalSession) => l.name), cloudNames,
     { hasEtag: (n) => !!cloud.getETag(n), isDirty: (n) => isCloudDirty(n), authoritative },
   );
   const droppedNames = new Set(), ghostNames = new Set(ghost);
@@ -137,11 +144,11 @@ async function reconcileCloudGone(localItems, cloudFiles, { cloudListOk, signedI
   return { droppedNames, ghostNames };
 }
 
-export async function listGallery({ signedIn, online } = {}) {
-  let local = [], localError = null;
+export async function listGallery({ signedIn, online }: { signedIn?: boolean; online?: boolean } = {}) {
+  let local: LocalSession[] = [], localError: unknown = null;
   try { local = await listSessions(); }
   catch (e) { localError = e; }
-  let files = [], cloudFolders = [], cloudListOk = false;
+  let files: CloudItem[] = [], cloudFolders: string[] = [], cloudListOk = false;
   if (signedIn && online) {
     // cloudListOk 取 all.complete（**不是**「没抛错」）：listAll 内任一子树列举失败 → complete=false →
     //   partial 列表，reconcile 必须当不权威处理（partial 里「缺失」≠云端真没了，绝不据此 drop 缓存）。
@@ -151,8 +158,8 @@ export async function listGallery({ signedIn, online } = {}) {
   // cloud-gone 收敛：drop clean 孤儿、标 dirty 孤儿为 ghost（护栏在函数内；列表不权威时整体跳过）
   const { droppedNames, ghostNames } = await reconcileCloudGone(local, files, { cloudListOk, signedIn, online });
   if (droppedNames.size) local = local.filter((l) => !droppedNames.has(l.name));
-  const items = mergeLocalCloud(local, files);
-  for (const it of items) {
+  const items = mergeLocalCloud(local, files as CloudFile[]);   // CloudItem ⊇ CloudFile（仅 lastModifiedDateTime 收窄 string|number→string；mergeLocalCloud 只读不写）
+  for (const it of items as Array<GalleryItem & { dirty?: boolean; ghost?: boolean }>) {
     it.dirty = !!(it.cloud && isCloudDirty(it.name));
     it.ghost = ghostNames.has(it.name);   // dirty 孤儿（云端 path 没了但本地有未推编辑）→ UI surface
   }
@@ -161,29 +168,29 @@ export async function listGallery({ signedIn, online } = {}) {
 
 // 回收站清单（本地 trash ⊕ 云端 trash），按 originalName 合并成统一 item（mergeTrash 纯函数）。
 //   item = { name, local:{trashKey,deletedAt,thumb,size}|null, cloud:{id,name,...}|null, deletedAt }
-export async function listGalleryTrash({ signedIn, online } = {}) {
-  let localTrash = [];
+export async function listGalleryTrash({ signedIn, online }: { signedIn?: boolean; online?: boolean } = {}) {
+  let localTrash: LocalTrash[] = [];
   try { localTrash = await listTrashedSessions(); } catch (e) { console.warn("[gallery] local trash failed:", e); }
-  let cloudTrash = [];
+  let cloudTrash: CloudItem[] = [];
   if (signedIn && online) {
     try { cloudTrash = await listCloudTrash(); } catch (e) { console.warn("[gallery] cloud trash failed:", e); }
   }
-  return mergeTrash(localTrash, cloudTrash);
+  return mergeTrash(localTrash, cloudTrash as CloudFile[]);   // CloudItem ⊇ CloudFile（同上）
 }
 
 // ---- brush-rack = Folder shape blob：{version, brushes, trash, resetAt}（brushes 名不变，旧设备仍认）；引擎内部用 items。
 const RACK_UAT_PREHISTORY = 1;
-function rackDecode(text) {
-  let o; try { o = JSON.parse(text); } catch { return null; }
+function rackDecode(text: string): FolderEnvelope | null {
+  let o: any; try { o = JSON.parse(text); } catch { return null; }   // any：解析任意 JSON（动态 rack/blob 边界，下面做形状校验）
   if (!o || typeof o !== "object" || !Array.isArray(o.brushes)) return null;   // 非 rack（伪在线 HTML / 截断）→ null
   return {
     version: 2,
-    items: o.brushes.map((b) => (b && b.uat == null ? { ...b, uat: RACK_UAT_PREHISTORY } : b)),
+    items: o.brushes.map((b: any) => (b && b.uat == null ? { ...b, uat: RACK_UAT_PREHISTORY } : b)),   // any：rack brush 元素来自动态 JSON
     trash: Array.isArray(o.trash) ? o.trash : [],
     resetAt: o.resetAt || 0,
   };
 }
-function rackEncode(folder) {
+function rackEncode(folder: FolderEnvelope) {
   return new Blob([JSON.stringify({ version: 2, brushes: folder.items, trash: folder.trash, resetAt: folder.resetAt })], { type: "application/json" });
 }
 // ---- brush-rack = Folder-shape Store 实例（L4 ③：第二 Store 实例，内置 FolderFlow + busy/status/防抖 cadence）----
@@ -194,7 +201,7 @@ export const rackStore = createFolderStore({
   cloud: rackSync, name: "rack", encode: rackEncode, decode: rackDecode,
   isOnline: () => navigator.onLine !== false,
 });
-export const setRackDirty = (d) => rackStore.setDirty(d);
+export const setRackDirty = (d: boolean) => rackStore.setDirty(d);
 export const isRackDirty = () => rackStore.isDirty();
 
 // ---- graph 直用（gallery folder 操作 + thumb byte-range）→ lib 的 graph（原始形态，单一 auth）----

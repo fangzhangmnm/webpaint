@@ -38,7 +38,7 @@ import {
   isSignedIn, isCloudDirty, getKnownETag, clearCloudState,
   CloudConflictError, CloudNameCollisionError,
   store as _store,
-} from "./app-store.js";
+} from "./app-store.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
 import { stripSessionExt } from "./config.ts";

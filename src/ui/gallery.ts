@@ -19,7 +19,7 @@ import {
   store as _store, isCloudDirty, listCloudSessionsRecursive,
   clearFolderCaches,
   listGallery, listGalleryTrash,
-} from "../app-store.js";
+} from "../app-store.ts";
 import { listSessions } from "../session.ts";
 import { setMeta } from "../storage.ts";
 import { getOrFetchCloudThumb } from "../cloud-thumb-cache.ts";
@@ -30,7 +30,7 @@ import { ENC_PEEK_MIME } from "../crypto-format.ts";
 import { isUnlocked, onLockChange, setPassword } from "../crypto-state.ts";
 import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword, ensureUnlocked } from "../enc-thumbs.ts";
 import { sliceFolder, folderHasContents, copyTargetName } from "../gallery-model.ts";
-import { cloud } from "../app-store.js";
+import { cloud } from "../app-store.ts";
 import { pathFolder, pathBasename, pathJoin } from "../gallery-path.ts";
 import { stripSessionExt } from "../config.ts";
 import { tileFor, breadcrumb, trashTileFor, humanTime, humanSize } from "./gallery-view-model.ts";

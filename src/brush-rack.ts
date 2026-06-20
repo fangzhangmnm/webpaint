@@ -15,7 +15,7 @@ import {
   makeDefaultRack, mergeMissingDefaults, migrateBrush, defaultBrushForTool,
   brushesByTool, findBrush, newBrushId, brushFromJSON, DEFAULT_FOLDER,
 } from "./brushes.ts";
-import { resolveRef } from "./app-store.js";
+import { resolveRef } from "./app-store.ts";
 import { collectFolders } from "./brush-rack-view.ts";
 import { mountRackSheet } from "./ui/rack-sheet.ts";
 import { mountBrushSettings } from "./ui/brush-settings.ts";

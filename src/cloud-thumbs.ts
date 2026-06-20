@@ -17,7 +17,7 @@
 //   - 硬扫：8 字节 sig + IHDR 验证 + IEND 终止，false-match 概率 ~1/2^96
 //   - ZIP 解析：EOCD commentLen sanity 防 false-positive；输出 PNG magic 校验
 
-import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./app-store.js";
+import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./app-store.ts";
 // 加密容器（ADR-0012）：尾部是加密 peek blob（WebPaint 的 peek=缩略图 PNG），
 // PNG 硬扫自然落空 → 扫 MAGIC。命中返**密文** Blob（type=ENC_PEEK_MIME），解密归 caller
 // （图库经 store.decryptPeekBytes 按锁态解；cache 层原样缓存密文 → 明文 thumb 不落 IDB）。
