@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v303 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v304 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -189,9 +189,20 @@ toolbar 解锁的 4 个消费方一簇入门：`layer-undo`(4)、`transient-pane
 - doc-ops：ctx 单例 + `Rect`/`CropState`/`TransientOpts`；crop 拖拽 handler `PointerEvent` + `_cropState.startMouse!`（drag 期非空）。
 - els：`resampleW/H/Lock/Mode` 收窄 input/select（candidate 4）。
 
-- **AppContext 消费方 rollout（candidate 2 续）**：batch 3-10 已 gated。**剩最后一簇**（依赖闭包全部已入门，可一起 gate）：
-  `gallery-shell`(19)、`side-windows`(16)、`topbar-menu`(10)、`export-import-menu`(2)、`smooth-dev-panel`(1)。
-  屎山内部按「诚实描述现状」类型化（北极星：少熵）。
+### ✅ batch 11 · 最后一簇消费方（v304，2026-06-19）—— **AppContext 消费方 rollout 完成**
+最后 5 个 `initX` 消费方一批入门：`gallery-shell`(19)、`side-windows`(16)、`topbar-menu`(10)、`export-import-menu`(2)、`smooth-dev-panel`(1)。
+零 any 出门。typecheck + 388 测试全绿、bundle 通过。
+- 套路同前：ctx 单例 → `AppContext[...]`，event handler typed + `e.target as Node`，`errMsg`，DOM null/getContext 收窄。
+- `app-context`：`GalleryHandle` 补 `setView/getFolder/emptyTrash`；`RackHandle` 补 `reset/syncCloud` + `get(): {brushes}|null`。
+- `els`：`undoBtn/redoBtn`(button)、`referenceFileInput/newDocName/newDocW/newDocH`(input) 收窄（candidate 4）。
+- `JSON.parse(localStorage.getItem(K)!)`（getItem 的 string|null → `!` 保原行为，runtime JSON.parse(null) 本就 ToString）。
+- topbar-menu/gallery-shell 是 store-orchestration 红线：改动 type-erased / 行为等价。
+
+**🎉 candidate 2（AppContext 消费方 rollout）全部完成**：~22 个 `initX` 消费方全部 gated。
+
+## 待迁（剩余非消费方 .ts + JS 源）
+
+- **非 initX 消费方的 app .ts**（直接构造，不经 ctx）：`brush-rack`/`current-brush`/`dial-controls`/`save-status`/`pwa-shell`/`dev-console`/`brush-io`。可按依赖闭包零散 gate。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。
 - **手感红区**（`input.js` 1171 行未测 · `brush.js` · `stroke-smoother.js`）= 用户钉死区。

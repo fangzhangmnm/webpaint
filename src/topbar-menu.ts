@@ -33,22 +33,25 @@ import { decodeOraToDoc } from "./ora.js";
 import { compressPixelSnap } from "./pixel-edit.js";
 import { maybeFastForwardActive } from "./cloud-freshness.ts";
 
+import type { AppContext } from "./app-context.ts";
+const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
+
 // ---- ctx-bound 协作件（app 拥有，boot 时 initTopbarMenu(ctx) 注入）----
-let input: any, doc: any, board: any, history: any, editMode: any;
-let setStatus: any, updateSaveStatus: any, updateZoomLabel: any;
-let gallery: any, rack: any;
+let input: AppContext["input"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], editMode: AppContext["editMode"];
+let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"], updateZoomLabel: AppContext["updateZoomLabel"];
+let gallery: AppContext["gallery"], rack: AppContext["rack"];
 
 // 通用 sheet 开关（清空图层 sheet 等）——纯 class toggle，无状态。
-function openSheet(sheet, backdrop) {
+function openSheet(sheet: HTMLElement, backdrop: HTMLElement) {
   backdrop.classList.remove("hidden");
   sheet.classList.remove("hidden");
 }
-function closeSheet(sheet, backdrop) {
+function closeSheet(sheet: HTMLElement, backdrop: HTMLElement) {
   backdrop.classList.add("hidden");
   sheet.classList.add("hidden");
 }
 
-export function initTopbarMenu(ctx) {
+export function initTopbarMenu(ctx: AppContext) {
   input = ctx.input;
   doc = ctx.doc;
   board = ctx.board;
@@ -63,16 +66,16 @@ export function initTopbarMenu(ctx) {
   // ---- undo / redo ----
   els.undoBtn.addEventListener("click", () => input.ctrlZ());
   els.redoBtn.addEventListener("click", () => input.redo());
-  window.addEventListener("wp:histchange", (e) => {
-    els.undoBtn.disabled = !e.detail.canUndo;
-    els.redoBtn.disabled = !e.detail.canRedo;
+  window.addEventListener("wp:histchange", (e: Event) => {
+    els.undoBtn.disabled = !(e as CustomEvent).detail.canUndo;
+    els.redoBtn.disabled = !(e as CustomEvent).detail.canRedo;
   });
   els.undoBtn.disabled = true;
   els.redoBtn.disabled = true;
 
   els.clearBackdrop.addEventListener("click", () => closeSheet(els.clearSheet, els.clearBackdrop));
-  els.clearSheet.addEventListener("click", (e) => {
-    const a = e.target.closest("[data-clear]")?.dataset.clear;
+  els.clearSheet.addEventListener("click", (e: Event) => {
+    const a = (e.target as HTMLElement | null)?.closest("[data-clear]") ? ((e.target as HTMLElement).closest("[data-clear]") as HTMLElement).dataset.clear : undefined;
     if (!a) return;
     closeSheet(els.clearSheet, els.clearBackdrop);
     if (a !== "confirm") return;
@@ -82,10 +85,10 @@ export function initTopbarMenu(ctx) {
     const before = layer.snapshot();
     doc.clearActiveLayer();
     const after = layer.snapshot();
-    const entry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
+    const entry: { type: string; layerId: number; before: unknown; after: unknown; beforeBlob: Blob | null; afterBlob: Blob | null } = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
     history.push(entry);
-    compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
+    compressPixelSnap(entry.before, (blob: Blob) => { entry.beforeBlob = blob; });
+    compressPixelSnap(entry.after,  (blob: Blob) => { entry.afterBlob  = blob; });
     board.invalidateAll();
     setStatus("已清空当前图层（Ctrl+Z 撤销）");
   });
@@ -102,7 +105,7 @@ export function initTopbarMenu(ctx) {
   });
   // saveAndPush / renameCurrentSession / coalescer+autosave 接线全切到 session-state.ts。
   // Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地（不推云）。合流状态机在 Store（_store.session）。
-  window.addEventListener("keydown", (e) => {
+  window.addEventListener("keydown", (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
       e.preventDefault();
       _store.session.request(e.shiftKey ? "local" : "push");
@@ -115,7 +118,7 @@ export function initTopbarMenu(ctx) {
   // 2. dialog 弹出时浏览器暂停 UI 但 JS async 还在跑 → 偷偷起 saveNow，user 看 dialog 时
   //    后台 IDB transaction 大概率能跑完；user 选「留下」→ 成果保住，选「离开」→
   //    至少有 dialog 那一两秒救了
-  window.addEventListener("beforeunload", (e) => {
+  window.addEventListener("beforeunload", (e: BeforeUnloadEvent) => {
     if (_store.edits.localDirty() && !_store.busy.saving()) {
       e.preventDefault();
       e.returnValue = "";
@@ -139,15 +142,15 @@ export function initTopbarMenu(ctx) {
 
   // adjust panel head 拖动
   (function bindAdjustPanelDrag() {
-    let drag = null;
-    els.adjustPanelHead.addEventListener("pointerdown", (e) => {
-      if (e.target.closest(".float-panel-close")) return;
+    let drag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
+    els.adjustPanelHead.addEventListener("pointerdown", (e: PointerEvent) => {
+      if ((e.target as HTMLElement | null)?.closest(".float-panel-close")) return;
       const r = els.adjustPanel.getBoundingClientRect();
       drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
       els.adjustPanelHead.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
-    els.adjustPanelHead.addEventListener("pointermove", (e) => {
+    els.adjustPanelHead.addEventListener("pointermove", (e: PointerEvent) => {
       if (!drag || e.pointerId !== drag.id) return;
       const w = els.adjustPanel.offsetWidth, h = els.adjustPanel.offsetHeight;
       const left = Math.max(0, Math.min(window.innerWidth - w, drag.ol + (e.clientX - drag.sx)));
@@ -155,7 +158,7 @@ export function initTopbarMenu(ctx) {
       els.adjustPanel.style.left = left + "px";
       els.adjustPanel.style.top = top + "px";
     });
-    els.adjustPanelHead.addEventListener("pointerup", (e) => {
+    els.adjustPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
       if (drag && e.pointerId === drag.id) {
         try { els.adjustPanelHead.releasePointerCapture(e.pointerId); } catch {}
         drag = null;
@@ -208,7 +211,7 @@ export function initTopbarMenu(ctx) {
         gallery.refresh();
         return;
       } catch (e) {
-        setStatus("另存为失败：" + (e && e.message || e));
+        setStatus("另存为失败：" + errMsg(e));
         return;
       }
     }
@@ -245,7 +248,7 @@ export function initTopbarMenu(ctx) {
       updateSaveStatus();
       setStatus(`已恢复到本次打开时（${ageMin} 分钟前）`);
     } catch (e) {
-      setStatus("恢复失败：" + (e && e.message || e), true);
+      setStatus("恢复失败：" + errMsg(e), true);
     }
   });
 
@@ -289,7 +292,7 @@ export function initTopbarMenu(ctx) {
       setStatus("已清缓存，正在硬重载…", true);
       setTimeout(() => location.reload(), 200);
     } catch (e) {
-      setStatus("清缓存失败：" + (e.message || e), true);
+      setStatus("清缓存失败：" + errMsg(e), true);
     }
   });
 
@@ -303,6 +306,6 @@ export function initTopbarMenu(ctx) {
     rack.reset(true);   // 恢复出厂 resetAt watermark + 重置 toolStates + persist + applyToolState + bump
     setRackDirty(true);
     if (isSignedIn()) rack.syncCloud();
-    setStatus(`笔架已重置（${rack.get().brushes.length} 个 brush）`, true);
+    setStatus(`笔架已重置（${rack.get()?.brushes.length} 个 brush）`, true);
   });
 }

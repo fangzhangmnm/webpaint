@@ -28,17 +28,20 @@ import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.js";
 import { ensureUnlocked } from "./enc-thumbs.js";
 
+import type { AppContext } from "./app-context.ts";
+const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
+
 // ---- ctx-bound 协作件（app 拥有，boot 时 initGalleryShell(ctx) 注入）----
-let editMode: any, board: any, gallery: any, doc: any, _store: any, setStatus: any, withBusy: any;
+let editMode: AppContext["editMode"], board: AppContext["board"], gallery: AppContext["gallery"], doc: AppContext["doc"], _store: AppContext["store"], setStatus: AppContext["setStatus"], withBusy: AppContext["withBusy"];
 
 // trash-bar / add / trash 按钮的可见性随视图（旧 renderGallery 内联，现 app chrome 显式管）。
-function _galleryChrome(view) {
+function _galleryChrome(view: string) {
   els.galleryTrashBar?.classList.toggle("hidden", view !== "trash");
   els.galleryAddBtn?.classList.toggle("hidden", view === "trash");
   els.galleryTrashBtn?.classList.toggle("hidden", view === "trash");
 }
 
-export async function setGalleryOpen(open) {
+export async function setGalleryOpen(open: boolean) {
   if (open) {
     // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存
     editMode.applyPendingTransient();
@@ -77,8 +80,8 @@ export function openNewDocSheet() {
   els.newDocName.value = folder ? `${folder}/${base}` : base;
   _selectPreset("2048x2048");
   els.newDocCustomRow.style.display = "none";
-  els.newDocW.value = doc.width;
-  els.newDocH.value = doc.height;
+  els.newDocW.value = String(doc.width);
+  els.newDocH.value = String(doc.height);
   els.newDocBackdrop.classList.remove("hidden");
   els.newDocSheet.classList.remove("hidden");
   setTimeout(() => { els.newDocName.focus(); els.newDocName.select(); }, 50);
@@ -88,8 +91,8 @@ function closeNewDocSheet() {
   els.newDocSheet.classList.add("hidden");
 }
 function _selectPreset(val: string) {
-  const btns = (els.newDocSheet as any).querySelectorAll("[data-preset]");
-  btns.forEach((b: any) => b.setAttribute("aria-pressed", b.dataset.preset === val ? "true" : "false"));
+  const btns = els.newDocSheet.querySelectorAll<HTMLElement>("[data-preset]");
+  btns.forEach((b) => b.setAttribute("aria-pressed", b.dataset.preset === val ? "true" : "false"));
   els.newDocCustomRow.style.display = val === "custom" ? "" : "none";
 }
 
@@ -147,7 +150,7 @@ export async function checkQuotaAndWarn() {
 }
 
 // （humanTime 死码已删 2026-06：gallery-shell 无调用者；展示用的 humanTime 在 gallery-view-model.ts。）
-function humanSize(b) {
+function humanSize(b: number | null | undefined): string {
   if (b == null) return "?";
   if (b === 0) return "0 B";
   if (b < 1024) return `${b} B`;
@@ -157,7 +160,7 @@ function humanSize(b) {
 }
 
 // 给本地拿一个不冲突的名字（X / X 1 / X 2 / ...）
-export async function uniqueLocalName(stem) {
+export async function uniqueLocalName(stem: string) {
   const existing = new Set((await listSessions()).map((s) => s.name));
   if (!existing.has(stem)) return stem;
   for (let i = 1; i < 100; i++) {
@@ -167,7 +170,7 @@ export async function uniqueLocalName(stem) {
   return `${stem} ${Date.now()}`;
 }
 
-export function initGalleryShell(ctx) {
+export function initGalleryShell(ctx: AppContext) {
   editMode = ctx.editMode;
   board = ctx.board;
   gallery = ctx.gallery;
@@ -177,7 +180,7 @@ export function initGalleryShell(ctx) {
   withBusy = ctx.withBusy;
 
   // 加号 popup
-  els.galleryAddBtn.addEventListener("click", (e) => {
+  els.galleryAddBtn.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     const hidden = els.galleryAddPopup.classList.contains("hidden");
     els.cloudAccountPopup.classList.add("hidden");
@@ -186,7 +189,7 @@ export function initGalleryShell(ctx) {
     els.galleryAddBtn.setAttribute("aria-expanded", hidden ? "true" : "false");
   });
   // 云 icon popup
-  els.cloudIconBtn.addEventListener("click", (e) => {
+  els.cloudIconBtn.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     const hidden = els.cloudAccountPopup.classList.contains("hidden");
     els.galleryAddPopup.classList.add("hidden");
@@ -200,7 +203,7 @@ export function initGalleryShell(ctx) {
   const _switchView = (view: "files" | "trash") => { _galleryChrome(view); gallery.setView(view); };
   els.galleryTrashBtn?.addEventListener("click", () => _switchView("trash"));
   els.galleryTrashBack?.addEventListener("click", () => _switchView("files"));
-  els.galleryTrashMenuBtn?.addEventListener("click", (e: any) => {
+  els.galleryTrashMenuBtn?.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     const hidden = els.galleryTrashMenuPopup.classList.contains("hidden");
     els.galleryTrashMenuPopup.classList.toggle("hidden", !hidden);
@@ -216,7 +219,7 @@ export function initGalleryShell(ctx) {
   });
 
   // 图库菜单 popup（版本号 + 强制更新 + 文件无关设置）
-  els.galleryMenuBtn?.addEventListener("click", (e) => {
+  els.galleryMenuBtn?.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     const hidden = els.galleryMenuPopup.classList.contains("hidden");
     els.galleryAddPopup.classList.add("hidden");
@@ -241,7 +244,7 @@ export function initGalleryShell(ctx) {
     // 找一件本地加密作品 → ensureUnlocked（busy 外 prompt + verifyPassword 验 peek + 记忆）。
     // 一件都没有 → 收下未验证的密码当统一密码（用到时自然验证，错了会重问）。
     try {
-      const enc = (await listSessions()).find((s: any) => s.encrypted);
+      const enc = (await listSessions()).find((s: { encrypted?: boolean }) => s.encrypted);
       if (enc) {
         if (await ensureUnlocked(enc.name)) { setStatus("已解锁加密作品（密码只在内存，关页即忘）"); gallery.refresh(); }
         return;
@@ -275,24 +278,24 @@ export function initGalleryShell(ctx) {
       await importImageAsNewDoc(file);
       setGalleryOpen(false);
     } catch (e) {
-      setStatus("从剪切板新建失败：" + (e && e.message || e));
+      setStatus("从剪切板新建失败：" + errMsg(e));
     }
   });
 
   // 新建作品 sheet 接线
   // v217：preset 改成按钮组（_selectPreset + 委托事件）
-  els.newDocSheet.addEventListener("click", (e: any) => {
-    const btn = e.target.closest("[data-preset]");
+  els.newDocSheet.addEventListener("click", (e: Event) => {
+    const btn = (e.target as HTMLElement | null)?.closest("[data-preset]") as HTMLElement | null;
     if (!btn) return;
-    _selectPreset(btn.dataset.preset);
+    _selectPreset(btn.dataset.preset || "2048x2048");
   });
   els.newDocBackdrop.addEventListener("click", closeNewDocSheet);
   els.newDocCancel.addEventListener("click", closeNewDocSheet);
   els.newDocConfirm.addEventListener("click", async () => {
     const nameRaw = (els.newDocName.value || "").trim() || "未命名";
     let w, h;
-    const sel = (els.newDocSheet as any).querySelector("[data-preset][aria-pressed='true']");
-    const presetVal = sel ? sel.dataset.preset : "2048x2048";
+    const sel = els.newDocSheet.querySelector("[data-preset][aria-pressed='true']") as HTMLElement | null;
+    const presetVal = (sel?.dataset.preset) || "2048x2048";
     if (presetVal === "custom") {
       w = Math.max(16, Math.min(8192, parseInt(els.newDocW.value, 10) || 2048));
       h = Math.max(16, Math.min(8192, parseInt(els.newDocH.value, 10) || 2048));
@@ -318,25 +321,25 @@ export function initGalleryShell(ctx) {
     els.menuTheme?.click();
   });
   // 三个 popup 的 outside-click 关闭
-  document.addEventListener("pointerdown", (e: any) => {
+  document.addEventListener("pointerdown", (e: Event) => {
     if (!els.galleryAddPopup.classList.contains("hidden") &&
-        !els.galleryAddPopup.contains(e.target) &&
-        !els.galleryAddBtn.contains(e.target)) {
+        !els.galleryAddPopup.contains(e.target as Node) &&
+        !els.galleryAddBtn.contains(e.target as Node)) {
       els.galleryAddPopup.classList.add("hidden");
     }
     if (!els.cloudAccountPopup.classList.contains("hidden") &&
-        !els.cloudAccountPopup.contains(e.target) &&
-        !els.cloudIconBtn.contains(e.target)) {
+        !els.cloudAccountPopup.contains(e.target as Node) &&
+        !els.cloudIconBtn.contains(e.target as Node)) {
       els.cloudAccountPopup.classList.add("hidden");
     }
     if (els.galleryMenuPopup && !els.galleryMenuPopup.classList.contains("hidden") &&
-        !els.galleryMenuPopup.contains(e.target) &&
-        !els.galleryMenuBtn.contains(e.target)) {
+        !els.galleryMenuPopup.contains(e.target as Node) &&
+        !els.galleryMenuBtn.contains(e.target as Node)) {
       els.galleryMenuPopup.classList.add("hidden");
     }
     if (els.galleryTrashMenuPopup && !els.galleryTrashMenuPopup.classList.contains("hidden") &&
-        !els.galleryTrashMenuPopup.contains(e.target) &&
-        !els.galleryTrashMenuBtn.contains(e.target)) {
+        !els.galleryTrashMenuPopup.contains(e.target as Node) &&
+        !els.galleryTrashMenuBtn.contains(e.target as Node)) {
       els.galleryTrashMenuPopup.classList.add("hidden");
     }
   });
@@ -359,11 +362,11 @@ export function initGalleryShell(ctx) {
     //   withBusy 可重入（ref-count），内层 store.flow.newFolder 再包一层 busy 不会提前解锁。
     await withBusy(`正在创建文件夹 ${trimmed}…`, async () => {
       // 已存在 check（本地+云的 item 派生 + 云端真文件夹）
-      let allNames: any[] = [], cloudFolders: any[] = [];
-      try { allNames = allNames.concat((await listSessions()).map((s: any) => s.name)); } catch {}
+      let allNames: string[] = [], cloudFolders: string[] = [];
+      try { allNames = allNames.concat((await listSessions()).map((s: { name: string }) => s.name)); } catch {}
       try {
         const all = await listCloudAll();
-        allNames = allNames.concat(all.files.map((c: any) => stripSessionExt(c.path)));
+        allNames = allNames.concat(all.files.map((c: { path: string }) => stripSessionExt(c.path)));
         cloudFolders = all.folders;
       } catch (e) { console.warn("[folder] cloud list failed:", e); }
       const fullPrefix = `${fullPath}/`;
@@ -371,7 +374,7 @@ export function initGalleryShell(ctx) {
       if (exists) { setStatus(`文件夹 "${trimmed}" 已存在`, true); return; }
       // 走 store.flow.newFolder（深模块窄接口）而非裸 ensureSubfolder——锁屏/单飞守卫由库内强制。
       try { await _store.flow.newFolder(fullPath, { isOnline: () => isSignedIn() && navigator.onLine !== false }); setStatus(`已建文件夹：${trimmed}`); }
-      catch (e: any) { console.warn("[folder] cloud ensure failed:", e); setStatus("建文件夹失败：" + (e && e.message || e), true); }
+      catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus("建文件夹失败：" + errMsg(e), true); }
     });
     gallery.refresh();
   });

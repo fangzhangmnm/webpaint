@@ -17,7 +17,9 @@ import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFr
 import { importImageAsLayer } from "./import-image.ts";
 import { looksEncryptedContainer } from "./crypto-format.js";
 
-let doc: any, setStatus: any;
+import type { AppContext } from "./app-context.ts";
+const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
+let doc: AppContext["doc"], setStatus: AppContext["setStatus"];
 
 // 导出文件名时间戳（YYYYMMDD-HHMM）—— 仅导出图片路径用
 function stampNow() {
@@ -31,24 +33,24 @@ function stampNow() {
 const _EXP_PRJ_KEY = "webpaint:exportProject:v1";   // { format: "ora" | "psd" }
 const _EXP_IMG_KEY = "webpaint:exportImage:v1";     // { format, target }
 const _IMP_IMG_KEY = "webpaint:importImage:v1";     // { source: "file" | "clipboard" }
-function _getExpPrj() {
-  try { return JSON.parse(localStorage.getItem(_EXP_PRJ_KEY)) || { format: "ora" }; }
+function _getExpPrj(): { format: string } {
+  try { return JSON.parse(localStorage.getItem(_EXP_PRJ_KEY)!) || { format: "ora" }; }
   catch { return { format: "ora" }; }
 }
-function _getExpImg() {
+function _getExpImg(): { format: string; target: string; scope: string } {
   try {
-    const v = JSON.parse(localStorage.getItem(_EXP_IMG_KEY)) || {};
+    const v = JSON.parse(localStorage.getItem(_EXP_IMG_KEY)!) || {};
     // v124 加 scope 字段 ("merged" | "active")，默认 merged 兼容旧配置
     return { format: "png", target: "file", scope: "merged", ...v };
   } catch { return { format: "png", target: "file", scope: "merged" }; }
 }
-function _getImpImg() {
-  try { return JSON.parse(localStorage.getItem(_IMP_IMG_KEY)) || { source: "file" }; }
+function _getImpImg(): { source: string } {
+  try { return JSON.parse(localStorage.getItem(_IMP_IMG_KEY)!) || { source: "file" }; }
   catch { return { source: "file" }; }
 }
-function _setExpPrj(v) { localStorage.setItem(_EXP_PRJ_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
-function _setExpImg(v) { localStorage.setItem(_EXP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
-function _setImpImg(v) { localStorage.setItem(_IMP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
+function _setExpPrj(v: unknown) { localStorage.setItem(_EXP_PRJ_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
+function _setExpImg(v: unknown) { localStorage.setItem(_EXP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
+function _setImpImg(v: unknown) { localStorage.setItem(_IMP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
 function _updateMenuSubLabels() {
   const ep = _getExpPrj();
   const ei = _getExpImg();
@@ -62,7 +64,7 @@ function _updateMenuSubLabels() {
 }
 
 // 🔧 配置 popup（点开 / 点别处关）。setMenuOpen 不变，popup 嵌在 menu-item-row 里
-function _openMenuConfigPopup(wrenchBtn, html, onApply) {
+function _openMenuConfigPopup(wrenchBtn: HTMLElement, html: string, onApply: (popup: HTMLElement) => void) {
   // v124 toggle：再点同一个扳手就收回（user：「再按一下扳手应该收回」）
   const existing = wrenchBtn.closest(".menu-item-row")?.querySelector(".menu-config-popup");
   if (existing) { existing.remove(); return; }
@@ -78,8 +80,8 @@ function _openMenuConfigPopup(wrenchBtn, html, onApply) {
   // popup 内点击不冒泡（让 menu 自身的「点外面关」别误把 popup 当外面）
   popup.addEventListener("click", (e) => e.stopPropagation());
   setTimeout(() => {
-    function onDocClick(ev) {
-      if (popup.contains(ev.target) || wrenchBtn.contains(ev.target)) return;
+    function onDocClick(ev: Event) {
+      if (popup.contains(ev.target as Node) || wrenchBtn.contains(ev.target as Node)) return;
       popup.remove();
       document.removeEventListener("pointerdown", onDocClick, true);
     }
@@ -87,7 +89,7 @@ function _openMenuConfigPopup(wrenchBtn, html, onApply) {
   }, 0);
 }
 
-export function initExportImportMenu(ctx) {
+export function initExportImportMenu(ctx: AppContext) {
   ({ doc, setStatus } = ctx);
 
   _updateMenuSubLabels();
@@ -102,7 +104,7 @@ export function initExportImportMenu(ctx) {
       const ext = (await looksEncryptedContainer(blob)) ? "zip" : exp.ext;
       triggerDownload(blob, `${session.name}.${ext}`);
       setStatus(`.${ext} 已下载`);
-    } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
+    } catch (e) { setStatus("导出失败：" + errMsg(e)); }
   });
   els.menuExportImage.addEventListener("click", async () => {
     setMenuOpen(false);
@@ -119,7 +121,7 @@ export function initExportImportMenu(ctx) {
         const r = await shareOrDownloadBlob(blob, `${session.name}-${stampNow()}.${exp.ext}`, exp.mime);
         setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : `${exp.ext.toUpperCase()} 已下载`);
       }
-    } catch (e) { setStatus("导出失败：" + (e && e.message || e)); }
+    } catch (e) { setStatus("导出失败：" + errMsg(e)); }
   });
   els.menuImportImage.addEventListener("click", async () => {
     setMenuOpen(false);
@@ -130,7 +132,7 @@ export function initExportImportMenu(ctx) {
         if (!blob) { setStatus("剪贴板里没有图片"); return; }
         const fakeFile = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
         await importImageAsLayer(fakeFile);
-      } catch (e) { setStatus("从剪贴板粘贴失败：" + (e && e.message || e)); }
+      } catch (e) { setStatus("从剪贴板粘贴失败：" + errMsg(e)); }
     } else {
       els.oraFileInput.value = "";
       els.oraFileInput.click();
@@ -142,29 +144,29 @@ export function initExportImportMenu(ctx) {
   //   双 click() 在 iPad Safari 上 picker 干脆不开。删掉；layerImportPhotoBtn
   //   已在 line ~1788 通过 _openImagePicker 接管（含 _addImportAsNewDoc 复位）。
 
-  els.menuExportProjectConfig.addEventListener("click", (e) => {
+  els.menuExportProjectConfig.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     const c = _getExpPrj();
     const fmtRadios = listExportersByKind("project").map((exp) =>
       `<label><input type="radio" name="fmt" value="${exp.id}" ${c.format === exp.id ? "checked" : ""} /> ${exp.label}</label>`
     ).join("");
-    _openMenuConfigPopup(e.currentTarget, `
+    _openMenuConfigPopup(e.currentTarget as HTMLElement, `
       <div class="menu-config-section">
         <div class="menu-config-title">格式</div>
         ${fmtRadios}
       </div>
     `, (popup) => {
-      const fmt = popup.querySelector('input[name="fmt"]:checked')?.value || "ora";
+      const fmt = (popup.querySelector('input[name="fmt"]:checked') as HTMLInputElement | null)?.value || "ora";
       _setExpPrj({ format: fmt });
     });
   });
-  els.menuExportImageConfig.addEventListener("click", (e) => {
+  els.menuExportImageConfig.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     const c = _getExpImg();
     const fmtRadios = listExportersByKind("image").map((exp) =>
       `<label><input type="radio" name="fmt" value="${exp.id}" ${c.format === exp.id ? "checked" : ""} /> ${exp.label}</label>`
     ).join("");
-    _openMenuConfigPopup(e.currentTarget, `
+    _openMenuConfigPopup(e.currentTarget as HTMLElement, `
       <div class="menu-config-section">
         <div class="menu-config-title">格式</div>
         ${fmtRadios}
@@ -180,23 +182,23 @@ export function initExportImportMenu(ctx) {
         <label><input type="radio" name="tgt" value="clipboard" ${c.target === "clipboard" ? "checked" : ""} /> 剪切板</label>
       </div>
     `, (popup) => {
-      const fmt = popup.querySelector('input[name="fmt"]:checked')?.value || "png";
-      const tgt = popup.querySelector('input[name="tgt"]:checked')?.value || "file";
-      const scope = popup.querySelector('input[name="scope"]:checked')?.value || "merged";
+      const fmt = (popup.querySelector('input[name="fmt"]:checked') as HTMLInputElement | null)?.value || "png";
+      const tgt = (popup.querySelector('input[name="tgt"]:checked') as HTMLInputElement | null)?.value || "file";
+      const scope = (popup.querySelector('input[name="scope"]:checked') as HTMLInputElement | null)?.value || "merged";
       _setExpImg({ format: fmt, target: tgt, scope });
     });
   });
-  els.menuImportImageConfig.addEventListener("click", (e) => {
+  els.menuImportImageConfig.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     const c = _getImpImg();
-    _openMenuConfigPopup(e.currentTarget, `
+    _openMenuConfigPopup(e.currentTarget as HTMLElement, `
       <div class="menu-config-section">
         <div class="menu-config-title">来源</div>
         <label><input type="radio" name="src" value="file" ${c.source === "file" ? "checked" : ""} /> 文件</label>
         <label><input type="radio" name="src" value="clipboard" ${c.source === "clipboard" ? "checked" : ""} /> 剪切板</label>
       </div>
     `, (popup) => {
-      const src = popup.querySelector('input[name="src"]:checked')?.value || "file";
+      const src = (popup.querySelector('input[name="src"]:checked') as HTMLInputElement | null)?.value || "file";
       _setImpImg({ source: src });
     });
   });

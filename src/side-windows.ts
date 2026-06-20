@@ -10,9 +10,11 @@ import { els } from "./els.ts";
 import { decodeImageFile, fitWithin, canvasToBlob } from "./resample.js";
 import { setColor } from "./color-panel.ts";
 import { setMenuOpen } from "./settings-menu.ts";
+import type { AppContext } from "./app-context.ts";
+const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
 // initSideWindows(ctx) 填入；construct 期 null，仅 config 回调（lazy）/ button 接线读取。
-let setStatus: any, editMode: any, state: any, doc: any, input: any, _store: any, updateSaveStatus: any;
+let setStatus: AppContext["setStatus"], editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"], input: AppContext["input"], _store: AppContext["store"], updateSaveStatus: AppContext["updateSaveStatus"];
 
 // ---- 参考小窗 ----
 // 浮动 panel + 独立 viewport（pinch / zoom / rotate）。状态在 ReferenceWindow 内部维护。
@@ -23,7 +25,7 @@ export const referenceWindow = new ReferenceWindow({
   canvas: els.referenceCanvas,
   closeBtn: els.referencePanelClose,
   emptyHint: els.referenceEmpty,
-  status: (m: any, e?: any) => setStatus(m, e),
+  status: (m: string, e?: boolean) => setStatus(m, e),
   // v154 参考窗吸色：eyedropper / 长按 → 吸窗内显示色，复用主吸色 setColor + pin
   getTool: () => editMode.current(),
   getLongPressPickEnabled: () => state.longPressPick,
@@ -45,22 +47,22 @@ export const paletteWindow = new PaletteWindow({
   const handle = document.getElementById("referenceResizeHandle");
   const panel = els.referencePanel;
   if (!handle || !panel) return;
-  let drag: any = null;
-  handle.addEventListener("pointerdown", (e: any) => {
+  let drag: { id: number; sx: number; sy: number; w0: number; h0: number } | null = null;
+  handle.addEventListener("pointerdown", (e: PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     handle.setPointerCapture(e.pointerId);
     const rect = panel.getBoundingClientRect();
     drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, w0: rect.width, h0: rect.height };
   });
-  handle.addEventListener("pointermove", (e: any) => {
+  handle.addEventListener("pointermove", (e: PointerEvent) => {
     if (!drag || e.pointerId !== drag.id) return;
     const w = Math.max(160, Math.min(window.innerWidth - 40, drag.w0 + (e.clientX - drag.sx)));
     const h = Math.max(160, Math.min(window.innerHeight - 80, drag.h0 + (e.clientY - drag.sy)));
     panel.style.width = w + "px";
     panel.style.height = h + "px";
   });
-  const endDrag = (e: any) => {
+  const endDrag = (e: PointerEvent) => {
     if (drag && e.pointerId === drag.id) {
       try { handle.releasePointerCapture(e.pointerId); } catch {}
       drag = null;
@@ -72,7 +74,7 @@ export const paletteWindow = new PaletteWindow({
   handle.addEventListener("pointercancel", endDrag);
 })();
 
-export function initSideWindows(ctx: any) {
+export function initSideWindows(ctx: AppContext) {
   setStatus = ctx.setStatus;
   editMode = ctx.editMode;
   state = ctx.state;
@@ -91,8 +93,8 @@ export function initSideWindows(ctx: any) {
     els.referenceFileInput.value = "";
     els.referenceFileInput.click();
   });
-  els.referenceFileInput.addEventListener("change", async (e: any) => {
-    const file = e.target.files && e.target.files[0];
+  els.referenceFileInput.addEventListener("change", async (e: Event) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
     try {
       const decoded = await decodeImageFile(file);          // C：鲁棒解码（修 Windows createImageBitmap 失效）
@@ -106,8 +108,8 @@ export function initSideWindows(ctx: any) {
       updateSaveStatus();
       window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
       setStatus(`参考：${file.name}${fit.scaled ? `（已缩到 ${fit.w}×${fit.h}）` : ""}（会跟当前画一起保存）`);
-    } catch (err: any) {
-      setStatus("参考图载入失败：" + (err && err.message || err));
+    } catch (err) {
+      setStatus("参考图载入失败：" + errMsg(err));
     }
   });
   els.referenceLiveBtn.addEventListener("click", () => {

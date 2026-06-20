@@ -64,9 +64,12 @@ export interface RackHandle {
   defaultToolStateFor(tool: string): Partial<ToolDial>;
   checkCloud(): Promise<unknown>;
   refreshCloudState(): void;
-  get(): unknown;
+  get(): { brushes: unknown[] } | null;
   setRack(rack: unknown): void;
   persist(): Promise<unknown>;
+  // 重置笔架（topbar-menu）：
+  reset(force?: boolean): void;
+  syncCloud(): void;
   [k: string]: unknown;
 }
 // 浮窗（side-windows.ts）：参考窗 / 调色板窗——方法集不同，分两个句柄。
@@ -90,6 +93,9 @@ export interface PaletteWindowHandle {
 export interface GalleryHandle {
   refresh(): void;
   setFolder(folder: string): void;
+  setView(view: string): void;
+  getFolder(): string;
+  emptyTrash(scope: string): void;
   [k: string]: unknown;
 }
 // 左栏 dial 组件句柄（ui/left-dial.ts）。

@@ -8,22 +8,24 @@
 import { SMOOTH, SMOOTH_DEFAULTS, saveSmooth, resetSmooth } from "./smooth-config.js";
 import { els } from "./els.ts";
 import { setMenuOpen } from "./settings-menu.ts";
+import type { AppContext } from "./app-context.ts";
 
-let setStatus: any;
+let setStatus: AppContext["setStatus"];
 
-const _SMOOTH_LABELS = {
+const _SMOOTH_LABELS: Record<string, string> = {
   tauMaxMs:           "streamline=1 时间常数 tau (ms, 越大越平滑/越拖)",
   tailBow:            "弧 tail 增益 (1=自然, >1 更鼓, 0=直)",
   stabMaxPx:          "stabilization=1 死区半径 (screen px)",
   rawStaticSq:        "raw 静止门限 (screen px²)",
   pressureAlpha:      "压感 EMA α (input 端去尖刺, 0..1)",
 };
-let _smoothDevPanel = null;
-function _refreshSmoothInputs(p) {
-  for (const el of p.querySelectorAll("[data-skey]")) {
-    const k = el.dataset.skey;
-    if (el.type === "checkbox") el.checked = !!SMOOTH[k];
-    else el.value = String(SMOOTH[k]);
+let _smoothDevPanel: HTMLDivElement | null = null;
+function _refreshSmoothInputs(p: HTMLElement) {
+  for (const el of p.querySelectorAll<HTMLInputElement>("[data-skey]")) {
+    const SM = SMOOTH as Record<string, number | boolean>;
+    const k = el.dataset.skey!;
+    if (el.type === "checkbox") el.checked = !!SM[k];
+    else el.value = String(SM[k]);
   }
 }
 function _buildSmoothDevPanel() {
@@ -43,21 +45,22 @@ function _buildSmoothDevPanel() {
     row.style.cssText = "display:flex;align-items:center;gap:8px;margin:5px 0";
     const lbl = document.createElement("span");
     lbl.textContent = _SMOOTH_LABELS[k] || k;
+    const SM = SMOOTH as Record<string, number | boolean>; const SD = SMOOTH_DEFAULTS as Record<string, number | boolean>;
     lbl.style.cssText = "flex:1";
     row.appendChild(lbl);
-    if (typeof SMOOTH_DEFAULTS[k] === "boolean") {
+    if (typeof SD[k] === "boolean") {
       const cb = document.createElement("input");
-      cb.type = "checkbox"; cb.dataset.skey = k; cb.checked = !!SMOOTH[k];
-      cb.addEventListener("change", () => { SMOOTH[k] = cb.checked; saveSmooth(); });
+      cb.type = "checkbox"; cb.dataset.skey = k; cb.checked = !!SM[k];
+      cb.addEventListener("change", () => { SM[k] = cb.checked; saveSmooth(); });
       row.appendChild(cb);
     } else {
       const tb = document.createElement("input");
-      tb.type = "text"; tb.inputMode = "decimal"; tb.dataset.skey = k; tb.value = String(SMOOTH[k]);
+      tb.type = "text"; tb.inputMode = "decimal"; tb.dataset.skey = k; tb.value = String(SM[k]);
       tb.style.cssText = "width:74px;text-align:right;font:inherit";
       const commit = (resetIfBad: boolean) => {
         const v = parseFloat(tb.value);
-        if (Number.isFinite(v)) { SMOOTH[k] = v; saveSmooth(); }   // 合法即生效（下一笔用）
-        else if (resetIfBad) tb.value = String(SMOOTH[k]);          // 失焦时非法才回填，打字途中不打断
+        if (Number.isFinite(v)) { SM[k] = v; saveSmooth(); }   // 合法即生效（下一笔用）
+        else if (resetIfBad) tb.value = String(SM[k]);          // 失焦时非法才回填，打字途中不打断
       };
       tb.addEventListener("input", () => commit(false));   // 边打边生效（不靠回车/失焦）
       tb.addEventListener("change", () => commit(true));    // 回车 / 失焦提交 + 非法回填
@@ -78,7 +81,7 @@ function _buildSmoothDevPanel() {
   return p;
 }
 
-export function initSmoothDevPanel(ctx) {
+export function initSmoothDevPanel(ctx: AppContext) {
   setStatus = ctx.setStatus;
   els.menuSmoothDev?.addEventListener("click", () => {
     setMenuOpen(false);
