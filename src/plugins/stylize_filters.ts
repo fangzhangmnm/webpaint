@@ -4,6 +4,12 @@
 // v135 (user：「三个同主题的艺术滤镜合同一个 js」) 从 mosaic.js / halftone.js / stained-glass.js 合并
 
 import { registerFilter, makeSliderRow, makeSelectRow } from "../filters.ts";
+import type { FilterParams } from "../filters.ts";
+
+// buildBody state：app 注入的 { params } 容器（filter UI 读写 state.params）
+interface FilterBuildState {
+  params: Record<string, unknown>;
+}
 
 // ============ 马赛克（pixelize）============
 // 每个 cellSize × cellSize 方块用块内平均色填满。用途：交作业过审 / 隐私打码 / 像素艺术风格化
@@ -16,14 +22,21 @@ export class MosaicFilter {
 
   static defaults() { return { cellSize: 12 }; }
 
-  static buildBody(container, state, onChange) {
-    container.appendChild(makeSliderRow("块大小", "cellSize", 2, 64, 1, state.params.cellSize, (k, v) => {
+  static buildBody(container: HTMLElement, state: FilterBuildState, onChange: () => void) {
+    container.appendChild(makeSliderRow("块大小", "cellSize", 2, 64, 1, state.params.cellSize as number, (k: string, v: number) => {
       state.params.cellSize = v | 0;
       onChange();
-    }, { fmt: (v) => `${v | 0} px` }));
+    }, { fmt: (v: number) => `${v | 0} px` }));
   }
 
-  static bake(src, dst, p, mask, w, h) {
+  static bake(
+    src: Uint8ClampedArray,
+    dst: Uint8ClampedArray,
+    p: { cellSize: number },
+    mask: Uint8ClampedArray | null,
+    w: number,
+    h: number,
+  ) {
     const cs = Math.max(2, p.cellSize | 0);
     for (let cy = 0; cy < h; cy += cs) {
       for (let cx = 0; cx < w; cx += cs) {
@@ -68,24 +81,31 @@ export class HalftoneFilter {
     return { cellSize: 8, dotScale: 100, mode: "blackOnWhite" };
   }
 
-  static buildBody(container, state, onChange) {
-    const set = (k, v) => {
+  static buildBody(container: HTMLElement, state: FilterBuildState, onChange: () => void) {
+    const set = (k: string, v: string | number) => {
       state.params[k] = (typeof v === "string") ? v : (v | 0);
       onChange();
     };
-    container.appendChild(makeSliderRow("网点间距", "cellSize", 3, 32, 1, state.params.cellSize, set, {
-      fmt: (v) => `${v | 0} px`,
+    container.appendChild(makeSliderRow("网点间距", "cellSize", 3, 32, 1, state.params.cellSize as number, set, {
+      fmt: (v: number) => `${v | 0} px`,
     }));
-    container.appendChild(makeSliderRow("网点缩放", "dotScale", 50, 200, 5, state.params.dotScale, set, {
-      fmt: (v) => `${v | 0}%`,
+    container.appendChild(makeSliderRow("网点缩放", "dotScale", 50, 200, 5, state.params.dotScale as number, set, {
+      fmt: (v: number) => `${v | 0}%`,
     }));
     container.appendChild(makeSelectRow("模式", "mode", [
       { value: "blackOnWhite", label: "黑点 on 白" },
       { value: "whiteOnBlack", label: "白点 on 黑" },
-    ], state.params.mode, set));
+    ], state.params.mode as string, set));
   }
 
-  static bake(src, dst, p, mask, w, h) {
+  static bake(
+    src: Uint8ClampedArray,
+    dst: Uint8ClampedArray,
+    p: { cellSize: number; dotScale: number; mode: string },
+    mask: Uint8ClampedArray | null,
+    w: number,
+    h: number,
+  ) {
     const cs = Math.max(3, p.cellSize | 0);
     const scale = (p.dotScale | 0) / 100;
     const inverted = p.mode === "whiteOnBlack";
@@ -135,21 +155,28 @@ export class StainedGlassFilter {
   static title = "教堂彩窗";
   static category = "artist";
   static modes = ["region"];
-  static bleedRadius(p) { return p ? (p.cellSize | 0) : 12; }
+  static bleedRadius(p: FilterParams | null) { return p ? ((p.cellSize as number) | 0) : 12; }
 
   static defaults() { return { cellSize: 16, leadWidth: 1 }; }
 
-  static buildBody(container, state, onChange) {
-    const set = (k, v) => { state.params[k] = v | 0; onChange(); };
-    container.appendChild(makeSliderRow("玻璃块大小", "cellSize", 6, 64, 1, state.params.cellSize, set, {
-      fmt: (v) => `${v | 0} px`,
+  static buildBody(container: HTMLElement, state: FilterBuildState, onChange: () => void) {
+    const set = (k: string, v: number) => { state.params[k] = v | 0; onChange(); };
+    container.appendChild(makeSliderRow("玻璃块大小", "cellSize", 6, 64, 1, state.params.cellSize as number, set, {
+      fmt: (v: number) => `${v | 0} px`,
     }));
-    container.appendChild(makeSliderRow("铅条粗细",   "leadWidth", 0, 4, 1, state.params.leadWidth, set, {
-      fmt: (v) => `${v | 0} px`,
+    container.appendChild(makeSliderRow("铅条粗细",   "leadWidth", 0, 4, 1, state.params.leadWidth as number, set, {
+      fmt: (v: number) => `${v | 0} px`,
     }));
   }
 
-  static bake(src, dst, p, mask, w, h) {
+  static bake(
+    src: Uint8ClampedArray,
+    dst: Uint8ClampedArray,
+    p: { cellSize: number; leadWidth: number },
+    mask: Uint8ClampedArray | null,
+    w: number,
+    h: number,
+  ) {
     const cs = Math.max(6, p.cellSize | 0);
     const lead = Math.max(0, p.leadWidth | 0);
     const cols = Math.ceil(w / cs) + 1;

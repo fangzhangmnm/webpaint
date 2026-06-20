@@ -12,14 +12,22 @@
 //   - size = state.brush.size（左栏 size slider）
 
 import { registerFilter } from "../filters.ts";
+import type { Filter, FilterParams, BrushLayer, BrushSettings, BrushSelection, DirtyRect } from "../filters.ts";
 import { LiquifyEngine } from "./liquify-engine.ts";
+import type { Layer } from "../doc.ts";
+import type { Selection } from "../selection.ts";
+
+// liquify 把 stroke 委托给 LiquifyEngine；单 stroke 的可变状态只持一个 engine 引用。
+interface LiquifyBrushState {
+  engine: LiquifyEngine;
+}
 
 export class LiquifyFilter {
   static id = "liquify";
   static title = "液化";
   static category = "adjustment";   // 跟 sharpenBlur 同组（菜单"笔刷类"）
   static modes = ["brush"];
-  static bleedRadius(p) {
+  static bleedRadius(p: FilterParams): number {
     // 液化每个 stamp 在 footprint 内累加 dispField，footprint 半径 = brush.size/2
     // 不读 footprint 外，所以 0 即可
     return 0;
@@ -49,34 +57,34 @@ export class LiquifyFilter {
   // region 模式没意义（液化天生是 stroke-based），所以不提供 bake / buildBody
 
   // Filter brush 契约：begin / extend / end / cancel / flushDirty
-  static beginBrushStroke(layer, params, brushSettings, selection, x, y, pressure) {
+  static beginBrushStroke(layer: BrushLayer, params: FilterParams, brushSettings: BrushSettings, selection: BrushSelection | null, x: number, y: number, pressure: number): LiquifyBrushState {
     const engine = new LiquifyEngine();
-    const scale = params.strengthScale ?? 1;
+    const scale = (params.strengthScale as number) ?? 1;
     const settings = {
-      mode: params.mode || "push",
+      mode: (params.mode as string) || "push",
       size: brushSettings.size,
       strength: (brushSettings.opacity ?? 1) * scale,    // opacity × variant scale
-      bleed: params.bleed || "edge",                      // v147 选区边界取样模式
+      bleed: (params.bleed as string) || "edge",          // v147 选区边界取样模式
     };
-    engine.beginStroke(layer, settings, x, y, selection);
+    engine.beginStroke(layer as unknown as Layer, settings, x, y, selection as unknown as Selection | null);
     return { engine };
   }
 
-  static extendBrushStamp(state, x, y, _pressure) {
+  static extendBrushStamp(state: LiquifyBrushState, x: number, y: number, _pressure: number): void {
     state.engine.extendStroke(x, y);
   }
 
-  static endBrushStroke(state) {
+  static endBrushStroke(state: LiquifyBrushState): void {
     state.engine.endStroke();
   }
 
-  static cancelBrushStroke(state) {
+  static cancelBrushStroke(state: LiquifyBrushState): void {
     state.engine.cancelStroke();
   }
 
-  static flushDirty(state) {
+  static flushDirty(state: LiquifyBrushState): DirtyRect | null {
     return state.engine.flushDirty();
   }
 }
 
-registerFilter(LiquifyFilter);
+registerFilter(LiquifyFilter as unknown as Filter);

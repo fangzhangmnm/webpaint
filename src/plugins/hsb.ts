@@ -5,6 +5,19 @@
 // - 线性饱和度：朝 luma lerp，PS 老式饱和度
 
 import { registerFilter, clamp8, makeSliderRow, makeSelectRow } from "../filters.ts";
+import type { FilterParams } from "../filters.ts";
+
+interface HsbParams extends FilterParams {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  hue: number;
+  satMode: string;
+}
+
+interface HsbState {
+  params: HsbParams;
+}
 
 export class HsbFilter {
   static id = "hsb";
@@ -17,8 +30,8 @@ export class HsbFilter {
     return { brightness: 0, contrast: 0, saturation: 0, hue: 0, satMode: "vibrance" };
   }
 
-  static buildBody(container, state, onChange) {
-    const set = (k, v) => { state.params[k] = (typeof v === "string") ? v : (v | 0); onChange(); };
+  static buildBody(container: HTMLElement, state: HsbState, onChange: () => void) {
+    const set = (k: string, v: string | number) => { state.params[k] = (typeof v === "string") ? v : (v | 0); onChange(); };
     // 亮度：黑→白 渐变
     container.appendChild(makeSliderRow("亮度", "brightness", -100, 100, 1, state.params.brightness, set, {
       gradient: "linear-gradient(90deg, #000 0%, #888 50%, #fff 100%)",
@@ -41,7 +54,7 @@ export class HsbFilter {
     }));
   }
 
-  static bake(srcData, dstData, p, mask) {
+  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: HsbParams, mask: Uint8ClampedArray | null) {
     const b = 1 + (p.brightness / 100);
     const c = 1 + (p.contrast / 100);
     const sat = p.saturation / 100;       // -1..1

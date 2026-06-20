@@ -3,6 +3,19 @@
 // 区段权重 = luma 三段高斯（shadow @ 0、mid @ 0.5、hi @ 1）
 
 import { registerFilter, clamp8, makeSliderRow, makeSectionTitle } from "../filters.ts";
+import type { FilterParams } from "../filters.ts";
+
+interface ColorBalanceParams extends FilterParams {
+  shR: number; shG: number; shB: number;
+  mR: number; mG: number; mB: number;
+  hiR: number; hiG: number; hiB: number;
+}
+
+interface ColorBalanceState {
+  params: ColorBalanceParams;
+}
+
+type RampPrefix = "sh" | "m" | "hi";
 
 export class ColorBalanceFilter {
   static id = "colorBalance";
@@ -15,8 +28,8 @@ export class ColorBalanceFilter {
     return { shR: 0, shG: 0, shB: 0, mR: 0, mG: 0, mB: 0, hiR: 0, hiG: 0, hiB: 0 };
   }
 
-  static buildBody(container, state, onChange) {
-    const set = (k, v) => { state.params[k] = v | 0; onChange(); };
+  static buildBody(container: HTMLElement, state: ColorBalanceState, onChange: () => void) {
+    const set = (k: string, v: number) => { state.params[k] = v | 0; onChange(); };
     // v132 (user：「colorful slider 也对应调整亮度让用户有直观感受」)
     //   3 段 × 3 轴 各自一套 ramp：颜色按 tone 区段亮度深浅，user 一看就知是哪段
     const RAMPS = {
@@ -36,11 +49,11 @@ export class ColorBalanceFilter {
         B: "linear-gradient(90deg, #ffc 0%, #ddd 50%, #ccf 100%)",
       },
     };
-    const axisRows = (prefix) => {
+    const axisRows = (prefix: RampPrefix) => {
       const r = RAMPS[prefix];
-      container.appendChild(makeSliderRow("青 ⟷ 红", prefix + "R", -100, 100, 1, state.params[prefix + "R"], set, { gradient: r.R }));
-      container.appendChild(makeSliderRow("品 ⟷ 绿", prefix + "G", -100, 100, 1, state.params[prefix + "G"], set, { gradient: r.G }));
-      container.appendChild(makeSliderRow("黄 ⟷ 蓝", prefix + "B", -100, 100, 1, state.params[prefix + "B"], set, { gradient: r.B }));
+      container.appendChild(makeSliderRow("青 ⟷ 红", prefix + "R", -100, 100, 1, state.params[prefix + "R"] as number, set, { gradient: r.R }));
+      container.appendChild(makeSliderRow("品 ⟷ 绿", prefix + "G", -100, 100, 1, state.params[prefix + "G"] as number, set, { gradient: r.G }));
+      container.appendChild(makeSliderRow("黄 ⟷ 蓝", prefix + "B", -100, 100, 1, state.params[prefix + "B"] as number, set, { gradient: r.B }));
     };
     container.appendChild(makeSectionTitle("阴影（暗部，luma≈0）"));
     axisRows("sh");
@@ -50,7 +63,7 @@ export class ColorBalanceFilter {
     axisRows("hi");
   }
 
-  static bake(srcData, dstData, p, mask) {
+  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: ColorBalanceParams, mask: Uint8ClampedArray | null) {
     // 三段 luma 权重函数（每段高斯 σ≈0.25，中心 0 / 0.5 / 1）
     const wShadow = new Float32Array(256);
     const wMid    = new Float32Array(256);

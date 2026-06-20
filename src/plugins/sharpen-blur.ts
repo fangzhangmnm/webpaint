@@ -6,6 +6,7 @@
 // 论证：模糊本质 non-local 卷积，大图慢；brush 模式天然限定 bbox 不卡
 
 import { registerFilter, clamp8, makeSliderRow, attachColorBrushBehavior } from "../filters.ts";
+import type { Filter, FilterParams } from "../filters.ts";
 
 export class SharpenBlurFilter {
   static id = "sharpenBlur";
@@ -22,8 +23,8 @@ export class SharpenBlurFilter {
   ];
 
   // bleed = 模糊 N 次 box 半径 = N；锐化单次 box = 1；0 = identity
-  static bleedRadius(p) {
-    const amt = (p && p.amount) | 0;
+  static bleedRadius(p: FilterParams): number {
+    const amt = (p && (p.amount as number)) | 0;
     if (amt < 0) return Math.max(1, Math.min(10, Math.round(-amt / 10)));
     if (amt > 0) return 1;
     return 0;
@@ -31,9 +32,10 @@ export class SharpenBlurFilter {
 
   static defaults() { return { amount: 0 }; }
 
-  static buildBody(container, state, onChange) {
-    container.appendChild(makeSliderRow("← 模糊      锐化 →", "amount", -100, 100, 1, state.params.amount, (k, v) => {
-      state.params.amount = v | 0;
+  static buildBody(container: HTMLElement, state: unknown, onChange: () => void): void {
+    const st = state as { params: { amount: number } };
+    container.appendChild(makeSliderRow("← 模糊      锐化 →", "amount", -100, 100, 1, st.params.amount, (k: string, v: number) => {
+      st.params.amount = v | 0;
       onChange();
     }, {
       gradient: "linear-gradient(90deg, #c4d2dc 0%, #888 50%, #f5f5f5 100%)",
@@ -46,8 +48,8 @@ export class SharpenBlurFilter {
   //   - threshold（|luma diff| < 4 跳过）= 抗噪（PS Unsharp Mask 的 threshold 参数）
   //   - k = amt/100（不再 ×2）减弱过冲
   //   模糊 path 保持 box blur N iter
-  static bake(srcData, dstData, p, mask, w, h) {
-    const amt = p.amount | 0;
+  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: FilterParams, mask: Uint8ClampedArray | null, w: number, h: number): void {
+    const amt = (p.amount as number) | 0;
     if (amt === 0) { dstData.set(srcData); return; }
     if (amt < 0) {
       const N = Math.max(1, Math.min(10, Math.round(-amt / 10)));
@@ -93,7 +95,7 @@ export class SharpenBlurFilter {
   }
 
   // v135 Gaussian 3×3 (1,2,1 / 2,4,2 / 1,2,1 / 16)：sharpen path 用，比 box 干净
-  static _gaussianBlur3(src, dst, w, h) {
+  static _gaussianBlur3(src: Uint8ClampedArray, dst: Uint8ClampedArray, w: number, h: number): void {
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const o = (y * w + x) * 4;
@@ -111,7 +113,7 @@ export class SharpenBlurFilter {
       }
     }
   }
-  static _boxBlur3(src, dst, w, h, mask) {
+  static _boxBlur3(src: Uint8ClampedArray, dst: Uint8ClampedArray, w: number, h: number, mask: Uint8ClampedArray | null): void {
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const o = (y * w + x) * 4;

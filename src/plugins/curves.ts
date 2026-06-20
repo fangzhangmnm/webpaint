@@ -7,16 +7,32 @@
 //   保单调性 / 不 overshoot（vs Catmull-Rom 在密集点会 over/undershoot 被 clamp 成 plateau）
 
 import { registerFilter, clamp8 } from "../filters.ts";
+import type { Filter, FilterParams } from "../filters.ts";
+
+type Point = [number, number];
+
+interface CurvesParams extends FilterParams {
+  active: string;
+  comp: Point[];
+  r: Point[];
+  g: Point[];
+  b: Point[];
+  a: Point[];
+}
+
+interface CurvesBuildState {
+  params: CurvesParams;
+}
 
 export class CurvesFilter {
   static id = "curves";
   static title = "曲线";
   static category = "adjustment";
   static modes = ["region"];
-  static bleedRadius() { return 0; }
+  static bleedRadius(): number { return 0; }
 
-  static defaults() {
-    const id = () => [[0, 0], [255, 255]];
+  static defaults(): CurvesParams {
+    const id = (): Point[] => [[0, 0], [255, 255]];
     return { active: "comp", comp: id(), r: id(), g: id(), b: id(), a: id() };
   }
 
@@ -26,7 +42,7 @@ export class CurvesFilter {
   //   平滑舒服（视觉跟 PS / Unity Curve Editor 一致）
   //   越界值会 clamp 到 0..255，偶尔出现 plateau 是 trade-off（PS 也这样）
   //   Hermite basis 复用：y(t) = h00·y0 + h10·dx·m0 + h01·y1 + h11·dx·m1
-  static _buildLut(points) {
+  static _buildLut(points: Point[]): Uint8Array {
     const pts = points.slice().sort((a, b) => a[0] - b[0]);
     const n = pts.length;
     const lut = new Uint8Array(256);
@@ -68,7 +84,7 @@ export class CurvesFilter {
     return lut;
   }
 
-  static buildBody(container, state, onChange) {
+  static buildBody(container: HTMLElement, state: CurvesBuildState, onChange: () => void): void {
     container.innerHTML = "";
     // 通道 selector
     const tabs = document.createElement("div");
@@ -89,7 +105,7 @@ export class CurvesFilter {
       b.dataset.ch = c.id;
       b.addEventListener("click", () => {
         state.params.active = c.id;
-        for (const x of tabs.children) x.setAttribute("aria-pressed", x.dataset.ch === c.id ? "true" : "false");
+        for (const x of tabs.children) x.setAttribute("aria-pressed", (x as HTMLElement).dataset.ch === c.id ? "true" : "false");
         draw();
       });
       b.setAttribute("aria-pressed", state.params.active === c.id ? "true" : "false");
@@ -103,12 +119,12 @@ export class CurvesFilter {
     canvas.className = "curves-canvas";
     canvas.style.touchAction = "none";
     container.appendChild(canvas);
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d")!;
 
-    function getPts() { return state.params[state.params.active]; }
-    function setPts(pts) { state.params[state.params.active] = pts; }
-    function toScreen(x, y) { return { sx: (x / 255) * SIZE, sy: SIZE - (y / 255) * SIZE }; }
-    function toData(sx, sy) {
+    function getPts(): Point[] { return state.params[state.params.active] as Point[]; }
+    function setPts(pts: Point[]): void { state.params[state.params.active] = pts; }
+    function toScreen(x: number, y: number): { sx: number; sy: number } { return { sx: (x / 255) * SIZE, sy: SIZE - (y / 255) * SIZE }; }
+    function toData(sx: number, sy: number): Point {
       return [
         Math.max(0, Math.min(255, Math.round((sx / SIZE) * 255))),
         Math.max(0, Math.min(255, Math.round((1 - sy / SIZE) * 255))),
@@ -116,7 +132,7 @@ export class CurvesFilter {
     }
     function draw() {
       const ch = state.params.active;
-      const chDef = CH.find((c) => c.id === ch);
+      const chDef = CH.find((c) => c.id === ch)!;
       ctx.clearRect(0, 0, SIZE, SIZE);
       ctx.fillStyle = "#1c1c1c"; ctx.fillRect(0, 0, SIZE, SIZE);
       ctx.strokeStyle = "#333"; ctx.lineWidth = 1;
@@ -143,8 +159,8 @@ export class CurvesFilter {
         ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
       }
     }
-    let dragIdx = -1, longPressTimer = null, downAt = null;
-    canvas.addEventListener("pointerdown", (e) => {
+    let dragIdx = -1, longPressTimer: ReturnType<typeof setTimeout> | null = null, downAt: { sx: number; sy: number } | null = null;
+    canvas.addEventListener("pointerdown", (e: PointerEvent) => {
       e.preventDefault();
       canvas.setPointerCapture(e.pointerId);
       const r = canvas.getBoundingClientRect();
@@ -171,7 +187,7 @@ export class CurvesFilter {
       } else {
         const [dx, dy] = toData(sx, sy);
         const newPts = pts.slice();
-        let ins = newPts.findIndex((pt) => pt[0] > dx);
+        let ins = newPts.findIndex((pt: Point) => pt[0] > dx);
         if (ins < 0) ins = newPts.length - 1;
         if (ins === 0) ins = 1;
         newPts.splice(ins, 0, [dx, dy]);
@@ -181,7 +197,7 @@ export class CurvesFilter {
       }
       downAt = { sx, sy };
     });
-    canvas.addEventListener("pointermove", (e) => {
+    canvas.addEventListener("pointermove", (e: PointerEvent) => {
       if (dragIdx < 0) return;
       const r = canvas.getBoundingClientRect();
       const sx = e.clientX - r.left, sy = e.clientY - r.top;
@@ -201,7 +217,7 @@ export class CurvesFilter {
       }
       onChange(); draw();
     });
-    const endDrag = (e) => {
+    const endDrag = (e: PointerEvent): void => {
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
       dragIdx = -1;
       try { canvas.releasePointerCapture(e.pointerId); } catch {}
@@ -211,7 +227,7 @@ export class CurvesFilter {
     draw();
   }
 
-  static bake(srcData, dstData, p, mask) {
+  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: CurvesParams, mask: Uint8ClampedArray | null): void {
     const lutComp = CurvesFilter._buildLut(p.comp);
     const lutR    = CurvesFilter._buildLut(p.r);
     const lutG    = CurvesFilter._buildLut(p.g);
