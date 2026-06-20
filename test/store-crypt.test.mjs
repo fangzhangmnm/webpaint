@@ -16,7 +16,7 @@ const { createCloudSync, memKv } = await import("../src/store/cloud-sync.ts");
 const { createMockProvider } = await import("../src/store/mock-provider.ts");
 const { createMockLocal } = await import("../src/store/mock-local.ts");
 const { looksEncryptedContainer } = await import("../src/store/crypto-container.ts");
-const { zipPack } = await import("../src/zip.js");
+const { zipPack } = await import("../src/zip.ts");
 const { encryptPeek } = await import("../src/store/crypto-container.ts");
 
 const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c];

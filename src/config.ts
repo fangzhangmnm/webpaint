@@ -21,10 +21,10 @@ export const SCOPES = ["Files.ReadWrite.AppFolder", "offline_access"];
 // （"current"），还用不上这个；phase 2 多 session 时再用。
 //   "未命名"          → "未命名.ora"
 //   "characters/wall" → "characters/wall.ora"
-export function sessionFileName(sessionName) {
+export function sessionFileName(sessionName: string) {
   const segments = (sessionName || "未命名")
     .split("/")
-    .map((s) => s.replace(/[\\:*?"<>|]+/g, "_").trim())
+    .map((s: string) => s.replace(/[\\:*?"<>|]+/g, "_").trim())
     .filter(Boolean);
   if (!segments.length) segments.push("未命名");
   return `${segments.join("/")}.ora`;
@@ -32,12 +32,12 @@ export function sessionFileName(sessionName) {
 
 // 加密容器的云端文件名（ADR-0012：加密文件外部扩展名 = .zip——容器本来就是标准 zip，
 // 名实相符、防软件按 .ora 误认）。同一 name 任一时刻只住一个扩展名下，cloud-sync 负责翻转。
-export function encSessionFileName(sessionName) {
+export function encSessionFileName(sessionName: string) {
   return sessionFileName(sessionName).replace(/\.ora$/, ".zip");
 }
 
 // 云端 path → session name（sessionFileName/encSessionFileName 的逆）。
 // 所有「path 去扩展名」的地方都走这里，别再散落 \.ora$ 正则（加密文件是 .zip）。
-export function stripSessionExt(path) {
+export function stripSessionExt(path: string) {
   return String(path).replace(/\.(ora|zip)$/i, "");
 }

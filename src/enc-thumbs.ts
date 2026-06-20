@@ -3,16 +3,16 @@
 // （busy 遮罩 z 高于 sheet，盖住密码框 = 无限转圈死锁；sheets 护栏也会 throw）。
 
 import { store } from "./app-store.js";
-import { isUnlocked, getPassword, setPassword, onPasswordVerified, promptPassword } from "./crypto-state.js";
+import { isUnlocked, getPassword, setPassword, onPasswordVerified, promptPassword } from "./crypto-state.ts";
 
 /** 本地加密作品的缩略图（内存密码解得开→PNG Blob；锁定/没有→null）。非交互——批量渲染不弹窗。 */
-export async function localPeekThumb(name) {
+export async function localPeekThumb(name: string): Promise<Blob | null> {
   const bytes = await store.readPeek(name);
   return bytes && bytes.length ? new Blob([bytes], { type: "image/png" }) : null;
 }
 
 /** 云端 byte-range 拉回的密文 peek blob（ENC_PEEK_MIME）→ PNG Blob | null。非交互。 */
-export async function decryptCloudPeekThumb(name, encBlob) {
+export async function decryptCloudPeekThumb(name: string, encBlob: Blob): Promise<Blob | null> {
   const bytes = await store.decryptPeekBytes(name, encBlob);
   return bytes && bytes.length ? new Blob([bytes], { type: "image/png" }) : null;
 }
@@ -22,7 +22,7 @@ export async function decryptCloudPeekThumb(name, encBlob) {
  * 内存密码先 verify（统一/per-name），不行就 prompt 循环（错→重问，取消→false）。
  * 验证经 store.verifyPassword（解 peek，便宜、不开 UI、不进 busy）。返回 false = 用户取消。
  */
-export async function ensureUnlocked(name) {
+export async function ensureUnlocked(name: string): Promise<boolean> {
   const cur = getPassword(name);
   if (cur && await store.verifyPassword(name, cur)) return true;
   for (let attempt = 0; ; attempt++) {
@@ -40,7 +40,7 @@ export async function ensureUnlocked(name) {
  * 返回验证过的密码（调用方拿去 unsealWith 解；不污染全局，记忆由调用方按落库 name 决定），
  * 取消 → null。**busy 外调用。**
  */
-export async function ensureUnlockedForBlob(blob) {
+export async function ensureUnlockedForBlob(blob: Blob) {
   const cur = getPassword(null);
   if (cur && await store.verifyContainer(blob, cur)) return cur;
   for (let attempt = 0; ; attempt++) {

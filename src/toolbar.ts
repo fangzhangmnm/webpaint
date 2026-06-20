@@ -9,7 +9,7 @@
 //             fillResampleSelect（变换采样 dropdown SSoT）。
 
 import { els } from "./els.ts";
-import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
+import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { Selection } from "./selection.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";

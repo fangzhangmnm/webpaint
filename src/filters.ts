@@ -33,51 +33,143 @@
 
 // registry 原语共享自 registry.js（candidate 2：filter 与 exporter 同一道接缝）。
 import { makeRegistry } from "./registry.ts";
-const _reg = makeRegistry({ name: "filter" });
 
-export function registerFilter(FilterClass) {
+// ============= Filter 契约（TS 化）=============
+// 一个 Filter = 一个全 static 的 ES class。下面是其类型契约——消费侧
+// （filters-adjust.ts、plugins/*）依赖此形状。runtime brush 方法
+// （attachColorBrushBehavior 注入）是可选的。
+
+export type FilterParams = Record<string, unknown>;
+
+// region filter bake：纯函数 src→dst（同尺寸）。mask=null 全图。
+export interface Filter {
+  id: string;
+  title: string;
+  category?: string;
+  modes?: string[];
+  bleedRadius?(params: FilterParams): number;
+  defaults?(): FilterParams;
+  buildBody?(container: HTMLElement, state: unknown, onChange: () => void): void;
+  bake(
+    srcData: Uint8ClampedArray,
+    dstData: Uint8ClampedArray,
+    params: FilterParams,
+    mask: Uint8ClampedArray | null,
+    w: number,
+    h: number,
+  ): void;
+  // attachColorBrushBehavior 注入的 runtime brush 方法（color-brush 类 filter）
+  beginBrushStroke?(
+    layer: BrushLayer,
+    params: FilterParams,
+    brushSettings: BrushSettings,
+    selection: BrushSelection | null,
+    x: number,
+    y: number,
+    p: number,
+  ): ColorBrushState;
+  extendBrushStamp?(state: ColorBrushState, x: number, y: number, p: number): void;
+  endBrushStroke?(state: ColorBrushState): void;
+  flushDirty?(state: ColorBrushState): DirtyRect | null;
+}
+
+// color-brush 行为操作的 app-domain 对象（doc.js / brush 输入未类型化 → 描述用到的字段）。
+export interface BrushLayer {
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
+  ctx: CanvasRenderingContext2D;
+}
+
+export interface BrushSettings {
+  size: number;
+  spacingValue?: number;
+  hardness?: number;
+  flow?: number;
+  opacity?: number;
+}
+
+export interface BrushSelection {
+  maskCanvas: CanvasImageSource;
+  bboxX: number;
+  bboxY: number;
+}
+
+export type DirtyRect = [number, number, number, number];
+
+// 单 stroke 的可变状态（beginBrushStroke 返回，后续方法读写）。
+export interface ColorBrushState {
+  layer: BrushLayer;
+  params: FilterParams;
+  brushSettings: BrushSettings;
+  selection: BrushSelection | null;
+  FilterClass: Filter;
+  lastX: number;
+  lastY: number;
+  pendingDist: number;
+  dirty: DirtyRect | null;
+}
+
+const _reg = makeRegistry<Filter>({ name: "filter" });
+
+export function registerFilter(FilterClass: Filter): void {
   if (!FilterClass || !FilterClass.id) {
     throw new Error("Filter 必须有 static id");
   }
   _reg.register(FilterClass);
 }
 
-export function getFilter(id) {
+export function getFilter(id: string): Filter | null {
   return _reg.get(id);
 }
 
-export function listFilters() {
+export function listFilters(): Filter[] {
   return _reg.list();
 }
 
 // 监听新 filter 注册；菜单 lazy 渲染 / 插件加载后自动出现入口
-export function onFilterRegistered(fn) {
+export function onFilterRegistered(fn: (item: Filter) => void): () => void {
   return _reg.onRegistered(fn);
 }
 
 // ============= 共享 helper =============
 
-export function clamp8(v) { return v < 0 ? 0 : v > 255 ? 255 : v | 0; }
+export function clamp8(v: number): number { return v < 0 ? 0 : v > 255 ? 255 : v | 0; }
 
 // 一行 slider row：label + range + 数字
 //   onChange(key, value) 在 input 时触发
 //   fmt(value) 可选格式化数字显示
 //   gradient 可选 CSS background（color ramp slider）
-export function makeSliderRow(label, key, min, max, step, init, onChange, opts = {}) {
+export interface SliderRowOpts {
+  fmt?: (value: number) => string;
+  gradient?: string;
+}
+
+export function makeSliderRow(
+  label: string,
+  key: string,
+  min: number,
+  max: number,
+  step: number,
+  init: number,
+  onChange: (key: string, value: number) => void,
+  opts: SliderRowOpts = {},
+): HTMLLabelElement {
   const { fmt, gradient } = opts;
   const wrap = document.createElement("label");
   wrap.className = "brush-slider-row";
   wrap.innerHTML = `<span class="brush-slider-label">${label}</span>` +
     `<input type="range" min="${min}" max="${max}" step="${step}" value="${init}" />` +
     `<span class="brush-slider-value"></span>`;
-  const input = wrap.querySelector("input");
+  const input = wrap.querySelector("input")!;
   if (gradient) {
     // v132 修：input 默认 track 盖了 background；要 .color-ramp class 切自定义 track
     input.style.background = gradient;
     input.classList.add("color-ramp");
   }
-  const val = wrap.querySelector(".brush-slider-value");
-  const update = (v) => { val.textContent = fmt ? fmt(v) : String(v); };
+  const val = wrap.querySelector(".brush-slider-value")!;
+  const update = (v: number) => { val.textContent = fmt ? fmt(v) : String(v); };
   update(init);
   input.addEventListener("input", () => {
     const v = parseFloat(input.value);
@@ -87,7 +179,7 @@ export function makeSliderRow(label, key, min, max, step, init, onChange, opts =
   return wrap;
 }
 
-export function makeSectionTitle(text) {
+export function makeSectionTitle(text: string): HTMLDivElement {
   const d = document.createElement("div");
   d.className = "adjust-section-title";
   d.textContent = text;
@@ -108,16 +200,16 @@ export function makeSectionTitle(text) {
 //   // 之后 BlurFilter.beginBrushStroke/extendBrushStamp/endBrushStroke/flushDirty 都有了
 //
 // 跟 liquify（位移场）那种 filter 不同；位移场 filter 自己写完整 brush 方法。
-export function attachColorBrushBehavior(FilterClass) {
-  FilterClass.beginBrushStroke = function(layer, params, brushSettings, selection, x, y, p) {
-    const state = {
+export function attachColorBrushBehavior(FilterClass: Filter): void {
+  FilterClass.beginBrushStroke = function(layer: BrushLayer, params: FilterParams, brushSettings: BrushSettings, selection: BrushSelection | null, x: number, y: number, p: number): ColorBrushState {
+    const state: ColorBrushState = {
       layer, params, brushSettings, selection, FilterClass,
       lastX: x, lastY: y, pendingDist: 0, dirty: null,
     };
     _colorBrushStamp(state, x, y, p);
     return state;
   };
-  FilterClass.extendBrushStamp = function(state, x, y, p) {
+  FilterClass.extendBrushStamp = function(state: ColorBrushState, x: number, y: number, p: number): void {
     const dx = x - state.lastX, dy = y - state.lastY;
     const dist = Math.hypot(dx, dy);
     if (dist <= 0) return;
@@ -138,8 +230,8 @@ export function attachColorBrushBehavior(FilterClass) {
     state.pendingDist = dist - (placedDist - spacingPx);
     state.lastX = x; state.lastY = y;
   };
-  FilterClass.endBrushStroke = function(_state) { /* nothing */ };
-  FilterClass.flushDirty = function(state) {
+  FilterClass.endBrushStroke = function(_state: ColorBrushState): void { /* nothing */ };
+  FilterClass.flushDirty = function(state: ColorBrushState): DirtyRect | null {
     const d = state.dirty;
     state.dirty = null;
     return d;
@@ -147,7 +239,7 @@ export function attachColorBrushBehavior(FilterClass) {
 }
 
 // 单 stamp 内的工作：读 layer 像素 → filter.bake → 圆形 alpha + 选区 → 合回 layer
-function _colorBrushStamp(state, cx, cy, pressure) {
+function _colorBrushStamp(state: ColorBrushState, cx: number, cy: number, pressure: number): void {
   const { layer, FilterClass, params, brushSettings, selection } = state;
   const R = Math.max(2, brushSettings.size / 2 * (pressure ?? 1));
   const hardness = brushSettings.hardness ?? 0.6;
@@ -169,11 +261,11 @@ function _colorBrushStamp(state, cx, cy, pressure) {
   FilterClass.bake(srcImg.data, dstImg.data, params, null, ew, eh);
   const ox = sx0 - ex0, oy = sy0 - ey0;
   const sw = sx1 - sx0, sh = sy1 - sy0;
-  let selData = null;
+  let selData: Uint8ClampedArray | null = null;
   if (selection) {
     const sc = document.createElement("canvas");
     sc.width = sw; sc.height = sh;
-    const sctx = sc.getContext("2d");
+    const sctx = sc.getContext("2d")!;
     sctx.drawImage(selection.maskCanvas, selection.bboxX - sx0, selection.bboxY - sy0);
     selData = sctx.getImageData(0, 0, sw, sh).data;
   }
@@ -216,14 +308,25 @@ function _colorBrushStamp(state, cx, cy, pressure) {
 }
 
 // 给插件 / 自定义 UI 用：返回一个 `<select>` row
-export function makeSelectRow(label, key, options, init, onChange) {
+export interface SelectOption {
+  value: string;
+  label: string;
+}
+
+export function makeSelectRow(
+  label: string,
+  key: string,
+  options: SelectOption[],
+  init: string,
+  onChange: (key: string, value: string) => void,
+): HTMLLabelElement {
   const wrap = document.createElement("label");
   wrap.className = "brush-slider-row";
   wrap.innerHTML = `<span class="brush-slider-label">${label}</span>` +
     `<select style="flex:1; font:inherit; padding:2px 4px;">` +
     options.map((o) => `<option value="${o.value}"${o.value === init ? " selected" : ""}>${o.label}</option>`).join("") +
     `</select><span class="brush-slider-value" style="min-width:0"></span>`;
-  const sel = wrap.querySelector("select");
+  const sel = wrap.querySelector("select")!;
   sel.addEventListener("change", () => onChange(key, sel.value));
   return wrap;
 }

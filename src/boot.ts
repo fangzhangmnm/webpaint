@@ -5,10 +5,10 @@
 //
 // 红线：store 调用（_store.flow.load）verbatim 搬迁、一字未改——只 relocate，不碰同步机制。
 
-import { defaultsPromise, mergeMissingDefaults, makeDefaultRack } from "./brushes.js";
+import { defaultsPromise, mergeMissingDefaults, makeDefaultRack } from "./brushes.ts";
 import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
-import { ensureUnlocked } from "./enc-thumbs.js";
+import { ensureUnlocked } from "./enc-thumbs.ts";
 import { decodeOraToDoc } from "./ora.ts";
 import type { PaintDoc } from "./doc.ts";
 import type { AppContext } from "./app-context.ts";
@@ -30,7 +30,7 @@ export function initRackBoot(ctx: AppContext) {
     defaultsPromise().then(() => {
       const cur = rack.get();
       if (!cur) return;
-      const merged = mergeMissingDefaults(cur);
+      const merged = mergeMissingDefaults(cur as Parameters<typeof mergeMissingDefaults>[0]);
       if (!merged) return;
       rack.setRack(merged);
       rack.persist().catch(() => {});

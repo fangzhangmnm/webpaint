@@ -16,9 +16,9 @@
 
 import { encodeDocToOra, decodeOraToDoc } from "./ora.ts";
 import { compositeLayers } from "./layer-composite.ts";
-import { looksEncryptedContainer } from "./crypto-format.js";
+import { looksEncryptedContainer } from "./crypto-format.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
-import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.js";
+import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.ts";
 import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）
 import type { PaintDoc } from "./doc.ts";
 
@@ -246,7 +246,7 @@ export async function exportOraDownload(doc: PaintDoc, filename = "未命名.ora
 /** 导出 .psd 到本地下载（最小子集：raster layer + bbox + blend mode + opacity + name）。
  *  Photoshop / Affinity / Procreate / Krita 都吃。详见 src/psd.js */
 export async function exportPsdDownload(doc: PaintDoc, filename = "未命名.psd") {
-  const { encodeDocToPsd } = await import("./psd.js");
+  const { encodeDocToPsd } = await import("./psd.ts");
   const blob = await encodeDocToPsd(doc);
   triggerDownload(blob, filename);
 }

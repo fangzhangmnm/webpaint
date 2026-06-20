@@ -22,15 +22,30 @@
 
 import { compositeLayers } from "./layer-composite.ts";
 import { flattenLeaves } from "./doc.ts";
+import type { Layer, PaintDoc } from "./doc.ts";
+
+// doc.layers / compositeLayers 的节点联合（Layer | LayerGroup）；这两个类型在 doc.ts 未导出，
+// compositeLayers 接受 doc.layers 原样传入即可，这里给本地用到的画布上下文类型。
+type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+
+// 单通道 PackBits 编码结果
+interface EncodedChannel {
+  id: number;
+  length: number;
+  rowByteCounts: Uint16Array;
+  encoded: Uint8Array;
+}
 
 // ---- BinaryWriter：动态增长 Uint8Array + big-endian + delayed fill ----
 class BinaryWriter {
+  _buf: Uint8Array;
+  _off: number;
   constructor(initialCap = 1024) {
     this._buf = new Uint8Array(initialCap);
     this._off = 0;
   }
   get offset() { return this._off; }
-  _grow(n) {
+  _grow(n: number) {
     if (this._off + n <= this._buf.length) return;
     let cap = this._buf.length;
     while (cap < this._off + n) cap *= 2;
@@ -38,37 +53,37 @@ class BinaryWriter {
     nb.set(this._buf);
     this._buf = nb;
   }
-  writeUInt8(v)  { this._grow(1); this._buf[this._off++] = v & 0xff; }
-  writeUInt16(v) {
+  writeUInt8(v: number)  { this._grow(1); this._buf[this._off++] = v & 0xff; }
+  writeUInt16(v: number) {
     this._grow(2);
     this._buf[this._off++] = (v >>> 8) & 0xff;
     this._buf[this._off++] = v & 0xff;
   }
-  writeUInt32(v) {
+  writeUInt32(v: number) {
     this._grow(4);
     this._buf[this._off++] = (v >>> 24) & 0xff;
     this._buf[this._off++] = (v >>> 16) & 0xff;
     this._buf[this._off++] = (v >>>  8) & 0xff;
     this._buf[this._off++] = v & 0xff;
   }
-  writeInt16(v) { this.writeUInt16(v & 0xffff); }
-  writeAscii(s) {
+  writeInt16(v: number) { this.writeUInt16(v & 0xffff); }
+  writeAscii(s: string) {
     this._grow(s.length);
     for (let i = 0; i < s.length; i++) this._buf[this._off++] = s.charCodeAt(i) & 0xff;
   }
-  writeBytes(arr) {
+  writeBytes(arr: Uint8Array) {
     this._grow(arr.length);
     this._buf.set(arr, this._off);
     this._off += arr.length;
   }
-  padTo(multiple) {
+  padTo(multiple: number) {
     const r = this._off % multiple;
     if (r === 0) return;
     const n = multiple - r;
     this._grow(n);
     for (let i = 0; i < n; i++) this._buf[this._off++] = 0;
   }
-  fillUInt32(at, v) {
+  fillUInt32(at: number, v: number) {
     this._buf[at]     = (v >>> 24) & 0xff;
     this._buf[at + 1] = (v >>> 16) & 0xff;
     this._buf[at + 2] = (v >>>  8) & 0xff;
@@ -84,7 +99,7 @@ class BinaryWriter {
 //     -127..-1    = 把下一个字节重复 (1 - n) 次（注意 8-bit signed）
 //     -128 (0x80) = no-op，不用
 // 输出对每行独立做（PSD 按 scanline 切片）。
-function packBitsEncodeRow(src) {
+function packBitsEncodeRow(src: Uint8Array) {
   const out = [];
   const len = src.length;
   let i = 0;
@@ -114,7 +129,7 @@ function packBitsEncodeRow(src) {
 }
 
 // 编码一整张通道（h 行 × w 列），返回每行字节数 + 拼接的编码 bytes
-function packBitsEncodeChannel(data, w, h) {
+function packBitsEncodeChannel(data: Uint8Array, w: number, h: number) {
   if (w === 0 || h === 0) {
     return { rowByteCounts: new Uint16Array(0), encoded: new Uint8Array(0) };
   }
@@ -135,7 +150,7 @@ function packBitsEncodeChannel(data, w, h) {
 }
 
 // ---- 通道切分：RGBA interleaved → 4 个独立 Uint8Array ----
-function splitRGBAChannels(rgba, w, h) {
+function splitRGBAChannels(rgba: Uint8ClampedArray, w: number, h: number) {
   const n = w * h;
   const r = new Uint8Array(n);
   const g = new Uint8Array(n);
@@ -152,7 +167,7 @@ function splitRGBAChannels(rgba, w, h) {
 
 // ---- Canvas blend mode → PSD blend key（4 chars，缺位补空格）----
 // 12 个 Canvas mode 大部分能一一对应；其他 mode 我们也没用。
-const PSD_BLEND_MODE = {
+const PSD_BLEND_MODE: Record<string, string> = {
   "source-over": "norm",
   "multiply":    "mul ",
   "screen":      "scrn",
@@ -174,7 +189,7 @@ const PSD_BLEND_MODE = {
 // ---- 名字编码 ----
 // PSD layer name：pascal string（1 byte 长度 + bytes），padded 到 4 倍数（含长度字节）
 // 只装 ASCII；非 ASCII 替换成 '?'。真实 unicode 名走 "luni" additional info。
-function asciiPascalBytes(name) {
+function asciiPascalBytes(name: string) {
   const arr = [];
   for (let i = 0; i < name.length && arr.length < 255; i++) {
     const c = name.charCodeAt(i);
@@ -184,7 +199,7 @@ function asciiPascalBytes(name) {
 }
 
 // ---- 主入口 ----
-export async function encodeDocToPsd(doc) {
+export async function encodeDocToPsd(doc: PaintDoc) {
   const w = new BinaryWriter(64 * 1024);
   const docW = doc.width;
   const docH = doc.height;
@@ -250,7 +265,7 @@ export async function encodeDocToPsd(doc) {
 }
 
 // ---- 每 layer 通道编码（预算长度用）----
-function encodeLayerChannels(layer) {
+function encodeLayerChannels(layer: Layer): EncodedChannel[] {
   const lw = layer.bboxW || 0;
   const lh = layer.bboxH || 0;
   let channels;
@@ -275,7 +290,7 @@ function encodeLayerChannels(layer) {
   });
 }
 
-function writeLayerRecord(w, layer, encChannels) {
+function writeLayerRecord(w: BinaryWriter, layer: Layer, encChannels: EncodedChannel[]) {
   // bbox（PSD wants top, left, bottom, right）
   const empty = !(layer.bboxW > 0 && layer.bboxH > 0);
   const top    = empty ? 0 : layer.bboxY;
@@ -335,7 +350,7 @@ function writeLayerRecord(w, layer, encChannels) {
 // "luni" 块：
 //   "8BIM" "luni" length(uint32) charCount(uint32) UTF-16BE bytes
 //   length 字段后的数据 padded 到 4 倍数
-function writeLuni(w, name) {
+function writeLuni(w: BinaryWriter, name: string) {
   w.writeAscii("8BIM");
   w.writeAscii("luni");
   const lenOff = w.offset;
@@ -349,7 +364,7 @@ function writeLuni(w, name) {
   w.fillUInt32(lenOff, dataLen);
 }
 
-function writeLayerChannelData(w, layer, encChannels) {
+function writeLayerChannelData(w: BinaryWriter, layer: Layer, encChannels: EncodedChannel[]) {
   const lh = layer.bboxH || 0;
   for (const ch of encChannels) {
     w.writeUInt16(1);                            // compression = RLE
@@ -361,11 +376,11 @@ function writeLayerChannelData(w, layer, encChannels) {
 }
 
 // ---- Merged image：所有可见 layer 合成到 docW×docH 平面后写入 ----
-function writeMergedImage(w, doc, docW, docH) {
+function writeMergedImage(w: BinaryWriter, doc: PaintDoc, docW: number, docH: number) {
   const c = (typeof OffscreenCanvas !== "undefined")
     ? new OffscreenCanvas(docW, docH)
     : (() => { const x = document.createElement("canvas"); x.width = docW; x.height = docH; return x; })();
-  const ctx = c.getContext("2d");
+  const ctx = c.getContext("2d") as Ctx;
   // 透明背景；merged 自带 alpha
   ctx.clearRect(0, 0, docW, docH);
   // 走规范合成器（deep module A）：respect clip + mode + 组隔离（修旧实现无视 clip 的 bug）。

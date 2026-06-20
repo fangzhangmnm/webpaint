@@ -15,15 +15,40 @@ import { raiseWindow } from "./surfaces.ts";
 
 const CANVAS_SIZE = 256;
 
+interface RGB { r: number; g: number; b: number; }
+
+type PaletteMode = "brush" | "mix" | "picker";
+
+interface PaletteWindowOptions {
+  root: HTMLElement;
+  onColorSampled: (hex: string) => void;
+  getCurrentColor?: () => string;
+}
+
+interface PaletteSerializedState {
+  open: boolean;
+  mode: PaletteMode;
+  imageB64: string;
+  position: { left: string; top: string } | null;
+}
+
 export class PaletteWindow {
-  constructor({ root, onColorSampled, getCurrentColor }) {
+  root: HTMLElement;
+  onColorSampled: (hex: string) => void;
+  getCurrentColor: () => string;
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  mode: PaletteMode;
+  _open: boolean;
+
+  constructor({ root, onColorSampled, getCurrentColor }: PaletteWindowOptions) {
     this.root = root;
     this.onColorSampled = onColorSampled;
     this.getCurrentColor = getCurrentColor || (() => "#000");
-    this.canvas = root.querySelector(".palette-canvas");
+    this.canvas = root.querySelector(".palette-canvas") as HTMLCanvasElement;
     this.canvas.width = CANVAS_SIZE;
     this.canvas.height = CANVAS_SIZE;
-    this.ctx = this.canvas.getContext("2d");
+    this.ctx = this.canvas.getContext("2d")!;
     this._fillBackground();
     this.mode = "brush";
     this._open = root.classList.contains("hidden") ? false : true;
@@ -43,7 +68,7 @@ export class PaletteWindow {
   toggle() { this._open ? this.close() : this.open(); }
   isOpen() { return this._open; }
 
-  setMode(m) {
+  setMode(m: string) {
     if (m === "smudge") m = "mix";   // v309：旧持久值「涂抹」→「混色」迁移
     if (m !== "brush" && m !== "mix" && m !== "picker") return;
     this.mode = m;
@@ -51,14 +76,14 @@ export class PaletteWindow {
   }
 
   _refreshToolButtons() {
-    for (const b of this.root.querySelectorAll(".palette-tool")) {
+    for (const b of this.root.querySelectorAll<HTMLElement>(".palette-tool")) {
       b.setAttribute("aria-pressed", b.dataset.paletteTool === this.mode ? "true" : "false");
     }
   }
 
   _wireToolButtons() {
-    for (const b of this.root.querySelectorAll(".palette-tool")) {
-      b.addEventListener("click", () => this.setMode(b.dataset.paletteTool));
+    for (const b of this.root.querySelectorAll<HTMLElement>(".palette-tool")) {
+      b.addEventListener("click", () => this.setMode(b.dataset.paletteTool!));
     }
     const clearBtn = this.root.querySelector(".palette-clear");
     if (clearBtn) clearBtn.addEventListener("click", () => this.clear());
@@ -67,26 +92,26 @@ export class PaletteWindow {
     this._refreshToolButtons();
   }
 
-  _toLocal(e) {
+  _toLocal(e: PointerEvent) {
     const r = this.canvas.getBoundingClientRect();
     return {
       x: ((e.clientX - r.left) / r.width) * CANVAS_SIZE,
       y: ((e.clientY - r.top) / r.height) * CANVAS_SIZE,
     };
   }
-  _sample(x, y) {
+  _sample(x: number, y: number): RGB {
     const ix = Math.max(0, Math.min(CANVAS_SIZE - 1, Math.floor(x)));
     const iy = Math.max(0, Math.min(CANVAS_SIZE - 1, Math.floor(y)));
     const d = this.ctx.getImageData(ix, iy, 1, 1).data;
     return { r: d[0], g: d[1], b: d[2] };
   }
-  _toHex({ r, g, b }) {
+  _toHex({ r, g, b }: RGB) {
     return "#" + [r, g, b].map(v => Math.max(0, Math.min(255, v|0)).toString(16).padStart(2, "0")).join("");
   }
 
   _wireEvents() {
-    let active = false, lastX = 0, lastY = 0, loaded = null;
-    const onDown = (e) => {
+    let active = false, lastX = 0, lastY = 0, loaded: RGB | null = null;
+    const onDown = (e: PointerEvent) => {
       e.stopPropagation();
       this.canvas.setPointerCapture(e.pointerId);
       const { x, y } = this._toLocal(e);
@@ -96,7 +121,7 @@ export class PaletteWindow {
       this._paint(x, y, loaded);
       e.preventDefault();
     };
-    const onMove = (e) => {
+    const onMove = (e: PointerEvent) => {
       if (!active) return;
       const { x, y } = this._toLocal(e);
       const dx = x - lastX, dy = y - lastY;
@@ -114,7 +139,7 @@ export class PaletteWindow {
         lastX = x; lastY = y;
       }
     };
-    const onUp = (e) => { active = false; loaded = null; e?.stopPropagation?.(); };
+    const onUp = (e: PointerEvent) => { active = false; loaded = null; e?.stopPropagation?.(); };
     this.canvas.addEventListener("pointerdown", onDown);
     this.canvas.addEventListener("pointermove", onMove);
     this.canvas.addEventListener("pointerup", onUp);
@@ -122,7 +147,7 @@ export class PaletteWindow {
     this.canvas.addEventListener("pointerleave", () => { /* keep active during fast drag */ });
   }
 
-  _paint(x, y, loaded) {
+  _paint(x: number, y: number, loaded: RGB | null) {
     const ctx = this.ctx;
     if (this.mode === "brush") {
       ctx.fillStyle = this.getCurrentColor();
@@ -148,17 +173,17 @@ export class PaletteWindow {
   }
 
   _wireDrag() {
-    const head = this.root.querySelector(".palette-head");
+    const head = this.root.querySelector<HTMLElement>(".palette-head");
     if (!head) return;
     let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
-    head.addEventListener("pointerdown", (e) => {
-      if (e.target.tagName === "BUTTON") return;
+    head.addEventListener("pointerdown", (e: PointerEvent) => {
+      if ((e.target as HTMLElement).tagName === "BUTTON") return;
       dragging = true; sx = e.clientX; sy = e.clientY;
       const r = this.root.getBoundingClientRect();
       ox = r.left; oy = r.top;
       head.setPointerCapture(e.pointerId);
     });
-    head.addEventListener("pointermove", (e) => {
+    head.addEventListener("pointermove", (e: PointerEvent) => {
       if (!dragging) return;
       this.root.style.left = (ox + (e.clientX - sx)) + "px";
       this.root.style.top  = (oy + (e.clientY - sy)) + "px";
@@ -179,7 +204,7 @@ export class PaletteWindow {
       };
     } catch (_) { return null; }
   }
-  applySerializedState(s) {
+  applySerializedState(s: PaletteSerializedState | null) {
     if (!s) return;
     if (s.mode) this.setMode(s.mode);
     if (s.position) {

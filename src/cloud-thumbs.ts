@@ -21,7 +21,7 @@ import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./app
 // 加密容器（ADR-0012）：尾部是加密 peek blob（WebPaint 的 peek=缩略图 PNG），
 // PNG 硬扫自然落空 → 扫 MAGIC。命中返**密文** Blob（type=ENC_PEEK_MIME），解密归 caller
 // （图库经 store.decryptPeekBytes 按锁态解；cache 层原样缓存密文 → 明文 thumb 不落 IDB）。
-import { scanEncPeekFromEnd, ENC_PEEK_MIME } from "./crypto-format.js";
+import { scanEncPeekFromEnd, ENC_PEEK_MIME } from "./crypto-format.ts";
 
 // 投机 suffix：last N 字节一次性拿 EOCD + CD +（自家 ora）thumbnail data
 // 80KB budget = thumb 自适应目标 ≤ 70KB + 尾巴 ~10KB（CD + EOCD + sig 扫描余量）
@@ -32,7 +32,9 @@ const THUMB_PATH = "Thumbnails/thumbnail.png";
 const PNG_SIG = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
 // telemetry：记录 80KB 一次拉硬扫的命中分布（console: WebPaint.cloudThumbTelemetry()）
-export const telemetry = {
+export const telemetry: {
+  small: number; hardScan: number; encScan: number; zip2: number; zip3: number; errors: number;
+} = {
   small: 0,         // 路径 0：< 80KB 整下载
   hardScan: 0,      // 路径 1：1 request hardscan 命中（理想）
   encScan: 0,       // 路径 1e：加密容器 MAGIC 命中（1 request，返密文）
@@ -53,7 +55,16 @@ const IEND_TAIL = [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82];
 // 找 EOCD signature (0x06054b50) 在 buffer 里的位置；从末尾向前扫
 // 带 sanity check：找到 sig 后 verify commentLen 跟剩余字节匹配，防 false-positive
 // 返回 -1 没找到
-function _findEOCD(buf) {
+// ZIP central-directory entry（_parseCD 输出）
+interface ZipEntry {
+  name: string;
+  method: number;
+  compSize: number;
+  uncSize: number;
+  localOff: number;
+}
+
+function _findEOCD(buf: ArrayBuffer): number {
   const view = new DataView(buf);
   const maxScan = Math.min(buf.byteLength, 22 + 65535);
   for (let i = buf.byteLength - 22; i >= buf.byteLength - maxScan; i--) {
@@ -68,7 +79,7 @@ function _findEOCD(buf) {
 }
 
 // 从 EOCD 拿 central directory location
-function _parseEOCD(buf, eocdOffset) {
+function _parseEOCD(buf: ArrayBuffer, eocdOffset: number): { cdSize: number; cdOffset: number; entries: number } {
   const v = new DataView(buf, eocdOffset);
   return {
     cdSize:    v.getUint32(12, true),
@@ -78,8 +89,8 @@ function _parseEOCD(buf, eocdOffset) {
 }
 
 // parse central directory，返回 entries 数组
-function _parseCD(buf, cdStartInBuf, cdSize) {
-  const entries = [];
+function _parseCD(buf: ArrayBuffer, cdStartInBuf: number, cdSize: number): ZipEntry[] {
+  const entries: ZipEntry[] = [];
   let p = cdStartInBuf;
   const end = cdStartInBuf + cdSize;
   while (p < end) {
@@ -101,7 +112,7 @@ function _parseCD(buf, cdStartInBuf, cdSize) {
 }
 
 // 算 local file header 数据偏移：header 30 字节 + filename + extra
-function _localHeaderDataOffset(buf, headerOffsetInBuf) {
+function _localHeaderDataOffset(buf: ArrayBuffer, headerOffsetInBuf: number): number {
   const v = new DataView(buf, headerOffsetInBuf);
   if (v.getUint32(0, true) !== 0x04034b50) throw new Error("非法 local file header");
   const nameLen  = v.getUint16(26, true);
@@ -113,7 +124,7 @@ function _localHeaderDataOffset(buf, headerOffsetInBuf) {
 
 // method=0 stored, method=8 deflate
 // 返回 Uint8Array（caller 校 magic 再包 Blob）
-async function _decompress(rawData, method) {
+async function _decompress(rawData: Uint8Array, method: number): Promise<Uint8Array> {
   if (method === 0) return rawData.slice();
   if (method === 8) {
     if (typeof DecompressionStream === "undefined") {
@@ -128,7 +139,7 @@ async function _decompress(rawData, method) {
 }
 
 // PNG magic 校验（防错位 byte-range 取到非 PNG 数据）
-function _isPng(bytes) {
+function _isPng(bytes: Uint8Array): boolean {
   if (bytes.length < 8) return false;
   for (let i = 0; i < 8; i++) if (bytes[i] !== PNG_SIG[i]) return false;
   return true;
@@ -137,7 +148,7 @@ function _isPng(bytes) {
 // 从 buf 末尾向前扫一个完整 PNG：sig + IHDR + ... + IEND
 // 找不到返 null；找到返 Uint8Array slice
 // 自家 ora 的 thumbnail 100% 命中（thumbnail 放 zip 末 + STORE 不压）
-function _scanPngFromEnd(buf) {
+function _scanPngFromEnd(buf: ArrayBuffer): Uint8Array | null {
   const u8 = new Uint8Array(buf);
   const n = u8.length;
   // 从末尾向前扫 PNG sig（8 字节）
@@ -177,10 +188,10 @@ function _scanPngFromEnd(buf) {
  * @param {string} [opts.downloadUrl] — listChildren 带回的 1h 短效 CDN URL，
  *                                       直接打省一次 metadata RTT；过期抛 401/403
  */
-export async function fetchOraThumbnail(itemId, fileSize, opts = {}) {
+export async function fetchOraThumbnail(itemId: string, fileSize: number, opts: { downloadUrl?: string } = {}): Promise<Blob> {
   const dl = opts.downloadUrl || null;
   // 抽象：有 downloadUrl 走 CDN（省 metadata RTT）；没有走老路（自己拿 url）
-  const rangeFetch = dl
+  const rangeFetch: (offset: number | null, length: number) => Promise<ArrayBuffer> = dl
     ? (offset, length) => downloadRangeFromUrl(dl, offset, length)
     : (offset, length) => downloadItemRange(itemId, offset, length);
 
@@ -253,14 +264,14 @@ export async function fetchOraThumbnail(itemId, fileSize, opts = {}) {
 }
 
 // 加密 thumb：buf 尾扫 MAGIC，命中切出完整密文段（含头），打 ENC_PEEK_MIME 标记。
-function _scanEncThumb(buf) {
+function _scanEncThumb(buf: ArrayBuffer): Blob | null {
   const parsed = scanEncPeekFromEnd(new Uint8Array(buf));
   if (!parsed) return null;
   return new Blob([new Uint8Array(buf).slice(parsed.start, parsed.end)], { type: ENC_PEEK_MIME });
 }
 
 // ============= 提取 helper（小文件路径用）=============
-async function _extractFromBuffer(buf, fileStart) {
+async function _extractFromBuffer(buf: ArrayBuffer, fileStart: number): Promise<Blob> {
   const eocdInBuf = _findEOCD(buf);
   if (eocdInBuf < 0) throw new Error("EOCD 没找到");
   const { cdSize, cdOffset } = _parseEOCD(buf, eocdInBuf);

@@ -23,10 +23,10 @@ import { listCloudSessionsRecursive, listCloudAll, isSignedIn } from "./app-stor
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.ts";
-import { stripSessionExt } from "./config.js";
+import { stripSessionExt } from "./config.ts";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
-import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.js";
-import { ensureUnlocked } from "./enc-thumbs.js";
+import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.ts";
+import { ensureUnlocked } from "./enc-thumbs.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);

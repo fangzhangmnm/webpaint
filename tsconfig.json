@@ -44,7 +44,27 @@
   // batch 14（v308，2026-06-19）：二级引擎 .js→.ts（brush/liquify/filter-brush/stroke-smoother/
   //   stroke-input-smooth/lasso/selection/layer-composite/floating-transform/resample/bitmap）。
   //   selection.ts 真类型 → doc.ts 弃本地 SelectionLike 镜像直接 import Selection。
+  // batch 15（v312，2026-06-20）：支持/功能叶 .js→.ts（filters/storage/config/crypto-*/brushes/
+  //   exporters/zip/sevenzip/cloud-thumbs*/enc-thumbs/reference/palette/psd/smooth-config/panel-state）。
+  //   剩 app-store.js（红线门面）+ app.js（god-file 根）+ version.js（构建 sed 路径，保 .js）。
   "include": [
+    "src/brushes.ts",
+    "src/cloud-thumb-cache.ts",
+    "src/cloud-thumbs.ts",
+    "src/config.ts",
+    "src/crypto-format.ts",
+    "src/crypto-state.ts",
+    "src/enc-thumbs.ts",
+    "src/exporters.ts",
+    "src/filters.ts",
+    "src/palette.ts",
+    "src/panel-state.ts",
+    "src/psd.ts",
+    "src/reference.ts",
+    "src/sevenzip.ts",
+    "src/smooth-config.ts",
+    "src/storage.ts",
+    "src/zip.ts",
     "src/brush.ts",
     "src/plugins/liquify-engine.ts",
     "src/filter-brush.ts",

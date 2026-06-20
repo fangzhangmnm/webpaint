@@ -1,7 +1,8 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v311 / 2026-06-20。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v312 / 2026-06-20。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > v311：input.ts (21 any→0) + ora.ts (4→0) 收尾——引擎全 typed 后，input 弃本地 stand-in interface（Board/Doc/Layer/EditMode/History/PixelHistory/BrushSettings）改 `import type` 真类型，删 batch-13/14 的 `as unknown as Parameters<…>` 收口 cast；ora 的 canvas/merged 用 `OffscreenCanvas|HTMLCanvasElement`。引擎接缝 any 泄漏归零。
+> **v312（batch 15）：支持/功能叶 17 个 .js→.ts**（filters/storage/config/crypto-state/crypto-format/brushes/exporters/zip/sevenzip/cloud-thumbs/cloud-thumb-cache/enc-thumbs/reference/palette/psd/smooth-config/panel-state），8 并行 subagent。filters.ts 出真 `Filter` 契约（成员多 optional 容插件）→ filters-adjust 保自己更严的 `FilterLike` 用 cast 收口。级联 15 个 boundary（brush-rack 的 `_rack!`、session-state.readCheckpoint 收 getMeta unknown、side-windows palette root `!` 等）。残留 2 个文档化 any：brushes.ts 迁移 `[k]:any`、zip.ts vendor lib。**至此 src 下仅剩 3 个 .js：app-store.js（红线门面，改前 escalate）、app.js（god-file 组合根，最后做）、version.js（构建 sed 路径，故意保 .js）。**
 > v309 cleanup（非迁移批）：① purge 从未实装的 canvas smudge 工具（engine/UI/tool/data 全删，留 toolbar/palette 两处旧值迁移 fallback，待将来重写）。② liquify 引擎 `src/liquify.ts` → `src/plugins/liquify-engine.ts`（与其 filter 插件 `plugins/liquify.js` 同处；gate 路径同步更新）。③ palette 的 mini「涂抹」混色模式 id `smudge`→`mix`（避免与 canvas smudge 混淆；这是独立的调色板混色功能，非画布工具）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 

@@ -3,7 +3,7 @@
 //
 // v135 (user：「三个同主题的艺术滤镜合同一个 js」) 从 mosaic.js / halftone.js / stained-glass.js 合并
 
-import { registerFilter, makeSliderRow, makeSelectRow } from "../filters.js";
+import { registerFilter, makeSliderRow, makeSelectRow } from "../filters.ts";
 
 // ============ 马赛克（pixelize）============
 // 每个 cellSize × cellSize 方块用块内平均色填满。用途：交作业过审 / 隐私打码 / 像素艺术风格化

@@ -21,6 +21,62 @@
 //   shape / coeffs / pressureGamma / compositeMode /
 //   spacing / pixelMode / taper / hardness / 椭圆参数 / smooth
 
+import type { Brush, BrushRackData } from "./brush-types.ts";
+
+// makeBrush 的命名参数形状（大多有默认值，name/tool 必填）。
+interface MakeBrushArgs {
+  id?: string;
+  name: string;
+  tool: string;
+  folder?: string;
+  size?: number;
+  sizeBaseMax?: number;
+  sizeCoeff?: number;
+  opaCoeff?: number;
+  flowCoeff?: number;
+  pressureGamma?: number;
+  pressureLPF?: number;
+  compositeMode?: string;
+  blendMode?: string;
+  shapeKind?: string;
+  aspect?: number;
+  rotation?: number;
+  hardness?: number;
+  textureB64?: string | null;
+  spacingValue?: number;
+  pixelMode?: boolean;
+  taperIn?: number;
+  taperOut?: number;
+  streamline?: number;
+  stabilization?: number;
+  defaultOpa?: number;
+  uat?: number;
+}
+
+// default-brushes.json 的单条 spec（id/name/tool + 其余 makeBrush 参数收在 args）。
+interface BrushSpec {
+  id: string;
+  name: string;
+  tool: string;
+  args?: Partial<MakeBrushArgs>;
+}
+
+// migrateBrush 的输入：IDB 老 schema brush，含已撤字段（flow/airbrush/opacity/...）。
+// 迁移代码读写/删除大量动态历史字段，故 index 签名 any 兜底（documented last-resort：
+// 这是按字段名擦写的迁移管线，不是稳定契约）。只把做算术/比较的嵌套形状显式列出。
+interface LegacyBrush {
+  size?: BrushSizeLegacy;
+  flow?: { min?: number; pressureCurve?: number; base?: number };
+  spacing?: { kind?: string; value?: number } | number;
+  [k: string]: any;
+}
+interface BrushSizeLegacy {
+  base?: number;
+  max?: number;
+  min?: number;
+  pressureCurve?: number;
+}
+
 export const RACK_VERSION = 2;     // v2: brush 加 uat；rack 加 trash[]/resetAt；删 activeByTool（活动笔归 per-doc toolStates）。Folder shape，见 docs/folderflow-build-plan.md
 export const DEFAULT_FOLDER = "我的常用";
 // 迁移 / 出厂基准 uat：> resetAt(0) 故不被水位误丢；任何真实编辑(Date.now())必胜过它。
@@ -55,7 +111,7 @@ function makeBrush({
   defaultOpa = 1.0,
   // v2: last user-action-time —— FolderFlow 合并键（见 src/store/folder-merge.js）。
   uat = PRE_HISTORY_UAT,
-}) {
+}: MakeBrushArgs): Brush {
   return {
     id, uat, name, tool, folder,
     shape: { kind: shapeKind, aspect, rotation, hardness, textureB64 },
@@ -79,7 +135,7 @@ function makeBrush({
 // **stable ID**：以 "default-{tool}-{slug}" 形式固定。bump 时新 default 通过 id 比对
 // merge 到用户 rack（不覆盖用户改过的 brush，但缺失的会补上）。
 // **shapes/airbrush 工具已撤**（v96/v120）——BRUSH_GROUP 仍含其 tool 值，仅为老 preset 数据向后兼容。
-let _defaultsSpec = [];      // fetch 回来前是空，回来后就是 default-brushes.json 内容
+let _defaultsSpec: BrushSpec[] = [];      // fetch 回来前是空，回来后就是 default-brushes.json 内容
 const _defaultsPromise = (async () => {
   try {
     const url = new URL("./default-brushes.json", document.baseURI).href;
@@ -110,7 +166,7 @@ function _emergencyBrush(uat = PRE_HISTORY_UAT) {
 // - 老 spacing { kind, value } / size.pressureCurve / flow.pressureCurve / bufferMode / airbrush / opacity / flow.base / flow.min / size.min
 // - v98 的 defaultOpa / defaultFlow 也删（user：「默认 opacity 默认 flow 两个字段不要，都是 1」）
 // - v99 加 smooth 字段（user：「smooth 没进笔刷」）
-export function migrateBrush(b) {
+export function migrateBrush(b: LegacyBrush): LegacyBrush {
   if (!b) return b;
   // 老 spacing { kind, value } → 标量
   if (b.spacing && typeof b.spacing === "object") {
@@ -166,13 +222,13 @@ export function migrateBrush(b) {
   return b;
 }
 
-function specToBrush(spec, uat = PRE_HISTORY_UAT) {
+function specToBrush(spec: BrushSpec, uat = PRE_HISTORY_UAT): Brush {
   return makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args, uat });
 }
 
 // resetAt=0 → 首 boot（出厂笔 uat=PRE_HISTORY）；resetAt>0 → 恢复出厂
 // （出厂笔 uat 须 > resetAt，否则刚重置就被自己的水位线丢掉）。
-export function makeDefaultRack({ resetAt = 0 } = {}) {
+export function makeDefaultRack({ resetAt = 0 }: { resetAt?: number } = {}): BrushRackData {
   const uat = resetAt > 0 ? resetAt + 1 : PRE_HISTORY_UAT;
   let brushes = _defaultsSpec.map((s) => specToBrush(s, uat));
   if (brushes.length === 0) brushes = [_emergencyBrush(uat)];
@@ -187,17 +243,17 @@ export function makeDefaultRack({ resetAt = 0 } = {}) {
 //   - 返回新 rack 时 caller 做 `_brushRack = newRack` 单写 = atomic
 // 注：_defaultsSpec 还空时（fetch 没回），返回 null = no-op；fetch 回来后 app.js 再调一次。
 // 也承担 v1→v2 迁移：补 trash[]/resetAt、删 activeByTool、置 version。
-export function mergeMissingDefaults(rack) {
+export function mergeMissingDefaults(rack: BrushRackData): BrushRackData | null {
   if (!rack || !Array.isArray(rack.brushes)) return null;
   const ids = new Set(rack.brushes.map((b) => b.id));
-  const trashIds = new Set((rack.trash || []).map((t) => t.id));   // 已删的 default 不复活
+  const trashIds = new Set((rack.trash || []).map((t) => (t as { id: string }).id));   // 已删的 default 不复活
   const missing = _defaultsSpec.filter((s) => !ids.has(s.id) && !trashIds.has(s.id));
   const needsFields = !Array.isArray(rack.trash) || rack.resetAt == null
     || rack.activeByTool != null || rack.version !== RACK_VERSION;
   if (missing.length === 0 && !needsFields) return null;
   const resetAt = rack.resetAt || 0;
   const uat = resetAt > 0 ? resetAt + 1 : PRE_HISTORY_UAT;
-  const out = {
+  const out: BrushRackData = {
     ...rack,
     version: RACK_VERSION,
     brushes: [...rack.brushes, ...missing.map((s) => specToBrush(s, uat))],
@@ -209,10 +265,10 @@ export function mergeMissingDefaults(rack) {
 }
 
 // 序列化
-export function rackToJSON(rack) {
+export function rackToJSON(rack: BrushRackData): string {
   return JSON.stringify(rack, null, 2);
 }
-export function rackFromJSON(text) {
+export function rackFromJSON(text: string): BrushRackData {
   const obj = JSON.parse(text);
   if (!obj || typeof obj !== "object") throw new Error("rack JSON 格式不对");
   if (!Array.isArray(obj.brushes)) throw new Error("rack 缺 brushes");
@@ -225,10 +281,10 @@ export function rackFromJSON(text) {
 }
 
 // 单 brush export / import
-export function brushToJSON(brush) {
+export function brushToJSON(brush: Brush): string {
   return JSON.stringify(brush, null, 2);
 }
-export function brushFromJSON(text) {
+export function brushFromJSON(text: string): LegacyBrush {
   const obj = JSON.parse(text);
   if (!obj.id || !obj.name || !obj.tool) throw new Error("brush JSON 缺必填字段");
   obj.id = newBrushId();
@@ -237,24 +293,24 @@ export function brushFromJSON(text) {
 }
 
 // 工具方法
-export function findBrush(rack, id) {
+export function findBrush(rack: BrushRackData, id: string): Brush | null {
   return rack.brushes.find((b) => b.id === id) || null;
 }
 // brush 工具池子含已撤工具的老 preset（airbrush/shapes 工具撤了，但用户老 rack 里的 preset 仍要可见）
 const BRUSH_GROUP = ["brush", "airbrush", "shapes"];
-export function brushesByTool(rack, tool) {
+export function brushesByTool(rack: BrushRackData, tool: string): Brush[] {
   if (tool === "brush") {
     return rack.brushes.filter((b) => BRUSH_GROUP.includes(b.tool));
   }
   // v132 filterBrush 是新工具类别，自己的 rack（不串到 brush）
   return rack.brushes.filter((b) => b.tool === tool);
 }
-export function brushesByFolder(rack, folder) {
+export function brushesByFolder(rack: BrushRackData, folder: string): Brush[] {
   return rack.brushes.filter((b) => b.folder === folder);
 }
 // 某工具的「代表笔」——给 defaultToolStateFor 取初值。
 // activeByTool 已废（v2：活动笔归 per-doc toolStates，见 docs/folderflow-build-plan.md §6）；
 // 这里就取该工具第一支笔当默认。
-export function defaultBrushForTool(rack, tool) {
+export function defaultBrushForTool(rack: BrushRackData, tool: string): Brush | null {
   return brushesByTool(rack, tool)[0] || null;
 }

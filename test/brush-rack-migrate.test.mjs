@@ -4,7 +4,7 @@ import { describe, it, assert, eq } from "./runner.mjs";
 import {
   makeDefaultRack, mergeMissingDefaults, migrateBrush, rackFromJSON,
   defaultBrushForTool, PRE_HISTORY_UAT, RACK_VERSION,
-} from "../src/brushes.js";
+} from "../src/brushes.ts";
 
 describe("brushes v2 迁移", () => {
   it("migrateBrush：老笔无 uat → PRE_HISTORY_UAT", () => {

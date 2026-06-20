@@ -10,11 +10,11 @@
 // 全部搬来（classify + copy-paste），app.js 短路成构造 + 事件绑定。
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
-import { getMeta, setMeta } from "./storage.js";
+import { getMeta, setMeta } from "./storage.ts";
 import {
   makeDefaultRack, mergeMissingDefaults, migrateBrush, defaultBrushForTool,
   brushesByTool, findBrush, newBrushId, brushFromJSON, DEFAULT_FOLDER,
-} from "./brushes.js";
+} from "./brushes.ts";
 import { resolveRef } from "./app-store.js";
 import { collectFolders } from "./brush-rack-view.ts";
 import { mountRackSheet } from "./ui/rack-sheet.ts";
@@ -174,7 +174,7 @@ export class BrushRack {
     const key = this.getRackToolKey(tool);
     const ts = this.d.state.toolStates[key];
     if (!ts) return;
-    const brush = findBrush(this._rack, brushId);
+    const brush = findBrush(this._rack!, brushId);
     if (!brush) return;
     ts.activeBrushId = brushId;
     ts.activeBrushName = brush.name;
@@ -257,7 +257,7 @@ export class BrushRack {
   openBrushSettings(brushId: string, newDraft?: Brush) {
     let draft: Brush;
     if (newDraft) draft = newDraft;
-    else { const b = findBrush(this._rack, brushId); if (!b) return; draft = JSON.parse(JSON.stringify(b)); }
+    else { const b = findBrush(this._rack!, brushId); if (!b) return; draft = JSON.parse(JSON.stringify(b)); }
     this._editingId = brushId;
     this._editingDraft = draft;
     this._settingsUI!.open(draft);
@@ -390,9 +390,9 @@ export class BrushRack {
 
   _onNewBrush() {
     const activeId = this.d.state.toolStates[this.getRackToolKey(this.ui.tool)]?.activeBrushId;
-    let source = activeId ? findBrush(this._rack, activeId) : null;
+    let source = activeId ? findBrush(this._rack!, activeId) : null;
     if (!source) {
-      const inFolder = (brushesByTool(this._rack, this.ui.tool) as Brush[]).filter((b) => (b.folder || DEFAULT_FOLDER) === this.ui.folder);
+      const inFolder = (brushesByTool(this._rack!, this.ui.tool) as Brush[]).filter((b) => (b.folder || DEFAULT_FOLDER) === this.ui.folder);
       source = inFolder[0] || this._rack!.brushes[0] || null;
     }
     let newB: Brush;

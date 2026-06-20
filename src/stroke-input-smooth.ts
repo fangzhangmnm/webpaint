@@ -8,7 +8,7 @@
 // 纯函数（唯一外部依赖 = SMOOTH 配置）：**mutates rec 的平滑状态**（rawSX/Y, stabX/Y, smX/Y），
 // 返回平滑后 screen 点 {x,y}。调用前 rec 须已锚（input._down 起手 rawS/stab/sm = raw 起点）。
 // drx/dry = 本 event 的 raw screen 位移。
-import { SMOOTH } from "./smooth-config.js";
+import { SMOOTH } from "./smooth-config.ts";
 
 // 即时笔的可变平滑状态（调用方逐 event 持续 mutate）。
 interface SmoothRec {

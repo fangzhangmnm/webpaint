@@ -31,7 +31,7 @@ import {
   setCurrentSessionName,
 } from "./session.ts";
 import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.ts";
-import { getMeta, setMeta } from "./storage.js";
+import { getMeta, setMeta } from "./storage.ts";
 import { PaintDoc } from "./doc.ts";
 import type { Layer } from "./doc.ts";
 import {
@@ -41,11 +41,11 @@ import {
 } from "./app-store.js";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
-import { stripSessionExt } from "./config.js";
+import { stripSessionExt } from "./config.ts";
 import { sessionNameConflict } from "./session-name.ts";
 import { serializedToolStatePatch } from "./editor-state.ts";   // 反序列化细节下沉（rec #5 part b）
-import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.js";
-import { setPassword } from "./crypto-state.js";
+import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
+import { setPassword } from "./crypto-state.ts";
 import { els } from "./els.ts";
 import type { AppContext } from "./app-context.ts";
 import type { GalleryItem } from "./gallery-model.ts";
@@ -206,7 +206,7 @@ async function _writeSessionCheckpoint(name: string) {
 async function _readSessionCheckpoint(name: string) {
   const blob = await getMeta(`revert:${name}:ora`);
   const at = await getMeta(`revert:${name}:at`);
-  return blob ? { blob, at: at || 0 } : null;
+  return blob ? { blob: blob as Blob, at: (at as number) || 0 } : null;
 }
 
 // ---- blank-unnamed 自检（verbatim）----

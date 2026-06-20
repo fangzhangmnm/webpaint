@@ -4,8 +4,8 @@
 // 构造期的 config 回调只在 user 交互时被 CALL，故引用 module-level let（construct 时为 null，
 //   initSideWindows(ctx) 在任何交互前填好）是安全的。setColor 是稳定 import，无需经 ctx。
 
-import { ReferenceWindow } from "./reference.js";
-import { PaletteWindow } from "./palette.js";
+import { ReferenceWindow } from "./reference.ts";
+import { PaletteWindow } from "./palette.ts";
 import { els } from "./els.ts";
 import { decodeImageFile, fitWithin, canvasToBlob } from "./resample.ts";
 import { setColor } from "./color-panel.ts";
@@ -36,7 +36,7 @@ export const referenceWindow = new ReferenceWindow({
 // 256×256 mixer canvas + 刷 / 涂 / 吸 3 工具。吸色 → 主画 setColor。
 // 画布内容跟 doc 走（webpaint/state.json 持久化，跟 reference 同模式）
 export const paletteWindow = new PaletteWindow({
-  root: document.getElementById("paletteWindow"),
+  root: document.getElementById("paletteWindow")!,
   onColorSampled: (hex: string) => setColor(hex),
   getCurrentColor: () => state.color,
 });

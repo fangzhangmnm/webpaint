@@ -23,10 +23,24 @@ import { encodeDocToOra } from "./ora.ts";
 import { renderDocToImageBlob } from "./session.ts";
 import { store as _store } from "./app-store.js";
 import { session } from "./session-state.ts";
+import type { PaintDoc } from "./doc.ts";
 
-const _reg = makeRegistry({ name: "exporter" });
+export interface ExportOpts {
+  scope?: string;
+}
+export interface Exporter {
+  id: string;
+  label: string;
+  ext: string;
+  mime?: string;
+  kind: "project" | "image";
+  encode: (doc: PaintDoc, opts?: ExportOpts) => Promise<Blob>;
+  busyHint?: string;
+}
 
-export function registerExporter(spec) {
+const _reg = makeRegistry<Exporter>({ name: "exporter" });
+
+export function registerExporter(spec: Exporter) {
   if (!spec || !spec.id) throw new Error("Exporter 必须有 id");
   if (typeof spec.encode !== "function") throw new Error(`Exporter ${spec.id} 缺 encode()`);
   if (spec.kind !== "project" && spec.kind !== "image") {
@@ -34,10 +48,12 @@ export function registerExporter(spec) {
   }
   _reg.register(spec);
 }
-export function getExporter(id) { return _reg.get(id); }
+// 注：内建 ora/png/jpg/psd 在模块加载时即注册，消费方恒以 `getExporter(x) || getExporter("ora")`
+// 兜底取用 → 返回类型按非 null 暴露（registry.get 本体仍 Exporter | null，这里在接缝处收口）。
+export function getExporter(id: string): Exporter { return _reg.get(id) as Exporter; }
 export function listExporters() { return _reg.list(); }
-export function listExportersByKind(kind) { return _reg.list().filter((e) => e.kind === kind); }
-export function onExporterRegistered(fn) { return _reg.onRegistered(fn); }
+export function listExportersByKind(kind: string) { return _reg.list().filter((e) => e.kind === kind); }
+export function onExporterRegistered(fn: (item: Exporter) => void) { return _reg.onRegistered(fn); }
 
 // ============= 第一方内建导出器 =============
 registerExporter({
@@ -55,15 +71,15 @@ registerExporter({
 registerExporter({
   id: "psd", label: ".psd（Photoshop）", ext: "psd", kind: "project", busyHint: "PSD 编码中…",
   encode: async (doc) => {
-    const { encodeDocToPsd } = await import("./psd.js");   // 懒加载：psd 编码器只在用时拉
+    const { encodeDocToPsd } = await import("./psd.ts");   // 懒加载：psd 编码器只在用时拉
     return encodeDocToPsd(doc);
   },
 });
 registerExporter({
   id: "png", label: "PNG", ext: "png", mime: "image/png", kind: "image",
-  encode: (doc, { scope = "merged" } = {}) => renderDocToImageBlob(doc, "image/png", undefined, scope),
+  encode: (doc, { scope = "merged" } = {}) => renderDocToImageBlob(doc, "image/png", undefined, scope) as Promise<Blob>,
 });
 registerExporter({
   id: "jpg", label: "JPG", ext: "jpg", mime: "image/jpeg", kind: "image",
-  encode: (doc, { scope = "merged" } = {}) => renderDocToImageBlob(doc, "image/jpeg", 0.92, scope),
+  encode: (doc, { scope = "merged" } = {}) => renderDocToImageBlob(doc, "image/jpeg", 0.92, scope) as Promise<Blob>,
 });

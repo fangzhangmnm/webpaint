@@ -11,7 +11,7 @@
 //   - strength = state.brush.opacity（左栏 opacity slider 当 strength）
 //   - size = state.brush.size（左栏 size slider）
 
-import { registerFilter } from "../filters.js";
+import { registerFilter } from "../filters.ts";
 import { LiquifyEngine } from "./liquify-engine.ts";
 
 export class LiquifyFilter {

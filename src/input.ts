@@ -29,7 +29,7 @@ import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapActio
 import { assignRole, effectiveTool, toolToRole } from "./pointer-route.ts";
 import { inputSmooth } from "./stroke-input-smooth.ts";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.ts";
-import { SMOOTH } from "./smooth-config.js";
+import { SMOOTH } from "./smooth-config.ts";
 import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 import type { Board } from "./board.ts";

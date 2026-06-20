@@ -8,19 +8,27 @@
 // HOST-SEAM：crypto-container（store 底座）调 pack7z/unpack7z；浏览器走默认 loader，
 //   node 测试经 setSevenZipLoader 注入 node 版（require + fs），不碰浏览器路径。
 
+import type { SevenZipModuleFactory } from "../vendor/7z-wasm/index.d.ts";
+
+interface SevenZipConfig {
+  factory: SevenZipModuleFactory;
+  wasmBinary: ArrayBuffer;
+}
+type SevenZipLoader = () => Promise<SevenZipConfig>;
+
 const VENDOR_JS = "./vendor/7z-wasm/7zz.umd.js";
 const VENDOR_WASM = "./vendor/7z-wasm/7zz.wasm";
 
 // loader: async () => { factory, wasmBinary }。factory = 7z-wasm 的 SevenZip 模块工厂。
-let _loader = _defaultBrowserLoader;
-let _cached = null;   // { factory, wasmBinary }（loader 跑一次即缓存）
+let _loader: SevenZipLoader = _defaultBrowserLoader;
+let _cached: SevenZipConfig | null = null;   // { factory, wasmBinary }（loader 跑一次即缓存）
 
 /** node 测试注入点（浏览器不调用）。 */
-export function setSevenZipLoader(fn) { _loader = fn; _cached = null; }
+export function setSevenZipLoader(fn: SevenZipLoader) { _loader = fn; _cached = null; }
 
-async function _defaultBrowserLoader() {
+async function _defaultBrowserLoader(): Promise<SevenZipConfig> {
   // 注入 vendored UMD 脚本（classic script → window.SevenZip 全局工厂）。不 import，保持惰性、不进 bundle。
-  if (!globalThis.SevenZip) {
+  if (!(globalThis as unknown as { SevenZip?: SevenZipModuleFactory }).SevenZip) {
     await new Promise((resolve, reject) => {
       const s = document.createElement("script");
       s.src = VENDOR_JS;
@@ -29,7 +37,7 @@ async function _defaultBrowserLoader() {
       document.head.appendChild(s);
     });
   }
-  const factory = globalThis.SevenZip;
+  const factory = (globalThis as unknown as { SevenZip?: SevenZipModuleFactory }).SevenZip;
   if (!factory) throw new Error("7z-wasm 工厂未挂载（window.SevenZip）");
   const resp = await fetch(VENDOR_WASM);
   if (!resp.ok) throw new Error("7z-wasm wasm 加载失败：" + resp.status);
@@ -48,8 +56,18 @@ async function _instance() {
   return await factory({ print: () => {}, printErr: () => {}, wasmBinary });
 }
 
+type SevenZipData = Uint8Array | ArrayBuffer | string;
+interface SevenZipEntry {
+  path: string;
+  data: SevenZipData;
+}
+// .code 标错密码（消费方 crypto-container 按 code 分支）。
+interface WrongPasswordError extends Error {
+  code?: string;
+}
+
 const _UTF8 = new TextEncoder();
-function _toU8(d) {
+function _toU8(d: SevenZipData) {
   if (d instanceof Uint8Array) return d;
   if (d instanceof ArrayBuffer) return new Uint8Array(d);
   if (typeof d === "string") return _UTF8.encode(d);
@@ -60,7 +78,7 @@ function _toU8(d) {
  * 打包加密 .7z。entries: [{ path, data }]，return Uint8Array（.7z 字节）。
  * -t7z AES-256 · -mhe=on 加密头（文件名也加密）· -mx=0 STORE（内容已压缩，不再 deflate）。
  */
-export async function pack7z(entries, password) {
+export async function pack7z(entries: SevenZipEntry[], password: string) {
   if (!password) throw new Error("没有密码，无法加密");
   const sz = await _instance();
   const names = [];
@@ -81,20 +99,20 @@ export async function pack7z(entries, password) {
  * -mhe 加密头：密码错时连目录都列不出 → 产物缺失即判错密码。
  * @returns {Promise<Record<string, Uint8Array>>}
  */
-export async function unpack7z(bytes, password) {
+export async function unpack7z(bytes: SevenZipData, password: string) {
   const sz = await _instance();
   sz.FS.writeFile("/in.7z", _toU8(bytes));
   sz.FS.mkdir("/out");
   try { sz.callMain(["x", "-p" + password, "-y", "-bso0", "-bse0", "/in.7z", "-o/out"]); }
   catch (_) { /* 错密码 → callMain 非零退出可能抛；以产物为准 */ }
-  let files;
-  try { files = sz.FS.readdir("/out").filter((n) => n !== "." && n !== ".."); }
+  let files: string[];
+  try { files = sz.FS.readdir("/out").filter((n: string) => n !== "." && n !== ".."); }
   catch (_) { files = []; }
   if (!files.length) {
-    const e = new Error("密码不对或文件已损坏"); e.code = "WRONG_PASSWORD"; throw e;
+    const e: WrongPasswordError = new Error("密码不对或文件已损坏"); e.code = "WRONG_PASSWORD"; throw e;
   }
   /** @type {Record<string, Uint8Array>} */
-  const out = {};
+  const out: Record<string, Uint8Array> = {};
   for (const name of files) {
     try {
       const stat = sz.FS.stat("/out/" + name);
@@ -103,7 +121,7 @@ export async function unpack7z(bytes, password) {
     } catch (_) { /* skip */ }
   }
   if (!Object.keys(out).length) {
-    const e = new Error("密码不对或文件已损坏"); e.code = "WRONG_PASSWORD"; throw e;
+    const e: WrongPasswordError = new Error("密码不对或文件已损坏"); e.code = "WRONG_PASSWORD"; throw e;
   }
   return out;
 }

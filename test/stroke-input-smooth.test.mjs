@@ -2,7 +2,7 @@
 // 纯函数（mutates rec）：逐参数钉行为。详 docs/brush-procreate-smoothing.md。
 import { describe, it, assert } from "./runner.mjs";
 import { inputSmooth } from "../src/stroke-input-smooth.ts";
-import { SMOOTH } from "../src/smooth-config.js";
+import { SMOOTH } from "../src/smooth-config.ts";
 
 // 起手锚（同 input._down：rawS/stab/sm = raw 起点）
 const rec0 = (x = 100, y = 100) => ({ rawSX: x, rawSY: y, stabX: x, stabY: y, smX: x, smY: y });

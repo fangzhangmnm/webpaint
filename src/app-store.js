@@ -11,9 +11,9 @@ import { createLocalAdapter } from "./store/local-adapter.ts";
 import { withBusy } from "./fullscreen-busy.ts";   // 注入给 store：用户态写流深模块强制锁屏（契约见 store.createStore）
 import { listSessions, listTrashedSessions, trashSession, getCurrentSessionName } from "./session.ts";
 import { mergeLocalCloud, mergeTrash, classifyCloudGone } from "./gallery-model.ts";
-import { CLIENT_ID, SCOPES, sessionFileName, encSessionFileName, stripSessionExt } from "./config.js";
-import { zipReadEntry } from "./zip.js";
-import { getPassword } from "./crypto-state.js";
+import { CLIENT_ID, SCOPES, sessionFileName, encSessionFileName, stripSessionExt } from "./config.ts";
+import { zipReadEntry } from "./zip.ts";
+import { getPassword } from "./crypto-state.ts";
 // lib 的 graph（OneDrive transport，单一 auth）—— gallery folder 操作 + thumb byte-range 都走它。
 import {
   getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches,

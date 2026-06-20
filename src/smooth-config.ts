@@ -19,10 +19,10 @@ export const SMOOTH_DEFAULTS = Object.freeze({
 });
 
 // 运行时可变副本（dev 面板改它）。启动从 localStorage 合并覆盖。
-export const SMOOTH = { ...SMOOTH_DEFAULTS };
+export const SMOOTH: Record<keyof typeof SMOOTH_DEFAULTS, number> = { ...SMOOTH_DEFAULTS };
 try {
-  const saved = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
-  for (const k of Object.keys(SMOOTH_DEFAULTS)) {
+  const saved = JSON.parse(localStorage.getItem(LS_KEY) || "{}") as Record<string, number>;
+  for (const k of Object.keys(SMOOTH_DEFAULTS) as (keyof typeof SMOOTH_DEFAULTS)[]) {
     if (k in saved) SMOOTH[k] = saved[k];
   }
 } catch (_) { /* 坏 JSON 忽略，用默认 */ }

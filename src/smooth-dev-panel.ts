@@ -5,7 +5,7 @@
 //
 // 协作件经 ctx 绑入：setStatus（状态行）。SMOOTH 配置直接 import；els / setMenuOpen 直接 import。
 
-import { SMOOTH, SMOOTH_DEFAULTS, saveSmooth, resetSmooth } from "./smooth-config.js";
+import { SMOOTH, SMOOTH_DEFAULTS, saveSmooth, resetSmooth } from "./smooth-config.ts";
 import { els } from "./els.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import type { AppContext } from "./app-context.ts";

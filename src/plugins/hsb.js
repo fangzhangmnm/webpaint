@@ -4,7 +4,7 @@
 // - 自然饱和度（vibrance）：对低饱和像素加幅度大，高饱和像素少加，防过饱
 // - 线性饱和度：朝 luma lerp，PS 老式饱和度
 
-import { registerFilter, clamp8, makeSliderRow, makeSelectRow } from "../filters.js";
+import { registerFilter, clamp8, makeSliderRow, makeSelectRow } from "../filters.ts";
 
 export class HsbFilter {
   static id = "hsb";

@@ -14,9 +14,15 @@
 // 画布 pointerdown 默认关全部（user：「画画时别让 panel 挡着」）。
 // 在 panel 内 click 不要冒泡到 canvas（panel 自己 stopPropagation）。
 
-const handlers = new Map();
-let currentOpen = null;
-const listeners = new Set();
+interface PanelHandlers {
+  show?: () => void;
+  hide?: () => void;
+}
+type ExclusiveListener = (id: string | null) => void;
+
+const handlers = new Map<string, PanelHandlers>();
+let currentOpen: string | null = null;
+const listeners = new Set<ExclusiveListener>();
 
 export const PANELS = {
   RACK_BRUSH: "rack-brush",
@@ -29,11 +35,11 @@ export const PANELS = {
   MENU: "menu",
 };
 
-export function registerPanel(id, { show, hide }) {
+export function registerPanel(id: string, { show, hide }: PanelHandlers) {
   handlers.set(id, { show, hide });
 }
 
-export function openExclusive(id) {
+export function openExclusive(id: string) {
   if (currentOpen === id) { closeExclusive(); return; }
   if (currentOpen) {
     const h = handlers.get(currentOpen);
@@ -55,7 +61,7 @@ export function closeExclusive() {
 
 export function getCurrentExclusive() { return currentOpen; }
 
-export function onExclusiveChange(fn) {
+export function onExclusiveChange(fn: ExclusiveListener) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }

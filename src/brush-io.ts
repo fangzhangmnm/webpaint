@@ -1,7 +1,7 @@
 // 职责：把笔刷预设序列化/分享成文件（单笔导出 / 文件夹导出 / 笔架→默认代码 / 通用 share-or-download）。
 // 无 app 状态、无 DOM 副作用之外的耦合：入参拿 rack/brush，出参给文件 + 返回计数/字符串，状态提示留 app。
 
-import { brushToJSON, brushesByTool, DEFAULT_FOLDER } from "./brushes.js";
+import { brushToJSON, brushesByTool, DEFAULT_FOLDER } from "./brushes.ts";
 import type { Brush, BrushRackData } from "./brush-types.ts";
 
 // navigator.canShare/share 的 files 形参在部分 lib.dom 里未覆盖 → 窄化扩展（不引入 any）。

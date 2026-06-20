@@ -11,7 +11,7 @@
 //   hardDelete(name)    → void（storage.deleteSession）
 //   restore(trashKey)   → name（session.restoreSession，撞名自动 (2)）
 
-import { getSession, putSession, deleteSession } from "../storage.js";
+import { getSession, putSession, deleteSession } from "../storage.ts";
 import { trashSession, restoreSession, purgeFromTrash, listTrashedSessions, renderThumbBlob, putSessionPkg } from "../session.ts";
 import { decodeOraToDoc } from "../ora.ts";
 import { looksEncryptedContainer } from "./crypto-container.ts";

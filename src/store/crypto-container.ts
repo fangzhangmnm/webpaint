@@ -29,8 +29,8 @@
 //     碰不到用户文件就能拒错密码 → throw code=WRONG_PASSWORD）。
 // 无密钥托管、无 salt 文件：salt 在各自 header（.7z header / peek header），换/丢设备零迁移。
 
-import { zipPack, zipUnpack } from "../zip.js";
-import { pack7z, unpack7z } from "../sevenzip.js";
+import { zipPack, zipUnpack } from "../zip.ts";
+import { pack7z, unpack7z } from "../sevenzip.ts";
 
 // payload 永远走 unpack7z（7z-wasm = 真 7-Zip）——它**既认 .7z 也认老 WinZip-AES zip**（实测逐位还原），
 // 所以加解密一概不碰 zip.js，向后兼容 v233-235 老容器零特例。下面 magic 仅用于「识别这块是不是加密 payload」。

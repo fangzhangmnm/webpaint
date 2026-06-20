@@ -19,7 +19,7 @@ import { Board } from "./board.ts";
 import { InputController } from "./input.ts";
 import { PixelEdit } from "./pixel-edit.ts";   // compressPixelSnap/applyPixelSnap 切到 layer-undo/topbar-menu
 import { makeCurrentBrush } from "./current-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolved-brush.js）
-import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
+import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
 import { UndoStack } from "./history.ts";
 import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
@@ -28,7 +28,7 @@ import { mountGallery } from "./ui/gallery.ts";          // candidate 1 · 图�
 import { BrushRack } from "./brush-rack.ts";
 import { PwaShell } from "./pwa-shell.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
-import { setPasswordPrompt } from "./crypto-state.js";   // 加密：密码弹窗注入（ADR-0012）
+import { setPasswordPrompt } from "./crypto-state.ts";   // 加密：密码弹窗注入（ADR-0012）
 import { els } from "./els.ts";
 import { makeDialControls } from "./dial-controls.ts";   // dial 写入（setSize/setOpacity）+ 当前 dial + 键盘 [ ] 调粗
 import { initTheme } from "./theme.ts";

@@ -17,7 +17,7 @@ export function ensureZipLoaded() {
 // 7z-wasm：sevenzip.js 默认 loader 是浏览器路径（注入 script + fetch），node 跑不了 →
 // 经 setSevenZipLoader 注入 node 版（require UMD + fs 读 wasm）。
 export async function ensure7zLoaded() {
-  const { setSevenZipLoader } = await import("../src/sevenzip.js");
+  const { setSevenZipLoader } = await import("../src/sevenzip.ts");
   const require = createRequire(import.meta.url);
   const factory = require("../vendor/7z-wasm/7zz.umd.js");
   const wasmPath = new URL("../vendor/7z-wasm/7zz.wasm", import.meta.url);

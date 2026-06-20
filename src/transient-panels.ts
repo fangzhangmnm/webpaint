@@ -4,7 +4,7 @@
 // brush rack 走 closeExclusive 顺手关。z-order：点 panel 把它带到同层最高 z（_bringPanelTop）。
 // _suppressTransientPanels/_restoreTransientPanels/_bringPanelTop/_commitTransform/_cancelTransform
 // 经 ctx 被 toolbar / selection-ops / doc-ops / filters-adjust 消费，故全部 export。
-import { closeExclusive } from "./panel-state.js";
+import { closeExclusive } from "./panel-state.ts";
 import { updateLassoToolbar } from "./toolbar.ts";
 import { raiseWindow, registerWindow } from "./surfaces.ts";
 import type { AppContext } from "./app-context.ts";

@@ -19,7 +19,47 @@
 // 参考窗用独立 viewport（image-origin 约定），但双指变换的三角与主画布同一套：
 // 共享 pinchScaleRot + solveAnchorTranslation（见 pointer-gesture.js / K3）。
 import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.ts";
+import type { GestureViewport } from "./pointer-gesture.ts";
 import { raiseWindow } from "./surfaces.ts";
+import type { PaintDoc, Layer } from "./doc.ts";
+
+// 参考窗内部 viewport（image-origin 约定）。形同 GestureViewport。
+type RefViewport = GestureViewport;
+
+// 构造参数（来自 side-windows：DOM 元素 + app 注入回调）。
+// canvas 边界处用 HTMLElement（els.referenceCanvas 经 byId 默认窄到 HTMLElement，
+// 运行期实为 <canvas>），构造期 cast 到 HTMLCanvasElement。
+interface ReferenceWindowOpts {
+  panel: HTMLElement;
+  head: HTMLElement;
+  body: HTMLElement;
+  canvas: HTMLElement;
+  closeBtn: HTMLElement;
+  emptyHint: HTMLElement | null;
+  status?: (msg: string, isError?: boolean) => void;
+  getTool?: () => string | null;
+  getLongPressPickEnabled?: () => boolean;
+  onColorSampled?: (hex: string) => void;
+}
+
+// setBitmap 接受的源：ImageBitmap，或 resample 出的 canvas（side-windows 传 fit.source）。
+// 运行期只用 .close?.()/.width/.height/drawImage —— 鸭子 union，避免引 resample 私有类型。
+// close? 可选：非 ImageBitmap 的 canvas 源没有 close（代码用 ?. 守）。
+type RefBitmapSource = (ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas) & { close?: () => void };
+
+// setBitmap 的 opts：原始文件 Blob（跟 doc 一起进 .ora）。
+interface SetBitmapOpts { persistBlob?: Blob | null; }
+
+// getSerializedState / applySerializedState 的 painting-scoped 状态。
+interface RefSerializedState {
+  open: boolean;
+  viewport: RefViewport;
+}
+
+// 拖整窗 / 手势 state。
+interface PanelDragState { id: number; sx: number; sy: number; ol: number; ot: number; }
+interface GestureStartState { midX: number; midY: number; dist: number; angle: number; vp: RefViewport; }
+interface PointerPos { x: number; y: number; }
 
 const LS_POS = "webpaint.refPanel.pos";       // {left, top, width, height}
 const LS_VP  = "webpaint.refPanel.vp";        // {tx, ty, scale, rot}
@@ -28,11 +68,37 @@ const REF_LONG_PRESS_MS = 450;                // 长按吸色延迟（对齐 inp
 const REF_LONG_PRESS_CANCEL_SQ = 64;          // 8px²：长按期间移动超此 → 取消，回 pan
 
 export class ReferenceWindow {
-  constructor(opts) {
+  panel: HTMLElement;
+  head: HTMLElement;
+  body: HTMLElement;
+  canvas: HTMLCanvasElement;
+  closeBtn: HTMLElement;
+  emptyHint: HTMLElement | null;
+  status: (msg: string, isError?: boolean) => void;
+  getTool: () => string | null;
+  getLongPressPickEnabled: () => boolean;
+  onColorSampled: (hex: string) => void;
+  _picking: boolean;
+  _longPressTimer: ReturnType<typeof setTimeout> | null;
+  _lpStart: PointerPos | null;
+  ctx: CanvasRenderingContext2D;
+  bitmap: RefBitmapSource | null;
+  _bitmapBlob!: Blob | null;   // 在 setBitmap/clearBitmap 赋值（构造期不设）
+  _liveDoc: PaintDoc | null;
+  _composeCanvas: HTMLCanvasElement | null;
+  _liveDirty: boolean;
+  vp: RefViewport;
+  _raf: number | null;
+  _panelDrag: PanelDragState | null;
+  _resizeDrag: unknown;
+  _pointers: Map<number, PointerPos>;
+  _gestureStart: GestureStartState | null;
+
+  constructor(opts: ReferenceWindowOpts) {
     this.panel   = opts.panel;                 // .float-panel
     this.head    = opts.head;                  // 拖动标题栏
     this.body    = opts.body;                  // 装 canvas 的 div
-    this.canvas  = opts.canvas;                // 内部画图 canvas
+    this.canvas  = opts.canvas as HTMLCanvasElement;   // 内部画图 canvas（els 默认窄到 HTMLElement）
     this.closeBtn = opts.closeBtn;
     this.emptyHint = opts.emptyHint;           // "选个图…" 占位文字
     this.status  = opts.status || (() => {});
@@ -43,7 +109,7 @@ export class ReferenceWindow {
     this._picking = false;                     // 当前指在吸色（非 pan）
     this._longPressTimer = null;
     this._lpStart = null;
-    this.ctx = this.canvas.getContext("2d");
+    this.ctx = this.canvas.getContext("2d")!;
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = "high";
 
@@ -70,7 +136,7 @@ export class ReferenceWindow {
   }
 
   // ---- 外部 API ----
-  setBitmap(bitmap, opts = {}) {
+  setBitmap(bitmap: RefBitmapSource | null, opts: SetBitmapOpts = {}) {
     // 切静态源 → 退出 live 模式
     this._stopLive();
     if (this.bitmap && this.bitmap !== bitmap) this.bitmap.close?.();
@@ -97,25 +163,26 @@ export class ReferenceWindow {
 
   // 跟着 .ora 进 / 出 webpaint/state.json（painting-scoped 状态）。
   // 不带 panel 位置 / 大小（那是 device-scoped，留 localStorage）。
-  getSerializedState() {
+  getSerializedState(): RefSerializedState {
     return {
       open: this.isOpen(),
       viewport: { ...this.vp },
     };
   }
-  applySerializedState(state) {
+  applySerializedState(state: unknown): void {
     if (!state || typeof state !== "object") return;
-    if (state.viewport) {
-      if (Number.isFinite(state.viewport.tx)) this.vp.tx = state.viewport.tx;
-      if (Number.isFinite(state.viewport.ty)) this.vp.ty = state.viewport.ty;
-      if (Number.isFinite(state.viewport.scale)) this.vp.scale = state.viewport.scale;
-      if (Number.isFinite(state.viewport.rot)) this.vp.rot = state.viewport.rot;
+    const st = state as { viewport?: Partial<RefViewport>; open?: unknown };
+    if (st.viewport) {
+      if (Number.isFinite(st.viewport.tx)) this.vp.tx = st.viewport.tx!;
+      if (Number.isFinite(st.viewport.ty)) this.vp.ty = st.viewport.ty!;
+      if (Number.isFinite(st.viewport.scale)) this.vp.scale = st.viewport.scale!;
+      if (Number.isFinite(st.viewport.rot)) this.vp.rot = st.viewport.rot!;
     }
-    if (state.open) this.open(); else this.close();
+    if (st.open) this.open(); else this.close();
     this._invalidate();
   }
   // 实时镜像主画布：board.markDocDirty 触发 wp:docpixeldirty → markLiveDirty
-  setLiveSource(doc) {
+  setLiveSource(doc: PaintDoc) {
     if (this.bitmap) { this.bitmap.close?.(); this.bitmap = null; }
     this._liveDoc = doc;
     if (!this._composeCanvas) this._composeCanvas = document.createElement("canvas");
@@ -125,7 +192,7 @@ export class ReferenceWindow {
     this._invalidate();
   }
   isLive() { return !!this._liveDoc; }
-  toggleLive(doc) {
+  toggleLive(doc: PaintDoc) {
     if (this.isLive()) {
       this._stopLive();
       this._updateEmptyHint();
@@ -149,19 +216,20 @@ export class ReferenceWindow {
     const doc = this._liveDoc;
     if (!doc) return;
     const W = doc.width, H = doc.height;
-    if (this._composeCanvas.width !== W || this._composeCanvas.height !== H) {
-      this._composeCanvas.width = W;
-      this._composeCanvas.height = H;
+    if (this._composeCanvas!.width !== W || this._composeCanvas!.height !== H) {
+      this._composeCanvas!.width = W;
+      this._composeCanvas!.height = H;
     }
-    const cx = this._composeCanvas.getContext("2d");
+    const cx = this._composeCanvas!.getContext("2d")!;
     cx.clearRect(0, 0, W, H);
     cx.fillStyle = doc.backgroundColor || "#ffffff";
     cx.fillRect(0, 0, W, H);
-    for (const layer of doc.layers) {
+    for (const node of doc.layers) {
+      const layer = node as Layer;   // live 合成假设扁平叶层（运行期既有约定）
       if (!layer.visible) continue;
       if (!(layer.bboxW > 0 && layer.bboxH > 0)) continue;
       cx.globalAlpha = layer.opacity ?? 1;
-      cx.globalCompositeOperation = layer.mode || "source-over";
+      cx.globalCompositeOperation = (layer.mode || "source-over") as GlobalCompositeOperation;
       cx.drawImage(layer.canvas, layer.bboxX, layer.bboxY);
     }
     cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
@@ -219,7 +287,7 @@ export class ReferenceWindow {
     this.head.addEventListener("pointerdown", (e) => {
       // 标题栏里的按钮（载入 / 镜像画布 / 适应 / 关闭）不参与拖窗——否则 head 的
       // setPointerCapture 吞掉按钮 click，导入/镜像按钮就「点了没反应」（v154 修，user 反映又不弹）
-      if (e.target.closest("button")) return;
+      if ((e.target as Element).closest("button")) return;
       const r = this.panel.getBoundingClientRect();
       this._panelDrag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ol: r.left, ot: r.top };
       this.head.setPointerCapture(e.pointerId);
@@ -261,7 +329,7 @@ export class ReferenceWindow {
     ro.observe(this.body);
   }
 
-  _onDown(e) {
+  _onDown(e: PointerEvent) {
     this.canvas.setPointerCapture?.(e.pointerId);
     this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     // 吸色（v154）：eyedropper 工具 → 立即吸；touch + 长按吸色开启 → 起 timer（不动才吸，动了回 pan）
@@ -289,7 +357,7 @@ export class ReferenceWindow {
     }
     e.preventDefault();
   }
-  _onMove(e) {
+  _onMove(e: PointerEvent) {
     const p = this._pointers.get(e.pointerId);
     if (!p) return;
     const px = p.x, py = p.y;
@@ -330,7 +398,7 @@ export class ReferenceWindow {
     }
     e.preventDefault();
   }
-  _onUp(e) {
+  _onUp(e: PointerEvent) {
     this._pointers.delete(e.pointerId);
     this._cancelLongPress();
     if (this._pointers.size === 0) this._endPick();
@@ -347,7 +415,7 @@ export class ReferenceWindow {
     if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; }
     this._lpStart = null;
   }
-  _beginPick(e) {
+  _beginPick(e: PointerEvent) {
     this._picking = true;
     this._cancelLongPress();
     this.status("吸色（参考）");
@@ -359,7 +427,7 @@ export class ReferenceWindow {
     window.dispatchEvent(new CustomEvent("wp:pickerHide"));
   }
   // 读自家 canvas 像素（所见即所吸）。透明区（没图）不吸。半透明合成到白底。
-  _pickAt(clientX, clientY) {
+  _pickAt(clientX: number, clientY: number) {
     const rect = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     let px = Math.round((clientX - rect.left) * dpr);
@@ -375,7 +443,7 @@ export class ReferenceWindow {
     this.onColorSampled(hex);
     window.dispatchEvent(new CustomEvent("wp:pickerShow", { detail: { sx: clientX, sy: clientY, hex } }));
   }
-  _onWheel(e) {
+  _onWheel(e: WheelEvent) {
     e.preventDefault();
     const rect = this.canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -484,11 +552,11 @@ export class ReferenceWindow {
   }
 }
 
-function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+function clamp(x: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, x)); }
 
 // 屏幕→图像坐标的逆变换（用于 anchor-preserving）。屏幕坐标 sx/sy = relative to canvas top-left
 // 正变换：screen = R(rot) · S(scale) · img + (tx, ty)；逆变换 img = S^-1 · R^-1 · (screen - tx, ty)
-function screenToImg(sx, sy, vp) {
+function screenToImg(sx: number, sy: number, vp: RefViewport) {
   const c = Math.cos(-vp.rot), s = Math.sin(-vp.rot);
   const dx = sx - vp.tx, dy = sy - vp.ty;
   return { x: (dx * c - dy * s) / vp.scale, y: (dx * s + dy * c) / vp.scale };

@@ -2,7 +2,7 @@
 // 3 区段：阴影 / 中间调 / 高光，每区 3 个轴（青-红 / 品-绿 / 黄-蓝）
 // 区段权重 = luma 三段高斯（shadow @ 0、mid @ 0.5、hi @ 1）
 
-import { registerFilter, clamp8, makeSliderRow, makeSectionTitle } from "../filters.js";
+import { registerFilter, clamp8, makeSliderRow, makeSectionTitle } from "../filters.ts";
 
 export class ColorBalanceFilter {
   static id = "colorBalance";

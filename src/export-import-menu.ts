@@ -9,13 +9,13 @@
 //   session.js(下载·分享·剪贴板) / import-image(导入)。
 // app 协作件经 ctx 绑入：doc / setStatus（核心单例）。
 
-import { getExporter, listExportersByKind } from "./exporters.js";
+import { getExporter, listExportersByKind } from "./exporters.ts";
 import { els } from "./els.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
-import { looksEncryptedContainer } from "./crypto-format.js";
+import { looksEncryptedContainer } from "./crypto-format.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);

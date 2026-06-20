@@ -13,33 +13,40 @@
 //
 // 不在这处理：网络拉取本身 / IntersectionObserver / 并发限流（caller 负责）
 
-import { getMeta, setMeta } from "./storage.js";
-import { fetchOraThumbnail } from "./cloud-thumbs.js";
+import { getMeta, setMeta } from "./storage.ts";
+import { fetchOraThumbnail } from "./cloud-thumbs.ts";
 import { getDownloadUrl } from "./app-store.js";
 
 const KEY_PREFIX = "cloud-thumb:";
 
-function _key(itemId) { return KEY_PREFIX + itemId; }
+function _key(itemId: string): string { return KEY_PREFIX + itemId; }
+
+// IDB 里存的缓存条目形态
+interface CachedThumb {
+  etag: string;
+  blob: Blob;
+  at: number;
+}
 
 // cache stats（console 用：WebPaint.cloudThumbStats()）
-export const stats = { hits: 0, misses: 0, errors: 0 };
+export const stats: { hits: number; misses: number; errors: number } = { hits: 0, misses: 0, errors: 0 };
 export function resetStats() { stats.hits = 0; stats.misses = 0; stats.errors = 0; }
 
 // debug toggle：开了就不读 IDB cache，每次走网络 → 看 telemetry 路径分布
 // 用法：WebPaint.cloudThumbSkipCache(true)
-export const config = { skipCache: false };
+export const config: { skipCache: boolean } = { skipCache: false };
 
 /** 读 cache。返回 { etag, blob, at } 或 null */
-export async function readCachedThumb(itemId) {
+export async function readCachedThumb(itemId: string): Promise<CachedThumb | null> {
   try {
-    const v = await getMeta(_key(itemId));
+    const v = await getMeta(_key(itemId)) as CachedThumb | undefined;
     if (v && v.blob && v.etag) return v;
     return null;
   } catch (_) { return null; }
 }
 
 /** 写 cache（fire-and-forget；失败不影响主流程） */
-export async function writeCachedThumb(itemId, etag, blob) {
+export async function writeCachedThumb(itemId: string, etag: string, blob: Blob): Promise<void> {
   try {
     await setMeta(_key(itemId), { etag, blob, at: Date.now() });
   } catch (e) {
@@ -64,7 +71,7 @@ export async function writeCachedThumb(itemId, etag, blob) {
  *   有 → 省每张 thumb 的 metadata RTT；401/403 过期会重申请一次再试
  * @returns {Promise<{ blob: Blob, fromCache: boolean }>}
  */
-export async function getOrFetchCloudThumb(itemId, etag, fileSize, downloadUrl = null) {
+export async function getOrFetchCloudThumb(itemId: string, etag: string, fileSize: number, downloadUrl: string | null = null): Promise<{ blob: Blob; fromCache: boolean }> {
   if (!config.skipCache) {
     const cached = await readCachedThumb(itemId);
     if (cached && cached.etag === etag) {
@@ -84,12 +91,12 @@ export async function getOrFetchCloudThumb(itemId, etag, fileSize, downloadUrl =
 }
 
 // 带 downloadUrl 时优先直打 CDN；过期（401/403）→ 重新申请 1 次 → 仍失败抛
-async function _fetchWithExpireRetry(itemId, fileSize, downloadUrl) {
+async function _fetchWithExpireRetry(itemId: string, fileSize: number, downloadUrl: string | null): Promise<Blob> {
   if (!downloadUrl) return await fetchOraThumbnail(itemId, fileSize);
   try {
     return await fetchOraThumbnail(itemId, fileSize, { downloadUrl });
   } catch (e) {
-    if (e.status === 401 || e.status === 403) {
+    if ((e as { status?: number }).status === 401 || (e as { status?: number }).status === 403) {
       const fresh = await getDownloadUrl(itemId);
       if (!fresh) throw e;
       return await fetchOraThumbnail(itemId, fileSize, { downloadUrl: fresh });
@@ -99,8 +106,8 @@ async function _fetchWithExpireRetry(itemId, fileSize, downloadUrl) {
 }
 
 /** 调试：清空全部缩略图 cache（扫 meta store，删 cloud-thumb:* keys，返删除数） */
-export async function clearCloudThumbCache() {
-  return new Promise((resolve, reject) => {
+export async function clearCloudThumbCache(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
     const req = indexedDB.open("webpaint");
     req.onsuccess = () => {
       const db = req.result;
@@ -108,8 +115,8 @@ export async function clearCloudThumbCache() {
       const store = tx.objectStore("meta");
       const cur = store.openCursor();
       let n = 0;
-      cur.onsuccess = (ev) => {
-        const cursor = ev.target.result;
+      cur.onsuccess = (ev: Event) => {
+        const cursor = (ev.target as IDBRequest<IDBCursorWithValue | null>).result;
         if (!cursor) {
           tx.oncomplete = () => { resetStats(); resolve(n); };
           return;

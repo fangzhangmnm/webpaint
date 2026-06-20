@@ -5,7 +5,7 @@
 
 import { listSessions } from "./session.ts";
 import { listCloudSessionsRecursive } from "./app-store.js";
-import { stripSessionExt } from "./config.js";
+import { stripSessionExt } from "./config.ts";
 
 // 返回冲突类型 "local" | "cloud" | null。cloud 列举失败不算冲突（best-effort，吞并 warn）。
 export async function sessionNameConflict(name: string, { cloud = false }: { cloud?: boolean } = {}): Promise<"local" | "cloud" | null> {

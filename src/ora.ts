@@ -19,7 +19,7 @@
 // **注意**：blob 全是 Uint8Array 传给 zip.js。Canvas.toBlob 拿到 Blob，需要
 // arrayBuffer() 转 Uint8Array。
 
-import { zipPack, zipUnpack } from "./zip.js";
+import { zipPack, zipUnpack } from "./zip.ts";
 import { Layer, LayerGroup, PaintDoc, flattenLeaves, findNodeById, reseedLayerIdCounter } from "./doc.ts";
 import { compositeLayers } from "./layer-composite.ts";
 import { smartResample } from "./resample.ts";

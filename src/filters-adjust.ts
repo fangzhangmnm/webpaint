@@ -8,8 +8,8 @@
 // state.filterBrush 是 active filter-brush 的 SSoT（在 state 上，经绑定的 state 读写）。
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
-import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
-import { getFilter, listFilters, onFilterRegistered } from "./filters.js";
+import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
+import { getFilter, listFilters, onFilterRegistered } from "./filters.ts";
 import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";
 
 import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式 import）
@@ -88,7 +88,7 @@ function _initFilterSurrogate(L: AdjustLayer) {
 // v132 opts.picker = [Filter, ...]：在 panel body 顶部插一个 dropdown 切其他 filter
 //   切换 = cancel 当前 → reopen 新 filter（同一 picker）。用于"艺术滤镜"组
 function _openFilterPanel(filterId: string, opts: { picker?: FilterLike[] } = {}) {
-  const Filter = getFilter(filterId);
+  const Filter = getFilter(filterId) as FilterLike | undefined;
   if (!Filter) { setStatus(`未知 filter：${filterId}`, true); return; }
   const L = requireEditableLeaf(doc, setStatus) as AdjustLayer | null;   // 组/隐藏 → 标准状态行 + 退出（取代旧的只查 !L）
   if (!L) return;
@@ -209,7 +209,7 @@ function _renderFilterMenu() {
   const container = document.getElementById("adjustFilterList");
   if (!container) return;
   container.innerHTML = "";
-  const all = listFilters();
+  const all = listFilters() as FilterLike[];
   const adjustmentRegion = all.filter((F) => (F.category || "adjustment") === "adjustment" && F.modes.includes("region"));
   const brushFilters     = all.filter((F) => F.modes.includes("brush"));
   const artistFilters    = all.filter((F) => F.category === "artist");
@@ -255,7 +255,7 @@ function _renderFilterMenu() {
 }
 // 艺术滤镜：开 adjust panel，body 顶部加 dropdown 切具体 filter
 function _openArtistPicker() {
-  const artist = listFilters().filter((F) => F.category === "artist");
+  const artist = (listFilters() as FilterLike[]).filter((F) => F.category === "artist");
   if (artist.length === 0) { setStatus("没有艺术滤镜"); return; }
   _openFilterPanel(artist[0].id, { picker: artist });
 }
