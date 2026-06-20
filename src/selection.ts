@@ -13,7 +13,32 @@
 // - 实例字段 bboxX/bboxY/bboxW/bboxH/maskCanvas 保持公开（board/filters drawImage 直接读）。
 //   lasso 的自由变换/mesh gizmo 不在这里（另一个 concern，留 lasso）。
 
-function makeBitmap(w, h) {
+// 本文件用到的最小 canvas/层接口（selection.ts 拥有 Selection 真类型；
+// doc.ts 的 SelectionLike 镜像本类公开成员，集成时以本文件为准对齐）。
+type Bitmap = OffscreenCanvas | HTMLCanvasElement;
+type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+
+// applyMaskPostStroke / fillOnLayer / clearOnLayer 调用方（Layer）的最小形状。
+interface LayerLike {
+  bboxX: number;
+  bboxY: number;
+  ctx: Ctx;
+  snapshot(): LayerSnapLike;
+  ensureBbox(x0: number, y0: number, x1: number, y1: number): void;
+}
+
+// Layer.snapshot() 产物（applyMaskPostStroke 的 preSnap/afterSnap 形状）。
+interface LayerSnapLike {
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
+  imageData?: ImageData | null;
+}
+
+type ComposeMode = "new" | "union" | "subtract" | "intersect";
+
+function makeBitmap(w: number, h: number): Bitmap {
   return (typeof OffscreenCanvas !== "undefined")
     ? new OffscreenCanvas(w, h)
     : (() => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; })();
@@ -23,7 +48,7 @@ function makeBitmap(w, h) {
 //   每轮「先收集再应用」(double-buffer) 保证恰好 radius 像素环，不在同轮内自传播。
 //   grid 外侧：膨胀时当「空」(continue)，腐蚀时当「非选区」(touch=把贴边的腐蚀掉)。
 //   ← 从 lasso.js _morphMask 搬来（v242：expand/shrink 改成选区编辑 op，不再 bake 进魔术棒）。
-function morphBinary(grid, w, h, radius, grow) {
+function morphBinary(grid: Uint8Array, w: number, h: number, radius: number, grow: boolean): void {
   if (radius <= 0) return;
   for (let k = 0; k < radius; k++) {
     const changes = [];
@@ -54,7 +79,14 @@ function morphBinary(grid, w, h, radius, grow) {
 }
 
 export class Selection {
-  constructor(bboxX, bboxY, bboxW, bboxH, maskCanvas) {
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
+  maskCanvas: Bitmap;
+  _outlineChains: Float32Array[] | null;
+
+  constructor(bboxX: number, bboxY: number, bboxW: number, bboxH: number, maskCanvas: Bitmap) {
     this.bboxX = bboxX; this.bboxY = bboxY;
     this.bboxW = bboxW; this.bboxH = bboxH;
     this.maskCanvas = maskCanvas;
@@ -64,11 +96,11 @@ export class Selection {
   // ---- 工厂 ----
 
   // 全白选区（select all / 反选-无选区 / 整层选区）。x/y 给 layer 偏移用。
-  static full(docW, docH, x = 0, y = 0) {
+  static full(docW: number, docH: number, x = 0, y = 0): Selection | null {
     const w = docW | 0, h = docH | 0;
     if (w <= 0 || h <= 0) return null;
     const mask = makeBitmap(w, h);
-    const mctx = mask.getContext("2d");
+    const mctx = mask.getContext("2d")!;
     mctx.fillStyle = "#fff";
     mctx.fillRect(0, 0, w, h);
     return new Selection(x, y, w, h, mask);
@@ -78,7 +110,7 @@ export class Selection {
 
   // 把 newSel 按 mode 合并到 oldSel（两者皆 Selection|null）。退化（空）→ null。
   //   new → 替换；union → ∪；subtract → \；intersect → ∩
-  static compose(oldSel, newSel, mode) {
+  static compose(oldSel: Selection | null, newSel: Selection | null, mode: ComposeMode): Selection | null {
     if (!newSel) return oldSel;
     if (mode === "new" || !oldSel) return newSel;
     let x0, y0, x1, y1;
@@ -100,7 +132,7 @@ export class Selection {
     }
     const w = x1 - x0, h = y1 - y0;
     const canvas = makeBitmap(w, h);
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d")!;
     ctx.drawImage(oldSel.maskCanvas, oldSel.bboxX - x0, oldSel.bboxY - y0);
     if (mode === "union") {
       ctx.globalCompositeOperation = "source-over";
@@ -118,9 +150,9 @@ export class Selection {
   }
 
   // 反选：在 docW×docH 上 全白 - 本选区 mask。返回新 Selection。
-  invert(docW, docH) {
+  invert(docW: number, docH: number): Selection {
     const canvas = makeBitmap(docW, docH);
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d")!;
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, docW, docH);
     ctx.globalCompositeOperation = "destination-out";
@@ -134,7 +166,7 @@ export class Selection {
   //   - 8-连通（Chebyshev/方形增长），|radius| 轮，pixel-art 逻辑（硬边，不羽化）。
   //   - 膨胀时 bbox 每边外扩 radius 并 clamp 到 doc；收缩沿用原 bbox。
   //   白边场景：魔术棒停在线稿 AA 半透明处 → 对选区 expand 几 px 钻到线下 → 填色无白边。
-  morphed(radius, docW, docH) {
+  morphed(radius: number, docW: number, docH: number): Selection | null {
     const r = Math.round(radius);
     if (r === 0) return this;
     if (this.bboxW <= 0 || this.bboxH <= 0) return this;
@@ -148,7 +180,7 @@ export class Selection {
     const nw = nx1 - nx0, nh = ny1 - ny0;
     if (nw <= 0 || nh <= 0) return null;
     // 旧 mask → 二值网格（放进新 bbox 的对应位置）
-    const srcCtx = this.maskCanvas.getContext("2d");
+    const srcCtx = this.maskCanvas.getContext("2d")!;
     const srcData = srcCtx.getImageData(0, 0, this.bboxW, this.bboxH).data;
     const grid = new Uint8Array(nw * nh);
     for (let y = 0; y < this.bboxH; y++) {
@@ -162,7 +194,7 @@ export class Selection {
     morphBinary(grid, nw, nh, a, grow);
     // 网格 → mask canvas（硬边 0/255）
     const m = makeBitmap(nw, nh);
-    const mctx = m.getContext("2d");
+    const mctx = m.getContext("2d")!;
     const out = mctx.createImageData(nw, nh);
     const od = out.data;
     let any = false;
@@ -178,7 +210,7 @@ export class Selection {
 
   // ---- 行军蚁描边（懒算缓存）----
   // 返回 Array<Float32Array>，每条 = 一条 polyline（doc 坐标，[x,y,x,y,...]）。board 画虚线用。
-  outline() {
+  outline(): Float32Array[] {
     if (!this._outlineChains) {
       this._outlineChains = chainMaskOutline(extractMaskOutline(this));
     }
@@ -189,7 +221,7 @@ export class Selection {
 
   // 笔刷/橡皮/液化结束后：把 layer 在选区外的像素 revert 到 preSnap（"stroke 只在选区内生效"）。
   // per-pixel：选区外取 pre，选区内取 after。brush/eraser 都对（按 mask 选 pre/after，不是 composite）。
-  applyMaskPostStroke(layer, preSnap) {
+  applyMaskPostStroke(layer: LayerLike, preSnap: LayerSnapLike | null): void {
     if (!preSnap) return;
     const afterSnap = layer.snapshot();
     const px0 = preSnap.bboxX, py0 = preSnap.bboxY;
@@ -201,9 +233,9 @@ export class Selection {
     const uw = ux1 - ux0, uh = uy1 - uy0;
     if (uw <= 0 || uh <= 0) return;
 
-    let maskData = null;
+    let maskData: Uint8ClampedArray | null = null;
     if (this.bboxW > 0 && this.bboxH > 0) {
-      const mctx = this.maskCanvas.getContext("2d");
+      const mctx = this.maskCanvas.getContext("2d")!;
       maskData = mctx.getImageData(0, 0, this.bboxW, this.bboxH).data;
     }
     const preData = preSnap.imageData ? preSnap.imageData.data : null;
@@ -243,11 +275,11 @@ export class Selection {
   }
 
   // 选区内填色（调用方负责 push history）。
-  fillOnLayer(layer, color) {
+  fillOnLayer(layer: LayerLike, color: string): void {
     if (!layer) return;
     layer.ensureBbox(this.bboxX, this.bboxY, this.bboxX + this.bboxW, this.bboxY + this.bboxH);
     const tmp = makeBitmap(this.bboxW, this.bboxH);
-    const tctx = tmp.getContext("2d");
+    const tctx = tmp.getContext("2d")!;
     tctx.fillStyle = color;
     tctx.fillRect(0, 0, this.bboxW, this.bboxH);
     tctx.globalCompositeOperation = "destination-in";
@@ -257,7 +289,7 @@ export class Selection {
   }
 
   // 清除选区内像素（dst-out mask）。
-  clearOnLayer(layer) {
+  clearOnLayer(layer: LayerLike): void {
     if (!layer) return;
     const lctx = layer.ctx;
     lctx.save();
@@ -269,7 +301,7 @@ export class Selection {
   // ---- crop / resample 时变换自身 → 新 Selection（doc.cropTo/resampleTo 用）----
 
   // 裁剪：doc 原点平移 (dx,dy)，新画布 nw×nh。clamp 到画布内，全裁掉 → null。
-  croppedTo(dx, dy, nw, nh) {
+  croppedTo(dx: number, dy: number, nw: number, nh: number): Selection | null {
     const tL = this.bboxX - dx, tT = this.bboxY - dy;
     const tR = tL + this.bboxW, tB = tT + this.bboxH;
     const newL = Math.max(0, tL), newT = Math.max(0, tT);
@@ -278,14 +310,14 @@ export class Selection {
     if (newW <= 0 || newH <= 0) return null;
     const srcX = newL - tL, srcY = newT - tT;
     const m = makeBitmap(newW, newH);
-    m.getContext("2d").drawImage(this.maskCanvas, srcX, srcY, newW, newH, 0, 0, newW, newH);
+    m.getContext("2d")!.drawImage(this.maskCanvas, srcX, srcY, newW, newH, 0, 0, newW, newH);
     return new Selection(newL, newT, newW, newH, m);
   }
 
   // 水平翻转：mask 左右镜像，bbox 在 docW 内镜像。返回新 Selection。
-  flippedHorizontal(docW) {
+  flippedHorizontal(docW: number): Selection {
     const m = makeBitmap(this.bboxW, this.bboxH);
-    const mctx = m.getContext("2d");
+    const mctx = m.getContext("2d")!;
     mctx.setTransform(-1, 0, 0, 1, this.bboxW, 0);
     mctx.drawImage(this.maskCanvas, 0, 0);
     return new Selection(docW - (this.bboxX + this.bboxW), this.bboxY, this.bboxW, this.bboxH, m);
@@ -294,9 +326,9 @@ export class Selection {
   // 逆时针旋转 90°：mask 旋转，bbox 按 doc 旋转公式变换。docW/docH = **旧** doc 尺寸。返回新 Selection。
   //   局部旋转与 doc.rotate90CCW 一致：旧局部 (lx,ly)→新局部 (ly, bboxW-lx)，矩阵 (0,-1,1,0,0,bboxW)。
   //   新 bbox：newX=bboxY, newY=docW-(bboxX+bboxW), newW=bboxH, newH=bboxW。
-  rotated90CCW(docW, docH) {
+  rotated90CCW(docW: number, docH: number): Selection {
     const m = makeBitmap(this.bboxH, this.bboxW);   // 新 mask = (bboxH × bboxW)
-    const mctx = m.getContext("2d");
+    const mctx = m.getContext("2d")!;
     mctx.imageSmoothingEnabled = false;
     mctx.setTransform(0, -1, 1, 0, 0, this.bboxW);
     mctx.drawImage(this.maskCanvas, 0, 0);
@@ -311,12 +343,12 @@ export class Selection {
   }
 
   // 重采样：mask 同步缩放 (sx,sy)。
-  resampledTo(sx, sy, smooth, quality) {
+  resampledTo(sx: number, sy: number, smooth: boolean, quality: ImageSmoothingQuality): Selection {
     const oW = this.bboxW, oH = this.bboxH;
     const nbw = Math.max(1, Math.round(oW * sx));
     const nbh = Math.max(1, Math.round(oH * sy));
     const m = makeBitmap(nbw, nbh);
-    const mctx = m.getContext("2d");
+    const mctx = m.getContext("2d")!;
     mctx.imageSmoothingEnabled = smooth;
     mctx.imageSmoothingQuality = quality;
     mctx.drawImage(this.maskCanvas, 0, 0, oW, oH, 0, 0, nbw, nbh);
@@ -328,14 +360,14 @@ export class Selection {
 
 // 从 maskCanvas 抽轮廓 polyline 段。输出 Float32Array 平铺 [x0,y0,x1,y1,...]（doc 坐标）。
 // O(bboxW×bboxH)，一次性（outline() 缓存）。
-function extractMaskOutline(sel) {
+function extractMaskOutline(sel: Selection): Float32Array {
   const w = sel.bboxW, h = sel.bboxH;
   if (w <= 1 || h <= 1) return new Float32Array(0);
-  const ctx = sel.maskCanvas.getContext("2d");
+  const ctx = sel.maskCanvas.getContext("2d")!;
   const data = ctx.getImageData(0, 0, w, h).data;
-  const segs = [];
+  const segs: number[] = [];
   // v113: virtual padding —— canvas 外侧一圈 alpha=0，让 mask 占满边时也能 detect transition。
-  const alpha = (x, y) => (x < 0 || x >= w || y < 0 || y >= h) ? 0 : (data[(y * w + x) * 4 + 3] > 128 ? 1 : 0);
+  const alpha = (x: number, y: number) => (x < 0 || x >= w || y < 0 || y >= h) ? 0 : (data[(y * w + x) * 4 + 3] > 128 ? 1 : 0);
   for (let y = -1; y < h; y++) {
     for (let x = -1; x < w; x++) {
       const a00 = alpha(x, y), a10 = alpha(x + 1, y), a01 = alpha(x, y + 1), a11 = alpha(x + 1, y + 1);
@@ -367,22 +399,22 @@ function extractMaskOutline(sel) {
 }
 
 // 把碎段链成连续 polyline（dash 才能沿整条边流，否则每段当 subpath dash 重置）。
-function chainMaskOutline(segs) {
-  const out = [];
+function chainMaskOutline(segs: Float32Array): Float32Array[] {
+  const out: Float32Array[] = [];
   if (segs.length < 4) return out;
   const n = segs.length / 4;
-  const key = (x, y) => `${Math.round(x * 2)},${Math.round(y * 2)}`;
-  const endpoints = new Map();
+  const key = (x: number, y: number) => `${Math.round(x * 2)},${Math.round(y * 2)}`;
+  const endpoints = new Map<string, number[]>();
   for (let i = 0; i < n; i++) {
     const k0 = key(segs[i * 4], segs[i * 4 + 1]);
     const k1 = key(segs[i * 4 + 2], segs[i * 4 + 3]);
     if (!endpoints.has(k0)) endpoints.set(k0, []);
     if (!endpoints.has(k1)) endpoints.set(k1, []);
-    endpoints.get(k0).push(i * 2);
-    endpoints.get(k1).push(i * 2 + 1);
+    endpoints.get(k0)!.push(i * 2);
+    endpoints.get(k1)!.push(i * 2 + 1);
   }
   const used = new Uint8Array(n);
-  const findUnused = (k) => {
+  const findUnused = (k: string) => {
     const arr = endpoints.get(k);
     if (!arr) return -1;
     for (const slot of arr) if (!used[slot >> 1]) return slot;

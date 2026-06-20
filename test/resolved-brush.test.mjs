@@ -1,7 +1,7 @@
 // 当前笔（ResolvedBrush）解析验收（candidate 3）。纯派生 + 不可变。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { resolveBrush } from "../src/resolved-brush.ts";
-import { DEFAULT_SETTINGS } from "../src/brush.js";
+import { DEFAULT_SETTINGS } from "../src/brush.ts";
 
 describe("resolveBrush · 无笔架兜底（mental model：console 设工具即可画）", () => {
   it("preset=null 仍给出完整可画的笔（DEFAULT 兜底 + dial 覆盖）", () => {

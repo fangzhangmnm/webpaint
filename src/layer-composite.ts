@@ -17,13 +17,46 @@
 // 组隔离：组满足 mode≠source-over || opacity<1 || clippingMask || isolate → 先把子树合到独立 buffer
 //   再按 group.opacity/mode（+clip）整体混；否则 pass-through（子层直接落 ctx，能与组下方层混）。
 
-import { makeBitmap } from "./bitmap.js";
+import { makeBitmap } from "./bitmap.ts";
+import type { Layer, LayerGroup } from "./doc.ts";
+
+// 合成树节点 = 叶(Layer) | 组(LayerGroup)（doc.ts 的 Node 未 export，本地等价重建）。
+type CompositeNode = Layer | LayerGroup;
+// makeBitmap / canvas 离屏位图。
+type Bitmap = OffscreenCanvas | HTMLCanvasElement;
+type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+
+// 笔刷 live overlay 描述（compositeLayers 的 overlayFor 接缝）。canvas 指向裁过的离屏。
+interface OverlayDesc {
+  canvas: CanvasImageSource;
+  bboxX: number; bboxY: number; bboxW: number; bboxH: number;
+  opacity: number;
+  mode?: string;
+  blendMode?: string;
+}
+// 自由变换浮层 render 描述（floatFor 接缝；画在源层 z 位）。
+interface FloatDesc {
+  canvas: CanvasImageSource;
+  dstX: number;
+  dstY: number;
+}
+// compositeLayers 的合成选项接缝（board 注入复用离屏池 / overlay / float / surrogate source）。
+interface CompositeOpts {
+  ignoreClip?: boolean;
+  source?: (layer: Layer) => CanvasImageSource;
+  overlayFor?: (node: Layer) => OverlayDesc | null;
+  floatFor?: (node: Layer) => FloatDesc | null;
+  clipTmp?: (w: number, h: number) => Bitmap;
+  eraseTmp?: (w: number, h: number) => Bitmap;
+}
+// 内容包围盒（doc 坐标）。
+interface ContentBbox { x0: number; y0: number; x1: number; y1: number; }
 
 // 某一层级的剪裁基底解析。返回与 nodes 等长的数组：每项 = 基底**节点**（非 index）或 null。
 // 叶：有内容 = bboxW>0&&bboxH>0；组：有内容 = 可见（无法廉价知道空组，按非空处理，安全上界）。
-export function computeClipBaseForNodes(nodes) {
-  const out = new Array(nodes.length).fill(null);
-  let currentBase = null;
+export function computeClipBaseForNodes(nodes: CompositeNode[]): (CompositeNode | null)[] {
+  const out: (CompositeNode | null)[] = new Array(nodes.length).fill(null);
+  let currentBase: CompositeNode | null = null;
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (n.clippingMask && currentBase) {
@@ -40,19 +73,19 @@ export function computeClipBaseForNodes(nodes) {
 // 组是否需要隔离（先合 buffer 再整体混）。**pass-through 是唯一非隔离态**（PS 的两挡：
 //   Pass Through = 纯收纳，子层直接和组下方背景混；Normal/任意模式/opacity<1/clip = 隔离=拍平再混）。
 //   v278 起 group.mode==="pass-through" 是显式默认；其余一切（含 source-over/"正常"）都隔离。
-function groupNeedsIsolation(group) {
+function groupNeedsIsolation(group: LayerGroup): boolean {
   return group.mode !== "pass-through"
     || group.opacity < 1
     || group.clippingMask;
 }
 
 // 节点（叶或组）在 doc 坐标的内容包围盒，给隔离 buffer 定尺寸。组 = 子树并集。
-function nodeContentBbox(node) {
+function nodeContentBbox(node: CompositeNode): ContentBbox | null {
   if (!node.isGroup) {
     if (node.bboxW <= 0 || node.bboxH <= 0) return null;
     return { x0: node.bboxX, y0: node.bboxY, x1: node.bboxX + node.bboxW, y1: node.bboxY + node.bboxH };
   }
-  let b = null;
+  let b: ContentBbox | null = null;
   for (const c of node.children) {
     if (!c.visible) continue;
     const cb = nodeContentBbox(c);
@@ -71,7 +104,7 @@ function nodeContentBbox(node) {
 //                       忽略源层 opacity/mode；commit 后才入层取层的 opacity/mode）。Slice 3 起可对多节点返回。
 //   clipTmp(w,h)     -> 复用的剪裁离屏（board 有池；默认新建）
 //   eraseTmp(w,h)    -> 复用的 erase/混合离屏（默认新建）
-export function compositeLayers(ctx, nodes, opts = {}) {
+export function compositeLayers(ctx: Ctx, nodes: CompositeNode[], opts: CompositeOpts = {}) {
   // ignoreClip：把每个节点当非 clip 画（scope==="active" 单层导出：导出该层 raw 像素，无视 clip 标志）。
   const baseFor = opts.ignoreClip ? new Array(nodes.length).fill(null) : computeClipBaseForNodes(nodes);
   for (let i = 0; i < nodes.length; i++) {
@@ -96,7 +129,7 @@ export function compositeLayers(ctx, nodes, opts = {}) {
     const prevA = ctx.globalAlpha;
     const prevC = ctx.globalCompositeOperation;
     ctx.globalAlpha = node.opacity;
-    ctx.globalCompositeOperation = node.mode || "source-over";
+    ctx.globalCompositeOperation = (node.mode || "source-over") as GlobalCompositeOperation;
     if (base) _drawLeafClipped(ctx, node, base, overlay, opts);
     else _drawLayerWithOverlay(ctx, node, overlay, opts);
     ctx.globalAlpha = prevA;
@@ -110,7 +143,7 @@ export function compositeLayers(ctx, nodes, opts = {}) {
 }
 
 // 组：pass-through 直接落 ctx；隔离则先合 buffer 再按 group.opacity/mode(+clip) 整体混。
-function _compositeGroup(ctx, group, base, opts) {
+function _compositeGroup(ctx: Ctx, group: LayerGroup, base: CompositeNode | null, opts: CompositeOpts) {
   if (!groupNeedsIsolation(group)) {
     // pass-through：子层直接落 ctx（能与组下方层混）。group 不影响 globalAlpha/comp。
     compositeLayers(ctx, group.children, opts);
@@ -122,7 +155,7 @@ function _compositeGroup(ctx, group, base, opts) {
   const h = Math.max(1, Math.ceil(bb.y1) - Math.floor(bb.y0));
   const ox = Math.floor(bb.x0), oy = Math.floor(bb.y0);
   const buf = makeBitmap(w, h);
-  const bctx = buf.getContext("2d");
+  const bctx = buf.getContext("2d") as Ctx;
   // buffer 在 doc 坐标：平移使 doc(ox,oy) → buffer(0,0)
   bctx.setTransform(1, 0, 0, 1, -ox, -oy);
   compositeLayers(bctx, group.children, opts);
@@ -137,14 +170,14 @@ function _compositeGroup(ctx, group, base, opts) {
   const prevC = ctx.globalCompositeOperation;
   ctx.globalAlpha = group.opacity;
   // pass-through 组被 opacity<1/clip 逼到隔离时，整体混仍按 Normal（穿透≠某种混合模式）。
-  ctx.globalCompositeOperation = (group.mode === "pass-through") ? "source-over" : (group.mode || "source-over");
+  ctx.globalCompositeOperation = ((group.mode === "pass-through") ? "source-over" : (group.mode || "source-over")) as GlobalCompositeOperation;
   ctx.drawImage(buf, 0, 0, w, h, ox, oy, w, h);
   ctx.globalAlpha = prevA;
   ctx.globalCompositeOperation = prevC;
 }
 
 // 把某节点的 alpha（叶=其 canvas；组=其合成结果）画到 dst-in 目标。给 clip 用。
-function _drawNodeAlpha(tctx, node, originX, originY, opts) {
+function _drawNodeAlpha(tctx: Ctx, node: CompositeNode, originX: number, originY: number, opts: CompositeOpts) {
   if (!node.isGroup) {
     const src = (opts.source ? opts.source(node) : node.canvas);
     const overlay = opts.overlayFor ? opts.overlayFor(node) : null;
@@ -163,13 +196,13 @@ function _drawNodeAlpha(tctx, node, originX, originY, opts) {
     const rw = rx1 - rx0, rh = ry1 - ry0;
     if (rw <= 0 || rh <= 0) return;
     const ec = (opts.eraseTmp ? opts.eraseTmp(rw, rh) : makeBitmap(rw, rh));
-    const ectx = ec.getContext("2d");
+    const ectx = ec.getContext("2d") as Ctx;
     ectx.setTransform(1, 0, 0, 1, 0, 0);
     ectx.clearRect(0, 0, rw, rh);
     ectx.globalCompositeOperation = "source-over";
     if (hasBasePx) ectx.drawImage(src, node.bboxX - rx0, node.bboxY - ry0);
     ectx.globalAlpha = overlay.opacity;
-    ectx.globalCompositeOperation = overlay.mode === "erase" ? "destination-out" : (overlay.blendMode || "source-over");
+    ectx.globalCompositeOperation = (overlay.mode === "erase" ? "destination-out" : (overlay.blendMode || "source-over")) as GlobalCompositeOperation;
     ectx.drawImage(overlay.canvas, overlay.bboxX - rx0, overlay.bboxY - ry0);
     ectx.globalAlpha = 1;
     ectx.globalCompositeOperation = "source-over";
@@ -183,7 +216,7 @@ function _drawNodeAlpha(tctx, node, originX, originY, opts) {
   const h = Math.max(1, Math.ceil(bb.y1) - Math.floor(bb.y0));
   const gx = Math.floor(bb.x0), gy = Math.floor(bb.y0);
   const gb = makeBitmap(w, h);
-  const gctx = gb.getContext("2d");
+  const gctx = gb.getContext("2d") as Ctx;
   gctx.setTransform(1, 0, 0, 1, -gx, -gy);
   compositeLayers(gctx, node.children, opts);
   gctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -192,7 +225,7 @@ function _drawNodeAlpha(tctx, node, originX, originY, opts) {
 
 // clip 叶：region = layer∪overlay bbox；在离屏画 (layer⊕overlay) → dst-in 基底 alpha → 整块 blit。
 // 与 board._renderLayerClipped 逐行对齐（layer.opacity/mode 由调用方在 ctx 上已设，blit tmp 时生效）。
-function _drawLeafClipped(ctx, layer, base, overlay, opts) {
+function _drawLeafClipped(ctx: Ctx, layer: Layer, base: CompositeNode, overlay: OverlayDesc | null, opts: CompositeOpts) {
   let rx0 = Infinity, ry0 = Infinity, rx1 = -Infinity, ry1 = -Infinity;
   if (layer.bboxW > 0 && layer.bboxH > 0) {
     rx0 = layer.bboxX; ry0 = layer.bboxY; rx1 = layer.bboxX + layer.bboxW; ry1 = layer.bboxY + layer.bboxH;
@@ -204,7 +237,7 @@ function _drawLeafClipped(ctx, layer, base, overlay, opts) {
   const rw = rx1 - rx0, rh = ry1 - ry0;
   if (rw <= 0 || rh <= 0) return;
   const tmp = (opts.clipTmp ? opts.clipTmp(rw, rh) : makeBitmap(rw, rh));
-  const tctx = tmp.getContext("2d");
+  const tctx = tmp.getContext("2d") as Ctx;
   tctx.setTransform(1, 0, 0, 1, 0, 0);
   tctx.clearRect(0, 0, rw, rh);
   tctx.setTransform(1, 0, 0, 1, -rx0, -ry0);   // doc 绝对坐标 → tmp
@@ -217,7 +250,7 @@ function _drawLeafClipped(ctx, layer, base, overlay, opts) {
 }
 
 // 叶 + 可选 overlay 合成到 ctx（ctx 在 doc 坐标）。与 board._drawLayerWithOverlay 逐行对齐。
-function _drawLayerWithOverlay(ctx, layer, overlay, opts) {
+function _drawLayerWithOverlay(ctx: Ctx, layer: Layer, overlay: OverlayDesc | null, opts: CompositeOpts) {
   const sourceCanvas = (opts.source ? opts.source(layer) : layer.canvas);
   const hasLayerPixels = layer.bboxW > 0 && layer.bboxH > 0;
   const overlayOp = !overlay ? "source-over"
@@ -237,24 +270,24 @@ function _drawLayerWithOverlay(ctx, layer, overlay, opts) {
     return;
   }
   // 复合通路（erase / 混合模式）：overlay 只对**本层像素**合成，在临时画布上 (layer ⊕ overlay) 烤好再整体 blit。
-  if (!hasLayerPixels && overlay.mode === "erase") return;
+  if (!hasLayerPixels && overlay!.mode === "erase") return;
   let rx0 = Infinity, ry0 = Infinity, rx1 = -Infinity, ry1 = -Infinity;
   if (hasLayerPixels) {
     rx0 = layer.bboxX; ry0 = layer.bboxY; rx1 = layer.bboxX + layer.bboxW; ry1 = layer.bboxY + layer.bboxH;
   }
-  rx0 = Math.min(rx0, overlay.bboxX); ry0 = Math.min(ry0, overlay.bboxY);
-  rx1 = Math.max(rx1, overlay.bboxX + overlay.bboxW); ry1 = Math.max(ry1, overlay.bboxY + overlay.bboxH);
+  rx0 = Math.min(rx0, overlay!.bboxX); ry0 = Math.min(ry0, overlay!.bboxY);
+  rx1 = Math.max(rx1, overlay!.bboxX + overlay!.bboxW); ry1 = Math.max(ry1, overlay!.bboxY + overlay!.bboxH);
   const rw = rx1 - rx0, rh = ry1 - ry0;
   if (rw <= 0 || rh <= 0) return;
   const ec = (opts.eraseTmp ? opts.eraseTmp(rw, rh) : makeBitmap(rw, rh));
-  const ectx = ec.getContext("2d");
+  const ectx = ec.getContext("2d") as Ctx;
   ectx.setTransform(1, 0, 0, 1, 0, 0);
   ectx.clearRect(0, 0, rw, rh);
   ectx.globalCompositeOperation = "source-over";
   if (hasLayerPixels) ectx.drawImage(sourceCanvas, layer.bboxX - rx0, layer.bboxY - ry0);
-  ectx.globalAlpha = overlay.opacity;
-  ectx.globalCompositeOperation = overlayOp;
-  ectx.drawImage(overlay.canvas, overlay.bboxX - rx0, overlay.bboxY - ry0);
+  ectx.globalAlpha = overlay!.opacity;
+  ectx.globalCompositeOperation = overlayOp as GlobalCompositeOperation;
+  ectx.drawImage(overlay!.canvas, overlay!.bboxX - rx0, overlay!.bboxY - ry0);
   ectx.globalAlpha = 1;
   ectx.globalCompositeOperation = "source-over";
   ctx.drawImage(ec, 0, 0, rw, rh, rx0, ry0, rw, rh);

@@ -15,9 +15,9 @@
 //     把"加载失败的 path"当 oldName 删掉
 
 import { encodeDocToOra, decodeOraToDoc } from "./ora.ts";
-import { compositeLayers } from "./layer-composite.js";
+import { compositeLayers } from "./layer-composite.ts";
 import { looksEncryptedContainer } from "./crypto-format.js";
-import { smartResample, canvasToBlob } from "./resample.js";
+import { smartResample, canvasToBlob } from "./resample.ts";
 import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.js";
 import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）
 import type { PaintDoc } from "./doc.ts";
@@ -89,7 +89,7 @@ export async function renderThumbBlob(doc: PaintDoc, maxSide = 256) {
   const W = doc.width, H = doc.height;
   const merged = document.createElement("canvas");
   merged.width = W; merged.height = H;
-  const mctx = merged.getContext("2d");
+  const mctx = merged.getContext("2d")!;
   // 不涂底：保 alpha，PNG 编码透出来 → 容器 CSS bg 直接生效（调色不用改 JS）。
   // 走规范合成器（deep module A）：respect clip/mode + **组隔离**（手抄扁平 loop 会漏掉组内层）。
   compositeLayers(mctx, doc.layers);

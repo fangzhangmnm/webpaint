@@ -16,7 +16,7 @@ export const RESAMPLE_MODES = [
 ];
 
 // 用 RESAMPLE_MODES 填一个 <select>（按 context 过滤），选中 selected。
-export function fillResampleSelect(sel, context, selected) {
+export function fillResampleSelect(sel: HTMLSelectElement | null, context: string | null, selected: string) {
   if (!sel) return;
   sel.innerHTML = "";
   for (const m of RESAMPLE_MODES) {
@@ -29,7 +29,7 @@ export function fillResampleSelect(sel, context, selected) {
   }
 }
 
-function makeCanvas(w, h) {
+function makeCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement {
   w = Math.max(1, w | 0); h = Math.max(1, h | 0);
   return (typeof OffscreenCanvas !== "undefined")
     ? new OffscreenCanvas(w, h)
@@ -38,25 +38,27 @@ function makeCanvas(w, h) {
 
 // 高质量缩放到 (tw,th)。缩小走 step-halving（防 aliasing），放大/收尾走 high smoothing。
 // src 可是 ImageBitmap / HTMLImageElement / canvas（任意 drawImage 源）。返回一张 canvas。
-export function smartResample(src, tw, th) {
+type ResampleSource = ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas;
+
+export function smartResample(src: ResampleSource, tw: number, th: number): OffscreenCanvas | HTMLCanvasElement {
   tw = Math.max(1, Math.round(tw));
   th = Math.max(1, Math.round(th));
-  let sw = src.width || src.naturalWidth;
-  let sh = src.height || src.naturalHeight;
+  let sw = src.width || (src as HTMLImageElement).naturalWidth;
+  let sh = src.height || (src as HTMLImageElement).naturalHeight;
   let cur = src;
   // 缩小：每步最多减半，逼近目标
   while (sw > tw * 2 || sh > th * 2) {
     const nw = Math.max(tw, Math.floor(sw / 2));
     const nh = Math.max(th, Math.floor(sh / 2));
     const c = makeCanvas(nw, nh);
-    const cx = c.getContext("2d");
+    const cx = c.getContext("2d")!;
     cx.imageSmoothingEnabled = true;
     cx.imageSmoothingQuality = "high";
     cx.drawImage(cur, 0, 0, sw, sh, 0, 0, nw, nh);
     cur = c; sw = nw; sh = nh;
   }
   const out = makeCanvas(tw, th);
-  const ox = out.getContext("2d");
+  const ox = out.getContext("2d")!;
   ox.imageSmoothingEnabled = true;
   ox.imageSmoothingQuality = "high";
   ox.drawImage(cur, 0, 0, sw, sh, 0, 0, tw, th);
@@ -65,9 +67,9 @@ export function smartResample(src, tw, th) {
 
 // 限制在 maxW×maxH 内（保持比例）。没超 → 原样返回 src（不复制）。超了 → step-halving 缩小。
 // 返回 { source, w, h, scaled }：source 可直接 drawImage / setBitmap。
-export function fitWithin(src, maxW, maxH) {
-  const sw = src.width || src.naturalWidth;
-  const sh = src.height || src.naturalHeight;
+export function fitWithin(src: ResampleSource, maxW: number, maxH: number) {
+  const sw = src.width || (src as HTMLImageElement).naturalWidth;
+  const sh = src.height || (src as HTMLImageElement).naturalHeight;
   if (sw <= maxW && sh <= maxH) return { source: src, w: sw, h: sh, scaled: false };
   const k = Math.min(maxW / sw, maxH / sh);
   const tw = Math.round(sw * k), th = Math.round(sh * k);
@@ -76,7 +78,7 @@ export function fitWithin(src, maxW, maxH) {
 
 // 鲁棒解码图片文件 → ImageBitmap，失败（某些 Windows / 浏览器配置 / 格式下 createImageBitmap(File) 会抛）
 // 退回 Image + objectURL 解码。返回可 drawImage 的源（ImageBitmap 或 HTMLImageElement）。
-export async function decodeImageFile(file) {
+export async function decodeImageFile(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
   try {
     return await createImageBitmap(file);
   } catch {
@@ -91,7 +93,7 @@ export async function decodeImageFile(file) {
 }
 
 // canvas → PNG Blob（持久化用）。OffscreenCanvas 用 convertToBlob，普通 canvas 用 toBlob。
-export function canvasToBlob(canvas, type = "image/png") {
-  if (canvas.convertToBlob) return canvas.convertToBlob({ type });
-  return new Promise((resolve) => canvas.toBlob(resolve, type));
+export function canvasToBlob(canvas: OffscreenCanvas | HTMLCanvasElement, type = "image/png") {
+  if ((canvas as OffscreenCanvas).convertToBlob) return (canvas as OffscreenCanvas).convertToBlob({ type });
+  return new Promise<Blob | null>((resolve) => (canvas as HTMLCanvasElement).toBlob(resolve, type));
 }

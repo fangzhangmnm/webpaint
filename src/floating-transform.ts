@@ -12,20 +12,89 @@
 // 渲染：2×2 mesh 走 renderQuadPerPixel（per-pixel inverse homography + 双三次/双线性采样）。
 //   math-exact，无 PS1 三角化 artifact。caller drawImage 渲染结果（board export 在文件末）。
 
-import { Selection } from "./selection.js";
-import { makeBitmap } from "./bitmap.js";
+import { Selection } from "./selection.ts";
+import { makeBitmap } from "./bitmap.ts";
 import { eachLeaf } from "./doc.ts";
+import type { Layer, LayerGroup } from "./doc.ts";
+
+// ---- 局部几何/数据类型（type-strip 后纯运行时无变化）----
+type Node = Layer | LayerGroup;
+type Bitmap = OffscreenCanvas | HTMLCanvasElement;
+interface Point { x: number; y: number; }
+type Mesh = Point[][];                          // 2×2：[[TL,TR],[BL,BR]]
+interface Rect { x: number; y: number; w: number; h: number; }
+type SampleMode = "nearest" | "bilinear" | "bicubic";
+
+interface RenderResult { canvas: Bitmap; dstX: number; dstY: number; }
+
+interface Source {
+  layer: Layer;
+  canvas: Bitmap;
+  imageData: ImageData;
+  rect: Rect;
+  preSnap: ReturnType<Layer["snapshot"]>;
+  _renderCache: RenderResult | null;
+}
+
+interface Floating {
+  sources: Source[];
+  gizmoBbox: Rect;
+  mode: TransformModeKind | null;
+  meshN: number;
+  mesh: Mesh;
+  uniformAspect: number;
+  _renderCache?: RenderResult | null;
+}
+
+type TransformModeKind = "free" | "uniform" | "distort";
+
+interface Hit {
+  kind: "translate" | "corner" | "edge" | "rotate";
+  row?: number;
+  col?: number;
+  edge?: string;
+  pos?: Point;
+  anchor?: Point;
+}
+
+interface Drag extends Hit {
+  startX: number;
+  startY: number;
+  meshSnap: Mesh;
+}
+
+interface LiftOpts { fallbackFullLayer?: boolean; cut?: boolean; }
+
+interface Homography {
+  a: number; b: number; c: number; d: number; e: number; f: number; g: number; h: number;
+}
+
+interface TransformMode {
+  kind: TransformModeKind;
+  meshN: number;
+  showsRotate: boolean;
+  corner: (mesh: Mesh, snap: Mesh, drag: Drag, r: number, c: number, x: number, y: number, asp: number) => void;
+  edge: (mesh: Mesh, snap: Mesh, drag: Drag, e: string, x: number, y: number, asp: number) => void;
+  projectOnEnter: (mesh: Mesh, fromKind: TransformModeKind | null, asp: number) => Mesh | null;
+}
+
+interface DocLike { selection: unknown; }
 
 export class FloatingTransform {
+  _floating: Floating | null;
+  _drag: Drag | null;
+  _sampleMode: SampleMode;
+  onChange: () => void;
+
   // onChange 晚绑定（LassoEngine 构造时传 () => this.onChange()，因为 input.js 之后才赋 onChange）。
-  constructor(onChange = () => {}) {
+  constructor(onChange: () => void = () => {}) {
     this._floating = null;
     this._drag = null;
     this._sampleMode = "bicubic";   // nearest | bilinear | bicubic（transform 重采样质量；v125 默认双三次）
     this.onChange = onChange;
   }
 
-  setSampleMode(m) {
+  setSampleMode(m: string) {
     if (m === "nearest" || m === "bilinear" || m === "bicubic") {
       this._sampleMode = m;
       if (this._floating) { this._floating._renderCache = null; this.onChange(); }
@@ -41,7 +110,7 @@ export class FloatingTransform {
   // selection 为 null 且 opts.fallbackFullLayer → 隐式全选（leaf=整层；group=每叶整层）。
   // opts.cut: true(默认) = 挖空源层（Ctrl+T）；false = 不挖洞（Ctrl+D 复制为浮层）。
   // 返回 bool（false = 没东西可变换）。
-  lift(selection, node, opts = {}) {
+  lift(selection: Selection | null, node: Node | null, opts: LiftOpts = {}) {
     if (this._floating) return false;
     const sources = node && node.isGroup
       ? this._liftGroupSources(selection, node, opts)
@@ -63,7 +132,7 @@ export class FloatingTransform {
     return true;
   }
 
-  _liftLeafSources(selection, layer, opts) {
+  _liftLeafSources(selection: Selection | null, layer: Layer | null, opts: LiftOpts): Source[] {
     let sel = selection;
     if (!sel && opts.fallbackFullLayer && layer && layer.bboxW > 0 && layer.bboxH > 0) {
       sel = Selection.full(layer.bboxW, layer.bboxH, layer.bboxX, layer.bboxY);
@@ -73,8 +142,8 @@ export class FloatingTransform {
     return src ? [src] : [];
   }
 
-  _liftGroupSources(selection, group, opts) {
-    const leaves = [];
+  _liftGroupSources(selection: Selection | null, group: LayerGroup, opts: LiftOpts): Source[] {
+    const leaves: Layer[] = [];
     eachLeaf(group.children, (L) => leaves.push(L));   // 含隐藏叶（整组一起动）
     const sources = [];
     for (const leaf of leaves) {
@@ -84,7 +153,7 @@ export class FloatingTransform {
         if (!opts.fallbackFullLayer || leaf.bboxW <= 0 || leaf.bboxH <= 0) continue;
         sel = Selection.full(leaf.bboxW, leaf.bboxH, leaf.bboxX, leaf.bboxY);
       }
-      const src = bakeSource(sel, leaf, opts);
+      const src = bakeSource(sel!, leaf, opts);
       if (src) sources.push(src);
     }
     return sources;
@@ -92,11 +161,11 @@ export class FloatingTransform {
 
   // -------- 模式切换 --------
   // mode = null（"selected"：只显轮廓、拖内 = 平移）或 "free" | "uniform" | "distort"。
-  setMode(mode) {
+  setMode(mode: TransformModeKind | null) {
     const f = this._floating;
     if (!f) return;
     if (mode === f.mode) return;
-    const mdef = MODES[mode];
+    const mdef = MODES[mode as TransformModeKind];
     if (mdef && mdef.projectOnEnter) {
       const projected = mdef.projectOnEnter(f.mesh, f.mode, f.uniformAspect);
       if (projected) { f.mesh = projected; invalidateRender(f); }
@@ -108,7 +177,7 @@ export class FloatingTransform {
 
   // -------- 拖动 --------
   // v125 (user：「transform 拖外面也能移动，gizmo 安全区大一点」)：handle 半径 18 doc-px；quad 外按下默认 translate。
-  hitTest(x, y, screenScale = 1) {
+  hitTest(x: number, y: number, screenScale = 1): Hit | null {
     const f = this._floating;
     if (!f) return null;
     if (f.mode === null) {
@@ -117,13 +186,13 @@ export class FloatingTransform {
     const r = 18 / screenScale;
     const handles = this._visibleHandles(screenScale);
     for (const h of handles) {
-      const dx = x - h.pos.x, dy = y - h.pos.y;
+      const dx = x - h.pos!.x, dy = y - h.pos!.y;
       if (dx * dx + dy * dy < r * r) return h;
     }
     return { kind: "translate" };
   }
 
-  beginDrag(hit, x, y) {
+  beginDrag(hit: Hit | null, x: number, y: number) {
     const f = this._floating;
     if (!f || !hit) return;
     this._drag = {
@@ -132,7 +201,7 @@ export class FloatingTransform {
       meshSnap: f.mesh.map((row) => row.map((p) => ({ x: p.x, y: p.y }))),
     };
   }
-  extendDrag(x, y) {
+  extendDrag(x: number, y: number) {
     const f = this._floating;
     const d = this._drag;
     if (!f || !d) return;
@@ -141,11 +210,11 @@ export class FloatingTransform {
     if (d.kind === "translate") {
       applyTranslate(f.mesh, d.meshSnap, dx, dy);
     } else if (d.kind === "corner") {
-      const md = MODES[f.mode];
-      if (md) md.corner(f.mesh, d.meshSnap, d, d.row, d.col, x, y, f.uniformAspect);
+      const md = MODES[f.mode as TransformModeKind];
+      if (md) md.corner(f.mesh, d.meshSnap, d, d.row!, d.col!, x, y, f.uniformAspect);
     } else if (d.kind === "edge") {
-      const md = MODES[f.mode];
-      if (md) md.edge(f.mesh, d.meshSnap, d, d.edge, x, y, f.uniformAspect);
+      const md = MODES[f.mode as TransformModeKind];
+      if (md) md.edge(f.mesh, d.meshSnap, d, d.edge!, x, y, f.uniformAspect);
     } else if (d.kind === "rotate") {
       applyRotate(f.mesh, d.meshSnap, d, x, y);
     }
@@ -155,9 +224,9 @@ export class FloatingTransform {
   endDrag() { this._drag = null; }
 
   // 把一个 source 的浮层像素落回它自己的 layer（commit/stamp 共用）。
-  _bakeDown(src) {
+  _bakeDown(src: Source) {
     const layer = src.layer;
-    const rendered = renderSource(src, this._floating.gizmoBbox, this._floating.mesh, this._sampleMode);
+    const rendered = renderSource(src, this._floating!.gizmoBbox, this._floating!.mesh, this._sampleMode);
     if (!rendered) return;
     layer.ensureBbox(
       Math.floor(rendered.dstX), Math.floor(rendered.dstY),
@@ -177,10 +246,10 @@ export class FloatingTransform {
 
   // -------- commit / cancel --------
   // commit(doc)：各 source 落回各自 layer，返回多层 "lasso" history entry；自动清 doc.selection（v119）。
-  commit(doc) {
+  commit(doc: DocLike | null) {
     const f = this._floating;
     if (!f) return null;
-    const layers = [];
+    const layers: Array<{ layerId: number; before: Source["preSnap"]; after: ReturnType<Layer["snapshot"]>; beforeBlob: null; afterBlob: null }> = [];
     for (const src of f.sources) {
       this._bakeDown(src);
       layers.push({ layerId: src.layer.id, before: src.preSnap, after: src.layer.snapshot(), beforeBlob: null, afterBlob: null });
@@ -205,7 +274,7 @@ export class FloatingTransform {
 
   // -------- 外部查询 --------
   // 给某节点（叶）取它的浮层 render（{canvas,dstX,dstY}）或 null。board 的 floatFor 接缝调它（按 z 插）。
-  renderForLayer(layer) {
+  renderForLayer(layer: Layer) {
     const f = this._floating;
     if (!f) return null;
     const src = f.sources.find((s) => s.layer === layer);
@@ -224,11 +293,11 @@ export class FloatingTransform {
   visibleHandles(screenScale = 1) { return this._visibleHandles(screenScale); }
 
   // ---------- 内部 ----------
-  _visibleHandles(screenScale = 1) {
+  _visibleHandles(screenScale = 1): Hit[] {
     const f = this._floating;
     if (!f) return [];
     if (f.mode === null) return [];     // selected 状态：不暴露 handles
-    const out = [];
+    const out: Hit[] = [];
     const m = f.mesh;
     out.push({ kind: "corner", row: 0, col: 0, pos: m[0][0] });
     out.push({ kind: "corner", row: 0, col: 1, pos: m[0][1] });
@@ -253,7 +322,7 @@ export class FloatingTransform {
     return out;
   }
 
-  _pointInQuad(x, y) {
+  _pointInQuad(x: number, y: number) {
     const f = this._floating;
     if (!f) return false;
     const N = f.meshN;
@@ -266,7 +335,7 @@ export class FloatingTransform {
 // ============ TransformMode adapters ============
 // 每个 mode 一个 adapter：meshN / 是否露 rotate handle / corner·edge 约束 / 切入投影。
 // free/uniform 共用 solveAffineCorner·solveAffineEdge（uniform=true 多一步锁比）；distort 自走简单分支。
-const MODES = {
+const MODES: Record<TransformModeKind, TransformMode> = {
   free: {
     kind: "free", meshN: 2, showsRotate: true,
     corner: (mesh, snap, drag, r, c, x, y, _asp) => solveAffineCorner(mesh, snap, drag, r, c, x, y, false),
@@ -290,7 +359,7 @@ const MODES = {
 export const TRANSFORM_MODE_KINDS = ["free", "uniform", "distort"];
 
 // ---- 约束数学（mode-independent）----
-function applyTranslate(mesh, meshSnap, dx, dy) {
+function applyTranslate(mesh: Mesh, meshSnap: Mesh, dx: number, dy: number) {
   for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
     mesh[i][j].x = meshSnap[i][j].x + dx;
     mesh[i][j].y = meshSnap[i][j].y + dy;
@@ -298,7 +367,7 @@ function applyTranslate(mesh, meshSnap, dx, dy) {
 }
 
 // v117: rotate —— 绕 centroid（4 角平均）转 dθ = atan2(finger−c) − atan2(start−c)。
-function applyRotate(mesh, meshSnap, drag, x, y) {
+function applyRotate(mesh: Mesh, meshSnap: Mesh, drag: Drag, x: number, y: number) {
   const m = meshSnap;
   const cx = (m[0][0].x + m[0][1].x + m[1][0].x + m[1][1].x) / 4;
   const cy = (m[0][0].y + m[0][1].y + m[1][0].y + m[1][1].y) / 4;
@@ -314,18 +383,18 @@ function applyRotate(mesh, meshSnap, drag, x, y) {
 }
 
 // ---- distort：4 角 / 边端点自由 ----
-function applyDistortCorner(mesh, meshSnap, drag, row, col, x, y) {
+function applyDistortCorner(mesh: Mesh, meshSnap: Mesh, drag: Drag, row: number, col: number, x: number, y: number) {
   mesh[row][col].x = meshSnap[row][col].x + (x - drag.startX);
   mesh[row][col].y = meshSnap[row][col].y + (y - drag.startY);
 }
-function applyDistortEdge(mesh, meshSnap, drag, edge, x, y) {
+function applyDistortEdge(mesh: Mesh, meshSnap: Mesh, drag: Drag, edge: string, x: number, y: number) {
   const dx = x - drag.startX, dy = y - drag.startY;
-  const idx = {
+  const idx = ({
     top:    [[0, 0], [0, 1]],
     bottom: [[1, 0], [1, 1]],
     left:   [[0, 0], [1, 0]],
     right:  [[0, 1], [1, 1]],
-  }[edge];
+  } as Record<string, number[][]>)[edge];
   for (const [r, c] of idx) {
     mesh[r][c] = { x: meshSnap[r][c].x + dx, y: meshSnap[r][c].y + dy };
   }
@@ -333,11 +402,11 @@ function applyDistortEdge(mesh, meshSnap, drag, edge, x, y) {
 
 // ---- free / uniform：平行四边形约束 ----
 // 角点拖：对角锚定 + ax/ay 各自缩放（保原方向）。uniform=true → 沿对角线等比锁比。
-function solveAffineCorner(mesh, meshSnap, drag, row, col, x, y, uniform) {
+function solveAffineCorner(mesh: Mesh, meshSnap: Mesh, drag: Drag, row: number, col: number, x: number, y: number, uniform: boolean) {
   let targetX = meshSnap[row][col].x + (x - drag.startX);
   let targetY = meshSnap[row][col].y + (y - drag.startY);
   // 4 角约定：TL=[0][0], TR=[0][1], BL=[1][0], BR=[1][1]；对角表
-  const opp = { "0,0": [1, 1], "0,1": [1, 0], "1,0": [0, 1], "1,1": [0, 0] };
+  const opp: Record<string, number[]> = { "0,0": [1, 1], "0,1": [1, 0], "1,0": [0, 1], "1,1": [0, 0] };
   const [or, oc] = opp[`${row},${col}`];
   const anchor = meshSnap[or][oc];                 // 对角锚点（变换中不动）
   const origAx = sub(meshSnap[0][1], meshSnap[0][0]);
@@ -383,7 +452,7 @@ function solveAffineCorner(mesh, meshSnap, drag, row, col, x, y, uniform) {
 }
 
 // 边中点拖（free/uniform）：沿对应轴 1D 缩放，对边锚定。uniform → 两轴一起按锁比缩放、对边中点锚定。
-function solveAffineEdge(mesh, meshSnap, drag, edge, x, y, uniform, uniformAspect) {
+function solveAffineEdge(mesh: Mesh, meshSnap: Mesh, drag: Drag, edge: string, x: number, y: number, uniform: boolean, uniformAspect: number) {
   const m = meshSnap;
   const origAx = sub(m[0][1], m[0][0]);
   const origAy = sub(m[1][0], m[0][0]);
@@ -411,7 +480,7 @@ function solveAffineEdge(mesh, meshSnap, drag, edge, x, y, uniform, uniformAspec
   const blAnchor = m[1][0];
   const newAy = { x: ayU.x * lenAy, y: ayU.y * lenAy };
   const newAx = { x: axU.x * lenAx, y: axU.y * lenAx };
-  let origin;
+  let origin: Point;
   if (uniform) {
     // uniform 拖边：锚 = 对边中点（antipodal），反解 origin。
     const a = (axis === "ay-shrink") ? { p: mid(m[1][0], m[1][1]), ox: newAx.x / 2 + newAy.x, oy: newAx.y / 2 + newAy.y }   // top
@@ -441,7 +510,7 @@ function solveAffineEdge(mesh, meshSnap, drag, edge, x, y, uniform, uniformAspec
 
 // ---- 切入 mode 时的 mesh 投影 ----
 // v118：distort (任意 quad) → free (旋转矩形，shearless)。u=平均水平向量，v=u 转 90°（去 shear）。
-function projectToRectangle(mesh) {
+function projectToRectangle(mesh: Mesh): Mesh {
   const tl = mesh[0][0], tr = mesh[0][1];
   const bl = mesh[1][0], br = mesh[1][1];
   const cx = (tl.x + tr.x + bl.x + br.x) / 4;
@@ -464,7 +533,7 @@ function projectToRectangle(mesh) {
   ];
 }
 // v111: parallelogram → rectangle 锁纵横比（uniform）。v 长度 = u 长度 / aspect（保 v 投影符号）。
-function projectToUniformRect(mesh, aspect) {
+function projectToUniformRect(mesh: Mesh, aspect: number): Mesh {
   const tl = mesh[0][0], tr = mesh[0][1];
   const bl = mesh[1][0], br = mesh[1][1];
   const cx = (tl.x + tr.x + bl.x + br.x) / 4;
@@ -490,9 +559,9 @@ function projectToUniformRect(mesh, aspect) {
 
 // ============ 几何工具 ============
 // 作废所有 source 的 cached render（mesh / mode 变了）。
-function invalidateRender(f) { if (f.sources) for (const s of f.sources) s._renderCache = null; }
+function invalidateRender(f: Floating) { if (f.sources) for (const s of f.sources) s._renderCache = null; }
 // 矩形并集（{x,y,w,h}）。
-function unionRects(rects) {
+function unionRects(rects: Rect[]): Rect {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const r of rects) {
     if (r.x < x0) x0 = r.x;
@@ -503,19 +572,19 @@ function unionRects(rects) {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 // 矩形 {x,y,w,h} → 2×2 mesh（[[TL,TR],[BL,BR]]）。
-function bboxToQuad(b) {
+function bboxToQuad(b: Rect): Mesh {
   return [
     [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }],
     [{ x: b.x, y: b.y + b.h }, { x: b.x + b.w, y: b.y + b.h }],
   ];
 }
-function sub(a, b) { return { x: a.x - b.x, y: a.y - b.y }; }
-function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
-function norm(v) {
+function sub(a: Point, b: Point): Point { return { x: a.x - b.x, y: a.y - b.y }; }
+function mid(a: Point, b: Point): Point { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+function norm(v: Point): Point {
   const len = Math.hypot(v.x, v.y);
   return len > 1e-6 ? { x: v.x / len, y: v.y / len } : { x: 1, y: 0 };
 }
-function pointInPoly(poly, x, y) {
+function pointInPoly(poly: Point[], x: number, y: number) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const xi = poly[i].x, yi = poly[i].y;
@@ -526,7 +595,7 @@ function pointInPoly(poly, x, y) {
   }
   return inside;
 }
-function meshBbox(mesh) {
+function meshBbox(mesh: Mesh): [number, number, number, number] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const row of mesh) for (const p of row) {
     if (p.x < minX) minX = p.x;
@@ -541,7 +610,7 @@ function meshBbox(mesh) {
 // 把 layer ∩ selection mask 烤成一个 source（{layer, canvas, imageData, rect, preSnap, _renderCache}）。
 //   trim 到非透明内容紧 bbox（v217 handles 贴内容）；不足 2×2 → null（v232 误触级别）。
 //   opts.cut !== false → 从源层挖空（destination-out）。返回 source 或 null。
-export function bakeSource(sel, layer, opts = {}) {
+export function bakeSource(sel: Selection, layer: Layer, opts: LiftOpts = {}): Source | null {
   const lbX = layer.bboxX, lbY = layer.bboxY, lbW = layer.bboxW, lbH = layer.bboxH;
   // 选区可能跨 layer.bbox 外；clip 到交集
   const x0 = Math.max(lbX, sel.bboxX);
@@ -555,7 +624,7 @@ export function bakeSource(sel, layer, opts = {}) {
 
   // floating canvas = layer ∩ selection mask（在交集 bbox 内）
   const floating = makeBitmap(w, h);
-  const fctx = floating.getContext("2d");
+  const fctx = floating.getContext("2d")!;
   fctx.drawImage(layer.canvas, x0 - lbX, y0 - lbY, w, h, 0, 0, w, h);
   fctx.globalCompositeOperation = "destination-in";
   fctx.drawImage(sel.maskCanvas, sel.bboxX - x0, sel.bboxY - y0);
@@ -584,7 +653,7 @@ export function bakeSource(sel, layer, opts = {}) {
     tx0 = x0 + mnX; ty0 = y0 + mnY;
     srcW = tw; srcH = th;
     const cropped = makeBitmap(tw, th);
-    const cctx = cropped.getContext("2d");
+    const cctx = cropped.getContext("2d")!;
     cctx.drawImage(floating, mnX, mnY, tw, th, 0, 0, tw, th);
     srcCanvas = cropped;
     srcImageData = cctx.getImageData(0, 0, tw, th);
@@ -604,25 +673,25 @@ export function bakeSource(sel, layer, opts = {}) {
 
 // 一个 source rect 经共享 gizmo（gizmoBbox 初始帧 → 当前 mesh quad 的 homography）映出的 dest quad。
 //   单 source 时 rect === gizmoBbox → destQuad === mesh（逐点等同旧单层），故单层行为不变。
-export function sourceDestQuad(rect, gizmoBbox, mesh) {
+export function sourceDestQuad(rect: Rect, gizmoBbox: Rect, mesh: Mesh): Mesh | null {
   const H = homographyFromUnitSquareToQuad(mesh[0][0], mesh[0][1], mesh[1][1], mesh[1][0]);
   if (!H) return null;
   const gw = gizmoBbox.w || 1, gh = gizmoBbox.h || 1;
-  const map = (x, y) => homographySample(H, (x - gizmoBbox.x) / gw, (y - gizmoBbox.y) / gh);
+  const map = (x: number, y: number) => homographySample(H, (x - gizmoBbox.x) / gw, (y - gizmoBbox.y) / gh);
   return [
     [map(rect.x, rect.y), map(rect.x + rect.w, rect.y)],
     [map(rect.x, rect.y + rect.h), map(rect.x + rect.w, rect.y + rect.h)],
   ];
 }
 // 把一个 source 按共享 gizmo 渲染成 {canvas,dstX,dstY}。
-export function renderSource(source, gizmoBbox, mesh, sampleMode = "bilinear") {
+export function renderSource(source: Source, gizmoBbox: Rect, mesh: Mesh, sampleMode: SampleMode = "bilinear"): RenderResult | null {
   const destQuad = sourceDestQuad(source.rect, gizmoBbox, mesh);
   if (!destQuad) return null;
   return renderQuadPerPixel(source.imageData, source.rect.w, source.rect.h, destQuad, sampleMode);
 }
 
 // 单位方格 → quad 的前向求值（renderSource 把 source 角投到 dest 用）。
-function homographySample(H, u, v) {
+function homographySample(H: Homography, u: number, v: number): Point {
   const w = H.g * u + H.h * v + 1;
   return { x: (H.a * u + H.b * v + H.c) / w, y: (H.d * u + H.e * v + H.f) / w };
 }
@@ -630,7 +699,7 @@ function homographySample(H, u, v) {
 // ============ Per-pixel inverse-homography render (free / uniform / distort) ============
 // 2×2 mesh：每个 dst pixel 通过 inverse homography 算回 src 单位方格 (u,v) → 采样源像素。
 // 零 PS1 artifact，零 C0 折角（quad 内是 1 个连续映射）。返回 { canvas, dstX, dstY }（doc 坐标左上角）。
-export function renderQuadPerPixel(srcImageData, srcW, srcH, mesh, sampleMode = "bilinear") {
+export function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number, mesh: Mesh, sampleMode: SampleMode = "bilinear"): RenderResult | null {
   const tl = mesh[0][0], tr = mesh[0][1], bl = mesh[1][0], br = mesh[1][1];
   const minX = Math.floor(Math.min(tl.x, tr.x, bl.x, br.x));
   const minY = Math.floor(Math.min(tl.y, tr.y, bl.y, br.y));
@@ -671,14 +740,14 @@ export function renderQuadPerPixel(srcImageData, srcW, srcH, mesh, sampleMode = 
   }
 
   const canvas = makeBitmap(dstW, dstH);
-  const c = canvas.getContext("2d");
+  const c = canvas.getContext("2d")!;
   c.putImageData(out, 0, 0);
   return { canvas, dstX: minX, dstY: minY };
 }
 
 // 单位方格 (0,0)-(1,1) → 一般四边形 (TL,TR,BR,BL) 的 homography（Heckbert 1989 闭式解）。
 //   x = (a·u + b·v + c) / (g·u + h·v + 1)；平行四边形时 g=h=0 退化为 affine。
-function homographyFromUnitSquareToQuad(tl, tr, br, bl) {
+function homographyFromUnitSquareToQuad(tl: Point, tr: Point, br: Point, bl: Point): Homography | null {
   const dx1 = tr.x - br.x, dy1 = tr.y - br.y;
   const dx2 = bl.x - br.x, dy2 = bl.y - br.y;
   const sx = tl.x - tr.x + br.x - bl.x;
@@ -699,7 +768,7 @@ function homographyFromUnitSquareToQuad(tl, tr, br, bl) {
 }
 
 // 最近邻 sample：pixel art / 硬边
-function nearestSample(sdat, w, h, sx, sy, ddat, dstIdx) {
+function nearestSample(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, dstIdx: number) {
   const ix = Math.floor(sx), iy = Math.floor(sy);
   if (ix < 0 || ix >= w || iy < 0 || iy >= h) return;
   const p = (iy * w + ix) * 4;
@@ -709,9 +778,9 @@ function nearestSample(sdat, w, h, sx, sy, ddat, dstIdx) {
   ddat[dstIdx + 3] = sdat[p + 3];
 }
 // Catmull-Rom bicubic（B=0, C=0.5）。4×4 taps。premultiplied alpha 防选区边缘黑边。
-function bicubicSample(sdat, w, h, sx, sy, ddat, dstIdx) {
+function bicubicSample(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, dstIdx: number) {
   const ix = Math.floor(sx), iy = Math.floor(sy);
-  const k = (t) => {
+  const k = (t: number) => {
     const a = -0.5;
     const at = Math.abs(t);
     if (at < 1) return (a + 2) * at * at * at - (a + 3) * at * at + 1;
@@ -744,7 +813,7 @@ function bicubicSample(sdat, w, h, sx, sy, ddat, dstIdx) {
 }
 // bilinear sample。v124：clamp x0/x1/y0/y1（replicate edge）防边缘黑边 + 半透。
 // v216：premultiplied alpha 插值，透明邻居对 RGB 贡献为 0（防 PNG 暗边）。
-function bilinearSample(sdat, w, h, sx, sy, ddat, dstIdx) {
+function bilinearSample(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, dstIdx: number) {
   const ix = Math.floor(sx);
   const iy = Math.floor(sy);
   const fx = sx - ix;
@@ -774,7 +843,7 @@ function bilinearSample(sdat, w, h, sx, sy, ddat, dstIdx) {
 }
 
 // 3×3 matrix invert（normalize so [8] = 1）
-function invertMat3(m) {
+function invertMat3(m: number[]): number[] | null {
   const [a, b, c, d, e, f, g, h, i] = m;
   const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
   if (Math.abs(det) < 1e-9) return null;

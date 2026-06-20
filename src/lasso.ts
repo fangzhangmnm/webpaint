@@ -27,11 +27,47 @@
 // 选区值 + mask 操作（compose/invert/outline/applyMaskPostStroke/fill/clear/crop）已搬到
 // selection.js 的 Selection 类。lasso 只负责手势光栅化（产 Selection）+ 自由变换 gizmo。
 
-import { Selection } from "./selection.js";
-import { makeBitmap } from "./bitmap.js";
-import { FloatingTransform } from "./floating-transform.js";
+import { Selection } from "./selection.ts";
+import { makeBitmap } from "./bitmap.ts";
+import { FloatingTransform } from "./floating-transform.ts";
+import type { Layer, LayerGroup } from "./doc.ts";
+
+// ---- 本文件用到的最小局部类型（selection/doc/layer 的真类型在各自模块；此处只描述本类消费面）----
+interface Point { x: number; y: number; }
+interface DraftRect { x0: number; y0: number; x1: number; y1: number; }
+// Selection 实例的消费面（bbox + maskCanvas；真类型在 selection.ts）
+type SelectionLike = Selection;
+// doc 的消费面：选区是 doc 的一等公民
+interface LassoDoc {
+  width: number;
+  height: number;
+  selection: SelectionLike | null;
+}
+type LassoNode = Layer | LayerGroup;
+type LiftOpts = { cut?: boolean; fallbackFullLayer?: boolean };
+type LassoState =
+  | "idle"
+  | "drawing-freehand"
+  | "drawing-rect"
+  | "drawing-ellipse"
+  | "magic-tentative"
+  | "floating";
+type SubTool = "freehand" | "rect" | "ellipse" | "magic";
+type SetOpMode = "new" | "union" | "subtract" | "intersect";
 
 export class LassoEngine {
+  _state: LassoState;
+  _subTool: SubTool;
+  _setOpMode: SetOpMode;
+  _constrainSquare: boolean;
+  _magicThreshold: number;
+  _points: Point[];
+  _rect: DraftRect | null;
+  _magicStart: Point | null;
+  _ft: FloatingTransform;
+  doc: LassoDoc | null;
+  onChange: () => void;
+
   constructor() {
     this._state = "idle";         // idle | drawing-freehand | drawing-rect | drawing-ellipse | floating
     this._subTool = "freehand";   // freehand | rect | ellipse | magic
@@ -49,8 +85,8 @@ export class LassoEngine {
     this.doc = null;              // 由 input.js 注入；选区是 doc 的一等公民
     this.onChange = () => {};
   }
-  setDoc(doc) { this.doc = doc; }
-  setSubTool(name) {
+  setDoc(doc: LassoDoc | null) { this.doc = doc; }
+  setSubTool(name: SubTool) {
     if (this._subTool === name) return;
     this._subTool = name;
     this._points = []; this._rect = null; this._magicStart = null;
@@ -58,17 +94,17 @@ export class LassoEngine {
     this.onChange();
   }
   getSubTool() { return this._subTool; }
-  setSetOpMode(mode) { this._setOpMode = mode; this.onChange(); }
+  setSetOpMode(mode: SetOpMode) { this._setOpMode = mode; this.onChange(); }
   getSetOpMode() { return this._setOpMode; }
-  setMagicThreshold(v) { this._magicThreshold = Math.max(0, Math.min(100, v)); }
+  setMagicThreshold(v: number) { this._magicThreshold = Math.max(0, Math.min(100, v)); }
   getMagicThreshold() { return this._magicThreshold; }
-  setSampleMode(m) { this._ft.setSampleMode(m); }
+  setSampleMode(m: string) { this._ft.setSampleMode(m); }
   getSampleMode() { return this._ft.getSampleMode(); }
-  setConstrainSquare(on) { this._constrainSquare = !!on; this.onChange(); }
+  setConstrainSquare(on: unknown) { this._constrainSquare = !!on; this.onChange(); }
   getConstrainSquare() { return this._constrainSquare; }
 
   // -------- 选区路径（按 subTool 路由）--------
-  beginPath(x, y) {
+  beginPath(x: number, y: number) {
     if (this._ft.isActive()) return;   // transform 期间不能再画
     if (this._subTool === "freehand") {
       this._state = "drawing-freehand";
@@ -86,7 +122,7 @@ export class LassoEngine {
     }
     this.onChange();
   }
-  extendPath(x, y) {
+  extendPath(x: number, y: number) {
     if (this._state === "drawing-freehand") {
       const p = this._points[this._points.length - 1];
       if (p && Math.abs(p.x - x) < 1 && Math.abs(p.y - y) < 1) return;
@@ -96,13 +132,13 @@ export class LassoEngine {
       let nx = x, ny = y;
       // 正方 / 圆 约束：让 (x1-x0) 和 (y1-y0) 绝对值相等（取较大者）
       if (this._constrainSquare) {
-        const dx = x - this._rect.x0, dy = y - this._rect.y0;
+        const dx = x - this._rect!.x0, dy = y - this._rect!.y0;
         const m = Math.max(Math.abs(dx), Math.abs(dy));
-        nx = this._rect.x0 + (dx >= 0 ? m : -m);
-        ny = this._rect.y0 + (dy >= 0 ? m : -m);
+        nx = this._rect!.x0 + (dx >= 0 ? m : -m);
+        ny = this._rect!.y0 + (dy >= 0 ? m : -m);
       }
-      this._rect.x1 = nx;
-      this._rect.y1 = ny;
+      this._rect!.x1 = nx;
+      this._rect!.y1 = ny;
       this.onChange();
     }
   }
@@ -110,7 +146,7 @@ export class LassoEngine {
   // 返回 history entry（caller push）或 null（选区无效 / 没动）
   // v125 (user：「lasso 全在外面时行为奇怪，应该自动清掉在外面，然后判断没选中任何」)
   //   rasterize 出 newSel 后先 clip 到 doc 边界。完全在外 → 返 null
-  endPath(sourceLayer) {
+  endPath(sourceLayer: Layer | null) {
     let newSel = null;
     if (this._state === "drawing-freehand") {
       newSel = this._rasterizeFreehandToSelection(this._points);
@@ -131,7 +167,7 @@ export class LassoEngine {
     return this._applySelectionUpdate(newSel);
   }
   // v125: 把 selection bbox 与 doc 矩形相交。完全在外 → null
-  _clipSelectionToDoc(sel) {
+  _clipSelectionToDoc(sel: SelectionLike | null): SelectionLike | null {
     if (!sel || !this.doc) return sel;
     const docW = this.doc.width, docH = this.doc.height;
     const x0 = Math.max(0, sel.bboxX);
@@ -142,12 +178,12 @@ export class LassoEngine {
     if (w <= 0 || h <= 0) return null;
     if (x0 === sel.bboxX && y0 === sel.bboxY && w === sel.bboxW && h === sel.bboxH) return sel;
     const c = makeBitmap(w, h);
-    const cctx = c.getContext("2d");
+    const cctx = c.getContext("2d")!;
     cctx.drawImage(sel.maskCanvas, sel.bboxX - x0, sel.bboxY - y0);
     return new Selection(x0, y0, w, h, c);
   }
   // 编程入口（取消选区 / 反选 / 由 history undo 调用恢复）
-  setSelection(sel) {
+  setSelection(sel: SelectionLike | null) {
     if (!this.doc) return null;
     const oldSel = this.doc.selection;
     if (oldSel === sel) return null;
@@ -168,14 +204,14 @@ export class LassoEngine {
   // 默认进入 free 模式（不再走 v56 那种"selected sub-state"）
   // opts.cut: true(默认) = 挖空源层（Ctrl+T 变换）；false = 不挖洞，源层保留（Ctrl+D 复制为浮层）
   // opts.fallbackFullLayer: 没选区时用整层做隐式全选（v218；selection 局部构造，不写 doc.selection）
-  liftSelectionForTransform(layer, opts = {}) {
-    const ok = this._ft.lift(this.doc?.selection, layer, opts);
+  liftSelectionForTransform(layer: LassoNode | null, opts: LiftOpts = {}) {
+    const ok = this._ft.lift(this.doc?.selection as Selection | null, layer, opts);
     if (ok) this._state = "floating";
     return ok;
   }
 
   // ---- rasterize helpers（返回 selection-shaped object 或 null）----
-  _rasterizeFreehandToSelection(pts) {
+  _rasterizeFreehandToSelection(pts: Point[]): SelectionLike | null {
     if (pts.length < 3) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of pts) {
@@ -189,7 +225,7 @@ export class LassoEngine {
     const w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) return null;
     const maskCanvas = makeBitmap(w, h);
-    const mctx = maskCanvas.getContext("2d");
+    const mctx = maskCanvas.getContext("2d")!;
     mctx.fillStyle = "#fff";
     mctx.beginPath();
     for (let i = 0; i < pts.length; i++) {
@@ -201,7 +237,7 @@ export class LassoEngine {
     mctx.fill("evenodd");
     return new Selection(x0, y0, w, h, maskCanvas);
   }
-  _rasterizeRectToSelection(r) {
+  _rasterizeRectToSelection(r: DraftRect | null): SelectionLike | null {
     if (!r) return null;
     const x0 = Math.floor(Math.min(r.x0, r.x1));
     const y0 = Math.floor(Math.min(r.y0, r.y1));
@@ -210,12 +246,12 @@ export class LassoEngine {
     const w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) return null;
     const maskCanvas = makeBitmap(w, h);
-    const mctx = maskCanvas.getContext("2d");
+    const mctx = maskCanvas.getContext("2d")!;
     mctx.fillStyle = "#fff";
     mctx.fillRect(0, 0, w, h);
     return new Selection(x0, y0, w, h, maskCanvas);
   }
-  _rasterizeEllipseToSelection(r) {
+  _rasterizeEllipseToSelection(r: DraftRect | null): SelectionLike | null {
     if (!r) return null;
     const x0 = Math.floor(Math.min(r.x0, r.x1));
     const y0 = Math.floor(Math.min(r.y0, r.y1));
@@ -224,7 +260,7 @@ export class LassoEngine {
     const w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) return null;
     const maskCanvas = makeBitmap(w, h);
-    const mctx = maskCanvas.getContext("2d");
+    const mctx = maskCanvas.getContext("2d")!;
     mctx.fillStyle = "#fff";
     mctx.beginPath();
     mctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
@@ -241,7 +277,7 @@ export class LassoEngine {
   //
   // 内存（2048² doc）：layerData 16MB + visited buffer 4MB + maskCanvas
   // 仅 bbox 大小。barrier 不再单独 alloc（diff 算在 flood fill 里 inline）。
-  _magicWandToSelection(start, sourceLayer) {
+  _magicWandToSelection(start: Point | null, sourceLayer: Layer | null): SelectionLike | null {
     if (!start || !this.doc) return null;
     const docW = this.doc.width, docH = this.doc.height;
     const sx = Math.floor(start.x);
@@ -252,7 +288,7 @@ export class LassoEngine {
     const lbY = sourceLayer?.bboxY ?? 0;
     const lbW = sourceLayer?.bboxW ?? 0;
     const lbH = sourceLayer?.bboxH ?? 0;
-    let layerData = null;
+    let layerData: Uint8ClampedArray | null = null;
     if (sourceLayer && lbW > 0 && lbH > 0) {
       layerData = sourceLayer.ctx.getImageData(0, 0, lbW, lbH).data;
     }
@@ -268,7 +304,7 @@ export class LassoEngine {
     // 「layer 外」的 barrier 算一次：透明 (0,0,0,0) 跟 tap 色的 max-diff
     const outsideIsBarrier = Math.max(sr, sg, sb, sa) > tCh;
     // inline barrier 检查：返回 true = 是 barrier = flood 不能进
-    const isBarrier = (p) => {
+    const isBarrier = (p: number) => {
       const py = (p / docW) | 0;
       const px = p - py * docW;
       if (!layerData || px < lbX || px >= lbX + lbW || py < lbY || py >= lbY + lbH) {
@@ -291,7 +327,7 @@ export class LassoEngine {
     const stack = [startIdx];
     let mnx = docW, mny = docH, mxx = -1, mxy = -1;
     while (stack.length) {
-      const p = stack.pop();
+      const p = stack.pop()!;
       if (combined[p] !== 0) continue;
       if (isBarrier(p)) { combined[p] = 2; continue; }
       combined[p] = 1;
@@ -310,7 +346,7 @@ export class LassoEngine {
     //   白边修法 = 对选区跑「扩张」编辑 op（Selection.morphed），用户自己把控量。
     const tw = mxx - mnx + 1, th = mxy - mny + 1;
     const maskCanvas = makeBitmap(tw, th);
-    const mctx = maskCanvas.getContext("2d");
+    const mctx = maskCanvas.getContext("2d")!;
     const out = mctx.createImageData(tw, th);
     const odata = out.data;
     for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
@@ -323,7 +359,7 @@ export class LassoEngine {
     return new Selection(mnx, mny, tw, th, maskCanvas);
   }
   // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
-  _applySelectionUpdate(newSel) {
+  _applySelectionUpdate(newSel: SelectionLike) {
     if (!this.doc) return null;
     const oldSel = this.doc.selection;
     const merged = Selection.compose(oldSel, newSel, this._setOpMode);
@@ -336,11 +372,11 @@ export class LassoEngine {
   // -------- 模式切换 --------
   // ---- 自由变换：全委托 FloatingTransform 深模块（floating-transform.js / CONTEXT「浮层变换」）。
   //      本类只在 lift/commit/cancel 维护 lasso 状态机 _state；其余纯转发。----
-  setMode(mode) { this._ft.setMode(mode); }
+  setMode(mode: Parameters<FloatingTransform["setMode"]>[0]) { this._ft.setMode(mode); }
   getMode() { return this._ft.getMode(); }
-  hitTest(x, y, screenScale = 1) { return this._ft.hitTest(x, y, screenScale); }
-  beginDrag(hit, x, y) { this._ft.beginDrag(hit, x, y); }
-  extendDrag(x, y) { this._ft.extendDrag(x, y); }
+  hitTest(x: number, y: number, screenScale = 1) { return this._ft.hitTest(x, y, screenScale); }
+  beginDrag(hit: Parameters<FloatingTransform["beginDrag"]>[0], x: number, y: number) { this._ft.beginDrag(hit, x, y); }
+  extendDrag(x: number, y: number) { this._ft.extendDrag(x, y); }
   endDrag() { this._ft.endDrag(); }
   stamp() { return this._ft.stamp(); }
   commit() {

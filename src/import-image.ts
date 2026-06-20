@@ -10,7 +10,7 @@
 
 import { els } from "./els.ts";
 import { session } from "./session-state.ts";
-import { decodeImageFile, smartResample } from "./resample.js";
+import { decodeImageFile, smartResample } from "./resample.ts";
 import { decodeOraToDoc } from "./ora.ts";
 import { store as _store } from "./app-store.js";
 import { stripSessionExt } from "./config.js";
@@ -80,7 +80,7 @@ export async function importImageAsNewDoc(file: File) {
     // 超 8192 缩小走 step-halving 抗锯齿；否则原样画
     const src = (w < bitmap.width || h < bitmap.height) ? smartResample(bitmap, w, h) : bitmap;
     lctx.drawImage(src, 0, 0, w, h);
-    bitmap.close?.();
+    (bitmap as ImageBitmap).close?.();
   } });
   setStatus(`新建（照片）：${name}（${w}×${h}）`);
 }
@@ -161,14 +161,14 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   let w = ow, h = oh; let imgSmoothing: ImageSmoothingQuality = "high";
   if (ow > docW || oh > docH) {
     const choice = await _openBigImportSheet(ow, oh, docW, docH);
-    if (!choice) { bitmap.close?.(); return; }   // user 取消
+    if (!choice) { (bitmap as ImageBitmap).close?.(); return; }   // user 取消
     w = choice.w; h = choice.h;
     imgSmoothing = choice.mode === "nearest" ? "low" : "high";
   }
   // 新建空层
   const layer = doc.addLayer(file.name.replace(/\.[^.]+$/, ""));
   if (!layer) {
-    bitmap.close?.();
+    (bitmap as ImageBitmap).close?.();
     setStatus(`图层已达上限 (${doc.maxLayers})，无法导入`);
     return;
   }
@@ -190,7 +190,7 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   // 缩小且非 nearest（像素画保持硬边）→ step-halving 抗锯齿；否则原样画
   const lsrc = (imgSmoothing !== "low" && (w < ow || h < oh)) ? smartResample(bitmap, w, h) : bitmap;
   lctx.drawImage(lsrc, 0, 0, w, h);
-  bitmap.close?.();
+  (bitmap as ImageBitmap).close?.();
   renderLayersPanel();
   board.invalidateAll();
   board.requestRender();

@@ -90,7 +90,7 @@ useStub();
 // doc.js makeBitmap 在无 OffscreenCanvas 时走 document.createElement；这里 OffscreenCanvas 已设，足够。
 
 const { PaintDoc, Layer } = await import("../src/doc.ts");
-const { Selection } = await import("../src/selection.js");
+const { Selection } = await import("../src/selection.ts");
 globalThis.OffscreenCanvas = _prevOSC;
 
 // 直接验证 bbox 旋转公式（纯数字，不碰像素）

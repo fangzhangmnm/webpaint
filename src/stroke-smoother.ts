@@ -20,9 +20,34 @@
 const FALLBACK_DT = 16;   // 无时间戳（形状工具合成笔触）兜底 dt(ms)
 const FLUSH_DT = 6;       // tail flush 每 tick dt(ms)（只决定弧采样密度，不决定弧形）
 
+interface StrokeSmootherOpts {
+  tau?: number;       // 时间常数(ms,0=不平滑)
+  deadzone?: number;  // 死区半径(doc px)
+  tailBow?: number;   // 弧动量增益(1=自然,>1 更鼓,0=直)
+}
+
 export class StrokeSmoother {
+  tau: number;
+  r: number;
+  bow: number;
+  cx: number[];
+  cy: number[];
+  cp: number[];
+  _committed: number;
+  _tailLen: number;
+  seq: number;
+  _ox: number;
+  _oy: number;
+  _vx: number;
+  _vy: number;
+  _sx: number;
+  _sy: number;
+  _lastT: number | null;
+  _lastP: number;
+  _started: boolean;
+
   // opts: { tau:时间常数(ms,0=不平滑), deadzone:死区半径(doc px), tailBow:弧动量增益(1=自然,>1 更鼓,0=直) }
-  constructor(opts = {}) {
+  constructor(opts: StrokeSmootherOpts = {}) {
     this.tau = Math.max(0, opts.tau || 0);
     this.r = Math.max(0, opts.deadzone || 0);
     this.bow = opts.tailBow == null ? 1 : Math.max(0, opts.tailBow);
@@ -37,7 +62,7 @@ export class StrokeSmoother {
 
   get count() { return this.cx.length; }
 
-  push(x, y, p, t) {
+  push(x: number, y: number, p: number, t: number | null | undefined) {
     this.seq++;
     if (!this._started) {
       this._started = true;
@@ -71,7 +96,7 @@ export class StrokeSmoother {
   }
 
   // 非破坏地从 (pos, vel·bow) 继续 SmoothDamp 飞向 pen，收集弧点，末点钉 pen。返回点数。
-  _buildTail(tp) {
+  _buildTail(tp: number): number {
     if (this.tau <= 0) return 0;
     let px = this._ox, py = this._oy, vx = this._vx * this.bow, vy = this._vy * this.bow;
     const sx = this._sx, sy = this._sy;
@@ -100,7 +125,7 @@ export class StrokeSmoother {
 }
 
 // 时间制 SmoothDamp（临界阻尼，Game Programming Gems 4 有理近似）。smoothTime 与 dt 同量纲(ms)。
-function smoothDamp(px, py, vx, vy, tx, ty, smoothTime, dt) {
+function smoothDamp(px: number, py: number, vx: number, vy: number, tx: number, ty: number, smoothTime: number, dt: number): [number, number, number, number] {
   const omega = 2 / smoothTime, x = omega * dt;
   const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
   const cdx = px - tx, cdy = py - ty;

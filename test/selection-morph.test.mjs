@@ -40,7 +40,7 @@ class StubCanvas {
 }
 globalThis.OffscreenCanvas = StubCanvas;
 
-const { Selection } = await import("../src/selection.js");
+const { Selection } = await import("../src/selection.ts");
 
 // mask 局部 (lx,ly) 的 alpha
 function maskA(sel, lx, ly) {

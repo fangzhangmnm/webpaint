@@ -39,7 +39,82 @@
 //     - overlay = frozen ⊕ tail（wash:max / buildup:over），opacity 只在 composite 时乘一次
 //   smudge / pixel 仍走 immediate 路径（直接进 layer，无法重画）。
 
-import { StrokeSmoother } from "./stroke-smoother.js";
+import { StrokeSmoother } from "./stroke-smoother.ts";
+import type { Layer } from "./doc.ts";
+import type { ResolvedBrush } from "./resolved-brush.ts";
+
+// 2D context（cache canvas / layer ctx 都可能是 OffscreenCanvas 或 <canvas>）
+type Ctx2D = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+type AnyCanvas = OffscreenCanvas | HTMLCanvasElement;
+
+interface RgbColor { r: number; g: number; b: number; }
+interface RgbaColor { r: number; g: number; b: number; a: number; }
+
+// Build-Up colored stamp cache（按 baseSize 烤一次，drawImage 缩到目标 size）
+interface StampCache {
+  key: string;
+  canvas: HTMLCanvasElement;
+  baseSize: number;
+  radius: number;
+}
+
+interface StampParams { size: number; stampAlpha: number; }
+
+// frozen/tail 沿平滑中心线撒点的游标
+interface Walk {
+  ci: number;
+  started: boolean;
+  accumDist: number;
+  lastP: number;
+  strokeDist: number;
+}
+
+type Rect = [number, number, number, number];
+
+// 进行中描边的全部可变态（begin 建、extend/end 改、end 清）
+interface StrokeState {
+  layer: Layer;
+  settings: ResolvedBrush;
+  mode: string;
+  buffered: boolean;
+  lastX: number;
+  lastY: number;
+  lastP: number;
+  pLPF: number;
+  lastEventTime: number;
+  accumDist: number;
+  strokeDist: number;
+  dirty: Rect | null;
+  isBuildup: boolean;
+  bufferCanvas: HTMLCanvasElement | null;
+  bufferCtx: Ctx2D | null;
+  bufferData: Uint8ClampedArray | null;
+  bufBboxX: number;
+  bufBboxY: number;
+  bufBboxW: number;
+  bufBboxH: number;
+  overlayCanvas: HTMLCanvasElement | null;
+  overlayCtx: Ctx2D | null;
+  _composeAtSeq: number;
+  _taperTotal: number | null;
+  sm: StrokeSmoother | null;
+  frozenWalk: Walk;
+  tailCanvas: HTMLCanvasElement | null;
+  tailCtx: Ctx2D | null;
+  tailData: Uint8ClampedArray | null;
+  tailCapW: number;
+  tailCapH: number;
+  tailX: number;
+  tailY: number;
+  tailW: number;
+  tailH: number;
+  prevTailX: number;
+  prevTailY: number;
+  prevTailW: number;
+  prevTailH: number;
+  frozenDirty: Rect | null;
+  loaded?: RgbaColor | null;
+}
 
 // 引擎默认参数袋 = ResolvedBrush 的 base（resolved-brush.js import 之）。
 // 当前笔（state.brush 旧单例）已收敛成不可变 ResolvedBrush（见 docs/CONTEXT [[当前笔]]）；
@@ -90,21 +165,24 @@ export const DEFAULT_SETTINGS = {
 };
 
 export class BrushSettings {
-  constructor(overrides) { Object.assign(this, DEFAULT_SETTINGS, overrides || {}); }
-  clone(over) { return new BrushSettings({ ...this, ...over }); }
+  [k: string]: unknown;
+  constructor(overrides?: Record<string, unknown> | null) { Object.assign(this, DEFAULT_SETTINGS, overrides || {}); }
+  clone(over?: Record<string, unknown>) { return new BrushSettings({ ...this, ...over }); }
 }
 
 // signed_lerp：coeff ∈ [−1, 1]，p ∈ [0, 1]，返回 ∈ [amp, 1] where amp = 1 − |coeff|。
 //   coeff ≥ 0：amp + (1 − amp) × p  →  p=0 → amp，p=1 → 1
 //   coeff < 0：1 + (amp − 1) × p    →  p=0 → 1，  p=1 → amp
 //   coeff = 0：永远 1（不响应压感）
-function signedLerp(coeff, p) {
+function signedLerp(coeff: number, p: number) {
   const amp = 1 - Math.abs(coeff);
   return coeff >= 0 ? amp + (1 - amp) * p
                     : 1 + (amp - 1) * p;
 }
 
 export class BrushEngine {
+  _stampCache: StampCache | null;
+  _stroke: StrokeState | null;
   constructor() {
     this._stampCache = null;       // {key, canvas, baseSize, radius} —— Build-Up colored stamp cache
     this._stroke = null;
@@ -114,7 +192,7 @@ export class BrushEngine {
   // PERF：cache key 不含 size —— stamp 按 baseSize 烤一次，每颗 drawImage 缩到目标 size。
   // v107: 撤 createRadialGradient（linear interp，dα/dr 在 boundary 非 0 → C0 不连续），
   // 改 putImageData 用 JS per-pixel 真值 smoothstep 烤。bake 一次的开销换 stamp 完全无 banding。
-  _getStamp(size, hardness, color, mode) {
+  _getStamp(size: number, hardness: number, color: string, mode: string): StampCache {
     const useColor = mode === "erase" ? "#000" : color;
     const key = `${useColor}|${hardness.toFixed(3)}|${mode}`;
     if (this._stampCache && this._stampCache.key === key && this._stampCache.baseSize >= size) {
@@ -125,7 +203,7 @@ export class BrushEngine {
     const r = d / 2;                          // stamp 中心 = canvas 半宽
     const stamp = document.createElement("canvas");
     stamp.width = d; stamp.height = d;
-    const sctx = stamp.getContext("2d");
+    const sctx = stamp.getContext("2d")!;
     const hd = Math.max(0, Math.min(0.999, hardness));
     const innerR = hd * r;                    // 硬芯半径（α=1 内）
     const decayLen = r - innerR;              // 衰减区长度（α 从 1 → 0）
@@ -161,11 +239,13 @@ export class BrushEngine {
 
   invalidateStamp() { this._stampCache = null; }
 
-  setColor(color) {
+  setColor(color: string) {
     // 注：当前笔已是不可变 ResolvedBrush（settings 被 freeze）；描边中改色不是现行路径
     //   （全仓无调用，颜色随 ResolvedBrush 整体替换）。留此守卫=防 frozen 写崩，非功能路径。
     if (this._stroke && !Object.isFrozen(this._stroke.settings)) {
-      this._stroke.settings.color = color;
+      // settings 类型上是 Readonly（ResolvedBrush）；此守卫分支仅在未 frozen 时运行（非现行路径）。
+      // cast 掉 readonly 以保留原运行时写入，不改行为。
+      (this._stroke.settings as { color: string }).color = color;
       // 颜色变 → frozen + tail 都要重画：作废 overlay 强制全幅重建
       this._stroke.overlayCanvas = null;
       this._stroke._composeAtSeq = -1;
@@ -174,7 +254,7 @@ export class BrushEngine {
   }
 
   // step = size_eff × spacing；低压感 size 小 → step 小，不会出豆豆链
-  _stepFor(s, pressure) {
+  _stepFor(s: ResolvedBrush, pressure: number) {
     const p = Math.max(0, Math.min(1, pressure));
     const pCurve = Math.pow(p, Math.max(0.01, s.pressureGamma || 1.0));
     const sizeMul = signedLerp(s.sizeCoeff || 0, pCurve);
@@ -184,8 +264,8 @@ export class BrushEngine {
 
   // smooth: { tau(ms), deadzone(doc px) }。t = 起手事件时间戳(ms)。详 docs/brush-procreate-smoothing.md。
   //   tau=0 & deadzone=0 → 不平滑（直通 raw）。
-  beginStroke(layer, settings, x, y, pressure, mode = "brush", smooth = {}, t = null) {
-    let loaded = null;
+  beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, pressure: number, mode: string = "brush", smooth: { tau?: number; deadzone?: number; tailBow?: number } = {}, t: number | null = null) {
+    let loaded: RgbaColor | null = null;
     if (mode === "smudge") loaded = this._sampleLayerColor(layer, x, y);
     const isBuildup = (settings.compositeMode || "wash") === "buildup";
     // buffered = 走 frozen/tail 平滑（进 buffer）；smudge / pixel = immediate（直接进 layer）
@@ -222,16 +302,16 @@ export class BrushEngine {
       frozenDirty: null,                       // 自上次 compose 起冻结新烤的区域（overlay 刷新用）
     };
     if (buffered) {
-      this._stroke.sm.push(x, y, pressure, t);   // 第一颗由 tail / endStroke 渲染，begin 不烤
+      this._stroke.sm!.push(x, y, pressure, t);   // 第一颗由 tail / endStroke 渲染，begin 不烤
     } else {
       this._stampOne(x, y, pressure);
     }
   }
 
-  _ensureBufferBbox(x0, y0, x1, y1) {
-    const st = this._stroke;
+  _ensureBufferBbox(x0: number, y0: number, x1: number, y1: number) {
+    const st = this._stroke!;
     const m = 32;
-    let nx, ny, nx1, ny1;
+    let nx: number, ny: number, nx1: number, ny1: number;
     if (st.bufBboxW === 0) {
       nx = Math.floor(x0 - m);
       ny = Math.floor(y0 - m);
@@ -258,7 +338,7 @@ export class BrushEngine {
       const newCanvas = document.createElement("canvas");
       newCanvas.width = nw;
       newCanvas.height = nh;
-      const newCtx = newCanvas.getContext("2d");
+      const newCtx = newCanvas.getContext("2d")!;
       if (st.bufferCanvas && st.bufBboxW > 0 && st.bufBboxH > 0) {
         newCtx.drawImage(st.bufferCanvas, st.bufBboxX - nx, st.bufBboxY - ny);
       }
@@ -290,8 +370,8 @@ export class BrushEngine {
   }
 
   // 压感时间域 LPF（v102）：一阶 IIR，α = dt/(dt+τ)；τ=0 → 直传 raw
-  _pressureLPF(pressure) {
-    const st = this._stroke;
+  _pressureLPF(pressure: number) {
+    const st = this._stroke!;
     const tau = st.settings.pressureLPF || 0;
     const now = performance.now();
     const dt = Math.max(1, now - st.lastEventTime);
@@ -301,7 +381,7 @@ export class BrushEngine {
     return st.pLPF;
   }
 
-  extendStroke(x, y, pressure, t = null) {
+  extendStroke(x: number, y: number, pressure: number, t: number | null = null) {
     const st = this._stroke;
     if (!st) return;
     // NaN/inf 护栏：甩太快 / 坏事件可能传入非有限坐标 → 跳过
@@ -312,8 +392,8 @@ export class BrushEngine {
   }
 
   // smudge / pixel：raw 点直接沿段等距撒进 layer（无 frozen/tail，无法重画）
-  _extendImmediate(x, y, pEff) {
-    const st = this._stroke;
+  _extendImmediate(x: number, y: number, pEff: number) {
+    const st = this._stroke!;
     const dx = x - st.lastX, dy = y - st.lastY;
     const L = Math.hypot(dx, dy);
     if (L === 0) return;
@@ -339,19 +419,19 @@ export class BrushEngine {
 
   // brush / erase：raw 进 smoother，把新冻结的中心线段烤进 frozen buffer。
   // tail 不在这里画（每帧 getLiveOverlay 时画）。
-  _extendBuffered(x, y, pEff, t = null) {
-    const st = this._stroke;
-    st.sm.push(x, y, pEff, t);
-    st.sm.update();
-    const fi = st.sm.frozenIndex();
+  _extendBuffered(x: number, y: number, pEff: number, t: number | null = null) {
+    const st = this._stroke!;
+    st.sm!.push(x, y, pEff, t);
+    st.sm!.update();
+    const fi = st.sm!.frozenIndex();
     if (fi >= 0) this._walkStamps(st.frozenWalk, fi, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));
   }
 
   // 沿平滑中心线 C 从 walk 游标走到 endIdx 顶点，等距撒点，每颗调 emit(x,y,p,strokeDist)。
   // 起点补一颗（continuous walk 否则缺起点）。修改 walk 游标（frozen 用真游标 / tail 用拷贝）。
-  _walkStamps(walk, endIdx, emit) {
-    const st = this._stroke;
-    const sm = st.sm;
+  _walkStamps(walk: Walk, endIdx: number, emit: (x: number, y: number, p: number, strokeDist: number) => void) {
+    const st = this._stroke!;
+    const sm = st.sm!;
     if (!walk.started && sm.count > 0) {
       walk.started = true;
       emit(sm.cx[0], sm.cy[0], sm.cp[0], walk.strokeDist);
@@ -382,8 +462,8 @@ export class BrushEngine {
   }
 
   // 一颗 → frozen buffer（带 culling + ensureBbox + frozenDirty 累积）
-  _emitFrozen(x, y, p, strokeDist) {
-    const st = this._stroke;
+  _emitFrozen(x: number, y: number, p: number, strokeDist: number) {
+    const st = this._stroke!;
     const params = this._stampParams(p, strokeDist);
     if (!params) return;
     const { size, stampAlpha } = params;
@@ -391,8 +471,8 @@ export class BrushEngine {
     const x0 = x - radius - 1, y0 = y - radius - 1, x1 = x + radius + 1, y1 = y + radius + 1;
     if (x1 < 0 || y1 < 0 || x0 > st.layer.docW || y0 > st.layer.docH) return;   // culling
     this._ensureBufferBbox(x0, y0, x1, y1);
-    if (st.isBuildup) this._buildupOverInto(st.bufferCtx, st.bufBboxX, st.bufBboxY, x, y, size, stampAlpha);
-    else this._washMaxInto(st.bufferData, st.bufBboxW, st.bufBboxH, st.bufBboxX, st.bufBboxY, x, y, size, stampAlpha);
+    if (st.isBuildup) this._buildupOverInto(st.bufferCtx!, st.bufBboxX, st.bufBboxY, x, y, size, stampAlpha);
+    else this._washMaxInto(st.bufferData!, st.bufBboxW, st.bufBboxH, st.bufBboxX, st.bufBboxY, x, y, size, stampAlpha);
     this._growRect(st, "frozenDirty", x0, y0, x1, y1);
     this._markDirty(x0, y0, x1, y1);
   }
@@ -400,9 +480,9 @@ export class BrushEngine {
   endStroke() {
     const st = this._stroke;
     if (st && st.buffered) {
-      st.sm.update();
-      st.sm.finish();                    // 抬笔收尾：把直线桥换成带动量的弧尾、钉终点（画到头）
-      const last = st.sm.count - 1;
+      st.sm!.update();
+      st.sm!.finish();                    // 抬笔收尾：把直线桥换成带动量的弧尾、钉终点（画到头）
+      const last = st.sm!.count - 1;
       if (last >= 0) {
         // 出端 taper 需总笔长 → 先用 frozenWalk 拷贝干走一遍量 total（不烤），再设 _taperTotal 真烤。
         if (st.settings.taperOut > 0) {
@@ -421,7 +501,7 @@ export class BrushEngine {
   cancelStroke() { this._stroke = null; }
 
   _compositeBufferToLayer() {
-    const st = this._stroke;
+    const st = this._stroke!;
     const layer = st.layer;
     const composeCanvas = st.isBuildup ? st.bufferCanvas : this._renderWashToCanvas();
     if (!composeCanvas) return;
@@ -437,16 +517,16 @@ export class BrushEngine {
     ctx.globalAlpha = Math.max(0, Math.min(1, st.settings.opacity ?? 1.0));   // Π 外 × opacity
     // v242 锁定不透明度：source-atop = 只在已有 alpha 上画、保留目标 alpha（不增不删透明度）。
     //   覆盖 per-brush blendMode（锁 alpha 时"在已有像素里改色"优先于混合模式；线稿重着色用）。橡皮不锁。
-    ctx.globalCompositeOperation = st.mode === "erase"
+    ctx.globalCompositeOperation = (st.mode === "erase"
       ? "destination-out"
-      : (layer.lockAlpha ? "source-atop" : (st.settings.blendMode || "source-over"));   // v163 per-brush 混合模式
+      : (layer.lockAlpha ? "source-atop" : (st.settings.blendMode || "source-over"))) as GlobalCompositeOperation;   // v163 per-brush 混合模式
     ctx.drawImage(composeCanvas, st.bufBboxX - layer.bboxX, st.bufBboxY - layer.bboxY);
     ctx.globalAlpha = prevA;
     ctx.globalCompositeOperation = prevC;
   }
 
   // Wash：把 Uint8 buffer 转 RGBA canvas（color × α）。用于 endStroke 合成 + live overlay。
-  _renderWashToCanvas(targetCanvas = null) {
+  _renderWashToCanvas(targetCanvas: HTMLCanvasElement | null = null) {
     const st = this._stroke;
     if (!st || !st.bufferData) return null;
     const w = st.bufBboxW, h = st.bufBboxH;
@@ -457,7 +537,7 @@ export class BrushEngine {
     } else if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w; canvas.height = h;
     }
-    const cctx = canvas.getContext("2d");
+    const cctx = canvas.getContext("2d")!;
     const out = cctx.createImageData(w, h);
     // erase 模式 color 不影响（dst-out 只看 α），还是填黑省得 RGB 漏到合成层
     const color = st.mode === "erase" ? { r: 0, g: 0, b: 0 } : hexToRgbObj(st.settings.color);
@@ -485,10 +565,10 @@ export class BrushEngine {
     // board 一帧会调多次（partial/full 判定 + _renderLayers）。tail 只随每个 raw push 变（笔尖移动）→
     // 用 sm.seq（每 push +1）当缓存键：同 seq + overlay 在 → 直接返回缓存，不重算 tail/compose。
     // （不能用 sm.count：慢速 raw 不落新锚点时 count 不变，但笔尖动了、tail 仍需重画。）
-    if (st.sm.seq !== st._composeAtSeq || !st.overlayCanvas) {
+    if (st.sm!.seq !== st._composeAtSeq || !st.overlayCanvas) {
       this._renderTail();
       this._composeOverlay();
-      st._composeAtSeq = st.sm.seq;
+      st._composeAtSeq = st.sm!.seq;
     }
     if (!st.overlayCanvas) return null;
     return {
@@ -504,8 +584,8 @@ export class BrushEngine {
 
   // 每帧重画 tail（frozen 前沿 → 笔尖）。两趟：先收集 stamp 算 bbox，再 ensure buffer + 光栅化。
   _renderTail() {
-    const st = this._stroke;
-    const sm = st.sm;
+    const st = this._stroke!;
+    const sm = st.sm!;
     sm.update();                                // 确保 C 最新（begin 后首帧也对）
     const last = sm.count - 1;
     if (last < 0) { st.tailW = 0; st.tailH = 0; return; }
@@ -516,7 +596,7 @@ export class BrushEngine {
       strokeDist: st.frozenWalk.strokeDist,
     };
     // 1) 收集 tail stamp（culling doc 外）
-    const stamps = [];
+    const stamps: { x: number; y: number; size: number; stampAlpha: number }[] = [];
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     this._walkStamps(walk, last, (x, y, p, sd) => {
       const params = this._stampParams(p, sd);
@@ -543,18 +623,18 @@ export class BrushEngine {
     // 2) ensure tail buffer + 清 + 光栅
     this._ensureTailBbox(tw, th);
     if (st.isBuildup) {
-      st.tailCtx.clearRect(0, 0, tw, th);
-      for (const s of stamps) this._buildupOverInto(st.tailCtx, tx, ty, s.x, s.y, s.size, s.stampAlpha);
+      st.tailCtx!.clearRect(0, 0, tw, th);
+      for (const s of stamps) this._buildupOverInto(st.tailCtx!, tx, ty, s.x, s.y, s.size, s.stampAlpha);
     } else {
-      st.tailData.fill(0, 0, tw * th);
-      for (const s of stamps) this._washMaxInto(st.tailData, tw, th, tx, ty, s.x, s.y, s.size, s.stampAlpha);
+      st.tailData!.fill(0, 0, tw * th);
+      for (const s of stamps) this._washMaxInto(st.tailData!, tw, th, tx, ty, s.x, s.y, s.size, s.stampAlpha);
     }
     this._markDirty(tx, ty, tx + tw, ty + th);
   }
 
   // tail buffer：预分配 grow-only，复用（不每帧 malloc）。容量 ≥ 当前 tail bbox。
-  _ensureTailBbox(tw, th) {
-    const st = this._stroke;
+  _ensureTailBbox(tw: number, th: number) {
+    const st = this._stroke!;
     if (tw <= st.tailCapW && th <= st.tailCapH && (st.isBuildup ? st.tailCanvas : st.tailData)) return;
     const cw = Math.max(tw, st.tailCapW, 64);
     const ch = Math.max(th, st.tailCapH, 64);
@@ -562,7 +642,7 @@ export class BrushEngine {
     if (st.isBuildup) {
       st.tailCanvas = document.createElement("canvas");
       st.tailCanvas.width = cw; st.tailCanvas.height = ch;
-      st.tailCtx = st.tailCanvas.getContext("2d");
+      st.tailCtx = st.tailCanvas.getContext("2d")!;
     } else {
       st.tailData = new Uint8ClampedArray(cw * ch);
     }
@@ -570,14 +650,14 @@ export class BrushEngine {
 
   // 合成 overlay = frozen ⊕ tail（wash:max / buildup:over）。只补 (prevTail ∪ frozenDirty) 与 tail 区。
   _composeOverlay() {
-    const st = this._stroke;
+    const st = this._stroke!;
     const W = st.bufBboxW, H = st.bufBboxH;
     if (W <= 0 || H <= 0) return;
     let rebuilt = false;
     if (!st.overlayCanvas) {
       st.overlayCanvas = document.createElement("canvas");
       st.overlayCanvas.width = W; st.overlayCanvas.height = H;
-      st.overlayCtx = st.overlayCanvas.getContext("2d");
+      st.overlayCtx = st.overlayCanvas.getContext("2d")!;
       rebuilt = true;
     } else if (st.overlayCanvas.width !== W || st.overlayCanvas.height !== H) {
       st.overlayCanvas.width = W; st.overlayCanvas.height = H;
@@ -588,7 +668,7 @@ export class BrushEngine {
       st.prevTailW = 0; st.frozenDirty = null;
     } else {
       // 还原 (上帧 tail ∪ 新冻结) 区域为纯 frozen
-      let r = null;
+      let r: number[] | null = null;
       if (st.prevTailW > 0) r = [st.prevTailX, st.prevTailY, st.prevTailX + st.prevTailW, st.prevTailY + st.prevTailH];
       if (st.frozenDirty) {
         const d = st.frozenDirty;
@@ -614,14 +694,14 @@ export class BrushEngine {
   }
 
   // 把 frozen buffer 的 (lx,ly,lw,lh)（overlay 局部坐标）刷进 overlay（替换，frozen 权威）
-  _blitFrozen(lx, ly, lw, lh) {
-    const st = this._stroke;
-    const octx = st.overlayCtx;
+  _blitFrozen(lx: number, ly: number, lw: number, lh: number) {
+    const st = this._stroke!;
+    const octx = st.overlayCtx!;
     if (st.isBuildup) {
       octx.clearRect(lx, ly, lw, lh);
       if (st.bufferCanvas) octx.drawImage(st.bufferCanvas, lx, ly, lw, lh, lx, ly, lw, lh);
     } else {
-      const buf = st.bufferData;
+      const buf = st.bufferData!;
       const bufW = st.bufBboxW;
       const col = st.mode === "erase" ? { r: 0, g: 0, b: 0 } : hexToRgbObj(st.settings.color);
       const img = octx.createImageData(lw, lh);
@@ -639,15 +719,15 @@ export class BrushEngine {
   }
 
   // 把 tail 叠到 overlay 的 (lx,ly)（overlay 局部坐标）。wash=max(frozen,tail)；buildup=tail over frozen。
-  _blitTail(lx, ly) {
-    const st = this._stroke;
-    const octx = st.overlayCtx;
+  _blitTail(lx: number, ly: number) {
+    const st = this._stroke!;
+    const octx = st.overlayCtx!;
     const tw = st.tailW, th = st.tailH;
     if (st.isBuildup) {
-      octx.drawImage(st.tailCanvas, 0, 0, tw, th, lx, ly, tw, th);   // source-over
+      octx.drawImage(st.tailCanvas!, 0, 0, tw, th, lx, ly, tw, th);   // source-over
     } else {
-      const frozen = st.bufferData, bufW = st.bufBboxW;
-      const tail = st.tailData;
+      const frozen = st.bufferData!, bufW = st.bufBboxW;
+      const tail = st.tailData!;
       const col = st.mode === "erase" ? { r: 0, g: 0, b: 0 } : hexToRgbObj(st.settings.color);
       const img = octx.createImageData(tw, th);
       const d = img.data;
@@ -673,7 +753,7 @@ export class BrushEngine {
     return d;
   }
 
-  _sampleLayerColor(layer, x, y) {
+  _sampleLayerColor(layer: Layer, x: number, y: number): RgbaColor {
     const ix = Math.floor(x - layer.bboxX);
     const iy = Math.floor(y - layer.bboxY);
     if (ix < 0 || iy < 0 || ix >= layer.bboxW || iy >= layer.bboxH) {
@@ -687,14 +767,16 @@ export class BrushEngine {
 
   // pressure → {size, stampAlpha}（taper / signedLerp dynamics）。null = 太淡跳过。
   // strokeDist 决定 anti-spike taper 包络（frozen / tail walk 各传自己的）。
-  _stampParams(pressure, strokeDist) {
-    const st = this._stroke;
+  _stampParams(pressure: number, strokeDist: number): StampParams | null {
+    const st = this._stroke!;
     const s = st.settings;
+    // taperFloor 不在 ResolvedBrush 显式字段（来自 DEFAULT_SETTINGS 兜底），index 签名为 unknown → 断言 number。
+    const taperFloor = s.taperFloor as number;
     let p = Math.max(0, Math.min(1, pressure));
     // 入端 taper：起手 fade-in（也兼顾 Apple Pencil 落笔 spike → 萝卜尖）
     if (s.taperIn > 0) {
       const t = Math.min(1, strokeDist / (s.size * s.taperIn));
-      p *= s.taperFloor + (1 - s.taperFloor) * t;
+      p *= taperFloor + (1 - taperFloor) * t;
     }
     // 出端 taper：末端 fade-out。需总笔长 → 只在 endStroke 时 st._taperTotal 有值（live 不 taper）
     if (s.taperOut > 0 && st._taperTotal != null) {
@@ -702,7 +784,7 @@ export class BrushEngine {
       const taperLen = s.size * s.taperOut;
       if (distFromEnd < taperLen) {
         const t = Math.max(0, distFromEnd / taperLen);
-        p *= s.taperFloor + (1 - s.taperFloor) * t;
+        p *= taperFloor + (1 - taperFloor) * t;
       }
     }
     const pCurve = Math.pow(p, Math.max(0.01, s.pressureGamma || 1.0));
@@ -714,7 +796,7 @@ export class BrushEngine {
   }
 
   // immediate 路径（smudge / pixel）：算 params + 直接进 layer。
-  _stampOne(x, y, pressure) {
+  _stampOne(x: number, y: number, pressure: number) {
     const st = this._stroke;
     if (!st) return;
     const s = st.settings;
@@ -733,7 +815,7 @@ export class BrushEngine {
   }
 
   // 累积一个 grow-only rect 到 st[field]（[x0,y0,x1,y1]）
-  _growRect(st, field, x0, y0, x1, y1) {
+  _growRect(st: StrokeState, field: "frozenDirty", x0: number, y0: number, x1: number, y1: number) {
     const d = st[field];
     if (d) {
       if (x0 < d[0]) d[0] = x0; if (y0 < d[1]) d[1] = y0;
@@ -742,9 +824,9 @@ export class BrushEngine {
   }
 
   // Build-Up: 把 cached colored stamp 以 source-over drawImage 进 ctx（bx/by = ctx 的 doc 原点偏移）
-  _buildupOverInto(ctx, bx, by, x, y, size, stampAlpha) {
-    const s = this._stroke.settings;
-    const stamp = this._getStamp(s.size, s.hardness, s.color, this._stroke.mode);
+  _buildupOverInto(ctx: Ctx2D, bx: number, by: number, x: number, y: number, size: number, stampAlpha: number) {
+    const s = this._stroke!.settings;
+    const stamp = this._getStamp(s.size, s.hardness, s.color, this._stroke!.mode);
     const drawD = size + 2 * (size / stamp.baseSize);
     const drawR = drawD / 2;
     const lx = x - bx, ly = y - by;
@@ -766,8 +848,8 @@ export class BrushEngine {
   }
 
   // Wash: JS per-pixel max blend 进 Uint8 buf（bufW×bufH，bx/by = doc 原点偏移）
-  _washMaxInto(buf, bufW, bufH, bx, by, x, y, size, stampAlpha) {
-    const s = this._stroke.settings;
+  _washMaxInto(buf: Uint8ClampedArray, bufW: number, bufH: number, bx: number, by: number, x: number, y: number, size: number, stampAlpha: number) {
+    const s = this._stroke!.settings;
     const cx = x - bx;
     const cy = y - by;
     const radius = size / 2;
@@ -816,25 +898,25 @@ export class BrushEngine {
     }
   }
 
-  _smudgeStampDirect(x, y, size, stampAlpha) {
-    const st = this._stroke;
+  _smudgeStampDirect(x: number, y: number, size: number, stampAlpha: number) {
+    const st = this._stroke!;
     const s = st.settings;
     const cur = this._sampleLayerColor(st.layer, x, y);
     const strength = s.smudgeStrength ?? 0.8;
     const dryness = s.smudgeDryness ?? 0.1;
     const outCol = {
-      r: st.loaded.r * strength + cur.r * (1 - strength),
-      g: st.loaded.g * strength + cur.g * (1 - strength),
-      b: st.loaded.b * strength + cur.b * (1 - strength),
-      a: Math.max(st.loaded.a, cur.a),
+      r: st.loaded!.r * strength + cur.r * (1 - strength),
+      g: st.loaded!.g * strength + cur.g * (1 - strength),
+      b: st.loaded!.b * strength + cur.b * (1 - strength),
+      a: Math.max(st.loaded!.a, cur.a),
     };
     const hex = "#" + [outCol.r, outCol.g, outCol.b]
       .map(v => Math.max(0, Math.min(255, v|0)).toString(16).padStart(2, "0")).join("");
     st.loaded = {
-      r: st.loaded.r * (1 - dryness) + cur.r * dryness,
-      g: st.loaded.g * (1 - dryness) + cur.g * dryness,
-      b: st.loaded.b * (1 - dryness) + cur.b * dryness,
-      a: st.loaded.a * (1 - dryness) + cur.a * dryness,
+      r: st.loaded!.r * (1 - dryness) + cur.r * dryness,
+      g: st.loaded!.g * (1 - dryness) + cur.g * dryness,
+      b: st.loaded!.b * (1 - dryness) + cur.b * dryness,
+      a: st.loaded!.a * (1 - dryness) + cur.a * dryness,
     };
     const stamp = makeRadialStamp(size, s.hardness, hex);
     const drawD = stamp.size;
@@ -852,8 +934,8 @@ export class BrushEngine {
     ctx.globalCompositeOperation = prevC;
   }
 
-  _pixelStampDirect(x, y, size, stampAlpha) {
-    const st = this._stroke;
+  _pixelStampDirect(x: number, y: number, size: number, stampAlpha: number) {
+    const st = this._stroke!;
     const s = st.settings;
     const layer = st.layer;
     const ctx = layer.ctx;
@@ -877,8 +959,8 @@ export class BrushEngine {
     ctx.globalCompositeOperation = prevC;
   }
 
-  _markDirty(x0, y0, x1, y1) {
-    const st = this._stroke;
+  _markDirty(x0: number, y0: number, x1: number, y1: number) {
+    const st = this._stroke!;
     const d = st.dirty;
     if (d) {
       if (x0 < d[0]) d[0] = x0;
@@ -892,12 +974,12 @@ export class BrushEngine {
 }
 
 // smudge 用的小 radial gradient stamp（每颗 color 不同，不 cache）
-function makeRadialStamp(size, hardness, color) {
+function makeRadialStamp(size: number, hardness: number, color: string) {
   const d = Math.max(4, Math.ceil(size + 2));
   const r = d / 2;
   const c = document.createElement("canvas");
   c.width = d; c.height = d;
-  const cx = c.getContext("2d");
+  const cx = c.getContext("2d")!;
   const hd = Math.max(0, Math.min(0.999, hardness));
   const g = cx.createRadialGradient(r, r, hd * r, r, r, r);
   g.addColorStop(0, color);
@@ -907,7 +989,7 @@ function makeRadialStamp(size, hardness, color) {
   return { canvas: c, size: d };
 }
 
-function hexToRgbObj(hex) {
+function hexToRgbObj(hex: string): RgbColor {
   if (!hex || hex[0] !== "#") return { r: 0, g: 0, b: 0 };
   if (hex.length === 7) {
     return {
@@ -927,7 +1009,7 @@ function hexToRgbObj(hex) {
 }
 
 // "#rrggbb" → "rgba(r,g,b,a)"
-export function hexToRgba(hex, a = 1) {
+export function hexToRgba(hex: string, a: number = 1) {
   const c = hexToRgbObj(hex);
   return `rgba(${c.r},${c.g},${c.b},${a})`;
 }

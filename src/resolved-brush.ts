@@ -14,7 +14,7 @@
 //
 // 纯模块：无 DOM / 无 IDB / 无 cloud。可 node 直测（test/resolved-brush.test.mjs）。
 
-import { DEFAULT_SETTINGS } from "./brush.js";
+import { DEFAULT_SETTINGS } from "./brush.ts";
 
 // 笔架里的一把预设（黑盒；只读这里用到的字段）。
 export interface BrushPreset {

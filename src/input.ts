@@ -20,14 +20,14 @@
 //     ctrlKey (pinch)        → 以光标为中心缩放
 //     else                   → 平移
 
-import { BrushEngine } from "./brush.js";
-import { LiquifyEngine } from "./liquify.js";
-import { LassoEngine } from "./lasso.js";
-import { FilterBrushEngine } from "./filter-brush.js";
+import { BrushEngine } from "./brush.ts";
+import { LiquifyEngine } from "./liquify.ts";
+import { LassoEngine } from "./lasso.ts";
+import { FilterBrushEngine } from "./filter-brush.ts";
 import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./pointer-gesture.ts";
 import { assignRole, effectiveTool, toolToRole } from "./pointer-route.ts";
-import { inputSmooth } from "./stroke-input-smooth.js";
+import { inputSmooth } from "./stroke-input-smooth.ts";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.ts";
 import { SMOOTH } from "./smooth-config.js";
 import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
@@ -720,7 +720,7 @@ export class InputController {
         if (rec.rawToEngine) {
           psx = ev.clientX; psy = ev.clientY;
         } else {
-          const sp = inputSmooth(rec, settings, drx, dry);
+          const sp = inputSmooth(rec as unknown as Parameters<typeof inputSmooth>[0], settings, drx, dry);
           psx = sp.x; psy = sp.y;
         }
         const { x: dx, y: dy } = this.board.screenToDoc(psx, psy);
@@ -745,7 +745,7 @@ export class InputController {
         const sdy = e.clientY - rec.startY!;
         if (sdx * sdx + sdy * sdy > 64) {
           rec._lassoMode = "drawing";
-          this.lasso.beginPath(rec._lassoStartDocX, rec._lassoStartDocY);
+          this.lasso.beginPath(rec._lassoStartDocX!, rec._lassoStartDocY!);
           this.lasso.extendPath(dx, dy);
         }
       } else if (rec._lassoMode === "drawing") {
@@ -917,7 +917,7 @@ export class InputController {
     this._activeStroke = { engine: this.liquify, tx, finalize: spec.finalize };
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     // v124 (user：「preview 没 apply 选区」) 把 selection 传给 liquify，stamp 内 mask 外保留 startSnap
-    this.liquify.beginStroke(layer, settings, dx, dy, this.doc.selection);
+    this.liquify.beginStroke(layer as unknown as Parameters<typeof this.liquify.beginStroke>[0], settings, dx, dy, this.doc.selection);
     this.board.requestRender();
   }
 
@@ -939,7 +939,7 @@ export class InputController {
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
     try {
-      this.filterBrush.beginStroke(layer, fbState.Filter, fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
+      this.filterBrush.beginStroke(layer as unknown as Parameters<typeof this.filterBrush.beginStroke>[0], fbState.Filter, fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
     } catch (e) {
       console.warn("[filter brush] begin failed:", e);
       this._activeStroke = null;

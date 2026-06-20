@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v307 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v308 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -218,10 +218,18 @@ toolbar 解锁的 4 个消费方一簇入门：`layer-undo`(4)、`transient-pane
 - **gallery.ts 此前根本没进 program**（gallery-shell 动态 import）→ agent 报 0 是 vacuous；正式入 gate 后暴露 9 个真错（`onUnmounted` 漏在 vue stub、闭包内 `props.cloud!`、TrashGItem cast 等），已修。
 - 残留**诚实 boundary any**：`input.ts` 21、`ora.ts` 4 —— 全指向**仍未类型化的 .js 引擎**（`brush.js`/`liquify.js`/`filter-brush.js`/`lasso.js`/`bitmap.js`/`resample.js`）。这些转 .ts 后即可收口（input 的本地 `Doc`/`Board` interface 换成 `import type` 真类型）。
 
+### ✅ batch 14 · 二级引擎簇 .js→.ts（v308，2026-06-19）—— 手感引擎全员入门
+11 个二级引擎 .js→.ts：`brush`(933loc/164err)、`floating-transform`(797/233)、`selection`(414/161)、`lasso`(370/181)、`liquify`(329/30)、`layer-composite`(261/37)、`stroke-smoother`(109/117,手感核心)、`stroke-input-smooth`(37)、`filter-brush`(56)、`resample`(97)、`bitmap`(10)。8 并行 subagent，铁律=只加注解/cast，零行为改。388 测试全程绿、tsc 0、bundle 通过。
+- **`plugins/liquify.js` 撞名坑**：根 `liquify.js` 改名时 sed 误改了 `plugins/index.js` 的 `./liquify.js`（指 plugins/liquify.js，未转）→ boot smoke 测试当场红。已还原。教训：rename sed 要防同名子目录文件误伤。
+- **selection 真类型回填 doc.ts**：`selection.ts` 出真 `Selection` 类 → `doc.ts` 弃 batch-13 的本地 `SelectionLike` 镜像，直接 `import type { Selection }`。顺手纠正 batch-13 我加错的 `SelectionLike.maskData`（真类无此成员）、`outline()` 实为 `Float32Array[]` 非 `number[][]`。
+- **级联仅 27 个**（比 batch 13 的 111 小：引擎对引擎的依赖比消费方对引擎少）。selection 根因修掉 7，其余 20 个 1 个 agent seam cast 收口（`Parameters<typeof fn>[N]` 提取真引擎形参类型，零新 any；engine 文件未导出 SubTool/Source/CompositeOpts 等故走 Parameters 间接绑）。
+- **brush.ts agent 抓到潜伏 bug**（未改，留给人）：`beginStroke` 里 smudge 的 `loaded` 算了但没写进 stroke 对象 → smudge stamp 路径运行时永不触发。修它=行为改动，超本批范围；手感相关，**需人确认**。
+
 ## 待迁（剩余 JS 源）
 
-- **手感二级引擎**（仍 .js，input/ora 的 boundary any 指向它们）：`brush.js`、`liquify.js`、`filter-brush.js`、`stroke-smoother.js`、`lasso.js`、`bitmap.js`、`resample.js`、`selection.js`、`layer-composite.js`、`floating-transform.js`。转完可清掉 input/ora 残留 any + input 本地 interface。
-- **红线接缝** `app-store.js` = `src/store/**` 的门面，改前 escalate human。
+- **input.ts 本地 interface 清理**（即时可做，已解锁）：input/ora 的 21+4 残留 any 是 input 本地 `Doc`/`Board`/`Layer`/`EditMode`/`History`/`PixelHistory`/`BrushSettings`/`LiquifySettings`/`FilterBrushState` 镜像 interface（`[k]:any`）+ `engine:any`。这些引擎现已全 .ts → 换成 `import type` 真类型即可清掉大半 any + 去掉 batch-13/14 的 `as unknown as Parameters<...>` 收口 cast。focused 小批。
+- **支持/功能叶**（batch 15）：`filters`(8imp) `storage`(6) `config`(6) `crypto-state`(7) `brushes`(3) `exporters` `zip` `sevenzip` `cloud-thumbs*` `enc-thumbs` `reference`(495) `palette`(197) `psd`(385) `smooth-config` `panel-state` `version`。
+- **红线接缝** `app-store.js`(17imp) = `src/store/**` 的门面，改前 escalate human。
 - app.js（组合根）本身仍 .js（god-file 装配，最后处理）。
   **最后、保守**：只加类型注解、零行为改动、单独成批交付真机。
 

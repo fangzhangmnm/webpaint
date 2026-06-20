@@ -21,9 +21,9 @@
 
 import { zipPack, zipUnpack } from "./zip.js";
 import { Layer, LayerGroup, PaintDoc, flattenLeaves, findNodeById, reseedLayerIdCounter } from "./doc.ts";
-import { compositeLayers } from "./layer-composite.js";
-import { smartResample } from "./resample.js";
-import { makeBitmap } from "./bitmap.js";
+import { compositeLayers } from "./layer-composite.ts";
+import { smartResample } from "./resample.ts";
+import { makeBitmap } from "./bitmap.ts";
 // 纯树↔stack.xml 序列化（嵌套组 + id + active）抽到独立深模块（无 canvas 依赖，可纯 node 测）。
 import { buildStackXml, parseStackXml } from "./ora-stack-xml.ts";
 import type { ParsedNode } from "./ora-stack-xml.ts";
@@ -74,7 +74,7 @@ function bytesToString(bytes: Uint8Array): string {
  */
 function renderMerged(doc: EncodeDoc) {
   const c = makeBitmap(doc.width, doc.height);
-  const ctx = c.getContext("2d");
+  const ctx = c.getContext("2d")!;
   // v134 (user：「即使 merged 也保留 alpha；ora 里 merged 同处理」)
   //   不涂 doc.backgroundColor 作 base —— ora 的 mergedimage.png 保 alpha，user 想要白底自己加层。
   // 合成走规范合成器（deep module A，含 clip + 组隔离）。ctx 已在 doc 坐标 1:1。无 live overlay。

@@ -3,7 +3,7 @@
 // 这里只压**clip 基底解析**（survey 标记的「最大语义地雷」）：同级最近非clip可见有内容层、
 // 链共基底、基底隐藏/无基底 → null、组可作基底。
 import { describe, it, assert } from "./runner.mjs";
-import { computeClipBaseForNodes, compositeLayers } from "../src/layer-composite.js";
+import { computeClipBaseForNodes, compositeLayers } from "../src/layer-composite.ts";
 
 // 假节点：叶 = {clippingMask, visible, bboxW, bboxH}；组 = {isGroup:true, clippingMask, visible}
 const leaf = (o = {}) => ({ clippingMask: false, visible: true, bboxW: 10, bboxH: 10, isGroup: false, ...o });

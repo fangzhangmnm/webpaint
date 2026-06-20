@@ -7,7 +7,7 @@
 import { ReferenceWindow } from "./reference.js";
 import { PaletteWindow } from "./palette.js";
 import { els } from "./els.ts";
-import { decodeImageFile, fitWithin, canvasToBlob } from "./resample.js";
+import { decodeImageFile, fitWithin, canvasToBlob } from "./resample.ts";
 import { setColor } from "./color-panel.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import type { AppContext } from "./app-context.ts";
@@ -101,9 +101,9 @@ export function initSideWindows(ctx: AppContext) {
       const REF_MAX = 2048;                                 // B：参考图最大边（≈2048² 面积上限）
       const fit = fitWithin(decoded, REF_MAX, REF_MAX);     // 超了 step-halving 缩小
       // 缩了就存缩小后的 PNG（省 .ora 体积）；没缩存原文件 Blob
-      const persistBlob = fit.scaled ? await canvasToBlob(fit.source) : file;
+      const persistBlob = fit.scaled ? await canvasToBlob(fit.source as Parameters<typeof canvasToBlob>[0]) : file;
       referenceWindow.setBitmap(fit.source, { persistBlob });
-      if (fit.scaled) decoded.close?.();                    // 缩放后原 bitmap 没用了，释放
+      if (fit.scaled) (decoded as ImageBitmap).close?.();                    // 缩放后原 bitmap 没用了，释放
       _store.edits.mark();
       updateSaveStatus();
       window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));

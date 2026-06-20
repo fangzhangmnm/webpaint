@@ -9,8 +9,8 @@
 // - 没有持久化（proposal："甚至没保存的情况下"）。但 doc 的 API 已经按"会被序列化"
 //   去设计 —— 后期换 IndexedDB / OneDrive / 自定义文件格式时不需要重构模型。
 
-import { smartResample } from "./resample.js";
-import { makeBitmap } from "./bitmap.js";
+import { smartResample } from "./resample.ts";
+import { makeBitmap } from "./bitmap.ts";
 
 export const DEFAULT_DOC_SIZE = 2048;
 
@@ -92,21 +92,8 @@ type DeepSnapNode =
       children: DeepSnapNode[];
     };
 
-// 选区对象（selection.ts 拥有真类型；此处只描述本文件用到的成员）。
-interface SelectionLike {
-  // bbox + mask（consumers: selection-ops / board / filters-adjust 直接读 selection.js 的实例）
-  bboxX: number;
-  bboxY: number;
-  bboxW: number;
-  bboxH: number;
-  maskCanvas: CanvasImageSource;
-  maskData?: ImageData;
-  outline(): number[][];
-  croppedTo(dx: number, dy: number, nw: number, nh: number): SelectionLike;
-  flippedHorizontal(w: number): SelectionLike;
-  rotated90CCW(w: number, h: number): SelectionLike;
-  resampledTo(sx: number, sy: number, smooth: boolean, quality: ImageSmoothingQuality): SelectionLike;
-}
+// 选区对象：selection.ts 拥有真类型（batch 14 起直接 import，替原本地 SelectionLike 镜像）。
+import type { Selection } from "./selection.ts";
 
 // 层 bbox 长大时给的边距，防 stamp 进出边界反复 realloc
 const BBOX_GROW_MARGIN = 32;
@@ -365,7 +352,7 @@ export class PaintDoc {
   layers: Node[];
   activeId: number | null;
   backgroundColor: string;
-  selection: SelectionLike | null;
+  selection: Selection | null;
   referenceLayerId: number | null;
   constructor({ width = DEFAULT_DOC_SIZE, height = DEFAULT_DOC_SIZE }: { width?: number; height?: number } = {}) {
     this.width = width;
@@ -896,7 +883,7 @@ export class PaintDoc {
     activeId?: number | null;
     activeIndex?: number;
     referenceLayerId: number | null;
-    selection: SelectionLike | null;
+    selection: Selection | null;
     layers: DeepSnapNode[];
   } | null) {
     if (!snap) return;

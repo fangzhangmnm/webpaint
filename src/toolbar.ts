@@ -10,11 +10,11 @@
 
 import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
-import { Selection } from "./selection.js";
+import { Selection } from "./selection.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { safeLSSet } from "./safe-ls.ts";
-import { fillResampleSelect } from "./resample.js";
+import { fillResampleSelect } from "./resample.ts";
 import type { AppContext } from "./app-context.ts";
 
 // 静态存在的工具栏元素查表 helper（initToolbar 在 DOM 就绪后调）。
@@ -303,14 +303,14 @@ export function initToolbar(ctx: AppContext) {
   // sub-tool picker
   for (const b of lassoSubBtns) {
     b.addEventListener("click", () => {
-      input.lasso.setSubTool(b.dataset.lassoSub);
+      input.lasso.setSubTool(b.dataset.lassoSub as Parameters<typeof input.lasso.setSubTool>[0]);
       updateLassoToolbar();
     });
   }
   // set-op modifier
   for (const b of lassoSetOpBtns) {
     b.addEventListener("click", () => {
-      input.lasso.setSetOpMode(b.dataset.lassoSetop);
+      input.lasso.setSetOpMode(b.dataset.lassoSetop as Parameters<typeof input.lasso.setSetOpMode>[0]);
       updateLassoToolbar();
     });
   }
@@ -373,7 +373,7 @@ export function initToolbar(ctx: AppContext) {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
     const before = layer.snapshot();
-    (doc.selection as Selection).fillOnLayer(layer, state.color);
+    (doc.selection as Selection).fillOnLayer(layer as unknown as Parameters<Selection["fillOnLayer"]>[0], state.color);
     const after = layer.snapshot();
     const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
     history.push(entry as unknown as Parameters<(typeof history)["push"]>[0]);
@@ -387,7 +387,7 @@ export function initToolbar(ctx: AppContext) {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
     const before = layer.snapshot();
-    (doc.selection as Selection).clearOnLayer(layer);
+    (doc.selection as Selection).clearOnLayer(layer as unknown as Parameters<Selection["clearOnLayer"]>[0]);
     const after = layer.snapshot();
     const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
     history.push(entry as unknown as Parameters<(typeof history)["push"]>[0]);
@@ -417,7 +417,7 @@ export function initToolbar(ctx: AppContext) {
   // transform 模式 picker + 应用 / 取消
   for (const b of lassoTransformModeBtns) {
     b.addEventListener("click", () => {
-      input.lasso.setMode(b.dataset.lassoMode);
+      input.lasso.setMode(b.dataset.lassoMode as Parameters<typeof input.lasso.setMode>[0]);
       updateLassoToolbar();
     });
   }

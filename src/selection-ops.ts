@@ -6,7 +6,7 @@
 //     入口在 input.js KEYBOARD_SHORTCUTS（hub）；run 派发 window 事件，逻辑搬到这（要 doc/import/setColor）。
 //     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
 import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.ts";
-import { Selection } from "./selection.js";
+import { Selection } from "./selection.ts";
 import { countLeaves } from "./doc.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";

@@ -12,7 +12,7 @@
 //   - size = state.brush.size（左栏 size slider）
 
 import { registerFilter } from "../filters.js";
-import { LiquifyEngine } from "../liquify.js";
+import { LiquifyEngine } from "../liquify.ts";
 
 export class LiquifyFilter {
   static id = "liquify";

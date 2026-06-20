@@ -41,7 +41,21 @@
   // batch 13（v306，2026-06-19）：引擎接缝 .js→.ts 大批转换（doc/board/input 手感核心 + edit-mode/
   //   history/pixel-edit/session/ora）+ gallery UI 簇灭 any。引擎类型从 inferred-any 收成真类型，
   //   级联到消费方的 boundary mismatch 用 cast 收口（行为零变更，388 测试守门）。
+  // batch 14（v308，2026-06-19）：二级引擎 .js→.ts（brush/liquify/filter-brush/stroke-smoother/
+  //   stroke-input-smooth/lasso/selection/layer-composite/floating-transform/resample/bitmap）。
+  //   selection.ts 真类型 → doc.ts 弃本地 SelectionLike 镜像直接 import Selection。
   "include": [
+    "src/brush.ts",
+    "src/liquify.ts",
+    "src/filter-brush.ts",
+    "src/stroke-smoother.ts",
+    "src/stroke-input-smooth.ts",
+    "src/lasso.ts",
+    "src/selection.ts",
+    "src/layer-composite.ts",
+    "src/floating-transform.ts",
+    "src/resample.ts",
+    "src/bitmap.ts",
     "src/doc.ts",
     "src/board.ts",
     "src/input.ts",

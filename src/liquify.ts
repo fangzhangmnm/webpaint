@@ -37,7 +37,48 @@
 // dx 坑保护：跟 v46/v47 一样，extendStroke 拿 input.js 已过 timeStamp + 平滑
 // 管线的 (x, y)，自身不再过滤 raw。
 
+import type { Layer } from "./doc.ts";
+import type { Selection } from "./selection.ts";
+
+interface LiquifySettings {
+  bleed?: string;
+  size: number;
+  strength: number;
+  mode: string;
+}
+
+interface DispField {
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
+  data: Float32Array;
+}
+
+interface LayerSnapshot {
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
+  imageData?: ImageData | null;
+}
+
+interface LiquifyStroke {
+  layer: Layer;
+  settings: LiquifySettings;
+  bleed: string;
+  lastX: number;
+  lastY: number;
+  dirty: [number, number, number, number] | null;
+  startSnap: LayerSnapshot;
+  dispField: DispField;
+  maskData: Uint8ClampedArray | null;
+  maskBbox: { x: number; y: number; w: number; h: number } | null;
+}
+
 export class LiquifyEngine {
+  _stroke: LiquifyStroke | null;
+
   constructor() {
     this._stroke = null;
   }
@@ -51,16 +92,16 @@ export class LiquifyEngine {
   //   "clip"   — 设墙：源落选区外 → 保留 dest 原像素（无位移），什么都不进
   //   "edge"   — (默认) 沿 dest→source 射线 march 到刚离开选区的边界点采样
   //              → 边界像素沿拉拽方向被无限拉长，无外部内容、无中轴接缝（见 docs/liquify-blur.md）
-  beginStroke(layer, settings, x, y, selection) {
+  beginStroke(layer: Layer, settings: LiquifySettings, x: number, y: number, selection: Selection | null) {
     const lbW = Math.max(1, layer.bboxW);
     const lbH = Math.max(1, layer.bboxH);
     const bleed = settings.bleed || "edge";
     // 把 selection mask 烤进一个 Uint8 array 与 layer.bbox 对齐 (mask alpha 通道 0..255)
-    let maskData = null;
+    let maskData: Uint8ClampedArray | null = null;
     if (selection) {
       const c = document.createElement("canvas");
       c.width = lbW; c.height = lbH;
-      const cctx = c.getContext("2d");
+      const cctx = c.getContext("2d")!;
       cctx.drawImage(selection.maskCanvas, selection.bboxX - layer.bboxX, selection.bboxY - layer.bboxY);
       maskData = cctx.getImageData(0, 0, lbW, lbH).data;   // RGBA, 看 [i*4+3]
     }
@@ -85,7 +126,7 @@ export class LiquifyEngine {
   }
 
   // 每个 event 一次。x, y 已经是 input.js 处理过的 doc 坐标。
-  extendStroke(x, y) {
+  extendStroke(x: number, y: number) {
     const st = this._stroke;
     if (!st) return;
     const s = st.settings;
@@ -141,17 +182,17 @@ export class LiquifyEngine {
     const maskX = maskBox ? maskBox.x : 0, maskY = maskBox ? maskBox.y : 0;
     const maskW = maskBox ? maskBox.w : 0, maskH = maskBox ? maskBox.h : 0;
     // 整数 cell (ix,iy) 是否在选区内（mask alpha>=128）
-    const cellIn = (ix, iy) => {
+    const cellIn = (ix: number, iy: number) => {
       const mx = ix - maskX, my = iy - maskY;
       if (mx < 0 || my < 0 || mx >= maskW || my >= maskH) return false;
-      return maskData[(my * maskW + mx) * 4 + 3] >= 128;
+      return maskData![(my * maskW + mx) * 4 + 3] >= 128;
     };
     // doc 坐标 (px,py)（四舍五入到最近 cell）是否在选区内
-    const inMask = (px, py) => cellIn(Math.round(px), Math.round(py));
+    const inMask = (px: number, py: number) => cellIn(Math.round(px), Math.round(py));
     // 浮点源 (fsx,fsy) 的 bilinear 2×2 footprint 是否**整个**在选区内。
     // v147 修白边：只测中心点不够——中心 in-mask 但某个角 tap 落选区外时，
     // bilinear 会把外面（可能透明）像素混进来 → 边界一条细白线。要求 4 tap 全 in。
-    const srcFootprintIn = (fsx, fsy) => {
+    const srcFootprintIn = (fsx: number, fsy: number) => {
       const ix = Math.floor(fsx), iy = Math.floor(fsy);
       return cellIn(ix, iy) && cellIn(ix + 1, iy) && cellIn(ix, iy + 1) && cellIn(ix + 1, iy + 1);
     };
@@ -276,7 +317,7 @@ export class LiquifyEngine {
 
   // dispField 必须始终 = layer bbox（resample 时按 layer 像素位置查）
   _syncDispFieldToLayer() {
-    const st = this._stroke;
+    const st = this._stroke!;
     const f = st.dispField;
     const layer = st.layer;
     if (f.bboxX === layer.bboxX && f.bboxY === layer.bboxY &&
@@ -305,7 +346,7 @@ export class LiquifyEngine {
 // v135 (user：「液化做一下防黑边」)
 //   越界返 0 = 黑透明在 buildup 背景上显实黑。改 clamp-to-edge：
 //   越界取边像素 → "重复 / 引力透镜" 视觉保留，但没实黑（边像素=透明的话仍透，不糊黑）
-function bilinearSample(sdat, w, h, sx, sy, ddat, dstIdx) {
+function bilinearSample(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, dstIdx: number) {
   const ix = Math.floor(sx);
   const iy = Math.floor(sy);
   const fx = sx - ix;

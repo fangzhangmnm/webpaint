@@ -1,7 +1,7 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
-import { renderSource } from "./floating-transform.js";
-import { compositeLayers } from "./layer-composite.js";
-import { makeBitmap } from "./bitmap.js";
+import { renderSource } from "./floating-transform.ts";
+import { compositeLayers } from "./layer-composite.ts";
+import { makeBitmap } from "./bitmap.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 
 // ---- 本文件用到的结构类型（局部定义，只覆盖 board 实际访问的成员）----
@@ -640,7 +640,7 @@ export class Board {
         const src = float.sources.find((s) => s.layer === node);
         if (!src) return null;
         if (!src._renderCache) {
-          src._renderCache = renderSource(src, float.gizmoBbox, float.mesh, lassoInfo!.sampleMode);
+          src._renderCache = renderSource(src as unknown as Parameters<typeof renderSource>[0], float.gizmoBbox as Parameters<typeof renderSource>[1], float.mesh as Parameters<typeof renderSource>[2], lassoInfo!.sampleMode as Parameters<typeof renderSource>[3]);
         }
         return src._renderCache;
       } : undefined,
@@ -650,7 +650,7 @@ export class Board {
   }
   // 直接合成到 ctx（ctx 已在 doc 坐标）。实时（描边/调整预览）路径用。
   _renderLayers(ctx: Ctx2D) {
-    compositeLayers(ctx, this.doc.layers, this._layerCompositeOpts());
+    compositeLayers(ctx, this.doc.layers, this._layerCompositeOpts() as unknown as Parameters<typeof compositeLayers>[2]);
   }
   // 实时预览中？= 有笔刷 overlay / 调整 surrogate / stroke 进行中。实时走直接合成（保手感）；
   //   静态走 1:1 缓存（白边修）。
@@ -677,7 +677,7 @@ export class Board {
       octx.imageSmoothingEnabled = true;
       octx.imageSmoothingQuality = "low";
       this._drawDocBg(octx);   // 缓存含 doc bg → 混合模式 over bg，与实时同底（修抬笔"弹回"）
-      compositeLayers(octx, this.doc.layers, this._layerCompositeOpts());
+      compositeLayers(octx, this.doc.layers, this._layerCompositeOpts() as unknown as Parameters<typeof compositeLayers>[2]);
       this._compositeCacheDirty = false;
     }
     return off!;

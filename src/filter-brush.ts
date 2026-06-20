@@ -14,13 +14,30 @@
 //   cancelBrushStroke?(state)                            可选，取消（abort 路径）
 //   flushDirty?(state) → [x0,y0,x1,y1] | null            可选，告诉 board dirty bbox
 
+import type { Layer } from "./doc.ts";
+import type { Selection } from "./selection.ts";
+
+// filter-brush 模式下 Filter 必须实现的最小契约（brush 方法在 filters.js 运行时挂上，
+// 故此处只描述本引擎会 dispatch 的子集；handle/params 对引擎是不透明的）。
+interface BrushFilter {
+  id?: string;
+  beginBrushStroke(layer: Layer, params: unknown, brushSettings: unknown, selection: Selection | null, x: number, y: number, pressure: number): unknown;
+  extendBrushStamp(state: unknown, x: number, y: number, pressure: number): void;
+  endBrushStroke?(state: unknown): void;
+  cancelBrushStroke?(state: unknown): void;
+  flushDirty?(state: unknown): [number, number, number, number] | null;
+}
+
 export class FilterBrushEngine {
+  _handle: unknown;
+  _Filter: BrushFilter | null;
+
   constructor() {
     this._handle = null;
     this._Filter = null;
   }
 
-  beginStroke(layer, Filter, params, brushSettings, selection, x, y, pressure) {
+  beginStroke(layer: Layer, Filter: BrushFilter, params: unknown, brushSettings: unknown, selection: Selection | null, x: number, y: number, pressure: number) {
     if (!Filter || !Filter.beginBrushStroke) {
       throw new Error(`Filter ${Filter && Filter.id} 不支持 brush 模式`);
     }
@@ -28,28 +45,28 @@ export class FilterBrushEngine {
     this._handle = Filter.beginBrushStroke(layer, params, brushSettings, selection, x, y, pressure);
   }
 
-  extendStroke(x, y, pressure) {
+  extendStroke(x: number, y: number, pressure: number) {
     if (!this._handle) return;
-    this._Filter.extendBrushStamp(this._handle, x, y, pressure);
+    this._Filter!.extendBrushStamp(this._handle, x, y, pressure);
   }
 
   endStroke() {
     if (!this._handle) return;
-    this._Filter.endBrushStroke?.(this._handle);
+    this._Filter!.endBrushStroke?.(this._handle);
     this._handle = null;
     this._Filter = null;
   }
 
   cancelStroke() {
     if (!this._handle) return;
-    (this._Filter.cancelBrushStroke || this._Filter.endBrushStroke)?.(this._handle);
+    (this._Filter!.cancelBrushStroke || this._Filter!.endBrushStroke)?.(this._handle);
     this._handle = null;
     this._Filter = null;
   }
 
   flushDirty() {
     if (!this._handle) return null;
-    return this._Filter.flushDirty?.(this._handle) ?? null;
+    return this._Filter!.flushDirty?.(this._handle) ?? null;
   }
 
   isActive() { return !!this._handle; }

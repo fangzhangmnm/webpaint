@@ -3,7 +3,7 @@
 // 守的是「从 lasso.js 抽出 Float 深模块 + TransformMode adapter 后，free/uniform/distort/旋转/平移/投影
 //   的几何与旧实现逐点一致」。warp 已删（不测）。
 import { describe, it, assert } from "./runner.mjs";
-import { FloatingTransform, sourceDestQuad } from "../src/floating-transform.js";
+import { FloatingTransform, sourceDestQuad } from "../src/floating-transform.ts";
 
 const SQ = () => [[{ x: 0, y: 0 }, { x: 10, y: 0 }], [{ x: 0, y: 10 }, { x: 10, y: 10 }]];
 function mkFloat(mode = "free", aspect = 1, mesh = SQ()) {

@@ -10,8 +10,19 @@
 // drx/dry = 本 event 的 raw screen 位移。
 import { SMOOTH } from "./smooth-config.js";
 
-export function inputSmooth(rec, settings, drx, dry) {
-  const clamp01 = (v) => Math.max(0, Math.min(1, v || 0));
+// 即时笔的可变平滑状态（调用方逐 event 持续 mutate）。
+interface SmoothRec {
+  rawSX: number; rawSY: number;
+  stabX: number; stabY: number;
+  smX: number; smY: number;
+}
+interface SmoothSettings {
+  streamline?: number;
+  stabilization?: number;
+}
+
+export function inputSmooth(rec: SmoothRec, settings: SmoothSettings | null | undefined, drx: number, dry: number): { x: number; y: number } {
+  const clamp01 = (v: number | undefined) => Math.max(0, Math.min(1, v || 0));
   const sl   = clamp01(settings?.streamline);
   const stab = clamp01(settings?.stabilization);
 
