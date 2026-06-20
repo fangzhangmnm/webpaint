@@ -13,23 +13,42 @@ import {
 } from "./cloud-thumb-cache.js";
 import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTelemetry } from "./cloud-thumbs.js";
 
+// 调试控制台 = 一袋 console 手敲的函数（非业务）。诚实描述实际挂上的成员，index 兜底插件扩展。
+declare global {
+  interface Window {
+    WebPaint?: {
+      fetchOraThumbnail?: typeof fetchOraThumbnail;
+      cloudThumbStats?: () => unknown;
+      cloudThumbResetStats?: () => void;
+      cloudThumbSkipCache?: (on?: boolean) => void;
+      clearCloudThumbCache?: () => Promise<number>;
+      pocFetchThumb?: (itemId?: string, fileSize?: number) => Promise<Blob>;
+      registerFilter?: typeof registerFilter;
+      listFilters?: typeof listFilters;
+      registerExporter?: typeof registerExporter;
+      listExporters?: typeof listExporters;
+      [k: string]: unknown;
+    };
+  }
+}
+
 export function initDevConsole() {
   // v136 POC: 云缩略图 byte-range 拉取 — console 调试
   //   await WebPaint.pocFetchThumb()  默认拉云列表第一个 ora 验证
-  window.WebPaint = window.WebPaint || {};
-  window.WebPaint.fetchOraThumbnail = fetchOraThumbnail;
-  window.WebPaint.cloudThumbStats = () => ({ cache: { ...cloudThumbStats }, paths: { ...cloudThumbTelemetry } });
-  window.WebPaint.cloudThumbResetStats = () => { cloudThumbResetStats(); cloudThumbResetTelemetry(); };
-  window.WebPaint.cloudThumbSkipCache = (on = true) => {
+  const WP = (window.WebPaint = window.WebPaint || {});
+  WP.fetchOraThumbnail = fetchOraThumbnail;
+  WP.cloudThumbStats = () => ({ cache: { ...cloudThumbStats }, paths: { ...cloudThumbTelemetry } });
+  WP.cloudThumbResetStats = () => { cloudThumbResetStats(); cloudThumbResetTelemetry(); };
+  WP.cloudThumbSkipCache = (on = true) => {
     cloudThumbConfig.skipCache = !!on;
     console.log(`[cloud-thumb] skipCache=${cloudThumbConfig.skipCache}`);
   };
-  window.WebPaint.clearCloudThumbCache = async () => {
+  WP.clearCloudThumbCache = async () => {
     const n = await clearCloudThumbCache();
     console.log(`[cloud-thumb] cleared ${n} cached thumbnails`);
     return n;
   };
-  window.WebPaint.pocFetchThumb = async function (itemId, fileSize) {
+  WP.pocFetchThumb = async function (itemId?: string, fileSize?: number) {
     if (!itemId) {
       // 自动找第一个云端 ora
       if (!isSignedIn()) throw new Error("没登录云");
@@ -40,7 +59,8 @@ export function initDevConsole() {
       console.log("POC：拉", first.path, "size", fileSize);
     }
     const t0 = performance.now();
-    const blob = await fetchOraThumbnail(itemId, fileSize);
+    // 手动路径可只给 itemId（fileSize 由 byte-range 探测）；auto 路径两者都填。运行时契约不变。
+    const blob = await fetchOraThumbnail(itemId, fileSize as number);
     console.log(`POC 完成 ${(performance.now() - t0) | 0}ms, blob size ${blob.size}`);
     // 显示到 console（可见 thumbnail）
     const url = URL.createObjectURL(blob);
@@ -55,10 +75,9 @@ export function initDevConsole() {
 
   // 暴露给 plugin（v131）：window.WebPaint.registerFilter(FilterClass)
   // 插件自己写 buildBody，可以放色环 / 自定义 canvas / 任何 DOM（user：「插件自己提供 UI」）
-  window.WebPaint = window.WebPaint || {};
-  window.WebPaint.registerFilter = registerFilter;
-  window.WebPaint.listFilters = listFilters;
+  WP.registerFilter = registerFilter;
+  WP.listFilters = listFilters;
   // candidate 2：导出格式同样可插件注册（下载插件 → registerExporter）
-  window.WebPaint.registerExporter = registerExporter;
-  window.WebPaint.listExporters = listExporters;
+  WP.registerExporter = registerExporter;
+  WP.listExporters = listExporters;
 }

@@ -20,49 +20,79 @@ import { collectFolders } from "./brush-rack-view.ts";
 import { mountRackSheet } from "./ui/rack-sheet.ts";
 import { mountBrushSettings } from "./ui/brush-settings.ts";
 import { exportBrush, exportRackFolder, buildRackCode, shareOrDownloadJSON } from "./brush-io.ts";
+import type { Brush, BrushRackData } from "./brush-types.ts";
+import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
+import type { EditMode } from "./edit-mode.js";
 
 const RACK_META_KEY = "brush-rack";
 const TOOL_LABEL: Record<string, string> = { brush: "笔刷", smudge: "涂抹", eraser: "橡皮" };
 
+// 笔架同步编排句柄（folder-sync store；诚实描述本类调到的成员）。
+interface RackSyncResult {
+  folder?: { version: number; items: Brush[]; trash?: unknown[]; resetAt?: number };
+  status?: string;
+  error?: unknown;
+}
+interface RackStore {
+  edit(): void;
+  status(o: { signedIn: boolean; online: boolean }): string;
+  sync(): Promise<void>;
+  isDirty(): boolean;
+  flush(): void;
+  configure(opts: {
+    canSync: () => boolean;
+    snapshot: () => unknown;
+    onBusyChange: () => void;
+    onResult: (res: RackSyncResult) => void | Promise<void>;
+  }): void;
+}
+
 // 构造期依赖（早于 SSoT 块构造，故 editMode 走 thunk 避 TDZ；DOM/icons/panels 等晚绑走 init()）。
 export interface BrushRackDeps {
-  state: any;                 // 共享 SSoT（state.toolStates 反应式）
-  dialReactive: any;          // 共享 SSoT（rackVersion bump / tool）
-  editMode: () => any;        // thunk：构造时 editMode 尚未定义
+  state: EditorRuntimeState;  // 共享 SSoT（state.toolStates 反应式）
+  dialReactive: DialReactive; // 共享 SSoT（rackVersion bump / tool）
+  editMode: () => EditMode;   // thunk：构造时 editMode 尚未定义
   setStatus: (m: string, e?: boolean) => void;
   confirm: (title: string, msg: string) => Promise<boolean>;
   openExclusive: (id: string) => void;
   closeExclusive: () => void;
   registerPanel: (id: string, h: { show: () => void; hide: () => void }) => void;
-  rackStore: any;
+  rackStore: RackStore;
   setRackDirty: (d: boolean) => void;
   isSignedIn: () => boolean;
   isOnline: () => boolean;
 }
 // init() 晚绑：DOM els + icons + blendModes + panel 映射（这些常量定义在 app.js 后段）。
+interface RackEls {
+  mount: HTMLElement; title: HTMLElement; sheet: HTMLElement; close: HTMLElement;
+  newBtn: HTMLElement; importBtn: HTMLElement;
+  cloudPushBtn?: HTMLElement; exportFolderBtn?: HTMLElement; resetBtn?: HTMLElement; dumpCodeBtn?: HTMLElement;
+}
+interface SettingsEls { view: HTMLElement; body: HTMLElement; save: HTMLElement; cancel: HTMLElement; }
 export interface BrushRackUI {
-  els: { rack: any; settings: any };
+  els: { rack: RackEls; settings: SettingsEls };
   icons: { check: string; busy: string; upload: string; disk: string };
-  blendModes: any;
+  blendModes: Record<string, string>;
   RACK_PANEL_BY_TOOL: Record<string, string>;
 }
 
 export class BrushRack {
-  d: BrushRackDeps;
-  _rack: any = null;
-  ui: any;
+  // UI 字段（BrushRackUI）由 init() 晚绑 Object.assign 进来 → 构造期 cast 一次记录此事实，余处全类型化。
+  d: BrushRackDeps & BrushRackUI;
+  _rack: BrushRackData | null = null;
+  ui: { tool: string; folder: string };
   _cloudState = "no-auth";
   _editingId: string | null = null;
-  _editingDraft: any = null;
-  _settingsUI: any = null;
+  _editingDraft: Brush | null = null;
+  _settingsUI: ReturnType<typeof mountBrushSettings> | null = null;
 
   constructor(deps: BrushRackDeps) {
-    this.d = deps;
+    this.d = deps as BrushRackDeps & BrushRackUI;
     this.ui = reactive({ tool: "brush", folder: DEFAULT_FOLDER });
   }
 
   get() { return this._rack; }
-  setRack(r: any) { this._rack = r; }   // boot 的 default-merge / 兜底用
+  setRack(r: BrushRackData) { this._rack = r; }   // boot 的 default-merge / 兜底用
 
   // ---- 预设存储 ----
   async load() {
@@ -72,7 +102,7 @@ export class BrushRack {
   }
   async _loadRack() {
     try {
-      let stored: any = await getMeta(RACK_META_KEY);
+      let stored = await getMeta(RACK_META_KEY) as BrushRackData | null;
       if (stored && Array.isArray(stored.brushes) && stored.brushes.length > 0) {
         let migrated = false;
         for (const b of stored.brushes) {
@@ -113,16 +143,16 @@ export class BrushRack {
     return { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null, activeBrushName: null };
   }
   // healing 回写版（显式路径用）
-  findToolBrush(ts: any) {
+  findToolBrush(ts: ToolDial | null | undefined) {
     if (!ts || !this._rack) return null;
-    const b = resolveRef(this._rack.brushes, { id: ts.activeBrushId, name: ts.activeBrushName });
+    const b = resolveRef(this._rack.brushes, { id: ts.activeBrushId, name: ts.activeBrushName }) as Brush | null;
     if (b) { ts.activeBrushId = b.id; ts.activeBrushName = b.name; }
     return b;
   }
   // 纯查找（currentBrush computed 用：computed 内绝不可写 reactive）
-  findToolBrushPure(ts: any) {
+  findToolBrushPure(ts: ToolDial | null | undefined) {
     if (!ts || !this._rack) return null;
-    return resolveRef(this._rack.brushes, { id: ts.activeBrushId, name: ts.activeBrushName });
+    return resolveRef(this._rack.brushes, { id: ts.activeBrushId, name: ts.activeBrushName }) as Brush | null;
   }
   applyToolState(tool: string) {
     if (!this._rack) return;
@@ -207,7 +237,7 @@ export class BrushRack {
   _nextBrushName() {
     const re = /^新笔\s*(\d+)$/;
     let max = 0;
-    for (const b of this._rack.brushes) { const m = re.exec(b.name); if (m) max = Math.max(max, parseInt(m[1], 10)); }
+    for (const b of this._rack!.brushes) { const m = re.exec(b.name); if (m) max = Math.max(max, parseInt(m[1], 10)); }
     return `新笔 ${max + 1}`;
   }
   // v232 (user：「新建笔从当前 active 笔拷贝，名字也从原名派生」)：「水彩」→「水彩 2」→「水彩 3」。
@@ -216,7 +246,7 @@ export class BrushRack {
     const base = String(srcName || "").replace(/\s*\d+$/, "").trim() || "新笔";
     const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(\\d+)$`);
     let max = 1;
-    for (const b of this._rack.brushes) {
+    for (const b of this._rack!.brushes) {
       const m = re.exec(b.name);
       if (m) max = Math.max(max, parseInt(m[1], 10));
     }
@@ -224,51 +254,53 @@ export class BrushRack {
   }
 
   // ---- 笔设置编辑器（draft → 存才落 rack）----
-  openBrushSettings(brushId: string, newDraft?: any) {
-    let draft;
+  openBrushSettings(brushId: string, newDraft?: Brush) {
+    let draft: Brush;
     if (newDraft) draft = newDraft;
     else { const b = findBrush(this._rack, brushId); if (!b) return; draft = JSON.parse(JSON.stringify(b)); }
     this._editingId = brushId;
     this._editingDraft = draft;
-    this._settingsUI.open(draft);
+    this._settingsUI!.open(draft);
     this.d.els.settings.view.classList.remove("hidden");
   }
   closeBrushSettings(save: boolean) {
     if (save && this._editingDraft) {
-      this._editingDraft.uat = Date.now();
-      const idx = this._rack.brushes.findIndex((x: any) => x.id === this._editingId);
-      if (idx >= 0) this._rack.brushes[idx] = this._editingDraft;
-      else this._rack.brushes.push(this._editingDraft);
+      const draft = this._editingDraft, rack = this._rack!;   // 编辑期 rack 必已 load
+      draft.uat = Date.now();
+      const idx = rack.brushes.findIndex((x) => x.id === this._editingId);
+      if (idx >= 0) rack.brushes[idx] = draft;
+      else rack.brushes.push(draft);
       this.markChanged();
-      const targetTool = this.d.editMode().current() === "airbrush" ? "brush" : this._editingDraft.tool;
+      const targetTool = this.d.editMode().current() === "airbrush" ? "brush" : draft.tool;
       if (this.getRackToolKey(this.d.editMode().current()) === this.getRackToolKey(targetTool)) {
-        this.selectBrushPresetForTool(this.d.editMode().current(), this._editingDraft.id);
+        this.selectBrushPresetForTool(this.d.editMode().current(), draft.id);
       } else {
-        this.selectBrushPresetForTool(targetTool, this._editingDraft.id);
+        this.selectBrushPresetForTool(targetTool, draft.id);
       }
       this.d.dialReactive.rackVersion++;
-      this.d.setStatus(`已保存：${this._editingDraft.name}`);
+      this.d.setStatus(`已保存：${draft.name}`);
     }
     this._editingId = null;
     this._editingDraft = null;
-    this._settingsUI.close();
+    this._settingsUI!.close();
     this.d.els.settings.view.classList.add("hidden");
   }
   async deleteEditingBrush() {
     const b = this._editingDraft;
     if (!b) return;
     if (!(await this.d.confirm("删除这支笔？", `「${b.name}」（不可撤销）`))) return;
-    const idx = this._rack.brushes.findIndex((x: any) => x.id === this._editingId);
+    const rack = this._rack!;
+    const idx = rack.brushes.findIndex((x) => x.id === this._editingId);
     if (idx >= 0) {
-      this._rack.brushes.splice(idx, 1);
-      if (!Array.isArray(this._rack.trash)) this._rack.trash = [];
-      this._rack.trash.push({ id: this._editingId, uat: Date.now() });
+      rack.brushes.splice(idx, 1);
+      if (!Array.isArray(rack.trash)) rack.trash = [];
+      rack.trash.push({ id: this._editingId, uat: Date.now() });
       this.markChanged();
       this.d.dialReactive.rackVersion++;
     }
     this._editingId = null;
     this._editingDraft = null;
-    this._settingsUI.close();
+    this._settingsUI!.close();
     this.d.els.settings.view.classList.add("hidden");
     this.d.setStatus("已删除");
   }
@@ -276,7 +308,7 @@ export class BrushRack {
   // ---- 装配：mount sheet/settings 组件 + rackStore.configure + 注册 panel + 绑 DOM 事件 ----
   init(ui: BrushRackUI) {
     Object.assign(this.d, ui);   // 晚绑 els/icons/blendModes/RACK_PANEL_BY_TOOL
-    const els = (this.d as any).els.rack, sEls = (this.d as any).els.settings;
+    const els = this.d.els.rack, sEls = this.d.els.settings;
 
     // rack-sheet Vue 组件
     mountRackSheet(els.mount, {
@@ -288,7 +320,7 @@ export class BrushRack {
       onSelectFolder: (f: string) => { this.ui.folder = f; },
       onSelectBrush: (id: string) => { this.selectBrushPresetForTool(this.ui.tool, id); this.d.closeExclusive(); },
       onEditBrush: (id: string) => { this.d.closeExclusive(); this.openBrushSettings(id); },
-      onReset: () => { this.reset(false); this.d.setStatus(`已恢复默认笔架（${this._rack.brushes.length} 个）`, true); },
+      onReset: () => { this.reset(false); this.d.setStatus(`已恢复默认笔架（${this._rack!.brushes.length} 个）`, true); },
     });
 
     // brush-settings 编辑器 Vue 组件
@@ -303,7 +335,7 @@ export class BrushRack {
       canSync: () => this.d.isSignedIn() && this.d.isOnline(),
       snapshot: () => this._rack ? { version: this._rack.version, items: this._rack.brushes, trash: this._rack.trash || [], resetAt: this._rack.resetAt || 0 } : null,
       onBusyChange: () => this.refreshCloudState(),
-      onResult: async (res: any) => {
+      onResult: async (res) => {
         if (res.folder && this._editingId == null) {
           this._rack = { ...(this._rack), version: res.folder.version, brushes: res.folder.items, trash: res.folder.trash, resetAt: res.folder.resetAt };
           { const _n = mergeMissingDefaults(this._rack); if (_n) this._rack = _n; }
@@ -347,7 +379,7 @@ export class BrushRack {
       this.reset(true);
       this.d.setRackDirty(true);
       if (this.d.isSignedIn()) this.syncCloud();
-      this.d.setStatus(`笔架已重置（${this._rack.brushes.length} 个 brush）`, true);
+      this.d.setStatus(`笔架已重置（${this._rack!.brushes.length} 个 brush）`, true);
     });
     if (els.dumpCodeBtn) els.dumpCodeBtn.addEventListener("click", async () => {
       if (!this._rack) return;
@@ -360,10 +392,10 @@ export class BrushRack {
     const activeId = this.d.state.toolStates[this.getRackToolKey(this.ui.tool)]?.activeBrushId;
     let source = activeId ? findBrush(this._rack, activeId) : null;
     if (!source) {
-      const inFolder = brushesByTool(this._rack, this.ui.tool).filter((b: any) => (b.folder || DEFAULT_FOLDER) === this.ui.folder);
-      source = inFolder[0] || this._rack.brushes[0] || null;
+      const inFolder = (brushesByTool(this._rack, this.ui.tool) as Brush[]).filter((b) => (b.folder || DEFAULT_FOLDER) === this.ui.folder);
+      source = inFolder[0] || this._rack!.brushes[0] || null;
     }
-    let newB: any;
+    let newB: Brush;
     if (source) {
       newB = JSON.parse(JSON.stringify(source));
       newB.id = newBrushId();
@@ -395,14 +427,14 @@ export class BrushRack {
       const file = inp.files?.[0];
       if (!file) return;
       try {
-        const b: any = brushFromJSON(await file.text());
+        const b = brushFromJSON(await file.text()) as Brush;
         b.folder = this.ui.folder;
         b.tool = this.ui.tool;
         b.uat = Date.now();
-        this._rack.brushes.push(b);
+        this._rack!.brushes.push(b);
         this.markChanged();
         this.d.setStatus(`已导入：${b.name}`);
-      } catch (e: any) { this.d.setStatus("导入失败：" + (e.message || e), true); }
+      } catch (e) { this.d.setStatus("导入失败：" + String((e as { message?: unknown })?.message || e), true); }
       document.body.removeChild(inp);
     });
     document.body.appendChild(inp);

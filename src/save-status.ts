@@ -43,7 +43,8 @@ export function computeSaveState() {
   if (_store.busy.pushing()) return "cloud-busy";
   if (_store.busy.saving()) return "saving";
   if (_store.edits.localDirty()) return "dirty";
-  const st = _store.cloud.status(session.name, { signedIn: isSignedIn(), hasLocal: true });
+  // session.name: string|null；updateSaveStatus 在调本函数前已 `if(!session.name) return` 守门（跨函数 tsc 看不到）。
+  const st = _store.cloud.status(session.name as string, { signedIn: isSignedIn(), hasLocal: true });
   if (st === "dirty") return "cloud-dirty";     // 本地已存、云端未同步
   if (st === "synced") return "synced";         // 与云端一致
   return "local-only";                          // 未登录（含 cloud-only/absent，对本地视角=只本地）

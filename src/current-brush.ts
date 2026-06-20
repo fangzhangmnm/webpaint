@@ -12,15 +12,23 @@
 
 import { computed, watch } from "../vendor/vue/vue.esm-browser.prod.js";
 import { resolveBrush } from "./resolved-brush.ts";
+import type { BrushPreset } from "./resolved-brush.ts";
+import type { EditorRuntimeState, DialReactive } from "./app-context.ts";
+import type { BrushRack } from "./brush-rack.ts";
 
-export function makeCurrentBrush({ state, dialReactive, rack }: any) {
+interface CurrentBrushDeps { state: EditorRuntimeState; dialReactive: DialReactive; rack: BrushRack; }
+// input 晚于本工厂构造 → bindEngine 分离调用；只触及 brush.invalidateStamp（裸引擎桥）。
+type EngineInput = { brush?: { invalidateStamp?: () => void } } | null | undefined;
+
+export function makeCurrentBrush({ state, dialReactive, rack }: CurrentBrushDeps) {
   // **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。
   const currentBrush = computed(() => {
     void dialReactive.rackVersion;   // 依赖笔架版本（编辑/重置预设后重算活动预设字段）
     const ts = state.toolStates[rack.getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
     const preset = rack.findToolBrushPure(ts);   // 无笔架 → null → DEFAULT 兜底
     return resolveBrush({
-      preset,
+      // 同一运行时 brush 对象的两个视图：rack 存的是完整 Brush，resolveBrush 只读 BrushPreset 子集。
+      preset: preset as BrushPreset | null,
       size: ts.size, opacity: ts.opacity ?? 1.0, flow: ts.flow ?? 1.0,
       color: state.color,
       pressureToSize: state.pressureToSize,
@@ -30,7 +38,7 @@ export function makeCurrentBrush({ state, dialReactive, rack }: any) {
 
   // 命令/反应桥：当前笔变 → 引擎 stamp 缓存失效（flush:"sync" 复刻旧 refreshCurrentBrush 的同步时机）。
   // input 晚于本工厂构造 → bindEngine 分离调用；cb 仍守 input?.（防御）。这是「反应式 UI 态 ↔ 裸引擎态」唯一的桥。
-  const bindEngine = (input: any) =>
+  const bindEngine = (input: EngineInput) =>
     watch(currentBrush, () => { if (input?.brush?.invalidateStamp) input.brush.invalidateStamp(); }, { flush: "sync" });
 
   return { currentBrush, bindEngine };

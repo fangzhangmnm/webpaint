@@ -35,7 +35,18 @@
   // batch 3（v296，2026-06-19）：app 层基础叶子（surfaces/signals/sheets/anchored-popup/session-name）
   //   + color-panel 消费方（带 ui/color-wheel·color-model 级联）。
   // batch 4（v297，2026-06-19）：session-state + editor-state hub（解锁多数消费方闭包；EditorRuntimeState 收紧）。
+  // batch 11（v304，2026-06-19）：最后一簇 AppContext 消费方 → consumer rollout 完成。
+  // batch 12（v305，2026-06-19）：非 ctx 消费方簇（brush-rack keystone + brush-io/current-brush/
+  //   dial-controls/pwa-shell/dev-console/save-status）+ 新 brush-types（brush 形状单一真源）。
   "include": [
+    "src/brush-types.ts",
+    "src/brush-rack.ts",
+    "src/brush-io.ts",
+    "src/current-brush.ts",
+    "src/dial-controls.ts",
+    "src/pwa-shell.ts",
+    "src/dev-console.ts",
+    "src/save-status.ts",
     "src/store/**/*.ts",
     "src/store/**/*.js",
     "src/app-context.ts",

@@ -13,7 +13,7 @@ export interface PwaShellDeps {
 
 export class PwaShell {
   d: PwaShellDeps;
-  reg: any = null;
+  reg: ServiceWorkerRegistration | null = null;
   dismissed = false;
   constructor(d: PwaShellDeps) { this.d = d; }
 
@@ -39,7 +39,7 @@ export class PwaShell {
     this.d.dismissBtn.addEventListener("click", () => { this.dismissed = true; this.d.toast.classList.add("hidden"); });
 
     if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname) && !IS_DEV_ROUTE) {
-      navigator.serviceWorker.addEventListener("message", (e: any) => { if (e.data?.type === "asset-updated") this.show(); });
+      navigator.serviceWorker.addEventListener("message", (e: MessageEvent) => { if (e.data?.type === "asset-updated") this.show(); });
       navigator.serviceWorker.register("./service-worker.js").then((registration) => {
         this.reg = registration;
         if (registration.waiting && navigator.serviceWorker.controller) this.show();

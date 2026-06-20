@@ -13,6 +13,7 @@
 import { createApp, defineComponent, ref } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { quantizeSize } from "./brush-size.ts";
 import { ensureBrushDraftDefaults } from "./brush-settings-model.ts";
+import type { BrushDraft } from "./brush-settings-model.ts";
 
 const SECTION = "brush-settings-section";
 const TITLE = "brush-settings-section-title";
@@ -161,7 +162,7 @@ export function mountBrushSettings(
   }));
   app.mount(el);
   return {
-    open(d: object) { ensureBrushDraftDefaults(d); draft.value = d; },
+    open(d: object) { ensureBrushDraftDefaults(d as BrushDraft); draft.value = d; },
     close() { draft.value = null; },
   };
 }

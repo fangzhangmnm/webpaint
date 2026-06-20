@@ -2,13 +2,21 @@
 // 无 app 状态、无 DOM 副作用之外的耦合：入参拿 rack/brush，出参给文件 + 返回计数/字符串，状态提示留 app。
 
 import { brushToJSON, brushesByTool, DEFAULT_FOLDER } from "./brushes.js";
+import type { Brush, BrushRackData } from "./brush-types.ts";
+
+// navigator.canShare/share 的 files 形参在部分 lib.dom 里未覆盖 → 窄化扩展（不引入 any）。
+type FileShareNavigator = Navigator & {
+  canShare?: (data?: { files?: File[] }) => boolean;
+  share?: (data?: { files?: File[]; title?: string }) => Promise<void>;
+};
 
 // navigator.share 优先（iPad 原生分享），否则 <a download> 兜底。
 export async function shareOrDownloadJSON(blob: Blob, filename: string, title?: string): Promise<void> {
-  if ((navigator as any).canShare && navigator.share) {
+  const nav = navigator as FileShareNavigator;
+  if (nav.canShare && nav.share) {
     const file = new File([blob], filename, { type: blob.type || "application/json" });
-    if ((navigator as any).canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title } as any); return; }
+    if (nav.canShare({ files: [file] })) {
+      try { await nav.share({ files: [file], title }); return; }
       catch { /* 用户取消 / 不支持 → 兜底下载 */ }
     }
   }
@@ -21,14 +29,14 @@ export async function shareOrDownloadJSON(blob: Blob, filename: string, title?: 
 }
 
 // 单笔导出。
-export async function exportBrush(brush: any): Promise<void> {
+export async function exportBrush(brush: Brush): Promise<void> {
   const blob = new Blob([brushToJSON(brush)], { type: "application/json" });
   await shareOrDownloadJSON(blob, `${brush.name || "brush"}-${brush.tool}.json`, brush.name);
 }
 
 // 当前文件夹下所有笔导出成一个 pack。返回导出笔数（0 = 空文件夹，app 决定提示）。
-export async function exportRackFolder(rack: any, tool: string, folder: string): Promise<number> {
-  const brushes = brushesByTool(rack, tool).filter((b: any) => (b.folder || DEFAULT_FOLDER) === folder);
+export async function exportRackFolder(rack: BrushRackData, tool: string, folder: string): Promise<number> {
+  const brushes = (brushesByTool(rack, tool) as Brush[]).filter((b) => (b.folder || DEFAULT_FOLDER) === folder);
   if (brushes.length === 0) return 0;
   const pack = { version: 1, folder, tool, brushes };
   const blob = new Blob([JSON.stringify(pack, null, 2)], { type: "application/json" });
@@ -37,12 +45,12 @@ export async function exportRackFolder(rack: any, tool: string, folder: string):
 }
 
 // dev：把当前笔架拼成 src/brushes.js 的 DEFAULTS_SPEC 源码（纯函数，返回代码字符串）。
-export function buildRackCode(rack: any): string {
+export function buildRackCode(rack: BrushRackData): string {
   const lines: string[] = [];
   lines.push("// Auto-dumped from brush rack. 替换 src/brushes.js DEFAULTS_SPEC array 内容。");
   lines.push("export const DEFAULTS_SPEC = [");
   for (const b of rack.brushes) {
-    const args: Record<string, any> = {};
+    const args: Record<string, unknown> = {};
     args.size = b.size?.base ?? 12;
     args.sizeBaseMax = b.size?.max ?? 200;
     args.hardness = b.shape?.hardness ?? 1.0;

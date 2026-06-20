@@ -9,8 +9,15 @@
 
 import { safeLSSet } from "./safe-ls.ts";
 import { stepFor, quantizeSize } from "./ui/brush-size.ts";
+import type { EditorRuntimeState } from "./app-context.ts";
+import type { BrushRack } from "./brush-rack.ts";
+import type { EditMode } from "./edit-mode.js";
+import type { Board } from "./board.js";
 
-export function makeDialControls({ state, rack, getEditMode }: any) {
+interface DialControlsDeps { state: EditorRuntimeState; rack: BrushRack; getEditMode: () => EditMode; }
+interface DialKeyboardDeps { board: Board; leftDial: { flashSize: () => void }; }
+
+export function makeDialControls({ state, rack, getEditMode }: DialControlsDeps) {
   const setSize = (v: number) => {
     v = Math.max(1, Math.round(v));        // clamp to int
     rack.writeCurrentToolSize(v);          // dial SSoT（反应式 → currentBrush + <LeftDial> 自动跟随）
@@ -23,12 +30,12 @@ export function makeDialControls({ state, rack, getEditMode }: any) {
   const currentDials = () => state.toolStates[rack.getRackToolKey(getEditMode().current())] || state.toolStates.brush;
 
   // 键盘 [ ] 调粗（v132 tool-aware dispatch）。max 从活动预设取；段量化（20内1/50内2/100内5/200内10/500内20/1000内50）。
-  const bindKeyboard = ({ board, leftDial }: any) => {
-    window.addEventListener("wp:adjsize", (e: any) => {
+  const bindKeyboard = ({ board, leftDial }: DialKeyboardDeps) => {
+    window.addEventListener("wp:adjsize", (e: Event) => {
       const t = getEditMode().current();
       if (t === "brush" || t === "eraser" || t === "smudge" || t === "filterBrush") {
         const maxPx = rack.findToolBrushPure(currentDials())?.size?.max || 200;
-        const dir = Math.sign(e.detail) || 1;
+        const dir = Math.sign((e as CustomEvent<number>).detail) || 1;
         const curSize = currentDials().size;
         const next = Math.max(1, Math.min(maxPx, quantizeSize(curSize + dir * stepFor(curSize))));
         setSize(next);

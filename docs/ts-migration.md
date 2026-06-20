@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v304 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v305 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -200,9 +200,17 @@ toolbar 解锁的 4 个消费方一簇入门：`layer-undo`(4)、`transient-pane
 
 **🎉 candidate 2（AppContext 消费方 rollout）全部完成**：~22 个 `initX` 消费方全部 gated。
 
-## 待迁（剩余非消费方 .ts + JS 源）
+### ✅ batch 12 · 非 ctx 消费方簇（v305，2026-06-19）—— brush-rack keystone
+直接构造（不经 ctx）的一簇一批入门：`brush-rack`(22 any，411loc keystone)、`brush-io`(8)、`current-brush`(2)、`dial-controls`(3)、`pwa-shell`(2)、`dev-console`(0)、`save-status`(0)。零 any 出门。typecheck + 388 测试 + bundle 全绿。
+- **新 `brush-types.ts`**：brush / 笔架数据形状的**单一 TS 真源**（`Brush` / `BrushRackData`，诚实描述 `brushes.js` 运行时形状 + `[k]:unknown` 兜底）。brush-rack/brush-io 共用，灭掉「同一形状抄两遍」的隐式 any。
+- `brush-rack`：`BrushRackDeps` 用 `import type` 绑真单例（`EditorRuntimeState`/`DialReactive`/`EditMode`）+ 本地 `RackStore`/`RackSyncResult` 接口；UI 晚绑字段 `d = deps as Deps & UI`（一处 cast 记录 init() 晚绑，余处全类型化，替原 `(this.d as any).els`）；`_rack` 后置 `!`（编辑/导出路径 rack 必已 load）。
+- `dev-console`：`declare global { Window.WebPaint }` 诚实列出挂上的调试成员；`const WP = window.WebPaint = ... || {}` 捕获本地避 strict possibly-undefined。
+- 拉入 program 的连带文件修了 2 个潜伏错：`ui/brush-settings.ts` `open(d as BrushDraft)`、`current-brush` `preset as BrushPreset`（同一运行时对象的两个视图）——皆行为等价 cast。
+- `save-status` 红线接缝：`session.name as string`（updateSaveStatus 已守门，跨函数 tsc 看不到）。
 
-- **非 initX 消费方的 app .ts**（直接构造，不经 ctx）：`brush-rack`/`current-brush`/`dial-controls`/`save-status`/`pwa-shell`/`dev-console`/`brush-io`。可按依赖闭包零散 gate。
+## 待迁（剩余 JS 源）
+
+- 已无未 gate 的 app 层 `.ts`（brush-rack 簇收尾）。剩 `ui/brush-settings-model.ts` 等连带 .ts 已随 import 进 program 受检。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。
 - **手感红区**（`input.js` 1171 行未测 · `brush.js` · `stroke-smoother.js`）= 用户钉死区。
