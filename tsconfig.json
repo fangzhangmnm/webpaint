@@ -50,6 +50,11 @@
   "include": [
     "src/app.ts",
     "src/app-store.ts",
+    "src/ui/brush-settings.ts",
+    "src/ui/brush-settings-model.ts",
+    "src/ui/brush-size.ts",
+    "src/ui/left-dial.ts",
+    "src/version.ts",
     "src/brushes.ts",
     "src/cloud-thumb-cache.ts",
     "src/cloud-thumbs.ts",

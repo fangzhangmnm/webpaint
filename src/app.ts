@@ -13,7 +13,7 @@
 //   session-state   ← 活动文档生命周期（存/换/退）     Store(app-store) ← 本地+云同步机制
 //   currentBrush    ← 不可变 ResolvedBrush（从 dial+预设纯派生，引擎唯一吃）
 
-import { WEBPAINT_VERSION } from "./version.js";
+import { WEBPAINT_VERSION } from "./version.ts";
 import { PaintDoc } from "./doc.ts";
 import { Board } from "./board.ts";
 import { InputController } from "./input.ts";

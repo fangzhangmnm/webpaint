@@ -25,7 +25,7 @@
 //   _activeSessionName，给 app.js 的 ~30 处 read-site 兼容。
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
-import { WEBPAINT_VERSION } from "./version.js";
+import { WEBPAINT_VERSION } from "./version.ts";
 import {
   trashSession, renderThumbBlob,
   setCurrentSessionName,

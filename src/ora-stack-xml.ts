@@ -1,4 +1,4 @@
-import { WEBPAINT_VERSION } from "./version.js";
+import { WEBPAINT_VERSION } from "./version.ts";
 // OpenRaster stack.xml 序列化 —— **纯** 图层树 ↔ XML（无 canvas / 无 zip / 无 PNG）。
 //
 // 从 ora.js 抽出（batch 2）：buildStackXml / parseStackXml 只处理结构（嵌套组 + id + 属性），
