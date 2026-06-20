@@ -31,84 +31,47 @@ import { inputSmooth } from "./stroke-input-smooth.ts";
 import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.ts";
 import { SMOOTH } from "./smooth-config.js";
 import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
-import type { PaintDoc } from "./doc.ts";
-import type { Board as EngineBoard } from "./board.ts";
+import type { PaintDoc, Layer } from "./doc.ts";
+import type { Board } from "./board.ts";
+import type { EditMode } from "./edit-mode.ts";
+import type { UndoStack } from "./history.ts";
+import type { PixelEdit } from "./pixel-edit.ts";
+import type { ResolvedBrush } from "./resolved-brush.ts";
+import type { Selection } from "./selection.ts";
 
-// ---- 局部最小类型（跨文件依赖尚未全部 well-typed；只声明本文件用到的成员）----
-// board（src/board.* 尚未 typed）：视口 / 渲染 / 坐标变换接缝。
-interface Viewport { tx: number; ty: number; scale: number; rot: number; }
-interface Board {
-  canvas: HTMLCanvasElement;
-  viewport: Viewport;
-  minScale: number;
-  maxScale: number;
-  doc: Doc;
-  requestRender(): void;
-  invalidateAll(): void;
-  setCursor(c: { x: number; y: number; size: number; square: boolean } | null): void;
-  screenToDoc(x: number, y: number): { x: number; y: number };
-  markDocDirty(x: number, y: number, w: number, h: number): void;
-  pan(dx: number, dy: number): void;
-  zoomAt(x: number, y: number, factor: number): void;
-  rotateAt(x: number, y: number, dRot: number): void;
-  setViewport(tx: number, ty: number, scale: number, rot: number): void;
-  fitToScreen(): void;
-  ensureCompositeCache(): HTMLCanvasElement;
-  [k: string]: any;
-}
-// doc（src/document.* 尚未 typed）。
-interface Layer {
-  isGroup?: boolean;
-  sampleAt?(ix: number, iy: number): ArrayLike<number>;
-  [k: string]: any;
-}
-interface Doc {
-  width: number;
-  height: number;
-  selection: any;
-  backgroundColor?: string;
-  activeLayer: Layer | null;
-  activeEditableLeaf(): { reason: string };
-  getFloodSourceLayer(): any;
-  [k: string]: any;
-}
-// EditMode 状态机（src/edit-mode.* 尚未 typed）。
-interface EditMode {
-  cursor(): string;
-  current(): string;
-  canDraw(): boolean;
-  isTransient(): boolean;
-  ctrlZMeans(): string;
-  abortTransient(): void;
-  [k: string]: any;
-}
-// 共享 UndoStack（src/history.* 尚未 typed）。
-interface History {
-  push(entry: any): void;
-  registerHandler(type: string, handler: any): void;
-  canUndo(): boolean;
-  canRedo(): boolean;
-  undo(): void;
-  redo(): void;
-  clear(): void;
-  [k: string]: any;
-}
-// PixelEdit 事务（src/pixel-edit.ts，begin/commit/abort 尚未导出精确类型）。
-interface PixelTx {
-  commit(fn: ((layer: Layer, pre: any) => void) | null): void;
-  abort(): void;
-}
-interface PixelHistory {
-  begin(layer: Layer, historyType: string): PixelTx;
-  [k: string]: any;
-}
-interface BrushSettings { size: number; pixelMode?: boolean; streamline?: number; stabilization?: number; [k: string]: any; }
-interface LiquifySettings { mode: string; size: number; strength: number; [k: string]: any; }
-interface FilterBrushState { Filter: any; params: any; [k: string]: any; }
+// ---- 引擎真类型已全部 .ts 化，直接 import（见各引擎模块）。本文件仅保留以下接缝别名/最小壳。----
+// doc 现取 PaintDoc 真类型（board/lasso/pixel-edit 都吃它）。
+type Doc = PaintDoc;
+// 共享 UndoStack（history.ts）。
+type History = UndoStack;
+// PixelEdit 实例（pixel-edit.ts）。begin() 回的事务句柄无 named export → 取 ReturnType。
+type PixelHistory = PixelEdit;
+type PixelTx = ReturnType<PixelEdit["begin"]>;
+// 笔刷 settings = ResolvedBrush（resolved-brush.ts，引擎 beginStroke 吃的不可变值）。
+type BrushSettings = ResolvedBrush;
+// liquify settings：引擎的 LiquifySettings 未 export；input 只用 mode/size/strength，
+//   bleed 等其余字段引擎内部从 settings 取 → 用 ResolvedBrush 同惯例的最小壳 + unknown 兜底。
+interface LiquifySettings { mode: string; size: number; strength: number; bleed?: string; }
+// filterBrush 当前激活态：Filter 是 filter-brush.ts 的 BrushFilter（未 export，对 input 不透明）+ params。
+//   beginStroke 调用点再断言到引擎签名；这里 Filter/params 对 input 不透明 → unknown。
+interface FilterBrushState { Filter: unknown; params: unknown; }
 
 // 活动笔画（brush / liquify / filterBrush 共享 begin/extend/end/cancel 协议）。
-// engine 跨文件未 typed（brush/liquify/filter-brush 仍 .js）→ any，待引擎 typed 后收窄。
-interface ActiveStroke { engine: any; tx: PixelTx; finalize: boolean; }
+// 三引擎的 begin*/extend/end/cancel/flushDirty 接口一致 → 用并集做 engine 字段。
+type StrokeEngine = BrushEngine | LiquifyEngine | FilterBrushEngine;
+interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; }
+
+// history.ts 的 UndoEntry 未 export（领域无关动态壳）。本地镜像：dispatch key + 动态 payload。
+type UndoEntry = Record<string, unknown> & { type: string };
+// 本文件注册的两类 handler 的 entry shape（lasso 复合像素 + 选区变化）。
+//   lasso entry 由 floating-transform.commit 产；selectionChange 由 lasso.endPath/setSelection 产。
+type PixelSnapRef = Parameters<typeof applyPixelSnap>[2];
+type BlobRef = Parameters<typeof applyPixelSnap>[3];
+interface LassoEntry {
+  layers: Array<{ layerId: number; before: PixelSnapRef; after: PixelSnapRef; beforeBlob: BlobRef; afterBlob: BlobRef }>;
+  prevSelection?: Selection | null;
+}
+interface SelectionChangeEntry { before: Selection | null; after: Selection | null; }
 
 // pointer 记录：down 时建立、move/up 累积手感状态（平滑 / 压感 / 死区 / long-press）。
 interface PointerRec {
@@ -412,26 +375,28 @@ export class InputController {
       // v119: commit 时清了 selection，undo 时把它恢复回来
       // 多层 entry：e.layers = [{layerId, before, after, beforeBlob, afterBlob}]（组变换 = 多层；单层 = 1 项）。
       this.history.registerHandler("lasso", {
-        undo: (e: any) => {
-          for (const L of e.layers) applyPixelSnap(this.doc as unknown as PaintDoc, L.layerId, L.before, L.beforeBlob, this.board as unknown as EngineBoard);
-          if (e.prevSelection !== undefined) {
-            this.doc.selection = e.prevSelection;
+        undo: (e: UndoEntry) => {
+          const le = e as unknown as LassoEntry;
+          for (const L of le.layers) applyPixelSnap(this.doc, L.layerId, L.before, L.beforeBlob, this.board);
+          if (le.prevSelection !== undefined) {
+            this.doc.selection = le.prevSelection;
             this.board.invalidateAll();
           }
         },
-        redo: (e: any) => {
-          for (const L of e.layers) applyPixelSnap(this.doc as unknown as PaintDoc, L.layerId, L.after, L.afterBlob, this.board as unknown as EngineBoard);
-          if (e.prevSelection !== undefined) {
+        redo: (e: UndoEntry) => {
+          const le = e as unknown as LassoEntry;
+          for (const L of le.layers) applyPixelSnap(this.doc, L.layerId, L.after, L.afterBlob, this.board);
+          if (le.prevSelection !== undefined) {
             this.doc.selection = null;       // redo 后再清
             this.board.invalidateAll();
           }
         },
-        refsLayer: (e: any, id: any) => e.layers.some((L: any) => L.layerId === id),
+        refsLayer: (e: UndoEntry, id: number) => (e as unknown as LassoEntry).layers.some((L) => L.layerId === id),
       });
       // 选区变化（lasso 圈 / 取消选区 / 反选 等）也进 undo，但不动像素
       this.history.registerHandler("selectionChange", {
-        undo: (e: any) => { this.doc.selection = e.before; this.board.invalidateAll(); },
-        redo: (e: any) => { this.doc.selection = e.after;  this.board.invalidateAll(); },
+        undo: (e: UndoEntry) => { this.doc.selection = (e as unknown as SelectionChangeEntry).before; this.board.invalidateAll(); },
+        redo: (e: UndoEntry) => { this.doc.selection = (e as unknown as SelectionChangeEntry).after;  this.board.invalidateAll(); },
         // 选区不属于某一 layer；refsLayer 永远 false（删图层不影响选区 entry）
         refsLayer: () => false,
       });
@@ -854,7 +819,8 @@ export class InputController {
   _beginStroke(e: PointerEvent, rec: PointerRec, mode: string) {
     const settings = this.getBrushSettings();
     if (!settings || !this.doc.activeLayer) return;
-    const layer = this.doc.activeLayer;
+    // activeLayer 是 Node（叶|组）；上游 activeEditableLeaf 已硬拒组 → 此处确为可写叶。
+    const layer = this.doc.activeLayer as Layer;
     const spec = pixelStrokeSpec(rec.role as string)!;   // draw / erase → 同 stroke 事务 + finalize
     const tx = this.pixelHistory!.begin(layer, spec.historyType);
     this._activeStroke = { engine: this.brush, tx, finalize: spec.finalize };
@@ -868,9 +834,7 @@ export class InputController {
     const scale = this.board.viewport.scale || 1;
     // v249：时间常数指数追踪 + 死区。{tau, deadzone}。
     const smooth = buffered ? _resolveSmooth(settings, scale) : {};
-    // brush.js 的 beginStroke 第 8 参 `t = null` → JS 推断成 null 型；e.timeStamp(number) 传不进。
-    // 仅此调用 cast 绕过上游未 typed 的默认值推断（不改运行时）。
-    (this.brush as any).beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
+    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
     const bbox = this.brush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
@@ -885,7 +849,12 @@ export class InputController {
     this._activeStroke = null;
     as.engine.endStroke();
     const sel = as.finalize ? this.doc.selection : null;
-    as.tx.commit(sel ? (layer, pre) => sel.applyMaskPostStroke(layer, pre) : null);
+    // commit 的 finalize 形参是可选（运行时 falsy 即跳过）；保留旧的 `: null` 分支，仅 type 上窄到入参类型。
+    type CommitFn = NonNullable<Parameters<PixelTx["commit"]>[0]>;
+    const finalize: CommitFn | null = sel
+      ? (layer, pre) => sel.applyMaskPostStroke(layer as Parameters<Selection["applyMaskPostStroke"]>[0], pre)
+      : null;
+    as.tx.commit(finalize as Parameters<PixelTx["commit"]>[0]);
     // 抬笔 commit 帧**强制全屏**：endStroke() 已把 buffer 烤进 layer 并清掉 live overlay（_stroke=null），
     // 这一帧再走 partial 会撞 Windows clip-sliver 灰框——_renderPartial 的 overlay 守卫此刻拦不住（overlay 已 null）。
     // 见 docs/lessons-canvas-edge-bugs.md 坑2：buffered（double-buffer）stroke commit 是守卫的盲区，full 兜底。
@@ -908,13 +877,13 @@ export class InputController {
   _beginLiquify(rec: PointerRec) {
     const settings = this.getLiquifySettings();
     if (!settings || !this.doc.activeLayer) { rec.role = null; return; }
-    const layer = this.doc.activeLayer;
+    const layer = this.doc.activeLayer as Layer;   // 组已被上游硬拒，此处确为叶
     const spec = pixelStrokeSpec(rec.role as string)!;   // liquify → 独立 "liquify" 事务 + finalize
     const tx = this.pixelHistory!.begin(layer, spec.historyType);
     this._activeStroke = { engine: this.liquify, tx, finalize: spec.finalize };
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     // v124 (user：「preview 没 apply 选区」) 把 selection 传给 liquify，stamp 内 mask 外保留 startSnap
-    this.liquify.beginStroke(layer as unknown as Parameters<typeof this.liquify.beginStroke>[0], settings, dx, dy, this.doc.selection);
+    this.liquify.beginStroke(layer, settings, dx, dy, this.doc.selection);
     this.board.requestRender();
   }
 
@@ -928,7 +897,7 @@ export class InputController {
     if (!fbState || !fbState.Filter || !brushSettings || !this.doc.activeLayer) {
       rec.role = null; return;
     }
-    const layer = this.doc.activeLayer;
+    const layer = this.doc.activeLayer as Layer;   // 组已被上游硬拒，此处确为叶
     const spec = pixelStrokeSpec(rec.role as string)!;   // filterBrush → "stroke" 事务，finalize:false
     const tx = this.pixelHistory!.begin(layer, spec.historyType);
     // filterBrush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre → 无需 post-stroke finalize（spec.finalize=false）
@@ -936,7 +905,8 @@ export class InputController {
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
     try {
-      this.filterBrush.beginStroke(layer as unknown as Parameters<typeof this.filterBrush.beginStroke>[0], fbState.Filter, fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
+      // fbState.Filter 对 input 不透明（BrushFilter 未 export）→ 在引擎接缝处断言到 beginStroke 入参类型。
+      this.filterBrush.beginStroke(layer, fbState.Filter as Parameters<FilterBrushEngine["beginStroke"]>[1], fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
     } catch (e) {
       console.warn("[filter brush] begin failed:", e);
       this._activeStroke = null;

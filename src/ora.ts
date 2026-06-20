@@ -49,13 +49,14 @@ type DecodedDoc = PaintDoc & {
 
 // ---- 工具 ----
 
-async function canvasToPngBytes(canvas: any): Promise<Uint8Array> {
-  // OffscreenCanvas 用 convertToBlob，HTMLCanvasElement 用 toBlob —— 分支
+async function canvasToPngBytes(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Uint8Array> {
+  // OffscreenCanvas 用 convertToBlob，HTMLCanvasElement 用 toBlob —— 运行时 feature-detect 分支
   let blob: Blob | null | undefined;
-  if (typeof canvas.convertToBlob === "function") {
-    blob = await canvas.convertToBlob({ type: "image/png" });
-  } else if (typeof canvas.toBlob === "function") {
-    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  const oc = canvas as OffscreenCanvas, hc = canvas as HTMLCanvasElement;
+  if (typeof oc.convertToBlob === "function") {
+    blob = await oc.convertToBlob({ type: "image/png" });
+  } else if (typeof hc.toBlob === "function") {
+    blob = await new Promise<Blob | null>((resolve) => hc.toBlob(resolve, "image/png"));
   } else {
     throw new Error("canvas 无 toBlob / convertToBlob");
   }
@@ -86,9 +87,9 @@ function renderMerged(doc: EncodeDoc) {
  *  cloud-thumbs.js suffix budget = 80KB；留 ~10KB 给 zip 尾巴（CD + EOCD + 扫描余量）→ thumb ≤ 70KB
  *  返 { canvas, png: Uint8Array }
  */
-async function renderThumbnailAdaptive(merged: any, maxBytes = 71680) {
+async function renderThumbnailAdaptive(merged: OffscreenCanvas | HTMLCanvasElement, maxBytes = 71680) {
   const sizes = [256, 192, 128];
-  let lastPng: Uint8Array | null = null, lastCanvas: any = null;
+  let lastPng: Uint8Array | null = null, lastCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   for (let i = 0; i < sizes.length; i++) {
     const c = renderThumbnail(merged, sizes[i]);
     const png = await canvasToPngBytes(c);
@@ -105,7 +106,7 @@ async function renderThumbnailAdaptive(merged: any, maxBytes = 71680) {
  * 的 smartResample——之前这里抄了一份且循环条件写成 && 导致细长画布退化成单次缩，
  * 现删除重复实现直接复用 SSoT。
  */
-function renderThumbnail(merged: any, maxSide = 256) {
+function renderThumbnail(merged: OffscreenCanvas | HTMLCanvasElement, maxSide = 256) {
   const srcW = merged.width, srcH = merged.height;
   const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
   const tw = Math.max(1, Math.round(srcW * scale));
