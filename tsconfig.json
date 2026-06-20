@@ -47,6 +47,7 @@
     "src/layer-undo.ts",
     "src/selection-ops.ts",
     "src/filters-adjust.ts",
+    "src/import-image.ts",
     "src/cloud-freshness.ts",
     "src/boot.ts",
     "src/surfaces.ts",

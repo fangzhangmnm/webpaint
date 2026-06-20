@@ -19,11 +19,24 @@ import { onPasswordVerified } from "./crypto-state.js";
 import { setTool, updateLassoToolbar } from "./toolbar.ts";
 import { _makeFullLayerSelection } from "./selection-ops.ts";
 import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./transient-panels.ts";
+import type { AppContext } from "./app-context.ts";
+
+// 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
+const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
+
+// 导入时往 doc 活层写像素（doc.js 未类型化 → 只描述用到的字段；ctx 容 OffscreenCanvas/HTMLCanvasElement）。
+interface ImportLayer {
+  name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number;
+  canvas: CanvasImageSource; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+}
+// big-import sheet 的结果。
+interface BigImportChoice { w: number; h: number; mode: string; }
+interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // app 单例 / 跨模块函数（initImportImage(ctx) 装入）。
-let doc: any, board: any, input: any, editMode: any;
-let setStatus: any, updateSaveStatus: any;
-let renderLayersPanel: any, setGalleryOpen: any, uniqueLocalName: any;
+let doc: AppContext["doc"], board: AppContext["board"], input: AppContext["input"], editMode: AppContext["editMode"];
+let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"];
+let renderLayersPanel: AppContext["renderLayersPanel"], setGalleryOpen: AppContext["setGalleryOpen"], uniqueLocalName: AppContext["uniqueLocalName"];
 
 // 图库「导入照片」会 set 此 flag=true，oraFileInput change 读后立即复位（语义：照片打底新 doc）。
 let _addImportAsNewDoc = false;
@@ -41,7 +54,7 @@ export function _openImagePicker() {
 
 // 「导入照片」语义：用照片新建一个 doc（doc 尺寸 = 照片尺寸，cap 8192），
 // 单层就是这张照片。和"导入图片 / .ora"（叠新图层到当前 doc）不同。
-export async function importImageAsNewDoc(file: any) {
+export async function importImageAsNewDoc(file: File) {
   const bitmap = await decodeImageFile(file);
   const w = Math.min(8192, bitmap.width);
   const h = Math.min(8192, bitmap.height);
@@ -50,20 +63,22 @@ export async function importImageAsNewDoc(file: any) {
   // 共用 session.newDoc 骨架（消 survey rec #4 孪生）：照片绘制 = fillLayer0；doc 替换/全部重置/
   // 落盘/checkpoint 归 session。照片导入因此与空白新建完全对齐（清 selection/参考窗 + color 归黑 +
   // 加密归明文 + 关图库）——human 定：之前不重置这些反而是小 bug。
-  await session.newDoc({ name, w, h, fillLayer0: (layer: any) => {
-    layer.name = file.name.replace(/\.[^.]+$/, "") || "图像";
-    layer.bboxX = 0; layer.bboxY = 0;
-    layer.bboxW = w; layer.bboxH = h;
+  await session.newDoc({ name, w, h, fillLayer0: (layer: unknown) => {
+    const L = layer as ImportLayer;
+    L.name = file.name.replace(/\.[^.]+$/, "") || "图像";
+    L.bboxX = 0; L.bboxY = 0;
+    L.bboxW = w; L.bboxH = h;
     const c = (typeof OffscreenCanvas !== "undefined")
       ? new OffscreenCanvas(w, h)
       : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
-    layer.canvas = c;
-    layer.ctx = c.getContext("2d", { willReadFrequently: false });
-    layer.ctx.imageSmoothingEnabled = true;
-    layer.ctx.imageSmoothingQuality = "high";
+    L.canvas = c;
+    const lctx = c.getContext("2d", { willReadFrequently: false })!;
+    L.ctx = lctx;
+    lctx.imageSmoothingEnabled = true;
+    lctx.imageSmoothingQuality = "high";
     // 超 8192 缩小走 step-halving 抗锯齿；否则原样画
     const src = (w < bitmap.width || h < bitmap.height) ? smartResample(bitmap, w, h) : bitmap;
-    layer.ctx.drawImage(src, 0, 0, w, h);
+    lctx.drawImage(src, 0, 0, w, h);
     bitmap.close?.();
   } });
   setStatus(`新建（照片）：${name}（${w}×${h}）`);
@@ -73,15 +88,15 @@ export async function importImageAsNewDoc(file: any) {
 // 居中对齐；如果图片比 doc 大，按比例缩到 80% 短边，避免一上来就盖死。
 // v134 big-import sheet：图片 > 画布 弹询问
 //   resolve { w, h, mode } 或 null（取消）
-function _openBigImportSheet(ow: number, oh: number, docW: number, docH: number) {
-  const backdrop = document.getElementById("bigImportBackdrop");
-  const sheet = document.getElementById("bigImportSheet");
+function _openBigImportSheet(ow: number, oh: number, docW: number, docH: number): Promise<BigImportChoice | null> {
+  const backdrop = document.getElementById("bigImportBackdrop") as HTMLElement;
+  const sheet = document.getElementById("bigImportSheet") as HTMLElement;
   const wIn = document.getElementById("bigImportW") as HTMLInputElement;
   const hIn = document.getElementById("bigImportH") as HTMLInputElement;
   const modeSel = document.getElementById("bigImportMode") as HTMLSelectElement;
-  const info = document.getElementById("bigImportInfo");
-  const okBtn = document.getElementById("bigImportConfirm");
-  const cancelBtn = document.getElementById("bigImportCancel");
+  const info = document.getElementById("bigImportInfo") as HTMLElement;
+  const okBtn = document.getElementById("bigImportConfirm") as HTMLElement;
+  const cancelBtn = document.getElementById("bigImportCancel") as HTMLElement;
   // fit-to-canvas（保比例 = 短边贴齐）
   const scale = Math.min(docW / ow, docH / oh);
   const fitW = Math.round(ow * scale);
@@ -117,34 +132,34 @@ function _openBigImportSheet(ow: number, oh: number, docW: number, docH: number)
   }
   backdrop.classList.remove("hidden");
   sheet.classList.remove("hidden");
-  return new Promise((resolve) => {
+  return new Promise<BigImportChoice | null>((resolve) => {
     const cleanup = () => {
       backdrop.classList.add("hidden");
       sheet.classList.add("hidden");
-      (okBtn as any).onclick = null;
-      (cancelBtn as any).onclick = null;
-      (backdrop as any).onclick = null;
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      backdrop.onclick = null;
     };
-    (okBtn as any).onclick = () => {
+    okBtn.onclick = () => {
       const w = Math.max(1, Math.min(8192, parseFloat(wIn.value) | 0));
       const h = Math.max(1, Math.min(8192, parseFloat(hIn.value) | 0));
       const mode = modeSel.value || "bicubic";
       cleanup();
       resolve({ w, h, mode });
     };
-    (cancelBtn as any).onclick = () => { cleanup(); resolve(null); };
-    (backdrop as any).onclick  = () => { cleanup(); resolve(null); };
+    cancelBtn.onclick = () => { cleanup(); resolve(null); };
+    backdrop.onclick  = () => { cleanup(); resolve(null); };
   });
 }
 
-export async function importImageAsLayer(file: any, opts: any = {}) {
+export async function importImageAsLayer(file: File, opts: { center?: { x: number; y: number } } = {}) {
   const bitmap = await decodeImageFile(file);
   const ow = bitmap.width, oh = bitmap.height;
   const docW = doc.width, docH = doc.height;
   // v134 (user：「导入超大图片弹 sheet」) bitmap 比 doc 大 → 询问 fit / 保原 / 自定义
-  let w = ow, h = oh, imgSmoothing = "high";
+  let w = ow, h = oh; let imgSmoothing: ImageSmoothingQuality = "high";
   if (ow > docW || oh > docH) {
-    const choice = await _openBigImportSheet(ow, oh, docW, docH) as any;
+    const choice = await _openBigImportSheet(ow, oh, docW, docH);
     if (!choice) { bitmap.close?.(); return; }   // user 取消
     w = choice.w; h = choice.h;
     imgSmoothing = choice.mode === "nearest" ? "low" : "high";
@@ -167,12 +182,13 @@ export async function importImageAsLayer(file: any, opts: any = {}) {
     ? new OffscreenCanvas(w, h)
     : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
   layer.canvas = c;
-  layer.ctx = c.getContext("2d", { willReadFrequently: false });
-  layer.ctx.imageSmoothingEnabled = imgSmoothing !== "low";
-  layer.ctx.imageSmoothingQuality = imgSmoothing;
+  const lctx = c.getContext("2d", { willReadFrequently: false })!;
+  layer.ctx = lctx;
+  lctx.imageSmoothingEnabled = imgSmoothing !== "low";
+  lctx.imageSmoothingQuality = imgSmoothing;
   // 缩小且非 nearest（像素画保持硬边）→ step-halving 抗锯齿；否则原样画
   const lsrc = (imgSmoothing !== "low" && (w < ow || h < oh)) ? smartResample(bitmap, w, h) : bitmap;
-  layer.ctx.drawImage(lsrc, 0, 0, w, h);
+  lctx.drawImage(lsrc, 0, 0, w, h);
   bitmap.close?.();
   renderLayersPanel();
   board.invalidateAll();
@@ -190,7 +206,7 @@ export async function importImageAsLayer(file: any, opts: any = {}) {
       setTool("lasso");
       const ok = input.lasso.liftSelectionForTransform(layer);
       if (ok) {
-        editMode.enterTransient("transform", { apply: _commitTransform, abort: _cancelTransform });
+        (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("transform", { apply: _commitTransform, abort: _cancelTransform });
         input.lasso.setMode("free");
         updateLassoToolbar();
         _suppressTransientPanels("transform");
@@ -203,7 +219,7 @@ export async function importImageAsLayer(file: any, opts: any = {}) {
   setStatus(`已导入为新图层：${file.name}`);
 }
 
-export function initImportImage(ctx: any) {
+export function initImportImage(ctx: AppContext) {
   doc = ctx.doc;
   board = ctx.board;
   input = ctx.input;
@@ -218,8 +234,8 @@ export function initImportImage(ctx: any) {
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);
 
   // file-input plumbing：按文件类型分流（.ora→adopt / image→As{NewDoc|Layer}）。
-  els.oraFileInput.addEventListener("change", async (e: any) => {
-    const file = e.target.files && e.target.files[0];
+  els.oraFileInput.addEventListener("change", async (e: Event) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
     // 图库里"导入照片"语义：把照片当新 doc 打底（不是叠到当前）
     const asNewDoc = _addImportAsNewDoc;
     _addImportAsNewDoc = false;
@@ -254,25 +270,25 @@ export function initImportImage(ctx: any) {
       } else {
         setStatus(`不支持的文件类型：${file.type || file.name}`);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.warn("[import] failed:", err);
-      setStatus("导入失败：" + (err && err.message || err));
+      setStatus("导入失败：" + errMsg(err));
     }
   });
 
   // v156 桌面拖拽图片到画布 → 导入为新层（落点 = 拖放位置）。external image = new layer 语义。
-  window.addEventListener("dragover", (e) => {
+  window.addEventListener("dragover", (e: DragEvent) => {
     if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) e.preventDefault();   // 允许 drop
   });
-  window.addEventListener("drop", async (e: any) => {
+  window.addEventListener("drop", async (e: DragEvent) => {
     const files = [...(e.dataTransfer?.files || [])];
-    const img = files.find((f: any) => f.type && f.type.startsWith("image/"));
+    const img = files.find((f: File) => f.type && f.type.startsWith("image/"));
     if (!img) return;                                  // 非图片（如 .ora）不拦，让默认行为
     e.preventDefault();
     if (document.body.dataset.mode === "gallery") { setStatus("退出图库后再拖入图片", true); return; }
     const center = board.screenToDoc(e.clientX, e.clientY);
     try { await importImageAsLayer(img, { center }); }
-    catch (err: any) { setStatus(`拖入失败：${err.message || err}`, true); }
+    catch (err) { setStatus(`拖入失败：${errMsg(err)}`, true); }
   });
 
   // 图库「导入照片」入口（galleryAddPopup → addImportPhoto）设 _addImportAsNewDoc 经此函数。

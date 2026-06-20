@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v301 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v302 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -176,9 +176,15 @@ toolbar 解锁的 4 个消费方一簇入门：`layer-undo`(4)、`transient-pane
 
 **关键发现**：**动态 dispatch payload 用一处带注释的 `Record<string, any>` alias 是诚实的**——undo entry / filter params 这类「shape 由 push 方决定、owner 是未类型化 .js」的数据，编穷举 interface 是过度工程；一个具名 alias + candidate 3 收紧的备注，比散落 `any` 干净，也不假装确定性。
 
-- **AppContext 消费方 rollout（candidate 2 续）**：batch 3-8 已 gated。剩 ~6 个 `initX`。
-  - `import-image.ts`(26) 现已可 gate（selection-ops/transient-panels/toolbar 都入门了）。之后 `gallery-shell`/`export-import-menu` 解锁。
-  - `settings-menu`(21)↔`doc-ops`(16) 互相依赖 → 必须**成对** gate；`side-windows`/`topbar-menu`/`smooth-dev-panel` 等它俩。
+### ✅ batch 9 · import-image（v302，2026-06-19）
+图片/.ora 导入（`import-image.ts` 26 any · canvas 重）入门。零 any 出门。typecheck + 388 测试全绿、bundle 通过。
+- ctx 单例 + `ImportLayer`（OffscreenCanvas/HTMLCanvasElement 写像素）+ `BigImportChoice`。
+- canvas 联合：`c.getContext("2d", …)!` 捕获到 `const lctx`（避免 layer.ctx 的 null 散读）；`imgSmoothing: ImageSmoothingQuality`。
+- big-import sheet DOM 全 `as HTMLElement`（删 `(x as any).onclick`）；`els.oraFileInput` 收窄 `HTMLInputElement`（candidate 4）。
+- fillLayer0 经 session.newDoc 的 `(layer: unknown)` 契约 → 内部 `as ImportLayer`。
+
+- **AppContext 消费方 rollout（candidate 2 续）**：batch 3-9 已 gated。剩 5 个 `initX`。
+  - `settings-menu`(21)↔`doc-ops`(16) 互相依赖 → 必须**成对** gate（下一批）；`side-windows`/`topbar-menu`/`smooth-dev-panel`/`export-import-menu`/`gallery-shell` 等它俩。
   屎山内部按「诚实描述现状」类型化（北极星：少熵）。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。

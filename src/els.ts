@@ -123,7 +123,7 @@ export const els = {
   menuPixelGrid: byId("menuPixelGrid"),
   menuFps: byId("menuFps"),
   menuCheckUpdate: byId("menuCheckUpdate"),
-  oraFileInput: byId("oraFileInput"),
+  oraFileInput: byId<HTMLInputElement>("oraFileInput"),
   genericBackdrop: byId("genericBackdrop"),
   genericSheet: byId("genericSheet"),
   genericSheetTitle: byId("genericSheetTitle"),
