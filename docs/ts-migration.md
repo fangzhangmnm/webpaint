@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v302 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v303 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -183,8 +183,14 @@ toolbar 解锁的 4 个消费方一簇入门：`layer-undo`(4)、`transient-pane
 - big-import sheet DOM 全 `as HTMLElement`（删 `(x as any).onclick`）；`els.oraFileInput` 收窄 `HTMLInputElement`（candidate 4）。
 - fillLayer0 经 session.newDoc 的 `(layer: unknown)` 契约 → 内部 `as ImportLayer`。
 
-- **AppContext 消费方 rollout（candidate 2 续）**：batch 3-9 已 gated。剩 5 个 `initX`。
-  - `settings-menu`(21)↔`doc-ops`(16) 互相依赖 → 必须**成对** gate（下一批）；`side-windows`/`topbar-menu`/`smooth-dev-panel`/`export-import-menu`/`gallery-shell` 等它俩。
+### ✅ batch 10 · settings-menu ↔ doc-ops 成对（v303，2026-06-19）
+互相依赖的一对（`settings-menu` 21 + `doc-ops` 16 any）必须同批 gate。零 any 出门。typecheck + 388 测试全绿、bundle 通过。
+- settings-menu：ctx 单例 + `applyX(on: boolean)` ×7 + `ShortcutLike`（KEYBOARD_SHORTCUTS）+ openSheet/closeSheet 容 null。
+- doc-ops：ctx 单例 + `Rect`/`CropState`/`TransientOpts`；crop 拖拽 handler `PointerEvent` + `_cropState.startMouse!`（drag 期非空）。
+- els：`resampleW/H/Lock/Mode` 收窄 input/select（candidate 4）。
+
+- **AppContext 消费方 rollout（candidate 2 续）**：batch 3-10 已 gated。**剩最后一簇**（依赖闭包全部已入门，可一起 gate）：
+  `gallery-shell`(19)、`side-windows`(16)、`topbar-menu`(10)、`export-import-menu`(2)、`smooth-dev-panel`(1)。
   屎山内部按「诚实描述现状」类型化（北极星：少熵）。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。

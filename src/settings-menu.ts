@@ -12,46 +12,52 @@ import { applyTheme, cycleTheme, THEME_LABEL } from "./theme.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.js";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
 import { positionPopup } from "./anchored-popup.ts";
+import type { AppContext } from "./app-context.ts";
 
-let state: any, board: any, setStatus: any, store: any, updateSaveStatus: any;
+// KEYBOARD_SHORTCUTS 元素（input.js 未类型化 → 描述渲染用到的字段）。
+interface ShortcutLike { category?: string; desc: string; combo: string; }
+
+let state: AppContext["state"], board: AppContext["board"], setStatus: AppContext["setStatus"], store: AppContext["store"], updateSaveStatus: AppContext["updateSaveStatus"];
 
 // openSheet/closeSheet：app.js-local 小工具被快捷键 sheet 用，inline 复制一份（app 仍各自保留）
-function openSheet(sheet: any, backdrop: any) {
+function openSheet(sheet: HTMLElement | null, backdrop: HTMLElement | null) {
+  if (!sheet || !backdrop) return;
   backdrop.classList.remove("hidden");
   sheet.classList.remove("hidden");
 }
-function closeSheet(sheet: any, backdrop: any) {
+function closeSheet(sheet: HTMLElement | null, backdrop: HTMLElement | null) {
+  if (!sheet || !backdrop) return;
   backdrop.classList.add("hidden");
   sheet.classList.add("hidden");
 }
 
-function setMenuItem(btn: any, on: any, stateLabel = on ? "开" : "关") {
+function setMenuItem(btn: HTMLElement, on: boolean, stateLabel = on ? "开" : "关") {
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   const st = btn.querySelector('.menu-item-state');
   if (st) st.textContent = stateLabel;
 }
 
-function applyPressureSize(on: any) {
+function applyPressureSize(on: boolean) {
   state.pressureToSize = !!on;           // 全局开关 SSoT（反应式 → currentBrush 自动重派生）
   setMenuItem(els.menuPressureSize, on);
   safeLSSet("webpaint.pToSize", on ? "1" : "0");
 }
-function applyPressureOpacity(on: any) {
+function applyPressureOpacity(on: boolean) {
   state.pressureToOpacity = !!on;        // 反应式 → currentBrush 自动重派生
   setMenuItem(els.menuPressureOpacity, on);
   safeLSSet("webpaint.pToOpacity", on ? "1" : "0");
 }
-function applyLongPressPick(on: any) {
+function applyLongPressPick(on: boolean) {
   state.longPressPick = !!on;
   setMenuItem(els.menuLongPressPick, on);
   safeLSSet("webpaint.longPressPick", on ? "1" : "0");
 }
-function applySingleFingerDraw(on: any) {
+function applySingleFingerDraw(on: boolean) {
   state.singleFingerDraw = !!on;
   setMenuItem(els.menuSingleFingerDraw, on);
   safeLSSet("webpaint.singleFingerDraw", on ? "1" : "0");
 }
-export function applyCheckerboard(on: any) {
+export function applyCheckerboard(on: boolean) {
   // v125: checkerboard per-doc，不再写 localStorage
   state.checkerboard = !!on;
   setMenuItem(els.menuCheckerboard, on);
@@ -61,14 +67,14 @@ export function applyCheckerboard(on: any) {
 }
 
 // v163 像素栅格：全局开关（视图辅助，跟设备不跟文件），localStorage 持久化，默认开
-function applyPixelGrid(on: any) {
+function applyPixelGrid(on: boolean) {
   board.setPixelGridEnabled?.(!!on);
   setMenuItem(els.menuPixelGrid, !!on);
   safeLSSet("webpaint.pixelGrid", on ? "1" : "0");
 }
 
 // v275 FPS 计：dev 性能读数（角落 overlay；设备级开关，localStorage 持久化，默认关）。防煤气灯。
-function applyFps(on: any) {
+function applyFps(on: boolean) {
   board.setShowFps?.(!!on);
   setMenuItem(els.menuFps, !!on);
   safeLSSet("webpaint.fps", on ? "1" : "0");
@@ -80,11 +86,11 @@ const _shortcutsBackdrop = document.getElementById("shortcutsBackdrop");
 const _shortcutsBody = document.getElementById("shortcutsBody");
 function _renderShortcutsSheet() {
   if (!_shortcutsBody) return;
-  const byCat = new Map();
+  const byCat = new Map<string, ShortcutLike[]>();
   for (const sc of KEYBOARD_SHORTCUTS) {
     const cat = sc.category || "其它";
     if (!byCat.has(cat)) byCat.set(cat, []);
-    byCat.get(cat).push(sc);
+    byCat.get(cat)!.push(sc);
   }
   // 同 combo 多 entry（如 Escape 在 floating / hasSelection 两条）合并展示
   let html = "";
@@ -97,7 +103,7 @@ function _renderShortcutsSheet() {
   _shortcutsBody.innerHTML = html;
 }
 
-export function setMenuOpen(open: any) {
+export function setMenuOpen(open: boolean) {
   els.menuPanel.classList.toggle("hidden", !open);
   els.menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) {
@@ -108,7 +114,7 @@ export function setMenuOpen(open: any) {
   }
 }
 
-export function initSettingsMenu(ctx) {
+export function initSettingsMenu(ctx: AppContext) {
   ({ state, board, setStatus, store, updateSaveStatus } = ctx);
 
   els.menuPressureSize.addEventListener("click", () => {
@@ -173,13 +179,13 @@ export function initSettingsMenu(ctx) {
   applySingleFingerDraw(state.singleFingerDraw);
   applyCheckerboard(state.checkerboard);
 
-  els.menuBtn.addEventListener("click", (e: any) => {
+  els.menuBtn.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     setMenuOpen(els.menuPanel.classList.contains("hidden"));
   });
-  document.addEventListener("pointerdown", (e: any) => {
+  document.addEventListener("pointerdown", (e: Event) => {
     if (els.menuPanel.classList.contains("hidden")) return;
-    if (els.menuPanel.contains(e.target) || els.menuBtn.contains(e.target)) return;
+    if (els.menuPanel.contains(e.target as Node) || els.menuBtn.contains(e.target as Node)) return;
     setMenuOpen(false);
   });
 }

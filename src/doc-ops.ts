@@ -8,14 +8,19 @@
 import { els } from "./els.ts";
 import { bumpDoc } from "./signals.ts";
 import { resizeCropRect, cropRectToInts } from "./crop-geometry.ts";
+import type { AppContext } from "./app-context.ts";
+
+interface Rect { x: number; y: number; w: number; h: number; }
+interface CropState { rect: Rect; drag: string | null; startMouse: { x: number; y: number } | null; startRect: Rect | null; }
+interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // ctx 绑入：core 单例
-let editMode: any, doc: any, board: any, history: any, setStatus: any;
+let editMode: AppContext["editMode"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
 // 命令 = 拥有它的模块的接口（显式 import，不经 ctx）
 import { setMenuOpen } from "./settings-menu.ts";
 import { setAdjustOpen } from "./filters-adjust.ts";
 // ctx 绑入：仍在 app.js 的编排件（app-local function）
-let _suppressTransientPanels: any, _restoreTransientPanels: any;
+let _suppressTransientPanels: AppContext["_suppressTransientPanels"], _restoreTransientPanels: AppContext["_restoreTransientPanels"];
 
 // ===== v110/114 crop / resample / adjust =====
 // 通用：op 前先 commit floating + 把当前 doc + viewport snapshot 当 before
@@ -26,7 +31,7 @@ function _captureDocBefore() {
 function _captureDocAfter() {
   return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
 }
-function _pushDocTransform(before: any, after: any, label: string) {
+function _pushDocTransform(before: unknown, after: unknown, label: string) {
   history.push({ type: "docTransform", before, after });   // history.push 同步派 wp:histchange → 编辑门已标游标+云脏（无需再标）
   if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   board.invalidateAll();
@@ -48,15 +53,15 @@ export function runDocTransform(label: string, applyFn: () => void) {
 // v114: 裁切后让原 (rect.x, rect.y) 像素在屏上不挪 → viewport.tx/ty 减去 (rect.x, rect.y) × scale
 // 数学：old 屏位 = old_tx + rect.x × scale；new 屏位 = new_tx + 0 × scale = new_tx
 // 要等 → new_tx = old_tx + rect.x × scale
-function _shiftViewportAfterCrop(rect: any) {
+function _shiftViewportAfterCrop(rect: { x: number; y: number }) {
   const v = board.viewport;
   v.tx = v.tx + rect.x * v.scale;
   v.ty = v.ty + rect.y * v.scale;
 }
 
 // 自由裁切（8-handle）----
-let _cropState: any = null;     // { rect:{x,y,w,h} in doc, drag:'nw'|'n'|'ne'|...|'move'|null, startMouse, startRect }
-function _docRectToScreen(r: any) {
+let _cropState: CropState | null = null;     // { rect:{x,y,w,h} in doc, drag:'nw'|'n'|'ne'|...|'move'|null, startMouse, startRect }
+function _docRectToScreen(r: Rect) {
   const { tx, ty, scale } = board.viewport;
   return { x: r.x * scale + tx, y: r.y * scale + ty, w: r.w * scale, h: r.h * scale };
 }
@@ -88,7 +93,7 @@ function _openCropMode() {
   _renderCropOverlay();
   _suppressTransientPanels("crop");
   // crop transient：apply/abort 都 = 丢弃裁切框（真裁只走 Apply 按钮）。决定性动作/ctrl-z 不会误裁。
-  editMode.enterTransient("crop", { apply: _closeCropMode, abort: _closeCropMode });
+  (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("crop", { apply: _closeCropMode, abort: _closeCropMode });
 }
 function _closeCropMode() {
   _cropState = null;
@@ -131,7 +136,7 @@ function _closeResampleDialog() {
   els.resampleSheet.classList.add("hidden");
 }
 
-export function initDocOps(ctx) {
+export function initDocOps(ctx: AppContext) {
   ({ editMode, doc, board, history, setStatus,
      _suppressTransientPanels, _restoreTransientPanels } = ctx);
 
@@ -209,37 +214,37 @@ export function initDocOps(ctx) {
   // 裁切 overlay 拖拽 (handle / rect 内 = move)
   (function bindCropOverlayPointer() {
     const overlay = document.getElementById("cropOverlay")!;
-    overlay.addEventListener("pointerdown", (e: any) => {
+    overlay.addEventListener("pointerdown", (e: PointerEvent) => {
       if (!_cropState) return;
       e.preventDefault();
       e.stopPropagation();
       // v125 (user：「crop 的时候 选区不应该点击空白时可拖动，只有拖动 handler 才行」)
       //   只有 [data-handle] 命中才进 drag；rect 内空白 → no-op（防误碰整体移动）
-      const handle = e.target?.dataset?.handle || null;
+      const handle = (e.target as HTMLElement | null)?.dataset?.handle || null;
       if (!handle) return;
       // 捕获在 handle 上（overlay 现在 pointer-events:none，捕在它身上不稳）。pointerup 自动释放。
-      try { e.target.setPointerCapture(e.pointerId); } catch {}
+      try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch {}
       _cropState.drag = handle;
       _cropState.startMouse = { x: e.clientX, y: e.clientY };
       _cropState.startRect = { ...(_cropState.rect) };
     });
-    overlay.addEventListener("pointermove", (e: any) => {
+    overlay.addEventListener("pointermove", (e: PointerEvent) => {
       if (!_cropState || !_cropState.drag) return;
-      const dx_screen = e.clientX - _cropState.startMouse.x;
-      const dy_screen = e.clientY - _cropState.startMouse.y;
+      const dx_screen = e.clientX - _cropState.startMouse!.x;
+      const dy_screen = e.clientY - _cropState.startMouse!.y;
       const scale = board.viewport.scale;
       const dx = dx_screen / scale;
       const dy = dy_screen / scale;
       // 8-handle resize 几何（含「缩到下限对边不动」+ v127 向外扩张）抽到 crop-geometry.js
-      _cropState.rect = resizeCropRect(_cropState.drag, _cropState.startRect, dx, dy, { min: 4, max: 8192 });
+      _cropState.rect = resizeCropRect(_cropState.drag, _cropState.startRect!, dx, dy, { min: 4, max: 8192 });
       _renderCropOverlay();
     });
-    overlay.addEventListener("pointerup", (e: any) => {
+    overlay.addEventListener("pointerup", (e: PointerEvent) => {
       if (!_cropState) return;
       try { overlay.releasePointerCapture(e.pointerId); } catch {}
       _cropState.drag = null;
     });
-    overlay.addEventListener("pointercancel", (e: any) => {
+    overlay.addEventListener("pointercancel", (e: PointerEvent) => {
       if (!_cropState) return;
       try { overlay.releasePointerCapture(e.pointerId); } catch {}
       _cropState.drag = null;

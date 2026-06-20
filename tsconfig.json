@@ -48,6 +48,8 @@
     "src/selection-ops.ts",
     "src/filters-adjust.ts",
     "src/import-image.ts",
+    "src/settings-menu.ts",
+    "src/doc-ops.ts",
     "src/cloud-freshness.ts",
     "src/boot.ts",
     "src/surfaces.ts",
