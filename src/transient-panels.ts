@@ -7,16 +7,17 @@
 import { closeExclusive } from "./panel-state.js";
 import { updateLassoToolbar } from "./toolbar.ts";
 import { raiseWindow, registerWindow } from "./surfaces.ts";
+import type { AppContext } from "./app-context.ts";
 
-let input: any, board: any;
+let input: AppContext["input"], board: AppContext["board"];
 
 // v116: transient mode panel suppression
 // user：「transient 的时候有些窗口应该暂时 hide... 大部分窗口都是准模态的，而不是一直留在画布上」
 // 进 transient (lasso transform / crop / color adjust)：把不相关 float 暂时藏起；
 // 退出时复原。brush rack 走 closeExclusive 顺便关；brush settings 全屏 view 不动 (用户主动开的)
-let _suppressedDuringTransient = [];
-export function _suppressTransientPanels(mode) {
-  const allow = {
+let _suppressedDuringTransient: { el: HTMLElement; id: string }[] = [];
+export function _suppressTransientPanels(mode: string) {
+  const allow: Record<string, string[]> = {
     transform:      ["referencePanel", "layersPanel"],     // transform 时还要看引用图 / 切活动层
     crop:           ["referencePanel"],
     "adjust-color": ["referencePanel", "layersPanel"],
@@ -61,7 +62,7 @@ export function _cancelTransform() {
   _restoreTransientPanels();
 }
 
-export function initTransientPanels(ctx) {
+export function initTransientPanels(ctx: AppContext) {
   input = ctx.input;
   board = ctx.board;
 

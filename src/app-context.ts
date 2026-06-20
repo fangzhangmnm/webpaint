@@ -31,7 +31,7 @@ export interface ToolDial {
   variantId?: string | null;
 }
 export interface EditorRuntimeState {
-  filterBrush: { Filter: unknown; params: unknown; variantLabel?: string } | null;
+  filterBrush: { Filter: unknown; params: Record<string, unknown>; variantId?: string; variantLabel?: string } | null;
   color: string;
   pressureToSize: boolean;
   pressureToOpacity: boolean;

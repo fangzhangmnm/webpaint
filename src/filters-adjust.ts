@@ -12,16 +12,39 @@ import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
 import { getFilter, listFilters, onFilterRegistered } from "./filters.js";
 import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";
 
-let state: any, editMode: any, doc: any, board: any, history: any;
-let setStatus: any, store: any, updateSaveStatus: any;
-let _bringPanelTop: any;
-let _suppressTransientPanels: any, _restoreTransientPanels: any;
 import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式 import）
 import { requireEditableLeaf } from "./editable-leaf.ts";
+import type { AppContext } from "./app-context.ts";
+
+// Filter 对象（filters.js 未类型化 → 描述本面板用到的接口）。
+interface FilterLike {
+  id: string; title: string; modes: string[]; category?: string;
+  defaults(): Record<string, unknown>;
+  buildBody(body: HTMLElement, state: unknown, onChange: () => void): void;
+  bake(src: Uint8ClampedArray, out: Uint8ClampedArray, params: unknown, mask: Uint8ClampedArray | null, w: number, h: number): void;
+  brushVariants?: { id: string; title: string; params: Record<string, unknown> }[];
+  boundaryModes?: { id: string; title: string }[];
+}
+// adjust panel 操作的 doc 活层（doc.js 未类型化 → 只描述用到的）。
+interface AdjustLayer { id: number; name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; ctx: CanvasRenderingContext2D; snapshot(): unknown; }
+// editMode.enterTransient 的 apply/abort（edit-mode.js 未类型化默认 null → 调用处断言真签名）。
+interface TransientOpts { apply?: () => void; abort?: () => void; }
+// filter region preview 态（surrogate canvas + 提取的源/掩码数据）。
+interface AdjustState {
+  Filter: FilterLike; active: AdjustLayer; params: Record<string, unknown>;
+  beforeSnap: unknown; sur: HTMLCanvasElement; surCtx: CanvasRenderingContext2D;
+  srcImg: ImageData; maskData: Uint8ClampedArray | null; _rafId: number;
+  picker: FilterLike[] | null;
+}
+
+let state: AppContext["state"], editMode: AppContext["editMode"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"];
+let setStatus: AppContext["setStatus"], store: AppContext["store"], updateSaveStatus: AppContext["updateSaveStatus"];
+let _bringPanelTop: AppContext["_bringPanelTop"];
+let _suppressTransientPanels: AppContext["_suppressTransientPanels"], _restoreTransientPanels: AppContext["_restoreTransientPanels"];
 
 // ---- topbar：adjustments popup（液化 / 后续调色 etc）----
 // 单按钮 → 弹一列 menu-item（同 menuPanel 模式）。学 Procreate adjustments icon。
-export function setAdjustOpen(open) {
+export function setAdjustOpen(open: boolean) {
   els.adjustPopup.classList.toggle("hidden", !open);
   els.topAdjustBtn.setAttribute("aria-expanded", open ? "true" : "false");
   if (open) {
@@ -40,21 +63,21 @@ export function setAdjustOpen(open) {
 // _adjustState = { Filter, active, params, beforeSnap, sur, surCtx, srcImg, maskData, _rafId }
 // 入口 _openFilterPanel(filterId)；Reset / Cancel / Apply 共用
 // preview 用 rAF coalesce：slider drag 不堵队列（user：「液化笔刷事件 last commit，slider drag 也是，gaussian blur fps 低 OK，别 queue 卡半天」）
-let _adjustState = null;     // 见上注释
+let _adjustState: AdjustState | null = null;     // 见上注释
 // === 老 BCSH 实现已迁 src/filters.js HsbFilter，这里只剩 panel infra ===
 
 // 准备 surrogate canvas + 提取 src/mask 数据
-function _initFilterSurrogate(L) {
+function _initFilterSurrogate(L: AdjustLayer) {
   const sur = document.createElement("canvas");
   sur.width = L.bboxW; sur.height = L.bboxH;
-  const surCtx = sur.getContext("2d");
+  const surCtx = sur.getContext("2d")!;
   surCtx.drawImage(L.canvas, 0, 0);
   const srcImg = surCtx.getImageData(0, 0, L.bboxW, L.bboxH);
   let maskData = null;
   if (doc.selection) {
     const m = document.createElement("canvas");
     m.width = L.bboxW; m.height = L.bboxH;
-    const mctx = m.getContext("2d");
+    const mctx = m.getContext("2d")!;
     mctx.drawImage(doc.selection.maskCanvas,
       doc.selection.bboxX - L.bboxX, doc.selection.bboxY - L.bboxY);
     maskData = mctx.getImageData(0, 0, L.bboxW, L.bboxH).data;
@@ -64,10 +87,10 @@ function _initFilterSurrogate(L) {
 
 // v132 opts.picker = [Filter, ...]：在 panel body 顶部插一个 dropdown 切其他 filter
 //   切换 = cancel 当前 → reopen 新 filter（同一 picker）。用于"艺术滤镜"组
-function _openFilterPanel(filterId, opts = {}) {
+function _openFilterPanel(filterId: string, opts: { picker?: FilterLike[] } = {}) {
   const Filter = getFilter(filterId);
   if (!Filter) { setStatus(`未知 filter：${filterId}`, true); return; }
-  const L = requireEditableLeaf(doc, setStatus);   // 组/隐藏 → 标准状态行 + 退出（取代旧的只查 !L）
+  const L = requireEditableLeaf(doc, setStatus) as AdjustLayer | null;   // 组/隐藏 → 标准状态行 + 退出（取代旧的只查 !L）
   if (!L) return;
   if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("活动图层是空的", true); return; }
   // v232 (user：「液化状态下调出色彩平衡，液化没自动关掉」)：filterBrush（液化/锐化模糊）是持久
@@ -122,7 +145,7 @@ function _openFilterPanel(filterId, opts = {}) {
   _runFilterPreview();      // 初次渲染（identity）
   _suppressTransientPanels("adjust-color");
   // adjust transient：apply=烤进(true)，abort=丢弃(false)。_closeFilterPanel 是 sync 点（见其尾 exitTransient）。
-  editMode.enterTransient("adjust", { apply: () => _closeFilterPanel(true), abort: () => _closeFilterPanel(false) });
+  (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("adjust", { apply: () => _closeFilterPanel(true), abort: () => _closeFilterPanel(false) });
 }
 
 // preview coalesce：rAF 保证最多 1 帧 1 次 bake，slider drag 不堵队列
@@ -138,13 +161,14 @@ function _onFilterChange() {
 }
 function _runFilterPreview() {
   const s = _adjustState;
+  if (!s) return;
   const outImg = s.surCtx.createImageData(s.srcImg.width, s.srcImg.height);
   s.Filter.bake(s.srcImg.data, outImg.data, s.params, s.maskData, s.srcImg.width, s.srcImg.height);
   s.surCtx.putImageData(outImg, 0, 0);
   board.invalidateAll();
 }
 
-function _closeFilterPanel(applied) {
+function _closeFilterPanel(applied: boolean) {
   if (!_adjustState) return;
   const L = _adjustState.active;
   if (_adjustState._rafId) { cancelAnimationFrame(_adjustState._rafId); _adjustState._rafId = 0; }
@@ -192,7 +216,7 @@ function _renderFilterMenu() {
   const addHr = () => {
     const hr = document.createElement("hr"); hr.className = "menu-sep"; container.appendChild(hr);
   };
-  const addItem = (label, prefixSvg, onClick) => {
+  const addItem = (label: string, prefixSvg: string, onClick: () => void) => {
     const btn = document.createElement("button");
     btn.className = "menu-item menu-item-with-icon";
     btn.type = "button";
@@ -242,8 +266,8 @@ function _openArtistPicker() {
 //        + variantId 优先用 toolStates.filterBrush.variantId 持久化值
 //        + toolbar 渲染子算法 dropdown（user：「不同算法是 toolbar dropdown」）
 //   退出：清 state.filterBrush；关 rack；setTool 回前一个
-let _filterBrushPreviousTool = null;
-function _enterFilterBrushMode(Filter) {
+let _filterBrushPreviousTool: string | null = null;
+function _enterFilterBrushMode(Filter: FilterLike) {
   editMode.applyPendingTransient();
   _filterBrushPreviousTool = editMode.current() === "filterBrush" ? "brush" : editMode.current();
   // 取持久化的 variantId（user 上次选过的；新 doc 默认第一个）
@@ -274,18 +298,19 @@ function _exitFilterBrushMode() {
 // 渲染 toolbar：title + variant dropdown (if multi) + 退出
 function _renderFilterBrushToolbar() {
   if (!state.filterBrush) return;
-  const { Filter, variantId } = state.filterBrush;
+  const fb = state.filterBrush;                  // 捕获非空引用（闭包里 state.filterBrush 不被收窄）
+  const Filter = fb.Filter as FilterLike;        // filterBrush.Filter 在 AppContext 里是 unknown（owner=filters.js）
+  const variantId = fb.variantId;
   const tb = document.getElementById("filterBrushToolbar");
   const title = document.getElementById("filterBrushTitle");
   if (!tb || !title) return;
   tb.classList.remove("hidden");
   title.textContent = Filter.title;
   // dropdown：清掉旧的，按 brushVariants 重建
-  let sel = document.getElementById("filterBrushVariantSel");
-  if (sel) sel.remove();
+  document.getElementById("filterBrushVariantSel")?.remove();
   const variants = Filter.brushVariants || [];
   if (variants.length > 1) {
-    sel = document.createElement("select");
+    const sel = document.createElement("select");
     sel.id = "filterBrushVariantSel";
     sel.className = "crop-toolbar-btn";
     sel.style.padding = "2px 6px";
@@ -300,11 +325,11 @@ function _renderFilterBrushToolbar() {
       const v = variants.find((x) => x.id === sel.value);
       if (!v) return;
       // 切 variant 别丢 bleed（boundaryModes filter 才有这个 key）
-      state.filterBrush.params = Filter.boundaryModes
-        ? { ...v.params, bleed: state.filterBrush.params.bleed }
+      fb.params = Filter.boundaryModes
+        ? { ...v.params, bleed: fb.params.bleed }
         : v.params;
-      state.filterBrush.variantId = v.id;
-      state.filterBrush.variantLabel = v.title;
+      fb.variantId = v.id;
+      fb.variantLabel = v.title;
       if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = v.id;
       // UI 态不 mark dirty（user 2026-06-10）：variant 选择是工具态，保存时顺手捞；真应用滤镜走 histchange 门。
       setStatus(`已切 ${v.title}`);
@@ -314,15 +339,14 @@ function _renderFilterBrushToolbar() {
   }
   // v147 边界取样下拉：仅当 filter 声明 boundaryModes（液化）且有选区时渲染。
   // feature 声明数据 + 通用渲染 → 删 filter 即删 UI，不再像旧 #liquifyPanel 那样静态腐烂。
-  let bsel = document.getElementById("filterBrushBleedSel");
-  if (bsel) bsel.remove();
+  document.getElementById("filterBrushBleedSel")?.remove();
   if (Filter.boundaryModes && doc.selection) {
-    bsel = document.createElement("select");
+    const bsel = document.createElement("select");
     bsel.id = "filterBrushBleedSel";
     bsel.className = "crop-toolbar-btn";
     bsel.style.padding = "2px 6px";
     bsel.title = "选区边界：位移源落到选区外怎么办";
-    const curBleed = state.filterBrush.params.bleed || "edge";
+    const curBleed = fb.params.bleed || "edge";
     for (const b of Filter.boundaryModes) {
       const opt = document.createElement("option");
       opt.value = b.id;
@@ -331,9 +355,9 @@ function _renderFilterBrushToolbar() {
       bsel.appendChild(opt);
     }
     bsel.addEventListener("change", () => {
-      state.filterBrush.params = { ...state.filterBrush.params, bleed: bsel.value };
+      fb.params = { ...fb.params, bleed: bsel.value };
       safeLSSet("webpaint.liquify.bleed", bsel.value);
-      const m = Filter.boundaryModes.find((b) => b.id === bsel.value);
+      const m = Filter.boundaryModes!.find((b) => b.id === bsel.value);
       setStatus(`边界：${m ? m.title : bsel.value}`);
     });
     // 插在 variant select 后（没有 variant 就插 title 后）
@@ -341,17 +365,17 @@ function _renderFilterBrushToolbar() {
   }
 }
 
-export function initFiltersAdjust(ctx) {
+export function initFiltersAdjust(ctx: AppContext) {
   ({ state, editMode, doc, board, history, setStatus, store, updateSaveStatus,
      _bringPanelTop, _suppressTransientPanels, _restoreTransientPanels } = ctx);
 
-  els.topAdjustBtn.addEventListener("click", (e) => {
+  els.topAdjustBtn.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     setAdjustOpen(els.adjustPopup.classList.contains("hidden"));
   });
-  document.addEventListener("pointerdown", (e) => {
+  document.addEventListener("pointerdown", (e: Event) => {
     if (els.adjustPopup.classList.contains("hidden")) return;
-    if (els.adjustPopup.contains(e.target) || els.topAdjustBtn.contains(e.target)) return;
+    if (els.adjustPopup.contains(e.target as Node) || els.topAdjustBtn.contains(e.target as Node)) return;
     setAdjustOpen(false);
   });
 
@@ -363,14 +387,14 @@ export function initFiltersAdjust(ctx) {
   document.getElementById("filterBrushOpenRack")?.addEventListener("click", () => {
     openExclusive(PANELS.RACK_FILTER_BRUSH);
   });
-  document.getElementById("adjustReset").addEventListener("click", () => {
+  document.getElementById("adjustReset")?.addEventListener("click", () => {
     if (!_adjustState) return;
     _adjustState.params = _adjustState.Filter.defaults();
     els.adjustParamsBody.innerHTML = "";
     _adjustState.Filter.buildBody(els.adjustParamsBody, _adjustState, _onFilterChange);
     _onFilterChange();
   });
-  document.getElementById("adjustCancel").addEventListener("click", () => _closeFilterPanel(false));
-  document.getElementById("adjustPanelClose").addEventListener("click", () => _closeFilterPanel(false));
-  document.getElementById("adjustApply").addEventListener("click", () => _closeFilterPanel(true));
+  document.getElementById("adjustCancel")?.addEventListener("click", () => _closeFilterPanel(false));
+  document.getElementById("adjustPanelClose")?.addEventListener("click", () => _closeFilterPanel(false));
+  document.getElementById("adjustApply")?.addEventListener("click", () => _closeFilterPanel(true));
 }

@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v300 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v301 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -163,10 +163,22 @@ typecheck + 388 测试全绿、bundle 通过。零 any 出门。
 - **DOM 类型化是负 any**：把 module-level DOM lets 从 `any` 改成真元素类型后，散在各处的 `(x as any)` use-site cast 一次性消失（51 any 里很大一块是这种）。typed-at-source > cast-at-use。
 - **未类型 .js 的「默认 null 收窄」陷阱**：edit-mode.js `enterTransient(name, {apply=null, abort=null}={})` 被 tsc 推断成 apply/abort: `null` → 传函数报错。在调用处断言方法签名是最小修（candidate 3 给 edit-mode.js 真类型时移除）。
 
-- **AppContext 消费方 rollout（candidate 2 续）**：基础叶子 + hub + cloud-freshness/boot + layers-panel + toolbar 已 gated（batch 3-7）。剩 ~10 个 `initX`。
-  - `layer-undo.ts`(4)、`selection-ops.ts`(12)、`transient-panels.ts`(2)、`filters-adjust.ts`(11) 现已**全部可 gate**（.ts 依赖闭包 = layers-panel/toolbar/editable-leaf 已入门）。
-  - `import-image.ts`(26) 还差 `selection-ops`；之后 `gallery-shell`/`export-import-menu` 解锁。
-  - `settings-menu`/`doc-ops`/`side-windows`/`topbar-menu`/`smooth-dev-panel` 互相 + 向 settings-menu 级联，是下一个小簇。
+### ✅ batch 8 · toolbar 下游簇（v301，2026-06-19）
+toolbar 解锁的 4 个消费方一簇入门：`layer-undo`(4)、`transient-panels`(2)、`selection-ops`(12)、`filters-adjust`(11)。零 any 出门。typecheck + 388 测试全绿、bundle 通过。
+
+| 文件 | 要点 |
+|---|---|
+| `transient-panels.ts` | ctx 单例 + `_suppressedDuringTransient: {el,id}[]` + `allow: Record<string,string[]>`。 |
+| `layer-undo.ts` | ctx 单例 + 9 个 undo handler 回调 `(e: UndoEntry)`。`type UndoEntry = Record<string, any>`——**异构动态 dispatch payload，history.js 是未类型化 owner**；与其编 9 个抛弃型 interface，不如一处带注释的 alias（candidate 3 收紧成判别联合）。 |
+| `selection-ops.ts` | ctx 单例 + `LayerLike`（canvas 几何）；canvas `getContext("2d")!`；`requireEditableLeaf(...) as LayerLike`；enterTransient 断言。 |
+| `filters-adjust.ts` | ctx 单例 + `FilterLike`/`AdjustLayer`/`AdjustState`（filters.js 未类型化）。filter-brush toolbar 重写：捕获 `const fb = state.filterBrush`（闭包不收窄）+ `Filter as FilterLike`。 |
+| `app-context.ts` | `EditorRuntimeState.filterBrush` 加 `params: Record<string,unknown>` + `variantId?`（filters-adjust 读写）。 |
+
+**关键发现**：**动态 dispatch payload 用一处带注释的 `Record<string, any>` alias 是诚实的**——undo entry / filter params 这类「shape 由 push 方决定、owner 是未类型化 .js」的数据，编穷举 interface 是过度工程；一个具名 alias + candidate 3 收紧的备注，比散落 `any` 干净，也不假装确定性。
+
+- **AppContext 消费方 rollout（candidate 2 续）**：batch 3-8 已 gated。剩 ~6 个 `initX`。
+  - `import-image.ts`(26) 现已可 gate（selection-ops/transient-panels/toolbar 都入门了）。之后 `gallery-shell`/`export-import-menu` 解锁。
+  - `settings-menu`(21)↔`doc-ops`(16) 互相依赖 → 必须**成对** gate；`side-windows`/`topbar-menu`/`smooth-dev-panel` 等它俩。
   屎山内部按「诚实描述现状」类型化（北极星：少熵）。
 - **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
   也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。
