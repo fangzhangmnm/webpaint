@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v306 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v307 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
