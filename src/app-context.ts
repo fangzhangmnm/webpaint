@@ -12,12 +12,12 @@
 //   · 反应式 state / dialReactive / rack / 浮窗 / gallery 的形状暂在此**诚实描述**（不 import 其 .ts 源，
 //     避免 cascade 把屎山拖进门）——随各源逐步类型化再收敛引用。本接口是增量推进的锚，不是终态。
 
-import type { PaintDoc } from "./doc.js";
-import type { Board } from "./board.js";
-import type { InputController } from "./input.js";
-import type { EditMode } from "./edit-mode.js";
-import type { UndoStack } from "./history.js";
-import type { PixelEdit } from "./pixel-edit.js";
+import type { PaintDoc } from "./doc.ts";
+import type { Board } from "./board.ts";
+import type { InputController } from "./input.ts";
+import type { EditMode } from "./edit-mode.ts";
+import type { UndoStack } from "./history.ts";
+import type { PixelEdit } from "./pixel-edit.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 
 // ---- 反应式 RAM 态（editor-state.ts 的 state/dialReactive；此处描述消费方读到的字段）----

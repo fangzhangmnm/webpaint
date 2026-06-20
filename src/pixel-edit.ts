@@ -10,19 +10,49 @@
 //   lasso 的复合 entry（像素 + 选区，一步 undo）与 selectionChange 不归这里——它们用下面的原语。
 // - render 策略留在 caller（各工具 partial / full 不同），commit/abort 不替 caller 决定刷新粒度。
 
-import { findNodeById } from "./doc.js";   // 递归按 id 找叶（图层树：层可能在组内）
+import { findNodeById } from "./doc.ts";   // 递归按 id 找叶（图层树：层可能在组内）
+import type { PaintDoc, Layer } from "./doc.ts";
+import type { Board } from "./board.ts";
+import type { UndoStack } from "./history.ts";
+
+// Layer.snapshot()/restoreFromSnapshot() 共用的像素快照形状（doc.ts 里 LayerSnap 未 export，本地镜像）。
+interface PixelSnap {
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
+  imageData?: ImageData | null;
+  bitmap?: ImageBitmap | null;
+}
+
+// restoreFromSnapshot 的入参形状（doc.ts 里 LayerSnap 未 export，借方法签名取之）。
+type LayerSnapArg = Parameters<Layer["restoreFromSnapshot"]>[0];
+
+// 一条纯像素 undo entry（before/after 像素 snap + 压缩后的 Blob）。
+interface PixelEntry {
+  type: string;
+  layerId: number;
+  before: PixelSnap;
+  after: PixelSnap;
+  beforeBlob: Blob | null;
+  afterBlob: Blob | null;
+}
+
+// handler 派发记录 = 异构动态 payload（history.ts 是未类型化 owner，UndoEntry 未 export）。
+// 与 layer-undo.ts 同惯例：Record<string, any> 收 entry，宽到能喂回 registerHandler。
+type UndoEntry = Record<string, any>;
 
 // ---- 低层原语（export；lasso 复合 handler + app.js 图层 handler 都复用这套）----
 
 // 取 Layer.snapshot() 出来的 { bboxX/Y/W/H, imageData } 异步压成 PNG Blob。
 // 成功时回调拿到 Blob 且 snap.imageData 被置 null 释放 raw。失败保留 imageData（仍可走 imageData 路径）。
-export function compressPixelSnap(snap, onBlob) {
+export function compressPixelSnap(snap: PixelSnap | null, onBlob: (blob: Blob | null) => void) {
   if (!snap || !snap.imageData) { onBlob(null); return; }
   if (snap.bboxW <= 0 || snap.bboxH <= 0) { snap.imageData = null; onBlob(null); return; }
   const c = document.createElement("canvas");
   c.width = snap.bboxW;
   c.height = snap.bboxH;
-  c.getContext("2d").putImageData(snap.imageData, 0, 0);
+  c.getContext("2d")!.putImageData(snap.imageData, 0, 0);
   c.toBlob((blob) => {
     if (!blob) { onBlob(null); return; }
     snap.imageData = null;     // 释放 raw
@@ -32,21 +62,21 @@ export function compressPixelSnap(snap, onBlob) {
 
 // 把 { snap, blob } 应用到指定 layer。imageData 优先（同步），否则解 blob（异步）。
 // invalidateAll 在像素到位后才调，避免渲染 stale 帧 flash。
-export function applyPixelSnap(doc, layerId, snap, blob, board) {
-  const layer = findNodeById(doc.layers, layerId);
+export function applyPixelSnap(doc: PaintDoc, layerId: number, snap: PixelSnap | null, blob: Blob | null, board: Board | null) {
+  const layer = findNodeById(doc.layers, layerId) as Layer | null;
   if (!layer) return Promise.resolve();
   if (snap && snap.imageData) {
-    layer.restoreFromSnapshot(snap);
+    layer.restoreFromSnapshot(snap as LayerSnapArg);
     board?.invalidateAll();
     return Promise.resolve();
   }
   if (!blob) {
-    if (snap) layer.restoreFromSnapshot({ ...snap, imageData: null });
+    if (snap) layer.restoreFromSnapshot({ ...snap, imageData: null } as LayerSnapArg);
     board?.invalidateAll();
     return Promise.resolve();
   }
   return createImageBitmap(blob).then((bitmap) => {
-    layer.restoreFromSnapshot({ ...snap, bitmap });
+    layer.restoreFromSnapshot({ ...snap, bitmap } as unknown as LayerSnapArg);
     bitmap.close?.();
     board?.invalidateAll();
   });
@@ -56,18 +86,22 @@ export function applyPixelSnap(doc, layerId, snap, blob, board) {
 // commit(finalize?) 里 finalize(layer, preSnap) 在拍 after 之前跑——选区 mask 的插槽
 // （#2 选区模块将来把 selection.applyMaskPostStroke 插这里）。preSnap 保持私有。
 class PixelEditTx {
-  constructor(owner, layer, type) {
+  _owner: PixelEdit;
+  _type: string;
+  _layerId: number;
+  _pre: PixelSnap;
+  constructor(owner: PixelEdit, layer: Layer, type: string) {
     this._owner = owner;
     this._type = type;
     this._layerId = layer.id;
     this._pre = layer.snapshot();
   }
   // 入栈成功返回 true；layer 中途没了（删层）→ 不入栈返回 false。
-  commit(finalize) {
-    const layer = findNodeById(this._owner.doc.layers, this._layerId);
+  commit(finalize?: (layer: Layer, preSnap: PixelSnap) => void) {
+    const layer = findNodeById(this._owner.doc.layers, this._layerId) as Layer | null;
     if (!layer) return false;
     if (finalize) finalize(layer, this._pre);
-    const entry = {
+    const entry: PixelEntry = {
       type: this._type,
       layerId: this._layerId,
       before: this._pre,
@@ -75,24 +109,27 @@ class PixelEditTx {
       beforeBlob: null,
       afterBlob: null,
     };
-    this._owner.history.push(entry);
+    this._owner.history.push(entry as unknown as Parameters<UndoStack["push"]>[0]);
     compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
     compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
     return true;
   }
   // 还原到 preSnap，不入栈。always invalidateAll（像素回退要全刷）。
   abort() {
-    const layer = findNodeById(this._owner.doc.layers, this._layerId);
+    const layer = findNodeById(this._owner.doc.layers, this._layerId) as Layer | null;
     if (layer) {
-      layer.restoreFromSnapshot(this._pre);
+      layer.restoreFromSnapshot(this._pre as LayerSnapArg);
       this._owner.board?.invalidateAll();
     }
   }
 }
 
 export class PixelEdit {
+  doc: PaintDoc;
+  history: UndoStack;
+  board: Board | null;
   // 纯 in-process。board 可选（测试时省略，commit/abort 不依赖渲染）。
-  constructor({ doc, history, board }) {
+  constructor({ doc, history, board }: { doc: PaintDoc; history: UndoStack; board?: Board | null }) {
     this.doc = doc;
     this.history = history;
     this.board = board || null;
@@ -100,15 +137,15 @@ export class PixelEdit {
     // filterBrush 复用 "stroke"；都是 before/after 像素 snap，handler 一致。
     for (const type of ["stroke", "liquify"]) {
       history.registerHandler(type, {
-        undo: (e) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
-        redo: (e) => applyPixelSnap(this.doc, e.layerId, e.after,  e.afterBlob,  this.board),
-        refsLayer: (e, id) => e.layerId === id,
-      });
+        undo: (e: UndoEntry) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
+        redo: (e: UndoEntry) => applyPixelSnap(this.doc, e.layerId, e.after,  e.afterBlob,  this.board),
+        refsLayer: (e: UndoEntry, id: number) => e.layerId === id,
+      } as unknown as Parameters<UndoStack["registerHandler"]>[1]);
     }
   }
 
   // 起一笔：立刻拍 before-snapshot。caller 随后让 engine 改 layer，结束时 commit / abort。
-  begin(layer, type) {
+  begin(layer: Layer, type: string) {
     return new PixelEditTx(this, layer, type);
   }
 }

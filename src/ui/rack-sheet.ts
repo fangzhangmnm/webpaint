@@ -11,10 +11,11 @@
 
 import { createApp, defineComponent, computed } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { collectFolders, brushesInFolder, smoothstepRadialGradient } from "../brush-rack-view.ts";
+import type { Brush } from "../brush-types.ts";
 
 export interface RackSheetOpts {
   defaultFolder: string;
-  getBrushes(): any[];        // 当前工具的笔（读 _brushRack，gated rackVersion）
+  getBrushes(): Brush[];      // 当前工具的笔（读 _brushRack，gated rackVersion）
   getRackEmpty(): boolean;    // 整个笔架空（显「恢复默认」）
   getFolder(): string;        // rackUi.folder
   getActiveId(): string | null;
@@ -39,7 +40,7 @@ export function mountRackSheet(el: HTMLElement, opts: RackSheetOpts): RackSheetH
       const tiles = computed(() => brushesInFolder(brushes.value, effectiveFolder.value, opts.defaultFolder));
       const activeId = computed(() => opts.getActiveId());
 
-      function tileStyle(b: any) {
+      function tileStyle(b: Brush) {
         const s: Record<string, string> = { background: smoothstepRadialGradient(b.shape?.hardness ?? 1) };
         if (b.shape?.kind === "ellipse") s.transform = `rotate(${b.shape.rotation}deg) scaleY(${b.shape.aspect})`;
         return s;

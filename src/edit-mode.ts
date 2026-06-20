@@ -17,8 +17,26 @@
 
 const FALLBACK_TOOL = "brush";   // returnTool 兜底
 
+// 一条 mode 的能力描述。transient 专属的两个语义旋钮 onToolSwitch/returnTo 为可选。
+interface Cap {
+  canDraw: boolean;
+  allowsColor: boolean;
+  cursor: string;
+  ctrlZ: string;
+  transient: boolean;
+  onToolSwitch?: string;
+  returnTo?: string | null;
+}
+type EditModeName = keyof typeof CAPS;
+
+// 进 transient 时携带的 apply/abort 闭包。
+interface TransientHooks {
+  apply: (() => void) | null;
+  abort: (() => void) | null;
+}
+
 // 能力表 = 纯数据，一张 flat enum。新增滤镜/笔刷 effect = payload，不动此表（见 docs 两个 payload 家族）。
-const CAPS = {
+const CAPS: Record<string, Cap> = {
   // 持久·交互式 stamp 工具（brush-driven）：canDraw、笔刷 cursor、ctrlZ history、产 "stroke" PixelEdit。
   brush:       { canDraw: true,  allowsColor: true,  cursor: "brush", ctrlZ: "history",         transient: false },
   // eraser allowsColor:true（2026-06-06 user 改）：橡皮本身不吃 state.color，但禁用色板按钮**误导**
@@ -40,7 +58,11 @@ const CAPS = {
 const FALLBACK = CAPS.brush;
 
 export class EditMode {
-  constructor({ initialTool = "brush" } = {}) {
+  _current: string;
+  _returnTool: string;
+  _transient: TransientHooks | null;
+
+  constructor({ initialTool = "brush" }: { initialTool?: string } = {}) {
     this._current = initialTool;      // 单轴：当前 mode（CAPS key）
     this._returnTool = initialTool;   // transient 结束回到的持久 tool（内部，只从持久 mode 捕获）
     this._transient = null;           // 当前 transient 的 { apply, abort }（仅 transient 时非 null）
@@ -61,7 +83,7 @@ export class EditMode {
 
   // ---- 切持久工具 ----
   // 切工具 = 用户决定性动作。transient 期间按该 transient 的 onToolSwitch 语义 apply/cancel 它，再进点的工具。
-  setTool(tool) {
+  setTool(tool: string) {
     if (this.isTransient()) {
       this._clearTransient(this._cap().onToolSwitch === "cancel" ? "abort" : "apply");
       this._current = tool; this._returnTool = tool; this._emit();
@@ -73,7 +95,7 @@ export class EditMode {
 
   // ---- transient ----
   // 进 transform/crop/adjust。_returnTool 只从持久 mode 捕获（transient→transient 先 apply 旧的，不覆盖）。
-  enterTransient(name, { apply = null, abort = null } = {}) {
+  enterTransient(name: string, { apply = null, abort = null }: Partial<TransientHooks> = {}) {
     if (!this.isTransient()) this._returnTool = this._current;
     this._clearTransient("apply");      // silent；下面统一 emit 一次
     this._current = name;
@@ -108,7 +130,7 @@ export class EditMode {
 
   // 内部：跑当前 transient 的 apply|abort，清 _transient，**不改 _current、不 emit**（调用方决定）。
   // 先清字段再跑闭包，防闭包内重入看到旧 transient。返回是否确有动作。
-  _clearTransient(action) {
+  _clearTransient(action: string) {
     const t = this._transient;
     if (!t) return false;
     this._transient = null;

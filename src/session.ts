@@ -14,12 +14,32 @@
 //   - 但内存里 _activeSessionName 用 safe default，避免 save 走 rename 路径
 //     把"加载失败的 path"当 oldName 删掉
 
-import { encodeDocToOra, decodeOraToDoc } from "./ora.js";
+import { encodeDocToOra, decodeOraToDoc } from "./ora.ts";
 import { compositeLayers } from "./layer-composite.js";
 import { looksEncryptedContainer } from "./crypto-format.js";
 import { smartResample, canvasToBlob } from "./resample.js";
 import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.js";
 import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）
+import type { PaintDoc } from "./doc.ts";
+
+// navigator.canShare/share 的 files 形参在部分 lib.dom 里未覆盖 → 窄化扩展（不引入 any）。
+// 抄 src/brush-io.ts 的 FileShareNavigator 模式。
+type FileShareNavigator = Navigator & {
+  canShare?: (data?: { files?: File[] }) => boolean;
+  share?: (data?: { files?: File[]; title?: string }) => Promise<void>;
+};
+
+interface SaveSessionOpts {
+  referenceImage?: Blob;
+  webpaintState?: object;
+}
+
+interface SessionPkg {
+  name: string;
+  updatedAt: number;
+  ora: Blob;
+  thumb: Blob | null;
+}
 
 const LS_CURRENT_NAME = "webpaint.currentSessionName";
 const DEFAULT_NAME = "未命名";
@@ -31,7 +51,7 @@ export function getCurrentSessionName() {
   try { return localStorage.getItem(LS_CURRENT_NAME) || ""; }
   catch { return ""; }
 }
-export function setCurrentSessionName(name) {
+export function setCurrentSessionName(name: string) {
   try { localStorage.setItem(LS_CURRENT_NAME, name); } catch {}
 }
 
@@ -41,7 +61,7 @@ export function setCurrentSessionName(name) {
  *  opts.referenceImage: optional Blob —— 嵌进 .ora 跟着文件走（webpaint/reference.png）。
  *  opts.webpaintState:  optional 对象，进 webpaint/state.json
  */
-export async function saveSession(doc, name, opts = {}) {
+export async function saveSession(doc: PaintDoc, name?: string, opts: SaveSessionOpts = {}) {
   const sessionName = name || getCurrentSessionName();
   const [ora, thumb] = await Promise.all([
     encodeDocToOra(doc, {
@@ -56,7 +76,7 @@ export async function saveSession(doc, name, opts = {}) {
 /** **单一本地落盘点**：组 pkg（name/updatedAt/ora/thumb）+ 原子 putSession。
  *  两条路共用——saveSession（活 doc 算 ora+thumb，热路径不解码）与 LocalAdapter
  *  （Store 流：bytes 解码渲 thumb，冷路径）。pkg 结构只在这里定义一次。 */
-export async function putSessionPkg(name, ora, thumb = null) {
+export async function putSessionPkg(name: string, ora: Blob, thumb: Blob | null = null) {
   const pkg = { name, updatedAt: Date.now(), ora, thumb };
   await putSession(name, pkg);
   return pkg;
@@ -65,7 +85,7 @@ export async function putSessionPkg(name, ora, thumb = null) {
 /** 渲染缩略图 blob（最长边 = maxSide）。给图库 grid 用。
  *  PNG 保留 alpha → 容器 CSS 背景可独立调色，立绘透明区跟容器自然融合。
  */
-export async function renderThumbBlob(doc, maxSide = 256) {
+export async function renderThumbBlob(doc: PaintDoc, maxSide = 256) {
   const W = doc.width, H = doc.height;
   const merged = document.createElement("canvas");
   merged.width = W; merged.height = H;
@@ -87,11 +107,11 @@ export async function renderThumbBlob(doc, maxSide = 256) {
  *  counter 防同 ms 内多次 trash 同名冲突（Date.now() ms 级 + 自增 counter 永不重复）。 */
 const TRASH_PREFIX = "trash:";
 let _trashCounter = 0;
-function makeTrashKey(name) {
+function makeTrashKey(name: string) {
   return `${TRASH_PREFIX}${Date.now()}-${++_trashCounter}:${name}`;
 }
-function isTrashKey(key) { return typeof key === "string" && key.startsWith(TRASH_PREFIX); }
-function parseTrashKey(key) {
+function isTrashKey(key: string) { return typeof key === "string" && key.startsWith(TRASH_PREFIX); }
+function parseTrashKey(key: string) {
   // trash:<ts>[-<counter>]:<originalName>。counter 段可选（旧记录无）。name 可能含 ":"
   const m = /^trash:(\d+)(?:-\d+)?:(.+)$/s.exec(key);
   if (!m) return null;
@@ -101,7 +121,7 @@ function parseTrashKey(key) {
 // 这里只消费它的前缀常量，把这道隐藏命名空间从图库列表过滤掉（覆盖前留底，不该 flood 用户文件夹）。
 
 /** 本地原子重命名（atomic put new + delete old）。同名抛 destination-exists。 */
-export async function renameLocalSession(oldName, newName) {
+export async function renameLocalSession(oldName: string, newName: string) {
   if (oldName === newName) return;
   await renameSessionKey(oldName, newName);
 }
@@ -110,7 +130,7 @@ export async function renameLocalSession(oldName, newName) {
  *  默认过滤 trash:* keys；要看 trash 用 listTrashedSessions */
 // 加密探测 memo：尾部 96KB 扫一次 MAGIC 就够，但图库每次 reload 都列 → 按 (name, updatedAt, size) 缓存
 const _encDetectMemo = new Map();
-async function _detectEncrypted(id, pkg) {
+async function _detectEncrypted(id: string, pkg: SessionPkg) {
   if (!pkg.ora) return false;
   const key = `${id}\x00${pkg.updatedAt || 0}\x00${pkg.ora.size || 0}`;
   const hit = _encDetectMemo.get(key);
@@ -164,7 +184,7 @@ export async function listTrashedSessions() {
 }
 
 /** 软删：把本地 session rename 到 trash:<ts>:<name>。返 trashKey */
-export async function trashSession(name) {
+export async function trashSession(name: string) {
   const trashKey = makeTrashKey(name);
   await renameSessionKey(name, trashKey);
   return trashKey;
@@ -172,7 +192,7 @@ export async function trashSession(name) {
 
 /** 从 trash 恢复。如果 originalName 冲突（同名 active session 存在）→ 自动加 (2)(3)... 后缀。
  *  返实际恢复的 name */
-export async function restoreSession(trashKey) {
+export async function restoreSession(trashKey: string) {
   const parsed = parseTrashKey(trashKey);
   if (!parsed) throw new Error("非 trash key");
   let target = parsed.originalName;
@@ -188,7 +208,7 @@ export async function restoreSession(trashKey) {
 }
 
 /** 永久删 trash 里一条 */
-export async function purgeFromTrash(trashKey) {
+export async function purgeFromTrash(trashKey: string) {
   if (!isTrashKey(trashKey)) throw new Error("非 trash key");
   await deleteSession(trashKey);
 }
@@ -205,12 +225,12 @@ export async function emptyTrash() {
 // （加密容器自动解壳）。boot 在 app.js、打开在 session-state.openItem。
 // 旧 v35 单 slot 迁移随之退役（所有设备 ≥ v36 已久；LEGACY_SLOT 常量留 listSessions 过滤用）。
 
-export async function removeSession(name) {
+export async function removeSession(name: string) {
   await deleteSession(name);
 }
 
 /** Save As：把 doc 写到新 name 下。**不删旧的**。caller 决定切到新 name。 */
-export async function saveAsSession(doc, name) {
+export async function saveAsSession(doc: PaintDoc, name: string) {
   return await saveSession(doc, name);
 }
 
@@ -218,14 +238,14 @@ export async function saveAsSession(doc, name) {
 export const saveCurrentSession = saveSession;
 
 /** 导出 .ora 到本地下载 */
-export async function exportOraDownload(doc, filename = "未命名.ora") {
+export async function exportOraDownload(doc: PaintDoc, filename = "未命名.ora") {
   const blob = await encodeDocToOra(doc);
   triggerDownload(blob, filename);
 }
 
 /** 导出 .psd 到本地下载（最小子集：raster layer + bbox + blend mode + opacity + name）。
  *  Photoshop / Affinity / Procreate / Krita 都吃。详见 src/psd.js */
-export async function exportPsdDownload(doc, filename = "未命名.psd") {
+export async function exportPsdDownload(doc: PaintDoc, filename = "未命名.psd") {
   const { encodeDocToPsd } = await import("./psd.js");
   const blob = await encodeDocToPsd(doc);
   triggerDownload(blob, filename);
@@ -240,11 +260,11 @@ export async function exportPsdDownload(doc, filename = "未命名.psd") {
 //   "active" = 仅当前 active layer。JPG 仍涂 doc 背景（无 alpha）；PNG 保 alpha
 // candidate 2：导出格式（png/jpg exporter）只负责把 doc 渲成 image blob；
 // 去向（分享/下载/剪贴板）是正交的 sink，见 shareOrDownloadBlob。故此函数公开。
-export async function renderDocToImageBlob(doc, mime = "image/png", quality, scope = "merged") {
+export async function renderDocToImageBlob(doc: PaintDoc, mime = "image/png", quality?: number, scope = "merged") {
   const c = document.createElement("canvas");
   c.width = doc.width;
   c.height = doc.height;
-  const ctx = c.getContext("2d");
+  const ctx = c.getContext("2d")!;
   // v134 (user：「导出 png 保留透明度！！」) 只 JPG 涂 doc 背景（无 alpha 通道）
   //   PNG 永远不涂，empty 区域 = 透明，user 想要白底自己加图层
   const wantBg = mime === "image/jpeg";
@@ -259,11 +279,11 @@ export async function renderDocToImageBlob(doc, mime = "image/png", quality, sco
   } else {
     compositeLayers(ctx, doc.layers);
   }
-  const blob = await new Promise((resolve) => c.toBlob(resolve, mime, quality));
+  const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, mime, quality));
   if (blob) return blob;
   // jpg 返 null 兜底走 png
   if (mime !== "image/png") {
-    return await new Promise((resolve) => c.toBlob(resolve, "image/png"));
+    return await new Promise<Blob | null>((resolve) => c.toBlob(resolve, "image/png"));
   }
   throw new Error("canvas.toBlob 返 null");
 }
@@ -284,15 +304,16 @@ function _prefersShare() {
 // 平台 sink（与格式正交）：移动端优先 navigator.share（→ 相册/Files）；桌面/降级直接下载。
 // candidate 2：exporter 产 blob，这里只决定去哪。filename 含扩展名。
 //   → { method: "share" | "cancel" | "download" }
-export async function shareOrDownloadBlob(blob, filename, mime) {
+export async function shareOrDownloadBlob(blob: Blob, filename: string, mime?: string) {
   const file = new File([blob], filename, { type: mime || blob.type || "application/octet-stream" });
-  if (_prefersShare() && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+  const nav = navigator as FileShareNavigator;
+  if (_prefersShare() && nav.canShare && nav.canShare({ files: [file] }) && nav.share) {
     try {
-      await navigator.share({ files: [file], title: filename });
+      await nav.share({ files: [file], title: filename });
       return { method: "share" };
     } catch (e) {
       // 用户取消 = AbortError，不报错；其他错降级到 download
-      if (e && e.name === "AbortError") return { method: "cancel" };
+      if (e && (e as { name?: string }).name === "AbortError") return { method: "cancel" };
       // 失败 fall through 到 download
     }
   }
@@ -300,18 +321,18 @@ export async function shareOrDownloadBlob(blob, filename, mime) {
   return { method: "download" };
 }
 
-export async function shareOrDownloadImage(doc, format = "png", filename = "WebPaint", scope = "merged") {
+export async function shareOrDownloadImage(doc: PaintDoc, format = "png", filename = "WebPaint", scope = "merged") {
   const mime = format === "jpg" ? "image/jpeg" : "image/png";
   const ext  = format === "jpg" ? "jpg" : "png";
   const quality = format === "jpg" ? 0.92 : undefined;
   const blob = await renderDocToImageBlob(doc, mime, quality, scope);
-  return shareOrDownloadBlob(blob, `${filename}.${ext}`, mime);
+  return shareOrDownloadBlob(blob!, `${filename}.${ext}`, mime);
 }
 
 // ---- 剪贴板 IO ----
 
 /** 把 doc 合成图复制到剪贴板（PNG）。iPad Safari / 桌面都支持。 */
-export async function copyImageToClipboard(doc, scope = "merged") {
+export async function copyImageToClipboard(doc: PaintDoc, scope = "merged") {
   // iOS Safari 要求 clipboard.write 在 user gesture 内"同步"触达；**不能**先 await blob 再 write
   // （那个 await 跨过 gesture 窗口 → NotAllowedError）。把 renderDocToImageBlob 的 Promise<Blob>
   // 直接交给 ClipboardItem（lazy promise 写法），复用 writeImageBlobToClipboard 同款路径。
@@ -321,7 +342,7 @@ export async function copyImageToClipboard(doc, scope = "merged") {
 }
 
 /** 把任意 PNG blob（或 Promise<Blob>，Safari lazy 写法）复制到剪贴板。 */
-export async function writeImageBlobToClipboard(blobOrPromise) {
+export async function writeImageBlobToClipboard(blobOrPromise: Blob | Promise<Blob>) {
   if (!navigator.clipboard || !navigator.clipboard.write) {
     throw new Error("浏览器不支持剪贴板写入");
   }
@@ -348,7 +369,7 @@ export async function readImageFromClipboard() {
 
 // ---- 工具 ----
 
-export function triggerDownload(blob, filename) {
+export function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

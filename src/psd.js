@@ -21,7 +21,7 @@
 //   // → image/vnd.adobe.photoshop blob，触发下载或 share
 
 import { compositeLayers } from "./layer-composite.js";
-import { flattenLeaves } from "./doc.js";
+import { flattenLeaves } from "./doc.ts";
 
 // ---- BinaryWriter：动态增长 Uint8Array + big-endian + delayed fill ----
 class BinaryWriter {

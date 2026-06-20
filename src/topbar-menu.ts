@@ -29,9 +29,10 @@ import { els } from "./els.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { sessionNameConflict } from "./session-name.ts";
-import { decodeOraToDoc } from "./ora.js";
-import { compressPixelSnap } from "./pixel-edit.js";
+import { decodeOraToDoc } from "./ora.ts";
+import { compressPixelSnap } from "./pixel-edit.ts";
 import { maybeFastForwardActive } from "./cloud-freshness.ts";
+import type { Layer, PaintDoc } from "./doc.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -79,7 +80,7 @@ export function initTopbarMenu(ctx: AppContext) {
     if (!a) return;
     closeSheet(els.clearSheet, els.clearBackdrop);
     if (a !== "confirm") return;
-    const layer = doc.activeLayer;
+    const layer = doc.activeLayer as Layer | null;
     if (!layer) return;
     // 走 stroke handler 让 Ctrl+Z 能复活。before = 当前像素；after = 空层快照。
     const before = layer.snapshot();
@@ -87,8 +88,8 @@ export function initTopbarMenu(ctx: AppContext) {
     const after = layer.snapshot();
     const entry: { type: string; layerId: number; before: unknown; after: unknown; beforeBlob: Blob | null; afterBlob: Blob | null } = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
     history.push(entry);
-    compressPixelSnap(entry.before, (blob: Blob) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob: Blob) => { entry.afterBlob  = blob; });
+    compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
+    compressPixelSnap(entry.after  as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.afterBlob  = blob; });
     board.invalidateAll();
     setStatus("已清空当前图层（Ctrl+Z 撤销）");
   });
@@ -241,7 +242,7 @@ export function initTopbarMenu(ctx: AppContext) {
       const plain = await _store.unseal(session.name, cp.blob);
       if (!plain) { setStatus("恢复失败：需要密码解锁", true); return; }
       const loaded = await decodeOraToDoc(plain);
-      session.adoptWithOpts(loaded, session.name, { skipCheckpoint: true });
+      session.adoptWithOpts(loaded as PaintDoc, session.name, { skipCheckpoint: true });
       // R4：revert 是内容变化（像素回到旧快照）→ 必须走 clean→dirty 门标云脏。
       //   旧版只 edits.mark() 不标云脏 → 云端永远收不到 revert，且 clean 快进会无备份吃掉 revert 结果。
       _store.edit(session.name);

@@ -38,7 +38,21 @@
   // batch 11（v304，2026-06-19）：最后一簇 AppContext 消费方 → consumer rollout 完成。
   // batch 12（v305，2026-06-19）：非 ctx 消费方簇（brush-rack keystone + brush-io/current-brush/
   //   dial-controls/pwa-shell/dev-console/save-status）+ 新 brush-types（brush 形状单一真源）。
+  // batch 13（v306，2026-06-19）：引擎接缝 .js→.ts 大批转换（doc/board/input 手感核心 + edit-mode/
+  //   history/pixel-edit/session/ora）+ gallery UI 簇灭 any。引擎类型从 inferred-any 收成真类型，
+  //   级联到消费方的 boundary mismatch 用 cast 收口（行为零变更，388 测试守门）。
   "include": [
+    "src/doc.ts",
+    "src/board.ts",
+    "src/input.ts",
+    "src/edit-mode.ts",
+    "src/history.ts",
+    "src/pixel-edit.ts",
+    "src/session.ts",
+    "src/ora.ts",
+    "src/ui/gallery.ts",
+    "src/ui/gallery-view-model.ts",
+    "src/ui/rack-sheet.ts",
     "src/brush-types.ts",
     "src/brush-rack.ts",
     "src/brush-io.ts",

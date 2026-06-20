@@ -7,9 +7,10 @@
 
 import { defaultsPromise, mergeMissingDefaults, makeDefaultRack } from "./brushes.js";
 import { session } from "./session-state.ts";
-import { getCurrentSessionName } from "./session.js";
+import { getCurrentSessionName } from "./session.ts";
 import { ensureUnlocked } from "./enc-thumbs.js";
-import { decodeOraToDoc } from "./ora.js";
+import { decodeOraToDoc } from "./ora.ts";
+import type { PaintDoc } from "./doc.ts";
 import type { AppContext } from "./app-context.ts";
 
 // 笔架 boot：异步加载 IDB 缓存 → toolStates 缺失字段从 rack 补齐 → 应用当前 tool 的 state。
@@ -75,8 +76,8 @@ export async function bootRestoreSession(ctx: AppContext) {
         : `找不到上次画作 "${wantedName}"，先选一个或新建`);
       return;
     }
-    const loaded = await decodeOraToDoc(r.blob);
-    session.adopt(loaded, wantedName);
+    const loaded = await decodeOraToDoc(r.blob!);
+    session.adopt(loaded as PaintDoc, wantedName);
     setStatus(`已恢复：${wantedName} (${loaded.layers.length} 层)`);
     gateCloudSyncOnOpen(wantedName).catch((e: unknown) => console.warn("[sync-gate]", e));
   } catch (e) {

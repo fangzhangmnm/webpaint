@@ -11,7 +11,7 @@
 import { els } from "./els.ts";
 import { session } from "./session-state.ts";
 import { decodeImageFile, smartResample } from "./resample.js";
-import { decodeOraToDoc } from "./ora.js";
+import { decodeOraToDoc } from "./ora.ts";
 import { store as _store } from "./app-store.js";
 import { stripSessionExt } from "./config.js";
 import { ensureUnlockedForBlob } from "./enc-thumbs.js";
@@ -20,6 +20,7 @@ import { setTool, updateLassoToolbar } from "./toolbar.ts";
 import { _makeFullLayerSelection } from "./selection-ops.ts";
 import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import type { AppContext } from "./app-context.ts";
+import type { PaintDoc } from "./doc.ts";
 
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -202,7 +203,7 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   try {
     const sel = _makeFullLayerSelection(layer);
     if (sel) {
-      doc.selection = sel;
+      doc.selection = sel as typeof doc.selection;
       setTool("lasso");
       const ok = input.lasso.liftSelectionForTransform(layer);
       if (ok) {
@@ -257,7 +258,7 @@ export function initImportImage(ctx: AppContext) {
           onPasswordVerified(nm, pw);
         }
         const loaded = await decodeOraToDoc(plain);
-        session.adopt(loaded, nm);
+        session.adopt(loaded as PaintDoc, nm);
         setStatus(`已导入：${nm}`);
         setGalleryOpen(false);
       } else if (isImage) {

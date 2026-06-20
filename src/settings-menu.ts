@@ -9,7 +9,7 @@
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { applyTheme, cycleTheme, THEME_LABEL } from "./theme.ts";
-import { KEYBOARD_SHORTCUTS } from "./input.js";
+import { KEYBOARD_SHORTCUTS } from "./input.ts";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
 import { positionPopup } from "./anchored-popup.ts";
 import type { AppContext } from "./app-context.ts";

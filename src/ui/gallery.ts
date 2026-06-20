@@ -20,7 +20,7 @@ import {
   clearFolderCaches,
   listGallery, listGalleryTrash,
 } from "../app-store.js";
-import { listSessions } from "../session.js";
+import { listSessions } from "../session.ts";
 import { setMeta } from "../storage.js";
 import { getOrFetchCloudThumb } from "../cloud-thumb-cache.js";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
@@ -34,6 +34,7 @@ import { cloud } from "../app-store.js";
 import { pathFolder, pathBasename, pathJoin } from "../gallery-path.ts";
 import { stripSessionExt } from "../config.js";
 import { tileFor, breadcrumb, trashTileFor, humanTime, humanSize } from "./gallery-view-model.ts";
+import type { GItem, TrashGItem, CloudFileMeta } from "./gallery-view-model.ts";
 import { session } from "../session-state.ts";
 
 const LS_FOLDER = "webpaint.galleryFolder";
@@ -84,7 +85,13 @@ const ThumbCell = defineComponent({
     alt: { type: String, default: "" },
   },
   emits: ["unlock"],
-  setup(props: any) {
+  setup(props: {
+    localThumb: Blob | null;
+    encName: string | null;
+    cloud: CloudFileMeta | null;
+    fallback: string;
+    alt: string;
+  }) {
     const url = ref<string | null>(null);
     const showCloud = ref(false);
     const locked = ref(false);
@@ -113,14 +120,14 @@ const ThumbCell = defineComponent({
           for (const e of entries) {
             if (!e.isIntersecting) continue;
             obs?.disconnect(); obs = null;
-            const c = props.cloud;
-            getOrFetchCloudThumb(c.id, c.eTag || "", c.size || 0, c["@microsoft.graph.downloadUrl"])
-              .then(({ blob }: any) => {
+            const c = props.cloud!;   // 闭包外 line 119 `if (props.cloud)` 已守门
+            getOrFetchCloudThumb(c.id as string, c.eTag || "", c.size || 0, c["@microsoft.graph.downloadUrl"])
+              .then(({ blob }: { blob: Blob }) => {
                 showCloud.value = false;
                 if (blob && blob.type === ENC_PEEK_MIME) { cloudEncBlob = blob; return tryDecrypt(); }
                 setBlob(blob);
               })
-              .catch((err: any) => console.warn("[gallery] thumb:", err));
+              .catch((err: unknown) => console.warn("[gallery] thumb:", err));
           }
         }, { rootMargin: "600px 0px", threshold: 0.01 });
         nextTick(() => { if (obs && root.value) obs.observe(root.value); });
@@ -151,8 +158,8 @@ function makeGallery(host: GalleryHost) {
       const view = ref<"files" | "trash">("files");
       const folder = ref<string>(safeFolder());
       const loading = ref(false);
-      const data = reactive<{ items: any[]; cloudFolders: string[] }>({ items: [], cloudFolders: [] });
-      const trash = ref<any[]>([]);
+      const data = reactive<{ items: GItem[]; cloudFolders: string[] }>({ items: [], cloudFolders: [] });
+      const trash = ref<TrashGItem[]>([]);
       const openMenu = ref<string | null>(null);   // 当前展开的 tile 菜单 key
 
       function safeFolder() { try { return localStorage.getItem(LS_FOLDER) || ""; } catch { return ""; } }
@@ -164,11 +171,11 @@ function makeGallery(host: GalleryHost) {
         try {
           const st = { signedIn: host.signedIn(), online: host.online() };
           if (view.value === "trash") {
-            trash.value = await listGalleryTrash(st);
+            trash.value = await listGalleryTrash(st) as TrashGItem[];
           } else {
             const r = await listGallery(st);
             data.items = r.items; data.cloudFolders = r.cloudFolders;
-            if (r.localError) host.status("本地图库读取失败：" + (r.localError.message || r.localError) + "（隐私窗口 / IDB 被禁？）", true);
+            if (r.localError) host.status("本地图库读取失败：" + ((r.localError as { message?: unknown }).message || r.localError) + "（隐私窗口 / IDB 被禁？）", true);
           }
         } finally { loading.value = false; }
       }
@@ -191,16 +198,16 @@ function makeGallery(host: GalleryHost) {
       const emptyText = computed(() => view.value === "trash" ? "回收站是空的。"
         : folder.value ? `文件夹 "${folder.value}" 是空的` : "还没有保存的作品。点右上加号新建一个，或先在 PC 上画一笔。");
 
-      const badgeIcon = (k: string) => (ICON as any)[k] || "";
-      const fmtMeta = (t: any) => `${humanTime(t.time)} · ${humanSize(t.size)}`;
+      const badgeIcon = (k: string) => (ICON as Record<string, string>)[k] || "";
+      const fmtMeta = (t: { time: number; size: number }) => `${humanTime(t.time)} · ${humanSize(t.size)}`;
 
       // ---- 名字冲突预检（快，无网络放前）----
       async function nameTaken(name: string, alsoCloud: boolean): Promise<string | null> {
-        const localNames = new Set((await listSessions()).map((s: any) => s.name));
+        const localNames = new Set((await listSessions()).map((s) => s.name));
         if (localNames.has(name)) return "本地";
         if (alsoCloud) {
           try {
-            const cloudNames = new Set((await listCloudSessionsRecursive()).map((c: any) => stripSessionExt(c.path)));
+            const cloudNames = new Set((await listCloudSessionsRecursive()).map((c: { path: string }) => stripSessionExt(c.path)));
             if (cloudNames.has(name)) return "云端";
           } catch (e) { console.warn("[gallery] cloud names:", e); }
         }
@@ -210,7 +217,7 @@ function makeGallery(host: GalleryHost) {
       // ---- intents（文件管理：本模块自管；画布耦合：转 host）----
       const toggleMenu = (key: string) => { openMenu.value = openMenu.value === key ? null : key; };
 
-      async function openTile(item: any) {
+      async function openTile(item: GItem) {
         openMenu.value = null;
         if (item.name === host.activeName()) { await session.open(item); return; }  // 已是活动 → 关库
         await session.open(item);
@@ -218,7 +225,7 @@ function makeGallery(host: GalleryHost) {
       }
       function enterFolder(path: string) { setFolder(path); }
 
-      async function rename(item: any) {
+      async function rename(item: GItem) {
         openMenu.value = null;
         const isCloud = !!item.cloud;
         if (item.name === host.activeName()) {
@@ -238,14 +245,14 @@ function makeGallery(host: GalleryHost) {
           if (trimmed === item.name) { host.status("名字未变"); return; }
           // 锁屏从确认即开始，把冲突检查（nameTaken 含云端 listCloudSessionsRecursive 网络往返）
           // 也包进来——否则确认后到锁屏之间有明显空窗（用户：「点了没立刻锁，过一会才锁」）。
-          const result: any = await host.busy(`正在重命名 ${item.name} → ${trimmed}…`, async () => {
+          const result = await host.busy<{ taken?: string; ok?: boolean; error?: unknown }>(`正在重命名 ${item.name} → ${trimmed}…`, async () => {
             const t = await nameTaken(trimmed, isCloud);
             if (t) return { taken: t };
             try {
               const res = await _store.flow.rename(item.name, trimmed, { cloud: isCloud });
               host.status(res.cloudDeferred ? `已重命名（云端稍后重试）：${trimmed}` : `已重命名：${trimmed}`);
               return { ok: true };
-            } catch (e: any) { return { error: e?.message || e }; }
+            } catch (e: unknown) { return { error: (e as { message?: unknown })?.message || e }; }
           });
           if (result.taken) { candidate = trimmed; note = `${result.taken}已有同名，换一个`; continue; }
           if (result.error) { candidate = trimmed; note = `失败：${result.error}`; continue; }
@@ -254,7 +261,7 @@ function makeGallery(host: GalleryHost) {
         await reload();
       }
 
-      async function move(item: any) {
+      async function move(item: GItem) {
         openMenu.value = null;
         const isCloud = !!item.cloud;
         const cur = pathFolder(item.name), base = pathBasename(item.name);
@@ -279,7 +286,7 @@ function makeGallery(host: GalleryHost) {
             const res = await _store.flow.rename(item.name, newName, { cloud: isCloud });
             if (item.name === host.activeName()) session.setName(newName);
             host.status(res.cloudDeferred ? `已移动（云端稍后重试）：${target || "根目录"}` : `已移动到：${target || "根目录"}`);
-          } catch (e: any) { host.status(`移动失败：${e?.message || e}`, true); }
+          } catch (e: unknown) { host.status(`移动失败：${(e as { message?: unknown })?.message || e}`, true); }
         });
         await reload();
       }
@@ -289,7 +296,7 @@ function makeGallery(host: GalleryHost) {
       //   · 加密源 → 拷贝的是同一个加密容器（saveAs→_doPush→_seal 见 plain 已是容器即透传，**无需密码**）；
       //   · 纯云端源（无本地副本）→ cloud.pull 拉原始容器字节（同样原样，不解壳）；
       //   · 明文源 → 明文拷贝。新名是全新身份 → _seal 里 local.get(newName)=null → 当明文文件透传。
-      async function copy(item: any) {
+      async function copy(item: GItem) {
         openMenu.value = null;
         const isCloud = !!item.cloud;
         const cloudOn = host.signedIn() && host.online();
@@ -306,10 +313,10 @@ function makeGallery(host: GalleryHost) {
             }
             if (!bytes) { host.status("找不到源作品的字节，复制失败", true); return; }
             // 目标名：同文件夹下「<名> 副本」「<名> 副本2」…取首个本地⊕云端都不占用的。
-            const localNames = new Set((await listSessions()).map((s: any) => s.name));
+            const localNames = new Set((await listSessions()).map((s) => s.name));
             let cloudNames = new Set<string>();
             if (cloudOn) {
-              try { cloudNames = new Set((await listCloudSessionsRecursive()).map((c: any) => stripSessionExt(c.path))); }
+              try { cloudNames = new Set((await listCloudSessionsRecursive()).map((c: { path: string }) => stripSessionExt(c.path))); }
               catch (e) { console.warn("[gallery] copy cloud names:", e); }
             }
             const newName = copyTargetName(item.name, (n: string) => localNames.has(n) || cloudNames.has(n));
@@ -318,25 +325,25 @@ function makeGallery(host: GalleryHost) {
             if (!cloudOn) host.status(`已创建副本：${pathBasename(newName)}（仅本地）`);
             else if (res.cloudDeferred) host.status(`已创建副本：${pathBasename(newName)}（本地完成；云端稍后推）`);
             else host.status(`已创建副本：${pathBasename(newName)}`);
-          } catch (e: any) { host.status(`创建副本失败：${e?.message || e}`, true); }
+          } catch (e: unknown) { host.status(`创建副本失败：${(e as { message?: unknown })?.message || e}`, true); }
         });
         await reload();
       }
 
-      async function push(item: any) { openMenu.value = null; await session.push(item); await reload(); }
-      async function unload(item: any) { openMenu.value = null; await session.unload(item); await reload(); }
+      async function push(item: GItem) { openMenu.value = null; await session.push(item); await reload(); }
+      async function unload(item: GItem) { openMenu.value = null; await session.unload(item); await reload(); }
 
       // ---- 加密 intent（ADR-0012）。transform 与密码循环都在 store（flow.encrypt/decrypt +
       //   crypt seam：本地+云端字节一起换、If-Match、失败标脏接力收敛、密码验证/记忆）。
       //   图库只剩 per-app 的部分：活动项预检（活动 doc 的内存态/同步 base 正被 session 编排，
       //   图库越过它改字节=竞态）、首次设密码的双输 UX、明文残留清理。
-      function _encPrecheck(item: any, verb: string): boolean {
+      function _encPrecheck(item: GItem, verb: string): boolean {
         if (item.name === host.activeName()) { host.status(`这画正开着 —— 先退出到图库再${verb}`, true); return false; }
         if (!item.local) { host.status(`纯云端作品先拉取到本地再${verb}`, true); return false; }
         return true;
       }
       // store transform 的共同收尾：状态文案 + 残留清理。返回是否成功换体。
-      async function _afterSwap(item: any, res: any, okMsg: string): Promise<boolean> {
+      async function _afterSwap(item: GItem, res: { status?: string }, okMsg: string): Promise<boolean> {
         if (res.status === "offline") { host.status(`已同步过云端的作品需在线操作（本地与云端要一起换）`, true); return false; }
         if (res.status === "no-local") { host.status("本地字节缺失", true); return false; }
         if (res.status === "locked") { host.status("已取消（需要密码）", true); return false; }
@@ -348,7 +355,7 @@ function makeGallery(host: GalleryHost) {
         return true;
       }
 
-      async function encryptItem(item: any) {
+      async function encryptItem(item: GItem) {
         openMenu.value = null;
         if (!_encPrecheck(item, "加密")) return;
         // 首次设密码（已解锁则复用统一密码）——放进 crypto-state，flow.encrypt 经 seam 自取
@@ -361,11 +368,11 @@ function makeGallery(host: GalleryHost) {
           if (!(await _afterSwap(item, res, `已加密：${item.name}（7-Zip 输此密码可恢复；忘记密码内容永久找不回）`))) return;
           // 清明文残留：revert checkpoint（旧内容的明文快照）
           try { await setMeta(`revert:${item.name}:ora`, null); await setMeta(`revert:${item.name}:at`, null); } catch (_) {}
-        } catch (e: any) { host.status(`加密失败：${e?.message || e}`, true); }
+        } catch (e: unknown) { host.status(`加密失败：${(e as { message?: unknown })?.message || e}`, true); }
         await reload();
       }
 
-      async function decryptItem(item: any) {
+      async function decryptItem(item: GItem) {
         openMenu.value = null;
         if (!_encPrecheck(item, "解除加密")) return;
         if (!(await host.confirm(`解除「${pathBasename(item.name)}」的加密？`,
@@ -376,7 +383,7 @@ function makeGallery(host: GalleryHost) {
           const res = await _store.flow.decrypt(item.name, { isOnline: () => host.signedIn() && host.online() });
           if (res.status === "not-encrypted") { host.status("这不是加密作品"); return; }
           await _afterSwap(item, res, `已解除加密：${item.name}`);
-        } catch (e: any) { host.status(`解除加密失败：${e?.message || e}`, true); }
+        } catch (e: unknown) { host.status(`解除加密失败：${(e as { message?: unknown })?.message || e}`, true); }
         await reload();
       }
 
@@ -385,7 +392,7 @@ function makeGallery(host: GalleryHost) {
         if (await ensureUnlocked(name)) { host.status("已解锁加密作品（密码只在内存，关页即忘）"); await reload(); }
       }
 
-      async function del(item: any) {
+      async function del(item: GItem) {
         openMenu.value = null;
         const isActive = item.name === host.activeName();
         const isLocal = !!item.local, isCloud = !!item.cloud;
@@ -400,12 +407,12 @@ function makeGallery(host: GalleryHost) {
             await _store.flow.delete(item.name, { isOnline: () => host.online() });
             if (isActive) await session.exit();
             host.status(`已删除：${item.name}`);
-          } catch (e: any) { host.status(`删除失败：${e?.message || e}`, true); }
+          } catch (e: unknown) { host.status(`删除失败：${(e as { message?: unknown })?.message || e}`, true); }
         });
         await reload();
       }
 
-      async function folderDelete(ft: any) {
+      async function folderDelete(ft: { name: string; path: string; empty: boolean }) {
         openMenu.value = null;
         if (!ft.empty) { host.status("文件夹非空，请先把里面的作品移走或删除", true); return; }
         if (!host.signedIn() || !host.online()) { host.status("删除文件夹需先登录云端", true); return; }
@@ -415,11 +422,11 @@ function makeGallery(host: GalleryHost) {
           const res = await _store.flow.deleteFolder(ft.path, { isOnline: () => host.online() });
           clearFolderCaches();
           host.status(res.status === "folder-deleted" ? `已删除空文件夹：${ft.name}` : `文件夹已不存在：${ft.name}`);
-        } catch (e: any) { host.status(`删除文件夹失败：${e?.message || e}`, true); }
+        } catch (e: unknown) { host.status(`删除文件夹失败：${(e as { message?: unknown })?.message || e}`, true); }
         await reload();
       }
 
-      async function trashRestore(item: any) {
+      async function trashRestore(item: TrashGItem) {
         openMenu.value = null;
         await host.busy(`正在恢复 ${item.name}…`, async () => {
           try {
@@ -431,19 +438,19 @@ function makeGallery(host: GalleryHost) {
             });
             const rn = res.name || item.name;
             host.status(`已恢复：${rn}${rn !== item.name ? `（原名 ${item.name} 已被占用）` : ""}`);
-          } catch (e: any) { host.status(`恢复失败：${e?.message || e}`, true); }
+          } catch (e: unknown) { host.status(`恢复失败：${(e as { message?: unknown })?.message || e}`, true); }
         });
         await reload();
       }
 
-      async function trashPurge(item: any) {
+      async function trashPurge(item: TrashGItem) {
         openMenu.value = null;
         if (!(await host.confirm(`永久删除 "${item.name}"？`, "不可撤销。"))) return;
         await host.busy(`正在永久删除 ${item.name}…`, async () => {
           try {
             await _store.flow.purge({ trashKey: item.local ? item.local.trashKey : null, cloudItemId: item.cloud ? item.cloud.id : null });
             host.status(`已永久删除：${item.name}`);
-          } catch (e: any) { host.status(`永久删除失败：${e?.message || e}`, true); }
+          } catch (e: unknown) { host.status(`永久删除失败：${(e as { message?: unknown })?.message || e}`, true); }
         });
         await reload();
       }
@@ -455,7 +462,7 @@ function makeGallery(host: GalleryHost) {
         if (!(await host.confirm(`清空${label}回收站？`, `${label}回收站会被彻底清空，不可撤销。`))) return;
         await host.busy(`正在清空${label}回收站…`, async () => {
           const res = await _store.flow.emptyTrash({ scope, isOnline: () => host.signedIn() && host.online() });
-          const cloudFails = (res.failed || []).filter((f: any) => f.where !== "local").length;
+          const cloudFails = ((res.failed || []) as Array<{ where?: string }>).filter((f) => f.where !== "local").length;
           if (scope !== "local" && cloudFails) host.status(`${cloudFails} 项云端没清（可能离线），回线再清`, true);
           else if ((res.failed || []).length) host.status("清空时部分失败", true);
           else host.status(`已清空${label}回收站`);
@@ -560,9 +567,19 @@ export interface GalleryHandle {
   unmount(): void;
 }
 
+// 组件 setup 暴露给 handle 的反应式态/方法（Vue mount 返回的 proxy 上读到的子集）。
+interface GalleryVM {
+  reload(): void;
+  setView(v: "files" | "trash"): void;
+  view: "files" | "trash";
+  setFolder(p: string): void;
+  folder: string;
+  emptyTrash(scope?: "local" | "cloud" | "both"): void;
+}
+
 export function mountGallery(el: HTMLElement, host: GalleryHost): GalleryHandle {
   const app = createApp(makeGallery(host));
-  const vm: any = app.mount(el);
+  const vm = app.mount(el) as unknown as GalleryVM;
   return {
     refresh: () => vm.reload(),
     setView: (v) => vm.setView(v),

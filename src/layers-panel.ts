@@ -22,23 +22,24 @@
 // + _afterDocChange（lasso / history handler 也调）+ layerSpecFrom（lasso 也调）。
 
 import { createApp, defineComponent, reactive, computed, watch, nextTick } from "../vendor/vue/vue.esm-browser.prod.js";
-import { countLeaves, findNodeById } from "./doc.js";
+import { countLeaves, findNodeById } from "./doc.ts";
+import type { Layer, LayerGroup } from "./doc.ts";
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { raiseWindow } from "./surfaces.ts";
-import { compressPixelSnap } from "./pixel-edit.js";
+import { compressPixelSnap } from "./pixel-edit.ts";
 import type { AppContext } from "./app-context.ts";
 
-// doc 图层活对象（doc.js 未类型化 → 描述本面板用到的字段/方法）。null 守卫兜「层在回调前被删」。
-interface LayerNode {
-  id: number; name: string; visible: boolean; opacity: number; mode: string;
-  clippingMask: boolean; lockAlpha: boolean; isGroup: boolean;
-  bboxW: number; bboxH: number; children?: LayerNode[];
-  snapshot(): LayerSpec; restoreFromSnapshot(snap: LayerSpec): void;
-}
+// doc 图层活对象（树节点 = 叶 Layer | 组 LayerGroup）。引擎类型化后直接对齐其 Node 联合，
+// 不再维护发散本地形状（doc.ts 的 Node 未 export → 此处用导出的两个 class 重建联合）。
+// null 守卫兜「层在回调前被删」。
+type LayerNode = Layer | LayerGroup;
+// compressPixelSnap 收的像素快照形状（pixel-edit.ts 的 PixelSnap 未 export → 借函数签名取之）。
+type PixelSnap = NonNullable<Parameters<typeof compressPixelSnap>[0]>;
 // layer-undo.layerSpecFrom / L.snapshot() 产出的可变 spec（异步压缩回填 .blob）。
-interface LayerSpec { blob?: Blob | null; imageData?: unknown; [k: string]: unknown; }
+// 引擎方法收 PixelSnap：本地 spec 须与其像素字段对齐（imageData 是 ImageData|null，非 unknown）。
+interface LayerSpec extends PixelSnap { blob?: Blob | null; [k: string]: unknown; }
 
 // 传过 Vue 边界的 leaf-by-value 快照（每次 bump 拷新对象，见文件头硬规则）。
 interface LayerLeafSnap {
@@ -140,7 +141,7 @@ function _deleteLayer(L: LayerNode | null) {
   const layerSpec = layerSpecFrom(L) as LayerSpec;
   if (!doc.removeLayer(L.id)) { setStatus("至少保留一层"); return; }
   history.push({ type: "removeLayer", index: loc.index, parentId: loc.parentId, layerSpec });
-  compressPixelSnap(layerSpec, (blob: Blob) => { layerSpec.blob = blob; });
+  compressPixelSnap(layerSpec, (blob: Blob | null) => { layerSpec.blob = blob; });
   _afterDocChange();
 }
 // ---- 图层组 op caller（都走 snapshotTree 结构撤销；纯结构变、零像素拷贝）----
@@ -183,13 +184,14 @@ function _moveOutOfGroup(L: LayerNode | null) {
 // v132：清空当前图层像素，保留图层 + 名字 + opacity / mode，bbox 归零
 function _clearLayerPixels(L: LayerNode | null) {
   if (!L) return;
-  if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("图层已经是空的"); return; }
-  const before = L.snapshot();
-  L.restoreFromSnapshot({ bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null, bitmap: null });
-  const after = L.snapshot();
+  // 清空像素是叶专属 op（template gates on !isGroup）；组无 bbox/snapshot → 就地 as Layer 视之。
+  if ((L as Layer).bboxW <= 0 || (L as Layer).bboxH <= 0) { setStatus("图层已经是空的"); return; }
+  const before = (L as Layer).snapshot() as LayerSpec;
+  (L as Layer).restoreFromSnapshot({ bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null, bitmap: null });
+  const after = (L as Layer).snapshot() as LayerSpec;
   history.push({ type: "stroke", layerId: L.id, before, after, beforeBlob: null, afterBlob: null });
-  compressPixelSnap(before, (blob: Blob) => { before.blob = blob; });
-  compressPixelSnap(after,  (blob: Blob) => { after.blob  = blob; });
+  compressPixelSnap(before, (blob: Blob | null) => { before.blob = blob; });
+  compressPixelSnap(after,  (blob: Blob | null) => { after.blob  = blob; });
   _afterDocChange();
   board.invalidateAll();
   setStatus(`已清空：${L.name}`);
@@ -202,7 +204,7 @@ const _MERGE_DOWN_STATUS: Record<string, string> = {
 };
 function _mergeDownLayer(L: LayerNode | null) {
   if (!L) return;
-  const r = doc.mergeDownLayer(L);
+  const r = doc.mergeDownLayer(L as Layer);   // 向下合并是叶专属 op（template gates on !isGroup）
   if (!r.ok) {
     if (r.reason === "empty-active") { _deleteLayer(L); return; }   // active 空 → 当删 active
     setStatus(_MERGE_DOWN_STATUS[r.reason ?? ""] || "无法向下合并");
@@ -216,10 +218,12 @@ function _mergeDownLayer(L: LayerNode | null) {
     underBeforeClipping: r.underBeforeClipping, resultClipping: r.resultClipping,
     activeSpec: r.activeSpec, activeLoc: r.activeLoc,
   });
-  compressPixelSnap(r.underBefore, (blob: Blob) => { r.underBefore.blob = blob; });
-  compressPixelSnap(r.underAfter, (blob: Blob) => { r.underAfter.blob = blob; });
-  const aspec = r.activeSpec as LayerSpec;   // mergeDown 结果 spec（doc.js 未类型化，blob 初始 null）
-  if (aspec.imageData) compressPixelSnap(aspec, (blob: Blob) => { aspec.blob = blob; });
+  // underBefore/After = Layer.snapshot() 像素 snap（无 blob 字段，异步压缩回填）；闭包内 r.ok
+  // 收窄不保留 → 沿 LayerSpec 视之（PixelSnap + 可选 blob，运行期同一对象引用）。
+  compressPixelSnap(r.underBefore as LayerSpec, (blob: Blob | null) => { (r.underBefore as LayerSpec).blob = blob; });
+  compressPixelSnap(r.underAfter as LayerSpec, (blob: Blob | null) => { (r.underAfter as LayerSpec).blob = blob; });
+  const aspec = r.activeSpec as unknown as LayerSpec;   // mergeDown 结果 spec（doc.js 未类型化，blob 初始 null）
+  if (aspec.imageData) compressPixelSnap(aspec, (blob: Blob | null) => { aspec.blob = blob; });
   _afterDocChange();
 }
 function _moveLayerDelta(L: LayerNode | null, delta: number) {
@@ -240,7 +244,7 @@ function _duplicateLayer(L: LayerNode | null) {
   const newLayer = r.newLayer!;
   const layerSpec = { ...(layerSpecFrom(newLayer) as LayerSpec), clippingMask: newLayer.clippingMask, lockAlpha: newLayer.lockAlpha };
   history.push({ type: "addLayer", index: r.loc!.index, parentId: r.loc!.parentId, layerSpec, prevActiveId });
-  compressPixelSnap(layerSpec, (blob: Blob) => { layerSpec.blob = blob; });
+  compressPixelSnap(layerSpec, (blob: Blob | null) => { layerSpec.blob = blob; });
   _afterDocChange();
   setStatus(`已复制：${L.name}`);
 }
@@ -277,9 +281,10 @@ function _toggleClipping(L: LayerNode | null) {
 // v242 锁定不透明度（alpha lock）：纯绘制约束，不改像素/合成 → 不必 invalidate 渲染，render panel 即可。
 function _toggleLockAlpha(L: LayerNode | null) {
   if (!L) return;
-  const oldVal = L.lockAlpha;
-  L.lockAlpha = !oldVal;
-  history.push({ type: "setLayerProp", layerId: L.id, prop: "lockAlpha", oldVal, newVal: L.lockAlpha });
+  // 锁 α 是叶专属 toggle（template gates on !isGroup）；组无 lockAlpha → 就地 as Layer 视之。
+  const oldVal = (L as Layer).lockAlpha;
+  (L as Layer).lockAlpha = !oldVal;
+  history.push({ type: "setLayerProp", layerId: L.id, prop: "lockAlpha", oldVal, newVal: (L as Layer).lockAlpha });
   renderLayersPanel();
 }
 function _toggleReference(L: LayerNode | null) {
@@ -580,7 +585,7 @@ const LayersPanel = defineComponent({
             canDel: n.isGroup || totalLeaves > 1,
             canMoveOut: depth > 0,                                       // 在组内 → 可移出
             moveTargets,                                                 // 可移入的已有组（high：把外面的层加入已知组）
-            layer: { id: n.id, name: n.name, visible: n.visible, opacity: n.opacity, mode: n.mode, clippingMask: n.clippingMask, lockAlpha: n.lockAlpha, isGroup: !!n.isGroup },
+            layer: { id: n.id, name: n.name, visible: n.visible, opacity: n.opacity, mode: n.mode, clippingMask: n.clippingMask, lockAlpha: (n as Layer).lockAlpha, isGroup: !!n.isGroup },
           };
           if (n.isGroup) {
             const collapsed = layersUi.collapsedIds.has(n.id);
@@ -649,8 +654,8 @@ function _syncChrome() {
   // v267 上移/下移按钮按活动节点的**同级**边界禁用（树化：top/bottom 按同级算）
   const upBtn = document.getElementById("layerMoveUpBtn") as HTMLButtonElement;
   const downBtn = document.getElementById("layerMoveDownBtn") as HTMLButtonElement;
-  if (upBtn) upBtn.disabled = !doc.canMoveLayer(doc.activeId, 1);
-  if (downBtn) downBtn.disabled = !doc.canMoveLayer(doc.activeId, -1);
+  if (upBtn) upBtn.disabled = !doc.canMoveLayer(doc.activeId!, 1);
+  if (downBtn) downBtn.disabled = !doc.canMoveLayer(doc.activeId!, -1);
   nextTick(() => {
     _clampListHeight();   // 列表高度跟位置/层数走，保证最底 item 可滚到
     els.layersList.querySelector(".layer-row.active")?.scrollIntoView({ block: "nearest" });

@@ -20,21 +20,38 @@
 // arrayBuffer() 转 Uint8Array。
 
 import { zipPack, zipUnpack } from "./zip.js";
-import { Layer, LayerGroup, PaintDoc, flattenLeaves, findNodeById, reseedLayerIdCounter } from "./doc.js";
+import { Layer, LayerGroup, PaintDoc, flattenLeaves, findNodeById, reseedLayerIdCounter } from "./doc.ts";
 import { compositeLayers } from "./layer-composite.js";
 import { smartResample } from "./resample.js";
 import { makeBitmap } from "./bitmap.js";
 // 纯树↔stack.xml 序列化（嵌套组 + id + active）抽到独立深模块（无 canvas 依赖，可纯 node 测）。
 import { buildStackXml, parseStackXml } from "./ora-stack-xml.ts";
+import type { ParsedNode } from "./ora-stack-xml.ts";
+
+// 2D 上下文：OffscreenCanvas / <canvas> 两种 ctx 共有 API（与 doc.ts 的 Ctx 同形）。
+type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+// renderMerged / encode 只读 doc 的 width/height/layers，与 PaintDoc 形状兼容。
+type EncodeDoc = { width: number; height: number; layers: PaintDoc["layers"] };
+// encode opts：两个可选 WebPaint 私有扩展。
+interface EncodeOpts {
+  referenceImage?: Blob;
+  webpaintState?: object;
+}
+// decode 末尾写入 PaintDoc 上未声明的私有字段（store seam 读取），就地扩展形状。
+type DecodedDoc = PaintDoc & {
+  _referenceBlob?: Blob;
+  _webpaintState?: unknown;
+  _wroteWith: string | null;
+};
 // 加密对本 codec **不可见**（v235 起）：encode 永远出明文 ora、decode 永远收明文 ora。
 // 包壳/解壳全在 store 深模块（flow.save/load/push/pull 自动处理；密码经 crypt seam）。
 // 拿到加密容器字节请先走 store.unseal / flow.load，别直接喂这里（会报「缺 stack.xml」）。
 
 // ---- 工具 ----
 
-async function canvasToPngBytes(canvas) {
+async function canvasToPngBytes(canvas: any): Promise<Uint8Array> {
   // OffscreenCanvas 用 convertToBlob，HTMLCanvasElement 用 toBlob —— 分支
-  let blob;
+  let blob: Blob | null | undefined;
   if (typeof canvas.convertToBlob === "function") {
     blob = await canvas.convertToBlob({ type: "image/png" });
   } else if (typeof canvas.toBlob === "function") {
@@ -46,7 +63,7 @@ async function canvasToPngBytes(canvas) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-function bytesToString(bytes) {
+function bytesToString(bytes: Uint8Array): string {
   return new TextDecoder("utf-8").decode(bytes);
 }
 
@@ -55,7 +72,7 @@ function bytesToString(bytes) {
 /**
  * 渲染整图合成预览。doc-size canvas + 逐 layer drawImage（带 bbox 偏移 + opacity + mode）。
  */
-function renderMerged(doc) {
+function renderMerged(doc: EncodeDoc) {
   const c = makeBitmap(doc.width, doc.height);
   const ctx = c.getContext("2d");
   // v134 (user：「即使 merged 也保留 alpha；ora 里 merged 同处理」)
@@ -69,9 +86,9 @@ function renderMerged(doc) {
  *  cloud-thumbs.js suffix budget = 80KB；留 ~10KB 给 zip 尾巴（CD + EOCD + 扫描余量）→ thumb ≤ 70KB
  *  返 { canvas, png: Uint8Array }
  */
-async function renderThumbnailAdaptive(merged, maxBytes = 71680) {
+async function renderThumbnailAdaptive(merged: any, maxBytes = 71680) {
   const sizes = [256, 192, 128];
-  let lastPng = null, lastCanvas = null;
+  let lastPng: Uint8Array | null = null, lastCanvas: any = null;
   for (let i = 0; i < sizes.length; i++) {
     const c = renderThumbnail(merged, sizes[i]);
     const png = await canvasToPngBytes(c);
@@ -88,7 +105,7 @@ async function renderThumbnailAdaptive(merged, maxBytes = 71680) {
  * 的 smartResample——之前这里抄了一份且循环条件写成 && 导致细长画布退化成单次缩，
  * 现删除重复实现直接复用 SSoT。
  */
-function renderThumbnail(merged, maxSide = 256) {
+function renderThumbnail(merged: any, maxSide = 256) {
   const srcW = merged.width, srcH = merged.height;
   const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
   const tw = Math.max(1, Math.round(srcW * scale));
@@ -105,7 +122,7 @@ function renderThumbnail(merged, maxSide = 256) {
  * opts.referenceImage: optional Blob
  * opts.webpaintState:  optional object（直接 JSON.stringify）
  */
-export async function encodeDocToOra(doc, opts = {}) {
+export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
   const merged = renderMerged(doc);
   const mergedPng = await canvasToPngBytes(merged);
   // thumb：自适应尺寸 256→192→128，目标 ≤ 80KB（让云端 48KB suffix 大概率命中）
@@ -116,7 +133,7 @@ export async function encodeDocToOra(doc, opts = {}) {
   //   2. Thumbnails/thumbnail.png 故意放最后 → 云端 byte-range thumbnail（v137）
   //      只拉 last 128KB 就能一次性拿到 EOCD + CD + thumbnail data，省 2 次请求
   //   3. mergedimage / layer 是大块，放中间
-  const entries = [
+  const entries: { path: string; data: string | Uint8Array }[] = [
     { path: "mimetype", data: "image/openraster" },
     { path: "stack.xml", data: buildStackXml(doc) },
     { path: "mergedimage.png", data: mergedPng },
@@ -139,7 +156,7 @@ export async function encodeDocToOra(doc, opts = {}) {
   }
 
   // thumbnail 末尾（云端 byte-range 优化）
-  entries.push({ path: "Thumbnails/thumbnail.png", data: thumbPng });
+  entries.push({ path: "Thumbnails/thumbnail.png", data: thumbPng as Uint8Array });
 
   // WebPaint 私有扩展：reference 小窗的图 + 杂项 state JSON。
   if (opts.referenceImage instanceof Blob) {
@@ -157,7 +174,7 @@ export async function encodeDocToOra(doc, opts = {}) {
 // ---- decode：.ora Blob → PaintDoc ----
 
 /** Blob (.ora 明文) → PaintDoc */
-export async function decodeOraToDoc(blob) {
+export async function decodeOraToDoc(blob: Blob) {
   const files = await zipUnpack(blob);
   if (!files["stack.xml"]) throw new Error(".ora 缺 stack.xml");
   // mimetype 检验（友好，不强制）
@@ -170,13 +187,13 @@ export async function decodeOraToDoc(blob) {
   const xml = bytesToString(files["stack.xml"]);
   const meta = parseStackXml(xml);
 
-  const doc = new PaintDoc({ width: meta.w, height: meta.h });
+  const doc = new PaintDoc({ width: meta.w, height: meta.h }) as DecodedDoc;
   doc.layers = [];                                // 清掉 ctor 默认的 1 层
-  let activeId = null;
+  let activeId: number | null = null;
 
   // spec 树 → 真节点（递归）。叶按 src 载 PNG；组递归建 children。
   //   持久化 id 直接覆盖（旧 .ora 无 id → spec.id=null → 留 ctor 发的新 id）。
-  const buildNode = async (spec) => {
+  const buildNode = async (spec: ParsedNode): Promise<Layer | LayerGroup> => {
     if (spec.isGroup) {
       const g = new LayerGroup({ name: spec.name });
       if (spec.id != null) g.id = spec.id;
@@ -209,7 +226,7 @@ export async function decodeOraToDoc(blob) {
     layer.bboxW = bitmap.width;
     layer.bboxH = bitmap.height;
     layer.canvas = makeBitmap(bitmap.width, bitmap.height);
-    layer.ctx = layer.canvas.getContext("2d", { willReadFrequently: false });
+    layer.ctx = layer.canvas.getContext("2d", { willReadFrequently: false }) as Ctx;
     layer.ctx.imageSmoothingEnabled = true;
     layer.ctx.imageSmoothingQuality = "low";
     layer.ctx.drawImage(bitmap, 0, 0);
@@ -251,7 +268,7 @@ export async function decodeOraToDoc(blob) {
 
 // 把版本号字符串（"v71-2026-05-28" 或 "v71"）解析成可比较的整数。
 // 失败 → null（caller 跳过比较；零信息时不警告）
-export function parseAppVersion(s) {
+export function parseAppVersion(s: string | null | undefined): number | null {
   if (!s) return null;
   const m = String(s).match(/^v(\d+)/);
   return m ? parseInt(m[1], 10) : null;

@@ -13,15 +13,33 @@
 //   3. entry data schema 一致（同类 op 用同一壳）
 //   4. handler 之间不互相调
 
+// 一条 undo entry：type 是 dispatch key，其余字段是 op 自带的最小 payload（领域无关，动态壳）。
+interface UndoEntry extends Record<string, unknown> {
+  type: string;
+}
+
+// handler 统一 shape（见上文纪律 2）。entry 收 UndoEntry；undo/redo 可同步可异步。
+interface UndoHandler {
+  undo(e: UndoEntry): void | Promise<void>;
+  redo(e: UndoEntry): void | Promise<void>;
+  refsLayer?(e: UndoEntry, id: number): boolean;   // layer id 全程是 number
+  dispose?(e: UndoEntry): void;
+}
+
 export class UndoStack {
-  constructor({ max = 50 } = {}) {
+  entries: UndoEntry[];
+  index: number;
+  max: number;
+  handlers: Map<string, UndoHandler>;
+
+  constructor({ max = 50 }: { max?: number } = {}) {
     this.entries = [];
     this.index = -1;          // index of "currently applied" entry; -1 = nothing applied
     this.max = max;
     this.handlers = new Map();  // type → { undo, redo, refsLayer?, dispose? }
   }
 
-  registerHandler(type, handler) {
+  registerHandler(type: string, handler: UndoHandler) {
     if (!handler || typeof handler.undo !== "function" || typeof handler.redo !== "function") {
       throw new Error(`UndoStack handler for "${type}" must have undo + redo`);
     }
@@ -33,7 +51,7 @@ export class UndoStack {
 
   // 把一条新 entry 入栈（也代表"已经发生过"——push 前 caller 已经把效果应用到 doc 了）。
   // truncate redo segment（如果之前 undo 过然后又有新动作）。dispose 被裁掉的 entry。
-  push(entry) {
+  push(entry: UndoEntry) {
     if (!entry || typeof entry.type !== "string") {
       throw new Error("UndoStack.push: entry must have type:string");
     }
@@ -44,7 +62,7 @@ export class UndoStack {
     this.entries.push(entry);
     this.index++;
     while (this.entries.length > this.max) {
-      const evicted = this.entries.shift();
+      const evicted = this.entries.shift()!;
       this._dispose(evicted);
       this.index--;
     }
@@ -86,7 +104,7 @@ export class UndoStack {
     this._emit();
   }
 
-  _dispose(entry) {
+  _dispose(entry: UndoEntry) {
     const h = this.handlers.get(entry.type);
     if (h && typeof h.dispose === "function") {
       try { h.dispose(entry); } catch (err) { console.warn(`[history] dispose failed:`, err); }

@@ -12,8 +12,8 @@
 //   restore(trashKey)   → name（session.restoreSession，撞名自动 (2)）
 
 import { getSession, putSession, deleteSession } from "../storage.js";
-import { trashSession, restoreSession, purgeFromTrash, listTrashedSessions, renderThumbBlob, putSessionPkg } from "../session.js";
-import { decodeOraToDoc } from "../ora.js";
+import { trashSession, restoreSession, purgeFromTrash, listTrashedSessions, renderThumbBlob, putSessionPkg } from "../session.ts";
+import { decodeOraToDoc } from "../ora.ts";
 import { looksEncryptedContainer } from "./crypto-container.ts";
 import { LOCAL_BACKUP_PREFIX, asideStamp } from "./move-aside.ts";
 import type { Bytes, LocalAdapter, TrashEntry } from "./types.ts";

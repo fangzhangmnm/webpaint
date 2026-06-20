@@ -6,8 +6,9 @@
 
 import { els } from "./els.ts";
 import { renderLayersPanel } from "./layers-panel.ts";
-import { applyPixelSnap } from "./pixel-edit.js";
+import { applyPixelSnap } from "./pixel-edit.ts";
 import type { AppContext } from "./app-context.ts";
+import type { Layer } from "./doc.ts";
 
 let doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
 
@@ -24,7 +25,7 @@ export function _afterDocChange() {
 
 // 从 Layer 拿一份 spec（含 pixel snapshot）—— add/remove handler 都用
 // 「层 → spec」的形状归模型层（doc.layerSpec）；这里只是旧名兜底。
-export function layerSpecFrom(L: unknown) { return doc.layerSpec(L); }
+export function layerSpecFrom(L: unknown) { return doc.layerSpec(L as Layer); }
 
 export function initLayerUndo(ctx: AppContext) {
   ({ doc, board, history, setStatus } = ctx);
@@ -156,11 +157,11 @@ export function initLayerUndo(ctx: AppContext) {
   history.registerHandler("setLayerProp", {
     undo: (e: UndoEntry) => {
       const L = doc.findLayer(e.layerId);
-      if (L) { L[e.prop] = e.oldVal; _afterDocChange(); setStatus(`「${L.name}」${_LP_LABEL[e.prop] || e.prop} 已还原`); }
+      if (L) { (L as unknown as Record<string, unknown>)[e.prop as string] = e.oldVal; _afterDocChange(); setStatus(`「${L.name}」${_LP_LABEL[e.prop] || e.prop} 已还原`); }
     },
     redo: (e: UndoEntry) => {
       const L = doc.findLayer(e.layerId);
-      if (L) { L[e.prop] = e.newVal; _afterDocChange(); setStatus(`「${L.name}」${_LP_LABEL[e.prop] || e.prop} 已更新`); }
+      if (L) { (L as unknown as Record<string, unknown>)[e.prop as string] = e.newVal; _afterDocChange(); setStatus(`「${L.name}」${_LP_LABEL[e.prop] || e.prop} 已更新`); }
     },
     refsLayer: (e: UndoEntry, id: number) => e.layerId === id,
   });

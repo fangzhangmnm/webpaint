@@ -14,7 +14,7 @@
 
 import { Selection } from "./selection.js";
 import { makeBitmap } from "./bitmap.js";
-import { eachLeaf } from "./doc.js";
+import { eachLeaf } from "./doc.ts";
 
 export class FloatingTransform {
   // onChange 晚绑定（LassoEngine 构造时传 () => this.onChange()，因为 input.js 之后才赋 onChange）。

@@ -3,7 +3,7 @@
 // topbar-menu.menuSaveAs 各抄一份 listSessions/listCloud + includes 检查。两者循环结构有意不同
 // （rename 把检查包进 withBusy 覆盖空窗；saveAs 在 busy 前查），故只抽**检查本身**，调用点结构不动。
 
-import { listSessions } from "./session.js";
+import { listSessions } from "./session.ts";
 import { listCloudSessionsRecursive } from "./app-store.js";
 import { stripSessionExt } from "./config.js";
 

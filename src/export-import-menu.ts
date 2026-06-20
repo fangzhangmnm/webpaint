@@ -13,7 +13,7 @@ import { getExporter, listExportersByKind } from "./exporters.js";
 import { els } from "./els.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
-import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard } from "./session.js";
+import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
 import { looksEncryptedContainer } from "./crypto-format.js";
 

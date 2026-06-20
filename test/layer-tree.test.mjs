@@ -21,7 +21,7 @@ const _prevOSC = globalThis.OffscreenCanvas;
 function useStub() { globalThis.OffscreenCanvas = StubCanvas; }
 useStub();
 const { PaintDoc, LayerGroup, findNodeById, findParentOf, countLeaves, flattenLeaves } =
-  await import("../src/doc.js");
+  await import("../src/doc.ts");
 globalThis.OffscreenCanvas = _prevOSC;   // import 完还原，避免毒别的文件
 
 // 每个 it() 开头 useStub()（PaintDoc 构造/快照走 OffscreenCanvas）。

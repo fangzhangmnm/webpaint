@@ -22,7 +22,7 @@ import { mountBrushSettings } from "./ui/brush-settings.ts";
 import { exportBrush, exportRackFolder, buildRackCode, shareOrDownloadJSON } from "./brush-io.ts";
 import type { Brush, BrushRackData } from "./brush-types.ts";
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
-import type { EditMode } from "./edit-mode.js";
+import type { EditMode } from "./edit-mode.ts";
 
 const RACK_META_KEY = "brush-rack";
 const TOOL_LABEL: Record<string, string> = { brush: "笔刷", smudge: "涂抹", eraser: "橡皮" };

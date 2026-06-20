@@ -11,8 +11,8 @@ import { safeLSSet } from "./safe-ls.ts";
 import { stepFor, quantizeSize } from "./ui/brush-size.ts";
 import type { EditorRuntimeState } from "./app-context.ts";
 import type { BrushRack } from "./brush-rack.ts";
-import type { EditMode } from "./edit-mode.js";
-import type { Board } from "./board.js";
+import type { EditMode } from "./edit-mode.ts";
+import type { Board } from "./board.ts";
 
 interface DialControlsDeps { state: EditorRuntimeState; rack: BrushRack; getEditMode: () => EditMode; }
 interface DialKeyboardDeps { board: Board; leftDial: { flashSize: () => void }; }

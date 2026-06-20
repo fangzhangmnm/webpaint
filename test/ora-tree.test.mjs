@@ -73,7 +73,7 @@ globalThis.DOMParser = FakeDOMParser;
 //   run.mjs 里一众 TLA 模块的微任务交错顺序，毒到 selection-morph 的 OSC-stub（实测）。
 //   ora-stack-xml.js 无 canvas 依赖，本就不该碰 OSC，但 await 回合数本身是雷 → 收成 1 个。
 const [_docMod, _oraXmlMod] = await Promise.all([
-  import("../src/doc.js"),
+  import("../src/doc.ts"),
   import("../src/ora-stack-xml.ts"),
 ]);
 const { PaintDoc } = _docMod;

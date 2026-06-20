@@ -29,10 +29,11 @@ import { WEBPAINT_VERSION } from "./version.js";
 import {
   trashSession, renderThumbBlob,
   setCurrentSessionName,
-} from "./session.js";
-import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.js";
+} from "./session.ts";
+import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.ts";
 import { getMeta, setMeta } from "./storage.js";
-import { PaintDoc } from "./doc.js";
+import { PaintDoc } from "./doc.ts";
+import type { Layer } from "./doc.ts";
 import {
   isSignedIn, isCloudDirty, getKnownETag, clearCloudState,
   CloudConflictError, CloudNameCollisionError,
@@ -192,7 +193,7 @@ function _buildOraMeta() {
   };
 }
 // encodeDocToOra 出 .ora Blob（ora.js 未类型化 → 在此 JS-seam 断言其形状，candidate 3 收紧时移除）。
-function _encodeCurrentOra(): Promise<Blob> { return encodeDocToOra(doc, _buildOraMeta()) as Promise<Blob>; }
+function _encodeCurrentOra(): Promise<Blob> { return encodeDocToOra(doc, _buildOraMeta() as Parameters<typeof encodeDocToOra>[1]) as Promise<Blob>; }
 async function _writeSessionCheckpoint(name: string) {
   if (!name) return;
   // checkpoint 是 app 自管的旁路存储 → 过 store.seal 按文件加密态包壳（加密作品的明文绝不落盘；
@@ -211,13 +212,13 @@ async function _readSessionCheckpoint(name: string) {
 // ---- blank-unnamed 自检（verbatim）----
 function _docIsBlankUnnamed() {
   if (_isLazyBlankSession) {
-    for (const L of doc.layers) {
+    for (const L of doc.layers as Layer[]) {
       if (L.bboxW > 0 && L.bboxH > 0) { _isLazyBlankSession = false; _recomputePhase(); return false; }
     }
     return true;
   }
   if (_activeSessionName && _activeSessionName !== "未命名") return false;
-  for (const L of doc.layers) {
+  for (const L of doc.layers as Layer[]) {
     if (L.bboxW > 0 && L.bboxH > 0) return false;   // 有像素 → 不算 blank
   }
   return true;
@@ -362,7 +363,7 @@ async function saveAndPush() {
   try {
     const result = await _store.flow.push(sessionName, {
       encode: () => _encodeCurrentOra(),   // 同步字节不带 viewport（ADR-0016 §6）
-      adopt: async (blob: Blob, nm: string) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
+      adopt: async (blob: Blob, nm: string) => { const loaded = await decodeOraToDoc(blob) as LoadedDoc; adoptLoadedDoc(loaded, nm); },
       onConflict: async () => await lockSyncGate({
         title: "云端有更新版本",
         message: `「${sessionName}」云端已被改过；你本地是 ${getLocalSavedAtLabel()}。`,
@@ -595,7 +596,7 @@ async function pullCloudPath(path: string) {
     const localName = await uniqueLocalName(cloudName);
     const res = await _store.flow.acquire(cloudName, {
       localName,
-      adopt: async (blob: Blob, nm: string) => { const loaded = await decodeOraToDoc(blob); adoptLoadedDoc(loaded, nm); },
+      adopt: async (blob: Blob, nm: string) => { const loaded = await decodeOraToDoc(blob) as LoadedDoc; adoptLoadedDoc(loaded, nm); },
     });
     if (res.status === "absent") { setStatus(`找不到：${path}`); return; }
     setGalleryOpen(false);
@@ -624,7 +625,7 @@ async function openItem(item: GalleryItem) {
       }
       if (r.status === "absent") { setStatus(`找不到：${item.name}`); return; }
       if (r.status === "locked") { setStatus("未打开：需要密码解锁", true); return; }
-      const loaded: LoadedDoc = await decodeOraToDoc(r.blob);
+      const loaded: LoadedDoc = await decodeOraToDoc(r.blob!) as LoadedDoc;
       adoptLoadedDoc(loaded, item.name);
       setGalleryOpen(false);
       setStatus(`已打开：${item.name}`);
@@ -646,10 +647,10 @@ async function pushItem(item: GalleryItem) {
       const r = await _store.flow.load(item.name);   // 解壳读取（密码已在内存）
       if (r.status === "absent") throw new Error("找不到本地 session");
       if (r.status === "locked") throw new Error("需要密码解锁");
-      const loaded: LoadedDoc = await decodeOraToDoc(r.blob);
+      const loaded: LoadedDoc = await decodeOraToDoc(r.blob!) as LoadedDoc;
       if (item.local && item.cloud) _store.adoptBase(item.name, getKnownETag(item.name));  // reloaded 后补锚 If-Match（W2 红线）
       const res = await _store.flow.push(item.name, {
-        encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState }) as Promise<Blob>,
+        encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState } as Parameters<typeof encodeDocToOra>[1]) as Promise<Blob>,
         onConflict: async () => "keep",
       });
       if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开处理 / 先改名）`, true);
@@ -677,7 +678,7 @@ async function unloadItem(item: GalleryItem) {
   });
 }
 
-function setName(name: string | null) { _activeSessionName = name; setCurrentSessionName(name); _recomputePhase(); }
+function setName(name: string | null) { _activeSessionName = name; setCurrentSessionName(name as string); _recomputePhase(); }
 
 // ---- 公开 session 对象 ----
 export const session = {

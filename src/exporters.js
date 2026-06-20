@@ -19,8 +19,8 @@
 // shareOrDownloadBlob / triggerDownload。exporter 只管「doc → 该格式的字节」。
 
 import { makeRegistry } from "./registry.ts";
-import { encodeDocToOra } from "./ora.js";
-import { renderDocToImageBlob } from "./session.js";
+import { encodeDocToOra } from "./ora.ts";
+import { renderDocToImageBlob } from "./session.ts";
 import { store as _store } from "./app-store.js";
 import { session } from "./session-state.ts";
 

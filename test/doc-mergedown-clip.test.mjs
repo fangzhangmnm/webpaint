@@ -96,7 +96,7 @@ class StubCanvas {
 const _prevOSC = globalThis.OffscreenCanvas;
 function useStub() { globalThis.OffscreenCanvas = StubCanvas; }
 useStub();
-const { PaintDoc } = await import("../src/doc.js");
+const { PaintDoc } = await import("../src/doc.ts");
 globalThis.OffscreenCanvas = _prevOSC;   // import 完还原，避免毒到不设 stub 的 test 文件
 
 // 填一个 layer 的整块矩形（doc 坐标 bbox=全块），rgba

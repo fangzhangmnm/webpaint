@@ -1,6 +1,6 @@
 # JS → TS 迁移：进度与策略
 
-> as-of v305 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
+> as-of v306 / 2026-06-19。本文是 how 类文档（最易腐烂）——与代码矛盾时信代码（`tsconfig.json` 的 `include` 是唯一真相）。
 > 完整勘探报告：`docs/reports/2026-06-19-js-ts-migration-deepening-review.html`（gitignored，仅本机）。
 
 ## 北极星 + 原则（用户钉死，2026-06-19）
@@ -208,12 +208,21 @@ toolbar 解锁的 4 个消费方一簇入门：`layer-undo`(4)、`transient-pane
 - 拉入 program 的连带文件修了 2 个潜伏错：`ui/brush-settings.ts` `open(d as BrushDraft)`、`current-brush` `preset as BrushPreset`（同一运行时对象的两个视图）——皆行为等价 cast。
 - `save-status` 红线接缝：`session.name as string`（updateSaveStatus 已守门，跨函数 tsc 看不到）。
 
+### ✅ batch 13 · 引擎接缝 .js→.ts 大批转换（v306，2026-06-19）—— 含手感核心
+用户解禁：「只加 type 不改手感」→ 一口气转 **8 个引擎 .js→.ts** + gallery UI 簇灭 any。
+8 个并行 subagent（每文件一个，铁律：只加注解/cast/interface，绝不改运行时表达式）+ 中心化 rename/改 import 扩展名/收口级联。**388 测试是行为护栏，全程绿**。
+- 转换文件：`doc`(950loc/375 err)、`board`(823/290)、`input`(1171/390，手感核心)、`session`(361/36)、`ora`(258/57)、`pixel-edit`(114/45)、`edit-mode`(126/26)、`history`(102/34)。
+- gallery UI 簇灭 any：`ui/gallery`(37→0)、`gallery-view-model`(5→0)、`rack-sheet`(2→0)。
+- **机制**：`.js→.ts` = git mv + 全仓 import 扩展名 `./X.js`→`./X.ts`（含 app.js / 子目录 `../X.js`）+ 入 gate。运行时 node strip-types 跑 .ts、esbuild 打包，行为零变更。
+- **引擎类型从 inferred-any 收成真类型** → 级联到消费方 ~111 个 boundary mismatch。两处引擎根因修一次收掉大半：`history.UndoHandler.refsLayer(id:number)`（layer id 全程 number）、`doc.SelectionLike` 补 bbox/maskCanvas/outline + `LayerSnap.bitmap` 收 ImageBitmap。其余消费方（layers-panel 36、session-state 13、toolbar 12…）3 个并行 agent 在 seam 处 cast 收口（零新 any）。
+- **gallery.ts 此前根本没进 program**（gallery-shell 动态 import）→ agent 报 0 是 vacuous；正式入 gate 后暴露 9 个真错（`onUnmounted` 漏在 vue stub、闭包内 `props.cloud!`、TrashGItem cast 等），已修。
+- 残留**诚实 boundary any**：`input.ts` 21、`ora.ts` 4 —— 全指向**仍未类型化的 .js 引擎**（`brush.js`/`liquify.js`/`filter-brush.js`/`lasso.js`/`bitmap.js`/`resample.js`）。这些转 .ts 后即可收口（input 的本地 `Doc`/`Board` interface 换成 `import type` 真类型）。
+
 ## 待迁（剩余 JS 源）
 
-- 已无未 gate 的 app 层 `.ts`（brush-rack 簇收尾）。剩 `ui/brush-settings-model.ts` 等连带 .ts 已随 import 进 program 受检。
-- **高入度 JS 接缝**（`any` 从源头扩散）：`doc.js`(8↘) `session.js`(10↘) `ora.js`(8↘)。按入度给真类型——
-  也会自动收紧 `AppContext` 里 `import type` 的引擎单例形状。`app-store.js`(16↘) = **红线接缝**，改前 escalate human。
-- **手感红区**（`input.js` 1171 行未测 · `brush.js` · `stroke-smoother.js`）= 用户钉死区。
+- **手感二级引擎**（仍 .js，input/ora 的 boundary any 指向它们）：`brush.js`、`liquify.js`、`filter-brush.js`、`stroke-smoother.js`、`lasso.js`、`bitmap.js`、`resample.js`、`selection.js`、`layer-composite.js`、`floating-transform.js`。转完可清掉 input/ora 残留 any + input 本地 interface。
+- **红线接缝** `app-store.js` = `src/store/**` 的门面，改前 escalate human。
+- app.js（组合根）本身仍 .js（god-file 装配，最后处理）。
   **最后、保守**：只加类型注解、零行为改动、单独成批交付真机。
 
 ## 怎么迁一簇文件（清单）

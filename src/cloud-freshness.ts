@@ -23,7 +23,8 @@ import {
   store as _store,
 } from "./app-store.js";
 import { lockSyncGate, settleSyncGate } from "./sheets.ts";
-import { decodeOraToDoc } from "./ora.js";
+import { decodeOraToDoc } from "./ora.ts";
+import type { PaintDoc } from "./doc.ts";
 import { els } from "./els.ts";
 import type { AppContext } from "./app-context.ts";
 
@@ -123,7 +124,7 @@ async function checkCloudETag(sessionName: string) {
           ],
         });
       },
-      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); session.adopt(loaded, nm); },
+      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); session.adopt(loaded as PaintDoc, nm); },
     });
   } finally {
     settleSyncGate(null);   // 收尾确保 spinner 关（已关则安全 no-op）
@@ -175,7 +176,7 @@ async function maybeFastForwardActive({ manual = false } = {}) {
     const res = await _store.flow.refresh(name, {
       isOnline: () => navigator.onLine !== false,
       localDirty: () => _store.edits.localDirty(),
-      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); session.adopt(loaded, nm); },
+      adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); session.adopt(loaded as PaintDoc, nm); },
       busy: manual ? withBusy : undefined,   // 手动点 → 锁屏（反馈 + 防刷新中途动笔）；自动轮询 → 静默
     });
     if (res.status === "fast-forwarded") {

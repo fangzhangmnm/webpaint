@@ -11,7 +11,7 @@
 import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.js";
 import { Selection } from "./selection.js";
-import { compressPixelSnap } from "./pixel-edit.js";
+import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { safeLSSet } from "./safe-ls.ts";
 import { fillResampleSelect } from "./resample.js";
@@ -192,7 +192,7 @@ function _runSelEditPreview() {
   if (!s) return;
   const amt = _selEditAmount();
   const signed = s.op === "expand" ? amt : -amt;
-  doc.selection = s.before.morphed(signed, doc.width, doc.height);
+  doc.selection = s.before.morphed(signed, doc.width, doc.height) as (typeof doc)["selection"];
   input.lasso.onChange?.();   // requestRender（重画蚂蚁线）+ wp:lassochange（派生工具栏，已对 _selEdit 免疫）
 }
 function _onSelEditInput() {
@@ -209,7 +209,7 @@ function _openSelEdit(op: "expand" | "shrink") {
   const { menu, popup, title, amount } = _selEditEls();
   menu?.classList.add("hidden");
   if (_selEdit) _finishSelEdit(false);    // 已开着另一个 → 先取消旧的（还原）再开新的
-  _selEdit = { before: doc.selection, op, rafId: 0 };
+  _selEdit = { before: doc.selection as Selection, op, rafId: 0 };
   if (title) title.textContent = op === "expand" ? "扩张选区" : "收缩选区";
   if (amount) amount.value = "1";         // 默认 1px（最常用的轻微扩缩）
   popup?.classList.remove("hidden");
@@ -231,7 +231,7 @@ function _finishSelEdit(applied: boolean) {
     if (after !== before && history) history.push({ type: "selectionChange", before, after });
     setStatus(s.op === "expand" ? "选区已扩张" : "选区已收缩");
   } else {
-    doc.selection = s.before;               // 还原
+    doc.selection = s.before as (typeof doc)["selection"];               // 还原
   }
   popup?.classList.add("hidden");
   input.lasso.onChange?.();
@@ -373,12 +373,12 @@ export function initToolbar(ctx: AppContext) {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
     const before = layer.snapshot();
-    doc.selection.fillOnLayer(layer, state.color);
+    (doc.selection as Selection).fillOnLayer(layer, state.color);
     const after = layer.snapshot();
     const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-    history.push(entry);
-    compressPixelSnap(entry.before, (blob: Blob) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob: Blob) => { entry.afterBlob  = blob; });
+    history.push(entry as unknown as Parameters<(typeof history)["push"]>[0]);
+    compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
+    compressPixelSnap(entry.after as Parameters<typeof compressPixelSnap>[0],  (blob: Blob | null) => { entry.afterBlob  = blob; });
     board.invalidateAll();
     setStatus(`已填色：${state.color}`);
   });
@@ -387,12 +387,12 @@ export function initToolbar(ctx: AppContext) {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
     const before = layer.snapshot();
-    doc.selection.clearOnLayer(layer);
+    (doc.selection as Selection).clearOnLayer(layer);
     const after = layer.snapshot();
     const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-    history.push(entry);
-    compressPixelSnap(entry.before, (blob: Blob) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after,  (blob: Blob) => { entry.afterBlob  = blob; });
+    history.push(entry as unknown as Parameters<(typeof history)["push"]>[0]);
+    compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
+    compressPixelSnap(entry.after as Parameters<typeof compressPixelSnap>[0],  (blob: Blob | null) => { entry.afterBlob  = blob; });
     board.invalidateAll();
     setStatus("已清除选区内像素");
   });
@@ -407,7 +407,7 @@ export function initToolbar(ctx: AppContext) {
 
   // 反选：在 docW×docH 上 mask 取反
   byId("lassoInvertBtn").addEventListener("click", () => {
-    const inv = doc.selection ? doc.selection.invert(doc.width, doc.height) : Selection.full(doc.width, doc.height);
+    const inv = doc.selection ? (doc.selection as Selection).invert(doc.width, doc.height) : Selection.full(doc.width, doc.height);
     const entry = input.lasso.setSelection(inv);
     if (entry && history) history.push(entry);
     board.invalidateAll();

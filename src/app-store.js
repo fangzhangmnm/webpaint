@@ -9,7 +9,7 @@ import { createFolderStore } from "./store/folder-store.ts";
 export { resolveRef } from "./store/folder-merge.ts";   // {id,name} 引用解析（id→name 兜底），活动笔刷引用用
 import { createLocalAdapter } from "./store/local-adapter.ts";
 import { withBusy } from "./fullscreen-busy.ts";   // 注入给 store：用户态写流深模块强制锁屏（契约见 store.createStore）
-import { listSessions, listTrashedSessions, trashSession, getCurrentSessionName } from "./session.js";
+import { listSessions, listTrashedSessions, trashSession, getCurrentSessionName } from "./session.ts";
 import { mergeLocalCloud, mergeTrash, classifyCloudGone } from "./gallery-model.ts";
 import { CLIENT_ID, SCOPES, sessionFileName, encSessionFileName, stripSessionExt } from "./config.js";
 import { zipReadEntry } from "./zip.js";

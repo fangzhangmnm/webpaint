@@ -89,7 +89,7 @@ function useStub() { globalThis.OffscreenCanvas = StubCanvas; }
 useStub();
 // doc.js makeBitmap 在无 OffscreenCanvas 时走 document.createElement；这里 OffscreenCanvas 已设，足够。
 
-const { PaintDoc, Layer } = await import("../src/doc.js");
+const { PaintDoc, Layer } = await import("../src/doc.ts");
 const { Selection } = await import("../src/selection.js");
 globalThis.OffscreenCanvas = _prevOSC;
 

@@ -5,16 +5,20 @@
 //   - v156 剪贴板 / 复制为浮层 快捷键：wp:copy / wp:paste / wp:duplicateFloat 三个 window 事件的逻辑。
 //     入口在 input.js KEYBOARD_SHORTCUTS（hub）；run 派发 window 事件，逻辑搬到这（要 doc/import/setColor）。
 //     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
-import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.js";
+import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.ts";
 import { Selection } from "./selection.js";
-import { countLeaves } from "./doc.js";
-import { compressPixelSnap } from "./pixel-edit.js";
+import { countLeaves } from "./doc.ts";
+import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { updateLassoToolbar } from "./toolbar.ts";
 import type { AppContext } from "./app-context.ts";
 
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
+
+// PixelSnap 未从 pixel-edit.ts export → 借 compressPixelSnap 第一参取之（snap-with-blob 是 app 记账叠加字段）。
+type PixelSnap = NonNullable<Parameters<typeof compressPixelSnap>[0]>;
+type PixelSnapWithBlob = PixelSnap & { blob?: Blob | null };
 
 // doc 活层 / Selection 的最小结构（doc/selection.js 未类型化 → 只描述本文件用到的几何字段）。
 interface LayerLike { bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; }
@@ -52,7 +56,7 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   const src = doc.activeLayer;
   if (!src) return;
   if (src.isGroup) { setStatus("请先选择一个图层（组不能这样操作）"); return; }
-  const beforeActive = move ? src.snapshot() : null;
+  const beforeActive: PixelSnapWithBlob | null = move ? src.snapshot() : null;
   const newL = doc.addLayer(move ? "移到新层" : "复制层");
   if (!newL) return;
   // 把 newL 的 bbox / canvas 重设为 selection bbox
@@ -79,7 +83,7 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   }
   const loc = doc.locateNode(newL.id)!;   // {parentId, index}：组内也精确（撤销 insertLayerAt 用）
   const newLayerSpec = layerSpecFrom(newL) as { blob?: Blob | null; [k: string]: unknown };
-  const afterActive = move ? src.snapshot() : null;
+  const afterActive: PixelSnapWithBlob | null = move ? src.snapshot() : null;
   history.push({
     type: "selectionToLayer",
     isMove: move,
@@ -88,9 +92,9 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
     beforeActive, afterActive,
   });
   // 异步压缩 newL pixels（同 removeLayer 路径）
-  compressPixelSnap(newLayerSpec, (blob: Blob) => { newLayerSpec.blob = blob; });
-  if (move && beforeActive) compressPixelSnap(beforeActive, (blob: Blob) => { beforeActive.blob = blob; });
-  if (move && afterActive)  compressPixelSnap(afterActive,  (blob: Blob) => { afterActive.blob = blob; });
+  compressPixelSnap(newLayerSpec as unknown as PixelSnap, (blob: Blob | null) => { newLayerSpec.blob = blob; });
+  if (move && beforeActive) compressPixelSnap(beforeActive, (blob: Blob | null) => { beforeActive.blob = blob; });
+  if (move && afterActive)  compressPixelSnap(afterActive,  (blob: Blob | null) => { afterActive.blob = blob; });
   _afterDocChange();
   setStatus(move ? "已移到新层" : "已复制到新层");
 }
@@ -120,7 +124,7 @@ export function initSelectionOps(ctx: AppContext) {
     if (!layer) return;
     let canvas;
     if (doc.selection) {
-      canvas = _extractSelectionRegionCanvas(layer, doc.selection);
+      canvas = _extractSelectionRegionCanvas(layer, doc.selection as unknown as Selection);
       if (!canvas) { setStatus("选区在图层外，无内容可复制", true); return; }
     } else {
       if (layer.bboxW <= 0 || layer.bboxH <= 0) { setStatus("当前图层为空", true); return; }
@@ -130,7 +134,7 @@ export function initSelectionOps(ctx: AppContext) {
     }
     try {
       // lazy promise：blob 生成放进 ClipboardItem，保 Safari user-gesture
-      await writeImageBlobToClipboard(new Promise((res) => canvas.toBlob(res, "image/png")));
+      await writeImageBlobToClipboard(new Promise<Blob>((res) => canvas.toBlob(res as BlobCallback, "image/png")));
       setStatus(doc.selection ? "已复制选区到剪贴板" : "已复制当前图层到剪贴板");
     } catch (e) {
       setStatus(`复制失败：${errMsg(e)}`, true);

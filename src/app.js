@@ -14,14 +14,14 @@
 //   currentBrush    ← 不可变 ResolvedBrush（从 dial+预设纯派生，引擎唯一吃）
 
 import { WEBPAINT_VERSION } from "./version.js";
-import { PaintDoc } from "./doc.js";
-import { Board } from "./board.js";
-import { InputController } from "./input.js";
-import { PixelEdit } from "./pixel-edit.js";   // compressPixelSnap/applyPixelSnap 切到 layer-undo/topbar-menu
+import { PaintDoc } from "./doc.ts";
+import { Board } from "./board.ts";
+import { InputController } from "./input.ts";
+import { PixelEdit } from "./pixel-edit.ts";   // compressPixelSnap/applyPixelSnap 切到 layer-undo/topbar-menu
 import { makeCurrentBrush } from "./current-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolved-brush.js）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.js";
-import { UndoStack } from "./history.js";
-import { EditMode } from "./edit-mode.js";
+import { UndoStack } from "./history.ts";
+import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
 import { initDevConsole } from "./dev-console.ts";   // window.WebPaint 调试接口
 import { mountGallery } from "./ui/gallery.ts";          // candidate 1 · 图库深模块

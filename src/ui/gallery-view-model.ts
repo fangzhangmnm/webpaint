@@ -9,6 +9,33 @@
 
 import { pathBasename } from "../gallery-path.ts";
 import { itemTime } from "../gallery-model.ts";
+import type { GalleryItem, CloudFile, LocalSession } from "../gallery-model.ts";
+
+// 本地 session 包（listSessions 的元素 + 图库消费的运行态字段：缩略图 Blob / 字节大小 /
+// 加密标志 / 回收站 key）。store 本体仍是 .js，这里只声明图库读到的字段。
+export interface LocalSessionMeta extends LocalSession {
+  size?: number;
+  thumb?: Blob | null;
+  encrypted?: boolean;
+  trashKey?: string;
+}
+
+// 缩略图 provider（getOrFetchCloudThumb）读的云端文件字段：id / eTag / size / 下载直链。
+export interface CloudFileMeta extends CloudFile {
+  id?: string;
+  eTag?: string;
+  size?: number;
+  "@microsoft.graph.downloadUrl"?: string;
+}
+
+// 图库消费的 item 形状：gallery-model 的 GalleryItem + 图库运行态（dirty / ghost）+
+// local/cloud 的扩展元字段。
+export interface GItem extends Omit<GalleryItem, "local" | "cloud"> {
+  local: LocalSessionMeta | null;
+  cloud: CloudFileMeta | null;
+  dirty?: boolean;
+  ghost?: boolean;
+}
 
 // 文件 tile 的同步徽章（图标 SVG 在组件 template 里按 kind 渲）。ghost = cloud-gone dirty 孤儿。
 export type BadgeKind = "syncedBoth" | "dirtyBoth" | "cloudOnly" | "localOnly" | "ghost";
@@ -23,13 +50,13 @@ export interface GalleryTile {
   badgeTitle: string;
   ghost: boolean;        // cloud-gone dirty 孤儿（云端 path 被别的设备改名/删，本地有未推编辑）→ UI surface
   hasLocalThumb: boolean;
-  cloud: any | null;     // {id,eTag,size,downloadUrl?} 给 thumb provider；纯本地 = null
+  cloud: CloudFileMeta | null;     // {id,eTag,size,downloadUrl?} 给 thumb provider；纯本地 = null
   isActive: boolean;
   encrypted: boolean;    // 本地字节是加密容器（ADR-0012）。纯云端项未知（thumb 拉回时按 MIME 现场识别）
 }
 
 export function tileFor(
-  item: any,
+  item: GItem,
   opts: { signedIn: boolean; activeName: string | null },
 ): GalleryTile {
   const isLocal = !!item.local, isCloud = !!item.cloud;
@@ -83,8 +110,16 @@ export interface TrashTile {
   deletedAt: number;
   source: string;        // 本地 / 云端 / 本地+云端
   hasLocalThumb: boolean;
-  cloud: any | null;
-  local: any | null;
+  cloud: CloudFileMeta | null;
+  local: LocalSessionMeta | null;
+}
+
+// 回收站 item：deletedAt + 本地 trash 记录（含 thumb / trashKey）+ 云端文件。
+export interface TrashGItem {
+  name: string;
+  deletedAt?: number;
+  local: LocalSessionMeta | null;
+  cloud: CloudFileMeta | null;
 }
 
 // 展示格式化（纯）。humanTime 读 now：组件用，测试只覆 humanSize。
@@ -107,7 +142,7 @@ export function humanSize(b: number | null | undefined): string {
   return `${(b / 1073741824).toFixed(2)} GB`;
 }
 
-export function trashTileFor(item: any): TrashTile {
+export function trashTileFor(item: TrashGItem): TrashTile {
   const src = item.local && item.cloud ? "本地+云端" : item.local ? "本地" : "云端";
   return {
     name: item.name,
