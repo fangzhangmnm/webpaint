@@ -3,6 +3,7 @@
 // 映射到新 lib API），所以 app.js 调用点基本不动。store.flow.push 走真编排（B1/B2/B5/C4）。
 // WebPaint 专属（不 vendor）。lib 是 canonical；这里只做 config 注入 + 装配 + 兼容 shim。
 
+import { looksEncryptedContainer } from "./crypto-format.ts";
 import { createStore, createCloudSync, createOneDriveProvider } from "./store/index.ts";
 import { CloudConflictError, CloudNameCollisionError } from "./store/cloud-sync.ts";
 import { createFolderStore } from "./store/folder-store.ts";
@@ -58,6 +59,13 @@ export const store = createStore({
     ext: "ora",
     makePeek: async (blob) => { try { return await zipReadEntry(blob, "Thumbnails/thumbnail.png"); } catch (_) { return null; } },
     getPassword,   // store 对密码非交互：唯一 seam=读内存；弹窗/验证/重试在 enc-thumbs.ensureUnlocked（busy 外）
+  },
+  // N2（审计 2026-06-09）：采纳云端字节落盘前校验是真容器（WebPaint work-file = ora-zip 或加密容器）。
+  //   挡 captive-portal 的 200-HTML body / 坏云副本覆盖唯一一份好本地副本（clean fast-forward 无 backup）。
+  validateAdopt: async (blob) => {
+    const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+    if (head[0] === 0x50 && head[1] === 0x4B && head[2] === 0x03 && head[3] === 0x04) return true;   // ZIP 局部头 PK\x03\x04（ora / .zip）
+    return looksEncryptedContainer(blob);                                                            // 加密容器（7z magic / peek 标记）
   },
 });
 export { CloudConflictError, CloudNameCollisionError };

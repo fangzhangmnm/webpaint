@@ -49,6 +49,12 @@ interface StoreDeps {
     makePeek?: (data: Blob) => Promise<Uint8Array | null>;     // 明文 → 明文不透明字节；加密深模块做
     getPassword?: (name: string) => string | null;            // 同步、非交互、只读内存（唯一密码来源）
   };
+  /** N2（审计 2026-06-09，贴 MASTER 第5行）：采纳云端字节（clean fast-forward / pull）落盘**前**的有效性校验 hook。
+   *  store **格式盲**——校验逻辑由 app 提供（WebPaint：是 ora-zip 或加密容器）。返回 false →
+   *  绝不覆盖本地、不推进 etag/dirty，flow 报 reason="invalid-cloud-bytes"。挡 captive-portal 的
+   *  200-HTML body / 坏云副本覆盖唯一一份好本地副本（clean FF ⇒ 无 backup）。
+   *  缺省（canonical / 非 WebPaint）= 不校验，行为完全不变（与 folder-flow 的 parseFolderBlob 护甲同位）。 */
+  validateAdopt?: (blob: Blob) => boolean | Promise<boolean>;
 }
 
 // 冲突 / 同步流的状态机返回（status 判别）。app 据此续 UI。
@@ -114,7 +120,7 @@ interface FlowResult {
  *   锁屏，调用方忘了包也照锁——挡住改名中途点刷新/tile 读到半截态那类竞态（见 0B 三联症）。
  *   后台流（_doPush/autosave/freshness probe）不默认锁（否则自动保存会闪全屏遮罩）。
  */
-export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy, crypt = {} }: StoreDeps = {} as StoreDeps) {
+export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200, sleep, busy: _uiBusy = passBusy, crypt = {}, validateAdopt }: StoreDeps = {} as StoreDeps) {
   const sub = createSubstrate();    // shape-agnostic 底座：编辑游标 + push-serialize + save 合流
   const _sleep = sleep || ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
@@ -238,6 +244,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     }
     const r = await cloud.pull(name);
     if (!r) return { ok: false, reason: "cloud-vanished", backupName };
+    // N2：采纳云端字节落盘前校验是真容器（app 注入；store 格式盲）。坏字节（captive-portal 200-HTML /
+    //   损坏云副本）→ 拒绝，绝不用它覆盖唯一一份好本地（clean FF 没 backup）。备份已留则原件仍在。
+    if (validateAdopt && !(await validateAdopt(r.blob))) return { ok: false, reason: "invalid-cloud-bytes", backupName };
     await local!.save(name, r.blob);                // 覆盖本地为云端版（dirty 时原件已备份）
     // 采纳后置（R1 根治）：etag/dirty 只在 local.save **成功之后**推进——落盘前强退不再留下
     //   「kv 指新版、本地是旧字节」的静默覆盖窗口（重启后 open 会正确判定云端更新、重新 FF）。

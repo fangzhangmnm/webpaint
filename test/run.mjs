@@ -6,6 +6,7 @@ import "./crypto-container.test.mjs";
 import "./store-crypt.test.mjs";
 import "./substrate.test.mjs";
 import "./store-flow.test.mjs";
+import "./store-adopt-validation.test.mjs";
 import "./store-coalescer.test.mjs";
 import "./folder-merge.test.mjs";
 import "./folder-flow.test.mjs";
