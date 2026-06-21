@@ -118,6 +118,35 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   function setDirty(name: string, dirty: boolean): void { _dirtyMem.set(name, dirty); kv.set(dirtyKey(name), dirty ? "1" : "0"); }
   function clearState(name: string): void { _dirtyMem.delete(name); kv.remove(etagKey(name)); kv.remove(dirtyKey(name)); }
 
+  // N6（审计 2026-06-09，全场唯一静默丢失路径）：lost-response/409 认领云端 item 为「我方成功 push」前，
+  //   size 相等还要**尾部字节相等**才认。zip/ora 尾 = central directory + 每条 CRC32 + EOCD ≈ 内容指纹；
+  //   只在罕见认领窗口对**单个在推文件**拉一次小 byte-range（不是图库遍历）。拉尾失败 = 保守不认（宁可重试，
+  //   也绝不把同名同大小异内容文件静默认作我方 push → 本地字节永不丢）。
+  const _ADOPT_TAIL_N = 8192;
+  function _bytesEq(a: Uint8Array, b: Uint8Array): boolean {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  async function _localTail(b: Bytes | Blob, size: number, n: number): Promise<Uint8Array> {
+    const start = Math.max(0, size - n);
+    if (b instanceof Blob) return new Uint8Array(await b.slice(start, size).arrayBuffer());
+    return (b as Uint8Array).slice(start, size);
+  }
+  //   三态：match=尾符（确认我方）、differ=尾异（确认别人文件）、unknown=拉尾失败（保守：不认也不误判 collision，保持 dirty 重试）。
+  async function _confirmOurUpload(fresh: CloudItem, localBytes: Bytes | Blob, size: number): Promise<"match" | "differ" | "unknown"> {
+    if (size <= 0) return "differ";                                      // 空字节不认（0 字节占位防线）
+    try {
+      const n = Math.min(_ADOPT_TAIL_N, size);
+      const offset = Math.max(0, (fresh.size || size) - n);
+      const raw = await provider.downloadRange(fresh.id, offset, n);
+      const cloudTail = raw instanceof Uint8Array ? raw
+        : raw instanceof Blob ? new Uint8Array(await raw.arrayBuffer())
+        : new Uint8Array(raw);
+      return _bytesEq(await _localTail(localBytes, size, n), cloudTail) ? "match" : "differ";
+    } catch { return "unknown"; }                                       // 拉尾失败 → 未知，保持 dirty 下次重试（不静默认领、也不误报 collision）
+  }
+
   async function push(name: string, bytes: Bytes | Blob, opts: { baseEtag?: string | null; encrypted?: boolean } = {}): Promise<PushResult> {
     // 目标扩展名按**字节内容**走（caller——store——按尾部探测传 encrypted；加密=容器=.zip 名实相符）。
     const enc = !!(encFileName && opts.encrypted);
@@ -156,11 +185,14 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     //   0 字节占位 / 别人的异文件 骗成 synced——postmortem 2026-06-05 第④级 + path-身份同名碰撞）。
     if (!item || !item.eTag) {
       const fresh = await provider.getItemByPath(path).catch(() => null);
-      if (fresh && fresh.eTag && fresh.size === wrote) item = fresh;   // 大小匹配 → 认（我方成功上传/同内容）
-      else if (!baseEtag && fresh && fresh.size > 0) {
-        // 云端已有同名、**非空且大小不符** = 别人的同名异文件 → 绝不覆盖。保持 dirty，抛 collision 让 caller 提示改名。
+      // N6：size 相等还要**尾部字节相等**才认作我方成功 push（防同名同大小异内容文件被静默认领=丢失）。
+      const verdict = fresh && fresh.eTag && fresh.size === wrote ? await _confirmOurUpload(fresh, bytes, wrote) : null;
+      if (verdict === "match") item = fresh;                            // size + 尾都符 → 确认我方 push
+      else if (!baseEtag && fresh && fresh.size > 0 && verdict !== "unknown") {
+        // 云端已有同名、非空，且（大小不符 **或** 大小相同但尾部异内容）= 别人的同名异文件 → 绝不覆盖。
+        //   保持 dirty，抛 collision 让 caller 提示改名（本地字节不丢）。unknown（拉尾失败）不在此列——见下。
         throw new CloudNameCollisionError(name);
-      } else { item = null; }   // 0 字节占位（我方失败上传）/ 其他 → 保持 dirty，下次重试
+      } else { item = null; }   // 0 字节占位 / 有 base 未确认 / unknown 拉尾失败 → 保持 dirty，下次重试
     }
     if (item && item.eTag) { setETag(name, item.eTag); setDirty(name, false); }
     return { item };
