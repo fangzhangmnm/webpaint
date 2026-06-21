@@ -70,6 +70,33 @@ describe("cloud-sync P0 · N7 dirty-rename 旧云 .trash 失败不静默吞", ()
   });
 });
 
+describe("cloud-sync P0 · N3 离线删除持久化队列 + 重连 drainDeleteQueue 重放", () => {
+  it("离线删 → 排队（云端没动）；重连 drain 且 base-etag 匹配 → 云端真删", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    const delRes = await env.store.flow.delete("猫", { isOnline: () => false });
+    eq(delRes.queuedCloudDelete, true, "离线删回报已排队");
+    eq(await env.local.exists("猫"), false, "本地离线 move-aside");
+    assert(await env.provider.getItemByPath("猫.ora"), "离线时云端还在（没删）");
+    const drain = await env.store.flow.drainDeleteQueue();             // 重连排空
+    eq(drain.drained, 1, "重放一条");
+    eq(drain.deferred, 0, "无遗留");
+    eq(await env.provider.getItemByPath("猫.ora"), null, "base-etag 匹配 → 云端进 .trash（删了）");
+    const drain2 = await env.store.flow.drainDeleteQueue();
+    eq(drain2.drained, 0, "队列已空，幂等");
+  });
+  it("离线删后云端同名被换成新文件（etag 变）→ drain 命中 base 不符 → conflict-edit-wins，绝不删新文件", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    await env.store.flow.delete("猫", { isOnline: () => false });      // 离线排队，base = v1 的 etag
+    // 期间别的设备把同名文件换成了新内容（etag 改变）——正是「旧设备攒删除、很久后上线」要防的
+    await env.provider.upload("猫.ora", bytes("new-file-from-other-device"), { conflictBehavior: "replace" });
+    const drain = await env.store.flow.drainDeleteQueue();
+    eq(drain.drained, 1, "出队（终态 conflict-edit-wins）");
+    assert(await env.provider.getItemByPath("猫.ora"), "base-etag 守卫：云端新文件没被旧删除误杀");
+  });
+});
+
 import { mergeFolders } from "../src/store/folder-merge.ts";
 describe("folder-merge P0 · N11 显式 conflictPolicy（默认 last-win）", () => {
   const item = (id, uat, extra) => ({ id, uat, ...extra });

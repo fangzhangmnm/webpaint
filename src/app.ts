@@ -363,6 +363,7 @@ window.addEventListener("wp:auth-changed", () => {
 window.addEventListener("online", async () => {
   if (!isSignedIn()) await retrySilentSignIn();
   updateCloudAuthUI();
+  if (isSignedIn()) _store.flow.drainDeleteQueue().catch((e) => console.warn("drainDeleteQueue", e));   // N3：重连重放离线删除（base-etag 守卫，不删错文件）
   if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
   showIdleLockIfStale();   // 回到在线 → 闲够了则锁屏（不静默 FF；点继续才 explicit 刷新）
 });
@@ -371,6 +372,8 @@ window.addEventListener("offline", () => { updateCloudAuthUI(); });
 // 前台新鲜度活动监听 + idle tick 接线已切到 cloud-freshness.ts initCloudFreshness。
 // Gallery-first 启动恢复（加载上次 session 或停 gallery）= boot.ts bootRestoreSession。
 bootRestoreSession(ctx);
+// N3：启动时若在线+已登录，排空上次离线攒下的删除队列（fresh boot 不触发 online 事件，故此处补一刀）。
+if (navigator.onLine && isSignedIn()) _store.flow.drainDeleteQueue().catch((e) => console.warn("drainDeleteQueue", e));
 
 // 笔架深模块装配：mount sheet/settings 组件 + rackStore.configure + 注册 panel + 绑 DOM 事件。
 rack.init({

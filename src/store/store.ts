@@ -401,10 +401,12 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
     const localPresent = local ? await local.exists(name) : false;
     if (!isOnline()) {
-      // 离线：本地 move-aside + 排队云删（带 base-etag 供重连重放）。队列须持久化（C1b 接 IDB）。
+      // 离线：本地 move-aside + 排队云删（带 base-etag 供重连重放）。N3：队列已持久化（kv），由 drainDeleteQueue 排空。
+      const baseEtag = cloud.getETag(name);            // 先取（local.trash 不动云态，但稳妥起见前置）
       let trashKey: string | null = null;
       if (localPresent) trashKey = await local!.trash(name);
-      return { status: "trashed", where: "local", queuedCloudDelete: true, baseEtag: cloud.getETag(name), trashKey };
+      _enqueueDelete(name, baseEtag);                  // N3：持久化排队 → 重连 drainDeleteQueue 重放（base-etag 守卫防删错文件）
+      return { status: "trashed", where: "local", queuedCloudDelete: true, baseEtag, trashKey };
     }
     return busy("删除中…", async () => {
       let cloudPresent = false;
@@ -428,9 +430,39 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     });
   }
 
+  // N3：离线删除队列**持久化**（kv）。entry = { name, baseEtag }（base 供重放时 If-Match 式守卫）。
+  const _DELQ_KEY = "delqueue:v1";
+  function _readDelQueue(): Array<{ name: string; baseEtag: string | null }> {
+    try { const raw = kv.get(_DELQ_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
+  }
+  function _writeDelQueue(q: Array<{ name: string; baseEtag: string | null }>): void {
+    if (q.length) kv.set(_DELQ_KEY, JSON.stringify(q)); else kv.remove(_DELQ_KEY);
+  }
+  function _enqueueDelete(name: string, baseEtag: string | null): void {
+    const q = _readDelQueue().filter((e) => e.name !== name);   // 同名去重，最新覆盖
+    q.push({ name, baseEtag });
+    _writeDelQueue(q);
+  }
+  // N3：重连重放离线删除队列。每条按 base-etag 守卫——**被别处改过（含同名新文件）→ conflict-edit-wins → 不删**
+  //   （正是「旧设备攒着删除、很久后上线，绝不能删掉别人的同名新文件」要防的）。终态出队；deferred-offline 留队。
+  async function drainDeleteQueue(): Promise<{ drained: number; deferred: number }> {
+    const q = _readDelQueue();
+    if (!q.length) return { drained: 0, deferred: 0 };
+    const remain: typeof q = [];
+    let drained = 0;
+    for (const e of q) {
+      let r: FlowResult;
+      try { r = await replayDelete(e.name, { baseEtag: e.baseEtag }); }
+      catch { remain.push(e); continue; }                       // 抛错（网络等）→ 留队重试
+      if (r.status === "deferred-offline") remain.push(e);       // 还没网 → 留队
+      else drained++;                                            // trashed/converged/conflict-edit-wins → 终态出队
+    }
+    _writeDelQueue(remain);
+    return { drained, deferred: remain.length };
+  }
+
   // C7：离线删除重连重放。按 base-etag 收敛；被别处改过 → delete-vs-edit 默认 edit-wins（不删）。
-  // NOT-WIRED（aspirational）：flow.delete 离线时返 queuedCloudDelete，但队列尚未持久化（C1b 接 IDB），
-  //   故此函数目前无调用方。保留为 C7 的唯一实现；接队列那轮再启用，别误当死码删掉。
+  //   N3：已接线——del() 离线时 _enqueueDelete 持久化，重连/上线由 app 调 flow.drainDeleteQueue 排空。
   async function replayDelete(name: string, opts: { baseEtag?: string | null } = {}): Promise<FlowResult> {
     const { baseEtag } = opts;
     let meta: FetchMetaResult | null;
@@ -960,7 +992,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   return {
     flow: {
-      push, open, refresh, acquire, replayDelete,         // 后台 / 读流：不进单飞守卫
+      push, open, refresh, acquire, replayDelete, drainDeleteQueue,   // 后台 / 读流：不进单飞守卫
       delete: _singleFlight("删除", del),
       rename: _singleFlight("重命名", rename),
       saveAs: _singleFlight("另存为", saveAs),
