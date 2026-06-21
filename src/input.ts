@@ -34,7 +34,7 @@ import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { UndoStack } from "./history.ts";
+import type { UndoStack, UndoEntry, UndoHandler } from "./history.ts";
 import type { PixelEdit } from "./pixel-edit.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Selection } from "./selection.ts";
@@ -61,17 +61,15 @@ interface FilterBrushState { Filter: unknown; params: unknown; }
 type StrokeEngine = BrushEngine | LiquifyEngine | FilterBrushEngine;
 interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; }
 
-// history.ts 的 UndoEntry 未 export（领域无关动态壳）。本地镜像：dispatch key + 动态 payload。
-type UndoEntry = Record<string, unknown> & { type: string };
 // 本文件注册的两类 handler 的 entry shape（lasso 复合像素 + 选区变化）。
 //   lasso entry 由 floating-transform.commit 产；selectionChange 由 lasso.endPath/setSelection 产。
 type PixelSnapRef = Parameters<typeof applyPixelSnap>[2];
 type BlobRef = Parameters<typeof applyPixelSnap>[3];
-interface LassoEntry {
+interface LassoEntry extends UndoEntry {
   layers: Array<{ layerId: number; before: PixelSnapRef; after: PixelSnapRef; beforeBlob: BlobRef; afterBlob: BlobRef }>;
   prevSelection?: Selection | null;
 }
-interface SelectionChangeEntry { before: Selection | null; after: Selection | null; }
+interface SelectionChangeEntry extends UndoEntry { before: Selection | null; after: Selection | null; }
 
 // pointer 记录：down 时建立、move/up 累积手感状态（平滑 / 压感 / 死区 / long-press）。
 interface PointerRec {
@@ -375,31 +373,29 @@ export class InputController {
       // v119: commit 时清了 selection，undo 时把它恢复回来
       // 多层 entry：e.layers = [{layerId, before, after, beforeBlob, afterBlob}]（组变换 = 多层；单层 = 1 项）。
       this.history.registerHandler("lasso", {
-        undo: (e: UndoEntry) => {
-          const le = e as unknown as LassoEntry;
-          for (const L of le.layers) applyPixelSnap(this.doc, L.layerId, L.before, L.beforeBlob, this.board);
-          if (le.prevSelection !== undefined) {
-            this.doc.selection = le.prevSelection;
+        undo: (e: LassoEntry) => {
+          for (const L of e.layers) applyPixelSnap(this.doc, L.layerId, L.before, L.beforeBlob, this.board);
+          if (e.prevSelection !== undefined) {
+            this.doc.selection = e.prevSelection;
             this.board.invalidateAll();
           }
         },
-        redo: (e: UndoEntry) => {
-          const le = e as unknown as LassoEntry;
-          for (const L of le.layers) applyPixelSnap(this.doc, L.layerId, L.after, L.afterBlob, this.board);
-          if (le.prevSelection !== undefined) {
+        redo: (e: LassoEntry) => {
+          for (const L of e.layers) applyPixelSnap(this.doc, L.layerId, L.after, L.afterBlob, this.board);
+          if (e.prevSelection !== undefined) {
             this.doc.selection = null;       // redo 后再清
             this.board.invalidateAll();
           }
         },
-        refsLayer: (e: UndoEntry, id: number) => (e as unknown as LassoEntry).layers.some((L) => L.layerId === id),
-      });
+        refsLayer: (e: LassoEntry, id: number) => e.layers.some((L) => L.layerId === id),
+      } satisfies UndoHandler);
       // 选区变化（lasso 圈 / 取消选区 / 反选 等）也进 undo，但不动像素
       this.history.registerHandler("selectionChange", {
-        undo: (e: UndoEntry) => { this.doc.selection = (e as unknown as SelectionChangeEntry).before; this.board.invalidateAll(); },
-        redo: (e: UndoEntry) => { this.doc.selection = (e as unknown as SelectionChangeEntry).after;  this.board.invalidateAll(); },
+        undo: (e: SelectionChangeEntry) => { this.doc.selection = e.before; this.board.invalidateAll(); },
+        redo: (e: SelectionChangeEntry) => { this.doc.selection = e.after;  this.board.invalidateAll(); },
         // 选区不属于某一 layer；refsLayer 永远 false（删图层不影响选区 entry）
         refsLayer: () => false,
-      });
+      } satisfies UndoHandler);
     }
     // 把 doc 引用给 lasso，便于直接操作 doc.selection
     this.lasso.setDoc(this.doc);

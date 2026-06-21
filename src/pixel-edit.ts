@@ -13,7 +13,7 @@
 import { findNodeById } from "./doc.ts";   // 递归按 id 找叶（图层树：层可能在组内）
 import type { PaintDoc, Layer } from "./doc.ts";
 import type { Board } from "./board.ts";
-import type { UndoStack } from "./history.ts";
+import type { UndoStack, UndoEntry, UndoHandler } from "./history.ts";
 
 // Layer.snapshot()/restoreFromSnapshot() 共用的像素快照形状（doc.ts 里 LayerSnap 未 export，本地镜像）。
 interface PixelSnap {
@@ -28,8 +28,8 @@ interface PixelSnap {
 // restoreFromSnapshot 的入参形状（doc.ts 里 LayerSnap 未 export，借方法签名取之）。
 type LayerSnapArg = Parameters<Layer["restoreFromSnapshot"]>[0];
 
-// 一条纯像素 undo entry（before/after 像素 snap + 压缩后的 Blob）。
-interface PixelEntry {
+// 一条纯像素 undo entry（before/after 像素 snap + 压缩后的 Blob）。继承 history 的 UndoEntry 契约（v320 收口）。
+interface PixelEntry extends UndoEntry {
   type: string;
   layerId: number;
   before: PixelSnap;
@@ -38,9 +38,6 @@ interface PixelEntry {
   afterBlob: Blob | null;
 }
 
-// handler 派发记录 = 异构动态 payload（history.ts 是未类型化 owner，UndoEntry 未 export）。
-// 与 layer-undo.ts 同惯例：Record<string, any> 收 entry，宽到能喂回 registerHandler。
-type UndoEntry = Record<string, any>;
 
 // ---- 低层原语（export；lasso 复合 handler + app.js 图层 handler 都复用这套）----
 
@@ -76,7 +73,7 @@ export function applyPixelSnap(doc: PaintDoc, layerId: number, snap: PixelSnap |
     return Promise.resolve();
   }
   return createImageBitmap(blob).then((bitmap) => {
-    layer.restoreFromSnapshot({ ...snap, bitmap } as unknown as LayerSnapArg);
+    layer.restoreFromSnapshot({ ...snap, bitmap } as LayerSnapArg);
     bitmap.close?.();
     board?.invalidateAll();
   });
@@ -109,7 +106,7 @@ class PixelEditTx {
       beforeBlob: null,
       afterBlob: null,
     };
-    this._owner.history.push(entry as unknown as Parameters<UndoStack["push"]>[0]);
+    this._owner.history.push(entry);
     compressPixelSnap(entry.before, (blob) => { entry.beforeBlob = blob; });
     compressPixelSnap(entry.after,  (blob) => { entry.afterBlob  = blob; });
     return true;
@@ -137,10 +134,10 @@ export class PixelEdit {
     // filterBrush 复用 "stroke"；都是 before/after 像素 snap，handler 一致。
     for (const type of ["stroke", "liquify"]) {
       history.registerHandler(type, {
-        undo: (e: UndoEntry) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
-        redo: (e: UndoEntry) => applyPixelSnap(this.doc, e.layerId, e.after,  e.afterBlob,  this.board),
-        refsLayer: (e: UndoEntry, id: number) => e.layerId === id,
-      } as unknown as Parameters<UndoStack["registerHandler"]>[1]);
+        undo: (e: PixelEntry) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
+        redo: (e: PixelEntry) => applyPixelSnap(this.doc, e.layerId, e.after,  e.afterBlob,  this.board),
+        refsLayer: (e: PixelEntry, id: number) => e.layerId === id,
+      } satisfies UndoHandler);
     }
   }
 

@@ -16,6 +16,7 @@ import { requireEditableLeaf } from "./editable-leaf.ts";
 import { safeLSSet } from "./safe-ls.ts";
 import { fillResampleSelect } from "./resample.ts";
 import type { AppContext } from "./app-context.ts";
+import type { UndoEntry } from "./history.ts";
 
 // 静态存在的工具栏元素查表 helper（initToolbar 在 DOM 就绪后调）。
 const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -23,7 +24,7 @@ const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getEl
 // requireEditableLeaf / transform 收到的 doc 活层（doc/selection.js 未类型化 → 只描述本文件用到的）。
 interface LayerLike { id: number; snapshot(): unknown; }
 // fill/clear 的 stroke undo entry（异步压缩回填 blob）。
-interface StrokeEntry { type: string; layerId: number; before: unknown; after: unknown; beforeBlob: Blob | null; afterBlob: Blob | null; }
+interface StrokeEntry extends UndoEntry { layerId: number; before: unknown; after: unknown; beforeBlob: Blob | null; afterBlob: Blob | null; }
 // 选区编辑 modal 态（仅 modal 开着时非 null）。Selection 取自 selection.js 的 class（值导入兼作类型）。
 interface SelEditState { before: Selection; op: "expand" | "shrink"; rafId: number; }
 // editMode.enterTransient 的 apply/abort 回调（edit-mode.js 未类型化，默认 null 把推断窄成 null|undefined → 在调用处断言真签名）。
@@ -370,7 +371,7 @@ export function initToolbar(ctx: AppContext) {
     (doc.selection as Selection).fillOnLayer(layer as unknown as Parameters<Selection["fillOnLayer"]>[0], state.color);
     const after = layer.snapshot();
     const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-    history.push(entry as unknown as Parameters<(typeof history)["push"]>[0]);
+    history.push(entry);
     compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
     compressPixelSnap(entry.after as Parameters<typeof compressPixelSnap>[0],  (blob: Blob | null) => { entry.afterBlob  = blob; });
     board.invalidateAll();
@@ -384,7 +385,7 @@ export function initToolbar(ctx: AppContext) {
     (doc.selection as Selection).clearOnLayer(layer as unknown as Parameters<Selection["clearOnLayer"]>[0]);
     const after = layer.snapshot();
     const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-    history.push(entry as unknown as Parameters<(typeof history)["push"]>[0]);
+    history.push(entry);
     compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
     compressPixelSnap(entry.after as Parameters<typeof compressPixelSnap>[0],  (blob: Blob | null) => { entry.afterBlob  = blob; });
     board.invalidateAll();

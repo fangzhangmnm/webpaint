@@ -14,12 +14,14 @@
 //   4. handler 之间不互相调
 
 // 一条 undo entry：type 是 dispatch key，其余字段是 op 自带的最小 payload（领域无关，动态壳）。
-interface UndoEntry extends Record<string, unknown> {
+// export：op 模块（pixel-edit / layer-undo / toolbar / input）push/registerHandler 时直接绑此契约，
+//   省掉 `as unknown as Parameters<UndoStack["push"]>[0]` 那串占位 cast（v320 精度收口）。
+export interface UndoEntry extends Record<string, unknown> {
   type: string;
 }
 
 // handler 统一 shape（见上文纪律 2）。entry 收 UndoEntry；undo/redo 可同步可异步。
-interface UndoHandler {
+export interface UndoHandler {
   undo(e: UndoEntry): void | Promise<void>;
   redo(e: UndoEntry): void | Promise<void>;
   refsLayer?(e: UndoEntry, id: number): boolean;   // layer id 全程是 number
