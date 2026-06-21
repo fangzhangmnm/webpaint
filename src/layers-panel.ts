@@ -119,7 +119,7 @@ function _addEmptyLayer() {
   const L = doc.addLayer();
   if (!L) return;
   const loc = doc.locateNode(L.id)!;                   // {parentId, index}：组内新建也精确复位
-  const layerSpec = layerSpecFrom(L) as LayerSpec;
+  const layerSpec = layerSpecFrom(L) as unknown as LayerSpec;   // LayerSpecShape→LayerSpec（同对象，后者带 index sig，经 unknown 转）
   history.push({ type: "addLayer", index: loc.index, parentId: loc.parentId, layerSpec, prevActiveId });
   _afterDocChange();
 }
@@ -138,7 +138,7 @@ function _deleteLayer(L: LayerNode | null) {
     return;
   }
   const loc = doc.locateNode(L.id)!;                   // 先记位置（removeLayer 后就找不到了）
-  const layerSpec = layerSpecFrom(L) as LayerSpec;
+  const layerSpec = layerSpecFrom(L) as unknown as LayerSpec;   // LayerSpecShape→LayerSpec（同对象，后者带 index sig，经 unknown 转）
   if (!doc.removeLayer(L.id)) { setStatus("至少保留一层"); return; }
   history.push({ type: "removeLayer", index: loc.index, parentId: loc.parentId, layerSpec });
   compressPixelSnap(layerSpec, (blob: Blob | null) => { layerSpec.blob = blob; });
@@ -242,7 +242,7 @@ function _duplicateLayer(L: LayerNode | null) {
   const r = doc.duplicateLayer(L.id);
   if (!r.ok) return;
   const newLayer = r.newLayer!;
-  const layerSpec = { ...(layerSpecFrom(newLayer) as LayerSpec), clippingMask: newLayer.clippingMask, lockAlpha: newLayer.lockAlpha };
+  const layerSpec = { ...(layerSpecFrom(newLayer) as unknown as LayerSpec), clippingMask: newLayer.clippingMask, lockAlpha: newLayer.lockAlpha };
   history.push({ type: "addLayer", index: r.loc!.index, parentId: r.loc!.parentId, layerSpec, prevActiveId });
   compressPixelSnap(layerSpec, (blob: Blob | null) => { layerSpec.blob = blob; });
   _afterDocChange();

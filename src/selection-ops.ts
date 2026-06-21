@@ -82,7 +82,7 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
     src.ctx.restore();
   }
   const loc = doc.locateNode(newL.id)!;   // {parentId, index}：组内也精确（撤销 insertLayerAt 用）
-  const newLayerSpec = layerSpecFrom(newL) as { blob?: Blob | null; [k: string]: unknown };
+  const newLayerSpec = layerSpecFrom(newL) as unknown as { blob?: Blob | null; [k: string]: unknown };   // LayerSpecShape→带 index sig 形（同对象，经 unknown 转）
   const afterActive: PixelSnapWithBlob | null = move ? src.snapshot() : null;
   history.push({
     type: "selectionToLayer",

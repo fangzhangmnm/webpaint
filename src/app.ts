@@ -206,7 +206,7 @@ function freezeCtx<T extends object>(obj: T): T {
   }
   return Object.freeze(obj);
 }
-const ctx = freezeCtx({
+const ctx: AppContext = freezeCtx({
   state, dialReactive, currentBrush, editMode, doc, board, input, history, pixelHistory,
   rack, store: _store, setStatus, withBusy, leftDial,
   updateSaveStatus, updateZoomLabel, updateNewerBanner,
@@ -219,7 +219,7 @@ const ctx = freezeCtx({
   setGalleryOpen, gateCloudSyncOnOpen, checkQuotaAndWarn, uniqueLocalName,
   getLocalSavedAtLabel, showFullscreenBusy, hideFullscreenBusy,
   get gallery() { return gallery; },   // 晚绑：gallery const 在下方 mountGallery 处构造
-} as unknown as AppContext);
+});
 initColorPanel(ctx);
 initTheme(ctx);
 initLayersPanel(ctx);
@@ -315,7 +315,7 @@ const gallery = mountGallery(document.getElementById("galleryMount")!, {
 
 // gallery 现由 ctx 的 getter 透传（不再 ctx.gallery= / Object.assign 二次突变——ctx 已冻结、一次构造）。
 // 晚 init 在此之后跑，故各模块 init 体里的 `x = ctx.gallery` 读到真值。
-setSessionGallery(gallery as unknown as AppContext["gallery"]);   // session 的晚绑 gallery handle（getter 已使其 init 期即读到真值；此调用保持幂等冗余）
+setSessionGallery(gallery);   // session 的晚绑 gallery handle（getter 已使其 init 期即读到真值；此调用保持幂等冗余）
 initSession(ctx);
 initCloudFreshness(ctx);   // 前台云端新鲜度（需 board/withBusy/setStatus/updateSaveStatus）
 initImportImage(ctx);      // 图片/.ora 导入（需 late ctx：applyCheckerboard/renderLayersPanel/setGalleryOpen/uniqueLocalName）

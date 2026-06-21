@@ -70,7 +70,8 @@ export interface RackHandle {
   // 重置笔架（topbar-menu）：
   reset(force?: boolean): void;
   syncCloud(): void;
-  [k: string]: unknown;
+  // v319：去掉 [k:string]:unknown index sig —— 真 BrushRack 类无 index sig 故装不进；
+  //   去掉后 BrushRack 直接 assignable（已满足上列全部具名成员），ctx 得以验证而非 cast。
 }
 // 浮窗（side-windows.ts）：参考窗 / 调色板窗——方法集不同，分两个句柄。
 export interface ReferenceWindowHandle {
@@ -80,26 +81,19 @@ export interface ReferenceWindowHandle {
   setBitmap(bitmap: ImageBitmap, opts?: { persistBlob?: Blob | null }): void;
   getPersistBlob(): Blob | null;
   close?(): void;
-  [k: string]: unknown;
 }
 export interface PaletteWindowHandle {
   getSerializedState(): unknown;
   applySerializedState(s: unknown): void;
   clear?(): void;
   close?(): void;
-  [k: string]: unknown;
 }
-// 图库（ui/gallery.ts mountGallery 返回）。
-export interface GalleryHandle {
-  refresh(): void;
-  setFolder(folder: string): void;
-  setView(view: string): void;
-  getFolder(): string;
-  emptyTrash(scope: string): void;
-  [k: string]: unknown;
-}
-// 左栏 dial 组件句柄（ui/left-dial.ts）。
-export interface LeftDialHandle { [k: string]: unknown; }
+// 图库句柄 = ui/gallery.ts mountGallery 的真返回类型（单一真源，弃本地镜像 v319）。
+import type { GalleryHandle } from "./ui/gallery.ts";
+export type { GalleryHandle };
+// 左栏 dial 组件句柄 = ui/left-dial.ts 的真返回类型（单一真源，弃本地占位 v319）。
+import type { LeftDialHandle } from "./ui/left-dial.ts";
+export type { LeftDialHandle };
 // 当前笔：Vue computed of ResolvedBrush（引擎只读 .value）。
 export interface CurrentBrushRef { readonly value: ResolvedBrush; }
 
@@ -127,18 +121,18 @@ export interface AppContext {
   leftDial: LeftDialHandle;
   updateSaveStatus: () => void;
   updateZoomLabel: () => void;
-  updateNewerBanner: (...args: unknown[]) => void;
+  updateNewerBanner: () => void;   // v319：真实现无参（save-status.ts）
 
   // transient 面板 / 变换护栏（transient-panels.ts / layer-undo.ts）
-  _suppressTransientPanels: (reason?: string) => void;
+  _suppressTransientPanels: (mode: string) => void;   // v319：真实现 mode 必填（allow[mode]），原 reason?: 太松
   _restoreTransientPanels: () => void;
-  layerSpecFrom: (...args: unknown[]) => unknown;
-  _bringPanelTop: (...args: unknown[]) => void;
+  layerSpecFrom: (L: unknown) => ReturnType<PaintDoc["layerSpec"]>;   // v319：真返回 doc.layerSpec 的 LayerSpecShape（doc.ts 未导出 → 经 ReturnType 取）
+  _bringPanelTop: (el: HTMLElement | null) => void;   // v319：= surfaces.raiseWindow
   _commitTransform: () => void;
   _cancelTransform: () => void;
-  selectionToNewLayer: (...args: unknown[]) => void;
-  importImageAsLayer: (...args: unknown[]) => unknown;
-  afterDocChange: (...args: unknown[]) => void;
+  selectionToNewLayer: (arg: { move: boolean }) => void;   // v319：真实现解构 { move }
+  importImageAsLayer: (file: File, opts?: { center?: { x: number; y: number } }) => Promise<void>;   // v319：真实现 async，opts 有默认值
+  afterDocChange: () => void;   // v319：= layer-undo._afterDocChange，无参
 
   // 浮窗（side-windows.ts，module-eval 即构造）
   referenceWindow: ReferenceWindowHandle;
@@ -146,14 +140,14 @@ export interface AppContext {
 
   // 跨模块函数
   setColor: (hex: string) => void;
-  applyCheckerboard: (...args: unknown[]) => void;
+  applyCheckerboard: (on: boolean) => void;   // v319：真实现 settings-menu.applyCheckerboard
   renderLayersPanel: () => void;
   setGalleryOpen: (open: boolean) => void;
-  gateCloudSyncOnOpen: (...args: unknown[]) => Promise<unknown>;
-  checkQuotaAndWarn: (...args: unknown[]) => unknown;
-  uniqueLocalName: (...args: unknown[]) => string;
-  getLocalSavedAtLabel: (...args: unknown[]) => string;
-  showFullscreenBusy: (...args: unknown[]) => void;
+  gateCloudSyncOnOpen: (sessionName: string) => Promise<void>;   // v319：真实现 cloud-freshness，async 无显式返回值
+  checkQuotaAndWarn: () => Promise<void>;   // v319：真实现 gallery-shell，async 无参无返回值
+  uniqueLocalName: (stem: string) => Promise<string>;   // v319：真实现 gallery-shell，async
+  getLocalSavedAtLabel: () => string;   // v319：真实现 cloud-freshness，无参
+  showFullscreenBusy: (msg?: string) => void;   // v319：真实现 fullscreen-busy
   hideFullscreenBusy: () => void;
 
   // 晚绑（app.js 用 getter 透传，gallery const 在 mountGallery 后构造）

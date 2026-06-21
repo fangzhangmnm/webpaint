@@ -601,7 +601,7 @@ async function pullCloudPath(path: string) {
     if (res.status === "absent") { setStatus(`找不到：${path}`); return; }
     setGalleryOpen(false);
     setStatus(`已打开：${res.localName}（从云端拉取）`);
-    gateCloudSyncOnOpen(res.localName).catch((e: unknown) => console.warn("[sync-gate]", e));
+    gateCloudSyncOnOpen(res.localName!).catch((e: unknown) => console.warn("[sync-gate]", e));   // res.status≠"absent" → localName 必有（store flow 结果类型仍标 optional）
   } catch (err) {
     console.warn("[cloud] pull failed:", err);
     setStatus("拉取失败：" + errMsg(err));
