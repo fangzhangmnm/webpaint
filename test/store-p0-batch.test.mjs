@@ -95,6 +95,43 @@ describe("cloud-sync P0 · N3 离线删除持久化队列 + 重连 drainDeleteQu
     eq(drain.drained, 1, "出队（终态 conflict-edit-wins）");
     assert(await env.provider.getItemByPath("猫.ora"), "base-etag 守卫：云端新文件没被旧删除误杀");
   });
+  // Finding 1（静态论证 2026-06-21）：本地 only（从未同步，null base）离线删 → 不得在重连时盲删同名别设备新文件。
+  it("本地 only（null base）离线删 → 重连后绝不 trash 同名的别设备新文件", async () => {
+    const env = mk();
+    await env.local.save("图", bytes("mine-local-only"));             // 仅本地，从未 push → cloud.getETag("图")=null
+    eq(env.cloud.getETag("图"), null, "前提：无云端 base");
+    const delRes = await env.store.flow.delete("图", { isOnline: () => false });
+    eq(await env.local.exists("图"), false, "本地 only 删了本地份");
+    eq(delRes.queuedCloudDelete, false, "无云端 base → 不排云删（没有可证明属于自己的云端版本）");
+    // 之后别的设备创建了一个**不同的**同名云文件
+    await env.provider.upload("图.ora", bytes("OTHER-DEVICE-DISTINCT-WORK"), { conflictBehavior: "fail" });
+    await env.store.flow.drainDeleteQueue();                          // 重连排空
+    assert(await env.provider.getItemByPath("图.ora"), "别设备的同名新文件没被盲删（红线：不静默删未证实属己内容）");
+  });
+  // Finding 1 防御纵深：即便有人直接用 null base 调 replayDelete，也拒绝 trash。
+  it("replayDelete 收到 null base + 云端有同名文件 → skipped-no-base，不 trash", async () => {
+    const env = mk();
+    await env.provider.upload("图.ora", bytes("someone-elses"), { conflictBehavior: "fail" });
+    const r = await env.store.flow.replayDelete("图", { baseEtag: null });
+    eq(r.status, "skipped-no-base", "无 base 无法证明云端这份属己 → 不删");
+    assert(await env.provider.getItemByPath("图.ora"), "云端文件仍在");
+  });
+});
+
+// Finding 2（静态论证 2026-06-21）：cloud.push 返 {item:null}（保守 unknown 路径）时 _doPush 不得谎报 "pushed"。
+describe("cloud-sync · Finding 2 push 未确认不谎报 pushed", () => {
+  it("无 base + 云端同名同长度异内容 + 尾校验失败（unknown）→ status≠pushed 且仍 dirty", async () => {
+    const env = mk();
+    const MINE = bytes("AAAAAAAAAAAAAAAA");                            // 16 bytes
+    const OTHER = bytes("BBBBBBBBBBBBBBBB");                           // 同长 16，异内容
+    await env.provider.upload("猫.ora", OTHER, { conflictBehavior: "fail" });   // 云端已有别设备同长文件
+    await env.local.save("猫", MINE);
+    env.cloud.setDirty("猫", true);                                   // 本地脏、无 base → 首推不带 If-Match → 409
+    env.provider.downloadRange = async () => { throw new Error("mock: 尾校验拉取失败"); };   // → _confirmOurUpload verdict=unknown → cloud.push 返 {item:null}
+    const res = await env.store.flow.push("猫", { encode: () => MINE, getEditVersion: () => 1 });
+    assert(res.status !== "pushed", `未确认落地不得报 pushed（实得 ${res.status}）`);
+    eq(env.cloud.isDirty("猫"), true, "保持 dirty → 下次重推，不静默丢");
+  });
 });
 
 describe("cloud-sync P0 · N10 快进期间 store 拥 replacing 门（input 起笔据此降级，gate 归深模块）", () => {

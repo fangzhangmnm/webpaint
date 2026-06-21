@@ -206,7 +206,11 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         attempt++;
         try {
           const { item } = await cloud.push(name, bytes, { baseEtag, encrypted: isEnc });
-          if (item && item.eTag) _base.set(name, item.eTag);   // 只推进自己的 base
+          // Finding 2（静态论证 2026-06-21）：cloud.push 返 {item:null} = 保守"unknown"路径（尾校验失败/未确认落地）。
+          //   此时 cloud 未清 dirty（字节安全、会重推），但**绝不能谎报 "pushed"**（反煤气灯：app 据此清未同步 UI 会误导）。
+          //   回报 "deferred"——未确认，保持未同步态、下次重推。
+          if (!(item && item.eTag)) return _finish(name, v0, getEditVersion, "deferred");
+          _base.set(name, item.eTag);                          // 只推进自己的 base
           return _finish(name, v0, getEditVersion, "pushed");
         } catch (e: unknown) {
           if (e && (e as { name?: string }).name === "CloudConflictError") {
@@ -415,8 +419,12 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       const baseEtag = cloud.getETag(name);            // 先取（local.trash 不动云态，但稳妥起见前置）
       let trashKey: string | null = null;
       if (localPresent) trashKey = await local!.trash(name);
-      _enqueueDelete(name, baseEtag);                  // N3：持久化排队 → 重连 drainDeleteQueue 重放（base-etag 守卫防删错文件）
-      return { status: "trashed", where: "local", queuedCloudDelete: true, baseEtag, trashKey };
+      // Finding 1（静态论证 2026-06-21）：仅当有已知云端 base（etag）才排云删。null base = 本地 only / 从未同步——
+      //   云端没有可证明属于我们的版本；若仍排队，重连时 base-etag 守卫因 null 短路，会盲删**同名的别设备新文件**
+      //   （红线：不得静默删未证实属己的内容）。故 null base 不排队（本地已删即完事）。
+      const queuedCloudDelete = baseEtag != null;
+      if (queuedCloudDelete) _enqueueDelete(name, baseEtag);   // 重连 drainDeleteQueue 重放（base-etag 守卫防删错文件）
+      return { status: "trashed", where: "local", queuedCloudDelete, baseEtag, trashKey };
     }
     return busy("删除中…", async () => {
       let cloudPresent = false;
@@ -479,7 +487,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     try { meta = await cloud.fetchMeta(name); }
     catch (_) { return { status: "deferred-offline" }; }
     if (!meta) return { status: "converged", reason: "already-gone" };
-    if (baseEtag && meta.etag !== baseEtag) return { status: "conflict-edit-wins" };
+    // Finding 1 防御纵深：无 base 不得 trash——无法证明云端这份就是我们删的那份（可能是别设备同名新文件）。
+    //   正常路径 del() 已不再为 null base 排队；这里再兜一层，保护公开的 flow.replayDelete 直调。终态（出队，不重试）。
+    if (!baseEtag) return { status: "skipped-no-base" };
+    if (meta.etag !== baseEtag) return { status: "conflict-edit-wins" };
     return { status: "trashed", trashed: await cloud.trash(name) };
   }
 
