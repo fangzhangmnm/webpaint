@@ -237,25 +237,33 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   // 仅在 local 注入时调用（caller 保证）；故内部用 local! 断言非空。
   async function _safePull(name: string, adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>): Promise<SafePullResult> {
     let backupName: string | undefined;
-    // ADR-0016 §consequences：clean 本地是可从云端重取的已知版本，无未见内容可丢 → 跳过 backup（不再 spam .backup-local）。
-    //   仅 dirty——未推（cloud.isDirty）或未落盘（edits.localDirty）——才在覆盖前留底。匹配 ADR-0009「clean switch never spams a backup」。
-    if (cloud.isDirty(name) || sub.edits.localDirty()) {
-      try { backupName = await local!.backup(name); }
-      catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
+    // N10：换内容临界段——置 replacing。input 起笔门读 store.busy.replacing() 降级（FF-wins：挡笔不中止）。
+    //   覆盖**整段**（含 cloud.pull 网络窗）：起笔落在旧内容上随后被 adopt 覆盖 = 可见丢笔，挡笔静默 > 丢笔可见。
+    //   gate 归 store 拥（SSoT），auto-FF 路径（app 传 busy:undefined）也被护住，不再裸奔。finally 必清。
+    busy.set("replacing", true);
+    try {
+      // ADR-0016 §consequences：clean 本地是可从云端重取的已知版本，无未见内容可丢 → 跳过 backup（不再 spam .backup-local）。
+      //   仅 dirty——未推（cloud.isDirty）或未落盘（edits.localDirty）——才在覆盖前留底。匹配 ADR-0009「clean switch never spams a backup」。
+      if (cloud.isDirty(name) || sub.edits.localDirty()) {
+        try { backupName = await local!.backup(name); }
+        catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
+      }
+      const r = await cloud.pull(name);
+      if (!r) return { ok: false, reason: "cloud-vanished", backupName };
+      // N2：采纳云端字节落盘前校验是真容器（app 注入；store 格式盲）。坏字节（captive-portal 200-HTML /
+      //   损坏云副本）→ 拒绝，绝不用它覆盖唯一一份好本地（clean FF 没 backup）。备份已留则原件仍在。
+      if (validateAdopt && !(await validateAdopt(r.blob))) return { ok: false, reason: "invalid-cloud-bytes", backupName };
+      await local!.save(name, r.blob);                // 覆盖本地为云端版（dirty 时原件已备份）
+      // 采纳后置（R1 根治）：etag/dirty 只在 local.save **成功之后**推进——落盘前强退不再留下
+      //   「kv 指新版、本地是旧字节」的静默覆盖窗口（重启后 open 会正确判定云端更新、重新 FF）。
+      if (r.item && r.item.eTag) { cloud.setETag(name, r.item.eTag); _base.set(name, r.item.eTag); }
+      cloud.setDirty(name, false);              // 已采纳云端 → 不再 unpushed
+      clearParent(name);                        // episode 结束（已采纳云版）
+      if (adopt) await adopt(await _unsealOrThrow(name, r.blob), name);   // 反映到活编辑器（已解壳为明文）
+      return { ok: true, backupName };
+    } finally {
+      busy.set("replacing", false);
     }
-    const r = await cloud.pull(name);
-    if (!r) return { ok: false, reason: "cloud-vanished", backupName };
-    // N2：采纳云端字节落盘前校验是真容器（app 注入；store 格式盲）。坏字节（captive-portal 200-HTML /
-    //   损坏云副本）→ 拒绝，绝不用它覆盖唯一一份好本地（clean FF 没 backup）。备份已留则原件仍在。
-    if (validateAdopt && !(await validateAdopt(r.blob))) return { ok: false, reason: "invalid-cloud-bytes", backupName };
-    await local!.save(name, r.blob);                // 覆盖本地为云端版（dirty 时原件已备份）
-    // 采纳后置（R1 根治）：etag/dirty 只在 local.save **成功之后**推进——落盘前强退不再留下
-    //   「kv 指新版、本地是旧字节」的静默覆盖窗口（重启后 open 会正确判定云端更新、重新 FF）。
-    if (r.item && r.item.eTag) { cloud.setETag(name, r.item.eTag); _base.set(name, r.item.eTag); }
-    cloud.setDirty(name, false);              // 已采纳云端 → 不再 unpushed
-    clearParent(name);                        // episode 结束（已采纳云版）
-    if (adopt) await adopt(await _unsealOrThrow(name, r.blob), name);   // 反映到活编辑器（已解壳为明文）
-    return { ok: true, backupName };
   }
 
   // 真冲突的执行（pull/branch 在 Store 内做；keep/rename 交回 app 处理身份变更）。
@@ -365,9 +373,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     adopt?: (blob: Blob, name: string) => unknown | Promise<unknown>;
     localDirty?: () => boolean;
     busy?: Busy;
+    onReplaceStart?: () => void;   // N10：真要拉内容（etag 动过+clean）才触发——app 据此给非阻塞 status（auto-FF 无锁屏时解释挡笔）
   }
   async function refresh(name: string, opts: RefreshOpts = {}): Promise<FlowResult> {
-    const { isOnline = () => true, adopt, localDirty, busy = passBusy } = opts;
+    const { isOnline = () => true, adopt, localDirty, busy = passBusy, onReplaceStart } = opts;
     if (!isOnline()) return { status: "offline" };
     if (cloud.isDirty(name) || (localDirty && localDirty())) return { status: "dirty-skip" };
     return busy("检查云端…", async () => {
@@ -378,6 +387,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       const base = seenBase(name);
       if (!base || meta.etag === base) return { status: "in-sync" };
       if (cloud.isDirty(name) || (localDirty && localDirty())) return { status: "dirty-skip" };  // fetchMeta 期间用户动了笔 → 放弃
+      if (onReplaceStart) onReplaceStart();   // N10：确定要拉内容了 → 通知 app（非阻塞 status）；此后 _safePull 置 replacing 挡笔
       const r = await _safePull(name, adopt);
       return r.ok ? { status: "fast-forwarded" } : { status: "ff-failed", reason: r.reason };
     });
@@ -697,10 +707,10 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // transient busy（saving=本地 IDB 写盘中 / pushing=云端 push 中）：app 的 save 编排置位，status 只读（L4 ②b）。
   // 取代 app 的 _docSaving/_cloudPushing 全局——computeSaveState 从此只读 store，不再碰 app 态。
-  const _busy: { saving: boolean; pushing: boolean } = { saving: false, pushing: false };
+  const _busy: { saving: boolean; pushing: boolean; replacing: boolean } = { saving: false, pushing: false, replacing: false };
   let _pushIdleWaiters: Array<() => void> = [];
   const busy = {
-    set: (k: "saving" | "pushing", v: boolean) => {
+    set: (k: "saving" | "pushing" | "replacing", v: boolean) => {
       _busy[k] = !!v;
       if (k === "pushing" && !_busy.pushing && _pushIdleWaiters.length) {   // push 落地 → 唤醒所有等待者
         const ws = _pushIdleWaiters; _pushIdleWaiters = []; ws.forEach((r) => r());
@@ -708,6 +718,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     },
     saving: () => _busy.saving,
     pushing: () => _busy.pushing,
+    // N10：云端快进正在换本地字节/画布内容（_safePull 临界段）。input 起笔门读它降级 → 不在半换态上落笔。
+    //   gate 由 store 拥（SSoT），不再依赖 app 是否传了阻塞 busy overlay（auto-FF 原本传 undefined = 裸奔）。
+    replacing: () => _busy.replacing,
     // 等当前 push 跑完（L4 ②d）：取代 app 的 80ms 轮询 _awaitCloudPushIdle = 重抄 store serialize。
     // 无 push 在飞 → 立即 resolve；有 → 等 set("pushing",false) 那刻 resolve。
     whenPushIdle: (): Promise<void> => _busy.pushing ? new Promise<void>((r) => _pushIdleWaiters.push(r)) : Promise.resolve(),

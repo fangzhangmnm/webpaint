@@ -149,6 +149,7 @@ const input = new InputController(board, doc, {
   getLongPressPickEnabled: () => state.longPressPick,
   getSingleFingerDraw: () => state.singleFingerDraw,
   getPickMode: () => state.pickMode,
+  isContentReplacing: () => _store.busy.replacing(),   // N10：云端快进换内容中 → 起笔降级（gate 归 store 拥）
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
   history,

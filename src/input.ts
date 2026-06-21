@@ -123,6 +123,7 @@ interface InputOpts {
   status?: (msg: string) => void;
   history?: History | null;
   pixelHistory?: PixelHistory | null;
+  isContentReplacing?: () => boolean;   // N10：云端快进正在换画布内容时为 true → draw-role 起笔降级（同 !canDraw 路径）
 }
 
 interface KeyboardShortcut {
@@ -310,6 +311,7 @@ export class InputController {
   getLongPressPickEnabled: () => boolean;
   getSingleFingerDraw: () => boolean;
   getPickMode: () => string;
+  isContentReplacing: () => boolean;   // N10：见 InputOpts
   onColorSampled: (hex: string) => void;
   status: (msg: string) => void;
   pointers: Map<number, PointerRec>;
@@ -346,6 +348,7 @@ export class InputController {
     this.getLongPressPickEnabled = opts.getLongPressPickEnabled || (() => false);
     this.getSingleFingerDraw = opts.getSingleFingerDraw || (() => false);
     this.getPickMode = opts.getPickMode || (() => "composite");   // 吸色取样：composite | layer
+    this.isContentReplacing = opts.isContentReplacing || (() => false);   // N10：云端快进换内容中 → 起笔降级
     this.onColorSampled = opts.onColorSampled || (() => {});
     this.status = opts.status || (() => {});
 
@@ -519,8 +522,10 @@ export class InputController {
 
     // #6 EditMode gate（fail-safe）：transient/非绘画 mode 下，draw 类 role 一律拒绝。
     // 防 role 决策对未知 mode（crop/adjust）fall-through 到 "draw" 而误触 stroke 污染 undo。
+    // N10：云端快进（_safePull 换本地字节 + adopt 换画布）进行中，draw-role 走同一降级路径——
+    //   防起笔落在「旧内容/半换态」上随后被 adopt 覆盖（FF-wins 已定，故是挡笔而非中止 FF）。
     const _isDrawRole = isPixelStroke(role as string);
-    if (_isDrawRole && this.editMode && !this.editMode.canDraw()) {
+    if (_isDrawRole && ((this.editMode && !this.editMode.canDraw()) || this.isContentReplacing())) {
       // touch：保留 pointer 降级成 hold（不画），让后续手指仍能凑成双指/三指手势（undo/redo）。
       //   删 pointer 会让第二指的 activeTouches 计 0 → 手势永远凑不起来。mouse/pen 无多指手势，直接拒。
       if (e.pointerType === "touch") { rec.role = "hold"; return; }

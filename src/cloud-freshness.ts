@@ -177,7 +177,9 @@ async function maybeFastForwardActive({ manual = false } = {}) {
       isOnline: () => navigator.onLine !== false,
       localDirty: () => _store.edits.localDirty(),
       adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); session.adopt(loaded as PaintDoc, nm); },
-      busy: manual ? withBusy : undefined,   // 手动点 → 锁屏（反馈 + 防刷新中途动笔）；自动轮询 → 静默
+      busy: manual ? withBusy : undefined,   // 手动点 → 锁屏（反馈 + 防刷新中途动笔）；自动轮询 → 静默（挡笔靠 store.busy.replacing）
+      // N10：自动 FF 无锁屏，但 store.busy.replacing() 会挡起笔。给个轻量 status 解释这次挡笔——只在真要拉内容时（etag 动过）触发，不是每次轮询都闪。
+      onReplaceStart: manual ? undefined : () => setStatus("正在同步云端最新…"),
     });
     if (res.status === "fast-forwarded") {
       board.setViewport(vp.tx, vp.ty, vp.scale, vp.rot || 0);   // 还原本设备视口

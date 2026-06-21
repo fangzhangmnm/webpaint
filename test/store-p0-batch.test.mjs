@@ -97,6 +97,41 @@ describe("cloud-sync P0 · N3 离线删除持久化队列 + 重连 drainDeleteQu
   });
 });
 
+describe("cloud-sync P0 · N10 快进期间 store 拥 replacing 门（input 起笔据此降级，gate 归深模块）", () => {
+  it("clean + 云端 etag 动过 → refresh 走 _safePull：临界段内 replacing()=true，结束 finally 清回 false", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    env.cloud.setDirty("猫", false);
+    eq(env.store.busy.replacing(), false, "初始非换内容态");
+    let sawReplaceStart = false;
+    await env.provider.upload("猫.ora", bytes("v2-from-other-device"), { conflictBehavior: "replace" });   // 另一台设备改了云端（etag 变）
+    let sawDuring = null;
+    const res = await env.store.flow.refresh("猫", {
+      isOnline: () => true,
+      localDirty: () => false,
+      onReplaceStart: () => { sawReplaceStart = true; },
+      adopt: async () => { sawDuring = env.store.busy.replacing(); },   // adopt 在 _safePull 内 → 此刻应 true
+    });
+    eq(res.status, "fast-forwarded", "etag 动过 + clean → 快进");
+    eq(sawReplaceStart, true, "确定要拉内容时通知了 app（auto-FF 据此出 status）");
+    eq(sawDuring, true, "换内容临界段内 replacing()=true（input 会挡起笔，不落在半换态上）");
+    eq(env.store.busy.replacing(), false, "结束后 finally 清回 false");
+  });
+  it("in-sync（etag 未动）→ 不进 _safePull：replacing 全程 false，onReplaceStart 不触发", async () => {
+    const env = mk();
+    await seedSynced(env, "猫", "v1");
+    env.cloud.setDirty("猫", false);
+    let replaceStartCalled = false;
+    const res = await env.store.flow.refresh("猫", {
+      isOnline: () => true, localDirty: () => false,
+      onReplaceStart: () => { replaceStartCalled = true; },
+    });
+    eq(res.status, "in-sync");
+    eq(replaceStartCalled, false, "没拉内容 → 不闪 status（每次轮询不打扰）");
+    eq(env.store.busy.replacing(), false, "从不置 replacing");
+  });
+});
+
 import { mergeFolders } from "../src/store/folder-merge.ts";
 describe("folder-merge P0 · N11 显式 conflictPolicy（默认 last-win）", () => {
   const item = (id, uat, extra) => ({ id, uat, ...extra });
