@@ -31,6 +31,22 @@ export interface FolderEnvelope {
 }
 // 同 id 解析回调：胜出 entry（字段级 override 用）。
 export type ResolveFn = (x: FolderItem, y: FolderItem) => FolderItem;
+
+// ── 冲突策略（N11，显式化）──────────────────────────────────────────────
+// **数据类区别（钉死）**：珍贵作品类（.ora 画作）走 If-Match、**绝不 LWW**——分歧一律 surface
+//   （冲突 sheet / .backup），见 cloud-sync。Folder 形状（笔架等**配置类**数据）则是
+//   **有意采用 last-win**：同一支笔在两端并发改，时间戳（uat）新的胜、旧的丢——冲突概率近零、
+//   配置丢一次微调远轻于丢一幅画，这是经权衡的取舍（非红线违反）。
+// 这里把它从「藏在 defaultResolve 里」升成**显式命名的策略枚举**，自文档化、未来可扩
+//   （如某数据类要 "duplicate-on-clash" 再加值）。目前**只实现 "last-win"**。
+export type FolderConflictPolicy = "last-win";
+export const lastWinResolve: ResolveFn = (x, y) => defaultResolve(x, y);
+function resolverForPolicy(policy: FolderConflictPolicy): ResolveFn {
+  switch (policy) {
+    case "last-win": return lastWinResolve;
+    default: return lastWinResolve;   // 目前只此一种；扩枚举时在此加 case
+  }
+}
 // {id, name} 引用（Work-file / Cue 持引用，Folder 不持指针）。
 export interface FolderRef {
   id?: string | number | null;
@@ -57,11 +73,11 @@ function defaultResolve(x: FolderItem, y: FolderItem): FolderItem {
 export function mergeFolders(
   a: FolderEnvelope | null | undefined,
   b: FolderEnvelope | null | undefined,
-  { resolve }: { resolve?: ResolveFn } = {},
+  { resolve, conflictPolicy = "last-win" }: { resolve?: ResolveFn; conflictPolicy?: FolderConflictPolicy } = {},
 ): FolderEnvelope {
   const A = a || emptyFolder(), B = b || emptyFolder();
   const resetAt = Math.max(A.resetAt || 0, B.resetAt || 0);
-  const pick = resolve || defaultResolve;
+  const pick = resolve || resolverForPolicy(conflictPolicy);   // N11：显式策略（默认 last-win）；resolve override 仍优先
 
   // 1. items 按 id union；≤ resetAt 的丢（恢复出厂水位线）；同 id 撞 → pick
   const items = new Map<FolderItem["id"], FolderItem>();

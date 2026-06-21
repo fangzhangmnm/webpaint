@@ -69,3 +69,21 @@ describe("cloud-sync P0 · N7 dirty-rename 旧云 .trash 失败不静默吞", ()
     eq(res.oldCloudOrphan, true, "旧云 .trash 失败被回报（不静默吞 → A9 不复发）");
   });
 });
+
+import { mergeFolders } from "../src/store/folder-merge.ts";
+describe("folder-merge P0 · N11 显式 conflictPolicy（默认 last-win）", () => {
+  const item = (id, uat, extra) => ({ id, uat, ...extra });
+  const env = (items) => ({ version: 1, items, trash: [], resetAt: 0 });
+  it("同 id 撞 → uat 新者胜（last-win），默认即此策略", () => {
+    const a = env([item("b1", 100, { size: 10 })]);
+    const b = env([item("b1", 200, { size: 20 })]);   // uat 更新
+    const m = mergeFolders(a, b);                       // 不传 conflictPolicy → 默认 last-win
+    eq(m.items.find((e) => e.id === "b1").size, 20, "uat 新者（size 20）胜");
+  });
+  it("显式 conflictPolicy:'last-win' 行为一致", () => {
+    const a = env([item("b1", 300, { size: 30 })]);    // a 更新
+    const b = env([item("b1", 200, { size: 20 })]);
+    const m = mergeFolders(a, b, { conflictPolicy: "last-win" });
+    eq(m.items.find((e) => e.id === "b1").size, 30, "uat 新者（size 30）胜");
+  });
+});

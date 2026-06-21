@@ -12,6 +12,7 @@
 // └──────────────────────────────────────────────────────────────────────────┘
 
 import { mergeFolders, emptyFolder, normalizeFolder } from "./folder-merge.ts";
+import type { FolderConflictPolicy } from "./folder-merge.ts";
 import type { FolderEnvelope, ResolveFn } from "./folder-merge.ts";
 import type { Bytes, CloudSync } from "./types.ts";
 
@@ -43,6 +44,7 @@ export interface FolderFlowConfig {
   encode: (folder: FolderEnvelope) => Bytes | Blob;  // folder → 上传字节（app 决 envelope 格式）
   decode: (text: string) => FolderEnvelope | null;   // 云端字节 → folder（含旧格式迁移；非法/脏字节返 null）
   resolve?: ResolveFn;                               // 字段级合并 override（罕见；默认整 entry LWW）
+  conflictPolicy?: FolderConflictPolicy;             // N11：显式冲突策略（默认 "last-win"；配置类数据有意 LWW）
   isOnline?: () => boolean;
   timeoutMs?: number;
 }
@@ -62,7 +64,7 @@ export interface FolderFlow {
  * @param {number} [cfg.timeoutMs=15000]
  */
 export function createFolderFlow(cfg: FolderFlowConfig): FolderFlow {
-  const { cloud, name, encode, decode, resolve, isOnline, timeoutMs = 15000 } = cfg;
+  const { cloud, name, encode, decode, resolve, conflictPolicy = "last-win", isOnline, timeoutMs = 15000 } = cfg;
   let chain: Promise<FolderFlowResult> = Promise.resolve(null as unknown as FolderFlowResult);
 
   // 串行化同名 sync（避免自我并发 race）。返回 { status, folder, etag?, pushed? }。
@@ -90,7 +92,7 @@ export function createFolderFlow(cfg: FolderFlowConfig): FolderFlow {
       cloudFolder = parsed;
     }
 
-    const merged = mergeFolders(localFolder, cloudFolder, { resolve });
+    const merged = mergeFolders(localFolder, cloudFolder, { resolve, conflictPolicy });
 
     // 本地没贡献任何云端没有的东西 → 不必 push（pull-before-edit / 重复 sync 不白写云端）。
     if (normalizeFolder(merged) === normalizeFolder(cloudFolder)) {

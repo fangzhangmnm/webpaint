@@ -7,7 +7,7 @@
 //   canSync()=auth/online 门；onBusyChange()=busy 变化时刷 UI（store 不碰 DOM）。dirty 单源=注入的 cloud。
 import { createFolderFlow } from "./folder-flow.ts";
 import type { FolderFlow, FolderFlowResult } from "./folder-flow.ts";
-import type { FolderEnvelope, ResolveFn } from "./folder-merge.ts";
+import type { FolderEnvelope, ResolveFn, FolderConflictPolicy } from "./folder-merge.ts";
 import type { Bytes, CloudSync } from "./types.ts";
 
 export type FolderStatus = "busy" | "no-auth" | "offline" | "dirty" | "synced";
@@ -19,6 +19,7 @@ export interface FolderStoreConfig {
   encode: (folder: FolderEnvelope) => Bytes | Blob;
   decode: (text: string) => FolderEnvelope | null;
   resolve?: ResolveFn;
+  conflictPolicy?: FolderConflictPolicy;   // N11：显式冲突策略（默认 "last-win"）
   isOnline?: () => boolean;
   flow?: FolderFlow;            // flow 可注入（测试）
   syncDelayMs?: number;
@@ -33,8 +34,9 @@ export interface FolderStoreHooks {
 }
 
 export function createFolderStore(cfg: FolderStoreConfig) {
-  const { cloud, name, encode, decode, isOnline, flow, syncDelayMs = 1500 } = cfg;
-  const _flow: FolderFlow = flow || createFolderFlow({ cloud, name, encode, decode, isOnline });   // flow 可注入（测试）
+  const { cloud, name, encode, decode, isOnline, flow, resolve, conflictPolicy, syncDelayMs = 1500 } = cfg;
+  // N11：把 resolve / conflictPolicy 透传给 flow（原本漏传 → cfg.resolve 形同虚设）。默认 "last-win"。
+  const _flow: FolderFlow = flow || createFolderFlow({ cloud, name, encode, decode, isOnline, resolve, conflictPolicy });
   let _syncing = false;
   let _timer: ReturnType<typeof setTimeout> | null = null;
   let _snapshot: () => FolderEnvelope | null = () => null;
