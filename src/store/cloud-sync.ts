@@ -140,7 +140,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
       }
     }
     // bytes 是 Uint8Array（Bytes），byteLength 即字节数；?? size/length 是历史兼容兜底（任意来源），故收窄成 any 读。
-    const wrote = (bytes && ((bytes as any).byteLength ?? (bytes as any).size ?? (bytes as any).length)) || 0;
+    const wrote = (bytes && ((bytes as { byteLength?: number; size?: number; length?: number }).byteLength ?? (bytes as { byteLength?: number; size?: number; length?: number }).size ?? (bytes as { byteLength?: number; size?: number; length?: number }).length)) || 0;
     // conflictBehavior：有 baseEtag → "replace"（If-Match 守，412 才冲突）；**无 baseEtag（新建/未基于云版）→ "fail"**
     //   → 绝不无条件覆盖云端已存在的同名文件（否则静默吃掉别人/旧版的同名作品 = 数据丢失，path-身份红线）。
     let item: CloudItem | null = null;

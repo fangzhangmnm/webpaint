@@ -140,9 +140,9 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
   function hasParent(name: string) { return _parent.has(name); }
   function parentFor(name: string): string | null { return _parent.has(name) ? _parent.get(name)! : null; }
 
-  function _retriable(e: any): boolean {
-    return !!e && (e.status == null || e.status === 429 || (e.status >= 500 && e.status <= 599))
-      && e.name !== "CloudConflictError" && e.name !== "CloudNameCollisionError";   // 撞名异文件不重试（重试只会再撞）
+  function _retriable(e: unknown): boolean {
+    return !!e && ((e as { status?: number }).status == null || (e as { status?: number }).status === 429 || ((e as { status?: number }).status! >= 500 && (e as { status?: number }).status! <= 599))
+      && (e as { name?: string }).name !== "CloudConflictError" && (e as { name?: string }).name !== "CloudNameCollisionError";   // 撞名异文件不重试（重试只会再撞）
   }
 
   // 412：可能是自己 lost-response 已落盘的写。拉云比对，相等即自愈（B5/W1）。
@@ -201,8 +201,8 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
           const { item } = await cloud.push(name, bytes, { baseEtag, encrypted: isEnc });
           if (item && item.eTag) _base.set(name, item.eTag);   // 只推进自己的 base
           return _finish(name, v0, getEditVersion, "pushed");
-        } catch (e: any) {
-          if (e && e.name === "CloudConflictError") {
+        } catch (e: unknown) {
+          if (e && (e as { name?: string }).name === "CloudConflictError") {
             if (await _tryHeal(name, bytes)) return _finish(name, v0, getEditVersion, "healed");
             const choice = onConflict ? await onConflict({ name }) : "keep";
             return await _resolveConflict(name, choice, { bytes, adopt, saveBranch, now });   // pull/branch/weak-override 在 Store 内执行
@@ -702,7 +702,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     const pw = crypt.getPassword ? crypt.getPassword(name) : null;
     if (!pw) return null;
     try { return await attempt(pw); }
-    catch (e: any) { if (e?.code === "WRONG_PASSWORD") return null; throw e; }
+    catch (e: unknown) { if ((e as { code?: string } | null | undefined)?.code === "WRONG_PASSWORD") return null; throw e; }
   }
 
   // UI 解锁循环的便宜验证器：解 name 的 peek（AES-GCM，快，不碰 7z、不开 UI、不进 busy）→ 密码对否。
@@ -781,7 +781,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return sub.serialize(name, async () => {
       const plain = await toU8(await encode());
       const sealed = await _seal(name, plain);
-      await (local!.save as any)(name, sealed, hint);
+      await local!.save(name, sealed, hint);
       return { status: "saved", local: true };
     });
   }
@@ -820,11 +820,11 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       if (item && item.eTag) _base.set(name, item.eTag);  // cloud.push 内已 setETag+setDirty(false)；这里推进本 tab base
       clearParent(name);                                  // episode 落地
       return { status: "swapped", cloud: true };
-    } catch (e: any) {
+    } catch (e: unknown) {
       // ② 本地已换、云端没跟上 → 标脏 + 锚 parent=换前云版，正常 push 流接力收敛
       _parent.set(name, prevEtag);
       cloud.setDirty(name, true);
-      if (e && e.name === "CloudConflictError") return { status: "conflict", dirtyAfter: true };
+      if (e && (e as { name?: string }).name === "CloudConflictError") return { status: "conflict", dirtyAfter: true };
       return { status: "cloud-deferred", dirtyAfter: true, error: e };
     }
   }
@@ -873,13 +873,13 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     if (local) {
       const blob = await local.get(name);
       if (blob) {
-        const size = (blob as any).size ?? (blob as any).length ?? 0;
-        const sliced = (blob as any).slice(Math.max(0, size - n));
+        const size = blob.size ?? (blob as { length?: number }).length ?? 0;
+        const sliced = blob.slice(Math.max(0, size - n)) as Blob | Uint8Array;
         return sliced instanceof Blob ? sliced : new Blob([sliced]);
       }
     }
-    if (tryCloud && (cloud as any).pullTail) {
-      const t = await (cloud as any).pullTail(name, n);
+    if (tryCloud && cloud.pullTail) {
+      const t = await cloud.pullTail(name, n);
       return t ? new Blob([t.bytes as BlobPart]) : null;
     }
     return null;

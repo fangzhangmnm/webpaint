@@ -20,7 +20,7 @@ import type { Bytes, LocalAdapter, TrashEntry } from "./types.ts";
 
 export function createLocalAdapter(): LocalAdapter {
   return {
-    async save(name: string, oraBlob: Bytes | Blob, hint?: any) {
+    async save(name: string, oraBlob: Bytes | Blob, hint?: unknown) {
       // 给 Store 流（flow.save / pull 覆盖 / rename / push）用。
       // **必须归一化成 Blob**：Store 流经 toU8 传进来的是 Uint8Array，但本地持久层契约是 Blob——
       //   pkg.ora.size 给图库列大小（Uint8Array 只有 byteLength → undefined → 列「0B」），
@@ -35,7 +35,7 @@ export function createLocalAdapter(): LocalAdapter {
       let thumb = null;
       const isEnc = await looksEncryptedContainer(blob);
       if (!isEnc) {
-        if (hint && hint.thumb instanceof Blob) thumb = hint.thumb;
+        if (hint && (hint as { thumb?: unknown }).thumb instanceof Blob) thumb = (hint as { thumb?: Blob }).thumb;
         else {
           try { thumb = await renderThumbBlob(await decodeOraToDoc(blob), 256); }
           catch (e) { console.warn("[local] thumb 渲染失败，仅存字节：", e); }

@@ -68,7 +68,7 @@ export interface EncPeekParsed {
 export interface ContainerMeta { v: number; name: string | null; ext: string; }
 
 export function makeGuid(): string {
-  return (globalThis.crypto && (crypto as any).randomUUID) ? (crypto as any).randomUUID()
+  return (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID()
     : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
         const r = (Math.random() * 16) | 0; return (c === "x" ? r : (r & 3) | 8).toString(16);
       });
