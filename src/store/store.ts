@@ -75,6 +75,7 @@ interface FlowResult {
   backedUp?: string | null;
   cloudDeferred?: boolean;
   queuedCloudDelete?: boolean;
+  oldCloudOrphan?: boolean;   // N7：rename 后旧云文件 .trash 失败 → 残留孤儿，caller 应 surface
   trashKey?: string | null;
   trashed?: unknown;
   push?: unknown;
@@ -409,8 +410,17 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
       let cloudPresent = false;
       try { cloudPresent = !!(await cloud.fetchMeta(name)); } catch (_) { cloudPresent = false; }
       if (cloudPresent) {
+        const wasDirty = cloud.isDirty(name);          // ★必须在 trash 前取：cloud.trash 内 clearState 后 isDirty 默认回 true
         const trashed = await cloud.trash(name);       // 先云端进 .trash（失败抛 → 本地不动）
-        if (localPresent) await local!.hardDelete(name);            // 再本地直接删（不留双份）
+        if (localPresent) {
+          if (wasDirty) {
+            // N5：本地有未推改动（这份字节「只有本地有」）→ 删除只删云端版；本地**留在目录里**降级为
+            //   local-only（解绑云端 etag/dirty）。绝不 hardDelete、不藏 backup——未推字节不可静默丢。
+            cloud.clearState(name);
+            return { status: "demoted-local-only", where: "cloud", trashed };
+          }
+          await local!.hardDelete(name);            // 干净副本 = 云端 .trash 已救着 → 硬删不丢、不留双份
+        }
         return { status: "trashed", where: "cloud", trashed };
       }
       if (localPresent) { const trashKey = await local!.trash(name); return { status: "trashed", where: "local", trashKey }; }
@@ -445,7 +455,14 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
     return busy("恢复中…", async () => {
       let name: string | null = targetName || null, restoredLocal = false, restoredCloud = false;
       if (trashKey && local) { const n = await local.restore(trashKey); if (n) { name = n; restoredLocal = true; } }
-      if (fromCloud && cloudItemId != null) { await cloud.restore(cloudItemId, (name || targetName)!); restoredCloud = true; }
+      if (fromCloud && cloudItemId != null) {
+        const ritem = await cloud.restore(cloudItemId, (name || targetName)!) as { eTag?: string | null };
+        restoredCloud = true;
+        // N8：采纳恢复出的云 item 的 etag（cloud.restore 是 move → 新 etag）→ 之后 push 有 base，
+        //   不再「无 base → 409」对**用户自己的文件**弹假 CloudNameCollisionError。
+        const rname = name || targetName;
+        if (rname && ritem && ritem.eTag) { cloud.setETag(rname, ritem.eTag); _base.set(rname, ritem.eTag); }
+      }
       if (!restoredLocal && !restoredCloud) return { status: "noop" };
       return { status: "restored", name, local: restoredLocal, cloud: restoredCloud };
     });
@@ -546,9 +563,12 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
         }
         if (bytes == null) { _base.delete(oldName); return { status: "renamed", where: "local", newName }; }
         const res = await _doPush(newName, { encode: () => bytes, getEditVersion: gev, busy });  // dirty / 无旧云文件 → 推当前字节（含 B5/retry/conflict）
-        if (cloudOld) { try { await cloud.trash(oldName); } catch (_) {} }  // 旧名进 .trash，不 hard-delete（C5）
+        // N7：旧名进 .trash（不 hard-delete，C5）。失败**不再静默吞**——回报 oldCloudOrphan 让 caller
+        //   surface（否则旧云文件静默成孤儿，A9 复发）。新名已推成功，故不抛、不回滚，只标记。
+        let oldCloudOrphan = false;
+        if (cloudOld) { try { await cloud.trash(oldName); } catch (_) { oldCloudOrphan = true; } }
         _base.delete(oldName);
-        return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, push: res };
+        return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, push: res, oldCloudOrphan };
       } catch (e) {
         cloud.setDirty(newName, true); _base.delete(oldName);
         return { status: "renamed", where: "local", newName, cloudDeferred: true, error: e };
