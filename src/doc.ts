@@ -1051,6 +1051,46 @@ export class PaintDoc {
     this.width = nw;
     this.height = nh;
   }
+
+  // 偏移整个 doc（dx, dy 像素），**环绕**（wrap-around）—— 画 seamless 贴图的核心动作。
+  //   贴图要平铺无缝：把 doc 偏移半幅（dx=W/2, dy=H/2）后，原来藏在四条边上的接缝
+  //   全汇到画面正中央，直接涂抹/仿章消除即可。doc 尺寸不变（区别于 crop/resample）。
+  // 实现：每层合成进一张整幅 doc canvas 的 4 个环绕位（偏移归一化到 [0,W)/[0,H) 后只需 4 个，
+  //   见下），bbox 设为整幅。整数平移 → 关插值保像素锐利。
+  //   —— 不做 trim-to-content：seamless 贴图层通常铺满整幅，trim 后 bbox 仍是整幅；
+  //      trim 扫描是易错优化，且 computeMaxLayers 本就按「每层占满」悲观预算，整幅 bbox 与之一致。
+  offsetWrap(dx: number, dy: number) {
+    const W = this.width, H = this.height;
+    const ox = (((dx | 0) % W) + W) % W;   // 归一化到 [0, W)
+    const oy = (((dy | 0) % H) + H) % H;   // 归一化到 [0, H)
+    if (ox === 0 && oy === 0) return;       // 无变化（守卫也在调用方，这里再兜一次）
+    // 归一化后，原内容（在 [bx, bx+bw)）右移 ox 落在 [bx+ox, …)，越过右/下边的部分由
+    // 「-W / -H」环绕副本接回左/上。故只需 sx∈{0,-W} × sy∈{0,-H} 共 4 个位置。
+    for (const L of flattenLeaves(this.layers)) {
+      if (L.bboxW <= 0 || L.bboxH <= 0) continue;
+      const nc = makeBitmap(W, H);
+      const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
+      nctx.imageSmoothingEnabled = false;   // 整数平移，保像素锐利
+      const bx = L.bboxX, by = L.bboxY;
+      for (const sx of [0, -W]) {
+        for (const sy of [0, -H]) {
+          nctx.drawImage(L.canvas, bx + ox + sx, by + oy + sy);
+        }
+      }
+      nctx.imageSmoothingEnabled = true;    // 还原，后续 brush 直接画不带特殊态
+      nctx.imageSmoothingQuality = "low";
+      L.canvas = nc;
+      L.ctx = nctx;
+      L.bboxX = 0;
+      L.bboxY = 0;
+      L.bboxW = W;
+      L.bboxH = H;
+    }
+    if (this.selection) {
+      this.selection = this.selection.offsetWrapped(ox, oy, W, H);
+    }
+    // doc 尺寸不变
+  }
 }
 
 // 按设备 RAM + 画布分辨率 算图层数上限。**悲观估计**：每层按占满 doc 算

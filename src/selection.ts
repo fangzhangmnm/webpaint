@@ -354,6 +354,20 @@ export class Selection {
     mctx.drawImage(this.maskCanvas, 0, 0, oW, oH, 0, 0, nbw, nbh);
     return new Selection(Math.round(this.bboxX * sx), Math.round(this.bboxY * sy), nbw, nbh, m);
   }
+
+  // 偏移环绕：随 doc.offsetWrap 平移选区。mask 合成进整幅 doc mask 的 4 个环绕位，bbox 设为整幅。
+  //   dx,dy 已由调用方归一化到 [0,W)/[0,H)。整数平移 → 关插值保边沿锐利。
+  offsetWrapped(dx: number, dy: number, docW: number, docH: number): Selection {
+    const m = makeBitmap(docW, docH);
+    const mctx = m.getContext("2d")!;
+    mctx.imageSmoothingEnabled = false;
+    for (const sx of [0, -docW]) {
+      for (const sy of [0, -docH]) {
+        mctx.drawImage(this.maskCanvas, this.bboxX + dx + sx, this.bboxY + dy + sy);
+      }
+    }
+    return new Selection(0, 0, docW, docH, m);
+  }
 }
 
 // ============ 内部：marching squares 描边 ============

@@ -756,6 +756,29 @@
       </div>
     </div>
 
+    <!-- 偏移接缝（环绕）对话框 —— 沿用 .resample-* 样式。dx/dy 像素，向右/下为正，环绕。 -->
+    <div class="resample-backdrop hidden" id="offsetBackdrop"></div>
+    <div class="resample-sheet hidden" id="offsetSheet" role="dialog" aria-modal="true">
+      <div class="resample-head">偏移接缝（环绕）</div>
+      <div class="resample-body">
+        <div class="resample-row">
+          <label for="offsetX">水平 (px)</label>
+          <input type="number" id="offsetX" step="1" />
+        </div>
+        <div class="resample-row">
+          <label for="offsetY">垂直 (px)</label>
+          <input type="number" id="offsetY" step="1" />
+        </div>
+        <div class="resample-row resample-row-link">
+          <button type="button" id="offsetHalf">居中接缝（半幅 ½）</button>
+        </div>
+      </div>
+      <div class="resample-foot">
+        <button type="button" id="offsetCancel">取消</button>
+        <button type="button" id="offsetConfirm" class="primary">应用</button>
+      </div>
+    </div>
+
     <!-- v110 颜色调整面板（沿用 .float-panel 拖标题模式）
          v131 (user：「先把调色做了」) refactor → 通用 filter 平台：
          body 改成空容器，JS 按 filter 类型动态填（HSB / 色彩平衡 / Curves / 锐化模糊） -->
@@ -873,6 +896,10 @@
       </button>
       <button class="menu-item" id="menuRotate90" type="button" role="menuitem">
         <span class="menu-item-label">逆时针旋转 90°</span>
+      </button>
+      <!-- 画 seamless 贴图：偏移画布（环绕），把藏在边上的接缝移到中央涂抹消除 -->
+      <button class="menu-item" id="menuOffset" type="button" role="menuitem">
+        <span class="menu-item-label">偏移接缝（环绕）…</span>
       </button>
       <button class="menu-item" id="adjustResample" type="button" role="menuitem">
         <span class="menu-item-label">调整尺寸</span>

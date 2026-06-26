@@ -136,6 +136,24 @@ function _closeResampleDialog() {
   els.resampleSheet.classList.add("hidden");
 }
 
+// 偏移接缝（环绕）对话框 ----
+// 默认预填半幅（dx=W/2, dy=H/2）：seamless 贴图最常用的「把四边接缝汇到中央」一步。
+function _openOffsetDialog() {
+  els.offsetBackdrop.classList.remove("hidden");
+  els.offsetSheet.classList.remove("hidden");
+  els.offsetX.value = String(Math.round(doc.width / 2));
+  els.offsetY.value = String(Math.round(doc.height / 2));
+  els.offsetX.focus();
+  els.offsetHalf.onclick = () => {
+    els.offsetX.value = String(Math.round(doc.width / 2));
+    els.offsetY.value = String(Math.round(doc.height / 2));
+  };
+}
+function _closeOffsetDialog() {
+  els.offsetBackdrop.classList.add("hidden");
+  els.offsetSheet.classList.add("hidden");
+}
+
 export function initDocOps(ctx: AppContext) {
   ({ editMode, doc, board, history, setStatus,
      _suppressTransientPanels, _restoreTransientPanels } = ctx);
@@ -268,5 +286,25 @@ export function initDocOps(ctx: AppContext) {
     if (nw === doc.width && nh === doc.height) { _closeResampleDialog(); return; }
     runDocTransform(`已重采样到 ${nw}×${nh}（${mode}）`, () => doc.resampleTo(nw, nh, mode));
     _closeResampleDialog();
+  });
+
+  // 偏移接缝（环绕）---- doc 尺寸不变（像 flipH），无需 viewport shift。
+  document.getElementById("menuOffset")!.addEventListener("click", () => {
+    setMenuOpen(false);
+    setAdjustOpen(false);
+    editMode.applyPendingTransient();   // 决定性命令：先 commit 浮动变换/调色再改像素
+    _openOffsetDialog();
+  });
+  els.offsetCancel.addEventListener("click", () => _closeOffsetDialog());
+  els.offsetBackdrop.addEventListener("click", () => _closeOffsetDialog());
+  els.offsetConfirm.addEventListener("click", () => {
+    const dx = parseFloat(els.offsetX.value) | 0;
+    const dy = parseFloat(els.offsetY.value) | 0;
+    // 归一化到 [0,W)/[0,H) 判 no-op（偏移整幅 = 不动）。doc.offsetWrap 内也会再兜一次。
+    const ox = ((dx % doc.width) + doc.width) % doc.width;
+    const oy = ((dy % doc.height) + doc.height) % doc.height;
+    if (ox === 0 && oy === 0) { _closeOffsetDialog(); return; }
+    runDocTransform(`已偏移 ${dx},${dy}（环绕）`, () => doc.offsetWrap(dx, dy));
+    _closeOffsetDialog();
   });
 }
