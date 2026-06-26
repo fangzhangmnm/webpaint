@@ -42,7 +42,10 @@ interface FloatDesc {
 }
 // compositeLayers 的合成选项接缝（board 注入复用离屏池 / overlay / float / surrogate source）。
 interface CompositeOpts {
-  ignoreClip?: boolean;
+  // 只忽略**直接传入的这些节点自身**的 clip（它们的 clip 基底在本次调用之外，
+  //   如单层导出 [activeLayer]：基底兄弟不在数组里）。组**内部**的 clip 一律照常生效
+  //   （不向子层传播——见 _compositeGroup 递归时清零此标志）。默认 false = 全程用 clip。
+  ignoreSelfClip?: boolean;
   source?: (layer: Layer) => CanvasImageSource;
   overlayFor?: (node: Layer) => OverlayDesc | null;
   floatFor?: (node: Layer) => FloatDesc | null;
@@ -105,14 +108,15 @@ function nodeContentBbox(node: CompositeNode): ContentBbox | null {
 //   clipTmp(w,h)     -> 复用的剪裁离屏（board 有池；默认新建）
 //   eraseTmp(w,h)    -> 复用的 erase/混合离屏（默认新建）
 export function compositeLayers(ctx: Ctx, nodes: CompositeNode[], opts: CompositeOpts = {}) {
-  // ignoreClip：把每个节点当非 clip 画（scope==="active" 单层导出：导出该层 raw 像素，无视 clip 标志）。
-  const baseFor = opts.ignoreClip ? new Array(nodes.length).fill(null) : computeClipBaseForNodes(nodes);
+  // ignoreSelfClip：把**这一层级**的每个节点当非 clip 画（单层导出 [activeLayer]：基底兄弟不在数组里，
+  //   否则 clip 叶会因「有 clip 无基底」整张消失）。组内部 clip 不受影响（_compositeGroup 递归时已清零）。
+  const baseFor = opts.ignoreSelfClip ? new Array(nodes.length).fill(null) : computeClipBaseForNodes(nodes);
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     if (!node.visible) continue;
     const base = baseFor[i];
     // clip 节点但同级无可见基底 → 不渲染（蒙版无效，跟基底隐显）。
-    if (node.clippingMask && !base && !opts.ignoreClip) continue;
+    if (node.clippingMask && !base && !opts.ignoreSelfClip) continue;
 
     if (node.isGroup) {
       _compositeGroup(ctx, node, base, opts);
@@ -144,9 +148,12 @@ export function compositeLayers(ctx: Ctx, nodes: CompositeNode[], opts: Composit
 
 // 组：pass-through 直接落 ctx；隔离则先合 buffer 再按 group.opacity/mode(+clip) 整体混。
 function _compositeGroup(ctx: Ctx, group: LayerGroup, base: CompositeNode | null, opts: CompositeOpts) {
+  // ignoreSelfClip 只对**被直接选中的顶层节点**（组自身）生效；组内子层的 clip 是组内局部关系，
+  //   基底都在 children 数组里，一律照常解析 → 递归前清零此标志。
+  const childOpts = opts.ignoreSelfClip ? { ...opts, ignoreSelfClip: false } : opts;
   if (!groupNeedsIsolation(group)) {
     // pass-through：子层直接落 ctx（能与组下方层混）。group 不影响 globalAlpha/comp。
-    compositeLayers(ctx, group.children, opts);
+    compositeLayers(ctx, group.children, childOpts);
     return;
   }
   const bb = nodeContentBbox(group);
@@ -158,7 +165,7 @@ function _compositeGroup(ctx: Ctx, group: LayerGroup, base: CompositeNode | null
   const bctx = buf.getContext("2d") as Ctx;
   // buffer 在 doc 坐标：平移使 doc(ox,oy) → buffer(0,0)
   bctx.setTransform(1, 0, 0, 1, -ox, -oy);
-  compositeLayers(bctx, group.children, opts);
+  compositeLayers(bctx, group.children, childOpts);
   bctx.setTransform(1, 0, 0, 1, 0, 0);
   // clip：组作为 clip 节点时，buffer dst-in 基底 alpha（基底可能是叶或组）
   if (group.clippingMask && base) {

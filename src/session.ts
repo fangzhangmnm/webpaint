@@ -273,9 +273,10 @@ export async function renderDocToImageBlob(doc: PaintDoc, mime = "image/png", qu
     ctx.fillRect(0, 0, doc.width, doc.height);
   }
   // 合成走规范合成器（deep module A，含 clip + 组隔离）。ctx 在 doc 坐标 1:1，无 live overlay。
-  //   scope==="active"：仅当前层，导出该层 raw 像素（无视 clip 标志，单层导出最简语义）。
+  //   scope==="active"：仅当前层。若选中的是组 → 导出该组合并结果（组内 clip/blend/隔离照常）；
+  //   ignoreSelfClip 只忽略被选节点**自身**对外部兄弟的 clip（基底不在导出里），不影响组内部 clip。
   if (scope === "active") {
-    if (doc.activeLayer) compositeLayers(ctx, [doc.activeLayer], { ignoreClip: true });
+    if (doc.activeLayer) compositeLayers(ctx, [doc.activeLayer], { ignoreSelfClip: true });
   } else {
     compositeLayers(ctx, doc.layers);
   }

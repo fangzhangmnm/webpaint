@@ -114,3 +114,77 @@ describe("layer-composite · floatFor z-order 接缝", () => {
     assert(ctx.order.join(",") === "A,float", `期望 A,float 实得 ${ctx.order.join(",")}`);
   });
 });
+
+// ignoreSelfClip：单层/单组导出（scope==="active"）。语义＝只忽略**被直接选中的顶层节点自身**
+//   对外部兄弟的 clip（基底不在导出里）；组**内部**的 clip 一律照常生效（不向子层传播）。
+//   验证手段：clipped 路径走 _drawLeafClipped → 调 opts.clipTmp；故用 clipTmp 探针判定「是否走了裁剪」。
+describe("layer-composite · ignoreSelfClip 单层/单组导出", () => {
+  const recCtx = () => {
+    const order = [];
+    return {
+      order, globalAlpha: 1, globalCompositeOperation: "source-over",
+      save() {}, restore() {}, setTransform() {}, clearRect() {},
+      drawImage(img) { order.push(img && img.__tag ? img.__tag : "?"); },
+    };
+  };
+  const pxLeaf = (tag, o = {}) => ({
+    clippingMask: false, visible: true, isGroup: false,
+    bboxX: 0, bboxY: 0, bboxW: 10, bboxH: 10, opacity: 1, mode: "source-over",
+    canvas: { __tag: tag }, ...o,
+  });
+  const grp = (children, o = {}) => ({
+    isGroup: true, clippingMask: false, visible: true, opacity: 1,
+    mode: "pass-through", children, ...o,
+  });
+  // clipTmp 探针：记录被调次数；返回一个最小可用离屏（getContext 给足 _drawLeafClipped 用的方法）。
+  const clipTmpSpy = () => {
+    const calls = [];
+    const fn = (w, h) => {
+      calls.push([w, h]);
+      const tctx = {
+        globalAlpha: 1, globalCompositeOperation: "source-over",
+        setTransform() {}, clearRect() {}, drawImage() {},
+      };
+      return { __tag: "clipped", getContext: () => tctx };
+    };
+    fn.calls = calls;
+    return fn;
+  };
+
+  it("单个 clip 叶单独导出 → 仍出 raw 像素（不因「有clip无基底」整张消失）", () => {
+    const ctx = recCtx();
+    compositeLayers(ctx, [pxLeaf("L", { clippingMask: true })], { ignoreSelfClip: true });
+    assert(ctx.order.join(",") === "L", `期望 L（raw 像素）实得 "${ctx.order.join(",")}"`);
+  });
+
+  it("反例：不带 ignoreSelfClip 时同一 clip 叶无基底 → 整张消失（确认 flag 的必要性）", () => {
+    const ctx = recCtx();
+    compositeLayers(ctx, [pxLeaf("L", { clippingMask: true })], {});
+    assert(ctx.order.length === 0, `期望空（被跳过）实得 "${ctx.order.join(",")}"`);
+  });
+
+  it("选中组单独导出：组内 clip 照常生效（clipTmp 被调）——ignoreSelfClip 不向子层传播", () => {
+    const base = pxLeaf("base");
+    const clip = pxLeaf("clip", { clippingMask: true });
+    const g = grp([base, clip]);                       // 组内：clip 裁到 base
+    const ctx = recCtx();
+    const spy = clipTmpSpy();
+    compositeLayers(ctx, [g], { ignoreSelfClip: true, clipTmp: spy });
+    assert(spy.calls.length === 1, `组内 clip 应走裁剪路径（clipTmp 调 1 次）实得 ${spy.calls.length}`);
+    assert(ctx.order.join(",") === "base,clipped",
+      `期望 base 直绘 + clip 经离屏裁剪后 blit，实得 "${ctx.order.join(",")}"`);
+  });
+
+  it("嵌套组：深层 clip 也照常生效（ignoreSelfClip 在每层递归都被清零，不渗透到任意深度）", () => {
+    const innerBase = pxLeaf("inner-base");
+    const innerClip = pxLeaf("inner-clip", { clippingMask: true });
+    const inner = grp([innerBase, innerClip]);         // 子组内：inner-clip 裁到 inner-base
+    const outer = grp([pxLeaf("sib"), inner]);         // 外组：一个旁层 + 子组
+    const ctx = recCtx();
+    const spy = clipTmpSpy();
+    compositeLayers(ctx, [outer], { ignoreSelfClip: true, clipTmp: spy });
+    assert(spy.calls.length === 1, `深层 clip 仍应走裁剪路径（clipTmp 调 1 次）实得 ${spy.calls.length}`);
+    assert(ctx.order.join(",") === "sib,inner-base,clipped",
+      `期望旁层 + 子组内 base 直绘 + 深层 clip 裁剪后 blit，实得 "${ctx.order.join(",")}"`);
+  });
+});
