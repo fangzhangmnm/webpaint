@@ -194,6 +194,13 @@ async function useSelection() {
 
 // ───────────────────────── 推（WebPaint → Blender）─────────────────────────
 
+// 保持比例缩进 maxSide 见方（长边 = min(长边, maxSide)，不放大）。给预设算实数填框。
+function fitAspect(maxSide: number): { w: number; h: number } {
+  const dw = ctx.doc.width, dh = ctx.doc.height;
+  const k = Math.min(1, maxSide / Math.max(dw, dh));
+  return { w: Math.max(1, Math.round(dw * k)), h: Math.max(1, Math.round(dh * k)) };
+}
+
 // 两个文本框 → 目标尺寸（W×H，可非方形拉伸）。都空 → null（= 原 doc 尺寸，不缩放）。
 // 单轴空 → 该轴回退 doc 尺寸。上限 8192 防误填。
 function parseTargetSize(): { w: number; h: number } | null {
@@ -450,12 +457,14 @@ function buildPanel() {
           <input id="btpSizeH" class="btp-input" placeholder="高" inputmode="numeric" />
           <select id="btpSizePreset" class="btp-sizepreset" aria-label="尺寸预设">
             <option value="">预设…</option>
-            <option value="doc">Doc</option>
-            <option value="128">128</option>
-            <option value="256">256</option>
-            <option value="512">512</option>
-            <option value="1024">1024</option>
-            <option value="2048">2048</option>
+            <option value="doc">原尺寸</option>
+            <option value="fit512">比例 ≤512</option>
+            <option value="fit1024">比例 ≤1024</option>
+            <option value="fit2048">比例 ≤2048</option>
+            <option value="256">方 256²</option>
+            <option value="512">方 512²</option>
+            <option value="1024">方 1024²</option>
+            <option value="2048">方 2048²</option>
           </select>
         </div>
       </div>
@@ -504,12 +513,19 @@ function buildPanel() {
     r.addEventListener("change", () => { if (r.checked) { uploadSource = r.value === "active" ? "active" : "merged"; syncConfigUI(); } });
   }
 
-  // 分辨率预设下拉 → 同时填两个文本框（"doc" = 清空 = doc 尺寸），随即复位下拉
+  // 分辨率预设下拉 → 把算好的实数填进两个文本框（文本框始终是真源），随即复位下拉。
+  //   原尺寸 = doc W/H；比例 ≤N = 保持比例缩进 N 见方（不放大）；方 N² = N×N。
   const sizePreset = q<HTMLSelectElement>("#btpSizePreset");
   sizePreset.addEventListener("change", () => {
     const v = sizePreset.value;
-    if (v === "doc") { sizeW.value = ""; sizeH.value = ""; }
-    else if (v) { sizeW.value = v; sizeH.value = v; }
+    if (v) {
+      const wh =
+        v === "doc" ? { w: ctx.doc.width, h: ctx.doc.height }
+        : v.startsWith("fit") ? fitAspect(Number(v.slice(3)))
+        : { w: Number(v), h: Number(v) };
+      sizeW.value = String(wh.w);
+      sizeH.value = String(wh.h);
+    }
     sizePreset.selectedIndex = 0;
   });
 
