@@ -126,6 +126,7 @@
     "src/smooth-dev-panel.ts",
     "src/export-import-menu.ts",
     "src/topbar-menu.ts",
+    "src/blender-sync.ts",
     "src/side-windows.ts",
     "src/gallery-shell.ts",
     "src/cloud-freshness.ts",

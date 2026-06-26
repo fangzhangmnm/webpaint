@@ -2171,6 +2171,33 @@ body[data-mode="gallery"] .board { display: none !important; }
   gap: 10px;
   padding: 12px;
 }
+/* Blender Sync 面板（btp，插件式子功能；沿用 .float-panel 框架，仅补内部布局） */
+.btp-panel { width: 280px; }
+.btp-conn, .btp-row, .btp-remote { display: flex; flex-direction: column; gap: 6px; }
+.btp-label { font-size: 12px; color: var(--ink-soft); }
+.btp-input, .btp-area { width: 100%; box-sizing: border-box; }
+.btp-area { resize: vertical; font-family: ui-monospace, monospace; font-size: 11px; }
+.btp-btn {
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+.btp-btn:hover { background: color-mix(in srgb, var(--accent, #4a90d9) 14%, transparent); }
+.btp-btn.primary { background: var(--accent, #4a90d9); color: #fff; border-color: transparent; }
+.btp-btn.btp-sm { padding: 5px 8px; font-size: 12px; }
+.btp-btnrow { display: flex; gap: 6px; }
+.btp-btnrow .btp-btn { flex: 1; }
+.btp-radio { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink); }
+.btp-sep { border: none; border-top: 1px solid var(--line); margin: 2px 0; width: 100%; }
+.btp-status { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+.btp-dot { width: 9px; height: 9px; border-radius: 50%; background: #c3503a; flex: none; }
+.btp-dot[data-state="connected"] { background: #3a9a4a; }
+.btp-dot[data-state="connecting"] { background: #d99a20; }
+.btp-remote summary { font-size: 12px; color: var(--ink-soft); cursor: pointer; }
 .close-x {
   background: transparent;
   border: none;

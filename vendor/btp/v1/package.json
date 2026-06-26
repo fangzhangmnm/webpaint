@@ -1,0 +1,15 @@
+{
+  "type": "module",
+  "name": "btp-protocol-v1",
+  "version": "1.1.0",
+  "description": "Blender Texture Protocol client (v1): localhost HTTP + WebRTC remote transport. Bundled with README.md.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "license": "MIT"
+}

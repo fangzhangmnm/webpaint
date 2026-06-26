@@ -54,6 +54,7 @@ import { initImportImage, importImageAsLayer } from "./import-image.ts";   // im
 import { initExportImportMenu } from "./export-import-menu.ts";
 import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueLocalName } from "./gallery-shell.ts";
 import { initTopbarMenu } from "./topbar-menu.ts";
+import { initBlenderSync } from "./blender-sync.ts";   // 推/拉贴图到 Blender（BlenderTextureProtocol，插件式隔离子功能）
 import { initPlatformGuards } from "./platform-guards.ts";
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
 import { watch } from "../vendor/vue/vue.esm-browser.prod.js";   // 加密常驻指示 watch（currentBrush computed + 引擎桥已下沉 current-brush.ts）
@@ -322,6 +323,7 @@ initCloudFreshness(ctx);   // 前台云端新鲜度（需 board/withBusy/setStat
 initImportImage(ctx);      // 图片/.ora 导入（需 late ctx：applyCheckerboard/renderLayersPanel/setGalleryOpen/uniqueLocalName）
 initGalleryShell(ctx);     // 图库外壳（需 ctx.gallery + late keys）
 initTopbarMenu(ctx);       // 顶栏/菜单/sheet/save 触发 事件接线（需 ctx.gallery）
+initBlenderSync(ctx);      // Blender 同步面板（菜单入口 menuBlender → 自建 float panel）
 initCloudAuthUI(ctx);
 
 // v236 加密常驻指示（顶栏小锁 + 菜单 label）：反应式跟 session.enc.encrypted。
