@@ -85,7 +85,7 @@ if (navigator.maxTouchPoints > 0) {
 const doc = new PaintDoc({ width: 2048, height: 2048 });
 const board = new Board(els.board as HTMLCanvasElement, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-els.versionLabel.textContent = WEBPAINT_VERSION || "?";
+els.versionLabel.textContent = `版本：${WEBPAINT_VERSION || "?"}`;   // 挪到「强制更新」旁的菜单信息行
 // gallery 也显版本号（footer 水印 + 菜单信息行）——配合「强制更新」让用户知道自己在哪个版本。
 if (els.galleryFootVersion) els.galleryFootVersion.textContent = WEBPAINT_VERSION || "?";
 if (els.galleryMenuVersion) els.galleryMenuVersion.textContent = `版本：${WEBPAINT_VERSION || "?"}`;

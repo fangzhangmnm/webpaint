@@ -923,6 +923,7 @@
       <button class="menu-item menu-danger" id="menuResetBrushRack" type="button" role="menuitem">
         <span class="menu-item-label">重置笔架出厂…</span>
       </button>
+      <div class="menu-item-info" id="versionLabel">版本：—</div>
       <button class="menu-item" id="menuForcePwaReset" type="button" role="menuitem">
         <span class="menu-item-label">强制更新（清缓存重启）</span>
       </button>
@@ -967,8 +968,7 @@
       <span id="canvasSizeLabel">2048×2048</span>
       <span class="sep" aria-hidden="true">·</span>
       <span id="statusLabel">就绪</span>
-      <span class="sep" aria-hidden="true">·</span>
-      <span id="versionLabel" class="version">v?</span>
+      <!-- v329 版本号挪到「强制更新」旁（menuForcePwaReset），不再占状态栏 -->
       <!-- v124b dev 标识 (user：「让我们知道是 dev」)；app.js 检测后加 .visible -->
       <span id="envChip" class="env-chip hidden" aria-label="dev environment">DEV</span>
     </div>
@@ -1002,6 +1002,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-42a0afc82812.mjs"></script>
+    <script type="module" src="./dist/webpaint-d99fe914d717.mjs"></script>
   </body>
 </html>

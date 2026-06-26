@@ -2171,50 +2171,71 @@ body[data-mode="gallery"] .board { display: none !important; }
   gap: 10px;
   padding: 12px;
 }
-/* Blender Sync 面板（btp，插件式子功能；沿用 .float-panel 框架，紧凑 + 小屏不溢出） */
-.btp-panel { width: 264px; }
+/* Blender 同步面板（btp，插件式子功能；沿用 .float-panel 框架，紧凑 + 小屏不溢出） */
+.btp-panel { width: 268px; }
 /* 关键：body 封顶高度 + 滚动 → 小屏也看得全（head 常驻，body 内滚） */
-.btp-panel .float-panel-body { gap: 7px; padding: 10px; max-height: calc(100vh - 92px); overflow-y: auto; }
-.btp-conn, .btp-row, .btp-remote { display: flex; flex-direction: column; gap: 5px; }
+.btp-panel .float-panel-body { gap: 8px; padding: 10px; max-height: calc(100vh - 92px); overflow-y: auto; }
+.btp-row { display: flex; flex-direction: column; gap: 5px; }
 .btp-label { font-size: 12px; color: var(--ink-soft); }
 .btp-input, .btp-area, .btp-sizepreset {
   box-sizing: border-box;
-  padding: 5px 7px;
+  padding: 6px 8px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--bg-soft);
   color: var(--ink);
-  font-size: 12px;
+  font-size: 13px;
 }
 .btp-input { width: 100%; }
 .btp-area { resize: vertical; font-family: ui-monospace, monospace; font-size: 11px; width: 100%; }
 .btp-btn {
-  padding: 6px 9px;
+  padding: 7px 10px;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--bg) 60%, transparent);
   color: var(--ink);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
 }
 .btp-btn:hover { background: color-mix(in srgb, var(--accent, #4a90d9) 14%, transparent); }
+.btp-btn:disabled { opacity: 0.55; cursor: default; }
 .btp-btn.primary { background: var(--accent, #4a90d9); color: #fff; border-color: transparent; }
-.btp-btn.btp-sm { padding: 5px 8px; }
-.btp-btnrow { display: flex; gap: 6px; }
-.btp-btnrow .btp-btn { flex: 1; }
-/* 分辨率行：[文本框 flex][预设下拉][Push] 一行 */
-.btp-sizerow { display: flex; gap: 6px; align-items: center; }
-.btp-sizerow .btp-input { flex: 1 1 auto; min-width: 0; }
+.btp-btn.btp-sm { padding: 6px 9px; font-size: 12px; flex: 0 0 auto; }
+
+/* main + ⋯ 行（沿用 menu-item-row 思路：主键 flex，⋯ 36px，弹层 absolute 收在行内） */
+.btp-action-row { display: flex; gap: 4px; position: relative; align-items: stretch; }
+.btp-action-row > .btp-btn:first-child,
+.btp-action-row > .btp-connbtn { flex: 1 1 auto; min-width: 0; }
+
+/* 智能连接键：单键多态（off / connecting / on），图标 + 文案 */
+.btp-connbtn { display: flex; align-items: center; justify-content: center; gap: 7px; }
+.btp-connbtn svg { width: 17px; height: 17px; flex: none; }
+.btp-connbtn[data-state="on"] { color: #3a9a4a; border-color: color-mix(in srgb, #3a9a4a 45%, var(--line)); }
+.btp-connbtn[data-state="connecting"] { color: #d99a20; }
+.btp-connbtn[data-state="connecting"] .spin-arc { animation: wp-spin 1s linear infinite; }
+
+/* 拉取 / 推送 主键：图标 + 标签 + 行内 sub（当前配置） */
+.btp-action { display: flex; align-items: center; gap: 8px; text-align: left; }
+.btp-action-ic { display: flex; flex: none; }
+.btp-action-ic svg { width: 18px; height: 18px; }
+.btp-action-label { flex: 1 1 auto; }
+.btp-action-sub { font-size: 11px; opacity: 0.8; white-space: nowrap; }
+.btp-action.primary .btp-action-sub { color: #fff; opacity: 0.85; }
+
+/* 贴图名行：输入框 flex + 两个小键 */
+.btp-namerow { display: flex; gap: 5px; align-items: center; }
+.btp-namerow .btp-input { flex: 1 1 auto; min-width: 0; }
+
+/* 尺寸行：W × H + 预设 */
+.btp-sizerow { display: flex; gap: 5px; align-items: center; }
+.btp-sizerow .btp-input { flex: 1 1 auto; min-width: 0; text-align: center; }
+.btp-x { color: var(--ink-soft); flex: none; }
 .btp-sizepreset { flex: 0 0 auto; cursor: pointer; }
-.btp-pushbtn { flex: 0 0 auto; }
-.btp-sep { border: none; border-top: 1px solid var(--line); margin: 1px 0; width: 100%; }
-.btp-status { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
-.btp-dot { width: 9px; height: 9px; border-radius: 50%; background: #c3503a; flex: none; }
-.btp-dot[data-state="connected"] { background: #3a9a4a; }
-.btp-dot[data-state="connecting"] { background: #d99a20; }
-.btp-remote summary { font-size: 12px; color: var(--ink-soft); cursor: pointer; }
-/* scope chips 紧贴 .preset-chips 全局样式，仅微调间距 */
-.btp-scope { gap: 5px; }
+
+/* ⋯ 弹层（复用 .menu-config-popup 外观；远程配对的更宽以容下文本框） */
+.btp-popup { min-width: 168px; }
+.btp-popup-wide { min-width: 232px; }
+.btp-popup.hidden { display: none; }
 .close-x {
   background: transparent;
   border: none;
