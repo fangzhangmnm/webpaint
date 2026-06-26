@@ -27,8 +27,9 @@ const POS_KEY = "webpaint.blenderPanel.pos";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
 // ─── 内联 SVG 图标（currentColor → 由 data-state CSS 着色 / spin）───
+// 带显式 width/height：无尺寸的 inline svg 会撑成 300×150 默认值，必须自带固有尺寸（CSS 仅微调）。
 const svg = (inner: string) =>
-  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
 const ICON_OFF = svg('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>');                                   // 云
 const ICON_ON = svg('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/>'); // 云+勾
 const ICON_BUSY = svg('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><g class="spin-arc" style="transform-origin:12px 13px"><path d="M9 13a3 3 0 0 1 5.5-1.6"/></g>');
@@ -85,11 +86,12 @@ function setConnState(s: "off" | "connecting" | "on", detail = "") {
   connDetail = detail;
   connBtn.dataset.state = s;
   connBtn.disabled = s === "connecting";
-  const inner =
-    s === "on" ? ICON_ON + `<span>已连接${detail ? " · " + detail : ""}</span>`
-    : s === "connecting" ? ICON_BUSY + "<span>连接中…</span>"
-    : ICON_OFF + "<span>连接 Blender</span>";
-  connBtn.innerHTML = inner;
+  const icon = s === "on" ? ICON_ON : s === "connecting" ? ICON_BUSY : ICON_OFF;
+  const label = s === "on" ? `已连接${detail ? " · " + detail : ""}`
+    : s === "connecting" ? "连接中…"
+    : "连接 Blender";
+  // 图标与文字各自 span，绝不把文字塞进 svg；图标走 .btp-action-ic 统一尺寸
+  connBtn.innerHTML = `<span class="btp-action-ic">${icon}</span><span class="btp-connbtn-label">${label}</span>`;
 }
 
 // 连接键点击：断开↔连本机（连接中忽略）。远程配对走旁边的 ⋯。
