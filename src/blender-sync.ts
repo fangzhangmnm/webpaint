@@ -39,7 +39,8 @@ let answerRow: HTMLDivElement;
 let answerOutput: HTMLTextAreaElement;
 let nameInput: HTMLInputElement;
 let texList: HTMLDataListElement;
-let sizeSelect: HTMLSelectElement;
+let sizeInput: HTMLInputElement;     // 分辨率：文本框（真源），空 / "doc" = doc 尺寸
+let built = false;                   // panel DOM 是否已建（持久化早调时守门）
 
 function q<T extends Element>(sel: string): T {
   const e = panel.querySelector(sel);
@@ -161,13 +162,31 @@ async function useSelection() {
 
 // ───────────────────────── 推（WebPaint → Blender）─────────────────────────
 
-// 把 doc 渲成要推的 PNG。size==="doc" → 原 doc 尺寸直接用合成器产物；
-// 否则缩到方形预设：拉伸（不裁不留边），缩放全走 smartResample 深模块（抗锯齿）。
-async function renderPushPng(scope: string, size: string): Promise<Blob> {
+// 当前推送源（chips 段控）。
+function currentScope(): "merged" | "active" {
+  const pressed = panel.querySelector<HTMLButtonElement>('.btp-scope button[aria-pressed="true"]');
+  return pressed?.dataset.scope === "active" ? "active" : "merged";
+}
+function setScope(scope: "merged" | "active") {
+  for (const b of panel.querySelectorAll<HTMLButtonElement>(".btp-scope button")) {
+    b.setAttribute("aria-pressed", b.dataset.scope === scope ? "true" : "false");
+  }
+}
+
+// 文本框 → 方形像素尺寸。空 / "doc" / 非法 → null（= 原 doc 尺寸）。上限 8192 防误填。
+function parseTargetSize(): number | null {
+  const v = sizeInput.value.trim().toLowerCase();
+  if (!v || v === "doc") return null;
+  const n = Math.round(Number(v.replace(/[^0-9.]/g, "")));
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 8192) : null;
+}
+
+// 把 doc 渲成要推的 PNG。target===null → 原 doc 尺寸直接用合成器产物；
+// 否则缩到方形：拉伸（不裁不留边），缩放全走 smartResample 深模块（抗锯齿）。
+async function renderPushPng(scope: string, target: number | null): Promise<Blob> {
   const blob = await renderDocToImageBlob(ctx.doc, "image/png", undefined, scope);
   if (!blob) throw new Error("failed to render canvas");
-  if (size === "doc") return blob;
-  const target = Number(size);
+  if (!target) return blob;
   const bmp = await createImageBitmap(blob);
   try {
     const scaled = smartResample(bmp, target, target);   // stretch → target×target，安全缩小
@@ -183,12 +202,11 @@ async function push() {
   if (!client) { ctx.setStatus("Connect to Blender first", true); return; }
   const name = nameInput.value.trim();
   if (!name) { ctx.setStatus("Enter a texture name", true); return; }
-  const scopeEl = panel.querySelector<HTMLInputElement>('input[name="btpSrc"]:checked');
-  const scope = scopeEl?.value === "active" ? "active" : "merged";
-  const size = sizeSelect.value;
+  const scope = currentScope();
+  const target = parseTargetSize();
   try {
     await ctx.withBusy("Pushing to Blender…", async () => {
-      const png = await renderPushPng(scope, size);
+      const png = await renderPushPng(scope, target);
       try {
         await client!.putTextureData(name, png);    // 整张覆盖现有 image
       } catch (e) {
@@ -321,34 +339,37 @@ function buildPanel() {
         <datalist id="btpTexList"></datalist>
         <div class="btp-btnrow">
           <button class="btp-btn btp-sm" id="btpUseSel" type="button">Use selection</button>
-          <button class="btp-btn btp-sm" id="btpRefresh" type="button">Refresh list</button>
+          <button class="btp-btn btp-sm" id="btpRefresh" type="button">Refresh</button>
         </div>
       </div>
       <hr class="btp-sep" />
       <div class="btp-row">
-        <div class="btp-label">Pull from Blender</div>
+        <div class="btp-label">Pull to</div>
         <div class="btp-btnrow">
-          <button class="btp-btn" id="btpPullNew" type="button">→ New layer</button>
-          <button class="btp-btn" id="btpPullOver" type="button">→ Overwrite layer</button>
+          <button class="btp-btn" id="btpPullNew" type="button">New layer</button>
+          <button class="btp-btn" id="btpPullOver" type="button">Overwrite</button>
         </div>
       </div>
       <hr class="btp-sep" />
       <div class="btp-row">
-        <div class="btp-label">Push to Blender</div>
-        <div class="btp-radio">
-          <label><input type="radio" name="btpSrc" value="merged" checked /> Merged canvas</label>
-          <label><input type="radio" name="btpSrc" value="active" /> Current layer / group</label>
+        <div class="btp-label">Push from</div>
+        <div class="preset-chips btp-scope">
+          <button type="button" data-scope="merged" aria-pressed="true">Merged</button>
+          <button type="button" data-scope="active" aria-pressed="false">Layer / group</button>
         </div>
-        <label class="btp-label" for="btpSize">Resolution (stretch-fit)</label>
-        <select id="btpSize" class="btp-input">
-          <option value="doc">Doc size</option>
-          <option value="128">128 × 128</option>
-          <option value="256">256 × 256</option>
-          <option value="512">512 × 512</option>
-          <option value="1024">1024 × 1024</option>
-          <option value="2048">2048 × 2048</option>
-        </select>
-        <button class="btp-btn primary" id="btpPush" type="button">Push to Blender</button>
+        <div class="btp-sizerow">
+          <input id="btpSize" class="btp-input" placeholder="doc px" title="Resolution (square px, stretch-fit). Empty = doc size." />
+          <select id="btpSizePreset" class="btp-sizepreset" aria-label="Resolution preset">
+            <option value="">px…</option>
+            <option value="doc">Doc</option>
+            <option value="128">128</option>
+            <option value="256">256</option>
+            <option value="512">512</option>
+            <option value="1024">1024</option>
+            <option value="2048">2048</option>
+          </select>
+          <button class="btp-btn primary btp-pushbtn" id="btpPush" type="button">Push</button>
+        </div>
       </div>
     </div>
   `;
@@ -363,7 +384,7 @@ function buildPanel() {
   answerOutput = q("#btpAnswer");
   nameInput = q("#btpName");
   texList = q("#btpTexList");
-  sizeSelect = q("#btpSize");
+  sizeInput = q("#btpSize");
 
   // 行为接线
   q<HTMLButtonElement>("#btpClose").addEventListener("click", () => togglePanel(false));
@@ -383,8 +404,35 @@ function buildPanel() {
   q<HTMLButtonElement>("#btpPullOver").addEventListener("click", () => { void pull("overwrite"); });
   q<HTMLButtonElement>("#btpPush").addEventListener("click", () => { void push(); });
 
+  // 推送源 chips（段控）
+  for (const b of panel.querySelectorAll<HTMLButtonElement>(".btp-scope button")) {
+    b.addEventListener("click", () => setScope(b.dataset.scope === "active" ? "active" : "merged"));
+  }
+  // 分辨率预设下拉 → 填进文本框（文本框是真源），随即复位下拉
+  const sizePreset = q<HTMLSelectElement>("#btpSizePreset");
+  sizePreset.addEventListener("change", () => {
+    const v = sizePreset.value;
+    if (v) sizeInput.value = v === "doc" ? "" : v;   // "doc" = 空（= doc 尺寸）
+    sizePreset.selectedIndex = 0;
+  });
+
   attachDrag(q<HTMLDivElement>("#btpHead"));
   restorePos();
+  built = true;
+}
+
+// ───────────────────── 随文档持久化（.ora webpaintState 搭便车）─────────────────────
+// 由 session-state.storeEditorStateToOra / restoreEditorStateFromOra 编排，跟 reference/palette 同款。
+export function getBlenderSyncState(): { textureName: string; resolution: string; sourceScope: string } | undefined {
+  if (!built) return undefined;
+  return { textureName: nameInput.value, resolution: sizeInput.value, sourceScope: currentScope() };
+}
+export function applyBlenderSyncState(s?: unknown) {
+  if (!built) return;
+  const o = (s && typeof s === "object") ? (s as Record<string, unknown>) : {};
+  nameInput.value = typeof o.textureName === "string" ? o.textureName : "";
+  sizeInput.value = typeof o.resolution === "string" ? o.resolution : "";
+  setScope(o.sourceScope === "active" ? "active" : "merged");
 }
 
 // 拖动面板头（沿用 layers-panel / color-panel 模式）。

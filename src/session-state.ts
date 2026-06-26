@@ -44,6 +44,7 @@ import { pathFolder } from "./gallery-path.ts";
 import { stripSessionExt } from "./config.ts";
 import { sessionNameConflict } from "./session-name.ts";
 import { serializedToolStatePatch } from "./editor-state.ts";   // 反序列化细节下沉（rec #5 part b）
+import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";   // Blender sync 设置随文档持久化
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
 import { setPassword } from "./crypto-state.ts";
 import { els } from "./els.ts";
@@ -60,6 +61,7 @@ interface OraWebpaintState {
   reference?: unknown; color?: string; toolStates?: Record<string, unknown>;
   palette?: unknown; checkerboard?: boolean; activeId?: number; activeLayerIndex?: number;
   viewport?: { scale?: number } & Record<string, unknown>;
+  blender?: unknown;   // Blender sync 面板设置（贴图名 / 分辨率 / 推送源）——随文档走
 }
 // decodeOraToDoc 的产物 = PaintDoc 实例 + app meta（ora.js 在 doc 上挂的旁路字段）。
 //   intersection 让 decodeOraToDoc 推断出的裸 PaintDoc 可直接赋入（meta 皆 optional）。
@@ -135,6 +137,7 @@ function storeEditorStateToOra() {
     // 表达「active = 组」。仍写 activeLayerIndex 作老 app 读新文件的降级兜底（叶序）。
     activeId: doc.activeId,
     activeLayerIndex: doc.activeIndex,
+    blender: getBlenderSyncState(),   // undefined（面板未建）→ JSON 自动丢弃
   };
 }
 
@@ -149,6 +152,7 @@ function resetEditorState() {
   setColor("#000000");          // gallery-first：默认黑
   applyCheckerboard(false);
   state.filterBrush = null;
+  applyBlenderSyncState();      // Blender sync 设置回默认（per-doc）
 }
 
 // ③ 反序列化：把 .ora 的 _webpaintState 覆盖到已 reset 的基线之上（仅在开文件时调）。
@@ -174,6 +178,7 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
     rack.applyToolState(editMode.current());
   }
   applyCheckerboard(!!ws?.checkerboard);   // 缺省回 false（reset 已设，这里按文件值再覆盖）
+  applyBlenderSyncState(ws?.blender);      // Blender sync 设置（无 → 回默认）
   // 当前选中图层；doc.layers 此时已由 adoptState 就位。优先 activeId（可指向组）；
   // 老文件无 activeId → 回退 activeLayerIndex（叶序）。越界/不存在静默忽略。
   if (ws?.activeId != null && doc.setActiveById(ws.activeId)) {
