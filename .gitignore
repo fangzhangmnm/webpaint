@@ -35,3 +35,6 @@ dist/main-tmp.mjs
 dist/main-tmp.mjs.map
 # Claude Code session 区（worktree / 本地设置），不入库
 .claude/
+
+# GL smoke：esbuild 生成的 bundle（test/gl-smoke/harness.ts → harness.js）
+test/gl-smoke/harness.js

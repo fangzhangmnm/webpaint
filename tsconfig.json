@@ -158,6 +158,7 @@
     "src/ora-stack-xml.ts",
     "src/gl/tile-geometry.ts",
     "src/gl/tile-store.ts",
-    "src/gl/gl-context.ts"
+    "src/gl/gl-context.ts",
+    "src/gl/tile-backend-gl.ts"
   ]
 }

@@ -2,13 +2,15 @@
   "name": "webpaint",
   "private": true,
   "type": "module",
-  "comment": "运行时无依赖、全 vendor（src/ ESM，node 直跑 test/ 与 bench/，构建走 scripts/build.sh + tools/esbuild）。devDependencies 仅供类型检查（tsc --noEmit），不进运行时 bundle、不影响部署。",
+  "comment": "运行时无依赖、全 vendor（src/ ESM，node 直跑 test/ 与 bench/，构建走 scripts/build.sh + tools/esbuild）。devDependencies 仅供开发期（tsc --noEmit 类型检查 + playwright GL smoke `npm run smoke`），不进运行时 bundle、不影响部署。",
   "scripts": {
     "test": "node test/run.mjs",
+    "smoke": "node test/gl-smoke/run.mjs",
     "build": "bash scripts/build.sh",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
+    "playwright": "^1.61.1",
     "typescript": "5.7.3"
   }
 }
