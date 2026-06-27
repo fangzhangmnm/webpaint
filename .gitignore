@@ -38,3 +38,4 @@ dist/main-tmp.mjs.map
 
 # GL smoke：esbuild 生成的 bundle（test/gl-smoke/harness.ts → harness.js）
 test/gl-smoke/harness.js
+test/gl-smoke/preview.js

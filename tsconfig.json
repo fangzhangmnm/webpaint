@@ -164,6 +164,7 @@
     "src/gl/gl-compositor.ts",
     "src/gl/tile-index.ts",
     "src/gl/gl-compose-plan.ts",
-    "src/gl/gl-doc-bridge.ts"
+    "src/gl/gl-doc-bridge.ts",
+    "src/gl/gl-doc-renderer.ts"
   ]
 }

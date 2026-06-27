@@ -25,10 +25,12 @@ const PRESENT_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_src;
+uniform int u_flipY;        // 屏显=1（clip y+1=画布顶=accum v=N-1=doc 底 → 需翻）；FBO readback=0
 out vec4 o;
 void main(){
-  vec4 p = texture(u_src, v_uv);
-  vec3 c = (p.a > 0.0) ? (p.rgb / p.a) : vec3(0.0);
+  vec2 uv = (u_flipY == 1) ? vec2(v_uv.x, 1.0 - v_uv.y) : v_uv;
+  vec4 p = texture(u_src, uv);
+  vec3 c = (p.a > 0.0) ? (p.rgb / p.a) : vec3(0.0);   // 解预乘 → 直值
   o = vec4(c, p.a);
 }`;
 
@@ -136,18 +138,28 @@ export class GLCompositor {
     if (loc) this._glctx.gl.uniform1i(loc, unit);
   }
 
-  // 预乘累积器 → 直值 RGBA8 目标 FBO（解预乘 present）。给 readback/屏显用。
+  // 预乘累积器 → 直值 RGBA8 目标 FBO（解预乘 present）。给 readback 用（不翻 Y）。
   presentTo(srcTex: WebGLTexture, target: PooledFBO, w: number, h: number): void {
+    this._present(srcTex, target.fbo, w, h, false);
+  }
+
+  // 预乘累积器 → 默认 framebuffer（可见画布），翻 Y、解预乘。viewport = 画布像素尺寸。
+  presentToScreen(srcTex: WebGLTexture, canvasW: number, canvasH: number): void {
+    this._present(srcTex, null, canvasW, canvasH, true);
+  }
+
+  private _present(srcTex: WebGLTexture, fbo: WebGLFramebuffer | null, w: number, h: number, flipY: boolean): void {
     const gl = this._glctx.gl;
     const prog = this._glctx.program("present", COMPOSITE_VERT, PRESENT_FRAG);
     gl.bindVertexArray(this._glctx.quadVAO());
     gl.viewport(0, 0, w, h);
     gl.disable(gl.BLEND);
     gl.useProgram(prog);
+    gl.uniform1i(gl.getUniformLocation(prog, "u_flipY"), flipY ? 1 : 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, srcTex);
     this._setSampler(prog, "u_src", 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindVertexArray(null);

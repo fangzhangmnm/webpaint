@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node test/run.mjs",
     "smoke": "node test/gl-smoke/run.mjs",
+    "preview:build": "tools/esbuild/esbuild test/gl-smoke/preview.ts --bundle --format=iife --outfile=test/gl-smoke/preview.js",
     "build": "bash scripts/build.sh",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
