@@ -6,10 +6,12 @@
 //   client's documented API changes. Non-protocol bug fixes / internal
 //   refactors do NOT bump. Major bumps imply a parallel /protocol/vN/ dir.
 
-// 1.1.0: added remote transport (connectRemote / signaling.js / webrtc-fetch.js)
-//        — a documented client-API addition. Wire endpoints unchanged (still v1).
+// 1.1.0: added remote transport (connectRemote / signaling.js / webrtc-fetch.js).
+// 1.2.0: removed the WebRTC remote transport — remote access is now plain HTTPS
+//        (point baseUrl at any URL reaching the server, e.g. via `tailscale serve`).
+//        Wire endpoints unchanged (still v1); only the client bundle's API shrank.
 export const PROTOCOL = "v1";
-export const BUNDLE_VERSION = "1.1.0";
+export const BUNDLE_VERSION = "1.2.0";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:18765";
 

@@ -3,7 +3,8 @@
 // 插件式隔离的子功能：唯一对外入口 initBlenderSync(ctx)，外加随文档持久化的 get/applyBlenderSyncState。
 // 依赖面收窄到三处，全是别人家的深模块 / 契约，本模块零格式知识：
 //   - AppContext seam（doc / board / pixelHistory / setStatus / withBusy / …）
-//   - vendored btp 客户端（../vendor/btp/v1/index.js）——推/拉的网络 + WebRTC 配对全在里面
+//   - vendored btp 客户端（../vendor/btp/v1/index.js）——BTPClient 走 fetch；连接 = 一个 baseUrl
+//     （本机 localhost / 另一台设备填能连到 server 的 HTTPS 地址，如 tailscale serve 的 *.ts.net）
 //   - 三个 WebPaint 深模块：renderDocToImageBlob（唯一合成器）、smartResample（安全缩放，
 //     step-halving 抗锯齿，缩小到小贴图不糊）、Layer.restoreFromSnapshot（换 canvas + 复位 bbox）
 //
@@ -21,9 +22,10 @@ import { smartResample, canvasToBlob } from "./resample.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
-import { BTPClient, BTPError, connectRemote, ManualSignaling } from "../vendor/btp/v1/index.js";
+import { BTPClient, BTPError } from "../vendor/btp/v1/index.js";
 
 const POS_KEY = "webpaint.blenderPanel.pos";
+const URL_KEY = "webpaint.blender.remoteUrl";   // 远程地址：设备级（localStorage），不随文档走
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
 // ─── 内联 SVG 图标（currentColor → 由 data-state CSS 着色 / spin）───
@@ -38,8 +40,7 @@ const ICON_UL = svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyl
 
 // ─── 模块状态（单实例；panel 与连接随 app 生命周期常驻）───
 let ctx: AppContext;
-let client: BTPClient | null = null;        // 连上后的客户端（localhost 或 WebRTC，API 同形）
-let conn: { close(): void } | null = null;  // WebRTC 连接句柄（localhost 时为 null）
+let client: BTPClient | null = null;        // 连上后的客户端（本机或远程 HTTPS，API 同形）
 let connState: "off" | "connecting" | "on" = "off";
 let connDetail = "";
 let pullTarget: "new" | "overwrite" = "new";    // 拉取去向
@@ -49,9 +50,7 @@ let built = false;
 // ─── DOM 引用（buildPanel 填充）───
 let panel: HTMLDivElement;
 let connBtn: HTMLButtonElement;
-let offerInput: HTMLTextAreaElement;
-let answerRow: HTMLDivElement;
-let answerOutput: HTMLTextAreaElement;
+let remoteUrl: HTMLInputElement;
 let nameInput: HTMLInputElement;
 let texList: HTMLDataListElement;
 let sizeW: HTMLInputElement;
@@ -94,69 +93,41 @@ function setConnState(s: "off" | "connecting" | "on", detail = "") {
   connBtn.innerHTML = `<span class="btp-action-ic">${icon}</span><span class="btp-connbtn-label">${label}</span>`;
 }
 
-// 连接键点击：断开↔连本机（连接中忽略）。远程配对走旁边的 ⋯。
+// 连接键点击：断开↔连接（连接中忽略）。
 function onConnClick() {
   if (connState === "on") disconnect();
-  else if (connState === "off") void connectLocal();
+  else if (connState === "off") void connect();
 }
 
-// 同机：localhost HTTP。Blender 那侧需 per-session 开启端口（consent 在 Blender 面板）。
-async function connectLocal() {
+// 连接。远程地址留空 = 本机 localhost（http://127.0.0.1:18765）；填了 = 直连那个 HTTPS 地址
+// （例如 PC 上跑 `tailscale serve` 得到的 *.ts.net）。两种连接调用代码完全一致。
+async function connect() {
+  const url = remoteUrl.value.trim();
   setConnState("connecting");
   try {
-    const c = new BTPClient();   // http://127.0.0.1:18765
-    await c.getScene();          // 探活：不可达 / 未开端口 → 抛
+    const c = url ? new BTPClient({ baseUrl: url }) : new BTPClient();
+    await c.getScene();          // 探活：不可达 / 未开端口 / 证书错 / 名字解析不了 → 抛
     client = c;
-    conn = null;
-    setConnState("on", "本机");
+    setConnState("on", url ? hostOf(url) : "本机");
     await refreshTextureList();
-    ctx.setStatus("已连接 Blender");
+    ctx.setStatus(url ? "已连接 " + hostOf(url) : "已连接 Blender（本机）");
   } catch (e) {
     client = null;
     setConnState("off");
-    ctx.setStatus("连不上 Blender —— 先在 Blender 的 BTP 面板里开启端口", true);
-    console.warn("[btp] connectLocal:", e);
+    ctx.setStatus(url
+      ? "连不上 " + hostOf(url) + " —— 确认 Blender 已开端口、该地址可达（如 tailscale serve）"
+      : "连不上本机 Blender —— 先在 Blender 的 BTP 面板里开启端口", true);
+    console.warn("[btp] connect:", e);
   }
 }
 
-// 跨设备（iPad）：WebRTC 手动配对。Blender 是 offerer，我们 answer。
-// connectRemote 在 channel 打开后才 resolve（要等用户把响应码贴回 Blender）。
-async function pairRemote() {
-  const offerCode = offerInput.value.trim();
-  if (!offerCode) { ctx.setStatus("先粘贴 Blender 的连接码", true); return; }
-  setConnState("connecting");
-  try {
-    const rc = await connectRemote({
-      signaling: ManualSignaling({
-        offer: offerCode,
-        // 握手途中回调：把我们的响应码亮出来给用户复制回 Blender
-        onAnswer: (code: string) => {
-          answerOutput.value = code;
-          answerRow.hidden = false;
-        },
-      }),
-      handshakeTimeoutMs: 120000,   // 给人工复制粘贴留足时间
-    });
-    conn = rc;
-    client = new BTPClient({ baseUrl: "", fetch: rc.fetch });
-    setConnState("on", "远程");
-    closeAllPopups();
-    await refreshTextureList();
-    ctx.setStatus("已与 Blender 配对");
-  } catch (e) {
-    client = null;
-    setConnState("off");
-    ctx.setStatus("配对失败：" + errMsg(e), true);
-  }
+function hostOf(url: string): string {
+  try { return new URL(url).host; } catch { return url; }
 }
 
 function disconnect() {
-  try { conn?.close(); } catch { /* noop */ }
-  conn = null;
   client = null;
   texList.innerHTML = "";
-  answerRow.hidden = true;
-  answerOutput.value = "";
   setConnState("off");
 }
 
@@ -394,21 +365,11 @@ function buildPanel() {
       <button class="float-panel-close" id="btpClose" type="button" aria-label="关闭">×</button>
     </div>
     <div class="float-panel-body">
-      <div class="btp-action-row">
+      <div class="btp-row">
         <button class="btp-btn btp-connbtn" id="btpConnBtn" type="button" data-state="off"></button>
-        <button class="menu-item-wrench" id="btpRemoteCfg" type="button" title="远程设备（iPad）配对">⋯</button>
-        <div class="menu-config-popup btp-popup btp-popup-wide hidden" id="btpRemotePop">
-          <div class="menu-config-section">
-            <div class="menu-config-title">远程设备（iPad）配对</div>
-            <textarea id="btpOffer" class="btp-area" rows="2" placeholder="粘贴 Blender 的连接码 BTP1:…"></textarea>
-            <button class="btp-btn" id="btpPair" type="button">配对</button>
-            <div id="btpAnswerRow" hidden>
-              <div class="btp-label">把下面响应码贴回 Blender：</div>
-              <textarea id="btpAnswer" class="btp-area" rows="2" readonly></textarea>
-              <button class="btp-btn" id="btpCopyAnswer" type="button">复制响应码</button>
-            </div>
-          </div>
-        </div>
+        <input id="btpRemoteUrl" class="btp-input" inputmode="url"
+               placeholder="远程地址（留空 = 本机 127.0.0.1）"
+               title="另一台设备：填能连到 Blender 的 HTTPS 地址，例如 tailscale serve 的 https://pc.tailnet.ts.net" />
       </div>
       <div class="btp-row">
         <label class="btp-label" for="btpName">贴图名（= 标识）</label>
@@ -474,9 +435,9 @@ function buildPanel() {
 
   // 引用
   connBtn = q("#btpConnBtn");
-  offerInput = q("#btpOffer");
-  answerRow = q("#btpAnswerRow");
-  answerOutput = q("#btpAnswer");
+  remoteUrl = q("#btpRemoteUrl");
+  remoteUrl.value = safeLS(URL_KEY) || "";
+  remoteUrl.addEventListener("change", () => safeLSSet(URL_KEY, remoteUrl.value.trim()));
   nameInput = q("#btpName");
   texList = q("#btpTexList");
   sizeW = q("#btpSizeW");
@@ -487,21 +448,12 @@ function buildPanel() {
   // 行为接线
   q<HTMLButtonElement>("#btpClose").addEventListener("click", () => togglePanel(false));
   connBtn.addEventListener("click", onConnClick);
-  q<HTMLButtonElement>("#btpPair").addEventListener("click", () => { void pairRemote(); });
-  q<HTMLButtonElement>("#btpCopyAnswer").addEventListener("click", () => {
-    answerOutput.select();
-    void navigator.clipboard?.writeText(answerOutput.value).then(
-      () => ctx.setStatus("响应码已复制"),
-      () => { /* 用户可手动复制选中文本 */ },
-    );
-  });
   q<HTMLButtonElement>("#btpUseSel").addEventListener("click", () => { void useSelection(); });
   q<HTMLButtonElement>("#btpRefresh").addEventListener("click", () => { void refreshTextureList(); });
   q<HTMLButtonElement>("#btpDownload").addEventListener("click", () => { void pull(); });
   q<HTMLButtonElement>("#btpUpload").addEventListener("click", () => { void push(); });
 
-  // ⋯ 弹层
-  wirePopup(q("#btpRemoteCfg"), q("#btpRemotePop"));
+  // ⋯ 弹层（拉取 / 推送配置）
   wirePopup(q("#btpDownloadCfg"), q("#btpDownloadPop"));
   wirePopup(q("#btpUploadCfg"), q("#btpUploadPop"));
 

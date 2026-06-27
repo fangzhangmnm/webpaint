@@ -2177,7 +2177,7 @@ body[data-mode="gallery"] .board { display: none !important; }
 .btp-panel .float-panel-body { gap: 8px; padding: 10px; max-height: calc(100vh - 92px); overflow-y: auto; }
 .btp-row { display: flex; flex-direction: column; gap: 5px; }
 .btp-label { font-size: 12px; color: var(--ink-soft); }
-.btp-input, .btp-area, .btp-sizepreset {
+.btp-input, .btp-sizepreset {
   box-sizing: border-box;
   padding: 6px 8px;
   border-radius: var(--radius);
@@ -2187,7 +2187,6 @@ body[data-mode="gallery"] .board { display: none !important; }
   font-size: 13px;
 }
 .btp-input { width: 100%; }
-.btp-area { resize: vertical; font-family: ui-monospace, monospace; font-size: 11px; width: 100%; }
 .btp-btn {
   padding: 7px 10px;
   border-radius: var(--radius);
@@ -2234,7 +2233,6 @@ body[data-mode="gallery"] .board { display: none !important; }
 
 /* ⋯ 弹层（复用 .menu-config-popup 外观；远程配对的更宽以容下文本框） */
 .btp-popup { min-width: 168px; }
-.btp-popup-wide { min-width: 232px; }
 .btp-popup.hidden { display: none; }
 .close-x {
   background: transparent;

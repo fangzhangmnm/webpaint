@@ -8,6 +8,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Wire compatibility: all `/v1/*` endpoints stay forward-compatible within 1.x
 (fields may be added, never removed or re-meaning'd).
 
+## 1.2.0
+
+Removed — the **WebRTC remote transport** (`connectRemote`, `channelFetch`,
+`ManualSignaling`, `ServerSignaling`, and `webrtc-fetch.js` / `signaling.js` /
+`frame.js` / `sdp-envelope.js`). Cross-device access is now plain HTTPS: point
+`BTPClient({ baseUrl })` at any URL that reaches the Blender server — easiest is
+`tailscale serve` (valid cert, tunnelled, works same-WiFi and remote). No wire
+change; `/v1/*` endpoints untouched. The client bundle's API surface shrank to
+`BTPClient`, `BTPError`, `PROTOCOL`, `BUNDLE_VERSION`. The removed transport is
+preserved at git tag `archive/webrtc-transport`.
+
+Why: WebRTC existed only to punch through the HTTPS → `http://<lan-ip>`
+mixed-content wall, but it doesn't work in an iOS home-screen PWA (no host ICE
+candidates / local-network permission gate). A direct HTTPS URL (Tailscale) is
+simpler and actually works on iPad.
+
 ## 1.1.0
 
 Added — **remote transport** (cross-device, WebRTC DataChannel) and a single

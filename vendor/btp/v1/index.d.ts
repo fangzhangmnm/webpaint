@@ -56,9 +56,12 @@ export class BTPError extends Error {
 // ─── Client ───
 
 export interface BTPClientOptions {
-  /** Default "http://127.0.0.1:18765" (localhost HTTP). Pass "" for WebRTC. */
+  /**
+   * Default "http://127.0.0.1:18765" (same machine). For another device, pass
+   * an HTTPS URL that reaches the server (e.g. a Tailscale `*.ts.net` URL).
+   */
   baseUrl?: string;
-  /** Inject a transport. Omit = native fetch; pass conn.fetch for WebRTC. */
+  /** Inject a custom fetch (tests / alternate transport). Omit = native fetch. */
   fetch?: typeof fetch;
   /** Per-request timeout in ms (default: none). */
   timeoutMs?: number;
@@ -93,54 +96,3 @@ export class BTPClient {
     },
   ): Promise<unknown>;
 }
-
-// ─── Remote transport (cross-device, WebRTC) ───
-
-/** Strategy that moves the offer/answer codes between the two devices. */
-export interface Signaling {
-  /** Resolve the offer (connection) code produced by Blender. */
-  receiveOffer(): Promise<string>;
-  /** Deliver our answer (response) code back to Blender. */
-  sendAnswer(code: string): Promise<void>;
-}
-
-/** Copy/paste signaling. */
-export function ManualSignaling(opts: {
-  /** Blender's connection code, or a function returning it. */
-  offer: string | (() => string | Promise<string>);
-  /** Called with our response code so the UI can present it for paste-back. */
-  onAnswer?: (code: string) => void | Promise<void>;
-}): Signaling;
-
-/** Reserved (PIN/relay pairing). Not implemented — throws when called. */
-export function ServerSignaling(): never;
-
-export interface ConnectRemoteOptions {
-  signaling: Signaling;
-  /** Default { iceServers: [] } — pure LAN, no STUN/TURN. */
-  rtcConfig?: RTCConfiguration;
-  /** Abort if the channel doesn't open in time (default 30000). */
-  handshakeTimeoutMs?: number;
-  /** Per-request timeout in ms (default: none). */
-  requestTimeoutMs?: number;
-  onStateChange?: (state: RTCPeerConnectionState) => void;
-}
-
-export interface RemoteConnection {
-  /** A fetch-shaped transport; hand to new BTPClient({ baseUrl:"", fetch }). */
-  fetch: typeof fetch;
-  close(): void;
-  peerConnection: RTCPeerConnection;
-  /** Peer DTLS fingerprint ("sha-256 AB:CD:…") parsed from the offer, or null. */
-  remoteFingerprint: string | null;
-  readonly connectionState: RTCPeerConnectionState;
-}
-
-/** Pair with Blender (Blender-as-offerer) and return a fetch-shaped transport. */
-export function connectRemote(opts: ConnectRemoteOptions): Promise<RemoteConnection>;
-
-/** Wrap an already-open DataChannel-like object as a fetch function. */
-export function channelFetch(
-  channel: RTCDataChannel,
-  opts?: { requestTimeoutMs?: number },
-): typeof fetch;
