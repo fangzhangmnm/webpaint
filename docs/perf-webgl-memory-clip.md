@@ -144,7 +144,21 @@ GL canvas 垫 #board 下渲 doc（void+背景+图层+live overlay，视口仿射
 1. **Stage 3：GL 笔刷栅格化**（StrokeRasterizer 消费 CPU StrokeSmoother 中心线 → GL stamp；Build-Up=source-over/Wash=MAX；
    flow-in/opacity-out；smoothstep falloff 照搬）。完成「改成 webgl」primary，golden 对拍现笔刷；live 描边全 GPU(去 CPU overlay)。
 2. **tiling 存储**（11 层 / 内存目标 = 原始「顺便」诉求）：图层像素从 Canvas2D bbox 画布迁到稀疏 tile（去 16.8MB/层）。
-   动 doc.ts Layer + brush commit + undo(per-tile delta) + .ora 存读。**手感隔离**：active 层物化 bbox scratch 描边、commit 切片回 tile。
+
+   **爆炸半径已 survey（2026-06-27）**，设计 = **单一虚拟化点**：
+   - **tiles = SoT**（稀疏 256² CPU 像素 + GPU 上传给 GL 合成）。
+   - **`Layer.canvas` → 按需物化的 bbox 视图**（getter：无则从 tile 物化；可丢弃释放内存 → inactive 层只留稀疏 tile）。
+     → 绝大多数**读者不用改**（layer-composite/ora/psd/reference/board 都读 layer.canvas 或 opts.source）。
+   - **直接写 layer.ctx 的写者**（brush commit `brush.ts:507/516`、filters `:299`、filters-adjust `:178`、liquify
+     `:281`、floating-transform `:235`、selection `:274/288/297`、selection-ops `:74/81`）：写进物化 canvas 后**脏区刷回 tile**。
+   - **整体替换 canvas 的写者**（merge `doc.ts:608`、变换 `:934/962/996/1041/1082`、clear `:818`、import、ora 导入）：重写整个 tile 集。
+   - **snapshot 货币**（`snapshot/restoreFromSnapshot` + imageData|blob|bitmap，被 pixel-edit/layer-undo/blender/duplicate 消费）：
+     改成 per-tile delta（或兼容保留 imageData 路径先不动）。
+   - **手感隔离**：active 层物化 canvas 常驻供笔刷描边（现状不变），commit 后脏区刷回 tile。
+
+   **切片**：① Layer tile-SoT + 物化 canvas 写穿（**先不丢 canvas，内存中性，只换 SoT**；save/undo/全 op round-trip 守门）——
+   keystone，数据完整性关键。② inactive 层丢 canvas（真省内存）+ 抬 computeMaxLayers。③ snapshot→per-tile delta（undo 内存）。
+   ④ GL board 直读 tile（去每帧 re-tile）。⑤ TileResidency（GPU-only inactive 层的掉电/autosave/逐出）。
 3. **TileResidency**（配 tiling 存储才有意义）：压缩备份 + OPFS autosave + context-loss 重上传 + 冷层逐出（§4.1/4.2/4.4）。
 4. **抬 computeMaxLayers** 软上限（tiling 后实占 << 预算）+ 内存 HUD；GL 稳后删 2D 路径 / 去 ?glboard 开关成默认。
 
