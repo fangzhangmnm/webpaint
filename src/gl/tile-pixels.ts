@@ -1,0 +1,201 @@
+// LayerPixels —— 图层像素的新真源（SoT）：**稀疏 256² CPU tile**，doc 坐标接口，**bbox-free**。
+// 取代 doc.ts 旧的「单张 Canvas2D bbox 画布 + bboxX/Y/W/H + ensureBbox」。
+//
+// 设计（greenfield，深模块窄接口）：
+//   - 像素按 256² tile 稀疏存（空 tile 不分配 = 内存杠杆）。每 tile = RGBA Uint8ClampedArray。
+//   - **bbox 不是身份**：内容框由 contentBounds() 从已分配 tile **派生**（要紧可扫 alpha）。
+//   - 写：putRegion(doc 矩形, 源 RGBA) —— 把该矩形像素**整块替换**进相关 tile；变全透明的 tile 回收。
+//   - 读：getRegion(doc 矩形) → 拼 tile 出 flat RGBA（缺 tile=透明）。
+//   - Canvas2D facade（materialize/editRegion，browser-only，本文件末）给旧的 layer.canvas/ctx 写者读者过渡。
+//   - dirty tile 跟踪给 GL 增量上传 / flush 用。snapshot/restore 给 undo（先全 tile，后续 per-tile delta）。
+//
+// 纯核心（putRegion/getRegion/sampleAt/contentBounds/snapshot…）零 DOM 依赖 → node 全测。
+// Canvas2D facade 需浏览器 → Chromium golden 验。
+
+import { TILE_SIZE, tilesAcross, tilesDown, tileKey, tileCoord, forEachTileInRect } from "./tile-geometry.ts";
+
+const TILE_RGBA = TILE_SIZE * TILE_SIZE * 4;
+
+export class LayerPixels {
+  readonly docW: number;
+  readonly docH: number;
+  private _across: number;
+  private _tiles = new Map<number, Uint8ClampedArray>();   // tileKey → RGBA 256²
+  private _dirty = new Set<number>();                       // 自上次 markAllClean 后变更的 tileKey
+
+  constructor(docW: number, docH: number) {
+    this.docW = docW;
+    this.docH = docH;
+    this._across = tilesAcross(docW);
+  }
+
+  get tileCount(): number { return this._tiles.size; }
+  isEmpty(): boolean { return this._tiles.size === 0; }
+
+  // ---- 低层 tile 访问 ----
+  // 取 tile 像素（不存在返 null）。返回的是内部引用，调用方别越界写。
+  getTile(tx: number, ty: number): Uint8ClampedArray | null {
+    return this._tiles.get(tileKey(tx, ty, this._across)) ?? null;
+  }
+  // 整 tile 写入（拷贝进来；全透明则回收）。给 GL readback / wholesale 重建用。
+  putTile(tx: number, ty: number, pixels: Uint8ClampedArray): void {
+    const key = tileKey(tx, ty, this._across);
+    if (isAllTransparent(pixels)) { this._tiles.delete(key); this._dirty.add(key); return; }
+    const t = new Uint8ClampedArray(TILE_RGBA);
+    t.set(pixels.subarray(0, TILE_RGBA));
+    this._tiles.set(key, t);
+    this._dirty.add(key);
+  }
+  forEachTile(cb: (tx: number, ty: number, pixels: Uint8ClampedArray) => void): void {
+    this._tiles.forEach((px, key) => { const { tx, ty } = tileCoord(key, this._across); cb(tx, ty, px); });
+  }
+
+  // ---- 写：把 doc 矩形 [sx0,sy0,sw,sh] 的像素**整块替换**为 src（flat RGBA，行优先，sw 宽）----
+  // src 的透明像素也会写入（= 该处变透明）。覆盖后全透明的 tile 回收。
+  putRegion(sx0: number, sy0: number, sw: number, sh: number, src: Uint8ClampedArray): void {
+    if (sw <= 0 || sh <= 0) return;
+    forEachTileInRect(sx0, sy0, sw, sh, this.docW, this.docH, (tx, ty) => {
+      const key = tileKey(tx, ty, this._across);
+      let tile = this._tiles.get(key);
+      const created = !tile;
+      if (!tile) tile = new Uint8ClampedArray(TILE_RGBA);
+      const tox = tx * TILE_SIZE, toy = ty * TILE_SIZE;
+      // 该 tile 与 src 矩形的交集（doc 坐标）
+      const ix0 = Math.max(tox, sx0), iy0 = Math.max(toy, sy0);
+      const ix1 = Math.min(tox + TILE_SIZE, sx0 + sw), iy1 = Math.min(toy + TILE_SIZE, sy0 + sh);
+      for (let y = iy0; y < iy1; y++) {
+        let di = ((y - toy) * TILE_SIZE + (ix0 - tox)) * 4;
+        let si = ((y - sy0) * sw + (ix0 - sx0)) * 4;
+        for (let x = ix0; x < ix1; x++) {
+          tile[di] = src[si]; tile[di + 1] = src[si + 1]; tile[di + 2] = src[si + 2]; tile[di + 3] = src[si + 3];
+          di += 4; si += 4;
+        }
+      }
+      if (isAllTransparent(tile)) { if (!created) this._tiles.delete(key); /* created 空 tile 不存 */ }
+      else this._tiles.set(key, tile);
+      this._dirty.add(key);
+    });
+  }
+
+  // ---- 读：doc 矩形 → flat RGBA（缺 tile = 透明 0）----
+  getRegion(x0: number, y0: number, w: number, h: number): Uint8ClampedArray {
+    const out = new Uint8ClampedArray(w * h * 4);
+    forEachTileInRect(x0, y0, w, h, this.docW, this.docH, (tx, ty) => {
+      const tile = this._tiles.get(tileKey(tx, ty, this._across));
+      if (!tile) return;   // 透明
+      const tox = tx * TILE_SIZE, toy = ty * TILE_SIZE;
+      const ix0 = Math.max(tox, x0), iy0 = Math.max(toy, y0);
+      const ix1 = Math.min(tox + TILE_SIZE, x0 + w), iy1 = Math.min(toy + TILE_SIZE, y0 + h);
+      for (let y = iy0; y < iy1; y++) {
+        let si = ((y - toy) * TILE_SIZE + (ix0 - tox)) * 4;
+        let di = ((y - y0) * w + (ix0 - x0)) * 4;
+        for (let x = ix0; x < ix1; x++) {
+          out[di] = tile[si]; out[di + 1] = tile[si + 1]; out[di + 2] = tile[si + 2]; out[di + 3] = tile[si + 3];
+          di += 4; si += 4;
+        }
+      }
+    });
+    return out;
+  }
+
+  sampleAt(x: number, y: number): [number, number, number, number] {
+    if (x < 0 || y < 0 || x >= this.docW || y >= this.docH) return [0, 0, 0, 0];
+    const tx = Math.floor(x / TILE_SIZE), ty = Math.floor(y / TILE_SIZE);
+    const tile = this._tiles.get(tileKey(tx, ty, this._across));
+    if (!tile) return [0, 0, 0, 0];
+    const i = ((y - ty * TILE_SIZE) * TILE_SIZE + (x - tx * TILE_SIZE)) * 4;
+    return [tile[i], tile[i + 1], tile[i + 2], tile[i + 3]];
+  }
+
+  // ---- 派生内容框（bbox 替代）----
+  // tile 粒度并集；tight=true 时扫边缘 tile 的 alpha 收紧到像素。空 → null。
+  contentBounds(tight = false): { x: number; y: number; w: number; h: number } | null {
+    if (this._tiles.size === 0) return null;
+    let tx0 = Infinity, ty0 = Infinity, tx1 = -Infinity, ty1 = -Infinity;
+    this._tiles.forEach((_px, key) => {
+      const { tx, ty } = tileCoord(key, this._across);
+      if (tx < tx0) tx0 = tx; if (tx > tx1) tx1 = tx; if (ty < ty0) ty0 = ty; if (ty > ty1) ty1 = ty;
+    });
+    let x0 = tx0 * TILE_SIZE, y0 = ty0 * TILE_SIZE;
+    let x1 = Math.min(this.docW, (tx1 + 1) * TILE_SIZE), y1 = Math.min(this.docH, (ty1 + 1) * TILE_SIZE);
+    if (tight) {
+      // 扫所有 tile 的非透明像素收紧（O(已分配像素)，只在导出/crop 等低频调）。
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      this._tiles.forEach((px, key) => {
+        const { tx, ty } = tileCoord(key, this._across);
+        const tox = tx * TILE_SIZE, toy = ty * TILE_SIZE;
+        for (let ly = 0; ly < TILE_SIZE; ly++) for (let lx = 0; lx < TILE_SIZE; lx++) {
+          if (px[(ly * TILE_SIZE + lx) * 4 + 3] !== 0) {
+            const dx = tox + lx, dy = toy + ly;
+            if (dx < minX) minX = dx; if (dx > maxX) maxX = dx; if (dy < minY) minY = dy; if (dy > maxY) maxY = dy;
+          }
+        }
+      });
+      if (minX === Infinity) return null;   // 全透明
+      x0 = minX; y0 = minY; x1 = maxX + 1; y1 = maxY + 1;
+    }
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  clear(): void { this._tiles.forEach((_p, k) => this._dirty.add(k)); this._tiles.clear(); }
+
+  // ---- dirty 跟踪（GL 增量上传）----
+  dirtyTileKeys(): number[] { return [...this._dirty]; }
+  markAllClean(): void { this._dirty.clear(); }
+
+  // ---- undo 快照（先全 tile 深拷贝；per-tile delta = 后续切片③）----
+  snapshot(): { across: number; tiles: [number, Uint8ClampedArray][] } {
+    const tiles: [number, Uint8ClampedArray][] = [];
+    this._tiles.forEach((px, key) => tiles.push([key, new Uint8ClampedArray(px)]));
+    return { across: this._across, tiles };
+  }
+  restore(snap: { across: number; tiles: [number, Uint8ClampedArray][] }): void {
+    this._tiles.forEach((_p, k) => this._dirty.add(k));
+    this._tiles.clear();
+    for (const [key, px] of snap.tiles) { this._tiles.set(key, new Uint8ClampedArray(px)); this._dirty.add(key); }
+  }
+}
+
+function isAllTransparent(px: Uint8ClampedArray): boolean {
+  for (let i = 3; i < px.length; i += 4) if (px[i] !== 0) return false;
+  return true;
+}
+
+// ---- Canvas2D facade（browser-only；给旧 layer.canvas/ctx 写者读者过渡）----
+type Bitmap2D = HTMLCanvasElement | OffscreenCanvas;
+function scratch2D(w: number, h: number): Bitmap2D {
+  if (typeof OffscreenCanvas !== "undefined") { try { return new OffscreenCanvas(w, h); } catch { /* fall */ } }
+  const c = document.createElement("canvas"); c.width = w; c.height = h; return c;
+}
+
+// 物化整个内容为一张 bbox 画布（+ doc 原点）。给 2D 读者（旧 layer.canvas）。空 → null。
+//   tight=true 扫 alpha 收紧（导出/crop）；默认 tile 粒度（够 2D 合成用）。
+export function materialize(lp: LayerPixels, tight = false): { canvas: Bitmap2D; ox: number; oy: number } | null {
+  const b = lp.contentBounds(tight);
+  if (!b) return null;
+  const c = scratch2D(b.w, b.h);
+  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
+  ctx.putImageData(new ImageData(lp.getRegion(b.x, b.y, b.w, b.h), b.w, b.h), 0, 0);
+  return { canvas: c, ox: b.x, oy: b.y };
+}
+
+// 编辑事务（替代旧 ensureBbox + layer.ctx）：物化 doc 矩形 [rx0,ry0,rw,rh]（含已有像素）→ 给 ctx 让 fn 画
+//   → 结果切片回 tile。fn(ctx, ox, oy)：ctx 原点 = doc(ox,oy)，即在 doc 坐标 d 处画 = ctx 坐标 d-ox/d-oy。
+export function editRegion(lp: LayerPixels, rx0: number, ry0: number, rw: number, rh: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void {
+  if (rw <= 0 || rh <= 0) return;
+  const c = scratch2D(rw, rh);
+  const ctx = c.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
+  ctx.putImageData(new ImageData(lp.getRegion(rx0, ry0, rw, rh), rw, rh), 0, 0);   // 预填已有
+  fn(ctx, rx0, ry0);
+  lp.putRegion(rx0, ry0, rw, rh, ctx.getImageData(0, 0, rw, rh).data);             // 切片回 tile
+}
+
+// 整体从一张 canvas 重建（变换/合并/导入/ora）：清空 + 切片。srcCanvas 内容在 doc (ox,oy) 起、w×h。
+export function replaceFromCanvas(lp: LayerPixels, srcCanvas: CanvasImageSource, ox: number, oy: number, w: number, h: number): void {
+  lp.clear();
+  if (w <= 0 || h <= 0) return;
+  const c = scratch2D(w, h);
+  const ctx = c.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
+  ctx.drawImage(srcCanvas, 0, 0);
+  lp.putRegion(ox, oy, w, h, ctx.getImageData(0, 0, w, h).data);
+}

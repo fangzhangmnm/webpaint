@@ -166,6 +166,7 @@
     "src/gl/gl-compose-plan.ts",
     "src/gl/gl-doc-bridge.ts",
     "src/gl/gl-doc-renderer.ts",
-    "src/gl/gl-board.ts"
+    "src/gl/gl-board.ts",
+    "src/gl/tile-pixels.ts"
   ]
 }

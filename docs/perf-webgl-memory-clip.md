@@ -132,6 +132,11 @@ GL canvas 垫 #board 下渲 doc（void+背景+图层+live overlay，视口仿射
 - syncAll：内容变就全层重传（commit/undo）。优化：**per-layer 脏跟踪**（board 知道 active 层，只 syncLayer(脏层)），消除多层文档抬笔卡顿。
 - overlay 仍每帧 setOverlay（bbox 小，但可只在 sm.seq 变时传）。
 
+**A2. 视口狗牙（polish round，待查）**：v336 已改 present 缩小(scale<1)用 LINEAR、放大用 NEAREST（对齐 2D
+  `_renderFull`：scale>1 关 imageSmoothing=NEAREST、scale≤1 平滑）。**用户存疑待查**：大屏上小图狗牙是不是
+  NEAREST-on-minify 造成的（但 v336 minify 已 LINEAR，应平滑——需 re-confirm 真机）/ 是不是 Canvas2D quirk /
+  跟像素栅格阈值(scale≥4)的关系。重构完静态对比旧行为再定。
+
 **B. grid 重做（用户提，用 shader 更舒服）**：
 - 现状：像素栅格 = 独立 #boardGrid 2D canvas，仅视口变时重画（_drawGrid，scale≥4 渐显，device-px 对齐 fillRect）。GL 模式下仍工作。
 - 重做：grid 进 **present shader**（或一个 GL pass）——按视口直接在片元算网格线，省掉独立 canvas + 每次视口变的 CPU 重画。阈值/渐隐/device 对齐照搬 PIXEL_GRID_FADE_LO=4/FULL=7/ALPHA=0.4。

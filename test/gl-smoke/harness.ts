@@ -14,6 +14,7 @@ import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { TileIndexTexture } from "../../src/gl/tile-index.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
 import { uploadLayerToTiles, docTreeToComp } from "../../src/gl/gl-doc-bridge.ts";
+import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/gl/tile-pixels.ts";
 import { compositeLayers } from "../../src/layer-composite.ts";
 
 interface Check { name: string; ok: boolean; detail: string; }
@@ -302,6 +303,42 @@ function bridgeParity(glctx: GLContext, add: Add): void {
   res.forEach((r) => r.index.dispose());
 }
 
+// LayerPixels Canvas2D facade golden：editRegion 画 → 经 tile → materialize，对比直接 Canvas2D 参考。
+function tilePixelsParity(add: Add): void {
+  const N = 512;
+  const draw = (ctx: CanvasRenderingContext2D) => {
+    const g = ctx.createLinearGradient(0, 0, N, N);
+    g.addColorStop(0, "rgba(255,40,40,1)"); g.addColorStop(1, "rgba(40,40,255,1)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, N, N);
+    ctx.fillStyle = "rgba(40,220,60,1)"; ctx.fillRect(100, 120, 200, 180);   // 跨 tile 的实色块
+    ctx.fillStyle = "rgba(240,220,40,0.6)"; ctx.fillRect(260, 60, 150, 300); // 半透明跨 tile
+  };
+  // LayerPixels 路径：editRegion 画满 → materialize（画满 → bounds=全 doc）
+  const lp = new LayerPixels(N, N);
+  editRegion(lp, 0, 0, N, N, (ctx) => draw(ctx));
+  const mat = materialize(lp);
+  if (!mat) { add("tilepixels:facade round-trip", false, "materialize null"); return; }
+  const mc = document.createElement("canvas"); mc.width = N; mc.height = N;
+  mc.getContext("2d")!.drawImage(mat.canvas as CanvasImageSource, mat.ox, mat.oy);
+  const got = mc.getContext("2d")!.getImageData(0, 0, N, N).data;
+  // 参考：直接 Canvas2D
+  const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
+  const rctx = ref.getContext("2d")!; draw(rctx);
+  const refData = rctx.getImageData(0, 0, N, N).data;
+  const { md } = maxPremulDiff(refData, new Uint8Array(got.buffer), N);
+  add("tilepixels:editRegion→tile→materialize vs Canvas2D", md <= 3, `maxΔ=${md}`);
+
+  // replaceFromCanvas round-trip：整张换进去再 materialize 对比
+  const lp2 = new LayerPixels(N, N);
+  replaceFromCanvas(lp2, ref as CanvasImageSource, 0, 0, N, N);
+  const mat2 = materialize(lp2);
+  const mc2 = document.createElement("canvas"); mc2.width = N; mc2.height = N;
+  if (mat2) mc2.getContext("2d")!.drawImage(mat2.canvas as CanvasImageSource, mat2.ox, mat2.oy);
+  const got2 = mc2.getContext("2d")!.getImageData(0, 0, N, N).data;
+  const { md: md2 } = maxPremulDiff(refData, new Uint8Array(got2.buffer), N);
+  add("tilepixels:replaceFromCanvas vs Canvas2D", md2 <= 3, `maxΔ=${md2}`);
+}
+
 function run(): { ok: boolean; checks: Check[]; error: string | null } {
   const checks: Check[] = [];
   const add: Add = (name, ok, detail = "") => checks.push({ name, ok, detail });
@@ -365,6 +402,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { groupParity(glctx, add); } catch (e) { add("group parity", false, String(e)); }
   try { overlayParity(glctx, add); } catch (e) { add("overlay parity", false, String(e)); }
   try { bridgeParity(glctx, add); } catch (e) { add("bridge parity", false, String(e)); }
+  try { tilePixelsParity(add); } catch (e) { add("tilepixels parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);
