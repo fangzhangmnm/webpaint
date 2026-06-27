@@ -61,9 +61,11 @@ export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled"):
          float srcA = sp.a;
          vec3 Cs = (sp.a > 0.0) ? (sp.rgb / sp.a) : vec3(0.0);   // 解预乘`
     : src === "overlay"
-      // 活动叶 ⊕ overlay：erase = destination-out（叶 alpha 削减）；否则 overlay source-over 叠在叶上。
+      // 活动叶 ⊕ overlay：overlay 是 **bbox 尺寸**纹理（doc 坐标 u_ovOrigin 起、u_ovSize 大）——按 bbox 映射，
+      //   bbox 外透明（避免每帧传 doc 尺寸纹理）。erase = destination-out（叶 alpha 削减）；否则 source-over 叠。
       ? `vec4 base = sampleTiled(u_srcIndex, docPos);
-         vec4 ov = texture(u_overlay, v_uv);
+         vec2 ovUv = (docPos - u_ovOrigin) / u_ovSize;
+         vec4 ov = (any(lessThan(ovUv, vec2(0.0))) || any(greaterThan(ovUv, vec2(1.0)))) ? vec4(0.0) : texture(u_overlay, ovUv);
          float ovA = ov.a * u_overlayOpacity;
          float srcA; vec3 Cs;
          if (u_overlayErase == 1) {
@@ -90,6 +92,8 @@ uniform float u_opacity;
 uniform int u_hasClip;
 uniform float u_overlayOpacity;
 uniform int u_overlayErase;
+uniform vec2 u_ovOrigin;
+uniform vec2 u_ovSize;
 out vec4 o;
 
 float bfn(float Cb, float Cs){ ${BLEND_BODY[mode]} }

@@ -16,7 +16,7 @@ import type { PooledFBO, FBOPrec, GLContext } from "./gl-context.ts";
 // board 传入的 live 描边 overlay（bbox 裁剪 canvas + 落在哪个活动层）。erase = 橡皮（destination-out）。
 export interface OverlayInput {
   canvas: CanvasImageSource;
-  bboxX: number; bboxY: number;
+  bboxX: number; bboxY: number; bboxW: number; bboxH: number;
   layerId: number;
   opacity: number;
   erase: boolean;
@@ -29,10 +29,9 @@ export class GLDocRenderer {
   private _comp: GLCompositor;
   private _scratch: HTMLCanvasElement;
   private _layerTiles = new Map<number, LayerTiles>();
-  // live 描边 overlay：doc 尺寸 scratch canvas → 纹理，每帧重传（first cut；bbox-sub 优化后续）。
-  private _ovCanvas: HTMLCanvasElement;
+  // live 描边 overlay：只传**描边 bbox 尺寸**纹理（小），shader 按 bbox 映射。
   private _ovTex: WebGLTexture | null = null;
-  private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean } | null = null;
+  private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; ox: number; oy: number; ow: number; oh: number } | null = null;
 
   constructor(glctx: GLContext, capacity: number, accumPrec: FBOPrec = "f16") {
     this._glctx = glctx;
@@ -40,7 +39,6 @@ export class GLDocRenderer {
     this._pool = new TilePool(this._backend);
     this._comp = new GLCompositor(glctx, accumPrec);
     this._scratch = document.createElement("canvas");
-    this._ovCanvas = document.createElement("canvas");
   }
 
   // 内存核算（接 computeMaxLayers 软上限 / HUD）。committed = 池预分配；used = 实占 tile。
@@ -66,14 +64,10 @@ export class GLDocRenderer {
     if (r) { r.index.dispose(); r.tileMap.clear(); this._layerTiles.delete(id); }
   }
 
-  // 设置/清除 live 描边 overlay（board 每帧调；null=无描边）。doc 尺寸 scratch + texImage 重传。
-  setOverlay(ov: OverlayInput | null, docW: number, docH: number): void {
-    if (!ov) { this._overlay = null; return; }
+  // 设置/清除 live 描边 overlay（board 每帧调；null=无描边）。只传**描边 bbox 尺寸**纹理（小）。
+  setOverlay(ov: OverlayInput | null, _docW: number, _docH: number): void {
+    if (!ov || ov.bboxW <= 0 || ov.bboxH <= 0) { this._overlay = null; return; }
     const gl = this._glctx.gl;
-    if (this._ovCanvas.width !== docW || this._ovCanvas.height !== docH) { this._ovCanvas.width = docW; this._ovCanvas.height = docH; }
-    const octx = this._ovCanvas.getContext("2d") as CanvasRenderingContext2D;
-    octx.clearRect(0, 0, docW, docH);
-    octx.drawImage(ov.canvas, ov.bboxX, ov.bboxY);
     if (!this._ovTex) {
       this._ovTex = gl.createTexture()!;
       gl.bindTexture(gl.TEXTURE_2D, this._ovTex);
@@ -84,9 +78,9 @@ export class GLDocRenderer {
     }
     gl.bindTexture(gl.TEXTURE_2D, this._ovTex);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 存直值（shader 自己处理）
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this._ovCanvas);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, ov.canvas as TexImageSource);   // bbox 尺寸直传（overlay 是 canvas）
     gl.bindTexture(gl.TEXTURE_2D, null);
-    this._overlay = { tex: this._ovTex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase };
+    this._overlay = { tex: this._ovTex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, ox: ov.bboxX, oy: ov.bboxY, ow: ov.bboxW, oh: ov.bboxH };
   }
 
   // 合成整棵树 → 可见画布（视口仿射 = board _applyDocTransform 的 6 参；含 live overlay）。需先 sync。
@@ -104,10 +98,16 @@ export class GLDocRenderer {
     this._glctx.returnFBO(accum);
   }
 
-  // 合成 → 预乘累积器 FBO（caller 负责 returnFBO/present/readback）。给导出/缩略图/吸管复用。
-  composite(nodes: DocNode[], docW: number, docH: number): PooledFBO {
-    return this._composite(nodes, docW, docH);
+  // 合成 → 预乘累积器 FBO（caller 负责 returnFBO/present/readback）。给 GLBoard 缓存 + 导出/缩略图/吸管复用。
+  // bg = doc 背景色（预乘）。setOverlay 先调（描边时）。
+  composite(nodes: DocNode[], docW: number, docH: number, bg?: [number, number, number, number]): PooledFBO {
+    return this._composite(nodes, docW, docH, bg);
   }
+  // 把一张（缓存的）合成纹理按视口仿射 present 到屏（pan/zoom 只走这步，便宜）。smooth 见 compositor。
+  presentAffine(tex: WebGLTexture, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth: boolean): void {
+    this._comp.presentToScreenAffine(tex, docW, docH, affine, canvasW, canvasH, smooth);
+  }
+  returnFBO(fbo: PooledFBO): void { this._glctx.returnFBO(fbo); }
 
   private _composite(nodes: DocNode[], docW: number, docH: number, bg?: [number, number, number, number]): PooledFBO {
     const ov = this._overlay;
@@ -118,7 +118,7 @@ export class GLDocRenderer {
         if (!r) throw new Error(`LAYER_NOT_SYNCED:${leaf.id}`);   // syncAll 后每叶都在表（空层=空 index）
         return { index: r.index, hasContent: r.tileMap.tileCount > 0 };
       },
-      ov ? (leaf): OverlayDesc | null => (leaf.id === ov.layerId ? { tex: ov.tex, opacity: ov.opacity, erase: ov.erase } : null) : undefined,
+      ov ? (leaf): OverlayDesc | null => (leaf.id === ov.layerId ? { tex: ov.tex, opacity: ov.opacity, erase: ov.erase, ox: ov.ox, oy: ov.oy, ow: ov.ow, oh: ov.oh } : null) : undefined,
     );
     return this._comp.composite(this._backend.texture, tree, docW, docH, bg);
   }

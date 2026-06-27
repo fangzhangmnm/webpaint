@@ -653,7 +653,7 @@ export class Board {
     this._glBoard!.render(
       this.doc as unknown as GLDoc,
       this._docTransformParams(),
-      W, H, this._voidColor, docBg,
+      W, H, this.viewport.scale, this._voidColor, docBg,
       this._isLivePreview(), this._glOverlayInput(),
     );
     // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框
@@ -677,7 +677,7 @@ export class Board {
     }
     if (!overlay) return null;
     const o = overlay as OverlayDesc & { opacity?: number; mode?: string };
-    return { canvas: o.canvas, bboxX: o.bboxX, bboxY: o.bboxY, layerId: o.layer.id, opacity: o.opacity ?? 1, erase: o.mode === "erase" };
+    return { canvas: o.canvas, bboxX: o.bboxX, bboxY: o.bboxY, bboxW: o.bboxW, bboxH: o.bboxH, layerId: o.layer.id, opacity: o.opacity ?? 1, erase: o.mode === "erase" };
   }
 
   // doc 底色（棋盘 = 透明指示；否则 backgroundColor）。实时路径画到屏幕、缓存路径画到离屏——

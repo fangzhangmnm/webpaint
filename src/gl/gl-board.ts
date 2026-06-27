@@ -8,6 +8,7 @@ import { GLContext } from "./gl-context.ts";
 import { GLDocRenderer } from "./gl-doc-renderer.ts";
 import type { OverlayInput } from "./gl-doc-renderer.ts";
 import type { DocNode } from "./gl-doc-bridge.ts";
+import type { PooledFBO } from "./gl-context.ts";
 
 export interface GLDoc { layers: DocNode[]; width: number; height: number; }
 
@@ -29,36 +30,43 @@ export class GLBoard {
   private _glctx: GLContext;
   private _renderer: GLDocRenderer;
   private _contentDirty = true;
+  private _cache: PooledFBO | null = null;   // 缓存的 doc 合成（视口无关）→ pan/zoom 只 present 它，不重合成
 
   constructor(canvas: HTMLCanvasElement, capacity: number) {
     this.canvas = canvas;
     this._glctx = new GLContext(canvas);
     this._renderer = new GLDocRenderer(this._glctx, capacity);
-    // context-loss：丢了 → 全量重传（从 layer canvas 重建 tile）。
-    this._glctx.onRestored = () => { this._contentDirty = true; };
+    // context-loss：丢了 → 全量重传（从 layer canvas 重建 tile）+ 缓存作废。
+    this._glctx.onRestored = () => { this._contentDirty = true; this._cache = null; };
   }
 
   get memory() { return this._renderer.memory; }
   markContentDirty(): void { this._contentDirty = true; }
 
-  // 渲染一帧。affine6 = board _applyDocTransform 的 device-px 6 参；canvasW/H = device px；
+  // 渲染一帧。affine6 = board _applyDocTransform 的 device-px 6 参；canvasW/H = device px；scale = 视口缩放；
   //   voidColor = doc 外底色；docBg = doc 背景色（null=棋盘/透明，first cut 显 void）；
-  //   livePreview = 描边/调整预览中（true → 不重传，靠 overlay）；overlay = live 描边（null=无）。
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null): void {
+  //   livePreview = 描边/调整预览中；overlay = live 描边（null=无）。
+  // **性能关键**：合成结果缓存（视口无关）。pan/zoom（内容没变）→ 只 present 缓存，不重合成（修 30fps）。
+  //   重合成只在：内容脏(commit/undo/结构) 或 描边中(overlay/active 每帧变) 或 首帧/context 恢复。
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null): void {
     if (this._glctx.isLost) return;
-    if (this._contentDirty && !livePreview) {
-      this._renderer.syncAll(doc.layers, doc.width, doc.height);
-      this._contentDirty = false;
+    const contentChanged = this._contentDirty && !livePreview;
+    if (contentChanged) { this._renderer.syncAll(doc.layers, doc.width, doc.height); this._contentDirty = false; }
+
+    if (contentChanged || livePreview || !this._cache) {
+      this._renderer.setOverlay(livePreview ? overlay : null, doc.width, doc.height);
+      const bg: [number, number, number, number] | undefined = docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;
+      const fresh = this._renderer.composite(doc.layers, doc.width, doc.height, bg);
+      if (this._cache) this._renderer.returnFBO(this._cache);
+      this._cache = fresh;
     }
-    this._renderer.setOverlay(overlay, doc.width, doc.height);
+
     const gl = this._glctx.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvasW, canvasH);
     const [vr, vg, vb] = hexToRgb(voidColor);
     gl.clearColor(vr, vg, vb, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    // doc 背景：opaque → 预乘 = 直值（a=1）。棋盘/null → 透明（first cut 显 void）。
-    const bg: [number, number, number, number] | undefined = docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;
-    this._renderer.renderToScreenAffine(doc.layers, doc.width, doc.height, affine6, canvasW, canvasH, bg);
+    this._renderer.presentAffine(this._cache!.tex, doc.width, doc.height, affine6, canvasW, canvasH, scale < 1);
   }
 }

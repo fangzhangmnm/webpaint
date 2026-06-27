@@ -8,11 +8,13 @@
 import type { TileIndexTexture } from "./tile-index.ts";
 import type { BlendMode } from "./blend-glsl.ts";
 
-// live 描边 overlay（活动叶层叠加）：doc 尺寸直值纹理 + 不透明度 + 是否擦除。blendMode-overlay 暂缓。
+// live 描边 overlay（活动叶层叠加）：**bbox 尺寸**直值纹理 + doc 坐标 bbox（origin/size）+ 不透明度 + 擦除。
+//   blendMode-overlay 暂缓。
 export interface OverlayDesc {
   tex: WebGLTexture;
   opacity: number;
   erase: boolean;
+  ox: number; oy: number; ow: number; oh: number;   // doc 坐标 bbox（shader 按此映射，bbox 外透明）
 }
 export interface CompLeaf {
   kind: "leaf";

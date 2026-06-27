@@ -126,6 +126,8 @@ export class GLCompositor {
     gl.uniform1i(u("u_hasClip"), clipIndex ? 1 : 0);
     gl.uniform1f(u("u_overlayOpacity"), overlay ? overlay.opacity : 1);
     gl.uniform1i(u("u_overlayErase"), overlay && overlay.erase ? 1 : 0);
+    gl.uniform2f(u("u_ovOrigin"), overlay ? overlay.ox : 0, overlay ? overlay.oy : 0);
+    gl.uniform2f(u("u_ovSize"), overlay ? overlay.ow : 1, overlay ? overlay.oh : 1);
     // **每个 sampler 固定单元 + 对未激活的也绑 2D 占位**：否则未被编译器消除的未用 sampler 默认落
     //   单元 0（= u_arr 的 sampler2DArray）→ 类型冲突 INVALID_OPERATION(0x502)。占位用 acc.read（2D）。
     const ph = acc.read.tex;   // 2D 占位纹理
@@ -165,14 +167,20 @@ export class GLCompositor {
 
   // 视口感知 present：用 board 的 device-px 仿射把 doc 纹理摆到屏幕（pan/zoom/rot/dpr 一致）。
   // affine = [a,b,c,d,e,f]（board _applyDocTransform 的 setTransform 参数）；canvasW/H = device px。
+  // smooth = 缩小(scale<1)用 LINEAR 抗锯齿；放大(scale>1)用 NEAREST 看像素（对齐 2D board imageSmoothing 策略）。
   // 不清屏（caller 先清 void 色）；doc 之外的画布区不被本 draw 覆盖。
-  presentToScreenAffine(srcTex: WebGLTexture, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number): void {
+  presentToScreenAffine(srcTex: WebGLTexture, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, smooth = true): void {
     const gl = this._glctx.gl;
     const prog = this._glctx.program("present-affine", PRESENT_AFFINE_VERT, PRESENT_FRAG);
     gl.bindVertexArray(this._glctx.quadVAO());
     gl.viewport(0, 0, canvasW, canvasH);
     gl.disable(gl.BLEND);
     gl.useProgram(prog);
+    // 按 smooth 切源纹理过滤（FBO 默认 NEAREST；present 时按视口 scale 调）。
+    gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    const filt = smooth ? gl.LINEAR : gl.NEAREST;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filt);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filt);
     gl.uniform1i(gl.getUniformLocation(prog, "u_flipY"), 0);   // 朝向由顶点 clip-y 处理
     gl.uniform2f(gl.getUniformLocation(prog, "u_docSize"), docW, docH);
     gl.uniform2f(gl.getUniformLocation(prog, "u_canvas"), canvasW, canvasH);

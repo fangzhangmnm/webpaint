@@ -252,7 +252,7 @@ function overlayParity(glctx: GLContext, add: Add): void {
     } as never);
     const ref = gctx.getImageData(0, 0, n, n).data;
     // GL：活动叶带 overlay
-    const active: Leaf & { overlay: { tex: WebGLTexture; opacity: number; erase: boolean } } = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase } };
+    const active: Leaf & { overlay: { tex: WebGLTexture; opacity: number; erase: boolean; ox: number; oy: number; ow: number; oh: number } } = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase, ox: 0, oy: 0, ow: n, oh: n } };
     glctx.gl.getError();  // 清掉之前残留
     const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), active], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
