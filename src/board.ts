@@ -2,6 +2,10 @@
 import { renderSource } from "./floating-transform.ts";
 import { compositeLayers } from "./layer-composite.ts";
 import { makeBitmap } from "./bitmap.ts";
+import { GLBoard, glBoardEnabled } from "./gl/gl-board.ts";
+import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
+import type { OverlayInput } from "./gl/gl-doc-renderer.ts";
+import type { GLDoc } from "./gl/gl-board.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 
 // ---- 本文件用到的结构类型（局部定义，只覆盖 board 实际访问的成员）----
@@ -120,10 +124,17 @@ export class Board {
   _fps?: number | null;
   _fpsEl?: HTMLElement;
   static _dispatchingDirty?: boolean;
+  // WebGL2 渲染（?glboard=1 开关后；默认关 → 全 null，2D 路径不变）。
+  _glOn?: boolean;
+  _glBoard?: GLBoard | null;
+  _glCanvas?: HTMLCanvasElement | null;
 
   constructor(canvas: HTMLCanvasElement, doc: PaintDoc) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext("2d", { alpha: false })!;
+    // GL 模式（?glboard=1）：2D canvas 用 alpha:true（透明，只画 overlay/边框，GL canvas 在后透出 doc）。
+    //   默认关 → alpha:false，2D 路径逐字不变。（alpha=true ⟺ glOn：GL 模式要透明叠层）
+    this._glOn = glBoardEnabled();
+    this.ctx = canvas.getContext("2d", { alpha: this._glOn })!;
     this.doc = doc;
     this.dpr = Math.max(1, window.devicePixelRatio || 1);
     // viewport: tx/ty = screen-px offset of doc top-left (in scale=1, rot=0 frame),
@@ -184,14 +195,38 @@ export class Board {
       ro.observe(this.canvas);
     }
 
+    // GL 渲染器（开关开时）：建 GL canvas 垫在 #board 之下 + GLBoard。失败则回退 2D（_glBoard=null）。
+    this._glBoard = null;
+    this._glCanvas = null;
+    if (this._glOn) this._setupGLBoard();
+
     // 首次：把 doc 居中适配
     this.fitToScreen();
+  }
+
+  // 建 GL canvas（同 .board CSS 定位，DOM 插在 #board 前→在其下；pointer-events:none 不吃事件）+ GLBoard。
+  _setupGLBoard() {
+    try {
+      const gl = document.createElement("canvas");
+      gl.className = "board";            // 同 fixed inset:0 100% 定位 + gallery 隐藏
+      gl.id = "boardGL";
+      gl.style.pointerEvents = "none";   // 事件归 #board
+      gl.width = this.canvas.width; gl.height = this.canvas.height;
+      this.canvas.parentNode?.insertBefore(gl, this.canvas);
+      this._glCanvas = gl;
+      this._glBoard = new GLBoard(gl, poolCapacityForBudget(256 * 1024 * 1024));
+    } catch (e) {
+      console.warn("[board] GL 初始化失败，回退 2D：", e);
+      if (this._glCanvas) { this._glCanvas.remove(); this._glCanvas = null; }
+      this._glBoard = null;
+    }
   }
 
   setDoc(doc: PaintDoc) {
     this.doc = doc;
     this._dirtyFull = true;
     this._compositeCacheDirty = true;   // 新 doc → 合成缓存作废
+    this._glBoard?.markContentDirty();   // GL：新 doc → 全量重传
     this.fitToScreen();
   }
 
@@ -214,6 +249,7 @@ export class Board {
   // 由 BrushEngine 报告："这一帧 layer 像素被改在这片 doc-px bbox 里"
   markDocDirty(x0: number, y0: number, x1: number, y1: number) {
     this._compositeCacheDirty = true;   // 像素改 → 合成缓存作废（描边中走直接合成，commit 后才重建）
+    this._glBoard?.markContentDirty();   // GL：内容脏（描边中 livePreview 守门不重传，抬笔 commit 后才同步）
     if (this._dirtyDocRect) {
       const d = this._dirtyDocRect;
       if (x0 < d[0]) d[0] = x0;
@@ -351,6 +387,7 @@ export class Board {
   invalidateAll() {
     this._dirtyFull = true;
     this._compositeCacheDirty = true;   // 图层/结构/doc-transform 变 → 合成缓存作废
+    this._glBoard?.markContentDirty();   // GL：图层/结构变 → 全量重传
     this.requestRender();
   }
 
@@ -444,7 +481,8 @@ export class Board {
   //   screen.y = b*doc.x + d*doc.y + f
   // 我们的视口：先平移 -W/2 (-H/2) → 缩放 scale → 旋转 rot → 平移到屏幕上
   // doc center。dpr 在所有之外（用 setTransform 顶层再乘）。
-  _applyDocTransform(ctx: Ctx2D) {
+  // doc px → device px 的 6 仿射参（setTransform 的 a,b,c,d,e,f）。2D setTransform 与 GL present 共用。
+  _docTransformParams(): [number, number, number, number, number, number] {
     const { scale, rot } = this.viewport;
     const dpr = this.dpr;
     const { cx, cy } = this._docCenterScreen();
@@ -457,7 +495,11 @@ export class Board {
     const d = scale * cosR;
     const e = cx - a * (W / 2) - c * (H / 2);
     const f = cy - b * (W / 2) - d * (H / 2);
-    ctx.setTransform(dpr * a, dpr * b, dpr * c, dpr * d, dpr * e, dpr * f);
+    return [dpr * a, dpr * b, dpr * c, dpr * d, dpr * e, dpr * f];
+  }
+  _applyDocTransform(ctx: Ctx2D) {
+    const [a, b, c, d, e, f] = this._docTransformParams();
+    ctx.setTransform(a, b, c, d, e, f);
   }
 
   // ---- 渲染 ----
@@ -472,6 +514,7 @@ export class Board {
     this.dpr = dpr;
     this.canvas.width = tw;
     this.canvas.height = th;
+    if (this._glCanvas) { this._glCanvas.width = tw; this._glCanvas.height = th; }   // GL canvas 跟随 device px
     this._dirtyFull = true;
     this._gridSig = "";   // 尺寸变 → 强制重算栅格 div
     this.requestRender();
@@ -562,6 +605,9 @@ export class Board {
     const ctx = this.ctx;
     const W = this.canvas.width, H = this.canvas.height;
 
+    // GL 模式：doc(底+背景+图层) 走 GL canvas；本 2D canvas 只画 overlay/边框（透明底，GL 透出）。
+    if (this._glBoard) { this._renderFullGL(ctx, W, H); return; }
+
     // 1) 底色
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = this._voidColor;
@@ -598,6 +644,40 @@ export class Board {
     ctx.strokeStyle = "rgba(0,0,0,0.18)";
     ctx.lineWidth = 1 / scale;
     ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+  }
+
+  // GL 渲染路径：GL canvas 渲 doc（void 底 + doc 背景 + 图层 + live overlay，视口仿射）；
+  //   本 2D canvas 清透明、只画 lasso overlay + doc 边框（GL 透出 doc）。
+  _renderFullGL(ctx: Ctx2D, W: number, H: number) {
+    const docBg = this._showCheckerboard ? null : (this.doc.backgroundColor || "#ffffff");   // 棋盘 first cut 显 void
+    this._glBoard!.render(
+      this.doc as unknown as GLDoc,
+      this._docTransformParams(),
+      W, H, this._voidColor, docBg,
+      this._isLivePreview(), this._glOverlayInput(),
+    );
+    // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    this._applyDocTransform(ctx);
+    const { scale } = this.viewport;
+    this._drawLassoOverlay(ctx, scale);
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.lineWidth = 1 / scale;
+    ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+  }
+
+  // live 描边 overlay → GL 输入（选区/锁α 裁剪与 2D 路径一致；blendMode-overlay 暂按 source-over）。
+  _glOverlayInput(): OverlayInput | null {
+    let overlay = this._overlayProvider?.();
+    if (!overlay) return null;
+    const layer = overlay.layer;
+    if (this.doc.selection || layer.lockAlpha) {
+      overlay = this._clipOverlayMasks(overlay, this.doc.selection as unknown as Selection | null, layer.lockAlpha ? layer : null) as OverlayDesc | undefined;
+    }
+    if (!overlay) return null;
+    const o = overlay as OverlayDesc & { opacity?: number; mode?: string };
+    return { canvas: o.canvas, bboxX: o.bboxX, bboxY: o.bboxY, layerId: o.layer.id, opacity: o.opacity ?? 1, erase: o.mode === "erase" };
   }
 
   // doc 底色（棋盘 = 透明指示；否则 backgroundColor）。实时路径画到屏幕、缓存路径画到离屏——

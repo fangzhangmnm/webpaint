@@ -54,7 +54,9 @@ export class GLContext {
       depth: false,
       stencil: false,
       premultipliedAlpha: true,  // 合成走预乘 alpha（blend 数学的前提，见 compositor）
-      preserveDrawingBuffer: false,
+      // board 是**按需渲染**（非每帧）：preserveDrawingBuffer:true 让空闲时上一帧内容保留，
+      //   否则浏览器合成后清空 buffer → 闲置/重合成时画布变黑。代价是每帧一次拷贝，可忽略。
+      preserveDrawingBuffer: true,
       powerPreference: "high-performance",
     };
     const gl = canvas.getContext("webgl2", attrs) as WebGL2RenderingContext | null;

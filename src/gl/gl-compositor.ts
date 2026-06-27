@@ -34,6 +34,20 @@ void main(){
   o = vec4(c, p.a);
 }`;
 
+// 视口感知 present 的顶点：doc px → device px（board 的 _applyDocTransform 同一仿射）→ clip。
+//   clip.y = 1 - 2·py/ch（device-py 下增 → clip-y 上增）自带朝向：a_pos.y=0=doc 顶=texture v0=doc 顶数据 → 屏顶。
+const PRESENT_AFFINE_VERT = `#version 300 es
+layout(location=0) in vec2 a_pos;        // [0,1]²
+uniform vec2 u_docSize;
+uniform mat3 u_affine;                    // doc px → device px（列主序）
+uniform vec2 u_canvas;                    // device px 画布尺寸
+out vec2 v_uv;
+void main(){
+  v_uv = a_pos;
+  vec3 dev = u_affine * vec3(a_pos * u_docSize, 1.0);
+  gl_Position = vec4(2.0 * dev.x / u_canvas.x - 1.0, 1.0 - 2.0 * dev.y / u_canvas.y, 0.0, 1.0);
+}`;
+
 export class GLCompositor {
   private _glctx: GLContext;
   private _prec: FBOPrec;
@@ -46,26 +60,27 @@ export class GLCompositor {
     return this._glctx.program(compositeProgramKey(mode, src), COMPOSITE_VERT, compositeFragSource(mode, src));
   }
 
-  // 合成一个层级的兄弟节点（自底向上）进一张预乘累积器 FBO 返回（透明底）。caller 负责 returnFBO。
+  // 合成一个层级的兄弟节点（自底向上）进一张预乘累积器 FBO 返回。caller 负责 returnFBO。
   // arrayTex = TileBackend 稀疏 tile 池纹理；docW/H = doc 像素尺寸。
+  // bg = 底色（**预乘** [r,g,b,a]，doc 背景色；缺省透明）。顶层用 doc bg；组 sub-accumulator 永远透明。
   // VAO/viewport 在此绑定一次；隔离组递归走 _composeFresh（**不碰 VAO**，否则解绑会废掉外层后续 pass）。
-  composite(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number): PooledFBO {
+  composite(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: [number, number, number, number]): PooledFBO {
     const gl = this._glctx.gl;
     gl.bindVertexArray(this._glctx.quadVAO());
     gl.viewport(0, 0, docW, docH);
     gl.disable(gl.BLEND);
-    const result = this._composeFresh(arrayTex, nodes, docW, docH);
+    const result = this._composeFresh(arrayTex, nodes, docW, docH, bg);
     gl.bindVertexArray(null);
     return result;
   }
 
-  // 内部：合兄弟数组进一张新累积器返回（假设 VAO 已绑、viewport 已设）。隔离组递归用它。
-  private _composeFresh(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number): PooledFBO {
+  // 内部：合兄弟数组进一张新累积器返回（假设 VAO 已绑、viewport 已设）。隔离组递归用它（清透明）。
+  private _composeFresh(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: [number, number, number, number]): PooledFBO {
     const acc: Acc = {
       read: this._glctx.borrowFBO(docW, docH, this._prec),
       write: this._glctx.borrowFBO(docW, docH, this._prec),
     };
-    this._clear(acc.read);
+    this._clear(acc.read, bg);
     this._applyNodes(arrayTex, nodes, acc, docW, docH);
     this._glctx.returnFBO(acc.write);
     return acc.read;
@@ -143,9 +158,32 @@ export class GLCompositor {
     this._present(srcTex, target.fbo, w, h, false);
   }
 
-  // 预乘累积器 → 默认 framebuffer（可见画布），翻 Y、解预乘。viewport = 画布像素尺寸。
+  // 预乘累积器 → 默认 framebuffer（可见画布），翻 Y、解预乘、整文档铺满（1:1 fit，预览页用）。
   presentToScreen(srcTex: WebGLTexture, canvasW: number, canvasH: number): void {
     this._present(srcTex, null, canvasW, canvasH, true);
+  }
+
+  // 视口感知 present：用 board 的 device-px 仿射把 doc 纹理摆到屏幕（pan/zoom/rot/dpr 一致）。
+  // affine = [a,b,c,d,e,f]（board _applyDocTransform 的 setTransform 参数）；canvasW/H = device px。
+  // 不清屏（caller 先清 void 色）；doc 之外的画布区不被本 draw 覆盖。
+  presentToScreenAffine(srcTex: WebGLTexture, docW: number, docH: number, affine: number[], canvasW: number, canvasH: number): void {
+    const gl = this._glctx.gl;
+    const prog = this._glctx.program("present-affine", PRESENT_AFFINE_VERT, PRESENT_FRAG);
+    gl.bindVertexArray(this._glctx.quadVAO());
+    gl.viewport(0, 0, canvasW, canvasH);
+    gl.disable(gl.BLEND);
+    gl.useProgram(prog);
+    gl.uniform1i(gl.getUniformLocation(prog, "u_flipY"), 0);   // 朝向由顶点 clip-y 处理
+    gl.uniform2f(gl.getUniformLocation(prog, "u_docSize"), docW, docH);
+    gl.uniform2f(gl.getUniformLocation(prog, "u_canvas"), canvasW, canvasH);
+    const [a, b, c, d, e, f] = affine;
+    gl.uniformMatrix3fv(gl.getUniformLocation(prog, "u_affine"), false, new Float32Array([a, b, 0, c, d, 0, e, f, 1]));
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    this._setSampler(prog, "u_src", 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindVertexArray(null);
   }
 
   private _present(srcTex: WebGLTexture, fbo: WebGLFramebuffer | null, w: number, h: number, flipY: boolean): void {
@@ -165,10 +203,10 @@ export class GLCompositor {
     gl.bindVertexArray(null);
   }
 
-  private _clear(f: PooledFBO): void {
+  private _clear(f: PooledFBO, bg?: [number, number, number, number]): void {
     const gl = this._glctx.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, f.fbo);
-    gl.clearColor(0, 0, 0, 0);
+    if (bg) gl.clearColor(bg[0], bg[1], bg[2], bg[3]); else gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
