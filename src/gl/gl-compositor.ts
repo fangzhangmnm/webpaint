@@ -1,25 +1,24 @@
 // GLCompositor —— WebGL2 图层合成器（docs/perf-webgl-memory-clip.md §3 模块 4）。
 //
-// 算法：ping-pong 两张预乘 RGBA16F 累积器，**一层一 pass**——每 pass 采（累积器, 源 tile）→
-//   W3C blend + source-over 合成（blend-glsl.ts）→ 写另一张累积器、交换。N 层 = N pass。
-//   clip = shader 里源 alpha × 基底 alpha（无 2D 的 dst-in dance；静态层 tile 已在 GPU → 重合便宜）。
+// 算法：ping-pong 两张预乘累积器，**一层一 pass**——每 pass 全屏，shader 按 doc 坐标查该层 tile-index
+//   定位 tile、采源（直值）+ 累积器（预乘）→ W3C blend + source-over 合成 → 写另一张累积器、交换。
+//   N 层 = N pass。clip = shader 里源 alpha × 基底 alpha（无 2D dst-in dance）。多 tile 层无需多 draw。
 //
-// **本文件当前是 Stage 2a-0 切片**：扁平层（每层单 tile，按 slice 直采）。多 tile（tile-index map）、
-//   组隔离、pass-through、overlay/float 注入 = 2a-1/2b/2c 续接。先用最小铺垫把**最难的 blend 数学**
-//   用同引擎 2D-vs-GL 自 diff 钉死，再加 tiling 一般性。
+// **当前是 Stage 2 扁平切片**：单层级兄弟数组（无组隔离/pass-through/overlay/float）。组递归 = 2b 续接。
 //
-// 验证：纯 gl.*，node no-op → smoke harness 自 diff（vs Canvas2D 原生 blend，12 模式）。
+// 验证：纯 gl.*，node no-op → smoke harness 自 diff（12 blend + clip + 多 tile，vs Canvas2D）。
 
 import { COMPOSITE_VERT, compositeFragSource, compositeProgramKey } from "./blend-glsl.ts";
 import type { BlendMode } from "./blend-glsl.ts";
+import type { TileIndexTexture } from "./tile-index.ts";
 import type { GLContext, PooledFBO, FBOPrec } from "./gl-context.ts";
 
-// 扁平层描述（2a-0）：源 tile slice、不透明度、blend、剪裁基底 slice（-1=无）。
-export interface FlatLayer {
-  slice: number;
+// 合成层描述：源层 tile-index、不透明度、blend、剪裁基底 tile-index（null=无 clip）。
+export interface TiledLayer {
+  srcIndex: TileIndexTexture;
   opacity: number;
   mode: BlendMode;
-  clipSlice: number;
+  clipIndex: TileIndexTexture | null;
 }
 
 const PRESENT_FRAG = `#version 300 es
@@ -46,13 +45,14 @@ export class GLCompositor {
     return this._glctx.program(compositeProgramKey(mode), COMPOSITE_VERT, compositeFragSource(mode));
   }
 
-  // 自底向上合成 layers 进一张预乘累积器 FBO 返回。caller 负责 returnFBO（或转 present）。
-  compositeFlat(arrayTex: WebGLTexture, layers: FlatLayer[], w: number, h: number): PooledFBO {
+  // 自底向上合成 layers 进一张预乘累积器 FBO 返回。docW/H = doc 像素尺寸（累积器尺寸 + shader docPos）。
+  // caller 负责 returnFBO（或转 present）。arrayTex = TileBackend 的稀疏 tile 池纹理。
+  composite(arrayTex: WebGLTexture, layers: TiledLayer[], docW: number, docH: number): PooledFBO {
     const gl = this._glctx.gl;
-    let read = this._glctx.borrowFBO(w, h, this._prec);
-    let write = this._glctx.borrowFBO(w, h, this._prec);
+    let read = this._glctx.borrowFBO(docW, docH, this._prec);
+    let write = this._glctx.borrowFBO(docW, docH, this._prec);
     gl.bindVertexArray(this._glctx.quadVAO());
-    gl.viewport(0, 0, w, h);
+    gl.viewport(0, 0, docW, docH);
     gl.disable(gl.BLEND);   // shader 手动合成，关固定功能 blend
 
     this._clearFBO(read);
@@ -60,15 +60,22 @@ export class GLCompositor {
     for (const layer of layers) {
       const prog = this._blendProgram(layer.mode);
       gl.useProgram(prog);
-      gl.uniform1f(gl.getUniformLocation(prog, "u_srcSlice"), layer.slice);
+      gl.uniform2f(gl.getUniformLocation(prog, "u_docSize"), docW, docH);
       gl.uniform1f(gl.getUniformLocation(prog, "u_opacity"), layer.opacity);
-      gl.uniform1f(gl.getUniformLocation(prog, "u_clipSlice"), layer.clipSlice);
+      gl.uniform1i(gl.getUniformLocation(prog, "u_hasClip"), layer.clipIndex ? 1 : 0);
+      // 纹理单元：0=tile 池 array，1=累积器(read)，2=源 index，3=clip index
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, arrayTex);
       gl.uniform1i(gl.getUniformLocation(prog, "u_arr"), 0);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, read.tex);
       gl.uniform1i(gl.getUniformLocation(prog, "u_dst"), 1);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, layer.srcIndex.tex);
+      gl.uniform1i(gl.getUniformLocation(prog, "u_srcIndex"), 2);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, (layer.clipIndex ?? layer.srcIndex).tex);   // 无 clip 时绑个占位，shader 不读
+      gl.uniform1i(gl.getUniformLocation(prog, "u_clipIndex"), 3);
       gl.bindFramebuffer(gl.FRAMEBUFFER, write.fbo);
       gl.drawArrays(gl.TRIANGLES, 0, 6);
       const tmp = read; read = write; write = tmp;   // 交换

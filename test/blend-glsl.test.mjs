@@ -30,7 +30,9 @@ describe("blend-glsl · fragment 源", () => {
       assert(f.startsWith("#version 300 es"), `${m} 版本头`);
       assert(f.includes("sampler2DArray") && f.includes("u_dst"), `${m} 采样器`);
       assert(f.includes("float bfn(") && f.includes("blendRGB"), `${m} blend 脚手架`);
-      assert(f.includes("u_clipSlice") && f.includes("u_opacity"), `${m} clip/opacity uniform`);
+      assert(f.includes("u_srcIndex") && f.includes("u_clipIndex") && f.includes("u_hasClip"), `${m} tile-index/clip uniform`);
+      assert(f.includes("u_docSize") && f.includes("sampleTiled"), `${m} 多 tile 采样`);
+      assert(f.includes("u_opacity"), `${m} opacity uniform`);
       // 预乘合成关键式
       assert(f.includes("as + ab * (1.0 - as)"), `${m} αo 合成式`);
     }

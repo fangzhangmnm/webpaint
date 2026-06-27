@@ -161,6 +161,7 @@
     "src/gl/gl-context.ts",
     "src/gl/tile-backend-gl.ts",
     "src/gl/blend-glsl.ts",
-    "src/gl/gl-compositor.ts"
+    "src/gl/gl-compositor.ts",
+    "src/gl/tile-index.ts"
   ]
 }

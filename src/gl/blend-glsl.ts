@@ -44,29 +44,43 @@ layout(location=0) in vec2 a_pos;
 out vec2 v_uv;
 void main(){ v_uv = a_pos; gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0); }`;
 
-// 一个 blend 模式的 fragment 源：采源 tile（直值）+ 累积器（预乘）→ W3C blend + source-over 合成 → 预乘输出。
-//   u_arr/u_srcSlice：源层在 array texture 的 slice；u_dst：累积器（预乘 RGBA16F）；
-//   u_opacity：层不透明度（× 进源 alpha，Π 外那一份，见 brush §4.3）；
-//   u_clipSlice：剪裁基底 slice（≥0 时把源 alpha × 基底 alpha = clip 蒙版）；-1 关闭。
+// 一个 blend 模式的 fragment 源：按 doc 坐标查 tile-index 采源 tile（直值）+ 累积器（预乘）
+//   → W3C blend + source-over 合成 → 预乘输出。
+//   u_arr：稀疏 tile 池（TEXTURE_2D_ARRAY）；u_srcIndex/u_clipIndex：层的 tile-index 纹理
+//     （R32F，大小 across×down，每 texel = slice 或 -1 表空 tile）；u_docSize：doc 像素尺寸；
+//   u_dst：累积器（预乘）；u_opacity：层不透明度（Π 外那份，见 §4.3）；
+//   u_hasClip：1 时把源 alpha × 基底 alpha = clip 蒙版。
+//   sampleTiled：doc 坐标 → tile 坐标 → index 查 slice（空则透明）→ tile 内局部 uv 采 array。
 export function compositeFragSource(mode: BlendMode): string {
   return `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
 in vec2 v_uv;
 uniform sampler2DArray u_arr;
-uniform float u_srcSlice;
+uniform highp sampler2D u_srcIndex;
+uniform highp sampler2D u_clipIndex;
 uniform sampler2D u_dst;
+uniform vec2 u_docSize;
 uniform float u_opacity;
-uniform float u_clipSlice;
+uniform int u_hasClip;
 out vec4 o;
 
 float bfn(float Cb, float Cs){ ${BLEND_BODY[mode]} }
 vec3 blendRGB(vec3 b, vec3 s){ return vec3(bfn(b.r,s.r), bfn(b.g,s.g), bfn(b.b,s.b)); }
 
+vec4 sampleTiled(highp sampler2D index, vec2 docPos){
+  ivec2 tc = ivec2(floor(docPos / 256.0));
+  float slice = texelFetch(index, tc, 0).r;     // R32F：slice 或 -1
+  if (slice < 0.0) return vec4(0.0);             // 空 tile = 透明
+  vec2 local = (docPos - vec2(tc) * 256.0) / 256.0;
+  return texture(u_arr, vec3(local, slice));
+}
+
 void main(){
-  vec4 src = texture(u_arr, vec3(v_uv, u_srcSlice));   // 直值 RGBA
+  vec2 docPos = v_uv * u_docSize;
+  vec4 src = sampleTiled(u_srcIndex, docPos);    // 直值 RGBA
   float as = src.a * u_opacity;
-  if (u_clipSlice >= 0.0) as *= texture(u_arr, vec3(v_uv, u_clipSlice)).a;   // clip 蒙版
+  if (u_hasClip == 1) as *= sampleTiled(u_clipIndex, docPos).a;   // clip 蒙版
   vec3 Cs = src.rgb;
 
   vec4 dst = texture(u_dst, v_uv);    // 预乘 (Pb, ab)
