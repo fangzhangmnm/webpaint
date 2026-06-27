@@ -8,6 +8,12 @@
 import type { TileIndexTexture } from "./tile-index.ts";
 import type { BlendMode } from "./blend-glsl.ts";
 
+// live 描边 overlay（活动叶层叠加）：doc 尺寸直值纹理 + 不透明度 + 是否擦除。blendMode-overlay 暂缓。
+export interface OverlayDesc {
+  tex: WebGLTexture;
+  opacity: number;
+  erase: boolean;
+}
 export interface CompLeaf {
   kind: "leaf";
   srcIndex: TileIndexTexture;
@@ -16,6 +22,7 @@ export interface CompLeaf {
   clip: boolean;          // 是否剪裁层
   visible: boolean;
   hasContent: boolean;    // 有像素（空层不能当 clip 基底；对齐 2D 的 bboxW>0&&bboxH>0）
+  overlay?: OverlayDesc | null;   // 活动叶的 live 描边 overlay（null/缺省=无）
 }
 export interface CompGroup {
   kind: "group";

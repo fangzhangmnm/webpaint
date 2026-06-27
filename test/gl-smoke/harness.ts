@@ -81,6 +81,17 @@ function maxPremulDiff(ref: Uint8ClampedArray, glpx: Uint8Array, n: number): { m
 function idx1(glctx: GLContext, slice: number): TileIndexTexture {
   const t = new TileIndexTexture(glctx, TILE_SIZE, TILE_SIZE); t.setTile(0, 0, slice); return t;
 }
+// doc 尺寸直值 RGBA8 2D 纹理（live overlay 用）。
+function makeTex2D(glctx: GLContext, img: Uint8Array, n: number): WebGLTexture {
+  const gl = glctx.gl; const tex = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, n, n);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, n, n, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return tex;
+}
 function L(srcIndex: TileIndexTexture, opacity: number, mode: string, clip = false): Leaf {
   return { kind: "leaf", srcIndex, opacity, mode, clip, visible: true, hasContent: true };
 }
@@ -218,6 +229,39 @@ function groupParity(glctx: GLContext, add: Add): void {
   }
 }
 
+// ---- live overlay 注入 vs compositeLayers overlayFor（normal + erase）----
+function overlayParity(glctx: GLContext, add: Add): void {
+  const n = TILE_SIZE; const backend = new GLTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
+  const bg = makeImg(n, (x, y) => [60, 120 + (x % 120), 60 + (y % 180), 255]);          // 底
+  const layer = makeImg(n, (x, y) => [200, 60 + (x % 180), 80, 180 + ((x + y) % 76)]);   // 活动叶
+  const ov = makeImg(n, (x, y) => ((x + y) % 64 < 40) ? [40 + (x % 200), 220, 60, 160 + (y % 80)] : [0, 0, 0, 0]);  // 描边（带空隙）
+  backend.uploadSlice(0, bg); backend.uploadSlice(1, layer);
+  const i0 = idx1(glctx, 0), i1 = idx1(glctx, 1);
+  const ovTex = makeTex2D(glctx, ov, n);
+  for (const erase of [false, true]) {
+    const opacity = 0.85;
+    // golden：compositeLayers，活动叶带 overlayFor
+    const A2D = { isGroup: false, visible: true, clippingMask: false, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, canvas: imgToCanvas(bg, n) };
+    const L2D = { isGroup: false, visible: true, clippingMask: false, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, canvas: imgToCanvas(layer, n) };
+    const ovCanvas = imgToCanvas(ov, n);
+    const gc = document.createElement("canvas"); gc.width = n; gc.height = n;
+    const gctx = gc.getContext("2d")!; gctx.clearRect(0, 0, n, n);
+    compositeLayers(gctx as unknown as CanvasRenderingContext2D, [A2D, L2D] as never, {
+      overlayFor: (node: unknown) => node === L2D ? { canvas: ovCanvas, bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, opacity, mode: erase ? "erase" : undefined, blendMode: "source-over" } : null,
+    } as never);
+    const ref = gctx.getImageData(0, 0, n, n).data;
+    // GL：活动叶带 overlay
+    const active: Leaf & { overlay: { tex: WebGLTexture; opacity: number; erase: boolean } } = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase } };
+    glctx.gl.getError();  // 清掉之前残留
+    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), active], n, n);
+    const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
+    const err = glctx.gl.getError();
+    const { md, at } = maxPremulDiff(ref, glpx, n);
+    add(`overlay:${erase ? "erase" : "normal"} vs compositeLayers`, md <= 4 && err === 0, `maxΔ=${md} err=0x${err.toString(16)} ${md > 4 ? at : ""}`);
+  }
+  i0.dispose(); i1.dispose(); glctx.gl.deleteTexture(ovTex);
+}
+
 function run(): { ok: boolean; checks: Check[]; error: string | null } {
   const checks: Check[] = [];
   const add: Add = (name, ok, detail = "") => checks.push({ name, ok, detail });
@@ -279,8 +323,10 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   } catch (e) { add("blend/clip parity", false, String(e)); }
   try { multiTileParity(glctx, add); } catch (e) { add("multitile parity", false, String(e)); }
   try { groupParity(glctx, add); } catch (e) { add("group parity", false, String(e)); }
+  try { overlayParity(glctx, add); } catch (e) { add("overlay parity", false, String(e)); }
 
-  add("no GL error", gl.getError() === gl.NO_ERROR, `0x${gl.getError().toString(16)}`);
+  const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
+  add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);
   return { ok: checks.every((c) => c.ok), checks, error: null };
 }
 

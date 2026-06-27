@@ -44,8 +44,9 @@ layout(location=0) in vec2 a_pos;
 out vec2 v_uv;
 void main(){ v_uv = a_pos; gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0); }`;
 
-// 源种类：tiled = 叶层（查 tile-index 采稀疏 tile 池）；group = 隔离组的预乘 sub-accumulator 纹理。
-export type SourceKind = "tiled" | "group";
+// 源种类：tiled = 叶层（查 tile-index 采稀疏 tile 池）；group = 隔离组的预乘 sub-accumulator 纹理；
+//   overlay = 活动叶层 ⊕ live 描边 overlay（doc 尺寸直值纹理，source-over/erase；blendMode-overlay 暂缓）。
+export type SourceKind = "tiled" | "group" | "overlay";
 
 // 一个 (blend 模式, 源种类) 的 fragment 源：取源直值 + 累积器（预乘）→ W3C blend + source-over → 预乘输出。
 //   u_arr：稀疏 tile 池；u_srcIndex：叶层 tile-index（tiled 用）；u_groupSrc：组预乘纹理（group 用）；
@@ -54,13 +55,26 @@ export type SourceKind = "tiled" | "group";
 //   sampleTiled：doc 坐标 → tile 坐标 → index 查 slice（空则透明）→ tile 内局部 uv 采 array。
 export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled"): string {
   // 源取值片段：算出 srcA（源 alpha 直值）+ Cs（源直值色）。
-  const srcSnippet = src === "group"
-    ? `vec4 sp = texture(u_groupSrc, v_uv);
-       float srcA = sp.a;
-       vec3 Cs = (sp.a > 0.0) ? (sp.rgb / sp.a) : vec3(0.0);   // 解预乘`
-    : `vec4 s = sampleTiled(u_srcIndex, docPos);
-       float srcA = s.a;
-       vec3 Cs = s.rgb;`;
+  const srcSnippet =
+    src === "group"
+      ? `vec4 sp = texture(u_groupSrc, v_uv);
+         float srcA = sp.a;
+         vec3 Cs = (sp.a > 0.0) ? (sp.rgb / sp.a) : vec3(0.0);   // 解预乘`
+    : src === "overlay"
+      // 活动叶 ⊕ overlay：erase = destination-out（叶 alpha 削减）；否则 overlay source-over 叠在叶上。
+      ? `vec4 base = sampleTiled(u_srcIndex, docPos);
+         vec4 ov = texture(u_overlay, v_uv);
+         float ovA = ov.a * u_overlayOpacity;
+         float srcA; vec3 Cs;
+         if (u_overlayErase == 1) {
+           srcA = base.a * (1.0 - ovA); Cs = base.rgb;
+         } else {
+           srcA = ovA + base.a * (1.0 - ovA);
+           Cs = (srcA > 0.0) ? (ov.rgb * ovA + base.rgb * base.a * (1.0 - ovA)) / srcA : vec3(0.0);
+         }`
+      : `vec4 s = sampleTiled(u_srcIndex, docPos);
+         float srcA = s.a;
+         vec3 Cs = s.rgb;`;
   return `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
@@ -69,10 +83,13 @@ uniform sampler2DArray u_arr;
 uniform highp sampler2D u_srcIndex;
 uniform highp sampler2D u_clipIndex;
 uniform sampler2D u_groupSrc;
+uniform sampler2D u_overlay;
 uniform sampler2D u_dst;
 uniform vec2 u_docSize;
 uniform float u_opacity;
 uniform int u_hasClip;
+uniform float u_overlayOpacity;
+uniform int u_overlayErase;
 out vec4 o;
 
 float bfn(float Cb, float Cs){ ${BLEND_BODY[mode]} }

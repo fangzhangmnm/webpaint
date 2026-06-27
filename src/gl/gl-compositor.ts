@@ -14,7 +14,7 @@
 import { COMPOSITE_VERT, compositeFragSource, compositeProgramKey } from "./blend-glsl.ts";
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
 import { resolveClipBases, needsIsolation, groupUnitMode } from "./gl-compose-plan.ts";
-import type { CompNode } from "./gl-compose-plan.ts";
+import type { CompNode, OverlayDesc } from "./gl-compose-plan.ts";
 import type { TileIndexTexture } from "./tile-index.ts";
 import type { GLContext, PooledFBO, FBOPrec } from "./gl-context.ts";
 
@@ -81,7 +81,8 @@ export class GLCompositor {
       const clipIndex = base && base.kind === "leaf" ? base.srcIndex : null;
 
       if (node.kind === "leaf") {
-        this._pass(arrayTex, "tiled", node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH);
+        const srcKind = node.overlay ? "overlay" : "tiled";
+        this._pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
       } else if (needsIsolation(node)) {
         const sub = this._composeFresh(arrayTex, node.children, docW, docH);   // 独立 sub-accumulator（不碰 VAO）
         this._pass(arrayTex, "group", null, sub.tex, groupUnitMode(node), node.opacity, clipIndex, acc, docW, docH);
@@ -97,7 +98,7 @@ export class GLCompositor {
     arrayTex: WebGLTexture, srcKind: SourceKind,
     srcIndex: TileIndexTexture | null, groupTex: WebGLTexture | null,
     mode: BlendMode, opacity: number, clipIndex: TileIndexTexture | null,
-    acc: Acc, docW: number, docH: number,
+    acc: Acc, docW: number, docH: number, overlay: OverlayDesc | null = null,
   ): void {
     const gl = this._glctx.gl;
     const prog = this._program(mode, srcKind);
@@ -106,23 +107,23 @@ export class GLCompositor {
     gl.uniform2f(u("u_docSize"), docW, docH);
     gl.uniform1f(u("u_opacity"), opacity);
     gl.uniform1i(u("u_hasClip"), clipIndex ? 1 : 0);
-    // 单元 0=tile 池 array，1=累积器(read)，2=源 index，3=clip index，4=组预乘源
+    gl.uniform1f(u("u_overlayOpacity"), overlay ? overlay.opacity : 1);
+    gl.uniform1i(u("u_overlayErase"), overlay && overlay.erase ? 1 : 0);
+    // **每个 sampler 固定单元 + 对未激活的也绑 2D 占位**：否则未被编译器消除的未用 sampler 默认落
+    //   单元 0（= u_arr 的 sampler2DArray）→ 类型冲突 INVALID_OPERATION(0x502)。占位用 acc.read（2D）。
+    const ph = acc.read.tex;   // 2D 占位纹理
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, arrayTex);
     this._setSampler(prog, "u_arr", 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, acc.read.tex);
     this._setSampler(prog, "u_dst", 1);
-    if (srcKind === "tiled" && srcIndex) {
-      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, srcIndex.tex);
-      this._setSampler(prog, "u_srcIndex", 2);
-    }
-    // clip index（无 clip 时绑源/占位，shader u_hasClip=0 不读）
-    gl.activeTexture(gl.TEXTURE3);
-    gl.bindTexture(gl.TEXTURE_2D, (clipIndex ?? srcIndex)?.tex ?? acc.read.tex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, srcIndex?.tex ?? ph);
+    this._setSampler(prog, "u_srcIndex", 2);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, (clipIndex ?? srcIndex)?.tex ?? ph);
     this._setSampler(prog, "u_clipIndex", 3);
-    if (srcKind === "group" && groupTex) {
-      gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, groupTex);
-      this._setSampler(prog, "u_groupSrc", 4);
-    }
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, groupTex ?? ph);
+    this._setSampler(prog, "u_groupSrc", 4);
+    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, overlay?.tex ?? ph);
+    this._setSampler(prog, "u_overlay", 5);
     gl.bindFramebuffer(gl.FRAMEBUFFER, acc.write.fbo);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
