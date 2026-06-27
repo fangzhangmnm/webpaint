@@ -44,14 +44,23 @@ layout(location=0) in vec2 a_pos;
 out vec2 v_uv;
 void main(){ v_uv = a_pos; gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0); }`;
 
-// 一个 blend 模式的 fragment 源：按 doc 坐标查 tile-index 采源 tile（直值）+ 累积器（预乘）
-//   → W3C blend + source-over 合成 → 预乘输出。
-//   u_arr：稀疏 tile 池（TEXTURE_2D_ARRAY）；u_srcIndex/u_clipIndex：层的 tile-index 纹理
-//     （R32F，大小 across×down，每 texel = slice 或 -1 表空 tile）；u_docSize：doc 像素尺寸；
-//   u_dst：累积器（预乘）；u_opacity：层不透明度（Π 外那份，见 §4.3）；
-//   u_hasClip：1 时把源 alpha × 基底 alpha = clip 蒙版。
+// 源种类：tiled = 叶层（查 tile-index 采稀疏 tile 池）；group = 隔离组的预乘 sub-accumulator 纹理。
+export type SourceKind = "tiled" | "group";
+
+// 一个 (blend 模式, 源种类) 的 fragment 源：取源直值 + 累积器（预乘）→ W3C blend + source-over → 预乘输出。
+//   u_arr：稀疏 tile 池；u_srcIndex：叶层 tile-index（tiled 用）；u_groupSrc：组预乘纹理（group 用）；
+//   u_clipIndex：剪裁基底 tile-index；u_docSize：doc 像素尺寸；u_dst：累积器（预乘）；
+//   u_opacity：层不透明度（Π 外那份，§4.3）；u_hasClip：1 时源 alpha × 基底 alpha = clip 蒙版。
 //   sampleTiled：doc 坐标 → tile 坐标 → index 查 slice（空则透明）→ tile 内局部 uv 采 array。
-export function compositeFragSource(mode: BlendMode): string {
+export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled"): string {
+  // 源取值片段：算出 srcA（源 alpha 直值）+ Cs（源直值色）。
+  const srcSnippet = src === "group"
+    ? `vec4 sp = texture(u_groupSrc, v_uv);
+       float srcA = sp.a;
+       vec3 Cs = (sp.a > 0.0) ? (sp.rgb / sp.a) : vec3(0.0);   // 解预乘`
+    : `vec4 s = sampleTiled(u_srcIndex, docPos);
+       float srcA = s.a;
+       vec3 Cs = s.rgb;`;
   return `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
@@ -59,6 +68,7 @@ in vec2 v_uv;
 uniform sampler2DArray u_arr;
 uniform highp sampler2D u_srcIndex;
 uniform highp sampler2D u_clipIndex;
+uniform sampler2D u_groupSrc;
 uniform sampler2D u_dst;
 uniform vec2 u_docSize;
 uniform float u_opacity;
@@ -78,10 +88,9 @@ vec4 sampleTiled(highp sampler2D index, vec2 docPos){
 
 void main(){
   vec2 docPos = v_uv * u_docSize;
-  vec4 src = sampleTiled(u_srcIndex, docPos);    // 直值 RGBA
-  float as = src.a * u_opacity;
+  ${srcSnippet}
+  float as = srcA * u_opacity;
   if (u_hasClip == 1) as *= sampleTiled(u_clipIndex, docPos).a;   // clip 蒙版
-  vec3 Cs = src.rgb;
 
   vec4 dst = texture(u_dst, v_uv);    // 预乘 (Pb, ab)
   float ab = dst.a;
@@ -95,6 +104,6 @@ void main(){
 }
 
 // program 缓存键（GLContext.program 用）。
-export function compositeProgramKey(mode: BlendMode): string {
-  return `composite:${mode}`;
+export function compositeProgramKey(mode: BlendMode, src: SourceKind = "tiled"): string {
+  return `composite:${mode}:${src}`;
 }
