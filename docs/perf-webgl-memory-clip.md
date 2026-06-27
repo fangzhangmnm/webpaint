@@ -1,45 +1,102 @@
-# 性能 / 内存 / clip — 未来工程（WebGL + tiling）
+# 性能 / 内存 / clip — WebGL2 + tiling 全量重写（工程主文档）
 
-> as-of v276 / 2026-06-14。本文是**决策 + 路线图**（why 类，耐老化）。数据来自用户 iPad mini 真机实测。
-> 现状渲染管线见 `src/layer-composite.js`（统一合成器）+ `src/board.js`；提交 v274–v276。
+> as-of v326 / 2026-06-27。**决策 + 架构 + 路线图**（why 类，耐老化）。前身是 v276 的同名 doc（真机实测 + 三明治/clip缓存权衡，已并入「历史权衡」节）。
+> 定调：**全 WebGL2 重写合成器 + 笔刷栅格化 + tiling 图层存储**，greenfield，不留 Canvas2D 回退尸体。旧 2D code 走 git 备份 + 冻成 golden fixture，重写完即删。
 
-## 真机现状（用户实测，~2K doc，二次元工作流，≈10–11 图层）
-- **pan = 60fps** ✓（board 的 1:1 doc 合成缓存，命中只 1 次 blit；见 board.ensureCompositeCache）。
-- **plain-layer 描边 = 60fps** ✓。
-- **有 clip 蒙版时描边 ≈ 30fps** ✗ ← 本文要解决的核心。
-- **11 个 plain 图层仍 60fps** → 多图层本身不掉帧 → **partial-render 复杂度确实没必要**（v275 已删 `_renderPartial` + 黑缝补丁）。
-- **内存偏紧**：iPad mini ~11 层（2K）已紧。每满幅层 ≈ 2048²×4 ≈ **16.8MB**；11 层 ≈ 184MB。
+---
 
-## clip 为何贵（live 描边路径）
-描边走 live 直接合成，每帧重合**所有**层。每层代价：
-- plain 层 = 1 次 `drawImage(layer→screen)`（GPU blit，便宜）。
-- clip 层 = `clearRect(tmp)+drawImage(clip→tmp)+drawImage(base→tmp, destination-in)+drawImage(tmp→screen)`
-  = **3 次 doc 分辨率 canvas 操作**算 `clip∩base` 再 blit ≈ 4× plain。
-- **关键浪费**：描边期间，**静态** clip 层（clip 和 base 都没在被画）也被这套 dance 每帧重算 60×/s，结果每帧相同。
+## 0. 真机现状（v276 用户 iPad mini 实测，仍是出发点）
+- pan = 60fps ✓（board 1:1 合成缓存）。plain 描边 = 60fps ✓。**clip 蒙版描边 ≈ 30fps ✗**（本工程核心痛点之一）。
+- 11 个 plain 图层仍 60fps → 多图层本身不掉帧，partial-render 没必要（v275 已删）。
+- 内存偏紧：iPad mini 2K ~11 层已紧。每满幅层 ≈ 2048²×4 ≈ 16.8MB；11 层 ≈ 184MB。
 
-## 方案权衡（已论证）
+## 1. 为什么是 11 层 vs Procreate 的 124 层（已查清，含上一轮乐观说法的修正）
+`computeMaxLayers = clamp(deviceMemory×0.15, 64, 192) / (W·H·4)`。iPad Safari `navigator.deviceMemory` 缺失→回退 4GB→预算被 **clamp 到 192MB** / 16.78MB ≈ **11**。
+Procreate iPad mini 6（4GB RAM）2048² → **124 层**：反推 ≈ 2GB 预算 / 16.78MB ≈ 124（**此 2GB 是反推 Procreate 原生 app 的预算，不是任何文档数，更不是 PWA 数**）。
+
+**真正的差距是 web ↔ native 的内存待遇，不是每层公式（两边都≈满幅 16.78MB 最坏）：**
+- **PWA/Safari tab 的真上限 = iOS jetsam 每-tab 限额**（已查）：多数设备 ~300–450MB，高 RAM 新 iPad 才报到 ~1–2GB；WebKit MemoryPressureHandler 与 jetsam 取小者，过半即开始施压。web 内容被杀得比原生狠 → 我们拿的远比 Procreate 原生的 ~2GB 少。
+- **修正上一轮的乐观说法**：我说过「WebGL 纹理不计入 Canvas2D 池 → 直接抬预算」。半对：WebGL **确实**绕开 Canvas2D backing 那个 ~384MB 子池，但**统一内存下纹理仍算进同一个 jetsam 每-tab 总预算**。低端 iPad mini 上 384MB 子池≈整个 tab 预算 → 绕开它并不凭空多给一大块；高 RAM iPad 上 tab 预算大得多，WebGL+tiling 才真能解锁更多层。**绕池不是银弹。**
+
+→ 抬层数的真杠杆排序：① **tiling**（让实占 << 预算，是稳健主力，任何设备都吃到）；② WebGL 砍掉 ~50–100MB 辅助 2D canvas + 绕 384MB 子池（高 RAM 设备收益大）；③ Stage 0 在目标 iPad **实测真预算**再定 cap。别再把「绕池」当主力。
+
+## 2. clip 为何贵（live 描边路径）
+描边走 live 直接合成，每帧重合**所有**层。clip 层每帧 = `clearRect(tmp)+drawImage(clip→tmp)+drawImage(base→tmp,destination-in)+drawImage(tmp→screen)` ≈ 4× plain。**关键浪费**：描边期间**静态** clip 层（clip 和 base 都没在画）也每帧重算 60×/s，结果每帧相同。
+→ WebGL 原生解：fragment shader 里 clip = 采基底 alpha 一次过，无 tmp canvas、无 dst-in dance；静态层 tile 已在 GPU，重合成只是重采样。
+
+---
+
+## 3. 目标架构（全 WebGL2，7 个深模块）
+
+**定调**：iPad/桌面都有 WebGL2（iOS 15+ / 2021，**远早于任何 Apple Pencil 设备**——初代 Pencil 的 iPad Pro 2015 也能跑 iPadOS 16）→ **不留 Canvas2D 回退**。古董纯指绘设备给「需要 WebGL2」提示。选 WebGL2 不选 WebGPU：iPad 是手感裁判，WebGL2 有 MAX blend / TEXTURE_2D_ARRAY / FBO 全部所需且铁稳；WebGPU 留未来，本工程不 re-litigate。
+
+领域核心：**文档 = 图层栈；每层 = 稀疏 256² tile 集合的 RGBA8 像素；一切产像素的(笔/填充/变换/滤镜)写 tile，一切耗像素的(板显/导出/缩略图/吸管)读合成后的 tile。**
+
+| # | 深模块 | 窄接口 | 藏住的行为 / deletion test |
+|---|---|---|---|
+| 1 | **GLContext** | `gl()`,`program(name)`,`borrowFBO/return`,能力位,`onLost/onRestored` | 单持久 context、shader 编译缓存、FBO 池、quad VAO、**context-loss 生命周期**。删→每个 GL 调用方重搓 |
+| 2 | **TileStore**（内存杠杆） | `layer.tileAt(tx,ty,{create})`,`forEachTile`,`allocatedTileCount`,`freeTile` | 稀疏分配(空 tile=0 内存)、全透明 tile 回收、`TEXTURE_2D_ARRAY` slice 自由表、内存核算。**突破层数上限的核心**。删→每读写方自管 slice+稀疏 |
+| 3 | **TileResidency**（安全/恢复，本轮新增） | `pin/unpin(layer)`,`evictColdTiles()`,`recoverAll()`,`autosaveTick()` | 压缩备份(RAM)+autosave 到 OPFS；`webglcontextlost→restored` 从备份重上传；**lazy 驻留/分页**(不一次物化整个重文件)+**冷层逐出压缩/磁盘**。**这是「不崩、不毁文件」的模块** |
+| 4 | **Compositor**（替代 layer-composite.ts） | `composite(tree, target, {viewport, overlayFor, floatFor})` | ping-pong 16F 累积、12 可分离 blend + clip(shader 采基底 alpha)、组隔离(子累积器)、pass-through。**真 seam**：target=屏 vs 离屏 readback（两 adapter）。删→合成又在 板/导出/缩略图/吸管 漂移 |
+| 5 | **StrokeRasterizer**（GL 笔刷栅格化） | `begin(brush,p0)`,`extend(p)→dirtyRect`,`previewTexture()`,`commit()` | 实例化 stamp quad、fragment 内 `1−u²(3−2u)` falloff、Build-Up(source-over 累积) vs Wash(`blendEquation MAX`)、**flow 在 Π 内/opacity 在 Π 外**、taper。删→笔刷数学四散。**消费 StrokeSmoother 中心线**(不重写平滑) |
+| 6 | **Board** | 现有 requestRender/pan/zoom 大致不变 | 视口+rAF 调度；pan/zoom=换 viewport transform 重合成（GPU 便宜，可能砍掉 composite cache） |
+| 7 | **PixelReadback adapter** | `readLayer/readComposite → ImageData/blob` | .ora/PNG/PSD/undo/吸管 统一从 GPU readback；非实时路径，低频 |
+
+**刻意不动 / 不抽的边界**：
+- **StrokeSmoother（CPU，保留不动）**：二阶临界阻尼 SmoothDamp + 动量弧 tail，把 raw 指针流平滑成中心线 `cx/cy/cp[] + tail`。这是**顺序状态化的矢量平滑**，本就不是并行像素活，塞 shader 荒谬。「WebGL 重写笔刷」= 栅格化(stamp→像素)进 GPU，**平滑留 CPU**——正确模块边界，不是恋旧。
+- **PixelEdit（保留，重指向 tile）**：undo 事务深模块(begin 拍 before / commit 拍 after+压 PNG / abort 还原)，stroke·liquify·filterBrush·shapes 复用。接口不变，底下 `Layer.snapshot()/restoreFromSnapshot()` 从「bbox ImageData」改成「变更 tile 集」。GL 笔刷照样 `PixelEdit.begin()…commit()` 插进去。
+- **GLContext 单实例**：一个 adapter → 不做「渲染后端可换」抽象（否则得养 2D 尸体）。
+
+**手感钉死的数学是移植目标 spec，不是要保的旧 code**：falloff `1−u²(3−2u)`、Wash=max、flow·opacity 分离、streamline tau、taper、压感 gamma。实现全 GL 重写，用 golden 对拍卡住数学。
+
+---
+
+## 4. 本轮硬问题的设计答复（并入架构，避免文档即刻过期）
+
+### 4.1 不上传纹理 ⇒ RAM 不存图层？——半对，且这是 context-loss 的命门
+图层像素驻 GPU 纹理后，**显示/合成/绘画不需要 CPU 常驻副本**（iPad 统一内存下 GPU 纹理与 RAM 同一物理池，省的是「第二份副本」；PC 独显下真省系统 RAM）。但 **save/undo/吸管/缩略图需要 CPU 像素 → readback-on-demand**（非常驻）。**致命点**：context 一丢纹理全没 → **不能纯 GPU 驻留无备份** → TileResidency 持一份**压缩备份**(RAM 压缩 tile + autosave 到 OPFS)，掉 context/被杀后从备份重建。
+**「双份内存」的修正**：备份是**压缩 tile**（PNG/zlib ≈ 1–4MB/满幅层），不是 raw 16.78MB → 额外只 ~1.1×，不是 2×。所以「GPU+RAM 双份」不是主要因素，主要因素是 web↔native 待遇（§1）。
+**Procreate 不付这份税**：原生 Metal **后台不丢 GPU 资源**（无 WebGL 那种 context lost 事件），统一内存里就一份 tiled 副本、冷 tile 分页到磁盘；被整个杀才从存盘重载。我们这点 ~1.1× 是 web 端「context 可丢」的固有税。
+
+### 4.2 不设层数上限会 OOM/闪退/毁文件？——会，所以要软上限（不是硬上限）
+不设任何限 + 用户堆层堆到 OOM：iOS jetsam 杀 tab/PWA → 未存丢失；更糟，**磁盘文件编码的 tile 多到载入即 OOM → 打开就闪退的毒文件**。
+**但上限必须软（resize 时的 hint + 警告），绝不能硬（拒绝操作/拒绝打开）**——因为高 cap 设备（iPad Pro 8–16GB）存的 60 层 .ora 必须能在 iPad mini 上**打开**（分页降速，不是拒开/损坏）。硬 cap = 跨设备毒文件。
+对策（TileResidency 负责）：**实占内存感知的软上限 + 临界前警告**；**lazy tile 驻留**(载入不一次物化所有 tile，按可视/活跃流式上)+**冷层逐出压缩/磁盘** → 重文件**退化(变慢)而非崩溃**，文件永远可开。这正是 Procreate 的分页模型。
+**保守估算（待 Stage 0 实测校准）**：满幅层 GPU 16.78MB + 压缩备份 ~1–4MB ≈ ~18–21MB/层；按 iPad mini PWA tab 预算保守取（§1，~300–450MB 偏低端）→ 最坏满幅 ~15–25 层、配 tiling 稀疏典型可达 30–50+。**30–50 对二次元工作流 good enough**；真数 Stage 0 在目标机测。
+
+### 4.3 undo 用高压省内存？——真杠杆是 tiling 的 per-tile delta，不是更高压缩比
+undo 必须**无损**(有损快照=静默改像素=数据红线)，PNG/zlib 已够，调高压缩级别只是边际。真省内存的是：tiling 后一笔只碰几个 tile → undo 快照 = **只存变更的 tile**(per-tile delta)，不再是整个 layer bbox。PixelEdit 的 before/after 快照天然映射成 tile 集 → 典型描边 undo 内存大降，免费。
+
+### 4.4 旁边跑大游戏抢显存 / 切出去玩回来 → GL context 怎样？（PC+iOS，browser+PWA）
+**已查实**：iOS Safari/PWA 后台**会丢 WebGL context**（尤其旁边大游戏逼近显存上限时，iOS 16.7/17 已知行为；Safari 17.1.x 缓解部分误丢但根本机制还在）。PC(独显)旁边跑游戏 → 显存争用可触发 context lost / TDR GPU reset，纹理失效。
+- **PWA(standalone) 比 Safari tab 更易被后台杀**（iOS 历史如此）→ 全杀场景必须靠 autosave 重载恢复。
+- 统一对策(TileResidency)：①必接 `webglcontextlost`(preventDefault)+`restored`(从压缩备份重上传所有 tile/重编 shader/重建 FBO)；②**autosave 到 OPFS** 兜「整 tab/PWA 被杀」；③主动**降显存压力**(逐冷层、空 tile 不占)让丢的概率更低。
+- 同屏开原神参考：可行但显存共享，本就该靠 ①②③ 兜——这恰好是 TileResidency 存在的理由，不是额外负担。
+
+---
+
+## 5. 分阶段（深模块构建序；旧 2D 输出冻成 golden fixture 当对拍基准，重写完删）
+1. **GLContext + TileStore + TileResidency 骨架** — 地基。TileStore 靠 readPixels round-trip 测稀疏/回收，不依赖显示。TileResidency 先做 context-loss 重建 + autosave round-trip 测。
+2. **Compositor** vs TileStore — golden 对拍：12 模式+clip+组 像素匹配冻结的旧 2D 输出。Board 切 GL；载入/commit 时把现有像素桥接进 tile（**唯一过渡桥**，phase 3 删；用户已认可中途 iPad 测一次）。**交付：clip 60fps + tiling 内存 + 抬层数上限 + 验证 WebGL 是否逃出 Canvas2D 池。真机批 #1。**
+3. **StrokeRasterizer** — GL stamp→stroke FBO→tile commit，删 CPU 栅格化 + 过渡桥。golden 对拍现笔刷(Wash/Buildup/falloff/flow·opacity)。**交付：全 GL 管线 + 16F 去 banding(bonus)。真机批 #2(手感裁判)。**
+4. **收尾** — 删 layer-composite.ts/ensureBbox/composite cache/erase·clip temp；导出·缩略图·吸管走 GL readback；`computeMaxLayers` 改 tile 实占软预算 + 警告；内存 HUD。
+
+风险集中在 **②Compositor blend 对拍** 和 **③笔刷手感对拍**，两处都 golden 卡死、不靠真机兜底。worktree 上做，WIP commit 防丢，coherent 后真机批量验、merge 回 main。
+
+## 6. 历史权衡（v276 已论证，留作不 re-litigate）
 | 方案 | 结论 |
 |---|---|
-| **三明治**（缓存 active 上/下，每帧只合 active） | **否决**：active 上方有多个不同 blend mode 时，"above" 无法预合成一张 source-over 图（每个 blend 要真实 below+active 背景）→ 频繁回退全合，复杂度白付。用户点破。 |
-| **clip 结果缓存**（缓存每个静态 clip 层的 clip∩base，每帧只 blit） | 可行：clip 层降到 ~1 drawImage = plain 代价，**原生兼容 blend mode**；epoch（wp:histchange）失效 + liveLayerId 旁路。**但加内存**（每 clip 一张缓存）→ 在内存吃紧下方向错 → 暂缓。 |
-| **WebGL/WebGPU 渲染器** | **真正答案**（见下）。 |
-| **tiling 稀疏分块** | **per-layer 内存的真正杠杆**（见下）。 |
+| 三明治(缓存 active 上/下) | **否决**：active 上方多个不同 blend 时 above 无法预合成一张 source-over → 频繁回退全合。用户点破。 |
+| clip 结果缓存(每静态 clip 层缓存 clip∩base) | 可行但**加内存**，内存吃紧下方向错 → WebGL 原生解之，不需要。 |
+| partial-render | 11 plain 层 60fps 证明多层不掉帧，复杂度没必要(v275 已删)。 |
 
-## WebGL 能否优化内存？（用户问，已答）
-- **per-layer 存储：无直接收益**。GPU 纹理 ≈ canvas backing（RGBA8 4 字节/px）。11 层 ≈ 184MB 两者一样。
-- **辅助内存：大收益**。2D 路径要一堆额外 canvas 才快（合成缓存 16MB、clip/erase tmp、潜在 clip 缓存）。
-  WebGL 在 shader 里每帧重合，**这些缓存全不需要** → 重负载下省 ~50–100MB。且 clip/blend 一次过 → 无 clip 缓存内存。
-- **clip 性能：原生解决**（fragment shader 一次过 clip+blend+合成，30fps 问题消失）。
-- **per-layer 内存真正的解法是 tiling**（稀疏 256² tile，只分配有画的 tile）。空层 ≈ 0 内存。Procreate 即此法。
-  tiling 配 WebGL 自然，但它本身才是攻 184MB baseline 的杠杆；WebGL 单独不缩 baseline。
-
-## 路线图（用户已记 todo，本批不碰）
-1. **WebGL/WebGPU 渲染器**：clip/blend/合成进 shader → clip 60fps + 去辅助内存 + 为 tiling 铺路。
-2. **tiling**：稀疏分块图层 → 攻 per-layer 内存 baseline。
-- **大工程、多 session、风险在笔刷手感 path（human-pinned）**。当独立项目**认真规划**，不要 mid-stream bolt-on。
-- 临时止血（若内存逼急、又不上 WebGL）：不加 clip 缓存；白边 1:1 缓存可改按需/可关；紧 bbox；压缩/限 undo。
+## 7. bonus（in-reach，不进核心范围免膨胀）
+- **RGBA16F 累积关 banding**：tile 存 RGBA8(省内存)，合成/笔刷累积在 RGBA16F FBO(去 8-bit round)，present 落 8-bit。顺手修 backlog 大喷枪 banding，不翻倍图层内存。
 
 ## 引用
-- 统一合成器：`src/layer-composite.js`（`compositeLayers` 已含递归组隔离 + per-level clip）。
-- 1:1 合成缓存 + 内容-only 失效：`src/board.js`（`ensureCompositeCache` / `render` / `_drawDocBg`），v274–v275。
-- FPS 计（防煤气灯）：设置→调试→「FPS 计」（v275）。
+- 现 2D 合成器：`src/layer-composite.ts`（重写后删，先冻 golden）。
+- 现笔刷：`src/brush.ts`(栅格化重写) + `src/stroke-smoother.ts`(**保留**) + `src/resolved-brush.ts`。
+- undo 事务：`src/pixel-edit.ts`(保留，重指向 tile) + `src/history.ts`。
+- 图层存储：`src/doc.ts`(`Layer`/`computeMaxLayers`/`ensureBbox` 改 tile)。
+- board：`src/board.ts`(`ensureCompositeCache`/`render`/视口)。
+- blend 列表(12 可分离)：`src/layers-panel.ts:71` `LAYER_MODE_LABEL`。

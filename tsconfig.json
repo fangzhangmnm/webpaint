@@ -155,6 +155,8 @@
     "src/brush-rack-view.ts",
     "src/pointer-gesture.ts",
     "src/resolved-brush.ts",
-    "src/ora-stack-xml.ts"
+    "src/ora-stack-xml.ts",
+    "src/gl/tile-geometry.ts",
+    "src/gl/tile-store.ts"
   ]
 }
