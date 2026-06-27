@@ -13,6 +13,7 @@ import { TILE_SIZE } from "../../src/gl/tile-geometry.ts";
 import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { TileIndexTexture } from "../../src/gl/tile-index.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
+import { uploadLayerToTiles, docTreeToComp } from "../../src/gl/gl-doc-bridge.ts";
 import { compositeLayers } from "../../src/layer-composite.ts";
 
 interface Check { name: string; ok: boolean; detail: string; }
@@ -262,6 +263,45 @@ function overlayParity(glctx: GLContext, add: Add): void {
   i0.dispose(); i1.dispose(); glctx.gl.deleteTexture(ovTex);
 }
 
+// ---- E) 真桥端到端：doc 节点（bbox 裁剪 Canvas2D 层）→ uploadLayerToTiles → docTreeToComp → GL
+//        vs compositeLayers（同一组 fake-Layer 同时喂两边）。验 bbox 偏移切 tile + 翻译 + 全文档合成。
+function makeLayerCanvas(w: number, h: number, fn: (x: number, y: number) => [number, number, number, number]): HTMLCanvasElement {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const im = new ImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const [r, g, b, a] = fn(x, y); const i = (y * w + x) * 4;
+    im.data[i] = r; im.data[i + 1] = g; im.data[i + 2] = b; im.data[i + 3] = a;
+  }
+  c.getContext("2d")!.putImageData(im, 0, 0);
+  return c;
+}
+function bridgeParity(glctx: GLContext, add: Add): void {
+  const N = 512;
+  const backend = new GLTileBackend(glctx, 40); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  const scratch = document.createElement("canvas");
+  // fake-Layer：bbox 裁剪、含偏移层；同时是 compositeLayers 的 golden 输入。
+  const A = { isGroup: false, id: 1, opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: makeLayerCanvas(N, N, (x, y) => [60, 120 + (x % 120), 60 + (y % 160), 255]) };
+  const B = { isGroup: false, id: 2, opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 100, bboxY: 80, bboxW: 300, bboxH: 260, canvas: makeLayerCanvas(300, 260, (x, y) => [220, 80 + (x % 150), 60, 200]) };
+  const C = { isGroup: false, id: 3, opacity: 1, mode: "source-over", clippingMask: true, visible: true, bboxX: 120, bboxY: 100, bboxW: 260, bboxH: 220, canvas: makeLayerCanvas(260, 220, (x, y) => [60, 200, 200, (x + y < 200) ? 255 : 90]) };
+  const grp = { isGroup: true, id: 4, opacity: 0.85, mode: "source-over", clippingMask: false, visible: true, children: [B, C] };
+  const nodes = [A, grp];
+
+  const res = new Map<number, ReturnType<typeof uploadLayerToTiles>>();
+  for (const leaf of [A, B, C]) res.set(leaf.id, uploadLayerToTiles(glctx, backend, pool, leaf, N, N, scratch));
+
+  const gc = document.createElement("canvas"); gc.width = N; gc.height = N;
+  const gctx = gc.getContext("2d")!; gctx.clearRect(0, 0, N, N);
+  compositeLayers(gctx as unknown as CanvasRenderingContext2D, nodes as never, {});
+  const ref = gctx.getImageData(0, 0, N, N).data;
+
+  const tree = docTreeToComp(nodes as never, (leaf) => { const r = res.get((leaf as { id: number }).id)!; return { index: r.index, hasContent: r.tileMap.tileCount > 0 }; });
+  const accum = comp.composite(backend.texture, tree, N, N);
+  const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
+  const { md, at } = maxPremulDiff(ref, glpx, N);
+  add("bridge:doc→tiles→GL full-doc vs compositeLayers", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  res.forEach((r) => r.index.dispose());
+}
+
 function run(): { ok: boolean; checks: Check[]; error: string | null } {
   const checks: Check[] = [];
   const add: Add = (name, ok, detail = "") => checks.push({ name, ok, detail });
@@ -324,6 +364,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { multiTileParity(glctx, add); } catch (e) { add("multitile parity", false, String(e)); }
   try { groupParity(glctx, add); } catch (e) { add("group parity", false, String(e)); }
   try { overlayParity(glctx, add); } catch (e) { add("overlay parity", false, String(e)); }
+  try { bridgeParity(glctx, add); } catch (e) { add("bridge parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);
