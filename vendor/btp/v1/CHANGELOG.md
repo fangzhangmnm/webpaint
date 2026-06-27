@@ -8,6 +8,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 Wire compatibility: all `/v1/*` endpoints stay forward-compatible within 1.x
 (fields may be added, never removed or re-meaning'd).
 
+## 1.3.0
+
+Added — **reference-image API** (`listReferences`, `getReference`,
+`putReference`, `deleteReference`) — see `docs/adr/0001`. A reference is a
+metadata-only placement that links a texture by name (send the pixels via the
+texture endpoints first); `putReference` is an idempotent upsert. Realised in
+Blender as an Image Empty tagged `btp_ref=<name>`, normalised to longest-edge =
+1 (aspect follows the linked image). Wire stays `/v1`.
+
+Addon `btp-0.5.0`, shipped together: removed the orphaned WebRTC server
+(`webrtc.py` / `signaling.py` / `frame.py` / `sdp_envelope.py` + all
+aiortc/av/cryptography wheels) — the addon is pure-stdlib again; remote access is
+a direct HTTPS URL (e.g. `tailscale serve`). Pre-prune state at git tag
+`archive/webrtc-addon`.
+
 ## 1.2.0
 
 Removed — the **WebRTC remote transport** (`connectRemote`, `channelFetch`,

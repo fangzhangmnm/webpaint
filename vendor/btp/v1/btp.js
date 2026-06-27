@@ -9,9 +9,10 @@
 // 1.1.0: added remote transport (connectRemote / signaling.js / webrtc-fetch.js).
 // 1.2.0: removed the WebRTC remote transport — remote access is now plain HTTPS
 //        (point baseUrl at any URL reaching the server, e.g. via `tailscale serve`).
-//        Wire endpoints unchanged (still v1); only the client bundle's API shrank.
+// 1.3.0: added the reference-image API (listReferences / getReference /
+//        putReference / deleteReference) — see docs/adr/0001. Wire stays v1.
 export const PROTOCOL = "v1";
-export const BUNDLE_VERSION = "1.2.0";
+export const BUNDLE_VERSION = "1.3.0";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:18765";
 
@@ -101,6 +102,38 @@ export class BTPClient {
 
   async getSelection() {
     return this._send("GET", "/v1/selection");
+  }
+
+  // ─── References (ADR-0001) ───
+  // A reference is a metadata-only placement that links a texture by NAME — send
+  // the pixels via the texture endpoints first, then upsert the reference. Upsert
+  // is idempotent by name (create if absent, else relink + re-place).
+
+  async listReferences() {
+    return this._send("GET", "/v1/references");
+  }
+
+  async getReference(name) {
+    return this._send("GET", `/v1/references/${enc(name)}`);
+  }
+
+  /**
+   * Create-or-update a reference by name (idempotent).
+   * @param {string} name
+   * @param {{ image: string, placement?: object, opacity?: number }} spec
+   *   image    — an existing texture name (pixels already sent).
+   *   placement — { mode:"view", view:"front"|"back"|"left"|"right"|"top"|"bottom" }
+   *               or { mode:"transform", location, rotation, scale }.
+   */
+  async putReference(name, spec) {
+    return this._send("PUT", `/v1/references/${enc(name)}`, {
+      body: JSON.stringify(spec),
+      contentType: "application/json",
+    });
+  }
+
+  async deleteReference(name) {
+    return this._send("DELETE", `/v1/references/${enc(name)}`);
   }
 
   // ─── Ad-hoc commands ───

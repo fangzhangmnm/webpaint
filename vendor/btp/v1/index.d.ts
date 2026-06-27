@@ -40,6 +40,36 @@ export interface Selection {
   mesh: null;
 }
 
+// ─── References (ADR-0001) ───
+
+/** Where a reference image sits in the scene. Minimal to start; extensible. */
+export type Placement =
+  | { mode: "view"; view: "front" | "back" | "left" | "right" | "top" | "bottom" | "camera" }
+  | {
+      mode: "transform";
+      location?: [number, number, number];
+      rotation?: [number, number, number];
+      scale?: [number, number, number];
+    };
+
+export interface ReferenceSpec {
+  /** An existing texture name (send its pixels via the texture endpoints first). */
+  image: string;
+  placement?: Placement;
+  /** 0..1; default 1. */
+  opacity?: number;
+}
+
+export interface Reference {
+  name: string;
+  image: string | null;
+  /** The backing Blender object name. */
+  object: string;
+  location: [number, number, number];
+  rotation: [number, number, number];
+  opacity: number;
+}
+
 /** Accepted request body for binary uploads. */
 export type PngBody = Blob | ArrayBuffer | Uint8Array;
 
@@ -82,6 +112,14 @@ export class BTPClient {
   createTexture(name: string, png: PngBody): Promise<TextureMetadata>;
   renameTexture(name: string, newName: string): Promise<TextureMetadata>;
   getSelection(): Promise<Selection>;
+
+  /** Reference images (ADR-0001) — metadata-only placements linking a texture by name. */
+  listReferences(): Promise<Reference[]>;
+  getReference(name: string): Promise<Reference>;
+  /** Create-or-update a reference by name (idempotent upsert; relinks image + re-applies aspect). */
+  putReference(name: string, spec: ReferenceSpec): Promise<Reference>;
+  deleteReference(name: string): Promise<{ deleted: string }>;
+
   /** Server-defined ad-hoc command; NOT covered by version guarantees. */
   exec(command: string, params?: Record<string, unknown>): Promise<unknown>;
   /** Escape hatch for endpoints not wrapped above. */
