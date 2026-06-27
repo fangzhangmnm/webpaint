@@ -45,6 +45,7 @@ let connState: "off" | "connecting" | "on" = "off";
 let connDetail = "";
 let pullTarget: "new" | "overwrite" = "new";    // 拉取去向
 let uploadSource: "merged" | "active" = "merged"; // 推送来源
+let uploadAsRef = false;                           // 推送后是否建/更新参考图（名字同贴图名）
 let built = false;
 
 // ─── DOM 引用（buildPanel 填充）───
@@ -220,8 +221,10 @@ async function push() {
           throw e;
         }
       }
+      // 也作为参考图：参考名 = 贴图名（object / texture 同名）。像素刚发完，幂等 upsert。
+      if (uploadAsRef) await client!.putReference(name, { image: name });
     });
-    ctx.setStatus(`已推送「${name}」到 Blender`);
+    ctx.setStatus(`已推送「${name}」到 Blender` + (uploadAsRef ? "（含参考图）" : ""));
     refreshTextureList();   // 新建的名字现在可见了
   } catch (e) {
     ctx.setStatus("推送失败：" + errMsg(e), true);
@@ -298,7 +301,7 @@ async function pull() {
 // ───────────────────── 随文档持久化（.ora webpaintState 搭便车）─────────────────────
 // 由 session-state.storeEditorStateToOra / restoreEditorStateFromOra 编排，跟 reference/palette 同款。
 export function getBlenderSyncState():
-  | { textureName: string; resW: string; resH: string; uploadSource: string; pullTarget: string }
+  | { textureName: string; resW: string; resH: string; uploadSource: string; pullTarget: string; uploadAsRef: boolean }
   | undefined {
   if (!built) return undefined;
   return {
@@ -307,6 +310,7 @@ export function getBlenderSyncState():
     resH: sizeH.value,
     uploadSource,
     pullTarget,
+    uploadAsRef,
   };
 }
 export function applyBlenderSyncState(s?: unknown) {
@@ -317,13 +321,16 @@ export function applyBlenderSyncState(s?: unknown) {
   sizeH.value = typeof o.resH === "string" ? o.resH : "";
   uploadSource = o.uploadSource === "active" ? "active" : "merged";
   pullTarget = o.pullTarget === "overwrite" ? "overwrite" : "new";
+  uploadAsRef = o.uploadAsRef === true;
   syncConfigUI();
 }
 
 // 把 uploadSource/pullTarget 反映到 ⋯ 配置的 radio + 行内 sub 标签。
 function syncConfigUI() {
   dlSub.textContent = pullTarget === "new" ? "新图层" : "覆盖当前";
-  ulSub.textContent = uploadSource === "merged" ? "合并画布" : "当前图层组";
+  ulSub.textContent = (uploadSource === "merged" ? "合并画布" : "当前图层组") + (uploadAsRef ? " · +参考" : "");
+  const asRef = panel.querySelector<HTMLInputElement>("#btpAsRef");
+  if (asRef) asRef.checked = uploadAsRef;
   for (const r of panel.querySelectorAll<HTMLInputElement>('input[name="btpPull"]')) {
     r.checked = r.value === pullTarget;
   }
@@ -408,6 +415,9 @@ function buildPanel() {
             <label><input type="radio" name="btpSrc" value="merged" checked /> 合并画布</label>
             <label><input type="radio" name="btpSrc" value="active" /> 当前图层 / 组</label>
           </div>
+          <div class="menu-config-section">
+            <label><input type="checkbox" id="btpAsRef" /> 推送后建/更新参考图</label>
+          </div>
         </div>
       </div>
       <div class="btp-row">
@@ -464,6 +474,10 @@ function buildPanel() {
   for (const r of panel.querySelectorAll<HTMLInputElement>('input[name="btpSrc"]')) {
     r.addEventListener("change", () => { if (r.checked) { uploadSource = r.value === "active" ? "active" : "merged"; syncConfigUI(); } });
   }
+  q<HTMLInputElement>("#btpAsRef").addEventListener("change", (e) => {
+    uploadAsRef = (e.target as HTMLInputElement).checked;
+    syncConfigUI();
+  });
 
   // 分辨率预设下拉 → 把算好的实数填进两个文本框（文本框始终是真源），随即复位下拉。
   //   原尺寸 = doc W/H；比例 ≤N = 保持比例缩进 N 见方（不放大）；方 N² = N×N。
