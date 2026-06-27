@@ -159,6 +159,8 @@
     "src/gl/tile-geometry.ts",
     "src/gl/tile-store.ts",
     "src/gl/gl-context.ts",
-    "src/gl/tile-backend-gl.ts"
+    "src/gl/tile-backend-gl.ts",
+    "src/gl/blend-glsl.ts",
+    "src/gl/gl-compositor.ts"
   ]
 }

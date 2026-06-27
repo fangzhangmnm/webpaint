@@ -12,11 +12,15 @@
 // 验证边界：本模块全是 gl.* 调用，node DOM-shim 下是 no-op → **node 测不了，真机批验证**。
 //   故刻意只放标准、可读、无分支魔法的 GL 样板；易错点（FBO 完整性 / float 目标 params）逐行注释。
 
+// 渲染目标精度档：u8=RGBA8（present/屏显），f16=RGBA16F（合成累积，§7 banding bonus），
+//   f32=RGBA32F（精度验证/陡 blend 模式；比 f16 多一倍 transient，仅累积器一张、不乘层数）。
+export type FBOPrec = "u8" | "f16" | "f32";
+
 export interface GLCaps {
   maxTextureSize: number;        // MAX_TEXTURE_SIZE（iPad Apple GPU ≥ 16384）
   maxArrayLayers: number;        // MAX_ARRAY_TEXTURE_LAYERS（tile 池深度上界）
   maxTextureUnits: number;       // MAX_TEXTURE_IMAGE_UNITS（≥16；用不到那么多，ping-pong 逐层叠）
-  floatColorBuffer: boolean;     // 能否渲到 RGBA16F（§7 banding bonus + 16F 累积）
+  floatColorBuffer: boolean;     // 能否渲到 RGBA16F/32F（EXT_color_buffer_float）
 }
 
 // 池化的离屏渲染目标：framebuffer + 它的颜色纹理。
@@ -25,7 +29,7 @@ export interface PooledFBO {
   tex: WebGLTexture;
   w: number;
   h: number;
-  float: boolean;
+  prec: FBOPrec;
 }
 
 export class GLContext {
@@ -127,34 +131,37 @@ export class GLContext {
   }
 
   // ---- FBO 池 ----
-  // 借一个 ≥ 请求尺寸的渲染目标。float=true 要 RGBA16F（caps.floatColorBuffer 须真）。
-  // 池里找精确同尺寸同 float 的复用；否则新建。用完 returnFBO 还回。
-  borrowFBO(w: number, h: number, float = false): PooledFBO {
+  // 借一个 ≥ 请求尺寸的渲染目标。f16/f32 要 caps.floatColorBuffer。
+  // 池里找精确同尺寸同精度的复用；否则新建。用完 returnFBO 还回。
+  borrowFBO(w: number, h: number, prec: FBOPrec = "u8"): PooledFBO {
     for (let i = 0; i < this._fboPool.length; i++) {
       const f = this._fboPool[i];
-      if (f.w === w && f.h === h && f.float === float) {
+      if (f.w === w && f.h === h && f.prec === prec) {
         this._fboPool.splice(i, 1);
         return f;
       }
     }
-    return this._createFBO(w, h, float);
+    return this._createFBO(w, h, prec);
   }
 
   returnFBO(f: PooledFBO): void {
     this._fboPool.push(f);
   }
 
-  private _createFBO(w: number, h: number, float: boolean): PooledFBO {
+  private _createFBO(w: number, h: number, prec: FBOPrec): PooledFBO {
     const gl = this.gl;
     const tex = gl.createTexture();
     if (!tex) throw new Error("CREATE_TEXTURE_FAILED");
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    // float 目标用 RGBA16F + HALF_FLOAT；否则 RGBA8。线性过滤给视口缩放采样用。
-    const internal = float ? gl.RGBA16F : gl.RGBA8;
-    const type = float ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+    // 精度档 → internalformat + type。f16/f32 线性过滤给视口缩放采样用。
+    const internal = prec === "f32" ? gl.RGBA32F : prec === "f16" ? gl.RGBA16F : gl.RGBA8;
+    const type = prec === "f32" ? gl.FLOAT : prec === "f16" ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
     gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, gl.RGBA, type, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    // NEAREST：累积器/中间 FBO 全是 1:1 采样（v_uv 对齐像素网格），不需要 LINEAR。
+    //   且 RGBA32F + LINEAR 需 OES_texture_float_linear（iPad/SwiftShader 不保证）→ 纹理不完整、
+    //   采样返回 (0,0,0,1)。视口缩放的屏幕 present（后续接 board）再单独配 LINEAR 采样。
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     const fbo = gl.createFramebuffer();
@@ -164,11 +171,11 @@ export class GLContext {
     // 完整性检查（真机易错点：float 目标在某些设备非 color-renderable）。
     const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     if (status !== gl.FRAMEBUFFER_COMPLETE) {
-      throw new Error(`FBO_INCOMPLETE:0x${status.toString(16)}:float=${float}`);
+      throw new Error(`FBO_INCOMPLETE:0x${status.toString(16)}:prec=${prec}`);
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
-    return { fbo, tex, w, h, float };
+    return { fbo, tex, w, h, prec };
   }
 
   // ---- 单位 quad（两个三角形覆盖 [0,1]²；位置即 uv）----
