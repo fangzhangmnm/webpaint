@@ -439,6 +439,32 @@ function stampParity(glctx: GLContext, add: Add): void {
   }
 }
 
+// ---- E4) bg 接缝 golden：GL 棋盘背景 vs 2D 棋盘 + compositeLayers ----
+function drawCheckerRef(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const gray = (Math.floor(x / 16) + Math.floor(y / 16)) % 2 >= 1;
+    const v = gray ? 200 : 255;
+    ctx.fillStyle = `rgb(${v},${v},${v})`; ctx.fillRect(x, y, 1, 1);
+  }
+}
+function checkerParity(glctx: GLContext, add: Add): void {
+  const N = 192;
+  const backend = new GLTileBackend(glctx, 16); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  // 半透明层（部分覆盖）→ 透明处应显棋盘
+  const layerCanvas = makeLayerCanvas(N, N, (x, y) => (x > 48 && x < 144 && y > 48 && y < 144) ? [200, 40, 40, 128] : [0, 0, 0, 0]);
+  const lt = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, layerCanvas) }, N, N);
+  const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: lt.tileMap.tileCount > 0, overlay: null }];
+  const accum = comp.composite(backend.texture, tree as never, N, N, "checker");
+  const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
+  const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
+  const rctx = ref.getContext("2d")!;
+  drawCheckerRef(rctx, N, N); rctx.drawImage(layerCanvas, 0, 0);   // 层 source-over 棋盘
+  const refData = rctx.getImageData(0, 0, N, N).data;
+  const { md, at } = maxPremulDiff(refData, glpx, N);
+  add("checker:GL 棋盘背景 vs 2D 棋盘+层", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  lt.index.dispose();
+}
+
 // ---- E3) 全管线 golden：真 BrushEngine CPU 描边(getLiveOverlay) vs collectStamps→GPU 栅格 ----
 //   验证「手感数学(CPU 出 stamp) + GPU 栅格」整条管线匹配**真 CPU 笔刷**（非公式再实现）。
 //   两边都是 pre-opacity 的 stroke 像素（frozen+tail）；CPU overlay 直 α → 转预乘 vs GPU 预乘。
@@ -550,6 +576,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { tilePixelsParity(add); } catch (e) { add("tilepixels parity", false, String(e)); }
   try { stampParity(glctx, add); } catch (e) { add("stamp parity", false, String(e)); }
   try { brushPipelineParity(glctx, add); } catch (e) { add("brushpipe parity", false, String(e)); }
+  try { checkerParity(glctx, add); } catch (e) { add("checker parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);

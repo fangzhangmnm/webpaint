@@ -8,6 +8,7 @@
 import { GLTileBackend } from "./tile-backend-gl.ts";
 import { TilePool, TILE_BYTES } from "./tile-store.ts";
 import { GLCompositor } from "./gl-compositor.ts";
+import type { Background } from "./gl-compositor.ts";
 import { uploadLayerToTiles, docTreeToComp } from "./gl-doc-bridge.ts";
 import type { DocNode, DocLeaf, LayerTiles } from "./gl-doc-bridge.ts";
 import type { OverlayDesc } from "./gl-compose-plan.ts";
@@ -83,7 +84,7 @@ export class GLDocRenderer {
 
   // 合成整棵树 → 可见画布（视口仿射 = board _applyDocTransform 的 6 参；含 live overlay）。需先 sync。
   // bg = doc 背景色（预乘 [r,g,b,a]；缺省透明）。
-  renderToScreenAffine(nodes: DocNode[], docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, bg?: [number, number, number, number]): void {
+  renderToScreenAffine(nodes: DocNode[], docW: number, docH: number, affine: number[], canvasW: number, canvasH: number, bg?: Background): void {
     const accum = this._composite(nodes, docW, docH, bg);
     this._comp.presentToScreenAffine(accum.tex, docW, docH, affine, canvasW, canvasH);
     this._glctx.returnFBO(accum);
@@ -98,7 +99,7 @@ export class GLDocRenderer {
 
   // 合成 → 预乘累积器 FBO（caller 负责 returnFBO/present/readback）。给 GLBoard 缓存 + 导出/缩略图/吸管复用。
   // bg = doc 背景色（预乘）。setOverlay 先调（描边时）。
-  composite(nodes: DocNode[], docW: number, docH: number, bg?: [number, number, number, number]): PooledFBO {
+  composite(nodes: DocNode[], docW: number, docH: number, bg?: Background): PooledFBO {
     return this._composite(nodes, docW, docH, bg);
   }
   // 把一张（缓存的）合成纹理按视口仿射 present 到屏（pan/zoom 只走这步，便宜）。smooth 见 compositor。
@@ -107,7 +108,7 @@ export class GLDocRenderer {
   }
   returnFBO(fbo: PooledFBO): void { this._glctx.returnFBO(fbo); }
 
-  private _composite(nodes: DocNode[], docW: number, docH: number, bg?: [number, number, number, number]): PooledFBO {
+  private _composite(nodes: DocNode[], docW: number, docH: number, bg?: Background): PooledFBO {
     const ov = this._overlay;
     const tree = docTreeToComp(
       nodes,

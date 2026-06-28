@@ -8,6 +8,7 @@ import { GLContext } from "./gl-context.ts";
 import { GLDocRenderer } from "./gl-doc-renderer.ts";
 import type { OverlayInput } from "./gl-doc-renderer.ts";
 import type { DocNode } from "./gl-doc-bridge.ts";
+import type { Background } from "./gl-compositor.ts";
 import type { PooledFBO } from "./gl-context.ts";
 
 export interface GLDoc { layers: DocNode[]; width: number; height: number; }
@@ -55,7 +56,9 @@ export class GLBoard {
 
     if (contentChanged || livePreview || !this._cache) {
       this._renderer.setOverlay(livePreview ? overlay : null, doc.width, doc.height);
-      const bg: [number, number, number, number] | undefined = docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;
+      // docBg：null=透明（void 透出）/ "checker"=棋盘背景 / "#rrggbb"=预乘纯色。
+      const bg: Background | undefined = docBg === "checker" ? "checker"
+        : docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;
       const fresh = this._renderer.composite(doc.layers, doc.width, doc.height, bg);
       if (this._cache) this._renderer.returnFBO(this._cache);
       this._cache = fresh;

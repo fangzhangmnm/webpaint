@@ -18,8 +18,26 @@ import type { CompNode, OverlayDesc } from "./gl-compose-plan.ts";
 import type { TileIndexTexture } from "./tile-index.ts";
 import type { GLContext, PooledFBO, FBOPrec } from "./gl-context.ts";
 
+// 文档背景接缝（对齐 2D compositeLayers 的 bg + board._drawCheckerboard）：
+//   undefined = 透明（present 时 void 色透出）；[r,g,b,a] = 预乘纯色（doc 背景色）；"checker" = 透明棋盘。
+export type Background = [number, number, number, number] | "checker";
+
 // 可变 ping-pong 对（pass-through 组要在同一累积器上续 pass，故按引用传递）。
 interface Acc { read: PooledFBO; write: PooledFBO; }
+
+// 棋盘背景（doc 空间，16px 格，#fff/#c8c8c8）——逐位匹配 board._drawCheckerboard。预乘不透明。
+//   docPos = v_uv·docSize（与 composite frag 的层采样同约定 → 自动对齐）。
+const CHECKER_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform vec2 u_docSize;
+out vec4 o;
+void main(){
+  vec2 d = v_uv * u_docSize;
+  float c = mod(floor(d.x / 16.0) + floor(d.y / 16.0), 2.0);
+  vec3 col = (c >= 1.0) ? vec3(0.784314) : vec3(1.0);   // #c8c8c8 / #ffffff
+  o = vec4(col, 1.0);
+}`;
 
 const PRESENT_FRAG = `#version 300 es
 precision highp float;
@@ -64,7 +82,7 @@ export class GLCompositor {
   // arrayTex = TileBackend 稀疏 tile 池纹理；docW/H = doc 像素尺寸。
   // bg = 底色（**预乘** [r,g,b,a]，doc 背景色；缺省透明）。顶层用 doc bg；组 sub-accumulator 永远透明。
   // VAO/viewport 在此绑定一次；隔离组递归走 _composeFresh（**不碰 VAO**，否则解绑会废掉外层后续 pass）。
-  composite(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: [number, number, number, number]): PooledFBO {
+  composite(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
     const gl = this._glctx.gl;
     gl.bindVertexArray(this._glctx.quadVAO());
     gl.viewport(0, 0, docW, docH);
@@ -75,15 +93,28 @@ export class GLCompositor {
   }
 
   // 内部：合兄弟数组进一张新累积器返回（假设 VAO 已绑、viewport 已设）。隔离组递归用它（清透明）。
-  private _composeFresh(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: [number, number, number, number]): PooledFBO {
+  private _composeFresh(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
     const acc: Acc = {
       read: this._glctx.borrowFBO(docW, docH, this._prec),
       write: this._glctx.borrowFBO(docW, docH, this._prec),
     };
-    this._clear(acc.read, bg);
+    if (bg === "checker") { this._clear(acc.read, undefined); this._drawChecker(acc.read, docW, docH); }
+    else this._clear(acc.read, bg);
     this._applyNodes(arrayTex, nodes, acc, docW, docH);
     this._glctx.returnFBO(acc.write);
     return acc.read;
+  }
+
+  // 棋盘背景 pass → 填进累积器（doc 空间）。VAO 已由 composite() 绑、viewport 已设。
+  private _drawChecker(f: PooledFBO, docW: number, docH: number): void {
+    const gl = this._glctx.gl;
+    const prog = this._glctx.program("checker", COMPOSITE_VERT, CHECKER_FRAG);
+    gl.useProgram(prog);
+    gl.uniform2f(gl.getUniformLocation(prog, "u_docSize"), docW, docH);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f.fbo);
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   // 把兄弟节点逐个 pass 到 acc（pass-through 组递归到同一 acc；隔离组先合 sub 再整体混）。

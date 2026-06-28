@@ -664,7 +664,7 @@ export class Board {
   // GL 渲染路径：GL canvas 渲 doc（void 底 + doc 背景 + 图层 + live overlay，视口仿射）；
   //   本 2D canvas 清透明、只画 lasso overlay + doc 边框（GL 透出 doc）。
   _renderFullGL(ctx: Ctx2D, W: number, H: number) {
-    const docBg = this._showCheckerboard ? null : (this.doc.backgroundColor || "#ffffff");   // 棋盘 first cut 显 void
+    const docBg = this._showCheckerboard ? "checker" : (this.doc.backgroundColor || "#ffffff");   // 棋盘背景接缝（GL 合成器 doc 空间棋盘）
     this._glBoard!.render(
       this.doc as unknown as GLDoc,
       this._docTransformParams(),
