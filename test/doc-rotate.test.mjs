@@ -97,6 +97,13 @@ globalThis.OffscreenCanvas = _prevOSC;
 function expectedBbox(b, W) {
   return { x: b.bboxY, y: W - (b.bboxX + b.bboxW), w: b.bboxH, h: b.bboxW };
 }
+// tile-SoT：用 putImageData（纯路径，无 canvas）在层的 doc 区域填不透明色。content 紧框 = contentBounds(true)。
+function fillRegion(L, x, y, w, h, [r, g, b] = [255, 0, 0]) {
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) { data[i * 4] = r; data[i * 4 + 1] = g; data[i * 4 + 2] = b; data[i * 4 + 3] = 255; }
+  L.putImageData(x, y, { width: w, height: h, data });
+}
+function tb(L) { return L.pixels.contentBounds(true); }   // 紧内容框（tile-SoT 下 bbox 的等价验证）
 
 describe("doc.rotate90CCW · 纯数字 bbox + 尺寸", () => {
   it("尺寸 W↔H 互换", () => {
@@ -107,61 +114,40 @@ describe("doc.rotate90CCW · 纯数字 bbox + 尺寸", () => {
     eq(doc.height, 10, "新高=旧宽");
   });
 
-  it("bbox 按公式 newX=bboxY, newY=W-(bboxX+bboxW), newW=bboxH, newH=bboxW", () => {
-    useStub();
+  it("content 紧框按公式 newX=bboxY, newY=W-(bboxX+bboxW), newW=bboxH, newH=bboxW（tile-SoT）", () => {
     const doc = new PaintDoc({ width: 20, height: 12 });
-    // 手动放一个非满 bbox 的层
     const L = doc.layers[0];
-    L.bboxX = 3; L.bboxY = 2; L.bboxW = 5; L.bboxH = 4;
-    L.canvas = new StubCanvas(5, 4); L.ctx = L.canvas.getContext("2d");
+    fillRegion(L, 3, 2, 5, 4);   // 内容在 (3,2) 5×4
     const exp = expectedBbox({ bboxX: 3, bboxY: 2, bboxW: 5, bboxH: 4 }, 20);
     doc.rotate90CCW();
-    eq(L.bboxX, exp.x, "newX");
-    eq(L.bboxY, exp.y, "newY");
-    eq(L.bboxW, exp.w, "newW");
-    eq(L.bboxH, exp.h, "newH");
-    eq(L.docW, 12, "L.docW 更新为新宽");
-    eq(L.docH, 20, "L.docH 更新为新高");
+    const b = tb(L);
+    eq(b.x, exp.x, "newX"); eq(b.y, exp.y, "newY"); eq(b.w, exp.w, "newW"); eq(b.h, exp.h, "newH");
+    eq(L.docW, 12, "L.docW 更新为新宽"); eq(L.docH, 20, "L.docH 更新为新高");
   });
 
-  it("旋转 4 次 = 恒等（尺寸 + bbox 都回原）", () => {
-    useStub();
+  it("旋转 4 次 = 恒等（尺寸 + content 紧框都回原）", () => {
     const doc = new PaintDoc({ width: 20, height: 12 });
     const L = doc.layers[0];
-    L.bboxX = 3; L.bboxY = 2; L.bboxW = 5; L.bboxH = 4;
-    L.canvas = new StubCanvas(5, 4); L.ctx = L.canvas.getContext("2d");
-    const orig = { w: doc.width, h: doc.height, bx: L.bboxX, by: L.bboxY, bw: L.bboxW, bh: L.bboxH };
+    fillRegion(L, 3, 2, 5, 4);
+    const o = tb(L);
     for (let k = 0; k < 4; k++) doc.rotate90CCW();
-    eq(doc.width, orig.w, "宽回原");
-    eq(doc.height, orig.h, "高回原");
-    eq(L.bboxX, orig.bx, "bboxX 回原");
-    eq(L.bboxY, orig.by, "bboxY 回原");
-    eq(L.bboxW, orig.bw, "bboxW 回原");
-    eq(L.bboxH, orig.bh, "bboxH 回原");
+    eq(doc.width, 20, "宽回原"); eq(doc.height, 12, "高回原");
+    const b = tb(L);
+    eq(b.x, o.x, "x 回原"); eq(b.y, o.y, "y 回原"); eq(b.w, o.w, "w 回原"); eq(b.h, o.h, "h 回原");
   });
 });
 
 describe("doc.rotate90CCW · 像素方向（一个角点）", () => {
   it("旧 doc 左上角像素 (0,0) → 新 doc 左下角 (0, W-1=H'-1)", () => {
-    useStub();
     // W=4, H=2 → 新 doc 2×4。在旧 (0,0) 放红，验证旋转后落到新左下 (0,3)。
     const doc = new PaintDoc({ width: 4, height: 2 });
-    const L = doc.layers[0];   // 满 bbox 4×2
-    // 整层涂透明，仅 (0,0) = 红
-    const d = L.canvas.getContext("2d").cv.data;
-    for (let i = 0; i < d.length; i++) d[i] = 0;
-    d[0] = 255; d[3] = 255;   // (0,0) 红不透明
+    const L = doc.layers[0];
+    fillRegion(L, 0, 0, 1, 1);   // 仅 (0,0) 红不透明
     doc.rotate90CCW();
-    eq(doc.width, 2, "新宽=2");
-    eq(doc.height, 4, "新高=4");
-    // 新 doc (x,y) = 旧 (0,0)→(0, W-0)=(0,4)，像素中心落在新局部 → 验证 alpha 出现在底行 y=3
-    const nd = L.canvas.getContext("2d").cv;
-    const W2 = L.bboxW;   // 新 bbox 宽 = 旧高 2
-    // 新左下角 (0, H'-1) = (0,3)
-    const idx = (3 * W2 + 0) * 4;
-    assert(nd.data[idx + 3] === 255, `左上角应旋到新左下 (0,3)，实测该处 alpha=${nd.data[idx + 3]}`);
-    // 新左上 (0,0) 应为空（旧右上 (W,0) 才映射到这）
-    assert(nd.data[3] === 0, `新左上 (0,0) 应空，实测 alpha=${nd.data[3]}`);
+    eq(doc.width, 2, "新宽=2"); eq(doc.height, 4, "新高=4");
+    // 旧 (0,0) → 新 (0, W-1)=(0,3)
+    eq(L.sampleAt(0, 3)[3], 255, "左上角旋到新左下 (0,3)");
+    eq(L.sampleAt(0, 0)[3], 0, "新左上 (0,0) 应空");
   });
 });
 

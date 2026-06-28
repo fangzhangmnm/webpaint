@@ -139,6 +139,68 @@ export class LayerPixels {
 
   clear(): void { this._tiles.forEach((_p, k) => this._dirty.add(k)); this._tiles.clear(); }
 
+  // ---- 纯变换（raw 数组操作，返回新 LayerPixels；doc 变换用，node 全可测、无 Canvas2D 往返、更快）----
+  // 水平镜像（doc 尺寸不变）。
+  flippedHorizontal(): LayerPixels {
+    const np = new LayerPixels(this.docW, this.docH);
+    const b = this.contentBounds();
+    if (!b) return np;
+    const src = this.getRegion(b.x, b.y, b.w, b.h);
+    const dst = new Uint8ClampedArray(b.w * b.h * 4);
+    for (let y = 0; y < b.h; y++) for (let x = 0; x < b.w; x++) {
+      const si = (y * b.w + x) * 4, di = (y * b.w + (b.w - 1 - x)) * 4;
+      dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = src[si + 3];
+    }
+    np.putRegion(this.docW - (b.x + b.w), b.y, b.w, b.h, dst);
+    return np;
+  }
+  // 逆时针旋转 90°：old doc (x,y) → new doc (y, W-1-x)，W=旧宽。新 doc 尺寸 = (旧高 × 旧宽)。
+  rotated90CCW(): LayerPixels {
+    const W = this.docW;
+    const np = new LayerPixels(this.docH, W);   // 新 doc = H × W
+    const b = this.contentBounds();
+    if (!b) return np;
+    const src = this.getRegion(b.x, b.y, b.w, b.h);
+    const nw = b.h, nh = b.w;
+    const dst = new Uint8ClampedArray(nw * nh * 4);
+    for (let y = 0; y < b.h; y++) for (let x = 0; x < b.w; x++) {
+      // 新 local：ndx = y，ndy = b.w-1-x（新 bbox 在 (b.y, W-(b.x+b.w))）
+      const si = (y * b.w + x) * 4, di = ((b.w - 1 - x) * nw + y) * 4;
+      dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = src[si + 3];
+    }
+    np.putRegion(b.y, W - (b.x + b.w), nw, nh, dst);
+    return np;
+  }
+  // 环绕偏移：new (x+ox)%W, (y+oy)%H。doc 尺寸不变（seamless 贴图）。
+  offsetWrapped(ox: number, oy: number): LayerPixels {
+    const W = this.docW, H = this.docH;
+    const np = new LayerPixels(W, H);
+    if (this.isEmpty()) return np;
+    const src = this.getRegion(0, 0, W, H);   // 整幅（2K=16MB，offsetWrap 低频）
+    const dst = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const nx = (x + ox) % W, ny = (y + oy) % H;
+      const si = (y * W + x) * 4, di = (ny * W + nx) * 4;
+      dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = src[si + 3];
+    }
+    np.putRegion(0, 0, W, H, dst);
+    return np;
+  }
+  // 裁切到新 doc 尺寸：old (x,y) → new (x-dx, y-dy)，clip 到 [0,newW)×[0,newH)。
+  cropped(dx: number, dy: number, newW: number, newH: number): LayerPixels {
+    const np = new LayerPixels(newW, newH);
+    const b = this.contentBounds();
+    if (!b) return np;
+    const tL = b.x - dx, tT = b.y - dy;
+    const nL = Math.max(0, tL), nT = Math.max(0, tT);
+    const nR = Math.min(newW, tL + b.w), nB = Math.min(newH, tT + b.h);
+    const nw = nR - nL, nh = nB - nT;
+    if (nw <= 0 || nh <= 0) return np;
+    const src = this.getRegion(nL + dx, nT + dy, nw, nh);   // 对应旧 doc 坐标
+    np.putRegion(nL, nT, nw, nh, src);
+    return np;
+  }
+
   // ---- dirty 跟踪（GL 增量上传）----
   dirtyTileKeys(): number[] { return [...this._dirty]; }
   markAllClean(): void { this._dirty.clear(); }

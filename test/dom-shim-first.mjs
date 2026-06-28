@@ -12,3 +12,14 @@
 
 import { installDomShim } from "./dom-shim.mjs";
 installDomShim();
+
+// ImageData 全局 shim（node 无）：tile-pixels materialize/getImageData 用 `new ImageData(data,w,h)`。
+// 真浏览器用原生 ImageData；node 给最小实现（{data,width,height}），让经 Canvas2D 的路径在 stub 下可测。
+if (typeof globalThis.ImageData === "undefined") {
+  globalThis.ImageData = class ImageData {
+    constructor(data, width, height) {
+      if (typeof data === "number") { height = width; width = data; data = new Uint8ClampedArray(width * height * 4); }
+      this.data = data; this.width = width; this.height = height ?? (data.length / 4 / width);
+    }
+  };
+}

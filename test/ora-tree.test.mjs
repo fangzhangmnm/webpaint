@@ -88,7 +88,8 @@ const T = (name, fn) => it(name, () => { useStub(); fn(); });
 function buildTreeDoc() {
   const d = new PaintDoc();
   const L0 = d.layers[0];
-  L0.bboxX = 5; L0.bboxY = 7; L0.bboxW = 10; L0.bboxH = 10;
+  // tile-SoT：填 (5,7) 起 10×10 不透明内容 → contentBounds 紧框 = bbox(5,7,10,10)，驱动 ORA x/y 偏移
+  L0.putImageData(5, 7, { width: 10, height: 10, data: new Uint8ClampedArray(10 * 10 * 4).fill(255) });
   const L2 = d.addLayer();               // [L0, L2]，active=L2（root 顶，最后留在顶）
   d.setActiveById(L0.id);
   const L1 = d.addLayer();               // [L0, L1, L2]，active=L1

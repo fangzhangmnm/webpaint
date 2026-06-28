@@ -228,8 +228,7 @@ describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
   T("mergeDownLayer 返回 activeLoc；duplicateLayer 返回 loc", () => {
     const d = new PaintDoc();
     const L1 = d.addLayer();
-    L1.ensureBbox(0, 0, 4, 4);        // 给点像素让 mergeDown 不走 empty-active
-    L1.bboxW = 4; L1.bboxH = 4;
+    L1.putImageData(0, 0, { width: 4, height: 4, data: new Uint8ClampedArray(4 * 4 * 4).fill(255) });   // 给点像素让 mergeDown 不走 empty-active
     const r = d.mergeDownLayer(L1);
     assert(r.ok && r.activeLoc && r.activeLoc.parentId === null && r.activeLoc.index === 1, "activeLoc 同级位");
     const dup = d.duplicateLayer(d.layers[0].id);

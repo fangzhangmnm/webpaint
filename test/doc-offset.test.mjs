@@ -76,39 +76,27 @@ const { PaintDoc } = await import("../src/doc.ts");
 const { Selection } = await import("../src/selection.ts");
 globalThis.OffscreenCanvas = _prevOSC;
 
-// 在满 bbox 层的 (x,y) 放一个唯一标记色（用 alpha 编码身份：每点 alpha=唯一值）
+// tile-SoT：putImageData/sampleAt 纯路径（无 canvas）。markPixel 在 doc (x,y) 放标记色。
 function markPixel(L, x, y, val) {
-  const d = L.canvas.getContext("2d").cv.data;
-  const i = (y * L.bboxW + x) * 4;
-  d[i] = val; d[i + 1] = val; d[i + 2] = val; d[i + 3] = 255;
+  L.putImageData(x, y, { width: 1, height: 1, data: new Uint8ClampedArray([val, val, val, 255]) });
 }
-function alphaAt(L, x, y) {
-  const cv = L.canvas.getContext("2d").cv;
-  return cv.data[(y * cv.width + x) * 4 + 3];
-}
-function redAt(L, x, y) {
-  const cv = L.canvas.getContext("2d").cv;
-  return cv.data[(y * cv.width + x) * 4];
-}
+function alphaAt(L, x, y) { return L.sampleAt(x, y)[3]; }
+function redAt(L, x, y) { return L.sampleAt(x, y)[0]; }
 
 describe("doc.offsetWrap · 尺寸不变 + 像素环绕映射", () => {
   it("doc 尺寸偏移后不变", () => {
-    useStub();
     const doc = new PaintDoc({ width: 10, height: 6 });
+    markPixel(doc.layers[0], 2, 2, 50);
     doc.offsetWrap(3, 2);
     eq(doc.width, 10, "宽不变");
     eq(doc.height, 6, "高不变");
-    eq(doc.layers[0].bboxW, 10, "层 bbox 设为整幅宽");
-    eq(doc.layers[0].bboxH, 6, "层 bbox 设为整幅高");
+    eq(redAt(doc.layers[0], 5, 4), 50, "(2,2) → (5,4)");
   });
 
   it("偏移 (1,1)：每个角点按 (x+1)%W,(y+1)%H 环绕", () => {
-    useStub();
-    // W=4,H=2 满 bbox。四角放不同灰度 r，验证落点。
+    // W=4,H=2。四角放不同灰度 r，验证落点。
     const doc = new PaintDoc({ width: 4, height: 2 });
     const L = doc.layers[0];
-    const d = L.canvas.getContext("2d").cv.data;
-    for (let i = 0; i < d.length; i++) d[i] = 0;
     markPixel(L, 0, 0, 10);   // 左上 → (1,1)
     markPixel(L, 3, 0, 20);   // 右上 → (0,1)
     markPixel(L, 0, 1, 30);   // 左下 → (1,0)
@@ -121,11 +109,8 @@ describe("doc.offsetWrap · 尺寸不变 + 像素环绕映射", () => {
   });
 
   it("负偏移也环绕：(-1,0) 把左列移到右边", () => {
-    useStub();
     const doc = new PaintDoc({ width: 4, height: 1 });
     const L = doc.layers[0];
-    const d = L.canvas.getContext("2d").cv.data;
-    for (let i = 0; i < d.length; i++) d[i] = 0;
     markPixel(L, 0, 0, 99);   // 左列 → (-1)%4 = 3
     doc.offsetWrap(-1, 0);
     eq(redAt(L, 3, 0), 99, "(0,0) 在 dx=-1 下环绕到 (3,0)");
@@ -134,22 +119,16 @@ describe("doc.offsetWrap · 尺寸不变 + 像素环绕映射", () => {
 
 describe("doc.offsetWrap · 恒等性", () => {
   it("偏移整幅 (W,H) = 无变化", () => {
-    useStub();
     const doc = new PaintDoc({ width: 4, height: 2 });
     const L = doc.layers[0];
-    const d = L.canvas.getContext("2d").cv.data;
-    for (let i = 0; i < d.length; i++) d[i] = 0;
     markPixel(L, 2, 1, 77);
     doc.offsetWrap(4, 2);
     eq(redAt(L, 2, 1), 77, "整幅偏移 = 像素不动");
   });
 
   it("偏移 a 再偏移 (W-a, H-b) 回到原图", () => {
-    useStub();
     const doc = new PaintDoc({ width: 4, height: 2 });
     const L = doc.layers[0];
-    const d = L.canvas.getContext("2d").cv.data;
-    for (let i = 0; i < d.length; i++) d[i] = 0;
     markPixel(L, 0, 0, 12);
     markPixel(L, 2, 1, 34);
     doc.offsetWrap(1, 1);

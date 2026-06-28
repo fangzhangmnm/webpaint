@@ -99,31 +99,22 @@ useStub();
 const { PaintDoc } = await import("../src/doc.ts");
 globalThis.OffscreenCanvas = _prevOSC;   // import 完还原，避免毒到不设 stub 的 test 文件
 
-// 填一个 layer 的整块矩形（doc 坐标 bbox=全块），rgba
+// 填一个 layer 的整块矩形（tile-SoT：putImageData 纯路径），rgba
 function fillLayer(L, w, h, r, g, b, a) {
-  L.bboxX = 0; L.bboxY = 0; L.bboxW = w; L.bboxH = h;
-  L.canvas = new StubCanvas(w, h);
-  L.ctx = L.canvas.getContext("2d");
-  const d = L.canvas.data;
+  const d = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) { d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = a; }
+  L.putImageData(0, 0, { width: w, height: h, data: d });
 }
 // 让 under 只有左半 alpha（右半透明），用于验剪裁
 function fillLeftHalf(L, w, h, r, g, b) {
-  L.bboxX = 0; L.bboxY = 0; L.bboxW = w; L.bboxH = h;
-  L.canvas = new StubCanvas(w, h);
-  L.ctx = L.canvas.getContext("2d");
-  const d = L.canvas.data;
+  const d = new Uint8ClampedArray(w * h * 4);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const i = (y * w + x) * 4;
-    const inside = x < w / 2;
-    d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = inside ? 255 : 0;
+    d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = (x < w / 2) ? 255 : 0;
   }
+  L.putImageData(0, 0, { width: w, height: h, data: d });
 }
-function px(L, x, y) {
-  const d = L.canvas.getContext("2d").getImageData(0, 0, L.bboxW, L.bboxH).data;
-  const i = ((y - L.bboxY) * L.bboxW + (x - L.bboxX)) * 4;
-  return [d[i], d[i + 1], d[i + 2], d[i + 3]];
-}
+function px(L, x, y) { return [...L.sampleAt(x, y)]; }
 
 describe("mergeDownLayer · 剪裁层向下合并到基底", () => {
   it("active 剪裁(满红) + under 基底(左半蓝) → 合并：右半被裁掉(透明)，左半=红覆盖蓝", () => {

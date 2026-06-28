@@ -131,10 +131,12 @@ export class Layer {
   }
 
   // ---- 派生只读视图（读者：2D 合成器 / ora / psd / 导出 / board / 吸管）----
-  // 物化整内容为一张 tile 粒度 bbox 画布（缓存；任何写后 _invalidate 失效）。空层 → 1×1 占位。
+  // 物化整内容为一张**紧内容框**画布（缓存；任何写后 _invalidate 失效）。空层 → 1×1 占位。
+  // tight=true：origin/尺寸 = 紧贴像素的 bbox（不是 tile 粒度），让 bboxX/Y/W/H 与旧系统语义一致——
+  // ora/psd/导出读这层当 (canvas, bboxX, bboxY) 配对，紧框既省 PNG 体积又匹配旧 .ora 输出。
   private _ensureMat(): { canvas: Bitmap; ox: number; oy: number } {
     if (this._mat) return this._mat;
-    const m = materialize(this.pixels);
+    const m = materialize(this.pixels, true);
     if (m) { this._mat = { canvas: m.canvas as Bitmap, ox: m.ox, oy: m.oy }; return this._mat; }
     if (!this._empty) this._empty = makeBitmap(1, 1);
     this._mat = { canvas: this._empty, ox: 0, oy: 0 };
@@ -167,6 +169,11 @@ export class Layer {
   }
   // 清空全层。
   clearAll() { this.pixels.clear(); this._invalidate(); }
+
+  // 换一整套 pixels（纯变换 flip/rotate/offset/crop 用：变换返回新 LayerPixels）+ 新 doc 尺寸。
+  setPixels(p: LayerPixels, newDocW: number, newDocH: number) {
+    this.pixels = p; this.docW = newDocW; this.docH = newDocH; this._invalidate();
+  }
 
   // 重置像素到**新 doc 尺寸** + 可选填入一张 canvas（crop / rotate / resample 等改 doc 尺寸的变换用——
   //   tile 几何依赖 docW，尺寸变必须重建 LayerPixels）。src=null → 空层。src 内容在 doc (ox,oy) 起、w×h。
@@ -852,23 +859,7 @@ export class PaintDoc {
   cropTo(rect: { x: number; y: number; w: number; h: number }) {
     const dx = rect.x | 0, dy = rect.y | 0, nw = Math.max(1, rect.w | 0), nh = Math.max(1, rect.h | 0);
     for (const L of flattenLeaves(this.layers)) {
-      const bx = L.bboxX, by = L.bboxY, bw = L.bboxW, bh = L.bboxH;   // 读老（物化）bbox
-      if (bw <= 0 || bh <= 0) { L.remapPixels(nw, nh, null); continue; }
-      // 老 bbox → 新 doc 坐标后 clip 到 [0, nw] × [0, nh]
-      const tL = bx - dx, tT = by - dy;
-      const tR = tL + bw, tB = tT + bh;
-      const newL = Math.max(0, tL),  newT = Math.max(0, tT);
-      const newR = Math.min(nw, tR), newB = Math.min(nh, tB);
-      const newW = newR - newL, newH = newB - newT;
-      if (newW <= 0 || newH <= 0) { L.remapPixels(nw, nh, null); continue; }   // 整层裁到 doc 外 → 空
-      // srcX/srcY = 老 layer canvas 上要拷贝的左上角（老 bbox 局部坐标）
-      const srcX = newL - tL, srcY = newT - tT;
-      const nc = makeBitmap(newW, newH);
-      const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
-      nctx.imageSmoothingEnabled = true;
-      nctx.imageSmoothingQuality = "low";
-      nctx.drawImage(L.canvas, srcX, srcY, newW, newH, 0, 0, newW, newH);
-      L.remapPixels(nw, nh, nc, newL, newT, newW, newH);
+      L.setPixels(L.pixels.cropped(dx, dy, nw, nh), nw, nh);   // 纯 tile：裁切 + 新 doc 尺寸
     }
     if (this.selection) {
       this.selection = this.selection.croppedTo(dx, dy, nw, nh);
@@ -882,16 +873,7 @@ export class PaintDoc {
   flipHorizontal() {
     const W = this.width;
     for (const L of flattenLeaves(this.layers)) {
-      const bx = L.bboxX, by = L.bboxY, bw = L.bboxW, bh = L.bboxH;
-      if (bw > 0 && bh > 0) {
-        const nc = makeBitmap(bw, bh);
-        const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
-        nctx.imageSmoothingEnabled = false;
-        nctx.setTransform(-1, 0, 0, 1, bw, 0);
-        nctx.drawImage(L.canvas, 0, 0);
-        nctx.setTransform(1, 0, 0, 1, 0, 0);   // 还原
-        L.replaceFromCanvas(nc, W - (bx + bw), by, bw, bh);   // doc 尺寸不变
-      }
+      L.setPixels(L.pixels.flippedHorizontal(), L.docW, L.docH);   // 纯 tile 水平镜像
     }
     if (this.selection) {
       this.selection = this.selection.flippedHorizontal(W);
@@ -910,19 +892,7 @@ export class PaintDoc {
     const W = this.width;
     const H = this.height;
     for (const L of flattenLeaves(this.layers)) {
-      const oldBX = L.bboxX, oldBY = L.bboxY, oldBW = L.bboxW, oldBH = L.bboxH;
-      if (oldBW > 0 && oldBH > 0) {
-        const nc = makeBitmap(oldBH, oldBW);   // 新 canvas = (bboxH × bboxW)
-        const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
-        nctx.imageSmoothingEnabled = false;     // 保像素锐利
-        nctx.setTransform(0, -1, 1, 0, 0, oldBW);
-        nctx.drawImage(L.canvas, 0, 0);
-        nctx.setTransform(1, 0, 0, 1, 0, 0);    // 还原
-        // 新 doc 尺寸 (H×W)；新 bbox 位置 (oldBY, W-(oldBX+oldBW))、尺寸 (oldBH×oldBW)
-        L.remapPixels(H, W, nc, oldBY, W - (oldBX + oldBW), oldBH, oldBW);
-      } else {
-        L.remapPixels(H, W, null);   // 空层也要换 doc 尺寸
-      }
+      L.setPixels(L.pixels.rotated90CCW(), H, W);   // 纯 tile 逆时针 90°（新 doc = H×W）
     }
     if (this.selection) {
       this.selection = this.selection.rotated90CCW(W, H);
@@ -979,13 +949,7 @@ export class PaintDoc {
     // 归一化后，原内容（在 [bx, bx+bw)）右移 ox 落在 [bx+ox, …)，越过右/下边的部分由
     // 「-W / -H」环绕副本接回左/上。故只需 sx∈{0,-W} × sy∈{0,-H} 共 4 个位置。
     for (const L of flattenLeaves(this.layers)) {
-      const bx = L.bboxX, by = L.bboxY;
-      if (L.bboxW <= 0 || L.bboxH <= 0) continue;
-      const nc = makeBitmap(W, H);
-      const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
-      nctx.imageSmoothingEnabled = false;   // 整数平移，保像素锐利
-      for (const sx of [0, -W]) for (const sy of [0, -H]) nctx.drawImage(L.canvas, bx + ox + sx, by + oy + sy);
-      L.replaceFromCanvas(nc, 0, 0, W, H);   // doc 尺寸不变
+      L.setPixels(L.pixels.offsetWrapped(ox, oy), W, H);   // 纯 tile 环绕偏移
     }
     if (this.selection) {
       this.selection = this.selection.offsetWrapped(ox, oy, W, H);
