@@ -16,6 +16,12 @@ export interface OverlayDesc {
   erase: boolean;
   ox: number; oy: number; ow: number; oh: number;   // doc 坐标 bbox（shader 按此映射，bbox 外透明）
 }
+// 自由变换浮层（floatFor 接缝，对齐 2D layer-composite.ts:143-145）：warp 后的内容，**bbox 尺寸**直值纹理 +
+//   doc 坐标 bbox。在源层 z 之上 source-over α=1，**忽略源层 mode/opacity**（与 overlay 不同——overlay 随层）。
+export interface FloatDesc {
+  tex: WebGLTexture;
+  ox: number; oy: number; ow: number; oh: number;   // doc 坐标 bbox（renderSource 的 dstX/dstY/w/h）
+}
 export interface CompLeaf {
   kind: "leaf";
   srcIndex: TileIndexTexture;
@@ -25,6 +31,7 @@ export interface CompLeaf {
   visible: boolean;
   hasContent: boolean;    // 有像素（空层不能当 clip 基底；对齐 2D 的 bboxW>0&&bboxH>0）
   overlay?: OverlayDesc | null;   // 活动叶的 live 描边 overlay（null/缺省=无）
+  float?: FloatDesc | null;       // 自由变换浮层（null/缺省=无）
 }
 export interface CompGroup {
   kind: "group";

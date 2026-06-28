@@ -6,7 +6,7 @@
 
 import { GLContext } from "./gl-context.ts";
 import { GLDocRenderer } from "./gl-doc-renderer.ts";
-import type { OverlayInput } from "./gl-doc-renderer.ts";
+import type { OverlayInput, FloatInput } from "./gl-doc-renderer.ts";
 import type { DocNode } from "./gl-doc-bridge.ts";
 import type { Background } from "./gl-compositor.ts";
 import type { PooledFBO } from "./gl-context.ts";
@@ -49,13 +49,14 @@ export class GLBoard {
   //   livePreview = 描边/调整预览中；overlay = live 描边（null=无）。
   // **性能关键**：合成结果缓存（视口无关）。pan/zoom（内容没变）→ 只 present 缓存，不重合成（修 30fps）。
   //   重合成只在：内容脏(commit/undo/结构) 或 描边中(overlay/active 每帧变) 或 首帧/context 恢复。
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null): void {
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = []): void {
     if (this._glctx.isLost) return;
     const contentChanged = this._contentDirty && !livePreview;
     if (contentChanged) { this._renderer.syncAll(doc.layers, doc.width, doc.height); this._contentDirty = false; }
 
     if (contentChanged || livePreview || !this._cache) {
       this._renderer.setOverlay(livePreview ? overlay : null, doc.width, doc.height);
+      this._renderer.setFloats(floats, doc.width, doc.height);   // 自由变换浮层（空=无变换）
       // docBg：null=透明（void 透出）/ "checker"=棋盘背景 / "#rrggbb"=预乘纯色。
       const bg: Background | undefined = docBg === "checker" ? "checker"
         : docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;

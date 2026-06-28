@@ -465,6 +465,40 @@ function checkerParity(glctx: GLContext, add: Add): void {
   lt.index.dispose();
 }
 
+// ---- E5) floatFor 接缝 golden：GL 浮层 pass vs 2D drawImage(float) source-over ----
+function texFromCanvas(glctx: GLContext, c: HTMLCanvasElement): WebGLTexture {
+  const gl = glctx.gl;
+  const t = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c as unknown as TexImageSource);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return t;
+}
+function floatParity(glctx: GLContext, add: Add): void {
+  const N = 192;
+  const backend = new GLTileBackend(glctx, 16); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  const baseCanvas = makeLayerCanvas(N, N, () => [40, 80, 160, 255]);   // 不透明底
+  const lt = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, baseCanvas) }, N, N);
+  const fw = 80, fh = 70, fx = 50, fy = 40;
+  const floatCanvas = makeLayerCanvas(fw, fh, (x, y) => [220, 60, 60, (x + y) % 200 + 40]);   // 半透明渐变
+  const ftex = texFromCanvas(glctx, floatCanvas);
+  const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: ftex, ox: fx, oy: fy, ow: fw, oh: fh } }];
+  const accum = comp.composite(backend.texture, tree as never, N, N);
+  const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
+  const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
+  const rctx = ref.getContext("2d")!;
+  rctx.drawImage(baseCanvas, 0, 0); rctx.drawImage(floatCanvas, fx, fy);   // 浮层 source-over 底（α=1，忽略层 mode/opacity）
+  const refData = rctx.getImageData(0, 0, N, N).data;
+  const { md, at } = maxPremulDiff(refData, glpx, N);
+  add("float:GL 浮层 pass vs 2D drawImage source-over", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  lt.index.dispose(); glctx.gl.deleteTexture(ftex);
+}
+
 // ---- E3) 全管线 golden：真 BrushEngine CPU 描边(getLiveOverlay) vs collectStamps→GPU 栅格 ----
 //   验证「手感数学(CPU 出 stamp) + GPU 栅格」整条管线匹配**真 CPU 笔刷**（非公式再实现）。
 //   两边都是 pre-opacity 的 stroke 像素（frozen+tail）；CPU overlay 直 α → 转预乘 vs GPU 预乘。
@@ -577,6 +611,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { stampParity(glctx, add); } catch (e) { add("stamp parity", false, String(e)); }
   try { brushPipelineParity(glctx, add); } catch (e) { add("brushpipe parity", false, String(e)); }
   try { checkerParity(glctx, add); } catch (e) { add("checker parity", false, String(e)); }
+  try { floatParity(glctx, add); } catch (e) { add("float parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);

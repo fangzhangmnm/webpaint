@@ -4,7 +4,7 @@ import { compositeLayers } from "./layer-composite.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { GLBoard, glBoardEnabled } from "./gl/gl-board.ts";
 import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
-import type { OverlayInput } from "./gl/gl-doc-renderer.ts";
+import type { OverlayInput, FloatInput } from "./gl/gl-doc-renderer.ts";
 import type { GLDoc } from "./gl/gl-board.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 import { eachLeaf, layerByteBudget } from "./doc.ts";
@@ -669,7 +669,7 @@ export class Board {
       this.doc as unknown as GLDoc,
       this._docTransformParams(),
       W, H, this.viewport.scale, this._voidColor, docBg,
-      this._isLivePreview(), this._glOverlayInput(),
+      this._isLivePreview(), this._glOverlayInput(), this._glFloatInputs(),
     );
     // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。
     //   非 live-preview 帧（已 syncAll 把 tile 传 GPU）后释放各层物化缓存 → GL 模式不常驻第二份拷贝。
@@ -684,6 +684,23 @@ export class Board {
     ctx.strokeStyle = "rgba(0,0,0,0.18)";
     ctx.lineWidth = 1 / scale;
     ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+  }
+
+  // 自由变换浮层 → GL 输入（floatFor 接缝）：每源层 renderSource(warp) → 落源层 z。复用 src._renderCache
+  //   （mesh 变了 FloatingTransform 那边 invalidate；与 2D floatFor 共享缓存，不重复 warp）。
+  _glFloatInputs(): FloatInput[] {
+    const lassoInfo = this._lassoProvider?.();
+    const float = (lassoInfo && lassoInfo.floating) ? lassoInfo.floating : null;
+    if (!float) return [];
+    const out: FloatInput[] = [];
+    for (const src of float.sources) {
+      if (!src._renderCache) {
+        src._renderCache = renderSource(src as unknown as Parameters<typeof renderSource>[0], float.gizmoBbox as Parameters<typeof renderSource>[1], float.mesh as Parameters<typeof renderSource>[2], lassoInfo!.sampleMode as Parameters<typeof renderSource>[3]);
+      }
+      const rc = src._renderCache as { canvas: CanvasImageSource & { width: number; height: number }; dstX: number; dstY: number } | null;
+      if (rc && rc.canvas) out.push({ layerId: src.layer.id, canvas: rc.canvas, dstX: rc.dstX, dstY: rc.dstY, w: rc.canvas.width, h: rc.canvas.height });
+    }
+    return out;
   }
 
   // live 描边 overlay → GL 输入（选区/锁α 裁剪与 2D 路径一致；blendMode-overlay 暂按 source-over）。

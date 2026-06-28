@@ -14,7 +14,7 @@
 import { COMPOSITE_VERT, compositeFragSource, compositeProgramKey } from "./blend-glsl.ts";
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
 import { resolveClipBases, needsIsolation, groupUnitMode } from "./gl-compose-plan.ts";
-import type { CompNode, OverlayDesc } from "./gl-compose-plan.ts";
+import type { CompNode, OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
 import type { TileIndexTexture } from "./tile-index.ts";
 import type { GLContext, PooledFBO, FBOPrec } from "./gl-context.ts";
 
@@ -37,6 +37,29 @@ void main(){
   float c = mod(floor(d.x / 16.0) + floor(d.y / 16.0), 2.0);
   vec3 col = (c >= 1.0) ? vec3(0.784314) : vec3(1.0);   // #c8c8c8 / #ffffff
   o = vec4(col, 1.0);
+}`;
+
+// 自由变换浮层 pass（floatFor 接缝）：把一张 doc-bbox 直值纹理 source-over α=1 合进累积器，
+//   忽略源层 mode/opacity（对齐 2D layer-composite.ts:143-145 的 drawImage(float) 默认态）。
+const FLOAT_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform vec2 u_docSize;
+uniform sampler2D u_dst;       // 累积器（预乘）
+uniform sampler2D u_float;     // 浮层 bbox 直值纹理
+uniform vec2 u_fOrigin;        // doc bbox 左上
+uniform vec2 u_fSize;          // doc bbox 尺寸
+out vec4 o;
+void main(){
+  vec4 dst = texture(u_dst, v_uv);                 // 预乘 (Pd, ad)
+  vec2 d = v_uv * u_docSize;
+  vec2 fuv = (d - u_fOrigin) / u_fSize;
+  vec4 src = vec4(0.0);
+  if (fuv.x >= 0.0 && fuv.x <= 1.0 && fuv.y >= 0.0 && fuv.y <= 1.0) {
+    vec4 s = texture(u_float, fuv);                // 直值
+    src = vec4(s.rgb * s.a, s.a);                  // → 预乘
+  }
+  o = src + dst * (1.0 - src.a);                   // source-over（预乘）
 }`;
 
 const PRESENT_FRAG = `#version 300 es
@@ -131,6 +154,8 @@ export class GLCompositor {
       if (node.kind === "leaf") {
         const srcKind = node.overlay ? "overlay" : "tiled";
         this._pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
+        // 自由变换浮层：源层 z 之上 source-over α=1（独立 pass，不随层 mode/opacity）。
+        if (node.float) this._floatPass(node.float, acc, docW, docH);
       } else if (needsIsolation(node)) {
         const sub = this._composeFresh(arrayTex, node.children, docW, docH);   // 独立 sub-accumulator（不碰 VAO）
         this._pass(arrayTex, "group", null, sub.tex, groupUnitMode(node), node.opacity, clipIndex, acc, docW, docH);
@@ -178,6 +203,25 @@ export class GLCompositor {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     const tmp = acc.read; acc.read = acc.write; acc.write = tmp;   // 交换
+  }
+
+  // 浮层 pass：float bbox 纹理 source-over α=1 → acc.write，交换。VAO/viewport 已绑。
+  private _floatPass(f: FloatDesc, acc: Acc, docW: number, docH: number): void {
+    const gl = this._glctx.gl;
+    const prog = this._glctx.program("float", COMPOSITE_VERT, FLOAT_FRAG);
+    gl.useProgram(prog);
+    gl.uniform2f(gl.getUniformLocation(prog, "u_docSize"), docW, docH);
+    gl.uniform2f(gl.getUniformLocation(prog, "u_fOrigin"), f.ox, f.oy);
+    gl.uniform2f(gl.getUniformLocation(prog, "u_fSize"), f.ow, f.oh);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, acc.read.tex);
+    this._setSampler(prog, "u_dst", 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, f.tex);
+    this._setSampler(prog, "u_float", 1);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, acc.write.fbo);
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const tmp = acc.read; acc.read = acc.write; acc.write = tmp;
   }
 
   // 仅当 uniform 未被编译器优化掉（location 非 null）才设——unused sampler 安全跳过。

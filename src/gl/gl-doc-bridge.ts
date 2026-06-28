@@ -11,7 +11,7 @@ import type { TilePool } from "./tile-store.ts";
 import { TileIndexTexture } from "./tile-index.ts";
 import { BLEND_MODES } from "./blend-glsl.ts";
 import type { BlendMode } from "./blend-glsl.ts";
-import type { CompNode, OverlayDesc } from "./gl-compose-plan.ts";
+import type { CompNode, OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
 import type { GLTileBackend } from "./tile-backend-gl.ts";
 import type { GLContext } from "./gl-context.ts";
 import type { LayerPixels } from "./tile-pixels.ts";
@@ -63,25 +63,28 @@ export function uploadLayerToTiles(
 
 // doc 节点树 → CompNode 树。resourceFor(leaf) 给该叶的 index + 是否有内容（空层不能当 clip 基底）。
 // overlayFor(leaf) 可选：给某叶（通常活动层）挂 live 描边 overlay（null=无）。
+// floatFor(leaf) 可选：给某叶（自由变换源层）挂 warp 后的浮层（null=无）。
 export function docTreeToComp(
   nodes: DocNode[],
   resourceFor: (leaf: DocLeaf) => { index: TileIndexTexture; hasContent: boolean },
   overlayFor?: (leaf: DocLeaf) => OverlayDesc | null,
+  floatFor?: (leaf: DocLeaf) => FloatDesc | null,
 ): CompNode[] {
-  return nodes.map((n) => docNodeToComp(n, resourceFor, overlayFor));
+  return nodes.map((n) => docNodeToComp(n, resourceFor, overlayFor, floatFor));
 }
 function docNodeToComp(
   n: DocNode,
   resourceFor: (leaf: DocLeaf) => { index: TileIndexTexture; hasContent: boolean },
   overlayFor?: (leaf: DocLeaf) => OverlayDesc | null,
+  floatFor?: (leaf: DocLeaf) => FloatDesc | null,
 ): CompNode {
   if (!n.isGroup) {
     const r = resourceFor(n);
-    return { kind: "leaf", srcIndex: r.index, opacity: n.opacity, mode: safeMode(n.mode), clip: !!n.clippingMask, visible: !!n.visible, hasContent: r.hasContent, overlay: overlayFor ? overlayFor(n) : null };
+    return { kind: "leaf", srcIndex: r.index, opacity: n.opacity, mode: safeMode(n.mode), clip: !!n.clippingMask, visible: !!n.visible, hasContent: r.hasContent, overlay: overlayFor ? overlayFor(n) : null, float: floatFor ? floatFor(n) : null };
   }
   return {
     kind: "group",
-    children: n.children.map((c) => docNodeToComp(c, resourceFor, overlayFor)),
+    children: n.children.map((c) => docNodeToComp(c, resourceFor, overlayFor, floatFor)),
     opacity: n.opacity,
     mode: n.mode === "pass-through" ? "pass-through" : safeMode(n.mode),
     clip: !!n.clippingMask,
