@@ -150,6 +150,13 @@ export class Layer {
   //   _invalidate 是写后失效（语义=内容变），releaseMaterialized 是纯腾内存（语义=缓存可弃）——分名以免混淆。
   releaseMaterialized() { this._mat = null; }
 
+  // 实占 RAM 字节：稀疏 tile + （countMat 且持有时）物化 canvas。GL 模式 countMat=false → 单份计费（多放层）；
+  //   2D 模式 countMat=true → 双份计费（保守、防 OOM）。给 doc.maxLayers 动态字节预算。
+  residentBytes(countMat: boolean): number {
+    const mat = (countMat && this._mat) ? this._mat.canvas.width * this._mat.canvas.height * 4 : 0;
+    return this.pixels.byteUsage + mat;
+  }
+
   // canvas / ctx：旧读者照用（drawImage 源 / getImageData）。**写请走 editRegion，别写这个 ctx**（写丢）。
   get canvas(): Bitmap { return this._ensureMat().canvas; }
   get ctx(): Ctx { return this._ensureMat().canvas.getContext("2d", { willReadFrequently: true }) as Ctx; }
@@ -326,6 +333,11 @@ export class PaintDoc {
   backgroundColor: string;
   selection: Selection | null;
   referenceLayerId: number | null;
+  // 内存预算档（maxLayers 用；board 在 setDoc/构造时按 GL/2D 模式 configureMemory）。
+  //   null budget → 用 layerByteBudget() 默认（deviceMemory×0.15）。countMat：2D 模式 _mat 常驻须计费（默认 true，
+  //   保守）；GL 模式 release 物化 canvas → false（单份 tile 计费 → 多放层）。
+  _memBudgetBytes: number | null = null;
+  _memCountMat = true;
   constructor({ width = DEFAULT_DOC_SIZE, height = DEFAULT_DOC_SIZE }: { width?: number; height?: number } = {}) {
     this.width = width;
     this.height = height;
@@ -403,8 +415,17 @@ export class PaintDoc {
     this.activeId = L ? L.id : null;
   }
 
+  // 设内存预算档（board 按 GL/2D 模式调）。budgetBytes=该模式可用驻留字节；countMat=是否把物化 canvas 计入。
+  configureMemory(budgetBytes: number, countMat: boolean) {
+    this._memBudgetBytes = budgetBytes;
+    this._memCountMat = countMat;
+  }
+
   get maxLayers() {
-    return computeMaxLayers(this.width, this.height);
+    const leaves = flattenLeaves(this.layers);
+    let resident = 0;
+    for (const L of leaves) resident += L.residentBytes(this._memCountMat);
+    return computeMaxLayers(leaves.length, resident, this._memBudgetBytes ?? layerByteBudget());
   }
 
   // 兼容：按扁平叶序 index 设 active（老 ORA state 存的是 index）。
@@ -964,29 +985,29 @@ export class PaintDoc {
   }
 }
 
-// 按设备 RAM + 画布分辨率 算图层数上限。**悲观估计**：每层按占满 doc 算
-// （不假设 bbox 省内存），这样即使用户把每一层都画满也不会爆。bbox 实际
-// 省的内存是"赚的"，cap 不靠它兜底。
+// 图层数上限 = **动态总驻留字节预算**（v339，替代旧的「悲观 per-layer × 分辨率」静态公式）。
+// 道理：tiling 后一层只占它**实画的 tile**（稀疏），不是整幅；旧公式按整幅算 → 2K 卡死 11 层，
+//   即使大多数层只画了一角。新公式按**所有层当前实占字节**（residentBytes：稀疏 tile + 持有的物化 canvas）
+//   对一个总字节预算封顶：
+//     - 预算内 → 放到硬顶 HARD_CEIL（空层几乎免费 → 可像 Procreate 那样开很多稀疏层）。
+//     - 已达预算 → 冻结在当前层数（≥2）→ 防 OOM（整幅画满的极端 doc 自然在 ~预算/16.8MB 层处停）。
+//   GL 模式 release 物化 canvas → residentBytes 单份 → 放更多层（破 11 的真赢）；2D 模式 _mat 常驻 →
+//   双份计费 → 自动更保守。
 //
-// 公式：
-//   layerBudgetMB = clamp(deviceMemory × 1024 × 0.15, 64, 192)
-//     - 0.15 留 85% 给 OS / 别的 tab / 浏览器开销 / 我们自己的 stroke buffer / undo
-//       blob / erase composite / 屏幕 canvas / JS heap
-//     - 下限 64 MB（至少 2 层）
-//     - 上限 192 MB（不让单 doc 把整个 canvas 池吃光）
-//   perLayerMB = canvas_area × 4 / 1e6           // 最坏每层占满
-//   max = clamp(budget / per, 2, 64)
-//
-// `navigator.deviceMemory` 在 Chrome/Edge/Firefox 有，**Safari iOS 没有**，
-// fallback 当 4 GB（保守，撑得起入门 iPad）。
-// Clipping mask 解析已下沉到规范合成器 src/layer-composite.js 的 computeClipBaseForNodes
-//   （按同级兄弟、支持组、基底必须可见——隐藏基底则 clip 链不显）。doc.js 不再保留扁平副本（消漂移）。
+// layerByteBudget = clamp(deviceMemory × 1024 × 0.15 MB, 256, 768) → ~614MB@4GB。
+//   0.15 留 85% 给 OS/别 tab/stroke buffer/undo blob/屏幕 canvas/JS heap；下限 256MB（撑得起十几层），
+//   上限 768MB（不让单 doc 吃光）。`navigator.deviceMemory` Safari iOS 没有 → fallback 4GB（保守）。
+// HARD_CEIL=64：绝对天花板（Procreate 量级），即使预算够也不放更多——防病态 doc + UI 合理。
+export const LAYER_HARD_CEIL = 64;
 
-export function computeMaxLayers(canvasW: number, canvasH: number) {
+export function layerByteBudget(): number {
   const deviceMemoryGB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4;
-  const deviceMemoryMB = deviceMemoryGB * 1024;
-  const budgetMB = Math.max(64, Math.min(192, deviceMemoryMB * 0.15));
-  const perLayerMB = (canvasW * canvasH * 4) / 1e6;
-  const n = Math.floor(budgetMB / Math.max(1, perLayerMB));
-  return Math.max(2, Math.min(64, n));
+  const budgetMB = Math.max(256, Math.min(768, deviceMemoryGB * 1024 * 0.15));
+  return budgetMB * 1e6;
+}
+
+// currentLeafCount = 当前叶层数；residentBytes = 所有叶 residentBytes() 之和；budgetBytes = 该模式预算。
+export function computeMaxLayers(currentLeafCount: number, residentBytes: number, budgetBytes = layerByteBudget()): number {
+  if (residentBytes >= budgetBytes) return Math.max(2, currentLeafCount);   // 已达字节预算：冻结
+  return LAYER_HARD_CEIL;                                                    // 预算内：放到硬顶
 }

@@ -7,7 +7,7 @@ import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
 import type { OverlayInput } from "./gl/gl-doc-renderer.ts";
 import type { GLDoc } from "./gl/gl-board.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
-import { eachLeaf } from "./doc.ts";
+import { eachLeaf, layerByteBudget } from "./doc.ts";
 
 // ---- 本文件用到的结构类型（局部定义，只覆盖 board 实际访问的成员）----
 
@@ -200,9 +200,22 @@ export class Board {
     this._glBoard = null;
     this._glCanvas = null;
     if (this._glOn) this._setupGLBoard();
+    this._configureDocMemory();
 
     // 首次：把 doc 居中适配
     this.fitToScreen();
+  }
+
+  // 按渲染模式给 doc 设内存预算档（doc.maxLayers 动态字节预算用）：
+  //   GL 模式——合成直读 tile + 每帧 release 物化 canvas → 单份 tile 计费；预算 = min(GPU tile 池容量, 设备 RAM 预算)
+  //     （CPU cap 不得超 GPU 池容量，否则池满丢 tile = 合成漏块）。
+  //   2D 模式——_mat 常驻 → tile + 物化 canvas 双份计费；预算 = 设备 RAM 预算（诚实计 actual bytes，防 OOM）。
+  _configureDocMemory() {
+    if (this._glBoard) {
+      this.doc.configureMemory(Math.min(this._glBoard.memory.committedBytes, layerByteBudget()), false);
+    } else {
+      this.doc.configureMemory(layerByteBudget(), true);
+    }
   }
 
   // 建 GL canvas（同 .board CSS 定位，DOM 插在 #board 前→在其下；pointer-events:none 不吃事件）+ GLBoard。
@@ -225,6 +238,7 @@ export class Board {
 
   setDoc(doc: PaintDoc) {
     this.doc = doc;
+    this._configureDocMemory();
     this._dirtyFull = true;
     this._compositeCacheDirty = true;   // 新 doc → 合成缓存作废
     this._glBoard?.markContentDirty();   // GL：新 doc → 全量重传

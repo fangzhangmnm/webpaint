@@ -30,6 +30,8 @@ export class LayerPixels {
   }
 
   get tileCount(): number { return this._tiles.size; }
+  // 实占 CPU tile 字节（稀疏：只数已分配 tile）。给 computeMaxLayers 动态字节预算 / 内存 HUD。
+  get byteUsage(): number { return this._tiles.size * TILE_RGBA; }
   isEmpty(): boolean { return this._tiles.size === 0; }
 
   // ---- 低层 tile 访问 ----
