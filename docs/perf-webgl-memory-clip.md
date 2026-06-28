@@ -159,7 +159,14 @@ GL canvas 垫 #board 下渲 doc（void+背景+图层+live overlay，视口仿射
      改成 per-tile delta（或兼容保留 imageData 路径先不动）。
    - **手感隔离**：active 层物化 canvas 常驻供笔刷描边（现状不变），commit 后脏区刷回 tile。
 
-   **切片**：① Layer tile-SoT + 物化 canvas 写穿（**先不丢 canvas，内存中性，只换 SoT**；save/undo/全 op round-trip 守门）——
+   **切片①已落地（513f01f，浏览器验证正确）**：Layer 内部换 LayerPixels、bbox 删成派生 getter、全部写者迁
+     editRegion/replaceFromCanvas/putImageData。2D+GL 描边/undo 真浏览器验过、tsc 干净、LayerPixels golden 过。
+     **遗留：14 node 测试回归**——doc 变换(rotate/flip/offset/crop)+merge+ora 用 Canvas2D scratch 切片，
+     node dom-shim no-op（旧测试用 StubCtx 测层 canvas，新 Layer 用内部 scratch）→ node 测不了像素。
+     **修法（下一步）**：① rotate/flip/offset/crop 改**纯 tile/raw 数组操作**（node 可测 + 更快 + 去 Canvas2D 往返）；
+     merge 是 Canvas2D 合成、ora 是序列化往返 → 这俩 port 到 Chromium smoke 或加 raw 路径。
+
+   **后续切片**：① Layer tile-SoT + 物化 canvas 写穿（**先不丢 canvas，内存中性，只换 SoT**；save/undo/全 op round-trip 守门）——
    keystone，数据完整性关键。② inactive 层丢 canvas（真省内存）+ 抬 computeMaxLayers。③ snapshot→per-tile delta（undo 内存）。
    ④ GL board 直读 tile（去每帧 re-tile）。⑤ TileResidency（GPU-only inactive 层的掉电/autosave/逐出）。
 3. **TileResidency**（配 tiling 存储才有意义）：压缩备份 + OPFS autosave + context-loss 重上传 + 冷层逐出（§4.1/4.2/4.4）。
