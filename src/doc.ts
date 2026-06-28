@@ -144,6 +144,12 @@ export class Layer {
   }
   private _invalidate() { this._mat = null; }
 
+  // 释放物化 canvas 缓存（保留 tile SoT，下次 getter 访问按需重建）。切片②：GL 模式下合成直读 tile、
+  //   不碰 layer.canvas → 非活动层的物化 canvas 是纯冗余（~docW·docH·4，2K≈16.8MB/层）。board 每帧 GL 渲染后
+  //   （非 livePreview）对各层调此 → GL 模式不再常驻第二份像素拷贝（消除 tiling 迁移引入的内存翻倍）。
+  //   _invalidate 是写后失效（语义=内容变），releaseMaterialized 是纯腾内存（语义=缓存可弃）——分名以免混淆。
+  releaseMaterialized() { this._mat = null; }
+
   // canvas / ctx：旧读者照用（drawImage 源 / getImageData）。**写请走 editRegion，别写这个 ctx**（写丢）。
   get canvas(): Bitmap { return this._ensureMat().canvas; }
   get ctx(): Ctx { return this._ensureMat().canvas.getContext("2d", { willReadFrequently: true }) as Ctx; }

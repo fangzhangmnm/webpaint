@@ -27,7 +27,6 @@ export class GLDocRenderer {
   private _backend: GLTileBackend;
   private _pool: TilePool;
   private _comp: GLCompositor;
-  private _scratch: HTMLCanvasElement;
   private _layerTiles = new Map<number, LayerTiles>();
   // live 描边 overlay：只传**描边 bbox 尺寸**纹理（小），shader 按 bbox 映射。
   private _ovTex: WebGLTexture | null = null;
@@ -38,7 +37,6 @@ export class GLDocRenderer {
     this._backend = new GLTileBackend(glctx, capacity);
     this._pool = new TilePool(this._backend);
     this._comp = new GLCompositor(glctx, accumPrec);
-    this._scratch = document.createElement("canvas");
   }
 
   // 内存核算（接 computeMaxLayers 软上限 / HUD）。committed = 池预分配；used = 实占 tile。
@@ -50,7 +48,7 @@ export class GLDocRenderer {
   syncLayer(leaf: DocLeaf, docW: number, docH: number): void {
     const old = this._layerTiles.get(leaf.id);
     if (old) { old.index.dispose(); old.tileMap.clear(); }
-    this._layerTiles.set(leaf.id, uploadLayerToTiles(this._glctx, this._backend, this._pool, leaf, docW, docH, this._scratch));
+    this._layerTiles.set(leaf.id, uploadLayerToTiles(this._glctx, this._backend, this._pool, leaf, docW, docH));
   }
 
   // 重传整棵树所有叶（correctness-first）。

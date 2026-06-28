@@ -276,19 +276,29 @@ function makeLayerCanvas(w: number, h: number, fn: (x: number, y: number) => [nu
   c.getContext("2d")!.putImageData(im, 0, 0);
   return c;
 }
+// 从一张 bbox 裁剪 canvas 建 LayerPixels（doc 区 [bboxX,bboxY]+尺寸），= 该层稀疏 tile SoT。
+// golden 仍喂 .canvas（compositeLayers 读），GL 路径喂 .pixels（uploadLayerToTiles 直读）→ 双路同源。
+function pixelsFromCanvas(docW: number, docH: number, bx: number, by: number, c: HTMLCanvasElement): LayerPixels {
+  const lp = new LayerPixels(docW, docH);
+  const data = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+  lp.putRegion(bx, by, c.width, c.height, new Uint8ClampedArray(data));
+  return lp;
+}
 function bridgeParity(glctx: GLContext, add: Add): void {
   const N = 512;
   const backend = new GLTileBackend(glctx, 40); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
-  const scratch = document.createElement("canvas");
-  // fake-Layer：bbox 裁剪、含偏移层；同时是 compositeLayers 的 golden 输入。
-  const A = { isGroup: false, id: 1, opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: makeLayerCanvas(N, N, (x, y) => [60, 120 + (x % 120), 60 + (y % 160), 255]) };
-  const B = { isGroup: false, id: 2, opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 100, bboxY: 80, bboxW: 300, bboxH: 260, canvas: makeLayerCanvas(300, 260, (x, y) => [220, 80 + (x % 150), 60, 200]) };
-  const C = { isGroup: false, id: 3, opacity: 1, mode: "source-over", clippingMask: true, visible: true, bboxX: 120, bboxY: 100, bboxW: 260, bboxH: 220, canvas: makeLayerCanvas(260, 220, (x, y) => [60, 200, 200, (x + y < 200) ? 255 : 90]) };
+  // fake-Layer：bbox 裁剪、含偏移层；canvas=compositeLayers golden 输入，pixels=GL 直读 SoT（同源）。
+  const cA = makeLayerCanvas(N, N, (x, y) => [60, 120 + (x % 120), 60 + (y % 160), 255]);
+  const cB = makeLayerCanvas(300, 260, (x, y) => [220, 80 + (x % 150), 60, 200]);
+  const cC = makeLayerCanvas(260, 220, (x, y) => [60, 200, 200, (x + y < 200) ? 255 : 90]);
+  const A = { isGroup: false, id: 1, opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: cA, pixels: pixelsFromCanvas(N, N, 0, 0, cA) };
+  const B = { isGroup: false, id: 2, opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 100, bboxY: 80, bboxW: 300, bboxH: 260, canvas: cB, pixels: pixelsFromCanvas(N, N, 100, 80, cB) };
+  const C = { isGroup: false, id: 3, opacity: 1, mode: "source-over", clippingMask: true, visible: true, bboxX: 120, bboxY: 100, bboxW: 260, bboxH: 220, canvas: cC, pixels: pixelsFromCanvas(N, N, 120, 100, cC) };
   const grp = { isGroup: true, id: 4, opacity: 0.85, mode: "source-over", clippingMask: false, visible: true, children: [B, C] };
   const nodes = [A, grp];
 
   const res = new Map<number, ReturnType<typeof uploadLayerToTiles>>();
-  for (const leaf of [A, B, C]) res.set(leaf.id, uploadLayerToTiles(glctx, backend, pool, leaf, N, N, scratch));
+  for (const leaf of [A, B, C]) res.set(leaf.id, uploadLayerToTiles(glctx, backend, pool, leaf, N, N));
 
   const gc = document.createElement("canvas"); gc.width = N; gc.height = N;
   const gctx = gc.getContext("2d")!; gctx.clearRect(0, 0, N, N);

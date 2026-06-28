@@ -36,7 +36,7 @@ export class GLBoard {
     this.canvas = canvas;
     this._glctx = new GLContext(canvas);
     this._renderer = new GLDocRenderer(this._glctx, capacity);
-    // context-loss：丢了 → 全量重传（从 layer canvas 重建 tile）+ 缓存作废。
+    // context-loss：丢了 → 全量重传（从 layer pixels 稀疏 tile 重建）+ 缓存作废。
     this._glctx.onRestored = () => { this._contentDirty = true; this._cache = null; };
   }
 

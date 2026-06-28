@@ -7,6 +7,7 @@ import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
 import type { OverlayInput } from "./gl/gl-doc-renderer.ts";
 import type { GLDoc } from "./gl/gl-board.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
+import { eachLeaf } from "./doc.ts";
 
 // ---- 本文件用到的结构类型（局部定义，只覆盖 board 实际访问的成员）----
 
@@ -656,6 +657,10 @@ export class Board {
       W, H, this.viewport.scale, this._voidColor, docBg,
       this._isLivePreview(), this._glOverlayInput(),
     );
+    // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。
+    //   非 live-preview 帧（已 syncAll 把 tile 传 GPU）后释放各层物化缓存 → GL 模式不常驻第二份拷贝。
+    //   （live-preview 中不释放：活动层 surrogate / 叠层路径可能仍读 canvas。getter 命中会按需重建。）
+    if (!this._isLivePreview()) eachLeaf(this.doc.layers, (l) => l.releaseMaterialized());
     // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);

@@ -166,11 +166,21 @@ GL canvas 垫 #board 下渲 doc（void+背景+图层+live overlay，视口仿射
      **修法（下一步）**：① rotate/flip/offset/crop 改**纯 tile/raw 数组操作**（node 可测 + 更快 + 去 Canvas2D 往返）；
      merge 是 Canvas2D 合成、ora 是序列化往返 → 这俩 port 到 Chromium smoke 或加 raw 路径。
 
-   **后续切片**：① Layer tile-SoT + 物化 canvas 写穿（**先不丢 canvas，内存中性，只换 SoT**；save/undo/全 op round-trip 守门）——
-   keystone，数据完整性关键。② inactive 层丢 canvas（真省内存）+ 抬 computeMaxLayers。③ snapshot→per-tile delta（undo 内存）。
-   ④ GL board 直读 tile（去每帧 re-tile）。⑤ TileResidency（GPU-only inactive 层的掉电/autosave/逐出）。
+   **切片④已落地（v338，2026-06-28，smoke bridge Δ1 不变）**：`uploadLayerToTiles` 改**直读 layer.pixels
+     稀疏 tile** 上传 GPU（forEachTile → uploadSlice），删 Canvas2D scratch + drawImage + getImageData 重切片。
+     `DocLeaf` 接口 canvas/bbox → `pixels: LayerPixels`。**canvas 自此不在 GPU 合成路径上**（用户钉的「webgl 不需要 canvas」方向）。
+   **切片②已落地（v338）— 注意只是「撤销迁移引入的内存翻倍」，不是「破 11 层」**：`Layer.releaseMaterialized()`
+     + board `_renderFullGL` 非 livePreview 帧后对各叶调用 → GL 模式不常驻第二份物化 canvas 拷贝。
+     **诚实记账**：旧（迁移前）每层 = 1 张 Canvas2D；迁移加了第二份（tiles + _mat）；切片②把 _mat 释放 → 回到 ~1 份。
+     最坏情形（整层画满）仍 = 16.8MB/层 tiles。故 computeMaxLayers **没动**（盲抬有 all-full-layers OOM 风险）。
+     **真·破 11 层要 ⑤**（inactive 层 GPU-only/压缩驻留）**或** computeMaxLayers 改**动态总字节预算**
+     （稀疏层实占 << 满层；按总驻留 tile 字节 + 硬顶封顶，而非悲观 per-layer×count）——这俩才结构性挣得，下一步选其一。
+
+   **后续切片**：①✅ Layer tile-SoT + 物化 canvas 写穿。②✅ release 物化 canvas（GL 模式零常驻第二拷贝）。
+   ③ snapshot→per-tile delta（undo 内存）。④✅ GL board 直读 tile（去 canvas re-tile）。⑤ TileResidency（GPU-only inactive 层的掉电/autosave/逐出）。
 3. **TileResidency**（配 tiling 存储才有意义）：压缩备份 + OPFS autosave + context-loss 重上传 + 冷层逐出（§4.1/4.2/4.4）。
-4. **抬 computeMaxLayers** 软上限（tiling 后实占 << 预算）+ 内存 HUD；GL 稳后删 2D 路径 / 去 ?glboard 开关成默认。
+4. **破 11 层 = ⑤ 或动态字节预算**：computeMaxLayers 现仍悲观 per-layer×count（2K→~11）。tiling 后真实占用稀疏，
+   改成「总驻留 tile 字节预算 + 硬顶」可让多稀疏层并存（Procreate 现实）+ 内存 HUD；GL 稳后删 2D 路径 / ?glboard 成默认。
 
 ## 6. 历史权衡（v276 已论证，留作不 re-litigate）
 | 方案 | 结论 |

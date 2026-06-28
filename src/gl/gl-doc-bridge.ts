@@ -1,10 +1,11 @@
 // doc 图层树 → GL 合成器输入的桥（docs/perf-webgl-memory-clip.md §5.5 接 board）。
 // 两件事：
-//   ① uploadLayerToTiles：Layer 的 Canvas2D bbox 像素 → 稀疏 tile（空 tile 跳过=稀疏内存杠杆）+ TileIndexTexture。
+//   ① uploadLayerToTiles：Layer 的**稀疏 tile 直接上传** GPU（无 Canvas2D 中转 = canvas 不在 GPU 路径上，
+//      切片④）。空 / 全透明 tile 已被 LayerPixels 剪枝 → forEachTile 只吐有内容的 tile。
 //   ② docTreeToComp：doc 节点树（Layer|LayerGroup）→ CompNode 树（纯翻译，node 可测）。
 // 用**结构化类型**接 doc 节点（不 import doc.ts）→ gl/ 保持独立深模块；board 传结构兼容的真节点即可。
 
-import { TILE_SIZE, tilesAcross, forEachTileInRect } from "./tile-geometry.ts";
+import { tilesAcross } from "./tile-geometry.ts";
 import { LayerTileMap } from "./tile-store.ts";
 import type { TilePool } from "./tile-store.ts";
 import { TileIndexTexture } from "./tile-index.ts";
@@ -13,12 +14,14 @@ import type { BlendMode } from "./blend-glsl.ts";
 import type { CompNode, OverlayDesc } from "./gl-compose-plan.ts";
 import type { GLTileBackend } from "./tile-backend-gl.ts";
 import type { GLContext } from "./gl-context.ts";
+import type { LayerPixels } from "./tile-pixels.ts";
 
 // 结构化 doc 节点（与 doc.ts Layer/LayerGroup 字段兼容）。
+// pixels = 该层稀疏 tile SoT（GL 直读上传；canvas/bbox 是派生视图，GL 路径不再需要）。
 export interface DocLeaf {
   isGroup: false; id: number;
   opacity: number; mode: string; clippingMask: boolean; visible: boolean;
-  bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource;
+  pixels: LayerPixels;
 }
 export interface DocGroup {
   isGroup: true; id: number;
@@ -38,28 +41,18 @@ export interface LayerTiles {
   tileMap: LayerTileMap;
 }
 
-// 把一个 Layer 的 bbox 像素切成稀疏 tile 上传。空层 / 全透明 tile 跳过。
-// scratch = 复用的 256² 离屏（避免每层每 tile 新建）。
+// 把一个 Layer 的稀疏 tile **直接上传** GPU（无 Canvas2D 中转，切片④）。
+// LayerPixels 已剪枝空/全透明 tile → forEachTile 只吐有内容的 tile，且每 tile = 满 256² RGBA、
+// 对齐全局 tile 网格 → 1:1 拷进 GPU slice，零重切片/零 drawImage/零 getImageData。
 export function uploadLayerToTiles(
   glctx: GLContext, backend: GLTileBackend, pool: TilePool,
-  layer: { bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource },
-  docW: number, docH: number, scratch: HTMLCanvasElement,
+  layer: { pixels: LayerPixels },
+  docW: number, docH: number,
 ): LayerTiles {
   const across = tilesAcross(docW);
   const tileMap = new LayerTileMap(pool, across);
   const index = new TileIndexTexture(glctx, docW, docH);
-  if (layer.bboxW <= 0 || layer.bboxH <= 0) return { index, tileMap };   // 空层 = 0 tile
-
-  scratch.width = TILE_SIZE; scratch.height = TILE_SIZE;
-  const sctx = scratch.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
-  forEachTileInRect(layer.bboxX, layer.bboxY, layer.bboxW, layer.bboxH, docW, docH, (tx, ty) => {
-    sctx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
-    // 把 layer.canvas（doc 区 [bboxX,bboxY]+bbox）画到 scratch，使 doc(tx·256,ty·256) → scratch(0,0)
-    sctx.drawImage(layer.canvas, layer.bboxX - tx * TILE_SIZE, layer.bboxY - ty * TILE_SIZE);
-    const data = sctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data;
-    let any = false;
-    for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) { any = true; break; }
-    if (!any) return;   // 全透明 tile 跳过（稀疏）
+  layer.pixels.forEachTile((tx, ty, data) => {
     const tile = tileMap.tileAt(tx, ty, { create: true });
     if (!tile) return;  // 池满（软上限压力，TileResidency 接入后逐冷 tile）
     backend.uploadSlice(tile.slice, new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
