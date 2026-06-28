@@ -18,6 +18,9 @@ import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../s
 import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
 import type { Stamp } from "../../src/gl/gl-stamp.ts";
 import { compositeLayers } from "../../src/layer-composite.ts";
+import { BrushEngine } from "../../src/brush.ts";
+import { resolveBrush } from "../../src/resolved-brush.ts";
+import { PaintDoc } from "../../src/doc.ts";
 
 interface Check { name: string; ok: boolean; detail: string; }
 type Add = (name: string, ok: boolean, detail?: string) => void;
@@ -392,11 +395,11 @@ function cpuStampRef(n: number, stamps: Stamp[], color: [number, number, number]
   return out;
 }
 // 读 FBO 预乘字节。栅格器顶点把 doc y=0 映到 NDC y=-1 → readback row0 = doc y=0，与 CPU 参考同向，无需翻 Y。
-function readFBO(glctx: GLContext, fbo: WebGLFramebuffer, n: number): Uint8Array {
+function readFBO(glctx: GLContext, fbo: WebGLFramebuffer, w: number, h: number = w): Uint8Array {
   const gl = glctx.gl;
-  const raw = new Uint8Array(n * n * 4);
+  const raw = new Uint8Array(w * h * 4);
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-  gl.readPixels(0, 0, n, n, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   return raw;
 }
@@ -434,6 +437,51 @@ function stampParity(glctx: GLContext, add: Add): void {
     const { md, at } = maxByteDiff(ref, glpx, N);
     add(`stamp:${buildup ? "buildup" : "wash"} 椭圆 GPU vs CPU 公式`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
   }
+}
+
+// ---- E3) 全管线 golden：真 BrushEngine CPU 描边(getLiveOverlay) vs collectStamps→GPU 栅格 ----
+//   验证「手感数学(CPU 出 stamp) + GPU 栅格」整条管线匹配**真 CPU 笔刷**（非公式再实现）。
+//   两边都是 pre-opacity 的 stroke 像素（frozen+tail）；CPU overlay 直 α → 转预乘 vs GPU 预乘。
+function cpuStraightToPremul(straight: Uint8ClampedArray): Uint8Array {
+  const out = new Uint8Array(straight.length);
+  for (let i = 0; i < straight.length; i += 4) {
+    const a = straight[i + 3];
+    out[i] = Math.round(straight[i] * a / 255); out[i + 1] = Math.round(straight[i + 1] * a / 255);
+    out[i + 2] = Math.round(straight[i + 2] * a / 255); out[i + 3] = a;
+  }
+  return out;
+}
+function brushPipeDiff(glctx: GLContext, ras: GLStampRasterizer, mode: string): { md: number; bw: number; ai: number; cpu: Uint8Array; gpu: Uint8Array } | null {
+  const doc = new PaintDoc({ width: 512, height: 512 });
+  const eng = new BrushEngine();
+  const s = resolveBrush({ size: 36, color: "#cc4488", preset: { shape: { kind: "round", hardness: 0.35 }, compositeMode: mode, spacing: 0.08 } });
+  eng.beginStroke(doc.layers[0], s, 80, 90, 1.0, "brush");
+  eng.extendStroke(160, 110, 0.95); eng.extendStroke(240, 180, 0.8); eng.extendStroke(320, 150, 0.6);
+  const ov = eng.getLiveOverlay();
+  const cs = eng.collectStamps();
+  if (!ov || !cs) return null;
+  const bw = ov.bboxW, bh = ov.bboxH;
+  const ovData = (ov.canvas as HTMLCanvasElement).getContext("2d")!.getImageData(0, 0, bw, bh).data;
+  const cpu = cpuStraightToPremul(ovData);
+  const fbo = ras.rasterize(cs.stamps, cs.shape, ov.bboxX, ov.bboxY, bw, bh);
+  const gpu = readFBO(glctx, fbo.fbo, bw, bh);
+  glctx.returnFBO(fbo);
+  let md = 0, ai = 0;
+  for (let i = 0; i < bw * bh * 4; i++) { const d = Math.abs(cpu[i] - gpu[i]); if (d > md) { md = d; ai = i - (i % 4); } }
+  return { md, bw, ai, cpu, gpu };
+}
+function brushPipelineParity(glctx: GLContext, add: Add): void {
+  const ras = new GLStampRasterizer(glctx);
+  // WASH：CPU(_washMaxInto) 与 GPU 同走**解析 falloff** → 全管线对真 CPV 笔刷应紧匹配（gate）。
+  const w = brushPipeDiff(glctx, ras, "wash");
+  if (!w) { add("brushpipe:wash 取 overlay/stamps", false, "null"); return; }
+  const wp = w.ai / 4;
+  add("brushpipe:wash 真CPU笔刷 vs collectStamps→GPU", w.md <= 8, `maxΔ=${w.md} @(${wp % w.bw},${Math.floor(wp / w.bw)})`);
+  // BUILDUP：CPU(_buildupOverInto) 用**缓存重采样 stamp**(baseSize 64→drawImage 缩放)，GPU 用解析 → 天然发散。
+  //   非 bug（stampParity 已证 GPU buildup 对解析公式 Δ1）；GPU 与 wash 一致、更干净，但**变了旧 buildup 观感**。
+  //   = 手感判断项（user 真机定）。此处只**记录**发散量、不 gate（≤120 仅防爆/退化哨兵）。
+  const b = brushPipeDiff(glctx, ras, "buildup");
+  if (b) add(`brushpipe:buildup 发散(CPU缓存stamp vs GPU解析,手感待定) maxΔ=${b.md}`, b.md <= 120, `cpu=[${b.cpu[b.ai]},${b.cpu[b.ai + 1]},${b.cpu[b.ai + 2]},${b.cpu[b.ai + 3]}] gpu=[${b.gpu[b.ai]},${b.gpu[b.ai + 1]},${b.gpu[b.ai + 2]},${b.gpu[b.ai + 3]}]`);
 }
 
 function run(): { ok: boolean; checks: Check[]; error: string | null } {
@@ -501,6 +549,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { bridgeParity(glctx, add); } catch (e) { add("bridge parity", false, String(e)); }
   try { tilePixelsParity(add); } catch (e) { add("tilepixels parity", false, String(e)); }
   try { stampParity(glctx, add); } catch (e) { add("stamp parity", false, String(e)); }
+  try { brushPipelineParity(glctx, add); } catch (e) { add("brushpipe parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);
