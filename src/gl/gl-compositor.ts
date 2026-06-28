@@ -147,15 +147,21 @@ export class GLCompositor {
       const node = nodes[i];
       if (!node.visible) continue;
       const base = bases[i];
-      if (node.clip && !base) continue;   // clip 无基底 → 不渲染
+      // clip 无基底 → 层本身不渲染，**但浮层仍要显**（变换中整层被提起、基底变空时，clip 层的 float 不能跟着消失；
+      //   对齐 2D layer-composite.ts:131/143 —— float 独立于 clip 绘制）。组无 float → clip 无基底直接跳。
+      const clipNoBase = node.clip && !base;
       // clip 基底：仅支持叶作基底（其 tile-index 即蒙版）。组作基底罕见，暂不支持（当无 clip）。
       const clipIndex = base && base.kind === "leaf" ? base.srcIndex : null;
 
       if (node.kind === "leaf") {
-        const srcKind = node.overlay ? "overlay" : "tiled";
-        this._pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
-        // 自由变换浮层：源层 z 之上 source-over α=1（独立 pass，不随层 mode/opacity）。
+        if (!clipNoBase) {
+          const srcKind = node.overlay ? "overlay" : "tiled";
+          this._pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
+        }
+        // 自由变换浮层：源层 z 之上 source-over α=1（独立 pass，不随层 mode/opacity/clip）。
         if (node.float) this._floatPass(node.float, acc, docW, docH);
+      } else if (clipNoBase) {
+        continue;
       } else if (needsIsolation(node)) {
         const sub = this._composeFresh(arrayTex, node.children, docW, docH);   // 独立 sub-accumulator（不碰 VAO）
         this._pass(arrayTex, "group", null, sub.tex, groupUnitMode(node), node.opacity, clipIndex, acc, docW, docH);

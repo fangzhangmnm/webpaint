@@ -499,6 +499,21 @@ function floatParity(glctx: GLContext, add: Add): void {
   const { md, at } = maxPremulDiff(refData, glpx, N);
   add("float:GL 浮层 pass vs 2D drawImage source-over", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
   lt.index.dispose(); glctx.gl.deleteTexture(ftex);
+
+  // clip 层空基底 + float（变换图层组时 clip 层基底被提空）→ 层不渲染但 float 仍显（修「变换组 clip 消失」）。
+  const eb = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, makeLayerCanvas(N, N, () => [0, 0, 0, 0])) }, N, N);
+  const fc2 = makeLayerCanvas(70, 60, () => [80, 200, 120, 200]); const ftex2 = texFromCanvas(glctx, fc2);
+  const tree2 = [
+    { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: null },
+    { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: { tex: ftex2, ox: 40, oy: 35, ow: 70, oh: 60 } },
+  ];
+  const acc2 = comp.composite(backend.texture, tree2 as never, N, N);
+  const glpx2 = readComposite(glctx, comp, acc2, N); glctx.returnFBO(acc2);
+  const ref2 = document.createElement("canvas"); ref2.width = N; ref2.height = N;
+  const rctx2 = ref2.getContext("2d")!; rctx2.clearRect(0, 0, N, N); rctx2.drawImage(fc2, 40, 35);   // clip 层空基底=不显，仅 float
+  const d2 = maxPremulDiff(rctx2.getImageData(0, 0, N, N).data, glpx2, N);
+  add("float:clip 层空基底 → float 仍显（修变换组 clip 消失）", d2.md <= 4, `maxΔ=${d2.md} ${d2.md > 4 ? d2.at : ""}`);
+  eb.index.dispose(); glctx.gl.deleteTexture(ftex2);
 }
 
 // ---- E3) 全管线 golden：真 BrushEngine CPU 描边(getLiveOverlay) vs collectStamps→GPU 栅格 ----
