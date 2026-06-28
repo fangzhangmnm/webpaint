@@ -150,8 +150,12 @@ GL canvas 垫 #board 下渲 doc（void+背景+图层+live overlay，视口仿射
 - 吸管：GL 模式仍按需建 2D 合成缓存取色（对但冗余）→ 可改读 GL 合成 readback。
 
 ## 5.7 主轨 roadmap（最重要，按序推进）
-1. **Stage 3：GL 笔刷栅格化**（StrokeRasterizer 消费 CPU StrokeSmoother 中心线 → GL stamp；Build-Up=source-over/Wash=MAX；
-   flow-in/opacity-out；smoothstep falloff 照搬）。完成「改成 webgl」primary，golden 对拍现笔刷；live 描边全 GPU(去 CPU overlay)。
+1. ✅ **Stage 3：GL 笔刷栅格化（v340-346 落地）**。切法=手感数学(_walkStamps 间距/_stampParams 压感/taper)留 CPU 不动，
+   GPU 只接管逐像素 falloff+buildup/wash 累积。GLStampRasterizer(圆/椭圆×wash/buildup golden Δ1)；brush.collectStamps
+   出栈+包围盒；GPU live overlay(setStampOverlay→presentTo straight) + GPU commit(rasterizeStrokeToCanvas→
+   readback→_commitStrokeCanvas/editRegion)。golden 对拍**真 CPU 笔刷** wash Δ2。buildup 走解析(用户定，与 wash 一致)。
+   **待补**：① GPU live overlay 的 selection/lockAlpha 裁剪（现这两种回退 CPU overlay，commit 仍 GPU 正确）；
+   ② 删描边中 CPU 栅格(extendStroke→buffer，GPU-live 时未用)；③ 大喷枪 banding(RGBA16F 累积，§7 bonus)。
 2. **tiling 存储**（11 层 / 内存目标 = 原始「顺便」诉求）：图层像素从 Canvas2D bbox 画布迁到稀疏 tile（去 16.8MB/层）。
 
    **爆炸半径已 survey（2026-06-27）**，设计 = **单一虚拟化点**：
