@@ -15,6 +15,8 @@ import { TileIndexTexture } from "../../src/gl/tile-index.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
 import { uploadLayerToTiles, docTreeToComp } from "../../src/gl/gl-doc-bridge.ts";
 import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/gl/tile-pixels.ts";
+import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
+import type { Stamp } from "../../src/gl/gl-stamp.ts";
 import { compositeLayers } from "../../src/layer-composite.ts";
 
 interface Check { name: string; ok: boolean; detail: string; }
@@ -349,6 +351,76 @@ function tilePixelsParity(add: Add): void {
   add("tilepixels:replaceFromCanvas vs Canvas2D", md2 <= 3, `maxΔ=${md2}`);
 }
 
+// ---- E2) GL stamp 栅格器 golden：GPU 栅格 stamp 列表 vs CPU 同公式参考（falloff+wash/buildup 累积）----
+//   参考 = brush.ts 提取的公式（_getStamp:221 / _washMaxInto:867 / _buildupOverInto）的独立 CPU 实现。
+//   两边都算**预乘 RGBA**，直接比预乘字节（我们的 GPU 输出本就是预乘）。
+function shapeAlpha(dist: number, radius: number, hardness: number): number {
+  const h = Math.max(0, Math.min(0.999, hardness));
+  const innerR = h * radius, decayLen = radius - innerR;
+  if (dist >= radius) return 0;
+  if (decayLen <= 0 || dist <= innerR) return 1;
+  const u = (dist - innerR) / decayLen; return 1 - u * u * (3 - 2 * u);
+}
+// CPU 参考 → 预乘字节（top-down，row0=doc y=0）。
+function cpuStampRef(n: number, stamps: Stamp[], color: [number, number, number], hardness: number, buildup: boolean): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(n * n * 4);
+  for (let py = 0; py < n; py++) for (let px = 0; px < n; px++) {
+    const i = (py * n + px) * 4;
+    if (buildup) {
+      let ar = 0, ag = 0, ab = 0, aa = 0;   // 预乘累加器（0..1）
+      for (const s of stamps) {
+        const dx = px + 0.5 - s.x, dy = py + 0.5 - s.y;
+        const sa = s.alpha * shapeAlpha(Math.sqrt(dx * dx + dy * dy), s.size / 2, hardness);
+        if (sa <= 0) continue;
+        ar = color[0] * sa + ar * (1 - sa); ag = color[1] * sa + ag * (1 - sa);
+        ab = color[2] * sa + ab * (1 - sa); aa = sa + aa * (1 - sa);
+      }
+      out[i] = Math.round(ar * 255); out[i + 1] = Math.round(ag * 255); out[i + 2] = Math.round(ab * 255); out[i + 3] = Math.round(aa * 255);
+    } else {
+      let a = 0;
+      for (const s of stamps) {
+        const dx = px + 0.5 - s.x, dy = py + 0.5 - s.y;
+        a = Math.max(a, s.alpha * shapeAlpha(Math.sqrt(dx * dx + dy * dy), s.size / 2, hardness));
+      }
+      out[i] = Math.round(color[0] * a * 255); out[i + 1] = Math.round(color[1] * a * 255); out[i + 2] = Math.round(color[2] * a * 255); out[i + 3] = Math.round(a * 255);
+    }
+  }
+  return out;
+}
+// 读 FBO 预乘字节。栅格器顶点把 doc y=0 映到 NDC y=-1 → readback row0 = doc y=0，与 CPU 参考同向，无需翻 Y。
+function readFBO(glctx: GLContext, fbo: WebGLFramebuffer, n: number): Uint8Array {
+  const gl = glctx.gl;
+  const raw = new Uint8Array(n * n * 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.readPixels(0, 0, n, n, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return raw;
+}
+function maxByteDiff(ref: Uint8ClampedArray, gl: Uint8Array, n: number): { md: number; at: string } {
+  let md = 0, ai = 0;
+  for (let i = 0; i < n * n * 4; i++) { const d = Math.abs(ref[i] - gl[i]); if (d > md) { md = d; ai = i - (i % 4); } }
+  const p = ai / 4; return { md, at: `@(${p % n},${Math.floor(p / n)}) ref=[${ref[ai]},${ref[ai + 1]},${ref[ai + 2]},${ref[ai + 3]}] gl=[${gl[ai]},${gl[ai + 1]},${gl[ai + 2]},${gl[ai + 3]}]` };
+}
+function stampParity(glctx: GLContext, add: Add): void {
+  const N = 128;
+  const ras = new GLStampRasterizer(glctx);
+  const color: [number, number, number] = [0.2, 0.6, 0.9];
+  const stamps: Stamp[] = [
+    { x: 40, y: 40, size: 50, alpha: 0.6 },
+    { x: 70, y: 55, size: 40, alpha: 0.5 },
+    { x: 55, y: 80, size: 60, alpha: 0.7 },
+  ];
+  for (const buildup of [false, true]) {
+    const hardness = 0.3;
+    const fbo = ras.rasterize(stamps, { hardness, color, buildup }, 0, 0, N, N);
+    const glpx = readFBO(glctx, fbo.fbo, N);
+    glctx.returnFBO(fbo);
+    const ref = cpuStampRef(N, stamps, color, hardness, buildup);
+    const { md, at } = maxByteDiff(ref, glpx, N);
+    add(`stamp:${buildup ? "buildup" : "wash"} GPU vs CPU 公式`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  }
+}
+
 function run(): { ok: boolean; checks: Check[]; error: string | null } {
   const checks: Check[] = [];
   const add: Add = (name, ok, detail = "") => checks.push({ name, ok, detail });
@@ -413,6 +485,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { overlayParity(glctx, add); } catch (e) { add("overlay parity", false, String(e)); }
   try { bridgeParity(glctx, add); } catch (e) { add("bridge parity", false, String(e)); }
   try { tilePixelsParity(add); } catch (e) { add("tilepixels parity", false, String(e)); }
+  try { stampParity(glctx, add); } catch (e) { add("stamp parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);
