@@ -712,8 +712,8 @@ export class Board {
       overlay = this._clipOverlayMasks(overlay, this.doc.selection as unknown as Selection | null, layer.lockAlpha ? layer : null) as OverlayDesc | undefined;
     }
     if (!overlay) return null;
-    const o = overlay as OverlayDesc & { opacity?: number; mode?: string };
-    return { canvas: o.canvas, bboxX: o.bboxX, bboxY: o.bboxY, bboxW: o.bboxW, bboxH: o.bboxH, layerId: o.layer.id, opacity: o.opacity ?? 1, erase: o.mode === "erase" };
+    const o = overlay as OverlayDesc & { opacity?: number; mode?: string; blendMode?: string };
+    return { canvas: o.canvas, bboxX: o.bboxX, bboxY: o.bboxY, bboxW: o.bboxW, bboxH: o.bboxH, layerId: o.layer.id, opacity: o.opacity ?? 1, erase: o.mode === "erase", blendMode: o.blendMode || "source-over" };
   }
 
   // doc 底色（棋盘 = 透明指示；否则 backgroundColor）。实时路径画到屏幕、缓存路径画到离屏——

@@ -9,7 +9,7 @@ import { GLTileBackend } from "./tile-backend-gl.ts";
 import { TilePool, TILE_BYTES } from "./tile-store.ts";
 import { GLCompositor } from "./gl-compositor.ts";
 import type { Background } from "./gl-compositor.ts";
-import { uploadLayerToTiles, docTreeToComp } from "./gl-doc-bridge.ts";
+import { uploadLayerToTiles, docTreeToComp, safeMode } from "./gl-doc-bridge.ts";
 import type { DocNode, DocLeaf, LayerTiles } from "./gl-doc-bridge.ts";
 import type { OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
 import type { PooledFBO, FBOPrec, GLContext } from "./gl-context.ts";
@@ -21,6 +21,7 @@ export interface OverlayInput {
   layerId: number;
   opacity: number;
   erase: boolean;
+  blendMode: string;   // 笔刷混合模式（safeMode 收敛到 12 可分离；erase 时忽略）
 }
 
 // board 传入的自由变换浮层（warp 后的内容 canvas + doc 坐标位置 + 落在哪个源层 z）。
@@ -38,7 +39,7 @@ export class GLDocRenderer {
   private _layerTiles = new Map<number, LayerTiles>();
   // live 描边 overlay：只传**描边 bbox 尺寸**纹理（小），shader 按 bbox 映射。
   private _ovTex: WebGLTexture | null = null;
-  private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; ox: number; oy: number; ow: number; oh: number } | null = null;
+  private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number } | null = null;
   // 自由变换浮层：per-源层 id 一张复用纹理（warp 每帧变，重传）+ 当前帧描述。
   private _floatTex = new Map<number, WebGLTexture>();
   private _floats = new Map<number, FloatDesc>();
@@ -89,7 +90,7 @@ export class GLDocRenderer {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 存直值（shader 自己处理）
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, ov.canvas as TexImageSource);   // bbox 尺寸直传（overlay 是 canvas）
     gl.bindTexture(gl.TEXTURE_2D, null);
-    this._overlay = { tex: this._ovTex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, ox: ov.bboxX, oy: ov.bboxY, ow: ov.bboxW, oh: ov.bboxH };
+    this._overlay = { tex: this._ovTex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: ov.bboxX, oy: ov.bboxY, ow: ov.bboxW, oh: ov.bboxH };
   }
 
   // 设置/清除自由变换浮层（board 每帧调；空数组=无）。每个浮层=warp 后 canvas 直传 per-源层 id 纹理。
@@ -155,7 +156,7 @@ export class GLDocRenderer {
         if (!r) throw new Error(`LAYER_NOT_SYNCED:${leaf.id}`);   // syncAll 后每叶都在表（空层=空 index）
         return { index: r.index, hasContent: r.tileMap.tileCount > 0 };
       },
-      ov ? (leaf): OverlayDesc | null => (leaf.id === ov.layerId ? { tex: ov.tex, opacity: ov.opacity, erase: ov.erase, ox: ov.ox, oy: ov.oy, ow: ov.ow, oh: ov.oh } : null) : undefined,
+      ov ? (leaf): OverlayDesc | null => (leaf.id === ov.layerId ? { tex: ov.tex, opacity: ov.opacity, erase: ov.erase, blendMode: safeMode(ov.blendMode), ox: ov.ox, oy: ov.oy, ow: ov.ow, oh: ov.oh } : null) : undefined,
       this._floats.size ? (leaf): FloatDesc | null => this._floats.get(leaf.id) ?? null : undefined,
     );
     return this._comp.composite(this._backend.texture, tree, docW, docH, bg);

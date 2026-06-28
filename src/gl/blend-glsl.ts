@@ -53,7 +53,7 @@ export type SourceKind = "tiled" | "group" | "overlay";
 //   u_clipIndex：剪裁基底 tile-index；u_docSize：doc 像素尺寸；u_dst：累积器（预乘）；
 //   u_opacity：层不透明度（Π 外那份，§4.3）；u_hasClip：1 时源 alpha × 基底 alpha = clip 蒙版。
 //   sampleTiled：doc 坐标 → tile 坐标 → index 查 slice（空则透明）→ tile 内局部 uv 采 array。
-export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled"): string {
+export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled", overlayMode: BlendMode = "source-over"): string {
   // 源取值片段：算出 srcA（源 alpha 直值）+ Cs（源直值色）。
   const srcSnippet =
     src === "group"
@@ -62,7 +62,8 @@ export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled"):
          vec3 Cs = (sp.a > 0.0) ? (sp.rgb / sp.a) : vec3(0.0);   // 解预乘`
     : src === "overlay"
       // 活动叶 ⊕ overlay：overlay 是 **bbox 尺寸**纹理（doc 坐标 u_ovOrigin 起、u_ovSize 大）——按 bbox 映射，
-      //   bbox 外透明（避免每帧传 doc 尺寸纹理）。erase = destination-out（叶 alpha 削减）；否则 source-over 叠。
+      //   bbox 外透明（避免每帧传 doc 尺寸纹理）。erase = destination-out（叶 alpha 削减）；否则按 **brush blendMode**
+      //   把 overlay（源）合到 base（背景）——W3C §10.2，与 2D layer-composite.ts:212 的 globalCompositeOperation 等价。
       ? `vec4 base = sampleTiled(u_srcIndex, docPos);
          vec2 ovUv = (docPos - u_ovOrigin) / u_ovSize;
          vec4 ov = (any(lessThan(ovUv, vec2(0.0))) || any(greaterThan(ovUv, vec2(1.0)))) ? vec4(0.0) : texture(u_overlay, ovUv);
@@ -71,12 +72,18 @@ export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled"):
          if (u_overlayErase == 1) {
            srcA = base.a * (1.0 - ovA); Cs = base.rgb;
          } else {
+           vec3 ovBlend = (1.0 - base.a) * ov.rgb + base.a * blendRGB_ov(base.rgb, ov.rgb);   // W3C blend 只在 base 存在处
            srcA = ovA + base.a * (1.0 - ovA);
-           Cs = (srcA > 0.0) ? (ov.rgb * ovA + base.rgb * base.a * (1.0 - ovA)) / srcA : vec3(0.0);
+           Cs = (srcA > 0.0) ? (ovBlend * ovA + base.rgb * base.a * (1.0 - ovA)) / srcA : vec3(0.0);
          }`
       : `vec4 s = sampleTiled(u_srcIndex, docPos);
          float srcA = s.a;
          vec3 Cs = s.rgb;`;
+  // overlay 专属：brush blendMode 的第二个 blend 函数（ov 合到 base 用，与层 mode 正交）。
+  const ovBlendFns = src === "overlay"
+    ? `float bfn_ov(float Cb, float Cs){ ${BLEND_BODY[overlayMode]} }
+       vec3 blendRGB_ov(vec3 b, vec3 s){ return vec3(bfn_ov(b.r,s.r), bfn_ov(b.g,s.g), bfn_ov(b.b,s.b)); }`
+    : "";
   return `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
@@ -98,6 +105,7 @@ out vec4 o;
 
 float bfn(float Cb, float Cs){ ${BLEND_BODY[mode]} }
 vec3 blendRGB(vec3 b, vec3 s){ return vec3(bfn(b.r,s.r), bfn(b.g,s.g), bfn(b.b,s.b)); }
+${ovBlendFns}
 
 vec4 sampleTiled(highp sampler2D index, vec2 docPos){
   ivec2 tc = ivec2(floor(docPos / 256.0));
@@ -125,6 +133,6 @@ void main(){
 }
 
 // program 缓存键（GLContext.program 用）。
-export function compositeProgramKey(mode: BlendMode, src: SourceKind = "tiled"): string {
-  return `composite:${mode}:${src}`;
+export function compositeProgramKey(mode: BlendMode, src: SourceKind = "tiled", overlayMode: BlendMode = "source-over"): string {
+  return src === "overlay" ? `composite:${mode}:${src}:${overlayMode}` : `composite:${mode}:${src}`;
 }

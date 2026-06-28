@@ -97,8 +97,8 @@ export class GLCompositor {
     this._prec = accumPrec;
   }
 
-  private _program(mode: BlendMode, src: SourceKind): WebGLProgram {
-    return this._glctx.program(compositeProgramKey(mode, src), COMPOSITE_VERT, compositeFragSource(mode, src));
+  private _program(mode: BlendMode, src: SourceKind, overlayMode: BlendMode = "source-over"): WebGLProgram {
+    return this._glctx.program(compositeProgramKey(mode, src, overlayMode), COMPOSITE_VERT, compositeFragSource(mode, src, overlayMode));
   }
 
   // 合成一个层级的兄弟节点（自底向上）进一张预乘累积器 FBO 返回。caller 负责 returnFBO。
@@ -174,7 +174,7 @@ export class GLCompositor {
     acc: Acc, docW: number, docH: number, overlay: OverlayDesc | null = null,
   ): void {
     const gl = this._glctx.gl;
-    const prog = this._program(mode, srcKind);
+    const prog = this._program(mode, srcKind, overlay && !overlay.erase ? overlay.blendMode : "source-over");
     gl.useProgram(prog);
     const u = (name: string) => gl.getUniformLocation(prog, name);
     gl.uniform2f(u("u_docSize"), docW, docH);

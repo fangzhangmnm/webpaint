@@ -14,6 +14,7 @@ export interface OverlayDesc {
   tex: WebGLTexture;
   opacity: number;
   erase: boolean;
+  blendMode: BlendMode;   // 笔刷混合模式（overlay 合到 base 用；erase 时忽略）
   ox: number; oy: number; ow: number; oh: number;   // doc 坐标 bbox（shader 按此映射，bbox 外透明）
 }
 // 自由变换浮层（floatFor 接缝，对齐 2D layer-composite.ts:143-145）：warp 后的内容，**bbox 尺寸**直值纹理 +

@@ -245,26 +245,28 @@ function overlayParity(glctx: GLContext, add: Add): void {
   backend.uploadSlice(0, bg); backend.uploadSlice(1, layer);
   const i0 = idx1(glctx, 0), i1 = idx1(glctx, 1);
   const ovTex = makeTex2D(glctx, ov, n);
-  for (const erase of [false, true]) {
+  // normal(source-over) + erase + blendMode(multiply) —— 后者验 blendMode-overlay 接缝。
+  for (const cse of [{ erase: false, bm: "source-over" }, { erase: true, bm: "source-over" }, { erase: false, bm: "multiply" }]) {
+    const { erase, bm } = cse;
     const opacity = 0.85;
-    // golden：compositeLayers，活动叶带 overlayFor
+    // golden：compositeLayers，活动叶带 overlayFor（blendMode 透传）
     const A2D = { isGroup: false, visible: true, clippingMask: false, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, canvas: imgToCanvas(bg, n) };
     const L2D = { isGroup: false, visible: true, clippingMask: false, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, canvas: imgToCanvas(layer, n) };
     const ovCanvas = imgToCanvas(ov, n);
     const gc = document.createElement("canvas"); gc.width = n; gc.height = n;
     const gctx = gc.getContext("2d")!; gctx.clearRect(0, 0, n, n);
     compositeLayers(gctx as unknown as CanvasRenderingContext2D, [A2D, L2D] as never, {
-      overlayFor: (node: unknown) => node === L2D ? { canvas: ovCanvas, bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, opacity, mode: erase ? "erase" : undefined, blendMode: "source-over" } : null,
+      overlayFor: (node: unknown) => node === L2D ? { canvas: ovCanvas, bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, opacity, mode: erase ? "erase" : undefined, blendMode: bm } : null,
     } as never);
     const ref = gctx.getImageData(0, 0, n, n).data;
-    // GL：活动叶带 overlay
-    const active: Leaf & { overlay: { tex: WebGLTexture; opacity: number; erase: boolean; ox: number; oy: number; ow: number; oh: number } } = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase, ox: 0, oy: 0, ow: n, oh: n } };
+    // GL：活动叶带 overlay（blendMode）
+    const active = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase, blendMode: bm, ox: 0, oy: 0, ow: n, oh: n } };
     glctx.gl.getError();  // 清掉之前残留
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), active], n, n);
+    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const err = glctx.gl.getError();
     const { md, at } = maxPremulDiff(ref, glpx, n);
-    add(`overlay:${erase ? "erase" : "normal"} vs compositeLayers`, md <= 4 && err === 0, `maxΔ=${md} err=0x${err.toString(16)} ${md > 4 ? at : ""}`);
+    add(`overlay:${erase ? "erase" : bm} vs compositeLayers`, md <= 4 && err === 0, `maxΔ=${md} err=0x${err.toString(16)} ${md > 4 ? at : ""}`);
   }
   i0.dispose(); i1.dispose(); glctx.gl.deleteTexture(ovTex);
 }
