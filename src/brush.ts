@@ -503,19 +503,15 @@ export class BrushEngine {
     // （live overlay 走 doc 坐标不裁，所以画时看不出，pen-up 才丢）。bbox 增长是引擎的事——其它引擎
     // (immediate brush / liquify / shapes / 填充 / lasso) 也都各自 ensureBbox；PixelEdit 只管 undo。
     // 时机：本函数在 freeze-all 之后被调，bufBbox 已是终值。
-    layer.ensureBbox(st.bufBboxX, st.bufBboxY, st.bufBboxX + st.bufBboxW, st.bufBboxY + st.bufBboxH);
-    const ctx = layer.ctx;
-    const prevA = ctx.globalAlpha;
-    const prevC = ctx.globalCompositeOperation;
-    ctx.globalAlpha = Math.max(0, Math.min(1, st.settings.opacity ?? 1.0));   // Π 外 × opacity
-    // v242 锁定不透明度：source-atop = 只在已有 alpha 上画、保留目标 alpha（不增不删透明度）。
-    //   覆盖 per-brush blendMode（锁 alpha 时"在已有像素里改色"优先于混合模式；线稿重着色用）。橡皮不锁。
-    ctx.globalCompositeOperation = (st.mode === "erase"
-      ? "destination-out"
-      : (layer.lockAlpha ? "source-atop" : (st.settings.blendMode || "source-over"))) as GlobalCompositeOperation;   // v163 per-brush 混合模式
-    ctx.drawImage(composeCanvas, st.bufBboxX - layer.bboxX, st.bufBboxY - layer.bboxY);
-    ctx.globalAlpha = prevA;
-    ctx.globalCompositeOperation = prevC;
+    // editRegion 物化该区现有像素 → 让 source-atop/destination-out/blendMode 对已有像素合成正确 → 切片回 tile。
+    layer.editRegion(st.bufBboxX, st.bufBboxY, st.bufBboxW, st.bufBboxH, (ctx, ox, oy) => {
+      ctx.globalAlpha = Math.max(0, Math.min(1, st.settings.opacity ?? 1.0));   // Π 外 × opacity
+      // v242 锁定不透明度：source-atop = 只在已有 alpha 上画、保留目标 alpha。覆盖 per-brush blendMode。橡皮不锁。
+      ctx.globalCompositeOperation = (st.mode === "erase"
+        ? "destination-out"
+        : (layer.lockAlpha ? "source-atop" : (st.settings.blendMode || "source-over"))) as GlobalCompositeOperation;
+      ctx.drawImage(composeCanvas, st.bufBboxX - ox, st.bufBboxY - oy);
+    });
   }
 
   // Wash：把 Uint8 buffer 转 RGBA canvas（color × α）。用于 endStroke 合成 + live overlay。
@@ -881,25 +877,18 @@ export class BrushEngine {
     const st = this._stroke!;
     const s = st.settings;
     const layer = st.layer;
-    const ctx = layer.ctx;
-    const lx = x - layer.bboxX;
-    const ly = y - layer.bboxY;
     const intSize = Math.max(1, Math.round(size));
-    // v104: 像素中心位置。pixel i 覆盖 [i, i+1)，光标 lx 所在 pixel = floor(lx)。
-    // 之前 Math.round(lx) - floor(intSize/2) 在 0.5 边界少偏一个像素（user 反映「差了 0.5」）。
-    // 新公式 floor(lx - (intSize-1)/2)：intSize=1 时 = floor(lx) ✓，>1 偶数时左偏 0.5（可接受）
-    const ix = Math.floor(lx - (intSize - 1) / 2);
-    const iy = Math.floor(ly - (intSize - 1) / 2);
-    const prevA = ctx.globalAlpha;
-    const prevC = ctx.globalCompositeOperation;
-    ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));   // pixel 不走 buffer，opacity 这里乘
-    // v242 锁定不透明度：非橡皮走 source-atop（只改已有像素颜色，不增删 alpha）
-    ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : (layer.lockAlpha ? "source-atop" : "source-over");
-    ctx.fillStyle = st.mode === "erase" ? "#000" : (s.color || "#000");
-    ctx.imageSmoothingEnabled = false;
-    ctx.fillRect(ix, iy, intSize, intSize);
-    ctx.globalAlpha = prevA;
-    ctx.globalCompositeOperation = prevC;
+    // v104: 像素中心位置（doc 坐标）。pixel i 覆盖 [i, i+1)；floor(x - (intSize-1)/2)：intSize=1 时=floor(x) ✓。
+    const ix = Math.floor(x - (intSize - 1) / 2);
+    const iy = Math.floor(y - (intSize - 1) / 2);
+    layer.editRegion(ix, iy, intSize, intSize, (ctx, ox, oy) => {
+      ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));   // pixel 不走 buffer，opacity 这里乘
+      // v242 锁定不透明度：非橡皮走 source-atop（只改已有像素颜色，不增删 alpha）
+      ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : (layer.lockAlpha ? "source-atop" : "source-over");
+      ctx.fillStyle = st.mode === "erase" ? "#000" : (s.color || "#000");
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillRect(ix - ox, iy - oy, intSize, intSize);
+    });
   }
 
   _markDirty(x0: number, y0: number, x1: number, y1: number) {

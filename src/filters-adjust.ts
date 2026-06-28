@@ -26,7 +26,7 @@ interface FilterLike {
   boundaryModes?: { id: string; title: string }[];
 }
 // adjust panel 操作的 doc 活层（doc.js 未类型化 → 只描述用到的）。
-interface AdjustLayer { id: number; name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; ctx: CanvasRenderingContext2D; snapshot(): unknown; }
+interface AdjustLayer { id: number; name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; ctx: CanvasRenderingContext2D; snapshot(): unknown; replaceFromCanvas(src: CanvasImageSource, ox: number, oy: number, w: number, h: number): void; }
 // editMode.enterTransient 的 apply/abort（edit-mode.js 未类型化默认 null → 调用处断言真签名）。
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 // filter region preview 态（surrogate canvas + 提取的源/掩码数据）。
@@ -174,9 +174,8 @@ function _closeFilterPanel(applied: boolean) {
   if (_adjustState._rafId) { cancelAnimationFrame(_adjustState._rafId); _adjustState._rafId = 0; }
   board.setActiveLayerSurrogate?.(null, null);
   if (applied) {
-    // 烤进 layer（surrogate 已是最终结果，直接拷回）
-    L.ctx.clearRect(0, 0, L.bboxW, L.bboxH);
-    L.ctx.drawImage(_adjustState.sur, 0, 0);
+    // 烤进 layer（surrogate 已是最终结果，整体替换图层像素 → 切片回 tile）
+    L.replaceFromCanvas(_adjustState.sur, L.bboxX, L.bboxY, _adjustState.sur.width, _adjustState.sur.height);
     const after = L.snapshot();
     history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });   // history.push 同步派 wp:histchange → 编辑门已标
     setStatus(`${_adjustState.Filter.title} 已应用：${L.name}`);

@@ -11,6 +11,7 @@
 
 import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
+import { LayerPixels, materialize, editRegion as editPixels, replaceFromCanvas as replacePixels } from "./gl/tile-pixels.ts";
 
 export const DEFAULT_DOC_SIZE = 2048;
 
@@ -31,7 +32,7 @@ interface LayerSnap {
   bboxW: number;
   bboxH: number;
   imageData?: ImageData | null;
-  bitmap?: Bitmap | ImageBitmap | null;   // blob 解码路径 restoreFromSnapshot 收 ImageBitmap
+  bitmap?: ImageBitmap | null;   // blob 解码路径 restoreFromSnapshot 收 ImageBitmap（pixel-edit PixelSnap 同形）
 }
 
 // layerSpec() 产物（undo 入栈 / insertLayerAt 复位用）。
@@ -48,7 +49,7 @@ interface LayerSpecShape {
   bboxW?: number;
   bboxH?: number;
   imageData?: ImageData | null;
-  bitmap?: Bitmap | ImageBitmap | null;
+  bitmap?: ImageBitmap | null;
   blob?: Blob | null;
 }
 
@@ -109,150 +110,108 @@ export class Layer {
   lockAlpha: boolean;
   docW: number;
   docH: number;
-  bboxX: number;
-  bboxY: number;
-  bboxW: number;
-  bboxH: number;
-  canvas: Bitmap;
-  ctx: Ctx;
-  constructor({ width, height, name, empty = false }: { width: number; height: number; name?: string; empty?: boolean } = {} as { width: number; height: number; name?: string; empty?: boolean }) {
+  // 像素真源 = 稀疏 tile（bbox-free）。canvas/bbox 是派生视图（见 getter）。
+  pixels: LayerPixels;
+  private _mat: { canvas: Bitmap; ox: number; oy: number } | null = null;   // 物化视图缓存（读者用；写后失效）
+  private _empty: Bitmap | null = null;                                      // 空层 1×1 占位
+
+  constructor({ width, height, name }: { width: number; height: number; name?: string; empty?: boolean } = {} as { width: number; height: number; name?: string; empty?: boolean }) {
     this.id = _layerIdCounter++;
     this.isGroup = false;            // 树节点判别：Layer=叶。LayerGroup 覆为 true。
     this.name = name || `图层 ${this.id}`;
     this.visible = true;
     this.opacity = 1;
     this.mode = "source-over";       // Canvas2D globalCompositeOperation
-    this.clippingMask = false;       // true → 被剪裁到「下方第一颗非剪裁层」alpha；
-                                     //         连续剪裁层链共用同一颗基底（Procreate）
-    this.lockAlpha = false;          // v242 锁定不透明度（preserve alpha）：true → 笔只改已有像素的颜色，
-                                     //         不增删 alpha（线稿重着色）。draw 时走 source-atop（见 brush.js）
+    this.clippingMask = false;       // true → 被剪裁到「下方第一颗非剪裁层」alpha；连续剪裁层链共基底（Procreate）
+    this.lockAlpha = false;          // v242 锁定不透明度：true → 笔只改已有像素颜色（source-atop）
     this.docW = width;
     this.docH = height;
-    if (empty) {
-      // 空层：bbox 为 0，canvas 1×1 占位（避免 null ctx 引用爆栈）。
-      // 第一颗 stamp 触发 ensureBbox 后才真分配。这样新建图层 ≈ 0 内存。
-      this.bboxX = 0;
-      this.bboxY = 0;
-      this.bboxW = 0;
-      this.bboxH = 0;
-      this.canvas = makeBitmap(1, 1);
-    } else {
-      // 老路径（doc 初始层）：bbox = 全 doc，行为同 v32
-      this.bboxX = 0;
-      this.bboxY = 0;
-      this.bboxW = width;
-      this.bboxH = height;
-      this.canvas = makeBitmap(width, height);
-    }
-    this.ctx = this.canvas.getContext("2d", { willReadFrequently: false }) as Ctx;
-    this.ctx.imageSmoothingEnabled = true;
-    this.ctx.imageSmoothingQuality = "low";
+    // 初始无内容（旧 base 层也是透明全 doc canvas = 无内容）。tile 按需分配 → 新层 ≈ 0 内存。
+    this.pixels = new LayerPixels(width, height);
   }
-  // 给 board.drawImage / 旧代码用。返回 canvas 实际尺寸 = bbox 尺寸。
+
+  // ---- 派生只读视图（读者：2D 合成器 / ora / psd / 导出 / board / 吸管）----
+  // 物化整内容为一张 tile 粒度 bbox 画布（缓存；任何写后 _invalidate 失效）。空层 → 1×1 占位。
+  private _ensureMat(): { canvas: Bitmap; ox: number; oy: number } {
+    if (this._mat) return this._mat;
+    const m = materialize(this.pixels);
+    if (m) { this._mat = { canvas: m.canvas as Bitmap, ox: m.ox, oy: m.oy }; return this._mat; }
+    if (!this._empty) this._empty = makeBitmap(1, 1);
+    this._mat = { canvas: this._empty, ox: 0, oy: 0 };
+    return this._mat;
+  }
+  private _invalidate() { this._mat = null; }
+
+  // canvas / ctx：旧读者照用（drawImage 源 / getImageData）。**写请走 editRegion，别写这个 ctx**（写丢）。
+  get canvas(): Bitmap { return this._ensureMat().canvas; }
+  get ctx(): Ctx { return this._ensureMat().canvas.getContext("2d", { willReadFrequently: true }) as Ctx; }
+  // bbox = 物化视图的 doc 框（tile 粒度）。空层 = 0（对齐旧行为）。
+  get bboxX(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().ox; }
+  get bboxY(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().oy; }
+  get bboxW(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().canvas.width; }
+  get bboxH(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().canvas.height; }
   get width() { return this.bboxW; }
   get height() { return this.bboxH; }
 
-  // 确保 doc 坐标 rect [x0,y0,x1,y1] 落在 bbox 内；不在则 grow canvas。
-  // - 加 BBOX_GROW_MARGIN 防 stamp 反复出入边界
-  // - clamp 在 doc 边界内（rect 完全在 doc 外 → no-op）
-  // - 旧 canvas drawImage 到新 canvas 的对应位置，旧像素保留
-  // - empty 层（bboxW/H=0）首次 ensureBbox 时直接按 rect 分配，不和占位
-  //   1×1 canvas 求 union（否则 bbox 会无谓延伸到 (0,0)）
-  ensureBbox(x0: number, y0: number, x1: number, y1: number) {
-    const isEmpty = this.bboxW <= 0 || this.bboxH <= 0;
-    if (!isEmpty &&
-        x0 >= this.bboxX && y0 >= this.bboxY &&
-        x1 <= this.bboxX + this.bboxW && y1 <= this.bboxY + this.bboxH) return;
-    const m = BBOX_GROW_MARGIN;
-    let nx, ny, nx1, ny1;
-    if (isEmpty) {
-      nx = x0 - m; ny = y0 - m;
-      nx1 = x1 + m; ny1 = y1 + m;
-    } else {
-      nx  = Math.min(this.bboxX, x0 - m);
-      ny  = Math.min(this.bboxY, y0 - m);
-      nx1 = Math.max(this.bboxX + this.bboxW, x1 + m);
-      ny1 = Math.max(this.bboxY + this.bboxH, y1 + m);
-    }
-    nx = Math.floor(nx);
-    ny = Math.floor(ny);
-    nx1 = Math.ceil(nx1);
-    ny1 = Math.ceil(ny1);
-    // clamp 到 doc 边界
-    nx = Math.max(0, nx);
-    ny = Math.max(0, ny);
-    nx1 = Math.min(this.docW, nx1);
-    ny1 = Math.min(this.docH, ny1);
-    const nw = nx1 - nx;
-    const nh = ny1 - ny;
-    if (nw <= 0 || nh <= 0) return;     // 整块在 doc 外
-    if (!isEmpty && nw === this.bboxW && nh === this.bboxH && nx === this.bboxX && ny === this.bboxY) return;
-    const nc = makeBitmap(nw, nh);
-    const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
-    nctx.imageSmoothingEnabled = true;
-    nctx.imageSmoothingQuality = "low";
-    if (!isEmpty) {
-      nctx.drawImage(this.canvas, this.bboxX - nx, this.bboxY - ny);
-    }
-    this.canvas = nc;
-    this.ctx = nctx;
-    this.bboxX = nx;
-    this.bboxY = ny;
-    this.bboxW = nw;
-    this.bboxH = nh;
+  // ---- 写者入口 ----
+  // 编辑 doc 矩形 [x0,y0,w,h]：fn(ctx, ox, oy) 在该区画（ctx 已含现有像素；doc 坐标 d 处画 = ctx 坐标 d-ox/d-oy）。
+  //   blend/erase/lockAlpha 这类对已有像素合成的写法天然正确（fn 看到的就是现有像素）。
+  editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void) {
+    editPixels(this.pixels, x0, y0, w, h, fn);
+    this._invalidate();
+  }
+  // 整体从一张 canvas 重建（变换 / 合并 / 导入 / ora）：srcCanvas 内容在 doc (ox,oy) 起、w×h。
+  replaceFromCanvas(srcCanvas: CanvasImageSource, ox: number, oy: number, w: number, h: number) {
+    replacePixels(this.pixels, srcCanvas, ox, oy, w, h);
+    this._invalidate();
+  }
+  // 清空全层。
+  clearAll() { this.pixels.clear(); this._invalidate(); }
+
+  // 重置像素到**新 doc 尺寸** + 可选填入一张 canvas（crop / rotate / resample 等改 doc 尺寸的变换用——
+  //   tile 几何依赖 docW，尺寸变必须重建 LayerPixels）。src=null → 空层。src 内容在 doc (ox,oy) 起、w×h。
+  remapPixels(newDocW: number, newDocH: number, src: CanvasImageSource | null, ox = 0, oy = 0, w = 0, h = 0) {
+    this.docW = newDocW;
+    this.docH = newDocH;
+    this.pixels = new LayerPixels(newDocW, newDocH);
+    if (src && w > 0 && h > 0) replacePixels(this.pixels, src, ox, oy, w, h);
+    this._invalidate();
   }
 
-  // doc 坐标采样（吸色用）。落在 bbox 外 → 透明。
-  sampleAt(docX: number, docY: number) {
-    if (this.bboxW <= 0 || this.bboxH <= 0) return [0, 0, 0, 0];
-    const lx = docX - this.bboxX;
-    const ly = docY - this.bboxY;
-    if (lx < 0 || ly < 0 || lx >= this.bboxW || ly >= this.bboxH) {
-      return [0, 0, 0, 0];
-    }
-    try {
-      return this.ctx.getImageData(lx, ly, 1, 1).data;
-    } catch {
-      return [0, 0, 0, 0];
-    }
+  // ensureBbox 兼容 shim：tile 按需分配，无需预扩容 → no-op。旧写者已迁 editRegion；残留调用安全。
+  ensureBbox(_x0: number, _y0: number, _x1: number, _y1: number) { /* no-op，tile 按需分配 */ }
+
+  // doc 坐标采样（吸色）。tile 精确取点，bbox 外透明。
+  sampleAt(docX: number, docY: number) { return this.pixels.sampleAt(Math.floor(docX), Math.floor(docY)); }
+
+  // doc 坐标读/写整块像素（filters / liquify / selection 这类 read-process-write ImageData 用，绕开物化 canvas）。
+  getImageData(docX: number, docY: number, w: number, h: number): ImageData {
+    return new ImageData(this.pixels.getRegion(docX, docY, w, h), w, h);
+  }
+  putImageData(docX: number, docY: number, img: ImageData) {
+    this.pixels.putRegion(docX, docY, img.width, img.height, img.data);
+    this._invalidate();
   }
 
-  // 整个 layer 当前像素的快照（给 undo 用）。包含 bbox 信息，restore 时
-  // 会换 canvas + 复位 bbox。empty 层 imageData=null。
-  snapshot() {
-    if (this.bboxW <= 0 || this.bboxH <= 0) {
-      return { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
-    }
-    return {
-      bboxX: this.bboxX, bboxY: this.bboxY,
-      bboxW: this.bboxW, bboxH: this.bboxH,
-      imageData: this.ctx.getImageData(0, 0, this.bboxW, this.bboxH),
-    };
+  // undo 快照：仍出 imageData + tight bbox 形状（pixel-edit / layer-undo / save 不改；tile-delta = 切片③）。
+  snapshot(): LayerSnap {
+    const m = materialize(this.pixels, true);   // tight
+    if (!m) return { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
+    const ctx = (m.canvas as HTMLCanvasElement).getContext("2d", { willReadFrequently: true }) as Ctx;
+    return { bboxX: m.ox, bboxY: m.oy, bboxW: m.canvas.width, bboxH: m.canvas.height, imageData: ctx.getImageData(0, 0, m.canvas.width, m.canvas.height) };
   }
 
-  // 把快照里的像素 + bbox 还原。必要时 realloc canvas。
+  // 还原快照：清空 + 按 bbox 位置切片回 tile。
   restoreFromSnapshot(snap: LayerSnap) {
-    const targetW = Math.max(1, snap.bboxW);   // 1×1 占位给 empty
-    const targetH = Math.max(1, snap.bboxH);
-    if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
-      this.canvas = makeBitmap(targetW, targetH);
-      this.ctx = this.canvas.getContext("2d", { willReadFrequently: false }) as Ctx;
-      this.ctx.imageSmoothingEnabled = true;
-      this.ctx.imageSmoothingQuality = "low";
+    this.pixels.clear();
+    if (snap.bboxW > 0 && snap.bboxH > 0) {
+      if (snap.imageData) {
+        this.pixels.putRegion(snap.bboxX, snap.bboxY, snap.bboxW, snap.bboxH, snap.imageData.data);
+      } else if (snap.bitmap) {
+        replacePixels(this.pixels, snap.bitmap as CanvasImageSource, snap.bboxX, snap.bboxY, snap.bboxW, snap.bboxH);
+      }
     }
-    this.bboxX = snap.bboxX;
-    this.bboxY = snap.bboxY;
-    this.bboxW = snap.bboxW;
-    this.bboxH = snap.bboxH;
-    if (snap.imageData) {
-      this.ctx.putImageData(snap.imageData, 0, 0);
-    } else if (snap.bitmap) {
-      this.ctx.clearRect(0, 0, targetW, targetH);
-      this.ctx.drawImage(snap.bitmap, 0, 0);
-    } else {
-      // empty snapshot：清空占位 1×1
-      this.ctx.clearRect(0, 0, targetW, targetH);
-    }
+    this._invalidate();
   }
 }
 
@@ -604,10 +563,8 @@ export class PaintDoc {
     const underBeforeClipping = under.clippingMask;
     const activeSpec = this.layerSpec(L);
     activeSpec.clippingMask = L.clippingMask;   // redo 还原 active 的剪裁标志
-    // 替换 under 画布 + 归一化（active.mode×active.opacity 已烤进 tmp）
-    under.canvas = tmp;
-    under.ctx = tmp.getContext("2d", { willReadFrequently: false }) as Ctx;
-    under.bboxX = x0; under.bboxY = y0; under.bboxW = newW; under.bboxH = newH;
+    // 替换 under 像素 + 归一化（active.mode×active.opacity 已烤进 tmp）
+    under.replaceFromCanvas(tmp, x0, y0, newW, newH);
     under.opacity = 1;
     under.mode = "source-over";
     // 链内合并：结果仍剪裁到同一基底；基底 case：结果是普通基底层（非剪裁）。
@@ -807,18 +764,11 @@ export class PaintDoc {
     }
   }
 
-  // 清空当前 layer 像素（不删 layer）。bbox 复位为 empty（释放 canvas）。
+  // 清空当前 layer 像素（不删 layer）。
   clearActiveLayer() {
     const L = this.activeLayer;
     if (!L || L.isGroup) return;
-    L.bboxX = 0;
-    L.bboxY = 0;
-    L.bboxW = 0;
-    L.bboxH = 0;
-    L.canvas = makeBitmap(1, 1);
-    L.ctx = L.canvas.getContext("2d", { willReadFrequently: false }) as Ctx;
-    L.ctx.imageSmoothingEnabled = true;
-    L.ctx.imageSmoothingQuality = "low";
+    L.clearAll();
   }
 
   // 整张 doc 的像素 dump（旧 API 兼容；新代码直接用 Layer.snapshot()）。
@@ -902,41 +852,23 @@ export class PaintDoc {
   cropTo(rect: { x: number; y: number; w: number; h: number }) {
     const dx = rect.x | 0, dy = rect.y | 0, nw = Math.max(1, rect.w | 0), nh = Math.max(1, rect.h | 0);
     for (const L of flattenLeaves(this.layers)) {
-      L.docW = nw;
-      L.docH = nh;
-      if (L.bboxW <= 0 || L.bboxH <= 0) {
-        L.bboxX = 0; L.bboxY = 0;
-        continue;
-      }
+      const bx = L.bboxX, by = L.bboxY, bw = L.bboxW, bh = L.bboxH;   // 读老（物化）bbox
+      if (bw <= 0 || bh <= 0) { L.remapPixels(nw, nh, null); continue; }
       // 老 bbox → 新 doc 坐标后 clip 到 [0, nw] × [0, nh]
-      const tL = L.bboxX - dx, tT = L.bboxY - dy;
-      const tR = tL + L.bboxW, tB = tT + L.bboxH;
+      const tL = bx - dx, tT = by - dy;
+      const tR = tL + bw, tB = tT + bh;
       const newL = Math.max(0, tL),  newT = Math.max(0, tT);
       const newR = Math.min(nw, tR), newB = Math.min(nh, tB);
       const newW = newR - newL, newH = newB - newT;
-      if (newW <= 0 || newH <= 0) {
-        // 整层裁到 doc 外 → 空层占位
-        L.bboxX = 0; L.bboxY = 0; L.bboxW = 0; L.bboxH = 0;
-        L.canvas = makeBitmap(1, 1);
-        L.ctx = L.canvas.getContext("2d", { willReadFrequently: false }) as Ctx;
-        L.ctx.imageSmoothingEnabled = true;
-        L.ctx.imageSmoothingQuality = "low";
-        continue;
-      }
-      // srcX/srcY = 老 layer canvas 上要拷贝的左上角 (老 bbox 局部坐标)
-      const srcX = newL - tL;
-      const srcY = newT - tT;
+      if (newW <= 0 || newH <= 0) { L.remapPixels(nw, nh, null); continue; }   // 整层裁到 doc 外 → 空
+      // srcX/srcY = 老 layer canvas 上要拷贝的左上角（老 bbox 局部坐标）
+      const srcX = newL - tL, srcY = newT - tT;
       const nc = makeBitmap(newW, newH);
       const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
       nctx.imageSmoothingEnabled = true;
       nctx.imageSmoothingQuality = "low";
       nctx.drawImage(L.canvas, srcX, srcY, newW, newH, 0, 0, newW, newH);
-      L.canvas = nc;
-      L.ctx = nctx;
-      L.bboxX = newL;
-      L.bboxY = newT;
-      L.bboxW = newW;
-      L.bboxH = newH;
+      L.remapPixels(nw, nh, nc, newL, newT, newW, newH);
     }
     if (this.selection) {
       this.selection = this.selection.croppedTo(dx, dy, nw, nh);
@@ -950,18 +882,15 @@ export class PaintDoc {
   flipHorizontal() {
     const W = this.width;
     for (const L of flattenLeaves(this.layers)) {
-      if (L.bboxW > 0 && L.bboxH > 0) {
-        const nc = makeBitmap(L.bboxW, L.bboxH);
+      const bx = L.bboxX, by = L.bboxY, bw = L.bboxW, bh = L.bboxH;
+      if (bw > 0 && bh > 0) {
+        const nc = makeBitmap(bw, bh);
         const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
         nctx.imageSmoothingEnabled = false;
-        nctx.setTransform(-1, 0, 0, 1, L.bboxW, 0);
+        nctx.setTransform(-1, 0, 0, 1, bw, 0);
         nctx.drawImage(L.canvas, 0, 0);
-        nctx.setTransform(1, 0, 0, 1, 0, 0);   // 还原，后续 brush 直接画不带镜像
-        nctx.imageSmoothingEnabled = true;
-        nctx.imageSmoothingQuality = "low";
-        L.canvas = nc;
-        L.ctx = nctx;
-        L.bboxX = W - (L.bboxX + L.bboxW);
+        nctx.setTransform(1, 0, 0, 1, 0, 0);   // 还原
+        L.replaceFromCanvas(nc, W - (bx + bw), by, bw, bh);   // doc 尺寸不变
       }
     }
     if (this.selection) {
@@ -981,24 +910,18 @@ export class PaintDoc {
     const W = this.width;
     const H = this.height;
     for (const L of flattenLeaves(this.layers)) {
-      L.docW = H;        // 新 doc 宽 = 旧高
-      L.docH = W;        // 新 doc 高 = 旧宽
-      if (L.bboxW > 0 && L.bboxH > 0) {
-        const oldBX = L.bboxX, oldBY = L.bboxY, oldBW = L.bboxW, oldBH = L.bboxH;
+      const oldBX = L.bboxX, oldBY = L.bboxY, oldBW = L.bboxW, oldBH = L.bboxH;
+      if (oldBW > 0 && oldBH > 0) {
         const nc = makeBitmap(oldBH, oldBW);   // 新 canvas = (bboxH × bboxW)
         const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
         nctx.imageSmoothingEnabled = false;     // 保像素锐利
         nctx.setTransform(0, -1, 1, 0, 0, oldBW);
         nctx.drawImage(L.canvas, 0, 0);
-        nctx.setTransform(1, 0, 0, 1, 0, 0);    // 还原，后续 brush 直接画不带旋转
-        nctx.imageSmoothingEnabled = true;
-        nctx.imageSmoothingQuality = "low";
-        L.canvas = nc;
-        L.ctx = nctx;
-        L.bboxX = oldBY;
-        L.bboxY = W - (oldBX + oldBW);
-        L.bboxW = oldBH;
-        L.bboxH = oldBW;
+        nctx.setTransform(1, 0, 0, 1, 0, 0);    // 还原
+        // 新 doc 尺寸 (H×W)；新 bbox 位置 (oldBY, W-(oldBX+oldBW))、尺寸 (oldBH×oldBW)
+        L.remapPixels(H, W, nc, oldBY, W - (oldBX + oldBW), oldBH, oldBW);
+      } else {
+        L.remapPixels(H, W, null);   // 空层也要换 doc 尺寸
       }
     }
     if (this.selection) {
@@ -1018,32 +941,21 @@ export class PaintDoc {
     const smooth = mode !== "nearest";
     const quality = mode === "bicubic" ? "high" : "low";
     for (const L of flattenLeaves(this.layers)) {
-      L.docW = nw;
-      L.docH = nh;
-      if (L.bboxW <= 0 || L.bboxH <= 0) continue;
+      const bx = L.bboxX, by = L.bboxY, oW = L.bboxW, oH = L.bboxH;
+      if (oW <= 0 || oH <= 0) { L.remapPixels(nw, nh, null); continue; }
       const ox = L.canvas;
-      const oW = L.bboxW;
-      const oH = L.bboxH;
       const nbw = Math.max(1, Math.round(oW * sx));
       const nbh = Math.max(1, Math.round(oH * sy));
-      const nbx = Math.round(L.bboxX * sx);
-      const nby = Math.round(L.bboxY * sy);
+      const nbx = Math.round(bx * sx);
+      const nby = Math.round(by * sy);
       const nc = makeBitmap(nbw, nbh);
       const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
       nctx.imageSmoothingEnabled = smooth;
       nctx.imageSmoothingQuality = quality;
-      // "sharper" 模式 = step-halving（缩小抗锯齿 / 放大高质量，PS Bicubic Sharper 近似）；其余单遍 browser
-      if (mode === "sharper") {
-        nctx.drawImage(smartResample(ox, nbw, nbh), 0, 0);
-      } else {
-        nctx.drawImage(ox, 0, 0, oW, oH, 0, 0, nbw, nbh);
-      }
-      L.canvas = nc;
-      L.ctx = nctx;
-      L.bboxX = nbx;
-      L.bboxY = nby;
-      L.bboxW = nbw;
-      L.bboxH = nbh;
+      // "sharper" 模式 = step-halving；其余单遍 browser
+      if (mode === "sharper") nctx.drawImage(smartResample(ox, nbw, nbh), 0, 0);
+      else nctx.drawImage(ox, 0, 0, oW, oH, 0, 0, nbw, nbh);
+      L.remapPixels(nw, nh, nc, nbx, nby, nbw, nbh);
     }
     if (this.selection) {
       this.selection = this.selection.resampledTo(sx, sy, smooth, quality);
@@ -1067,24 +979,13 @@ export class PaintDoc {
     // 归一化后，原内容（在 [bx, bx+bw)）右移 ox 落在 [bx+ox, …)，越过右/下边的部分由
     // 「-W / -H」环绕副本接回左/上。故只需 sx∈{0,-W} × sy∈{0,-H} 共 4 个位置。
     for (const L of flattenLeaves(this.layers)) {
+      const bx = L.bboxX, by = L.bboxY;
       if (L.bboxW <= 0 || L.bboxH <= 0) continue;
       const nc = makeBitmap(W, H);
       const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
       nctx.imageSmoothingEnabled = false;   // 整数平移，保像素锐利
-      const bx = L.bboxX, by = L.bboxY;
-      for (const sx of [0, -W]) {
-        for (const sy of [0, -H]) {
-          nctx.drawImage(L.canvas, bx + ox + sx, by + oy + sy);
-        }
-      }
-      nctx.imageSmoothingEnabled = true;    // 还原，后续 brush 直接画不带特殊态
-      nctx.imageSmoothingQuality = "low";
-      L.canvas = nc;
-      L.ctx = nctx;
-      L.bboxX = 0;
-      L.bboxY = 0;
-      L.bboxW = W;
-      L.bboxH = H;
+      for (const sx of [0, -W]) for (const sy of [0, -H]) nctx.drawImage(L.canvas, bx + ox + sx, by + oy + sy);
+      L.replaceFromCanvas(nc, 0, 0, W, H);   // doc 尺寸不变
     }
     if (this.selection) {
       this.selection = this.selection.offsetWrapped(ox, oy, W, H);

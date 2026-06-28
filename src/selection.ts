@@ -25,6 +25,8 @@ interface LayerLike {
   ctx: Ctx;
   snapshot(): LayerSnapLike;
   ensureBbox(x0: number, y0: number, x1: number, y1: number): void;
+  putImageData(docX: number, docY: number, img: ImageData): void;
+  editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void;
 }
 
 // Layer.snapshot() 产物（applyMaskPostStroke 的 preSnap/afterSnap 形状）。
@@ -270,14 +272,12 @@ export class Selection {
         }
       }
     }
-    layer.ensureBbox(ux0, uy0, ux1, uy1);
-    layer.ctx.putImageData(out, ux0 - layer.bboxX, uy0 - layer.bboxY);
+    layer.putImageData(ux0, uy0, out);   // out 已是 post-stroke-masked 结果，整块替换该区
   }
 
-  // 选区内填色（调用方负责 push history）。
+  // 选区内填色（调用方负责 push history）。source-over 叠在已有像素上。
   fillOnLayer(layer: LayerLike, color: string): void {
     if (!layer) return;
-    layer.ensureBbox(this.bboxX, this.bboxY, this.bboxX + this.bboxW, this.bboxY + this.bboxH);
     const tmp = makeBitmap(this.bboxW, this.bboxH);
     const tctx = tmp.getContext("2d")!;
     tctx.fillStyle = color;
@@ -285,17 +285,18 @@ export class Selection {
     tctx.globalCompositeOperation = "destination-in";
     tctx.drawImage(this.maskCanvas, 0, 0);
     tctx.globalCompositeOperation = "source-over";
-    layer.ctx.drawImage(tmp, this.bboxX - layer.bboxX, this.bboxY - layer.bboxY);
+    layer.editRegion(this.bboxX, this.bboxY, this.bboxW, this.bboxH, (ctx, ox, oy) => {
+      ctx.drawImage(tmp as CanvasImageSource, this.bboxX - ox, this.bboxY - oy);
+    });
   }
 
   // 清除选区内像素（dst-out mask）。
   clearOnLayer(layer: LayerLike): void {
     if (!layer) return;
-    const lctx = layer.ctx;
-    lctx.save();
-    lctx.globalCompositeOperation = "destination-out";
-    lctx.drawImage(this.maskCanvas, this.bboxX - layer.bboxX, this.bboxY - layer.bboxY);
-    lctx.restore();
+    layer.editRegion(this.bboxX, this.bboxY, this.bboxW, this.bboxH, (ctx, ox, oy) => {
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.drawImage(this.maskCanvas, this.bboxX - ox, this.bboxY - oy);
+    });
   }
 
   // ---- crop / resample 时变换自身 → 新 Selection（doc.cropTo/resampleTo 用）----

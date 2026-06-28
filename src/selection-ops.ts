@@ -59,27 +59,21 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   const beforeActive: PixelSnapWithBlob | null = move ? src.snapshot() : null;
   const newL = doc.addLayer(move ? "移到新层" : "复制层");
   if (!newL) return;
-  // 把 newL 的 bbox / canvas 重设为 selection bbox
-  newL.bboxX = sel.bboxX;
-  newL.bboxY = sel.bboxY;
-  newL.bboxW = sel.bboxW;
-  newL.bboxH = sel.bboxH;
-  newL.canvas.width = sel.bboxW;
-  newL.canvas.height = sel.bboxH;
-  const nctx = newL.canvas.getContext("2d", { willReadFrequently: false })!;
-  newL.ctx = nctx;
-  nctx.imageSmoothingEnabled = true;
-  nctx.imageSmoothingQuality = "low";
-  // 把 active ∩ selection 的像素 copy 进 newL
+  // 把 active ∩ selection 的像素 copy 进 newL（建一张 selection bbox 大小的 canvas 再切片回 tile）
+  const nc = document.createElement("canvas");
+  nc.width = sel.bboxW; nc.height = sel.bboxH;
+  const nctx = nc.getContext("2d", { willReadFrequently: false })!;
   nctx.drawImage(src.canvas, src.bboxX - sel.bboxX, src.bboxY - sel.bboxY);
   nctx.globalCompositeOperation = "destination-in";
   nctx.drawImage(sel.maskCanvas, 0, 0);
   nctx.globalCompositeOperation = "source-over";
+  newL.replaceFromCanvas(nc, sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
   if (move) {
-    src.ctx.save();
-    src.ctx.globalCompositeOperation = "destination-out";
-    src.ctx.drawImage(sel.maskCanvas, sel.bboxX - src.bboxX, sel.bboxY - src.bboxY);
-    src.ctx.restore();
+    // 从源层挖洞（destination-out 选区形状）
+    src.editRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (ctx, ox, oy) => {
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.drawImage(sel.maskCanvas, sel.bboxX - ox, sel.bboxY - oy);
+    });
   }
   const loc = doc.locateNode(newL.id)!;   // {parentId, index}：组内也精确（撤销 insertLayerAt 用）
   const newLayerSpec = layerSpecFrom(newL) as unknown as { blob?: Blob | null; [k: string]: unknown };   // LayerSpecShape→带 index sig 形（同对象，经 unknown 转）

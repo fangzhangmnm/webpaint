@@ -29,6 +29,7 @@ const errMsg = (e: unknown): string => String((e as { message?: unknown })?.mess
 interface ImportLayer {
   name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number;
   canvas: CanvasImageSource; ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  replaceFromCanvas(src: CanvasImageSource, ox: number, oy: number, w: number, h: number): void;
 }
 // big-import sheet 的结果。
 interface BigImportChoice { w: number; h: number; mode: string; }
@@ -67,19 +68,16 @@ export async function importImageAsNewDoc(file: File) {
   await session.newDoc({ name, w, h, fillLayer0: (layer: unknown) => {
     const L = layer as ImportLayer;
     L.name = file.name.replace(/\.[^.]+$/, "") || "图像";
-    L.bboxX = 0; L.bboxY = 0;
-    L.bboxW = w; L.bboxH = h;
     const c = (typeof OffscreenCanvas !== "undefined")
       ? new OffscreenCanvas(w, h)
       : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
-    L.canvas = c;
     const lctx = c.getContext("2d", { willReadFrequently: false })!;
-    L.ctx = lctx;
     lctx.imageSmoothingEnabled = true;
     lctx.imageSmoothingQuality = "high";
     // 超 8192 缩小走 step-halving 抗锯齿；否则原样画
     const src = (w < bitmap.width || h < bitmap.height) ? smartResample(bitmap, w, h) : bitmap;
     lctx.drawImage(src, 0, 0, w, h);
+    L.replaceFromCanvas(c, 0, 0, w, h);
     (bitmap as ImageBitmap).close?.();
   } });
   setStatus(`新建（照片）：${name}（${w}×${h}）`);
@@ -175,21 +173,18 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   // bbox 中心：默认 doc 中心；opts.center（doc 坐标）可指定（Ctrl+V 传视口中心）
   const ccx = opts.center?.x ?? docW / 2;
   const ccy = opts.center?.y ?? docH / 2;
-  layer.bboxX = Math.floor(ccx - w / 2);
-  layer.bboxY = Math.floor(ccy - h / 2);
-  layer.bboxW = w;
-  layer.bboxH = h;
+  const bx = Math.floor(ccx - w / 2);
+  const by = Math.floor(ccy - h / 2);
   const c = (typeof OffscreenCanvas !== "undefined")
     ? new OffscreenCanvas(w, h)
     : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
-  layer.canvas = c;
   const lctx = c.getContext("2d", { willReadFrequently: false })!;
-  layer.ctx = lctx;
   lctx.imageSmoothingEnabled = imgSmoothing !== "low";
   lctx.imageSmoothingQuality = imgSmoothing;
   // 缩小且非 nearest（像素画保持硬边）→ step-halving 抗锯齿；否则原样画
   const lsrc = (imgSmoothing !== "low" && (w < ow || h < oh)) ? smartResample(bitmap, w, h) : bitmap;
   lctx.drawImage(lsrc, 0, 0, w, h);
+  layer.replaceFromCanvas(c, bx, by, w, h);
   (bitmap as ImageBitmap).close?.();
   renderLayersPanel();
   board.invalidateAll();

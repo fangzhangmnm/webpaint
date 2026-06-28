@@ -222,15 +222,7 @@ export async function decodeOraToDoc(blob: Blob) {
     layer.mode = spec.mode;
     layer.clippingMask = !!spec.clippingMask;
     layer.lockAlpha = !!spec.lockAlpha;
-    layer.bboxX = spec.x;
-    layer.bboxY = spec.y;
-    layer.bboxW = bitmap.width;
-    layer.bboxH = bitmap.height;
-    layer.canvas = makeBitmap(bitmap.width, bitmap.height);
-    layer.ctx = layer.canvas.getContext("2d", { willReadFrequently: false }) as Ctx;
-    layer.ctx.imageSmoothingEnabled = true;
-    layer.ctx.imageSmoothingQuality = "low";
-    layer.ctx.drawImage(bitmap, 0, 0);
+    layer.replaceFromCanvas(bitmap, spec.x, spec.y, bitmap.width, bitmap.height);
     bitmap.close?.();
     if (spec.isActive) activeId = layer.id;
     if (spec.isReference) doc.referenceLayerId = layer.id;

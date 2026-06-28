@@ -278,7 +278,7 @@ export class LiquifyEngine {
         // 空 startSnap → ddat 默认 0（透明黑），液化空层无源可推 = 不变
       }
     }
-    layer.ctx.putImageData(dst, x0 - lbX, y0 - lbY);
+    layer.putImageData(x0, y0, dst);   // doc 坐标写回 tile
 
     // dirty bbox 累积
     if (st.dirty) {

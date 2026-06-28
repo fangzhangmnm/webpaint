@@ -228,11 +228,11 @@ export class FloatingTransform {
     const layer = src.layer;
     const rendered = renderSource(src, this._floating!.gizmoBbox, this._floating!.mesh, this._sampleMode);
     if (!rendered) return;
-    layer.ensureBbox(
-      Math.floor(rendered.dstX), Math.floor(rendered.dstY),
-      Math.ceil(rendered.dstX + rendered.canvas.width), Math.ceil(rendered.dstY + rendered.canvas.height),
-    );
-    layer.ctx.drawImage(rendered.canvas, rendered.dstX - layer.bboxX, rendered.dstY - layer.bboxY);
+    const rx0 = Math.floor(rendered.dstX), ry0 = Math.floor(rendered.dstY);
+    const rx1 = Math.ceil(rendered.dstX + rendered.canvas.width), ry1 = Math.ceil(rendered.dstY + rendered.canvas.height);
+    layer.editRegion(rx0, ry0, rx1 - rx0, ry1 - ry0, (ctx, ox, oy) => {
+      ctx.drawImage(rendered.canvas, rendered.dstX - ox, rendered.dstY - oy);
+    });
   }
 
   // Stamp：各 source 写回各自 layer，KEEP float（不 push history；commit 时一次性 push）。
@@ -661,11 +661,10 @@ export function bakeSource(sel: Selection, layer: Layer, opts: LiftOpts = {}): S
 
   // 挖空源层（cut=false 跳过 → 复制为浮层，源层不动）
   if (opts.cut !== false) {
-    const lctx = layer.ctx;
-    lctx.save();
-    lctx.globalCompositeOperation = "destination-out";
-    lctx.drawImage(sel.maskCanvas, sel.bboxX - lbX, sel.bboxY - lbY);
-    lctx.restore();
+    layer.editRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (ctx, ox, oy) => {
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.drawImage(sel.maskCanvas, sel.bboxX - ox, sel.bboxY - oy);
+    });
   }
 
   return { layer, canvas: srcCanvas, imageData: srcImageData, rect: { x: tx0, y: ty0, w: srcW, h: srcH }, preSnap, _renderCache: null };

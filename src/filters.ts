@@ -80,6 +80,8 @@ export interface BrushLayer {
   bboxW: number;
   bboxH: number;
   ctx: CanvasRenderingContext2D;
+  getImageData(docX: number, docY: number, w: number, h: number): ImageData;
+  putImageData(docX: number, docY: number, img: ImageData): void;
 }
 
 export interface BrushSettings {
@@ -256,7 +258,7 @@ function _colorBrushStamp(state: ColorBrushState, cx: number, cy: number, pressu
   const ex1 = Math.min(lx1, sx1 + bleed), ey1 = Math.min(ly1, sy1 + bleed);
   const ew = ex1 - ex0, eh = ey1 - ey0;
   if (ew <= 0 || eh <= 0) return;
-  const srcImg = layer.ctx.getImageData(ex0 - lx0, ey0 - ly0, ew, eh);
+  const srcImg = layer.getImageData(ex0, ey0, ew, eh);   // doc 坐标读（绕物化 canvas）
   const dstImg = new ImageData(ew, eh);
   FilterClass.bake(srcImg.data, dstImg.data, params, null, ew, eh);
   const ox = sx0 - ex0, oy = sy0 - ey0;
@@ -269,7 +271,7 @@ function _colorBrushStamp(state: ColorBrushState, cx: number, cy: number, pressu
     sctx.drawImage(selection.maskCanvas, selection.bboxX - sx0, selection.bboxY - sy0);
     selData = sctx.getImageData(0, 0, sw, sh).data;
   }
-  const layerImg = layer.ctx.getImageData(sx0 - lx0, sy0 - ly0, sw, sh);
+  const layerImg = layer.getImageData(sx0, sy0, sw, sh);
   const layerData = layerImg.data;
   const flow = Math.max(0, Math.min(1, brushSettings.flow ?? brushSettings.opacity ?? 1));
   for (let j = 0; j < sh; j++) {
@@ -296,7 +298,7 @@ function _colorBrushStamp(state: ColorBrushState, cx: number, cy: number, pressu
       layerData[lo + 3] = layerData[lo + 3] * (1 - a) + dstImg.data[fo + 3] * a;
     }
   }
-  layer.ctx.putImageData(layerImg, sx0 - lx0, sy0 - ly0);
+  layer.putImageData(sx0, sy0, layerImg);   // doc 坐标写回 tile
   const d = state.dirty;
   if (!d) state.dirty = [sx0, sy0, sx1, sy1];
   else {
