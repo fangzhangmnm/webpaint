@@ -139,9 +139,15 @@ GL canvas 垫 #board 下渲 doc（void+背景+图层+live overlay，视口仿射
 - 现状：像素栅格 = 独立 #boardGrid 2D canvas，仅视口变时重画（_drawGrid，scale≥4 渐显，device-px 对齐 fillRect）。GL 模式下仍工作。
 - 重做：grid 进 **present shader**（或一个 GL pass）——按视口直接在片元算网格线，省掉独立 canvas + 每次视口变的 CPU 重画。阈值/渐隐/device 对齐照搬 PIXEL_GRID_FADE_LO=4/FULL=7/ALPHA=0.4。
 
-**C. GL board 功能缺口（correctness，用户当前工作流没卡，低优先）**：
-- lasso 自由变换的**内容预览**（floatFor）GL 下不显示；棋盘背景显 void；blendMode-overlay(非常规笔 live 预览)按 normal。
-- 吸管：GL 模式现仍按需建 2D 合成缓存取色（对但冗余）→ 可改读 GL 合成 readback。
+**C. GL board 功能缺口（合成器接缝；系统化补=长出与 2D compositeLayers 对应的接缝，每个 golden 对拍 2D）**：
+- ✅ **bg 接缝（v343）**：棋盘背景——GLCompositor `Background="checker"` → doc 空间棋盘 pass（16px #fff/#c8c8c8），
+  golden vs 2D 棋盘+层 Δ1。修「透明背景显 void」。
+- ✅ **floatFor 接缝（v344）**：自由变换实时浮层——CompLeaf.float + `_floatPass`（源层 z 之上 source-over α=1，
+  忽略层 mode/opacity）；board `_glFloatInputs` renderSource（共享 src._renderCache）；源层「洞」已在 lift
+  烤进 tiles → GL 直接显。golden vs 2D drawImage(float) Δ1。修「变换无实时参考」。
+- ⏳ **blendMode-overlay 接缝**：非常规笔(multiply 等) live 预览仍按 source-over。需 overlay srcKind shader 多一维
+  brush blendMode（ov-onto-base 用 W3C blend，与层 mode 正交 → 新 program 变体）。§5.6.C 注「用户没卡」，低优先。
+- 吸管：GL 模式仍按需建 2D 合成缓存取色（对但冗余）→ 可改读 GL 合成 readback。
 
 ## 5.7 主轨 roadmap（最重要，按序推进）
 1. **Stage 3：GL 笔刷栅格化**（StrokeRasterizer 消费 CPU StrokeSmoother 中心线 → GL stamp；Build-Up=source-over/Wash=MAX；
