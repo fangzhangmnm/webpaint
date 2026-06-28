@@ -42,6 +42,7 @@
 import { StrokeSmoother } from "./stroke-smoother.ts";
 import type { Layer } from "./doc.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
+import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
 // 2D context（cache canvas / layer ctx 都可能是 OffscreenCanvas 或 <canvas>）
 type Ctx2D = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
@@ -568,6 +569,35 @@ export class BrushEngine {
       opacity: Math.max(0, Math.min(1, st.settings.opacity ?? 1.0)),
       mode: st.mode,
       blendMode: st.settings.blendMode || "source-over",   // v163 board 用它合成 overlay
+    };
+  }
+
+  // Stage 3：收集当前 stroke 全部 stamp（frozen 0..count-1，含 tail）为列表 + stroke 笔形 —— 给 GPU 栅格器
+  //   (GLStampRasterizer，board 消费)。**复用 _walkStamps(手感间距) + _stampParams(压感/taper)**，与 CPU
+  //   _emitFrozen 同源 → 手感逐位一致；纯读（传 fresh walk，不碰 live cursor/buffer）。endStroke 后 _taperTotal
+  //   有值则自动含出端 taper。pixelMode/未描边 → null（caller 回退）。color 给 0..1；erase 由 caller 用 mode 处理。
+  collectStamps(): { stamps: Stamp[]; shape: StrokeShape; layer: Layer; mode: string; opacity: number; blendMode: string } | null {
+    const st = this._stroke;
+    if (!st || !st.buffered || !st.sm || st.settings.pixelMode) return null;
+    const out: Stamp[] = [];
+    const walk: Walk = { ci: 0, started: false, accumDist: 0, lastP: 0, strokeDist: 0 };
+    this._walkStamps(walk, st.sm.count - 1, (x, y, p, sd) => {
+      const params = this._stampParams(p, sd);
+      if (params) out.push({ x, y, size: params.size, alpha: params.stampAlpha });
+    });
+    const s = st.settings;
+    const useEllipse = s.shapeKind === "ellipse" && (s.shapeAspect !== 1 || s.shapeRotation !== 0);
+    const col = hexToRgbObj(s.color);
+    return {
+      stamps: out,
+      shape: {
+        hardness: s.hardness, color: [col.r / 255, col.g / 255, col.b / 255], buildup: st.isBuildup,
+        aspect: useEllipse ? s.shapeAspect : 1, rotation: useEllipse ? s.shapeRotation : 0,
+      },
+      layer: st.layer,
+      mode: st.mode,
+      opacity: Math.max(0, Math.min(1, s.opacity ?? 1.0)),   // Π-outer（commit/overlay 时一次性乘）
+      blendMode: s.blendMode || "source-over",
     };
   }
 

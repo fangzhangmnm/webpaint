@@ -361,16 +361,21 @@ function shapeAlpha(dist: number, radius: number, hardness: number): number {
   if (decayLen <= 0 || dist <= innerR) return 1;
   const u = (dist - innerR) / decayLen; return 1 - u * u * (3 - 2 * u);
 }
+// 椭圆逆变换后的 dist（匹配 _washMaxInto:854-856；aspect=1/rot=0 → 圆）。
+function ellipDist(dx: number, dy: number, aspect: number, rotation: number): number {
+  const c = Math.cos(rotation), s = Math.sin(rotation), ia = 1 / Math.max(0.01, aspect);
+  const dxR = c * dx + s * dy, dyR = (-s * dx + c * dy) * ia;
+  return Math.sqrt(dxR * dxR + dyR * dyR);
+}
 // CPU 参考 → 预乘字节（top-down，row0=doc y=0）。
-function cpuStampRef(n: number, stamps: Stamp[], color: [number, number, number], hardness: number, buildup: boolean): Uint8ClampedArray {
+function cpuStampRef(n: number, stamps: Stamp[], color: [number, number, number], hardness: number, buildup: boolean, aspect = 1, rotation = 0): Uint8ClampedArray {
   const out = new Uint8ClampedArray(n * n * 4);
   for (let py = 0; py < n; py++) for (let px = 0; px < n; px++) {
     const i = (py * n + px) * 4;
     if (buildup) {
       let ar = 0, ag = 0, ab = 0, aa = 0;   // 预乘累加器（0..1）
       for (const s of stamps) {
-        const dx = px + 0.5 - s.x, dy = py + 0.5 - s.y;
-        const sa = s.alpha * shapeAlpha(Math.sqrt(dx * dx + dy * dy), s.size / 2, hardness);
+        const sa = s.alpha * shapeAlpha(ellipDist(px + 0.5 - s.x, py + 0.5 - s.y, aspect, rotation), s.size / 2, hardness);
         if (sa <= 0) continue;
         ar = color[0] * sa + ar * (1 - sa); ag = color[1] * sa + ag * (1 - sa);
         ab = color[2] * sa + ab * (1 - sa); aa = sa + aa * (1 - sa);
@@ -379,8 +384,7 @@ function cpuStampRef(n: number, stamps: Stamp[], color: [number, number, number]
     } else {
       let a = 0;
       for (const s of stamps) {
-        const dx = px + 0.5 - s.x, dy = py + 0.5 - s.y;
-        a = Math.max(a, s.alpha * shapeAlpha(Math.sqrt(dx * dx + dy * dy), s.size / 2, hardness));
+        a = Math.max(a, s.alpha * shapeAlpha(ellipDist(px + 0.5 - s.x, py + 0.5 - s.y, aspect, rotation), s.size / 2, hardness));
       }
       out[i] = Math.round(color[0] * a * 255); out[i + 1] = Math.round(color[1] * a * 255); out[i + 2] = Math.round(color[2] * a * 255); out[i + 3] = Math.round(a * 255);
     }
@@ -418,6 +422,17 @@ function stampParity(glctx: GLContext, add: Add): void {
     const ref = cpuStampRef(N, stamps, color, hardness, buildup);
     const { md, at } = maxByteDiff(ref, glpx, N);
     add(`stamp:${buildup ? "buildup" : "wash"} GPU vs CPU 公式`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  }
+  // 椭圆（aspect≠1 + 旋转）：wash + buildup 各一。
+  const aspect = 2.2, rotation = 0.6;
+  for (const buildup of [false, true]) {
+    const hardness = 0.4;
+    const fbo = ras.rasterize(stamps, { hardness, color, buildup, aspect, rotation }, 0, 0, N, N);
+    const glpx = readFBO(glctx, fbo.fbo, N);
+    glctx.returnFBO(fbo);
+    const ref = cpuStampRef(N, stamps, color, hardness, buildup, aspect, rotation);
+    const { md, at } = maxByteDiff(ref, glpx, N);
+    add(`stamp:${buildup ? "buildup" : "wash"} 椭圆 GPU vs CPU 公式`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
   }
 }
 

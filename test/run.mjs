@@ -35,6 +35,7 @@ import "./doc-rotate.test.mjs";             // v258 逆时针旋转 90°（bbox 
 import "./doc-offset.test.mjs";             // 偏移接缝（环绕）：像素环绕映射 + 恒等性 + selection bbox
 import "./doc-mergedown-clip.test.mjs";     // v258 剪裁层向下合并（dst-in 裁基底 + 链内保剪裁 + 拒绝反向）
 import "./layer-cap-budget.test.mjs";        // v339 动态字节预算图层上限（预算内放硬顶 / 达预算冻结 / 模式档 countMat）
+import "./brush-collect-stamps.test.mjs";    // Stage 3：brush.collectStamps GPU stamp-list 出栈（复用手感数学 / 椭圆透传 / pixelMode null）
 import "./layer-composite.test.mjs";        // deep module A：clip 基底解析（同级/链共基底/基底隐显/组作基底）
 import "./tile-store.test.mjs";             // WebGL2+tiling Stage 1：tile 几何 + 稀疏存储簿记（fake backend round-trip）
 import "./tile-pixels.test.mjs";          

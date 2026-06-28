@@ -11,8 +11,8 @@
 //   - Build-Up（source-over）：accum = premult(color, dabA) over（blendFunc ONE,1-SRCA）。
 //   - Π-outer 的 user.opacity **不在这里**（commit/overlay 时一次性乘，对齐 brush.ts:24-26）。
 //
-// 本版只做**圆形** stamp（默认笔；aspect=1/rotation=0）。椭圆（_washMaxInto 的旋转+1/aspect 逆变换）
-//   留下一刀——useEllipse 时 caller 暂回退 CPU 路径。
+// 椭圆 stamp：fragment 对 doc 偏移做旋转(-rotation)+1/aspect 逆变换再算 dist（逐位匹配 _washMaxInto:838-856）；
+//   圆形 = aspect=1/rotation=0 的退化（同一路径）。quad 用 radius·max(1,aspect) 外接盒 over-cover，frag discard 出界。
 
 import type { GLContext, PooledFBO } from "./gl-context.ts";
 
@@ -23,6 +23,8 @@ export interface StrokeShape {
   hardness: number;                  // 0..0.999（硬芯比例）
   color: [number, number, number];   // 0..1（线性前的 sRGB 字节/255；与 CPU 同域）
   buildup: boolean;                   // true=Build-Up(source-over) / false=Wash(max)
+  aspect?: number;                    // 椭圆纵横比（默认 1=圆）
+  rotation?: number;                  // 椭圆旋转弧度（默认 0）
 }
 
 // 累积 stamp 的顶点 shader：单位 quad → stamp 包围盒（doc→clip）。v_local = 相对中心的像素偏移。
@@ -33,9 +35,11 @@ uniform vec2 u_bboxOrigin;                // bbox 左上 doc 坐标
 uniform vec2 u_bboxSize;                  // bbox 像素尺寸
 uniform vec2 u_center;                    // stamp 中心 doc
 uniform float u_radius;                   // size/2（+1 像素余量在 caller）
-out vec2 v_local;                         // 相对中心像素偏移
+uniform float u_aspect;                   // 椭圆纵横比（1=圆）
+out vec2 v_local;                         // 相对中心像素偏移（doc 轴对齐）
 void main() {
-  vec2 corner = (a_quad * 2.0 - 1.0) * u_radius;   // [-r,r]²
+  float rext = u_radius * max(1.0, u_aspect);      // 椭圆外接盒半边（over-cover，frag discard 出界）
+  vec2 corner = (a_quad * 2.0 - 1.0) * rext;       // [-rext,rext]²
   vec2 docPos = u_center + corner;
   v_local = corner;
   vec2 uv = (docPos - u_bboxOrigin) / u_bboxSize;  // 0..1 in bbox
@@ -52,9 +56,16 @@ uniform float u_hardness;     // 0..0.999
 uniform float u_stampAlpha;   // 该 dab 的 α（0..1）
 uniform vec3 u_color;         // 0..1
 uniform bool u_buildup;
+uniform float u_aspect;       // 椭圆纵横比（1=圆）
+uniform float u_rotation;     // 椭圆旋转弧度（0=不旋）
 out vec4 o;
 void main() {
-  float dist = length(v_local);
+  // 旋转(-rotation)+1/aspect 逆变换（匹配 _washMaxInto:854-856）；圆=退化(c=1,s=0,ia=1)。
+  float c = cos(u_rotation), s = sin(u_rotation);
+  float ia = 1.0 / max(0.01, u_aspect);
+  float dxR = c * v_local.x + s * v_local.y;
+  float dyR = (-s * v_local.x + c * v_local.y) * ia;
+  float dist = length(vec2(dxR, dyR));
   float innerR = u_hardness * u_radius;
   float decayLen = u_radius - innerR;
   float shapeA;
@@ -108,6 +119,8 @@ export class GLStampRasterizer {
     gl.uniform1f(gl.getUniformLocation(prog, "u_hardness"), Math.max(0, Math.min(0.999, shape.hardness)));
     gl.uniform3f(gl.getUniformLocation(prog, "u_color"), shape.color[0], shape.color[1], shape.color[2]);
     gl.uniform1i(gl.getUniformLocation(prog, "u_buildup"), shape.buildup ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(prog, "u_aspect"), shape.aspect ?? 1);
+    gl.uniform1f(gl.getUniformLocation(prog, "u_rotation"), shape.rotation ?? 0);
     const uCenter = gl.getUniformLocation(prog, "u_center");
     const uRadius = gl.getUniformLocation(prog, "u_radius");
     const uAlpha = gl.getUniformLocation(prog, "u_stampAlpha");
