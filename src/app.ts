@@ -170,6 +170,7 @@ bindEngine(input);
 // 笔触 buffer live overlay：board 每帧问 brush 要，layer 之上 composite × s.opacity
 // 预览（实际像素在 endStroke 才烧进 layer）。
 board.setOverlayProvider(() => input.brush.getLiveOverlay());
+board.setStampProvider(() => input.brush.collectStamps());   // Stage 3：GPU stamp live overlay（GL 模式 + 无选区/lockAlpha）
 // v131 修 (user：「液化 windows 又有 partial redraw 白框」)
 //   filter brush（含 v132 后的液化）没用 overlayProvider 通路，board partial render 抓不到，sliver 漏出
 //   strokeActiveHint 兜底：stroke 进行中 = 全屏渲染

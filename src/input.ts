@@ -848,7 +848,11 @@ export class InputController {
     const as = this._activeStroke;
     if (!as) return;
     this._activeStroke = null;
-    as.engine.endStroke();
+    // Stage 3：brush 描边在 GL 模式走 GPU commit（栅格 stamp→readback→editRegion，buildup 解析）；
+    //   其它引擎(liquify/filterBrush) 或 2D 模式照旧 CPU。选区由下方 finalize 的 applyMaskPostStroke 兜。
+    const glRaster = (as.engine === this.brush) ? this.board.glStrokeRasterizeFn() : null;
+    if (glRaster) this.brush.endStroke(glRaster);
+    else as.engine.endStroke();
     const sel = as.finalize ? this.doc.selection : null;
     // commit 的 finalize 形参是可选（运行时 falsy 即跳过）；保留旧的 `: null` 分支，仅 type 上窄到入参类型。
     type CommitFn = NonNullable<Parameters<PixelTx["commit"]>[0]>;

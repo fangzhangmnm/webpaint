@@ -6,7 +6,8 @@
 
 import { GLContext } from "./gl-context.ts";
 import { GLDocRenderer } from "./gl-doc-renderer.ts";
-import type { OverlayInput, FloatInput } from "./gl-doc-renderer.ts";
+import type { OverlayInput, FloatInput, StampOverlayInput } from "./gl-doc-renderer.ts";
+import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { DocNode } from "./gl-doc-bridge.ts";
 import type { Background } from "./gl-compositor.ts";
 import type { PooledFBO } from "./gl-context.ts";
@@ -49,13 +50,23 @@ export class GLBoard {
   //   livePreview = 描边/调整预览中；overlay = live 描边（null=无）。
   // **性能关键**：合成结果缓存（视口无关）。pan/zoom（内容没变）→ 只 present 缓存，不重合成（修 30fps）。
   //   重合成只在：内容脏(commit/undo/结构) 或 描边中(overlay/active 每帧变) 或 首帧/context 恢复。
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = []): void {
+  // 给 commit 用：栅格化 stroke stamp 列表 → straight RGBA canvas（board GL-commit 走 readback→editRegion）。
+  rasterizeStrokeToCanvas(stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number) {
+    return this._renderer.rasterizeStrokeToCanvas(stamps, shape, bx, by, bw, bh);
+  }
+
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null): void {
     if (this._glctx.isLost) return;
     const contentChanged = this._contentDirty && !livePreview;
     if (contentChanged) { this._renderer.syncAll(doc.layers, doc.width, doc.height); this._contentDirty = false; }
 
     if (contentChanged || livePreview || !this._cache) {
-      this._renderer.setOverlay(livePreview ? overlay : null, doc.width, doc.height);
+      // GPU stamp overlay（brush 描边中）优先；否则 CPU canvas overlay（filter/liquify 等）。
+      if (livePreview && stampOverlay) {
+        this._renderer.setStampOverlay(stampOverlay.stamps, stampOverlay.shape, stampOverlay.bx, stampOverlay.by, stampOverlay.bw, stampOverlay.bh, stampOverlay.layerId, stampOverlay.opacity, stampOverlay.erase, stampOverlay.blendMode);
+      } else {
+        this._renderer.setOverlay(livePreview ? overlay : null, doc.width, doc.height);
+      }
       this._renderer.setFloats(floats, doc.width, doc.height);   // 自由变换浮层（空=无变换）
       // docBg：null=透明（void 透出）/ "checker"=棋盘背景 / "#rrggbb"=预乘纯色。
       const bg: Background | undefined = docBg === "checker" ? "checker"

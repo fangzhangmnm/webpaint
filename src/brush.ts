@@ -471,8 +471,11 @@ export class BrushEngine {
     this._markDirty(x0, y0, x1, y1);
   }
 
-  endStroke() {
+  // rasterizeStroke 给定（GL 模式，board 注入）→ commit 走 **GPU 栅格 stamp 列表 → readback canvas → editRegion**
+  //   （buildup 走解析、与 live 一致）；否则 CPU buffer 路径（不变）。smoother finish + taper 计算两路都做。
+  endStroke(rasterizeStroke?: (stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null) {
     const st = this._stroke;
+    const gpu = !!rasterizeStroke && !!st && st.buffered && !st.settings.pixelMode;
     if (st && st.buffered) {
       st.sm!.update();
       st.sm!.finish();                    // 抬笔收尾：把直线桥换成带动量的弧尾、钉终点（画到头）
@@ -484,11 +487,19 @@ export class BrushEngine {
           this._walkStamps(dry, last, () => {});
           st._taperTotal = dry.strokeDist;
         }
-        // tail 全部转正（endIdx=last）；单点 tap (last=0) 也会经 !started 撒一颗
-        this._walkStamps(st.frozenWalk, last, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));
+        // tail 全部转正（endIdx=last）。GPU 模式跳过 CPU 栅格（collectStamps 重走，buffer 不用）。
+        if (!gpu) this._walkStamps(st.frozenWalk, last, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));
       }
     }
-    if (st && (st.bufferCanvas || st.bufferData)) this._compositeBufferToLayer();
+    if (gpu) {
+      const cs = this.collectStamps();   // 含 final tail + taper（_taperTotal 已设）
+      if (cs && cs.stamps.length) {
+        const r = rasterizeStroke!(cs.stamps, cs.shape, cs.bx, cs.by, cs.bw, cs.bh);
+        if (r) this._commitStrokeCanvas(r.canvas, r.dstX, r.dstY, r.canvas.width, r.canvas.height);
+      }
+    } else if (st && (st.bufferCanvas || st.bufferData)) {
+      this._compositeBufferToLayer();
+    }
     this._stroke = null;
   }
 
@@ -496,22 +507,26 @@ export class BrushEngine {
 
   _compositeBufferToLayer() {
     const st = this._stroke!;
-    const layer = st.layer;
     const composeCanvas = st.isBuildup ? st.bufferCanvas : this._renderWashToCanvas();
     if (!composeCanvas) return;
-    // layer 存储是裁剪过的(bbox)，frozen/tail buffer 全程不碰 layer → commit 前必须把 layer bbox
-    // 扩到覆盖整条 stroke buffer，否则 drawImage 落到过小的 layer canvas → 超出旧 bbox 的像素被裁
-    // （live overlay 走 doc 坐标不裁，所以画时看不出，pen-up 才丢）。bbox 增长是引擎的事——其它引擎
-    // (immediate brush / liquify / shapes / 填充 / lasso) 也都各自 ensureBbox；PixelEdit 只管 undo。
-    // 时机：本函数在 freeze-all 之后被调，bufBbox 已是终值。
-    // editRegion 物化该区现有像素 → 让 source-atop/destination-out/blendMode 对已有像素合成正确 → 切片回 tile。
-    layer.editRegion(st.bufBboxX, st.bufBboxY, st.bufBboxW, st.bufBboxH, (ctx, ox, oy) => {
+    this._commitStrokeCanvas(composeCanvas, st.bufBboxX, st.bufBboxY, st.bufBboxW, st.bufBboxH);
+  }
+
+  // 把一张 stroke 像素 canvas（straight RGBA，doc (bx,by) 起 bw×bh）commit 进 layer——CPU buffer 路径与
+  //   GPU readback 路径共用。editRegion 物化该区现有像素 → Π-outer opacity × blendMode/erase/lockAlpha
+  //   drawImage → 切片回 tile（source-atop/destination-out 对已有像素合成正确）。layer 存储是 bbox 裁剪过的，
+  //   editRegion 负责把 bbox 扩到覆盖整条 stroke（否则超旧 bbox 像素 pen-up 才丢）。
+  _commitStrokeCanvas(composeCanvas: AnyCanvas, bx: number, by: number, bw: number, bh: number) {
+    if (bw <= 0 || bh <= 0) return;
+    const st = this._stroke!;
+    const layer = st.layer;
+    layer.editRegion(bx, by, bw, bh, (ctx, ox, oy) => {
       ctx.globalAlpha = Math.max(0, Math.min(1, st.settings.opacity ?? 1.0));   // Π 外 × opacity
       // v242 锁定不透明度：source-atop = 只在已有 alpha 上画、保留目标 alpha。覆盖 per-brush blendMode。橡皮不锁。
       ctx.globalCompositeOperation = (st.mode === "erase"
         ? "destination-out"
         : (layer.lockAlpha ? "source-atop" : (st.settings.blendMode || "source-over"))) as GlobalCompositeOperation;
-      ctx.drawImage(composeCanvas, st.bufBboxX - ox, st.bufBboxY - oy);
+      ctx.drawImage(composeCanvas, bx - ox, by - oy);
     });
   }
 
@@ -576,7 +591,7 @@ export class BrushEngine {
   //   (GLStampRasterizer，board 消费)。**复用 _walkStamps(手感间距) + _stampParams(压感/taper)**，与 CPU
   //   _emitFrozen 同源 → 手感逐位一致；纯读（传 fresh walk，不碰 live cursor/buffer）。endStroke 后 _taperTotal
   //   有值则自动含出端 taper。pixelMode/未描边 → null（caller 回退）。color 给 0..1；erase 由 caller 用 mode 处理。
-  collectStamps(): { stamps: Stamp[]; shape: StrokeShape; layer: Layer; mode: string; opacity: number; blendMode: string } | null {
+  collectStamps(): { stamps: Stamp[]; shape: StrokeShape; layer: Layer; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null {
     const st = this._stroke;
     if (!st || !st.buffered || !st.sm || st.settings.pixelMode) return null;
     const out: Stamp[] = [];
@@ -585,11 +600,19 @@ export class BrushEngine {
       const params = this._stampParams(p, sd);
       if (params) out.push({ x, y, size: params.size, alpha: params.stampAlpha });
     });
+    // stamp 包围盒（doc 坐标，+1px falloff 余量，clamp 到 doc）——live overlay + commit 共用。
+    const docW = st.layer.docW, docH = st.layer.docH;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const s2 of out) { const r = s2.size / 2 + 1; if (s2.x - r < x0) x0 = s2.x - r; if (s2.y - r < y0) y0 = s2.y - r; if (s2.x + r > x1) x1 = s2.x + r; if (s2.y + r > y1) y1 = s2.y + r; }
+    const bx = out.length ? Math.max(0, Math.floor(x0)) : 0;
+    const by = out.length ? Math.max(0, Math.floor(y0)) : 0;
+    const bw = out.length ? Math.min(docW, Math.ceil(x1)) - bx : 0;
+    const bh = out.length ? Math.min(docH, Math.ceil(y1)) - by : 0;
     const s = st.settings;
     const useEllipse = s.shapeKind === "ellipse" && (s.shapeAspect !== 1 || s.shapeRotation !== 0);
     const col = hexToRgbObj(s.color);
     return {
-      stamps: out,
+      stamps: out, bx, by, bw, bh,
       shape: {
         hardness: s.hardness, color: [col.r / 255, col.g / 255, col.b / 255], buildup: st.isBuildup,
         aspect: useEllipse ? s.shapeAspect : 1, rotation: useEllipse ? s.shapeRotation : 0,

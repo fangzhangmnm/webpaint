@@ -4,7 +4,11 @@ import { compositeLayers } from "./layer-composite.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { GLBoard, glBoardEnabled } from "./gl/gl-board.ts";
 import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
-import type { OverlayInput, FloatInput } from "./gl/gl-doc-renderer.ts";
+import type { OverlayInput, FloatInput, StampOverlayInput } from "./gl/gl-doc-renderer.ts";
+import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
+
+// brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。
+type StampCollect = { stamps: Stamp[]; shape: StrokeShape; layer: Layer; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null;
 import type { GLDoc } from "./gl/gl-board.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 import { eachLeaf, layerByteBudget } from "./doc.ts";
@@ -669,7 +673,7 @@ export class Board {
       this.doc as unknown as GLDoc,
       this._docTransformParams(),
       W, H, this.viewport.scale, this._voidColor, docBg,
-      this._isLivePreview(), this._glOverlayInput(), this._glFloatInputs(),
+      this._isLivePreview(), this._glOverlayInput(), this._glFloatInputs(), this._glStampOverlay(),
     );
     // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。
     //   非 live-preview 帧（已 syncAll 把 tile 传 GPU）后释放各层物化缓存 → GL 模式不常驻第二份拷贝。
@@ -684,6 +688,26 @@ export class Board {
     ctx.strokeStyle = "rgba(0,0,0,0.18)";
     ctx.lineWidth = 1 / scale;
     ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+  }
+
+  // Stage 3：brush stamp 列表提供者（app 注入 = () => input.brush.collectStamps()）。
+  _stampProvider: (() => StampCollect) | null = null;
+  setStampProvider(fn: () => StampCollect) { this._stampProvider = fn; }
+
+  // GPU brush stamp overlay（Stage 3，替 CPU overlayCanvas）。仅在**无选区 + 非 lockAlpha** 时用——
+  //   这两种裁剪 GPU overlay 暂未做 → 回退 CPU overlay（_clipOverlayMasks 裁剪正确）。其余 brush 描边走
+  //   GPU stamp（与 GPU commit 同源解析 → buildup 也一致）。commit 始终 GPU（选区由 pen-up applyMaskPostStroke 兜）。
+  _glStampOverlay(): StampOverlayInput | null {
+    if (this.doc.selection) return null;
+    const cs = this._stampProvider?.();
+    if (!cs || !cs.stamps.length || cs.layer.lockAlpha) return null;
+    return { stamps: cs.stamps, shape: cs.shape, bx: cs.bx, by: cs.by, bw: cs.bw, bh: cs.bh, layerId: cs.layer.id, opacity: cs.opacity, erase: cs.mode === "erase", blendMode: cs.blendMode };
+  }
+
+  // commit 用：GL 模式返回「stamp 列表 → straight canvas」的 GPU 栅格 fn；否则 null（brush.endStroke 走 CPU buffer）。
+  glStrokeRasterizeFn(): ((stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null) | null {
+    if (!this._glBoard) return null;
+    return (stamps, shape, bx, by, bw, bh) => this._glBoard!.rasterizeStrokeToCanvas(stamps, shape, bx, by, bw, bh);
   }
 
   // 自由变换浮层 → GL 输入（floatFor 接缝）：每源层 renderSource(warp) → 落源层 z。复用 src._renderCache
