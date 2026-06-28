@@ -835,7 +835,8 @@ export class InputController {
     const scale = this.board.viewport.scale || 1;
     // v249：时间常数指数追踪 + 死区。{tau, deadzone}。
     const smooth = buffered ? _resolveSmooth(settings, scale) : {};
-    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
+    // GL 模式：buffered 描边 live+commit 全 GPU → 引擎跳 CPU frozen 烤/CPU overlay（Stage 2）。
+    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp, this.board.isGLBoard());
     const bbox = this.brush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();

@@ -708,6 +708,9 @@ export class Board {
     };
   }
 
+  // GL board 是否启用（brush beginStroke 据此跳 CPU frozen 烤/getLiveOverlay；与 glStrokeRasterizeFn 同源）。
+  isGLBoard(): boolean { return !!this._glBoard; }
+
   // commit 用：GL 模式返回「stamp 列表 → straight canvas」的 GPU 栅格 fn；否则 null（brush.endStroke 走 CPU buffer）。
   glStrokeRasterizeFn(): ((stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null) | null {
     if (!this._glBoard) return null;

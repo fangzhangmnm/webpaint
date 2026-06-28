@@ -77,6 +77,9 @@ interface StrokeState {
   settings: ResolvedBrush;
   mode: string;
   buffered: boolean;
+  // GL board 模式：live+commit 全 GPU（collectStamps→GPU 栅格）。true 时 extendStroke 跳 CPU frozen 烤、
+  //   getLiveOverlay 返回 null（CPU display 路径全废，见 docs/perf-webgl-memory-clip.md #2）。pixelMode 仍 CPU。
+  glMode: boolean;
   lastX: number;
   lastY: number;
   lastP: number;
@@ -260,7 +263,7 @@ export class BrushEngine {
 
   // smooth: { tau(ms), deadzone(doc px) }。t = 起手事件时间戳(ms)。详 docs/brush-procreate-smoothing.md。
   //   tau=0 & deadzone=0 → 不平滑（直通 raw）。
-  beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, pressure: number, mode: string = "brush", smooth: { tau?: number; deadzone?: number; tailBow?: number } = {}, t: number | null = null) {
+  beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, pressure: number, mode: string = "brush", smooth: { tau?: number; deadzone?: number; tailBow?: number } = {}, t: number | null = null, glMode: boolean = false) {
     const isBuildup = (settings.compositeMode || "wash") === "buildup";
     // buffered = 走 frozen/tail 平滑（进 buffer）；pixel = immediate（直接进 layer）
     const buffered = !settings.pixelMode;
@@ -268,6 +271,7 @@ export class BrushEngine {
     this._stroke = {
       layer, settings, mode,
       buffered,
+      glMode,
       lastX: x, lastY: y, lastP: pLPF0,
       pLPF: pLPF0,                              // 当前 LPF 态
       lastEventTime: performance.now(),
@@ -416,7 +420,10 @@ export class BrushEngine {
   _extendBuffered(x: number, y: number, pEff: number, t: number | null = null) {
     const st = this._stroke!;
     st.sm!.push(x, y, pEff, t);
-    st.sm!.update();
+    st.sm!.update();   // collectStamps（GPU 模式）也读 sm.C → 必须更新
+    // GL 模式：live overlay 由 GPU 走 collectStamps（fresh walk，不碰 frozenWalk）→ CPU frozen 烤纯废功，跳过。
+    //   frozenWalk 停留在 ci=0；endStroke 的 taperOut dry-walk 从 0 走全程，_taperTotal 仍正确。
+    if (st.glMode) return;
     const fi = st.sm!.frozenIndex();
     if (fi >= 0) this._walkStamps(st.frozenWalk, fi, (sx, sy, p, sd) => this._emitFrozen(sx, sy, p, sd));
   }
@@ -567,6 +574,9 @@ export class BrushEngine {
   getLiveOverlay() {
     const st = this._stroke;
     if (!st || !st.buffered) return null;
+    // GL 模式：live preview 走 GPU stamp overlay（board._glStampOverlay→collectStamps）；CPU overlay 不被消费。
+    //   返回 null 跳过 _renderTail/_composeOverlay 每帧栅格。描边活跃由 board._strokeActiveHint 兜（不靠本返回值）。
+    if (st.glMode) return null;
     // board 一帧会调多次（partial/full 判定 + _renderLayers）。tail 只随每个 raw push 变（笔尖移动）→
     // 用 sm.seq（每 push +1）当缓存键：同 seq + overlay 在 → 直接返回缓存，不重算 tail/compose。
     // （不能用 sm.count：慢速 raw 不落新锚点时 count 不变，但笔尖动了、tail 仍需重画。）
