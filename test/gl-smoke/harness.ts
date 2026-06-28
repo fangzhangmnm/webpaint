@@ -268,6 +268,27 @@ function overlayParity(glctx: GLContext, add: Add): void {
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`overlay:${erase ? "erase" : bm} vs compositeLayers`, md <= 4 && err === 0, `maxΔ=${md} err=0x${err.toString(16)} ${md > 4 ? at : ""}`);
   }
+  // lockAlpha：GL shader 裁 overlay 到 base.a；2D ref 预裁(dst-in 层 alpha)后 source-over → 应等价。
+  {
+    const opacity = 0.85;
+    const A2D = { isGroup: false, visible: true, clippingMask: false, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, canvas: imgToCanvas(bg, n) };
+    const L2D = { isGroup: false, visible: true, clippingMask: false, opacity: 1, mode: "source-over", bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, canvas: imgToCanvas(layer, n) };
+    const clipped = document.createElement("canvas"); clipped.width = n; clipped.height = n;
+    const cc = clipped.getContext("2d")!; cc.drawImage(imgToCanvas(ov, n), 0, 0);
+    cc.globalCompositeOperation = "destination-in"; cc.drawImage(imgToCanvas(layer, n), 0, 0); cc.globalCompositeOperation = "source-over";
+    const gc = document.createElement("canvas"); gc.width = n; gc.height = n; const gctx = gc.getContext("2d")!; gctx.clearRect(0, 0, n, n);
+    compositeLayers(gctx as unknown as CanvasRenderingContext2D, [A2D, L2D] as never, {
+      overlayFor: (node: unknown) => node === L2D ? { canvas: clipped, bboxX: 0, bboxY: 0, bboxW: n, bboxH: n, opacity, blendMode: "source-over" } : null,
+    } as never);
+    const ref = gctx.getImageData(0, 0, n, n).data;
+    const active = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase: false, blendMode: "source-over", lockAlpha: true, selMask: null, ox: 0, oy: 0, ow: n, oh: n } };
+    glctx.gl.getError();
+    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
+    const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
+    const err = glctx.gl.getError();
+    const { md, at } = maxPremulDiff(ref, glpx, n);
+    add("overlay:lockAlpha GPU 裁 base.a vs 2D dst-in 层", md <= 4 && err === 0, `maxΔ=${md} err=0x${err.toString(16)} ${md > 4 ? at : ""}`);
+  }
   i0.dispose(); i1.dispose(); glctx.gl.deleteTexture(ovTex);
 }
 

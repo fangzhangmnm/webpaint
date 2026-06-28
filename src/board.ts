@@ -694,14 +694,18 @@ export class Board {
   _stampProvider: (() => StampCollect) | null = null;
   setStampProvider(fn: () => StampCollect) { this._stampProvider = fn; }
 
-  // GPU brush stamp overlay（Stage 3，替 CPU overlayCanvas）。仅在**无选区 + 非 lockAlpha** 时用——
-  //   这两种裁剪 GPU overlay 暂未做 → 回退 CPU overlay（_clipOverlayMasks 裁剪正确）。其余 brush 描边走
-  //   GPU stamp（与 GPU commit 同源解析 → buildup 也一致）。commit 始终 GPU（选区由 pen-up applyMaskPostStroke 兜）。
+  // GPU brush stamp overlay（Stage 3，替 CPU overlayCanvas）。selection/lockAlpha 在 GPU overlay shader 内裁
+  //   （setStampOverlay 上传选区 mask + base.a 锁α），与 commit 一致；commit 始终 GPU（选区另由 applyMaskPostStroke 兜）。
   _glStampOverlay(): StampOverlayInput | null {
-    if (this.doc.selection) return null;
     const cs = this._stampProvider?.();
-    if (!cs || !cs.stamps.length || cs.layer.lockAlpha) return null;
-    return { stamps: cs.stamps, shape: cs.shape, bx: cs.bx, by: cs.by, bw: cs.bw, bh: cs.bh, layerId: cs.layer.id, opacity: cs.opacity, erase: cs.mode === "erase", blendMode: cs.blendMode };
+    if (!cs || !cs.stamps.length) return null;
+    const sel = this.doc.selection;
+    return {
+      stamps: cs.stamps, shape: cs.shape, bx: cs.bx, by: cs.by, bw: cs.bw, bh: cs.bh,
+      layerId: cs.layer.id, opacity: cs.opacity, erase: cs.mode === "erase", blendMode: cs.blendMode,
+      lockAlpha: !!cs.layer.lockAlpha,
+      selMask: sel ? { canvas: sel.maskCanvas as unknown as CanvasImageSource, ox: sel.bboxX, oy: sel.bboxY, ow: sel.bboxW, oh: sel.bboxH } : null,
+    };
   }
 
   // commit 用：GL 模式返回「stamp 列表 → straight canvas」的 GPU 栅格 fn；否则 null（brush.endStroke 走 CPU buffer）。

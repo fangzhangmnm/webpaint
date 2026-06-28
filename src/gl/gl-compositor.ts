@@ -190,6 +190,11 @@ export class GLCompositor {
     gl.uniform1i(u("u_overlayErase"), overlay && overlay.erase ? 1 : 0);
     gl.uniform2f(u("u_ovOrigin"), overlay ? overlay.ox : 0, overlay ? overlay.oy : 0);
     gl.uniform2f(u("u_ovSize"), overlay ? overlay.ow : 1, overlay ? overlay.oh : 1);
+    gl.uniform1i(u("u_ovLockAlpha"), overlay && overlay.lockAlpha ? 1 : 0);
+    const sel = overlay?.selMask ?? null;
+    gl.uniform1i(u("u_ovHasSel"), sel ? 1 : 0);
+    gl.uniform2f(u("u_ovSelOrigin"), sel ? sel.ox : 0, sel ? sel.oy : 0);
+    gl.uniform2f(u("u_ovSelSize"), sel ? sel.ow : 1, sel ? sel.oh : 1);
     // **每个 sampler 固定单元 + 对未激活的也绑 2D 占位**：否则未被编译器消除的未用 sampler 默认落
     //   单元 0（= u_arr 的 sampler2DArray）→ 类型冲突 INVALID_OPERATION(0x502)。占位用 acc.read（2D）。
     const ph = acc.read.tex;   // 2D 占位纹理
@@ -205,6 +210,8 @@ export class GLCompositor {
     this._setSampler(prog, "u_groupSrc", 4);
     gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, overlay?.tex ?? ph);
     this._setSampler(prog, "u_overlay", 5);
+    gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, sel?.tex ?? ph);
+    this._setSampler(prog, "u_ovSel", 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, acc.write.fbo);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);

@@ -34,10 +34,13 @@ export interface FloatInput {
 }
 
 // board 传入的 GPU brush stamp overlay（Stage 3：替 CPU overlayCanvas）。bx/by/bw/bh = stamp 包围盒 doc 坐标。
+//   lockAlpha + selMask：在 GPU overlay shader 里裁剪（替代 CPU 的 _clipOverlayMasks dst-in）。
 export interface StampOverlayInput {
   stamps: Stamp[]; shape: StrokeShape;
   bx: number; by: number; bw: number; bh: number;
   layerId: number; opacity: number; erase: boolean; blendMode: string;
+  lockAlpha: boolean;
+  selMask: { canvas: CanvasImageSource; ox: number; oy: number; ow: number; oh: number } | null;
 }
 
 export class GLDocRenderer {
@@ -50,7 +53,8 @@ export class GLDocRenderer {
   private _layerTiles = new Map<number, LayerTiles>();
   // live 描边 overlay：只传**描边 bbox 尺寸**纹理（小），shader 按 bbox 映射。
   private _ovTex: WebGLTexture | null = null;
-  private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number } | null = null;
+  private _selTex: WebGLTexture | null = null;   // GPU overlay 选区蒙版（复用，每帧重传）
+  private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number; lockAlpha: boolean; selMask: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null } | null = null;
   // 自由变换浮层：per-源层 id 一张复用纹理（warp 每帧变，重传）+ 当前帧描述。
   private _floatTex = new Map<number, WebGLTexture>();
   private _floats = new Map<number, FloatDesc>();
@@ -102,21 +106,40 @@ export class GLDocRenderer {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 存直值（shader 自己处理）
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, ov.canvas as TexImageSource);   // bbox 尺寸直传（overlay 是 canvas）
     gl.bindTexture(gl.TEXTURE_2D, null);
-    this._overlay = { tex: this._ovTex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: ov.bboxX, oy: ov.bboxY, ow: ov.bboxW, oh: ov.bboxH };
+    // CPU canvas overlay 已由 board._clipOverlayMasks 预裁 → shader 不再裁（lockAlpha=false, selMask=null）。
+    this._overlay = { tex: this._ovTex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: ov.bboxX, oy: ov.bboxY, ow: ov.bboxW, oh: ov.bboxH, lockAlpha: false, selMask: null };
   }
 
   // Stage 3：用 GPU stamp 栅格器把 brush stamp 列表栅格成 overlay（替 CPU overlayCanvas）。
   //   栅格器出**预乘** FBO → presentTo 解预乘成 straight FBO（overlay shader 吃 straight，与 CPU canvas overlay 同）。
   //   straight FBO 留到本帧合成后归还（_overlayOwnedFBO）。bx/by/bw/bh = stamp 包围盒 doc 坐标。
-  setStampOverlay(stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number, layerId: number, opacity: number, erase: boolean, blendMode: string): void {
-    if (stamps.length === 0 || bw <= 0 || bh <= 0) { this._overlay = null; return; }
-    const fboP = this._rasterizer.rasterize(stamps, shape, bx, by, bw, bh);   // 预乘
-    const fboS = this._glctx.borrowFBO(bw, bh, "u8");
-    this._comp.presentTo(fboP.tex, fboS, bw, bh);                              // → straight
+  setStampOverlay(ov: StampOverlayInput): void {
+    if (ov.stamps.length === 0 || ov.bw <= 0 || ov.bh <= 0) { this._overlay = null; return; }
+    const gl = this._glctx.gl;
+    const fboP = this._rasterizer.rasterize(ov.stamps, ov.shape, ov.bx, ov.by, ov.bw, ov.bh);   // 预乘
+    const fboS = this._glctx.borrowFBO(ov.bw, ov.bh, "u8");
+    this._comp.presentTo(fboP.tex, fboS, ov.bw, ov.bh);                        // → straight
     this._glctx.returnFBO(fboP);
     if (this._overlayOwnedFBO) this._glctx.returnFBO(this._overlayOwnedFBO);   // 上帧残留（保险）
     this._overlayOwnedFBO = fboS;
-    this._overlay = { tex: fboS.tex, layerId, opacity, erase, blendMode, ox: bx, oy: by, ow: bw, oh: bh };
+    // 选区蒙版上传（lockAlpha 用 base.a，shader 内裁，不需纹理）。
+    let selMask: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null = null;
+    if (ov.selMask) {
+      if (!this._selTex) {
+        this._selTex = gl.createTexture()!;
+        gl.bindTexture(gl.TEXTURE_2D, this._selTex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      }
+      gl.bindTexture(gl.TEXTURE_2D, this._selTex);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, ov.selMask.canvas as TexImageSource);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      selMask = { tex: this._selTex, ox: ov.selMask.ox, oy: ov.selMask.oy, ow: ov.selMask.ow, oh: ov.selMask.oh };
+    }
+    this._overlay = { tex: fboS.tex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: ov.bx, oy: ov.by, ow: ov.bw, oh: ov.bh, lockAlpha: ov.lockAlpha, selMask };
   }
 
   // Stage 3：栅格化 stroke stamp 列表 → straight RGBA canvas（commit 用，readback→editRegion）。
@@ -199,7 +222,7 @@ export class GLDocRenderer {
         if (!r) throw new Error(`LAYER_NOT_SYNCED:${leaf.id}`);   // syncAll 后每叶都在表（空层=空 index）
         return { index: r.index, hasContent: r.tileMap.tileCount > 0 };
       },
-      ov ? (leaf): OverlayDesc | null => (leaf.id === ov.layerId ? { tex: ov.tex, opacity: ov.opacity, erase: ov.erase, blendMode: safeMode(ov.blendMode), ox: ov.ox, oy: ov.oy, ow: ov.ow, oh: ov.oh } : null) : undefined,
+      ov ? (leaf): OverlayDesc | null => (leaf.id === ov.layerId ? { tex: ov.tex, opacity: ov.opacity, erase: ov.erase, blendMode: safeMode(ov.blendMode), ox: ov.ox, oy: ov.oy, ow: ov.ow, oh: ov.oh, lockAlpha: ov.lockAlpha, selMask: ov.selMask } : null) : undefined,
       this._floats.size ? (leaf): FloatDesc | null => this._floats.get(leaf.id) ?? null : undefined,
     );
     const result = this._comp.composite(this._backend.texture, tree, docW, docH, bg);

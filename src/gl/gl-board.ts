@@ -63,7 +63,7 @@ export class GLBoard {
     if (contentChanged || livePreview || !this._cache) {
       // GPU stamp overlay（brush 描边中）优先；否则 CPU canvas overlay（filter/liquify 等）。
       if (livePreview && stampOverlay) {
-        this._renderer.setStampOverlay(stampOverlay.stamps, stampOverlay.shape, stampOverlay.bx, stampOverlay.by, stampOverlay.bw, stampOverlay.bh, stampOverlay.layerId, stampOverlay.opacity, stampOverlay.erase, stampOverlay.blendMode);
+        this._renderer.setStampOverlay(stampOverlay);
       } else {
         this._renderer.setOverlay(livePreview ? overlay : null, doc.width, doc.height);
       }
