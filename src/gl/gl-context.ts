@@ -45,6 +45,7 @@ export class GLContext {
   onLost: (() => void) | null = null;
   onRestored: (() => void) | null = null;
   private _lost = false;
+  private _gen = 0;   // restore 代际：每次 context 恢复 +1。持久 GL 对象（如 stamp 实例 VAO）按此判失效重建。
 
   constructor(canvas: HTMLCanvasElement | OffscreenCanvas) {
     this.canvas = canvas;
@@ -87,6 +88,8 @@ export class GLContext {
   }
 
   get isLost(): boolean { return this._lost; }
+  // 持久 GL 对象的失效令牌：caller 缓存创建时的 generation，与此不等即重建（restore 后旧句柄已废）。
+  get generation(): number { return this._gen; }
 
   // ---- shader program 缓存 ----
   // 按 name 取已编译 program；首次需给源。源被记下，context restored 后自动重编。
@@ -202,6 +205,7 @@ export class GLContext {
   // context restored 后：旧 GL 对象句柄全失效 → 重编所有 program、清空 FBO 池（按需重建）、丢 quad。
   // tile 纹理由 TileResidency 在 onRestored 回调里从备份重上传（本模块不持 tile）。
   private _rebuildAfterRestore(): void {
+    this._gen++;   // 旧 program/FBO/VAO 句柄全废 → 代际 +1，持久对象 holder 据此重建
     this._programs.clear();
     for (const [name, src] of this._programSrc) {
       this._programs.set(name, this._compile(src.vert, src.frag, name));

@@ -27,33 +27,38 @@ export interface StrokeShape {
   rotation?: number;                  // 椭圆旋转弧度（默认 0）
 }
 
-// 累积 stamp 的顶点 shader：单位 quad → stamp 包围盒（doc→clip）。v_local = 相对中心的像素偏移。
+// 累积 stamp 的顶点 shader（**instanced**：整条 stroke 一次 drawArraysInstanced，替逐 stamp 一 draw call）。
+//   loc0 = 单位 quad（每实例共用）；loc1 = 每 stamp 实例属性 (cx,cy,radius,alpha)，divisor=1。
+//   center/radius/alpha 从 uniform 改成 instance attr → varying 进 frag（手感数学不变，只换喂法）。
 const ACCUM_VERT = `#version 300 es
 precision highp float;
-layout(location=0) in vec2 a_quad;        // [0,1]²
+layout(location=0) in vec2 a_quad;        // [0,1]²（per-vertex）
+layout(location=1) in vec4 a_inst;        // (cx, cy, radius, alpha)（per-instance）
 uniform vec2 u_bboxOrigin;                // bbox 左上 doc 坐标
 uniform vec2 u_bboxSize;                  // bbox 像素尺寸
-uniform vec2 u_center;                    // stamp 中心 doc
-uniform float u_radius;                   // size/2（+1 像素余量在 caller）
 uniform float u_aspect;                   // 椭圆纵横比（1=圆）
 out vec2 v_local;                         // 相对中心像素偏移（doc 轴对齐）
+out float v_radius;                       // 该 stamp 半径（size/2）
+out float v_alpha;                        // 该 dab 的 α
 void main() {
-  float rext = u_radius * max(1.0, u_aspect);      // 椭圆外接盒半边（over-cover，frag discard 出界）
+  float radius = a_inst.z;
+  float rext = radius * max(1.0, u_aspect);        // 椭圆外接盒半边（over-cover，frag discard 出界）
   vec2 corner = (a_quad * 2.0 - 1.0) * rext;       // [-rext,rext]²
-  vec2 docPos = u_center + corner;
-  v_local = corner;
+  vec2 docPos = a_inst.xy + corner;
+  v_local = corner; v_radius = radius; v_alpha = a_inst.w;
   vec2 uv = (docPos - u_bboxOrigin) / u_bboxSize;  // 0..1 in bbox
   gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);    // bbox 左上=clip(-1,1)（present 时 y 由 caller 约定）
 }`;
 
 // falloff（逐位匹配 brush.ts:217-221 / 862-867）+ 输出该 dab 贡献。
 // Wash：frag 出 (0,0,0,dabA)，外部 MAX blend。Build-Up：出 premult(color,dabA)，外部 over blend。
+//   实例顺序 = stamp 顺序（gl_InstanceID 单调）→ build-up source-over 累积次序与逐 draw call 逐位等价。
 const ACCUM_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_local;
-uniform float u_radius;
+in float v_radius;            // 该 stamp 半径
+in float v_alpha;             // 该 dab 的 α（0..1）
 uniform float u_hardness;     // 0..0.999
-uniform float u_stampAlpha;   // 该 dab 的 α（0..1）
 uniform vec3 u_color;         // 0..1
 uniform bool u_buildup;
 uniform float u_aspect;       // 椭圆纵横比（1=圆）
@@ -66,13 +71,13 @@ void main() {
   float dxR = c * v_local.x + s * v_local.y;
   float dyR = (-s * v_local.x + c * v_local.y) * ia;
   float dist = length(vec2(dxR, dyR));
-  float innerR = u_hardness * u_radius;
-  float decayLen = u_radius - innerR;
+  float innerR = u_hardness * v_radius;
+  float decayLen = v_radius - innerR;
   float shapeA;
-  if (dist >= u_radius) { discard; }
+  if (dist >= v_radius) { discard; }
   if (decayLen <= 0.0 || dist <= innerR) shapeA = 1.0;
   else { float u = (dist - innerR) / decayLen; shapeA = 1.0 - u*u*(3.0 - 2.0*u); }
-  float dabA = u_stampAlpha * shapeA;
+  float dabA = v_alpha * shapeA;
   if (u_buildup) o = vec4(u_color * dabA, dabA);   // premult, over
   else           o = vec4(0.0, 0.0, 0.0, dabA);    // wash: 累积 α (MAX)
 }`;
@@ -93,13 +98,43 @@ void main() { float a = texture(u_accum, v_uv).a; o = vec4(u_color * a, a); }`;
 
 export class GLStampRasterizer {
   private _glctx: GLContext;
+  // 持久 instanced VAO：单位 quad（loc0，static）+ 每 stamp 实例属性缓冲（loc1，每帧重填）。
+  //   按 context generation 缓存——restore 后旧句柄失效，_gen 不等即重建。
+  private _vao: WebGLVertexArrayObject | null = null;
+  private _instBuf: WebGLBuffer | null = null;
+  private _vaoGen = -1;
+  private _instData = new Float32Array(0);   // 复用，按 stamp 数增长（不每帧新分配）
   constructor(glctx: GLContext) { this._glctx = glctx; }
+
+  // 取（或按代际重建）instanced VAO；返回实例属性缓冲。单位 quad = GLContext.quadVAO 同布局（6 顶点）。
+  private _ensureVAO(): WebGLVertexArrayObject {
+    const gl = this._glctx.gl;
+    if (this._vao && this._vaoGen === this._glctx.generation) return this._vao;
+    const vao = gl.createVertexArray();
+    if (!vao) throw new Error("CREATE_VAO_FAILED");
+    gl.bindVertexArray(vao);
+    // loc0：单位 quad（两三角覆盖 [0,1]²；位置即 uv），per-vertex。
+    const quadBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    // loc1：每 stamp (cx,cy,radius,alpha)，divisor=1（每实例步进一次）。缓冲此处建、rasterize 重填。
+    const instBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, instBuf);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+    gl.bindVertexArray(null);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    this._vao = vao; this._instBuf = instBuf; this._vaoGen = this._glctx.generation;
+    return vao;
+  }
 
   // 栅格化 stamps → 一张 bbox 尺寸的**预乘 RGBA** FBO（caller returnFBO）。
   //   bboxOrigin/Size = 输出纹理对应的 doc 区域。color/hardness/buildup = stroke 常量。
   rasterize(stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number): PooledFBO {
     const gl = this._glctx.gl;
-    const quad = this._glctx.quadVAO();
     const accum = this._glctx.borrowFBO(bw, bh, "u8");
 
     // 1) 累积 pass。
@@ -113,7 +148,6 @@ export class GLStampRasterizer {
 
     const prog = this._glctx.program("stamp-accum", ACCUM_VERT, ACCUM_FRAG);
     gl.useProgram(prog);
-    gl.bindVertexArray(quad);
     gl.uniform2f(gl.getUniformLocation(prog, "u_bboxOrigin"), bx, by);
     gl.uniform2f(gl.getUniformLocation(prog, "u_bboxSize"), bw, bh);
     gl.uniform1f(gl.getUniformLocation(prog, "u_hardness"), Math.max(0, Math.min(0.999, shape.hardness)));
@@ -121,15 +155,17 @@ export class GLStampRasterizer {
     gl.uniform1i(gl.getUniformLocation(prog, "u_buildup"), shape.buildup ? 1 : 0);
     gl.uniform1f(gl.getUniformLocation(prog, "u_aspect"), shape.aspect ?? 1);
     gl.uniform1f(gl.getUniformLocation(prog, "u_rotation"), shape.rotation ?? 0);
-    const uCenter = gl.getUniformLocation(prog, "u_center");
-    const uRadius = gl.getUniformLocation(prog, "u_radius");
-    const uAlpha = gl.getUniformLocation(prog, "u_stampAlpha");
-    for (const s of stamps) {
-      gl.uniform2f(uCenter, s.x, s.y);
-      gl.uniform1f(uRadius, s.size / 2);
-      gl.uniform1f(uAlpha, s.alpha);
-      gl.drawArrays(gl.TRIANGLES, 0, 6);
-    }
+    // 实例属性打包 (cx,cy,radius,alpha) → 一次 drawArraysInstanced（替逐 stamp draw call）。
+    const n = stamps.length;
+    if (this._instData.length < n * 4) this._instData = new Float32Array(n * 4);
+    const data = this._instData;
+    for (let i = 0; i < n; i++) { const s = stamps[i]; const o = i * 4; data[o] = s.x; data[o + 1] = s.y; data[o + 2] = s.size / 2; data[o + 3] = s.alpha; }
+    this._ensureVAO();
+    gl.bindVertexArray(this._vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._instBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, n * 4), gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
 
     if (shape.buildup) {
       gl.bindVertexArray(null);
@@ -145,7 +181,7 @@ export class GLStampRasterizer {
     gl.disable(gl.BLEND);
     const cprog = this._glctx.program("stamp-color", COLOR_VERT, COLOR_FRAG);
     gl.useProgram(cprog);
-    gl.bindVertexArray(quad);
+    gl.bindVertexArray(this._glctx.quadVAO());   // 上色 = 全屏 quad（共享 VAO，只 loc0）
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, accum.tex);
     gl.uniform1i(gl.getUniformLocation(cprog, "u_accum"), 0);
