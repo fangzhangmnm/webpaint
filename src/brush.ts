@@ -330,11 +330,6 @@ export class BrushEngine {
     });
   }
 
-  // CPU live overlay 已归档（GL board 唯一路径下 brush live 预览走 GPU stamp overlay = board._glStampOverlay
-  //   →collectStamps）。board._overlayProvider 仍每帧调本桥（filter/liquify 另走 syncLayer 接缝）→ 恒返 null，
-  //   不再每帧 _renderTail/_composeOverlay 栅格。描边活跃由 board._strokeActiveHint 兜，不靠本返回值。
-  getLiveOverlay(): null { return null; }
-
   // Stage 3：收集当前 stroke 全部 stamp（frozen 0..count-1，含 tail）为列表 + stroke 笔形 —— 给 GPU 栅格器
   //   (GLStampRasterizer，board 消费)。**复用 _walkStamps(手感间距) + _stampParams(压感/taper)**，与 CPU
   //   _emitFrozen 同源 → 手感逐位一致；纯读（传 fresh walk，不碰 live cursor/buffer）。endStroke 后 _taperTotal

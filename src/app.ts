@@ -167,16 +167,10 @@ bindEngine(input);
 // iPad 系统手势抢断 canvas pointer 后偶尔不发 pointercancel 到 canvas，map 里残留 ghost。
 // pointer 自愈 + iPad/触屏系统手势拦截 = platform-guards.ts initPlatformGuards。
 
-// 笔触 buffer live overlay：board 每帧问 brush 要，layer 之上 composite × s.opacity
-// 预览（实际像素在 endStroke 才烧进 layer）。
-board.setOverlayProvider(() => input.brush.getLiveOverlay());
-board.setStampProvider(() => input.brush.collectStamps());   // Stage 3：GPU stamp live overlay（GL 模式 + 无选区/lockAlpha）
-// v131 修 (user：「液化 windows 又有 partial redraw 白框」)
-//   filter brush（含 v132 后的液化）没用 overlayProvider 通路，board partial render 抓不到，sliver 漏出
-//   strokeActiveHint 兜底：stroke 进行中 = 全屏渲染
-// v189 修 (user：「像素笔 Windows 又出黑框」)：旧 hint 只兜 filterBrush，像素笔 直接写 layer、
-//   无 buffered overlay、又非 filterBrush → 漏。改用 input.isStrokeActive()（任一笔画进行中都强全屏，
-//   含 brush/像素笔/liquify/filterBrush）；buffered 笔本就走 overlayProvider，这里冗余无害。
+// brush live 预览：GPU stamp overlay（collectStamps→GPU 栅格；选区/lockAlpha 在 shader 内裁）。
+board.setStampProvider(() => input.brush.collectStamps());
+// strokeActiveHint：任一笔画进行中 → board 走 livePreview（直接合成，不用静态缓存）。
+//   含 brush/像素笔/liquify/filterBrush（liquify/filter/pixel 另经 setLiveSyncProvider 把活动层每帧重传 GPU）。
 board.setStrokeActiveHint(() => input.isStrokeActive());
 // GL live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中要把活动层每帧重传 GPU 才显预览
 //   （buffered brush 走 GPU stamp overlay，此处返 null）。仅 GL 模式生效（board 内部门控）。

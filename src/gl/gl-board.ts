@@ -1,12 +1,11 @@
-// GLBoard —— 生产 board.ts 的 GL 渲染委托（docs/perf-webgl-memory-clip.md §5.5 接 board）。
-// 放在 ?glboard=1 开关后面：board canvas(alpha) 在前只画 overlay/边框，本 GL canvas 垫在后面渲 doc。
-// 脏策略：内容变(markContentDirty)且非 live-preview 时才 syncAll；描边中靠 live overlay，不重传；
-//   pan/zoom 不重传（视口变不碰内容）。per-layer 脏 + bbox-sub overlay = 后续优化。
-// 不碰生产 2D 路径：glboard=0 时 board 行为逐字不变。
+// GLBoard —— board.ts 的 GL 渲染委托（v351 起唯一 display 路径；docs/perf-webgl-memory-clip.md §5.5）。
+// board canvas(alpha:true) 在前只画 lasso overlay/边框，本 GL canvas 垫在后面渲 doc。
+// 脏策略：内容变(markContentDirty)且非 live-preview 时才 syncAll；描边中靠 GPU stamp overlay/live-sync seam，
+//   不重传；pan/zoom 不重传（视口变不碰内容）。per-layer 脏 + bbox-sub = 后续优化（见 perf-optimization-backlog）。
 
 import { GLContext } from "./gl-context.ts";
 import { GLDocRenderer } from "./gl-doc-renderer.ts";
-import type { OverlayInput, FloatInput, StampOverlayInput, SurrogateInput } from "./gl-doc-renderer.ts";
+import type { FloatInput, StampOverlayInput, SurrogateInput } from "./gl-doc-renderer.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { Background } from "./gl-compositor.ts";
@@ -15,10 +14,6 @@ import type { PooledFBO } from "./gl-context.ts";
 export interface GLDoc { layers: DocNode[]; width: number; height: number; }
 // board live-sync 接缝用的叶类型别名（结构上 = DocLeaf，board 传活动 Layer 进来重传）。
 export type { DocLeaf as GLLeaf } from "./gl-doc-bridge.ts";
-
-// **v351 起 GL 是唯一 display 路径**（2D display 已归档进 ARCHIVE/old-board-2d-display.ts）。恒开；
-//   `?glboard=0` 过渡逃生已删（无 2D 可回退）。GL init 失败 → board 显「需 WebGL2」（_setupGLBoard catch + _renderFull）。
-export function glBoardEnabled(): boolean { return true; }
 
 // "#rrggbb" → [r,g,b] in [0,1]（void 底色 clear 用）。失败回退浅灰。
 function hexToRgb(hex: string): [number, number, number] {
@@ -60,7 +55,7 @@ export class GLBoard {
     return this._renderer.warpToCanvas(srcCanvas, srcW, srcH, hinv, mode, bx, by, bw, bh);
   }
 
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, forceSync = false, surrogate: SurrogateInput | null = null): void {
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, forceSync = false, surrogate: SurrogateInput | null = null): void {
     if (this._glctx.isLost) return;
     // forceSync：livePreview 帧也强制全量同步一次（自由变换 lift 那帧——挖洞改了源层 tile，但 livePreview
     //   门控会挡住 syncAll → 否则 GPU 上是陈旧的无洞源层）。拖动中源层静止 → 不再 forceSync，保住 v352 零 per 帧成本。
@@ -74,12 +69,9 @@ export class GLBoard {
     if (surrogate) this._renderer.syncLayerFromCanvas(surrogate.layerId, surrogate.canvas, surrogate.bx, surrogate.by, surrogate.w, surrogate.h, doc.width, doc.height);
 
     if (contentChanged || livePreview || !this._cache) {
-      // GPU stamp overlay（brush 描边中）优先；否则 CPU canvas overlay（filter/liquify 等）。
-      if (livePreview && stampOverlay) {
-        this._renderer.setStampOverlay(stampOverlay);
-      } else {
-        this._renderer.setOverlay(livePreview ? overlay : null, doc.width, doc.height);
-      }
+      // brush live = GPU stamp overlay（描边中）；否则清掉上帧 overlay（filter/liquify/pixel 走 live-sync seam，无 overlay）。
+      if (livePreview && stampOverlay) this._renderer.setStampOverlay(stampOverlay);
+      else this._renderer.clearOverlay();
       this._renderer.setFloats(floats, doc.width, doc.height);   // 自由变换浮层（空=无变换）
       // docBg：null=透明（void 透出）/ "checker"=棋盘背景 / "#rrggbb"=预乘纯色。
       const bg: Background | undefined = docBg === "checker" ? "checker"

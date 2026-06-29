@@ -3,9 +3,9 @@ import { sourceWarpMatrix } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import { compositeLayers } from "./layer-composite.ts";
 import { makeBitmap } from "./bitmap.ts";
-import { GLBoard, glBoardEnabled } from "./gl/gl-board.ts";
+import { GLBoard } from "./gl/gl-board.ts";
 import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
-import type { OverlayInput, FloatInput, StampOverlayInput, SurrogateInput } from "./gl/gl-doc-renderer.ts";
+import type { FloatInput, StampOverlayInput, SurrogateInput } from "./gl/gl-doc-renderer.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
 // brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。
@@ -27,13 +27,6 @@ interface Selection {
   bboxX: number; bboxY: number; bboxW: number; bboxH: number;
   maskCanvas: CanvasImageSource;
   outline(): number[][];
-}
-
-// 笔刷 live overlay 描述（compositeLayers 的 overlayFor 接缝；canvas 指向裁过的离屏）
-interface OverlayDesc {
-  layer: Layer;
-  canvas: CanvasImageSource;
-  bboxX: number; bboxY: number; bboxW: number; bboxH: number;
 }
 
 // 自由变换浮层网格点 / source / float 描述（lassoInfo.floating）
@@ -64,7 +57,7 @@ interface LassoInfo {
   sampleMode?: string;
 }
 
-// 采样模式字符串 → GPU warp shader 的 int（0=nearest 1=bilinear 2=bicubic；默认 bilinear，对齐 renderSource 默认）。
+// 采样模式字符串 → GPU warp shader 的 int（0=nearest 1=bilinear 2=bicubic；默认 bilinear）。
 function _sampleModeInt(mode?: string): number {
   return mode === "nearest" ? 0 : mode === "bicubic" ? 2 : 1;
 }
@@ -107,12 +100,9 @@ export class Board {
   _raf: number | null;
   _cursor: Cursor | null;
   _showCursor: boolean;
-  _dirtyDocRect: [number, number, number, number] | null;
-  _dirtyFull: boolean;
   _voidColor: string;
   _showCheckerboard: boolean;
   _pixelGridEnabled: boolean;
-  _overlayProvider: (() => OverlayDesc | null | undefined) | null;
   _eraseComposite: HTMLCanvasElement | null;
   _eraseCompositeKey: string | null;
   gridCanvas: HTMLCanvasElement | null;
@@ -132,22 +122,19 @@ export class Board {
   _activeSurrogateBx?: number;   // 替身 canvas 的 doc 左上（GL 上传 tiles 用）
   _activeSurrogateBy?: number;
   _clipTmp?: HTMLCanvasElement;
-  _overlayClipTmp?: HTMLCanvasElement;
   _showFps?: boolean;
   _lastFrameT?: number | null;
   _fps?: number | null;
   _fpsEl?: HTMLElement;
   static _dispatchingDirty?: boolean;
-  // WebGL2 渲染（v351 起唯一 display 路径，glBoardEnabled 恒 true）。init 失败 → _glBoard=null → _renderFull 显「需 WebGL2」。
-  _glOn?: boolean;
+  // WebGL2 渲染（v351 起唯一 display 路径）。init 失败 → _glBoard=null → _renderFull 显「需 WebGL2」。
   _glBoard?: GLBoard | null;
   _glCanvas?: HTMLCanvasElement | null;
 
   constructor(canvas: HTMLCanvasElement, doc: PaintDoc) {
     this.canvas = canvas;
-    // 本 2D canvas 用 alpha:true（透明，只画 lasso overlay/边框，GL canvas 在后透出 doc）。GL 是唯一路径。
-    this._glOn = glBoardEnabled();
-    this.ctx = canvas.getContext("2d", { alpha: this._glOn })!;
+    // 本 2D canvas 恒 alpha:true（透明，只画 lasso overlay/边框，GL canvas 在后透出 doc）。GL 是唯一 display 路径。
+    this.ctx = canvas.getContext("2d", { alpha: true })!;
     this.doc = doc;
     this.dpr = Math.max(1, window.devicePixelRatio || 1);
     // viewport: tx/ty = screen-px offset of doc top-left (in scale=1, rot=0 frame),
@@ -160,12 +147,6 @@ export class Board {
     this._cursor = null;            // {x, y, size} in screen px，可选
     this._showCursor = false;
 
-    // Dirty tracking：
-    // _dirtyDocRect = 笔触改了的 doc-px bbox（[x0,y0,x1,y1]），渲染时只 blit 这一片
-    // _dirtyFull    = 视口 / 主题 / 光标 / 图层结构改了 → 整张重画
-    this._dirtyDocRect = null;
-    this._dirtyFull = true;
-
     // 主题色：从 CSS 变量取
     this._voidColor = "#e6e2d6";
     // 棋盘背景：开后底层用半透明灰白格替代 doc.backgroundColor。
@@ -175,10 +156,6 @@ export class Board {
     //   只画可见区域格线（性能）；很细很淡；全局开关可关。
     this._pixelGridEnabled = true;
 
-    // Live overlay provider：渲染时调一次，返回 {canvas, layer, opacity, mode} 或 null。
-    // 笔触进行中由 brush.getLiveOverlay() 提供。paint 模式：layer 之上 composite buffer×opacity。
-    // erase 模式：把 layer 画进 _eraseComposite，对它 dst-out buffer×opacity，再画到屏幕。
-    this._overlayProvider = null;
     this._eraseComposite = null;
     this._eraseCompositeKey = null;
 
@@ -211,7 +188,7 @@ export class Board {
     // GL 渲染器（唯一 display 路径）：建 GL canvas 垫在 #board 之下 + GLBoard。失败 → _glBoard=null → _renderFull 显「需 WebGL2」。
     this._glBoard = null;
     this._glCanvas = null;
-    if (this._glOn) this._setupGLBoard();
+    this._setupGLBoard();
     this._configureDocMemory();
 
     // 首次：把 doc 居中适配
@@ -251,7 +228,6 @@ export class Board {
   setDoc(doc: PaintDoc) {
     this.doc = doc;
     this._configureDocMemory();
-    this._dirtyFull = true;
     this._compositeCacheDirty = true;   // 新 doc → 合成缓存作废
     this._glBoard?.markContentDirty();   // GL：新 doc → 全量重传
     this.fitToScreen();
@@ -259,7 +235,6 @@ export class Board {
 
   setShowCheckerboard(on: boolean) {
     this._showCheckerboard = !!on;
-    this._dirtyFull = true;
   }
   setPixelGridEnabled(on: boolean) {
     this._pixelGridEnabled = !!on;
@@ -269,23 +244,13 @@ export class Board {
   getPixelGridEnabled() { return this._pixelGridEnabled; }
   setThemeColors({ voidColor }: { voidColor?: string }) {
     if (voidColor) this._voidColor = voidColor;
-    this._dirtyFull = true;
     this.requestRender();
   }
 
-  // 由 BrushEngine 报告："这一帧 layer 像素被改在这片 doc-px bbox 里"
-  markDocDirty(x0: number, y0: number, x1: number, y1: number) {
-    this._compositeCacheDirty = true;   // 像素改 → 合成缓存作废（描边中走直接合成，commit 后才重建）
+  // 由 BrushEngine 报告："layer 像素被改"（脏 bbox 参数现仅语义/旁观者用；GL-only 后无 partial-blit 消费它）。
+  markDocDirty(_x0: number, _y0: number, _x1: number, _y1: number) {
+    this._compositeCacheDirty = true;   // 像素改 → 合成缓存作废（吸管 composite 缓存；commit 后重建）
     this._glBoard?.markContentDirty();   // GL：内容脏（描边中 livePreview 守门不重传，抬笔 commit 后才同步）
-    if (this._dirtyDocRect) {
-      const d = this._dirtyDocRect;
-      if (x0 < d[0]) d[0] = x0;
-      if (y0 < d[1]) d[1] = y0;
-      if (x1 > d[2]) d[2] = x1;
-      if (y1 > d[3]) d[3] = y1;
-    } else {
-      this._dirtyDocRect = [x0, y0, x1, y1];
-    }
     // 通知挂在 doc 上的旁观者（如 reference live 镜像）。每个 brush stamp 都会触发，
     // 但 reference 端 markLiveDirty 仅置 flag + 走 rAF，不真合成，开销 ≪ 1ms。
     if (!Board._dispatchingDirty) {
@@ -293,10 +258,6 @@ export class Board {
       window.dispatchEvent(new CustomEvent("wp:docpixeldirty"));
       Board._dispatchingDirty = false;
     }
-  }
-  // 视口 / 主题 / 光标 / 图层结构改了 → 整张重画
-  markFullDirty() {
-    this._dirtyFull = true;
   }
 
   // ---- 坐标 ----
@@ -331,7 +292,6 @@ export class Board {
     this.viewport.tx += dx;
     this.viewport.ty += dy;
     this._clampPan();
-    this._dirtyFull = true;
     this.requestRender();
   }
 
@@ -371,7 +331,6 @@ export class Board {
     const after = this.docToScreen(docPt.x, docPt.y);
     this.viewport.tx += anchorX - after.x;
     this.viewport.ty += anchorY - after.y;
-    this._dirtyFull = true;
     this.requestRender();
   }
 
@@ -382,7 +341,6 @@ export class Board {
     const after = this.docToScreen(docPt.x, docPt.y);
     this.viewport.tx += anchorX - after.x;
     this.viewport.ty += anchorY - after.y;
-    this._dirtyFull = true;
     this.requestRender();
   }
 
@@ -392,7 +350,6 @@ export class Board {
     this.viewport.scale = clamp(scale, this.minScale, this.maxScale);
     if (typeof rot === "number") this.viewport.rot = rot;
     this._clampPan();   // 双指 pan / 程序设位也受边界约束（fitToScreen 居中 → no-op）
-    this._dirtyFull = true;
     this.requestRender();
   }
 
@@ -412,7 +369,6 @@ export class Board {
 
   // 公共 API：layer 像素被改了（图层结构变 / 切换 / putImageData 等）
   invalidateAll() {
-    this._dirtyFull = true;
     this._compositeCacheDirty = true;   // 图层/结构/doc-transform 变 → 合成缓存作废
     this._glBoard?.markContentDirty();   // GL：图层/结构变 → 全量重传
     this.requestRender();
@@ -424,17 +380,11 @@ export class Board {
   // GL live-sync：返回描边中原地改像素、需每帧重传 GPU 的活动叶（无=null）。仅 GL 路径消费。
   setLiveSyncProvider(fn: (() => Layer | null) | null) { this._liveSyncProvider = fn; }
 
-  setOverlayProvider(fn: (() => OverlayDesc | null | undefined) | null) {
-    this._overlayProvider = fn;
-  }
   // 套索 overlay：在 layer 像素之上画一条 polygon (drawing) 或 floating canvas + marching ants
   setLassoProvider(fn: (() => LassoInfo | null | undefined) | null) {
     this._lassoProvider = fn;
   }
-  // v110: 给某 layer 在 board 渲染时套 ctx.filter（颜色调整 live preview）—— v113 撤
-  // ctx.filter on iPad Safari Canvas2D 偶发不渲染 (user：「颜色调整预览，apply 都没用」)
-  setActiveLayerFilter() { /* no-op, replaced by surrogate */ }
-  // v113: 颜色调整 live preview 走 surrogate canvas（per-pixel JS 滤镜结果塞进来）。GL 模式：该替身经 _glSurrogate
+  // 颜色调整 live preview 走 surrogate canvas（per-pixel JS 滤镜结果塞进来）。GL 模式：该替身经 _glSurrogate
   //   上传成活动层 GPU tiles 显示（非破坏）。(layerId, canvas, bx, by) 启动；(null, null) 关。
   //   invalidateAll → markContentDirty：关闭时下一帧（非 livePreview）syncAll 从真像素恢复 GPU。
   setActiveLayerSurrogate(layerId: number | null, canvas: CanvasImageSource | null, bx = 0, by = 0) {
@@ -477,45 +427,9 @@ export class Board {
     }
     return this._clipTmp;
   }
-  // Overlay 选区裁剪临时 canvas。同一帧 ≤ 1 颗 active 层有 overlay，独占用。
-  _getOverlayClipTmp(w: number, h: number) {
-    if (!this._overlayClipTmp || this._overlayClipTmp.width < w || this._overlayClipTmp.height < h) {
-      const nw = Math.max(this._overlayClipTmp?.width || 0, w);
-      const nh = Math.max(this._overlayClipTmp?.height || 0, h);
-      this._overlayClipTmp = document.createElement("canvas");
-      this._overlayClipTmp.width = nw;
-      this._overlayClipTmp.height = nh;
-    }
-    return this._overlayClipTmp;
-  }
-  // 把笔刷 live overlay 按 选区 mask + 锁α layer alpha 裁，让画中实时看到限制范围。
-  // 返回一个**新 overlay 描述**，canvas 指向裁过的临时 canvas；bbox 保持不变（局部坐标不变）。
-  // 落笔后 Selection.applyMaskPostStroke / source-atop 做最终持久化裁；这里只是 preview。
-  //   单 tmp 内多个 dst-in 顺序求交（先读原 overlay 一次，再叠 mask）——不会自绘清空。
-  _clipOverlayMasks(overlay: OverlayDesc, selection: Selection | null, lockLayer: Layer | null) {
-    const tmp = this._getOverlayClipTmp(overlay.bboxW, overlay.bboxH);
-    const tctx = tmp.getContext("2d")!;
-    tctx.setTransform(1, 0, 0, 1, 0, 0);
-    tctx.clearRect(0, 0, overlay.bboxW, overlay.bboxH);
-    tctx.drawImage(overlay.canvas, 0, 0);
-    if (selection) {
-      tctx.globalCompositeOperation = "destination-in";
-      tctx.drawImage(selection.maskCanvas, selection.bboxX - overlay.bboxX, selection.bboxY - overlay.bboxY);
-    }
-    if (lockLayer) {
-      // 锁α：dst-in layer 现有像素的 alpha。空层（无像素）→ 清空（没有可着色的地方）。
-      if (lockLayer.bboxW > 0 && lockLayer.bboxH > 0) {
-        tctx.globalCompositeOperation = "destination-in";
-        tctx.drawImage(lockLayer.canvas, lockLayer.bboxX - overlay.bboxX, lockLayer.bboxY - overlay.bboxY);
-      } else {
-        tctx.clearRect(0, 0, overlay.bboxW, overlay.bboxH);
-      }
-    }
-    tctx.globalCompositeOperation = "source-over";
-    return { ...overlay, canvas: tmp };
-  }
-  // 注：层合成（含 clip dst-in 基底、erase/混合 overlay 复合通路）已下沉到 src/layer-composite.js
-  //   （deep module A）。board 经 _renderLayers 的 opts 注入 surrogate / overlay 裁剪 / tmp 池。
+  // 注：层合成（含 clip dst-in 基底、erase/混合复合通路）在 src/layer-composite.ts（deep module A）；
+  //   board 仅经 _layerCompositeOpts 给 ensureCompositeCache（吸管）注入 surrogate / tmp 池。display 全走 GL。
+  //   （CPU 笔刷 live overlay 裁剪 _clipOverlayMasks 已删——brush live 走 GPU stamp overlay，shader 内裁选区/锁α。）
 
   // 把 ctx 设到 "doc 坐标系"：doc (0,0) 映射到 ctx 当前 origin，含 dpr +
   // viewport (tx,ty,scale,rot) 全部。setTransform 接 6 浮点 a,b,c,d,e,f：
@@ -557,7 +471,6 @@ export class Board {
     this.canvas.width = tw;
     this.canvas.height = th;
     if (this._glCanvas) { this._glCanvas.width = tw; this._glCanvas.height = th; }   // GL canvas 跟随 device px
-    this._dirtyFull = true;
     this._gridSig = "";   // 尺寸变 → 强制重算栅格 div
     this.requestRender();
   }
@@ -602,8 +515,6 @@ export class Board {
     //   **缓存失效只跟内容/结构变**（markDocDirty / invalidateAll / setDoc 置 _compositeCacheDirty），
     //   不跟视口变 → pan/zoom 不重建缓存（修卡顿根因：旧版 _dirtyFull 含视口 → 每帧重建 2048²）。
     this._renderFull();
-    this._dirtyDocRect = null;
-    this._dirtyFull = false;
     this._syncGrid();   // 每帧一次：sig 守卫，视口没变（如 stroke 中）→ 立即 no-op
     this._tickFps();
   }
@@ -682,7 +593,7 @@ export class Board {
       this.doc as unknown as GLDoc,
       this._docTransformParams(),
       W, H, this.viewport.scale, this._voidColor, docBg,
-      this._isLivePreview(), this._glOverlayInput(), this._glFloatInputs(), this._glStampOverlay(),
+      this._isLivePreview(), this._glFloatInputs(), this._glStampOverlay(),
       liveSync as unknown as GLLeaf | null, forceSync, this._glSurrogate(),
     );
     // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。
@@ -718,7 +629,7 @@ export class Board {
     };
   }
 
-  // GL board 是否启用（brush beginStroke 据此跳 CPU frozen 烤/getLiveOverlay；与 glStrokeRasterizeFn 同源）。
+  // GL board 是否启用（brush beginStroke 据此设 glMode；与 glStrokeRasterizeFn 同源）。
   isGLBoard(): boolean { return !!this._glBoard; }
 
   // commit 用：GL 模式返回「stamp 列表 → straight canvas」的 GPU 栅格 fn；否则 null（brush.endStroke 走 CPU buffer）。
@@ -750,19 +661,6 @@ export class Board {
     return out;
   }
 
-  // live 描边 overlay → GL 输入（选区/锁α 裁剪与 2D 路径一致；blendMode-overlay 暂按 source-over）。
-  _glOverlayInput(): OverlayInput | null {
-    let overlay = this._overlayProvider?.();
-    if (!overlay) return null;
-    const layer = overlay.layer;
-    if (this.doc.selection || layer.lockAlpha) {
-      overlay = this._clipOverlayMasks(overlay, this.doc.selection as unknown as Selection | null, layer.lockAlpha ? layer : null) as OverlayDesc | undefined;
-    }
-    if (!overlay) return null;
-    const o = overlay as OverlayDesc & { opacity?: number; mode?: string; blendMode?: string };
-    return { canvas: o.canvas, bboxX: o.bboxX, bboxY: o.bboxY, bboxW: o.bboxW, bboxH: o.bboxH, layerId: o.layer.id, opacity: o.opacity ?? 1, erase: o.mode === "erase", blendMode: o.blendMode || "source-over" };
-  }
-
   // doc 底色（棋盘 = 透明指示；否则 backgroundColor）。实时路径画到屏幕、缓存路径画到离屏——
   //   两处用同一底，保混合模式合成一致（见 _renderFull / ensureCompositeCache）。
   _drawDocBg(ctx: Ctx2D) {
@@ -777,34 +675,21 @@ export class Board {
   // （旧 _renderPartial / clip-window + Windows 黑缝 floor-ceil 补丁已删：v275 拥抱 full-composite，
   //   静态走 1:1 缓存、实时直接合成。partial 的两类缝隙问题（白缝/黑缝）随之消失。）
 
-  // board 注入规范合成器（deep module A）的实时特性 opts：
-  //   - source: 颜色调整 live preview 的 surrogate canvas 替换
-  //   - overlayFor: 笔刷 live overlay（含 选区 + 锁α 的 preview 裁剪，与 pen-up 的 source-atop 一致）
-  //   - clipTmp / eraseTmp: board 的复用离屏池（grow-only，避免每帧分配）
+  // 规范合成器 opts —— **现仅 ensureCompositeCache（吸管 composite 取色）用**，非 display（display 全走 GL）。
+  //   source：活动层若有调整 surrogate 则用替身。overlay/float 已去（display 浮层/描边 overlay 全在 GL 合成器；
+  //   吸管不会在描边/变换进行中触发，gizmo/笔占指针）。clipTmp/eraseTmp：clip-mask/erase 合成的复用离屏池。
   _layerCompositeOpts() {
-    const overlay = this._overlayProvider?.();
-    // 此 opts 现仅 ensureCompositeCache（吸管 composite 取色）用——非 display（display 全走 GL）。
-    //   floatFor 已去：吸管不可能在自由变换进行中触发（gizmo 占指针），故吸管 composite 不含浮层（GPU warp 单一 SSoT，
-    //   CPU renderSource 已归档）。display 的浮层在 GL 合成器 _floatPass（GPU warp）。
     return {
       source: (layer: Layer) =>
         (this._activeSurrogateLayerId === layer.id && this._activeSurrogateCanvas)
           ? this._activeSurrogateCanvas : layer.canvas,
-      overlayFor: (layer: Layer) => {
-        let lOverlay: OverlayDesc | null = overlay && overlay.layer === layer ? overlay : null;
-        if (lOverlay && (this.doc.selection || layer.lockAlpha)) {
-          lOverlay = this._clipOverlayMasks(lOverlay, this.doc.selection as unknown as Selection | null, layer.lockAlpha ? layer : null);
-        }
-        return lOverlay;
-      },
       clipTmp: (w: number, h: number) => this._getClipTmp(w, h),
       eraseTmp: (w: number, h: number) => this._getEraseComposite(w, h),
     };
   }
-  // 实时预览中？= 有笔刷 overlay / 调整 surrogate / stroke 进行中。GL 路径用它门控 syncAll/release。
-  //   （旧 2D display 的直接合成 _renderLayers 已归档；compositeLayers 仍由 ensureCompositeCache 给吸管用。）
+  // 实时预览中？= 调整 surrogate / stroke 进行中 / 活动浮层。GL 路径用它门控 syncAll/release。
   _isLivePreview() {
-    return !!(this._overlayProvider?.() || this._activeSurrogateCanvas
+    return !!(this._activeSurrogateCanvas
       || (this._strokeActiveHint && this._strokeActiveHint())
       // 活动浮层（自由变换）→ 走实时合成（浮层经 floatFor 插在源层 z；mesh 每帧变，不能用静态缓存）。
       || this._lassoProvider?.()?.floating);

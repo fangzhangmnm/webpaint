@@ -17,16 +17,6 @@ import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { PooledFBO, FBOPrec, GLContext } from "./gl-context.ts";
 
-// board 传入的 live 描边 overlay（bbox 裁剪 canvas + 落在哪个活动层）。erase = 橡皮（destination-out）。
-export interface OverlayInput {
-  canvas: CanvasImageSource;
-  bboxX: number; bboxY: number; bboxW: number; bboxH: number;
-  layerId: number;
-  opacity: number;
-  erase: boolean;
-  blendMode: string;   // 笔刷混合模式（safeMode 收敛到 12 可分离；erase 时忽略）
-}
-
 // board 传入的自由变换浮层（**GPU warp 输入**）：未 warp 的源纹理 canvas（拖动中稳定，srcW×srcH）+ 逆单应性
 //   Hinv（每帧更新）+ sampleMode + 落在哪个源层 z。源纹理按 srcCanvas 引用缓存，**只在内容变时重传**。
 // 颜色调整 live preview 替身：活动层用这张 canvas（doc (bx,by) 起 w×h）当 GPU tiles 显示（非破坏）。
@@ -58,8 +48,6 @@ export class GLDocRenderer {
   private _rasterizer: GLStampRasterizer;
   private _overlayOwnedFBO: PooledFBO | null = null;   // setStampOverlay 借的 straight FBO，合成后归还
   private _layerTiles = new Map<number, LayerTiles>();
-  // live 描边 overlay：只传**描边 bbox 尺寸**纹理（小），shader 按 bbox 映射。
-  private _ovTex: WebGLTexture | null = null;
   private _selTex: WebGLTexture | null = null;   // GPU overlay 选区蒙版（复用，每帧重传）
   private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number; lockAlpha: boolean; selMask: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null } | null = null;
   // 自由变换浮层：per-源层 id 一张复用纹理（warp 每帧变，重传）+ 当前帧描述。
@@ -108,25 +96,8 @@ export class GLDocRenderer {
     if (r) { r.index.dispose(); r.tileMap.clear(); this._layerTiles.delete(id); }
   }
 
-  // 设置/清除 live 描边 overlay（board 每帧调；null=无描边）。只传**描边 bbox 尺寸**纹理（小）。
-  setOverlay(ov: OverlayInput | null, _docW: number, _docH: number): void {
-    if (!ov || ov.bboxW <= 0 || ov.bboxH <= 0) { this._overlay = null; return; }
-    const gl = this._glctx.gl;
-    if (!this._ovTex) {
-      this._ovTex = gl.createTexture()!;
-      gl.bindTexture(gl.TEXTURE_2D, this._ovTex);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    }
-    gl.bindTexture(gl.TEXTURE_2D, this._ovTex);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 存直值（shader 自己处理）
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, ov.canvas as TexImageSource);   // bbox 尺寸直传（overlay 是 canvas）
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    // CPU canvas overlay 已由 board._clipOverlayMasks 预裁 → shader 不再裁（lockAlpha=false, selMask=null）。
-    this._overlay = { tex: this._ovTex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: ov.bboxX, oy: ov.bboxY, ow: ov.bboxW, oh: ov.bboxH, lockAlpha: false, selMask: null };
-  }
+  // 清掉上帧 live overlay（无 brush stamp overlay 的帧调；CPU canvas overlay 路径已删，brush live 走 setStampOverlay）。
+  clearOverlay(): void { this._overlay = null; }
 
   // Stage 3：用 GPU stamp 栅格器把 brush stamp 列表栅格成 overlay（替 CPU overlayCanvas）。
   //   栅格器出**预乘** FBO → presentTo 解预乘成 straight FBO（overlay shader 吃 straight，与 CPU canvas overlay 同）。
