@@ -29,7 +29,7 @@
 // ============= 插件加载（future）=============
 // window.WebPaint.registerFilter(MyFilterClass) — 暴露在 app.js 末尾
 // onFilterRegistered(fn) — 监听新 filter，菜单自动加入口
-// 下载插件接口：[docs/backlog.md] AI 远程 / 本地 WASM 段落
+// 下载插件接口：[docs/20260528-backlog.md] AI 远程 / 本地 WASM 段落
 
 // registry 原语共享自 registry.js（candidate 2：filter 与 exporter 同一道接缝）。
 import { makeRegistry } from "./registry.ts";

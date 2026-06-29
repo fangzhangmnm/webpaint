@@ -1,6 +1,6 @@
 // Surfaces —— z-order 深模块。回答一个问题：「这块 UI 该浮在谁上面」。
 //
-// 设计（v232，docs/surfaces-z-order.md）：
+// 设计（v232，docs/20260611-surfaces-z-order.md）：
 // - 全 app 的 z 是一张静态 band 表，SSoT 在 styles.css :root 的 --z-* 变量：
 //     chrome < toolbar < window < sheet < overlay < menu < toast < modal < gate < busy < popout < dev < error
 //   band 间关系编译期定死：「菜单/popup 永远在浮窗上面」「图库里的菜单永远在图库上面」是

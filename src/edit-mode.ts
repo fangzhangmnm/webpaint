@@ -1,6 +1,6 @@
 // EditMode —— 独占编辑状态机，"我现在在什么编辑模式"的 SSoT。**单轴**。
 //
-// 设计定稿见 docs/tool-mode-state-machine.md，领域词见 CONTEXT.md (EditMode / Transient)。给下个 AI：
+// 设计定稿见 docs/20260531-tool-mode-state-machine.md，领域词见 CONTEXT.md (EditMode / Transient)。给下个 AI：
 //
 // - 命名：叫 EditMode 不叫 Mode，因为 "mode" 在本仓重载严重（L.mode 混合模式 / liquify.mode /
 //   body.dataset.mode 图库 / blend mode）。EditMode = 当前处于哪种编辑模式。

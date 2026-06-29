@@ -1,4 +1,4 @@
-// doc 图层树 → GL 合成器输入的桥（docs/perf-webgl-memory-clip.md §5.5 接 board）。
+// doc 图层树 → GL 合成器输入的桥（docs/20260614-perf-webgl-memory-clip.md §5.5 接 board）。
 // 两件事：
 //   ① uploadLayerToTiles：Layer 的**稀疏 tile 直接上传** GPU（无 Canvas2D 中转 = canvas 不在 GPU 路径上，
 //      切片④）。空 / 全透明 tile 已被 LayerPixels 剪枝 → forEachTile 只吐有内容的 tile。

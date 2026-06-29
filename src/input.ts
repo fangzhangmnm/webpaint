@@ -148,7 +148,7 @@ const DOUBLETAP_MAX_GAP = 80;
 //   SMOOTH.stabMaxPx     stabilization=1 时死区半径
 // Undo 通过 history.UndoStack（v44 起 command pattern + 注册 handler）。
 // 这里只注册 "stroke" type 的 handler，layer 操作的 handler 在 app.js 注册。
-// 详见 docs/undo-architecture.md。
+// 详见 docs/20260527-undo-architecture.md。
 
 // 多指 tap = undo/redo（Procreate 方言）
 const GESTURE_TAP_MAX_MS = 250;
@@ -158,7 +158,7 @@ const GESTURE_TAP_MAX_MOVE_SQ = 256;     // 16 px²
 const LONG_PRESS_MS = 450;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
-// v249: 两参 → 引擎平滑参数（时间常数指数追踪 + 死区，详 docs/brush-procreate-smoothing.md）。
+// v249: 两参 → 引擎平滑参数（时间常数指数追踪 + 死区，详 docs/20260613-brush-procreate-smoothing.md）。
 //   tau = streamline × tauMaxMs（时间，scale 无关）；deadzone = stabilization × stabMaxPx ÷scale（doc px）。
 function _resolveSmooth(settings: BrushSettings, scale: number) {
   const sc = scale || 1;
@@ -564,7 +564,7 @@ export class InputController {
       // 画 / 液化 / filter brush 的时候不画 cursor（板子 dirty-rect 用，避免 cursor 撑全屏 dirty）
       this.board.setCursor(null);
       // 锚 smoothing / raw / 压感 状态到 down 点。
-      // 防 dx 坑（timeStamp 单调），见 docs/ipad-coalesced-events.md
+      // 防 dx 坑（timeStamp 单调），见 docs/20260527-ipad-coalesced-events.md
       rec.lastRawX = x;
       rec.lastRawY = y;
       rec.lastP = null;
@@ -670,7 +670,7 @@ export class InputController {
         // 的 coalesced 列表会把上一批的样本一起带回来 (eg 一批末尾 t=21，下
         // 一批开头又给 t=4..25)。这些"反向小段"被 brush 当真实位移累计进
         // path 长度 → 几十 doc-px 周期的疏密波（鼠标无此问题）。详见
-        // docs/ipad-coalesced-events.md。只接受 timeStamp 严格递增的 event。
+        // docs/20260527-ipad-coalesced-events.md。只接受 timeStamp 严格递增的 event。
         if (ev.timeStamp <= rec.lastEventTs!) continue;
         rec.lastEventTs = ev.timeStamp;
         // raw 几乎没动 → 跳整个 event
@@ -816,7 +816,7 @@ export class InputController {
   // entry shape：{ type: "stroke", layerId, before, after, beforeBlob, afterBlob }
   // - before/after = Layer.snapshot()（bboxX/Y/W/H + imageData）
   // - blob 字段 push 后异步 toBlob 填，填好后释放 imageData
-  // 详见 docs/undo-architecture.md。
+  // 详见 docs/20260527-undo-architecture.md。
   // 即时笔位置平滑在 stroke-input-smooth.js（inputSmooth，死区+EMA，pure·可测）；主笔刷走引擎 stroke-smoother.js。
 
   _beginStroke(e: PointerEvent, rec: PointerRec, mode: string) {

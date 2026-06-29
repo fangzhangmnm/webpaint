@@ -1,5 +1,5 @@
 // Store —— 持久化 + 同步的深模块（施工中）。把原本散在 app.js 的同步**编排**收拢到这里，
-// 对 UI 只暴露 flow 接口。红线在库内 enforce，不在 UI。见 docs/sync-store-extraction.md。
+// 对 UI 只暴露 flow 接口。红线在库内 enforce，不在 UI。见 docs/20260604-sync-store-extraction.md。
 //
 // Store 自己管两件 adapter：cloud（CloudProvider，经 cloud.js）+ local（IDB，store.local）。
 // 仍由调用方提供的回调只剩真·doc/UI/env：
@@ -952,7 +952,7 @@ export function createStore({ cloud, local, kv, maxAttempts = 4, backoffMs = 200
 
   // ---- 读侧原语（格式盲；peek 字节的解释归 app）----
 
-  // 尾部字节（file-envelope.md salvage）。自动路由：本地有 → blob 尾切片（IDB Blob.slice 惰性）；
+  // 尾部字节（20260607-file-envelope.md salvage）。自动路由：本地有 → blob 尾切片（IDB Blob.slice 惰性）；
   //   没有且 opts.cloud → 云端 byte-range（peek 预览纯云端文件用）。
   async function getTailBytes(name: string, n: number, { cloud: tryCloud = false } = {}): Promise<Blob | null> {
     if (local) {

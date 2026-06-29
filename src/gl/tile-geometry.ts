@@ -1,7 +1,7 @@
 // Tile 几何（纯函数，零依赖、零副作用、node 全可测）。
 //
 // WebGL2+tiling 重写的最底座：把「doc 像素坐标」↔「256² tile 网格坐标」之间的换算收成一处。
-// 见 docs/perf-webgl-memory-clip.md §3（TileStore 是突破层数上限的核心深模块；本文件是它的几何子层）。
+// 见 docs/20260614-perf-webgl-memory-clip.md §3（TileStore 是突破层数上限的核心深模块；本文件是它的几何子层）。
 //
 // 约定（与 doc 坐标系一致）：
 //   - doc 空间：(0,0)=左上，x 右、y 下，尺寸 docW×docH。

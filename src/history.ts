@@ -1,6 +1,6 @@
 // Undo / Redo 通用栈。Command pattern + 注册式 handler（"α 形态"）。
 //
-// 设计原则在 docs/undo-architecture.md。给下个 AI / AtlasMaker 兄弟看：
+// 设计原则在 docs/20260527-undo-architecture.md。给下个 AI / AtlasMaker 兄弟看：
 //
 // - **不抄 Blender memfile**（整状态 snapshot 慢 + 内存大）
 // - 取 Procreate / Photoshop / Krita pattern：每个 op 只存自己变了的最小数据

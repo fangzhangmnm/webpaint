@@ -1,6 +1,6 @@
 // IndexedDB 持久化 —— **一个 session = 一个 atomic 包**。
 //
-// 抄 AtlasMaker v0.7 的设计（docs/persistence-and-encryption-shareback.md
+// 抄 AtlasMaker v0.7 的设计（docs/20260527-persistence-and-encryption-shareback.md
 // TL;DR 第 1 条）：**不要**拆 layer-blobs 多 store 多 tx。refresh 在中间
 // 截断会丢半边。
 //

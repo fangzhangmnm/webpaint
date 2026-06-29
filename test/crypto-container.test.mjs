@@ -3,7 +3,7 @@
 // node 跑真 zip.js（外壳）+ **真 7z-wasm**（payload，vendored）+ 真 WebCrypto（peek）。
 // 互操作性：payload 是真 .7z —— 一个全新 7z-wasm 实例（= 模拟「另一台机器的 7-Zip」）
 // 用密码解开 <GUID> → data.bin 逐位还原，证明 7-Zip 输密码能开。
-// 真桌面 7-Zip 实测仍留给 PC 真机批（见 docs/encryption.md 待验清单）。
+// 真桌面 7-Zip 实测仍留给 PC 真机批（见 docs/20260611-encryption.md 待验清单）。
 
 import { describe, it, assert, eq } from "./runner.mjs";
 import { ensureZipLoaded, ensure7zLoaded } from "./zip-node.mjs";

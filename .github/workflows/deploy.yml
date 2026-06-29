@@ -6,7 +6,7 @@
 # 第一次 setup：手动建 prod 分支 → push（否则 checkout prod 会 fail）：
 #   git checkout -b prod && git push -u origin prod
 #
-# 论证 / sibling 抄法：docs/dev-prod-split.md
+# 论证 / sibling 抄法：docs/20260529-dev-prod-split.md
 name: Deploy Pages
 
 on:

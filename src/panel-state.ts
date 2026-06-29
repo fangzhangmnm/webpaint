@@ -1,4 +1,4 @@
-// 面板互斥管理。详 conversation v79→v80 + docs/sync-design.md 类似的状态模型。
+// 面板互斥管理。详 conversation v79→v80 + docs/20260528-sync-design.md 类似的状态模型。
 //
 // 三层 panel：
 //   1. 常驻（颜色、参考）—— 不进这管，自己 toggle，不被关

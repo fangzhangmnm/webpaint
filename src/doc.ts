@@ -345,7 +345,7 @@ export class PaintDoc {
     this.activeId = this.layers[0].id;   // active = 节点 id（可叶可组）。activeIndex 是扁平叶序兼容垫片。
     // 背景色：手感期固定白纸。后期开 doc.background 概念时再补。
     this.backgroundColor = "#ffffff";
-    // 选区（一等公民）。null = 没选区 = 所有像素都可作用。详见 docs/lasso-and-selection.md。
+    // 选区（一等公民）。null = 没选区 = 所有像素都可作用。详见 docs/20260528-lasso-and-selection.md。
     //   { bboxX, bboxY, bboxW, bboxH, maskCanvas } —— maskCanvas alpha = mask（255 内 / 0 外）
     this.selection = null;
     // 参考层：unique。null = 用 active 层做魔棒 / 油漆桶的源。否则用这一层

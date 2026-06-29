@@ -274,7 +274,7 @@ export class LassoEngine {
   // bbox 矩形。修：迭代**整 doc 尺寸**，layer.bbox 外当 (0,0,0,0) 透明像素。
   //
   // 历史「容隙」功能 v71→v79 撤掉：barrier dilate N px 会盖住 user 的 tap 点
-  // 让小区域整片不可点。详 docs/lessons-magic-wand-gap-closing.md。
+  // 让小区域整片不可点。详 docs/20260528-lessons-magic-wand-gap-closing.md。
   //
   // 内存（2048² doc）：layerData 16MB + visited buffer 4MB + maskCanvas
   // 仅 bbox 大小。barrier 不再单独 alloc（diff 算在 flood fill 里 inline）。

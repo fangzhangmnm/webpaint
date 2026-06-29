@@ -1,5 +1,5 @@
 // 平滑管线的全局可调参数（SSoT）。dev 面板用 textbox/开关 改这里，localStorage 持久化。
-// 详 docs/brush-procreate-smoothing.md。
+// 详 docs/20260613-brush-procreate-smoothing.md。
 //
 // 为什么集中在这：调参从「改代码 commit/push」搬到「设备上改值」。dev 面板大范围 textbox →
 // 自测每个参数是否真起作用（×100 没变化 = 死参数），杀「饱和假阴性」式煤气灯。

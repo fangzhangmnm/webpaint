@@ -1,6 +1,6 @@
 // 液化引擎 (v48 / path A: accumulated displacement field)。
 //
-// 核心思想（论证见 docs/liquify-blur.md）：
+// 核心思想（论证见 docs/20260528-liquify-blur.md）：
 //   不在 layer 像素上 in-place 迭代 bilinear（v46 / v47 这么干会糊）。
 //   改成：
 //     1. beginStroke 拍一张 startSnap = layer 当前像素（不变，只读）
@@ -91,7 +91,7 @@ export class LiquifyEngine {
   //   "import" — 源不夹：位移源落选区外仍照采 → 真把外部内容拉进来
   //   "clip"   — 设墙：源落选区外 → 保留 dest 原像素（无位移），什么都不进
   //   "edge"   — (默认) 沿 dest→source 射线 march 到刚离开选区的边界点采样
-  //              → 边界像素沿拉拽方向被无限拉长，无外部内容、无中轴接缝（见 docs/liquify-blur.md）
+  //              → 边界像素沿拉拽方向被无限拉长，无外部内容、无中轴接缝（见 docs/20260528-liquify-blur.md）
   beginStroke(layer: Layer, settings: LiquifySettings, x: number, y: number, selection: Selection | null) {
     const lbW = Math.max(1, layer.bboxW);
     const lbH = Math.max(1, layer.bboxH);

@@ -131,7 +131,7 @@ bindSizeKeyboard({ board, leftDial });
 
 
 // Undo / redo 共享栈（command pattern + 注册 handler，详见
-// docs/undo-architecture.md）。input.js 注册 "stroke" handler；layer
+// docs/20260527-undo-architecture.md）。input.js 注册 "stroke" handler；layer
 // 操作的 5 个 handler 在下方 boot 段集中注册（四条纪律 #1）。
 const history = new UndoStack({ max: 50 });
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。

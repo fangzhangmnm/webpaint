@@ -1,7 +1,7 @@
 /* WebPaint — 和兄弟项目同款米色 / 夜黑 + 全屏画布 + 浮动顶栏 */
 
 :root {
-  /* ---- Surface 层级表（z-order SSoT，v232；详 docs/surfaces-z-order.md）----
+  /* ---- Surface 层级表（z-order SSoT，v232；详 docs/20260611-surfaces-z-order.md）----
      全仓唯一允许出现 z-index 数字的地方。band 间不变量（结构性，不靠手填数字）：
        chrome < toolbar < window < sheet < overlay < menu < toast < modal < gate < busy < popout < dev < error
      「菜单/popup 永远在浮窗和全屏 overlay 上面」由 band 序保证。
@@ -1745,7 +1745,7 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   background: var(--ink); color: var(--bg); border-color: var(--ink);
 }
 
-/* Sync gate ——— 锁屏 + 决策 sheet（见 docs/sync-design.md） */
+/* Sync gate ——— 锁屏 + 决策 sheet（见 docs/20260528-sync-design.md） */
 .sync-gate-backdrop { z-index: var(--z-gate); background: rgba(0, 0, 0, 0.45); }
 .sync-gate-sheet { z-index: calc(var(--z-gate) + 1); max-width: 320px; }
 .sync-gate-spinner {

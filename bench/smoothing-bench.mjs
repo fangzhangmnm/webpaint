@@ -1,5 +1,5 @@
 // 平滑台架 — 验时间常数指数追踪 out += (pen−out)·(1−exp(−dt/tau)) 的几条主张。
-// 详 docs/brush-procreate-smoothing.md。跑：node bench/smoothing-bench.mjs
+// 详 docs/20260613-brush-procreate-smoothing.md。跑：node bench/smoothing-bench.mjs
 //
 //   ① 固定时间滞后 + 采样率无关 —— 滞后 ≈ v·tau，dt 不同（240Hz vs 60Hz）滞后接近。
 //   ② 顿涌现 —— 滞后 = 速度×tau：慢→贴笔、快→重平滑。零检测。

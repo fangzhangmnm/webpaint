@@ -1,4 +1,4 @@
-// TileStore —— 稀疏分块图层存储的簿记层（内存杠杆深模块；docs/perf-webgl-memory-clip.md §3 模块 2）。
+// TileStore —— 稀疏分块图层存储的簿记层（内存杠杆深模块；docs/20260614-perf-webgl-memory-clip.md §3 模块 2）。
 //
 // 职责：把「图层像素」拆成 256² tile，只为**有画的** tile 占一个 GPU 池 slice（空 tile=0 内存）。
 //   这是突破 11 层上限的核心——实占 = 已分配 tile 数 × 256²×4，而非 层数 × 满幅。

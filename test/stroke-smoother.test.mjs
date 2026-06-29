@@ -1,5 +1,5 @@
 // 主笔刷平滑 StrokeSmoother：时间常数指数追踪 out += (pen−out)·(1−exp(−dt/tau))。
-// 详 docs/brush-procreate-smoothing.md。验：固定时间滞后 / 帧率(采样率)无关 / 死区 / 收尾钉终点 / 因果。
+// 详 docs/20260613-brush-procreate-smoothing.md。验：固定时间滞后 / 帧率(采样率)无关 / 死区 / 收尾钉终点 / 因果。
 import { describe, it, assert } from "./runner.mjs";
 import { StrokeSmoother } from "../src/stroke-smoother.ts";
 

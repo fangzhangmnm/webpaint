@@ -1,4 +1,5 @@
 # contribution 插件的边界：不建 Op / Tool 插件注册表
+> created 20260608
 
 **Status:** accepted（2026-06-08，candidate 2 grilling）
 

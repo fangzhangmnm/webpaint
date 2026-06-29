@@ -29,7 +29,7 @@
     "forceConsistentCasingInFileNames": true
   },
   // include = 受 tsc 检查的显式准入名单（不是「全 src/」）。store 深模块 + 逐批迁入的叶子。
-  // 加新文件进来 = 把它纳入硬门：从此它的类型契约被持续验证（见 docs/ts-migration.md）。
+  // 加新文件进来 = 把它纳入硬门：从此它的类型契约被持续验证（见 docs/20260619-ts-migration.md）。
   // batch 1（v294，2026-06-19）：11 个纯·已测·低耦合叶子（无 DOM 副作用 / 无领域写）。
   // batch 2（v295，2026-06-19）：AppContext seam（组合根装配契约）+ 首批 initX 消费方入门。
   // batch 3（v296，2026-06-19）：app 层基础叶子（surfaces/signals/sheets/anchored-popup/session-name）

@@ -1,4 +1,4 @@
-// GLCompositor —— WebGL2 图层合成器（docs/perf-webgl-memory-clip.md §3 模块 4）。
+// GLCompositor —— WebGL2 图层合成器（docs/20260614-perf-webgl-memory-clip.md §3 模块 4）。
 //
 // 算法：ping-pong 两张预乘累积器，**一层一 pass**——每 pass 全屏，shader 按 doc 坐标查 tile-index
 //   采源 + 累积器（预乘）→ W3C blend + source-over → 写另一张、交换。clip = 源α×基底α（无 2D dst-in）。
@@ -96,7 +96,7 @@ vec4 warpSample(sampler2D tex, vec2 size, mat3 hinv, int mode, vec2 docXY){
   return sampleSrc(tex, size, mode, u * size.x, v * size.y);
 }`;
 
-// live 浮层 pass（合成到累积器）。clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather，docs/transform-clip-gpu-warp.md）。
+// live 浮层 pass（合成到累积器）。clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather，docs/20260628-transform-clip-gpu-warp.md）。
 const WARP_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -244,7 +244,7 @@ export class GLCompositor {
           this._pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
         }
         // 自由变换浮层：源层 z 之上 source-over α=1（独立 pass）。clip 浮层 + 基底也是浮层（组变换）→ 裁到基底
-        //   浮层 warp 后 alpha（base.float）；基底静止/非叶则不裁（见 docs/transform-clip-gpu-warp.md 边界）。
+        //   浮层 warp 后 alpha（base.float）；基底静止/非叶则不裁（见 docs/20260628-transform-clip-gpu-warp.md 边界）。
         if (node.float) this._floatPass(node.float, acc, docW, docH, (node.clip && base && base.kind === "leaf") ? base.float ?? null : null);
       } else if (clipNoBase) {
         continue;

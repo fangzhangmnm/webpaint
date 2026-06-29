@@ -1,4 +1,4 @@
-// 笔刷引擎 v98（Krita-aligned + 双 path）。详 docs/brush-architecture.md。
+// 笔刷引擎 v98（Krita-aligned + 双 path）。详 docs/20260529-brush-architecture.md。
 //
 // **核心模型**：
 //   per stamp at pressure p：
@@ -31,7 +31,7 @@
 //     board 的 GLStampRasterizer（falloff/buildup/wash 累积在 GPU）。CPU frozen/tail buffer + overlay 合成
 //     已归档（→ ARCHIVE/old-brush-cpu-raster.ts；frozen/tail 双 buffer = #4 GPU 缓存 spec）。
 //   pixelMode —— immediate（_extendImmediate/_stampOne/_pixelStampDirect 直接 editRegion 进 layer），仍 CPU。
-//   平滑核 v249 = 时间常数指数追踪（详 docs/brush-procreate-smoothing.md）：smoother 给平滑中心线 C；
+//   平滑核 v249 = 时间常数指数追踪（详 docs/20260613-brush-procreate-smoothing.md）：smoother 给平滑中心线 C；
 //     抬笔 finish() 收尾把直线桥换成动量弧尾、钉终点。
 
 import { StrokeSmoother } from "./stroke-smoother.ts";
@@ -112,7 +112,7 @@ export const DEFAULT_SETTINGS = {
   blendMode: "source-over",
   // pixel mode：
   pixelMode: false,
-  // 位置平滑（时间常数指数追踪，详 docs/brush-procreate-smoothing.md）：
+  // 位置平滑（时间常数指数追踪，详 docs/20260613-brush-procreate-smoothing.md）：
   streamline: 0.15,         // → 时间常数 tau：滞后恒 tau 时长（跟笔/可控/顿涌现）。0.5=满劲 → 默认 0.15=轻
   stabilization: 0,         // 死区拉绳：硬空间阈值去抖（与 tau 频域去抖正交）
   // taper：笔触两端渐细，**纯 stylistic·per-preset**（brushes.js makeBrush 的 taperIn/out → preset.taper）。默认 0=无。
@@ -156,7 +156,7 @@ export class BrushEngine {
     return Math.max(0.5, effSize * s.spacing);
   }
 
-  // smooth: { tau(ms), deadzone(doc px) }。t = 起手事件时间戳(ms)。详 docs/brush-procreate-smoothing.md。
+  // smooth: { tau(ms), deadzone(doc px) }。t = 起手事件时间戳(ms)。详 docs/20260613-brush-procreate-smoothing.md。
   //   tau=0 & deadzone=0 → 不平滑（直通 raw）。
   beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, pressure: number, mode: string = "brush", smooth: { tau?: number; deadzone?: number; tailBow?: number } = {}, t: number | null = null, glMode: boolean = false) {
     const isBuildup = (settings.compositeMode || "wash") === "buildup";
@@ -175,7 +175,7 @@ export class BrushEngine {
       dirty: null,
       isBuildup,
       _taperTotal: null,                        // endStroke 时填总笔长，给出端 taper 用（live 为 null=不 taper）
-      // --- v243 Procreate EMA + 死区 + 贴笔尖（详 docs/brush-procreate-smoothing.md）---
+      // --- v243 Procreate EMA + 死区 + 贴笔尖（详 docs/20260613-brush-procreate-smoothing.md）---
       sm: buffered ? new StrokeSmoother(smooth) : null,
       // frozen 撒点游标：GL 模式 collectStamps 用 fresh walk，此游标只供 endStroke taper dry-walk 从 ci=0 走全程。
       frozenWalk: { ci: 0, started: false, accumDist: 0, lastP: pLPF0, strokeDist: 0 },

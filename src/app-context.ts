@@ -5,7 +5,7 @@
 // 抄了 20 遍。这里把那份契约收成**一处** interface：app.js 的 ctx 字面量（39 键）= 此接口的实现，
 // 每个 initX(ctx: AppContext) 签它 → 一处真理、处处复用、改 ctx 形状编译器即点出受影响模块。
 //
-// 类型策略（见 docs/ts-migration.md「seam 优先 + 诚实描述现状」）：
+// 类型策略（见 docs/20260619-ts-migration.md「seam 优先 + 诚实描述现状」）：
 //   · 引擎单例（doc/board/input/editMode/history/pixelHistory）= `import type` 自未类型化的 .js class
 //     → 拿 tsc 从 JS 推断出的真实实例形状，**零额外迁移**、不连带把别的 .ts 拖进门（.js 走 checkJs:false）。
 //   · currentBrush 的 ResolvedBrush 来自已入门的 resolved-brush.ts。

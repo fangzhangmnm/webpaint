@@ -1,4 +1,4 @@
-// GLDocRenderer —— doc 图层树 → 屏幕的编排（docs/perf-webgl-memory-clip.md §5.5）。
+// GLDocRenderer —— doc 图层树 → 屏幕的编排（docs/20260614-perf-webgl-memory-clip.md §5.5）。
 // 持有：tile 池(GLTileBackend+TilePool)、合成器、每层 GL 资源(index+tileMap)、复用 scratch。
 // 这是 board 接线时持有的顶层对象。脏跟踪（只重传变更层）是优化，先 correctness-first 全重传。
 //

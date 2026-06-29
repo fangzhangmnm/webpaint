@@ -1,4 +1,5 @@
 # 图层组的 blend / clip 语义：对齐 PS/Procreate 的隔离模型，且刻意超出两处
+> created 20260614
 
 **Status:** accepted（2026-06-14，v277 落地后 grounded 复核；**v278 加 pass-through + 改用 ORA 标准 isolation**）
 
@@ -56,4 +57,4 @@ v277 是**从 mode/opacity/clip 推导**隔离，没有独立的「穿透 vs 正
 - 模型：`src/doc.js`（`LayerGroup.mode` 默认 `"pass-through"`；`addGroup()` 空组）。
 - 序列化：`src/ora-stack-xml.js`（组写/读标准 `isolation`；穿透/正常/混合模式三态往返，node 测覆盖）。
 - 面板：`src/layers-panel.ts`（组模式下拉 = `GROUP_MODE_LABEL` 穿透置顶）。
-- 状态文档：`docs/layer-groups.md`。
+- 状态文档：`docs/20260614-layer-groups.md`。

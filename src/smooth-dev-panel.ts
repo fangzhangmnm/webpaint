@@ -1,7 +1,7 @@
 // 职责（单一）：v158 平滑调参 dev 面板——读/写 SMOOTH 配置的 dev 调参浮层 + 菜单入口。
 //
 // 所有平滑魔数：连续用 textbox（可打任意数量级值 → 自测是否真起作用/跳出饱和区，杀煤气灯）、二元用 checkbox。
-// live 改 SMOOTH + localStorage 持久化；下一笔生效。详 docs/stroke-smoother-time-gate.md。
+// live 改 SMOOTH + localStorage 持久化；下一笔生效。详 docs/20260604-stroke-smoother-time-gate.md。
 //
 // 协作件经 ctx 绑入：setStatus（状态行）。SMOOTH 配置直接 import；els / setMenuOpen 直接 import。
 

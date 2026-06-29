@@ -1,5 +1,5 @@
 // 即时路径位置平滑（像素笔）——Procreate 二参 per-event 版。
-// 详 docs/brush-procreate-smoothing.md。
+// 详 docs/20260613-brush-procreate-smoothing.md。
 //
 // 主笔刷（buffered brush/erase）走引擎侧 stroke-smoother.js（重采样 EMA + 贴笔尖 catch-up）。
 // 这里只服务**即时笔**：它们直接写 layer、无法重画 tail，所以不做 lookahead/catch-up，

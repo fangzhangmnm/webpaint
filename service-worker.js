@@ -7,7 +7,7 @@
 //   - fetch：cache-first + 后台 revalidate；ETag 变了通知 page。
 //
 // 跟 sibling family 抄：基本可以 1:1 拷，改 STATIC_PRECACHE 列表就行。
-// 论证见 docs/why-content-hash-bundle.md。
+// 论证见 docs/20260529-why-content-hash-bundle.md。
 
 const STATIC_PRECACHE = [
   "./",

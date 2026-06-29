@@ -1,6 +1,6 @@
 // Selection —— 选区，doc 的一等公民。**不可变值对象 + mask 操作**。
 //
-// 设计见 CONTEXT.md (Selection) / docs/lasso-and-selection.md。给下个 AI：
+// 设计见 CONTEXT.md (Selection) / docs/20260528-lasso-and-selection.md。给下个 AI：
 //
 // - 之前选区是裸结构体 { bboxX,bboxY,bboxW,bboxH, maskCanvas }，6 个 mask 操作以自由函数
 //   散在 lasso.js（combineSelections / invert / extractMaskOutline / chainMaskOutline /

@@ -1,4 +1,4 @@
-// 位置平滑 — 时间制二阶临界阻尼 SmoothDamp（时间缓冲）+ 动量弧 tail。详 docs/brush-procreate-smoothing.md。
+// 位置平滑 — 时间制二阶临界阻尼 SmoothDamp（时间缓冲）+ 动量弧 tail。详 docs/20260613-brush-procreate-smoothing.md。
 //
 // 两层：
 //   【时间缓冲 committed】二阶临界阻尼 SmoothDamp，**smoothTime = tau（时间制，用真实 dt）**：

@@ -1,4 +1,4 @@
-// GLBoard —— board.ts 的 GL 渲染委托（v351 起唯一 display 路径；docs/perf-webgl-memory-clip.md §5.5）。
+// GLBoard —— board.ts 的 GL 渲染委托（v351 起唯一 display 路径；docs/20260614-perf-webgl-memory-clip.md §5.5）。
 // board canvas(alpha:true) 在前只画 lasso overlay/边框，本 GL canvas 垫在后面渲 doc。
 // 脏策略：内容变(markContentDirty)且非 live-preview 时才 syncAll；描边中靠 GPU stamp overlay/live-sync seam，
 //   不重传；pan/zoom 不重传（视口变不碰内容）。per-layer 脏 + bbox-sub = 后续优化（见 perf-optimization-backlog）。

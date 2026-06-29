@@ -2,7 +2,7 @@
 // 用途：sync-store 抽取的测试替身（spec §4.2 / §9 phase 2）。Store 的 flow 测试都跑它。
 // 不碰网络、不碰 MSAL，秒级 CI。
 //
-// 契约见 docs/sync-store-extraction.md。错误约定：throw Error 且带 .status（404/409/412），
+// 契约见 docs/20260604-sync-store-extraction.md。错误约定：throw Error 且带 .status（404/409/412），
 // 与 graph.js 的 err.status 完全一致 → cloud.js 里 e.status===412/409 的判断原样可用。
 //
 // 模拟语义（与真 OneDrive 对齐的关键几条）：

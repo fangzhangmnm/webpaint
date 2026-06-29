@@ -159,7 +159,7 @@ export function initSettingsMenu(ctx: AppContext) {
     setStatus(`主题 · ${THEME_LABEL[next]}`);
   });
   // v100：删「检测更新」menu (实测在 iPad PWA 上不可靠，user：「检测更新功能没用」)。
-  // 强制更新一律走「强制清缓存重启」（menuForcePwaReset）— 详 docs/pwa-update-detection.md。
+  // 强制更新一律走「强制清缓存重启」（menuForcePwaReset）— 详 docs/20260526-pwa-update-detection.md。
   // 老 element 在 HTML 里 hidden，handler 留空保 element exists 防 null deref。
   if (els.menuCheckUpdate) els.menuCheckUpdate.addEventListener("click", () => setMenuOpen(false));
   // v124b: menuClear 撤了（user：「清空内容跟删除重复，删掉」）。stub 留兜底

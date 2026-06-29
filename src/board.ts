@@ -160,7 +160,7 @@ export class Board {
     this._eraseComposite = null;
     this._eraseCompositeKey = null;
 
-    // v163 瞬态 UI 分层（省 hot-path + 显存，详 docs/overlay-grid-cursor-layers.md）：
+    // v163 瞬态 UI 分层（省 hot-path + 显存，详 docs/20260604-overlay-grid-cursor-layers.md）：
     //   像素栅格 = 独立 canvas，**仅视口变时重画**（_syncGrid sig 守卫）→ 画笔行进时不碰它，零逐帧成本；
     //     device-px 对齐画线（CSS gradient 在浮点 zoom 下 sub-pixel 糊：少线/粗细不一，业界都用 canvas）。
     //     backing 按需分配，隐藏/缩小时释放（width=0）→ 只在高 zoom 看栅格时占一张屏的显存。

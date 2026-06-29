@@ -4,7 +4,7 @@
 //
 // 正确性策略：Canvas2D 的原生 blend = 同一份 W3C 规范 → GL 输出必须逐像素匹配 Canvas2D。
 //   blend 公式生成（本文件）node 可测（断言每模式含对的式子）；像素匹配由 smoke harness 的
-//   同引擎 2D-vs-GL 自 diff 验（docs/perf-webgl-memory-clip.md §5 Stage 2）。
+//   同引擎 2D-vs-GL 自 diff 验（docs/20260614-perf-webgl-memory-clip.md §5 Stage 2）。
 //
 // 约定：bfn(Cb,Cs) 在**直值**(unpremultiplied, [0,1]) 上算，逐通道。源/背景的预乘与合成在主 shader。
 

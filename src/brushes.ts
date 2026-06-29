@@ -1,4 +1,4 @@
-// Brush rack 数据模型 + 默认笔架。详 docs/brush-architecture.md。
+// Brush rack 数据模型 + 默认笔架。详 docs/20260529-brush-architecture.md。
 //
 // **v99 schema (Krita-aligned)**：
 // - **三个压感 coeff** (sizeCoeff / opaCoeff / flowCoeff)：−1..1，0=不响应，
@@ -77,7 +77,7 @@ interface BrushSizeLegacy {
   pressureCurve?: number;
 }
 
-export const RACK_VERSION = 2;     // v2: brush 加 uat；rack 加 trash[]/resetAt；删 activeByTool（活动笔归 per-doc toolStates）。Folder shape，见 docs/folderflow-build-plan.md
+export const RACK_VERSION = 2;     // v2: brush 加 uat；rack 加 trash[]/resetAt；删 activeByTool（活动笔归 per-doc toolStates）。Folder shape，见 docs/20260606-folderflow-build-plan.md
 export const DEFAULT_FOLDER = "我的常用";
 // 迁移 / 出厂基准 uat：> resetAt(0) 故不被水位误丢；任何真实编辑(Date.now())必胜过它。
 export const PRE_HISTORY_UAT = 1;
@@ -105,7 +105,7 @@ function makeBrush({
   spacingValue = 0.06,
   pixelMode = false,
   taperIn = 0, taperOut = 0,
-  // 位置平滑（per-brush，Procreate，详 docs/brush-procreate-smoothing.md）
+  // 位置平滑（per-brush，Procreate，详 docs/20260613-brush-procreate-smoothing.md）
   streamline = 0.15, stabilization = 0,
   // v99r2：defaultOpa 留着，默认 1.0；user 编辑笔可以改成 0.6 当 sketch 默认
   defaultOpa = 1.0,
@@ -309,7 +309,7 @@ export function brushesByFolder(rack: BrushRackData, folder: string): Brush[] {
   return rack.brushes.filter((b) => b.folder === folder);
 }
 // 某工具的「代表笔」——给 defaultToolStateFor 取初值。
-// activeByTool 已废（v2：活动笔归 per-doc toolStates，见 docs/folderflow-build-plan.md §6）；
+// activeByTool 已废（v2：活动笔归 per-doc toolStates，见 docs/20260606-folderflow-build-plan.md §6）；
 // 这里就取该工具第一支笔当默认。
 export function defaultBrushForTool(rack: BrushRackData, tool: string): Brush | null {
   return brushesByTool(rack, tool)[0] || null;

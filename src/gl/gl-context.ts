@@ -1,4 +1,4 @@
-// GLContext —— 单持久 WebGL2 上下文的封装（docs/perf-webgl-memory-clip.md §3 模块 1）。
+// GLContext —— 单持久 WebGL2 上下文的封装（docs/20260614-perf-webgl-memory-clip.md §3 模块 1）。
 //
 // 职责（窄接口后面藏掉的脏活）：
 //   - 取 WebGL2 context（无则响亮失败，由 caller 给「需要 WebGL2」提示——§3 定调不留 2D 回退）。

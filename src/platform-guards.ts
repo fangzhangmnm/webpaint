@@ -1,6 +1,6 @@
 // 平台手势护栏 —— 单一职责：全局 capture-phase 拦截 + pointer 自愈，挡掉 iPad/触屏系统手势对画布的劫持。
 //
-// 防御面（docs/ipad-doubletap-architecture.md layer 2/4）：
+// 防御面（docs/20260530-ipad-doubletap-architecture.md layer 2/4）：
 //   - pointer 自愈：window 级 pointercancel / app 隐藏 / 失焦 → input.cancelAllPointers()（清 ghost finger）。
 //   - dblclick 拦截：防 iPad 系统级「双击文本选中 / 双击拖窗」。
 //   - 3 指以上 touchstart 拦截：挡系统 split-view / slide-over 抢手。

@@ -1,5 +1,5 @@
 // 即时路径平滑（像素）inputSmooth：死区 + EMA 二参。screen px。
-// 纯函数（mutates rec）：逐参数钉行为。详 docs/brush-procreate-smoothing.md。
+// 纯函数（mutates rec）：逐参数钉行为。详 docs/20260613-brush-procreate-smoothing.md。
 import { describe, it, assert } from "./runner.mjs";
 import { inputSmooth } from "../src/stroke-input-smooth.ts";
 import { SMOOTH } from "../src/smooth-config.ts";

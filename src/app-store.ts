@@ -116,7 +116,7 @@ export const clearCloudState = (name: string) => cloud.clearState(name);
 // 绝不阻断）。本地读失败 → 标 localError，app 报状态。返回的 item = { name, local|null, cloud|null, dirty }，
 // item.cloud 自带 { id, eTag, size, lastModifiedDateTime, path, downloadUrl? }（thumb provider 直接读）。
 // cloud-gone reconciliation（ADR-0014 👻 ghost · etag-tombstone · 无 GUID；见
-//   docs/reports/2026-06-10-cloud-gone-reconciliation-proposal.md）。
+//   docs/reports/20260610-cloud-gone-reconciliation-proposal.md）。
 // 本地有 etag（曾 synced）但云端 path 没了 = 被别的设备改名/移动/删 → 孤儿：
 //   · clean（无未推编辑）→ **自动收敛 drop 本地缓存 + clearState**（改名/删除有效传播、零 duplicate、无复活；
 //     clean == 等同某个仍在云端改名后/或 .trash 里的版本，本地无未见字节可丢）。

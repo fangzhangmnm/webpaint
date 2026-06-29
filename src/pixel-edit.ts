@@ -1,6 +1,6 @@
 // 像素编辑事务（PixelEdit）。把"一次按-拖-抬产生的 layer 像素改动"收成一个 undo 事务。
 //
-// 设计见 docs/undo-architecture.md / CONTEXT.md（领域词 PixelEdit）。给下个 AI：
+// 设计见 docs/20260527-undo-architecture.md / CONTEXT.md（领域词 PixelEdit）。给下个 AI：
 //
 // - 之前 stroke / liquify / filterBrush / shapes 各自抄一遍 "拍 before → 改 → 拍 after →
 //   build entry → push → 异步压缩 before/after" + 一对 _<tool>LayerId/_<tool>PreSnap 字段。
