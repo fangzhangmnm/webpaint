@@ -21,6 +21,7 @@ import { compositeLayers } from "../../src/layer-composite.ts";
 import { BrushEngine } from "../../src/brush.ts";
 import { resolveBrush } from "../../src/resolved-brush.ts";
 import { PaintDoc } from "../../src/doc.ts";
+import { quadWarp, renderQuadPerPixel } from "../../src/floating-transform.ts";
 
 interface Check { name: string; ok: boolean; detail: string; }
 type Add = (name: string, ok: boolean, detail?: string) => void;
@@ -488,7 +489,11 @@ function checkerParity(glctx: GLContext, add: Add): void {
   lt.index.dispose();
 }
 
-// ---- E5) floatFor 接缝 golden：GL 浮层 pass vs 2D drawImage(float) source-over ----
+// ---- E5) floatFor 接缝 golden：GPU warp pass vs 2D（合成语义 + warp 逐位对拍 CPU renderQuadPerPixel）----
+// 轴对齐矩形 [x0,y0,w,h] 的逆单应性（row-major，doc→源单位方格）：身份 warp（仅平移缩放）= 把源 1:1 放到 (x0,y0)。
+function rectHinv(x0: number, y0: number, w: number, h: number): number[] {
+  return [1 / w, 0, -x0 / w, 0, 1 / h, -y0 / h, 0, 0, 1];
+}
 function texFromCanvas(glctx: GLContext, c: HTMLCanvasElement): WebGLTexture {
   const gl = glctx.gl;
   const t = gl.createTexture()!;
@@ -510,15 +515,15 @@ function floatParity(glctx: GLContext, add: Add): void {
   const fw = 80, fh = 70, fx = 50, fy = 40;
   const floatCanvas = makeLayerCanvas(fw, fh, (x, y) => [220, 60, 60, (x + y) % 200 + 40]);   // 半透明渐变
   const ftex = texFromCanvas(glctx, floatCanvas);
-  const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: ftex, ox: fx, oy: fy, ow: fw, oh: fh } }];
+  const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: ftex, srcW: fw, srcH: fh, hinv: rectHinv(fx, fy, fw, fh), mode: 0 } }];
   const accum = comp.composite(backend.texture, tree as never, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
   const rctx = ref.getContext("2d")!;
-  rctx.drawImage(baseCanvas, 0, 0); rctx.drawImage(floatCanvas, fx, fy);   // 浮层 source-over 底（α=1，忽略层 mode/opacity）
+  rctx.drawImage(baseCanvas, 0, 0); rctx.drawImage(floatCanvas, fx, fy);   // 身份 warp(nearest) → 等价 drawImage 放 (fx,fy)
   const refData = rctx.getImageData(0, 0, N, N).data;
   const { md, at } = maxPremulDiff(refData, glpx, N);
-  add("float:GL 浮层 pass vs 2D drawImage source-over", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  add("float:GPU warp pass(身份) vs 2D drawImage source-over", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
   lt.index.dispose(); glctx.gl.deleteTexture(ftex);
 
   // clip 层空基底 + float（变换图层组时 clip 层基底被提空）→ 层不渲染但 float 仍显（修「变换组 clip 消失」）。
@@ -526,7 +531,7 @@ function floatParity(glctx: GLContext, add: Add): void {
   const fc2 = makeLayerCanvas(70, 60, () => [80, 200, 120, 200]); const ftex2 = texFromCanvas(glctx, fc2);
   const tree2 = [
     { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: null },
-    { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: { tex: ftex2, ox: 40, oy: 35, ow: 70, oh: 60 } },
+    { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: { tex: ftex2, srcW: 70, srcH: 60, hinv: rectHinv(40, 35, 70, 60), mode: 0 } },
   ];
   const acc2 = comp.composite(backend.texture, tree2 as never, N, N);
   const glpx2 = readComposite(glctx, comp, acc2, N); glctx.returnFBO(acc2);
@@ -535,6 +540,39 @@ function floatParity(glctx: GLContext, add: Add): void {
   const d2 = maxPremulDiff(rctx2.getImageData(0, 0, N, N).data, glpx2, N);
   add("float:clip 层空基底 → float 仍显（修变换组 clip 消失）", d2.md <= 4, `maxΔ=${d2.md} ${d2.md > 4 ? d2.at : ""}`);
   eb.index.dispose(); glctx.gl.deleteTexture(ftex2);
+}
+
+// ---- E5b) GPU warp vs CPU renderQuadPerPixel 逐位 golden（扭曲 quad，bilinear + bicubic）----
+//   核心证据：WARP_FRAG 的逆单应性 gather + 手写 Catmull-Rom 采样器逐位复刻 CPU。源带 alpha 变化（测 premult）。
+function warpParity(glctx: GLContext, add: Add): void {
+  const N = 192;
+  const backend = new GLTileBackend(glctx, 16); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  const baseCanvas = makeLayerCanvas(N, N, () => [30, 30, 30, 255]);   // 不透明底（warp source-over 其上）
+  const lt = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, baseCanvas) }, N, N);
+  const sw = 64, sh = 48;
+  const srcCanvas = makeLayerCanvas(sw, sh, (x, y) => {
+    const cell = (((x >> 3) + (y >> 3)) & 1) === 1;       // 8px 棋盘色
+    const a = 60 + ((x * 3 + y * 5) % 196);               // alpha 变化
+    return cell ? [230, 80, 40, a] : [40, 120, 230, a];
+  });
+  const srcImg = srcCanvas.getContext("2d")!.getImageData(0, 0, sw, sh);
+  const stex = texFromCanvas(glctx, srcCanvas);
+  const mesh = [[{ x: 30, y: 40 }, { x: 150, y: 25 }], [{ x: 50, y: 150 }, { x: 170, y: 130 }]];   // 透视扭曲 quad
+  const q = quadWarp(mesh as never);
+  for (const [name, mode, sm] of [["bilinear", 1, "bilinear"], ["bicubic", 2, "bicubic"]] as const) {
+    if (!q) { add(`warp:${name} 取 quadWarp`, false, "null"); continue; }
+    const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: stex, srcW: sw, srcH: sh, hinv: q.hinv, mode } }];
+    const accum = comp.composite(backend.texture, tree as never, N, N);
+    const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
+    const rr = renderQuadPerPixel(srcImg, sw, sh, mesh as never, sm);   // CPU 参照（straight）
+    const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
+    const rctx = ref.getContext("2d")!;
+    rctx.drawImage(baseCanvas, 0, 0);
+    if (rr) rctx.drawImage(rr.canvas as CanvasImageSource, rr.dstX, rr.dstY);   // warp source-over 底
+    const { md, at } = maxPremulDiff(rctx.getImageData(0, 0, N, N).data, glpx, N);
+    add(`warp:${name} 扭曲quad GPU vs CPU renderQuadPerPixel`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  }
+  lt.index.dispose(); glctx.gl.deleteTexture(stex);
 }
 
 // ---- E3) 全管线 golden：真 BrushEngine 描边 → collectStamps → GPU 栅格 vs 解析公式参照 ----
@@ -658,6 +696,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { brushPipelineParity(glctx, add); } catch (e) { add("brushpipe parity", false, String(e)); }
   try { checkerParity(glctx, add); } catch (e) { add("checker parity", false, String(e)); }
   try { floatParity(glctx, add); } catch (e) { add("float parity", false, String(e)); }
+  try { warpParity(glctx, add); } catch (e) { add("warp parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);

@@ -1,5 +1,5 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
-import { renderSource } from "./floating-transform.ts";
+import { renderSource, sourceWarpMatrix } from "./floating-transform.ts";
 import { compositeLayers } from "./layer-composite.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { GLBoard, glBoardEnabled } from "./gl/gl-board.ts";
@@ -63,6 +63,11 @@ interface LassoInfo {
   drawingEllipse?: { x0: number; y0: number; x1: number; y1: number } | null;
   handles?: Handle[] | null;
   sampleMode?: string;
+}
+
+// 采样模式字符串 → GPU warp shader 的 int（0=nearest 1=bilinear 2=bicubic；默认 bilinear，对齐 renderSource 默认）。
+function _sampleModeInt(mode?: string): number {
+  return mode === "nearest" ? 0 : mode === "bicubic" ? 2 : 1;
 }
 
 type Ctx2D = CanvasRenderingContext2D;
@@ -703,19 +708,19 @@ export class Board {
     return (stamps, shape, bx, by, bw, bh) => this._glBoard!.rasterizeStrokeToCanvas(stamps, shape, bx, by, bw, bh);
   }
 
-  // 自由变换浮层 → GL 输入（floatFor 接缝）：每源层 renderSource(warp) → 落源层 z。复用 src._renderCache
-  //   （mesh 变了 FloatingTransform 那边 invalidate；与 2D floatFor 共享缓存，不重复 warp）。
+  // 自由变换浮层 → GL warp 输入（floatFor 接缝）：每源层传**未 warp 源纹理 + Hinv**（GPU 在 shader 里 gather
+  //   warp，源纹理只在内容变时重传）。替代旧 CPU renderSource。落源层 z（floatFor 按 leaf.id 匹配）。
   _glFloatInputs(): FloatInput[] {
     const lassoInfo = this._lassoProvider?.();
     const float = (lassoInfo && lassoInfo.floating) ? lassoInfo.floating : null;
     if (!float) return [];
+    const mode = _sampleModeInt(lassoInfo!.sampleMode);
     const out: FloatInput[] = [];
     for (const src of float.sources) {
-      if (!src._renderCache) {
-        src._renderCache = renderSource(src as unknown as Parameters<typeof renderSource>[0], float.gizmoBbox as Parameters<typeof renderSource>[1], float.mesh as Parameters<typeof renderSource>[2], lassoInfo!.sampleMode as Parameters<typeof renderSource>[3]);
-      }
-      const rc = src._renderCache as { canvas: CanvasImageSource & { width: number; height: number }; dstX: number; dstY: number } | null;
-      if (rc && rc.canvas) out.push({ layerId: src.layer.id, canvas: rc.canvas, dstX: rc.dstX, dstY: rc.dstY, w: rc.canvas.width, h: rc.canvas.height });
+      const wp = sourceWarpMatrix(src as unknown as Parameters<typeof sourceWarpMatrix>[0], float.gizmoBbox as Parameters<typeof sourceWarpMatrix>[1], float.mesh as Parameters<typeof sourceWarpMatrix>[2]);
+      if (!wp) continue;
+      const s = src as unknown as { canvas: CanvasImageSource; rect: { w: number; h: number } };
+      out.push({ layerId: src.layer.id, srcCanvas: s.canvas, srcW: s.rect.w, srcH: s.rect.h, hinv: wp.hinv, mode });
     }
     return out;
   }

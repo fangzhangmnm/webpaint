@@ -696,22 +696,39 @@ function homographySample(H: Homography, u: number, v: number): Point {
 }
 
 // ============ Per-pixel inverse-homography render (free / uniform / distort) ============
-// 2×2 mesh：每个 dst pixel 通过 inverse homography 算回 src 单位方格 (u,v) → 采样源像素。
-// 零 PS1 artifact，零 C0 折角（quad 内是 1 个连续映射）。返回 { canvas, dstX, dstY }（doc 坐标左上角）。
-export function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number, mesh: Mesh, sampleMode: SampleMode = "bilinear"): RenderResult | null {
+// 2×2 mesh → { 逆单应性 Hinv（doc→src 单位方格，9 数 row-major）, dst bbox }。
+//   **CPU renderQuadPerPixel 与 GPU warp shader 共用此函数** → 同一矩阵、零漂移（golden 才对得上）。
+export function quadWarp(mesh: Mesh): { hinv: number[]; minX: number; minY: number; maxX: number; maxY: number } | null {
   const tl = mesh[0][0], tr = mesh[0][1], bl = mesh[1][0], br = mesh[1][1];
   const minX = Math.floor(Math.min(tl.x, tr.x, bl.x, br.x));
   const minY = Math.floor(Math.min(tl.y, tr.y, bl.y, br.y));
   const maxX = Math.ceil(Math.max(tl.x, tr.x, bl.x, br.x));
   const maxY = Math.ceil(Math.max(tl.y, tr.y, bl.y, br.y));
-  const dstW = maxX - minX, dstH = maxY - minY;
-  if (dstW <= 0 || dstH <= 0) return null;
-
+  if (maxX - minX <= 0 || maxY - minY <= 0) return null;
   const Hfwd = homographyFromUnitSquareToQuad(tl, tr, br, bl);
   if (!Hfwd) return null;
-  const H9 = [Hfwd.a, Hfwd.b, Hfwd.c, Hfwd.d, Hfwd.e, Hfwd.f, Hfwd.g, Hfwd.h, 1];
-  const Hinv = invertMat3(H9);
+  const Hinv = invertMat3([Hfwd.a, Hfwd.b, Hfwd.c, Hfwd.d, Hfwd.e, Hfwd.f, Hfwd.g, Hfwd.h, 1]);
   if (!Hinv) return null;
+  return { hinv: Hinv, minX, minY, maxX, maxY };
+}
+
+// 一个 source（经共享 gizmo 映出自己的 dest quad）→ GPU warp 参数：Hinv + dst bbox（doc 坐标）。
+//   board._glFloatInputs 用它喂 GPU（源纹理 src.canvas 只传一次，每帧只更 hinv），替代 CPU renderSource。
+export function sourceWarpMatrix(source: Source, gizmoBbox: Rect, mesh: Mesh): { hinv: number[]; bx: number; by: number; bw: number; bh: number } | null {
+  const destQuad = sourceDestQuad(source.rect, gizmoBbox, mesh);
+  if (!destQuad) return null;
+  const q = quadWarp(destQuad);
+  if (!q) return null;
+  return { hinv: q.hinv, bx: q.minX, by: q.minY, bw: q.maxX - q.minX, bh: q.maxY - q.minY };
+}
+
+// 2×2 mesh：每个 dst pixel 通过 inverse homography 算回 src 单位方格 (u,v) → 采样源像素。
+// 零 PS1 artifact，零 C0 折角（quad 内是 1 个连续映射）。返回 { canvas, dstX, dstY }（doc 坐标左上角）。
+export function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number, mesh: Mesh, sampleMode: SampleMode = "bilinear"): RenderResult | null {
+  const q = quadWarp(mesh);
+  if (!q) return null;
+  const { hinv: Hinv, minX, minY, maxX, maxY } = q;
+  const dstW = maxX - minX, dstH = maxY - minY;
 
   const out = new ImageData(dstW, dstH);
   const odata = out.data;

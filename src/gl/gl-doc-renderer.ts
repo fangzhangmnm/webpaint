@@ -26,11 +26,14 @@ export interface OverlayInput {
   blendMode: string;   // 笔刷混合模式（safeMode 收敛到 12 可分离；erase 时忽略）
 }
 
-// board 传入的自由变换浮层（warp 后的内容 canvas + doc 坐标位置 + 落在哪个源层 z）。
+// board 传入的自由变换浮层（**GPU warp 输入**）：未 warp 的源纹理 canvas（拖动中稳定，srcW×srcH）+ 逆单应性
+//   Hinv（每帧更新）+ sampleMode + 落在哪个源层 z。源纹理按 srcCanvas 引用缓存，**只在内容变时重传**。
 export interface FloatInput {
   layerId: number;
-  canvas: CanvasImageSource;
-  dstX: number; dstY: number; w: number; h: number;
+  srcCanvas: CanvasImageSource;   // 未 warp 源像素（稳定引用 → 复用 GPU 纹理）
+  srcW: number; srcH: number;
+  hinv: number[];                 // 9，row-major，doc→源单位方格
+  mode: number;                   // 0=nearest 1=bilinear 2=bicubic
 }
 
 // board 传入的 GPU brush stamp overlay（Stage 3：替 CPU overlayCanvas）。bx/by/bw/bh = stamp 包围盒 doc 坐标。
@@ -56,7 +59,7 @@ export class GLDocRenderer {
   private _selTex: WebGLTexture | null = null;   // GPU overlay 选区蒙版（复用，每帧重传）
   private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number; lockAlpha: boolean; selMask: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null } | null = null;
   // 自由变换浮层：per-源层 id 一张复用纹理（warp 每帧变，重传）+ 当前帧描述。
-  private _floatTex = new Map<number, WebGLTexture>();
+  private _floatTex = new Map<number, { tex: WebGLTexture; canvas: CanvasImageSource | null }>();
   private _floats = new Map<number, FloatDesc>();
 
   constructor(glctx: GLContext, capacity: number, accumPrec: FBOPrec = "f16") {
@@ -159,32 +162,37 @@ export class GLDocRenderer {
     return { canvas, dstX: bx, dstY: by };
   }
 
-  // 设置/清除自由变换浮层（board 每帧调；空数组=无）。每个浮层=warp 后 canvas 直传 per-源层 id 纹理。
+  // 设置/清除自由变换浮层（board 每帧调；空数组=无）。GPU warp：**源纹理只在 srcCanvas 引用变时重传**（拖动中
+  //   源像素稳定 → 整条拖动只上传一次），每帧只更新 Hinv/mode（_floats 里）。这是把 warp 移上 GPU 的性能本质。
   setFloats(floats: FloatInput[], _docW: number, _docH: number): void {
     const gl = this._glctx.gl;
     this._floats.clear();
     const seen = new Set<number>();
     for (const f of floats) {
-      if (f.w <= 0 || f.h <= 0) continue;
+      if (f.srcW <= 0 || f.srcH <= 0) continue;
       seen.add(f.layerId);
-      let tex = this._floatTex.get(f.layerId);
-      if (!tex) {
-        tex = gl.createTexture()!;
+      let entry = this._floatTex.get(f.layerId);
+      if (!entry) {
+        const tex = gl.createTexture()!;
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        this._floatTex.set(f.layerId, tex);
+        entry = { tex, canvas: null };
+        this._floatTex.set(f.layerId, entry);
       }
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 存直值（shader 自己处理）
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, f.canvas as TexImageSource);
-      this._floats.set(f.layerId, { tex, ox: f.dstX, oy: f.dstY, ow: f.w, oh: f.h });
+      if (entry.canvas !== f.srcCanvas) {   // 源内容变（首次/换浮层）才重传
+        gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 存直值（shader 自己处理）
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, f.srcCanvas as TexImageSource);
+        entry.canvas = f.srcCanvas;
+      }
+      this._floats.set(f.layerId, { tex: entry.tex, srcW: f.srcW, srcH: f.srcH, hinv: f.hinv, mode: f.mode });
     }
     gl.bindTexture(gl.TEXTURE_2D, null);
     // 回收不再用的源层纹理
-    for (const [id, tex] of this._floatTex) if (!seen.has(id)) { gl.deleteTexture(tex); this._floatTex.delete(id); }
+    for (const [id, e] of this._floatTex) if (!seen.has(id)) { gl.deleteTexture(e.tex); this._floatTex.delete(id); }
   }
 
   // 合成整棵树 → 可见画布（视口仿射 = board _applyDocTransform 的 6 参；含 live overlay）。需先 sync。

@@ -19,11 +19,14 @@ export interface OverlayDesc {
   lockAlpha?: boolean;    // 锁α：overlay 裁到 base 现有 alpha（GPU stamp overlay 用；CPU canvas overlay 已预裁=false）
   selMask?: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null;   // 选区蒙版（同上，预裁的 CPU overlay=null）
 }
-// 自由变换浮层（floatFor 接缝，对齐 2D layer-composite.ts:143-145）：warp 后的内容，**bbox 尺寸**直值纹理 +
-//   doc 坐标 bbox。在源层 z 之上 source-over α=1，**忽略源层 mode/opacity**（与 overlay 不同——overlay 随层）。
+// 自由变换浮层（floatFor 接缝，对齐 2D layer-composite.ts:143-145）= **GPU warp 输入**：未 warp 的源纹理 +
+//   逆单应性 Hinv（doc→源单位方格）+ sampleMode。shader 逐 dst 像素 gather 采样。在源层 z 之上 source-over α=1，
+//   **忽略源层 mode/opacity**（与 overlay 不同——overlay 随层）。
 export interface FloatDesc {
-  tex: WebGLTexture;
-  ox: number; oy: number; ow: number; oh: number;   // doc 坐标 bbox（renderSource 的 dstX/dstY/w/h）
+  tex: WebGLTexture;      // 源纹理（未 warp，直值，srcW×srcH，常驻——拖动中只换 hinv）
+  srcW: number; srcH: number;
+  hinv: number[];         // 9，row-major，doc(x,y,1)→源 (u,v,w) 透视除
+  mode: number;           // 0=nearest 1=bilinear 2=bicubic
 }
 export interface CompLeaf {
   kind: "leaf";
