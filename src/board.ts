@@ -9,7 +9,7 @@ import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
 // brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。
 type StampCollect = { stamps: Stamp[]; shape: StrokeShape; layer: Layer; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null;
-import type { GLDoc } from "./gl/gl-board.ts";
+import type { GLDoc, GLLeaf } from "./gl/gl-board.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 import { eachLeaf, layerByteBudget } from "./doc.ts";
 
@@ -119,6 +119,8 @@ export class Board {
   _compositeCacheDirty?: boolean;
   _compositeCache?: Bitmap | null;
   _strokeActiveHint?: (() => unknown) | null;
+  // GL live-sync：原地改像素的笔描边中要重传 GPU 的活动叶（无=不重传，buffered brush/无描边）。
+  _liveSyncProvider?: (() => Layer | null) | null;
   _lassoProvider?: (() => LassoInfo | null | undefined) | null;
   _activeSurrogateLayerId?: number | null;
   _activeSurrogateCanvas?: CanvasImageSource | null;
@@ -413,6 +415,9 @@ export class Board {
   // v131: liquify / filter brush 等没用 overlay 但仍需禁 partial。fn 返回 truthy = 强全屏
   setStrokeActiveHint(fn: (() => unknown) | null) { this._strokeActiveHint = fn; }
 
+  // GL live-sync：返回描边中原地改像素、需每帧重传 GPU 的活动叶（无=null）。仅 GL 路径消费。
+  setLiveSyncProvider(fn: (() => Layer | null) | null) { this._liveSyncProvider = fn; }
+
   setOverlayProvider(fn: (() => OverlayDesc | null | undefined) | null) {
     this._overlayProvider = fn;
   }
@@ -669,11 +674,14 @@ export class Board {
   //   本 2D canvas 清透明、只画 lasso overlay + doc 边框（GL 透出 doc）。
   _renderFullGL(ctx: Ctx2D, W: number, H: number) {
     const docBg = this._showCheckerboard ? "checker" : (this.doc.backgroundColor || "#ffffff");   // 棋盘背景接缝（GL 合成器 doc 空间棋盘）
+    // live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中把活动叶每帧重传 GPU（否则 live 门控挡住 syncAll → 预览不动）。
+    const liveSync = this._liveSyncProvider?.() ?? null;
     this._glBoard!.render(
       this.doc as unknown as GLDoc,
       this._docTransformParams(),
       W, H, this.viewport.scale, this._voidColor, docBg,
       this._isLivePreview(), this._glOverlayInput(), this._glFloatInputs(), this._glStampOverlay(),
+      liveSync as unknown as GLLeaf | null,
     );
     // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。
     //   非 live-preview 帧（已 syncAll 把 tile 传 GPU）后释放各层物化缓存 → GL 模式不常驻第二份拷贝。

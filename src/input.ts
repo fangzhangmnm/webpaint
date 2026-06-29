@@ -59,7 +59,9 @@ interface FilterBrushState { Filter: unknown; params: unknown; }
 // 活动笔画（brush / liquify / filterBrush 共享 begin/extend/end/cancel 协议）。
 // 三引擎的 begin*/extend/end/cancel/flushDirty 接口一致 → 用并集做 engine 字段。
 type StrokeEngine = BrushEngine | LiquifyEngine | FilterBrushEngine;
-interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; }
+// inPlace = 描边中原地改 layer 像素（liquify/filterBrush/pixelMode brush），非 overlay 预览。
+//   GL 模式下这类笔的 live 预览要靠 board 每帧把活动层重传 GPU（buffered brush 走 GPU stamp overlay，不算）。
+interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; inPlace: boolean; }
 
 // 本文件注册的两类 handler 的 entry shape（lasso 复合像素 + 选区变化）。
 //   lasso entry 由 floating-transform.commit 产；selectionChange 由 lasso.endPath/setSelection 产。
@@ -824,7 +826,7 @@ export class InputController {
     const layer = this.doc.activeLayer as Layer;
     const spec = pixelStrokeSpec(rec.role as string)!;   // draw / erase → 同 stroke 事务 + finalize
     const tx = this.pixelHistory!.begin(layer, spec.historyType);
-    this._activeStroke = { engine: this.brush, tx, finalize: spec.finalize };
+    this._activeStroke = { engine: this.brush, tx, finalize: spec.finalize, inPlace: !!settings.pixelMode };
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, e);
@@ -878,6 +880,15 @@ export class InputController {
   // 原来 strokeActiveHint 只兜 filterBrush，**像素笔直接写 layer、无 buffered overlay、又非 filterBrush → 漏出黑框**。
   isStrokeActive() { return !!this._activeStroke; }
 
+  // GL live-sync 接缝：描边中原地改像素的笔（liquify/filterBrush/pixelMode brush）→ 返回活动叶，
+  //   board 每帧把它重传 GPU 才能显 live 预览（buffered brush 走 GPU stamp overlay，返 null）。非描边 / overlay 笔 → null。
+  liveMutatedLeaf(): Layer | null {
+    const as = this._activeStroke;
+    if (!as || !as.inPlace) return null;
+    const layer = this.doc.activeLayer;
+    return (layer && !(layer as Layer).isGroup) ? (layer as Layer) : null;
+  }
+
   // ---- 液化 ----
   // 一次"按-拖-抬"= 一个 "liquify" history entry。schema 同 stroke。
   _beginLiquify(rec: PointerRec) {
@@ -886,7 +897,7 @@ export class InputController {
     const layer = this.doc.activeLayer as Layer;   // 组已被上游硬拒，此处确为叶
     const spec = pixelStrokeSpec(rec.role as string)!;   // liquify → 独立 "liquify" 事务 + finalize
     const tx = this.pixelHistory!.begin(layer, spec.historyType);
-    this._activeStroke = { engine: this.liquify, tx, finalize: spec.finalize };
+    this._activeStroke = { engine: this.liquify, tx, finalize: spec.finalize, inPlace: true };
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     // v124 (user：「preview 没 apply 选区」) 把 selection 传给 liquify，stamp 内 mask 外保留 startSnap
     this.liquify.beginStroke(layer, settings, dx, dy, this.doc.selection);
@@ -907,7 +918,7 @@ export class InputController {
     const spec = pixelStrokeSpec(rec.role as string)!;   // filterBrush → "stroke" 事务，finalize:false
     const tx = this.pixelHistory!.begin(layer, spec.historyType);
     // filterBrush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre → 无需 post-stroke finalize（spec.finalize=false）
-    this._activeStroke = { engine: this.filterBrush, tx, finalize: spec.finalize };
+    this._activeStroke = { engine: this.filterBrush, tx, finalize: spec.finalize, inPlace: true };
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
     try {

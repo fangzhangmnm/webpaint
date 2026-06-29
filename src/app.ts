@@ -178,6 +178,9 @@ board.setStampProvider(() => input.brush.collectStamps());   // Stage 3：GPU st
 //   无 buffered overlay、又非 filterBrush → 漏。改用 input.isStrokeActive()（任一笔画进行中都强全屏，
 //   含 brush/像素笔/liquify/filterBrush）；buffered 笔本就走 overlayProvider，这里冗余无害。
 board.setStrokeActiveHint(() => input.isStrokeActive());
+// GL live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中要把活动层每帧重传 GPU 才显预览
+//   （buffered brush 走 GPU stamp overlay，此处返 null）。仅 GL 模式生效（board 内部门控）。
+board.setLiveSyncProvider(() => input.liveMutatedLeaf());
 board.setLassoProvider((() => ({
   selection:      doc.selection,
   drawingPath:    input.lasso.getDrawingPath(),

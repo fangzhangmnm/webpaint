@@ -8,16 +8,19 @@ import { GLContext } from "./gl-context.ts";
 import { GLDocRenderer } from "./gl-doc-renderer.ts";
 import type { OverlayInput, FloatInput, StampOverlayInput } from "./gl-doc-renderer.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
-import type { DocNode } from "./gl-doc-bridge.ts";
+import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { Background } from "./gl-compositor.ts";
 import type { PooledFBO } from "./gl-context.ts";
 
 export interface GLDoc { layers: DocNode[]; width: number; height: number; }
+// board live-sync 接缝用的叶类型别名（结构上 = DocLeaf，board 传活动 Layer 进来重传）。
+export type { DocLeaf as GLLeaf } from "./gl-doc-bridge.ts";
 
-// URL 开关（默认关 → 生产零变更）。
+// URL 开关。**v350 起 GL 是默认**（WebGL2 已是合成/笔刷唯一路径）；`?glboard=0` 显式回退 2D（过渡逃生，
+//   2D display 路径归档后删此逃生）。GL init 失败时 board 仍自动回退 2D（_setupGLBoard catch）。
 export function glBoardEnabled(): boolean {
-  try { return new URLSearchParams(location.search).get("glboard") === "1"; }
-  catch { return false; }
+  try { return new URLSearchParams(location.search).get("glboard") !== "0"; }
+  catch { return true; }
 }
 
 // "#rrggbb" → [r,g,b] in [0,1]（void 底色 clear 用）。失败回退浅灰。
@@ -55,10 +58,13 @@ export class GLBoard {
     return this._renderer.rasterizeStrokeToCanvas(stamps, shape, bx, by, bw, bh);
   }
 
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null): void {
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null): void {
     if (this._glctx.isLost) return;
     const contentChanged = this._contentDirty && !livePreview;
     if (contentChanged) { this._renderer.syncAll(doc.layers, doc.width, doc.height); this._contentDirty = false; }
+    // live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中，contentChanged 被 live 门控挡住 →
+    //   只把活动叶每帧重传 GPU，下面 livePreview 重合成就能显 live 预览（buffered brush 走 overlay，liveSyncLeaf=null）。
+    else if (livePreview && liveSyncLeaf) { this._renderer.syncLayer(liveSyncLeaf, doc.width, doc.height); }
 
     if (contentChanged || livePreview || !this._cache) {
       // GPU stamp overlay（brush 描边中）优先；否则 CPU canvas overlay（filter/liquify 等）。
