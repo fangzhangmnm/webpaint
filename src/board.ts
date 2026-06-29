@@ -375,6 +375,15 @@ export class Board {
     this.requestRender();
   }
 
+  // 盖印（stamp）落层后但 float 仍活：盖印经 _bakeDown 改了源层 tile，但 livePreview 门控会挡住 syncAll
+  //   → 盖印像素卡在 CPU tile、要等 commit 结束 float 才显。这里把"上帧无浮层"伪装出来，让下一帧重走 lift 的
+  //   forceSync 一次（_renderFullGL: floatActive && !_wasFloatActive），把盖印写进的源层 tile 同步上 GPU。
+  //   拖动中源层再次静止 → 不增加 per-帧成本（与 lift forceSync 同一机制）。
+  forceGLResyncUnderFloat() {
+    this._wasFloatActive = false;
+    this.requestRender();
+  }
+
   // v131: liquify / filter brush 等没用 overlay 但仍需禁 partial。fn 返回 truthy = 强全屏
   setStrokeActiveHint(fn: (() => unknown) | null) { this._strokeActiveHint = fn; }
 
