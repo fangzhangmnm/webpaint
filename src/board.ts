@@ -5,7 +5,7 @@ import { compositeLayers } from "./layer-composite.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { GLBoard, glBoardEnabled } from "./gl/gl-board.ts";
 import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
-import type { OverlayInput, FloatInput, StampOverlayInput } from "./gl/gl-doc-renderer.ts";
+import type { OverlayInput, FloatInput, StampOverlayInput, SurrogateInput } from "./gl/gl-doc-renderer.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
 // brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。
@@ -129,6 +129,8 @@ export class Board {
   _lassoProvider?: (() => LassoInfo | null | undefined) | null;
   _activeSurrogateLayerId?: number | null;
   _activeSurrogateCanvas?: CanvasImageSource | null;
+  _activeSurrogateBx?: number;   // 替身 canvas 的 doc 左上（GL 上传 tiles 用）
+  _activeSurrogateBy?: number;
   _clipTmp?: HTMLCanvasElement;
   _overlayClipTmp?: HTMLCanvasElement;
   _showFps?: boolean;
@@ -432,12 +434,24 @@ export class Board {
   // v110: 给某 layer 在 board 渲染时套 ctx.filter（颜色调整 live preview）—— v113 撤
   // ctx.filter on iPad Safari Canvas2D 偶发不渲染 (user：「颜色调整预览，apply 都没用」)
   setActiveLayerFilter() { /* no-op, replaced by surrogate */ }
-  // v113: 颜色调整 live preview 走 surrogate canvas（per-pixel JS BCSH 之后塞进来）
-  // (layerId, canvas) 启动；(null, null) 关
-  setActiveLayerSurrogate(layerId: number | null, canvas: CanvasImageSource | null) {
+  // v113: 颜色调整 live preview 走 surrogate canvas（per-pixel JS 滤镜结果塞进来）。GL 模式：该替身经 _glSurrogate
+  //   上传成活动层 GPU tiles 显示（非破坏）。(layerId, canvas, bx, by) 启动；(null, null) 关。
+  //   invalidateAll → markContentDirty：关闭时下一帧（非 livePreview）syncAll 从真像素恢复 GPU。
+  setActiveLayerSurrogate(layerId: number | null, canvas: CanvasImageSource | null, bx = 0, by = 0) {
     this._activeSurrogateLayerId = layerId;
     this._activeSurrogateCanvas = canvas;
+    this._activeSurrogateBx = bx;
+    this._activeSurrogateBy = by;
     this.invalidateAll();
+  }
+
+  // GL 渲染用：当前活动层替身（颜色调整 preview）→ SurrogateInput（无替身=null）。
+  _glSurrogate(): SurrogateInput | null {
+    const c = this._activeSurrogateCanvas;
+    if (!c || this._activeSurrogateLayerId == null) return null;
+    const w = (c as HTMLCanvasElement).width, h = (c as HTMLCanvasElement).height;
+    if (!w || !h) return null;
+    return { layerId: this._activeSurrogateLayerId, canvas: c, bx: this._activeSurrogateBx ?? 0, by: this._activeSurrogateBy ?? 0, w, h };
   }
 
   // 复用 erase 临时合成 canvas（同 doc 尺寸；改了重新分配）
@@ -669,7 +683,7 @@ export class Board {
       this._docTransformParams(),
       W, H, this.viewport.scale, this._voidColor, docBg,
       this._isLivePreview(), this._glOverlayInput(), this._glFloatInputs(), this._glStampOverlay(),
-      liveSync as unknown as GLLeaf | null, forceSync,
+      liveSync as unknown as GLLeaf | null, forceSync, this._glSurrogate(),
     );
     // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。
     //   非 live-preview 帧（已 syncAll 把 tile 传 GPU）后释放各层物化缓存 → GL 模式不常驻第二份拷贝。

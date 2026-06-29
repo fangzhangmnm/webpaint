@@ -6,7 +6,7 @@
 
 import { GLContext } from "./gl-context.ts";
 import { GLDocRenderer } from "./gl-doc-renderer.ts";
-import type { OverlayInput, FloatInput, StampOverlayInput } from "./gl-doc-renderer.ts";
+import type { OverlayInput, FloatInput, StampOverlayInput, SurrogateInput } from "./gl-doc-renderer.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { Background } from "./gl-compositor.ts";
@@ -60,7 +60,7 @@ export class GLBoard {
     return this._renderer.warpToCanvas(srcCanvas, srcW, srcH, hinv, mode, bx, by, bw, bh);
   }
 
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, forceSync = false): void {
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, forceSync = false, surrogate: SurrogateInput | null = null): void {
     if (this._glctx.isLost) return;
     // forceSync：livePreview 帧也强制全量同步一次（自由变换 lift 那帧——挖洞改了源层 tile，但 livePreview
     //   门控会挡住 syncAll → 否则 GPU 上是陈旧的无洞源层）。拖动中源层静止 → 不再 forceSync，保住 v352 零 per 帧成本。
@@ -69,6 +69,9 @@ export class GLBoard {
     // live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中，contentChanged 被 live 门控挡住 →
     //   只把活动叶每帧重传 GPU，下面 livePreview 重合成就能显 live 预览（buffered brush 走 overlay，liveSyncLeaf=null）。
     else if (livePreview && liveSyncLeaf) { this._renderer.syncLayer(liveSyncLeaf, doc.width, doc.height); }
+    // 颜色调整 live preview：把活动层的替身 canvas 当它的 GPU tiles 上传（非破坏，layer.pixels 不动）。livePreview
+    //   下 syncAll 已被门控挡住 → 不会覆盖。清除替身后 board markContentDirty → syncAll 从真像素恢复。
+    if (surrogate) this._renderer.syncLayerFromCanvas(surrogate.layerId, surrogate.canvas, surrogate.bx, surrogate.by, surrogate.w, surrogate.h, doc.width, doc.height);
 
     if (contentChanged || livePreview || !this._cache) {
       // GPU stamp overlay（brush 描边中）优先；否则 CPU canvas overlay（filter/liquify 等）。

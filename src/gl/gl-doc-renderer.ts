@@ -10,6 +10,7 @@ import { TilePool, TILE_BYTES } from "./tile-store.ts";
 import { GLCompositor } from "./gl-compositor.ts";
 import type { Background } from "./gl-compositor.ts";
 import { uploadLayerToTiles, docTreeToComp, safeMode } from "./gl-doc-bridge.ts";
+import { LayerPixels, replaceFromCanvas } from "./tile-pixels.ts";
 import type { DocNode, DocLeaf, LayerTiles } from "./gl-doc-bridge.ts";
 import type { OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
@@ -28,6 +29,9 @@ export interface OverlayInput {
 
 // board 传入的自由变换浮层（**GPU warp 输入**）：未 warp 的源纹理 canvas（拖动中稳定，srcW×srcH）+ 逆单应性
 //   Hinv（每帧更新）+ sampleMode + 落在哪个源层 z。源纹理按 srcCanvas 引用缓存，**只在内容变时重传**。
+// 颜色调整 live preview 替身：活动层用这张 canvas（doc (bx,by) 起 w×h）当 GPU tiles 显示（非破坏）。
+export interface SurrogateInput { layerId: number; canvas: CanvasImageSource; bx: number; by: number; w: number; h: number; }
+
 export interface FloatInput {
   layerId: number;
   srcCanvas: CanvasImageSource;   // 未 warp 源像素（稳定引用 → 复用 GPU 纹理）
@@ -80,6 +84,17 @@ export class GLDocRenderer {
     const old = this._layerTiles.get(leaf.id);
     if (old) { old.index.dispose(); old.tileMap.clear(); }
     this._layerTiles.set(leaf.id, uploadLayerToTiles(this._glctx, this._backend, this._pool, leaf, docW, docH));
+  }
+
+  // 把一张 canvas（doc (bx,by) 起 w×h）当某层的 GPU tiles 上传（颜色调整 live preview 的替身 surrogate）。
+  //   **非破坏**：不碰 layer.pixels（真 SoT），只覆盖该层 GPU tiles；surrogate 清除后 board markContentDirty →
+  //   syncAll 从真像素重传恢复。临时 LayerPixels（preview 滑块驱动，非每帧热循环）。
+  syncLayerFromCanvas(leafId: number, canvas: CanvasImageSource, bx: number, by: number, w: number, h: number, docW: number, docH: number): void {
+    const tmp = new LayerPixels(docW, docH);
+    replaceFromCanvas(tmp, canvas, bx, by, w, h);
+    const old = this._layerTiles.get(leafId);
+    if (old) { old.index.dispose(); old.tileMap.clear(); }
+    this._layerTiles.set(leafId, uploadLayerToTiles(this._glctx, this._backend, this._pool, { pixels: tmp }, docW, docH));
   }
 
   // 重传整棵树所有叶（correctness-first）。

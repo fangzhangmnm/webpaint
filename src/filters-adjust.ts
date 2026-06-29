@@ -141,7 +141,7 @@ function _openFilterPanel(filterId: string, opts: { picker?: FilterLike[] } = {}
   void w;   // 宽度由 CSS 定，右钉不再需要算 left
   positionPopup(els.adjustPanel, { align: "right", edgeMargin: 16, belowToolbars: true, offsetY: 8 });
   _bringPanelTop(els.adjustPanel);
-  board.setActiveLayerSurrogate?.(L.id, sur);
+  board.setActiveLayerSurrogate?.(L.id, sur, L.bboxX, L.bboxY);   // bbox 给 GL 上传替身 tiles 用
   _runFilterPreview();      // 初次渲染（identity）
   _suppressTransientPanels("adjust-color");
   // adjust transient：apply=烤进(true)，abort=丢弃(false)。_closeFilterPanel 是 sync 点（见其尾 exitTransient）。
