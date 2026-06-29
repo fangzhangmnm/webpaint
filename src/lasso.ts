@@ -17,8 +17,8 @@
 //     uniformAspect,       // uniform 模式锁定的 W/H 比（lift 时记一次）
 //   }
 //
-// 渲染：2×2 mesh 走 renderQuadPerPixel（per-pixel inverse homography + 双三次/双线性采样），
-//   数学精确（无 PS1 三角化 artifact）。caller drawImage 渲染结果。
+// 渲染：2×2 mesh → GPU warp（gl-compositor WARP_FRAG，per-pixel inverse homography + 双三次/双线性），
+//   数学精确（无 PS1 三角化 artifact）。display/commit 全 GPU（board._glFloatInputs / glBoard.warpToCanvas）。
 //
 // 模式切换：保留当前 mesh 形状，只换约束。
 //   free → uniform：不动 mesh，后续 drag 才有锁比约束
@@ -406,5 +406,5 @@ export class LassoEngine {
   getFloatingScreenBbox() { return this._ft.getFloatingScreenBbox(); }
   // 给 board overlay 用：当前可拖的 handle 列表（v117: screenScale 让 rotate handle 按屏幕 px 偏移定位）
   visibleHandles(screenScale = 1) { return this._ft.visibleHandles(screenScale); }
-  // 渲染 floating 用 renderQuadPerPixel（在 floating-transform.js）。
+  // 渲染 floating：GPU warp（board._glFloatInputs→gl-compositor _floatPass）。
 }

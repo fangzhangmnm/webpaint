@@ -136,8 +136,8 @@ bindSizeKeyboard({ board, leftDial });
 const history = new UndoStack({ max: 50 });
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。
 const editMode = new EditMode({ initialTool: "brush" });
-// 当前笔派生（dial+预设+color+压感 → ResolvedBrush）+ 引擎桥（current-brush.ts）。input 前建（getBrushSettings 读它）。
-const { currentBrush, bindEngine } = makeCurrentBrush({ state, dialReactive, rack });
+// 当前笔派生（dial+预设+color+压感 → ResolvedBrush，current-brush.ts）。input 前建（getBrushSettings 读它）。
+const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack });
 // PixelEdit：纯像素（stroke/liquify/filterBrush）的 undo 事务 + handler。
 // 和 UndoStack 平级，注入 input。见 pixel-edit.js / CONTEXT.md。
 const pixelHistory = new PixelEdit({ doc, history, board });
@@ -157,8 +157,6 @@ const input = new InputController(board, doc, {
   pixelHistory,
   editMode,
 });
-// 引擎桥：currentBrush 变 → input.brush.invalidateStamp（flush:"sync"）。input 现已建好。
-bindEngine(input);
 
 // transient 面板抑制·复原 + panel z-order bringTop + transform commit/cancel 护栏 = transient-panels.ts。
 

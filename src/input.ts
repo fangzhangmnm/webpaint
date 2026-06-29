@@ -863,9 +863,7 @@ export class InputController {
       ? (layer, pre) => sel.applyMaskPostStroke(layer as Parameters<Selection["applyMaskPostStroke"]>[0], pre)
       : null;
     as.tx.commit(finalize as Parameters<PixelTx["commit"]>[0]);
-    // 抬笔 commit 帧**强制全屏**：endStroke() 已把 buffer 烤进 layer 并清掉 live overlay（_stroke=null），
-    // 这一帧再走 partial 会撞 Windows clip-sliver 灰框——_renderPartial 的 overlay 守卫此刻拦不住（overlay 已 null）。
-    // 见 docs/lessons-canvas-edge-bugs.md 坑2：buffered（double-buffer）stroke commit 是守卫的盲区，full 兜底。
+    // 抬笔 commit：endStroke 已把像素烤进 layer → invalidateAll 触发重渲 + GL markContentDirty（下一帧 syncAll 同步）。
     this.board.invalidateAll();
   }
   _abortStroke() {
@@ -876,8 +874,7 @@ export class InputController {
     as.tx.abort();
   }
   // 任一像素笔画进行中（brush / 像素笔 / liquify / filterBrush 都设 _activeStroke）。
-  // board partial-render 守卫用它强走全屏 → 避开 Windows clip-sliver 黑框（docs/lessons-canvas-edge-bugs.md 坑2）。
-  // 原来 strokeActiveHint 只兜 filterBrush，**像素笔直接写 layer、无 buffered overlay、又非 filterBrush → 漏出黑框**。
+  // board._strokeActiveHint 用它判 livePreview（描边中走直接合成 / GL 门控），含像素笔/liquify/filterBrush。
   isStrokeActive() { return !!this._activeStroke; }
 
   // GL live-sync 接缝：描边中原地改像素的笔（liquify/filterBrush/pixelMode brush）→ 返回活动叶，

@@ -147,10 +147,6 @@ export class BrushEngine {
     this._stroke = null;
   }
 
-  // CPU stamp cache 随 GL 转默认归档（_getStamp/_stampCache → ARCHIVE/old-brush-cpu-raster.ts）。
-  //   currentBrush 变时 current-brush.ts 仍调本桥（裸引擎接口）→ 留成 no-op，不破坏调用方。
-  invalidateStamp() { /* CPU stamp cache 已归档；GPU 栅格无缓存可作废 */ }
-
   // step = size_eff × spacing；低压感 size 小 → step 小，不会出豆豆链
   _stepFor(s: ResolvedBrush, pressure: number) {
     const p = Math.max(0, Math.min(1, pressure));

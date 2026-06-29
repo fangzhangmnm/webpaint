@@ -9,8 +9,8 @@
 //   （uniform 多一步锁比），distort 自走简单分支。warp 已删（旧 4×4 是错数学）——以后
 //   用正确数学回来时，就是第 4 个 adapter（带自己的 meshN/handles/约束/render），不是 god-method 里的分支。
 //
-// 渲染：2×2 mesh 走 renderQuadPerPixel（per-pixel inverse homography + 双三次/双线性采样）。
-//   math-exact，无 PS1 三角化 artifact。caller drawImage 渲染结果（board export 在文件末）。
+// 渲染：2×2 mesh → GPU warp（gl-compositor，per-pixel inverse homography + 双三次/双线性采样；本文件只出
+//   warp 矩阵 sourceWarpMatrix/quadWarp，栅格在 GPU）。math-exact，无 PS1 三角化 artifact。
 
 import { Selection } from "./selection.ts";
 import { makeBitmap } from "./bitmap.ts";
@@ -605,7 +605,7 @@ function meshBbox(mesh: Mesh): [number, number, number, number] {
 }
 
 // ============ Source bake / render ============
-// 把 layer ∩ selection mask 烤成一个 source（{layer, canvas, imageData, rect, preSnap, _renderCache}）。
+// 把 layer ∩ selection mask 烤成一个 source（{layer, canvas, imageData, rect, preSnap}）。
 //   trim 到非透明内容紧 bbox（v217 handles 贴内容）；不足 2×2 → null（v232 误触级别）。
 //   opts.cut !== false → 从源层挖空（destination-out）。返回 source 或 null。
 export function bakeSource(sel: Selection, layer: Layer, opts: LiftOpts = {}): Source | null {
@@ -688,7 +688,7 @@ function homographySample(H: Homography, u: number, v: number): Point {
 
 // ============ Per-pixel inverse-homography render (free / uniform / distort) ============
 // 2×2 mesh → { 逆单应性 Hinv（doc→src 单位方格，9 数 row-major）, dst bbox }。
-//   **CPU renderQuadPerPixel 与 GPU warp shader 共用此函数** → 同一矩阵、零漂移（golden 才对得上）。
+//   **GPU warp shader 与 golden 的 CPU 参照（harness）共用此函数** → 同一矩阵、零漂移（golden 才对得上）。
 export function quadWarp(mesh: Mesh): { hinv: number[]; minX: number; minY: number; maxX: number; maxY: number } | null {
   const tl = mesh[0][0], tr = mesh[0][1], bl = mesh[1][0], br = mesh[1][1];
   const minX = Math.floor(Math.min(tl.x, tr.x, bl.x, br.x));

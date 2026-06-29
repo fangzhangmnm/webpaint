@@ -298,7 +298,7 @@ export class LiquifyEngine {
     this._stroke = null;
   }
 
-  // v131: 给 board 用——液化 stroke 进行中时禁掉 partial render（Windows Skia sliver bug）
+  // 液化 stroke 进行中？（input.isStrokeActive 等用它判活动笔画）
   isActive() { return !!this._stroke; }
 
   cancelStroke() {
