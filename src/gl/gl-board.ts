@@ -55,9 +55,11 @@ export class GLBoard {
     return this._renderer.rasterizeStrokeToCanvas(stamps, shape, bx, by, bw, bh);
   }
 
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null): void {
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, forceSync = false): void {
     if (this._glctx.isLost) return;
-    const contentChanged = this._contentDirty && !livePreview;
+    // forceSync：livePreview 帧也强制全量同步一次（自由变换 lift 那帧——挖洞改了源层 tile，但 livePreview
+    //   门控会挡住 syncAll → 否则 GPU 上是陈旧的无洞源层）。拖动中源层静止 → 不再 forceSync，保住 v352 零 per 帧成本。
+    const contentChanged = (this._contentDirty && !livePreview) || forceSync;
     if (contentChanged) { this._renderer.syncAll(doc.layers, doc.width, doc.height); this._contentDirty = false; }
     // live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中，contentChanged 被 live 门控挡住 →
     //   只把活动叶每帧重传 GPU，下面 livePreview 重合成就能显 live 预览（buffered brush 走 overlay，liveSyncLeaf=null）。
