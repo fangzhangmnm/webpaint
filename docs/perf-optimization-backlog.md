@@ -1,15 +1,28 @@
 # WebGL 渲染性能优化 backlog（给 fresh agent）
 
-> as-of v355 / 2026-06-28。**优化建议 + 起点**（会腐烂的 how 类，动手前先按 §0 量一遍）。地基已收成单一 GPU SSoT（见 docs/canvas-render-audit.md：全库无 CPU display 路径）——优化只针对 GPU 合成/warp 热路径，别去碰离屏 CPU（吸管/导出/缩略图/滤镜计算）。
+> as-of v359 / 2026-06-29（§0 复核 + §3 已修；原 §1/§2 仍开）。**优化建议 + 起点**（会腐烂的 how 类，动手前先按 §0 量一遍）。地基已收成单一 GPU SSoT（见 docs/canvas-render-audit.md：全库无 CPU display 路径）——优化只针对 GPU 合成/warp 热路径，别去碰离屏 CPU（吸管/导出/缩略图/滤镜计算）。
 > 现状帧率：用户真机报「clip 多层 40-50fps（目标稳 60）」「组变换 clip 拖动帧率有点低」。WebGL 重构 #1-#3（架构）+ #5（GPU warp）已完成。本 doc = 原 #4（性能）+ #5 引入的新热点。
 
 ---
 
 ## §0 先量后优（铁律，别猜）
 动任何优化前先定位真瓶颈，否则白干：
-1. 加帧计时（board 已有 `_fps`，board.ts `_updateFps`）——先确认掉帧场景（空层描边？clip？组变换？大笔？）。
-2. GPU 计时：用 `EXT_disjoint_timer_query_webgl2`（若 SwiftShader/iPad 支持）或粗粒度 `performance.now()` 包住 `glBoard.render`。分清 **CPU 提交时间** vs **GPU 执行时间** vs **readback 阻塞**。
-3. 按场景归因到下面某一条，再动手。math/手感类禁止猜测式调试（家族规则）。
+1. 加帧计时（board 已有 `_fps`，board.ts `_tickFps`）——先确认掉帧场景（空层描边？clip？组变换？大笔？）。
+2. **v359 起 HUD 已有每帧归因第二行**（开 FPS 即显）：`Np f Nf s Ns` = blend pass 数 / 浮层 warp pass 数 / overlay stamp 数。
+   - `Np`（passes）直读 **§2 layer-count 假说**：clip 多层掉帧时 Np 应≈可见层数，确认「pass 数 ∝ 层数」是瓶颈。
+   - `Nf`（floatPasses）= §3/§4 浮层 pass 数（组变换 N 源层 = N）。`Ns`（stamps）= §1 长描边二次爆炸的直读（描边越长 Ns 越大）。
+   - 来源：`gl-compositor.ts stats{passes,floatPasses}`（composite() 入口清零）→ renderer/board.stats → board `_tickFps`。
+3. GPU 计时（可选，更细）：`EXT_disjoint_timer_query_webgl2`（iPad Safari 历史上禁，未必有）或 `performance.now()` 包 `glBoard.render`。分清 **CPU 提交** vs **GPU 执行** vs **readback 阻塞**。
+4. 按场景归因到下面某一条，再动手。math/手感类禁止猜测式调试（家族规则）。
+
+### §0.1 从零复核结论（fresh agent v359 / 2026-06-29，已逐文件验证非 AI 猜测）
+独立追了一遍每帧路径（gl-board→gl-doc-renderer→gl-compositor→blend-glsl），**与原 backlog 归因收敛**，且补了量化与一处新发现：
+- **瓶颈 = passes × doc 像素 × 每片 tile-index 间接采样**。clip 多层 40-50fps 的成本结构：每帧 composite **全层重合**（livePreview 门控只挡 syncAll，不挡重合成），L 个全屏 f16 pass。2048²×~10 pass ≈ 数千万片/帧，正落 40-50fps 区——**§2「活动层下方缓存」是层数维度的第一杠杆，已验证对**。
+- §1 已确认真：`brush.collectStamps()` 每帧 walk `0..count-1` **整条** stroke → `_glStampOverlay` 每帧喂全量 → 栅格器重栅格整条。长描边二次。
+- §3 已确认真且 **v359 已修**（`WARP_FRAG` 加 `&& s.a>0.0` 早退，跳 quad 外基底 16-tap bicubic；golden `clip:*`/`warpclip:` 全过，像素零变化）。
+- **新发现（CPU 侧，非 GPU）**：`gl-compositor._pass`/`_floatPass` 每 pass 每帧调 ~20 次 `getUniformLocation`（uniform location 未缓存）。L 层 → ~200 次/帧。2048² 下 GPU 片元仍占主导（故不是首杠杆），但 location 缓存是**零行为变化、golden 可证**的纯 CPU 省，可与 §2 顺带做。**注意**：context-restore 会重编 program → 缓存须随 `onRestored` 失效，否则句柄陈旧。
+
+**下一步推荐顺序（待 HUD 真机数定夺）**：先开 FPS 真机读 clip 场景的 `Np`/`Ns` → 若 Np 随层数线性涨即坐实 §2 → 做 §2 sandwich（最大杠杆，但 clip 链/pass-through 组正确性须靠 smoke golden 守）；§1 frozen/tail 是独立的「长描边×大笔」维度（spec 在 ARCHIVE/old-brush-cpu-raster.ts）；getUniformLocation 缓存顺带清。
 
 ---
 
