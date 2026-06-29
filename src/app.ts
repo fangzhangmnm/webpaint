@@ -181,6 +181,8 @@ board.setStrokeActiveHint(() => input.isStrokeActive());
 // GL live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中要把活动层每帧重传 GPU 才显预览
 //   （buffered brush 走 GPU stamp overlay，此处返 null）。仅 GL 模式生效（board 内部门控）。
 board.setLiveSyncProvider(() => input.liveMutatedLeaf());
+// 自由变换 commit 烤定走 GPU warp（board.glWarpBakeFn）；lasso 仍 GL-blind，经 provider 拿。
+input.lasso.setWarpBakeProvider(() => board.glWarpBakeFn());
 board.setLassoProvider((() => ({
   selection:      doc.selection,
   drawingPath:    input.lasso.getDrawingPath(),

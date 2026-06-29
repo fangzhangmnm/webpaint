@@ -39,29 +39,10 @@ void main(){
   o = vec4(col, 1.0);
 }`;
 
-// 自由变换浮层 pass（floatFor 接缝）= **GPU warp（gather）**：源纹理（未 warp）+ 逆单应性 Hinv →
-//   每个 dst doc 像素逆映射回源单位方格 (u,v)，剔除 quad 外，按 sampleMode 手写采样（nearest/bilinear/
-//   bicubic），再 source-over α=1 合进累积器（忽略源层 mode/opacity，对齐 2D drawImage(float)）。
-//   采样器逐位复刻 src/floating-transform.ts 的 nearest/bilinear/bicubic（golden 对拍 renderQuadPerPixel）。
-//   源纹理存**直值**（setFloats UNPACK_PREMULTIPLY=false），texelFetch 取整数 texel = CPU sdata 索引同序。
-const WARP_FRAG = `#version 300 es
-precision highp float;
-in vec2 v_uv;
-uniform vec2 u_docSize;
-uniform sampler2D u_dst;        // 累积器（预乘）
-uniform sampler2D u_src;        // 源纹理（未 warp，直值），尺寸 u_srcSize
-uniform vec2 u_srcSize;         // srcW, srcH
-uniform mat3 u_Hinv;            // doc(x,y,1) → 源单位方格 (u,v,w)，透视除（row-major，transpose 上传）
-uniform int u_mode;            // 0=nearest 1=bilinear 2=bicubic
-// 组变换 clip：clip 浮层裁到基底浮层的 warp 后 alpha（in-shader gather，零额外内存，见 docs/transform-clip-gpu-warp.md）。
-uniform int u_clip;            // 1=裁到基底浮层
-uniform sampler2D u_baseTex;   // 基底浮层源纹理（已驻留），尺寸 u_baseSize
-uniform vec2 u_baseSize;
-uniform mat3 u_baseHinv;       // doc → 基底源单位方格
-uniform int u_baseMode;
-out vec4 o;
-
-// Catmull-Rom cubic（a=-0.5），|t|≥2 → 0。复刻 floating-transform.ts bicubicSample 的 k()。
+// GPU warp 共用 GLSL：逐 dst 像素逆单应性 gather + 手写采样器（nearest/bilinear/bicubic），**逐位复刻
+//   floating-transform 的 CPU 采样器**（golden 对拍）。WARP_FRAG（live 合成）与 WARP_BAKE_FRAG（commit 烤定，
+//   输出 straight）共用，零漂移。源纹理存**直值**（setFloats UNPACK_PREMULTIPLY=false），texelFetch 整数 texel。
+const WARP_FUNCS = `
 float cubicK(float t){
   float a = -0.5;
   float at = abs(t);
@@ -113,7 +94,25 @@ vec4 warpSample(sampler2D tex, vec2 size, mat3 hinv, int mode, vec2 docXY){
   float u = uvw.x / uvw.z, v = uvw.y / uvw.z;
   if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) return vec4(0.0);
   return sampleSrc(tex, size, mode, u * size.x, v * size.y);
-}
+}`;
+
+// live 浮层 pass（合成到累积器）。clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather，docs/transform-clip-gpu-warp.md）。
+const WARP_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform vec2 u_docSize;
+uniform sampler2D u_dst;        // 累积器（预乘）
+uniform sampler2D u_src;        // 源纹理（未 warp，直值），尺寸 u_srcSize
+uniform vec2 u_srcSize;
+uniform mat3 u_Hinv;            // doc(x,y,1) → 源单位方格（row-major，transpose 上传）
+uniform int u_mode;            // 0=nearest 1=bilinear 2=bicubic
+uniform int u_clip;            // 1=裁到基底浮层
+uniform sampler2D u_baseTex;   // 基底浮层源纹理（已驻留）
+uniform vec2 u_baseSize;
+uniform mat3 u_baseHinv;
+uniform int u_baseMode;
+out vec4 o;
+${WARP_FUNCS}
 void main(){
   vec4 dst = texture(u_dst, v_uv);                   // 预乘 (Pd, ad)
   vec2 docXY = v_uv * u_docSize;                     // dst 像素中心（fragment 中心 → +0.5 自带）
@@ -124,6 +123,23 @@ void main(){
   }
   vec4 src = vec4(s.rgb * s.a, s.a);                  // → 预乘
   o = src + dst * (1.0 - src.a);                     // source-over（预乘）
+}`;
+
+// commit 烤定：warp 源 → **straight** RGBA 进 bbox FBO（readback→canvas→editRegion）。FBO 像素 → doc 坐标
+//   = bakeOrigin + v_uv·bakeSize；无 clip（commit 烤回各层不裁，clip 在 commit 后正常合成里复活）。
+const WARP_BAKE_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform vec2 u_bakeOrigin;     // bbox 左上 doc 坐标 (bx,by)
+uniform vec2 u_bakeSize;       // bbox 尺寸 (bw,bh)
+uniform sampler2D u_src;
+uniform vec2 u_srcSize;
+uniform mat3 u_Hinv;
+uniform int u_mode;
+out vec4 o;
+${WARP_FUNCS}
+void main(){
+  o = warpSample(u_src, u_srcSize, u_Hinv, u_mode, u_bakeOrigin + v_uv * u_bakeSize);   // 直值（不预乘、不合成）
 }`;
 
 const PRESENT_FRAG = `#version 300 es
@@ -375,6 +391,46 @@ export class GLCompositor {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindVertexArray(null);
+  }
+
+  // commit 烤定：warp 源 → **straight** RGBA bbox FBO → readback → canvas（floating-transform._bakeDown 用，
+  //   复用 live 同一套 warp 采样器 = preview/commit 零漂移）。源纹理临时上传（commit 一次性，可忽略）。
+  warpToCanvas(srcCanvas: TexImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
+    if (bw <= 0 || bh <= 0) return null;
+    const gl = this._glctx.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 直值
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcCanvas);
+    const fbo = this._glctx.borrowFBO(bw, bh, "u8");
+    const prog = this._glctx.program("warpbake", COMPOSITE_VERT, WARP_BAKE_FRAG);
+    gl.bindVertexArray(this._glctx.quadVAO());
+    gl.viewport(0, 0, bw, bh);
+    gl.disable(gl.BLEND);
+    gl.useProgram(prog);
+    const u = (n: string) => gl.getUniformLocation(prog, n);
+    gl.uniform2f(u("u_bakeOrigin"), bx, by);
+    gl.uniform2f(u("u_bakeSize"), bw, bh);
+    gl.uniform2f(u("u_srcSize"), srcW, srcH);
+    gl.uniformMatrix3fv(u("u_Hinv"), true, hinv);   // row-major → transpose
+    gl.uniform1i(u("u_mode"), mode);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+    this._setSampler(prog, "u_src", 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    const px = new Uint8Array(bw * bh * 4);
+    gl.readPixels(0, 0, bw, bh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindVertexArray(null);
+    this._glctx.returnFBO(fbo);
+    gl.deleteTexture(tex);
+    const canvas = document.createElement("canvas"); canvas.width = bw; canvas.height = bh;
+    canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), bw, bh), 0, 0);
+    return { canvas, dstX: bx, dstY: by };
   }
 
   private _clear(f: PooledFBO, bg?: [number, number, number, number]): void {

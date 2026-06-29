@@ -30,6 +30,7 @@
 import { Selection } from "./selection.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
+import type { WarpBakeFn } from "./floating-transform.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
 
 // ---- 本文件用到的最小局部类型（selection/doc/layer 的真类型在各自模块；此处只描述本类消费面）----
@@ -378,10 +379,13 @@ export class LassoEngine {
   beginDrag(hit: Parameters<FloatingTransform["beginDrag"]>[0], x: number, y: number) { this._ft.beginDrag(hit, x, y); }
   extendDrag(x: number, y: number) { this._ft.extendDrag(x, y); }
   endDrag() { this._ft.endDrag(); }
-  stamp() { return this._ft.stamp(); }
+  // GPU 烤定 fn 注入（app: () => board.glWarpBakeFn()）；commit/stamp 落层时 warp 走 GPU。lasso 仍 GL-blind。
+  _warpBakeProvider: (() => WarpBakeFn | null) | null = null;
+  setWarpBakeProvider(fn: (() => WarpBakeFn | null) | null) { this._warpBakeProvider = fn; }
+  stamp() { return this._ft.stamp(this._warpBakeProvider?.() ?? null); }
   commit() {
     const wasActive = this._ft.isActive();
-    const entry = this._ft.commit(this.doc);
+    const entry = this._ft.commit(this.doc, this._warpBakeProvider?.() ?? null);
     if (wasActive) this._state = "idle";
     return entry;
   }

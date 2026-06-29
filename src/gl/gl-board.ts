@@ -55,6 +55,11 @@ export class GLBoard {
     return this._renderer.rasterizeStrokeToCanvas(stamps, shape, bx, by, bw, bh);
   }
 
+  // 给自由变换 commit 用：warp 源 → straight RGBA canvas（_bakeDown 走 readback→editRegion，复用 live warp）。
+  warpToCanvas(srcCanvas: TexImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {
+    return this._renderer.warpToCanvas(srcCanvas, srcW, srcH, hinv, mode, bx, by, bw, bh);
+  }
+
   render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, overlay: OverlayInput | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, forceSync = false): void {
     if (this._glctx.isLost) return;
     // forceSync：livePreview 帧也强制全量同步一次（自由变换 lift 那帧——挖洞改了源层 tile，但 livePreview

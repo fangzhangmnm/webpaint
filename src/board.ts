@@ -1,5 +1,6 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
-import { renderSource, sourceWarpMatrix } from "./floating-transform.ts";
+import { sourceWarpMatrix } from "./floating-transform.ts";
+import type { WarpBakeFn } from "./floating-transform.ts";
 import { compositeLayers } from "./layer-composite.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { GLBoard, glBoardEnabled } from "./gl/gl-board.ts";
@@ -37,9 +38,7 @@ interface OverlayDesc {
 
 // 自由变换浮层网格点 / source / float 描述（lassoInfo.floating）
 interface MeshPt { x: number; y: number; }
-// renderSource() 的回值缓存（{canvas, dstX, dstY} | null），形状对 board 不透明
-type RenderCache = { canvas: CanvasImageSource; dstX: number; dstY: number } | null;
-interface FloatSource { layer: Layer; _renderCache?: RenderCache; }
+interface FloatSource { layer: Layer; }   // float 像素 warp 全走 GPU（_glFloatInputs→_floatPass），board 端不持 render 缓存
 interface FloatInfo {
   sources: FloatSource[];
   gizmoBbox: unknown;
@@ -714,6 +713,12 @@ export class Board {
     return (stamps, shape, bx, by, bw, bh) => this._glBoard!.rasterizeStrokeToCanvas(stamps, shape, bx, by, bw, bh);
   }
 
+  // 自由变换 commit 烤定用：GPU warp 源 → straight canvas（_bakeDown 注入；GL 失败=null，commit 不烤）。
+  glWarpBakeFn(): WarpBakeFn | null {
+    if (!this._glBoard) return null;
+    return (srcCanvas, srcW, srcH, hinv, mode, bx, by, bw, bh) => this._glBoard!.warpToCanvas(srcCanvas as unknown as TexImageSource, srcW, srcH, hinv, mode, bx, by, bw, bh);
+  }
+
   // 自由变换浮层 → GL warp 输入（floatFor 接缝）：每源层传**未 warp 源纹理 + Hinv**（GPU 在 shader 里 gather
   //   warp，源纹理只在内容变时重传）。替代旧 CPU renderSource。落源层 z（floatFor 按 leaf.id 匹配）。
   _glFloatInputs(): FloatInput[] {
@@ -764,10 +769,9 @@ export class Board {
   //   - clipTmp / eraseTmp: board 的复用离屏池（grow-only，避免每帧分配）
   _layerCompositeOpts() {
     const overlay = this._overlayProvider?.();
-    // 自由变换浮层：渲染插在源层 z 位（compositeLayers 的 floatFor 接缝）。render 缓存到 f._renderCache，
-    //   mesh 变了 FloatingTransform 那边 invalidate。Slice 3 起 float 可有多 source → 按 node 匹配多次返回。
-    const lassoInfo = this._lassoProvider?.();
-    const float = (lassoInfo && lassoInfo.floating) ? lassoInfo.floating : null;
+    // 此 opts 现仅 ensureCompositeCache（吸管 composite 取色）用——非 display（display 全走 GL）。
+    //   floatFor 已去：吸管不可能在自由变换进行中触发（gizmo 占指针），故吸管 composite 不含浮层（GPU warp 单一 SSoT，
+    //   CPU renderSource 已归档）。display 的浮层在 GL 合成器 _floatPass（GPU warp）。
     return {
       source: (layer: Layer) =>
         (this._activeSurrogateLayerId === layer.id && this._activeSurrogateCanvas)
@@ -779,15 +783,6 @@ export class Board {
         }
         return lOverlay;
       },
-      floatFor: float ? (node: Layer) => {
-        // 多 source（组变换）：按 node 找它的 source；各 source 渲染缓存在自己身上（mesh 变了 FT invalidate）。
-        const src = float.sources.find((s) => s.layer === node);
-        if (!src) return null;
-        if (!src._renderCache) {
-          src._renderCache = renderSource(src as unknown as Parameters<typeof renderSource>[0], float.gizmoBbox as Parameters<typeof renderSource>[1], float.mesh as Parameters<typeof renderSource>[2], lassoInfo!.sampleMode as Parameters<typeof renderSource>[3]);
-        }
-        return src._renderCache;
-      } : undefined,
       clipTmp: (w: number, h: number) => this._getClipTmp(w, h),
       eraseTmp: (w: number, h: number) => this._getEraseComposite(w, h),
     };

@@ -21,7 +21,65 @@ import { compositeLayers } from "../../src/layer-composite.ts";
 import { BrushEngine } from "../../src/brush.ts";
 import { resolveBrush } from "../../src/resolved-brush.ts";
 import { PaintDoc } from "../../src/doc.ts";
-import { quadWarp, renderQuadPerPixel } from "../../src/floating-transform.ts";
+import { quadWarp } from "../../src/floating-transform.ts";
+
+// ---- CPU warp 参照（golden 基准）：v355 从 src/floating-transform 归档进 harness（运行时单一 GPU SSoT；
+//   这份 CPU 逐像素逆单应性 + 采样器只在测试里当 GPU warp 的对照基准，不在产品路径）。verbatim 复刻原实现。----
+type CpuMesh = { x: number; y: number }[][];
+function cpuNearest(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, di: number) {
+  const ix = Math.floor(sx), iy = Math.floor(sy);
+  if (ix < 0 || ix >= w || iy < 0 || iy >= h) return;
+  const p = (iy * w + ix) * 4;
+  ddat[di] = sdat[p]; ddat[di + 1] = sdat[p + 1]; ddat[di + 2] = sdat[p + 2]; ddat[di + 3] = sdat[p + 3];
+}
+function cpuBicubic(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, di: number) {
+  const ix = Math.floor(sx), iy = Math.floor(sy);
+  const k = (t: number) => { const a = -0.5; const at = Math.abs(t); if (at < 1) return (a + 2) * at * at * at - (a + 3) * at * at + 1; if (at < 2) return a * at * at * at - 5 * a * at * at + 8 * a * at - 4 * a; return 0; };
+  const kx = [k((ix - 1) - sx), k(ix - sx), k((ix + 1) - sx), k((ix + 2) - sx)];
+  const ky = [k((iy - 1) - sy), k(iy - sy), k((iy + 1) - sy), k((iy + 2) - sy)];
+  let r = 0, g = 0, b = 0, a = 0;
+  for (let j = 0; j < 4; j++) { const yy = iy - 1 + j; if (yy < 0 || yy >= h) continue;
+    for (let i = 0; i < 4; i++) { const xx = ix - 1 + i; if (xx < 0 || xx >= w) continue;
+      const p = (yy * w + xx) * 4, ww = kx[i] * ky[j], av = sdat[p + 3];
+      r += sdat[p] * av * ww; g += sdat[p + 1] * av * ww; b += sdat[p + 2] * av * ww; a += av * ww; } }
+  ddat[di + 3] = Math.max(0, Math.min(255, a));
+  if (a < 1e-4) { ddat[di] = ddat[di + 1] = ddat[di + 2] = 0; return; }
+  ddat[di] = Math.max(0, Math.min(255, r / a)); ddat[di + 1] = Math.max(0, Math.min(255, g / a)); ddat[di + 2] = Math.max(0, Math.min(255, b / a));
+}
+function cpuBilinear(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, di: number) {
+  const ix = Math.floor(sx), iy = Math.floor(sy), fx = sx - ix, fy = sy - iy;
+  if (ix < -1 || ix >= w || iy < -1 || iy >= h) return;
+  const x0 = ix < 0 ? 0 : (ix >= w ? w - 1 : ix), x1 = (ix + 1) < 0 ? 0 : ((ix + 1) >= w ? w - 1 : (ix + 1));
+  const y0 = iy < 0 ? 0 : (iy >= h ? h - 1 : iy), y1 = (iy + 1) < 0 ? 0 : ((iy + 1) >= h ? h - 1 : (iy + 1));
+  const p00 = (y0 * w + x0) * 4, p10 = (y0 * w + x1) * 4, p01 = (y1 * w + x0) * 4, p11 = (y1 * w + x1) * 4;
+  const w00 = (1 - fx) * (1 - fy), w10 = fx * (1 - fy), w01 = (1 - fx) * fy, w11 = fx * fy;
+  const a00 = sdat[p00 + 3], a10 = sdat[p10 + 3], a01 = sdat[p01 + 3], a11 = sdat[p11 + 3];
+  const a = a00 * w00 + a10 * w10 + a01 * w01 + a11 * w11;
+  ddat[di + 3] = a;
+  if (a < 1e-4) { ddat[di] = ddat[di + 1] = ddat[di + 2] = 0; return; }
+  for (let c = 0; c < 3; c++) ddat[di + c] = (sdat[p00 + c] * a00 * w00 + sdat[p10 + c] * a10 * w10 + sdat[p01 + c] * a01 * w01 + sdat[p11 + c] * a11 * w11) / a;
+}
+function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number, mesh: CpuMesh, sampleMode: string): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
+  const q = quadWarp(mesh as never);
+  if (!q) return null;
+  const { hinv: Hinv, minX, minY, maxX, maxY } = q;
+  const dstW = maxX - minX, dstH = maxY - minY;
+  const out = new ImageData(dstW, dstH), odata = out.data, sdata = srcImageData.data;
+  for (let dy = 0; dy < dstH; dy++) for (let dx = 0; dx < dstW; dx++) {
+    const docX = minX + dx + 0.5, docY = minY + dy + 0.5;
+    const w = Hinv[6] * docX + Hinv[7] * docY + Hinv[8];
+    if (Math.abs(w) < 1e-9) continue;
+    const u = (Hinv[0] * docX + Hinv[1] * docY + Hinv[2]) / w, v = (Hinv[3] * docX + Hinv[4] * docY + Hinv[5]) / w;
+    if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+    const sx = u * srcW, sy = v * srcH, di = (dy * dstW + dx) * 4;
+    if (sampleMode === "nearest") cpuNearest(sdata, srcW, srcH, sx, sy, odata, di);
+    else if (sampleMode === "bicubic") cpuBicubic(sdata, srcW, srcH, sx, sy, odata, di);
+    else cpuBilinear(sdata, srcW, srcH, sx, sy, odata, di);
+  }
+  const canvas = document.createElement("canvas"); canvas.width = dstW; canvas.height = dstH;
+  canvas.getContext("2d")!.putImageData(out, 0, 0);
+  return { canvas, dstX: minX, dstY: minY };
+}
 
 interface Check { name: string; ok: boolean; detail: string; }
 type Add = (name: string, ok: boolean, detail?: string) => void;
@@ -571,6 +629,18 @@ function warpParity(glctx: GLContext, add: Add): void {
     if (rr) rctx.drawImage(rr.canvas as CanvasImageSource, rr.dstX, rr.dstY);   // warp source-over 底
     const { md, at } = maxPremulDiff(rctx.getImageData(0, 0, N, N).data, glpx, N);
     add(`warp:${name} 扭曲quad GPU vs CPU renderQuadPerPixel`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  }
+  // commit 烤定路径：comp.warpToCanvas（straight，无合成）vs CPU renderQuadPerPixel（straight），同 bbox 逐位。
+  if (q) {
+    const bake = comp.warpToCanvas(srcCanvas as unknown as TexImageSource, sw, sh, q.hinv, 2, q.minX, q.minY, q.maxX - q.minX, q.maxY - q.minY);
+    const cpu = renderQuadPerPixel(srcImg, sw, sh, mesh as never, "bicubic");
+    const gpC = document.createElement("canvas"); gpC.width = N; gpC.height = N; const gpx2 = gpC.getContext("2d")!;
+    if (bake) gpx2.drawImage(bake.canvas, bake.dstX, bake.dstY);
+    const cpC = document.createElement("canvas"); cpC.width = N; cpC.height = N; const cpx2 = cpC.getContext("2d")!;
+    if (cpu) cpx2.drawImage(cpu.canvas as CanvasImageSource, cpu.dstX, cpu.dstY);
+    const gb = new Uint8Array(gpx2.getImageData(0, 0, N, N).data.buffer);
+    const { md, at } = maxPremulDiff(cpx2.getImageData(0, 0, N, N).data, gb, N);
+    add("warpbake:commit GPU warpToCanvas vs CPU renderQuadPerPixel", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
   }
   lt.index.dispose(); glctx.gl.deleteTexture(stex);
 }

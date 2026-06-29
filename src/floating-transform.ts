@@ -25,15 +25,18 @@ type Mesh = Point[][];                          // 2×2：[[TL,TR],[BL,BR]]
 interface Rect { x: number; y: number; w: number; h: number; }
 type SampleMode = "nearest" | "bilinear" | "bicubic";
 
-interface RenderResult { canvas: Bitmap; dstX: number; dstY: number; }
+// commit 烤定的 GPU warp fn（board.glWarpBakeFn 注入）：warp 源 → straight RGBA canvas + doc 坐标位置。
+//   mode：0=nearest 1=bilinear 2=bicubic（对齐 WARP shader）。GL 失败=null（commit 不烤）。
+export type WarpBakeFn = (srcCanvas: CanvasImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null;
 
+// 一个浮层源：未 warp 的 lift 像素（canvas/imageData，trim 到 selection bbox）+ 落回它哪个 layer。
+//   display/commit 的 warp 全走 GPU（board._glFloatInputs→_floatPass / glBoard.warpToCanvas），无 CPU render 缓存。
 interface Source {
   layer: Layer;
   canvas: Bitmap;
   imageData: ImageData;
   rect: Rect;
   preSnap: ReturnType<Layer["snapshot"]>;
-  _renderCache: RenderResult | null;
 }
 
 interface Floating {
@@ -43,7 +46,6 @@ interface Floating {
   meshN: number;
   mesh: Mesh;
   uniformAspect: number;
-  _renderCache?: RenderResult | null;
 }
 
 type TransformModeKind = "free" | "uniform" | "distort";
@@ -97,7 +99,7 @@ export class FloatingTransform {
   setSampleMode(m: string) {
     if (m === "nearest" || m === "bilinear" || m === "bicubic") {
       this._sampleMode = m;
-      if (this._floating) { this._floating._renderCache = null; this.onChange(); }
+      if (this._floating) this.onChange();   // GPU 每帧按 mode 重 warp，无 CPU 缓存可清
     }
   }
   getSampleMode() { return this._sampleMode; }
@@ -168,7 +170,7 @@ export class FloatingTransform {
     const mdef = MODES[mode as TransformModeKind];
     if (mdef && mdef.projectOnEnter) {
       const projected = mdef.projectOnEnter(f.mesh, f.mode, f.uniformAspect);
-      if (projected) { f.mesh = projected; invalidateRender(f); }
+      if (projected) f.mesh = projected;
     }
     f.mode = mode;
     this.onChange();
@@ -218,40 +220,45 @@ export class FloatingTransform {
     } else if (d.kind === "rotate") {
       applyRotate(f.mesh, d.meshSnap, d, x, y);
     }
-    invalidateRender(f);              // mesh 变了，作废各 source 的 cached render
-    this.onChange();
+    this.onChange();                  // mesh 变 → board 每帧用新 mesh 重算 Hinv 重 warp（GPU，无 CPU 缓存）
   }
   endDrag() { this._drag = null; }
 
-  // 把一个 source 的浮层像素落回它自己的 layer（commit/stamp 共用）。
-  _bakeDown(src: Source) {
-    const layer = src.layer;
-    const rendered = renderSource(src, this._floating!.gizmoBbox, this._floating!.mesh, this._sampleMode);
+  // 把一个 source 的浮层像素落回它自己的 layer（commit/stamp 共用）。GPU 烤定：sourceWarpMatrix 算 Hinv+bbox →
+  //   bakeFn（board.glWarpBakeFn = GPU warp readback）→ straight canvas → editRegion 落层。与 live warp 同采样器，
+  //   零 preview/commit 漂移。bakeFn 缺省（GL 失败）→ 不烤（app 已显「需 WebGL2」）。
+  _bakeDown(src: Source, bakeFn?: WarpBakeFn | null) {
+    if (!bakeFn) return;
+    const f = this._floating!;
+    const wp = sourceWarpMatrix(src, f.gizmoBbox, f.mesh);
+    if (!wp || wp.bw <= 0 || wp.bh <= 0) return;
+    const mode = this._sampleMode === "nearest" ? 0 : this._sampleMode === "bicubic" ? 2 : 1;
+    const rendered = bakeFn(src.canvas, src.rect.w, src.rect.h, wp.hinv, mode, wp.bx, wp.by, wp.bw, wp.bh);
     if (!rendered) return;
     const rx0 = Math.floor(rendered.dstX), ry0 = Math.floor(rendered.dstY);
     const rx1 = Math.ceil(rendered.dstX + rendered.canvas.width), ry1 = Math.ceil(rendered.dstY + rendered.canvas.height);
-    layer.editRegion(rx0, ry0, rx1 - rx0, ry1 - ry0, (ctx, ox, oy) => {
+    src.layer.editRegion(rx0, ry0, rx1 - rx0, ry1 - ry0, (ctx, ox, oy) => {
       ctx.drawImage(rendered.canvas, rendered.dstX - ox, rendered.dstY - oy);
     });
   }
 
   // Stamp：各 source 写回各自 layer，KEEP float（不 push history；commit 时一次性 push）。
-  stamp() {
+  stamp(bakeFn?: WarpBakeFn | null) {
     const f = this._floating;
     if (!f) return false;
-    for (const src of f.sources) this._bakeDown(src);
+    for (const src of f.sources) this._bakeDown(src, bakeFn);
     this.onChange();
     return true;
   }
 
   // -------- commit / cancel --------
-  // commit(doc)：各 source 落回各自 layer，返回多层 "lasso" history entry；自动清 doc.selection（v119）。
-  commit(doc: DocLike | null) {
+  // commit(doc, bakeFn)：各 source 落回各自 layer，返回多层 "lasso" history entry；自动清 doc.selection（v119）。
+  commit(doc: DocLike | null, bakeFn?: WarpBakeFn | null) {
     const f = this._floating;
     if (!f) return null;
     const layers: Array<{ layerId: number; before: Source["preSnap"]; after: ReturnType<Layer["snapshot"]>; beforeBlob: null; afterBlob: null }> = [];
     for (const src of f.sources) {
-      this._bakeDown(src);
+      this._bakeDown(src, bakeFn);
       layers.push({ layerId: src.layer.id, before: src.preSnap, after: src.layer.snapshot(), beforeBlob: null, afterBlob: null });
     }
     const prevSelection = doc?.selection || null;
@@ -273,15 +280,7 @@ export class FloatingTransform {
   }
 
   // -------- 外部查询 --------
-  // 给某节点（叶）取它的浮层 render（{canvas,dstX,dstY}）或 null。board 的 floatFor 接缝调它（按 z 插）。
-  renderForLayer(layer: Layer) {
-    const f = this._floating;
-    if (!f) return null;
-    const src = f.sources.find((s) => s.layer === layer);
-    if (!src) return null;
-    if (!src._renderCache) src._renderCache = renderSource(src, f.gizmoBbox, f.mesh, this._sampleMode);
-    return src._renderCache;
-  }
+  // （renderForLayer 已删：浮层 display 走 GPU warp [board._glFloatInputs→_floatPass]，不再有 CPU per-layer render。）
 
   getFloatingScreenBbox() {
     const f = this._floating;
@@ -559,7 +558,6 @@ function projectToUniformRect(mesh: Mesh, aspect: number): Mesh {
 
 // ============ 几何工具 ============
 // 作废所有 source 的 cached render（mesh / mode 变了）。
-function invalidateRender(f: Floating) { if (f.sources) for (const s of f.sources) s._renderCache = null; }
 // 矩形并集（{x,y,w,h}）。
 function unionRects(rects: Rect[]): Rect {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -667,7 +665,7 @@ export function bakeSource(sel: Selection, layer: Layer, opts: LiftOpts = {}): S
     });
   }
 
-  return { layer, canvas: srcCanvas, imageData: srcImageData, rect: { x: tx0, y: ty0, w: srcW, h: srcH }, preSnap, _renderCache: null };
+  return { layer, canvas: srcCanvas, imageData: srcImageData, rect: { x: tx0, y: ty0, w: srcW, h: srcH }, preSnap };
 }
 
 // 一个 source rect 经共享 gizmo（gizmoBbox 初始帧 → 当前 mesh quad 的 homography）映出的 dest quad。
@@ -682,14 +680,7 @@ export function sourceDestQuad(rect: Rect, gizmoBbox: Rect, mesh: Mesh): Mesh | 
     [map(rect.x, rect.y + rect.h), map(rect.x + rect.w, rect.y + rect.h)],
   ];
 }
-// 把一个 source 按共享 gizmo 渲染成 {canvas,dstX,dstY}。
-export function renderSource(source: Source, gizmoBbox: Rect, mesh: Mesh, sampleMode: SampleMode = "bilinear"): RenderResult | null {
-  const destQuad = sourceDestQuad(source.rect, gizmoBbox, mesh);
-  if (!destQuad) return null;
-  return renderQuadPerPixel(source.imageData, source.rect.w, source.rect.h, destQuad, sampleMode);
-}
-
-// 单位方格 → quad 的前向求值（renderSource 把 source 角投到 dest 用）。
+// 单位方格 → quad 的前向求值（sourceDestQuad 把 source 角投到 dest 用）。
 function homographySample(H: Homography, u: number, v: number): Point {
   const w = H.g * u + H.h * v + 1;
   return { x: (H.a * u + H.b * v + H.c) / w, y: (H.d * u + H.e * v + H.f) / w };
@@ -722,44 +713,9 @@ export function sourceWarpMatrix(source: Source, gizmoBbox: Rect, mesh: Mesh): {
   return { hinv: q.hinv, bx: q.minX, by: q.minY, bw: q.maxX - q.minX, bh: q.maxY - q.minY };
 }
 
-// 2×2 mesh：每个 dst pixel 通过 inverse homography 算回 src 单位方格 (u,v) → 采样源像素。
-// 零 PS1 artifact，零 C0 折角（quad 内是 1 个连续映射）。返回 { canvas, dstX, dstY }（doc 坐标左上角）。
-export function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number, mesh: Mesh, sampleMode: SampleMode = "bilinear"): RenderResult | null {
-  const q = quadWarp(mesh);
-  if (!q) return null;
-  const { hinv: Hinv, minX, minY, maxX, maxY } = q;
-  const dstW = maxX - minX, dstH = maxY - minY;
-
-  const out = new ImageData(dstW, dstH);
-  const odata = out.data;
-  const sdata = srcImageData.data;
-
-  for (let dy = 0; dy < dstH; dy++) {
-    for (let dx = 0; dx < dstW; dx++) {
-      const docX = minX + dx + 0.5;     // pixel center
-      const docY = minY + dy + 0.5;
-      const w = Hinv[6] * docX + Hinv[7] * docY + Hinv[8];
-      if (Math.abs(w) < 1e-9) continue;
-      const u = (Hinv[0] * docX + Hinv[1] * docY + Hinv[2]) / w;
-      const v = (Hinv[3] * docX + Hinv[4] * docY + Hinv[5]) / w;
-      if (u < 0 || u > 1 || v < 0 || v > 1) continue;
-      const sx = u * srcW;
-      const sy = v * srcH;
-      if (sampleMode === "nearest") {
-        nearestSample(sdata, srcW, srcH, sx, sy, odata, (dy * dstW + dx) * 4);
-      } else if (sampleMode === "bicubic") {
-        bicubicSample(sdata, srcW, srcH, sx, sy, odata, (dy * dstW + dx) * 4);
-      } else {
-        bilinearSample(sdata, srcW, srcH, sx, sy, odata, (dy * dstW + dx) * 4);
-      }
-    }
-  }
-
-  const canvas = makeBitmap(dstW, dstH);
-  const c = canvas.getContext("2d")!;
-  c.putImageData(out, 0, 0);
-  return { canvas, dstX: minX, dstY: minY };
-}
+// CPU 逐像素 warp（renderQuadPerPixel）+ 三采样器（nearest/bilinear/bicubic）已归档（v355）：display+commit 全
+//   走 GPU warp（gl-compositor WARP_FRAG/WARP_BAKE_FRAG，复用 quadWarp 同矩阵）。golden 的 CPU 对照基准搬进
+//   test/gl-smoke/harness.ts（test-only，非运行时路径）。下面的 homography/invertMat3 是 quadWarp 的依赖，留下。
 
 // 单位方格 (0,0)-(1,1) → 一般四边形 (TL,TR,BR,BL) 的 homography（Heckbert 1989 闭式解）。
 //   x = (a·u + b·v + c) / (g·u + h·v + 1)；平行四边形时 g=h=0 退化为 affine。
@@ -781,81 +737,6 @@ function homographyFromUnitSquareToQuad(tl: Point, tr: Point, br: Point, bl: Poi
     f: tl.y,
     g, h,
   };
-}
-
-// 最近邻 sample：pixel art / 硬边
-function nearestSample(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, dstIdx: number) {
-  const ix = Math.floor(sx), iy = Math.floor(sy);
-  if (ix < 0 || ix >= w || iy < 0 || iy >= h) return;
-  const p = (iy * w + ix) * 4;
-  ddat[dstIdx]     = sdat[p];
-  ddat[dstIdx + 1] = sdat[p + 1];
-  ddat[dstIdx + 2] = sdat[p + 2];
-  ddat[dstIdx + 3] = sdat[p + 3];
-}
-// Catmull-Rom bicubic（B=0, C=0.5）。4×4 taps。premultiplied alpha 防选区边缘黑边。
-function bicubicSample(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, dstIdx: number) {
-  const ix = Math.floor(sx), iy = Math.floor(sy);
-  const k = (t: number) => {
-    const a = -0.5;
-    const at = Math.abs(t);
-    if (at < 1) return (a + 2) * at * at * at - (a + 3) * at * at + 1;
-    if (at < 2) return a * at * at * at - 5 * a * at * at + 8 * a * at - 4 * a;
-    return 0;
-  };
-  const kx = [k((ix - 1) - sx), k(ix - sx), k((ix + 1) - sx), k((ix + 2) - sx)];
-  const ky = [k((iy - 1) - sy), k(iy - sy), k((iy + 1) - sy), k((iy + 2) - sy)];
-  let r = 0, g = 0, b = 0, a = 0;
-  for (let j = 0; j < 4; j++) {
-    const yy = iy - 1 + j;
-    if (yy < 0 || yy >= h) continue;
-    for (let i = 0; i < 4; i++) {
-      const xx = ix - 1 + i;
-      if (xx < 0 || xx >= w) continue;
-      const p = (yy * w + xx) * 4;
-      const ww = kx[i] * ky[j];
-      const av = sdat[p + 3];
-      r += sdat[p]     * av * ww;
-      g += sdat[p + 1] * av * ww;
-      b += sdat[p + 2] * av * ww;
-      a += av * ww;
-    }
-  }
-  ddat[dstIdx + 3] = Math.max(0, Math.min(255, a));
-  if (a < 1e-4) { ddat[dstIdx] = ddat[dstIdx + 1] = ddat[dstIdx + 2] = 0; return; }
-  ddat[dstIdx]     = Math.max(0, Math.min(255, r / a));
-  ddat[dstIdx + 1] = Math.max(0, Math.min(255, g / a));
-  ddat[dstIdx + 2] = Math.max(0, Math.min(255, b / a));
-}
-// bilinear sample。v124：clamp x0/x1/y0/y1（replicate edge）防边缘黑边 + 半透。
-// v216：premultiplied alpha 插值，透明邻居对 RGB 贡献为 0（防 PNG 暗边）。
-function bilinearSample(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, dstIdx: number) {
-  const ix = Math.floor(sx);
-  const iy = Math.floor(sy);
-  const fx = sx - ix;
-  const fy = sy - iy;
-  if (ix < -1 || ix >= w || iy < -1 || iy >= h) return;
-  const x0 = ix < 0 ? 0 : (ix >= w ? w - 1 : ix);
-  const x1 = (ix + 1) < 0 ? 0 : ((ix + 1) >= w ? w - 1 : (ix + 1));
-  const y0 = iy < 0 ? 0 : (iy >= h ? h - 1 : iy);
-  const y1 = (iy + 1) < 0 ? 0 : ((iy + 1) >= h ? h - 1 : (iy + 1));
-  const p00 = (y0 * w + x0) * 4;
-  const p10 = (y0 * w + x1) * 4;
-  const p01 = (y1 * w + x0) * 4;
-  const p11 = (y1 * w + x1) * 4;
-  const w00 = (1 - fx) * (1 - fy);
-  const w10 = fx * (1 - fy);
-  const w01 = (1 - fx) * fy;
-  const w11 = fx * fy;
-  const a00 = sdat[p00 + 3], a10 = sdat[p10 + 3], a01 = sdat[p01 + 3], a11 = sdat[p11 + 3];
-  const a = a00 * w00 + a10 * w10 + a01 * w01 + a11 * w11;
-  ddat[dstIdx + 3] = a;
-  if (a < 1e-4) { ddat[dstIdx] = ddat[dstIdx + 1] = ddat[dstIdx + 2] = 0; return; }
-  for (let c = 0; c < 3; c++) {
-    const pm = sdat[p00 + c] * a00 * w00 + sdat[p10 + c] * a10 * w10
-             + sdat[p01 + c] * a01 * w01 + sdat[p11 + c] * a11 * w11;
-    ddat[dstIdx + c] = pm / a;
-  }
 }
 
 // 3×3 matrix invert（normalize so [8] = 1）

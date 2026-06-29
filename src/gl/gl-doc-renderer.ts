@@ -162,6 +162,11 @@ export class GLDocRenderer {
     return { canvas, dstX: bx, dstY: by };
   }
 
+  // commit 烤定：warp 源 → straight canvas（floating-transform._bakeDown 用，复用 live 同采样器）。
+  warpToCanvas(srcCanvas: TexImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {
+    return this._comp.warpToCanvas(srcCanvas, srcW, srcH, hinv, mode, bx, by, bw, bh);
+  }
+
   // 设置/清除自由变换浮层（board 每帧调；空数组=无）。GPU warp：**源纹理只在 srcCanvas 引用变时重传**（拖动中
   //   源像素稳定 → 整条拖动只上传一次），每帧只更新 Hinv/mode（_floats 里）。这是把 warp 移上 GPU 的性能本质。
   setFloats(floats: FloatInput[], _docW: number, _docH: number): void {

@@ -4,4 +4,4 @@
 //
 // v121 起改 ES module 导出：bundle 后 esbuild 把字面值 inline 进 webpaint-<hash>.mjs。
 // 跟 bundle 一起 hash 出新文件名，不再需要 SW 合成 / import URL rewrite 等老花招。
-export const WEBPAINT_VERSION = "v354-2026-06-28";
+export const WEBPAINT_VERSION = "v355-2026-06-28";
