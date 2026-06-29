@@ -61,7 +61,9 @@ export function resolveClipBases(nodes: CompNode[]): (CompNode | null)[] {
       out[i] = base;
     } else {
       out[i] = null;
-      const hasContent = n.kind === "group" ? n.visible : (n.visible && n.hasContent);
+      // 浮层叶（自由变换中基底被挖洞 hasContent=false，但内容在 .float 里）也算有内容 → 仍当合法 clip 基底，
+      //   否则组变换时 clip 浮层找不到基底、裁剪断掉（见 docs/transform-clip-gpu-warp.md）。
+      const hasContent = n.kind === "group" ? n.visible : (n.visible && (n.hasContent || !!n.float));
       if (!n.clip && hasContent) base = n;
     }
   }

@@ -575,6 +575,52 @@ function warpParity(glctx: GLContext, add: Add): void {
   lt.index.dispose(); glctx.gl.deleteTexture(stex);
 }
 
+// ---- E5c) 组变换 clip 浮层 golden：clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather）vs CPU ----
+//   基底源 alpha=蒙版形状（左实右透），clip 源全不透明 → clip 应只显在基底实处。两者同 mesh warp。
+function warpClipParity(glctx: GLContext, add: Add): void {
+  const N = 192;
+  const backend = new GLTileBackend(glctx, 16); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  const bgCanvas = makeLayerCanvas(N, N, () => [30, 30, 30, 255]);
+  const bg = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, bgCanvas) }, N, N);
+  const empty = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, makeLayerCanvas(N, N, () => [0, 0, 0, 0])) }, N, N);
+  const sw = 64, sh = 48;
+  const baseSrc = makeLayerCanvas(sw, sh, (x) => x < sw / 2 ? [40, 120, 230, 255] : [40, 120, 230, 0]);   // 蒙版：左实右透
+  const clipSrc = makeLayerCanvas(sw, sh, () => [230, 80, 40, 255]);                                       // clip 内容：全不透明红
+  const baseImg = baseSrc.getContext("2d")!.getImageData(0, 0, sw, sh);
+  const clipImg = clipSrc.getContext("2d")!.getImageData(0, 0, sw, sh);
+  const baseTex = texFromCanvas(glctx, baseSrc), clipTex = texFromCanvas(glctx, clipSrc);
+  const mesh = [[{ x: 30, y: 40 }, { x: 150, y: 25 }], [{ x: 50, y: 150 }, { x: 170, y: 130 }]];
+  const q = quadWarp(mesh as never);
+  if (!q) { add("warpclip 取 quadWarp", false, "null"); return; }
+  const baseFD = { tex: baseTex, srcW: sw, srcH: sh, hinv: q.hinv, mode: 2 };
+  const clipFD = { tex: clipTex, srcW: sw, srcH: sh, hinv: q.hinv, mode: 2 };
+  // 树：bg(底) + 基底叶(空 tile + base float) + clip 叶(空 tile, clip=true, clip float)
+  const tree = [
+    { kind: "leaf", srcIndex: bg.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: null },
+    { kind: "leaf", srcIndex: empty.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: baseFD },
+    { kind: "leaf", srcIndex: empty.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: clipFD },
+  ];
+  const accum = comp.composite(backend.texture, tree as never, N, N);
+  const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
+  // CPU 参照：base/clip 各 warp（同 mesh → 同 dst），clip 用 base alpha destination-in，再依次 source-over 底。
+  const bw = renderQuadPerPixel(baseImg, sw, sh, mesh as never, "bicubic");
+  const cw = renderQuadPerPixel(clipImg, sw, sh, mesh as never, "bicubic");
+  const ref = document.createElement("canvas"); ref.width = N; ref.height = N; const rctx = ref.getContext("2d")!;
+  rctx.drawImage(bgCanvas, 0, 0);
+  if (bw) rctx.drawImage(bw.canvas as CanvasImageSource, bw.dstX, bw.dstY);   // 基底浮层
+  if (cw && bw) {
+    const cl = document.createElement("canvas"); cl.width = cw.canvas.width; cl.height = cw.canvas.height;
+    const cc = cl.getContext("2d")!;
+    cc.drawImage(cw.canvas as CanvasImageSource, 0, 0);
+    cc.globalCompositeOperation = "destination-in";
+    cc.drawImage(bw.canvas as CanvasImageSource, bw.dstX - cw.dstX, bw.dstY - cw.dstY);   // base alpha 蒙版（同 mesh 一般同偏移）
+    rctx.drawImage(cl, cw.dstX, cw.dstY);
+  }
+  const { md, at } = maxPremulDiff(rctx.getImageData(0, 0, N, N).data, glpx, N);
+  add("warpclip:组变换 clip 浮层裁基底 GPU vs CPU", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  bg.index.dispose(); empty.index.dispose(); glctx.gl.deleteTexture(baseTex); glctx.gl.deleteTexture(clipTex);
+}
+
 // ---- E3) 全管线 golden：真 BrushEngine 描边 → collectStamps → GPU 栅格 vs 解析公式参照 ----
 //   验证「手感数学(CPU 出 stamp 列表) + GPU 栅格」整条管线：collectStamps 的 stamp（_walkStamps 间距 +
 //   _stampParams 压感/taper）经 GPU 栅格，== 同 stamp 列表的解析 falloff（wash:max / buildup:over）。
@@ -697,6 +743,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { checkerParity(glctx, add); } catch (e) { add("checker parity", false, String(e)); }
   try { floatParity(glctx, add); } catch (e) { add("float parity", false, String(e)); }
   try { warpParity(glctx, add); } catch (e) { add("warp parity", false, String(e)); }
+  try { warpClipParity(glctx, add); } catch (e) { add("warpclip parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);

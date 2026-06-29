@@ -53,6 +53,12 @@ uniform sampler2D u_src;        // 源纹理（未 warp，直值），尺寸 u_s
 uniform vec2 u_srcSize;         // srcW, srcH
 uniform mat3 u_Hinv;            // doc(x,y,1) → 源单位方格 (u,v,w)，透视除（row-major，transpose 上传）
 uniform int u_mode;            // 0=nearest 1=bilinear 2=bicubic
+// 组变换 clip：clip 浮层裁到基底浮层的 warp 后 alpha（in-shader gather，零额外内存，见 docs/transform-clip-gpu-warp.md）。
+uniform int u_clip;            // 1=裁到基底浮层
+uniform sampler2D u_baseTex;   // 基底浮层源纹理（已驻留），尺寸 u_baseSize
+uniform vec2 u_baseSize;
+uniform mat3 u_baseHinv;       // doc → 基底源单位方格
+uniform int u_baseMode;
 out vec4 o;
 
 // Catmull-Rom cubic（a=-0.5），|t|≥2 → 0。复刻 floating-transform.ts bicubicSample 的 k()。
@@ -63,25 +69,20 @@ float cubicK(float t){
   if (at < 2.0) return a*at*at*at - 5.0*a*at*at + 8.0*a*at - 4.0*a;
   return 0.0;
 }
-// 越界返回 alpha=0（透明）的直值 texel。
-vec4 fetchT(int x, int y, int W, int H){
-  if (x < 0 || x >= W || y < 0 || y >= H) return vec4(0.0);
-  return texelFetch(u_src, ivec2(x, y), 0);
-}
-// 返回**直值** RGBA（与 CPU 采样器输出同：rgb 反预乘、a 钳）。
-vec4 sampleSrc(float sx, float sy){
-  int W = int(u_srcSize.x), H = int(u_srcSize.y);
+// 返回**直值** RGBA（与 CPU 采样器输出同：rgb 反预乘、a 钳）。sampler/size/mode 参数化 → 源与基底共用。
+vec4 sampleSrc(sampler2D tex, vec2 size, int mode, float sx, float sy){
+  int W = int(size.x), H = int(size.y);
   int ix = int(floor(sx)), iy = int(floor(sy));
-  if (u_mode == 0){                                  // nearest：越界透明
+  if (mode == 0){                                    // nearest：越界透明
     if (ix < 0 || ix >= W || iy < 0 || iy >= H) return vec4(0.0);
-    return texelFetch(u_src, ivec2(ix, iy), 0);
-  } else if (u_mode == 1){                           // bilinear：replicate-edge clamp，premult 插值
+    return texelFetch(tex, ivec2(ix, iy), 0);
+  } else if (mode == 1){                             // bilinear：replicate-edge clamp，premult 插值
     float fx = sx - float(ix), fy = sy - float(iy);
     if (ix < -1 || ix >= W || iy < -1 || iy >= H) return vec4(0.0);
     int x0 = clamp(ix, 0, W-1), x1 = clamp(ix+1, 0, W-1);
     int y0 = clamp(iy, 0, H-1), y1 = clamp(iy+1, 0, H-1);
-    vec4 c00 = texelFetch(u_src, ivec2(x0,y0), 0), c10 = texelFetch(u_src, ivec2(x1,y0), 0);
-    vec4 c01 = texelFetch(u_src, ivec2(x0,y1), 0), c11 = texelFetch(u_src, ivec2(x1,y1), 0);
+    vec4 c00 = texelFetch(tex, ivec2(x0,y0), 0), c10 = texelFetch(tex, ivec2(x1,y0), 0);
+    vec4 c01 = texelFetch(tex, ivec2(x0,y1), 0), c11 = texelFetch(tex, ivec2(x1,y1), 0);
     float w00=(1.0-fx)*(1.0-fy), w10=fx*(1.0-fy), w01=(1.0-fx)*fy, w11=fx*fy;
     float a = c00.a*w00 + c10.a*w10 + c01.a*w01 + c11.a*w11;
     if (a < 4.0e-7) return vec4(0.0);                // CPU a<1e-4(0..255 尺) ≈ a<3.9e-7(0..1)
@@ -96,7 +97,7 @@ vec4 sampleSrc(float sx, float sy){
     int yy = iy-1+j; if (yy<0||yy>=H) continue;
     for (int i=0;i<4;i++){
       int xx = ix-1+i; if (xx<0||xx>=W) continue;
-      vec4 c = texelFetch(u_src, ivec2(xx,yy), 0);
+      vec4 c = texelFetch(tex, ivec2(xx,yy), 0);
       float av = c.a, ww = kx[i]*ky[j];
       r += c.r*av*ww; g += c.g*av*ww; b += c.b*av*ww; a += av*ww;
     }
@@ -105,18 +106,23 @@ vec4 sampleSrc(float sx, float sy){
   if (a < 4.0e-7) return vec4(0.0);
   return vec4(clamp(r/a,0.0,1.0), clamp(g/a,0.0,1.0), clamp(b/a,0.0,1.0), aOut);
 }
+// doc 像素 → 某浮层源 (u,v)，落 [0,1]² 采样直值，否则透明（quad 外）。
+vec4 warpSample(sampler2D tex, vec2 size, mat3 hinv, int mode, vec2 docXY){
+  vec3 uvw = hinv * vec3(docXY, 1.0);
+  if (abs(uvw.z) < 1.0e-9) return vec4(0.0);
+  float u = uvw.x / uvw.z, v = uvw.y / uvw.z;
+  if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) return vec4(0.0);
+  return sampleSrc(tex, size, mode, u * size.x, v * size.y);
+}
 void main(){
   vec4 dst = texture(u_dst, v_uv);                   // 预乘 (Pd, ad)
   vec2 docXY = v_uv * u_docSize;                     // dst 像素中心（fragment 中心 → +0.5 自带）
-  vec3 uvw = u_Hinv * vec3(docXY, 1.0);
-  vec4 src = vec4(0.0);
-  if (abs(uvw.z) >= 1.0e-9){
-    float u = uvw.x / uvw.z, v = uvw.y / uvw.z;
-    if (u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0){
-      vec4 s = sampleSrc(u * u_srcSize.x, v * u_srcSize.y);  // 直值
-      src = vec4(s.rgb * s.a, s.a);                          // → 预乘
-    }
+  vec4 s = warpSample(u_src, u_srcSize, u_Hinv, u_mode, docXY);   // 直值
+  if (u_clip == 1){                                  // 裁到基底浮层 warp 后 alpha（clip 链共基底也对）
+    float baseA = warpSample(u_baseTex, u_baseSize, u_baseHinv, u_baseMode, docXY).a;
+    s.a *= baseA;
   }
+  vec4 src = vec4(s.rgb * s.a, s.a);                  // → 预乘
   o = src + dst * (1.0 - src.a);                     // source-over（预乘）
 }`;
 
@@ -216,8 +222,9 @@ export class GLCompositor {
           const srcKind = node.overlay ? "overlay" : "tiled";
           this._pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
         }
-        // 自由变换浮层：源层 z 之上 source-over α=1（独立 pass，不随层 mode/opacity/clip）。
-        if (node.float) this._floatPass(node.float, acc, docW, docH);
+        // 自由变换浮层：源层 z 之上 source-over α=1（独立 pass）。clip 浮层 + 基底也是浮层（组变换）→ 裁到基底
+        //   浮层 warp 后 alpha（base.float）；基底静止/非叶则不裁（见 docs/transform-clip-gpu-warp.md 边界）。
+        if (node.float) this._floatPass(node.float, acc, docW, docH, (node.clip && base && base.kind === "leaf") ? base.float ?? null : null);
       } else if (clipNoBase) {
         continue;
       } else if (needsIsolation(node)) {
@@ -278,18 +285,29 @@ export class GLCompositor {
 
   // 浮层 pass = GPU warp（gather）：源纹理 + Hinv → 逐 dst 像素逆映射采样 → source-over α=1 → acc.write，交换。
   //   全屏 quad（按 doc 像素 gather，剔除 quad 外）；blend 关、预乘 source-over 在 fragment 手算。
-  private _floatPass(f: FloatDesc, acc: Acc, docW: number, docH: number): void {
+  //   clipBase 非空（组变换里 clip 浮层的基底浮层）→ shader 里 clipα ×= gather 基底 alpha（零额外内存）。
+  private _floatPass(f: FloatDesc, acc: Acc, docW: number, docH: number, clipBase: FloatDesc | null = null): void {
     const gl = this._glctx.gl;
     const prog = this._glctx.program("warp", COMPOSITE_VERT, WARP_FRAG);
     gl.useProgram(prog);
-    gl.uniform2f(gl.getUniformLocation(prog, "u_docSize"), docW, docH);
-    gl.uniform2f(gl.getUniformLocation(prog, "u_srcSize"), f.srcW, f.srcH);
-    gl.uniformMatrix3fv(gl.getUniformLocation(prog, "u_Hinv"), true, f.hinv);   // row-major → transpose
-    gl.uniform1i(gl.getUniformLocation(prog, "u_mode"), f.mode);
+    const u = (name: string) => gl.getUniformLocation(prog, name);
+    gl.uniform2f(u("u_docSize"), docW, docH);
+    gl.uniform2f(u("u_srcSize"), f.srcW, f.srcH);
+    gl.uniformMatrix3fv(u("u_Hinv"), true, f.hinv);   // row-major → transpose
+    gl.uniform1i(u("u_mode"), f.mode);
+    gl.uniform1i(u("u_clip"), clipBase ? 1 : 0);
+    if (clipBase) {
+      gl.uniform2f(u("u_baseSize"), clipBase.srcW, clipBase.srcH);
+      gl.uniformMatrix3fv(u("u_baseHinv"), true, clipBase.hinv);
+      gl.uniform1i(u("u_baseMode"), clipBase.mode);
+    }
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, acc.read.tex);
     this._setSampler(prog, "u_dst", 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, f.tex);
     this._setSampler(prog, "u_src", 1);
+    // u_baseTex 固定单元 2（无 clip 也绑占位 acc.read，防未用 sampler 落单元 0 与 array 冲突，同 _pass 注释）。
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, clipBase ? clipBase.tex : acc.read.tex);
+    this._setSampler(prog, "u_baseTex", 2);
     gl.bindFramebuffer(gl.FRAMEBUFFER, acc.write.fbo);
     gl.disable(gl.BLEND);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
