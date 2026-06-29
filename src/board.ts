@@ -126,6 +126,7 @@ export class Board {
   _lastFrameT?: number | null;
   _fps?: number | null;
   _fpsEl?: HTMLElement;
+  _lastStampCount = 0;   // 上帧 overlay stamp 数（HUD；§1 长描边二次爆炸的直读量，仅 _showFps 时填）
   static _dispatchingDirty?: boolean;
   // WebGL2 渲染（v351 起唯一 display 路径）。init 失败 → _glBoard=null → _renderFull 显「需 WebGL2」。
   _glBoard?: GLBoard | null;
@@ -551,7 +552,11 @@ export class Board {
       }
     }
     this._lastFrameT = now;
-    this._ensureFpsEl().textContent = `${this._fps ? this._fps.toFixed(0) : "--"} fps`;
+    // 第二行 = 每帧合成归因（§2 layer-count / §3 float / §1 长描边）：Np=blend pass 数、Nf=浮层 warp pass、Ns=stamp 数。
+    //   pan/zoom 不重合成 → p/f 冻在上次合成帧（预期）。读这三个数即可定位掉帧在哪条，不必靠猜。
+    const s = this._glBoard?.stats;
+    const line2 = s ? `\n${s.passes}p ${s.floatPasses}f ${this._lastStampCount}s` : "";
+    this._ensureFpsEl().textContent = `${this._fps ? this._fps.toFixed(0) : "--"} fps${line2}`;
   }
 
   // v351 起 GL board 是唯一 display 路径（2D display 归档进 ARCHIVE/old-board-2d-display.ts）。
@@ -589,11 +594,13 @@ export class Board {
     const floatActive = !!this._lassoProvider?.()?.floating;
     const forceSync = floatActive && !this._wasFloatActive;
     this._wasFloatActive = floatActive;
+    const stampOverlay = this._glStampOverlay();
+    this._lastStampCount = this._showFps ? (stampOverlay?.stamps.length ?? 0) : 0;   // HUD only
     this._glBoard!.render(
       this.doc as unknown as GLDoc,
       this._docTransformParams(),
       W, H, this.viewport.scale, this._voidColor, docBg,
-      this._isLivePreview(), this._glFloatInputs(), this._glStampOverlay(),
+      this._isLivePreview(), this._glFloatInputs(), stampOverlay,
       liveSync as unknown as GLLeaf | null, forceSync, this._glSurrogate(),
     );
     // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。

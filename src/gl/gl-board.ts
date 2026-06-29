@@ -38,6 +38,8 @@ export class GLBoard {
   }
 
   get memory() { return this._renderer.memory; }
+  // 上一帧合成 pass 计数（dev HUD；只在内容/描边帧更新——pan/zoom 只 present 缓存不重合成，故读数冻在上次合成）。
+  get stats(): { passes: number; floatPasses: number } { return this._renderer.stats; }
   markContentDirty(): void { this._contentDirty = true; }
 
   // 渲染一帧。affine6 = board _applyDocTransform 的 device-px 6 参；canvasW/H = device px；scale = 视口缩放；

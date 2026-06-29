@@ -67,6 +67,9 @@ export class GLDocRenderer {
     return { usedTiles: this._pool.allocatedCount, capacity: this._pool.capacity, usedBytes: this._pool.byteUsage, committedBytes: this._backend.committedBytes };
   }
 
+  // 上一次合成的 pass 计数（dev HUD；compositor 在 composite() 入口清零）。
+  get stats(): { passes: number; floatPasses: number } { return this._comp.stats; }
+
   // 重传一个叶层像素 → tiles（内容变更后调）。
   syncLayer(leaf: DocLeaf, docW: number, docH: number): void {
     const old = this._layerTiles.get(leaf.id);

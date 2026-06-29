@@ -117,7 +117,8 @@ void main(){
   vec4 dst = texture(u_dst, v_uv);                   // 预乘 (Pd, ad)
   vec2 docXY = v_uv * u_docSize;                     // dst 像素中心（fragment 中心 → +0.5 自带）
   vec4 s = warpSample(u_src, u_srcSize, u_Hinv, u_mode, docXY);   // 直值
-  if (u_clip == 1){                                  // 裁到基底浮层 warp 后 alpha（clip 链共基底也对）
+  if (u_clip == 1 && s.a > 0.0){                     // 裁到基底浮层 warp 后 alpha（clip 链共基底也对）
+    // 早退：s.a==0（quad 外/透明）时 s.a*=baseA 恒 0，无须算基底 16-tap bicubic gather（perf-optimization-backlog §3）。
     float baseA = warpSample(u_baseTex, u_baseSize, u_baseHinv, u_baseMode, docXY).a;
     s.a *= baseA;
   }
@@ -172,6 +173,9 @@ void main(){
 export class GLCompositor {
   private _glctx: GLContext;
   private _prec: FBOPrec;
+  // 性能计数（dev HUD 用，零成本——只在 _pass/_floatPass 自增整数）。composite() 入口清零，调用方读 stats。
+  //   passes = blend pass 数（≈ 可见层/组单元数，§2 layer-count 假说的直读量）；floatPasses = 浮层 warp pass 数。
+  readonly stats = { passes: 0, floatPasses: 0 };
   constructor(glctx: GLContext, accumPrec: FBOPrec = "f16") {
     this._glctx = glctx;
     this._prec = accumPrec;
@@ -187,6 +191,7 @@ export class GLCompositor {
   // VAO/viewport 在此绑定一次；隔离组递归走 _composeFresh（**不碰 VAO**，否则解绑会废掉外层后续 pass）。
   composite(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
     const gl = this._glctx.gl;
+    this.stats.passes = 0; this.stats.floatPasses = 0;   // 本次合成清零（含递归隔离组的 pass）
     gl.bindVertexArray(this._glctx.quadVAO());
     gl.viewport(0, 0, docW, docH);
     gl.disable(gl.BLEND);
@@ -261,6 +266,7 @@ export class GLCompositor {
     acc: Acc, docW: number, docH: number, overlay: OverlayDesc | null = null,
   ): void {
     const gl = this._glctx.gl;
+    this.stats.passes++;
     const prog = this._program(mode, srcKind, overlay && !overlay.erase ? overlay.blendMode : "source-over");
     gl.useProgram(prog);
     const u = (name: string) => gl.getUniformLocation(prog, name);
@@ -304,6 +310,7 @@ export class GLCompositor {
   //   clipBase 非空（组变换里 clip 浮层的基底浮层）→ shader 里 clipα ×= gather 基底 alpha（零额外内存）。
   private _floatPass(f: FloatDesc, acc: Acc, docW: number, docH: number, clipBase: FloatDesc | null = null): void {
     const gl = this._glctx.gl;
+    this.stats.floatPasses++;
     const prog = this._glctx.program("warp", COMPOSITE_VERT, WARP_FRAG);
     gl.useProgram(prog);
     const u = (name: string) => gl.getUniformLocation(prog, name);
