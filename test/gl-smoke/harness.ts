@@ -537,49 +537,57 @@ function floatParity(glctx: GLContext, add: Add): void {
   eb.index.dispose(); glctx.gl.deleteTexture(ftex2);
 }
 
-// ---- E3) 全管线 golden：真 BrushEngine CPU 描边(getLiveOverlay) vs collectStamps→GPU 栅格 ----
-//   验证「手感数学(CPU 出 stamp) + GPU 栅格」整条管线匹配**真 CPU 笔刷**（非公式再实现）。
-//   两边都是 pre-opacity 的 stroke 像素（frozen+tail）；CPU overlay 直 α → 转预乘 vs GPU 预乘。
-function cpuStraightToPremul(straight: Uint8ClampedArray): Uint8Array {
-  const out = new Uint8Array(straight.length);
-  for (let i = 0; i < straight.length; i += 4) {
-    const a = straight[i + 3];
-    out[i] = Math.round(straight[i] * a / 255); out[i + 1] = Math.round(straight[i + 1] * a / 255);
-    out[i + 2] = Math.round(straight[i + 2] * a / 255); out[i + 3] = a;
-  }
-  return out;
-}
-function brushPipeDiff(glctx: GLContext, ras: GLStampRasterizer, mode: string): { md: number; bw: number; ai: number; cpu: Uint8Array; gpu: Uint8Array } | null {
+// ---- E3) 全管线 golden：真 BrushEngine 描边 → collectStamps → GPU 栅格 vs 解析公式参照 ----
+//   验证「手感数学(CPU 出 stamp 列表) + GPU 栅格」整条管线：collectStamps 的 stamp（_walkStamps 间距 +
+//   _stampParams 压感/taper）经 GPU 栅格，== 同 stamp 列表的解析 falloff（wash:max / buildup:over）。
+//   v351：旧 CPU overlay/buffer 路径已归档（→ ARCHIVE），参照改由解析公式重算同一 stamp 列表（doc 坐标偏移），
+//   不再读 getLiveOverlay。wash + buildup 两侧现都解析 → 都是真 gate（旧 buildup 缓存重采样发散已随 CPU 路径消失）。
+function brushPipeDiff(glctx: GLContext, ras: GLStampRasterizer, mode: string): { md: number; bw: number; ai: number } | null {
   const doc = new PaintDoc({ width: 512, height: 512 });
   const eng = new BrushEngine();
   const s = resolveBrush({ size: 36, color: "#cc4488", preset: { shape: { kind: "round", hardness: 0.35 }, compositeMode: mode, spacing: 0.08 } });
   eng.beginStroke(doc.layers[0], s, 80, 90, 1.0, "brush");
   eng.extendStroke(160, 110, 0.95); eng.extendStroke(240, 180, 0.8); eng.extendStroke(320, 150, 0.6);
-  const ov = eng.getLiveOverlay();
   const cs = eng.collectStamps();
-  if (!ov || !cs) return null;
-  const bw = ov.bboxW, bh = ov.bboxH;
-  const ovData = (ov.canvas as HTMLCanvasElement).getContext("2d")!.getImageData(0, 0, bw, bh).data;
-  const cpu = cpuStraightToPremul(ovData);
-  const fbo = ras.rasterize(cs.stamps, cs.shape, ov.bboxX, ov.bboxY, bw, bh);
+  if (!cs || !cs.stamps.length) return null;
+  const bw = cs.bw, bh = cs.bh, buildup = cs.shape.buildup;
+  const color = cs.shape.color, hardness = cs.shape.hardness;
+  const aspect = cs.shape.aspect ?? 1, rotation = cs.shape.rotation ?? 0;
+  // CPU 参照（预乘）：把 stamps 按解析 falloff 栅格进 bbox（同 cpuStampRef，矩形 + doc 坐标偏移 cs.bx/by）。
+  const cpu = new Uint8ClampedArray(bw * bh * 4);
+  for (let py = 0; py < bh; py++) for (let px = 0; px < bw; px++) {
+    const i = (py * bw + px) * 4;
+    const dx0 = px + 0.5 + cs.bx, dy0 = py + 0.5 + cs.by;   // doc 坐标（栅格器同映射）
+    if (buildup) {
+      let ar = 0, ag = 0, ab = 0, aa = 0;
+      for (const st of cs.stamps) {
+        const sa = st.alpha * shapeAlpha(ellipDist(dx0 - st.x, dy0 - st.y, aspect, rotation), st.size / 2, hardness);
+        if (sa <= 0) continue;
+        ar = color[0] * sa + ar * (1 - sa); ag = color[1] * sa + ag * (1 - sa);
+        ab = color[2] * sa + ab * (1 - sa); aa = sa + aa * (1 - sa);
+      }
+      cpu[i] = Math.round(ar * 255); cpu[i + 1] = Math.round(ag * 255); cpu[i + 2] = Math.round(ab * 255); cpu[i + 3] = Math.round(aa * 255);
+    } else {
+      let a = 0;
+      for (const st of cs.stamps) a = Math.max(a, st.alpha * shapeAlpha(ellipDist(dx0 - st.x, dy0 - st.y, aspect, rotation), st.size / 2, hardness));
+      cpu[i] = Math.round(color[0] * a * 255); cpu[i + 1] = Math.round(color[1] * a * 255); cpu[i + 2] = Math.round(color[2] * a * 255); cpu[i + 3] = Math.round(a * 255);
+    }
+  }
+  const fbo = ras.rasterize(cs.stamps, cs.shape, cs.bx, cs.by, bw, bh);
   const gpu = readFBO(glctx, fbo.fbo, bw, bh);
   glctx.returnFBO(fbo);
   let md = 0, ai = 0;
   for (let i = 0; i < bw * bh * 4; i++) { const d = Math.abs(cpu[i] - gpu[i]); if (d > md) { md = d; ai = i - (i % 4); } }
-  return { md, bw, ai, cpu, gpu };
+  return { md, bw, ai };
 }
 function brushPipelineParity(glctx: GLContext, add: Add): void {
   const ras = new GLStampRasterizer(glctx);
-  // WASH：CPU(_washMaxInto) 与 GPU 同走**解析 falloff** → 全管线对真 CPV 笔刷应紧匹配（gate）。
-  const w = brushPipeDiff(glctx, ras, "wash");
-  if (!w) { add("brushpipe:wash 取 overlay/stamps", false, "null"); return; }
-  const wp = w.ai / 4;
-  add("brushpipe:wash 真CPU笔刷 vs collectStamps→GPU", w.md <= 8, `maxΔ=${w.md} @(${wp % w.bw},${Math.floor(wp / w.bw)})`);
-  // BUILDUP：CPU(_buildupOverInto) 用**缓存重采样 stamp**(baseSize 64→drawImage 缩放)，GPU 用解析 → 天然发散。
-  //   非 bug（stampParity 已证 GPU buildup 对解析公式 Δ1）；GPU 与 wash 一致、更干净，但**变了旧 buildup 观感**。
-  //   = 手感判断项（user 真机定）。此处只**记录**发散量、不 gate（≤120 仅防爆/退化哨兵）。
-  const b = brushPipeDiff(glctx, ras, "buildup");
-  if (b) add(`brushpipe:buildup 发散(CPU缓存stamp vs GPU解析,手感待定) maxΔ=${b.md}`, b.md <= 120, `cpu=[${b.cpu[b.ai]},${b.cpu[b.ai + 1]},${b.cpu[b.ai + 2]},${b.cpu[b.ai + 3]}] gpu=[${b.gpu[b.ai]},${b.gpu[b.ai + 1]},${b.gpu[b.ai + 2]},${b.gpu[b.ai + 3]}]`);
+  for (const mode of ["wash", "buildup"]) {
+    const r = brushPipeDiff(glctx, ras, mode);
+    if (!r) { add(`brushpipe:${mode} 取 stamps`, false, "null"); continue; }
+    const p = r.ai / 4;
+    add(`brushpipe:${mode} 真笔 collectStamps→GPU vs 解析公式`, r.md <= 4, `maxΔ=${r.md} @(${p % r.bw},${Math.floor(p / r.bw)})`);
+  }
 }
 
 function run(): { ok: boolean; checks: Check[]; error: string | null } {

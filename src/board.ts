@@ -131,15 +131,14 @@ export class Board {
   _fps?: number | null;
   _fpsEl?: HTMLElement;
   static _dispatchingDirty?: boolean;
-  // WebGL2 渲染（?glboard=1 开关后；默认关 → 全 null，2D 路径不变）。
+  // WebGL2 渲染（v351 起唯一 display 路径，glBoardEnabled 恒 true）。init 失败 → _glBoard=null → _renderFull 显「需 WebGL2」。
   _glOn?: boolean;
   _glBoard?: GLBoard | null;
   _glCanvas?: HTMLCanvasElement | null;
 
   constructor(canvas: HTMLCanvasElement, doc: PaintDoc) {
     this.canvas = canvas;
-    // GL 模式（?glboard=1）：2D canvas 用 alpha:true（透明，只画 overlay/边框，GL canvas 在后透出 doc）。
-    //   默认关 → alpha:false，2D 路径逐字不变。（alpha=true ⟺ glOn：GL 模式要透明叠层）
+    // 本 2D canvas 用 alpha:true（透明，只画 lasso overlay/边框，GL canvas 在后透出 doc）。GL 是唯一路径。
     this._glOn = glBoardEnabled();
     this.ctx = canvas.getContext("2d", { alpha: this._glOn })!;
     this.doc = doc;
@@ -202,7 +201,7 @@ export class Board {
       ro.observe(this.canvas);
     }
 
-    // GL 渲染器（开关开时）：建 GL canvas 垫在 #board 之下 + GLBoard。失败则回退 2D（_glBoard=null）。
+    // GL 渲染器（唯一 display 路径）：建 GL canvas 垫在 #board 之下 + GLBoard。失败 → _glBoard=null → _renderFull 显「需 WebGL2」。
     this._glBoard = null;
     this._glCanvas = null;
     if (this._glOn) this._setupGLBoard();
@@ -236,7 +235,7 @@ export class Board {
       this._glCanvas = gl;
       this._glBoard = new GLBoard(gl, poolCapacityForBudget(256 * 1024 * 1024));
     } catch (e) {
-      console.warn("[board] GL 初始化失败，回退 2D：", e);
+      console.warn("[board] GL 初始化失败（无 WebGL2）→ 显「需 WebGL2」：", e);
       if (this._glCanvas) { this._glCanvas.remove(); this._glCanvas = null; }
       this._glBoard = null;
     }
@@ -625,49 +624,28 @@ export class Board {
     this._ensureFpsEl().textContent = `${this._fps ? this._fps.toFixed(0) : "--"} fps`;
   }
 
+  // v351 起 GL board 是唯一 display 路径（2D display 归档进 ARCHIVE/old-board-2d-display.ts）。
+  //   GL init 失败（无 WebGL2）→ 不回退 2D，显「需 WebGL2」提示（吸管/导出/缩略图的 CPU compositeLayers 仍保留，
+  //   见 ensureCompositeCache）。
   _renderFull() {
     const ctx = this.ctx;
     const W = this.canvas.width, H = this.canvas.height;
+    if (!this._glBoard) { this._drawGLRequiredMessage(ctx, W, H); return; }
+    this._renderFullGL(ctx, W, H);
+  }
 
-    // GL 模式：doc(底+背景+图层) 走 GL canvas；本 2D canvas 只画 overlay/边框（透明底，GL 透出）。
-    if (this._glBoard) { this._renderFullGL(ctx, W, H); return; }
-
-    // 1) 底色
+  // GL 初始化失败兜底画面（无 WebGL2 设备）。void 底 + 居中中文提示。
+  _drawGLRequiredMessage(ctx: Ctx2D, W: number, H: number) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = this._voidColor;
     ctx.fillRect(0, 0, W, H);
-
-    // 2) 切到 doc 坐标系（含 dpr / scale / rot / translate）
-    this._applyDocTransform(ctx);
-    const { scale } = this.viewport;
-
-    // v100：放大查看（scale > 1）走 nearest-neighbor，看像素级细节
-    // user：「画布当放缩 > 1 的时候改成 nearest neighbor」
-    if (scale > 1) {
-      ctx.imageSmoothingEnabled = false;
-    } else {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = scale < 0.5 ? "low" : "high";
-    }
-
-    // doc 背景 + 图层。**一致性铁律**：实时与缓存都让 layer blend 落在**同一底**（doc bg）上，
-    //   否则混合模式（multiply 等）实时(over bg) ≠ 缓存(over 透明) → 抬笔"弹回"（v275 回归 bug）。
-    //   白边修：静态走 1:1 doc 合成缓存（bg+layers 整数对齐）+ 单次缩放 blit；实时直接合成保手感。
-    if (this._isLivePreview()) {
-      this._drawDocBg(ctx);
-      this._renderLayers(ctx);
-    } else {
-      this._blitCompositeCache(ctx);   // 缓存已含 doc bg（与实时同底）
-    }
-
-    // 套索 overlay（蚂蚁线 / drawing path / floating / handles，doc 坐标系）
-    this._drawLassoOverlay(ctx, scale);
-
-    // doc 边框（doc 坐标系下；lineWidth 在缩放 / 旋转下会变粗细，需要 inverse-scale lineWidth）
-    // 栅格 = CSS div（_syncGrid），光标 = DOM div（_updateCursorEl），都不在这条 canvas hot path。
-    ctx.strokeStyle = "rgba(0,0,0,0.18)";
-    ctx.lineWidth = 1 / scale;
-    ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+    ctx.fillStyle = "#7a756a";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const s = Math.max(14, Math.round(16 * this.dpr));
+    ctx.font = `${s}px system-ui, -apple-system, sans-serif`;
+    ctx.fillText("此设备不支持 WebGL2 —— 无法运行画布", W / 2, H / 2 - s);
+    ctx.fillText("请用支持 WebGL2 的浏览器/设备打开", W / 2, H / 2 + s);
   }
 
   // GL 渲染路径：GL canvas 渲 doc（void 底 + doc 背景 + 图层 + live overlay，视口仿射）；
@@ -803,12 +781,8 @@ export class Board {
       eraseTmp: (w: number, h: number) => this._getEraseComposite(w, h),
     };
   }
-  // 直接合成到 ctx（ctx 已在 doc 坐标）。实时（描边/调整预览）路径用。
-  _renderLayers(ctx: Ctx2D) {
-    compositeLayers(ctx, this.doc.layers, this._layerCompositeOpts() as unknown as Parameters<typeof compositeLayers>[2]);
-  }
-  // 实时预览中？= 有笔刷 overlay / 调整 surrogate / stroke 进行中。实时走直接合成（保手感）；
-  //   静态走 1:1 缓存（白边修）。
+  // 实时预览中？= 有笔刷 overlay / 调整 surrogate / stroke 进行中。GL 路径用它门控 syncAll/release。
+  //   （旧 2D display 的直接合成 _renderLayers 已归档；compositeLayers 仍由 ensureCompositeCache 给吸管用。）
   _isLivePreview() {
     return !!(this._overlayProvider?.() || this._activeSurrogateCanvas
       || (this._strokeActiveHint && this._strokeActiveHint())
@@ -837,12 +811,6 @@ export class Board {
     }
     return off!;
   }
-  _blitCompositeCache(ctx: Ctx2D) {
-    const off = this.ensureCompositeCache();
-    // ctx 已在 doc 坐标（含 dpr/scale/rot）；off 是 doc 1:1 → 单次缩放 blit，层间已整数对齐 = 无白缝。
-    ctx.drawImage(off, 0, 0);
-  }
-
   // 套索 overlay：
   //   drawing 期间：画 polyline overlay
   //   floating：用 mesh 三角剖分画浮层；画 mesh 边框 + 内部线 + handles

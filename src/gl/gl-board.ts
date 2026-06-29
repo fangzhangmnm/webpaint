@@ -16,12 +16,9 @@ export interface GLDoc { layers: DocNode[]; width: number; height: number; }
 // board live-sync 接缝用的叶类型别名（结构上 = DocLeaf，board 传活动 Layer 进来重传）。
 export type { DocLeaf as GLLeaf } from "./gl-doc-bridge.ts";
 
-// URL 开关。**v350 起 GL 是默认**（WebGL2 已是合成/笔刷唯一路径）；`?glboard=0` 显式回退 2D（过渡逃生，
-//   2D display 路径归档后删此逃生）。GL init 失败时 board 仍自动回退 2D（_setupGLBoard catch）。
-export function glBoardEnabled(): boolean {
-  try { return new URLSearchParams(location.search).get("glboard") !== "0"; }
-  catch { return true; }
-}
+// **v351 起 GL 是唯一 display 路径**（2D display 已归档进 ARCHIVE/old-board-2d-display.ts）。恒开；
+//   `?glboard=0` 过渡逃生已删（无 2D 可回退）。GL init 失败 → board 显「需 WebGL2」（_setupGLBoard catch + _renderFull）。
+export function glBoardEnabled(): boolean { return true; }
 
 // "#rrggbb" → [r,g,b] in [0,1]（void 底色 clear 用）。失败回退浅灰。
 function hexToRgb(hex: string): [number, number, number] {
