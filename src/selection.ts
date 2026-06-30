@@ -24,7 +24,6 @@ interface LayerLike {
   bboxY: number;
   ctx: Ctx;
   snapshot(): LayerSnapLike;
-  ensureBbox(x0: number, y0: number, x1: number, y1: number): void;
   putImageData(docX: number, docY: number, img: ImageData): void;
   editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void;
 }

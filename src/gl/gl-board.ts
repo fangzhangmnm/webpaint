@@ -28,6 +28,7 @@ export class GLBoard {
   private _renderer: GLDocRenderer;
   private _contentDirty = true;
   private _cache: PooledFBO | null = null;   // 缓存的 doc 合成（视口无关）→ pan/zoom 只 present 它，不重合成
+  private _lastDocW = -1; private _lastDocH = -1;   // doc 尺寸变检测（→ 清 FBO 池，旧尺寸 FBO 永不再命中）
 
   constructor(canvas: HTMLCanvasElement, capacity: number) {
     this.canvas = canvas;
@@ -60,6 +61,14 @@ export class GLBoard {
 
   render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, forceSync = false, surrogate: SurrogateInput | null = null): void {
     if (this._glctx.isLost) return;
+    // doc 尺寸变（改分辨率/裁剪）：池里全是旧 doc 尺寸 FBO，永不再命中 → 主动清掉真删 GL（旧的大、早放早好），
+    //   缓存作废、下帧全量重传。比等 cap 惰性驱逐更干净（否则会同时压两个 doc 尺寸的 FBO）。
+    if (doc.width !== this._lastDocW || doc.height !== this._lastDocH) {
+      if (this._cache) { this._renderer.returnFBO(this._cache); this._cache = null; }
+      this._glctx.clearPool();
+      this._contentDirty = true;
+      this._lastDocW = doc.width; this._lastDocH = doc.height;
+    }
     // forceSync：livePreview 帧也强制全量同步一次（自由变换 lift 那帧——挖洞改了源层 tile，但 livePreview
     //   门控会挡住 syncAll → 否则 GPU 上是陈旧的无洞源层）。拖动中源层静止 → 不再 forceSync，保住 v352 零 per 帧成本。
     const contentChanged = (this._contentDirty && !livePreview) || forceSync;

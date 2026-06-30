@@ -411,7 +411,7 @@ export class BrushEngine {
     const { size, stampAlpha } = params;
     const radius = size / 2;
     const x0 = x - radius - 1, y0 = y - radius - 1, x1 = x + radius + 1, y1 = y + radius + 1;
-    st.layer.ensureBbox(x0, y0, x1, y1);
+    // （tile era：写走 editRegion/putImageData 按需分配 tile，无需预扩容——旧 ensureBbox 调用已删）
     if (s.pixelMode) {
       this._pixelStampDirect(x, y, size, stampAlpha);
     }

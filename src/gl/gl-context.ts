@@ -175,6 +175,13 @@ export class GLContext {
   // dev HUD：池占用（确认有界，不再单增）。
   get fboPoolStats(): { count: number; bytes: number } { return { count: this._fboPool.length, bytes: this._poolBytes() }; }
 
+  // 清空 FBO 池并真删 GL 资源。doc 尺寸变（池里全是旧 doc 尺寸、永不再命中）时主动调，
+  //   不必等字节/数量 cap 惰性顶到才驱逐（旧 doc 尺寸 FBO 大，早放早好）。
+  clearPool(): void {
+    for (const f of this._fboPool) { this.gl.deleteFramebuffer(f.fbo); this.gl.deleteTexture(f.tex); }
+    this._fboPool = [];
+  }
+
   private _createFBO(w: number, h: number, prec: FBOPrec): PooledFBO {
     const gl = this.gl;
     const tex = gl.createTexture();

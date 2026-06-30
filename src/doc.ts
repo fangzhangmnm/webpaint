@@ -198,9 +198,6 @@ export class Layer {
     this._invalidate();
   }
 
-  // ensureBbox 兼容 shim：tile 按需分配，无需预扩容 → no-op。旧写者已迁 editRegion；残留调用安全。
-  ensureBbox(_x0: number, _y0: number, _x1: number, _y1: number) { /* no-op，tile 按需分配 */ }
-
   // doc 坐标采样（吸色）。tile 精确取点，bbox 外透明。
   sampleAt(docX: number, docY: number) { return this.pixels.sampleAt(Math.floor(docX), Math.floor(docY)); }
 
