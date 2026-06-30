@@ -62,8 +62,8 @@ jobs:
           cp -r prod-tree/dist   site/
           cp -r main-tree/vendor site/dev/
           cp -r main-tree/dist   site/dev/
-          # /dev/ 不要 SW（dev 应该改完即见，不走缓存层）
-          rm -f site/dev/service-worker.js
+          # /dev/ 也要 SW（已上面 cp 到 site/dev/）：worker 按 scope 走 network-first——在线「改完即见」不变，
+          #   离线才回退缓存（修「/dev/ 无 SW → 闪退离线打不开」的坑，见 docs/20260630-pwa-offline-dev-sw.md）。
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

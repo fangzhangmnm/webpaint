@@ -25,6 +25,12 @@ const STATIC_PRECACHE = [
 
 let CACHE_NAME = "webpaint-boot";   // install 时会被替换为 webpaint-<bundleHash>
 
+// 同一个 SW 文件部署到 /(prod) 和 /dev/ 两处；按**自己的作用域**选策略（owner: docs + src/pwa-shell.ts）：
+//   - prod(scope=/)      → cache-first：秒开 + 离线稳，更新靠 asset-updated toast。
+//   - dev(scope 含 /dev/) → network-first：在线永远先抓网（「改完即见」/强制更新不变），离线才回退缓存
+//     （崩溃后能离线重开——修「/dev/ 按设计无 SW → 闪退离线打不开」的坑，见 docs/20260630-pwa-offline-dev-sw.md）。
+const SCOPE_IS_DEV = self.location.pathname.includes("/dev/");
+
 async function getCurrentBundleUrl() {
   const res = await fetch("./index.html", { cache: "no-store" });
   if (!res.ok) throw new Error("install: index.html fetch failed " + res.status);
@@ -80,42 +86,55 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  // v121 dev/ 入口走纯 HTTP（不进 SW cache 层），让 dev 改完即见
-  if (url.pathname.includes("/dev/")) return;
-
-  event.respondWith((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(req, { ignoreSearch: true });
-
-    const networkPromise = fetch(req).then((resp) => {
-      if (resp && resp.ok) {
-        if (cached) {
-          const cE = cached.headers.get("etag");
-          const fE = resp.headers.get("etag");
-          const cL = cached.headers.get("content-length");
-          const fL = resp.headers.get("content-length");
-          const changed = (cE && fE && cE !== fE) || (!cE && cL && fL && cL !== fL);
-          if (changed) notifyUpdate(req.url).catch(() => {});
-        }
-        // hash-named bundle 不可能变内容；其它文件可能更新，put 一次
-        cache.put(req, resp.clone()).catch(() => {});
-      }
-      return resp;
-    }).catch(() => null);
-
-    if (cached) {
-      networkPromise.catch(() => {});
-      return cached;
-    }
-    const resp = await networkPromise;
-    if (resp) return resp;
-    if (req.mode === "navigate") {
-      const fallback = await cache.match("./index.html");
-      if (fallback) return fallback;
-    }
-    return new Response("offline & not cached", { status: 503 });
-  })());
+  // prod 根 SW(scope=/)不碰 /dev/——留给 /dev/ 作用域的 dev SW 自己处理（dev SW 的 scope 已限在 /dev/，故只 prod 需此跳）。
+  if (!SCOPE_IS_DEV && url.pathname.includes("/dev/")) return;
+  event.respondWith(SCOPE_IS_DEV ? networkFirst(req) : cacheFirst(req));
 });
+
+// prod：cache-first + 后台 revalidate（ETag/长度变 → 通知 page 弹更新 toast）。
+async function cacheFirst(req) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(req, { ignoreSearch: true });
+  const networkPromise = fetch(req).then((resp) => {
+    if (resp && resp.ok) {
+      if (cached) {
+        const cE = cached.headers.get("etag"), fE = resp.headers.get("etag");
+        const cL = cached.headers.get("content-length"), fL = resp.headers.get("content-length");
+        const changed = (cE && fE && cE !== fE) || (!cE && cL && fL && cL !== fL);
+        if (changed) notifyUpdate(req.url).catch(() => {});
+      }
+      cache.put(req, resp.clone()).catch(() => {});   // hash-named bundle 内容不变；其它文件更新则刷一次
+    }
+    return resp;
+  }).catch(() => null);
+  if (cached) { networkPromise.catch(() => {}); return cached; }
+  const resp = await networkPromise;
+  if (resp) return resp;
+  return navFallback(req, cache);
+}
+
+// dev：network-first——在线永远拿最新（「改完即见」/强制更新不变），离线才回退缓存（崩溃后能离线重开）。
+async function networkFirst(req) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const resp = await fetch(req);
+    if (resp && resp.ok) cache.put(req, resp.clone()).catch(() => {});   // 顺手刷缓存，供下次离线回退
+    return resp;
+  } catch {
+    const cached = await cache.match(req, { ignoreSearch: true });
+    if (cached) return cached;
+    return navFallback(req, cache);
+  }
+}
+
+// 导航请求离线且未命中 → 回退缓存的 index.html（PWA 壳）；否则 503。
+async function navFallback(req, cache) {
+  if (req.mode === "navigate") {
+    const fallback = await cache.match("./index.html");
+    if (fallback) return fallback;
+  }
+  return new Response("offline & not cached", { status: 503 });
+}
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "skip-waiting") self.skipWaiting();
