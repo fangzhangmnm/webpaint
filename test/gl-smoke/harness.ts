@@ -519,6 +519,21 @@ function stampParity(glctx: GLContext, add: Add): void {
     const { md, at } = maxByteDiff(ref, glpx, N);
     add(`stamp:${buildup ? "buildup" : "wash"} 椭圆 GPU vs CPU 公式`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
   }
+  // scissor 等价（overlay 整屏 FBO 路径）：左半 scissor → 左半 == 无 scissor、右半全透明。
+  //   证明 doc 尺寸 FBO + scissor 限着色 = bbox FBO 同像素，且 scissor 外被全屏清成透明（无残留）。
+  for (const buildup of [false, true]) {
+    const hardness = 0.3;
+    const full = readFBO(glctx, (() => { const f = ras.rasterize(stamps, { hardness, color, buildup }, 0, 0, N, N); return f; })().fbo, N);
+    const fScis = ras.rasterize(stamps, { hardness, color, buildup }, 0, 0, N, N, { x: 0, y: 0, w: 64, h: N });
+    const scis = readFBO(glctx, fScis.fbo, N); glctx.returnFBO(fScis);
+    let mdL = 0, maxAR = 0;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const i = (y * N + x) * 4;
+      if (x < 64) { for (let c = 0; c < 4; c++) mdL = Math.max(mdL, Math.abs(full[i + c] - scis[i + c])); }
+      else { maxAR = Math.max(maxAR, scis[i + 3]); }   // 右半应全透明
+    }
+    add(`stamp:scissor 等价 ${buildup ? "buildup" : "wash"}（左半==无scissor / 右半透明）`, mdL <= 1 && maxAR === 0, `左maxΔ=${mdL} 右maxA=${maxAR}`);
+  }
 }
 
 // ---- E4) bg 接缝 golden：GL 棋盘背景 vs 2D 棋盘 + compositeLayers ----

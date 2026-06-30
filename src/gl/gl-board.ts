@@ -40,6 +40,7 @@ export class GLBoard {
   get memory() { return this._renderer.memory; }
   // 上一帧合成 pass 计数（dev HUD；只在内容/描边帧更新——pan/zoom 只 present 缓存不重合成，故读数冻在上次合成）。
   get stats(): { passes: number; floatPasses: number } { return this._renderer.stats; }
+  get fboPoolStats(): { count: number; bytes: number } { return this._renderer.fboPoolStats; }
   markContentDirty(): void { this._contentDirty = true; }
 
   // 渲染一帧。affine6 = board _applyDocTransform 的 device-px 6 参；canvasW/H = device px；scale = 视口缩放；
@@ -72,7 +73,7 @@ export class GLBoard {
 
     if (contentChanged || livePreview || !this._cache) {
       // brush live = GPU stamp overlay（描边中）；否则清掉上帧 overlay（filter/liquify/pixel 走 live-sync seam，无 overlay）。
-      if (livePreview && stampOverlay) this._renderer.setStampOverlay(stampOverlay);
+      if (livePreview && stampOverlay) this._renderer.setStampOverlay(stampOverlay, doc.width, doc.height);
       else this._renderer.clearOverlay();
       this._renderer.setFloats(floats, doc.width, doc.height);   // 自由变换浮层（空=无变换）
       // docBg：null=透明（void 透出）/ "checker"=棋盘背景 / "#rrggbb"=预乘纯色。

@@ -131,25 +131,30 @@ export class GLStampRasterizer {
     return vao;
   }
 
-  // 栅格化 stamps → 一张 bbox 尺寸的**预乘 RGBA** FBO（caller returnFBO）。
-  //   bboxOrigin/Size = 输出纹理对应的 doc 区域。color/hardness/buildup = stroke 常量。
-  rasterize(stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number): PooledFBO {
+  // 栅格化 stamps → 一张**预乘 RGBA** FBO（caller returnFBO）。
+  //   (ox,oy,ow,oh) = 输出 FBO 覆盖的 doc 区域（= FBO 像素尺寸 ow×oh）。stamps 用 doc 坐标。
+  //   scissor（可选）= 只着色该 doc 子矩形（FBO 像素 = doc-区域偏移；doc-y 1:1 不翻），FBO 其余区清透明。
+  //     overlay 路径传 (0,0,docW,docH)+scissor=stamp bbox → **整屏 FBO 复用**(尺寸恒定→池命中,零重复 malloc)，
+  //     GPU 着色仍限 bbox。commit 路径传 (bx,by,bw,bh)+无 scissor → bbox FBO（一次性，旧行为）。
+  rasterize(stamps: Stamp[], shape: StrokeShape, ox: number, oy: number, ow: number, oh: number, scissor?: { x: number; y: number; w: number; h: number } | null): PooledFBO {
     const gl = this._glctx.gl;
-    const accum = this._glctx.borrowFBO(bw, bh, "u8");
+    const accum = this._glctx.borrowFBO(ow, oh, "u8");
 
-    // 1) 累积 pass。
+    // 1) 累积 pass。先**全屏清透明**（scissor off）→ 子矩形外保证透明；再开 scissor 限着色到 bbox。
     gl.bindFramebuffer(gl.FRAMEBUFFER, accum.fbo);
-    gl.viewport(0, 0, bw, bh);
+    gl.viewport(0, 0, ow, oh);
+    gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    if (scissor) { gl.enable(gl.SCISSOR_TEST); gl.scissor(scissor.x, scissor.y, scissor.w, scissor.h); }
     gl.enable(gl.BLEND);
     if (shape.buildup) { gl.blendEquation(gl.FUNC_ADD); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); }
     else { gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE, gl.ONE); }   // MAX：src/dst factor 被忽略
 
     const prog = this._glctx.program("stamp-accum", ACCUM_VERT, ACCUM_FRAG);
     gl.useProgram(prog);
-    gl.uniform2f(gl.getUniformLocation(prog, "u_bboxOrigin"), bx, by);
-    gl.uniform2f(gl.getUniformLocation(prog, "u_bboxSize"), bw, bh);
+    gl.uniform2f(gl.getUniformLocation(prog, "u_bboxOrigin"), ox, oy);
+    gl.uniform2f(gl.getUniformLocation(prog, "u_bboxSize"), ow, oh);
     gl.uniform1f(gl.getUniformLocation(prog, "u_hardness"), Math.max(0, Math.min(0.999, shape.hardness)));
     gl.uniform3f(gl.getUniformLocation(prog, "u_color"), shape.color[0], shape.color[1], shape.color[2]);
     gl.uniform1i(gl.getUniformLocation(prog, "u_buildup"), shape.buildup ? 1 : 0);
@@ -168,17 +173,22 @@ export class GLStampRasterizer {
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
 
     if (shape.buildup) {
+      gl.disable(gl.SCISSOR_TEST);
       gl.bindVertexArray(null);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.disable(gl.BLEND);
       return accum;   // 已是 premult colored
     }
 
-    // 2) wash 上色 pass：accum.a → premult(color,a) 到另一张 FBO。
-    const out = this._glctx.borrowFBO(bw, bh, "u8");
+    // 2) wash 上色 pass：accum.a → premult(color,a) 到另一张 FBO。同样先全屏清、再 scissor 限着色。
+    const out = this._glctx.borrowFBO(ow, oh, "u8");
     gl.bindFramebuffer(gl.FRAMEBUFFER, out.fbo);
-    gl.viewport(0, 0, bw, bh);
+    gl.viewport(0, 0, ow, oh);
     gl.disable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (scissor) { gl.enable(gl.SCISSOR_TEST); gl.scissor(scissor.x, scissor.y, scissor.w, scissor.h); }
     const cprog = this._glctx.program("stamp-color", COLOR_VERT, COLOR_FRAG);
     gl.useProgram(cprog);
     gl.bindVertexArray(this._glctx.quadVAO());   // 上色 = 全屏 quad（共享 VAO，只 loc0）
@@ -188,6 +198,7 @@ export class GLStampRasterizer {
     gl.uniform3f(gl.getUniformLocation(cprog, "u_color"), shape.color[0], shape.color[1], shape.color[2]);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
+    gl.disable(gl.SCISSOR_TEST);
     gl.bindVertexArray(null);
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);

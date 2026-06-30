@@ -564,7 +564,10 @@ export class Board {
     // 第二行 = 每帧合成归因（§2 layer-count / §3 float / §1 长描边）：Np=blend pass 数、Nf=浮层 warp pass、Ns=stamp 数。
     //   pan/zoom 不重合成 → p/f 冻在上次合成帧（预期）。读这三个数即可定位掉帧在哪条，不必靠猜。
     const s = this._glBoard?.stats;
-    const line2 = s ? `\n${s.passes}p ${s.floatPasses}f ${this._lastStampCount}s` : "";
+    const pool = this._glBoard?.fboPoolStats;
+    // 第二行末尾加 FBO 池占用（确认有界不单增）：Nfbo 张 / Mmb。
+    const poolStr = pool ? ` ${pool.count}fbo/${Math.round(pool.bytes / 1048576)}mb` : "";
+    const line2 = s ? `\n${s.passes}p ${s.floatPasses}f ${this._lastStampCount}s${poolStr}` : "";
     this._ensureFpsEl().textContent = `${this._fps ? this._fps.toFixed(0) : "--"} fps${line2}`;
   }
 

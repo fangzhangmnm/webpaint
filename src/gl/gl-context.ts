@@ -16,6 +16,11 @@
 //   f32=RGBA32F（精度验证/陡 blend 模式；比 f16 多一倍 transient，仅累积器一张、不乘层数）。
 export type FBOPrec = "u8" | "f16" | "f32";
 
+// FBO 池上界（防泄露）。count 主防"许多不同尺寸的一次性 FBO"（commit/warp 每笔一张）累积；
+//   bytes 是兜底显存天花板。doc 尺寸热 FBO 每帧复用、是 MRU，不会被驱逐 → 不抖。
+const FBO_POOL_MAX_COUNT = 48;
+const FBO_POOL_BUDGET_BYTES = 384 * 1024 * 1024;
+
 export interface GLCaps {
   maxTextureSize: number;        // MAX_TEXTURE_SIZE（iPad Apple GPU ≥ 16384）
   maxArrayLayers: number;        // MAX_ARRAY_TEXTURE_LAYERS（tile 池深度上界）
@@ -149,9 +154,26 @@ export class GLContext {
     return this._createFBO(w, h, prec);
   }
 
+  // 归还到池末尾（= MRU）。**有界**：超字节预算或数量上限 → 从队首（LRU）驱逐并真正删 GL 资源。
+  //   修泄露根因：旧版只 push 不删，bbox 尺寸每次不同 → 池只增不减（显存涨 + borrow 线性扫描变慢 = 越画越卡，
+  //   极端下 iOS OOM→闪退）。doc 尺寸的热 FBO 每帧 borrow+return → 总在队尾，不会被前端驱逐（不抖）。
   returnFBO(f: PooledFBO): void {
     this._fboPool.push(f);
+    while ((this._poolBytes() > FBO_POOL_BUDGET_BYTES || this._fboPool.length > FBO_POOL_MAX_COUNT) && this._fboPool.length > 1) {
+      const e = this._fboPool.shift()!;   // 队首 = 最久未用
+      this.gl.deleteFramebuffer(e.fbo);
+      this.gl.deleteTexture(e.tex);
+    }
   }
+
+  private _fboBytes(f: PooledFBO): number {
+    return f.w * f.h * (f.prec === "f32" ? 16 : f.prec === "f16" ? 8 : 4);
+  }
+  private _poolBytes(): number {
+    let b = 0; for (const f of this._fboPool) b += this._fboBytes(f); return b;
+  }
+  // dev HUD：池占用（确认有界，不再单增）。
+  get fboPoolStats(): { count: number; bytes: number } { return { count: this._fboPool.length, bytes: this._poolBytes() }; }
 
   private _createFBO(w: number, h: number, prec: FBOPrec): PooledFBO {
     const gl = this.gl;

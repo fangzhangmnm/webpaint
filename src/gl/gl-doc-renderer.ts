@@ -69,6 +69,8 @@ export class GLDocRenderer {
 
   // 上一次合成的 pass 计数（dev HUD；compositor 在 composite() 入口清零）。
   get stats(): { passes: number; floatPasses: number } { return this._comp.stats; }
+  // FBO 池占用（dev HUD：确认有界）。
+  get fboPoolStats(): { count: number; bytes: number } { return this._glctx.fboPoolStats; }
 
   // 重传一个叶层像素 → tiles（内容变更后调）。
   syncLayer(leaf: DocLeaf, docW: number, docH: number): void {
@@ -105,12 +107,14 @@ export class GLDocRenderer {
   // Stage 3：用 GPU stamp 栅格器把 brush stamp 列表栅格成 overlay（替 CPU overlayCanvas）。
   //   栅格器出**预乘** FBO → presentTo 解预乘成 straight FBO（overlay shader 吃 straight，与 CPU canvas overlay 同）。
   //   straight FBO 留到本帧合成后归还（_overlayOwnedFBO）。bx/by/bw/bh = stamp 包围盒 doc 坐标。
-  setStampOverlay(ov: StampOverlayInput): void {
+  setStampOverlay(ov: StampOverlayInput, docW: number, docH: number): void {
     if (ov.stamps.length === 0 || ov.bw <= 0 || ov.bh <= 0) { this._overlay = null; return; }
     const gl = this._glctx.gl;
-    const fboP = this._rasterizer.rasterize(ov.stamps, ov.shape, ov.bx, ov.by, ov.bw, ov.bh);   // 预乘
-    const fboS = this._glctx.borrowFBO(ov.bw, ov.bh, "u8");
-    this._comp.presentTo(fboP.tex, fboS, ov.bw, ov.bh);                        // → straight
+    // **整屏 doc FBO + scissor**（避免每帧按 bbox 尺寸 malloc）：栅格器/straight 都按 doc 尺寸借 → 池每帧同尺寸命中、
+    //   零重复 malloc、零泄露；着色靠 scissor 限回 stamp bbox（GPU 成本不变）。overlay 描述符随之变整屏（ox0/oy0/ow=docW）。
+    const fboP = this._rasterizer.rasterize(ov.stamps, ov.shape, 0, 0, docW, docH, { x: ov.bx, y: ov.by, w: ov.bw, h: ov.bh });   // 预乘，整屏
+    const fboS = this._glctx.borrowFBO(docW, docH, "u8");
+    this._comp.presentTo(fboP.tex, fboS, docW, docH);                          // → straight（整屏，bbox 外透明）
     this._glctx.returnFBO(fboP);
     if (this._overlayOwnedFBO) this._glctx.returnFBO(this._overlayOwnedFBO);   // 上帧残留（保险）
     this._overlayOwnedFBO = fboS;
@@ -131,7 +135,7 @@ export class GLDocRenderer {
       gl.bindTexture(gl.TEXTURE_2D, null);
       selMask = { tex: this._selTex, ox: ov.selMask.ox, oy: ov.selMask.oy, ow: ov.selMask.ow, oh: ov.selMask.oh };
     }
-    this._overlay = { tex: fboS.tex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: ov.bx, oy: ov.by, ow: ov.bw, oh: ov.bh, lockAlpha: ov.lockAlpha, selMask };
+    this._overlay = { tex: fboS.tex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: 0, oy: 0, ow: docW, oh: docH, lockAlpha: ov.lockAlpha, selMask };
   }
 
   // Stage 3：栅格化 stroke stamp 列表 → straight RGBA canvas（commit 用，readback→editRegion）。
