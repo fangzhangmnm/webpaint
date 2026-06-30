@@ -21,6 +21,7 @@ import "./pointer-gesture.test.mjs";
 import "./crop-geometry.test.mjs";
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
+import "./liquify-bilinear.test.mjs";
 import "./gallery-model.test.mjs";
 import "./gallery-view-model.test.mjs";
 import "./color-model.test.mjs";

@@ -336,29 +336,33 @@ export class LiquifyEngine {
   }
 }
 
-// bilinear 取样 sdat[sx, sy] → ddat[dstIdx..+3]。sx/sy 浮点；越界 → 透明黑。
-// v135 (user：「液化做一下防黑边」)
-//   越界返 0 = 黑透明在 buildup 背景上显实黑。改 clamp-to-edge：
-//   越界取边像素 → "重复 / 引力透镜" 视觉保留，但没实黑（边像素=透明的话仍透，不糊黑）
-function bilinearSample(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, dstIdx: number) {
+// bilinear 取样 sdat[sx, sy] → ddat[dstIdx..+3]（straight RGBA）。sx/sy 浮点。
+// **预乘空间累加 + 越界 tap 记 0（不 clamp）**——逐位对齐 GL warp 采样器（gl-compositor WARP_FUNCS）：
+//   · 越界不 clamp → 不会把内容紧边界的不透明像素复制成"拉丝"（修：画个圆往下推、圆顶端被拉出一条）。
+//   · 预乘混合 → 透明 tap 不把直值色拖暗（这才是 v135「防黑边」的正解；当年 clamp 是权宜——避了黑、却换来拉丝）。
+//   仍是双线性(同权重核)，锐度与旧版**逐位一致、不变糊**；整数坐标(fx=fy=0)退化成点采样 → v147 选区整数 march 不受影响。
+// export 供 test/liquify-bilinear.test.mjs 直接喂数组验（dom-shim canvas no-op，整段引擎跑不了像素）。
+export function bilinearSample(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, dstIdx: number) {
   const ix = Math.floor(sx);
   const iy = Math.floor(sy);
   const fx = sx - ix;
   const fy = sy - iy;
-  const cx0 = ix < 0 ? 0 : ix >= w ? w - 1 : ix;
-  const cx1 = (ix + 1) < 0 ? 0 : (ix + 1) >= w ? w - 1 : (ix + 1);
-  const cy0 = iy < 0 ? 0 : iy >= h ? h - 1 : iy;
-  const cy1 = (iy + 1) < 0 ? 0 : (iy + 1) >= h ? h - 1 : (iy + 1);
-  const p00 = (cy0 * w + cx0) * 4;
-  const p10 = (cy0 * w + cx1) * 4;
-  const p01 = (cy1 * w + cx0) * 4;
-  const p11 = (cy1 * w + cx1) * 4;
-  const w00 = (1 - fx) * (1 - fy);
-  const w10 = fx * (1 - fy);
-  const w01 = (1 - fx) * fy;
-  const w11 = fx * fy;
-  for (let c = 0; c < 4; c++) {
-    ddat[dstIdx + c] = sdat[p00 + c] * w00 + sdat[p10 + c] * w10
-                     + sdat[p01 + c] * w01 + sdat[p11 + c] * w11;
-  }
+  let pr = 0, pg = 0, pb = 0, pa = 0;   // 预乘累加：pr/pg/pb = Σ wt·C·(A/255)，pa = Σ wt·A
+  const acc = (px: number, py: number, wt: number) => {
+    if (wt === 0 || px < 0 || px >= w || py < 0 || py >= h) return;   // 越界 tap = 0（不 clamp）
+    const o = (py * w + px) * 4;
+    const a = sdat[o + 3];
+    const af = (a / 255) * wt;
+    pr += sdat[o] * af; pg += sdat[o + 1] * af; pb += sdat[o + 2] * af; pa += a * wt;
+  };
+  acc(ix, iy, (1 - fx) * (1 - fy));
+  acc(ix + 1, iy, fx * (1 - fy));
+  acc(ix, iy + 1, (1 - fx) * fy);
+  acc(ix + 1, iy + 1, fx * fy);
+  if (pa < 1e-4) { ddat[dstIdx] = ddat[dstIdx + 1] = ddat[dstIdx + 2] = ddat[dstIdx + 3] = 0; return; }
+  const afSum = pa / 255;   // Σ wt·(A/255)；反预乘 → 直值色（透明 tap 不拖暗）
+  ddat[dstIdx] = pr / afSum;
+  ddat[dstIdx + 1] = pg / afSum;
+  ddat[dstIdx + 2] = pb / afSum;
+  ddat[dstIdx + 3] = pa;
 }
