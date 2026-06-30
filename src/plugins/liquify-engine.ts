@@ -135,30 +135,23 @@ export class LiquifyEngine {
     const cx = x, cy = y;
     const layer = st.layer;
 
-    // 1) layer bbox 扩到包住 footprint（被推到边外的像素能落地）
+    // 1) footprint 夹到 **doc 边界**（不是 layer.bbox）。tile era：layer.ensureBbox 已是 no-op、
+    //    layer.bbox 是「现有内容」包围盒、扩不动——靠它夹会把推出旧内容边的像素截掉（degeneration，
+    //    canvas 时代 ensureBbox 会把图层画布扩大让像素落地）。tile putImageData 按需分配 tile，写哪都行。
     const fx0 = Math.floor(cx - R), fy0 = Math.floor(cy - R);
     const fx1 = Math.ceil(cx + R),  fy1 = Math.ceil(cy + R);
-    layer.ensureBbox(fx0, fy0, fx1, fy1);
-    if (layer.bboxW <= 0 || layer.bboxH <= 0) {
-      // doc 外的笔，跳
-      st.lastX = x; st.lastY = y;
-      return;
-    }
-    // 2) dispField 同步 layer bbox（layer ensureBbox 只扩不缩 → 旧 ⊆ 新）
-    this._syncDispFieldToLayer();
-
-    const lbX = layer.bboxX, lbY = layer.bboxY;
-    const lbW = layer.bboxW, lbH = layer.bboxH;
-    // footprint clamped 到 layer
-    const x0 = Math.max(lbX, fx0);
-    const y0 = Math.max(lbY, fy0);
-    const x1 = Math.min(lbX + lbW, fx1);
-    const y1 = Math.min(lbY + lbH, fy1);
+    const x0 = Math.max(0, fx0);
+    const y0 = Math.max(0, fy0);
+    const x1 = Math.min(layer.docW, fx1);
+    const y1 = Math.min(layer.docH, fy1);
     const w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) {
+      // 全在 doc 外
       st.lastX = x; st.lastY = y;
       return;
     }
+    // 2) dispField 长到覆盖本 footprint（不再 tie layer.bbox；只扩不缩，doc 内有界）
+    this._growDispField(x0, y0, x1, y1);
 
     // velocity（push mode）
     const vx = x - st.lastX;
@@ -315,17 +308,18 @@ export class LiquifyEngine {
     return d;
   }
 
-  // dispField 必须始终 = layer bbox（resample 时按 layer 像素位置查）
-  _syncDispFieldToLayer() {
+  // dispField 长到覆盖 [x0,y0,x1,y1)（= 当前 ∪ 该矩形；只扩不缩，调用方已夹到 doc）。
+  //   tile era 取代 _syncDispFieldToLayer：位移场跟「笔触扫过的区域」走，不再 tie 现有内容 bbox
+  //   （否则推出旧内容边的像素被截，见 extendStroke 注释）。
+  _growDispField(x0: number, y0: number, x1: number, y1: number) {
     const st = this._stroke!;
     const f = st.dispField;
-    const layer = st.layer;
-    if (f.bboxX === layer.bboxX && f.bboxY === layer.bboxY &&
-        f.bboxW === layer.bboxW && f.bboxH === layer.bboxH) return;
-    const nx = layer.bboxX, ny = layer.bboxY;
-    const nw = layer.bboxW, nh = layer.bboxH;
+    const nx = Math.min(f.bboxX, x0), ny = Math.min(f.bboxY, y0);
+    const ex = Math.max(f.bboxX + f.bboxW, x1), ey = Math.max(f.bboxY + f.bboxH, y1);
+    const nw = ex - nx, nh = ey - ny;
+    if (nx === f.bboxX && ny === f.bboxY && nw === f.bboxW && nh === f.bboxH) return;
     const newData = new Float32Array(2 * nw * nh);
-    // 旧 dispField bbox ⊆ 新（layer.ensureBbox 永远扩不缩），整行 set 拷
+    // 旧 dispField bbox ⊆ 新（只扩不缩），整行 set 拷保留已累积位移
     if (f.bboxW > 0 && f.bboxH > 0) {
       const dx = f.bboxX - nx;
       const dy = f.bboxY - ny;

@@ -19,6 +19,7 @@ import "./registry.test.mjs";
 import "./resolved-brush.test.mjs";
 import "./pointer-gesture.test.mjs";
 import "./crop-geometry.test.mjs";
+import "./liquify-bbox.test.mjs";
 import "./gallery-model.test.mjs";
 import "./gallery-view-model.test.mjs";
 import "./color-model.test.mjs";
