@@ -63,6 +63,14 @@ export class TilePool {
     this._free.push(slice);
     this._used--;
   }
+
+  // 全池复位（context-loss 后端重建后调）：底层 array texture 已换新、所有 slice 内容没了 → 自由表清零、
+  //   从头重新分配。caller 须同时丢弃所有 LayerTileMap（其 Tile.slice 引用已失效），再 syncAll 全新重传。
+  reset(): void {
+    this._free = [];
+    this._next = 0;
+    this._used = 0;
+  }
 }
 
 // 单层稀疏 tile map。across = 该 doc 的列数（tilesAcross(docW)），用于 tileKey。

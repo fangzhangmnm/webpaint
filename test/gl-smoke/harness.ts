@@ -829,6 +829,17 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   } catch (e) { add("backend.clearSlice→zero", false, String(e)); }
 
   try {
+    // context-loss 后端重建：recreate() → 全新空 array texture（旧内容没了）+ 重建后上传/读回正常。
+    const rb = new GLTileBackend(glctx, 4);
+    rb.uploadSlice(1, new Uint8Array(TILE_BYTES).fill(77));
+    rb.recreate();
+    const after = rb.readSlice(1); const isEmpty = after[0] === 0 && after[TILE_BYTES - 1] === 0;
+    const p = new Uint8Array(TILE_BYTES); p[0] = 55; p[3] = 255; rb.uploadSlice(2, p);
+    const back = rb.readSlice(2); const rt = back[0] === 55 && back[3] === 255;
+    add("residency:backend.recreate → 空纹理 + 重建后上传读回正常", isEmpty && rt, `empty=${isEmpty} rt=${rt}`);
+  } catch (e) { add("residency:backend.recreate", false, String(e)); }
+
+  try {
     const pool = new TilePool(backend); const lm = new LayerTileMap(pool, 8);
     const t = lm.tileAt(1, 1, { create: true }); if (!t) throw new Error("tileAt create null");
     const p = new Uint8Array(TILE_BYTES); p[0] = 99; p[3] = 255; backend.uploadSlice(t.slice, p);

@@ -129,6 +129,13 @@ describe("LayerPixels · 驱逐 raw + 中心惰性重物化", () => {
       assert(lp.isRawResident(), "读后已重物化");
     }
   });
+  it("红线：provider 失败（不 adopt，模拟 context-loss 无 GPU）→ 保持 evicted，让 recoverAll 兜", () => {
+    const lp = makePopulated();
+    lp.setResidencyProvider(() => { /* 失败：不调 adoptResidentTiles（GPU tiles 已丢） */ });
+    assert(lp.evictRaw(), "驱逐");
+    lp.getRegion(0, 0, 4, 4);                       // 读触发 provider，但失败
+    assert(!lp.isRawResident(), "provider 失败 → 仍 evicted（绝不误清成已驻留但空 → 防 recoverAll 跳过丢数据）");
+  });
   it("重物化后可继续编辑（putRegion bump version → 备份陈旧）", async () => {
     const lp = makePopulated();
     const res = new TileResidency(identityCodec);
@@ -156,6 +163,17 @@ describe("TileResidency · 簿记", () => {
     res.dropLayer(7);
     assert(!res.hasBackup(7), "dropLayer 后无备份");
     eq(res.backupByteUsage(), 0, "占用归零");
+  });
+  it("forgetExcept：删层对账，只留 live 集里的备份/pin", async () => {
+    const lp = makePopulated();
+    const res = new TileResidency(identityCodec);
+    await res.backupLayer(1, lp); await res.backupLayer(2, lp); await res.backupLayer(3, lp);
+    res.pin(2); res.pin(9);
+    res.forgetExcept(new Set([2, 3]));   // 1 被删；9 的 pin 也清
+    assert(!res.hasBackup(1), "1 备份被对账掉");
+    assert(res.hasBackup(2) && res.hasBackup(3), "2/3 保留");
+    assert(res.isPinned(2), "2 pin 保留");
+    assert(!res.isPinned(9), "9（无备份、非 live）pin 清掉");
   });
   it("deflate 压缩确实变小（大面积同色）", async () => {
     const lp = new LayerPixels(W, H);

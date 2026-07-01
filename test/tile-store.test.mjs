@@ -21,6 +21,20 @@ function fakeBackend(capacity = 1000) {
   };
 }
 
+describe("TilePool · reset（context-loss 后端重建后复位）", () => {
+  it("reset 后自由表清零、从头分配、_used 归零", () => {
+    const pool = new TilePool(fakeBackend(100));
+    const s0 = pool.acquireSlice(), s1 = pool.acquireSlice();
+    pool.releaseSlice(s0);
+    assert(pool.allocatedCount === 1, "分配 2 释放 1 → used=1");
+    pool.reset();
+    assert(pool.allocatedCount === 0, "reset 后 used=0");
+    assert(pool.acquireSlice() === 0, "reset 后从 slice 0 重新分配");
+    assert(pool.acquireSlice() === 1, "下一个 slice 1（自由表已清，非复用旧 s0）");
+    void s1;
+  });
+});
+
 describe("tile-geometry · 网格换算", () => {
   it("tilesAcross/Down 向上取整，最小 1", () => {
     assert(tilesAcross(2048) === 8, "2048/256=8");

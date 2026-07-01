@@ -123,4 +123,10 @@ export class TileResidency {
     this._backups.delete(layerId);
     this._pinned.delete(layerId);
   }
+
+  // 对账：丢弃所有不在 liveIds 里的层的备份/pin（board 无单独删层钩子 → syncAll 时按当前树对账，防删层泄露备份）。
+  forgetExcept(liveIds: Set<number>): void {
+    for (const id of [...this._backups.keys()]) if (!liveIds.has(id)) this._backups.delete(id);
+    for (const id of [...this._pinned]) if (!liveIds.has(id)) this._pinned.delete(id);
+  }
 }

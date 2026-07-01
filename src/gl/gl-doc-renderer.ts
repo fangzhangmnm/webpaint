@@ -72,8 +72,9 @@ export class GLDocRenderer {
   // provider（驱逐层被读时的 sync 重物化）：从该层**当前 GPU tiles** readback 回填 CPU raw。
   //   只丢 CPU raw、留 GPU → GPU 恒是当前权威 → readback 恒可用且同步（不引入 async 涟漪覆盖 75 个 sync 读者）。
   private _readbackProvider(leaf: DocLeaf): void {
+    if (this._glctx.isLost) return;   // context 丢：GPU tiles 已失效，不 readback 垃圾；recoverAll 会从备份重物化
     const lt = this._layerTiles.get(leaf.id);
-    if (!lt) return;   // 无 GPU tiles（不该发生：驱逐前必已 synced）→ 留空，caller 得透明
+    if (!lt) return;   // 无 GPU tiles（context 重建后 _layerTiles 已清 / 驱逐前未 synced）→ 留空，recoverAll 兜
     const entries: Array<{ tx: number; ty: number; px: Uint8ClampedArray }> = [];
     lt.tileMap.forEachTile((t) => { entries.push({ tx: t.tx, ty: t.ty, px: new Uint8ClampedArray(this._backend.readSlice(t.slice)) }); });
     leaf.pixels.adoptResidentTiles(entries);
@@ -138,9 +139,21 @@ export class GLDocRenderer {
     this._layerTiles.set(leafId, uploadLayerToTiles(this._glctx, this._backend, this._pool, { pixels: tmp }, docW, docH));
   }
 
-  // 重传整棵树所有叶（correctness-first）。
+  // 重传整棵树所有叶（correctness-first）+ 对账已删层（board 无单独删层钩子 → 在此按当前树回收
+  //   陈旧 _layerTiles 的 GPU slices + residency 备份，修既有删层泄露）。
   syncAll(nodes: DocNode[], docW: number, docH: number): void {
-    this._eachLeaf(nodes, (l) => this.syncLayer(l, docW, docH));
+    const live = new Set<number>();
+    this._eachLeaf(nodes, (l) => { live.add(l.id); this.syncLayer(l, docW, docH); });
+    for (const id of [...this._layerTiles.keys()]) if (!live.has(id)) this.dropLayer(id);
+    this._residency.forgetExcept(live);
+  }
+
+  // context-loss 恢复：底层 array texture 随 context 失效 → 重建全新空后端 + 复位池 + 清陈旧 _layerTiles。
+  //   之后 gl-board 先 recoverAll（被驱逐层的 CPU raw 从压缩备份重物化），再 syncAll 从各层 CPU raw 全新重传。
+  handleContextRestored(): void {
+    this._backend.recreate();
+    this._pool.reset();
+    this._layerTiles.clear();   // 旧 index/tileMap 的 GL 句柄已随 context 失效，弃引用（死对象 GC；不 dispose）
   }
 
   // 删层时释放其资源（GPU tiles + 压缩备份）。

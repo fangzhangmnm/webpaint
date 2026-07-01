@@ -59,8 +59,10 @@ export class LayerPixels {
   }
   private _ensureResident(): void {
     if (!this._evicted) return;
-    this._evicted = false;                                  // 先落标志防重入/失败自旋
-    this._provider?.(this);                                 // provider 回填 _tiles（sync GPU readback）
+    // provider **成功**（调 adoptResidentTiles）才清 _evicted；失败（context 丢/无 GPU tiles，不 adopt）则**保持
+    //   evicted** → 让 recoverAll 从压缩备份兜。红线：绝不因一次失败的重物化把 evicted 误清成"已驻留但空"→
+    //   recoverAll 会跳过 → 内容只剩备份没人读 → 存盘丢数据。provider 非递归（不碰 guarded read），无自旋。
+    this._provider?.(this);
   }
 
   get tileCount(): number { this._ensureResident(); return this._tiles.size; }

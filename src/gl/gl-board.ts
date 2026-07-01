@@ -34,9 +34,12 @@ export class GLBoard {
     this.canvas = canvas;
     this._glctx = new GLContext(canvas);
     this._renderer = new GLDocRenderer(this._glctx, capacity);
-    // context-loss：丢了 → 全量重传（从 layer pixels 稀疏 tile 重建）+ 缓存作废。被驱逐层的 raw 也随 GPU 没了
-    //   （只剩压缩备份）→ 先 recoverAll 从备份解驱逐（_needRecover 门），再 syncAll 重传。
-    this._glctx.onRestored = () => { this._contentDirty = true; this._cache = null; this._needRecover = true; };
+    // context-loss：丢了 → 底层 array texture 也失效 → 先重建后端+复位池+清陈旧 tiles，再全量重传。
+    //   被驱逐层的 raw 也随 GPU 没了（只剩压缩备份）→ 先 recoverAll 从备份解驱逐（_needRecover 门），再 syncAll 重传。
+    this._glctx.onRestored = () => {
+      this._renderer.handleContextRestored();   // 重建后端 array texture + 复位池 + 清陈旧 _layerTiles（旧句柄已死）
+      this._contentDirty = true; this._cache = null; this._needRecover = true;
+    };
   }
 
   private _needRecover = false;    // context-loss 后待从备份重物化被驱逐层（recoverAll 在 syncAll 前跑）

@@ -24,22 +24,35 @@ export class GLTileBackend implements TileBackend {
   private _zero: Uint8Array;   // 共享零缓冲（clearSlice 复用，免每次新建）
 
   constructor(glctx: GLContext, capacity: number) {
-    const gl = glctx.gl;
-    this._gl = gl;
+    this._gl = glctx.gl;
     this.capacity = capacity;
+    this._zero = new Uint8Array(TILE_BYTES);
+    this._tex = this._allocTexture();
+  }
+
+  private _allocTexture(): WebGLTexture {
+    const gl = this._gl;
     const tex = gl.createTexture();
     if (!tex) throw new Error("CREATE_ARRAY_TEX_FAILED");
-    this._tex = tex;
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
     // immutable storage：1 mip、RGBA8、TILE×TILE×capacity。整块显存在此刻被承诺。
-    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, TILE_SIZE, TILE_SIZE, capacity);
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, TILE_SIZE, TILE_SIZE, this.capacity);
     // 1:1 doc 分辨率采样（视口缩放在最终 present 那步做，不在采 tile 时）→ NEAREST 精确无边渗。
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
-    this._zero = new Uint8Array(TILE_BYTES);
+    return tex;
+  }
+
+  // context-loss 恢复：旧 _tex 已随 context 失效 → 重建全新空 array texture + 复位 readFbo。caller(GLDocRenderer)
+  //   须同时 pool.reset() + 清 _layerTiles（旧 slice 引用失效），再 syncAll 全新重传。
+  recreate(): void {
+    const gl = this._gl;
+    try { gl.deleteTexture(this._tex); } catch { /* 已随 context 没了，无害 */ }
+    this._readFbo = null;   // 旧 FBO 句柄也失效
+    this._tex = this._allocTexture();
   }
 
   // 给合成器采样用（绑这张 array texture，按 slice 索引采）。
