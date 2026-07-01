@@ -104,16 +104,17 @@ export class TileResidency {
     return b.epoch === pixels.contentVersion;         // 备份陈旧（层被编辑过）→ 拒绝
   }
 
-  // 从备份重物化到给定（应为空的被驱逐层）LayerPixels：解压 → putTile。
-  //   context-loss 恢复 / 冷层被读时的 ensureResident 原语。往返逐字节等价（无损）。
+  // 从备份重物化到（被驱逐的）LayerPixels：解压 → adoptResidentTiles（回填 + 清 _evicted 标志 + **不 bump
+  //   contentVersion**——内容与备份 epoch 一致，重物化对读者/驱逐门透明）。context-loss recoverAll 用。往返无损。
   async restoreLayer(layerId: number, pixels: LayerPixels): Promise<boolean> {
     const b = this._backups.get(layerId);
     if (!b) return false;
-    pixels.clear();
+    const entries: Array<{ tx: number; ty: number; px: Uint8ClampedArray }> = [];
     for (const { tx, ty, comp } of b.tiles) {
       const bytes = await this._codec.decompress(comp);
-      pixels.putTile(tx, ty, new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+      entries.push({ tx, ty, px: new Uint8ClampedArray(bytes.buffer, bytes.byteOffset, bytes.byteLength) });
     }
+    pixels.adoptResidentTiles(entries);
     return true;
   }
 

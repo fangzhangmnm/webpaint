@@ -608,6 +608,9 @@ export class Board {
     this._wasFloatActive = floatActive;
     const stampOverlay = this._glStampOverlay();
     this._lastStampCount = this._showFps ? (stampOverlay?.stamps.length ?? 0) : 0;   // HUD only
+    // 冷层驻留：pin 活动叶（永不驱逐 raw）+ 备份驱逐切走的前活动冷层（省 ~16MB/满层）。活动是组/无 → 传 null。
+    const activeNode = this.doc.activeLayer;
+    this._glBoard!.setActiveLeaf(activeNode && !activeNode.isGroup ? (activeNode as unknown as GLLeaf) : null);
     this._glBoard!.render(
       this.doc as unknown as GLDoc,
       this._docTransformParams(),

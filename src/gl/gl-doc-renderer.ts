@@ -16,6 +16,7 @@ import type { OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import type { PooledFBO, FBOPrec, GLContext } from "./gl-context.ts";
+import { TileResidency } from "./tile-residency.ts";
 
 // board 传入的自由变换浮层（**GPU warp 输入**）：未 warp 的源纹理 canvas（拖动中稳定，srcW×srcH）+ 逆单应性
 //   Hinv（每帧更新）+ sampleMode + 落在哪个源层 z。源纹理按 srcCanvas 引用缓存，**只在内容变时重传**。
@@ -53,6 +54,9 @@ export class GLDocRenderer {
   // 自由变换浮层：per-源层 id 一张复用纹理（warp 每帧变，重传）+ 当前帧描述。
   private _floatTex = new Map<number, { tex: WebGLTexture; canvas: CanvasImageSource | null }>();
   private _floats = new Map<number, FloatDesc>();
+  // 冷层驻留：活动层 pin、切走的层备份后驱逐 CPU raw（省 ~16MB/满层），只留 GPU tiles + 压缩备份。
+  private _residency = new TileResidency();
+  private _activeLeaf: DocLeaf | null = null;
 
   constructor(glctx: GLContext, capacity: number, accumPrec: FBOPrec = "f16") {
     this._glctx = glctx;
@@ -60,6 +64,46 @@ export class GLDocRenderer {
     this._pool = new TilePool(this._backend);
     this._comp = new GLCompositor(glctx, accumPrec);
     this._rasterizer = new GLStampRasterizer(glctx);
+  }
+
+  // 冷层驻留 HUD：压缩备份字节。
+  get residencyBackupBytes(): number { return this._residency.backupByteUsage(); }
+
+  // provider（驱逐层被读时的 sync 重物化）：从该层**当前 GPU tiles** readback 回填 CPU raw。
+  //   只丢 CPU raw、留 GPU → GPU 恒是当前权威 → readback 恒可用且同步（不引入 async 涟漪覆盖 75 个 sync 读者）。
+  private _readbackProvider(leaf: DocLeaf): void {
+    const lt = this._layerTiles.get(leaf.id);
+    if (!lt) return;   // 无 GPU tiles（不该发生：驱逐前必已 synced）→ 留空，caller 得透明
+    const entries: Array<{ tx: number; ty: number; px: Uint8ClampedArray }> = [];
+    lt.tileMap.forEachTile((t) => { entries.push({ tx: t.tx, ty: t.ty, px: new Uint8ClampedArray(this._backend.readSlice(t.slice)) }); });
+    leaf.pixels.adoptResidentTiles(entries);
+  }
+
+  // board 每次活动层变时调：pin 新活动 + 把切走的前活动层备份后驱逐（fire-and-forget，canEvictRaw 守）。
+  setActiveLeaf(leaf: DocLeaf | null): void {
+    const prev = this._activeLeaf;
+    if (prev && (!leaf || prev.id !== leaf.id)) {
+      this._residency.unpin(prev.id);
+      void this._backupAndEvict(prev);
+    }
+    this._activeLeaf = leaf;
+    if (leaf) this._residency.pin(leaf.id);
+  }
+
+  private async _backupAndEvict(leaf: DocLeaf): Promise<void> {
+    try {
+      if (!leaf.pixels.isRawResident()) return;
+      await this._residency.backupLayer(leaf.id, leaf.pixels);
+      if (this._residency.canEvictRaw(leaf.id, leaf.pixels)) leaf.pixels.evictRaw();
+    } catch { /* 备份失败 → 不驱逐（保守：raw 留着，红线优先） */ }
+  }
+
+  // context-loss 恢复：GPU tiles 全没 → 被驱逐层的 raw 也没了（只剩备份）→ 必须先从备份重物化所有驱逐层，
+  //   **再** syncAll 重上传。async；caller(gl-board) 在 syncAll 前 await。
+  async recoverAll(nodes: DocNode[]): Promise<void> {
+    const leaves: DocLeaf[] = [];
+    this._eachLeaf(nodes, (l) => leaves.push(l));
+    for (const l of leaves) if (!l.pixels.isRawResident()) await this._residency.restoreLayer(l.id, l.pixels);
   }
 
   // 内存核算（接 computeMaxLayers 软上限 / HUD）。committed = 池预分配；used = 实占 tile。
@@ -74,6 +118,10 @@ export class GLDocRenderer {
 
   // 重传一个叶层像素 → tiles（内容变更后调）。
   syncLayer(leaf: DocLeaf, docW: number, docH: number): void {
+    leaf.pixels.setResidencyProvider(() => this._readbackProvider(leaf));   // 确保驱逐后被读能 sync 重物化
+    // 驱逐层（CPU raw 已丢）：GPU tiles 本就是当前权威、内容冻结 → **不重传**（否则 dispose 旧 tiles 后 forEachTile
+    //   会从正被释放的 slice readback → 丢数据）。context-loss 时 gl-board 先 recoverAll 解驱逐再 syncAll。
+    if (!leaf.pixels.isRawResident()) return;
     const old = this._layerTiles.get(leaf.id);
     if (old) { old.index.dispose(); old.tileMap.clear(); }
     this._layerTiles.set(leaf.id, uploadLayerToTiles(this._glctx, this._backend, this._pool, leaf, docW, docH));
@@ -95,10 +143,12 @@ export class GLDocRenderer {
     this._eachLeaf(nodes, (l) => this.syncLayer(l, docW, docH));
   }
 
-  // 删层时释放其资源。
+  // 删层时释放其资源（GPU tiles + 压缩备份）。
   dropLayer(id: number): void {
     const r = this._layerTiles.get(id);
     if (r) { r.index.dispose(); r.tileMap.clear(); this._layerTiles.delete(id); }
+    this._residency.dropLayer(id);
+    if (this._activeLeaf?.id === id) this._activeLeaf = null;
   }
 
   // 清掉上帧 live overlay（无 brush stamp overlay 的帧调；CPU canvas overlay 路径已删，brush live 走 setStampOverlay）。

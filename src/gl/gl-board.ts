@@ -34,9 +34,17 @@ export class GLBoard {
     this.canvas = canvas;
     this._glctx = new GLContext(canvas);
     this._renderer = new GLDocRenderer(this._glctx, capacity);
-    // context-loss：丢了 → 全量重传（从 layer pixels 稀疏 tile 重建）+ 缓存作废。
-    this._glctx.onRestored = () => { this._contentDirty = true; this._cache = null; };
+    // context-loss：丢了 → 全量重传（从 layer pixels 稀疏 tile 重建）+ 缓存作废。被驱逐层的 raw 也随 GPU 没了
+    //   （只剩压缩备份）→ 先 recoverAll 从备份解驱逐（_needRecover 门），再 syncAll 重传。
+    this._glctx.onRestored = () => { this._contentDirty = true; this._cache = null; this._needRecover = true; };
   }
+
+  private _needRecover = false;    // context-loss 后待从备份重物化被驱逐层（recoverAll 在 syncAll 前跑）
+  private _recovering = false;     // recoverAll 进行中：跳过合成帧（别从空 raw 合成）
+
+  // board 每次活动层变时转发：pin 新活动 + 备份驱逐切走的冷层。
+  setActiveLeaf(leaf: DocLeaf | null): void { this._renderer.setActiveLeaf(leaf); }
+  get residencyBackupBytes(): number { return this._renderer.residencyBackupBytes; }
 
   get memory() { return this._renderer.memory; }
   // 上一帧合成 pass 计数（dev HUD；只在内容/描边帧更新——pan/zoom 只 present 缓存不重合成，故读数冻在上次合成）。
@@ -61,6 +69,15 @@ export class GLBoard {
 
   render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, livePreview: boolean, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, forceSync = false, surrogate: SurrogateInput | null = null): void {
     if (this._glctx.isLost) return;
+    // context-loss 恢复：先从压缩备份重物化被驱逐层的 CPU raw，再让下帧 syncAll 重传 GPU。async → 恢复中跳帧
+    //   （别从空 raw 合成成空层）。恢复完 markContentDirty，下帧正常全量重传。
+    if (this._needRecover && !this._recovering) {
+      this._needRecover = false; this._recovering = true;
+      this._renderer.recoverAll(doc.layers)
+        .then(() => { this._recovering = false; this._contentDirty = true; })
+        .catch(() => { this._recovering = false; this._contentDirty = true; });
+    }
+    if (this._recovering) return;
     // doc 尺寸变（改分辨率/裁剪）：池里全是旧 doc 尺寸 FBO，永不再命中 → 主动清掉真删 GL（旧的大、早放早好），
     //   缓存作废、下帧全量重传。比等 cap 惰性驱逐更干净（否则会同时压两个 doc 尺寸的 FBO）。
     if (doc.width !== this._lastDocW || doc.height !== this._lastDocH) {

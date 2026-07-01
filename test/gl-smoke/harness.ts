@@ -400,6 +400,30 @@ function bridgeParity(glctx: GLContext, add: Add): void {
   res.forEach((r) => r.index.dispose());
 }
 
+// ---- E2) TileResidency GPU-readback provider：驱逐冷层 CPU raw 后，从**当前 GPU tiles** readback 重物化
+//         必须逐字节等价（= GLDocRenderer._readbackProvider 的 GL 依赖面；async 压缩备份往返由 node deflate 测覆盖）。
+function residencyReadbackParity(glctx: GLContext, add: Add): void {
+  const N = 256;
+  const backend = new GLTileBackend(glctx, 16); const pool = new TilePool(backend);
+  const c = makeLayerCanvas(N, N, (x, y) => [x % 256, y % 256, (x * 7 + y * 3) % 256, (x + y < 120) ? 0 : 255]);
+  const lp = pixelsFromCanvas(N, N, 0, 0, c);
+  const ref = lp.getRegion(0, 0, N, N);                       // 驱逐前基准
+  const lt = uploadLayerToTiles(glctx, backend, pool, { pixels: lp }, N, N);   // 上 GPU
+  // 装 provider（同 GLDocRenderer._readbackProvider：从该层当前 GPU tiles readback 回填）
+  lp.setResidencyProvider((p) => {
+    const entries: Array<{ tx: number; ty: number; px: Uint8ClampedArray }> = [];
+    lt.tileMap.forEachTile((t) => entries.push({ tx: t.tx, ty: t.ty, px: new Uint8ClampedArray(backend.readSlice(t.slice)) }));
+    p.adoptResidentTiles(entries);
+  });
+  const evicted = lp.evictRaw();
+  const zeroBytes = lp.byteUsage === 0;
+  const round = lp.getRegion(0, 0, N, N);                     // 触发 provider readback 重物化
+  const resident = lp.isRawResident();
+  let md = 0; for (let i = 0; i < ref.length; i++) { const d = Math.abs(ref[i] - round[i]); if (d > md) md = d; }
+  add("residency:evict→GPU readback 重物化 逐字节一致", evicted && zeroBytes && resident && md === 0, `evict=${evicted} bytes0=${zeroBytes} maxΔ=${md}`);
+  lt.index.dispose();
+}
+
 // LayerPixels Canvas2D facade golden：editRegion 画 → 经 tile → materialize，对比直接 Canvas2D 参考。
 function tilePixelsParity(add: Add): void {
   const N = 512;
@@ -822,6 +846,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { groupParity(glctx, add); } catch (e) { add("group parity", false, String(e)); }
   try { overlayParity(glctx, add); } catch (e) { add("overlay parity", false, String(e)); }
   try { bridgeParity(glctx, add); } catch (e) { add("bridge parity", false, String(e)); }
+  try { residencyReadbackParity(glctx, add); } catch (e) { add("residency readback parity", false, String(e)); }
   try { tilePixelsParity(add); } catch (e) { add("tilepixels parity", false, String(e)); }
   try { stampParity(glctx, add); } catch (e) { add("stamp parity", false, String(e)); }
   try { brushPipelineParity(glctx, add); } catch (e) { add("brushpipe parity", false, String(e)); }
