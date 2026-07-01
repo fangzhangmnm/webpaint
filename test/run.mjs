@@ -41,7 +41,8 @@ import "./layer-cap-budget.test.mjs";        // v339 动态字节预算图层上
 import "./brush-collect-stamps.test.mjs";    // Stage 3：brush.collectStamps GPU stamp-list 出栈（复用手感数学 / 椭圆透传 / pixelMode null）
 import "./layer-composite.test.mjs";        // deep module A：clip 基底解析（同级/链共基底/基底隐显/组作基底）
 import "./tile-store.test.mjs";             // WebGL2+tiling Stage 1：tile 几何 + 稀疏存储簿记（fake backend round-trip）
-import "./tile-pixels.test.mjs";          
+import "./tile-pixels.test.mjs";
+import "./tile-residency.test.mjs";         // TileResidency Slice A：无损压缩备份 + dirty-never-evict 门 + contentVersion          
 import "./blend-glsl.test.mjs";             // WebGL2+tiling Stage 2：12 blend GLSL 生成（像素 parity 在 npm run smoke）
 import "./gl-compose-plan.test.mjs";        // WebGL2+tiling Stage 2：clip 基底解析 + 组隔离判定（与 layer-composite 对齐）
 import "./gl-doc-bridge.test.mjs";       // WebGL2+tiling 接 board：doc 树→CompNode 翻译 + safeMode

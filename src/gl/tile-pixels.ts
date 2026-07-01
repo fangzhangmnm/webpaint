@@ -22,6 +22,7 @@ export class LayerPixels {
   private _across: number;
   private _tiles = new Map<number, Uint8ClampedArray>();   // tileKey → RGBA 256²
   private _dirty = new Set<number>();                       // 自上次 markAllClean 后变更的 tileKey
+  private _contentVersion = 0;                              // 单调递增，每次内容 mutation +1（TileResidency 驱逐门用）
 
   constructor(docW: number, docH: number) {
     this.docW = docW;
@@ -30,6 +31,9 @@ export class LayerPixels {
   }
 
   get tileCount(): number { return this._tiles.size; }
+  // 内容版本：单调递增，任何像素 mutation（putRegion/putTile/clear/restore）+1。**不是** _dirty（那是 GL 上传脏）。
+  //   TileResidency 记 backupEpoch=contentVersion；驱逐冷层 raw 当且仅当 backupEpoch===contentVersion（备份仍覆盖当前内容）。
+  get contentVersion(): number { return this._contentVersion; }
   // 实占 CPU tile 字节（稀疏：只数已分配 tile）。给 computeMaxLayers 动态字节预算 / 内存 HUD。
   get byteUsage(): number { return this._tiles.size * TILE_RGBA; }
   isEmpty(): boolean { return this._tiles.size === 0; }
@@ -41,6 +45,7 @@ export class LayerPixels {
   }
   // 整 tile 写入（拷贝进来；全透明则回收）。给 GL readback / wholesale 重建用。
   putTile(tx: number, ty: number, pixels: Uint8ClampedArray): void {
+    this._contentVersion++;
     const key = tileKey(tx, ty, this._across);
     if (isAllTransparent(pixels)) { this._tiles.delete(key); this._dirty.add(key); return; }
     const t = new Uint8ClampedArray(TILE_RGBA);
@@ -56,6 +61,7 @@ export class LayerPixels {
   // src 的透明像素也会写入（= 该处变透明）。覆盖后全透明的 tile 回收。
   putRegion(sx0: number, sy0: number, sw: number, sh: number, src: Uint8ClampedArray): void {
     if (sw <= 0 || sh <= 0) return;
+    this._contentVersion++;
     forEachTileInRect(sx0, sy0, sw, sh, this.docW, this.docH, (tx, ty) => {
       const key = tileKey(tx, ty, this._across);
       let tile = this._tiles.get(key);
@@ -139,7 +145,7 @@ export class LayerPixels {
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
-  clear(): void { this._tiles.forEach((_p, k) => this._dirty.add(k)); this._tiles.clear(); }
+  clear(): void { this._contentVersion++; this._tiles.forEach((_p, k) => this._dirty.add(k)); this._tiles.clear(); }
 
   // ---- 纯变换（raw 数组操作，返回新 LayerPixels；doc 变换用，node 全可测、无 Canvas2D 往返、更快）----
   // 水平镜像（doc 尺寸不变）。
@@ -214,6 +220,7 @@ export class LayerPixels {
     return { across: this._across, tiles };
   }
   restore(snap: { across: number; tiles: [number, Uint8ClampedArray][] }): void {
+    this._contentVersion++;
     this._tiles.forEach((_p, k) => this._dirty.add(k));
     this._tiles.clear();
     for (const [key, px] of snap.tiles) { this._tiles.set(key, new Uint8ClampedArray(px)); this._dirty.add(key); }
