@@ -23,6 +23,8 @@ export class LayerPixels {
   private _tiles = new Map<number, Uint8ClampedArray>();   // tileKey → RGBA 256²
   private _dirty = new Set<number>();                       // 自上次 markAllClean 后变更的 tileKey
   private _contentVersion = 0;                              // 单调递增，每次内容 mutation +1（TileResidency 驱逐门用）
+  private _evicted = false;                                 // raw 被 TileResidency 驱逐（只剩 GPU tiles + 压缩备份）
+  private _provider: ((lp: LayerPixels) => void) | null = null;   // 重物化回调（sync GPU readback，TileResidency 装）
 
   constructor(docW: number, docH: number) {
     this.docW = docW;
@@ -30,17 +32,49 @@ export class LayerPixels {
     this._across = tilesAcross(docW);
   }
 
-  get tileCount(): number { return this._tiles.size; }
+  // ---- 冷层驻留（TileResidency 接线）----
+  // 中心护栏：被驱逐层被任何 read 命中时，先 sync 重物化 raw（provider = GPU readback 回填）。所有 read 方法
+  //   首行调 _ensureResident() → 覆盖全部 LayerPixels 读者（导出/合成/变换/undo/吸管），零 per-caller 扇出。
+  //   重物化不改内容 → 不 bump contentVersion（驱逐门 epoch 不变，重物化对读者透明）。
+  setResidencyProvider(fn: (lp: LayerPixels) => void): void { this._provider = fn; }
+  isRawResident(): boolean { return !this._evicted; }
+  // 驱逐 raw：丢 CPU _tiles（省 ~16MB/满层），只留 GPU tiles + 压缩备份。需已设 provider（否则无退路 → 拒绝）。
+  //   caller(TileResidency) 须先 canEvictRaw（备份完整且非 pinned）。不 bump contentVersion（内容没变，只驻留变）。
+  evictRaw(): boolean {
+    if (this._evicted) return true;
+    if (!this._provider) return false;                      // 无重物化路径 → 拒绝（红线：不可无退路地丢 raw）
+    this._tiles.clear();
+    this._evicted = true;
+    return true;
+  }
+  // provider 回填：装入重物化 tile（不 bump contentVersion、不进 _dirty——GPU 已有这些像素，非 GL 上传源）。
+  adoptResidentTiles(entries: Array<{ tx: number; ty: number; px: Uint8ClampedArray }>): void {
+    for (const { tx, ty, px } of entries) {
+      if (isAllTransparent(px)) continue;
+      const t = new Uint8ClampedArray(TILE_RGBA);
+      t.set(px.subarray(0, TILE_RGBA));
+      this._tiles.set(tileKey(tx, ty, this._across), t);
+    }
+    this._evicted = false;
+  }
+  private _ensureResident(): void {
+    if (!this._evicted) return;
+    this._evicted = false;                                  // 先落标志防重入/失败自旋
+    this._provider?.(this);                                 // provider 回填 _tiles（sync GPU readback）
+  }
+
+  get tileCount(): number { this._ensureResident(); return this._tiles.size; }
   // 内容版本：单调递增，任何像素 mutation（putRegion/putTile/clear/restore）+1。**不是** _dirty（那是 GL 上传脏）。
   //   TileResidency 记 backupEpoch=contentVersion；驱逐冷层 raw 当且仅当 backupEpoch===contentVersion（备份仍覆盖当前内容）。
   get contentVersion(): number { return this._contentVersion; }
   // 实占 CPU tile 字节（稀疏：只数已分配 tile）。给 computeMaxLayers 动态字节预算 / 内存 HUD。
-  get byteUsage(): number { return this._tiles.size * TILE_RGBA; }
-  isEmpty(): boolean { return this._tiles.size === 0; }
+  get byteUsage(): number { return this._tiles.size * TILE_RGBA; }   // 实占 CPU 字节：驱逐后为 0（正是省的那份），不重物化
+  isEmpty(): boolean { if (this._evicted) return false; return this._tiles.size === 0; }   // 只驱逐非空层 → 驱逐即非空
 
   // ---- 低层 tile 访问 ----
   // 取 tile 像素（不存在返 null）。返回的是内部引用，调用方别越界写。
   getTile(tx: number, ty: number): Uint8ClampedArray | null {
+    this._ensureResident();
     return this._tiles.get(tileKey(tx, ty, this._across)) ?? null;
   }
   // 整 tile 写入（拷贝进来；全透明则回收）。给 GL readback / wholesale 重建用。
@@ -54,6 +88,7 @@ export class LayerPixels {
     this._dirty.add(key);
   }
   forEachTile(cb: (tx: number, ty: number, pixels: Uint8ClampedArray) => void): void {
+    this._ensureResident();
     this._tiles.forEach((px, key) => { const { tx, ty } = tileCoord(key, this._across); cb(tx, ty, px); });
   }
 
@@ -87,6 +122,7 @@ export class LayerPixels {
 
   // ---- 读：doc 矩形 → flat RGBA（缺 tile = 透明 0）----
   getRegion(x0: number, y0: number, w: number, h: number): Uint8ClampedArray {
+    this._ensureResident();
     const out = new Uint8ClampedArray(w * h * 4);
     forEachTileInRect(x0, y0, w, h, this.docW, this.docH, (tx, ty) => {
       const tile = this._tiles.get(tileKey(tx, ty, this._across));
@@ -108,6 +144,7 @@ export class LayerPixels {
 
   sampleAt(x: number, y: number): [number, number, number, number] {
     if (x < 0 || y < 0 || x >= this.docW || y >= this.docH) return [0, 0, 0, 0];
+    this._ensureResident();
     const tx = Math.floor(x / TILE_SIZE), ty = Math.floor(y / TILE_SIZE);
     const tile = this._tiles.get(tileKey(tx, ty, this._across));
     if (!tile) return [0, 0, 0, 0];
@@ -118,6 +155,7 @@ export class LayerPixels {
   // ---- 派生内容框（bbox 替代）----
   // tile 粒度并集；tight=true 时扫边缘 tile 的 alpha 收紧到像素。空 → null。
   contentBounds(tight = false): { x: number; y: number; w: number; h: number } | null {
+    this._ensureResident();
     if (this._tiles.size === 0) return null;
     let tx0 = Infinity, ty0 = Infinity, tx1 = -Infinity, ty1 = -Infinity;
     this._tiles.forEach((_px, key) => {
@@ -215,6 +253,7 @@ export class LayerPixels {
 
   // ---- undo 快照（先全 tile 深拷贝；per-tile delta = 后续切片③）----
   snapshot(): { across: number; tiles: [number, Uint8ClampedArray][] } {
+    this._ensureResident();
     const tiles: [number, Uint8ClampedArray][] = [];
     this._tiles.forEach((px, key) => tiles.push([key, new Uint8ClampedArray(px)]));
     return { across: this._across, tiles };

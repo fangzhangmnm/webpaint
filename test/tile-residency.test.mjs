@@ -85,6 +85,64 @@ describe("TileResidency · dirty-never-evict 门", () => {
   });
 });
 
+// 模拟 GPU-readback provider：驱逐前抓一份 tile 拷贝当「GPU 副本」，重物化时回填（= readSlice 行为）。
+function wireFakeGpu(lp) {
+  let gpu = null;
+  lp.setResidencyProvider((p) => { if (gpu) p.adoptResidentTiles(gpu); });
+  return { capture() { gpu = []; lp.forEachTile((tx, ty, px) => gpu.push({ tx, ty, px: new Uint8ClampedArray(px) })); } };
+}
+
+describe("LayerPixels · 驱逐 raw + 中心惰性重物化", () => {
+  it("无 provider → evictRaw 拒绝（红线：不可无退路地丢）", () => {
+    const lp = makePopulated();
+    assert(!lp.evictRaw(), "无 provider 拒绝驱逐");
+    assert(lp.isRawResident(), "仍驻留");
+  });
+  it("驱逐后 byteUsage=0 / isEmpty=false / contentVersion 不变", () => {
+    const lp = makePopulated();
+    const gpu = wireFakeGpu(lp); gpu.capture();
+    const before = lp.contentVersion, tc = lp.tileCount;
+    assert(lp.byteUsage > 0, "驱逐前有字节");
+    // 直接操 _tiles 前先驱逐（tileCount 会触发重物化，故先读快照）
+    assert(lp.evictRaw(), "驱逐成功");
+    eq(lp.byteUsage, 0, "驱逐后 CPU 字节=0（省的那份，byteUsage 不重物化）");
+    assert(!lp.isEmpty(), "非空层驱逐后 isEmpty=false（不谎报空）");
+    eq(lp.contentVersion, before, "驱逐不 bump contentVersion");
+    // 触发重物化的读
+    eq(lp.tileCount, tc, "重物化后 tile 数恢复");
+    eq(lp.contentVersion, before, "重物化也不 bump contentVersion");
+  });
+  it("所有读者驱逐后透明重物化，像素逐字节一致", () => {
+    for (const read of [
+      (lp, ref) => assert(eqBytes(lp.getRegion(0, 0, W, H), ref), "getRegion"),
+      (lp) => assert(lp.sampleAt(100, 120)[3] === 200, "sampleAt"),
+      (lp) => { let n = 0; lp.forEachTile(() => n++); assert(n > 0, "forEachTile"); },
+      (lp) => assert(lp.contentBounds() !== null, "contentBounds"),
+      (lp) => assert(lp.snapshot().tiles.length > 0, "snapshot"),
+      (lp) => assert(lp.getTile(0, 0) !== null || lp.getTile(2, 2) !== null, "getTile"),
+    ]) {
+      const lp = makePopulated();
+      const ref = lp.getRegion(0, 0, W, H);
+      const gpu = wireFakeGpu(lp); gpu.capture();
+      assert(lp.evictRaw() && !lp.isRawResident(), "已驱逐");
+      read(lp, ref);
+      assert(lp.isRawResident(), "读后已重物化");
+    }
+  });
+  it("重物化后可继续编辑（putRegion bump version → 备份陈旧）", async () => {
+    const lp = makePopulated();
+    const res = new TileResidency(identityCodec);
+    await res.backupLayer(9, lp);
+    const gpu = wireFakeGpu(lp); gpu.capture();
+    assert(res.canEvictRaw(9, lp), "可驱逐");
+    assert(lp.evictRaw(), "驱逐");
+    lp.getRegion(0, 0, 4, 4);                    // 读 → 重物化
+    assert(res.canEvictRaw(9, lp), "重物化后备份仍有效（version 未变）");
+    lp.putRegion(0, 0, 8, 8, region(0, 0, 8, 8, () => [5, 5, 5, 255]));   // 编辑 bump
+    assert(!res.canEvictRaw(9, lp), "编辑后备份陈旧→不可驱逐");
+  });
+});
+
 describe("TileResidency · 簿记", () => {
   it("hasBackup / backupEpoch / dropLayer / byteUsage", async () => {
     const lp = makePopulated();
