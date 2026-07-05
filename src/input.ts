@@ -8,8 +8,9 @@
 // 行为矩阵（沿用 ScratchPad，做了 picker 增项）：
 //   tool=brush / eraser / picker:
 //     pen                    → 画 / 擦 / 吸
-//     touch (无 pen)         → 单指拖 = 画；双指 = pan+pinch
-//     touch (本机见过 pen)   → 永远不画；单指=pan，双指=pan+pinch
+//     touch (无 pen)         → 单指=惰性 hold（防手掌误触，不画不平移）；「单指绘画」开关 ON 时单指作画；双指=pan+pinch
+//     touch (本机见过 pen)   → 永远不画；单指=惰性 hold（**不 pan**）；双指=pan+pinch
+//     ——防手掌误触：单指永不平移画布，pan 一律两指（见过 pen 的设备手掌≡单指 touch，物理不可分）。见 pointer-route.ts:assignRole
 //     mouse 左键             → 画/擦/吸
 //     mouse 中/右键          → pan
 //     按住 Space             → 临时 pan
@@ -107,6 +108,7 @@ interface PointerRec {
 
 interface GestureTap {
   startTime: number;
+  firstDownTime: number;   // 参与本次手势的最早触点落下时刻，tap 时长从这里算（抓久搁掌根的"慢 tap"）
   isTap: boolean;
   maxCount: number;
   startPositions: Record<string, { x: number; y: number }>;
@@ -153,6 +155,12 @@ const DOUBLETAP_MAX_GAP = 80;
 // 多指 tap = undo/redo（Procreate 方言）
 const GESTURE_TAP_MAX_MS = 250;
 const GESTURE_TAP_MAX_MOVE_SQ = 256;     // 16 px²
+
+// 掌触防误撤销：手掌搁屏 = ≥2 个 touch 触点，与真双指物理不可分。写字前后手掌一抖/闪灭
+// 就凑成假"双指 tap"→ 误 undo。_purgeAllTouches 只在下次落笔清；最后一笔后、下笔未来的
+// 窗口里掌触闪灭仍会误撤销。故多指 *tap* 加笔尖时近性门：笔尖活动（落/移/抬）后这段时间内
+// 的多指 tap 一律视作掌触 flicker，吞掉不撤销/重做。只挡 tap，pinch/pan 不受影响。
+const PALM_PEN_GUARD_MS = 600;
 
 // 单指长按 → 临时切到 picker；user 设置可开关。延迟阈值参考 iOS 系统 longpress。
 const LONG_PRESS_MS = 450;
@@ -323,6 +331,7 @@ export class InputController {
   gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport } | null;
   _gestureTap: GestureTap | null;
   _lastTap: TapRef | null;
+  _lastPenActivity: number = -Infinity;   // 最近笔尖落/移/抬时刻 (ms)。掌触 tap 门用
   history: History | null;
   pixelHistory: PixelHistory | null;
   _activeStroke: ActiveStroke | null = null;
@@ -459,6 +468,7 @@ export class InputController {
     if (e.pointerType === "pen") {
       this._purgeAllTouches();
       this.penEverSeen = true;
+      this._lastPenActivity = performance.now();
       this._lastTap = null;
     }
     this.canvas.setPointerCapture?.(e.pointerId);
@@ -624,6 +634,7 @@ export class InputController {
     rec.x = e.clientX;
     rec.y = e.clientY;
     rec.lastUpdateTs = performance.now();
+    if (rec.pointerType === "pen") this._lastPenActivity = rec.lastUpdateTs;  // 掌触 tap 门
 
     // 单指长按 timer 还在 → 检查是否移动超阈值，超了就取消（当 draw 处理）
     if (rec.longPressTimer) {
@@ -749,6 +760,7 @@ export class InputController {
     this.pointers.delete(e.pointerId);
     rec.x = e.clientX;
     rec.y = e.clientY;
+    if (rec.pointerType === "pen") this._lastPenActivity = performance.now();  // 掌触 tap 门：从抬笔起算
     if (rec.longPressTimer) { clearTimeout(rec.longPressTimer); rec.longPressTimer = null; }
 
     if (rec.role === "gesture") {
@@ -759,8 +771,13 @@ export class InputController {
         if (remaining === 0 && this._gestureTap) {
           const tap = this._gestureTap;
           this._gestureTap = null;
-          const elapsed = performance.now() - tap.startTime;
-          if (tap.isTap && elapsed < GESTURE_TAP_MAX_MS) {
+          const now = performance.now();
+          // 从最早触点落下算 tap 时长：掌根久搁 = 慢 tap = 超限剔除（旧口径从第二指到来算漏掉）。
+          const elapsed = now - tap.firstDownTime;
+          // 笔尖时近性门：写字缝里手掌抖出的"快闪双指"（时长没超但紧邻落笔）也吞掉，绝不误撤销。
+          // 真想撤销时笔尖已离屏 > PALM_PEN_GUARD_MS，双指/三指 tap 照常。只挡 tap，pinch/pan 不动。
+          const palmGuard = (now - this._lastPenActivity) < PALM_PEN_GUARD_MS;
+          if (tap.isTap && elapsed < GESTURE_TAP_MAX_MS && !palmGuard) {
             const act = gestureTapAction(tap.maxCount);   // 2→undo / 3+→redo
             if (act === "undo") { this.ctrlZ(); this.status("双指 · 撤销"); }
             else if (act === "redo") { this.redo(); this.status("三指 · 重做"); }
@@ -1083,6 +1100,7 @@ export class InputController {
     if (!this._gestureTap) {
       this._gestureTap = {
         startTime: performance.now(),
+        firstDownTime: Infinity,
         isTap: true,
         maxCount: 0,
         startPositions: {},
@@ -1091,6 +1109,11 @@ export class InputController {
     for (const [pid, p] of this.pointers) {
       if (p.role === "gesture" && !(pid in this._gestureTap.startPositions)) {
         this._gestureTap.startPositions[pid] = { x: p.x, y: p.y };
+        // 掌根久搁再抬：downTime 很早 → firstDownTime 很早 → 抬手 elapsed 超限，不算 tap。
+        // 旧口径从第二指到来算，抓不到"掌 blob 早压着、第二个 blob 才刚冒"的慢 tap。
+        if (p.downTime != null && p.downTime < this._gestureTap.firstDownTime) {
+          this._gestureTap.firstDownTime = p.downTime;
+        }
       }
     }
     if (touches.length > this._gestureTap.maxCount) {
