@@ -381,3 +381,63 @@ export function triggerDownload(blob: Blob, filename: string) {
   // 100ms 后 revoke，给浏览器一点点时间发起下载
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
+
+// ---- 打印 sink ----
+
+/**
+ * 把图片 blob 送系统打印对话框（与文件/剪贴板/分享正交的第 4 个 sink）。
+ * iPad Safari：window.print() 弹 iOS 打印面板 → 选 AirPrint 打印机走 WiFi 直打。
+ * 桌面：弹浏览器/系统打印对话框。
+ *
+ * 为什么不用 popup 新窗口 / iframe：
+ *   - popup 新窗口 iOS Safari 会被拦截器挡；
+ *   - iframe.contentWindow.print() iOS 会打整页（不是 iframe 内容）。
+ * 稳的做法：在**当前文档**注入一个 @media print 覆盖层——打印时隐藏全页、只留这张图。
+ * window.print() 不需要 user gesture（不像 clipboard.write），故 encode 的 await 不会失效。
+ */
+export async function printImageBlob(blobOrPromise: Blob | Promise<Blob>) {
+  const blob = await blobOrPromise;
+  const url = URL.createObjectURL(blob);
+  const layer = document.createElement("div");
+  layer.className = "wp-print-layer";
+  const img = document.createElement("img");
+  img.src = url;
+  layer.appendChild(img);
+
+  const style = document.createElement("style");
+  // 屏幕上 layer 恒隐藏；打印时隐藏全页、只显 layer，并把图缩放进整页。
+  style.textContent = `
+    .wp-print-layer { display: none; }
+    @media print {
+      html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+      body > *:not(.wp-print-layer) { display: none !important; }
+      .wp-print-layer {
+        display: flex !important; align-items: center; justify-content: center;
+        position: fixed; inset: 0; margin: 0; padding: 0;
+      }
+      .wp-print-layer img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    }`;
+
+  document.body.appendChild(style);
+  document.body.appendChild(layer);
+
+  const cleanup = () => {
+    style.remove();
+    layer.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  await new Promise<void>((resolve) => {
+    if (img.complete && img.naturalWidth > 0) return resolve();
+    img.onload = () => resolve();
+    img.onerror = () => resolve();
+  });
+
+  // afterprint 在桌面可靠；iOS Safari 可能不触发 → 兜底定时清理。
+  let done = false;
+  const finish = () => { if (done) return; done = true; cleanup(); window.removeEventListener("afterprint", finish); };
+  window.addEventListener("afterprint", finish);
+  setTimeout(finish, 60000);
+
+  window.print();
+}

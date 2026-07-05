@@ -13,7 +13,7 @@ import { getExporter, listExportersByKind } from "./exporters.ts";
 import { els } from "./els.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
-import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard } from "./session.ts";
+import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
 import { looksEncryptedContainer } from "./crypto-format.ts";
 
@@ -59,7 +59,7 @@ function _updateMenuSubLabels() {
   const eiEl = document.getElementById("menuExportImageSub");
   const iiEl = document.getElementById("menuImportImageSub");
   if (epEl) epEl.textContent = "." + ((getExporter(ep.format) || getExporter("ora")).ext);
-  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? "当前层" : "合并"} · ${ei.target === "clipboard" ? "剪切板" : "文件"}`;
+  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? "当前层" : "合并"} · ${ei.target === "clipboard" ? "剪切板" : ei.target === "print" ? "打印" : "文件"}`;
   if (iiEl) iiEl.textContent = `${ii.source === "clipboard" ? "剪切板" : "文件"} · 新图层`;
 }
 
@@ -114,6 +114,13 @@ export function initExportImportMenu(ctx: AppContext) {
         // 剪贴板恒为 PNG（ClipboardItem image/png）——格式选择只作用于文件/分享路径
         await copyImageToClipboard(doc, c.scope);
         setStatus(`已复制 PNG 到剪贴板（${c.scope === "active" ? "当前层" : "合并"}）`);
+      } else if (c.target === "print") {
+        // 打印恒走位图（PNG）——矢量/ora 之类没意义；scope 仍生效。
+        const exp = getExporter(c.format === "jpg" ? "jpg" : "png") || getExporter("png");
+        if (exp.busyHint) setStatus(exp.busyHint, true);
+        const blob = await exp.encode(doc, { scope: c.scope });
+        await printImageBlob(blob);
+        setStatus("打印面板已开");
       } else {
         const exp = getExporter(c.format) || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
@@ -180,6 +187,7 @@ export function initExportImportMenu(ctx: AppContext) {
         <div class="menu-config-title">去向</div>
         <label><input type="radio" name="tgt" value="file" ${c.target === "file" ? "checked" : ""} /> 文件</label>
         <label><input type="radio" name="tgt" value="clipboard" ${c.target === "clipboard" ? "checked" : ""} /> 剪切板</label>
+        <label><input type="radio" name="tgt" value="print" ${c.target === "print" ? "checked" : ""} /> 打印</label>
       </div>
     `, (popup) => {
       const fmt = (popup.querySelector('input[name="fmt"]:checked') as HTMLInputElement | null)?.value || "png";
