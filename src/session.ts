@@ -384,31 +384,73 @@ export function triggerDownload(blob: Blob, filename: string) {
 
 // ---- 打印 sink ----
 
+// 只有图的极简打印文档（新窗口 / iframe 共用）。src 传 blob objectURL 或 data URL。
+// autoPrint：新窗口用 true（内嵌脚本 img.onload→window.print()→afterprint 自关标签页，父窗口跨窗口
+//   驱动子窗口打印不可靠）；iframe 用 false（父窗口拿到 iwin 后自己驱动 print，别让脚本重复打）。
+function _printDocHtml(src: string, autoPrint: boolean): string {
+  const script = autoPrint
+    ? "<scr" + "ipt>" +
+      "var i=document.images[0];" +
+      "function p(){setTimeout(function(){try{window.focus();window.print();}catch(e){}},120);}" +
+      "if(i.complete&&i.naturalWidth)p();else{i.onload=p;i.onerror=p;}" +
+      // 打印面板关/取消后自动关标签页（自开窗口可自关）；iOS 未必触发 afterprint 则用户手动关。
+      "window.onafterprint=function(){setTimeout(function(){try{window.close();}catch(e){}},300);};" +
+      "</scr" + "ipt>"
+    : "";
+  return (
+    "<!doctype html><html><head><meta charset=\"utf-8\">" +
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+    "<title>打印</title><style>" +
+    "@page{margin:0}" +
+    "html,body{margin:0;padding:0;height:100%;background:#fff}" +
+    "body{display:flex;align-items:center;justify-content:center}" +
+    "img{max-width:100%;max-height:100%;object-fit:contain}" +
+    "</style></head><body>" +
+    "<img alt=\"\" src=\"" + src + "\">" +
+    script +
+    "</body></html>"
+  );
+}
+
 /**
- * 把图片 blob 送系统打印对话框（与文件/剪贴板/分享正交的第 4 个 sink）。
- * iPad Safari：弹 iOS 打印面板 → 选 AirPrint 打印机走 WiFi 直打。桌面：弹浏览器打印对话框。
+ * 首选打印路径：把图开在**独立新标签页**里、从那儿打印（v375，用户实测选定）。
+ * 为什么不在本页打：WebPaint 屏上是 2D canvas，但底下有 WebGL 合成器；iOS 16.7/17 已知 bug——
+ *   打印 popover 这种模态一接管就丢 WebGL context（"WebGL: context lost"，见 Apple Dev Forums），
+ *   打印期间任何 render 会把空 GL 结果 blit 到 2D 画布 → 主画布闪白/丢图。v370~v373 页内各招（@media
+ *   print 覆盖层 / iframe / 每帧重绘 keep-alive / 持久 <img> 封面）都救不干净（用户逐版实测）。
+ * 正解：把打印彻底搬离这个脆弱的 WebGL 页——新标签页只有一张 <img>，打印面板盖在它上面，主 app 页
+ *   在另一个 tab、全程不被打印流程碰。
  *
- * 关键：打**隐藏 iframe 自己的文档**（doc 里只有这张图），调 `iframe.contentWindow.print()`。
- *   - v370 的「当前文档注入 @media print 覆盖层 + 顶层 window.print()」在 iOS 上失败：
- *     iOS Safari 基本无视 @media print，把当前视口整页栅格化 → 打出来是网页截图（用户实测）。
- *   - iframe 是独立文档，iOS 打的是 iframe 里的内容，绕开顶层页的 print CSS。
- *     （注意区别：顶层 window.print() 才会打整页；iframe.contentWindow.print() 打 iframe 文档。
- *      print-js / react-to-print 在 iOS 上就是这么干的。）
- *
- * coverCanvas：打印期间盖在它上面的**持久静态封面**。为什么需要：iPad 打印面板是盖在页面上的
- *   popover（主画布在旁可见），iOS 生成预览时会重排/重置主画布 canvas 的 backing store → 内容被清成白，
- *   且面板模态期间 rAF 被暂停（v372 每帧重绘救不回，用户实测「预览转圈后图消失」）。
- *   解法：打印前把该 canvas 当前像素**快照成一张 <img> position:fixed 贴在它屏幕矩形上**——painted <img>
- *   是持久 DOM，重排/重合成都不掉，天然免疫。afterprint 撤封面。主画布是 2D canvas（board getContext("2d")），
- *   toDataURL 稳拿当前像素，无 WebGL readback 时序坑。
- * onAfterPrint：afterprint / 60s 兜底回调一次（撤完封面后），给 app 重绘主画布兜底（board.invalidateAll）。
- * window.print() 不需要 user gesture（不像 clipboard.write），故 encode 的 await 不会失效。
+ * win 必须在**用户手势同步期内**就 window.open 好再传进来（iOS transient-activation 很严，encode 的
+ *   await 一跨就废）——所以开窗在 export-import-menu 的 click handler 里、encode 之前。
+ * blob URL 与 opener 同源，子窗口能读；子窗口 <img> 一旦 load 完像素已进去，60s 后 revoke 不影响已渲染图。
+ */
+export async function printImageInNewWindow(win: Window, blobOrPromise: Blob | Promise<Blob>) {
+  let url = "";
+  try {
+    const blob = await blobOrPromise;
+    url = URL.createObjectURL(blob);
+    win.document.open();
+    win.document.write(_printDocHtml(url, true));   // autoPrint：子窗口自己打 + 打完自关
+    win.document.close();
+  } catch (e) {
+    try { win.close(); } catch { /* ignore */ }
+    if (url) URL.revokeObjectURL(url);
+    throw e;
+  }
+  // 子窗口已把 blob 读进 <img>；给足加载时间后回收 objectURL（不影响已渲染的图）。
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+/**
+ * 兜底打印路径：弹窗被拦时用页内隐藏 iframe 打（桌面/降级）。打 iframe 自己的文档、调
+ * iframe.contentWindow.print()（顶层 window.print() 会打整页；iOS 无视 @media print，故必走 iframe 文档）。
+ * onAfterPrint：afterprint / 60s 兜底回调一次，给 app 重绘兜底。
  */
 export async function printImageBlob(
   blobOrPromise: Blob | Promise<Blob>,
-  opts: { coverCanvas?: HTMLCanvasElement | null; onAfterPrint?: () => void } = {},
+  onAfterPrint?: () => void,
 ) {
-  const { coverCanvas, onAfterPrint } = opts;
   const blob = await blobOrPromise;
   const url = URL.createObjectURL(blob);
 
@@ -420,54 +462,27 @@ export async function printImageBlob(
 
   const idoc = iframe.contentDocument;
   const iwin = iframe.contentWindow;
-  let cover: HTMLImageElement | null = null;
-  const cleanup = () => { cover?.remove(); iframe.remove(); URL.revokeObjectURL(url); };
+  const cleanup = () => { iframe.remove(); URL.revokeObjectURL(url); };
   if (!idoc || !iwin) { cleanup(); throw new Error("打印 iframe 创建失败"); }
 
   idoc.open();
-  idoc.write(
-    "<!doctype html><html><head><meta charset=\"utf-8\"><style>" +
-    "@page { margin: 0; }" +
-    "html,body { margin:0; padding:0; height:100%; }" +
-    "body { display:flex; align-items:center; justify-content:center; }" +
-    "img { max-width:100%; max-height:100%; object-fit:contain; }" +
-    "</style></head><body></body></html>"
-  );
+  idoc.write(_printDocHtml(url, false));   // 父窗口驱动 print，别让脚本重复打
   idoc.close();
 
-  const img = idoc.createElement("img");
-  img.src = url;
-  idoc.body.appendChild(img);
-
   await new Promise<void>((resolve) => {
-    if (img.complete && img.naturalWidth > 0) return resolve();
+    const img = idoc.images[0];
+    if (!img || (img.complete && img.naturalWidth > 0)) return resolve();
     img.onload = () => resolve();
     img.onerror = () => resolve();
   });
 
-  // 持久封面：快照主画布 → position:fixed <img> 贴在它屏幕矩形上（打印期间免疫 iOS 重排清屏）。
-  if (coverCanvas) {
-    try {
-      const r = coverCanvas.getBoundingClientRect();
-      const c = document.createElement("img");
-      c.setAttribute("aria-hidden", "true");
-      c.src = coverCanvas.toDataURL("image/png");
-      c.style.cssText =
-        `position:fixed; left:${r.left}px; top:${r.top}px; width:${r.width}px; height:${r.height}px;` +
-        "z-index:2147483646; pointer-events:none; margin:0; object-fit:contain;";
-      document.body.appendChild(c);
-      cover = c;
-    } catch { /* 2D canvas 理论上不 taint；真失败就不盖封面，不炸打印 */ }
-  }
-
-  // afterprint 桌面可靠；iOS 未必触发 → 长兜底定时清理（打印面板期间别删 iframe / 封面）。
+  // afterprint 桌面可靠；iOS 未必触发 → 长兜底定时清理（打印面板期间别删 iframe）。
   let done = false;
   const finish = () => {
     if (done) return;
     done = true;
-    cleanup();               // 撤封面 + iframe + revoke
+    cleanup();
     iwin.removeEventListener("afterprint", finish);
-    // 撤封面后主画布可能还是白 → 请 app 重绘。放 rAF 后一拍再来一次，兜面板关掉那次重合成。
     if (onAfterPrint) {
       try { onAfterPrint(); } catch { /* 收尾失败不该炸打印流程 */ }
       requestAnimationFrame(() => { try { onAfterPrint(); } catch { /* ditto */ } });

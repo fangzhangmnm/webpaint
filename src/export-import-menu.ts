@@ -13,7 +13,7 @@ import { getExporter, listExportersByKind } from "./exporters.ts";
 import { els } from "./els.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
-import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob } from "./session.ts";
+import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
 import { looksEncryptedContainer } from "./crypto-format.ts";
 
@@ -117,15 +117,19 @@ export function initExportImportMenu(ctx: AppContext) {
       } else if (c.target === "print") {
         // 打印恒走位图（PNG）——矢量/ora 之类没意义；scope 仍生效。
         const exp = getExporter(c.format === "jpg" ? "jpg" : "png") || getExporter("png");
+        // 首选：新标签页打印（把打印彻底搬离脆弱的 WebGL 页，修 iOS 打印丢图，见 session.ts）。
+        //   window.open 必须在此**手势同步期**就开好，不能等 encode 的 await（iOS transient-activation 严）。
+        const win = window.open("", "_blank");
         if (exp.busyHint) setStatus(exp.busyHint, true);
         const blob = await exp.encode(doc, { scope: c.scope });
-        // iOS 打印面板期间主画布会被重排清成白（rAF 也被暂停，救不回）：把主画布快照成持久
-        //   <img> 盖上去（免疫重合成），afterprint 撤封面 + 重绘。sink 内部管封面生命周期。
-        await printImageBlob(blob, {
-          coverCanvas: board.canvas,
-          onAfterPrint: () => board.invalidateAll(),
-        });
-        setStatus("打印面板已开");
+        if (win) {
+          await printImageInNewWindow(win, blob);
+          setStatus("已在新标签页打开打印");
+        } else {
+          // 弹窗被拦 → 降级页内 iframe 打印（可能仍丢图；提示放行弹窗更稳）。
+          await printImageBlob(blob, () => board.invalidateAll());
+          setStatus("弹窗被拦，改用页内打印——若丢图请在 Safari 允许本站弹窗后重试");
+        }
       } else {
         const exp = getExporter(c.format) || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
