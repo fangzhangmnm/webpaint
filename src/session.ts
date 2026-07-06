@@ -386,46 +386,45 @@ export function triggerDownload(blob: Blob, filename: string) {
 
 /**
  * 把图片 blob 送系统打印对话框（与文件/剪贴板/分享正交的第 4 个 sink）。
- * iPad Safari：window.print() 弹 iOS 打印面板 → 选 AirPrint 打印机走 WiFi 直打。
- * 桌面：弹浏览器/系统打印对话框。
+ * iPad Safari：弹 iOS 打印面板 → 选 AirPrint 打印机走 WiFi 直打。桌面：弹浏览器打印对话框。
  *
- * 为什么不用 popup 新窗口 / iframe：
- *   - popup 新窗口 iOS Safari 会被拦截器挡；
- *   - iframe.contentWindow.print() iOS 会打整页（不是 iframe 内容）。
- * 稳的做法：在**当前文档**注入一个 @media print 覆盖层——打印时隐藏全页、只留这张图。
+ * 关键：打**隐藏 iframe 自己的文档**（doc 里只有这张图），调 `iframe.contentWindow.print()`。
+ *   - v370 的「当前文档注入 @media print 覆盖层 + 顶层 window.print()」在 iOS 上失败：
+ *     iOS Safari 基本无视 @media print，把当前视口整页栅格化 → 打出来是网页截图（用户实测）。
+ *   - iframe 是独立文档，iOS 打的是 iframe 里的内容，绕开顶层页的 print CSS。
+ *     （注意区别：顶层 window.print() 才会打整页；iframe.contentWindow.print() 打 iframe 文档。
+ *      print-js / react-to-print 在 iOS 上就是这么干的。）
  * window.print() 不需要 user gesture（不像 clipboard.write），故 encode 的 await 不会失效。
  */
 export async function printImageBlob(blobOrPromise: Blob | Promise<Blob>) {
   const blob = await blobOrPromise;
   const url = URL.createObjectURL(blob);
-  const layer = document.createElement("div");
-  layer.className = "wp-print-layer";
-  const img = document.createElement("img");
+
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  // 不能 display:none（iOS 不渲染就打不出内容）；挪到视口外 + visibility:hidden。
+  iframe.style.cssText = "position:fixed; right:0; bottom:0; width:1px; height:1px; border:0; visibility:hidden;";
+  document.body.appendChild(iframe);
+
+  const idoc = iframe.contentDocument;
+  const iwin = iframe.contentWindow;
+  const cleanup = () => { iframe.remove(); URL.revokeObjectURL(url); };
+  if (!idoc || !iwin) { cleanup(); throw new Error("打印 iframe 创建失败"); }
+
+  idoc.open();
+  idoc.write(
+    "<!doctype html><html><head><meta charset=\"utf-8\"><style>" +
+    "@page { margin: 0; }" +
+    "html,body { margin:0; padding:0; height:100%; }" +
+    "body { display:flex; align-items:center; justify-content:center; }" +
+    "img { max-width:100%; max-height:100%; object-fit:contain; }" +
+    "</style></head><body></body></html>"
+  );
+  idoc.close();
+
+  const img = idoc.createElement("img");
   img.src = url;
-  layer.appendChild(img);
-
-  const style = document.createElement("style");
-  // 屏幕上 layer 恒隐藏；打印时隐藏全页、只显 layer，并把图缩放进整页。
-  style.textContent = `
-    .wp-print-layer { display: none; }
-    @media print {
-      html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
-      body > *:not(.wp-print-layer) { display: none !important; }
-      .wp-print-layer {
-        display: flex !important; align-items: center; justify-content: center;
-        position: fixed; inset: 0; margin: 0; padding: 0;
-      }
-      .wp-print-layer img { max-width: 100%; max-height: 100%; object-fit: contain; }
-    }`;
-
-  document.body.appendChild(style);
-  document.body.appendChild(layer);
-
-  const cleanup = () => {
-    style.remove();
-    layer.remove();
-    URL.revokeObjectURL(url);
-  };
+  idoc.body.appendChild(img);
 
   await new Promise<void>((resolve) => {
     if (img.complete && img.naturalWidth > 0) return resolve();
@@ -433,11 +432,12 @@ export async function printImageBlob(blobOrPromise: Blob | Promise<Blob>) {
     img.onerror = () => resolve();
   });
 
-  // afterprint 在桌面可靠；iOS Safari 可能不触发 → 兜底定时清理。
+  // afterprint 桌面可靠；iOS 未必触发 → 长兜底定时清理（打印面板期间别删 iframe）。
   let done = false;
-  const finish = () => { if (done) return; done = true; cleanup(); window.removeEventListener("afterprint", finish); };
-  window.addEventListener("afterprint", finish);
+  const finish = () => { if (done) return; done = true; cleanup(); iwin.removeEventListener("afterprint", finish); };
+  iwin.addEventListener("afterprint", finish);
   setTimeout(finish, 60000);
 
-  window.print();
+  iwin.focus();
+  iwin.print();
 }
