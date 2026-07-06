@@ -395,19 +395,20 @@ export function triggerDownload(blob: Blob, filename: string) {
  *     （注意区别：顶层 window.print() 才会打整页；iframe.contentWindow.print() 打 iframe 文档。
  *      print-js / react-to-print 在 iOS 上就是这么干的。）
  *
- * hooks 给 app 层重绘用，救 WebGL 白屏——iPad 打印面板是**盖在页面上的 popover**（不铺满屏，
- *   主画布在旁边可见），页面从不 hidden/blur，故不触发 visibilitychange/focus。iOS 在打印面板里
- *   **每调一项设置就重合成一次预览**，每次重合成都撞上被清空的 drawing buffer（preserveDrawingBuffer:false）
- *   → 主画布反复闪白（用户实测）。单靠 afterprint 一次重绘救不了面板期间的连闪。
- *   - onFrame：打印窗口期间**每帧**调（board.requestRender，轻）——持续重画，让每次重合成都撞上新鲜帧。
- *   - onDone：afterprint / 60s 兜底时调一次（board.invalidateAll，重，全量重传）——收尾兜底。
+ * coverCanvas：打印期间盖在它上面的**持久静态封面**。为什么需要：iPad 打印面板是盖在页面上的
+ *   popover（主画布在旁可见），iOS 生成预览时会重排/重置主画布 canvas 的 backing store → 内容被清成白，
+ *   且面板模态期间 rAF 被暂停（v372 每帧重绘救不回，用户实测「预览转圈后图消失」）。
+ *   解法：打印前把该 canvas 当前像素**快照成一张 <img> position:fixed 贴在它屏幕矩形上**——painted <img>
+ *   是持久 DOM，重排/重合成都不掉，天然免疫。afterprint 撤封面。主画布是 2D canvas（board getContext("2d")），
+ *   toDataURL 稳拿当前像素，无 WebGL readback 时序坑。
+ * onAfterPrint：afterprint / 60s 兜底回调一次（撤完封面后），给 app 重绘主画布兜底（board.invalidateAll）。
  * window.print() 不需要 user gesture（不像 clipboard.write），故 encode 的 await 不会失效。
  */
 export async function printImageBlob(
   blobOrPromise: Blob | Promise<Blob>,
-  hooks: { onFrame?: () => void; onDone?: () => void } = {},
+  opts: { coverCanvas?: HTMLCanvasElement | null; onAfterPrint?: () => void } = {},
 ) {
-  const { onFrame, onDone } = hooks;
+  const { coverCanvas, onAfterPrint } = opts;
   const blob = await blobOrPromise;
   const url = URL.createObjectURL(blob);
 
@@ -419,7 +420,8 @@ export async function printImageBlob(
 
   const idoc = iframe.contentDocument;
   const iwin = iframe.contentWindow;
-  const cleanup = () => { iframe.remove(); URL.revokeObjectURL(url); };
+  let cover: HTMLImageElement | null = null;
+  const cleanup = () => { cover?.remove(); iframe.remove(); URL.revokeObjectURL(url); };
   if (!idoc || !iwin) { cleanup(); throw new Error("打印 iframe 创建失败"); }
 
   idoc.open();
@@ -443,32 +445,37 @@ export async function printImageBlob(
     img.onerror = () => resolve();
   });
 
-  // afterprint 桌面可靠；iOS 未必触发 → 长兜底定时清理（打印面板期间别删 iframe）。
+  // 持久封面：快照主画布 → position:fixed <img> 贴在它屏幕矩形上（打印期间免疫 iOS 重排清屏）。
+  if (coverCanvas) {
+    try {
+      const r = coverCanvas.getBoundingClientRect();
+      const c = document.createElement("img");
+      c.setAttribute("aria-hidden", "true");
+      c.src = coverCanvas.toDataURL("image/png");
+      c.style.cssText =
+        `position:fixed; left:${r.left}px; top:${r.top}px; width:${r.width}px; height:${r.height}px;` +
+        "z-index:2147483646; pointer-events:none; margin:0; object-fit:contain;";
+      document.body.appendChild(c);
+      cover = c;
+    } catch { /* 2D canvas 理论上不 taint；真失败就不盖封面，不炸打印 */ }
+  }
+
+  // afterprint 桌面可靠；iOS 未必触发 → 长兜底定时清理（打印面板期间别删 iframe / 封面）。
   let done = false;
-  // keep-alive：打印窗口期间每帧请主画布重绘，抵消 iOS 每次预览重合成带来的闪白。
-  let raf = 0;
-  const tick = () => {
-    if (done) return;
-    try { onFrame?.(); } catch { /* 重绘失败不该炸打印流程 */ }
-    raf = requestAnimationFrame(tick);
-  };
   const finish = () => {
     if (done) return;
     done = true;
-    if (raf) cancelAnimationFrame(raf);
-    cleanup();
+    cleanup();               // 撤封面 + iframe + revoke
     iwin.removeEventListener("afterprint", finish);
-    // 收尾：面板关掉后浏览器还会重合成一次 → 放 rAF 后一拍再全量重绘一次兜底。
-    if (onDone) {
-      try { onDone(); } catch { /* ditto */ }
-      requestAnimationFrame(() => { try { onDone(); } catch { /* ditto */ } });
+    // 撤封面后主画布可能还是白 → 请 app 重绘。放 rAF 后一拍再来一次，兜面板关掉那次重合成。
+    if (onAfterPrint) {
+      try { onAfterPrint(); } catch { /* 收尾失败不该炸打印流程 */ }
+      requestAnimationFrame(() => { try { onAfterPrint(); } catch { /* ditto */ } });
     }
   };
   iwin.addEventListener("afterprint", finish);
   setTimeout(finish, 60000);
 
-  // 先起 keep-alive 循环，再唤打印面板——面板一出现主画布就已在持续重画。
-  if (onFrame) raf = requestAnimationFrame(tick);
   iwin.focus();
   iwin.print();
 }

@@ -119,11 +119,11 @@ export function initExportImportMenu(ctx: AppContext) {
         const exp = getExporter(c.format === "jpg" ? "jpg" : "png") || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
         const blob = await exp.encode(doc, { scope: c.scope });
-        // iOS 打印面板期间主画布会反复闪白（WebGL buffer 被清、每次预览重合成撞空）：
-        //   onFrame 每帧 requestRender 持续重画；onDone 收尾全量 invalidateAll。
+        // iOS 打印面板期间主画布会被重排清成白（rAF 也被暂停，救不回）：把主画布快照成持久
+        //   <img> 盖上去（免疫重合成），afterprint 撤封面 + 重绘。sink 内部管封面生命周期。
         await printImageBlob(blob, {
-          onFrame: () => board.requestRender(),
-          onDone: () => board.invalidateAll(),
+          coverCanvas: board.canvas,
+          onAfterPrint: () => board.invalidateAll(),
         });
         setStatus("打印面板已开");
       } else {
