@@ -394,9 +394,20 @@ export function triggerDownload(blob: Blob, filename: string) {
  *   - iframe 是独立文档，iOS 打的是 iframe 里的内容，绕开顶层页的 print CSS。
  *     （注意区别：顶层 window.print() 才会打整页；iframe.contentWindow.print() 打 iframe 文档。
  *      print-js / react-to-print 在 iOS 上就是这么干的。）
+ *
+ * hooks 给 app 层重绘用，救 WebGL 白屏——iPad 打印面板是**盖在页面上的 popover**（不铺满屏，
+ *   主画布在旁边可见），页面从不 hidden/blur，故不触发 visibilitychange/focus。iOS 在打印面板里
+ *   **每调一项设置就重合成一次预览**，每次重合成都撞上被清空的 drawing buffer（preserveDrawingBuffer:false）
+ *   → 主画布反复闪白（用户实测）。单靠 afterprint 一次重绘救不了面板期间的连闪。
+ *   - onFrame：打印窗口期间**每帧**调（board.requestRender，轻）——持续重画，让每次重合成都撞上新鲜帧。
+ *   - onDone：afterprint / 60s 兜底时调一次（board.invalidateAll，重，全量重传）——收尾兜底。
  * window.print() 不需要 user gesture（不像 clipboard.write），故 encode 的 await 不会失效。
  */
-export async function printImageBlob(blobOrPromise: Blob | Promise<Blob>) {
+export async function printImageBlob(
+  blobOrPromise: Blob | Promise<Blob>,
+  hooks: { onFrame?: () => void; onDone?: () => void } = {},
+) {
+  const { onFrame, onDone } = hooks;
   const blob = await blobOrPromise;
   const url = URL.createObjectURL(blob);
 
@@ -434,10 +445,30 @@ export async function printImageBlob(blobOrPromise: Blob | Promise<Blob>) {
 
   // afterprint 桌面可靠；iOS 未必触发 → 长兜底定时清理（打印面板期间别删 iframe）。
   let done = false;
-  const finish = () => { if (done) return; done = true; cleanup(); iwin.removeEventListener("afterprint", finish); };
+  // keep-alive：打印窗口期间每帧请主画布重绘，抵消 iOS 每次预览重合成带来的闪白。
+  let raf = 0;
+  const tick = () => {
+    if (done) return;
+    try { onFrame?.(); } catch { /* 重绘失败不该炸打印流程 */ }
+    raf = requestAnimationFrame(tick);
+  };
+  const finish = () => {
+    if (done) return;
+    done = true;
+    if (raf) cancelAnimationFrame(raf);
+    cleanup();
+    iwin.removeEventListener("afterprint", finish);
+    // 收尾：面板关掉后浏览器还会重合成一次 → 放 rAF 后一拍再全量重绘一次兜底。
+    if (onDone) {
+      try { onDone(); } catch { /* ditto */ }
+      requestAnimationFrame(() => { try { onDone(); } catch { /* ditto */ } });
+    }
+  };
   iwin.addEventListener("afterprint", finish);
   setTimeout(finish, 60000);
 
+  // 先起 keep-alive 循环，再唤打印面板——面板一出现主画布就已在持续重画。
+  if (onFrame) raf = requestAnimationFrame(tick);
   iwin.focus();
   iwin.print();
 }

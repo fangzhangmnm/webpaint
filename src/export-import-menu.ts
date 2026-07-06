@@ -19,7 +19,7 @@ import { looksEncryptedContainer } from "./crypto-format.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
-let doc: AppContext["doc"], setStatus: AppContext["setStatus"];
+let doc: AppContext["doc"], setStatus: AppContext["setStatus"], board: AppContext["board"];
 
 // 导出文件名时间戳（YYYYMMDD-HHMM）—— 仅导出图片路径用
 function stampNow() {
@@ -90,7 +90,7 @@ function _openMenuConfigPopup(wrenchBtn: HTMLElement, html: string, onApply: (po
 }
 
 export function initExportImportMenu(ctx: AppContext) {
-  ({ doc, setStatus } = ctx);
+  ({ doc, setStatus, board } = ctx);
 
   _updateMenuSubLabels();
 
@@ -119,7 +119,12 @@ export function initExportImportMenu(ctx: AppContext) {
         const exp = getExporter(c.format === "jpg" ? "jpg" : "png") || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
         const blob = await exp.encode(doc, { scope: c.scope });
-        await printImageBlob(blob);
+        // iOS 打印面板期间主画布会反复闪白（WebGL buffer 被清、每次预览重合成撞空）：
+        //   onFrame 每帧 requestRender 持续重画；onDone 收尾全量 invalidateAll。
+        await printImageBlob(blob, {
+          onFrame: () => board.requestRender(),
+          onDone: () => board.invalidateAll(),
+        });
         setStatus("打印面板已开");
       } else {
         const exp = getExporter(c.format) || getExporter("png");
