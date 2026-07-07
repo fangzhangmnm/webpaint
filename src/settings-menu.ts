@@ -9,7 +9,7 @@
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { applyTheme, cycleTheme, themeLabel } from "./theme.ts";
-import { t, lang, cycleLang, setLang, LANG_NAME } from "./i18n/index.ts";
+import { t, lang, cycleLang, setLang, LANG_NAME, type Key } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
 import { positionPopup } from "./anchored-popup.ts";
@@ -89,16 +89,16 @@ function _renderShortcutsSheet() {
   if (!_shortcutsBody) return;
   const byCat = new Map<string, ShortcutLike[]>();
   for (const sc of KEYBOARD_SHORTCUTS) {
-    const cat = sc.category || "其它";
+    const cat = sc.category || "sc.cat.other";   // category 现存 i18n key（input.ts）
     if (!byCat.has(cat)) byCat.set(cat, []);
     byCat.get(cat)!.push(sc);
   }
   // 同 combo 多 entry（如 Escape 在 floating / hasSelection 两条）合并展示
   let html = "";
   for (const [cat, list] of byCat) {
-    html += `<div class="shortcuts-category">${cat}</div>`;
+    html += `<div class="shortcuts-category">${t(cat as Key)}</div>`;
     for (const sc of list) {
-      html += `<div class="shortcuts-row"><span>${sc.desc}</span><span class="shortcuts-combo">${sc.combo}</span></div>`;
+      html += `<div class="shortcuts-row"><span>${t(sc.desc as Key)}</span><span class="shortcuts-combo">${sc.combo}</span></div>`;
     }
   }
   _shortcutsBody.innerHTML = html;

@@ -202,7 +202,10 @@ CSS 吃不了变量 → 改成 JS 设 badge 元素文本，或 `::before` 读 `d
   - [x] **3b（v379，已落 dev，组件级 Chromium 48/48 en·ja + 无 CJK 残留负检）**：`ui/brush-settings.ts` 全屏表单（section 标题/label/option/按钮；latin 参数名 size/opacity/flow/streamline/…/compositeMode 有意不译）。验证=esbuild 单组件 harness 直接挂载渲染（模板不受 tsc 检查 → 必须真渲染验 L.* 无 typo）。
   - [x] **3c（v380，已落 dev，Chromium 38/38 含 gallery 空态 en·ja）**：`ui/gallery.ts`（图库/文件管理 ~75 串：host.status/confirm/input/busy + emptyText/nameTaken + 模板 tile 按钮/菜单）。TS handler 直接 `t()`；模板 buttons 走 `L` manifest；复用 menu.encrypt/decrypt + enc.locked.aria。验证=typecheck + 无 CJK 残留扫描 + gallery 空态实渲染 + 模板 `L.*` 引用逐条人工核对（tile-menu 因需真作品渲染，headless-gallery 空态到不了，靠静态核对+扫描）。current-brush.ts 无用户可见串。
 - [ ] **切片 4**：图标占位 glyph-SVG（§7，与 SVG track 的 `20260707-svg-icon-inventory.md` 对接）+ 套索栏布局。
-- [ ] **切片 5**：命令式 JS 散点 + `input.ts` 快捷键表 + `cloud-freshness.ts` 网络对话框。
+- [~] **切片 5**：命令式 JS 散点 + `input.ts` 快捷键表 + `cloud-freshness.ts` 网络对话框。
+  - [x] **5a（v381，已落 dev，Chromium 40/40 shortcuts en·ja）**：`input.ts` KEYBOARD_SHORTCUTS 表——desc/category 改存 i18n key，`settings-menu.ts` `_renderShortcutsSheet` 渲染时 `t()`。+~30 key(sc.*)。验证=程序触发 menuShortcuts 渲染 sheet 读 #shortcutsBody。
+  - [ ] **5b**：index.html 剩余静态 chrome（gallery 菜单/回收站/新建作品 sheet/云账号菜单 + 浮窗标题 图层/参考/颜色调整 + 参考窗）。
+  - [ ] **5c**：命令式 setStatus 散点（filters-adjust / blender-sync / cloud-auth-ui / import-image / doc-ops / session-state / brush-rack …）+ `cloud-freshness.ts` 网络对话框。
 - [ ] **抽取**：subagent 按文件簇 fan-out 机械抽 key。按面分批交付（高可见 chrome 优先）。
 
 **诚实标注**：全量 ~600–1000 条，多 session。每批按家族「我只测一次就是交付」的批量真机纪律走。

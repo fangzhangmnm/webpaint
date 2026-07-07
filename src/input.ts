@@ -198,25 +198,25 @@ function _hasSelectionIdle(i: InputController) {
 
 export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   // 编辑（任何时候都该 work，除了 gallery 单 modal）
-  { combo: "Ctrl+Z",           desc: "撤销",     category: "编辑",
+  { combo: "Ctrl+Z",           desc: "sc.undo",     category: "sc.cat.edit",
     when: _editMode, run: (i) => i.ctrlZ() },
-  { combo: "Ctrl+Shift+Z",     desc: "重做",     category: "编辑",
+  { combo: "Ctrl+Shift+Z",     desc: "sc.redo",     category: "sc.cat.edit",
     when: _editMode, run: (i) => i.redo() },
-  { combo: "Ctrl+Y",           desc: "重做",     category: "编辑",
+  { combo: "Ctrl+Y",           desc: "sc.redo",     category: "sc.cat.edit",
     when: _editMode, run: (i) => i.redo() },
   // v156 剪贴板：逻辑在 app.js（doc/import/clipboard）→ run 派发 window 事件。
   //   when=_editMode（不查选区）→ 始终匹配以 preventDefault，挡掉浏览器原生 copy/paste；run 内部再决定。
-  { combo: "Ctrl+C",           desc: "复制到剪贴板", category: "编辑",
+  { combo: "Ctrl+C",           desc: "sc.copyClip", category: "sc.cat.edit",
     when: _editMode, run: () => window.dispatchEvent(new CustomEvent("wp:copy")) },
-  { combo: "Ctrl+V",           desc: "粘贴为新层",   category: "编辑",
+  { combo: "Ctrl+V",           desc: "sc.pasteLayer",   category: "sc.cat.edit",
     when: _editMode, run: () => window.dispatchEvent(new CustomEvent("wp:paste")) },
 
   // 套索 / 选区（在浮层时只 Enter/Esc，其它跳过）
-  { combo: "Enter",            desc: "应用变换", category: "套索",
+  { combo: "Enter",            desc: "sc.applyTransform", category: "sc.cat.lasso",
     when: _floating, run: (i) => i._commitLasso() },
-  { combo: "Escape",           desc: "取消变换", category: "套索",
+  { combo: "Escape",           desc: "sc.cancelTransform", category: "sc.cat.lasso",
     when: _floating, run: (i) => i._abortLasso() },
-  { combo: "Escape",           desc: "取消选区", category: "套索",
+  { combo: "Escape",           desc: "sc.deselect", category: "sc.cat.lasso",
     when: _hasSelectionIdle,
     run: (i) => {
       const entry = i.lasso.setSelection(null);
@@ -224,59 +224,59 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
       i.board.invalidateAll();
     },
   },
-  { combo: "Ctrl+A",           desc: "全选",     category: "套索",
+  { combo: "Ctrl+A",           desc: "sc.selectAll",     category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoSelectAllBtn")?.click() },
-  { combo: "Ctrl+D",           desc: "取消选区", category: "套索",
+  { combo: "Ctrl+D",           desc: "sc.deselect", category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoDeselectBtn")?.click() },
-  { combo: "Ctrl+Shift+I",     desc: "反选",     category: "套索",
+  { combo: "Ctrl+Shift+I",     desc: "sc.invert",     category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoInvertBtn")?.click() },
   // v156 变换 / 复制为浮层（都需选区 + 非浮层；run 内部再查选区）
   // 裸 T 任何环境可用；Ctrl+T 是浏览器保留键 → 仅装成 PWA(standalone) 时可用，标签页里被浏览器开新标签吞掉。
-  { combo: "T",                desc: "变换选区",     category: "套索",
+  { combo: "T",                desc: "sc.transformSel",     category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoTransformBtn")?.click() },
-  { combo: "Ctrl+T",           desc: "变换选区（仅 PWA；浏览器标签页内 Ctrl+T 被占用）", category: "套索",
+  { combo: "Ctrl+T",           desc: "sc.transformSelPwa", category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoTransformBtn")?.click() },
-  { combo: "Ctrl+J",           desc: "复制选区为浮层", category: "套索",
+  { combo: "Ctrl+J",           desc: "sc.floatCopy", category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => window.dispatchEvent(new CustomEvent("wp:duplicateFloat")) },
 
   // 工具切换（gallery / floating 时跳过）
-  { combo: "B",                desc: "笔刷",     category: "工具",
+  { combo: "B",                desc: "sc.brush",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("brush") },
-  { combo: "E",                desc: "橡皮",     category: "工具",
+  { combo: "E",                desc: "sc.eraser",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("eraser") },
-  { combo: "I",                desc: "吸色",     category: "工具",
+  { combo: "I",                desc: "sc.picker",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("picker") },
-  { combo: "L",                desc: "套索",     category: "工具",
+  { combo: "L",                desc: "sc.lasso",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("lasso") },
-  { combo: "H",                desc: "平移",     category: "工具",
+  { combo: "H",                desc: "sc.pan",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("hand") },
 
   // 窗格（裸字母；逻辑在 app.js，run 派发 window 事件）。不用 F 键（笔记本要 Fn / iPad 没有）。
-  { combo: "C",                desc: "颜色窗格", category: "窗格",
+  { combo: "C",                desc: "sc.colorPanel", category: "sc.cat.panels",
     when: (i) => _editMode(i) && !_floating(i), run: () => window.dispatchEvent(new CustomEvent("wp:toggleColor")) },
-  { combo: "N",                desc: "图层窗格", category: "窗格",
+  { combo: "N",                desc: "sc.layerPanel", category: "sc.cat.panels",
     when: (i) => _editMode(i) && !_floating(i), run: () => window.dispatchEvent(new CustomEvent("wp:toggleLayers")) },
-  { combo: "R",                desc: "参考小窗", category: "窗格",
+  { combo: "R",                desc: "menu.reference", category: "sc.cat.panels",
     when: (i) => _editMode(i) && !_floating(i), run: () => window.dispatchEvent(new CustomEvent("wp:toggleReference")) },
 
   // 视图
-  { combo: "0",                desc: "画布居中", category: "视图",
+  { combo: "0",                desc: "sc.centerCanvas", category: "sc.cat.view",
     when: _editMode, run: (i) => i.board.fitToScreen() },
-  { combo: "+",                desc: "放大",     category: "视图",
+  { combo: "+",                desc: "sc.zoomIn",     category: "sc.cat.view",
     when: _editMode, run: (i) => i.board.zoomAt(innerWidth/2, innerHeight/2, 1.2) },
-  { combo: "-",                desc: "缩小",     category: "视图",
+  { combo: "-",                desc: "sc.zoomOut",     category: "sc.cat.view",
     when: _editMode, run: (i) => i.board.zoomAt(innerWidth/2, innerHeight/2, 1/1.2) },
 
   // 笔粗
-  { combo: "[",                desc: "笔粗 -",   category: "笔粗",
+  { combo: "[",                desc: "sc.sizeDown",   category: "sc.cat.size",
     when: _editMode, run: (i) => i._adjustSize(-2) },
-  { combo: "]",                desc: "笔粗 +",   category: "笔粗",
+  { combo: "]",                desc: "sc.sizeUp",   category: "sc.cat.size",
     when: _editMode, run: (i) => i._adjustSize(+2) },
 
   // **特殊**：Space hold = 临时 pan，需要 keyup 解除（_keydown 顶部硬编码，不走 registry）
