@@ -943,12 +943,11 @@
         <span class="menu-item-label" data-i18n="menu.theme">主题</span>
         <span class="menu-item-state" data-state-for="theme">跟随系统</span>
       </button>
-      <button class="menu-item" id="menuLanguage" type="button" role="menuitem" aria-haspopup="true" aria-expanded="false">
+      <!-- 语言：下拉框选择（JS 按 LANGS 填 endonym option；change 即切换+reload）。 -->
+      <label class="menu-item menu-lang-row">
         <span class="menu-item-label" data-i18n="menu.language">语言</span>
-        <span class="menu-item-state" data-state-for="language">中文</span>
-      </button>
-      <!-- 语言选项（JS 按 LANGS 填 endonym 按钮；点开/点选择即切换+reload）。用 click-to-pick 取代旧的 cycle。 -->
-      <div id="menuLanguageOptions" class="menu-lang-options hidden" role="group"></div>
+        <select id="menuLanguageSelect" class="menu-lang-select"></select>
+      </label>
 
       <hr class="menu-sep" />
       <div class="menu-section-label" data-i18n="menu.section.debug">调试</div>
@@ -1035,6 +1034,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-89e9b791f563.mjs"></script>
+    <script type="module" src="./dist/webpaint-baa3b3dd6876.mjs"></script>
   </body>
 </html>
