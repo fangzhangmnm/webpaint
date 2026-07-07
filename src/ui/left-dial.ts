@@ -10,6 +10,7 @@
 
 import { createApp, defineComponent, reactive, ref, computed, watch } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { sliderPosToSize, sizeToSliderPos, sliderMaxPos } from "./brush-size.ts";
+import { t } from "../i18n/index.ts";
 
 const POPUP_FRAME = 64;
 const LONGPRESS_MS = 600;
@@ -89,19 +90,21 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
       function brushUp() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
       function brushClick() { if (lpFired) { lpFired = false; return; } opts.onBrushTap(); }
 
+      // i18n：t() 在 setup 调（§5a），模板引 L.*。
+      const L = { brush: t("ld.brush"), size: t("ld.size"), opacity: t("ld.opacity") };
       return {
         size, opacity, sizePos, sizePosMax, opaPct, brushName, canDraw, popup,
-        sizeSlider, opaSlider, onSizeInput, onOpaInput, brushDown, brushUp, brushClick,
+        sizeSlider, opaSlider, onSizeInput, onOpaInput, brushDown, brushUp, brushClick, L,
       };
     },
     template: `
-      <button class="left-sidebar-brush" type="button" title="当前笔刷（tap 切换 / 长按编辑）"
+      <button class="left-sidebar-brush" type="button" :title="L.brush"
         @pointerdown="brushDown" @pointerup="brushUp" @pointerleave="brushUp" @pointercancel="brushUp" @click="brushClick">
         <span class="left-sidebar-brush-name">{{ brushName }}</span>
       </button>
       <input ref="sizeSlider" id="sizeSlider" class="left-sidebar-slider" type="range" min="0" :max="sizePosMax" step="1"
-        :value="sizePos" :disabled="!canDraw" orient="vertical" aria-label="笔粗" @input="onSizeInput" />
-      <span class="left-sidebar-label" title="笔粗" aria-hidden="true">
+        :value="sizePos" :disabled="!canDraw" orient="vertical" :aria-label="L.size" @input="onSizeInput" />
+      <span class="left-sidebar-label" :title="L.size" aria-hidden="true">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="12 3, 4 8, 12 13"/>
         </svg>
@@ -113,8 +116,8 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
         <span class="size-popup-text">{{ popup.text }}</span>
       </div>
       <input ref="opaSlider" id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1"
-        :value="opaPct" :disabled="!canDraw" orient="vertical" aria-label="不透明度" @input="onOpaInput" />
-      <span class="left-sidebar-label" title="不透明度" aria-hidden="true">
+        :value="opaPct" :disabled="!canDraw" orient="vertical" :aria-label="L.opacity" @input="onOpaInput" />
+      <span class="left-sidebar-label" :title="L.opacity" aria-hidden="true">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
           <defs><clipPath id="opaCircleClip"><circle cx="8" cy="8" r="6.5"/></clipPath></defs>
           <g clip-path="url(#opaCircleClip)">

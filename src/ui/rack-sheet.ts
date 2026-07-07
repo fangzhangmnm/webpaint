@@ -11,6 +11,7 @@
 
 import { createApp, defineComponent, computed } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { collectFolders, brushesInFolder, smoothstepRadialGradient } from "../brush-rack-view.ts";
+import { t } from "../i18n/index.ts";
 import type { Brush } from "../brush-types.ts";
 
 export interface RackSheetOpts {
@@ -46,23 +47,25 @@ export function mountRackSheet(el: HTMLElement, opts: RackSheetOpts): RackSheetH
         return s;
       }
       // 直接调注入回调（闭包）——比 $emit→root-prop 映射简单可靠。
+      // i18n：t() 在 setup 调（§5a），模板引 L.*。
+      const L = { rackEmpty: t("rs.rackEmpty"), resetRack: t("rs.resetRack"), empty: t("rs.empty"), edit: t("rs.edit") };
       return {
         brushes, rackEmpty, folders, effectiveFolder, tiles, activeId, tileStyle,
         selectFolder: opts.onSelectFolder, selectBrush: opts.onSelectBrush,
-        editBrush: opts.onEditBrush, reset: opts.onReset,
+        editBrush: opts.onEditBrush, reset: opts.onReset, L,
       };
     },
     template: `
       <div v-if="rackEmpty" class="brush-rack-grid">
         <div style="padding:20px;text-align:center;color:var(--ink-soft);">
-          笔架是空的。<br><br>
-          <button class="brush-rack-action" @click="reset()">恢复默认笔架（8 个）</button>
+          {{ L.rackEmpty }}<br><br>
+          <button class="brush-rack-action" @click="reset()">{{ L.resetRack }}</button>
         </div>
       </div>
       <template v-else-if="!brushes.length">
         <div class="brush-rack-folders"></div>
         <div class="brush-rack-grid">
-          <div style="padding:20px;text-align:center;color:var(--ink-soft);">此工具暂无笔刷。点「+ 新建」加一个。</div>
+          <div style="padding:20px;text-align:center;color:var(--ink-soft);">{{ L.empty }}</div>
         </div>
       </template>
       <template v-else>
@@ -75,7 +78,7 @@ export function mountRackSheet(el: HTMLElement, opts: RackSheetOpts): RackSheetH
             :aria-pressed="b.id === activeId" @click="selectBrush(b.id)">
             <div class="brush-rack-tile-preview" :style="tileStyle(b)"></div>
             <span class="brush-rack-tile-name">{{ b.name }}</span>
-            <button type="button" class="brush-rack-tile-edit" title="编辑" @click.stop="editBrush(b.id)">⋯</button>
+            <button type="button" class="brush-rack-tile-edit" :title="L.edit" @click.stop="editBrush(b.id)">⋯</button>
           </div>
         </div>
       </template>

@@ -15,6 +15,7 @@ import {
   createApp, defineComponent, reactive, ref, computed, watch, onMounted,
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { hsvToHex, hexToHsv, normalizeHex, sameHex } from "./color-model.ts";
+import { t } from "../i18n/index.ts";
 
 export const ColorWheel = defineComponent({
   name: "ColorWheel",
@@ -122,14 +123,16 @@ export const ColorWheel = defineComponent({
       commit();
     }
 
-    return { pad, hsv, hex, hexText, padDown, padMove, padUp, onHue, onHex };
+    // i18n：t() 在 setup 调（key 受 tsc 检查），模板只引 L.*（§5a 纪律）。
+    const L = { svPad: t("cw.svPad"), hue: t("cw.hue") };
+    return { pad, hsv, hex, hexText, padDown, padMove, padUp, onHue, onHex, L };
   },
   // 多根 = fragment：挂进 .float-panel-body 后三个节点成为它的直接 flex 子节点，
   // DOM 结构与原 index.html 一字不差（样式全 class-based，照旧生效）。
   template: `
-    <canvas ref="pad" class="sv-pad" width="240" height="180" aria-label="饱和度 / 明度面板"
+    <canvas ref="pad" class="sv-pad" width="240" height="180" :aria-label="L.svPad"
       @pointerdown="padDown" @pointermove="padMove" @pointerup="padUp" @pointercancel="padUp"></canvas>
-    <input type="range" min="0" max="360" step="1" class="hue-slider" :value="hsv.h" @input="onHue" aria-label="色相" />
+    <input type="range" min="0" max="360" step="1" class="hue-slider" :value="hsv.h" @input="onHue" :aria-label="L.hue" />
     <div class="picker-row">
       <span class="picker-preview" :style="{ background: hex }"></span>
       <input type="text" maxlength="9" :value="hexText" @change="onHex" aria-label="HEX" />

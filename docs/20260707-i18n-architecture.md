@@ -197,7 +197,10 @@ CSS 吃不了变量 → 改成 JS 设 badge 元素文本，或 `::before` 读 `d
 - [x] **切片 1（v376，已落 dev，已 Chromium 端到端验）**：`src/i18n/` 核心（`strings.ts` 类型门 + `index.ts` t/setLang/localizeDom）+ 语言切换器（⋯菜单，cycle zh→en→ja→tok + reload）+ 首批 SVG-free 文案：**工具栏 tooltip（data-i18n-title 桥）+ ⋯菜单 Settings/Debug 段 + 通用对话框 OK/取消 + 状态行 idle**。`:lang(ja)` 字体栈。playwright 验：en/ja/tok 四语渲染、`<html lang>` 动态、tok→en fallback、endonym、idle 复位均过（18/18）。**真机未验**（桌面 Chromium 已验）。
   - 遗留（切片内诚实交代）：`topSaveBtn` title、`cloudIconBtn`、⋯菜单**文件段**（导入/导出/重命名/加密/裁切…）、`menuEncryptLabel`/`menuCropLabel` 等 JS 动态标签、绝大多数 `setStatus` 消息 —— 仍中文，归切片 2。
 - [x] **切片 2（v377，已落 dev，Chromium 端到端验 30/30）**：⋯菜单文件段静态标签（import/export/rename/saveAs/revert/flipH/rotate90/offset/resample/reference/fit/gallery）+ 扳手 tooltip（3 config）+ 动态标签 encrypt(`app.ts` watch)/crop(`doc-ops.ts`)/subs(`export-import-menu.ts`)+ 顶栏保存按钮 7 态（`save-status.ts`，{name} 插值）。**⋯菜单现全 4 语**。遗留：对话框 **caller** 侧标题/消息（`openConfirmSheet`/`openInputSheet` 的 title/message 仍中文，散在 doc-ops/session-state/brush-rack 等）→ 归切片 2b/5；OK/取消按钮已切片 1 localized。
-- [ ] **切片 3**：Vue 7 文件模板 `t()`（按 §5a 纪律，setup 里调）。
+- [~] **切片 3**：Vue 7 文件模板 `t()`（按 §5a 纪律，setup 里 `L` manifest，模板引 `L.*`；TS handler/status 直接 `t()`）。
+  - [x] **3a（v378，已落 dev，Chromium 36/36）**：color-wheel / left-dial / rack-sheet / **layers-panel**（含 `LAYER_MODE_LABEL`/`GROUP_MODE_LABEL` 混合模式名收成 i18n 单一源→图层面板+笔刷设置下拉共用；badge/eye/menu/status/undo 全 4 语）。
+  - [ ] **3b**：`ui/brush-settings.ts`（笔刷设置全屏 ~30 label）。
+  - [ ] **3c**：`ui/gallery.ts`（图库/文件管理 ~80 串，多为 `host.status()` + confirm + 模板按钮）。current-brush.ts 无用户可见串。
 - [ ] **切片 4**：图标占位 glyph-SVG（§7，与 SVG track 的 `20260707-svg-icon-inventory.md` 对接）+ 套索栏布局。
 - [ ] **切片 5**：命令式 JS 散点 + `input.ts` 快捷键表 + `cloud-freshness.ts` 网络对话框。
 - [ ] **抽取**：subagent 按文件簇 fan-out 机械抽 key。按面分批交付（高可见 chrome 优先）。
