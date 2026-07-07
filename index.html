@@ -836,7 +836,7 @@
            user：「压感 -> 颜色，不透明度 这些应该只在笔刷设置页出现」→ 删 -->
       <!-- v267 (user) 图库挪回三条杠菜单顶部 -->
       <button class="menu-item" id="menuGallery" type="button" role="menuitem">
-        <span class="menu-item-label">图库</span>
+        <span class="menu-item-label" data-i18n="nav.gallery">图库</span>
       </button>
 
       <hr class="menu-sep" />
@@ -844,68 +844,68 @@
            裁切 context-aware（有选区→裁选区；否则开自由裁切 8-handle）；
            重采样 renamed 成 Resize；参考小窗 挪进来一起 -->
       <!-- v125 (user：「主目录第一个栏叫做文件」) 文件 label 回归 -->
-      <div class="menu-section-label">文件</div>
+      <div class="menu-section-label" data-i18n="menu.section.file">文件</div>
       <div class="menu-item-row">
         <button class="menu-item menu-item-main" id="menuImportImage" type="button" role="menuitem">
-          <span class="menu-item-label">导入图片</span>
+          <span class="menu-item-label" data-i18n="menu.importImage">导入图片</span>
           <span class="menu-item-sub" id="menuImportImageSub">文件 · 新图层</span>
         </button>
-        <button class="menu-item-wrench" id="menuImportImageConfig" type="button" title="配置导入图片" aria-label="配置导入图片">
+        <button class="menu-item-wrench" id="menuImportImageConfig" type="button" data-i18n-title="menu.config.importImage" data-i18n-aria="menu.config.importImage">
           ⋯
         </button>
       </div>
       <div class="menu-item-row">
         <button class="menu-item menu-item-main" id="menuExportImage" type="button" role="menuitem">
-          <span class="menu-item-label">导出图片</span>
+          <span class="menu-item-label" data-i18n="menu.exportImage">导出图片</span>
           <span class="menu-item-sub" id="menuExportImageSub">PNG · 文件</span>
         </button>
-        <button class="menu-item-wrench" id="menuExportImageConfig" type="button" title="配置导出图片" aria-label="配置导出图片">
+        <button class="menu-item-wrench" id="menuExportImageConfig" type="button" data-i18n-title="menu.config.exportImage" data-i18n-aria="menu.config.exportImage">
           ⋯
         </button>
       </div>
       <div class="menu-item-row">
         <button class="menu-item menu-item-main" id="menuExportProject" type="button" role="menuitem">
-          <span class="menu-item-label">导出项目</span>
+          <span class="menu-item-label" data-i18n="menu.exportProject">导出项目</span>
           <span class="menu-item-sub" id="menuExportProjectSub">.ora</span>
         </button>
-        <button class="menu-item-wrench" id="menuExportProjectConfig" type="button" title="配置导出项目" aria-label="配置导出项目">
+        <button class="menu-item-wrench" id="menuExportProjectConfig" type="button" data-i18n-title="menu.config.exportProject" data-i18n-aria="menu.config.exportProject">
           ⋯
         </button>
       </div>
       <button class="menu-item" id="menuRename" type="button" role="menuitem">
-        <span class="menu-item-label">重命名当前画作…</span>
+        <span class="menu-item-label" data-i18n="menu.rename">重命名当前画作…</span>
       </button>
       <!-- v125 (user：「菜单加另存为（画库，名字冲突检查）」) -->
       <button class="menu-item" id="menuSaveAs" type="button" role="menuitem">
-        <span class="menu-item-label">另存为…</span>
+        <span class="menu-item-label" data-i18n="menu.saveAs">另存为…</span>
       </button>
       <!-- v133 (user：「revert + explicit save 重写 checkpoint」) -->
       <button class="menu-item" id="menuRevertToOpen" type="button" role="menuitem">
-        <span class="menu-item-label">撤销修改…</span>
+        <span class="menu-item-label" data-i18n="menu.revert">撤销修改…</span>
       </button>
-      <!-- v236 加密：当前画作加密/解除（ADR-0012）。label 随加密态切换 -->
+      <!-- v236 加密：当前画作加密/解除（ADR-0012）。label 随加密态切换（JS t() 设，见 app.ts）-->
       <button class="menu-item" id="menuEncrypt" type="button" role="menuitem">
         <span class="menu-item-label" id="menuEncryptLabel">加密保护…</span>
       </button>
-      <!-- v124 裁切合并：有选区 → 裁切到选区；否则 → 自由裁切 8 handle -->
+      <!-- v124 裁切合并：有选区 → 裁切到选区；否则 → 自由裁切（label 随选区态 JS t() 设，见 doc-ops.ts）-->
       <button class="menu-item" id="menuCrop" type="button" role="menuitem">
         <span class="menu-item-label" id="menuCropLabel">裁切</span>
       </button>
       <button class="menu-item" id="menuFlipH" type="button" role="menuitem">
-        <span class="menu-item-label">水平翻转</span>
+        <span class="menu-item-label" data-i18n="menu.flipH">水平翻转</span>
       </button>
       <button class="menu-item" id="menuRotate90" type="button" role="menuitem">
-        <span class="menu-item-label">逆时针旋转 90°</span>
+        <span class="menu-item-label" data-i18n="menu.rotate90">逆时针旋转 90°</span>
       </button>
       <!-- 画 seamless 贴图：偏移画布（环绕），把藏在边上的接缝移到中央涂抹消除 -->
       <button class="menu-item" id="menuOffset" type="button" role="menuitem">
-        <span class="menu-item-label">偏移接缝（环绕）…</span>
+        <span class="menu-item-label" data-i18n="menu.offset">偏移接缝（环绕）…</span>
       </button>
       <button class="menu-item" id="adjustResample" type="button" role="menuitem">
-        <span class="menu-item-label">调整尺寸</span>
+        <span class="menu-item-label" data-i18n="menu.resample">调整尺寸</span>
       </button>
       <button class="menu-item" id="menuReference" type="button" role="menuitem">
-        <span class="menu-item-label">参考小窗</span>
+        <span class="menu-item-label" data-i18n="menu.reference">参考小窗</span>
       </button>
       <button class="menu-item" id="menuBlender" type="button" role="menuitem">
         <span class="menu-item-label">Blender sync…</span>
@@ -915,7 +915,7 @@
       </button>
       <!-- v267 (user)：视口复位（画布拖出屏幕时一键找回）= fitToScreen -->
       <button class="menu-item" id="menuFit" type="button" role="menuitem">
-        <span class="menu-item-label">视口复位</span>
+        <span class="menu-item-label" data-i18n="menu.fit">视口复位</span>
       </button>
       <!-- v124 隐藏 stub：删了的旧入口 id 留着防 app.js getElementById 崩 -->
       <button id="adjustCropToSelection" type="button" hidden></button>
@@ -1033,6 +1033,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-544f1730cb6a.mjs"></script>
+    <script type="module" src="./dist/webpaint-e9a162d7126b.mjs"></script>
   </body>
 </html>
