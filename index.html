@@ -71,7 +71,7 @@
       </button>
       <!-- v267 (user) 图库挪回三条杠菜单（见 menuPanel 的 menuGallery） -->
       <!-- 智能保存：operator。data-state 由 app.js 切 -->
-      <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
+      <button class="tool" id="topSaveBtn" type="button" data-i18n-title="save.tip"></button>
       <!-- v236 加密常驻指示：当前画作加密时显示小锁（点它进解除加密）。明文时 hidden。 -->
       <button class="tool top-enc-lock hidden" id="topEncLock" type="button" data-i18n-title="enc.locked" data-i18n-aria="enc.locked.aria">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -316,28 +316,28 @@
          - Row 2: hasSelection + !floating  →  selectionActions
                   floating                    →  transformCtrl
          每行各自横滚兜底，不会撑出 iPad mini 竖屏 -->
-    <div class="lasso-toolbar-stack hidden" id="lassoToolbarStack" role="toolbar" aria-label="套索 / 选区">
+    <div class="lasso-toolbar-stack hidden" id="lassoToolbarStack" role="toolbar" data-i18n-aria="la.stack">
       <!-- Row 1: 选区方式 -->
       <div class="lasso-toolbar hidden" id="lassoToolbarRow1">
         <div class="lasso-section" id="lassoSubToolBar">
           <!-- v123 sub-tool 改 icon (user) -->
-          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="freehand" type="button" title="自由套索" aria-label="自由套索">
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="freehand" type="button" data-i18n-title="la.freehand" aria-label="自由套索">
             <!-- v124 webui 迭代 -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 2.4" aria-hidden="true">
               <path d="M3.5 11.5 C3.83 9.83 6.08 7 7.5 6.5 C8.92 6 10.5 8.5 12 8.5 C13.5 8.5 15.08 6 16.5 6.5 C17.92 7 20.17 9.83 20.5 11.5 C20.83 13.17 19.92 15.5 18.5 16.5 C17.08 17.5 14.17 17.5 12 17.5 C9.83 17.5 6.92 17.5 5.5 16.5 C4.08 15.5 3.17 13.17 3.5 11.5 Z"/>
             </svg>
           </button>
-          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="rect" type="button" title="矩形选区" aria-label="矩形选区">
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="rect" type="button" data-i18n-title="la.rect" aria-label="矩形选区">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="4" y="6" width="16" height="12" stroke-dasharray="3 2"/>
             </svg>
           </button>
-          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="ellipse" type="button" title="椭圆选区" aria-label="椭圆选区">
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="ellipse" type="button" data-i18n-title="la.ellipse" aria-label="椭圆选区">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <ellipse cx="12" cy="12" rx="8" ry="6" stroke-dasharray="3 2"/>
             </svg>
           </button>
-          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="magic" type="button" title="魔术棒" aria-label="魔术棒">
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="magic" type="button" data-i18n-title="la.magic" aria-label="魔术棒">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <!-- 魔棒 stick -->
               <path d="M4 20l11-11"/>
@@ -349,13 +349,13 @@
           </button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <!-- v123 set-op 改文氏图 (user：「新/并/差 用文氏图，dashed 边缘，加号表 new，不要交集」) -->
-          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" title="新建选区（替换当前）" aria-label="新建选区">
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" data-i18n-title="la.new" aria-label="新建选区">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="7" stroke-dasharray="3 2"/>
               <path d="M12 9v6M9 12h6"/>
             </svg>
           </button>
-          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" title="添加到选区" aria-label="添加到选区">
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" data-i18n-title="la.union" aria-label="添加到选区">
             <!-- v124 webui 迭代 -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="2.5" y="3" width="10" height="10" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2" fill="currentColor" fill-opacity="0.16"/>
@@ -363,7 +363,7 @@
               <path d="M16 11.5 V17.5 M13 14.5 H19" stroke-width="2"/>
             </svg>
           </button>
-          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="subtract" type="button" title="从选区减去" aria-label="从选区减去">
+          <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="subtract" type="button" data-i18n-title="la.subtract" aria-label="从选区减去">
             <!-- v124 webui 迭代 -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="2.5" y="3" width="10" height="10" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2" fill="currentColor" fill-opacity="0.16"/>
@@ -375,14 +375,14 @@
           <button class="lasso-tool-btn hidden" data-lasso-setop="intersect" type="button" aria-hidden="true"></button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <!-- v124 全选 / 反选 / 去选 同组 (user) -->
-          <button class="lasso-tool-btn lasso-tool-icon" id="lassoSelectAllBtn" type="button" title="全选 (Ctrl+A)" aria-label="全选">
+          <button class="lasso-tool-btn lasso-tool-icon" id="lassoSelectAllBtn" type="button" data-i18n-title="la.selectAll" aria-label="全选">
             <!-- v124 webui 迭代 -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-width="1.8"/>
               <rect x="5.6" y="5.6" width="12.8" height="12.8" rx="1.5" stroke-width="1.4" stroke-dasharray="3 2" fill="currentColor" fill-opacity="0.14"/>
             </svg>
           </button>
-          <button class="lasso-tool-btn lasso-tool-icon" id="lassoInvertBtn" type="button" title="反选 (Ctrl+Shift+I)" aria-label="反选">
+          <button class="lasso-tool-btn lasso-tool-icon" id="lassoInvertBtn" type="button" data-i18n-title="la.invert" aria-label="反选">
             <!-- v124 webui 迭代 -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <defs><clipPath id="invClip"><rect x="3" y="3" width="18" height="18" rx="2.5"/></clipPath></defs>
@@ -393,13 +393,13 @@
           </button>
           <!-- v242 选区编辑齿轮（op 不是 tool）：有选区才亮。点开 → 扩张/收缩菜单 → 实时预览 modal -->
           <!-- v269 (user)：放在 反选 右边、取消选区 左边。图标=「选区扩缩」嵌套虚线框（非通用齿轮） -->
-          <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoSelEditBtn" type="button" title="编辑选区：扩张 / 收缩" aria-haspopup="true">
+          <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoSelEditBtn" type="button" data-i18n-title="la.selEdit" aria-haspopup="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2"/>
               <rect x="8" y="8" width="8" height="8" rx="1.5"/>
             </svg>
           </button>
-          <button class="lasso-tool-btn lasso-tool-icon lasso-tool-cancel" id="lassoDeselectBtn" type="button" title="取消选区 (Ctrl+D)" aria-label="取消选区">
+          <button class="lasso-tool-btn lasso-tool-icon lasso-tool-cancel" id="lassoDeselectBtn" type="button" data-i18n-title="la.deselect" aria-label="取消选区">
             <!-- v124 webui 迭代 -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2"/>
@@ -407,8 +407,8 @@
             </svg>
           </button>
           <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
-          <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" title="约束 1:1（正方 / 圆）">1:1</button>
-          <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" title="魔术棒阈值">设置</button>
+          <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain">1:1</button>
+          <button class="lasso-tool-btn hidden" id="lassoMagicCfgBtn" type="button" data-i18n-title="la.magicCfg">设置</button>
         </div>
       </div>
       <!-- Row 2: 选区操作 / 变换控制 -->
@@ -430,7 +430,7 @@
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <!-- v120: 3 个按钮意义不明，改 dropdown；nearest 改成「像素画」直说语义 -->
           <!-- 选项由 JS 从 resample.js RESAMPLE_MODES (SSoT) 填，见 fillResampleSelect -->
-          <select class="lasso-tool-select" id="lassoSampleSel" title="采样模式"></select>
+          <select class="lasso-tool-select" id="lassoSampleSel" data-i18n-title="la.sampleMode"></select>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <button class="lasso-tool-btn lasso-tool-confirm" id="lassoStampBtn" type="button" title="盖印（写入但保留浮层，可连击多次叠加）">盖印</button>
           <button class="lasso-tool-btn lasso-tool-confirm" id="lassoCommitBtn" type="button" title="应用变换">应用</button>
@@ -441,13 +441,13 @@
 
     <!-- 吸色工具 context toolbar（复用 lasso stack 的 context-toolbar 视觉类）：吸色取样模式。
          与 lassoToolbarStack 互斥（吸色 ⊻ 套索），同位显示。 -->
-    <div class="lasso-toolbar-stack hidden" id="pickerToolbar" role="toolbar" aria-label="吸色取样">
+    <div class="lasso-toolbar-stack hidden" id="pickerToolbar" role="toolbar" data-i18n-aria="pick.toolbar">
       <div class="lasso-toolbar">
         <div class="lasso-section">
-          <span class="lasso-tool-text" aria-hidden="true">取样</span>
-          <select class="lasso-tool-select" id="pickModeSel" title="吸色取样：合并最终颜色 / 当前图层原色">
-            <option value="composite">合并颜色</option>
-            <option value="layer">当前图层</option>
+          <span class="lasso-tool-text" aria-hidden="true" data-i18n="pick.sampleLabel">取样</span>
+          <select class="lasso-tool-select" id="pickModeSel" data-i18n-title="pick.sampleTip">
+            <option value="composite" data-i18n="pick.composite">合并颜色</option>
+            <option value="layer" data-i18n="pick.active">当前图层</option>
           </select>
         </div>
       </div>
@@ -455,32 +455,32 @@
 
     <!-- 魔术棒设置 popup（点设置弹出，再点别处关）—— 独立于 toolbar stack -->
     <!-- v242：只剩阈值；扩展/收缩拆成选区编辑 op（见下 lassoSelEditMenu / lassoSelOpPopup） -->
-    <div class="lasso-popup hidden" id="lassoMagicPopup" role="dialog" aria-label="魔术棒设置">
+    <div class="lasso-popup hidden" id="lassoMagicPopup" role="dialog" data-i18n-aria="la.magicSettings">
       <label class="lasso-popup-row">
-        <span>阈值</span>
+        <span data-i18n="la.threshold">阈值</span>
         <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" />
         <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
       </label>
     </div>
 
     <!-- v242 选区编辑：齿轮 → 这个菜单 → 选扩张/收缩 → 开 lassoSelOpPopup 实时预览 -->
-    <div class="lasso-popup hidden" id="lassoSelEditMenu" role="menu" aria-label="编辑选区">
-      <button class="lasso-tool-btn" id="lassoSelExpandBtn" type="button" role="menuitem" style="justify-content:flex-start;">扩张…</button>
-      <button class="lasso-tool-btn" id="lassoSelShrinkBtn" type="button" role="menuitem" style="justify-content:flex-start;">收缩…</button>
+    <div class="lasso-popup hidden" id="lassoSelEditMenu" role="menu" data-i18n-aria="la.editSel">
+      <button class="lasso-tool-btn" id="lassoSelExpandBtn" type="button" role="menuitem" style="justify-content:flex-start;" data-i18n="la.expand">扩张…</button>
+      <button class="lasso-tool-btn" id="lassoSelShrinkBtn" type="button" role="menuitem" style="justify-content:flex-start;" data-i18n="la.shrink">收缩…</button>
     </div>
 
     <!-- v242 选区扩张/收缩 modal：走 adjust 逻辑（transient + 实时预览），数字输入 -->
-    <div class="lasso-popup hidden" id="lassoSelOpPopup" role="dialog" aria-label="扩张 / 收缩选区">
+    <div class="lasso-popup hidden" id="lassoSelOpPopup" role="dialog" data-i18n-aria="la.expandShrink">
       <div class="lasso-popup-row" style="grid-template-columns: 1fr auto auto;">
         <span id="lassoSelOpTitle">扩张选区</span>
         <input type="text" inputmode="numeric" id="lassoSelOpAmount" value="1"
-          style="width:56px;text-align:right;" aria-label="像素数" />
+          style="width:56px;text-align:right;" data-i18n-aria="la.pixelCount" />
         <span>px</span>
       </div>
       <div class="lasso-popup-row" style="grid-template-columns: 1fr auto auto; gap:10px;">
         <span></span>
-        <button class="lasso-tool-btn lasso-tool-cancel" id="lassoSelOpCancel" type="button">取消</button>
-        <button class="lasso-tool-btn lasso-tool-confirm" id="lassoSelOpApply" type="button">应用</button>
+        <button class="lasso-tool-btn lasso-tool-cancel" id="lassoSelOpCancel" type="button" data-i18n="common.cancel">取消</button>
+        <button class="lasso-tool-btn lasso-tool-confirm" id="lassoSelOpApply" type="button" data-i18n="common.apply">应用</button>
       </div>
     </div>
 
@@ -490,8 +490,8 @@
          浮动可拖；canvas 内容跟 doc 走（webpaint/state.json 持久化） -->
     <div class="palette-window hidden" id="paletteWindow">
       <div class="palette-head">
-        <span class="palette-title">调色板</span>
-        <button class="palette-close" type="button" aria-label="关闭">×</button>
+        <span class="palette-title" data-i18n="palette.title">调色板</span>
+        <button class="palette-close" type="button" data-i18n-aria="common.close.aria">×</button>
       </div>
       <div class="palette-body">
         <canvas class="palette-canvas" width="256" height="256"></canvas>
@@ -506,30 +506,30 @@
 
     <!-- Brush rack sheet（v83）：底部弹出，选当前工具的 brush
          exclusive；tap 画布关（不要 backdrop，语义是 drawer 不是 modal） -->
-    <div class="brush-rack-sheet hidden" id="brushRackSheet" role="dialog" aria-label="笔架">
+    <div class="brush-rack-sheet hidden" id="brushRackSheet" role="dialog" data-i18n-aria="rack.sheet">
       <div class="brush-rack-head">
         <span id="brushRackTitle">笔架 · 笔刷</span>
         <div class="brush-rack-actions">
           <!-- v134 全 SVG icon；重置出厂挪进菜单 → 调试（safety net）；导入/导出/新建/云备份 都 icon -->
-          <button class="brush-rack-action brush-rack-action-icon" id="brushRackImport" type="button" title="导入笔架 JSON" aria-label="导入笔架">
+          <button class="brush-rack-action brush-rack-action-icon" id="brushRackImport" type="button" data-i18n-title="rack.importJson" aria-label="导入笔架">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 3 v11"/><polyline points="7 9, 12 14, 17 9"/>
               <path d="M4 17 v3 a1 1 0 0 0 1 1 h14 a1 1 0 0 0 1 -1 v-3"/>
             </svg>
           </button>
-          <button class="brush-rack-action brush-rack-action-icon" id="brushRackExportFolder" type="button" title="导出当前文件夹为 JSON" aria-label="导出笔架">
+          <button class="brush-rack-action brush-rack-action-icon" id="brushRackExportFolder" type="button" data-i18n-title="rack.exportFolder" aria-label="导出笔架">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 21 v-11"/><polyline points="7 15, 12 10, 17 15"/>
               <path d="M4 7 v-3 a1 1 0 0 1 1 -1 h14 a1 1 0 0 1 1 1 v3"/>
             </svg>
           </button>
-          <button class="brush-rack-action brush-rack-action-icon" id="brushRackCloudPush" type="button" title="云备份笔架到 OneDrive" aria-label="云备份笔架">
+          <button class="brush-rack-action brush-rack-action-icon" id="brushRackCloudPush" type="button" data-i18n-title="rack.cloudPush" aria-label="云备份笔架">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M17.5 19 H6.5 A4.5 4.5 0 0 1 6 10 a6 6 0 0 1 11.6 -1 A4 4 0 0 1 17.5 19 Z"/>
               <polyline points="9 14, 12 11, 15 14"/><path d="M12 11 v6"/>
             </svg>
           </button>
-          <button class="brush-rack-action brush-rack-action-icon" id="brushRackNew" type="button" title="新建笔刷" aria-label="新建笔刷">
+          <button class="brush-rack-action brush-rack-action-icon" id="brushRackNew" type="button" data-i18n-title="rack.newBrush" aria-label="新建笔刷">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
@@ -537,7 +537,7 @@
           <!-- v134 重置出厂藏菜单 调试段 -->
           <button id="brushRackReset" type="button" hidden></button>
           <button id="brushRackDumpCode" type="button" hidden></button>
-          <button class="brush-rack-close" id="brushRackClose" type="button" aria-label="关闭">×</button>
+          <button class="brush-rack-close" id="brushRackClose" type="button" data-i18n-aria="common.close.aria">×</button>
         </div>
       </div>
       <!-- folder tabs + 笔 grid = <RackSheet> Vue 组件（src/ui/rack-sheet.ts）挂载于此。
@@ -546,11 +546,11 @@
     </div>
 
     <!-- Brush settings 全屏 view（v83）：编辑某个 brush preset -->
-    <div class="brush-settings-view hidden" id="brushSettingsView" role="dialog" aria-modal="true" aria-label="笔刷设置">
+    <div class="brush-settings-view hidden" id="brushSettingsView" role="dialog" aria-modal="true" data-i18n-aria="bsv.title">
       <header class="brush-settings-head">
-        <button class="brush-settings-back" id="brushSettingsCancel" type="button">取消</button>
-        <span class="brush-settings-title">笔刷设置</span>
-        <button class="brush-settings-save" id="brushSettingsSave" type="button">保存</button>
+        <button class="brush-settings-back" id="brushSettingsCancel" type="button" data-i18n="common.cancel">取消</button>
+        <span class="brush-settings-title" data-i18n="bsv.title">笔刷设置</span>
+        <button class="brush-settings-save" id="brushSettingsSave" type="button" data-i18n="common.save">保存</button>
       </header>
       <div class="brush-settings-body" id="brushSettingsBody"></div>
     </div>
@@ -561,7 +561,7 @@
     <div class="sheet sync-gate-sheet hidden" id="syncGateSheet" role="dialog" aria-modal="true">
       <h3 id="syncGateTitle">同步状态</h3>
       <p id="syncGateMessage" class="sheet-hint"></p>
-      <div id="syncGateSpinner" class="sync-gate-spinner hidden"><div class="spinner-ring"></div><span>正在检查云端…</span></div>
+      <div id="syncGateSpinner" class="sync-gate-spinner hidden"><div class="spinner-ring"></div><span data-i18n="sg.checking">正在检查云端…</span></div>
       <div id="syncGateActions" class="sync-gate-actions"></div>
     </div>
 
@@ -691,91 +691,91 @@
     <!-- v134 导入超大图片 sheet（图片 > 画布时弹）：保持原 / fit-to-canvas（默认）/ 自定义 + 锁比例 + 插值 -->
     <div class="resample-backdrop hidden" id="bigImportBackdrop"></div>
     <div class="resample-sheet hidden" id="bigImportSheet" role="dialog" aria-modal="true">
-      <div class="resample-head">图片比画布大</div>
+      <div class="resample-head" data-i18n="ri.title">图片比画布大</div>
       <div class="resample-body">
         <div class="resample-row" style="font-size:12px; color:var(--ink-soft);">
           <span id="bigImportInfo">图片 W×H · 画布 docW×docH</span>
         </div>
         <div class="resample-row">
-          <label><input type="radio" name="bigImportChoice" value="fit" checked /> 缩到画布（默认）</label>
+          <label><input type="radio" name="bigImportChoice" value="fit" checked /> <span data-i18n="ri.fit">缩到画布（默认）</span></label>
         </div>
         <div class="resample-row">
-          <label><input type="radio" name="bigImportChoice" value="keep" /> 保持原尺寸（layer 超出画布，可后调）</label>
+          <label><input type="radio" name="bigImportChoice" value="keep" /> <span data-i18n="ri.keep">保持原尺寸（layer 超出画布，可后调）</span></label>
         </div>
         <div class="resample-row">
-          <label><input type="radio" name="bigImportChoice" value="custom" /> 自定义</label>
+          <label><input type="radio" name="bigImportChoice" value="custom" /> <span data-i18n="common.custom">自定义</span></label>
         </div>
         <div class="resample-row">
-          <label for="bigImportW">宽 (px)</label>
+          <label for="bigImportW" data-i18n="dim.width">宽 (px)</label>
           <input type="number" id="bigImportW" min="1" max="8192" step="1" />
         </div>
         <div class="resample-row">
-          <label for="bigImportH">高 (px)</label>
+          <label for="bigImportH" data-i18n="dim.height">高 (px)</label>
           <input type="number" id="bigImportH" min="1" max="8192" step="1" />
         </div>
         <div class="resample-row">
-          <label for="bigImportMode">插值</label>
+          <label for="bigImportMode" data-i18n="dim.interp">插值</label>
           <select id="bigImportMode">
-            <option value="bicubic">双三次（默认 / 高质量）</option>
-            <option value="bilinear">双线性（软）</option>
-            <option value="nearest">最近邻（像素艺术 / 硬边）</option>
+            <option value="bicubic" data-i18n="interp.bicubic">双三次（默认 / 高质量）</option>
+            <option value="bilinear" data-i18n="interp.bilinear">双线性（软）</option>
+            <option value="nearest" data-i18n="interp.nearest">最近邻（像素艺术 / 硬边）</option>
           </select>
         </div>
       </div>
       <div class="resample-foot">
-        <button type="button" id="bigImportCancel">取消</button>
-        <button type="button" id="bigImportConfirm" class="primary">确定</button>
+        <button type="button" id="bigImportCancel" data-i18n="common.cancel">取消</button>
+        <button type="button" id="bigImportConfirm" class="primary" data-i18n="common.ok">确定</button>
       </div>
     </div>
 
     <!-- v110 重采样对话框 -->
     <div class="resample-backdrop hidden" id="resampleBackdrop"></div>
     <div class="resample-sheet hidden" id="resampleSheet" role="dialog" aria-modal="true">
-      <div class="resample-head">画布重采样</div>
+      <div class="resample-head" data-i18n="rs2.title">画布重采样</div>
       <div class="resample-body">
         <div class="resample-row">
-          <label for="resampleW">宽 (px)</label>
+          <label for="resampleW" data-i18n="dim.width">宽 (px)</label>
           <input type="number" id="resampleW" min="1" max="8192" step="1" />
         </div>
         <div class="resample-row">
-          <label for="resampleH">高 (px)</label>
+          <label for="resampleH" data-i18n="dim.height">高 (px)</label>
           <input type="number" id="resampleH" min="1" max="8192" step="1" />
         </div>
         <div class="resample-row resample-row-link">
-          <label><input type="checkbox" id="resampleLock" checked /> 锁比例</label>
+          <label><input type="checkbox" id="resampleLock" checked /> <span data-i18n="rs2.lock">锁比例</span></label>
         </div>
         <div class="resample-row">
-          <label for="resampleMode">插值</label>
+          <label for="resampleMode" data-i18n="dim.interp">插值</label>
           <!-- 选项由 JS 从 resample.js RESAMPLE_MODES (SSoT) 填，见 fillResampleSelect -->
           <select id="resampleMode"></select>
         </div>
       </div>
       <div class="resample-foot">
-        <button type="button" id="resampleCancel">取消</button>
-        <button type="button" id="resampleConfirm" class="primary">应用</button>
+        <button type="button" id="resampleCancel" data-i18n="common.cancel">取消</button>
+        <button type="button" id="resampleConfirm" class="primary" data-i18n="common.apply">应用</button>
       </div>
     </div>
 
     <!-- 偏移接缝（环绕）对话框 —— 沿用 .resample-* 样式。dx/dy 像素，向右/下为正，环绕。 -->
     <div class="resample-backdrop hidden" id="offsetBackdrop"></div>
     <div class="resample-sheet hidden" id="offsetSheet" role="dialog" aria-modal="true">
-      <div class="resample-head">偏移接缝（环绕）</div>
+      <div class="resample-head" data-i18n="off.title">偏移接缝（环绕）</div>
       <div class="resample-body">
         <div class="resample-row">
-          <label for="offsetX">水平 (px)</label>
+          <label for="offsetX" data-i18n="off.x">水平 (px)</label>
           <input type="number" id="offsetX" step="1" />
         </div>
         <div class="resample-row">
-          <label for="offsetY">垂直 (px)</label>
+          <label for="offsetY" data-i18n="off.y">垂直 (px)</label>
           <input type="number" id="offsetY" step="1" />
         </div>
         <div class="resample-row resample-row-link">
-          <button type="button" id="offsetHalf">居中接缝（半幅 ½）</button>
+          <button type="button" id="offsetHalf" data-i18n="off.half">居中接缝（半幅 ½）</button>
         </div>
       </div>
       <div class="resample-foot">
-        <button type="button" id="offsetCancel">取消</button>
-        <button type="button" id="offsetConfirm" class="primary">应用</button>
+        <button type="button" id="offsetCancel" data-i18n="common.cancel">取消</button>
+        <button type="button" id="offsetConfirm" class="primary" data-i18n="common.apply">应用</button>
       </div>
     </div>
 
@@ -785,33 +785,33 @@
     <div class="float-panel adjust-panel hidden" id="adjustPanel">
       <div class="float-panel-head" id="adjustPanelHead">
         <span class="float-panel-title" id="adjustPanelTitle">颜色调整</span>
-        <button class="float-panel-close" id="adjustPanelClose" type="button" aria-label="关闭">×</button>
+        <button class="float-panel-close" id="adjustPanelClose" type="button" data-i18n-aria="common.close.aria">×</button>
       </div>
       <div class="float-panel-body">
         <div id="adjustParamsBody"><!-- JS 填 --></div>
         <div class="adjust-panel-foot">
-          <button type="button" id="adjustReset">重置</button>
-          <button type="button" id="adjustCancel">取消</button>
-          <button type="button" id="adjustApply" class="primary">应用</button>
+          <button type="button" id="adjustReset" data-i18n="common.reset">重置</button>
+          <button type="button" id="adjustCancel" data-i18n="common.cancel">取消</button>
+          <button type="button" id="adjustApply" class="primary" data-i18n="common.apply">应用</button>
         </div>
       </div>
     </div>
 
     <!-- v110 自由裁切：toolbar (8-handle crop) -->
     <div class="crop-toolbar hidden" id="cropToolbar">
-      <span class="crop-toolbar-label">裁切：拖角 / 边 / 框内移动</span>
+      <span class="crop-toolbar-label" data-i18n="crop.hint">裁切：拖角 / 边 / 框内移动</span>
       <span class="crop-toolbar-sep" aria-hidden="true">|</span>
-      <button class="crop-toolbar-btn" id="cropToolbarApply" type="button">应用</button>
-      <button class="crop-toolbar-btn crop-toolbar-cancel" id="cropToolbarCancel" type="button">取消</button>
+      <button class="crop-toolbar-btn" id="cropToolbarApply" type="button" data-i18n="common.apply">应用</button>
+      <button class="crop-toolbar-btn crop-toolbar-cancel" id="cropToolbarCancel" type="button" data-i18n="common.cancel">取消</button>
     </div>
 
     <!-- v132 Filter brush toolbar：进入模糊笔刷 / 锐化笔刷等 filter brush 模式时浮在顶栏下方 -->
     <div class="crop-toolbar hidden" id="filterBrushToolbar">
-      <span class="crop-toolbar-label" id="filterBrushTitle">滤镜笔刷</span>
+      <span class="crop-toolbar-label" id="filterBrushTitle" data-i18n="fb.title">滤镜笔刷</span>
       <span class="crop-toolbar-sep" aria-hidden="true">|</span>
       <!-- v132 (user：「ui 里有一个开笔架的功能，不然笔架关了开不了」) -->
-      <button class="crop-toolbar-btn" id="filterBrushOpenRack" type="button">笔架</button>
-      <button class="crop-toolbar-btn crop-toolbar-cancel" id="filterBrushExit" type="button">退出</button>
+      <button class="crop-toolbar-btn" id="filterBrushOpenRack" type="button" data-i18n="rack.sheet">笔架</button>
+      <button class="crop-toolbar-btn crop-toolbar-cancel" id="filterBrushExit" type="button" data-i18n="common.exit">退出</button>
     </div>
 
     <!-- v110 自由裁切 overlay：rect + 8 handles + dimmed mask -->
@@ -1005,10 +1005,10 @@
     </div>
 
     <!-- HSV 浮动色板：点 activeSwatch / `C` 开关，拖标题栏移动，位置记忆到 localStorage -->
-    <div id="colorPanel" class="float-panel hidden" role="dialog" aria-label="颜色">
+    <div id="colorPanel" class="float-panel hidden" role="dialog" data-i18n-aria="color.title">
       <div class="float-panel-head" id="colorPanelHead">
-        <span class="float-panel-title">颜色</span>
-        <button id="colorPanelClose" class="close-x" type="button" aria-label="关闭">×</button>
+        <span class="float-panel-title" data-i18n="color.title">颜色</span>
+        <button id="colorPanelClose" class="close-x" type="button" data-i18n-aria="common.close.aria">×</button>
       </div>
       <!-- 色轮 = 薄 Vue 组件（src/ui/color-wheel.ts）挂载于此；SV pad / 色相 / HEX / 预览由组件渲染 -->
       <div class="float-panel-body"></div>
@@ -1016,23 +1016,23 @@
 
     <!-- 清空确认（只清当前图层；可撤销） -->
     <div id="clearBackdrop" class="backdrop hidden" aria-hidden="true"></div>
-    <div id="clearSheet" class="sheet hidden" role="dialog" aria-label="清空确认">
-      <h3>清空当前图层？</h3>
-      <p class="sheet-hint" id="clearSheetMessage">把当前图层的像素全部抹掉。可以 Ctrl+Z 撤销。</p>
-      <button class="sheet-action danger" data-clear="confirm">清空</button>
-      <button class="sheet-action ghost" data-clear="cancel">取消</button>
+    <div id="clearSheet" class="sheet hidden" role="dialog" data-i18n-aria="clr.aria">
+      <h3 data-i18n="clr.title">清空当前图层？</h3>
+      <p class="sheet-hint" id="clearSheetMessage" data-i18n="clr.msg">把当前图层的像素全部抹掉。可以 Ctrl+Z 撤销。</p>
+      <button class="sheet-action danger" data-clear="confirm" data-i18n="clr.confirm">清空</button>
+      <button class="sheet-action ghost" data-clear="cancel" data-i18n="common.cancel">取消</button>
     </div>
 
     <!-- 更新 toast -->
     <div id="updateToast" class="toast hidden" role="status" aria-live="polite">
-      <span>有新版本</span>
-      <button id="updateToastReload" type="button">刷新</button>
-      <button id="updateToastDismiss" type="button" class="dismiss" aria-label="忽略">×</button>
+      <span data-i18n="upd.available">有新版本</span>
+      <button id="updateToastReload" type="button" data-i18n="upd.reload">刷新</button>
+      <button id="updateToastDismiss" type="button" class="dismiss" data-i18n-aria="upd.dismiss">×</button>
     </div>
 
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-9521b6f76aa0.mjs"></script>
+    <script type="module" src="./dist/webpaint-03e717860dc9.mjs"></script>
   </body>
 </html>
