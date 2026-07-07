@@ -697,6 +697,11 @@ input[type=range] {
 /* v124 menu-item 带 SVG icon（目前只用于图库）：左对齐 + 间距 */
 .menu-item.menu-item-with-icon { justify-content: flex-start; gap: 10px; }
 .menu-item.menu-item-with-icon svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+/* 语言选择器：⋯ 菜单里「语言」项下展开的 4 个 endonym 选项（click-to-pick） */
+.menu-lang-option { justify-content: flex-start; gap: 8px; padding-left: 22px; }
+.menu-lang-option .menu-lang-check { width: 1em; text-align: center; color: var(--accent); flex-shrink: 0; }
+.menu-lang-option[aria-checked="true"] .menu-item-label { color: var(--accent); font-weight: 600; }
 .menu-item-state { color: var(--ink-soft); font-size: 12px; }
 .menu-item[aria-pressed="true"] .menu-item-state { color: var(--accent, #4c8bf5); font-weight: 600; }
 .menu-item.menu-danger { color: #c0392b; }
