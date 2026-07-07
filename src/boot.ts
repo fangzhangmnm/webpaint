@@ -5,6 +5,7 @@
 //
 // 红线：store 调用（_store.flow.load）verbatim 搬迁、一字未改——只 relocate，不碰同步机制。
 
+import { t } from "./i18n/index.ts";
 import { defaultsPromise, mergeMissingDefaults, makeDefaultRack } from "./brushes.ts";
 import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
@@ -18,8 +19,8 @@ import type { AppContext } from "./app-context.ts";
 export function initRackBoot(ctx: AppContext) {
   const { rack, state, editMode, dialReactive, setStatus } = ctx;
   const backfillToolStates = () => {
-    for (const t of Object.keys(state.toolStates)) {
-      if (state.toolStates[t].activeBrushId == null) Object.assign(state.toolStates[t], rack.defaultToolStateFor(t));
+    for (const tk of Object.keys(state.toolStates)) {
+      if (state.toolStates[tk].activeBrushId == null) Object.assign(state.toolStates[tk], rack.defaultToolStateFor(tk));
     }
   };
   rack.load().then(() => {
@@ -43,7 +44,7 @@ export function initRackBoot(ctx: AppContext) {
     rack.setRack(makeDefaultRack());
     rack.applyToolState(editMode.current());
     dialReactive.rackVersion++;
-    setStatus("笔架持久化失败（可能私密浏览）：本次 session 可用，重启会重置", true);
+    setStatus(t("mi.rackPersistFailed"), true);
   });
 }
 
@@ -72,19 +73,19 @@ export async function bootRestoreSession(ctx: AppContext) {
       updateSaveStatus();
       await setGalleryOpen(true);
       setStatus(r.status === "locked"
-        ? `「${wantedName}」是加密作品（已取消解锁）——从图库再打开`
-        : `找不到上次画作 "${wantedName}"，先选一个或新建`);
+        ? t("mi.encryptedCancelled", { name: wantedName })
+        : t("mi.lastNotFound", { name: wantedName }));
       return;
     }
     const loaded = await decodeOraToDoc(r.blob!);
     session.adopt(loaded as PaintDoc, wantedName);
-    setStatus(`已恢复：${wantedName} (${loaded.layers.length} 层)`);
+    setStatus(t("mi.restored", { name: wantedName, n: loaded.layers.length }));
     gateCloudSyncOnOpen(wantedName).catch((e: unknown) => console.warn("[sync-gate]", e));
   } catch (e) {
     console.warn("[session] load failed:", e);
     session.setName(null);
     updateSaveStatus();
     await setGalleryOpen(true);
-    setStatus(`启动加载 "${wantedName}" 失败：${String((e as Error)?.message || e)}`, true);
+    setStatus(t("mi.bootLoadFailed", { name: wantedName, err: String((e as Error)?.message || e) }), true);
   }
 }

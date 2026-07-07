@@ -15,6 +15,7 @@ import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { safeLSSet } from "./safe-ls.ts";
 import { fillResampleSelect } from "./resample.ts";
+import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
 import type { UndoEntry } from "./history.ts";
 
@@ -118,26 +119,26 @@ export function updateLassoToolbar() {
 }
 
 // ---- 工具 ----
-export function setTool(t: string) {
+export function setTool(tool: string) {
   // v96：airbrush 工具不存在了。老 doc 持久化里可能存了 "airbrush" → 透明回退到 brush
-  if (t === "airbrush") t = "brush";
+  if (tool === "airbrush") tool = "brush";
   // v120：shapes 撤了。老 doc 持久化里可能存了 "shapes" → 透明回退 brush
-  if (t === "shapes") t = "brush";
+  if (tool === "shapes") tool = "brush";
   // v309：smudge 工具（一直只是 disabled 占位、从未实装）整体 purge，待将来重写。
   //   老 doc 持久化里可能存了 "smudge" → 透明回退 brush（同 airbrush/shapes）
-  if (t === "smudge") t = "brush";
+  if (tool === "smudge") tool = "brush";
   // 切工具 = 决定性动作 → editMode.setTool 内部按 onToolSwitch 把停驻 transient apply/cancel（不在这单独调）
   // v132: 切到非 filterBrush 工具时自动退出 filter brush 模式（藏 toolbar / 清 state）
-  if (state.filterBrush && t !== "filterBrush") {
+  if (state.filterBrush && tool !== "filterBrush") {
     state.filterBrush = null;
     const tb = document.getElementById("filterBrushToolbar");
     if (tb) tb.classList.add("hidden");
   }
-  editMode.setTool(t);   // emit wp:modechange → _syncEditModeUI 派生按钮高亮 / lasso 工具栏
-  document.body.dataset.tool = t;   // 持久工具的 CSS hook（transient 期间保持不变）
+  editMode.setTool(tool);   // emit wp:modechange → _syncEditModeUI 派生按钮高亮 / lasso 工具栏
+  document.body.dataset.tool = tool;   // 持久工具的 CSS hook（transient 期间保持不变）
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
-  if (t === "brush" || t === "eraser" || t === "filterBrush") {
-    rack.applyToolState(t);
+  if (tool === "brush" || tool === "eraser" || tool === "filterBrush") {
+    rack.applyToolState(tool);
   }
 }
 
@@ -206,7 +207,7 @@ function _openSelEdit(op: "expand" | "shrink") {
   menu?.classList.add("hidden");
   if (_selEdit) _finishSelEdit(false);    // 已开着另一个 → 先取消旧的（还原）再开新的
   _selEdit = { before: doc.selection as Selection, op, rafId: 0 };
-  if (title) title.textContent = op === "expand" ? "扩张选区" : "收缩选区";
+  if (title) title.textContent = op === "expand" ? t("se.expandSelection") : t("se.shrinkSelection");
   if (amount) amount.value = "1";         // 默认 1px（最常用的轻微扩缩）
   popup?.classList.remove("hidden");
   _runSelEditPreview();                    // 初次预览
@@ -225,7 +226,7 @@ function _finishSelEdit(applied: boolean) {
   if (applied) {
     const before = s.before, after = doc.selection;
     if (after !== before && history) history.push({ type: "selectionChange", before, after });
-    setStatus(s.op === "expand" ? "选区已扩张" : "选区已收缩");
+    setStatus(s.op === "expand" ? t("se.selectionExpanded") : t("se.selectionShrunk"));
   } else {
     doc.selection = s.before as (typeof doc)["selection"];               // 还原
   }
@@ -351,9 +352,9 @@ export function initToolbar(ctx: AppContext) {
       if (entry && history) history.push(entry);
       board.invalidateAll();
       updateLassoToolbar();
-      setStatus("选区里没有可变换的像素，已取消选区");
+      setStatus(t("se.noPixelsToTransform"));
     } else {
-      setStatus("图层是空的，没东西可变换");
+      setStatus(t("se.layerEmptyNoTransform"));
     }
   });
 
@@ -375,7 +376,7 @@ export function initToolbar(ctx: AppContext) {
     compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
     compressPixelSnap(entry.after as Parameters<typeof compressPixelSnap>[0],  (blob: Blob | null) => { entry.afterBlob  = blob; });
     board.invalidateAll();
-    setStatus(`已填色：${state.color}`);
+    setStatus(t("se.filled", { color: state.color }));
   });
   // 清除：选区内 dst-out
   byId("lassoClearBtn").addEventListener("click", () => {
@@ -389,7 +390,7 @@ export function initToolbar(ctx: AppContext) {
     compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
     compressPixelSnap(entry.after as Parameters<typeof compressPixelSnap>[0],  (blob: Blob | null) => { entry.afterBlob  = blob; });
     board.invalidateAll();
-    setStatus("已清除选区内像素");
+    setStatus(t("se.clearedSelection"));
   });
   // v112: 全选（user：「lasso 加全选」）
   byId("lassoSelectAllBtn").addEventListener("click", () => {
@@ -429,7 +430,7 @@ export function initToolbar(ctx: AppContext) {
     if (input.lasso.stamp()) {
       board.invalidateAll();
       board.forceGLResyncUnderFloat();   // float 仍活 → 强制下一帧把盖印写进的源层 tile 同步上 GPU（否则等 commit 才显）
-      setStatus("已盖印");
+      setStatus(t("se.stamped"));
     }
   });
   // v120: 插值模式 dropdown（旧 3 个按钮 → 1 个 select）
@@ -473,15 +474,15 @@ export function initToolbar(ctx: AppContext) {
   // ---- 工具按钮 ----
   for (const b of els.toolBtns) {
     b.addEventListener("click", () => {
-      const t = b.dataset.tool!;   // .tool[data-tool] 选择器保证存在
+      const tool = b.dataset.tool!;   // .tool[data-tool] 选择器保证存在
       // tap-active-again：已激活的 rack 工具再点 → 开/关该工具的笔架 sheet
       // 详 conversation v79→v80：「tap = 切换 / 已激活 tap = 开 rack」
-      if (editMode.current() === t && RACK_PANEL_BY_TOOL[t]) {
-        openExclusive(RACK_PANEL_BY_TOOL[t]);
+      if (editMode.current() === tool && RACK_PANEL_BY_TOOL[tool]) {
+        openExclusive(RACK_PANEL_BY_TOOL[tool]);
         return;
       }
       // v124 (user) 第二次按 lasso = Esc 语义：清选区 + 回上一个非 lasso 工具
-      if (editMode.current() === "lasso" && t === "lasso") {
+      if (editMode.current() === "lasso" && tool === "lasso") {
         if (doc.selection) {
           const entry = input.lasso.setSelection(null);
           if (entry) history.push(entry);
@@ -492,7 +493,7 @@ export function initToolbar(ctx: AppContext) {
         return;
       }
       if (editMode.current() !== "lasso") _lastNonLassoTool = editMode.current();
-      setTool(t);
+      setTool(tool);
       // 切到新 tool 时关掉之前开的 rack（防止 stale）
       closeExclusive();
     });
@@ -503,12 +504,12 @@ export function initToolbar(ctx: AppContext) {
   // pencil 模式下双击 → 笔↔橡皮。但 floating 选区存在时屏蔽（避免误触切工具 = 自动 apply 变换）
   window.addEventListener("wp:doubletap", () => {
     if (input.lasso.hasFloating()) {
-      setStatus("套索浮层进行中，双击切换暂停（点应用 / 取消 / 返回工具栏）");
+      setStatus(t("se.lassoFloatingBusy"));
       return;
     }
     const next = editMode.current() === "eraser" ? "brush" : "eraser";
     setTool(next);
-    setStatus(`双击 · ${next === "eraser" ? "橡皮" : "笔刷"}`);
+    setStatus(next === "eraser" ? t("se.doubleTapEraser") : t("se.doubleTapBrush"));
   });
   setTool(editMode.current());
 }

@@ -16,6 +16,7 @@
 // 依赖绑定：board / withBusy / setStatus / updateSaveStatus 经 initCloudFreshness(ctx) 注入；
 //   session / store+auth / sheet gate / decodeOraToDoc / els 直接 import（leaf/singleton）。
 
+import { t } from "./i18n/index.ts";
 import { session } from "./session-state.ts";
 import {
   isSignedIn, isCloudDirty,
@@ -44,15 +45,15 @@ async function gateCloudSyncOnOpen(sessionName: string) {
   // 上次登录这次离线 → 锁屏问意图（不动 lastSessionSignedIn 直到 user 选）
   if (!online) {
     const choice = await lockSyncGate({
-      title: "未连接网络",
-      message: "上次是登录 OneDrive 状态。离线只能用本地缓存。",
+      title: t("cf.noNetworkTitle"),
+      message: t("cf.noNetworkMsg"),
       showSpinner: false,
       actions: [
-        { label: "离线模式", value: "offline" },
-        { label: "稍后再试（取消）", value: "offline", primary: false },
+        { label: t("cf.offlineMode"), value: "offline" },
+        { label: t("cf.retryLaterCancel"), value: "offline", primary: false },
       ],
     });
-    if (choice === "offline") setStatus("离线模式：用本地缓存", true);
+    if (choice === "offline") setStatus(t("cf.offlineModeUsingCache"), true);
     return;
   }
 
@@ -65,17 +66,17 @@ async function gateCloudSyncOnOpen(sessionName: string) {
   // 真的拿不到 token → 才弹 gate
   if (!isSignedIn()) {
     const choice = await lockSyncGate({
-      title: "OneDrive 登录已过期",
-      message: "token 失效。重登拿云端，离线用本地。",
+      title: t("cf.tokenExpiredTitle"),
+      message: t("cf.tokenExpiredMsg"),
       showSpinner: false,
       actions: [
-        { label: "重新登录", value: "signin", primary: true },
-        { label: "离线模式", value: "offline" },
+        { label: t("cf.signIn"), value: "signin", primary: true },
+        { label: t("cf.offlineMode"), value: "offline" },
       ],
     });
     if (choice === "signin") {
-      try { await signIn(); setStatus("已登录"); }
-      catch (e) { setStatus("登录失败：" + errMsg(e), true); return; }
+      try { await signIn(); setStatus(t("cf.signedIn")); }
+      catch (e) { setStatus(t("cf.signInFailed", { err: errMsg(e) }), true); return; }
       // 登录成功 → 重入流程
       return gateCloudSyncOnOpen(sessionName);
     }
@@ -97,8 +98,8 @@ async function checkCloudETag(sessionName: string) {
   const probe = new Promise((res) => { onSkip = res; });
   let skipped = false;
   lockSyncGate({
-    title: "检查云端", message: sessionName, showSpinner: true,
-    actions: [{ label: "跳过到离线", value: { kind: "skip" } }],
+    title: t("cf.checkingCloud"), message: sessionName, showSpinner: true,
+    actions: [{ label: t("cf.skipToOffline"), value: { kind: "skip" } }],
   }).then((v) => { if (v && v.kind === "skip") { skipped = true; onSkip(); } });
 
   let res;
@@ -113,14 +114,14 @@ async function checkCloudETag(sessionName: string) {
       onNewer: async ({ cloudTime }) => {
         settleSyncGate(null);
         return await lockSyncGate({
-          title: "云端有新版本",
-          message: `${sessionName} 在云端 ${formatCloudTime(cloudTime)} 有新版本。本地是 ${getLocalSavedAtLabel()}。`,
+          title: t("cf.cloudNewerTitle"),
+          message: t("cf.cloudNewerMsg", { name: sessionName, time: formatCloudTime(cloudTime), local: getLocalSavedAtLabel() }),
           showSpinner: false,
           // spec（file-enter）：安全项 keep 默认（本地可能有未推编辑，默认拉云会丢）。
           actions: [
-            { label: "保留本地（之后 push 会再确认）", value: "keep", primary: true },
-            { label: "用云端覆盖本地（本地先备份进 .backup）", value: "pull" },
-            { label: "两份都留（云端另存为副本）", value: "branch" },
+            { label: t("cf.keepLocal"), value: "keep", primary: true },
+            { label: t("cf.overwriteLocal"), value: "pull" },
+            { label: t("cf.keepBoth"), value: "branch" },
           ],
         });
       },
@@ -131,16 +132,16 @@ async function checkCloudETag(sessionName: string) {
   }
 
   // flow.open 的 source/reason → 状态提示
-  if (res.source === "fast-forwarded") setStatus(`已同步到云端最新：${sessionName}`);   // clean 静默快进（ADR-0016）
-  else if (res.source === "pulled") setStatus(`已拉云端；本地原版备份为「${res.backupName}」`);
-  else if (res.source === "branched") setStatus(`云端版已开为「${res.branchName}」`);
+  if (res.source === "fast-forwarded") setStatus(t("cf.syncedToCloud", { name: sessionName }));   // clean 静默快进（ADR-0016）
+  else if (res.source === "pulled") setStatus(t("cf.pulledBackup", { backup: res.backupName ?? "" }));
+  else if (res.source === "branched") setStatus(t("cf.branchedAs", { branch: res.branchName ?? "" }));
   else {
     const reason = res.reason;
-    if (skipped || reason === "skipped") setStatus("已跳过云端检查，用本地版本");
-    else if (reason === "cloud-error") setStatus("连不上云端，用本地版本");
-    else if (reason === "backup-failed") setStatus(`本地备份失败，已取消拉云端（本地未动）`, true);
-    else if (reason === "cloud-vanished") setStatus(`云端找不到「${sessionName}」（本地未动）`, true);
-    else if (reason === "kept") setStatus("已保留本地，云端版本暂不动");
+    if (skipped || reason === "skipped") setStatus(t("cf.skippedUsingLocal"));
+    else if (reason === "cloud-error") setStatus(t("cf.cloudUnreachable"));
+    else if (reason === "backup-failed") setStatus(t("cf.backupFailed"), true);
+    else if (reason === "cloud-vanished") setStatus(t("cf.cloudVanished", { name: sessionName }), true);
+    else if (reason === "kept") setStatus(t("cf.keptLocal"));
     // in-sync / cloud-absent → 静默
   }
   // 成功联到云（非离线/出错/跳过）→ 记新鲜度时刻（ADR-0017：开图本身就是一次云端检查）。
@@ -165,7 +166,7 @@ function _markActivity() { _lastActivityAt = Date.now(); }
 let _ffInFlight = false;
 async function maybeFastForwardActive({ manual = false } = {}) {
   if (_ffInFlight) return;
-  if (!isSignedIn() || navigator.onLine === false) { if (manual) setStatus("离线，暂时无法检查云端", true); return; }
+  if (!isSignedIn() || navigator.onLine === false) { if (manual) setStatus(t("cf.offlineCantCheck"), true); return; }
   const name = session.name;
   if (!name || name === "未命名") return;
   if (els.galleryFull && !els.galleryFull.classList.contains("hidden")) return;   // 在图库（无活动画布）不 FF
@@ -179,13 +180,13 @@ async function maybeFastForwardActive({ manual = false } = {}) {
       adopt: async (blob, nm) => { const loaded = await decodeOraToDoc(blob); session.adopt(loaded as PaintDoc, nm); },
       busy: manual ? withBusy : undefined,   // 手动点 → 锁屏（反馈 + 防刷新中途动笔）；自动轮询 → 静默（挡笔靠 store.busy.replacing）
       // N10：自动 FF 无锁屏，但 store.busy.replacing() 会挡起笔。给个轻量 status 解释这次挡笔——只在真要拉内容时（etag 动过）触发，不是每次轮询都闪。
-      onReplaceStart: manual ? undefined : () => setStatus("正在同步云端最新…"),
+      onReplaceStart: manual ? undefined : () => setStatus(t("cf.syncingCloud")),
     });
     if (res.status === "fast-forwarded") {
       board.setViewport(vp.tx, vp.ty, vp.scale, vp.rot || 0);   // 还原本设备视口
-      setStatus(`已同步到云端最新：${name}`);
+      setStatus(t("cf.syncedToCloud", { name }));
     } else if (manual && res.status === "in-sync") {
-      setStatus(`已是云端最新：${name}`);
+      setStatus(t("cf.alreadyLatest", { name }));
     }
     updateSaveStatus();   // 刷新新鲜度指示（synced 图标 fresh/stale）
   } catch (e) { console.warn("[ff] 快进失败：", e); }
@@ -206,10 +207,10 @@ async function showIdleLockIfStale() {
   _idleLockShowing = true;
   try {
     await lockSyncGate({
-      title: "暂离编辑",
-      message: "离开一会儿了。点「继续」会检查云端最新版本（可能是其他设备的改动）。",
+      title: t("cf.idleTitle"),
+      message: t("cf.idleMsg"),
       showSpinner: false,
-      actions: [{ label: "继续编辑", value: "resume", primary: true }],
+      actions: [{ label: t("cf.resumeEditing"), value: "resume", primary: true }],
     });
   } finally {
     settleSyncGate(null);   // 收尾（已关则 no-op）
@@ -221,13 +222,13 @@ async function showIdleLockIfStale() {
 
 function formatCloudTime(iso: string | number) {
   if (!iso) return "?";
-  const t = Date.parse(String(iso));
-  if (!t) return String(iso);
-  const d = new Date(t);
+  const ts = Date.parse(String(iso));
+  if (!ts) return String(iso);
+  const d = new Date(ts);
   return `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 function getLocalSavedAtLabel() {
-  if (!session.docLastSavedAt) return "（未保存）";
+  if (!session.docLastSavedAt) return t("cf.notSaved");
   const d = new Date(session.docLastSavedAt);
   return `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }

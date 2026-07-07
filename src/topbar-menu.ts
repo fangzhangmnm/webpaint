@@ -32,6 +32,7 @@ import { sessionNameConflict } from "./session-name.ts";
 import { decodeOraToDoc } from "./ora.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import { maybeFastForwardActive } from "./cloud-freshness.ts";
+import { t } from "./i18n/index.ts";
 import type { Layer, PaintDoc } from "./doc.ts";
 
 import type { AppContext } from "./app-context.ts";
@@ -91,7 +92,7 @@ export function initTopbarMenu(ctx: AppContext) {
     compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
     compressPixelSnap(entry.after  as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.afterBlob  = blob; });
     board.invalidateAll();
-    setStatus("已清空当前图层（Ctrl+Z 撤销）");
+    setStatus(t("tm.clearedActiveLayer"));
   });
 
   // ---- 保存触发：wp:histchange dirty 门 / Ctrl+S / beforeunload / topSaveBtn ----
@@ -187,14 +188,14 @@ export function initTopbarMenu(ctx: AppContext) {
     const oldName = session.name || "未命名";
     let candidate = `${oldName} 副本`;
     while (true) {
-      const input = await openInputSheet("另存为", candidate, { placeholder: "新作品名字" });
+      const input = await openInputSheet(t("tm.saveAs"), candidate, { placeholder: t("tm.newArtworkNamePlaceholder") });
       if (input === null) return;
       const trimmed = input.trim();
-      if (!trimmed) { setStatus("名字不能空", true); candidate = ""; continue; }
-      if (trimmed === oldName) { setStatus("名字和当前一样，换一个", true); candidate = trimmed; continue; }
+      if (!trimmed) { setStatus(t("tm.nameEmpty"), true); candidate = ""; continue; }
+      if (trimmed === oldName) { setStatus(t("tm.nameSameAsCurrent"), true); candidate = trimmed; continue; }
       const conflict = await sessionNameConflict(trimmed, { cloud: isSignedIn() && navigator.onLine !== false });
-      if (conflict === "local") { setStatus(`本地已有同名 "${trimmed}"，换一个`, true); candidate = trimmed; continue; }
-      if (conflict === "cloud") { setStatus(`云端已有同名 "${trimmed}"，换一个`, true); candidate = trimmed; continue; }
+      if (conflict === "local") { setStatus(t("tm.localNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
+      if (conflict === "cloud") { setStatus(t("tm.cloudNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
       // 另存为 = 写新身份、旧的不动（store.flow.saveAs：本地存 + 云端 push，云端 best-effort）。
       try {
         const cloudOn = isSignedIn() && navigator.onLine !== false;
@@ -206,13 +207,13 @@ export function initTopbarMenu(ctx: AppContext) {
         _store.edits.markSaved();
         session.markSavedNow();
         updateSaveStatus();
-        if (!cloudOn) setStatus(`已另存为：${trimmed}`);
-        else if (res.cloudDeferred) setStatus(`已另存为（仅本地）：${trimmed}（云端稍后 Ctrl+S 推）`);
-        else setStatus(`已另存为（含云端）：${trimmed}`);
+        if (!cloudOn) setStatus(t("tm.savedAs", { name: trimmed }));
+        else if (res.cloudDeferred) setStatus(t("tm.savedAsLocalOnly", { name: trimmed }));
+        else setStatus(t("tm.savedAsWithCloud", { name: trimmed }));
         gallery.refresh();
         return;
       } catch (e) {
-        setStatus("另存为失败：" + errMsg(e));
+        setStatus(t("tm.saveAsFailed", { err: String(errMsg(e)) }));
         return;
       }
     }
@@ -220,19 +221,19 @@ export function initTopbarMenu(ctx: AppContext) {
   // v133 revert：从 IDB checkpoint 恢复 session 打开时的状态
   els.menuRevertToOpen?.addEventListener("click", async () => {
     setMenuOpen(false);
-    if (!session.name) { setStatus("没活动 session", true); return; }
+    if (!session.name) { setStatus(t("tm.noActiveSession"), true); return; }
     const cp = await session.readCheckpoint(session.name);
     if (!cp || !cp.blob) {
-      setStatus("没找到本次打开时的快照", true);
+      setStatus(t("tm.noOpenSnapshot"), true);
       return;
     }
     const ageMin = Math.max(1, Math.round((Date.now() - (cp.at || session.sessionOpenedAt)) / 60000));
     const choice = await lockSyncGate({
-      title: "撤销修改",
-      message: `回到约 ${ageMin} 分钟前的快照（本次打开或上次保存时的版本）。\n之后所有修改将丢失。`,
+      title: t("tm.revertTitle"),
+      message: t("tm.revertMessage", { min: ageMin }),
       actions: [
-        { label: "取消", value: "cancel" },
-        { label: "撤销", value: "ok", primary: true },
+        { label: t("tm.cancel"), value: "cancel" },
+        { label: t("tm.revert"), value: "ok", primary: true },
       ],
     });
     if (choice !== "ok") return;
@@ -240,16 +241,16 @@ export function initTopbarMenu(ctx: AppContext) {
     try {
       // checkpoint 字节按文件加密态包过壳 → 先 unseal（明文原样过；密码在内存则无感）
       const plain = await _store.unseal(session.name, cp.blob);
-      if (!plain) { setStatus("恢复失败：需要密码解锁", true); return; }
+      if (!plain) { setStatus(t("tm.revertFailedNeedPassword"), true); return; }
       const loaded = await decodeOraToDoc(plain);
       session.adoptWithOpts(loaded as PaintDoc, session.name, { skipCheckpoint: true });
       // R4：revert 是内容变化（像素回到旧快照）→ 必须走 clean→dirty 门标云脏。
       //   旧版只 edits.mark() 不标云脏 → 云端永远收不到 revert，且 clean 快进会无备份吃掉 revert 结果。
       _store.edit(session.name);
       updateSaveStatus();
-      setStatus(`已恢复到本次打开时（${ageMin} 分钟前）`);
+      setStatus(t("tm.revertedToOpen", { min: ageMin }));
     } catch (e) {
-      setStatus("恢复失败：" + errMsg(e), true);
+      setStatus(t("tm.revertFailed", { err: String(errMsg(e)) }), true);
     }
   });
 
@@ -264,7 +265,7 @@ export function initTopbarMenu(ctx: AppContext) {
     setMenuOpen(false);
     board.fitToScreen();
     updateZoomLabel();
-    setStatus("视口已复位");
+    setStatus(t("tm.viewportReset"));
   });
 
   // v109: 撤「笔刷平滑设置」浮动面板 —— 平滑参数 v99 起 per-preset，进 brush settings 调。
@@ -273,10 +274,8 @@ export function initTopbarMenu(ctx: AppContext) {
   els.menuForcePwaReset.addEventListener("click", async () => {
     els.menuPanel?.classList.add("hidden");
     const ok = await openConfirmSheet(
-      "强制清缓存重启？",
-      "会清掉 SW + Cache Storage，强制重新拉所有 JS / CSS。" +
-      "你的画 / 笔架（IDB / OneDrive）不会动。\n" +
-      "用途：PWA 卡老版本，点更新还是老的时候用。",
+      t("tm.forceResetTitle"),
+      t("tm.forceResetBody"),
     );
     if (!ok) return;
     try {
@@ -290,23 +289,23 @@ export function initTopbarMenu(ctx: AppContext) {
         const keys = await caches.keys();
         for (const k of keys) await caches.delete(k).catch(() => {});
       }
-      setStatus("已清缓存，正在硬重载…", true);
+      setStatus(t("tm.cacheClearedReloading"), true);
       setTimeout(() => location.reload(), 200);
     } catch (e) {
-      setStatus("清缓存失败：" + errMsg(e), true);
+      setStatus(t("tm.cacheClearFailed", { err: String(errMsg(e)) }), true);
     }
   });
 
   els.menuResetBrushRack.addEventListener("click", async () => {
     els.menuPanel?.classList.add("hidden");
     const ok = await openConfirmSheet(
-      "重置笔架？",
-      "会删除全部自定义笔刷 + 改过的默认笔，恢复出厂 8 个 brush。不可撤销。",
+      t("tm.resetRackTitle"),
+      t("tm.resetRackBody"),
     );
     if (!ok) return;
     rack.reset(true);   // 恢复出厂 resetAt watermark + 重置 toolStates + persist + applyToolState + bump
     setRackDirty(true);
     if (isSignedIn()) rack.syncCloud();
-    setStatus(`笔架已重置（${rack.get()?.brushes.length} 个 brush）`, true);
+    setStatus(t("tm.rackReset", { count: rack.get()?.brushes.length ?? 0 }), true);
   });
 }

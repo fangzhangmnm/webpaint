@@ -7,6 +7,7 @@
 // 拆分期约定：import { ctx }，在 initFiltersAdjust() 把用到的 core 单例绑进私有 let，函数体逐字搬迁。
 // state.filterBrush 是 active filter-brush 的 SSoT（在 state 上，经绑定的 state 读写）。
 import { els } from "./els.ts";
+import { t } from "./i18n/index.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { getFilter, listFilters, onFilterRegistered } from "./filters.ts";
@@ -89,10 +90,10 @@ function _initFilterSurrogate(L: AdjustLayer) {
 //   切换 = cancel 当前 → reopen 新 filter（同一 picker）。用于"艺术滤镜"组
 function _openFilterPanel(filterId: string, opts: { picker?: FilterLike[] } = {}) {
   const Filter = getFilter(filterId) as FilterLike | undefined;
-  if (!Filter) { setStatus(`未知 filter：${filterId}`, true); return; }
+  if (!Filter) { setStatus(t("mi.unknownFilter", { id: filterId }), true); return; }
   const L = requireEditableLeaf(doc, setStatus) as AdjustLayer | null;   // 组/隐藏 → 标准状态行 + 退出（取代旧的只查 !L）
   if (!L) return;
-  if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus("活动图层是空的", true); return; }
+  if (L.bboxW <= 0 || L.bboxH <= 0) { setStatus(t("mi.activeLayerEmpty"), true); return; }
   // v232 (user：「液化状态下调出色彩平衡，液化没自动关掉」)：filterBrush（液化/锐化模糊）是持久
   // 模式，enterTransient 只捕获 _returnTool、不收它的 toolbar → UI 留着但笔禁用，像坏了。
   // 开任何滤镜面板前先整个退出 filterBrush 模式（收 toolbar / 清 state / 回前一工具）。
@@ -105,13 +106,13 @@ function _openFilterPanel(filterId: string, opts: { picker?: FilterLike[] } = {}
     _rafId: 0,
     picker: opts.picker || null,
   };
-  if (els.adjustPanelTitle) els.adjustPanelTitle.textContent = opts.picker ? "艺术滤镜" : Filter.title;
+  if (els.adjustPanelTitle) els.adjustPanelTitle.textContent = opts.picker ? t("mi.artFilters") : Filter.title;
   els.adjustParamsBody.innerHTML = "";
   // picker 模式：插 dropdown
   if (opts.picker) {
     const wrap = document.createElement("label");
     wrap.className = "brush-slider-row";
-    wrap.innerHTML = `<span class="brush-slider-label">选滤镜</span>`;
+    wrap.innerHTML = `<span class="brush-slider-label">${t("mi.chooseFilter")}</span>`;
     const sel = document.createElement("select");
     sel.style.flex = "1";
     sel.style.font = "inherit";
@@ -178,7 +179,7 @@ function _closeFilterPanel(applied: boolean) {
     L.replaceFromCanvas(_adjustState.sur, L.bboxX, L.bboxY, _adjustState.sur.width, _adjustState.sur.height);
     const after = L.snapshot();
     history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });   // history.push 同步派 wp:histchange → 编辑门已标
-    setStatus(`${_adjustState.Filter.title} 已应用：${L.name}`);
+    setStatus(t("mi.filterApplied", { title: _adjustState.Filter.title, name: L.name }));
   }
   _adjustState = null;
   els.adjustPanel.classList.add("hidden");
@@ -246,7 +247,7 @@ function _renderFilterMenu() {
   // 3) 艺术滤镜（1 picker item）
   if (artistFilters.length > 0) {
     if (groupOpened) addHr();
-    addItem("艺术滤镜", ADJUST_PREFIX_SVG, () => {
+    addItem(t("mi.artFilters"), ADJUST_PREFIX_SVG, () => {
       setAdjustOpen(false);
       _openArtistPicker();
     });
@@ -255,7 +256,7 @@ function _renderFilterMenu() {
 // 艺术滤镜：开 adjust panel，body 顶部加 dropdown 切具体 filter
 function _openArtistPicker() {
   const artist = (listFilters() as FilterLike[]).filter((F) => F.category === "artist");
-  if (artist.length === 0) { setStatus("没有艺术滤镜"); return; }
+  if (artist.length === 0) { setStatus(t("mi.noArtFilters")); return; }
   _openFilterPanel(artist[0].id, { picker: artist });
 }
 
@@ -283,7 +284,7 @@ function _enterFilterBrushMode(Filter: FilterLike) {
   _renderFilterBrushToolbar();
   // v132 (user：「点 filter brush 不要自动弹笔架」) 进入时不开 rack
   //   user 想换笔点 toolbar 的「笔架」button
-  setStatus(`${Filter.title}（笔刷）`);
+  setStatus(t("mi.filterBrushMode", { title: Filter.title }));
 }
 function _exitFilterBrushMode() {
   state.filterBrush = null;
@@ -292,7 +293,7 @@ function _exitFilterBrushMode() {
   closeExclusive();   // 收 rack
   setTool(_filterBrushPreviousTool || "brush");
   _filterBrushPreviousTool = null;
-  setStatus("已退出 filter brush");
+  setStatus(t("mi.exitedFilterBrush"));
 }
 // 渲染 toolbar：title + variant dropdown (if multi) + 退出
 function _renderFilterBrushToolbar() {
@@ -331,7 +332,7 @@ function _renderFilterBrushToolbar() {
       fb.variantLabel = v.title;
       if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = v.id;
       // UI 态不 mark dirty（user 2026-06-10）：variant 选择是工具态，保存时顺手捞；真应用滤镜走 histchange 门。
-      setStatus(`已切 ${v.title}`);
+      setStatus(t("mi.switchedTo", { title: v.title }));
     });
     // 插在 title 后
     title.insertAdjacentElement("afterend", sel);
@@ -344,7 +345,7 @@ function _renderFilterBrushToolbar() {
     bsel.id = "filterBrushBleedSel";
     bsel.className = "crop-toolbar-btn";
     bsel.style.padding = "2px 6px";
-    bsel.title = "选区边界：位移源落到选区外怎么办";
+    bsel.title = t("mi.boundaryTooltip");
     const curBleed = fb.params.bleed || "edge";
     for (const b of Filter.boundaryModes) {
       const opt = document.createElement("option");
@@ -357,7 +358,7 @@ function _renderFilterBrushToolbar() {
       fb.params = { ...fb.params, bleed: bsel.value };
       safeLSSet("webpaint.liquify.bleed", bsel.value);
       const m = Filter.boundaryModes!.find((b) => b.id === bsel.value);
-      setStatus(`边界：${m ? m.title : bsel.value}`);
+      setStatus(t("mi.boundary", { mode: m ? m.title : bsel.value }));
     });
     // 插在 variant select 后（没有 variant 就插 title 后）
     (document.getElementById("filterBrushVariantSel") || title).insertAdjacentElement("afterend", bsel);

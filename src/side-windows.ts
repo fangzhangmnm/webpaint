@@ -4,6 +4,7 @@
 // 构造期的 config 回调只在 user 交互时被 CALL，故引用 module-level let（construct 时为 null，
 //   initSideWindows(ctx) 在任何交互前填好）是安全的。setColor 是稳定 import，无需经 ctx。
 
+import { t } from "./i18n/index.ts";
 import { ReferenceWindow } from "./reference.ts";
 import { PaletteWindow } from "./palette.ts";
 import { els } from "./els.ts";
@@ -107,15 +108,15 @@ export function initSideWindows(ctx: AppContext) {
       _store.edits.mark();
       updateSaveStatus();
       window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
-      setStatus(`参考：${file.name}${fit.scaled ? `（已缩到 ${fit.w}×${fit.h}）` : ""}（会跟当前画一起保存）`);
+      setStatus(t("mi.referenceLoaded", { name: file.name, scaled: fit.scaled ? t("mi.referenceScaled", { w: fit.w, h: fit.h }) : "" }));
     } catch (err) {
-      setStatus("参考图载入失败：" + errMsg(err));
+      setStatus(t("mi.referenceLoadFailed", { err: errMsg(err) }));
     }
   });
   els.referenceLiveBtn.addEventListener("click", () => {
     referenceWindow.toggleLive(doc);
     els.referenceLiveBtn.setAttribute("aria-pressed", referenceWindow.isLive() ? "true" : "false");
-    setStatus(referenceWindow.isLive() ? "参考小窗：实时镜像主画布" : "参考小窗：已退出实时模式");
+    setStatus(referenceWindow.isLive() ? t("mi.referenceLive") : t("mi.referenceLiveExit"));
   });
   els.referenceFitBtn.addEventListener("click", () => referenceWindow.fitToPanel());
 }

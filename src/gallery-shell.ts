@@ -27,6 +27,7 @@ import { stripSessionExt } from "./config.ts";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.ts";
 import { ensureUnlocked } from "./enc-thumbs.ts";
+import { t } from "./i18n/index.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -105,7 +106,7 @@ export async function updateIdbUsage() {
     const sessions = await listSessions();
     let total = 0;
     for (const s of sessions) total += (s.size || 0);
-    let label = `本地占用：${humanSize(total)}（${sessions.length} 件）`;
+    let label = t("gs.footUsage", { size: humanSize(total), count: sessions.length });
     let level = "ok";   // ok | warn | critical
     if (navigator.storage && navigator.storage.estimate) {
       const est = await navigator.storage.estimate();
@@ -113,16 +114,16 @@ export async function updateIdbUsage() {
         const ratio = (est.usage || 0) / est.quota;
         const pct = Math.round(ratio * 100);
         els.galleryFootUsage.title =
-          `浏览器分配上限约 ${humanSize(est.quota)}；当前 ${pct}% 已用（含 SW 缓存等）`;
-        if (ratio > 0.95) { level = "critical"; label += ` · 已用 ${pct}%`; }
-        else if (ratio > 0.8) { level = "warn"; label += ` · 已用 ${pct}%`; }
+          t("gs.footUsageTitle", { size: humanSize(est.quota), pct });
+        if (ratio > 0.95) { level = "critical"; label += t("gs.usedSuffix", { pct }); }
+        else if (ratio > 0.8) { level = "warn"; label += t("gs.usedSuffix", { pct }); }
       }
     }
     els.galleryFootUsage.textContent = label;
     els.galleryFootUsage.classList.toggle("usage-warn", level === "warn");
     els.galleryFootUsage.classList.toggle("usage-critical", level === "critical");
   } catch {
-    els.galleryFootUsage.textContent = "占用：未知";
+    els.galleryFootUsage.textContent = t("gs.usageUnknown");
   }
 }
 
@@ -142,9 +143,9 @@ export async function checkQuotaAndWarn() {
     if (level === _lastQuotaWarnLevel) return;
     _lastQuotaWarnLevel = level;
     if (level === "critical") {
-      setStatus(`本地存储 ${pct}% 已满 — 立即去图库卸载不常用的作品`, true);
+      setStatus(t("gs.quotaCritical", { pct }), true);
     } else if (level === "warn") {
-      setStatus(`本地存储 ${pct}% 已用 — 建议在图库整理`, true);
+      setStatus(t("gs.quotaWarn", { pct }), true);
     }
   } catch {}
 }
@@ -229,7 +230,7 @@ export function initGalleryShell(ctx: AppContext) {
     els.galleryMenuBtn.setAttribute("aria-expanded", hidden ? "true" : "false");
     // 解锁/锁定按钮的标签随锁态（每次开菜单刷一次即可）
     const lockLabel = els.galleryMenuLock?.querySelector(".menu-item-label");
-    if (lockLabel) lockLabel.textContent = isUnlocked() ? "锁定加密作品（忘掉密码）" : "解锁加密作品…";
+    if (lockLabel) lockLabel.textContent = isUnlocked() ? t("gs.lockLabel") : t("gs.unlockLabel");
   });
 
   // 加密作品 解锁/锁定（ADR-0012 统一图库密码；密码只在内存，锁定 = 清掉）
@@ -237,7 +238,7 @@ export function initGalleryShell(ctx: AppContext) {
     els.galleryMenuPopup.classList.add("hidden");
     if (isUnlocked()) {
       lock();
-      setStatus("已锁定加密作品（密码已从内存清除）");
+      setStatus(t("gs.locked"));
       gallery.refresh();
       return;
     }
@@ -246,12 +247,12 @@ export function initGalleryShell(ctx: AppContext) {
     try {
       const enc = (await listSessions()).find((s: { encrypted?: boolean }) => s.encrypted);
       if (enc) {
-        if (await ensureUnlocked(enc.name)) { setStatus("已解锁加密作品（密码只在内存，关页即忘）"); gallery.refresh(); }
+        if (await ensureUnlocked(enc.name)) { setStatus(t("gs.unlocked")); gallery.refresh(); }
         return;
       }
     } catch (_) {}
-    const pw = await promptPassword({ title: "解锁加密作品", message: "本地暂无加密作品可验证——密码先收下，用到时自动验证" });
-    if (pw != null) { setPassword(pw); setStatus("已记下密码（打开加密作品时验证）"); gallery.refresh(); }
+    const pw = await promptPassword({ title: t("gs.unlockTitle"), message: t("gs.unlockNoLocalMsg") });
+    if (pw != null) { setPassword(pw); setStatus(t("gs.pwRecorded")); gallery.refresh(); }
   });
 
   // 加号 → 新建：弹 sheet 选名字 + 分辨率
@@ -273,12 +274,12 @@ export function initGalleryShell(ctx: AppContext) {
     els.galleryAddPopup.classList.add("hidden");
     try {
       const blob = await readImageFromClipboard();
-      if (!blob) { setStatus("剪贴板里没有图片"); return; }
+      if (!blob) { setStatus(t("gs.clipboardNoImage")); return; }
       const file = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
       await importImageAsNewDoc(file);
       setGalleryOpen(false);
     } catch (e) {
-      setStatus("从剪切板新建失败：" + errMsg(e));
+      setStatus(t("gs.clipboardNewFailed", { err: errMsg(e) }));
     }
   });
 
@@ -292,7 +293,7 @@ export function initGalleryShell(ctx: AppContext) {
   els.newDocBackdrop.addEventListener("click", closeNewDocSheet);
   els.newDocCancel.addEventListener("click", closeNewDocSheet);
   els.newDocConfirm.addEventListener("click", async () => {
-    const nameRaw = (els.newDocName.value || "").trim() || "未命名";
+    const nameRaw = (els.newDocName.value || "").trim() || t("gs.untitled");
     let w, h;
     const sel = els.newDocSheet.querySelector("[data-preset][aria-pressed='true']") as HTMLElement | null;
     const presetVal = (sel?.dataset.preset) || "2048x2048";
@@ -308,7 +309,7 @@ export function initGalleryShell(ctx: AppContext) {
     closeNewDocSheet();
     // doc 替换 + 落盘 + 切指针 + checkpoint + 关库全在 session.newDoc（session-state.ts）。
     await session.newDoc({ name, w, h });
-    setStatus(`新建：${name}（${w}×${h}）`);
+    setStatus(t("gs.created", { name, w, h }));
   });
 
   // 图库菜单 popup 内动作代理到主菜单已有 handler（.click() 即触发，不重复逻辑/状态）。
@@ -349,18 +350,18 @@ export function initGalleryShell(ctx: AppContext) {
     els.galleryAddPopup.classList.add("hidden");
     // 文件夹模型「云端真文件夹为准」→ 必须登录+在线才能建（否则无处持久化空文件夹）
     if (!isSignedIn() || navigator.onLine === false) {
-      setStatus("新建文件夹需先登录云端（空文件夹存在 OneDrive 上）", true);
+      setStatus(t("gs.folderNeedSignin"), true);
       return;
     }
-    const stem = await openInputSheet("新建文件夹", "新文件夹", { placeholder: "文件夹名" });
+    const stem = await openInputSheet(t("gs.newFolderTitle"), t("gs.newFolderDefault"), { placeholder: t("gs.folderNamePlaceholder") });
     if (stem == null) return;
     const trimmed = stem.trim();
-    if (!trimmed) { setStatus("文件夹名不能空", true); return; }
-    if (trimmed.includes("/")) { setStatus("文件夹名不能含 /（要建嵌套请进对应文件夹再点新建）", true); return; }
+    if (!trimmed) { setStatus(t("gs.folderNameEmpty"), true); return; }
+    if (trimmed.includes("/")) { setStatus(t("gs.folderNameNoSlash"), true); return; }
     const fullPath = pathJoin(gallery.getFolder(), trimmed);
     // 点确定即刻锁屏（含「已存在」预检的网络往返也在锁内）——修「新建文件夹延迟锁屏 F」。
     //   withBusy 可重入（ref-count），内层 store.flow.newFolder 再包一层 busy 不会提前解锁。
-    await withBusy(`正在创建文件夹 ${trimmed}…`, async () => {
+    await withBusy(t("gs.creatingFolder", { name: trimmed }), async () => {
       // 已存在 check（本地+云的 item 派生 + 云端真文件夹）
       let allNames: string[] = [], cloudFolders: string[] = [];
       try { allNames = allNames.concat((await listSessions()).map((s: { name: string }) => s.name)); } catch {}
@@ -371,10 +372,10 @@ export function initGalleryShell(ctx: AppContext) {
       } catch (e) { console.warn("[folder] cloud list failed:", e); }
       const fullPrefix = `${fullPath}/`;
       const exists = allNames.some((n) => n === fullPath || n.startsWith(fullPrefix)) || cloudFolders.includes(fullPath);
-      if (exists) { setStatus(`文件夹 "${trimmed}" 已存在`, true); return; }
+      if (exists) { setStatus(t("gs.folderExists", { name: trimmed }), true); return; }
       // 走 store.flow.newFolder（深模块窄接口）而非裸 ensureSubfolder——锁屏/单飞守卫由库内强制。
-      try { await _store.flow.newFolder(fullPath, { isOnline: () => isSignedIn() && navigator.onLine !== false }); setStatus(`已建文件夹：${trimmed}`); }
-      catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus("建文件夹失败：" + errMsg(e), true); }
+      try { await _store.flow.newFolder(fullPath, { isOnline: () => isSignedIn() && navigator.onLine !== false }); setStatus(t("gs.folderCreated", { name: trimmed })); }
+      catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus(t("gs.folderCreateFailed", { err: errMsg(e) }), true); }
     });
     gallery.refresh();
   });

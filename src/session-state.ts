@@ -50,6 +50,7 @@ import { setPassword } from "./crypto-state.ts";
 import { els } from "./els.ts";
 import type { AppContext } from "./app-context.ts";
 import type { GalleryItem } from "./gallery-model.ts";
+import { t } from "./i18n/index.ts";
 
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -243,11 +244,10 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
   if (_loadedDocIsNewer && !_loadedDocNewerConfirmed) {
     if (opts.implicit) return;
     const ok = await openConfirmSheet(
-      `覆盖更新版本写的画？`,
-      `这画由 ${_loadedDocWriterVer} 写的，你是 ${WEBPAINT_VERSION}。` +
-      `保存会丢失新版本特有的属性（如新图层 flag 等）。建议先刷新升级。`,
+      t("ss.overwriteNewerTitle"),
+      t("ss.overwriteNewerMsg", { writer: String(_loadedDocWriterVer), version: WEBPAINT_VERSION }),
     );
-    if (!ok) { setStatus("已取消保存"); return; }
+    if (!ok) { setStatus(t("ss.saveCancelled")); return; }
     _loadedDocNewerConfirmed = true;
     updateNewerBanner();
   }
@@ -262,11 +262,11 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
     });
     _store.edits.markSaved();
     _docLastSavedAt = Date.now();
-    setStatus(`已保存：${_activeSessionName}`);
+    setStatus(t("ss.saved", { name: _activeSessionName ?? "" }));
     checkQuotaAndWarn();
   } catch (e) {
     console.warn("[session] save failed:", e);
-    setStatus("保存失败：" + errMsg(e));
+    setStatus(t("ss.saveFailed", { error: errMsg(e) }));
   } finally {
     _store.busy.set("saving", false);
     updateSaveStatus();
@@ -306,8 +306,7 @@ function adoptLoadedDoc(loaded: LoadedDoc, sessionName: string) {
     _loadedDocIsNewer = true;
     _loadedDocWriterVer = loaded._wroteWith ?? null;
     setStatus(
-      `这画由 ${loaded._wroteWith} 写的，你是 ${WEBPAINT_VERSION} —— ` +
-      `编辑保存会丢失新版特有的层属性。建议先刷新升级。`,
+      t("ss.docNewerWarning", { writer: String(loaded._wroteWith), version: WEBPAINT_VERSION }),
       true,
     );
   } else {
@@ -341,12 +340,12 @@ function adoptLoadedDocWithOpts(loaded: LoadedDoc, name: string, opts: AdoptOpts
 async function saveAndPush() {
   if (_store.busy.saving()) return;
   if (_store.busy.pushing()) await _awaitCloudPushIdle();
-  if (!_activeSessionName) { setStatus("没打开作品，无法保存", true); return; }
+  if (!_activeSessionName) { setStatus(t("ss.noDocCannotSave"), true); return; }
   if (_store.edits.localDirty()) await saveNow();
   // R3：「新版本文档」守卫必须也挡 push——saveNow 里用户点了取消只保住了本地；
   //   这里不复查的话 cloud-dirty 仍为真 → 降级字节照样推上云（覆盖的还是更权威的一端）。
   if (_loadedDocIsNewer && !_loadedDocNewerConfirmed && isCloudDirty(_activeSessionName)) {
-    setStatus("未推送：这画由更新版本写成，你取消了覆盖（本地与云端都保持原样）", true);
+    setStatus(t("ss.notPushedNewer"), true);
     return;
   }
   if (_activeSessionName) {
@@ -354,11 +353,11 @@ async function saveAndPush() {
     _writeSessionCheckpoint(_activeSessionName).catch((e) => console.warn("[revert] explicit save checkpoint:", e));
   }
   if (isSignedIn() && navigator.onLine === false && isCloudDirty(_activeSessionName)) {
-    setStatus(`已存本地：${_activeSessionName}（离线，回到在线再 Ctrl+S 推云端）`);
+    setStatus(t("ss.savedLocalOffline", { name: _activeSessionName ?? "" }));
     return;
   }
   if (!(isSignedIn() && isCloudDirty(_activeSessionName))) {
-    if (!isSignedIn() && !_store.edits.localDirty()) setStatus(`已存本地：${_activeSessionName}（IDB 易失，登录云端更安全）`);
+    if (!isSignedIn() && !_store.edits.localDirty()) setStatus(t("ss.savedLocalIdb", { name: _activeSessionName ?? "" }));
     return;
   }
   const sessionName = _activeSessionName;
@@ -370,41 +369,41 @@ async function saveAndPush() {
       encode: () => _encodeCurrentOra(),   // 同步字节不带 viewport（ADR-0016 §6）
       adopt: async (blob: Blob, nm: string) => { const loaded = await decodeOraToDoc(blob) as LoadedDoc; adoptLoadedDoc(loaded, nm); },
       onConflict: async () => await lockSyncGate({
-        title: "云端有更新版本",
-        message: `「${sessionName}」云端已被改过；你本地是 ${getLocalSavedAtLabel()}。`,
+        title: t("ss.cloudNewerTitle"),
+        message: t("ss.cloudNewerMsg", { name: sessionName, savedAt: getLocalSavedAtLabel() }),
         showSpinner: false,
         actions: [
-          { label: "保留本地、暂不推（稍后再决定）", value: "no-op", primary: true },
-          { label: "用云端覆盖本地（我的版本存进 .backup，可恢复）", value: "pull" },
-          { label: "用本地覆盖云端（云端原版存进 .backup，可恢复）", value: "weak-override" },
+          { label: t("ss.keepLocalDefer"), value: "no-op", primary: true },
+          { label: t("ss.overwriteLocalWithCloud"), value: "pull" },
+          { label: t("ss.overwriteCloudWithLocal"), value: "weak-override" },
         ],
       }),
     });
     if (result.status === "conflict") {
       conflictChoice = result.choice;                 // no-op（app 执行）
     } else if (result.status === "resolved" && result.resolution === "pull") {
-      setStatus(`已采用云端版本：${sessionName}（你的版本存进本地 .backup，可恢复）`);
+      setStatus(t("ss.adoptedCloud", { name: sessionName }));
       gallery.refresh();
     } else if (result.status === "resolved" && result.resolution === "weak-override") {
-      setStatus(`已用本地覆盖云端：${sessionName}（云端原版存进 .backup，可恢复）`);
+      setStatus(t("ss.overroteCloud", { name: sessionName }));
       gallery.refresh();
     } else {
       setStatus(result.status === "healed"
-        ? `已同步到云端：${sessionName}（云端本已是这份）`
-        : `已同步到云端：${sessionName}`);
+        ? t("ss.syncedHealed", { name: sessionName })
+        : t("ss.synced", { name: sessionName }));
       gallery.refresh();
     }
   } catch (e) {
     console.warn("[cloud] store push failed:", e);
     if (e instanceof CloudNameCollisionError)
-      setStatus(`云端已有同名「${sessionName}」（不同作品）——已留本地、未覆盖云端，改个名再推`, true);
-    else setStatus("推送失败：" + errMsg(e));
+      setStatus(t("ss.cloudNameCollisionKept", { name: sessionName }), true);
+    else setStatus(t("ss.pushFailed", { error: errMsg(e) }));
   } finally {
     _store.busy.set("pushing", false);
     updateSaveStatus();
   }
   if (conflictChoice === "no-op") {
-    setStatus(`已保留本地，云端未动；下次推会再确认（${sessionName}）`);
+    setStatus(t("ss.keptLocalWillReconfirm", { name: sessionName }));
   }
 }
 
@@ -412,50 +411,50 @@ async function saveAndPush() {
 // 与图库 intent 同 store operator，差别：先 saveNow flush 活 doc 的明文 → flow.encrypt 读它打包换两端。
 // 活动 doc 内存态不动（at-rest 字节变容器，后续 save 自动包壳——透明）。需在线（有云副本时）。
 async function encryptCurrent() {
-  if (!_activeSessionName || _isLazyBlankSession) { setStatus("先打开或保存一张画再加密", true); return; }
+  if (!_activeSessionName || _isLazyBlankSession) { setStatus(t("ss.openOrSaveBeforeEncrypt"), true); return; }
   const online = () => isSignedIn() && navigator.onLine !== false;
-  if (await _store.isEncrypted(_activeSessionName)) { setStatus("已是加密作品"); return; }
+  if (await _store.isEncrypted(_activeSessionName)) { setStatus(t("ss.alreadyEncrypted")); return; }
   const pw = await ensureNewPassword();
-  if (pw == null) { setStatus("已取消"); return; }
+  if (pw == null) { setStatus(t("ss.cancelled")); return; }
   setPassword(pw);
-  await withBusy(`正在加密 ${_activeSessionName}…`, async () => {
+  await withBusy(t("ss.encryptingBusy", { name: _activeSessionName ?? "" }), async () => {
     try {
       await saveNow();   // flush 活 doc 明文 → store 读它打包
       const res = await _store.flow.encrypt(_activeSessionName!, { isOnline: online });
-      if (res.status === "offline") { setStatus("已同步过云端的作品需在线加密", true); return; }
-      if (res.status === "already") { setStatus("已是加密作品"); return; }
+      if (res.status === "offline") { setStatus(t("ss.encryptNeedsOnline"), true); return; }
+      if (res.status === "already") { setStatus(t("ss.alreadyEncrypted")); return; }
       // 清明文残留（旧 checkpoint 明文快照）+ 重写成密文 checkpoint
       try { await setMeta(`revert:${_activeSessionName}:ora`, null); await setMeta(`revert:${_activeSessionName}:at`, null); } catch {}
       await _refreshEncrypted();
       updateSaveStatus();
       setStatus(res.status === "cloud-deferred"
-        ? `已加密（本地完成；云端回线后推）：${_activeSessionName}`
-        : `已加密：${_activeSessionName}（7-Zip 输此密码可恢复；忘记密码内容永久找不回）`,
+        ? t("ss.encryptedDeferred", { name: _activeSessionName ?? "" })
+        : t("ss.encrypted", { name: _activeSessionName ?? "" }),
         res.status === "cloud-deferred");
       gallery?.refresh?.();
-    } catch (e) { setStatus("加密失败：" + errMsg(e), true); }
+    } catch (e) { setStatus(t("ss.encryptFailed", { error: errMsg(e) }), true); }
   });
 }
 async function decryptCurrent() {
-  if (!_activeSessionName) { setStatus("没打开作品", true); return; }
+  if (!_activeSessionName) { setStatus(t("ss.noDocOpen"), true); return; }
   const online = () => isSignedIn() && navigator.onLine !== false;
-  if (!(await _store.isEncrypted(_activeSessionName))) { setStatus("这不是加密作品"); return; }
-  const ok = await openConfirmSheet("解除当前作品的加密？", "内容将以明文存放在本机与云端，任何能访问此设备或云账号的人都能查看。");
+  if (!(await _store.isEncrypted(_activeSessionName))) { setStatus(t("ss.notEncrypted")); return; }
+  const ok = await openConfirmSheet(t("ss.decryptConfirmTitle"), t("ss.decryptConfirmMsg"));
   if (!ok) return;
   // **必须在 withBusy 之前解锁**（密码框会被 busy 遮罩盖住→死锁；flow.decrypt 非交互拿不到密码会返 locked）
-  if (!(await ensureUnlocked(_activeSessionName))) { setStatus("已取消（需要密码）", true); return; }
-  await withBusy(`正在解除加密 ${_activeSessionName}…`, async () => {
+  if (!(await ensureUnlocked(_activeSessionName))) { setStatus(t("ss.cancelledNeedPassword"), true); return; }
+  await withBusy(t("ss.decryptingBusy", { name: _activeSessionName ?? "" }), async () => {
     try {
       if (_store.edits.localDirty()) await saveNow();
       const res = await _store.flow.decrypt(_activeSessionName!, { isOnline: online });
-      if (res.status === "offline") { setStatus("已同步过云端的作品需在线解除加密", true); return; }
-      if (res.status === "locked") { setStatus("已取消（需要密码）", true); return; }
-      if (res.status === "not-encrypted") { setStatus("这不是加密作品"); return; }
+      if (res.status === "offline") { setStatus(t("ss.decryptNeedsOnline"), true); return; }
+      if (res.status === "locked") { setStatus(t("ss.cancelledNeedPassword"), true); return; }
+      if (res.status === "not-encrypted") { setStatus(t("ss.notEncrypted")); return; }
       await _refreshEncrypted();
       updateSaveStatus();
-      setStatus(`已解除加密：${_activeSessionName}`);
+      setStatus(t("ss.decrypted", { name: _activeSessionName ?? "" }));
       gallery?.refresh?.();
-    } catch (e) { setStatus("解除加密失败：" + errMsg(e), true); }
+    } catch (e) { setStatus(t("ss.decryptFailed", { error: errMsg(e) }), true); }
   });
 }
 
@@ -464,7 +463,7 @@ async function decryptCurrent() {
 let showFullscreenBusy: AppContext["showFullscreenBusy"], hideFullscreenBusy: AppContext["hideFullscreenBusy"];
 async function _awaitCloudPushIdle() {
   if (!_store.busy.pushing()) return;
-  showFullscreenBusy("正在同步到云端…");
+  showFullscreenBusy(t("ss.syncingToCloud"));
   try { await _store.busy.whenPushIdle(); } finally { hideFullscreenBusy(); }
 }
 
@@ -475,17 +474,17 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
   let candidate = suggested || oldName;
   let note = "";   // v267：把上一轮的错误（重名/空名）写进重弹标题，保证用户看得到
   while (true) {
-    const title = note ? `重命名（${note}）` : (reason ? `重命名（${reason}）` : "重命名当前画作");
-    const input2 = await openInputSheet(title, candidate, { placeholder: "作品名字" });
+    const title = note ? t("ss.renameTitleWith", { detail: note }) : (reason ? t("ss.renameTitleWith", { detail: reason }) : t("ss.renameTitle"));
+    const input2 = await openInputSheet(title, candidate, { placeholder: t("ss.artworkNamePlaceholder") });
     if (input2 === null) return null;
     const trimmed = input2.trim();
-    if (!trimmed) { note = "名字不能空"; candidate = ""; continue; }
+    if (!trimmed) { note = t("ss.nameCannotBeEmpty"); candidate = ""; continue; }
     if (trimmed === oldName) return oldName;       // 没改 = 等于成功
     // 锁屏从**确认即开始**，把冲突检查（await listSessions，可能慢）也包进来——否则确认到锁屏
     // 之间有空窗，用户以为「点了没反应、过一会才锁」。冲突 → 退出锁屏后重新弹名字（continue）。
     // 锁屏跑改名（编码 ora + 云端 move/push + 本地存+渲 thumb 都重），与 sibling 深模块 op 对齐；
     // store 现在内部也对 rename 强制 busy（可重入），这里外层 busy 只是为了覆盖冲突检查那段 await。
-    const outcome: { conflict?: boolean; ok?: boolean; error?: boolean } = await withBusy(`正在重命名 ${oldName} → ${trimmed}…`, async () => {
+    const outcome: { conflict?: boolean; ok?: boolean; error?: boolean } = await withBusy(t("ss.renamingBusy", { oldName, newName: trimmed }), async () => {
       if (await sessionNameConflict(trimmed)) return { conflict: true };   // 本地查（共用 helper）；rename 不预检云端（store.flow.rename 管云端 move）
       try {
         const cloudOn = isSignedIn() && navigator.onLine !== false;
@@ -499,19 +498,19 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
         _store.edits.markSaved();
         _docLastSavedAt = Date.now();
         updateSaveStatus();
-        if (!cloudOn) setStatus(`已重命名：${oldName} → ${trimmed}`);
-        else if (res.cloudDeferred) setStatus(`已重命名（仅本地）：${oldName} → ${trimmed}（云端稍后 Ctrl+S 推）`);
-        else setStatus(`已重命名（含云端）：${oldName} → ${trimmed}`);
+        if (!cloudOn) setStatus(t("ss.renamed", { oldName, newName: trimmed }));
+        else if (res.cloudDeferred) setStatus(t("ss.renamedLocalOnly", { oldName, newName: trimmed }));
+        else setStatus(t("ss.renamedWithCloud", { oldName, newName: trimmed }));
         gallery.refresh();
         return { ok: true };
       } catch (e) {
-        setStatus("重命名失败：" + errMsg(e));
+        setStatus(t("ss.renameFailed", { error: errMsg(e) }));
         return { error: true };
       }
     });
     if (outcome.conflict) {
-      setStatus(`本地已有同名 "${trimmed}"，换一个`, true);
-      note = `已有同名 "${trimmed}"，换一个`;
+      setStatus(t("ss.localNameTakenStatus", { name: trimmed }), true);
+      note = t("ss.nameTakenNote", { name: trimmed });
       candidate = trimmed;
       continue;
     }
@@ -522,7 +521,7 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
 // ---- _exitCanvasToGallery → exit()（verbatim）----
 async function exitCanvasToGallery() {
   if (_activeSessionName) {
-    await withBusy(`正在保存 ${_activeSessionName}…`, async () => {
+    await withBusy(t("ss.savingBusy", { name: _activeSessionName ?? "" }), async () => {
       try { await saveAndPush(); } catch (e) { console.warn("[exit-to-gallery] save failed:", e); }
     });
     // K2（审计 2026-06-10）：本地落盘没成（保存失败 / 用户取消了新版本覆盖）时**不无条件宣布干净**——
@@ -530,16 +529,16 @@ async function exitCanvasToGallery() {
     //   现在显式问：重试 / 仍要退出（丢弃）。只有用户亲口选丢才丢。
     while (_store.edits.localDirty() && !_docIsBlankUnnamed()) {
       const choice = await lockSyncGate({
-        title: "本地保存未完成",
-        message: `「${_activeSessionName}」的修改还没写进本地存储（保存失败或被取消）。直接退出会丢这些修改。`,
+        title: t("ss.localSaveIncompleteTitle"),
+        message: t("ss.localSaveIncompleteMsg", { name: _activeSessionName ?? "" }),
         showSpinner: false,
         actions: [
-          { label: "重试保存", value: "retry", primary: true },
-          { label: "仍要退出（丢弃本次修改）", value: "discard" },
+          { label: t("ss.retrySave"), value: "retry", primary: true },
+          { label: t("ss.exitDiscard"), value: "discard" },
         ],
       });
       if (choice !== "retry") break;
-      await withBusy(`正在保存 ${_activeSessionName}…`, async () => {
+      await withBusy(t("ss.savingBusy", { name: _activeSessionName ?? "" }), async () => {
         try { await saveAndPush(); } catch (e) { console.warn("[exit-to-gallery] retry failed:", e); }
       });
     }
@@ -594,22 +593,22 @@ async function pullCloudPath(path: string) {
   // 加密容器云端名 = .zip（约定）。拉取前先在 busy 外解锁（验证用云端 peek byte-range）——
   //   acquire 内部 adopt 会 unseal，密码不在内存会抛 LOCKED；且 busy 起来后弹密码框死锁。
   if (/\.zip$/i.test(String(path))) {
-    if (!(await ensureUnlocked(cloudName))) { setStatus("未拉取：需要密码解锁（已取消）", true); return; }
+    if (!(await ensureUnlocked(cloudName))) { setStatus(t("ss.notPulledNeedPassword"), true); return; }
   }
-  showFullscreenBusy(`正在从云端拉取…`);
+  showFullscreenBusy(t("ss.pullingFromCloudBusy"));
   try {
     const localName = await uniqueLocalName(cloudName);
     const res = await _store.flow.acquire(cloudName, {
       localName,
       adopt: async (blob: Blob, nm: string) => { const loaded = await decodeOraToDoc(blob) as LoadedDoc; adoptLoadedDoc(loaded, nm); },
     });
-    if (res.status === "absent") { setStatus(`找不到：${path}`); return; }
+    if (res.status === "absent") { setStatus(t("ss.notFound", { name: path })); return; }
     setGalleryOpen(false);
-    setStatus(`已打开：${res.localName}（从云端拉取）`);
+    setStatus(t("ss.openedFromCloud", { name: res.localName ?? "" }));
     gateCloudSyncOnOpen(res.localName!).catch((e: unknown) => console.warn("[sync-gate]", e));   // res.status≠"absent" → localName 必有（store flow 结果类型仍标 optional）
   } catch (err) {
     console.warn("[cloud] pull failed:", err);
-    setStatus("拉取失败：" + errMsg(err));
+    setStatus(t("ss.pullFailed", { error: errMsg(err) }));
   } finally {
     hideFullscreenBusy();
   }
@@ -625,29 +624,29 @@ async function openItem(item: GalleryItem) {
       // 在这里（非 busy）ensureUnlocked 后重 load。openItem 不在 withBusy 内，弹密码框安全。
       let r = await _store.flow.load(item.name);
       if (r.status === "locked") {
-        if (!(await ensureUnlocked(item.name))) { setStatus("未打开：需要密码解锁（已取消）", true); return; }
+        if (!(await ensureUnlocked(item.name))) { setStatus(t("ss.notOpenedNeedPasswordCancelled"), true); return; }
         r = await _store.flow.load(item.name);
       }
-      if (r.status === "absent") { setStatus(`找不到：${item.name}`); return; }
-      if (r.status === "locked") { setStatus("未打开：需要密码解锁", true); return; }
+      if (r.status === "absent") { setStatus(t("ss.notFound", { name: item.name })); return; }
+      if (r.status === "locked") { setStatus(t("ss.notOpenedNeedPassword"), true); return; }
       const loaded: LoadedDoc = await decodeOraToDoc(r.blob!) as LoadedDoc;
       adoptLoadedDoc(loaded, item.name);
       setGalleryOpen(false);
-      setStatus(`已打开：${item.name}`);
+      setStatus(t("ss.opened", { name: item.name }));
       gateCloudSyncOnOpen(item.name).catch((e: unknown) => console.warn("[sync-gate]", e));
     } else if (item.cloud) {
-      setStatus(`正在拉取：${item.name}…`);
+      setStatus(t("ss.pulling", { name: item.name }));
       await pullCloudPath(item.cloud.path);   // 自带 busy + adopt + 关库
     }
-  } catch (err) { setStatus("打开失败：" + errMsg(err)); }
+  } catch (err) { setStatus(t("ss.openFailed", { error: errMsg(err) })); }
 }
 
 async function pushItem(item: GalleryItem) {
   // 加密文件先在 busy 外解锁（push 内 load 要解壳；密码框不能在 busy 里弹）
   if (await _store.isEncrypted(item.name)) {
-    if (!(await ensureUnlocked(item.name))) { setStatus("未推送：需要密码解锁（已取消）", true); return; }
+    if (!(await ensureUnlocked(item.name))) { setStatus(t("ss.notPushedNeedPassword"), true); return; }
   }
-  await withBusy(`正在推送 ${item.name} 到云端…`, async () => {
+  await withBusy(t("ss.pushingToCloudBusy", { name: item.name }), async () => {
     try {
       const r = await _store.flow.load(item.name);   // 解壳读取（密码已在内存）
       if (r.status === "absent") throw new Error("找不到本地 session");
@@ -658,12 +657,12 @@ async function pushItem(item: GalleryItem) {
         encode: () => encodeDocToOra(loaded, { referenceImage: loaded._referenceBlob, webpaintState: loaded._webpaintState } as Parameters<typeof encodeDocToOra>[1]) as Promise<Blob>,
         onConflict: async () => "keep",
       });
-      if (res.status === "conflict") setStatus(`云端有更新版本：${item.name}（打开处理 / 先改名）`, true);
-      else setStatus(`已推送：${item.name}`);
+      if (res.status === "conflict") setStatus(t("ss.cloudNewerConflict", { name: item.name }), true);
+      else setStatus(t("ss.pushed", { name: item.name }));
     } catch (err) {
-      if (err instanceof CloudNameCollisionError) setStatus(`云端已有同名「${item.name}」（不同作品）——未覆盖，改名再推`, true);
-      else if (err instanceof CloudConflictError) setStatus(`云端冲突：${item.name}（打开处理）`, true);
-      else setStatus("推送失败：" + errMsg(err));
+      if (err instanceof CloudNameCollisionError) setStatus(t("ss.cloudNameCollisionNotOverwritten", { name: item.name }), true);
+      else if (err instanceof CloudConflictError) setStatus(t("ss.cloudConflict", { name: item.name }), true);
+      else setStatus(t("ss.pushFailed", { error: errMsg(err) }));
     }
   });
 }
@@ -671,15 +670,15 @@ async function pushItem(item: GalleryItem) {
 async function unloadItem(item: GalleryItem) {
   const isActive = item.name === _activeSessionName;
   if (isCloudDirty(item.name)) {
-    const ok = await openConfirmSheet(`卸载本地 "${item.name}"？`, "本地有未推送到云端的修改——会移进**本地回收站**（可恢复）。云端保留旧版本。");
+    const ok = await openConfirmSheet(t("ss.unloadConfirmTitle", { name: item.name }), t("ss.unloadConfirmMsg"));
     if (!ok) return;
   }
-  await withBusy(`正在卸载本地 ${item.name}…`, async () => {
+  await withBusy(t("ss.unloadingBusy", { name: item.name }), async () => {
     // K3（审计 2026-06-10）：进本地回收站而非硬删（红线「删除=移到.trash」——dirty 的未推字节可救回）。
     //   清同步态：① dirty 残留会让 cloud-only 项挂假「未推」徽章；② 残留 etag 是 K6 类
     //   「saveAs/rename 拿受害者 etag 当 If-Match 静默覆盖」的使能条件。
-    try { await trashSession(item.name); clearCloudState(item.name); if (isActive) await exitCanvasToGallery(); setStatus(`已卸载本地：${item.name}（修改在本地回收站，云端保留）`); }
-    catch (err) { setStatus("卸载失败：" + errMsg(err)); }
+    try { await trashSession(item.name); clearCloudState(item.name); if (isActive) await exitCanvasToGallery(); setStatus(t("ss.unloaded", { name: item.name })); }
+    catch (err) { setStatus(t("ss.unloadFailed", { error: errMsg(err) })); }
   });
 }
 

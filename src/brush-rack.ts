@@ -23,9 +23,10 @@ import { exportBrush, exportRackFolder, buildRackCode, shareOrDownloadJSON } fro
 import type { Brush, BrushRackData } from "./brush-types.ts";
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
 import type { EditMode } from "./edit-mode.ts";
+import { t } from "./i18n/index.ts";
 
 const RACK_META_KEY = "brush-rack";
-const TOOL_LABEL: Record<string, string> = { brush: "笔刷", eraser: "橡皮" };
+const TOOL_LABEL: Record<string, string> = { brush: t("br.toolBrush"), eraser: t("br.toolEraser") };
 
 // 笔架同步编排句柄（folder-sync store；诚实描述本类调到的成员）。
 interface RackSyncResult {
@@ -195,8 +196,8 @@ export class BrushRack {
     const I = this.d.icons;
     const ICON: Record<string, string> = { synced: I.check, busy: I.busy, dirty: I.upload, offline: I.disk, "no-auth": I.disk };
     const TITLE: Record<string, string> = {
-      synced: "笔架 已同步云端", busy: "笔架 上传中…", dirty: "笔架 待推 — 点推送",
-      offline: "笔架 离线 — 仅本地", "no-auth": "笔架 未登录 — 登 OneDrive 自动同步",
+      synced: t("br.cloudSynced"), busy: t("br.cloudBusy"), dirty: t("br.cloudDirty"),
+      offline: t("br.cloudOffline"), "no-auth": t("br.cloudNoAuth"),
     };
     btn.innerHTML = ICON[this._cloudState] || ICON.synced;
     btn.title = TITLE[this._cloudState] || "";
@@ -214,7 +215,7 @@ export class BrushRack {
     this.ui.tool = tool;
     const folders = collectFolders(brushesByTool(this._rack, this.getRackToolKey(tool)), DEFAULT_FOLDER);
     if (!folders.includes(this.ui.folder)) this.ui.folder = folders[0] || DEFAULT_FOLDER;
-    this.d.els.rack.title.textContent = `笔架 · ${TOOL_LABEL[tool] || tool}`;
+    this.d.els.rack.title.textContent = t("br.rackTitle", { tool: TOOL_LABEL[tool] || tool });
     this.d.els.rack.sheet.classList.remove("hidden");
     this.refreshCloudState();
   }
@@ -278,7 +279,7 @@ export class BrushRack {
         this.selectBrushPresetForTool(targetTool, draft.id);
       }
       this.d.dialReactive.rackVersion++;
-      this.d.setStatus(`已保存：${draft.name}`);
+      this.d.setStatus(t("br.saved", { name: draft.name }));
     }
     this._editingId = null;
     this._editingDraft = null;
@@ -288,7 +289,7 @@ export class BrushRack {
   async deleteEditingBrush() {
     const b = this._editingDraft;
     if (!b) return;
-    if (!(await this.d.confirm("删除这支笔？", `「${b.name}」（不可撤销）`))) return;
+    if (!(await this.d.confirm(t("br.deleteBrushTitle"), t("br.deleteBrushMsg", { name: b.name })))) return;
     const rack = this._rack!;
     const idx = rack.brushes.findIndex((x) => x.id === this._editingId);
     if (idx >= 0) {
@@ -302,7 +303,7 @@ export class BrushRack {
     this._editingDraft = null;
     this._settingsUI!.close();
     this.d.els.settings.view.classList.add("hidden");
-    this.d.setStatus("已删除");
+    this.d.setStatus(t("br.deleted"));
   }
 
   // ---- 装配：mount sheet/settings 组件 + rackStore.configure + 注册 panel + 绑 DOM 事件 ----
@@ -320,7 +321,7 @@ export class BrushRack {
       onSelectFolder: (f: string) => { this.ui.folder = f; },
       onSelectBrush: (id: string) => { this.selectBrushPresetForTool(this.ui.tool, id); this.d.closeExclusive(); },
       onEditBrush: (id: string) => { this.d.closeExclusive(); this.openBrushSettings(id); },
-      onReset: () => { this.reset(false); this.d.setStatus(`已恢复默认笔架（${this._rack!.brushes.length} 个）`, true); },
+      onReset: () => { this.reset(false); this.d.setStatus(t("br.rackRestored", { n: this._rack!.brushes.length }), true); },
     });
 
     // brush-settings 编辑器 Vue 组件
@@ -343,9 +344,9 @@ export class BrushRack {
           this.applyToolState(this.d.editMode().current());
           this.d.dialReactive.rackVersion++;
         }
-        if (res.status === "synced") this.d.setStatus("笔架已同步到云端");
-        else if (res.status === "invalid") this.d.setStatus("笔架云端数据异常，已留待重试", true);
-        else if (res.status === "dirty") { console.warn("[brush-rack sync]", res.error); this.d.setStatus("笔架同步失败，已留待重试", true); }
+        if (res.status === "synced") this.d.setStatus(t("br.syncedToCloud"));
+        else if (res.status === "invalid") this.d.setStatus(t("br.syncInvalid"), true);
+        else if (res.status === "dirty") { console.warn("[brush-rack sync]", res.error); this.d.setStatus(t("br.syncFailed"), true); }
       },
     });
 
@@ -367,24 +368,24 @@ export class BrushRack {
     if (els.exportFolderBtn) els.exportFolderBtn.addEventListener("click", async () => {
       if (!this._rack) return;
       const n = await exportRackFolder(this._rack, this.ui.tool, this.ui.folder);
-      this.d.setStatus(n ? `已导出文件夹「${this.ui.folder}」（${n} 笔）` : "本文件夹是空的", !n);
+      this.d.setStatus(n ? t("br.folderExported", { folder: this.ui.folder, n }) : t("br.folderEmpty"), !n);
     });
     if (els.cloudPushBtn) els.cloudPushBtn.addEventListener("click", async () => {
-      if (!this.d.isSignedIn()) { this.d.setStatus("请先登录云端账号", true); return; }
-      this.d.setStatus("正在同步笔架…");
+      if (!this.d.isSignedIn()) { this.d.setStatus(t("br.pleaseSignIn"), true); return; }
+      this.d.setStatus(t("br.syncing"));
       await this.syncCloud();
     });
     if (els.resetBtn) els.resetBtn.addEventListener("click", async () => {
-      if (!(await this.d.confirm("重置笔架？", "会删除全部自定义笔刷 + 改过的默认笔，恢复出厂默认。不可撤销。"))) return;
+      if (!(await this.d.confirm(t("br.resetRackTitle"), t("br.resetRackMsg")))) return;
       this.reset(true);
       this.d.setRackDirty(true);
       if (this.d.isSignedIn()) this.syncCloud();
-      this.d.setStatus(`笔架已重置（${this._rack!.brushes.length} 个 brush）`, true);
+      this.d.setStatus(t("br.rackReset", { n: this._rack!.brushes.length }), true);
     });
     if (els.dumpCodeBtn) els.dumpCodeBtn.addEventListener("click", async () => {
       if (!this._rack) return;
       await shareOrDownloadJSON(new Blob([buildRackCode(this._rack)], { type: "text/javascript" }), "default-brushes.js", "笔架代码");
-      this.d.setStatus(`已导出 ${this._rack.brushes.length} 笔的代码文件`);
+      this.d.setStatus(t("br.codeExported", { n: this._rack.brushes.length }));
     });
   }
 
@@ -432,8 +433,8 @@ export class BrushRack {
         b.uat = Date.now();
         this._rack!.brushes.push(b);
         this.markChanged();
-        this.d.setStatus(`已导入：${b.name}`);
-      } catch (e) { this.d.setStatus("导入失败：" + String((e as { message?: unknown })?.message || e), true); }
+        this.d.setStatus(t("br.imported", { name: b.name }));
+      } catch (e) { this.d.setStatus(t("br.importFailed", { error: String((e as { message?: unknown })?.message || e) }), true); }
       document.body.removeChild(inp);
     });
     document.body.appendChild(inp);

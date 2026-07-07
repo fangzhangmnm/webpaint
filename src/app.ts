@@ -77,7 +77,7 @@ import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, setLastSessi
 // 加密（ADR-0012）：密码弹窗接线 —— crypto-state 无 DOM，composition root 把 in-app
 // 输入 sheet 注入进去（守「无系统对话框」红线）。必须在任何 decode 之前（boot load 可能是加密作品）。
 setPasswordPrompt(({ title, message }) =>
-  openInputSheet(title || "输入密码", "", { placeholder: "图库密码", password: true, message: message || "" }));
+  openInputSheet(title || t("mi.enterPassword"), "", { placeholder: t("mi.galleryPassword"), password: true, message: message || "" }));
 
 // 触屏检测（iPad / iPhone / surface touchscreen）→ hand 工具隐藏（双指 pan 已足）
 if (navigator.maxTouchPoints > 0) {
@@ -90,7 +90,7 @@ els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
 els.versionLabel.textContent = t("menu.version", { v: WEBPAINT_VERSION || "?" });   // 挪到「强制更新」旁的菜单信息行
 // gallery 也显版本号（footer 水印 + 菜单信息行）——配合「强制更新」让用户知道自己在哪个版本。
 if (els.galleryFootVersion) els.galleryFootVersion.textContent = WEBPAINT_VERSION || "?";
-if (els.galleryMenuVersion) els.galleryMenuVersion.textContent = `版本：${WEBPAINT_VERSION || "?"}`;
+if (els.galleryMenuVersion) els.galleryMenuVersion.textContent = t("menu.version", { v: WEBPAINT_VERSION || "?" });
 
 // 编辑器「当前设成什么样」的反应式 RAM SSoT（主色 / 每工具 dial / 压感开关 / 棋盘等）= editor-state.ts。
 // 当前笔（currentBrush computed）从这束 dial + 笔架预设纯派生（见下，组合接线留 app）。
@@ -304,10 +304,10 @@ const gallery = mountGallery(document.getElementById("galleryMount")!, {
   signedIn: () => isSignedIn(),
   online: () => navigator.onLine !== false,
   activeName: () => session.name,
-  confirm: (t, m) => openConfirmSheet(t, m),
-  input: (t, d, o) => openInputSheet(t, d, o),
+  confirm: (title, m) => openConfirmSheet(title, m),
+  input: (title, d, o) => openInputSheet(title, d, o),
   chooseFolder: async (title, message, options) => {
-    const v = await lockSyncGate({ title, message, showSpinner: false, actions: [...options, { label: "✕ 取消", value: "__cancel__" }] });
+    const v = await lockSyncGate({ title, message, showSpinner: false, actions: [...options, { label: "✕ " + t("common.cancel"), value: "__cancel__" }] });
     return (v == null || v === "__cancel__") ? null : v;
   },
   status: (m, e) => setStatus(m, e),

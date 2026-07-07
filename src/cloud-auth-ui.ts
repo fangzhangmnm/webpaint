@@ -8,6 +8,7 @@
 // auth 是公共面：直接 import 自 app-store.js。setStatus / updateSaveStatus / gallery
 // 经 ctx 注册表晚绑（拆分期权宜）。
 
+import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
 import {
@@ -30,9 +31,9 @@ export function updateCloudAuthUI() {
     const acc = getActiveAccount();
     els.cloudIconBtn.innerHTML = ICON_CLOUD_IN;
     els.cloudIconBtn.dataset.cloudState = "signedin";
-    const who = acc?.username || acc?.name || "已登录";
-    els.cloudIconBtn.title = offline ? `云端：${who}（离线，无法推 / 拉）` : `云端：${who}（点开账号菜单）`;
-    els.cloudAccountInfo.textContent = offline ? `云端：${who}（离线）` : `云端：${who}`;
+    const who = acc?.username || acc?.name || t("cf.signedIn");
+    els.cloudIconBtn.title = offline ? t("cf.cloudAccountOfflineTitle", { who }) : t("cf.cloudAccountTitle", { who });
+    els.cloudAccountInfo.textContent = offline ? t("cf.cloudAccountOfflineInfo", { who }) : t("cf.cloudAccountInfo", { who });
     els.cloudSignInBtn.classList.add("hidden");
     els.cloudSignOutBtn.classList.remove("hidden");
     els.cloudRefreshBtn.classList.toggle("hidden", offline);   // 离线时藏刷新（按了没意义）
@@ -40,11 +41,11 @@ export function updateCloudAuthUI() {
     els.cloudIconBtn.innerHTML = ICON_CLOUD_OUT;
     els.cloudIconBtn.dataset.cloudState = configured ? "out" : "unconfigured";
     if (offline && configured) {
-      els.cloudIconBtn.title = "云端：离线（无法登录 / 同步；本地图库正常）";
-      els.cloudAccountInfo.textContent = "云端：离线";
+      els.cloudIconBtn.title = t("cf.cloudOfflineTitle");
+      els.cloudAccountInfo.textContent = t("cf.cloudOffline");
     } else {
-      els.cloudIconBtn.title = configured ? "云端：未登录（点开登录）" : "云端：未配置";
-      els.cloudAccountInfo.textContent = configured ? "云端：未登录" : "云端：未配置";
+      els.cloudIconBtn.title = configured ? t("cf.cloudNotSignedInTitle") : t("cf.cloudNotConfigured");
+      els.cloudAccountInfo.textContent = configured ? t("cf.cloudNotSignedIn") : t("cf.cloudNotConfigured");
     }
     els.cloudSignInBtn.classList.toggle("hidden", !configured || offline);    // 离线时登录按钮无意义
     els.cloudSignOutBtn.classList.add("hidden");
@@ -61,8 +62,8 @@ export function initCloudAuthUI(ctx: AppContext) {
 
   els.cloudSignInBtn.addEventListener("click", async () => {
     els.cloudAccountPopup.classList.add("hidden");
-    if (!isAuthConfigured()) { setStatus("尚未配置 OneDrive 客户端"); return; }
-    try { await signIn(); setLastSessionSignedIn(true); } catch (e) { setStatus("登录失败：" + String((e as Error)?.message || e)); }
+    if (!isAuthConfigured()) { setStatus(t("cf.notConfiguredClient")); return; }
+    try { await signIn(); setLastSessionSignedIn(true); } catch (e) { setStatus(t("cf.signInFailed", { err: String((e as Error)?.message || e) })); }
   });
   els.cloudSignOutBtn.addEventListener("click", async () => {
     els.cloudAccountPopup.classList.add("hidden");

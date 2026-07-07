@@ -7,6 +7,7 @@
 import { els } from "./els.ts";
 import { renderLayersPanel } from "./layers-panel.ts";
 import { applyPixelSnap } from "./pixel-edit.ts";
+import { t, type Key } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
 import type { Layer } from "./doc.ts";
 
@@ -40,13 +41,13 @@ export function initLayerUndo(ctx: AppContext) {
       doc.removeLayer(e.layerSpec.id);
       if (e.prevActiveId != null) doc.setActiveById(e.prevActiveId);   // 回到创建前的活动层（不误导）
       _afterDocChange();
-      setStatus(`已撤销创建图层「${e.layerSpec.name || ""}」`);
+      setStatus(t("se.undoCreateLayer", { name: e.layerSpec.name || "" }));
     },
     redo: (e: UndoEntry) => {
       doc.insertLayerAt(e.index, e.layerSpec, e.parentId ?? null);
       doc.setActiveById(e.layerSpec.id);
       _afterDocChange();
-      setStatus(`已恢复图层「${e.layerSpec.name || ""}」`);
+      setStatus(t("se.restoredLayer", { name: e.layerSpec.name || "" }));
     },
     refsLayer: (e: UndoEntry, id: number) => e.layerSpec.id === id,
   });
@@ -67,12 +68,12 @@ export function initLayerUndo(ctx: AppContext) {
       }
       doc.setActiveById(spec.id);
       _afterDocChange();
-      setStatus(`已恢复图层「${spec.name || ""}」`);
+      setStatus(t("se.restoredLayer", { name: spec.name || "" }));
     },
     redo: (e: UndoEntry) => {
       doc.removeLayer(e.layerSpec.id);
       _afterDocChange();
-      setStatus(`已删除图层「${e.layerSpec.name || ""}」`);
+      setStatus(t("se.deletedLayer", { name: e.layerSpec.name || "" }));
     },
     refsLayer: (e: UndoEntry, id: number) => e.layerSpec.id === id,
   });
@@ -99,7 +100,7 @@ export function initLayerUndo(ctx: AppContext) {
       }
       doc.setActiveById(spec.id);
       _afterDocChange();
-      setStatus(`已撤销合并 · 恢复「${spec.name || ""}」`);
+      setStatus(t("se.undoMergeRestore", { name: spec.name || "" }));
     },
     redo: (e: UndoEntry) => {
       const under = doc.findLayer(e.underId);
@@ -112,7 +113,7 @@ export function initLayerUndo(ctx: AppContext) {
       doc.removeLayer(e.activeSpec.id);
       doc.setActiveById(e.underId);
       _afterDocChange();
-      setStatus("已向下合并");
+      setStatus(t("se.mergedDown"));
     },
     refsLayer: (e: UndoEntry, id: number) => e.underId === id || e.activeSpec.id === id,
   });
@@ -122,13 +123,13 @@ export function initLayerUndo(ctx: AppContext) {
       doc.moveLayer(e.layerId, -e.delta);
       _afterDocChange();
       const L = doc.findLayer(e.layerId);
-      setStatus(`图层「${L?.name || ""}」移回原位`);
+      setStatus(t("se.layerMovedBack", { name: L?.name || "" }));
     },
     redo: (e: UndoEntry) => {
       doc.moveLayer(e.layerId, e.delta);
       _afterDocChange();
       const L = doc.findLayer(e.layerId);
-      setStatus(`图层「${L?.name || ""}」已移动`);
+      setStatus(t("se.layerMoved", { name: L?.name || "" }));
     },
     refsLayer: (e: UndoEntry, id: number) => e.layerId === id,
   });
@@ -144,24 +145,25 @@ export function initLayerUndo(ctx: AppContext) {
   history.registerHandler("renameLayer", {
     undo: (e: UndoEntry) => {
       const L = doc.findLayer(e.layerId);
-      if (L) { L.name = e.oldName; renderLayersPanel(); setStatus(`图层名还原「${e.oldName}」`); }
+      if (L) { L.name = e.oldName; renderLayersPanel(); setStatus(t("se.layerNameRestored", { name: e.oldName })); }
     },
     redo: (e: UndoEntry) => {
       const L = doc.findLayer(e.layerId);
-      if (L) { L.name = e.newName; renderLayersPanel(); setStatus(`图层重命名「${e.newName}」`); }
+      if (L) { L.name = e.newName; renderLayersPanel(); setStatus(t("se.layerRenamed", { name: e.newName })); }
     },
     refsLayer: (e: UndoEntry, id: number) => e.layerId === id,
   });
   // setLayerProp：visibility / opacity / mode
-  const _LP_LABEL: Record<string, string> = { visible: "可见", opacity: "不透明度", mode: "混合", clippingMask: "剪裁", lockAlpha: "锁定不透明度" };
+  const _LP_LABEL: Record<string, Key> = { visible: "se.propVisible", opacity: "se.propOpacity", mode: "se.propMode", clippingMask: "se.propClipping", lockAlpha: "se.propLockAlpha" };
+  const _lpLabel = (prop: string): string => (_LP_LABEL[prop] ? t(_LP_LABEL[prop]) : prop);
   history.registerHandler("setLayerProp", {
     undo: (e: UndoEntry) => {
       const L = doc.findLayer(e.layerId);
-      if (L) { (L as unknown as Record<string, unknown>)[e.prop as string] = e.oldVal; _afterDocChange(); setStatus(`「${L.name}」${_LP_LABEL[e.prop] || e.prop} 已还原`); }
+      if (L) { (L as unknown as Record<string, unknown>)[e.prop as string] = e.oldVal; _afterDocChange(); setStatus(t("se.propRestored", { name: L.name, prop: _lpLabel(e.prop) })); }
     },
     redo: (e: UndoEntry) => {
       const L = doc.findLayer(e.layerId);
-      if (L) { (L as unknown as Record<string, unknown>)[e.prop as string] = e.newVal; _afterDocChange(); setStatus(`「${L.name}」${_LP_LABEL[e.prop] || e.prop} 已更新`); }
+      if (L) { (L as unknown as Record<string, unknown>)[e.prop as string] = e.newVal; _afterDocChange(); setStatus(t("se.propUpdated", { name: L.name, prop: _lpLabel(e.prop) })); }
     },
     refsLayer: (e: UndoEntry, id: number) => e.layerId === id,
   });

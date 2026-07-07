@@ -207,7 +207,7 @@ CSS 吃不了变量 → 改成 JS 设 badge 元素文本，或 `::before` 读 `d
   - [~] **5b**：index.html 剩余静态 chrome。
     - [x] **5b-1（v382，已落 dev，Chromium 48/48）**：gallery 菜单/回收站 chrome + 新建作品 sheet + 浮窗标题(图层 restructure 保 count / 参考) + 图层脚工具 + 参考窗 + 关闭 aria（~48 处 data-i18n，subagent fan-out 应用 + 我审）。
     - [x] **5b-2（v383，已落 dev，Chromium 55/55）**：lasso icon tooltips + brush rack/settings-view header + sync-gate spinner + 大图导入/重采样/偏移/裁切/调整/颜色/清空/更新toast 对话框 + 共用 dim.*/interp.*/common.apply/save/reset/exit/custom（~65 处，subagent fan-out+审）。**遗留(小)**：icon 按钮的 aria-label 仍中文（title 已译，视觉全对；aria≈title 的 a11y polish，可后补）。glyph 文字按钮(套索文字栏 变换/填色…+palette 笔混吸清)=切片 4；JS 动态标签(galleryFootUsage/cloudAccountInfo/brushRackTitle/lassoSelOpTitle/syncGateTitle/adjustPanelTitle/bigImportInfo)=5c。
-  - [ ] **5c**：命令式 setStatus 散点（filters-adjust / blender-sync / cloud-auth-ui / import-image / doc-ops / session-state / brush-rack …）+ `cloud-freshness.ts` 网络对话框。
+  - [x] **5c（v384，已落 dev，Chromium 57/57）**：命令式 setStatus/host.status/confirm/busy 散点 + JS 动态标签 + Blender 面板 —— **8 并行 subagent fan-out**（ss/tm/bl/gs/cf/br/se/mi 前缀，各返 manifest，我中央合并 **371 key** 进 strings.ts，typecheck 全 resolve）。覆盖 session-state/topbar-menu/doc-ops/export-import/blender-sync/gallery-shell/cloud-freshness/cloud-auth-ui/brush-rack/selection-ops/layer-undo/toolbar/import-image/filters-adjust/side-windows/boot/app + settings-menu 压感 toggle。遗留(有意)：`src/store/**`(红线,内部/error)、dev 面板(smooth-dev)、名字 sentinel(未命名/副本/默认笔=身份数据)、内部 throw。fan-out 教训：subagent 默认只回 ja，须显式要 `{zh,en,ja}` 全量。
 - [ ] **抽取**：subagent 按文件簇 fan-out 机械抽 key。按面分批交付（高可见 chrome 优先）。
 
 **诚实标注**：全量 ~600–1000 条，多 session。每批按家族「我只测一次就是交付」的批量真机纪律走。

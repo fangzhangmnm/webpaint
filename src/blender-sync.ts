@@ -23,6 +23,7 @@ import { requireEditableLeaf } from "./editable-leaf.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { BTPClient, BTPError } from "../vendor/btp/v1/index.js";
+import { t } from "./i18n/index.ts";
 
 const POS_KEY = "webpaint.blenderPanel.pos";
 const URL_KEY = "webpaint.blender.remoteUrl";   // 远程地址：设备级（localStorage），不随文档走
@@ -87,9 +88,9 @@ function setConnState(s: "off" | "connecting" | "on", detail = "") {
   connBtn.dataset.state = s;
   connBtn.disabled = s === "connecting";
   const icon = s === "on" ? ICON_ON : s === "connecting" ? ICON_BUSY : ICON_OFF;
-  const label = s === "on" ? `已连接${detail ? " · " + detail : ""}`
-    : s === "connecting" ? "连接中…"
-    : "连接 Blender";
+  const label = s === "on" ? t("bl.connected") + (detail ? " · " + detail : "")
+    : s === "connecting" ? t("bl.connecting")
+    : t("bl.connectBlender");
   // 图标与文字各自 span，绝不把文字塞进 svg；图标走 .btp-action-ic 统一尺寸
   connBtn.innerHTML = `<span class="btp-action-ic">${icon}</span><span class="btp-connbtn-label">${label}</span>`;
 }
@@ -109,15 +110,15 @@ async function connect() {
     const c = url ? new BTPClient({ baseUrl: url }) : new BTPClient();
     await c.getScene();          // 探活：不可达 / 未开端口 / 证书错 / 名字解析不了 → 抛
     client = c;
-    setConnState("on", url ? hostOf(url) : "本机");
+    setConnState("on", url ? hostOf(url) : t("bl.localMachine"));
     await refreshTextureList();
-    ctx.setStatus(url ? "已连接 " + hostOf(url) : "已连接 Blender（本机）");
+    ctx.setStatus(url ? t("bl.connectedHost", { host: hostOf(url) }) : t("bl.connectedLocal"));
   } catch (e) {
     client = null;
     setConnState("off");
     ctx.setStatus(url
-      ? "连不上 " + hostOf(url) + " —— 确认 Blender 已开端口、该地址可达（如 tailscale serve）"
-      : "连不上本机 Blender —— 先在 Blender 的 BTP 面板里开启端口", true);
+      ? t("bl.cannotConnectHost", { host: hostOf(url) })
+      : t("bl.cannotConnectLocal"), true);
     console.warn("[btp] connect:", e);
   }
 }
@@ -139,28 +140,28 @@ async function refreshTextureList() {
   try {
     const list = await client.listTextures();
     texList.innerHTML = "";
-    for (const t of list) {
+    for (const tex of list) {
       const opt = document.createElement("option");
-      opt.value = t.name;
+      opt.value = tex.name;
       texList.appendChild(opt);
     }
   } catch (e) {
-    ctx.setStatus("拉取贴图列表失败：" + errMsg(e), true);
+    ctx.setStatus(t("bl.textureListFailed", { error: errMsg(e) }), true);
   }
 }
 
 async function useSelection() {
-  if (!client) { ctx.setStatus("请先连接 Blender", true); return; }
+  if (!client) { ctx.setStatus(t("bl.connectFirst"), true); return; }
   try {
     const sel = await client.getSelection();
     if (sel.texture) {
       nameInput.value = sel.texture;
-      ctx.setStatus("已用 Blender 选中贴图：" + sel.texture);
+      ctx.setStatus(t("bl.usedSelectedTexture", { name: sel.texture }));
     } else {
-      ctx.setStatus("Blender 里没有选中贴图", true);
+      ctx.setStatus(t("bl.noSelectedTexture"), true);
     }
   } catch (e) {
-    ctx.setStatus("读取选中失败：" + errMsg(e), true);
+    ctx.setStatus(t("bl.readSelectionFailed", { error: errMsg(e) }), true);
   }
 }
 
@@ -204,12 +205,12 @@ async function renderPushPng(scope: string, target: { w: number; h: number } | n
 }
 
 async function push() {
-  if (!client) { ctx.setStatus("请先连接 Blender", true); return; }
+  if (!client) { ctx.setStatus(t("bl.connectFirst"), true); return; }
   const name = nameInput.value.trim();
-  if (!name) { ctx.setStatus("请填贴图名", true); return; }
+  if (!name) { ctx.setStatus(t("bl.enterTextureName"), true); return; }
   const target = parseTargetSize();
   try {
-    await ctx.withBusy("正在推送到 Blender…", async () => {
+    await ctx.withBusy(t("bl.pushing"), async () => {
       const png = await renderPushPng(uploadSource, target);
       try {
         await client!.putTextureData(name, png);    // 整张覆盖现有 image
@@ -224,10 +225,10 @@ async function push() {
       // 也作为参考图：参考名 = 贴图名（object / texture 同名）。像素刚发完，幂等 upsert。
       if (uploadAsRef) await client!.putReference(name, { image: name });
     });
-    ctx.setStatus(`已推送「${name}」到 Blender` + (uploadAsRef ? "（含参考图）" : ""));
+    ctx.setStatus(t("bl.pushed", { name }) + (uploadAsRef ? t("bl.withReference") : ""));
     refreshTextureList();   // 新建的名字现在可见了
   } catch (e) {
-    ctx.setStatus("推送失败：" + errMsg(e), true);
+    ctx.setStatus(t("bl.pushFailed", { error: errMsg(e) }), true);
   }
 }
 
@@ -239,7 +240,7 @@ function placeBitmapAsNewLayer(bmp: ImageBitmap, name: string): boolean {
   const doc = ctx.doc;
   const layer = doc.addLayer(name);
   if (!layer) {
-    ctx.setStatus(`图层已达上限（${doc.maxLayers}）`, true);
+    ctx.setStatus(t("bl.layerLimit", { max: doc.maxLayers }), true);
     return false;
   }
   const w = bmp.width, h = bmp.height;
@@ -269,9 +270,9 @@ function overwriteLeaf(leaf: Layer, bmp: ImageBitmap) {
 }
 
 async function pull() {
-  if (!client) { ctx.setStatus("请先连接 Blender", true); return; }
+  if (!client) { ctx.setStatus(t("bl.connectFirst"), true); return; }
   const name = nameInput.value.trim();
-  if (!name) { ctx.setStatus("请填贴图名", true); return; }
+  if (!name) { ctx.setStatus(t("bl.enterTextureName"), true); return; }
 
   // 覆盖模式先确认有可写叶（组/隐藏/无 → 不白拉），fail fast
   let leaf: Layer | null = null;
@@ -282,7 +283,7 @@ async function pull() {
 
   try {
     let ok = true;
-    await ctx.withBusy("正在从 Blender 拉取…", async () => {
+    await ctx.withBusy(t("bl.pulling"), async () => {
       const blob = await client!.getTextureData(name);
       const bmp = await createImageBitmap(blob);
       try {
@@ -292,9 +293,9 @@ async function pull() {
         bmp.close();
       }
     });
-    if (ok) ctx.setStatus(`已拉取「${name}」→ ${pullTarget === "new" ? "新图层" : "当前图层"}`);
+    if (ok) ctx.setStatus(t("bl.pulled", { name, target: pullTarget === "new" ? t("bl.newLayer") : t("bl.currentLayer") }));
   } catch (e) {
-    ctx.setStatus("拉取失败：" + errMsg(e), true);
+    ctx.setStatus(t("bl.pullFailed", { error: errMsg(e) }), true);
   }
 }
 
@@ -327,8 +328,8 @@ export function applyBlenderSyncState(s?: unknown) {
 
 // 把 uploadSource/pullTarget 反映到 ⋯ 配置的 radio + 行内 sub 标签。
 function syncConfigUI() {
-  dlSub.textContent = pullTarget === "new" ? "新图层" : "覆盖当前";
-  ulSub.textContent = (uploadSource === "merged" ? "合并画布" : "当前图层组") + (uploadAsRef ? " · +参考" : "");
+  dlSub.textContent = pullTarget === "new" ? t("bl.newLayer") : t("bl.overwriteCurrent");
+  ulSub.textContent = (uploadSource === "merged" ? t("bl.mergedCanvas") : t("bl.activeLayerGroup")) + (uploadAsRef ? t("bl.plusRef") : "");
   const asRef = panel.querySelector<HTMLInputElement>("#btpAsRef");
   if (asRef) asRef.checked = uploadAsRef;
   for (const r of panel.querySelectorAll<HTMLInputElement>('input[name="btpPull"]')) {
@@ -368,74 +369,74 @@ function buildPanel() {
   panel.id = "blenderPanel";
   panel.innerHTML = `
     <div class="float-panel-head" id="btpHead">
-      <span class="float-panel-title">Blender 同步</span>
-      <button class="float-panel-close" id="btpClose" type="button" aria-label="关闭">×</button>
+      <span class="float-panel-title">${t("bl.panelTitle")}</span>
+      <button class="float-panel-close" id="btpClose" type="button" aria-label="${t("bl.close")}">×</button>
     </div>
     <div class="float-panel-body">
       <div class="btp-row">
         <button class="btp-btn btp-connbtn" id="btpConnBtn" type="button" data-state="off"></button>
         <input id="btpRemoteUrl" class="btp-input" inputmode="url"
-               placeholder="远程地址（留空 = 本机 127.0.0.1）"
-               title="另一台设备：填能连到 Blender 的 HTTPS 地址，例如 tailscale serve 的 https://pc.tailnet.ts.net" />
+               placeholder="${t("bl.remoteUrlPlaceholder")}"
+               title="${t("bl.remoteUrlTitle")}" />
       </div>
       <div class="btp-row">
-        <label class="btp-label" for="btpName">贴图名（= 标识）</label>
+        <label class="btp-label" for="btpName">${t("bl.textureNameLabel")}</label>
         <div class="btp-namerow">
-          <input id="btpName" class="btp-input" list="btpTexList" placeholder="image 名字" />
+          <input id="btpName" class="btp-input" list="btpTexList" placeholder="${t("bl.imageNamePlaceholder")}" />
           <datalist id="btpTexList"></datalist>
-          <button class="btp-btn btp-sm" id="btpUseSel" type="button" title="用 Blender 当前选中">选中</button>
-          <button class="btp-btn btp-sm" id="btpRefresh" type="button" title="刷新贴图列表">刷新</button>
+          <button class="btp-btn btp-sm" id="btpUseSel" type="button" title="${t("bl.useSelTitle")}">${t("bl.useSelBtn")}</button>
+          <button class="btp-btn btp-sm" id="btpRefresh" type="button" title="${t("bl.refreshTitle")}">${t("bl.refreshBtn")}</button>
         </div>
       </div>
       <div class="btp-action-row">
         <button class="btp-btn btp-action" id="btpDownload" type="button">
           <span class="btp-action-ic">${ICON_DL}</span>
-          <span class="btp-action-label">拉取贴图</span>
-          <span class="btp-action-sub" id="btpDownloadSub">新图层</span>
+          <span class="btp-action-label">${t("bl.pullTextureLabel")}</span>
+          <span class="btp-action-sub" id="btpDownloadSub">${t("bl.newLayer")}</span>
         </button>
-        <button class="menu-item-wrench" id="btpDownloadCfg" type="button" title="拉取设置">⋯</button>
+        <button class="menu-item-wrench" id="btpDownloadCfg" type="button" title="${t("bl.pullSettingsTitle")}">⋯</button>
         <div class="menu-config-popup btp-popup hidden" id="btpDownloadPop">
           <div class="menu-config-section">
-            <div class="menu-config-title">拉到</div>
-            <label><input type="radio" name="btpPull" value="new" checked /> 新建图层</label>
-            <label><input type="radio" name="btpPull" value="overwrite" /> 覆盖当前图层</label>
+            <div class="menu-config-title">${t("bl.pullToTitle")}</div>
+            <label><input type="radio" name="btpPull" value="new" checked /> ${t("bl.newLayerRadio")}</label>
+            <label><input type="radio" name="btpPull" value="overwrite" /> ${t("bl.overwriteCurrentLayer")}</label>
           </div>
         </div>
       </div>
       <div class="btp-action-row">
         <button class="btp-btn btp-action primary" id="btpUpload" type="button">
           <span class="btp-action-ic">${ICON_UL}</span>
-          <span class="btp-action-label">推送贴图</span>
-          <span class="btp-action-sub" id="btpUploadSub">合并画布</span>
+          <span class="btp-action-label">${t("bl.pushTextureLabel")}</span>
+          <span class="btp-action-sub" id="btpUploadSub">${t("bl.mergedCanvas")}</span>
         </button>
-        <button class="menu-item-wrench" id="btpUploadCfg" type="button" title="推送设置">⋯</button>
+        <button class="menu-item-wrench" id="btpUploadCfg" type="button" title="${t("bl.pushSettingsTitle")}">⋯</button>
         <div class="menu-config-popup btp-popup hidden" id="btpUploadPop">
           <div class="menu-config-section">
-            <div class="menu-config-title">推送来源</div>
-            <label><input type="radio" name="btpSrc" value="merged" checked /> 合并画布</label>
-            <label><input type="radio" name="btpSrc" value="active" /> 当前图层 / 组</label>
+            <div class="menu-config-title">${t("bl.pushSourceTitle")}</div>
+            <label><input type="radio" name="btpSrc" value="merged" checked /> ${t("bl.mergedCanvas")}</label>
+            <label><input type="radio" name="btpSrc" value="active" /> ${t("bl.activeLayerOrGroup")}</label>
           </div>
           <div class="menu-config-section">
-            <label><input type="checkbox" id="btpAsRef" /> 推送后建/更新参考图</label>
+            <label><input type="checkbox" id="btpAsRef" /> ${t("bl.buildRefAfterPush")}</label>
           </div>
         </div>
       </div>
       <div class="btp-row">
-        <label class="btp-label">尺寸（拉伸贴合，空 = doc 尺寸）</label>
+        <label class="btp-label">${t("bl.sizeLabel")}</label>
         <div class="btp-sizerow">
-          <input id="btpSizeW" class="btp-input" placeholder="宽" inputmode="numeric" />
+          <input id="btpSizeW" class="btp-input" placeholder="${t("bl.widthPlaceholder")}" inputmode="numeric" />
           <span class="btp-x">×</span>
-          <input id="btpSizeH" class="btp-input" placeholder="高" inputmode="numeric" />
-          <select id="btpSizePreset" class="btp-sizepreset" aria-label="尺寸预设">
-            <option value="">预设…</option>
-            <option value="doc">原尺寸</option>
-            <option value="fit512">比例 ≤512</option>
-            <option value="fit1024">比例 ≤1024</option>
-            <option value="fit2048">比例 ≤2048</option>
-            <option value="256">方 256²</option>
-            <option value="512">方 512²</option>
-            <option value="1024">方 1024²</option>
-            <option value="2048">方 2048²</option>
+          <input id="btpSizeH" class="btp-input" placeholder="${t("bl.heightPlaceholder")}" inputmode="numeric" />
+          <select id="btpSizePreset" class="btp-sizepreset" aria-label="${t("bl.sizePresetAria")}">
+            <option value="">${t("bl.presetPlaceholder")}</option>
+            <option value="doc">${t("bl.presetDocSize")}</option>
+            <option value="fit512">${t("bl.presetFit512")}</option>
+            <option value="fit1024">${t("bl.presetFit1024")}</option>
+            <option value="fit2048">${t("bl.presetFit2048")}</option>
+            <option value="256">${t("bl.presetSquare256")}</option>
+            <option value="512">${t("bl.presetSquare512")}</option>
+            <option value="1024">${t("bl.presetSquare1024")}</option>
+            <option value="2048">${t("bl.presetSquare2048")}</option>
           </select>
         </div>
       </div>

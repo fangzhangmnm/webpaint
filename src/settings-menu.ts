@@ -120,11 +120,11 @@ export function initSettingsMenu(ctx: AppContext) {
 
   els.menuPressureSize.addEventListener("click", () => {
     applyPressureSize(!state.pressureToSize);
-    setStatus(`压·粗 · ${state.pressureToSize ? "开" : "关"}`);
+    setStatus(t("status.pressureSize", { s: state.pressureToSize ? t("common.on") : t("common.off") }));
   });
   els.menuPressureOpacity.addEventListener("click", () => {
     applyPressureOpacity(!state.pressureToOpacity);
-    setStatus(`压·透 · ${state.pressureToOpacity ? "开" : "关"}`);
+    setStatus(t("status.pressureOpacity", { s: state.pressureToOpacity ? t("common.on") : t("common.off") }));
   });
   els.menuLongPressPick.addEventListener("click", () => {
     applyLongPressPick(!state.longPressPick);

@@ -9,6 +9,7 @@
 // 「导入照片(新建)」复用 session.newDoc 骨架（fillLayer0 画照片），不再自建 PaintDoc/做 doc 替换。
 
 import { els } from "./els.ts";
+import { t } from "./i18n/index.ts";
 import { session } from "./session-state.ts";
 import { decodeImageFile, smartResample } from "./resample.ts";
 import { decodeOraToDoc } from "./ora.ts";
@@ -60,14 +61,14 @@ export async function importImageAsNewDoc(file: File) {
   const bitmap = await decodeImageFile(file);
   const w = Math.min(8192, bitmap.width);
   const h = Math.min(8192, bitmap.height);
-  const stem = file.name.replace(/\.[^.]+$/, "") || "导入";
+  const stem = file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImportName");
   const name = await uniqueLocalName(stem);
   // 共用 session.newDoc 骨架（消 survey rec #4 孪生）：照片绘制 = fillLayer0；doc 替换/全部重置/
   // 落盘/checkpoint 归 session。照片导入因此与空白新建完全对齐（清 selection/参考窗 + color 归黑 +
   // 加密归明文 + 关图库）——human 定：之前不重置这些反而是小 bug。
   await session.newDoc({ name, w, h, fillLayer0: (layer: unknown) => {
     const L = layer as ImportLayer;
-    L.name = file.name.replace(/\.[^.]+$/, "") || "图像";
+    L.name = file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImageName");
     const c = (typeof OffscreenCanvas !== "undefined")
       ? new OffscreenCanvas(w, h)
       : (() => { const x = document.createElement("canvas"); x.width = w; x.height = h; return x; })();
@@ -80,7 +81,7 @@ export async function importImageAsNewDoc(file: File) {
     L.replaceFromCanvas(c, 0, 0, w, h);
     (bitmap as ImageBitmap).close?.();
   } });
-  setStatus(`新建（照片）：${name}（${w}×${h}）`);
+  setStatus(t("mi.newFromPhoto", { name, w, h }));
 }
 
 // 把图片当一个新图层叠进当前 doc（photobash / 参考图工作流）。
@@ -100,7 +101,7 @@ function _openBigImportSheet(ow: number, oh: number, docW: number, docH: number)
   const scale = Math.min(docW / ow, docH / oh);
   const fitW = Math.round(ow * scale);
   const fitH = Math.round(oh * scale);
-  info.textContent = `图片 ${ow}×${oh} · 画布 ${docW}×${docH}`;
+  info.textContent = t("mi.bigImportInfo", { ow, oh, docW, docH });
   wIn.value = String(fitW);
   hIn.value = String(fitH);
   // 默认 fit choice
@@ -167,7 +168,7 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   const layer = doc.addLayer(file.name.replace(/\.[^.]+$/, ""));
   if (!layer) {
     (bitmap as ImageBitmap).close?.();
-    setStatus(`图层已达上限 (${doc.maxLayers})，无法导入`);
+    setStatus(t("mi.layerLimitImport", { max: doc.maxLayers }));
     return;
   }
   // bbox 中心：默认 doc 中心；opts.center（doc 坐标）可指定（Ctrl+V 传视口中心）
@@ -207,12 +208,12 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
         updateLassoToolbar();
         _suppressTransientPanels("transform");
         board.invalidateAll();
-        setStatus(`已导入：${file.name}（拖角变换 → 应用 / 取消）`);
+        setStatus(t("mi.importedTransform", { name: file.name }));
         return;
       }
     }
   } catch (e) { console.warn("[import auto-transform]", e); }
-  setStatus(`已导入为新图层：${file.name}`);
+  setStatus(t("mi.importedAsLayer", { name: file.name }));
 }
 
 export function initImportImage(ctx: AppContext) {
@@ -240,21 +241,21 @@ export function initImportImage(ctx: AppContext) {
     const isImage = (file.type || "").startsWith("image/");
     try {
       if (isOra) {
-        const nm = stripSessionExt(file.name) || "未命名";
+        const nm = stripSessionExt(file.name) || t("nd.untitled");
         // 外来文件可能是加密容器（可能用与图库不同的密码）→ busy 外解锁 + 显式密码解，
         //   再按落库 name 记忆（onPasswordVerified：全局空→上位 / 否则 per-name 覆盖）。
         let plain: Blob = file;
         if (await _store.looksEncrypted(file)) {
           const pw = await ensureUnlockedForBlob(file);
-          if (pw == null) { setStatus("已取消导入（需要密码）", true); return; }
+          if (pw == null) { setStatus(t("mi.importCancelledNeedPw"), true); return; }
           const out = await _store.unsealWith(file, pw);
-          if (!out) { setStatus("导入失败（密码不对）", true); return; }
+          if (!out) { setStatus(t("mi.importFailedWrongPw"), true); return; }
           plain = out;
           onPasswordVerified(nm, pw);
         }
         const loaded = await decodeOraToDoc(plain);
         session.adopt(loaded as PaintDoc, nm);
-        setStatus(`已导入：${nm}`);
+        setStatus(t("mi.imported", { name: nm }));
         setGalleryOpen(false);
       } else if (isImage) {
         if (asNewDoc) {
@@ -264,11 +265,11 @@ export function initImportImage(ctx: AppContext) {
           await importImageAsLayer(file);
         }
       } else {
-        setStatus(`不支持的文件类型：${file.type || file.name}`);
+        setStatus(t("mi.unsupportedFileType", { type: file.type || file.name }));
       }
     } catch (err) {
       console.warn("[import] failed:", err);
-      setStatus("导入失败：" + errMsg(err));
+      setStatus(t("mi.importFailed", { err: errMsg(err) }));
     }
   });
 
@@ -281,10 +282,10 @@ export function initImportImage(ctx: AppContext) {
     const img = files.find((f: File) => f.type && f.type.startsWith("image/"));
     if (!img) return;                                  // 非图片（如 .ora）不拦，让默认行为
     e.preventDefault();
-    if (document.body.dataset.mode === "gallery") { setStatus("退出图库后再拖入图片", true); return; }
+    if (document.body.dataset.mode === "gallery") { setStatus(t("mi.exitGalleryBeforeDrop"), true); return; }
     const center = board.screenToDoc(e.clientX, e.clientY);
     try { await importImageAsLayer(img, { center }); }
-    catch (err) { setStatus(`拖入失败：${errMsg(err)}`, true); }
+    catch (err) { setStatus(t("mi.dropFailed", { err: errMsg(err) }), true); }
   });
 
   // 图库「导入照片」入口（galleryAddPopup → addImportPhoto）设 _addImportAsNewDoc 经此函数。

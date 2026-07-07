@@ -104,8 +104,8 @@ export function initExportImportMenu(ctx: AppContext) {
       // 加密作品的 ora 导出件是密文容器 → 下载名用 .zip（名实相符，7-Zip 输密码可开）
       const ext = (await looksEncryptedContainer(blob)) ? "zip" : exp.ext;
       triggerDownload(blob, `${session.name}.${ext}`);
-      setStatus(`.${ext} 已下载`);
-    } catch (e) { setStatus("导出失败：" + errMsg(e)); }
+      setStatus(t("tm.dotExtDownloaded", { ext }));
+    } catch (e) { setStatus(t("tm.exportFailed", { err: String(errMsg(e)) })); }
   });
   els.menuExportImage.addEventListener("click", async () => {
     setMenuOpen(false);
@@ -114,7 +114,7 @@ export function initExportImportMenu(ctx: AppContext) {
       if (c.target === "clipboard") {
         // 剪贴板恒为 PNG（ClipboardItem image/png）——格式选择只作用于文件/分享路径
         await copyImageToClipboard(doc, c.scope);
-        setStatus(`已复制 PNG 到剪贴板（${c.scope === "active" ? "当前层" : "合并"}）`);
+        setStatus(t("tm.copiedPngToClipboard", { scope: c.scope === "active" ? t("tm.scopeActiveLayer") : t("tm.scopeMerged") }));
       } else if (c.target === "print") {
         // 打印恒走位图（PNG）——矢量/ora 之类没意义；scope 仍生效。
         const exp = getExporter(c.format === "jpg" ? "jpg" : "png") || getExporter("png");
@@ -125,20 +125,20 @@ export function initExportImportMenu(ctx: AppContext) {
         const blob = await exp.encode(doc, { scope: c.scope });
         if (win) {
           await printImageInNewWindow(win, blob);
-          setStatus("已在新标签页打开打印");
+          setStatus(t("tm.printOpenedNewTab"));
         } else {
           // 弹窗被拦 → 降级页内 iframe 打印（可能仍丢图；提示放行弹窗更稳）。
           await printImageBlob(blob, () => board.invalidateAll());
-          setStatus("弹窗被拦，改用页内打印——若丢图请在 Safari 允许本站弹窗后重试");
+          setStatus(t("tm.popupBlockedInlinePrint"));
         }
       } else {
         const exp = getExporter(c.format) || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
         const blob = await exp.encode(doc, { scope: c.scope });
         const r = await shareOrDownloadBlob(blob, `${session.name}-${stampNow()}.${exp.ext}`, exp.mime);
-        setStatus(r.method === "share" ? "分享面板已开" : r.method === "cancel" ? "取消分享" : `${exp.ext.toUpperCase()} 已下载`);
+        setStatus(r.method === "share" ? t("tm.sharePanelOpened") : r.method === "cancel" ? t("tm.shareCancelled") : t("tm.extDownloadedUpper", { ext: exp.ext.toUpperCase() }));
       }
-    } catch (e) { setStatus("导出失败：" + errMsg(e)); }
+    } catch (e) { setStatus(t("tm.exportFailed", { err: String(errMsg(e)) })); }
   });
   els.menuImportImage.addEventListener("click", async () => {
     setMenuOpen(false);
@@ -146,10 +146,10 @@ export function initExportImportMenu(ctx: AppContext) {
     if (source === "clipboard") {
       try {
         const blob = await readImageFromClipboard();
-        if (!blob) { setStatus("剪贴板里没有图片"); return; }
+        if (!blob) { setStatus(t("tm.clipboardNoImage")); return; }
         const fakeFile = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
         await importImageAsLayer(fakeFile);
-      } catch (e) { setStatus("从剪贴板粘贴失败：" + errMsg(e)); }
+      } catch (e) { setStatus(t("tm.clipboardPasteFailed", { err: String(errMsg(e)) })); }
     } else {
       els.oraFileInput.value = "";
       els.oraFileInput.click();
@@ -169,7 +169,7 @@ export function initExportImportMenu(ctx: AppContext) {
     ).join("");
     _openMenuConfigPopup(e.currentTarget as HTMLElement, `
       <div class="menu-config-section">
-        <div class="menu-config-title">格式</div>
+        <div class="menu-config-title">${t("tm.configFormat")}</div>
         ${fmtRadios}
       </div>
     `, (popup) => {
@@ -185,19 +185,19 @@ export function initExportImportMenu(ctx: AppContext) {
     ).join("");
     _openMenuConfigPopup(e.currentTarget as HTMLElement, `
       <div class="menu-config-section">
-        <div class="menu-config-title">格式</div>
+        <div class="menu-config-title">${t("tm.configFormat")}</div>
         ${fmtRadios}
       </div>
       <div class="menu-config-section">
-        <div class="menu-config-title">范围</div>
-        <label><input type="radio" name="scope" value="merged" ${c.scope === "merged" ? "checked" : ""} /> 合并所有可见层</label>
-        <label><input type="radio" name="scope" value="active" ${c.scope === "active" ? "checked" : ""} /> 仅当前层</label>
+        <div class="menu-config-title">${t("tm.configScope")}</div>
+        <label><input type="radio" name="scope" value="merged" ${c.scope === "merged" ? "checked" : ""} /> ${t("tm.mergeAllVisible")}</label>
+        <label><input type="radio" name="scope" value="active" ${c.scope === "active" ? "checked" : ""} /> ${t("tm.onlyActiveLayer")}</label>
       </div>
       <div class="menu-config-section">
-        <div class="menu-config-title">去向</div>
-        <label><input type="radio" name="tgt" value="file" ${c.target === "file" ? "checked" : ""} /> 文件</label>
-        <label><input type="radio" name="tgt" value="clipboard" ${c.target === "clipboard" ? "checked" : ""} /> 剪切板</label>
-        <label><input type="radio" name="tgt" value="print" ${c.target === "print" ? "checked" : ""} /> 打印</label>
+        <div class="menu-config-title">${t("tm.configTarget")}</div>
+        <label><input type="radio" name="tgt" value="file" ${c.target === "file" ? "checked" : ""} /> ${t("tm.targetFile")}</label>
+        <label><input type="radio" name="tgt" value="clipboard" ${c.target === "clipboard" ? "checked" : ""} /> ${t("tm.targetClipboard")}</label>
+        <label><input type="radio" name="tgt" value="print" ${c.target === "print" ? "checked" : ""} /> ${t("tm.targetPrint")}</label>
       </div>
     `, (popup) => {
       const fmt = (popup.querySelector('input[name="fmt"]:checked') as HTMLInputElement | null)?.value || "png";
@@ -211,9 +211,9 @@ export function initExportImportMenu(ctx: AppContext) {
     const c = _getImpImg();
     _openMenuConfigPopup(e.currentTarget as HTMLElement, `
       <div class="menu-config-section">
-        <div class="menu-config-title">来源</div>
-        <label><input type="radio" name="src" value="file" ${c.source === "file" ? "checked" : ""} /> 文件</label>
-        <label><input type="radio" name="src" value="clipboard" ${c.source === "clipboard" ? "checked" : ""} /> 剪切板</label>
+        <div class="menu-config-title">${t("tm.configSource")}</div>
+        <label><input type="radio" name="src" value="file" ${c.source === "file" ? "checked" : ""} /> ${t("tm.targetFile")}</label>
+        <label><input type="radio" name="src" value="clipboard" ${c.source === "clipboard" ? "checked" : ""} /> ${t("tm.targetClipboard")}</label>
       </div>
     `, (popup) => {
       const src = (popup.querySelector('input[name="src"]:checked') as HTMLInputElement | null)?.value || "file";

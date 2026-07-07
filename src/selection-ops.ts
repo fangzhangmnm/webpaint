@@ -11,6 +11,7 @@ import { countLeaves } from "./doc.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { updateLassoToolbar } from "./toolbar.ts";
+import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
 
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
@@ -51,11 +52,11 @@ function _extractSelectionRegionCanvas(layer: LayerLike, sel: Selection) {
 // 选区 → 新层。move=true 同时从源层挖洞（移动语义），含 undo 记账。
 export function selectionToNewLayer({ move }: { move: boolean }) {
   const sel = doc.selection;
-  if (!sel) { setStatus("没选区"); return; }
-  if (countLeaves(doc.layers) >= doc.maxLayers) { setStatus(`图层数已达上限 ${doc.maxLayers}`); return; }
+  if (!sel) { setStatus(t("se.noSelection")); return; }
+  if (countLeaves(doc.layers) >= doc.maxLayers) { setStatus(t("se.maxLayersReached", { max: doc.maxLayers })); return; }
   const src = doc.activeLayer;
   if (!src) return;
-  if (src.isGroup) { setStatus("请先选择一个图层（组不能这样操作）"); return; }
+  if (src.isGroup) { setStatus(t("se.selectLayerFirstGroup")); return; }
   const beforeActive: PixelSnapWithBlob | null = move ? src.snapshot() : null;
   const newL = doc.addLayer(move ? "移到新层" : "复制层");
   if (!newL) return;
@@ -90,7 +91,7 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   if (move && beforeActive) compressPixelSnap(beforeActive, (blob: Blob | null) => { beforeActive.blob = blob; });
   if (move && afterActive)  compressPixelSnap(afterActive,  (blob: Blob | null) => { afterActive.blob = blob; });
   _afterDocChange();
-  setStatus(move ? "已移到新层" : "已复制到新层");
+  setStatus(move ? t("se.movedToNewLayer") : t("se.copiedToNewLayer"));
 }
 
 // v111: 给 layer 当前 bbox 做一个全白 mask 当 selection（占满整个 layer 像素）
@@ -119,9 +120,9 @@ export function initSelectionOps(ctx: AppContext) {
     let canvas;
     if (doc.selection) {
       canvas = _extractSelectionRegionCanvas(layer, doc.selection as unknown as Selection);
-      if (!canvas) { setStatus("选区在图层外，无内容可复制", true); return; }
+      if (!canvas) { setStatus(t("se.selectionOutsideLayer"), true); return; }
     } else {
-      if (layer.bboxW <= 0 || layer.bboxH <= 0) { setStatus("当前图层为空", true); return; }
+      if (layer.bboxW <= 0 || layer.bboxH <= 0) { setStatus(t("se.layerEmpty"), true); return; }
       canvas = document.createElement("canvas");
       canvas.width = layer.bboxW; canvas.height = layer.bboxH;
       canvas.getContext("2d")!.drawImage(layer.canvas, 0, 0);
@@ -129,17 +130,17 @@ export function initSelectionOps(ctx: AppContext) {
     try {
       // lazy promise：blob 生成放进 ClipboardItem，保 Safari user-gesture
       await writeImageBlobToClipboard(new Promise<Blob>((res) => canvas.toBlob(res as BlobCallback, "image/png")));
-      setStatus(doc.selection ? "已复制选区到剪贴板" : "已复制当前图层到剪贴板");
+      setStatus(doc.selection ? t("se.copiedSelectionToClipboard") : t("se.copiedLayerToClipboard"));
     } catch (e) {
-      setStatus(`复制失败：${errMsg(e)}`, true);
+      setStatus(t("se.copyFailed", { error: errMsg(e) }), true);
     }
   });
   // Ctrl+V：系统剪贴板图 → 新层，视口居中（复用 importImageAsLayer）
   window.addEventListener("wp:paste", async () => {
     let blob;
     try { blob = await readImageFromClipboard(); }
-    catch (e) { setStatus(`读取剪贴板失败：${errMsg(e)}`, true); return; }
-    if (!blob) { setStatus("剪贴板里没有图片", true); return; }
+    catch (e) { setStatus(t("se.clipboardReadFailed", { error: errMsg(e) }), true); return; }
+    if (!blob) { setStatus(t("se.clipboardNoImage"), true); return; }
     const file = new File([blob], "paste.png", { type: blob.type || "image/png" });
     const r = board.canvas.getBoundingClientRect();
     const center = board.screenToDoc(r.left + r.width / 2, r.top + r.height / 2);
@@ -148,14 +149,14 @@ export function initSelectionOps(ctx: AppContext) {
   // Ctrl+D：当前选区 → 原位浮层（不挖洞）= 非破坏性 lift + transform
   window.addEventListener("wp:duplicateFloat", () => {
     if (input.lasso.hasFloating()) return;
-    if (!doc.selection) { setStatus("先框选再 Ctrl+D 复制为浮层", true); return; }
+    if (!doc.selection) { setStatus(t("se.selectBeforeDuplicateFloat"), true); return; }
     const ok = input.lasso.liftSelectionForTransform(doc.activeLayer, { cut: false });
     if (ok) {
       (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("transform", { apply: _commitTransform, abort: _cancelTransform });
       updateLassoToolbar();
       _suppressTransientPanels("transform");
       board.invalidateAll();
-      setStatus("已复制选区为浮层（拖动定位 → 应用 / 取消）");
+      setStatus(t("se.duplicatedAsFloat"));
     }
   });
 }

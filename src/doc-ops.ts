@@ -83,7 +83,7 @@ function _openCropMode() {
   //   以前弹提示让用户手动按 0；改成自动复位旋转（保 zoom/位置，只归零 rot），直接进。
   if (board.viewport.rot && Math.abs(board.viewport.rot) > 0.01) {
     board.setViewport(board.viewport.tx, board.viewport.ty, board.viewport.scale, 0);
-    setStatus("已复位画布旋转以进入自由裁切");
+    setStatus(t("tm.rotationResetForCrop"));
   }
   _cropState = {
     rect: { x: 0, y: 0, w: doc.width, h: doc.height },
@@ -163,12 +163,12 @@ export function initDocOps(ctx: AppContext) {
   document.getElementById("adjustCropToSelection")!.addEventListener("click", () => {
     setMenuOpen(false);
     setAdjustOpen(false);
-    if (!doc.selection) { setStatus("没选区——画一个 lasso 选区先", true); return; }
+    if (!doc.selection) { setStatus(t("tm.noSelectionDrawLasso"), true); return; }
     const s = doc.selection;
     const x = Math.max(0, s.bboxX | 0), y = Math.max(0, s.bboxY | 0);
     const w = Math.min(doc.width - x, s.bboxW | 0), h = Math.min(doc.height - y, s.bboxH | 0);
-    if (w < 1 || h < 1) { setStatus("选区太小或在画布外", true); return; }
-    runDocTransform(`已裁到选区：${w}×${h}`, () => {
+    if (w < 1 || h < 1) { setStatus(t("tm.selectionTooSmall"), true); return; }
+    runDocTransform(t("tm.croppedToSelection", { w, h }), () => {
       doc.cropTo({ x, y, w, h });
       _shiftViewportAfterCrop({ x, y });
     });
@@ -198,7 +198,7 @@ export function initDocOps(ctx: AppContext) {
     _menuFlipHBtn.addEventListener("click", () => {
       setMenuOpen(false);
       setAdjustOpen(false);
-      runDocTransform("已水平翻转", () => doc.flipHorizontal());
+      runDocTransform(t("tm.flippedHorizontal"), () => doc.flipHorizontal());
     });
   }
 
@@ -210,7 +210,7 @@ export function initDocOps(ctx: AppContext) {
     _menuRotate90Btn.addEventListener("click", () => {
       setMenuOpen(false);
       setAdjustOpen(false);
-      runDocTransform("已逆时针旋转 90°", () => {
+      runDocTransform(t("tm.rotated90CCW"), () => {
         doc.rotate90CCW();
         board.fitToScreen();
       });
@@ -223,7 +223,7 @@ export function initDocOps(ctx: AppContext) {
     // v127 (user：「裁切还可以扩张」)：允许 x/y 负（向左/向上扩），允许 w/h > doc（向右/向下扩）
     //   只保最小 1 + 最大 8192；doc.cropTo 已支持负 dx/dy
     const { x, y, w, h } = cropRectToInts(_cropState.rect, { min: 1, max: 8192 });
-    runDocTransform(`已裁切：${w}×${h}`, () => {
+    runDocTransform(t("tm.cropped", { w, h }), () => {
       doc.cropTo({ x, y, w, h });
       _shiftViewportAfterCrop({ x, y });
     });
@@ -283,9 +283,9 @@ export function initDocOps(ctx: AppContext) {
     const nw = parseFloat(els.resampleW.value) | 0;
     const nh = parseFloat(els.resampleH.value) | 0;
     const mode = els.resampleMode.value || "bicubic";
-    if (nw < 1 || nh < 1 || nw > 8192 || nh > 8192) { setStatus("尺寸超出 [1, 8192]", true); return; }
+    if (nw < 1 || nh < 1 || nw > 8192 || nh > 8192) { setStatus(t("tm.sizeOutOfRange"), true); return; }
     if (nw === doc.width && nh === doc.height) { _closeResampleDialog(); return; }
-    runDocTransform(`已重采样到 ${nw}×${nh}（${mode}）`, () => doc.resampleTo(nw, nh, mode));
+    runDocTransform(t("tm.resampled", { w: nw, h: nh, mode }), () => doc.resampleTo(nw, nh, mode));
     _closeResampleDialog();
   });
 
@@ -305,7 +305,7 @@ export function initDocOps(ctx: AppContext) {
     const ox = ((dx % doc.width) + doc.width) % doc.width;
     const oy = ((dy % doc.height) + doc.height) % doc.height;
     if (ox === 0 && oy === 0) { _closeOffsetDialog(); return; }
-    runDocTransform(`已偏移 ${dx},${dy}（环绕）`, () => doc.offsetWrap(dx, dy));
+    runDocTransform(t("tm.offset", { dx, dy }), () => doc.offsetWrap(dx, dy));
     _closeOffsetDialog();
   });
 }
