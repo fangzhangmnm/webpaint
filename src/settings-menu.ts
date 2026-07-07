@@ -159,32 +159,14 @@ export function initSettingsMenu(ctx: AppContext) {
     applyTheme(next);
     setStatus(t("status.theme", { s: themeLabel(next) }));
   });
-  // 语言选择器（click-to-pick，取代旧 cycle）：点 语言 展开 4 个 endonym 选项，点哪个切哪个（setLang 内 reload）。
-  //   endonym（各语母语名）= 任何 UI 语言都认得，误切到看不懂的语言也能凭母语名点回来。
-  const menuLanguage = document.getElementById("menuLanguage");
-  const menuLanguageOptions = document.getElementById("menuLanguageOptions");
-  const updateLangLabel = () => {
-    const st = menuLanguage?.querySelector('[data-state-for="language"]');
-    if (st) st.textContent = LANG_NAME[lang()];
-  };
-  if (menuLanguageOptions) {
+  // 语言：下拉框选择（endonym = 各语母语名，任何 UI 语言都认得；change 即 setLang→reload）。
+  const menuLanguageSelect = document.getElementById("menuLanguageSelect") as HTMLSelectElement | null;
+  if (menuLanguageSelect) {
     // endonym 是静态语言名（中文/English/日本語/toki pona），非用户数据 → innerHTML 安全。
-    menuLanguageOptions.innerHTML = LANGS.map((l) =>
-      `<button class="menu-item menu-lang-option" type="button" role="menuitemradio" data-lang="${l}" aria-checked="${l === lang()}">` +
-      `<span class="menu-lang-check">${l === lang() ? "✓" : ""}</span>` +
-      `<span class="menu-item-label">${LANG_NAME[l]}</span></button>`,
-    ).join("");
-    menuLanguageOptions.addEventListener("click", (e: Event) => {
-      const btn = (e.target as HTMLElement).closest("[data-lang]") as HTMLElement | null;
-      if (btn) setLang(btn.dataset.lang as Lang);   // setLang 内部 reload；选同语言 = no-op
-    });
+    menuLanguageSelect.innerHTML = LANGS.map((l) =>
+      `<option value="${l}"${l === lang() ? " selected" : ""}>${LANG_NAME[l]}</option>`).join("");
+    menuLanguageSelect.addEventListener("change", () => setLang(menuLanguageSelect.value as Lang));   // setLang 内部 reload
   }
-  updateLangLabel();
-  const setLangOptionsOpen = (open: boolean) => {
-    menuLanguageOptions?.classList.toggle("hidden", !open);
-    menuLanguage?.setAttribute("aria-expanded", open ? "true" : "false");
-  };
-  menuLanguage?.addEventListener("click", () => setLangOptionsOpen(menuLanguageOptions?.classList.contains("hidden") ?? false));
   // v100：删「检测更新」menu (实测在 iPad PWA 上不可靠，user：「检测更新功能没用」)。
   // 强制更新一律走「强制清缓存重启」（menuForcePwaReset）— 详 docs/20260526-pwa-update-detection.md。
   // 老 element 在 HTML 里 hidden，handler 留空保 element exists 防 null deref。
