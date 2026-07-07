@@ -94,6 +94,10 @@ export function setLang(l: Lang) {
 - **英文复数**只在极少处：用 key 挂函数值或 `_plural` 兄弟 key 局部处理，不上通用复数引擎。
 - `t()` 读**当前 lang 一次**（reload 制，无需响应式订阅）。
 
+**默认 + 持久化（v385，2026-07-07 定；实现已偏离上面示意代码）**：
+- **初始默认 = 系统语言判定**：`detectLang()` 读 `navigator.language`（ja/zh/tok→对应；**未支持语言 → 英文**，更国际）。首次无持久化即按系统语言。
+- **持久化落 `src/syncable-prefs.ts`**（「将来跨设备同步的候选偏好」集中模块）：现 = 设备本地 localStorage 单 blob `webpaint.synced`，**语言 + 主题同处**。**唯一 seam**：等新 store 的 settings-sync 接回来，只切 syncable-prefs 后端，i18n/theme 调用方不动。用户决定 UI 语言**暂设备本地、不云同步**（per-device 系统默认是常见做法）。迁移：旧散键 `webpaint.lang`/`webpaint.theme` 读时兜底。
+
 ---
 
 ## 4. 为什么手搓 `t()`，不 vendor vue-i18n
