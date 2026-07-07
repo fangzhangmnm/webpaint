@@ -199,7 +199,7 @@ CSS 吃不了变量 → 改成 JS 设 badge 元素文本，或 `::before` 读 `d
 - [x] **切片 2（v377，已落 dev，Chromium 端到端验 30/30）**：⋯菜单文件段静态标签（import/export/rename/saveAs/revert/flipH/rotate90/offset/resample/reference/fit/gallery）+ 扳手 tooltip（3 config）+ 动态标签 encrypt(`app.ts` watch)/crop(`doc-ops.ts`)/subs(`export-import-menu.ts`)+ 顶栏保存按钮 7 态（`save-status.ts`，{name} 插值）。**⋯菜单现全 4 语**。遗留：对话框 **caller** 侧标题/消息（`openConfirmSheet`/`openInputSheet` 的 title/message 仍中文，散在 doc-ops/session-state/brush-rack 等）→ 归切片 2b/5；OK/取消按钮已切片 1 localized。
 - [~] **切片 3**：Vue 7 文件模板 `t()`（按 §5a 纪律，setup 里 `L` manifest，模板引 `L.*`；TS handler/status 直接 `t()`）。
   - [x] **3a（v378，已落 dev，Chromium 36/36）**：color-wheel / left-dial / rack-sheet / **layers-panel**（含 `LAYER_MODE_LABEL`/`GROUP_MODE_LABEL` 混合模式名收成 i18n 单一源→图层面板+笔刷设置下拉共用；badge/eye/menu/status/undo 全 4 语）。
-  - [ ] **3b**：`ui/brush-settings.ts`（笔刷设置全屏 ~30 label）。
+  - [x] **3b（v379，已落 dev，组件级 Chromium 48/48 en·ja + 无 CJK 残留负检）**：`ui/brush-settings.ts` 全屏表单（section 标题/label/option/按钮；latin 参数名 size/opacity/flow/streamline/…/compositeMode 有意不译）。验证=esbuild 单组件 harness 直接挂载渲染（模板不受 tsc 检查 → 必须真渲染验 L.* 无 typo）。
   - [ ] **3c**：`ui/gallery.ts`（图库/文件管理 ~80 串，多为 `host.status()` + confirm + 模板按钮）。current-brush.ts 无用户可见串。
 - [ ] **切片 4**：图标占位 glyph-SVG（§7，与 SVG track 的 `20260707-svg-icon-inventory.md` 对接）+ 套索栏布局。
 - [ ] **切片 5**：命令式 JS 散点 + `input.ts` 快捷键表 + `cloud-freshness.ts` 网络对话框。
