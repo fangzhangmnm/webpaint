@@ -62,7 +62,7 @@
     <!-- 顶栏 (v123 起 Procreate 顺序)：菜单 | 保存 | 工具组 | 调整 | 图层 | 颜色
          operator 全在这（点了有动作，要 user consent）。read-only 状态在右下 HUD。 -->
     <header class="top-bar" id="topBar">
-      <button class="tool" id="menuButton" type="button" title="菜单" aria-haspopup="true" aria-expanded="false">
+      <button class="tool" id="menuButton" type="button" data-i18n-title="tool.menu" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <line x1="4" y1="7" x2="20" y2="7"></line>
           <line x1="4" y1="12" x2="20" y2="12"></line>
@@ -73,7 +73,7 @@
       <!-- 智能保存：operator。data-state 由 app.js 切 -->
       <button class="tool" id="topSaveBtn" type="button" title="保存 / 上传"></button>
       <!-- v236 加密常驻指示：当前画作加密时显示小锁（点它进解除加密）。明文时 hidden。 -->
-      <button class="tool top-enc-lock hidden" id="topEncLock" type="button" title="已加密 · 点击解除加密" aria-label="已加密">
+      <button class="tool top-enc-lock hidden" id="topEncLock" type="button" data-i18n-title="enc.locked" data-i18n-aria="enc.locked.aria">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="5" y="11" width="14" height="9" rx="2"></rect>
           <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
@@ -83,14 +83,14 @@
       <span class="top-bar-sep" aria-hidden="true"></span>
 
       <div class="tool-group" role="group" aria-label="tools">
-        <button class="tool" id="toolPen" type="button" data-tool="brush" aria-pressed="true" title="笔刷 (B)">
+        <button class="tool" id="toolPen" type="button" data-tool="brush" aria-pressed="true" data-i18n-title="tool.brush">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M14 4l6 6-9 9H5v-6l9-9z"></path>
             <path d="M13 5l6 6"></path>
           </svg>
         </button>
         <!-- v309: smudge 工具（一直 disabled、从未实装）已 purge，待将来重写时连按钮一起加回 -->
-        <button class="tool" id="toolEraser" type="button" data-tool="eraser" title="橡皮 (E)">
+        <button class="tool" id="toolEraser" type="button" data-tool="eraser" data-i18n-title="tool.eraser">
           <!-- v124 webui 迭代 -->
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M7 21 l-4.3 -4.3 c-1 -1 -1 -2.5 0 -3.4 l9.6 -9.6 c1 -1 2.5 -1 3.4 0 l5.6 5.6 c1 1 1 2.5 0 3.4 L13 21"/>
@@ -103,7 +103,7 @@
                   → 未来变成 brush preset 的 toggle 字段 -->
         <!-- 喷枪不再是独立工具 (v96)：是 brush preset 的特征（spacing.kind=time + bufferMode=direct）。
              用户点笔刷工具，picks 大喷枪 / 小喷枪 preset 就行 -->
-        <button class="tool" id="toolPicker" type="button" data-tool="picker" title="吸色 (I)">
+        <button class="tool" id="toolPicker" type="button" data-tool="picker" data-i18n-title="tool.picker">
           <!-- v124 webui 迭代 -->
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M3 21 l1 -1 h2.5 L14 12.5"/>
@@ -111,13 +111,13 @@
             <path d="M14.2 6.9 L17.4 3.7 a2.4 2.4 0 0 1 3 3 L17.1 9.6 a1.3 1.3 0 0 1 0 1.9 a1.3 1.3 0 0 1 -1.9 0 L12.5 9.6 a1.3 1.3 0 0 1 0 -1.9 a1.3 1.3 0 0 1 1.9 0 Z"/>
           </svg>
         </button>
-        <button class="tool" id="toolLasso" type="button" data-tool="lasso" title="套索 (L)">
+        <button class="tool" id="toolLasso" type="button" data-tool="lasso" data-i18n-title="tool.lasso">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M4 7c0-2 4-4 8-4s8 2 8 4-4 4-8 4-8-2-8-4z"></path>
             <path d="M8 11c-1 4 1 8 5 9"></path>
           </svg>
         </button>
-        <button class="tool tool-hand-conditional" id="toolHand" type="button" data-tool="hand" title="平移 (H / Space)">
+        <button class="tool tool-hand-conditional" id="toolHand" type="button" data-tool="hand" data-i18n-title="tool.pan">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M18 11V6a2 2 0 0 0-4 0v5"></path>
             <path d="M14 10V4a2 2 0 0 0-4 0v6"></path>
@@ -130,7 +130,7 @@
       <span class="top-bar-sep" aria-hidden="true"></span>
 
       <!-- v134 fx icon：x 往 f 收近一点（user：「负间距更贴」）-->
-      <button class="tool" id="topAdjustBtn" type="button" title="调整" aria-haspopup="true" aria-expanded="false">
+      <button class="tool" id="topAdjustBtn" type="button" data-i18n-title="tool.adjust" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <text x="5" y="19" font-family="Georgia, 'Times New Roman', serif" font-size="22" font-style="italic" font-weight="500">f</text>
           <text x="12" y="19" font-family="Georgia, 'Times New Roman', serif" font-size="13" font-style="italic" font-weight="500">x</text>
@@ -138,7 +138,7 @@
       </button>
 
       <!-- v123 图层 + 颜色 挪到右边（Procreate 习惯）。图库进菜单顶部 -->
-      <button class="tool" id="layersButton" type="button" title="图层" aria-pressed="false">
+      <button class="tool" id="layersButton" type="button" data-i18n-title="tool.layers" aria-pressed="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polygon points="12 2 22 8 12 14 2 8 12 2"></polygon>
           <polyline points="2 13 12 19 22 13"></polyline>
@@ -147,7 +147,7 @@
       </button>
 
       <div class="color-group" role="group" aria-label="color">
-        <button class="swatch active-color" id="activeSwatch" title="颜色 (C)"></button>
+        <button class="swatch active-color" id="activeSwatch" data-i18n-title="tool.color"></button>
       </div>
     </header>
 
@@ -156,13 +156,13 @@
       <!-- 笔指示按钮 + size/opacity 竖滑块 + size popup = <LeftDial> Vue 组件（src/ui/left-dial.ts）挂载于此。
            display:contents → 组件渲染的节点作为 .left-sidebar 的直接 flex 子项（保留原 gap/居中布局）。 -->
       <div id="leftDialMount" style="display:contents"></div>
-      <button class="tool" id="undoButton" type="button" title="撤销 (Ctrl+Z)">
+      <button class="tool" id="undoButton" type="button" data-i18n-title="action.undo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="9 14 4 9 9 4"></polyline>
           <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
         </svg>
       </button>
-      <button class="tool" id="redoButton" type="button" title="重做 (Ctrl+Shift+Z)">
+      <button class="tool" id="redoButton" type="button" data-i18n-title="action.redo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="15 14 20 9 15 4"></polyline>
           <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path>
@@ -172,19 +172,19 @@
 
     <!-- 图库：左标题 + 右对齐 (云图标 / 刷新 / 加号)；底部 IDB 占用 + 清扫缓存。
          无返回键 —— 点当前 active tile 关闭。详见 docs/20260527-artist-priorities.md ergonomics. -->
-    <div class="gallery-full hidden" id="galleryFull" role="dialog" aria-label="图库">
+    <div class="gallery-full hidden" id="galleryFull" role="dialog" data-i18n-aria="nav.gallery">
       <div class="gallery-header">
-        <span class="gallery-title">图库</span>
-        <div class="gallery-actions" role="group" aria-label="账号 / 新增">
+        <span class="gallery-title" data-i18n="nav.gallery">图库</span>
+        <div class="gallery-actions" role="group" data-i18n-aria="account.add.aria">
           <button class="gallery-icon-btn" id="cloudIconBtn" type="button" title="云端账号" aria-haspopup="true" aria-expanded="false"></button>
-          <button class="gallery-icon-btn hidden" id="cloudRefreshBtn" type="button" title="刷新云端列表">
+          <button class="gallery-icon-btn hidden" id="cloudRefreshBtn" type="button" data-i18n-title="cloud.refresh">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <!-- 顺时针 3/4 圆 + 箭头：从 12 点出发顺时针绕到 9 点；箭头尖在右上 -->
               <path d="M21 12a9 9 0 1 1-3.5-7.1"/>
               <polyline points="21 4 21 9 16 9"/>
             </svg>
           </button>
-          <button class="gallery-icon-btn" id="galleryTrashBtn" type="button" title="回收站" aria-label="回收站">
+          <button class="gallery-icon-btn" id="galleryTrashBtn" type="button" data-i18n-title="nav.trash" data-i18n-aria="nav.trash">
             <!-- 归档箱 + 时钟回拨：暗示"已删/可恢复"，避免 trash-can 误读为"删选中" -->
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M3 5h18v4H3z"/>
@@ -568,11 +568,11 @@
     <!-- 通用 in-app 对话（替代 alert / prompt / confirm；见 feedback-no-system-dialog） -->
     <div class="backdrop hidden" id="genericBackdrop"></div>
     <div class="sheet hidden" id="genericSheet" role="dialog" aria-modal="true">
-      <h3 id="genericSheetTitle">提示</h3>
+      <h3 id="genericSheetTitle" data-i18n="common.notice">提示</h3>
       <p id="genericSheetMessage" class="sheet-hint hidden"></p>
       <input id="genericSheetInput" type="text" class="generic-sheet-input hidden" />
-      <button class="sheet-action" id="genericSheetConfirm" type="button">确定</button>
-      <button class="sheet-action ghost" id="genericSheetCancel" type="button">取消</button>
+      <button class="sheet-action" id="genericSheetConfirm" type="button" data-i18n="common.ok">确定</button>
+      <button class="sheet-action ghost" id="genericSheetCancel" type="button" data-i18n="common.cancel">取消</button>
     </div>
 
     <!-- 统一导入入口：iPad 上 accept="image/*,.ora" 会同时给出 "Photo Library"
@@ -911,7 +911,7 @@
         <span class="menu-item-label">Blender sync…</span>
       </button>
       <button class="menu-item" id="menuShortcuts" type="button" role="menuitem">
-        <span class="menu-item-label">快捷键</span>
+        <span class="menu-item-label" data-i18n="menu.shortcuts">快捷键</span>
       </button>
       <!-- v267 (user)：视口复位（画布拖出屏幕时一键找回）= fitToScreen -->
       <button class="menu-item" id="menuFit" type="button" role="menuitem">
@@ -922,43 +922,47 @@
       <button id="adjustCropFree" type="button" hidden></button>
 
       <hr class="menu-sep" />
-      <div class="menu-section-label">设置</div>
+      <div class="menu-section-label" data-i18n="menu.section.settings">设置</div>
       <button class="menu-item" id="menuCheckerboard" type="button" role="menuitemcheckbox" aria-pressed="false">
-        <span class="menu-item-label">透明背景显示棋盘</span>
+        <span class="menu-item-label" data-i18n="menu.checkerboard">透明背景显示棋盘</span>
         <span class="menu-item-state" data-state-for="checkerboard">关</span>
       </button>
       <button class="menu-item" id="menuLongPressPick" type="button" role="menuitemcheckbox" aria-pressed="false">
-        <span class="menu-item-label">单指长按吸色</span>
+        <span class="menu-item-label" data-i18n="menu.longPressPick">单指长按吸色</span>
         <span class="menu-item-state" data-state-for="longPressPick">关</span>
       </button>
       <button class="menu-item" id="menuSingleFingerDraw" type="button" role="menuitemcheckbox" aria-pressed="false">
-        <span class="menu-item-label">单指绘画</span>
+        <span class="menu-item-label" data-i18n="menu.singleFingerDraw">单指绘画</span>
         <span class="menu-item-state" data-state-for="singleFingerDraw">关</span>
       </button>
       <button class="menu-item" id="menuPixelGrid" type="button" role="menuitemcheckbox" aria-pressed="true">
-        <span class="menu-item-label">像素栅格（放大时）</span>
+        <span class="menu-item-label" data-i18n="menu.pixelGrid">像素栅格（放大时）</span>
         <span class="menu-item-state" data-state-for="pixelGrid">开</span>
       </button>
       <button class="menu-item" id="menuTheme" type="button" role="menuitem">
-        <span class="menu-item-label">主题</span>
+        <span class="menu-item-label" data-i18n="menu.theme">主题</span>
         <span class="menu-item-state" data-state-for="theme">跟随系统</span>
+      </button>
+      <button class="menu-item" id="menuLanguage" type="button" role="menuitem">
+        <span class="menu-item-label" data-i18n="menu.language">语言</span>
+        <span class="menu-item-state" data-state-for="language">中文</span>
       </button>
 
       <hr class="menu-sep" />
-      <div class="menu-section-label">调试</div>
+      <div class="menu-section-label" data-i18n="menu.section.debug">调试</div>
       <!-- v134 重置出厂从笔架 toolbar 挪过来（safety net 防误触）-->
       <button class="menu-item menu-danger" id="menuResetBrushRack" type="button" role="menuitem">
-        <span class="menu-item-label">重置笔架出厂…</span>
+        <span class="menu-item-label" data-i18n="menu.resetRack">重置笔架出厂…</span>
       </button>
       <div class="menu-item-info" id="versionLabel">版本：—</div>
       <button class="menu-item" id="menuForcePwaReset" type="button" role="menuitem">
-        <span class="menu-item-label">强制更新（清缓存重启）</span>
+        <span class="menu-item-label" data-i18n="menu.forceReset">强制更新（清缓存重启）</span>
       </button>
       <button class="menu-item" id="menuSmoothDev" type="button" role="menuitem">
-        <span class="menu-item-label">平滑调参（dev）</span>
+        <span class="menu-item-label" data-i18n="menu.smoothDev">平滑调参（dev）</span>
       </button>
       <button class="menu-item" id="menuFps" type="button" role="menuitemcheckbox" aria-pressed="false">
-        <span class="menu-item-label">FPS 计</span>
+        <span class="menu-item-label" data-i18n="menu.fps">FPS 计</span>
         <span class="menu-item-state" data-state-for="fps">关</span>
       </button>
       <button class="menu-item" id="menuCheckUpdate" type="button" role="menuitem" hidden></button>
@@ -977,8 +981,8 @@
     <div class="backdrop hidden" id="shortcutsBackdrop"></div>
     <div class="sheet shortcuts-sheet hidden" id="shortcutsSheet" role="dialog" aria-labelledby="shortcutsTitle">
       <div class="sheet-head">
-        <span id="shortcutsTitle" class="sheet-title">快捷键</span>
-        <button type="button" id="shortcutsClose" class="sheet-close" aria-label="关闭">×</button>
+        <span id="shortcutsTitle" class="sheet-title" data-i18n="menu.shortcuts">快捷键</span>
+        <button type="button" id="shortcutsClose" class="sheet-close" data-i18n-aria="common.close.aria" aria-label="关闭">×</button>
       </div>
       <div class="sheet-body" id="shortcutsBody"><!-- JS 渲染 --></div>
     </div>
@@ -994,7 +998,7 @@
       <span class="sep" aria-hidden="true">·</span>
       <span id="canvasSizeLabel">2048×2048</span>
       <span class="sep" aria-hidden="true">·</span>
-      <span id="statusLabel">就绪</span>
+      <span id="statusLabel" data-i18n="status.ready">就绪</span>
       <!-- v329 版本号挪到「强制更新」旁（menuForcePwaReset），不再占状态栏 -->
       <!-- v124b dev 标识 (user：「让我们知道是 dev」)；app.js 检测后加 .visible -->
       <span id="envChip" class="env-chip hidden" aria-label="dev environment">DEV</span>
@@ -1029,6 +1033,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-6a12a61f600e.mjs"></script>
+    <script type="module" src="./dist/webpaint-544f1730cb6a.mjs"></script>
   </body>
 </html>
