@@ -71,4 +71,43 @@ export const S = {
   "status.fps":           { zh: "FPS 计 · {s}", en: "FPS meter · {s}", ja: "FPS 表示 · {s}" },
   "status.theme":         { zh: "主题 · {s}",  en: "Theme · {s}",     ja: "テーマ · {s}" },
   "status.language":      { zh: "语言 · {s}",  en: "Language · {s}",  ja: "言語 · {s}" },
+
+  // ── ⋯ 菜单：文件段（切片 2）────────────────────────────────────
+  "menu.section.file":   { zh: "文件",        en: "File",            ja: "ファイル" },
+  "menu.importImage":    { zh: "导入图片",    en: "Import image",    ja: "画像を読み込む" },
+  "menu.exportImage":    { zh: "导出图片",    en: "Export image",    ja: "画像を書き出す" },
+  "menu.exportProject":  { zh: "导出项目",    en: "Export project",  ja: "プロジェクトを書き出す" },
+  "menu.rename":         { zh: "重命名当前画作…", en: "Rename artwork…", ja: "作品名を変更…" },
+  "menu.saveAs":         { zh: "另存为…",     en: "Save as…",        ja: "名前を付けて保存…" },
+  "menu.revert":         { zh: "撤销修改…",   en: "Revert changes…", ja: "変更を取り消す…" },
+  "menu.encrypt":        { zh: "加密保护…",   en: "Encrypt…",        ja: "暗号化…" },
+  "menu.decrypt":        { zh: "解除加密…",   en: "Decrypt…",        ja: "暗号化を解除…" },
+  "menu.cropToSelection":{ zh: "裁切到选区",  en: "Crop to selection", ja: "選択範囲で切り抜き" },
+  "menu.cropFree":       { zh: "裁切（自由）", en: "Crop (free)",     ja: "切り抜き（自由）" },
+  "menu.flipH":          { zh: "水平翻转",    en: "Flip horizontal", ja: "左右反転" },
+  "menu.rotate90":       { zh: "逆时针旋转 90°", en: "Rotate 90° CCW", ja: "反時計回りに90°回転" },
+  "menu.offset":         { zh: "偏移接缝（环绕）…", en: "Offset seam (wrap)…", ja: "シームをずらす（ラップ）…" },
+  "menu.resample":       { zh: "调整尺寸",    en: "Resize",          ja: "サイズ変更" },
+  "menu.reference":      { zh: "参考小窗",    en: "Reference window", ja: "参考ウィンドウ" },
+  "menu.fit":            { zh: "视口复位",    en: "Reset view",      ja: "ビューをリセット" },
+  "menu.config.importImage":  { zh: "配置导入图片", en: "Import settings", ja: "読み込み設定" },
+  "menu.config.exportImage":  { zh: "配置导出图片", en: "Export settings", ja: "書き出し設定" },
+  "menu.config.exportProject":{ zh: "配置导出项目", en: "Project export settings", ja: "プロジェクト書き出し設定" },
+
+  // ── 菜单子标签片段（导入/导出行的 sub；组合成 "PNG · 合并 · 文件"）──
+  "sub.activeLayer": { zh: "当前层",   en: "Active layer", ja: "アクティブ層" },
+  "sub.merged":      { zh: "合并",     en: "Merged",       ja: "統合" },
+  "sub.clipboard":   { zh: "剪切板",   en: "Clipboard",    ja: "クリップボード" },
+  "sub.print":       { zh: "打印",     en: "Print",        ja: "印刷" },
+  "sub.file":        { zh: "文件",     en: "File",         ja: "ファイル" },
+  "sub.newLayer":    { zh: "新图层",   en: "New layer",    ja: "新規レイヤー" },
+
+  // ── 顶栏保存按钮 tooltip（save-status.ts 按态动态设，{name}=作品名）──
+  "save.none":       { zh: "未打开作品", en: "No artwork open", ja: "作品が開かれていません" },
+  "save.uploading":  { zh: "上传中… · {name}", en: "Uploading… · {name}", ja: "アップロード中… · {name}" },
+  "save.saving":     { zh: "保存中… · {name}", en: "Saving… · {name}", ja: "保存中… · {name}" },
+  "save.dirty":      { zh: "保存 + 推送 (Ctrl+S) · {name} · 未保存", en: "Save + push (Ctrl+S) · {name} · unsaved", ja: "保存＋アップロード (Ctrl+S) · {name} · 未保存" },
+  "save.cloudDirty": { zh: "推送到云端 (Ctrl+S) · {name} · 本地已存，云端未同步", en: "Push to cloud (Ctrl+S) · {name} · saved locally, not synced", ja: "クラウドにアップロード (Ctrl+S) · {name} · ローカル保存済み、未同期" },
+  "save.synced":     { zh: "已同步云端（上次保存时）· 点击检查是否有新版本 · {name}", en: "Synced to cloud (at last save) · tap to check for newer · {name}", ja: "クラウド同期済み（前回保存時）· タップで更新確認 · {name}" },
+  "save.localOnly":  { zh: "已存本地（IDB 易失，登录云端更安全） · {name}", en: "Saved locally (IDB is volatile; sign in for safety) · {name}", ja: "ローカル保存済み（IDBは揮発性、クラウド推奨） · {name}" },
 } as const satisfies Record<string, Entry>;

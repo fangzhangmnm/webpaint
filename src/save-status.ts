@@ -8,6 +8,7 @@
 import { els } from "./els.ts";
 import { store as _store, isSignedIn } from "./app-store.ts";
 import { session } from "./session-state.ts";
+import { t } from "./i18n/index.ts";
 
 // 文档版本警告：在 setStatus 之上再呈现一个持久 banner（用 doc.body.dataset 给 CSS 染色）
 export function updateNewerBanner() {
@@ -54,21 +55,21 @@ export function updateSaveStatus() {
   if (!session.name) {
     els.topSaveBtn.dataset.state = "none";
     els.topSaveBtn.innerHTML = ICON_DISK;
-    els.topSaveBtn.title = "未打开作品";
+    els.topSaveBtn.title = t("save.none");
     return;
   }
   const state = computeSaveState();
   els.topSaveBtn.dataset.state = state;
   els.topSaveBtn.style.opacity = ""; els.topSaveBtn.style.color = "";   // 永不残留旧的灰/蓝 —— 云=可按态主题色（灰=不可按，禁用）
   const name = session.name;
-  if (state === "cloud-busy") { els.topSaveBtn.innerHTML = ICON_CLOUD_BUSY; els.topSaveBtn.title = `上传中… · ${name}`; }
-  else if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存中… · ${name}`; }
-  else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `保存 + 推送 (Ctrl+S) · ${name} · 未保存`; }
-  else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = `推送到云端 (Ctrl+S) · ${name} · 本地已存，云端未同步`; }
+  if (state === "cloud-busy") { els.topSaveBtn.innerHTML = ICON_CLOUD_BUSY; els.topSaveBtn.title = t("save.uploading", { name }); }
+  else if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.saving", { name }); }
+  else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.dirty", { name }); }
+  else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = t("save.cloudDirty", { name }); }
   else if (state === "synced") {
     // synced = 云✓（上次保存时已同步）。中性可按态色；点击=检查云端有没有新版本（动作走 tooltip+行为）。
     els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK;
-    els.topSaveBtn.title = `已同步云端（上次保存时）· 点击检查是否有新版本 · ${name}`;
+    els.topSaveBtn.title = t("save.synced", { name });
   }
-  else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = `已存本地（IDB 易失，登录云端更安全） · ${name}`; }
+  else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.localOnly", { name }); }
 }

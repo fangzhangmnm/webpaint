@@ -7,6 +7,7 @@
 
 import { els } from "./els.ts";
 import { bumpDoc } from "./signals.ts";
+import { t } from "./i18n/index.ts";
 import { resizeCropRect, cropRectToInts } from "./crop-geometry.ts";
 import type { AppContext } from "./app-context.ts";
 
@@ -106,7 +107,7 @@ function _closeCropMode() {
 export function _updateMenuCropLabel() {
   const lbl = document.getElementById("menuCropLabel");
   if (!lbl) return;
-  lbl.textContent = doc.selection ? "裁切到选区" : "裁切（自由）";
+  lbl.textContent = doc.selection ? t("menu.cropToSelection") : t("menu.cropFree");
 }
 
 // 重采样对话框 ----

@@ -329,7 +329,7 @@ initCloudAuthUI(ctx);
 // v236 加密常驻指示（顶栏小锁 + 菜单 label）：反应式跟 session.enc.encrypted。
 watch(() => session.enc.encrypted, (enc) => {
   els.topEncLock?.classList.toggle("hidden", !enc);
-  if (els.menuEncryptLabel) els.menuEncryptLabel.textContent = enc ? "解除加密…" : "加密保护…";
+  if (els.menuEncryptLabel) els.menuEncryptLabel.textContent = enc ? t("menu.decrypt") : t("menu.encrypt");
 }, { immediate: true });
 els.topEncLock?.addEventListener("click", () => session.decryptCurrent());
 

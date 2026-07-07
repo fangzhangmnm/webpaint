@@ -11,6 +11,7 @@
 
 import { getExporter, listExportersByKind } from "./exporters.ts";
 import { els } from "./els.ts";
+import { t } from "./i18n/index.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow } from "./session.ts";
@@ -59,8 +60,8 @@ function _updateMenuSubLabels() {
   const eiEl = document.getElementById("menuExportImageSub");
   const iiEl = document.getElementById("menuImportImageSub");
   if (epEl) epEl.textContent = "." + ((getExporter(ep.format) || getExporter("ora")).ext);
-  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? "当前层" : "合并"} · ${ei.target === "clipboard" ? "剪切板" : ei.target === "print" ? "打印" : "文件"}`;
-  if (iiEl) iiEl.textContent = `${ii.source === "clipboard" ? "剪切板" : "文件"} · 新图层`;
+  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : t("sub.file")}`;
+  if (iiEl) iiEl.textContent = `${ii.source === "clipboard" ? t("sub.clipboard") : t("sub.file")} · ${t("sub.newLayer")}`;
 }
 
 // 🔧 配置 popup（点开 / 点别处关）。setMenuOpen 不变，popup 嵌在 menu-item-row 里
