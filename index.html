@@ -176,7 +176,7 @@
       <div class="gallery-header">
         <span class="gallery-title" data-i18n="nav.gallery">图库</span>
         <div class="gallery-actions" role="group" data-i18n-aria="account.add.aria">
-          <button class="gallery-icon-btn" id="cloudIconBtn" type="button" title="云端账号" aria-haspopup="true" aria-expanded="false"></button>
+          <button class="gallery-icon-btn" id="cloudIconBtn" type="button" data-i18n-title="cloud.account" aria-haspopup="true" aria-expanded="false"></button>
           <button class="gallery-icon-btn hidden" id="cloudRefreshBtn" type="button" data-i18n-title="cloud.refresh">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <!-- 顺时针 3/4 圆 + 箭头：从 12 点出发顺时针绕到 9 点；箭头尖在右上 -->
@@ -192,14 +192,14 @@
               <path d="M10 13h4"/>
             </svg>
           </button>
-          <button class="gallery-icon-btn" id="galleryAddBtn" type="button" title="新增" aria-haspopup="true" aria-expanded="false">
+          <button class="gallery-icon-btn" id="galleryAddBtn" type="button" data-i18n-title="gal.chrome.add" aria-haspopup="true" aria-expanded="false">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="12" y1="5" x2="12" y2="19"/>
               <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
           </button>
           <!-- v232 (user)：图标改三条横线，跟 toolbar 主菜单一致 -->
-          <button class="gallery-icon-btn" id="galleryMenuBtn" type="button" title="图库菜单（更新 / 设置）" aria-haspopup="true" aria-expanded="false">
+          <button class="gallery-icon-btn" id="galleryMenuBtn" type="button" data-i18n-title="gal.chrome.menuTip" aria-haspopup="true" aria-expanded="false">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="4" y1="7" x2="20" y2="7"></line>
               <line x1="4" y1="12" x2="20" y2="12"></line>
@@ -209,13 +209,13 @@
         </div>
       </div>
       <div class="gallery-trash-bar hidden" id="galleryTrashBar">
-        <button class="gallery-back-btn" id="galleryTrashBack" type="button">← 返回图库</button>
-        <span class="gallery-trash-title">回收站</span>
+        <button class="gallery-back-btn" id="galleryTrashBack" type="button" data-i18n="gal.chrome.back">← 返回图库</button>
+        <span class="gallery-trash-title" data-i18n="nav.trash">回收站</span>
         <div class="gallery-trash-menu-wrap">
-          <button class="gallery-trash-menu-btn" id="galleryTrashMenuBtn" type="button" title="回收站操作" aria-haspopup="true">⋯</button>
+          <button class="gallery-trash-menu-btn" id="galleryTrashMenuBtn" type="button" data-i18n-title="gal.chrome.trashOps" aria-haspopup="true">⋯</button>
           <div class="gallery-trash-menu-popup hidden" id="galleryTrashMenuPopup" role="menu">
-            <button class="gallery-trash-menu-item danger" id="galleryEmptyTrashLocalBtn" type="button" role="menuitem">清空本地回收站</button>
-            <button class="gallery-trash-menu-item danger" id="galleryEmptyTrashCloudBtn" type="button" role="menuitem">清空云端回收站</button>
+            <button class="gallery-trash-menu-item danger" id="galleryEmptyTrashLocalBtn" type="button" role="menuitem" data-i18n="gal.chrome.emptyLocal">清空本地回收站</button>
+            <button class="gallery-trash-menu-item danger" id="galleryEmptyTrashCloudBtn" type="button" role="menuitem" data-i18n="gal.chrome.emptyCloud">清空云端回收站</button>
           </div>
         </div>
       </div>
@@ -223,7 +223,7 @@
       <div id="galleryMount"></div>
       <div class="gallery-foot">
         <span class="gallery-foot-usage" id="galleryFootUsage">本地占用：计算中…</span>
-        <span class="gallery-foot-version" id="galleryFootVersion" title="当前 WebPaint 版本"></span>
+        <span class="gallery-foot-version" id="galleryFootVersion" data-i18n-title="gal.chrome.versionTip"></span>
       </div>
     </div>
 
@@ -231,29 +231,29 @@
     <div class="menu-panel hidden" id="galleryMenuPopup" role="menu">
       <div class="menu-item-info" id="galleryMenuVersion">版本：—</div>
       <button class="menu-item" id="galleryMenuForceUpdate" type="button" role="menuitem">
-        <span class="menu-item-label">强制更新（清缓存重启）</span>
+        <span class="menu-item-label" data-i18n="menu.forceReset">强制更新（清缓存重启）</span>
       </button>
       <button class="menu-item" id="galleryMenuTheme" type="button" role="menuitem">
-        <span class="menu-item-label">主题…</span>
+        <span class="menu-item-label" data-i18n="gal.menu.theme">主题…</span>
       </button>
       <button class="menu-item" id="galleryMenuLock" type="button" role="menuitem">
-        <span class="menu-item-label">解锁加密作品…</span>
+        <span class="menu-item-label" data-i18n="gal.menu.unlock">解锁加密作品…</span>
       </button>
     </div>
 
     <!-- 加号 popup：新建 / 从图片 / 从剪切板 -->
     <div class="menu-panel hidden" id="galleryAddPopup" role="menu">
       <button class="menu-item" id="addNew" type="button" role="menuitem">
-        <span class="menu-item-label">新建作品…</span>
+        <span class="menu-item-label" data-i18n="gal.menu.newDoc">新建作品…</span>
       </button>
       <button class="menu-item" id="addImportPhoto" type="button" role="menuitem">
-        <span class="menu-item-label">从图片新建…</span>
+        <span class="menu-item-label" data-i18n="gal.menu.newFromImage">从图片新建…</span>
       </button>
       <button class="menu-item" id="addImportClipboard" type="button" role="menuitem">
-        <span class="menu-item-label">从剪切板新建</span>
+        <span class="menu-item-label" data-i18n="gal.menu.newFromClipboard">从剪切板新建</span>
       </button>
       <button class="menu-item" id="addNewFolder" type="button" role="menuitem">
-        <span class="menu-item-label">新建文件夹…</span>
+        <span class="menu-item-label" data-i18n="gal.menu.newFolder">新建文件夹…</span>
       </button>
     </div>
 
@@ -261,33 +261,33 @@
     <div class="menu-panel hidden" id="cloudAccountPopup" role="menu">
       <div class="menu-item-info" id="cloudAccountInfo">云端：未配置</div>
       <button class="menu-item hidden" id="cloudSignInBtn" type="button" role="menuitem">
-        <span class="menu-item-label">登录 OneDrive</span>
+        <span class="menu-item-label" data-i18n="gal.menu.signIn">登录 OneDrive</span>
       </button>
       <button class="menu-item hidden" id="cloudSignOutBtn" type="button" role="menuitem">
-        <span class="menu-item-label">退出登录</span>
+        <span class="menu-item-label" data-i18n="gal.menu.signOut">退出登录</span>
       </button>
     </div>
 
     <!-- 新建作品 sheet：名字 + 分辨率（预设 + 自定义） -->
     <div class="backdrop hidden" id="newDocBackdrop"></div>
-    <div class="sheet hidden" id="newDocSheet" role="dialog" aria-modal="true" aria-label="新建作品">
-      <h3>新建作品</h3>
+    <div class="sheet hidden" id="newDocSheet" role="dialog" aria-modal="true" data-i18n-aria="nd.title">
+      <h3 data-i18n="nd.title">新建作品</h3>
       <label class="brush-slider-row" style="grid-template-columns: 80px 1fr;">
-        <span class="brush-slider-label">名字</span>
-        <input id="newDocName" type="text" class="generic-sheet-input" placeholder="未命名" />
+        <span class="brush-slider-label" data-i18n="bs.name">名字</span>
+        <input id="newDocName" type="text" class="generic-sheet-input" data-i18n-ph="nd.untitled" />
       </label>
       <div class="new-doc-preset-section">
-        <div class="new-doc-preset-label">绘画</div>
+        <div class="new-doc-preset-label" data-i18n="nd.painting">绘画</div>
         <div class="preset-chips">
           <button type="button" data-preset="2048x2048" aria-pressed="true">2048²</button>
           <button type="button" data-preset="1024x1024" aria-pressed="false">1024²</button>
           <button type="button" data-preset="4096x4096" aria-pressed="false">4096²</button>
-          <button type="button" data-preset="2480x3508" aria-pressed="false">A4 竖</button>
-          <button type="button" data-preset="3508x2480" aria-pressed="false">A4 横</button>
+          <button type="button" data-preset="2480x3508" aria-pressed="false" data-i18n="nd.a4portrait">A4 竖</button>
+          <button type="button" data-preset="3508x2480" aria-pressed="false" data-i18n="nd.a4landscape">A4 横</button>
           <button type="button" data-preset="1920x1080" aria-pressed="false">1920×1080</button>
           <button type="button" data-preset="1080x1920" aria-pressed="false">1080×1920</button>
         </div>
-        <div class="new-doc-preset-label">像素画</div>
+        <div class="new-doc-preset-label" data-i18n="nd.pixelart">像素画</div>
         <div class="preset-chips">
           <button type="button" data-preset="16x16" aria-pressed="false">16²</button>
           <button type="button" data-preset="32x32" aria-pressed="false">32²</button>
@@ -295,16 +295,16 @@
           <button type="button" data-preset="128x128" aria-pressed="false">128²</button>
         </div>
         <div class="preset-chips">
-          <button type="button" data-preset="custom" aria-pressed="false">自定义…</button>
+          <button type="button" data-preset="custom" aria-pressed="false" data-i18n="nd.custom">自定义…</button>
         </div>
       </div>
       <label class="brush-slider-row" id="newDocCustomRow" style="grid-template-columns: 80px 1fr 1fr; display:none;">
-        <span class="brush-slider-label">尺寸</span>
+        <span class="brush-slider-label" data-i18n="nd.size">尺寸</span>
         <input id="newDocW" type="number" min="16" max="8192" step="16" value="2048" />
         <input id="newDocH" type="number" min="16" max="8192" step="16" value="2048" />
       </label>
-      <button class="sheet-action" id="newDocConfirm" type="button">创建</button>
-      <button class="sheet-action ghost" id="newDocCancel" type="button">取消</button>
+      <button class="sheet-action" id="newDocConfirm" type="button" data-i18n="nd.create">创建</button>
+      <button class="sheet-action ghost" id="newDocCancel" type="button" data-i18n="common.cancel">取消</button>
     </div>
 
     <!-- 套索工具栏 v91：两行 stack 设计，详 conversation v91→v92
@@ -584,33 +584,33 @@
          (UI 习惯：上面在画面上面)。新建按钮在 footer。 -->
     <div class="float-panel layers-panel hidden" id="layersPanel">
       <div class="float-panel-head" id="layersPanelHead">
-        <span class="float-panel-title">图层 <span id="layersCountLabel" class="float-panel-subtle">0 / 0</span></span>
-        <button class="float-panel-close" id="layersPanelClose" type="button" aria-label="关闭">×</button>
+        <span class="float-panel-title"><span data-i18n="tool.layers">图层</span> <span id="layersCountLabel" class="float-panel-subtle">0 / 0</span></span>
+        <button class="float-panel-close" id="layersPanelClose" type="button" data-i18n-aria="common.close.aria">×</button>
       </div>
       <div class="layers-list" id="layersList"><!-- rows rendered by JS --></div>
       <!-- v267 (user) 指令栏：+（弹菜单：新图层 / 导入图片到新层） · 上移 · 下移 · 删除。
            （user 改主意：加号重新弹菜单——本轮明确要求；导入图片收进菜单不再占独立按钮） -->
       <div class="layers-foot">
-        <button class="layers-foot-btn" id="layerAddBtn" type="button" title="新建 / 导入" aria-label="新建 / 导入" aria-haspopup="true">
+        <button class="layers-foot-btn" id="layerAddBtn" type="button" data-i18n-title="lp.foot.add" aria-label="新建 / 导入" aria-haspopup="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"/>
             <line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
         </button>
-        <button class="layers-foot-btn" id="layerMoveUpBtn" type="button" title="上移图层" aria-label="上移图层">
+        <button class="layers-foot-btn" id="layerMoveUpBtn" type="button" data-i18n-title="lp.foot.up" aria-label="上移图层">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="12" y1="19" x2="12" y2="5"/>
             <polyline points="6 11 12 5 18 11"/>
           </svg>
         </button>
-        <button class="layers-foot-btn" id="layerMoveDownBtn" type="button" title="下移图层" aria-label="下移图层">
+        <button class="layers-foot-btn" id="layerMoveDownBtn" type="button" data-i18n-title="lp.foot.down" aria-label="下移图层">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19"/>
             <polyline points="6 13 12 19 18 13"/>
           </svg>
         </button>
         <!-- v132 (user：「global 加删除当前图层 垃圾桶 svg」) -->
-        <button class="layers-foot-btn" id="layerDeleteBtn" type="button" title="删除当前图层" aria-label="删除当前图层">
+        <button class="layers-foot-btn" id="layerDeleteBtn" type="button" data-i18n-title="lp.foot.del" aria-label="删除当前图层">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polyline points="3 6 5 6 21 6"/>
             <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
@@ -622,9 +622,9 @@
       </div>
       <!-- "+" 弹出菜单：新图层 / 新建图层组(空) / 导入图片到新层（layerImportPhotoBtn 仍由 import-image 接线） -->
       <div class="menu-panel layer-add-popup hidden" id="layerAddPopup" role="menu">
-        <button class="menu-item" id="layerAddNewBtn" type="button" role="menuitem"><span class="menu-item-label">新图层</span></button>
-        <button class="menu-item" id="layerAddGroupBtn" type="button" role="menuitem"><span class="menu-item-label">新建图层组</span></button>
-        <button class="menu-item" id="layerImportPhotoBtn" type="button" role="menuitem"><span class="menu-item-label">导入图片到新层</span></button>
+        <button class="menu-item" id="layerAddNewBtn" type="button" role="menuitem"><span class="menu-item-label" data-i18n="sub.newLayer">新图层</span></button>
+        <button class="menu-item" id="layerAddGroupBtn" type="button" role="menuitem"><span class="menu-item-label" data-i18n="lp.foot.newGroup">新建图层组</span></button>
+        <button class="menu-item" id="layerImportPhotoBtn" type="button" role="menuitem"><span class="menu-item-label" data-i18n="lp.foot.importPhoto">导入图片到新层</span></button>
       </div>
     </div>
 
@@ -634,21 +634,21 @@
     <!-- 参考小窗：浮动 panel 装一张参考图，独立 pinch / zoom / rotate -->
     <div class="float-panel reference-panel hidden" id="referencePanel">
       <div class="float-panel-head" id="referencePanelHead">
-        <span class="float-panel-title">参考</span>
-        <button class="reference-action-btn" id="referenceLoadBtn" type="button" title="从文件载入">
+        <span class="float-panel-title" data-i18n="fp.reference">参考</span>
+        <button class="reference-action-btn" id="referenceLoadBtn" type="button" data-i18n-title="ref.load">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <!-- 文件夹：左边 tab + 矩形主体 -->
             <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
           </svg>
         </button>
-        <button class="reference-action-btn" id="referenceLiveBtn" type="button" title="实时镜像主画布" aria-pressed="false">
+        <button class="reference-action-btn" id="referenceLiveBtn" type="button" data-i18n-title="ref.live" aria-pressed="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <!-- 大框（主画布）+ 内嵌小窗（参考小窗自己）—— picture-in-picture 隐喻 -->
             <rect x="3" y="4" width="18" height="14" rx="2"/>
             <rect x="12" y="10" width="7" height="5" rx="1"/>
           </svg>
         </button>
-        <button class="reference-action-btn" id="referenceFitBtn" type="button" title="适应窗口">
+        <button class="reference-action-btn" id="referenceFitBtn" type="button" data-i18n-title="ref.fit">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <!-- 四角向外的箭头 -->
             <polyline points="4 9 4 4 9 4"/>
@@ -657,10 +657,10 @@
             <polyline points="20 15 20 20 15 20"/>
           </svg>
         </button>
-        <button class="float-panel-close" id="referencePanelClose" type="button" aria-label="关闭">×</button>
+        <button class="float-panel-close" id="referencePanelClose" type="button" data-i18n-aria="common.close.aria">×</button>
       </div>
       <!-- v134 (user：「参考窗口大小可以调整」) iPad touch 拖手柄：CSS resize:both 只支持鼠标 -->
-      <div class="reference-resize-handle" id="referenceResizeHandle" aria-label="拖动调整窗口大小" title="拖动调整大小">
+      <div class="reference-resize-handle" id="referenceResizeHandle" data-i18n-aria="ref.resizeAria" data-i18n-title="ref.resize">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
           <line x1="4" y1="14" x2="14" y2="4"/>
           <line x1="9" y1="14" x2="14" y2="9"/>
@@ -669,10 +669,10 @@
       <div class="reference-body" id="referenceBody">
         <canvas id="referenceCanvas" class="reference-canvas"></canvas>
         <div class="reference-empty" id="referenceEmpty">
-          <p>选个图当参考</p>
-          <p class="sheet-hint">文件夹图标 = 加载图片</p>
-          <p class="sheet-hint">画中画图标 = 实时镜像主画布</p>
-          <p class="sheet-hint">单指拖移 / 双指 pinch + 旋转 / 双击适应</p>
+          <p data-i18n="ref.pick">选个图当参考</p>
+          <p class="sheet-hint" data-i18n="ref.hintFolder">文件夹图标 = 加载图片</p>
+          <p class="sheet-hint" data-i18n="ref.hintPip">画中画图标 = 实时镜像主画布</p>
+          <p class="sheet-hint" data-i18n="ref.hintGesture">单指拖移 / 双指 pinch + 旋转 / 双击适应</p>
         </div>
       </div>
     </div>
@@ -1033,6 +1033,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-2a7e09ffc7c8.mjs"></script>
+    <script type="module" src="./dist/webpaint-9521b6f76aa0.mjs"></script>
   </body>
 </html>
