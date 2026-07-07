@@ -61,6 +61,11 @@ export const S = {
   "common.cancel":  { zh: "取消",              en: "Cancel",          ja: "キャンセル",            tok: "weka" },
   "common.notice":  { zh: "提示",              en: "Notice",          ja: "お知らせ" },
   "common.close.aria":{ zh: "关闭",            en: "Close",           ja: "閉じる" },
+  "common.apply":   { zh: "应用",              en: "Apply",           ja: "適用" },
+  "common.save":    { zh: "保存",              en: "Save",            ja: "保存" },
+  "common.reset":   { zh: "重置",              en: "Reset",           ja: "リセット" },
+  "common.exit":    { zh: "退出",              en: "Exit",            ja: "終了" },
+  "common.custom":  { zh: "自定义",            en: "Custom",          ja: "カスタム" },
 
   // ── 状态行（本切片只接静态默认值 + 设置菜单反馈；setStatus 大面留后续切片）──
   "status.ready":         { zh: "就绪",        en: "Ready",           ja: "準備完了",              tok: "pona" },
@@ -419,4 +424,81 @@ export const S = {
   "ref.hintFolder":  { zh: "文件夹图标 = 加载图片", en: "Folder icon = load image", ja: "フォルダアイコン = 画像を読み込む" },
   "ref.hintPip":     { zh: "画中画图标 = 实时镜像主画布", en: "PiP icon = live mirror of canvas", ja: "PiPアイコン = キャンバスをライブミラー" },
   "ref.hintGesture": { zh: "单指拖移 / 双指 pinch + 旋转 / 双击适应", en: "One-finger drag / two-finger pinch + rotate / double-tap to fit", ja: "一本指ドラッグ / 二本指ピンチ+回転 / ダブルタップでフィット" },
+
+  // ── index.html 静态 chrome（切片 5b-2：lasso icon tooltips + rack/settings 头 + 各对话框）──
+  // 套索工具栏（icon 按钮 tooltip；文字按钮=glyph 切片 4 不在此）
+  "la.stack":        { zh: "套索 / 选区", en: "Lasso / selection", ja: "投げ縄 / 選択" },
+  "la.freehand":     { zh: "自由套索", en: "Freehand lasso", ja: "フリーハンド投げ縄" },
+  "la.rect":         { zh: "矩形选区", en: "Rectangle", ja: "長方形選択" },
+  "la.ellipse":      { zh: "椭圆选区", en: "Ellipse", ja: "楕円選択" },
+  "la.magic":        { zh: "魔术棒", en: "Magic wand", ja: "自動選択" },
+  "la.new":          { zh: "新建选区（替换当前）", en: "New selection (replace)", ja: "新規選択（置き換え）" },
+  "la.union":        { zh: "添加到选区", en: "Add to selection", ja: "選択範囲に追加" },
+  "la.subtract":     { zh: "从选区减去", en: "Subtract from selection", ja: "選択範囲から削除" },
+  "la.selectAll":    { zh: "全选 (Ctrl+A)", en: "Select all (Ctrl+A)", ja: "すべて選択 (Ctrl+A)" },
+  "la.invert":       { zh: "反选 (Ctrl+Shift+I)", en: "Invert (Ctrl+Shift+I)", ja: "選択を反転 (Ctrl+Shift+I)" },
+  "la.selEdit":      { zh: "编辑选区：扩张 / 收缩", en: "Edit selection: expand / shrink", ja: "選択範囲を編集：拡張 / 縮小" },
+  "la.deselect":     { zh: "取消选区 (Ctrl+D)", en: "Deselect (Ctrl+D)", ja: "選択を解除 (Ctrl+D)" },
+  "la.constrain":    { zh: "约束 1:1（正方 / 圆）", en: "Constrain 1:1 (square / circle)", ja: "1:1に固定（正方形 / 円）" },
+  "la.magicCfg":     { zh: "魔术棒阈值", en: "Magic wand threshold", ja: "自動選択のしきい値" },
+  "la.sampleMode":   { zh: "采样模式", en: "Sample mode", ja: "サンプリングモード" },
+  "la.magicSettings":{ zh: "魔术棒设置", en: "Magic wand settings", ja: "自動選択の設定" },
+  "la.threshold":    { zh: "阈值", en: "Threshold", ja: "しきい値" },
+  "la.editSel":      { zh: "编辑选区", en: "Edit selection", ja: "選択範囲を編集" },
+  "la.expand":       { zh: "扩张…", en: "Expand…", ja: "拡張…" },
+  "la.shrink":       { zh: "收缩…", en: "Shrink…", ja: "縮小…" },
+  "la.expandShrink": { zh: "扩张 / 收缩选区", en: "Expand / shrink selection", ja: "選択範囲の拡張 / 縮小" },
+  "la.pixelCount":   { zh: "像素数", en: "Pixels", ja: "ピクセル数" },
+  // 吸色取样
+  "pick.toolbar":    { zh: "吸色取样", en: "Eyedropper sampling", ja: "スポイトのサンプリング" },
+  "pick.sampleLabel":{ zh: "取样", en: "Sample", ja: "サンプル" },
+  "pick.sampleTip":  { zh: "吸色取样：合并最终颜色 / 当前图层原色", en: "Eyedropper: merged final color / active layer color", ja: "スポイト：合成後の色 / アクティブ層の色" },
+  "pick.composite":  { zh: "合并颜色", en: "Merged", ja: "合成" },
+  "pick.active":     { zh: "当前图层", en: "Active layer", ja: "アクティブ層" },
+  // 调色板面板标题
+  "palette.title":   { zh: "调色板", en: "Palette", ja: "パレット" },
+  // 笔架 sheet
+  "rack.sheet":      { zh: "笔架", en: "Brush rack", ja: "ブラシ棚" },
+  "rack.importJson": { zh: "导入笔架 JSON", en: "Import rack JSON", ja: "ブラシ棚JSONを読み込む" },
+  "rack.exportFolder":{ zh: "导出当前文件夹为 JSON", en: "Export current folder as JSON", ja: "現在のフォルダをJSONで書き出す" },
+  "rack.cloudPush":  { zh: "云备份笔架到 OneDrive", en: "Back up rack to OneDrive", ja: "ブラシ棚をOneDriveにバックアップ" },
+  "rack.newBrush":   { zh: "新建笔刷", en: "New brush", ja: "新規ブラシ" },
+  // 笔刷设置 view header
+  "bsv.title":       { zh: "笔刷设置", en: "Brush settings", ja: "ブラシ設定" },
+  // sync gate spinner
+  "sg.checking":     { zh: "正在检查云端…", en: "Checking cloud…", ja: "クラウドを確認中…" },
+  // 尺寸/插值（多对话框共用）
+  "dim.width":       { zh: "宽 (px)", en: "Width (px)", ja: "幅 (px)" },
+  "dim.height":      { zh: "高 (px)", en: "Height (px)", ja: "高さ (px)" },
+  "dim.interp":      { zh: "插值", en: "Interpolation", ja: "補間" },
+  "interp.bicubic":  { zh: "双三次（默认 / 高质量）", en: "Bicubic (default / high quality)", ja: "バイキュービック（既定 / 高品質）" },
+  "interp.bilinear": { zh: "双线性（软）", en: "Bilinear (soft)", ja: "バイリニア（柔らか）" },
+  "interp.nearest":  { zh: "最近邻（像素艺术 / 硬边）", en: "Nearest (pixel art / hard edge)", ja: "ニアレスト（ドット絵 / 硬いエッジ）" },
+  // 大图导入对话框
+  "ri.title":        { zh: "图片比画布大", en: "Image larger than canvas", ja: "画像がキャンバスより大きい" },
+  "ri.fit":          { zh: "缩到画布（默认）", en: "Fit to canvas (default)", ja: "キャンバスに合わせる（既定）" },
+  "ri.keep":         { zh: "保持原尺寸（layer 超出画布，可后调）", en: "Keep original size (layer exceeds canvas; adjust later)", ja: "元のサイズを維持（レイヤーがはみ出す、後で調整可）" },
+  // 画布重采样
+  "rs2.title":       { zh: "画布重采样", en: "Resize canvas", ja: "キャンバスをリサイズ" },
+  "rs2.lock":        { zh: "锁比例", en: "Lock ratio", ja: "比率をロック" },
+  // 偏移接缝
+  "off.title":       { zh: "偏移接缝（环绕）", en: "Offset seam (wrap)", ja: "シームをずらす（ラップ）" },
+  "off.x":           { zh: "水平 (px)", en: "Horizontal (px)", ja: "水平 (px)" },
+  "off.y":           { zh: "垂直 (px)", en: "Vertical (px)", ja: "垂直 (px)" },
+  "off.half":        { zh: "居中接缝（半幅 ½）", en: "Center seam (half ½)", ja: "シームを中央に（半分 ½）" },
+  // 裁切工具栏
+  "crop.hint":       { zh: "裁切：拖角 / 边 / 框内移动", en: "Crop: drag corner / edge / inside to move", ja: "切り抜き：角 / 辺 / 内側をドラッグで移動" },
+  // 滤镜笔刷工具栏
+  "fb.title":        { zh: "滤镜笔刷", en: "Filter brush", ja: "フィルターブラシ" },
+  // 颜色浮窗
+  "color.title":     { zh: "颜色", en: "Color", ja: "カラー" },
+  // 清空确认 sheet
+  "clr.aria":        { zh: "清空确认", en: "Clear confirmation", ja: "消去の確認" },
+  "clr.title":       { zh: "清空当前图层？", en: "Clear current layer?", ja: "現在のレイヤーを消去？" },
+  "clr.msg":         { zh: "把当前图层的像素全部抹掉。可以 Ctrl+Z 撤销。", en: "Erase all pixels on the current layer. Undo with Ctrl+Z.", ja: "現在のレイヤーのピクセルをすべて消去します。Ctrl+Z で元に戻せます。" },
+  "clr.confirm":     { zh: "清空", en: "Clear", ja: "消去" },
+  // 更新 toast
+  "upd.available":   { zh: "有新版本", en: "New version available", ja: "新しいバージョンあり" },
+  "upd.reload":      { zh: "刷新", en: "Reload", ja: "再読み込み" },
+  "upd.dismiss":     { zh: "忽略", en: "Dismiss", ja: "閉じる" },
 } as const satisfies Record<string, Entry>;
