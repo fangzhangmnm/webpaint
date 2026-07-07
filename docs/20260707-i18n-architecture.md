@@ -204,7 +204,9 @@ CSS 吃不了变量 → 改成 JS 设 badge 元素文本，或 `::before` 读 `d
 - [ ] **切片 4**：图标占位 glyph-SVG（§7，与 SVG track 的 `20260707-svg-icon-inventory.md` 对接）+ 套索栏布局。
 - [~] **切片 5**：命令式 JS 散点 + `input.ts` 快捷键表 + `cloud-freshness.ts` 网络对话框。
   - [x] **5a（v381，已落 dev，Chromium 40/40 shortcuts en·ja）**：`input.ts` KEYBOARD_SHORTCUTS 表——desc/category 改存 i18n key，`settings-menu.ts` `_renderShortcutsSheet` 渲染时 `t()`。+~30 key(sc.*)。验证=程序触发 menuShortcuts 渲染 sheet 读 #shortcutsBody。
-  - [ ] **5b**：index.html 剩余静态 chrome（gallery 菜单/回收站/新建作品 sheet/云账号菜单 + 浮窗标题 图层/参考/颜色调整 + 参考窗）。
+  - [~] **5b**：index.html 剩余静态 chrome。
+    - [x] **5b-1（v382，已落 dev，Chromium 48/48）**：gallery 菜单/回收站 chrome + 新建作品 sheet + 浮窗标题(图层 restructure 保 count / 参考) + 图层脚工具 + 参考窗 + 关闭 aria（~48 处 data-i18n，subagent fan-out 应用 + 我审）。
+    - [ ] **5b-2**：lasso icon tooltips + brush rack sheet 头/工具 tooltips + brush settings view header(取消/笔刷设置/保存) + sync gate + resample dialog + adjust panel(JS)。glyph 文字按钮(套索文字栏/palette)= 切片 4。
   - [ ] **5c**：命令式 setStatus 散点（filters-adjust / blender-sync / cloud-auth-ui / import-image / doc-ops / session-state / brush-rack …）+ `cloud-freshness.ts` 网络对话框。
 - [ ] **抽取**：subagent 按文件簇 fan-out 机械抽 key。按面分批交付（高可见 chrome 优先）。
 
