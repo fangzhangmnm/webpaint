@@ -14,6 +14,7 @@
 //   currentBrush    ← 不可变 ResolvedBrush（从 dial+预设纯派生，引擎唯一吃）
 
 import { WEBPAINT_VERSION } from "./version.ts";
+import { initI18n, t } from "./i18n/index.ts";   // 本地化：<html lang> + 静态 HTML data-i18n 填充
 import { PaintDoc } from "./doc.ts";
 import { Board } from "./board.ts";
 import { InputController } from "./input.ts";
@@ -82,10 +83,11 @@ setPasswordPrompt(({ title, message }) =>
 if (navigator.maxTouchPoints > 0) {
   document.body.dataset.inputTouchscreen = "1";
 }
+initI18n();   // 本地化 boot：设 <html lang> + 填静态 HTML data-i18n（早于任何 JS 设标签/首帧）
 const doc = new PaintDoc({ width: 2048, height: 2048 });
 const board = new Board(els.board as HTMLCanvasElement, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-els.versionLabel.textContent = `版本：${WEBPAINT_VERSION || "?"}`;   // 挪到「强制更新」旁的菜单信息行
+els.versionLabel.textContent = t("menu.version", { v: WEBPAINT_VERSION || "?" });   // 挪到「强制更新」旁的菜单信息行
 // gallery 也显版本号（footer 水印 + 菜单信息行）——配合「强制更新」让用户知道自己在哪个版本。
 if (els.galleryFootVersion) els.galleryFootVersion.textContent = WEBPAINT_VERSION || "?";
 if (els.galleryMenuVersion) els.galleryMenuVersion.textContent = `版本：${WEBPAINT_VERSION || "?"}`;
@@ -254,7 +256,7 @@ function setStatus(text: string, persist = false) {
   els.statusLabel.textContent = text;
   if (statusTimer) clearTimeout(statusTimer);
   if (!persist) {
-    statusTimer = setTimeout(() => { els.statusLabel.textContent = "就绪"; }, 1800);
+    statusTimer = setTimeout(() => { els.statusLabel.textContent = t("status.ready"); }, 1800);
   }
 }
 // 文档版本 newer banner + save 按钮 4 态渲染 = save-status.ts。
@@ -334,7 +336,7 @@ els.topEncLock?.addEventListener("click", () => session.decryptCurrent());
 // 图库 popup 开启/关闭 + 菜单代理 + 新建文件夹 + 新建作品 sheet + IDB 占用/配额 = gallery-shell.ts。
 
 // ---- 启动收尾：尝试加载上次的 session（异步，不阻塞 UI 显示） ----
-setStatus("就绪");
+setStatus(t("status.ready"));
 updateZoomLabel();
 updateSaveStatus();
 updateCloudAuthUI();

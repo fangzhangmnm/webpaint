@@ -8,7 +8,8 @@
 
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
-import { applyTheme, cycleTheme, THEME_LABEL } from "./theme.ts";
+import { applyTheme, cycleTheme, themeLabel } from "./theme.ts";
+import { t, lang, cycleLang, setLang, LANG_NAME } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
 import { positionPopup } from "./anchored-popup.ts";
@@ -31,7 +32,7 @@ function closeSheet(sheet: HTMLElement | null, backdrop: HTMLElement | null) {
   sheet.classList.add("hidden");
 }
 
-function setMenuItem(btn: HTMLElement, on: boolean, stateLabel = on ? "开" : "关") {
+function setMenuItem(btn: HTMLElement, on: boolean, stateLabel = on ? t("common.on") : t("common.off")) {
   btn.setAttribute("aria-pressed", on ? "true" : "false");
   const st = btn.querySelector('.menu-item-state');
   if (st) st.textContent = stateLabel;
@@ -127,36 +128,48 @@ export function initSettingsMenu(ctx: AppContext) {
   });
   els.menuLongPressPick.addEventListener("click", () => {
     applyLongPressPick(!state.longPressPick);
-    setStatus(`长按吸色 · ${state.longPressPick ? "开" : "关"}`);
+    setStatus(t("status.longPressPick", { s: state.longPressPick ? t("common.on") : t("common.off") }));
   });
   els.menuSingleFingerDraw.addEventListener("click", () => {
     applySingleFingerDraw(!state.singleFingerDraw);
-    setStatus(`单指绘画 · ${state.singleFingerDraw ? "开" : "关"}`);
+    setStatus(t("status.singleFingerDraw", { s: state.singleFingerDraw ? t("common.on") : t("common.off") }));
   });
   els.menuCheckerboard.addEventListener("click", () => {
     applyCheckerboard(!state.checkerboard);
     // UI 态不 mark dirty（user 2026-06-10）：棋盘是观感开关，下次真编辑保存时顺手捞进 state.json。
     //   不再 edits.mark()——否则切个棋盘就让已同步的画变「未保存」。
-    setStatus(`透明棋盘 · ${state.checkerboard ? "开" : "关"}`);
+    setStatus(t("status.checkerboard", { s: state.checkerboard ? t("common.on") : t("common.off") }));
   });
 
   applyPixelGrid(safeLS("webpaint.pixelGrid") !== "0");   // boot：缺省=开
   if (els.menuPixelGrid) els.menuPixelGrid.addEventListener("click", () => {
     const next = !board.getPixelGridEnabled();
     applyPixelGrid(next);
-    setStatus(`像素栅格 · ${next ? "开" : "关"}`);
+    setStatus(t("status.pixelGrid", { s: next ? t("common.on") : t("common.off") }));
   });
 
   applyFps(safeLS("webpaint.fps") === "1");   // boot：缺省=关
   if (els.menuFps) els.menuFps.addEventListener("click", () => {
     const next = !board.getShowFps?.();
     applyFps(next);
-    setStatus(`FPS 计 · ${next ? "开" : "关"}`);
+    setStatus(t("status.fps", { s: next ? t("common.on") : t("common.off") }));
   });
   els.menuTheme.addEventListener("click", () => {
     const next = cycleTheme();
     applyTheme(next);
-    setStatus(`主题 · ${THEME_LABEL[next]}`);
+    setStatus(t("status.theme", { s: themeLabel(next) }));
+  });
+  // 语言切换：cycle zh→en→ja→tok→zh，setLang 持久化 + reload（reload 前 status 来不及看，无妨）。
+  const menuLanguage = document.getElementById("menuLanguage");
+  const updateLangLabel = () => {
+    const st = menuLanguage?.querySelector('[data-state-for="language"]');
+    if (st) st.textContent = LANG_NAME[lang()];
+  };
+  updateLangLabel();
+  menuLanguage?.addEventListener("click", () => {
+    const next = cycleLang();
+    setStatus(t("status.language", { s: LANG_NAME[next] }));
+    setLang(next);
   });
   // v100：删「检测更新」menu (实测在 iPad PWA 上不可靠，user：「检测更新功能没用」)。
   // 强制更新一律走「强制清缓存重启」（menuForcePwaReset）— 详 docs/20260526-pwa-update-detection.md。

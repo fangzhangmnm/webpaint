@@ -88,6 +88,13 @@ html, body {
   touch-action: manipulation;
 }
 
+/* i18n 字形：<html lang> 由 src/i18n 动态设（zh-CN/en/ja/tok）。默认栈（body 上面）偏中文
+   （PingFang/YaHei）→ 日文共享汉字会渲成中文字形，故 :lang(ja) 显式改日文字体栈。
+   zh/en/tok 用默认栈即可（tok 拉丁走 -apple-system）。详 docs/20260707-i18n-architecture.md §6。 */
+body:lang(ja) {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, "Noto Sans JP", sans-serif;
+}
+
 /* 顶栏 / 浮窗 / sheet / toast 上的所有 button / input：也明确写一遍，防 iOS
    在某些 Safari 版本上 element 默认仍允许 double-tap zoom */
 button, input, .swatch, .tool, .float-panel, .top-bar, .hud, .sheet, .backdrop, .toast {
