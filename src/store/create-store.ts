@@ -81,7 +81,8 @@ export interface RawFile {
   open(): Promise<Blob | null>;
   rename(newName: string): Promise<void>;
   delete(): Promise<void>;
-  isDirty(): boolean;
+  // 注：无 isDirty —— 「有没未推的改动」是 **sync 状态**，经 store.listAllItems 的 syncState 读（unpushed/conflict）。
+  //   「是否 dirty 该推」= app 编辑逻辑（编辑器生命周期模块）的判断，不是库的事。
   // ── 离线副本（keepOffline/offload；无 LRU、无 pin flag：有本地副本 = kept offline）──
   isKeptOffline(): Promise<boolean>;            // 本地有副本？（= 已留作离线）
   keepOffline(): Promise<void>;                 // 留一份离线副本（未缓存则 acquire）。注：open 已含下载子过程，故名 keepOffline 非 download
@@ -334,7 +335,6 @@ export function createStore(config: StoreConfig) {
       },
       async rename(newName) { await renameSF(name, newName); },
       async delete() { await delSF(name); },
-      isDirty() { return head.isDirty(name); },
       isKeptOffline() { return local.exists(name); },   // 有本地副本 = 已留作离线（无 LRU、无独立 pin flag）
       async keepOffline() {   // 确保本地有副本（未缓存则 acquire；离线/失败 best-effort）
         if (!(await local.exists(name))) { try { await identity.acquire(name, { localName: name }); } catch (e) { ui.reportError(e); } }
@@ -414,7 +414,7 @@ export function createStore(config: StoreConfig) {
       if (!(await looksEncryptedContainer(blob))) return blob;
       try { return (await unpackContainer(blob, pw)).dataBlob; } catch { return null; }
     },
-    _internal: { head, cloud, sub },
+    // 无 _internal —— app 绝不碰 head/cloud/sub（库内测试直接 import 对应模块）。
   };
 }
 
