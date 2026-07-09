@@ -54,6 +54,7 @@ export interface EditorSessionConfig {
 
 export interface EditorSession {
   open(name: string): Promise<void>;             // 打开 doc：先存旧的 → file(name).open() → editor.adopt()
+  adopted(name: string): void;                    // 编辑器内容已由 app 装入（new-doc/import，非 store.open）→ 记为当前 + 标脏
   flushLocal(): Promise<void>;                    // 立即存本地（不推）——内存脏才动
   flushAndPush(): Promise<void>;                  // 立即存本地 + best-effort 推云——内存脏才动
   rename(newName: string): Promise<void>;         // 改身份（先 flush 旧内容）
@@ -70,7 +71,8 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
   const pushOn = new Set(policy.pushOn ?? ["exit"]);
 
   let _name: string | null = null;
-  let _dirty = false;                              // 内存脏：editor 改过、还没落盘
+  let _dirty = false;                              // 内存脏：editor 改过、还没落本地（驱动 autosave）
+  let _pushPending = false;                        // 推-pending：自上次成功推后编辑过（驱动退出推；≠内存脏，flushLocal 清内存脏但留 push-pending）
   let _saving = false;                             // 落盘中（防重入/竞态）
   let _timer: ReturnType<typeof setInterval> | null = null;
   let _idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -81,19 +83,23 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     if (_onChangeWired) return;
     _onChangeWired = true;
     editor.onChange(() => {
-      _dirty = true;
+      _dirty = true; _pushPending = true;
       if (pushOn.has("idle")) scheduleIdle();
     });
   }
 
   const fileOf = (name: string) => store.file(name, { isZip });
 
+  // tryPush=false（flushLocal/autosave）：内存脏才动。tryPush=true（flushAndPush/退出）：内存脏 **或** push-pending 就动
+  //   （= autosave 已把内容落本地、内存不脏但还没推 → 退出仍要推，否则本次编辑只在本地）。
   async function persist(tryPush: boolean): Promise<void> {
-    if (!_name || !_dirty || _saving) return;
+    const need = tryPush ? (_dirty || _pushPending) : _dirty;
+    if (!_name || !need || _saving) return;
     _saving = true;
     try {
       const { bytes, peek } = await editor.encode();
-      _dirty = false;                              // 先清脏：encode 已取快照；期间再改会重新置脏（下轮 autosave 收）
+      _dirty = false;                              // 清内存脏：encode 已取快照；期间再改会重新置脏（下轮 autosave 收）
+      if (tryPush) _pushPending = false;           // 乐观清 push-pending（push 失败留 sync-dirty，store 内部 queue 补推）
       await fileOf(_name).save(bytes, { tryPush, hint: peek != null ? { peek } : undefined });
     } finally {
       _saving = false;
@@ -116,7 +122,13 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       const blob = await fileOf(name).open();      // open 内含 freshness / 冲突 surface（store 的 ui）/ 崩溃恢复
       if (blob) await editor.adopt(blob);
       _name = name;
-      _dirty = false;                              // 刚 adopt = 干净
+      _dirty = false; _pushPending = false;         // 刚 adopt = 干净（本会话未编辑）
+    },
+
+    adopted(name: string): void {                  // new-doc/import：编辑器内容由 app 装入（非 store.open）→ 当前 + 脏
+      wireOnChange();
+      _name = name;
+      _dirty = true; _pushPending = true;           // 新内容未落盘/未推
     },
 
     flushLocal: () => persist(false),
@@ -132,7 +144,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     async delete(): Promise<void> {
       if (!_name) return;
       const n = _name;
-      _name = null; _dirty = false;
+      _name = null; _dirty = false; _pushPending = false;
       await fileOf(n).delete();
     },
 

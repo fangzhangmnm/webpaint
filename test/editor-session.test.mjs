@@ -126,3 +126,29 @@ describe("editor-session › policy: blur 推 vs 不推", () => {
     eq(store.saves[0].tryPush, false, "policy 无 exit → 切 doc 存旧只本地不推");
   });
 });
+
+describe("editor-session › push-pending（autosave 后退出仍推）", () => {
+  it("flushLocal 后 flushAndPush 仍推（内存不脏但 push-pending）", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    await es.open("a"); editor.fireChange();
+    await es.flushLocal();                    // 存本地：内存脏清、push-pending 留
+    eq(es.isDirty(), false);
+    await es.flushAndPush();                  // 内存不脏，但 push-pending → 应推
+    eq(store.saves.length, 2); eq(store.saves[1].tryPush, true, "autosave 过的内容退出仍推");
+  });
+  it("flushAndPush 后再 flushAndPush no-op（无新编辑）", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    await es.open("a"); editor.fireChange();
+    await es.flushAndPush(); await es.flushAndPush();
+    eq(store.saves.length, 1, "推过且无新编辑 → 第二次 no-op");
+  });
+  it("adopted（new-doc）→ 内存脏+push-pending", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    es.adopted("new.ora");
+    eq(es.currentName(), "new.ora"); eq(es.isDirty(), true);
+    await es.flushLocal(); eq(store.saves[0].name, "new.ora"); eq(store.saves[0].tryPush, false);
+  });
+});
