@@ -10,6 +10,7 @@ import "./store-adopt-validation.test.mjs";
 import "./store-lost-response-claim.test.mjs";
 import "./store-p0-batch.test.mjs";
 import "./store-coalescer.test.mjs";
+import "./editor-session.test.mjs";   // 家族共享模块 editor-session 生命周期编排（mock store+editor）
 import "./folder-merge.test.mjs";
 import "./folder-flow.test.mjs";
 import "./folder-store.test.mjs";
