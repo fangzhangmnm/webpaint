@@ -9,9 +9,6 @@ import { t } from "./i18n/index.ts";
 import { defaultsPromise, mergeMissingDefaults, makeDefaultRack } from "./brushes.ts";
 import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
-import { ensureUnlocked } from "./enc-thumbs.ts";
-import { decodeOraToDoc } from "./ora.ts";
-import type { PaintDoc } from "./doc.ts";
 import type { AppContext } from "./app-context.ts";
 
 // 笔架 boot：异步加载 IDB 缓存 → toolStates 缺失字段从 rack 补齐 → 应用当前 tool 的 state。
@@ -53,39 +50,14 @@ export function initRackBoot(ctx: AppContext) {
 //   2) 有 → load → 成功 adopt + 进画布；失败 → 停 gallery
 //   3) 失败保留 currentSessionName 不清（用户下次冷启动还能 retry）
 export async function bootRestoreSession(ctx: AppContext) {
-  const { store: _store, setGalleryOpen, updateSaveStatus, setStatus, gateCloudSyncOnOpen } = ctx;
+  const { setGalleryOpen, updateSaveStatus, setStatus } = ctx;
   const wantedName = getCurrentSessionName();
-  if (!wantedName) {
-    session.setName(null);
-    updateSaveStatus();
-    await setGalleryOpen(true);
-    return;
-  }
-  try {
-    // boot load 走 store.flow.load（明文原样；加密容器需先解锁）。boot 不在 busy → 可弹密码框。
-    let r = await _store.flow.load(wantedName);
-    if (r.status === "locked") {
-      if (await ensureUnlocked(wantedName)) r = await _store.flow.load(wantedName);
-    }
-    if (r.status !== "loaded") {
-      // IDB 没了 / 加密未解锁（取消）→ 停 gallery
-      session.setName(null);
-      updateSaveStatus();
-      await setGalleryOpen(true);
-      setStatus(r.status === "locked"
-        ? t("mi.encryptedCancelled", { name: wantedName })
-        : t("mi.lastNotFound", { name: wantedName }));
-      return;
-    }
-    const loaded = await decodeOraToDoc(r.blob!);
-    session.adopt(loaded as PaintDoc, wantedName);
-    setStatus(t("mi.restored", { name: wantedName, n: loaded.layers.length }));
-    gateCloudSyncOnOpen(wantedName).catch((e: unknown) => console.warn("[sync-gate]", e));
-  } catch (e) {
-    console.warn("[session] load failed:", e);
-    session.setName(null);
-    updateSaveStatus();
-    await setGalleryOpen(true);
-    setStatus(t("mi.bootLoadFailed", { name: wantedName, err: String((e as Error)?.message || e) }), true);
-  }
+  if (!wantedName) { session.setName(null); updateSaveStatus(); await setGalleryOpen(true); return; }
+  // session.restore：es.open（store.file.open 内含本地/云端 + freshness + unseal）+ 设活动。失败=文件缺失/取消解锁。
+  const ok = await session.restore(wantedName);
+  if (ok) { setStatus(t("ss.opened", { name: wantedName })); return; }
+  session.setName(null);
+  updateSaveStatus();
+  await setGalleryOpen(true);
+  setStatus(t("mi.lastNotFound", { name: wantedName }));
 }

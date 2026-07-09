@@ -143,10 +143,8 @@ export interface AppContext {
   applyCheckerboard: (on: boolean) => void;   // v319：真实现 settings-menu.applyCheckerboard
   renderLayersPanel: () => void;
   setGalleryOpen: (open: boolean) => void;
-  gateCloudSyncOnOpen: (sessionName: string) => Promise<void>;   // v319：真实现 cloud-freshness，async 无显式返回值
   checkQuotaAndWarn: () => Promise<void>;   // v319：真实现 gallery-shell，async 无参无返回值
   uniqueLocalName: (stem: string) => Promise<string>;   // v319：真实现 gallery-shell，async
-  getLocalSavedAtLabel: () => string;   // v319：真实现 cloud-freshness，无参
   showFullscreenBusy: (msg?: string) => void;   // v319：真实现 fullscreen-busy
   hideFullscreenBusy: () => void;
 

@@ -53,7 +53,7 @@ export interface EditorSessionConfig {
 // ── 生命周期编排者 ────────────────────────────────────────────────────────────────────────
 
 export interface EditorSession {
-  open(name: string): Promise<void>;             // 打开 doc：先存旧的 → file(name).open() → editor.adopt()
+  open(name: string): Promise<boolean>;          // 打开 doc：先存旧 → file.open() → adopt。返回是否 adopt 了（false=文件缺失/锁定，未装入）
   adopted(name: string): void;                    // 编辑器内容已由 app 装入（new-doc/import，非 store.open）→ 记为当前 + 标脏
   flushLocal(): Promise<void>;                    // 立即存本地（不推）——内存脏才动
   flushAndPush(): Promise<void>;                  // 立即存本地 + best-effort 推云——内存脏才动
@@ -116,13 +116,14 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     currentName: () => _name,
     isDirty: () => _dirty,
 
-    async open(name: string): Promise<void> {
+    async open(name: string): Promise<boolean> {
       if (_name && _name !== name) await persist(pushOn.has("exit"));   // 切 doc 前先存旧的（退出语义）
       wireOnChange();
       const blob = await fileOf(name).open();      // open 内含 freshness / 冲突 surface（store 的 ui）/ 崩溃恢复
       if (blob) await editor.adopt(blob);
       _name = name;
       _dirty = false; _pushPending = false;         // 刚 adopt = 干净（本会话未编辑）
+      return blob != null;                          // false = 文件缺失/锁定，doc 未装入（boot 据此回图库）
     },
 
     adopted(name: string): void {                  // new-doc/import：编辑器内容由 app 装入（非 store.open）→ 当前 + 脏

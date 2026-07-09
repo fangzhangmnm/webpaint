@@ -50,7 +50,6 @@ import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
 import { updateSaveStatus, updateNewerBanner, ICON_DISK, ICON_UPLOAD, ICON_CLOUD_CHECK, ICON_CLOUD_BUSY } from "./save-status.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import { initLayerUndo, _afterDocChange, layerSpecFrom } from "./layer-undo.ts";
-import { gateCloudSyncOnOpen, getLocalSavedAtLabel, showIdleLockIfStale, initCloudFreshness } from "./cloud-freshness.ts";   // maybeFastForwardActive→topbar-menu
 import { initImportImage, importImageAsLayer } from "./import-image.ts";   // importImageAsNewDoc/setAddImportAsNewDoc 仅 gallery-shell/export-menu 用
 import { initExportImportMenu } from "./export-import-menu.ts";
 import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueLocalName } from "./gallery-shell.ts";
@@ -152,7 +151,7 @@ const input = new InputController(board, doc, {
   getLongPressPickEnabled: () => state.longPressPick,
   getSingleFingerDraw: () => state.singleFingerDraw,
   getPickMode: () => state.pickMode,
-  isContentReplacing: () => _store.busy.replacing(),   // N10：云端快进换内容中 → 起笔降级（gate 归 store 拥）
+  isContentReplacing: () => session.loadingDoc,   // N10：adopt 换内容中 → 起笔降级（session._loadingDoc）
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
   history,
@@ -218,8 +217,8 @@ const ctx: AppContext = freezeCtx({
   afterDocChange: _afterDocChange,
   referenceWindow, paletteWindow,   // side-windows.ts 的 import（module-eval 即构造，早可用）
   setColor, applyCheckerboard, renderLayersPanel,
-  setGalleryOpen, gateCloudSyncOnOpen, checkQuotaAndWarn, uniqueLocalName,
-  getLocalSavedAtLabel, showFullscreenBusy, hideFullscreenBusy,
+  setGalleryOpen, checkQuotaAndWarn, uniqueLocalName,
+  showFullscreenBusy, hideFullscreenBusy,
   get gallery() { return gallery; },   // 晚绑：gallery const 在下方 mountGallery 处构造
 });
 initColorPanel(ctx);
@@ -319,7 +318,6 @@ const gallery = mountGallery(document.getElementById("galleryMount")!, {
 // 晚 init 在此之后跑，故各模块 init 体里的 `x = ctx.gallery` 读到真值。
 setSessionGallery(gallery);   // session 的晚绑 gallery handle（getter 已使其 init 期即读到真值；此调用保持幂等冗余）
 initSession(ctx);
-initCloudFreshness(ctx);   // 前台云端新鲜度（需 board/withBusy/setStatus/updateSaveStatus）
 initImportImage(ctx);      // 图片/.ora 导入（需 late ctx：applyCheckerboard/renderLayersPanel/setGalleryOpen/uniqueLocalName）
 initGalleryShell(ctx);     // 图库外壳（需 ctx.gallery + late keys）
 initTopbarMenu(ctx);       // 顶栏/菜单/sheet/save 触发 事件接线（需 ctx.gallery）
@@ -366,9 +364,9 @@ window.addEventListener("wp:auth-changed", () => {
 window.addEventListener("online", async () => {
   if (!isSignedIn()) await retrySilentSignIn();
   updateCloudAuthUI();
-  if (isSignedIn()) _store.flow.drainDeleteQueue().catch((e) => console.warn("drainDeleteQueue", e));   // N3：重连重放离线删除（base-etag 守卫，不删错文件）
+  if (isSignedIn()) _store.drainDeleteQueue().catch((e) => console.warn("drainDeleteQueue", e));   // N3：重连重放离线删队列
   if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
-  showIdleLockIfStale();   // 回到在线 → 闲够了则锁屏（不静默 FF；点继续才 explicit 刷新）
+  if (isSignedIn() && session.name) _store.refresh(session.name).catch(() => {});   // 回线：事件驱动干净快进（freshness 进库；无 idle-lock）
 });
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
 
@@ -376,7 +374,7 @@ window.addEventListener("offline", () => { updateCloudAuthUI(); });
 // Gallery-first 启动恢复（加载上次 session 或停 gallery）= boot.ts bootRestoreSession。
 bootRestoreSession(ctx);
 // N3：启动时若在线+已登录，排空上次离线攒下的删除队列（fresh boot 不触发 online 事件，故此处补一刀）。
-if (navigator.onLine && isSignedIn()) _store.flow.drainDeleteQueue().catch((e) => console.warn("drainDeleteQueue", e));
+if (navigator.onLine && isSignedIn()) _store.drainDeleteQueue().catch((e: unknown) => console.warn("drainDeleteQueue", e));
 
 // 笔架深模块装配：mount sheet/settings 组件 + rackStore.configure + 注册 panel + 绑 DOM 事件。
 rack.init({
@@ -419,7 +417,7 @@ new PwaShell({
   envChip: document.getElementById("envChip"),
   onBeforeReload: async () => {
     editMode.applyPendingTransient();
-    if (_store.edits.localDirty() && !_store.busy.saving()) await session.save();
+    await session.save();   // saveNow 内含 blank/dirty 守卫（es.flushLocal 不脏 no-op）
   },
-  onForeground: () => showIdleLockIfStale(),
+  onForeground: () => { if (isSignedIn() && session.name) _store.refresh(session.name).catch(() => {}); },
 }).init();
