@@ -8,7 +8,7 @@
 //     与本仓「identity = GUID」一脉，见 MASTER.md）。
 // 纯叶子模块（只依赖 Date/crypto），cloud-sync / local-adapter / session.js 都可安全 import（无环）。
 
-export const LOCAL_BACKUP_PREFIX = ".backup-local/";   // 本地隐藏命名空间（镜像云端 .backup/）；不进图库、不 flood 用户文件夹
+export const LOCAL_BACKUP_PREFIX = "local-backup:";   // 本地隐藏命名空间（镜像云端 .backup/，对齐 local-trash: 命名；ADR-0019 迁移 .backup-local/→此）；不进图库
 
 function pad(n: number, w = 2) { return String(n).padStart(w, "0"); }
 

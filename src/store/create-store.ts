@@ -352,6 +352,47 @@ export function createStore(config: StoreConfig) {
     ? createSyncedSettings(createCollection<SettingItem>({ cloud, name: syncedSettingsFileName, local }))
     : undefined;
 
+  // ═══ 恢复 WebPaint editor-shell 超集（ADR-0019 dormant-when-unused；报告候选 B/C）═══════════════════════
+  //   JRP 拆 store.ts 时剪掉的「编辑器节律 + 加密裸字节公开面」——阅读器不需要连续编辑，拆文件时没搬进任何深模块。
+  //   内核全在（sub.edits/session、head.recordEdit/markSeen、seal、encReadPeek）——这里只 **re-surface，不发明**。
+  //   JRP 不驱动这些 = 天然 dormant（timer 不 start、edit() 不调、无 codec 时加密面抛），正如加密整体 dormant。
+
+  // B1 编辑入口：游标 + clean→dirty 门（head.recordEdit 捕获 parentBase）。name 空=只推游标不标云脏（gallery-first 未绑）。
+  function edit(name?: string | null): void { sub.edits.mark(); if (name) head.recordEdit(name); }
+
+  // B2 transient busy（saving=本地写盘 / pushing=云 push / replacing=切文档）：app 编排置位，save-status 只读。
+  const _busy = { saving: false, pushing: false, replacing: false };
+  let _pushIdleWaiters: Array<() => void> = [];
+  const busy = {
+    saving: (): boolean => _busy.saving, pushing: (): boolean => _busy.pushing, replacing: (): boolean => _busy.replacing,
+    set(k: "saving" | "pushing" | "replacing", v: boolean): void {
+      _busy[k] = v;
+      if (k === "pushing" && !v) { const w = _pushIdleWaiters; _pushIdleWaiters = []; w.forEach((r) => r()); }
+    },
+    whenPushIdle: (): Promise<void> => (_busy.pushing ? new Promise<void>((r) => _pushIdleWaiters.push(r)) : Promise.resolve()),
+  };
+
+  // B3 autosave cadence（3min 兜底 timer + 生命周期 flush；dirty/busy 判定收一处）。persist=app 注入（含 encode + 语义守卫）。
+  let _autosaveTimer: ReturnType<typeof setInterval> | null = null;
+  let _persist: () => Promise<void> = async () => {};
+  const autosave = {
+    configure: ({ persist }: { persist?: () => Promise<void> } = {}): void => { if (persist) _persist = persist; },
+    start: (intervalMs: number): void => { if (_autosaveTimer != null) clearInterval(_autosaveTimer); _autosaveTimer = setInterval(() => { if (sub.edits.localDirty() && !_busy.saving) void _persist(); }, intervalMs); },
+    stop: (): void => { if (_autosaveTimer != null) { clearInterval(_autosaveTimer); _autosaveTimer = null; } },
+    flush: (): Promise<void> => ((sub.edits.localDirty() && !_busy.saving) ? _persist() : Promise.resolve()),
+  };
+
+  // B4 adoptBase：app 打开/采纳 item 时捕获本 tab base-etag（If-Match 锚点，W2 红线）→ local-head.markSeen。
+  function adoptBase(name: string, etag: string | null): void { head.markSeen(name, etag); }
+
+  // C 加密裸字节公开面（导出密文 / checkpoint 旁路 / 加密缩略图）。逻辑全在（seal/encReadPeek）；无 codec 注入 → dormant。
+  async function sealBytes(name: string, bytes: Bytes | Blob): Promise<Bytes> { return seal.sealForWrite(name, await toU8(bytes)); }
+  async function loadRaw(name: string): Promise<Blob | null> { const b = await local.get(name); return b == null ? null : (b instanceof Blob ? b : new Blob([b as BlobPart])); }
+  async function decryptPeekBytes(name: string, blob: Blob): Promise<Uint8Array | null> {
+    const p = scanEncPeekFromEnd(new Uint8Array(await blob.arrayBuffer()));
+    return p ? await seal.withPassword(name, (pw) => decryptPeek(p, pw)) : null;
+  }
+
   return {
     file,
     collection,
@@ -397,6 +438,22 @@ export function createStore(config: StoreConfig) {
       if (!(await looksEncryptedContainer(blob))) return blob;
       try { return (await unpackContainer(blob, pw)).dataBlob; } catch { return null; }
     },
+    // ── 恢复的 editor-shell 超集（B/C，dormant-when-unused）──
+    edit,                      // 唯一编辑入口：游标 + clean→dirty 门（B1）
+    edits: sub.edits,          // 编辑游标 SSoT（mark/version/markSaved/localDirty，住 substrate）
+    session: sub.session,      // Ctrl+S save 合流 coalescer（configure/request，住 substrate）
+    adoptBase,                 // 打开/采纳时捕获 base-etag（If-Match 锚点，B4）
+    busy,                      // transient saving/pushing/replacing（app 置位，save-status 只读，B2）
+    autosave,                  // 本地落盘节律 configure/start/stop/flush（B3）
+    // 加密裸字节公开面（C）：
+    seal: sealBytes,           // 按 name 加密态包壳（导出密文 / checkpoint 旁路）
+    unseal: (name: string, blob: Blob) => seal.unsealForRead(name, blob),   // 非交互解壳（明文原样 / 内存密码 / 锁定 null）
+    loadRaw,                   // 原始字节不解壳（导出密文容器）
+    getTailBytes: (name: string, n: number) => encTailBytes(name, n, true),  // 尾部 N 字节（本地切片/云端 byte-range）
+    decryptPeekBytes,          // 尾片 → peek 明文字节（非交互；锁定 null）
+    readPeek: (name: string) => encReadPeek(name, true),                     // 便捷组合（getTail + decryptPeek）
+    isEncrypted: (name: string) => encIsEncrypted(name),                     // 加密态查询（本地字节尾扫）
+    verifyPassword: (name: string, pw: string) => encVerify(name, pw),       // UI 解锁循环便宜验（解 peek）
     // 编辑游标（app 标脏入口经 file.save；此处暴露给需要的高级用法）。
     _internal: { head, cloud, sub },
   };
