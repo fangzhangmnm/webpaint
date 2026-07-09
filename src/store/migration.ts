@@ -89,9 +89,9 @@ export function remapLocalKey(key: string): string {
   return key;
 }
 
-/** 旧 session 记录 → 锚定记录形状：{name,updatedAt,ora,thumb} → {blob,thumb,updatedAt}（丢冗余 name，ora→blob）。纯函数。 */
-export function remapSessionRecord(rec: { updatedAt?: number; ora: unknown; thumb?: unknown }): { blob: unknown; thumb: unknown; updatedAt: number } {
-  return { blob: rec.ora, thumb: rec.thumb ?? null, updatedAt: rec.updatedAt ?? 0 };
+/** 旧 session 记录 → 锚定记录形状：{name,updatedAt,ora,thumb} → {blob,peek,updatedAt}（丢冗余 name，ora→blob，thumb→peek）。纯函数。 */
+export function remapSessionRecord(rec: { updatedAt?: number; ora: unknown; thumb?: unknown }): { blob: unknown; peek: unknown; updatedAt: number } {
+  return { blob: rec.ora, peek: rec.thumb ?? null, updatedAt: rec.updatedAt ?? 0 };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════

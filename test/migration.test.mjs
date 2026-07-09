@@ -67,13 +67,13 @@ describe("migration › remapper（纯）", () => {
   it("remapLocalKey: trash:→local-trash:", () => { eq(remapLocalKey("trash:1720000000-2:pic.ora"), "local-trash:1720000000-2:pic.ora"); });
   it("remapLocalKey: .backup-local/→local-backup:", () => { eq(remapLocalKey(".backup-local/20260709-abc:pic.ora"), "local-backup:20260709-abc:pic.ora"); });
   it("remapLocalKey: 普通名不变", () => { eq(remapLocalKey("MyPic.ora"), "MyPic.ora"); eq(remapLocalKey("folder/sub/p.ora"), "folder/sub/p.ora"); });
-  it("remapSessionRecord: {name,updatedAt,ora,thumb} → {blob,thumb,updatedAt}", () => {
+  it("remapSessionRecord: {...} → {blob,peek,updatedAt}", () => {
     const out = remapSessionRecord({ name: "x.ora", updatedAt: 42, ora: "BYTES", thumb: "T" });
-    eq(out.blob, "BYTES"); eq(out.thumb, "T"); eq(out.updatedAt, 42);
+    eq(out.blob, "BYTES"); eq(out.peek, "T"); eq(out.updatedAt, 42);
     eq("name" in out, false, "丢冗余 name"); eq("ora" in out, false, "ora→blob 改名");
   });
   it("remapSessionRecord: thumb 缺 → null；updatedAt 缺 → 0", () => {
-    const out = remapSessionRecord({ ora: "B" }); eq(out.thumb, null); eq(out.updatedAt, 0);
+    const out = remapSessionRecord({ ora: "B" }); eq(out.peek, null); eq(out.updatedAt, 0);
   });
 });
 

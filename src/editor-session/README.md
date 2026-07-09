@@ -14,7 +14,7 @@ app  ──建──> store (sync-store)          app 建 store（含 provider/�
  └──editor（画图引擎）<──adopt/encode── editor-session
 ```
 
-- **editor（app 的引擎）**：`adopt(bytes)` / `encode()→bytes` / `onChange(cb)` / `thumb?()`。**persistence-agnostic**，不知有云。
+- **editor（app 的引擎）**：`adopt(bytes)` / `encode()→{bytes,peek}` / `onChange(cb)`。**persistence-agnostic**，不知有云。
 - **editor-session（本模块）**：打开 / 存 / 推 / 失焦 flush / 退出推 / 崩溃恢复 的**通用编排**。是 store 的**消费者**，不创建 store。
 - **store（sync-store）**：藏起同步的文件系统。**app 创建**（本模块只调 `file(name).open/save/rename/delete` + `reconcile`）。
 
@@ -26,7 +26,7 @@ import { createEditorSession } from "./editor-session/index.ts";
 const store = createStore({ provider, ui, crypto, crypt, validateAdopt });   // app 建（含 ui bundle）
 const es = createEditorSession({
   store,                                    // app 建好的 store（本模块只消费）
-  editor: { adopt, encode, onChange, thumb },// app 的引擎适配器（本模块只调这四个）
+  editor: { adopt, encode, onChange },  // app 的引擎适配器（本模块只调这三个）
   isZip: true,                              // 这个 app 的 doc 是不是 zip 容器（有 peek）
   policy: { autosaveMs: 180_000, pushOn: ["exit"] },   // **app-agnostic**：cadence/push 时机每 app 不同 → 注入
 });

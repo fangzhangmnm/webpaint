@@ -62,7 +62,7 @@ export interface TrashEntry {
   name: string;
 }
 export interface LocalCache {
-  /** hint：flow.save 透传的 app 旁路（store 不解释、不解码内容；app 可经 hint.thumb 供现成缩略图）。 */
+  /** hint：save 透传的 app 旁路（store 不解释、不看内容；app 可经 hint.peek 供不透明 sidecar 字节）。 */
   save(name: string, bytes: Bytes | Blob, hint?: unknown): Promise<unknown>;
   get(name: string): Promise<Blob | null>;
   exists(name: string): Promise<boolean>;

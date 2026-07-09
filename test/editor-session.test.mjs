@@ -1,6 +1,6 @@
 // editor-session 生命周期编排验收（mock store + mock editor，纯逻辑）。
 //   验：open→adopt / onChange→内存脏 / flushLocal 不推 / flushAndPush 推 / 切 doc 前存旧 / rename 先 flush /
-//       不脏 no-op / encode 快照后清脏 / hint.thumb 透传 / delete 清态。
+//       不脏 no-op / encode 快照后清脏 / hint.peek 透传 / delete 清态。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { createEditorSession } from "../src/editor-session/index.ts";
 
@@ -33,9 +33,8 @@ function mockEditor() {
     adopted, get encodeCount() { return encodeCount; },
     fireChange: () => changeCb(),
     adopt: async (blob) => { adopted.push(blob); },
-    encode: async () => { encodeCount++; return new Blob(["DOC-BYTES-" + encodeCount]); },
+    encode: async () => { encodeCount++; return { bytes: new Blob(["DOC-BYTES-" + encodeCount]), peek: new Blob(["PEEK"]) }; },
     onChange: (cb) => { changeCb = cb; },
-    thumb: async () => new Blob(["THUMB"]),
   };
 }
 
@@ -78,11 +77,11 @@ describe("editor-session › flush 本地 vs 推云", () => {
     await es.flushLocal(); await es.flushAndPush();
     eq(store.saves.length, 0, "不脏不存"); eq(editor.encodeCount, 0, "不脏不 encode");
   });
-  it("hint.thumb 透传给 store.save", async () => {
+  it("hint.peek 透传给 store.save", async () => {
     const store = mockStore(), editor = mockEditor();
     const es = createEditorSession({ store, editor });
     await es.open("a"); editor.fireChange(); await es.flushLocal();
-    assert(store.saves[0].hint && store.saves[0].hint.thumb instanceof Blob, "hint.thumb 应为 Blob");
+    assert(store.saves[0].hint && store.saves[0].hint.peek instanceof Blob, "hint.peek 应为 Blob");
   });
 });
 

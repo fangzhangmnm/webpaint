@@ -6,7 +6,7 @@
 一个 doc「从打开到关闭、保持同步」的生命周期编排者。app-agnostic：注入 `editor` 适配器 + `store`（消费）+ `policy`。**是 sync-store 的消费者，不创建 store。**
 
 ## editor（适配器，app 注入）
-app 的编辑引擎暴露的最小面：`adopt(bytes)` / `encode()→bytes` / `onChange(cb)` / `thumb?()`。editor-session 不懂内容，只调这四个。**editor 绝不碰 store**（持久化对它透明）。
+app 的编辑引擎暴露的最小面：`adopt(bytes)` / `encode()→{bytes,peek}` / `onChange(cb)`。editor-session 不懂内容，只调这三个。**editor 绝不碰 store**（持久化对它透明）。
 
 ## 两种「脏」——**别混**（这是本模块存在的一半意义）
 - **内存脏（memory-dirty）** = editor 自上次落盘后改过、还没 encode 落本地。**本模块 track**（`isDirty()`），app 层概念。驱动 autosave cadence。

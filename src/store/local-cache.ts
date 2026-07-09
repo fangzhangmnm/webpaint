@@ -1,7 +1,7 @@
 // ⚠ 使用前必读 README.md。store 内部模块,**不要从 app 直接 import**——app 只走 createStore()。
 //
 // LocalCache —— store 的本地持久层(离线缓存 + 秒开)。**内容无关、零 ORA 知识**:
-//   只存/取不透明 binary blob(ora/glb/pdf/txt 一律),thumbnail 由 app 经 hint.thumb 供——
+//   只存/取不透明 binary blob(ora/glb/pdf/txt 一律),peek(不透明 sidecar)由 app 经 hint.peek 供——
 //   **store 绝不解码内容、绝不渲缩略图**(那是 app 的事)。自包含 IDB(idb-store.ts),不依赖任何 app 代码。
 // (旧版反向 import WebPaint 的 ora.ts/session.ts/storage.ts 解码渲 thumb —— 那是污染,2026-06-21 抽掉。)
 // 契约见 types.ts 的 LocalCache。浏览器专用,真机验。
@@ -15,11 +15,11 @@ function stripTrashPrefix(key: string): string { return key.replace(/^local-tras
 
 export function createLocalCache(): LocalCache {
   return {
-    // 覆盖写。bytes 归一化成 Blob(契约落 Blob)。thumb 只取 hint.thumb(store 不解码、不渲)。
+    // 覆盖写。bytes 归一化成 Blob(契约落 Blob)。peek 只取 hint.peek(store 不解码、不看内容)。
     async save(name: string, bytes: Bytes | Blob, hint?: unknown) {
       const blob = bytes instanceof Blob ? bytes : new Blob([bytes]);
-      const thumb = (hint && (hint as { thumb?: unknown }).thumb instanceof Blob) ? (hint as { thumb: Blob }).thumb : null;
-      await idbCache.put(name, { blob, thumb, updatedAt: Date.now() });
+      const peek = (hint && (hint as { peek?: unknown }).peek instanceof Blob) ? (hint as { peek: Blob }).peek : null;
+      await idbCache.put(name, { blob, peek, updatedAt: Date.now() });
     },
     async get(name: string) { const r = await idbCache.get(name); return r ? r.blob : null; },
     async exists(name: string) { return (await idbCache.get(name)) !== undefined; },

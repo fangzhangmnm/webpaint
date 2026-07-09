@@ -19,9 +19,10 @@
 /** app 的编辑引擎暴露给 editor-session 的最小面。本模块不懂内容，只调这几个。 */
 export interface EditorAdapter {
   adopt(bytes: Blob): Promise<void>;    // 收字节 → 解码进编辑器（替换当前内容）。null/失败由 app 域处理。
-  encode(): Promise<Blob>;              // 当前内容 → 字节（本模块拿去 store.save）。
   onChange(cb: () => void): void;       // 用户改动 → fire 一次（本模块据此标「内存脏」）。register-once。
-  thumb?(): Promise<Blob | null>;       // 选填：当前内容缩略图 → 作 store.save 的 hint.thumb（content-blind 透传）。
+  // 当前内容 → { bytes, peek }。peek = **content-blind 的不透明 sidecar 字节**（app 域自己决定语义，
+  //   如画作缩略图/文本摘要；editor-session 不看、只把它作 store.save 的 hint 透传）。无则 peek 省略。
+  encode(): Promise<{ bytes: Blob; peek?: Blob | null }>;
 }
 
 /** editor-session 消费的 store 最小面（结构类型；真 sync-store 天然满足，测试可 mock）。 */
@@ -91,10 +92,9 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     if (!_name || !_dirty || _saving) return;
     _saving = true;
     try {
-      const bytes = await editor.encode();
-      const hint = editor.thumb ? { thumb: await editor.thumb() } : undefined;
+      const { bytes, peek } = await editor.encode();
       _dirty = false;                              // 先清脏：encode 已取快照；期间再改会重新置脏（下轮 autosave 收）
-      await fileOf(_name).save(bytes, { tryPush, hint });
+      await fileOf(_name).save(bytes, { tryPush, hint: peek != null ? { peek } : undefined });
     } finally {
       _saving = false;
     }
