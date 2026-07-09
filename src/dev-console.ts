@@ -52,7 +52,7 @@ export function initDevConsole() {
     if (!itemId) {
       // 自动找第一个云端 ora
       if (!isSignedIn()) throw new Error("没登录云");
-      const list = await listCloudSessionsRecursive();
+      const list = await store.listAllItems({ signedIn: true, online: true }).then((r) => r.items);
       if (!list.length) throw new Error("云端没 session");
       const first = list[0];
       itemId = first.id; fileSize = first.size;

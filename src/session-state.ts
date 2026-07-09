@@ -379,6 +379,16 @@ async function restoreSession(name: string): Promise<boolean> {
   } catch (e) { console.warn("[session] restore failed:", e); return false; }
 }
 
+// 另存为：当前内容写新身份（旧的不动）+ 切到新名继续编辑。
+async function saveAs(newName: string): Promise<void> {
+  const bytes = await _encodeCurrentOra();
+  const peek = await renderThumbBlob(doc, 256);
+  await _file(newName).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
+  _activeSessionName = newName; setCurrentSessionName(newName); _isLazyBlankSession = false; _recomputePhase();
+  es.adopted(newName);   // es 切到新名（内容即新名的；下轮 autosave 若跑=同内容 re-save，无害）
+  _docLastSavedAt = Date.now(); updateSaveStatus(); gallery.refresh();
+}
+
 function setName(name: string | null) { _activeSessionName = name; setCurrentSessionName(name as string); _recomputePhase(); }
 
 // ---- 公开 session 对象（app.js 兼容面）----
@@ -395,7 +405,7 @@ export const session = {
   get loadedDocNewerConfirmed() { return _loadedDocNewerConfirmed; },
   get dirty() { return es ? es.isDirty() : false; },            // 内存脏（save-status 徽章用）
   markEdited() { if (es) es.markDirty(); },                     // app 驱动内容变化（导入/blender/参考窗）→ 标脏
-  setName, restore: restoreSession,
+  setName, restore: restoreSession, saveAs,
   save: saveNow, saveAndPush, adopt: adoptLoadedDoc, adoptWithOpts: adoptLoadedDocWithOpts,
   rename: renameCurrentSession, exit: exitCanvasToGallery, newDoc, pull: pullCloudPath, open: openItem, push: pushItem, unload: unloadItem,
   encodeOra: _encodeCurrentOra, buildOraMeta: _buildOraMeta,

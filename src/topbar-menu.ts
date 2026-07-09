@@ -22,7 +22,6 @@ import { session } from "./session-state.ts";
 import {
   store as _store,
   isSignedIn,
-  isCloudDirty,
   setRackDirty,
 } from "./app-store.ts";
 import { els } from "./els.ts";
@@ -31,7 +30,6 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { sessionNameConflict } from "./session-name.ts";
 import { decodeOraToDoc } from "./ora.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
-import { maybeFastForwardActive } from "./cloud-freshness.ts";
 import { t } from "./i18n/index.ts";
 import type { Layer, PaintDoc } from "./doc.ts";
 
@@ -100,9 +98,8 @@ export function initTopbarMenu(ctx: AppContext) {
   // store.edit(name) 一处吸：推编辑游标(local-dirty) + 经门标云脏(捕 parentBase；不 gate signedIn)。
   // name 空（gallery-first 未绑 session）→ 只推游标。门机制全在库内（app 不再直调 setCloudDirty，ADR-0016 §4）。
   window.addEventListener("wp:histchange", () => {
-    if (session.loadingDoc) return;             // 加载/采纳/FF 期间 clearHistory 派发的 histchange 不算编辑（不标脏）
-    _store.edit(session.name || null);
-    if (!session.name) return;                  // gallery-first: 无绑 session 时不刷 save 按钮
+    if (session.loadingDoc) return;             // 加载期 clearHistory 的 histchange 不算编辑（session 的 ora 适配器已挂 histchange→es 标脏）
+    if (!session.name) return;
     updateSaveStatus();
   });
   // saveAndPush / renameCurrentSession / coalescer+autosave 接线全切到 session-state.ts。
@@ -110,7 +107,7 @@ export function initTopbarMenu(ctx: AppContext) {
   window.addEventListener("keydown", (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
       e.preventDefault();
-      _store.session.request(e.shiftKey ? "local" : "push");
+      if (e.shiftKey) session.save(); else session.saveAndPush();   // Ctrl+Shift+S=只本地；Ctrl+S=存+推
     }
   });
   // autosave configure/start + visibility/pagehide flush 已切到 session-state.ts initSession。
@@ -121,11 +118,10 @@ export function initTopbarMenu(ctx: AppContext) {
   //    后台 IDB transaction 大概率能跑完；user 选「留下」→ 成果保住，选「离开」→
   //    至少有 dialog 那一两秒救了
   window.addEventListener("beforeunload", (e: BeforeUnloadEvent) => {
-    if (_store.edits.localDirty() && !_store.busy.saving()) {
+    if (session.dirty) {
       e.preventDefault();
       e.returnValue = "";
-      // 偷存（implicit 只写 IDB 不推云）；不 await 让 dialog 立刻起。flush 内部再判一次 dirty/busy（无害）
-      _store.autosave.flush().catch(() => {});
+      session.save().catch(() => {});   // 偷存本地（不 await 让 dialog 立刻起；saveNow 内部再判脏）
     }
   });
 
@@ -135,10 +131,10 @@ export function initTopbarMenu(ctx: AppContext) {
   els.topSaveBtn.addEventListener("click", () => {
     const name = session.name;
     // synced（无可存可推）→ 按钮兼作「刷新云端态」（ADR-0017，点一下 = 现场查云 + 干净则快进）；否则正常存/推。
-    if (name && name !== "未命名" && isSignedIn() && !_store.edits.localDirty() && !isCloudDirty(name)) {
-      maybeFastForwardActive({ manual: true });
+    if (name && name !== "未命名" && isSignedIn() && !session.dirty) {
+      _store.refresh(name).then(() => updateSaveStatus()).catch(() => {});   // synced：点=现场查云干净快进（freshness 进库）
     } else {
-      _store.session.request("push");
+      session.saveAndPush();
     }
   });
 
@@ -198,19 +194,8 @@ export function initTopbarMenu(ctx: AppContext) {
       if (conflict === "cloud") { setStatus(t("tm.cloudNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
       // 另存为 = 写新身份、旧的不动（store.flow.saveAs：本地存 + 云端 push，云端 best-effort）。
       try {
-        const cloudOn = isSignedIn() && navigator.onLine !== false;
-        const res = await _store.flow.saveAs(trimmed, {
-          encode: () => session.encodeOra(),
-          cloud: cloudOn,
-        });
-        session.setName(trimmed);
-        _store.edits.markSaved();
-        session.markSavedNow();
-        updateSaveStatus();
-        if (!cloudOn) setStatus(t("tm.savedAs", { name: trimmed }));
-        else if (res.cloudDeferred) setStatus(t("tm.savedAsLocalOnly", { name: trimmed }));
-        else setStatus(t("tm.savedAsWithCloud", { name: trimmed }));
-        gallery.refresh();
+        await session.saveAs(trimmed);   // 当前内容写新身份 + 切新名（session 编排；tryPush best-effort）
+        setStatus(t("tm.savedAsWithCloud", { name: trimmed }));
         return;
       } catch (e) {
         setStatus(t("tm.saveAsFailed", { err: String(errMsg(e)) }));
@@ -240,13 +225,13 @@ export function initTopbarMenu(ctx: AppContext) {
     editMode.applyPendingTransient();
     try {
       // checkpoint 字节按文件加密态包过壳 → 先 unseal（明文原样过；密码在内存则无感）
-      const plain = await _store.unseal(session.name, cp.blob);
+      const plain = cp.blob;   // ⚠TODO checkpoint 重构后过透明解壳；当前 readCheckpoint stub 返 null，此路不可达
       if (!plain) { setStatus(t("tm.revertFailedNeedPassword"), true); return; }
       const loaded = await decodeOraToDoc(plain);
       session.adoptWithOpts(loaded as PaintDoc, session.name, { skipCheckpoint: true });
       // R4：revert 是内容变化（像素回到旧快照）→ 必须走 clean→dirty 门标云脏。
       //   旧版只 edits.mark() 不标云脏 → 云端永远收不到 revert，且 clean 快进会无备份吃掉 revert 结果。
-      _store.edit(session.name);
+      session.markEdited();
       updateSaveStatus();
       setStatus(t("tm.revertedToOpen", { min: ageMin }));
     } catch (e) {
