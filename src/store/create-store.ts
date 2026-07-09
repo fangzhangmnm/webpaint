@@ -70,7 +70,8 @@ export interface StoreConfig {
 
 // ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
 export interface RawFile {
-  save(bytes: Bytes | Blob): Promise<void>;
+  save(bytes: Bytes | Blob, hint?: unknown): Promise<void>;        // 本地落盘 + consented push（hint 透传缩略图等 app 旁路，store content-blind）
+  saveLocal(bytes: Bytes | Blob, hint?: unknown): Promise<void>;   // 编辑器超集：**只落本地不 push**（autosave/频繁保存的 consent-safe 路径，ADR-0016/0018）
   open(): Promise<Blob | null>;
   rename(newName: string): Promise<void>;
   delete(): Promise<void>;
@@ -286,16 +287,23 @@ export function createStore(config: StoreConfig) {
       return await seal.unsealForRead(name, asBlob);
     };
     return {
-      async save(bytes) {
+      async save(bytes, hint) {
         head.recordEdit(name);                                   // 同步标脏：offload 的 isDirty 守卫立即可见（防驱逐吃未推字节）
         const plain = await toU8(bytes);
         const sealed = await seal.sealForWrite(name, plain);
-        await sub.serialize(name, () => local.save(name, sealed));   // local 写进同名串行链：与 offload.hardDelete 互斥（C2 红线）
+        await sub.serialize(name, () => local.save(name, sealed, hint));   // local 写进同名串行链：与 offload.hardDelete 互斥（C2 红线）；hint 透传缩略图
         try { await pushMod.push(name, { encode: () => plain, onConflict }); }
         catch (e) { ui.reportError(e); }
         // ADR-0018：离线「新上传」补推——push 没成(仍 dirty) ∧ 从没 synced(seenBase null) → 入队，回线 drainUploadQueue 补推。
         //   （编辑已同步文件 seenBase≠null → 不入队，仍走 consent-surface。enqueue 对 manual policy 内部 no-op。）
         if (head.isDirty(name) && head.seenBase(name) == null) uploadReplay.enqueue(name);
+      },
+      // 编辑器超集（ADR-0016/0018）：只落本地 + 标脏，**绝不 push**。autosave / 频繁保存走这条——
+      //   opaque Work 的 push 必须 consent-gated（Ctrl+S/exit 才 file.save），autosave 自动推 = 违反 consent 红线。
+      async saveLocal(bytes, hint) {
+        head.recordEdit(name);
+        const sealed = await seal.sealForWrite(name, await toU8(bytes));
+        await sub.serialize(name, () => local.save(name, sealed, hint));
       },
       async open() {
         if (await local.exists(name)) {                          // 有本地副本 → **先 etag 检查**（fresh.open）：in-sync 读本地、变了才拉云、脏 surface
