@@ -1,5 +1,5 @@
 // MockLocal —— 内存模拟本地持久层（IDB），实现 store.local 契约。
-// 真 LocalAdapter（包 session.js/storage.js）在 C1b 写；现在用它测 Store 的编排。
+// 真 LocalCache（包 session.js/storage.js）在 C1b 写；现在用它测 Store 的编排。
 //
 // store.local 契约：
 //   save(name, bytes)      → void        覆盖写（一文件一原子写，H1）
@@ -11,7 +11,7 @@
 //   restore(trashKey)     → name|null    从本地 trash 恢复
 
 import type { Bytes } from "./substrate.ts";
-import type { LocalAdapter, TrashEntry } from "./types.ts";
+import type { LocalCache, TrashEntry } from "./types.ts";
 
 // 本地 trash 条目内部形状。
 interface TrashItem {
@@ -28,8 +28,8 @@ async function toU8(x: Bytes | Blob | ArrayBuffer | string | null | undefined): 
   throw new Error("MockLocal: 无法识别的 bytes 类型");
 }
 
-// MockLocal = LocalAdapter 契约（类型层验证真 LocalAdapter 同契约）+ 测试辅助内省字段。
-export interface MockLocal extends LocalAdapter {
+// MockLocal = LocalCache 契约（类型层验证真 LocalCache 同契约）+ 测试辅助内省字段。
+export interface MockLocal extends LocalCache {
   _items: Map<string, Bytes>;
   _trash: Map<string, TrashItem>;
 }
@@ -38,16 +38,17 @@ export function createMockLocal(): MockLocal {
   const items = new Map<string, Bytes>();           // name → Uint8Array
   const trash = new Map<string, TrashItem>();        // trashKey → { name, bytes }
   let tk = 0, bk = 0;
-  // 注：本测试替身内部以 Uint8Array 存取（测试断言 .length / u8txt），而真 LocalAdapter
+  // 注：本测试替身内部以 Uint8Array 存取（测试断言 .length / u8txt），而真 LocalCache
   // 契约「内部落 Blob、get 出 Blob」。二者在「字节 vs Blob」上有意背离 —— 测试只关心字节内容。
-  // 故 get 运行时回 Bytes，但声明为契约的 Blob（下方 as 处擦除），保持 MockLocal ⊆ LocalAdapter。
-  const adapter: LocalAdapter = {
+  // 故 get 运行时回 Bytes，但声明为契约的 Blob（下方 as 处擦除），保持 MockLocal ⊆ LocalCache。
+  const adapter: LocalCache = {
     async save(name: string, bytes: Bytes | Blob) { items.set(name, await toU8(bytes)); },
     async get(name: string): Promise<Blob | null> {
       // 测试替身：运行时回 Uint8Array（测试只读字节内容），类型按契约声明 Blob。
       return (items.has(name) ? items.get(name)! : null) as unknown as Blob | null;
     },
     async exists(name: string) { return items.has(name); },
+    async appKeys() { return [...items.keys()].filter((k) => !k.startsWith("local-trash:") && !k.startsWith(".backup-local/") && !k.startsWith("__collection__/")); },
     async backup(name: string) {
       if (!items.has(name)) throw new Error(`本地无 ${name}，无法备份`);
       const backupName = `.backup-local/${++bk}:${name}`;   // 隐藏命名空间 + counter 防撞（测试确定性）；同名多次也唯一

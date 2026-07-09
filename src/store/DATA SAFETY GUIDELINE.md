@@ -1,0 +1,20 @@
+## A. Data-safety red-lines — these must NEVER happen
+
+The canonical failure list (from `journals/20260604-potential-bugs.md`, `docs/20260604-potential-bugs.md`) and exactly where the model forbids each. **If a change can cause any row's left column, it crosses a red-line.**
+
+| Must never happen | How the model forbids it | Owner |
+|---|---|---|
+| Two devices edit offline → reconnect → **LWW silently picks one, the other evaporates** | **No LWW for content.** Conflict = `dirty ∧ cloudMoved` → *surfaced* (sheet), never silent; both sides preserved (`.backup`) | state-machine §1, ADR-0009/0014 |
+| Same-device multi-tab: a **stale tab's Ctrl+S clobbers** a newer tab | **Per-file push-serialize + `If-Match` base-etag** → the stale push 412s, can't overwrite | ADR-0009 (W2) |
+| **Clock skew** makes LWW judge "older" as "newer" | No LWW; divergence decided by **`If-Match`/etag**, not timestamps. Display clock = **user-action-time** | ADR-0004/0009 |
+| **Un-pushed local edits wiped by cache eviction** (deadliest — gone before sync) | **Eviction guard: evict iff `clean ∧ re-fetchable`.** Dirty/unpushed is never evicted (auto-pinned + `.backup`) | ADR-0009 (W2), state-machine §3 |
+| **Interrupted upload → truncated/corrupt cloud file → next pull overwrites the good local** | **Atomic commit (`If-Match`) + W1 idempotency**; pull/auto-take only adopts a *complete* newer cloud version; re-entry never adopts a partial | ADR-0009, state-machine §3 |
+| **delete-vs-edit**: one deletes, one edits → merge loses something | **edit-wins by default** + delete = **move-to-`.trash`** (recoverable); surfaced, never silent | share-file-model §Offline-delete, ADR-0015 |
+| Cloud provider **dedup / rename / scan / quarantine** moves or alters the file | **Identity = path/name** (format-agnostic; the in-file **GUID-in-thumb scheme (ADR-0011) was tried on real devices and ROLLED BACK 2026-06-07** — see `WebPaint/docs/20260607-sync-identity-decision.md`: store parses no file, knows no thumb/guid, so mp3/txt/pdf siblings can share it). Data-safety guarantee that survives: two devices → same name → **never blind-overwrite** (no-base push uses `conflictBehavior:"fail"` + size-check → `CloudNameCollisionError`, both kept). Encryption hides bytes from scanners (3-layer, ADR-0012). *Cross-device rename-split (wart E) = accepted UX blemish, **not** data-loss (re-sync converges).* | ADR-0012; sync-identity-decision-2026-06-07 (**ADR-0011 GUID superseded**) |
+| **"Sync succeeded" actually wrote to the wrong account or folder** | **Phantom-path red-line**: destructive ops use the *actually-loaded* path, never `localStorage.currentPath`; the Workbench is never a destructive pointer; account-bound, old-account items **ghost** (never auto-delete) | ADR-0008, share-file-model |
+| **Conflict resolution picks one side and silently discards the other** | **Never hard-override a Work** (even with consent); weak-override stashes the loser to `.backup` (never lossy); no destructive "pull" | ADR-0009 |
+| **Cold-start / re-entry reads a half-written file** | **Ready-gate** suppresses input until re-entry resolves; re-entry rehydrates from the crash-shadow (local, complete) or a validated cloud version | ADR-0010 |
+
+**One-line invariants behind all of the above:** every push is `If-Match` · every delete/overwrite is **move-aside** (`.trash`/`.backup`, same-tier, never cross-network) · authority is **stateful** (dirty→local, clean→cloud) · identity is **path/name** (format-agnostic; in-file GUID superseded 2026-06-07) · the **deep storage module** enforces these, never the UI.
+
+> _§A identity row + invariant corrected as-of 2026-06-19 (JRP review): the GUID-in-thumb identity (ADR-0011) was rolled back 2026-06-07; store is format-agnostic, identity = path/name, **no thumbnail required**. Trust code over stale doc._

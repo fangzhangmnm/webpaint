@@ -29,8 +29,22 @@
 //     碰不到用户文件就能拒错密码 → throw code=WRONG_PASSWORD）。
 // 无密钥托管、无 salt 文件：salt 在各自 header（.7z header / peek header），换/丢设备零迁移。
 
-import { zipPack, zipUnpack } from "../zip.ts";
-import { pack7z, unpack7z } from "../sevenzip.ts";
+// HOST-SEAM(2026-06-21 改注入,去静态宿主依赖):zip/7z codec 由 createStore config 注入,
+// crypto-container **不再静态 import 宿主模块** → 不加密的项目(JRP)不被 zip/7z 拖累、store.ts 可独立构建。
+// 不提供 codec = 加密不可用(packContainer/unpackContainer 抛),探测类(looksEncryptedContainer 等)不受影响。
+export interface CryptoCodec {
+  zipPack(entries: { path: string; data: Uint8Array | string }[]): Promise<Blob>;
+  zipUnpack(blob: Blob): Promise<Record<string, Uint8Array>>;
+  pack7z(entries: { path: string; data: Uint8Array | string }[], password: string): Promise<Uint8Array>;
+  unpack7z(bytes: Uint8Array, password: string): Promise<Record<string, Uint8Array>>;
+}
+let _codec: CryptoCodec | null = null;
+/** createStore config 提供 zip/7z codec 时调用;不调 = 加密不可用。 */
+export function configureCryptoCodec(c: CryptoCodec | null): void { _codec = c; }
+function codec(): CryptoCodec {
+  if (!_codec) throw new Error("加密未配置：createStore config 未提供 crypto codec(zip/7z)");
+  return _codec;
+}
 
 // payload 永远走 unpack7z（7z-wasm = 真 7-Zip）——它**既认 .7z 也认老 WinZip-AES zip**（实测逐位还原），
 // 所以加解密一概不碰 zip.js，向后兼容 v233-235 老容器零特例。下面 magic 仅用于「识别这块是不是加密 payload」。
@@ -185,13 +199,13 @@ export interface PackOpts {
 export async function packContainer({ dataBytes, fileName, ext = "bin", guid, peek = null, password }: PackOpts): Promise<Blob> {
   if (!password) throw new Error("没有密码，无法加密");
   const metaJson = JSON.stringify({ v: 1, name: fileName || null, ext });
-  const payloadBytes = await pack7z([
+  const payloadBytes = await codec().pack7z([
     { path: "data.bin", data: dataBytes },
     { path: "meta.bin", data: META_MAGIC + metaJson },
   ], password);
   const peekEnc = await encryptPeek(peek, password);
   // peek 必须最后（byte-range 尾部一发命中 + 容器探测）；外层全 STORE（zipPack level:0）
-  return await zipPack([
+  return await codec().zipPack([
     { path: guid || makeGuid(), data: payloadBytes },
     { path: "peek", data: peekEnc },
   ]);
@@ -227,7 +241,7 @@ export async function unpackContainer(blob: Blob | Uint8Array, password: string)
   let payload: Uint8Array | null = null, guid = "";
   if (_startsWith(whole, ZIP_MAGIC)) {
     try {
-      const outer = await zipUnpack(blob instanceof Blob ? blob : new Blob([whole as BlobPart]));
+      const outer = await codec().zipUnpack(blob instanceof Blob ? blob : new Blob([whole as BlobPart]));
       const g = Object.keys(outer).find((n) => n !== "peek" && n !== "thumb");   // "thumb"=v233/234 兼容
       if (g && outer[g] && (_startsWith(outer[g], SEVENZ_MAGIC) || _startsWith(outer[g], ZIP_MAGIC))) {
         payload = outer[g]; guid = g;
@@ -236,7 +250,7 @@ export async function unpackContainer(blob: Blob | Uint8Array, password: string)
   }
 
   // 无外壳（裸 .7z / 裸 WinZip-AES）→ 整块就是加密 payload。两路最终都 7z-wasm 解，零格式特例。
-  const inner = await unpack7z(payload ?? whole, password);
+  const inner = await codec().unpack7z(payload ?? whole, password);
   const data = _pickData(inner);
   if (!data) throw new Error("加密文件里没有可读内容");
   return { dataBlob: new Blob([data as BlobPart], { type: "application/zip" }), meta: _readMeta(inner), guid };

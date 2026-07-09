@@ -190,10 +190,13 @@ export async function getToken(): Promise<string> {
     const result = await pca.acquireTokenSilent({ scopes: SCOPES, account: activeAccount });
     return result.accessToken;
   } catch (e) {
-    // silent 失败 = token 过期/失效 → **先清 activeAccount + 通知**（F2：别再假装已登录），再重定向登录。
+    // silent 失败 = token 过期/失效 → 清 activeAccount + 通知 UI（按钮变灰，回到"未登录"）。
+    // **绝不在此 acquireTokenRedirect**：getToken 只在后台 graph 请求里被调；后台数据同步
+    //   触发交互式跳转 = boot 重定向循环（silent 失败→跳转→重载→再 silent 失败…一直转）/
+    //   阅读中被劫持导航。交互式重新登录只走显式 signIn()（user-gesture loginRedirect），
+    //   后台同步在此降级为离线（调用方 try/catch 收成 offline，本地仍可读、脏不丢）。
     activeAccount = null;
     _emitAuth();
-    await pca.acquireTokenRedirect({ scopes: SCOPES });
     throw e;
   }
 }

@@ -317,6 +317,12 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     try { items = await provider.list(trashFolder); } catch (_) { return []; }
     return items.filter(match);
   }
+  // 备份箱列表（weakOverride/keepMine 的 loser 字节 stash 处）。恢复/彻底删走通用 restore(itemId)/purge(itemId)。
+  async function listBackup(): Promise<CloudItem[]> {
+    let items: CloudItem[];
+    try { items = await provider.list(backupFolder); } catch (_) { return []; }
+    return items.filter(match);
+  }
 
   // 同 folder → rename；跨 folder → ensureFolder + move。caller 保证 newName 不冲突。
   async function rename(oldName: string, newName: string): Promise<void> {
@@ -375,7 +381,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   return {
     push, pull, fetchMeta, pullTail, weakOverride,
     trash, restore, purge,
-    list, listAll, listFolders, listTrash, rename, remove,
+    list, listAll, listFolders, listTrash, listBackup, rename, remove,
     ensureFolder, removeFolder,
     getETag, setETag, isDirty, setDirty, clearState,
   };

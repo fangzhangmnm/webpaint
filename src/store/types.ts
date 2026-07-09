@@ -54,19 +54,20 @@ export interface CloudProvider {
   rename(id: string, newName: string, eTag?: string | null): Promise<CloudItem>;
 }
 
-// ---- 本地持久层（LocalAdapter）：store.local 契约 ----
-// **字节边界关键点**（v221 0B bug 雷区）：save 可收 Bytes 或 Blob（store 流经 toU8 给的是 Bytes），
-//   但内部必须落 Blob（pkg.ora.size 给图库列大小、decodeOraToDoc 的 BlobReader 都只吃 Blob）；
-//   get 出 Blob（解码/上传再各自转）。类型在此写死，错配即编译错。
+// ---- 本地持久层（LocalCache）：store.local 契约（**内容无关**，存任意 binary blob）----
+// **字节边界关键点**（0B bug 雷区）：save 可收 Bytes 或 Blob（store 流经 toU8 给的是 Bytes），
+//   但内部必须落 Blob（size/上传/读取都按 Blob 算）；get 出 Blob。类型在此写死，错配即编译错。
 export interface TrashEntry {
   trashKey: string;
   name: string;
 }
-export interface LocalAdapter {
-  /** hint：flow.save 透传的 app 旁路（store 不解释；如 WebPaint 带活 doc 现成缩略图省一次解码）。 */
-  save(name: string, oraBytes: Bytes | Blob, hint?: unknown): Promise<unknown>;
+export interface LocalCache {
+  /** hint：flow.save 透传的 app 旁路（store 不解释、不解码内容；app 可经 hint.thumb 供现成缩略图）。 */
+  save(name: string, bytes: Bytes | Blob, hint?: unknown): Promise<unknown>;
   get(name: string): Promise<Blob | null>;
   exists(name: string): Promise<boolean>;
+  /** 已缓存的**应用文件名**集合（排除 trash/backup/collection 内部命名空间）——gallery 批量判 cached 用。 */
+  appKeys(): Promise<string[]>;
   backup(name: string): Promise<string>;
   trash(name: string): Promise<string>;
   hardDelete(name: string): Promise<void>;
@@ -114,6 +115,7 @@ export interface CloudSync {
   listAll(): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }>;
   listFolders(): Promise<string[]>;
   listTrash(): Promise<CloudItem[]>;
+  listBackup(): Promise<CloudItem[]>;
   rename(oldName: string, newName: string): Promise<unknown>;
   remove(name: string): Promise<unknown>;
   ensureFolder(path: string): Promise<void>;
