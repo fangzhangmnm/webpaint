@@ -4,7 +4,7 @@
 // （rename 把检查包进 withBusy 覆盖空窗；saveAs 在 busy 前查），故只抽**检查本身**，调用点结构不动。
 
 import { listSessions } from "./session.ts";
-import { listCloudSessionsRecursive } from "./app-store.ts";
+import { store } from "./app-store.ts";
 import { stripSessionExt } from "./config.ts";
 
 // 返回冲突类型 "local" | "cloud" | null。cloud 列举失败不算冲突（best-effort，吞并 warn）。
@@ -13,8 +13,8 @@ export async function sessionNameConflict(name: string, { cloud = false }: { clo
   if (localNames.includes(name)) return "local";
   if (cloud) {
     try {
-      const list = await listCloudSessionsRecursive();
-      if (list.map((c: { path: string }) => stripSessionExt(c.path)).includes(name)) return "cloud";
+      const { items } = await store.listAllItems({ signedIn: true, online: navigator.onLine !== false });
+      if (items.map((it) => stripSessionExt(it.path)).includes(name)) return "cloud";
     } catch (e) { console.warn("[session-name] cloud list failed:", e); }
   }
   return null;

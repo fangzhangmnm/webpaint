@@ -62,10 +62,9 @@ registerExporter({
   // 防「导出」变成无声的明文泄漏口。要明文导出：先在图库解除加密。
   // 下载扩展名由 export-import-menu 按字节判（容器 → .zip）。
   encode: async (doc) => {
-    const plain = await encodeDocToOra(doc);
-    if (!session.name) return plain;
-    const sealed = await _store.seal(session.name, new Uint8Array(await plain.arrayBuffer()));
-    return new Blob([sealed], { type: "application/zip" });
+    // cutover：store.seal 已删（裸加密面塌进透明 open/save）。导出=明文 .ora（本机下载，用户显式选；
+    //   加密保护的是云端 at-rest。TODO：若要密文导出，经 store 读 at-rest 字节的新接口。
+    return await encodeDocToOra(doc);
   },
 });
 registerExporter({

@@ -7,14 +7,13 @@ import { isUnlocked, getPassword, setPassword, onPasswordVerified, promptPasswor
 
 /** 本地加密作品的缩略图（内存密码解得开→PNG Blob；锁定/没有→null）。非交互——批量渲染不弹窗。 */
 export async function localPeekThumb(name: string): Promise<Blob | null> {
-  const bytes = await store.readPeek(name);
-  return bytes && bytes.length ? new Blob([bytes], { type: "image/png" }) : null;
+  return await store.file(name, { isZip: true }).getPeek();   // 不透明 peek 字节（app 当 PNG 缩略图）；本地切片/云端 byte-range
 }
 
 /** 云端 byte-range 拉回的密文 peek blob（ENC_PEEK_MIME）→ PNG Blob | null。非交互。 */
 export async function decryptCloudPeekThumb(name: string, encBlob: Blob): Promise<Blob | null> {
-  const bytes = await store.decryptPeekBytes(name, encBlob);
-  return bytes && bytes.length ? new Blob([bytes], { type: "image/png" }) : null;
+  void encBlob;
+  return await store.file(name, { isZip: true }).getPeek();   // getPeek 自取本地/云端；encBlob 参数保留兼容（不再用）
 }
 
 /**
@@ -24,14 +23,14 @@ export async function decryptCloudPeekThumb(name: string, encBlob: Blob): Promis
  */
 export async function ensureUnlocked(name: string): Promise<boolean> {
   const cur = getPassword(name);
-  if (cur && await store.verifyPassword(name, cur)) return true;
+  if (cur && await store.file(name, { isZip: true }).verifyPassword(cur)) return true;
   for (let attempt = 0; ; attempt++) {
     const pw = await promptPassword({
       title: "解锁加密作品",
       message: attempt > 0 ? "密码不对，再试一次" : "输入图库密码。密码只存在内存里，关页即忘。",
     });
     if (pw == null) return false;
-    if (await store.verifyPassword(name, pw)) { onPasswordVerified(name, pw); return true; }
+    if (await store.file(name, { isZip: true }).verifyPassword(pw)) { onPasswordVerified(name, pw); return true; }
   }
 }
 

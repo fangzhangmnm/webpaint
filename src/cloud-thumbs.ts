@@ -17,7 +17,11 @@
 //   - 硬扫：8 字节 sig + IHDR 验证 + IEND 终止，false-match 概率 ~1/2^96
 //   - ZIP 解析：EOCD commentLen sanity 防 false-positive；输出 PNG magic 校验
 
-import { downloadItemRange, downloadItemBlob, downloadRangeFromUrl } from "./app-store.ts";
+// ⚠TODO：cloud-only 缩略图的 byte-range 拉取——薄库不暴露原始 byte-range（内容盲）。暂 stub 返 null（占位图）。
+//   缓存过/本地的作品仍有 peek 缩略图（store 存的 hint.peek）；cloud-only 未缓存 → 占位。待 store 出内容盲 getTail 原语。
+const downloadItemRange = async (..._a: unknown[]): Promise<Uint8Array | null> => null;
+const downloadItemBlob = async (..._a: unknown[]): Promise<Blob | null> => null;
+const downloadRangeFromUrl = async (..._a: unknown[]): Promise<Uint8Array | null> => null;
 // 加密容器（ADR-0012）：尾部是加密 peek blob（WebPaint 的 peek=缩略图 PNG），
 // PNG 硬扫自然落空 → 扫 MAGIC。命中返**密文** Blob（type=ENC_PEEK_MIME），解密归 caller
 // （图库经 store.decryptPeekBytes 按锁态解；cache 层原样缓存密文 → 明文 thumb 不落 IDB）。

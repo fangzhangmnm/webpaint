@@ -5,6 +5,7 @@
 //   initSideWindows(ctx) 在任何交互前填好）是安全的。setColor 是稳定 import，无需经 ctx。
 
 import { t } from "./i18n/index.ts";
+import { session } from "./session-state.ts";
 import { ReferenceWindow } from "./reference.ts";
 import { PaletteWindow } from "./palette.ts";
 import { els } from "./els.ts";
@@ -105,7 +106,7 @@ export function initSideWindows(ctx: AppContext) {
       const persistBlob = fit.scaled ? await canvasToBlob(fit.source as Parameters<typeof canvasToBlob>[0]) : file;
       referenceWindow.setBitmap(fit.source, { persistBlob });
       if (fit.scaled) (decoded as ImageBitmap).close?.();                    // 缩放后原 bitmap 没用了，释放
-      _store.edits.mark();
+      session.markEdited();
       updateSaveStatus();
       window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
       setStatus(t("mi.referenceLoaded", { name: file.name, scaled: fit.scaled ? t("mi.referenceScaled", { w: fit.w, h: fit.h }) : "" }));

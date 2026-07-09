@@ -15,7 +15,10 @@ import {
   makeDefaultRack, mergeMissingDefaults, migrateBrush, defaultBrushForTool,
   brushesByTool, findBrush, newBrushId, brushFromJSON, DEFAULT_FOLDER,
 } from "./brushes.ts";
-import { resolveRef } from "./app-store.ts";
+// resolveRef 内联（brush ref 解析：先 id 后 name 兜底；折 folder-merge 依赖）。
+function resolveRef<T extends { id?: unknown; name?: unknown }>(list: T[], ref: { id?: unknown; name?: unknown }): T | null {
+  return list.find((x) => ref.id != null && x.id === ref.id) ?? list.find((x) => ref.name != null && x.name === ref.name) ?? null;
+}
 import { collectFolders } from "./brush-rack-view.ts";
 import { mountRackSheet } from "./ui/rack-sheet.ts";
 import { mountBrushSettings } from "./ui/brush-settings.ts";

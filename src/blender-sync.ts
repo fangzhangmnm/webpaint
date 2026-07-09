@@ -12,9 +12,10 @@
 // 单键多态（连接/连接中/已连接，点击随态切动作）；拉取/推送 = 菜单里 smart 导入导出那种 main + ⋯ 配置。
 //
 // 协议立场（别在这重新发明）：贴图靠 name 识别；推 = 整张覆盖，无冲突解决 by design。
-// 不碰 store 红线：只调 store.edits.mark() 公共 API（同 import-image.ts），其余持久化全走库。
+// 不碰 store 红线：只调 session.markEdited() 公共 API（同 import-image.ts），其余持久化全走库。
 
 import type { AppContext } from "./app-context.ts";
+import { session } from "./session-state.ts";
 import type { Layer } from "./doc.ts";
 import { store } from "./app-store.ts";
 import { renderDocToImageBlob } from "./session.ts";
@@ -250,7 +251,7 @@ function placeBitmapAsNewLayer(bmp: ImageBitmap, name: string): boolean {
     bboxW: w, bboxH: h,
     bitmap: bmp,
   });
-  store.edits.mark();
+  session.markEdited();
   ctx.updateSaveStatus();
   ctx.afterDocChange();
   return true;
@@ -265,7 +266,7 @@ function overwriteLeaf(leaf: Layer, bmp: ImageBitmap) {
   ctx.board.invalidateAll();
   ctx.board.requestRender();
   ctx.renderLayersPanel();                             // 刷缩略图
-  store.edits.mark();
+  session.markEdited();
   ctx.updateSaveStatus();
 }
 

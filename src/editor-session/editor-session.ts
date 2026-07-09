@@ -55,6 +55,7 @@ export interface EditorSessionConfig {
 export interface EditorSession {
   open(name: string): Promise<boolean>;          // 打开 doc：先存旧 → file.open() → adopt。返回是否 adopt 了（false=文件缺失/锁定，未装入）
   adopted(name: string): void;                    // 编辑器内容已由 app 装入（new-doc/import，非 store.open）→ 记为当前 + 标脏
+  markDirty(): void;                              // app 驱动的内容变化（不走 editor onChange，如设置/参考窗）→ 标脏
   flushLocal(): Promise<void>;                    // 立即存本地（不推）——内存脏才动
   flushAndPush(): Promise<void>;                  // 立即存本地 + best-effort 推云——内存脏才动
   rename(newName: string): Promise<void>;         // 改身份（先 flush 旧内容）
@@ -131,6 +132,8 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       _name = name;
       _dirty = true; _pushPending = true;           // 新内容未落盘/未推
     },
+
+    markDirty(): void { _dirty = true; _pushPending = true; },   // app 驱动内容变化（onChange 之外）→ 标脏
 
     flushLocal: () => persist(false),
     flushAndPush: () => persist(true),

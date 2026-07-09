@@ -40,15 +40,9 @@ export const ICON_CLOUD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="cu
 export const ICON_CLOUD_BUSY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><g class="spin-arc" style="transform-origin: 12px 13px;"><path d="M9 13a3 3 0 0 1 5.5-1.6" /><polyline points="14.5 9.5 14.5 11.4 12.6 11.4" /></g></svg>';
 
 export function computeSaveState() {
-  // transient（本地未存/存盘中/推云中）= app 态；synced/dirty/local-only = store.cloud.status 单一源（候选2）。
-  if (_store.busy.pushing()) return "cloud-busy";
-  if (_store.busy.saving()) return "saving";
-  if (_store.edits.localDirty()) return "dirty";
-  // session.name: string|null；updateSaveStatus 在调本函数前已 `if(!session.name) return` 守门（跨函数 tsc 看不到）。
-  const st = _store.cloud.status(session.name as string, { signedIn: isSignedIn(), hasLocal: true });
-  if (st === "dirty") return "cloud-dirty";     // 本地已存、云端未同步
-  if (st === "synced") return "synced";         // 与云端一致
-  return "local-only";                          // 未登录（含 cloud-only/absent，对本地视角=只本地）
+  // cutover：busy/cloud 状态不再暴露（sync 脏进 listAllItems，非徽章热路径）。内存脏=session.dirty，其余按登录态。
+  if (session.dirty) return "dirty";                       // 内存脏（未落盘）
+  return isSignedIn() ? "synced" : "local-only";
 }
 export function updateSaveStatus() {
   // gallery-first: 没绑 session → 隐藏 save btn（没东西可保存）
@@ -62,10 +56,7 @@ export function updateSaveStatus() {
   els.topSaveBtn.dataset.state = state;
   els.topSaveBtn.style.opacity = ""; els.topSaveBtn.style.color = "";   // 永不残留旧的灰/蓝 —— 云=可按态主题色（灰=不可按，禁用）
   const name = session.name;
-  if (state === "cloud-busy") { els.topSaveBtn.innerHTML = ICON_CLOUD_BUSY; els.topSaveBtn.title = t("save.uploading", { name }); }
-  else if (state === "saving")      { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.saving", { name }); }
-  else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.dirty", { name }); }
-  else if (state === "cloud-dirty") { els.topSaveBtn.innerHTML = ICON_UPLOAD; els.topSaveBtn.title = t("save.cloudDirty", { name }); }
+  if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.dirty", { name }); }
   else if (state === "synced") {
     // synced = 云✓（上次保存时已同步）。中性可按态色；点击=检查云端有没有新版本（动作走 tooltip+行为）。
     els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK;

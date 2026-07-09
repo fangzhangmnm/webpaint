@@ -393,6 +393,8 @@ export const session = {
   get loadedDocIsNewer() { return _loadedDocIsNewer; },
   get loadedDocWriterVer() { return _loadedDocWriterVer; },
   get loadedDocNewerConfirmed() { return _loadedDocNewerConfirmed; },
+  get dirty() { return es ? es.isDirty() : false; },            // 内存脏（save-status 徽章用）
+  markEdited() { if (es) es.markDirty(); },                     // app 驱动内容变化（导入/blender/参考窗）→ 标脏
   setName, restore: restoreSession,
   save: saveNow, saveAndPush, adopt: adoptLoadedDoc, adoptWithOpts: adoptLoadedDocWithOpts,
   rename: renameCurrentSession, exit: exitCanvasToGallery, newDoc, pull: pullCloudPath, open: openItem, push: pushItem, unload: unloadItem,

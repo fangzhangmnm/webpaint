@@ -15,7 +15,7 @@
 
 import { getMeta, setMeta } from "./storage.ts";
 import { fetchOraThumbnail } from "./cloud-thumbs.ts";
-import { getDownloadUrl } from "./app-store.ts";
+const getDownloadUrl = async (..._a: unknown[]): Promise<string | null> => null;   // ⚠TODO：薄库不暴露 downloadUrl（内容盲）
 
 const KEY_PREFIX = "cloud-thumb:";
 

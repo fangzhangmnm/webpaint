@@ -190,7 +190,7 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   renderLayersPanel();
   board.invalidateAll();
   board.requestRender();
-  _store.edits.mark();
+  session.markEdited();
   updateSaveStatus();
   // 触发 wp:histchange 让保存状态同步
   window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
