@@ -19,7 +19,7 @@
 import { session } from "./session-state.ts";
 import { els } from "./els.ts";
 import { listSessions, readImageFromClipboard } from "./session.ts";
-import { listCloudSessionsRecursive, listCloudAll, isSignedIn } from "./app-store.ts";
+import { isSignedIn } from "./app-store.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.ts";
@@ -46,7 +46,7 @@ export async function setGalleryOpen(open: boolean) {
   if (open) {
     // 进图库 = 用户离开编辑场景 → apply 所有 pending transient（套索浮层等）+ 保存
     editMode.applyPendingTransient();
-    if (_store.edits.localDirty() && !_store.busy.saving()) await session.save();
+    if (session.dirty) await session.save();
     await session.awaitCloudPushIdle();   // 等 cloud push 完，防 status race
     document.body.dataset.mode = "gallery";
     els.galleryFull.classList.remove("hidden");
@@ -55,7 +55,7 @@ export async function setGalleryOpen(open: boolean) {
     updateIdbUsage();
   } else {
     editMode.applyPendingTransient();
-    if (_store.edits.localDirty() && !_store.busy.saving()) await session.save();
+    if (session.dirty) await session.save();
     els.galleryFull.classList.add("hidden");
     delete document.body.dataset.mode;
     // 关闭可能打开的 popup
@@ -366,15 +366,15 @@ export function initGalleryShell(ctx: AppContext) {
       let allNames: string[] = [], cloudFolders: string[] = [];
       try { allNames = allNames.concat((await listSessions()).map((s: { name: string }) => s.name)); } catch {}
       try {
-        const all = await listCloudAll();
-        allNames = allNames.concat(all.files.map((c: { path: string }) => stripSessionExt(c.path)));
+        const all = await _store.listAllItems({ signedIn: isSignedIn(), online: navigator.onLine !== false });
+        allNames = allNames.concat(all.items.map((it) => stripSessionExt(it.path)));
         cloudFolders = all.folders;
       } catch (e) { console.warn("[folder] cloud list failed:", e); }
       const fullPrefix = `${fullPath}/`;
       const exists = allNames.some((n) => n === fullPath || n.startsWith(fullPrefix)) || cloudFolders.includes(fullPath);
       if (exists) { setStatus(t("gs.folderExists", { name: trimmed }), true); return; }
       // 走 store.flow.newFolder（深模块窄接口）而非裸 ensureSubfolder——锁屏/单飞守卫由库内强制。
-      try { await _store.flow.newFolder(fullPath, { isOnline: () => isSignedIn() && navigator.onLine !== false }); setStatus(t("gs.folderCreated", { name: trimmed })); }
+      try { await _store.newFolder(fullPath); setStatus(t("gs.folderCreated", { name: trimmed })); }
       catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus(t("gs.folderCreateFailed", { err: errMsg(e) }), true); }
     });
     gallery.refresh();

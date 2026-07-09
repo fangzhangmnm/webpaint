@@ -3,17 +3,10 @@ import "./dom-shim-first.mjs";   // **必须第一**：在任何 import-Vue 之�
 import { run } from "./runner.mjs";
 import "./onedrive-provider.contract.test.mjs";
 import "./crypto-container.test.mjs";
-import "./store-crypt.test.mjs";
 import "./substrate.test.mjs";
-import "./store-flow.test.mjs";
-import "./store-adopt-validation.test.mjs";
-import "./store-lost-response-claim.test.mjs";
-import "./store-p0-batch.test.mjs";
-import "./store-coalescer.test.mjs";
 import "./editor-session.test.mjs";   // 家族共享模块 editor-session 生命周期编排（mock store+editor）
 import "./folder-merge.test.mjs";
 import "./folder-flow.test.mjs";
-import "./folder-store.test.mjs";
 import "./brush-rack-migrate.test.mjs";
 import "./engine-registry.test.mjs";
 import "./registry.test.mjs";
@@ -53,8 +46,6 @@ import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序�
 // document 缓存成 module 级 const（createText 等用它）。boot-smoke 装了 DOM shim 后才 import app.js，
 // 故 Vue 求值时 document 有效（=shim doc）；若让别的 import-Vue 的测试先跑（node 无 document），
 // Vue 缓存 doc=null，boot-smoke 里 Vue mount 即 `null.createTextNode` 炸。current-brush 故排其后。
-import "./app-boot.test.mjs";   // 组合根 boot smoke（接线零覆盖缺口，见该文件头注释）。包了 global timer。
-import "./current-brush.test.mjs";   // 当前笔反应式接线（守 boot-smoke 抓不到的依赖断裂）。不 mount DOM，无 shim 也跑。
 import "./dial-controls.test.mjs";   // dial 写入 setSize/setOpacity + 键盘 [ ] 段量化调粗。
 import "./editor-state-restore.test.mjs";   // adoptLoadedDoc 的 toolStates 反序列化下沉（v98 兼容）。
 

@@ -14,10 +14,12 @@ await ensure7zLoaded();
 const {
   packContainer, unpackContainer, looksEncryptedContainer,
   scanEncPeekFromEnd, decryptPeek, encryptPeek,
-  makeGuid, PEEK_TAIL_WINDOW,
+  makeGuid, PEEK_TAIL_WINDOW, configureCryptoCodec,
 } = await import("../src/store/crypto-container.ts");
-const { zipPack } = await import("../src/zip.ts");
-const { pack7z } = await import("../src/sevenzip.ts");
+const { zipPack, zipUnpack } = await import("../src/zip.ts");
+const { pack7z, unpack7z } = await import("../src/sevenzip.ts");
+// cutover：crypto-container 不再静态 import 宿主 zip/7z（HOST-SEAM 注入）→ 测试前注入 codec。
+configureCryptoCodec({ zipPack, zipUnpack, pack7z, unpack7z });
 
 // ---- 测试素材 ----
 const PNG_STUB = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4, 5, 6, 7, 8]);
@@ -178,7 +180,7 @@ describe("crypto-container · 尾部加密 peek（byte-range 路径，格式盲�
 // 只用最小 zip parser 取出外层 <GUID> 字节（外壳是明文 zip），断言它是 .7z；再用**全新** 7z-wasm
 // 实例（= 另一台机器的 7-Zip）输密码解出 data.bin → 逐位还原。
 
-const { unpack7z } = await import("../src/sevenzip.ts");
+// unpack7z 已在文件头 import（codec 注入）。
 
 function parseOuterZip(u8) {
   // 外壳明文 zip：EOCD → CD → local header（最小 32-bit parser）

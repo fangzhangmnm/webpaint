@@ -2,7 +2,7 @@
 //   纯调试面：console 里手敲 WebPaint.* 验证云缩略图 byte-range 拉取、看缓存命中、给插件挂注册口。
 //   非业务逻辑，所有依赖直接 import（无 ctx），由 app 启动时调一次 initDevConsole()。
 import { fetchOraThumbnail } from "./cloud-thumbs.ts";
-import { isSignedIn, listCloudSessionsRecursive } from "./app-store.ts";
+import { isSignedIn, store } from "./app-store.ts";
 import { registerFilter, listFilters } from "./filters.ts";
 import { registerExporter, listExporters } from "./exporters.ts";
 import {
@@ -55,7 +55,7 @@ export function initDevConsole() {
       const list = await store.listAllItems({ signedIn: true, online: true }).then((r) => r.items);
       if (!list.length) throw new Error("云端没 session");
       const first = list[0];
-      itemId = first.id; fileSize = first.size;
+      itemId = first.path; fileSize = first.size ?? 0;   // ⚠ Item 无 provider id（薄库内容盲）；POC 用 path 占位
       console.log("POC：拉", first.path, "size", fileSize);
     }
     const t0 = performance.now();

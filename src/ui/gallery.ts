@@ -16,8 +16,7 @@ import {
   createApp, defineComponent, reactive, ref, computed, watch, onMounted, onUnmounted, nextTick,
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import {
-  store as _store, isCloudDirty, listCloudSessionsRecursive,
-  clearFolderCaches,
+  store as _store,
   listGallery, listGalleryTrash,
 } from "../app-store.ts";
 import { listSessions } from "../session.ts";
@@ -30,7 +29,6 @@ import { ENC_PEEK_MIME } from "../crypto-format.ts";
 import { isUnlocked, onLockChange, setPassword } from "../crypto-state.ts";
 import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword, ensureUnlocked } from "../enc-thumbs.ts";
 import { sliceFolder, folderHasContents, copyTargetName } from "../gallery-model.ts";
-import { cloud } from "../app-store.ts";
 import { pathFolder, pathBasename, pathJoin } from "../gallery-path.ts";
 import { stripSessionExt } from "../config.ts";
 import { tileFor, breadcrumb, trashTileFor, humanTime, humanSize } from "./gallery-view-model.ts";
@@ -172,7 +170,7 @@ function makeGallery(host: GalleryHost) {
         try {
           const st = { signedIn: host.signedIn(), online: host.online() };
           if (view.value === "trash") {
-            trash.value = await listGalleryTrash(st) as TrashGItem[];
+            trash.value = await listGalleryTrash() as unknown as TrashGItem[];
           } else {
             const r = await listGallery(st);
             data.items = r.items; data.cloudFolders = r.cloudFolders;
@@ -208,7 +206,7 @@ function makeGallery(host: GalleryHost) {
         if (localNames.has(name)) return t("gal.loc.local");
         if (alsoCloud) {
           try {
-            const cloudNames = new Set((await listCloudSessionsRecursive()).map((c: { path: string }) => stripSessionExt(c.path)));
+            const cloudNames = new Set((await _store.listAllItems({ signedIn: true, online: true })).items.map((it) => stripSessionExt(it.path)));
             if (cloudNames.has(name)) return t("gal.loc.cloud");
           } catch (e) { console.warn("[gallery] cloud names:", e); }
         }
@@ -250,8 +248,8 @@ function makeGallery(host: GalleryHost) {
             const taken = await nameTaken(trimmed, isCloud);
             if (taken) return { taken };
             try {
-              const res = await _store.flow.rename(item.name, trimmed, { cloud: isCloud });
-              host.status(res.cloudDeferred ? t("gal.st.renamedDeferred", { to: trimmed }) : t("gal.st.renamed", { to: trimmed }));
+              await _store.file(item.name, { isZip: true }).rename(trimmed);   // 云端 move 内含（If-Match）
+              host.status(t("gal.st.renamed", { to: trimmed }));
               return { ok: true };
             } catch (e: unknown) { return { error: (e as { message?: unknown })?.message || e }; }
           });
@@ -284,9 +282,9 @@ function makeGallery(host: GalleryHost) {
         if (taken) { host.status(t("gal.st.nameTakenTarget", { loc: taken, base }), true); return; }
         await host.busy(t("gal.busy.move", { base, target: target || t("gal.root") }), async () => {
           try {
-            const res = await _store.flow.rename(item.name, newName, { cloud: isCloud });
+            await _store.file(item.name, { isZip: true }).rename(newName);
             if (item.name === host.activeName()) session.setName(newName);
-            host.status(res.cloudDeferred ? t("gal.st.movedDeferred", { target: target || t("gal.root") }) : t("gal.st.moved", { target: target || t("gal.root") }));
+            host.status(t("gal.st.moved", { target: target || t("gal.root") }));
           } catch (e: unknown) { host.status(t("gal.st.moveFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         });
         await reload();
@@ -304,28 +302,20 @@ function makeGallery(host: GalleryHost) {
         await host.busy(t("gal.busy.copy", { base: pathBasename(item.name) }), async () => {
           try {
             // 取源原始字节：有本地副本 → loadRaw（离线可用、不弹密码）；纯云端 → 拉云端原始容器。
-            let bytes: Blob | null = null;
-            if (item.local) {
-              bytes = await _store.loadRaw(item.name);
-            } else if (isCloud) {
-              if (!cloudOn) { host.status(t("gal.st.copyCloudNeedLogin"), true); return; }
-              const r = await cloud.pull(item.name);
-              bytes = r ? r.blob : null;
-            }
+            // 取源字节：file.open 本地有读本地、无则拉云（明文；⚠TODO 加密源拷贝会解密，待内容盲 raw-read 原语）。
+            const bytes: Blob | null = await _store.file(item.name, { isZip: true }).open();
             if (!bytes) { host.status(t("gal.st.copyNoBytes"), true); return; }
             // 目标名：同文件夹下「<名> 副本」「<名> 副本2」…取首个本地⊕云端都不占用的。
             const localNames = new Set((await listSessions()).map((s) => s.name));
             let cloudNames = new Set<string>();
             if (cloudOn) {
-              try { cloudNames = new Set((await listCloudSessionsRecursive()).map((c: { path: string }) => stripSessionExt(c.path))); }
+              try { cloudNames = new Set((await _store.listAllItems({ signedIn: true, online: true })).items.map((it) => stripSessionExt(it.path))); }
               catch (e) { console.warn("[gallery] copy cloud names:", e); }
             }
             const newName = copyTargetName(item.name, (n: string) => localNames.has(n) || cloudNames.has(n));
             // 写新身份：本地存 + 云端 push（云端 best-effort，离线/失败标未推送，下次 Ctrl+S 续）。
-            const res = await _store.flow.saveAs(newName, { encode: () => bytes, cloud: cloudOn });
-            if (!cloudOn) host.status(t("gal.st.copiedLocal", { name: pathBasename(newName) }));
-            else if (res.cloudDeferred) host.status(t("gal.st.copiedDeferred", { name: pathBasename(newName) }));
-            else host.status(t("gal.st.copied", { name: pathBasename(newName) }));
+            await _store.file(newName, { isZip: true }).save(bytes, { tryPush: cloudOn });   // 新身份：本地存 + best-effort 推
+            host.status(t("gal.st.copied", { name: pathBasename(newName) }));
           } catch (e: unknown) { host.status(t("gal.st.copyFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         });
         await reload();
@@ -364,7 +354,7 @@ function makeGallery(host: GalleryHost) {
         if (pw == null) { host.status(t("gal.st.cancelled")); return; }
         setPassword(pw);
         try {
-          const res = await _store.flow.encrypt(item.name, { isOnline: () => host.signedIn() && host.online() });
+          const res = await _store.file(item.name, { isZip: true }).encrypt({ isOnline: () => host.signedIn() && host.online() });
           if (res.status === "already") { host.status(t("gal.st.alreadyEnc")); return; }
           if (!(await _afterSwap(item, res, t("gal.st.encryptedOk", { name: item.name })))) return;
           // 清明文残留：revert checkpoint（旧内容的明文快照）
@@ -381,7 +371,7 @@ function makeGallery(host: GalleryHost) {
         // **解锁在 busy 之前**（flow.decrypt 自带 busy；密码框不能在 busy 里弹→死锁）
         if (!(await ensureUnlocked(item.name))) { host.status(t("gal.st.cancelledPw"), true); return; }
         try {
-          const res = await _store.flow.decrypt(item.name, { isOnline: () => host.signedIn() && host.online() });
+          const res = await _store.file(item.name, { isZip: true }).decrypt({ isOnline: () => host.signedIn() && host.online() });
           if (res.status === "not-encrypted") { host.status(t("gal.st.notEnc")); return; }
           await _afterSwap(item, res, t("gal.st.decrypted", { name: item.name }));
         } catch (e: unknown) { host.status(t("gal.st.decryptFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
@@ -397,7 +387,7 @@ function makeGallery(host: GalleryHost) {
         openMenu.value = null;
         const isActive = item.name === host.activeName();
         const isLocal = !!item.local, isCloud = !!item.cloud;
-        const dirty = isLocal && isCloud && isCloudDirty(item.name);
+        const dirty = isLocal && isCloud && !!(item as { dirty?: boolean }).dirty;
         let detail = isLocal && isCloud
           ? (dirty ? t("gal.del.dirtyDetail") : t("gal.del.syncedDetail"))
           : isCloud ? t("gal.del.cloudDetail") : t("gal.del.localDetail");
@@ -405,7 +395,7 @@ function makeGallery(host: GalleryHost) {
         if (!(await host.confirm(t("gal.dlg.delTitle", { name: item.name }), detail))) return;
         await host.busy(t("gal.busy.del", { name: item.name }), async () => {
           try {
-            await _store.flow.delete(item.name, { isOnline: () => host.online() });
+            await _store.file(item.name, { isZip: true }).delete();
             if (isActive) await session.exit();
             host.status(t("gal.st.deleted", { name: item.name }));
           } catch (e: unknown) { host.status(t("gal.st.delFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
@@ -420,9 +410,8 @@ function makeGallery(host: GalleryHost) {
         // 走 store.flow.deleteFolder：库内强制锁屏 + 「必须空」兜底 + 不吞错（旧版 getItemByPath 没选 folder facet
         //   → item.folder 永远 undefined → 根本没删却照报「已删除」= N9 + 用户「删空夹不可用」）。
         try {
-          const res = await _store.flow.deleteFolder(ft.path, { isOnline: () => host.online() });
-          clearFolderCaches();
-          host.status(res.status === "folder-deleted" ? t("gal.st.folderDeleted", { name: ft.name }) : t("gal.st.folderGone", { name: ft.name }));
+          await _store.deleteFolder(ft.path);
+          host.status(t("gal.st.folderDeleted", { name: ft.name }));
         } catch (e: unknown) { host.status(t("gal.st.folderDelFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         await reload();
       }
@@ -431,7 +420,7 @@ function makeGallery(host: GalleryHost) {
         openMenu.value = null;
         await host.busy(t("gal.busy.restore", { name: item.name }), async () => {
           try {
-            const res = await _store.flow.restore({
+            const res = await _store.restore({
               trashKey: item.local ? item.local.trashKey : null,
               fromCloud: !!item.cloud,
               cloudItemId: item.cloud ? item.cloud.id : null,
@@ -449,7 +438,7 @@ function makeGallery(host: GalleryHost) {
         if (!(await host.confirm(t("gal.dlg.purgeTitle", { name: item.name }), t("gal.dlg.purgeMsg")))) return;
         await host.busy(t("gal.busy.purge", { name: item.name }), async () => {
           try {
-            await _store.flow.purge({ trashKey: item.local ? item.local.trashKey : null, cloudItemId: item.cloud ? item.cloud.id : null });
+            await _store.purge({ trashKey: item.local ? item.local.trashKey : null, cloudItemId: item.cloud ? item.cloud.id : null });
             host.status(t("gal.st.purged", { name: item.name }));
           } catch (e: unknown) { host.status(t("gal.st.purgeFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         });
@@ -462,7 +451,7 @@ function makeGallery(host: GalleryHost) {
         if (scope === "cloud" && !(host.signedIn() && host.online())) { host.status(t("gal.st.emptyTrashCloudNeedLogin"), true); return; }
         if (!(await host.confirm(t("gal.dlg.emptyTrashTitle", { label }), t("gal.dlg.emptyTrashMsg", { label })))) return;
         await host.busy(t("gal.busy.emptyTrash", { label }), async () => {
-          const res = await _store.flow.emptyTrash({ scope, isOnline: () => host.signedIn() && host.online() });
+          const res = await _store.emptyTrash({ scope });
           const cloudFails = ((res.failed || []) as Array<{ where?: string }>).filter((f) => f.where !== "local").length;
           if (scope !== "local" && cloudFails) host.status(t("gal.st.emptyTrashCloudFail", { n: cloudFails }), true);
           else if ((res.failed || []).length) host.status(t("gal.st.emptyTrashPartial"), true);

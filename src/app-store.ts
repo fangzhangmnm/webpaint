@@ -1,7 +1,8 @@
 // app-store —— WebPaint 装配 sync-store 的唯一点（cutover：薄库 + editor-session）。
 //   只做 config 注入（provider / ui bundle / crypto codec / crypt / validateAdopt）+ auth 转发 + gallery 列举适配。
 //   app 只碰 store 四面（file/collection/localSettings/syncedSettings）+ editor-session。绝不裸碰 kv/IDB/graph/vendor。
-import { createStore, createOneDriveProvider } from "./store/index.ts";
+import { createStore, createOneDriveProvider, isCached, isDirty } from "./store/index.ts";
+import { stripSessionExt } from "./config.ts";
 import { storeUI } from "./store-ui.ts";
 import { looksEncryptedContainer } from "./crypto-format.ts";
 import { CLIENT_ID, SCOPES } from "./config.ts";
@@ -52,13 +53,25 @@ export const getLastSessionSignedIn = () => store.localSettings.get<boolean>("la
 export const setLastSessionSignedIn = (v: unknown) => store.localSettings.set("lastSessionSignedIn", !!v);
 
 // ---- gallery 数据：统一列举（local ∪ cloud，每项带 syncState）+ cloud-gone 安全收敛（都进库）----
+const _CLOUD_STATES = new Set(["cloud-only", "synced", "unpushed", "newer-on-cloud", "conflict"]);   // 有云版的 syncState
 export async function listGallery({ signedIn, online }: { signedIn?: boolean; online?: boolean } = {}) {
   const ctx = { signedIn: !!signedIn, online: !!online };
   try { await store.reconcile(); } catch (e) { storeUI.reportError(e); }
-  const { items, folders, complete } = await store.listAllItems(ctx);
-  return { items, cloudFolders: folders, complete };
+  const { items: raw, folders } = await store.listAllItems(ctx);
+  // Item{path,syncState} → 旧 GalleryItem{name,local,cloud,dirty,ghost}（gallery-view-model 兼容；派生自 syncState）。
+  const items = raw.map((it) => {
+    const name = stripSessionExt(it.path);
+    return {
+      name,
+      local: isCached(it.syncState) ? { name } : null,
+      cloud: _CLOUD_STATES.has(it.syncState) ? { path: it.path, name, lastModifiedDateTime: it.lastModified ? new Date(it.lastModified).toISOString() : undefined } : null,
+      dirty: isDirty(it.syncState),
+      ghost: it.syncState === "ghost",
+    };
+  });
+  return { items, cloudFolders: folders, localError: null };   // offline-first：listAllItems 绝不 throw，localError 恒 null
 }
-export const listGalleryTrash = () => store.listTrash();
+export const listGalleryTrash = async () => (await store.listTrash()).map((c) => ({ name: stripSessionExt(c.path || c.name || ""), local: null, cloud: c, deletedAt: 0 }));
 
 // ---- brush-rack cloud-sync（⚠TODO：→ store.collection("brush-rack.json") 逐 brush 一 item。当前本地-only stub）----
 //   rack 本地持久化在 brush-rack.ts 自管（IDB via getMeta）；此处只是它期望的 cloud-sync 面，暂 no-op。
