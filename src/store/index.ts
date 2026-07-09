@@ -17,22 +17,6 @@ export { createLocalCache } from "./local-cache.ts";
 // provider（云端低层 adapter）：OneDrive（浏览器）/ graph 适配器（可 mock 验）。
 export { createOneDriveProvider } from "./providers/index.ts";
 export { graphToCloudProvider } from "./onedrive-provider.ts";
-
-// ── 编辑器-app 超集面（ADR-0019 dormant-when-unused）──────────────────────────────────────────
-//   WebPaint 这类编辑器需要、JRP 这类阅读器不需要的件：第二 cloud-sync 实例（brush-rack 单文件同步）、
-//   folder-shape collection（rack）、gallery 直用的 graph folder/thumb 原语、catch 用的错误类型。
-//   JRP 不 import 这些 = dormant。app 仍只从 index 拿，不 deep import 内部文件。
-export { createCloudSync, memKv, CloudConflictError, CloudNameCollisionError } from "./cloud-sync.ts";
-export { createFolderStore } from "./folder-store.ts";
-export { resolveRef } from "./folder-merge.ts";
-export type { FolderEnvelope } from "./folder-merge.ts";
-export { createMockProvider } from "./mock-provider.ts";
-export { createMockLocal } from "./mock-local.ts";
-export type { Kv, CloudItem } from "./types.ts";
-// gallery folder-tree 操作 + thumb byte-range：单一 auth 的 OneDrive graph 原语。
-export {
-  getItemByPath, deleteItem, ensureSubfolder, clearFolderCaches,
-  downloadItemRange, downloadItemBlob, downloadRangeFromUrl, getDownloadUrl,
-} from "./providers/graph.ts";
-// migration（ADR-0019）：cutover 数据迁移（app 在 boot ready-gate 前 await）。
-export { runStoreMigrations, CURRENT_SCHEMA } from "./migration.ts";
+//   注：迁移（migration）不暴露——createStore 内部自跑（数据搬迁是同步细节，app 不该看见）。
+//   brush-rack 走 store.collection、gallery 缩略图/文件夹走 file.getPreview / store.list——不再 deep import
+//   cloud-sync/folder-store/graph（接口尽可能瘦，见 ADR：迁移的意义=发现最少接口）。

@@ -23,6 +23,7 @@ import { createLocalSettings, createSyncedSettings, type LocalSettings, type Syn
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
 import { createLocalCache } from "./local-cache.ts";
+import { runStoreMigrations } from "./migration.ts";
 
 // ── ui bundle（Model B，README.md §7）：store 在决策点回调进来 + await ──
 export interface StoreUI {
@@ -66,12 +67,17 @@ export interface StoreConfig {
   isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
   keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
   offlineUploadReplay?: UploadReplayPolicy;           // ADR-0018：离线「新上传」回线补推策略 auto|ask|manual（默认 manual；WebPaint=manual、JRP=ask）
+  // ── 数据迁移（ADR-0019，createStore 内部自跑、隐形）──
+  skipMigration?: boolean;                            // 测试/无 localStorage 环境跳过（prod 不传）
+  migrationCollections?: ReadonlySet<string>;         // dirty 拆轨用的已知 collection 名（WebPaint=∅：webpaint.dirty: 全是工作文件）
 }
 
 // ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
 export interface RawFile {
-  save(bytes: Bytes | Blob, hint?: unknown): Promise<void>;        // 本地落盘 + consented push（hint 透传缩略图等 app 旁路，store content-blind）
-  saveLocal(bytes: Bytes | Blob, hint?: unknown): Promise<void>;   // 编辑器超集：**只落本地不 push**（autosave/频繁保存的 consent-safe 路径，ADR-0016/0018）
+  //  save(bytes)            = 本地落盘 + consented push（默认）
+  //  save(bytes,{push:false})= 只落本地不推（autosave/频繁保存；opaque Work 的 push 必须 consent-gated，ADR-0016/0018）
+  //  hint 透传缩略图等 app 旁路（store content-blind，不解释）。
+  save(bytes: Bytes | Blob, opts?: { push?: boolean; hint?: unknown }): Promise<void>;
   open(): Promise<Blob | null>;
   rename(newName: string): Promise<void>;
   delete(): Promise<void>;
@@ -109,6 +115,12 @@ export function createStore(config: StoreConfig) {
   const cloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => n });
   const sub = createSubstrate();
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n) });
+  // 数据迁移（ADR-0019）：**createStore 内部自跑、隐形**——app 看不见 migration（数据搬迁是同步细节）。
+  //   ops 首用前 await migrationReady（open/save/list）。测试/无 localStorage 环境跳过。
+  const migrationReady: Promise<void> =
+    config.skipMigration || !(globalThis as { localStorage?: unknown }).localStorage
+      ? Promise.resolve()
+      : runStoreMigrations(config.migrationCollections ?? new Set<string>());
   const offloadMod = createOffload({ cloud, local, head, isOnline, serialize: sub.serialize });   // serialize：offload 的 hardDelete ⟂ save 的 local 写互斥（红线：驱逐不吃未推字节）
   const reconcileMod = createReconcile({ cloud, local, head, isOnline });
 
@@ -287,25 +299,20 @@ export function createStore(config: StoreConfig) {
       return await seal.unsealForRead(name, asBlob);
     };
     return {
-      async save(bytes, hint) {
+      async save(bytes, opts) {
+        await migrationReady;
         head.recordEdit(name);                                   // 同步标脏：offload 的 isDirty 守卫立即可见（防驱逐吃未推字节）
         const plain = await toU8(bytes);
         const sealed = await seal.sealForWrite(name, plain);
-        await sub.serialize(name, () => local.save(name, sealed, hint));   // local 写进同名串行链：与 offload.hardDelete 互斥（C2 红线）；hint 透传缩略图
+        await sub.serialize(name, () => local.save(name, sealed, opts?.hint));   // local 写同名串行链：与 offload.hardDelete 互斥（C2 红线）；hint 透传缩略图
+        if (opts?.push === false) return;                        // 只落本地（autosave/consent-safe，ADR-0016/0018：opaque Work 的 push 必 consent-gated）
         try { await pushMod.push(name, { encode: () => plain, onConflict }); }
         catch (e) { ui.reportError(e); }
         // ADR-0018：离线「新上传」补推——push 没成(仍 dirty) ∧ 从没 synced(seenBase null) → 入队，回线 drainUploadQueue 补推。
-        //   （编辑已同步文件 seenBase≠null → 不入队，仍走 consent-surface。enqueue 对 manual policy 内部 no-op。）
         if (head.isDirty(name) && head.seenBase(name) == null) uploadReplay.enqueue(name);
       },
-      // 编辑器超集（ADR-0016/0018）：只落本地 + 标脏，**绝不 push**。autosave / 频繁保存走这条——
-      //   opaque Work 的 push 必须 consent-gated（Ctrl+S/exit 才 file.save），autosave 自动推 = 违反 consent 红线。
-      async saveLocal(bytes, hint) {
-        head.recordEdit(name);
-        const sealed = await seal.sealForWrite(name, await toU8(bytes));
-        await sub.serialize(name, () => local.save(name, sealed, hint));
-      },
       async open() {
+        await migrationReady;
         if (await local.exists(name)) {                          // 有本地副本 → **先 etag 检查**（fresh.open）：in-sync 读本地、变了才拉云、脏 surface
           // isOnline：离线直接读本地、不碰 fetchMeta（离线模式完美工作，绝不卡 open）。
           // offlineEscape：在线但 fetchMeta 挂死（iOS 老 token iframe）时，用户点「跳过到离线」→ probe 赢 race → 读本地。
@@ -360,54 +367,13 @@ export function createStore(config: StoreConfig) {
     ? createSyncedSettings(createCollection<SettingItem>({ cloud, name: syncedSettingsFileName, local }))
     : undefined;
 
-  // ═══ 恢复 WebPaint editor-shell 超集（ADR-0019 dormant-when-unused；报告候选 B/C）═══════════════════════
-  //   JRP 拆 store.ts 时剪掉的「编辑器节律 + 加密裸字节公开面」——阅读器不需要连续编辑，拆文件时没搬进任何深模块。
-  //   内核全在（sub.edits/session、head.recordEdit/markSeen、seal、encReadPeek）——这里只 **re-surface，不发明**。
-  //   JRP 不驱动这些 = 天然 dormant（timer 不 start、edit() 不调、无 codec 时加密面抛），正如加密整体 dormant。
-
-  // B1 编辑入口：游标 + clean→dirty 门（head.recordEdit 捕获 parentBase）。name 空=只推游标不标云脏（gallery-first 未绑）。
-  function edit(name?: string | null): void { sub.edits.mark(); if (name) head.recordEdit(name); }
-
-  // B2 transient busy（saving=本地写盘 / pushing=云 push / replacing=切文档）：app 编排置位，save-status 只读。
-  const _busy = { saving: false, pushing: false, replacing: false };
-  let _pushIdleWaiters: Array<() => void> = [];
-  const busy = {
-    saving: (): boolean => _busy.saving, pushing: (): boolean => _busy.pushing, replacing: (): boolean => _busy.replacing,
-    set(k: "saving" | "pushing" | "replacing", v: boolean): void {
-      _busy[k] = v;
-      if (k === "pushing" && !v) { const w = _pushIdleWaiters; _pushIdleWaiters = []; w.forEach((r) => r()); }
-    },
-    whenPushIdle: (): Promise<void> => (_busy.pushing ? new Promise<void>((r) => _pushIdleWaiters.push(r)) : Promise.resolve()),
-  };
-
-  // B3 autosave cadence（3min 兜底 timer + 生命周期 flush；dirty/busy 判定收一处）。persist=app 注入（含 encode + 语义守卫）。
-  let _autosaveTimer: ReturnType<typeof setInterval> | null = null;
-  let _persist: () => Promise<void> = async () => {};
-  const autosave = {
-    configure: ({ persist }: { persist?: () => Promise<void> } = {}): void => { if (persist) _persist = persist; },
-    start: (intervalMs: number): void => { if (_autosaveTimer != null) clearInterval(_autosaveTimer); _autosaveTimer = setInterval(() => { if (sub.edits.localDirty() && !_busy.saving) void _persist(); }, intervalMs); },
-    stop: (): void => { if (_autosaveTimer != null) { clearInterval(_autosaveTimer); _autosaveTimer = null; } },
-    flush: (): Promise<void> => ((sub.edits.localDirty() && !_busy.saving) ? _persist() : Promise.resolve()),
-  };
-
-  // B4 adoptBase：app 打开/采纳 item 时捕获本 tab base-etag（If-Match 锚点，W2 红线）→ local-head.markSeen。
-  function adoptBase(name: string, etag: string | null): void { head.markSeen(name, etag); }
-
-  // C 加密裸字节公开面（导出密文 / checkpoint 旁路 / 加密缩略图）。逻辑全在（seal/encReadPeek）；无 codec 注入 → dormant。
-  async function sealBytes(name: string, bytes: Bytes | Blob): Promise<Bytes> { return seal.sealForWrite(name, await toU8(bytes)); }
-  async function loadRaw(name: string): Promise<Blob | null> { const b = await local.get(name); return b == null ? null : (b instanceof Blob ? b : new Blob([b as BlobPart])); }
-  async function decryptPeekBytes(name: string, blob: Blob): Promise<Uint8Array | null> {
-    const p = scanEncPeekFromEnd(new Uint8Array(await blob.arrayBuffer()));
-    return p ? await seal.withPassword(name, (pw) => decryptPeek(p, pw)) : null;
-  }
-
   return {
     file,
     collection,
     localSettings,
     syncedSettings,
     // ── 统一列举：整个虚拟 FS 一次列举（local ∪ cloud，每项带解析好的 syncState）。offline-first 结构性保证在库内。──
-    listAllItems: (ctx: ListContext) => listing.listAllItems(ctx),
+    listAllItems: async (ctx: ListContext) => { await migrationReady; return listing.listAllItems(ctx); },
     // ⛔ 旧列举接口已废（2026-07-01）——改用 store.listAllItems(ctx)。
     //   listAllItems = 全部文件的唯一统一视图；local/cloud 不是两个来源、是 Item 的属性（syncState）。
     //   "只要本地 / 只要云端" 的想法 = 没理解这个模型（= mergeLocalCloud/localKeys 越狱的复发，正是 JRP 登出看不了
@@ -446,23 +412,6 @@ export function createStore(config: StoreConfig) {
       if (!(await looksEncryptedContainer(blob))) return blob;
       try { return (await unpackContainer(blob, pw)).dataBlob; } catch { return null; }
     },
-    // ── 恢复的 editor-shell 超集（B/C，dormant-when-unused）──
-    edit,                      // 唯一编辑入口：游标 + clean→dirty 门（B1）
-    edits: sub.edits,          // 编辑游标 SSoT（mark/version/markSaved/localDirty，住 substrate）
-    session: sub.session,      // Ctrl+S save 合流 coalescer（configure/request，住 substrate）
-    adoptBase,                 // 打开/采纳时捕获 base-etag（If-Match 锚点，B4）
-    busy,                      // transient saving/pushing/replacing（app 置位，save-status 只读，B2）
-    autosave,                  // 本地落盘节律 configure/start/stop/flush（B3）
-    // 加密裸字节公开面（C）：
-    seal: sealBytes,           // 按 name 加密态包壳（导出密文 / checkpoint 旁路）
-    unseal: (name: string, blob: Blob) => seal.unsealForRead(name, blob),   // 非交互解壳（明文原样 / 内存密码 / 锁定 null）
-    loadRaw,                   // 原始字节不解壳（导出密文容器）
-    getTailBytes: (name: string, n: number) => encTailBytes(name, n, true),  // 尾部 N 字节（本地切片/云端 byte-range）
-    decryptPeekBytes,          // 尾片 → peek 明文字节（非交互；锁定 null）
-    readPeek: (name: string) => encReadPeek(name, true),                     // 便捷组合（getTail + decryptPeek）
-    isEncrypted: (name: string) => encIsEncrypted(name),                     // 加密态查询（本地字节尾扫）
-    verifyPassword: (name: string, pw: string) => encVerify(name, pw),       // UI 解锁循环便宜验（解 peek）
-    // 编辑游标（app 标脏入口经 file.save；此处暴露给需要的高级用法）。
     _internal: { head, cloud, sub },
   };
 }
