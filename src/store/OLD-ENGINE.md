@@ -98,11 +98,11 @@
 | UI 决策 seam | 散在 deps(`busy`)+各 flow opts(`onConflict`/`onNewer`/`confirm`/…) | 统一 `ui = {busy, askPassword, resolveConflict, reportError}` |
 | 冲突选项 | `"keep"\|"pull"\|"branch"\|"weak-override"\|"rename"` | `"keepMine"\|"takeCloud"\|"cancel"`（收敛成 3 个） |
 | 密码 | `crypt.getPassword` 同步读内存 + flow 返 `locked`，UI 在 busy 外循环 | `ui.askPassword` 异步，**store 驱动**验+重试循环 |
-| 文件对象 | 无；按 `name` 散调 `flow.push/open/save/…` | `store.file(name,{isZip})`→`RawFile`/`ZipFile`（带 save/open/rename/delete/setPreview） |
+| 文件对象 | 无；按 `name` 散调 `flow.push/open/save/…` | `store.file(name,{isZip})`→`RawFile`/`ZipFile`（带 save/open/rename/delete/setPeek） |
 | 集合 | 另一套 `folder-store`（app 注入 snapshot/encode/decode） | `store.collection`（自拥内存、JSON 自序列化）—— **已新建好** |
 | 设置 | `settings`(local KV only) | `localSettings` + `syncedSettings`(key-as-item) —— **已新建好** |
 | 加密引擎 | `crypto` 注入整个 zip+7z codec | zip 随库 + **仅 7z 注入**(`sevenZip`)，不注入→`store.encryption` 类型不存在 |
-| 预览 | app 经 `crypt.makePeek` 回调抠 / `readPeek` 读 | `ZipFile.setPreview(blob)` 显式给 / `getPreview()` |
+| 预览 | app 经 `crypt.makePeek` 回调抠 / `readPeek` 读 | `ZipFile.setPeek(blob)` 显式给 / `getPeek()` |
 | barrel | index.ts 导出 createStore + createCloudSync + folder-store + memKv… | 只导出 `createStore` + provider，其余封死 |
 
 ---

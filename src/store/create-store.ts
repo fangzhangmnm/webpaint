@@ -72,7 +72,7 @@ export interface StoreConfig {
   migrationCollections?: ReadonlySet<string>;         // dirty 拆轨用的已知 collection 名（WebPaint=∅：webpaint.dirty: 全是工作文件）
 }
 
-// ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
+// ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 getPeek/setPeek ──
 export interface RawFile {
   //  save(bytes)               = 本地落盘 + best-effort 推云（默认 tryPush:true）
   //  save(bytes,{tryPush:false})= 只落本地不推（autosave/频繁保存；opaque Work 的 push 必须 consent-gated，ADR-0016/0018）
@@ -93,7 +93,7 @@ export interface RawFile {
   verifyPassword(pw: string): Promise<boolean>;                         // app 解锁循环（busy 外）便宜验：解 peek，不碰 7z
 }
 export interface ZipFile extends RawFile {
-  // peek = 加密容器最外层可 byte-range 单独取的 **不透明 sidecar 字节**（≤64KiB，独立 AES-GCM）。
+  // peek = 加密容器最外层可 byte-range 单独取的 **不透明尾块字节**（≤64KiB，独立 AES-GCM）。
   //   库只加密/解密/尾取，**绝不假设它是图**——app 拿 Blob 自己 cast 成缩略图（内容知识全在 app）。
   getPeek(): Promise<Blob | null>;
   setPeek(peekBytes: Blob): Promise<void>;   // ⚠未采用：peek 经 crypt.makePeek 自动派生

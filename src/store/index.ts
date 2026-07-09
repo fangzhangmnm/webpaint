@@ -18,5 +18,5 @@ export { createLocalCache } from "./local-cache.ts";
 export { createOneDriveProvider } from "./providers/index.ts";
 export { graphToCloudProvider } from "./onedrive-provider.ts";
 //   注：迁移（migration）不暴露——createStore 内部自跑（数据搬迁是同步细节，app 不该看见）。
-//   brush-rack 走 store.collection、gallery 缩略图/文件夹走 file.getPreview / store.list——不再 deep import
+//   brush-rack 走 store.collection、gallery 缩略图/文件夹走 file.getPeek / store.list——不再 deep import
 //   cloud-sync/folder-store/graph（接口尽可能瘦，见 ADR：迁移的意义=发现最少接口）。

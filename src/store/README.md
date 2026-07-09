@@ -61,7 +61,7 @@ const store = createStore({
 
 | 拿到的 | 方法 | 章节 |
 |---|---|---|
-| `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · rename · delete · keepOffline · offload · isKeptOffline · isDirty · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPreview`；`setPreview` 未采用，peek 经 `crypt.makePeek` 自动） | §2 |
+| `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · rename · delete · keepOffline · offload · isKeptOffline · isDirty · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek`；`setPeek` 未采用，peek 经 `crypt.makePeek` 自动） | §2 |
 | `store.collection(name, {manual?})` | `upsertItem · deleteItem · getItem · items · keys · init · flush · flushLocal` | §3 |
 | `store.localSettings` / `store.syncedSettings` | `get · set · delete`（synced 需 config 给 `syncedSettingsFileName`） | §4 |
 | `store.list()` / `store.listAll()` | 列云端文件+文件夹 `{files, folders, complete}`（`complete:false` **别据此删缓存**） | §2 |
@@ -121,13 +121,13 @@ store.emptyTrash({ scope: "both" });                          // 清空回收站
 
 ```ts
 const raw = store.file("a.pdf", { isZip: false });   // 类型 RawFile
-raw.getPreview();   // ❌ 编译错：RawFile 没有 getPreview
+raw.getPeek();   // ❌ 编译错：RawFile 没有 getPeek
 
 const zip = store.file("a.ora", { isZip: true });    // 类型 ZipFile
-const p = await zip.getPreview();    // 一次（本地切片或云端尾部 byte-range）取预览，不全量下载
+const p = await zip.getPeek();    // 一次（本地切片或云端尾部 byte-range）取预览，不全量下载
 ```
 - `isZip:false` → **`RawFile`**：原始字节直存（云端文件 = 原始内容，双击能开，守 anti-abandonware）。**无预览图**。
-- `isZip:true` → **`ZipFile`**：库把 peek 当容器尾部一段管（**你不写任何 zip 代码**）。peek 经 `crypt.makePeek` 自动派生（无显式 `setPreview`，§5）。
+- `isZip:true` → **`ZipFile`**：库把 peek 当容器尾部一段管（**你不写任何 zip 代码**）。peek 经 `crypt.makePeek` 自动派生（无显式 `setPeek`，§5）。
 - peek/预览是**格式无关的不透明 binary blob**（jpg/png/随便，库不看、不构造、不解码）。
 
 ---
@@ -193,7 +193,7 @@ const store = createStore({
 - **透明封解**：照常 `f.save(bytes)` / `f.open()`，库按文件 at-rest 态自动加/解密（SSoT=字节本身）。未解锁（无/错密码）→ `open` 返 `null`、`save` 抛 `LOCKED`（**绝不静默存明文**）。
 - **at-rest 切换**：`f.encrypt()` 明文→密文、`f.decrypt()` 密文→明文。红线：先本地落地、再云端 If-Match 跟进；失败标脏锚 parentBase 交 push 流接力（绝不只换一端=静默撤销加密）；曾同步但离线→拒；错密码在任何持久改动前出局。
 - **解锁循环（app 在 busy 外做）**：`f.verifyPassword(pw)` 便宜验（解 peek，不碰 7z）→ app 自己存密码 → 重跑 flow。
-- **预览**：`ZipFile.getPreview()` 读容器尾部 peek（本地切片或云端 byte-range，不全量下载）。peek 经 `crypt.makePeek` 自动派生（无显式 `setPreview`）。
+- **预览**：`ZipFile.getPeek()` 读容器尾部 peek（本地切片或云端 byte-range，不全量下载）。peek 经 `crypt.makePeek` 自动派生（无显式 `setPeek`）。
 - **导入辅助**（文件还没进 store）：`store.looksEncrypted(blob)` / `store.verifyContainer(blob,pw)` / `store.unsealWith(blob,pw)`。
 
 > **未采用**：README 早期草拟的 `store.encryption`（库统一密钥 + `vault.salt` + `encrypted:true` + `saveEncrypted` + `addEncryption`）超集**本版不实现**——对齐 WebPaint 真机验过的 `getPassword`/`encrypt` 模型（见 `docs/11`）。要库统一密钥再单独 escalate。
@@ -240,7 +240,7 @@ const ui = {
 flow 的原子单位是「进入 flow 那刻抓的**不可变快照**」，不是 wall-clock。store **永不回写 app 的活动状态**；回调 await 期间 app 的 mutation 归**下一个 dirty 周期**的新快照，绝不塞进正在飞的 flow。（外部如云端 API 的并发不在此保证内。）
 
 ### 另外的"形状强制"
-- `getPreview` 只在 `ZipFile` 上 → 逼你想清文件是不是 zip。
+- `getPeek` 只在 `ZipFile` 上 → 逼你想清文件是不是 zip。
 - `get` 不给 default → 逼你把默认值收一处。
 - 密码**非交互**（`crypt.getPassword` 只读内存）→ 逼解锁 UX 收进 app 的 busy 外循环。
 
