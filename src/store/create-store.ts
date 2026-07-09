@@ -74,10 +74,10 @@ export interface StoreConfig {
 
 // ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 setPreview ──
 export interface RawFile {
-  //  save(bytes)            = 本地落盘 + consented push（默认）
-  //  save(bytes,{push:false})= 只落本地不推（autosave/频繁保存；opaque Work 的 push 必须 consent-gated，ADR-0016/0018）
-  //  hint 透传缩略图等 app 旁路（store content-blind，不解释）。
-  save(bytes: Bytes | Blob, opts?: { push?: boolean; hint?: unknown }): Promise<void>;
+  //  save(bytes)               = 本地落盘 + best-effort 推云（默认 tryPush:true）
+  //  save(bytes,{tryPush:false})= 只落本地不推（autosave/频繁保存；opaque Work 的 push 必须 consent-gated，ADR-0016/0018）
+  //  tryPush 是 **best-effort**：离线/冲突/失败 → 文件留 dirty、下次补推（不保证同步到云）。hint 透传缩略图（store content-blind）。
+  save(bytes: Bytes | Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<void>;
   open(): Promise<Blob | null>;
   rename(newName: string): Promise<void>;
   delete(): Promise<void>;
@@ -93,8 +93,10 @@ export interface RawFile {
   verifyPassword(pw: string): Promise<boolean>;                         // app 解锁循环（busy 外）便宜验：解 peek，不碰 7z
 }
 export interface ZipFile extends RawFile {
-  setPreview(previewBlob: Blob): Promise<void>;
-  getPreview(): Promise<Blob | null>;
+  // peek = 加密容器最外层可 byte-range 单独取的 **不透明 sidecar 字节**（≤64KiB，独立 AES-GCM）。
+  //   库只加密/解密/尾取，**绝不假设它是图**——app 拿 Blob 自己 cast 成缩略图（内容知识全在 app）。
+  getPeek(): Promise<Blob | null>;
+  setPeek(peekBytes: Blob): Promise<void>;   // ⚠未采用：peek 经 crypt.makePeek 自动派生
 }
 
 function localStorageKv(): Kv {
@@ -305,7 +307,7 @@ export function createStore(config: StoreConfig) {
         const plain = await toU8(bytes);
         const sealed = await seal.sealForWrite(name, plain);
         await sub.serialize(name, () => local.save(name, sealed, opts?.hint));   // local 写同名串行链：与 offload.hardDelete 互斥（C2 红线）；hint 透传缩略图
-        if (opts?.push === false) return;                        // 只落本地（autosave/consent-safe，ADR-0016/0018：opaque Work 的 push 必 consent-gated）
+        if (opts?.tryPush === false) return;                     // 只落本地（autosave/consent-safe，ADR-0016/0018：opaque Work 的 push 必 consent-gated）
         try { await pushMod.push(name, { encode: () => plain, onConflict }); }
         catch (e) { ui.reportError(e); }
         // ADR-0018：离线「新上传」补推——push 没成(仍 dirty) ∧ 从没 synced(seenBase null) → 入队，回线 drainUploadQueue 补推。
@@ -351,11 +353,11 @@ export function createStore(config: StoreConfig) {
   function file(name: string, opts: { isZip: boolean }): RawFile | ZipFile {
     const raw = makeRaw(name);
     if (!opts.isZip) return raw;
-    // ZipFile.getPreview：读容器尾部加密 peek（本地切片或云端 byte-range）→ 不透明明文字节包 Blob；锁定/无 peek → null。
-    //   peek 是 seal 时经 crypt.makePeek 自动派生（对齐 WebPaint，无显式 setPreview）；故 setPreview 暂留 notYet。
-    const getPreview = async (): Promise<Blob | null> => { const b = await encReadPeek(name, true); return b ? new Blob([b as BlobPart]) : null; };
-    const setPreview = async (_b: Blob): Promise<void> => { throw new Error("ZipFile.setPreview ⚠未采用：peek 经 crypt.makePeek 自动派生（对齐 WebPaint，见 docs/11）"); };
-    return Object.assign(raw, { setPreview, getPreview }) as ZipFile;
+    // getPeek：读容器尾部加密 peek（本地切片或云端 byte-range）→ **不透明明文字节**包 Blob；锁定/无 peek → null。
+    //   peek 经 seal 时 crypt.makePeek 自动派生（无显式 setPeek）；库不假设它是图，app 拿 Blob 自己 cast 缩略图。
+    const getPeek = async (): Promise<Blob | null> => { const b = await encReadPeek(name, true); return b ? new Blob([b as BlobPart]) : null; };
+    const setPeek = async (_b: Blob): Promise<void> => { throw new Error("ZipFile.setPeek ⚠未采用：peek 经 crypt.makePeek 自动派生"); };
+    return Object.assign(raw, { setPeek, getPeek }) as ZipFile;
   }
 
   // ── collection / settings ──
