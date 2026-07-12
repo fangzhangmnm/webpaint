@@ -17,6 +17,7 @@ import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
 import "./liquify-bilinear.test.mjs";
 import "./gallery-model.test.mjs";
+import "./store-folder-listing.test.mjs";   // 2026-07-11 网盘模型：per-folder listFolder/reconcileFolder/watchFolder + 数据安全 guardrail
 import "./gallery-view-model.test.mjs";
 import "./color-model.test.mjs";
 import "./brush-size.test.mjs";

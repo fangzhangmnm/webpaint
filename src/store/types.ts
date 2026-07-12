@@ -113,6 +113,10 @@ export interface CloudSync {
   purge(cloudItemId: string): Promise<unknown>;
   list(): Promise<CloudItem[]>;
   listAll(): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }>;
+  /** 单夹列举（非递归，一次 provider.list 往返）——watchFolder / per-folder reconcile 用。
+   *  files/folders = 该夹**直属**子项（folders=immediate 子夹全路径）。complete=false → 这一夹 list() 抛错
+   *  （离线/未登录/子树失败）→ 调用方当「该夹不权威」处理，**绝不据此判 cloud-gone**（与 listAll 的 partial 守卫同纪律）。 */
+  listFolder(path: string): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }>;
   listFolders(): Promise<string[]>;
   listTrash(): Promise<CloudItem[]>;
   listBackup(): Promise<CloudItem[]>;

@@ -17,7 +17,7 @@ import { createTrash } from "./trash.ts";
 import { createOffload } from "./offload.ts";
 import { createReconcile } from "./reconcile.ts";
 import { createCollection, type Collection } from "./collection.ts";
-import { createListing, type ListContext } from "./listing.ts";
+import { createListing, type ListContext, type FolderSnapshot } from "./listing.ts";
 import { createUploadReplay, type UploadReplayPolicy } from "./upload-queue.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
@@ -65,6 +65,7 @@ export interface StoreConfig {
   //   **库对加密透明**：验的是**解密后的明文**（你看真 PDF/.ora，不是密文容器）。
   validateAdopt: (plain: Blob) => boolean | Promise<boolean>;
   isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
+  signedIn?: () => boolean;                          // **连接态由 store 自持**（网盘模型：app 不再每次列举传 ctx）。ctor 注入一次；不给 → 恒 true（退回 provider 失败即降级）。watchFolder / 云列举据此决定「云轴可不可解析」。
   keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
   offlineUploadReplay?: UploadReplayPolicy;           // ADR-0018：离线「新上传」回线补推策略 auto|ask|manual（默认 manual；WebPaint=manual、JRP=ask）
   // ── 数据迁移（ADR-0019，createStore 内部自跑、隐形）──
@@ -146,6 +147,47 @@ export function createStore(config: StoreConfig) {
 
   // ── 统一列举（README §2）：整个虚拟 FS 一次列举 = local ∪ cloud，每项带 syncState。mergeLocalCloud 收进库内。──
   const listing = createListing({ cloud, local, head, pendingFolders: readPending });
+
+  // ── watchFolder（网盘模型）：订阅**一个**文件夹。app 只知「这一夹更新了」，分不出也不需分 local/remote。──────
+  //   连接态 store 自持（config.signedIn/isOnline）——app 不再传 ctx。每次回调同 shape（FolderSnapshot，仅该夹直属子项）。
+  //   两帧节律：① 立即本地帧（绝不空/throw，offline-first）② 云端帧（拉该夹一次 + 惰性 reconcileFolder，到了用**同一 cb** 再闪）。
+  //   之后本夹任何本地写（save/rename/delete/建删夹）→ notifyFolderOf 重推本地帧（即时反映，无云往返；云端刷新只在订阅时/显式）。
+  const signedIn = config.signedIn ?? ((): boolean => true);
+  const ctxNow = (): ListContext => ({ signedIn: signedIn(), online: isOnline() });
+  const LOCAL_CTX: ListContext = { signedIn: false, online: false };   // 强制本地视角（首帧/写后重画：云不可达 → 纯本地 union）
+  const folderWatchers = new Map<string, Set<(s: FolderSnapshot) => void>>();
+
+  // 推一帧给某夹的所有 watcher。**sanity-check**：snapshot.path 必须 === 订阅 path——orchestration 错乱把别夹推来就丢弃（红线：绝不把别夹内容塞给这个 watcher）。
+  function emitFolder(folder: string, snap: FolderSnapshot): void {
+    if (snap.path !== folder) { ui.reportError(new Error(`watchFolder 路径错乱：订阅「${folder}」收到「${snap.path}」，已丢弃`)); return; }
+    const set = folderWatchers.get(folder);
+    if (!set) return;
+    for (const cb of set) { try { cb(snap); } catch (e) { ui.reportError(e); } }
+  }
+  async function pushLocalFrame(folder: string): Promise<void> {
+    if (!folderWatchers.has(folder)) return;
+    try { emitFolder(folder, await listing.listFolder(folder, LOCAL_CTX)); } catch (e) { ui.reportError(e); }
+  }
+  async function pushRemoteFrame(folder: string): Promise<void> {
+    if (!folderWatchers.has(folder)) return;
+    await reconcileMod.reconcileFolder(folder).catch((e) => ui.reportError(e));   // 「看到夹才 reconcile」：惰性、非静默、仅本夹
+    try { emitFolder(folder, await listing.listFolder(folder, ctxNow())); } catch (e) { ui.reportError(e); }
+  }
+  // 写路径变动 → 通知受影响夹（name 的父夹）的 watcher 即时重画本地帧。
+  function notifyFolderOf(name: string): void {
+    void pushLocalFrame(name.includes("/") ? name.slice(0, name.lastIndexOf("/")) : "");
+  }
+  function watchFolder(folder: string, cb: (s: FolderSnapshot) => void): () => void {
+    let set = folderWatchers.get(folder);
+    if (!set) { set = new Set(); folderWatchers.set(folder, set); }
+    set.add(cb);
+    void (async () => {
+      await migrationReady;
+      try { cb(await listing.listFolder(folder, LOCAL_CTX)); } catch (e) { ui.reportError(e); }   // ① 本地帧（该新订阅者）
+      await pushRemoteFrame(folder);                                                              // ② 云端帧（全体 watcher）
+    })();
+    return (): void => { const s = folderWatchers.get(folder); if (s) { s.delete(cb); if (!s.size) folderWatchers.delete(folder); } };
+  }
 
   // ── seal：加密透明（crypto-container 默认；getPassword 非交互）。JRP 不加密 → getPassword 恒 null=透传 ──
   const seal = createSeal({
@@ -308,6 +350,7 @@ export function createStore(config: StoreConfig) {
         const plain = await toU8(bytes);
         const sealed = await seal.sealForWrite(name, plain);
         await sub.serialize(name, () => local.save(name, sealed, opts?.hint));   // local 写同名串行链：与 offload.hardDelete 互斥（C2 红线）；hint 透传缩略图
+        notifyFolderOf(name);                                    // 网盘模型：本夹 watcher 即时反映新增/变脏（无云往返；gallery 没开=cheap no-op）
         if (opts?.tryPush === false) return;                     // 只落本地（autosave/consent-safe，ADR-0016/0018：opaque Work 的 push 必 consent-gated）
         try { await pushMod.push(name, { encode: () => plain, onConflict }); }
         catch (e) { ui.reportError(e); }
@@ -333,8 +376,8 @@ export function createStore(config: StoreConfig) {
         const pulled = await cloud.pull(name).catch((e) => { ui.reportError(e); return null; });
         return pulled ? await seal.unsealForRead(name, pulled.blob) : null;   // range/streaming（按需取片）是 ⚠TODO 优化
       },
-      async rename(newName) { await renameSF(name, newName); },
-      async delete() { await delSF(name); },
+      async rename(newName) { await renameSF(name, newName); notifyFolderOf(name); notifyFolderOf(newName); },   // 旧夹移出 + 新夹移入，两边都重画
+      async delete() { await delSF(name); notifyFolderOf(name); },
       isKeptOffline() { return local.exists(name); },   // 有本地副本 = 已留作离线（无 LRU、无独立 pin flag）
       async keepOffline() {   // 确保本地有副本（未缓存则 acquire；离线/失败 best-effort）
         if (!(await local.exists(name))) { try { await identity.acquire(name, { localName: name }); } catch (e) { ui.reportError(e); } }
@@ -374,7 +417,11 @@ export function createStore(config: StoreConfig) {
     collection,
     localSettings,
     syncedSettings,
+    // ── watchFolder（网盘模型，2026-07-11）：订阅**一个**文件夹 → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。
+    //   替代「listAllItems 全树 + 客户端切一夹」的浪费（JRP 开夹慢的根因）。连接态 store 自持（config.signedIn/isOnline），**无 ctx**。──
+    watchFolder,
     // ── 统一列举：整个虚拟 FS 一次列举（local ∪ cloud，每项带解析好的 syncState）。offline-first 结构性保证在库内。──
+    //   ⚠ 全库列举（每个子夹一次往返）：日常开夹用 watchFolder（单夹一次往返），此接口留给需要全表的少数场景（名去重等，宜改定向）。
     listAllItems: async (ctx: ListContext) => { await migrationReady; return listing.listAllItems(ctx); },
     // ⛔ 旧列举接口已废（2026-07-01）——改用 store.listAllItems(ctx)。
     //   listAllItems = 全部文件的唯一统一视图；local/cloud 不是两个来源、是 Item 的属性（syncState）。
@@ -386,19 +433,23 @@ export function createStore(config: StoreConfig) {
     // localKeys: () => local.appKeys(),  // ← 用 listAllItems(ctx) 的 item.syncState + isCached()（不再单列本地半截）
     // 文件夹操作（gallery folder-tree）：空文件夹增删。**离线也能建**（本地登记 + 回线 drainFolders 补建）。
     ensureFolder: (path: string) => ensureFolderLocalFirst(path),
-    newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", () => ensureFolderLocalFirst(path))),
+    newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", async () => { await ensureFolderLocalFirst(path); notifyFolderOf(path); })),   // 子夹出现在父夹 → 重画父夹
     deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", async () => {
       const wasPending = readPending().includes(path);
       clearPendingFolder(path);                                   // 离线建的（从没上云）→ 清登记即删
-      if (!isOnline()) { if (wasPending) return true; throw new Error("离线：无法删除已上云的文件夹"); }
-      return cloud.removeFolder(path);
+      if (!isOnline()) { if (wasPending) { notifyFolderOf(path); return true; } throw new Error("离线：无法删除已上云的文件夹"); }
+      const r = await cloud.removeFolder(path);
+      notifyFolderOf(path);                                       // 子夹从父夹消失 → 重画父夹
+      return r;
     })),
     drainFolders,   // 回线补建离线创建的空夹（app 在 online / listGallery 时调，对齐 drainDeleteQueue）
     // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放 + cloud-gone 收敛（安全子集 #43）。
     refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
     drainDeleteQueue: () => del.drainDeleteQueue(),
     drainUploadQueue: () => uploadReplay.drain(),   // ADR-0018：回线/成功连接补推离线新上传（app 在 online/boot 调；ask 模式内部先问）
-    reconcile: (opts?: { activeName?: string }) => reconcileMod.reconcile(opts),   // gallery list-fetch 时调：clean 孤儿→local-only（不删不 trash）
+    // **全库** cloud-gone 收敛（clean 孤儿→local-only，不删不 trash）。**仅用户显式指令**（将来隐藏的「校验完整性」入口），
+    //   **绝不自动/轮询/每次列举调**——全树 listAll 是重活。日常开夹的惰性收敛已在 watchFolder 内走 reconcileFolder（看到夹才收敛）。
+    reconcile: (opts?: { activeName?: string }) => reconcileMod.reconcile(opts),
 
     listTrash: () => cloud.listTrash(),   // 回收站列表（gallery trash 视图）
     listBackup: () => cloud.listBackup(),   // 备份箱列表（恢复箱视图；webxiaoheiwu 用）

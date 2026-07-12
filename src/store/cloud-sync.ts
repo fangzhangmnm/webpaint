@@ -312,6 +312,22 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   }
   async function listFolders(): Promise<string[]> { const out: CloudItem[] = [], folders: string[] = []; await _walk("", out, 0, folders, { partial: false }); return folders; }
 
+  // 单夹列举（**非递归**，一次 provider.list）——watchFolder / reconcileFolder 用；替代「listAll 全树 walk 后客户端切一夹」的浪费。
+  //   complete=false ⟸ 这一夹 list() 抛错（离线/未登录/子树失败）→ 调用方当「不权威」，绝不据此判 cloud-gone（同 _walk partial 纪律）。
+  //   顶层 .trash/.backup 同 _walk 跳过（path==="" 时）。folders = immediate 子夹全路径。
+  async function listFolder(path: string): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }> {
+    let items: CloudItem[];
+    try { items = await provider.list(path); } catch (_) { return { files: [], folders: [], complete: false }; }
+    const files: CloudItem[] = [], folders: string[] = [];
+    for (const it of items) {
+      if (path === "" && it.isFolder && (it.name === trashFolder || it.name === backupFolder)) continue;
+      const itPath = path ? `${path}/${it.name}` : it.name;
+      if (it.isFolder) folders.push(itPath);
+      else if (match(it)) files.push({ ...it, path: itPath, name: toName(itPath) });
+    }
+    return { files, folders, complete: true };
+  }
+
   async function listTrash(): Promise<CloudItem[]> {
     let items: CloudItem[];
     try { items = await provider.list(trashFolder); } catch (_) { return []; }
@@ -381,7 +397,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   return {
     push, pull, fetchMeta, pullTail, weakOverride,
     trash, restore, purge,
-    list, listAll, listFolders, listTrash, listBackup, rename, remove,
+    list, listAll, listFolder, listFolders, listTrash, listBackup, rename, remove,
     ensureFolder, removeFolder,
     getETag, setETag, isDirty, setDirty, clearState,
   };

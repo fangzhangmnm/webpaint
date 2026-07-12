@@ -40,7 +40,7 @@ export function classifyCloudGone(
 }
 
 export interface ReconcileCfg {
-  cloud: Pick<CloudSync, "listAll" | "clearState">;
+  cloud: Pick<CloudSync, "listAll" | "listFolder" | "clearState">;
   local: Pick<LocalCache, "appKeys">;
   head: Pick<LocalHead, "seenBase" | "isDirty" | "forget">;
   isOnline?: () => boolean;
@@ -48,22 +48,46 @@ export interface ReconcileCfg {
 
 export function createReconcile(cfg: ReconcileCfg) {
   const { cloud, local, head, isOnline } = cfg;
-  // gallery list-fetch 时调。activeName = 当前打开的 doc（K1 跳过，可选）。
+
+  // 共用收敛：给一组 localNames + 权威 cloudNameSet → demote clean 孤儿（清两条 etag 轨道；本地 blob 不动）。
+  function converge(localNames: string[], cloudNames: Set<string>, authoritative: boolean, activeName?: string): { demoted: string[] } {
+    const { demote } = classifyCloudGone(localNames, cloudNames, {
+      seenBase: (n) => head.seenBase(n),
+      isDirty: (n) => head.isDirty(n),
+      authoritative,
+      skip: activeName ? (n) => n === activeName : undefined,
+    });
+    for (const name of demote) { cloud.clearState(name); head.forget(name); }
+    return { demoted: demote };
+  }
+
+  // **全库** cloud-gone 收敛——**仅用户显式指令**（将来隐藏的「校验完整性」入口），**绝不自动/轮询**。
+  //   全树 listAll（每个子夹一次 Graph 往返）是重活；日常开夹惰性收敛走 reconcileFolder。空列表守卫防网抖误删。
   async function reconcile(opts: { activeName?: string } = {}): Promise<{ demoted: string[] }> {
     if (isOnline && !isOnline()) return { demoted: [] };                  // 离线 → 不权威
     const all = await cloud.listAll().catch(() => null);                  // 未登录/网失败 → null
     const authoritative = !!(all && all.complete && all.files.length > 0);  // 失败-fetch + 空列表守卫
     if (!authoritative) return { demoted: [] };
     const cloudNames = new Set(all!.files.map((f) => f.path ?? f.name));
-    const localNames = await local.appKeys();
-    const { demote } = classifyCloudGone(localNames, cloudNames, {
-      seenBase: (n) => head.seenBase(n),
-      isDirty: (n) => head.isDirty(n),
-      authoritative,
-      skip: opts.activeName ? (n) => n === opts.activeName : undefined,
-    });
-    for (const name of demote) { cloud.clearState(name); head.forget(name); }   // 清两条 etag 轨道；本地 blob 不动
-    return { demoted: demote };
+    return converge(await local.appKeys(), cloudNames, authoritative, opts.activeName);
   }
-  return { reconcile };
+
+  // **单夹** cloud-gone 收敛——「看到 folder 才 reconcile」（watchFolder 的 remote pass 副作用），非静默、非全扫。
+  //   authoritative = 这一夹 list() 没抛错（complete）。空夹合法（per-folder 下「空」≠网抖，与 reconcile 的空列表守卫不同）。
+  //   只判**该夹直属**本地文件（startsWith(prefix) ∧ 无更深 slash）——身份=path、不跨夹追踪：别夹的 clean 文件永不被本次降级。
+  async function reconcileFolder(folder: string, opts: { activeName?: string } = {}): Promise<{ demoted: string[] }> {
+    if (isOnline && !isOnline()) return { demoted: [] };
+    const res = await cloud.listFolder(folder).catch(() => null);
+    if (!res || !res.complete) return { demoted: [] };                   // 这一夹没列全 → 不权威 → no-op（绝不据此判 gone）
+    const cloudNames = new Set(res.files.map((f) => f.path ?? f.name));
+    const prefix = folder ? `${folder}/` : "";
+    const localNames = (await local.appKeys()).filter((k) => {
+      if (folder && !k.startsWith(prefix)) return false;
+      const rest = k.slice(prefix.length);
+      return rest.length > 0 && !rest.includes("/");                     // 仅本夹直属文件
+    });
+    return converge(localNames, cloudNames, true, opts.activeName);
+  }
+
+  return { reconcile, reconcileFolder };
 }
