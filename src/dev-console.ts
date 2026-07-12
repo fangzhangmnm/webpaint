@@ -50,9 +50,15 @@ export function initDevConsole() {
   };
   WP.pocFetchThumb = async function (itemId?: string, fileSize?: number) {
     if (!itemId) {
-      // 自动找第一个云端 ora
+      // 自动找第一个云端 ora。库不提供廉价全库列举 → **app 自己递归 listFolder**（代价=N 次往返，显式承担）。
       if (!isSignedIn()) throw new Error("没登录云");
-      const list = await store.listAllItems({ signedIn: true, online: true }).then((r) => r.items);
+      const walkAll = async (folder = ""): Promise<Array<{ path: string; size: number | undefined }>> => {
+        const snap = await store.listFolder(folder);
+        const out = snap.items.map((it) => ({ path: it.path, size: it.size }));
+        for (const sub of snap.folders) out.push(...await walkAll(sub));
+        return out;
+      };
+      const list = await walkAll();
       if (!list.length) throw new Error("云端没 session");
       const first = list[0];
       itemId = first.path; fileSize = first.size ?? 0;   // ⚠ Item 无 provider id（薄库内容盲）；POC 用 path 占位

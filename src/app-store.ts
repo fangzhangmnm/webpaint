@@ -81,11 +81,8 @@ export function watchGalleryFolder(
     });
   });
 }
-// ⚠ 全库列举（每个子夹一次往返）——**非热路径**：仅剩 name 去重 / dev-console 用（宜改定向，见 CLAUDE.md follow-up）。gallery 浏览已走 watchGalleryFolder。
-export async function listGallery({ signedIn, online }: { signedIn?: boolean; online?: boolean } = {}) {
-  const { items: raw, folders } = await store.listAllItems({ signedIn: !!signedIn, online: !!online });
-  return { items: raw.map(itemToG), cloudFolders: folders, localError: null };   // offline-first：listAllItems 绝不 throw
-}
+// ⛔ listGallery（全树列举）已删 2026-07-12——**库不提供廉价全库入口**（隐藏 walk 整树的代价）。
+//   日常浏览走 watchGalleryFolder（单夹）；定向查 store.listFolder(path)；真要全库 app 自己递归 listFolder（成本显式）。
 export const listGalleryTrash = async () => (await store.listTrash()).map((c) => ({ name: stripSessionExt(c.path || c.name || ""), local: null, cloud: c, deletedAt: 0 }));
 
 // ---- brush-rack cloud-sync（⚠TODO：→ store.collection("brush-rack.json") 逐 brush 一 item。当前本地-only stub）----

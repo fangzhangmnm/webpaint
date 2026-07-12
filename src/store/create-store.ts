@@ -418,19 +418,14 @@ export function createStore(config: StoreConfig) {
     localSettings,
     syncedSettings,
     // ── watchFolder（网盘模型，2026-07-11）：订阅**一个**文件夹 → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。
-    //   替代「listAllItems 全树 + 客户端切一夹」的浪费（JRP 开夹慢的根因）。连接态 store 自持（config.signedIn/isOnline），**无 ctx**。──
+    //   替代「全树列举 + 客户端切一夹」的浪费（JRP 开夹慢的根因）。连接态 store 自持（config.signedIn/isOnline），**无 ctx**。──
     watchFolder,
-    // ── 统一列举：整个虚拟 FS 一次列举（local ∪ cloud，每项带解析好的 syncState）。offline-first 结构性保证在库内。──
-    //   ⚠ 全库列举（每个子夹一次往返）：日常开夹用 watchFolder（单夹一次往返），此接口留给需要全表的少数场景（名去重等，宜改定向）。
-    listAllItems: async (ctx: ListContext) => { await migrationReady; return listing.listAllItems(ctx); },
-    // ⛔ 旧列举接口已废（2026-07-01）——改用 store.listAllItems(ctx)。
-    //   listAllItems = 全部文件的唯一统一视图；local/cloud 不是两个来源、是 Item 的属性（syncState）。
-    //   "只要本地 / 只要云端" 的想法 = 没理解这个模型（= mergeLocalCloud/localKeys 越狱的复发，正是 JRP 登出看不了
-    //   本地论文的根因）。**请完整重构调用方**：别用 justLocal/justRemote 取巧参数、别 deep import cloud.listAll/local.appKeys。
-    //   详 CONTEXT.md §反-duplicate + listing.ts。
-    // list: () => cloud.list(),          // ← 用 listAllItems(ctx)
-    // listAll: () => cloud.listAll(),    // ← 用 listAllItems(ctx)（cloud.listAll 仅库内 listing/reconcile 用）
-    // localKeys: () => local.appKeys(),  // ← 用 listAllItems(ctx) 的 item.syncState + isCached()（不再单列本地半截）
+    // 一次性单夹列举（watchFolder 的非订阅兄弟）：定向存在性检查 / app 自己递归全库时用。纯读、无 reconcile 副作用。
+    //   **本库不提供「一次列全库」的廉价接口**（那会 walk 整棵树、代价被隐藏）——真要全库，app 自己递归 listFolder，
+    //   代价（N 次往返）由调用方显式承担、看得见（用户拍板：全库让 app 自己递归，效率相当但成本可见）。
+    listFolder: async (path: string): Promise<FolderSnapshot> => { await migrationReady; return listing.listFolder(path, ctxNow()); },
+    // localKeys / listAllItems / listAll 均不暴露：日常浏览 watchFolder（单夹）；定向查 listFolder；全库 app 自递归。
+    //   （cloud.listAll 仅库内 reconcile 的 user-instruction「校验完整性」用；identity=path、local/cloud 是 Item 的属性 syncState 不是两来源。）
     // 文件夹操作（gallery folder-tree）：空文件夹增删。**离线也能建**（本地登记 + 回线 drainFolders 补建）。
     ensureFolder: (path: string) => ensureFolderLocalFirst(path),
     newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", async () => { await ensureFolderLocalFirst(path); notifyFolderOf(path); })),   // 子夹出现在父夹 → 重画父夹

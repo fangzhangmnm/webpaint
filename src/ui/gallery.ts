@@ -17,7 +17,7 @@ import {
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import {
   store as _store,
-  watchGalleryFolder, listGallery, listGalleryTrash,
+  watchGalleryFolder, listGalleryTrash,
 } from "../app-store.ts";
 import { listSessions } from "../session.ts";
 import { setMeta } from "../storage.ts";
@@ -208,14 +208,10 @@ function makeGallery(host: GalleryHost) {
 
       // ---- 名字冲突预检（快，无网络放前）----
       async function nameTaken(name: string, alsoCloud: boolean): Promise<string | null> {
-        const localNames = new Set((await listSessions()).map((s) => s.name));
+        const localNames = new Set((await listSessions()).map((s) => s.name));   // 本地跨夹全量（listSessions 名含夹前缀）
         if (localNames.has(name)) return t("gal.loc.local");
-        if (alsoCloud) {
-          try {
-            const cloudNames = new Set((await _store.listAllItems({ signedIn: true, online: true })).items.map((it) => stripSessionExt(it.path)));
-            if (cloudNames.has(name)) return t("gal.loc.cloud");
-          } catch (e) { console.warn("[gallery] cloud names:", e); }
-        }
+        // 云端只查手上当前夹快照（新建/改名/同夹副本都在当前夹；跨夹 move 的目标夹由 store 的 conflictBehavior:fail 兜底 surface）。
+        if (alsoCloud && data.files.some((it) => it.name === name && it.cloud)) return t("gal.loc.cloud");
         return null;
       }
 
@@ -270,16 +266,12 @@ function makeGallery(host: GalleryHost) {
         openMenu.value = null;
         const isCloud = !!item.cloud;
         const cur = pathFolder(item.name), base = pathBasename(item.name);
-        // 移动是跨夹操作 → 按需取全夹树（偶发动作，非热路径）；日常浏览走 watchFolder 单夹。
-        const full = await listGallery({ signedIn: host.signedIn(), online: host.online() });
-        const folders = new Set<string>(full.cloudFolders);
-        folders.add("");
-        for (const it of full.items) {
-          const parts = it.name.split("/"); let acc = "";
-          for (let i = 0; i < parts.length - 1; i++) { acc = acc ? `${acc}/${parts[i]}` : parts[i]; folders.add(acc); }
-        }
-        folders.delete(cur);
-        const sorted = [...folders].sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
+        // 网盘模型：只提供「上移到父夹」+「移进当前可见子夹」——用手上已有的单夹数据，**绝不再 poll 全树**。
+        const targets: string[] = [];
+        if (folder.value) targets.push(pathFolder(folder.value));                 // 父夹（当前非根时；父可能是根 ""）
+        for (const fn of data.folderNames) targets.push(pathJoin(folder.value, fn)); // 当前夹的 immediate 子夹
+        const sorted = [...new Set(targets)].filter((f) => f !== cur)
+          .sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)));
         if (!sorted.length) { host.status(t("gal.st.noOtherFolder")); return; }
         const target = await host.chooseFolder(t("gal.dlg.moveTitle", { base }), t("gal.dlg.moveMsg"),
           sorted.map((f) => ({ label: f === "" ? t("gal.rootFolder") : f, value: f })));
@@ -313,13 +305,9 @@ function makeGallery(host: GalleryHost) {
             // 取源字节：file.open 本地有读本地、无则拉云（明文；⚠TODO 加密源拷贝会解密，待内容盲 raw-read 原语）。
             const bytes: Blob | null = await _store.file(item.name, { isZip: true }).open();
             if (!bytes) { host.status(t("gal.st.copyNoBytes"), true); return; }
-            // 目标名：同文件夹下「<名> 副本」「<名> 副本2」…取首个本地⊕云端都不占用的。
+            // 目标名：同文件夹下「<名> 副本」「<名> 副本2」…取首个本地⊕云端都不占用的。源在当前夹 → 用手上单夹快照，不 poll。
             const localNames = new Set((await listSessions()).map((s) => s.name));
-            let cloudNames = new Set<string>();
-            if (cloudOn) {
-              try { cloudNames = new Set((await _store.listAllItems({ signedIn: true, online: true })).items.map((it) => stripSessionExt(it.path))); }
-              catch (e) { console.warn("[gallery] copy cloud names:", e); }
-            }
+            const cloudNames = new Set(data.files.filter((it) => it.cloud).map((it) => it.name));   // 当前夹云端名
             const newName = copyTargetName(item.name, (n: string) => localNames.has(n) || cloudNames.has(n));
             // 写新身份：本地存 + 云端 push（云端 best-effort，离线/失败标未推送，下次 Ctrl+S 续）。
             await _store.file(newName, { isZip: true }).save(bytes, { tryPush: cloudOn });   // 新身份：本地存 + best-effort 推

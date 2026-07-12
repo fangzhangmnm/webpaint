@@ -207,6 +207,16 @@ describe("watchFolder · 网盘模型集成", () => {
     unsub();
   });
 
+  it("store.listFolder 一次性（非订阅）：定向查某夹 → 该夹直属项", async () => {
+    const { store } = mkStore({ online: false });
+    await raw(store, "A/one").save(bytes("1"), { tryPush: false });
+    await raw(store, "B/two").save(bytes("2"), { tryPush: false });
+    const snap = await store.listFolder("A");
+    eq(snap.path, "A");
+    assert(snap.items.some((i) => i.path === "A/one"), "A 直属项");
+    assert(!snap.items.some((i) => i.path === "B/two"), "别夹项不出现");
+  });
+
   it("unsubscribe 后不再收帧", async () => {
     const { store } = mkStore({ online: false });
     let calls = 0;
