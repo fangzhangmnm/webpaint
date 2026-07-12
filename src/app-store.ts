@@ -34,6 +34,7 @@ export const store = createStore({
     return looksEncryptedContainer(blob);
   },
   keepOnOpen: true,
+  signedIn: () => _auth.isSignedIn(),   // 连接态 store 自持（网盘模型）：watchFolder/云列举不再由 app 每次传 ctx
 });
 
 // ============ auth（转发）============
@@ -52,24 +53,38 @@ export const getAuthState = () => _auth.getAuthState();
 export const getLastSessionSignedIn = () => store.localSettings.get<boolean>("lastSessionSignedIn") === true;
 export const setLastSessionSignedIn = (v: unknown) => store.localSettings.set("lastSessionSignedIn", !!v);
 
-// ---- gallery 数据：统一列举（local ∪ cloud，每项带 syncState）+ cloud-gone 安全收敛（都进库）----
+// ---- gallery 数据：统一列举（local ∪ cloud，每项带 syncState）。reconcile 已进库（watchFolder 惰性 per-folder）。----
 const _CLOUD_STATES = new Set(["cloud-only", "synced", "unpushed", "newer-on-cloud", "conflict"]);   // 有云版的 syncState
-export async function listGallery({ signedIn, online }: { signedIn?: boolean; online?: boolean } = {}) {
-  const ctx = { signedIn: !!signedIn, online: !!online };
-  try { await store.reconcile(); } catch (e) { storeUI.reportError(e); }
-  const { items: raw, folders } = await store.listAllItems(ctx);
-  // Item{path,syncState} → 旧 GalleryItem{name,local,cloud,dirty,ghost}（gallery-view-model 兼容；派生自 syncState）。
-  const items = raw.map((it) => {
-    const name = stripSessionExt(it.path);
-    return {
-      name,
-      local: isCached(it.syncState) ? { name } : null,
-      cloud: _CLOUD_STATES.has(it.syncState) ? { path: it.path, name, lastModifiedDateTime: it.lastModified ? new Date(it.lastModified).toISOString() : undefined } : null,
-      dirty: isDirty(it.syncState),
-      ghost: it.syncState === "ghost",
-    };
+// Item{path,syncState} → 旧 GalleryItem{name,local,cloud,dirty,ghost}（gallery-view-model 兼容；派生自 syncState）。
+function itemToG(it: { path: string; syncState: string; lastModified?: number }) {
+  const name = stripSessionExt(it.path);
+  return {
+    name,
+    local: isCached(it.syncState as never) ? { name } : null,
+    cloud: _CLOUD_STATES.has(it.syncState) ? { path: it.path, name, lastModifiedDateTime: it.lastModified ? new Date(it.lastModified).toISOString() : undefined } : null,
+    dirty: isDirty(it.syncState as never),
+    ghost: it.syncState === "ghost",
+  };
+}
+// watchFolder（网盘模型）：订阅**当前文件夹** → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。
+//   替代 listGallery 全树列举（JRP 开夹慢的根因）；连接态 store 自持、无 ctx。folderNames = immediate 子夹名。
+export function watchGalleryFolder(
+  folder: string,
+  cb: (snap: { path: string; items: ReturnType<typeof itemToG>[]; folderNames: string[] }) => void,
+): () => void {
+  const prefix = folder ? `${folder}/` : "";
+  return store.watchFolder(folder, (snap) => {
+    cb({
+      path: snap.path,
+      items: snap.items.map(itemToG),
+      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),   // 全路径 → immediate 段
+    });
   });
-  return { items, cloudFolders: folders, localError: null };   // offline-first：listAllItems 绝不 throw，localError 恒 null
+}
+// ⚠ 全库列举（每个子夹一次往返）——**非热路径**：仅剩 name 去重 / dev-console 用（宜改定向，见 CLAUDE.md follow-up）。gallery 浏览已走 watchGalleryFolder。
+export async function listGallery({ signedIn, online }: { signedIn?: boolean; online?: boolean } = {}) {
+  const { items: raw, folders } = await store.listAllItems({ signedIn: !!signedIn, online: !!online });
+  return { items: raw.map(itemToG), cloudFolders: folders, localError: null };   // offline-first：listAllItems 绝不 throw
 }
 export const listGalleryTrash = async () => (await store.listTrash()).map((c) => ({ name: stripSessionExt(c.path || c.name || ""), local: null, cloud: c, deletedAt: 0 }));
 

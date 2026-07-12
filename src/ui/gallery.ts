@@ -17,7 +17,7 @@ import {
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import {
   store as _store,
-  listGallery, listGalleryTrash,
+  watchGalleryFolder, listGallery, listGalleryTrash,
 } from "../app-store.ts";
 import { listSessions } from "../session.ts";
 import { setMeta } from "../storage.ts";
@@ -28,7 +28,7 @@ import { getOrFetchCloudThumb } from "../cloud-thumb-cache.ts";
 import { ENC_PEEK_MIME } from "../crypto-format.ts";
 import { isUnlocked, onLockChange, setPassword } from "../crypto-state.ts";
 import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword, ensureUnlocked } from "../enc-thumbs.ts";
-import { sliceFolder, folderHasContents, copyTargetName } from "../gallery-model.ts";
+import { copyTargetName } from "../gallery-model.ts";
 import { pathFolder, pathBasename, pathJoin } from "../gallery-path.ts";
 import { stripSessionExt } from "../config.ts";
 import { tileFor, breadcrumb, trashTileFor, humanTime, humanSize } from "./gallery-view-model.ts";
@@ -157,35 +157,41 @@ function makeGallery(host: GalleryHost) {
       const view = ref<"files" | "trash">("files");
       const folder = ref<string>(safeFolder());
       const loading = ref(false);
-      const data = reactive<{ items: GItem[]; cloudFolders: string[] }>({ items: [], cloudFolders: [] });
+      // 当前文件夹的**单夹**快照（store.watchFolder 已切好片；不再客户端 sliceFolder 全表）。
+      const data = reactive<{ files: GItem[]; folderNames: string[] }>({ files: [], folderNames: [] });
       const trash = ref<TrashGItem[]>([]);
       const openMenu = ref<string | null>(null);   // 当前展开的 tile 菜单 key
 
       function safeFolder() { try { return localStorage.getItem(LS_FOLDER) || ""; } catch { return ""; } }
-      function setFolder(p: string) { folder.value = p || ""; try { localStorage.setItem(LS_FOLDER, folder.value); } catch {} openMenu.value = null; }
 
-      async function reload() {
+      // ── watchFolder 订阅（网盘模型）：立即本地帧 + 云端帧同一 cb。换夹 = 退订重订。──
+      let _unsub: (() => void) | null = null;
+      function subscribe() {
+        _unsub?.(); _unsub = null;
+        if (view.value !== "files") return;
         loading.value = true;
-        openMenu.value = null;
-        try {
-          const st = { signedIn: host.signedIn(), online: host.online() };
-          if (view.value === "trash") {
-            trash.value = await listGalleryTrash() as unknown as TrashGItem[];
-          } else {
-            const r = await listGallery(st);
-            data.items = r.items; data.cloudFolders = r.cloudFolders;
-            if (r.localError) host.status(t("gal.st.localReadFail", { e: String((r.localError as { message?: unknown }).message || r.localError) }), true);
-          }
-        } finally { loading.value = false; }
+        _unsub = watchGalleryFolder(folder.value, (snap) => {
+          if (snap.path !== folder.value) return;   // 双保险：换夹途中的旧帧丢弃（库内已 sanity-check，此处再挡）
+          data.files = snap.items as unknown as GItem[];
+          data.folderNames = snap.folderNames;
+          loading.value = false;
+        });
       }
+      async function loadTrash() {
+        loading.value = true;
+        try { trash.value = await listGalleryTrash() as unknown as TrashGItem[]; }
+        finally { loading.value = false; }
+      }
+      // 对外/内部刷新：files 视图重订阅（重跑本地+云端帧）；trash 视图重载。日常本夹写已由 store notifyFolderOf 即时重画。
+      async function reload() { openMenu.value = null; if (view.value === "trash") { _unsub?.(); _unsub = null; await loadTrash(); } else subscribe(); }
+      function setFolder(p: string) { folder.value = p || ""; try { localStorage.setItem(LS_FOLDER, folder.value); } catch {} openMenu.value = null; subscribe(); }
 
-      // ---- 派生（纯 view-model + gallery-model）----
-      const slice = computed(() => sliceFolder(data.items, data.cloudFolders, folder.value));
-      const folderTiles = computed(() => slice.value.folderNames.map((fn) => {
-        const path = pathJoin(folder.value, fn);
-        return { name: fn, path, empty: !folderHasContents(data.items, data.cloudFolders, path) };
-      }));
-      const fileTiles = computed(() => slice.value.files.map((it) => ({
+      subscribe();                        // 初始订阅当前夹
+      onUnmounted(() => { _unsub?.(); _unsub = null; });
+
+      // ---- 派生（纯 view-model；切片已在 store 内完成）----
+      const folderTiles = computed(() => data.folderNames.map((fn) => ({ name: fn, path: pathJoin(folder.value, fn) })));
+      const fileTiles = computed(() => data.files.map((it) => ({
         item: it,
         t: tileFor(it, { signedIn: host.signedIn(), activeName: host.activeName() }),
       })));
@@ -264,9 +270,11 @@ function makeGallery(host: GalleryHost) {
         openMenu.value = null;
         const isCloud = !!item.cloud;
         const cur = pathFolder(item.name), base = pathBasename(item.name);
-        const folders = new Set<string>(data.cloudFolders);
+        // 移动是跨夹操作 → 按需取全夹树（偶发动作，非热路径）；日常浏览走 watchFolder 单夹。
+        const full = await listGallery({ signedIn: host.signedIn(), online: host.online() });
+        const folders = new Set<string>(full.cloudFolders);
         folders.add("");
-        for (const it of data.items) {
+        for (const it of full.items) {
           const parts = it.name.split("/"); let acc = "";
           for (let i = 0; i < parts.length - 1; i++) { acc = acc ? `${acc}/${parts[i]}` : parts[i]; folders.add(acc); }
         }
@@ -403,9 +411,9 @@ function makeGallery(host: GalleryHost) {
         await reload();
       }
 
-      async function folderDelete(ft: { name: string; path: string; empty: boolean }) {
+      async function folderDelete(ft: { name: string; path: string }) {
         openMenu.value = null;
-        if (!ft.empty) { host.status(t("gal.st.folderNonEmpty"), true); return; }
+        // per-folder 模型下不预知子夹空否 → 直接交 store.deleteFolder：库内「必须空」是红线硬兜底，非空则抛、下面 catch surface。
         if (!host.signedIn() || !host.online()) { host.status(t("gal.st.folderDelNeedLogin"), true); return; }
         // 走 store.flow.deleteFolder：库内强制锁屏 + 「必须空」兜底 + 不吞错（旧版 getItemByPath 没选 folder facet
         //   → item.folder 永远 undefined → 根本没删却照报「已删除」= N9 + 用户「删空夹不可用」）。
@@ -494,11 +502,11 @@ function makeGallery(host: GalleryHost) {
             <div class="gallery-tile-thumb" v-html="ICON.folder"></div>
             <div class="gallery-tile-name-row">
               <div class="gallery-tile-name" :title="ft.path">{{ ft.name }}</div>
-              <div class="gallery-tile-meta">{{ ft.empty ? L.emptyFolder : L.folder }}</div>
+              <div class="gallery-tile-meta">{{ L.folder }}</div>
             </div>
             <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu('F:'+ft.path)">⋯</button>
             <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!=='F:'+ft.path }" @click.stop>
-              <button type="button" class="danger" :disabled="!ft.empty" @click="folderDelete(ft)">{{ ft.empty ? L.delEmptyFolder : L.delFolderNonEmpty }}</button>
+              <button type="button" class="danger" @click="folderDelete(ft)">{{ L.delEmptyFolder }}</button>
             </div>
           </div>
 
