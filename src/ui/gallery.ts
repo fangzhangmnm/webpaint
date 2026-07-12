@@ -264,7 +264,6 @@ function makeGallery(host: GalleryHost) {
 
       async function move(item: GItem) {
         openMenu.value = null;
-        const isCloud = !!item.cloud;
         const cur = pathFolder(item.name), base = pathBasename(item.name);
         // 网盘模型：只提供「上移到父夹」+「移进当前可见子夹」——用手上已有的单夹数据，**绝不再 poll 全树**。
         const targets: string[] = [];
@@ -278,14 +277,16 @@ function makeGallery(host: GalleryHost) {
         if (target == null) return;
         const newName = pathJoin(target, base);
         if (newName === item.name) { host.status(t("gal.st.alreadyInFolder")); return; }
-        const taken = await nameTaken(newName, isCloud);
-        if (taken) { host.status(t("gal.st.nameTakenTarget", { loc: taken, base }), true); return; }
+        // 碰撞不再由 app 先 list 目标夹预检（原则上不知别夹内容）——直接 move，store 目标占用护栏撞名即抛，UI 拒绝。
         await host.busy(t("gal.busy.move", { base, target: target || t("gal.root") }), async () => {
           try {
             await _store.file(item.name, { isZip: true }).rename(newName);
             if (item.name === host.activeName()) session.setName(newName);
             host.status(t("gal.st.moved", { target: target || t("gal.root") }));
-          } catch (e: unknown) { host.status(t("gal.st.moveFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
+          } catch (e: unknown) {
+            if ((e as { name?: string })?.name === "CloudNameCollisionError") host.status(t("gal.st.nameTakenTarget", { loc: "", base }), true);
+            else host.status(t("gal.st.moveFail", { e: String((e as { message?: unknown })?.message || e) }), true);
+          }
         });
         await reload();
       }

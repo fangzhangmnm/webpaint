@@ -6,6 +6,7 @@
 //   串行 against 两名 in-flight（serialize2）。编排 push 深模块 + cloud.rename + local-head。
 import { toU8 } from "./substrate.ts";
 import type { BytesSource } from "./substrate.ts";
+import { CloudNameCollisionError } from "./cloud-sync.ts";
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 import type { Seal } from "./seal.ts";
@@ -35,10 +36,23 @@ export function createIdentity(cfg: IdentityCfg) {
   const { cloud, local, head, doPush, serialize, serialize2, seal, busy: _busy = passBusy } = cfg;
   const unseal = (name: string, blob: Blob) => seal ? seal.unsealForRead(name, blob) : Promise.resolve(blob as Blob | null);
 
+  // 目标名占用护栏（**碰撞检查内化**：caller 不必先 list 目标夹——app 原则上不知道别夹内容）。
+  //   本地已有 newName ∨ 云端已有 newName（任一）→ 抛 CloudNameCollisionError，**在改任何字节之前**（防 rename/saveAs 覆盖既有文件 = data-loss）。
+  //   离线时 cloud.fetchMeta 抛/失败 → 视作云端无（本地护栏仍挡；后续 push 的 conflictBehavior:fail 兜底云端）。
+  async function assertNameFree(newName: string, doCloud: boolean): Promise<void> {
+    if (local && await local.exists(newName)) throw new CloudNameCollisionError(newName);
+    if (doCloud) {
+      let meta = null;
+      try { meta = await cloud.fetchMeta(newName); } catch { meta = null; }
+      if (meta) throw new CloudNameCollisionError(newName);
+    }
+  }
+
   async function rename(oldName: string, newName: string, opts: RenameOpts = {}): Promise<IdResult> {
     const { encode, getEditVersion, cloud: doCloud = true, busy = _busy } = opts;
     if (!oldName || !newName || oldName === newName) return { status: "noop" };
     return serialize2(oldName, newName, () => busy("重命名…", async () => {
+      await assertNameFree(newName, doCloud);       // 目标占用 → 抛 collision（改字节前；move 到别夹撞名走这里，caller catch 拒绝）
       const hasLocal = local ? await local.exists(oldName) : false;
       let bytes: Bytes | null = null;
       if (encode) bytes = await toU8(await encode());
@@ -79,6 +93,7 @@ export function createIdentity(cfg: IdentityCfg) {
   async function saveAs(newName: string, opts: SaveAsOpts): Promise<IdResult> {
     const { encode, getEditVersion, cloud: doCloud = true, busy = _busy } = opts;
     return serialize(newName, async () => {
+      await assertNameFree(newName, doCloud);       // 另存为目标占用 → collision（旧的不动、新的不覆盖既有）
       const bytes = await toU8(await encode());
       if (local) await local.save(newName, bytes);
       if (!doCloud) return { status: "saved", where: "local", newName };

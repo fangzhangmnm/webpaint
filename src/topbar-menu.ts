@@ -189,15 +189,15 @@ export function initTopbarMenu(ctx: AppContext) {
       const trimmed = input.trim();
       if (!trimmed) { setStatus(t("tm.nameEmpty"), true); candidate = ""; continue; }
       if (trimmed === oldName) { setStatus(t("tm.nameSameAsCurrent"), true); candidate = trimmed; continue; }
-      const conflict = await sessionNameConflict(trimmed, { cloud: isSignedIn() && navigator.onLine !== false });
-      if (conflict === "local") { setStatus(t("tm.localNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
-      if (conflict === "cloud") { setStatus(t("tm.cloudNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
+      if (await sessionNameConflict(trimmed) === "local") { setStatus(t("tm.localNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
+      // 云端占用不在此预检（网盘模型不 list 别夹）——store saveAs 目标护栏撞名即抛，下面 catch 循环重问。
       // 另存为 = 写新身份、旧的不动（store.flow.saveAs：本地存 + 云端 push，云端 best-effort）。
       try {
         await session.saveAs(trimmed);   // 当前内容写新身份 + 切新名（session 编排；tryPush best-effort）
         setStatus(t("tm.savedAsWithCloud", { name: trimmed }));
         return;
       } catch (e) {
+        if ((e as { name?: string })?.name === "CloudNameCollisionError") { setStatus(t("tm.cloudNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
         setStatus(t("tm.saveAsFailed", { err: String(errMsg(e)) }));
         return;
       }

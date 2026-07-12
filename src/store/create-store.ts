@@ -420,11 +420,9 @@ export function createStore(config: StoreConfig) {
     // ── watchFolder（网盘模型，2026-07-11）：订阅**一个**文件夹 → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。
     //   替代「全树列举 + 客户端切一夹」的浪费（JRP 开夹慢的根因）。连接态 store 自持（config.signedIn/isOnline），**无 ctx**。──
     watchFolder,
-    // 一次性单夹列举（watchFolder 的非订阅兄弟）：定向存在性检查 / app 自己递归全库时用。纯读、无 reconcile 副作用。
-    //   **本库不提供「一次列全库」的廉价接口**（那会 walk 整棵树、代价被隐藏）——真要全库，app 自己递归 listFolder，
-    //   代价（N 次往返）由调用方显式承担、看得见（用户拍板：全库让 app 自己递归，效率相当但成本可见）。
-    listFolder: async (path: string): Promise<FolderSnapshot> => { await migrationReady; return listing.listFolder(path, ctxNow()); },
-    // localKeys / listAllItems / listAll 均不暴露：日常浏览 watchFolder（单夹）；定向查 listFolder；全库 app 自递归。
+    // **唯一列举面 = watchFolder（订阅当前夹）**。不暴露 listFolder/listAllItems/listAll/localKeys：
+    //   app 原则上不知道别的 folder 的内容（内存只放当前夹，免 cache-invalidation）。名字碰撞由 mutation 自查内化
+    //   （rename/saveAs 目标占用 → 抛 CloudNameCollisionError），不靠「先 list 目标夹」。真要全库 app 自己递归（成本显式）。
     //   （cloud.listAll 仅库内 reconcile 的 user-instruction「校验完整性」用；identity=path、local/cloud 是 Item 的属性 syncState 不是两来源。）
     // 文件夹操作（gallery folder-tree）：空文件夹增删。**离线也能建**（本地登记 + 回线 drainFolders 补建）。
     ensureFolder: (path: string) => ensureFolderLocalFirst(path),

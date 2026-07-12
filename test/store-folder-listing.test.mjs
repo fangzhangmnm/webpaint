@@ -157,15 +157,16 @@ describe("cloud-sync.listFolder · 非递归 + 顶层安全网跳过", () => {
 describe("watchFolder · 网盘模型集成", () => {
   function mkStore({ online = true, signedIn = true } = {}) {
     const errors = [];
+    const local = createMockLocal();
     const store = createStore({
       provider: createMockProvider(),
       ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: (e) => errors.push(e) },
       validateAdopt: () => true,
-      kv: memKv(), local: createMockLocal(),
+      kv: memKv(), local,
       isOnline: () => online, signedIn: () => signedIn,
       skipMigration: true,
     });
-    return { store, errors };
+    return { store, errors, local };
   }
   const raw = (store, name) => store.file(name, { isZip: false });
 
@@ -207,16 +208,6 @@ describe("watchFolder · 网盘模型集成", () => {
     unsub();
   });
 
-  it("store.listFolder 一次性（非订阅）：定向查某夹 → 该夹直属项", async () => {
-    const { store } = mkStore({ online: false });
-    await raw(store, "A/one").save(bytes("1"), { tryPush: false });
-    await raw(store, "B/two").save(bytes("2"), { tryPush: false });
-    const snap = await store.listFolder("A");
-    eq(snap.path, "A");
-    assert(snap.items.some((i) => i.path === "A/one"), "A 直属项");
-    assert(!snap.items.some((i) => i.path === "B/two"), "别夹项不出现");
-  });
-
   it("unsubscribe 后不再收帧", async () => {
     const { store } = mkStore({ online: false });
     let calls = 0;
@@ -227,5 +218,49 @@ describe("watchFolder · 网盘模型集成", () => {
     await raw(store, "A/z").save(bytes("z"), { tryPush: false });
     await new Promise((r) => setTimeout(r, 5));
     eq(calls, after, "退订后写入不再回调");
+  });
+});
+
+// ── 目标名占用护栏（碰撞检查内化进 rename/saveAs，替代「app 先 list 目标夹」；防覆盖既有=data-loss）───────────
+describe("rename/saveAs 目标占用护栏", () => {
+  function mkStore() {
+    const local = createMockLocal();
+    const store = createStore({
+      provider: createMockProvider(),
+      ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {} },
+      validateAdopt: () => true, kv: memKv(), local,
+      isOnline: () => false, signedIn: () => false, skipMigration: true,   // 离线：只验本地占用护栏
+    });
+    return { store, local };
+  }
+  const raw = (store, name) => store.file(name, { isZip: false });
+  const dec = (u) => new TextDecoder().decode(u);
+
+  it("rename 到本地已存在名 → 抛 CloudNameCollisionError，绝不覆盖既有字节", async () => {
+    const { store, local } = mkStore();
+    await raw(store, "A/keep").save(bytes("KEEP"), { tryPush: false });
+    await raw(store, "A/src").save(bytes("SRC"), { tryPush: false });
+    let err = null;
+    try { await raw(store, "A/src").rename("A/keep"); } catch (e) { err = e; }
+    assert(err && err.name === "CloudNameCollisionError", "撞名抛 typed collision");
+    eq(dec(local._items.get("A/keep")), "KEEP", "★既有文件字节绝不被源覆盖（data-loss 防线）");
+    assert(local._items.has("A/src"), "源仍在（rename 未发生）");
+  });
+
+  it("saveAs 到已存在名 → 抛 collision（旧的不动、新的不覆盖）", async () => {
+    const { store, local } = mkStore();
+    await raw(store, "keep").save(bytes("K"), { tryPush: false });
+    let err = null;
+    try { await store.saveAs("keep", { encode: () => bytes("NEW") }); } catch (e) { err = e; }
+    assert(err && err.name === "CloudNameCollisionError", "撞名抛 collision");
+    eq(dec(local._items.get("keep")), "K", "既有不被覆盖");
+  });
+
+  it("rename 到不占用名 → 正常改名（护栏不误伤）", async () => {
+    const { store, local } = mkStore();
+    await raw(store, "A/src").save(bytes("SRC"), { tryPush: false });
+    await raw(store, "A/src").rename("A/dst");
+    assert(!local._items.has("A/src") && local._items.has("A/dst"), "改名生效：旧无新有");
+    eq(dec(local._items.get("A/dst")), "SRC", "字节随身份走");
   });
 });

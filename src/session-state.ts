@@ -267,7 +267,10 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
         setStatus(t("ss.renamedWithCloud", { oldName, newName: trimmed }));
         gallery.refresh();
         return { ok: true };
-      } catch (e) { setStatus(t("ss.renameFailed", { error: errMsg(e) })); return {}; }
+      } catch (e) {
+        if ((e as { name?: string })?.name === "CloudNameCollisionError") return { conflict: true };   // 云端目标占用（store 护栏）→ 循环重问
+        setStatus(t("ss.renameFailed", { error: errMsg(e) })); return {};
+      }
     });
     if (outcome.conflict) { setStatus(t("ss.localNameTakenStatus", { name: trimmed }), true); note = t("ss.nameTakenNote", { name: trimmed }); candidate = trimmed; continue; }
     return outcome.ok ? trimmed : null;

@@ -49,21 +49,8 @@ export function initDevConsole() {
     return n;
   };
   WP.pocFetchThumb = async function (itemId?: string, fileSize?: number) {
-    if (!itemId) {
-      // 自动找第一个云端 ora。库不提供廉价全库列举 → **app 自己递归 listFolder**（代价=N 次往返，显式承担）。
-      if (!isSignedIn()) throw new Error("没登录云");
-      const walkAll = async (folder = ""): Promise<Array<{ path: string; size: number | undefined }>> => {
-        const snap = await store.listFolder(folder);
-        const out = snap.items.map((it) => ({ path: it.path, size: it.size }));
-        for (const sub of snap.folders) out.push(...await walkAll(sub));
-        return out;
-      };
-      const list = await walkAll();
-      if (!list.length) throw new Error("云端没 session");
-      const first = list[0];
-      itemId = first.path; fileSize = first.size ?? 0;   // ⚠ Item 无 provider id（薄库内容盲）；POC 用 path 占位
-      console.log("POC：拉", first.path, "size", fileSize);
-    }
+    // 网盘模型：库不提供廉价全库列举、也不暴露单夹 list → POC 需显式 itemId（从 gallery tile 的 path 取）。
+    if (!itemId) throw new Error("pocFetchThumb 需显式 itemId（path）");
     const t0 = performance.now();
     // 手动路径可只给 itemId（fileSize 由 byte-range 探测）；auto 路径两者都填。运行时契约不变。
     const blob = await fetchOraThumbnail(itemId, fileSize as number);

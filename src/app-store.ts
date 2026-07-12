@@ -81,8 +81,8 @@ export function watchGalleryFolder(
     });
   });
 }
-// ⛔ listGallery（全树列举）已删 2026-07-12——**库不提供廉价全库入口**（隐藏 walk 整树的代价）。
-//   日常浏览走 watchGalleryFolder（单夹）；定向查 store.listFolder(path)；真要全库 app 自己递归 listFolder（成本显式）。
+// ⛔ listGallery（全树列举）已删 2026-07-12——**库唯一列举面 = watchGalleryFolder（订阅当前夹）**。
+//   app 原则上不知道别的 folder 内容（内存只放当前夹）；名字碰撞由 store rename/saveAs 目标护栏内化检测（撞名抛 CloudNameCollisionError），不靠先 list 目标夹。
 export const listGalleryTrash = async () => (await store.listTrash()).map((c) => ({ name: stripSessionExt(c.path || c.name || ""), local: null, cloud: c, deletedAt: 0 }));
 
 // ---- brush-rack cloud-sync（⚠TODO：→ store.collection("brush-rack.json") 逐 brush 一 item。当前本地-only stub）----

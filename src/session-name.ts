@@ -4,20 +4,11 @@
 // （rename 把检查包进 withBusy 覆盖空窗；saveAs 在 busy 前查），故只抽**检查本身**，调用点结构不动。
 
 import { listSessions } from "./session.ts";
-import { store } from "./app-store.ts";
-import { stripSessionExt } from "./config.ts";
 
-// 返回冲突类型 "local" | "cloud" | null。cloud 列举失败不算冲突（best-effort，吞并 warn）。
-//   网盘模型：只查**目标夹**（name 所在夹）一次，不再全库列举（身份=path，冲突仅同夹同名）。
-export async function sessionNameConflict(name: string, { cloud = false }: { cloud?: boolean } = {}): Promise<"local" | "cloud" | null> {
+// 本地重名预检（app 合法知道本地全量 session）。**云端碰撞不在这里查**——网盘模型下 app 原则上不知别夹内容，
+//   云端占用由 store 的 rename/saveAs 目标护栏内化检测（撞名抛 CloudNameCollisionError，调用方 catch 循环重问）。
+//   保留 opts.cloud 形参仅为调用点签名稳定（本函数忽略它）；返回 "local" | null。
+export async function sessionNameConflict(name: string, _opts: { cloud?: boolean } = {}): Promise<"local" | null> {
   const localNames = (await listSessions()).map((s: { name: string }) => s.name);
-  if (localNames.includes(name)) return "local";
-  if (cloud) {
-    try {
-      const folder = name.includes("/") ? name.slice(0, name.lastIndexOf("/")) : "";
-      const { items } = await store.listFolder(folder);
-      if (items.some((it) => stripSessionExt(it.path) === name)) return "cloud";   // 本地已在上面拦掉 → 这里命中即云端
-    } catch (e) { console.warn("[session-name] cloud list failed:", e); }
-  }
-  return null;
+  return localNames.includes(name) ? "local" : null;
 }

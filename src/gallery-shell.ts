@@ -361,17 +361,11 @@ export function initGalleryShell(ctx: AppContext) {
     const fullPath = pathJoin(gallery.getFolder(), trimmed);
     // 点确定即刻锁屏（含「已存在」预检的网络往返也在锁内）——修「新建文件夹延迟锁屏 F」。
     //   withBusy 可重入（ref-count），内层 store.flow.newFolder 再包一层 busy 不会提前解锁。
-    const parent = gallery.getFolder();
     await withBusy(t("gs.creatingFolder", { name: trimmed }), async () => {
-      // 已存在 check：网盘模型只查**父夹**一次（新夹是父夹的 immediate 子项，冲突仅在父夹内），不再全库列举。
+      // 网盘模型：不 list 目标夹查存在（原则上不知别夹内容）。本地已有同名文件 → 提示；云端 ensureFolder 幂等（已存在=复用，无害）。
       let localNames: string[] = [];
       try { localNames = (await listSessions()).map((s: { name: string }) => s.name); } catch {}
-      let exists = localNames.some((n) => n === fullPath || n.startsWith(`${fullPath}/`));
-      try {
-        const snap = await _store.listFolder(parent);
-        exists = exists || snap.folders.includes(fullPath) || snap.items.some((it) => stripSessionExt(it.path) === fullPath);
-      } catch (e) { console.warn("[folder] cloud list failed:", e); }
-      if (exists) { setStatus(t("gs.folderExists", { name: trimmed }), true); return; }
+      if (localNames.some((n) => n === fullPath || n.startsWith(`${fullPath}/`))) { setStatus(t("gs.folderExists", { name: trimmed }), true); return; }
       // 走 store.flow.newFolder（深模块窄接口）而非裸 ensureSubfolder——锁屏/单飞守卫由库内强制。
       try { await _store.newFolder(fullPath); setStatus(t("gs.folderCreated", { name: trimmed })); }
       catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus(t("gs.folderCreateFailed", { err: errMsg(e) }), true); }
