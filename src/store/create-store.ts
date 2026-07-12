@@ -80,7 +80,7 @@ export interface RawFile {
   //  tryPush 是 **best-effort**：离线/冲突/失败 → 文件留 dirty、下次补推（不保证同步到云）。hint 透传缩略图（store content-blind）。
   save(bytes: Bytes | Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<void>;
   open(): Promise<Blob | null>;
-  rename(newName: string): Promise<void>;
+  // 注：无 rename —— 改身份/移动**唯一入口 = store.tryMove(from,to)**（含 nameOccupied 占用检查，结果式不抛）。
   delete(): Promise<void>;
   // 注：无 isDirty —— 「有没未推的改动」是 **sync 状态**，经 store.listAllItems 的 syncState 读（unpushed/conflict）。
   //   「是否 dirty 该推」= app 编辑逻辑（编辑器生命周期模块）的判断，不是库的事。
@@ -270,8 +270,7 @@ export function createStore(config: StoreConfig) {
     };
   }
   const delSF = singleFlight("删除", (n: string) => { uploadReplay.remove(n); return del.del(n, { isOnline }); });   // 删=supersede：从补推队列摘掉（ADR-0018）   // 接 isOnline：离线删走 move-aside + base-etag 守卫的删队列（重连 drainDeleteQueue 重放）
-  const renameSF = singleFlight("重命名", (n: string, nn: string) => identity.rename(n, nn));
-  // tryMove(from,to)：改身份/移动的**结果式**入口——**本操作含目标占用检查**（第一行 nameOccupied，占用则不动字节直接返错）。
+  // tryMove(from,to)：改身份/移动的**唯一结果式入口**（file() 无 rename，editor-session 也走这里）——**本操作含目标占用检查**（第一行 nameOccupied，占用则不动字节直接返错）。
   //   ok:false 时调用方 surface（UI 拒绝/重问）；不抛 CloudNameCollisionError（内部护栏是兜底，这里预检过即 skip）。
   type TryMoveResult = { ok: true } | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
   const tryMoveSF = singleFlight("移动", async (from: string, to: string): Promise<TryMoveResult> => {
@@ -401,7 +400,6 @@ export function createStore(config: StoreConfig) {
         const pulled = await cloud.pull(name).catch((e) => { ui.reportError(e); return null; });
         return pulled ? await seal.unsealForRead(name, pulled.blob) : null;   // range/streaming（按需取片）是 ⚠TODO 优化
       },
-      async rename(newName) { await renameSF(name, newName); notifyFolderOf(name); notifyFolderOf(newName); },   // 旧夹移出 + 新夹移入，两边都重画
       async delete() { await delSF(name); notifyFolderOf(name); },
       isKeptOffline() { return local.exists(name); },   // 有本地副本 = 已留作离线（无 LRU、无独立 pin flag）
       async keepOffline() {   // 确保本地有副本（未缓存则 acquire；离线/失败 best-effort）

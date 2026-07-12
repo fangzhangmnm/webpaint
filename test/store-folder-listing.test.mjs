@@ -236,17 +236,6 @@ describe("rename/saveAs 目标占用护栏", () => {
   const raw = (store, name) => store.file(name, { isZip: false });
   const dec = (u) => new TextDecoder().decode(u);
 
-  it("rename 到本地已存在名 → 抛 CloudNameCollisionError，绝不覆盖既有字节", async () => {
-    const { store, local } = mkStore();
-    await raw(store, "A/keep").save(bytes("KEEP"), { tryPush: false });
-    await raw(store, "A/src").save(bytes("SRC"), { tryPush: false });
-    let err = null;
-    try { await raw(store, "A/src").rename("A/keep"); } catch (e) { err = e; }
-    assert(err && err.name === "CloudNameCollisionError", "撞名抛 typed collision");
-    eq(dec(local._items.get("A/keep")), "KEEP", "★既有文件字节绝不被源覆盖（data-loss 防线）");
-    assert(local._items.has("A/src"), "源仍在（rename 未发生）");
-  });
-
   it("saveAs 到已存在名 → 抛 collision（旧的不动、新的不覆盖）", async () => {
     const { store, local } = mkStore();
     await raw(store, "keep").save(bytes("K"), { tryPush: false });
@@ -256,24 +245,18 @@ describe("rename/saveAs 目标占用护栏", () => {
     eq(dec(local._items.get("keep")), "K", "既有不被覆盖");
   });
 
-  it("rename 到不占用名 → 正常改名（护栏不误伤）", async () => {
-    const { store, local } = mkStore();
-    await raw(store, "A/src").save(bytes("SRC"), { tryPush: false });
-    await raw(store, "A/src").rename("A/dst");
-    assert(!local._items.has("A/src") && local._items.has("A/dst"), "改名生效：旧无新有");
-    eq(dec(local._items.get("A/dst")), "SRC", "字节随身份走");
-  });
-
-  it("store.tryMove：占用→{ok:false,where}（不动字节）；空→{ok:true}（移动生效）", async () => {
+  it("store.tryMove：占用→{ok:false,where}（不动字节，防覆盖 data-loss）；空→{ok:true}（移动生效、字节随身份）", async () => {
     const { store, local } = mkStore();
     await raw(store, "A/keep").save(bytes("KEEP"), { tryPush: false });
     await raw(store, "A/src").save(bytes("SRC"), { tryPush: false });
     const bad = await store.tryMove("A/src", "A/keep");
-    assert(bad.ok === false && bad.reason === "name-collision" && bad.where === "local", "占用 → 结果式返错");
-    assert(local._items.has("A/src") && eq(dec(local._items.get("A/keep")), "KEEP") === undefined, "不动字节：src 仍在、keep 不被覆盖");
+    assert(bad.ok === false && bad.reason === "name-collision" && bad.where === "local", "占用 → 结果式返错（不抛）");
+    assert(local._items.has("A/src"), "不动字节：src 仍在");
+    eq(dec(local._items.get("A/keep")), "KEEP", "★既有 keep 绝不被源覆盖（data-loss 防线）");
     const ok = await store.tryMove("A/src", "B/dst");
     assert(ok.ok === true, "空 → ok");
     assert(!local._items.has("A/src") && local._items.has("B/dst"), "移动生效");
+    eq(dec(local._items.get("B/dst")), "SRC", "字节随身份走");
   });
 
   it("store.nameOccupied：local→'local'、无→null", async () => {
@@ -308,7 +291,8 @@ describe("离线 move（删+建，tag 走法）", () => {
     assert(await provider.getItemByPath("old"), "云端有 old");
 
     setOnline(false);
-    await raw(store, "old").rename("new");                                   // 离线 move
+    const mv = await store.tryMove("old", "new");                            // 离线 move（唯一入口）
+    assert(mv.ok === true, "离线 move 成功");
 
     // 本地：new 有、old 进本地 .trash（move-aside，绝不 hardDelete）
     assert(local._items.has("new") && !local._items.has("old"), "本地 new 有 old 无");
@@ -334,7 +318,8 @@ describe("离线 move（删+建，tag 走法）", () => {
     await raw(store, "old").save(bytes("OLD"), { tryPush: true });           // 在线 synced
 
     setOnline(false);
-    await raw(store, "old").rename("new");                                   // 离线：只查本地占用（无）→ 放行
+    const mv = await store.tryMove("old", "new");                            // 离线：只查本地占用（无）→ 放行
+    assert(mv.ok === true, "离线 move 放行（云端占用离线看不到）");
     eq(dec(local._items.get("new")), "OLD", "本地 new = 我方字节");
 
     setOnline(true);

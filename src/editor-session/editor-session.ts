@@ -26,13 +26,15 @@ export interface EditorAdapter {
 }
 
 /** editor-session 消费的 store 最小面（结构类型；真 sync-store 天然满足，测试可 mock）。 */
+// tryMove 结果（rename/move 唯一入口；含目标占用检查，占用则不动字节返错，不抛）。
+export type TryMoveResult = { ok: true } | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
 export interface StoreLike {
   file(name: string, opts: { isZip: boolean }): {
     open(): Promise<Blob | null>;
     save(bytes: Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<void>;
-    rename(newName: string): Promise<void>;
     delete(): Promise<void>;
   };
+  tryMove(from: string, to: string): Promise<TryMoveResult>;   // 改身份/移动唯一入口（含 nameOccupied 占用检查）
   reconcile?(opts?: { activeName?: string }): Promise<void>;
 }
 
@@ -58,7 +60,7 @@ export interface EditorSession {
   markDirty(): void;                              // app 驱动的内容变化（不走 editor onChange，如设置/参考窗）→ 标脏
   flushLocal(): Promise<void>;                    // 立即存本地（不推）——内存脏才动
   flushAndPush(): Promise<void>;                  // 立即存本地 + best-effort 推云——内存脏才动
-  rename(newName: string): Promise<void>;         // 改身份（先 flush 旧内容）
+  rename(newName: string): Promise<TryMoveResult>;   // 改身份（先 flush 旧内容）→ 走 store.tryMove；占用则返 {ok:false}（不改 _name）
   delete(): Promise<void>;                        // 删当前 doc
   currentName(): string | null;
   isDirty(): boolean;                             // **内存脏**（自上次落盘后 editor 改过）——app 层概念，非 sync 脏
@@ -138,11 +140,12 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     flushLocal: () => persist(false),
     flushAndPush: () => persist(true),
 
-    async rename(newName: string): Promise<void> {
-      if (!_name) return;
+    async rename(newName: string): Promise<TryMoveResult> {
+      if (!_name) return { ok: true };
       await persist(false);                        // 先把内存落到旧名
-      await fileOf(_name).rename(newName);
-      _name = newName;
+      const r = await store.tryMove(_name, newName);   // 唯一入口（含占用检查）；占用→不改 _name
+      if (r.ok) _name = newName;
+      return r;
     },
 
     async delete(): Promise<void> {

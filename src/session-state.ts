@@ -20,7 +20,6 @@ import { isSignedIn, store as _store } from "./app-store.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
 import { stripSessionExt } from "./config.ts";
-import { sessionNameConflict } from "./session-name.ts";
 import { serializedToolStatePatch } from "./editor-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
@@ -259,18 +258,15 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
     if (!trimmed) { note = t("ss.nameCannotBeEmpty"); candidate = ""; continue; }
     if (trimmed === oldName) return oldName;
     const outcome: { conflict?: boolean; ok?: boolean } = await withBusy(t("ss.renamingBusy", { oldName, newName: trimmed }), async () => {
-      if (await sessionNameConflict(trimmed)) return { conflict: true };
       try {
-        await es.rename(trimmed);   // es 先 flushLocal 旧内容 → store.file.rename（云端 move 内含）
+        const r = await es.rename(trimmed);   // es 先 flushLocal 旧内容 → store.tryMove（唯一入口，含占用检查）
+        if (!r.ok) return { conflict: true };  // 目标占用（local/cloud）→ 循环重问；未改 _name
         _activeSessionName = trimmed; setCurrentSessionName(trimmed); _recomputePhase();
         _docLastSavedAt = Date.now(); updateSaveStatus();
         setStatus(t("ss.renamedWithCloud", { oldName, newName: trimmed }));
         gallery.refresh();
         return { ok: true };
-      } catch (e) {
-        if ((e as { name?: string })?.name === "CloudNameCollisionError") return { conflict: true };   // 云端目标占用（store 护栏）→ 循环重问
-        setStatus(t("ss.renameFailed", { error: errMsg(e) })); return {};
-      }
+      } catch (e) { setStatus(t("ss.renameFailed", { error: errMsg(e) })); return {}; }
     });
     if (outcome.conflict) { setStatus(t("ss.localNameTakenStatus", { name: trimmed }), true); note = t("ss.nameTakenNote", { name: trimmed }); candidate = trimmed; continue; }
     return outcome.ok ? trimmed : null;

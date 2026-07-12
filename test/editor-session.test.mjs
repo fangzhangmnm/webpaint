@@ -17,10 +17,10 @@ function mockStore() {
       return {
         open: async () => { opened.push({ name, isZip: opts.isZip }); return this._openReturns; },
         save: async (bytes, o) => { saves.push({ name, tryPush: o?.tryPush, hint: o?.hint, size: bytes.size }); },
-        rename: async (nn) => { renames.push({ from: name, to: nn }); },
         delete: async () => { deletes.push(name); },
       };
     },
+    tryMove: async (from, to) => { renames.push({ from, to }); return { ok: true }; },   // 改身份/移动唯一入口（StoreLike）
   };
 }
 
