@@ -17,7 +17,7 @@ export const storeUI: StoreUI = {
   resolveConflict: async ({ name }): Promise<"keepMine" | "takeCloud" | "cancel"> => {
     const choice = await lockSyncGate<"keepMine" | "takeCloud" | "cancel">({
       title: t("cf.cloudNewerTitle"),
-      message: `「${stripSessionExt(name)}」云端与本地都改过，保留哪份？`,   // TODO(i18n)：加 cf.conflictBothChanged key
+      message: t("cf.conflictBothChanged", { name: stripSessionExt(name) }),
 
       showSpinner: false,
       actions: [

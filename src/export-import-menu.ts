@@ -16,7 +16,6 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
-import { looksEncryptedContainer } from "./crypto-format.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -98,13 +97,15 @@ export function initExportImportMenu(ctx: AppContext) {
   els.menuExportProject.addEventListener("click", async () => {
     setMenuOpen(false);
     const exp = getExporter(_getExpPrj().format) || getExporter("ora");
+    // ⚠ 加密作品的 project(.ora/.psd) 导出目前只能产出**明文**（store.seal cutover 删后没有读 at-rest
+    //   密文的导出接口，详 exporters.ts）。为不让「导出」成无声明文泄漏口，加密态直接拦截并提示先解密。
+    //   （image png/jpg 导出是显式拍平出图、从没承诺密文，不在此拦。）
+    if (session.enc.encrypted) { setStatus(t("tm.encryptedExportBlocked"), true); return; }
     try {
       if (exp.busyHint) setStatus(exp.busyHint, true);
       const blob = await exp.encode(doc);
-      // 加密作品的 ora 导出件是密文容器 → 下载名用 .zip（名实相符，7-Zip 输密码可开）
-      const ext = (await looksEncryptedContainer(blob)) ? "zip" : exp.ext;
-      triggerDownload(blob, `${session.name}.${ext}`);
-      setStatus(t("tm.dotExtDownloaded", { ext }));
+      triggerDownload(blob, `${session.name}.${exp.ext}`);
+      setStatus(t("tm.dotExtDownloaded", { ext: exp.ext }));
     } catch (e) { setStatus(t("tm.exportFailed", { err: String(errMsg(e)) })); }
   });
   els.menuExportImage.addEventListener("click", async () => {

@@ -880,7 +880,10 @@
         <span class="menu-item-label" data-i18n="menu.saveAs">另存为…</span>
       </button>
       <!-- v133 (user：「revert + explicit save 重写 checkpoint」) -->
-      <button class="menu-item" id="menuRevertToOpen" type="button" role="menuitem">
+      <!-- store-cutover：checkpoint 读写在 session-state.ts 仍是 stub（seal 删后未替）→ readCheckpoint 恒 null，
+           此项点了永远「无快照」。隐藏入口而非露一个必失败的按钮；handler / tm.revert* i18n 保留，
+           日后接回 checkpoint→本地文件时去掉 hidden 即复活。 -->
+      <button class="menu-item" id="menuRevertToOpen" type="button" role="menuitem" hidden>
         <span class="menu-item-label" data-i18n="menu.revert">撤销修改…</span>
       </button>
       <!-- v236 加密：当前画作加密/解除（ADR-0012）。label 随加密态切换（JS t() 设，见 app.ts）-->

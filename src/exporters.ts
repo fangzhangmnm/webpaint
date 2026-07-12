@@ -58,12 +58,12 @@ export function onExporterRegistered(fn: (item: Exporter) => void) { return _reg
 // ============= 第一方内建导出器 =============
 registerExporter({
   id: "ora", label: ".ora（推荐 / 开源）", ext: "ora", kind: "project",
-  // 加密作品导出 = 密文容器（store.seal 按当前文件加密态包壳；明文作品原样）——
-  // 防「导出」变成无声的明文泄漏口。要明文导出：先在图库解除加密。
-  // 下载扩展名由 export-import-menu 按字节判（容器 → .zip）。
+  // ⚠ 本 encode 产出**明文** .ora（store.seal 在 cutover 删了，裸加密面塌进透明 open/save，
+  //   目前没有「读 at-rest 密文字节」的导出接口）。加密保护的是云端 at-rest，不是本地导出件。
+  //   → 为不让「导出」变成无声的明文泄漏口，**加密作品的 project 导出在 export-import-menu 处被拦截**
+  //     （见 menuExportProject handler 的 session.enc.encrypted 守卫）；明文作品原样导出。
+  //   TODO（follow-up）：接 store 读 at-rest 密文字节的新接口后，改回密文导出并撤掉那道守卫。
   encode: async (doc) => {
-    // cutover：store.seal 已删（裸加密面塌进透明 open/save）。导出=明文 .ora（本机下载，用户显式选；
-    //   加密保护的是云端 at-rest。TODO：若要密文导出，经 store 读 at-rest 字节的新接口。
     return await encodeDocToOra(doc);
   },
 });
