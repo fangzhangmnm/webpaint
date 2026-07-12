@@ -26,6 +26,10 @@ export interface IdentityCfg {
   serialize2: <T>(a: string, b: string, fn: () => Promise<T>) => Promise<T>;
   seal?: Pick<Seal, "unsealForRead">;
   busy?: Busy;
+  // ── 离线 move = 删 old + 建 new（决策 1A/2，2026-07-12；在线走服务端原子 move，离线不可原子才降级）──
+  isOnline?: () => boolean;
+  deleteOffline?: (name: string) => Promise<void>;   // 复用 del.del 的离线删语义（本地 move-aside + base-etag 云删排队 + null 守卫 + forget）
+  queueUpload?: (name: string) => void;              // 离线新建 float 的补推入队（uploadReplay.enqueue，ADR-0018）
 }
 export interface RenameOpts { encode?: () => BytesSource | Promise<BytesSource>; getEditVersion?: () => number; cloud?: boolean; busy?: Busy }
 export interface SaveAsOpts { encode: () => BytesSource | Promise<BytesSource>; getEditVersion?: () => number; cloud?: boolean; busy?: Busy }
@@ -33,7 +37,7 @@ export interface AcquireOpts { localName?: string; adopt?: AdoptFn; busy?: Busy 
 export interface IdResult { status: string; where?: string; newName?: string; localName?: string; oldCloudOrphan?: boolean; cloudDeferred?: boolean; item?: unknown; error?: unknown }
 
 export function createIdentity(cfg: IdentityCfg) {
-  const { cloud, local, head, doPush, serialize, serialize2, seal, busy: _busy = passBusy } = cfg;
+  const { cloud, local, head, doPush, serialize, serialize2, seal, busy: _busy = passBusy, isOnline, deleteOffline, queueUpload } = cfg;
   const unseal = (name: string, blob: Blob) => seal ? seal.unsealForRead(name, blob) : Promise.resolve(blob as Blob | null);
 
   // 目标名占用护栏（**碰撞检查内化**：caller 不必先 list 目标夹——app 原则上不知道别夹内容）。
@@ -41,7 +45,7 @@ export function createIdentity(cfg: IdentityCfg) {
   //   离线时 cloud.fetchMeta 抛/失败 → 视作云端无（本地护栏仍挡；后续 push 的 conflictBehavior:fail 兜底云端）。
   async function assertNameFree(newName: string, doCloud: boolean): Promise<void> {
     if (local && await local.exists(newName)) throw new CloudNameCollisionError(newName);
-    if (doCloud) {
+    if (doCloud && (!isOnline || isOnline())) {   // **离线不查云**（查不了/会挂）——靠本地护栏 + 后续 push 的 conflictBehavior:fail 兜底云端撞名
       let meta = null;
       try { meta = await cloud.fetchMeta(newName); } catch { meta = null; }
       if (meta) throw new CloudNameCollisionError(newName);
@@ -57,6 +61,18 @@ export function createIdentity(cfg: IdentityCfg) {
       let bytes: Bytes | null = null;
       if (encode) bytes = await toU8(await encode());
       else if (hasLocal) bytes = await toU8((await local!.get(oldName))!);
+
+      // ── 离线 move = 删 old + 建 new（决策 1A/2）──────────────────────────────────────────────
+      //   服务端原子 move 只在线可做（保 etag、不重传字节、不丢）；离线不可原子 → 降级：建 new(本地 float) + 删 old(vetted 离线删)。
+      //   两侧各自排队、重连**独立收敛**（决策 1A）：new 撞名 push fail→surface（字节留本地 dirty）；old 走 base-etag 守卫的云删。
+      //   字节永不丢：new 本地 dirty 永不驱逐 + old 进 .trash（可恢复）。cloud-only(无本地字节)离线无法搬 → 落到下方现状分支。
+      if (doCloud && isOnline && !isOnline() && deleteOffline && hasLocal) {
+        await local!.save(newName, bytes!);         // 建 new（本地字节 = old 的 at-rest 字节；含未推编辑/加密原样搬）
+        head.recordEdit(newName);                   // new = never-synced float（_parent=null → 首推 conflictBehavior:fail，撞名 surface）
+        queueUpload?.(newName);                     // 重连补推（ADR-0018）
+        await deleteOffline(oldName);               // 删 old：本地 move-aside + 云删排队(base-etag 守卫) + head.forget
+        return { status: "renamed", where: "offline-move", newName };
+      }
 
       if (local && hasLocal) {
         await local.save(newName, bytes!);          // 先存新名（phantom-path：绝不先删）

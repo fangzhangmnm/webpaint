@@ -264,3 +264,66 @@ describe("rename/saveAs 目标占用护栏", () => {
     eq(dec(local._items.get("A/dst")), "SRC", "字节随身份走");
   });
 });
+
+// ── 离线 move = 删 old + 建 new（决策 1A 独立收敛 / 决策 2 在线保持服务端原子）───────────────────
+describe("离线 move（删+建，tag 走法）", () => {
+  function mkMoveStore() {
+    const local = createMockLocal();
+    const provider = createMockProvider();
+    let online = true;
+    const store = createStore({
+      provider, local, kv: memKv(),
+      ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {}, onReplayStatus: () => {} },
+      validateAdopt: () => true, isOnline: () => online, signedIn: () => online,
+      offlineUploadReplay: "auto", skipMigration: true,   // auto：证补推链路（WebPaint 实际 manual=等显式推）
+    });
+    return { store, local, provider, setOnline: (v) => { online = v; } };
+  }
+  const raw = (store, n) => store.file(n, { isZip: false });
+  const dec = (u) => new TextDecoder().decode(u);
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+
+  it("离线 move synced 文件 → old 本地move-aside+云删排队、new 本地float；重连独立收敛（决策1A）", async () => {
+    const { store, local, provider, setOnline } = mkMoveStore();
+    await raw(store, "old").save(bytes("OLD"), { tryPush: true });          // 在线 synced
+    assert(await provider.getItemByPath("old"), "云端有 old");
+
+    setOnline(false);
+    await raw(store, "old").rename("new");                                   // 离线 move
+
+    // 本地：new 有、old 进本地 .trash（move-aside，绝不 hardDelete）
+    assert(local._items.has("new") && !local._items.has("old"), "本地 new 有 old 无");
+    assert([...local._trash.values()].some((t) => t.name === "old"), "old 进本地 .trash（可恢复）");
+    eq(dec(local._items.get("new")), "OLD", "new 承载 old 的字节");
+
+    // new 的 syncState = 本地未推（float：never-synced ∧ dirty）
+    let snap = null; const un = store.watchFolder("", (s) => { snap = s; }); await tick(); un();
+    const ni = snap.items.find((i) => i.path === "new");
+    assert(ni && (ni.syncState === "float" || ni.syncState === "unpushed"), `new 本地未推（实=${ni && ni.syncState}）`);
+
+    // 重连：两侧各自排队独立收敛（决策 1A）
+    setOnline(true);
+    await store.drainDeleteQueue();                                          // old 云删（base-etag 守卫）
+    await store.drainUploadQueue();                                          // new 补推
+    assert(await provider.getItemByPath("new"), "云端有 new（补推落地）");
+    assert(!(await provider.getItemByPath("old")), "云端 old 没了（进 .trash）");
+  });
+
+  it("离线 move 后重连、目标云端撞名 → new 撞名不落云、字节留本地 dirty；old 删除独立照走", async () => {
+    const { store, local, provider, setOnline } = mkMoveStore();
+    await provider.upload("new", bytes("OCCUPIED-DIFFERENT-BYTES"));         // 目标已被别的文件占（云端、本地不知）
+    await raw(store, "old").save(bytes("OLD"), { tryPush: true });           // 在线 synced
+
+    setOnline(false);
+    await raw(store, "old").rename("new");                                   // 离线：只查本地占用（无）→ 放行
+    eq(dec(local._items.get("new")), "OLD", "本地 new = 我方字节");
+
+    setOnline(true);
+    await store.drainUploadQueue();                                          // 推 new → conflictBehavior:fail → 撞名出队 surface
+    eq(dec(local._items.get("new")), "OLD", "★撞名后 new 字节仍在本地（dirty 不丢）");
+    const cloudNew = await provider.getItemByPath("new");
+    assert(cloudNew && cloudNew.size !== bytes("OLD").length, "云端 new 仍是占位文件（我方没盲覆盖）");
+    await store.drainDeleteQueue();
+    assert(!(await provider.getItemByPath("old")), "old 删除独立照走（决策1A）");
+  });
+});

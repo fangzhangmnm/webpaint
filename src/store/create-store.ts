@@ -233,7 +233,13 @@ export function createStore(config: StoreConfig) {
   });
   const fresh = createFreshness({ cloud, head, safeResolve, busy: ui.busy });
   const del = createDelete({ cloud, local, head, kv, busy: ui.busy });
-  const identity = createIdentity({ cloud, local, head, doPush: pushMod.doPush, serialize: sub.serialize, serialize2: sub.serialize2, seal, busy: ui.busy });
+  const identity = createIdentity({
+    cloud, local, head, doPush: pushMod.doPush, serialize: sub.serialize, serialize2: sub.serialize2, seal, busy: ui.busy,
+    // 离线 move = 删+建（决策 1A/2）：在线走 identity 内的服务端原子 move；离线降级，复用 del.del 离线删 + uploadReplay 补推。
+    isOnline,
+    deleteOffline: (name: string) => del.del(name, { isOnline }).then(() => {}),   // 完整离线删语义（move-aside + base-etag 云删排队 + null 守卫 + forget）
+    queueUpload: (name: string) => uploadReplay.enqueue(name),                     // never-synced float 重连补推（ADR-0018）
+  });
   const trashMod = createTrash({ cloud, local, head, busy: ui.busy });
 
   // ── 单飞守卫（port 自 WebPaint store.ts，2026-06-21 起红线）：用户态写流同一时刻只一个，
