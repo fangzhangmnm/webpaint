@@ -6,6 +6,10 @@ const _todos = [];
 
 export function describe(name, fn) { _suite = name; fn(); _suite = ""; }
 export function it(name, fn) { _tests.push({ name: `${_suite} › ${name}`, fn }); }
+// 家族 store 引擎测试（从 JRP 的 _harness.ts 风格移植）用扁平 test()/tick()——注册进同一 _tests 队列，
+// 与 describe/it 共存、同一 run() 执行。import 从 ./_harness.ts 改指 ./runner.mjs 即可。
+export function test(name, fn) { _tests.push({ name: `${_suite ? _suite + " › " : ""}${name}`, fn }); }
+export function tick() { return new Promise((r) => setTimeout(r, 0)); }
 // 待办规格：描述 Store（C1+）必须满足、但当前代码还没实现的行为。
 // 不执行、不计失败——是验收标准 / TDD 的红线清单，落地后改成 it() 即可。
 export function todo(name) { _todos.push(`${_suite ? _suite + " › " : ""}${name}`); }
