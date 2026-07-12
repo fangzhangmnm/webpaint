@@ -5,14 +5,15 @@
 
 ---
 
-## §0 先量后优（铁律，别猜）
+<!-- ## §0 先量后优（铁律，别猜）
 动任何优化前先定位真瓶颈，否则白干：
 1. 加帧计时（board 已有 `_fps`，board.ts `_tickFps`）——先确认掉帧场景（空层描边？clip？组变换？大笔？）。
 2. **v359 起 HUD 已有每帧归因第二行**（开 FPS 即显）：`Np f Nf s Ns` = blend pass 数 / 浮层 warp pass 数 / overlay stamp 数。
    - `Np`（passes）直读 **§2 layer-count 假说**：clip 多层掉帧时 Np 应≈可见层数，确认「pass 数 ∝ 层数」是瓶颈。
    - `Nf`（floatPasses）= §3/§4 浮层 pass 数（组变换 N 源层 = N）。`Ns`（stamps）= §1 长描边二次爆炸的直读（描边越长 Ns 越大）。
    - 来源：`gl-compositor.ts stats{passes,floatPasses}`（composite() 入口清零）→ renderer/board.stats → board `_tickFps`。
-3. GPU 计时（可选，更细）：`EXT_disjoint_timer_query_webgl2`（iPad Safari 历史上禁，未必有）或 `performance.now()` 包 `glBoard.render`。分清 **CPU 提交** vs **GPU 执行** vs **readback 阻塞**。
+3. GPU 计时（可选，更细）：`EXT_disjoint_timer_query_webgl2`（iPad Safari 历史上禁，未必有）或 `performance.now()` 包 `glBoard.render`。分清 **CPU 提交** vs **GPU 执行** vs **readback 阻塞**。 -->
+人类回应：不同意，AI不应该为自己的每一个不确定性使唤人类，或者看到风险就外推。
 4. 按场景归因到下面某一条，再动手。math/手感类禁止猜测式调试（家族规则）。
 
 ### §0.1 从零复核结论（fresh agent v359 / 2026-06-29，已逐文件验证非 AI 猜测）
@@ -67,9 +68,11 @@ liquify/filterBrush/pixelMode 描边中，board 每帧把**整个活动层**重�
 ---
 
 ## 不变量（优化别破）
-- **手感红线**：stroke-smoother + `_walkStamps`/`_stampParams`/`collectStamps` 一字不动（间距/压感/taper）。
+<!-- - **手感红线**：stroke-smoother + `_walkStamps`/`_stampParams`/`collectStamps` 一字不动（间距/压感/taper）。 -->
+人类回应：说的太绝对了，我的建议是vector mathcpu跑可以保留不动，但是需要批判性地看。
 - **golden 对拍**：所有 GPU 改动跑 `npm run smoke`（Chromium）对拍 CPU 基准（采样器/合成公式）；node `npm test`。
 - **零额外 SSoT**：别为优化引第二条渲染/warp 路径（刚收成单一 GPU，见 audit）。frozen/tail 缓存是同一 GPU 路径的缓存，不是第二实现。
-- 改 store/`src/store/**` = 红线，别碰（与渲染无关）。
+人类评论：这句的真正意思是：不要因为保守就把旧的，应该被重构优化掉的代码当不可侵犯的东西一层层包起来。你应该greenfield地做。旧的代码是用来做参考、批判的
+- store/`src/store/**` = 事关存储安全，不在我们这次范围内
 
 参考：[[perf-webgl-memory-clip]]（主文档）、[[canvas-render-audit]]、`ARCHIVE/old-brush-cpu-raster.ts`（frozen/tail spec）。
