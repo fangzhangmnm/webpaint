@@ -33,6 +33,7 @@ import "./identity.test.ts";         // saveAs/rename/move 身份换（含撞名
 import "./reconcile.test.ts";        // 全库 cloud-gone 收敛（clean 孤儿→local-only 不删）
 import "./cloud-sync.test.ts";       // provider↔本地缓存低层同步 + memKv
 import "./store-lost-response-claim.test.mjs";   // N6 认领尾部校验：同名同大小异内容 → 不认作我方 push（防 lost-response 静默丢失）
+import "./migration.test.mjs";       // ADR-0019/0020 迁移编排：版本戳单调/幂等/崩溃安全不盖戳（IDB 搬字节部分 mock；分支此前漏 import）
 import "./gallery-view-model.test.mjs";
 import "./color-model.test.mjs";
 import "./brush-size.test.mjs";
