@@ -189,6 +189,14 @@ export function createStore(config: StoreConfig) {
     return (): void => { const s = folderWatchers.get(folder); if (s) { s.delete(cb); if (!s.size) folderWatchers.delete(folder); } };
   }
 
+  // ── 名字占用检查（**唯一权威**：local + remote 统一在此）——rename/saveAs 护栏、tryMove、app 预检全走它。──
+  //   本地已有 → "local"；否则在线且云端已有 → "cloud"；都无（或离线查不了云）→ null。离线只查本地（靠 push conflictBehavior:fail 兜底）。
+  async function nameOccupied(name: string): Promise<"local" | "cloud" | null> {
+    if (await local.exists(name)) return "local";
+    if (isOnline()) { try { if (await cloud.fetchMeta(name)) return "cloud"; } catch { /* 云不可达 → 当未占用，push 时 fail 兜底 */ } }
+    return null;
+  }
+
   // ── seal：加密透明（crypto-container 默认；getPassword 非交互）。JRP 不加密 → getPassword 恒 null=透传 ──
   const seal = createSeal({
     looksContainer: (b) => looksEncryptedContainer(b),
@@ -239,6 +247,7 @@ export function createStore(config: StoreConfig) {
     isOnline,
     deleteOffline: (name: string) => del.del(name, { isOnline }).then(() => {}),   // 完整离线删语义（move-aside + base-etag 云删排队 + null 守卫 + forget）
     queueUpload: (name: string) => uploadReplay.enqueue(name),                     // never-synced float 重连补推（ADR-0018）
+    nameOccupied,                                                                  // 唯一占用检查（assertNameFree 据此抛）
   });
   const trashMod = createTrash({ cloud, local, head, busy: ui.busy });
 
@@ -262,6 +271,16 @@ export function createStore(config: StoreConfig) {
   }
   const delSF = singleFlight("删除", (n: string) => { uploadReplay.remove(n); return del.del(n, { isOnline }); });   // 删=supersede：从补推队列摘掉（ADR-0018）   // 接 isOnline：离线删走 move-aside + base-etag 守卫的删队列（重连 drainDeleteQueue 重放）
   const renameSF = singleFlight("重命名", (n: string, nn: string) => identity.rename(n, nn));
+  // tryMove(from,to)：改身份/移动的**结果式**入口——**本操作含目标占用检查**（第一行 nameOccupied，占用则不动字节直接返错）。
+  //   ok:false 时调用方 surface（UI 拒绝/重问）；不抛 CloudNameCollisionError（内部护栏是兜底，这里预检过即 skip）。
+  type TryMoveResult = { ok: true } | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
+  const tryMoveSF = singleFlight("移动", async (from: string, to: string): Promise<TryMoveResult> => {
+    const occ = await nameOccupied(to);
+    if (occ) return { ok: false, reason: "name-collision", where: occ };
+    await identity.rename(from, to, { skipOccupiedCheck: true });   // 已 nameOccupied 预检，跳过内部重复
+    notifyFolderOf(from); notifyFolderOf(to);                       // 旧夹移出 + 新夹移入，两边重画
+    return { ok: true };
+  });
 
   // ── ui 映射：冲突回调把 local/cloud 字节取来喂 ui.resolveConflict（必填，绝不静默 cancel）──
   const onConflict = async ({ name }: { name: string }): Promise<ResolveChoice> => {
@@ -457,6 +476,9 @@ export function createStore(config: StoreConfig) {
     purge: singleFlight("彻底删除", trashMod.purge),
     emptyTrash: singleFlight("清空回收站", trashMod.emptyTrash),
     saveAs: singleFlight("另存为", identity.saveAs),
+    // 移动/改身份（含占用检查，结果式）+ 名字占用统一检查（app 新建/另存/改名前预检全走它）。
+    tryMove: (from: string, to: string) => tryMoveSF(from, to),
+    nameOccupied: (name: string) => nameOccupied(name),
     // ── 加密导入辅助（文件还没进 store、无 name 可查时；对齐 WebPaint）──
     looksEncrypted: (blob: Blob | Uint8Array) => looksEncryptedContainer(blob),   // 是否加密容器（导入分流）
     verifyContainer: async (blob: Blob, pw: string): Promise<boolean> => { if (!pw) return false; try { await unpackContainer(blob, pw); return true; } catch { return false; } },

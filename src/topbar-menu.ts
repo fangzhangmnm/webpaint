@@ -189,8 +189,9 @@ export function initTopbarMenu(ctx: AppContext) {
       const trimmed = input.trim();
       if (!trimmed) { setStatus(t("tm.nameEmpty"), true); candidate = ""; continue; }
       if (trimmed === oldName) { setStatus(t("tm.nameSameAsCurrent"), true); candidate = trimmed; continue; }
-      if (await sessionNameConflict(trimmed) === "local") { setStatus(t("tm.localNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
-      // 云端占用不在此预检（网盘模型不 list 别夹）——store saveAs 目标护栏撞名即抛，下面 catch 循环重问。
+      const occ = await sessionNameConflict(trimmed);   // 统一 store.nameOccupied：local + 在线 remote
+      if (occ) { setStatus(t(occ === "local" ? "tm.localNameExists" : "tm.cloudNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
+      // 极端 race（预检后到落盘间被占）→ store saveAs 护栏抛，下面 catch 兜底循环重问。
       // 另存为 = 写新身份、旧的不动（store.flow.saveAs：本地存 + 云端 push，云端 best-effort）。
       try {
         await session.saveAs(trimmed);   // 当前内容写新身份 + 切新名（session 编排；tryPush best-effort）

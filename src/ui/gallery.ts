@@ -17,7 +17,7 @@ import {
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import {
   store as _store,
-  watchGalleryFolder, listGalleryTrash,
+  watchFolder, listGalleryTrash,
 } from "../app-store.ts";
 import { listSessions } from "../session.ts";
 import { setMeta } from "../storage.ts";
@@ -170,7 +170,7 @@ function makeGallery(host: GalleryHost) {
         _unsub?.(); _unsub = null;
         if (view.value !== "files") return;
         loading.value = true;
-        _unsub = watchGalleryFolder(folder.value, (snap) => {
+        _unsub = watchFolder(folder.value, (snap) => {
           if (snap.path !== folder.value) return;   // 双保险：换夹途中的旧帧丢弃（库内已 sanity-check，此处再挡）
           data.files = snap.items as unknown as GItem[];
           data.folderNames = snap.folderNames;
@@ -206,14 +206,8 @@ function makeGallery(host: GalleryHost) {
       const badgeIcon = (k: string) => (ICON as Record<string, string>)[k] || "";
       const fmtMeta = (t: { time: number; size: number }) => `${humanTime(t.time)} · ${humanSize(t.size)}`;
 
-      // ---- 名字冲突预检（快，无网络放前）----
-      async function nameTaken(name: string, alsoCloud: boolean): Promise<string | null> {
-        const localNames = new Set((await listSessions()).map((s) => s.name));   // 本地跨夹全量（listSessions 名含夹前缀）
-        if (localNames.has(name)) return t("gal.loc.local");
-        // 云端只查手上当前夹快照（新建/改名/同夹副本都在当前夹；跨夹 move 的目标夹由 store 的 conflictBehavior:fail 兜底 surface）。
-        if (alsoCloud && data.files.some((it) => it.name === name && it.cloud)) return t("gal.loc.cloud");
-        return null;
-      }
+      // 占用 where → 本地化标签（rename/move 的碰撞 surface）。占用检查已内化进 store.tryMove（不再 app 预检 list 目标夹）。
+      const whereLabel = (where: "local" | "cloud") => (where === "local" ? t("gal.loc.local") : t("gal.loc.cloud"));
 
       // ---- intents（文件管理：本模块自管；画布耦合：转 host）----
       const toggleMenu = (key: string) => { openMenu.value = openMenu.value === key ? null : key; };
@@ -228,7 +222,6 @@ function makeGallery(host: GalleryHost) {
 
       async function rename(item: GItem) {
         openMenu.value = null;
-        const isCloud = !!item.cloud;
         if (item.name === host.activeName()) {
           const nn = await session.rename();
           if (nn && nn !== item.name) host.status(t("gal.st.renamed2", { from: item.name, to: nn }));
@@ -247,10 +240,9 @@ function makeGallery(host: GalleryHost) {
           // 锁屏从确认即开始，把冲突检查（nameTaken 含云端 listCloudSessionsRecursive 网络往返）
           // 也包进来——否则确认后到锁屏之间有明显空窗（用户：「点了没立刻锁，过一会才锁」）。
           const result = await host.busy<{ taken?: string; ok?: boolean; error?: unknown }>(t("gal.busy.rename", { name: item.name, to: trimmed }), async () => {
-            const taken = await nameTaken(trimmed, isCloud);
-            if (taken) return { taken };
             try {
-              await _store.file(item.name, { isZip: true }).rename(trimmed);   // 云端 move 内含（If-Match）
+              const r = await _store.tryMove(item.name, trimmed);   // 含占用检查（不动字节直接返错）；不抛碰撞
+              if (!r.ok) return { taken: whereLabel(r.where) };
               host.status(t("gal.st.renamed", { to: trimmed }));
               return { ok: true };
             } catch (e: unknown) { return { error: (e as { message?: unknown })?.message || e }; }
@@ -277,16 +269,14 @@ function makeGallery(host: GalleryHost) {
         if (target == null) return;
         const newName = pathJoin(target, base);
         if (newName === item.name) { host.status(t("gal.st.alreadyInFolder")); return; }
-        // 碰撞不再由 app 先 list 目标夹预检（原则上不知别夹内容）——直接 move，store 目标占用护栏撞名即抛，UI 拒绝。
+        // 占用检查内化在 store.tryMove（第一行 nameOccupied，占用则不动字节返 {ok:false}）——app 不 list 目标夹。
         await host.busy(t("gal.busy.move", { base, target: target || t("gal.root") }), async () => {
           try {
-            await _store.file(item.name, { isZip: true }).rename(newName);
+            const r = await _store.tryMove(item.name, newName);
+            if (!r.ok) { host.status(t("gal.st.nameTakenTarget", { loc: whereLabel(r.where), base }), true); return; }
             if (item.name === host.activeName()) session.setName(newName);
             host.status(t("gal.st.moved", { target: target || t("gal.root") }));
-          } catch (e: unknown) {
-            if ((e as { name?: string })?.name === "CloudNameCollisionError") host.status(t("gal.st.nameTakenTarget", { loc: "", base }), true);
-            else host.status(t("gal.st.moveFail", { e: String((e as { message?: unknown })?.message || e) }), true);
-          }
+          } catch (e: unknown) { host.status(t("gal.st.moveFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         });
         await reload();
       }

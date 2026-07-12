@@ -263,6 +263,25 @@ describe("rename/saveAs 目标占用护栏", () => {
     assert(!local._items.has("A/src") && local._items.has("A/dst"), "改名生效：旧无新有");
     eq(dec(local._items.get("A/dst")), "SRC", "字节随身份走");
   });
+
+  it("store.tryMove：占用→{ok:false,where}（不动字节）；空→{ok:true}（移动生效）", async () => {
+    const { store, local } = mkStore();
+    await raw(store, "A/keep").save(bytes("KEEP"), { tryPush: false });
+    await raw(store, "A/src").save(bytes("SRC"), { tryPush: false });
+    const bad = await store.tryMove("A/src", "A/keep");
+    assert(bad.ok === false && bad.reason === "name-collision" && bad.where === "local", "占用 → 结果式返错");
+    assert(local._items.has("A/src") && eq(dec(local._items.get("A/keep")), "KEEP") === undefined, "不动字节：src 仍在、keep 不被覆盖");
+    const ok = await store.tryMove("A/src", "B/dst");
+    assert(ok.ok === true, "空 → ok");
+    assert(!local._items.has("A/src") && local._items.has("B/dst"), "移动生效");
+  });
+
+  it("store.nameOccupied：local→'local'、无→null", async () => {
+    const { store } = mkStore();
+    await raw(store, "x").save(bytes("X"), { tryPush: false });
+    eq(await store.nameOccupied("x"), "local");
+    eq(await store.nameOccupied("nope"), null);
+  });
 });
 
 // ── 离线 move = 删 old + 建 new（决策 1A 独立收敛 / 决策 2 在线保持服务端原子）───────────────────

@@ -67,8 +67,8 @@ function itemToG(it: { path: string; syncState: string; lastModified?: number })
   };
 }
 // watchFolder（网盘模型）：订阅**当前文件夹** → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。
-//   替代 listGallery 全树列举（JRP 开夹慢的根因）；连接态 store 自持、无 ctx。folderNames = immediate 子夹名。
-export function watchGalleryFolder(
+//   替代全树列举（JRP 开夹慢的根因）；连接态 store 自持、无 ctx。folderNames = immediate 子夹名。（映射 store.Item → app GItem。）
+export function watchFolder(
   folder: string,
   cb: (snap: { path: string; items: ReturnType<typeof itemToG>[]; folderNames: string[] }) => void,
 ): () => void {
@@ -81,7 +81,7 @@ export function watchGalleryFolder(
     });
   });
 }
-// ⛔ listGallery（全树列举）已删 2026-07-12——**库唯一列举面 = watchGalleryFolder（订阅当前夹）**。
+// ⛔ listGallery（全树列举）已删 2026-07-12——**库唯一列举面 = store.watchFolder（订阅当前夹）**，app 包成 watchFolder。
 //   app 原则上不知道别的 folder 内容（内存只放当前夹）；名字碰撞由 store rename/saveAs 目标护栏内化检测（撞名抛 CloudNameCollisionError），不靠先 list 目标夹。
 export const listGalleryTrash = async () => (await store.listTrash()).map((c) => ({ name: stripSessionExt(c.path || c.name || ""), local: null, cloud: c, deletedAt: 0 }));
 

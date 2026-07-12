@@ -30,33 +30,32 @@ export interface IdentityCfg {
   isOnline?: () => boolean;
   deleteOffline?: (name: string) => Promise<void>;   // 复用 del.del 的离线删语义（本地 move-aside + base-etag 云删排队 + null 守卫 + forget）
   queueUpload?: (name: string) => void;              // 离线新建 float 的补推入队（uploadReplay.enqueue，ADR-0018）
+  nameOccupied?: (name: string) => Promise<"local" | "cloud" | null>;   // 唯一名字占用检查（create-store 注入）；assertNameFree 据此抛
 }
-export interface RenameOpts { encode?: () => BytesSource | Promise<BytesSource>; getEditVersion?: () => number; cloud?: boolean; busy?: Busy }
+export interface RenameOpts { encode?: () => BytesSource | Promise<BytesSource>; getEditVersion?: () => number; cloud?: boolean; busy?: Busy; skipOccupiedCheck?: boolean }
 export interface SaveAsOpts { encode: () => BytesSource | Promise<BytesSource>; getEditVersion?: () => number; cloud?: boolean; busy?: Busy }
 export interface AcquireOpts { localName?: string; adopt?: AdoptFn; busy?: Busy }
 export interface IdResult { status: string; where?: string; newName?: string; localName?: string; oldCloudOrphan?: boolean; cloudDeferred?: boolean; item?: unknown; error?: unknown }
 
 export function createIdentity(cfg: IdentityCfg) {
-  const { cloud, local, head, doPush, serialize, serialize2, seal, busy: _busy = passBusy, isOnline, deleteOffline, queueUpload } = cfg;
+  const { cloud, local, head, doPush, serialize, serialize2, seal, busy: _busy = passBusy, isOnline, deleteOffline, queueUpload, nameOccupied } = cfg;
   const unseal = (name: string, blob: Blob) => seal ? seal.unsealForRead(name, blob) : Promise.resolve(blob as Blob | null);
 
   // 目标名占用护栏（**碰撞检查内化**：caller 不必先 list 目标夹——app 原则上不知道别夹内容）。
   //   本地已有 newName ∨ 云端已有 newName（任一）→ 抛 CloudNameCollisionError，**在改任何字节之前**（防 rename/saveAs 覆盖既有文件 = data-loss）。
   //   离线时 cloud.fetchMeta 抛/失败 → 视作云端无（本地护栏仍挡；后续 push 的 conflictBehavior:fail 兜底云端）。
   async function assertNameFree(newName: string, doCloud: boolean): Promise<void> {
+    // doCloud=false（本地-only rename）→ 只查本地；否则走注入的统一 nameOccupied（local+在线 remote）。缺注入（裸测试）→ 退回本地 exists。
+    if (doCloud && nameOccupied) { if (await nameOccupied(newName)) throw new CloudNameCollisionError(newName); return; }
     if (local && await local.exists(newName)) throw new CloudNameCollisionError(newName);
-    if (doCloud && (!isOnline || isOnline())) {   // **离线不查云**（查不了/会挂）——靠本地护栏 + 后续 push 的 conflictBehavior:fail 兜底云端撞名
-      let meta = null;
-      try { meta = await cloud.fetchMeta(newName); } catch { meta = null; }
-      if (meta) throw new CloudNameCollisionError(newName);
-    }
   }
 
   async function rename(oldName: string, newName: string, opts: RenameOpts = {}): Promise<IdResult> {
-    const { encode, getEditVersion, cloud: doCloud = true, busy = _busy } = opts;
+    const { encode, getEditVersion, cloud: doCloud = true, busy = _busy, skipOccupiedCheck } = opts;
     if (!oldName || !newName || oldName === newName) return { status: "noop" };
     return serialize2(oldName, newName, () => busy("重命名…", async () => {
-      await assertNameFree(newName, doCloud);       // 目标占用 → 抛 collision（改字节前；move 到别夹撞名走这里，caller catch 拒绝）
+      if (!skipOccupiedCheck) await assertNameFree(newName, doCloud);   // 目标占用 → 抛 collision（改字节前）。tryMove 已 nameOccupied 预检 → skip，避免重复 fetchMeta
+
       const hasLocal = local ? await local.exists(oldName) : false;
       let bytes: Bytes | null = null;
       if (encode) bytes = await toU8(await encode());

@@ -23,7 +23,6 @@ import { isSignedIn } from "./app-store.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.ts";
-import { stripSessionExt } from "./config.ts";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.ts";
 import { ensureUnlocked } from "./enc-thumbs.ts";
@@ -362,10 +361,8 @@ export function initGalleryShell(ctx: AppContext) {
     // 点确定即刻锁屏（含「已存在」预检的网络往返也在锁内）——修「新建文件夹延迟锁屏 F」。
     //   withBusy 可重入（ref-count），内层 store.flow.newFolder 再包一层 busy 不会提前解锁。
     await withBusy(t("gs.creatingFolder", { name: trimmed }), async () => {
-      // 网盘模型：不 list 目标夹查存在（原则上不知别夹内容）。本地已有同名文件 → 提示；云端 ensureFolder 幂等（已存在=复用，无害）。
-      let localNames: string[] = [];
-      try { localNames = (await listSessions()).map((s: { name: string }) => s.name); } catch {}
-      if (localNames.some((n) => n === fullPath || n.startsWith(`${fullPath}/`))) { setStatus(t("gs.folderExists", { name: trimmed }), true); return; }
+      // 统一走 store.nameOccupied（唯一占用检查）：同名文件占了 → 提示；纯文件夹已存在则 ensureFolder 幂等（复用无害）。
+      if (await _store.nameOccupied(fullPath)) { setStatus(t("gs.folderExists", { name: trimmed }), true); return; }
       // 走 store.flow.newFolder（深模块窄接口）而非裸 ensureSubfolder——锁屏/单飞守卫由库内强制。
       try { await _store.newFolder(fullPath); setStatus(t("gs.folderCreated", { name: trimmed })); }
       catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus(t("gs.folderCreateFailed", { err: errMsg(e) }), true); }
