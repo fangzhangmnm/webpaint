@@ -134,7 +134,7 @@ export function createStore(config: StoreConfig) {
   const ns = storeNamespace(appId, databaseId);   // 命名空间根 `${appId}.${databaseId}`：IDB 库名 + 全部 localStorage 键前缀
   // **窄腰 choke point**：包一层 namespacedKv，所有键自动落 `${ns.root}.`；各深模块只用相对键（files.*/collections.*/settings.*/internal.*）。
   const kv = namespacedKv(rawKv, ns.root);
-  const local = config.local ?? createLocalCache(ns.dbName);              // 文件缓存（files/trash/backups 分区）；prod=idb、测试注入 mock
+  const local = config.local ?? createLocalCache(ns.dbName);              // 文件缓存（files/trash/backup 分区）；prod=idb、测试注入 mock
   const collectionLocal = config.local ?? createCollectionCache(ns.dbName);   // collections 分区缓存（collection 自带 `collections/` 前缀）
   const isOnline = config.isOnline ?? ((): boolean => (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine !== false);
   // 加密密码源（对齐 WebPaint 非交互 getPassword）：优先 crypt.getPassword，兼容旧顶层；不给 → 恒 null（透传明文）。

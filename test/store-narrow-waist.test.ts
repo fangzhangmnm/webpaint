@@ -1,6 +1,6 @@
 // 窄腰重构验收（2026-07-13）：命名空间根 `${appId}.${databaseId}` + kv 前缀 choke point +
 //   isHidden 列举过滤 + collection 合法名/保留名 + files/collections 两实例 etag 隔离 +
-//   settings 散键裸值 + collection 云端落 `.${appId}/<name>.json` + backupFolder 默认 `.backups`。
+//   settings 散键裸值 + collection 云端落 `.${appId}/<name>.json` + backupFolder 默认 `.backup`。
 import { test, eq, assert } from "./runner.mjs";
 import { isHidden } from "../src/store/is-hidden.ts";
 import { namespacedKv } from "../src/store/kv-namespace.ts";
@@ -34,8 +34,8 @@ function mkStore(kv: ReturnType<typeof dumpKv>, provider = createMockProvider(),
 }
 
 // ── isHidden（纯）────────────────────────────────────────────────────────────
-test("[narrow-waist] isHidden：末段 dot 判隐藏（.trash/.backups/.wp/任意 dot；a/.b；.x/y 段）", () => {
-  for (const h of [".trash", ".backups", ".wp", ".secret.ora", "a/.hidden", "folder/.b.ora"])
+test("[narrow-waist] isHidden：末段 dot 判隐藏（.trash/.backup/.wp/任意 dot；a/.b；.x/y 段）", () => {
+  for (const h of [".trash", ".backup", ".wp", ".secret.ora", "a/.hidden", "folder/.b.ora"])
     assert(isHidden(h), `应隐藏: ${h}`);
   for (const v of ["x.ora", "folder/x.ora", "reading-state", "a.b/c.ora", ""])
     assert(!isHidden(v), `不应隐藏: ${v}`);
@@ -110,11 +110,11 @@ test("[narrow-waist] file 与同名 collection 的 etag 落不同前缀（两实
   assert(!!(await provider.getItemByPath("dup.ora")), "文件落 approot 根 dup.ora");
 });
 
-// ── cloud-sync backupFolder 默认 .backups（weakOverride loser 落 .backups/）─────────
-test("[narrow-waist] cloud-sync backupFolder 默认 .backups（weakOverride 把云端 loser stash 进 .backups/）", async () => {
+// ── cloud-sync backupFolder 默认 .backup（weakOverride loser 落 .backup/）─────────
+test("[narrow-waist] cloud-sync backupFolder 默认 .backup（weakOverride 把云端 loser stash 进 .backup/）", async () => {
   const provider = createMockProvider();
   provider._seed("z.ora", "OLD-CLOUD");
   const cloud = createCloudSync({ provider, kv: (() => { const d = dumpKv(); return d; })(), fileName: (n: string) => n });
   const res = await cloud.weakOverride("z.ora", new TextEncoder().encode("NEW-LOCAL"));
-  assert(String(res.backedUp).startsWith(".backups/"), `loser 应进 .backups/，实得 ${res.backedUp}`);
+  assert(String(res.backedUp).startsWith(".backup/"), `loser 应进 .backup/，实得 ${res.backedUp}`);
 });

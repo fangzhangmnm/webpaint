@@ -84,9 +84,9 @@ store/ 外每一处命中都是 jailbreak（WebPaint 已知三处：`session-sta
 
 - **事故背景**：store-cutover 曾把 WebPaint 换成引擎写死的通用名（`sync-store-cache`、`sync.etag:`…），与同 origin 的 JRP **共用一个 IDB + 一批键** → 文件互漏、schema 戳互踩跳迁移 → 图库显 0 B。用户真机抓到。
 - **根治 + 窄腰**（> as-of 2026-07-13）：`createStore({ appId, databaseId = "defaultStore" })`。命名空间根 `ns = ${appId}.${databaseId}`（同 app 多 store 实例传不同 databaseId 即互不打架）。
-  - **IDB**：单库 `${ns}`、单 object store `blobs`，key=`${partition}/${name}`（`files/`·`trash/`·`backups/`·`collections/`；blob-partition 深模块 = IDB 侧唯一知道前缀的地方）。
+  - **IDB**：单库 `${ns}`、单 object store `blobs`，key=`${partition}/${name}`（`files/`·`trash/`·`backup/`·`collections/`；blob-partition 深模块 = IDB 侧唯一知道前缀的地方）。
   - **localStorage**：`namespacedKv(rawKv, ns)` 包一层 = **唯一 choke point**，各模块只用相对键（`database-version`·`files.etag:`·`files.dirty:`·`collections.etag:`/`.dirty:`·`settings.<key>`·`internal.pending_new_folders`/`_deletions`/`_uploads`），根前缀统一加、想漏漏不出。
   - **两个 cloud-sync 实例**：files（`appKey:"files"`, `manageDirty:false`, fileName 恒等）+ collections（`appKey:"collections"`, fileName `n=>`.${appId}/${n}.json``）→ etag 命名空间按实体分离（同名 file 与 collection 不撞）。
-- **isHidden 深模块**：列举层（cloud-sync/listing/reconcile 共用）过滤**末段以 `.` 开头**的项 → `.trash`/`.backups`/`.<appId>`(collections/settings) + 任意 dotfile/dotfolder 都不进图库。
+- **isHidden 深模块**：列举层（cloud-sync/listing/reconcile 共用）过滤**末段以 `.` 开头**的项 → `.trash`/`.backup`/`.<appId>`(collections/settings) + 任意 dotfile/dotfolder 都不进图库。
 - 不传 `appId`/`databaseId` → 抛错，绝不静默共用。WebPaint=`"webpaint"`（databaseId 默认 defaultStore）。
 - **follow-up**：JRP 侧同一引擎 bake 回时接新签名（`appId`+`databaseId`）。

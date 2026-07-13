@@ -13,7 +13,7 @@
 //   据此降级会误把一堆好文件断了云端谱系。所以只在「在线 ∧ listAll.complete ∧ 非空」时才收敛。
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
-import { isHidden } from "./is-hidden.ts";   // 隐藏项（.trash/.backups/.<appId>/任意 dot）：云端已过滤，本地侧也别据此误判 gone
+import { isHidden } from "./is-hidden.ts";   // 隐藏项（.trash/.backup/.<appId>/任意 dot）：云端已过滤，本地侧也别据此误判 gone
 
 // 纯分类器（零 IO、可穷举单测）：返回该 demote 的 clean 孤儿名。
 //   规则（对齐 WebPaint gallery-model.classifyCloudGone，去掉 ghost/pin 轴——JRP 无 pin，dirty 孤儿一律留）：

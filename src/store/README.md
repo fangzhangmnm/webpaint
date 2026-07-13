@@ -57,7 +57,7 @@ const store = createStore({
 > **关于 `crypto`**：加密**逻辑**全在库内，唯一例外是重型 7z 引擎（wasm ~1.6MB）由 app vendor + 注入（包成 `crypto` codec）——体积大，不塞进每个 app 的 bundle。不注入 → 加密 dormant（packContainer 抛、其余照常；JRP 不加密就不 vendor，省 1.6MB）。KDF/GCM 走内置 WebCrypto，不用注入。
 >
 > **⚠ 命名空间根 `${appId}.${databaseId}`（同 origin 兄弟 PWA / 多 store 实例隔离）** > as-of 窄腰重构 2026-07-13：IndexedDB 和 localStorage 按 **origin** 隔离、**不按 path**（GitHub Pages `/webpaint/` 与 `/jrp/` 同 origin）。库把**所有持久化标识收进一个命名空间根 `${appId}.${databaseId}`**（`databaseId` 默认 `"defaultStore"`；同一 app 想开多个互不打架的 store → 传不同 databaseId）：
-> - **IndexedDB**：单库 `${appId}.${databaseId}`、单 object store `blobs`，key = `${partition}/${name}`（分区 `files/`·`trash/`·`backups/`·`collections/`，blob-partition 深模块）。
+> - **IndexedDB**：单库 `${appId}.${databaseId}`、单 object store `blobs`，key = `${partition}/${name}`（分区 `files/`·`trash/`·`backup/`·`collections/`，blob-partition 深模块）。
 > - **localStorage**：经 `namespacedKv` 统一加根前缀的**唯一 choke point**——`${ns}.database-version`（schema 戳）、`${ns}.files.etag:`(cloud-sync files 实例)、`${ns}.files.dirty:`(local-head，文件 dirty 权威)、`${ns}.collections.etag:`/`.dirty:`(collections 实例)、`${ns}.settings.<key>`(散键裸值)、`${ns}.internal.pending_new_folders`/`_deletions`/`_uploads`。各深模块只用相对键，想漏都漏不出命名空间。
 >
 > **同 origin 的每个兄弟 PWA 必须用不同 `appId`**——否则两 app 读写同一份存储：文件互漏、schema 戳互踩跳迁移（显 0B）、缓存互毁。**根治自 2026-07-12 真机灾难**（详 `docs/20260712-store-per-app-namespace.md`）。不传 `appId`/`databaseId` → 抛错，绝不静默共用。

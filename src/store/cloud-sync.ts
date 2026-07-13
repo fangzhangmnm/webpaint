@@ -11,7 +11,7 @@
 //   restore 撞名 (2)(3) 防覆盖。
 
 import { asideStamp } from "./move-aside.ts";   // 深模块的 move-aside 命名策略（yyyymmddhhmmss-guid 防撞）
-import { isHidden } from "./is-hidden.ts";       // 列举隐藏判定（.trash/.backups/.<appId> + 任意 dot 项）
+import { isHidden } from "./is-hidden.ts";       // 列举隐藏判定（.trash/.backup/.<appId> + 任意 dot 项）
 import type { Bytes, CloudItem, CloudProvider, CloudSync, FetchMetaResult, Kv, PullResult, PushResult, WeakOverrideResult } from "./types.ts";
 
 export class CloudConflictError extends Error {
@@ -80,7 +80,7 @@ interface CloudSyncCfg {
  */
 export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   const { provider, kv, fileName, encFileName = null, contentType = "application/octet-stream",
-    trashFolder = ".trash", backupFolder = ".backups", appKey = "sync", manageDirty = true } = cfg;
+    trashFolder = ".trash", backupFolder = ".backup", appKey = "sync", manageDirty = true } = cfg;
   const now = cfg.now || (() => Date.now());
 
   // name → 云端实际 item（同一 name 在任一时刻只住一个扩展名下；明文路径先试 = 多数命中 1 RTT）。
@@ -315,7 +315,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     let items: CloudItem[];
     try { items = await provider.list(subpath); } catch (_) { status.partial = true; return; }
     for (const it of items) {
-      // 隐藏项（末段以 "." 开头）整个跳过：.trash / .backups / .<appId>(collections/settings) 安全网夹 +
+      // 隐藏项（末段以 "." 开头）整个跳过：.trash / .backup / .<appId>(collections/settings) 安全网夹 +
       //   任意 dotfile/dotfolder，都不进文件列表、不进文件夹列表、不递归其内容（isHidden 深模块唯一真相）。
       if (isHidden(it.name)) continue;
       const itPath = subpath ? `${subpath}/${it.name}` : it.name;
@@ -344,7 +344,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     try { items = await provider.list(path); } catch (_) { return { files: [], folders: [], complete: false }; }
     const files: CloudItem[] = [], folders: string[] = [];
     for (const it of items) {
-      if (isHidden(it.name)) continue;   // 隐藏项（.trash/.backups/.<appId>/任意 dot）不进列举——isHidden 深模块
+      if (isHidden(it.name)) continue;   // 隐藏项（.trash/.backup/.<appId>/任意 dot）不进列举——isHidden 深模块
       const itPath = path ? `${path}/${it.name}` : it.name;
       if (it.isFolder) folders.push(itPath);
       else if (match(it)) files.push({ ...it, path: itPath, name: toName(itPath) });

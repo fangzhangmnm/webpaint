@@ -3,7 +3,7 @@
 // LocalCache —— store 的本地持久层(离线缓存 + 秒开)。**内容无关、零 ORA 知识**:
 //   只存/取不透明 binary blob(ora/glb/pdf/txt 一律),peek(不透明 sidecar)由 app 经 hint.peek 供——
 //   **store 绝不解码内容、绝不渲缩略图**(那是 app 的事)。IDB 单 object store `blobs`,本 cache 用
-//   **files / trash / backups 三个分区**(blob-partition 深模块);collections 是**另一个分区**,由
+//   **files / trash / backup 三个分区**(blob-partition 深模块);collections 是**另一个分区**,由
 //   createCollectionCache 提供、collection 模块用(见 create-store 接线)。
 // 契约见 types.ts 的 LocalCache。浏览器专用,真机验。
 
@@ -26,7 +26,7 @@ export function createLocalCache(dbName: string): LocalCache {
   const bs = createPartitionedBlobStore(dbName);
   const files = bs.partition("files");
   const trashP = bs.partition("trash");
-  const backupsP = bs.partition("backups");
+  const backupP = bs.partition("backup");
   return {
     // 覆盖写。bytes 归一化成 Blob(契约落 Blob)。peek 只取 hint.peek(store 不解码、不看内容)。
     async save(name: string, bytes: Bytes | Blob, hint?: unknown) {
@@ -38,15 +38,15 @@ export function createLocalCache(dbName: string): LocalCache {
     async exists(name: string) { return files.exists(name); },
     // 轻量元信息：blob.size 是 Blob 引用属性（不载字节）、updatedAt 存记录里 → 便宜。listing 给本地项填尺寸/时间。
     async stat(name: string) { const r = await files.get(name); return r ? { size: r.blob.size, updatedAt: r.updatedAt } : null; },
-    // 已缓存的应用文件名 = files 分区键（trash/backups/collections 天然隔离在别分区，无需按名过滤）。
+    // 已缓存的应用文件名 = files 分区键（trash/backup/collections 天然隔离在别分区，无需按名过滤）。
     async appKeys() { return files.keys(); },
-    // 覆盖前留底:复制到 backups 分区(yyyymmddhhmmss-guid 防撞;原件不动)。
+    // 覆盖前留底:复制到 backup 分区(yyyymmddhhmmss-guid 防撞;原件不动)。
     async backup(name: string) {
       const r = await files.get(name);
       if (!r) throw new Error(`本地无 ${name},无法备份`);
       const inner = `${stamp()}:${name}`;
-      await backupsP.put(inner, { ...r, updatedAt: Date.now() });
-      return `backups/${inner}`;
+      await backupP.put(inner, { ...r, updatedAt: Date.now() });
+      return `backup/${inner}`;
     },
     async trash(name: string) {
       const inner = `${stamp()}:${name}`;
@@ -57,12 +57,12 @@ export function createLocalCache(dbName: string): LocalCache {
     async restore(trashKey: string) {
       const { part, inner } = splitKey(trashKey);
       const orig = stripStamp(inner);
-      await (part === "backups" ? backupsP : trashP).moveTo(inner, "files", orig);
+      await (part === "backup" ? backupP : trashP).moveTo(inner, "files", orig);
       return orig;
     },
     async purgeTrash(trashKey: string) {
       const { part, inner } = splitKey(trashKey);
-      await (part === "backups" ? backupsP : trashP).del(inner);
+      await (part === "backup" ? backupP : trashP).del(inner);
     },
     async listTrash(): Promise<TrashEntry[]> {
       return (await trashP.keys()).map((inner) => ({ trashKey: `trash/${inner}`, name: stripStamp(inner) }));
