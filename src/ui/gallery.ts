@@ -80,6 +80,11 @@ const ThumbCell = defineComponent({
     localThumb: { default: null },
     encName: { type: String, default: null },    // 本地加密作品的 name（走 store.readPeek）
     cloud: { default: null },
+    // 未加密时：有本地或云端字节都可经 store.peekTail 取缩略图（peekTail 本地→切片、纯云端→byte-range）。
+    fetchable: { type: Boolean, default: false }, // 有字节可取（本地∨云端）→ 走 peekTail 缩略图
+    isCloud: { type: Boolean, default: false },   // 纯云端（决定是否显云 loading 态；本地不显）
+    thumbToken: { type: String, default: "" },    // 新鲜度戳（云 lastModified / 本地 updatedAt / size）
+    thumbSize: { type: Number, default: 0 },
     fallback: { type: String, default: "?" },
     alt: { type: String, default: "" },
   },
@@ -88,6 +93,10 @@ const ThumbCell = defineComponent({
     localThumb: Blob | null;
     encName: string | null;
     cloud: CloudFileMeta | null;
+    fetchable: boolean;
+    isCloud: boolean;
+    thumbToken: string;
+    thumbSize: number;
     fallback: string;
     alt: string;
   }) {
@@ -113,17 +122,17 @@ const ThumbCell = defineComponent({
     onMounted(() => {
       if (props.localThumb) { setBlob(props.localThumb); return; }
       if (props.encName) { tryDecrypt(); return; }
-      if (props.cloud) {
-        showCloud.value = true;
+      // 未加密：有本地或云端字节都经 store.peekTail 取缩略图（本地→切片不碰网、纯云端→一次尾 byte-range）。
+      //   之前只 props.cloud 触发 → 本地-only 项无缩略图（新 store 的 local 不带 thumb Blob）。
+      if (props.fetchable) {
+        if (props.isCloud) showCloud.value = true;   // 云 loading 态只给纯云端；本地即时不显
         obs = new IntersectionObserver((entries) => {
           for (const e of entries) {
             if (!e.isIntersecting) continue;
             obs?.disconnect(); obs = null;
-            const c = props.cloud!;   // 闭包外 line 119 `if (props.cloud)` 已守门
             // 库无 itemId/downloadUrl（内容盲）：按**裸 name**（props.alt = item.name）走 store.peekTail，
-            //   新鲜度戳 = lastModified 优先退 size（token 变 = 重拉）。
-            const token = c.lastModifiedDateTime || String(c.size || 0);
-            getOrFetchCloudThumb(props.alt, token, c.size || 0)
+            //   新鲜度戳 = 云 lastModified / 本地 updatedAt / size（token 变 = 重拉）。
+            getOrFetchCloudThumb(props.alt, props.thumbToken, props.thumbSize)
               .then(({ blob }: { blob: Blob }) => {
                 showCloud.value = false;
                 if (blob && blob.type === ENC_PEEK_MIME) { cloudEncBlob = blob; return tryDecrypt(); }
@@ -493,7 +502,7 @@ function makeGallery(host: GalleryHost) {
           </div>
 
           <div v-for="row in fileTiles" :key="row.t.name" class="gallery-tile" :class="{ active: row.t.isActive }" @click="openTile(row.item)">
-            <ThumbCell :local-thumb="row.t.hasLocalThumb ? row.item.local.thumb : null" :enc-name="row.t.encrypted ? row.t.name : null" :cloud="row.t.encrypted ? null : row.t.cloud" :fallback="row.t.displayName.slice(0,1) || '?'" :alt="row.t.name" @unlock="onUnlock" />
+            <ThumbCell :local-thumb="row.t.hasLocalThumb ? row.item.local.thumb : null" :enc-name="row.t.encrypted ? row.t.name : null" :fetchable="!row.t.encrypted && (!!row.t.cloud || !!row.item.local)" :is-cloud="!row.item.local && !!row.t.cloud" :thumb-token="String(row.item.local ? (row.item.local.updatedAt||0) : (row.t.cloud && row.t.cloud.lastModifiedDateTime || row.t.size || 0))" :thumb-size="row.t.size || 0" :fallback="row.t.displayName.slice(0,1) || '?'" :alt="row.t.name" @unlock="onUnlock" />
             <div class="gallery-tile-name-row">
               <div class="gallery-tile-name" :title="row.t.fullPath">{{ row.t.displayName }}</div>
               <div class="gallery-tile-meta">
@@ -527,7 +536,7 @@ function makeGallery(host: GalleryHost) {
 
         <template v-if="view==='trash' && !loading">
           <div v-for="row in trashTiles" :key="row.t.name + row.t.deletedAt" class="gallery-tile">
-            <ThumbCell :local-thumb="row.t.hasLocalThumb ? row.item.local.thumb : null" :cloud="row.t.cloud" :fallback="row.t.name.slice(0,1) || '?'" :alt="row.t.name" />
+            <ThumbCell :local-thumb="row.t.hasLocalThumb ? row.item.local.thumb : null" :fetchable="!row.t.encrypted && (!!row.t.cloud || !!row.item.local)" :is-cloud="!row.item.local && !!row.t.cloud" :thumb-token="String(row.item.local ? (row.item.local.updatedAt||0) : (row.t.cloud && row.t.cloud.lastModifiedDateTime || row.t.size || 0))" :thumb-size="row.t.size || 0" :fallback="row.t.name.slice(0,1) || '?'" :alt="row.t.name" />
             <div class="gallery-tile-name-row">
               <div class="gallery-tile-name" :title="row.t.name">{{ row.t.name }}</div>
               <div class="gallery-tile-meta">{{ row.t.source }} · {{ fmtMeta({time: row.t.deletedAt, size: 0}).split(' · ')[0] }} {{ L.deleted }}</div>
