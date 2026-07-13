@@ -20,8 +20,8 @@ export interface LocalSessionMeta extends LocalSession {
   trashKey?: string;
 }
 
-// 云端文件元字段。缩略图走 store.peekTail（按 name，不再要 itemId/downloadUrl，内容盲）——
-//   这里只留 size（新鲜度戳退路 + ZIP fallback 偏移）；lastModifiedDateTime 在基类 CloudFile。
+// 云端文件元字段。缩略图走 store.getPeek（按 name，不再要 itemId/downloadUrl，内容盲）——
+//   这里只留 size（新鲜度戳退路）；lastModifiedDateTime 在基类 CloudFile。
 //   id 仅回收站 restore/purge 的 cloudItemId 用（store.listTrash 带回），缩略图路径不碰。
 export interface CloudFileMeta extends CloudFile {
   id?: string;

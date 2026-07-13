@@ -78,30 +78,44 @@ test("[cloud-naming] 子夹 A/wall.ora → listing 身份=A/wall.ora（保留夹
   assert(paths.includes("A/wall.ora"), `子夹身份应=A/wall.ora（保留夹 + 全名），实得 ${JSON.stringify(paths)}`);
 });
 
-// peekTail：内容盲尾取（cloud-only 缩略图字节源）。全名身份、无 fileName 注入（薄默认恒等）。
-//   ⚠ peekTail 将在 getPeek 重构中从公开面移除，此处暂验字节源正确。
+// getPeek：内容盲尾取 + 库内 zip 解析（cloud-only 缩略图路径）。全名身份、无 fileName 注入（薄默认恒等）。
+//   公开 peekTail 已在 getPeek 重构中移除；这里验字节源路由（本地切片 / 云端 byte-range）经硬扫返回末尾 PNG。
 const mkStore = (provider: ReturnType<typeof createMockProvider>) => createStore({
   appId: "test", provider,
   ui: { busy: (_l: string, fn: () => Promise<unknown>) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {} } as never,
   validateAdopt: () => true, kv: memKv(), local: createMockLocal(),
   isOnline: () => true, signedIn: () => true, skipMigration: true,   // 无 fileName/encFileName 注入 → 用薄默认（恒等 / 追加 .zip）
 });
+// 最小「末尾 PNG」：SIG(8) + IHDR_HEAD(8) + 17 填充 + IEND_TAIL(8)。硬扫 scanPngFromEnd 命中（自家 ora thumb 放末 + STORE）。
+const PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,   // sig
+  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,   // IHDR head
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,   // filler
+  0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,   // IEND tail
+]);
+const withPngTail = (prefix: string): Uint8Array => {
+  const p = new TextEncoder().encode(prefix);
+  const out = new Uint8Array(p.length + PNG.length);
+  out.set(p, 0); out.set(PNG, p.length);
+  return out;
+};
+const bytesEq = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
 
-test("[peekTail] 纯云端 X.ora → 经 cloud.pullTail 取末尾 n 字节（内容盲，不整份下载）", async () => {
+test("[getPeek] 纯云端 X.ora → 经 cloud.pullTail byte-range 取尾片 + 硬扫返回末尾 PNG（不整份下载）", async () => {
   const provider = createMockProvider();
-  const body = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ".repeat(6);   // 216 字节
-  provider._seed("note.ora", body);
+  provider._seed("note.ora", withPngTail("PK\x03\x04...zip prefix bytes...".repeat(4)));
   const store = mkStore(provider);
-  const tail = await store.file("note.ora", { isZip: false }).peekTail(20);
-  assert(!!tail, "纯云端应经 cloud.pullTail byte-range 取到尾部（cloud-only 缩略图靠此）");
-  eq(td.decode(new Uint8Array(await tail!.arrayBuffer())), body.slice(-20));
+  const peek = await store.file("note.ora", { isZip: true }).getPeek({ bytesLength: 200, zipEntry: "Thumbnails/thumbnail.png" });
+  assert(!!peek, "纯云端应经 cloud.pullTail 取尾片、硬扫命中末尾 PNG（cloud-only 缩略图靠此）");
+  eq(peek!.type, "image/png");
+  assert(bytesEq(new Uint8Array(await peek!.arrayBuffer()), PNG), "返回的字节 = 末尾那段 PNG");
 });
 
-test("[peekTail] 本地缓存有 → Blob.slice 尾部（不碰网络）", async () => {
+test("[getPeek] 本地缓存有 → Blob.slice 尾片（不碰网络）+ 硬扫 PNG", async () => {
   const provider = createMockProvider();
   const store = mkStore(provider);
-  await store.file("draw.ora", { isZip: false }).save(new TextEncoder().encode("HELLO-LOCAL-TAIL"));
-  const tail = await store.file("draw.ora", { isZip: false }).peekTail(4);
-  assert(!!tail, "本地有副本 → 切片");
-  eq(td.decode(new Uint8Array(await tail!.arrayBuffer())), "TAIL");
+  await store.file("draw.ora", { isZip: false }).save(withPngTail("local body "));
+  const peek = await store.file("draw.ora", { isZip: true }).getPeek({ bytesLength: 200, zipEntry: "Thumbnails/thumbnail.png" });
+  assert(!!peek, "本地有副本 → 切尾片、硬扫 PNG");
+  assert(bytesEq(new Uint8Array(await peek!.arrayBuffer()), PNG), "本地路径同样返回末尾 PNG");
 });

@@ -19,6 +19,7 @@ import "./liquify-bilinear.test.mjs";
 import "./gallery-model.test.mjs";
 import "./store-folder-listing.test.mjs";   // 2026-07-11 网盘模型：per-folder listFolder/reconcileFolder/watchFolder + 数据安全 guardrail
 import "./store-cloud-naming.test.ts";       // 2026-07-12 回归：裸 session name ↔ 云端 X.ora/X.zip 往返（cutover 漏 fileName + listing 按 path 归一 → 0B/打开空白）
+import "./zip-peek.test.mjs";                // 2026-07-13 getPeek slice：库内 zip 尾片解析（硬扫末尾 PNG + 尾内 CD fallback）
 // ── 新引擎红线对抗 battery（2026-07-12 从 JRP 按模块测试移植；旧 store-flow/store-p0-batch 等 import 已删的
 //    monolithic store.ts、早成孤儿不跑 → 这批直接验新模块的红线：If-Match/parentBase/conflict→backup/move-aside/… ）──
 import "./push.test.ts";             // If-Match=parentBase、412 surface、0 字节占位仍 dirty、撞名不覆盖
@@ -34,7 +35,7 @@ import "./identity.test.ts";         // saveAs/rename/move 身份换（含撞名
 import "./reconcile.test.ts";        // 全库 cloud-gone 收敛（clean 孤儿→local-only 不删）
 import "./cloud-sync.test.ts";       // provider↔本地缓存低层同步 + memKv
 import "./store-lost-response-claim.test.mjs";   // N6 认领尾部校验：同名同大小异内容 → 不认作我方 push（防 lost-response 静默丢失）
-import "./migration.test.mjs";       // ADR-0019/0020 迁移编排：版本戳单调/幂等/崩溃安全不盖戳（IDB 搬字节部分 mock；分支此前漏 import）
+import "./migration.test.mjs";       // ADR-0019 迁移**框架**：版本戳/命名空间/编排机制（单调·幂等·崩溃安全，合成迁移注入）。V001/V002 tax 已清（2026-07-13）
 import "./gallery-view-model.test.mjs";
 import "./color-model.test.mjs";
 import "./brush-size.test.mjs";

@@ -24,6 +24,7 @@ import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
 import { createLocalCache } from "./local-cache.ts";
 import { runStoreMigrations, storeNamespace } from "./migration.ts";
+import { scanPngFromEnd, zipEntryPngFromTail, isPng } from "./zip-peek.ts";
 
 // ── ui bundle（Model B，README.md §7）：store 在决策点回调进来 + await ──
 export interface StoreUI {
@@ -79,12 +80,10 @@ export interface StoreConfig {
   signedIn?: () => boolean;                          // **连接态由 store 自持**（网盘模型：app 不再每次列举传 ctx）。ctor 注入一次；不给 → 恒 true（退回 provider 失败即降级）。watchFolder / 云列举据此决定「云轴可不可解析」。
   autoCacheOpenedFile?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
   offlineUploadReplay?: UploadReplayPolicy;           // ADR-0018：离线「新上传」回线补推策略 auto|ask|manual（默认 manual；WebPaint=manual、JRP=ask）
-  // ── 数据迁移（ADR-0019，createStore 内部自跑、隐形）──
+  // ── 数据迁移框架（ADR-0019，createStore 内部自跑、隐形）──
+  //   2026-07-13：无用户/无后向兼容 → 清空 MIGRATIONS（历史 V001/V002 tax 删除），库以最新标准出生。
+  //   框架（版本戳 + 有序注册表 + 编排）留着——将来真有用户、真要改 kv/IDB 结构时加第一条迁移。
   skipMigration?: boolean;                            // 测试/无 localStorage 环境跳过（prod 不传）
-  migrationCollections?: ReadonlySet<string>;         // dirty 拆轨用的已知 collection 名（WebPaint=∅：webpaint.dirty: 全是工作文件）
-  // ── v002 身份 裸名→全名（薄库）迁移映射：app 注入 = sessionFileName（裸→全名，含 sanitize；与 store.file(全名) lookup 逐字一致）。
-  //   返回 null = 该键不动（已全名 / 非 session）→ 幂等 + 防重入。不给 → v002 身份改名整段 no-op（身份本就是全名的 app）。──
-  migrateToFullIdentity?: (name: string) => string | null;
 }
 
 // ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 getPeek/setPeek ──
@@ -107,15 +106,15 @@ export interface RawFile {
   encrypt(opts?: { isOnline?: () => boolean }): Promise<{ status: string }>;   // 明文→密文（先本地后云 If-Match；离线 defer；错密码前置出局）
   decrypt(opts?: { isOnline?: () => boolean }): Promise<{ status: string }>;   // 密文→明文（同上红线）
   verifyPassword(pw: string): Promise<boolean>;                         // app 解锁循环（busy 外）便宜验：解 peek，不碰 7z
-  // 内容盲**尾部 n 字节**（本地有→Blob.slice；纯云端→provider byte-range via cloud.pullTail）。缺→null。
-  //   app 自己扫内容（如 .ora 末尾的缩略图 PNG）——库不解码、不假设格式。cloud-only 缩略图不必整份下载。
-  peekTail(n: number): Promise<Blob | null>;
 }
 export interface ZipFile extends RawFile {
-  // peek = 加密容器最外层可 byte-range 单独取的 **不透明尾块字节**（≤64KiB，独立 AES-GCM）。
-  //   库只加密/解密/尾取，**绝不假设它是图**——app 拿 Blob 自己 cast 成缩略图（内容知识全在 app）。
-  getPeek(): Promise<Blob | null>;
-  setPeek(peekBytes: Blob): Promise<void>;   // ⚠未采用：peek 经 crypt.makePeek 自动派生
+  // getPeek：从容器尾片抓 zipEntry 的 peek 字节（zip 解析在库内部，app 不碰 zip 布局）。字节源=本地切片∨云端 byte-range。
+  //   返回：**明文** zip → PNG Blob(type=image/png)；**加密**容器 → **密文** peek Blob(type=ENC_PEEK_MIME，未解密)；无→null。
+  //   加密件只返密文（**绝不在这解密**）——让 app 的缓存层原样存密文，明文缩略图永不落 IDB（安全红线）。解密走 decryptPeek。
+  //   ⚠库不假设 peek 是图——就是「zipEntry 的字节」；WebPaint 拿去 cast 成缩略图 PNG（内容知识全在 app）。
+  getPeek(opts: { bytesLength: number; zipEntry: string }): Promise<Blob | null>;
+  // 把 getPeek 返回的密文 peek blob 非交互解密成明文（内存密码；锁定/错密码→null）。已是明文(非 ENC_PEEK_MIME)→原样返。
+  decryptPeek(encPeek: Blob): Promise<Blob | null>;
 }
 
 function localStorageKv(): Kv {
@@ -140,12 +139,13 @@ export function createStore(config: StoreConfig) {
   const cloud: CloudSync = createCloudSync({ provider, kv, fileName: config.fileName ?? ((n: string) => n), encFileName: config.encFileName ?? ((n: string) => `${n}.zip`), appKey: `${appId}.sync` });
   const sub = createSubstrate();
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n), keyPrefix: `${appId}.head` });   // → `${appId}.head.dirty:`
-  // 数据迁移（ADR-0019）：**createStore 内部自跑、隐形**——app 看不见 migration（数据搬迁是同步细节）。
+  // 数据迁移框架（ADR-0019）：**createStore 内部自跑、隐形**——app 看不见 migration。
+  //   MIGRATIONS 现为空（无用户/无后向兼容，2026-07-13 清 tax）→ 编排跑空、无 op；框架留着待将来第一条真迁移。
   //   ops 首用前 await migrationReady（open/save/list）。测试/无 localStorage 环境跳过。
   const migrationReady: Promise<void> =
     config.skipMigration || !(globalThis as { localStorage?: unknown }).localStorage
       ? Promise.resolve()
-      : runStoreMigrations(appId, config.migrationCollections ?? new Set<string>(), config.migrateToFullIdentity);
+      : runStoreMigrations(appId);
   const offloadMod = createOffload({ cloud, local, head, isOnline, serialize: sub.serialize });   // serialize：offload 的 hardDelete ⟂ save 的 local 写互斥（红线：驱逐不吃未推字节）
   const reconcileMod = createReconcile({ cloud, local, head, isOnline });
 
@@ -316,12 +316,20 @@ export function createStore(config: StoreConfig) {
     if (tryCloud && cloud.pullTail) { const t = await cloud.pullTail(name, n); return t ? new Blob([t.bytes as BlobPart]) : null; }  // 纯云端 peek：byte-range
     return null;
   }
-  async function encReadPeek(name: string, tryCloud: boolean): Promise<Uint8Array | null> {
-    const tail = await encTailBytes(name, PEEK_TAIL_WINDOW, tryCloud);
-    if (!tail) return null;
-    const parsed = scanEncPeekFromEnd(new Uint8Array(await tail.arrayBuffer()));
+  // 尾片 + 文件总字节（getPeek 的 zip 解析要总字节判 CD/entry 绝对偏移是否落在尾片）。本地→切片+blob.size；纯云端→byte-range+item.size。
+  async function peekTailWithSize(name: string, n: number): Promise<{ buf: ArrayBuffer; totalSize: number } | null> {
+    const blob = await local.get(name);
+    if (blob) { const b = blob instanceof Blob ? blob : new Blob([blob as BlobPart]); return { buf: await b.slice(Math.max(0, b.size - n)).arrayBuffer(), totalSize: b.size }; }
+    if (cloud.pullTail) { const t = await cloud.pullTail(name, n); return t ? { buf: t.bytes.slice().buffer as ArrayBuffer, totalSize: t.item.size || t.bytes.byteLength } : null; }   // 纯云端：byte-range，总字节取 item.size
+    return null;
+  }
+  // 把一段密文 peek（getPeek 返回的 ENC_PEEK_MIME 段）非交互解密成明文字节。非 ENC_PEEK_MIME（已明文）→ 原样返。锁定/错密码→null。
+  async function decryptEncPeek(name: string, encPeek: Blob): Promise<Blob | null> {
+    if (encPeek.type !== ENC_PEEK_MIME) return encPeek;   // 明文（如 image/png）直接给
+    const parsed = scanEncPeekFromEnd(new Uint8Array(await encPeek.arrayBuffer()));
     if (!parsed) return null;
-    return await seal.withPassword(name, (pw) => decryptPeek(parsed, pw));   // 非交互内存密码；锁定 → null
+    const plain = await seal.withPassword(name, (pw) => decryptPeek(parsed, pw));   // 非交互内存密码；锁定 → null
+    return plain ? new Blob([plain as BlobPart]) : null;
   }
   async function encVerify(name: string, pw: string): Promise<boolean> {     // app 解锁循环的便宜验证器（解 peek，不碰 7z）
     if (!pw) return false;
@@ -431,9 +439,6 @@ export function createStore(config: StoreConfig) {
       encrypt(opts) { return encEncrypt(name, opts?.isOnline ?? isOnline); },
       decrypt(opts) { return encDecrypt(name, opts?.isOnline ?? isOnline); },
       verifyPassword(pw) { return encVerify(name, pw); },
-      // 内容盲**尾部字节**（本地有→切片；纯云端→cloud.pullTail byte-range）。app 拿去自己扫（如 .ora 末尾的缩略图 PNG）。
-      //   库不解码、不假设是什么——就是「最后 n 字节」。cloud-only 缩略图无需先整份下载。
-      peekTail(n) { return encTailBytes(name, n, true); },
     };
   }
 
@@ -443,11 +448,20 @@ export function createStore(config: StoreConfig) {
   function file(name: string, opts: { isZip: boolean }): RawFile | ZipFile {
     const raw = makeRaw(name);
     if (!opts.isZip) return raw;
-    // getPeek：读容器尾部加密 peek（本地切片或云端 byte-range）→ **不透明明文字节**包 Blob；锁定/无 peek → null。
-    //   peek 经 seal 时 crypt.makePeek 自动派生（无显式 setPeek）；库不假设它是图，app 拿 Blob 自己 cast 缩略图。
-    const getPeek = async (): Promise<Blob | null> => { const b = await encReadPeek(name, true); return b ? new Blob([b as BlobPart]) : null; };
-    const setPeek = async (_b: Blob): Promise<void> => { throw new Error("ZipFile.setPeek ⚠未采用：peek 经 crypt.makePeek 自动派生"); };
-    return Object.assign(raw, { setPeek, getPeek }) as ZipFile;
+    // getPeek：库内部从容器尾片解 zip 抓 zipEntry 的 peek 字节。硬扫末尾 PNG → 加密 MAGIC 扫 → 尾内 CD fallback。
+    //   明文 zip → PNG Blob(image/png)；加密容器 → **密文** peek Blob(ENC_PEEK_MIME，不解密，供 app 缓存层原样存密文=明文不落 IDB)；无→null。
+    const getPeek = async (o: { bytesLength: number; zipEntry: string }): Promise<Blob | null> => {
+      const tw = await peekTailWithSize(name, o.bytesLength);
+      if (!tw) return null;
+      const fast = scanPngFromEnd(tw.buf);                                          // 1) 硬扫末尾 PNG（自家 v137+ ora thumb 放末 + STORE → 几乎必中）
+      if (fast && isPng(fast)) return new Blob([fast as BlobPart], { type: "image/png" });
+      const encSeg = scanEncPeekFromEnd(new Uint8Array(tw.buf));                    // 2) 加密容器：MAGIC 扫 → 返密文段（不解密；app 缓存密文，解密走 decryptPeek）
+      if (encSeg) return new Blob([new Uint8Array(tw.buf).slice(encSeg.start, encSeg.end) as BlobPart], { type: ENC_PEEK_MIME });
+      const cd = await zipEntryPngFromTail(tw.buf, tw.totalSize, o.zipEntry);       // 3) 尾内 CD fallback（外部/老 deflate ora）
+      return cd ? new Blob([cd as BlobPart], { type: "image/png" }) : null;
+    };
+    const decryptPeekFn = (encPeek: Blob): Promise<Blob | null> => decryptEncPeek(name, encPeek);
+    return Object.assign(raw, { getPeek, decryptPeek: decryptPeekFn }) as ZipFile;
   }
 
   // ── collection / settings ──

@@ -11,7 +11,6 @@ import {
   config as cloudThumbConfig,
   resetStats as cloudThumbResetStats,
 } from "./cloud-thumb-cache.ts";
-import { telemetry as cloudThumbTelemetry, resetTelemetry as cloudThumbResetTelemetry } from "./cloud-thumbs.ts";
 
 // 调试控制台 = 一袋 console 手敲的函数（非业务）。诚实描述实际挂上的成员，index 兜底插件扩展。
 declare global {
@@ -22,7 +21,7 @@ declare global {
       cloudThumbResetStats?: () => void;
       cloudThumbSkipCache?: (on?: boolean) => void;
       clearCloudThumbCache?: () => Promise<number>;
-      pocFetchThumb?: (itemId?: string, fileSize?: number) => Promise<Blob>;
+      pocFetchThumb?: (name?: string) => Promise<Blob>;
       registerFilter?: typeof registerFilter;
       listFilters?: typeof listFilters;
       registerExporter?: typeof registerExporter;
@@ -37,8 +36,8 @@ export function initDevConsole() {
   //   await WebPaint.pocFetchThumb()  默认拉云列表第一个 ora 验证
   const WP = (window.WebPaint = window.WebPaint || {});
   WP.fetchOraThumbnail = fetchOraThumbnail;
-  WP.cloudThumbStats = () => ({ cache: { ...cloudThumbStats }, paths: { ...cloudThumbTelemetry } });
-  WP.cloudThumbResetStats = () => { cloudThumbResetStats(); cloudThumbResetTelemetry(); };
+  WP.cloudThumbStats = () => ({ cache: { ...cloudThumbStats } });   // 路径分布（硬扫/CD/加密）已下沉进库 getPeek，不再从 app 暴露
+  WP.cloudThumbResetStats = () => { cloudThumbResetStats(); };
   WP.cloudThumbSkipCache = (on = true) => {
     cloudThumbConfig.skipCache = !!on;
     console.log(`[cloud-thumb] skipCache=${cloudThumbConfig.skipCache}`);
@@ -48,13 +47,12 @@ export function initDevConsole() {
     console.log(`[cloud-thumb] cleared ${n} cached thumbnails`);
     return n;
   };
-  WP.pocFetchThumb = async function (name?: string, fileSize?: number) {
-    // store-cutover：fetchOraThumbnail 现按**裸 session 名**（item.name，无后缀）走 store.peekTail。
-    //   POC 需显式给该 name（从 gallery tile 取 item.name）；不再是 OneDrive itemId。
+  WP.pocFetchThumb = async function (name?: string) {
+    // fetchOraThumbnail 按**裸 session 名**（item.name，无后缀）走 store.getPeek（zip 解析在库内部）。
+    //   POC 需显式给该 name（从 gallery tile 取 item.name）；不再是 OneDrive itemId / fileSize。
     if (!name) throw new Error("pocFetchThumb 需显式裸 session 名（item.name）");
     const t0 = performance.now();
-    // fileSize 可选（供 ZIP fallback 判偏移；硬扫/加密扫不需要）。运行时契约不变。
-    const blob = await fetchOraThumbnail(name, fileSize);
+    const blob = await fetchOraThumbnail(name);
     console.log(`POC 完成 ${(performance.now() - t0) | 0}ms, blob size ${blob.size}`);
     // 显示到 console（可见 thumbnail）
     const url = URL.createObjectURL(blob);

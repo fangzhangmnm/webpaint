@@ -2,7 +2,7 @@
 //   只做 config 注入（provider / ui bundle / crypto codec / crypt / validateAdopt）+ auth 转发 + gallery 列举适配。
 //   app 只碰 store 四面（file/collection/localSettings/syncedSettings）+ editor-session。绝不裸碰 kv/IDB/graph/vendor。
 import { createStore, createOneDriveProvider, isCached, isDirty } from "./store/index.ts";
-import { stripSessionExt, sessionFileName } from "./config.ts";
+import { stripSessionExt } from "./config.ts";
 import { storeUI } from "./store-ui.ts";
 import { looksEncryptedContainer } from "./crypto-format.ts";
 import { CLIENT_ID, SCOPES } from "./config.ts";
@@ -27,9 +27,7 @@ export const store = createStore({
   //   encFileName 追加 .zip（加密容器外扩展名 ADR-0012）。app 在**边界**用 sessionFileName 把裸 session 名转成全名
   //   （X→X.ora）再传库（见 session-state 的 _file / editor-session 的 name；OUT 侧 itemToG 用 stripSessionExt 还原显示）。
   //   加密件云端 = X.ora.zip（追加，无损可逆），由库据字节加密态自动翻转，app 只管明文全名。
-  // v002 迁移：把 v001 落地的**裸名**本地身份（blob key + etag + dirty）改成全名 X.ora（= 新 store.file(全名) lookup）。
-  //   映射 = sessionFileName（与边界 toFull 逐字一致，含 sanitize）；已 .ora 结尾 → null 跳（幂等 + 崩溃重跑安全）。
-  migrateToFullIdentity: (n: string) => /\.ora$/i.test(n) ? null : sessionFileName(n),
+  //   身份从出生即全名——无迁移（无用户/无后向兼容，2026-07-13 清 tax；migration 框架留库内待将来）。
   crypto: cryptoCodec,
   crypt: {
     ext: "ora",

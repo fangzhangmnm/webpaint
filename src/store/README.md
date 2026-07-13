@@ -64,7 +64,7 @@ const store = createStore({
 
 | 拿到的 | 方法 | 章节 |
 |---|---|---|
-| `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · rename · delete · keepOffline · offload · isKeptOffline · isDirty · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek`；`setPeek` 未采用，peek 经 `crypt.makePeek` 自动） | §2 |
+| `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · rename · delete · keepOffline · offload · isKeptOffline · isDirty · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek({bytesLength,zipEntry})` + `decryptPeek(blob)`；zip 尾片解析在库内部，`setPeek` 未采用，peek 经 `crypt.makePeek` 自动） | §2 |
 | `store.collection(name, {manual?})` | `upsertItem · deleteItem · getItem · items · keys · init · flush · flushLocal` | §3 |
 | `store.localSettings` / `store.syncedSettings` | `get · set · delete`（synced 需 config 给 `syncedSettingsFileName`） | §4 |
 | `store.list()` / `store.listAll()` | 列云端文件+文件夹 `{files, folders, complete}`（`complete:false` **别据此删缓存**） | §2 |
@@ -127,10 +127,11 @@ const raw = store.file("a.pdf", { isZip: false });   // 类型 RawFile
 raw.getPeek();   // ❌ 编译错：RawFile 没有 getPeek
 
 const zip = store.file("a.ora", { isZip: true });    // 类型 ZipFile
-const p = await zip.getPeek();    // 一次（本地切片或云端尾部 byte-range）取预览，不全量下载
+const p = await zip.getPeek({ bytesLength: 131072, zipEntry: "Thumbnails/thumbnail.png" });
+                                  // 一次尾片（本地切片或云端 byte-range）+ 库内 zip 解析，取该 entry 的 peek 字节，不全量下载
 ```
 - `isZip:false` → **`RawFile`**：原始字节直存（云端文件 = 原始内容，双击能开，守 anti-abandonware）。**无预览图**。
-- `isZip:true` → **`ZipFile`**：库把 peek 当容器尾部一段管（**你不写任何 zip 代码**）。peek 经 `crypt.makePeek` 自动派生（无显式 `setPeek`，§5）。
+- `isZip:true` → **`ZipFile`**：库把 zip 尾片解析全包（**你不写任何 zip 代码**）。`getPeek({bytesLength, zipEntry})` 返明文 entry 的 PNG／或加密容器的**密文** peek（`ENC_PEEK_MIME`，不解密，供你缓存原样存密文=明文不落盘），密文再经 `decryptPeek(blob)` 非交互解。写侧 peek 经 `crypt.makePeek` 自动派生（无显式 `setPeek`，§5）。
 - peek/预览是**格式无关的不透明 binary blob**（jpg/png/随便，库不看、不构造、不解码）。
 
 ---
@@ -196,7 +197,7 @@ const store = createStore({
 - **透明封解**：照常 `f.save(bytes)` / `f.open()`，库按文件 at-rest 态自动加/解密（SSoT=字节本身）。未解锁（无/错密码）→ `open` 返 `null`、`save` 抛 `LOCKED`（**绝不静默存明文**）。
 - **at-rest 切换**：`f.encrypt()` 明文→密文、`f.decrypt()` 密文→明文。红线：先本地落地、再云端 If-Match 跟进；失败标脏锚 parentBase 交 push 流接力（绝不只换一端=静默撤销加密）；曾同步但离线→拒；错密码在任何持久改动前出局。
 - **解锁循环（app 在 busy 外做）**：`f.verifyPassword(pw)` 便宜验（解 peek，不碰 7z）→ app 自己存密码 → 重跑 flow。
-- **预览**：`ZipFile.getPeek()` 读容器尾部 peek（本地切片或云端 byte-range，不全量下载）。peek 经 `crypt.makePeek` 自动派生（无显式 `setPeek`）。
+- **预览**：`ZipFile.getPeek({bytesLength, zipEntry})` 取尾片 + 库内 zip 解析该 entry（本地切片或云端 byte-range，不全量下载）。明文→PNG blob；加密→**密文** peek blob（`ENC_PEEK_MIME`，不解密→你缓存原样存密文=明文不落盘）；密文再经 `decryptPeek(blob)` 非交互解（内存密码；锁定→null）。写侧 peek 经 `crypt.makePeek` 自动派生（无显式 `setPeek`）。
 - **导入辅助**（文件还没进 store）：`store.looksEncrypted(blob)` / `store.verifyContainer(blob,pw)` / `store.unsealWith(blob,pw)`。
 
 > **未采用**：README 早期草拟的 `store.encryption`（库统一密钥 + `vault.salt` + `encrypted:true` + `saveEncrypted` + `addEncryption`）超集**本版不实现**——对齐 WebPaint 真机验过的 `getPassword`/`encrypt` 模型（见 `docs/11`）。要库统一密钥再单独 escalate。

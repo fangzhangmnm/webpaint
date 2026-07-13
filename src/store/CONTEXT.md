@@ -68,19 +68,21 @@ store/ 外每一处命中都是 jailbreak（WebPaint 已知三处：`session-sta
 
 ## migration / schema-version（深模块，ADR-0019）
 
-> 引擎存储名字锚定在此谱系；跨版本收敛靠**显式版本迁移**，不靠愈合（不写 `?? ora` 类 read-fallback）。
+> as-of v397 / 2026-07-13：**框架保留、迁移清空**。WebPaint 无用户、无后向兼容 → 历史 V001（webpaint-anchor）/ V002（裸名→全名）
+> 两条迁移的搬迁逻辑（tax）已删，库以**最新标准**出生（身份=全名 X.ora、appId 命名空间、dirty 双轨从出生即成立，无需搬迁）。
+> 跨版本收敛仍靠**显式版本迁移**，不靠愈合（不写 `?? ora` 类 read-fallback）——只是当前注册表为空。
 
-- **schema-version** — kv 里一枚戳 `store.schema = vNNN-yyyymmdd`（如 `v001-20260709`）。字符串序即版本序（NNN 零填充）。= "这个客户端的 on-disk 结构有多新"，让陈旧可见（家族"缓存无失效机制→让龄可见"同源）。
-- **migration（深模块）** — 引擎内部，app 碰不到（ADR-0021 四面）。boot 时 `createStore` 在 ready-gate 前 `await runMigrations`：读戳 → 按有序注册表跑欠的迁移 → **run 成功后才盖新戳**（崩了不盖→重跑）。每次动 kv/IDB 结构加一条。
-- **幂等 + 崩溃安全** — put-by-key 覆盖；**先写新 + 盖戳，最后才删旧**（红线：绝不在目标 durably 写成前删源，护未推的世界唯一副本）。IDB 不能 node 测 → 纯分类器（dirty-split）单测 + 真机验。
-- **v001-20260709 webpaint-anchor** — WebPaint prod 名 → 锚定名（IDB `webpaint/sessions`→`sync-store-cache/blobs`、字段 `ora`→`blob`、`trash:`→`local-trash:`、`.backup-local/`→`local-backup:`、kv `webpaint.etag:`→`sync.etag:`、dirty 拆轨见下）。对 JRP/新装 = **no-op**（无 `webpaint.*` → 跳过盖戳）。
-- **dirty 双轨（ADR-0020）** — 工作文件 dirty 在 **local-head**（`head.dirty:`，缺失=clean）；collection dirty 在 **cloud-sync**（`sync.dirty:`，缺失=脏）。迁移按「是否 collection 名」路由；不认识的名字**保守当工作文件+留脏**（宁留勿丢）。
+- **schema-version** — kv 里一枚戳 `${appId}.store.schema = vNNN-yyyymmdd`。字符串序即版本序（NNN 零填充）。= "这个客户端的 on-disk 结构有多新"，让陈旧可见（家族"缓存无失效机制→让龄可见"同源）。
+- **migration（深模块）** — 引擎内部，app 碰不到（ADR-0021 四面）。boot 时 `createStore` 在 ready-gate 前 `await runMigrations`：读戳 → 按有序注册表 `MIGRATIONS` 跑欠的迁移 → **run 成功后才盖新戳**（崩了不盖→重跑）。**现 `MIGRATIONS` 为空** → 编排跑空、不盖戳（新装即最新）。
+- **框架留着待将来** — 真有用户、真要改 kv/IDB 结构时，往 `MIGRATIONS` 加**第一条** `Migration`（version 单调），编排自动接管。`runMigrations(ctx, migrations?)` 的 migrations 参数默认 = `MIGRATIONS`（测试注入合成列表验编排机制：单调/幂等/崩溃安全）。
+- **幂等 + 崩溃安全（机制仍在）** — 逐条迁移 run 成功才盖戳；抛则不盖、下次从该条重跑（红线：绝不在目标 durably 写成前删源，护未推的世界唯一副本）。migration.test.mjs 用合成迁移守这套机制。
+- **dirty 双轨（ADR-0020，运行时不变）** — 工作文件 dirty 在 **local-head**（`${appId}.head.dirty:`，缺失=clean）；collection dirty 在 **cloud-sync**（`${appId}.sync.dirty:`，缺失=脏）。这是**运行时记账**，不是迁移——清 tax 不影响它。
 
 ## app 命名空间 / 同 origin 隔离（ADR-0022，2026-07-12 真机事故根治）
 
 > IndexedDB 和 localStorage 按 **origin**（scheme+host+port）隔离、**不按 path**。GitHub Pages 的 project site 同 origin（`user.github.io/webpaint/` 与 `/jrp/` 只 path 不同）。写死的库名/键前缀 → 兄弟 PWA 共用一份存储 = 灾难。
 
-- **事故**：store-cutover 把 WebPaint 从 app 专属旧库（`webpaint`/`webpaint.*`）换成本引擎写死的通用名（`sync-store-cache`、`sync.etag:`、`head.dirty:`、`store.schema`）。JRP 早已 live 用同一套通用名 → 同 origin 下**共用一个 IDB + 一批键**：JRP 的论文漏进 WebPaint 图库；谁先 boot 谁把 `store.schema` 盖上戳，另一个 `needsMigration=false` **跳过迁移 → 旧库画作没搬进来 → 图库显 0 B**。用户真机抓到。
-- **根治**：`createStore` 加**必填 `appId`**。所有持久化标识据它派生（`storeNamespace(appId)`）：IDB 库 `${appId}.sync-store-cache`；localStorage `${appId}.sync.*`（cloud-sync appKey=`${appId}.sync`）/`${appId}.head.*`（local-head keyPrefix=`${appId}.head`）/`${appId}.store.schema`/`${appId}.folders.pending`。不传 `appId` → 抛错，绝不静默共用。WebPaint=`"webpaint"`、JRP=`"jrp"`。
-- **∴ 上面 v001 段与双轨段写的 `sync-store-cache`/`sync.*`/`head.*`/`store.schema` 现在实际都带 `${appId}.` 前缀**（迁移目标随命名空间走：migrateKv 收 `etagPrefix`/`dirtyPrefixes`、runMigrations 收 `schemaKey`、migrateSessionsIdb 收 `newDbName`，全由 `runStoreMigrations(appId,…)` 从 `storeNamespace(appId)` 喂进去）。旧库名 `webpaint`/`sessions`（迁移源）不变——它本来就 app 专属、不撞。
+- **事故背景**：store-cutover 曾把 WebPaint 换成引擎写死的通用名（`sync-store-cache`、`sync.etag:`…），与同 origin 的 JRP **共用一个 IDB + 一批键** → 文件互漏、`store.schema` 互踩跳迁移 → 图库显 0 B。用户真机抓到。
+- **根治**：`createStore` 加**必填 `appId`**。所有持久化标识据它派生（`storeNamespace(appId)`，运行时深模块，非迁移）：IDB 库 `${appId}.sync-store-cache`；localStorage `${appId}.sync.*`（cloud-sync appKey=`${appId}.sync`）/`${appId}.head.*`（local-head keyPrefix=`${appId}.head`）/`${appId}.store.schema`/`${appId}.folders.pending`。不传 `appId` → 抛错，绝不静默共用。WebPaint=`"webpaint"`、JRP=`"jrp"`。
+- **∴ 所有键都带 `${appId}.` 前缀**——`storeNamespace(appId)` 是单一真源（`create-store` 取 `dbName`/`foldersPendingKey`；将来的迁移经 `MigrationCtx.ns` 取 `dbName`/`etagPrefix`/`dirtyPrefixes` 改结构）。旧库名 `webpaint`/`sessions`（曾是 V001 迁移源，现无用户已随 tax 一起不再引用）。
 - **follow-up**：JRP 侧同一引擎也需接 `appId="jrp"`（当前它还用裸 `sync.*`；WebPaint 命名空间成 `webpaint.*` 后已不再和它撞，但 JRP 对未来兄弟仍有同样潜在 bug）——走 pwa-cloud-store bake 回时补。

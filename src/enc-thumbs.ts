@@ -4,6 +4,7 @@
 
 import { store } from "./app-store.ts";
 import { sessionFileName } from "./config.ts";   // 边界：裸 item.name → 库全名（薄库身份=X.ora）
+import { SUFFIX_BYTES, THUMB_PATH } from "./cloud-thumbs.ts";
 import { isUnlocked, getPassword, setPassword, onPasswordVerified, promptPassword } from "./crypto-state.ts";
 
 // 边界：app 传裸 session 名，库身份是全名 → sessionFileName 统一转（与 session-state/gallery 一致）。
@@ -11,13 +12,14 @@ const encFile = (name: string) => store.file(sessionFileName(name), { isZip: tru
 
 /** 本地加密作品的缩略图（内存密码解得开→PNG Blob；锁定/没有→null）。非交互——批量渲染不弹窗。 */
 export async function localPeekThumb(name: string): Promise<Blob | null> {
-  return await encFile(name).getPeek();   // 不透明 peek 字节（app 当 PNG 缩略图）；本地切片/云端 byte-range
+  const zf = encFile(name);
+  const peek = await zf.getPeek({ bytesLength: SUFFIX_BYTES, zipEntry: THUMB_PATH });   // 加密件 → 密文 peek blob（ENC_PEEK_MIME）
+  return peek ? await zf.decryptPeek(peek) : null;                                      // 内存密码非交互解；锁定→null。明文缩略图不落任何缓存（结果仅 object URL）
 }
 
-/** 云端 byte-range 拉回的密文 peek blob（ENC_PEEK_MIME）→ PNG Blob | null。非交互。 */
+/** 云端 byte-range 拉回的密文 peek blob（ENC_PEEK_MIME，缓存原样存）→ 明文 PNG Blob | null。非交互，不再重取（直接解传入密文）。 */
 export async function decryptCloudPeekThumb(name: string, encBlob: Blob): Promise<Blob | null> {
-  void encBlob;
-  return await encFile(name).getPeek();   // getPeek 自取本地/云端；encBlob 参数保留兼容（不再用）
+  return await encFile(name).decryptPeek(encBlob);   // 密文 peek → 明文；已明文(非 ENC_PEEK_MIME)原样返
 }
 
 /**

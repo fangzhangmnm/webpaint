@@ -75,7 +75,8 @@ export async function getOrFetchCloudThumb(name: string, token: string, fileSize
   }
   stats.misses++;
   try {
-    const blob = await fetchOraThumbnail(name, fileSize);
+    void fileSize;   // 遗留参数：尾窗口偏移判定已下沉进库 getPeek（库自算 size）；签名保留不破坏 gallery 调用
+    const blob = await fetchOraThumbnail(name);
     if (!config.skipCache) writeCachedThumb(name, token, blob);
     return { blob, fromCache: false };
   } catch (e) {
