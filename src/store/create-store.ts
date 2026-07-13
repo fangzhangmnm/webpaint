@@ -70,6 +70,11 @@ export interface StoreConfig {
   //   合法 etag 能覆盖唯一好的本地副本 = 丢内容（论文/画作都怕；只读消费者不上传不伤云，但机场网毁缓存照样难看）。
   //   **库对加密透明**：验的是**解密后的明文**（你看真 PDF/.ora，不是密文容器）。
   validateAdopt: (plain: Blob) => boolean | Promise<boolean>;
+  // ── 云端文件命名（app 域：store name → 云端文件名）。**不给 = 恒等**（JRP 等名字本身含扩展名的 app）。
+  //   WebPaint 的 session name 是裸名（"未命名"），云端存 `.ora` → 必须给 `fileName: n => n+".ora"`（+加密 `.zip`）。
+  //   ⚠ cutover 一度漏传 → 老云端 `X.ora` 用裸名 `X` 取不到（0B/打开空白）。见 docs/20260712-store-per-app-namespace.md 边角。
+  fileName?: (name: string) => string;               // store name → 云端文件名（如 n => n + ".ora"）
+  encFileName?: (name: string) => string;            // 加密容器的云端文件名（如 n => n + ".zip"；ADR-0012）
   isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
   signedIn?: () => boolean;                          // **连接态由 store 自持**（网盘模型：app 不再每次列举传 ctx）。ctor 注入一次；不给 → 恒 true（退回 provider 失败即降级）。watchFolder / 云列举据此决定「云轴可不可解析」。
   autoCacheOpenedFile?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
@@ -124,7 +129,7 @@ export function createStore(config: StoreConfig) {
   if (config.crypto) configureCryptoCodec(config.crypto);   // app 注入 zip/7z codec 才启用加密；JRP 不注入 → dormant
 
   // ── 脊椎 + 低层 ──
-  const cloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => n, appKey: `${appId}.sync` });   // → `${appId}.sync.etag:` / `.dirty:`
+  const cloud: CloudSync = createCloudSync({ provider, kv, fileName: config.fileName ?? ((n: string) => n), encFileName: config.encFileName, appKey: `${appId}.sync` });   // fileName 不给=恒等（名字自带扩展名的 app）；WebPaint 传 n=>n+".ora"。appKey → `${appId}.sync.etag:`/`.dirty:`
   const sub = createSubstrate();
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n), keyPrefix: `${appId}.head` });   // → `${appId}.head.dirty:`
   // 数据迁移（ADR-0019）：**createStore 内部自跑、隐形**——app 看不见 migration（数据搬迁是同步细节）。

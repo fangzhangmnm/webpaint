@@ -30,7 +30,7 @@ describe("listing.listFolder · 单夹直属 scope + 子夹派生", () => {
 
   it("只返回本夹直属文件；别夹 local key 绝不进本夹（guardrail）", async () => {
     const listing = mk(
-      { files: [{ path: "A/foo", eTag: "e1", size: 3 }], folders: ["A/cloudsub"], complete: true },
+      { files: [{ path: "A/foo", name: "A/foo", eTag: "e1", size: 3 }], folders: ["A/cloudsub"], complete: true },   // name=toName(path)（cloud-sync 契约）
       ["A/foo", "A/deep/x", "B/other"],          // A/deep/x → 子夹 A/deep；B/other → 别夹，必须不出现
       { "A/foo": "e1" },
     );
@@ -55,7 +55,7 @@ describe("listing.listFolder · 单夹直属 scope + 子夹派生", () => {
 
   it("根目录 folder=''：nested local + pending 都算 immediate 子夹", async () => {
     const listing = mk(
-      { files: [{ path: "top", eTag: "e", size: 1 }], folders: [], complete: true },
+      { files: [{ path: "top", name: "top", eTag: "e", size: 1 }], folders: [], complete: true },
       ["top", "P/inside"], { top: "e" }, new Set(), ["Q"],
     );
     const snap = await listing.listFolder("", CTX_ON);

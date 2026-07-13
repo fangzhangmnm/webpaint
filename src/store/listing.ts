@@ -122,7 +122,10 @@ export function createListing(cfg: ListingCfg) {
 
     const prefix = folder ? `${folder}/` : "";
     const cloudMap = new Map<string, { eTag: string; size: number; lastModified?: number }>();
-    for (const c of cloudRes?.files ?? []) cloudMap.set(c.path, { eTag: c.eTag, size: c.size, lastModified: toMs(c.lastModifiedDateTime) });
+    // 身份 = **session name（c.name = toName 去扩展名）**，不是 c.path（云端文件名含 .ora/.zip）。
+    //   本地 key（appKeys / 迁移）也是裸 session name → 两轴按同一 key 归一；否则 cloud X.ora 与 local X 分裂成两项、
+    //   且 open(裸名) 与 cloud X.ora 对不上（=0B/打开空白的根因）。fileName/encFileName 负责裸名→云端名的往返。
+    for (const c of cloudRes?.files ?? []) cloudMap.set(c.name, { eTag: c.eTag, size: c.size, lastModified: toMs(c.lastModifiedDateTime) });
 
     // 本地：只看本夹前缀下的 key；直属文件 → 参与列举，更深的 → 记 immediate 子夹。
     const localDirect = new Set<string>();
@@ -158,7 +161,7 @@ export function createListing(cfg: ListingCfg) {
 
     const cloudMap = new Map<string, { eTag: string; size: number; lastModified?: number }>();
     for (const c of cloudRes?.files ?? []) {
-      cloudMap.set(c.path, { eTag: c.eTag, size: c.size, lastModified: toMs(c.lastModifiedDateTime) });
+      cloudMap.set(c.name, { eTag: c.eTag, size: c.size, lastModified: toMs(c.lastModifiedDateTime) });   // 身份=session name（裸），见 listFolder 同处注释
     }
     const localSet = new Set(await local.appKeys());
 

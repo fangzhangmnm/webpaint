@@ -18,6 +18,7 @@ import "./liquify-bbox.test.mjs";
 import "./liquify-bilinear.test.mjs";
 import "./gallery-model.test.mjs";
 import "./store-folder-listing.test.mjs";   // 2026-07-11 网盘模型：per-folder listFolder/reconcileFolder/watchFolder + 数据安全 guardrail
+import "./store-cloud-naming.test.ts";       // 2026-07-12 回归：裸 session name ↔ 云端 X.ora/X.zip 往返（cutover 漏 fileName + listing 按 path 归一 → 0B/打开空白）
 // ── 新引擎红线对抗 battery（2026-07-12 从 JRP 按模块测试移植；旧 store-flow/store-p0-batch 等 import 已删的
 //    monolithic store.ts、早成孤儿不跑 → 这批直接验新模块的红线：If-Match/parentBase/conflict→backup/move-aside/… ）──
 import "./push.test.ts";             // If-Match=parentBase、412 surface、0 字节占位仍 dirty、撞名不覆盖

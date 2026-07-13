@@ -66,3 +66,44 @@ WebPaint = `"webpaint"`、JRP = `"jrp"`。不传 `appId` → `createStore` 抛�
 
 - `tsc=0`、`node test/run.mjs` 560/0（migration 编排 + 红线 battery 全绿；store-folder-listing 的 3 处 `createStore` 补了 `appId:"test"`）。
 - **真机待验**（IDB node 测不到）：WebPaint dev 打开 → 只见自己的画、不见 JRP 文件、旧画作正常显示非 0 B；JRP 打开 → 不受影响。
+
+---
+
+# 第二个 cutover bug（v390，同一真机会话抓到）——裸 session name ↔ 云端 `X.ora` 往返丢了
+
+命名空间修好后，图库开始显示 WebPaint 自己的云端文件，但**全部 cloud-only、0 B、占位缩略图、打开是空白画布**。
+
+## 根因（两处，叠加）
+
+WebPaint 的 session name 是**裸名**（"未命名"、"20260528-01"），云端文件存 `X.ora`（加密 `X.zip`，见 `config.ts sessionFileName`）。裸名 `X` ↔ 云端 `X.ora` 的往返靠两个方向的映射，cutover 都弄丢了：
+
+1. **`create-store` 写死 `fileName: (n) => n` 恒等**（该处 doc 明说应 `n => n + ".ora"`）→ `cloud.pull("X")` 找云端 `X`（无扩展）→ 404 → 取不到 → 0B/空白。加密同理丢了 `.zip`。
+2. **`listing.ts` 按 `c.path`（含 `.ora`）归一**（应按 `c.name = toName(path)` 裸名）→ store 身份成 `X.ora`，而本地缓存/迁移/app open 都用裸名 `X` → 云 `X.ora` 与本地 `X` 分裂成两项、open(裸名) 对不上。
+3. 连带 **`reconcile.ts` 用 `f.path ?? f.name`**（优先含扩展路径）建 cloud-gone 判定集 → 本地裸名 `X` 在 `{X.ora}` 里找不到 → **误判 cloud-gone → demote**（非破坏但错误断云谱系）。
+
+（此前所有 node 测试都用**裸名 mock provider**（无扩展名）→ `toName`/`fileName` 恒等、往返恰好成立 → 完全没覆盖到带扩展名的真实情况，bug 溜过。）
+
+## 修
+
+- `StoreConfig` 加 `fileName?`/`encFileName?`（默认恒等；名字自带扩展名的 app 如 JRP 不受影响）；`create-store` 透传给 `createCloudSync`。
+- `app-store` 传 `fileName: sessionFileName`（`X`→`X.ora`）、`encFileName: encSessionFileName`（`X`→`X.zip`）。
+- `listing.ts` 两处 `cloudMap.set(c.name, …)`（裸 session 名归一，不是 `c.path`）。
+- `reconcile.ts` 两处 `f.name ?? f.path`（优先裸名，和本地 appKeys 对齐）。
+- **回归测试** `test/store-cloud-naming.test.ts`：真 cloud-sync + listing over mock，种子 `X.ora`/`X.zip`/`A/wall.ora` → 断言 listing 身份=裸名 + `pull(裸名)` 经 fileName 命中。这类带扩展名的往返此前零覆盖，正是漏掉的盲区。
+
+## 身份模型（钉死，别再漂）
+
+**store 规范身份 = 裸 session name**（`toName` 去扩展名，保留夹路径：`A/wall.ora`→`A/wall`）。
+- 本地缓存 key、迁移 key、app 的 `store.file(name)`、dirty/etag 记账 —— 全用裸名。
+- `fileName`/`encFileName`：裸名 → 云端文件名（加 `.ora`/`.zip`）。`toName`：云端文件名 → 裸名（去扩展）。两者互逆。
+- listing/reconcile 拿 cloud 列表时按 `c.name`（裸）归一，与本地 appKeys（裸）在同一 key 空间求并。
+
+## 遗留
+
+- **cloud-only 缩略图仍是占位图**（`cloud-thumbs.ts` stub，pre-existing P2）→ 未下载的云画在图库仍显占位 + 0 B，**打开后**缓存本地才有真缩略图/尺寸。本次只修「打开取不到内容」，缩略图 stub 是独立 follow-up。
+- JRP 侧同引擎用 `fileName=identity` + 全名身份 + listing 按 path——与 WebPaint 现在的裸名模型**分叉了**。bake 回时要统一（让 listing 一律按 `c.name`，JRP 也改成裸名 + `fileName` 加扩展）。走 pwa-cloud-store。
+
+## 验证（v390）
+
+- `tsc=0`、`node test/run.mjs` **563/0**（新增 3 个 cloud-naming 回归）。
+- **真机待验**：图库云端老画能打开出内容（非空白）、尺寸非 0 B；子夹里的画也能开；加密画能开。

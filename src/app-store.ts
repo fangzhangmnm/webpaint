@@ -2,7 +2,7 @@
 //   只做 config 注入（provider / ui bundle / crypto codec / crypt / validateAdopt）+ auth 转发 + gallery 列举适配。
 //   app 只碰 store 四面（file/collection/localSettings/syncedSettings）+ editor-session。绝不裸碰 kv/IDB/graph/vendor。
 import { createStore, createOneDriveProvider, isCached, isDirty } from "./store/index.ts";
-import { stripSessionExt } from "./config.ts";
+import { stripSessionExt, sessionFileName, encSessionFileName } from "./config.ts";
 import { storeUI } from "./store-ui.ts";
 import { looksEncryptedContainer } from "./crypto-format.ts";
 import { CLIENT_ID, SCOPES } from "./config.ts";
@@ -23,6 +23,10 @@ export const store = createStore({
   provider,
   ui: storeUI,
   appId: "webpaint",   // 本 origin 内唯一命名空间：IDB 库 webpaint.sync-store-cache + localStorage webpaint.* 键，与兄弟 PWA(JRP 等)隔离
+  // 云端命名：WebPaint session name 是裸名，云端存 .ora（加密 .zip）。裸名 X ↔ 云端 X.ora 的往返。
+  //   （cutover 一度漏传 → 老云端 X.ora 用裸名取不到=0B/打开空白，本次补回。）
+  fileName: sessionFileName,        // "未命名" → "未命名.ora"
+  encFileName: encSessionFileName,  // "未命名" → "未命名.zip"（ADR-0012 加密外扩展名）
 
   crypto: cryptoCodec,
   crypt: {

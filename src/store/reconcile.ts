@@ -68,7 +68,7 @@ export function createReconcile(cfg: ReconcileCfg) {
     const all = await cloud.listAll().catch(() => null);                  // 未登录/网失败 → null
     const authoritative = !!(all && all.complete && all.files.length > 0);  // 失败-fetch + 空列表守卫
     if (!authoritative) return { demoted: [] };
-    const cloudNames = new Set(all!.files.map((f) => f.path ?? f.name));
+    const cloudNames = new Set(all!.files.map((f) => f.name ?? f.path));
     return converge(await local.appKeys(), cloudNames, authoritative, opts.activeName);
   }
 
@@ -79,7 +79,7 @@ export function createReconcile(cfg: ReconcileCfg) {
     if (isOnline && !isOnline()) return { demoted: [] };
     const res = await cloud.listFolder(folder).catch(() => null);
     if (!res || !res.complete) return { demoted: [] };                   // 这一夹没列全 → 不权威 → no-op（绝不据此判 gone）
-    const cloudNames = new Set(res.files.map((f) => f.path ?? f.name));
+    const cloudNames = new Set(res.files.map((f) => f.name ?? f.path));
     const prefix = folder ? `${folder}/` : "";
     const localNames = (await local.appKeys()).filter((k) => {
       if (folder && !k.startsWith(prefix)) return false;
