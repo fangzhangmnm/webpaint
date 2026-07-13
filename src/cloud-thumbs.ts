@@ -29,7 +29,7 @@ import { scanEncPeekFromEnd, ENC_PEEK_MIME } from "./crypto-format.ts";
 // 投机 suffix：last N 字节一次性拿 EOCD + CD +（自家 ora）thumbnail data
 // 80KB budget = thumb 自适应目标 ≤ 70KB + 尾巴 ~10KB（CD + EOCD + sig 扫描余量）
 // 扫不到 PNG → 用同一 buffer 走 ZIP 解析
-const SUFFIX_BYTES = 81920;
+const SUFFIX_BYTES = 131072;   // 128KB（80KB→128KB，2026-07-12）：图层多的 ora 中央目录大、把缩略图 entry 挤出小尾片 → 占位。放宽尾窗口救多数。仍不中的极大文件退占位（不做任意偏移二次拉，避免给 store 加 peekRange）。
 const THUMB_PATH = "Thumbnails/thumbnail.png";
 // PNG 完整 sig 8 字节（4 字节短 sig 会有更多 false match）
 const PNG_SIG = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
