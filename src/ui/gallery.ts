@@ -21,7 +21,7 @@ import {
 } from "../app-store.ts";
 import { listSessions } from "../session.ts";
 import { setMeta } from "../storage.ts";
-import { getOrFetchCloudThumb } from "../cloud-thumb-cache.ts";
+import { getOrFetchCloudThumb, invalidateCachedThumb } from "../cloud-thumb-cache.ts";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
 // crypt seam）。图库只做 per-app 的部分：首次设密码双输 UX、活动项预检、明文残留清理、
 // 以及把 peek 字节解释成缩略图（enc-thumbs）。
@@ -340,8 +340,8 @@ function makeGallery(host: GalleryHost) {
         if (res.status === "conflict") { host.status(t("gal.st.encConflict", { name: item.name }), true); }
         else if (res.status === "cloud-deferred") { host.status(t("gal.st.encDeferred", { okMsg }), true); }
         else host.status(okMsg);
-        // 旧 token 的云 thumb 缓存条目立即作废（明文/密文残留都清）。cache 现按裸 name key（store-cutover）。
-        try { await setMeta(`cloud-thumb:${item.name}`, null); } catch (_) {}
+        // 旧 token 的云 thumb 缓存条目立即作废（明文/密文残留都清）。缓存按 store 身份 key，走模块入口（独立 thumb DB）。
+        await invalidateCachedThumb(item.name);
         return true;
       }
 

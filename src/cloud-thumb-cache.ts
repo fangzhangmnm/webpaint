@@ -1,11 +1,12 @@
-// 云端 ora thumbnail 的 IDB 缓存（v137；store-cutover 2026-07-12 重锚）
+// 云端 ora thumbnail 的 IDB 缓存（v137；store-cutover 2026-07-12 重锚；v400 独立 DB + key 对齐 store 身份）
 //
-// key 形态：`cloud-thumb:<name>` 存 meta store，value = { token, blob, at }
-//   - name = 库的裸 session 名（item.name，无后缀）—— 薄库不再暴露 OneDrive itemId（内容盲，身份=path）。
+// 存法：**独立 IDB `webpaint-gallery-thumbs`**（自己一个 database，不挤 webpaint DB 的 meta 大篮子，也不用 bump webpaint DB 版本），
+//   key = store 文件身份 = sessionFileName(裸名) = 全名 X.ora（与 cloud-thumbs.ts 传给 store.file 的 key 逐字一致）。
+//   value = { token, blob, at }。改前：存 webpaint DB 的 meta store、key=`cloud-thumb:<裸名>`（v400 迁移，旧孤儿由 clearCloudThumbCache 清）。
 //   - token = 新鲜度戳（cloud.lastModifiedDateTime 优先，退 size）。token 变 = 文件改了 → 重拉 + 覆盖同 key。
 //   - token 同 = blob 仍有效，直接用。
 //
-// 与旧 itemId key 的取舍：无 itemId → 改名的作品换 name = 换 key（旧条目成孤儿，随 clearCloudThumbCache 清）。
+// 无 itemId → 改名的作品换 name = 换 store-key = 换 cache key（旧条目成孤儿，随 clearCloudThumbCache 清）。
 //   同名编辑走 token 比对、覆盖同 key，不累积孤儿。失效不需 TTL：下次 list 拿到新 lastModified/size 即重拉。
 //
 // 加密作品：fetchOraThumbnail 返回**密文** blob（type=ENC_PEEK_MIME），缓存原样存密文 → 明文缩略图不落 IDB；
@@ -16,12 +17,14 @@
 //
 // 不在这处理：网络拉取本身 / IntersectionObserver / 并发限流（caller 负责）
 
-import { getMeta, setMeta } from "./storage.ts";
+import { getThumb, setThumb, deleteThumb, clearThumbs, deleteMetaByPrefix } from "./storage.ts";
 import { fetchOraThumbnail } from "./cloud-thumbs.ts";
+import { sessionFileName } from "./config.ts";
 
-const KEY_PREFIX = "cloud-thumb:";
+const LEGACY_META_PREFIX = "cloud-thumb:";   // v400 前 thumb 存 meta store 的 key 前缀（迁移时清孤儿）
 
-function _key(name: string): string { return KEY_PREFIX + name; }
+// cache key = store 文件身份（sessionFileName(裸名)=全名 X.ora）；专用 store 即命名空间，key 无需前缀。caller 仍传裸名。
+function _key(name: string): string { return sessionFileName(name); }
 
 // IDB 里存的缓存条目形态
 interface CachedThumb {
@@ -41,7 +44,7 @@ export const config: { skipCache: boolean } = { skipCache: false };
 /** 读 cache。返回 { token, blob, at } 或 null */
 export async function readCachedThumb(name: string): Promise<CachedThumb | null> {
   try {
-    const v = await getMeta(_key(name)) as CachedThumb | undefined;
+    const v = await getThumb(_key(name)) as CachedThumb | undefined;
     if (v && v.blob && v.token) return v;
     return null;
   } catch (_) { return null; }
@@ -50,10 +53,15 @@ export async function readCachedThumb(name: string): Promise<CachedThumb | null>
 /** 写 cache（fire-and-forget；失败不影响主流程） */
 export async function writeCachedThumb(name: string, token: string, blob: Blob): Promise<void> {
   try {
-    await setMeta(_key(name), { token, blob, at: Date.now() });
+    await setThumb(_key(name), { token, blob, at: Date.now() });
   } catch (e) {
     console.warn("[cloud-thumb-cache] write failed:", e);
   }
+}
+
+/** 让一件作品的缩略图缓存立即作废（bytes 变了：加密/解密/revert 后）。删同 key，下次 miss 重拉。 */
+export async function invalidateCachedThumb(name: string): Promise<void> {
+  try { await deleteThumb(_key(name)); } catch (_) { /* best-effort */ }
 }
 
 /**
@@ -85,30 +93,9 @@ export async function getOrFetchCloudThumb(name: string, token: string, fileSize
   }
 }
 
-/** 调试：清空全部缩略图 cache（扫 meta store，删 cloud-thumb:* keys，返删除数） */
+/** 调试：清空全部缩略图 cache（清空 gallery-thumbs 专用 store + 扫 meta 删旧 cloud-thumb:* 孤儿，返删除数） */
 export async function clearCloudThumbCache(): Promise<number> {
-  return new Promise<number>((resolve, reject) => {
-    const req = indexedDB.open("webpaint");
-    req.onsuccess = () => {
-      const db = req.result;
-      const tx = db.transaction("meta", "readwrite");
-      const store = tx.objectStore("meta");
-      const cur = store.openCursor();
-      let n = 0;
-      cur.onsuccess = (ev: Event) => {
-        const cursor = (ev.target as IDBRequest<IDBCursorWithValue | null>).result;
-        if (!cursor) {
-          tx.oncomplete = () => { resetStats(); resolve(n); };
-          return;
-        }
-        if (String(cursor.key).startsWith(KEY_PREFIX)) {
-          cursor.delete();
-          n++;
-        }
-        cursor.continue();
-      };
-      cur.onerror = () => reject(cur.error);
-    };
-    req.onerror = () => reject(req.error);
-  });
+  const [n, legacy] = await Promise.all([clearThumbs(), deleteMetaByPrefix(LEGACY_META_PREFIX)]);
+  resetStats();
+  return n + legacy;
 }
