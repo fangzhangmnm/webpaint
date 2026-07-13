@@ -1,5 +1,11 @@
 # 薄 store 全名身份重构 — Handoff（2026-07-13）
 
+> ✅ **v397（origin/main=6d8db9e）已做**（无用户/无后向兼容，用户拍板）：**① getPeek 最小做法**（zip 尾片解析下沉进库
+>   `src/store/zip-peek.ts`，删公开 `peekTail`，新 `getPeek({bytesLength,zipEntry})`+`decryptPeek(blob)`，加密件明文缩略图仍不落 IDB）
+>   · **② 老云端 X.zip = 确认无 legacy fallback**（`_find` 只试 X.ora/X.ora.zip，代码只认最新标准，不加兼容）
+>   · **清 migration tax**（删 V001/V002 + 搬迁函数，MIGRATIONS 空、框架留待将来）。559 测绿、tsc=0。**真机仍待验**（下方清单 + getPeek 缩略图一遍）。
+>   遗留（本次未做，非阻塞）：极大 CD 文件缩略图仍退占位（不加任意偏移 range 原语）；「缩略图硬扫可能抓到图层」硬扫序未改。
+>
 > created 20260713 · as-of v396 / 2026-07-13
 > 前置：`docs/20260712-store-per-app-namespace.md`（appId 命名空间 + v390 裸名往返）、`src/store/DATA SAFETY GUIDELINE.md` §A、memory `project_webpaint_store_watchfolder`。
 
