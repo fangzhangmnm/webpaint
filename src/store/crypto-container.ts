@@ -69,6 +69,11 @@ export const PEEK_TAIL_WINDOW = 98304;
 // 加密 peek blob 的 Blob.type 标记 —— byte-range 管线/缓存层靠它区分明文与密文（不解释内容）
 export const ENC_PEEK_MIME = "application/x-sync-store-enc-peek";
 
+// 加密容器外层 zip 里「加密旁路小块」entry 的名字。getPeek 按**文件名**在 CD 里认它 =「这是加密容器」，
+//   命中即返其字节(密文)供 app 解。当前写 "peek"；"thumb" 是 v233/234 老容器兼容名（都在此列）。
+export const CONTAINER_PEEK_ENTRY = "peek";
+export const CONTAINER_PEEK_ENTRIES: readonly string[] = [CONTAINER_PEEK_ENTRY, "thumb"];
+
 const META_MAGIC = "WPMETA1\n";
 
 export interface EncPeekParsed {
@@ -207,7 +212,7 @@ export async function packContainer({ dataBytes, fileName, ext = "bin", guid, pe
   // peek 必须最后（byte-range 尾部一发命中 + 容器探测）；外层全 STORE（zipPack level:0）
   return await codec().zipPack([
     { path: guid || makeGuid(), data: payloadBytes },
-    { path: "peek", data: peekEnc },
+    { path: CONTAINER_PEEK_ENTRY, data: peekEnc },
   ]);
 }
 
@@ -242,7 +247,7 @@ export async function unpackContainer(blob: Blob | Uint8Array, password: string)
   if (_startsWith(whole, ZIP_MAGIC)) {
     try {
       const outer = await codec().zipUnpack(blob instanceof Blob ? blob : new Blob([whole as BlobPart]));
-      const g = Object.keys(outer).find((n) => n !== "peek" && n !== "thumb");   // "thumb"=v233/234 兼容
+      const g = Object.keys(outer).find((n) => !CONTAINER_PEEK_ENTRIES.includes(n));   // 非 peek/thumb = payload
       if (g && outer[g] && (_startsWith(outer[g], SEVENZ_MAGIC) || _startsWith(outer[g], ZIP_MAGIC))) {
         payload = outer[g]; guid = g;
       }

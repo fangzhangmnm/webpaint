@@ -109,6 +109,8 @@ export interface CloudSync {
   fetchMeta(name: string): Promise<FetchMetaResult | null>;
   /** 尾部 byte-range 纯读（peek 预览纯云端文件用；store.getTailBytes 的云端腿）。 */
   pullTail(name: string, n: number): Promise<{ bytes: Bytes; item: CloudItem } | null>;
+  /** 任意绝对偏移 byte-range 纯读（getPeek 的「CD / entry 溢出尾片时二次拉」用）。越界自动钳。 */
+  pullRange(name: string, offset: number, length: number): Promise<{ bytes: Bytes; item: CloudItem } | null>;
   weakOverride(name: string, bytes: Bytes, opts?: { encrypted?: boolean }): Promise<WeakOverrideResult>;
   trash(name: string): Promise<unknown>;
   restore(cloudItemId: string, name: string): Promise<unknown>;

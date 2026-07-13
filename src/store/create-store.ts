@@ -7,7 +7,7 @@ import { toU8, createSubstrate } from "./substrate.ts";
 import type { Bytes } from "./substrate.ts";
 import { createLocalHead } from "./local-head.ts";
 import { createSeal } from "./seal.ts";
-import { looksEncryptedContainer, packContainer, unpackContainer, configureCryptoCodec, scanEncPeekFromEnd, decryptPeek, PEEK_TAIL_WINDOW, ENC_PEEK_MIME, type CryptoCodec } from "./crypto-container.ts";
+import { looksEncryptedContainer, packContainer, unpackContainer, configureCryptoCodec, scanEncPeekFromEnd, decryptPeek, PEEK_TAIL_WINDOW, ENC_PEEK_MIME, CONTAINER_PEEK_ENTRIES, type CryptoCodec } from "./crypto-container.ts";
 import { createSafeResolve, type ResolveChoice } from "./safe-resolve.ts";
 import { createPush } from "./push.ts";
 import { createFreshness } from "./freshness.ts";
@@ -24,7 +24,7 @@ import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
 import { createLocalCache } from "./local-cache.ts";
 import { runStoreMigrations, storeNamespace } from "./migration.ts";
-import { scanPngFromEnd, zipEntryPngFromTail, isPng } from "./zip-peek.ts";
+import { readCentralDirectory, readEntryBytes, type PeekSource } from "./zip-peek.ts";
 
 // ── ui bundle（Model B，README.md §7）：store 在决策点回调进来 + await ──
 export interface StoreUI {
@@ -108,10 +108,12 @@ export interface RawFile {
   verifyPassword(pw: string): Promise<boolean>;                         // app 解锁循环（busy 外）便宜验：解 peek，不碰 7z
 }
 export interface ZipFile extends RawFile {
-  // getPeek：从容器尾片抓 zipEntry 的 peek 字节（zip 解析在库内部，app 不碰 zip 布局）。字节源=本地切片∨云端 byte-range。
-  //   返回：**明文** zip → PNG Blob(type=image/png)；**加密**容器 → **密文** peek Blob(type=ENC_PEEK_MIME，未解密)；无→null。
+  // getPeek：从 zip 容器里**按文件名**抓 zipEntry 的字节（zip 解析在库内部，app 不碰 zip 布局）。
+  //   取字节 schema：先拉尾片(bytesLength)→解 EOCD/CD→按名找 entry；CD/entry 溢出尾片则各一次额外 byte-range。
+  //   返回：**明文** zip → entry 原始字节 Blob(**无 type**，格式盲，app 自解释)；**加密**容器 → **密文** peek
+  //   Blob(type=ENC_PEEK_MIME，未解密)；找不到/不可达→null。
   //   加密件只返密文（**绝不在这解密**）——让 app 的缓存层原样存密文，明文缩略图永不落 IDB（安全红线）。解密走 decryptPeek。
-  //   ⚠库不假设 peek 是图——就是「zipEntry 的字节」；WebPaint 拿去 cast 成缩略图 PNG（内容知识全在 app）。
+  //   ⚠库不认内容格式——就是「按名取到的 entry 字节」；WebPaint 拿去当缩略图（内容知识全在 app）。
   getPeek(opts: { bytesLength: number; zipEntry: string }): Promise<Blob | null>;
   // 把 getPeek 返回的密文 peek blob 非交互解密成明文（内存密码；锁定/错密码→null）。已是明文(非 ENC_PEEK_MIME)→原样返。
   decryptPeek(encPeek: Blob): Promise<Blob | null>;
@@ -316,11 +318,29 @@ export function createStore(config: StoreConfig) {
     if (tryCloud && cloud.pullTail) { const t = await cloud.pullTail(name, n); return t ? new Blob([t.bytes as BlobPart]) : null; }  // 纯云端 peek：byte-range
     return null;
   }
-  // 尾片 + 文件总字节（getPeek 的 zip 解析要总字节判 CD/entry 绝对偏移是否落在尾片）。本地→切片+blob.size；纯云端→byte-range+item.size。
-  async function peekTailWithSize(name: string, n: number): Promise<{ buf: ArrayBuffer; totalSize: number } | null> {
+  // getPeek 的字节源：尾片 + 总字节 + 「按绝对偏移二次拉」。本地→Blob.slice（惰性，不碰网）；纯云端→byte-range。
+  //   range() 供库内 zip 解析在 CD/entry 溢出尾片时二次拉（本地切片 / 云端 pullRange）。
+  async function openPeekSource(name: string, n: number): Promise<PeekSource | null> {
     const blob = await local.get(name);
-    if (blob) { const b = blob instanceof Blob ? blob : new Blob([blob as BlobPart]); return { buf: await b.slice(Math.max(0, b.size - n)).arrayBuffer(), totalSize: b.size }; }
-    if (cloud.pullTail) { const t = await cloud.pullTail(name, n); return t ? { buf: t.bytes.slice().buffer as ArrayBuffer, totalSize: t.item.size || t.bytes.byteLength } : null; }   // 纯云端：byte-range，总字节取 item.size
+    if (blob) {
+      const b = blob instanceof Blob ? blob : new Blob([blob as BlobPart]);
+      const total = b.size;
+      const tail = new Uint8Array(await b.slice(Math.max(0, total - n)).arrayBuffer());
+      return { totalSize: total, tail, range: async (off, len) => new Uint8Array(await b.slice(off, off + len).arrayBuffer()) };
+    }
+    if (cloud.pullTail) {
+      const t = await cloud.pullTail(name, n);
+      if (!t) return null;
+      const tail = t.bytes instanceof Uint8Array ? t.bytes : new Uint8Array(t.bytes as ArrayBufferLike);
+      const total = t.item.size || tail.length;
+      return {
+        totalSize: total, tail,
+        range: async (off, len) => {
+          const r = cloud.pullRange ? await cloud.pullRange(name, off, len) : null;
+          return r ? (r.bytes instanceof Uint8Array ? r.bytes : new Uint8Array(r.bytes as ArrayBufferLike)) : null;
+        },
+      };
+    }
     return null;
   }
   // 把一段密文 peek（getPeek 返回的 ENC_PEEK_MIME 段）非交互解密成明文字节。非 ENC_PEEK_MIME（已明文）→ 原样返。锁定/错密码→null。
@@ -448,17 +468,24 @@ export function createStore(config: StoreConfig) {
   function file(name: string, opts: { isZip: boolean }): RawFile | ZipFile {
     const raw = makeRaw(name);
     if (!opts.isZip) return raw;
-    // getPeek：库内部从容器尾片解 zip 抓 zipEntry 的 peek 字节。硬扫末尾 PNG → 加密 MAGIC 扫 → 尾内 CD fallback。
-    //   明文 zip → PNG Blob(image/png)；加密容器 → **密文** peek Blob(ENC_PEEK_MIME，不解密，供 app 缓存层原样存密文=明文不落 IDB)；无→null。
+    // getPeek：库内部解 zip 的 central directory，**按文件名**抓 entry 字节（格式盲、内容盲）。
+    //   加密容器：外层明文 zip 带名为 CONTAINER_PEEK_ENTRIES 的旁路 entry（"peek"/老 "thumb"）——按名命中即
+    //     返其**密文**字节(ENC_PEEK_MIME，不解密，供 app 缓存层原样存密文=明文不落 IDB)。明文 ora 无此名 entry 不误命中。
+    //   明文容器：按 app 提供的 o.zipEntry 抓 → entry 原始字节 Blob(无 type)。找不到/不可达→null。
     const getPeek = async (o: { bytesLength: number; zipEntry: string }): Promise<Blob | null> => {
-      const tw = await peekTailWithSize(name, o.bytesLength);
-      if (!tw) return null;
-      const fast = scanPngFromEnd(tw.buf);                                          // 1) 硬扫末尾 PNG（自家 v137+ ora thumb 放末 + STORE → 几乎必中）
-      if (fast && isPng(fast)) return new Blob([fast as BlobPart], { type: "image/png" });
-      const encSeg = scanEncPeekFromEnd(new Uint8Array(tw.buf));                    // 2) 加密容器：MAGIC 扫 → 返密文段（不解密；app 缓存密文，解密走 decryptPeek）
-      if (encSeg) return new Blob([new Uint8Array(tw.buf).slice(encSeg.start, encSeg.end) as BlobPart], { type: ENC_PEEK_MIME });
-      const cd = await zipEntryPngFromTail(tw.buf, tw.totalSize, o.zipEntry);       // 3) 尾内 CD fallback（外部/老 deflate ora）
-      return cd ? new Blob([cd as BlobPart], { type: "image/png" }) : null;
+      const src = await openPeekSource(name, o.bytesLength);
+      if (!src) return null;
+      const entries = await readCentralDirectory(src);
+      if (!entries) return null;
+      const encEntry = entries.find((e) => CONTAINER_PEEK_ENTRIES.includes(e.name));   // 加密容器旁路块（密文）
+      if (encEntry) {
+        const bytes = await readEntryBytes(src, encEntry);
+        return bytes ? new Blob([bytes as BlobPart], { type: ENC_PEEK_MIME }) : null;
+      }
+      const target = entries.find((e) => e.name === o.zipEntry);                       // 明文：唯一依据 = app 给的文件名
+      if (!target) return null;
+      const bytes = await readEntryBytes(src, target);
+      return bytes ? new Blob([bytes as BlobPart]) : null;                             // 格式盲：不贴 MIME
     };
     const decryptPeekFn = (encPeek: Blob): Promise<Blob | null> => decryptEncPeek(name, encPeek);
     return Object.assign(raw, { getPeek, decryptPeek: decryptPeekFn }) as ZipFile;

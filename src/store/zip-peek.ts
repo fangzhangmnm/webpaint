@@ -1,144 +1,146 @@
-// 库内部深模块：从 zip(.ora) 尾片抓一个 entry 的 PNG（缩略图）。**纯逻辑**——无 store/crypto 依赖。
-//   2026-07-13 从 app 层 cloud-thumbs.ts 下沉进库（getPeek slice）：app 不再自己解 zip，
-//   只调 ZipFile.getPeek({bytesLength, zipEntry})，库内部（create-store）编排 硬扫→加密扫→CD fallback。
+// 库内部深模块：从 zip 容器里按 **文件名** 取一个 entry 的字节。**格式盲、内容盲**——
+//   不认 PNG、不认任何 app 内容格式，唯一定位依据 = caller 给的 entry 名（getPeek 的 zipEntry）。
+//   2026-07-13(v399) 重写：删掉旧「尾部硬扫 PNG magic」+「不做二次拉」的实现，改标准 zip 解析
+//   （EOCD → central directory → 按名找 entry → 按需二次 byte-range 拉），加密/明文/大文件一视同仁。
 //
-// .ora 是 zip。WebPaint 的 ora.ts 把 Thumbnails/thumbnail.png 放 zip **末** + STORE（不 deflate），
-// 故最快路径是从尾片末尾硬扫 PNG magic（自家 ora 100% 命中）。外部/老 deflate ora 退回尾内 CD 解析。
+// 取字节 schema（PeekSource 把「本地 Blob.slice」和「云端 byte-range」抽象成同一个「按绝对偏移读」）：
+//   1. 先有尾片 tail（约 80KB）：一定含 EOCD（zip 末尾结构），可能含整份 central directory(CD)、可能含目标 entry。
+//   2. 解 EOCD 得 CD 偏移/大小；CD 若不全落在尾片 → 一次额外 range 拉 CD。
+//   3. CD 里按名找目标 entry；entry 的 local header + 数据若不全落在尾片 → 一次额外 range 拉它。
+//   4. 按 zip method 解压（STORE=0 直取 / deflate=8）返回原始字节。
 //
-// 安全：出口都是 PNG blob → <img> 浏览器原生 decode，无 injection 路径。
-//   硬扫：8 字节 sig + IHDR 验证 + IEND 终止，false-match ~1/2^96。CD 解析：EOCD commentLen sanity + 输出 PNG magic 校验。
+// 关于「magic」：这里只保留 zip 格式**结构签名**（EOCD 0x06054b50 / CD 0x02014b50 / local header 0x04034b50）
+//   作解析定位与防错位守卫——那是 zip 格式内在的，不是内容/app 知识。定位「哪个 entry 是预览」纯靠文件名。
 //
 // 只支持 32-bit zip（无 zip64）——WebPaint ora / 加密外壳都在此范围。
 
-// PNG 完整 sig 8 字节（4 字节短 sig false match 多）
-const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-// IHDR chunk: length(4)=0x0000000D + "IHDR"
-const IHDR_HEAD = [0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52];
-// IEND chunk: length(4)=0 + "IEND" + crc=AE 42 60 82（IEND 数据为空 → CRC 固定）
-const IEND_TAIL = [0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82];
+const SIG_EOCD = 0x06054b50;
+const SIG_CD = 0x02014b50;
+const SIG_LOCAL = 0x04034b50;
 
-// ZIP central-directory entry（_parseCD 输出）
-interface ZipEntry {
+// local header 之后 extra 字段的余量（自家 STORE zip extra=0；外部 zip 通常也很小）。
+// 「一发拉」时多带这些字节，绝大多数情况下一次 range 就够（不必为 local header 单独发一次）。
+const LOCAL_HEADER_EXTRA_SLACK = 4096;
+
+/**
+ * 字节源抽象：库内部编排「先尾片、不够再二次拉」。
+ *   - totalSize：文件总字节（判绝对偏移是否落在尾片）。
+ *   - tail：末 N 字节（N = min(bytesLength, totalSize)）。
+ *   - range(offset,length)：按**绝对**偏移读（本地 Blob.slice / 云端 downloadRange）；不可达 → null。
+ */
+export interface PeekSource {
+  totalSize: number;
+  tail: Uint8Array;
+  range(offset: number, length: number): Promise<Uint8Array | null>;
+}
+
+// central directory 一条 entry（parseCD 输出）。
+export interface ZipDirEntry {
   name: string;
   method: number;
   compSize: number;
-  uncSize: number;
+  nameLen: number;
   localOff: number;
 }
 
-// PNG magic 校验（防错位 byte-range 取到非 PNG 数据）
-export function isPng(bytes: Uint8Array): boolean {
-  if (bytes.length < 8) return false;
-  for (let i = 0; i < 8; i++) if (bytes[i] !== PNG_SIG[i]) return false;
-  return true;
-}
+// 尾片起始的绝对偏移。
+function tailStart(src: PeekSource): number { return src.totalSize - src.tail.length; }
 
-/**
- * 从 buf 末尾向前扫一个完整 PNG：sig + IHDR + … + IEND。找不到返 null。
- * 自家 ora 的 thumbnail 100% 命中（thumbnail 放 zip 末 + STORE 不压）。
- */
-export function scanPngFromEnd(buf: ArrayBuffer): Uint8Array | null {
-  const u8 = new Uint8Array(buf);
-  const n = u8.length;
-  outer: for (let i = n - 8; i >= 0; i--) {
-    for (let k = 0; k < 8; k++) if (u8[i + k] !== PNG_SIG[k]) continue outer;
-    if (i + 16 > n) continue;                                    // 验后续 IHDR chunk（防 false-positive）
-    let ok = true;
-    for (let k = 0; k < 8; k++) if (u8[i + 8 + k] !== IHDR_HEAD[k]) { ok = false; break; }
-    if (!ok) continue;
-    for (let j = i + 16; j + 8 <= n; j++) {                      // 从 i 向后扫 IEND 终止
-      let match = true;
-      for (let k = 0; k < 8; k++) if (u8[j + k] !== IEND_TAIL[k]) { match = false; break; }
-      if (match) return u8.slice(i, j + 8);
-    }
-    return null;   // 找到 sig + IHDR 但没 IEND（PNG 不完整/跨尾片边界）→ 放弃，让 fallback 接手
+// 按绝对偏移读 len 字节：整段落在尾片 → 切尾片（零请求）；否则走 range 二次拉。len<=0 → 空。
+async function readAbs(src: PeekSource, off: number, len: number): Promise<Uint8Array | null> {
+  if (len <= 0) return new Uint8Array(0);
+  const ts = tailStart(src);
+  if (off >= ts && off + len <= src.totalSize) {
+    const s = off - ts;
+    return src.tail.subarray(s, s + len);
   }
-  return null;
+  return await src.range(off, len);
 }
 
-// 找 EOCD signature(0x06054b50)，从末尾向前扫；带 commentLen sanity 防 false-positive。返回 -1 没找到。
-function _findEOCD(buf: ArrayBuffer): number {
-  const view = new DataView(buf);
-  const maxScan = Math.min(buf.byteLength, 22 + 65535);
-  for (let i = buf.byteLength - 22; i >= buf.byteLength - maxScan; i--) {
-    if (i < 0) break;
-    if (view.getUint32(i, true) !== 0x06054b50) continue;
-    const commentLen = view.getUint16(i + 20, true);
-    if (i + 22 + commentLen === buf.byteLength) return i;        // commentLen 必须 == buf 剩余字节 - 22
+// 尾片里找 EOCD（zip 末尾结构，必在尾片，除非 comment 超尾片长——自家/常规 ora 都无 comment）。
+//   commentLen sanity（i+22+commentLen == 尾片末）防 false-positive。返回尾片内偏移，-1 未找到。
+function findEOCD(tail: Uint8Array): number {
+  if (tail.length < 22) return -1;
+  const dv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+  for (let i = tail.length - 22; i >= 0; i--) {
+    if (dv.getUint32(i, true) !== SIG_EOCD) continue;
+    const commentLen = dv.getUint16(i + 20, true);
+    if (i + 22 + commentLen === tail.length) return i;
   }
   return -1;
 }
 
-// 从 EOCD 拿 central directory location
-function _parseEOCD(buf: ArrayBuffer, eocdOffset: number): { cdSize: number; cdOffset: number; entries: number } {
-  const v = new DataView(buf, eocdOffset);
-  return { cdSize: v.getUint32(12, true), cdOffset: v.getUint32(16, true), entries: v.getUint16(10, true) };
-}
-
-// parse central directory，返回 entries 数组
-function _parseCD(buf: ArrayBuffer, cdStartInBuf: number, cdSize: number): ZipEntry[] {
-  const entries: ZipEntry[] = [];
-  let p = cdStartInBuf;
-  const end = cdStartInBuf + cdSize;
-  while (p < end) {
-    const v = new DataView(buf, p);
-    if (v.getUint32(0, true) !== 0x02014b50) break;
-    const method = v.getUint16(10, true);
-    const compSize = v.getUint32(20, true);
-    const uncSize = v.getUint32(24, true);
-    const nameLen = v.getUint16(28, true);
-    const extraLen = v.getUint16(30, true);
-    const commLen = v.getUint16(32, true);
-    const localOff = v.getUint32(42, true);
-    const name = new TextDecoder().decode(new Uint8Array(buf, p + 46, nameLen));
-    entries.push({ name, method, compSize, uncSize, localOff });
+// 解 central directory 字节（从 CD 起始的独立 buffer）→ entries。
+function parseCD(cd: Uint8Array): ZipDirEntry[] {
+  const dv = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+  const entries: ZipDirEntry[] = [];
+  let p = 0;
+  while (p + 46 <= cd.length) {
+    if (dv.getUint32(p, true) !== SIG_CD) break;
+    const method = dv.getUint16(p + 10, true);
+    const compSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const commLen = dv.getUint16(p + 32, true);
+    const localOff = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(cd.subarray(p + 46, p + 46 + nameLen));
+    entries.push({ name, method, compSize, nameLen, localOff });
     p += 46 + nameLen + extraLen + commLen;
   }
   return entries;
 }
 
-// 算 local file header 数据偏移：header 30 字节 + filename + extra
-function _localHeaderDataOffset(buf: ArrayBuffer, headerOffsetInBuf: number): number {
-  const v = new DataView(buf, headerOffsetInBuf);
-  if (v.getUint32(0, true) !== 0x04034b50) throw new Error("非法 local file header");
-  return 30 + v.getUint16(26, true) + v.getUint16(28, true);
+/** 解 central directory → entries（CD 不全在尾片时二次拉）。找不到 EOCD / CD 拉不全 → null。 */
+export async function readCentralDirectory(src: PeekSource): Promise<ZipDirEntry[] | null> {
+  const eocd = findEOCD(src.tail);
+  if (eocd < 0) return null;
+  const dv = new DataView(src.tail.buffer, src.tail.byteOffset, src.tail.byteLength);
+  const cdSize = dv.getUint32(eocd + 12, true);
+  const cdOffset = dv.getUint32(eocd + 16, true);
+  if (cdSize <= 0 || cdOffset + cdSize > src.totalSize) return null;
+  const cd = await readAbs(src, cdOffset, cdSize);
+  if (!cd || cd.length < cdSize) return null;
+  return parseCD(cd);
 }
 
-// method=0 stored / method=8 deflate。返回 Uint8Array（caller 校 magic 再包 Blob）。
-async function _decompress(rawData: Uint8Array, method: number): Promise<Uint8Array> {
-  if (method === 0) return rawData.slice();
+// method=0 STORE / method=8 deflate。其它 → null。
+async function inflate(raw: Uint8Array, method: number): Promise<Uint8Array | null> {
+  if (method === 0) return raw.slice();
   if (method === 8) {
-    if (typeof DecompressionStream === "undefined") throw new Error("DecompressionStream 不支持");
+    if (typeof DecompressionStream === "undefined") return null;
     const ds = new DecompressionStream("deflate-raw");
-    const stream = new Blob([rawData]).stream().pipeThrough(ds);
+    const stream = new Blob([raw as BlobPart]).stream().pipeThrough(ds);
     return new Uint8Array(await new Response(stream).arrayBuffer());
   }
-  throw new Error(`不支持的 zip method ${method}`);
+  return null;
 }
 
-/**
- * 尾内 CD fallback：从尾片解 zip 中央目录，按名抓 entryName 的 PNG（外部/老 deflate ora）。
- *   只在 CD + 目标 entry 都落在尾片时可行；越界/找不到/不是 PNG → null（放弃任意偏移二次拉，见下）。
- *   ⚠不做任意偏移二次拉取：薄库内容盲、不暴露 provider itemId，无法重建任意 byte-range。极大 CD 文件缩略图退占位。
- * @param buf        尾片字节
- * @param totalSize  文件总字节（本地 blob.size / 云端 item.size）——判 CD/entry 绝对偏移是否落在尾片
- * @param entryName  目标 entry 名（如 "Thumbnails/thumbnail.png"）
- */
-export async function zipEntryPngFromTail(buf: ArrayBuffer, totalSize: number, entryName: string): Promise<Uint8Array | null> {
-  // 文件比尾片大 → 尾片是 suffix，起始绝对偏移 = totalSize - 尾片长；否则整份即 buffer，偏移 0。
-  const tailStart = totalSize > buf.byteLength ? totalSize - buf.byteLength : 0;
-  const eocd = _findEOCD(buf);
-  if (eocd < 0) return null;
-  const { cdSize, cdOffset } = _parseEOCD(buf, eocd);
-  if (cdOffset < tailStart || cdOffset - tailStart + cdSize > buf.byteLength) return null;   // CD 不在尾片
-  const entry = _parseCD(buf, cdOffset - tailStart, cdSize).find((e) => e.name === entryName);
-  if (!entry) return null;
-  const start = entry.localOff;
-  const end = start + 256 + entry.compSize;   // header 预留 256 足够
-  if (start < tailStart || end - tailStart > buf.byteLength) return null;                    // entry 不在尾片
-  const entryInBuf = start - tailStart;
-  const dataOff = _localHeaderDataOffset(buf, entryInBuf);
-  const raw = new Uint8Array(buf, entryInBuf + dataOff, entry.compSize);
-  const png = await _decompress(raw, entry.method);
-  return isPng(png) ? png : null;
+/** 抓一个 entry 的解压后字节。数据不全在尾片时二次拉（常见 1 次）。任何异常 → null。 */
+export async function readEntryBytes(src: PeekSource, entry: ZipDirEntry): Promise<Uint8Array | null> {
+  // 一发拉 [localOff, +local header + slack + compSize]：整段落尾片则零额外请求；否则一次 range。
+  const guess = 30 + entry.nameLen + LOCAL_HEADER_EXTRA_SLACK + entry.compSize;
+  const chunk = await readAbs(src, entry.localOff, Math.min(guess, src.totalSize - entry.localOff));
+  if (!chunk || chunk.length < 30) return null;
+  const dv = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+  if (dv.getUint32(0, true) !== SIG_LOCAL) return null;          // 结构签名（非内容知识）：防错位偏移
+  const nameLen = dv.getUint16(26, true);
+  const extraLen = dv.getUint16(28, true);
+  const dataStart = 30 + nameLen + extraLen;
+  let raw: Uint8Array | null;
+  if (dataStart + entry.compSize <= chunk.length) {
+    raw = chunk.subarray(dataStart, dataStart + entry.compSize);
+  } else {
+    // local extra 超出 slack（罕见）→ 精确二次拉数据段。
+    raw = await readAbs(src, entry.localOff + dataStart, entry.compSize);
+  }
+  if (!raw) return null;
+  return await inflate(raw, entry.method);
+}
+
+/** 便捷：按名取一个 entry 的字节（CD → 按名找 → 读）。找不到 → null。 */
+export async function readNamedEntry(src: PeekSource, name: string): Promise<Uint8Array | null> {
+  const entries = await readCentralDirectory(src);
+  if (!entries) return null;
+  const e = entries.find((x) => x.name === name);
+  return e ? await readEntryBytes(src, e) : null;
 }

@@ -157,10 +157,11 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
   }
 
   // WebPaint 私有扩展：reference 小窗的图 + 杂项 state JSON。
-  // ⚠必须在 Thumbnails/thumbnail.png **之前** push：缩略图 byte-range 提取（cloud-thumbs.ts /
-  //   store/zip-peek.ts scanPngFromEnd）从 zip 尾部往前扫「最后一个完整 PNG」当缩略图。
-  //   reference.png 也是 PNG——若排在 thumbnail 之后、又小到落进尾片 128KB 窗口，尾扫会先扫到它，
-  //   缩略图就错显成参考小窗的图（v398 修）。故 thumbnail 必须是 zip 里最后一个 entry。
+  // Thumbnails/thumbnail.png 放**最后一个 entry**：缩略图 byte-range 提取先拉尾片 80KB，thumbnail 在尾
+  //   → 一发命中、零额外请求。故 reference.png / state.json 都排在它之前。
+  //   历史：v398 前 reference.png 被 push 在 thumbnail 之后，那时库靠「尾部硬扫最后一个 PNG」找缩略图，
+  //   会先扫到 reference.png → 缩略图错显成参考图。v399 起库改**按文件名**解 CD 取 entry，位置不再决定对错
+  //   （错图 bug 根治），但 thumbnail 放最后仍是最省 byte-range 的约定。
   if (opts.referenceImage instanceof Blob) {
     const refBytes = new Uint8Array(await opts.referenceImage.arrayBuffer());
     entries.push({ path: "webpaint/reference.png", data: refBytes });

@@ -78,44 +78,92 @@ test("[cloud-naming] 子夹 A/wall.ora → listing 身份=A/wall.ora（保留夹
   assert(paths.includes("A/wall.ora"), `子夹身份应=A/wall.ora（保留夹 + 全名），实得 ${JSON.stringify(paths)}`);
 });
 
-// getPeek：内容盲尾取 + 库内 zip 解析（cloud-only 缩略图路径）。全名身份、无 fileName 注入（薄默认恒等）。
-//   公开 peekTail 已在 getPeek 重构中移除；这里验字节源路由（本地切片 / 云端 byte-range）经硬扫返回末尾 PNG。
+// getPeek：格式盲、**按文件名**解 zip CD 取 entry（cloud-only 缩略图路径）。全名身份、无 fileName 注入（薄默认恒等）。
+//   v399：删「硬扫末尾 PNG」；改标准 zip 解析(EOCD→CD→按名找 entry→溢出尾片二次拉)。明文→entry 字节(无 type)；
+//   加密容器→外层 "peek" entry 密文(ENC_PEEK_MIME)。验字节源路由(本地切片 / 云端 byte-range + pullRange 二次拉)。
 const mkStore = (provider: ReturnType<typeof createMockProvider>) => createStore({
   appId: "test", provider,
   ui: { busy: (_l: string, fn: () => Promise<unknown>) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {} } as never,
   validateAdopt: () => true, kv: memKv(), local: createMockLocal(),
   isOnline: () => true, signedIn: () => true, skipMigration: true,   // 无 fileName/encFileName 注入 → 用薄默认（恒等 / 追加 .zip）
 });
-// 最小「末尾 PNG」：SIG(8) + IHDR_HEAD(8) + 17 填充 + IEND_TAIL(8)。硬扫 scanPngFromEnd 命中（自家 ora thumb 放末 + STORE）。
-const PNG = new Uint8Array([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,   // sig
-  0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,   // IHDR head
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,   // filler
-  0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,   // IEND tail
-]);
-const withPngTail = (prefix: string): Uint8Array => {
-  const p = new TextEncoder().encode(prefix);
-  const out = new Uint8Array(p.length + PNG.length);
-  out.set(p, 0); out.set(PNG, p.length);
-  return out;
-};
 const bytesEq = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+const ENC = new TextEncoder();
 
-test("[getPeek] 纯云端 X.ora → 经 cloud.pullTail byte-range 取尾片 + 硬扫返回末尾 PNG（不整份下载）", async () => {
+// 手搓 STORE zip（method=0）：[local header + name + data]* + [CD]* + EOCD。format-blind getPeek 需要真 zip。
+function buildStoreZip(entries: { name: string; data: Uint8Array | string }[]): Uint8Array {
+  const locals: Uint8Array[] = [], cds: Uint8Array[] = [];
+  let offset = 0;
+  for (const e of entries) {
+    const name = ENC.encode(e.name);
+    const data = typeof e.data === "string" ? ENC.encode(e.data) : e.data;
+    const lh = new Uint8Array(30 + name.length + data.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(8, 0, true);
+    lv.setUint32(18, data.length, true); lv.setUint32(22, data.length, true);
+    lv.setUint16(26, name.length, true); lv.setUint16(28, 0, true);
+    lh.set(name, 30); lh.set(data, 30 + name.length);
+    locals.push(lh);
+    const cd = new Uint8Array(46 + name.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint16(10, 0, true);
+    cv.setUint32(20, data.length, true); cv.setUint32(24, data.length, true);
+    cv.setUint16(28, name.length, true); cv.setUint32(42, offset, true);
+    cd.set(name, 46); cds.push(cd);
+    offset += lh.length;
+  }
+  const cdBytes = new Uint8Array(cds.reduce((s, a) => s + a.length, 0));
+  { let p = 0; for (const a of cds) { cdBytes.set(a, p); p += a.length; } }
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, cdBytes.length, true); ev.setUint32(16, offset, true);
+  const out = new Uint8Array(offset + cdBytes.length + eocd.length);
+  let p = 0; for (const a of locals) { out.set(a, p); p += a.length; } out.set(cdBytes, p); p += cdBytes.length; out.set(eocd, p);
+  return out;
+}
+const THUMB = ENC.encode("THUMB-opaque-bytes-not-a-png");
+const REF = ENC.encode("REFERENCE-window-image-bytes");
+// reference.png 在 thumbnail 之前（v398 修复后的真实 ora 顺序）；thumbnail 最后。
+const oraZip = () => buildStoreZip([{ name: "mimetype", data: "image/openraster" }, { name: "webpaint/reference.png", data: REF }, { name: "Thumbnails/thumbnail.png", data: THUMB }]);
+
+test("[getPeek] 纯云端 X.ora → cloud byte-range 取尾片 + 解 CD 按名返回 thumbnail entry（无 type，不整份下载）", async () => {
   const provider = createMockProvider();
-  provider._seed("note.ora", withPngTail("PK\x03\x04...zip prefix bytes...".repeat(4)));
+  provider._seed("note.ora", oraZip());
   const store = mkStore(provider);
-  const peek = await store.file("note.ora", { isZip: true }).getPeek({ bytesLength: 200, zipEntry: "Thumbnails/thumbnail.png" });
-  assert(!!peek, "纯云端应经 cloud.pullTail 取尾片、硬扫命中末尾 PNG（cloud-only 缩略图靠此）");
-  eq(peek!.type, "image/png");
-  assert(bytesEq(new Uint8Array(await peek!.arrayBuffer()), PNG), "返回的字节 = 末尾那段 PNG");
+  const peek = await store.file("note.ora", { isZip: true }).getPeek({ bytesLength: 4096, zipEntry: "Thumbnails/thumbnail.png" });
+  assert(!!peek, "纯云端应经 cloud.pullTail 取尾片、按名命中 thumbnail entry");
+  eq(peek!.type, "", "格式盲：明文 entry 不贴 MIME");
+  assert(bytesEq(new Uint8Array(await peek!.arrayBuffer()), THUMB), "按名返回 = thumbnail 字节（不是 reference）");
 });
 
-test("[getPeek] 本地缓存有 → Blob.slice 尾片（不碰网络）+ 硬扫 PNG", async () => {
+test("[getPeek] 本地缓存有 → Blob.slice 尾片（不碰网络）+ 按名取 thumbnail", async () => {
   const provider = createMockProvider();
   const store = mkStore(provider);
-  await store.file("draw.ora", { isZip: false }).save(withPngTail("local body "));
-  const peek = await store.file("draw.ora", { isZip: true }).getPeek({ bytesLength: 200, zipEntry: "Thumbnails/thumbnail.png" });
-  assert(!!peek, "本地有副本 → 切尾片、硬扫 PNG");
-  assert(bytesEq(new Uint8Array(await peek!.arrayBuffer()), PNG), "本地路径同样返回末尾 PNG");
+  await store.file("draw.ora", { isZip: false }).save(oraZip());
+  const peek = await store.file("draw.ora", { isZip: true }).getPeek({ bytesLength: 4096, zipEntry: "Thumbnails/thumbnail.png" });
+  assert(!!peek, "本地有副本 → 切尾片、按名取 thumbnail");
+  assert(bytesEq(new Uint8Array(await peek!.arrayBuffer()), THUMB), "本地路径同样按名返回 thumbnail");
+});
+
+test("[getPeek] 尾片太小装不下 CD → cloud.pullRange 二次拉，仍按名取到 thumbnail", async () => {
+  const provider = createMockProvider();
+  provider._seed("big.ora", buildStoreZip([{ name: "data/layer1.png", data: new Uint8Array(6000).fill(3) }, { name: "Thumbnails/thumbnail.png", data: THUMB }]));
+  const store = mkStore(provider);
+  // 80B 尾片只够 EOCD，装不下 CD 和大 layer entry → 库须 pullRange 二次拉 CD + entry。
+  const peek = await store.file("big.ora", { isZip: true }).getPeek({ bytesLength: 80, zipEntry: "Thumbnails/thumbnail.png" });
+  assert(!!peek, "CD/entry 溢出尾片 → 经 pullRange 二次拉仍取到（不再退占位）");
+  assert(bytesEq(new Uint8Array(await peek!.arrayBuffer()), THUMB), "二次拉后字节仍是 thumbnail");
+});
+
+test("[getPeek] 加密容器（外层 zip 有 'peek' entry）→ 按名返回密文 blob(ENC_PEEK_MIME)，不解密", async () => {
+  const provider = createMockProvider();
+  const cipher = ENC.encode("ENC-PEEK-CIPHERTEXT-frame-bytes");
+  // 加密容器外层形状：[<GUID> payload, "peek" 密文旁路]（app 拿 ENC_PEEK_MIME → 手动 decryptPeek）。
+  provider._seed("secret.ora.zip", buildStoreZip([{ name: "3f2504e0-uuid", data: new Uint8Array(40).fill(1) }, { name: "peek", data: cipher }]));
+  const store = mkStore(provider);
+  const peek = await store.file("secret.ora", { isZip: true }).getPeek({ bytesLength: 4096, zipEntry: "Thumbnails/thumbnail.png" });
+  assert(!!peek, "加密容器应按名命中外层 'peek' entry");
+  eq(peek!.type, "application/x-sync-store-enc-peek", "返回密文标记 ENC_PEEK_MIME（app 手动解）");
+  assert(bytesEq(new Uint8Array(await peek!.arrayBuffer()), cipher), "返回的是 peek entry 的密文字节（库不解密）");
 });
