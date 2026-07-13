@@ -19,7 +19,7 @@ export interface SessionPkg {
 }
 
 const DB_NAME = "webpaint";
-const DB_VERSION = 2;
+const DB_VERSION = 3;             // v3：加 gallery-thumbs store（bump 让已存在的库触发 onupgradeneeded 补建；additive、无迁移）
 const STORE_SESSIONS = "sessions";
 const STORE_META = "meta";       // 保留给 settings / theme / etc.
 const STORE_THUMBS = "gallery-thumbs";   // 图库缩略图缓存专用 store，key = store 文件身份 X.ora（cloud-thumb-cache.ts）

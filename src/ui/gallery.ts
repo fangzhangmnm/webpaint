@@ -340,7 +340,7 @@ function makeGallery(host: GalleryHost) {
         if (res.status === "conflict") { host.status(t("gal.st.encConflict", { name: item.name }), true); }
         else if (res.status === "cloud-deferred") { host.status(t("gal.st.encDeferred", { okMsg }), true); }
         else host.status(okMsg);
-        // 旧 token 的云 thumb 缓存条目立即作废（明文/密文残留都清）。缓存按 store 身份 key，走模块入口（独立 thumb DB）。
+        // 旧 token 的云 thumb 缓存条目立即作废（明文/密文残留都清）。缓存按 store 身份 key，走模块入口（不裸碰 IDB）。
         await invalidateCachedThumb(item.name);
         return true;
       }
