@@ -22,6 +22,7 @@ const DB_NAME = "webpaint";
 const DB_VERSION = 2;
 const STORE_SESSIONS = "sessions";
 const STORE_META = "meta";       // 保留给 settings / theme / etc.
+const STORE_THUMBS = "gallery-thumbs";   // 图库缩略图缓存专用 store，key = store 文件身份 X.ora（cloud-thumb-cache.ts）
 
 let _dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -33,6 +34,7 @@ function openDB(): Promise<IDBDatabase> {
       const db = (ev.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_SESSIONS)) db.createObjectStore(STORE_SESSIONS);
       if (!db.objectStoreNames.contains(STORE_META)) db.createObjectStore(STORE_META);
+      if (!db.objectStoreNames.contains(STORE_THUMBS)) db.createObjectStore(STORE_THUMBS);
       // 旧的 docs/layers stores 不主动删（如果存在），让 DevTools 翻历史；
       // 新代码不读不写它们。
     };
@@ -40,27 +42,6 @@ function openDB(): Promise<IDBDatabase> {
     req.onerror = () => reject(req.error);
   });
   return _dbPromise;
-}
-
-// 图库缩略图缓存放**独立 IDB**（不挤 webpaint DB 的 meta，也不用 bump webpaint DB 版本）。
-// 单 object store，key = store 文件身份 X.ora。见 cloud-thumb-cache.ts。
-const THUMB_DB_NAME = "webpaint-gallery-thumbs";
-const THUMB_DB_VERSION = 1;
-const STORE_THUMBS = "thumbs";
-let _thumbDbPromise: Promise<IDBDatabase> | null = null;
-
-function openThumbDB(): Promise<IDBDatabase> {
-  if (_thumbDbPromise) return _thumbDbPromise;
-  _thumbDbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(THUMB_DB_NAME, THUMB_DB_VERSION);
-    req.onupgradeneeded = (ev) => {
-      const db = (ev.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_THUMBS)) db.createObjectStore(STORE_THUMBS);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-  return _thumbDbPromise;
 }
 
 /**
@@ -168,9 +149,9 @@ export async function setMeta(key: string, value: unknown): Promise<void> {
   });
 }
 
-// gallery 缩略图缓存：独立 IDB（webpaint-gallery-thumbs），key = store 文件身份 X.ora。value 见 cloud-thumb-cache。
+// gallery 缩略图缓存：webpaint DB 的 gallery-thumbs store，key = store 文件身份 X.ora。value 见 cloud-thumb-cache。
 export async function getThumb(key: string): Promise<unknown> {
-  const db = await openThumbDB();
+  const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_THUMBS, "readonly");
     const req = tx.objectStore(STORE_THUMBS).get(key);
@@ -180,7 +161,7 @@ export async function getThumb(key: string): Promise<unknown> {
 }
 
 export async function setThumb(key: string, value: unknown): Promise<void> {
-  const db = await openThumbDB();
+  const db = await openDB();
   return new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_THUMBS, "readwrite");
     tx.objectStore(STORE_THUMBS).put(value, key);
@@ -191,7 +172,7 @@ export async function setThumb(key: string, value: unknown): Promise<void> {
 
 // 删单条缩略图缓存（作废：bytes 变了）。
 export async function deleteThumb(key: string): Promise<void> {
-  const db = await openThumbDB();
+  const db = await openDB();
   return new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_THUMBS, "readwrite");
     tx.objectStore(STORE_THUMBS).delete(key);
@@ -200,33 +181,15 @@ export async function deleteThumb(key: string): Promise<void> {
   });
 }
 
-// 清空整个缩略图 store（独立 DB → 一发 clear，返清掉的条数）。
+// 清空整个缩略图 store（返清掉的条数）。
 export async function clearThumbs(): Promise<number> {
-  const db = await openThumbDB();
+  const db = await openDB();
   return new Promise<number>((resolve, reject) => {
     const tx = db.transaction(STORE_THUMBS, "readwrite");
     const store = tx.objectStore(STORE_THUMBS);
     const countReq = store.count();
     let n = 0;
     countReq.onsuccess = () => { n = countReq.result; store.clear(); };
-    tx.oncomplete = () => resolve(n);
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-// 删 meta store 里某前缀的所有 key（v400 迁移：清 cloud-thumb-cache 旧 `cloud-thumb:` 孤儿）。返删除数。
-export async function deleteMetaByPrefix(prefix: string): Promise<number> {
-  const db = await openDB();
-  return new Promise<number>((resolve, reject) => {
-    const tx = db.transaction(STORE_META, "readwrite");
-    const cur = tx.objectStore(STORE_META).openCursor();
-    let n = 0;
-    cur.onsuccess = (ev: Event) => {
-      const cursor = (ev.target as IDBRequest<IDBCursorWithValue | null>).result;
-      if (!cursor) return;
-      if (String(cursor.key).startsWith(prefix)) { cursor.delete(); n++; }
-      cursor.continue();
-    };
     tx.oncomplete = () => resolve(n);
     tx.onerror = () => reject(tx.error);
   });

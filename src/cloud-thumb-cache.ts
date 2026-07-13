@@ -1,8 +1,8 @@
-// 云端 ora thumbnail 的 IDB 缓存（v137；store-cutover 2026-07-12 重锚；v400 独立 DB + key 对齐 store 身份）
+// 云端 ora thumbnail 的 IDB 缓存（v137；store-cutover 2026-07-12 重锚；v401 专用 store + key 对齐 store 身份）
 //
-// 存法：**独立 IDB `webpaint-gallery-thumbs`**（自己一个 database，不挤 webpaint DB 的 meta 大篮子，也不用 bump webpaint DB 版本），
+// 存法：webpaint DB 的 **gallery-thumbs 专用 object store**（不挤 meta 大篮子），
 //   key = store 文件身份 = sessionFileName(裸名) = 全名 X.ora（与 cloud-thumbs.ts 传给 store.file 的 key 逐字一致）。
-//   value = { token, blob, at }。改前：存 webpaint DB 的 meta store、key=`cloud-thumb:<裸名>`（v400 迁移，旧孤儿由 clearCloudThumbCache 清）。
+//   value = { token, blob, at }。
 //   - token = 新鲜度戳（cloud.lastModifiedDateTime 优先，退 size）。token 变 = 文件改了 → 重拉 + 覆盖同 key。
 //   - token 同 = blob 仍有效，直接用。
 //
@@ -17,11 +17,9 @@
 //
 // 不在这处理：网络拉取本身 / IntersectionObserver / 并发限流（caller 负责）
 
-import { getThumb, setThumb, deleteThumb, clearThumbs, deleteMetaByPrefix } from "./storage.ts";
+import { getThumb, setThumb, deleteThumb, clearThumbs } from "./storage.ts";
 import { fetchOraThumbnail } from "./cloud-thumbs.ts";
 import { sessionFileName } from "./config.ts";
-
-const LEGACY_META_PREFIX = "cloud-thumb:";   // v400 前 thumb 存 meta store 的 key 前缀（迁移时清孤儿）
 
 // cache key = store 文件身份（sessionFileName(裸名)=全名 X.ora）；专用 store 即命名空间，key 无需前缀。caller 仍传裸名。
 function _key(name: string): string { return sessionFileName(name); }
@@ -93,9 +91,9 @@ export async function getOrFetchCloudThumb(name: string, token: string, fileSize
   }
 }
 
-/** 调试：清空全部缩略图 cache（清空 gallery-thumbs 专用 store + 扫 meta 删旧 cloud-thumb:* 孤儿，返删除数） */
+/** 调试：清空全部缩略图 cache（清空 gallery-thumbs store，返删除数） */
 export async function clearCloudThumbCache(): Promise<number> {
-  const [n, legacy] = await Promise.all([clearThumbs(), deleteMetaByPrefix(LEGACY_META_PREFIX)]);
+  const n = await clearThumbs();
   resetStats();
-  return n + legacy;
+  return n;
 }
