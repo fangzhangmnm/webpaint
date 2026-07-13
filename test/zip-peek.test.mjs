@@ -80,6 +80,28 @@ function buildStoreZip(entries) {
 const DUMMY = (i) => ({ name: `layers/dummy${i}.png`, data: new Uint8Array(32).fill(i) });
 const zipWith = (thumbData) => buildStoreZip([{ name: "Thumbnails/thumbnail.png", data: thumbData }, DUMMY(1), DUMMY(2), DUMMY(3), DUMMY(4)]);
 
+// ── v398 回归：缩略图 vs 参考小窗图的尾扫碰撞 ──
+// scanPngFromEnd 是名字盲的——它返回「zip 里物理位置最靠后的完整 PNG」当缩略图。ora.ts 的
+//   entry 顺序约定 Thumbnails/thumbnail.png 必须是最后一个 entry；曾把 webpaint/reference.png
+//   append 在 thumbnail 之后（v397 及以前），导致有参考图的画作缩略图错显成参考图（见 ora.ts 注释）。
+// 两个 PNG 用不同 filler 字节区分。
+const PNG2 = concat(PNG.slice(0, 16), new Uint8Array(17).fill(0x55), PNG.slice(33));   // 同结构，filler=0x55
+describe("zip-peek › scanPngFromEnd 缩略图/参考图碰撞（v398 回归）", () => {
+  it("修复后顺序：reference 在前、thumbnail 在后 → 尾扫返回 thumbnail", () => {
+    // 真实 ora 尾部：… reference.png（参考图）, thumbnail.png（缩略图，最后）+ CD/EOCD 尾巴
+    const refImg = PNG2, thumb = PNG;
+    const buf = concat(refImg, thumb, new Uint8Array([9, 9, 9, 9])).buffer;   // 尾 4 字节 ≈ CD/EOCD
+    const out = scanPngFromEnd(buf);
+    assert(!!out && bytesEq(out, thumb), "缩略图是最后一个 PNG → 尾扫命中缩略图，不是参考图");
+  });
+  it("旧 bug 顺序：thumbnail 在前、reference 在后 → 尾扫误返回 reference（记录 bug 机制）", () => {
+    const thumb = PNG, refImg = PNG2;
+    const buf = concat(thumb, refImg, new Uint8Array([9, 9, 9, 9])).buffer;
+    const out = scanPngFromEnd(buf);
+    assert(!!out && bytesEq(out, refImg), "尾扫名字盲 → 返回物理靠后的参考图（故 thumbnail 必须排最后）");
+  });
+});
+
 describe("zip-peek › zipEntryPngFromTail（尾内 CD fallback，真 STORE zip）", () => {
   it("按名抓到目标 entry 的 PNG", async () => {
     const zip = zipWith(PNG);

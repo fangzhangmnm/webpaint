@@ -156,10 +156,11 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
     entries.push({ path: `data/layer${L.id}.png`, data: png });
   }
 
-  // thumbnail 末尾（云端 byte-range 优化）
-  entries.push({ path: "Thumbnails/thumbnail.png", data: thumbPng as Uint8Array });
-
   // WebPaint 私有扩展：reference 小窗的图 + 杂项 state JSON。
+  // ⚠必须在 Thumbnails/thumbnail.png **之前** push：缩略图 byte-range 提取（cloud-thumbs.ts /
+  //   store/zip-peek.ts scanPngFromEnd）从 zip 尾部往前扫「最后一个完整 PNG」当缩略图。
+  //   reference.png 也是 PNG——若排在 thumbnail 之后、又小到落进尾片 128KB 窗口，尾扫会先扫到它，
+  //   缩略图就错显成参考小窗的图（v398 修）。故 thumbnail 必须是 zip 里最后一个 entry。
   if (opts.referenceImage instanceof Blob) {
     const refBytes = new Uint8Array(await opts.referenceImage.arrayBuffer());
     entries.push({ path: "webpaint/reference.png", data: refBytes });
@@ -168,6 +169,9 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
     const jsonText = JSON.stringify(opts.webpaintState);
     entries.push({ path: "webpaint/state.json", data: jsonText });
   }
+
+  // thumbnail 末尾（云端 byte-range 优化）——必须是最后一个 entry，见上方 reference.png 注释。
+  entries.push({ path: "Thumbnails/thumbnail.png", data: thumbPng as Uint8Array });
 
   return await zipPack(entries);
 }
