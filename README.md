@@ -333,14 +333,56 @@ bash scripts/build.sh  # 跑 esbuild → 生成 hash 文件名进 dist/（首次
 
 这种"我提需求、AI 写代码"的 Modding 自由度，正是开源相对闭源软件最大的优势。
 
+#### 数据 schema（存储结构约定）
+
+> **改 store 库代码时，动任何持久化数据结构（IndexedDB / localStorage），尤其是新建字段，必须先显式经过用户同意。** 新建字段时也想一下：它该进 `appId.databaseId.internal` 命名空间，还是放别的地方。
+
+**所有 IndexedDB 收到 `appId.databaseId`**：
+- file 放 `appId.databaseId/files/`
+- 删掉的 file 放 `appId.databaseId/trash/`
+- backup file 放 `appId.databaseId/backup/`
+- collection 放 `appId.databaseId/collections/`
+
+**所有 localStorage 收到 `appId.databaseId`**：
+- schema 版本放在 `appId.databaseId.database-version`
+- 每个文件的 meta 收到 `appId.databaseId.files`（name = path = identity = IDB key，带后缀名，加密时对应云端文件名加 `.zip`）
+  - `appId.databaseId.files.etag:<name>`
+  - `appId.databaseId.files.dirty:<name>`
+- collection 的 meta 收到 `appId.databaseId.collections`（collection-name 是合法文件名，不带后缀名）
+  - `appId.databaseId.collections.etag:<collection-name>`
+  - `appId.databaseId.collections.dirty:<collection-name>`
+- settings 放 `appId.databaseId.settings`（包括 localSettings 和 syncedSettings 的 cache）
+- 杂的东西收到 `appId.databaseId.internal`
+  - `appId.databaseId.internal.pending_new_folders`
+  - `appId.databaseId.internal.pending_deletions`
+  - `appId.databaseId.internal.pending_uploads`
+
+**MSAL 的凭证**放在 localStorage 的 `msal.` 下，不同子项目共享——msal 也算一个 appId，以后加别的 provider 也用那个 provider 的 appId。
+
+**Provider（云端网盘）的文件格式**：
+- path 的根文件对应 appfolder 的根 `/`，没有类似 `papers/` 的二级目录
+- trash 放 `/.trash/`
+- backup 放 `/.backup/`
+- 其他的东西收到 `/.<appId>/`
+  - collections 放 `/.<appId>/<collection-name>.json`，不要和 settings 撞车
+  - syncedSettings 放 `/.<appId>/settings.json`，它技术上就是复用了一个 collection；user-facing 一侧 create collection 时 `settings` 作为保留名禁用
+- watchFolder / listFolder 过滤所有带 `.` 的文件夹，文件也过滤带 `.` 的；实现在 listFolder 层，用一个专门的模块内部函数 `isHidden` 收成深模块
+
+**其他约定**：
+- store 对象 ctor 收 `appId` + `databaseId`
+- provider id（msal）由 provider 实现层自己管理
+- kv 自动加 `appId.databaseId.` 前缀
+- IDB 里各个子分区抽成深模块收一下腰，不过 file / trash / backup 可以放一起
+- settings 刷新时机：启动 hydrate 完后台拉一次，app 在 focus / visible / online 时各拉一次；per-key last-write-win
+
 #### 配置自己的 OneDrive（部署到公网时）
 
-OneDrive 同步用的是 **Microsoft Entra (Azure AD)** OAuth，我的 client id 写死在 `src/config.js`。你 fork 之后部署到自己的域名、想用同步：
+OneDrive 同步用的是 **Microsoft Entra (Azure AD)** OAuth，我的 client id 写死在 `src/config.ts`。你 fork 之后部署到自己的域名、想用同步：
 
 1. 去 https://portal.azure.com → Microsoft Entra ID → 应用注册
 2. 新建一个 SPA 应用，加 Redirect URI = 你部署的 URL（例如 `https://yourname.github.io/webpaint/`）
 3. 拿到 Application (client) ID
-4. 改 `src/config.js` 里的 `MSAL_CLIENT_ID` 换成你自己的
+4. 改 `src/config.ts` 里的 `CLIENT_ID` 换成你自己的
 
 不绑 OneDrive 的话，所有功能都还在，只是没法多端同步。
 

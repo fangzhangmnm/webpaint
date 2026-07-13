@@ -16,7 +16,7 @@ import { createIdentity } from "./identity.ts";
 import { createTrash } from "./trash.ts";
 import { createOffload } from "./offload.ts";
 import { createReconcile } from "./reconcile.ts";
-import { createCollection, type Collection } from "./collection.ts";
+import { createCollection, emptyCollectionBytes, type Collection } from "./collection.ts";
 import { createListing, type ListContext, type FolderSnapshot } from "./listing.ts";
 import { createUploadReplay, type UploadReplayPolicy } from "./upload-queue.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
@@ -204,6 +204,7 @@ export function createStore(config: StoreConfig) {
   }
   async function pushRemoteFrame(folder: string): Promise<void> {
     if (!folderWatchers.has(folder)) return;
+    void ensureScaffold();   // store 自管 scaffold 的首次云成功点：开库时 auth 未就绪跳过的，这里（app 订阅、auth 就绪后）补建
     await reconcileMod.reconcileFolder(folder).catch((e) => ui.reportError(e));   // 「看到夹才 reconcile」：惰性、非静默、仅本夹
     try { emitFolder(folder, await listing.listFolder(folder, ctxNow())); } catch (e) { ui.reportError(e); }
   }
@@ -503,6 +504,30 @@ export function createStore(config: StoreConfig) {
   }
 
   // ── collection / settings ──
+  // ── collection scaffold（开库即 idempotent 建云端 `.${appId}/` 夹 + `.${appId}/<name>.json`）───────────────
+  //   用户要求：开库时（第一次云成功）就把 collection/settings 的云端文件建出来（哪怕空），离线跳过、回线 drainFolders 补。
+  //   syncedSettings 恒建（.${appId}/settings.json）；app 一旦 store.collection(name)（如将来接 brush-rack）→ 那份也建。
+  //   **store 自管，非 app 调**（app 不 ensure、不知情）：① 开库（首次创建/访问 store 对象）即 fire 一次——但构造时
+  //   auth/online 常还没就绪（signedIn=false）→ 早退；② store 自己的**首次云成功点**（watchFolder 远端帧，app 订阅、
+  //   auth 就绪后跑）再补。idempotent：ensureFolder(`.${appId}`) + 每个 collection 名 fetchMeta 无 → push 空信封建出来
+  //   （baseEtag:null → conflictBehavior:fail，**绝不覆盖已有**）；每名建好记进 _scaffoldEnsured，全建好即封顶不再打扰。
+  const _scaffoldNames = new Set<string>();
+  const _scaffoldEnsured = new Set<string>();
+  async function ensureScaffold(): Promise<void> {
+    if (!isOnline() || !signedIn() || _scaffoldEnsured.size >= _scaffoldNames.size) return;
+    await migrationReady;
+    try { await collectionsCloud.ensureFolder(`.${appId}`); } catch (e) { ui.reportError(e); return; }   // 夹建不出（离线/失败）→ 整轮下次再试
+    for (const name of _scaffoldNames) {
+      if (_scaffoldEnsured.has(name)) continue;
+      try {
+        if (!(await collectionsCloud.fetchMeta(name).catch(() => null)))
+          await collectionsCloud.push(name, emptyCollectionBytes(), { baseEtag: null });   // 云端没这文件才建空信封
+        _scaffoldEnsured.add(name);
+      } catch (e) { ui.reportError(e); }   // 撞名（别端已建）/离线 → 不 mark，下次 fetchMeta 命中即收敛
+    }
+  }
+  function registerScaffold(name: string): void { _scaffoldNames.add(name); void ensureScaffold(); }
+
   const RESERVED_COLLECTIONS = new Set(["settings"]);   // syncedSettings 占用（云端 .${appId}/settings.json）
   function assertValidCollectionName(name: string): void {
     // collection name = 合法文件名、不带后缀（`brush-rack`、`reading-state`）；store 映射云端时自己追加 `.json`。
@@ -511,15 +536,16 @@ export function createStore(config: StoreConfig) {
   }
   function collection<T extends object>(name: string, opts: { manual?: boolean } = {}): Collection<T> {
     assertValidCollectionName(name);
-    return createCollection<T>({ cloud: collectionsCloud, name, local: collectionLocal, manual: opts.manual });   // collections 实例 + collections 分区缓存
+    const coll = createCollection<T>({ cloud: collectionsCloud, name, local: collectionLocal, manual: opts.manual });   // collections 实例 + collections 分区缓存
+    registerScaffold(name);   // app 一旦建了这 collection（如将来接 brush-rack）→ store 自动在云端 idempotent 建出 .${appId}/<name>.json
+    return coll;
   }
   const localSettings: LocalSettings = createLocalSettings(kv);
-  // syncedSettings：**恒有**——保留名 collection `settings`（走 collections 实例，云端 `.${appId}/settings.json`）。
+  // syncedSettings：**恒有**——保留名 collection `settings`（走 collections 实例，云端 `.${appId}/settings.json`，开库 idempotent 建出）。
   //   散键裸值读面在 localStorage（kv），collection 只当后台 LWW 传输引擎；app 调 init()/refresh() 驱动拉云 → 投影回散键。
-  const syncedSettings: SyncedSettings = createSyncedSettings(
-    createCollection<SettingItem>({ cloud: collectionsCloud, name: "settings", local: collectionLocal }),
-    kv,
-  );
+  const _settingsColl = createCollection<SettingItem>({ cloud: collectionsCloud, name: "settings", local: collectionLocal });
+  const syncedSettings: SyncedSettings = createSyncedSettings(_settingsColl, kv);
+  registerScaffold("settings");   // 开库即 idempotent 建 .${appId}/settings.json
 
   return {
     file,

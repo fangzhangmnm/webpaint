@@ -46,6 +46,9 @@ export interface Collection<T extends object> {
 const encode = (f: FolderEnvelope): Uint8Array => new TextEncoder().encode(JSON.stringify(f));
 const decode = (text: string): FolderEnvelope | null => parseFolderBlob(text);
 
+// store scaffold 用：一份**空** collection 的字节（与 encode 同格式 → decode 可读回）。开库时 store 拿它 idempotent 建空云文件。
+export function emptyCollectionBytes(): Uint8Array { return encode(emptyFolder()); }
+
 // FolderItem（内部，带 uat）→ 对外 item（剥掉 uat，留 id + payload）。
 function toItem<T extends object>(e: FolderItem): CollectionItem<T> {
   const { uat: _uat, ...rest } = e;

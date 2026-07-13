@@ -110,6 +110,22 @@ test("[narrow-waist] file 与同名 collection 的 etag 落不同前缀（两实
   assert(!!(await provider.getItemByPath("dup.ora")), "文件落 approot 根 dup.ora");
 });
 
+// ── store 自管 scaffold：开库 idempotent 建 .wp/settings.json + collection 建 .wp/<name>.json ──
+test("[narrow-waist] store 自管 scaffold：开库建 .wp/settings.json；建 collection → 建 .wp/<name>.json（不覆盖已有）", async () => {
+  const provider = createMockProvider();
+  const { store } = mkStore(dumpKv(), provider);
+  store.collection("brush-rack");                        // app 建 collection → store 自动在云端建出文件
+  await new Promise((r) => setTimeout(r, 30));           // 等 fire-and-forget scaffold 落地
+  assert(!!(await provider.getItemByPath(".wp/settings.json")), "开库应 idempotent 建 .wp/settings.json");
+  assert(!!(await provider.getItemByPath(".wp/brush-rack.json")), "建 collection 应建 .wp/brush-rack.json");
+  const before = await provider.getItemByPath(".wp/settings.json");
+  // 二次开库同 provider → 已存在不重建、不覆盖（etag 不变）
+  mkStore(dumpKv(), provider);
+  await new Promise((r) => setTimeout(r, 30));
+  const after = await provider.getItemByPath(".wp/settings.json");
+  eq(after!.eTag, before!.eTag, "已存在的 settings.json 不被空信封覆盖（etag 不变）");
+});
+
 // ── cloud-sync backupFolder 默认 .backup（weakOverride loser 落 .backup/）─────────
 test("[narrow-waist] cloud-sync backupFolder 默认 .backup（weakOverride 把云端 loser stash 进 .backup/）", async () => {
   const provider = createMockProvider();
