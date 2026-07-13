@@ -62,12 +62,13 @@ export const setLastSessionSignedIn = (v: unknown) => store.localSettings.set("l
 // ---- gallery 数据：统一列举（local ∪ cloud，每项带 syncState）。reconcile 已进库（watchFolder 惰性 per-folder）。----
 const _CLOUD_STATES = new Set(["cloud-only", "synced", "unpushed", "newer-on-cloud", "conflict"]);   // 有云版的 syncState
 // Item{path,syncState} → 旧 GalleryItem{name,local,cloud,dirty,ghost}（gallery-view-model 兼容；派生自 syncState）。
-function itemToG(it: { path: string; syncState: string; lastModified?: number }) {
+function itemToG(it: { path: string; syncState: string; lastModified?: number; size?: number }) {
   const name = stripSessionExt(it.path);
   return {
     name,
     local: isCached(it.syncState as never) ? { name } : null,
-    cloud: _CLOUD_STATES.has(it.syncState) ? { path: it.path, name, lastModifiedDateTime: it.lastModified ? new Date(it.lastModified).toISOString() : undefined } : null,
+    // size 从 store Item 带出来（listing 已从云端 c.size 解析）→ 图库显真尺寸而非 0 B。
+    cloud: _CLOUD_STATES.has(it.syncState) ? { path: it.path, name, size: it.size, lastModifiedDateTime: it.lastModified ? new Date(it.lastModified).toISOString() : undefined } : null,
     dirty: isDirty(it.syncState as never),
     ghost: it.syncState === "ghost",
   };
