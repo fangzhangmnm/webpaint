@@ -29,6 +29,7 @@ import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { sessionNameConflict } from "./session-name.ts";
 import { decodeOraToDoc } from "./ora.ts";
+import { sessionFileName } from "./config.ts";   // 边界：裸 session 名 → 库全名（薄库身份=X.ora）
 import { compressPixelSnap } from "./pixel-edit.ts";
 import { t } from "./i18n/index.ts";
 import type { Layer, PaintDoc } from "./doc.ts";
@@ -132,7 +133,7 @@ export function initTopbarMenu(ctx: AppContext) {
     const name = session.name;
     // synced（无可存可推）→ 按钮兼作「刷新云端态」（ADR-0017，点一下 = 现场查云 + 干净则快进）；否则正常存/推。
     if (name && name !== "未命名" && isSignedIn() && !session.dirty) {
-      _store.refresh(name).then(() => updateSaveStatus()).catch(() => {});   // synced：点=现场查云干净快进（freshness 进库）
+      _store.refresh(sessionFileName(name)).then(() => updateSaveStatus()).catch(() => {});   // synced：点=现场查云干净快进（freshness 进库）。边界转全名（薄库身份=X.ora，全 app 一致）。
     } else {
       session.saveAndPush();
     }

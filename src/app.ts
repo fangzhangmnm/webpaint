@@ -31,6 +31,7 @@ import type { BrushRackDeps } from "./brush-rack.ts";
 import { PwaShell } from "./pwa-shell.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
 import { setPasswordPrompt } from "./crypto-state.ts";   // 加密：密码弹窗注入（ADR-0012）
+import { sessionFileName } from "./config.ts";   // 边界：裸 session 名 → 库全名（薄库身份=X.ora）
 import { els } from "./els.ts";
 import type { AppContext } from "./app-context.ts";
 import { makeDialControls } from "./dial-controls.ts";   // dial 写入（setSize/setOpacity）+ 当前 dial + 键盘 [ ] 调粗
@@ -366,7 +367,7 @@ window.addEventListener("online", async () => {
   updateCloudAuthUI();
   if (isSignedIn()) _store.drainDeleteQueue().catch((e) => console.warn("drainDeleteQueue", e));   // N3：重连重放离线删队列
   if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
-  if (isSignedIn() && session.name) _store.refresh(session.name).catch(() => {});   // 回线：事件驱动干净快进（freshness 进库；无 idle-lock）
+  if (isSignedIn() && session.name) _store.refresh(sessionFileName(session.name)).catch(() => {});   // 回线：事件驱动干净快进（freshness 进库；无 idle-lock）。边界转全名。
 });
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
 
@@ -419,5 +420,5 @@ new PwaShell({
     editMode.applyPendingTransient();
     await session.save();   // saveNow 内含 blank/dirty 守卫（es.flushLocal 不脏 no-op）
   },
-  onForeground: () => { if (isSignedIn() && session.name) _store.refresh(session.name).catch(() => {}); },
+  onForeground: () => { if (isSignedIn() && session.name) _store.refresh(sessionFileName(session.name)).catch(() => {}); },   // 边界转全名
 }).init();

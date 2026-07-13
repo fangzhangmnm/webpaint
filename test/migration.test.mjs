@@ -6,7 +6,7 @@ import {
   parseSchemaVersion, needsMigration,
   classifyDirty, JRP_DIRTY_PREFIXES,
   remapLocalKey, remapSessionRecord,
-  migrateKv, runMigrations, MIGRATIONS, CURRENT_SCHEMA, SCHEMA_KEY,
+  migrateKv, migrateIdentityKv, runMigrations, MIGRATIONS, CURRENT_SCHEMA, SCHEMA_KEY,
 } from "../src/store/migration.ts";
 
 // 内存 MigrationKv（含 keys 枚举）。
@@ -164,5 +164,77 @@ describe("migration › runMigrations 编排", () => {
   it("注册表 version 单调 + 当前戳 = 表尾", () => {
     for (let i = 1; i < MIGRATIONS.length; i++) assert(MIGRATIONS[i - 1].version < MIGRATIONS[i].version, "version 应单调递增");
     eq(MIGRATIONS[MIGRATIONS.length - 1].version, CURRENT_SCHEMA, "CURRENT_SCHEMA = 注册表最后一条");
+  });
+});
+
+describe("migration › v002 身份 裸名→全名（薄库 X→X.ora）", () => {
+  // 测试用简化 toFull（append；真 app 注入 = sessionFileName，含 sanitize）。已 .ora 结尾 → null（幂等）。
+  const toFull = (n) => /\.ora$/i.test(n) ? null : `${n}.ora`;
+  const EP = "webpaint.sync.etag:";
+  const DP = { collection: "webpaint.sync.dirty:", workFile: "webpaint.head.dirty:" };
+
+  it("etag/dirty 段 裸→全名（值保留、旧键删）", () => {
+    const kv = memMkv({
+      "webpaint.sync.etag:20260528-01": "eA",
+      "webpaint.head.dirty:20260528-01": "1",           // 工作文件脏（红线：必须跟着改名）
+      "webpaint.sync.etag:A/wall": "eB",                // 子夹路径
+    });
+    migrateIdentityKv(kv, EP, DP, toFull);
+    const d = kv._dump();
+    eq(d["webpaint.sync.etag:20260528-01.ora"], "eA");
+    eq(d["webpaint.head.dirty:20260528-01.ora"], "1", "红线：dirty 跟着改名，否则未推副本被当 clean 驱逐→丢编辑");
+    eq(d["webpaint.sync.etag:A/wall.ora"], "eB", "子夹路径保留 + 追加 .ora");
+    eq("webpaint.sync.etag:20260528-01" in d, false, "旧裸名 etag 键删");
+    eq("webpaint.head.dirty:20260528-01" in d, false, "旧裸名 dirty 键删");
+  });
+
+  it("collection dirty 段（sync.dirty:）也改名", () => {
+    const kv = memMkv({ "webpaint.sync.dirty:draft": "1" });
+    migrateIdentityKv(kv, EP, DP, toFull);
+    eq(kv._dump()["webpaint.sync.dirty:draft.ora"], "1");
+  });
+
+  it("幂等：已全名（.ora 结尾）→ toFull 返 null → 不动（崩溃重跑安全）", () => {
+    const kv = memMkv({ "webpaint.sync.etag:X.ora": "e", "webpaint.head.dirty:X.ora": "1" });
+    const before = JSON.stringify(kv._dump());
+    migrateIdentityKv(kv, EP, DP, toFull);
+    eq(JSON.stringify(kv._dump()), before, "全名键不再追加 .ora（防重入）");
+  });
+
+  it("无关键不碰（schema/pending/其它前缀）", () => {
+    const kv = memMkv({ "webpaint.store.schema": "v001-x", "webpaint.folders.pending": "[]", "other:k": "v" });
+    migrateIdentityKv(kv, EP, DP, toFull);
+    const d = kv._dump();
+    eq(d["webpaint.store.schema"], "v001-x"); eq(d["webpaint.folders.pending"], "[]"); eq(d["other:k"], "v");
+  });
+
+  it("名字含 : 正确提取（slice 非 split）", () => {
+    const kv = memMkv({ "webpaint.head.dirty:a:b": "1" });
+    migrateIdentityKv(kv, EP, DP, toFull);
+    eq(kv._dump()["webpaint.head.dirty:a:b.ora"], "1");
+  });
+
+  it("编排：v001-stamped 设备 → 只跑 v002，kv 半生效 + 盖到 v002", async () => {
+    const kv = memMkv({
+      [SCHEMA_KEY]: "v001-20260709",           // 已在 v001（裸名、sync./head. 前缀）
+      "webpaint.sync.etag:pic": "e",
+      "webpaint.head.dirty:pic": "1",
+    });
+    // 不传 dbName：IDB 半（migrateIdentityIdb）真机验（node 无真 IDB）；此处只验 kv 半 + 编排盖戳。
+    await runMigrations({
+      kv, collectionNames: new Set(), migrateIdb: async () => {},
+      schemaKey: SCHEMA_KEY, newEtagPrefix: EP, dirtyPrefixes: DP, toFull,
+    });
+    const d = kv._dump();
+    eq(d["webpaint.sync.etag:pic.ora"], "e", "v002 kv 段生效");
+    eq(d["webpaint.head.dirty:pic.ora"], "1");
+    eq(kv.get(SCHEMA_KEY), CURRENT_SCHEMA, "盖到 v002");
+  });
+
+  it("编排：无 toFull → v002 身份改名 no-op（身份本就全名的 app）仍盖戳", async () => {
+    const kv = memMkv({ "webpaint.sync.etag:paper.pdf": "e" });
+    await runMigrations({ kv, collectionNames: new Set(), migrateIdb: async () => {}, schemaKey: SCHEMA_KEY, newEtagPrefix: EP, dirtyPrefixes: DP });
+    eq(kv._dump()["webpaint.sync.etag:paper.pdf"], "e", "无 toFull → 不动身份");
+    eq(kv.get(SCHEMA_KEY), CURRENT_SCHEMA, "仍盖到 v002（版本前进）");
   });
 });

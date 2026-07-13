@@ -132,9 +132,9 @@ export function createListing(cfg: ListingCfg) {
 
     const prefix = folder ? `${folder}/` : "";
     const cloudMap = new Map<string, { eTag: string; size: number; lastModified?: number }>();
-    // 身份 = **session name（c.name = toName 去扩展名）**，不是 c.path（云端文件名含 .ora/.zip）。
-    //   本地 key（appKeys / 迁移）也是裸 session name → 两轴按同一 key 归一；否则 cloud X.ora 与 local X 分裂成两项、
-    //   且 open(裸名) 与 cloud X.ora 对不上（=0B/打开空白的根因）。fileName/encFileName 负责裸名→云端名的往返。
+    // 身份 = **全名（c.name = toName(云端文件名)）**：明文 X.ora 恒等、加密 X.ora.zip 去尾 .zip → 都归一到 X.ora。
+    //   本地 key（appKeys / 迁移后）也是全名 X.ora → 两轴按同一 key 归一；否则 cloud 与 local 分裂成两项、open 对不上
+    //   （=0B/打开空白的根因，v390）。app 在边界用 sessionFileName 把裸 session 名转全名；encFileName 负责加密件的 .zip 追加。
     for (const c of cloudRes?.files ?? []) cloudMap.set(c.name, { eTag: c.eTag, size: c.size, lastModified: toMs(c.lastModifiedDateTime) });
 
     // 本地：只看本夹前缀下的 key；直属文件 → 参与列举，更深的 → 记 immediate 子夹。

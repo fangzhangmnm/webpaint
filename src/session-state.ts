@@ -19,7 +19,7 @@ import type { Layer } from "./doc.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
-import { stripSessionExt } from "./config.ts";
+import { stripSessionExt, sessionFileName } from "./config.ts";
 import { serializedToolStatePatch } from "./editor-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
@@ -68,7 +68,10 @@ const _phase = reactive<{ current: "gallery" | "editing" | "lazyblank" }>({ curr
 function _recomputePhase() { _phase.current = !_activeSessionName ? "gallery" : _isLazyBlankSession ? "lazyblank" : "editing"; }
 
 const _enc = reactive<{ encrypted: boolean }>({ encrypted: false });
-const _file = (name: string) => _store.file(name, { isZip: true });   // WebPaint work-file = ora-zip 容器（有 peek）
+// 边界（薄库身份=全名）：app 内部 _activeSessionName 是**裸** session 名；跨到库/editor-session 前统一 sessionFileName
+//   转全名（X→X.ora）。加密件 .zip 由库内部据字节态翻转，app 只传明文全名。OUT 侧（itemToG）用 stripSessionExt 还原。
+const toFull = (name: string) => sessionFileName(name);
+const _file = (name: string) => _store.file(toFull(name), { isZip: true });   // WebPaint work-file = ora-zip 容器（有 peek）
 async function _refreshEncrypted() {
   try { _enc.encrypted = _activeSessionName ? await _file(_activeSessionName).isEncrypted() : false; }
   catch { _enc.encrypted = false; }
@@ -153,7 +156,7 @@ function adoptModel(loaded: LoadedDoc) {
 function adoptLoadedDoc(loaded: LoadedDoc, name: string) {
   adoptModel(loaded);
   _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase();
-  es.adopted(name);
+  es.adopted(toFull(name));
   _docLastSavedAt = Date.now(); updateSaveStatus(); _refreshEncrypted();
 }
 function adoptLoadedDocWithOpts(loaded: LoadedDoc, name: string, _opts: { skipCheckpoint?: boolean }) { adoptLoadedDoc(loaded, name); }
@@ -259,7 +262,7 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
     if (trimmed === oldName) return oldName;
     const outcome: { conflict?: boolean; ok?: boolean } = await withBusy(t("ss.renamingBusy", { oldName, newName: trimmed }), async () => {
       try {
-        const r = await es.rename(trimmed);   // es 先 flushLocal 旧内容 → store.tryMove（唯一入口，含占用检查）
+        const r = await es.rename(toFull(trimmed));   // es 先 flushLocal 旧内容 → store.tryMove（唯一入口，含占用检查）；边界转全名
         if (!r.ok) return { conflict: true };  // 目标占用（local/cloud）→ 循环重问；未改 _name
         _activeSessionName = trimmed; setCurrentSessionName(trimmed); _recomputePhase();
         _docLastSavedAt = Date.now(); updateSaveStatus();
@@ -305,7 +308,7 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
   _activeSessionName = name; setCurrentSessionName(name); _recomputePhase();
   _enc.encrypted = false; input.clearHistory(); board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
   resetEditorState();
-  es.adopted(name);   // 新内容装入 editor（非 store.open）→ es 记为当前 + 脏
+  es.adopted(toFull(name));   // 新内容装入 editor（非 store.open）→ es 记为当前 + 脏；边界转全名
   _docLastSavedAt = 0; updateSaveStatus();
   await saveNow();   // 落盘（tryPush:false）
   setGalleryOpen(false);
@@ -317,7 +320,7 @@ async function pullCloudPath(path: string) {
   if (/\.zip$/i.test(String(path))) { if (!(await ensureUnlocked(name))) { setStatus(t("ss.notPulledNeedPassword"), true); return; } }
   showFullscreenBusy(t("ss.pullingFromCloudBusy"));
   try {
-    await es.open(name);   // file.open：本地无→拉云落本地→adopt。freshness/冲突经 store ui。
+    await es.open(toFull(name));   // file.open：本地无→拉云落本地→adopt。freshness/冲突经 store ui。边界转全名。
     _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     setGalleryOpen(false); setStatus(t("ss.openedFromCloud", { name }));
   } catch (err) { console.warn("[cloud] pull failed:", err); setStatus(t("ss.pullFailed", { error: errMsg(err) })); }
@@ -333,7 +336,7 @@ async function openItem(item: GalleryItem) {
     if (await _file(item.name).isEncrypted()) {
       if (!(await ensureUnlocked(item.name))) { setStatus(t("ss.notOpenedNeedPasswordCancelled"), true); return; }
     }
-    await es.open(item.name);   // file.open：load + freshness + 冲突 surface + 崩溃恢复；返 null（锁定/缺失）→ adopt 跳过
+    await es.open(toFull(item.name));   // file.open：load + freshness + 冲突 surface + 崩溃恢复；返 null（锁定/缺失）→ adopt 跳过。边界转全名。
     _activeSessionName = item.name; setCurrentSessionName(item.name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     setGalleryOpen(false); setStatus(t("ss.opened", { name: item.name }));
   } catch (err) { setStatus(t("ss.openFailed", { error: errMsg(err) })); }
@@ -371,7 +374,7 @@ async function unloadItem(item: GalleryItem) {
 async function restoreSession(name: string): Promise<boolean> {
   try {
     if (await _file(name).isEncrypted()) { if (!(await ensureUnlocked(name))) return false; }
-    if (!(await es.open(name))) return false;   // 文件缺失/锁定 → 未装入
+    if (!(await es.open(toFull(name)))) return false;   // 文件缺失/锁定 → 未装入。边界转全名。
     _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     _docLastSavedAt = Date.now(); updateSaveStatus();
     return true;
@@ -384,7 +387,7 @@ async function saveAs(newName: string): Promise<void> {
   const peek = await renderThumbBlob(doc, 256);
   await _file(newName).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
   _activeSessionName = newName; setCurrentSessionName(newName); _isLazyBlankSession = false; _recomputePhase();
-  es.adopted(newName);   // es 切到新名（内容即新名的；下轮 autosave 若跑=同内容 re-save，无害）
+  es.adopted(toFull(newName));   // es 切到新名（内容即新名的；下轮 autosave 若跑=同内容 re-save，无害）。边界转全名。
   _docLastSavedAt = Date.now(); updateSaveStatus(); gallery.refresh();
 }
 

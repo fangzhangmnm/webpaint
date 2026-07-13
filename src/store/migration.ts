@@ -10,6 +10,8 @@
 // **不做愈合**（无 `?? ora` read-fallback，ADR-0019）：迁移一次性把数据搬到锚定名，之后 reader 全干净。
 
 import type { Kv } from "./types.ts";
+import { createIdbCache } from "./idb-store.ts";
+import { LOCAL_BACKUP_PREFIX } from "./move-aside.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // ① 纯逻辑
@@ -18,7 +20,7 @@ import type { Kv } from "./types.ts";
 // ── schema 版本戳：kv["store.schema"] = "vNNN-yyyymmdd"（NNN 零填充=单调序号，yyyymmdd=落地日）──
 export type SchemaVersion = `v${string}`;   // 例 "v001-20260709"
 export const SCHEMA_KEY = "store.schema";
-export const CURRENT_SCHEMA: SchemaVersion = "v001-20260709";
+export const CURRENT_SCHEMA: SchemaVersion = "v002-20260713";   // v002：身份 裸名→全名（薄库，X→X.ora）
 
 /** 解析 vNNN-yyyymmdd。合法 → { seq, date }；非法 → null。 */
 export function parseSchemaVersion(v: string): { seq: number; date: string } | null {
@@ -156,6 +158,33 @@ export function migrateKv(kv: MigrationKv, opts: MigrateKvOpts): void {
   }
 }
 
+// ── v002 身份 裸名 → 全名（薄库：库身份从 app 注入名变成全名 X.ora）──────────────────────────
+//   toFull(name)：裸名 → 全名（app 注入 = sessionFileName，含 sanitize，与 app 现在的 store.file(全名) lookup 逐字一致）；
+//     返回 null = **不动**（已全名 / 非 session）→ 幂等 + 防重入（崩溃重跑不二次追加）。红线：null 判定必须让「已迁移的键」返 null。
+export type ToFull = (name: string) => string | null;
+
+/**
+ * v002 kv 半（同步，over MigrationKv，穷举 mem 测）：etag + dirty(head/sync) 三前缀的 **name 段** 裸→全名。
+ *   `${etagPrefix}X` → `${etagPrefix}toFull(X)`；dirty 两轨同理。值原样保留；toFull 返 null/同名 → 跳（幂等）。
+ *   红线：dirty 键必须跟着改名——否则全名身份查不到旧裸名的 dirty flag → 未推的世界唯一副本被当 clean 驱逐（丢编辑）。
+ */
+export function migrateIdentityKv(kv: MigrationKv, etagPrefix: string, dirtyPrefixes: DirtyPrefixes, toFull: ToFull): void {
+  const prefixes = [etagPrefix, dirtyPrefixes.workFile, dirtyPrefixes.collection];
+  for (const key of kv.keys()) {
+    for (const p of prefixes) {
+      if (!key.startsWith(p)) continue;
+      const name = key.slice(p.length);
+      const full = toFull(name);
+      if (full != null && full !== name) {
+        const v = kv.get(key);
+        if (v != null) kv.set(p + full, v);
+        kv.remove(key);
+      }
+      break;   // 一个键至多命中一个前缀
+    }
+  }
+}
+
 // ── 迁移编排 ────────────────────────────────────────────────────────────────────────────
 export interface MigrationCtx {
   kv: MigrationKv;
@@ -166,6 +195,9 @@ export interface MigrationCtx {
   schemaKey?: string;              // schema 戳键（默认 SCHEMA_KEY="store.schema"）
   newEtagPrefix?: string;          // 新 etag 前缀（默认 NEW_ETAG_PREFIX="sync.etag:"）
   dirtyPrefixes?: DirtyPrefixes;   // 新 dirty 双轨前缀（默认 JRP_DIRTY_PREFIXES）
+  // ── v002 身份 裸→全名 用 ──
+  dbName?: string;                 // IDB 库名（v002 blob key 改名用；prod = ns.dbName）
+  toFull?: ToFull;                 // 裸名→全名映射（app 注入 = sessionFileName；不给 → v002 身份改名整段 no-op）
   log?: (msg: string) => void;
 }
 
@@ -185,8 +217,21 @@ export const V001_WEBPAINT_ANCHOR: Migration = {
   },
 };
 
+/** v002 身份 裸名 → 全名（薄库）：kv etag/dirty 段改名（可测）+ IDB blob key 改名（注入）。
+ *   toFull 不给（测试/JRP 等身份本就是全名的 app）→ 整条 no-op（仍盖戳，版本前进）。
+ *   红线：dirty 键与 blob key 必须一起改名（否则未推的世界唯一副本身份错位 → 被当 clean 驱逐 = 丢编辑）。 */
+export const V002_FULL_IDENTITY: Migration = {
+  version: "v002-20260713",
+  describe: "身份 裸名→全名（薄库 X→X.ora）：blob key + etag + dirty 段改名（toFull 幂等跳已全名）",
+  async run(ctx) {
+    if (!ctx.toFull) { ctx.log?.("[migration] v002：无 toFull → 身份改名 no-op（身份本就是全名）"); return; }
+    migrateIdentityKv(ctx.kv, ctx.newEtagPrefix ?? NEW_ETAG_PREFIX, ctx.dirtyPrefixes ?? JRP_DIRTY_PREFIXES, ctx.toFull);   // 同步、可测
+    if (ctx.dbName) await migrateIdentityIdb(ctx.dbName, ctx.toFull);   // 注入、真机验
+  },
+};
+
 /** 有序注册表（每次动 kv/IDB 结构加一条，version 单调）。 */
-export const MIGRATIONS: readonly Migration[] = [V001_WEBPAINT_ANCHOR];
+export const MIGRATIONS: readonly Migration[] = [V001_WEBPAINT_ANCHOR, V002_FULL_IDENTITY];
 
 /**
  * 读戳 → 按序跑欠的迁移 → **run 成功后才盖新戳**（崩了不盖→下次重跑）。幂等：戳已到位则整体 no-op。
@@ -265,9 +310,30 @@ export async function migrateSessionsIdb(newDbName: string): Promise<void> {
   oldDb.close(); newDb.close();
 }
 
+/**
+ * v002 IDB 半（真机验）：`${appId}.sync-store-cache`/`blobs` 里的**每个 session blob key** 裸→全名（toFull）。
+ *   排除内部命名空间（local-trash: / .backup-local / __collection__/）——只改用户 session 文件。
+ *   幂等：toFull 对**已全名**键返 null → 跳（崩溃重跑不二次追加 .ora）。原子 rename（get→put 新→del 旧）。
+ * 红线：blob key 必须与 kv 半（etag/dirty）**同一 toFull** 改名，否则全名身份读不到本地字节/dirty flag。
+ * ⚠ 未 node 测（IDB node 不可用）。真机验：迁移前把画都 push OneDrive（本地纯可重下影子，风险归零）。
+ */
+export async function migrateIdentityIdb(dbName: string, toFull: ToFull): Promise<void> {
+  const idb = (globalThis as { indexedDB?: IDBFactory }).indexedDB;
+  if (!idb) return;   // 无 IDB 环境 → no-op
+  const cache = createIdbCache(dbName);
+  const keys = await cache.keys();
+  for (const k of keys) {
+    if (k.startsWith("local-trash:") || k.startsWith(LOCAL_BACKUP_PREFIX) || k.startsWith("__collection__/")) continue;   // 内部命名空间不动
+    const full = toFull(k);
+    if (full == null || full === k) continue;   // 已全名/不动 → 跳（幂等）
+    await cache.rename(k, full);                 // 原子 get→put(全名)→del(裸名)
+  }
+}
+
 /** prod 组装 + 跑（createStore 在 ready-gate 前调）。IO 薄壳，真机验。
- *  appId = app 在本 origin 内的唯一命名空间 → 所有持久化标识（IDB 库名 + localStorage 键）都据它隔离。 */
-export async function runStoreMigrations(appId: string, collectionNames: ReadonlySet<string>, log?: (m: string) => void): Promise<void> {
+ *  appId = app 在本 origin 内的唯一命名空间 → 所有持久化标识（IDB 库名 + localStorage 键）都据它隔离。
+ *  toFull = app 的裸名→全名映射（WebPaint = sessionFileName；不给 → v002 身份改名 no-op）。 */
+export async function runStoreMigrations(appId: string, collectionNames: ReadonlySet<string>, toFull?: ToFull, log?: (m: string) => void): Promise<void> {
   const ns = storeNamespace(appId);
   await runMigrations({
     kv: localStorageMigrationKv(),
@@ -276,6 +342,8 @@ export async function runStoreMigrations(appId: string, collectionNames: Readonl
     schemaKey: ns.schemaKey,
     newEtagPrefix: ns.etagPrefix,
     dirtyPrefixes: ns.dirtyPrefixes,
+    dbName: ns.dbName,
+    toFull,
     log,
   });
 }

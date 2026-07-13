@@ -82,6 +82,9 @@ export interface StoreConfig {
   // ── 数据迁移（ADR-0019，createStore 内部自跑、隐形）──
   skipMigration?: boolean;                            // 测试/无 localStorage 环境跳过（prod 不传）
   migrationCollections?: ReadonlySet<string>;         // dirty 拆轨用的已知 collection 名（WebPaint=∅：webpaint.dirty: 全是工作文件）
+  // ── v002 身份 裸名→全名（薄库）迁移映射：app 注入 = sessionFileName（裸→全名，含 sanitize；与 store.file(全名) lookup 逐字一致）。
+  //   返回 null = 该键不动（已全名 / 非 session）→ 幂等 + 防重入。不给 → v002 身份改名整段 no-op（身份本就是全名的 app）。──
+  migrateToFullIdentity?: (name: string) => string | null;
 }
 
 // ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 getPeek/setPeek ──
@@ -132,7 +135,9 @@ export function createStore(config: StoreConfig) {
   if (config.crypto) configureCryptoCodec(config.crypto);   // app 注入 zip/7z codec 才启用加密；JRP 不注入 → dormant
 
   // ── 脊椎 + 低层 ──
-  const cloud: CloudSync = createCloudSync({ provider, kv, fileName: config.fileName ?? ((n: string) => n), encFileName: config.encFileName, appKey: `${appId}.sync` });   // fileName 不给=恒等（名字自带扩展名的 app）；WebPaint 传 n=>n+".ora"。appKey → `${appId}.sync.etag:`/`.dirty:`
+  // 薄命名（身份=全名）：fileName 恒等（身份即云端文件名）；encFileName **追加** .zip（加密容器外扩展名 ADR-0012，无损可逆：X.ora→X.ora.zip、Y.zip→Y.zip.zip）。
+  //   app 不再注入命名（在边界用 sessionFileName 把裸 session 名转全名后传库）；toName 的逆见 cloud-sync 默认。appKey → `${appId}.sync.etag:`/`.dirty:`
+  const cloud: CloudSync = createCloudSync({ provider, kv, fileName: config.fileName ?? ((n: string) => n), encFileName: config.encFileName ?? ((n: string) => `${n}.zip`), appKey: `${appId}.sync` });
   const sub = createSubstrate();
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n), keyPrefix: `${appId}.head` });   // → `${appId}.head.dirty:`
   // 数据迁移（ADR-0019）：**createStore 内部自跑、隐形**——app 看不见 migration（数据搬迁是同步细节）。
@@ -140,7 +145,7 @@ export function createStore(config: StoreConfig) {
   const migrationReady: Promise<void> =
     config.skipMigration || !(globalThis as { localStorage?: unknown }).localStorage
       ? Promise.resolve()
-      : runStoreMigrations(appId, config.migrationCollections ?? new Set<string>());
+      : runStoreMigrations(appId, config.migrationCollections ?? new Set<string>(), config.migrateToFullIdentity);
   const offloadMod = createOffload({ cloud, local, head, isOnline, serialize: sub.serialize });   // serialize：offload 的 hardDelete ⟂ save 的 local 写互斥（红线：驱逐不吃未推字节）
   const reconcileMod = createReconcile({ cloud, local, head, isOnline });
 

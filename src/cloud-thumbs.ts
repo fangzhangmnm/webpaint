@@ -21,6 +21,7 @@
 //   本地有缓存 → Blob.slice 尾片；纯云端 → cloud.pullTail 真 OneDrive byte-range。不再要 itemId/downloadUrl。
 //   身份 = 库的**裸 session 名**（item.name，无 .ora/.zip 后缀）。库不解码——app 自己扫尾部 PNG。
 import { store } from "./app-store.ts";
+import { sessionFileName } from "./config.ts";   // 边界：裸 item.name → 库全名（薄库身份=X.ora）
 // 加密容器（ADR-0012）：尾部是加密 peek blob（WebPaint 的 peek=缩略图 PNG），
 // PNG 硬扫自然落空 → 扫 MAGIC。命中返**密文** Blob（type=ENC_PEEK_MIME），解密归 caller
 // （图库经 store.decryptPeekBytes 按锁态解；cache 层原样缓存密文 → 明文 thumb 不落 IDB）。
@@ -194,7 +195,7 @@ function _scanPngFromEnd(buf: ArrayBuffer): Uint8Array | null {
  */
 export async function fetchOraThumbnail(name: string, fileSize = 0): Promise<Blob> {
   // 尾部字节唯一来源：内容盲 peekTail（本地切片或云端 byte-range）。
-  const tailBlob = await store.file(name, { isZip: true }).peekTail(SUFFIX_BYTES);
+  const tailBlob = await store.file(sessionFileName(name), { isZip: true }).peekTail(SUFFIX_BYTES);   // 边界转全名（库身份=X.ora）
   if (!tailBlob) throw new Error("peekTail 返回 null（云端不可达 / 无此文件 / 无本地副本）");
   const tailBuf = await tailBlob.arrayBuffer();
   // 文件比尾 buffer 大 → 尾片是 suffix，起始绝对偏移 = fileSize - 长度；否则（文件 ≤ 尾）整份即 buffer，偏移 0。

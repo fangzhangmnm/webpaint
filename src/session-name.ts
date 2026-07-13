@@ -4,9 +4,11 @@
 // （rename 把检查包进 withBusy 覆盖空窗；saveAs 在 busy 前查），故只抽**检查本身**，调用点结构不动。
 
 import { store } from "./app-store.ts";
+import { sessionFileName } from "./config.ts";
 
 // 名字占用预检（rename / saveAs 共用）——**统一走 store.nameOccupied**（唯一 local+remote 占用检查）。
 //   返回 "local" | "cloud" | null。opts.cloud 形参保留仅为调用点签名稳定（store.nameOccupied 自己按在线态决定查不查云）。
+//   边界：**session 名**（非文件夹）→ sessionFileName 转全名（库身份=X.ora）。文件夹占用检查另有其路（gallery-shell 传裸文件夹路径，不经此）。
 export async function sessionNameConflict(name: string, _opts: { cloud?: boolean } = {}): Promise<"local" | "cloud" | null> {
-  return store.nameOccupied(name);
+  return store.nameOccupied(sessionFileName(name));
 }

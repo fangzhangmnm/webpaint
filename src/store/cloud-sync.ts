@@ -92,8 +92,9 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   }
   // match(item)：哪些云端文件算"session"（扩展名 agnostic；默认所有非文件夹）。gallery 列表用。
   const match = cfg.match || ((it: CloudItem) => !it.isFolder);
-  // toName(item)：云端文件名 → session name（fileName 的逆；默认去最后一段扩展名）。
-  const toName = cfg.toName || ((name: string) => name.replace(/\.[^./]+$/, ""));
+  // toName(item)：云端文件名 → **身份**（fileName 的逆）。薄默认（身份=全名）：只去尾部一个 .zip（加密容器外扩展名，ADR-0012）。
+  //   X.ora→X.ora、X.ora.zip→X.ora（新加密件）、Y.zip→Y、Y.zip.zip→Y.zip。与 encFileName「追加 .zip」互逆、无损（多扩展名不丢信息）。
+  const toName = cfg.toName || ((name: string) => (name.endsWith(".zip") ? name.slice(0, -4) : name));
 
   const etagKey = (n: string) => `${appKey}.etag:${n}`;
   const dirtyKey = (n: string) => `${appKey}.dirty:${n}`;
