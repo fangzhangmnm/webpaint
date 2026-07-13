@@ -64,6 +64,28 @@ export interface DirtyPrefixes {
 }
 export const JRP_DIRTY_PREFIXES: DirtyPrefixes = { collection: "sync.dirty:", workFile: "head.dirty:" };
 
+// ── app 命名空间（同 origin 兄弟 PWA 隔离的红线；见 idb-store.ts 头注释）─────────────────────────
+//   IndexedDB / localStorage 按 origin 隔离、不按 path → GitHub Pages 的 /webpaint/ 与 /jrp/ 同 origin。
+//   写死的库名/键前缀会让两个 app 共用一份存储 = 灾难（文件互漏、schema 戳互踩、缓存互毁）。
+//   ∴ 所有持久化标识都从 appId 派生：IDB 库 `${appId}.sync-store-cache`、localStorage 全 `${appId}.` 前缀。
+export interface StoreNamespace {
+  dbName: string;                 // IDB 库名
+  schemaKey: string;              // schema 版本戳键
+  etagPrefix: string;             // 新 etag 键前缀（= cloud-sync appKey `${appId}.sync` + ".etag:"）
+  dirtyPrefixes: DirtyPrefixes;   // 新 dirty 双轨前缀（cloud-sync `${appId}.sync.dirty:` / local-head `${appId}.head.dirty:`）
+  foldersPendingKey: string;      // 离线空夹登记键
+}
+export function storeNamespace(appId: string): StoreNamespace {
+  if (!appId) throw new Error("storeNamespace: appId 必填——同 origin 兄弟 PWA 隔离的红线，不给会共用一个库");
+  return {
+    dbName: `${appId}.sync-store-cache`,
+    schemaKey: `${appId}.store.schema`,
+    etagPrefix: `${appId}.sync.etag:`,
+    dirtyPrefixes: { collection: `${appId}.sync.dirty:`, workFile: `${appId}.head.dirty:` },
+    foldersPendingKey: `${appId}.folders.pending`,
+  };
+}
+
 /**
  * 把一条旧 dirty 分类到收敛后两轨之一（ADR-0020）。纯函数。
  * 红线：**仅** oldValue==="0" 判 clean；"1"/缺失/怪值/不认识的名字 一律留脏，绝不把未推的世界唯一副本降 clean → 被驱逐。
@@ -106,6 +128,7 @@ export interface MigrationKv extends Kv {
 export interface MigrateKvOpts {
   collectionNames: ReadonlySet<string>;
   dirtyPrefixes?: DirtyPrefixes;
+  etagPrefix?: string;   // 新 etag 前缀（prod 传 `${appId}.sync.etag:`；默认裸 sync.etag: 仅给测试）
 }
 
 /**
@@ -117,11 +140,12 @@ export interface MigrateKvOpts {
  */
 export function migrateKv(kv: MigrationKv, opts: MigrateKvOpts): void {
   const dp = opts.dirtyPrefixes ?? JRP_DIRTY_PREFIXES;
+  const ep = opts.etagPrefix ?? NEW_ETAG_PREFIX;
   for (const key of kv.keys()) {
     if (key.startsWith(LEGACY_ETAG_PREFIX)) {
       const name = key.slice(LEGACY_ETAG_PREFIX.length);
       const v = kv.get(key);
-      if (v != null) kv.set(NEW_ETAG_PREFIX + name, v);
+      if (v != null) kv.set(ep + name, v);
       kv.remove(key);
     } else if (key.startsWith(LEGACY_DIRTY_PREFIX)) {
       const name = key.slice(LEGACY_DIRTY_PREFIX.length);
@@ -138,6 +162,10 @@ export interface MigrationCtx {
   collectionNames: ReadonlySet<string>;
   /** IDB 搬字节（注入：prod=真 IDB copy；测试=mock）。分开注入 → 编排+kv 半可 node 测，IDB 半真机验。 */
   migrateIdb: () => Promise<void>;
+  // ── app 命名空间（prod 传；不传 → 用裸默认，仅给测试）。──
+  schemaKey?: string;              // schema 戳键（默认 SCHEMA_KEY="store.schema"）
+  newEtagPrefix?: string;          // 新 etag 前缀（默认 NEW_ETAG_PREFIX="sync.etag:"）
+  dirtyPrefixes?: DirtyPrefixes;   // 新 dirty 双轨前缀（默认 JRP_DIRTY_PREFIXES）
   log?: (msg: string) => void;
 }
 
@@ -152,7 +180,7 @@ export const V001_WEBPAINT_ANCHOR: Migration = {
   version: "v001-20260709",
   describe: "webpaint-anchor：webpaint→sync/head/local-* 名 + ora→blob + dirty 拆轨",
   async run(ctx) {
-    migrateKv(ctx.kv, { collectionNames: ctx.collectionNames });   // 同步、可测
+    migrateKv(ctx.kv, { collectionNames: ctx.collectionNames, etagPrefix: ctx.newEtagPrefix, dirtyPrefixes: ctx.dirtyPrefixes });   // 同步、可测
     await ctx.migrateIdb();                                         // 注入、真机验
   },
 };
@@ -165,11 +193,12 @@ export const MIGRATIONS: readonly Migration[] = [V001_WEBPAINT_ANCHOR];
  * createStore 在 ready-gate 前 await 本函数（迁移未完不提供任何读）。
  */
 export async function runMigrations(ctx: MigrationCtx): Promise<void> {
+  const schemaKey = ctx.schemaKey ?? SCHEMA_KEY;
   for (const m of MIGRATIONS) {
-    if (!needsMigration(ctx.kv.get(SCHEMA_KEY), m.version)) continue;
+    if (!needsMigration(ctx.kv.get(schemaKey), m.version)) continue;
     ctx.log?.(`[migration] → ${m.version}: ${m.describe}`);
     await m.run(ctx);
-    ctx.kv.set(SCHEMA_KEY, m.version);
+    ctx.kv.set(schemaKey, m.version);
   }
 }
 
@@ -195,11 +224,11 @@ export function localStorageMigrationKv(): MigrationKv {
  * 红线：**先把新库全部写成，才允许删旧库**（本函数不删旧——留给上层在整条迁移+盖戳确认后再清；崩溃重跑幂等，put 覆盖）。
  * ⚠ 未 node 测（IDB node 不可用）。cutover 前真机验：迁移前先把所有画 push OneDrive（本地纯可重下影子，风险归零）。
  */
-export async function migrateSessionsIdb(): Promise<void> {
+export async function migrateSessionsIdb(newDbName: string): Promise<void> {
   const idb = (globalThis as { indexedDB?: IDBFactory }).indexedDB;
   if (!idb) return;   // 无 IDB 环境（不该在 prod 发生）→ no-op
   const OLD_DB = "webpaint", OLD_STORE = "sessions";
-  const NEW_DB = "sync-store-cache", NEW_STORE = "blobs";
+  const NEW_DB = newDbName, NEW_STORE = "blobs";   // ⚠ newDbName 必带 app 命名空间（`${appId}.sync-store-cache`）——非写死，防同 origin 兄弟 PWA 互踩
 
   const open = (name: string, upgrade?: (db: IDBDatabase) => void): Promise<IDBDatabase> =>
     new Promise((res, rej) => {
@@ -236,12 +265,17 @@ export async function migrateSessionsIdb(): Promise<void> {
   oldDb.close(); newDb.close();
 }
 
-/** prod 组装 + 跑（createStore 在 ready-gate 前调）。IO 薄壳，真机验。 */
-export async function runStoreMigrations(collectionNames: ReadonlySet<string>, log?: (m: string) => void): Promise<void> {
+/** prod 组装 + 跑（createStore 在 ready-gate 前调）。IO 薄壳，真机验。
+ *  appId = app 在本 origin 内的唯一命名空间 → 所有持久化标识（IDB 库名 + localStorage 键）都据它隔离。 */
+export async function runStoreMigrations(appId: string, collectionNames: ReadonlySet<string>, log?: (m: string) => void): Promise<void> {
+  const ns = storeNamespace(appId);
   await runMigrations({
     kv: localStorageMigrationKv(),
     collectionNames,
-    migrateIdb: migrateSessionsIdb,
+    migrateIdb: () => migrateSessionsIdb(ns.dbName),
+    schemaKey: ns.schemaKey,
+    newEtagPrefix: ns.etagPrefix,
+    dirtyPrefixes: ns.dirtyPrefixes,
     log,
   });
 }

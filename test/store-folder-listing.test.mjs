@@ -159,6 +159,7 @@ describe("watchFolder · 网盘模型集成", () => {
     const errors = [];
     const local = createMockLocal();
     const store = createStore({
+      appId: "test",
       provider: createMockProvider(),
       ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: (e) => errors.push(e) },
       validateAdopt: () => true,
@@ -226,6 +227,7 @@ describe("rename/saveAs 目标占用护栏", () => {
   function mkStore() {
     const local = createMockLocal();
     const store = createStore({
+      appId: "test",
       provider: createMockProvider(),
       ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {} },
       validateAdopt: () => true, kv: memKv(), local,
@@ -274,6 +276,7 @@ describe("离线 move（删+建，tag 走法）", () => {
     const provider = createMockProvider();
     let online = true;
     const store = createStore({
+      appId: "test",
       provider, local, kv: memKv(),
       ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {}, onReplayStatus: () => {} },
       validateAdopt: () => true, isOnline: () => online, signedIn: () => online,

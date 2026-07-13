@@ -23,7 +23,7 @@ import { createLocalSettings, createSyncedSettings, type LocalSettings, type Syn
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
 import { createLocalCache } from "./local-cache.ts";
-import { runStoreMigrations } from "./migration.ts";
+import { runStoreMigrations, storeNamespace } from "./migration.ts";
 
 // ── ui bundle（Model B，README.md §7）：store 在决策点回调进来 + await ──
 export interface StoreUI {
@@ -45,6 +45,12 @@ export interface StoreUI {
 export interface StoreConfig {
   provider: CloudProvider;
   ui: StoreUI;
+  // ⚠ **必填** app 在本 origin 内的唯一命名空间（如 "webpaint" / "jrp"）。所有持久化标识——IndexedDB 库名
+  //   (`${appId}.sync-store-cache`) + 全部 localStorage 键 (`${appId}.sync.*` / `${appId}.head.*` /
+  //   `${appId}.store.schema` / `${appId}.folders.pending`)——都据它隔离。**同 origin 的兄弟 PWA 必须用不同
+  //   appId**：IndexedDB/localStorage 按 origin 隔离不按 path，GitHub Pages 的 /webpaint/ 与 /jrp/ 同 origin，
+  //   两个 app 若共用写死的库名会读写同一份存储 = 灾难（文件互漏、schema 戳互踩、缓存互毁）。见 idb-store.ts 头注释。
+  appId: string;
   syncedSettingsFileName?: string;
   // ── 加密（对齐 WebPaint，见 docs/11；逻辑在库、重型 7z/zip codec 由 app 注入）──
   //   不注入 crypto → 加密 dormant（packContainer 抛「加密未配置」）；JRP 不加密就不注入，省 1.6MB。
@@ -66,7 +72,7 @@ export interface StoreConfig {
   validateAdopt: (plain: Blob) => boolean | Promise<boolean>;
   isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
   signedIn?: () => boolean;                          // **连接态由 store 自持**（网盘模型：app 不再每次列举传 ctx）。ctor 注入一次；不给 → 恒 true（退回 provider 失败即降级）。watchFolder / 云列举据此决定「云轴可不可解析」。
-  keepOnOpen?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
+  autoCacheOpenedFile?: boolean;                              // 消费模式：true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地；range 按需取片是 ⚠TODO 优化)
   offlineUploadReplay?: UploadReplayPolicy;           // ADR-0018：离线「新上传」回线补推策略 auto|ask|manual（默认 manual；WebPaint=manual、JRP=ask）
   // ── 数据迁移（ADR-0019，createStore 内部自跑、隐形）──
   skipMigration?: boolean;                            // 测试/无 localStorage 环境跳过（prod 不传）
@@ -108,29 +114,31 @@ function localStorageKv(): Kv {
 }
 
 export function createStore(config: StoreConfig) {
-  const { provider, ui, syncedSettingsFileName, kv = localStorageKv(), validateAdopt, keepOnOpen = true } = config;
-  const local = config.local ?? createLocalCache();   // prod=idb；测试注入 mock-local
+  const { provider, ui, appId, syncedSettingsFileName, kv = localStorageKv(), validateAdopt, autoCacheOpenedFile = true } = config;
+  if (!appId) throw new Error("createStore: appId 必填——同 origin 兄弟 PWA 隔离的红线（每个 app 建自己的 IDB 库）");
+  const ns = storeNamespace(appId);   // IDB 库名 + 全部 localStorage 键前缀，都据 appId 命名空间隔离
+  const local = config.local ?? createLocalCache(ns.dbName);   // prod=idb（app 专属库）；测试注入 mock-local
   const isOnline = config.isOnline ?? ((): boolean => (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine !== false);
   // 加密密码源（对齐 WebPaint 非交互 getPassword）：优先 crypt.getPassword，兼容旧顶层；不给 → 恒 null（透传明文）。
   const getPassword = config.crypt?.getPassword ?? config.getPassword ?? ((): string | null => null);
   if (config.crypto) configureCryptoCodec(config.crypto);   // app 注入 zip/7z codec 才启用加密；JRP 不注入 → dormant
 
   // ── 脊椎 + 低层 ──
-  const cloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => n });
+  const cloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => n, appKey: `${appId}.sync` });   // → `${appId}.sync.etag:` / `.dirty:`
   const sub = createSubstrate();
-  const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n) });
+  const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n), keyPrefix: `${appId}.head` });   // → `${appId}.head.dirty:`
   // 数据迁移（ADR-0019）：**createStore 内部自跑、隐形**——app 看不见 migration（数据搬迁是同步细节）。
   //   ops 首用前 await migrationReady（open/save/list）。测试/无 localStorage 环境跳过。
   const migrationReady: Promise<void> =
     config.skipMigration || !(globalThis as { localStorage?: unknown }).localStorage
       ? Promise.resolve()
-      : runStoreMigrations(config.migrationCollections ?? new Set<string>());
+      : runStoreMigrations(appId, config.migrationCollections ?? new Set<string>());
   const offloadMod = createOffload({ cloud, local, head, isOnline, serialize: sub.serialize });   // serialize：offload 的 hardDelete ⟂ save 的 local 写互斥（红线：驱逐不吃未推字节）
   const reconcileMod = createReconcile({ cloud, local, head, isOnline });
 
   // ── folder 本地登记（离线建空夹）：pending = 建了但还没确认上云的空文件夹。──────────────
   //   离线也能建空夹（用户要求）：先 kv 登记 → 并进 listAllItems.folders（离线可见/持久）→ 回线 drainFolders 补建。
-  const FOLDERS_PENDING_KEY = "folders.pending";
+  const FOLDERS_PENDING_KEY = ns.foldersPendingKey;   // `${appId}.folders.pending`（app 命名空间）
   const readPending = (): string[] => { try { const v = JSON.parse(kv.get(FOLDERS_PENDING_KEY) ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
   const writePending = (a: string[]): void => kv.set(FOLDERS_PENDING_KEY, JSON.stringify([...new Set(a)]));
   const addPendingFolder = (p: string): void => writePending([...readPending(), p]);
@@ -392,11 +400,11 @@ export function createStore(config: StoreConfig) {
           finally { esc?.settle(); }
           return readLocal();
         }
-        if (keepOnOpen) {                                          // 本地没有、持有模式 → 拉云落本地（无可显示，必须等）
+        if (autoCacheOpenedFile) {                                          // 本地没有、持有模式 → 拉云落本地（无可显示，必须等）
           await identity.acquire(name, { localName: name });
           return readLocal();
         }
-        // 本地没有、过路模式（keepOnOpen:false，流式消费）→ 整份拉云、**不落本地**，直接返字节
+        // 本地没有、过路模式（autoCacheOpenedFile:false，流式消费）→ 整份拉云、**不落本地**，直接返字节
         const pulled = await cloud.pull(name).catch((e) => { ui.reportError(e); return null; });
         return pulled ? await seal.unsealForRead(name, pulled.blob) : null;   // range/streaming（按需取片）是 ⚠TODO 优化
       },

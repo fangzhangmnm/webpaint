@@ -45,7 +45,8 @@ const { provider } = createOneDriveProvider({ clientId, msalUrl: "./vendor/msal/
 const store = createStore({
   provider,                                  // 必填：云端低层（OneDrive / mock provider）
   ui,                                        // 必填：UI 回调 bundle，store 在决策点回调进来（见 §7）
-  keepOnOpen: true,                          // 选填(默认 true)：消费模式。true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地，§2；range 按需取片是 ⚠TODO 优化)
+  appId: "webpaint",                         // **必填**：本 app 在本 origin 内的唯一命名空间（见下「⚠ appId 红线」）
+  autoCacheOpenedFile: true,                          // 选填(默认 true)：消费模式。true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地，§2；range 按需取片是 ⚠TODO 优化)
   syncedSettingsFileName: "settings.json",   // 选填：要跨设备同步设置时给（§4）
   validateAdopt,                             // **所有 consumer 必填，禁 placeholder/noop**：采纳云字节覆盖本地前验真内容（PDF/.ora）。**库对加密透明 → 验的是解密后明文**。防损坏/captive-portal HTML 拿合法 etag 覆盖好本地=丢内容。
   // ── 加密（§5）：JRP 不加密就不给（dormant，省 1.6MB）──
@@ -54,6 +55,8 @@ const store = createStore({
 });
 ```
 > **关于 `crypto`**：加密**逻辑**全在库内，唯一例外是重型 7z 引擎（wasm ~1.6MB）由 app vendor + 注入（包成 `crypto` codec）——体积大，不塞进每个 app 的 bundle。不注入 → 加密 dormant（packContainer 抛、其余照常；JRP 不加密就不 vendor，省 1.6MB）。KDF/GCM 走内置 WebCrypto，不用注入。
+>
+> **⚠ `appId` 红线（同 origin 兄弟 PWA 隔离）**：IndexedDB 和 localStorage 按 **origin**（scheme+host+port）隔离，**不按 path**。GitHub Pages 的 project site 全在同一 origin（`user.github.io/webpaint/` 与 `user.github.io/jrp/` 同 origin，只 path 不同）。所以库把**所有持久化标识都按 `appId` 命名空间**：IDB 库名 `${appId}.sync-store-cache`、localStorage 键 `${appId}.sync.*`/`${appId}.head.*`/`${appId}.store.schema`/`${appId}.folders.pending`。**同 origin 的每个兄弟 PWA 必须用不同 `appId`**——否则两个 app 读写**同一个** IDB/键：别人的文件漏进你的图库、schema 迁移戳互踩（一个 app 盖了戳另一个就跳过迁移→数据搬不过来显 0B）、本地缓存互相覆盖。**这是 2026-07-12 真机抓到的灾难 bug 的根治**（详 `docs/20260712-store-per-app-namespace.md`）。不传 `appId` → 直接抛错，不给静默共用。
 
 `createStore(config)` 返回**你 app 需要的一切**——你永远不自己构造 cloud / 本地缓存 / 集合。
 
@@ -88,7 +91,7 @@ await f.delete();             // 销毁：本地副本→本地 .trash / 云端�
 - **新建文件 = 对一个新 name `save`**（没有单独的 create）。云端已有同名但内容不同 → 提示用户，绝不覆盖。
 - **delete vs offload**：offload 只丢「可重取的 shadow」、云端不动；delete 是**销毁**。delete 内部按原子态分流——本地若是 offloadable shadow → 硬删本地（云端 .trash 已救着，不留双份）；本地若是唯一副本（dirty/local-only）→ 先变 local-only 再进**本地** .trash（未推字节可恢复，绝不硬删）。云端副本进**云端** .trash。两套 trash 各管各、不跨网（ADR-0015）。
 - **`open` 自动把字节缓存本地**（离线可读，你不碰 IndexedDB）。
-- **`keepOnOpen:false`（流式消费 app：RealHome glb / Background Radio）已实现**：`open` 本地有就读本地、没有就**整份拉云、不落本地**，只显式 `keepOffline` 才整份落地。⚠TODO **range / streaming 优化**：大媒体按需取片（`provider.downloadRange` 已具备）、不整块下载——`open` 路由 cache-or-remote 取片，形状以后慢慢设计。
+- **`autoCacheOpenedFile:false`（流式消费 app：RealHome glb / Background Radio）已实现**：`open` 本地有就读本地、没有就**整份拉云、不落本地**，只显式 `keepOffline` 才整份落地。⚠TODO **range / streaming 优化**：大媒体按需取片（`provider.downloadRange` 已具备）、不整块下载——`open` 路由 cache-or-remote 取片，形状以后慢慢设计。
 - `store.list()` / `store.listAll()` → `{ files, folders, complete }`。`complete:false` = 列举有子树失败，**别据此删缓存**。
 - `store.reconcile({activeName?})` — cloud-gone 安全收敛（app 在 gallery list-fetch 时调）：曾 synced 的 clean 本地、云端没了 → 降级 local-only（**不删不 trash，blob 留着**）；dirty/从没同步/partial-or-空列表 一律不动。详见 CONTEXT.md。
 
@@ -103,7 +106,7 @@ store.localKeys();        // 已留作离线（=有本地副本）的文件名�
 - **心智模型**：有本地副本 = "kept offline"。无 LRU、无 pin、无 unpin、无 force——只有「留一份」(`keepOffline`) 和「移除」(`offload`)；中间「可被自动驱逐的 cache」态**不存在**（开了 / 下载了就留着，直到显式 `offload`）。
 - **offload 只对 shadow 合法**：本地副本是「云端某完整版的可重取镜像」时，offload = hardDelete（**不进本地 trash**，可重下）。合法 = `clean ∧ 在线 ∧ 已登录 ∧ 曾 synced ∧ 云端仍有完整副本(size>0)`。cloudMoved（云端被别人推了新版）**仍合法**（clean 本地下次 open 会快进）。
 - **非法 offload = 内部错误（banner），不是软保留**：本地是**世界唯一副本**（local-only / 未上传 / dirty / forked / cloud-gone / 离线）时，它不是谁的 shadow，offload **不适用** → 抛 `OffloadIllegalError`，经 ui.reportError 出 banner。UX 不该暴露非法 offload；要清掉唯一副本走的是 **delete** 语义，不是 offload。
-- `keepOnOpen:true`（默认，见 §1）下 `open` 即自动留本地；`keepOnOpen:false` 流式消费则 `open` 过路不留（整份拉云不落本地；range 取片是 ⚠TODO 优化），只有显式 `keepOffline` 才落地。
+- `autoCacheOpenedFile:true`（默认，见 §1）下 `open` 即自动留本地；`autoCacheOpenedFile:false` 流式消费则 `open` 过路不留（整份拉云不落本地；range 取片是 ⚠TODO 优化），只有显式 `keepOffline` 才落地。
 
 ### 回收站 / 备份
 

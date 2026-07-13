@@ -6,14 +6,17 @@
 // (旧版反向 import WebPaint 的 ora.ts/session.ts/storage.ts 解码渲 thumb —— 那是污染,2026-06-21 抽掉。)
 // 契约见 types.ts 的 LocalCache。浏览器专用,真机验。
 
-import { idbCache } from "./idb-store.ts";
+import { createIdbCache } from "./idb-store.ts";
 import { LOCAL_BACKUP_PREFIX, asideStamp } from "./move-aside.ts";
 import type { Bytes, LocalCache, TrashEntry } from "./types.ts";
 
 const TRASH_PREFIX = "local-trash:";
 function stripTrashPrefix(key: string): string { return key.replace(/^local-trash:[^:]*:/, ""); }
 
-export function createLocalCache(): LocalCache {
+// dbName 必须已带 app 命名空间（createStore 从 appId 派生 `${appId}.sync-store-cache`）——
+//   同 origin 兄弟 PWA 隔离的红线，见 idb-store.ts 头注释。
+export function createLocalCache(dbName: string): LocalCache {
+  const idbCache = createIdbCache(dbName);
   return {
     // 覆盖写。bytes 归一化成 Blob(契约落 Blob)。peek 只取 hint.peek(store 不解码、不看内容)。
     async save(name: string, bytes: Bytes | Blob, hint?: unknown) {

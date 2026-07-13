@@ -40,9 +40,9 @@
 
 > 本地副本的语义收敛成**一个 bit：在本地 / 不在本地**（= kept offline / 不）。LRU 已废弃 → 没有「受保护 vs 可驱逐」两层 → "pin" 这词没有指称对象，整套 pin/unpin/evict/force 坍缩成两个动词。
 
-- **keepOffline** — 确保本地有一份副本（未缓存则 acquire）。`keepOnOpen:true` 下开即等价自动 keepOffline。**不叫 download**：`open` 内部已含下载子过程，叫 download 会误导。
+- **keepOffline** — 确保本地有一份副本（未缓存则 acquire）。`autoCacheOpenedFile:true` 下开即等价自动 keepOffline。**不叫 download**：`open` 内部已含下载子过程，叫 download 会误导。
 - **offload** — 移除本地副本（≠ delete，云端不动）。**红线守卫全在 `offload` 深模块一处**，复用 local-head 的 etag 谱系逻辑（不发明）：合法 = `clean ∧ 在线 ∧ 已登录 ∧ head.seenBase!=null（曾 synced = 有已知云版 = re-fetchable，对齐 WebPaint「有 etag」）∧ cloud.fetchMeta 存在 ∧ meta.size>0（挡 0B 幻象）`。cloudMoved（云端 etag≠seenBase 但有完整版）仍合法。**非法（dirty / 离线 / 未登录 / local-only / cloud-gone / 0B）= 本地是世界唯一副本 → 抛 `OffloadIllegalError`**（不软返回 kept；经 ui.reportError 出 banner，UX 不该暴露非法 offload）。要清掉唯一副本走 **delete** 语义，不是 offload。
-- **keepOnOpen**（store ctor）— 消费模式。`true`=读者/编辑器（JRP/JRB/WebPaint…），开即留本地；`false`=流式/过路消费（RealHome/Background Radio），开不留本地、只显式 keepOffline 才落地（⚠TODO 未实现，连 §2 range/streaming 一起设计）。
+- **autoCacheOpenedFile**（store ctor）— 消费模式。`true`=读者/编辑器（JRP/JRB/WebPaint…），开即留本地；`false`=流式/过路消费（RealHome/Background Radio），开不留本地、只显式 keepOffline 才落地（⚠TODO 未实现，连 §2 range/streaming 一起设计）。
 
 ## 反-duplicate 不变量（本库存在的唯一意义 = AI 不得绕）
 
@@ -75,3 +75,12 @@ store/ 外每一处命中都是 jailbreak（WebPaint 已知三处：`session-sta
 - **幂等 + 崩溃安全** — put-by-key 覆盖；**先写新 + 盖戳，最后才删旧**（红线：绝不在目标 durably 写成前删源，护未推的世界唯一副本）。IDB 不能 node 测 → 纯分类器（dirty-split）单测 + 真机验。
 - **v001-20260709 webpaint-anchor** — WebPaint prod 名 → 锚定名（IDB `webpaint/sessions`→`sync-store-cache/blobs`、字段 `ora`→`blob`、`trash:`→`local-trash:`、`.backup-local/`→`local-backup:`、kv `webpaint.etag:`→`sync.etag:`、dirty 拆轨见下）。对 JRP/新装 = **no-op**（无 `webpaint.*` → 跳过盖戳）。
 - **dirty 双轨（ADR-0020）** — 工作文件 dirty 在 **local-head**（`head.dirty:`，缺失=clean）；collection dirty 在 **cloud-sync**（`sync.dirty:`，缺失=脏）。迁移按「是否 collection 名」路由；不认识的名字**保守当工作文件+留脏**（宁留勿丢）。
+
+## app 命名空间 / 同 origin 隔离（ADR-0022，2026-07-12 真机事故根治）
+
+> IndexedDB 和 localStorage 按 **origin**（scheme+host+port）隔离、**不按 path**。GitHub Pages 的 project site 同 origin（`user.github.io/webpaint/` 与 `/jrp/` 只 path 不同）。写死的库名/键前缀 → 兄弟 PWA 共用一份存储 = 灾难。
+
+- **事故**：store-cutover 把 WebPaint 从 app 专属旧库（`webpaint`/`webpaint.*`）换成本引擎写死的通用名（`sync-store-cache`、`sync.etag:`、`head.dirty:`、`store.schema`）。JRP 早已 live 用同一套通用名 → 同 origin 下**共用一个 IDB + 一批键**：JRP 的论文漏进 WebPaint 图库；谁先 boot 谁把 `store.schema` 盖上戳，另一个 `needsMigration=false` **跳过迁移 → 旧库画作没搬进来 → 图库显 0 B**。用户真机抓到。
+- **根治**：`createStore` 加**必填 `appId`**。所有持久化标识据它派生（`storeNamespace(appId)`）：IDB 库 `${appId}.sync-store-cache`；localStorage `${appId}.sync.*`（cloud-sync appKey=`${appId}.sync`）/`${appId}.head.*`（local-head keyPrefix=`${appId}.head`）/`${appId}.store.schema`/`${appId}.folders.pending`。不传 `appId` → 抛错，绝不静默共用。WebPaint=`"webpaint"`、JRP=`"jrp"`。
+- **∴ 上面 v001 段与双轨段写的 `sync-store-cache`/`sync.*`/`head.*`/`store.schema` 现在实际都带 `${appId}.` 前缀**（迁移目标随命名空间走：migrateKv 收 `etagPrefix`/`dirtyPrefixes`、runMigrations 收 `schemaKey`、migrateSessionsIdb 收 `newDbName`，全由 `runStoreMigrations(appId,…)` 从 `storeNamespace(appId)` 喂进去）。旧库名 `webpaint`/`sessions`（迁移源）不变——它本来就 app 专属、不撞。
+- **follow-up**：JRP 侧同一引擎也需接 `appId="jrp"`（当前它还用裸 `sync.*`；WebPaint 命名空间成 `webpaint.*` 后已不再和它撞，但 JRP 对未来兄弟仍有同样潜在 bug）——走 pwa-cloud-store bake 回时补。

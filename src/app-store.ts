@@ -22,6 +22,8 @@ const cryptoCodec = { zipPack, zipUnpack, pack7z, unpack7z };
 export const store = createStore({
   provider,
   ui: storeUI,
+  appId: "webpaint",   // 本 origin 内唯一命名空间：IDB 库 webpaint.sync-store-cache + localStorage webpaint.* 键，与兄弟 PWA(JRP 等)隔离
+
   crypto: cryptoCodec,
   crypt: {
     ext: "ora",
@@ -33,7 +35,7 @@ export const store = createStore({
     if (head[0] === 0x50 && head[1] === 0x4B && head[2] === 0x03 && head[3] === 0x04) return true;   // ZIP PK\x03\x04
     return looksEncryptedContainer(blob);
   },
-  keepOnOpen: true,
+  autoCacheOpenedFile: true,
   signedIn: () => _auth.isSignedIn(),   // 连接态 store 自持（网盘模型）：watchFolder/云列举不再由 app 每次传 ctx
 });
 
