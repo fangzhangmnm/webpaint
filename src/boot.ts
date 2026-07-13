@@ -6,7 +6,7 @@
 // 红线：store 调用（_store.flow.load）verbatim 搬迁、一字未改——只 relocate，不碰同步机制。
 
 import { t } from "./i18n/index.ts";
-import { defaultsPromise, mergeMissingDefaults, makeDefaultRack } from "./brushes.ts";
+import { defaultsPromise, makeDefaultRack } from "./brushes.ts";
 import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
 import type { AppContext } from "./app-context.ts";
@@ -26,11 +26,8 @@ export function initRackBoot(ctx: AppContext) {
     dialReactive.rackVersion++;
     setTimeout(() => { rack.checkCloud().catch(() => {}); rack.refreshCloudState(); }, 2000);
     defaultsPromise().then(() => {
-      const cur = rack.get();
-      if (!cur) return;
-      const merged = mergeMissingDefaults(cur as Parameters<typeof mergeMissingDefaults>[0]);
-      if (!merged) return;
-      rack.setRack(merged);
+      // default-brushes.json 回来了 → seedGen 落后才补缺失默认笔（brush-rack-store 内化，尊重用户删除）。
+      if (!rack.mergeDefaults()) return;
       rack.persist().catch(() => {});
       backfillToolStates();
       rack.applyToolState(editMode.current());

@@ -29,6 +29,7 @@ interface MakeBrushArgs {
   name: string;
   tool: string;
   folder?: string;
+  order?: number;
   size?: number;
   sizeBaseMax?: number;
   sizeCoeff?: number;
@@ -92,6 +93,7 @@ function makeBrush({
   name,
   tool,
   folder = DEFAULT_FOLDER,
+  order,
   size = 12, sizeBaseMax = 200,
   sizeCoeff = 0.6, opaCoeff = 0.6, flowCoeff = 0,
   pressureGamma = 1.0,
@@ -113,7 +115,7 @@ function makeBrush({
   uat = PRE_HISTORY_UAT,
 }: MakeBrushArgs): Brush {
   return {
-    id, uat, name, tool, folder,
+    id, uat, name, tool, folder, order,
     shape: { kind: shapeKind, aspect, rotation, hardness, textureB64 },
     size: { base: size, max: sizeBaseMax },
     sizeCoeff, opaCoeff, flowCoeff,
@@ -158,7 +160,7 @@ export function getDefaultsSpec() { return _defaultsSpec; }
 function _emergencyBrush(uat = PRE_HISTORY_UAT) {
   return makeBrush({
     id: "emergency-brush", name: "默认笔", tool: "brush",
-    size: 12, hardness: 0.8, sizeCoeff: 0.6, opaCoeff: 0.6, uat,
+    size: 12, hardness: 0.8, sizeCoeff: 0.6, opaCoeff: 0.6, uat, order: 0,
   });
 }
 
@@ -222,15 +224,22 @@ export function migrateBrush(b: LegacyBrush): LegacyBrush {
   return b;
 }
 
-function specToBrush(spec: BrushSpec, uat = PRE_HISTORY_UAT): Brush {
-  return makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args, uat });
+function specToBrush(spec: BrushSpec, uat = PRE_HISTORY_UAT, order?: number): Brush {
+  return makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args, uat, order });
+}
+
+// 笔架内下一个可用 order（append 到末尾）。空架从 0 起。
+export function nextBrushOrder(brushes: Brush[]): number {
+  let max = -1;
+  for (const b of brushes) if (typeof b.order === "number" && b.order > max) max = b.order;
+  return max + 1;
 }
 
 // resetAt=0 → 首 boot（出厂笔 uat=PRE_HISTORY）；resetAt>0 → 恢复出厂
 // （出厂笔 uat 须 > resetAt，否则刚重置就被自己的水位线丢掉）。
 export function makeDefaultRack({ resetAt = 0 }: { resetAt?: number } = {}): BrushRackData {
   const uat = resetAt > 0 ? resetAt + 1 : PRE_HISTORY_UAT;
-  let brushes = _defaultsSpec.map((s) => specToBrush(s, uat));
+  let brushes = _defaultsSpec.map((s, i) => specToBrush(s, uat, i));
   if (brushes.length === 0) brushes = [_emergencyBrush(uat)];
   return { version: RACK_VERSION, brushes, trash: [], resetAt };
 }
@@ -253,10 +262,11 @@ export function mergeMissingDefaults(rack: BrushRackData): BrushRackData | null 
   if (missing.length === 0 && !needsFields) return null;
   const resetAt = rack.resetAt || 0;
   const uat = resetAt > 0 ? resetAt + 1 : PRE_HISTORY_UAT;
+  let ord = nextBrushOrder(rack.brushes);   // 新补默认笔接在末尾（保持既有排列）
   const out: BrushRackData = {
     ...rack,
     version: RACK_VERSION,
-    brushes: [...rack.brushes, ...missing.map((s) => specToBrush(s, uat))],
+    brushes: [...rack.brushes, ...missing.map((s) => specToBrush(s, uat, ord++))],
     trash: Array.isArray(rack.trash) ? rack.trash : [],
     resetAt,
   };

@@ -5,8 +5,7 @@
 //   · data-i18n 是过渡桥（非终点）：静态 index.html 一次性填充；新内容/需动的段走 Vue + t()。
 
 import { S, type Lang } from "./strings.ts";
-import { safeLS } from "../safe-ls.ts";
-import { getPref, setPref } from "../syncable-prefs.ts";   // 语言 = 「跨设备同步候选」偏好（现设备本地，seam 见 syncable-prefs）
+import { getSetting, setSetting } from "../settings.ts";   // 语言 = synced 设置（跨设备跟人；settings 深模块路由）
 
 export type { Lang } from "./strings.ts";
 export type Key = keyof typeof S;
@@ -14,8 +13,6 @@ export type Key = keyof typeof S;
 export const LANGS: Lang[] = ["zh", "en", "ja", "tok"];
 // 语言名用 endonym（各语言自称，不翻译）——菜单里显示当前语言用。
 export const LANG_NAME: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語", tok: "toki pona" };
-
-const LS_KEY = "webpaint.lang";   // 旧散键（迁移兜底用；写只落 syncable-prefs blob）
 
 // 首次运行（无持久化）按系统语言判定。未支持的系统语言 → 英文（更国际；用户 2026-07-07 定）。
 function detectLang(): Lang {
@@ -27,7 +24,7 @@ function detectLang(): Lang {
 }
 
 function readLang(): Lang {
-  const v = (getPref("lang") ?? safeLS(LS_KEY)) as Lang | null;   // 新 blob 优先，旧散键兜底（迁移）
+  const v = getSetting<Lang | null>("lang");   // settings 深模块：旧键/blob 迁移内化；default null → detect
   return v && LANGS.includes(v) ? v : detectLang();
 }
 
@@ -53,8 +50,8 @@ export function cycleLang(): Lang { return LANGS[(LANGS.indexOf(_lang) + 1) % LA
 
 export function setLang(l: Lang) {
   if (!LANGS.includes(l) || l === _lang) return;
-  setPref("lang", l);   // 落 syncable-prefs（现设备本地；新 store 接回来时随之上云）
-  location.reload();     // reload 制
+  setSetting("lang", l);   // settings 深模块：本地镜像 + 跨设备 syncedSettings
+  location.reload();       // reload 制
 }
 
 // data-i18n 桥：静态 HTML 一次性填充。textContent / title / aria-label / placeholder 四种 attr。

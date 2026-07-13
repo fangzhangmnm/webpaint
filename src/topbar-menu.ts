@@ -22,7 +22,6 @@ import { session } from "./session-state.ts";
 import {
   store as _store,
   isSignedIn,
-  setRackDirty,
 } from "./app-store.ts";
 import { els } from "./els.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
@@ -289,8 +288,7 @@ export function initTopbarMenu(ctx: AppContext) {
       t("tm.resetRackBody"),
     );
     if (!ok) return;
-    rack.reset(true);   // 恢复出厂 resetAt watermark + 重置 toolStates + persist + applyToolState + bump
-    setRackDirty(true);
+    rack.reset(true);   // 恢复出厂：删用户笔(tombstone)+默认笔重置+toolStates+reconcile 标脏+applyToolState+bump
     if (isSignedIn()) rack.syncCloud();
     setStatus(t("tm.rackReset", { count: rack.get()?.brushes.length ?? 0 }), true);
   });

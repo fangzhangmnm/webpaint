@@ -10,11 +10,11 @@
 // 全部搬来（classify + copy-paste），app.js 短路成构造 + 事件绑定。
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
-import { getMeta, setMeta } from "./storage.ts";
 import {
-  makeDefaultRack, mergeMissingDefaults, migrateBrush, defaultBrushForTool,
+  makeDefaultRack, defaultBrushForTool, nextBrushOrder, RACK_VERSION,
   brushesByTool, findBrush, newBrushId, brushFromJSON, DEFAULT_FOLDER,
 } from "./brushes.ts";
+import type { RackCollection } from "./brush-rack-store.ts";
 // resolveRef 内联（brush ref 解析：先 id 后 name 兜底；折 folder-merge 依赖）。
 function resolveRef<T extends { id?: unknown; name?: unknown }>(list: T[], ref: { id?: unknown; name?: unknown }): T | null {
   return list.find((x) => ref.id != null && x.id === ref.id) ?? list.find((x) => ref.name != null && x.name === ref.name) ?? null;
@@ -28,28 +28,7 @@ import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.t
 import type { EditMode } from "./edit-mode.ts";
 import { t } from "./i18n/index.ts";
 
-const RACK_META_KEY = "brush-rack";
 const TOOL_LABEL: Record<string, string> = { brush: t("br.toolBrush"), eraser: t("br.toolEraser") };
-
-// 笔架同步编排句柄（folder-sync store；诚实描述本类调到的成员）。
-interface RackSyncResult {
-  folder?: { version: number; items: Brush[]; trash?: unknown[]; resetAt?: number };
-  status?: string;
-  error?: unknown;
-}
-interface RackStore {
-  edit(): void;
-  status(o: { signedIn: boolean; online: boolean }): string;
-  sync(): Promise<void>;
-  isDirty(): boolean;
-  flush(): void;
-  configure(opts: {
-    canSync: () => boolean;
-    snapshot: () => unknown;
-    onBusyChange: () => void;
-    onResult: (res: RackSyncResult) => void | Promise<void>;
-  }): void;
-}
 
 // 构造期依赖（早于 SSoT 块构造，故 editMode 走 thunk 避 TDZ；DOM/icons/panels 等晚绑走 init()）。
 export interface BrushRackDeps {
@@ -61,8 +40,7 @@ export interface BrushRackDeps {
   openExclusive: (id: string) => void;
   closeExclusive: () => void;
   registerPanel: (id: string, h: { show: () => void; hide: () => void }) => void;
-  rackStore: RackStore;
-  setRackDirty: (d: boolean) => void;
+  rackColl: RackCollection;   // 笔架持久化后端（store.collection，见 brush-rack-store.ts）
   isSignedIn: () => boolean;
   isOnline: () => boolean;
 }
@@ -98,41 +76,33 @@ export class BrushRack {
   get() { return this._rack; }
   setRack(r: BrushRackData) { this._rack = r; }   // boot 的 default-merge / 兜底用
 
-  // ---- 预设存储 ----
+  // ---- 预设存储（store.collection 后端，见 brush-rack-store.ts）----
   async load() {
-    this._rack = await this._loadRack();
+    const brushes = await this.d.rackColl.init();   // collection init + 一次性 IDB 迁移 / 全新种子
+    this._applyLoadedBrushes(brushes);
     this.d.dialReactive.rackVersion++;
     return this._rack;
   }
-  async _loadRack() {
-    try {
-      let stored = await getMeta(RACK_META_KEY) as BrushRackData | null;
-      if (stored && Array.isArray(stored.brushes) && stored.brushes.length > 0) {
-        let migrated = false;
-        for (const b of stored.brushes) {
-          const before = JSON.stringify(b);
-          migrateBrush(b);
-          if (JSON.stringify(b) !== before) migrated = true;
-        }
-        const newRack = mergeMissingDefaults(stored);
-        if (newRack) stored = newRack;
-        if (migrated || newRack) { try { await setMeta(RACK_META_KEY, stored); } catch {} }
-        return stored;
-      }
-    } catch (e) { console.warn("[brush-rack] load failed:", e); }
-    const rack = makeDefaultRack();
-    try { await setMeta(RACK_META_KEY, rack); } catch (e) { console.warn("[brush-rack] save default failed:", e); }
-    return rack;
+  // collection 返回的全量笔（已按 order 排序）→ 内存 rack。trash/resetAt 仅为形状兼容，合并由 collection 内化。
+  _applyLoadedBrushes(brushes: Brush[]) {
+    this._rack = { version: RACK_VERSION, brushes, trash: [], resetAt: 0 };
   }
+  // default-brushes.json async 回来后 boot 调：seedGen 落后才补缺失默认笔。返回是否有变（有则 rack 已刷新）。
+  mergeDefaults(): boolean {
+    const newBrushes = this.d.rackColl.seedDefaults(makeDefaultRack().brushes);
+    if (!newBrushes) return false;
+    this._applyLoadedBrushes(newBrushes);
+    return true;
+  }
+  // 落盘：把内存笔架对账进 collection（新增/变更 upsert、消失的 delete；collection 自排防抖云同步）。
   async persist() {
     if (!this._rack) return;
-    try { await setMeta(RACK_META_KEY, this._rack); }
+    try { this.d.rackColl.reconcile(this._rack.brushes); await this.d.rackColl.flushLocal(); }
     catch (e) { console.warn("[brush-rack] persist failed:", e); }
   }
-  // 笔架内容变了单一入口：落本地 + 标脏排防抖同步 + 刷 icon + bump rackVersion（当前笔/sheet 重算）。
+  // 笔架内容变了单一入口：对账落盘（collection 自标脏排同步）+ 刷 icon + bump rackVersion（当前笔/sheet 重算）。
   markChanged() {
     this.persist();
-    this.d.rackStore.edit();
     this.refreshCloudState();
     this.d.dialReactive.rackVersion++;
   }
@@ -190,7 +160,7 @@ export class BrushRack {
 
   // ---- 云图标态机 ----
   refreshCloudState() {
-    this._cloudState = this.d.rackStore.status({ signedIn: this.d.isSignedIn(), online: this.d.isOnline() });
+    this._cloudState = this.d.rackColl.status({ signedIn: this.d.isSignedIn(), online: this.d.isOnline() });
     this._updateCloudIcon();
   }
   _updateCloudIcon() {
@@ -206,7 +176,15 @@ export class BrushRack {
     btn.title = TITLE[this._cloudState] || "";
     btn.dataset.state = this._cloudState;
   }
-  async syncCloud() { await this.d.rackStore.sync(); this.refreshCloudState(); }
+  // 云同步：collection flush（写本地 + 若脏推云、pull-merge）→ 用合并后的全量笔刷新内存架。
+  async syncCloud() {
+    if (this._editingId != null) { this.refreshCloudState(); return; }   // 编辑期不吞掉草稿：只刷态、不重载
+    const brushes = await this.d.rackColl.syncCloud();
+    this._applyLoadedBrushes(brushes);
+    this.applyToolState(this.d.editMode().current());
+    this.d.dialReactive.rackVersion++;
+    this.refreshCloudState();
+  }
   async checkCloud() {
     if (!this.d.isSignedIn() || !this.d.isOnline()) return;
     await this.syncCloud();
@@ -224,8 +202,7 @@ export class BrushRack {
   }
   hideSheet() {
     this.d.els.rack.sheet.classList.add("hidden");
-    if (this.d.rackStore.isDirty()) this.persist();
-    this.d.rackStore.flush();
+    if (this.d.rackColl.isDirty()) void this.persist();   // collection 自排防抖云同步
   }
 
   reset(factory: boolean) {
@@ -273,7 +250,7 @@ export class BrushRack {
       draft.uat = Date.now();
       const idx = rack.brushes.findIndex((x) => x.id === this._editingId);
       if (idx >= 0) rack.brushes[idx] = draft;
-      else rack.brushes.push(draft);
+      else { if (typeof draft.order !== "number") draft.order = nextBrushOrder(rack.brushes); rack.brushes.push(draft); }
       this.markChanged();
       const targetTool = this.d.editMode().current() === "airbrush" ? "brush" : draft.tool;
       if (this.getRackToolKey(this.d.editMode().current()) === this.getRackToolKey(targetTool)) {
@@ -296,9 +273,7 @@ export class BrushRack {
     const rack = this._rack!;
     const idx = rack.brushes.findIndex((x) => x.id === this._editingId);
     if (idx >= 0) {
-      rack.brushes.splice(idx, 1);
-      if (!Array.isArray(rack.trash)) rack.trash = [];
-      rack.trash.push({ id: this._editingId, uat: Date.now() });
+      rack.brushes.splice(idx, 1);   // markChanged→reconcile 会 deleteItem（collection 内部记 tombstone）
       this.markChanged();
       this.d.dialReactive.rackVersion++;
     }
@@ -334,24 +309,7 @@ export class BrushRack {
       onExport: () => { if (this._editingDraft) exportBrush(this._editingDraft); },
     });
 
-    // 笔架同步编排
-    this.d.rackStore.configure({
-      canSync: () => this.d.isSignedIn() && this.d.isOnline(),
-      snapshot: () => this._rack ? { version: this._rack.version, items: this._rack.brushes, trash: this._rack.trash || [], resetAt: this._rack.resetAt || 0 } : null,
-      onBusyChange: () => this.refreshCloudState(),
-      onResult: async (res) => {
-        if (res.folder && this._editingId == null) {
-          this._rack = { ...(this._rack), version: res.folder.version, brushes: res.folder.items, trash: res.folder.trash, resetAt: res.folder.resetAt };
-          { const _n = mergeMissingDefaults(this._rack); if (_n) this._rack = _n; }
-          await this.persist();
-          this.applyToolState(this.d.editMode().current());
-          this.d.dialReactive.rackVersion++;
-        }
-        if (res.status === "synced") this.d.setStatus(t("br.syncedToCloud"));
-        else if (res.status === "invalid") this.d.setStatus(t("br.syncInvalid"), true);
-        else if (res.status === "dirty") { console.warn("[brush-rack sync]", res.error); this.d.setStatus(t("br.syncFailed"), true); }
-      },
-    });
+    // 笔架持久化后端 = store.collection（brush-rack-store.ts）；同步/迁移/种子全在那，此处无需 configure。
 
     // 注册 exclusive panel（多 tool → 同 panel id 去重，第一个赢）
     const registered = new Set();
@@ -380,8 +338,7 @@ export class BrushRack {
     });
     if (els.resetBtn) els.resetBtn.addEventListener("click", async () => {
       if (!(await this.d.confirm(t("br.resetRackTitle"), t("br.resetRackMsg")))) return;
-      this.reset(true);
-      this.d.setRackDirty(true);
+      this.reset(true);   // reset→markChanged→reconcile 已标脏（删用户笔 tombstone + 默认笔重置）
       if (this.d.isSignedIn()) this.syncCloud();
       this.d.setStatus(t("br.rackReset", { n: this._rack!.brushes.length }), true);
     });
@@ -406,6 +363,7 @@ export class BrushRack {
       newB.name = this._deriveBrushName(source.name);
       newB.folder = this.ui.folder;
       newB.tool = this.ui.tool;
+      newB.order = nextBrushOrder(this._rack!.brushes);   // 接末尾
     } else {
       newB = {
         id: newBrushId(), name: this._nextBrushName(), tool: this.ui.tool, folder: this.ui.folder,
@@ -418,6 +376,7 @@ export class BrushRack {
       };
     }
     newB.uat = Date.now();
+    if (typeof newB.order !== "number") newB.order = nextBrushOrder(this._rack!.brushes);
     this.d.closeExclusive();
     this.openBrushSettings(newB.id, newB);
   }
@@ -434,6 +393,7 @@ export class BrushRack {
         b.folder = this.ui.folder;
         b.tool = this.ui.tool;
         b.uat = Date.now();
+        b.order = nextBrushOrder(this._rack!.brushes);   // 接末尾
         this._rack!.brushes.push(b);
         this.markChanged();
         this.d.setStatus(t("br.imported", { name: b.name }));

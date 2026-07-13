@@ -9,6 +9,14 @@ import { CLIENT_ID, SCOPES } from "./config.ts";
 import { zipReadEntry, zipPack, zipUnpack } from "./zip.ts";
 import { pack7z, unpack7z } from "./sevenzip.ts";
 import { getPassword } from "./crypto-state.ts";
+import { createRackStore } from "./brush-rack-store.ts";
+import { wireSyncedSettings } from "./settings.ts";
+import type { Brush } from "./brush-types.ts";
+
+// 隐藏配置夹：笔架 + 跨设备设置的 collection 都落这里（云端归组、不污染图库）。
+//   ⚠ 图库列举**目前**由库在 depth-0 只滤 .trash/.backup（不含本夹）→ app 侧在 watchFolder 里额外滤掉本夹（见下）。
+//   待办（已知会用户）：库要把列举 filter 移出去（filter 是 app 的事）→ 届时本夹隐藏改由 app 统一负责。
+export const CONFIG_FOLDER = ".webpaint";
 
 // OneDrive provider + auth。
 const od = createOneDriveProvider({ clientId: CLIENT_ID, scopes: SCOPES, msalUrl: "./vendor/msal/msal-browser.min.js" });
@@ -23,6 +31,9 @@ export const store = createStore({
   provider,
   ui: storeUI,
   appId: "webpaint",   // 本 origin 内唯一命名空间：IDB 库 webpaint.sync-store-cache + localStorage webpaint.* 键，与兄弟 PWA(JRP 等)隔离
+  // 跨设备设置（settings 深模块的 synced 轴）→ 云端 .webpaint/ 配置夹（与笔架同处，见 CONFIG_FOLDER）。
+  //   ⚠ fileName=sessionFileName 会给它加 .ora（云端实为 .webpaint/settings.json.ora）——在隐藏配置夹里不影响功能。
+  syncedSettingsFileName: `${CONFIG_FOLDER}/settings.json`,
   // 云端命名：WebPaint session name 是裸名，云端存 .ora（加密 .zip）。裸名 X ↔ 云端 X.ora 的往返。
   //   （cutover 一度漏传 → 老云端 X.ora 用裸名取不到=0B/打开空白，本次补回。）
   fileName: sessionFileName,        // "未命名" → "未命名.ora"
@@ -87,7 +98,8 @@ export function watchFolder(
       // 文件名**倒序**（localeCompare numeric）：新文档名 yyyymmdd-xxxx → 新日期在前，稳定（不随存盘时间跳）。
       //   store 列举顺序不保证；排序是 app 展示策略（对齐 gallery-model.sliceFolder 的既定倒序），故在此 app 层做。
       items: snap.items.map(itemToG).sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true })),
-      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),   // 全路径 → immediate 段
+      // 全路径 → immediate 段；隐藏配置夹 .webpaint（笔架/设置 collection 落此，不进图库）。
+      folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter((n) => n && n !== CONFIG_FOLDER),
     });
   });
 }
@@ -95,17 +107,9 @@ export function watchFolder(
 //   app 原则上不知道别的 folder 内容（内存只放当前夹）；名字碰撞由 store rename/saveAs 目标护栏内化检测（撞名抛 CloudNameCollisionError），不靠先 list 目标夹。
 export const listGalleryTrash = async () => (await store.listTrash()).map((c) => ({ name: stripSessionExt(c.path || c.name || ""), local: null, cloud: c, deletedAt: 0 }));
 
-// ---- brush-rack cloud-sync（⚠TODO：→ store.collection("brush-rack.json") 逐 brush 一 item。当前本地-only stub）----
-//   rack 本地持久化在 brush-rack.ts 自管（IDB via getMeta）；此处只是它期望的 cloud-sync 面，暂 no-op。
-let _rackDirty = false;
-export const rackStore = {
-  edit(): void { _rackDirty = true; },
-  isDirty(): boolean { return _rackDirty; },
-  setDirty(d: boolean): void { _rackDirty = d; },
-  flush(): void { _rackDirty = false; },
-  async sync(): Promise<void> { /* TODO: store.collection 逐 item 同步 */ },
-  status(_ctx?: { signedIn?: boolean; online?: boolean }): string { return "local-only"; },
-  configure(_c: unknown): void { /* TODO */ },
-};
-export const setRackDirty = (d: boolean) => rackStore.setDirty(d);
-export const isRackDirty = () => rackStore.isDirty();
+// ---- 笔架持久化后端：store.collection（云端 .webpaint/brush-rack.json，逐 brush 一 item，per-item LWW）----
+//   一次性 IDB→collection 迁移 + 默认笔种子 + reconcile 全在 brush-rack-store.ts（深模块）。app 只装配这一行。
+export const rackColl = createRackStore(store.collection<Brush>(`${CONFIG_FOLDER}/brush-rack.json`));
+
+// settings 深模块的 synced 轴接入：把 store.syncedSettings 注入 settings（settings 刻意不反向 import app-store，见其头注释）。
+wireSyncedSettings(store.syncedSettings);

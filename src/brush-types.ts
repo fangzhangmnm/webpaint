@@ -16,6 +16,8 @@ export interface Brush {
   name: string;
   tool: string;
   folder?: string;
+  // 笔架内排序键（全局单调；filter by tool/folder 保序 = 保夹内顺序）。collection 逐 item 存，items() 顺序不保证 → 靠 order 复原用户排列。
+  order?: number;
   size: BrushSize;
   shape?: BrushShape;
   sizeCoeff?: number;

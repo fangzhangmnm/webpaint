@@ -8,6 +8,8 @@ import "./editor-session.test.mjs";   // 家族共享模块 editor-session 生�
 import "./folder-merge.test.mjs";
 import "./folder-flow.test.mjs";
 import "./brush-rack-migrate.test.mjs";
+import "./brush-rack-store.test.mjs";   // 笔架→store.collection 后端：迁移/种子/seedGen/跨设备删除不复活/order/合并
+import "./settings-core.test.mjs";      // settings 路由核：scope 路由/旧键迁移/synced 镜像/init 拉云折回
 import "./engine-registry.test.mjs";
 import "./registry.test.mjs";
 import "./resolved-brush.test.mjs";

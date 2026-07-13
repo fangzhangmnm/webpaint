@@ -13,7 +13,7 @@ import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { Selection } from "./selection.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
-import { safeLSSet } from "./safe-ls.ts";
+import { setSetting } from "./settings.ts";
 import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
@@ -453,7 +453,7 @@ export function initToolbar(ctx: AppContext) {
     psel.value = state.pickMode;
     psel.addEventListener("change", () => {
       state.pickMode = psel.value;
-      safeLSSet("webpaint.pickMode", psel.value);
+      setSetting("pickMode", psel.value);
     });
   }
   // 选区 → 新层 / 复制层

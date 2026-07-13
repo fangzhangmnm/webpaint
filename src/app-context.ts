@@ -67,6 +67,7 @@ export interface RackHandle {
   get(): { brushes: unknown[] } | null;
   setRack(rack: unknown): void;
   persist(): Promise<unknown>;
+  mergeDefaults(): boolean;   // default-brushes.json async 回来后补缺失默认笔（seedGen gated）
   // 重置笔架（topbar-menu）：
   reset(force?: boolean): void;
   syncCloud(): void;

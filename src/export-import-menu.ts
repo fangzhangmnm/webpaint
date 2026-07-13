@@ -16,6 +16,7 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
+import { getSetting, setSetting } from "./settings.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -29,28 +30,20 @@ function stampNow() {
 
 // v120: 主菜单导出/导入 重组（user：「导出项目和导出语义分开」+「小扳手」)
 // - 主行 = 按 sticky config 一键执行；🔧 = 弹 inline popup 改 config
-// - sticky 存 localStorage（不绑 doc，配一次全工程用）
-const _EXP_PRJ_KEY = "webpaint:exportProject:v1";   // { format: "ora" | "psd" }
-const _EXP_IMG_KEY = "webpaint:exportImage:v1";     // { format, target }
-const _IMP_IMG_KEY = "webpaint:importImage:v1";     // { source: "file" | "clipboard" }
+// - sticky 存 settings 深模块（设备本地，不绑 doc，配一次全工程用；旧 webpaint:*:v1 键由 settings 迁移）
 function _getExpPrj(): { format: string } {
-  try { return JSON.parse(localStorage.getItem(_EXP_PRJ_KEY)!) || { format: "ora" }; }
-  catch { return { format: "ora" }; }
+  return { format: "ora", ...(getSetting<{ format?: string } | null>("exportProject") || {}) };
 }
 function _getExpImg(): { format: string; target: string; scope: string } {
-  try {
-    const v = JSON.parse(localStorage.getItem(_EXP_IMG_KEY)!) || {};
-    // v124 加 scope 字段 ("merged" | "active")，默认 merged 兼容旧配置
-    return { format: "png", target: "file", scope: "merged", ...v };
-  } catch { return { format: "png", target: "file", scope: "merged" }; }
+  // v124 加 scope 字段 ("merged" | "active")，默认 merged 兼容旧配置
+  return { format: "png", target: "file", scope: "merged", ...(getSetting<object | null>("exportImage") || {}) };
 }
 function _getImpImg(): { source: string } {
-  try { return JSON.parse(localStorage.getItem(_IMP_IMG_KEY)!) || { source: "file" }; }
-  catch { return { source: "file" }; }
+  return { source: "file", ...(getSetting<{ source?: string } | null>("importImage") || {}) };
 }
-function _setExpPrj(v: unknown) { localStorage.setItem(_EXP_PRJ_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
-function _setExpImg(v: unknown) { localStorage.setItem(_EXP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
-function _setImpImg(v: unknown) { localStorage.setItem(_IMP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
+function _setExpPrj(v: unknown) { setSetting("exportProject", v); _updateMenuSubLabels(); }
+function _setExpImg(v: unknown) { setSetting("exportImage", v); _updateMenuSubLabels(); }
+function _setImpImg(v: unknown) { setSetting("importImage", v); _updateMenuSubLabels(); }
 function _updateMenuSubLabels() {
   const ep = _getExpPrj();
   const ei = _getExpImg();

@@ -14,7 +14,7 @@
 //   state.pressureTo* 的读写零改动，背后是反应式（Vue 组件 computed 自动追踪 → 当前笔重派生）。
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
-import { safeLS } from "./safe-ls.ts";
+import { getSetting } from "./settings.ts";
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
 
 // 编辑器 RAM 态的形状契约见 AppContext（EditorRuntimeState / DialReactive）——本模块是其唯一构造者。
@@ -26,7 +26,7 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
   // reactive：dial 是反应式 SSoT。先建 toolStates → 让 state 字面量一次成形、整体类型化（序列化走 JSON.stringify 无碍）。
   const toolStates: Record<string, ToolDial> = reactive({
     // brush 的 boot dial 从 LS 兜底（保留「记住上次粗细/透」；rack/doc 载入后被 preset/ORA toolStates 覆盖）。
-    brush:    { size: parseFloat(safeLS("webpaint.size") || "12"), opacity: parseFloat(safeLS("webpaint.opacity") || "1"), flow: 1.0, activeBrushId: null },
+    brush:    { size: getSetting<number>("lastSize"), opacity: getSetting<number>("lastOpacity"), flow: 1.0, activeBrushId: null },
     eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
     // v132：size=radius，opacity=transparency/flow，variantId=子算法选择（Filter.brushVariants[].id），空=默认
     filterBrush: { size: 32, opacity: 1.0, flow: 1.0, activeBrushId: null, variantId: null },
@@ -36,13 +36,13 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     // tool（当前工具）的 SSoT 在 editMode（editMode.current()）。见 edit-mode.js / CONTEXT.md。
     // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
     filterBrush: null,
-    color: safeLS("webpaint.color") || "#1b1b1b",
-    // 全局（非 per-tool）压感开关。boot 读 LS（v202 修：旧版写 pToSize 从不读回）。未设过→DEFAULT(开)；"0"→关。
-    pressureToSize: safeLS("webpaint.pToSize") !== "0",
-    pressureToOpacity: safeLS("webpaint.pToOpacity") !== "0",
-    longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
-    singleFingerDraw: safeLS("webpaint.singleFingerDraw") === "1",  // 默认关——用户要单指默认不作画
-    pickMode: safeLS("webpaint.pickMode") || "composite",  // 吸色取样：composite(合并·respect clip+mode) | layer(raw 色)
+    color: getSetting<string>("lastColor"),
+    // 全局（非 per-tool）压感开关。boot 读 settings 深模块（default + 旧键迁移内化）。
+    pressureToSize: getSetting<boolean>("pressureToSize"),
+    pressureToOpacity: getSetting<boolean>("pressureToOpacity"),
+    longPressPick: getSetting<boolean>("longPressPick"), // 默认关，user 担心误触
+    singleFingerDraw: getSetting<boolean>("singleFingerDraw"),  // 默认关——用户要单指默认不作画
+    pickMode: getSetting<string>("pickMode"),  // 吸色取样：composite(合并·respect clip+mode) | layer(raw 色)
     // v125 checkerboard 从全局 LS 改 per-doc（跟文件走）。初始 false；adopt 时按文件值覆盖；新建默认 false。
     checkerboard: false,
     toolStates,

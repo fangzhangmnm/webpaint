@@ -7,7 +7,7 @@
 // editMode 用 thunk：setSize 要早于 leftDial 构造可用，而 editMode const 晚于 leftDial 才声明
 // （与 brush-rack 构造里的 editMode:()=>editMode 同款）。board/leftDial 也晚 → bindKeyboard 分离调。
 
-import { safeLSSet } from "./safe-ls.ts";
+import { setSetting } from "./settings.ts";
 import { stepFor, quantizeSize } from "./ui/brush-size.ts";
 import type { EditorRuntimeState } from "./app-context.ts";
 import type { BrushRack } from "./brush-rack.ts";
@@ -21,11 +21,11 @@ export function makeDialControls({ state, rack, getEditMode }: DialControlsDeps)
   const setSize = (v: number) => {
     v = Math.max(1, Math.round(v));        // clamp to int
     rack.writeCurrentToolSize(v);          // dial SSoT（反应式 → currentBrush + <LeftDial> 自动跟随）
-    safeLSSet("webpaint.size", String(v));
+    setSetting("lastSize", v);             // 记住上次粗细（settings 深模块，设备本地）
   };
   const setOpacity = (v: number) => {
     rack.writeCurrentToolOpacity(v);       // dial SSoT（反应式）
-    safeLSSet("webpaint.opacity", String(v));
+    setSetting("lastOpacity", v);          // 记住上次透明度
   };
   const currentDials = () => state.toolStates[rack.getRackToolKey(getEditMode().current())] || state.toolStates.brush;
 

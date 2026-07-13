@@ -7,7 +7,7 @@
 // 仍留 app.js 的协作件经 ctx 绑入：state / board / setStatus / store / updateSaveStatus（核心单例）。
 
 import { els } from "./els.ts";
-import { safeLS, safeLSSet } from "./safe-ls.ts";
+import { getSetting, setSetting } from "./settings.ts";
 import { applyTheme, cycleTheme, themeLabel } from "./theme.ts";
 import { t, lang, setLang, LANGS, LANG_NAME, type Key, type Lang } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
@@ -41,22 +41,22 @@ function setMenuItem(btn: HTMLElement, on: boolean, stateLabel = on ? t("common.
 function applyPressureSize(on: boolean) {
   state.pressureToSize = !!on;           // 全局开关 SSoT（反应式 → currentBrush 自动重派生）
   setMenuItem(els.menuPressureSize, on);
-  safeLSSet("webpaint.pToSize", on ? "1" : "0");
+  setSetting("pressureToSize", on);
 }
 function applyPressureOpacity(on: boolean) {
   state.pressureToOpacity = !!on;        // 反应式 → currentBrush 自动重派生
   setMenuItem(els.menuPressureOpacity, on);
-  safeLSSet("webpaint.pToOpacity", on ? "1" : "0");
+  setSetting("pressureToOpacity", on);
 }
 function applyLongPressPick(on: boolean) {
   state.longPressPick = !!on;
   setMenuItem(els.menuLongPressPick, on);
-  safeLSSet("webpaint.longPressPick", on ? "1" : "0");
+  setSetting("longPressPick", on);
 }
 function applySingleFingerDraw(on: boolean) {
   state.singleFingerDraw = !!on;
   setMenuItem(els.menuSingleFingerDraw, on);
-  safeLSSet("webpaint.singleFingerDraw", on ? "1" : "0");
+  setSetting("singleFingerDraw", on);
 }
 export function applyCheckerboard(on: boolean) {
   // v125: checkerboard per-doc，不再写 localStorage
@@ -71,14 +71,14 @@ export function applyCheckerboard(on: boolean) {
 function applyPixelGrid(on: boolean) {
   board.setPixelGridEnabled?.(!!on);
   setMenuItem(els.menuPixelGrid, !!on);
-  safeLSSet("webpaint.pixelGrid", on ? "1" : "0");
+  setSetting("pixelGrid", on);
 }
 
 // v275 FPS 计：dev 性能读数（角落 overlay；设备级开关，localStorage 持久化，默认关）。防煤气灯。
 function applyFps(on: boolean) {
   board.setShowFps?.(!!on);
   setMenuItem(els.menuFps, !!on);
-  safeLSSet("webpaint.fps", on ? "1" : "0");
+  setSetting("fps", on);
 }
 
 // v124 快捷键 sheet：从 KEYBOARD_SHORTCUTS 自动渲染（input.js 注册的唯一真理源）
@@ -141,14 +141,14 @@ export function initSettingsMenu(ctx: AppContext) {
     setStatus(t("status.checkerboard", { s: state.checkerboard ? t("common.on") : t("common.off") }));
   });
 
-  applyPixelGrid(safeLS("webpaint.pixelGrid") !== "0");   // boot：缺省=开
+  applyPixelGrid(getSetting<boolean>("pixelGrid"));   // boot：settings 深模块（default 开 + 旧键迁移）
   if (els.menuPixelGrid) els.menuPixelGrid.addEventListener("click", () => {
     const next = !board.getPixelGridEnabled();
     applyPixelGrid(next);
     setStatus(t("status.pixelGrid", { s: next ? t("common.on") : t("common.off") }));
   });
 
-  applyFps(safeLS("webpaint.fps") === "1");   // boot：缺省=关
+  applyFps(getSetting<boolean>("fps"));   // boot：settings 深模块（default 关 + 旧键迁移）
   if (els.menuFps) els.menuFps.addEventListener("click", () => {
     const next = !board.getShowFps?.();
     applyFps(next);

@@ -27,7 +27,7 @@ import { t } from "./i18n/index.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";
-import { safeLS, safeLSSet } from "./safe-ls.ts";
+import { getSetting, setSetting } from "./settings.ts";
 import { raiseWindow } from "./surfaces.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import type { AppContext } from "./app-context.ts";
@@ -720,7 +720,7 @@ export function initLayersPanel(ctx: AppContext) {
     els.layersPanel.style.right = "auto";
     els.layersPanel.style.top = top + "px";
     _clampListHeight();   // 拖动改了面板顶 → 重钉列表高度，底部 item 始终够得着
-    safeLSSet("webpaint.layersPanel.pos", JSON.stringify({ left, top }));
+    setSetting("layersPanelPos", { left, top });
   });
   els.layersPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
     if (_layersDrag && e.pointerId === _layersDrag.id) {
@@ -729,10 +729,10 @@ export function initLayersPanel(ctx: AppContext) {
     }
   });
   // 还原上次位置
-  const saved = safeLS("webpaint.layersPanel.pos");
+  const saved = getSetting<{ left?: number; top?: number } | null>("layersPanelPos");
   if (saved) {
     try {
-      const o = JSON.parse(saved);
+      const o = saved;
       els.layersPanel.style.left = o.left + "px";
       els.layersPanel.style.right = "auto";
       els.layersPanel.style.top = o.top + "px";

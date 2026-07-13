@@ -20,6 +20,7 @@ import {
   watchFolder, listGalleryTrash,
 } from "../app-store.ts";
 import { listSessions } from "../session.ts";
+import { getSetting, setSetting } from "../settings.ts";
 import { setMeta } from "../storage.ts";
 import { getOrFetchCloudThumb } from "../cloud-thumb-cache.ts";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
@@ -36,7 +37,6 @@ import type { GItem, TrashGItem, CloudFileMeta } from "./gallery-view-model.ts";
 import { session } from "../session-state.ts";
 import { t } from "../i18n/index.ts";
 
-const LS_FOLDER = "webpaint.galleryFolder";
 
 // ---- 图标（从 app.js 搬来，徽章 4 态 + 文件夹/云）----
 const SVG = (inner: string, sw = "2") =>
@@ -174,7 +174,7 @@ function makeGallery(host: GalleryHost) {
       const trash = ref<TrashGItem[]>([]);
       const openMenu = ref<string | null>(null);   // 当前展开的 tile 菜单 key
 
-      function safeFolder() { try { return localStorage.getItem(LS_FOLDER) || ""; } catch { return ""; } }
+      function safeFolder() { return getSetting<string>("galleryFolder"); }
 
       // ── watchFolder 订阅（网盘模型）：立即本地帧 + 云端帧同一 cb。换夹 = 退订重订。──
       let _unsub: (() => void) | null = null;
@@ -196,7 +196,7 @@ function makeGallery(host: GalleryHost) {
       }
       // 对外/内部刷新：files 视图重订阅（重跑本地+云端帧）；trash 视图重载。日常本夹写已由 store notifyFolderOf 即时重画。
       async function reload() { openMenu.value = null; if (view.value === "trash") { _unsub?.(); _unsub = null; await loadTrash(); } else subscribe(); }
-      function setFolder(p: string) { folder.value = p || ""; try { localStorage.setItem(LS_FOLDER, folder.value); } catch {} openMenu.value = null; subscribe(); }
+      function setFolder(p: string) { folder.value = p || ""; setSetting("galleryFolder", folder.value); openMenu.value = null; subscribe(); }
 
       subscribe();                        // 初始订阅当前夹
       onUnmounted(() => { _unsub?.(); _unsub = null; });

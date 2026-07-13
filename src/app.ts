@@ -39,6 +39,7 @@ import { initLayersPanel, renderLayersPanel, LAYER_MODE_LABEL } from "./layers-p
 import { initDocOps } from "./doc-ops.ts";
 import { initCloudAuthUI, updateCloudAuthUI } from "./cloud-auth-ui.ts";
 import { initSettingsMenu, applyCheckerboard } from "./settings-menu.ts";   // setMenuOpen→各菜单模块
+import { initSettings } from "./settings.ts";   // settings 深模块：boot 拉跨设备设置
 import { initFiltersAdjust } from "./filters-adjust.ts";
 import { initToolbar, RACK_PANEL_BY_TOOL } from "./toolbar.ts";
 import { setColor, initColorPanel } from "./color-panel.ts";
@@ -65,7 +66,7 @@ import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排�
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
 import "./plugins/index.ts";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 // candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
-import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, setLastSessionSignedIn, rackStore, setRackDirty, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
+import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, setLastSessionSignedIn, rackColl, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
 
 
 
@@ -104,7 +105,7 @@ const rack = new BrushRack({
   editMode: () => editMode,
   setStatus, confirm: openConfirmSheet,
   openExclusive, closeExclusive, registerPanel,
-  rackStore: rackStore as unknown as BrushRackDeps["rackStore"], setRackDirty,
+  rackColl,
   isSignedIn, isOnline: () => navigator.onLine !== false,
 });
 
@@ -226,6 +227,9 @@ initTheme(ctx);
 initLayersPanel(ctx);
 initDocOps(ctx);
 initSettingsMenu(ctx);
+// 跨设备设置拉云（settings 深模块，synced 轴）：折回本地镜像 + 通知 theme 重贴。fire-and-forget，不阻塞首帧。
+//   须在 initTheme 之后（onSyncedSettingChange("theme") 监听已注册）。
+void initSettings();
 initExportImportMenu(ctx);
 initFiltersAdjust(ctx);
 initToolbar(ctx);

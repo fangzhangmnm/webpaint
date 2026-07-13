@@ -6,15 +6,13 @@ import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
 import { mountColorWheel } from "./ui/color-wheel.ts";
 import { raiseWindow } from "./surfaces.ts";
-
-const safeLS = (k: string, f?: string) => { try { return localStorage.getItem(k) ?? f; } catch { return f; } };
-const safeLSSet = (k: string, v: unknown) => { try { localStorage.setItem(k, String(v)); } catch {} };
+import { getSetting, setSetting } from "./settings.ts";
 
 let state: AppContext["state"], colorWheel: ReturnType<typeof mountColorWheel>;
 
 export function setColor(hex: string) {
   state.color = hex;   // 反应式（proxy→dialReactive.color）→ currentBrush computed 自动重派生
-  safeLSSet("webpaint.color", hex);
+  setSetting("lastColor", hex);   // 记住上次色（settings 深模块，设备本地）
   els.activeSwatch.style.background = hex;
   colorWheel.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue
 }
@@ -25,15 +23,11 @@ export function toggleColorPanel(force?: boolean) {
   if (show) {
     els.colorPanel.classList.remove("hidden");
     raiseWindow(els.colorPanel);
-    const saved = safeLS("webpaint.colorPanel.pos");
+    const saved = getSetting<{ left?: number; top?: number } | null>("colorPanelPos");
     const w = els.colorPanel.offsetWidth || 264;
     const h = els.colorPanel.offsetHeight || 320;
-    let left, top;
-    if (saved) {
-      try { const o = JSON.parse(saved); left = o.left; top = o.top; }
-      catch { left = top = null; }
-    }
-    if (left == null) { left = window.innerWidth - w - 16; top = 60; }
+    let left = saved?.left, top = saved?.top;
+    if (left == null || top == null) { left = window.innerWidth - w - 16; top = 60; }
     left = Math.max(0, Math.min(window.innerWidth - w, left));
     top = Math.max(0, Math.min(window.innerHeight - h, top));
     els.colorPanel.style.left = left + "px";
@@ -72,7 +66,7 @@ export function initColorPanel(ctx: AppContext) {
     const top = Math.max(0, Math.min(window.innerHeight - h, _panelDrag.ot + (e.clientY - _panelDrag.sy)));
     els.colorPanel.style.left = left + "px";
     els.colorPanel.style.top = top + "px";
-    safeLSSet("webpaint.colorPanel.pos", JSON.stringify({ left, top }));
+    setSetting("colorPanelPos", { left, top });
   });
   els.colorPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
     if (_panelDrag && e.pointerId === _panelDrag.id) {

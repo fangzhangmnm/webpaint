@@ -5,3 +5,6 @@ export function safeLS(key: string, fallback: string | null = null): string | nu
 export function safeLSSet(key: string, val: string): void {
   try { localStorage.setItem(key, val); } catch {}
 }
+export function safeLSRemove(key: string): void {
+  try { localStorage.removeItem(key); } catch {}
+}
