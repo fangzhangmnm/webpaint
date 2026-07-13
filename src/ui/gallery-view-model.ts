@@ -20,12 +20,12 @@ export interface LocalSessionMeta extends LocalSession {
   trashKey?: string;
 }
 
-// 缩略图 provider（getOrFetchCloudThumb）读的云端文件字段：id / eTag / size / 下载直链。
+// 云端文件元字段。缩略图走 store.peekTail（按 name，不再要 itemId/downloadUrl，内容盲）——
+//   这里只留 size（新鲜度戳退路 + ZIP fallback 偏移）；lastModifiedDateTime 在基类 CloudFile。
+//   id 仅回收站 restore/purge 的 cloudItemId 用（store.listTrash 带回），缩略图路径不碰。
 export interface CloudFileMeta extends CloudFile {
   id?: string;
-  eTag?: string;
   size?: number;
-  "@microsoft.graph.downloadUrl"?: string;
 }
 
 // 图库消费的 item 形状：gallery-model 的 GalleryItem + 图库运行态（dirty / ghost）+
@@ -50,7 +50,7 @@ export interface GalleryTile {
   badgeTitle: string;
   ghost: boolean;        // cloud-gone dirty 孤儿（云端 path 被别的设备改名/删，本地有未推编辑）→ UI surface
   hasLocalThumb: boolean;
-  cloud: CloudFileMeta | null;     // {id,eTag,size,downloadUrl?} 给 thumb provider；纯本地 = null
+  cloud: CloudFileMeta | null;     // {size,lastModifiedDateTime} 给 thumb provider（按 name+token 拉）；纯本地 = null
   isActive: boolean;
   encrypted: boolean;    // 本地字节是加密容器（ADR-0012）。纯云端项未知（thumb 拉回时按 MIME 现场识别）
 }

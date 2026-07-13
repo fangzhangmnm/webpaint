@@ -1,12 +1,15 @@
-// 云端 ora thumbnail 的 IDB 缓存（v137）
+// 云端 ora thumbnail 的 IDB 缓存（v137；store-cutover 2026-07-12 重锚）
 //
-// key 形态：`cloud-thumb:<itemId>` 存 meta store，value = { etag, blob, at }
-//   - itemId 跨 rename 稳定（OneDrive 保证）→ 文件改名不失效
-//   - etag 变 = 文件改了 → 重拉 + 覆盖
-//   - etag 同 = blob 仍然有效，直接用
+// key 形态：`cloud-thumb:<name>` 存 meta store，value = { token, blob, at }
+//   - name = 库的裸 session 名（item.name，无后缀）—— 薄库不再暴露 OneDrive itemId（内容盲，身份=path）。
+//   - token = 新鲜度戳（cloud.lastModifiedDateTime 优先，退 size）。token 变 = 文件改了 → 重拉 + 覆盖同 key。
+//   - token 同 = blob 仍有效，直接用。
 //
-// 失效路径：用户在 OneDrive 网页改文件 / 桌面 OneDrive 同步覆盖 → 下次 list
-// 会拿到新 etag，我们对比就重拉。不需要 TTL。
+// 与旧 itemId key 的取舍：无 itemId → 改名的作品换 name = 换 key（旧条目成孤儿，随 clearCloudThumbCache 清）。
+//   同名编辑走 token 比对、覆盖同 key，不累积孤儿。失效不需 TTL：下次 list 拿到新 lastModified/size 即重拉。
+//
+// 加密作品：fetchOraThumbnail 返回**密文** blob（type=ENC_PEEK_MIME），缓存原样存密文 → 明文缩略图不落 IDB；
+//   caller（gallery）拿密文当「这是加密项」信号，经 store getPeek 按锁态解。
 //
 // 容量：256×256 PNG ~25KB/张；500 张 ≈ 12MB。本机 IDB 配额 GB 级，可忽略。
 // 真要清：window.WebPaint.clearCloudThumbCache()
@@ -15,15 +18,14 @@
 
 import { getMeta, setMeta } from "./storage.ts";
 import { fetchOraThumbnail } from "./cloud-thumbs.ts";
-const getDownloadUrl = async (..._a: unknown[]): Promise<string | null> => null;   // ⚠TODO：薄库不暴露 downloadUrl（内容盲）
 
 const KEY_PREFIX = "cloud-thumb:";
 
-function _key(itemId: string): string { return KEY_PREFIX + itemId; }
+function _key(name: string): string { return KEY_PREFIX + name; }
 
 // IDB 里存的缓存条目形态
 interface CachedThumb {
-  etag: string;
+  token: string;
   blob: Blob;
   at: number;
 }
@@ -36,71 +38,48 @@ export function resetStats() { stats.hits = 0; stats.misses = 0; stats.errors = 
 // 用法：WebPaint.cloudThumbSkipCache(true)
 export const config: { skipCache: boolean } = { skipCache: false };
 
-/** 读 cache。返回 { etag, blob, at } 或 null */
-export async function readCachedThumb(itemId: string): Promise<CachedThumb | null> {
+/** 读 cache。返回 { token, blob, at } 或 null */
+export async function readCachedThumb(name: string): Promise<CachedThumb | null> {
   try {
-    const v = await getMeta(_key(itemId)) as CachedThumb | undefined;
-    if (v && v.blob && v.etag) return v;
+    const v = await getMeta(_key(name)) as CachedThumb | undefined;
+    if (v && v.blob && v.token) return v;
     return null;
   } catch (_) { return null; }
 }
 
 /** 写 cache（fire-and-forget；失败不影响主流程） */
-export async function writeCachedThumb(itemId: string, etag: string, blob: Blob): Promise<void> {
+export async function writeCachedThumb(name: string, token: string, blob: Blob): Promise<void> {
   try {
-    await setMeta(_key(itemId), { etag, blob, at: Date.now() });
+    await setMeta(_key(name), { token, blob, at: Date.now() });
   } catch (e) {
     console.warn("[cloud-thumb-cache] write failed:", e);
   }
 }
 
 /**
- * 拿 thumbnail。优先 cache（etag 匹配）；miss 走网络 + 回写 cache。
+ * 拿 thumbnail。优先 cache（token 匹配）；miss 走网络（peekTail）+ 回写 cache。
  * 失败抛错（caller 显示 placeholder）。
  *
- * @param {string} itemId
- * @param {string} etag       来自 listChildren item.eTag
- * @param {number} fileSize
- * @returns {Promise<Blob>}
- */
-/**
- * @param {string} itemId
- * @param {string} etag       listChildren item.eTag
- * @param {number} fileSize
- * @param {string|null} [downloadUrl] — listChildren 带回的 1h 短效 CDN URL
- *   有 → 省每张 thumb 的 metadata RTT；401/403 过期会重申请一次再试
+ * @param {string} name       库的裸 session 名（item.name，无后缀 = store.file 的 key）
+ * @param {string} token      新鲜度戳（cloud.lastModifiedDateTime 优先，退 size）；变 = 重拉
+ * @param {number} fileSize   文件总字节（cloud.size）——供 ZIP fallback 判偏移；缺省 0 = 未知
  * @returns {Promise<{ blob: Blob, fromCache: boolean }>}
  */
-export async function getOrFetchCloudThumb(itemId: string, etag: string, fileSize: number, downloadUrl: string | null = null): Promise<{ blob: Blob; fromCache: boolean }> {
+export async function getOrFetchCloudThumb(name: string, token: string, fileSize = 0): Promise<{ blob: Blob; fromCache: boolean }> {
   if (!config.skipCache) {
-    const cached = await readCachedThumb(itemId);
-    if (cached && cached.etag === etag) {
+    const cached = await readCachedThumb(name);
+    if (cached && cached.token === token) {
       stats.hits++;
       return { blob: cached.blob, fromCache: true };
     }
   }
   stats.misses++;
   try {
-    const blob = await _fetchWithExpireRetry(itemId, fileSize, downloadUrl);
-    if (!config.skipCache) writeCachedThumb(itemId, etag, blob);
+    const blob = await fetchOraThumbnail(name, fileSize);
+    if (!config.skipCache) writeCachedThumb(name, token, blob);
     return { blob, fromCache: false };
   } catch (e) {
     stats.errors++;
-    throw e;
-  }
-}
-
-// 带 downloadUrl 时优先直打 CDN；过期（401/403）→ 重新申请 1 次 → 仍失败抛
-async function _fetchWithExpireRetry(itemId: string, fileSize: number, downloadUrl: string | null): Promise<Blob> {
-  if (!downloadUrl) return await fetchOraThumbnail(itemId, fileSize);
-  try {
-    return await fetchOraThumbnail(itemId, fileSize, { downloadUrl });
-  } catch (e) {
-    if ((e as { status?: number }).status === 401 || (e as { status?: number }).status === 403) {
-      const fresh = await getDownloadUrl(itemId);
-      if (!fresh) throw e;
-      return await fetchOraThumbnail(itemId, fileSize, { downloadUrl: fresh });
-    }
     throw e;
   }
 }

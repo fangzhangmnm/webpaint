@@ -84,7 +84,9 @@ export function watchFolder(
   return store.watchFolder(folder, (snap) => {
     cb({
       path: snap.path,
-      items: snap.items.map(itemToG),
+      // 文件名**倒序**（localeCompare numeric）：新文档名 yyyymmdd-xxxx → 新日期在前，稳定（不随存盘时间跳）。
+      //   store 列举顺序不保证；排序是 app 展示策略（对齐 gallery-model.sliceFolder 的既定倒序），故在此 app 层做。
+      items: snap.items.map(itemToG).sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true })),
       folderNames: snap.folders.map((f) => f.slice(prefix.length)).filter(Boolean),   // 全路径 → immediate 段
     });
   });

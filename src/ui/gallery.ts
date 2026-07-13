@@ -120,7 +120,10 @@ const ThumbCell = defineComponent({
             if (!e.isIntersecting) continue;
             obs?.disconnect(); obs = null;
             const c = props.cloud!;   // 闭包外 line 119 `if (props.cloud)` 已守门
-            getOrFetchCloudThumb(c.id as string, c.eTag || "", c.size || 0, c["@microsoft.graph.downloadUrl"])
+            // 库无 itemId/downloadUrl（内容盲）：按**裸 name**（props.alt = item.name）走 store.peekTail，
+            //   新鲜度戳 = lastModified 优先退 size（token 变 = 重拉）。
+            const token = c.lastModifiedDateTime || String(c.size || 0);
+            getOrFetchCloudThumb(props.alt, token, c.size || 0)
               .then(({ blob }: { blob: Blob }) => {
                 showCloud.value = false;
                 if (blob && blob.type === ENC_PEEK_MIME) { cloudEncBlob = blob; return tryDecrypt(); }
@@ -328,8 +331,8 @@ function makeGallery(host: GalleryHost) {
         if (res.status === "conflict") { host.status(t("gal.st.encConflict", { name: item.name }), true); }
         else if (res.status === "cloud-deferred") { host.status(t("gal.st.encDeferred", { okMsg }), true); }
         else host.status(okMsg);
-        // 旧 etag 的云 thumb 缓存条目立即作废（明文/密文残留都清）
-        if (item.cloud?.id) { try { await setMeta(`cloud-thumb:${item.cloud.id}`, null); } catch (_) {} }
+        // 旧 token 的云 thumb 缓存条目立即作废（明文/密文残留都清）。cache 现按裸 name key（store-cutover）。
+        try { await setMeta(`cloud-thumb:${item.name}`, null); } catch (_) {}
         return true;
       }
 

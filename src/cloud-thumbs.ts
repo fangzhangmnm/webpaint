@@ -17,11 +17,10 @@
 //   - 硬扫：8 字节 sig + IHDR 验证 + IEND 终止，false-match 概率 ~1/2^96
 //   - ZIP 解析：EOCD commentLen sanity 防 false-positive；输出 PNG magic 校验
 
-// ⚠TODO：cloud-only 缩略图的 byte-range 拉取——薄库不暴露原始 byte-range（内容盲）。暂 stub 返 null（占位图）。
-//   缓存过/本地的作品仍有 peek 缩略图（store 存的 hint.peek）；cloud-only 未缓存 → 占位。待 store 出内容盲 getTail 原语。
-const downloadItemRange = async (..._a: unknown[]): Promise<ArrayBuffer> => new ArrayBuffer(0);
-const downloadItemBlob = async (..._a: unknown[]): Promise<Blob> => new Blob([]);
-const downloadRangeFromUrl = async (..._a: unknown[]): Promise<ArrayBuffer> => new ArrayBuffer(0);
+// 字节来源（2026-07-12 store-cutover）：薄库内容盲原语 store.file(name,{isZip}).peekTail(n)。
+//   本地有缓存 → Blob.slice 尾片；纯云端 → cloud.pullTail 真 OneDrive byte-range。不再要 itemId/downloadUrl。
+//   身份 = 库的**裸 session 名**（item.name，无 .ora/.zip 后缀）。库不解码——app 自己扫尾部 PNG。
+import { store } from "./app-store.ts";
 // 加密容器（ADR-0012）：尾部是加密 peek blob（WebPaint 的 peek=缩略图 PNG），
 // PNG 硬扫自然落空 → 扫 MAGIC。命中返**密文** Blob（type=ENC_PEEK_MIME），解密归 caller
 // （图库经 store.decryptPeekBytes 按锁态解；cache 层原样缓存密文 → 明文 thumb 不落 IDB）。
@@ -178,92 +177,62 @@ function _scanPngFromEnd(buf: ArrayBuffer): Uint8Array | null {
 // ============= 主入口 =============
 
 /**
- * 拉一个云端 ora 的 thumbnail，返回 PNG Blob
- * 不带 cache 逻辑（caller 负责）；不带 retry / 限流（caller 负责）
+ * 拉一个云端 ora 的 thumbnail，返回 PNG Blob（或加密容器的密文 peek blob，type=ENC_PEEK_MIME）。
+ * 不带 cache 逻辑（caller 负责）；不带 retry / 限流（caller 负责）。
  *
- * @param {string} itemId  OneDrive item id
- * @param {number} fileSize 文件总大小（来自 listChildren 的 item.size）
- * @returns {Promise<Blob>} PNG blob
+ * 字节来源 = store.file(name,{isZip}).peekTail(SUFFIX_BYTES)：内容盲尾片（本地切片或云端 byte-range）。
+ * 单次拉尾 80KB 就够——WebPaint v137+ ora 把 thumbnail PNG 放 zip 末 + STORE 不压，故硬扫 1 命中。
+ *
+ * ⚠已放弃的 fallback：任意偏移「3-request」拉取（CD / thumbnail entry 不在尾 buffer 内）。
+ *   薄库内容盲、不暴露 provider itemId/downloadUrl，无法重建任意 byte-range。此情形（外部/老 deflate
+ *   ora，缩略图不在文件末）→ 抛错，caller 显占位图。自家 ora 走硬扫，不受影响。
+ *
+ * @param {string} name  库的裸 session 名（item.name，无 .ora/.zip 后缀）
+ * @param {number} [fileSize] 文件总字节（cloud.size）；用来判断 ZIP fallback 的绝对偏移是否落在尾 buffer 内。
+ *                            缺省 0 = 未知（仅硬扫/加密扫可靠；ZIP fallback 越界会抛→占位）。
+ * @returns {Promise<Blob>} PNG blob，或 ENC_PEEK_MIME 密文 blob
  */
-/**
- * @param {string} itemId
- * @param {number} fileSize
- * @param {object} [opts]
- * @param {string} [opts.downloadUrl] — listChildren 带回的 1h 短效 CDN URL，
- *                                       直接打省一次 metadata RTT；过期抛 401/403
- */
-export async function fetchOraThumbnail(itemId: string, fileSize: number, opts: { downloadUrl?: string } = {}): Promise<Blob> {
-  const dl = opts.downloadUrl || null;
-  // 抽象：有 downloadUrl 走 CDN（省 metadata RTT）；没有走老路（自己拿 url）
-  const rangeFetch: (offset: number | null, length: number) => Promise<ArrayBuffer> = dl
-    ? (offset, length) => downloadRangeFromUrl(dl, offset, length)
-    : (offset, length) => downloadItemRange(itemId, offset, length);
+export async function fetchOraThumbnail(name: string, fileSize = 0): Promise<Blob> {
+  // 尾部字节唯一来源：内容盲 peekTail（本地切片或云端 byte-range）。
+  const tailBlob = await store.file(name, { isZip: true }).peekTail(SUFFIX_BYTES);
+  if (!tailBlob) throw new Error("peekTail 返回 null（云端不可达 / 无此文件 / 无本地副本）");
+  const tailBuf = await tailBlob.arrayBuffer();
+  // 文件比尾 buffer 大 → 尾片是 suffix，起始绝对偏移 = fileSize - 长度；否则（文件 ≤ 尾）整份即 buffer，偏移 0。
+  const tailStartOffset = fileSize > tailBuf.byteLength ? fileSize - tailBuf.byteLength : 0;
 
-  // 路径 0：小文件整下载（< 80KB 没必要 byte-range）
-  if (fileSize <= SUFFIX_BYTES) {
-    const blob = await downloadItemBlob(itemId);
-    const buf = await blob.arrayBuffer();
-    const scanned = _scanPngFromEnd(buf);
-    if (scanned && _isPng(scanned)) { telemetry.small++; return new Blob([scanned], { type: "image/png" }); }
-    const encSmall = _scanEncThumb(buf);
-    if (encSmall) { telemetry.small++; return encSmall; }
-    telemetry.small++;
-    return _extractFromBuffer(buf, 0);
-  }
-
-  // 路径 1：紧凑 suffix + 硬扫 PNG sig
-  // 自家 v137+ ora（thumb 放末 + STORE）几乎 100% 命中 → 1 request 完事
-  const tailBuf = await rangeFetch(null, SUFFIX_BYTES);
-  const tailStartOffset = fileSize - tailBuf.byteLength;
+  // 路径 1：硬扫 PNG sig（自家 v137+ ora thumb 放末 + STORE → 几乎 100% 命中）
   const fastScan = _scanPngFromEnd(tailBuf);
   if (fastScan && _isPng(fastScan)) { telemetry.hardScan++; return new Blob([fastScan], { type: "image/png" }); }
 
   // 路径 1e：加密容器（thumb blob 在外层 zip 末 + STORE，与明文 thumb 同一 80KB 预算内命中）
+  //   命中返**密文** blob（type=ENC_PEEK_MIME）；caller 经 store getPeek 按锁态解（明文不落 cache/IDB）。
   const encHit = _scanEncThumb(tailBuf);
   if (encHit) { telemetry.encScan++; return encHit; }
 
-  // 路径 2+3：ZIP 解析 fallback（外部 ora / 老 ora / deflate 压 thumbnail）
-  // 复用同一个 tailBuf 找 EOCD
+  // 路径 2（仅尾内）：ZIP 解析 fallback（外部 ora / 老 ora / deflate 压 thumbnail）。
+  //   只在 CD + thumbnail entry 都落在尾 buffer 时可行；否则抛（放弃任意偏移拉取，见上 ⚠）。
   const eocdInTail = _findEOCD(tailBuf);
   if (eocdInTail < 0) throw new Error("EOCD 没找到（文件不是 zip？）");
   const { cdSize, cdOffset } = _parseEOCD(tailBuf, eocdInTail);
-
-  // central directory 在 buf 里的位置？
-  let cdBuf, cdStartInCdBuf;
-  let extraRequests = 0;
-  if (cdOffset >= tailStartOffset) {
-    cdBuf = tailBuf;
-    cdStartInCdBuf = cdOffset - tailStartOffset;
-  } else {
-    cdBuf = await rangeFetch(cdOffset, cdSize);
-    cdStartInCdBuf = 0;
-    extraRequests++;
+  if (cdOffset < tailStartOffset || cdOffset - tailStartOffset + cdSize > tailBuf.byteLength) {
+    throw new Error("central directory 不在尾 buffer——已放弃任意偏移拉取（占位图）");
   }
-  const entries = _parseCD(cdBuf, cdStartInCdBuf, cdSize);
+  const entries = _parseCD(tailBuf, cdOffset - tailStartOffset, cdSize);
   const thumbEntry = entries.find((e) => e.name === THUMB_PATH);
   if (!thumbEntry) throw new Error("ora 内没找到 Thumbnails/thumbnail.png");
 
-  // thumbnail 数据需要的字节范围：[localOff, localOff + (header + compSize)]
-  // header 大小未知，预留 256 字节足够（30 + name + extra 一般 << 256）
+  // thumbnail 数据需要的字节范围：[localOff, localOff + (header + compSize)]。header 预留 256 足够。
   const thumbStart = thumbEntry.localOff;
   const thumbEnd = thumbStart + 256 + thumbEntry.compSize;
-
-  // 在 tail 里？
-  let entryBuf, entryStartInBuf;
-  if (thumbStart >= tailStartOffset && thumbEnd <= fileSize) {
-    entryBuf = tailBuf;
-    entryStartInBuf = thumbStart - tailStartOffset;
-  } else {
-    entryBuf = await rangeFetch(thumbStart, Math.min(256 + thumbEntry.compSize, fileSize - thumbStart));
-    entryStartInBuf = 0;
-    extraRequests++;
+  if (thumbStart < tailStartOffset || thumbEnd - tailStartOffset > tailBuf.byteLength) {
+    throw new Error("thumbnail entry 不在尾 buffer——已放弃任意偏移拉取（占位图）");
   }
-  const dataOffsetInEntry = _localHeaderDataOffset(entryBuf, entryStartInBuf);
-  const rawData = new Uint8Array(entryBuf, entryStartInBuf + dataOffsetInEntry, thumbEntry.compSize);
+  const entryStartInBuf = thumbStart - tailStartOffset;
+  const dataOffsetInEntry = _localHeaderDataOffset(tailBuf, entryStartInBuf);
+  const rawData = new Uint8Array(tailBuf, entryStartInBuf + dataOffsetInEntry, thumbEntry.compSize);
   const pngBytes = await _decompress(rawData, thumbEntry.method);
   if (!_isPng(pngBytes)) throw new Error("解出的不是 PNG（byte-range 错位？）");
-  if (extraRequests >= 2) telemetry.zip3++;
-  else telemetry.zip2++;
+  telemetry.zip2++;
   return new Blob([pngBytes], { type: "image/png" });
 }
 
@@ -272,19 +241,4 @@ function _scanEncThumb(buf: ArrayBuffer): Blob | null {
   const parsed = scanEncPeekFromEnd(new Uint8Array(buf));
   if (!parsed) return null;
   return new Blob([new Uint8Array(buf).slice(parsed.start, parsed.end)], { type: ENC_PEEK_MIME });
-}
-
-// ============= 提取 helper（小文件路径用）=============
-async function _extractFromBuffer(buf: ArrayBuffer, fileStart: number): Promise<Blob> {
-  const eocdInBuf = _findEOCD(buf);
-  if (eocdInBuf < 0) throw new Error("EOCD 没找到");
-  const { cdSize, cdOffset } = _parseEOCD(buf, eocdInBuf);
-  const entries = _parseCD(buf, cdOffset - fileStart, cdSize);
-  const thumb = entries.find((e) => e.name === THUMB_PATH);
-  if (!thumb) throw new Error("ora 内没 thumbnail");
-  const dataOff = _localHeaderDataOffset(buf, thumb.localOff - fileStart);
-  const rawData = new Uint8Array(buf, thumb.localOff - fileStart + dataOff, thumb.compSize);
-  const pngBytes = await _decompress(rawData, thumb.method);
-  if (!_isPng(pngBytes)) throw new Error("解出的不是 PNG");
-  return new Blob([pngBytes], { type: "image/png" });
 }

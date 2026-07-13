@@ -48,12 +48,13 @@ export function initDevConsole() {
     console.log(`[cloud-thumb] cleared ${n} cached thumbnails`);
     return n;
   };
-  WP.pocFetchThumb = async function (itemId?: string, fileSize?: number) {
-    // 网盘模型：库不提供廉价全库列举、也不暴露单夹 list → POC 需显式 itemId（从 gallery tile 的 path 取）。
-    if (!itemId) throw new Error("pocFetchThumb 需显式 itemId（path）");
+  WP.pocFetchThumb = async function (name?: string, fileSize?: number) {
+    // store-cutover：fetchOraThumbnail 现按**裸 session 名**（item.name，无后缀）走 store.peekTail。
+    //   POC 需显式给该 name（从 gallery tile 取 item.name）；不再是 OneDrive itemId。
+    if (!name) throw new Error("pocFetchThumb 需显式裸 session 名（item.name）");
     const t0 = performance.now();
-    // 手动路径可只给 itemId（fileSize 由 byte-range 探测）；auto 路径两者都填。运行时契约不变。
-    const blob = await fetchOraThumbnail(itemId, fileSize as number);
+    // fileSize 可选（供 ZIP fallback 判偏移；硬扫/加密扫不需要）。运行时契约不变。
+    const blob = await fetchOraThumbnail(name, fileSize);
     console.log(`POC 完成 ${(performance.now() - t0) | 0}ms, blob size ${blob.size}`);
     // 显示到 console（可见 thumbnail）
     const url = URL.createObjectURL(blob);
