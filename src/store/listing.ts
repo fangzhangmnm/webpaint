@@ -73,7 +73,7 @@ export function classifySyncState(f: {
 // ── 编排：union(cloud.listAll, local.appKeys) ⋈ local-head → Item[] ─────────────────────
 export interface ListingCfg {
   cloud: Pick<CloudSync, "listAll" | "listFolder" | "getETag">;
-  local: Pick<LocalCache, "appKeys">;
+  local: Pick<LocalCache, "appKeys"> & Partial<Pick<LocalCache, "stat">>;   // stat 选填：给本地项填 size/updatedAt（老 mock 无 stat → 跳过）
   head: Pick<LocalHead, "seenBase" | "isDirty">;
   pendingFolders?: () => string[];   // 离线建、尚未确认上云的空文件夹（folder-registry；并进 folders 让它离线可见）
 }
@@ -99,6 +99,7 @@ export function createListing(cfg: ListingCfg) {
     hasLocal: boolean,
     cloudReachable: boolean,
     absenceAuthoritative: boolean,
+    localStat?: { size: number; updatedAt: number } | null,
   ): Item {
     const hasCloud = cf != null;
     const seen = head.seenBase(path);
@@ -109,7 +110,16 @@ export function createListing(cfg: ListingCfg) {
       dirty: head.isDirty(path),
       cloudReachable, absenceAuthoritative,
     });
-    return { path, syncState, size: cf?.size, lastModified: cf?.lastModified };
+    // size/时间：云端有就用云端（authoritative），否则用本地缓存记录 → 离线 / 云端帧到达前也不显 0B/1970。
+    return { path, syncState, size: cf?.size ?? localStat?.size, lastModified: cf?.lastModified ?? localStat?.updatedAt };
+  }
+
+  // 本地项的轻量元信息（size+updatedAt），批量取 → classifyPath 给本地项填尺寸/时间。stat 缺（老 mock）→ 跳过。
+  async function statLocal(keys: Iterable<string>): Promise<Map<string, { size: number; updatedAt: number }>> {
+    const m = new Map<string, { size: number; updatedAt: number }>();
+    if (!local.stat) return m;
+    await Promise.all([...keys].map(async (k) => { const s = await local.stat!(k); if (s) m.set(k, s); }));
+    return m;
   }
 
   // 单夹列举（**非递归**）——watchFolder 的每次快照。**per-folder 权威**：只列该夹直属子项、只判该夹内 path。
@@ -147,8 +157,9 @@ export function createListing(cfg: ListingCfg) {
     }
 
     const paths = new Set<string>([...cloudMap.keys(), ...localDirect]);
+    const localStats = await statLocal(localDirect);
     const items: Item[] = [];
-    for (const path of paths) items.push(classifyPath(path, cloudMap.get(path), localDirect.has(path), cloudReachable, absenceAuthoritative));
+    for (const path of paths) items.push(classifyPath(path, cloudMap.get(path), localDirect.has(path), cloudReachable, absenceAuthoritative, localStats.get(path)));
 
     return { path: folder, items, folders: [...subfolders], complete: absenceAuthoritative };
   }
@@ -169,8 +180,9 @@ export function createListing(cfg: ListingCfg) {
     for (const p of cloudMap.keys()) paths.add(p);
     for (const p of localSet) paths.add(p);
 
+    const localStats = await statLocal(localSet);
     const items: Item[] = [];
-    for (const path of paths) items.push(classifyPath(path, cloudMap.get(path), localSet.has(path), cloudReachable, absenceAuthoritative));
+    for (const path of paths) items.push(classifyPath(path, cloudMap.get(path), localSet.has(path), cloudReachable, absenceAuthoritative, localStats.get(path)));
 
     // folders = 云 folders(可达时) ∪ 本地 pending 空夹（离线建的）。去重。
     const folderSet = new Set<string>(cloudRes?.folders ?? []);

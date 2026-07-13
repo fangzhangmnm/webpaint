@@ -66,8 +66,9 @@ function itemToG(it: { path: string; syncState: string; lastModified?: number; s
   const name = stripSessionExt(it.path);
   return {
     name,
-    local: isCached(it.syncState as never) ? { name } : null,
-    // size 从 store Item 带出来（listing 已从云端 c.size 解析）→ 图库显真尺寸而非 0 B。
+    // 本地项也带 size/updatedAt（listing 现从本地缓存记录填）→ 离线 / 云端帧到达前不显 0B/1970（itemTime 优先读 local.updatedAt）。
+    local: isCached(it.syncState as never) ? { name, size: it.size, updatedAt: it.lastModified } : null,
+    // size 从 store Item 带出来（listing 已从云端 c.size 或本地 stat 解析）→ 图库显真尺寸而非 0 B。
     cloud: _CLOUD_STATES.has(it.syncState) ? { path: it.path, name, size: it.size, lastModifiedDateTime: it.lastModified ? new Date(it.lastModified).toISOString() : undefined } : null,
     dirty: isDirty(it.syncState as never),
     ghost: it.syncState === "ghost",

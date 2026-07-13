@@ -48,6 +48,7 @@ export function createMockLocal(): MockLocal {
       return (items.has(name) ? items.get(name)! : null) as unknown as Blob | null;
     },
     async exists(name: string) { return items.has(name); },
+    async stat(name: string) { const b = items.get(name) as { size?: number } | undefined; return b ? { size: b.size ?? 0, updatedAt: 0 } : null; },
     async appKeys() { return [...items.keys()].filter((k) => !k.startsWith("local-trash:") && !k.startsWith(".backup-local/") && !k.startsWith("__collection__/")); },
     async backup(name: string) {
       if (!items.has(name)) throw new Error(`本地无 ${name}，无法备份`);

@@ -26,6 +26,8 @@ export function createLocalCache(dbName: string): LocalCache {
     },
     async get(name: string) { const r = await idbCache.get(name); return r ? r.blob : null; },
     async exists(name: string) { return (await idbCache.get(name)) !== undefined; },
+    // 轻量元信息：blob.size 是 Blob 引用属性（不载字节）、updatedAt 存在记录里 → 便宜。listing 给本地项填尺寸/时间。
+    async stat(name: string) { const r = await idbCache.get(name); return r ? { size: r.blob.size, updatedAt: r.updatedAt } : null; },
     // 已缓存的应用文件名（排除内部命名空间：local-trash: / .backup-local 前缀 / __collection__/）。
     async appKeys() {
       const keys = await idbCache.keys();

@@ -104,6 +104,9 @@ export interface RawFile {
   encrypt(opts?: { isOnline?: () => boolean }): Promise<{ status: string }>;   // 明文→密文（先本地后云 If-Match；离线 defer；错密码前置出局）
   decrypt(opts?: { isOnline?: () => boolean }): Promise<{ status: string }>;   // 密文→明文（同上红线）
   verifyPassword(pw: string): Promise<boolean>;                         // app 解锁循环（busy 外）便宜验：解 peek，不碰 7z
+  // 内容盲**尾部 n 字节**（本地有→Blob.slice；纯云端→provider byte-range via cloud.pullTail）。缺→null。
+  //   app 自己扫内容（如 .ora 末尾的缩略图 PNG）——库不解码、不假设格式。cloud-only 缩略图不必整份下载。
+  peekTail(n: number): Promise<Blob | null>;
 }
 export interface ZipFile extends RawFile {
   // peek = 加密容器最外层可 byte-range 单独取的 **不透明尾块字节**（≤64KiB，独立 AES-GCM）。
@@ -423,6 +426,9 @@ export function createStore(config: StoreConfig) {
       encrypt(opts) { return encEncrypt(name, opts?.isOnline ?? isOnline); },
       decrypt(opts) { return encDecrypt(name, opts?.isOnline ?? isOnline); },
       verifyPassword(pw) { return encVerify(name, pw); },
+      // 内容盲**尾部字节**（本地有→切片；纯云端→cloud.pullTail byte-range）。app 拿去自己扫（如 .ora 末尾的缩略图 PNG）。
+      //   库不解码、不假设是什么——就是「最后 n 字节」。cloud-only 缩略图无需先整份下载。
+      peekTail(n) { return encTailBytes(name, n, true); },
     };
   }
 

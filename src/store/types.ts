@@ -68,6 +68,8 @@ export interface LocalCache {
   exists(name: string): Promise<boolean>;
   /** 已缓存的**应用文件名**集合（排除 trash/backup/collection 内部命名空间）——gallery 批量判 cached 用。 */
   appKeys(): Promise<string[]>;
+  /** 轻量元信息（size + updatedAt），不取 blob 内容。listing 给本地项填尺寸/时间（离线/云端帧到达前也不显 0B/1970）。缺 → null。 */
+  stat(name: string): Promise<{ size: number; updatedAt: number } | null>;
   backup(name: string): Promise<string>;
   trash(name: string): Promise<string>;
   hardDelete(name: string): Promise<void>;
