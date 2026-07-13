@@ -435,7 +435,9 @@ export function initSession(ctx: AppContext) {
     editor: {
       adopt: async (bytes: Blob) => { const loaded = await decodeOraToDoc(bytes) as LoadedDoc; adoptModel(loaded); },
       encode: async () => ({ bytes: await _encodeCurrentOra(), peek: await renderThumbBlob(doc, 256) }),
-      onChange: (cb: () => void) => { document.addEventListener("wp:histchange", () => { if (!_loadingDoc) cb(); }); },
+      // ⚠ wp:histchange 在 **window** 上 dispatch（history.ts）——绑 document 收不到 → 打开的文档编辑永不标脏、
+      //   保存静默 no-op、编辑丢失（2026-07-12 真机抓到的数据丢失根因；其余监听者都用 window）。
+      onChange: (cb: () => void) => { window.addEventListener("wp:histchange", () => { if (!_loadingDoc) cb(); }); },
     },
     isZip: true,
     policy: { autosaveMs: AUTOSAVE_MS, pushOn: ["exit"] },
