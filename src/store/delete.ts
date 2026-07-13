@@ -25,7 +25,8 @@ export interface DelOpts {
 }
 export interface DelResult { status: string; where?: string; trashed?: unknown; trashKey?: string | null; baseEtag?: string | null; queuedCloudDelete?: boolean; reason?: string; drained?: number; deferred?: number }
 
-const DELQ_KEY = "delqueue:v1";
+// 相对键（namespacedKv 补 `${appId}.${databaseId}.` 根前缀 → `${ns}.internal.pending_deletions`）。
+const DELQ_KEY = "internal.pending_deletions";
 
 export function createDelete(cfg: DeleteCfg) {
   const { cloud, local, head, kv, busy: _busy = passBusy } = cfg;

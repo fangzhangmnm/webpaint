@@ -72,17 +72,21 @@ store/ 外每一处命中都是 jailbreak（WebPaint 已知三处：`session-sta
 > 两条迁移的搬迁逻辑（tax）已删，库以**最新标准**出生（身份=全名 X.ora、appId 命名空间、dirty 双轨从出生即成立，无需搬迁）。
 > 跨版本收敛仍靠**显式版本迁移**，不靠愈合（不写 `?? ora` 类 read-fallback）——只是当前注册表为空。
 
-- **schema-version** — kv 里一枚戳 `${appId}.store.schema = vNNN-yyyymmdd`。字符串序即版本序（NNN 零填充）。= "这个客户端的 on-disk 结构有多新"，让陈旧可见（家族"缓存无失效机制→让龄可见"同源）。
+- **schema-version** — kv 里一枚戳 `${ns}.database-version = vNNN-yyyymmdd`（ns=`${appId}.${databaseId}`）。字符串序即版本序（NNN 零填充）。= "这个客户端的 on-disk 结构有多新"，让陈旧可见（家族"缓存无失效机制→让龄可见"同源）。
 - **migration（深模块）** — 引擎内部，app 碰不到（ADR-0021 四面）。boot 时 `createStore` 在 ready-gate 前 `await runMigrations`：读戳 → 按有序注册表 `MIGRATIONS` 跑欠的迁移 → **run 成功后才盖新戳**（崩了不盖→重跑）。**现 `MIGRATIONS` 为空** → 编排跑空、不盖戳（新装即最新）。
 - **框架留着待将来** — 真有用户、真要改 kv/IDB 结构时，往 `MIGRATIONS` 加**第一条** `Migration`（version 单调），编排自动接管。`runMigrations(ctx, migrations?)` 的 migrations 参数默认 = `MIGRATIONS`（测试注入合成列表验编排机制：单调/幂等/崩溃安全）。
 - **幂等 + 崩溃安全（机制仍在）** — 逐条迁移 run 成功才盖戳；抛则不盖、下次从该条重跑（红线：绝不在目标 durably 写成前删源，护未推的世界唯一副本）。migration.test.mjs 用合成迁移守这套机制。
-- **dirty 双轨（ADR-0020，运行时不变）** — 工作文件 dirty 在 **local-head**（`${appId}.head.dirty:`，缺失=clean）；collection dirty 在 **cloud-sync**（`${appId}.sync.dirty:`，缺失=脏）。这是**运行时记账**，不是迁移——清 tax 不影响它。
+- **dirty 双轨（ADR-0020，运行时不变）** — 工作文件 dirty 在 **local-head**（`${ns}.files.dirty:`，缺失=clean，**唯一权威**）；collection dirty 在 **cloud-sync collections 实例**（`${ns}.collections.dirty:`，缺失=脏）。> as-of 窄腰重构 2026-07-13：files 的 cloud-sync 实例 **`manageDirty:false`**——绝不写 `files.dirty:`（否则 push 成功写 "0" 与 push 期间新编辑写 "1" 竞态 → 未推编辑被误判 clean 被驱逐，§A 最狠红线）。
 
-## app 命名空间 / 同 origin 隔离（ADR-0022，2026-07-12 真机事故根治）
+## 命名空间根 `${appId}.${databaseId}` / 同 origin 隔离（ADR-0022 2026-07-12；窄腰重构 2026-07-13）
 
 > IndexedDB 和 localStorage 按 **origin**（scheme+host+port）隔离、**不按 path**。GitHub Pages 的 project site 同 origin（`user.github.io/webpaint/` 与 `/jrp/` 只 path 不同）。写死的库名/键前缀 → 兄弟 PWA 共用一份存储 = 灾难。
 
-- **事故背景**：store-cutover 曾把 WebPaint 换成引擎写死的通用名（`sync-store-cache`、`sync.etag:`…），与同 origin 的 JRP **共用一个 IDB + 一批键** → 文件互漏、`store.schema` 互踩跳迁移 → 图库显 0 B。用户真机抓到。
-- **根治**：`createStore` 加**必填 `appId`**。所有持久化标识据它派生（`storeNamespace(appId)`，运行时深模块，非迁移）：IDB 库 `${appId}.sync-store-cache`；localStorage `${appId}.sync.*`（cloud-sync appKey=`${appId}.sync`）/`${appId}.head.*`（local-head keyPrefix=`${appId}.head`）/`${appId}.store.schema`/`${appId}.folders.pending`。不传 `appId` → 抛错，绝不静默共用。WebPaint=`"webpaint"`、JRP=`"jrp"`。
-- **∴ 所有键都带 `${appId}.` 前缀**——`storeNamespace(appId)` 是单一真源（`create-store` 取 `dbName`/`foldersPendingKey`；将来的迁移经 `MigrationCtx.ns` 取 `dbName`/`etagPrefix`/`dirtyPrefixes` 改结构）。旧库名 `webpaint`/`sessions`（曾是 V001 迁移源，现无用户已随 tax 一起不再引用）。
-- **follow-up**：JRP 侧同一引擎也需接 `appId="jrp"`（当前它还用裸 `sync.*`；WebPaint 命名空间成 `webpaint.*` 后已不再和它撞，但 JRP 对未来兄弟仍有同样潜在 bug）——走 pwa-cloud-store bake 回时补。
+- **事故背景**：store-cutover 曾把 WebPaint 换成引擎写死的通用名（`sync-store-cache`、`sync.etag:`…），与同 origin 的 JRP **共用一个 IDB + 一批键** → 文件互漏、schema 戳互踩跳迁移 → 图库显 0 B。用户真机抓到。
+- **根治 + 窄腰**（> as-of 2026-07-13）：`createStore({ appId, databaseId = "defaultStore" })`。命名空间根 `ns = ${appId}.${databaseId}`（同 app 多 store 实例传不同 databaseId 即互不打架）。
+  - **IDB**：单库 `${ns}`、单 object store `blobs`，key=`${partition}/${name}`（`files/`·`trash/`·`backups/`·`collections/`；blob-partition 深模块 = IDB 侧唯一知道前缀的地方）。
+  - **localStorage**：`namespacedKv(rawKv, ns)` 包一层 = **唯一 choke point**，各模块只用相对键（`database-version`·`files.etag:`·`files.dirty:`·`collections.etag:`/`.dirty:`·`settings.<key>`·`internal.pending_new_folders`/`_deletions`/`_uploads`），根前缀统一加、想漏漏不出。
+  - **两个 cloud-sync 实例**：files（`appKey:"files"`, `manageDirty:false`, fileName 恒等）+ collections（`appKey:"collections"`, fileName `n=>`.${appId}/${n}.json``）→ etag 命名空间按实体分离（同名 file 与 collection 不撞）。
+- **isHidden 深模块**：列举层（cloud-sync/listing/reconcile 共用）过滤**末段以 `.` 开头**的项 → `.trash`/`.backups`/`.<appId>`(collections/settings) + 任意 dotfile/dotfolder 都不进图库。
+- 不传 `appId`/`databaseId` → 抛错，绝不静默共用。WebPaint=`"webpaint"`（databaseId 默认 defaultStore）。
+- **follow-up**：JRP 侧同一引擎 bake 回时接新签名（`appId`+`databaseId`）。

@@ -22,8 +22,9 @@ import { createUploadReplay, type UploadReplayPolicy } from "./upload-queue.ts";
 import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
-import { createLocalCache } from "./local-cache.ts";
+import { createLocalCache, createCollectionCache } from "./local-cache.ts";
 import { runStoreMigrations, storeNamespace } from "./migration.ts";
+import { namespacedKv, type KeyedKv } from "./kv-namespace.ts";
 import { readCentralDirectory, readEntryBytes, type PeekSource } from "./zip-peek.ts";
 
 // ── ui bundle（Model B，README.md §7）：store 在决策点回调进来 + await ──
@@ -46,13 +47,15 @@ export interface StoreUI {
 export interface StoreConfig {
   provider: CloudProvider;
   ui: StoreUI;
-  // ⚠ **必填** app 在本 origin 内的唯一命名空间（如 "webpaint" / "jrp"）。所有持久化标识——IndexedDB 库名
-  //   (`${appId}.sync-store-cache`) + 全部 localStorage 键 (`${appId}.sync.*` / `${appId}.head.*` /
-  //   `${appId}.store.schema` / `${appId}.folders.pending`)——都据它隔离。**同 origin 的兄弟 PWA 必须用不同
-  //   appId**：IndexedDB/localStorage 按 origin 隔离不按 path，GitHub Pages 的 /webpaint/ 与 /jrp/ 同 origin，
-  //   两个 app 若共用写死的库名会读写同一份存储 = 灾难（文件互漏、schema 戳互踩、缓存互毁）。见 idb-store.ts 头注释。
+  // ⚠ **必填** app 在本 origin 内的唯一命名空间（如 "webpaint" / "jrp"）。与 databaseId 一起构成命名空间根
+  //   `${appId}.${databaseId}`：IndexedDB 库名 + 全部 localStorage 键前缀都据它隔离（namespacedKv 统一加）。
+  //   **同 origin 的兄弟 PWA 必须用不同 appId**：IndexedDB/localStorage 按 origin 隔离不按 path，GitHub Pages
+  //   的 /webpaint/ 与 /jrp/ 同 origin，共用写死的库名会读写同一份存储 = 灾难。见 idb-store.ts 头注释。
   appId: string;
-  syncedSettingsFileName?: string;
+  // 同一 app 内的 store 实例标识（默认 "defaultStore"）。想在一个 app 里开**多个互不打架的 store**（不同数据集）
+  //   → 传不同 databaseId：各自独立 IDB 库 `${appId}.${databaseId}` + 独立 localStorage 前缀。
+  databaseId?: string;
+  syncedSettingsFileName?: string;   // ⚠ 已废弃/忽略：syncedSettings 现恒有（保留名 collection `settings`，云端 .${appId}/settings.json）
   // ── 加密（对齐 WebPaint，见 docs/11；逻辑在库、重型 7z/zip codec 由 app 注入）──
   //   不注入 crypto → 加密 dormant（packContainer 抛「加密未配置」）；JRP 不加密就不注入，省 1.6MB。
   crypto?: CryptoCodec;                            // app 注入的 zip/7z codec（WebPaint 用 sevenzip.ts+zip.ts 包成）
@@ -119,41 +122,49 @@ export interface ZipFile extends RawFile {
   decryptPeek(encPeek: Blob): Promise<Blob | null>;
 }
 
-function localStorageKv(): Kv {
+function localStorageKv(): KeyedKv {
   const ls = (globalThis as { localStorage?: Storage }).localStorage;
   if (!ls) throw new Error("createStore: 无 localStorage，请注入 kv");
-  return { get: (k) => ls.getItem(k), set: (k, v) => ls.setItem(k, v), remove: (k) => ls.removeItem(k) };
+  return { get: (k) => ls.getItem(k), set: (k, v) => ls.setItem(k, v), remove: (k) => ls.removeItem(k), keys: () => Object.keys(ls) };
 }
 
 export function createStore(config: StoreConfig) {
-  const { provider, ui, appId, syncedSettingsFileName, kv = localStorageKv(), validateAdopt, autoCacheOpenedFile = true } = config;
+  const { provider, ui, appId, databaseId = "defaultStore", kv: rawKv = localStorageKv(), validateAdopt, autoCacheOpenedFile = true } = config;
   if (!appId) throw new Error("createStore: appId 必填——同 origin 兄弟 PWA 隔离的红线（每个 app 建自己的 IDB 库）");
-  const ns = storeNamespace(appId);   // IDB 库名 + 全部 localStorage 键前缀，都据 appId 命名空间隔离
-  const local = config.local ?? createLocalCache(ns.dbName);   // prod=idb（app 专属库）；测试注入 mock-local
+  const ns = storeNamespace(appId, databaseId);   // 命名空间根 `${appId}.${databaseId}`：IDB 库名 + 全部 localStorage 键前缀
+  // **窄腰 choke point**：包一层 namespacedKv，所有键自动落 `${ns.root}.`；各深模块只用相对键（files.*/collections.*/settings.*/internal.*）。
+  const kv = namespacedKv(rawKv, ns.root);
+  const local = config.local ?? createLocalCache(ns.dbName);              // 文件缓存（files/trash/backups 分区）；prod=idb、测试注入 mock
+  const collectionLocal = config.local ?? createCollectionCache(ns.dbName);   // collections 分区缓存（collection 自带 `collections/` 前缀）
   const isOnline = config.isOnline ?? ((): boolean => (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine !== false);
   // 加密密码源（对齐 WebPaint 非交互 getPassword）：优先 crypt.getPassword，兼容旧顶层；不给 → 恒 null（透传明文）。
   const getPassword = config.crypt?.getPassword ?? config.getPassword ?? ((): string | null => null);
   if (config.crypto) configureCryptoCodec(config.crypto);   // app 注入 zip/7z codec 才启用加密；JRP 不注入 → dormant
 
   // ── 脊椎 + 低层 ──
-  // 薄命名（身份=全名）：fileName 恒等（身份即云端文件名）；encFileName **追加** .zip（加密容器外扩展名 ADR-0012，无损可逆：X.ora→X.ora.zip、Y.zip→Y.zip.zip）。
-  //   app 不再注入命名（在边界用 sessionFileName 把裸 session 名转全名后传库）；toName 的逆见 cloud-sync 默认。appKey → `${appId}.sync.etag:`/`.dirty:`
-  const cloud: CloudSync = createCloudSync({ provider, kv, fileName: config.fileName ?? ((n: string) => n), encFileName: config.encFileName ?? ((n: string) => `${n}.zip`), appKey: `${appId}.sync` });
+  // 两个 cloud-sync 实例（etag 命名空间按实体分离，见 docs/plan）：
+  //   files 实例：身份=全名（fileName 恒等；encFileName 追加 .zip，加密容器外扩展名 ADR-0012 无损可逆）；
+  //     appKey="files" → `${ns}.files.etag:`；**manageDirty:false**——文件 dirty 权威在 local-head 的 `${ns}.files.dirty:`，
+  //     若 cloud-sync 也写同键，push 成功写 "0" 会与「push 期间用户新编辑写 '1'」竞态、把未推编辑误判 clean 被驱逐（§A 最狠红线）。
+  const cloud: CloudSync = createCloudSync({ provider, kv, fileName: config.fileName ?? ((n: string) => n), encFileName: config.encFileName ?? ((n: string) => `${n}.zip`), appKey: "files", manageDirty: false });
+  //   collections 实例：云端落 `/.${appId}/<name>.json`（隐藏夹，isHidden 过滤出图库）；appKey="collections" → `${ns}.collections.etag:`/`.dirty:`。
+  //     store.collection(name) + 保留名 collection `settings`(syncedSettings) 都走它。name 无后缀，store 追加 `.json`。
+  const collectionsCloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => `.${appId}/${n}.json`, appKey: "collections" });
   const sub = createSubstrate();
-  const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n), keyPrefix: `${appId}.head` });   // → `${appId}.head.dirty:`
+  const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n), keyPrefix: "files" });   // → `${ns}.files.dirty:`（文件 dirty 权威）
   // 数据迁移框架（ADR-0019）：**createStore 内部自跑、隐形**——app 看不见 migration。
   //   MIGRATIONS 现为空（无用户/无后向兼容，2026-07-13 清 tax）→ 编排跑空、无 op；框架留着待将来第一条真迁移。
   //   ops 首用前 await migrationReady（open/save/list）。测试/无 localStorage 环境跳过。
   const migrationReady: Promise<void> =
     config.skipMigration || !(globalThis as { localStorage?: unknown }).localStorage
       ? Promise.resolve()
-      : runStoreMigrations(appId);
+      : runStoreMigrations(appId, databaseId);
   const offloadMod = createOffload({ cloud, local, head, isOnline, serialize: sub.serialize });   // serialize：offload 的 hardDelete ⟂ save 的 local 写互斥（红线：驱逐不吃未推字节）
   const reconcileMod = createReconcile({ cloud, local, head, isOnline });
 
   // ── folder 本地登记（离线建空夹）：pending = 建了但还没确认上云的空文件夹。──────────────
   //   离线也能建空夹（用户要求）：先 kv 登记 → 并进 listAllItems.folders（离线可见/持久）→ 回线 drainFolders 补建。
-  const FOLDERS_PENDING_KEY = ns.foldersPendingKey;   // `${appId}.folders.pending`（app 命名空间）
+  const FOLDERS_PENDING_KEY = "internal.pending_new_folders";   // 相对键 → `${ns}.internal.pending_new_folders`
   const readPending = (): string[] => { try { const v = JSON.parse(kv.get(FOLDERS_PENDING_KEY) ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
   const writePending = (a: string[]): void => kv.set(FOLDERS_PENDING_KEY, JSON.stringify([...new Set(a)]));
   const addPendingFolder = (p: string): void => writePending([...readPending(), p]);
@@ -492,13 +503,23 @@ export function createStore(config: StoreConfig) {
   }
 
   // ── collection / settings ──
+  const RESERVED_COLLECTIONS = new Set(["settings"]);   // syncedSettings 占用（云端 .${appId}/settings.json）
+  function assertValidCollectionName(name: string): void {
+    // collection name = 合法文件名、不带后缀（`brush-rack`、`reading-state`）；store 映射云端时自己追加 `.json`。
+    if (!name || /[\\/:*?"<>|]/.test(name) || name === "." || name === "..") throw new Error(`collection 名非法（须合法文件名、不带后缀、无斜杠）：${JSON.stringify(name)}`);
+    if (RESERVED_COLLECTIONS.has(name)) throw new Error(`collection 名 "${name}" 是保留名（syncedSettings 用），请换名`);
+  }
   function collection<T extends object>(name: string, opts: { manual?: boolean } = {}): Collection<T> {
-    return createCollection<T>({ cloud, name, local, manual: opts.manual });   // local=IDB 透明缓存（离线可读/强杀存活）
+    assertValidCollectionName(name);
+    return createCollection<T>({ cloud: collectionsCloud, name, local: collectionLocal, manual: opts.manual });   // collections 实例 + collections 分区缓存
   }
   const localSettings: LocalSettings = createLocalSettings(kv);
-  const syncedSettings: SyncedSettings | undefined = syncedSettingsFileName
-    ? createSyncedSettings(createCollection<SettingItem>({ cloud, name: syncedSettingsFileName, local }))
-    : undefined;
+  // syncedSettings：**恒有**——保留名 collection `settings`（走 collections 实例，云端 `.${appId}/settings.json`）。
+  //   散键裸值读面在 localStorage（kv），collection 只当后台 LWW 传输引擎；app 调 init()/refresh() 驱动拉云 → 投影回散键。
+  const syncedSettings: SyncedSettings = createSyncedSettings(
+    createCollection<SettingItem>({ cloud: collectionsCloud, name: "settings", local: collectionLocal }),
+    kv,
+  );
 
   return {
     file,

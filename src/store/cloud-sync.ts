@@ -11,6 +11,7 @@
 //   restore 撞名 (2)(3) 防覆盖。
 
 import { asideStamp } from "./move-aside.ts";   // 深模块的 move-aside 命名策略（yyyymmddhhmmss-guid 防撞）
+import { isHidden } from "./is-hidden.ts";       // 列举隐藏判定（.trash/.backups/.<appId> + 任意 dot 项）
 import type { Bytes, CloudItem, CloudProvider, CloudSync, FetchMetaResult, Kv, PullResult, PushResult, WeakOverrideResult } from "./types.ts";
 
 export class CloudConflictError extends Error {
@@ -57,6 +58,11 @@ interface CloudSyncCfg {
   trashFolder?: string;
   backupFolder?: string;
   appKey?: string;
+  /** false = 本实例不 track dirty（setDirty/isDirty/clearState 对 dirty 键全 no-op）。
+   *  files 实例用 false：文件 dirty 权威在 local-head 的 `${ns}.files.dirty:`；若 cloud-sync 也写同键，
+   *  push 成功后写 "0" 会与「push 期间用户新编辑写 '1'」竞态、把未推编辑误判 clean → 被驱逐（§A 最狠红线）。
+   *  collections 实例用默认 true（collection 的 dirty 权威就在 cloud-sync）。 */
+  manageDirty?: boolean;
   now?: () => number;
   match?: (it: CloudItem) => boolean;
   toName?: (name: string) => string;
@@ -74,7 +80,7 @@ interface CloudSyncCfg {
  */
 export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   const { provider, kv, fileName, encFileName = null, contentType = "application/octet-stream",
-    trashFolder = ".trash", backupFolder = ".backup", appKey = "sync" } = cfg;
+    trashFolder = ".trash", backupFolder = ".backups", appKey = "sync", manageDirty = true } = cfg;
   const now = cfg.now || (() => Date.now());
 
   // name → 云端实际 item（同一 name 在任一时刻只住一个扩展名下；明文路径先试 = 多数命中 1 RTT）。
@@ -113,11 +119,12 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   //   回退到被 A 清过的 kv——多 tab 同画本就不支持（IDB 层互踩），残留窗口需四连巧合。
   const _dirtyMem = new Map<string, boolean>();
   function isDirty(name: string): boolean {
+    if (!manageDirty) return false;                          // files 实例：dirty 权威在 local-head，本实例不表态
     if (_dirtyMem.has(name)) return _dirtyMem.get(name)!;
     const v = kv.get(dirtyKey(name)); return v === null ? true : v === "1";
   }
-  function setDirty(name: string, dirty: boolean): void { _dirtyMem.set(name, dirty); kv.set(dirtyKey(name), dirty ? "1" : "0"); }
-  function clearState(name: string): void { _dirtyMem.delete(name); kv.remove(etagKey(name)); kv.remove(dirtyKey(name)); }
+  function setDirty(name: string, dirty: boolean): void { if (!manageDirty) return; _dirtyMem.set(name, dirty); kv.set(dirtyKey(name), dirty ? "1" : "0"); }
+  function clearState(name: string): void { _dirtyMem.delete(name); kv.remove(etagKey(name)); if (manageDirty) kv.remove(dirtyKey(name)); }
 
   // N6（审计 2026-06-09，全场唯一静默丢失路径）：lost-response/409 认领云端 item 为「我方成功 push」前，
   //   size 相等还要**尾部字节相等**才认。zip/ora 尾 = central directory + 每条 CRC32 + EOCD ≈ 内容指纹；
@@ -308,9 +315,9 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     let items: CloudItem[];
     try { items = await provider.list(subpath); } catch (_) { status.partial = true; return; }
     for (const it of items) {
-      // 顶层 .trash / .backup 都是隐藏安全网：整个跳过（不进文件列表、不进文件夹列表、不递归其内容）。
-      // 旧版只把 .backup 排出 folders 却仍递归进去 → 备份文件会漏进 gallery 文件列表（与 .trash 不一致的 bug）。
-      if (depth === 0 && it.isFolder && (it.name === trashFolder || it.name === backupFolder)) continue;
+      // 隐藏项（末段以 "." 开头）整个跳过：.trash / .backups / .<appId>(collections/settings) 安全网夹 +
+      //   任意 dotfile/dotfolder，都不进文件列表、不进文件夹列表、不递归其内容（isHidden 深模块唯一真相）。
+      if (isHidden(it.name)) continue;
       const itPath = subpath ? `${subpath}/${it.name}` : it.name;
       if (it.isFolder) {
         if (folders) folders.push(itPath);
@@ -337,7 +344,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     try { items = await provider.list(path); } catch (_) { return { files: [], folders: [], complete: false }; }
     const files: CloudItem[] = [], folders: string[] = [];
     for (const it of items) {
-      if (path === "" && it.isFolder && (it.name === trashFolder || it.name === backupFolder)) continue;
+      if (isHidden(it.name)) continue;   // 隐藏项（.trash/.backups/.<appId>/任意 dot）不进列举——isHidden 深模块
       const itPath = path ? `${path}/${it.name}` : it.name;
       if (it.isFolder) folders.push(itPath);
       else if (match(it)) files.push({ ...it, path: itPath, name: toName(itPath) });

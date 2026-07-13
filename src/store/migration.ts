@@ -10,9 +10,10 @@
 // 结构：① 纯逻辑（版本戳解析/比较）；② 命名空间派生；③ 编排；④ IO 薄壳（localStorage 包装）。
 
 import type { Kv } from "./types.ts";
+import { namespacedKv } from "./kv-namespace.ts";
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
-// ① schema 版本戳（kv["${appId}.store.schema"] = "vNNN-yyyymmdd"，NNN 零填充=单调序号，yyyymmdd=落地日）
+// ① schema 版本戳（namespacedKv 下 schemaKey="database-version" → `${ns}.database-version` = "vNNN-yyyymmdd"，NNN 零填充=单调序号，yyyymmdd=落地日）
 // ══════════════════════════════════════════════════════════════════════════════════════════
 
 export type SchemaVersion = `v${string}`;   // 例 "v001-20260709"
@@ -40,28 +41,21 @@ export function needsMigration(current: string | null, target: SchemaVersion): b
 //   写死的库名/键前缀会让两个 app 共用一份存储 = 灾难。∴ 所有持久化标识都从 appId 派生。
 // ══════════════════════════════════════════════════════════════════════════════════════════
 
-export interface DirtyPrefixes {
-  collection: string;   // cloud-sync 轨（默认脏）。`${appId}.sync.dirty:`
-  workFile: string;     // local-head 轨（默认 clean）。`${appId}.head.dirty:`
-}
-
+// 命名空间根 = `${appId}.${databaseId}`（IDB 库名 + 全部 localStorage 键的前缀，经 namespacedKv 统一加）。
+//   databaseId 默认 "defaultStore"（createStore ctor）；同 app 多 store 实例（不同 databaseId）本地互不打架。
+//   schemaKey 是**相对键**（namespacedKv 会补根前缀 → 实际 `${root}.database-version`）；migration 的
+//   kv 也是 namespacedKv，故各 Migration 内读写结构键都用相对键、天然落命名空间内。
 export interface StoreNamespace {
-  dbName: string;                 // IDB 库名
-  schemaKey: string;              // schema 版本戳键
-  etagPrefix: string;             // etag 键前缀（= cloud-sync appKey `${appId}.sync` + ".etag:"）
-  dirtyPrefixes: DirtyPrefixes;   // dirty 双轨前缀（cloud-sync `${appId}.sync.dirty:` / local-head `${appId}.head.dirty:`）
-  foldersPendingKey: string;      // 离线空夹登记键
+  root: string;      // `${appId}.${databaseId}`
+  dbName: string;    // IDB 库名 = root
+  schemaKey: string; // 相对键 "database-version"
 }
 
-export function storeNamespace(appId: string): StoreNamespace {
+export function storeNamespace(appId: string, databaseId: string): StoreNamespace {
   if (!appId) throw new Error("storeNamespace: appId 必填——同 origin 兄弟 PWA 隔离的红线，不给会共用一个库");
-  return {
-    dbName: `${appId}.sync-store-cache`,
-    schemaKey: `${appId}.store.schema`,
-    etagPrefix: `${appId}.sync.etag:`,
-    dirtyPrefixes: { collection: `${appId}.sync.dirty:`, workFile: `${appId}.head.dirty:` },
-    foldersPendingKey: `${appId}.folders.pending`,
-  };
+  if (!databaseId) throw new Error("storeNamespace: databaseId 必填——同 app 多 store 实例隔离（默认 defaultStore）");
+  const root = `${appId}.${databaseId}`;
+  return { root, dbName: root, schemaKey: "database-version" };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -122,7 +116,10 @@ export function localStorageMigrationKv(): MigrationKv {
   };
 }
 
-/** prod 组装 + 跑（createStore 在 ready-gate 前调）。appId = app 在本 origin 内的唯一命名空间。 */
-export async function runStoreMigrations(appId: string, log?: (m: string) => void): Promise<void> {
-  await runMigrations({ kv: localStorageMigrationKv(), ns: storeNamespace(appId), log });
+/** prod 组装 + 跑（createStore 在 ready-gate 前调）。命名空间根 = `${appId}.${databaseId}`。
+ *  kv 经 namespacedKv 包过 → migration 内所有键读写自动落 `${root}.` 命名空间（含 keys() 只列本命名空间）。 */
+export async function runStoreMigrations(appId: string, databaseId: string, log?: (m: string) => void): Promise<void> {
+  const ns = storeNamespace(appId, databaseId);
+  const kv = namespacedKv(localStorageMigrationKv(), ns.root);
+  await runMigrations({ kv, ns, log });
 }

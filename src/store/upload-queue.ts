@@ -30,7 +30,8 @@ export interface UploadReplayCfg {
 
 export interface DrainResult { status: string; pushed: number; remain?: number; }
 
-const UPQ_KEY = "uploadqueue:v1";
+// 相对键（namespacedKv 补 `${appId}.${databaseId}.` 根前缀 → `${ns}.internal.pending_uploads`）。
+const UPQ_KEY = "internal.pending_uploads";
 
 export function createUploadReplay(cfg: UploadReplayCfg) {
   const { kv, local, head, isOnline, serialize, pushLocal, policy, confirm, onStatus } = cfg;

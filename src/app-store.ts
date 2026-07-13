@@ -22,7 +22,7 @@ const cryptoCodec = { zipPack, zipUnpack, pack7z, unpack7z };
 export const store = createStore({
   provider,
   ui: storeUI,
-  appId: "webpaint",   // 本 origin 内唯一命名空间：IDB 库 webpaint.sync-store-cache + localStorage webpaint.* 键，与兄弟 PWA(JRP 等)隔离
+  appId: "webpaint",   // 本 origin 内唯一命名空间（databaseId 默认 "defaultStore"）：IDB 库 webpaint.defaultStore + localStorage webpaint.defaultStore.* 键，与兄弟 PWA(JRP 等)隔离
   // 薄命名（身份=全名）：**app 不再注入 fileName/encFileName**——库默认 fileName 恒等（身份即云端文件名）、
   //   encFileName 追加 .zip（加密容器外扩展名 ADR-0012）。app 在**边界**用 sessionFileName 把裸 session 名转成全名
   //   （X→X.ora）再传库（见 session-state 的 _file / editor-session 的 name；OUT 侧 itemToG 用 stripSessionExt 还原显示）。

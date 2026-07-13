@@ -19,7 +19,7 @@ function memMkv(init = {}) {
     _dump: () => Object.fromEntries(m),
   };
 }
-const NS = storeNamespace("webpaint");
+const NS = storeNamespace("webpaint", "defaultStore");
 const ctxOf = (kv, extra = {}) => ({ kv, ns: NS, ...extra });
 
 describe("migration › schema 版本戳", () => {
@@ -42,22 +42,21 @@ describe("migration › schema 版本戳", () => {
   });
 });
 
-describe("migration › appId 命名空间（同 origin 兄弟 PWA 隔离红线）", () => {
-  it("全部标识据 appId 派生", () => {
-    const ns = storeNamespace("webpaint");
-    eq(ns.dbName, "webpaint.sync-store-cache");
-    eq(ns.schemaKey, "webpaint.store.schema");
-    eq(ns.etagPrefix, "webpaint.sync.etag:");
-    eq(ns.dirtyPrefixes.collection, "webpaint.sync.dirty:");
-    eq(ns.dirtyPrefixes.workFile, "webpaint.head.dirty:");
-    eq(ns.foldersPendingKey, "webpaint.folders.pending");
+describe("migration › 命名空间根 appId.databaseId（同 origin 兄弟 PWA / 多 store 实例隔离红线）", () => {
+  it("标识据 appId.databaseId 派生", () => {
+    const ns = storeNamespace("webpaint", "defaultStore");
+    eq(ns.root, "webpaint.defaultStore");
+    eq(ns.dbName, "webpaint.defaultStore");
+    eq(ns.schemaKey, "database-version");   // 相对键（namespacedKv 补根 → webpaint.defaultStore.database-version）
   });
-  it("不同 appId → 不同库名/键（不互踩）", () => {
-    eq(storeNamespace("jrp").dbName === storeNamespace("webpaint").dbName, false);
-    eq(storeNamespace("jrp").etagPrefix, "jrp.sync.etag:");
+  it("不同 appId / databaseId → 不同库名（不互踩）", () => {
+    eq(storeNamespace("jrp", "defaultStore").dbName === storeNamespace("webpaint", "defaultStore").dbName, false);
+    eq(storeNamespace("webpaint", "thumbs").dbName === storeNamespace("webpaint", "defaultStore").dbName, false);
+    eq(storeNamespace("webpaint", "thumbs").dbName, "webpaint.thumbs");
   });
-  it("空 appId → 抛（不许 fallback 到共用库）", () => {
-    let t = false; try { storeNamespace(""); } catch { t = true; } assert(t, "空 appId 必抛");
+  it("空 appId / databaseId → 抛（不许 fallback 到共用库）", () => {
+    let t = false; try { storeNamespace("", "defaultStore"); } catch { t = true; } assert(t, "空 appId 必抛");
+    let t2 = false; try { storeNamespace("webpaint", ""); } catch { t2 = true; } assert(t2, "空 databaseId 必抛");
   });
 });
 
@@ -67,10 +66,10 @@ describe("migration › MIGRATIONS 注册表（tax 已清）", () => {
     for (let i = 1; i < MIGRATIONS.length; i++) assert(MIGRATIONS[i - 1].version < MIGRATIONS[i].version, "version 应单调递增");
   });
   it("空注册表跑 runMigrations → no-op、不写任何键", async () => {
-    const kv = memMkv({ "webpaint.sync.etag:x.ora": "e" });
+    const kv = memMkv({ "files.etag:x.ora": "e" });
     await runMigrations(ctxOf(kv));   // 默认 MIGRATIONS（空）
-    eq(kv._dump()["webpaint.store.schema"], undefined, "无迁移不盖戳");
-    eq(kv._dump()["webpaint.sync.etag:x.ora"], "e", "无迁移不动数据");
+    eq(kv._dump()[NS.schemaKey], undefined, "无迁移不盖戳");
+    eq(kv._dump()["files.etag:x.ora"], "e", "无迁移不动数据");
   });
 });
 

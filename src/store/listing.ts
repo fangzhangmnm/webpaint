@@ -11,6 +11,7 @@
 // 纯分类器 classifySyncState 可穷举单测（对齐 reconcile.classifyCloudGone 的纪律）。
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
+import { isHidden } from "./is-hidden.ts";   // 末段 dot = 隐藏（.trash/.backups/.<appId>/任意 dot 项不进列举）
 
 // syncState = residency(住哪) ⟂ sync-status(clean/dirty/conflict/gone) 两轴的 derived 投影。
 //   （单一 Residency 太薄——这是「sync state 更复杂」的落地。8 值对齐 PWAPatterns state-machine.md 的 badge。）
@@ -135,9 +136,9 @@ export function createListing(cfg: ListingCfg) {
     // 身份 = **全名（c.name = toName(云端文件名)）**：明文 X.ora 恒等、加密 X.ora.zip 去尾 .zip → 都归一到 X.ora。
     //   本地 key（appKeys / 迁移后）也是全名 X.ora → 两轴按同一 key 归一；否则 cloud 与 local 分裂成两项、open 对不上
     //   （=0B/打开空白的根因，v390）。app 在边界用 sessionFileName 把裸 session 名转全名；encFileName 负责加密件的 .zip 追加。
-    for (const c of cloudRes?.files ?? []) cloudMap.set(c.name, { eTag: c.eTag, size: c.size, lastModified: toMs(c.lastModifiedDateTime) });
+    for (const c of cloudRes?.files ?? []) { if (isHidden(c.name)) continue; cloudMap.set(c.name, { eTag: c.eTag, size: c.size, lastModified: toMs(c.lastModifiedDateTime) }); }
 
-    // 本地：只看本夹前缀下的 key；直属文件 → 参与列举，更深的 → 记 immediate 子夹。
+    // 本地：只看本夹前缀下的 key；直属文件 → 参与列举，更深的 → 记 immediate 子夹。隐藏项（末段 dot）全跳。
     const localDirect = new Set<string>();
     const subfolders = new Set<string>();
     for (const k of await local.appKeys()) {
@@ -145,15 +146,15 @@ export function createListing(cfg: ListingCfg) {
       const rest = k.slice(prefix.length);
       if (!rest) continue;
       const slash = rest.indexOf("/");
-      if (slash >= 0) subfolders.add(prefix + rest.slice(0, slash));
-      else localDirect.add(k);
+      if (slash >= 0) { const sub = prefix + rest.slice(0, slash); if (!isHidden(sub)) subfolders.add(sub); }
+      else if (!isHidden(k)) localDirect.add(k);
     }
-    for (const f of cloudRes?.folders ?? []) subfolders.add(f);   // 云端 immediate 子夹（含空夹）
+    for (const f of cloudRes?.folders ?? []) { if (!isHidden(f)) subfolders.add(f); }   // 云端 immediate 子夹（含空夹）
     for (const p of pendingFolders?.() ?? []) {                   // 离线建的空夹：取本夹下的 immediate 段
       if (folder && !p.startsWith(prefix)) continue;
       const rest = folder ? p.slice(prefix.length) : p;
       const seg = rest.includes("/") ? rest.slice(0, rest.indexOf("/")) : rest;
-      if (seg) subfolders.add(prefix + seg);
+      if (seg && !isHidden(seg)) subfolders.add(prefix + seg);
     }
 
     const paths = new Set<string>([...cloudMap.keys(), ...localDirect]);
@@ -172,9 +173,10 @@ export function createListing(cfg: ListingCfg) {
 
     const cloudMap = new Map<string, { eTag: string; size: number; lastModified?: number }>();
     for (const c of cloudRes?.files ?? []) {
+      if (isHidden(c.name)) continue;
       cloudMap.set(c.name, { eTag: c.eTag, size: c.size, lastModified: toMs(c.lastModifiedDateTime) });   // 身份=session name（裸），见 listFolder 同处注释
     }
-    const localSet = new Set(await local.appKeys());
+    const localSet = new Set((await local.appKeys()).filter((k) => !isHidden(k)));
 
     const paths = new Set<string>();
     for (const p of cloudMap.keys()) paths.add(p);
@@ -184,9 +186,10 @@ export function createListing(cfg: ListingCfg) {
     const items: Item[] = [];
     for (const path of paths) items.push(classifyPath(path, cloudMap.get(path), localSet.has(path), cloudReachable, absenceAuthoritative, localStats.get(path)));
 
-    // folders = 云 folders(可达时) ∪ 本地 pending 空夹（离线建的）。去重。
-    const folderSet = new Set<string>(cloudRes?.folders ?? []);
-    for (const p of pendingFolders?.() ?? []) folderSet.add(p);
+    // folders = 云 folders(可达时) ∪ 本地 pending 空夹（离线建的）。去重 + 隐藏项（末段 dot）跳过。
+    const folderSet = new Set<string>();
+    for (const f of cloudRes?.folders ?? []) if (!isHidden(f)) folderSet.add(f);
+    for (const p of pendingFolders?.() ?? []) if (!isHidden(p)) folderSet.add(p);
 
     return { items, folders: [...folderSet], complete: cloudReachable ? cloudRes!.complete : false };
   }

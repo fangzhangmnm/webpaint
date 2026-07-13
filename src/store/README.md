@@ -56,7 +56,13 @@ const store = createStore({
 ```
 > **关于 `crypto`**：加密**逻辑**全在库内，唯一例外是重型 7z 引擎（wasm ~1.6MB）由 app vendor + 注入（包成 `crypto` codec）——体积大，不塞进每个 app 的 bundle。不注入 → 加密 dormant（packContainer 抛、其余照常；JRP 不加密就不 vendor，省 1.6MB）。KDF/GCM 走内置 WebCrypto，不用注入。
 >
-> **⚠ `appId` 红线（同 origin 兄弟 PWA 隔离）**：IndexedDB 和 localStorage 按 **origin**（scheme+host+port）隔离，**不按 path**。GitHub Pages 的 project site 全在同一 origin（`user.github.io/webpaint/` 与 `user.github.io/jrp/` 同 origin，只 path 不同）。所以库把**所有持久化标识都按 `appId` 命名空间**：IDB 库名 `${appId}.sync-store-cache`、localStorage 键 `${appId}.sync.*`/`${appId}.head.*`/`${appId}.store.schema`/`${appId}.folders.pending`。**同 origin 的每个兄弟 PWA 必须用不同 `appId`**——否则两个 app 读写**同一个** IDB/键：别人的文件漏进你的图库、schema 迁移戳互踩（一个 app 盖了戳另一个就跳过迁移→数据搬不过来显 0B）、本地缓存互相覆盖。**这是 2026-07-12 真机抓到的灾难 bug 的根治**（详 `docs/20260712-store-per-app-namespace.md`）。不传 `appId` → 直接抛错，不给静默共用。
+> **⚠ 命名空间根 `${appId}.${databaseId}`（同 origin 兄弟 PWA / 多 store 实例隔离）** > as-of 窄腰重构 2026-07-13：IndexedDB 和 localStorage 按 **origin** 隔离、**不按 path**（GitHub Pages `/webpaint/` 与 `/jrp/` 同 origin）。库把**所有持久化标识收进一个命名空间根 `${appId}.${databaseId}`**（`databaseId` 默认 `"defaultStore"`；同一 app 想开多个互不打架的 store → 传不同 databaseId）：
+> - **IndexedDB**：单库 `${appId}.${databaseId}`、单 object store `blobs`，key = `${partition}/${name}`（分区 `files/`·`trash/`·`backups/`·`collections/`，blob-partition 深模块）。
+> - **localStorage**：经 `namespacedKv` 统一加根前缀的**唯一 choke point**——`${ns}.database-version`（schema 戳）、`${ns}.files.etag:`(cloud-sync files 实例)、`${ns}.files.dirty:`(local-head，文件 dirty 权威)、`${ns}.collections.etag:`/`.dirty:`(collections 实例)、`${ns}.settings.<key>`(散键裸值)、`${ns}.internal.pending_new_folders`/`_deletions`/`_uploads`。各深模块只用相对键，想漏都漏不出命名空间。
+>
+> **同 origin 的每个兄弟 PWA 必须用不同 `appId`**——否则两 app 读写同一份存储：文件互漏、schema 戳互踩跳迁移（显 0B）、缓存互毁。**根治自 2026-07-12 真机灾难**（详 `docs/20260712-store-per-app-namespace.md`）。不传 `appId`/`databaseId` → 抛错，绝不静默共用。
+>
+> **🔒 持久化改动需同意（红线，2026-07-13）**：动**任何持久化数据结构、创建新字段**（localStorage + IDB 都算）**必须先显式获用户同意**——布局一上真机就有数据躺着，结构漂移=丢数据/裂卡/兄弟串号。
 
 `createStore(config)` 返回**你 app 需要的一切**——你永远不自己构造 cloud / 本地缓存 / 集合。
 
@@ -175,7 +181,9 @@ store.syncedSettings.get("defaultZoom");
 store.syncedSettings.delete("defaultZoom");
 ```
 - **`get` 不给 default**：把"默认设置"放你 app **一处 SSoT**（一个 defaults 对象），别每次取值各写各的 default → 不一致。
-- `syncedSettings` 内部就是一个 collection，**每个 setting key 当一个 item**——所以"并发设不同 key 都不丢"是 §3 per-item LWW 白送的，没有第二套合并逻辑。
+- **两种设置同处 `${ns}.settings.<key>` 散键裸值**（不分 synced/local、无 blob）。`get/set` 直读写 localStorage（内存无副本、首屏零 await）。
+- `syncedSettings` 的**读/写面 = localStorage 裸值**；背后一个**保留名 collection `settings`** 当 LWW 传输引擎：`set` → 立即写 localStorage + fire-and-forget `collection.upsertItem`；`init()/refresh()`（app 在 boot/focus/online 调）→ `await` 拉云合并 → 把 items **投影回散键**。uat 只活在 collection（IDB `collections/settings` + 云端 `.${appId}/settings.json`）。「并发设不同 key 都不丢」是 §3 per-item LWW 白送的。
+- **collection 名 = 合法文件名、不带后缀**（`brush-rack`/`reading-state`）；store 映射云端自动追加 `.json` → `.${appId}/<name>.json`。`settings` 是保留名（禁用）。
 
 ---
 

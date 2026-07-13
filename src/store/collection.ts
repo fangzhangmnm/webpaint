@@ -11,8 +11,10 @@ import { emptyFolder, parseFolderBlob, mergeFolders, normalizeFolder } from "./f
 import type { FolderEnvelope, FolderItem } from "./folder-merge.ts";
 import type { CloudSync, LocalCache } from "./types.ts";
 
-// collection 在本地缓存（IDB）里的键名。前缀隔离，绝不与 file 路径（如 "papers/x.pdf"）撞。
-export function collectionLocalKey(name: string): string { return `__collection__/${name}`; }
+// collection 在本地缓存（IDB `blobs`）里的键名 = collections 分区（`collections/<name>`）。
+//   collection cache（createCollectionCache）写裸键 → 落 `collections/` 分区，与 files 分区天然隔离；
+//   绝不与 file 路径（如 "papers/x.pdf" → files 分区）撞。
+export function collectionLocalKey(name: string): string { return `collections/${name}`; }
 
 // 对外 item：调用方给的 payload + 必填 id（uat 不在此——库内部的事）。
 export type CollectionItem<T extends object> = T & { id: string };
