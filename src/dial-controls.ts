@@ -7,8 +7,8 @@
 // editMode 用 thunk：setSize 要早于 leftDial 构造可用，而 editMode const 晚于 leftDial 才声明
 // （与 brush-rack 构造里的 editMode:()=>editMode 同款）。board/leftDial 也晚 → bindKeyboard 分离调。
 
-import { safeLSSet } from "./safe-ls.ts";
 import { stepFor, quantizeSize } from "./ui/brush-size.ts";
+import { editorState } from "./editor-state.ts";   // brush dial → editorState.brushTool SSoT（binding 写反应式 + workspaceDirty）
 import type { EditorRuntimeState } from "./app-context.ts";
 import type { BrushRack } from "./brush-rack.ts";
 import type { EditMode } from "./edit-mode.ts";
@@ -18,20 +18,25 @@ interface DialControlsDeps { state: EditorRuntimeState; rack: BrushRack; getEdit
 interface DialKeyboardDeps { board: Board; leftDial: { flashSize: () => void }; }
 
 export function makeDialControls({ state, rack, getEditMode }: DialControlsDeps) {
+  // brush 工具的 size/opacity 归 editorState.brushTool SSoT（per-doc + 改即 workspaceDirty）；其他工具 dial（eraser/filterBrush）
+  //   未进 editorState（留下一轮）→ 仍走 rack.writeCurrentTool*。editorState.brushTool.size 经 binding 写同一 reactive dial，
+  //   与 writeCurrentToolSize（ts.size=v）等价 + 额外标脏。删 webpaint.size/opacity 设备级 LS 种子。
+  const isBrushTool = () => rack.getRackToolKey(getEditMode().current()) === "brush";
   const setSize = (v: number) => {
     v = Math.max(1, Math.round(v));        // clamp to int
-    rack.writeCurrentToolSize(v);          // dial SSoT（反应式 → currentBrush + <LeftDial> 自动跟随）
-    safeLSSet("webpaint.size", String(v));
+    if (isBrushTool()) editorState.brushTool.size = v;
+    else rack.writeCurrentToolSize(v);     // 反应式 → currentBrush + <LeftDial> 自动跟随
   };
   const setOpacity = (v: number) => {
-    rack.writeCurrentToolOpacity(v);       // dial SSoT（反应式）
-    safeLSSet("webpaint.opacity", String(v));
+    if (isBrushTool()) editorState.brushTool.opacity = v;
+    else rack.writeCurrentToolOpacity(v);
   };
   const currentDials = () => state.toolStates[rack.getRackToolKey(getEditMode().current())] || state.toolStates.brush;
 
   // 键盘 [ ] 调粗（v132 tool-aware dispatch）。max 从活动预设取；段量化（20内1/50内2/100内5/200内10/500内20/1000内50）。
-  const bindKeyboard = ({ board, leftDial }: DialKeyboardDeps) => {
-    window.addEventListener("wp:adjsize", (e: Event) => {
+  //   返回 disposer（真 app 调一次无所谓；测试 + 防泄漏用）。
+  const bindKeyboard = ({ board, leftDial }: DialKeyboardDeps): (() => void) => {
+    const handler = (e: Event) => {
       const t = getEditMode().current();
       if (t === "brush" || t === "eraser" || t === "filterBrush") {
         const maxPx = rack.findToolBrushPure(currentDials())?.size?.max || 200;
@@ -43,7 +48,9 @@ export function makeDialControls({ state, rack, getEditMode }: DialControlsDeps)
         if (board._cursor) board.setCursor({ ...board._cursor, size: next });
       }
       // 其他工具忽略（液化已 migrate 进 filterBrush）
-    });
+    };
+    window.addEventListener("wp:adjsize", handler);
+    return () => window.removeEventListener("wp:adjsize", handler);
   };
 
   return { setSize, setOpacity, currentDials, bindKeyboard };

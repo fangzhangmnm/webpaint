@@ -6,15 +6,12 @@ import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
 import { mountColorWheel } from "./ui/color-wheel.ts";
 import { raiseWindow } from "./surfaces.ts";
-
-const safeLS = (k: string, f?: string) => { try { return localStorage.getItem(k) ?? f; } catch { return f; } };
-const safeLSSet = (k: string, v: unknown) => { try { localStorage.setItem(k, String(v)); } catch {} };
+import { editorState } from "./editor-state.ts";
 
 let state: AppContext["state"], colorWheel: ReturnType<typeof mountColorWheel>;
 
 export function setColor(hex: string) {
-  state.color = hex;   // 反应式（proxy→dialReactive.color）→ currentBrush computed 自动重派生
-  safeLSSet("webpaint.color", hex);
+  editorState.brushTool.color = hex;   // 绑定反应式引擎（→state.color/dialReactive.color 重派生）+ 标脏持久化
   els.activeSwatch.style.background = hex;
   colorWheel.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue
 }
@@ -23,17 +20,37 @@ export function toggleColorPanel(force?: boolean) {
   const hidden = els.colorPanel.classList.contains("hidden");
   const show = force === true ? true : force === false ? false : hidden;
   if (show) {
+    editorState.colorPanel.enabled = true;
     els.colorPanel.classList.remove("hidden");
     raiseWindow(els.colorPanel);
-    const saved = safeLS("webpaint.colorPanel.pos");
+    const saved = editorState.colorPanel.position;
     const w = els.colorPanel.offsetWidth || 264;
     const h = els.colorPanel.offsetHeight || 320;
-    let left, top;
-    if (saved) {
-      try { const o = JSON.parse(saved); left = o.left; top = o.top; }
-      catch { left = top = null; }
-    }
-    if (left == null) { left = window.innerWidth - w - 16; top = 60; }
+    let left = saved?.left, top = saved?.top;
+    if (left == null || top == null) { left = window.innerWidth - w - 16; top = 60; }
+    left = Math.max(0, Math.min(window.innerWidth - w, left));
+    top = Math.max(0, Math.min(window.innerHeight - h, top));
+    els.colorPanel.style.left = left + "px";
+    els.colorPanel.style.top = top + "px";
+  } else {
+    editorState.colorPanel.enabled = false;
+    els.colorPanel.classList.add("hidden");
+  }
+}
+
+let _panelDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
+let _pickerPinTimer: ReturnType<typeof setTimeout> | undefined;
+
+// 文档加载/新建后应用该 doc 保存的面板状态：只写 DOM，绝不回写 editorState（否则会误标脏）。
+function applyColorPanelFromEditorState() {
+  els.activeSwatch.style.background = state.color;
+  if (editorState.colorPanel.enabled) {
+    els.colorPanel.classList.remove("hidden");
+    const saved = editorState.colorPanel.position;
+    const w = els.colorPanel.offsetWidth || 264;
+    const h = els.colorPanel.offsetHeight || 320;
+    let left = saved?.left, top = saved?.top;
+    if (left == null || top == null) { left = window.innerWidth - w - 16; top = 60; }
     left = Math.max(0, Math.min(window.innerWidth - w, left));
     top = Math.max(0, Math.min(window.innerHeight - h, top));
     els.colorPanel.style.left = left + "px";
@@ -42,9 +59,6 @@ export function toggleColorPanel(force?: boolean) {
     els.colorPanel.classList.add("hidden");
   }
 }
-
-let _panelDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
-let _pickerPinTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function initColorPanel(ctx: AppContext) {
   state = ctx.state;
@@ -72,7 +86,7 @@ export function initColorPanel(ctx: AppContext) {
     const top = Math.max(0, Math.min(window.innerHeight - h, _panelDrag.ot + (e.clientY - _panelDrag.sy)));
     els.colorPanel.style.left = left + "px";
     els.colorPanel.style.top = top + "px";
-    safeLSSet("webpaint.colorPanel.pos", JSON.stringify({ left, top }));
+    editorState.colorPanel.position = { left, top };
   });
   els.colorPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
     if (_panelDrag && e.pointerId === _panelDrag.id) {
@@ -81,6 +95,7 @@ export function initColorPanel(ctx: AppContext) {
     }
   });
   window.addEventListener("wp:toggleColor", () => toggleColorPanel());
+  window.addEventListener("wp:applyEditorState", () => applyColorPanelFromEditorState());
 
   // 吸色 pin tooltip（input.js _doPick 派发 wp:pickerShow，pin 在采样像素屏坐标，1.5s 自动淡出）
   const pin = document.getElementById("pickerPin");

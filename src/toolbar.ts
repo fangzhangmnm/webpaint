@@ -13,7 +13,7 @@ import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { Selection } from "./selection.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
-import { safeLSSet } from "./safe-ls.ts";
+import { editorState } from "./editor-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式 + workspaceDirty）
 import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
@@ -450,11 +450,10 @@ export function initToolbar(ctx: AppContext) {
   pickModeSel = document.getElementById("pickModeSel") as HTMLSelectElement | null;
   if (pickModeSel) {
     const psel = pickModeSel;
-    psel.value = state.pickMode;
-    psel.addEventListener("change", () => {
-      state.pickMode = psel.value;
-      safeLSSet("webpaint.pickMode", psel.value);
-    });
+    psel.value = editorState.colorPicker.layerMode;   // binding → state.pickMode（引擎 input._doPick 经 getPickMode 读）
+    psel.addEventListener("change", () => { editorState.colorPicker.layerMode = psel.value; });
+    // desk 载入：文档的 pickMode 回灌 → 刷新下拉显示（editorState 已由 Unserialize 更新，只同步 UI，不回写）
+    window.addEventListener("wp:applyEditorState", () => { psel.value = editorState.colorPicker.layerMode; });
   }
   // 选区 → 新层 / 复制层
   byId("lassoDuplicateBtn").addEventListener("click", () => {

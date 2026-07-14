@@ -91,6 +91,11 @@ function resetEditorState() {
   setColor("#000000"); applyCheckerboard(false); state.filterBrush = null; applyBlenderSyncState();
   editorState.reset();   // desk per-doc：开新文件/换画/卸载 → 重置 editorState struct（stage4）
 }
+
+// desk apply-on-load（stage5）：editorState.Unserialize/reset 后，把面板/视口等**回灌到 UI**。
+//   各面板模块（color/layers/ref/blender panel）在 init 里监听 wp:applyEditorState，读 editorState.<panel>
+//   开/关/定位自己（**只读 editorState + 裸 DOM 操作，不回写 editorState → 不 mark workspaceDirty**）。
+function applyEditorStateToUI(): void { window.dispatchEvent(new CustomEvent("wp:applyEditorState")); }
 function restoreEditorStateFromOra(loaded: LoadedDoc) {
   const ws = loaded?._webpaintState;
   if (loaded?._referenceBlob) {
@@ -152,6 +157,7 @@ function adoptModel(loaded: LoadedDoc) {
     restoreEditorStateFromOra(loaded);
     const vp = loaded._webpaintState?.viewport;
     if (vp && typeof vp.scale === "number") { Object.assign(board.viewport, vp); board.invalidateAll(); board.requestRender(); }
+    applyEditorStateToUI();   // desk：Unserialize 后把面板/视口回灌 UI
   } finally { _loadingDoc = false; }
 }
 
@@ -314,6 +320,7 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
   _activeSessionName = name; setCurrentSessionName(name); _recomputePhase();
   _enc.encrypted = false; input.clearHistory(); board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
   resetEditorState();
+  applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
   es.adopted(toFull(name));   // 新内容装入 editor（非 store.open）→ es 记为当前 + 脏；边界转全名
   _docLastSavedAt = 0; updateSaveStatus();
   await saveNow();   // 落盘（tryPush:false）

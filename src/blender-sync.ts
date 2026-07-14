@@ -22,12 +22,13 @@ import { renderDocToImageBlob } from "./session.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { setMenuOpen } from "./settings-menu.ts";
-import { safeLS, safeLSSet } from "./safe-ls.ts";
+import { editorState } from "./editor-state.ts";
+import { appState } from "./app-state.ts";
 import { BTPClient, BTPError } from "../vendor/btp/v1/index.js";
 import { t } from "./i18n/index.ts";
 
-const POS_KEY = "webpaint.blenderPanel.pos";
-const URL_KEY = "webpaint.blender.remoteUrl";   // 远程地址：设备级（localStorage），不随文档走
+// 面板 show/position 随文档走 → editorState.blenderPanel（.ora 序列化）。
+// 远端 URL 是账号级设置（tailscale 稳定端点，跨设备同步）→ appState.blenderPanelUrl，不随文档走。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
 // ─── 内联 SVG 图标（currentColor → 由 data-state CSS 着色 / spin）───
@@ -79,6 +80,29 @@ export function initBlenderSync(c: AppContext) {
   document.addEventListener("pointerdown", (e) => {
     if (!panel.contains(e.target as Node)) closeAllPopups();
   });
+  // 文档 editorState 加载/重置后 → 回灌面板 show/position（+ 账号级 URL）
+  window.addEventListener("wp:applyEditorState", () => applyBlenderPanelFromEditorState());
+}
+
+// 文档加载/新建后应用该 doc 保存的面板状态：只写 DOM，绝不回写 editorState（否则会误标脏）。
+// URL 是账号级（appState 跨设备同步），顺带刷新——可能在别的设备上改过。
+function applyBlenderPanelFromEditorState() {
+  if (!built) return;
+  remoteUrl.value = appState.blenderPanelUrl || "";
+  const show = editorState.blenderPanel.show;
+  panel.classList.toggle("hidden", !show);
+  if (show) {
+    document.body.appendChild(panel);   // 置顶
+    const saved = editorState.blenderPanel.position;
+    if (saved) {
+      const w = panel.offsetWidth, h = panel.offsetHeight;
+      const left = Math.max(0, Math.min(window.innerWidth - w, saved.left));
+      const top = Math.max(0, Math.min(window.innerHeight - h, saved.top));
+      panel.style.left = left + "px";
+      panel.style.right = "auto";
+      panel.style.top = top + "px";
+    }
+  }
 }
 
 // ───────────────────────── 连接（单键多态）─────────────────────────
@@ -362,6 +386,7 @@ function togglePanel(force?: boolean) {
   const show = force === undefined ? hidden : force;
   panel.classList.toggle("hidden", !show);
   if (show) document.body.appendChild(panel);   // 置顶
+  editorState.blenderPanel.show = show;         // 随文档持久化（标脏）
 }
 
 function buildPanel() {
@@ -448,8 +473,8 @@ function buildPanel() {
   // 引用
   connBtn = q("#btpConnBtn");
   remoteUrl = q("#btpRemoteUrl");
-  remoteUrl.value = safeLS(URL_KEY) || "";
-  remoteUrl.addEventListener("change", () => safeLSSet(URL_KEY, remoteUrl.value.trim()));
+  remoteUrl.value = appState.blenderPanelUrl || "";
+  remoteUrl.addEventListener("change", () => { appState.blenderPanelUrl = remoteUrl.value.trim(); });
   nameInput = q("#btpName");
   texList = q("#btpTexList");
   sizeW = q("#btpSizeW");
@@ -522,7 +547,7 @@ function attachDrag(head: HTMLElement) {
     panel.style.left = left + "px";
     panel.style.right = "auto";
     panel.style.top = top + "px";
-    safeLSSet(POS_KEY, JSON.stringify({ left, top }));
+    editorState.blenderPanel.position = { left, top };   // 随文档持久化（标脏）
   });
   head.addEventListener("pointerup", (e: PointerEvent) => {
     if (drag && e.pointerId === drag.id) {
@@ -533,12 +558,9 @@ function attachDrag(head: HTMLElement) {
 }
 
 function restorePos() {
-  const saved = safeLS(POS_KEY);
+  const saved = editorState.blenderPanel.position;
   if (!saved) return;
-  try {
-    const o = JSON.parse(saved) as { left: number; top: number };
-    panel.style.left = o.left + "px";
-    panel.style.right = "auto";
-    panel.style.top = o.top + "px";
-  } catch { /* 忽略坏值 */ }
+  panel.style.left = saved.left + "px";
+  panel.style.right = "auto";
+  panel.style.top = saved.top + "px";
 }

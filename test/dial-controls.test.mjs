@@ -44,7 +44,7 @@ describe("dial-controls · dial 写入 + 键盘调粗", () => {
     state.toolStates.brush.size = 12;
     const { bindKeyboard } = makeDialControls({ state, rack: fakeRack(state, 50), getEditMode: () => ({ current: () => "brush" }) });
     let flashed = 0;
-    bindKeyboard({ board: { _cursor: null }, leftDial: { flashSize: () => { flashed++; } } });
+    const off = bindKeyboard({ board: { _cursor: null }, leftDial: { flashSize: () => { flashed++; } } });
     // 12 在「<20 step=1」段：+1 方向 → 13。
     window.dispatchEvent(new CustomEvent("wp:adjsize", { detail: +1 }));
     eq(state.toolStates.brush.size, 13, "键盘 +1 段量化错（12→13 期望，<20 段 step=1）");
@@ -53,14 +53,16 @@ describe("dial-controls · dial 写入 + 键盘调粗", () => {
     state.toolStates.brush.size = 48;
     window.dispatchEvent(new CustomEvent("wp:adjsize", { detail: +1 }));
     eq(state.toolStates.brush.size, 50, "48→50（step=2 段 + clamp 到 max=50）");
+    off();   // 清理监听：dial 走 editorState 单例，泄漏监听会跨测串扰
   });
 
   it("键盘：非绘制工具忽略", () => {
     const { state } = createEditorState();
     state.toolStates.brush.size = 12;
     const { bindKeyboard } = makeDialControls({ state, rack: fakeRack(state), getEditMode: () => ({ current: () => "lasso" }) });
-    bindKeyboard({ board: { _cursor: null }, leftDial: { flashSize: () => {} } });
+    const off = bindKeyboard({ board: { _cursor: null }, leftDial: { flashSize: () => {} } });
     window.dispatchEvent(new CustomEvent("wp:adjsize", { detail: +1 }));
     eq(state.toolStates.brush.size, 12, "lasso 工具不该改 size");
+    off();
   });
 });

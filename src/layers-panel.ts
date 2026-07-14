@@ -27,7 +27,7 @@ import { t } from "./i18n/index.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";
-import { safeLS, safeLSSet } from "./safe-ls.ts";
+import { editorState } from "./editor-state.ts";
 import { raiseWindow } from "./surfaces.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import type { AppContext } from "./app-context.ts";
@@ -103,7 +103,24 @@ export function toggleLayersPanel(force?: boolean) {
   const show = force === true ? true : force === false ? false : hidden;
   els.layersPanel.classList.toggle("hidden", !show);
   els.layersBtn.setAttribute("aria-pressed", show ? "true" : "false");
+  // 开关状态随文档走：写进 editorState（setter 自动标记 workspace dirty）。
+  editorState.layersPanel.enabled = show;
   if (show) { raiseWindow(els.layersPanel); renderLayersPanel(); }
+}
+
+// doc 的 editorState 加载/重置后，把面板开关 + 位置**只读地**应用到 DOM（绝不回写 editorState → 不误标 dirty）。
+// 直接走裸 DOM 开关，不经 toggleLayersPanel（那条路径会写 editorState）。session-state 在 editorState 就绪后派发 wp:applyEditorState。
+function applyLayersPanelFromEditorState() {
+  const pos = editorState.layersPanel.position;   // {left,top} | null（null = 自动摆放，不动位置）
+  if (pos) {
+    els.layersPanel.style.left = pos.left + "px";
+    els.layersPanel.style.right = "auto";
+    els.layersPanel.style.top = pos.top + "px";
+  }
+  const enabled = editorState.layersPanel.enabled;
+  els.layersPanel.classList.toggle("hidden", !enabled);
+  els.layersBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+  if (enabled) { raiseWindow(els.layersPanel); renderLayersPanel(); }
 }
 
 // 兼容垫片：app.js 仍调它（导出名保留）—— 现在只 bumpDoc() → docVersion 信号驱动 Vue 重算。
@@ -720,7 +737,7 @@ export function initLayersPanel(ctx: AppContext) {
     els.layersPanel.style.right = "auto";
     els.layersPanel.style.top = top + "px";
     _clampListHeight();   // 拖动改了面板顶 → 重钉列表高度，底部 item 始终够得着
-    safeLSSet("webpaint.layersPanel.pos", JSON.stringify({ left, top }));
+    editorState.layersPanel.position = { left, top };   // 位置随文档走（setter 自动标记 dirty）
   });
   els.layersPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
     if (_layersDrag && e.pointerId === _layersDrag.id) {
@@ -728,16 +745,9 @@ export function initLayersPanel(ctx: AppContext) {
       _layersDrag = null;
     }
   });
-  // 还原上次位置
-  const saved = safeLS("webpaint.layersPanel.pos");
-  if (saved) {
-    try {
-      const o = JSON.parse(saved);
-      els.layersPanel.style.left = o.left + "px";
-      els.layersPanel.style.right = "auto";
-      els.layersPanel.style.top = o.top + "px";
-    } catch {}
-  }
+  // 面板开关 + 位置随文档走：doc 的 editorState 加载/重置后由 session-state 派发 wp:applyEditorState，据此应用到 DOM。
+  window.addEventListener("wp:applyEditorState", () => applyLayersPanelFromEditorState());
+  applyLayersPanelFromEditorState();   // 初次也按当前 editorState 摆好
 
   // v267 指令栏：+（弹菜单：新图层 / 导入图片）· 上移 · 下移 · 删除。命令全走深模块 caller，UI 只调。
   const addPopup = document.getElementById("layerAddPopup");
