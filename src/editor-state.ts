@@ -26,8 +26,9 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
   // shapes/airbrush **不**自己存——alias 到 brush（见 rack.getRackToolKey）。v98：{ size, opacity, flow, activeBrushId }。
   // reactive：dial 是反应式 SSoT。先建 toolStates → 让 state 字面量一次成形、整体类型化（序列化走 JSON.stringify 无碍）。
   const toolStates: Record<string, ToolDial> = reactive({
-    // brush 的 boot dial 从 LS 兜底（保留「记住上次粗细/透」；rack/doc 载入后被 preset/ORA toolStates 覆盖）。
-    brush:    { size: parseFloat(safeLS("webpaint.size") || "12"), opacity: parseFloat(safeLS("webpaint.opacity") || "1"), flow: 1.0, activeBrushId: null },
+    // brush dial 默认（size/opacity/brushId 归 editorState.brushTool SSoT，boot 后 bindEditorReactive 灌入、doc 载入覆盖；
+    //   不再从 LS 种子——desk per-doc，删了 webpaint.size/opacity 设备记忆）。flow 未进 editorState（留下一轮）。
+    brush:    { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null },
     eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
     // v132：size=radius，opacity=transparency/flow，variantId=子算法选择（Filter.brushVariants[].id），空=默认
     filterBrush: { size: 32, opacity: 1.0, flow: 1.0, activeBrushId: null, variantId: null },
@@ -37,14 +38,14 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     // tool（当前工具）的 SSoT 在 editMode（editMode.current()）。见 edit-mode.js / CONTEXT.md。
     // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
     filterBrush: null,
-    color: safeLS("webpaint.color") || "#1b1b1b",
+    color: "#1b1b1b",   // 归 editorState.brushTool.color SSoT（boot bind 灌入 / doc 载入覆盖）；删 webpaint.color LS 种子
     // 全局（非 per-tool）压感开关。boot 读 LS（v202 修：旧版写 pToSize 从不读回）。未设过→DEFAULT(开)；"0"→关。
     pressureToSize: safeLS("webpaint.pToSize") !== "0",
     pressureToOpacity: safeLS("webpaint.pToOpacity") !== "0",
     // 手势开关 = 跨设备偏好（synced-user-preference collection；createEditorState 在 boot 门后调，已 hydrate）。
     longPressPick: syncedUserPreference.getItem<boolean>("long-press-pick", PREF_DEFAULTS["long-press-pick"]),
     singleFingerDraw: syncedUserPreference.getItem<boolean>("single-finger-draw", PREF_DEFAULTS["single-finger-draw"]),
-    pickMode: safeLS("webpaint.pickMode") || "composite",  // 吸色取样：composite(合并·respect clip+mode) | layer(raw 色)
+    pickMode: "composite",  // 吸色取样 composite|layer；归 editorState.colorPicker.layerMode SSoT（bind 灌入/载入覆盖）；删 webpaint.pickMode LS
     // v125 checkerboard 从全局 LS 改 per-doc（跟文件走）。初始 false；adopt 时按文件值覆盖；新建默认 false。
     checkerboard: false,
     toolStates,
@@ -72,6 +73,16 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
   Object.defineProperty(state, "pressureToOpacity", {
     get: () => dialReactive.pressureToOpacity, set: (v: boolean) => { dialReactive.pressureToOpacity = v; },
     configurable: true, enumerable: true,
+  });
+
+  // editorState.brushTool / colorPicker.layerMode 绑到反应式引擎态（引擎不改；editorState 作 SSoT 接口）。
+  //   绑定即把 editorState 当前 S.g（默认，或 boot 前已 Unserialize 的值）灌进这些 reactive 字段，二者对齐。
+  bindEditorReactive({
+    getSize: () => toolStates.brush.size ?? 12, setSize: (v) => { toolStates.brush.size = v; },
+    getOpacity: () => toolStates.brush.opacity ?? 1.0, setOpacity: (v) => { toolStates.brush.opacity = v; },
+    getBrushId: () => toolStates.brush.activeBrushId ?? null, setBrushId: (v) => { toolStates.brush.activeBrushId = v; },
+    getColor: () => dialReactive.color, setColor: (v) => { dialReactive.color = v; },
+    getPickMode: () => state.pickMode, setPickMode: (v) => { state.pickMode = v; },
   });
 
   return { state, dialReactive };
@@ -146,6 +157,28 @@ let _workspaceDirty = false;
 let _onDirty: (() => void) | null = null;   // 可选外部通知钩子（如触发 UI 重算）；stage4 接 smart-save
 function setDirtyFlag(): void { _workspaceDirty = true; _onDirty?.(); }   // private：所有 setter 接它
 
+// ── 反应式引擎绑定（stage5）：brushTool(size/opacity/brushId/color) + colorPicker.layerMode 是引擎**每笔读**的
+//   反应式态。editorState 作 SSoT 接口，底层存储绑到 createEditorState 的 reactive state —— 引擎一行不改、
+//   Vue 反应式不断（改 editorState.brushTool.size 直接写 reactive → currentBrush 重算 + workspaceDirty）。
+//   未绑定（pre-boot / node 测）→ 回落 S.g 纯值。
+interface EngineBind {
+  getSize(): number; setSize(v: number): void;
+  getOpacity(): number; setOpacity(v: number): void;
+  getBrushId(): string | null; setBrushId(v: string | null): void;
+  getColor(): string; setColor(v: string): void;
+  getPickMode(): string; setPickMode(v: string): void;
+}
+let _bind: EngineBind | null = null;
+// 用 _bind 的 raw setter 灌值（不经 editorState setter → 不 mark dirty；load/reset/bind 用）。
+function applyBoundFromGroups(g: EditorGroups): void {
+  if (!_bind) return;
+  _bind.setSize(g.brushTool.size); _bind.setOpacity(g.brushTool.opacity);
+  _bind.setBrushId(g.brushTool.brushId); _bind.setColor(g.brushTool.color);
+  _bind.setPickMode(g.colorPicker.layerMode);
+}
+// boot 时 createEditorState 调：把当前 S.g（默认/已载入）灌进反应式引擎，二者对齐。
+export function bindEditorReactive(b: EngineBind): void { _bind = b; applyBoundFromGroups(S.g); }
+
 // 容错合并：present 键覆盖，缺键留 default，深一层（position/viewport）也浅合并。
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
 function mergeInto<T extends object>(dst: T, src: unknown): void {
@@ -186,23 +219,40 @@ export const editorState = {
     get show(): boolean { return S.g.blenderPanel.show; }, set show(v: boolean) { S.g.blenderPanel.show = v; setDirtyFlag(); },
     get position(): PanelPos | null { return S.g.blenderPanel.position; }, set position(v: PanelPos | null) { S.g.blenderPanel.position = v; setDirtyFlag(); },
   },
-  // tools（spec 表写了的收；未写的留下一轮）──
+  // tools（spec 表写了的收；未写的留下一轮）。brushTool + colorPicker 绑反应式引擎（见 EngineBind）──
   brushTool: {
-    get brushId(): string | null { return S.g.brushTool.brushId; }, set brushId(v: string | null) { S.g.brushTool.brushId = v; setDirtyFlag(); },
-    get size(): number { return S.g.brushTool.size; }, set size(v: number) { S.g.brushTool.size = v; setDirtyFlag(); },
-    get opacity(): number { return S.g.brushTool.opacity; }, set opacity(v: number) { S.g.brushTool.opacity = v; setDirtyFlag(); },
-    get color(): string { return S.g.brushTool.color; }, set color(v: string) { S.g.brushTool.color = v; setDirtyFlag(); },
+    get brushId(): string | null { return _bind ? _bind.getBrushId() : S.g.brushTool.brushId; },
+    set brushId(v: string | null) { if (_bind) _bind.setBrushId(v); else S.g.brushTool.brushId = v; setDirtyFlag(); },
+    get size(): number { return _bind ? _bind.getSize() : S.g.brushTool.size; },
+    set size(v: number) { if (_bind) _bind.setSize(v); else S.g.brushTool.size = v; setDirtyFlag(); },
+    get opacity(): number { return _bind ? _bind.getOpacity() : S.g.brushTool.opacity; },
+    set opacity(v: number) { if (_bind) _bind.setOpacity(v); else S.g.brushTool.opacity = v; setDirtyFlag(); },
+    get color(): string { return _bind ? _bind.getColor() : S.g.brushTool.color; },
+    set color(v: string) { if (_bind) _bind.setColor(v); else S.g.brushTool.color = v; setDirtyFlag(); },
   },
   liquify:     { get bleed(): string { return S.g.liquify.bleed; }, set bleed(v: string) { S.g.liquify.bleed = v; setDirtyFlag(); } },
-  colorPicker: { get layerMode(): string { return S.g.colorPicker.layerMode; }, set layerMode(v: string) { S.g.colorPicker.layerMode = v; setDirtyFlag(); } },
+  colorPicker: {
+    get layerMode(): string { return _bind ? _bind.getPickMode() : S.g.colorPicker.layerMode; },
+    set layerMode(v: string) { if (_bind) _bind.setPickMode(v); else S.g.colorPicker.layerMode = v; setDirtyFlag(); },
+  },
   // viewport / checkboard ──
   get viewport(): EditorViewport | null { return S.g.viewport; }, set viewport(v: EditorViewport | null) { S.g.viewport = v; setDirtyFlag(); },
   get checkboard(): boolean { return S.g.checkboard; }, set checkboard(v: boolean) { S.g.checkboard = v; setDirtyFlag(); },
 
   // ── 序列化（除各字段外仅此二法 + reset + workspaceDirty 读/清）──
-  Serialize(): EditorGroups { return JSON.parse(JSON.stringify(S.g)); },       // 深拷贝：与 live 态解耦；即 .webpaint/editor-state.json 内容
-  Unserialize(json: unknown): void { const d = freshGroups(); mergeInto(d, json); S.g = d; _workspaceDirty = false; },   // 载入非编辑 → 不脏
-  reset(): void { S.g = freshGroups(); _workspaceDirty = false; },              // 开新文件必调
+  // 深拷贝：与 live 解耦；即 .webpaint/editor-state.json 内容。绑定字段（brushTool/pickMode）从引擎 live 取。
+  Serialize(): EditorGroups {
+    const out = JSON.parse(JSON.stringify(S.g)) as EditorGroups;
+    if (_bind) {
+      out.brushTool = { brushId: _bind.getBrushId(), size: _bind.getSize(), opacity: _bind.getOpacity(), color: _bind.getColor() };
+      out.colorPicker = { layerMode: _bind.getPickMode() };
+    }
+    return out;
+  },
+  // 载入（非编辑→不脏）：合并进 S.g，再把绑定字段灌进反应式引擎。
+  Unserialize(json: unknown): void { const d = freshGroups(); mergeInto(d, json); S.g = d; applyBoundFromGroups(d); _workspaceDirty = false; },
+  // 开新文件必调：回默认 + 灌引擎。
+  reset(): void { S.g = freshGroups(); applyBoundFromGroups(S.g); _workspaceDirty = false; },
 
   // smart-save 用（stage4 接线）：workspaceDirty = editor-state 改过、未落盘（UI 静默、push 非 no-op）。
   isWorkspaceDirty(): boolean { return _workspaceDirty; },
