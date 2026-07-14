@@ -52,6 +52,7 @@ fi
 # 1. esbuild bundle 到临时名
 "$ESBUILD" "$ENTRY" \
   --bundle --format=esm --target=es2020 \
+  --supported:top-level-await=true \
   --minify --sourcemap=linked \
   --tree-shaking=true \
   --outfile="$TMP_OUT"
