@@ -2,7 +2,7 @@
 // + 齿轮（🔧）配置 popup + 菜单子标签刷新。
 //
 // 旧 app.js 「菜单：导入 / 导出 / 剪贴板」区逐字搬来；app.js 短路成 import + initExportImportMenu() 装配。
-// sticky 偏好存 localStorage（不绑 doc，配一次全工程用）；boot 的 _updateMenuSubLabels() 进 init。
+// 导入/导出偏好存 editorState（per-doc desk state，见 editor-state.ts）；boot 的 _updateMenuSubLabels() 进 init。
 // stampNow（导出文件名时间戳）只此处用，一并搬入。
 //
 // 依赖直 import（叶/单例）：exporters / els / settings-menu(setMenuOpen) / session-state(session) /
@@ -16,6 +16,7 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
+import { editorState } from "./editor-state.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -29,28 +30,26 @@ function stampNow() {
 
 // v120: 主菜单导出/导入 重组（user：「导出项目和导出语义分开」+「小扳手」)
 // - 主行 = 按 sticky config 一键执行；🔧 = 弹 inline popup 改 config
-// - sticky 存 localStorage（不绑 doc，配一次全工程用）
-const _EXP_PRJ_KEY = "webpaint:exportProject:v1";   // { format: "ora" | "psd" }
-const _EXP_IMG_KEY = "webpaint:exportImage:v1";     // { format, target }
-const _IMP_IMG_KEY = "webpaint:importImage:v1";     // { source: "file" | "clipboard" }
+// - 偏好存 editorState（per-doc desk state，setter 自动标 workspace dirty）
+//   getter/setter 返回形保持不变（scope ↔ editorState.export.layerMode 映射），call site 不动。
 function _getExpPrj(): { format: string } {
-  try { return JSON.parse(localStorage.getItem(_EXP_PRJ_KEY)!) || { format: "ora" }; }
-  catch { return { format: "ora" }; }
+  return { format: editorState.exportProject.format };
 }
 function _getExpImg(): { format: string; target: string; scope: string } {
-  try {
-    const v = JSON.parse(localStorage.getItem(_EXP_IMG_KEY)!) || {};
-    // v124 加 scope 字段 ("merged" | "active")，默认 merged 兼容旧配置
-    return { format: "png", target: "file", scope: "merged", ...v };
-  } catch { return { format: "png", target: "file", scope: "merged" }; }
+  // scope ← editorState.export.layerMode ("merged" | "active")
+  return { format: editorState.export.format, target: editorState.export.target, scope: editorState.export.layerMode };
 }
 function _getImpImg(): { source: string } {
-  try { return JSON.parse(localStorage.getItem(_IMP_IMG_KEY)!) || { source: "file" }; }
-  catch { return { source: "file" }; }
+  return { source: editorState.import.source };
 }
-function _setExpPrj(v: unknown) { localStorage.setItem(_EXP_PRJ_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
-function _setExpImg(v: unknown) { localStorage.setItem(_EXP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
-function _setImpImg(v: unknown) { localStorage.setItem(_IMP_IMG_KEY, JSON.stringify(v)); _updateMenuSubLabels(); }
+function _setExpPrj(v: { format: string }) { editorState.exportProject.format = v.format; _updateMenuSubLabels(); }
+function _setExpImg(v: { format: string; target: string; scope: string }) {
+  editorState.export.format = v.format;
+  editorState.export.target = v.target;
+  editorState.export.layerMode = v.scope;   // scope → layerMode
+  _updateMenuSubLabels();
+}
+function _setImpImg(v: { source: string }) { editorState.import.source = v.source; _updateMenuSubLabels(); }
 function _updateMenuSubLabels() {
   const ep = _getExpPrj();
   const ei = _getExpImg();

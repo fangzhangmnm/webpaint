@@ -8,7 +8,7 @@
 // state.filterBrush 是 active filter-brush 的 SSoT（在 state 上，经绑定的 state 读写）。
 import { els } from "./els.ts";
 import { t } from "./i18n/index.ts";
-import { safeLS, safeLSSet } from "./safe-ls.ts";
+import { editorState } from "./editor-state.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { getFilter, listFilters, onFilterRegistered } from "./filters.ts";
 import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";
@@ -276,7 +276,7 @@ function _enterFilterBrushMode(Filter: FilterLike) {
   let variant = variants.find((v) => v.id === savedVid) || variants[0];
   // v147 声明了 boundaryModes 的 filter（液化）→ params 带上持久化的 bleed；其他 filter 不掺这个 key
   const params = Filter.boundaryModes
-    ? { ...variant.params, bleed: safeLS("webpaint.liquify.bleed") || "edge" }
+    ? { ...variant.params, bleed: editorState.liquify.bleed }
     : variant.params;
   state.filterBrush = { Filter, params, variantId: variant.id, variantLabel: variant.title };
   if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = variant.id;
@@ -356,7 +356,7 @@ function _renderFilterBrushToolbar() {
     }
     bsel.addEventListener("change", () => {
       fb.params = { ...fb.params, bleed: bsel.value };
-      safeLSSet("webpaint.liquify.bleed", bsel.value);
+      editorState.liquify.bleed = bsel.value;
       const m = Filter.boundaryModes!.find((b) => b.id === bsel.value);
       setStatus(t("mi.boundary", { mode: m ? m.title : bsel.value }));
     });
