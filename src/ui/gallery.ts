@@ -195,9 +195,14 @@ function makeGallery(host: GalleryHost) {
       }
       // 对外/内部刷新：files 视图重订阅（重跑本地+云端帧）；trash 视图重载。日常本夹写已由 store notifyFolderOf 即时重画。
       async function reload() { openMenu.value = null; if (view.value === "trash") { _unsub?.(); _unsub = null; await loadTrash(); } else subscribe(); }
+      // 用户导航（点子夹/面包屑/退出画布）→ 换夹 + **写盘**（记住"上次在哪"）。
       function setFolder(p: string) { folder.value = p || ""; try { appState.currentDirectory = folder.value; } catch {} openMenu.value = null; subscribe(); }
+      // boot fixup 相专用：collection hydrate 后把"上次的夹"灌进来 —— **不写盘**。
+      //   若这里图省事复用 setFolder，就会把刚读到的值原样回写、盖上新 uat → 重演 P0-1 的
+      //   「最后冷启动的设备赢」LWW churn（settings-menu 的 render*/apply* 分工同理）。
+      function hydrateFolder(p: string) { if ((p || "") === folder.value) return; folder.value = p || ""; openMenu.value = null; subscribe(); }
 
-      subscribe();                        // 初始订阅当前夹
+      subscribe();                        // 初始订阅当前夹（v409：此刻 collection 未 hydrate → 恒为根；hydrateFolder 随后灌真值）
       onUnmounted(() => { _unsub?.(); _unsub = null; });
 
       // ---- 派生（纯 view-model；切片已在 store 内完成）----
@@ -470,7 +475,7 @@ function makeGallery(host: GalleryHost) {
       return {
         view, folder, loading, openMenu, isEmpty, emptyText, L,
         folderTiles, fileTiles, trashTiles, crumbs,
-        badgeIcon, fmtMeta, ICON, toggleMenu, setFolder, enterFolder,
+        badgeIcon, fmtMeta, ICON, toggleMenu, setFolder, hydrateFolder, enterFolder,
         openTile, rename, move, copy, push, unload, del, folderDelete, trashRestore, trashPurge, emptyTrash,
         encryptItem, decryptItem, onUnlock,
         reload, setView: (v: "files" | "trash") => { view.value = v; reload(); },
@@ -559,6 +564,7 @@ export interface GalleryHandle {
   setView(v: "files" | "trash"): void;
   getView(): "files" | "trash";
   setFolder(path: string): void;
+  hydrateFolder(path: string): void;   // boot fixup：灌"上次的夹"，不写盘
   getFolder(): string;
   emptyTrash(scope?: "local" | "cloud" | "both"): void;
   unmount(): void;
@@ -570,6 +576,7 @@ interface GalleryVM {
   setView(v: "files" | "trash"): void;
   view: "files" | "trash";
   setFolder(p: string): void;
+  hydrateFolder(p: string): void;
   folder: string;
   emptyTrash(scope?: "local" | "cloud" | "both"): void;
 }
@@ -582,6 +589,7 @@ export function mountGallery(el: HTMLElement, host: GalleryHost): GalleryHandle 
     setView: (v) => vm.setView(v),
     getView: () => vm.view,
     setFolder: (p) => vm.setFolder(p),
+    hydrateFolder: (p) => vm.hydrateFolder(p),
     getFolder: () => vm.folder,
     emptyTrash: (scope) => vm.emptyTrash(scope),
     unmount: () => app.unmount(),

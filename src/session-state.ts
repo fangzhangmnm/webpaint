@@ -46,6 +46,7 @@ let input: AppContext["input"], editMode: AppContext["editMode"], rack: AppConte
 let referenceWindow: AppContext["referenceWindow"], paletteWindow: AppContext["paletteWindow"];
 let setStatus: AppContext["setStatus"], withBusy: AppContext["withBusy"];
 let updateSaveStatus: AppContext["updateSaveStatus"], updateNewerBanner: AppContext["updateNewerBanner"];
+let pullSettingsAndState: AppContext["pullSettingsAndState"];
 let setColor: AppContext["setColor"], applyCheckerboard: AppContext["applyCheckerboard"], renderLayersPanel: AppContext["renderLayersPanel"];
 let setGalleryOpen: AppContext["setGalleryOpen"];
 let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"], uniqueLocalName: AppContext["uniqueLocalName"];
@@ -79,7 +80,11 @@ async function _refreshEncrypted() {
 
 // ============ 编辑器状态 I/O（v267b；app 编辑器概念，不动）============
 function storeEditorStateToOra() {
-  // checkerboard/viewport 已迁 editorState（.webpaint/editor-state.json）；此处 webpaint/state.json 只留未迁字段。
+  // ⚠**双轨**（诚实交代，别信"只留未迁字段"那种话）：checkerboard/viewport 确已迁走，但 color + toolStates
+  //   **两处都写**——本函数写 webpaint/state.json，editorState.Serialize() 又写 .webpaint/editor-state.json。
+  //   载入时 editorState 后手赢（restoreEditorStateFromOra 末尾 Unserialize）。
+  //   为什么还不能删旧轨：ws.toolStates 覆盖**全部**工具（eraser/filterBrush 的 dial 只在这），而
+  //   editorState.brushTool 只覆盖 brush 一个。要拆轨得先把 eraser/filterBrush dial 迁进 editorState（下一轮）。
   return {
     color: state.color, toolStates: state.toolStates,
     palette: paletteWindow.getSerializedState(),
@@ -107,18 +112,25 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
   }
   if (ws?.color) setColor(ws.color);
   if (ws?.palette) { try { paletteWindow.applySerializedState(ws.palette); } catch (_) {} }
-  if (ws?.toolStates && typeof ws.toolStates === "object") {
+  // 旧轨（webpaint/state.json）：灌**全部**工具的 dial（eraser/filterBrush 只在这一轨；见 storeEditorStateToOra 的双轨注）。
+  const savedToolStates = (ws?.toolStates && typeof ws.toolStates === "object") ? ws.toolStates : null;
+  if (savedToolStates) {
     for (const tk of Object.keys(state.toolStates)) {
-      const patch = serializedToolStatePatch(state.toolStates[tk], ws.toolStates[tk]);
+      const patch = serializedToolStatePatch(state.toolStates[tk], savedToolStates[tk]);
       if (patch) Object.assign(state.toolStates[tk], patch);
     }
-    rack.applyToolState(editMode.current());
   }
   applyBlenderSyncState(ws?.blender);   // checkboard 已迁 editorState → 经 wp:applyEditorState 应用（settings-menu 订阅）
   if (ws?.activeId != null && doc.setActiveById(ws.activeId)) renderLayersPanel();
   else if (typeof ws?.activeLayerIndex === "number" && doc.setActive(ws.activeLayerIndex)) renderLayersPanel();
-  // desk per-doc：载入 .webpaint/editor-state.json（缺失=老画作/不向后兼容 → resetEditorState 已回默认）。stage5 起各模块读它渲染。
+  // 新轨（desk per-doc）：载入 .webpaint/editor-state.json（缺失=老画作 → resetEditorState 已回默认）。
+  //   **后手赢**：它会用 brushTool 覆盖 toolStates.brush + color。
   if (loaded._editorState != null) editorState.Unserialize(loaded._editorState);
+  // ⚠ applyToolState 必须排在 **Unserialize 之后**（v409 修）：它按 toolStates 的 activeBrushId 应用笔架，
+  //   而新轨刚覆盖过那个值。v407-v408 把它放在 Unserialize 之前 —— 只因两轨由同一次 _buildOraMeta 同刻写出、
+  //   值必然相同才没暴露，是"靠巧合正确"。任一轨的兼容映射漂移（serializedToolStatePatch 的 v98 逻辑只作用于
+  //   旧轨）就会让笔架和 dial 不一致，且无任何报错。
+  if (savedToolStates || loaded._editorState != null) rack.applyToolState(editMode.current());
 }
 function _buildOraMeta() {
   // 存前把运行时 board 视口 + checkboard 观感开关镜像进 editorState（**不标脏**，见 syncRuntimeForSave 注）。
@@ -193,11 +205,10 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
     if (!ok) { setStatus(t("ss.saveCancelled")); return; }
     _loadedDocNewerConfirmed = true; updateNewerBanner();
   }
-  if (editorState.isWorkspaceDirty()) es.markWorkspacePending();   // desk 改动（无像素编辑）也让 flushLocal encode 落本地
   updateSaveStatus();
   try {
     await es.flushLocal();   // encode（+peek）→ store.file.save({tryPush:false})；只落本地（consent-safe）
-    editorState.clearWorkspaceDirty();   // desk 已随 encode 落本地
+                             // desk 不进 need：内容脏时顺手被 _buildOraMeta 捞走，不自己驱动落盘（v409）
     _docLastSavedAt = Date.now();
     setStatus(t("ss.saved", { name: _activeSessionName ?? "" }));
     checkQuotaAndWarn();
@@ -214,13 +225,13 @@ async function saveAndPush() {
     if (!_loadedDocNewerConfirmed) { setStatus(t("ss.notPushedNewer"), true); return; }
   }
   const name = _activeSessionName;
-  // workspaceDirty（desk 改过、内容未脏）→ 标 push-pending，让 flushAndPush 强制 encode+push（把 desk 落进 ora）。
-  if (editorState.isWorkspaceDirty()) es.markWorkspacePending();
   updateSaveStatus();
   try {
-    // flushAndPush：encode（若内存脏/push-pending）→ save({tryPush:true})。冲突/错误经 store 的 ui bundle surface。
-    await es.flushAndPush();
-    editorState.clearWorkspaceDirty();   // desk 已随 encode 落进 ora + 推云 → 清 workspaceDirty
+    // v409：用户**显式**按 save → forceSaveAndPush 无条件 encode+推，不脏也动。
+    //   理由（user 2026-07-14）：「至少可以改时间戳，不然用户点了 save 看到时间戳没动会觉得坏了」。
+    //   顺带把当前 desk 捞进 ora（_buildOraMeta → syncRuntimeForSave + Serialize）。
+    //   冲突/错误经 store 的 ui bundle surface。
+    await es.forceSaveAndPush();
     _docLastSavedAt = Date.now();
     setStatus(isSignedIn() ? t("ss.synced", { name }) : t("ss.savedLocalIdb", { name }));
     gallery.refresh();
@@ -301,9 +312,10 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
 // ---- 退出到图库（推 + 保存失败重试环）----
 async function exitCanvasToGallery() {
   if (_activeSessionName) {
-    if (editorState.isWorkspaceDirty()) es.markWorkspacePending();   // 只改 desk（无像素编辑）退出图库也要落盘+推（desk 跟画走）
+    // v409（D-Q6）：退出**只有内容脏/push-pending 才推**；只改 desk（无像素编辑）→ 不推不落本地，
+    //   下次开 revert 到上次保存的快照。user 2026-07-14：「退出应该只有 contentdirty 才强制推云，workspace dirty 可抛」。
     await withBusy(t("ss.savingBusy", { name: _activeSessionName ?? "" }), async () => {
-      try { await es.flushAndPush(); editorState.clearWorkspaceDirty(); } catch (e) { console.warn("[exit] save failed:", e); }
+      try { await es.flushAndPush(); } catch (e) { console.warn("[exit] save failed:", e); }
     });
     // 内存脏没落成（保存失败/取消）→ 显式问重试/丢弃，绝不无条件宣布干净（K2 红线）。
     while (es.isDirty() && !_docIsBlankUnnamed()) {
@@ -341,6 +353,11 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
 // ---- 打开云端路径（cloud item：unified open，file.open 自动拉云落本地）----
 async function pullCloudPath(path: string) {
   const name = stripSessionExt(path);
+  // 开画顺带把 4 个 settings/state collection 拉云对齐（v409，user 2026-07-14：「开画作的时候可以顺便
+  //   并行 pullandreconcile 下，fire and forget 不用 await」）。**绝不 await**：对齐是锦上添花，
+  //   不该让开画等网络（且离线/local-only 内部本就 no-op）。
+  pullSettingsAndState();
+
   if (/\.zip$/i.test(String(path))) { if (!(await ensureUnlocked(name))) { setStatus(t("ss.notPulledNeedPassword"), true); return; } }
   showFullscreenBusy(t("ss.pullingFromCloudBusy"));
   try {
@@ -355,6 +372,11 @@ async function pullCloudPath(path: string) {
 async function openItem(item: GalleryItem) {
   if (item.name === _activeSessionName) { setGalleryOpen(false); return; }
   if (es.isDirty()) await saveNow();
+  // 开画顺带把 4 个 settings/state collection 拉云对齐（v409，user 2026-07-14：「开画作的时候可以顺便
+  //   并行 pullandreconcile 下，fire and forget 不用 await」）。**绝不 await**：对齐是锦上添花，
+  //   不该让开画等网络（且离线/local-only 内部本就 no-op）。
+  pullSettingsAndState();
+
   try {
     // 加密且未解锁 → 先在 busy 外解锁（file.open 内部 unseal 要密码在内存）。
     if (await _file(item.name).isEncrypted()) {
@@ -396,6 +418,10 @@ async function unloadItem(item: GalleryItem) {
 
 // boot：按名恢复上次 doc（file.open 内含本地/云端 + freshness + unseal）。返回是否成功装入。
 async function restoreSession(name: string): Promise<boolean> {
+  // 开画顺带把 4 个 settings/state collection 拉云对齐（v409，user 2026-07-14：「开画作的时候可以顺便
+  //   并行 pullandreconcile 下，fire and forget 不用 await」）。**绝不 await**：对齐是锦上添花，
+  //   不该让开画等网络（且离线/local-only 内部本就 no-op）。
+  pullSettingsAndState();
   try {
     if (await _file(name).isEncrypted()) { if (!(await ensureUnlocked(name))) return false; }
     if (!(await es.open(toFull(name)))) return false;   // 文件缺失/锁定 → 未装入。边界转全名。
@@ -415,7 +441,16 @@ async function saveAs(newName: string): Promise<void> {
   _docLastSavedAt = Date.now(); updateSaveStatus(); gallery.refresh();
 }
 
-function setName(name: string | null) { _activeSessionName = name; setCurrentSessionName(name as string); _recomputePhase(); }
+// setName(name)：改活动身份（内存 + 持久 appState.currentFile 两轨齐动）。
+// setName(name, { persist: false })：**只动内存**——给 boot 加载失败用。
+//   幽灵 path 纪律（feedback-phantom-current-path）：加载失败要把内存名降回 safe default（防 save 走 rename
+//   路径把"加载失败的 path"当 oldName 删掉），但**持久的 currentFile 必须留着**，好让用户下次冷启动重试。
+//   失败不只是"文件真没了"：加密画取消密码框 / 离线只有云端副本 都会返 false。清了它们就再也不自动开了。
+function setName(name: string | null, opts: { persist?: boolean } = {}) {
+  _activeSessionName = name;
+  if (opts.persist !== false) setCurrentSessionName(name as string);
+  _recomputePhase();
+}
 
 // ---- 公开 session 对象（app.js 兼容面）----
 export const session = {
@@ -449,6 +484,7 @@ export function initSession(ctx: AppContext) {
   referenceWindow = ctx.referenceWindow; paletteWindow = ctx.paletteWindow;
   setStatus = ctx.setStatus; withBusy = ctx.withBusy;
   updateSaveStatus = ctx.updateSaveStatus; updateNewerBanner = ctx.updateNewerBanner;
+  pullSettingsAndState = ctx.pullSettingsAndState;
   setColor = ctx.setColor; applyCheckerboard = ctx.applyCheckerboard; renderLayersPanel = ctx.renderLayersPanel;
   setGalleryOpen = ctx.setGalleryOpen;
   checkQuotaAndWarn = ctx.checkQuotaAndWarn; uniqueLocalName = ctx.uniqueLocalName;
@@ -470,8 +506,7 @@ export function initSession(ctx: AppContext) {
     policy: { autosaveMs: AUTOSAVE_MS, pushOn: ["exit"] },
   });
   es.start();   // autosave 3min（只本地）+ visibility/pagehide flush（内部按 policy）
-  // desk 改动桥：editorState 任何 setter → es.markWorkspacePending() → autosave/pagehide/退出/存 都会 encode 落 desk（徽章仍静默）。
-  editorState._setOnDirty(() => es.markWorkspacePending());
+  // （v409：无 desk 改动桥 —— desk 不标脏、不驱动落盘，只在顺路 encode 时被 _buildOraMeta 捞走。详 editor-state.ts ⚠）
 
   _recomputePhase();
   resetEditorState();

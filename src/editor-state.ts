@@ -1,20 +1,24 @@
-// EditorState —— 编辑器「当前设成什么样」的反应式 RAM SSoT（**纯内存**，无持久化职责）。
+// 本文件两块（**刻意同居**：下面的 editorState struct 经 bindEditorReactive 绑住上面的 reactive dial，
+//   二者是同一份存储的两个面，拆开就得把桥暴露成跨模块 API）：
+//   ① createEditorState() —— 编辑器「当前设成什么样」的**反应式 RAM SSoT**（纯内存）
+//   ② editorState struct  —— per-doc「desk」的门面 + 序列化（见下方分隔线）
 //
-// 单一职责：构造并返回编辑器当前设置的单一真源——主色、每工具 dial（size/opacity/flow/activeBrushId）、
-//   全局压感开关、棋盘/长按吸色等开关、filterBrush 瞬态。从 localStorage 种子（记住上次粗细/透/色），
-//   但**不**负责落盘：ORA 存档由 session-state 的 _buildOraMeta 读这里的 state.color/toolStates/checkerboard
-//   （per-doc 跟文件走），LS 种子只是 boot 兜底。删了这个模块，这套 reactive proxy + LS 种子逻辑会原样
-//   回到 app 的 comp-root 中段——它聚的是「编辑器 RAM 态怎么建、怎么反应式」这一处知识。
+// ① 的单一职责：构造编辑器当前设置的单一真源——主色、每工具 dial（size/opacity/flow/activeBrushId）、
+//   棋盘/长按吸色等开关、filterBrush 瞬态。**不**负责落盘：ORA 存档由 session-state 的 _buildOraMeta
+//   读 state.color/toolStates/checkerboard（per-doc 跟文件走）。
+//   （v406 起**无 localStorage 种子**——desk per-doc，size/opacity/color 归 ② 的 brushTool SSoT，boot 后
+//    bindEditorReactive 灌入、doc 载入覆盖。别再写"从 LS 种子"，那是 v405 之前的事。）
 //
-// 不做：当前笔派生（currentBrush computed 在 app，依赖 rack/engine = 组合接线）；工具/transient 相位
-//   （editMode）；面板（panel-state）；视口（board，从不进 ORA）。故意不造中央 EditorState god-object——
-//   各轴各自反应式，这里只收「dial + 全局开关」这一束。
+// ① 不做：当前笔派生（currentBrush computed 在 app，依赖 rack/engine = 组合接线）；工具/transient 相位
+//   （editMode）；瞬态面板互斥（panel-state）。故意不造中央 god-object——各轴各自反应式。
+//   （视口**会**进 ORA，但走 ② 的 editorState.viewport 存时镜像，不在 ① 里。）
 //
-// 反应式桥：color / pressureTo* 用 defineProperty 代理回 dialReactive —— app 里 state.color /
-//   state.pressureTo* 的读写零改动，背后是反应式（Vue 组件 computed 自动追踪 → 当前笔重派生）。
+// 反应式桥：color 用 defineProperty 代理回 dialReactive —— app 里 state.color 的读写零改动，背后是
+//   反应式（Vue 组件 computed 自动追踪 → 当前笔重派生）。
+//   （全局 pressureToSize/Opacity 已 deprecate 2026-07-14 → 每笔自带的 sizeCoeff/opaCoeff，见 brush.ts:397。）
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
-import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势开关 = 跨设备偏好
+import { PREF_DEFAULTS } from "./app-prefs.ts";   // 手势开关默认值（真值由 app.ts fixup 相灌入，见下）
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
 
 // 编辑器 RAM 态的形状契约见 AppContext（EditorRuntimeState / DialReactive）——本模块是其唯一构造者。
@@ -39,9 +43,13 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     filterBrush: null,
     color: "#1b1b1b",   // 归 editorState.brushTool.color SSoT（boot bind 灌入 / doc 载入覆盖）；删 webpaint.color LS 种子
     // （全局压感开关 pressureToSize/Opacity 已 deprecate 2026-07-14 → 每笔自带，见 resolved-brush；删 webpaint.pToSize/pToOpacity LS）
-    // 手势开关 = 跨设备偏好（synced-user-preference collection；createEditorState 在 boot 门后调，已 hydrate）。
-    longPressPick: syncedUserPreference.getItem<boolean>("long-press-pick", PREF_DEFAULTS["long-press-pick"]),
-    singleFingerDraw: syncedUserPreference.getItem<boolean>("single-finger-draw", PREF_DEFAULTS["single-finger-draw"]),
+    // 手势开关 = 跨设备偏好（synced-user-preference collection）。
+    // ⚠v409 起 createEditorState 在 collection hydrate **之前**跑（TLA 门已拆）→ 这里只能拿到 DEFAULTS。
+    //   真值由 app.ts 的 fixup 相（await prefsReady）经 settings-menu 的 renderSettingsFromPrefs() 灌入。
+    //   消费方是 thunk 惰性读（app.ts 的 getLongPressPickEnabled/getSingleFingerDraw，每次 pointerdown 求值）
+    //   → 灌入即生效，不需要反应式。
+    longPressPick: PREF_DEFAULTS["long-press-pick"],
+    singleFingerDraw: PREF_DEFAULTS["single-finger-draw"],
     pickMode: "composite",  // 吸色取样 composite|layer；归 editorState.colorPicker.layerMode SSoT（bind 灌入/载入覆盖）；删 webpaint.pickMode LS
     // v125 checkerboard 从全局 LS 改 per-doc（跟文件走）。初始 false；adopt 时按文件值覆盖；新建默认 false。
     checkerboard: false,
@@ -103,17 +111,20 @@ export function serializedToolStatePatch(current: ToolDial, saved: unknown): Par
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // 「一个 project 就是一个 desk」：editor-state = 跟文档走的编辑器桌面态（面板/导入导出/工具参数/视口/棋盘）。
 //   用法像 struct：`editorState.colorPanel.position = {left,top}`（代码热路径）。
-//   **永远 Hot、不自动推**；除各字段外只有 Serialize()/Unserialize()/reset()（+ workspaceDirty 读/清）。
-//   所有 setter 经 private setDirtyFlag() → workspaceDirty（smart-save：UI 静默但可点、push 非 no-op）。
-//   开新文件必 reset()。序列化进 ora 的 `.webpaint/editor-state.json`（stage4 接线）。
+//   **永远 Hot、不自动推**；除各字段外只有 Serialize() / Unserialize() / reset() / syncRuntimeForSave()。
+//   开新文件必 reset()（钉在 session-state 的 adoptModel + newDoc，结构性无法绕过）。
+//   序列化进 ora 的 `.webpaint/editor-state.json`；**存盘时被顺手捞走**（_buildOraMeta），不自己驱动落盘。
 //
-// ⚠stage3 = **骨架**：字段默认自持、Serialize/Unserialize/reset/dirty 就绪并 node 可测；
-//   各模块（color-panel/reference/blender/export/liquify/toolbar/board…）read/write 迁进本 struct
-//   + 删设备级 localStorage + 折叠上面 createEditorState 的 dial/color 进 brushTool —— 全留 **stage5**。
-//   在 stage5 接线前，本 struct 不被任何模块驱动（setter 无人调 → workspaceDirty 恒 false → save 行为不变）。
+// ⚠**desk 没有 dirty 标记**（v409 决策，撤销 v407 的 workspaceDirty 设计）：
+//   desk 改动**不标脏、不触发保存、不触发退出推云**。只有内容脏（history 的 wp:histchange）或用户显式按
+//   save 才落盘；落盘时顺手把当前 desk 捞进快照。**代价（用户 2026-07-14 明示接受）**：只拖面板/只换笔、
+//   不画、不按 save 就退出 → desk 改动丢失，下次开 revert 到上次保存的快照。
+//   历史：v407 曾有 workspaceDirty + setDirtyFlag() callback，用来让「push 是否 no-op」的判定含 desk 改动。
+//   v409 定了①退出只有 contentDirty 才推②按 save 无条件 encode+push（时间戳必须动）→ 该标记零 reader → 删。
+//   **别再加回来**，除非先推翻①或②。
 //
 // setter 纪律（同 collection 浅拷贝）：整枝赋值 position/viewport（`x.position = {...}`），
-//   别原地改子对象字段（`x.position.left = 1` 不 mark dirty）。
+//   别原地改子对象字段（深层嵌套不隔离）。
 
 export interface PanelPos { left: number; top: number; width?: number; height?: number }
 export interface EditorViewport { tx: number; ty: number; scale: number; rot: number }
@@ -137,11 +148,8 @@ function freshGroups() {
 }
 export type EditorGroups = ReturnType<typeof freshGroups>;
 
-// ── 私有可变态 + dirty ─────────────────────────────────────────────────────────────────
+// ── 私有可变态 ─────────────────────────────────────────────────────────────────────────
 const S = { g: freshGroups() };       // mutable holder（reset 时整份换，访问器每次 deref S.g → reset 生效）
-let _workspaceDirty = false;
-let _onDirty: (() => void) | null = null;   // 可选外部通知钩子（如触发 UI 重算）；stage4 接 smart-save
-function setDirtyFlag(): void { _workspaceDirty = true; _onDirty?.(); }   // private：所有 setter 接它
 
 // ── 反应式引擎绑定（stage5）：brushTool(size/opacity/brushId/color) + colorPicker.layerMode 是引擎**每笔读**的
 //   反应式态。editorState 作 SSoT 接口，底层存储绑到 createEditorState 的 reactive state —— 引擎一行不改、
@@ -177,55 +185,57 @@ function mergeInto<T extends object>(dst: T, src: unknown): void {
   }
 }
 
-// ── struct 门面：显式访问器（每 setter 接 setDirtyFlag）+ 三方法 ─────────────────────────
+// ── struct 门面：显式访问器 + 四方法（**setter 不标脏**——desk 无 dirty 标记，见上方 ⚠）───────────
 export const editorState = {
   // import / export ──
-  import:        { get source(): string { return S.g.import.source; }, set source(v: string) { S.g.import.source = v; setDirtyFlag(); } },
+  import:        { get source(): string { return S.g.import.source; }, set source(v: string) { S.g.import.source = v; } },
   export: {
-    get format(): string { return S.g.export.format; }, set format(v: string) { S.g.export.format = v; setDirtyFlag(); },
-    get target(): string { return S.g.export.target; }, set target(v: string) { S.g.export.target = v; setDirtyFlag(); },
-    get layerMode(): string { return S.g.export.layerMode; }, set layerMode(v: string) { S.g.export.layerMode = v; setDirtyFlag(); },
+    get format(): string { return S.g.export.format; }, set format(v: string) { S.g.export.format = v; },
+    get target(): string { return S.g.export.target; }, set target(v: string) { S.g.export.target = v; },
+    get layerMode(): string { return S.g.export.layerMode; }, set layerMode(v: string) { S.g.export.layerMode = v; },
   },
-  exportProject: { get format(): string { return S.g.exportProject.format; }, set format(v: string) { S.g.exportProject.format = v; setDirtyFlag(); } },
+  exportProject: { get format(): string { return S.g.exportProject.format; }, set format(v: string) { S.g.exportProject.format = v; } },
   // panels（enabled/position 全 per-doc，决策1「desk 跟画走」）──
   colorPanel: {
-    get enabled(): boolean { return S.g.colorPanel.enabled; }, set enabled(v: boolean) { S.g.colorPanel.enabled = v; setDirtyFlag(); },
-    get position(): PanelPos | null { return S.g.colorPanel.position; }, set position(v: PanelPos | null) { S.g.colorPanel.position = v; setDirtyFlag(); },
+    get enabled(): boolean { return S.g.colorPanel.enabled; }, set enabled(v: boolean) { S.g.colorPanel.enabled = v; },
+    get position(): PanelPos | null { return S.g.colorPanel.position; }, set position(v: PanelPos | null) { S.g.colorPanel.position = v; },
   },
   layersPanel: {
-    get enabled(): boolean { return S.g.layersPanel.enabled; }, set enabled(v: boolean) { S.g.layersPanel.enabled = v; setDirtyFlag(); },
-    get position(): PanelPos | null { return S.g.layersPanel.position; }, set position(v: PanelPos | null) { S.g.layersPanel.position = v; setDirtyFlag(); },
+    get enabled(): boolean { return S.g.layersPanel.enabled; }, set enabled(v: boolean) { S.g.layersPanel.enabled = v; },
+    get position(): PanelPos | null { return S.g.layersPanel.position; }, set position(v: PanelPos | null) { S.g.layersPanel.position = v; },
   },
   refPanel: {
-    get enabled(): boolean { return S.g.refPanel.enabled; }, set enabled(v: boolean) { S.g.refPanel.enabled = v; setDirtyFlag(); },
-    get position(): PanelPos | null { return S.g.refPanel.position; }, set position(v: PanelPos | null) { S.g.refPanel.position = v; setDirtyFlag(); },
-    get viewport(): EditorViewport { return S.g.refPanel.viewport; }, set viewport(v: EditorViewport) { S.g.refPanel.viewport = v; setDirtyFlag(); },
+    get enabled(): boolean { return S.g.refPanel.enabled; }, set enabled(v: boolean) { S.g.refPanel.enabled = v; },
+    get position(): PanelPos | null { return S.g.refPanel.position; }, set position(v: PanelPos | null) { S.g.refPanel.position = v; },
+    get viewport(): EditorViewport { return S.g.refPanel.viewport; }, set viewport(v: EditorViewport) { S.g.refPanel.viewport = v; },
   },
   blenderPanel: {
-    get show(): boolean { return S.g.blenderPanel.show; }, set show(v: boolean) { S.g.blenderPanel.show = v; setDirtyFlag(); },
-    get position(): PanelPos | null { return S.g.blenderPanel.position; }, set position(v: PanelPos | null) { S.g.blenderPanel.position = v; setDirtyFlag(); },
+    get show(): boolean { return S.g.blenderPanel.show; }, set show(v: boolean) { S.g.blenderPanel.show = v; },
+    get position(): PanelPos | null { return S.g.blenderPanel.position; }, set position(v: PanelPos | null) { S.g.blenderPanel.position = v; },
   },
   // tools（spec 表写了的收；未写的留下一轮）。brushTool + colorPicker 绑反应式引擎（见 EngineBind）──
   brushTool: {
     get brushId(): string | null { return _bind ? _bind.getBrushId() : S.g.brushTool.brushId; },
-    set brushId(v: string | null) { if (_bind) _bind.setBrushId(v); else S.g.brushTool.brushId = v; setDirtyFlag(); },
+    set brushId(v: string | null) { if (_bind) _bind.setBrushId(v); else S.g.brushTool.brushId = v; },
     get size(): number { return _bind ? _bind.getSize() : S.g.brushTool.size; },
-    set size(v: number) { if (_bind) _bind.setSize(v); else S.g.brushTool.size = v; setDirtyFlag(); },
+    set size(v: number) { if (_bind) _bind.setSize(v); else S.g.brushTool.size = v; },
     get opacity(): number { return _bind ? _bind.getOpacity() : S.g.brushTool.opacity; },
-    set opacity(v: number) { if (_bind) _bind.setOpacity(v); else S.g.brushTool.opacity = v; setDirtyFlag(); },
+    set opacity(v: number) { if (_bind) _bind.setOpacity(v); else S.g.brushTool.opacity = v; },
     get color(): string { return _bind ? _bind.getColor() : S.g.brushTool.color; },
-    set color(v: string) { if (_bind) _bind.setColor(v); else S.g.brushTool.color = v; setDirtyFlag(); },
+    set color(v: string) { if (_bind) _bind.setColor(v); else S.g.brushTool.color = v; },
   },
-  liquify:     { get bleed(): string { return S.g.liquify.bleed; }, set bleed(v: string) { S.g.liquify.bleed = v; setDirtyFlag(); } },
+  liquify:     { get bleed(): string { return S.g.liquify.bleed; }, set bleed(v: string) { S.g.liquify.bleed = v; } },
   colorPicker: {
     get layerMode(): string { return _bind ? _bind.getPickMode() : S.g.colorPicker.layerMode; },
-    set layerMode(v: string) { if (_bind) _bind.setPickMode(v); else S.g.colorPicker.layerMode = v; setDirtyFlag(); },
+    set layerMode(v: string) { if (_bind) _bind.setPickMode(v); else S.g.colorPicker.layerMode = v; },
   },
-  // viewport / checkboard ──
-  get viewport(): EditorViewport | null { return S.g.viewport; }, set viewport(v: EditorViewport | null) { S.g.viewport = v; setDirtyFlag(); },
-  get checkboard(): boolean { return S.g.checkboard; }, set checkboard(v: boolean) { S.g.checkboard = v; setDirtyFlag(); },
+  // viewport / checkboard —— 真 SSoT 在 board.viewport / state.checkerboard，这两个字段是**存盘时的单向镜像**
+  //   （由 syncRuntimeForSave 灌入）+ 载入时的回灌源（session-state 读 editorState.viewport → board）。
+  //   故 setter 生产代码不调；留着是为了 Unserialize/测试能构造完整 desk。
+  get viewport(): EditorViewport | null { return S.g.viewport; }, set viewport(v: EditorViewport | null) { S.g.viewport = v; },
+  get checkboard(): boolean { return S.g.checkboard; }, set checkboard(v: boolean) { S.g.checkboard = v; },
 
-  // ── 序列化（除各字段外仅此二法 + reset + workspaceDirty 读/清）──
+  // ── 除各字段外仅此四法 ──
   // 深拷贝：与 live 解耦；即 .webpaint/editor-state.json 内容。绑定字段（brushTool/pickMode）从引擎 live 取。
   Serialize(): EditorGroups {
     const out = JSON.parse(JSON.stringify(S.g)) as EditorGroups;
@@ -235,18 +245,13 @@ export const editorState = {
     }
     return out;
   },
-  // 载入（非编辑→不脏）：合并进 S.g，再把绑定字段灌进反应式引擎。
-  Unserialize(json: unknown): void { const d = freshGroups(); mergeInto(d, json); S.g = d; applyBoundFromGroups(d); _workspaceDirty = false; },
+  // 载入：合并进 S.g，再把绑定字段灌进反应式引擎。
+  Unserialize(json: unknown): void { const d = freshGroups(); mergeInto(d, json); S.g = d; applyBoundFromGroups(d); },
   // 开新文件必调：回默认 + 灌引擎。
-  reset(): void { S.g = freshGroups(); applyBoundFromGroups(S.g); _workspaceDirty = false; },
+  reset(): void { S.g = freshGroups(); applyBoundFromGroups(S.g); },
 
-  // smart-save 用（stage4 接线）：workspaceDirty = editor-state 改过、未落盘（UI 静默、push 非 no-op）。
-  isWorkspaceDirty(): boolean { return _workspaceDirty; },
-  clearWorkspaceDirty(): void { _workspaceDirty = false; },                     // 存/推成功后清（stage4）
-  // 存前把运行时 SSoT（board 视口 / checkboard 观感开关）镜像进 S.g —— **不标脏**：
-  //   viewport 每帧变、checkboard 是观感开关（人类 2026-06-10 钉死「切棋盘不让画变未保存」），
-  //   故存时才捞进（顺手），不在改动时标 workspaceDirty。
+  // 存前把运行时 SSoT（board 视口 / checkboard 观感开关）镜像进 S.g —— 存时才捞进（顺手），
+  //   改动时什么都不做（desk 无 dirty 标记；且人类 2026-06-10 钉死「切棋盘不让画变未保存」）。
   syncRuntimeForSave(vp: EditorViewport, checkboard: boolean): void { S.g.viewport = vp; S.g.checkboard = checkboard; },
-  _setOnDirty(cb: (() => void) | null): void { _onDirty = cb; },               // 可选：dirty 时通知外部
 };
 export type EditorStateStruct = typeof editorState;

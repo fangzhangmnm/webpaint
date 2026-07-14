@@ -1,4 +1,4 @@
-// ⚠ 引擎内部深模块（ADR-0019 显式版本迁移）。app **碰不到**本文件（只走 createStore 的 file/collection/localSettings/syncedSettings）。
+// ⚠ 引擎内部深模块（ADR-0019 显式版本迁移）。app **碰不到**本文件（只走 createStore 的 file / collection 两面）。
 //   schema 名字/迁移是 store 独占。设计见 JRP src/store/CONTEXT.md 的 migration/schema-version 段。
 //
 // **框架，不含迁移**（2026-07-13）：WebPaint 无用户、无后向兼容 → 历史 V001（webpaint-anchor）/ V002（裸名→全名）

@@ -13,7 +13,7 @@ import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
 import {
   isSignedIn, isAuthConfigured, signIn, signOut,
-  getActiveAccount, retrySilentSignIn, setLastSessionSignedIn,
+  getActiveAccount, retrySilentSignIn,
 } from "./app-store.ts";
 
 let setStatus: AppContext["setStatus"];
@@ -63,12 +63,11 @@ export function initCloudAuthUI(ctx: AppContext) {
   els.cloudSignInBtn.addEventListener("click", async () => {
     els.cloudAccountPopup.classList.add("hidden");
     if (!isAuthConfigured()) { setStatus(t("cf.notConfiguredClient")); return; }
-    try { await signIn(); setLastSessionSignedIn(true); } catch (e) { setStatus(t("cf.signInFailed", { err: String((e as Error)?.message || e) })); }
+    try { await signIn(); } catch (e) { setStatus(t("cf.signInFailed", { err: String((e as Error)?.message || e) })); }
   });
   els.cloudSignOutBtn.addEventListener("click", async () => {
     els.cloudAccountPopup.classList.add("hidden");
     try { await signOut(); } catch (_) {}
-    setLastSessionSignedIn(false);    // 显式登出 → 下次不问
     updateCloudAuthUI();
     gallery.refresh();
   });

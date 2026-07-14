@@ -14,7 +14,7 @@
 //   currentBrush    ← 不可变 ResolvedBrush（从 dial+预设纯派生，引擎唯一吃）
 
 import { WEBPAINT_VERSION } from "./version.ts";
-import { initI18n, t } from "./i18n/index.ts";   // 本地化：<html lang> + 静态 HTML data-i18n 填充
+import { initI18n, t, reconcileLangFromPrefs } from "./i18n/index.ts";   // 本地化：<html lang> + 静态 HTML data-i18n 填充
 import { PaintDoc } from "./doc.ts";
 import { Board } from "./board.ts";
 import { InputController } from "./input.ts";
@@ -35,11 +35,11 @@ import { sessionFileName } from "./config.ts";   // 边界：裸 session 名 →
 import { els } from "./els.ts";
 import type { AppContext } from "./app-context.ts";
 import { makeDialControls } from "./dial-controls.ts";   // dial 写入（setSize/setOpacity）+ 当前 dial + 键盘 [ ] 调粗
-import { initTheme } from "./theme.ts";
+import { initTheme, reconcileThemeFromPrefs } from "./theme.ts";
 import { initLayersPanel, renderLayersPanel, LAYER_MODE_LABEL } from "./layers-panel.ts";
 import { initDocOps } from "./doc-ops.ts";
 import { initCloudAuthUI, updateCloudAuthUI } from "./cloud-auth-ui.ts";
-import { initSettingsMenu, applyCheckerboard } from "./settings-menu.ts";   // setMenuOpen→各菜单模块
+import { initSettingsMenu, applyCheckerboard, renderSettingsFromPrefs } from "./settings-menu.ts";   // setMenuOpen→各菜单模块
 import { initFiltersAdjust } from "./filters-adjust.ts";
 import { initToolbar, RACK_PANEL_BY_TOOL } from "./toolbar.ts";
 import { setColor, initColorPanel } from "./color-panel.ts";
@@ -55,7 +55,7 @@ import { initImportImage, importImageAsLayer } from "./import-image.ts";   // im
 import { initExportImportMenu } from "./export-import-menu.ts";
 import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueLocalName } from "./gallery-shell.ts";
 import { initTopbarMenu } from "./topbar-menu.ts";
-import { initBlenderSync } from "./blender-sync.ts";   // 推/拉贴图到 Blender（BlenderTextureProtocol，插件式隔离子功能）
+import { initBlenderSync, reconcileBlenderUrlFromPrefs } from "./blender-sync.ts";   // 推/拉贴图到 Blender（BlenderTextureProtocol，插件式隔离子功能）
 import { initPlatformGuards } from "./platform-guards.ts";
 import { mountLeftDial } from "./ui/left-dial.ts";   // candidate 1 Step 2 · 左栏 dial（size/opacity/笔指示/popup）
 import { watch } from "../vendor/vue/vue.esm-browser.prod.js";   // 加密常驻指示 watch（currentBrush computed + 引擎桥已下沉 current-brush.ts）
@@ -66,7 +66,7 @@ import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排�
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
 import "./plugins/index.ts";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 // candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
-import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, setLastSessionSignedIn, rackStore, setRackDirty, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
+import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, rackStore, setRackDirty, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
 import { initPreferences, refreshPreferences } from "./app-prefs.ts";   // boot 门 + 前台/online 拉云对齐 user-preference（lang/theme/手势）
 import { hydrateSmoothFromPrefs } from "./smooth-config.ts";   // boot 门后合并 synced 平滑调参进 SMOOTH
 import { initAppState, appState } from "./app-state.ts";                // boot 门 + 前台/online 拉云对齐 app-state（current-dir/file/blenderUrl）
@@ -79,13 +79,16 @@ const pullSettingsAndState = (): void => { void refreshPreferences(); void appSt
 
 // cut-over 完成：_store 从 app-store import（接 lib）。explicit 保存恒走 store.flow.push（B1/B2/B5/retry/C4）。
 
-// ============ boot 门（设置/状态 = 纯 IDB collection，无 localStorage 镜像）============
-// lang/theme 在下面 eval 期就要值、IDB 是 async → 先 await hydrate 4 个 collection（快、离线 OK、**不碰网**），
-//   再往下跑组合根，让 t()/theme 读到 hydrate 后的值（非默认语言用户不双载）。云端后台对齐 + onChange 通知（见各 collection）。
-//   TLA：本模块=bundle 入口，执行到此挂起直到本地 hydrate 完；imports 已 eval（已消除 eval 期 t()，见 i18n/brush-rack）→ 安全。
-//   app-store 已在 imports 期 eval → 4 个 collection 建好并 wire；此处只 await 各自 init（内部先 hydrate 本地）。
-await Promise.all([initPreferences(), initAppState()]);
-hydrateSmoothFromPrefs();   // collection 已 hydrate → 把 synced 平滑调参合并进 SMOOTH（手感热路径 eval 期已是 DEFAULTS）
+// ============ 设置/状态就绪 promise（v409：**不再是 TLA 门**）============
+// 设置/状态 SSoT = 4 个 IDB collection。IDB 是 async，而组合根是同步的 → 两种办法：
+//   v406-v408：TLA 门（`await Promise.all(...)` 挂起整个模块）—— 存在的**唯一**理由是 lang 在 eval 期
+//     就被 t() 读、`_lang` 一读即锁死。代价：整个 boot 等 IDB；且 theme 的首帧闪白它**根本修不了**
+//     （FOUC 发生在 bundle 求值之前）。
+//   v409：lang/theme 改走 **localStorage boot 快照**（src/boot-snapshot.ts）→ eval 期/pre-paint 同步可读
+//     → 门没必要了，拆掉。app-store 已在 imports 期 eval → 4 个 collection 建好并 wire；此处只**发起** init。
+// 其余 6 个消费方（currentFile/currentDirectory/4 个开关/stylus/blenderUrl）没有快照，hydrate 前只能读到
+//   DEFAULTS → 它们**各自 await prefsReady**，统一在下面的「fixup 相」灌真值。别在 fixup 之外读这些 pref。
+const prefsReady: Promise<unknown> = Promise.all([initPreferences(), initAppState()]);
 
 // ---- 启动 ----
 // 加密（ADR-0012）：密码弹窗接线 —— crypto-state 无 DOM，composition root 把 in-app
@@ -225,7 +228,7 @@ function freezeCtx<T extends object>(obj: T): T {
 const ctx: AppContext = freezeCtx({
   state, dialReactive, currentBrush, editMode, doc, board, input, history, pixelHistory,
   rack, store: _store, setStatus, withBusy, leftDial,
-  updateSaveStatus, updateZoomLabel, updateNewerBanner,
+  updateSaveStatus, updateZoomLabel, updateNewerBanner, pullSettingsAndState,
   _suppressTransientPanels, _restoreTransientPanels, layerSpecFrom, _bringPanelTop,
   _commitTransform, _cancelTransform, selectionToNewLayer,
   importImageAsLayer,   // selection-ops 的 Ctrl+V 粘贴 / drop 用（hoisted function）
@@ -356,8 +359,6 @@ updateCloudAuthUI();
 // MSAL init（懒；只在配了 CLIENT_ID 才 load script），失败安静吞
 if (isAuthConfigured()) {
   initAuth().then(() => {
-    // silent acquire 成功后 isSignedIn() = true → 同步 lastSessionSignedIn
-    if (isSignedIn()) setLastSessionSignedIn(true);
     updateCloudAuthUI();
     // gallery-first: boot 时 gallery 可能已经渲染过（auth 没好 → 只有本地）；
     // auth 完成后 if gallery 还开着 → 重渲染拿云端列表
@@ -369,7 +370,6 @@ if (isAuthConfigured()) {
 // auth 可观察 seam（候选1）：lib 在**每个** auth 转变（登录回来/后台silent/登出/过期F2）fire wp:auth-changed。
 // UI 订阅一次 → 按钮蓝/灰、save 图标、云列表 全自动同步，永不漂移、不再靠散落手 poke。
 window.addEventListener("wp:auth-changed", () => {
-  if (isSignedIn()) setLastSessionSignedIn(true);
   updateCloudAuthUI();
   updateSaveStatus();                                       // 候选2：auth 变化影响 save 图标
   if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
@@ -387,8 +387,29 @@ window.addEventListener("online", async () => {
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
 
 // 前台新鲜度活动监听 + idle tick 接线已切到 cloud-freshness.ts initCloudFreshness。
-// Gallery-first 启动恢复（加载上次 session 或停 gallery）= boot.ts bootRestoreSession。
-bootRestoreSession(ctx);
+//
+// ============ fixup 相（v409）：collection hydrate 完 → 把**真值**灌进上面已用 DEFAULTS 建好的 UI ============
+// 为什么需要这一相：拆了 TLA 门后，组合根是在 collection hydrate **之前**同步跑完的，所以上面所有读过
+//   pref/app-state 的地方拿到的都是 DEFAULTS。这里是**唯一**的补灌点 —— 6 个消费方一个都不能漏，
+//   漏了的症状是「设置静默回默认」：不报错、只在真机上偶发。改这块时对着这张表逐条打勾。
+//     ① stylus 平滑调参 ② 4 个开关（settings-menu）③ theme ④ lang ⑤ 图库上次的夹 ⑥ blender URL
+//     ⑦ 上次打开的画（currentFile → bootRestoreSession，必须排在最后：它会开画/开图库）
+// 纪律：这一相**只准 render / 不准写盘**（renderSettingsFromPrefs / hydrateFolder 都是不写盘的变体）。
+//   若这里调了会 setItem 的路径（applyPixelGrid / gallery.setFolder），就等于「读完立刻回写」，
+//   会把 uat 盖成 now → per-item LWW 退化成「最后冷启动的设备赢」= v406-v408 的 P0-1。
+void prefsReady.then(() => {
+  hydrateSmoothFromPrefs();      // ① 手感热路径：synced 平滑调参合并进 SMOOTH（eval 期是 SMOOTH_DEFAULTS）
+  renderSettingsFromPrefs();     // ② longPressPick / singleFingerDraw / pixel-grid / show-fps（不写盘）
+  reconcileThemeFromPrefs();     // ③ 刷 boot 快照；与快照不符则就地换（主题=css，无 reload）
+  reconcileLangFromPrefs();      // ④ 刷 boot 快照；与快照不符则 reload（lang 是 reload 制）—— 可能不返回
+  try { gallery.hydrateFolder(appState.currentDirectory); } catch { /* 图库未挂/无夹 */ }   // ⑤ 不写盘变体
+  reconcileBlenderUrlFromPrefs();   // ⑥ appState.blenderPanelUrl 真值刷进输入框（不写盘、不碰面板显隐）
+}).catch((e) => console.warn("[boot] settings fixup failed:", e));
+
+// ⑦ Gallery-first 启动恢复（读 appState.currentFile：非 null → 自动开那张画；否则停图库）= boot.ts。
+//   必须 await prefsReady：hydrate 前 currentFile 恒为 null → 会永远落图库、不再自动开上次的画。
+//   排在 fixup 之后（同一个 promise 的 then 按注册顺序跑）→ 开画时 desk/设置已就位。
+void prefsReady.then(() => bootRestoreSession(ctx)).catch((e) => console.warn("[boot] restore failed:", e));
 // N3：启动时若在线+已登录，排空上次离线攒下的删除队列（fresh boot 不触发 online 事件，故此处补一刀）。
 if (navigator.onLine && isSignedIn()) _store.drainDeleteQueue().catch((e: unknown) => console.warn("drainDeleteQueue", e));
 

@@ -1,24 +1,28 @@
-// Session 管理：把当前 PaintDoc 序列化进 IDB / 从 IDB 还原 / 导出下载 / 分享。
+// Session 管理：当前 session 名的读写面 + 缩略图渲染 + 导出下载 / 分享。
 //
-// **多 session（v36 起）**：IDB key = sessionName。localStorage 记当前 name。
-// 默认 "未命名"。重名直接覆盖。
+// **当前 session 名**：SSoT = `appState.currentFile`（synced-app-state collection，跨设备 resume）。
+//   ⚠ 不是 localStorage —— v406 起迁进 collection 了，别信任何还说 "localStorage 记当前 name" 的注释。
+//   默认 "未命名"。重名直接覆盖。
 //
 // **保存策略**（抄 AtlasMaker shareback TL;DR 第 2 条）：
-//   - Ctrl+S 主导
-//   - 3 min 兜底
+//   - Ctrl+S 主导（v409：按 save = 无条件 encode+推，让时间戳走字）
+//   - 3 min 兜底（只本地，consent-safe）
 //   - visibilitychange / pagehide 抢救
 //   - **不要** debounce/heartbeat —— 画图工具用户预期 Blender / Photoshop 模式
+//   实现在 session-state.ts + editor-session/。本文件只管"当前叫什么名"。
 //
-// 幽灵 current path 陷阱（feedback-phantom-current-path memory）：
-//   - boot load 失败时**不要**重置 localStorage（用户下次冷启动能重试）
-//   - 但内存里 _activeSessionName 用 safe default，避免 save 走 rename 路径
+// 幽灵 current path 陷阱（feedback-phantom-current-path memory）——载体变了、教训没变：
+//   - boot load 失败时**不要**清 `appState.currentFile`（用户下次冷启动能重试）
+//     → 见 boot.ts 的 `session.setName(null, { persist: false })`
+//   - 但内存里 _activeSessionName（session-state）用 safe default，避免 save 走 rename 路径
 //     把"加载失败的 path"当 oldName 删掉
+//   - **破坏性操作永远用「真正载入的路径」**，不用这里的 getCurrentSessionName()
 
 import { encodeDocToOra, decodeOraToDoc } from "./ora.ts";
 import { compositeLayers } from "./layer-composite.ts";
 import { looksEncryptedContainer } from "./crypto-format.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
-import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.ts";
+import { getSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.ts";
 import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
 import type { PaintDoc } from "./doc.ts";
@@ -29,11 +33,6 @@ type FileShareNavigator = Navigator & {
   canShare?: (data?: { files?: File[] }) => boolean;
   share?: (data?: { files?: File[]; title?: string }) => Promise<void>;
 };
-
-interface SaveSessionOpts {
-  referenceImage?: Blob;
-  webpaintState?: object;
-}
 
 interface SessionPkg {
   name: string;
@@ -56,32 +55,13 @@ export function setCurrentSessionName(name: string) {
   try { appState.currentFile = name || null; } catch {}
 }
 
-/** 把 doc 序列化进指定 session（默认当前），同时生成 thumb 存进 pkg。
- *  **仅限明文新建路径**（newDoc / saveAs 的新名字天然明文）——活动 doc 的常规保存
- *  走 store.flow.save（v235：加密包壳在深模块，这里不感知加密）。
- *  opts.referenceImage: optional Blob —— 嵌进 .ora 跟着文件走（webpaint/reference.png）。
- *  opts.webpaintState:  optional 对象，进 webpaint/state.json
- */
-export async function saveSession(doc: PaintDoc, name?: string, opts: SaveSessionOpts = {}) {
-  const sessionName = name || getCurrentSessionName();
-  const [ora, thumb] = await Promise.all([
-    encodeDocToOra(doc, {
-      referenceImage: opts.referenceImage,
-      webpaintState: opts.webpaintState,
-    }),
-    renderThumbBlob(doc, 256),
-  ]);
-  return await putSessionPkg(sessionName, ora, thumb);
-}
-
-/** **单一本地落盘点**：组 pkg（name/updatedAt/ora/thumb）+ 原子 putSession。
- *  两条路共用——saveSession（活 doc 算 ora+thumb，热路径不解码）与 LocalAdapter
- *  （Store 流：bytes 解码渲 thumb，冷路径）。pkg 结构只在这里定义一次。 */
-export async function putSessionPkg(name: string, ora: Blob, thumb: Blob | null = null) {
-  const pkg = { name, updatedAt: Date.now(), ora, thumb };
-  await putSession(name, pkg);
-  return pkg;
-}
+// （v409 删 saveSession / putSessionPkg / saveAsSession / saveCurrentSession —— 四个**零 importer** 的死符号。
+//  真正的保存路径是 session-state 的 es.flushLocal/forceSaveAndPush → store.file.save。
+//  删的第二个理由：saveSession 是标准的 **phantom-path 反模式**——`name || getCurrentSessionName()`
+//  从**持久化的** currentFile 取名，然后直接覆盖写。若 boot 加载失败而 currentFile 仍指向那个名字，
+//  "复用一下现成的 saveSession" 就会把当前内存 doc 覆盖到那条 path 上。AtlasMaker 0.7.2 就是这么
+//  吃掉一个加密文件的（见 feedback-phantom-current-path）。留着 = 一把上了膛的枪，删掉最省心。
+//  现役破坏性操作全部用「真正载入的路径」（item.name / _activeSessionName，后者只在 es.open() 成功后升级）。）
 
 /** 渲染缩略图 blob（最长边 = maxSide）。给图库 grid 用。
  *  PNG 保留 alpha → 容器 CSS 背景可独立调色，立绘透明区跟容器自然融合。
@@ -229,14 +209,6 @@ export async function emptyTrash() {
 export async function removeSession(name: string) {
   await deleteSession(name);
 }
-
-/** Save As：把 doc 写到新 name 下。**不删旧的**。caller 决定切到新 name。 */
-export async function saveAsSession(doc: PaintDoc, name: string) {
-  return await saveSession(doc, name);
-}
-
-// 兼容 v35 命名（app.js 旧 import）
-export const saveCurrentSession = saveSession;
 
 /** 导出 .ora 到本地下载 */
 export async function exportOraDownload(doc: PaintDoc, filename = "未命名.ora") {

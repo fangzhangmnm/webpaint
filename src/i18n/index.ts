@@ -6,6 +6,7 @@
 
 import { S, type Lang } from "./strings.ts";
 import { syncedUserPreference, PREF_DEFAULTS } from "../app-prefs.ts";   // 语言 = 跨设备偏好（synced-user-preference collection）
+import { readBootSnapshot, writeBootSnapshot } from "../boot-snapshot.ts";   // eval 期读得到的 lang 快照（IDB 异步，见该文件）
 
 export type { Lang } from "./strings.ts";
 export type Key = keyof typeof S;
@@ -23,13 +24,22 @@ function detectLang(): Lang {
   return "en";
 }
 
+const validLang = (v: unknown): Lang | null => (typeof v === "string" && LANGS.includes(v as Lang) ? v as Lang : null);
+
+// collection（SSoT）里的 lang。未设 / 未 hydrate → null（= 跟系统）。
+function langFromPrefs(): Lang | null {
+  return validLang(syncedUserPreference.getItem<Lang | null>("lang", PREF_DEFAULTS.lang as Lang | null));
+}
+// 解析优先级：collection（hydrate 后才有值）→ **LS 快照**（eval 期唯一读得到的）→ 跟系统。
+//   快照只在用户显式 setLang / 对账时写，所以"快照有值"≡"用户选过语言"，不会污染"跟系统"语义。
 function readLang(): Lang {
-  const v = syncedUserPreference.getItem<Lang | null>("lang", PREF_DEFAULTS.lang as Lang | null);
-  return v && LANGS.includes(v) ? v : detectLang();
+  return langFromPrefs() ?? validLang(readBootSnapshot("lang")) ?? detectLang();
 }
 
-// _lang **惰性**解析（首次 t()/lang() 时读）——避免模块 eval 期读 collection（那时 boot 门还没 hydrate 完）。
-//   首次访问发生在 boot 门 `await initPreferences()` 之后（app-main 动态 import 内），故读到的是 hydrate 后的值。
+// _lang **惰性**解析（首次 t()/lang() 时读）+ 一经解析即锁死（reload 制，全 app 一个语言，不要半译状态）。
+//   v409：eval 期读到的是 **LS 快照**（collection 还没 hydrate）——这正是快照存在的理由，也是
+//   v406-v408 那道 TLA 门（`await initPreferences()` 再跑组合根）被拆掉的前提。见 boot-snapshot.ts。
+//   hydrate 后由 reconcileLangFromPrefs() 对账；不一致 → 刷快照 + reload。
 let _lang: Lang | null = null;
 
 export function lang(): Lang { return (_lang ??= readLang()); }
@@ -51,9 +61,20 @@ export function applyHtmlLang() { document.documentElement.lang = htmlLangFor(la
 export function cycleLang(): Lang { return LANGS[(LANGS.indexOf(lang()) + 1) % LANGS.length]; }
 
 export function setLang(l: Lang) {
-  if (!LANGS.includes(l) || l === lang()) return;
-  syncedUserPreference.setItem("lang", l);   // 落 synced-user-preference collection（跨设备）
+  if (!LANGS.includes(l) || l === lang()) return;   // 值没变就早退：别白盖 uat 触发无谓云同步
+  syncedUserPreference.setItem("lang", l);   // SSoT：synced-user-preference collection（跨设备）
+  writeBootSnapshot("lang", l);              // 先刷快照，再 reload —— 顺序不能反，否则 reload 后 eval 期读回旧值
   location.reload();     // reload 制
+}
+
+// collection hydrate/reconcile 后对账（app.ts 的 fixup 相调）：先刷快照 → 语言不对就 reload。
+//   触发场景：① 别的设备改了语言、云端 reconcile 拉回来 ② 本机快照丢了（清缓存/隐私模式）而 IDB 还在。
+//   ⚠ 必须先写快照再 reload：reload 后 eval 期只读得到快照，不刷就无限 reload。
+export function reconcileLangFromPrefs(): void {
+  const real = langFromPrefs();
+  writeBootSnapshot("lang", real);          // null（跟系统）→ 清快照
+  const want = real ?? detectLang();
+  if (want !== lang()) location.reload();
 }
 
 // data-i18n 桥：静态 HTML 一次性填充。textContent / title / aria-label / placeholder 四种 attr。

@@ -78,17 +78,26 @@ describe("editor-session › flush 本地 vs 推云", () => {
     eq(store.saves.length, 0, "不脏不存"); eq(editor.encodeCount, 0, "不脏不 encode");
   });
 
-  it("markWorkspacePending → 内容不脏也 flushLocal encode（desk 跟画走）+ encode 后清", async () => {
+  // v409 回归锁（D-Q6）：desk 改动**不**驱动落盘/推云。markWorkspacePending 已删——
+  //   user 2026-07-14：「退出应该只有 contentdirty 才强制推云，workspace dirty 可抛」。
+  it("desk 改动无法驱动落盘：markWorkspacePending 已删（v409）", async () => {
     const store = mockStore(), editor = mockEditor();
     const es = createEditorSession({ store, editor });
     await es.open("a");                     // 内容不脏
-    es.markWorkspacePending();              // 只 desk 改动（非内容）
-    eq(es.isDirty(), false, "workspacePending 不置内存脏 → 徽章静默（session.dirty=false）");
-    await es.flushLocal();                  // 关键：workspacePending 让 flushLocal 也 encode（非 no-op）
-    eq(editor.encodeCount, 1, "workspacePending → flushLocal encode（desk 落本地）");
-    eq(store.saves.length, 1, "落本地一次");
-    await es.flushLocal();                  // encode 后已清 → 再 flush no-op
-    eq(editor.encodeCount, 1, "encode 后清 workspacePending → 不重复 encode");
+    eq(typeof es.markWorkspacePending, "undefined", "markWorkspacePending 应已删");
+    await es.flushLocal(); await es.flushAndPush();
+    eq(editor.encodeCount, 0, "内容不脏 → 退出/flush 都不 encode（desk 可抛）");
+    eq(store.saves.length, 0, "不落盘不推云");
+  });
+  // v409 回归锁（D2）：用户显式按 save → 无条件 encode+推，不脏也动（时间戳必须走字）。
+  it("forceSaveAndPush：不脏也 encode+推（v409 smart save）", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    await es.open("a");                     // 开完不脏
+    await es.forceSaveAndPush();
+    eq(editor.encodeCount, 1, "不脏也 encode（顺手捞 desk）");
+    eq(store.saves.length, 1, "不脏也存");
+    eq(store.saves[0].tryPush, true, "且推云 → 时间戳走字");
   });
   it("hint.peek 透传给 store.save", async () => {
     const store = mockStore(), editor = mockEditor();

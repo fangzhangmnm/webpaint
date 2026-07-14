@@ -1,6 +1,7 @@
 // app-store —— WebPaint 装配 sync-store 的唯一点（cutover：薄库 + editor-session）。
 //   只做 config 注入（provider / ui bundle / crypto codec / crypt / validateAdopt）+ auth 转发 + gallery 列举适配。
-//   app 只碰 store 四面（file/collection/localSettings/syncedSettings）+ editor-session。绝不裸碰 kv/IDB/graph/vendor。
+//   app 只碰 store 两面（**file / collection**）+ editor-session。绝不裸碰 kv/IDB/graph/vendor。
+//   （localSettings/syncedSettings 那两面已于 2026-07-13 删除 —— 全部 KV 化进 collection。别照旧注释找。）
 import { createStore, createOneDriveProvider, isCached, isDirty } from "./store/index.ts";
 import { stripSessionExt } from "./config.ts";
 import { storeUI } from "./store-ui.ts";
@@ -64,8 +65,6 @@ export const onAuthChanged = (cb: Parameters<typeof _auth.onAuthChanged>[0]) => 
 export const getAuthState = () => _auth.getAuthState();
 
 // 上次登录 flag（设备级 auth flag → local-app-state collection，经 appState struct）。boot 门 init 后才读写。
-export const getLastSessionSignedIn = () => appState.lastSessionSignedIn;
-export const setLastSessionSignedIn = (v: unknown) => { appState.lastSessionSignedIn = !!v; };
 
 // ---- gallery 数据：统一列举（local ∪ cloud，每项带 syncState）。reconcile 已进库（watchFolder 惰性 per-folder）。----
 const _CLOUD_STATES = new Set(["cloud-only", "synced", "unpushed", "newer-on-cloud", "conflict"]);   // 有云版的 syncState

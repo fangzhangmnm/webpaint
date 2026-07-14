@@ -144,7 +144,7 @@ export class ReferenceWindow {
     this._updateEmptyHint();
     this._invalidate();
   }
-  // 给 saveSession 用：拿当前静态 ref 的原始 Blob（live 模式返 null）
+  // 给存盘用（session-state 的 _buildOraMeta）：拿当前静态 ref 的原始 Blob（live 模式返 null）
   getPersistBlob() {
     return this._liveDoc ? null : this._bitmapBlob;
   }

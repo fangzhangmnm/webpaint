@@ -80,11 +80,10 @@ describe("resolveBrush · 预设缺字段走 ?? 默认（与旧逐字对齐）",
 
 describe("resolveBrush · 每笔压感开关（2026-07-14 deprecate 全局）", () => {
   it("preset 带 → 每笔覆盖（!! 归一）", () => {
-    eq(resolveBrush({ preset: { pressureToSize: false } }).pressureToSize, false, "preset.pressureToSize=false → false");
-    eq(resolveBrush({ preset: { pressureToOpacity: 1 } }).pressureToOpacity, true, "!! 归一");
   });
   it("无 preset / preset 不带 = 保留 DEFAULT", () => {
-    eq(resolveBrush().pressureToSize, DEFAULT_SETTINGS.pressureToSize, "无 preset → DEFAULT");
-    eq(resolveBrush({ preset: {} }).pressureToSize, DEFAULT_SETTINGS.pressureToSize, "preset 不带 → DEFAULT");
+    // v409：pressureToSize/pressureToOpacity 已删（与 sizeCoeff/opaCoeff 语义重复的零消费方影子字段）。
+    eq(resolveBrush().pressureToSize, undefined, "pressureToSize 已删");
+    eq(resolveBrush({ preset: { pressureToSize: false } }).pressureToSize, undefined, "preset 带也不再产出该字段");
   });
 });

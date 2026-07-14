@@ -6,7 +6,9 @@
 // ⚠**刻意不 import app-store**：lang/theme 被极多 leaf 与 node 测在**模块 eval 期**读（i18n 的 t()、theme），
 //   若拖进 app-store 就把整个 store/crypto/msal 栈塞进每个用 t() 的模块 + i18n↔store-ui 成环。
 //   故 collection 由 app-store 建好 store 后**惰性注入**（wirePreferences）；注入前读返 DEFAULTS（boot 安全）。
-//   boot 门：`await initPreferences()`（内部 hydrate 快、离线 OK）→ 再 dynamic import app-main，让 eval 期 lang 就绪。
+//   boot：`initPreferences()` 返 promise（内部先 hydrate 本地、快、离线 OK），app.ts 存成 `prefsReady`。
+//   v409 起**不再是 TLA 门**：lang/theme 走 localStorage boot 快照（src/boot-snapshot.ts）解决 eval 期/pre-paint,
+//   其余消费方各自 await prefsReady（app.ts 的 fixup 相）。（历史注释说的 "dynamic import app-main" 那个模块从未存在。）
 import type { Collection } from "./store/index.ts";
 
 // ── DEFAULTS SSoT（唯一处；getItem 缺省从这里取，别处不 inline）───────────────────────────

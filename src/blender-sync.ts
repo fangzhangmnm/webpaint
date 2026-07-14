@@ -84,7 +84,15 @@ export function initBlenderSync(c: AppContext) {
   window.addEventListener("wp:applyEditorState", () => applyBlenderPanelFromEditorState());
 }
 
-// 文档加载/新建后应用该 doc 保存的面板状态：只写 DOM，绝不回写 editorState（否则会误标脏）。
+// boot fixup 相（app.ts，await prefsReady 后）：把 appState.blenderPanelUrl 的**真值**刷进输入框。
+//   拆了 TLA 门后 buildPanel() 在 collection hydrate 之前跑 → :476 那次读到的是 ""（DEFAULTS）。
+//   只刷 URL、不碰面板显隐（那归 wp:applyEditorState / desk）。**不写盘**。
+export function reconcileBlenderUrlFromPrefs(): void {
+  if (!built || !remoteUrl) return;
+  remoteUrl.value = appState.blenderPanelUrl || "";
+}
+
+// 文档加载/新建后应用该 doc 保存的面板状态：只写 DOM，绝不回写 editorState。
 // URL 是账号级（appState 跨设备同步），顺带刷新——可能在别的设备上改过。
 function applyBlenderPanelFromEditorState() {
   if (!built) return;

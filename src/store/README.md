@@ -71,7 +71,7 @@ const store = createStore({
 | 拿到的 | 方法 | 章节 |
 |---|---|---|
 | `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · rename · delete · keepOffline · offload · isKeptOffline · isDirty · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek({bytesLength,zipEntry})` + `decryptPeek(blob)`；zip 尾片解析在库内部，`setPeek` 未采用，peek 经 `crypt.makePeek` 自动） | §2 |
-| `store.collection(name, {manual?, local?})` | `setItem · deleteItem · getItem(id,def) · getEntry · entries · keys · onChange · init · refresh · flush · flushLocal · isDirty`（`{local:true}` = 设备本地变体，永不碰云） | §3 |
+| `store.collection(name, {manual?, local?})` | `setItem · deleteItem · getItem(id,def) · getEntry · entries · keys · onChange · init · pullAndReconcile · flush · flushLocal · isDirty`（`{local:true}` = **不推云**的设备本地变体） | §3 |
 | `store.list()` / `store.listAll()` | 列云端文件+文件夹 `{files, folders, complete}`（`complete:false` **别据此删缓存**） | §2 |
 | `store.ensureFolder · newFolder · deleteFolder` | 文件夹增删（删除「必须空」库内强制） | §2 |
 | `store.listTrash · listBackup · restore · purge · emptyTrash` | 回收站 / 备份箱：列举·恢复·彻底删·清空 | §2 |
@@ -149,7 +149,7 @@ const p = await zip.getPeek({ bytesLength: 131072, zipEntry: "Thumbnails/thumbna
 
 ```ts
 const reading = store.collection("reading-state", { manual: true });   // manual=你控制推云时机；不传=编辑后自动防抖推
-                                                                       // { local: true } = 设备本地变体：只走 IDB、永不碰云、refresh no-op
+                                                                       // { local: true } = **不推云**（≠"开缓存"：synced 变体也写 IDB）；pullAndReconcile no-op
 await reading.init();                                        // **必须先调**：先 hydrate 本地(快) → 后台 fire-and-forget 拉云对齐。init 前 setItem 抛、getItem 恒返 default
 reading.setItem(docId, { pageIndex, yFraction });           // 新增 / 整条原子替换（id 必填；value = 任意 JSON，裸值或对象皆可）
 reading.deleteItem(docId);
@@ -166,7 +166,8 @@ await reading.flush();                                       // 推云（manual 
 - **getItem/setItem 两侧 value 浅拷贝隔离**：拿到的对象原地改、或传入的对象事后改，都不与库内信封互相污染（浅拷贝语义——深层嵌套要改整枝替换再 setItem）。
 - **item 是原子的：只有 `setItem`（整条替换），没有 partial update。** 想改一个字段 = 取整条 → 改 → 整条 setItem。换来合并简单 + 无中间态。
 - 内部按 item 合并，**逐 item last-write-wins**（每 item 各带 uat，并发改不同 item 都不丢；同 item 并发 = 静默 last-win，**仅配置类可接受**，画作 content 绝不走此路，走 §2 file 的 If-Match）。
-- **自动本地缓存**：离线、重新打开、意外关闭后都能读到上次的数据（你不碰 IndexedDB）。init 后台对齐云端、值变经 `onChange` 通知；事件驱动（focus/visible/online）重拉调 `refresh()`。页面卸载时调一次 `flushLocal()` 把最新状态落本地。
+- **自动本地缓存**：离线、重新打开、意外关闭后都能读到上次的数据（你不碰 IndexedDB）。init 后台对齐云端、值变经 `onChange` 通知；事件驱动（focus/visible/online）重拉调 `pullAndReconcile()`。页面卸载时调一次 `flushLocal()` 把最新状态落本地。
+  > ⚠ 名字别搞混：collection 的重拉叫 **`pullAndReconcile()`**；`store.refresh(name)` 是 **file** 那一面的新鲜度检查，两回事。
 
 ---
 

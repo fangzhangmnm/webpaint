@@ -29,9 +29,7 @@ import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { sessionNameConflict } from "./session-name.ts";
 import { decodeOraToDoc } from "./ora.ts";
-import { sessionFileName } from "./config.ts";   // 边界：裸 session 名 → 库全名（薄库身份=X.ora）
 import { compressPixelSnap } from "./pixel-edit.ts";
-import { editorState } from "./editor-state.ts";   // smart-save：workspaceDirty（editor-state 改了）→ push 非 no-op
 import { t } from "./i18n/index.ts";
 import type { Layer, PaintDoc } from "./doc.ts";
 
@@ -128,18 +126,12 @@ export function initTopbarMenu(ctx: AppContext) {
   });
 
   // ---- topbar：save/upload + gallery ----
-  // 点 save 按钮 = saveAndPush 一把梭（同 Ctrl+S）。state == "synced" 时
-  // 也跑一遍（no-op fast path）让 user 永远不需要"再点一下"。
-  els.topSaveBtn.addEventListener("click", () => {
-    const name = session.name;
-    // synced（无可存可推）→ 按钮兼作「刷新云端态」（ADR-0017，点一下 = 现场查云 + 干净则快进）；否则正常存/推。
-    //   workspaceDirty（editor-state 改过、UI 静默）也算「有可推」→ 走 saveAndPush 把 desk 落盘，不进查云快路径。
-    if (name && name !== "未命名" && isSignedIn() && !session.dirty && !editorState.isWorkspaceDirty()) {
-      _store.refresh(sessionFileName(name)).then(() => updateSaveStatus()).catch(() => {});   // synced：点=现场查云干净快进（freshness 进库）。边界转全名（薄库身份=X.ora，全 app 一致）。
-    } else {
-      session.saveAndPush();
-    }
-  });
+  // 点 save 按钮 = saveAndPush 一把梭（同 Ctrl+S），**无条件**——不脏也 encode+推。
+  //   v409（user 2026-07-14）：「smart save 在不 dirty 的时候也走 save，推云。至少可以改时间戳，
+  //   不然用户点了 save 看到时间戳没动会觉得坏了」。
+  //   故删掉旧的「synced → 只查云快进」分支（ADR-0017 的 no-op fast path）：那条路不动时间戳，
+  //   且 forceSaveAndPush 内部的 save 本就走 store 的 freshness/冲突 surface，查云的效果被它包含。
+  els.topSaveBtn.addEventListener("click", () => { session.saveAndPush(); });
 
   // adjust panel head 拖动
   (function bindAdjustPanelDrag() {

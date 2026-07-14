@@ -44,6 +44,20 @@ export class PwaShell {
     });
     this.d.dismissBtn.addEventListener("click", () => { this.dismissed = true; this.d.toast.classList.add("hidden"); });
 
+    // ---- 前台钩子：**无条件挂**（v409 修）----
+    // onForeground 是**业务**（app 拿它拉 4 个 settings/state collection + 查文件新鲜度）；SW 的 update poke
+    //   是外壳自己的事。两者只是碰巧同一时机，不该同生共死。
+    // v406-v408 这两个监听器挂在 `serviceWorker.register().then()` 里、且整块被 LOCAL_DEV_HOSTS 守卫包住 →
+    //   localhost 开发 / SW register reject（隐私窗口、SW 被禁、SW 404）/ 无 serviceWorker 的环境下，
+    //   **前台永不触发 onForeground**：设置跨设备同步静默消失，无任何报错。prod 能注册所以没暴露。
+    //   → 「设置同步」不该寄生在「SW 注册成功」的路径上。
+    const onFg = () => {
+      this.reg?.update().catch(() => {});   // SW 有才 poke（没有也不影响下面这行）
+      this.d.onForeground();
+    };
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") onFg(); });
+    window.addEventListener("focus", onFg);
+
     // 注册 SW：prod 和 dev(/dev/)都装（worker 按 scope 分 cache-first / network-first）；只跳 localhost（dev server 无 SW 文件）。
     if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {
       navigator.serviceWorker.addEventListener("message", (e: MessageEvent) => { if (e.data?.type === "asset-updated") this.show(); });
@@ -57,10 +71,7 @@ export class PwaShell {
             if (nw.state === "installed" && navigator.serviceWorker.controller) this.show();
           });
         });
-        const poke = () => { registration.update().catch(() => {}); };
-        document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { poke(); this.d.onForeground(); } });
-        window.addEventListener("focus", () => { poke(); this.d.onForeground(); });
-        setInterval(poke, 10 * 60 * 1000);
+        setInterval(() => { registration.update().catch(() => {}); }, 10 * 60 * 1000);
       }).catch((err) => console.warn("SW register failed", err));
     }
   }

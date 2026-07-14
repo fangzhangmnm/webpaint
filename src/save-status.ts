@@ -54,7 +54,9 @@ export function updateSaveStatus() {
   }
   const state = computeSaveState();
   els.topSaveBtn.dataset.state = state;
-  els.topSaveBtn.style.opacity = ""; els.topSaveBtn.style.color = "";   // 永不残留旧的灰/蓝 —— 云=可按态主题色（灰=不可按，禁用）
+  els.topSaveBtn.style.opacity = ""; els.topSaveBtn.style.color = "";   // 永不残留旧的内联灰/蓝，颜色一律交给 CSS 的 [data-state]
+  //   ⚠ 按钮**永远可点**（零 disabled 逻辑）：synced 态的灰只是"没什么可存"的视觉，不是禁用。
+  //   v409 起点它必 encode+推（forceSaveAndPush，让时间戳走字）。徽章只看内容脏，desk 改动 UI 静默。
   const name = session.name;
   if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.dirty", { name }); }
   else if (state === "synced") {

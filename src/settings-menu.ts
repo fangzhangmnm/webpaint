@@ -40,15 +40,29 @@ function setMenuItem(btn: HTMLElement, on: boolean, stateLabel = on ? t("common.
 }
 
 // （全局压感开关 applyPressureSize/Opacity 已 deprecate 2026-07-14 → 每笔自带，见 resolved-brush）
-function applyLongPressPick(on: boolean) {
+//
+// ⚠**render* / apply* 的分工是纪律，不是风格**（v409 修的 P0-1）：
+//   render*(on) = 只贴 RAM/DOM/board，**绝不写盘**；apply*(on) = render* + setItem（写 collection → 触发云同步）。
+//   **boot 只准调 render***。v406-v408 boot 调的是 apply*（读完立刻回写）→ collection.setItem 无条件盖
+//   `uat: now()` → per-item LWW 变成「**最后冷启动**的设备赢」而非「最后修改的设备赢」：
+//   iPad 上开的设置，被桌面机下次冷启动的回写盖掉、还推回云端把 iPad 也清了。4 个 synced 键的跨设备同步等于打死。
+//   theme.ts（renderTheme 不写盘）和 i18n（setLang 有 `l === lang()` 早退）本来就守着这条纪律，恰好躲过；
+//   settings-menu 当时没守。别再让 boot 路径碰 setItem。
+function renderLongPressPick(on: boolean) {
   state.longPressPick = !!on;
   setMenuItem(els.menuLongPressPick, on);
+}
+function applyLongPressPick(on: boolean) {
+  renderLongPressPick(on);
   syncedUserPreference.setItem("long-press-pick", !!on);   // 跨设备偏好
 }
-function applySingleFingerDraw(on: boolean) {
+function renderSingleFingerDraw(on: boolean) {
   state.singleFingerDraw = !!on;
   setMenuItem(els.menuSingleFingerDraw, on);
-  syncedUserPreference.setItem("single-finger-draw", !!on);   // 跨设备偏好（默认关——不拦鼠标）
+}
+function applySingleFingerDraw(on: boolean) {
+  renderSingleFingerDraw(on);
+  syncedUserPreference.setItem("single-finger-draw", !!on);   // 跨设备偏好（默认关——不拦鼠标，见 pointer-route）
 }
 export function applyCheckerboard(on: boolean) {
   // v125: checkerboard per-doc，不再写 localStorage
@@ -60,16 +74,22 @@ export function applyCheckerboard(on: boolean) {
 }
 
 // v163 像素栅格：全局开关（视图辅助），跨设备偏好（synced-user-preference），默认开
-function applyPixelGrid(on: boolean) {
+function renderPixelGrid(on: boolean) {
   board.setPixelGridEnabled?.(!!on);
   setMenuItem(els.menuPixelGrid, !!on);
+}
+function applyPixelGrid(on: boolean) {
+  renderPixelGrid(on);
   syncedUserPreference.setItem("pixel-grid", !!on);
 }
 
 // v275 FPS 计：dev 性能读数（角落 overlay）；跨设备偏好（synced-user-preference），默认关。防煤气灯。
-function applyFps(on: boolean) {
+function renderFps(on: boolean) {
   board.setShowFps?.(!!on);
   setMenuItem(els.menuFps, !!on);
+}
+function applyFps(on: boolean) {
+  renderFps(on);
   syncedUserPreference.setItem("show-fps", !!on);
 }
 
@@ -94,6 +114,15 @@ function _renderShortcutsSheet() {
     }
   }
   _shortcutsBody.innerHTML = html;
+}
+
+// collection hydrate 后由 app.ts 的 fixup 相调：把 4 个 synced 开关的**真值**灌进 RAM/DOM/board。
+//   **只 render 不写盘**（见上方纪律）——这是 P0-1 的修复核心：boot 路径永不 setItem。
+export function renderSettingsFromPrefs(): void {
+  renderPixelGrid(syncedUserPreference.getItem<boolean>("pixel-grid", PREF_DEFAULTS["pixel-grid"]));
+  renderFps(syncedUserPreference.getItem<boolean>("show-fps", PREF_DEFAULTS["show-fps"]));
+  renderLongPressPick(syncedUserPreference.getItem<boolean>("long-press-pick", PREF_DEFAULTS["long-press-pick"]));
+  renderSingleFingerDraw(syncedUserPreference.getItem<boolean>("single-finger-draw", PREF_DEFAULTS["single-finger-draw"]));
 }
 
 export function setMenuOpen(open: boolean) {
@@ -127,14 +156,12 @@ export function initSettingsMenu(ctx: AppContext) {
     setStatus(t("status.checkerboard", { s: state.checkerboard ? t("common.on") : t("common.off") }));
   });
 
-  applyPixelGrid(syncedUserPreference.getItem<boolean>("pixel-grid", PREF_DEFAULTS["pixel-grid"]));   // boot：缺省=开
   if (els.menuPixelGrid) els.menuPixelGrid.addEventListener("click", () => {
     const next = !board.getPixelGridEnabled();
     applyPixelGrid(next);
     setStatus(t("status.pixelGrid", { s: next ? t("common.on") : t("common.off") }));
   });
 
-  applyFps(syncedUserPreference.getItem<boolean>("show-fps", PREF_DEFAULTS["show-fps"]));   // boot：缺省=关
   if (els.menuFps) els.menuFps.addEventListener("click", () => {
     const next = !board.getShowFps?.();
     applyFps(next);
@@ -168,9 +195,9 @@ export function initSettingsMenu(ctx: AppContext) {
   document.getElementById("shortcutsClose")?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
   _shortcutsBackdrop?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
 
-  applyLongPressPick(state.longPressPick);
-  applySingleFingerDraw(state.singleFingerDraw);
-  applyCheckerboard(state.checkerboard);
+  // ⚠ boot 期**不**在这读 pref —— collection 还没 hydrate（v409 拆了 TLA 门），读到的是 DEFAULTS。
+  //   真值由 app.ts 的 fixup 相（await prefsReady 后）调 renderSettingsFromPrefs() 灌入。
+  applyCheckerboard(state.checkerboard);   // checkboard 是 per-doc desk（非 pref），不等 collection
 
   els.menuBtn.addEventListener("click", (e: Event) => {
     e.stopPropagation();

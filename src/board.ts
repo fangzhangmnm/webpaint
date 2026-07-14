@@ -2,6 +2,7 @@
 import { sourceWarpMatrix } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import { compositeLayers } from "./layer-composite.ts";
+import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT（别在本文件硬编码第二份）
 import { makeBitmap } from "./bitmap.ts";
 import { GLBoard } from "./gl/gl-board.ts";
 import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
@@ -155,7 +156,9 @@ export class Board {
     this._showCheckerboard = false;
     // v163 像素栅格：放大到 PIXEL_GRID_FADE_LO 以上渐显 1 doc-px 网格（像素画对齐）。
     //   只画可见区域格线（性能）；很细很淡；全局开关可关。
-    this._pixelGridEnabled = true;
+    //   真值由 app.ts 的 fixup 相经 settings-menu 的 renderSettingsFromPrefs() 灌入（SSoT = PREF_DEFAULTS["pixel-grid"]）；
+    //   这里只是构造期占位，别在这硬编码第二份默认值。
+    this._pixelGridEnabled = PREF_DEFAULTS["pixel-grid"];
 
     this._eraseComposite = null;
     this._eraseCompositeKey = null;

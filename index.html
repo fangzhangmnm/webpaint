@@ -6,10 +6,14 @@
     <meta name="theme-color" content="#F6F4EF" />
     <meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)" />
     <script>
-      // Theme guard：在样式表生效前把 [data-theme] 落上去，避免 FOUC
+      // Theme guard：在样式表生效前把 [data-theme] 落上去，避免 FOUC。
+      // 键 = webpaint.boot.theme（src/boot-snapshot.ts 的快照；SSoT 是 IDB collection，但 IDB 异步、
+      //   pre-paint 读不到 → 必须有这份同步镜像。写入方 = theme.ts 的 applyTheme/对账）。
+      //   ⚠ v406-v408 这里读的是 `webpaint.theme`，而那个键在迁 collection 时没了写入方 →
+      //     guard 静默失效、夜间冷启动闪白。改键名时**务必**同步改 theme.ts，否则又是同样的哑巴回归。
       (function () {
         try {
-          var saved = localStorage.getItem("webpaint.theme");
+          var saved = localStorage.getItem("webpaint.boot.theme");
           if (saved === "day" || saved === "night" || saved === "auto") {
             document.documentElement.setAttribute("data-theme", saved);
           }
@@ -1033,6 +1037,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-9623df90683d.mjs"></script>
+    <script type="module" src="./dist/webpaint-a153fe504be4.mjs"></script>
   </body>
 </html>

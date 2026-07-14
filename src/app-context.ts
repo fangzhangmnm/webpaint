@@ -115,6 +115,9 @@ export interface AppContext {
   withBusy: <T>(label: string, fn: () => Promise<T> | T) => Promise<T>;
   leftDial: LeftDialHandle;
   updateSaveStatus: () => void;
+  // 把 4 个 settings/state collection 拉云对齐（per-key LWW；离线/local-only 内部 no-op）。
+  // 组合根拥有（它是唯一同时认识 app-prefs 和 app-state 的地方）。**fire-and-forget，调用方别 await。**
+  pullSettingsAndState: () => void;
   updateZoomLabel: () => void;
   updateNewerBanner: () => void;   // v319：真实现无参（save-status.ts）
 

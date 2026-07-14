@@ -1308,8 +1308,9 @@ export class InputController {
 // 起手 warmup 也 0 但 lastP 还没 → 退到 **0.2**（v6，原本 0.5 → 起手鼓 bulb）。
 // 算完 raw 后过一道 LPF（rec.smP，α=PRESSURE_SMOOTH_ALPHA）做 stabilizer，
 // damp 10Hz 抖动 + 削传感器尖刺。sentinel rec.smP < 0 → 首颗用 raw（tap 满压）。
-// 注：是否真的把 pressure 用进 size / opacity 由 BrushSettings.pressureToSize /
-// pressureToOpacity 决定（v30 起，分别 toggle）。这里永远 return 真值。
+// 注：这里永远 return 真值。压感**是否**影响 size/opacity/flow 由每笔的 sizeCoeff / opaCoeff / flowCoeff
+// 决定（brush.ts 的 signedLerp，0=不响应）。v409 删了 pressureToSize/pressureToOpacity——那对字段
+// 从 v30 起就没人读了，这条注释在此之前一直是假的。
 function effectivePressureFor(rec: PointerRec, ev: { pointerType?: string; pressure?: number }): number {
   let raw: number;
   if (ev.pointerType === "mouse") {

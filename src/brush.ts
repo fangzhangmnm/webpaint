@@ -120,9 +120,6 @@ export const DEFAULT_SETTINGS = {
   taperIn: 0,
   taperOut: 0,        // 末端渐细长度（× 笔径）。0=无。endStroke 时按到末端距离施加（需总笔长）
   taperFloor: 0.4,    // taper 包络最小压感系数（in/out 两端共用）
-  // legacy 字段（applyBrushPresetFrozen 老路径可能 reference，no-op）：
-  pressureToSize: true,
-  pressureToOpacity: true,
 };
 
 export class BrushSettings {

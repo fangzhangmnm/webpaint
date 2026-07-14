@@ -20,7 +20,6 @@ test("[app-state] struct 冷字段直读写 collection（不落 RAM）+ 默认 +
   eq(appState.currentDirectory, "", "默认 current-directory=空串");
   eq(appState.currentFile, null, "默认 current-file=null");
   eq(appState.blenderPanelUrl, "", "默认 blenderPanelUrl=空串");
-  eq(appState.lastSessionSignedIn, false, "默认 lastSessionSignedIn=false");
 
   // set/get 往返
   appState.currentDirectory = "folder/a";
@@ -34,12 +33,10 @@ test("[app-state] struct 冷字段直读写 collection（不落 RAM）+ 默认 +
   eq(synced.getItem("current-directory", "?"), "folder/a", "直写落 synced collection（无 RAM 缓存）");
   eq(appState.blenderPanelUrl === synced.getItem("blender-panel-url", "?"), true, "blenderPanelUrl 落 synced-app-state（非 local）");
 
-  // 类型强制：lastSessionSignedIn setter !!v、getter ===true
-  appState.lastSessionSignedIn = 1;
-  eq(appState.lastSessionSignedIn, true, "lastSessionSignedIn 强制 boolean(truthy→true)");
-  appState.lastSessionSignedIn = 0;
-  eq(appState.lastSessionSignedIn, false, "lastSessionSignedIn 强制 boolean(falsy→false)");
-  eq(local.getItem("last-session-signed-in", "?"), false, "lastSessionSignedIn 落 local-app-state");
+  // v409 回归锁：local-app-state 回归**空**。last-session-signed-in 已删（零 consumer；
+  //   登录态 SSoT 归 auth provider，不在这存影子）。要加设备级字段时才往这写。
+  eq(local.keys().length, 0, "local-app-state 无字段（v409）");
+  eq(typeof appState.lastSessionSignedIn, "undefined", "lastSessionSignedIn 已删");
 
   // 除字段外仅两方法：pushHot no-op、pullFrom 不抛
   appState.pushHotToPersistent();

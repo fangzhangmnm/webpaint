@@ -128,7 +128,8 @@ export async function renameSessionKey(oldKey: string, newKey: string): Promise<
   });
 }
 
-// meta：单条配置（settings 之类）。app.js 现在用 localStorage；这里留给将来用。
+// meta：单条配置。⚠ **当前无人用**——设置全走 store 的 collection（IDB，见 src/app-prefs.ts / app-state.ts）。
+//   别照"app.js 用 localStorage"那句旧话理解：那是 v405 之前的事。要加设置就加 collection 键，别用这个。
 export async function getMeta(key: string): Promise<unknown> {
   const db = await openDB();
   return new Promise((resolve, reject) => {

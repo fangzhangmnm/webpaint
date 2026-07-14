@@ -18,8 +18,11 @@ export const APP_STATE_DEFAULTS = {
   "current-directory": "" as string,          // 上次所在图库文件夹（Cold）
   "current-file": null as string | null,      // 上次打开的文档名（非 null → boot 自动 open）（Cold）
   "blender-panel-url": "" as string,          // Blender 同步远端 URL（2026-07-14 决策：全账号同步，tailscale 稳定端点）（Cold）
-  // 设备本地（local-app-state）：跟设备走的持久态
-  "last-session-signed-in": false as boolean, // 上次是否登录（控静默重认证；设备级 auth flag）（Cold）
+  // 设备本地（local-app-state）：**当前为空**。
+  //   v407 曾放过 "last-session-signed-in"（"控静默重认证"），但它零 consumer——只写不读，
+  //   而真正的判定走 `!isSignedIn()`（app.ts 的 retrySilentSignIn）。v409 删：登录态的 SSoT 是
+  //   auth provider（MSAL 自己的 localStorage cache），不该在这再存一份会漂移的影子。
+  //   要加设备级字段时才往这写，别为"以后可能用得上"占位。
 } as const;
 export type AppStateKey = keyof typeof APP_STATE_DEFAULTS;
 
@@ -48,9 +51,7 @@ export const appState = {
   set currentFile(v: string | null) { setC(_synced, "current-file", v); },
   get blenderPanelUrl(): string { return getC<string>(_synced, "blender-panel-url"); },
   set blenderPanelUrl(v: string) { setC(_synced, "blender-panel-url", v); },
-  // ── 设备本地（local-app-state）冷字段 ──
-  get lastSessionSignedIn(): boolean { return getC<boolean>(_local, "last-session-signed-in") === true; },
-  set lastSessionSignedIn(v: boolean) { setC(_local, "last-session-signed-in", !!v); },
+  // ── 设备本地（local-app-state）冷字段：当前无（见 APP_STATE_DEFAULTS 注）──
 
   // ── 序列化持久化相关（除字段外仅此二法，无应用逻辑）──
   // 热变量写 collection。本轮无热字段：冷字段 setter 已直写 collection → no-op。

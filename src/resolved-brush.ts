@@ -30,8 +30,6 @@ export interface BrushPreset {
   spacing?: number | { value?: number };
   pixelMode?: boolean;
   smooth?: { streamline?: number; stabilization?: number };
-  pressureToSize?: boolean;      // 2026-07-14：压感→尺寸/透明 从全局开关 deprecate 成**每笔**（缺=DEFAULT true）；per-brush UI 下一轮
-  pressureToOpacity?: boolean;
 }
 
 // 引擎吃的扁平笔。字段集 = DEFAULT_SETTINGS 全集；index 签名兜住本模块不显式列举的默认字段
@@ -58,8 +56,6 @@ export interface BrushSettings {
   pixelMode: boolean;
   streamline: number;
   stabilization: number;
-  pressureToSize: boolean;
-  pressureToOpacity: boolean;
   [k: string]: unknown;
 }
 
@@ -78,7 +74,11 @@ export interface ResolveBrushArgs {
 // 但输出是 Object.freeze 的新值（绝不复用/原地改）。
 //   preset：活动预设；null = 无笔架，走 DEFAULT 兜底。
 //   size/opacity/flow：per-tool dial（toolState）；缺省保留 DEFAULT。
-//   color：全局色（#rrggbb）。压感开关 pressureToSize/pressureToOpacity = **每笔**（preset 带则用，缺则 DEFAULT true）。
+//   color：全局色（#rrggbb）。
+//   压感→尺寸/透明的**每笔**开关就是 sizeCoeff / opaCoeff（-1..1，0=不响应压感）——有 UI（ui/brush-settings）、
+//   随笔架持久化、brush.ts 的 signedLerp 真在算。v409 删了同语义的冗余影子字段 pressureToSize/pressureToOpacity：
+//   它们从 preset 读进 ResolvedBrush 后**零消费方**（没 UI 写、没引擎读、default-brushes.json 也没这键）。
+//   要"关掉压感对粗细的影响"就把 sizeCoeff 设 0，别再引入第二个开关。
 export function resolveBrush({
   preset = null, size, opacity, flow, color,
 }: ResolveBrushArgs = {}): ResolvedBrush {
@@ -111,8 +111,6 @@ export function resolveBrush({
     b.streamline    = sm.streamline    ?? 0.15;
     b.stabilization = sm.stabilization ?? 0;
     // 压感开关 = **每笔**（2026-07-14 deprecate 全局）：preset 带则用，缺则保留 DEFAULT（true）。
-    if (preset.pressureToSize    != null) b.pressureToSize    = !!preset.pressureToSize;
-    if (preset.pressureToOpacity != null) b.pressureToOpacity = !!preset.pressureToOpacity;
   }
 
   // —— 用户旋钮 + 全局色（缺省 = 保留 base 默认）。压感开关不再是全局参数（见上，每笔）——

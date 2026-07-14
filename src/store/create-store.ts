@@ -147,7 +147,8 @@ export function createStore(config: StoreConfig) {
   //     若 cloud-sync 也写同键，push 成功写 "0" 会与「push 期间用户新编辑写 '1'」竞态、把未推编辑误判 clean 被驱逐（§A 最狠红线）。
   const cloud: CloudSync = createCloudSync({ provider, kv, fileName: config.fileName ?? ((n: string) => n), encFileName: config.encFileName ?? ((n: string) => `${n}.zip`), appKey: "files", manageDirty: false });
   //   collections 实例：云端落 `/.${appId}/<name>.json`（隐藏夹，isHidden 过滤出图库）；appKey="collections" → `${ns}.collections.etag:`/`.dirty:`。
-  //     store.collection(name) + 保留名 collection `settings`(syncedSettings) 都走它。name 无后缀，store 追加 `.json`。
+  //     store.collection(name) 走它。name 无后缀，store 追加 `.json`。
+  //     （**无保留名**：2026-07-13 起 `settings` 也只是个普通 collection 名，assertValidCollectionName 只校验文件名合法性。）
   const collectionsCloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => `.${appId}/${n}.json`, appKey: "collections" });
   const sub = createSubstrate();
   const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n), keyPrefix: "files" });   // → `${ns}.files.dirty:`（文件 dirty 权威）
