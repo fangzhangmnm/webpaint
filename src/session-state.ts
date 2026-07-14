@@ -79,9 +79,10 @@ async function _refreshEncrypted() {
 
 // ============ 编辑器状态 I/O（v267b；app 编辑器概念，不动）============
 function storeEditorStateToOra() {
+  // checkerboard/viewport 已迁 editorState（.webpaint/editor-state.json）；此处 webpaint/state.json 只留未迁字段。
   return {
     reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates,
-    palette: paletteWindow.getSerializedState(), checkerboard: state.checkerboard,
+    palette: paletteWindow.getSerializedState(),
     activeId: doc.activeId, activeLayerIndex: doc.activeIndex, blender: getBlenderSyncState(),
   };
 }
@@ -113,13 +114,20 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
     }
     rack.applyToolState(editMode.current());
   }
-  applyCheckerboard(!!ws?.checkerboard); applyBlenderSyncState(ws?.blender);
+  applyBlenderSyncState(ws?.blender);   // checkboard 已迁 editorState → 经 wp:applyEditorState 应用（settings-menu 订阅）
   if (ws?.activeId != null && doc.setActiveById(ws.activeId)) renderLayersPanel();
   else if (typeof ws?.activeLayerIndex === "number" && doc.setActive(ws.activeLayerIndex)) renderLayersPanel();
   // desk per-doc：载入 .webpaint/editor-state.json（缺失=老画作/不向后兼容 → resetEditorState 已回默认）。stage5 起各模块读它渲染。
   if (loaded._editorState != null) editorState.Unserialize(loaded._editorState);
 }
-function _buildOraMeta() { return { referenceImage: referenceWindow.getPersistBlob(), webpaintState: storeEditorStateToOra(), editorState: editorState.Serialize() }; }
+function _buildOraMeta() {
+  // 存前把运行时 board 视口 + checkboard 观感开关镜像进 editorState（**不标脏**，见 syncRuntimeForSave 注）。
+  editorState.syncRuntimeForSave(
+    { tx: board.viewport.tx, ty: board.viewport.ty, scale: board.viewport.scale, rot: board.viewport.rot },
+    state.checkerboard,
+  );
+  return { referenceImage: referenceWindow.getPersistBlob(), webpaintState: storeEditorStateToOra(), editorState: editorState.Serialize() };
+}
 function _encodeCurrentOra(): Promise<Blob> { return encodeDocToOra(doc, _buildOraMeta() as Parameters<typeof encodeDocToOra>[1]) as Promise<Blob>; }
 
 // ---- blank-unnamed 自检 ----
@@ -155,9 +163,9 @@ function adoptModel(loaded: LoadedDoc) {
     } else { _loadedDocWriterVer = null; }
     updateNewerBanner();
     restoreEditorStateFromOra(loaded);
-    const vp = loaded._webpaintState?.viewport;
+    const vp = editorState.viewport;   // 视口从 editorState（.webpaint/editor-state.json）回灌 board
     if (vp && typeof vp.scale === "number") { Object.assign(board.viewport, vp); board.invalidateAll(); board.requestRender(); }
-    applyEditorStateToUI();   // desk：Unserialize 后把面板/视口回灌 UI
+    applyEditorStateToUI();   // desk：Unserialize 后把面板/checkboard 回灌 UI（各模块订阅 wp:applyEditorState）
   } finally { _loadingDoc = false; }
 }
 

@@ -9,6 +9,7 @@
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关 = 跨设备偏好
+import { editorState } from "./editor-state.ts";   // checkboard = per-doc editorState（载入时经 wp:applyEditorState 应用到 board）
 import { applyTheme, cycleTheme, themeLabel } from "./theme.ts";
 import { t, lang, setLang, LANGS, LANG_NAME, type Key, type Lang } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
@@ -118,6 +119,8 @@ export function initSettingsMenu(ctx: AppContext) {
     applySingleFingerDraw(!state.singleFingerDraw);
     setStatus(t("status.singleFingerDraw", { s: state.singleFingerDraw ? t("common.on") : t("common.off") }));
   });
+  // desk 载入：文档的 checkboard 回灌到 board（applyCheckerboard 只写 board+mirror，不写 editorState→不标脏；守人类 2026-06-10 决定）。
+  window.addEventListener("wp:applyEditorState", () => applyCheckerboard(editorState.checkboard));
   els.menuCheckerboard.addEventListener("click", () => {
     applyCheckerboard(!state.checkerboard);
     // UI 态不 mark dirty（user 2026-06-10）：棋盘是观感开关，下次真编辑保存时顺手捞进 state.json。

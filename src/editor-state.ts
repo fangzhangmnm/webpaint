@@ -243,6 +243,10 @@ export const editorState = {
   // smart-save 用（stage4 接线）：workspaceDirty = editor-state 改过、未落盘（UI 静默、push 非 no-op）。
   isWorkspaceDirty(): boolean { return _workspaceDirty; },
   clearWorkspaceDirty(): void { _workspaceDirty = false; },                     // 存/推成功后清（stage4）
+  // 存前把运行时 SSoT（board 视口 / checkboard 观感开关）镜像进 S.g —— **不标脏**：
+  //   viewport 每帧变、checkboard 是观感开关（人类 2026-06-10 钉死「切棋盘不让画变未保存」），
+  //   故存时才捞进（顺手），不在改动时标 workspaceDirty。
+  syncRuntimeForSave(vp: EditorViewport, checkboard: boolean): void { S.g.viewport = vp; S.g.checkboard = checkboard; },
   _setOnDirty(cb: (() => void) | null): void { _onDirty = cb; },               // 可选：dirty 时通知外部
 };
 export type EditorStateStruct = typeof editorState;
