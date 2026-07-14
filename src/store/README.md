@@ -47,7 +47,7 @@ const store = createStore({
   ui,                                        // 必填：UI 回调 bundle，store 在决策点回调进来（见 §7）
   appId: "webpaint",                         // **必填**：本 app 在本 origin 内的唯一命名空间（见下「⚠ appId 红线」）
   autoCacheOpenedFile: true,                          // 选填(默认 true)：消费模式。true=开即自动留本地(读者/编辑器)；false=过路/流式(开整份拉云不落本地，§2；range 按需取片是 ⚠TODO 优化)
-  syncedSettingsFileName: "settings.json",   // 选填：要跨设备同步设置时给（§4）
+  // （旧 syncedSettingsFileName 已删 2026-07-13：设置/状态全走 store.collection，见 §4）
   validateAdopt,                             // **所有 consumer 必填，禁 placeholder/noop**：采纳云字节覆盖本地前验真内容（PDF/.ora）。**库对加密透明 → 验的是解密后明文**。防损坏/captive-portal HTML 拿合法 etag 覆盖好本地=丢内容。
   // ── 加密（§5）：JRP 不加密就不给（dormant，省 1.6MB）──
   // crypto: myCodec,                        // 选填：app 注入的 zip/7z codec（不注入 = 加密不可用）
@@ -71,8 +71,7 @@ const store = createStore({
 | 拿到的 | 方法 | 章节 |
 |---|---|---|
 | `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · rename · delete · keepOffline · offload · isKeptOffline · isDirty · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek({bytesLength,zipEntry})` + `decryptPeek(blob)`；zip 尾片解析在库内部，`setPeek` 未采用，peek 经 `crypt.makePeek` 自动） | §2 |
-| `store.collection(name, {manual?})` | `upsertItem · deleteItem · getItem · items · keys · init · flush · flushLocal` | §3 |
-| `store.localSettings` / `store.syncedSettings` | `get · set · delete`（synced 需 config 给 `syncedSettingsFileName`） | §4 |
+| `store.collection(name, {manual?, local?})` | `setItem · deleteItem · getItem(id,def) · getEntry · entries · keys · onChange · init · refresh · flush · flushLocal · isDirty`（`{local:true}` = 设备本地变体，永不碰云） | §3 |
 | `store.list()` / `store.listAll()` | 列云端文件+文件夹 `{files, folders, complete}`（`complete:false` **别据此删缓存**） | §2 |
 | `store.ensureFolder · newFolder · deleteFolder` | 文件夹增删（删除「必须空」库内强制） | §2 |
 | `store.listTrash · listBackup · restore · purge · emptyTrash` | 回收站 / 备份箱：列举·恢复·彻底删·清空 | §2 |
@@ -146,44 +145,58 @@ const p = await zip.getPeek({ bytesLength: 131072, zipEntry: "Thumbnails/thumbna
 
 > （旧名 `folder-store` 是误导：它不是文件夹，是「一份同步 JSON、里头一堆带 id 的 item」。**已改名 `collection`**。）
 
+> as-of 2026-07-14：信封字段 `payload`→`value`、写面 `upsertItem`→`setItem`、读面加 `getItem(id, default)` + 浅拷贝隔离 + `onChange`。旧名已删（本节即当前 API）。
+
 ```ts
-const reading = store.collection("reading-state.json", { manual: true });   // manual=你控制推云时机；不传=编辑后自动防抖推
-await reading.init();                                        // **必须先调**：拉云端 merge 进内存（不 init 直接读 = 空）
-reading.upsertItem({ id: docId, pageIndex, yFraction });     // 新增 / 整条原子替换（id 类型上强制必填）
+const reading = store.collection("reading-state", { manual: true });   // manual=你控制推云时机；不传=编辑后自动防抖推
+                                                                       // { local: true } = 设备本地变体：只走 IDB、永不碰云、refresh no-op
+await reading.init();                                        // **必须先调**：先 hydrate 本地(快) → 后台 fire-and-forget 拉云对齐。init 前 setItem 抛、getItem 恒返 default
+reading.setItem(docId, { pageIndex, yFraction });           // 新增 / 整条原子替换（id 必填；value = 任意 JSON，裸值或对象皆可）
 reading.deleteItem(docId);
-reading.getItem(docId);                                      // 一条 | undefined
-reading.items();                                             // 全部 item（数组，每条含自己的 id）
-reading.keys();                                              // 全部 id（数组）
+reading.getItem(docId, defaultVal);                         // 读 value（无值→default；default 可为裸值或**共享**工厂 fn，⚠工厂 lambda 别 inline）
+reading.getEntry(docId);                                    // 带 uat 的完整 entry { id, uat, value } | undefined
+reading.entries();                                          // 全部 entry（数组）
+reading.keys();                                             // 全部 id（数组）
+const off = reading.onChange((ids) => {/* 云端对齐带来值变 */});   // 整库订阅；或 onChange(id, cb) 绑单 key（返退订）
 await reading.flush();                                       // 推云（manual 模式由你定时机）；flushLocal() 只落本地（卸载兜底）
 ```
-- 用于：阅读位置表、笔架、任何"一堆小条目、跨设备合并、零冲突"的东西。
-- **不传 `encode/decode`**：item 是普通 JSON 对象，库自己序列化（content-agnostic 是给 §2 file 的不透明 blob；collection 本就是结构化可合并 JSON，库懂它的信封）。
-- **信封由类型强制，不靠约定**：库内部把每条包成 `{ id, uat, payload }`——`id` 类型上必填（`upsertItem(item: { id: string } & T)`）；`uat`（合并时间戳）**库内部盖戳，app 既传不进也看不到**（顺带守"内容里不放 timestamp"红线）；payload = 你给的其余字段。
-- **item 是原子的：只有 `upsertItem`（整条替换），没有 partial update。** 想改一个字段 = 取整条 → 改 → 整条 upsert。换来合并简单 + 无中间态。
-- 内部按 item 合并，**逐 item last-write-wins**（每 item 各带时间戳，并发改不同 item 都不丢，不静默覆盖）。
-- **自动本地缓存**：离线、重新打开、意外关闭后都能读到上次的数据（你不碰 IndexedDB）。页面卸载时（关闭 / 切到后台）调一次 `reading.flushLocal()` 把最新状态落到本地。
+- 用于：阅读位置表、笔架、设置/状态、任何"一堆小条目、跨设备合并、零冲突"的东西。app 每类持久化建一个 collection（见 §4）。
+- **不传 `encode/decode`**：value 是普通 JSON（裸值或对象），库自己序列化（content-agnostic 是给 §2 file 的不透明 blob；collection 本就是结构化可合并 JSON，库懂它的信封）。
+- **信封由类型强制，不靠约定**：库内部把每条包成 `{ id, uat, value }`——`id` 必填；`uat`（合并时间戳）**库内部盖戳，app 既传不进也看不到**（顺带守"内容里不放 timestamp"红线）；`value` = 你给的裸值/对象。
+- **getItem/setItem 两侧 value 浅拷贝隔离**：拿到的对象原地改、或传入的对象事后改，都不与库内信封互相污染（浅拷贝语义——深层嵌套要改整枝替换再 setItem）。
+- **item 是原子的：只有 `setItem`（整条替换），没有 partial update。** 想改一个字段 = 取整条 → 改 → 整条 setItem。换来合并简单 + 无中间态。
+- 内部按 item 合并，**逐 item last-write-wins**（每 item 各带 uat，并发改不同 item 都不丢；同 item 并发 = 静默 last-win，**仅配置类可接受**，画作 content 绝不走此路，走 §2 file 的 If-Match）。
+- **自动本地缓存**：离线、重新打开、意外关闭后都能读到上次的数据（你不碰 IndexedDB）。init 后台对齐云端、值变经 `onChange` 通知；事件驱动（focus/visible/online）重拉调 `refresh()`。页面卸载时调一次 `flushLocal()` 把最新状态落本地。
 
 ---
 
-## 4. 设置 —— 你**不碰** localStorage
+## 4. 设置 / 状态 —— 每类持久化建一个 collection（你**不碰** localStorage）
 
-两种，别混：
+> as-of 2026-07-13：`localSettings`/`syncedSettings` 已删。设置/状态**全走 §3 collection**——app 为每类持久化建一个 collection，直接用其 KV 面。无第二份数据结构、无中央 registry、无保留名。
+
+两条正交轴，各建一个 collection：
+- **设备本地 vs 跨设备** → `{ local: true }`（只走 IDB、永不碰云）vs 默认（synced）。
+- **user-preference（跟人/设备的偏好）vs app-state（跨文件持久态）** → 语义分名，不同 collection。
+
+WebPaint 建了四个（app 层，非库硬编码）：
 
 ```ts
-// A. 设备本地（theme/zoom/spread…，每台设备独立，不同步）
-store.localSettings.set("theme", "night");
-store.localSettings.get("theme");      // 没设 → undefined（不提供 default 参数）
-store.localSettings.delete("theme");
+// 设备本地偏好（theme…）——local:true，不上云
+const localUserPref  = store.collection("local-user-preference",  { local: true });
+// 跨设备偏好（lang/手势/fps/pixel-grid…）
+const syncedUserPref = store.collection("synced-user-preference");
+// 跨设备 app 态（current-directory/current-file…）
+const syncedAppState = store.collection("synced-app-state");
+// 设备本地 app 态
+const localAppState  = store.collection("local-app-state", { local: true });
 
-// B. 跨设备同步（config 给了 syncedSettingsFileName 才有此属性）
-store.syncedSettings.set("defaultZoom", 1.2);
-store.syncedSettings.get("defaultZoom");
-store.syncedSettings.delete("defaultZoom");
+syncedUserPref.getItem("lang", "en");        // 直读（缺省 default；DEFAULTS 放 app 一处 SSoT，别处不 inline）
+syncedUserPref.setItem("lang", "zh");        // 直写（同步内存 + 防抖持久化 + 后台推云）
+syncedUserPref.onChange("lang", () => {/* 云端对齐把别台设备的改带回 → 热重贴 */});
 ```
-- **`get` 不给 default**：把"默认设置"放你 app **一处 SSoT**（一个 defaults 对象），别每次取值各写各的 default → 不一致。
-- **两种设置同处 `${ns}.settings.<key>` 散键裸值**（不分 synced/local、无 blob）。`get/set` 直读写 localStorage（内存无副本、首屏零 await）。
-- `syncedSettings` 的**读/写面 = localStorage 裸值**；背后一个**保留名 collection `settings`** 当 LWW 传输引擎：`set` → 立即写 localStorage + fire-and-forget `collection.upsertItem`；`init()/refresh()`（app 在 boot/focus/online 调）→ `await` 拉云合并 → 把 items **投影回散键**。uat 只活在 collection（IDB `collections/settings` + 云端 `.${appId}/settings.json`）。「并发设不同 key 都不丢」是 §3 per-item LWW 白送的。
-- **collection 名 = 合法文件名、不带后缀**（`brush-rack`/`reading-state`）；store 映射云端自动追加 `.json` → `.${appId}/<name>.json`。`settings` 是保留名（禁用）。
+- **default 放 app 一处 SSoT**（一个 DEFAULTS 对象），别每次取值各写各的 default → 不一致。
+- **boot 门**：app 在 comp-root 前 `await collection.init()`（内部 hydrate 快、离线 OK、不碰网）→ 让 eval 期就要值的 lang/theme 读到 hydrate 后的值；云端后台对齐、`onChange` 通知（非默认语言用户不双载）。
+- **collection 名 = 合法文件名、不带后缀**（`synced-user-preference`/`brush-rack`）；store 映射云端自动追加 `.json` → `.${appId}/<name>.json`。已无保留名（`settings` 不再保留）。
 
 ---
 
@@ -267,10 +280,10 @@ flow 的原子单位是「进入 flow 那刻抓的**不可变快照**」，不�
 | 缓存文件离线读 | 自己开 IndexedDB | `file.open` 自动缓存 |
 | 让文件离线常驻 / 腾本地空间 | 自己管 IndexedDB 容量 | `file.keepOffline()` / `file.offload()` |
 | 找回删掉的文件 | —— | `store.listTrash()` + `store.restore()` |
-| 存设置 | 自己 localStorage | `localSettings` / `syncedSettings` |
+| 存设置 / 状态 | 自己 localStorage | 建 `store.collection(...)`（`{local:true}` 设备本地 / 默认 synced），直读写 KV 面（§4） |
 | 列云端文件 | 自己 Graph fetch | `store.list*` |
 | 加密 | 自己写 zip/7z/容器 | 注入 `crypto` codec（§1）+ `crypt.getPassword` + `file.encrypt/decrypt`，逻辑库管 |
-| 局部改 collection 一条 | 找 partial-update API | 取整条 → 改 → `upsertItem` |
+| 局部改 collection 一条 | 找 partial-update API | 取整条 → 改 → `setItem` |
 | 库没有你要的操作 | deep import 内部 / 自己实现 | **escalate to human 改库 API** |
 
 

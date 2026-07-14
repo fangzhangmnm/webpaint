@@ -351,7 +351,7 @@ bash scripts/build.sh  # 跑 esbuild → 生成 hash 文件名进 dist/（首次
 - collection 的 meta 收到 `appId.databaseId.collections`（collection-name 是合法文件名，不带后缀名）
   - `appId.databaseId.collections.etag:<collection-name>`
   - `appId.databaseId.collections.dirty:<collection-name>`
-- settings 放 `appId.databaseId.settings`（包括 localSettings 和 syncedSettings 的 cache）
+- 设置/状态无独立 kv 区——全走 collection（`appId.databaseId.collections.*`）；`localSettings`/`syncedSettings` 已删（2026-07-13）
 - 杂的东西收到 `appId.databaseId.internal`
   - `appId.databaseId.internal.pending_new_folders`
   - `appId.databaseId.internal.pending_deletions`
@@ -364,8 +364,7 @@ bash scripts/build.sh  # 跑 esbuild → 生成 hash 文件名进 dist/（首次
 - trash 放 `/.trash/`
 - backup 放 `/.backup/`
 - 其他的东西收到 `/.<appId>/`
-  - collections 放 `/.<appId>/<collection-name>.json`，不要和 settings 撞车
-  - syncedSettings 放 `/.<appId>/settings.json`，它技术上就是复用了一个 collection；user-facing 一侧 create collection 时 `settings` 作为保留名禁用
+  - collections 放 `/.<appId>/<collection-name>.json`（设置/状态各类都是 collection：synced-user-preference / synced-app-state / local-* 等）；`settings` 已非保留名（2026-07-13）
 - watchFolder / listFolder 过滤所有带 `.` 的文件夹，文件也过滤带 `.` 的；实现在 listFolder 层，用一个专门的模块内部函数 `isHidden` 收成深模块
 
 **其他约定**：

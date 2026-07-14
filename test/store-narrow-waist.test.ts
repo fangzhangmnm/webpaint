@@ -73,6 +73,34 @@ test("[collection] getItem 缺省 + setItem/getItem 往返 + getEntry(uat) + 裸
   assert(c.keys().includes("lang") && c.keys().includes("panel"), "keys() 列所有 id");
 });
 
+// ── getItem/setItem 两侧 shallow copy 隔离：app 改拿到/传入的对象都不污染信封 ───────────────
+test("[collection] getItem/setItem 两侧 shallow copy 隔离（改副本不污染信封）", async () => {
+  const { store } = mkStore(dumpKv());
+  const c = store.collection("synced-app-state");
+  await c.init();
+  const src = { left: 1, top: 2 };
+  c.setItem("pos", src);
+  src.left = 999;                                  // app 事后改传入对象
+  eq((c.getItem("pos", null) as { left: number }).left, 1, "setItem 浅拷贝：事后改传入对象不污染信封");
+  const got = c.getItem("pos", null) as { left: number };
+  got.left = 777;                                  // app 原地改拿到的对象
+  eq((c.getItem("pos", null) as { left: number }).left, 1, "getItem 浅拷贝：原地改返回对象不污染信封");
+});
+
+// ── onChange 单 key 绑定：只该 key 变才触发（跨设备 pull 带来值变）─────────────────────────
+test("[collection] onChange(id,cb) 单 key 绑定：只该 key 变才触发", async () => {
+  const provider = createMockProvider();
+  const a = mkStore(dumpKv(), provider).store.collection("synced-user-preference");
+  await a.init(); a.setItem("lang", "zh"); await a.flush();   // A 先推云 lang=zh
+  const b = mkStore(dumpKv(), provider).store.collection("synced-user-preference");   // B 后登录（另一台设备）
+  let langHits = 0, otherHits = 0;
+  b.onChange("lang", () => { langHits++; });
+  b.onChange("other-key", () => { otherHits++; });
+  await b.init(); await b.refresh();               // B 拉云 → lang 从无→zh 值变
+  assert(langHits >= 1, "绑定的 lang 变了 → 触发");
+  eq(otherHits, 0, "没变的 other-key → 不触发");
+});
+
 // ── pre-init 守卫：init() 前 setItem 抛错；getItem 恒返 default ───────────────────────────
 test("[collection] pre-init 守卫：init 前 setItem 抛、getItem 返 default", () => {
   const { store } = mkStore(dumpKv());

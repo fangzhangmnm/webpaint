@@ -7,7 +7,8 @@
 //   per-item uat-LWW（CRDT-lite，零冲突静默 last-win，配置类可接受丢失——见 folder-merge §N11）。
 //   同步复用 folder-flow（pull-merge-push，If-Match）。序列化 = JSON（#68：库内部 JSON，app 不传 encode/decode）。
 //
-// 读写 = **同步内存**（getItem/setItem 不 await）；但内存 env 在 init() 前为空（getItem 返 default，setItem 抛错）。
+// 读写 = **同步内存**（getItem/setItem 不 await）；两侧 value 浅拷贝隔离（app 拿到/传入的对象改动不与信封互相污染）。
+//   但内存 env 在 init() 前为空（getItem 返 default，setItem 抛错）。onChange(cb) 整库 / onChange(id,cb) 绑单 key。
 //   init()（编排锁库内，照 file.open）：先 await hydrateLocal（本地 IDB，快）→ 再**后台 fire-and-forget**
 //   reconcile 云端（不 await）→ resolve。boot await init() 拿本地即够；云端后台对齐、onChange 通知。
 //   refresh()：事件驱动（focus/visible/online）重拉+resolve，per-key LWW（同 file.refresh）。
@@ -46,7 +47,8 @@ export interface Collection {
   getEntry(id: string): CollectionEntry | undefined;  // 带 uat 的完整 entry
   entries(): CollectionEntry[];                       // 全部 entry
   keys(): string[];                                   // 全部 id
-  onChange(cb: ChangeCb): () => void;                 // 云端 reconcile/refresh 带来值变→通知（返退订）
+  onChange(cb: ChangeCb): () => void;                 // 整库：云端 reconcile/refresh 带来值变→通知 changedIds（返退订）
+  onChange(id: string, cb: () => void): () => void;   // 单 key：绑某个 key，其值变→通知（返退订）
   flush(): Promise<void>;                             // 取消防抖、写本地 + 若脏立即云同步
   flushLocal(): Promise<void>;                        // 仅把内存 env 立即写本地缓存（卸载兜底；无网络）
   isDirty(): boolean;
@@ -58,8 +60,18 @@ const decode = (text: string): FolderEnvelope | null => parseFolderBlob(text);
 // store scaffold 用：一份**空** collection 的字节（与 encode 同格式 → decode 可读回）。开库时 store 拿它 idempotent 建空云文件。
 export function emptyCollectionBytes(): Uint8Array { return encode(emptyFolder()); }
 
+// getItem 缺省：def 可为裸值或**共享**工厂函数（缺项时才调）。⚠工厂 lambda **别 inline**——
+//   getItem 常在热路径被调，inline `() => ({...})` 每次分配闭包+默认对象；写成模块级共享 const 函数复用。
 const resolveDef = <V>(def?: V | (() => V)): V | undefined =>
   typeof def === "function" ? (def as () => V)() : def;
+
+// getItem/setItem 两侧 shallow copy：value 是对象/数组时拷一层，隔离库内信封与 app 的可变引用
+//   （getItem 拿到的对象原地改不污染存档信封；setItem 传入的对象之后被 app 改也不反污染信封）。标量原样。
+//   浅拷贝语义：深层嵌套子对象不拷——app 别原地改嵌套后指望隔离，要改整枝替换再 setItem。
+const shallowCopy = <V>(v: V): V =>
+  Array.isArray(v) ? ([...v] as unknown as V)
+  : (v && typeof v === "object") ? ({ ...(v as object) } as V)
+  : v;
 
 export function createCollection(cfg: CollectionConfig): Collection {
   const { cloud, name, isOnline, syncDelayMs = 1500, now = () => Date.now(), manual = false,
@@ -167,7 +179,7 @@ export function createCollection(cfg: CollectionConfig): Collection {
   function setItem(id: string, value: unknown): void {
     if (!ready) throw new Error(`collection(${name}).setItem 在 init() 前调用——设置未就绪`);
     if (id == null) throw new Error("collection.setItem: id 必填");
-    const fi: FolderItem = { id, uat: now(), value };   // 信封 {id, uat, value}；uat 内部盖戳
+    const fi: FolderItem = { id, uat: now(), value: shallowCopy(value) };   // 信封 {id, uat, value}；uat 内部盖戳；value 浅拷贝隔离
     env = { ...env, items: [...env.items.filter((e) => e.id !== id), fi] };
     scheduleSync();
   }
@@ -190,12 +202,19 @@ export function createCollection(cfg: CollectionConfig): Collection {
   }
   function getItem<V = unknown>(id: string, def?: V | (() => V)): V | undefined {
     const e = env.items.find((x) => x.id === id);
-    return e ? ((e as { value?: unknown }).value as V) : resolveDef(def);
+    return e ? shallowCopy((e as { value?: unknown }).value as V) : resolveDef(def);   // 浅拷贝隔离，防调用方原地改污染信封
   }
   function entries(): CollectionEntry[] { return env.items.map(entryOf); }
   function keys(): string[] { return env.items.map((e) => String(e.id)); }
 
-  function onChange(cb: ChangeCb): () => void { listeners.add(cb); return () => { listeners.delete(cb); }; }
+  // 整库 onChange(cb) 或单 key onChange(id, cb)。单 key = 内部包一层 ChangeCb 过滤 changedIds。
+  function onChange(a: ChangeCb | string, b?: () => void): () => void {
+    const cb: ChangeCb = typeof a === "string"
+      ? (ids) => { if (ids.includes(a)) b!(); }
+      : a;
+    listeners.add(cb);
+    return () => { listeners.delete(cb); };
+  }
 
   async function flush(): Promise<void> {
     clearTimer();
