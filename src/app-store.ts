@@ -10,7 +10,7 @@ import { zipReadEntry, zipPack, zipUnpack } from "./zip.ts";
 import { pack7z, unpack7z } from "./sevenzip.ts";
 import { getPassword } from "./crypto-state.ts";
 import { wirePreferences } from "./app-prefs.ts";
-import { wireAppState, localAppState, APP_STATE_DEFAULTS } from "./app-state.ts";
+import { wireAppState, appState } from "./app-state.ts";
 
 // OneDrive provider + auth。
 const od = createOneDriveProvider({ clientId: CLIENT_ID, scopes: SCOPES, msalUrl: "./vendor/msal/msal-browser.min.js" });
@@ -63,9 +63,9 @@ export const getToken = (...a: Parameters<typeof _auth.getToken>) => _auth.getTo
 export const onAuthChanged = (cb: Parameters<typeof _auth.onAuthChanged>[0]) => _auth.onAuthChanged(cb);
 export const getAuthState = () => _auth.getAuthState();
 
-// 上次登录 flag（设备级 auth flag → local-app-state collection）。boot 门 init 后才读写。
-export const getLastSessionSignedIn = () => localAppState.getItem("last-session-signed-in", APP_STATE_DEFAULTS["last-session-signed-in"]) === true;
-export const setLastSessionSignedIn = (v: unknown) => localAppState.setItem("last-session-signed-in", !!v);
+// 上次登录 flag（设备级 auth flag → local-app-state collection，经 appState struct）。boot 门 init 后才读写。
+export const getLastSessionSignedIn = () => appState.lastSessionSignedIn;
+export const setLastSessionSignedIn = (v: unknown) => { appState.lastSessionSignedIn = !!v; };
 
 // ---- gallery 数据：统一列举（local ∪ cloud，每项带 syncState）。reconcile 已进库（watchFolder 惰性 per-folder）。----
 const _CLOUD_STATES = new Set(["cloud-only", "synced", "unpushed", "newer-on-cloud", "conflict"]);   // 有云版的 syncState
