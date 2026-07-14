@@ -67,11 +67,20 @@ import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排�
 import "./plugins/index.ts";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 // candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
 import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, setLastSessionSignedIn, rackStore, setRackDirty, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
+import { initPreferences } from "./app-prefs.ts";   // boot 门：hydrate user-preference collection（lang/theme）
+import { initAppState } from "./app-state.ts";      // boot 门：hydrate app-state collection（current-dir/file …）
 
 
 
 
 // cut-over 完成：_store 从 app-store import（接 lib）。explicit 保存恒走 store.flow.push（B1/B2/B5/retry/C4）。
+
+// ============ boot 门（设置/状态 = 纯 IDB collection，无 localStorage 镜像）============
+// lang/theme 在下面 eval 期就要值、IDB 是 async → 先 await hydrate 4 个 collection（快、离线 OK、**不碰网**），
+//   再往下跑组合根，让 t()/theme 读到 hydrate 后的值（非默认语言用户不双载）。云端后台对齐 + onChange 通知（见各 collection）。
+//   TLA：本模块=bundle 入口，执行到此挂起直到本地 hydrate 完；imports 已 eval（已消除 eval 期 t()，见 i18n/brush-rack）→ 安全。
+//   app-store 已在 imports 期 eval → 4 个 collection 建好并 wire；此处只 await 各自 init（内部先 hydrate 本地）。
+await Promise.all([initPreferences(), initAppState()]);
 
 // ---- 启动 ----
 // 加密（ADR-0012）：密码弹窗接线 —— crypto-state 无 DOM，composition root 把 in-app

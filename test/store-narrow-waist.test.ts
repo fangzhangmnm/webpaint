@@ -1,6 +1,8 @@
-// 窄腰重构验收（2026-07-13）：命名空间根 `${appId}.${databaseId}` + kv 前缀 choke point +
-//   isHidden 列举过滤 + collection 合法名/保留名 + files/collections 两实例 etag 隔离 +
-//   settings 散键裸值 + collection 云端落 `.${appId}/<name>.json` + backupFolder 默认 `.backup`。
+// 窄腰 + collection-KV 验收（2026-07-13）：命名空间根 `${appId}.${databaseId}` + kv 前缀 choke point +
+//   isHidden 列举过滤 + collection 合法名 + files/collections 两实例 etag 隔离 +
+//   collection KV 面（getItem/default/setItem/getEntry/pre-init 守卫/local-only 变体） +
+//   collection 云端落 `.${appId}/<name>.json` + scaffold + backupFolder 默认 `.backup`。
+//   （localSettings/syncedSettings 已删 2026-07-13——设置/状态全走 collection。）
 import { test, eq, assert } from "./runner.mjs";
 import { isHidden } from "../src/store/is-hidden.ts";
 import { namespacedKv } from "../src/store/kv-namespace.ts";
@@ -47,44 +49,70 @@ test("[narrow-waist] namespacedKv：所有键补 `${ns}.` 前缀，keys() 只返
   raw.set("other.app.foo", "x");                 // 别的命名空间的键
   const kv = namespacedKv(raw, "wp.defaultStore");
   kv.set("files.etag:a.ora", "E");
-  kv.set("settings.theme", "\"dark\"");
+  kv.set("collections.etag:pref", "F");
   eq(raw.get("wp.defaultStore.files.etag:a.ora"), "E", "写落命名空间");
   eq(kv.get("files.etag:a.ora"), "E", "读经命名空间");
-  eq(kv.get("settings.theme"), "\"dark\"");
   const ks = kv.keys().sort();
-  eq(ks.join(","), "files.etag:a.ora,settings.theme", "keys() 只列本命名空间、去前缀，不含别的 app");
+  eq(ks.join(","), "collections.etag:pref,files.etag:a.ora", "keys() 只列本命名空间、去前缀，不含别的 app");
 });
 
-// ── createStore：命名空间 + collection 合法名/保留名 ───────────────────────────
-test("[narrow-waist] createStore：所有 kv 键落 `wp.defaultStore.`；localSettings/syncedSettings 散键裸值", () => {
+// ── collection KV 面：getItem 缺省 / setItem 往返 / getEntry / 信封 {id,uat,value} ─────────
+test("[collection] getItem 缺省 + setItem/getItem 往返 + getEntry(uat) + 裸值/对象 value", async () => {
+  const { store } = mkStore(dumpKv());
+  const c = store.collection("synced-user-preference");
+  eq(c.getItem("lang", "en"), "en", "init/无值 → 返 default");
+  eq(c.getItem("lang", () => "zh"), "zh", "default 支持 lambda");
+  await c.init();
+  eq(c.getItem("lang", "en"), "en", "hydrate 空 → 仍 default");
+  c.setItem("lang", "ja");                       // 裸值
+  c.setItem("panel", { x: 1, y: 2 });            // 对象值
+  eq(c.getItem("lang", "en"), "ja", "setItem/getItem 往返（裸值）");
+  eq(JSON.stringify(c.getItem("panel", null)), JSON.stringify({ x: 1, y: 2 }), "对象 value 往返");
+  const e = c.getEntry("lang");
+  assert(e && e.id === "lang" && e.value === "ja" && typeof e.uat === "number" && e.uat > 0, "getEntry 带 id/value/uat 盖戳");
+  assert(c.keys().includes("lang") && c.keys().includes("panel"), "keys() 列所有 id");
+});
+
+// ── pre-init 守卫：init() 前 setItem 抛错；getItem 恒返 default ───────────────────────────
+test("[collection] pre-init 守卫：init 前 setItem 抛、getItem 返 default", () => {
+  const { store } = mkStore(dumpKv());
+  const c = store.collection("synced-app-state");
+  eq(c.getItem("current-file", null), null, "init 前 getItem 返 default（不崩）");
+  let threw = false;
+  try { c.setItem("current-file", "x.ora"); } catch { threw = true; }
+  assert(threw, "init 前 setItem 应抛（设置未就绪，防覆盖未 hydrate 的值）");
+});
+
+// ── local-only 变体（{local:true}）：只走 IDB、永不碰云、不 scaffold 云文件 ──────────────────
+test("[collection] local-only 变体：不上云（无 collections.etag/dirty kv、云端无文件）、isDirty 恒 false", async () => {
   const kv = dumpKv();
-  const { store } = mkStore(kv);
-  store.localSettings.set("theme", "night");
-  store.syncedSettings.set("zoom", 1.5);
-  for (const k of kv.keys()) assert(k.startsWith("wp.defaultStore."), `键必须落命名空间根: ${k}`);
-  eq(kv.get("wp.defaultStore.settings.theme"), "\"night\"", "localSettings 散键裸值");
-  eq(kv.get("wp.defaultStore.settings.zoom"), "1.5", "syncedSettings 立即写散键裸值（首屏同步读）");
-  eq(store.localSettings.get("theme"), "night");
-  eq(store.syncedSettings.get("zoom"), 1.5);
+  const { store, provider } = mkStore(kv, createMockProvider());
+  const c = store.collection("local-user-preference", { local: true });
+  await c.init();
+  c.setItem("color-theme", "night");
+  await c.flush();
+  eq(c.getItem("color-theme", "auto"), "night", "本地往返 OK");
+  eq(c.isDirty(), false, "local-only 永不脏");
+  assert(!kv.keys().some((k) => k.includes("collections.etag:local-user-preference")), "local-only 不写 collections etag kv");
+  await new Promise((r) => setTimeout(r, 20));
+  assert(!(await provider.getItemByPath(".wp/local-user-preference.json")), "local-only 不 scaffold 云端文件");
 });
 
-test("[narrow-waist] databaseId：默认 defaultStore；不同 databaseId → 不同命名空间根（多实例不打架）", () => {
+test("[narrow-waist] databaseId：默认 defaultStore；不同 databaseId → 不同命名空间根（多实例不打架）", async () => {
   const kvA = dumpKv(), kvB = dumpKv();
-  mkStore(kvA).store.localSettings.set("x", 1);
-  mkStore(kvB, createMockProvider(), "thumbs").store.localSettings.set("x", 2);
+  const a = mkStore(kvA).store.collection("synced-user-preference"); await a.init(); a.setItem("lang", "zh"); await a.flush();
+  const b = mkStore(kvB, createMockProvider(), "thumbs").store.collection("synced-user-preference"); await b.init(); b.setItem("lang", "en"); await b.flush();
   assert(kvA.keys().every((k) => k.startsWith("wp.defaultStore.")), "默认根 wp.defaultStore");
   assert(kvB.keys().every((k) => k.startsWith("wp.thumbs.")), "自定义根 wp.thumbs");
 });
 
-test("[narrow-waist] collection 名：非法/斜杠/保留名 settings → 抛；合法名 OK", () => {
+test("[narrow-waist] collection 名：非法/斜杠/.. → 抛；合法名 OK（settings 已非保留名）", () => {
   const { store } = mkStore(dumpKv());
   for (const bad of ["", "a/b", "a:b", "..", "x*"]) {
     let t = false; try { store.collection(bad); } catch { t = true; }
     assert(t, `非法 collection 名应抛: ${JSON.stringify(bad)}`);
   }
-  let r = false; try { store.collection("settings"); } catch { r = true; }
-  assert(r, "保留名 settings 应抛（syncedSettings 占用）");
-  store.collection("brush-rack"); store.collection("reading-state");   // 合法：不抛
+  store.collection("settings"); store.collection("brush-rack"); store.collection("synced-user-preference");   // 合法：不抛（settings 已解除保留）
 });
 
 // ── files / collections 两实例 etag 隔离 + collection 云端落 .wp/<name>.json ──────
@@ -93,37 +121,34 @@ test("[narrow-waist] file 与同名 collection 的 etag 落不同前缀（两实
   const { store, provider } = mkStore(kv);
 
   await store.file("dup.ora", { isZip: false }).save(new TextEncoder().encode("BYTES"));   // 文件推云
-  const coll = store.collection<{ v: number }>("dup");
-  coll.upsertItem({ id: "k", v: 1 });
+  const coll = store.collection("dup");
+  await coll.init();
+  coll.setItem("k", { v: 1 });
   await coll.flush();                                                                        // collection 推云
 
-  // 文件 etag 落 files.etag:；collection etag 落 collections.etag:（同名 dup，前缀隔离不撞）
   assert(kv.keys().some((k) => k.startsWith("wp.defaultStore.files.etag:")), "文件 etag 落 files.etag:");
   assert(kv.keys().some((k) => k === "wp.defaultStore.collections.etag:dup"), "collection etag 落 collections.etag:dup");
-  // 文件 dirty 权威 = local-head 的 files.dirty:（推成功后清）；绝无 collections 前缀写文件
   assert(!kv.keys().some((k) => k.startsWith("wp.defaultStore.collections.etag:dup.ora")), "文件不该落 collections 前缀");
 
-  // collection 云端落隐藏夹 .wp/dup.json（app 追加 .json）
   const item = await provider.getItemByPath(".wp/dup.json");
   assert(!!item, "collection 应落云端 .wp/dup.json");
-  // 文件落根 dup.ora（不带 .json、不进 .wp）
   assert(!!(await provider.getItemByPath("dup.ora")), "文件落 approot 根 dup.ora");
 });
 
-// ── store 自管 scaffold：开库 idempotent 建 .wp/settings.json + collection 建 .wp/<name>.json ──
-test("[narrow-waist] store 自管 scaffold：开库建 .wp/settings.json；建 collection → 建 .wp/<name>.json（不覆盖已有）", async () => {
+// ── store 自管 scaffold：synced collection 建 .wp/<name>.json（不覆盖已有）──────────────────
+test("[narrow-waist] scaffold：建 synced collection → 建 .wp/<name>.json（不覆盖已有）", async () => {
   const provider = createMockProvider();
   const { store } = mkStore(dumpKv(), provider);
-  store.collection("brush-rack");                        // app 建 collection → store 自动在云端建出文件
+  store.collection("brush-rack");                        // synced collection → store 自动在云端建出文件
   await new Promise((r) => setTimeout(r, 30));           // 等 fire-and-forget scaffold 落地
-  assert(!!(await provider.getItemByPath(".wp/settings.json")), "开库应 idempotent 建 .wp/settings.json");
   assert(!!(await provider.getItemByPath(".wp/brush-rack.json")), "建 collection 应建 .wp/brush-rack.json");
-  const before = await provider.getItemByPath(".wp/settings.json");
-  // 二次开库同 provider → 已存在不重建、不覆盖（etag 不变）
-  mkStore(dumpKv(), provider);
+  const before = await provider.getItemByPath(".wp/brush-rack.json");
+  // 二次建同名同 provider → 已存在不重建、不覆盖（etag 不变）
+  const { store: store2 } = mkStore(dumpKv(), provider);
+  store2.collection("brush-rack");
   await new Promise((r) => setTimeout(r, 30));
-  const after = await provider.getItemByPath(".wp/settings.json");
-  eq(after!.eTag, before!.eTag, "已存在的 settings.json 不被空信封覆盖（etag 不变）");
+  const after = await provider.getItemByPath(".wp/brush-rack.json");
+  eq(after!.eTag, before!.eTag, "已存在的 .wp/brush-rack.json 不被空信封覆盖（etag 不变）");
 });
 
 // ── cloud-sync backupFolder 默认 .backup（weakOverride loser 落 .backup/）─────────

@@ -29,7 +29,8 @@ import type { EditMode } from "./edit-mode.ts";
 import { t } from "./i18n/index.ts";
 
 const RACK_META_KEY = "brush-rack";
-const TOOL_LABEL: Record<string, string> = { brush: t("br.toolBrush"), eraser: t("br.toolEraser") };
+// 惰性（不在模块 eval 期调 t()——那时 boot 门的 lang 还没 hydrate）：按 tool 现取标签。
+const toolLabel = (tool: string): string => tool === "eraser" ? t("br.toolEraser") : tool === "brush" ? t("br.toolBrush") : tool;
 
 // 笔架同步编排句柄（folder-sync store；诚实描述本类调到的成员）。
 interface RackSyncResult {
@@ -218,7 +219,7 @@ export class BrushRack {
     this.ui.tool = tool;
     const folders = collectFolders(brushesByTool(this._rack, this.getRackToolKey(tool)), DEFAULT_FOLDER);
     if (!folders.includes(this.ui.folder)) this.ui.folder = folders[0] || DEFAULT_FOLDER;
-    this.d.els.rack.title.textContent = t("br.rackTitle", { tool: TOOL_LABEL[tool] || tool });
+    this.d.els.rack.title.textContent = t("br.rackTitle", { tool: toolLabel(tool) });
     this.d.els.rack.sheet.classList.remove("hidden");
     this.refreshCloudState();
   }

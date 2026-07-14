@@ -15,6 +15,7 @@
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { safeLS } from "./safe-ls.ts";
+import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势开关 = 跨设备偏好
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
 
 // 编辑器 RAM 态的形状契约见 AppContext（EditorRuntimeState / DialReactive）——本模块是其唯一构造者。
@@ -40,8 +41,9 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     // 全局（非 per-tool）压感开关。boot 读 LS（v202 修：旧版写 pToSize 从不读回）。未设过→DEFAULT(开)；"0"→关。
     pressureToSize: safeLS("webpaint.pToSize") !== "0",
     pressureToOpacity: safeLS("webpaint.pToOpacity") !== "0",
-    longPressPick: safeLS("webpaint.longPressPick") === "1", // 默认关，user 担心误触
-    singleFingerDraw: safeLS("webpaint.singleFingerDraw") === "1",  // 默认关——用户要单指默认不作画
+    // 手势开关 = 跨设备偏好（synced-user-preference collection；createEditorState 在 boot 门后调，已 hydrate）。
+    longPressPick: syncedUserPreference.getItem<boolean>("long-press-pick", PREF_DEFAULTS["long-press-pick"]),
+    singleFingerDraw: syncedUserPreference.getItem<boolean>("single-finger-draw", PREF_DEFAULTS["single-finger-draw"]),
     pickMode: safeLS("webpaint.pickMode") || "composite",  // 吸色取样：composite(合并·respect clip+mode) | layer(raw 色)
     // v125 checkerboard 从全局 LS 改 per-doc（跟文件走）。初始 false；adopt 时按文件值覆盖；新建默认 false。
     checkerboard: false,

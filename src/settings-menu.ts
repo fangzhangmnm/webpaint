@@ -8,6 +8,7 @@
 
 import { els } from "./els.ts";
 import { safeLS, safeLSSet } from "./safe-ls.ts";
+import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关 = 跨设备偏好
 import { applyTheme, cycleTheme, themeLabel } from "./theme.ts";
 import { t, lang, setLang, LANGS, LANG_NAME, type Key, type Lang } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
@@ -51,12 +52,12 @@ function applyPressureOpacity(on: boolean) {
 function applyLongPressPick(on: boolean) {
   state.longPressPick = !!on;
   setMenuItem(els.menuLongPressPick, on);
-  safeLSSet("webpaint.longPressPick", on ? "1" : "0");
+  syncedUserPreference.setItem("long-press-pick", !!on);   // 跨设备偏好
 }
 function applySingleFingerDraw(on: boolean) {
   state.singleFingerDraw = !!on;
   setMenuItem(els.menuSingleFingerDraw, on);
-  safeLSSet("webpaint.singleFingerDraw", on ? "1" : "0");
+  syncedUserPreference.setItem("single-finger-draw", !!on);   // 跨设备偏好（默认关——不拦鼠标）
 }
 export function applyCheckerboard(on: boolean) {
   // v125: checkerboard per-doc，不再写 localStorage
@@ -67,18 +68,18 @@ export function applyCheckerboard(on: boolean) {
   board.requestRender();
 }
 
-// v163 像素栅格：全局开关（视图辅助，跟设备不跟文件），localStorage 持久化，默认开
+// v163 像素栅格：全局开关（视图辅助），跨设备偏好（synced-user-preference），默认开
 function applyPixelGrid(on: boolean) {
   board.setPixelGridEnabled?.(!!on);
   setMenuItem(els.menuPixelGrid, !!on);
-  safeLSSet("webpaint.pixelGrid", on ? "1" : "0");
+  syncedUserPreference.setItem("pixel-grid", !!on);
 }
 
-// v275 FPS 计：dev 性能读数（角落 overlay；设备级开关，localStorage 持久化，默认关）。防煤气灯。
+// v275 FPS 计：dev 性能读数（角落 overlay）；跨设备偏好（synced-user-preference），默认关。防煤气灯。
 function applyFps(on: boolean) {
   board.setShowFps?.(!!on);
   setMenuItem(els.menuFps, !!on);
-  safeLSSet("webpaint.fps", on ? "1" : "0");
+  syncedUserPreference.setItem("show-fps", !!on);
 }
 
 // v124 快捷键 sheet：从 KEYBOARD_SHORTCUTS 自动渲染（input.js 注册的唯一真理源）
@@ -141,14 +142,14 @@ export function initSettingsMenu(ctx: AppContext) {
     setStatus(t("status.checkerboard", { s: state.checkerboard ? t("common.on") : t("common.off") }));
   });
 
-  applyPixelGrid(safeLS("webpaint.pixelGrid") !== "0");   // boot：缺省=开
+  applyPixelGrid(syncedUserPreference.getItem<boolean>("pixel-grid", PREF_DEFAULTS["pixel-grid"]));   // boot：缺省=开
   if (els.menuPixelGrid) els.menuPixelGrid.addEventListener("click", () => {
     const next = !board.getPixelGridEnabled();
     applyPixelGrid(next);
     setStatus(t("status.pixelGrid", { s: next ? t("common.on") : t("common.off") }));
   });
 
-  applyFps(safeLS("webpaint.fps") === "1");   // boot：缺省=关
+  applyFps(syncedUserPreference.getItem<boolean>("show-fps", PREF_DEFAULTS["show-fps"]));   // boot：缺省=关
   if (els.menuFps) els.menuFps.addEventListener("click", () => {
     const next = !board.getShowFps?.();
     applyFps(next);

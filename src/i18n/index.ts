@@ -5,8 +5,7 @@
 //   · data-i18n 是过渡桥（非终点）：静态 index.html 一次性填充；新内容/需动的段走 Vue + t()。
 
 import { S, type Lang } from "./strings.ts";
-import { safeLS } from "../safe-ls.ts";
-import { getPref, setPref } from "../syncable-prefs.ts";   // 语言 = 「跨设备同步候选」偏好（现设备本地，seam 见 syncable-prefs）
+import { syncedUserPreference, PREF_DEFAULTS } from "../app-prefs.ts";   // 语言 = 跨设备偏好（synced-user-preference collection）
 
 export type { Lang } from "./strings.ts";
 export type Key = keyof typeof S;
@@ -14,8 +13,6 @@ export type Key = keyof typeof S;
 export const LANGS: Lang[] = ["zh", "en", "ja", "tok"];
 // 语言名用 endonym（各语言自称，不翻译）——菜单里显示当前语言用。
 export const LANG_NAME: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語", tok: "toki pona" };
-
-const LS_KEY = "webpaint.lang";   // 旧散键（迁移兜底用；写只落 syncable-prefs blob）
 
 // 首次运行（无持久化）按系统语言判定。未支持的系统语言 → 英文（更国际；用户 2026-07-07 定）。
 function detectLang(): Lang {
@@ -27,19 +24,21 @@ function detectLang(): Lang {
 }
 
 function readLang(): Lang {
-  const v = (getPref("lang") ?? safeLS(LS_KEY)) as Lang | null;   // 新 blob 优先，旧散键兜底（迁移）
+  const v = syncedUserPreference.getItem<Lang | null>("lang", PREF_DEFAULTS.lang as Lang | null);
   return v && LANGS.includes(v) ? v : detectLang();
 }
 
-let _lang: Lang = readLang();
+// _lang **惰性**解析（首次 t()/lang() 时读）——避免模块 eval 期读 collection（那时 boot 门还没 hydrate 完）。
+//   首次访问发生在 boot 门 `await initPreferences()` 之后（app-main 动态 import 内），故读到的是 hydrate 后的值。
+let _lang: Lang | null = null;
 
-export function lang(): Lang { return _lang; }
+export function lang(): Lang { return (_lang ??= readLang()); }
 
 // t(key, params?)：读当前语言一次（reload 制，无需响应式订阅）。fallback：请求语言 → en → zh。
 export function t(key: Key, params?: Record<string, string | number>): string {
   const e = S[key] as Record<string, string> | undefined;
   if (!e) { console.warn("[i18n] missing key:", key); return String(key); }   // 桥的 data-i18n 不受 tsc 检查 → 防崩
-  const raw = e[_lang] ?? e.en ?? e.zh;
+  const raw = e[lang()] ?? e.en ?? e.zh;
   if (!params) return raw;
   return raw.replace(/\{(\w+)\}/g, (_m, k) => (k in params ? String(params[k]) : `{${k}}`));
 }
@@ -47,13 +46,13 @@ export function t(key: Key, params?: Record<string, string | number>): string {
 function htmlLangFor(l: Lang): string {
   return l === "zh" ? "zh-CN" : l;   // ja / en / tok 原样；zh 用 zh-CN 走简中字形
 }
-export function applyHtmlLang() { document.documentElement.lang = htmlLangFor(_lang); }
+export function applyHtmlLang() { document.documentElement.lang = htmlLangFor(lang()); }
 
-export function cycleLang(): Lang { return LANGS[(LANGS.indexOf(_lang) + 1) % LANGS.length]; }
+export function cycleLang(): Lang { return LANGS[(LANGS.indexOf(lang()) + 1) % LANGS.length]; }
 
 export function setLang(l: Lang) {
-  if (!LANGS.includes(l) || l === _lang) return;
-  setPref("lang", l);   // 落 syncable-prefs（现设备本地；新 store 接回来时随之上云）
+  if (!LANGS.includes(l) || l === lang()) return;
+  syncedUserPreference.setItem("lang", l);   // 落 synced-user-preference collection（跨设备）
   location.reload();     // reload 制
 }
 

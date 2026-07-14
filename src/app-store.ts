@@ -9,6 +9,8 @@ import { CLIENT_ID, SCOPES } from "./config.ts";
 import { zipReadEntry, zipPack, zipUnpack } from "./zip.ts";
 import { pack7z, unpack7z } from "./sevenzip.ts";
 import { getPassword } from "./crypto-state.ts";
+import { wirePreferences } from "./app-prefs.ts";
+import { wireAppState, localAppState, APP_STATE_DEFAULTS } from "./app-state.ts";
 
 // OneDrive provider + auth。
 const od = createOneDriveProvider({ clientId: CLIENT_ID, scopes: SCOPES, msalUrl: "./vendor/msal/msal-browser.min.js" });
@@ -43,6 +45,12 @@ export const store = createStore({
   signedIn: () => _auth.isSignedIn(),   // 连接态 store 自持（网盘模型）：watchFolder/云列举不再由 app 每次传 ctx
 });
 
+// ============ 设置/状态 collection（4 个）注入 ============
+// app-prefs/app-state **不 import 本文件**（防 i18n→app-store→store-ui→i18n 成环）；由此处建好 store 后惰性注入。
+//   synced 变体上云 + scaffold；{local:true} 变体 local-only（设备本地、不碰云）。boot 门 await init* 后才读写。
+wirePreferences(store.collection("local-user-preference", { local: true }), store.collection("synced-user-preference"));
+wireAppState(store.collection("synced-app-state"), store.collection("local-app-state", { local: true }));
+
 // ============ auth（转发）============
 export const isAuthConfigured = () => _auth.isAuthConfigured();
 export const initAuth = (...a: Parameters<typeof _auth.initAuth>) => _auth.initAuth(...a);
@@ -55,9 +63,9 @@ export const getToken = (...a: Parameters<typeof _auth.getToken>) => _auth.getTo
 export const onAuthChanged = (cb: Parameters<typeof _auth.onAuthChanged>[0]) => _auth.onAuthChanged(cb);
 export const getAuthState = () => _auth.getAuthState();
 
-// 上次登录 flag（ADR-0021：app 不碰 kv → store.localSettings）。
-export const getLastSessionSignedIn = () => store.localSettings.get<boolean>("lastSessionSignedIn") === true;
-export const setLastSessionSignedIn = (v: unknown) => store.localSettings.set("lastSessionSignedIn", !!v);
+// 上次登录 flag（设备级 auth flag → local-app-state collection）。boot 门 init 后才读写。
+export const getLastSessionSignedIn = () => localAppState.getItem("last-session-signed-in", APP_STATE_DEFAULTS["last-session-signed-in"]) === true;
+export const setLastSessionSignedIn = (v: unknown) => localAppState.setItem("last-session-signed-in", !!v);
 
 // ---- gallery 数据：统一列举（local ∪ cloud，每项带 syncState）。reconcile 已进库（watchFolder 惰性 per-folder）。----
 const _CLOUD_STATES = new Set(["cloud-only", "synced", "unpushed", "newer-on-cloud", "conflict"]);   // 有云版的 syncState

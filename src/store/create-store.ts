@@ -1,7 +1,8 @@
 // ⚠ 这是库的唯一入口。接库必读同目录 README.md + CONTEXT.md。
 //
 // createStore —— 薄组合根：provider → 库内造 cloud/local/kv/脊椎 → 装配 10 个深模块 →
-//   暴露 README.md 的面（file / collection / localSettings / syncedSettings / list）。
+//   暴露 README.md 的面（file / collection / list）。设置/状态**全走 collection**（synced 或 {local:true} 变体），
+//   localSettings/syncedSettings 已删（2026-07-13）——app 每类持久化建一个 collection，直接用其 KV 面。
 //   红线全在各深模块内 enforce；这里只接线 + 把 ui bundle 映射到各 flow 的回调。
 import { toU8, createSubstrate } from "./substrate.ts";
 import type { Bytes } from "./substrate.ts";
@@ -19,7 +20,6 @@ import { createReconcile } from "./reconcile.ts";
 import { createCollection, emptyCollectionBytes, type Collection } from "./collection.ts";
 import { createListing, type ListContext, type FolderSnapshot } from "./listing.ts";
 import { createUploadReplay, type UploadReplayPolicy } from "./upload-queue.ts";
-import { createLocalSettings, createSyncedSettings, type LocalSettings, type SyncedSettings, type SettingItem } from "./settings.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
 import { createCloudSync } from "./cloud-sync.ts";
 import { createLocalCache, createCollectionCache } from "./local-cache.ts";
@@ -55,7 +55,6 @@ export interface StoreConfig {
   // 同一 app 内的 store 实例标识（默认 "defaultStore"）。想在一个 app 里开**多个互不打架的 store**（不同数据集）
   //   → 传不同 databaseId：各自独立 IDB 库 `${appId}.${databaseId}` + 独立 localStorage 前缀。
   databaseId?: string;
-  syncedSettingsFileName?: string;   // ⚠ 已废弃/忽略：syncedSettings 现恒有（保留名 collection `settings`，云端 .${appId}/settings.json）
   // ── 加密（对齐 WebPaint，见 docs/11；逻辑在库、重型 7z/zip codec 由 app 注入）──
   //   不注入 crypto → 加密 dormant（packContainer 抛「加密未配置」）；JRP 不加密就不注入，省 1.6MB。
   crypto?: CryptoCodec;                            // app 注入的 zip/7z codec（WebPaint 用 sevenzip.ts+zip.ts 包成）
@@ -505,8 +504,8 @@ export function createStore(config: StoreConfig) {
 
   // ── collection / settings ──
   // ── collection scaffold（开库即 idempotent 建云端 `.${appId}/` 夹 + `.${appId}/<name>.json`）───────────────
-  //   用户要求：开库时（第一次云成功）就把 collection/settings 的云端文件建出来（哪怕空），离线跳过、回线 drainFolders 补。
-  //   syncedSettings 恒建（.${appId}/settings.json）；app 一旦 store.collection(name)（如将来接 brush-rack）→ 那份也建。
+  //   用户要求：开库时（第一次云成功）就把 collection 的云端文件建出来（哪怕空），离线跳过、回线 drainFolders 补。
+  //   app 一旦 store.collection(name)（synced：如 synced-user-preference / brush-rack）→ 那份 idempotent 建出。local-only 不上云、不 scaffold。
   //   **store 自管，非 app 调**（app 不 ensure、不知情）：① 开库（首次创建/访问 store 对象）即 fire 一次——但构造时
   //   auth/online 常还没就绪（signedIn=false）→ 早退；② store 自己的**首次云成功点**（watchFolder 远端帧，app 订阅、
   //   auth 就绪后跑）再补。idempotent：ensureFolder(`.${appId}`) + 每个 collection 名 fetchMeta 无 → push 空信封建出来
@@ -528,30 +527,22 @@ export function createStore(config: StoreConfig) {
   }
   function registerScaffold(name: string): void { _scaffoldNames.add(name); void ensureScaffold(); }
 
-  const RESERVED_COLLECTIONS = new Set(["settings"]);   // syncedSettings 占用（云端 .${appId}/settings.json）
   function assertValidCollectionName(name: string): void {
-    // collection name = 合法文件名、不带后缀（`brush-rack`、`reading-state`）；store 映射云端时自己追加 `.json`。
+    // collection name = 合法文件名、不带后缀（`synced-user-preference`、`brush-rack`）；store 映射云端时自己追加 `.json`。
     if (!name || /[\\/:*?"<>|]/.test(name) || name === "." || name === "..") throw new Error(`collection 名非法（须合法文件名、不带后缀、无斜杠）：${JSON.stringify(name)}`);
-    if (RESERVED_COLLECTIONS.has(name)) throw new Error(`collection 名 "${name}" 是保留名（syncedSettings 用），请换名`);
   }
-  function collection<T extends object>(name: string, opts: { manual?: boolean } = {}): Collection<T> {
+  // collection(name, opts)：synced（默认）走 collections 实例 + 云端 scaffold；{local:true} = local-only 变体
+  //   （cloudless：只走 IDB 本地缓存、永不碰云、不 scaffold 云文件）——给设备本地设置/状态用。
+  function collection(name: string, opts: { manual?: boolean; local?: boolean } = {}): Collection {
     assertValidCollectionName(name);
-    const coll = createCollection<T>({ cloud: collectionsCloud, name, local: collectionLocal, manual: opts.manual });   // collections 实例 + collections 分区缓存
-    registerScaffold(name);   // app 一旦建了这 collection（如将来接 brush-rack）→ store 自动在云端 idempotent 建出 .${appId}/<name>.json
+    const coll = createCollection({ cloud: collectionsCloud, name, local: collectionLocal, manual: opts.manual, cloudless: opts.local });
+    if (!opts.local) registerScaffold(name);   // synced：store 自动在云端 idempotent 建出 .${appId}/<name>.json；local-only 不上云、不 scaffold
     return coll;
   }
-  const localSettings: LocalSettings = createLocalSettings(kv);
-  // syncedSettings：**恒有**——保留名 collection `settings`（走 collections 实例，云端 `.${appId}/settings.json`，开库 idempotent 建出）。
-  //   散键裸值读面在 localStorage（kv），collection 只当后台 LWW 传输引擎；app 调 init()/refresh() 驱动拉云 → 投影回散键。
-  const _settingsColl = createCollection<SettingItem>({ cloud: collectionsCloud, name: "settings", local: collectionLocal });
-  const syncedSettings: SyncedSettings = createSyncedSettings(_settingsColl, kv);
-  registerScaffold("settings");   // 开库即 idempotent 建 .${appId}/settings.json
 
   return {
     file,
     collection,
-    localSettings,
-    syncedSettings,
     // ── watchFolder（网盘模型，2026-07-11）：订阅**一个**文件夹 → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。
     //   替代「全树列举 + 客户端切一夹」的浪费（JRP 开夹慢的根因）。连接态 store 自持（config.signedIn/isOnline），**无 ctx**。──
     watchFolder,
