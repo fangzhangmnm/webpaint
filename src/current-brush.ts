@@ -29,8 +29,7 @@ export function makeCurrentBrush({ state, dialReactive, rack }: CurrentBrushDeps
       preset: preset as BrushPreset | null,
       size: ts.size, opacity: ts.opacity ?? 1.0, flow: ts.flow ?? 1.0,
       color: state.color,
-      pressureToSize: state.pressureToSize,
-      pressureToOpacity: state.pressureToOpacity,
+      // 压感开关不再全局传入（2026-07-14 deprecate）——每笔自带（resolveBrush 从 preset 取，缺则 DEFAULT true）。
     });
   });
 

@@ -78,12 +78,13 @@ describe("resolveBrush · 预设缺字段走 ?? 默认（与旧逐字对齐）",
   it("number 型 spacing 直取", () => eq(resolveBrush({ preset: { spacing: 0.18 } }).spacing, 0.18));
 });
 
-describe("resolveBrush · 全局压感开关", () => {
-  it("传入即覆盖（!! 归一）", () => {
-    eq(resolveBrush({ pressureToSize: false, pressureToOpacity: true }).pressureToSize, false);
-    eq(resolveBrush({ pressureToSize: 0, pressureToOpacity: 1 }).pressureToOpacity, true);
+describe("resolveBrush · 每笔压感开关（2026-07-14 deprecate 全局）", () => {
+  it("preset 带 → 每笔覆盖（!! 归一）", () => {
+    eq(resolveBrush({ preset: { pressureToSize: false } }).pressureToSize, false, "preset.pressureToSize=false → false");
+    eq(resolveBrush({ preset: { pressureToOpacity: 1 } }).pressureToOpacity, true, "!! 归一");
   });
-  it("不传 = 保留 DEFAULT", () => {
-    eq(resolveBrush().pressureToSize, DEFAULT_SETTINGS.pressureToSize);
+  it("无 preset / preset 不带 = 保留 DEFAULT", () => {
+    eq(resolveBrush().pressureToSize, DEFAULT_SETTINGS.pressureToSize, "无 preset → DEFAULT");
+    eq(resolveBrush({ preset: {} }).pressureToSize, DEFAULT_SETTINGS.pressureToSize, "preset 不带 → DEFAULT");
   });
 });

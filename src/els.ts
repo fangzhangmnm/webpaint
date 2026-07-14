@@ -30,8 +30,6 @@ export const els = {
   menuPanel: byId("menuPanel"),
   menuLongPressPick: byId("menuLongPressPick"),
   menuSingleFingerDraw: byId("menuSingleFingerDraw"),
-  menuPressureSize: byId("menuPressureSize"),
-  menuPressureOpacity: byId("menuPressureOpacity"),
   menuTheme: byId("menuTheme"),
   menuClear: byId("menuClear"),
   // v120 (user：「导出项目和导出语义分开 + 小扳手」)

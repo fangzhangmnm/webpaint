@@ -39,16 +39,7 @@ function setMenuItem(btn: HTMLElement, on: boolean, stateLabel = on ? t("common.
   if (st) st.textContent = stateLabel;
 }
 
-function applyPressureSize(on: boolean) {
-  state.pressureToSize = !!on;           // 全局开关 SSoT（反应式 → currentBrush 自动重派生）
-  setMenuItem(els.menuPressureSize, on);
-  safeLSSet("webpaint.pToSize", on ? "1" : "0");
-}
-function applyPressureOpacity(on: boolean) {
-  state.pressureToOpacity = !!on;        // 反应式 → currentBrush 自动重派生
-  setMenuItem(els.menuPressureOpacity, on);
-  safeLSSet("webpaint.pToOpacity", on ? "1" : "0");
-}
+// （全局压感开关 applyPressureSize/Opacity 已 deprecate 2026-07-14 → 每笔自带，见 resolved-brush）
 function applyLongPressPick(on: boolean) {
   state.longPressPick = !!on;
   setMenuItem(els.menuLongPressPick, on);
@@ -119,14 +110,6 @@ export function setMenuOpen(open: boolean) {
 export function initSettingsMenu(ctx: AppContext) {
   ({ state, board, setStatus, store, updateSaveStatus } = ctx);
 
-  els.menuPressureSize.addEventListener("click", () => {
-    applyPressureSize(!state.pressureToSize);
-    setStatus(t("status.pressureSize", { s: state.pressureToSize ? t("common.on") : t("common.off") }));
-  });
-  els.menuPressureOpacity.addEventListener("click", () => {
-    applyPressureOpacity(!state.pressureToOpacity);
-    setStatus(t("status.pressureOpacity", { s: state.pressureToOpacity ? t("common.on") : t("common.off") }));
-  });
   els.menuLongPressPick.addEventListener("click", () => {
     applyLongPressPick(!state.longPressPick);
     setStatus(t("status.longPressPick", { s: state.longPressPick ? t("common.on") : t("common.off") }));
@@ -183,8 +166,6 @@ export function initSettingsMenu(ctx: AppContext) {
   document.getElementById("shortcutsClose")?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
   _shortcutsBackdrop?.addEventListener("click", () => closeSheet(_shortcutsSheet, _shortcutsBackdrop));
 
-  applyPressureSize(state.pressureToSize);
-  applyPressureOpacity(state.pressureToOpacity);
   applyLongPressPick(state.longPressPick);
   applySingleFingerDraw(state.singleFingerDraw);
   applyCheckerboard(state.checkerboard);

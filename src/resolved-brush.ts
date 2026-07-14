@@ -30,6 +30,8 @@ export interface BrushPreset {
   spacing?: number | { value?: number };
   pixelMode?: boolean;
   smooth?: { streamline?: number; stabilization?: number };
+  pressureToSize?: boolean;      // 2026-07-14：压感→尺寸/透明 从全局开关 deprecate 成**每笔**（缺=DEFAULT true）；per-brush UI 下一轮
+  pressureToOpacity?: boolean;
 }
 
 // 引擎吃的扁平笔。字段集 = DEFAULT_SETTINGS 全集；index 签名兜住本模块不显式列举的默认字段
@@ -70,17 +72,15 @@ export interface ResolveBrushArgs {
   opacity?: number;
   flow?: number;
   color?: string;
-  pressureToSize?: boolean;
-  pressureToOpacity?: boolean;
 }
 
 // 从 SSoT 解析出当前笔。**等价于旧 applyBrushPresetFrozen ⊕ applyToolState ⊕ syncBrushColor**，
 // 但输出是 Object.freeze 的新值（绝不复用/原地改）。
 //   preset：活动预设；null = 无笔架，走 DEFAULT 兜底。
 //   size/opacity/flow：per-tool dial（toolState）；缺省保留 DEFAULT。
-//   color：全局色（#rrggbb）。pressureToSize/pressureToOpacity：全局开关。
+//   color：全局色（#rrggbb）。压感开关 pressureToSize/pressureToOpacity = **每笔**（preset 带则用，缺则 DEFAULT true）。
 export function resolveBrush({
-  preset = null, size, opacity, flow, color, pressureToSize, pressureToOpacity,
+  preset = null, size, opacity, flow, color,
 }: ResolveBrushArgs = {}): ResolvedBrush {
   // base = 引擎默认全集（type / taperFloor 等旧 applyBrushPresetFrozen 不碰的字段一并保留）。
   // DEFAULT_SETTINGS 来自未类型化的 brush.js（手感红区，本轮不迁）——在此唯一的领域接缝处断言其形状。
@@ -110,15 +110,16 @@ export function resolveBrush({
     const sm = preset.smooth || {};
     b.streamline    = sm.streamline    ?? 0.15;
     b.stabilization = sm.stabilization ?? 0;
+    // 压感开关 = **每笔**（2026-07-14 deprecate 全局）：preset 带则用，缺则保留 DEFAULT（true）。
+    if (preset.pressureToSize    != null) b.pressureToSize    = !!preset.pressureToSize;
+    if (preset.pressureToOpacity != null) b.pressureToOpacity = !!preset.pressureToOpacity;
   }
 
-  // —— 用户旋钮 + 全局色 + 全局压感（缺省 = 保留 base 默认）——
+  // —— 用户旋钮 + 全局色（缺省 = 保留 base 默认）。压感开关不再是全局参数（见上，每笔）——
   if (size              != null) b.size              = size;
   if (opacity           != null) b.opacity           = opacity;
   if (flow              != null) b.flow              = flow;
   if (color             != null) b.color             = color;
-  if (pressureToSize    != null) b.pressureToSize    = !!pressureToSize;
-  if (pressureToOpacity != null) b.pressureToOpacity = !!pressureToOpacity;
 
   return Object.freeze(b);
 }

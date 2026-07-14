@@ -33,8 +33,6 @@ export interface ToolDial {
 export interface EditorRuntimeState {
   filterBrush: { Filter: unknown; params: Record<string, unknown>; variantId?: string; variantLabel?: string } | null;
   color: string;
-  pressureToSize: boolean;
-  pressureToOpacity: boolean;
   longPressPick: boolean;
   singleFingerDraw: boolean;
   pickMode: string;
@@ -44,8 +42,6 @@ export interface EditorRuntimeState {
 export interface DialReactive {
   tool: string;
   color: string;
-  pressureToSize: boolean;
-  pressureToOpacity: boolean;
   rackVersion: number;
   canDraw: boolean;
 }

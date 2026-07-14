@@ -14,7 +14,6 @@
 //   state.pressureTo* 的读写零改动，背后是反应式（Vue 组件 computed 自动追踪 → 当前笔重派生）。
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
-import { safeLS } from "./safe-ls.ts";
 import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势开关 = 跨设备偏好
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
 
@@ -39,9 +38,7 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
     filterBrush: null,
     color: "#1b1b1b",   // 归 editorState.brushTool.color SSoT（boot bind 灌入 / doc 载入覆盖）；删 webpaint.color LS 种子
-    // 全局（非 per-tool）压感开关。boot 读 LS（v202 修：旧版写 pToSize 从不读回）。未设过→DEFAULT(开)；"0"→关。
-    pressureToSize: safeLS("webpaint.pToSize") !== "0",
-    pressureToOpacity: safeLS("webpaint.pToOpacity") !== "0",
+    // （全局压感开关 pressureToSize/Opacity 已 deprecate 2026-07-14 → 每笔自带，见 resolved-brush；删 webpaint.pToSize/pToOpacity LS）
     // 手势开关 = 跨设备偏好（synced-user-preference collection；createEditorState 在 boot 门后调，已 hydrate）。
     longPressPick: syncedUserPreference.getItem<boolean>("long-press-pick", PREF_DEFAULTS["long-press-pick"]),
     singleFingerDraw: syncedUserPreference.getItem<boolean>("single-finger-draw", PREF_DEFAULTS["single-finger-draw"]),
@@ -51,27 +48,16 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     toolStates,
   };
 
-  // 反应式 dial SSoT 的其余轴：color / 压感开关 / 当前工具 / 笔架版本 / canDraw。
+  // 反应式 dial SSoT 的其余轴：color / 当前工具 / 笔架版本 / canDraw。
   const dialReactive: DialReactive = reactive({
     tool: "brush",                 // 镜像 editMode.current()（含 transient）；_syncEditModeUI 同步
     color: state.color,
-    pressureToSize: state.pressureToSize,
-    pressureToOpacity: state.pressureToOpacity,
     rackVersion: 0,                // 笔架内容改了（编辑保存/重置）bump，让 computed 重算活动预设
     canDraw: true,                 // 镜像 editMode.canDraw()；_syncEditModeUI 同步 → <LeftDial> 滑块 disabled
   });
-  // color / 压感读写代理回 dialReactive（app 里 state.color / state.pressureTo* 零改动，背后反应式）。
-  // 逐属性显式 defineProperty（避免循环里 keyof 联合的赋值摩擦）。
+  // color 读写代理回 dialReactive（app 里 state.color 零改动，背后反应式）。
   Object.defineProperty(state, "color", {
     get: () => dialReactive.color, set: (v: string) => { dialReactive.color = v; },
-    configurable: true, enumerable: true,
-  });
-  Object.defineProperty(state, "pressureToSize", {
-    get: () => dialReactive.pressureToSize, set: (v: boolean) => { dialReactive.pressureToSize = v; },
-    configurable: true, enumerable: true,
-  });
-  Object.defineProperty(state, "pressureToOpacity", {
-    get: () => dialReactive.pressureToOpacity, set: (v: boolean) => { dialReactive.pressureToOpacity = v; },
     configurable: true, enumerable: true,
   });
 
