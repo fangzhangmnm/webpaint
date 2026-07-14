@@ -71,10 +71,9 @@ export interface RackHandle {
 }
 // 浮窗（side-windows.ts）：参考窗 / 调色板窗——方法集不同，分两个句柄。
 export interface ReferenceWindowHandle {
-  getSerializedState(): unknown;
-  applySerializedState(s: unknown): void;
+  // 参考窗 open/位置/vp 已迁 editorState.refPanel（2026-07-14）；不再 getSerializedState/applySerializedState。
   clearBitmap(): void;
-  setBitmap(bitmap: ImageBitmap, opts?: { persistBlob?: Blob | null }): void;
+  setBitmap(bitmap: ImageBitmap, opts?: { persistBlob?: Blob | null; skipFit?: boolean }): void;
   getPersistBlob(): Blob | null;
   close?(): void;
 }

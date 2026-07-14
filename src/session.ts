@@ -20,6 +20,7 @@ import { looksEncryptedContainer } from "./crypto-format.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
 import { getSession, putSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.ts";
 import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）
+import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
 import type { PaintDoc } from "./doc.ts";
 
 // navigator.canShare/share 的 files 形参在部分 lib.dom 里未覆盖 → 窄化扩展（不引入 any）。
@@ -41,18 +42,18 @@ interface SessionPkg {
   thumb: Blob | null;
 }
 
-const LS_CURRENT_NAME = "webpaint.currentSessionName";
 const DEFAULT_NAME = "未命名";
 const LEGACY_SLOT = "current";   // 旧 v35 单 slot key；冷启动会迁移到 DEFAULT_NAME
 
 // gallery-first: 空字符串 = 没活动 session（在 gallery）。
-// 老 user 没 set 过 → null → 返 ""（停 gallery，等用户选）
+// active session = appState.currentFile（synced-app-state，非 null → boot 自动 open；跨设备 resume）。
+//   null/未设 → 返 ""（停 gallery，等用户选）。try/catch 兜 pre-init（collection 未 hydrate 时 setItem 抛）。
 export function getCurrentSessionName() {
-  try { return localStorage.getItem(LS_CURRENT_NAME) || ""; }
+  try { return appState.currentFile ?? ""; }
   catch { return ""; }
 }
 export function setCurrentSessionName(name: string) {
-  try { localStorage.setItem(LS_CURRENT_NAME, name); } catch {}
+  try { appState.currentFile = name || null; } catch {}
 }
 
 /** 把 doc 序列化进指定 session（默认当前），同时生成 thumb 存进 pkg。

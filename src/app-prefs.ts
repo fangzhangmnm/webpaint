@@ -19,6 +19,7 @@ export const PREF_DEFAULTS = {
   "single-finger-draw": false as boolean,   // 单指作画（默认关——保证不拦鼠标/误触）
   "show-fps": false as boolean,             // FPS 计叠层
   "pixel-grid": true as boolean,            // 像素栅格叠层
+  "stylus-smooth-params": {} as Record<string, number>,   // 手写笔平滑调参（hidden debug；对象存 SMOOTH 覆盖，默认{}=全用 SMOOTH_DEFAULTS）
 } as const;
 export type PrefKey = keyof typeof PREF_DEFAULTS;
 

@@ -4,7 +4,9 @@
 // 设计取舍：
 // - 不复用 Board —— Board 强耦合 PaintDoc / brush overlay / dirty 系统。参考窗只是 "画一张图"。
 // - 复用 .float-panel 拖动模式（标题栏拖整窗），手势只在内部画布区域生效。
-// - 状态持久化到 localStorage：上一次的图（缩略 dataURL）+ panel 位置 + 大小。重启 PWA 也回得来。
+// - panel 位置 / 大小 / 开关 / 参考图 viewport 全进 editorState.refPanel（per-doc，跟 .ora 走，
+//   "一个 project = 一个 desk"），不再落 device localStorage。原图 bitmap 另存 webpaint/reference.png
+//   （session-state 管，见 getPersistBlob）。载入由 session-state 派发 wp:applyEditorState 回灌。
 //
 // 手势：
 //   单指拖 / 鼠标左键拖 = pan 内部 image
@@ -21,6 +23,7 @@
 import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.ts";
 import type { GestureViewport } from "./pointer-gesture.ts";
 import { raiseWindow } from "./surfaces.ts";
+import { editorState } from "./editor-state.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 
 // 参考窗内部 viewport（image-origin 约定）。形同 GestureViewport。
@@ -48,22 +51,13 @@ interface ReferenceWindowOpts {
 type RefBitmapSource = (ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas) & { close?: () => void };
 
 // setBitmap 的 opts：原始文件 Blob（跟 doc 一起进 .ora）。
-interface SetBitmapOpts { persistBlob?: Blob | null; }
-
-// getSerializedState / applySerializedState 的 painting-scoped 状态。
-interface RefSerializedState {
-  open: boolean;
-  viewport: RefViewport;
-}
+interface SetBitmapOpts { persistBlob?: Blob | null; skipFit?: boolean; }   // skipFit：doc 恢复时不 fitToPanel（保住 editorState 载入的 vp）
 
 // 拖整窗 / 手势 state。
 interface PanelDragState { id: number; sx: number; sy: number; ol: number; ot: number; }
 interface GestureStartState { midX: number; midY: number; dist: number; angle: number; vp: RefViewport; }
 interface PointerPos { x: number; y: number; }
 
-const LS_POS = "webpaint.refPanel.pos";       // {left, top, width, height}
-const LS_VP  = "webpaint.refPanel.vp";        // {tx, ty, scale, rot}
-const LS_OPEN = "webpaint.refPanel.open";     // "1" | "0"
 const REF_LONG_PRESS_MS = 450;                // 长按吸色延迟（对齐 input.js）
 const REF_LONG_PRESS_CANCEL_SQ = 64;          // 8px²：长按期间移动超此 → 取消，回 pan
 
@@ -93,6 +87,7 @@ export class ReferenceWindow {
   _resizeDrag: unknown;
   _pointers: Map<number, PointerPos>;
   _gestureStart: GestureStartState | null;
+  _applying: boolean;   // apply-on-load 期间：抑制 _savePos/_saveVp 回写 editorState（否则载入即标脏）
 
   constructor(opts: ReferenceWindowOpts) {
     this.panel   = opts.panel;                 // .float-panel
@@ -129,10 +124,11 @@ export class ReferenceWindow {
     this._resizeDrag = null;                   // 右下角 resize state
     this._pointers = new Map();
     this._gestureStart = null;
+    this._applying = false;
 
     this._bind();
-    this._loadPos();
-    this._loadVp();
+    // 位置 / viewport / 开关 = per-doc editorState.refPanel，由 session-state 在 doc 载入/重置后
+    // 派发 wp:applyEditorState → applyRefPanelFromEditorState() 回灌（见 _bind 监听）。
   }
 
   // ---- 外部 API ----
@@ -144,7 +140,7 @@ export class ReferenceWindow {
     // 持久化的原始 Blob（PNG / JPEG / 不管什么 mime），跟 doc 一起进 .ora。
     // opts.persistBlob 是调用方给的"原始文件" Blob。
     this._bitmapBlob = opts.persistBlob || null;
-    if (bitmap) this.fitToPanel();
+    if (bitmap && !opts.skipFit) this.fitToPanel();   // doc 恢复（skipFit）→ 保留 editorState 载入的 vp，不 fit
     this._updateEmptyHint();
     this._invalidate();
   }
@@ -161,26 +157,6 @@ export class ReferenceWindow {
     this._invalidate();
   }
 
-  // 跟着 .ora 进 / 出 webpaint/state.json（painting-scoped 状态）。
-  // 不带 panel 位置 / 大小（那是 device-scoped，留 localStorage）。
-  getSerializedState(): RefSerializedState {
-    return {
-      open: this.isOpen(),
-      viewport: { ...this.vp },
-    };
-  }
-  applySerializedState(state: unknown): void {
-    if (!state || typeof state !== "object") return;
-    const st = state as { viewport?: Partial<RefViewport>; open?: unknown };
-    if (st.viewport) {
-      if (Number.isFinite(st.viewport.tx)) this.vp.tx = st.viewport.tx!;
-      if (Number.isFinite(st.viewport.ty)) this.vp.ty = st.viewport.ty!;
-      if (Number.isFinite(st.viewport.scale)) this.vp.scale = st.viewport.scale!;
-      if (Number.isFinite(st.viewport.rot)) this.vp.rot = st.viewport.rot!;
-    }
-    if (st.open) this.open(); else this.close();
-    this._invalidate();
-  }
   // 实时镜像主画布：board.markDocDirty 触发 wp:docpixeldirty → markLiveDirty
   setLiveSource(doc: PaintDoc) {
     if (this.bitmap) { this.bitmap.close?.(); this.bitmap = null; }
@@ -235,10 +211,11 @@ export class ReferenceWindow {
     cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
   }
   open() {
+    editorState.refPanel.enabled = true;   // desk：开窗随 doc 走（标脏，per-doc）
     this.panel.classList.remove("hidden");
     raiseWindow(this.panel);   // v232：开窗即置顶（surfaces window band）
     // v112: 默认位置避开 topbar + 左 sidebar（user：「不要 spawn 在左上角贴顶，那样难点」）
-    // 仅在 panel 没被拖过 / 没 applySerializedState 时设默认；保留 user 调过的位置
+    // 仅在 panel 没被拖过 / 没回灌位置时设默认；保留 user 调过的位置
     if (!this.panel.style.left || !this.panel.style.top) {
       // v267 (user)：再往里收一点，避开 iPad 顶部日期/状态栏（左上角）。
       const topbarH = 56;
@@ -252,6 +229,7 @@ export class ReferenceWindow {
     this._invalidate();
   }
   close() {
+    editorState.refPanel.enabled = false;   // desk：关窗随 doc 走（标脏，per-doc）
     this.panel.classList.add("hidden");
   }
   isOpen() { return !this.panel.classList.contains("hidden"); }
@@ -282,6 +260,10 @@ export class ReferenceWindow {
     // doc 像素或图层结构变 → 标 live 脏（不强行渲染：_invalidate rAF 自己处理）
     window.addEventListener("wp:docpixeldirty", () => this.markLiveDirty());
     window.addEventListener("wp:histchange", () => this.markLiveDirty());
+
+    // desk：doc 的 editorState 载入 / 重置后，session-state 派发 wp:applyEditorState →
+    // 把 refPanel（开关 / 位置 / viewport）回灌到 DOM + this.vp（不回写 editorState，见 _applying 守卫）。
+    window.addEventListener("wp:applyEditorState", () => this.applyRefPanelFromEditorState());
 
     // 拖整窗（标题栏）
     this.head.addEventListener("pointerdown", (e) => {
@@ -514,41 +496,65 @@ export class ReferenceWindow {
     const has = !!(this.bitmap || this._liveDoc);
     this.emptyHint.classList.toggle("hidden", has);
   }
-  _savePos() {
+  // desk：doc 的 editorState 载入 / 重置后回灌到 DOM + this.vp。裸 DOM 开关（不经 open()/close()——
+  // 那两条会写 editorState.enabled 标脏）；_applying 守住异步 ResizeObserver 触发的 _savePos 不回写。
+  applyRefPanelFromEditorState() {
+    this._applying = true;
     try {
-      const r = this.panel.getBoundingClientRect();
-      localStorage.setItem(LS_POS, JSON.stringify({
-        left: r.left, top: r.top, width: r.width, height: r.height,
-      }));
-    } catch {}
+      this._loadVp();    // viewport → this.vp（只读 editorState，不回写）
+      this._loadPos();   // 位置 → 裸 DOM（clamp/默认，不回写）
+      // 开关：裸 classList，不经 open()/close()
+      if (editorState.refPanel.enabled) {
+        this.panel.classList.remove("hidden");
+        raiseWindow(this.panel);
+        this._resizeCanvasToBody();
+        if (this._liveDoc) this._liveDirty = true;   // 重开 live = 重画一次
+      } else {
+        this.panel.classList.add("hidden");
+      }
+      this._updateEmptyHint();
+      this._invalidate();
+    } finally {
+      // show 引发的 body 尺寸变会异步触发 ResizeObserver → _savePos；跨两帧保持 _applying，
+      // 兜住这次回灌不把刚载入的 doc 标脏。
+      requestAnimationFrame(() => requestAnimationFrame(() => { this._applying = false; }));
+    }
+  }
+  _savePos() {
+    if (this._applying) return;
+    const r = this.panel.getBoundingClientRect();
+    const cur = editorState.refPanel.position;
+    // 值没变就不写（否则 ResizeObserver 的无意义触发会误标脏）
+    if (cur && cur.left === r.left && cur.top === r.top && cur.width === r.width && cur.height === r.height) return;
+    editorState.refPanel.position = { left: r.left, top: r.top, width: r.width, height: r.height };
   }
   _loadPos() {
-    try {
-      const s = localStorage.getItem(LS_POS);
-      if (!s) return;
-      const o = JSON.parse(s);
-      // v268b (user)：钳进安全区——旧的(或越界的)持久化位置会把窗停在左上角，和 iPad 顶部
-      //   日期栏 + 左侧工具栏打架。floor 清掉 topbar(56)/左栏(80)/safe-area 余量。
-      const MIN_LEFT = 96, MIN_TOP = 96;
-      if (o.left != null) this.panel.style.left = Math.max(MIN_LEFT, o.left) + "px";
-      if (o.top != null) this.panel.style.top = Math.max(MIN_TOP, o.top) + "px";
+    // v268b (user)：钳进安全区——旧的(或越界的)持久化位置会把窗停在左上角，和 iPad 顶部
+    //   日期栏 + 左侧工具栏打架。floor 清掉 topbar(56)/左栏(80)/safe-area 余量。
+    const MIN_LEFT = 96, MIN_TOP = 96;
+    const o = editorState.refPanel.position;
+    if (o && o.left != null && o.top != null) {
+      this.panel.style.left = Math.max(MIN_LEFT, o.left) + "px";
+      this.panel.style.top = Math.max(MIN_TOP, o.top) + "px";
       if (o.width)  this.panel.style.width = o.width + "px";
       if (o.height) this.panel.style.height = o.height + "px";
-    } catch {}
+    } else if (!this.panel.style.left || !this.panel.style.top) {
+      // 无保存位置（auto-place）→ 默认避开 topbar + 左 sidebar（同 open()）
+      this.panel.style.left = "112px";
+      this.panel.style.top  = "104px";
+    }
   }
   _saveVp() {
-    try { localStorage.setItem(LS_VP, JSON.stringify(this.vp)); } catch {}
+    if (this._applying) return;
+    editorState.refPanel.viewport = { ...this.vp };
   }
   _loadVp() {
-    try {
-      const s = localStorage.getItem(LS_VP);
-      if (!s) return;
-      const o = JSON.parse(s);
-      if (Number.isFinite(o.tx)) this.vp.tx = o.tx;
-      if (Number.isFinite(o.ty)) this.vp.ty = o.ty;
-      if (Number.isFinite(o.scale)) this.vp.scale = o.scale;
-      if (Number.isFinite(o.rot)) this.vp.rot = o.rot;
-    } catch {}
+    const o = editorState.refPanel.viewport;
+    if (!o) return;
+    if (Number.isFinite(o.tx)) this.vp.tx = o.tx;
+    if (Number.isFinite(o.ty)) this.vp.ty = o.ty;
+    if (Number.isFinite(o.scale)) this.vp.scale = o.scale;
+    if (Number.isFinite(o.rot)) this.vp.rot = o.rot;
   }
 }
 

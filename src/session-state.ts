@@ -81,7 +81,7 @@ async function _refreshEncrypted() {
 function storeEditorStateToOra() {
   // checkerboard/viewport 已迁 editorState（.webpaint/editor-state.json）；此处 webpaint/state.json 只留未迁字段。
   return {
-    reference: referenceWindow.getSerializedState(), color: state.color, toolStates: state.toolStates,
+    color: state.color, toolStates: state.toolStates,
     palette: paletteWindow.getSerializedState(),
     activeId: doc.activeId, activeLayerIndex: doc.activeIndex, blender: getBlenderSyncState(),
   };
@@ -100,11 +100,11 @@ function applyEditorStateToUI(): void { window.dispatchEvent(new CustomEvent("wp
 function restoreEditorStateFromOra(loaded: LoadedDoc) {
   const ws = loaded?._webpaintState;
   if (loaded?._referenceBlob) {
+    // skipFit：ref 面板 open/位置/vp 由 editorState.refPanel 经 wp:applyEditorState 恢复；bitmap 异步载入不覆盖已载入 vp。
     createImageBitmap(loaded._referenceBlob).then((bitmap: ImageBitmap) => {
-      referenceWindow.setBitmap(bitmap, { persistBlob: loaded._referenceBlob });
-      if (ws?.reference) referenceWindow.applySerializedState(ws.reference);
+      referenceWindow.setBitmap(bitmap, { persistBlob: loaded._referenceBlob, skipFit: true });
     }).catch(() => {});
-  } else if (ws?.reference) { referenceWindow.applySerializedState(ws.reference); }
+  }
   if (ws?.color) setColor(ws.color);
   if (ws?.palette) { try { paletteWindow.applySerializedState(ws.palette); } catch (_) {} }
   if (ws?.toolStates && typeof ws.toolStates === "object") {

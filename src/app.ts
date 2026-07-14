@@ -68,6 +68,7 @@ import "./plugins/index.ts";    // 触发 HSB / ColorBalance / Curves / SharpenB
 // candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
 import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, setLastSessionSignedIn, rackStore, setRackDirty, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
 import { initPreferences, refreshPreferences } from "./app-prefs.ts";   // boot 门 + 前台/online 拉云对齐 user-preference（lang/theme/手势）
+import { hydrateSmoothFromPrefs } from "./smooth-config.ts";   // boot 门后合并 synced 平滑调参进 SMOOTH
 import { initAppState, appState } from "./app-state.ts";                // boot 门 + 前台/online 拉云对齐 app-state（current-dir/file/blenderUrl）
 
 // 前台（focus/visible）/ online 时把 4 个 settings/state collection 拉云对齐（per-key LWW；离线/local-only 内部 no-op）。
@@ -84,6 +85,7 @@ const pullSettingsAndState = (): void => { void refreshPreferences(); void appSt
 //   TLA：本模块=bundle 入口，执行到此挂起直到本地 hydrate 完；imports 已 eval（已消除 eval 期 t()，见 i18n/brush-rack）→ 安全。
 //   app-store 已在 imports 期 eval → 4 个 collection 建好并 wire；此处只 await 各自 init（内部先 hydrate 本地）。
 await Promise.all([initPreferences(), initAppState()]);
+hydrateSmoothFromPrefs();   // collection 已 hydrate → 把 synced 平滑调参合并进 SMOOTH（手感热路径 eval 期已是 DEFAULTS）
 
 // ---- 启动 ----
 // 加密（ADR-0012）：密码弹窗接线 —— crypto-state 无 DOM，composition root 把 in-app
@@ -303,7 +305,7 @@ initDevConsole();
 // ---- 图库 全屏（v50 重做：无返回键、底栏 IDB 占用 + 清扫、加号 popup、云图标 popup） ----
 // 退出画布回图库（保存 + 切指针 + 关库）= session.exit()，定义在 session-state.ts。
 // gallery-first 设计：用 session.name == null 区分 gallery 状态。
-// localStorage.webpaint.currentSessionName 真实持久化 active session name；
+// appState.currentFile（synced-app-state）真实持久化 active session name（跨设备 resume；非 null → boot 自动 open）；
 // 空字符串 = "在 gallery 没绑定任何画作"，refresh 后停 gallery。
 
 // 锚定 popup 定位 helper（positionPopup 核心 + anchorPopupToBtn/anchorPopupBelowToolbars wrapper）= anchored-popup.ts。
