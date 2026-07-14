@@ -7,7 +7,6 @@
 // 仍留 app.js 的协作件经 ctx 绑入：state / board / setStatus / store / updateSaveStatus（核心单例）。
 
 import { els } from "./els.ts";
-import { safeLS, safeLSSet } from "./safe-ls.ts";
 import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关 = 跨设备偏好
 import { editorState } from "./editor-state.ts";   // checkboard = per-doc editorState（载入时经 wp:applyEditorState 应用到 board）
 import { applyTheme, cycleTheme, themeLabel } from "./theme.ts";

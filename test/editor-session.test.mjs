@@ -77,6 +77,19 @@ describe("editor-session › flush 本地 vs 推云", () => {
     await es.flushLocal(); await es.flushAndPush();
     eq(store.saves.length, 0, "不脏不存"); eq(editor.encodeCount, 0, "不脏不 encode");
   });
+
+  it("markWorkspacePending → 内容不脏也 flushLocal encode（desk 跟画走）+ encode 后清", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    await es.open("a");                     // 内容不脏
+    es.markWorkspacePending();              // 只 desk 改动（非内容）
+    eq(es.isDirty(), false, "workspacePending 不置内存脏 → 徽章静默（session.dirty=false）");
+    await es.flushLocal();                  // 关键：workspacePending 让 flushLocal 也 encode（非 no-op）
+    eq(editor.encodeCount, 1, "workspacePending → flushLocal encode（desk 落本地）");
+    eq(store.saves.length, 1, "落本地一次");
+    await es.flushLocal();                  // encode 后已清 → 再 flush no-op
+    eq(editor.encodeCount, 1, "encode 后清 workspacePending → 不重复 encode");
+  });
   it("hint.peek 透传给 store.save", async () => {
     const store = mockStore(), editor = mockEditor();
     const es = createEditorSession({ store, editor });

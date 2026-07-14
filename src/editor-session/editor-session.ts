@@ -58,7 +58,7 @@ export interface EditorSession {
   open(name: string): Promise<boolean>;          // 打开 doc：先存旧 → file.open() → adopt。返回是否 adopt 了（false=文件缺失/锁定，未装入）
   adopted(name: string): void;                    // 编辑器内容已由 app 装入（new-doc/import，非 store.open）→ 记为当前 + 标脏
   markDirty(): void;                              // app 驱动的内容变化（不走 editor onChange，如设置/参考窗）→ 标脏
-  markPushPending(): void;                         // 只标 push-pending（不标内存脏）→ 徽章静默，但 flushAndPush 会 encode+推。给 workspaceDirty（desk 变、非内容变）用
+  markWorkspacePending(): void;                    // 标 workspace 脏（不标内存脏）→ 徽章静默，但 flushLocal+flushAndPush 都会 encode（落本地+退出推）。给 workspaceDirty（desk 变、非内容变）用
   flushLocal(): Promise<void>;                    // 立即存本地（不推）——内存脏才动
   flushAndPush(): Promise<void>;                  // 立即存本地 + best-effort 推云——内存脏 **或** push-pending 才动
   rename(newName: string): Promise<TryMoveResult>;   // 改身份（先 flush 旧内容）→ 走 store.tryMove；占用则返 {ok:false}（不改 _name）
@@ -77,6 +77,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
   let _name: string | null = null;
   let _dirty = false;                              // 内存脏：editor 改过、还没落本地（驱动 autosave）
   let _pushPending = false;                        // 推-pending：自上次成功推后编辑过（驱动退出推；≠内存脏，flushLocal 清内存脏但留 push-pending）
+  let _workspacePending = false;                   // workspace 脏（desk 改过、非内容）：徽章静默，但 flushLocal **和** flushAndPush 都要 encode 落盘（desk 跟画走）
   let _saving = false;                             // 落盘中（防重入/竞态）
   let _timer: ReturnType<typeof setInterval> | null = null;
   let _idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -97,12 +98,14 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
   // tryPush=false（flushLocal/autosave）：内存脏才动。tryPush=true（flushAndPush/退出）：内存脏 **或** push-pending 就动
   //   （= autosave 已把内容落本地、内存不脏但还没推 → 退出仍要推，否则本次编辑只在本地）。
   async function persist(tryPush: boolean): Promise<void> {
-    const need = tryPush ? (_dirty || _pushPending) : _dirty;
+    // workspacePending 进两侧 need：desk 改动（无像素编辑）也要落本地（flushLocal 崩溃安全）+ 退出/推时推云。
+    const need = tryPush ? (_dirty || _pushPending || _workspacePending) : (_dirty || _workspacePending);
     if (!_name || !need || _saving) return;
     _saving = true;
     try {
       const { bytes, peek } = await editor.encode();
       _dirty = false;                              // 清内存脏：encode 已取快照；期间再改会重新置脏（下轮 autosave 收）
+      _workspacePending = false;                   // encode 已把 editorState.Serialize() 快照进 meta（desk 已落）
       if (tryPush) _pushPending = false;           // 乐观清 push-pending（push 失败留 sync-dirty，store 内部 queue 补推）
       await fileOf(_name).save(bytes, { tryPush, hint: peek != null ? { peek } : undefined });
     } finally {
@@ -126,18 +129,18 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       const blob = await fileOf(name).open();      // open 内含 freshness / 冲突 surface（store 的 ui）/ 崩溃恢复
       if (blob) await editor.adopt(blob);
       _name = name;
-      _dirty = false; _pushPending = false;         // 刚 adopt = 干净（本会话未编辑）
+      _dirty = false; _pushPending = false; _workspacePending = false;   // 刚 adopt = 干净（本会话未编辑；desk 由 Unserialize 载入，非 pending）
       return blob != null;                          // false = 文件缺失/锁定，doc 未装入（boot 据此回图库）
     },
 
     adopted(name: string): void {                  // new-doc/import：编辑器内容由 app 装入（非 store.open）→ 当前 + 脏
       wireOnChange();
       _name = name;
-      _dirty = true; _pushPending = true;           // 新内容未落盘/未推
+      _dirty = true; _pushPending = true; _workspacePending = false;   // 新内容未落盘/未推；desk=默认（reset 过）非 pending
     },
 
     markDirty(): void { _dirty = true; _pushPending = true; },   // app 驱动内容变化（onChange 之外）→ 标脏
-    markPushPending(): void { _pushPending = true; },            // workspaceDirty：只标 push-pending（徽章不显脏，但 flushAndPush 会推）
+    markWorkspacePending(): void { _workspacePending = true; },  // workspaceDirty：徽章不显脏，但 flushLocal+flushAndPush 都 encode（desk 落本地+退出推）
 
     flushLocal: () => persist(false),
     flushAndPush: () => persist(true),
@@ -153,7 +156,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     async delete(): Promise<void> {
       if (!_name) return;
       const n = _name;
-      _name = null; _dirty = false; _pushPending = false;
+      _name = null; _dirty = false; _pushPending = false; _workspacePending = false;
       await fileOf(n).delete();
     },
 

@@ -193,9 +193,11 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
     if (!ok) { setStatus(t("ss.saveCancelled")); return; }
     _loadedDocNewerConfirmed = true; updateNewerBanner();
   }
+  if (editorState.isWorkspaceDirty()) es.markWorkspacePending();   // desk 改动（无像素编辑）也让 flushLocal encode 落本地
   updateSaveStatus();
   try {
     await es.flushLocal();   // encode（+peek）→ store.file.save({tryPush:false})；只落本地（consent-safe）
+    editorState.clearWorkspaceDirty();   // desk 已随 encode 落本地
     _docLastSavedAt = Date.now();
     setStatus(t("ss.saved", { name: _activeSessionName ?? "" }));
     checkQuotaAndWarn();
@@ -213,7 +215,7 @@ async function saveAndPush() {
   }
   const name = _activeSessionName;
   // workspaceDirty（desk 改过、内容未脏）→ 标 push-pending，让 flushAndPush 强制 encode+push（把 desk 落进 ora）。
-  if (editorState.isWorkspaceDirty()) es.markPushPending();
+  if (editorState.isWorkspaceDirty()) es.markWorkspacePending();
   updateSaveStatus();
   try {
     // flushAndPush：encode（若内存脏/push-pending）→ save({tryPush:true})。冲突/错误经 store 的 ui bundle surface。
@@ -299,8 +301,9 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
 // ---- 退出到图库（推 + 保存失败重试环）----
 async function exitCanvasToGallery() {
   if (_activeSessionName) {
+    if (editorState.isWorkspaceDirty()) es.markWorkspacePending();   // 只改 desk（无像素编辑）退出图库也要落盘+推（desk 跟画走）
     await withBusy(t("ss.savingBusy", { name: _activeSessionName ?? "" }), async () => {
-      try { await es.flushAndPush(); } catch (e) { console.warn("[exit] save failed:", e); }
+      try { await es.flushAndPush(); editorState.clearWorkspaceDirty(); } catch (e) { console.warn("[exit] save failed:", e); }
     });
     // 内存脏没落成（保存失败/取消）→ 显式问重试/丢弃，绝不无条件宣布干净（K2 红线）。
     while (es.isDirty() && !_docIsBlankUnnamed()) {
@@ -467,6 +470,8 @@ export function initSession(ctx: AppContext) {
     policy: { autosaveMs: AUTOSAVE_MS, pushOn: ["exit"] },
   });
   es.start();   // autosave 3min（只本地）+ visibility/pagehide flush（内部按 policy）
+  // desk 改动桥：editorState 任何 setter → es.markWorkspacePending() → autosave/pagehide/退出/存 都会 encode 落 desk（徽章仍静默）。
+  editorState._setOnDirty(() => es.markWorkspacePending());
 
   _recomputePhase();
   resetEditorState();

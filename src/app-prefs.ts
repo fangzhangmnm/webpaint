@@ -15,7 +15,7 @@ export const PREF_DEFAULTS = {
   "color-theme": "auto" as string,          // auto / day / night（主题 = 跟设备的日夜/环境）
   // 跨设备（synced-user-preference）：跟人/identity 走
   "lang": null as string | null,            // 界面语言（null=跟系统）
-  "long-press-pick": false as boolean,      // 长按吸色手势
+  "long-press-pick": true as boolean,       // 长按吸色手势（spec 表默认 true）
   "single-finger-draw": false as boolean,   // 单指作画（默认关——保证不拦鼠标/误触）
   "show-fps": false as boolean,             // FPS 计叠层
   "pixel-grid": true as boolean,            // 像素栅格叠层

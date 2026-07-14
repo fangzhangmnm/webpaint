@@ -92,6 +92,8 @@ export function initExportImportMenu(ctx: AppContext) {
   ({ doc, setStatus, board } = ctx);
 
   _updateMenuSubLabels();
+  // desk 载入：换画后导入导出偏好（editorState）变了 → 刷新折叠菜单 sub-label（值本身按需读，无数据问题；仅显示同步）。
+  window.addEventListener("wp:applyEditorState", _updateMenuSubLabels);
 
   els.menuExportProject.addEventListener("click", async () => {
     setMenuOpen(false);
