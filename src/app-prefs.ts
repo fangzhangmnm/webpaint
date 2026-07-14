@@ -35,7 +35,7 @@ export function initPreferences(): Promise<void> {
 }
 // 事件驱动（focus/visible/online）重拉云端 + resolve（per-key LWW）。app 在既有 foreground/online 钩子调。
 export function refreshPreferences(): Promise<void> {
-  return Promise.all([_local?.refresh() ?? Promise.resolve(), _synced?.refresh() ?? Promise.resolve()]).then(() => undefined);
+  return Promise.all([_local?.pullAndReconcile() ?? Promise.resolve(), _synced?.pullAndReconcile() ?? Promise.resolve()]).then(() => undefined);
 }
 
 // 直读面：未注入前（boot 极早/测试）安全返 default / no-op。

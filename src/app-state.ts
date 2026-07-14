@@ -57,6 +57,6 @@ export const appState = {
   pushHotToPersistent(): void { /* 无热字段 */ },
   // await 云端对齐后，热变量用云值覆盖。冷字段 getter 本就直读最新 collection，无需覆盖——只 await 对齐。
   async pullFromPersistent(): Promise<void> {
-    await Promise.all([_synced?.refresh() ?? Promise.resolve(), _local?.refresh() ?? Promise.resolve()]);
+    await Promise.all([_synced?.pullAndReconcile() ?? Promise.resolve(), _local?.pullAndReconcile() ?? Promise.resolve()]);
   },
 };

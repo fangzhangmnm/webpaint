@@ -96,7 +96,7 @@ test("[collection] onChange(id,cb) 单 key 绑定：只该 key 变才触发", as
   let langHits = 0, otherHits = 0;
   b.onChange("lang", () => { langHits++; });
   b.onChange("other-key", () => { otherHits++; });
-  await b.init(); await b.refresh();               // B 拉云 → lang 从无→zh 值变
+  await b.init(); await b.pullAndReconcile();       // B 拉云 → lang 从无→zh 值变
   assert(langHits >= 1, "绑定的 lang 变了 → 触发");
   eq(otherHits, 0, "没变的 other-key → 不触发");
 });

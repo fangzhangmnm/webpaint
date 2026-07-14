@@ -58,8 +58,9 @@ export interface EditorSession {
   open(name: string): Promise<boolean>;          // 打开 doc：先存旧 → file.open() → adopt。返回是否 adopt 了（false=文件缺失/锁定，未装入）
   adopted(name: string): void;                    // 编辑器内容已由 app 装入（new-doc/import，非 store.open）→ 记为当前 + 标脏
   markDirty(): void;                              // app 驱动的内容变化（不走 editor onChange，如设置/参考窗）→ 标脏
+  markPushPending(): void;                         // 只标 push-pending（不标内存脏）→ 徽章静默，但 flushAndPush 会 encode+推。给 workspaceDirty（desk 变、非内容变）用
   flushLocal(): Promise<void>;                    // 立即存本地（不推）——内存脏才动
-  flushAndPush(): Promise<void>;                  // 立即存本地 + best-effort 推云——内存脏才动
+  flushAndPush(): Promise<void>;                  // 立即存本地 + best-effort 推云——内存脏 **或** push-pending 才动
   rename(newName: string): Promise<TryMoveResult>;   // 改身份（先 flush 旧内容）→ 走 store.tryMove；占用则返 {ok:false}（不改 _name）
   delete(): Promise<void>;                        // 删当前 doc
   currentName(): string | null;
@@ -136,6 +137,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     },
 
     markDirty(): void { _dirty = true; _pushPending = true; },   // app 驱动内容变化（onChange 之外）→ 标脏
+    markPushPending(): void { _pushPending = true; },            // workspaceDirty：只标 push-pending（徽章不显脏，但 flushAndPush 会推）
 
     flushLocal: () => persist(false),
     flushAndPush: () => persist(true),

@@ -20,7 +20,7 @@ import { isSignedIn, store as _store } from "./app-store.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
 import { stripSessionExt, sessionFileName } from "./config.ts";
-import { serializedToolStatePatch } from "./editor-state.ts";
+import { serializedToolStatePatch, editorState } from "./editor-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
 import { setPassword } from "./crypto-state.ts";
@@ -38,7 +38,7 @@ interface OraWebpaintState {
   viewport?: { scale?: number } & Record<string, unknown>;
   blender?: unknown;
 }
-type LoadedDoc = PaintDoc & { _webpaintState?: OraWebpaintState; _referenceBlob?: Blob | null; _wroteWith?: string; };
+type LoadedDoc = PaintDoc & { _webpaintState?: OraWebpaintState; _editorState?: unknown; _referenceBlob?: Blob | null; _wroteWith?: string; };
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initSession(ctx) 注入）----
 let state: AppContext["state"], doc: AppContext["doc"], board: AppContext["board"];
@@ -89,6 +89,7 @@ function resetEditorState() {
   referenceWindow.clearBitmap(); referenceWindow.close?.();
   paletteWindow.clear?.(); paletteWindow.close?.();
   setColor("#000000"); applyCheckerboard(false); state.filterBrush = null; applyBlenderSyncState();
+  editorState.reset();   // desk per-doc：开新文件/换画/卸载 → 重置 editorState struct（stage4）
 }
 function restoreEditorStateFromOra(loaded: LoadedDoc) {
   const ws = loaded?._webpaintState;
@@ -110,8 +111,10 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
   applyCheckerboard(!!ws?.checkerboard); applyBlenderSyncState(ws?.blender);
   if (ws?.activeId != null && doc.setActiveById(ws.activeId)) renderLayersPanel();
   else if (typeof ws?.activeLayerIndex === "number" && doc.setActive(ws.activeLayerIndex)) renderLayersPanel();
+  // desk per-doc：载入 .webpaint/editor-state.json（缺失=老画作/不向后兼容 → resetEditorState 已回默认）。stage5 起各模块读它渲染。
+  if (loaded._editorState != null) editorState.Unserialize(loaded._editorState);
 }
-function _buildOraMeta() { return { referenceImage: referenceWindow.getPersistBlob(), webpaintState: storeEditorStateToOra() }; }
+function _buildOraMeta() { return { referenceImage: referenceWindow.getPersistBlob(), webpaintState: storeEditorStateToOra(), editorState: editorState.Serialize() }; }
 function _encodeCurrentOra(): Promise<Blob> { return encodeDocToOra(doc, _buildOraMeta() as Parameters<typeof encodeDocToOra>[1]) as Promise<Blob>; }
 
 // ---- blank-unnamed 自检 ----
@@ -195,10 +198,13 @@ async function saveAndPush() {
     if (!_loadedDocNewerConfirmed) { setStatus(t("ss.notPushedNewer"), true); return; }
   }
   const name = _activeSessionName;
+  // workspaceDirty（desk 改过、内容未脏）→ 标 push-pending，让 flushAndPush 强制 encode+push（把 desk 落进 ora）。
+  if (editorState.isWorkspaceDirty()) es.markPushPending();
   updateSaveStatus();
   try {
     // flushAndPush：encode（若内存脏/push-pending）→ save({tryPush:true})。冲突/错误经 store 的 ui bundle surface。
     await es.flushAndPush();
+    editorState.clearWorkspaceDirty();   // desk 已随 encode 落进 ora + 推云 → 清 workspaceDirty
     _docLastSavedAt = Date.now();
     setStatus(isSignedIn() ? t("ss.synced", { name }) : t("ss.savedLocalIdb", { name }));
     gallery.refresh();

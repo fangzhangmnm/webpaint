@@ -36,11 +36,13 @@ type EncodeDoc = { width: number; height: number; layers: PaintDoc["layers"] };
 interface EncodeOpts {
   referenceImage?: Blob;
   webpaintState?: object;
+  editorState?: object;   // editorState.Serialize() → .webpaint/editor-state.json（desk per-doc；不向后兼容 webpaint/state.json）
 }
 // decode 末尾写入 PaintDoc 上未声明的私有字段（store seam 读取），就地扩展形状。
 type DecodedDoc = PaintDoc & {
   _referenceBlob?: Blob;
   _webpaintState?: unknown;
+  _editorState?: unknown;   // .webpaint/editor-state.json → editorState.Unserialize()
   _wroteWith: string | null;
 };
 // 加密对本 codec **不可见**（v235 起）：encode 永远出明文 ora、decode 永远收明文 ora。
@@ -117,8 +119,9 @@ function renderThumbnail(merged: OffscreenCanvas | HTMLCanvasElement, maxSide = 
 /** doc → Blob (.ora)
  *
  * WebPaint 私有扩展（都在 webpaint/ 命名空间下，第三方 reader 会忽略或剥离）：
- *   webpaint/state.json   — 杂七杂八的应用状态（ref 小窗 open 标志、viewport 等）
- *   webpaint/reference.png — ref 小窗当前显示的图（原 Blob bytes）
+ *   webpaint/state.json        — 杂七杂八的应用状态（palette / activeLayerIndex / 未迁字段；ref 位图指针）
+ *   webpaint/reference.png     — ref 小窗当前显示的图（原 Blob bytes）
+ *   .webpaint/editor-state.json — editorState struct（desk per-doc；2026-07-14，不向后兼容旧 state.json 的被迁字段）
  *
  * opts.referenceImage: optional Blob
  * opts.webpaintState:  optional object（直接 JSON.stringify）
@@ -169,6 +172,10 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
   if (opts.webpaintState && typeof opts.webpaintState === "object") {
     const jsonText = JSON.stringify(opts.webpaintState);
     entries.push({ path: "webpaint/state.json", data: jsonText });
+  }
+  // editorState struct（desk per-doc）→ .webpaint/editor-state.json（决策3：不向后兼容 webpaint/state.json）。
+  if (opts.editorState && typeof opts.editorState === "object") {
+    entries.push({ path: ".webpaint/editor-state.json", data: JSON.stringify(opts.editorState) });
   }
 
   // thumbnail 末尾（云端 byte-range 优化）——必须是最后一个 entry，见上方 reference.png 注释。
@@ -258,6 +265,14 @@ export async function decodeOraToDoc(blob: Blob) {
       doc._webpaintState = JSON.parse(bytesToString(files["webpaint/state.json"]));
     } catch (e) {
       console.warn("[ora] webpaint/state.json parse failed:", e);
+    }
+  }
+  // editorState struct（desk per-doc）；缺失（老画作/不向后兼容）→ 留 undefined，adopt 时 reset 到默认。
+  if (files[".webpaint/editor-state.json"]) {
+    try {
+      doc._editorState = JSON.parse(bytesToString(files[".webpaint/editor-state.json"]));
+    } catch (e) {
+      console.warn("[ora] .webpaint/editor-state.json parse failed:", e);
     }
   }
   doc._wroteWith = meta.wroteWith || null;

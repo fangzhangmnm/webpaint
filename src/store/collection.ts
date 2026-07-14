@@ -11,7 +11,7 @@
 //   但内存 env 在 init() 前为空（getItem 返 default，setItem 抛错）。onChange(cb) 整库 / onChange(id,cb) 绑单 key。
 //   init()（编排锁库内，照 file.open）：先 await hydrateLocal（本地 IDB，快）→ 再**后台 fire-and-forget**
 //   reconcile 云端（不 await）→ resolve。boot await init() 拿本地即够；云端后台对齐、onChange 通知。
-//   refresh()：事件驱动（focus/visible/online）重拉+resolve，per-key LWW（同 file.refresh）。
+//   pullAndReconcile()：事件驱动（focus/visible/online）重拉+resolve，per-key LWW（同 file.refresh）。
 // local-only 变体（cloudless）：只走 IDB 本地缓存、永不碰云（flow.sync）。给设备本地设置用。
 import { createFolderFlow } from "./folder-flow.ts";
 import { emptyFolder, parseFolderBlob, mergeFolders, normalizeFolder } from "./folder-merge.ts";
@@ -35,12 +35,12 @@ export interface CollectionConfig {
   /** 本地缓存（IDB）：透明缓存内存 env → 离线可读 + 强杀存活 + 旧设备旧缓存靠 uat-LWW 不盖新。不传 = 纯内存+云。 */
   local?: Pick<LocalCache, "save" | "get" | "exists">;
   localWriteDelayMs?: number;   // 本地写防抖（coalesce 高频 setItem，避免每帧写 IDB）。默认 400。
-  cloudless?: boolean;          // local-only 变体：永不碰云（init 只 hydrate、setItem 只写本地、refresh no-op）。
+  cloudless?: boolean;          // local-only 变体：永不碰云（init 只 hydrate、setItem 只写本地、pullAndReconcile no-op）。
 }
 
 export interface Collection {
   init(): Promise<void>;                              // 先 hydrate 本地（快）→ 后台 reconcile 云端（不 await）
-  refresh(): Promise<void>;                           // 事件驱动重拉云端 + resolve（per-key LWW）
+  pullAndReconcile(): Promise<void>;                  // 事件驱动（focus/visible/online）重拉云端 + resolve（per-key LWW）
   setItem(id: string, value: unknown): void;          // 同步写内存 + 防抖持久化（init 前抛错）
   deleteItem(id: string): void;                       // 移到 trash（edit-wins 合并）
   getItem<V = unknown>(id: string, def?: V | (() => V)): V | undefined;   // 同步读 value（无值→default）
@@ -174,7 +174,7 @@ export function createCollection(cfg: CollectionConfig): Collection {
   }
   function backgroundReconcile(): Promise<void> { return reconcile().catch(() => undefined); }
 
-  async function refresh(): Promise<void> { await backgroundReconcile(); }   // 事件驱动重拉（focus/visible/online）
+  async function pullAndReconcile(): Promise<void> { await backgroundReconcile(); }   // 事件驱动重拉（focus/visible/online）
 
   function setItem(id: string, value: unknown): void {
     if (!ready) throw new Error(`collection(${name}).setItem 在 init() 前调用——设置未就绪`);
@@ -224,5 +224,5 @@ export function createCollection(cfg: CollectionConfig): Collection {
   function flushLocal(): Promise<void> { return writeLocalNow(); }
   function isDirty(): boolean { return cloudless ? false : cloud.isDirty(name); }
 
-  return { init, refresh, setItem, deleteItem, getItem, getEntry, entries, keys, onChange, flush, flushLocal, isDirty };
+  return { init, pullAndReconcile, setItem, deleteItem, getItem, getEntry, entries, keys, onChange, flush, flushLocal, isDirty };
 }

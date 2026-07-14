@@ -67,8 +67,11 @@ import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排�
 import "./plugins/index.ts";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 // candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
 import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, setLastSessionSignedIn, rackStore, setRackDirty, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
-import { initPreferences } from "./app-prefs.ts";   // boot 门：hydrate user-preference collection（lang/theme）
-import { initAppState } from "./app-state.ts";      // boot 门：hydrate app-state collection（current-dir/file …）
+import { initPreferences, refreshPreferences } from "./app-prefs.ts";   // boot 门 + 前台/online 拉云对齐 user-preference（lang/theme/手势）
+import { initAppState, appState } from "./app-state.ts";                // boot 门 + 前台/online 拉云对齐 app-state（current-dir/file/blenderUrl）
+
+// 前台（focus/visible）/ online 时把 4 个 settings/state collection 拉云对齐（per-key LWW；离线/local-only 内部 no-op）。
+const pullSettingsAndState = (): void => { void refreshPreferences(); void appState.pullFromPersistent(); };
 
 
 
@@ -373,6 +376,7 @@ window.addEventListener("wp:auth-changed", () => {
 // online 时尝试 silent re-auth：boot 离线 → activeAccount 为 null；有网了主动 retry 一次
 window.addEventListener("online", async () => {
   if (!isSignedIn()) await retrySilentSignIn();
+  pullSettingsAndState();                                    // 回线：拉 4 库 settings/state 对齐
   updateCloudAuthUI();
   if (isSignedIn()) _store.drainDeleteQueue().catch((e) => console.warn("drainDeleteQueue", e));   // N3：重连重放离线删队列
   if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
@@ -429,5 +433,5 @@ new PwaShell({
     editMode.applyPendingTransient();
     await session.save();   // saveNow 内含 blank/dirty 守卫（es.flushLocal 不脏 no-op）
   },
-  onForeground: () => { if (isSignedIn() && session.name) _store.refresh(sessionFileName(session.name)).catch(() => {}); },   // 边界转全名
+  onForeground: () => { pullSettingsAndState(); if (isSignedIn() && session.name) _store.refresh(sessionFileName(session.name)).catch(() => {}); },   // 前台：拉 4 库 + 当前文件快进（边界转全名）
 }).init();
