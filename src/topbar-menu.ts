@@ -31,6 +31,7 @@ import { sessionNameConflict } from "./session-name.ts";
 import { decodeOraToDoc } from "./ora.ts";
 import { sessionFileName } from "./config.ts";   // 边界：裸 session 名 → 库全名（薄库身份=X.ora）
 import { compressPixelSnap } from "./pixel-edit.ts";
+import { editorState } from "./editor-state.ts";   // smart-save：workspaceDirty（editor-state 改了）→ push 非 no-op
 import { t } from "./i18n/index.ts";
 import type { Layer, PaintDoc } from "./doc.ts";
 
@@ -132,7 +133,8 @@ export function initTopbarMenu(ctx: AppContext) {
   els.topSaveBtn.addEventListener("click", () => {
     const name = session.name;
     // synced（无可存可推）→ 按钮兼作「刷新云端态」（ADR-0017，点一下 = 现场查云 + 干净则快进）；否则正常存/推。
-    if (name && name !== "未命名" && isSignedIn() && !session.dirty) {
+    //   workspaceDirty（editor-state 改过、UI 静默）也算「有可推」→ 走 saveAndPush 把 desk 落盘，不进查云快路径。
+    if (name && name !== "未命名" && isSignedIn() && !session.dirty && !editorState.isWorkspaceDirty()) {
       _store.refresh(sessionFileName(name)).then(() => updateSaveStatus()).catch(() => {});   // synced：点=现场查云干净快进（freshness 进库）。边界转全名（薄库身份=X.ora，全 app 一致）。
     } else {
       session.saveAndPush();

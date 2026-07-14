@@ -100,3 +100,113 @@ export function serializedToolStatePatch(current: ToolDial, saved: unknown): Par
     ...(typeof s.variantId === "string" ? { variantId: s.variantId } : {}),
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// EditorState struct —— per-doc「desk」的 Hot RAM SSoT + 序列化（2026-07-14）
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// 「一个 project 就是一个 desk」：editor-state = 跟文档走的编辑器桌面态（面板/导入导出/工具参数/视口/棋盘）。
+//   用法像 struct：`editorState.colorPanel.position = {left,top}`（代码热路径）。
+//   **永远 Hot、不自动推**；除各字段外只有 Serialize()/Unserialize()/reset()（+ workspaceDirty 读/清）。
+//   所有 setter 经 private setDirtyFlag() → workspaceDirty（smart-save：UI 静默但可点、push 非 no-op）。
+//   开新文件必 reset()。序列化进 ora 的 `.webpaint/editor-state.json`（stage4 接线）。
+//
+// ⚠stage3 = **骨架**：字段默认自持、Serialize/Unserialize/reset/dirty 就绪并 node 可测；
+//   各模块（color-panel/reference/blender/export/liquify/toolbar/board…）read/write 迁进本 struct
+//   + 删设备级 localStorage + 折叠上面 createEditorState 的 dial/color 进 brushTool —— 全留 **stage5**。
+//   在 stage5 接线前，本 struct 不被任何模块驱动（setter 无人调 → workspaceDirty 恒 false → save 行为不变）。
+//
+// setter 纪律（同 collection 浅拷贝）：整枝赋值 position/viewport（`x.position = {...}`），
+//   别原地改子对象字段（`x.position.left = 1` 不 mark dirty）。
+
+export interface PanelPos { left: number; top: number; width?: number; height?: number }
+export interface EditorViewport { tx: number; ty: number; scale: number; rot: number }
+
+// 序列化形状 = `.webpaint/editor-state.json` 的内容（freshGroups() 即 defaults SSoT）。
+function freshGroups() {
+  return {
+    import:        { source: "file" as string },                                   // "file" | "clipboard"
+    export:        { format: "png" as string, target: "file" as string, layerMode: "merged" as string },   // layerMode=scope "merged"|"active"
+    exportProject: { format: "ora" as string },                                    // "ora" | "psd"
+    colorPanel:    { enabled: false, position: null as PanelPos | null },
+    layersPanel:   { enabled: false, position: null as PanelPos | null },
+    refPanel:      { enabled: false, position: null as PanelPos | null, viewport: { tx: 0, ty: 0, scale: 1, rot: 0 } as EditorViewport },
+    blenderPanel:  { show: false, position: null as PanelPos | null },
+    brushTool:     { brushId: null as string | null, size: 12, opacity: 1, color: "#1b1b1b" },
+    liquify:       { bleed: "edge" as string },
+    colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
+    viewport:      null as EditorViewport | null,
+    checkboard:    false,
+  };
+}
+export type EditorGroups = ReturnType<typeof freshGroups>;
+
+// ── 私有可变态 + dirty ─────────────────────────────────────────────────────────────────
+const S = { g: freshGroups() };       // mutable holder（reset 时整份换，访问器每次 deref S.g → reset 生效）
+let _workspaceDirty = false;
+let _onDirty: (() => void) | null = null;   // 可选外部通知钩子（如触发 UI 重算）；stage4 接 smart-save
+function setDirtyFlag(): void { _workspaceDirty = true; _onDirty?.(); }   // private：所有 setter 接它
+
+// 容错合并：present 键覆盖，缺键留 default，深一层（position/viewport）也浅合并。
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
+function mergeInto<T extends object>(dst: T, src: unknown): void {
+  if (!isObj(src)) return;
+  for (const k of Object.keys(dst) as (keyof T & string)[]) {
+    if (!(k in src) || src[k] === undefined) continue;
+    const dv = dst[k], sv = src[k];
+    if (isObj(dv) && isObj(sv)) mergeInto(dv as object, sv);
+    else (dst as Record<string, unknown>)[k] = sv;
+  }
+}
+
+// ── struct 门面：显式访问器（每 setter 接 setDirtyFlag）+ 三方法 ─────────────────────────
+export const editorState = {
+  // import / export ──
+  import:        { get source(): string { return S.g.import.source; }, set source(v: string) { S.g.import.source = v; setDirtyFlag(); } },
+  export: {
+    get format(): string { return S.g.export.format; }, set format(v: string) { S.g.export.format = v; setDirtyFlag(); },
+    get target(): string { return S.g.export.target; }, set target(v: string) { S.g.export.target = v; setDirtyFlag(); },
+    get layerMode(): string { return S.g.export.layerMode; }, set layerMode(v: string) { S.g.export.layerMode = v; setDirtyFlag(); },
+  },
+  exportProject: { get format(): string { return S.g.exportProject.format; }, set format(v: string) { S.g.exportProject.format = v; setDirtyFlag(); } },
+  // panels（enabled/position 全 per-doc，决策1「desk 跟画走」）──
+  colorPanel: {
+    get enabled(): boolean { return S.g.colorPanel.enabled; }, set enabled(v: boolean) { S.g.colorPanel.enabled = v; setDirtyFlag(); },
+    get position(): PanelPos | null { return S.g.colorPanel.position; }, set position(v: PanelPos | null) { S.g.colorPanel.position = v; setDirtyFlag(); },
+  },
+  layersPanel: {
+    get enabled(): boolean { return S.g.layersPanel.enabled; }, set enabled(v: boolean) { S.g.layersPanel.enabled = v; setDirtyFlag(); },
+    get position(): PanelPos | null { return S.g.layersPanel.position; }, set position(v: PanelPos | null) { S.g.layersPanel.position = v; setDirtyFlag(); },
+  },
+  refPanel: {
+    get enabled(): boolean { return S.g.refPanel.enabled; }, set enabled(v: boolean) { S.g.refPanel.enabled = v; setDirtyFlag(); },
+    get position(): PanelPos | null { return S.g.refPanel.position; }, set position(v: PanelPos | null) { S.g.refPanel.position = v; setDirtyFlag(); },
+    get viewport(): EditorViewport { return S.g.refPanel.viewport; }, set viewport(v: EditorViewport) { S.g.refPanel.viewport = v; setDirtyFlag(); },
+  },
+  blenderPanel: {
+    get show(): boolean { return S.g.blenderPanel.show; }, set show(v: boolean) { S.g.blenderPanel.show = v; setDirtyFlag(); },
+    get position(): PanelPos | null { return S.g.blenderPanel.position; }, set position(v: PanelPos | null) { S.g.blenderPanel.position = v; setDirtyFlag(); },
+  },
+  // tools（spec 表写了的收；未写的留下一轮）──
+  brushTool: {
+    get brushId(): string | null { return S.g.brushTool.brushId; }, set brushId(v: string | null) { S.g.brushTool.brushId = v; setDirtyFlag(); },
+    get size(): number { return S.g.brushTool.size; }, set size(v: number) { S.g.brushTool.size = v; setDirtyFlag(); },
+    get opacity(): number { return S.g.brushTool.opacity; }, set opacity(v: number) { S.g.brushTool.opacity = v; setDirtyFlag(); },
+    get color(): string { return S.g.brushTool.color; }, set color(v: string) { S.g.brushTool.color = v; setDirtyFlag(); },
+  },
+  liquify:     { get bleed(): string { return S.g.liquify.bleed; }, set bleed(v: string) { S.g.liquify.bleed = v; setDirtyFlag(); } },
+  colorPicker: { get layerMode(): string { return S.g.colorPicker.layerMode; }, set layerMode(v: string) { S.g.colorPicker.layerMode = v; setDirtyFlag(); } },
+  // viewport / checkboard ──
+  get viewport(): EditorViewport | null { return S.g.viewport; }, set viewport(v: EditorViewport | null) { S.g.viewport = v; setDirtyFlag(); },
+  get checkboard(): boolean { return S.g.checkboard; }, set checkboard(v: boolean) { S.g.checkboard = v; setDirtyFlag(); },
+
+  // ── 序列化（除各字段外仅此二法 + reset + workspaceDirty 读/清）──
+  Serialize(): EditorGroups { return JSON.parse(JSON.stringify(S.g)); },       // 深拷贝：与 live 态解耦；即 .webpaint/editor-state.json 内容
+  Unserialize(json: unknown): void { const d = freshGroups(); mergeInto(d, json); S.g = d; _workspaceDirty = false; },   // 载入非编辑 → 不脏
+  reset(): void { S.g = freshGroups(); _workspaceDirty = false; },              // 开新文件必调
+
+  // smart-save 用（stage4 接线）：workspaceDirty = editor-state 改过、未落盘（UI 静默、push 非 no-op）。
+  isWorkspaceDirty(): boolean { return _workspaceDirty; },
+  clearWorkspaceDirty(): void { _workspaceDirty = false; },                     // 存/推成功后清（stage4）
+  _setOnDirty(cb: (() => void) | null): void { _onDirty = cb; },               // 可选：dirty 时通知外部
+};
+export type EditorStateStruct = typeof editorState;
