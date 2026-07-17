@@ -91,6 +91,7 @@ export interface StoreConfig {
   //   框架（版本戳 + 有序注册表 + 编排）留着——将来真有用户、真要改 kv/IDB 结构时加第一条迁移。
   skipMigration?: boolean;                            // 测试/无 localStorage 环境跳过（prod 不传）
   cloudGoneGraceMs?: number;                          // 云端防抖窗口覆盖（测试注入小值；prod 缺省 ~24h）
+  activeName?: () => string | null;                   // 当前打开的 doc（全名身份）：cloud-gone 去抖 trash 绝不碰它（连 watchFolder 自动 reconcileFolder 也跳过）
 }
 
 // tryMove 结果式返回（不抛，UI 渲染 where 标签）。移动/改身份的唯一入口 = file.tryMove(to)。
@@ -180,7 +181,7 @@ export function createStore(config: StoreConfig) {
   // 云端防抖标记（candidate-gone）：clean cloud-gone 孤儿第一次权威见 gone 只标记，跨 GRACE 第二次+ 才 send trash（用户拍板 ~24h，2026-07-17）。
   const CLOUD_GONE_GRACE_MS = 24 * 3600 * 1000;
   const pendingGone = createPendingGone(kv, config.cloudGoneGraceMs ?? CLOUD_GONE_GRACE_MS);
-  const reconcileMod = createReconcile({ cloud, local, head, pending: pendingGone, isOnline });
+  const reconcileMod = createReconcile({ cloud, local, head, pending: pendingGone, isOnline, activeName: config.activeName });
 
   // ── folder 本地登记（离线建空夹）：pending = 建了但还没确认上云的空文件夹。──────────────
   //   离线也能建空夹（用户要求）：先 kv 登记 → 并进 listAllItems.folders（离线可见/持久）→ 回线 drainFolders 补建。
@@ -518,6 +519,7 @@ export function createStore(config: StoreConfig) {
       reupload() {
         return ui.busy("重新上传…", async () => {
           if (!(await local.exists(name))) return { status: "no-local" };
+          pendingGone.clear(name);                 // 用户已对 candidate 动手 → 清标记（成功=synced；失败=转 dirty/conflict，都不再是 pendingGone）
           head.forget(name);                       // 断旧云谱系（cloud 已 gone）→ no-base 首推
           head.recordEdit(name);                   // 标未推 → 走首推路径（no-base，conflictBehavior:fail 撞名不覆盖）
           const r = await pushLocalBytes(name);    // 复用 vetted push（seal 正确 + N6 + 撞名抛 CloudNameCollisionError → app surface）
@@ -627,10 +629,13 @@ export function createStore(config: StoreConfig) {
       newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", async () => { await ensureFolderLocalFirst(path); notifyFolderOf(path); })),   // 子夹出现在父夹 → 重画父夹
       deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", async () => {
         assertValidFileName(path, appId);                            // 路径护栏
+        // 判空**两端都查**：本地有该夹下的文件（含 local-only/未上云）→ 拒删（否则删掉云端夹、本地文件成孤儿）。
+        const prefix = `${path}/`;
+        if ((await local.appKeys()).some((k) => k.startsWith(prefix))) throw new Error(`文件夹非空（本地有文件），拒绝删除：${path}`);
         const wasPending = readPending().includes(path);
         clearPendingFolder(path);                                    // 离线建的（从没上云）→ 清登记即删
         if (!isOnline()) { if (wasPending) { notifyFolderOf(path); return true; } throw new Error("离线：无法删除已上云的文件夹"); }
-        const r = await cloud.removeFolder(path);
+        const r = await cloud.removeFolder(path);                    // 云端侧再查一遍 + list 抛错拒删（守卫击穿修复，step1）
         notifyFolderOf(path);                                        // 子夹从父夹消失 → 重画父夹
         return r;
       })),

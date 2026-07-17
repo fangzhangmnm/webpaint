@@ -120,3 +120,20 @@ test("[reconcile] listAll 抛错 → no-op", async () => {
   const out = await r.reconcile();
   eq(out.demoted.length, 0, "list 失败不收敛");
 });
+
+test("[reconcile] activeName skip：打开的 clean cloud-gone doc 绝不被去抖 trash（K1，连自动 reconcile 也跳）", async () => {
+  // 直接建带 activeName 的 reconcile：orphan.pdf 是活动 doc → 就算跨 grace 也不 trash。
+  const trashed: string[] = [];
+  const local = { appKeys: async () => ["orphan.pdf", "live.pdf"], trash: async (n: string) => { trashed.push(n); return `trash/${n}`; } };
+  const head = { seenBase: (n: string) => (n === "orphan.pdf" ? "e" : "e"), isDirty: () => false, forget: () => {} };
+  const cloud = { listAll: async () => ({ files: [{ path: "live.pdf" }], folders: [], complete: true }), clearState: () => {} };
+  let clock = 0;
+  const pending = createPendingGone(memKv(), 0);
+  const { reconcile } = createReconcile({ cloud: cloud as any, local: local as any, head: head as any, pending, now: () => clock, isOnline: () => true, activeName: () => "orphan.pdf" });
+  await reconcile();                 // 第一次
+  clock += 10;
+  const out = await reconcile();     // 第二次跨 grace
+  eq(out.demoted.length, 0, "活动 doc 绝不 demote/trash");
+  eq(trashed.length, 0, "没 trash 开着的 doc 本地缓存");
+  assert(!pending.isPending("orphan.pdf"), "活动 doc 连 candidate 都不标（skip）");
+});

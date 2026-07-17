@@ -56,7 +56,7 @@ export interface EditorSessionConfig {
 
 export interface EditorSession {
   open(name: string): Promise<boolean>;          // 打开 doc：先存旧 → file.open() → adopt。返回是否 adopt 了（false=文件缺失/锁定，未装入）
-  adopted(name: string): void;                    // 编辑器内容已由 app 装入（new-doc/import，非 store.open）→ 记为当前 + 标脏
+  adopted(name: string, opts?: { create?: boolean }): void;   // 编辑器内容已由 app 装入（new-doc/import，非 store.open）→ 记为当前 + 标脏；{create:true}=首存 mode:"new"（撞名不覆盖）
   markDirty(): void;                              // app 驱动的内容变化（不走 editor onChange，如设置/参考窗）→ 标脏
   flushLocal(): Promise<void>;                    // 立即存本地（不推）——内存脏才动
   flushAndPush(): Promise<void>;                  // 立即存本地 + best-effort 推云——内存脏 **或** push-pending 才动（退出用）
@@ -92,7 +92,8 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     });
   }
 
-  const fileOf = (name: string) => store.file(name, { isZip, mode: "existing" });   // editor 处理的都是已建身份（新建走 app 的 newDoc/saveAs）
+  const fileOf = (name: string) => store.file(name, { isZip, mode: "existing" });   // open/rename/删：已建身份
+  let _createNext = false;   // adopted({create:true})（新建画布/import）→ 下一次 persist 用 mode:"new"（撞名不覆盖），首存成功即转 existing
 
   // tryPush=false（flushLocal/autosave）：内存脏才动。tryPush=true（flushAndPush/**退出**）：内存脏 **或** push-pending 就动
   //   （= autosave 已把内容落本地、内存不脏但还没推 → 退出仍要推，否则本次编辑只在本地）。
@@ -107,7 +108,10 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       const { bytes, peek } = await editor.encode();
       _dirty = false;                              // 清内存脏：encode 已取快照；期间再改会重新置脏（下轮 autosave 收）
       if (tryPush) _pushPending = false;           // 乐观清 push-pending（push 失败留 sync-dirty，store 内部 queue 补推）
-      await fileOf(_name).save(bytes, { tryPush, hint: peek != null ? { peek } : undefined });
+      // 新建画布/import 首存 → mode:"new"（撞名不静默覆盖，抛 CloudNameCollisionError；saveNow 已 try/catch surface）；成功即转 existing（后续 autosave = 编辑）。
+      const mode = _createNext ? "new" : "existing";
+      await store.file(_name, { isZip, mode }).save(bytes, { tryPush, hint: peek != null ? { peek } : undefined });
+      _createNext = false;
     } finally {
       _saving = false;
     }
@@ -133,10 +137,11 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       return blob != null;                          // false = 文件缺失/锁定，doc 未装入（boot 据此回图库）
     },
 
-    adopted(name: string): void {                  // new-doc/import：编辑器内容由 app 装入（非 store.open）→ 当前 + 脏
+    adopted(name: string, opts?: { create?: boolean }): void {   // new-doc/import：编辑器内容由 app 装入（非 store.open）→ 当前 + 脏
       wireOnChange();
       _name = name;
       _dirty = true; _pushPending = true;          // 新内容未落盘/未推；desk=默认（reset 过）
+      _createNext = !!opts?.create;                // 新建画布/import → 首存 mode:"new"（撞名不覆盖）；纯 adopt(revert/切名) 不设 = existing
     },
 
     markDirty(): void { _dirty = true; _pushPending = true; },   // app 驱动内容变化（onChange 之外）→ 标脏

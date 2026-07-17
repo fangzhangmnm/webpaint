@@ -49,11 +49,13 @@ export interface ReconcileCfg {
   pending: PendingGone;                 // 云端防抖（candidate-gone）标记
   now?: () => number;                   // 时钟（测试注入；默认 Date.now）
   isOnline?: () => boolean;
+  activeName?: () => string | null;     // 当前打开的 doc（全名身份）——**去抖 trash 绝不碰活动 doc**（K1，reconcileFolder 也用，避免 trash 掉开着的 clean 文件本地缓存）
 }
 
 export function createReconcile(cfg: ReconcileCfg) {
-  const { cloud, local, head, pending, isOnline } = cfg;
+  const { cloud, local, head, pending, isOnline, activeName: activeNameFn } = cfg;
   const now = cfg.now || (() => Date.now());
+  const skipName = (opt?: string): string | undefined => opt ?? activeNameFn?.() ?? undefined;   // 显式 opts 优先，否则用 store 自持的活动 doc
 
   // 共用收敛（SSOT，reconcileAll + reconcileFolder + 各云端帧都经此）：给一组 localNames + **权威** cloudNameSet →
   //   clean 孤儿走**去抖**：第一次权威见 gone → 标 candidate（照常显示 + pendingGone badge，不删）；连续第二次+且跨 GRACE
@@ -90,7 +92,7 @@ export function createReconcile(cfg: ReconcileCfg) {
     const authoritative = !!(all && all.complete && all.files.length > 0);  // 失败-fetch + 空列表守卫
     if (!authoritative) return { demoted: [] };
     const cloudNames = new Set(all!.files.map((f) => f.name ?? f.path));
-    return converge(await local.appKeys(), cloudNames, authoritative, opts.activeName);
+    return converge(await local.appKeys(), cloudNames, authoritative, skipName(opts.activeName));
   }
 
   // **单夹** cloud-gone 收敛——「看到 folder 才 reconcile」（watchFolder 的 remote pass 副作用），非静默、非全扫。
@@ -107,7 +109,7 @@ export function createReconcile(cfg: ReconcileCfg) {
       const rest = k.slice(prefix.length);
       return rest.length > 0 && !rest.includes("/");                     // 仅本夹直属文件
     });
-    return converge(localNames, cloudNames, true, opts.activeName);
+    return converge(localNames, cloudNames, true, skipName(opts.activeName));
   }
 
   return { reconcile, reconcileFolder };

@@ -16,7 +16,7 @@ function mockStore() {
     file(name, opts) {
       return {
         open: async () => { opened.push({ name, isZip: opts.isZip, mode: opts.mode }); return this._openReturns; },
-        save: async (bytes, o) => { saves.push({ name, tryPush: o?.tryPush, hint: o?.hint, size: bytes.size }); },
+        save: async (bytes, o) => { saves.push({ name, tryPush: o?.tryPush, hint: o?.hint, size: bytes.size, mode: opts.mode }); },
         tryMove: async (to) => { renames.push({ from: name, to }); return { ok: true }; },   // 改身份/移动唯一入口（挂 file 上）
         delete: async () => { deletes.push(name); },
       };
@@ -76,6 +76,23 @@ describe("editor-session › flush 本地 vs 推云", () => {
     await es.open("a");                     // 开完不脏
     await es.flushLocal(); await es.flushAndPush();
     eq(store.saves.length, 0, "不脏不存"); eq(editor.encodeCount, 0, "不脏不 encode");
+  });
+  it("adopted({create:true})（新建画布/import）→ 首存 mode:'new'；成功后转 existing（编辑=覆盖）", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    es.adopted("fresh", { create: true });
+    await es.flushLocal();
+    eq(store.saves[0].mode, "new", "首存 mode:new（撞名不覆盖）");
+    editor.fireChange();
+    await es.flushLocal();
+    eq(store.saves[1].mode, "existing", "第二存转 existing（编辑覆盖正常）");
+  });
+  it("adopted()（revert/切名，非新建）→ mode:'existing'", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    es.adopted("x");
+    await es.flushLocal();
+    eq(store.saves[0].mode, "existing", "纯 adopt 不是新建 → existing");
   });
 
   // v409 回归锁（D-Q6）：desk 改动**不**驱动落盘/推云。markWorkspacePending 已删——

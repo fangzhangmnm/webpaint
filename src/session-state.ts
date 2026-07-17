@@ -345,9 +345,9 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
   _enc.encrypted = false; input.clearHistory(); board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
   resetEditorState();
   applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
-  es.adopted(toFull(name));   // 新内容装入 editor（非 store.open）→ es 记为当前 + 脏；边界转全名
+  es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
   _docLastSavedAt = 0; updateSaveStatus();
-  await saveNow();   // 落盘（tryPush:false）
+  await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
   setGalleryOpen(false);
 }
 

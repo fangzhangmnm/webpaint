@@ -275,3 +275,17 @@ test("[narrow-waist] cloud-sync backupFolder 默认 .backup（weakOverride 把�
     }
   });
 }
+
+// ── deleteFolder 判空两端（本地有文件也拒删，2026-07-17）────────────────────────────────
+{
+  const _enc = (s: string) => new TextEncoder().encode(s);
+  test("[files.deleteFolder] 本地夹下有文件 → 拒删（两端判空，防本地文件成孤儿）", async () => {
+    const { store } = mkStore(dumpKv());
+    await store.file("F/x.ora", { isZip: true, mode: "new" }).save(_enc("X"), { tryPush: false });   // 本地 F/ 下有文件
+    let threw = false;
+    try { await store.files.deleteFolder("F"); } catch { threw = true; }
+    assert(threw, "本地非空 → 拒删");
+    await store.file("F/x.ora", { isZip: true, mode: "existing" }).delete();   // 清掉（进 trash）
+    await store.files.deleteFolder("F");   // 现在本地空（cloud 也无此夹）→ 不抛
+  });
+}
