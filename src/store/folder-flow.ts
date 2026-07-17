@@ -36,7 +36,6 @@ export interface FolderFlowResult {
   etag?: string | null;
   pushed?: boolean;
   error?: unknown;
-  cloudExisted?: boolean;   // 本次 pull 云端是否存在文件（collection 新库判定用；离线/未 pull 时 undefined）
 }
 
 // createFolderFlow 注入配置。
@@ -84,14 +83,13 @@ export function createFolderFlow(cfg: FolderFlowConfig): FolderFlow {
     try { pulled = await withTimeout(cloud.pull(name), timeoutMs); }
     catch (e) { reportStoreError(e, "log"); return { status: "offline", folder: localFolder, error: e }; }   // 离线 / 慢网超时 / 伪在线 API 错
 
-    const cloudExisted = !!(pulled && pulled.blob);   // 云端本次是否有文件（新库判定用）
     let cloudFolder = emptyFolder();
     if (pulled && pulled.blob) {
       let text;
       try { text = await pulled.blob.text(); }
       catch (e) { reportStoreError(e, "log"); return { status: "offline", folder: localFolder, error: e }; }
       const parsed = decode(text);
-      if (!parsed) return { status: "invalid", folder: localFolder, cloudExisted };   // 伪在线防线：脏字节绝不进 merge
+      if (!parsed) return { status: "invalid", folder: localFolder };   // 伪在线防线：脏字节绝不进 merge
       cloudFolder = parsed;
     }
 
@@ -99,17 +97,17 @@ export function createFolderFlow(cfg: FolderFlowConfig): FolderFlow {
 
     // 本地没贡献任何云端没有的东西 → 不必 push（pull-before-edit / 重复 sync 不白写云端）。
     if (normalizeFolder(merged) === normalizeFolder(cloudFolder)) {
-      return { status: "synced", folder: merged, pushed: false, etag: pulled?.item?.eTag, cloudExisted };
+      return { status: "synced", folder: merged, pushed: false, etag: pulled?.item?.eTag };
     }
 
     try {
       // CloudSync.push 现收 Bytes|Blob（cloud-sync 内部 toU8 归一化），encode 出 Blob 直接传。
       const res = await withTimeout(cloud.push(name, encode(merged), { baseEtag: pulled?.item?.eTag }), timeoutMs);
-      return { status: "synced", folder: merged, pushed: true, etag: res?.item?.eTag, cloudExisted };
+      return { status: "synced", folder: merged, pushed: true, etag: res?.item?.eTag };
     } catch (e) {
       if (is412(e) && depth < 5) return _sync(merged, depth + 1);   // 有人插队 → 重拉重 merge 重推（带上已 merge 的本地）
       reportStoreError(e, "warning");   // push 真失败、配置数据留 dirty 未推 → surface
-      return { status: "dirty", folder: merged, error: e, cloudExisted };
+      return { status: "dirty", folder: merged, error: e };
     }
   }
 

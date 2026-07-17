@@ -12,9 +12,9 @@
 //   读面（keys/entries/getItem/getEntry）过滤 value===null。**setItem(id, undefined) 报错**（None 非法；
 //   要删传 null 或用 deleteItem）。无独立 trash 集合、无 resetAt 水位线（2026-07 tombstone 化）。
 //
-// **新库初始化（getInitData）**：仅当这份 collection 的 json **不存在**时调 getInitData() 填初始值，uat=1
-//   （最低戳 → 任何真实编辑 / 别设备的真数据必胜）。判「新库」：离线 = idb 无此 collection；
-//   在线 = idb 无 && 云端也无。见下 init()/firstReconcile()。
+// **新库初始化（getInitData，eager）**：**idb 无此 collection**（新库）时 init 立即调 getInitData() 填初始值
+//   uat=1（最低戳）。随后后台 reconcile 拉云——云端/别设备真数据（uat>1）经 LWW **必胜过 seed、覆盖**；
+//   云端确实空则 seed 推上去。离线新设备立即有内容；在线新设备先显 seed、云端到了再覆盖。见下 init()。
 //
 // 读写 = **同步内存**（getItem/setItem 不 await）；两侧 value 浅拷贝隔离（app 拿到/传入的对象改动不与信封互相污染）。
 //   但内存 env 在 init() 前为空（getItem 返 default，setItem 抛错）。onChange(cb) 整库 / onChange(id,cb) 绑单 key。
@@ -168,7 +168,7 @@ export function createCollection(cfg: CollectionConfig): Collection {
   }
 
   // sync：snapshot 内存 env → folder-flow（pull-merge-push）→ 把合并结果**并回**当前 env（per-item LWW 保新编辑不被旧快照盖）。
-  //   带来云端值变 → fireChanged。dirty 收尾（K12）：synced 且并回后 == 已推的 res.folder 才清脏。返 flow 结果（含 cloudExisted）。
+  //   带来云端值变 → fireChanged。dirty 收尾（K12）：synced 且并回后 == 已推的 res.folder 才清脏。返 flow 结果。
   async function sync(): Promise<FolderFlowResult | null> {
     if (cloudless) return null;
     const before = snapshotValues();
@@ -184,7 +184,7 @@ export function createCollection(cfg: CollectionConfig): Collection {
   }
 
   // 后台/事件驱动云端对齐：freshness 快路径（etag-skip）+ 完整 pull-merge-push；离线/坏字节绝不 wipe。
-  //   返 flow 结果（含 cloudExisted）或 null（cloudless / etag-skip）。
+  //   返 flow 结果或 null（cloudless / etag-skip）。
   async function reconcile(): Promise<FolderFlowResult | null> {
     if (cloudless) return null;
     // 快路径（freshness etag-skip）：clean ∧ 在线 ∧ 有已知 etag ∧ 云端 etag 没变 → 本地即最新，跳整份 pull-merge-push。
@@ -201,9 +201,7 @@ export function createCollection(cfg: CollectionConfig): Collection {
     catch (e) { reportStoreError(e, "warning"); }
   }
 
-  const hasLiveItems = (): boolean => env.items.some((e) => !isTombstone(e));
-
-  // 新库 seed：getInitData() → uat=1 填入（最低戳，真数据必胜）。
+  // 新库 seed：getInitData() → uat=1 填入（最低戳，真数据必胜）。**eager**：idb 无就填，不等云端判定。
   async function seedInit(): Promise<void> {
     if (!getInitData) return;
     let initial: CollectionInitItem[];
@@ -221,27 +219,13 @@ export function createCollection(cfg: CollectionConfig): Collection {
 
   async function init(): Promise<void> {
     await hydrateLocal();               // 先从本地缓存 hydrate（秒开 / 离线可读 / 强杀存活）；记 idbHad
-    ready = true;                       // 本地就绪：getItem 有值、setItem 放行。云端后台对齐（不 block boot）。
-    const idbEmpty = !idbHad;
-    if (cloudless) {
-      if (idbEmpty) await seedInit();   // local-only：idb 无此 collection = 新库
-      return;
-    }
-    const offline = isOnline ? !isOnline() : false;
-    if (idbEmpty && offline) await seedInit();   // 离线新设备：idb 无 → 新库 seed（uat=1；回线 reconcile 时真 cloud 必胜）
-    void firstReconcile(idbEmpty);      // 在线：reconcile；若 idb 无 && 云端无 → seed
-  }
-
-  // 首次 reconcile：兼做「在线新库」判定。idbEmpty && 云端无文件 && 合并后仍无 live item → seed uat=1 + 推云。
-  async function firstReconcile(idbEmpty: boolean): Promise<void> {
+    // **eager seed**（idb 无=新库）：立即用 uat=1 填初始值，不等云端判定。随后 reconcile 拉云——
+    //   云端/别设备的真数据（uat>1）经 LWW **必胜过 seed、覆盖**；云端确实空则 seed 被推上去。
+    //   离线新设备照样立即有内容；在线新设备先显 seed、云端到了再覆盖（用户设计）。
+    if (!idbHad) await seedInit();
+    ready = true;                       // 本地(含 seed)就绪：getItem 有值、setItem 放行。云端后台对齐（不 block boot）。
     if (cloudless) return;
-    let res: FolderFlowResult | null = null;
-    try { res = await reconcile(); }
-    catch (e) { reportStoreError(e, "log"); return; }
-    if (idbEmpty && res?.cloudExisted === false && !hasLiveItems()) {
-      await seedInit();                 // 在线 + idb 无 + 云端无 = 真·新库 → seed
-      scheduleSync();                   // 推 seed 到云
-    }
+    void reconcile().catch((e) => reportStoreError(e, "log"));   // 后台 pull-merge-push：真 cloud 覆盖 seed；seed 未被覆盖的推云
   }
 
   function setItem(id: string, value: unknown): void {

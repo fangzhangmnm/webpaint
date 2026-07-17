@@ -169,7 +169,7 @@ await reading.reconcileWithRemote();                        // 事件驱动重�
 - **item 是原子的：只有 `setItem`（整条替换），没有 partial update。** 想改一个字段 = 取整条 → 改 → 整条 setItem。换来合并简单 + 无中间态。
 - **删除 = 墓碑**：`deleteItem(id)` 写一条 `value:null`，带 uat 参与 LWW（删/编辑谁 uat 大谁胜）。墓碑留在库里跨设备传播删除、读面过滤——**无独立 trash 集合、无 resetAt 水位线**（时钟同步误差=已知风险，分钟级不成问题）。
 - 内部按 item 合并，**逐 item last-write-wins**（每 item 各带 uat，并发改不同 item 都不丢；同 item 并发 = 静默 last-win，**仅配置类可接受**，画作 content 绝不走此路，走 §2 file 的 If-Match）。
-- **新库判定 + seed**：`getInitData` 仅在**这份 collection 的 json 不存在**时调（离线=idb 无；在线=idb 无 && 云端无），填初始值 uat=1（最低戳→任何真实编辑/别设备真数据必胜）。store 内容无关：app 域构造 `[{id, value}]`（如笔架把 builtin-brushes.json 映射进来）。
+- **新库 seed（eager）**：`getInitData` 在 **idb 无此 collection**（新库）时立即调，填初始值 uat=1（最低戳）。随后 init 后台 reconcile 拉云——**云端/别设备的真数据（uat>1）经 LWW 必胜过 seed、覆盖**；云端确实空则 seed 推上去。离线新设备照样立即有内容；在线新设备先显 seed、云端到了再覆盖。store 内容无关：app 域构造 `[{id, value}]`（如笔架把 builtin-brushes.json 映射进来）。
 - **自动本地缓存**：离线、重新打开、意外关闭后都能读到上次的数据（你不碰 IndexedDB）。init 后台对齐云端、值变经 `onChange` 通知；事件驱动（focus/visible/online）重拉调 `reconcileWithRemote()`。页面卸载时调一次 `flushLocal()` 把最新状态落本地。
   > ⚠ 名字别搞混：collection 的重拉叫 **`reconcileWithRemote()`**（pull+push）；`store.refresh(name)` 是 **file** 那一面的新鲜度检查，两回事。
 
