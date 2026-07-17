@@ -70,13 +70,13 @@ const store = createStore({
 
 | 拿到的 | 方法 | 章节 |
 |---|---|---|
-| `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · rename · delete · keepOffline · offload · isKeptOffline · isDirty · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek({bytesLength,zipEntry})` + `decryptPeek(blob)`；zip 尾片解析在库内部，`setPeek` 未采用，peek 经 `crypt.makePeek` 自动） | §2 |
+| `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · pullIfClean · delete · keepOffline · offload · isKeptOffline · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek({bytesLength,zipEntry})` + `decryptPeek(blob)`；zip 尾片解析在库内部，`setPeek` 未采用，peek 经 `crypt.makePeek` 自动。无 `rename`/`isDirty`——改身份走 `store.tryMove`，dirty 经 `listAllItems` 的 syncState 读） | §2 |
 | `store.collection(name, {manual?, local?, getInitData?})` | `setItem · deleteItem · getItem(id,def) · getEntry · entries · keys · onChange · init · reconcileWithRemote · flushLocal · isDirty`（`{local:true}` = **不推云**的设备本地变体；`getInitData` = 新库 seed，uat=1；删除=value:null 墓碑） | §3 |
 | `store.list()` / `store.listAll()` | 列云端文件+文件夹 `{files, folders, complete}`（`complete:false` **别据此删缓存**） | §2 |
 | `store.ensureFolder · newFolder · deleteFolder` | 文件夹增删（删除「必须空」库内强制） | §2 |
 | `store.listTrash · listBackup · restore · purge · emptyTrash` | 回收站 / 备份箱：列举·恢复·彻底删·清空 | §2 |
 | `store.localKeys()` | 已留作离线（=有本地副本）的文件名集合（gallery 批量判） | §2 |
-| `store.refresh(name)` / `store.drainDeleteQueue()` | 事件驱动干净快进 / 离线删队列重放 | §6 |
+| `store.file(name).pullIfClean(opts?)` / `store.drainDeleteQueue()` | 事件驱动干净快进（per-file，clean→FF·dirty→no-op；原 `store.refresh` 收上 file） / 离线删队列重放 | §6 |
 | `store.reconcile({activeName?})` | cloud-gone 安全收敛（gallery list-fetch 时调：clean 孤儿→local-only，不删） | §6 |
 | `store.saveAs(...)` | 写到新身份（phantom-path 红线：先存新名再删旧） | §2 |
 | `store.looksEncrypted · verifyContainer · unsealWith` | 加密导入辅助（文件还没进 store、无 name 可查时） | §5 |
@@ -171,7 +171,7 @@ await reading.reconcileWithRemote();                        // 事件驱动重�
 - 内部按 item 合并，**逐 item last-write-wins**（每 item 各带 uat，并发改不同 item 都不丢；同 item 并发 = 静默 last-win，**仅配置类可接受**，画作 content 绝不走此路，走 §2 file 的 If-Match）。
 - **新库 seed（eager）**：`getInitData` 在 **idb 无此 collection**（新库）时立即调，填初始值 uat=1（最低戳）。随后 init 后台 reconcile 拉云——**云端/别设备的真数据（uat>1）经 LWW 必胜过 seed、覆盖**；云端确实空则 seed 推上去。离线新设备照样立即有内容；在线新设备先显 seed、云端到了再覆盖。store 内容无关：app 域构造 `[{id, value}]`（如笔架把 builtin-brushes.json 映射进来）。
 - **自动本地缓存**：离线、重新打开、意外关闭后都能读到上次的数据（你不碰 IndexedDB）。init 后台对齐云端、值变经 `onChange` 通知；事件驱动（focus/visible/online）重拉调 `reconcileWithRemote()`。页面卸载时调一次 `flushLocal()` 把最新状态落本地。
-  > ⚠ 名字别搞混：collection 的重拉叫 **`reconcileWithRemote()`**（pull+push）；`store.refresh(name)` 是 **file** 那一面的新鲜度检查，两回事。
+  > ⚠ 名字别搞混：collection 的重拉叫 **`reconcileWithRemote()`**（pull+push）；`store.file(name).pullIfClean()` 是 **file** 那一面的新鲜度检查（clean 快进），两回事。
 
 ---
 

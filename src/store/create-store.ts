@@ -11,7 +11,7 @@ import { createSeal } from "./seal.ts";
 import { looksEncryptedContainer, packContainer, unpackContainer, configureCryptoCodec, scanEncPeekFromEnd, decryptPeek, PEEK_TAIL_WINDOW, ENC_PEEK_MIME, CONTAINER_PEEK_ENTRIES, type CryptoCodec } from "./crypto-container.ts";
 import { createSafeResolve, type ResolveChoice } from "./safe-resolve.ts";
 import { createPush } from "./push.ts";
-import { createFreshness } from "./freshness.ts";
+import { createFreshness, type RefreshOpts, type FreshResult } from "./freshness.ts";
 import { createDelete } from "./delete.ts";
 import { createIdentity } from "./identity.ts";
 import { createTrash } from "./trash.ts";
@@ -96,6 +96,9 @@ export interface RawFile {
   //  tryPush 是 **best-effort**：离线/冲突/失败 → 文件留 dirty、下次补推（不保证同步到云）。hint 透传缩略图（store content-blind）。
   save(bytes: Bytes | Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<void>;
   open(): Promise<Blob | null>;
+  // 事件驱动「干净快进」：本地 clean ∧ 云端有更新 → 拉新版覆盖本地缓存；本地 dirty → no-op（绝不在事件里弹 sheet，
+  //   后续 push 的 412 会 surface 真分叉）。app 在 focus/visibility/online 调。（原 store.refresh(name)，2026-07 收上 file。）
+  pullIfClean(opts?: RefreshOpts): Promise<FreshResult>;
   // 注：无 rename —— 改身份/移动**唯一入口 = store.tryMove(from,to)**（含 nameOccupied 占用检查，结果式不抛）。
   delete(): Promise<void>;
   // 注：无 isDirty —— 「有没未推的改动」是 **sync 状态**，经 store.listAllItems 的 syncState 读（unpushed/conflict）。
@@ -464,6 +467,7 @@ export function createStore(config: StoreConfig) {
         const pulled = await cloud.pull(name).catch((e) => { ui.reportError(e); return null; });
         return pulled ? await seal.unsealForRead(name, pulled.blob) : null;   // range/streaming（按需取片）是 ⚠TODO 优化
       },
+      pullIfClean(opts) { return fresh.refresh(name, { isOnline, ...opts }); },   // 事件驱动干净快进（clean→FF、dirty→no-op）；默认注入 store 的 isOnline（离线早退，不空跑 fetchMeta）
       async delete() { await delSF(name); notifyFolderOf(name); },
       isKeptOffline() { return local.exists(name); },   // 有本地副本 = 已留作离线（无 LRU、无独立 pin flag）
       async keepOffline() {   // 确保本地有副本（未缓存则 acquire；离线/失败 best-effort）
@@ -569,7 +573,7 @@ export function createStore(config: StoreConfig) {
     })),
     drainFolders,   // 回线补建离线创建的空夹（app 在 online / listGallery 时调，对齐 drainDeleteQueue）
     // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放 + cloud-gone 收敛（安全子集 #43）。
-    refresh: (name: string, opts?: Parameters<typeof fresh.refresh>[1]) => fresh.refresh(name, opts),
+    //   （原 store.refresh(name) 已收上 file：`store.file(name).pullIfClean(opts)`——per-file 新鲜度是 file 的事，不放全局。）
     drainDeleteQueue: () => del.drainDeleteQueue(),
     drainUploadQueue: () => uploadReplay.drain(),   // ADR-0018：回线/成功连接补推离线新上传（app 在 online/boot 调；ask 模式内部先问）
     // **全库** cloud-gone 收敛（clean 孤儿→local-only，不删不 trash）。**仅用户显式指令**（将来隐藏的「校验完整性」入口），

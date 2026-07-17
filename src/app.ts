@@ -385,7 +385,7 @@ window.addEventListener("online", async () => {
   updateCloudAuthUI();
   if (isSignedIn()) _store.drainDeleteQueue().catch((e) => reportError(new Error("drainDeleteQueue: " + String(e)), "log"));   // N3：重连重放离线删队列
   if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
-  if (isSignedIn() && session.name) _store.refresh(sessionFileName(session.name)).catch(() => {});   // 回线：事件驱动干净快进（freshness 进库；无 idle-lock）。边界转全名。
+  if (isSignedIn() && session.name) _store.file(sessionFileName(session.name), { isZip: true }).pullIfClean().catch(() => {});   // 回线：事件驱动干净快进（freshness 进库；无 idle-lock）。边界转全名。
 });
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
 
@@ -458,5 +458,5 @@ new PwaShell({
     editMode.applyPendingTransient();
     await session.save();   // saveNow 内含 blank/dirty 守卫（es.flushLocal 不脏 no-op）
   },
-  onForeground: () => { pullSettingsAndState(); if (isSignedIn() && session.name) _store.refresh(sessionFileName(session.name)).catch(() => {}); },   // 前台：拉 4 库 + 当前文件快进（边界转全名）
+  onForeground: () => { pullSettingsAndState(); if (isSignedIn() && session.name) _store.file(sessionFileName(session.name), { isZip: true }).pullIfClean().catch(() => {}); },   // 前台：拉 4 库 + 当前文件快进（边界转全名）
 }).init();
