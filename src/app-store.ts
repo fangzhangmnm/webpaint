@@ -80,6 +80,7 @@ function itemToG(it: { path: string; syncState: string; lastModified?: number; s
     cloud: _CLOUD_STATES.has(it.syncState) ? { path: it.path, name, size: it.size, lastModifiedDateTime: it.lastModified ? new Date(it.lastModified).toISOString() : undefined } : null,
     dirty: isDirty(it.syncState as never),
     ghost: it.syncState === "ghost",
+    pendingGone: it.syncState === "pendingGone",   // clean cloud-gone 孤儿、防抖 grace 内 → gallery 显 badge + 重传/删动作
   };
 }
 // watchFolder（网盘模型）：订阅**当前文件夹** → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。

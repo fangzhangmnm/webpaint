@@ -35,10 +35,11 @@ export interface GItem extends Omit<GalleryItem, "local" | "cloud"> {
   cloud: CloudFileMeta | null;
   dirty?: boolean;
   ghost?: boolean;
+  pendingGone?: boolean;   // clean cloud-gone 孤儿、防抖 grace 内（云端刚没了，本地干净副本待处理）
 }
 
-// 文件 tile 的同步徽章（图标 SVG 在组件 template 里按 kind 渲）。ghost = cloud-gone dirty 孤儿。
-export type BadgeKind = "syncedBoth" | "dirtyBoth" | "cloudOnly" | "localOnly" | "ghost";
+// 文件 tile 的同步徽章（图标 SVG 在组件 template 里按 kind 渲）。ghost = cloud-gone dirty 孤儿；pendingGone = cloud-gone clean（grace 内）。
+export type BadgeKind = "syncedBoth" | "dirtyBoth" | "cloudOnly" | "localOnly" | "ghost" | "pendingGone";
 
 export interface GalleryTile {
   name: string;          // 全 path-name（key / 移动改名用）
@@ -49,6 +50,7 @@ export interface GalleryTile {
   badge: BadgeKind;
   badgeTitle: string;
   ghost: boolean;        // cloud-gone dirty 孤儿（云端 path 被别的设备改名/删，本地有未推编辑）→ UI surface
+  pendingGone: boolean;  // cloud-gone clean 孤儿、防抖 grace 内（照常显示 + badge；宽限后自动移入回收站；可「重新上传」/「删除」）
   hasLocalThumb: boolean;
   cloud: CloudFileMeta | null;     // {size,lastModifiedDateTime} 给 thumb provider（按 name+token 拉）；纯本地 = null
   isActive: boolean;
@@ -65,6 +67,10 @@ export function tileFor(
     // ghost 优先：dirty 孤儿（曾 synced，云端 path 被别的设备改名/移动/删，本地有未推编辑）。
     //   不当普通 localOnly——明确 surface；badge≠localOnly 顺带让「推送到云端」按钮消失（防复活已删路径）。
     badge = "ghost"; badgeTitle = "云端副本已被移动或删除，本地有未推送的修改 —— 可「重命名留存」或「丢弃」";
+  } else if (item.pendingGone) {
+    // pendingGone：clean 孤儿（曾 synced，云端 path 没了，本地干净副本）。防抖 grace 内照常显示 + 此 badge；
+    //   宽限期后 reconcile 会自动移入回收站。用户可「重新上传」（推回云端）或「删除」（提前入回收站）。
+    badge = "pendingGone"; badgeTitle = "云端副本已消失，本地干净副本待处理 —— 可「重新上传」推回云端，或「删除」；宽限期后自动移入回收站";
   } else if (isLocal && isCloud) {
     if (opts.signedIn && item.dirty) { badge = "dirtyBoth"; badgeTitle = "本地+云端 · 本地有未推改动"; }
     else { badge = "syncedBoth"; badgeTitle = "本地+云端（已同步）"; }
@@ -81,6 +87,7 @@ export function tileFor(
     size: (item.local?.size) || (item.cloud?.size) || 0,
     badge, badgeTitle,
     ghost: !!item.ghost,
+    pendingGone: !!item.pendingGone,
     hasLocalThumb: !!(item.local && item.local.thumb),
     cloud: item.cloud || null,
     isActive: !!opts.activeName && item.name === opts.activeName,

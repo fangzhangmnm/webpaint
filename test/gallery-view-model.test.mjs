@@ -51,6 +51,16 @@ describe("gallery-view-model · tileFor 徽章 4 态", () => {
   it("非 ghost → ghost 字段 false", () => {
     eq(tileFor({ name: "a", local, cloud: null }, { signedIn: true, activeName: null }).ghost, false);
   });
+  it("pendingGone（cloud-gone clean 孤儿、grace 内）→ pendingGone badge，优先于 localOnly", () => {
+    const t = tileFor({ name: "a", local, cloud: null, pendingGone: true }, { signedIn: true, activeName: null });
+    eq(t.badge, "pendingGone");
+    eq(t.pendingGone, true);
+    assert(/消失|待处理/.test(t.badgeTitle), "标题说明 cloud-gone + 待处理");
+  });
+  it("ghost 优先于 pendingGone（dirty cloud-gone 走 ghost，不会误标 pendingGone）", () => {
+    const t = tileFor({ name: "a", local, cloud: null, ghost: true, pendingGone: true }, { signedIn: true, activeName: null });
+    eq(t.badge, "ghost");
+  });
 });
 
 describe("gallery-view-model · breadcrumb", () => {

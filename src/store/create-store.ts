@@ -17,6 +17,7 @@ import { createIdentity } from "./identity.ts";
 import { createTrash } from "./trash.ts";
 import { createOffload } from "./offload.ts";
 import { createReconcile } from "./reconcile.ts";
+import { createPendingGone } from "./pending-gone.ts";
 import { createCollection, emptyCollectionBytes, type Collection, type CollectionConfig } from "./collection.ts";
 import { createListing, type ListContext, type FolderSnapshot } from "./listing.ts";
 import { createUploadReplay, type UploadReplayPolicy } from "./upload-queue.ts";
@@ -88,6 +89,7 @@ export interface StoreConfig {
   //   2026-07-13：无用户/无后向兼容 → 清空 MIGRATIONS（历史 V001/V002 tax 删除），库以最新标准出生。
   //   框架（版本戳 + 有序注册表 + 编排）留着——将来真有用户、真要改 kv/IDB 结构时加第一条迁移。
   skipMigration?: boolean;                            // 测试/无 localStorage 环境跳过（prod 不传）
+  cloudGoneGraceMs?: number;                          // 云端防抖窗口覆盖（测试注入小值；prod 缺省 ~24h）
 }
 
 // ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 getPeek/setPeek ──
@@ -102,6 +104,9 @@ export interface RawFile {
   pullIfClean(opts?: RefreshOpts): Promise<FreshResult>;
   // 注：无 rename —— 改身份/移动**唯一入口 = store.tryMove(from,to)**（含 nameOccupied 占用检查，结果式不抛）。
   delete(): Promise<void>;
+  // 重新上传（candidate-gone 的「保留重传」动作）：本地 clean 字节推云到空 path。撞名(乌龙云端已有)→抛 CloudNameCollisionError
+  //   （app surface conflict）；成功→采纳新 etag 变 synced + 清 candidate。gallery 层没开文件 → 必须 store 内解决，不靠编辑器 save。
+  reupload(): Promise<{ status: string }>;
   // 注：无 isDirty —— 「有没未推的改动」是 **sync 状态**，经 store.listAllItems 的 syncState 读（unpushed/conflict）。
   //   「是否 dirty 该推」= app 编辑逻辑（编辑器生命周期模块）的判断，不是库的事。
   // ── 离线副本（keepOffline/offload；无 LRU、无 pin flag：有本地副本 = kept offline）──
@@ -167,7 +172,10 @@ export function createStore(config: StoreConfig) {
       ? Promise.resolve()
       : runStoreMigrations(appId, databaseId);
   const offloadMod = createOffload({ cloud, local, head, isOnline, serialize: sub.serialize });   // serialize：offload 的 hardDelete ⟂ save 的 local 写互斥（红线：驱逐不吃未推字节）
-  const reconcileMod = createReconcile({ cloud, local, head, isOnline });
+  // 云端防抖标记（candidate-gone）：clean cloud-gone 孤儿第一次权威见 gone 只标记，跨 GRACE 第二次+ 才 send trash（用户拍板 ~24h，2026-07-17）。
+  const CLOUD_GONE_GRACE_MS = 24 * 3600 * 1000;
+  const pendingGone = createPendingGone(kv, config.cloudGoneGraceMs ?? CLOUD_GONE_GRACE_MS);
+  const reconcileMod = createReconcile({ cloud, local, head, pending: pendingGone, isOnline });
 
   // ── folder 本地登记（离线建空夹）：pending = 建了但还没确认上云的空文件夹。──────────────
   //   离线也能建空夹（用户要求）：先 kv 登记 → 并进 listAllItems.folders（离线可见/持久）→ 回线 drainFolders 补建。
@@ -187,7 +195,7 @@ export function createStore(config: StoreConfig) {
   }
 
   // ── 统一列举（README §2）：整个虚拟 FS 一次列举 = local ∪ cloud，每项带 syncState。mergeLocalCloud 收进库内。──
-  const listing = createListing({ cloud, local, head, pendingFolders: readPending });
+  const listing = createListing({ cloud, local, head, pendingFolders: readPending, isPendingGone: (p) => pendingGone.isPending(p) });
 
   // ── watchFolder（网盘模型）：订阅**一个**文件夹。app 只知「这一夹更新了」，分不出也不需分 local/remote。──────
   //   连接态 store 自持（config.signedIn/isOnline）——app 不再传 ctx。每次回调同 shape（FolderSnapshot，仅该夹直属子项）。
@@ -461,6 +469,7 @@ export function createStore(config: StoreConfig) {
           if (await nameOccupied(name)) throw new CloudNameCollisionError(name);
         }
         head.recordEdit(name);                                   // 同步标脏：offload 的 isDirty 守卫立即可见（防驱逐吃未推字节）
+        pendingGone.clear(name);                                 // 编辑取消 candidate-gone：grace 内被编辑 → 立即当正常 dirty 文件处理（不等下轮 reconcile）
         const plain = await toU8(bytes);
         const sealed = await seal.sealForWrite(name, plain);
         await sub.serialize(name, () => local.save(name, sealed, opts?.hint));   // local 写同名串行链：与 offload.hardDelete 互斥（C2 红线）；hint 透传缩略图
@@ -492,6 +501,16 @@ export function createStore(config: StoreConfig) {
       },
       pullIfClean(opts) { return fresh.refresh(name, { isOnline, ...opts }); },   // 事件驱动干净快进（clean→FF、dirty→no-op）；默认注入 store 的 isOnline（离线早退，不空跑 fetchMeta）
       async delete() { await delSF(name); notifyFolderOf(name); },
+      reupload() {
+        return ui.busy("重新上传…", async () => {
+          if (!(await local.exists(name))) return { status: "no-local" };
+          head.forget(name);                       // 断旧云谱系（cloud 已 gone）→ no-base 首推
+          head.recordEdit(name);                   // 标未推 → 走首推路径（no-base，conflictBehavior:fail 撞名不覆盖）
+          const r = await pushLocalBytes(name);    // 复用 vetted push（seal 正确 + N6 + 撞名抛 CloudNameCollisionError → app surface）
+          if (!head.isDirty(name)) { pendingGone.clear(name); notifyFolderOf(name); }   // push 成功 = synced → 清 candidate + 重画
+          return r;
+        });
+      },
       isKeptOffline() { return local.exists(name); },   // 有本地副本 = 已留作离线（无 LRU、无独立 pin flag）
       async keepOffline() {   // 确保本地有副本（未缓存则 acquire；离线/失败 best-effort）
         if (!(await local.exists(name))) { try { await identity.acquire(name, { localName: name }); } catch (e) { ui.reportError(e); } }

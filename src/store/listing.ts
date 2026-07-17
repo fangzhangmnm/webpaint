@@ -23,6 +23,7 @@ export type SyncState =
   | "newer-on-cloud"    // bound ∧ clean ∧ cloudMoved（⟳ 云有新版待 pull）
   | "conflict"          // bound ∧ dirty ∧ cloudMoved（⚠ 两端都动）
   | "ghost"             // dirty ∧ cloudGone（👻 云端没了但有未推字节，绝不删）
+  | "pendingGone"       // clean ∧ cloudGone ∧ 在防抖 grace 内（曾 synced、云端刚没了；照常显示 + badge；跨 grace 才 send trash）
   | "float"             // ¬bound ∧ dirty（纯本地、从没 synced、有编辑）
   | "local-only";       // 本地、从没 synced、clean（真本地文件）
 
@@ -53,6 +54,7 @@ export function classifySyncState(f: {
   dirty: boolean;              // head.isDirty
   cloudReachable: boolean;
   absenceAuthoritative: boolean;
+  pendingGone?: boolean;       // clean cloud-gone 孤儿被 reconcile 标了 candidate-gone（防抖 grace 内）→ 显 pendingGone 而非 local-only
 }): SyncState {
   if (!f.hasLocal) return "cloud-only";                 // union 保证：到这一定 hasCloud
   // ── 本地有副本 ────────────────────────────────────────────────
@@ -69,7 +71,9 @@ export function classifySyncState(f: {
   // ── 云列表里没有 ──────────────────────────────────────────────
   if (!f.everSynced) return f.dirty ? "float" : "local-only";   // 从没 synced = 真本地新文件，云端本就没有
   if (!f.absenceAuthoritative) return f.dirty ? "unpushed" : "synced";  // partial：没看到≠没了 → 保守显示「仍在」
-  return f.dirty ? "ghost" : "local-only";              // 真 cloud-gone：dirty→👻ghost（绝不删）；clean 孤儿→local-only（reconcile 会清 etag 轨道）
+  // 真 cloud-gone：dirty→👻ghost（绝不删）；clean 孤儿→防抖 grace 内显 pendingGone、grace 后被 reconcile trash 掉即从列表消失，否则 local-only。
+  if (f.dirty) return "ghost";
+  return f.pendingGone ? "pendingGone" : "local-only";
 }
 
 // ── 编排：union(cloud.listAll, local.appKeys) ⋈ local-head → Item[] ─────────────────────
@@ -78,6 +82,7 @@ export interface ListingCfg {
   local: Pick<LocalCache, "appKeys"> & Partial<Pick<LocalCache, "stat">>;   // stat 选填：给本地项填 size/updatedAt（老 mock 无 stat → 跳过）
   head: Pick<LocalHead, "seenBase" | "isDirty">;
   pendingFolders?: () => string[];   // 离线建、尚未确认上云的空文件夹（folder-registry；并进 folders 让它离线可见）
+  isPendingGone?: (path: string) => boolean;   // clean cloud-gone 孤儿在防抖 grace 内（pending-gone 深模块）→ 显 pendingGone badge
 }
 
 // 单夹 snapshot（watchFolder 每次回调的形状）——**只这一夹的直属子项**（非递归）。
@@ -92,7 +97,7 @@ const toMs = (v: string | number | undefined): number | undefined => {
 };
 
 export function createListing(cfg: ListingCfg) {
-  const { cloud, local, head, pendingFolders } = cfg;
+  const { cloud, local, head, pendingFolders, isPendingGone } = cfg;
 
   // 一个 path 的原始事实 → Item（cloud/local 两轴 + head → classifier）。listAllItems 与 listFolder 共用。
   function classifyPath(
@@ -111,6 +116,7 @@ export function createListing(cfg: ListingCfg) {
       hasLocal, hasCloud, everSynced, cloudMoved,
       dirty: head.isDirty(path),
       cloudReachable, absenceAuthoritative,
+      pendingGone: isPendingGone?.(path),
     });
     // size/时间：云端有就用云端（authoritative），否则用本地缓存记录 → 离线 / 云端帧到达前也不显 0B/1970。
     return { path, syncState, size: cf?.size ?? localStat?.size, lastModified: cf?.lastModified ?? localStat?.updatedAt };

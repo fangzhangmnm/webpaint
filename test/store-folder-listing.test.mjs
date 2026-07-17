@@ -7,6 +7,7 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 import { createListing } from "../src/store/listing.ts";
 import { createReconcile } from "../src/store/reconcile.ts";
+import { createPendingGone } from "../src/store/pending-gone.ts";
 import { createCloudSync, memKv } from "../src/store/cloud-sync.ts";
 import { createMockProvider } from "../src/store/mock-provider.ts";
 import { createMockLocal } from "../src/store/mock-local.ts";
@@ -67,35 +68,42 @@ describe("listing.listFolder · 单夹直属 scope + 子夹派生", () => {
 
 // ── reconcile.reconcileFolder（per-folder cloud-gone + 数据安全 guardrail）──────────────────
 describe("reconcile.reconcileFolder · per-folder cloud-gone guardrail", () => {
+  // grace=0：第一次 reconcileFolder 只标 candidate，第二次即动手（now-first=0≥0）——单测里不必真等 24h。
   function mk(cloudFolderRes, appKeys, seen, dirty = new Set(), online = true) {
-    const cleared = [], forgot = [];
+    const cleared = [], forgot = [], trashed = [];
     const cloud = {
       async listAll() { return { files: [], folders: [], complete: true }; },
       async listFolder() { return cloudFolderRes; },
       clearState: (n) => cleared.push(n),
     };
-    const local = { async appKeys() { return appKeys; } };
+    const local = { async appKeys() { return appKeys; }, async trash(n) { trashed.push(n); return `trash/${n}`; } };
     const head = {
       seenBase: (n) => (n in seen ? seen[n] : null),
       isDirty: (n) => dirty.has(n),
       forget: (n) => forgot.push(n),
     };
-    return { rec: createReconcile({ cloud, local, head, isOnline: () => online }), cleared, forgot };
+    const pending = createPendingGone(memKv(), 0);
+    return { rec: createReconcile({ cloud, local, head, pending, now: () => 1, isOnline: () => online }), cleared, forgot, trashed, pending };
   }
 
-  it("本夹 clean 孤儿→demote；别夹 clean 文件绝不被降级（不跨夹追踪）；dirty 孤儿留", async () => {
-    const { rec, cleared, forgot } = mk(
+  it("本夹 clean 孤儿→去抖后 send trash；别夹 clean 文件绝不被降级（不跨夹追踪）；dirty 孤儿留", async () => {
+    const { rec, cleared, forgot, trashed, pending } = mk(
       { files: [{ path: "A/keep", eTag: "e" }], folders: [], complete: true },
       ["A/keep", "A/goneClean", "A/goneDirty", "B/goneClean"],
       { "A/keep": "e", "A/goneClean": "old", "A/goneDirty": "old", "B/goneClean": "old" },
       new Set(["A/goneDirty"]),
     );
-    const { demoted } = await rec.reconcileFolder("A");
+    const first = await rec.reconcileFolder("A");
+    eq(first.demoted.length, 0, "第一次只标 candidate、不删");
+    assert(pending.isPending("A/goneClean"), "A/goneClean 标 candidate");
+    assert(!pending.isPending("B/goneClean"), "★别夹 clean 文件绝不被本次标（guardrail：不列别夹 local key）");
+    const { demoted } = await rec.reconcileFolder("A");   // 第二次：grace=0 → 动手
     eq(demoted.length, 1, "只降级一个");
     eq(demoted[0], "A/goneClean");
+    eq(trashed.join(","), "A/goneClean", "本地 send trash");
     assert(cleared.includes("A/goneClean") && forgot.includes("A/goneClean"), "清两条 etag 轨道");
-    assert(!cleared.includes("B/goneClean") && !forgot.includes("B/goneClean"), "★别夹 clean 文件绝不被本次降级（guardrail）");
-    assert(!demoted.includes("A/goneDirty"), "dirty 孤儿留（ghost，绝不删）");
+    assert(!cleared.includes("B/goneClean") && !forgot.includes("B/goneClean"), "★别夹 clean 文件绝不被降级（guardrail）");
+    assert(!demoted.includes("A/goneDirty") && trashed.length === 1, "dirty 孤儿留（ghost，绝不删）");
   });
 
   it("这一夹没列全（complete:false）→ no-op，绝不据此判 gone", async () => {

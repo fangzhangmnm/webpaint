@@ -13,6 +13,7 @@
 //   据此降级会误把一堆好文件断了云端谱系。所以只在「在线 ∧ listAll.complete ∧ 非空」时才收敛。
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
+import type { PendingGone } from "./pending-gone.ts";
 import { isHidden } from "./is-hidden.ts";   // 隐藏项（.trash/.backup/.<appId>/任意 dot）：云端已过滤，本地侧也别据此误判 gone
 import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 
@@ -43,25 +44,42 @@ export function classifyCloudGone(
 
 export interface ReconcileCfg {
   cloud: Pick<CloudSync, "listAll" | "listFolder" | "clearState">;
-  local: Pick<LocalCache, "appKeys">;
+  local: Pick<LocalCache, "appKeys" | "trash">;
   head: Pick<LocalHead, "seenBase" | "isDirty" | "forget">;
+  pending: PendingGone;                 // 云端防抖（candidate-gone）标记
+  now?: () => number;                   // 时钟（测试注入；默认 Date.now）
   isOnline?: () => boolean;
 }
 
 export function createReconcile(cfg: ReconcileCfg) {
-  const { cloud, local, head, isOnline } = cfg;
+  const { cloud, local, head, pending, isOnline } = cfg;
+  const now = cfg.now || (() => Date.now());
 
-  // 共用收敛：给一组 localNames + 权威 cloudNameSet → demote clean 孤儿（清两条 etag 轨道；本地 blob 不动）。
-  function converge(localNames: string[], cloudNames: Set<string>, authoritative: boolean, activeName?: string): { demoted: string[] } {
+  // 共用收敛（SSOT，reconcileAll + reconcileFolder + 各云端帧都经此）：给一组 localNames + **权威** cloudNameSet →
+  //   clean 孤儿走**去抖**：第一次权威见 gone → 标 candidate（照常显示 + pendingGone badge，不删）；连续第二次+且跨 GRACE
+  //   → 本地 send trash（云端已 gone，可恢复）+ 清两条 etag 轨道 + 清 candidate。重现/被编辑 dirty → 自愈清 candidate。
+  //   **非权威（partial/空/离线）→ 整个 no-op**：既不推进防抖、也不清 candidate（网抖不该动它）。dirty 孤儿 → ghost，永不碰。
+  async function converge(localNames: string[], cloudNames: Set<string>, authoritative: boolean, activeName?: string): Promise<{ demoted: string[] }> {
+    if (!authoritative) return { demoted: [] };
     localNames = localNames.filter((n) => !isHidden(n));   // 隐藏项云端本就不列 → 别据「云端没有」误判 gone
+    // 自愈/取消：candidate 重现（云端权威有）或已变 dirty（被编辑）→ 清标记。
+    for (const name of localNames) {
+      if (pending.isPending(name) && (cloudNames.has(name) || head.isDirty(name))) pending.clear(name);
+    }
     const { demote } = classifyCloudGone(localNames, cloudNames, {
       seenBase: (n) => head.seenBase(n),
       isDirty: (n) => head.isDirty(n),
       authoritative,
       skip: activeName ? (n) => n === activeName : undefined,
     });
-    for (const name of demote) { cloud.clearState(name); head.forget(name); }
-    return { demoted: demote };
+    const demoted: string[] = [];
+    for (const name of demote) {
+      if (!pending.seenGone(name, now())) continue;   // 首次见 gone / grace 内 → 标记+留着（badge），不删
+      await local.trash(name);                        // 跨 GRACE 第二次+ → 本地 send trash（move-aside，可恢复）
+      cloud.clearState(name); head.forget(name); pending.clear(name);   // 清两条 etag 轨道 + candidate
+      demoted.push(name);
+    }
+    return { demoted };
   }
 
   // **全库** cloud-gone 收敛——**仅用户显式指令**（将来隐藏的「校验完整性」入口），**绝不自动/轮询**。

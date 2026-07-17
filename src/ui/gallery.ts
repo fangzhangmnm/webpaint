@@ -48,6 +48,8 @@ const ICON = {
   folder: SVG('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', "1.6"),
   cloudBig: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>', "1.6"),
   ghost: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><line x1="3" y1="3" x2="21" y2="21"/>'),
+  // pendingGone：云端消失、本地干净待处理（防抖 grace 内）——云 + 时钟指针（宽限期），区别于 ghost 的划叉。
+  pendingGone: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><circle cx="12" cy="13" r="3.2"/><path d="M12 11.4v1.6l1.1.9"/>', "1.6"),
   lock: SVG('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>', "1.6"),
 };
 
@@ -325,6 +327,23 @@ function makeGallery(host: GalleryHost) {
       }
 
       async function push(item: GItem) { openMenu.value = null; await session.push(item); await reload(); }
+      // 重新上传（pendingGone 项）：本地干净字节推回空 path（store.file.reupload）。撞名(乌龙云端已有)→conflict surface；成功→synced + 清 candidate。
+      async function reupload(item: GItem) {
+        openMenu.value = null;
+        await host.busy(t("gal.busy.reupload"), async () => {
+          try {
+            const r = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).reupload();
+            if (r.status === "no-local") { host.status(t("gal.st.reuploadFail", { e: "no-local" }), true); return; }
+            host.status(t("gal.st.reuploaded", { name: item.name }));
+          } catch (e: unknown) {
+            const msg = String((e as { message?: unknown })?.message || e);
+            // no-base 撞名（乌龙：别设备已在同名放了异内容）→ CloudNameCollisionError（name/message 含撞名信息）
+            if ((e as { name?: string })?.name === "CloudNameCollisionError" || /collision|已存在|exists/i.test(msg)) host.status(t("gal.st.reuploadConflict", { name: item.name }), true);
+            else host.status(t("gal.st.reuploadFail", { e: msg }), true);
+          }
+        });
+        await reload();
+      }
       async function unload(item: GItem) { openMenu.value = null; await session.unload(item); await reload(); }
 
       // ---- 加密 intent（ADR-0012）。transform 与密码循环都在 store（flow.encrypt/decrypt +
@@ -470,12 +489,13 @@ function makeGallery(host: GalleryHost) {
         rename: t("gal.rename"), moveTo: t("gal.moveTo"), copy: t("gal.copy"), pullLocal: t("gal.pullLocal"),
         pushCloud: t("gal.pushCloud"), unloadLocal: t("gal.unloadLocal"), encrypt: t("menu.encrypt"), decrypt: t("menu.decrypt"),
         toTrash: t("gal.toTrash"), deleted: t("gal.deleted"), restore: t("gal.restore"), purge: t("gal.purge"),
+        reupload: t("gal.reupload"),
       };
       return {
         view, folder, loading, openMenu, isEmpty, emptyText, L,
         folderTiles, fileTiles, trashTiles, crumbs,
         badgeIcon, fmtMeta, ICON, toggleMenu, setFolder, hydrateFolder, enterFolder,
-        openTile, rename, move, copy, push, unload, del, folderDelete, trashRestore, trashPurge, emptyTrash,
+        openTile, rename, move, copy, push, reupload, unload, del, folderDelete, trashRestore, trashPurge, emptyTrash,
         encryptItem, decryptItem, onUnlock,
         reload, setView: (v: "files" | "trash") => { view.value = v; reload(); },
       };
@@ -520,6 +540,10 @@ function makeGallery(host: GalleryHost) {
                 <div class="gallery-menu-note">{{ L.divergedNote }}</div>
                 <button type="button" @click="rename(row.item)">{{ L.renameKeep }}</button>
                 <button type="button" class="danger" @click="del(row.item)">{{ L.discardToTrash }}</button>
+              </template>
+              <template v-else-if="row.t.pendingGone">
+                <button type="button" @click="reupload(row.item)">{{ L.reupload }}</button>
+                <button type="button" class="danger" @click="del(row.item)">{{ L.toTrash }}</button>
               </template>
               <template v-else>
                 <button type="button" @click="rename(row.item)">{{ L.rename }}</button>

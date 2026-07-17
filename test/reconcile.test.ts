@@ -1,7 +1,14 @@
 // reconcile 深模块测试：cloud-gone 安全收敛。纯分类器穷举 + 编排守卫（离线/partial/空/抛错→no-op）。
-// 红线：只降 clean 孤儿（清两轨 etag、blob 不动）；dirty/从没synced/在云端/非权威 一律不动；绝不删/trash。
-import { test, eq } from "./runner.mjs";
+// 红线（升级后 2026-07-17）：clean 孤儿走**去抖**——第一次权威见 gone 只标 candidate（不删）；连续第二次+且跨 GRACE
+//   → 本地 send trash（可恢复）+ 清两轨 etag；重现/被编辑 → 自愈清 candidate；dirty/从没synced/在云端/非权威 一律不动。
+import { test, eq, assert } from "./runner.mjs";
 import { classifyCloudGone, createReconcile } from "../src/store/reconcile.ts";
+import { createPendingGone } from "../src/store/pending-gone.ts";
+
+function memKv() {
+  const m = new Map<string, string>();
+  return { get: (k: string) => (m.has(k) ? m.get(k)! : null), set: (k: string, v: string) => { m.set(k, String(v)); }, remove: (k: string) => { m.delete(k); } };
+}
 
 // ── 纯分类器（穷举）──
 test("[reconcile] not authoritative → 空", () => {
@@ -29,35 +36,79 @@ test("[reconcile] K1 skip（当前打开的 doc）→ 不降级", () => {
   eq(r.demote.length, 0, "active doc 跳过");
 });
 
-// ── 编排（守卫 + demote 动作）──
-function rig(opts: { online?: boolean } = {}) {
-  const local = { appKeys: async () => ["orphan.pdf", "live.pdf", "localfile.pdf", "dirty.pdf"] };
+// ── 编排（守卫 + 去抖 trash 动作）──
+function rig(opts: { online?: boolean; graceMs?: number } = {}) {
+  const local = { appKeys: async () => ["orphan.pdf", "live.pdf", "localfile.pdf", "dirty.pdf"], trash: async (n: string) => { trashed.push(n); return `trash/${n}`; } };
   const seen = new Map<string, string>([["orphan.pdf", "e"], ["live.pdf", "e"], ["dirty.pdf", "e"]]);  // localfile.pdf 从没 synced
   const dirty = new Set(["dirty.pdf"]);
-  const cleared: string[] = [], forgotten: string[] = [];
+  const cleared: string[] = [], forgotten: string[] = [], trashed: string[] = [];
   const head = { seenBase: (n: string) => (seen.has(n) ? seen.get(n)! : null), isDirty: (n: string) => dirty.has(n), forget: (n: string) => forgotten.push(n) };
   let listResult: { files: { path: string }[]; folders: string[]; complete: boolean } | "throw" = { files: [{ path: "live.pdf" }], folders: [], complete: true };
   const cloud = { listAll: async () => { if (listResult === "throw") throw new Error("x"); return listResult; }, clearState: (n: string) => { cleared.push(n); } };
-  const { reconcile } = createReconcile({ cloud: cloud as any, local: local as any, head: head as any, isOnline: () => opts.online !== false });
-  return { reconcile, cleared, forgotten, setList: (l: typeof listResult) => { listResult = l; } };
+  let clock = 100000;
+  const pending = createPendingGone(memKv(), opts.graceMs ?? 1000);
+  const { reconcile } = createReconcile({ cloud: cloud as any, local: local as any, head: head as any, pending, now: () => clock, isOnline: () => opts.online !== false });
+  return { reconcile, cleared, forgotten, trashed, pending, tick: (ms: number) => { clock += ms; }, setDirty: (n: string) => dirty.add(n), setList: (l: typeof listResult) => { listResult = l; } };
 }
 
-test("[reconcile] happy：clean 孤儿 demote（清两轨 etag、blob 不动）", async () => {
+test("[reconcile] 去抖：第一次权威见 gone → 只标 candidate，不删（demoted 空、pendingGone、blob 不动）", async () => {
   const r = rig();
   const out = await r.reconcile();
-  eq(out.demoted.join(","), "orphan.pdf", "只降 orphan（live 在云端 / localfile 无 seenBase / dirty 留）");
-  eq(r.cleared.join(","), "orphan.pdf", "cloud.clearState 调过");
-  eq(r.forgotten.join(","), "orphan.pdf", "head.forget 调过");
+  eq(out.demoted.length, 0, "首次不删");
+  assert(r.pending.isPending("orphan.pdf"), "orphan 标为 candidate-gone");
+  eq(r.trashed.length, 0, "没 trash"); eq(r.forgotten.length, 0, "没清谱系");
+  assert(!r.pending.isPending("live.pdf") && !r.pending.isPending("localfile.pdf") && !r.pending.isPending("dirty.pdf"), "live/从没synced/dirty 都不标");
 });
-test("[reconcile] 离线 → 整个 no-op", async () => {
+test("[reconcile] 去抖：连续第二次 + 跨 GRACE → 本地 send trash + 清两轨 etag + 清 candidate", async () => {
+  const r = rig({ graceMs: 1000 });
+  await r.reconcile();          // 第一次：标记
+  r.tick(1500);                 // 跨过 grace
+  const out = await r.reconcile();
+  eq(out.demoted.join(","), "orphan.pdf", "跨 grace 第二次 → 动手");
+  eq(r.trashed.join(","), "orphan.pdf", "本地 send trash（可恢复）");
+  eq(r.cleared.join(","), "orphan.pdf", "cloud.clearState");
+  eq(r.forgotten.join(","), "orphan.pdf", "head.forget");
+  assert(!r.pending.isPending("orphan.pdf"), "candidate 清掉");
+});
+test("[reconcile] 去抖：grace 内第二次 → 仍不删（防单次网抖误删）", async () => {
+  const r = rig({ graceMs: 1000 });
+  await r.reconcile();
+  r.tick(500);                  // 没到 grace
+  const out = await r.reconcile();
+  eq(out.demoted.length, 0, "grace 内不动手");
+  eq(r.trashed.length, 0, "没 trash");
+  assert(r.pending.isPending("orphan.pdf"), "candidate 还在");
+});
+test("[reconcile] 重现即自愈：candidate 后云端又出现 → 清 candidate、绝不删", async () => {
+  const r = rig({ graceMs: 1000 });
+  await r.reconcile();          // 标记 orphan
+  assert(r.pending.isPending("orphan.pdf"), "先标了");
+  r.setList({ files: [{ path: "live.pdf" }, { path: "orphan.pdf" }], folders: [], complete: true });  // orphan 重现
+  r.tick(2000);                 // 就算跨了 grace
+  const out = await r.reconcile();
+  eq(out.demoted.length, 0, "重现 → 不删");
+  assert(!r.pending.isPending("orphan.pdf"), "candidate 自愈清掉");
+  eq(r.trashed.length, 0, "没 trash");
+});
+test("[reconcile] 编辑取消：candidate 后变 dirty → 清 candidate、当 ghost 处理（不删）", async () => {
+  const r = rig({ graceMs: 1000 });
+  await r.reconcile();          // 标记 orphan
+  r.setDirty("orphan.pdf");     // grace 内被编辑
+  r.tick(2000);
+  const out = await r.reconcile();
+  eq(out.demoted.length, 0, "dirty → 不删");
+  assert(!r.pending.isPending("orphan.pdf"), "candidate 取消");
+  eq(r.trashed.length, 0, "未推字节绝不动");
+});
+test("[reconcile] 离线 → 整个 no-op（不推进防抖）", async () => {
   const r = rig({ online: false });
   const out = await r.reconcile();
-  eq(out.demoted.length, 0, "离线不收敛"); eq(r.forgotten.length, 0, "没动谱系");
+  eq(out.demoted.length, 0, "离线不收敛"); assert(!r.pending.isPending("orphan.pdf"), "离线不标 candidate");
 });
 test("[reconcile] partial 列表（complete=false）→ no-op（失败-fetch 守卫）", async () => {
   const r = rig(); r.setList({ files: [{ path: "live.pdf" }], folders: [], complete: false });
   const out = await r.reconcile();
-  eq(out.demoted.length, 0, "partial 不收敛（缺失≠云端真没了）");
+  eq(out.demoted.length, 0, "partial 不收敛"); assert(!r.pending.isPending("orphan.pdf"), "partial 不标 candidate");
 });
 test("[reconcile] 空列表 → no-op（多半未登录/网抖）", async () => {
   const r = rig(); r.setList({ files: [], folders: [], complete: true });
