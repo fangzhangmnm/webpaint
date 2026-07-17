@@ -91,12 +91,12 @@ test("[collection] getItem/setItem 两侧 shallow copy 隔离（改副本不污�
 test("[collection] onChange(id,cb) 单 key 绑定：只该 key 变才触发", async () => {
   const provider = createMockProvider();
   const a = mkStore(dumpKv(), provider).store.collection("synced-user-preference");
-  await a.init(); a.setItem("lang", "zh"); await a.flush();   // A 先推云 lang=zh
+  await a.init(); a.setItem("lang", "zh"); await a.reconcileWithRemote();   // A 先推云 lang=zh
   const b = mkStore(dumpKv(), provider).store.collection("synced-user-preference");   // B 后登录（另一台设备）
   let langHits = 0, otherHits = 0;
   b.onChange("lang", () => { langHits++; });
   b.onChange("other-key", () => { otherHits++; });
-  await b.init(); await b.pullAndReconcile();       // B 拉云 → lang 从无→zh 值变
+  await b.init(); await b.reconcileWithRemote();       // B 拉云 → lang 从无→zh 值变
   assert(langHits >= 1, "绑定的 lang 变了 → 触发");
   eq(otherHits, 0, "没变的 other-key → 不触发");
 });
@@ -118,7 +118,7 @@ test("[collection] local-only 变体：不上云（无 collections.etag/dirty kv
   const c = store.collection("local-user-preference", { local: true });
   await c.init();
   c.setItem("color-theme", "night");
-  await c.flush();
+  await c.flushLocal();
   eq(c.getItem("color-theme", "auto"), "night", "本地往返 OK");
   eq(c.isDirty(), false, "local-only 永不脏");
   assert(!kv.keys().some((k) => k.includes("collections.etag:local-user-preference")), "local-only 不写 collections etag kv");
@@ -128,8 +128,8 @@ test("[collection] local-only 变体：不上云（无 collections.etag/dirty kv
 
 test("[narrow-waist] databaseId：默认 defaultStore；不同 databaseId → 不同命名空间根（多实例不打架）", async () => {
   const kvA = dumpKv(), kvB = dumpKv();
-  const a = mkStore(kvA).store.collection("synced-user-preference"); await a.init(); a.setItem("lang", "zh"); await a.flush();
-  const b = mkStore(kvB, createMockProvider(), "thumbs").store.collection("synced-user-preference"); await b.init(); b.setItem("lang", "en"); await b.flush();
+  const a = mkStore(kvA).store.collection("synced-user-preference"); await a.init(); a.setItem("lang", "zh"); await a.reconcileWithRemote();
+  const b = mkStore(kvB, createMockProvider(), "thumbs").store.collection("synced-user-preference"); await b.init(); b.setItem("lang", "en"); await b.reconcileWithRemote();
   assert(kvA.keys().every((k) => k.startsWith("wp.defaultStore.")), "默认根 wp.defaultStore");
   assert(kvB.keys().every((k) => k.startsWith("wp.thumbs.")), "自定义根 wp.thumbs");
 });
@@ -152,7 +152,7 @@ test("[narrow-waist] file 与同名 collection 的 etag 落不同前缀（两实
   const coll = store.collection("dup");
   await coll.init();
   coll.setItem("k", { v: 1 });
-  await coll.flush();                                                                        // collection 推云
+  await coll.reconcileWithRemote();                                                                        // collection 推云
 
   assert(kv.keys().some((k) => k.startsWith("wp.defaultStore.files.etag:")), "文件 etag 落 files.etag:");
   assert(kv.keys().some((k) => k === "wp.defaultStore.collections.etag:dup"), "collection etag 落 collections.etag:dup");

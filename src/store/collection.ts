@@ -7,16 +7,27 @@
 //   per-item uat-LWW（CRDT-lite，零冲突静默 last-win，配置类可接受丢失——见 folder-merge §N11）。
 //   同步复用 folder-flow（pull-merge-push，If-Match）。序列化 = JSON（#68：库内部 JSON，app 不传 encode/decode）。
 //
+// **删除 = 墓碑（value:null）**：deleteItem(id) ≡ setItem(id, null)。null 是**明确删除指令**（非「未知」），
+//   带 uat 参与 last-write-wins（删得晚→删掉；编辑得晚→留编辑）。墓碑留在 items[] 里照 LWW 跨设备传播，
+//   读面（keys/entries/getItem/getEntry）过滤 value===null。**setItem(id, undefined) 报错**（None 非法；
+//   要删传 null 或用 deleteItem）。无独立 trash 集合、无 resetAt 水位线（2026-07 tombstone 化）。
+//
+// **新库初始化（getInitData）**：仅当这份 collection 的 json **不存在**时调 getInitData() 填初始值，uat=1
+//   （最低戳 → 任何真实编辑 / 别设备的真数据必胜）。判「新库」：离线 = idb 无此 collection；
+//   在线 = idb 无 && 云端也无。见下 init()/firstReconcile()。
+//
 // 读写 = **同步内存**（getItem/setItem 不 await）；两侧 value 浅拷贝隔离（app 拿到/传入的对象改动不与信封互相污染）。
 //   但内存 env 在 init() 前为空（getItem 返 default，setItem 抛错）。onChange(cb) 整库 / onChange(id,cb) 绑单 key。
 //   init()（编排锁库内，照 file.open）：先 await hydrateLocal（本地 IDB，快）→ 再**后台 fire-and-forget**
 //   reconcile 云端（不 await）→ resolve。boot await init() 拿本地即够；云端后台对齐、onChange 通知。
-//   pullAndReconcile()：事件驱动（focus/visible/online）重拉+resolve，per-key LWW（同 file.refresh）。
+//   reconcileWithRemote()：事件驱动（focus/visible/online）重拉+resolve，per-key LWW（同 file.refresh）。
+//   pull 时若 local 有 uat-newer / pending → 一并 push（故名 reconcileWithRemote，非单向 pull）。
 // local-only 变体（cloudless）：只走 IDB 本地缓存、永不碰云（flow.sync）。给设备本地设置用。
-import { createFolderFlow } from "./folder-flow.ts";
-import { emptyFolder, parseFolderBlob, mergeFolders, normalizeFolder } from "./folder-merge.ts";
+import { createFolderFlow, type FolderFlowResult } from "./folder-flow.ts";
+import { emptyFolder, parseFolderBlob, mergeFolders, normalizeFolder, FOLDER_ENVELOPE_VERSION } from "./folder-merge.ts";
 import type { FolderEnvelope, FolderItem } from "./folder-merge.ts";
 import type { CloudSync, LocalCache } from "./types.ts";
+import { reportStoreError } from "./error-handling.ts";
 
 // collection 在本地缓存（IDB `blobs`）里的键名 = collections 分区（`collections/<name>`）。
 export function collectionLocalKey(name: string): string { return `collections/${name}`; }
@@ -25,32 +36,39 @@ export function collectionLocalKey(name: string): string { return `collections/$
 export interface CollectionEntry { id: string; uat: number; value: unknown; }
 export type ChangeCb = (changedIds: string[]) => void;
 
+// getInitData 的初始项：id + value（value 不可为 undefined）。app 域构造（如笔架把 builtin-brushes.json
+//   映射成 [{id, value}]），store 内容无关——不知道装的是笔。
+export interface CollectionInitItem { id: string; value: unknown; }
+
+const SEED_UAT = 1;   // 初始值 uat：最低戳，任何真实编辑（Date.now）/ 别设备真数据必胜。
+
 export interface CollectionConfig {
   cloud: CloudSync;
   name: string;                 // 同步键 = 云端文件名（如 "synced-user-preference.json"）
   isOnline?: () => boolean;
   syncDelayMs?: number;         // 编辑后防抖自动同步（collection 无冲突、union 安全，频繁推也行）
   now?: () => number;           // uat 盖戳（默认 Date.now；测试可注入确定时钟）
-  manual?: boolean;             // true=setItem/delete 只标脏不自动调度，由 flush 驱动 commit
+  manual?: boolean;             // true=setItem/delete 只标脏不自动调度云推，由 reconcileWithRemote 驱动 commit
   /** 本地缓存（IDB）：透明缓存内存 env → 离线可读 + 强杀存活 + 旧设备旧缓存靠 uat-LWW 不盖新。不传 = 纯内存+云。 */
   local?: Pick<LocalCache, "save" | "get" | "exists">;
   localWriteDelayMs?: number;   // 本地写防抖（coalesce 高频 setItem，避免每帧写 IDB）。默认 400。
-  cloudless?: boolean;          // local-only 变体：永不碰云（init 只 hydrate、setItem 只写本地、pullAndReconcile no-op）。
+  cloudless?: boolean;          // local-only 变体：永不碰云（init 只 hydrate、setItem 只写本地、reconcileWithRemote no-op）。
+  /** 仅当这份 collection 的 json **不存在**时调（填初始值，uat=1）。store 内容无关：app 域构造 [{id,value}]。 */
+  getInitData?: () => CollectionInitItem[] | Promise<CollectionInitItem[]>;
 }
 
 export interface Collection {
-  init(): Promise<void>;                              // 先 hydrate 本地（快）→ 后台 reconcile 云端（不 await）
-  pullAndReconcile(): Promise<void>;                  // 事件驱动（focus/visible/online）重拉云端 + resolve（per-key LWW）
-  setItem(id: string, value: unknown): void;          // 同步写内存 + 防抖持久化（init 前抛错）
-  deleteItem(id: string): void;                       // 移到 trash（edit-wins 合并）
-  getItem<V = unknown>(id: string, def?: V | (() => V)): V | undefined;   // 同步读 value（无值→default）
-  getEntry(id: string): CollectionEntry | undefined;  // 带 uat 的完整 entry
-  entries(): CollectionEntry[];                       // 全部 entry
-  keys(): string[];                                   // 全部 id
+  init(): Promise<void>;                              // 先 hydrate 本地（快）→ 后台 reconcile 云端（不 await）+ 新库 seed
+  reconcileWithRemote(): Promise<void>;               // 事件驱动（focus/visible/online）重拉云端 + resolve（per-key LWW；local newer/pending 一并 push）
+  setItem(id: string, value: unknown): void;          // 同步写内存 + 防抖持久化（init 前抛错；value===undefined 报错）
+  deleteItem(id: string): void;                       // ≡ setItem(id, null)：null 墓碑，LWW
+  getItem<V = unknown>(id: string, def?: V | (() => V)): V | undefined;   // 同步读 value（无值 / 墓碑 → default）
+  getEntry(id: string): CollectionEntry | undefined;  // 带 uat 的完整 entry（墓碑 → undefined）
+  entries(): CollectionEntry[];                       // 全部 entry（过滤墓碑）
+  keys(): string[];                                   // 全部 id（过滤墓碑）
   onChange(cb: ChangeCb): () => void;                 // 整库：云端 reconcile/refresh 带来值变→通知 changedIds（返退订）
   onChange(id: string, cb: () => void): () => void;   // 单 key：绑某个 key，其值变→通知（返退订）
-  flush(): Promise<void>;                             // 取消防抖、写本地 + 若脏立即云同步
-  flushLocal(): Promise<void>;                        // 仅把内存 env 立即写本地缓存（卸载兜底；无网络）
+  flushLocal(): Promise<void>;                        // 仅把内存 env 立即写本地缓存（卸载兜底；无网络）——云推由 reconcileWithRemote 兜底
   isDirty(): boolean;
 }
 
@@ -73,9 +91,13 @@ const shallowCopy = <V>(v: V): V =>
   : (v && typeof v === "object") ? ({ ...(v as object) } as V)
   : v;
 
+// 墓碑判定：value===null = 删除指令。
+const valueOf = (e: FolderItem): unknown => (e as { value?: unknown }).value;
+const isTombstone = (e: FolderItem): boolean => valueOf(e) === null;
+
 export function createCollection(cfg: CollectionConfig): Collection {
   const { cloud, name, isOnline, syncDelayMs = 1500, now = () => Date.now(), manual = false,
-    local, localWriteDelayMs = 400, cloudless = false } = cfg;
+    local, localWriteDelayMs = 400, cloudless = false, getInitData } = cfg;
   const flow = createFolderFlow({ cloud, name, encode, decode, isOnline });
   let env: FolderEnvelope = emptyFolder();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -83,9 +105,10 @@ export function createCollection(cfg: CollectionConfig): Collection {
   const listeners = new Set<ChangeCb>();
 
   // ── onChange：云端 reconcile/refresh 带来值变 → 通知订阅者（如 theme 云变热重贴）。──────────
+  //   墓碑（value:null）也计入快照 → 删除会触发 onChange（别台删了本地要跟着移除）。
   const snapshotValues = (): Map<string, string> => {
     const m = new Map<string, string>();
-    for (const e of env.items) if (e.id != null) m.set(String(e.id), JSON.stringify((e as { value?: unknown }).value));
+    for (const e of env.items) if (e.id != null) m.set(String(e.id), JSON.stringify(valueOf(e)));
     return m;
   };
   const fireChanged = (before: Map<string, string>): void => {
@@ -94,12 +117,13 @@ export function createCollection(cfg: CollectionConfig): Collection {
     const changed: string[] = [];
     for (const [id, v] of after) if (before.get(id) !== v) changed.push(id);
     for (const [id] of before) if (!after.has(id)) changed.push(id);
-    if (changed.length) for (const cb of listeners) { try { cb(changed); } catch { /* 单个监听崩不连累 */ } }
+    if (changed.length) for (const cb of listeners) { try { cb(changed); } catch (e) { reportStoreError(e, "log"); } }
   };
 
   // ── 本地缓存（IDB）：透明镜像内存 env（含 uat 的完整 envelope）。──────────────────────
   const localKey = collectionLocalKey(name);
   let hydrated = false;
+  let idbHad = false;                             // hydrate 时本地是否已有这份 collection（新库判定用）
   let localTimer: ReturnType<typeof setTimeout> | null = null;
   let localChain: Promise<void> = Promise.resolve();
 
@@ -113,9 +137,12 @@ export function createCollection(cfg: CollectionConfig): Collection {
     if (!local || hydrated) return;
     hydrated = true;
     try {
-      const cached = parseFolderBlob((await bytesOf(await local.get(localKey))) ?? new Uint8Array(0));
-      if (cached) env = mergeFolders(env, cached);   // 合并进当前 env（保留各 item uat）
-    } catch { /* 坏本地缓存 → 忽略，回退云端 */ }
+      idbHad = await local.exists(localKey);
+      if (idbHad) {
+        const cached = parseFolderBlob((await bytesOf(await local.get(localKey))) ?? new Uint8Array(0));
+        if (cached) env = mergeFolders(env, cached);   // 合并进当前 env（保留各 item uat）
+      }
+    } catch (e) { reportStoreError(e, "log"); }   // 坏本地缓存 → 忽略，回退云端
   }
   function clearLocalTimer(): void { if (localTimer != null) { clearTimeout(localTimer); localTimer = null; } }
   function scheduleLocalWrite(): void {
@@ -126,7 +153,7 @@ export function createCollection(cfg: CollectionConfig): Collection {
     if (!local) return Promise.resolve();
     clearLocalTimer();
     const snap = encode(env);                         // 抓当前 env 快照（含 uat）
-    localChain = localChain.then(() => local.save(localKey, snap).then(() => undefined)).catch(() => undefined);
+    localChain = localChain.then(() => local.save(localKey, snap).then(() => undefined)).catch((e) => reportStoreError(e, "log"));
     return localChain;
   }
 
@@ -135,15 +162,15 @@ export function createCollection(cfg: CollectionConfig): Collection {
     scheduleLocalWrite();        // 本地缓存与云无关：cloudless/manual/auto 都写本地（强杀/离线靠它）
     if (cloudless) return;       // local-only：永不碰云
     cloud.setDirty(name, true);
-    if (manual) return;          // 手动模式：只标脏，云 commit 由调用方 flush() 驱动
+    if (manual) return;          // 手动模式：只标脏，云 commit 由调用方 reconcileWithRemote() 驱动
     clearTimer();
     timer = setTimeout(() => { timer = null; void sync(); }, syncDelayMs);
   }
 
   // sync：snapshot 内存 env → folder-flow（pull-merge-push）→ 把合并结果**并回**当前 env（per-item LWW 保新编辑不被旧快照盖）。
-  //   带来云端值变 → fireChanged。dirty 收尾（K12）：synced 且并回后 == 已推的 res.folder 才清脏。
-  async function sync(): Promise<void> {
-    if (cloudless) return;
+  //   带来云端值变 → fireChanged。dirty 收尾（K12）：synced 且并回后 == 已推的 res.folder 才清脏。返 flow 结果（含 cloudExisted）。
+  async function sync(): Promise<FolderFlowResult | null> {
+    if (cloudless) return null;
     const before = snapshotValues();
     const res = await flow.sync(env);
     env = mergeFolders(env, res.folder);
@@ -153,59 +180,95 @@ export function createCollection(cfg: CollectionConfig): Collection {
       if (normalizeFolder(env) === normalizeFolder(res.folder)) cloud.setDirty(name, false);
     }
     fireChanged(before);
-  }
-
-  async function init(): Promise<void> {
-    await hydrateLocal();               // 先从本地缓存 hydrate（秒开 / 离线可读 / 强杀存活）
-    ready = true;                       // 本地就绪：getItem 有值、setItem 放行。云端后台对齐（不 block boot）。
-    if (cloudless) return;
-    void backgroundReconcile();         // fire-and-forget：编排锁库内，app 只 await 到本地就绪
+    return res;
   }
 
   // 后台/事件驱动云端对齐：freshness 快路径（etag-skip）+ 完整 pull-merge-push；离线/坏字节绝不 wipe。
-  async function reconcile(): Promise<void> {
-    if (cloudless) return;
+  //   返 flow 结果（含 cloudExisted）或 null（cloudless / etag-skip）。
+  async function reconcile(): Promise<FolderFlowResult | null> {
+    if (cloudless) return null;
     // 快路径（freshness etag-skip）：clean ∧ 在线 ∧ 有已知 etag ∧ 云端 etag 没变 → 本地即最新，跳整份 pull-merge-push。
     if (!cloud.isDirty(name) && (!isOnline || isOnline()) && cloud.getETag(name)) {
-      const meta = await cloud.fetchMeta(name).catch(() => null);
-      if (meta && meta.etag === cloud.getETag(name)) return;   // 云端没变 → 不重 pull
+      const meta = await cloud.fetchMeta(name).catch((e) => { reportStoreError(e, "log"); return null; });
+      if (meta && meta.etag === cloud.getETag(name)) return null;   // 云端没变 → 不重 pull（有 etag = 云端存在）
     }
-    await sync();                       // pull-merge-push（其内部离线优雅、绝不 wipe；带 fireChanged）
+    return sync();                       // pull-merge-push（其内部离线优雅、绝不 wipe；带 fireChanged）
   }
-  function backgroundReconcile(): Promise<void> { return reconcile().catch(() => undefined); }
 
-  async function pullAndReconcile(): Promise<void> { await backgroundReconcile(); }   // 事件驱动重拉（focus/visible/online）
+  // 事件驱动重拉（focus/visible/online）。错误接 reportError（意外 throw；flow 内部的离线/push 失败已各自 funnel）。
+  async function reconcileWithRemote(): Promise<void> {
+    try { await reconcile(); }
+    catch (e) { reportStoreError(e, "warning"); }
+  }
+
+  const hasLiveItems = (): boolean => env.items.some((e) => !isTombstone(e));
+
+  // 新库 seed：getInitData() → uat=1 填入（最低戳，真数据必胜）。
+  async function seedInit(): Promise<void> {
+    if (!getInitData) return;
+    let initial: CollectionInitItem[];
+    try { initial = await getInitData(); }
+    catch (e) { reportStoreError(e, "warning"); return; }   // 初始数据源（如 fetch builtin-brushes.json）失败 → surface
+    if (!initial || !initial.length) return;
+    const seeded: FolderItem[] = initial
+      .filter((it) => it && it.id != null && it.value !== undefined)
+      .map((it) => ({ id: it.id, uat: SEED_UAT, value: shallowCopy(it.value) }));
+    if (!seeded.length) return;
+    env = mergeFolders(env, { version: FOLDER_ENVELOPE_VERSION, items: seeded });   // LWW：seed uat=1 遇真数据必让位
+    cloud.setDirty(name, true);   // seed 需推云（cloudless 也标脏无害，flushLocal 落本地）
+    scheduleLocalWrite();
+  }
+
+  async function init(): Promise<void> {
+    await hydrateLocal();               // 先从本地缓存 hydrate（秒开 / 离线可读 / 强杀存活）；记 idbHad
+    ready = true;                       // 本地就绪：getItem 有值、setItem 放行。云端后台对齐（不 block boot）。
+    const idbEmpty = !idbHad;
+    if (cloudless) {
+      if (idbEmpty) await seedInit();   // local-only：idb 无此 collection = 新库
+      return;
+    }
+    const offline = isOnline ? !isOnline() : false;
+    if (idbEmpty && offline) await seedInit();   // 离线新设备：idb 无 → 新库 seed（uat=1；回线 reconcile 时真 cloud 必胜）
+    void firstReconcile(idbEmpty);      // 在线：reconcile；若 idb 无 && 云端无 → seed
+  }
+
+  // 首次 reconcile：兼做「在线新库」判定。idbEmpty && 云端无文件 && 合并后仍无 live item → seed uat=1 + 推云。
+  async function firstReconcile(idbEmpty: boolean): Promise<void> {
+    if (cloudless) return;
+    let res: FolderFlowResult | null = null;
+    try { res = await reconcile(); }
+    catch (e) { reportStoreError(e, "log"); return; }
+    if (idbEmpty && res?.cloudExisted === false && !hasLiveItems()) {
+      await seedInit();                 // 在线 + idb 无 + 云端无 = 真·新库 → seed
+      scheduleSync();                   // 推 seed 到云
+    }
+  }
 
   function setItem(id: string, value: unknown): void {
     if (!ready) throw new Error(`collection(${name}).setItem 在 init() 前调用——设置未就绪`);
     if (id == null) throw new Error("collection.setItem: id 必填");
-    const fi: FolderItem = { id, uat: now(), value: shallowCopy(value) };   // 信封 {id, uat, value}；uat 内部盖戳；value 浅拷贝隔离
+    if (value === undefined) throw new Error(`collection(${name}).setItem: value 不可为 undefined（删除请用 deleteItem 或传 null 墓碑）`);
+    const fi: FolderItem = { id, uat: now(), value: shallowCopy(value) };   // 信封 {id, uat, value}；uat 内部盖戳；value 浅拷贝隔离（null=墓碑）
     env = { ...env, items: [...env.items.filter((e) => e.id !== id), fi] };
     scheduleSync();
   }
 
   function deleteItem(id: string): void {
     if (!ready) throw new Error(`collection(${name}).deleteItem 在 init() 前调用`);
-    if (!env.items.some((e) => e.id === id)) return;
-    env = {
-      ...env,
-      items: env.items.filter((e) => e.id !== id),
-      trash: [...env.trash.filter((t) => t.id !== id), { id, uat: now() }],
-    };
-    scheduleSync();
+    setItem(id, null);   // null 墓碑 = 明确删除指令，LWW（删得晚→删掉；别处编辑得晚→复活）
   }
 
-  const entryOf = (e: FolderItem): CollectionEntry => ({ id: String(e.id), uat: e.uat || 0, value: (e as { value?: unknown }).value });
+  const entryOf = (e: FolderItem): CollectionEntry => ({ id: String(e.id), uat: e.uat || 0, value: valueOf(e) });
   function getEntry(id: string): CollectionEntry | undefined {
     const e = env.items.find((x) => x.id === id);
-    return e ? entryOf(e) : undefined;
+    return e && !isTombstone(e) ? entryOf(e) : undefined;   // 墓碑视为不存在
   }
   function getItem<V = unknown>(id: string, def?: V | (() => V)): V | undefined {
     const e = env.items.find((x) => x.id === id);
-    return e ? shallowCopy((e as { value?: unknown }).value as V) : resolveDef(def);   // 浅拷贝隔离，防调用方原地改污染信封
+    return e && !isTombstone(e) ? shallowCopy(valueOf(e) as V) : resolveDef(def);   // 墓碑→default；浅拷贝隔离防调用方原地改污染信封
   }
-  function entries(): CollectionEntry[] { return env.items.map(entryOf); }
-  function keys(): string[] { return env.items.map((e) => String(e.id)); }
+  function entries(): CollectionEntry[] { return env.items.filter((e) => !isTombstone(e)).map(entryOf); }
+  function keys(): string[] { return env.items.filter((e) => !isTombstone(e)).map((e) => String(e.id)); }
 
   // 整库 onChange(cb) 或单 key onChange(id, cb)。单 key = 内部包一层 ChangeCb 过滤 changedIds。
   function onChange(a: ChangeCb | string, b?: () => void): () => void {
@@ -216,13 +279,8 @@ export function createCollection(cfg: CollectionConfig): Collection {
     return () => { listeners.delete(cb); };
   }
 
-  async function flush(): Promise<void> {
-    clearTimer();
-    await writeLocalNow();                          // 先确保本地落（卸载/手动保存兜底）
-    if (!cloudless && cloud.isDirty(name)) await sync();
-  }
   function flushLocal(): Promise<void> { return writeLocalNow(); }
   function isDirty(): boolean { return cloudless ? false : cloud.isDirty(name); }
 
-  return { init, pullAndReconcile, setItem, deleteItem, getItem, getEntry, entries, keys, onChange, flush, flushLocal, isDirty };
+  return { init, reconcileWithRemote, setItem, deleteItem, getItem, getEntry, entries, keys, onChange, flushLocal, isDirty };
 }

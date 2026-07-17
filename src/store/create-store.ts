@@ -17,7 +17,7 @@ import { createIdentity } from "./identity.ts";
 import { createTrash } from "./trash.ts";
 import { createOffload } from "./offload.ts";
 import { createReconcile } from "./reconcile.ts";
-import { createCollection, emptyCollectionBytes, type Collection } from "./collection.ts";
+import { createCollection, emptyCollectionBytes, type Collection, type CollectionConfig } from "./collection.ts";
 import { createListing, type ListContext, type FolderSnapshot } from "./listing.ts";
 import { createUploadReplay, type UploadReplayPolicy } from "./upload-queue.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
@@ -537,9 +537,11 @@ export function createStore(config: StoreConfig) {
   }
   // collection(name, opts)：synced（默认）走 collections 实例 + 云端 scaffold；{local:true} = local-only 变体
   //   （cloudless：只走 IDB 本地缓存、永不碰云、不 scaffold 云文件）——给设备本地设置/状态用。
-  function collection(name: string, opts: { manual?: boolean; local?: boolean } = {}): Collection {
+  //   opts.getInitData：仅当这份 collection 的 json 不存在（新库）时调，填初始值（uat=1）。store 内容无关——
+  //     app 域构造 [{id, value}]（如笔架把 builtin-brushes.json 映射进来）。
+  function collection(name: string, opts: { manual?: boolean; local?: boolean; getInitData?: CollectionConfig["getInitData"] } = {}): Collection {
     assertValidCollectionName(name);
-    const coll = createCollection({ cloud: collectionsCloud, name, local: collectionLocal, manual: opts.manual, cloudless: opts.local });
+    const coll = createCollection({ cloud: collectionsCloud, name, local: collectionLocal, manual: opts.manual, cloudless: opts.local, getInitData: opts.getInitData });
     if (!opts.local) registerScaffold(name);   // synced：store 自动在云端 idempotent 建出 .${appId}/<name>.json；local-only 不上云、不 scaffold
     return coll;
   }

@@ -1,20 +1,19 @@
 // Folder shape 合并引擎验收（generic，app-agnostic）。模型见 ADR-0011 §Refinement 2026-06-06/-06b。
 // 验：不同 id union 无损 / 同 id LWW by uat / commutative + idempotent /
-//     删-vs-编辑 edit-wins / resetAt watermark(max-wins, 水位下落) /
+//     删除=value:null 墓碑，与编辑照 uat-LWW 竞争（删得晚→删掉、编辑得晚→复活）/
 //     parseFolderBlob 拒 HTML·截断 / resolveRef id→name 兜底。
 import { describe, it, assert, eq } from "./runner.mjs";
 import {
   mergeFolders, emptyFolder, isValidFolderEnvelope, parseFolderBlob, resolveRef,
 } from "../src/store/folder-merge.ts";
 
-// 规范化：items / trash 按 id 排序后 JSON，用于无视顺序的相等比较。
+// 规范化：items 按 id 排序后 JSON，用于无视顺序的相等比较（无 trash/resetAt——tombstone 化）。
 const norm = (f) => JSON.stringify({
   version: f.version,
-  resetAt: f.resetAt,
   items: [...f.items].sort((a, b) => String(a.id).localeCompare(String(b.id))),
-  trash: [...f.trash].sort((a, b) => String(a.id).localeCompare(String(b.id))),
 });
 const item = (id, uat, extra = {}) => ({ id, uat, name: id, ...extra });
+const tomb = (id, uat) => ({ id, uat, value: null });   // 墓碑：value:null = 删除指令
 const ids = (f) => f.items.map((e) => e.id).sort();
 
 describe("Folder.merge", () => {
@@ -32,42 +31,32 @@ describe("Folder.merge", () => {
     eq(m.items[0].v, "new");
   });
 
-  it("commutative：merge(A,B) ≡ merge(B,A)（含 uat 相等的 tiebreak）", () => {
-    const A = { ...emptyFolder(), items: [item("a", 10, { v: 1 }), item("x", 5, { v: "L" })], trash: [{ id: "d", uat: 9 }] };
-    const B = { ...emptyFolder(), items: [item("b", 12), item("x", 5, { v: "R" })], trash: [{ id: "d", uat: 7 }] };
+  it("commutative：merge(A,B) ≡ merge(B,A)（含 uat 相等的 tiebreak + 墓碑）", () => {
+    const A = { ...emptyFolder(), items: [item("a", 10, { v: 1 }), item("x", 5, { v: "L" }), tomb("d", 9)] };
+    const B = { ...emptyFolder(), items: [item("b", 12), item("x", 5, { v: "R" }), tomb("d", 7)] };
     eq(norm(mergeFolders(A, B)), norm(mergeFolders(B, A)), "merge 不满足交换律");
   });
 
   it("idempotent：merge(A,A) ≡ A", () => {
-    const A = { version: 1, resetAt: 0, items: [item("a", 10), item("b", 11)], trash: [{ id: "d", uat: 9 }] };
+    const A = { version: 2, items: [item("a", 10), item("b", 11), tomb("d", 9)] };
     eq(norm(mergeFolders(A, A)), norm(A));
     eq(norm(mergeFolders(mergeFolders(A, A), A)), norm(A), "两次合并应稳定");
   });
 
-  it("删 vs 编辑 = edit-wins：删后又编辑 → 复活、trash 记录作废", () => {
-    const A = { ...emptyFolder(), trash: [{ id: "x", uat: 10 }] };          // A 删 x@10
-    const B = { ...emptyFolder(), items: [item("x", 20, { v: "edited" })] }; // B 在 x@20 编辑
+  it("删 vs 编辑：编辑得晚(uat 大) → 复活（值胜过墓碑）", () => {
+    const A = { ...emptyFolder(), items: [tomb("x", 10)] };                  // A 删 x@10
+    const B = { ...emptyFolder(), items: [item("x", 20, { value: "edited" })] }; // B 在 x@20 编辑
     const m = mergeFolders(A, B);
-    eq(m.items.length, 1, "应复活");
-    eq(m.items[0].v, "edited");
-    eq(m.trash.length, 0, "trash 记录应作废");
+    eq(m.items.length, 1, "墓碑与值同 id → 一条");
+    eq(m.items[0].value, "edited", "编辑得晚 → 值胜（复活）");
   });
 
-  it("删 vs 编辑：删 ≥ 编辑 → 真删、留 trash 记录", () => {
-    const A = { ...emptyFolder(), trash: [{ id: "x", uat: 20 }] };          // A 删 x@20
-    const B = { ...emptyFolder(), items: [item("x", 10)] };                  // B 持旧 x@10
+  it("删 vs 编辑：删得晚(uat ≥ 编辑) → 墓碑胜（真删；墓碑留 items 照 LWW 传播）", () => {
+    const A = { ...emptyFolder(), items: [tomb("x", 20)] };                  // A 删 x@20
+    const B = { ...emptyFolder(), items: [item("x", 10, { value: "old" })] }; // B 持旧 x@10
     const m = mergeFolders(A, B);
-    eq(m.items.length, 0, "应真删");
-    eq(m.trash.length, 1, "应留 trash 记录（缺席≠删除）");
-  });
-
-  it("resetAt watermark：max-wins，水位下的 entry/trash 一律落", () => {
-    const A = { version: 1, resetAt: 100, items: [item("new", 150)], trash: [] };
-    const B = { version: 1, resetAt: 0, items: [item("old", 50), item("keep", 200)], trash: [{ id: "td", uat: 30 }] };
-    const m = mergeFolders(A, B);
-    eq(m.resetAt, 100, "resetAt 应 max-wins");
-    eq(JSON.stringify(ids(m)), JSON.stringify(["keep", "new"]), "old(50)/td(30) 应被水位清掉");
-    eq(m.trash.length, 0, "水位下的 trash 记录应清");
+    eq(m.items.length, 1, "墓碑保留在 items（供跨设备传播删除）");
+    eq(m.items[0].value, null, "删得晚 → 墓碑胜");
   });
 
   it("字段级 override（书签集并集那种）走 opts.resolve", () => {
@@ -86,7 +75,7 @@ describe("Folder.parseFolderBlob（伪在线防线）", () => {
   it("截断 / 乱字节 → null", () => { eq(parseFolderBlob('{"version":1,"items":['), null); });
   it("是 JSON 但不是 envelope → null", () => { eq(parseFolderBlob('{"foo":1}'), null); });
   it("envelope 校验：items 缺 uat → 不合法", () => {
-    assert(!isValidFolderEnvelope({ version: 1, resetAt: 0, trash: [], items: [{ id: "a" }] }));
+    assert(!isValidFolderEnvelope({ version: 2, items: [{ id: "a" }] }));
   });
 });
 

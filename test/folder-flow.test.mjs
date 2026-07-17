@@ -26,7 +26,7 @@ function mockCloud({ text = null, etag = null } = {}) {
     _set: (t, e) => { stored = t; et = e; },
   };
 }
-const folder = (items, extra = {}) => ({ version: 1, items, trash: [], resetAt: 0, ...extra });
+const folder = (items, extra = {}) => ({ version: 2, items, ...extra });   // v2：tombstone 化（无 trash/resetAt）
 const it1 = (id, uat) => ({ id, uat, name: id });
 
 describe("FolderFlow.sync", () => {

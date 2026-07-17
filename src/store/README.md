@@ -71,7 +71,7 @@ const store = createStore({
 | 拿到的 | 方法 | 章节 |
 |---|---|---|
 | `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · rename · delete · keepOffline · offload · isKeptOffline · isDirty · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek({bytesLength,zipEntry})` + `decryptPeek(blob)`；zip 尾片解析在库内部，`setPeek` 未采用，peek 经 `crypt.makePeek` 自动） | §2 |
-| `store.collection(name, {manual?, local?})` | `setItem · deleteItem · getItem(id,def) · getEntry · entries · keys · onChange · init · pullAndReconcile · flush · flushLocal · isDirty`（`{local:true}` = **不推云**的设备本地变体） | §3 |
+| `store.collection(name, {manual?, local?, getInitData?})` | `setItem · deleteItem · getItem(id,def) · getEntry · entries · keys · onChange · init · reconcileWithRemote · flushLocal · isDirty`（`{local:true}` = **不推云**的设备本地变体；`getInitData` = 新库 seed，uat=1；删除=value:null 墓碑） | §3 |
 | `store.list()` / `store.listAll()` | 列云端文件+文件夹 `{files, folders, complete}`（`complete:false` **别据此删缓存**） | §2 |
 | `store.ensureFolder · newFolder · deleteFolder` | 文件夹增删（删除「必须空」库内强制） | §2 |
 | `store.listTrash · listBackup · restore · purge · emptyTrash` | 回收站 / 备份箱：列举·恢复·彻底删·清空 | §2 |
@@ -145,29 +145,33 @@ const p = await zip.getPeek({ bytesLength: 131072, zipEntry: "Thumbnails/thumbna
 
 > （旧名 `folder-store` 是误导：它不是文件夹，是「一份同步 JSON、里头一堆带 id 的 item」。**已改名 `collection`**。）
 
-> as-of 2026-07-14：信封字段 `payload`→`value`、写面 `upsertItem`→`setItem`、读面加 `getItem(id, default)` + 浅拷贝隔离 + `onChange`。旧名已删（本节即当前 API）。
+> as-of 2026-07-14：信封字段 `payload`→`value`、写面 `upsertItem`→`setItem`、读面加 `getItem(id, default)` + 浅拷贝隔离 + `onChange`。
+> as-of 2026-07-17：删除改 **value:null 墓碑**（LWW，替代 trash/resetAt）；`setItem(id, undefined)` **报错**；`pullAndReconcile`→`reconcileWithRemote`；删 public `flush()`（云推由 reconcileWithRemote 兜底，`flushLocal()` 保留）；加 per-collection **`getInitData`**（新库 seed，uat=1）。旧名已删（本节即当前 API）。
 
 ```ts
-const reading = store.collection("reading-state", { manual: true });   // manual=你控制推云时机；不传=编辑后自动防抖推
-                                                                       // { local: true } = **不推云**（≠"开缓存"：synced 变体也写 IDB）；pullAndReconcile no-op
-await reading.init();                                        // **必须先调**：先 hydrate 本地(快) → 后台 fire-and-forget 拉云对齐。init 前 setItem 抛、getItem 恒返 default
-reading.setItem(docId, { pageIndex, yFraction });           // 新增 / 整条原子替换（id 必填；value = 任意 JSON，裸值或对象皆可）
-reading.deleteItem(docId);
-reading.getItem(docId, defaultVal);                         // 读 value（无值→default；default 可为裸值或**共享**工厂 fn，⚠工厂 lambda 别 inline）
-reading.getEntry(docId);                                    // 带 uat 的完整 entry { id, uat, value } | undefined
-reading.entries();                                          // 全部 entry（数组）
-reading.keys();                                             // 全部 id（数组）
+const reading = store.collection("reading-state", { manual: true });   // manual=你控制推云时机（reconcileWithRemote 驱动 commit）；不传=编辑后自动防抖推
+                                                                       // { local: true } = **不推云**（≠"开缓存"：synced 变体也写 IDB）；reconcileWithRemote no-op
+                                                                       // { getInitData: () => [{id, value}] } = **仅 json 不存在（新库）时**调，填初始值（uat=1）
+await reading.init();                                        // **必须先调**：先 hydrate 本地(快) → 后台 fire-and-forget 拉云对齐 + 新库 seed。init 前 setItem 抛、getItem 恒返 default
+reading.setItem(docId, { pageIndex, yFraction });           // 新增 / 整条原子替换（id 必填；value = 任意 JSON，裸值或对象；**value===undefined 报错**）
+reading.deleteItem(docId);                                  // ≡ setItem(docId, null)：null 墓碑=明确删除指令，LWW（删得晚→删掉、别处编辑得晚→复活）
+reading.getItem(docId, defaultVal);                         // 读 value（无值 / 墓碑 → default；default 可为裸值或**共享**工厂 fn，⚠工厂 lambda 别 inline）
+reading.getEntry(docId);                                    // 带 uat 的完整 entry { id, uat, value } | undefined（墓碑→undefined）
+reading.entries();                                          // 全部 entry（数组，过滤墓碑）
+reading.keys();                                             // 全部 id（数组，过滤墓碑）
 const off = reading.onChange((ids) => {/* 云端对齐带来值变 */});   // 整库订阅；或 onChange(id, cb) 绑单 key（返退订）
-await reading.flush();                                       // 推云（manual 模式由你定时机）；flushLocal() 只落本地（卸载兜底）
+await reading.reconcileWithRemote();                        // 事件驱动重拉 + resolve（local newer/pending 一并 push）；flushLocal() 只落本地（卸载兜底）
 ```
 - 用于：阅读位置表、笔架、设置/状态、任何"一堆小条目、跨设备合并、零冲突"的东西。app 每类持久化建一个 collection（见 §4）。
 - **不传 `encode/decode`**：value 是普通 JSON（裸值或对象），库自己序列化（content-agnostic 是给 §2 file 的不透明 blob；collection 本就是结构化可合并 JSON，库懂它的信封）。
-- **信封由类型强制，不靠约定**：库内部把每条包成 `{ id, uat, value }`——`id` 必填；`uat`（合并时间戳）**库内部盖戳，app 既传不进也看不到**（顺带守"内容里不放 timestamp"红线）；`value` = 你给的裸值/对象。
+- **信封由类型强制，不靠约定**：库内部把每条包成 `{ id, uat, value }`——`id` 必填；`uat`（合并时间戳）**库内部盖戳，app 既传不进也看不到**（顺带守"内容里不放 timestamp"红线）；`value` = 你给的裸值/对象（`null`=墓碑）。
 - **getItem/setItem 两侧 value 浅拷贝隔离**：拿到的对象原地改、或传入的对象事后改，都不与库内信封互相污染（浅拷贝语义——深层嵌套要改整枝替换再 setItem）。
 - **item 是原子的：只有 `setItem`（整条替换），没有 partial update。** 想改一个字段 = 取整条 → 改 → 整条 setItem。换来合并简单 + 无中间态。
+- **删除 = 墓碑**：`deleteItem(id)` 写一条 `value:null`，带 uat 参与 LWW（删/编辑谁 uat 大谁胜）。墓碑留在库里跨设备传播删除、读面过滤——**无独立 trash 集合、无 resetAt 水位线**（时钟同步误差=已知风险，分钟级不成问题）。
 - 内部按 item 合并，**逐 item last-write-wins**（每 item 各带 uat，并发改不同 item 都不丢；同 item 并发 = 静默 last-win，**仅配置类可接受**，画作 content 绝不走此路，走 §2 file 的 If-Match）。
-- **自动本地缓存**：离线、重新打开、意外关闭后都能读到上次的数据（你不碰 IndexedDB）。init 后台对齐云端、值变经 `onChange` 通知；事件驱动（focus/visible/online）重拉调 `pullAndReconcile()`。页面卸载时调一次 `flushLocal()` 把最新状态落本地。
-  > ⚠ 名字别搞混：collection 的重拉叫 **`pullAndReconcile()`**；`store.refresh(name)` 是 **file** 那一面的新鲜度检查，两回事。
+- **新库判定 + seed**：`getInitData` 仅在**这份 collection 的 json 不存在**时调（离线=idb 无；在线=idb 无 && 云端无），填初始值 uat=1（最低戳→任何真实编辑/别设备真数据必胜）。store 内容无关：app 域构造 `[{id, value}]`（如笔架把 builtin-brushes.json 映射进来）。
+- **自动本地缓存**：离线、重新打开、意外关闭后都能读到上次的数据（你不碰 IndexedDB）。init 后台对齐云端、值变经 `onChange` 通知；事件驱动（focus/visible/online）重拉调 `reconcileWithRemote()`。页面卸载时调一次 `flushLocal()` 把最新状态落本地。
+  > ⚠ 名字别搞混：collection 的重拉叫 **`reconcileWithRemote()`**（pull+push）；`store.refresh(name)` 是 **file** 那一面的新鲜度检查，两回事。
 
 ---
 
