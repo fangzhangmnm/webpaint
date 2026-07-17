@@ -22,7 +22,7 @@ import { eachLeaf, layerByteBudget } from "./doc.ts";
 interface Viewport { tx: number; ty: number; scale: number; rot: number; }
 
 // 光标预览（screen CSS px；size 是 doc px）
-interface Cursor { x: number; y: number; size: number; square?: boolean; }
+interface Cursor { x: number; y: number; size: number; square?: boolean; aspect?: number; rotation?: number; }   // aspect=椭圆度(0..1)、rotation=斜度(弧度，resolved 值)：footprint 预览
 
 // 选区（doc.selection）：alpha mask + bbox（与 selection-ops 的形状一致）
 interface Selection {
@@ -512,10 +512,16 @@ export class Board {
     const el = this.cursorEl;
     if (!el) return;
     if (this._showCursor && this._cursor) {
-      const r = Math.max(2, this._cursor.size * this.viewport.scale / 2);
+      const c = this._cursor;
+      const r = Math.max(2, c.size * this.viewport.scale / 2);
       el.style.width = el.style.height = (2 * r) + "px";
-      el.style.transform = `translate(${this._cursor.x - r}px, ${this._cursor.y - r}px)`;
-      el.classList.toggle("square", !!this._cursor.square);   // v232：像素笔方形 preview
+      // 椭圆度(aspect)/斜度(rotation) 反映 resolved-brush 的 footprint：绕中心 rotate + scaleY(aspect)。
+      //   translate 定位左上角、transform-origin 默认=中心 → 复合变换绕光标中心（矩阵已验），仍纯 transform（不触发 layout，v163）。
+      const aspect = (c.aspect != null && c.aspect > 0) ? c.aspect : 1;
+      const rotDeg = c.rotation ? c.rotation * 180 / Math.PI : 0;
+      const shape = (!c.square && (aspect !== 1 || rotDeg !== 0)) ? ` rotate(${rotDeg}deg) scale(1, ${aspect})` : "";
+      el.style.transform = `translate(${c.x - r}px, ${c.y - r}px)${shape}`;
+      el.classList.toggle("square", !!c.square);   // v232：像素笔方形 preview（方笔不套椭圆/斜度）
       el.style.display = "block";
     } else {
       el.style.display = "none";

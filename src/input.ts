@@ -445,7 +445,7 @@ export class InputController {
       this.board.setCursor(null);
       return;
     }
-    let size, square = false;
+    let size, square = false, aspect = 1, rotation = 0;
     if (cur === "ring") {
       const q = this.getLiquifySettings();
       size = (q && q.size) ? q.size * 2 : 100;     // size 是半径 → 直径 = ×2
@@ -454,8 +454,11 @@ export class InputController {
       size = settings ? settings.size : 12;
       // v232：像素笔 stamp 是方的（fillRect），preview 跟着方，别用圆误导
       square = !!(settings && settings.pixelMode);
+      // 椭圆度/斜度也照 resolved-brush（shapeRotation 是弧度）——footprint 预览
+      aspect = settings ? settings.shapeAspect : 1;
+      rotation = settings ? settings.shapeRotation : 0;
     }
-    this.board.setCursor({ x: e.clientX, y: e.clientY, size, square });
+    this.board.setCursor({ x: e.clientX, y: e.clientY, size, square, aspect, rotation });
   }
 
   _down(e: PointerEvent) {
