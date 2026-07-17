@@ -48,7 +48,7 @@ export interface DialReactive {
 
 // ---- 句柄类（深源未入门，先描述消费方用到的接口；grow as needed）----
 
-// 笔架（brush-rack.ts）。仅列消费方实际调到的成员；随 brush-rack 类型化再收敛。
+// 笔架（brush-rack-controller.ts）。仅列消费方实际调到的成员。
 export interface RackHandle {
   getRackToolKey(tool: string): string;
   findToolBrush(dial: ToolDial): { id: string; name?: string } | null;
@@ -58,16 +58,13 @@ export interface RackHandle {
   // boot 编排（initRackBoot）用到的：
   load(): Promise<unknown>;
   defaultToolStateFor(tool: string): Partial<ToolDial>;
-  checkCloud(): Promise<unknown>;
-  refreshCloudState(): void;
-  get(): { brushes: unknown[] } | null;
-  setRack(rack: unknown): void;
-  persist(): Promise<unknown>;
-  // 重置笔架（topbar-menu）：
-  reset(force?: boolean): void;
-  syncCloud(): void;
-  // v319：去掉 [k:string]:unknown index sig —— 真 BrushRack 类无 index sig 故装不进；
-  //   去掉后 BrushRack 直接 assignable（已满足上列全部具名成员），ctx 得以验证而非 cast。
+  get(): { brushes: unknown[] };
+  // 云端事件驱动重拉（刷新按钮 / 前台）：
+  reconcileWithRemote(): Promise<void>;
+  // 重置出厂笔（topbar-menu · 非破坏性覆盖同 id）：
+  resetBuiltin(): Promise<void>;
+  // v319：去掉 [k:string]:unknown index sig —— 真 controller 类无 index sig 故装不进；
+  //   去掉后 controller 直接 assignable（已满足上列全部具名成员），ctx 得以验证而非 cast。
 }
 // 浮窗（side-windows.ts）：参考窗 / 调色板窗——方法集不同，分两个句柄。
 export interface ReferenceWindowHandle {

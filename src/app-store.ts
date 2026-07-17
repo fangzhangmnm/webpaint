@@ -12,6 +12,7 @@ import { pack7z, unpack7z } from "./sevenzip.ts";
 import { getPassword } from "./crypto-state.ts";
 import { wirePreferences } from "./app-prefs.ts";
 import { wireAppState, appState } from "./app-state.ts";
+import { builtinBrushInitData } from "./brushes.ts";
 
 // OneDrive provider + auth。
 const od = createOneDriveProvider({ clientId: CLIENT_ID, scopes: SCOPES, msalUrl: "./vendor/msal/msal-browser.min.js" });
@@ -102,17 +103,8 @@ export function watchFolder(
 //   app 原则上不知道别的 folder 内容（内存只放当前夹）；名字碰撞由 store rename/saveAs 目标护栏内化检测（撞名抛 CloudNameCollisionError），不靠先 list 目标夹。
 export const listGalleryTrash = async () => (await store.listTrash()).map((c) => ({ name: stripSessionExt(c.path || c.name || ""), local: null, cloud: c, deletedAt: 0 }));
 
-// ---- brush-rack cloud-sync（⚠TODO：→ store.collection("brush-rack.json") 逐 brush 一 item。当前本地-only stub）----
-//   rack 本地持久化在 brush-rack.ts 自管（IDB via getMeta）；此处只是它期望的 cloud-sync 面，暂 no-op。
-let _rackDirty = false;
-export const rackStore = {
-  edit(): void { _rackDirty = true; },
-  isDirty(): boolean { return _rackDirty; },
-  setDirty(d: boolean): void { _rackDirty = d; },
-  flush(): void { _rackDirty = false; },
-  async sync(): Promise<void> { /* TODO: store.collection 逐 item 同步 */ },
-  status(_ctx?: { signedIn?: boolean; online?: boolean }): string { return "local-only"; },
-  configure(_c: unknown): void { /* TODO */ },
-};
-export const setRackDirty = (d: boolean) => rackStore.setDirty(d);
-export const isRackDirty = () => rackStore.isDirty();
+// ---- brush-rack collection（逐 brush 一 item + 一条 .meta）：持久化 + 云同步唯一入口，红线在库内。----
+//   getInitData（brushes.ts 域构造）：仅当这份 collection 的 json 不存在（新库）时 fetch builtin-brushes.json
+//   映射成 [{id,value}…, {.meta}] 填初始值（uat=1，任何真实编辑 / 别设备真数据必胜）。
+//   dirty / 冲突 / 墓碑 全归 collection；app 侧 brush-rack-controller 只做编排（无 rackStore/setRackDirty）。
+export const brushRackCollection = store.collection("brush-rack", { getInitData: builtinBrushInitData });

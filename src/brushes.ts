@@ -24,6 +24,12 @@
 import type { Brush, BrushRackData } from "./brush-types.ts";
 import { reportError } from "./error-badge.ts";
 
+// getInitData 的初始项形状（与 store 的 CollectionInitItem 结构等价；不 import 库类型免耦合）。
+export interface BrushInitItem { id: string; value: unknown; }
+// 笔架 collection 的特殊项 id + .meta 值形状（per-folder 有序 brushId 列表；folder 归属仍在 brush.folder）。
+export const RACK_META_ID = ".meta";
+export interface RackMeta { folderOrder: string[]; order: Record<string, string[]>; }
+
 // makeBrush 的命名参数形状（大多有默认值，name/tool 必填）。
 interface MakeBrushArgs {
   id?: string;
@@ -51,10 +57,9 @@ interface MakeBrushArgs {
   streamline?: number;
   stabilization?: number;
   defaultOpa?: number;
-  uat?: number;
 }
 
-// default-brushes.json 的单条 spec（id/name/tool + 其余 makeBrush 参数收在 args）。
+// builtin-brushes.json 的单条 spec（id/name/tool + 其余 makeBrush 参数收在 args）。
 interface BrushSpec {
   id: string;
   name: string;
@@ -78,17 +83,14 @@ interface BrushSizeLegacy {
   pressureCurve?: number;
 }
 
-export const RACK_VERSION = 2;     // v2: brush 加 uat；rack 加 trash[]/resetAt；删 activeByTool（活动笔归 per-doc toolStates）。Folder shape，见 docs/20260606-folderflow-build-plan.md
 export const DEFAULT_FOLDER = "我的常用";
-// 迁移 / 出厂基准 uat：> resetAt(0) 故不被水位误丢；任何真实编辑(Date.now())必胜过它。
-export const PRE_HISTORY_UAT = 1;
 
 export function newBrushId() {
   if (crypto?.randomUUID) return crypto.randomUUID();
   return "b-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-function makeBrush({
+export function makeBrush({
   id = newBrushId(),
   name,
   tool,
@@ -110,11 +112,9 @@ function makeBrush({
   streamline = 0.15, stabilization = 0,
   // v99r2：defaultOpa 留着，默认 1.0；user 编辑笔可以改成 0.6 当 sketch 默认
   defaultOpa = 1.0,
-  // v2: last user-action-time —— FolderFlow 合并键（见 src/store/folder-merge.js）。
-  uat = PRE_HISTORY_UAT,
 }: MakeBrushArgs): Brush {
   return {
-    id, uat, name, tool, folder,
+    id, name, tool, folder,
     shape: { kind: shapeKind, aspect, rotation, hardness, textureB64 },
     size: { base: size, max: sizeBaseMax },
     sizeCoeff, opaCoeff, flowCoeff,
@@ -130,37 +130,122 @@ function makeBrush({
   };
 }
 
-// 默认笔架——每工具一组开箱即用 preset。
-// v122 r2：default-brushes.json 从 src/ 挪到根，改 runtime fetch（user：「async fetch，
+// 出厂笔 spec 源——每工具一组开箱即用 preset。
+// v122 r2：builtin-brushes.json 从 src/ 挪到根，改 runtime fetch（user：「async fetch，
 // 什么时候拿到什么时候填，之前填空」）。SW precache 离线兜底；fetch 失败也不卡 boot。
-// **stable ID**：以 "default-{tool}-{slug}" 形式固定。bump 时新 default 通过 id 比对
-// merge 到用户 rack（不覆盖用户改过的 brush，但缺失的会补上）。
+// **stable ID**：以 "default-{tool}-{slug}" 形式固定——resetBuiltin 靠 id 比对覆盖同 id 用户笔。
 // **shapes/airbrush 工具已撤**（v96/v120）——BRUSH_GROUP 仍含其 tool 值，仅为老 preset 数据向后兼容。
-let _defaultsSpec: BrushSpec[] = [];      // fetch 回来前是空，回来后就是 default-brushes.json 内容
-const _defaultsPromise = (async () => {
+let _builtinSpec: BrushSpec[] = [];      // fetch 回来前是空，回来后就是 builtin-brushes.json 内容
+const _builtinPromise = (async () => {
   try {
-    const url = new URL("./default-brushes.json", document.baseURI).href;
+    const url = new URL("./builtin-brushes.json", document.baseURI).href;
     const r = await fetch(url);
     if (!r.ok) throw new Error("HTTP " + r.status);
     const json = await r.json();
-    if (!Array.isArray(json)) throw new Error("default-brushes.json 不是数组");
-    _defaultsSpec = json;
+    if (!Array.isArray(json)) throw new Error("builtin-brushes.json 不是数组");
+    _builtinSpec = json;
   } catch (e) {
-    reportError(new Error("[brushes] default-brushes.json 加载失败 → rack 走空兜底（emergency brush 顶上）。IDB 有的话照常用。" + String(e)), "log");
-    _defaultsSpec = [];
+    reportError(new Error("[brushes] builtin-brushes.json 加载失败 → 走空兜底（emergency brush 顶上）。" + String(e)), "log");
+    _builtinSpec = [];
   }
-  return _defaultsSpec;
+  return _builtinSpec;
 })();
-// 给 app.js 拿到这个 promise → boot 后 .then() retroactively merge
-export function defaultsPromise() { return _defaultsPromise; }
-export function getDefaultsSpec() { return _defaultsSpec; }
 
-// fetch 失败 + IDB 也空时的兜底：至少一个能画的笔，UI 不挂。
-function _emergencyBrush(uat = PRE_HISTORY_UAT) {
+// fetch 失败时的兜底：至少一个能画的笔，UI 不挂。
+function _emergencyBrush(): Brush {
   return makeBrush({
     id: "emergency-brush", name: "默认笔", tool: "brush",
-    size: 12, hardness: 0.8, sizeCoeff: 0.6, opaCoeff: 0.6, uat,
+    size: 12, hardness: 0.8, sizeCoeff: 0.6, opaCoeff: 0.6,
   });
+}
+
+// 出厂笔（specToBrush 化；fetch 失败 → emergency 兜底）。await 内部 fetch promise（幂等缓存）。
+//   给 collection.getInitData（新库 seed）与 controller.resetBuiltin（非破坏性覆盖同 id）共用。
+export async function builtinBrushes(): Promise<Brush[]> {
+  const specs = await _builtinPromise;
+  const brushes = specs.map((s) => specToBrush(s));
+  return brushes.length ? brushes : [_emergencyBrush()];
+}
+
+// —— .meta（per-folder 有序 brushId）纯操作（无副作用，node 可测）——
+export function emptyMeta(): RackMeta { return { folderOrder: [], order: {} }; }
+
+// 追加 id 到 folder 列表末尾（folder 不在则登记）；已在该 folder 则原样返回。
+export function metaAppend(meta: RackMeta, folder: string, id: string): RackMeta {
+  const folderOrder = meta.folderOrder.includes(folder) ? meta.folderOrder : [...meta.folderOrder, folder];
+  const cur = meta.order[folder] || [];
+  const list = cur.includes(id) ? cur : [...cur, id];
+  return { folderOrder, order: { ...meta.order, [folder]: list } };
+}
+
+// 从所有 folder 列表移除 id。
+export function metaRemove(meta: RackMeta, id: string): RackMeta {
+  const order: Record<string, string[]> = {};
+  for (const f of Object.keys(meta.order)) order[f] = meta.order[f].filter((x) => x !== id);
+  return { folderOrder: meta.folderOrder, order };
+}
+
+// 把 id 挪到 target folder（先从各处摘除，再追加到 target 末尾）。
+export function metaMove(meta: RackMeta, id: string, toFolder: string): RackMeta {
+  return metaAppend(metaRemove(meta, id), toFolder, id);
+}
+
+// resetBuiltin 用：把出厂 id（按 folder 分组）提到各自 folder 列表**最前**，用户笔留其后。
+export function metaPrependBuiltins(meta: RackMeta, builtinsByFolder: Record<string, string[]>): RackMeta {
+  const folders = [...new Set([...Object.keys(builtinsByFolder), ...meta.folderOrder])];
+  const order: Record<string, string[]> = {};
+  for (const f of folders) {
+    const builtins = builtinsByFolder[f] || [];
+    const rest = (meta.order[f] || []).filter((x) => !builtins.includes(x));
+    order[f] = [...builtins, ...rest];
+  }
+  for (const f of Object.keys(meta.order)) if (!(f in order)) order[f] = meta.order[f];
+  return { folderOrder: folders, order };
+}
+
+// 从一组笔攒初始 .meta（按 folder 保序分组）。
+export function buildInitMeta(brushes: Brush[]): RackMeta {
+  let meta = emptyMeta();
+  for (const b of brushes) meta = metaAppend(meta, b.folder || DEFAULT_FOLDER, b.id);
+  return meta;
+}
+
+// collection.getInitData（新库 seed）：出厂笔逐 item + 一条 .meta。store 内容无关，此为 app 域构造。
+export async function builtinBrushInitData(): Promise<BrushInitItem[]> {
+  const brushes = await builtinBrushes();
+  const meta = buildInitMeta(brushes);
+  return [
+    ...brushes.map((b) => ({ id: b.id, value: b as unknown })),
+    { id: RACK_META_ID, value: meta as unknown },
+  ];
+}
+
+// —— collection ↔ 瞬态 rack 视图桥（controller 用；结构型 CollectionLike 免耦合 store 类型）——
+export interface CollectionLike {
+  entries(): { id: string; value: unknown }[];
+  getItem(id: string, def?: unknown): unknown;
+}
+// 按 .meta 排序：folder 间按 folderOrder，folder 内按 order[folder]；不在 order 的（未登记新笔）落该 folder 末尾。
+//   稳定：同 rank 保原插入序。lookup（findBrush by id）不受影响；仅显示顺序用。无 .meta → 恒等（插入序）。
+export function orderBrushesByMeta(brushes: Brush[], meta: RackMeta): Brush[] {
+  const folderRank = (f: string): number => { const i = meta.folderOrder.indexOf(f); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+  const withinRank = (b: Brush): number => { const l = meta.order[b.folder || DEFAULT_FOLDER]; const i = l ? l.indexOf(b.id) : -1; return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+  return brushes.map((b, i) => ({ b, i })).sort((x, y) => {
+    const fr = folderRank(x.b.folder || DEFAULT_FOLDER) - folderRank(y.b.folder || DEFAULT_FOLDER);
+    if (fr) return fr;
+    const wr = withinRank(x.b) - withinRank(y.b);
+    return wr || (x.i - y.i);
+  }).map((e) => e.b);
+}
+// 全部笔（过滤 .meta 特殊项，按 .meta 排序 → resetBuiltin 的「出厂笔在最前」等可见）。
+export function getAllBrushes(coll: CollectionLike): Brush[] {
+  const brushes = coll.entries().filter((e) => e.id !== RACK_META_ID).map((e) => e.value as Brush);
+  return orderBrushesByMeta(brushes, getMeta(coll));
+}
+// .meta 值（缺则空）。
+export function getMeta(coll: CollectionLike): RackMeta {
+  const m = coll.getItem(RACK_META_ID, emptyMeta()) as RackMeta | undefined;
+  return m && Array.isArray(m.folderOrder) && m.order ? m : emptyMeta();
 }
 
 // IDB 老 schema 兼容（v82~v98 → v99）：
@@ -218,67 +303,11 @@ export function migrateBrush(b: LegacyBrush): LegacyBrush {
   if (!b.smooth) {
     b.smooth = { streamline: 0.15, stabilization: 0 };
   }
-  // v2: 老笔无 uat → pre-history 基准（任何真实编辑都胜过它）
-  if (b.uat == null) b.uat = PRE_HISTORY_UAT;
   return b;
 }
 
-function specToBrush(spec: BrushSpec, uat = PRE_HISTORY_UAT): Brush {
-  return makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args, uat });
-}
-
-// resetAt=0 → 首 boot（出厂笔 uat=PRE_HISTORY）；resetAt>0 → 恢复出厂
-// （出厂笔 uat 须 > resetAt，否则刚重置就被自己的水位线丢掉）。
-export function makeDefaultRack({ resetAt = 0 }: { resetAt?: number } = {}): BrushRackData {
-  const uat = resetAt > 0 ? resetAt + 1 : PRE_HISTORY_UAT;
-  let brushes = _defaultsSpec.map((s) => specToBrush(s, uat));
-  if (brushes.length === 0) brushes = [_emergencyBrush(uat)];
-  return { version: RACK_VERSION, brushes, trash: [], resetAt };
-}
-
-// 给 IDB 已有 rack 补缺：遍历 _defaultsSpec，缺哪个 ID 就 push 一份。
-// v122 r2 改原子语义（user：「不是 merge，而是直接改数组 ref，这样就 atomic」）：
-//   - 不 mutate 输入 rack
-//   - 算完整新 rack（含原 brushes + 缺失 defaults），一次性返回
-//   - 返回 null 表示不需要改 → caller 不 swap，省一次 UI 刷
-//   - 返回新 rack 时 caller 做 `_brushRack = newRack` 单写 = atomic
-// 注：_defaultsSpec 还空时（fetch 没回），返回 null = no-op；fetch 回来后 app.js 再调一次。
-// 也承担 v1→v2 迁移：补 trash[]/resetAt、删 activeByTool、置 version。
-export function mergeMissingDefaults(rack: BrushRackData): BrushRackData | null {
-  if (!rack || !Array.isArray(rack.brushes)) return null;
-  const ids = new Set(rack.brushes.map((b) => b.id));
-  const trashIds = new Set((rack.trash || []).map((t) => (t as { id: string }).id));   // 已删的 default 不复活
-  const missing = _defaultsSpec.filter((s) => !ids.has(s.id) && !trashIds.has(s.id));
-  const needsFields = !Array.isArray(rack.trash) || rack.resetAt == null
-    || rack.activeByTool != null || rack.version !== RACK_VERSION;
-  if (missing.length === 0 && !needsFields) return null;
-  const resetAt = rack.resetAt || 0;
-  const uat = resetAt > 0 ? resetAt + 1 : PRE_HISTORY_UAT;
-  const out: BrushRackData = {
-    ...rack,
-    version: RACK_VERSION,
-    brushes: [...rack.brushes, ...missing.map((s) => specToBrush(s, uat))],
-    trash: Array.isArray(rack.trash) ? rack.trash : [],
-    resetAt,
-  };
-  delete out.activeByTool;
-  return out;
-}
-
-// 序列化
-export function rackToJSON(rack: BrushRackData): string {
-  return JSON.stringify(rack, null, 2);
-}
-export function rackFromJSON(text: string): BrushRackData {
-  const obj = JSON.parse(text);
-  if (!obj || typeof obj !== "object") throw new Error("rack JSON 格式不对");
-  if (!Array.isArray(obj.brushes)) throw new Error("rack 缺 brushes");
-  if (obj.version !== RACK_VERSION) {
-    reportError(`[brushes] rack version ${obj.version} ≠ ${RACK_VERSION}; 当 ${RACK_VERSION} 用`, "log");
-  }
-  if (!Array.isArray(obj.trash)) obj.trash = [];
-  if (obj.resetAt == null) obj.resetAt = 0;
-  return obj;
+function specToBrush(spec: BrushSpec): Brush {
+  return makeBrush({ id: spec.id, name: spec.name, tool: spec.tool, ...spec.args });
 }
 
 // 单 brush export / import

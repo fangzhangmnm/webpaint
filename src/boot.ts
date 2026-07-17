@@ -7,13 +7,13 @@
 
 import { t } from "./i18n/index.ts";
 import { reportError } from "./error-badge.ts";
-import { defaultsPromise, mergeMissingDefaults, makeDefaultRack } from "./brushes.ts";
 import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
 import type { AppContext } from "./app-context.ts";
 
-// 笔架 boot：异步加载 IDB 缓存 → toolStates 缺失字段从 rack 补齐 → 应用当前 tool 的 state。
-// default-brushes.json 是 async fetch：回来后 retroactively merge 缺失默认笔。
+// 笔架 boot：collection.init（本地缓存 hydrate → 后台 reconcile 云端 + 新库 seed）→
+//   toolStates 缺失字段从 rack 补齐 → 应用当前 tool 的 state。云端 pull 由 collection.onChange
+//   自动刷（controller 内订阅）；不再有 IDB 迁移 / defaults retro-merge / 云图标态机。
 export function initRackBoot(ctx: AppContext) {
   const { rack, state, editMode, dialReactive, setStatus } = ctx;
   const backfillToolStates = () => {
@@ -25,23 +25,8 @@ export function initRackBoot(ctx: AppContext) {
     backfillToolStates();
     rack.applyToolState(editMode.current());
     dialReactive.rackVersion++;
-    setTimeout(() => { rack.checkCloud().catch(() => {}); rack.refreshCloudState(); }, 2000);
-    defaultsPromise().then(() => {
-      const cur = rack.get();
-      if (!cur) return;
-      const merged = mergeMissingDefaults(cur as Parameters<typeof mergeMissingDefaults>[0]);
-      if (!merged) return;
-      rack.setRack(merged);
-      rack.persist().catch(() => {});
-      backfillToolStates();
-      rack.applyToolState(editMode.current());
-      dialReactive.rackVersion++;
-    });
   }).catch((e: unknown) => {
     reportError(new Error("[brush-rack] init failed: " + String(e)), "log");
-    rack.setRack(makeDefaultRack());
-    rack.applyToolState(editMode.current());
-    dialReactive.rackVersion++;
     setStatus(t("mi.rackPersistFailed"), true);
   });
 }

@@ -68,7 +68,7 @@ describe("app.js 组合根 boot smoke", () => {
       uninstallDomShim();
     }
 
-    // node-env 下被 app 自己 catch 的兜底（IDB 缺失、default-brushes.json fetch 失败）是 console.warn，
+    // node-env 下被 app 自己 catch 的兜底（IDB 缺失、builtin-brushes.json fetch 失败）是 console.warn，
     // 不进 errors；这里只对「真的逃逸出来的抛错」失败。
     if (errors.length) {
       const lines = errors.map(([k, e]) => `  [${k}] ${e && e.stack || e}`).join("\n");

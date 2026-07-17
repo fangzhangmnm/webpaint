@@ -1,65 +1,108 @@
-// brushes.js v1→v2 迁移 / uat 打戳 / resetAt watermark 验收（纯逻辑，桌面可测）。
-// Node 下 default-brushes.json fetch 失败（无 document）→ _defaultsSpec 空 → emergency brush 顶上。
+// 笔架 v2→collection 模型验收（纯逻辑，桌面可测）。
+// 2026-07 重构：uat/makeDefaultRack/mergeMissingDefaults/trash/resetAt 全撤 —— 持久化归 store.collection
+//   （逐 brush 一 item + 一条 .meta），app 域只留 getInitData 构造 + .meta 纯操作。
+// Node 下 builtin-brushes.json fetch 失败（无 document）→ builtinBrushes 走 emergency 兜底。
 import { describe, it, assert, eq } from "./runner.mjs";
 import {
-  makeDefaultRack, mergeMissingDefaults, migrateBrush, rackFromJSON,
-  defaultBrushForTool, PRE_HISTORY_UAT, RACK_VERSION,
+  makeBrush, migrateBrush, defaultBrushForTool,
+  getAllBrushes, getMeta, emptyMeta, metaAppend, metaRemove, metaMove,
+  metaPrependBuiltins, buildInitMeta, builtinBrushInitData, RACK_META_ID, DEFAULT_FOLDER,
 } from "../src/brushes.ts";
 
-describe("brushes v2 迁移", () => {
-  it("migrateBrush：老笔无 uat → PRE_HISTORY_UAT", () => {
-    const b = { id: "x", name: "n", tool: "brush" };
+// 最小假 collection：entries() + getItem(id,def)（controller 的 CollectionLike 结构子集）。
+function fakeColl(items) {
+  return {
+    entries: () => items.filter((e) => e.value !== null).map((e) => ({ id: e.id, value: e.value })),
+    getItem: (id, def) => { const e = items.find((x) => x.id === id); return e && e.value !== null ? e.value : def; },
+  };
+}
+
+describe("brushes · uat 撤除", () => {
+  it("makeBrush 不再带 uat", () => {
+    const b = makeBrush({ name: "n", tool: "brush" });
+    assert(!("uat" in b), "makeBrush 输出不应含 uat");
+  });
+  it("migrateBrush 迁移 legacy 字段但不注入 uat", () => {
+    const b = { id: "x", name: "n", tool: "brush", airbrush: true };
     migrateBrush(b);
-    eq(b.uat, PRE_HISTORY_UAT);
+    assert(!("uat" in b), "migrateBrush 不应再加 uat");
+    eq(b.compositeMode, "buildup");   // airbrush → buildup（legacy 迁移仍在）
+    assert(!("airbrush" in b), "airbrush 应删");
   });
-  it("migrateBrush：已有 uat 不覆盖", () => {
-    const b = { id: "x", name: "n", tool: "brush", uat: 999 };
-    migrateBrush(b);
-    eq(b.uat, 999);
-  });
+});
 
-  it("makeDefaultRack()：首boot resetAt=0 / trash=[] / 笔 uat=PRE_HISTORY / 无 activeByTool", () => {
-    const r = makeDefaultRack();
-    eq(r.version, RACK_VERSION);
-    eq(r.resetAt, 0);
-    assert(Array.isArray(r.trash) && r.trash.length === 0, "trash 应为空数组");
-    assert(r.brushes.every((b) => b.uat === PRE_HISTORY_UAT), "首boot 笔 uat 应为 PRE_HISTORY");
-    assert(!("activeByTool" in r), "不应再有 activeByTool");
+describe("brushes · collection 视图桥", () => {
+  it("getAllBrushes 过滤 .meta 特殊项", () => {
+    const coll = fakeColl([
+      { id: "b1", value: { id: "b1", name: "笔1", tool: "brush", size: { base: 8 } } },
+      { id: RACK_META_ID, value: { folderOrder: ["我的常用"], order: { "我的常用": ["b1"] } } },
+    ]);
+    const brushes = getAllBrushes(coll);
+    eq(brushes.length, 1);
+    eq(brushes[0].id, "b1");
   });
-
-  it("makeDefaultRack({resetAt})：恢复出厂 笔 uat > resetAt（不被自己水位丢）", () => {
-    const T = 1_700_000_000_000;
-    const r = makeDefaultRack({ resetAt: T });
-    eq(r.resetAt, T);
-    assert(r.brushes.every((b) => b.uat > T), "出厂笔 uat 必须 > resetAt");
+  it("getMeta 缺项 → 空 meta", () => {
+    const m = getMeta(fakeColl([]));
+    assert(Array.isArray(m.folderOrder) && m.folderOrder.length === 0, "空 folderOrder");
+    eq(Object.keys(m.order).length, 0);
   });
-
-  it("mergeMissingDefaults：v1 老 rack → 补 trash/resetAt、删 activeByTool、置 version", () => {
-    const old = { version: 1, brushes: [{ id: "u1", name: "我的", tool: "brush", uat: 5 }], activeByTool: { brush: "u1" } };
-    const out = mergeMissingDefaults(old);
-    assert(out, "应返回新 rack（需迁移）");
-    eq(out.version, RACK_VERSION);
-    assert(Array.isArray(out.trash), "应补 trash");
-    eq(out.resetAt, 0);
-    assert(!("activeByTool" in out), "activeByTool 应删");
-  });
-
-  it("mergeMissingDefaults：已是 v2 且无缺失 → null（no-op 不白刷）", () => {
-    const r = { version: RACK_VERSION, brushes: [{ id: "u1", name: "我的", tool: "brush", uat: 5 }], trash: [], resetAt: 0 };
-    eq(mergeMissingDefaults(r), null);
-  });
-
-  it("defaultBrushForTool：取该工具第一支（不依赖 activeByTool）", () => {
-    const r = { version: RACK_VERSION, trash: [], resetAt: 0, brushes: [
-      { id: "b1", name: "笔1", tool: "brush", uat: 1 },
-      { id: "e1", name: "擦1", tool: "eraser", uat: 1 },
+  it("defaultBrushForTool 取该工具第一支（视图 { brushes }）", () => {
+    const rack = { brushes: [
+      { id: "b1", name: "笔1", tool: "brush", size: { base: 8 } },
+      { id: "e1", name: "擦1", tool: "eraser", size: { base: 8 } },
     ] };
-    eq(defaultBrushForTool(r, "eraser").id, "e1");
+    eq(defaultBrushForTool(rack, "eraser").id, "e1");
   });
+});
 
-  it("rackFromJSON：补 trash/resetAt 默认", () => {
-    const r = rackFromJSON(JSON.stringify({ version: RACK_VERSION, brushes: [] }));
-    assert(Array.isArray(r.trash));
-    eq(r.resetAt, 0);
+describe("brushes · .meta 纯操作", () => {
+  it("metaAppend 追加 + 登记 folder；重复不重加", () => {
+    let m = emptyMeta();
+    m = metaAppend(m, "A", "b1");
+    m = metaAppend(m, "A", "b2");
+    m = metaAppend(m, "A", "b1");   // 重复
+    eq(m.folderOrder.join(","), "A");
+    eq(m.order.A.join(","), "b1,b2");
+  });
+  it("metaRemove 从所有 folder 摘除", () => {
+    let m = { folderOrder: ["A", "B"], order: { A: ["b1", "b2"], B: ["b1"] } };
+    m = metaRemove(m, "b1");
+    eq(m.order.A.join(","), "b2");
+    eq(m.order.B.join(","), "");
+  });
+  it("metaMove 从旧 folder 挪到新 folder 末尾", () => {
+    let m = { folderOrder: ["A", "B"], order: { A: ["b1", "b2"], B: ["x"] } };
+    m = metaMove(m, "b1", "B");
+    eq(m.order.A.join(","), "b2");
+    eq(m.order.B.join(","), "x,b1");
+  });
+  it("metaPrependBuiltins 把出厂 id 提到各 folder 最前、用户笔留其后", () => {
+    const m = { folderOrder: ["我的常用"], order: { "我的常用": ["user1", "default-a", "user2"] } };
+    const out = metaPrependBuiltins(m, { "我的常用": ["default-a", "default-b"] });
+    eq(out.order["我的常用"].join(","), "default-a,default-b,user1,user2");
+  });
+  it("buildInitMeta 按 folder 保序分组", () => {
+    const meta = buildInitMeta([
+      { id: "b1", folder: "A" }, { id: "b2", folder: "A" }, { id: "b3", folder: "B" },
+    ]);
+    eq(meta.folderOrder.join(","), "A,B");
+    eq(meta.order.A.join(","), "b1,b2");
+    eq(meta.order.B.join(","), "b3");
+  });
+});
+
+describe("brushes · builtinBrushInitData（新库 seed 载荷）", () => {
+  it("含 .meta 项 + 笔项无 uat（node 下 fetch 失败走 emergency 兜底）", async () => {
+    const data = await builtinBrushInitData();
+    const meta = data.find((d) => d.id === RACK_META_ID);
+    assert(meta, "载荷应含 .meta 项");
+    const brushes = data.filter((d) => d.id !== RACK_META_ID);
+    assert(brushes.length >= 1, "至少一支笔（emergency 兜底）");
+    for (const d of brushes) assert(!("uat" in d.value), "seed 笔不应带 uat");
+    // .meta 覆盖所有笔的 folder
+    for (const d of brushes) {
+      const f = d.value.folder || DEFAULT_FOLDER;
+      assert((meta.value.order[f] || []).includes(d.id), `.meta 应含 ${d.id}`);
+    }
   });
 });

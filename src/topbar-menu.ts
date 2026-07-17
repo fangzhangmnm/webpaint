@@ -14,15 +14,13 @@
 // ctx 绑入（initTopbarMenu(ctx)，gallery 晚绑后才调）：
 //   input / doc / board / history / editMode / setStatus / updateSaveStatus / updateZoomLabel /
 //   gallery / rack。
-// 直接 import（leaf/singleton）：session、_store(store)/isSignedIn/isCloudDirty/setRackDirty、els、
+// 直接 import（leaf/singleton）：session、_store(store)、els、
 //   openInputSheet/openConfirmSheet/lockSyncGate、setMenuOpen、listSessions、
 //   listCloudSessionsRecursive、decodeOraToDoc、compressPixelSnap、maybeFastForwardActive。
 
 import { session } from "./session-state.ts";
 import {
   store as _store,
-  isSignedIn,
-  setRackDirty,
 } from "./app-store.ts";
 import { els } from "./els.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
@@ -284,9 +282,7 @@ export function initTopbarMenu(ctx: AppContext) {
       t("tm.resetRackBody"),
     );
     if (!ok) return;
-    rack.reset(true);   // 恢复出厂 resetAt watermark + 重置 toolStates + persist + applyToolState + bump
-    setRackDirty(true);
-    if (isSignedIn()) rack.syncCloud();
+    await rack.resetBuiltin();   // 非破坏性：出厂笔 setItem 覆盖同 id + .meta 提前；collection 自持久化/同步
     setStatus(t("tm.rackReset", { count: rack.get()?.brushes.length ?? 0 }), true);
   });
 }

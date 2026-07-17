@@ -4,8 +4,8 @@
 // 全是 computed（读反应式 dialReactive.rackVersion + rackUi + toolStates → 笔架内容/工具/文件夹/选中变即自动重渲）。
 // 各处 _renderRackSheet() 手动刷新调用全删（reactivity 替代）。
 //
-// 边界：sheet head 的动作工具条（导入/导出/云推/新建/重置/关闭 + 云图标态机）留 app 命令式（chrome + 绑 rackStore）。
-// 本组件只管「显示哪些 folder/笔 + 点了谁」，emit 回 app 编排（选笔=改 per-doc toolState、编辑=开设置、重置=造默认架）。
+// 边界：sheet head 的动作工具条（导入/导出/刷新/新建/重置/关闭）留 controller 命令式（chrome + 绑 collection）。
+// 本组件只管「显示哪些 folder/笔 + 点了谁」，emit 回 controller 编排（选笔=改 per-doc toolState、编辑=开设置、重置=resetBuiltin）。
 //
 // 纯派生（collectFolders/brushesInFolder/smoothstepRadialGradient）在 brush-rack-view.js（node 可测）。
 

@@ -102,7 +102,7 @@
     "src/ui/gallery-view-model.ts",
     "src/ui/rack-sheet.ts",
     "src/brush-types.ts",
-    "src/brush-rack.ts",
+    "src/brush-rack-controller.ts",
     "src/brush-io.ts",
     "src/current-brush.ts",
     "src/dial-controls.ts",

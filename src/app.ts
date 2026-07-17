@@ -26,8 +26,7 @@ import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
 import { initDevConsole } from "./dev-console.ts";   // window.WebPaint 调试接口
 import { mountGallery } from "./ui/gallery.ts";          // candidate 1 · 图库深模块
-import { BrushRack } from "./brush-rack.ts";
-import type { BrushRackDeps } from "./brush-rack.ts";
+import { BrushRackController } from "./brush-rack-controller.ts";
 import { PwaShell } from "./pwa-shell.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
 import { setPasswordPrompt } from "./crypto-state.ts";   // 加密：密码弹窗注入（ADR-0012）
@@ -48,7 +47,7 @@ import { createEditorState } from "./editor-state.ts";   // candidate 3 · 编�
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
-import { updateSaveStatus, updateNewerBanner, ICON_DISK, ICON_UPLOAD, ICON_CLOUD_CHECK, ICON_CLOUD_BUSY } from "./save-status.ts";
+import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import { initLayerUndo, _afterDocChange, layerSpecFrom } from "./layer-undo.ts";
@@ -67,7 +66,7 @@ import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排�
 //   每个调色器在 src/plugins/ 自成一文件，import 时自注册
 import "./plugins/index.ts";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 // candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
-import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, rackStore, setRackDirty, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
+import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, brushRackCollection, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
 import { initPreferences, refreshPreferences } from "./app-prefs.ts";   // boot 门 + 前台/online 拉云对齐 user-preference（lang/theme/手势）
 import { hydrateSmoothFromPrefs } from "./smooth-config.ts";   // boot 门后合并 synced 平滑调参进 SMOOTH
 import { initAppState, appState } from "./app-state.ts";                // boot 门 + 前台/online 拉云对齐 app-state（current-dir/file/blenderUrl）
@@ -117,13 +116,14 @@ const { state, dialReactive } = createEditorState();
 // 左栏 dial = <LeftDial> Vue 组件（src/ui/left-dial.ts）：笔指示按钮(tap=rack/长按=设置) + size/opacity 竖滑块 + size popup。
 // 全绑定反应式 dial SSoT（getter 读 state.toolStates/dialReactive → 组件 computed 自动追踪）。
 // 取代旧的 updateSidebarBrushIndicator / _sidebarBrushBtn 手势 / showSizePopup / 两个 slider 监听 / applyToolState 的 slider-DOM-push。
-// 笔架深模块（src/brush-rack.ts）。editMode 走 thunk（构造早于 editMode）；DOM/icons/panels 晚绑 init()。
-const rack = new BrushRack({
+// 笔架深模块（src/brush-rack-controller.ts）。持久化/云同步走 brushRackCollection（红线在库内）。
+// editMode 走 thunk（构造早于 editMode）；DOM/panels 晚绑 init()。
+const rack = new BrushRackController({
+  collection: brushRackCollection,
   state, dialReactive,
   editMode: () => editMode,
   setStatus, confirm: openConfirmSheet,
   openExclusive, closeExclusive, registerPanel,
-  rackStore: rackStore as unknown as BrushRackDeps["rackStore"], setRackDirty,
   isSignedIn, isOnline: () => navigator.onLine !== false,
 });
 
@@ -416,7 +416,7 @@ void prefsReady.then(() => bootRestoreSession(ctx)).catch((e) => reportError(new
 // N3：启动时若在线+已登录，排空上次离线攒下的删除队列（fresh boot 不触发 online 事件，故此处补一刀）。
 if (navigator.onLine && isSignedIn()) _store.drainDeleteQueue().catch((e: unknown) => reportError(new Error("drainDeleteQueue: " + String(e)), "log"));
 
-// 笔架深模块装配：mount sheet/settings 组件 + rackStore.configure + 注册 panel + 绑 DOM 事件。
+// 笔架深模块装配：mount sheet/settings 组件 + 注册 panel + 绑 DOM 事件 + 订阅 collection.onChange。
 rack.init({
   els: {
     rack: {
@@ -427,7 +427,7 @@ rack.init({
       newBtn: document.getElementById("brushRackNew")!,
       mount: document.getElementById("rackSheetMount")!,
       exportFolderBtn: document.getElementById("brushRackExportFolder")!,
-      cloudPushBtn: document.getElementById("brushRackCloudPush")!,
+      refreshBtn: document.getElementById("brushRackRefresh")!,
       resetBtn: document.getElementById("brushRackReset")!,
       dumpCodeBtn: document.getElementById("brushRackDumpCode")!,
     },
@@ -438,7 +438,6 @@ rack.init({
       cancel: document.getElementById("brushSettingsCancel")!,
     },
   },
-  icons: { check: ICON_CLOUD_CHECK, busy: ICON_CLOUD_BUSY, upload: ICON_UPLOAD, disk: ICON_DISK },
   blendModes: LAYER_MODE_LABEL,
   RACK_PANEL_BY_TOOL,
 });

@@ -17,7 +17,7 @@
 import { DEFAULT_CONFIG } from "./current-brush-config.ts";
 import { computed } from "../vendor/vue/vue.esm-browser.prod.js";
 import type { EditorRuntimeState, DialReactive } from "./app-context.ts";
-import type { BrushRack } from "./brush-rack.ts";
+import type { BrushRackController } from "./brush-rack-controller.ts";
 
 // 笔架里的一把预设（黑盒；只读这里用到的字段）。
 export interface BrushPreset {
@@ -77,7 +77,7 @@ export interface ResolveBrushArgs {
 //   color：全局色（#rrggbb）。
 //   压感→尺寸/透明的**每笔**开关就是 sizeCoeff / opaCoeff（-1..1，0=不响应压感）——有 UI（ui/brush-settings）、
 //   随笔架持久化、brush.ts 的 signedLerp 真在算。v409 删了同语义的冗余影子字段 pressureToSize/pressureToOpacity：
-//   它们从 preset 读进 ResolvedBrush 后**零消费方**（没 UI 写、没引擎读、default-brushes.json 也没这键）。
+//   它们从 preset 读进 ResolvedBrush 后**零消费方**（没 UI 写、没引擎读、builtin-brushes.json 也没这键）。
 //   要"关掉压感对粗细的影响"就把 sizeCoeff 设 0，别再引入第二个开关。
 export function resolveBrush({
   preset = null, size, opacity, flow, color,
@@ -134,7 +134,7 @@ export function resolveBrush({
 // 笔不更新（「功能不响应」级 bug，非手感漂移）。故 current-brush.test.mjs 验「改 dep → currentBrush 重算」。
 // （旧的 bindEngine→invalidateStamp 引擎桥已删：stamp 缓存随 GPU 栅格归档，无缓存可作废。）
 
-interface CurrentBrushDeps { state: EditorRuntimeState; dialReactive: DialReactive; rack: BrushRack; }
+interface CurrentBrushDeps { state: EditorRuntimeState; dialReactive: DialReactive; rack: BrushRackController; }
 
 export function makeCurrentBrush({ state, dialReactive, rack }: CurrentBrushDeps) {
   // **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。

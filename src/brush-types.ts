@@ -30,14 +30,14 @@ export interface Brush {
   pixelMode?: boolean;
   taper?: BrushTaper;
   smooth?: BrushSmooth;
-  uat?: number;
+  creation_time?: number;   // 新建/复制笔一瞬填；仅作者/版权签名参考，不进同步机制（uat 归 collection 内部盖戳）。
   [k: string]: unknown;
 }
 
+// 瞬态视图（controller 从 collection 现攒 { brushes: getAllBrushes(coll) }）——不再是持久化结构。
+//   旧的 version/trash/resetAt 随 uat/水位线机制一并撤（collection 用 tombstone + 内部 uat-LWW）。
 export interface BrushRackData {
-  version: number;
+  version?: number;
   brushes: Brush[];
-  trash?: unknown[];   // tombstone 数组（{id,uat}）；存同步在此进出，留 unknown 不绑死 server 形状
-  resetAt?: number;
   [k: string]: unknown;
 }

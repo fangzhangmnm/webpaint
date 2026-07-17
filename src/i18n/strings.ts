@@ -464,6 +464,7 @@ export const S = {
   "rack.importJson": { zh: "导入笔架 JSON", en: "Import rack JSON", ja: "ブラシ棚JSONを読み込む" },
   "rack.exportFolder":{ zh: "导出当前文件夹为 JSON", en: "Export current folder as JSON", ja: "現在のフォルダをJSONで書き出す" },
   "rack.cloudPush":  { zh: "云备份笔架到 OneDrive", en: "Back up rack to OneDrive", ja: "ブラシ棚をOneDriveにバックアップ" },
+  "rack.refresh":    { zh: "从云端刷新笔架", en: "Refresh rack from cloud", ja: "クラウドからブラシ棚を更新" },
   "rack.newBrush":   { zh: "新建笔刷", en: "New brush", ja: "新規ブラシ" },
   // 笔刷设置 view header
   "bsv.title":       { zh: "笔刷设置", en: "Brush settings", ja: "ブラシ設定" },
@@ -793,6 +794,7 @@ export const S = {
   "br.folderEmpty": { zh: "本文件夹是空的", en: "This folder is empty", ja: "このフォルダは空です" },
   "br.pleaseSignIn": { zh: "请先登录云端账号", en: "Please sign in to your cloud account first", ja: "先にクラウドアカウントにログインしてください" },
   "br.syncing": { zh: "正在同步笔架…", en: "Syncing rack…", ja: "ブラシラックを同期中…" },
+  "br.refreshing": { zh: "正在从云端刷新笔架…", en: "Refreshing rack from cloud…", ja: "クラウドからブラシラックを更新中…" },
   "br.resetRackTitle": { zh: "重置笔架？", en: "Reset brush rack?", ja: "ブラシラックをリセットしますか？" },
   "br.resetRackMsg": { zh: "会删除全部自定义笔刷 + 改过的默认笔，恢复出厂默认。不可撤销。", en: "This deletes all custom brushes plus modified defaults and restores factory defaults. Cannot be undone.", ja: "すべてのカスタムブラシと変更済みデフォルトブラシを削除し、工場出荷時の状態に戻します。取り消せません。" },
   "br.rackReset": { zh: "笔架已重置（{n} 个 brush）", en: "Rack reset ({n} brushes)", ja: "ブラシラックをリセットしました（{n} 個）" },

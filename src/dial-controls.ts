@@ -10,11 +10,11 @@
 import { stepFor, quantizeSize } from "./ui/brush-size.ts";
 import { editorState } from "./editor-state.ts";   // brush dial → editorState.brushTool SSoT（binding 写反应式 + workspaceDirty）
 import type { EditorRuntimeState } from "./app-context.ts";
-import type { BrushRack } from "./brush-rack.ts";
+import type { BrushRackController } from "./brush-rack-controller.ts";
 import type { EditMode } from "./edit-mode.ts";
 import type { Board } from "./board.ts";
 
-interface DialControlsDeps { state: EditorRuntimeState; rack: BrushRack; getEditMode: () => EditMode; }
+interface DialControlsDeps { state: EditorRuntimeState; rack: BrushRackController; getEditMode: () => EditMode; }
 interface DialKeyboardDeps { board: Board; leftDial: { flashSize: () => void }; }
 
 export function makeDialControls({ state, rack, getEditMode }: DialControlsDeps) {

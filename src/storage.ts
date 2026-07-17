@@ -21,7 +21,6 @@ export interface SessionPkg {
 const DB_NAME = "webpaint";
 const DB_VERSION = 3;             // v3：加 gallery-thumbs store（bump 让已存在的库触发 onupgradeneeded 补建；additive、无迁移）
 const STORE_SESSIONS = "sessions";
-const STORE_META = "meta";       // 目前仅 brush-rack 本地持久化在用（RACK_META_KEY）；step 5 迁到 store.collection 后本 store 会删。
 const STORE_THUMBS = "gallery-thumbs";   // 图库缩略图缓存专用 store，key = store 文件身份 X.ora（cloud-thumb-cache.ts）
 
 let _dbPromise: Promise<IDBDatabase> | null = null;
@@ -33,7 +32,6 @@ function openDB(): Promise<IDBDatabase> {
     req.onupgradeneeded = (ev) => {
       const db = (ev.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_SESSIONS)) db.createObjectStore(STORE_SESSIONS);
-      if (!db.objectStoreNames.contains(STORE_META)) db.createObjectStore(STORE_META);
       if (!db.objectStoreNames.contains(STORE_THUMBS)) db.createObjectStore(STORE_THUMBS);
       // 旧的 docs/layers stores 不主动删（如果存在），让 DevTools 翻历史；
       // 新代码不读不写它们。
@@ -128,28 +126,8 @@ export async function renameSessionKey(oldKey: string, newKey: string): Promise<
   });
 }
 
-// meta：单条配置的 IDB 键值面。⚠ **仅 brush-rack 本地持久化在用**（brush-rack.ts 的 RACK_META_KEY）——
-//   设置/状态已全走 store 的 collection（IDB，见 src/app-prefs.ts / app-state.ts），别再往 meta 加新键。
-//   笔架 step 5 迁到 store.collection 后，本 meta store（getMeta/setMeta + STORE_META object store）整体删除。
-export async function getMeta(key: string): Promise<unknown> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_META, "readonly");
-    const req = tx.objectStore(STORE_META).get(key);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-export async function setMeta(key: string, value: unknown): Promise<void> {
-  const db = await openDB();
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_META, "readwrite");
-    tx.objectStore(STORE_META).put(value, key);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
+// meta store（getMeta/setMeta + STORE_META object store）已于 2026-07 删除：笔架本地持久化迁到
+//   store.collection("brush-rack")；设置/状态早已走 collection（app-prefs.ts / app-state.ts）。别再加回。
 
 // gallery 缩略图缓存：webpaint DB 的 gallery-thumbs store，key = store 文件身份 X.ora。value 见 cloud-thumb-cache。
 export async function getThumb(key: string): Promise<unknown> {
