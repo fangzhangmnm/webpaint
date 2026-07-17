@@ -6,7 +6,7 @@
 // 不需要 DOM（Vue reactivity 在 node 直跑，resolveBrush 是纯函数）。
 
 import { describe, it, assert, eq } from "./runner.mjs";
-import { makeCurrentBrush } from "../src/current-brush.ts";
+import { makeCurrentBrush } from "../src/resolved-brush.ts";
 import { createEditorState } from "../src/editor-state.ts";
 
 // 最小假笔架：getRackToolKey 直返工具名；findToolBrushPure 默认返 null（→ resolveBrush 走 DEFAULT 兜底）。

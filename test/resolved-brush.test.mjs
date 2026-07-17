@@ -1,22 +1,22 @@
 // 当前笔（ResolvedBrush）解析验收（candidate 3）。纯派生 + 不可变。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { resolveBrush } from "../src/resolved-brush.ts";
-import { DEFAULT_SETTINGS } from "../src/brush.ts";
+import { DEFAULT_CONFIG } from "../src/current-brush-config.ts";
 
 describe("resolveBrush · 无笔架兜底（mental model：console 设工具即可画）", () => {
   it("preset=null 仍给出完整可画的笔（DEFAULT 兜底 + dial 覆盖）", () => {
     const b = resolveBrush({ preset: null, size: 40, opacity: 0.5, flow: 0.8, color: "#abcdef" });
     eq(b.size, 40); eq(b.opacity, 0.5); eq(b.flow, 0.8); eq(b.color, "#abcdef");
     // 形状/间距走 DEFAULT（无预设）
-    eq(b.hardness, DEFAULT_SETTINGS.hardness);
-    eq(b.spacing, DEFAULT_SETTINGS.spacing);
-    eq(b.compositeMode, DEFAULT_SETTINGS.compositeMode);
+    eq(b.hardness, DEFAULT_CONFIG.hardness);
+    eq(b.spacing, DEFAULT_CONFIG.spacing);
+    eq(b.compositeMode, DEFAULT_CONFIG.compositeMode);
   });
-  it("全空参 = DEFAULT_SETTINGS 全集（含 type / taperFloor 这类旧 frozen 不碰的字段）", () => {
+  it("全空参 = DEFAULT_CONFIG 全集（含 type / taperFloor 这类旧 frozen 不碰的字段）", () => {
     const b = resolveBrush();
-    eq(b.type, DEFAULT_SETTINGS.type);
-    eq(b.taperFloor, DEFAULT_SETTINGS.taperFloor);
-    eq(b.size, DEFAULT_SETTINGS.size);
+    eq(b.type, DEFAULT_CONFIG.type);
+    eq(b.taperFloor, DEFAULT_CONFIG.taperFloor);
+    eq(b.size, DEFAULT_CONFIG.size);
   });
 });
 

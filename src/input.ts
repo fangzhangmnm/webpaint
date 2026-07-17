@@ -49,8 +49,6 @@ type History = UndoStack;
 // PixelEdit 实例（pixel-edit.ts）。begin() 回的事务句柄无 named export → 取 ReturnType。
 type PixelHistory = PixelEdit;
 type PixelTx = ReturnType<PixelEdit["begin"]>;
-// 笔刷 settings = ResolvedBrush（resolved-brush.ts，引擎 beginStroke 吃的不可变值）。
-type BrushSettings = ResolvedBrush;
 // liquify settings：引擎的 LiquifySettings 未 export；input 只用 mode/size/strength，
 //   bleed 等其余字段引擎内部从 settings 取 → 用 ResolvedBrush 同惯例的最小壳 + unknown 兜底。
 interface LiquifySettings { mode: string; size: number; strength: number; bleed?: string; }
@@ -118,7 +116,7 @@ interface GestureTap {
 interface InputOpts {
   getTool?: () => string;
   editMode?: EditMode | null;
-  getBrushSettings?: () => BrushSettings | null;
+  getResolvedBrush?: () => ResolvedBrush | null;
   getLiquifySettings?: () => LiquifySettings;
   getFilterBrushState?: () => FilterBrushState | null;
   getLongPressPickEnabled?: () => boolean;
@@ -169,7 +167,7 @@ const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw �
 
 // v249: 两参 → 引擎平滑参数（时间常数指数追踪 + 死区，详 docs/20260613-brush-procreate-smoothing.md）。
 //   tau = streamline × tauMaxMs（时间，scale 无关）；deadzone = stabilization × stabMaxPx ÷scale（doc px）。
-function _resolveSmooth(settings: BrushSettings, scale: number) {
+function _resolveSmooth(settings: ResolvedBrush, scale: number) {
   const sc = scale || 1;
   const clamp01 = (v: number | undefined) => Math.max(0, Math.min(1, v || 0));
   return {
@@ -316,7 +314,7 @@ export class InputController {
   filterBrush: FilterBrushEngine;
   getTool: () => string;
   editMode: EditMode | null;
-  getBrushSettings: () => BrushSettings | null;
+  getResolvedBrush: () => ResolvedBrush | null;
   getLiquifySettings: () => LiquifySettings;
   getFilterBrushState: () => FilterBrushState | null;
   getLongPressPickEnabled: () => boolean;
@@ -353,7 +351,7 @@ export class InputController {
     };
     this.getTool = opts.getTool || (() => "brush");
     this.editMode = opts.editMode || null;   // EditMode 独占状态机（路由/gate/ctrl-z 用，见 edit-mode.js）
-    this.getBrushSettings = opts.getBrushSettings || (() => null);   // 必须传
+    this.getResolvedBrush = opts.getResolvedBrush || (() => null);   // 必须传
     this.getLiquifySettings = opts.getLiquifySettings || (() => ({ mode: "push", size: 50, strength: 0.5 }));
     // v132 filter brush 当前激活的 { Filter, params } 或 null
     this.getFilterBrushState = opts.getFilterBrushState || (() => null);
@@ -452,7 +450,7 @@ export class InputController {
       const q = this.getLiquifySettings();
       size = (q && q.size) ? q.size * 2 : 100;     // size 是半径 → 直径 = ×2
     } else {
-      const settings = this.getBrushSettings();
+      const settings = this.getResolvedBrush();
       size = settings ? settings.size : 12;
       // v232：像素笔 stamp 是方的（fillRect），preview 跟着方，别用圆误导
       square = !!(settings && settings.pixelMode);
@@ -676,7 +674,7 @@ export class InputController {
       // 半径下 coalesced 整批连续跑 → 帧延迟堆积 → 越拖越卡。只跑最新一个（保 timeStamp 滤后的）。
       // 画笔不能丢帧，会断笔/疏密；液化 / filter brush 每帧独立重采样，丢帧 = 跳过细分但形状仍连续。
       if (spec.coalesceLatest && list.length > 1) list = [list[list.length - 1]];
-      const settings = spec.usesBrushSettings ? this.getBrushSettings() : null;
+      const settings = spec.usesResolvedBrush ? this.getResolvedBrush() : null;
       for (const ev of list) {
         // **Safari iOS getCoalescedEvents() 边界回放过滤**：每次 pointermove
         // 的 coalesced 列表会把上一批的样本一起带回来 (eg 一批末尾 t=21，下
@@ -838,7 +836,7 @@ export class InputController {
   // 即时笔位置平滑在 stroke-input-smooth.js（inputSmooth，死区+EMA，pure·可测）；主笔刷走引擎 stroke-smoother.js。
 
   _beginStroke(e: PointerEvent, rec: PointerRec, mode: string) {
-    const settings = this.getBrushSettings();
+    const settings = this.getResolvedBrush();
     if (!settings || !this.doc.activeLayer) return;
     // activeLayer 是 Node（叶|组）；上游 activeEditableLeaf 已硬拒组 → 此处确为可写叶。
     const layer = this.doc.activeLayer as Layer;
@@ -921,11 +919,11 @@ export class InputController {
 
   // ---- Filter brush (v132) ----
   // 一笔 = 1 个 "stroke" history entry（schema 同笔触）
-  // brushSettings 从 getBrushSettings() 拿（沿用当前画笔 size / hardness / spacing / opacity）
+  // brushSettings 从 getResolvedBrush() 拿（沿用当前画笔 size / hardness / spacing / opacity）
   // filter + params 从 getFilterBrushState() 拿（app.js 在进入 filter brush 模式时 set）
   _beginFilterBrush(rec: PointerRec) {
     const fbState = this.getFilterBrushState();
-    const brushSettings = this.getBrushSettings();
+    const brushSettings = this.getResolvedBrush();
     if (!fbState || !fbState.Filter || !brushSettings || !this.doc.activeLayer) {
       rec.role = null; return;
     }

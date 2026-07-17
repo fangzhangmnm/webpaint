@@ -22,7 +22,7 @@ function resolveRef<T extends { id?: unknown; name?: unknown }>(list: T[], ref: 
 }
 import { collectFolders } from "./brush-rack-view.ts";
 import { mountRackSheet } from "./ui/rack-sheet.ts";
-import { mountBrushSettings } from "./ui/brush-settings.ts";
+import { mountBrushSettings } from "./ui/brush-config-view.ts";
 import { exportBrush, exportRackFolder, buildRackCode, shareOrDownloadJSON } from "./brush-io.ts";
 import type { Brush, BrushRackData } from "./brush-types.ts";
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";

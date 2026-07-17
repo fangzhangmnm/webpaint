@@ -18,23 +18,23 @@
 //   engineKey         begin 时用哪个引擎实例（input 上的 this[engineKey]）。draw/erase 共用 brush。
 //   coalesceLatest    pointermove 的 coalesced 批是否只跑最后一个
 //                     （液化 / filterBrush 每帧 ~31K typed-array ops，整批连跑会堆帧 → 丢帧只保最新）。
-//   usesBrushSettings _move 是否取 getBrushSettings() 喂四件套平滑（液化 / filterBrush 传 null）。
+//   usesResolvedBrush _move 是否取 getResolvedBrush() 喂四件套平滑（液化 / filterBrush 传 null）。
 //   finalize          endStroke 时是否按选区 applyMaskPostStroke
 //                     （filterBrush 在 begin 已吃 selection，故 false）。
 //   historyType       PixelEdit.begin 的事务类型（handler 见 pixel-edit.js）。
 export interface PixelStrokeSpec {
   engineKey: string;
   coalesceLatest: boolean;
-  usesBrushSettings: boolean;
+  usesResolvedBrush: boolean;
   finalize: boolean;
   historyType: string;
 }
 
 export const PIXEL_STROKE_SPECS: Readonly<Record<string, PixelStrokeSpec>> = Object.freeze({
-  draw:        Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesBrushSettings: true,  finalize: true,  historyType: "stroke" }),
-  erase:       Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesBrushSettings: true,  finalize: true,  historyType: "stroke" }),
-  liquify:     Object.freeze({ engineKey: "liquify",     coalesceLatest: true,  usesBrushSettings: false, finalize: true,  historyType: "liquify" }),
-  filterBrush: Object.freeze({ engineKey: "filterBrush", coalesceLatest: true,  usesBrushSettings: false, finalize: false, historyType: "stroke" }),
+  draw:        Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesResolvedBrush: true,  finalize: true,  historyType: "stroke" }),
+  erase:       Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesResolvedBrush: true,  finalize: true,  historyType: "stroke" }),
+  liquify:     Object.freeze({ engineKey: "liquify",     coalesceLatest: true,  usesResolvedBrush: false, finalize: true,  historyType: "liquify" }),
+  filterBrush: Object.freeze({ engineKey: "filterBrush", coalesceLatest: true,  usesResolvedBrush: false, finalize: false, historyType: "stroke" }),
 });
 
 // role 是否走 pixel-stroke 生命周期（begin → extend×N → end/abort，落 layer 像素 + PixelEdit 事务）。

@@ -197,7 +197,7 @@ export const S = {
   "rs.empty":        { zh: "此工具暂无笔刷。点「+ 新建」加一个。", en: "No brushes for this tool. Tap “+ New” to add one.", ja: "このツールにブラシがありません。「+ 新規」で追加。" },
   "rs.edit":         { zh: "编辑",     en: "Edit",         ja: "編集" },
 
-  // ── 笔刷设置全屏（ui/brush-settings.ts）切片 3b。latin 参数名(size/opacity/flow/
+  // ── 笔刷设置全屏（ui/brush-config-view.ts）切片 3b。latin 参数名(size/opacity/flow/
   //    streamline/stabilization/pressure LPF/pressureGamma/pixelMode/compositeMode)不译。──
   "bs.basic":        { zh: "基本",     en: "Basic",        ja: "基本" },
   "bs.name":         { zh: "名字",     en: "Name",         ja: "名前" },

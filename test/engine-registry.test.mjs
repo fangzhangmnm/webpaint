@@ -35,9 +35,9 @@ describe("engine-registry · dispatch 决策", () => {
     }
   });
 
-  it("spec.usesBrushSettings（喂四件套平滑）只对 draw / erase 为真", () => {
+  it("spec.usesResolvedBrush（喂四件套平滑）只对 draw / erase 为真", () => {
     for (const r of ["draw", "erase", "liquify", "filterBrush"]) {
-      eq(pixelStrokeSpec(r).usesBrushSettings, oldUsesBrushSettings(r), `usesBrushSettings(${r})`);
+      eq(pixelStrokeSpec(r).usesResolvedBrush, oldUsesBrushSettings(r), `usesResolvedBrush(${r})`);
     }
   });
 

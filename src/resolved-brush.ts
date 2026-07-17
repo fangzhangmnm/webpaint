@@ -10,11 +10,14 @@
 //   引擎只读这个值；frozen 让任何回写**响亮失败**而非静默污染。
 //
 //   mental model（user）：**没有笔架时，console 设一下工具也能画**——所以 preset=null 时
-//   这里用 DEFAULT_SETTINGS 兜底出一个完整可画的笔。rack 只是 ResolvedBrush 的**生产者之一**。
+//   这里用 DEFAULT_CONFIG 兜底出一个完整可画的笔。rack 只是 ResolvedBrush 的**生产者之一**。
 //
 // 纯模块：无 DOM / 无 IDB / 无 cloud。可 node 直测（test/resolved-brush.test.mjs）。
 
-import { DEFAULT_SETTINGS } from "./brush.ts";
+import { DEFAULT_CONFIG } from "./current-brush-config.ts";
+import { computed } from "../vendor/vue/vue.esm-browser.prod.js";
+import type { EditorRuntimeState, DialReactive } from "./app-context.ts";
+import type { BrushRack } from "./brush-rack.ts";
 
 // 笔架里的一把预设（黑盒；只读这里用到的字段）。
 export interface BrushPreset {
@@ -32,9 +35,9 @@ export interface BrushPreset {
   smooth?: { streamline?: number; stabilization?: number };
 }
 
-// 引擎吃的扁平笔。字段集 = DEFAULT_SETTINGS 全集；index 签名兜住本模块不显式列举的默认字段
+// 引擎吃的扁平笔（不可变值，引擎只读）。字段集 = DEFAULT_CONFIG 全集；index 签名兜住本模块不显式列举的默认字段
 // （type / taperFloor 等旧 applyBrushPresetFrozen 不碰、但 spread 保留下来的）。
-export interface BrushSettings {
+export interface ResolvedBrush {
   size: number;
   opacity: number;
   flow: number;
@@ -59,9 +62,6 @@ export interface BrushSettings {
   [k: string]: unknown;
 }
 
-// 引擎只读这个不可变值。
-export type ResolvedBrush = Readonly<BrushSettings>;
-
 export interface ResolveBrushArgs {
   preset?: BrushPreset | null;
   size?: number;
@@ -83,8 +83,8 @@ export function resolveBrush({
   preset = null, size, opacity, flow, color,
 }: ResolveBrushArgs = {}): ResolvedBrush {
   // base = 引擎默认全集（type / taperFloor 等旧 applyBrushPresetFrozen 不碰的字段一并保留）。
-  // DEFAULT_SETTINGS 来自未类型化的 brush.js（手感红区，本轮不迁）——在此唯一的领域接缝处断言其形状。
-  const b = { ...(DEFAULT_SETTINGS as Record<string, unknown>) } as BrushSettings;
+  // DEFAULT_CONFIG 来自 current-brush-config.ts（纯数据契约）——在此唯一的领域接缝处断言其形状。
+  const b = { ...(DEFAULT_CONFIG as Record<string, unknown>) } as ResolvedBrush;
 
   if (preset) {
     // —— 预设冻结字段（逐字段映射，?? 默认值与旧 applyBrushPresetFrozen 逐字对齐）——
@@ -120,4 +120,36 @@ export function resolveBrush({
   if (color             != null) b.color             = color;
 
   return Object.freeze(b);
+}
+
+// ——「当前笔」反应式派生 + 引擎桥（从组合根 app.js 下沉，survey rec #3）——
+//
+// currentBrush = Vue computed，把 4 个反应式 SSoT 装配成引擎唯一吃的不可变 ResolvedBrush：
+//   ① 当前工具 dial（toolStates：size/opacity/flow，per-doc reactive）
+//   ② 活动预设（笔架，rackVersion 触发重算）③ 全局 color ④ 全局压感开关
+// **手感数学全在 resolveBrush（上方），这里只装配、不碰任何公式/时间常数。**
+// 引擎只读 currentBrush.value（stroke begin 时取，非每 stamp）。
+//
+// 接线风险（boot-smoke 抓不到、本模块的 node 测专门守）：依赖集漏一个 → 改 dial/color/预设
+// 笔不更新（「功能不响应」级 bug，非手感漂移）。故 current-brush.test.mjs 验「改 dep → currentBrush 重算」。
+// （旧的 bindEngine→invalidateStamp 引擎桥已删：stamp 缓存随 GPU 栅格归档，无缓存可作废。）
+
+interface CurrentBrushDeps { state: EditorRuntimeState; dialReactive: DialReactive; rack: BrushRack; }
+
+export function makeCurrentBrush({ state, dialReactive, rack }: CurrentBrushDeps) {
+  // **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。
+  const currentBrush = computed(() => {
+    void dialReactive.rackVersion;   // 依赖笔架版本（编辑/重置预设后重算活动预设字段）
+    const ts = state.toolStates[rack.getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
+    const preset = rack.findToolBrushPure(ts);   // 无笔架 → null → DEFAULT 兜底
+    return resolveBrush({
+      // 同一运行时 brush 对象的两个视图：rack 存的是完整 Brush，resolveBrush 只读 BrushPreset 子集。
+      preset: preset as BrushPreset | null,
+      size: ts.size, opacity: ts.opacity ?? 1.0, flow: ts.flow ?? 1.0,
+      color: state.color,
+      // 压感开关不再全局传入（2026-07-14 deprecate）——每笔自带（resolveBrush 从 preset 取，缺则 DEFAULT true）。
+    });
+  });
+
+  return { currentBrush };
 }

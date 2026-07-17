@@ -1,7 +1,7 @@
 // 套件级 DOM shim 安装——**必须是 run.mjs 的第一个 import**。
 //
 // 为什么 top-level 装：Vue（vue.esm-browser）在 module-eval 时把 document 缓存成 module 级 const。
-// 只要套件里任何测试在 top-level import 了拉 Vue 的模块（如 current-brush.ts），ESM 会在 run() 之前
+// 只要套件里任何测试在 top-level import 了拉 Vue 的模块（如 resolved-brush.ts），ESM 会在 run() 之前
 // 就求值它 → Vue 那时若没 document（node 裸环境）→ 缓存 doc=null → 之后 boot-smoke 里 Vue mount
 // 即 `null.createTextNode` 炸。这里在最早时刻装好 shim，确保 Vue 首次求值时 document 有效。
 //

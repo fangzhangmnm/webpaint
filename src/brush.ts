@@ -80,53 +80,8 @@ interface StrokeState {
   frozenWalk: Walk;   // endStroke 出端 taper 干走（GL 模式停在 ci=0，dry-walk 从 0 走全程算总笔长）
 }
 
-// 引擎默认参数袋 = ResolvedBrush 的 base（resolved-brush.js import 之）。
-// 当前笔（state.brush 旧单例）已收敛成不可变 ResolvedBrush（见 docs/CONTEXT [[当前笔]]）；
-// 这张表是「无 preset / 无笔架」时也能画的兜底默认（user mental model：console 设工具即可绘画）。
-export const DEFAULT_SETTINGS = {
-  type: "round",
-  size: 12,
-  color: "#1b1b1b",
-  // 用户当场调（per-tool 持久）：
-  opacity: 1.0,           // user.opacity —— 应用在 endStroke composite (Π 外)
-  flow: 1.0,              // user.flow —— 进 α_dab (Π 内)
-  // 压感 dynamics（preset 冻结，−1..1 signed）：
-  sizeCoeff: 0.6,
-  opaCoeff: 0.6,
-  flowCoeff: 0,
-  pressureGamma: 1.0,
-  // v102: 压感时间域 LPF (ms，一阶 IIR)
-  // 0 = raw，正值 = 平滑（解 "转角顿一下 out-leg 突然细" 的问题）
-  pressureLPF: 50,
-  // shape：
-  hardness: 0.75,
-  shapeKind: "round",
-  shapeAspect: 1.0,
-  shapeRotation: 0,
-  // spacing：
-  spacing: 0.12,
-  // buffer 合成模式：
-  compositeMode: "wash",  // "wash" = Alpha Darken (JS max), "buildup" = source-over (Canvas2D native)
-  // 笔刷混合模式：整条 stroke 落到 layer 时的 globalCompositeOperation（multiply/screen/...）。
-  //   compositeMode 管 stroke 自身内部重叠；blendMode 管整条 stroke vs 下方 layer 像素。
-  blendMode: "source-over",
-  // pixel mode：
-  pixelMode: false,
-  // 位置平滑（时间常数指数追踪，详 docs/20260613-brush-procreate-smoothing.md）：
-  streamline: 0.15,         // → 时间常数 tau：滞后恒 tau 时长（跟笔/可控/顿涌现）。0.5=满劲 → 默认 0.15=轻
-  stabilization: 0,         // 死区拉绳：硬空间阈值去抖（与 tau 频域去抖正交）
-  // taper：笔触两端渐细，**纯 stylistic·per-preset**（brushes.js makeBrush 的 taperIn/out → preset.taper）。默认 0=无。
-  //   曾有「系统级 anti-spike 硬件 taper 1.5」的设定，但预设永远覆盖它 → 形同虚设且误导，已删（user 2026-06-08）。
-  taperIn: 0,
-  taperOut: 0,        // 末端渐细长度（× 笔径）。0=无。endStroke 时按到末端距离施加（需总笔长）
-  taperFloor: 0.4,    // taper 包络最小压感系数（in/out 两端共用）
-};
-
-export class BrushSettings {
-  [k: string]: unknown;
-  constructor(overrides?: Record<string, unknown> | null) { Object.assign(this, DEFAULT_SETTINGS, overrides || {}); }
-  clone(over?: Record<string, unknown>) { return new BrushSettings({ ...this, ...over }); }
-}
+// 引擎默认参数袋 DEFAULT_CONFIG（= ResolvedBrush 的 base）已下沉 current-brush-config.ts（纯数据契约）；
+// dead class BrushSettings（旧可变单例）随之删除——当前笔早已收敛成不可变 ResolvedBrush（见 docs/CONTEXT [[当前笔]]）。
 
 // signed_lerp：coeff ∈ [−1, 1]，p ∈ [0, 1]，返回 ∈ [amp, 1] where amp = 1 − |coeff|。
 //   coeff ≥ 0：amp + (1 − amp) × p  →  p=0 → amp，p=1 → 1
@@ -373,7 +328,7 @@ export class BrushEngine {
   _stampParams(pressure: number, strokeDist: number): StampParams | null {
     const st = this._stroke!;
     const s = st.settings;
-    // taperFloor 不在 ResolvedBrush 显式字段（来自 DEFAULT_SETTINGS 兜底），index 签名为 unknown → 断言 number。
+    // taperFloor 不在 ResolvedBrush 显式字段（来自 DEFAULT_CONFIG 兜底），index 签名为 unknown → 断言 number。
     const taperFloor = s.taperFloor as number;
     let p = Math.max(0, Math.min(1, pressure));
     // 入端 taper：起手 fade-in（也兼顾 Apple Pencil 落笔 spike → 萝卜尖）
