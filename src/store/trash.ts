@@ -12,12 +12,12 @@ type Busy = <T>(label: string, fn: () => Promise<T>) => Promise<T>;
 const passBusy: Busy = (_l, fn) => fn();
 
 export interface TrashCfg {
-  cloud: Pick<CloudSync, "restore" | "purge" | "listTrash">;
-  local?: Pick<LocalCache, "restore" | "purgeTrash" | "listTrash">;
+  cloud: Pick<CloudSync, "restore" | "purge" | "listTrash" | "listBackup">;
+  local?: Pick<LocalCache, "restore" | "purgeTrash" | "listTrash" | "listBackup">;
   head: Pick<LocalHead, "markSeen">;
   busy?: Busy;
 }
-export interface RestoreOpts { fromCloud?: boolean; cloudItemId?: string | null; targetName?: string; trashKey?: string | null; busy?: Busy }
+export interface RestoreOpts { fromCloud?: boolean; cloudItemId?: string | null; targetName?: string; trashKey?: string | null; encrypted?: boolean; busy?: Busy }
 export interface PurgeOpts { trashKey?: string | null; cloudItemId?: string | null; confirm?: (ctx: { title: string; body: string; danger?: boolean }) => boolean | Promise<boolean>; busy?: Busy }
 export interface EmptyTrashOpts { isOnline?: () => boolean; busy?: Busy; concurrency?: number; scope?: "local" | "cloud" | "both" }
 export interface TrashResult { status: string; name?: string | null; local?: boolean; cloud?: boolean; purged?: number; failed?: unknown[] }
@@ -26,12 +26,13 @@ export function createTrash(cfg: TrashCfg) {
   const { cloud, local, head, busy: _busy = passBusy } = cfg;
 
   async function restore(opts: RestoreOpts = {}): Promise<TrashResult> {
-    const { fromCloud, cloudItemId, targetName, trashKey, busy = _busy } = opts;
+    const { fromCloud, cloudItemId, targetName, trashKey, encrypted, busy = _busy } = opts;
     return busy("恢复中…", async () => {
       let name: string | null = targetName || null, restoredLocal = false, restoredCloud = false;
+      // both 行策略：本地先恢复到**原名**；云端腿随后 cloud.restore 撞名自动 (2)（复用其重试）→ 两份都在、不覆盖。
       if (trashKey && local) { const n = await local.restore(trashKey); if (n) { name = n; restoredLocal = true; } }
       if (fromCloud && cloudItemId != null) {
-        const ritem = await cloud.restore(cloudItemId, (name || targetName)!) as { eTag?: string | null };
+        const ritem = await cloud.restore(cloudItemId, (name || targetName)!, { encrypted }) as { eTag?: string | null };
         restoredCloud = true;
         // 采纳恢复出的云 item etag（restore 是 move → 新 etag）→ 之后 push 有 base，不对自己的文件弹假撞名。
         const rname = name || targetName;
@@ -79,5 +80,33 @@ export function createTrash(cfg: TrashCfg) {
     });
   }
 
-  return { restore, purge, emptyTrash };
+  // 清空**备份箱**（.backup / 本地 backup 分区）：weakOverride/keepMine 的 loser 字节 stash 处。
+  //   与 emptyTrash 同纪律：scope 选端、逐项独立 try、失败汇总不静默、强退=cancel。备份用 listBackup + 通用 purge/purgeTrash。
+  async function emptyBackup(opts: EmptyTrashOpts = {}): Promise<TrashResult> {
+    const { isOnline, busy = _busy, concurrency = 5, scope = "both" } = opts;
+    return busy("清空备份箱…", async () => {
+      let purged = 0; const failed: { name?: string; where: string; error: string }[] = [];
+      const errMsg = (e: unknown) => String((e as { message?: unknown })?.message || e);
+      if (scope !== "cloud" && local && local.listBackup && local.purgeTrash) {
+        for (const b of await local.listBackup()) {
+          try { await local.purgeTrash(b.trashKey); purged++; }   // purgeTrash 认 `backup/` 前缀 → 走 backup 分区
+          catch (e) { reportStoreError(e, "warning"); failed.push({ name: b.name, where: "local", error: errMsg(e) }); }
+        }
+      }
+      if (scope !== "local" && (!isOnline || isOnline())) {
+        let items: CloudItem[] | null = null;
+        try { items = await cloud.listBackup(); } catch (e) { reportStoreError(e, "warning"); failed.push({ where: "cloud-list", error: errMsg(e) }); }
+        items = items || [];
+        for (let i = 0; i < items.length; i += concurrency) {
+          await Promise.all(items.slice(i, i + concurrency).map(async (it) => {
+            try { await cloud.purge(it.id); purged++; }
+            catch (e) { reportStoreError(e, "warning"); failed.push({ name: it.name, where: "cloud", error: errMsg(e) }); }
+          }));
+        }
+      }
+      return { status: "emptied", purged, failed };
+    });
+  }
+
+  return { restore, purge, emptyTrash, emptyBackup };
 }

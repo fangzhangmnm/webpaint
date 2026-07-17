@@ -426,6 +426,7 @@ function makeGallery(host: GalleryHost) {
               fromCloud: !!item.cloud,
               cloudItemId: item.cloud ? item.cloud.id : null,
               targetName: sessionFileName(item.name),   // 边界转全名（恢复目标身份）
+              encrypted: item.encrypted,                // 加密件：云端腿恢复落 encFileName（否则密文落明文路径打不开）
             });
             const rn = res.name ? stripSessionExt(res.name) : item.name;   // 库返全名 → strip 回裸名显示/比对
             host.status(rn !== item.name ? t("gal.st.restoredRenamed", { name: rn, orig: item.name }) : t("gal.st.restored", { name: rn }));

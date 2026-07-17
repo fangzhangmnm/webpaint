@@ -101,7 +101,16 @@ export function watchFolder(
 }
 // ⛔ listGallery（全树列举）已删 2026-07-12——**库唯一列举面 = store.watchFolder（订阅当前夹）**，app 包成 watchFolder。
 //   app 原则上不知道别的 folder 内容（内存只放当前夹）；名字碰撞由 store rename/saveAs 目标护栏内化检测（撞名抛 CloudNameCollisionError），不靠先 list 目标夹。
-export const listGalleryTrash = async () => (await store.listTrash()).map((c) => ({ name: stripSessionExt(c.path || c.name || ""), local: null, cloud: c, deletedAt: 0 }));
+// 回收站视图：store.listTrash 返**两端聚合**的 TrashItem[]（side/localKey/cloudItemId/encrypted/conflictLive）→ 映射成 gallery 的 TrashGItem。
+//   local/cloud 两腿据 localKey/cloudItemId 填（app 原有 both-side 模型此前从没被本地腿填充）。只元数据，无 blob。
+export const listGalleryTrash = async () => (await store.listTrash()).map((it) => ({
+  name: stripSessionExt(it.name),
+  deletedAt: 0,
+  encrypted: it.encrypted,
+  conflictLive: it.conflictLive,
+  local: it.localKey ? { name: stripSessionExt(it.name), trashKey: it.localKey, encrypted: it.encrypted } : null,
+  cloud: it.cloudItemId ? { path: it.name, id: it.cloudItemId } : null,
+}));
 
 // ---- brush-rack collection（逐 brush 一 item + 一条 .meta）：持久化 + 云同步唯一入口，红线在库内。----
 //   getInitData（brushes.ts 域构造）：仅当这份 collection 的 json 不存在（新库）时 fetch builtin-brushes.json

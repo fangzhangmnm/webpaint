@@ -21,7 +21,8 @@ import { createCollection, emptyCollectionBytes, type Collection, type Collectio
 import { createListing, type ListContext, type FolderSnapshot } from "./listing.ts";
 import { createUploadReplay, type UploadReplayPolicy } from "./upload-queue.ts";
 import type { CloudProvider, CloudSync, Kv, LocalCache } from "./types.ts";
-import { createCloudSync } from "./cloud-sync.ts";
+import { createCloudSync, CloudNameCollisionError } from "./cloud-sync.ts";
+import { mergeTrash, type TrashItem } from "./trash-merge.ts";
 import { createLocalCache, createCollectionCache } from "./local-cache.ts";
 import { runStoreMigrations, storeNamespace } from "./migration.ts";
 import { namespacedKv, type KeyedKv } from "./kv-namespace.ts";
@@ -292,6 +293,21 @@ export function createStore(config: StoreConfig) {
   });
   const trashMod = createTrash({ cloud, local, head, busy: ui.busy });
 
+  // 回收站/备份箱两端聚合（README §2）：cloud + local 一次列举 → mergeTrash 归并成单一 TrashItem[]。
+  //   trash 才判 conflictLive（备份箱是冲突 loser、无此语义 → 传空 live set）；且仅当有本地项时才拉 live（省 listAll 全树 walk）。
+  async function aggregateBox(box: "trash" | "backup"): Promise<TrashItem[]> {
+    const cloudItems = await (box === "trash" ? cloud.listTrash() : cloud.listBackup());   // 内部已 catch → 出错返 []
+    const localItems = box === "trash"
+      ? (local.listTrash ? await local.listTrash() : [])
+      : (local.listBackup ? await local.listBackup() : []);
+    let live = new Set<string>();
+    if (box === "trash" && localItems.length && isOnline()) {
+      const all = await cloud.listAll().catch(() => null);
+      if (all && all.complete) live = new Set(all.files.map((f) => f.name ?? f.path));   // 只在权威（complete）时填 → 非权威=空集=conflictLive 不误报
+    }
+    return mergeTrash(localItems, cloudItems, live);
+  }
+
   // ── 单飞守卫（port 自 WebPaint store.ts，2026-06-21 起红线）：用户态写流同一时刻只一个，
   //   并发的第二个**直接拒**（throw STORE_BUSY），调用方 catch→报状态。与 ui.busy 正交、更硬
   //   （busy 只是 UI 防误点、无 UI 时失效；这道库内自带，无头复用也挡得住）。同名字节竞争仍由
@@ -427,7 +443,10 @@ export function createStore(config: StoreConfig) {
   }
 
   // ── file 工厂（重载：isZip 编译期分流）──
-  function makeRaw(name: string): RawFile {
+  //   mode="new"（新建画布）：首次 save 前查占用，已占用 → 抛 CloudNameCollisionError（**绝不静默覆盖同名**）。
+  //     红线归位：不覆盖的保证收进 store（不依赖每个 app 调用方记得先 uniqueLocalName）。"existing"（默认）= 普通 open/编辑，覆盖是正常持久。
+  function makeRaw(name: string, mode: "new" | "existing" = "existing"): RawFile {
+    let _createChecked = mode !== "new";   // "new" 首次 save 前做一次占用检查；之后（本对象已建）跳过，后续 autosave 是编辑不是新建
     const readLocal = async (): Promise<Blob | null> => {        // 读本地缓存字节 → 解壳出明文
       const blob = await local.get(name);
       if (!blob) return null;
@@ -437,6 +456,10 @@ export function createStore(config: StoreConfig) {
     return {
       async save(bytes, opts) {
         await migrationReady;
+        if (!_createChecked) {                                   // mode="new" 首存护栏：撞名不覆盖（本地/在线云端任一占用即抛）
+          _createChecked = true;
+          if (await nameOccupied(name)) throw new CloudNameCollisionError(name);
+        }
         head.recordEdit(name);                                   // 同步标脏：offload 的 isDirty 守卫立即可见（防驱逐吃未推字节）
         const plain = await toU8(bytes);
         const sealed = await seal.sealForWrite(name, plain);
@@ -481,11 +504,13 @@ export function createStore(config: StoreConfig) {
     };
   }
 
-  function file(name: string, opts: { isZip: true }): ZipFile;
-  function file(name: string, opts: { isZip: false }): RawFile;
-  function file(name: string, opts: { isZip: boolean }): RawFile | ZipFile;
-  function file(name: string, opts: { isZip: boolean }): RawFile | ZipFile {
-    const raw = makeRaw(name);
+  // opts.mode（选填，默认 "existing"）：见 makeRaw。"new"=新建画布（撞名不覆盖，抛 collision）。
+  //   （as-of 第 3 步计划：mode 将改**显式必填**——new=创建、existing=open——并审计所有 file() 调用点。本步先加选填 guard。）
+  function file(name: string, opts: { isZip: true; mode?: "new" | "existing" }): ZipFile;
+  function file(name: string, opts: { isZip: false; mode?: "new" | "existing" }): RawFile;
+  function file(name: string, opts: { isZip: boolean; mode?: "new" | "existing" }): RawFile | ZipFile;
+  function file(name: string, opts: { isZip: boolean; mode?: "new" | "existing" }): RawFile | ZipFile {
+    const raw = makeRaw(name, opts.mode);
     if (!opts.isZip) return raw;
     // getPeek：库内部解 zip 的 central directory，**按文件名**抓 entry 字节（格式盲、内容盲）。
     //   加密容器：外层明文 zip 带名为 CONTAINER_PEEK_ENTRIES 的旁路 entry（"peek"/老 "thumb"）——按名命中即
@@ -580,12 +605,14 @@ export function createStore(config: StoreConfig) {
     //   **绝不自动/轮询/每次列举调**——全树 listAll 是重活。日常开夹的惰性收敛已在 watchFolder 内走 reconcileFolder（看到夹才收敛）。
     reconcile: (opts?: { activeName?: string }) => reconcileMod.reconcile(opts),
 
-    listTrash: () => cloud.listTrash(),   // 回收站列表（gallery trash 视图）
-    listBackup: () => cloud.listBackup(),   // 备份箱列表（恢复箱视图；webxiaoheiwu 用）
-    // localKeys 已废（见上）——离线可读性经 store.listAllItems(ctx) 的 item.syncState + isCached() 判定，不再单列本地半截。
+    // 回收站/备份箱列表：**本地↔云两端聚合**（mergeTrash）。只返元数据（trashKey/cloudItemId/原名/加密标志/conflictLive），绝不带 blob。
+    //   conflictLive（离线删被 edit-wins 撤销→本地 trash 有、云端还活着）：仅当有本地 trash 项且能拿到**权威** live 列表时才判（离线/partial→空集→不误报）。
+    listTrash: () => aggregateBox("trash"),
+    listBackup: () => aggregateBox("backup"),
     restore: singleFlight("恢复", trashMod.restore),
     purge: singleFlight("彻底删除", trashMod.purge),
     emptyTrash: singleFlight("清空回收站", trashMod.emptyTrash),
+    emptyBackup: singleFlight("清空备份箱", trashMod.emptyBackup),
     saveAs: singleFlight("另存为", identity.saveAs),
     // 移动/改身份（含占用检查，结果式）+ 名字占用统一检查（app 新建/另存/改名前预检全走它）。
     tryMove: (from: string, to: string) => tryMoveSF(from, to),

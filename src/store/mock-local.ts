@@ -72,8 +72,15 @@ export function createMockLocal(): MockLocal {
       trash.delete(trashKey);
       return e.name;
     },
-    async purgeTrash(trashKey: string) { trash.delete(trashKey); },
+    async purgeTrash(trashKey: string) {
+      if (trashKey.startsWith(".backup-local/")) items.delete(trashKey);   // 备份腿（splitKey 在真实现走 backupP.del；mock 备份就住 items）
+      else trash.delete(trashKey);
+    },
     async listTrash(): Promise<TrashEntry[]> { return [...trash.entries()].map(([trashKey, e]) => ({ trashKey, name: e.name })); },
+    // 备份分区列举（mock：`.backup-local/<counter>:<name>` 键住在 items）。key 还原原名 = 去 `<prefix>:` 段。
+    async listBackup(): Promise<TrashEntry[]> {
+      return [...items.keys()].filter((k) => k.startsWith(".backup-local/")).map((k) => ({ trashKey: k, name: k.replace(/^\.backup-local\/\d+:/, "") }));
+    },
   };
   return {
     ...adapter,

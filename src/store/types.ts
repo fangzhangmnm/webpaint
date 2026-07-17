@@ -76,6 +76,8 @@ export interface LocalCache {
   restore(trashKey: string): Promise<string>;
   purgeTrash?(trashKey: string): Promise<void>;
   listTrash?(): Promise<TrashEntry[]>;
+  /** 备份分区列举（weakOverride/keepMine loser 的本地 stash）——回收站/备份视图两端聚合用。restore/purgeTrash 已认 `backup/` 前缀 key。 */
+  listBackup?(): Promise<TrashEntry[]>;
 }
 
 // ---- cloud-sync（session 级同步 over CloudProvider）：Store 消费的「cloud 后端」 ----
@@ -113,7 +115,8 @@ export interface CloudSync {
   pullRange(name: string, offset: number, length: number): Promise<{ bytes: Bytes; item: CloudItem } | null>;
   weakOverride(name: string, bytes: Bytes, opts?: { encrypted?: boolean }): Promise<WeakOverrideResult>;
   trash(name: string): Promise<unknown>;
-  restore(cloudItemId: string, name: string): Promise<unknown>;
+  /** enc.encrypted：trash 里的字节是加密容器（.zip 尾）→ 恢复必须落 encFileName（否则加密件被恢复到明文路径 = 打不开）。 */
+  restore(cloudItemId: string, name: string, opts?: { encrypted?: boolean }): Promise<unknown>;
   purge(cloudItemId: string): Promise<unknown>;
   list(): Promise<CloudItem[]>;
   listAll(): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }>;

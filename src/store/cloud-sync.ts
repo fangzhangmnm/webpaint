@@ -264,22 +264,24 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   }
 
   // 从 trash 移回；conflictBehavior=fail 防覆盖目标位置同名（关键 data-loss 点）；撞名 (2)(3) 重试。
-  async function restore(itemId: string, targetName: string): Promise<CloudItem> {
+  //   opts.encrypted：trash 里是加密容器（.zip 尾）→ 落 encFileName（否则加密字节被恢复到明文路径、双击打不开）。
+  async function restore(itemId: string, targetName: string, opts: { encrypted?: boolean } = {}): Promise<CloudItem> {
     const clean = targetName;
     const folder = clean.includes("/") ? clean.slice(0, clean.lastIndexOf("/")) : "";
     const base = baseName(clean);
+    const mkName = opts.encrypted && encFileName ? encFileName : fileName;   // 加密件恢复保留 .zip 容器扩展名
     const folderId = await provider.ensureFolder(folder);
     for (let attempt = 1; attempt < 100; attempt++) {
       const candidate = attempt === 1 ? base : `${base} (${attempt})`;
       try {
-        return await provider.move(itemId, folderId, { newName: fileName(candidate), conflictBehavior: "fail" });
+        return await provider.move(itemId, folderId, { newName: mkName(candidate), conflictBehavior: "fail" });
       } catch (e) {
         const status = (e as { status?: number })?.status;
         if (status === 409 || status === 412) continue;
         throw e;
       }
     }
-    return await provider.move(itemId, folderId, { newName: fileName(`${base} [${now()}]`), conflictBehavior: "fail" });
+    return await provider.move(itemId, folderId, { newName: mkName(`${base} [${now()}]`), conflictBehavior: "fail" });
   }
 
   async function purge(itemId: string): Promise<void> {
@@ -410,8 +412,11 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     const item = await provider.getItemByPath(path);
     if (!item) return false;
     if (!item.isFolder) throw new Error(`不是文件夹，拒绝删除：${path}`);
-    let children: CloudItem[] = [];
-    try { children = await provider.list(path); } catch (e) { reportStoreError(e, "warning"); children = []; }   // list 失败→当空→可能删掉非空夹（守卫被击穿）：surface
+    let children: CloudItem[];
+    // ★修（原 bug）：list 失败**绝不当空放行**——旧版 catch→children=[]→非空守卫被击穿→可能删掉非空夹。
+    //   无法证实为空（列举抛错/未权威）= 拒删（抛错 surface），红线「删文件夹必须证实为空」。
+    try { children = await provider.list(path); }
+    catch (e) { reportStoreError(e, "warning"); throw new Error(`无法确认文件夹是否为空（列举失败），已拒绝删除：${path}`); }
     if (children.length) throw new Error(`文件夹非空，拒绝删除：${path}`);
     await provider.delete(item.id);
     return true;

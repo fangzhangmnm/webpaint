@@ -187,3 +187,27 @@ test("[narrow-waist] cloud-sync backupFolder 默认 .backup（weakOverride 把�
   const res = await cloud.weakOverride("z.ora", new TextEncoder().encode("NEW-LOCAL"));
   assert(String(res.backedUp).startsWith(".backup/"), `loser 应进 .backup/，实得 ${res.backedUp}`);
 });
+
+// ── file mode:"new" 新建画布防静默覆盖（1d，2026-07-17）────────────────────────────────
+{
+  const _enc = (s: string) => new TextEncoder().encode(s);
+  const _td = new TextDecoder();
+  async function readFile(store: ReturnType<typeof mkStore>["store"], name: string): Promise<string> {
+    const b = await store.file(name, { isZip: true, mode: "existing" }).open();
+    if (!b) return "";
+    const u8 = b instanceof Uint8Array ? b : new Uint8Array(await (b as Blob).arrayBuffer());
+    return _td.decode(u8);
+  }
+  test("[file mode] mode:'new' 撞名不覆盖（抛 collision）；existing 覆盖=正常编辑", async () => {
+    const { store } = mkStore(dumpKv());
+    await store.file("A.ora", { isZip: true, mode: "new" }).save(_enc("V1"), { tryPush: false });   // 空名 → 建成功
+    eq(await readFile(store, "A.ora"), "V1", "新建成功、可读");
+    let threw = false;
+    try { await store.file("A.ora", { isZip: true, mode: "new" }).save(_enc("V2"), { tryPush: false }); }
+    catch { threw = true; }
+    assert(threw, "mode:'new' 撞名 → 抛（绝不静默覆盖）");
+    eq(await readFile(store, "A.ora"), "V1", "原字节没被覆盖（还是 V1）");
+    await store.file("A.ora", { isZip: true, mode: "existing" }).save(_enc("V3"), { tryPush: false });   // 编辑=覆盖正常
+    eq(await readFile(store, "A.ora"), "V3", "existing 覆盖 = 正常持久");
+  });
+}

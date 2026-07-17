@@ -68,3 +68,32 @@ test("emptyTrash local：批量清空本地回收站", async () => {
   eq(r.status, "emptied", "清空");
   eq(r.purged, 2, "清了 2 个");
 });
+
+test("emptyBackup both：清空备份箱两端（本地 backup 分区 + 云端 .backup）", async () => {
+  const { cloud, local, emptyBackup } = rig();
+  // 本地备份 1 个（backup 分区 .backup-local/…）
+  await local.save("x", enc("X")); await local.backup("x");
+  // 云端备份 1 个（weakOverride 把旧云版 stash 进 .backup）
+  await cloud.push("y", enc("Y1")); await cloud.weakOverride("y", enc("Y2"));
+  eq((await local.listBackup!()).length, 1, "本地备份 1");
+  eq((await cloud.listBackup()).length, 1, "云端备份 1");
+  const r = await emptyBackup({ scope: "both" });
+  eq(r.status, "emptied", "清空"); eq(r.purged, 2, "两端各清 1");
+  eq((await local.listBackup!()).length, 0, "本地备份清空");
+  eq((await cloud.listBackup()).length, 0, "云端备份清空");
+});
+
+test("restore 加密件：云端腿按 encrypted 落 encFileName（.zip 容器扩展名不丢，恢复后打得开）", async () => {
+  const provider = createMockProvider();
+  const cloud = createCloudSync({ provider, kv: memKv(), fileName: (n: string) => n, encFileName: (n: string) => `${n}.zip` });
+  const local = createMockLocal();
+  const head = createLocalHead({ kv: memKv(), getCloudEtag: (n: string) => cloud.getETag(n) });
+  const { restore } = createTrash({ cloud, local, head });
+  await cloud.push("A.ora", enc("SECRET"), { encrypted: true });   // 加密件落 A.ora.zip
+  assert(await provider.getItemByPath("A.ora.zip"), "加密件在 .zip 路径");
+  const trashed = await cloud.trash("A.ora") as { id: string };    // 进 .trash，stamped 名保留 .zip 尾
+  const r = await restore({ fromCloud: true, cloudItemId: trashed.id, targetName: "A.ora", encrypted: true });
+  eq(r.status, "restored", "恢复");
+  assert(await provider.getItemByPath("A.ora.zip"), "恢复回 encFileName（A.ora.zip），不是明文 A.ora");
+  assert(!(await provider.getItemByPath("A.ora")), "没落到明文路径");
+});

@@ -67,6 +67,10 @@ export function createLocalCache(dbName: string): LocalCache {
     async listTrash(): Promise<TrashEntry[]> {
       return (await trashP.keys()).map((inner) => ({ trashKey: `trash/${inner}`, name: stripStamp(inner) }));
     },
+    // 备份分区列举（形同 listTrash，但 key 带 `backup/` 前缀 → restore/purgeTrash 经 splitKey 认得走 backupP）。
+    async listBackup(): Promise<TrashEntry[]> {
+      return (await backupP.keys()).map((inner) => ({ trashKey: `backup/${inner}`, name: stripStamp(inner) }));
+    },
   };
 }
 

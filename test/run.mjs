@@ -25,7 +25,8 @@ import "./zip-peek.test.mjs";                // 2026-07-13 getPeek slice：库�
 import "./push.test.ts";             // If-Match=parentBase、412 surface、0 字节占位仍 dirty、撞名不覆盖
 import "./safe-resolve.test.ts";     // 冲突 choke point：keepMine/takeCloud、败者→.backup、同 ms 两份不覆盖
 import "./delete.test.ts";           // 删=move-aside→.trash、null-base 不误删别设备同名、离线排队
-import "./trash.test.ts";            // 回收站 restore/purge/empty、本地云端同层
+import "./trash.test.ts";            // 回收站 restore/purge/empty、本地云端同层 + emptyBackup + 加密件 restore 落 encFileName
+import "./trash-merge.test.ts";      // 回收站/备份箱本地↔云聚合：mergeTrash 配对（local/cloud/both）+ conflictLive + 加密解析
 import "./upload-queue.test.ts";     // ADR-0018 离线新上传回线补推（auto|ask|manual）
 import "./seal.test.ts";             // 加密封装：无密码 LockedError 绝不落明文
 import "./freshness.test.ts";        // 刷新/快进：clean 快进 vs dirty 不覆盖

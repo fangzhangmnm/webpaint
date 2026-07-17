@@ -115,11 +115,14 @@ export interface TrashTile {
 }
 
 // 回收站 item：deletedAt + 本地 trash 记录（含 thumb / trashKey）+ 云端文件。
+//   encrypted：云端字节是加密容器（restore 落 encFileName）。conflictLive：离线删被 edit-wins 撤销 → 本地 trash 有、云端还活着（两存，UI surface）。
 export interface TrashGItem {
   name: string;
   deletedAt?: number;
   local: LocalSessionMeta | null;
   cloud: CloudFileMeta | null;
+  encrypted?: boolean;
+  conflictLive?: boolean;
 }
 
 // 展示格式化（纯）。humanTime 读 now：组件用，测试只覆 humanSize。
@@ -143,7 +146,8 @@ export function humanSize(b: number | null | undefined): string {
 }
 
 export function trashTileFor(item: TrashGItem): TrashTile {
-  const src = item.local && item.cloud ? "本地+云端" : item.local ? "本地" : "云端";
+  const base = item.local && item.cloud ? "本地+云端" : item.local ? "本地" : "云端";
+  const src = item.conflictLive ? `${base}（云端仍在）` : base;   // 离线删被撤销：本地 trash 有、云端还活着 → 提示两存
   return {
     name: item.name,
     deletedAt: item.deletedAt || 0,
