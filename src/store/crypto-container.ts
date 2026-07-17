@@ -32,6 +32,8 @@
 // HOST-SEAM(2026-06-21 改注入,去静态宿主依赖):zip/7z codec 由 createStore config 注入,
 // crypto-container **不再静态 import 宿主模块** → 不加密的项目(JRP)不被 zip/7z 拖累、store.ts 可独立构建。
 // 不提供 codec = 加密不可用(packContainer/unpackContainer 抛),探测类(looksEncryptedContainer 等)不受影响。
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
+
 export interface CryptoCodec {
   zipPack(entries: { path: string; data: Uint8Array | string }[]): Promise<Blob>;
   zipUnpack(blob: Blob): Promise<Record<string, Uint8Array>>;
@@ -186,7 +188,7 @@ export async function looksEncryptedContainer(blobOrBytes: Blob | Uint8Array): P
       : new Uint8Array(await blobOrBytes.slice(0, 6).arrayBuffer());
     if (_startsWith(head, SEVENZ_MAGIC)) return true;                  // 裸 .7z
     return scanEncPeekFromEnd(await _tailBytes(blobOrBytes)) != null;  // app 容器（peek MAGIC）
-  } catch (_) { return false; }
+  } catch (e) { reportStoreError(e, "log"); return false; }
 }
 
 // ---- 容器 pack / unpack ----
@@ -229,7 +231,7 @@ function _readMeta(inner: Record<string, Uint8Array>): ContainerMeta | null {
   try {
     const text = new TextDecoder().decode(inner["meta.bin"]);
     if (text.startsWith(META_MAGIC)) return JSON.parse(text.slice(META_MAGIC.length));
-  } catch (_) { /* meta 是恢复辅助件，坏了不阻断 */ }
+  } catch (e) { reportStoreError(e, "log"); /* meta 是恢复辅助件，坏了不阻断 */ }
   return null;
 }
 
@@ -251,7 +253,7 @@ export async function unpackContainer(blob: Blob | Uint8Array, password: string)
       if (g && outer[g] && (_startsWith(outer[g], SEVENZ_MAGIC) || _startsWith(outer[g], ZIP_MAGIC))) {
         payload = outer[g]; guid = g;
       }
-    } catch (_) { /* 外层 entries 加密（裸 WinZip-AES）→ payload 留 null，整块解 */ }
+    } catch (e) { reportStoreError(e, "log"); /* 外层 entries 加密（裸 WinZip-AES）→ payload 留 null，整块解 */ }
   }
 
   // 无外壳（裸 .7z / 裸 WinZip-AES）→ 整块就是加密 payload。两路最终都 7z-wasm 解，零格式特例。

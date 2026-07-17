@@ -22,7 +22,7 @@ import { encodeDocToOra, decodeOraToDoc } from "./ora.ts";
 import { compositeLayers } from "./layer-composite.ts";
 import { looksEncryptedContainer } from "./crypto-format.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
-import { getSession, deleteSession, listSessionIds, renameSessionKey } from "./storage.ts";
+import { getSession, listSessionIds } from "./storage.ts";
 import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
 import type { PaintDoc } from "./doc.ts";
@@ -84,31 +84,16 @@ export async function renderThumbBlob(doc: PaintDoc, maxSide = 256) {
   return await canvasToBlob(thumb, "image/png");
 }
 
-/** trash 用 key prefix。delete 时 rename 到 trash:<timestamp>-<counter>:<name>，恢复时 rename 回。
- *  counter 防同 ms 内多次 trash 同名冲突（Date.now() ms 级 + 自增 counter 永不重复）。 */
+/** trash 用 key prefix：listSessions 据此把 trash:* 从图库列表过滤掉。
+ *  （本地 session 的 trash 生命周期 rename/restore/purge/empty 已退役——图库回收站走 store 的 .trash，
+ *   见 gallery + store.listTrash/restore。此处只保留过滤用的前缀判定。） */
 const TRASH_PREFIX = "trash:";
-let _trashCounter = 0;
-function makeTrashKey(name: string) {
-  return `${TRASH_PREFIX}${Date.now()}-${++_trashCounter}:${name}`;
-}
 function isTrashKey(key: string) { return typeof key === "string" && key.startsWith(TRASH_PREFIX); }
-function parseTrashKey(key: string) {
-  // trash:<ts>[-<counter>]:<originalName>。counter 段可选（旧记录无）。name 可能含 ":"
-  const m = /^trash:(\d+)(?:-\d+)?:(.+)$/s.exec(key);
-  if (!m) return null;
-  return { deletedAt: Number(m[1]), originalName: m[2] };
-}
 // 本地 backup 的命名/防撞/命名空间策略在深模块（src/store/move-aside.js + local-adapter）。
 // 这里只消费它的前缀常量，把这道隐藏命名空间从图库列表过滤掉（覆盖前留底，不该 flood 用户文件夹）。
 
-/** 本地原子重命名（atomic put new + delete old）。同名抛 destination-exists。 */
-export async function renameLocalSession(oldName: string, newName: string) {
-  if (oldName === newName) return;
-  await renameSessionKey(oldName, newName);
-}
-
 /** 列所有 session 元信息（name + updatedAt + size + thumb Blob + encrypted）。不解码 .ora。
- *  默认过滤 trash:* keys；要看 trash 用 listTrashedSessions */
+ *  默认过滤 trash:* keys（本地 session trash 生命周期已退役——图库回收站走 store 的 .trash）。 */
 // 加密探测 memo：尾部 96KB 扫一次 MAGIC 就够，但图库每次 reload 都列 → 按 (name, updatedAt, size) 缓存
 const _encDetectMemo = new Map();
 async function _detectEncrypted(id: string, pkg: SessionPkg) {
@@ -142,73 +127,11 @@ export async function listSessions() {
   return out;
 }
 
-/** 列 trash 内 sessions。返 [{ trashKey, originalName, deletedAt, thumb, size }] */
-export async function listTrashedSessions() {
-  const ids = await listSessionIds();
-  const out = [];
-  for (const id of ids) {
-    if (!isTrashKey(id)) continue;
-    const parsed = parseTrashKey(id);
-    if (!parsed) continue;
-    const pkg = await getSession(id);
-    if (!pkg) continue;
-    out.push({
-      trashKey: id,
-      originalName: parsed.originalName,
-      deletedAt: parsed.deletedAt,
-      size: (pkg.ora && pkg.ora.size) || 0,
-      thumb: pkg.thumb || null,
-    });
-  }
-  out.sort((a, b) => b.deletedAt - a.deletedAt);
-  return out;
-}
-
-/** 软删：把本地 session rename 到 trash:<ts>:<name>。返 trashKey */
-export async function trashSession(name: string) {
-  const trashKey = makeTrashKey(name);
-  await renameSessionKey(name, trashKey);
-  return trashKey;
-}
-
-/** 从 trash 恢复。如果 originalName 冲突（同名 active session 存在）→ 自动加 (2)(3)... 后缀。
- *  返实际恢复的 name */
-export async function restoreSession(trashKey: string) {
-  const parsed = parseTrashKey(trashKey);
-  if (!parsed) throw new Error("非 trash key");
-  let target = parsed.originalName;
-  const existing = new Set(await listSessionIds());
-  if (existing.has(target)) {
-    for (let i = 2; i < 1000; i++) {
-      const candidate = `${parsed.originalName} (${i})`;
-      if (!existing.has(candidate)) { target = candidate; break; }
-    }
-  }
-  await renameSessionKey(trashKey, target);
-  return target;
-}
-
-/** 永久删 trash 里一条 */
-export async function purgeFromTrash(trashKey: string) {
-  if (!isTrashKey(trashKey)) throw new Error("非 trash key");
-  await deleteSession(trashKey);
-}
-
-/** 清空整个 trash */
-export async function emptyTrash() {
-  const ids = await listSessionIds();
-  for (const id of ids) {
-    if (isTrashKey(id)) await deleteSession(id);
-  }
-}
-
-// loadCurrentSession / openSession 已退役（v235）：本地读取统一走 store.flow.load
-// （加密容器自动解壳）。boot 在 app.js、打开在 session-state.openItem。
-// 旧 v35 单 slot 迁移随之退役（所有设备 ≥ v36 已久；LEGACY_SLOT 常量留 listSessions 过滤用）。
-
-export async function removeSession(name: string) {
-  await deleteSession(name);
-}
+// 本地 session trash 生命周期（listTrashedSessions / trashSession / restoreSession / purgeFromTrash /
+//   emptyTrash / removeSession / renameLocalSession）已删（v410）——七个零 importer 的死符号；图库回收站
+//   走 store 的 .trash（store.listTrash / restore / purge / emptyTrash），本地不再自管一套 trash。
+// loadCurrentSession / openSession 已退役（v235）：本地读取统一走 store.flow.load（加密容器自动解壳）。
+//   boot 在 app.js、打开在 session-state.openItem。LEGACY_SLOT 常量留 listSessions 过滤用。
 
 /** 导出 .ora 到本地下载 */
 export async function exportOraDownload(doc: PaintDoc, filename = "未命名.ora") {

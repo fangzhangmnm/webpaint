@@ -4,6 +4,7 @@ import type { WarpBakeFn } from "./floating-transform.ts";
 import { compositeLayers } from "./layer-composite.ts";
 import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT（别在本文件硬编码第二份）
 import { makeBitmap } from "./bitmap.ts";
+import { reportError } from "./error-badge.ts";
 import { GLBoard } from "./gl/gl-board.ts";
 import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
 import type { FloatInput, StampOverlayInput, SurrogateInput } from "./gl/gl-doc-renderer.ts";
@@ -223,7 +224,7 @@ export class Board {
       this._glCanvas = gl;
       this._glBoard = new GLBoard(gl, poolCapacityForBudget(256 * 1024 * 1024));
     } catch (e) {
-      console.warn("[board] GL 初始化失败（无 WebGL2）→ 显「需 WebGL2」：", e);
+      reportError(new Error("[board] GL 初始化失败（无 WebGL2）→ 显「需 WebGL2」：" + String(e)), "log");
       if (this._glCanvas) { this._glCanvas.remove(); this._glCanvas = null; }
       this._glBoard = null;
     }

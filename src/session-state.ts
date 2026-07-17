@@ -12,6 +12,7 @@
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEBPAINT_VERSION } from "./version.ts";
+import { reportError } from "./error-badge.ts";
 import { renderThumbBlob, setCurrentSessionName } from "./session.ts";
 import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.ts";
 import { PaintDoc } from "./doc.ts";
@@ -212,7 +213,7 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
     _docLastSavedAt = Date.now();
     setStatus(t("ss.saved", { name: _activeSessionName ?? "" }));
     checkQuotaAndWarn();
-  } catch (e) { console.warn("[session] save failed:", e); setStatus(t("ss.saveFailed", { error: errMsg(e) })); }
+  } catch (e) { reportError(new Error("[session] save failed: " + String(e)), "log"); setStatus(t("ss.saveFailed", { error: errMsg(e) })); }
   finally { updateSaveStatus(); }
 }
 
@@ -235,7 +236,7 @@ async function saveAndPush() {
     _docLastSavedAt = Date.now();
     setStatus(isSignedIn() ? t("ss.synced", { name }) : t("ss.savedLocalIdb", { name }));
     gallery.refresh();
-  } catch (e) { console.warn("[cloud] push failed:", e); setStatus(t("ss.pushFailed", { error: errMsg(e) })); }
+  } catch (e) { reportError(new Error("[cloud] push failed: " + String(e)), "log"); setStatus(t("ss.pushFailed", { error: errMsg(e) })); }
   finally { updateSaveStatus(); }
 }
 
@@ -315,7 +316,7 @@ async function exitCanvasToGallery() {
     // v409（D-Q6）：退出**只有内容脏/push-pending 才推**；只改 desk（无像素编辑）→ 不推不落本地，
     //   下次开 revert 到上次保存的快照。user 2026-07-14：「退出应该只有 contentdirty 才强制推云，workspace dirty 可抛」。
     await withBusy(t("ss.savingBusy", { name: _activeSessionName ?? "" }), async () => {
-      try { await es.flushAndPush(); } catch (e) { console.warn("[exit] save failed:", e); }
+      try { await es.flushAndPush(); } catch (e) { reportError(new Error("[exit] save failed: " + String(e)), "log"); }
     });
     // 内存脏没落成（保存失败/取消）→ 显式问重试/丢弃，绝不无条件宣布干净（K2 红线）。
     while (es.isDirty() && !_docIsBlankUnnamed()) {
@@ -324,7 +325,7 @@ async function exitCanvasToGallery() {
         actions: [{ label: t("ss.retrySave"), value: "retry", primary: true }, { label: t("ss.exitDiscard"), value: "discard" }],
       });
       if (choice !== "retry") break;
-      await withBusy(t("ss.savingBusy", { name: _activeSessionName ?? "" }), async () => { try { await es.flushAndPush(); } catch (e) { console.warn("[exit] retry failed:", e); } });
+      await withBusy(t("ss.savingBusy", { name: _activeSessionName ?? "" }), async () => { try { await es.flushAndPush(); } catch (e) { reportError(new Error("[exit] retry failed: " + String(e)), "log"); } });
     }
     gallery.setFolder(pathFolder(_activeSessionName));
   }
@@ -364,7 +365,7 @@ async function pullCloudPath(path: string) {
     await es.open(toFull(name));   // file.open：本地无→拉云落本地→adopt。freshness/冲突经 store ui。边界转全名。
     _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     setGalleryOpen(false); setStatus(t("ss.openedFromCloud", { name }));
-  } catch (err) { console.warn("[cloud] pull failed:", err); setStatus(t("ss.pullFailed", { error: errMsg(err) })); }
+  } catch (err) { reportError(new Error("[cloud] pull failed: " + String(err)), "log"); setStatus(t("ss.pullFailed", { error: errMsg(err) })); }
   finally { hideFullscreenBusy(); }
 }
 
@@ -428,7 +429,7 @@ async function restoreSession(name: string): Promise<boolean> {
     _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     _docLastSavedAt = Date.now(); updateSaveStatus();
     return true;
-  } catch (e) { console.warn("[session] restore failed:", e); return false; }
+  } catch (e) { reportError(new Error("[session] restore failed: " + String(e)), "log"); return false; }
 }
 
 // 另存为：当前内容写新身份（旧的不动）+ 切到新名继续编辑。

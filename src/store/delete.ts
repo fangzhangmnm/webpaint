@@ -4,6 +4,7 @@
 //   三态：仅本地 / 仅云端 / 两者（两者→云端进 .trash + 本地干净副本直删，不留双份；本地脏→降级 local-only）。
 //   离线：本地 move-aside + 持久化排队（base-etag 守卫），重连 drainDeleteQueue 重放——
 //   被别处改过（含同名新文件）→ conflict-edit-wins → **不删**（防"旧设备攒删除很久后上线删掉别人的新文件"）。
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 import type { CloudSync, Kv, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 
@@ -32,7 +33,7 @@ export function createDelete(cfg: DeleteCfg) {
   const { cloud, local, head, kv, busy: _busy = passBusy } = cfg;
 
   function readQueue(): Array<{ name: string; baseEtag: string | null }> {
-    try { const raw = kv.get(DELQ_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
+    try { const raw = kv.get(DELQ_KEY); return raw ? JSON.parse(raw) : []; } catch (e) { reportStoreError(e, "log"); return []; }
   }
   function writeQueue(q: Array<{ name: string; baseEtag: string | null }>): void {
     if (q.length) kv.set(DELQ_KEY, JSON.stringify(q)); else kv.remove(DELQ_KEY);
@@ -63,7 +64,7 @@ export function createDelete(cfg: DeleteCfg) {
     }
     return busy("删除中…", async () => {
       let cloudPresent = false;
-      try { cloudPresent = !!(await cloud.fetchMeta(name)); } catch { cloudPresent = false; }
+      try { cloudPresent = !!(await cloud.fetchMeta(name)); } catch (e) { reportStoreError(e, "log"); cloudPresent = false; }
       if (cloudPresent) {
         const wasDirty = head.isDirty(name);                // ★trash 前取（trash 后谱系会被 forget）
         const trashed = await cloud.trash(name);            // 先云端进 .trash（失败抛 → 本地不动）
@@ -89,7 +90,7 @@ export function createDelete(cfg: DeleteCfg) {
   async function replayDelete(name: string, opts: { baseEtag?: string | null } = {}): Promise<DelResult> {
     const { baseEtag } = opts;
     let meta;
-    try { meta = await cloud.fetchMeta(name); } catch { return { status: "deferred-offline" }; }
+    try { meta = await cloud.fetchMeta(name); } catch (e) { reportStoreError(e, "log"); return { status: "deferred-offline" }; }
     if (!meta) return { status: "converged", reason: "already-gone" };
     // Finding 1 防御纵深（port 自 WebPaint）：无 base 不得 trash——无法证明云端这份就是我们删的那份
     //   （可能是别设备同名新文件）。正常路径 del() 已不再为 null base 排队；这里再兜一层，保护 drainDeleteQueue 直调。终态。
@@ -105,7 +106,7 @@ export function createDelete(cfg: DeleteCfg) {
     let drained = 0;
     for (const e of q) {
       let r: DelResult;
-      try { r = await replayDelete(e.name, { baseEtag: e.baseEtag }); } catch { remain.push(e); continue; }
+      try { r = await replayDelete(e.name, { baseEtag: e.baseEtag }); } catch (err) { reportStoreError(err, "log"); remain.push(e); continue; }
       if (r.status === "deferred-offline") remain.push(e); else drained++;   // 终态出队
     }
     writeQueue(remain);

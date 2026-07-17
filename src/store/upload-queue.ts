@@ -8,6 +8,7 @@
 // **非 busy 后台 drain**（不锁屏，用户继续读）：代价是与用户操作 race → 靠 ① per-name serialize ② 锁内 supersede 复检。
 // **中途关 app / 大文件慢网**：靠持久队列（没确认成功绝不出队）+ push 的 W1 幂等（真上去了但丢响应 → 下次重试 adopt 不重复）。
 // **per-app policy**（ctor）：auto=静默补推 · ask=每次 reconnect/成功连接问一次整批 · manual=不做（等显式再存）。
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 import type { Kv, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 
@@ -37,7 +38,7 @@ export function createUploadReplay(cfg: UploadReplayCfg) {
   const { kv, local, head, isOnline, serialize, pushLocal, policy, confirm, onStatus } = cfg;
 
   function readQueue(): string[] {
-    try { const v = JSON.parse(kv.get(UPQ_KEY) ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+    try { const v = JSON.parse(kv.get(UPQ_KEY) ?? "[]"); return Array.isArray(v) ? v : []; } catch (e) { reportStoreError(e, "log"); return []; }
   }
   function writeQueue(q: string[]): void { if (q.length) kv.set(UPQ_KEY, JSON.stringify([...new Set(q)])); else kv.remove(UPQ_KEY); }
   function enqueue(name: string): void { if (policy === "manual") return; writeQueue([...readQueue(), name]); }
@@ -63,7 +64,8 @@ export function createUploadReplay(cfg: UploadReplayCfg) {
         try { await pushLocal(name); return "pushed"; }
         catch (e) {
           if ((e as { name?: string } | null)?.name === "CloudNameCollisionError") return "collision";  // 同名异文件：surface + 出队（重试无用，等改名）
-          return "keep";   // 离线/transient → 留队，下次 reconnect 重试
+          reportStoreError(e, "log");   // 离线/transient → 留队重试，funnel 但不打扰
+          return "keep";
         }
       });
       if (r === "pushed") { pushed++; onStatus?.({ phase: "pushed", name, done: pushed, total: q.length }); }

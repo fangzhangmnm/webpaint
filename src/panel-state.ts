@@ -14,6 +14,8 @@
 // 画布 pointerdown 默认关全部（user：「画画时别让 panel 挡着」）。
 // 在 panel 内 click 不要冒泡到 canvas（panel 自己 stopPropagation）。
 
+import { reportError } from "./error-badge.ts";
+
 interface PanelHandlers {
   show?: () => void;
   hide?: () => void;
@@ -68,6 +70,6 @@ export function onExclusiveChange(fn: ExclusiveListener) {
 
 function notifyListeners() {
   for (const l of listeners) {
-    try { l(currentOpen); } catch (e) { console.warn("[panel-state] listener err:", e); }
+    try { l(currentOpen); } catch (e) { reportError(new Error("[panel-state] listener err: " + String(e)), "log"); }
   }
 }

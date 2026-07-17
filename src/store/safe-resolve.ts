@@ -6,6 +6,7 @@
 // 吃：cloud(pull/weakOverride) + local(backup/save) + local-head(markSynced 落地谱系)。
 import { toU8, bytesEqual } from "./substrate.ts";
 import type { Bytes } from "./substrate.ts";
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 
@@ -56,7 +57,7 @@ export function createSafeResolve(cfg: SafeResolveCfg): SafeResolve {
       // clean 本地 = 可从云重取的已知版本，无未见内容可丢 → 跳 backup（ADR-0016，不 spam .backup）。
       if (head.isDirty(name) || localDirty()) {
         try { backupName = await local.backup(name); }
-        catch (e) { return { ok: false, reason: "backup-failed", error: e }; }
+        catch (e) { reportStoreError(e, "warning"); return { ok: false, reason: "backup-failed", error: e }; }   // dirty 备份失败→中止 pull（不覆盖），degraded surface
       }
       const r = await cloud.pull(name);
       if (!r) return { ok: false, reason: "cloud-vanished", backupName };
@@ -78,7 +79,7 @@ export function createSafeResolve(cfg: SafeResolveCfg): SafeResolve {
   // lost-response 自愈：412 可能是自己已落盘的写。拉云逐字节比对，相等即采纳（B5/W1）。
   async function tryHeal(name: string, bytes: Bytes): Promise<boolean> {
     let pulled;
-    try { pulled = await cloud.pull(name); } catch { return false; }
+    try { pulled = await cloud.pull(name); } catch (e) { reportStoreError(e, "log"); return false; }
     if (!pulled) return false;
     if (bytesEqual(await toU8(pulled.blob), bytes)) {
       head.markSynced(name, pulled.item?.eTag ?? null);     // 自愈 → 这次推等价已在云端

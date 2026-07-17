@@ -9,6 +9,7 @@
 //   exists ∧ !head.isDirty ∧ 在线 ∧ head.seenBase!=null（曾 synced = 有已知云版 = re-fetchable，对齐 WebPaint「有 etag」）
 //   ∧ cloud.fetchMeta 存在（未登录会取不到 → cloud-gone）∧ meta.size>0（挡历史 0B 云端幻象）。
 //   cloudMoved（云端被别人推新版、etag≠seenBase）仍合法：clean 本地下次 open 会快进，重取拿更新版，不丢。
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 
@@ -47,7 +48,7 @@ export function createOffload(cfg: OffloadCfg) {
       if (head.isDirty(name)) throw new OffloadIllegalError(name, "dirty");          // 未推唯一字节
       if (isOnline && !isOnline()) throw new OffloadIllegalError(name, "offline");   // 不可重取
       if (head.seenBase(name) == null) throw new OffloadIllegalError(name, "local-only");  // 从没 synced = 无已知云版 = 唯一本地
-      const meta = await cloud.fetchMeta(name).catch(() => null);                    // 未登录/取不到 → null
+      const meta = await cloud.fetchMeta(name).catch((e) => { reportStoreError(e, "log"); return null; });   // 未登录/取不到 → null
       if (!meta) throw new OffloadIllegalError(name, "cloud-gone");                  // 云端没了 → 唯一好副本，保留
       if (!(meta.size > 0)) throw new OffloadIllegalError(name, "incomplete");       // 0B 云端幻象 → 不可信，绝不据此丢本地
       if (head.isDirty(name)) throw new OffloadIllegalError(name, "dirty");          // ② TOCTOU re-check：fetchMeta 期内被并发 save 写脏 → 拒

@@ -4,6 +4,7 @@
 //   freshness gate（ADR-0016）：比 seenBase vs 云端 etag；clean 且动过 → 静默无损快进；
 //   dirty 且动过 → 交 ui 选（绝不静默覆盖 dirty）。编排 local-head.seenBase/isDirty + safe-resolve.safePull。
 //   open = 开 session 的 gate（probe 可跳到离线）；refresh = 事件驱动(focus/visibility/online)的纯干净快进。
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 import type { CloudSync, FetchMetaResult } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 import type { SafeResolve, ResolveChoice } from "./safe-resolve.ts";
@@ -53,7 +54,7 @@ export function createFreshness(cfg: FreshnessCfg) {
         if (raced.k === "err") return { source: "local", reason: "cloud-error" };
         meta = raced.m;
       } else {
-        try { meta = await cloud.fetchMeta(name); } catch { return { source: "local", reason: "cloud-error" }; }
+        try { meta = await cloud.fetchMeta(name); } catch (e) { reportStoreError(e, "log"); return { source: "local", reason: "cloud-error" }; }
       }
       if (!meta) return { source: "local", reason: "cloud-absent" };
       const base = head.seenBase(name);
@@ -87,7 +88,7 @@ export function createFreshness(cfg: FreshnessCfg) {
     if (head.isDirty(name) || (localDirty && localDirty())) return { status: "dirty-skip" };
     return busy("检查云端…", async () => {
       let meta: FetchMetaResult | null;
-      try { meta = await cloud.fetchMeta(name); } catch { return { status: "cloud-error" }; }
+      try { meta = await cloud.fetchMeta(name); } catch (e) { reportStoreError(e, "log"); return { status: "cloud-error" }; }
       if (!meta) return { status: "cloud-absent" };
       const base = head.seenBase(name);
       if (!base || meta.etag === base) return { status: "in-sync" };

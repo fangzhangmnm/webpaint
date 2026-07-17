@@ -11,6 +11,7 @@
 // │ contentType 一样，不是 merge 逻辑外泄。                                        │
 // └──────────────────────────────────────────────────────────────────────────┘
 
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 import { mergeFolders, emptyFolder, normalizeFolder } from "./folder-merge.ts";
 import type { FolderConflictPolicy } from "./folder-merge.ts";
 import type { FolderEnvelope, ResolveFn } from "./folder-merge.ts";
@@ -80,13 +81,13 @@ export function createFolderFlow(cfg: FolderFlowConfig): FolderFlow {
 
     let pulled;
     try { pulled = await withTimeout(cloud.pull(name), timeoutMs); }
-    catch (e) { return { status: "offline", folder: localFolder, error: e }; }   // 离线 / 慢网超时 / 伪在线 API 错
+    catch (e) { reportStoreError(e, "log"); return { status: "offline", folder: localFolder, error: e }; }   // 离线 / 慢网超时 / 伪在线 API 错
 
     let cloudFolder = emptyFolder();
     if (pulled && pulled.blob) {
       let text;
       try { text = await pulled.blob.text(); }
-      catch (e) { return { status: "offline", folder: localFolder, error: e }; }
+      catch (e) { reportStoreError(e, "log"); return { status: "offline", folder: localFolder, error: e }; }
       const parsed = decode(text);
       if (!parsed) return { status: "invalid", folder: localFolder };   // 伪在线防线：脏字节绝不进 merge
       cloudFolder = parsed;
@@ -105,6 +106,7 @@ export function createFolderFlow(cfg: FolderFlowConfig): FolderFlow {
       return { status: "synced", folder: merged, pushed: true, etag: res?.item?.eTag };
     } catch (e) {
       if (is412(e) && depth < 5) return _sync(merged, depth + 1);   // 有人插队 → 重拉重 merge 重推（带上已 merge 的本地）
+      reportStoreError(e, "warning");   // push 真失败、配置数据留 dirty 未推 → surface
       return { status: "dirty", folder: merged, error: e };
     }
   }

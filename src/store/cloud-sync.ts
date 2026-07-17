@@ -12,6 +12,7 @@
 
 import { asideStamp } from "./move-aside.ts";   // 深模块的 move-aside 命名策略（yyyymmddhhmmss-guid 防撞）
 import { isHidden } from "./is-hidden.ts";       // 列举隐藏判定（.trash/.backup/.<appId> + 任意 dot 项）
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 import type { Bytes, CloudItem, CloudProvider, CloudSync, FetchMetaResult, Kv, PullResult, PushResult, WeakOverrideResult } from "./types.ts";
 
 export class CloudConflictError extends Error {
@@ -152,7 +153,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
         : raw instanceof Blob ? new Uint8Array(await raw.arrayBuffer())
         : new Uint8Array(raw);
       return _bytesEq(await _localTail(localBytes, size, n), cloudTail) ? "match" : "differ";
-    } catch { return "unknown"; }                                       // 拉尾失败 → 未知，保持 dirty 下次重试（不静默认领、也不误报 collision）
+    } catch (e) { reportStoreError(e, "log"); return "unknown"; }        // 拉尾失败 → 未知，保持 dirty 下次重试（不静默认领、也不误报 collision）
   }
 
   async function push(name: string, bytes: Bytes | Blob, opts: { baseEtag?: string | null; encrypted?: boolean } = {}): Promise<PushResult> {
@@ -165,9 +166,9 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     //   rename 是 metadata PATCH → etag 必变（S1），所以 If-Match 链要接力到 renamed.eTag。
     if (encFileName && baseEtag) {
       const otherPath = enc ? fileName(name) : encFileName!(name);
-      const target = await provider.getItemByPath(path).catch(() => null);
+      const target = await provider.getItemByPath(path).catch((e) => { reportStoreError(e, "log"); return null; });
       if (!target) {
-        const other = await provider.getItemByPath(otherPath).catch(() => null);
+        const other = await provider.getItemByPath(otherPath).catch((e) => { reportStoreError(e, "log"); return null; });
         if (other) {
           if (other.eTag !== baseEtag) throw new CloudConflictError(`云端已有更新版本 "${name}"`, name);
           const newBase = baseName(path);
@@ -192,7 +193,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     // H7 / 409 兜底：末响应无 item（分片丢响应）或 fail-409 → 拉权威 meta；**仅大小匹配才认**（防把
     //   0 字节占位 / 别人的异文件 骗成 synced——postmortem 2026-06-05 第④级 + path-身份同名碰撞）。
     if (!item || !item.eTag) {
-      const fresh = await provider.getItemByPath(path).catch(() => null);
+      const fresh = await provider.getItemByPath(path).catch((e) => { reportStoreError(e, "log"); return null; });
       // N6：size 相等还要**尾部字节相等**才认作我方成功 push（防同名同大小异内容文件被静默认领=丢失）。
       const verdict = fresh && fresh.eTag && fresh.size === wrote ? await _confirmOurUpload(fresh, bytes, wrote) : null;
       if (verdict === "match") item = fresh;                            // size + 尾都符 → 确认我方 push
@@ -299,7 +300,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     }
     // 原 path 现已空 → force-push 本地（无 If-Match）。
     let item: CloudItem | null = await provider.upload(path, bytes, { contentType, conflictBehavior: "replace" });
-    if (!item || !item.eTag) { const f = await provider.getItemByPath(path).catch(() => null); if (f && f.eTag) item = f; }
+    if (!item || !item.eTag) { const f = await provider.getItemByPath(path).catch((e) => { reportStoreError(e, "log"); return null; }); if (f && f.eTag) item = f; }
     if (item && item.eTag) { setETag(name, item.eTag); setDirty(name, false); }
     return { item, backedUp };
   }
@@ -313,7 +314,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   async function _walk(subpath: string, out: CloudItem[], depth: number, folders: string[] | null, status: { partial: boolean }): Promise<void> {
     if (depth > 8) return;
     let items: CloudItem[];
-    try { items = await provider.list(subpath); } catch (_) { status.partial = true; return; }
+    try { items = await provider.list(subpath); } catch (e) { reportStoreError(e, "log"); status.partial = true; return; }
     for (const it of items) {
       // 隐藏项（末段以 "." 开头）整个跳过：.trash / .backup / .<appId>(collections/settings) 安全网夹 +
       //   任意 dotfile/dotfolder，都不进文件列表、不进文件夹列表、不递归其内容（isHidden 深模块唯一真相）。
@@ -341,7 +342,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   //   顶层 .trash/.backup 同 _walk 跳过（path==="" 时）。folders = immediate 子夹全路径。
   async function listFolder(path: string): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }> {
     let items: CloudItem[];
-    try { items = await provider.list(path); } catch (_) { return { files: [], folders: [], complete: false }; }
+    try { items = await provider.list(path); } catch (e) { reportStoreError(e, "log"); return { files: [], folders: [], complete: false }; }
     const files: CloudItem[] = [], folders: string[] = [];
     for (const it of items) {
       if (isHidden(it.name)) continue;   // 隐藏项（.trash/.backup/.<appId>/任意 dot）不进列举——isHidden 深模块
@@ -354,13 +355,13 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
 
   async function listTrash(): Promise<CloudItem[]> {
     let items: CloudItem[];
-    try { items = await provider.list(trashFolder); } catch (_) { return []; }
+    try { items = await provider.list(trashFolder); } catch (e) { reportStoreError(e, "log"); return []; }
     return items.filter(match);
   }
   // 备份箱列表（weakOverride/keepMine 的 loser 字节 stash 处）。恢复/彻底删走通用 restore(itemId)/purge(itemId)。
   async function listBackup(): Promise<CloudItem[]> {
     let items: CloudItem[];
-    try { items = await provider.list(backupFolder); } catch (_) { return []; }
+    try { items = await provider.list(backupFolder); } catch (e) { reportStoreError(e, "log"); return []; }
     return items.filter(match);
   }
 
@@ -410,7 +411,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     if (!item) return false;
     if (!item.isFolder) throw new Error(`不是文件夹，拒绝删除：${path}`);
     let children: CloudItem[] = [];
-    try { children = await provider.list(path); } catch (_) { children = []; }
+    try { children = await provider.list(path); } catch (e) { reportStoreError(e, "warning"); children = []; }   // list 失败→当空→可能删掉非空夹（守卫被击穿）：surface
     if (children.length) throw new Error(`文件夹非空，拒绝删除：${path}`);
     await provider.delete(item.id);
     return true;

@@ -10,6 +10,8 @@
 // │ pull-merge-push 必收敛。                                                      │
 // └──────────────────────────────────────────────────────────────────────────┘
 
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
+
 // ---- Folder shape 类型（本文件 SSoT，folder-store / folder-flow 从这里 import）----
 // 知识面只有 id / uat / name?；其余字段 opaque payload，原样搬运（[k: string]: unknown）。
 export interface FolderItem {
@@ -124,7 +126,7 @@ export function parseFolderBlob(textOrBytes: string | Uint8Array): FolderEnvelop
   try {
     const s = typeof textOrBytes === "string" ? textOrBytes : new TextDecoder().decode(textOrBytes);
     o = JSON.parse(s);
-  } catch { return null; }
+  } catch (e) { reportStoreError(e, "log"); return null; }
   return isValidFolderEnvelope(o) ? o : null;
 }
 

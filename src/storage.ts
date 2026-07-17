@@ -21,7 +21,7 @@ export interface SessionPkg {
 const DB_NAME = "webpaint";
 const DB_VERSION = 3;             // v3：加 gallery-thumbs store（bump 让已存在的库触发 onupgradeneeded 补建；additive、无迁移）
 const STORE_SESSIONS = "sessions";
-const STORE_META = "meta";       // 保留给 settings / theme / etc.
+const STORE_META = "meta";       // 目前仅 brush-rack 本地持久化在用（RACK_META_KEY）；step 5 迁到 store.collection 后本 store 会删。
 const STORE_THUMBS = "gallery-thumbs";   // 图库缩略图缓存专用 store，key = store 文件身份 X.ora（cloud-thumb-cache.ts）
 
 let _dbPromise: Promise<IDBDatabase> | null = null;
@@ -128,8 +128,9 @@ export async function renameSessionKey(oldKey: string, newKey: string): Promise<
   });
 }
 
-// meta：单条配置。⚠ **当前无人用**——设置全走 store 的 collection（IDB，见 src/app-prefs.ts / app-state.ts）。
-//   别照"app.js 用 localStorage"那句旧话理解：那是 v405 之前的事。要加设置就加 collection 键，别用这个。
+// meta：单条配置的 IDB 键值面。⚠ **仅 brush-rack 本地持久化在用**（brush-rack.ts 的 RACK_META_KEY）——
+//   设置/状态已全走 store 的 collection（IDB，见 src/app-prefs.ts / app-state.ts），别再往 meta 加新键。
+//   笔架 step 5 迁到 store.collection 后，本 meta store（getMeta/setMeta + STORE_META object store）整体删除。
 export async function getMeta(key: string): Promise<unknown> {
   const db = await openDB();
   return new Promise((resolve, reject) => {

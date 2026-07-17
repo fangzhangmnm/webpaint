@@ -49,6 +49,7 @@ import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-b
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
 import { updateSaveStatus, updateNewerBanner, ICON_DISK, ICON_UPLOAD, ICON_CLOUD_CHECK, ICON_CLOUD_BUSY } from "./save-status.ts";
+import { initErrorBadge, reportError } from "./error-badge.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import { initLayerUndo, _afterDocChange, layerSpecFrom } from "./layer-undo.ts";
 import { initImportImage, importImageAsLayer } from "./import-image.ts";   // importImageAsNewDoc/setAddImportAsNewDoc 仅 gallery-shell/export-menu 用
@@ -276,6 +277,8 @@ function setStatus(text: string, persist = false) {
     statusTimer = setTimeout(() => { els.statusLabel.textContent = t("status.ready"); }, 1800);
   }
 }
+// 统一 error banner：注入状态栏 sink（info 级走这）+ 接管内联 __errBar 的 fatal handler（往后走 severity）。
+initErrorBadge({ status: setStatus });
 // 文档版本 newer banner + save 按钮 4 态渲染 = save-status.ts。
 // hook board render 更新 HUD
 const origRender = board.render.bind(board);
@@ -364,7 +367,7 @@ if (isAuthConfigured()) {
     // auth 完成后 if gallery 还开着 → 重渲染拿云端列表
     if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
   }).catch((e) => {
-    console.warn("[auth] init failed:", e);
+    reportError(new Error("[auth] init failed: " + String(e)), "log");
   });
 }
 // auth 可观察 seam（候选1）：lib 在**每个** auth 转变（登录回来/后台silent/登出/过期F2）fire wp:auth-changed。
@@ -380,7 +383,7 @@ window.addEventListener("online", async () => {
   if (!isSignedIn()) await retrySilentSignIn();
   pullSettingsAndState();                                    // 回线：拉 4 库 settings/state 对齐
   updateCloudAuthUI();
-  if (isSignedIn()) _store.drainDeleteQueue().catch((e) => console.warn("drainDeleteQueue", e));   // N3：重连重放离线删队列
+  if (isSignedIn()) _store.drainDeleteQueue().catch((e) => reportError(new Error("drainDeleteQueue: " + String(e)), "log"));   // N3：重连重放离线删队列
   if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
   if (isSignedIn() && session.name) _store.refresh(sessionFileName(session.name)).catch(() => {});   // 回线：事件驱动干净快进（freshness 进库；无 idle-lock）。边界转全名。
 });
@@ -404,14 +407,14 @@ void prefsReady.then(() => {
   reconcileLangFromPrefs();      // ④ 刷 boot 快照；与快照不符则 reload（lang 是 reload 制）—— 可能不返回
   try { gallery.hydrateFolder(appState.currentDirectory); } catch { /* 图库未挂/无夹 */ }   // ⑤ 不写盘变体
   reconcileBlenderUrlFromPrefs();   // ⑥ appState.blenderPanelUrl 真值刷进输入框（不写盘、不碰面板显隐）
-}).catch((e) => console.warn("[boot] settings fixup failed:", e));
+}).catch((e) => reportError(new Error("[boot] settings fixup failed: " + String(e)), "log"));
 
 // ⑦ Gallery-first 启动恢复（读 appState.currentFile：非 null → 自动开那张画；否则停图库）= boot.ts。
 //   必须 await prefsReady：hydrate 前 currentFile 恒为 null → 会永远落图库、不再自动开上次的画。
 //   排在 fixup 之后（同一个 promise 的 then 按注册顺序跑）→ 开画时 desk/设置已就位。
-void prefsReady.then(() => bootRestoreSession(ctx)).catch((e) => console.warn("[boot] restore failed:", e));
+void prefsReady.then(() => bootRestoreSession(ctx)).catch((e) => reportError(new Error("[boot] restore failed: " + String(e)), "log"));
 // N3：启动时若在线+已登录，排空上次离线攒下的删除队列（fresh boot 不触发 online 事件，故此处补一刀）。
-if (navigator.onLine && isSignedIn()) _store.drainDeleteQueue().catch((e: unknown) => console.warn("drainDeleteQueue", e));
+if (navigator.onLine && isSignedIn()) _store.drainDeleteQueue().catch((e: unknown) => reportError(new Error("drainDeleteQueue: " + String(e)), "log"));
 
 // 笔架深模块装配：mount sheet/settings 组件 + rackStore.configure + 注册 panel + 绑 DOM 事件。
 rack.init({

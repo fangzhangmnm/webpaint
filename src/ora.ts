@@ -19,6 +19,7 @@
 // **注意**：blob 全是 Uint8Array 传给 zip.js。Canvas.toBlob 拿到 Blob，需要
 // arrayBuffer() 转 Uint8Array。
 
+import { reportError } from "./error-badge.ts";
 import { zipPack, zipUnpack } from "./zip.ts";
 import { Layer, LayerGroup, PaintDoc, flattenLeaves, findNodeById, reseedLayerIdCounter } from "./doc.ts";
 import { compositeLayers } from "./layer-composite.ts";
@@ -194,7 +195,7 @@ export async function decodeOraToDoc(blob: Blob) {
   if (files["mimetype"]) {
     const m = bytesToString(files["mimetype"]).trim();
     if (m !== "image/openraster") {
-      console.warn(`[ora] mimetype 不是 image/openraster：${m}`);
+      reportError(`[ora] mimetype 不是 image/openraster：${m}`, "log");
     }
   }
   const xml = bytesToString(files["stack.xml"]);
@@ -264,7 +265,7 @@ export async function decodeOraToDoc(blob: Blob) {
     try {
       doc._webpaintState = JSON.parse(bytesToString(files["webpaint/state.json"]));
     } catch (e) {
-      console.warn("[ora] webpaint/state.json parse failed:", e);
+      reportError(new Error("[ora] webpaint/state.json parse failed: " + String(e)), "log");
     }
   }
   // editorState struct（desk per-doc）；缺失（老画作/不向后兼容）→ 留 undefined，adopt 时 reset 到默认。
@@ -272,7 +273,7 @@ export async function decodeOraToDoc(blob: Blob) {
     try {
       doc._editorState = JSON.parse(bytesToString(files[".webpaint/editor-state.json"]));
     } catch (e) {
-      console.warn("[ora] .webpaint/editor-state.json parse failed:", e);
+      reportError(new Error("[ora] .webpaint/editor-state.json parse failed: " + String(e)), "log");
     }
   }
   doc._wroteWith = meta.wroteWith || null;

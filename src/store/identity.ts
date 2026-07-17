@@ -6,6 +6,7 @@
 //   串行 against 两名 in-flight（serialize2）。编排 push 深模块 + cloud.rename + local-head。
 import { toU8 } from "./substrate.ts";
 import type { BytesSource } from "./substrate.ts";
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 import { CloudNameCollisionError } from "./cloud-sync.ts";
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
@@ -80,7 +81,7 @@ export function createIdentity(cfg: IdentityCfg) {
       if (!doCloud) { head.forget(oldName); return { status: "renamed", where: "local", newName }; }
       try {
         let cloudOld = null;
-        try { cloudOld = await cloud.fetchMeta(oldName); } catch { cloudOld = null; }
+        try { cloudOld = await cloud.fetchMeta(oldName); } catch (e) { reportStoreError(e, "log"); cloudOld = null; }
         // synced 或没本地字节可推（纯云端）→ 服务端 move，etag 顺延。
         if (cloudOld && (!head.isDirty(oldName) || bytes == null)) {
           await cloud.rename(oldName, newName);
@@ -91,10 +92,11 @@ export function createIdentity(cfg: IdentityCfg) {
         await doPush(newName, { encode: () => bytes!, getEditVersion });   // dirty/无旧云文件 → 推当前字节（含 B5/retry/conflict）
         // 旧名进 .trash（不 hard-delete，C5）。失败 → oldCloudOrphan 让 caller surface（新名已推成功，不回滚）。
         let oldCloudOrphan = false;
-        if (cloudOld) { try { await cloud.trash(oldName); } catch { oldCloudOrphan = true; } }
+        if (cloudOld) { try { await cloud.trash(oldName); } catch (e) { reportStoreError(e, "warning"); oldCloudOrphan = true; } }   // 旧名进 .trash 失败→云端遗留孤儿：surface
         head.forget(oldName);
         return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, oldCloudOrphan };
       } catch (e) {
+        reportStoreError(e, "warning");   // 云端推失败、newName 留本地 dirty 待推 → surface
         // 云端推失败（网络）→ 本地已是 newName，标脏让它成待推（下次 push/sync 自动带走 newName，
         //   不必重跑 rename 才收敛）。_parent=null=新身份首推（conflictBehavior:fail，撞名 surface 不盲覆盖）。
         head.recordEdit(newName);
@@ -116,6 +118,7 @@ export function createIdentity(cfg: IdentityCfg) {
         await doPush(newName, { encode: () => bytes, getEditVersion });
         return { status: "saved", where: "cloud", newName };
       } catch (e) {
+        reportStoreError(e, "warning");   // saveAs 云端推失败、newName 留本地 dirty 待推 → surface
         return { status: "saved", where: "local", newName, cloudDeferred: true, error: e };
       }
     });

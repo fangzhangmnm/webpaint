@@ -10,6 +10,7 @@
 // 全部搬来（classify + copy-paste），app.js 短路成构造 + 事件绑定。
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
+import { reportError } from "./error-badge.ts";
 import { getMeta, setMeta } from "./storage.ts";
 import {
   makeDefaultRack, mergeMissingDefaults, migrateBrush, defaultBrushForTool,
@@ -57,7 +58,7 @@ export interface BrushRackDeps {
   state: EditorRuntimeState;  // 共享 SSoT（state.toolStates 反应式）
   dialReactive: DialReactive; // 共享 SSoT（rackVersion bump / tool）
   editMode: () => EditMode;   // thunk：构造时 editMode 尚未定义
-  setStatus: (m: string, e?: boolean) => void;
+  setStatus: (text: string, persist?: boolean) => void;   // 第二参 = persist（消息是否常驻，不自动清）；无 error 参（真签名见 app-context.ts / app.ts）
   confirm: (title: string, msg: string) => Promise<boolean>;
   openExclusive: (id: string) => void;
   closeExclusive: () => void;
@@ -120,15 +121,15 @@ export class BrushRack {
         if (migrated || newRack) { try { await setMeta(RACK_META_KEY, stored); } catch {} }
         return stored;
       }
-    } catch (e) { console.warn("[brush-rack] load failed:", e); }
+    } catch (e) { reportError(new Error("[brush-rack] load failed: " + String(e)), "log"); }
     const rack = makeDefaultRack();
-    try { await setMeta(RACK_META_KEY, rack); } catch (e) { console.warn("[brush-rack] save default failed:", e); }
+    try { await setMeta(RACK_META_KEY, rack); } catch (e) { reportError(new Error("[brush-rack] save default failed: " + String(e)), "log"); }
     return rack;
   }
   async persist() {
     if (!this._rack) return;
     try { await setMeta(RACK_META_KEY, this._rack); }
-    catch (e) { console.warn("[brush-rack] persist failed:", e); }
+    catch (e) { reportError(new Error("[brush-rack] persist failed: " + String(e)), "log"); }
   }
   // 笔架内容变了单一入口：落本地 + 标脏排防抖同步 + 刷 icon + bump rackVersion（当前笔/sheet 重算）。
   markChanged() {
@@ -350,7 +351,7 @@ export class BrushRack {
         }
         if (res.status === "synced") this.d.setStatus(t("br.syncedToCloud"));
         else if (res.status === "invalid") this.d.setStatus(t("br.syncInvalid"), true);
-        else if (res.status === "dirty") { console.warn("[brush-rack sync]", res.error); this.d.setStatus(t("br.syncFailed"), true); }
+        else if (res.status === "dirty") { reportError(new Error("[brush-rack sync] " + String(res.error)), "log"); this.d.setStatus(t("br.syncFailed"), true); }
       },
     });
 

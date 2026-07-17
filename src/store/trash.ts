@@ -4,6 +4,7 @@
 //   restore：本地先恢复（撞名自动 (2)）→ 云端按同名恢复；采纳恢复出的云 item etag（move→新 etag）。
 //   purge：永久删（不可恢复）→ 强制 danger confirm。
 //   emptyTrash：批量彻底删，本地/云端一处清，逐项独立 try、失败汇总不静默；**强退=cancel，绝不自动续**。
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 import type { CloudItem, CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 
@@ -60,17 +61,17 @@ export function createTrash(cfg: TrashCfg) {
       if (scope !== "cloud" && local && local.listTrash && local.purgeTrash) {
         for (const t of await local.listTrash()) {
           try { await local.purgeTrash(t.trashKey); purged++; }
-          catch (e) { failed.push({ name: t.name, where: "local", error: errMsg(e) }); }
+          catch (e) { reportStoreError(e, "warning"); failed.push({ name: t.name, where: "local", error: errMsg(e) }); }
         }
       }
       if (scope !== "local" && (!isOnline || isOnline())) {
         let items: CloudItem[] | null = null;
-        try { items = await cloud.listTrash(); } catch (e) { failed.push({ where: "cloud-list", error: errMsg(e) }); }
+        try { items = await cloud.listTrash(); } catch (e) { reportStoreError(e, "warning"); failed.push({ where: "cloud-list", error: errMsg(e) }); }
         items = items || [];
         for (let i = 0; i < items.length; i += concurrency) {   // bounded 并发，快约 N×
           await Promise.all(items.slice(i, i + concurrency).map(async (it) => {
             try { await cloud.purge(it.id); purged++; }
-            catch (e) { failed.push({ name: it.name, where: "cloud", error: errMsg(e) }); }
+            catch (e) { reportStoreError(e, "warning"); failed.push({ name: it.name, where: "cloud", error: errMsg(e) }); }
           }));
         }
       }

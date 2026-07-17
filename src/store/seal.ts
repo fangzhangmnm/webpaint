@@ -8,6 +8,7 @@
 //   读路径锁定（无/错密码）→ 返 null（**不弹窗**；解锁循环是 UI 在 busy 外的事，见 README.md §7）。
 import { toU8 } from "./substrate.ts";
 import type { Bytes } from "./substrate.ts";
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 
 export class LockedError extends Error {
   code = "LOCKED";
@@ -53,7 +54,7 @@ export function createSeal(cfg: SealCfg): Seal {
     const pw = getPassword(name);
     if (!pw) throw new LockedError(name);
     let peek: Uint8Array | null = null;
-    if (makePeek) { try { peek = await makePeek(new Blob([plain as BlobPart])); } catch { peek = null; } }
+    if (makePeek) { try { peek = await makePeek(new Blob([plain as BlobPart])); } catch (e) { reportStoreError(e, "log"); peek = null; } }
     const container = await pack({ dataBytes: plain, fileName: name, ext, peek, password: pw });
     return await toU8(container);
   }

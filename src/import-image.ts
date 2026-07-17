@@ -9,6 +9,7 @@
 // 「导入照片(新建)」复用 session.newDoc 骨架（fillLayer0 画照片），不再自建 PaintDoc/做 doc 替换。
 
 import { els } from "./els.ts";
+import { reportError } from "./error-badge.ts";
 import { t } from "./i18n/index.ts";
 import { session } from "./session-state.ts";
 import { decodeImageFile, smartResample } from "./resample.ts";
@@ -212,7 +213,7 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
         return;
       }
     }
-  } catch (e) { console.warn("[import auto-transform]", e); }
+  } catch (e) { reportError(new Error("[import auto-transform] " + String(e)), "log"); }
   setStatus(t("mi.importedAsLayer", { name: file.name }));
 }
 
@@ -268,7 +269,7 @@ export function initImportImage(ctx: AppContext) {
         setStatus(t("mi.unsupportedFileType", { type: file.type || file.name }));
       }
     } catch (err) {
-      console.warn("[import] failed:", err);
+      reportError(new Error("[import] failed: " + String(err)), "log");
       setStatus(t("mi.importFailed", { err: errMsg(err) }));
     }
   });

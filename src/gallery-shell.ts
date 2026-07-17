@@ -17,6 +17,7 @@
 //   importImageAsNewDoc / readImageFromClipboard 直接 import（leaf/singleton）。
 
 import { session } from "./session-state.ts";
+import { reportError } from "./error-badge.ts";
 import { els } from "./els.ts";
 import { listSessions, readImageFromClipboard } from "./session.ts";
 import { isSignedIn } from "./app-store.ts";
@@ -365,7 +366,7 @@ export function initGalleryShell(ctx: AppContext) {
       if (await _store.nameOccupied(fullPath)) { setStatus(t("gs.folderExists", { name: trimmed }), true); return; }
       // 走 store.flow.newFolder（深模块窄接口）而非裸 ensureSubfolder——锁屏/单飞守卫由库内强制。
       try { await _store.newFolder(fullPath); setStatus(t("gs.folderCreated", { name: trimmed })); }
-      catch (e) { console.warn("[folder] cloud ensure failed:", e); setStatus(t("gs.folderCreateFailed", { err: errMsg(e) }), true); }
+      catch (e) { reportError(new Error("[folder] cloud ensure failed: " + String(e)), "log"); setStatus(t("gs.folderCreateFailed", { err: errMsg(e) }), true); }
     });
     gallery.refresh();
   });

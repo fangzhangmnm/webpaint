@@ -17,6 +17,8 @@
 //
 // idKey 默认 "id"；支持 static getter（如 FilterClass.id 是 static 字段，传 "id" 即可）。
 
+import { reportError } from "./error-badge.ts";
+
 export interface RegistryOpts {
   name?: string;
   idKey?: string;
@@ -46,7 +48,7 @@ export function makeRegistry<T>({ name = "registry", idKey = "id" }: RegistryOpt
       if (!id) throw new Error(`${name}: 注册项缺少 ${idKey}`);
       items.set(id, item);
       for (const fn of listeners) {
-        try { fn(item); } catch (e) { console.warn(`[${name} listener]`, e); }
+        try { fn(item); } catch (e) { reportError(new Error(`[${name} listener] ` + String(e)), "log"); }
       }
       return item;
     },

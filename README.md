@@ -333,6 +333,18 @@ bash scripts/build.sh  # 跑 esbuild → 生成 hash 文件名进 dist/（首次
 
 这种"我提需求、AI 写代码"的 Modding 自由度，正是开源相对闭源软件最大的优势。
 
+#### 错误上报（统一 error banner）
+
+全 app + store 的错误只走一个汇拢点：`src/error-badge.ts` 的 `reportError(err, level?)`。它是**最终消费者**——
+唯一 `console.log` 的地方，别再在别处散落 `console.error/warn` 做错误处理。分级：
+
+- `error` / `warning` → 顶层红/琥珀 banner（`#__errBar`，z-9999，盖过图库/busy/gate/modal 一切遮罩）
+- `info` → 底部状态栏（瞬态）
+- `log` → 只进 console（良性 offline / fallback：funnel 但不打扰用户）
+
+store 深模块不直接持有 UI：它们 funnel 到库内 `src/store/error-handling.ts` 的 `reportStoreError`，
+`createStore` 把它接到 app 传进去的 `ui.reportError`（即 error-badge）。store 侧只 funnel、不 log。
+
 #### 数据 schema（存储结构约定）
 
 > **改 store 库代码时，动任何持久化数据结构（IndexedDB / localStorage），尤其是新建字段，必须先显式经过用户同意。** 新建字段时也想一下：它该进 `appId.databaseId.internal` 命名空间，还是放别的地方。

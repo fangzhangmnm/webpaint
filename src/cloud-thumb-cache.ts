@@ -17,6 +17,7 @@
 //
 // 不在这处理：网络拉取本身 / IntersectionObserver / 并发限流（caller 负责）
 
+import { reportError } from "./error-badge.ts";
 import { getThumb, setThumb, deleteThumb, clearThumbs } from "./storage.ts";
 import { fetchOraThumbnail } from "./cloud-thumbs.ts";
 import { sessionFileName } from "./config.ts";
@@ -53,7 +54,7 @@ export async function writeCachedThumb(name: string, token: string, blob: Blob):
   try {
     await setThumb(_key(name), { token, blob, at: Date.now() });
   } catch (e) {
-    console.warn("[cloud-thumb-cache] write failed:", e);
+    reportError(new Error("[cloud-thumb-cache] write failed: " + String(e)), "log");
   }
 }
 

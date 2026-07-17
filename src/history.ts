@@ -16,6 +16,8 @@
 // 一条 undo entry：type 是 dispatch key，其余字段是 op 自带的最小 payload（领域无关，动态壳）。
 // export：op 模块（pixel-edit / layer-undo / toolbar / input）push/registerHandler 时直接绑此契约，
 //   省掉 `as unknown as Parameters<UndoStack["push"]>[0]` 那串占位 cast（v320 精度收口）。
+import { reportError } from "./error-badge.ts";
+
 export interface UndoEntry extends Record<string, unknown> {
   type: string;
 }
@@ -78,9 +80,9 @@ export class UndoStack {
     const h = this.handlers.get(e.type);
     if (h) {
       try { await h.undo(e); }
-      catch (err) { console.warn(`[history] undo handler "${e.type}" failed:`, err); }
+      catch (err) { reportError(new Error(`[history] undo handler "${e.type}" failed: ` + String(err)), "log"); }
     } else {
-      console.warn(`[history] no handler for "${e.type}"`);
+      reportError(`[history] no handler for "${e.type}"`, "log");
     }
     this._emit();
   }
@@ -92,9 +94,9 @@ export class UndoStack {
     const h = this.handlers.get(e.type);
     if (h) {
       try { await h.redo(e); }
-      catch (err) { console.warn(`[history] redo handler "${e.type}" failed:`, err); }
+      catch (err) { reportError(new Error(`[history] redo handler "${e.type}" failed: ` + String(err)), "log"); }
     } else {
-      console.warn(`[history] no handler for "${e.type}"`);
+      reportError(`[history] no handler for "${e.type}"`, "log");
     }
     this._emit();
   }
@@ -109,7 +111,7 @@ export class UndoStack {
   _dispose(entry: UndoEntry) {
     const h = this.handlers.get(entry.type);
     if (h && typeof h.dispose === "function") {
-      try { h.dispose(entry); } catch (err) { console.warn(`[history] dispose failed:`, err); }
+      try { h.dispose(entry); } catch (err) { reportError(new Error(`[history] dispose failed: ` + String(err)), "log"); }
     }
   }
 

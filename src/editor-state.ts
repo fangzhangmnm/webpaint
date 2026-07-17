@@ -29,7 +29,7 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
   // shapes/airbrush **不**自己存——alias 到 brush（见 rack.getRackToolKey）。v98：{ size, opacity, flow, activeBrushId }。
   // reactive：dial 是反应式 SSoT。先建 toolStates → 让 state 字面量一次成形、整体类型化（序列化走 JSON.stringify 无碍）。
   const toolStates: Record<string, ToolDial> = reactive({
-    // brush dial 默认（size/opacity/brushId 归 editorState.brushTool SSoT，boot 后 bindEditorReactive 灌入、doc 载入覆盖；
+    // brush dial 默认（size/opacity/activeBrushId 归 editorState.brushTool SSoT，boot 后 bindEditorReactive 灌入、doc 载入覆盖；
     //   不再从 LS 种子——desk per-doc，删了 webpaint.size/opacity 设备记忆）。flow 未进 editorState（留下一轮）。
     brush:    { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null },
     eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
@@ -74,7 +74,7 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
   bindEditorReactive({
     getSize: () => toolStates.brush.size ?? 12, setSize: (v) => { toolStates.brush.size = v; },
     getOpacity: () => toolStates.brush.opacity ?? 1.0, setOpacity: (v) => { toolStates.brush.opacity = v; },
-    getBrushId: () => toolStates.brush.activeBrushId ?? null, setBrushId: (v) => { toolStates.brush.activeBrushId = v; },
+    getActiveBrushId: () => toolStates.brush.activeBrushId ?? null, setActiveBrushId: (v) => { toolStates.brush.activeBrushId = v; },
     getColor: () => dialReactive.color, setColor: (v) => { dialReactive.color = v; },
     getPickMode: () => state.pickMode, setPickMode: (v) => { state.pickMode = v; },
   });
@@ -139,7 +139,7 @@ function freshGroups() {
     layersPanel:   { enabled: false, position: null as PanelPos | null },
     refPanel:      { enabled: false, position: null as PanelPos | null, viewport: { tx: 0, ty: 0, scale: 1, rot: 0 } as EditorViewport },
     blenderPanel:  { show: false, position: null as PanelPos | null },
-    brushTool:     { brushId: null as string | null, size: 12, opacity: 1, color: "#1b1b1b" },
+    brushTool:     { activeBrushId: null as string | null, size: 12, opacity: 1, color: "#1b1b1b" },
     liquify:       { bleed: "edge" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
     viewport:      null as EditorViewport | null,
@@ -151,14 +151,14 @@ export type EditorGroups = ReturnType<typeof freshGroups>;
 // ── 私有可变态 ─────────────────────────────────────────────────────────────────────────
 const S = { g: freshGroups() };       // mutable holder（reset 时整份换，访问器每次 deref S.g → reset 生效）
 
-// ── 反应式引擎绑定（stage5）：brushTool(size/opacity/brushId/color) + colorPicker.layerMode 是引擎**每笔读**的
+// ── 反应式引擎绑定（stage5）：brushTool(size/opacity/activeBrushId/color) + colorPicker.layerMode 是引擎**每笔读**的
 //   反应式态。editorState 作 SSoT 接口，底层存储绑到 createEditorState 的 reactive state —— 引擎一行不改、
 //   Vue 反应式不断（改 editorState.brushTool.size 直接写 reactive → currentBrush 重算 + workspaceDirty）。
 //   未绑定（pre-boot / node 测）→ 回落 S.g 纯值。
 interface EngineBind {
   getSize(): number; setSize(v: number): void;
   getOpacity(): number; setOpacity(v: number): void;
-  getBrushId(): string | null; setBrushId(v: string | null): void;
+  getActiveBrushId(): string | null; setActiveBrushId(v: string | null): void;
   getColor(): string; setColor(v: string): void;
   getPickMode(): string; setPickMode(v: string): void;
 }
@@ -167,7 +167,7 @@ let _bind: EngineBind | null = null;
 function applyBoundFromGroups(g: EditorGroups): void {
   if (!_bind) return;
   _bind.setSize(g.brushTool.size); _bind.setOpacity(g.brushTool.opacity);
-  _bind.setBrushId(g.brushTool.brushId); _bind.setColor(g.brushTool.color);
+  _bind.setActiveBrushId(g.brushTool.activeBrushId); _bind.setColor(g.brushTool.color);
   _bind.setPickMode(g.colorPicker.layerMode);
 }
 // boot 时 createEditorState 调：把当前 S.g（默认/已载入）灌进反应式引擎，二者对齐。
@@ -215,8 +215,8 @@ export const editorState = {
   },
   // tools（spec 表写了的收；未写的留下一轮）。brushTool + colorPicker 绑反应式引擎（见 EngineBind）──
   brushTool: {
-    get brushId(): string | null { return _bind ? _bind.getBrushId() : S.g.brushTool.brushId; },
-    set brushId(v: string | null) { if (_bind) _bind.setBrushId(v); else S.g.brushTool.brushId = v; },
+    get activeBrushId(): string | null { return _bind ? _bind.getActiveBrushId() : S.g.brushTool.activeBrushId; },
+    set activeBrushId(v: string | null) { if (_bind) _bind.setActiveBrushId(v); else S.g.brushTool.activeBrushId = v; },
     get size(): number { return _bind ? _bind.getSize() : S.g.brushTool.size; },
     set size(v: number) { if (_bind) _bind.setSize(v); else S.g.brushTool.size = v; },
     get opacity(): number { return _bind ? _bind.getOpacity() : S.g.brushTool.opacity; },
@@ -240,7 +240,7 @@ export const editorState = {
   Serialize(): EditorGroups {
     const out = JSON.parse(JSON.stringify(S.g)) as EditorGroups;
     if (_bind) {
-      out.brushTool = { brushId: _bind.getBrushId(), size: _bind.getSize(), opacity: _bind.getOpacity(), color: _bind.getColor() };
+      out.brushTool = { activeBrushId: _bind.getActiveBrushId(), size: _bind.getSize(), opacity: _bind.getOpacity(), color: _bind.getColor() };
       out.colorPicker = { layerMode: _bind.getPickMode() };
     }
     return out;

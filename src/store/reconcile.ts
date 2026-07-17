@@ -14,6 +14,7 @@
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 import { isHidden } from "./is-hidden.ts";   // 隐藏项（.trash/.backup/.<appId>/任意 dot）：云端已过滤，本地侧也别据此误判 gone
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 
 // 纯分类器（零 IO、可穷举单测）：返回该 demote 的 clean 孤儿名。
 //   规则（对齐 WebPaint gallery-model.classifyCloudGone，去掉 ghost/pin 轴——JRP 无 pin，dirty 孤儿一律留）：
@@ -67,7 +68,7 @@ export function createReconcile(cfg: ReconcileCfg) {
   //   全树 listAll（每个子夹一次 Graph 往返）是重活；日常开夹惰性收敛走 reconcileFolder。空列表守卫防网抖误删。
   async function reconcile(opts: { activeName?: string } = {}): Promise<{ demoted: string[] }> {
     if (isOnline && !isOnline()) return { demoted: [] };                  // 离线 → 不权威
-    const all = await cloud.listAll().catch(() => null);                  // 未登录/网失败 → null
+    const all = await cloud.listAll().catch((e) => { reportStoreError(e, "log"); return null; });   // 未登录/网失败 → null
     const authoritative = !!(all && all.complete && all.files.length > 0);  // 失败-fetch + 空列表守卫
     if (!authoritative) return { demoted: [] };
     const cloudNames = new Set(all!.files.map((f) => f.name ?? f.path));
@@ -79,7 +80,7 @@ export function createReconcile(cfg: ReconcileCfg) {
   //   只判**该夹直属**本地文件（startsWith(prefix) ∧ 无更深 slash）——身份=path、不跨夹追踪：别夹的 clean 文件永不被本次降级。
   async function reconcileFolder(folder: string, opts: { activeName?: string } = {}): Promise<{ demoted: string[] }> {
     if (isOnline && !isOnline()) return { demoted: [] };
-    const res = await cloud.listFolder(folder).catch(() => null);
+    const res = await cloud.listFolder(folder).catch((e) => { reportStoreError(e, "log"); return null; });
     if (!res || !res.complete) return { demoted: [] };                   // 这一夹没列全 → 不权威 → no-op（绝不据此判 gone）
     const cloudNames = new Set(res.files.map((f) => f.name ?? f.path));
     const prefix = folder ? `${folder}/` : "";

@@ -6,6 +6,7 @@
 // 红线：store 调用（_store.flow.load）verbatim 搬迁、一字未改——只 relocate，不碰同步机制。
 
 import { t } from "./i18n/index.ts";
+import { reportError } from "./error-badge.ts";
 import { defaultsPromise, mergeMissingDefaults, makeDefaultRack } from "./brushes.ts";
 import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
@@ -37,7 +38,7 @@ export function initRackBoot(ctx: AppContext) {
       dialReactive.rackVersion++;
     });
   }).catch((e: unknown) => {
-    console.warn("[brush-rack] init failed:", e);
+    reportError(new Error("[brush-rack] init failed: " + String(e)), "log");
     rack.setRack(makeDefaultRack());
     rack.applyToolState(editMode.current());
     dialReactive.rackVersion++;

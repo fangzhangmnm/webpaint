@@ -15,6 +15,7 @@
 // 不碰 store 红线：只调 session.markEdited() 公共 API（同 import-image.ts），其余持久化全走库。
 
 import type { AppContext } from "./app-context.ts";
+import { reportError } from "./error-badge.ts";
 import { session } from "./session-state.ts";
 import type { Layer } from "./doc.ts";
 import { store } from "./app-store.ts";
@@ -152,7 +153,7 @@ async function connect() {
     ctx.setStatus(url
       ? t("bl.cannotConnectHost", { host: hostOf(url) })
       : t("bl.cannotConnectLocal"), true);
-    console.warn("[btp] connect:", e);
+    reportError(new Error("[btp] connect: " + String(e)), "log");
   }
 }
 

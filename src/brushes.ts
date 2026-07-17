@@ -22,6 +22,7 @@
 //   spacing / pixelMode / taper / hardness / 椭圆参数 / smooth
 
 import type { Brush, BrushRackData } from "./brush-types.ts";
+import { reportError } from "./error-badge.ts";
 
 // makeBrush 的命名参数形状（大多有默认值，name/tool 必填）。
 interface MakeBrushArgs {
@@ -145,7 +146,7 @@ const _defaultsPromise = (async () => {
     if (!Array.isArray(json)) throw new Error("default-brushes.json 不是数组");
     _defaultsSpec = json;
   } catch (e) {
-    console.warn("[brushes] default-brushes.json 加载失败 → rack 走空兜底（emergency brush 顶上）。IDB 有的话照常用。", e);
+    reportError(new Error("[brushes] default-brushes.json 加载失败 → rack 走空兜底（emergency brush 顶上）。IDB 有的话照常用。" + String(e)), "log");
     _defaultsSpec = [];
   }
   return _defaultsSpec;
@@ -273,7 +274,7 @@ export function rackFromJSON(text: string): BrushRackData {
   if (!obj || typeof obj !== "object") throw new Error("rack JSON 格式不对");
   if (!Array.isArray(obj.brushes)) throw new Error("rack 缺 brushes");
   if (obj.version !== RACK_VERSION) {
-    console.warn(`[brushes] rack version ${obj.version} ≠ ${RACK_VERSION}; 当 ${RACK_VERSION} 用`);
+    reportError(`[brushes] rack version ${obj.version} ≠ ${RACK_VERSION}; 当 ${RACK_VERSION} 用`, "log");
   }
   if (!Array.isArray(obj.trash)) obj.trash = [];
   if (obj.resetAt == null) obj.resetAt = 0;

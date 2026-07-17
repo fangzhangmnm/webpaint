@@ -15,6 +15,8 @@
 // - 两个语义旋钮写在 CAPS（SSoT 定义语义，不硬编码）：onToolSwitch（点工具=apply/cancel）、returnTo。
 // - 纯 in-process，谓词 O(1) 查表。单次手势进行中不是 transient——那是 PixelEdit 的 tx。
 
+import { reportError } from "./error-badge.ts";
+
 const FALLBACK_TOOL = "brush";   // returnTool 兜底
 
 // 一条 mode 的能力描述。transient 专属的两个语义旋钮 onToolSwitch/returnTo 为可选。
@@ -135,7 +137,7 @@ export class EditMode {
     if (!t) return false;
     this._transient = null;
     try { (action === "abort" ? t.abort : t.apply)?.(); }
-    catch (e) { console.warn(`[edit-mode] transient ${action} failed:`, e); }
+    catch (e) { reportError(new Error(`[edit-mode] transient ${action} failed: ` + String(e)), "log"); }
     return true;
   }
 

@@ -22,6 +22,7 @@
 //     else                   → 平移
 
 import { BrushEngine } from "./brush.ts";
+import { reportError } from "./error-badge.ts";
 import { LiquifyEngine } from "./plugins/liquify-engine.ts";
 import { LassoEngine } from "./lasso.ts";
 import { FilterBrushEngine } from "./filter-brush.ts";
@@ -939,7 +940,7 @@ export class InputController {
       // fbState.Filter 对 input 不透明（BrushFilter 未 export）→ 在引擎接缝处断言到 beginStroke 入参类型。
       this.filterBrush.beginStroke(layer, fbState.Filter as Parameters<FilterBrushEngine["beginStroke"]>[1], fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
     } catch (e) {
-      console.warn("[filter brush] begin failed:", e);
+      reportError(new Error("[filter brush] begin failed: " + String(e)), "log");
       this._activeStroke = null;
       rec.role = null;
       this.status?.(`filter brush 出错：${(e as { message?: unknown })?.message || e}`);
@@ -987,7 +988,7 @@ export class InputController {
           this.status("选区全在画布外，已取消");
         }
       } catch (e) {
-        console.error("[lasso end]", e);
+        reportError(new Error("[lasso end] " + String(e)), "log");
         this.status("选区操作出错：" + ((e as { message?: unknown })?.message || e));
         this.lasso.cancelDrawing();
       }
@@ -1009,7 +1010,7 @@ export class InputController {
             this.status("魔术棒：tap 在线 / 边界上，没选到");
           }
         } catch (e) {
-          console.error("[magic-wand]", e);
+          reportError(new Error("[magic-wand] " + String(e)), "log");
           this.status("魔术棒出错：" + ((e as { message?: unknown })?.message || e));
         }
       } else {
@@ -1206,7 +1207,7 @@ export class InputController {
     for (const sc of KEYBOARD_SHORTCUTS) {
       if (sc.when && !sc.when(this)) continue;
       if (!_matchCombo(e, sc.combo)) continue;
-      try { sc.run(this); } catch (err) { console.warn("[shortcut]", sc.combo, err); }
+      try { sc.run(this); } catch (err) { reportError(new Error("[shortcut] " + sc.combo + " " + String(err)), "log"); }
       e.preventDefault();
       return;
     }

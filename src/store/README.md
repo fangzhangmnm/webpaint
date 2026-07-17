@@ -244,7 +244,10 @@ const ui = {
   // push 撞冲突时 store 调它；返回有限选项之一，后果由 store 执行(见下表)。**必给真 sheet，绝不静默 cancel**。
   resolveConflict: (ctx: { name: string; local: Blob | null; cloud: Blob | null }) => Promise<ConflictChoice>,
   // 非阻断错误(网络/文件不存在/字节非法)：store 调它弹 error banner。**必给，绝不吞 console**。
-  reportError: (err: unknown) => void,
+  //   level 缺省 "error"。分级 "error"|"warning"→banner、"info"→状态栏、"log"→仅 console(良性 offline/fallback)。
+  //   深模块不直接持有 ui：它们 import 库内 `error-handling.ts` 的 `reportStoreError(err, level)`，
+  //   createStore 装配时把它接到本 `reportError`（store 侧只 funnel、不 console.log，最终消费者才 log）。
+  reportError: (err: unknown, level?: "error" | "warning" | "info" | "log") => void,
   // 选填：云检查「跳过到离线」逃生闸（缺它优雅退回 isOnline 守卫，非隐藏失败）。
   offlineEscape?: () => { probe: Promise<unknown>; settle: () => void },
 };

@@ -20,8 +20,8 @@ import {
   watchFolder, listGalleryTrash,
 } from "../app-store.ts";
 import { listSessions } from "../session.ts";
-import { setMeta } from "../storage.ts";
 import { getOrFetchCloudThumb, invalidateCachedThumb } from "../cloud-thumb-cache.ts";
+import { reportError } from "../error-badge.ts";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
 // crypt seam）。图库只做 per-app 的部分：首次设密码双输 UX、活动项预检、明文残留清理、
 // 以及把 peek 字节解释成缩略图（enc-thumbs）。
@@ -137,7 +137,7 @@ const ThumbCell = defineComponent({
                 if (blob && blob.type === ENC_PEEK_MIME) { cloudEncBlob = blob; return tryDecrypt(); }
                 setBlob(blob);
               })
-              .catch((err: unknown) => console.warn("[gallery] thumb:", err));
+              .catch((err: unknown) => reportError(new Error("[gallery] thumb: " + String(err)), "log"));
           }
         }, { rootMargin: "600px 0px", threshold: 0.01 });
         nextTick(() => { if (obs && root.value) obs.observe(root.value); });
@@ -360,8 +360,6 @@ function makeGallery(host: GalleryHost) {
           const res = await _store.file(sessionFileName(item.name), { isZip: true }).encrypt({ isOnline: () => host.signedIn() && host.online() });
           if (res.status === "already") { host.status(t("gal.st.alreadyEnc")); return; }
           if (!(await _afterSwap(item, res, t("gal.st.encryptedOk", { name: item.name })))) return;
-          // 清明文残留：revert checkpoint（旧内容的明文快照）
-          try { await setMeta(`revert:${item.name}:ora`, null); await setMeta(`revert:${item.name}:at`, null); } catch (_) {}
         } catch (e: unknown) { host.status(t("gal.st.encFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         await reload();
       }

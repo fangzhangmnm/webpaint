@@ -7,6 +7,7 @@ import { withBusy } from "./fullscreen-busy.ts";
 import { lockSyncGate, settleSyncGate } from "./sheets.ts";
 import { t } from "./i18n/index.ts";
 import { stripSessionExt } from "./config.ts";
+import { reportError } from "./error-badge.ts";
 
 export const storeUI: StoreUI = {
   // 用户态写流强制锁屏（可重入 ref-count）。深模块内部 push/rename/del/加密都包这个。
@@ -29,8 +30,8 @@ export const storeUI: StoreUI = {
     return choice ?? "cancel";
   },
 
-  // 错误必 surface（ADR-0009 绝不吞 console）。TODO：接状态条 banner（当前 console + 待 UI 收口，见 cutover 计划）。
-  reportError: (err: unknown): void => { console.error("[store]", err); },
+  // 错误必 surface（ADR-0009 绝不吞 console）。接统一 error-badge：error/warning→顶层 banner、info→状态栏、log→仅 console。
+  reportError: (err: unknown, level): void => { reportError(err, level ?? "error"); },
 
   // 「跳过到离线」逃生闸（对齐旧 cloud-freshness）：引擎 freshness.open 拿 {probe, settle}，probe 与 fetchMeta race，
   //   finally 调 settle。用户点「跳过到离线」→ probe resolve → 读本地（无硬超时，用户即超时）。

@@ -8,6 +8,8 @@
 //   （"encountered a problem"）。dev 用 network-first：在线永远先抓网（"改完即见"/强制更新不变），离线才回退缓存。
 //   完整设计 + 这个坑见 docs/20260630-pwa-offline-dev-sw.md。
 
+import { reportError } from "./error-badge.ts";
+
 export interface PwaShellDeps {
   toast: HTMLElement;
   reloadBtn: HTMLElement;
@@ -72,7 +74,7 @@ export class PwaShell {
           });
         });
         setInterval(() => { registration.update().catch(() => {}); }, 10 * 60 * 1000);
-      }).catch((err) => console.warn("SW register failed", err));
+      }).catch((err) => reportError(new Error("SW register failed " + String(err)), "log"));
     }
   }
 }

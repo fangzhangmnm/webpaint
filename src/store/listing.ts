@@ -12,6 +12,7 @@
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 import { isHidden } from "./is-hidden.ts";   // 末段 dot = 隐藏（.trash/.backup/.<appId>/任意 dot 项不进列举）
+import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
 
 // syncState = residency(住哪) ⟂ sync-status(clean/dirty/conflict/gone) 两轴的 derived 投影。
 //   （单一 Residency 太薄——这是「sync state 更复杂」的落地。8 值对齐 PWAPatterns state-machine.md 的 badge。）
@@ -127,7 +128,7 @@ export function createListing(cfg: ListingCfg) {
   //   guardrail（红线）：绝不据本夹的 listing 判**别夹**文件 cloud-gone——因为压根不看别夹的 local key（下面 startsWith(prefix) 门）。
   //   absenceAuthoritative = 这一夹 list() 没抛错（cloudRes.complete）；离线/登出 → cloudReachable=false → 塌到本地视角。
   async function listFolder(folder: string, ctx: ListContext): Promise<FolderSnapshot> {
-    const cloudRes = (ctx.online && ctx.signedIn) ? await cloud.listFolder(folder).catch(() => null) : null;
+    const cloudRes = (ctx.online && ctx.signedIn) ? await cloud.listFolder(folder).catch((e) => { reportStoreError(e, "log"); return null; }) : null;
     const cloudReachable = cloudRes != null;
     const absenceAuthoritative = cloudReachable && cloudRes!.complete === true;
 
@@ -167,7 +168,7 @@ export function createListing(cfg: ListingCfg) {
 
   async function listAllItems(ctx: ListContext): Promise<{ items: Item[]; folders: string[]; complete: boolean }> {
     // 云那半：仅在线 ∧ 登录才取；抛错 → null（优雅降级，绝不 throw、绝不据此清本地）。
-    const cloudRes = (ctx.online && ctx.signedIn) ? await cloud.listAll().catch(() => null) : null;
+    const cloudRes = (ctx.online && ctx.signedIn) ? await cloud.listAll().catch((e) => { reportStoreError(e, "log"); return null; }) : null;
     const cloudReachable = cloudRes != null;
     const absenceAuthoritative = cloudReachable && cloudRes!.complete === true;
 
