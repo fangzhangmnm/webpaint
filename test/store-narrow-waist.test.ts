@@ -4,7 +4,7 @@
 //   collection 云端落 `.${appId}/<name>.json` + scaffold + backupFolder 默认 `.backup`。
 //   （localSettings/syncedSettings 已删 2026-07-13——设置/状态全走 collection。）
 import { test, eq, assert } from "./runner.mjs";
-import { isHidden } from "../src/store/is-hidden.ts";
+import { isHidden, assertValidFileName, assertValidCollectionName } from "../src/store/is-hidden.ts";
 import { namespacedKv } from "../src/store/kv-namespace.ts";
 import { createStore } from "../src/store/create-store.ts";
 import { createMockProvider } from "../src/store/mock-provider.ts";
@@ -233,5 +233,45 @@ test("[narrow-waist] cloud-sync backupFolder 默认 .backup（weakOverride 把�
     let threw = false;
     try { await store.file("R.ora", { isZip: true, mode: "existing" }).reupload(); } catch { threw = true; }
     assert(threw, "撞名异内容 → 抛（绝不覆盖别设备的新文件）");
+  });
+}
+
+// ── 第 3 步：path-guard 三函数 + collection 单例 + files 命名空间（2026-07-17）────────────────
+{
+  test("[path-guard] assertValidFileName：拒 3 个保留根，放行其他子路径/dotfile", () => {
+    for (const bad of [".trash", ".trash/x", ".backup", ".backup/x.ora", ".wp", ".wp/synced-user-preference"]) {
+      let threw = false; try { assertValidFileName(bad, "wp"); } catch { threw = true; }
+      assert(threw, `保留根应拒：${bad}`);
+    }
+    for (const ok of ["x.ora", "folder/x.ora", ".hidden.ora", "a/.b.ora", "folder/sub/deep.ora"]) {
+      assertValidFileName(ok, "wp");   // 不抛
+    }
+  });
+  test("[path-guard] assertValidCollectionName：禁斜杠/Windows 非法字符/bare .|..；放行点分层级", () => {
+    for (const bad of ["a/b", "a:b", "", ".", "..", "a*b"]) {
+      let threw = false; try { assertValidCollectionName(bad); } catch { threw = true; }
+      assert(threw, `应拒：${JSON.stringify(bad)}`);
+    }
+    for (const ok of ["brush-rack", "synced-user-preference", "parent.child", ".hidden-coll"]) {
+      assertValidCollectionName(ok);   // 不抛（点/前导点放行）
+    }
+  });
+  test("[files] file() 保留根名 → 抛（路径护栏归位 store）", () => {
+    const { store } = mkStore(dumpKv());
+    let threw = false; try { store.file(".trash/x.ora", { isZip: true, mode: "existing" }); } catch { threw = true; }
+    assert(threw, "保留根 file() 抛");
+  });
+  test("[collection] 单例：同名第二次返同一对象（app schema 全局单例命名空间）", () => {
+    const { store } = mkStore(dumpKv());
+    const a = store.collection("brush-rack");
+    const b = store.collection("brush-rack");
+    assert(a === b, "同名 collection 返同一实例（否则两份内存信封同步同一云文件=互相看不见）");
+    assert(store.collection("other") !== a, "不同名 → 不同实例");
+  });
+  test("[files] 命名空间面齐备（nameOccupied boolean / reconcileAll / drainOfflineQueue / 回收站族）", () => {
+    const { store } = mkStore(dumpKv());
+    for (const m of ["nameOccupied", "watchFolder", "ensureFolder", "newFolder", "deleteFolder", "drainOfflineQueue", "listTrash", "listBackup", "restoreTrash", "purgeTrash", "emptyTrash", "emptyBackup", "reconcileAll"]) {
+      assert(typeof store.files[m] === "function", `store.files.${m} 应存在`);
+    }
   });
 }

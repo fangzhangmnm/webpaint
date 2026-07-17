@@ -73,7 +73,7 @@ const _enc = reactive<{ encrypted: boolean }>({ encrypted: false });
 // 边界（薄库身份=全名）：app 内部 _activeSessionName 是**裸** session 名；跨到库/editor-session 前统一 sessionFileName
 //   转全名（X→X.ora）。加密件 .zip 由库内部据字节态翻转，app 只传明文全名。OUT 侧（itemToG）用 stripSessionExt 还原。
 const toFull = (name: string) => sessionFileName(name);
-const _file = (name: string) => _store.file(toFull(name), { isZip: true });   // WebPaint work-file = ora-zip 容器（有 peek）
+const _file = (name: string) => _store.file(toFull(name), { isZip: true, mode: "existing" });   // WebPaint work-file = ora-zip 容器（有 peek）
 async function _refreshEncrypted() {
   try { _enc.encrypted = _activeSessionName ? await _file(_activeSessionName).isEncrypted() : false; }
   catch { _enc.encrypted = false; }
@@ -436,7 +436,8 @@ async function restoreSession(name: string): Promise<boolean> {
 async function saveAs(newName: string): Promise<void> {
   const bytes = await _encodeCurrentOra();
   const peek = await renderThumbBlob(doc, 256);
-  await _file(newName).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
+  // 另存为=写**新身份** → mode:"new"（撞名不静默覆盖；topbar 已 nameOccupied 预检，这里 store 层再兜底红线）。
+  await _store.file(toFull(newName), { isZip: true, mode: "new" }).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
   _activeSessionName = newName; setCurrentSessionName(newName); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(newName));   // es 切到新名（内容即新名的；下轮 autosave 若跑=同内容 re-save，无害）。边界转全名。
   _docLastSavedAt = Date.now(); updateSaveStatus(); gallery.refresh();

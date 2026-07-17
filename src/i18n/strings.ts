@@ -594,6 +594,7 @@ export const S = {
   "tm.nameSameAsCurrent": { zh: "名字和当前一样，换一个", en: "Same as current name, choose another", ja: "現在の名前と同じです。別の名前にしてください" },
   "tm.localNameExists": { zh: "本地已有同名 \"{name}\"，换一个", en: "A local file named \"{name}\" already exists, choose another", ja: "ローカルに同名 \"{name}\" が既にあります。別の名前にしてください" },
   "tm.cloudNameExists": { zh: "云端已有同名 \"{name}\"，换一个", en: "A cloud file named \"{name}\" already exists, choose another", ja: "クラウドに同名 \"{name}\" が既にあります。別の名前にしてください" },
+  "tm.nameExists":      { zh: "已有同名 \"{name}\"（本地或云端），换一个", en: "A file named \"{name}\" already exists (local or cloud), choose another", ja: "同名 \"{name}\" が既にあります（ローカルまたはクラウド）。別の名前にしてください" },
   "tm.savedAs": { zh: "已另存为：{name}", en: "Saved as: {name}", ja: "名前を付けて保存しました：{name}" },
   "tm.savedAsLocalOnly": { zh: "已另存为（仅本地）：{name}（云端稍后 Ctrl+S 推）", en: "Saved as (local only): {name} (push to cloud later with Ctrl+S)", ja: "名前を付けて保存しました（ローカルのみ）：{name}（後で Ctrl+S でクラウドへ）" },
   "tm.savedAsWithCloud": { zh: "已另存为（含云端）：{name}", en: "Saved as (incl. cloud): {name}", ja: "名前を付けて保存しました（クラウド含む）：{name}" },

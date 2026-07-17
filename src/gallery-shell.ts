@@ -363,9 +363,9 @@ export function initGalleryShell(ctx: AppContext) {
     //   withBusy 可重入（ref-count），内层 store.flow.newFolder 再包一层 busy 不会提前解锁。
     await withBusy(t("gs.creatingFolder", { name: trimmed }), async () => {
       // 统一走 store.nameOccupied（唯一占用检查）：同名文件占了 → 提示；纯文件夹已存在则 ensureFolder 幂等（复用无害）。
-      if (await _store.nameOccupied(fullPath)) { setStatus(t("gs.folderExists", { name: trimmed }), true); return; }
+      if (await _store.files.nameOccupied(fullPath)) { setStatus(t("gs.folderExists", { name: trimmed }), true); return; }
       // 走 store.flow.newFolder（深模块窄接口）而非裸 ensureSubfolder——锁屏/单飞守卫由库内强制。
-      try { await _store.newFolder(fullPath); setStatus(t("gs.folderCreated", { name: trimmed })); }
+      try { await _store.files.newFolder(fullPath); setStatus(t("gs.folderCreated", { name: trimmed })); }
       catch (e) { reportError(new Error("[folder] cloud ensure failed: " + String(e)), "log"); setStatus(t("gs.folderCreateFailed", { err: errMsg(e) }), true); }
     });
     gallery.refresh();

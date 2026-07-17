@@ -29,13 +29,13 @@ export interface EditorAdapter {
 // tryMove 结果（rename/move 唯一入口；含目标占用检查，占用则不动字节返错，不抛）。
 export type TryMoveResult = { ok: true } | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
 export interface StoreLike {
-  file(name: string, opts: { isZip: boolean }): {
+  // mode 显式必填（new=新建、existing=打开已有）；editor-session 处理的都是已建身份 → 恒 "existing"。
+  file(name: string, opts: { isZip: boolean; mode: "new" | "existing" }): {
     open(): Promise<Blob | null>;
     save(bytes: Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<void>;
+    tryMove(to: string): Promise<TryMoveResult>;   // 改身份/移动唯一入口（含 nameOccupied 占用检查）——挂在 file 上
     delete(): Promise<void>;
   };
-  tryMove(from: string, to: string): Promise<TryMoveResult>;   // 改身份/移动唯一入口（含 nameOccupied 占用检查）
-  reconcile?(opts?: { activeName?: string }): Promise<void>;
 }
 
 /** app-agnostic 的 autosave / push 策略（每 app 不同 → 注入）。 */
@@ -61,7 +61,7 @@ export interface EditorSession {
   flushLocal(): Promise<void>;                    // 立即存本地（不推）——内存脏才动
   flushAndPush(): Promise<void>;                  // 立即存本地 + best-effort 推云——内存脏 **或** push-pending 才动（退出用）
   forceSaveAndPush(): Promise<void>;              // **无条件** encode + 存 + 推（用户显式按 save）——不脏也要动，让时间戳走字（v409）
-  rename(newName: string): Promise<TryMoveResult>;   // 改身份（先 flush 旧内容）→ 走 store.tryMove；占用则返 {ok:false}（不改 _name）
+  rename(newName: string): Promise<TryMoveResult>;   // 改身份（先 flush 旧内容）→ 走 file.tryMove；占用则返 {ok:false}（不改 _name）
   delete(): Promise<void>;                        // 删当前 doc
   currentName(): string | null;
   isDirty(): boolean;                             // **内存脏**（自上次落盘后 editor 改过）——app 层概念，非 sync 脏
@@ -92,7 +92,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     });
   }
 
-  const fileOf = (name: string) => store.file(name, { isZip });
+  const fileOf = (name: string) => store.file(name, { isZip, mode: "existing" });   // editor 处理的都是已建身份（新建走 app 的 newDoc/saveAs）
 
   // tryPush=false（flushLocal/autosave）：内存脏才动。tryPush=true（flushAndPush/**退出**）：内存脏 **或** push-pending 就动
   //   （= autosave 已把内容落本地、内存不脏但还没推 → 退出仍要推，否则本次编辑只在本地）。
@@ -148,7 +148,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     async rename(newName: string): Promise<TryMoveResult> {
       if (!_name) return { ok: true };
       await persist(false);                        // 先把内存落到旧名
-      const r = await store.tryMove(_name, newName);   // 唯一入口（含占用检查）；占用→不改 _name
+      const r = await fileOf(_name).tryMove(newName);   // 唯一入口（含占用检查，挂在 file 上）；占用→不改 _name
       if (r.ok) _name = newName;
       return r;
     },

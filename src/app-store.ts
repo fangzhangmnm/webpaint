@@ -90,7 +90,7 @@ export function watchFolder(
   cb: (snap: { path: string; items: ReturnType<typeof itemToG>[]; folderNames: string[] }) => void,
 ): () => void {
   const prefix = folder ? `${folder}/` : "";
-  return store.watchFolder(folder, (snap) => {
+  return store.files.watchFolder(folder, (snap) => {
     cb({
       path: snap.path,
       // 文件名**倒序**（localeCompare numeric）：新文档名 yyyymmdd-xxxx → 新日期在前，稳定（不随存盘时间跳）。
@@ -104,7 +104,7 @@ export function watchFolder(
 //   app 原则上不知道别的 folder 内容（内存只放当前夹）；名字碰撞由 store rename/saveAs 目标护栏内化检测（撞名抛 CloudNameCollisionError），不靠先 list 目标夹。
 // 回收站视图：store.listTrash 返**两端聚合**的 TrashItem[]（side/localKey/cloudItemId/encrypted/conflictLive）→ 映射成 gallery 的 TrashGItem。
 //   local/cloud 两腿据 localKey/cloudItemId 填（app 原有 both-side 模型此前从没被本地腿填充）。只元数据，无 blob。
-export const listGalleryTrash = async () => (await store.listTrash()).map((it) => ({
+export const listGalleryTrash = async () => (await store.files.listTrash()).map((it) => ({
   name: stripSessionExt(it.name),
   deletedAt: 0,
   encrypted: it.encrypted,

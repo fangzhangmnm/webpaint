@@ -8,7 +8,7 @@ import { SUFFIX_BYTES, THUMB_PATH } from "./cloud-thumbs.ts";
 import { isUnlocked, getPassword, setPassword, onPasswordVerified, promptPassword } from "./crypto-state.ts";
 
 // 边界：app 传裸 session 名，库身份是全名 → sessionFileName 统一转（与 session-state/gallery 一致）。
-const encFile = (name: string) => store.file(sessionFileName(name), { isZip: true });
+const encFile = (name: string) => store.file(sessionFileName(name), { isZip: true, mode: "existing" });
 
 /** 本地加密作品的缩略图（内存密码解得开→PNG Blob；锁定/没有→null）。非交互——批量渲染不弹窗。 */
 export async function localPeekThumb(name: string): Promise<Blob | null> {

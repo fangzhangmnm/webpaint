@@ -68,16 +68,18 @@ const store = createStore({
 
 **API 入口一览**（这就是你能碰的全部；其余都是内部深模块，碰不到）：
 
+> as-of 2026-07-17（第 3 步 namespace 整顿）：文件域「非单文件」操作全收进 **`store.files.*`**；`file()` 的 `mode` **显式必填**；改身份走 **`file.tryMove(to)`**（不再 `store.tryMove`）；cloud-gone 收敛升级为**去抖后 send trash**（`store.files.reconcileAll`）。
+
 | 拿到的 | 方法 | 章节 |
 |---|---|---|
-| `store.file(name, {isZip})` → `RawFile`/`ZipFile` | `save · open · pullIfClean · delete · keepOffline · offload · isKeptOffline · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek({bytesLength,zipEntry})` + `decryptPeek(blob)`；zip 尾片解析在库内部，`setPeek` 未采用，peek 经 `crypt.makePeek` 自动。无 `rename`/`isDirty`——改身份走 `store.tryMove`，dirty 经 `listAllItems` 的 syncState 读） | §2 |
-| `store.collection(name, {manual?, local?, getInitData?})` | `setItem · deleteItem · getItem(id,def) · getEntry · entries · keys · onChange · init · reconcileWithRemote · flushLocal · isDirty`（`{local:true}` = **不推云**的设备本地变体；`getInitData` = 新库 seed，uat=1；删除=value:null 墓碑） | §3 |
-| `store.list()` / `store.listAll()` | 列云端文件+文件夹 `{files, folders, complete}`（`complete:false` **别据此删缓存**） | §2 |
-| `store.ensureFolder · newFolder · deleteFolder` | 文件夹增删（删除「必须空」库内强制） | §2 |
-| `store.listTrash · listBackup · restore · purge · emptyTrash` | 回收站 / 备份箱：列举·恢复·彻底删·清空 | §2 |
-| `store.localKeys()` | 已留作离线（=有本地副本）的文件名集合（gallery 批量判） | §2 |
-| `store.file(name).pullIfClean(opts?)` / `store.drainDeleteQueue()` | 事件驱动干净快进（per-file，clean→FF·dirty→no-op；原 `store.refresh` 收上 file） / 离线删队列重放 | §6 |
-| `store.reconcile({activeName?})` | cloud-gone 安全收敛（gallery list-fetch 时调：clean 孤儿→local-only，不删） | §6 |
+| `store.file(name, {isZip, mode})` → `RawFile`/`ZipFile` | **`mode:"new"\|"existing"` 必填**（new=新建画布，撞名抛 `CloudNameCollisionError` 不覆盖；existing=打开已有）。`save · open · pullIfClean · tryMove(to) · delete · reupload · keepOffline · offload · isKeptOffline · isEncrypted · encrypt · decrypt · verifyPassword`（ZipFile 多 `getPeek({bytesLength,zipEntry})` + `decryptPeek(blob)`）。无 `rename`/`isDirty`——改身份走 `file.tryMove(to)`（结果式，含占用检查），dirty 经 syncState 读。`reupload()` = candidate-gone 的「重传」（本地 clean 字节 no-base 推回空 path） | §2 |
+| `store.collection(name, {manual?, local?, getInitData?})` | **单例**（同名返同一对象）。`setItem · deleteItem · getItem(id,def) · getEntry · entries · keys · onChange · init · reconcileWithRemote · flushLocal · isDirty`（`{local:true}` = **不推云**的设备本地变体；`getInitData` = 新库 seed，uat=1；删除=value:null 墓碑） | §3 |
+| `store.files.watchFolder(folder, cb)` | **唯一列举面**：订阅一个夹 → 立即本地帧、云端到了同一 cb 再闪（无 list/listAll/localKeys）。Item.syncState 含 `pendingGone`（cloud-gone clean 孤儿、防抖 grace 内） | §2 |
+| `store.files.nameOccupied(name)` → **boolean** | 名字占用（在线云端+本地都看，离线只看本地）。新建/另存/改名前预检 | §2 |
+| `store.files.ensureFolder · newFolder · deleteFolder` | 文件夹增删（删除「必须证实为空」库内强制；list 抛错/未权威→拒删） | §2 |
+| `store.files.drainOfflineQueue()` | 离线队列统一重放（按序：新文件夹→新上传→删文件）；app 在 online/boot/reconnect 调 | §6 |
+| `store.files.listTrash · listBackup · restoreTrash · purgeTrash · emptyTrash · emptyBackup` | 回收站/备份箱：**本地↔云聚合**列举（TrashItem：side/encrypted/conflictLive，只元数据无 blob）·恢复·彻底删·清空 | §2 |
+| `store.files.reconcileAll({activeName?})` | **全库** cloud-gone 收敛（仅用户显式指令）：clean 孤儿**去抖后 send trash**（首次见 gone 标 candidate、跨 ~24h GRACE 第二次+ 才动手；重现/被编辑自愈）。日常开夹惰性收敛走 watchFolder 内的 per-folder reconcile（同 converge SSOT） | §6 |
 | `store.saveAs(...)` | 写到新身份（phantom-path 红线：先存新名再删旧） | §2 |
 | `store.looksEncrypted · verifyContainer · unsealWith` | 加密导入辅助（文件还没进 store、无 name 可查时） | §5 |
 | 加密（at-rest，对齐 WebPaint） | config 注入 `crypto`(zip/7z codec) + `crypt`(ext/makePeek/getPassword)；透明封解 + `file.encrypt/decrypt`；不注入 = dormant。`store.encryption`/salt 超集未采用 | §5 |

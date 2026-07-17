@@ -182,8 +182,8 @@ export function initTopbarMenu(ctx: AppContext) {
       const trimmed = input.trim();
       if (!trimmed) { setStatus(t("tm.nameEmpty"), true); candidate = ""; continue; }
       if (trimmed === oldName) { setStatus(t("tm.nameSameAsCurrent"), true); candidate = trimmed; continue; }
-      const occ = await sessionNameConflict(trimmed);   // 统一 store.nameOccupied：local + 在线 remote
-      if (occ) { setStatus(t(occ === "local" ? "tm.localNameExists" : "tm.cloudNameExists", { name: trimmed }), true); candidate = trimmed; continue; }
+      const occ = await sessionNameConflict(trimmed);   // 统一 store.files.nameOccupied（boolean：local + 在线 remote）
+      if (occ) { setStatus(t("tm.nameExists", { name: trimmed }), true); candidate = trimmed; continue; }
       // 极端 race（预检后到落盘间被占）→ store saveAs 护栏抛，下面 catch 兜底循环重问。
       // 另存为 = 写新身份、旧的不动（store.flow.saveAs：本地存 + 云端 push，云端 best-effort）。
       try {

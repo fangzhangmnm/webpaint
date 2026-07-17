@@ -18,6 +18,7 @@ import { createTrash } from "./trash.ts";
 import { createOffload } from "./offload.ts";
 import { createReconcile } from "./reconcile.ts";
 import { createPendingGone } from "./pending-gone.ts";
+import { assertValidFileName, assertValidCollectionName } from "./is-hidden.ts";
 import { createCollection, emptyCollectionBytes, type Collection, type CollectionConfig } from "./collection.ts";
 import { createListing, type ListContext, type FolderSnapshot } from "./listing.ts";
 import { createUploadReplay, type UploadReplayPolicy } from "./upload-queue.ts";
@@ -92,6 +93,9 @@ export interface StoreConfig {
   cloudGoneGraceMs?: number;                          // 云端防抖窗口覆盖（测试注入小值；prod 缺省 ~24h）
 }
 
+// tryMove 结果式返回（不抛，UI 渲染 where 标签）。移动/改身份的唯一入口 = file.tryMove(to)。
+export type TryMoveResult = { ok: true } | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
+
 // ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 getPeek/setPeek ──
 export interface RawFile {
   //  save(bytes)               = 本地落盘 + best-effort 推云（默认 tryPush:true）
@@ -102,7 +106,8 @@ export interface RawFile {
   // 事件驱动「干净快进」：本地 clean ∧ 云端有更新 → 拉新版覆盖本地缓存；本地 dirty → no-op（绝不在事件里弹 sheet，
   //   后续 push 的 412 会 surface 真分叉）。app 在 focus/visibility/online 调。（原 store.refresh(name)，2026-07 收上 file。）
   pullIfClean(opts?: RefreshOpts): Promise<FreshResult>;
-  // 注：无 rename —— 改身份/移动**唯一入口 = store.tryMove(from,to)**（含 nameOccupied 占用检查，结果式不抛）。
+  // 改身份/移动**唯一入口 = file.tryMove(to)**（含 nameOccupied 占用检查，结果式不抛；ok:false→UI surface where）。无独立 rename。
+  tryMove(to: string): Promise<TryMoveResult>;
   delete(): Promise<void>;
   // 重新上传（candidate-gone 的「保留重传」动作）：本地 clean 字节推云到空 path。撞名(乌龙云端已有)→抛 CloudNameCollisionError
   //   （app surface conflict）；成功→采纳新 etag 变 synced + 清 candidate。gallery 层没开文件 → 必须 store 内解决，不靠编辑器 save。
@@ -186,12 +191,20 @@ export function createStore(config: StoreConfig) {
   const clearPendingFolder = (p: string): void => writePending(readPending().filter((x) => x !== p));
   // ensureFolder：本地先登记（离线可见/持久），在线则补建云端并清 pending；离线/失败留 pending 等 drainFolders。
   async function ensureFolderLocalFirst(path: string): Promise<void> {
+    assertValidFileName(path, appId);   // 路径护栏：禁在 .trash/.backup/.<appId> 保留根建夹
     addPendingFolder(path);
     if (isOnline()) { try { await cloud.ensureFolder(path); clearPendingFolder(path); } catch { /* 留 pending，回线补建 */ } }
   }
   async function drainFolders(): Promise<void> {
     if (!isOnline()) return;
     for (const p of readPending()) { try { await cloud.ensureFolder(p); clearPendingFolder(p); } catch { /* 下次再补 */ } }
+  }
+  // 离线队列统一重放（app 在 online/boot/reconnect 调）——**按序**：新文件夹补建 → 新上传补推 → 删文件重放。
+  //   （无独立「删文件夹」离线队列：离线只能删从没上云的 pending 空夹，已即时处理。）
+  async function drainOfflineQueue(): Promise<void> {
+    await drainFolders();                 // ① 新建的空夹补建（先建，后面的上传可能落在里头）
+    await uploadReplay.drain();           // ② 离线新上传补推（ADR-0018；ask 模式内部先问）
+    await del.drainDeleteQueue();         // ③ 离线删重放（base-etag 守卫，edit-wins）
   }
 
   // ── 统一列举（README §2）：整个虚拟 FS 一次列举 = local ∪ cloud，每项带 syncState。mergeLocalCloud 收进库内。──
@@ -228,6 +241,7 @@ export function createStore(config: StoreConfig) {
     void pushLocalFrame(name.includes("/") ? name.slice(0, name.lastIndexOf("/")) : "");
   }
   function watchFolder(folder: string, cb: (s: FolderSnapshot) => void): () => void {
+    if (folder) assertValidFileName(folder, appId);   // 路径护栏（空=根，放行）：禁订阅保留根
     let set = folderWatchers.get(folder);
     if (!set) { set = new Set(); folderWatchers.set(folder, set); }
     set.add(cb);
@@ -335,9 +349,8 @@ export function createStore(config: StoreConfig) {
     };
   }
   const delSF = singleFlight("删除", (n: string) => { uploadReplay.remove(n); return del.del(n, { isOnline }); });   // 删=supersede：从补推队列摘掉（ADR-0018）   // 接 isOnline：离线删走 move-aside + base-etag 守卫的删队列（重连 drainDeleteQueue 重放）
-  // tryMove(from,to)：改身份/移动的**唯一结果式入口**（file() 无 rename，editor-session 也走这里）——**本操作含目标占用检查**（第一行 nameOccupied，占用则不动字节直接返错）。
+  // file.tryMove(to)：改身份/移动的**唯一结果式入口**（file() 无 rename，editor-session 也走这里）——**本操作含目标占用检查**（第一行 nameOccupied，占用则不动字节直接返错）。
   //   ok:false 时调用方 surface（UI 拒绝/重问）；不抛 CloudNameCollisionError（内部护栏是兜底，这里预检过即 skip）。
-  type TryMoveResult = { ok: true } | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
   const tryMoveSF = singleFlight("移动", async (from: string, to: string): Promise<TryMoveResult> => {
     const occ = await nameOccupied(to);
     if (occ) return { ok: false, reason: "name-collision", where: occ };
@@ -500,6 +513,7 @@ export function createStore(config: StoreConfig) {
         return pulled ? await seal.unsealForRead(name, pulled.blob) : null;   // range/streaming（按需取片）是 ⚠TODO 优化
       },
       pullIfClean(opts) { return fresh.refresh(name, { isOnline, ...opts }); },   // 事件驱动干净快进（clean→FF、dirty→no-op）；默认注入 store 的 isOnline（离线早退，不空跑 fetchMeta）
+      tryMove(to) { return tryMoveSF(name, to); },
       async delete() { await delSF(name); notifyFolderOf(name); },
       reupload() {
         return ui.busy("重新上传…", async () => {
@@ -523,12 +537,13 @@ export function createStore(config: StoreConfig) {
     };
   }
 
-  // opts.mode（选填，默认 "existing"）：见 makeRaw。"new"=新建画布（撞名不覆盖，抛 collision）。
-  //   （as-of 第 3 步计划：mode 将改**显式必填**——new=创建、existing=open——并审计所有 file() 调用点。本步先加选填 guard。）
-  function file(name: string, opts: { isZip: true; mode?: "new" | "existing" }): ZipFile;
-  function file(name: string, opts: { isZip: false; mode?: "new" | "existing" }): RawFile;
-  function file(name: string, opts: { isZip: boolean; mode?: "new" | "existing" }): RawFile | ZipFile;
-  function file(name: string, opts: { isZip: boolean; mode?: "new" | "existing" }): RawFile | ZipFile {
+  // opts.mode（**显式必填**）：new=新建画布（撞名不覆盖，抛 collision）；existing=普通 open/编辑（大多数）。
+  //   逼调用方想清「这是新建还是打开已有」——省略/误用是调用方责任（TS 编译期必填）。路径护栏：拒保留根（.trash/.backup/.<appId>）。
+  function file(name: string, opts: { isZip: true; mode: "new" | "existing" }): ZipFile;
+  function file(name: string, opts: { isZip: false; mode: "new" | "existing" }): RawFile;
+  function file(name: string, opts: { isZip: boolean; mode: "new" | "existing" }): RawFile | ZipFile;
+  function file(name: string, opts: { isZip: boolean; mode: "new" | "existing" }): RawFile | ZipFile {
+    assertValidFileName(name, appId);
     const raw = makeRaw(name, opts.mode);
     if (!opts.isZip) return raw;
     // getPeek：库内部解 zip 的 central directory，**按文件名**抓 entry 字节（格式盲、内容盲）。
@@ -579,63 +594,61 @@ export function createStore(config: StoreConfig) {
   }
   function registerScaffold(name: string): void { _scaffoldNames.add(name); void ensureScaffold(); }
 
-  function assertValidCollectionName(name: string): void {
-    // collection name = 合法文件名、不带后缀（`synced-user-preference`、`brush-rack`）；store 映射云端时自己追加 `.json`。
-    if (!name || /[\\/:*?"<>|]/.test(name) || name === "." || name === "..") throw new Error(`collection 名非法（须合法文件名、不带后缀、无斜杠）：${JSON.stringify(name)}`);
-  }
   // collection(name, opts)：synced（默认）走 collections 实例 + 云端 scaffold；{local:true} = local-only 变体
   //   （cloudless：只走 IDB 本地缓存、永不碰云、不 scaffold 云文件）——给设备本地设置/状态用。
   //   opts.getInitData：仅当这份 collection 的 json 不存在（新库）时调，填初始值（uat=1）。store 内容无关——
   //     app 域构造 [{id, value}]（如笔架把 builtin-brushes.json 映射进来）。
+  //   **单例**：collection 是 app schema 的全局单例命名空间（非用户随建名字）——同名第二次返**同一对象**
+  //     （否则两个实例各持内存信封、同步同一云文件 → 写互相看不见、冲突）。opts 以首次为准（后续调忽略 opts 差异）。
+  const _collections = new Map<string, Collection>();
   function collection(name: string, opts: { manual?: boolean; local?: boolean; getInitData?: CollectionConfig["getInitData"] } = {}): Collection {
     assertValidCollectionName(name);
+    const cached = _collections.get(name);
+    if (cached) return cached;
     const coll = createCollection({ cloud: collectionsCloud, name, local: collectionLocal, manual: opts.manual, cloudless: opts.local, getInitData: opts.getInitData });
     if (!opts.local) registerScaffold(name);   // synced：store 自动在云端 idempotent 建出 .${appId}/<name>.json；local-only 不上云、不 scaffold
+    _collections.set(name, coll);
     return coll;
   }
 
   return {
+    // ── file（含 tryMove/pullIfClean/save/open/delete/reupload…）+ collection（单例）。改身份走 file.tryMove(to)。──
     file,
     collection,
-    // ── watchFolder（网盘模型，2026-07-11）：订阅**一个**文件夹 → 立即本地帧、云端到了同一 cb 再闪。app 只知「这一夹更新了」。
-    //   替代「全树列举 + 客户端切一夹」的浪费（JRP 开夹慢的根因）。连接态 store 自持（config.signedIn/isOnline），**无 ctx**。──
-    watchFolder,
-    // **唯一列举面 = watchFolder（订阅当前夹）**。不暴露 listFolder/listAllItems/listAll/localKeys：
-    //   app 原则上不知道别的 folder 的内容（内存只放当前夹，免 cache-invalidation）。名字碰撞由 mutation 自查内化
-    //   （rename/saveAs 目标占用 → 抛 CloudNameCollisionError），不靠「先 list 目标夹」。真要全库 app 自己递归（成本显式）。
-    //   （cloud.listAll 仅库内 reconcile 的 user-instruction「校验完整性」用；identity=path、local/cloud 是 Item 的属性 syncState 不是两来源。）
-    // 文件夹操作（gallery folder-tree）：空文件夹增删。**离线也能建**（本地登记 + 回线 drainFolders 补建）。
-    ensureFolder: (path: string) => ensureFolderLocalFirst(path),
-    newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", async () => { await ensureFolderLocalFirst(path); notifyFolderOf(path); })),   // 子夹出现在父夹 → 重画父夹
-    deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", async () => {
-      const wasPending = readPending().includes(path);
-      clearPendingFolder(path);                                   // 离线建的（从没上云）→ 清登记即删
-      if (!isOnline()) { if (wasPending) { notifyFolderOf(path); return true; } throw new Error("离线：无法删除已上云的文件夹"); }
-      const r = await cloud.removeFolder(path);
-      notifyFolderOf(path);                                       // 子夹从父夹消失 → 重画父夹
-      return r;
-    })),
-    drainFolders,   // 回线补建离线创建的空夹（app 在 online / listGallery 时调，对齐 drainDeleteQueue）
-    // 后台 / 事件流（app 在 focus/visibility/online 调）+ 离线删重放 + cloud-gone 收敛（安全子集 #43）。
-    //   （原 store.refresh(name) 已收上 file：`store.file(name).pullIfClean(opts)`——per-file 新鲜度是 file 的事，不放全局。）
-    drainDeleteQueue: () => del.drainDeleteQueue(),
-    drainUploadQueue: () => uploadReplay.drain(),   // ADR-0018：回线/成功连接补推离线新上传（app 在 online/boot 调；ask 模式内部先问）
-    // **全库** cloud-gone 收敛（clean 孤儿→local-only，不删不 trash）。**仅用户显式指令**（将来隐藏的「校验完整性」入口），
-    //   **绝不自动/轮询/每次列举调**——全树 listAll 是重活。日常开夹的惰性收敛已在 watchFolder 内走 reconcileFolder（看到夹才收敛）。
-    reconcile: (opts?: { activeName?: string }) => reconcileMod.reconcile(opts),
-
-    // 回收站/备份箱列表：**本地↔云两端聚合**（mergeTrash）。只返元数据（trashKey/cloudItemId/原名/加密标志/conflictLive），绝不带 blob。
-    //   conflictLive（离线删被 edit-wins 撤销→本地 trash 有、云端还活着）：仅当有本地 trash 项且能拿到**权威** live 列表时才判（离线/partial→空集→不误报）。
-    listTrash: () => aggregateBox("trash"),
-    listBackup: () => aggregateBox("backup"),
-    restore: singleFlight("恢复", trashMod.restore),
-    purge: singleFlight("彻底删除", trashMod.purge),
-    emptyTrash: singleFlight("清空回收站", trashMod.emptyTrash),
-    emptyBackup: singleFlight("清空备份箱", trashMod.emptyBackup),
+    // ── files 命名空间：所有「不挂在单个 file 上」的文件域操作（列举订阅 / 文件夹增删 / 离线队列 / 回收站备份箱 / 名字占用 / 全库收敛）。──
+    //   **唯一列举面 = files.watchFolder（订阅当前夹）**：立即本地帧、云端到了同一 cb 再闪。不暴露 list/listAll/localKeys
+    //   （app 只放当前夹于内存；名字碰撞由 file.tryMove/mode:"new" 内化检测，不靠「先 list 目标夹」；全库 listAll 仅库内 reconcile 用）。
+    files: {
+      // 名字占用（**boolean**）：在线云端+本地都看，离线只看本地（靠 push conflictBehavior:fail 兜底）。app 新建/另存/改名前预检。
+      nameOccupied: (name: string): Promise<boolean> => nameOccupied(name).then((o) => o != null),
+      watchFolder,
+      // 文件夹增删（gallery folder-tree）：空文件夹增删。**离线也能建**（本地登记 + 回线 drainOfflineQueue 补建）。删除「必须证实为空」库内强制（removeFolder 权威判空）。
+      ensureFolder: (path: string) => ensureFolderLocalFirst(path),
+      newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", async () => { await ensureFolderLocalFirst(path); notifyFolderOf(path); })),   // 子夹出现在父夹 → 重画父夹
+      deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", async () => {
+        assertValidFileName(path, appId);                            // 路径护栏
+        const wasPending = readPending().includes(path);
+        clearPendingFolder(path);                                    // 离线建的（从没上云）→ 清登记即删
+        if (!isOnline()) { if (wasPending) { notifyFolderOf(path); return true; } throw new Error("离线：无法删除已上云的文件夹"); }
+        const r = await cloud.removeFolder(path);
+        notifyFolderOf(path);                                        // 子夹从父夹消失 → 重画父夹
+        return r;
+      })),
+      // 离线队列统一重放（app 在 focus/visibility/online/boot 调）：新文件夹补建 → 新上传补推 → 删文件重放（按序）。
+      drainOfflineQueue,
+      // 回收站/备份箱列表：**本地↔云两端聚合**（mergeTrash）。只返元数据（trashKey/cloudItemId/原名/加密标志/conflictLive），绝不带 blob。
+      //   conflictLive（离线删被 edit-wins 撤销→本地 trash 有、云端还活着）：仅当有本地 trash 项且能拿到**权威** live 列表时才判（离线/partial→空集→不误报）。
+      listTrash: () => aggregateBox("trash"),
+      listBackup: () => aggregateBox("backup"),
+      restoreTrash: singleFlight("恢复", trashMod.restore),
+      purgeTrash: singleFlight("彻底删除", trashMod.purge),
+      emptyTrash: singleFlight("清空回收站", trashMod.emptyTrash),
+      emptyBackup: singleFlight("清空备份箱", trashMod.emptyBackup),
+      // **全库** cloud-gone 收敛（去抖后 send trash）。**仅用户显式指令**（隐藏的「校验完整性」入口），绝不自动/轮询——全树 listAll 是重活。
+      //   日常开夹的惰性收敛已在 watchFolder 内走 reconcileFolder（看到夹才收敛，同一 converge SSOT）。
+      reconcileAll: (opts?: { activeName?: string }) => reconcileMod.reconcile(opts),
+    },
     saveAs: singleFlight("另存为", identity.saveAs),
-    // 移动/改身份（含占用检查，结果式）+ 名字占用统一检查（app 新建/另存/改名前预检全走它）。
-    tryMove: (from: string, to: string) => tryMoveSF(from, to),
-    nameOccupied: (name: string) => nameOccupied(name),
     // ── 加密导入辅助（文件还没进 store、无 name 可查时；对齐 WebPaint）──
     looksEncrypted: (blob: Blob | Uint8Array) => looksEncryptedContainer(blob),   // 是否加密容器（导入分流）
     verifyContainer: async (blob: Blob, pw: string): Promise<boolean> => { if (!pw) return false; try { await unpackContainer(blob, pw); return true; } catch { return false; } },

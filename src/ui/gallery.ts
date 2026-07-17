@@ -259,7 +259,7 @@ function makeGallery(host: GalleryHost) {
           // 也包进来——否则确认后到锁屏之间有明显空窗（用户：「点了没立刻锁，过一会才锁」）。
           const result = await host.busy<{ taken?: string; ok?: boolean; error?: unknown }>(t("gal.busy.rename", { name: item.name, to: trimmed }), async () => {
             try {
-              const r = await _store.tryMove(sessionFileName(item.name), sessionFileName(trimmed));   // 含占用检查（不动字节直接返错）；不抛碰撞。边界转全名。
+              const r = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).tryMove(sessionFileName(trimmed));   // 含占用检查（不动字节直接返错）；不抛碰撞。边界转全名。
               if (!r.ok) return { taken: whereLabel(r.where) };
               host.status(t("gal.st.renamed", { to: trimmed }));
               return { ok: true };
@@ -290,7 +290,7 @@ function makeGallery(host: GalleryHost) {
         // 占用检查内化在 store.tryMove（第一行 nameOccupied，占用则不动字节返 {ok:false}）——app 不 list 目标夹。
         await host.busy(t("gal.busy.move", { base, target: target || t("gal.root") }), async () => {
           try {
-            const r = await _store.tryMove(sessionFileName(item.name), sessionFileName(newName));   // 边界转全名
+            const r = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).tryMove(sessionFileName(newName));   // 边界转全名
             if (!r.ok) { host.status(t("gal.st.nameTakenTarget", { loc: whereLabel(r.where), base }), true); return; }
             if (item.name === host.activeName()) session.setName(newName);
             host.status(t("gal.st.moved", { target: target || t("gal.root") }));
@@ -312,14 +312,14 @@ function makeGallery(host: GalleryHost) {
           try {
             // 取源原始字节：有本地副本 → loadRaw（离线可用、不弹密码）；纯云端 → 拉云端原始容器。
             // 取源字节：file.open 本地有读本地、无则拉云（明文；⚠TODO 加密源拷贝会解密，待内容盲 raw-read 原语）。
-            const bytes: Blob | null = await _store.file(sessionFileName(item.name), { isZip: true }).open();
+            const bytes: Blob | null = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).open();
             if (!bytes) { host.status(t("gal.st.copyNoBytes"), true); return; }
             // 目标名：同文件夹下「<名> 副本」「<名> 副本2」…取首个本地⊕云端都不占用的。源在当前夹 → 用手上单夹快照，不 poll。
             const localNames = new Set((await listSessions()).map((s) => s.name));
             const cloudNames = new Set(data.files.filter((it) => it.cloud).map((it) => it.name));   // 当前夹云端名
             const newName = copyTargetName(item.name, (n: string) => localNames.has(n) || cloudNames.has(n));
             // 写新身份：本地存 + 云端 push（云端 best-effort，离线/失败标未推送，下次 Ctrl+S 续）。
-            await _store.file(sessionFileName(newName), { isZip: true }).save(bytes, { tryPush: cloudOn });   // 新身份：本地存 + best-effort 推。边界转全名。
+            await _store.file(sessionFileName(newName), { isZip: true, mode: "new" }).save(bytes, { tryPush: cloudOn });   // 新身份：本地存 + best-effort 推。边界转全名。
             host.status(t("gal.st.copied", { name: pathBasename(newName) }));
           } catch (e: unknown) { host.status(t("gal.st.copyFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         });
@@ -376,7 +376,7 @@ function makeGallery(host: GalleryHost) {
         if (pw == null) { host.status(t("gal.st.cancelled")); return; }
         setPassword(pw);
         try {
-          const res = await _store.file(sessionFileName(item.name), { isZip: true }).encrypt({ isOnline: () => host.signedIn() && host.online() });
+          const res = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).encrypt({ isOnline: () => host.signedIn() && host.online() });
           if (res.status === "already") { host.status(t("gal.st.alreadyEnc")); return; }
           if (!(await _afterSwap(item, res, t("gal.st.encryptedOk", { name: item.name })))) return;
         } catch (e: unknown) { host.status(t("gal.st.encFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
@@ -391,7 +391,7 @@ function makeGallery(host: GalleryHost) {
         // **解锁在 busy 之前**（flow.decrypt 自带 busy；密码框不能在 busy 里弹→死锁）
         if (!(await ensureUnlocked(item.name))) { host.status(t("gal.st.cancelledPw"), true); return; }
         try {
-          const res = await _store.file(sessionFileName(item.name), { isZip: true }).decrypt({ isOnline: () => host.signedIn() && host.online() });
+          const res = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).decrypt({ isOnline: () => host.signedIn() && host.online() });
           if (res.status === "not-encrypted") { host.status(t("gal.st.notEnc")); return; }
           await _afterSwap(item, res, t("gal.st.decrypted", { name: item.name }));
         } catch (e: unknown) { host.status(t("gal.st.decryptFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
@@ -415,7 +415,7 @@ function makeGallery(host: GalleryHost) {
         if (!(await host.confirm(t("gal.dlg.delTitle", { name: item.name }), detail))) return;
         await host.busy(t("gal.busy.del", { name: item.name }), async () => {
           try {
-            await _store.file(sessionFileName(item.name), { isZip: true }).delete();
+            await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).delete();
             if (isActive) await session.exit();
             host.status(t("gal.st.deleted", { name: item.name }));
           } catch (e: unknown) { host.status(t("gal.st.delFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
@@ -430,7 +430,7 @@ function makeGallery(host: GalleryHost) {
         // 走 store.flow.deleteFolder：库内强制锁屏 + 「必须空」兜底 + 不吞错（旧版 getItemByPath 没选 folder facet
         //   → item.folder 永远 undefined → 根本没删却照报「已删除」= N9 + 用户「删空夹不可用」）。
         try {
-          await _store.deleteFolder(ft.path);
+          await _store.files.deleteFolder(ft.path);
           host.status(t("gal.st.folderDeleted", { name: ft.name }));
         } catch (e: unknown) { host.status(t("gal.st.folderDelFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         await reload();
@@ -440,7 +440,7 @@ function makeGallery(host: GalleryHost) {
         openMenu.value = null;
         await host.busy(t("gal.busy.restore", { name: item.name }), async () => {
           try {
-            const res = await _store.restore({
+            const res = await _store.files.restoreTrash({
               trashKey: item.local ? item.local.trashKey : null,
               fromCloud: !!item.cloud,
               cloudItemId: item.cloud ? item.cloud.id : null,
@@ -459,7 +459,7 @@ function makeGallery(host: GalleryHost) {
         if (!(await host.confirm(t("gal.dlg.purgeTitle", { name: item.name }), t("gal.dlg.purgeMsg")))) return;
         await host.busy(t("gal.busy.purge", { name: item.name }), async () => {
           try {
-            await _store.purge({ trashKey: item.local ? item.local.trashKey : null, cloudItemId: item.cloud ? item.cloud.id : null });
+            await _store.files.purgeTrash({ trashKey: item.local ? item.local.trashKey : null, cloudItemId: item.cloud ? item.cloud.id : null });
             host.status(t("gal.st.purged", { name: item.name }));
           } catch (e: unknown) { host.status(t("gal.st.purgeFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         });
@@ -472,7 +472,7 @@ function makeGallery(host: GalleryHost) {
         if (scope === "cloud" && !(host.signedIn() && host.online())) { host.status(t("gal.st.emptyTrashCloudNeedLogin"), true); return; }
         if (!(await host.confirm(t("gal.dlg.emptyTrashTitle", { label }), t("gal.dlg.emptyTrashMsg", { label })))) return;
         await host.busy(t("gal.busy.emptyTrash", { label }), async () => {
-          const res = await _store.emptyTrash({ scope });
+          const res = await _store.files.emptyTrash({ scope });
           const cloudFails = ((res.failed || []) as Array<{ where?: string }>).filter((f) => f.where !== "local").length;
           if (scope !== "local" && cloudFails) host.status(t("gal.st.emptyTrashCloudFail", { n: cloudFails }), true);
           else if ((res.failed || []).length) host.status(t("gal.st.emptyTrashPartial"), true);

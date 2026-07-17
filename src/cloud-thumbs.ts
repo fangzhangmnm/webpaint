@@ -19,7 +19,7 @@ export const THUMB_PATH = "Thumbnails/thumbnail.png";
  * @param name 库的裸 session 名（item.name，无 .ora/.zip 后缀）
  */
 export async function fetchOraThumbnail(name: string): Promise<Blob> {
-  const blob = await store.file(sessionFileName(name), { isZip: true }).getPeek({ bytesLength: SUFFIX_BYTES, zipEntry: THUMB_PATH });
+  const blob = await store.file(sessionFileName(name), { isZip: true, mode: "existing" }).getPeek({ bytesLength: SUFFIX_BYTES, zipEntry: THUMB_PATH });
   if (!blob) throw new Error("getPeek 返回 null（云端不可达 / 无此文件 / 无此 entry / 无本地副本）");
   return blob;
 }

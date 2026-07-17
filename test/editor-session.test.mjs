@@ -15,12 +15,12 @@ function mockStore() {
     _openReturns: new Blob(["CLOUD-OR-LOCAL"]),
     file(name, opts) {
       return {
-        open: async () => { opened.push({ name, isZip: opts.isZip }); return this._openReturns; },
+        open: async () => { opened.push({ name, isZip: opts.isZip, mode: opts.mode }); return this._openReturns; },
         save: async (bytes, o) => { saves.push({ name, tryPush: o?.tryPush, hint: o?.hint, size: bytes.size }); },
+        tryMove: async (to) => { renames.push({ from: name, to }); return { ok: true }; },   // 改身份/移动唯一入口（挂 file 上）
         delete: async () => { deletes.push(name); },
       };
     },
-    tryMove: async (from, to) => { renames.push({ from, to }); return { ok: true }; },   // 改身份/移动唯一入口（StoreLike）
   };
 }
 

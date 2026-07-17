@@ -383,9 +383,9 @@ window.addEventListener("online", async () => {
   if (!isSignedIn()) await retrySilentSignIn();
   pullSettingsAndState();                                    // 回线：拉 4 库 settings/state 对齐
   updateCloudAuthUI();
-  if (isSignedIn()) _store.drainDeleteQueue().catch((e) => reportError(new Error("drainDeleteQueue: " + String(e)), "log"));   // N3：重连重放离线删队列
+  if (isSignedIn()) _store.files.drainOfflineQueue().catch((e) => reportError(new Error("drainDeleteQueue: " + String(e)), "log"));   // N3：重连重放离线删队列
   if (!els.galleryFull.classList.contains("hidden")) gallery.refresh();
-  if (isSignedIn() && session.name) _store.file(sessionFileName(session.name), { isZip: true }).pullIfClean().catch(() => {});   // 回线：事件驱动干净快进（freshness 进库；无 idle-lock）。边界转全名。
+  if (isSignedIn() && session.name) _store.file(sessionFileName(session.name), { isZip: true, mode: "existing" }).pullIfClean().catch(() => {});   // 回线：事件驱动干净快进（freshness 进库；无 idle-lock）。边界转全名。
 });
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
 
@@ -414,7 +414,7 @@ void prefsReady.then(() => {
 //   排在 fixup 之后（同一个 promise 的 then 按注册顺序跑）→ 开画时 desk/设置已就位。
 void prefsReady.then(() => bootRestoreSession(ctx)).catch((e) => reportError(new Error("[boot] restore failed: " + String(e)), "log"));
 // N3：启动时若在线+已登录，排空上次离线攒下的删除队列（fresh boot 不触发 online 事件，故此处补一刀）。
-if (navigator.onLine && isSignedIn()) _store.drainDeleteQueue().catch((e: unknown) => reportError(new Error("drainDeleteQueue: " + String(e)), "log"));
+if (navigator.onLine && isSignedIn()) _store.files.drainOfflineQueue().catch((e: unknown) => reportError(new Error("drainDeleteQueue: " + String(e)), "log"));
 
 // 笔架深模块装配：mount sheet/settings 组件 + 注册 panel + 绑 DOM 事件 + 订阅 collection.onChange。
 rack.init({
@@ -458,5 +458,5 @@ new PwaShell({
     editMode.applyPendingTransient();
     await session.save();   // saveNow 内含 blank/dirty 守卫（es.flushLocal 不脏 no-op）
   },
-  onForeground: () => { pullSettingsAndState(); if (isSignedIn() && session.name) _store.file(sessionFileName(session.name), { isZip: true }).pullIfClean().catch(() => {}); },   // 前台：拉 4 库 + 当前文件快进（边界转全名）
+  onForeground: () => { pullSettingsAndState(); if (isSignedIn() && session.name) _store.file(sessionFileName(session.name), { isZip: true, mode: "existing" }).pullIfClean().catch(() => {}); },   // 前台：拉 4 库 + 当前文件快进（边界转全名）
 }).init();

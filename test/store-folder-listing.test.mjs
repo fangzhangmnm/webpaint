@@ -184,7 +184,7 @@ describe("watchFolder · 网盘模型集成", () => {
     await raw(store, "A/foo").save(bytes("x"), { tryPush: false });
     const snaps = [];
     const unsub = await new Promise((resolve) => {
-      const u = store.watchFolder("A", (s) => { snaps.push(s); if (snaps.length === 1) resolve(u); });
+      const u = store.files.watchFolder("A", (s) => { snaps.push(s); if (snaps.length === 1) resolve(u); });
     });
     assert(snaps.length >= 1, "至少一帧");
     eq(snaps[0].path, "A", "snapshot 带订阅 path");
@@ -195,7 +195,7 @@ describe("watchFolder · 网盘模型集成", () => {
   it("本夹保存 → watcher 即时重画（notifyFolderOf）", async () => {
     const { store } = mkStore({ online: false });
     let last = null, calls = 0;
-    const unsub = store.watchFolder("A", (s) => { last = s; calls++; });
+    const unsub = store.files.watchFolder("A", (s) => { last = s; calls++; });
     await new Promise((r) => setTimeout(r, 5));   // 放过订阅两帧
     const before = calls;
     await raw(store, "A/bar").save(bytes("y"), { tryPush: false });
@@ -210,7 +210,7 @@ describe("watchFolder · 网盘模型集成", () => {
     await raw(store, "A/inA").save(bytes("a"), { tryPush: false });
     await raw(store, "B/inB").save(bytes("b"), { tryPush: false });
     let last = null;
-    const unsub = store.watchFolder("A", (s) => { last = s; });
+    const unsub = store.files.watchFolder("A", (s) => { last = s; });
     await new Promise((r) => setTimeout(r, 5));
     assert(last.items.some((i) => i.path === "A/inA"), "A 的文件在");
     assert(!last.items.some((i) => i.path === "B/inB"), "★B 的文件绝不出现在 A 的快照");
@@ -220,7 +220,7 @@ describe("watchFolder · 网盘模型集成", () => {
   it("unsubscribe 后不再收帧", async () => {
     const { store } = mkStore({ online: false });
     let calls = 0;
-    const unsub = store.watchFolder("A", () => { calls++; });
+    const unsub = store.files.watchFolder("A", () => { calls++; });
     await new Promise((r) => setTimeout(r, 5));
     unsub();
     const after = calls;
@@ -259,21 +259,21 @@ describe("rename/saveAs 目标占用护栏", () => {
     const { store, local } = mkStore();
     await raw(store, "A/keep").save(bytes("KEEP"), { tryPush: false });
     await raw(store, "A/src").save(bytes("SRC"), { tryPush: false });
-    const bad = await store.tryMove("A/src", "A/keep");
+    const bad = await store.file("A/src", { isZip: false, mode: "existing" }).tryMove("A/keep");
     assert(bad.ok === false && bad.reason === "name-collision" && bad.where === "local", "占用 → 结果式返错（不抛）");
     assert(local._items.has("A/src"), "不动字节：src 仍在");
     eq(dec(local._items.get("A/keep")), "KEEP", "★既有 keep 绝不被源覆盖（data-loss 防线）");
-    const ok = await store.tryMove("A/src", "B/dst");
+    const ok = await store.file("A/src", { isZip: false, mode: "existing" }).tryMove("B/dst");
     assert(ok.ok === true, "空 → ok");
     assert(!local._items.has("A/src") && local._items.has("B/dst"), "移动生效");
     eq(dec(local._items.get("B/dst")), "SRC", "字节随身份走");
   });
 
-  it("store.nameOccupied：local→'local'、无→null", async () => {
+  it("store.files.nameOccupied：占用→true、无→false（boolean）", async () => {
     const { store } = mkStore();
     await raw(store, "x").save(bytes("X"), { tryPush: false });
-    eq(await store.nameOccupied("x"), "local");
-    eq(await store.nameOccupied("nope"), null);
+    eq(await store.files.nameOccupied("x"), true);
+    eq(await store.files.nameOccupied("nope"), false);
   });
 });
 
@@ -302,7 +302,7 @@ describe("离线 move（删+建，tag 走法）", () => {
     assert(await provider.getItemByPath("old"), "云端有 old");
 
     setOnline(false);
-    const mv = await store.tryMove("old", "new");                            // 离线 move（唯一入口）
+    const mv = await store.file("old", { isZip: false, mode: "existing" }).tryMove("new");   // 离线 move（唯一入口）
     assert(mv.ok === true, "离线 move 成功");
 
     // 本地：new 有、old 进本地 .trash（move-aside，绝不 hardDelete）
@@ -311,14 +311,13 @@ describe("离线 move（删+建，tag 走法）", () => {
     eq(dec(local._items.get("new")), "OLD", "new 承载 old 的字节");
 
     // new 的 syncState = 本地未推（float：never-synced ∧ dirty）
-    let snap = null; const un = store.watchFolder("", (s) => { snap = s; }); await tick(); un();
+    let snap = null; const un = store.files.watchFolder("", (s) => { snap = s; }); await tick(); un();
     const ni = snap.items.find((i) => i.path === "new");
     assert(ni && (ni.syncState === "float" || ni.syncState === "unpushed"), `new 本地未推（实=${ni && ni.syncState}）`);
 
-    // 重连：两侧各自排队独立收敛（决策 1A）
+    // 重连：两侧各自排队独立收敛（决策 1A）。drainOfflineQueue 统一按序：新夹→新上传→删文件。
     setOnline(true);
-    await store.drainDeleteQueue();                                          // old 云删（base-etag 守卫）
-    await store.drainUploadQueue();                                          // new 补推
+    await store.files.drainOfflineQueue();
     assert(await provider.getItemByPath("new"), "云端有 new（补推落地）");
     assert(!(await provider.getItemByPath("old")), "云端 old 没了（进 .trash）");
   });
@@ -329,16 +328,15 @@ describe("离线 move（删+建，tag 走法）", () => {
     await raw(store, "old").save(bytes("OLD"), { tryPush: true });           // 在线 synced
 
     setOnline(false);
-    const mv = await store.tryMove("old", "new");                            // 离线：只查本地占用（无）→ 放行
+    const mv = await store.file("old", { isZip: false, mode: "existing" }).tryMove("new");   // 离线：只查本地占用（无）→ 放行
     assert(mv.ok === true, "离线 move 放行（云端占用离线看不到）");
     eq(dec(local._items.get("new")), "OLD", "本地 new = 我方字节");
 
     setOnline(true);
-    await store.drainUploadQueue();                                          // 推 new → conflictBehavior:fail → 撞名出队 surface
+    await store.files.drainOfflineQueue();                                   // 统一：推 new→conflictBehavior:fail 撞名出队 surface + old 云删独立照走
     eq(dec(local._items.get("new")), "OLD", "★撞名后 new 字节仍在本地（dirty 不丢）");
     const cloudNew = await provider.getItemByPath("new");
     assert(cloudNew && cloudNew.size !== bytes("OLD").length, "云端 new 仍是占位文件（我方没盲覆盖）");
-    await store.drainDeleteQueue();
     assert(!(await provider.getItemByPath("old")), "old 删除独立照走（决策1A）");
   });
 });
