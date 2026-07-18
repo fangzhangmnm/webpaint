@@ -96,9 +96,25 @@ export class BrushRackController {
   // ---- 预设存储：collection.init（本地 hydrate → 后台 reconcile + 新库 seed）----
   async load(): Promise<BrushRackData> {
     await this.d.collection.init();
-    this._syncFromCollection();   // init 的 hydrate 发生在订阅之前 → 这里手动灌一次首帧
+    this.subscribeToCollection();
+    this._syncFromCollection();   // collection.init 的 hydrate 发生在订阅之前 → 首帧手动灌一次
     this.applyToolState(this.d.editMode().current());
     return this.get();
+  }
+
+  /** collection → 笔架的**唯一**绑定。本地写和云端写在 store 层已一视同仁，这里也不分。
+   *  放在 load()（数据层）而非 init()（要 DOM）：绑定与 UI 无关，且这样才能 node 测。 */
+  subscribeToCollection() {
+    this.d.collection.onChange((ids: string[]) => {
+      if (this._bulkWrite) return;                 // 批量写（resetBuiltin）自己在收尾统一刷一次
+      // ★镜像**必须**先刷，且不受下面两个守卫管辖：
+      //   守卫管的是「要不要动 toolState」，镜像管的是「笔架内容是什么」。
+      //   v415 初版把这行漏了 → 编辑保存/新建/删除/导入/云端拉取全都不刷新笔架和引擎
+      //   （改了笔按保存却没效果）。正是本文件头部声称已结构性杜绝的那类 bug。
+      this._syncFromCollection();
+      const onlyMeta = ids.length > 0 && ids.every((id) => id === RACK_META_ID);
+      if (this._editingId == null && !onlyMeta) this.applyToolState(this.d.editMode().current());
+    });
   }
   // 事件驱动重拉云端（刷新按钮 / 前台）。
   reconcileWithRemote(): Promise<void> { return this.d.collection.reconcileWithRemote(); }
@@ -292,11 +308,8 @@ export class BrushRackController {
     //   ① _editingId != null（笔设置编辑中）→ 不碰 toolState，免打扰用户正在改的 draft。
     //      closeBrushSettings 里 setItem 先发生、_editingId 后清，靠的就是这条挡住重入自打扰。
     //   ② 只有 .meta 变（纯排序/归夹）→ 活动笔不可能受影响，跳过 applyToolState。
-    this.d.collection.onChange((ids: string[]) => {
-      if (this._bulkWrite) return;                       // 批量写（resetBuiltin）自己在收尾统一刷一次
-      const onlyMeta = ids.length > 0 && ids.every((id) => id === RACK_META_ID);
-      if (this._editingId == null && !onlyMeta) this.applyToolState(this.d.editMode().current());
-    });
+    // （collection.onChange 的订阅已挪进 load()——它是**数据层**绑定，不该埋在要 DOM 的 init 里，
+    //   而且埋在这里就没法 node 测。见 load()。）
 
     // 注册 exclusive panel（多 tool → 同 panel id 去重，第一个赢）
     const registered = new Set<string>();

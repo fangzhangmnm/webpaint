@@ -49,6 +49,7 @@ import "./color-model.test.mjs";
 import "./brush-size.test.mjs";
 import "./brush-settings-model.test.mjs";
 import "./brush-rack-view.test.mjs";
+import "./brush-rack-reactive.test.mjs";   // ★笔架↔collection 绑定回归（v415 漏接过）
 import "./pointer-route.test.mjs";
 import "./stroke-input-smooth.test.mjs";
 import "./stroke-smoother.test.mjs";

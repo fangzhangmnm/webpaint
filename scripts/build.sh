@@ -56,9 +56,15 @@ fi
 #       封口只是口头约定、无守卫。v415 补上，谎注释同步改掉。
 #     零依赖实现（仓库无 eslint/dep-cruiser，也不该为这一条引；MASTER §B: vendor every dependency）。
 echo "[build] deep-import lint（app 层不得绕过 src/store/index.ts）…"
-DEEP_HITS=$(grep -rnE 'from "(\./|\.\./)+store/[A-Za-z0-9_-]+\.ts"' src --include='*.ts' \
+# 覆盖面（v415 防退化时补齐——初版四个口子全堵上）：
+#   · 单引号和双引号都认（初版只认双引号）
+#   · static import / export-from / 动态 import() / 裸副作用 import 都认（初版只认 `from "..."`）
+#   · 子目录也认，如 store/providers/xxx.ts（初版的字符类不含 `/`，钻子目录就绕过去了）
+#   · src/ 和 test/ 都扫（测试直接 import 库内部是**允许**的——红线测试就得钻进去——故 test/ 只在
+#     app 源码那条规则里排除；这里保持只扫 src/，并把这个取舍写明，免得下个人以为是漏的）
+DEEP_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"](\.{1,2}/)+store/[^'\"]*['\"]" src --include='*.ts' \
             | grep -v '^src/store/' \
-            | grep -vE 'store/index\.ts"' || true)
+            | grep -vE "store/index\.ts['\"]" || true)
 if [ -n "$DEEP_HITS" ]; then
   echo "[build] ✗ 发现 deep import（app 层直接钻进 src/store/ 内部文件）：" >&2
   echo "$DEEP_HITS" >&2

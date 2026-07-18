@@ -21,8 +21,6 @@
 import { session } from "./session-state.ts";
 import { isUnlocked } from "./crypto-state.ts";
 import { checkpointAgeMinutes } from "./checkpoint-policy.ts";
-import {
-} from "./app-store.ts";
 import { els } from "./els.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
@@ -185,8 +183,8 @@ export function initTopbarMenu(ctx: AppContext) {
       if (trimmed === oldName) { setStatus(t("tm.nameSameAsCurrent"), true); candidate = trimmed; continue; }
       const occ = await sessionNameConflict(trimmed);   // 统一 store.files.nameOccupied（boolean：local + 在线 remote）
       if (occ) { setStatus(t("tm.nameExists", { name: trimmed }), true); candidate = trimmed; continue; }
-      // 极端 race（预检后到落盘间被占）→ store saveAs 护栏抛，下面 catch 兜底循环重问。
-      // 另存为 = 写新身份、旧的不动（store.flow.saveAs：本地存 + 云端 push，云端 best-effort）。
+      // 极端 race（预检后到落盘间被占）→ file(name,{mode:"new"}) 的护栏抛 CloudNameCollisionError，
+      //   下面 catch 兜底循环重问。另存为 = 写新身份、旧的不动（本地存 + 云端 best-effort 推）。
       try {
         await session.saveAs(trimmed);   // 当前内容写新身份 + 切新名（session 编排；tryPush best-effort）
         setStatus(t("tm.savedAsWithCloud", { name: trimmed }));

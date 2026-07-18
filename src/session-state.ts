@@ -195,7 +195,11 @@ function adoptModel(loaded: LoadedDoc) {
 /** 外部导入：装入一个解好的 doc，作为**新身份**。首存 mode:"new"（撞名抛，不静默覆盖）。 */
 function adoptAsNew(loaded: LoadedDoc, name: string) {
   _adoptCommon(loaded, name, { create: true });
-  void _captureCheckpoint(name, "gallery-open");   // 新身份的「打开态」就是此刻
+  // ⚠ 这里**刻意不封 checkpoint**：此刻这个新身份在磁盘上还没有任何字节
+  //   （es.adopted 只是标脏，首存要等 autosave / Ctrl+S / 退出），
+  //   _captureCheckpoint 取 at-rest 字节会拿到 null 而静默跳过 —— 那是个恒 no-op 的假动作。
+  //   导入件的快照在它下一次从图库被打开时封（那时字节已在）。要改成"导入即封"得先 await 一次保存，
+  //   属于行为变更，攒着 escalate，不在清理批里夹带。
 }
 /** revert 回滚：装入一个解好的 doc，身份**不变**（首存 mode:"existing"，就是要写回原文件）。
  *  **不封存 checkpoint** —— 否则刚回滚掉的状态立刻把快照覆盖了，只能 revert 一次。 */
