@@ -38,14 +38,15 @@ const ICON_OFF = iconHtml("cloud", { size: 18 });
 const ICON_ON = iconHtml("cloud-synced", { size: 18 });
 const ICON_DL = iconHtml("download", { size: 18 });
 const ICON_UL = iconHtml("upload", { size: 18 });
-// 「连接中」= 静态云 + 独立的弧叠在上面转。两层，不是一个图标。
-// 为什么不用库里的 cloud-busy：那个云弧一体，<use> 生成的是影子内容，外部 CSS 选择器
-// （styles.css 的 `.btp-connbtn[data-state="connecting"] .spin-arc`）进不去，没法只转里面那条弧；
-// 整体转又会连云一起转。拆成两层后 .spin-arc 挂在外层 <svg> 上（普通 light DOM），选择器就够得到了。
+// 「连接中」= 上游的双件资产叠放：cloud-busy-base（云轮廓中心挖了圆洞）+ cloud-busy-spinner（弧+箭头）。
+// 挖洞是关键——只抠出弧、底下压整只云的话，转起来会露出底云自己那道弧。
+// spinner 的圆心正在 (12,12)，所以 CSS rotate 原地转不甩。
+// .spin-arc 挂在外层 <svg>（普通 light DOM）上，styles.css 的
+// `.btp-connbtn[data-state="connecting"] .spin-arc` 才够得到——<use> 影子内容外部选择器进不去。
 const ICON_BUSY =
   `<span class="icon-stack">` +
-  iconHtml("cloud", { size: 18 }) +
-  iconHtml("spinner-arc", { size: 18, cls: "spin-arc" }) +
+  iconHtml("cloud-busy-base", { size: 18 }) +
+  iconHtml("cloud-busy-spinner", { size: 18, cls: "spin-arc" }) +
   `</span>`;
 
 // ─── 模块状态（单实例；panel 与连接随 app 生命周期常驻）───

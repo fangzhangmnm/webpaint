@@ -591,7 +591,7 @@ function makeGallery(host: GalleryHost) {
                 <button v-if="row.t.badge==='cloudOnly'" type="button" @click="openTile(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#download"/></svg><span>{{ L.pullLocal }}</span></button>
                 <button v-if="row.t.badge==='localOnly'" type="button" @click="push(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#cloud-upload"/></svg><span>{{ L.pushCloud }}</span></button>
                 <button v-if="row.t.badge==='dirtyBoth'" type="button" @click="push(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#cloud-upload"/></svg><span>{{ L.pushCloud }}</span></button>
-                <button v-if="row.item.local && row.item.cloud" type="button" @click="unload(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#unload-local"/></svg><span>{{ L.unloadLocal }}</span></button>
+                <button v-if="row.item.local && row.item.cloud" type="button" @click="unload(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#unload-local-cache"/></svg><span>{{ L.unloadLocal }}</span></button>
                 <button v-if="row.item.local && !row.t.encrypted" type="button" @click="encryptItem(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lock"/></svg><span>{{ L.encrypt }}</span></button>
                 <button v-if="row.item.local && row.t.encrypted" type="button" @click="decryptItem(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#unlock"/></svg><span>{{ L.decrypt }}</span></button>
                 <button type="button" class="danger" @click="del(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#archive-box"/></svg><span>{{ L.toTrash }}</span></button>
@@ -609,7 +609,7 @@ function makeGallery(host: GalleryHost) {
             </div>
             <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu('T:'+row.t.name+row.t.deletedAt)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
             <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!=='T:'+row.t.name+row.t.deletedAt }" @click.stop>
-              <button type="button" @click="trashRestore(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#restore"/></svg><span>{{ L.restore }}</span></button>
+              <button type="button" @click="trashRestore(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#restore-trash"/></svg><span>{{ L.restore }}</span></button>
               <button type="button" class="danger" @click="trashPurge(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span>{{ L.purge }}</span></button>
             </div>
           </div>

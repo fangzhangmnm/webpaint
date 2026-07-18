@@ -538,14 +538,14 @@ const LayerRow = defineComponent({
 
         <!-- 图层组 reparent：解组（仅组）/ 移入某组（dropdown，不挤占菜单空间）/ 移出组。编组 = 「+」里新建空组 -->
         <hr class="menu-sep" v-if="isGroup || moveTargets.length || canMoveOut" />
-        <button v-if="isGroup" class="menu-item menu-item-with-icon" type="button" @click="act('ungroup')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ungroup"/></svg><span class="menu-item-label">{{ L.ungroup }}</span></button>
+        <button v-if="isGroup" class="menu-item menu-item-with-icon" type="button" @click="act('ungroup')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#explode-folder"/></svg><span class="menu-item-label">{{ L.ungroup }}</span></button>
         <label v-if="moveTargets.length" class="menu-item layer-move-into menu-item-with-icon" @click.stop><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#collection"/></svg><span class="menu-item-label">{{ L.moveIntoGroup }}</span>
           <select class="layer-move-select" @change="onMoveSelect" @click.stop>
             <option value="" selected>{{ L.choose }}</option>
             <option v-for="g in moveTargets" :key="'mi'+g.id" :value="String(g.id)">{{ g.name }}</option>
           </select>
         </label>
-        <button v-if="canMoveOut" class="menu-item menu-item-with-icon" type="button" @click="act('moveOut')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-out-group"/></svg><span class="menu-item-label">{{ L.moveOut }}</span></button>
+        <button v-if="canMoveOut" class="menu-item menu-item-with-icon" type="button" @click="act('moveOut')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-out-folder"/></svg><span class="menu-item-label">{{ L.moveOut }}</span></button>
 
         <hr class="menu-sep" />
         <!-- v267 (user)：层属性 toggle 收进 ⋯ 菜单（点了不关菜单，可连续切） -->
@@ -555,7 +555,7 @@ const LayerRow = defineComponent({
 
         <hr class="menu-sep" />
         <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#merge-down"/></svg><span class="menu-item-label">{{ L.mergeDown }}</span></button>
-        <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!hasPx" @click="act('clear')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-pixels"/></svg><span class="menu-item-label">{{ L.clearContent }}</span></button>
+        <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!hasPx" @click="act('clear')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-document"/></svg><span class="menu-item-label">{{ L.clearContent }}</span></button>
         <button class="menu-item menu-danger menu-item-with-icon" type="button" :disabled="!canDel" @click="act('del')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span class="menu-item-label">{{ isGroup ? L.delGroup : L.del }}</span></button>
       </div>
     </div>
