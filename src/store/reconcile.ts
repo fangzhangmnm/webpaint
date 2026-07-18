@@ -98,6 +98,14 @@ export function createReconcile(cfg: ReconcileCfg) {
 
   // **单夹** cloud-gone 收敛——「看到 folder 才 reconcile」（watchFolder 的 remote pass 副作用），非静默、非全扫。
   //   authoritative = 这一夹 list() 没抛错（complete）。空夹合法（per-folder 下「空」≠网抖，与 reconcile 的空列表守卫不同）。
+  //
+  // ⚠ **已知且已接受的风险，别再来"修"**（human 2026-07-18 明确拍板承担）：
+  //   provider 若**撒谎**——把 404 当空夹返回，或分页没列全却报 complete:true——本夹「本地 clean、
+  //   云端消失」的文件会被标 candidate-gone、进 24h grace、跨 grace 后 send trash（可恢复，非硬删）。
+  //   为什么不修：站在这一层**分辨不出**「真的空」和「provider 谎报空」——两者返回的字节一模一样。
+  //   现有缓解已是能做的全部：complete 守卫 + 去抖 grace + 重现自愈 + 被编辑即取消 + 终点是 .trash 不是硬删。
+  //   → 有界、可恢复、单用户下极难触发。与其加测试假装防住了，不如等真复现（或查 Graph 已知 bug）。
+  //   （同理 removeFolder 的分页 TOCTOU：判空与删除之间的窗口无法在客户端消除，同样承担。）
   //   只判**该夹直属**本地文件（startsWith(prefix) ∧ 无更深 slash）——身份=path、不跨夹追踪：别夹的 clean 文件永不被本次降级。
   async function reconcileFolder(folder: string, opts: { activeFileName?: string } = {}): Promise<{ demoted: string[] }> {
     if (isOnline && !isOnline()) return { demoted: [] };
