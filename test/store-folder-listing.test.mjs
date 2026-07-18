@@ -401,3 +401,28 @@ describe("离线删文件夹（排队/隐藏/回线删/content-wins/eager-cancel
     assert(await provider.getItemByPath("X"), "eager-cancel：X 删除被撤销，X 还在");
   });
 });
+
+// ── 打开纯云端未缓存文件：OneDrive 不可达时必须能「跳到离线」──────────────────────────────
+describe("open 纯云端项 · offlineEscape 出口", () => {
+  it("provider 挂死 + 用户点跳到离线 → open 返回（不永久卡住），且绝不假装成功", async () => {
+    const provider = createMockProvider();
+    let onSkip;
+    const probe = new Promise((res) => { onSkip = () => res(undefined); });
+    // 云端有这个文件，但 download 永不 resolve（模拟「在线但 OneDrive 不可达」）
+    provider._seed("cloudonly", new TextEncoder().encode("REMOTE"));
+    provider.download = () => new Promise(() => {});
+    const store = createStore({
+      appId: "test", provider,
+      ui: {
+        busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {},
+        offlineEscape: () => ({ probe, settle: () => {} }),
+      },
+      validateAdopt: () => true, kv: memKv(), local: createMockLocal(),
+      isOnline: () => true, signedIn: () => true, skipMigration: true,
+    });
+    const opened = store.file("cloudonly", { isZip: false, mode: "existing" }).open();
+    onSkip();                                   // 用户点「跳到离线」
+    const bytes = await opened;                 // ★关键：这里必须能 resolve（旧代码永远挂着）
+    eq(bytes, null, "本地本来就没有 → 诚实返回 null，绝不假装打开成功");
+  });
+});

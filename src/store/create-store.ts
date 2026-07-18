@@ -540,7 +540,16 @@ export function createStore(config: StoreConfig) {
           return readLocal();
         }
         if (autoCacheOpenedFile) {                                          // 本地没有、持有模式 → 拉云落本地（无可显示，必须等）
-          await identity.acquire(name, { localName: name });
+          // ⚠ 这条分支（打开一个**纯云端、本地从没缓存过**的作品）以前没有任何出口：
+          //   「在线但 OneDrive 不可达」（DNS 挂 / 代理 / 企业网限流）时 provider 的 fetch 可能挂很久，
+          //   spinner 就一直转，用户连退回离线去读别的本地文件都做不到。
+          //   → 和上面 fresh.open 同款处理：给一个「跳到离线」的出口（无硬超时，用户即超时）。
+          //   跳出后 acquire 仍在后台跑（成功了就当一次迟到的缓存填充，无害）；本地此刻没有 → 返 null，
+          //   由 app 诚实地报「打不开」，**绝不假装成功**。
+          const esc = isOnline() ? ui.offlineEscape?.() : undefined;
+          const pulling = identity.acquire(name, { localName: name }).catch((e) => { ui.reportError(e); return null; });
+          try { await (esc ? Promise.race([pulling, esc.probe]) : pulling); }
+          finally { esc?.settle(); }
           return readLocal();
         }
         // 本地没有、过路模式（autoCacheOpenedFile:false，流式消费）→ 整份拉云、**不落本地**，直接返字节
