@@ -26,20 +26,27 @@ import { editorState } from "./editor-state.ts";
 import { appState } from "./app-state.ts";
 import { BTPClient, BTPError } from "../vendor/btp/v1/index.js";
 import { t } from "./i18n/index.ts";
+import { iconHtml } from "./ui/icon.ts";
 
 // 面板 show/position 随文档走 → editorState.blenderPanel（.ora 序列化）。
 // 远端 URL 是账号级设置（tailscale 稳定端点，跨设备同步）→ appState.blenderPanelUrl，不随文档走。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
-// ─── 内联 SVG 图标（currentColor → 由 data-state CSS 着色 / spin）───
+// ─── 图标：走内联 sprite（见 src/ui/icon.ts）───
 // 带显式 width/height：无尺寸的 inline svg 会撑成 300×150 默认值，必须自带固有尺寸（CSS 仅微调）。
-const svg = (inner: string) =>
-  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
-const ICON_OFF = svg('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>');                                   // 云
-const ICON_ON = svg('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/>'); // 云+勾
-const ICON_BUSY = svg('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><g class="spin-arc" style="transform-origin:12px 13px"><path d="M9 13a3 3 0 0 1 5.5-1.6"/></g>');
-const ICON_DL = svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/>'); // 下载
-const ICON_UL = svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>');    // 上传
+const ICON_OFF = iconHtml("cloud", { size: 18 });
+const ICON_ON = iconHtml("cloud-synced", { size: 18 });
+const ICON_DL = iconHtml("download", { size: 18 });
+const ICON_UL = iconHtml("upload", { size: 18 });
+// ⚠ ICON_BUSY 是本轮唯一保留内联的图标，不是漏改。
+// 它的旋转弧靠 styles.css 的外部选择器 `.btp-connbtn[data-state="connecting"] .spin-arc` 驱动，
+// 而 <use> 生成的是影子内容——外部 CSS 选择器匹配不到里面的 .spin-arc，动画会静默失效。
+// （共享库的 #cloud-busy 图形本身是对的、class 也在，纯粹是 CSS 够不到。）
+// 要收进 sprite 得先把「只在 connecting 时转」这个条件换掉，那是行为改动，不属于本轮机械替换。
+const ICON_BUSY =
+  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+  `<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>` +
+  `<g class="spin-arc" style="transform-origin:12px 13px"><path d="M9 13a3 3 0 0 1 5.5-1.6"/></g></svg>`;
 
 // ─── 模块状态（单实例；panel 与连接随 app 生命周期常驻）───
 let ctx: AppContext;

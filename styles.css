@@ -685,6 +685,9 @@ input[type=range] {
   cursor: pointer;
   text-align: left;
 }
+/* .menu-item 的 display:flex 会压过 hidden 属性的 UA display:none —— 带 hidden 的菜单项
+   （menuRevertToOpen / menuCheckUpdate）其实一直显示着。既存 bug，v419 加前缀图标时发现。 */
+.menu-item[hidden] { display: none; }
 .menu-item:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
 /* v132 (user：「··· 删除会有不可用的清空，要灰」) menu item disabled = 灰 + 禁交互 */
 .menu-item:disabled { opacity: 0.35; cursor: not-allowed; }
@@ -692,6 +695,16 @@ input[type=range] {
 /* v124 menu-item 带 SVG icon（目前只用于图库）：左对齐 + 间距 */
 .menu-item.menu-item-with-icon { justify-content: flex-start; gap: 10px; }
 .menu-item.menu-item-with-icon svg { width: 18px; height: 18px; flex-shrink: 0; }
+/* v419 前缀图标铺开到所有菜单项。动机是 localization：菜单项文字换成英文会变长，
+   图标是语言无关的锚点——也给不认字的小孩和找不到语言设置的人一个能认的入口。
+   with-icon 把 space-between 换成了 flex-start+gap，所以原先靠 space-between 顶到右边的
+   状态字 / 副标题 / 语言下拉，要显式 margin-left:auto 才回得去。 */
+.menu-item.menu-item-with-icon .menu-item-state,
+.menu-item.menu-item-with-icon .menu-item-sub,
+.menu-item.menu-item-with-icon .menu-lang-select { margin-left: auto; }
+/* 回收站菜单项不是 .menu-item（另一套 class），单独给一份同样的排版 */
+.gallery-trash-menu-item.menu-item-with-icon { display: flex; align-items: center; gap: 10px; }
+.gallery-trash-menu-item.menu-item-with-icon svg { width: 18px; height: 18px; flex-shrink: 0; }
 
 /* 语言：⋯ 菜单里的下拉框行（label + select） */
 .menu-lang-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; }

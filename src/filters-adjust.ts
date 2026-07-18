@@ -16,6 +16,7 @@ import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";
 import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式 import）
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import type { AppContext } from "./app-context.ts";
+import { iconHtml } from "./ui/icon.ts";
 
 // Filter 对象（filters.js 未类型化 → 描述本面板用到的接口）。
 interface FilterLike {
@@ -196,15 +197,8 @@ function _closeFilterPanel(applied: boolean) {
 //             左侧 prefix = 笔刷 SVG（跟工具栏一致）
 //   - 艺术滤镜 = category="artist"，1 个 picker item（点开 panel 里有 dropdown 切）
 //   - 组之间 hr 分隔，不写类别 label
-const ADJUST_PREFIX_SVG = `<svg class="menu-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
-  <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"/>
-  <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/>
-  <circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"/>
-</svg>`;
-const BRUSH_PREFIX_SVG = `<svg class="menu-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <path d="M14 4l6 6-9 9H5v-6l9-9z"/><path d="M13 5l6 6"/>
-</svg>`;
+const ADJUST_PREFIX_SVG = iconHtml("sliders", { cls: "menu-item-icon" });
+const BRUSH_PREFIX_SVG = iconHtml("pencil", { cls: "menu-item-icon" });
 function _renderFilterMenu() {
   const container = document.getElementById("adjustFilterList");
   if (!container) return;

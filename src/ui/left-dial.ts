@@ -11,6 +11,7 @@
 import { createApp, defineComponent, reactive, ref, computed, watch } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { sliderPosToSize, sizeToSliderPos, sliderMaxPos } from "./brush-size.ts";
 import { t } from "../i18n/index.ts";
+import { iconHtml } from "./icon.ts";
 
 const POPUP_FRAME = 64;
 const LONGPRESS_MS = 600;
@@ -105,9 +106,7 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
       <input ref="sizeSlider" id="sizeSlider" class="left-sidebar-slider" type="range" min="0" :max="sizePosMax" step="1"
         :value="sizePos" :disabled="!canDraw" orient="vertical" :aria-label="L.size" @input="onSizeInput" />
       <span class="left-sidebar-label" :title="L.size" aria-hidden="true">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="12 3, 4 8, 12 13"/>
-        </svg>
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><use href="#brush-width"/></svg>
       </span>
       <div class="size-popup" :class="{ hidden: !popup.visible }" :style="{ left: popup.left + 'px', top: popup.top + 'px' }" aria-hidden="true">
         <div class="size-popup-circle-frame">
@@ -118,14 +117,7 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
       <input ref="opaSlider" id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1"
         :value="opaPct" :disabled="!canDraw" orient="vertical" :aria-label="L.opacity" @input="onOpaInput" />
       <span class="left-sidebar-label" :title="L.opacity" aria-hidden="true">
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <defs><clipPath id="opaCircleClip"><circle cx="8" cy="8" r="6.5"/></clipPath></defs>
-          <g clip-path="url(#opaCircleClip)">
-            <rect x="0" y="0" width="8" height="8" fill="currentColor"/>
-            <rect x="8" y="8" width="8" height="8" fill="currentColor"/>
-          </g>
-          <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/>
-        </svg>
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><use href="#transparency"/></svg>
       </span>
     `,
   });

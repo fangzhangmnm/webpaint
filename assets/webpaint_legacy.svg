@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+<!-- WebPaint 本地图标补丁 sprite —— 共享库（20260708 SVG Icons）里还没有的图标。
+
+     这个文件是【给美工 agent 的候选清单】，不是永久分叉。
+     每个 symbol 的 id 都用「最终语义名」命名，所以图标一旦进库：
+       重跑 extract-icons.py → tools/inline-sprites.py 检测到 assets/icons.svg 里已有同名 symbol
+       → 自动丢弃这里的副本 → 宿主的 <use href="#name"> 一个字都不用改。
+     即：把图标画进库，就是删掉这里一条的过程，自愈。
+
+     两类：
+       data-cat="legacy"  = WebPaint 已有的图形，从内联 svg 搬过来的，图形本身可用，只是库里没有。
+       data-cat="stopgap" = 库里没有图形，先用【单个汉字】顶住位置。
+
+     ⚠ stopgap 的局限（写给美工 agent 看）：
+       单汉字只解决「占地」问题——一个汉字 ≈ 一个图标宽，换成英文长词会把窄 UI 条撑爆。
+       它【不解决 pictogram 问题】：不认字的小孩看不懂「裁」「棋」「率」。
+       而 WebPaint 加图标的初衷正是给不认字的小孩和找不到语言设置的人用。
+       所以这 13 个单字全部是过渡态，每一个都需要真图形替换。优先级看下面 data-note。
+
+     样式契约沿用库的：viewBox 0 0 24 24 / fill=none stroke=currentColor stroke-width=1.7 / round caps。
+     单字 symbol 例外：走 <text fill=currentColor stroke=none>（与库里 fx 图标同款做法）。
+     字形依赖设备字体，中日文渲染会有差异；cairosvg 本地渲 CJK 出豆腐块属正常，别据此判断对错。
+-->
+
+  <!-- ═══ legacy：WebPaint 现有图形，搬运入库候选 ═══ -->
+
+  <!-- resize-grip — 参考小窗右下角拖拽缩放抓手。原 index.html viewBox 0 0 16 16，已按 ×1.5 归一到 24。
+       库里曾有 resize-handle，因描边下渲染差被 sunset；这个是 WebPaint 一直在用的两道斜线版本。 -->
+  <symbol id="resize-grip" data-cat="legacy" data-note="缩放抓手:右下角两道对角线(WebPaint 参考小窗在用;库里 resize-handle 已 sunset)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="21" x2="21" y2="6"/><line x1="13.5" y1="21" x2="21" y2="13.5"/></symbol>
+
+  <!-- cloud-pending — 云端文件消失、本地副本还干净，处在防抖宽限期内（还没判定为 cloud-gone）。
+       库里有 cloud-unavailable（云+划叉，已确认消失），这个是它的「还在等」前置态，两者必须能区分。 -->
+  <symbol id="cloud-pending" data-cat="legacy" data-note="云+时钟:云端消失但在宽限期内待判定(区别于 cloud-unavailable 的已确认划叉)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><circle cx="12" cy="13" r="3.2"/><path d="M12 11.4v1.6l1.1.9"/></symbol>
+
+  <!-- ═══ stopgap：单汉字顶位，全部待真图形替换 ═══ -->
+
+  <!-- gallery — 图库入口（主菜单第一项）。真图形建议：网格状缩略图墙 / 相框堆叠。 -->
+  <symbol id="gallery" data-cat="stopgap" data-note="单字顶位「库」=图库入口 · 待真图形替换(建议:缩略图网格墙)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">库</text></symbol>
+
+  <!-- image — 「从图片新建」。真图形建议：山+太阳的经典照片图元。库里 image-processing 分类下没有裸的 image。 -->
+  <symbol id="image" data-cat="stopgap" data-note="单字顶位「图」=从图片新建 · 待真图形替换(建议:山+太阳照片图元)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">图</text></symbol>
+
+  <!-- clipboard — 「从剪切板新建」。真图形建议：夹板+纸。 -->
+  <symbol id="clipboard" data-cat="stopgap" data-note="单字顶位「贴」=从剪切板新建 · 待真图形替换(建议:夹板+纸)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">贴</text></symbol>
+
+  <!-- rename — 「重命名当前画作」。库里有 tag（斜标牌+孔），语义接近但那是「标签」不是「改名」；
+       真图形建议：光标插入符 + 文字基线，或 tag+铅笔。 -->
+  <symbol id="rename" data-cat="stopgap" data-note="单字顶位「名」=重命名 · 待真图形替换(建议:tag+铅笔 或 文字光标)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">名</text></symbol>
+
+  <!-- project — 「导出项目」(.ora，含图层)。要和「导出图片」(export，扁平 PNG) 视觉可区分：
+       前者是整包带图层，后者是压平一张。真图形建议：export 箭头 + 图层堆叠。 -->
+  <symbol id="project" data-cat="stopgap" data-note="单字顶位「项」=导出项目(.ora 含图层) · 待真图形替换(建议:导出箭头+图层堆叠,须与 export 可区分)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">项</text></symbol>
+
+  <!-- crop — 裁切（有选区→裁到选区；无选区→自由裁切）。真图形建议：Photoshop 式两个 L 形直角交叠。
+       这是最该优先画的一个：裁切是通用图形语言，全世界的绘图软件都用同一个图元。 -->
+  <symbol id="crop" data-cat="stopgap" data-note="单字顶位「裁」=裁切 · 【优先】待真图形替换(建议:两个 L 形直角交叠,通用图元)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">裁</text></symbol>
+
+  <!-- checkerboard — 「透明背景显示棋盘」开关。真图形建议：2×2 或 3×3 交替填充的棋盘格方块。
+       这个也很好画且完全语言无关，建议优先。 -->
+  <symbol id="checkerboard" data-cat="stopgap" data-note="单字顶位「棋」=透明背景棋盘开关 · 【优先】待真图形替换(建议:交替填充棋盘格,语言无关易画)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">棋</text></symbol>
+
+  <!-- pixel-grid — 「像素栅格（放大时）」开关。真图形建议：细网格 + 一个高亮像素方块。
+       注意要和 checkerboard 视觉区分：那个是透明底提示，这个是放大时的对齐辅助线。 -->
+  <symbol id="pixel-grid" data-cat="stopgap" data-note="单字顶位「格」=像素栅格开关 · 待真图形替换(建议:网格+高亮像素,须与 checkerboard 可区分)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">格</text></symbol>
+
+  <!-- keyboard — 「快捷键」帮助表。真图形建议：键盘外框+按键点阵。语言无关，好画。 -->
+  <symbol id="keyboard" data-cat="stopgap" data-note="单字顶位「键」=快捷键表 · 待真图形替换(建议:键盘外框+按键点阵,语言无关)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">键</text></symbol>
+
+  <!-- brush-rack — 「重置笔架出厂」（危险操作，在调试段）。真图形建议：笔架/笔筒 + 回环箭头。
+       注意库里 brush-width 是「笔刷宽度」的波浪线，不是这个。 -->
+  <symbol id="brush-rack" data-cat="stopgap" data-note="单字顶位「架」=重置笔架出厂 · 待真图形替换(建议:笔筒+回环箭头)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">架</text></symbol>
+
+  <!-- fps — 「FPS 计」开关（调试段）。真图形建议：仪表盘指针 / 折线图跳动。 -->
+  <symbol id="fps" data-cat="stopgap" data-note="单字顶位「率」=FPS 计开关 · 待真图形替换(建议:仪表盘指针 或 跳动折线)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">率</text></symbol>
+
+  <!-- sign-out — 「退出登录」（OneDrive 账号菜单）。真图形建议：门框+向外箭头（通用 logout 图元）。 -->
+  <symbol id="sign-out" data-cat="stopgap" data-note="单字顶位「出」=退出登录 · 待真图形替换(建议:门框+向外箭头,通用 logout 图元)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">出</text></symbol>
+
+  <!-- blender — 「Blender sync…」（跟 Blender 的贴图往返通道）。
+       真图形建议：Blender 那个经典的橙色环形靶标轮廓（单色描边版），或双向同步箭头。 -->
+  <symbol id="blender" data-cat="stopgap" data-note="单字顶位「联」=Blender sync · 待真图形替换(建议:Blender 环形靶标轮廓 或 双向同步箭头)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">联</text></symbol>
+
+</svg>

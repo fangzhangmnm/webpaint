@@ -34,21 +34,22 @@ import type { GItem, TrashGItem, CloudFileMeta } from "./gallery-view-model.ts";
 import { session } from "../session-state.ts";
 import { appState } from "../app-state.ts";
 import { t } from "../i18n/index.ts";
+import { iconHtml } from "./icon.ts";
 
-// ---- 图标（从 app.js 搬来，徽章 4 态 + 文件夹/云）----
-const SVG = (inner: string, sw = "2") =>
-  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+// ---- 图标（徽章 4 态 + 文件夹/云）：全部指向内联 sprite，见 src/ui/icon.ts ----
+// 尺寸由 CSS 给（.gallery-tile-state-icon svg 12px / .enc 14px / 缩略图占位另有规则）。
 const ICON = {
-  localOnly: SVG('<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
-  cloudOnly: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>'),
-  syncedBoth: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 14 11 16 15 12"/>'),
-  dirtyBoth: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><line x1="12" y1="17" x2="12" y2="11"/><polyline points="9 14 12 11 15 14"/>'),
-  folder: SVG('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', "1.6"),
-  cloudBig: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>', "1.6"),
-  ghost: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><line x1="3" y1="3" x2="21" y2="21"/>'),
-  // pendingGone：云端消失、本地干净待处理（防抖 grace 内）——云 + 时钟指针（宽限期），区别于 ghost 的划叉。
-  pendingGone: SVG('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><circle cx="12" cy="13" r="3.2"/><path d="M12 11.4v1.6l1.1.9"/>', "1.6"),
-  lock: SVG('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>', "1.6"),
+  localOnly: iconHtml("database"),
+  cloudOnly: iconHtml("cloud"),
+  syncedBoth: iconHtml("cloud-synced"),
+  dirtyBoth: iconHtml("cloud-upload"),
+  folder: iconHtml("folder"),
+  cloudBig: iconHtml("cloud"),
+  // ghost：云端已确认消失（划叉）。pendingGone：云端消失但还在防抖 grace 内、尚未判定（云+时钟）。
+  // 两者必须视觉可分——别合并。pendingGone 共享库还没有，暂用 assets/webpaint_legacy.svg 的本地图形。
+  ghost: iconHtml("cloud-unavailable"),
+  pendingGone: iconHtml("cloud-pending"),
+  lock: iconHtml("lock"),
 };
 
 // 锁态 → 反应式镜像（ThumbCell 解锁后原地重试解密，不靠重建组件）

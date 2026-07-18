@@ -31,6 +31,7 @@ import { editorState } from "./editor-state.ts";
 import { raiseWindow } from "./surfaces.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
 import type { AppContext } from "./app-context.ts";
+import { iconHtml } from "./ui/icon.ts";
 
 // doc 图层活对象（树节点 = 叶 Layer | 组 LayerGroup）。引擎类型化后直接对齐其 Node 联合，
 // 不再维护发散本地形状（doc.ts 的 Node 未 export → 此处用导出的两个 class 重建联合）。
@@ -82,11 +83,11 @@ export const GROUP_MODE_LABEL: Record<string, string> = {
 function modeInitial(m: string) { return LAYER_MODE_INITIAL[m] || "?"; }
 
 // 眼睛 icon SVG（v123 16→22）
-const EYE_OPEN = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
-const EYE_OFF = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a18.94 18.94 0 0 1 4.06-5.06"/><path d="M1 1l22 22"/></svg>';
+const EYE_OPEN = iconHtml("visibility-show", { size: 22 });
+const EYE_OFF = iconHtml("visibility-hide", { size: 22 });
 // 组折叠图标 SVG（去三角，点文件夹切折叠）：展开 = 打开的文件夹；折叠 = 合上的文件夹。
-const FOLDER_OPEN = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1H7l-3 7a1 1 0 0 1-1-1V7z"/><path d="M4 17l2.5-6.5h15L19 17a1 1 0 0 1-1 .9H5a1 1 0 0 1-1-.9z"/></svg>';
-const FOLDER_CLOSED = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
+const FOLDER_OPEN = iconHtml("folder-open", { size: 20 });
+const FOLDER_CLOSED = iconHtml("folder", { size: 20 });
 
 // ---- 面板-UI-本地反应式状态（折叠 / 内联重命名 / ⋯菜单）----
 // 注：doc/图层结构变更的版本信号已外迁到 signals.ts 的 docVersion（跨切面共享）。
@@ -519,7 +520,7 @@ const LayerRow = defineComponent({
 
       <span v-if="layer.clippingMask" class="layer-clip-chip" :title="L.clippedTip">↘</span>
       <span v-if="!isGroup && layer.lockAlpha" class="layer-lock-chip" :title="L.lockAlphaTip">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><use href="#lock"/></svg>
       </span>
       <span v-if="isRef" class="layer-ref-chip" :title="L.refTip">{{ L.refChip }}</span>
 

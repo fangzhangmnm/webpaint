@@ -8,6 +8,7 @@ import { els } from "./els.ts";
 import { isSignedIn } from "./app-store.ts";
 import { session } from "./session-state.ts";
 import { t } from "./i18n/index.ts";
+import { iconHtml } from "./ui/icon.ts";
 
 // 文档版本警告：在 setStatus 之上再呈现一个持久 banner（用 doc.body.dataset 给 CSS 染色）
 export function updateNewerBanner() {
@@ -31,8 +32,8 @@ export function updateNewerBanner() {
 //   点任意状态都触发 saveAndPush。
 //   （saving / cloud-dirty / cloud-busy 三态已随 cutover 消失——computeSaveState 不再产出它们；
 //    对应的 ICON_UPLOAD / ICON_CLOUD_BUSY 图标和 styles.css 的 [data-state] 选择器一并作废。）
-export const ICON_DISK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
-export const ICON_CLOUD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
+export const ICON_DISK = iconHtml("floppy-disk");
+export const ICON_CLOUD_CHECK = iconHtml("cloud-synced");
 
 function computeSaveState() {
   // cutover：busy/cloud 状态不再暴露（sync 脏进 listAllItems，非徽章热路径）。内存脏=session.dirty，其余按登录态。

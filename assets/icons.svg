@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+<!-- 56 icons extracted from the family icon library (../../../../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead. -->
+  <!-- tool -->
+  <!-- eraser — tool.eraser -->
+  <symbol id="eraser" data-cat="tool" data-note="tool.eraser" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 21 l-4.3 -4.3 c-1 -1 -1 -2.5 0 -3.4 l9.6 -9.6 c1 -1 2.5 -1 3.4 0 l5.6 5.6 c1 1 1 2.5 0 3.4 L13 21"/> <path d="M22 21 H7"/> <path d="M5 11 l9 9"/></symbol>
+  <!-- eyedropper — tool.picker -->
+  <symbol id="eyedropper" data-cat="tool" data-note="tool.picker" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21 l1 -1 h2.5 L14 12.5"/> <path d="M4 20 v-2.5 L11.5 10"/> <path d="M14.2 6.9 L17.4 3.7 a2.4 2.4 0 0 1 3 3 L17.1 9.6 a1.3 1.3 0 0 1 0 1.9 a1.3 1.3 0 0 1 -1.9 0 L12.5 9.6 a1.3 1.3 0 0 1 0 -1.9 a1.3 1.3 0 0 1 1.9 0 Z"/></symbol>
+  <!-- hand — 手/抓取:食指左线裁到与拇指指尖弧交点 y=11.44,不再穿出 -->
+  <symbol id="hand" data-cat="tool" data-note="手/抓取:食指左线裁到与拇指指尖弧交点 y=11.44,不再穿出" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v5.44"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-1-5.6-2.8l-3.4-5.4a2 2 0 0 1 3.4-2L8 14"/></symbol>
+  <!-- lasso — tool.lasso -->
+  <symbol id="lasso" data-cat="tool" data-note="tool.lasso" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7c0-2 4-4 8-4s8 2 8 4-4 4-8 4-8-2-8-4z"></path> <path d="M8 11c-1 4 1 8 5 9"></path></symbol>
+  <!-- magic-wand — la.magic -->
+  <symbol id="magic-wand" data-cat="tool" data-note="la.magic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 魔棒 stick --> <path d="M4 20l11-11"/> <!-- 星星 tip --> <path d="M17 4l.8 1.7L19.5 6.5l-1.7.8L17 9l-.8-1.7L14.5 6.5l1.7-.8z"/> <!-- 闪光 --> <path d="M20 11h1M14 4l-.5-.8M21 16l-.7.3"/></symbol>
+  <!-- move — 四向移动箭头 (move tool, for SketchUp-clone) -->
+  <symbol id="move" data-cat="tool" data-note="四向移动箭头 (move tool, for SketchUp-clone)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/><path d="M9.5 5.5 12 3l2.5 2.5"/><path d="M9.5 18.5 12 21l2.5-2.5"/><path d="M5.5 9.5 3 12l2.5 2.5"/><path d="M18.5 9.5 21 12l-2.5 2.5"/></symbol>
+  <!-- pencil — 铅笔 Bootstrap Icons MIT -->
+  <symbol id="pencil" data-cat="tool" data-note="铅笔 Bootstrap Icons MIT" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g transform="scale(1.5)" fill="currentColor" stroke="none"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/></g></symbol>
+  <!-- image-processing -->
+  <!-- brush-width — 笔刷宽度:平行两条波浪(标准1.7/粗3.4) -->
+  <symbol id="brush-width" data-cat="image-processing" data-note="笔刷宽度:平行两条波浪(标准1.7/粗3.4)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9 Q7.5 6 12 9 T21 9" stroke-width="1.7"/><path d="M3 15.5 Q7.5 12.5 12 15.5 T21 15.5" stroke-width="3.4"/></symbol>
+  <!-- color-palette — 调色板:BI palette 身体(MIT)+四点非均匀,下方留空 -->
+  <symbol id="color-palette" data-cat="image-processing" data-note="调色板:BI palette 身体(MIT)+四点非均匀,下方留空" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g transform="scale(1.5)" fill="currentColor" stroke="none"><path d="M16 8c0 3.15-1.866 2.585-3.567 2.07C11.42 9.763 10.465 9.473 10 10c-.603.683-.475 1.819-.351 2.92C9.826 14.495 9.996 16 8 16a8 8 0 1 1 8-8m-8 7c.611 0 .654-.171.655-.176.078-.146.124-.464.07-1.119-.014-.168-.037-.37-.061-.591-.052-.464-.112-1.005-.118-1.462-.01-.707.083-1.61.704-2.314.369-.417.845-.578 1.272-.618.404-.038.812.026 1.16.104.343.077.702.186 1.025.284l.028.008c.346.105.658.199.953.266.653.148.904.083.991.024C14.717 9.38 15 9.161 15 8a7 7 0 1 0-7 7"/></g><circle cx="5.72" cy="10.32" r="1.9" fill="currentColor" stroke="none"/><circle cx="9.25" cy="6.11" r="2.6" fill="currentColor" stroke="none"/><circle cx="14.22" cy="5.89" r="2.15" fill="currentColor" stroke="none"/><circle cx="17.63" cy="8.75" r="2.35" fill="currentColor" stroke="none"/></symbol>
+  <!-- fx — 滤镜/调整 fx (WebPaint topAdjustBtn) -->
+  <symbol id="fx" data-cat="image-processing" data-note="滤镜/调整 fx (WebPaint topAdjustBtn)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><text x="5" y="19" font-family="Georgia,serif" font-size="22" font-style="italic" font-weight="500" fill="currentColor" stroke="none">f</text><text x="12" y="19" font-family="Georgia,serif" font-size="13" font-style="italic" font-weight="500" fill="currentColor" stroke="none">x</text></symbol>
+  <!-- sliders — 不写类别 -->
+  <symbol id="sliders" data-cat="image-processing" data-note="不写类别" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/> <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none"/> <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/> <circle cx="7" cy="18" r="2" fill="currentColor" stroke="none"/></symbol>
+  <!-- transparency — L.opacity -->
+  <symbol id="transparency" data-cat="image-processing" data-note="L.opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g transform="scale(1.5)"><defs><clipPath id="opaCircleClip"><circle cx="8" cy="8" r="6.5"/></clipPath></defs> <g clip-path="url(#opaCircleClip)"> <rect x="0" y="0" width="8" height="8" fill="currentColor"/> <rect x="8" y="8" width="8" height="8" fill="currentColor"/> </g> <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/></g></symbol>
+  <!-- transform -->
+  <!-- flip-horizontal — 水平翻转 -->
+  <symbol id="flip-horizontal" data-cat="transform" data-note="水平翻转" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 V20.5" stroke-dasharray="2 2"/><path d="M9.3 7 L4 12 L9.3 17 Z"/><path d="M14.7 7 L20 12 L14.7 17 Z" fill="currentColor" stroke="none"/></symbol>
+  <!-- rotate-ccw — 逆时针旋转+轴 (WebPaint 在用) -->
+  <symbol id="rotate-ccw" data-cat="transform" data-note="逆时针旋转+轴 (WebPaint 在用)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(24,0) scale(-1,1)"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v5h-5"/></g><circle cx="12" cy="12" r="2.6"/></symbol>
+  <!-- scale-uniform — 等比缩放(正方框+小方虚线) -->
+  <symbol id="scale-uniform" data-cat="transform" data-note="等比缩放(正方框+小方虚线)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="15" height="15" rx="1.3"/><rect x="4.5" y="12.5" width="6.9" height="7" rx="1.3" stroke-dasharray="2.6 2"/><path d="M11.4 12.5 L16.9 7"/><path d="M13.1 7 H16.9 V10.8"/></symbol>
+  <!-- selection -->
+  <!-- select-all — la.selectAll -->
+  <symbol id="select-all" data-cat="selection" data-note="la.selectAll" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5" stroke-width="1.8"/> <rect x="5.6" y="5.6" width="12.8" height="12.8" rx="1.5" stroke-width="1.4" stroke-dasharray="3 2" fill="currentColor" fill-opacity="0.14"/></symbol>
+  <!-- select-ellipse — la.ellipse -->
+  <symbol id="select-ellipse" data-cat="selection" data-note="la.ellipse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="12" rx="8" ry="6" stroke-dasharray="3 2"/></symbol>
+  <!-- select-freehand — la.freehand -->
+  <symbol id="select-freehand" data-cat="selection" data-note="la.freehand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path stroke-dasharray="3 2.4" d="M3.5 11.5 C3.83 9.83 6.08 7 7.5 6.5 C8.92 6 10.5 8.5 12 8.5 C13.5 8.5 15.08 6 16.5 6.5 C17.92 7 20.17 9.83 20.5 11.5 C20.83 13.17 19.92 15.5 18.5 16.5 C17.08 17.5 14.17 17.5 12 17.5 C9.83 17.5 6.92 17.5 5.5 16.5 C4.08 15.5 3.17 13.17 3.5 11.5 Z"/></symbol>
+  <!-- select-rectangle — la.rect -->
+  <symbol id="select-rectangle" data-cat="selection" data-note="la.rect" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="12" stroke-dasharray="3 2"/></symbol>
+  <!-- selection-clear — la.deselect -->
+  <symbol id="selection-clear" data-cat="selection" data-note="la.deselect" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2"/> <path d="M9 9 L15 15 M15 9 L9 15" stroke-width="1.8"/></symbol>
+  <!-- selection-difference — 差集:后框被前框 mask 遮挡(留 gap)+减号 -->
+  <symbol id="selection-difference" data-cat="selection" data-note="差集:后框被前框 mask 遮挡(留 gap)+减号" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icSelDiffMask"><rect width="24" height="24" fill="#fff"/><rect x="10.5" y="9" width="11" height="11" rx="2.2" fill="#000" stroke="#000" stroke-width="2.4"/></mask><g mask="url(#icSelDiffMask)"><rect x="2.5" y="3" width="10" height="10" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2" fill="currentColor" fill-opacity="0.16"/></g><rect x="10.5" y="9" width="11" height="11" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2"/><path d="M13 14.5 H19" stroke-width="2"/></symbol>
+  <!-- selection-expand — la.selEdit -->
+  <symbol id="selection-expand" data-cat="selection" data-note="la.selEdit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2"/> <rect x="8" y="8" width="8" height="8" rx="1.5"/></symbol>
+  <!-- selection-invert — la.invert -->
+  <symbol id="selection-invert" data-cat="selection" data-note="la.invert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><defs><clipPath id="invClip"><rect x="3" y="3" width="18" height="18" rx="2.5"/></clipPath></defs> <g clip-path="url(#invClip)"><path d="M3 3 L3 21 L21 21 Z" fill="currentColor" fill-opacity="0.18" stroke="none"/></g> <rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2" stroke-width="1.6"/> <path d="M4.2 4.2 L19.8 19.8" stroke-width="1.5"/></symbol>
+  <!-- selection-new — 虚线方框+加号 -->
+  <symbol id="selection-new" data-cat="selection" data-note="虚线方框+加号" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5" stroke-dasharray="3 2"/><path d="M12 8 v8 M8 12 h8"/></symbol>
+  <!-- selection-union — 并集:后框被前框 mask 遮挡(留 gap)+加号 -->
+  <symbol id="selection-union" data-cat="selection" data-note="并集:后框被前框 mask 遮挡(留 gap)+加号" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icSelUnionMask"><rect width="24" height="24" fill="#fff"/><rect x="10.5" y="9" width="11" height="11" rx="2.2" fill="#000" stroke="#000" stroke-width="2.4"/></mask><g mask="url(#icSelUnionMask)"><rect x="2.5" y="3" width="10" height="10" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2" fill="currentColor" fill-opacity="0.16"/></g><rect x="10.5" y="9" width="11" height="11" rx="2.2" stroke-width="1.5" stroke-dasharray="3 2"/><path d="M16 11.5 V17.5 M13 14.5 H19" stroke-width="2"/></symbol>
+  <!-- edit -->
+  <!-- arrow-redo — action.redo -->
+  <symbol id="arrow-redo" data-cat="edit" data-note="action.redo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"></polyline> <path d="M4 20v-7a4 4 0 0 1 4-4h12"></path></symbol>
+  <!-- arrow-undo — action.undo -->
+  <symbol id="arrow-undo" data-cat="edit" data-note="action.undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline> <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></symbol>
+  <!-- move-to-layer — 文件+绕行箭头(移到新层) -->
+  <symbol id="move-to-layer" data-cat="edit" data-note="文件+绕行箭头(移到新层)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3 H10 a2 2 0 0 0 -2 2 v14 a2 2 0 0 0 2 2 h8 a2 2 0 0 0 2 -2 V8 z"/><path d="M15 3 v5 h5"/><path d="M3 17 A7 7 0 0 1 12.5 9"/><g transform="rotate(30 12.8 9)"><path d="M9.7 8 L12.8 9 L12 12"/></g></symbol>
+  <!-- trash-can — 垃圾桶 -->
+  <symbol id="trash-can" data-cat="edit" data-note="垃圾桶" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 9.5v9"/><path d="M14 9.5v9"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+  <!-- file -->
+  <!-- export — rack.exportFolder -->
+  <symbol id="export" data-cat="file" data-note="rack.exportFolder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21 v-11"/><polyline points="7 15, 12 10, 17 15"/> <path d="M4 7 v-3 a1 1 0 0 1 1 -1 h14 a1 1 0 0 1 1 1 v3"/></symbol>
+  <!-- floppy-disk — 本地已保存但云端没动 -->
+  <symbol id="floppy-disk" data-cat="file" data-note="本地已保存但云端没动" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></symbol>
+  <!-- folder — ref.load -->
+  <symbol id="folder" data-cat="file" data-note="ref.load" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 文件夹：左边 tab + 矩形主体 --> <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <!-- folder-open — 打开的文件夹:背板止于盖顶 T 接,不再互相压线 -->
+  <symbol id="folder-open" data-cat="file" data-note="打开的文件夹:背板止于盖顶 T 接,不再互相压线" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18 V7 a2 2 0 0 1 2 -2 h4 l2 2 h6 a2 2 0 0 1 2 2 v1.8"/><path d="M3 18 L6.4 10.8 H21.6 L18.2 18 Z"/></symbol>
+  <!-- import — rack.importJson -->
+  <symbol id="import" data-cat="file" data-note="rack.importJson" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 v11"/><polyline points="7 9, 12 14, 17 9"/> <path d="M4 17 v3 a1 1 0 0 0 1 1 h14 a1 1 0 0 0 1 -1 v-3"/></symbol>
+  <!-- new — gal.chrome.add -->
+  <symbol id="new" data-cat="file" data-note="gal.chrome.add" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/> <line x1="5" y1="12" x2="19" y2="12"/></symbol>
+  <!-- hierarchy -->
+  <!-- collection — 收纳箱 (Blender collection · copy of archive-box) -->
+  <symbol id="collection" data-cat="hierarchy" data-note="收纳箱 (Blender collection · copy of archive-box)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v4H3z"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></symbol>
+  <!-- layers-stack — tool.layers -->
+  <symbol id="layers-stack" data-cat="hierarchy" data-note="tool.layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 22 8 12 14 2 8 12 2"></polygon> <polyline points="2 13 12 19 22 13"></polyline> <polyline points="2 18 12 24 22 18" transform="translate(0,-2)"></polyline></symbol>
+  <!-- lock — 锁:体 13x11+锁梁抬高(腿3.5),整体居中 -->
+  <symbol id="lock" data-cat="hierarchy" data-note="锁:体 13x11+锁梁抬高(腿3.5),整体居中" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="10" width="13" height="11"/><path d="M8.8 10 V6.5 a3.2 3.2 0 0 1 6.4 0 V10"/></symbol>
+  <!-- unlock — 开锁:同 lock 体型+锁梁弹开 -->
+  <symbol id="unlock" data-cat="hierarchy" data-note="开锁:同 lock 体型+锁梁弹开" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="10" width="13" height="11"/><path d="M8.8 10 V6.5 a3.2 3.2 0 0 1 6.3 -1.1"/></symbol>
+  <!-- visibility-hide — 隐藏:同一只眼+斜杠(mask 留 gap),与 show 成对 -->
+  <symbol id="visibility-hide" data-cat="hierarchy" data-note="隐藏:同一只眼+斜杠(mask 留 gap),与 show 成对" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icEyeHideMask"><rect width="24" height="24" fill="#fff"/><path d="M4.5 19.5 L19.5 4.5" stroke="#000" stroke-width="4"/></mask><g mask="url(#icEyeHideMask)"><path d="M3.5 12 Q12 3.5 20.5 12" stroke-width="2.2"/><path d="M3.5 12 Q12 20.5 20.5 12"/><circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/></g><path d="M4.5 19.5 L19.5 4.5"/></symbol>
+  <!-- visibility-show — 可见:实心大瞳孔(r3.4)+眼睑收小+上眼睑加宽(2.2) -->
+  <symbol id="visibility-show" data-cat="hierarchy" data-note="可见:实心大瞳孔(r3.4)+眼睑收小+上眼睑加宽(2.2)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12 Q12 3.5 20.5 12" stroke-width="2.2"/><path d="M3.5 12 Q12 20.5 20.5 12"/><circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/></symbol>
+  <!-- common -->
+  <!-- chevron-down — lp.foot.down -->
+  <symbol id="chevron-down" data-cat="common" data-note="lp.foot.down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/> <polyline points="6 13 12 19 18 13"/></symbol>
+  <!-- chevron-up — lp.foot.up -->
+  <symbol id="chevron-up" data-cat="common" data-note="lp.foot.up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/> <polyline points="6 11 12 5 18 11"/></symbol>
+  <!-- cloud -->
+  <!-- cloud — 云 -->
+  <symbol id="cloud" data-cat="cloud" data-note="云" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></symbol>
+  <!-- cloud-synced — 云+勾 -->
+  <symbol id="cloud-synced" data-cat="cloud" data-note="云+勾" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></symbol>
+  <symbol id="cloud-unavailable" data-cat="cloud" data-note="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><line x1="3" y1="3" x2="21" y2="21"/></symbol>
+  <!-- cloud-upload — rack.cloudPush -->
+  <symbol id="cloud-upload" data-cat="cloud" data-note="rack.cloudPush" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19 H6.5 A4.5 4.5 0 0 1 6 10 a6 6 0 0 1 11.6 -1 A4 4 0 0 1 17.5 19 Z"/> <polyline points="9 14, 12 11, 15 14"/><path d="M12 11 v6"/></symbol>
+  <!-- download — 下载 -->
+  <symbol id="download" data-cat="cloud" data-note="下载" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+  <!-- refresh — cloud.refresh -->
+  <symbol id="refresh" data-cat="cloud" data-note="cloud.refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 顺时针 3/4 圆 + 箭头：从 12 点出发顺时针绕到 9 点；箭头尖在右上 --> <path d="M21 12a9 9 0 1 1-3.5-7.1"/> <polyline points="21 4 21 9 16 9"/></symbol>
+  <!-- upload — 上传 -->
+  <symbol id="upload" data-cat="cloud" data-note="上传" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+  <!-- globalization -->
+  <!-- globe-speech — 语言=地球+对话气泡(mask 抠洞遮挡,留 gap) -->
+  <symbol id="globe-speech" data-cat="globalization" data-note="语言=地球+对话气泡(mask 抠洞遮挡,留 gap)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icGsMask"><rect width="24" height="24" fill="#fff"/><path d="M22 18.5 a1.7 1.7 0 0 1 -1.7 1.7 h-4 l-2.3 2 v-2 a1.7 1.7 0 0 1 -1.7 -1.7 v-2.6 a1.7 1.7 0 0 1 1.7 -1.7 h6.3 a1.7 1.7 0 0 1 1.7 1.7 z" fill="#000" stroke="#000" stroke-width="2.6"/></mask><g mask="url(#icGsMask)"><circle cx="10" cy="10" r="7"/><line x1="3" y1="10" x2="17" y2="10"/><ellipse cx="10" cy="10" rx="3" ry="7"/></g><path d="M22 18.5 a1.7 1.7 0 0 1 -1.7 1.7 h-4 l-2.3 2 v-2 a1.7 1.7 0 0 1 -1.7 -1.7 v-2.6 a1.7 1.7 0 0 1 1.7 -1.7 h6.3 a1.7 1.7 0 0 1 1.7 1.7 z"/></symbol>
+  <!-- viewport -->
+  <!-- maximize — ref.fit -->
+  <symbol id="maximize" data-cat="viewport" data-note="ref.fit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 四角向外的箭头 --> <polyline points="4 9 4 4 9 4"/> <polyline points="20 9 20 4 15 4"/> <polyline points="4 15 4 20 9 20"/> <polyline points="20 15 20 20 15 20"/></symbol>
+  <!-- picture-in-picture — ref.live -->
+  <symbol id="picture-in-picture" data-cat="viewport" data-note="ref.live" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 大框（主画布）+ 内嵌小窗（参考小窗自己）—— picture-in-picture 隐喻 --> <rect x="3" y="4" width="18" height="14" rx="2"/> <rect x="12" y="10" width="7" height="5" rx="1"/></symbol>
+  <!-- ui -->
+  <!-- archive-box — nav.trash -->
+  <symbol id="archive-box" data-cat="ui" data-note="nav.trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v4H3z"/> <path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/> <path d="M10 13h4"/></symbol>
+  <symbol id="database" data-cat="ui" data-note="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+  <!-- menu — tool.menu -->
+  <symbol id="menu" data-cat="ui" data-note="tool.menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"></line> <line x1="4" y1="12" x2="20" y2="12"></line> <line x1="4" y1="17" x2="20" y2="17"></line></symbol>
+</svg>

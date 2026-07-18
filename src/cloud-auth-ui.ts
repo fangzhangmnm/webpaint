@@ -11,6 +11,7 @@
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
+import { iconHtml } from "./ui/icon.ts";
 import {
   isSignedIn, isAuthConfigured, signIn, signOut,
   getActiveAccount, retrySilentSignIn,
@@ -20,8 +21,8 @@ let setStatus: AppContext["setStatus"];
 let updateSaveStatus: AppContext["updateSaveStatus"];
 let gallery: AppContext["gallery"];
 
-const ICON_CLOUD_OUT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>';
-const ICON_CLOUD_IN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
+const ICON_CLOUD_OUT = iconHtml("cloud");
+const ICON_CLOUD_IN = iconHtml("cloud-synced");
 
 export function updateCloudAuthUI() {
   const signed = isSignedIn();
