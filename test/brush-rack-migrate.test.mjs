@@ -8,6 +8,8 @@ import {
   getAllBrushes, getMeta, emptyMeta, metaAppend, metaRemove, metaMove,
   metaPrependBuiltins, buildInitMeta, builtinBrushInitData, RACK_META_ID, DEFAULT_FOLDER,
 } from "../src/brushes.ts";
+import { resolveBrush } from "../src/resolved-brush.ts";
+import { DEFAULT_CONFIG } from "../src/current-brush-config.ts";
 
 // 最小假 collection：entries() + getItem(id,def)（controller 的 CollectionLike 结构子集）。
 function fakeColl(items) {
@@ -104,5 +106,26 @@ describe("brushes · builtinBrushInitData（新库 seed 载荷）", () => {
       const f = d.value.folder || DEFAULT_FOLDER;
       assert((meta.value.order[f] || []).includes(d.id), `.meta 应含 ${d.id}`);
     }
+  });
+});
+
+// ── 默认值一致性（v416）───────────────────────────────────────────────────────────────────
+// 症状史：同一个概念的默认值散在 makeBrush / DEFAULT_CONFIG / ensureBrushConfigDefaults /
+//   resolveBrush 四处，各写各的 → hardness 曾是 0.75/1.0/1.0/1.0，pressureLPF 曾是 0/50/50/50。
+//   出厂笔因为**每个字段都显式写了值**所以从没暴露；只有「新建笔」（只传 id/name/tool/folder，
+//   其余全吃 makeBrush 默认）会掉进去 —— 新建的笔没有压感 LPF、转角顿一下，而出厂笔不会。
+describe("默认值四处一致（新建笔必须和出厂笔/UI 默认同一套）", () => {
+  it("新建笔（只给 id/name/tool/folder）resolve 出来 == DEFAULT_CONFIG", () => {
+    const nb = makeBrush({ id: "x", name: "新笔 1", tool: "brush", folder: DEFAULT_FOLDER });
+    const r = resolveBrush({ preset: nb });
+    for (const k of ["pressureLPF", "hardness", "spacing", "sizeCoeff", "opaCoeff", "flowCoeff",
+                     "pressureGamma", "streamline", "stabilization", "taperIn", "taperOut", "taperFloor"]) {
+      eq(r[k], DEFAULT_CONFIG[k], `新建笔的 ${k} 必须等于 DEFAULT_CONFIG（四处默认别再各说各话）`);
+    }
+  });
+
+  it("老笔补字段（migrateBrush 路径）的 pressureLPF 也是 50", () => {
+    const old = migrateBrush({ id: "o", name: "老笔", tool: "brush", shape: {}, size: { base: 12 } });
+    eq(old.pressureLPF, 50, "v416：human 拍板四处全统一 50，含老笔补字段");
   });
 });

@@ -90,6 +90,10 @@ export function newBrushId() {
   return "b-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
+// builtin-brushes.json 的约定：出厂笔**每个字段都显式写全**，不依赖本函数的默认值
+//   （human 2026-07-18 明确：不要删出厂笔的预设）。理由：出厂笔的参数是**被调过的手感意图**，
+//   写死才不会在某天有人改了下面这些默认值时跟着悄悄漂。
+//   下面这些默认值只服务「新建笔」（rack 只传 id/name/tool/folder）和缺字段的导入笔。
 export function makeBrush({
   id = newBrushId(),
   name,
@@ -100,7 +104,7 @@ export function makeBrush({
   pressureGamma = 1.0,
   // v102+: pressure low-pass filter（ms，时间域 IIR）
   // 解 "勾线转角顿一下 out-leg 变细" —— LPF 让落点过去几十毫秒的高 pressure 仍留尾巴
-  pressureLPF = 0,
+  pressureLPF = 50,   // v416 四处统一 50（此前这里是 0，导致**新建笔**没有压感 LPF，而出厂笔/UI 默认都是 50）
   compositeMode = "wash",
   blendMode = "source-over",   // v163: per-brush 混合模式（multiply/screen/... ＝ Canvas2D globalCompositeOperation）
   shapeKind = "round", aspect = 1.0, rotation = 0, hardness = 0.75,   // 与 DEFAULT_CONFIG / ensureBrushConfigDefaults / resolveBrush 统一（v415：此前三处 0.75/1.0/1.0 各说各话）
@@ -289,7 +293,7 @@ export function migrateBrush(b: LegacyBrush): LegacyBrush {
   if (b.defaultOpa == null) b.defaultOpa = 1.0;
   delete b.defaultFlow;
   if (b.pressureGamma == null) b.pressureGamma = 1.0;
-  if (b.pressureLPF == null) b.pressureLPF = 0;
+  if (b.pressureLPF == null) b.pressureLPF = 50;   // v416 统一 50（human 拍板：四处全统一，含老笔补字段）
   delete b.flowScale;                          // v106 撤
   delete b.spacingFlowMul;                     // 顺便清未出生的字段
   // compositeMode：airbrush=true → buildup；否则 wash
