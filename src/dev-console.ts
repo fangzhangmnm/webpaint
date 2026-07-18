@@ -65,6 +65,13 @@ export function initDevConsole() {
     return blob;
   };
 
+  // 回收站/备份箱管理（控制台调；backup 无 gallery UI——面板是以后的事，先控制台能清）。
+  //   scope: "local" | "cloud" | "both"（默认 both）。listTrash/listBackup 返两端聚合的元数据（无 blob）。
+  WP.listTrash = () => store.files.listTrash();
+  WP.listBackup = () => store.files.listBackup();
+  WP.emptyTrash = (scope: "local" | "cloud" | "both" = "both") => store.files.emptyTrash({ scope });
+  WP.emptyBackup = (scope: "local" | "cloud" | "both" = "both") => store.files.emptyBackup({ scope });
+
   // 暴露给 plugin（v131）：window.WebPaint.registerFilter(FilterClass)
   // 插件自己写 buildBody，可以放色环 / 自定义 canvas / 任何 DOM（user：「插件自己提供 UI」）
   WP.registerFilter = registerFilter;

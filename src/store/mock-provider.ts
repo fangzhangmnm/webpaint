@@ -14,6 +14,7 @@
 
 import type { Bytes } from "./substrate.ts";
 import type { CloudProvider, CloudItem, UploadOpts, MoveOpts } from "./types.ts";
+import { deleteEmptyFolderVia } from "./folder-delete.ts";
 
 // 带 .status 的 HTTP 风格错误（与 graph.js err.status 一致）。
 interface HttpError extends Error {
@@ -291,6 +292,12 @@ export function createMockProvider(opts: MockProviderOpts = {}): MockProvider {
         byPath.delete(n.path);
         byId.delete(n.id);
       }
+    },
+
+    // 删空夹（唯一文件夹删除面）：护栏走 folder-delete 深模块（getItemByPath→list→非空/list-fail→status；空才 delete）。
+    //   mock 的 delete(id) 忽略 etag（If-Match best-effort，mock 不建模并发）。
+    deleteEmptyFolder(path: string) {
+      return deleteEmptyFolderVia(provider.getItemByPath, provider.list, (id) => provider.delete(id), path);
     },
 
     async move(id: string, targetFolderId: string, { newName = null, eTag = null, conflictBehavior = "fail" }: MoveOpts = {}) {

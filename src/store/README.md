@@ -58,7 +58,7 @@ const store = createStore({
 >
 > **⚠ 命名空间根 `${appId}.${databaseId}`（同 origin 兄弟 PWA / 多 store 实例隔离）** > as-of 窄腰重构 2026-07-13：IndexedDB 和 localStorage 按 **origin** 隔离、**不按 path**（GitHub Pages `/webpaint/` 与 `/jrp/` 同 origin）。库把**所有持久化标识收进一个命名空间根 `${appId}.${databaseId}`**（`databaseId` 默认 `"defaultStore"`；同一 app 想开多个互不打架的 store → 传不同 databaseId）：
 > - **IndexedDB**：单库 `${appId}.${databaseId}`、单 object store `blobs`，key = `${partition}/${name}`（分区 `files/`·`trash/`·`backup/`·`collections/`，blob-partition 深模块）。
-> - **localStorage**：经 `namespacedKv` 统一加根前缀的**唯一 choke point**——`${ns}.database-version`（schema 戳）、`${ns}.files.etag:`(cloud-sync files 实例)、`${ns}.files.dirty:`(local-head，文件 dirty 权威)、`${ns}.collections.etag:`/`.dirty:`(collections 实例)、`${ns}.settings.<key>`(散键裸值)、`${ns}.internal.pending_new_folders`/`_deletions`/`_uploads`。各深模块只用相对键，想漏都漏不出命名空间。
+> - **localStorage**：经 `namespacedKv` 统一加根前缀的**唯一 choke point**——`${ns}.database-version`（schema 戳）、`${ns}.files.etag:`(cloud-sync files 实例)、`${ns}.files.dirty:`(local-head，文件 dirty 权威)、`${ns}.collections.etag:`/`.dirty:`(collections 实例)、`${ns}.settings.<key>`(散键裸值)、`${ns}.internal.pending_new_folders`/`_deletions`/`_uploads`/`_folder_deletions`/`pending_gone`。各深模块只用相对键，想漏都漏不出命名空间。
 >
 > **同 origin 的每个兄弟 PWA 必须用不同 `appId`**——否则两 app 读写同一份存储：文件互漏、schema 戳互踩跳迁移（显 0B）、缓存互毁。**根治自 2026-07-12 真机灾难**（详 `docs/20260712-store-per-app-namespace.md`）。不传 `appId`/`databaseId` → 抛错，绝不静默共用。
 >
@@ -77,9 +77,9 @@ const store = createStore({
 | `store.files.watchFolder(folder, cb)` | **唯一列举面**：订阅一个夹 → 立即本地帧、云端到了同一 cb 再闪（无 list/listAll/localKeys）。Item.syncState 含 `pendingGone`（cloud-gone clean 孤儿、防抖 grace 内） | §2 |
 | `store.files.nameOccupied(name)` → **boolean** | 名字占用（在线云端+本地都看，离线只看本地）。新建/另存/改名前预检 | §2 |
 | `store.files.ensureFolder · newFolder · deleteFolder` | 文件夹增删（删除「必须证实为空」库内强制；list 抛错/未权威→拒删） | §2 |
-| `store.files.drainOfflineQueue()` | 离线队列统一重放（按序：新文件夹→新上传→删文件）；app 在 online/boot/reconnect 调 | §6 |
+| `store.files.drainOfflineQueue()` | 离线队列统一重放（按序：新文件夹→新上传→删文件→删文件夹深→浅）；app 在 online/boot/reconnect 调 | §6 |
 | `store.files.listTrash · listBackup · restoreTrash · purgeTrash · emptyTrash · emptyBackup` | 回收站/备份箱：**本地↔云聚合**列举（TrashItem：side/encrypted/conflictLive，只元数据无 blob）·恢复·彻底删·清空 | §2 |
-| `store.files.reconcileAll({activeName?})` | **全库** cloud-gone 收敛（仅用户显式指令）：clean 孤儿**去抖后 send trash**（首次见 gone 标 candidate、跨 ~24h GRACE 第二次+ 才动手；重现/被编辑自愈）。日常开夹惰性收敛走 watchFolder 内的 per-folder reconcile（同 converge SSOT） | §6 |
+| `store.files.reconcileAll({activeFileName?})` | **全库** cloud-gone 收敛（仅用户显式指令）：clean 孤儿**去抖后 send trash**（首次见 gone 标 candidate、跨 ~24h GRACE 第二次+ 才动手；重现/被编辑自愈）。日常开夹惰性收敛走 watchFolder 内的 per-folder reconcile（同 converge SSOT） | §6 |
 | `store.saveAs(...)` | 写到新身份（phantom-path 红线：先存新名再删旧） | §2 |
 | `store.looksEncrypted · verifyContainer · unsealWith` | 加密导入辅助（文件还没进 store、无 name 可查时） | §5 |
 | 加密（at-rest，对齐 WebPaint） | config 注入 `crypto`(zip/7z codec) + `crypt`(ext/makePeek/getPassword)；透明封解 + `file.encrypt/decrypt`；不注入 = dormant。`store.encryption`/salt 超集未采用 | §5 |
@@ -89,26 +89,26 @@ const store = createStore({
 ## 2. 文件 store —— 一个名字一个文件
 
 ```ts
-const f = store.file("papers/Wei 2011.pdf", { isZip: false });
-await f.save(bytes);          // 新建 or 覆盖：本地落盘 + 按节律推云（If-Match 守冲突）
+const f = store.file("papers/Wei 2011.pdf", { isZip: false, mode: "existing" });   // mode 必填：existing=打开已有、new=新建
+await f.save(bytes);          // 落盘 + 按节律推云（If-Match 守冲突）。mode:"new" 首存撞名 → 抛 CloudNameCollisionError（不覆盖）
 const blob = await f.open();  // 本地有则秒开；无则拉云 + 缓存本地（下次离线可读）
-await f.rename("papers/new.pdf");
+await f.tryMove("papers/new.pdf");   // 改身份/移动**唯一入口**（含 nameOccupied 占用检查，结果式 {ok:false,where} 不抛）
+await f.reupload();           // candidate-gone「重新上传」：本地 clean 字节 no-base 推回空 path（撞名→collision surface；成功→synced）
 await f.delete();             // 销毁：本地副本→本地 .trash / 云端副本→云端 .trash（各自 move-aside，可恢复）
 ```
-- **新建文件 = 对一个新 name `save`**（没有单独的 create）。云端已有同名但内容不同 → 提示用户，绝不覆盖。
+- **新建文件 = 对一个新 name `file(name,{mode:"new"}).save`**（没有单独的 create）。云端已有同名但内容不同 → 抛 collision，绝不覆盖。
 - **delete vs offload**：offload 只丢「可重取的 shadow」、云端不动；delete 是**销毁**。delete 内部按原子态分流——本地若是 offloadable shadow → 硬删本地（云端 .trash 已救着，不留双份）；本地若是唯一副本（dirty/local-only）→ 先变 local-only 再进**本地** .trash（未推字节可恢复，绝不硬删）。云端副本进**云端** .trash。两套 trash 各管各、不跨网（ADR-0015）。
 - **`open` 自动把字节缓存本地**（离线可读，你不碰 IndexedDB）。
 - **`autoCacheOpenedFile:false`（流式消费 app：RealHome glb / Background Radio）已实现**：`open` 本地有就读本地、没有就**整份拉云、不落本地**，只显式 `keepOffline` 才整份落地。⚠TODO **range / streaming 优化**：大媒体按需取片（`provider.downloadRange` 已具备）、不整块下载——`open` 路由 cache-or-remote 取片，形状以后慢慢设计。
-- `store.list()` / `store.listAll()` → `{ files, folders, complete }`。`complete:false` = 列举有子树失败，**别据此删缓存**。
-- `store.reconcile({activeName?})` — cloud-gone 安全收敛（app 在 gallery list-fetch 时调）：曾 synced 的 clean 本地、云端没了 → 降级 local-only（**不删不 trash，blob 留着**）；dirty/从没同步/partial-or-空列表 一律不动。详见 CONTEXT.md。
+- **列举唯一面 = `store.files.watchFolder(folder, cb)`**（订阅一夹→本地帧+云端帧同一 cb；无 `list`/`listAll`/`localKeys` 公开面）。snapshot `{ path, items, folders, complete }`，`complete:false` **别据此删缓存**。
+- `store.files.reconcileAll({activeFileName?})` — **全库** cloud-gone 收敛（仅用户显式指令）：曾 synced 的 clean 孤儿 → **去抖后 send trash**（首次见 gone 标 candidate、跨 ~24h GRACE 第二次+ 才动手；重现/被编辑自愈；`activeFileName` 跳过当前打开的 doc）。日常开夹惰性收敛走 watchFolder 内的 per-folder reconcile（同 converge SSOT）。dirty/从没同步/partial-or-空列表 一律不动。详见 CONTEXT.md。
 
 ### 离线副本 —— keepOffline / offload（无 LRU、无 pin）
 
 ```ts
 await f.keepOffline();    // 留一份离线副本（未缓存则下载）。注：open 已含下载子过程，故名 keepOffline 非 download
 await f.offload();        // 移除本地副本（只删本地，云端不动）。**非法时抛错**，见下
-await f.isKeptOffline();  // 本地有副本？（= 已留作离线）
-store.localKeys();        // 已留作离线（=有本地副本）的文件名列表（批量标记 UI 用）
+await f.isKeptOffline();  // 本地有副本？（= 已留作离线；无 localKeys 批量面——离线可读性经 watchFolder 的 item.syncState 判）
 ```
 - **心智模型**：有本地副本 = "kept offline"。无 LRU、无 pin、无 unpin、无 force——只有「留一份」(`keepOffline`) 和「移除」(`offload`)；中间「可被自动驱逐的 cache」态**不存在**（开了 / 下载了就留着，直到显式 `offload`）。
 - **offload 只对 shadow 合法**：本地副本是「云端某完整版的可重取镜像」时，offload = hardDelete（**不进本地 trash**，可重下）。合法 = `clean ∧ 在线 ∧ 已登录 ∧ 曾 synced ∧ 云端仍有完整副本(size>0)`。cloudMoved（云端被别人推了新版）**仍合法**（clean 本地下次 open 会快进）。
@@ -118,12 +118,13 @@ store.localKeys();        // 已留作离线（=有本地副本）的文件名�
 ### 回收站 / 备份
 
 ```ts
-store.listTrash();    store.listBackup();                      // 列回收站 / 备份
-store.restore({ fromCloud: true, cloudItemId, targetName });   // 恢复到 targetName
-store.purge({ cloudItemId, confirm });                         // 彻底删除（confirm 回调确认）
-store.emptyTrash({ scope: "both" });                          // 清空回收站（"local" | "cloud" | "both"）
+store.files.listTrash();    store.files.listBackup();               // 列回收站 / 备份（**本地↔云两端聚合**的 TrashItem[]：side/encrypted/conflictLive，只元数据无 blob）
+store.files.restoreTrash({ trashKey, fromCloud, cloudItemId, targetName, encrypted });   // 恢复（side-aware：both 两腿都恢复，云端腿撞名自动 (2)）
+store.files.purgeTrash({ trashKey, cloudItemId, confirm });         // 彻底删除（confirm 回调确认）
+store.files.emptyTrash({ scope: "both" });                          // 清空回收站（"local" | "cloud" | "both"）
+store.files.emptyBackup({ scope: "both" });                         // 清空备份箱（同 scope；暂无 gallery UI，控制台/以后面板调）
 ```
-- `delete()` 把文件移入回收站（可恢复）；版本冲突时被替下的旧副本进备份（不丢）。两者都能列出、恢复、彻底删除。
+- `delete()` 把文件移入回收站（可恢复）；版本冲突时被替下的旧副本进备份（不丢）。`TrashItem.conflictLive`=离线删被回线 edit-wins 撤销→本地 trash 有、云端还活着（两存，UI surface）。
 
 ### `opts.isZip` —— 决定能否带预览图
 
@@ -289,9 +290,10 @@ flow 的原子单位是「进入 flow 那刻抓的**不可变快照**」，不�
 |---|---|---|
 | 缓存文件离线读 | 自己开 IndexedDB | `file.open` 自动缓存 |
 | 让文件离线常驻 / 腾本地空间 | 自己管 IndexedDB 容量 | `file.keepOffline()` / `file.offload()` |
-| 找回删掉的文件 | —— | `store.listTrash()` + `store.restore()` |
-| 存设置 / 状态 | 自己 localStorage | 建 `store.collection(...)`（`{local:true}` 设备本地 / 默认 synced），直读写 KV 面（§4） |
-| 列云端文件 | 自己 Graph fetch | `store.list*` |
+| 找回删掉的文件 | —— | `store.files.listTrash()` + `store.files.restoreTrash()` |
+| 删文件夹 | 自己 provider.delete（递归！） | `store.files.deleteFolder()`（护栏在 backend `deleteEmptyFolder`：只删空夹；离线排队回线 drain） |
+| 存设置 / 状态 | 自己 localStorage | 建 `store.collection(...)`（`{local:true}` 设备本地 / 默认 synced，**同名单例**），直读写 KV 面（§4） |
+| 列云端文件 | 自己 Graph fetch | `store.files.watchFolder`（订阅当前夹） |
 | 加密 | 自己写 zip/7z/容器 | 注入 `crypto` codec（§1）+ `crypt.getPassword` + `file.encrypt/decrypt`，逻辑库管 |
 | 局部改 collection 一条 | 找 partial-update API | 取整条 → 改 → `setItem` |
 | 库没有你要的操作 | deep import 内部 / 自己实现 | **escalate to human 改库 API** |

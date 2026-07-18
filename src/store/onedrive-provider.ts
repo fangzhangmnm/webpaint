@@ -6,6 +6,7 @@
 
 import type { CloudItem, CloudProvider, UploadOpts, MoveOpts, Bytes } from "./types.ts";
 import type * as graphModule from "./providers/graph.ts";
+import { deleteEmptyFolderVia } from "./folder-delete.ts";
 
 // graph transport 模块的形状（providers/index 传真 graph，测试传 graphFromProvider(Mock)）。
 type GraphTransport = typeof graphModule;
@@ -40,9 +41,11 @@ function toItem(it: RawGraphItem | null | undefined): CloudItem | null {
 
 export function graphToCloudProvider(graph: GraphTransport): CloudProvider {
   if (!graph) throw new Error("graphToCloudProvider: graph transport 必传");
+  const list = async (folder = ""): Promise<CloudItem[]> => (await graph.listChildren(folder)).map(toItem) as CloudItem[];
+  const getItemByPath = async (path: string): Promise<CloudItem | null> => toItem(await graph.getItemByPath(path));
   return {
-    list: async (folder = "") => (await graph.listChildren(folder)).map(toItem) as CloudItem[],
-    getItemByPath: async (path: string) => toItem(await graph.getItemByPath(path)),
+    list,
+    getItemByPath,
     download: (id: string) => graph.downloadItemBlob(id),
     downloadRange: (id: string, offset: number, length: number) => graph.downloadItemRange(id, offset, length),
     // graph.js 是 Blob 原生（按 .size 选简单/分块路径、用 .slice 切块）；lib 把字节归一成 Uint8Array。
@@ -52,7 +55,9 @@ export function graphToCloudProvider(graph: GraphTransport): CloudProvider {
       const body = blob instanceof Blob ? blob : new Blob([blob], { type: contentType });
       return graph.uploadFileToApproot(path, body, contentType, { conflictBehavior, eTag }).then(toItem) as Promise<CloudItem>;
     },
-    delete: (id: string) => graph.deleteItem(id),
+    delete: (id: string) => graph.deleteItem(id),   // 文件硬删（无条件）
+    // 删空夹（唯一文件夹删除面）：护栏在 folder-delete 深模块，If-Match folder etag best-effort。
+    deleteEmptyFolder: (path: string) => deleteEmptyFolderVia(getItemByPath, list, (id, etag) => graph.deleteItem(id, etag), path),
     ensureFolder: (path: string) => graph.ensureSubfolder(path),
     move: (id: string, folderId: string, opts: MoveOpts = {}) => graph.moveItemToFolder(id, folderId, opts).then(toItem) as Promise<CloudItem>,
     rename: (id: string, newName: string, eTag?: string | null) => graph.renameItem(id, newName, eTag).then(toItem) as Promise<CloudItem>,

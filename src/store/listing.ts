@@ -83,6 +83,7 @@ export interface ListingCfg {
   head: Pick<LocalHead, "seenBase" | "isDirty">;
   pendingFolders?: () => string[];   // 离线建、尚未确认上云的空文件夹（folder-registry；并进 folders 让它离线可见）
   isPendingGone?: (path: string) => boolean;   // clean cloud-gone 孤儿在防抖 grace 内（pending-gone 深模块）→ 显 pendingGone badge
+  pendingFolderDeletions?: () => string[];   // 离线排队待删的已上云空夹（全路径）→ **从 folders 减去**（回线 drain 前先隐藏，不再 list）
 }
 
 // 单夹 snapshot（watchFolder 每次回调的形状）——**只这一夹的直属子项**（非递归）。
@@ -97,7 +98,7 @@ const toMs = (v: string | number | undefined): number | undefined => {
 };
 
 export function createListing(cfg: ListingCfg) {
-  const { cloud, local, head, pendingFolders, isPendingGone } = cfg;
+  const { cloud, local, head, pendingFolders, isPendingGone, pendingFolderDeletions } = cfg;
 
   // 一个 path 的原始事实 → Item（cloud/local 两轴 + head → classifier）。listAllItems 与 listFolder 共用。
   function classifyPath(
@@ -163,6 +164,8 @@ export function createListing(cfg: ListingCfg) {
       const seg = rest.includes("/") ? rest.slice(0, rest.indexOf("/")) : rest;
       if (seg && !isHidden(seg)) subfolders.add(prefix + seg);
     }
+    // **post-union 减去**离线排队待删的空夹（否则 remote frame 每次把它从云端 folders 闪回）。
+    for (const d of pendingFolderDeletions?.() ?? []) subfolders.delete(d);
 
     const paths = new Set<string>([...cloudMap.keys(), ...localDirect]);
     const localStats = await statLocal(localDirect);
@@ -197,6 +200,7 @@ export function createListing(cfg: ListingCfg) {
     const folderSet = new Set<string>();
     for (const f of cloudRes?.folders ?? []) if (!isHidden(f)) folderSet.add(f);
     for (const p of pendingFolders?.() ?? []) if (!isHidden(p)) folderSet.add(p);
+    for (const d of pendingFolderDeletions?.() ?? []) folderSet.delete(d);   // post-union 减去待删空夹
 
     return { items, folders: [...folderSet], complete: cloudReachable ? cloudRes!.complete : false };
   }

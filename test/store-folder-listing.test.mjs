@@ -340,3 +340,56 @@ describe("离线 move（删+建，tag 走法）", () => {
     assert(!(await provider.getItemByPath("old")), "old 删除独立照走（决策1A）");
   });
 });
+
+// ── 离线删文件夹队列（deleteEmptyFolder 护栏 + drainOfflineQueue 第 4 步；safety agent 论证过）─────
+describe("离线删文件夹（排队/隐藏/回线删/content-wins/eager-cancel）", () => {
+  function mk() {
+    const local = createMockLocal();
+    const provider = createMockProvider();
+    let online = true;
+    const store = createStore({
+      appId: "test", provider, local, kv: memKv(),
+      ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {}, onReplayStatus: () => {} },
+      validateAdopt: () => true, isOnline: () => online, signedIn: () => online, skipMigration: true,
+    });
+    return { store, provider, setOnline: (v) => { online = v; } };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 5));
+
+  it("离线删已上云空夹 → 排队+listing 隐藏；回线 drainOfflineQueue → 云端删掉", async () => {
+    const { store, provider, setOnline } = mk();
+    await store.files.ensureFolder("F");
+    assert(await provider.getItemByPath("F"), "云端建了 F");
+    setOnline(false);
+    await store.files.deleteFolder("F");
+    assert(await provider.getItemByPath("F"), "离线：云端 F 还在（只排队，不删）");
+    setOnline(true);
+    let snap = null; const un = store.files.watchFolder("", (s) => { snap = s; }); await tick(); await tick(); un();
+    assert(snap && !snap.folders.includes("F"), "未 drain 时 listing 已隐藏 F（post-union 减去待删）");
+    await store.files.drainOfflineQueue();
+    assert(!(await provider.getItemByPath("F")), "drain → 云端 F 删掉");
+  });
+
+  it("离线删夹后别端往夹加内容 → 回线 drain 取消删除（content wins，非空不删）", async () => {
+    const { store, provider, setOnline } = mk();
+    await store.files.ensureFolder("F");
+    setOnline(false);
+    await store.files.deleteFolder("F");
+    await provider.upload("F/fromOther.ora", bytes("O"));   // 别端往 F 加内容（直接写云）
+    setOnline(true);
+    await store.files.drainOfflineQueue();
+    assert(await provider.getItemByPath("F"), "F 还在（非空 → 取消删除）");
+    assert(await provider.getItemByPath("F/fromOther.ora"), "别端内容没被递归删");
+  });
+
+  it("eager-cancel：离线删 X 后在 X 下建文件 → drain 不删 X（撤销排队删除）", async () => {
+    const { store, provider, setOnline } = mk();
+    await store.files.ensureFolder("X");
+    setOnline(false);
+    await store.files.deleteFolder("X");
+    await store.file("X/foo", { isZip: false, mode: "new" }).save(bytes("F"), { tryPush: false });   // X 下建文件 → eager-cancel
+    setOnline(true);
+    await store.files.drainOfflineQueue();
+    assert(await provider.getItemByPath("X"), "eager-cancel：X 删除被撤销，X 还在");
+  });
+});

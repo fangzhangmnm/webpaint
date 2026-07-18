@@ -13,7 +13,7 @@
 import { asideStamp } from "./move-aside.ts";   // 深模块的 move-aside 命名策略（yyyymmddhhmmss-guid 防撞）
 import { isHidden } from "./is-hidden.ts";       // 列举隐藏判定（.trash/.backup/.<appId> + 任意 dot 项）
 import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
-import type { Bytes, CloudItem, CloudProvider, CloudSync, FetchMetaResult, Kv, PullResult, PushResult, WeakOverrideResult } from "./types.ts";
+import type { Bytes, CloudItem, CloudProvider, CloudSync, FetchMetaResult, FolderDeleteResult, Kv, PullResult, PushResult, WeakOverrideResult } from "./types.ts";
 
 export class CloudConflictError extends Error {
   sessionName: string;
@@ -408,18 +408,10 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   }
   // 删除：**深模块内强制「必须空」**——云端侧 list 子项，非空拒删（防级联删整棵子树；
   //   是 UI guard 之上的硬兜底，库被无头复用/UI 绕过时也挡得住）。返回 false=云端已无此夹（noop，不报错）。
-  async function removeFolder(path: string): Promise<boolean> {
-    const item = await provider.getItemByPath(path);
-    if (!item) return false;
-    if (!item.isFolder) throw new Error(`不是文件夹，拒绝删除：${path}`);
-    let children: CloudItem[];
-    // ★修（原 bug）：list 失败**绝不当空放行**——旧版 catch→children=[]→非空守卫被击穿→可能删掉非空夹。
-    //   无法证实为空（列举抛错/未权威）= 拒删（抛错 surface），红线「删文件夹必须证实为空」。
-    try { children = await provider.list(path); }
-    catch (e) { reportStoreError(e, "warning"); throw new Error(`无法确认文件夹是否为空（列举失败），已拒绝删除：${path}`); }
-    if (children.length) throw new Error(`文件夹非空，拒绝删除：${path}`);
-    await provider.delete(item.id);
-    return true;
+  // 删空夹 = 薄委托 backend（护栏归 provider.deleteEmptyFolder：只删空夹、list 抛错=list-failed 绝不当空放行、If-Match best-effort）。
+  //   返判别式 status（deleted/already-gone/non-empty/list-failed）；上层（online deleteFolder / 离线 drain）各自映射，见 create-store。
+  function deleteEmptyFolder(path: string): Promise<FolderDeleteResult> {
+    return provider.deleteEmptyFolder(path);
   }
 
   // 注：CloudConflictError 仅作为顶层 export class 暴露（无实例消费 cloud.CloudConflictError），
@@ -428,7 +420,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     push, pull, fetchMeta, pullTail, pullRange, weakOverride,
     trash, restore, purge,
     list, listAll, listFolder, listFolders, listTrash, listBackup, rename, remove,
-    ensureFolder, removeFolder,
+    ensureFolder, deleteEmptyFolder,
     getETag, setETag, isDirty, setDirty, clearState,
   };
 }

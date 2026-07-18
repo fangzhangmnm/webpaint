@@ -234,8 +234,10 @@ export async function uploadFileToApproot(path: string, blob: Blob, contentType 
 }
 
 // ----- 删除 -----
-export async function deleteItem(itemId: string): Promise<void> {
-  await graphFetch("DELETE", `/me/drive/items/${itemId}`);
+// eTag（选填）：If-Match 前置——只在项未变时删（删空夹 best-effort 收 TOCTOU：child-add 若 bump folder eTag 则 412）。
+//   收不严（Graph 不保证 folder eTag 随 child 变）但零成本；文件硬删不传 = 无条件（旧行为）。
+export async function deleteItem(itemId: string, eTag?: string | null): Promise<void> {
+  await graphFetch("DELETE", `/me/drive/items/${itemId}`, eTag ? { headers: { "If-Match": eTag } } : {});
 }
 
 // ----- approot + 子文件夹 ensure / 移动 -----（trash + folder feature 用）

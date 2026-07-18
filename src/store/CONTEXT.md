@@ -56,14 +56,15 @@ grep -rnE 'evict|offload|LRU|frecency|cacheCap|ensureRoom|storage\.estimate|reco
 
 store/ 外每一处命中都是 jailbreak（WebPaint 已知三处：`session-state.ts` 驱逐守卫 / `app-store.ts` cloud-gone 收敛 / `cloud-freshness.ts` 陈旧锁——吸进库后旧码喂不到输入、自然枯死）。
 
-## reconcile —— cloud-gone 安全收敛（#43，已落地安全子集）
+## reconcile —— cloud-gone 收敛（#43；as-of 2026-07-17 **去抖后 send trash**，用户拍板升级）
 
-> 参考 WebPaint v227-228 etag-tombstone（GUID-free）**对齐移植**；只做不丢字节的那一半。`store.reconcile({activeName?})`，app 在 gallery list-fetch 时调（JRP 在 `persistence.listGallery`）。
+> 参考 WebPaint v227-228 etag-tombstone（GUID-free）。入口 `store.files.reconcileAll({activeFileName?})`（全库、仅用户显式指令）+ watchFolder remote frame 惰性 `reconcileFolder`（per-folder）——**都经同一 `converge` SSOT**。
 
-- **纯分类器** `classifyCloudGone(localNames, cloudNameSet, {seenBase, isDirty, authoritative, skip?})` → 返回该 demote 的 clean 孤儿（可穷举单测）。
-- **规则**：曾 synced（`seenBase!=null`）的 clean 本地、云端 path 没了 → **demote 成 local-only**（`cloud.clearState` + `head.forget` 清两轨 etag，**本地 blob 原地留着、不 trash、不 hardDelete**）。dirty 孤儿 → **留着 no-op**（未推字节只此一份）。从没 synced → 真本地文件、永不碰。在云端 → 不是孤儿。
-- **失败-fetch 守卫（命门）**：`authoritative = 在线 ∧ listAll.complete ∧ files 非空`，否则整个 no-op——partial 里「缺失」≠云端真没了；空列表多半未登录/网抖。绝不据 partial/空列表降级。
-- **K1**：可传 `activeName` 跳过当前打开的 doc（JRP 的 PDF 只读、demote 也无害，可不传）。
+- **纯分类器** `classifyCloudGone(...)` → 该处理的 clean 孤儿。**去抖**在 converge 里叠加（`pending-gone` 深模块）。
+- **规则（升级）**：曾 synced 的 clean 本地、云端 path 没了 → **去抖**：第一次权威见 gone 只标 candidate（`pending-gone` kv，照常显示 + `pendingGone` syncState badge，**不删**）；连续第二次+且跨 **GRACE(~24h)** → **`local.trash`**（move-aside 可恢复）+ `cloud.clearState`/`head.forget` 清两轨 etag + 清 candidate。**重现**（云端权威又有）/ **被编辑**（dirty，makeRaw.save 里即时 `pendingGone.clear`）→ 自愈清 candidate。dirty 孤儿 → ghost、no-op。从没 synced → 永不碰。
+  - **用户 argument**：本地 clean = 云端曾有备份；之后云端持续缺失（只要不是 store 别处/provider bug）= 用户同意的删除。但绝不一次网抖就删（故去抖）。
+- **失败-fetch 守卫（命门，不变）**：`authoritative`（reconcileAll=在线∧complete∧非空；reconcileFolder=该夹 complete），否则整个 no-op、**既不推进防抖也不清 candidate**。绝不据 partial/空列表推进。
+- **activeFileName（K1）**：createStore config 注入（读 appState.currentFile→全名），converge skip——**去抖 trash 绝不碰当前打开的 doc 本地缓存**（连 watchFolder 自动 reconcileFolder 也跳）。
 - **暂不做（仍 ⏸）**：裂卡 E / cloud-move A→B 的 **ghost UI / split-card / 阅读位置 re-key**（WebPaint 那版未真机验）。本模块只保证「clean 孤儿安全降级、绝不丢」，不解决 move 产生的重复卡或丢绑定。
 
 ## migration / schema-version（深模块，ADR-0019）

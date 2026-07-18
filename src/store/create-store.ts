@@ -91,7 +91,7 @@ export interface StoreConfig {
   //   框架（版本戳 + 有序注册表 + 编排）留着——将来真有用户、真要改 kv/IDB 结构时加第一条迁移。
   skipMigration?: boolean;                            // 测试/无 localStorage 环境跳过（prod 不传）
   cloudGoneGraceMs?: number;                          // 云端防抖窗口覆盖（测试注入小值；prod 缺省 ~24h）
-  activeName?: () => string | null;                   // 当前打开的 doc（全名身份）：cloud-gone 去抖 trash 绝不碰它（连 watchFolder 自动 reconcileFolder 也跳过）
+  activeFileName?: () => string | null;                   // 当前打开的 doc（全名身份）：cloud-gone 去抖 trash 绝不碰它（连 watchFolder 自动 reconcileFolder 也跳过）
 }
 
 // tryMove 结果式返回（不抛，UI 渲染 where 标签）。移动/改身份的唯一入口 = file.tryMove(to)。
@@ -181,7 +181,7 @@ export function createStore(config: StoreConfig) {
   // 云端防抖标记（candidate-gone）：clean cloud-gone 孤儿第一次权威见 gone 只标记，跨 GRACE 第二次+ 才 send trash（用户拍板 ~24h，2026-07-17）。
   const CLOUD_GONE_GRACE_MS = 24 * 3600 * 1000;
   const pendingGone = createPendingGone(kv, config.cloudGoneGraceMs ?? CLOUD_GONE_GRACE_MS);
-  const reconcileMod = createReconcile({ cloud, local, head, pending: pendingGone, isOnline, activeName: config.activeName });
+  const reconcileMod = createReconcile({ cloud, local, head, pending: pendingGone, isOnline, activeFileName: config.activeFileName });
 
   // ── folder 本地登记（离线建空夹）：pending = 建了但还没确认上云的空文件夹。──────────────
   //   离线也能建空夹（用户要求）：先 kv 登记 → 并进 listAllItems.folders（离线可见/持久）→ 回线 drainFolders 补建。
@@ -193,6 +193,7 @@ export function createStore(config: StoreConfig) {
   // ensureFolder：本地先登记（离线可见/持久），在线则补建云端并清 pending；离线/失败留 pending 等 drainFolders。
   async function ensureFolderLocalFirst(path: string): Promise<void> {
     assertValidFileName(path, appId);   // 路径护栏：禁在 .trash/.backup/.<appId> 保留根建夹
+    cancelFolderDeletionForDescendant(path);   // 建夹（含重建同名）→ 撤销该夹/祖先的排队删除（eager-cancel）
     addPendingFolder(path);
     if (isOnline()) { try { await cloud.ensureFolder(path); clearPendingFolder(path); } catch { /* 留 pending，回线补建 */ } }
   }
@@ -200,16 +201,42 @@ export function createStore(config: StoreConfig) {
     if (!isOnline()) return;
     for (const p of readPending()) { try { await cloud.ensureFolder(p); clearPendingFolder(p); } catch { /* 下次再补 */ } }
   }
-  // 离线队列统一重放（app 在 online/boot/reconnect 调）——**按序**：新文件夹补建 → 新上传补推 → 删文件重放。
-  //   （无独立「删文件夹」离线队列：离线只能删从没上云的 pending 空夹，已即时处理。）
+
+  // ── 离线「删已上云空夹」队列（镜像 delete-file 队列 delete.ts；只排**空**夹——enqueue 前已两端判空）。──────────
+  //   重放走 cloud.deleteEmptyFolder（护栏在 backend）：非空(别端加了内容/子夹)→取消(content wins)、list-failed→留队 defer。
+  const FOLDER_DEL_KEY = "internal.pending_folder_deletions";   // 相对键 → `${ns}.internal.pending_folder_deletions`
+  const readFolderDel = (): string[] => { try { const v = JSON.parse(kv.get(FOLDER_DEL_KEY) ?? "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
+  const writeFolderDel = (a: string[]): void => { const s = [...new Set(a)]; if (s.length) kv.set(FOLDER_DEL_KEY, JSON.stringify(s)); else kv.remove(FOLDER_DEL_KEY); };
+  const enqueueFolderDel = (p: string): void => writeFolderDel([...readFolderDel(), p]);
+  const dequeueFolderDel = (p: string): void => writeFolderDel(readFolderDel().filter((x) => x !== p));
+  // eager-cancel（镜像 pendingGone.clear，Q6 命门）：在 path 下创建后代（存文件/建夹）→ 撤销该祖先的排队删除（un-hide）。
+  function cancelFolderDeletionForDescendant(path: string): void {
+    const q = readFolderDel();
+    const keep = q.filter((f) => !(path === f || path.startsWith(`${f}/`)));
+    if (keep.length !== q.length) { writeFolderDel(keep); for (const f of q) if (!keep.includes(f)) notifyFolderOf(f); }
+  }
+  // 重放删文件夹（drainOfflineQueue 第 4 步）：**深→浅**（父夹见空子夹会误判 non-empty；先删深的）。
+  async function drainFolderDeletions(): Promise<void> {
+    if (!isOnline()) return;
+    const q = readFolderDel().sort((a, b) => b.split("/").length - a.split("/").length);
+    for (const p of q) {
+      let r; try { r = await cloud.deleteEmptyFolder(p); } catch (e) { ui.reportError(e, "warning"); continue; }   // 非文件夹等异常 → 留队 skip
+      if (r.status === "list-failed") continue;                 // 确认不了空 → 留队 defer
+      dequeueFolderDel(p); notifyFolderOf(p);                   // deleted/already-gone/non-empty(content wins 取消) 都终态出队
+    }
+  }
+
+  // 离线队列统一重放（app 在 online/boot/reconnect 调）——**按序**：新文件夹补建 → 新上传补推 → 删文件 → 删文件夹(深→浅)。
+  //   删文件夹放最后：queued 文件删完 → 夹才真空 → deleteEmptyFolder 才成。
   async function drainOfflineQueue(): Promise<void> {
     await drainFolders();                 // ① 新建的空夹补建（先建，后面的上传可能落在里头）
     await uploadReplay.drain();           // ② 离线新上传补推（ADR-0018；ask 模式内部先问）
-    await del.drainDeleteQueue();         // ③ 离线删重放（base-etag 守卫，edit-wins）
+    await del.drainDeleteQueue();         // ③ 离线删文件重放（base-etag 守卫，edit-wins）
+    await drainFolderDeletions();         // ④ 离线删文件夹重放（深→浅，non-empty 取消 / list-failed defer）
   }
 
   // ── 统一列举（README §2）：整个虚拟 FS 一次列举 = local ∪ cloud，每项带 syncState。mergeLocalCloud 收进库内。──
-  const listing = createListing({ cloud, local, head, pendingFolders: readPending, isPendingGone: (p) => pendingGone.isPending(p) });
+  const listing = createListing({ cloud, local, head, pendingFolders: readPending, isPendingGone: (p) => pendingGone.isPending(p), pendingFolderDeletions: readFolderDel });
 
   // ── watchFolder（网盘模型）：订阅**一个**文件夹。app 只知「这一夹更新了」，分不出也不需分 local/remote。──────
   //   连接态 store 自持（config.signedIn/isOnline）——app 不再传 ctx。每次回调同 shape（FolderSnapshot，仅该夹直属子项）。
@@ -484,6 +511,7 @@ export function createStore(config: StoreConfig) {
         }
         head.recordEdit(name);                                   // 同步标脏：offload 的 isDirty 守卫立即可见（防驱逐吃未推字节）
         pendingGone.clear(name);                                 // 编辑取消 candidate-gone：grace 内被编辑 → 立即当正常 dirty 文件处理（不等下轮 reconcile）
+        cancelFolderDeletionForDescendant(name);                 // 在待删夹下存文件 → 撤销该夹的排队删除（eager-cancel，Q6）
         const plain = await toU8(bytes);
         const sealed = await seal.sealForWrite(name, plain);
         await sub.serialize(name, () => local.save(name, sealed, opts?.hint));   // local 写同名串行链：与 offload.hardDelete 互斥（C2 红线）；hint 透传缩略图
@@ -627,17 +655,22 @@ export function createStore(config: StoreConfig) {
       // 文件夹增删（gallery folder-tree）：空文件夹增删。**离线也能建**（本地登记 + 回线 drainOfflineQueue 补建）。删除「必须证实为空」库内强制（removeFolder 权威判空）。
       ensureFolder: (path: string) => ensureFolderLocalFirst(path),
       newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", async () => { await ensureFolderLocalFirst(path); notifyFolderOf(path); })),   // 子夹出现在父夹 → 重画父夹
-      deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", async () => {
+      deleteFolder: singleFlight("删除文件夹", (path: string) => ui.busy("删除文件夹…", async (): Promise<void> => {
         assertValidFileName(path, appId);                            // 路径护栏
         // 判空**两端都查**：本地有该夹下的文件（含 local-only/未上云）→ 拒删（否则删掉云端夹、本地文件成孤儿）。
         const prefix = `${path}/`;
         if ((await local.appKeys()).some((k) => k.startsWith(prefix))) throw new Error(`文件夹非空（本地有文件），拒绝删除：${path}`);
         const wasPending = readPending().includes(path);
-        clearPendingFolder(path);                                    // 离线建的（从没上云）→ 清登记即删
-        if (!isOnline()) { if (wasPending) { notifyFolderOf(path); return true; } throw new Error("离线：无法删除已上云的文件夹"); }
-        const r = await cloud.removeFolder(path);                    // 云端侧再查一遍 + list 抛错拒删（守卫击穿修复，step1）
-        notifyFolderOf(path);                                        // 子夹从父夹消失 → 重画父夹
-        return r;
+        clearPendingFolder(path);                                    // **保持在 enqueue 前**（互斥 pending_new_folders：一个夹不能同时在建队列和删队列）
+        if (!isOnline()) {
+          if (wasPending) { notifyFolderOf(path); return; }          // 从没上云 → 清登记即删
+          enqueueFolderDel(path); notifyFolderOf(path);              // 已上云空夹 → 排队 + 隐藏（listing 减去），回线 drainFolderDeletions
+          return;
+        }
+        const r = await cloud.deleteEmptyFolder(path);               // backend 护栏：只删空夹
+        if (r.status === "non-empty") throw new Error(`文件夹非空，拒绝删除：${path}`);
+        if (r.status === "list-failed") throw new Error(`无法确认文件夹是否为空（列举失败），已拒绝删除：${path}`);
+        notifyFolderOf(path);                                        // deleted / already-gone：子夹从父夹消失 → 重画父夹
       })),
       // 离线队列统一重放（app 在 focus/visibility/online/boot 调）：新文件夹补建 → 新上传补推 → 删文件重放（按序）。
       drainOfflineQueue,
@@ -651,7 +684,7 @@ export function createStore(config: StoreConfig) {
       emptyBackup: singleFlight("清空备份箱", trashMod.emptyBackup),
       // **全库** cloud-gone 收敛（去抖后 send trash）。**仅用户显式指令**（隐藏的「校验完整性」入口），绝不自动/轮询——全树 listAll 是重活。
       //   日常开夹的惰性收敛已在 watchFolder 内走 reconcileFolder（看到夹才收敛，同一 converge SSOT）。
-      reconcileAll: (opts?: { activeName?: string }) => reconcileMod.reconcile(opts),
+      reconcileAll: (opts?: { activeFileName?: string }) => reconcileMod.reconcile(opts),
     },
     saveAs: singleFlight("另存为", identity.saveAs),
     // ── 加密导入辅助（文件还没进 store、无 name 可查时；对齐 WebPaint）──

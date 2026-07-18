@@ -47,7 +47,7 @@ export const store = createStore({
   signedIn: () => _auth.isSignedIn(),   // 连接态 store 自持（网盘模型）：watchFolder/云列举不再由 app 每次传 ctx
   // 当前打开的 doc（全名）：cloud-gone 去抖 trash 绝不碰它（连 watchFolder 自动 reconcileFolder 也跳过，防 trash 掉开着的 clean 文件本地缓存）。
   //   appState.currentFile = 活动 doc 裸名（退出置 null）；边界转全名。pre-init 抛 → null（不跳过，无害）。
-  activeName: () => { try { return appState.currentFile ? sessionFileName(appState.currentFile) : null; } catch { return null; } },
+  activeFileName: () => { try { return appState.currentFile ? sessionFileName(appState.currentFile) : null; } catch { return null; } },
 });
 
 // ============ 设置/状态 collection（4 个）注入 ============

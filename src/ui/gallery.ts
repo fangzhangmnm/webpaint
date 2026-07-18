@@ -426,7 +426,7 @@ function makeGallery(host: GalleryHost) {
       async function folderDelete(ft: { name: string; path: string }) {
         openMenu.value = null;
         // per-folder 模型下不预知子夹空否 → 直接交 store.deleteFolder：库内「必须空」是红线硬兜底，非空则抛、下面 catch surface。
-        if (!host.signedIn() || !host.online()) { host.status(t("gal.st.folderDelNeedLogin"), true); return; }
+        // 离线也放行：已上云空夹 → store 排队隐藏、回线 drainOfflineQueue 删（deleteEmptyFolder 护栏）；从没上云 → 清登记即删。
         // 走 store.flow.deleteFolder：库内强制锁屏 + 「必须空」兜底 + 不吞错（旧版 getItemByPath 没选 folder facet
         //   → item.folder 永远 undefined → 根本没删却照报「已删除」= N9 + 用户「删空夹不可用」）。
         try {

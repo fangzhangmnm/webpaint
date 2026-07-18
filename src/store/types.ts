@@ -40,6 +40,11 @@ export interface MoveOpts {
   conflictBehavior?: "fail" | "replace" | "rename";
 }
 
+// 删空夹的判别式结果。**backend 侧唯一的文件夹删除面**——递归/无条件的 delete(id) 不暴露给上层删文件夹，
+//   护栏（只删空夹）由 provider 保证。四态让上层区分：deleted/already-gone=终态成功；non-empty=有内容（drain 取消、
+//   online 拒删）；list-failed=列举失败确认不了空（drain 留队 defer、online 拒删）。绝不 throw 非空/列举失败（用 status 表达）。
+export interface FolderDeleteResult { status: "deleted" | "already-gone" | "non-empty" | "list-failed" }
+
 // 低层云端传输契约。WebPaint 用 OneDriveProvider（包 Graph），测试用 MockProvider。
 export interface CloudProvider {
   list(folder?: string): Promise<CloudItem[]>;
@@ -49,7 +54,9 @@ export interface CloudProvider {
   downloadRange(id: string, offset: number, length: number): Promise<Uint8Array | ArrayBuffer | Blob>;
   upload(path: string, blob: Bytes | Blob, opts?: UploadOpts): Promise<CloudItem>;
   ensureFolder(path: string): Promise<string>;
-  delete(id: string): Promise<void>;
+  delete(id: string): Promise<void>;   // 文件硬删（trash purge / hard remove）。**文件夹删除不走它**——走 deleteEmptyFolder（护栏在 provider）。
+  // 删**空**文件夹（唯一文件夹删除面）：provider 内部证实空才删（Graph 无 native「删空夹」→ list-then-delete，带 If-Match folder etag best-effort）。
+  deleteEmptyFolder(path: string): Promise<FolderDeleteResult>;
   move(id: string, targetFolderId: string, opts?: MoveOpts): Promise<CloudItem>;
   rename(id: string, newName: string, eTag?: string | null): Promise<CloudItem>;
 }
@@ -130,7 +137,7 @@ export interface CloudSync {
   rename(oldName: string, newName: string): Promise<unknown>;
   remove(name: string): Promise<unknown>;
   ensureFolder(path: string): Promise<void>;
-  removeFolder(path: string): Promise<boolean>;
+  deleteEmptyFolder(path: string): Promise<FolderDeleteResult>;   // 薄委托 provider.deleteEmptyFolder（护栏在 backend）
   isDirty(name: string): boolean;
   setDirty(name: string, dirty: boolean): void;
   getETag(name: string): string | null;

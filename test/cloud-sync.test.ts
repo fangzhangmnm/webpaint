@@ -81,34 +81,24 @@ test("[cloud-sync] 正常 no-base 新建（云端无同名）→ 成功 synced",
   assert(!cloud.isDirty("g"), "synced");
 });
 
-// ── removeFolder：判空守卫（原 bug = list 抛错→当空→守卫击穿删掉非空夹）────────────────────────
-test("[cloud-sync] removeFolder：空夹 → 删除成功", async () => {
+// ── deleteEmptyFolder：判空护栏（归 backend provider；返判别式 status 不 throw）。list-failed 覆盖见 folder-delete.test。──
+test("[cloud-sync] deleteEmptyFolder：空夹 → status=deleted", async () => {
   const { provider, cloud } = rig();
   await provider.ensureFolder("Empty");
-  eq(await cloud.removeFolder("Empty"), true, "空夹删成功");
+  eq((await cloud.deleteEmptyFolder("Empty")).status, "deleted", "空夹删成功");
   assert(!(await provider.getItemByPath("Empty")), "夹没了");
 });
 
-test("[cloud-sync] removeFolder：非空夹 → 拒删（抛错）", async () => {
+test("[cloud-sync] deleteEmptyFolder：非空夹 → status=non-empty（不删，绝不递归）", async () => {
   const { provider, cloud } = rig();
   await provider.ensureFolder("F");
   await provider.upload("F/child.ora", enc("C"));
-  let threw = false;
-  try { await cloud.removeFolder("F"); } catch { threw = true; }
-  assert(threw, "非空 → 拒删");
-  assert(await provider.getItemByPath("F/child.ora"), "子项还在");
+  eq((await cloud.deleteEmptyFolder("F")).status, "non-empty", "非空 → 不删");
+  assert(await provider.getItemByPath("F/child.ora"), "子项还在（没被递归删）");
+  assert(await provider.getItemByPath("F"), "夹还在");
 });
 
-test("[cloud-sync] removeFolder：list 抛错 → **拒删**（绝不当空放行；守卫击穿修复）", async () => {
-  const { provider } = rig();
-  await provider.ensureFolder("F");
-  await provider.upload("F/child.ora", enc("C"));            // F 非空
-  // 包一层：list 恒抛（模拟网络失败 / 子树列举失败）。getItemByPath 仍走真 provider（拿得到 F）。
-  const wrapped = { ...provider, list: async () => { throw new Error("list failed (network)"); } };
-  const cloud2 = createCloudSync({ provider: wrapped as unknown as typeof provider, kv: memKv(), fileName: (n: string) => n });
-  let threw = false;
-  try { await cloud2.removeFolder("F"); } catch { threw = true; }
-  assert(threw, "list 抛 → removeFolder 抛错拒删（不静默删非空夹）");
-  assert(await provider.getItemByPath("F"), "F 还在（没被误删）");
-  assert(await provider.getItemByPath("F/child.ora"), "子项没被误删");
+test("[cloud-sync] deleteEmptyFolder：不存在的夹 → status=already-gone（幂等）", async () => {
+  const { cloud } = rig();
+  eq((await cloud.deleteEmptyFolder("Nope")).status, "already-gone", "本就没有 → 幂等成功");
 });
