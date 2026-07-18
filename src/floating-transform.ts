@@ -355,7 +355,7 @@ const MODES: Record<TransformModeKind, TransformMode> = {
     projectOnEnter: () => null,
   },
 };
-export const TRANSFORM_MODE_KINDS = ["free", "uniform", "distort"];
+// （TRANSFORM_MODE_KINDS 已删 v415：零调用者。模式在 TransformMode 类型里，运行时不需要这份字符串表。）
 
 // ---- 约束数学（mode-independent）----
 function applyTranslate(mesh: Mesh, meshSnap: Mesh, dx: number, dy: number) {

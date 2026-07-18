@@ -344,7 +344,7 @@ const gallery = mountGallery(document.getElementById("galleryMount")!, {
 // 晚 init 在此之后跑，故各模块 init 体里的 `x = ctx.gallery` 读到真值。
 setSessionGallery(gallery);   // session 的晚绑 gallery handle（getter 已使其 init 期即读到真值；此调用保持幂等冗余）
 initSession(ctx);
-initImportImage(ctx);      // 图片/.ora 导入（需 late ctx：applyCheckerboard/renderLayersPanel/setGalleryOpen/uniqueLocalName）
+initImportImage(ctx);      // 图片/.ora 导入（需 late ctx：applyCheckerboard/renderLayersPanel/setGalleryOpen/uniqueNameFor）
 initGalleryShell(ctx);     // 图库外壳（需 ctx.gallery + late keys）
 initTopbarMenu(ctx);       // 顶栏/菜单/sheet/save 触发 事件接线（需 ctx.gallery）
 initBlenderSync(ctx);      // Blender 同步面板（菜单入口 menuBlender → 自建 float panel）

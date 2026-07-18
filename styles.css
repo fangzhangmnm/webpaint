@@ -1813,19 +1813,15 @@ body[data-mode="gallery"] .board { display: none !important; }
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--accent, #4c8bf5);
 }
-.tool[data-state="saving"] { opacity: 0.5; }
-.tool[data-state="cloud-dirty"] { color: #d49100; }
-.tool[data-state="cloud-busy"] { color: #d49100; }
-/* 云上传中：箭头部分自旋。SVG 里 class="spin-arc" 是旋转弧 */
-/* v134 笔架云备份按钮也用同 spin 动画（data-state="busy"） */
-.tool[data-state="cloud-busy"] .spin-arc,
-.brush-rack-action[data-state="busy"] .spin-arc { animation: wp-spin 1s linear infinite; }
+/* v415 删：saving / cloud-dirty / cloud-busy / saved 四个 .tool 态**没有任何生产者**——
+   store cutover 后 computeSaveState 只产 dirty | synced | local-only；
+   .brush-rack-action[data-state="busy"] 同理（笔架的云备份按钮早已删）。
+   wp-spin 动画本身保留：blender 连接按钮还在用（见下方 .btp-connbtn[data-state="connecting"]）。 */
 @keyframes wp-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
 .tool[data-state="synced"] { color: #8a8a8a; }
-.tool[data-state="saved"] { color: var(--ink-soft); }
 .gallery-grid {
   /* 内容高、不伸不缩（flex:none）——滚动交给 #galleryMount。这样 aspect-ratio 卡片行不会被收缩压扁。 */
   flex: none;

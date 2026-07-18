@@ -10,7 +10,6 @@ function byId<T extends HTMLElement = HTMLElement>(id: string): T {
 
 export const els = {
   board: byId("board"),
-  topBar: byId("topBar"),
   zoomLabel: byId("zoomLabel"),
   canvasSizeLabel: byId("canvasSizeLabel"),
   statusLabel: byId("statusLabel"),
@@ -83,7 +82,6 @@ export const els = {
   referenceFitBtn: byId("referenceFitBtn"),
   referenceFileInput: byId<HTMLInputElement>("referenceFileInput"),
   galleryFull: byId("galleryFull"),
-  galleryCloseBtn: byId("galleryCloseBtn"),
   galleryAddBtn: byId("galleryAddBtn"),
   galleryAddPopup: byId("galleryAddPopup"),
   galleryTrashBtn: byId("galleryTrashBtn"),
@@ -130,13 +128,6 @@ export const els = {
   menuFps: byId("menuFps"),
   menuCheckUpdate: byId("menuCheckUpdate"),
   oraFileInput: byId<HTMLInputElement>("oraFileInput"),
-  genericBackdrop: byId("genericBackdrop"),
-  genericSheet: byId("genericSheet"),
-  genericSheetTitle: byId("genericSheetTitle"),
-  genericSheetMessage: byId("genericSheetMessage"),
-  genericSheetInput: byId("genericSheetInput"),
-  genericSheetConfirm: byId("genericSheetConfirm"),
-  genericSheetCancel: byId("genericSheetCancel"),
   toolBtns: [...document.querySelectorAll<HTMLElement>(".tool[data-tool]")],
   activeSwatch: byId("activeSwatch"),
   // 浮动色板

@@ -1,6 +1,6 @@
 // 深模块策略：move-aside（删除 / 覆盖前留底）的**命名 + 隐藏命名空间**约定。规则只写在这里，
-// 不散到 app。tier 无关——cloud 用 .trash/ /.backup/ 文件夹，local 用 .backup-local/ 键前缀；
-// 命名与防撞这一份策略两边共用。
+// 不散到 app。tier 无关——cloud 用 .trash/ /.backup/ 文件夹，local 用 blob-partition 的 trash/backup 分区
+// （不是键前缀：v415 前这里写的「.backup-local/ 键前缀」已不是事实）；命名与防撞这一份策略两边共用。
 //
 // 名字 = `<base> [<yyyymmddhhmmss>-<guid>]`：
 //   - yyyymmddhhmmss：人读的秒级时间，一眼看出「哪个时间点的备份」；
@@ -8,7 +8,8 @@
 //     与本仓「identity = GUID」一脉，见 MASTER.md）。
 // 纯叶子模块（只依赖 Date/crypto），cloud-sync / local-adapter / session.js 都可安全 import（无环）。
 
-export const LOCAL_BACKUP_PREFIX = "local-backup:";   // 本地隐藏命名空间（镜像云端 .backup/，对齐 local-trash: 命名；ADR-0019 迁移 .backup-local/→此）；不进图库
+// （LOCAL_BACKUP_PREFIX 已删 v415：本地备份改走 blob-partition 的 backup 分区、键是 `backup/<inner>`，
+//   这个字符串前缀零引用。它最后一个消费者是 session.listSessions 的图库过滤，那个也在 v415 删了。）
 
 function pad(n: number, w = 2) { return String(n).padStart(w, "0"); }
 

@@ -1,27 +1,27 @@
 // 职责（单一）：顶栏按钮 + 汉堡菜单项 + 通用 sheet 开关 + 保存触发 的事件接线。
 //
 // 从 app.js god-file 切出来的「点哪个顶栏/菜单按钮 → 调哪条编排」那一轴。纯接线层：
-// 把 DOM 监听绑到 els.*，回调里调 session.* / _store.* / ctx 协作件。**不**持任何 SSoT 状态。
+// 把 DOM 监听绑到 els.*，回调里调 session.* / ctx 协作件。**不**持任何 SSoT 状态。
+// （v415：本模块**不再直接碰 store** —— 一切经 session.*。原来那份 _store.flow/_store.session/
+//   _store.autosave/_store.edits 的红线清单说的调用早已一个都不剩，import 也删了。）
 //
-// **红线（CRITICAL）**：本模块只 RELOCATE 接线，**绝不**改任何 store.* / _store.flow.* /
-//   _store.session.* / _store.autosave.* / _store.edit* / session.* 调用（参数/顺序/语义全保原样）。
+// **红线（CRITICAL）**：本模块只接线，**绝不**改任何 session.* 调用的参数/顺序/语义。
 //   menuSaveAs 用 session.saveAs（内部 = store.file(name,{mode:"new"}).save）；
-//   menuRevert 用 session.readCheckpoint/adoptWithOpts + _store.edits；
-//   save 触发用 _store.edit/session.request/autosave.flush。要改 store 行为 → STOP，escalate。
+//   menuRevert 用 session.readCheckpoint + session.adoptAsExisting（**既有身份**，别错用 adoptAsNew）。
+//   要改 store 行为 → STOP，escalate。
 //
 // 留在 app.js（核心 HUD glue，**不**搬）：setStatus / updateZoomLabel / board.render HUD hook。
 //
 // ctx 绑入（initTopbarMenu(ctx)，gallery 晚绑后才调）：
 //   input / doc / board / history / editMode / setStatus / updateSaveStatus / updateZoomLabel /
 //   gallery / rack。
-// 直接 import（leaf/singleton）：session、_store(store)、els、
-//   openInputSheet/openConfirmSheet/lockSyncGate、setMenuOpen、
-//   listCloudSessionsRecursive、decodeOraToDoc、compressPixelSnap、maybeFastForwardActive。
+// 直接 import（leaf/singleton）：session、els、openInputSheet/openConfirmSheet/lockSyncGate、
+//   setMenuOpen、decodeOraToDoc、compressPixelSnap 等（以实际 import 块为准）。
 
 import { session } from "./session-state.ts";
 import { isUnlocked } from "./crypto-state.ts";
+import { checkpointAgeMinutes } from "./checkpoint-policy.ts";
 import {
-  store as _store,
 } from "./app-store.ts";
 import { els } from "./els.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
@@ -208,7 +208,9 @@ export function initTopbarMenu(ctx: AppContext) {
       setStatus(session.enc.encrypted && !isUnlocked() ? t("tm.revertFailedNeedPassword") : t("tm.noOpenSnapshot"), true);
       return;
     }
-    const ageMin = Math.max(1, Math.round((Date.now() - (cp.at || session.sessionOpenedAt)) / 60000));
+    // cp.at 由 putCheckpoint 恒写 → 不需要兜底（旧的 `|| session.sessionOpenedAt` 是假兜底：
+    //   _sessionOpenedAt 的唯一写入者 markOpenedNow 零调用者，它恒为 0）。
+    const ageMin = checkpointAgeMinutes(cp.at, Date.now());
     const choice = await lockSyncGate({
       title: t("tm.revertTitle"),
       message: t("tm.revertMessage", { min: ageMin }),

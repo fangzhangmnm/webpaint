@@ -8,8 +8,9 @@
 // **红线（CRITICAL）**：setGalleryOpen / 新建确认 等编排里对 session.* / _store.* 的调用全部
 //   RELOCATE 原样（参数/顺序/语义保持），绝不改。要改 store/session 行为 → STOP，escalate。
 //
-// 对外导出（被 ctx 注入 app.js，session-state / import-image 经 ctx 消费）：
-//   setGalleryOpen / checkQuotaAndWarn / uniqueNameFor / updateIdbUsage / openNewDocSheet。
+// 对外导出：setGalleryOpen / checkQuotaAndWarn / uniqueNameFor（这三个经 ctx 注入 app，
+//   由 session-state / import-image 消费）。updateIdbUsage / openNewDocSheet 只在本模块内用
+//   （v415 核实：不在 AppContext 里、app.ts 也不 import——旧注释说它们对外是错的）。
 //
 // 依赖：editMode / board / gallery / store(_store) / setStatus 经 initGalleryShell(ctx) 绑入；
 //   doc 同样经 ctx（openNewDocSheet 读 doc.width/height）。session / els / isSignedIn /
@@ -27,7 +28,6 @@ import { openInputSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.ts";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.ts";
-import { ensureUnlocked } from "./enc-thumbs.ts";
 import { t } from "./i18n/index.ts";
 
 import type { AppContext } from "./app-context.ts";

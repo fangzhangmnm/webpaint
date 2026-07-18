@@ -58,7 +58,7 @@ function htmlLangFor(l: Lang): string {
 }
 export function applyHtmlLang() { document.documentElement.lang = htmlLangFor(lang()); }
 
-export function cycleLang(): Lang { return LANGS[(LANGS.indexOf(lang()) + 1) % LANGS.length]; }
+// （cycleLang 已删 v415：零调用者——语言在设置菜单里显式选，没有"循环切换"的入口。）
 
 export function setLang(l: Lang) {
   if (!LANGS.includes(l) || l === lang()) return;   // 值没变就早退：别白盖 uat 触发无谓云同步

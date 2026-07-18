@@ -7,7 +7,7 @@
 //   保单调性 / 不 overshoot（vs Catmull-Rom 在密集点会 over/undershoot 被 clamp 成 plateau）
 
 import { registerFilter, clamp8 } from "../filters.ts";
-import type { Filter, FilterParams } from "../filters.ts";
+import type { FilterParams } from "../filters.ts";
 
 type Point = [number, number];
 

@@ -514,7 +514,7 @@ export function createStore(config: StoreConfig) {
 
   // ── file 工厂（重载：isZip 编译期分流）──
   //   mode="new"（新建画布）：首次 save 前查占用，已占用 → 抛 CloudNameCollisionError（**绝不静默覆盖同名**）。
-  //     红线归位：不覆盖的保证收进 store（不依赖每个 app 调用方记得先 uniqueLocalName）。"existing"（默认）= 普通 open/编辑，覆盖是正常持久。
+  //     红线归位：不覆盖的保证收进 store（不依赖每个 app 调用方记得先查重名）。"existing"（默认）= 普通 open/编辑，覆盖是正常持久。
   function makeRaw(name: string, mode: "new" | "existing" = "existing"): RawFile {
     let _createChecked = mode !== "new";   // "new" 首次 save 前做一次占用检查；之后（本对象已建）跳过，后续 autosave 是编辑不是新建
     const readLocal = async (): Promise<Blob | null> => {        // 读本地缓存字节 → 解壳出明文

@@ -20,11 +20,9 @@ interface PanelHandlers {
   show?: () => void;
   hide?: () => void;
 }
-type ExclusiveListener = (id: string | null) => void;
 
 const handlers = new Map<string, PanelHandlers>();
 let currentOpen: string | null = null;
-const listeners = new Set<ExclusiveListener>();
 
 export const PANELS = {
   RACK_BRUSH: "rack-brush",
@@ -50,7 +48,6 @@ export function openExclusive(id: string) {
   currentOpen = id;
   const h = handlers.get(id);
   if (h?.show) h.show();
-  notifyListeners();
 }
 
 export function closeExclusive() {
@@ -58,18 +55,10 @@ export function closeExclusive() {
   const h = handlers.get(currentOpen);
   if (h?.hide) h.hide();
   currentOpen = null;
-  notifyListeners();
 }
 
 export function getCurrentExclusive() { return currentOpen; }
 
-export function onExclusiveChange(fn: ExclusiveListener) {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-}
+// （onExclusiveChange + listeners + notifyListeners 整条监听链已删 v415：
+//   onExclusiveChange 是 listeners 的**唯一** add 入口且零订阅者 → listeners 恒空、通知恒空转。）
 
-function notifyListeners() {
-  for (const l of listeners) {
-    try { l(currentOpen); } catch (e) { reportError(new Error("[panel-state] listener err: " + String(e)), "log"); }
-  }
-}

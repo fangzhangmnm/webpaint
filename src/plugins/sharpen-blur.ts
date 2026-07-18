@@ -6,7 +6,7 @@
 // 论证：模糊本质 non-local 卷积，大图慢；brush 模式天然限定 bbox 不卡
 
 import { registerFilter, clamp8, makeSliderRow, attachColorBrushBehavior } from "../filters.ts";
-import type { Filter, FilterParams } from "../filters.ts";
+import type { FilterParams } from "../filters.ts";
 
 export class SharpenBlurFilter {
   static id = "sharpenBlur";

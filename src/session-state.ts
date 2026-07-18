@@ -61,7 +61,6 @@ let showFullscreenBusy: AppContext["showFullscreenBusy"], hideFullscreenBusy: Ap
 let _activeSessionName: string | null = "未命名";   // 幽灵 path 保护：boot 成功/主动 open/new/save-as 才升级真名
 let _isLazyBlankSession = false;
 let _docLastSavedAt = 0;
-let _sessionOpenedAt = 0;
 let _loadedDocIsNewer = false;
 let _loadedDocWriterVer: string | null = null;
 let _loadedDocNewerConfirmed = false;
@@ -401,24 +400,8 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
   setGalleryOpen(false);
 }
 
-// ---- 打开云端路径（cloud item：unified open，file.open 自动拉云落本地）----
-async function pullCloudPath(path: string) {
-  const name = stripSessionExt(path);
-  // 开画顺带把 4 个 settings/state collection 拉云对齐（v409，user 2026-07-14：「开画作的时候可以顺便
-  //   并行 pullandreconcile 下，fire and forget 不用 await」）。**绝不 await**：对齐是锦上添花，
-  //   不该让开画等网络（且离线/local-only 内部本就 no-op）。
-  pullSettingsAndState();
-
-  if (/\.zip$/i.test(String(path))) { if (!(await ensureUnlocked(name))) { setStatus(t("ss.notPulledNeedPassword"), true); return; } }
-  showFullscreenBusy(t("ss.pullingFromCloudBusy"));
-  try {
-    await es.open(toFull(name));   // file.open：本地无→拉云落本地→adopt。freshness/冲突经 store ui。边界转全名。
-    _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
-    void _captureCheckpoint(name, "cloud-pull");
-    setGalleryOpen(false); setStatus(t("ss.openedFromCloud", { name }));
-  } catch (err) { reportError(new Error("[cloud] pull failed: " + String(err)), "log"); setStatus(t("ss.pullFailed", { error: errMsg(err) })); }
-  finally { hideFullscreenBusy(); }
-}
+// pullCloudPath 已删（v415）：零调用者。打开云端项走 openItem —— es.open → store.file.open，
+//   本地没有就自动拉云落本地，同一条路径同时覆盖本地项和纯云端项，不需要第二个平行入口。
 
 // ---- 打开图库 item ----
 async function openItem(item: GalleryItem) {
@@ -517,15 +500,11 @@ function setName(name: string | null, opts: { persist?: boolean } = {}) {
 
 // ---- 公开 session 对象（app.js 兼容面）----
 export const session = {
-  current: _phase, enc: _enc,
-  encryptCurrent, decryptCurrent, refreshEncrypted: _refreshEncrypted,
+  enc: _enc,
+  encryptCurrent, decryptCurrent,
   get name() { return _activeSessionName; },
-  get lazyBlank() { return _isLazyBlankSession; },
   get loadingDoc() { return _loadingDoc; },
-  get docLastSavedAt() { return _docLastSavedAt; },
-  get sessionOpenedAt() { return _sessionOpenedAt; },
   get loadedDocIsNewer() { return _loadedDocIsNewer; },
-  get loadedDocWriterVer() { return _loadedDocWriterVer; },
   get loadedDocNewerConfirmed() { return _loadedDocNewerConfirmed; },
   get dirty() { return es ? es.isDirty() : false; },            // 内存脏（save-status 徽章用）
   markEdited() { if (es) es.markDirty(); },                     // app 驱动内容变化（导入/blender/参考窗）→ 标脏
@@ -533,8 +512,7 @@ export const session = {
   save: saveNow, saveAndPush,
   // adopt 的两个意图显式分开（别再合成一个带 flag 的）：import=新身份 / revert=既有身份。
   adoptAsNew, adoptAsExisting,
-  rename: renameCurrentSession, exit: exitCanvasToGallery, newDoc, pull: pullCloudPath, open: openItem, push: pushItem, unload: unloadItem,
-  encodeOra: _encodeCurrentOra, buildOraMeta: _buildOraMeta,
+  rename: renameCurrentSession, exit: exitCanvasToGallery, newDoc, open: openItem, push: pushItem, unload: unloadItem,
   /** 当前作品的 at-rest **密文**字节（原样，不解壳、不要密码）。非加密件 → null。
    *  先 saveNow()：at-rest 字节是「上次保存」的内容，不先落盘就会导出成旧版本。 */
   async readEncryptedBytes(): Promise<EncryptedBlob | null> {
@@ -543,11 +521,10 @@ export const session = {
     return await _file(_activeSessionName).getEncryptedBlob();
   },
   readCheckpoint: _readSessionCheckpoint, dropCheckpoint: _dropCheckpoint,
+  // （v415 删掉一批零读者的 facade 条目：current/lazyBlank/docLastSavedAt/sessionOpenedAt/
+  //   loadedDocWriterVer/refreshEncrypted/encodeOra/buildOraMeta/markOpenedNow/markNewerConfirmed/
+  //   markSavedNow/resetSavedAt。背后的私有实现该活的都还活着，只是不再从这个门面漏出去。）
   awaitCloudPushIdle: async () => { /* 薄库 push 内联 await，无独立在飞态 */ },
-  markOpenedNow() { _sessionOpenedAt = Date.now(); },
-  markNewerConfirmed() { _loadedDocNewerConfirmed = true; },
-  markSavedNow() { _docLastSavedAt = Date.now(); },
-  resetSavedAt() { _docLastSavedAt = 0; },
 };
 
 export function initSession(ctx: AppContext) {

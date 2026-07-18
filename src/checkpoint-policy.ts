@@ -16,7 +16,6 @@ export type CheckpointTrigger =
   | "gallery-open"    // 从图库点开一幅画 → 封存
   | "new-doc"         // 新建画布（首存之后）→ 封存（revert = 回到空白）
   | "save-as"         // 另存为新身份 → 封存（新身份的"打开态"就是此刻）
-  | "cloud-pull"      // 从云端拉一幅本地没有的画并打开 → 封存
   | "boot-restore"    // 冷启动 / tab 重开 → **不**封存
   | "revert";         // 回滚 → **不**封存
 
@@ -24,7 +23,6 @@ const CAPTURE: Record<CheckpointTrigger, boolean> = {
   "gallery-open": true,
   "new-doc": true,
   "save-as": true,
-  "cloud-pull": true,
   "boot-restore": false,
   "revert": false,
 };

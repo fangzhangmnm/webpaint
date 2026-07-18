@@ -5,11 +5,10 @@ import { describe, it, assert, eq } from "./runner.mjs";
 import { shouldCapture, checkpointKey, checkpointAgeMinutes } from "../src/checkpoint-policy.ts";
 
 describe("checkpoint · 何时封存（这组判断错了 revert 就废）", () => {
-  it("打开一幅画的四个入口 → 封存", () => {
+  it("打开一幅画的三个入口 → 封存", () => {
     assert(shouldCapture("gallery-open"), "从图库点开");
     assert(shouldCapture("new-doc"), "新建画布（revert = 回到空白）");
     assert(shouldCapture("save-as"), "另存为新身份");
-    assert(shouldCapture("cloud-pull"), "从云端拉一幅本地没有的画");
   });
 
   it("★冷启动 / tab 重开 → **不**封存", () => {

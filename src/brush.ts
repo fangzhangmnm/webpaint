@@ -420,8 +420,4 @@ function hexToRgbObj(hex: string): RgbColor {
   return { r: 0, g: 0, b: 0 };
 }
 
-// "#rrggbb" → "rgba(r,g,b,a)"
-export function hexToRgba(hex: string, a: number = 1) {
-  const c = hexToRgbObj(hex);
-  return `rgba(${c.r},${c.g},${c.b},${a})`;
-}
+// （hexToRgba 已删 v415：零调用者。要 rgba 字符串的地方自己用 hexToRgbObj 拼。）

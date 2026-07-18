@@ -50,7 +50,7 @@ export function applyTheme(th: string) {
   writeBootSnapshot("theme", th);                   // 单向镜像：只给下次 boot 的 guard 读
 }
 export function cycleTheme() { return THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]; }
-export function currentTheme() { return theme; }
+// （currentTheme 已删 v415：零调用者。）
 
 // collection hydrate 后对账（app.ts 的 fixup 相调）：先刷快照 → 值不对就地换（主题=css，无需 reload）。
 //   典型触发：快照丢了（清缓存/隐私模式）或旧版本遗留的 `webpaint.theme` 还没迁过来。

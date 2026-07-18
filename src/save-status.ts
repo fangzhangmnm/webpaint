@@ -1,12 +1,11 @@
-// 职责（单一）：顶栏 save 按钮 4 态渲染 + 文档版本 newer banner。
-//   - computeSaveState：读 store（busy/edits/cloud）+ session.name + isSignedIn 推 save 态。
-//   - updateSaveStatus：把 4 态渲染成顶栏 save 按钮的 icon/title/data-state（gallery-first 无 session 时隐）。
+// 职责（单一）：顶栏 save 按钮 **3 态**渲染 + 文档版本 newer banner。
+//   - computeSaveState：session.dirty + isSignedIn → dirty | synced | local-only。
+//     （store cutover 后**不再读 busy/cloud**——sync 脏进列举，不是徽章热路径。旧注释说的"4 态/读 store"已不是事实。）
+//   - updateSaveStatus：渲染成顶栏 save 按钮的 icon/title/data-state（gallery-first 无 session 时隐）。
 //   - updateNewerBanner：文档版本警告 banner（doc.body.dataset.docNewer 给 CSS 染色）。
-// 依赖全是单例/leaf，直接 import：store/isSignedIn ← app-store.js，session ← session-state.ts，els ← els.ts。
-// 注：ICON_DISK/ICON_UPLOAD/ICON_CLOUD_CHECK/ICON_CLOUD_BUSY 也被 app.js 的 rack.init({icons}) 消费，
-//   故在此 export，app.js 改为从本模块 import（单一定义源）。
+// 依赖全是单例/leaf，直接 import：isSignedIn ← app-store.ts，session ← session-state.ts，els ← els.ts。
 import { els } from "./els.ts";
-import { store as _store, isSignedIn } from "./app-store.ts";
+import { isSignedIn } from "./app-store.ts";
 import { session } from "./session-state.ts";
 import { t } from "./i18n/index.ts";
 
@@ -25,21 +24,17 @@ export function updateNewerBanner() {
 //   只防崩，IDB 是 transient（浏览器随时可能 evict / 用户清缓存），不算安全位置。
 //   真正"安全"= 同步到云端。
 //
-//   Save 按钮 4 态：
-//   - saving → 半透明
+//   Save 按钮 3 态（cutover 后的真实集合）：
 //   - dirty (本地未存) → 蓝色 disk + 角点
-//   - cloud-dirty (IDB 已存但云端未同步) → 橙色上传箭头
 //   - synced → 灰色对勾云（已安全）
 //   - local-only (未登录云端) → 灰色 disk（提示 IDB 易失，建议登录）
-//   点任意状态都触发 saveAndPush（dirty + cloud-dirty 一次性处理）。
-//   冲突 (412) → alert 提示用户改名，本地已保存但云端没动。
+//   点任意状态都触发 saveAndPush。
+//   （saving / cloud-dirty / cloud-busy 三态已随 cutover 消失——computeSaveState 不再产出它们；
+//    对应的 ICON_UPLOAD / ICON_CLOUD_BUSY 图标和 styles.css 的 [data-state] 选择器一并作废。）
 export const ICON_DISK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>';
-export const ICON_UPLOAD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>';
 export const ICON_CLOUD_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="9 13 11 15 15 11"/></svg>';
-// 上传中：云形 + 旋转的弧。CSS animation rotate 由 [data-state="cloud-busy"] 触发
-export const ICON_CLOUD_BUSY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><g class="spin-arc" style="transform-origin: 12px 13px;"><path d="M9 13a3 3 0 0 1 5.5-1.6" /><polyline points="14.5 9.5 14.5 11.4 12.6 11.4" /></g></svg>';
 
-export function computeSaveState() {
+function computeSaveState() {
   // cutover：busy/cloud 状态不再暴露（sync 脏进 listAllItems，非徽章热路径）。内存脏=session.dirty，其余按登录态。
   if (session.dirty) return "dirty";                       // 内存脏（未落盘）
   return isSignedIn() ? "synced" : "local-only";

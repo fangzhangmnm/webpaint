@@ -18,7 +18,6 @@ import type { AppContext } from "./app-context.ts";
 import { reportError } from "./error-badge.ts";
 import { session } from "./session-state.ts";
 import type { Layer } from "./doc.ts";
-import { store } from "./app-store.ts";
 import { renderDocToImageBlob } from "./session.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";

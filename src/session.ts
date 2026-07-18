@@ -18,7 +18,6 @@
 //     把"加载失败的 path"当 oldName 删掉
 //   - **破坏性操作永远用「真正载入的路径」**，不用这里的 getCurrentSessionName()
 
-import { encodeDocToOra, decodeOraToDoc } from "./ora.ts";
 import { compositeLayers } from "./layer-composite.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
@@ -85,19 +84,8 @@ export async function renderThumbBlob(doc: PaintDoc, maxSide = 256) {
 // loadCurrentSession / openSession 已退役（v235）：本地读取统一走 store.flow.load（加密容器自动解壳）。
 //   boot 在 app.js、打开在 session-state.openItem。
 
-/** 导出 .ora 到本地下载 */
-export async function exportOraDownload(doc: PaintDoc, filename = "未命名.ora") {
-  const blob = await encodeDocToOra(doc);
-  triggerDownload(blob, filename);
-}
-
-/** 导出 .psd 到本地下载（最小子集：raster layer + bbox + blend mode + opacity + name）。
- *  Photoshop / Affinity / Procreate / Krita 都吃。详见 src/psd.js */
-export async function exportPsdDownload(doc: PaintDoc, filename = "未命名.psd") {
-  const { encodeDocToPsd } = await import("./psd.ts");
-  const blob = await encodeDocToPsd(doc);
-  triggerDownload(blob, filename);
-}
+// exportOraDownload / exportPsdDownload 已删（v415）：零调用者。
+//   导出走 exporters.ts 的注册表（registerExporter + export-import-menu 的菜单），不是这两个裸函数。
 
 // ---- 分享 / 导出 PNG / JPG ----
 
@@ -170,13 +158,8 @@ export async function shareOrDownloadBlob(blob: Blob, filename: string, mime?: s
   return { method: "download" };
 }
 
-export async function shareOrDownloadImage(doc: PaintDoc, format = "png", filename = "WebPaint", scope = "merged") {
-  const mime = format === "jpg" ? "image/jpeg" : "image/png";
-  const ext  = format === "jpg" ? "jpg" : "png";
-  const quality = format === "jpg" ? 0.92 : undefined;
-  const blob = await renderDocToImageBlob(doc, mime, quality, scope);
-  return shareOrDownloadBlob(blob!, `${filename}.${ext}`, mime);
-}
+// shareOrDownloadImage 已删（v415）：零调用者。分享/下载走 exporters + export-import-menu 的
+//   renderDocToImageBlob → shareOrDownloadBlob 组合（两者各自都还活着）。
 
 // ---- 剪贴板 IO ----
 

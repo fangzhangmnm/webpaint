@@ -21,7 +21,6 @@
 import { makeRegistry } from "./registry.ts";
 import { encodeDocToOra } from "./ora.ts";
 import { renderDocToImageBlob } from "./session.ts";
-import { store as _store } from "./app-store.ts";
 import { session } from "./session-state.ts";
 import type { PaintDoc } from "./doc.ts";
 
@@ -53,7 +52,7 @@ export function registerExporter(spec: Exporter) {
 export function getExporter(id: string): Exporter { return _reg.get(id) as Exporter; }
 export function listExporters() { return _reg.list(); }
 export function listExportersByKind(kind: string) { return _reg.list().filter((e) => e.kind === kind); }
-export function onExporterRegistered(fn: (item: Exporter) => void) { return _reg.onRegistered(fn); }
+// （onExporterRegistered 已删 v415：零调用者。导出器全是模块 eval 期静态注册，没有"注册后才出现"的动态场景。）
 
 // ============= 第一方内建导出器 =============
 registerExporter({

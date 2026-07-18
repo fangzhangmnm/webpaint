@@ -5,7 +5,7 @@
 import { store } from "./app-store.ts";
 import { sessionFileName } from "./config.ts";   // 边界：裸 item.name → 库全名（薄库身份=X.ora）
 import { SUFFIX_BYTES, THUMB_PATH } from "./cloud-thumbs.ts";
-import { isUnlocked, getPassword, setPassword, onPasswordVerified, promptPassword } from "./crypto-state.ts";
+import { isUnlocked, getPassword, onPasswordVerified, promptPassword } from "./crypto-state.ts";
 
 // 边界：app 传裸 session 名，库身份是全名 → sessionFileName 统一转（与 session-state/gallery 一致）。
 const encFile = (name: string) => store.file(sessionFileName(name), { isZip: true, mode: "existing" });

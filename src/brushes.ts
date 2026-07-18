@@ -336,9 +336,7 @@ export function brushesByTool(rack: BrushRackData, tool: string): Brush[] {
   // v132 filterBrush 是新工具类别，自己的 rack（不串到 brush）
   return rack.brushes.filter((b) => b.tool === tool);
 }
-export function brushesByFolder(rack: BrushRackData, folder: string): Brush[] {
-  return rack.brushes.filter((b) => b.folder === folder);
-}
+// （brushesByFolder 已删 v415：零调用者。笔架按夹分组走 brush-rack-view.collectFolders + brushesByTool。）
 // 某工具的「代表笔」——给 defaultToolStateFor 取初值。
 // activeByTool 已废（v2：活动笔归 per-doc toolStates，见 docs/20260606-folderflow-build-plan.md §6）；
 // 这里就取该工具第一支笔当默认。

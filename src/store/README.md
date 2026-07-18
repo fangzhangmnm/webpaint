@@ -243,7 +243,10 @@ const store = createStore({
 - **at-rest 切换**：`f.encrypt()` 明文→密文、`f.decrypt()` 密文→明文。红线：先本地落地、再云端 If-Match 跟进；失败标脏锚 parentBase 交 push 流接力（绝不只换一端=静默撤销加密）；曾同步但离线→拒；错密码在任何持久改动前出局。
 - **解锁循环（app 在 busy 外做）**：`f.verifyPassword(pw)` 便宜验（解 peek，不碰 7z）→ app 自己存密码 → 重跑 flow。
 - **预览**：`ZipFile.getPeek({bytesLength, zipEntry})` 取尾片 + 库内 zip 解析该 entry（本地切片或云端 byte-range，不全量下载）。明文→PNG blob；加密→**密文** peek blob（`ENC_PEEK_MIME`，不解密→你缓存原样存密文=明文不落盘）；密文再经 `decryptPeek(blob)` 非交互解（内存密码；锁定→null）。写侧 peek 经 `crypt.makePeek` 自动派生（无显式 `setPeek`）。
-- **导入辅助**（文件还没进 store）：`store.looksEncrypted(blob)` / `store.verifyContainer(blob,pw)` / `store.unsealWith(blob,pw)`。
+- **导入辅助**（文件还没进 store、无 name 可查 peek）：`store.encryption.isEncryptedBlob(blob)` 便宜分流 →
+  `store.encryption.tryDecryptEncryptedBlob(blob, pw)` **验+解合一**（null=错密码）。
+  合一是刻意的：拆成「先验再解」会把整份内容用 7z 解**两遍**（旧 `verifyContainer`+`unsealWith` 正是这个毛病）。
+- **读 at-rest 密文**（导出/拷贝/快照要原样搬密文、不能解壳）：`ZipFile.getEncryptedBlob()` → `EncryptedBlob | null`。
 
 > **未采用**：README 早期草拟的 `store.encryption` **超集**（库统一密钥 + `vault.salt` + `encrypted:true` + `saveEncrypted` + `addEncryption`）本版不实现
 > —— 注意别和 v415 落地的 `store.encryption`（只有三个**裸字节**级 helper，无密钥管理）混为一谈；那个是窄面，这个是被否掉的宽面——对齐 WebPaint 真机验过的 `getPassword`/`encrypt` 模型（见 `docs/11`）。要库统一密钥再单独 escalate。
