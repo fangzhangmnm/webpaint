@@ -96,8 +96,8 @@ export class BrushRackController {
   getRackToolKey(tool: string) { return tool === "airbrush" ? "brush" : tool; }
   defaultToolStateFor(tool: string) {
     const brush = defaultBrushForTool(this._view(), tool);
-    if (brush) return { size: brush.size.base, opacity: 1.0, flow: 1.0, activeBrushId: brush.id, activeBrushName: brush.name };
-    return { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null, activeBrushName: null };
+    if (brush) return { size: brush.size.base, opacity: 1.0, activeBrushId: brush.id, activeBrushName: brush.name };
+    return { size: 12, opacity: 1.0, activeBrushId: null, activeBrushName: null };
   }
   // healing 回写版（显式路径用）
   findToolBrush(ts: ToolDial | null | undefined) {
@@ -136,7 +136,6 @@ export class BrushRackController {
     ts.activeBrushName = brush.name;
     ts.size = brush.size.base;
     ts.opacity = brush.defaultOpa ?? 1.0;
-    ts.flow = 1.0;
     if (key === this.getRackToolKey(this.d.editMode().current())) this.applyToolState(this.d.editMode().current());
   }
 

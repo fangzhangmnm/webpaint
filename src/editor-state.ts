@@ -3,7 +3,7 @@
 //   ① createEditorState() —— 编辑器「当前设成什么样」的**反应式 RAM SSoT**（纯内存）
 //   ② editorState struct  —— per-doc「desk」的门面 + 序列化（见下方分隔线）
 //
-// ① 的单一职责：构造编辑器当前设置的单一真源——主色、每工具 dial（size/opacity/flow/activeBrushId）、
+// ① 的单一职责：构造编辑器当前设置的单一真源——主色、每工具 dial（size/opacity/activeBrushId）、
 //   棋盘/长按吸色等开关、filterBrush 瞬态。**不**负责落盘：ORA 存档由 session-state 的 _buildOraMeta
 //   读 state.color/toolStates/checkerboard（per-doc 跟文件走）。
 //   （v406 起**无 localStorage 种子**——desk per-doc，size/opacity/color 归 ② 的 brushTool SSoT，boot 后
@@ -26,15 +26,16 @@ export type EditorState = EditorRuntimeState;
 
 export function createEditorState(): { state: EditorRuntimeState; dialReactive: DialReactive } {
   // state.toolStates：per-tool 持久化（per-doc）。当前笔 = currentBrush computed（在 app）从这束 dial 纯派生。
-  // shapes/airbrush **不**自己存——alias 到 brush（见 rack.getRackToolKey）。v98：{ size, opacity, flow, activeBrushId }。
+  // shapes/airbrush **不**自己存——alias 到 brush（见 rack.getRackToolKey）。形状：{ size, opacity, activeBrushId }。
   // reactive：dial 是反应式 SSoT。先建 toolStates → 让 state 字面量一次成形、整体类型化（序列化走 JSON.stringify 无碍）。
   const toolStates: Record<string, ToolDial> = reactive({
     // brush dial 默认（size/opacity/activeBrushId 归 editorState.brushTool SSoT，boot 后 bindEditorReactive 灌入、doc 载入覆盖；
-    //   不再从 LS 种子——desk per-doc，删了 webpaint.size/opacity 设备记忆）。flow 未进 editorState（留下一轮）。
-    brush:    { size: 12, opacity: 1.0, flow: 1.0, activeBrushId: null },
-    eraser:   { size: 32, opacity: 0.6, flow: 1.0, activeBrushId: null },
-    // v132：size=radius，opacity=transparency/flow，variantId=子算法选择（Filter.brushVariants[].id），空=默认
-    filterBrush: { size: 32, opacity: 1.0, flow: 1.0, activeBrushId: null, variantId: null },
+    //   不再从 LS 种子——desk per-doc，删了 webpaint.size/opacity 设备记忆）。
+    //   v415 删了 flow：四处钉死 1.0、无滑块、无 preset 来源——压感对流量的影响走 per-preset 的 flowCoeff。
+    brush:    { size: 12, opacity: 1.0, activeBrushId: null },
+    eraser:   { size: 32, opacity: 0.6, activeBrushId: null },
+    // v132：size=radius，opacity=transparency，variantId=子算法选择（Filter.brushVariants[].id），空=默认
+    filterBrush: { size: 32, opacity: 1.0, activeBrushId: null, variantId: null },
   });
 
   const state: EditorRuntimeState = {
@@ -85,7 +86,9 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
 // 把存档的 per-tool dial（ORA _webpaintState.toolStates[tool]）按 v98 兼容映射成 patch 对象，
 // caller Object.assign 到 reactive toolStates[tool]（保留反应式）。saved 无效 → null（不动）。
 // 反序列化细节下沉到 editor-state（toolState 形状的所有者；survey rec #5 part b）：
-//   v98 起 opacity/flow 分离——老 doc 只有 .intensity 当 opacity；只有 flow 没 opacity 时 flow 也当 opacity。
+//   老 doc 兼容（**保留**）：只有 .intensity 当 opacity；只有 flow 没 opacity 时 flow 也当 opacity。
+//   v415 起 dial 没有 flow 这一轴（恒 1.0、无滑块、无 preset 来源 = 纯摆设，已删），
+//   所以只读不写：老档里的 flow 仍可能被当 opacity 用，但不再往 toolState 写回 flow 字段。
 export function serializedToolStatePatch(current: ToolDial, saved: unknown): Partial<ToolDial> | null {
   if (!saved || typeof saved !== "object") return null;
   const s = saved as Record<string, unknown>;
@@ -93,12 +96,9 @@ export function serializedToolStatePatch(current: ToolDial, saved: unknown): Par
            : typeof s.intensity === "number" ? s.intensity
            : typeof s.flow === "number" ? s.flow
            : current.opacity;
-  const fl = typeof s.flow === "number" && typeof s.opacity === "number" ? s.flow
-           : current.flow;
   return {
     size: typeof s.size === "number" ? s.size : current.size,
     opacity: op,
-    flow: fl,
     activeBrushId: typeof s.activeBrushId === "string" ? s.activeBrushId : current.activeBrushId,
     activeBrushName: typeof s.activeBrushName === "string" ? s.activeBrushName : current.activeBrushName,
     // v132 filterBrush 多 variantId

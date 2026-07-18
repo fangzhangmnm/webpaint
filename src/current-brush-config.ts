@@ -7,7 +7,6 @@
 // 当前笔（state.brush 旧单例）已收敛成不可变 ResolvedBrush（见 docs/CONTEXT [[当前笔]]）；
 // 这张表是「无 preset / 无笔架」时也能画的兜底默认（user mental model：console 设工具即可绘画）。
 export const DEFAULT_CONFIG = {
-  type: "round",
   size: 12,
   color: "#1b1b1b",
   // 用户当场调（per-tool 持久）：
@@ -27,7 +26,7 @@ export const DEFAULT_CONFIG = {
   shapeAspect: 1.0,
   shapeRotation: 0,
   // spacing：
-  spacing: 0.12,
+  spacing: 0.06,
   // buffer 合成模式：
   compositeMode: "wash",  // "wash" = Alpha Darken (JS max), "buildup" = source-over (Canvas2D native)
   // 笔刷混合模式：整条 stroke 落到 layer 时的 globalCompositeOperation（multiply/screen/...）。

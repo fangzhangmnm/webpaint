@@ -8,8 +8,9 @@
 // - **compositeMode** = stroke buffer 内重叠合成方式（per-brush 标志）：
 //     "wash"    = Alpha Darken：buffer = max(buffer, α_dab) → 自交不变深、单笔有上限
 //     "buildup" = source-over：累积，可达 1.0（喷枪 feel）
-// - **opacity / flow 不存** preset：选 preset 时 toolState.opacity = 1, toolState.flow = 1
+// - **opacity / flow 不存** preset：选 preset 时 toolState.opacity = 1
 //   （user：「默认 opacity 默认 flow 两个字段不要，都是 1」）。user 自己拉 slider / brush settings 调。
+//   v415：dial 连 flow 这一轴都删了（钉死 1.0、无滑块 = 摆设）——压感对流量的影响走 per-preset flowCoeff。
 // - **airbrush flag 没了**：buildup + opaCoeff=0 就是喷枪 feel，user 自己拉低 flow slider。
 // - **pressureGamma**：p' = p^gamma，统一 power 曲线（默 1.0）。
 // - **smooth**：per-preset 位置平滑参数（Procreate 两参：streamline / stabilization）。

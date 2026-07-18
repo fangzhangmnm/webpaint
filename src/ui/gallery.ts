@@ -333,7 +333,7 @@ function makeGallery(host: GalleryHost) {
         await reload();
       }
 
-      // 复制项目：源字节 → 新名（同文件夹「<名> 副本」自动去重）。app 层组合 _store.flow.saveAs，
+      // 复制项目：源字节 → 新名（同文件夹「<名> 副本」自动去重）。app 层组合 file(mode:"new").save，
       //   不碰红线 store 内部。源字节走**原始字节**（loadRaw / cloud.pull）原样搬运：
       //   · 加密源 → 拷贝的是同一个加密容器（saveAs→_doPush→_seal 见 plain 已是容器即透传，**无需密码**）；
       //   · 纯云端源（无本地副本）→ cloud.pull 拉原始容器字节（同样原样，不解壳）；

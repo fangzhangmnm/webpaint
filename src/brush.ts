@@ -328,8 +328,7 @@ export class BrushEngine {
   _stampParams(pressure: number, strokeDist: number): StampParams | null {
     const st = this._stroke!;
     const s = st.settings;
-    // taperFloor 不在 ResolvedBrush 显式字段（来自 DEFAULT_CONFIG 兜底），index 签名为 unknown → 断言 number。
-    const taperFloor = s.taperFloor as number;
+    const taperFloor = s.taperFloor;   // v415 起是 ResolvedBrush 的显式字段（per-brush 可调，不再恒 0.4）
     let p = Math.max(0, Math.min(1, pressure));
     // 入端 taper：起手 fade-in（也兼顾 Apple Pencil 落笔 spike → 萝卜尖）
     if (s.taperIn > 0) {

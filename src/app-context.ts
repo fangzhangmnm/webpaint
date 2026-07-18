@@ -25,7 +25,6 @@ import type { ResolvedBrush } from "./resolved-brush.ts";
 export interface ToolDial {
   size: number;
   opacity?: number;
-  flow?: number;
   activeBrushId?: string | null;
   activeBrushName?: string | null;
   variantId?: string | null;

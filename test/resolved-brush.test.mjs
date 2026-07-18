@@ -5,16 +5,17 @@ import { DEFAULT_CONFIG } from "../src/current-brush-config.ts";
 
 describe("resolveBrush · 无笔架兜底（mental model：console 设工具即可画）", () => {
   it("preset=null 仍给出完整可画的笔（DEFAULT 兜底 + dial 覆盖）", () => {
-    const b = resolveBrush({ preset: null, size: 40, opacity: 0.5, flow: 0.8, color: "#abcdef" });
-    eq(b.size, 40); eq(b.opacity, 0.5); eq(b.flow, 0.8); eq(b.color, "#abcdef");
+    const b = resolveBrush({ preset: null, size: 40, opacity: 0.5, color: "#abcdef" });
+    eq(b.size, 40); eq(b.opacity, 0.5); eq(b.color, "#abcdef");
+    eq(b.flow, DEFAULT_CONFIG.flow, "flow 无 dial → 恒取 DEFAULT（压感走 flowCoeff）");
     // 形状/间距走 DEFAULT（无预设）
     eq(b.hardness, DEFAULT_CONFIG.hardness);
     eq(b.spacing, DEFAULT_CONFIG.spacing);
     eq(b.compositeMode, DEFAULT_CONFIG.compositeMode);
   });
-  it("全空参 = DEFAULT_CONFIG 全集（含 type / taperFloor 这类旧 frozen 不碰的字段）", () => {
+  it("全空参 = DEFAULT_CONFIG 全集", () => {
     const b = resolveBrush();
-    eq(b.type, DEFAULT_CONFIG.type);
+    eq(b.taperFloor, DEFAULT_CONFIG.taperFloor);
     eq(b.taperFloor, DEFAULT_CONFIG.taperFloor);
     eq(b.size, DEFAULT_CONFIG.size);
   });
@@ -39,20 +40,23 @@ describe("resolveBrush · 不可变（by-value 红线）", () => {
 describe("resolveBrush · 预设字段映射（对齐旧 applyBrushPresetFrozen）", () => {
   const preset = {
     shape: { kind: "ellipse", aspect: 0.5, rotation: 90, hardness: 0.3 },
-    taper: { in: 0.2, out: 0.4 },
+    taper: { in: 0.2, out: 0.4 }, taperFloor: 0.15,
     sizeCoeff: 0.9, opaCoeff: 0.1, flowCoeff: -0.5,
     pressureGamma: 2.0, pressureLPF: 80,
     compositeMode: "buildup", blendMode: "multiply",
     spacing: { value: 0.25 }, pixelMode: true,
     smooth: { streamline: 0.7, stabilization: 0.2 },
   };
-  const b = resolveBrush({ preset, size: 33, opacity: 0.9, flow: 1.0, color: "#112233" });
+  const b = resolveBrush({ preset, size: 33, opacity: 0.9, color: "#112233" });
   it("shape：kind/aspect/hardness 直拷，rotation 度→弧度", () => {
     eq(b.shapeKind, "ellipse"); eq(b.shapeAspect, 0.5); eq(b.hardness, 0.3);
     eq(b.shapeRotation, 90 * Math.PI / 180);
   });
   it("taper / coeffs / gamma / lpf", () => {
     eq(b.taperIn, 0.2); eq(b.taperOut, 0.4);
+    // ★v415 修的悬空字段：draft 有、collection 存了，但 BrushPreset 没这字段、resolveBrush 不映射
+    //   → 引擎恒读 DEFAULT_CONFIG 的 0.4，per-brush 值被整个丢弃。
+    eq(b.taperFloor, 0.15, "per-brush taperFloor 必须真的进 ResolvedBrush（不是恒 0.4）");
     eq(b.sizeCoeff, 0.9); eq(b.opaCoeff, 0.1); eq(b.flowCoeff, -0.5);
     eq(b.pressureGamma, 2.0); eq(b.pressureLPF, 80);
   });
@@ -63,8 +67,8 @@ describe("resolveBrush · 预设字段映射（对齐旧 applyBrushPresetFrozen�
   it("smooth 参数", () => {
     eq(b.streamline, 0.7); eq(b.stabilization, 0.2);
   });
-  it("dial（size/opacity/flow）+ color 覆盖", () => {
-    eq(b.size, 33); eq(b.opacity, 0.9); eq(b.flow, 1.0); eq(b.color, "#112233");
+  it("dial（size/opacity）+ color 覆盖", () => {
+    eq(b.size, 33); eq(b.opacity, 0.9); eq(b.color, "#112233");
   });
 });
 
@@ -72,6 +76,7 @@ describe("resolveBrush · 预设缺字段走 ?? 默认（与旧逐字对齐）",
   it("空 shape/taper → kind round / aspect 1 / hardness 1 / taper 0 / spacing 0.06", () => {
     const b = resolveBrush({ preset: {} });
     eq(b.shapeKind, "round"); eq(b.shapeAspect, 1.0); eq(b.hardness, 1.0);
+    eq(b.taperFloor, 0.4, "preset 没写 taperFloor → 回退 0.4");
     eq(b.taperIn, 0); eq(b.taperOut, 0); eq(b.spacing, 0.06);
     eq(b.sizeCoeff, 0.6); eq(b.opaCoeff, 0.6); eq(b.flowCoeff, 0);
   });

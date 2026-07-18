@@ -5,7 +5,7 @@
 //
 // **红线（CRITICAL）**：本模块只 RELOCATE 接线，**绝不**改任何 store.* / _store.flow.* /
 //   _store.session.* / _store.autosave.* / _store.edit* / session.* 调用（参数/顺序/语义全保原样）。
-//   menuSaveAs 用 _store.flow.saveAs + session.setName/encodeOra/markSavedNow；
+//   menuSaveAs 用 session.saveAs（内部 = store.file(name,{mode:"new"}).save）；
 //   menuRevert 用 session.readCheckpoint/adoptWithOpts + _store.edits；
 //   save 触发用 _store.edit/session.request/autosave.flush。要改 store 行为 → STOP，escalate。
 //
