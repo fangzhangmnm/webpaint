@@ -1962,7 +1962,12 @@ body[data-mode="gallery"] .board { display: none !important; }
   font-size: 13px;
   color: var(--ink);
   white-space: nowrap;
+  /* v419 前缀图标：图标 + 文字并排 */
+  display: flex;
+  align-items: center;
+  gap: 9px;
 }
+.gallery-tile-menu-popup button svg { width: 16px; height: 16px; flex: none; }
 .gallery-tile-menu-popup button:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
 .gallery-tile-menu-popup button.danger { color: #c0392b; }
 .gallery-tile-menu-popup button.danger:hover { background: color-mix(in srgb, #c0392b 12%, transparent); }

@@ -346,6 +346,33 @@
   <symbol id="clear-canvas" data-cat="stopgap" data-note="单字顶位「清」=清空调色板画布 · 待真图形替换(建议:画布+扫除;与 clear-pixels 不同动作故分两个 id)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">清</text></symbol>
 
 
+  <!-- ── 图库瓦片 ⋯ 菜单 / 图层行 ⋯ 菜单用的 6 个 ── -->
+
+  <!-- move-to-folder — 图库「移动到…」（把作品挪进别的文件夹）。真图形建议：文件 + 指向文件夹的箭头。 -->
+  <symbol id="move-to-folder" data-cat="stopgap" data-note="单字顶位「移」=移动到其他文件夹 · 待真图形替换(建议:文件+指向文件夹箭头)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">移</text></symbol>
+
+
+  <!-- unload-local — 图库「卸载本地」：本地副本删掉、云端保留（省空间，不是删作品）。
+       语义敏感——绝不能画成垃圾桶，用户会以为在删画。真图形建议：云 + 向下弹出的本地盘（脱离）。 -->
+  <symbol id="unload-local" data-cat="stopgap" data-note="单字顶位「卸」=卸载本地副本(云端保留) · 待真图形替换【绝不能画成垃圾桶,会被误读成删画】" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">卸</text></symbol>
+
+
+  <!-- restore — 回收站「恢复」。真图形建议：逆时针回环箭头 + 文件（区别于 arrow-undo 的编辑撤销）。 -->
+  <symbol id="restore" data-cat="stopgap" data-note="单字顶位「复」=从回收站恢复 · 待真图形替换(建议:回环箭头+文件;须与 arrow-undo 编辑撤销可分)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">复</text></symbol>
+
+
+  <!-- ungroup — 图层「解组」（拆掉图层组，子层留在原位）。真图形建议：collection 图标 + 散开的箭头。 -->
+  <symbol id="ungroup" data-cat="stopgap" data-note="单字顶位「散」=解散图层组 · 待真图形替换(建议:收纳箱+向外散开箭头)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">散</text></symbol>
+
+
+  <!-- move-out-group — 图层「移出组」（把这一层挪到组外面）。与 move-to-folder 是不同动作故分 id。 -->
+  <symbol id="move-out-group" data-cat="stopgap" data-note="单字顶位「出」=图层移出所在组 · 待真图形替换(建议:层从收纳箱向外的箭头;与 sign-out 无关,勿合并)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">出</text></symbol>
+
+
+  <!-- merge-down — 图层「向下合并」。真图形建议：两层 + 向下箭头合成一层（PS 同款语义）。 -->
+  <symbol id="merge-down" data-cat="stopgap" data-note="单字顶位「合」=向下合并图层 · 待真图形替换(建议:两层+向下合并箭头)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">合</text></symbol>
+
+
   <!-- blender — 「Blender sync…」（跟 Blender 的贴图往返通道）。
        真图形建议：Blender 那个经典的橙色环形靶标轮廓（单色描边版），或双向同步箭头。 -->
   <symbol id="blender" data-cat="stopgap" data-note="单字顶位「联」=Blender sync · 待真图形替换(建议:Blender 环形靶标轮廓 或 双向同步箭头)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">联</text></symbol>
@@ -1183,6 +1210,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-fe952b88fe69.mjs"></script>
+    <script type="module" src="./dist/webpaint-e66bfacc543a.mjs"></script>
   </body>
 </html>
