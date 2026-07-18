@@ -354,13 +354,14 @@ describe("离线删文件夹（排队/隐藏/回线删/content-wins/eager-cancel
   function mk() {
     const local = createMockLocal();
     const provider = createMockProvider();
+    const kv = memKv();
     let online = true;
     const store = createStore({
-      appId: "test", provider, local, kv: memKv(),
+      appId: "test", provider, local, kv,
       ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {}, onReplayStatus: () => {} },
       validateAdopt: () => true, isOnline: () => online, signedIn: () => online, skipMigration: true,
     });
-    return { store, provider, setOnline: (v) => { online = v; } };
+    return { store, provider, kv, setOnline: (v) => { online = v; } };
   }
   const tick = () => new Promise((r) => setTimeout(r, 5));
 
@@ -388,6 +389,24 @@ describe("离线删文件夹（排队/隐藏/回线删/content-wins/eager-cancel
     await store.files.drainOfflineQueue();
     assert(await provider.getItemByPath("F"), "F 还在（非空 → 取消删除）");
     assert(await provider.getItemByPath("F/fromOther.ora"), "别端内容没被递归删");
+  });
+
+  it("嵌套夹排队 → drain **深→浅**（先删子后删父，否则父恒非空、永远删不掉）", async () => {
+    const { store, provider, kv, setOnline } = mk();
+    await store.files.ensureFolder("P/C/G");            // 三层
+    setOnline(false);
+    // 故意**按浅→深**的顺序排队，逼 drain 自己去排序（不能靠调用方的顺序）
+    await store.files.deleteFolder("P/C/G");
+    await store.files.deleteFolder("P/C");
+    await store.files.deleteFolder("P");
+    // 队列是持久化的 kv 记录（离线跨重启也要活）
+    const q = JSON.parse(kv.get("test.defaultStore.internal.pending_folder_deletions"));
+    eq(q.length, 3, "三层都排了队");
+    setOnline(true);
+    await store.files.drainOfflineQueue();
+    assert(!(await provider.getItemByPath("P/C/G")), "最深的删了");
+    assert(!(await provider.getItemByPath("P/C")), "中间的删了");
+    assert(!(await provider.getItemByPath("P")), "★父夹也删了——drain 若不按深→浅，父恒非空、永远删不掉");
   });
 
   it("eager-cancel：离线删 X 后在 X 下建文件 → drain 不删 X（撤销排队删除）", async () => {
