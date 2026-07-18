@@ -230,8 +230,8 @@ describe("watchFolder · 网盘模型集成", () => {
   });
 });
 
-// ── 目标名占用护栏（碰撞检查内化进 rename/saveAs，替代「app 先 list 目标夹」；防覆盖既有=data-loss）───────────
-describe("rename/saveAs 目标占用护栏", () => {
+// ── 目标名占用护栏（碰撞检查内化进 tryMove / mode:"new"，替代「app 先 list 目标夹」；防覆盖既有=data-loss）──
+describe("改身份/新建 的目标占用护栏", () => {
   function mkStore() {
     const local = createMockLocal();
     const store = createStore({
@@ -246,13 +246,21 @@ describe("rename/saveAs 目标占用护栏", () => {
   const raw = (store, name) => store.file(name, { isZip: false });
   const dec = (u) => new TextDecoder().decode(u);
 
-  it("saveAs 到已存在名 → 抛 collision（旧的不动、新的不覆盖）", async () => {
+  // 承接原「saveAs 到已存在名」用例：saveAs 已删，写新身份统一走 file(name,{mode:"new"}).save()。
+  //   红线不变——撞名绝不静默覆盖既有字节。
+  it("mode:\"new\" 存到已存在名 → 抛 collision（旧的不动、新的不覆盖）", async () => {
     const { store, local } = mkStore();
     await raw(store, "keep").save(bytes("K"), { tryPush: false });
     let err = null;
-    try { await store.saveAs("keep", { encode: () => bytes("NEW") }); } catch (e) { err = e; }
+    try { await store.file("keep", { isZip: false, mode: "new" }).save(bytes("NEW"), { tryPush: false }); } catch (e) { err = e; }
     assert(err && err.name === "CloudNameCollisionError", "撞名抛 collision");
-    eq(dec(local._items.get("keep")), "K", "既有不被覆盖");
+    eq(dec(local._items.get("keep")), "K", "★既有不被覆盖");
+  });
+
+  it("mode:\"new\" 存到空名 → 正常落盘（护栏不误伤新建）", async () => {
+    const { store, local } = mkStore();
+    await store.file("fresh", { isZip: false, mode: "new" }).save(bytes("F"), { tryPush: false });
+    eq(dec(local._items.get("fresh")), "F", "新身份写入成功");
   });
 
   it("store.tryMove：占用→{ok:false,where}（不动字节，防覆盖 data-loss）；空→{ok:true}（移动生效、字节随身份）", async () => {

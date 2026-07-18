@@ -80,7 +80,6 @@ const store = createStore({
 | `store.files.drainOfflineQueue()` | 离线队列统一重放（按序：新文件夹→新上传→删文件→删文件夹深→浅）；app 在 online/boot/reconnect 调 | §6 |
 | `store.files.listTrash · listBackup · restoreTrash · purgeTrash · emptyTrash · emptyBackup` | 回收站/备份箱：**本地↔云聚合**列举（TrashItem：side/encrypted/conflictLive，只元数据无 blob）·恢复·彻底删·清空 | §2 |
 | `store.files.reconcileAll({activeFileName?})` | **全库** cloud-gone 收敛（仅用户显式指令）：clean 孤儿**去抖后 send trash**（首次见 gone 标 candidate、跨 ~24h GRACE 第二次+ 才动手；重现/被编辑自愈）。日常开夹惰性收敛走 watchFolder 内的 per-folder reconcile（同 converge SSOT） | §6 |
-| `store.saveAs(...)` | 写到新身份（phantom-path 红线：先存新名再删旧） | §2 |
 | `store.looksEncrypted · verifyContainer · unsealWith` | 加密导入辅助（文件还没进 store、无 name 可查时） | §5 |
 | 加密（at-rest，对齐 WebPaint） | config 注入 `crypto`(zip/7z codec) + `crypt`(ext/makePeek/getPassword)；透明封解 + `file.encrypt/decrypt`；不注入 = dormant。`store.encryption`/salt 超集未采用 | §5 |
 
@@ -209,6 +208,23 @@ syncedUserPref.onChange("lang", () => {/* 云端对齐把别台设备的改带�
 ---
 
 ## 5. 加密 —— 逻辑在库，对 app 透明（已实现，对齐 WebPaint）
+
+> ### 🔴 红线：解密后的明文永不落任何持久层
+>
+> **加密作品的明文字节 / 图层位图 / 及其缩略图派生，只能存在于内存，永不落任何持久层。**
+> 持久层 = IndexedDB（含本库的 `blobs`）、localStorage、checkpoint/快照、导出文件、任何缓存。
+>
+> 库已经在这么做，别拆：
+> - 每次本地写前 `seal.sealForWrite` 包壳 → **IDB 里也是密文**，不只是云端；
+> - 无密码 → 抛 `LockedError`，**绝不静默降级存明文**；
+> - `unsealForRead` 只返内存 Blob；
+> - `getPeek` 对加密件返**密文** peek（`ENC_PEEK_MIME`），**库绝不为了缓存去解密**——
+>   app 原样存密文，要显示时再 `decryptPeek` 解到内存；
+> - 本地缓存记录**没有任何缩略图/预览字段**。曾有个 `.peek`（零 reader），
+>   对加密件把 256px 明文缩略图写进了 IDB，2026-07 已删——**别再加回来**。
+>
+> 加它之前先问：这坨字节是不是某个加密作品解出来的？是 → 只能在 RAM。
+
 
 > 加密**逻辑**（3 层容器 / KDF / peek 验证器 / 透明封解）全在库内。重型 **7z(1.6MB wasm)+zip codec 由 app 注入**（不塞每个 bundle）。不注入 → 加密 dormant（不加密的项目省 1.6MB）。密码**非交互**：库永不弹框（§7），app 持密码 + 解锁循环在 busy 外。详见 `docs/11`。
 

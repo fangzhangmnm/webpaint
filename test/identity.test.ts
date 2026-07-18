@@ -48,12 +48,8 @@ test("rename cloud synced → 服务端 move（etag 顺延）", async () => {
   eq(await asStr((await cloud.pull("new.pdf"))?.blob), "DATA", "云端新名有字节");
 });
 
-test("saveAs：写新身份，云端有", async () => {
-  const { cloud, saveAs } = rig();
-  const r = await saveAs("copy.pdf", { encode: () => enc("COPY") });
-  eq(r.where, "cloud", "推云端");
-  eq(await asStr((await cloud.pull("copy.pdf"))?.blob), "COPY", "云端 copy");
-});
+// （原「saveAs：写新身份，云端有」已随 identity.saveAs 删除——写新身份统一走
+//   file(name,{mode:"new"}).save()，覆盖在 store-folder-listing.test.mjs 的目标占用护栏一节。）
 
 test("rename dirty：推当前字节到新名 + 旧名进云端 .trash（脏字节不丢、不 hard-delete C5）", async () => {
   const { cloud, local, head, rename } = rig();

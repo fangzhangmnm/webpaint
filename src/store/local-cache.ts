@@ -1,8 +1,8 @@
 // ⚠ 使用前必读 README.md。store 内部模块,**不要从 app 直接 import**——app 只走 createStore()。
 //
 // LocalCache —— store 的本地持久层(离线缓存 + 秒开)。**内容无关、零 ORA 知识**:
-//   只存/取不透明 binary blob(ora/glb/pdf/txt 一律),peek(不透明 sidecar)由 app 经 hint.peek 供——
-//   **store 绝不解码内容、绝不渲缩略图**(那是 app 的事)。IDB 单 object store `blobs`,本 cache 用
+//   只存/取不透明 binary blob(ora/glb/pdf/txt 一律)——**store 绝不解码内容、绝不渲缩略图**(那是 app 的事),
+//   也**绝不持久化任何内容派生物**(缩略图/预览):加密件的明文派生物落盘即红线失守。IDB 单 object store `blobs`,本 cache 用
 //   **files / trash / backup 三个分区**(blob-partition 深模块);collections 是**另一个分区**,由
 //   createCollectionCache 提供、collection 模块用(见 create-store 接线)。
 // 契约见 types.ts 的 LocalCache。浏览器专用,真机验。
@@ -28,11 +28,13 @@ export function createLocalCache(dbName: string): LocalCache {
   const trashP = bs.partition("trash");
   const backupP = bs.partition("backup");
   return {
-    // 覆盖写。bytes 归一化成 Blob(契约落 Blob)。peek 只取 hint.peek(store 不解码、不看内容)。
-    async save(name: string, bytes: Bytes | Blob, hint?: unknown) {
+    // 覆盖写。bytes 归一化成 Blob(契约落 Blob)。
+    // ⚠ 曾把 hint.peek 一并写进记录的 .peek 字段——**零 reader**（活的图库缩略图走密文 getPeek），
+    //   却对加密件把 256px **明文**缩略图落进了 IDB，违反红线「明文缩略图永不落盘」。字段已删；
+    //   hint 仍原样透传给上层作旁路，但 store 不再持久化它的任何解码产物。
+    async save(name: string, bytes: Bytes | Blob, _hint?: unknown) {
       const blob = bytes instanceof Blob ? bytes : new Blob([bytes]);
-      const peek = (hint && (hint as { peek?: unknown }).peek instanceof Blob) ? (hint as { peek: Blob }).peek : null;
-      await files.put(name, { blob, peek, updatedAt: Date.now() });
+      await files.put(name, { blob, updatedAt: Date.now() });
     },
     async get(name: string) { const r = await files.get(name); return r ? r.blob : null; },
     async exists(name: string) { return files.exists(name); },
@@ -81,7 +83,7 @@ export function createCollectionCache(dbName: string): Pick<LocalCache, "save" |
   return {
     async save(name: string, bytes: Bytes | Blob) {
       const blob = bytes instanceof Blob ? bytes : new Blob([bytes]);
-      await idb.put(name, { blob, peek: null, updatedAt: Date.now() });
+      await idb.put(name, { blob, updatedAt: Date.now() });
     },
     async get(name: string) { const r = await idb.get(name); return r ? r.blob : null; },
     async exists(name: string) { return (await idb.get(name)) !== undefined; },

@@ -281,7 +281,7 @@ export function createStore(config: StoreConfig) {
     return (): void => { const s = folderWatchers.get(folder); if (s) { s.delete(cb); if (!s.size) folderWatchers.delete(folder); } };
   }
 
-  // ── 名字占用检查（**唯一权威**：local + remote 统一在此）——rename/saveAs 护栏、tryMove、app 预检全走它。──
+  // ── 名字占用检查（**唯一权威**：local + remote 统一在此）——rename 护栏、tryMove、mode:"new" 首存护栏、app 预检全走它。──
   //   本地已有 → "local"；否则在线且云端已有 → "cloud"；都无（或离线查不了云）→ null。离线只查本地（靠 push conflictBehavior:fail 兜底）。
   async function nameOccupied(name: string): Promise<"local" | "cloud" | null> {
     if (await local.exists(name)) return "local";
@@ -362,7 +362,7 @@ export function createStore(config: StoreConfig) {
   //   并发的第二个**直接拒**（throw STORE_BUSY），调用方 catch→报状态。与 ui.busy 正交、更硬
   //   （busy 只是 UI 防误点、无 UI 时失效；这道库内自带，无头复用也挡得住）。同名字节竞争仍由
   //   substrate.serialize2 兜底，这道在其上加「全局同一时刻只一个用户态写」的更强语义（user 明确要）。
-  //   安全前提：被守的流互不内部调用——saveAs/rename 内部走 doPush（非被守流）；del/restore/purge/
+  //   安全前提：被守的流互不内部调用——rename 内部走 doPush（非被守流）；del/restore/purge/
   //   emptyTrash 直调 adapter；newFolder/deleteFolder 直调 cloud.*。新增被守流前先核这条，否则嵌套自锁。
   let _userWriteInFlight: string | null = null;
   function singleFlight<A extends unknown[], R>(label: string, fn: (...a: A) => Promise<R>): (...a: A) => Promise<R> {
@@ -692,7 +692,6 @@ export function createStore(config: StoreConfig) {
       //   日常开夹的惰性收敛已在 watchFolder 内走 reconcileFolder（看到夹才收敛，同一 converge SSOT）。
       reconcileAll: (opts?: { activeFileName?: string }) => reconcileMod.reconcile(opts),
     },
-    saveAs: singleFlight("另存为", identity.saveAs),
     // ── 加密导入辅助（文件还没进 store、无 name 可查时；对齐 WebPaint）──
     looksEncrypted: (blob: Blob | Uint8Array) => looksEncryptedContainer(blob),   // 是否加密容器（导入分流）
     verifyContainer: async (blob: Blob, pw: string): Promise<boolean> => { if (!pw) return false; try { await unpackContainer(blob, pw); return true; } catch { return false; } },

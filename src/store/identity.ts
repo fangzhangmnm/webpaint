@@ -1,6 +1,6 @@
 // ⚠ 使用前必读 README.md + CONTEXT.md。app 不直接 import——经 createStore。
 //
-// identity（深模块）—— 改身份：rename / saveAs / acquire。单一职责 = 安全的身份变更：
+// identity（深模块）—— 改身份：rename / acquire。单一职责 = 安全的身份变更：
 //   phantom-path 红线：**本地先存新名再删旧名**（绝不先删）。
 //   rename：synced/纯云端 → 服务端 move 保 etag 不重传；dirty 有本地字节 → push 当前字节到新名 + 旧名进 .trash。
 //   串行 against 两名 in-flight（serialize2）。编排 push 深模块 + cloud.rename + local-head。
@@ -34,7 +34,6 @@ export interface IdentityCfg {
   nameOccupied?: (name: string) => Promise<"local" | "cloud" | null>;   // 唯一名字占用检查（create-store 注入）；assertNameFree 据此抛
 }
 export interface RenameOpts { encode?: () => BytesSource | Promise<BytesSource>; getEditVersion?: () => number; cloud?: boolean; busy?: Busy; skipOccupiedCheck?: boolean }
-export interface SaveAsOpts { encode: () => BytesSource | Promise<BytesSource>; getEditVersion?: () => number; cloud?: boolean; busy?: Busy }
 export interface AcquireOpts { localName?: string; adopt?: AdoptFn; busy?: Busy }
 export interface IdResult { status: string; where?: string; newName?: string; localName?: string; oldCloudOrphan?: boolean; cloudDeferred?: boolean; item?: unknown; error?: unknown }
 
@@ -43,7 +42,7 @@ export function createIdentity(cfg: IdentityCfg) {
   const unseal = (name: string, blob: Blob) => seal ? seal.unsealForRead(name, blob) : Promise.resolve(blob as Blob | null);
 
   // 目标名占用护栏（**碰撞检查内化**：caller 不必先 list 目标夹——app 原则上不知道别夹内容）。
-  //   本地已有 newName ∨ 云端已有 newName（任一）→ 抛 CloudNameCollisionError，**在改任何字节之前**（防 rename/saveAs 覆盖既有文件 = data-loss）。
+  //   本地已有 newName ∨ 云端已有 newName（任一）→ 抛 CloudNameCollisionError，**在改任何字节之前**（防 rename 覆盖既有文件 = data-loss）。
   //   离线时 cloud.fetchMeta 抛/失败 → 视作云端无（本地护栏仍挡；后续 push 的 conflictBehavior:fail 兜底云端）。
   async function assertNameFree(newName: string, doCloud: boolean): Promise<void> {
     // doCloud=false（本地-only rename）→ 只查本地；否则走注入的统一 nameOccupied（local+在线 remote）。缺注入（裸测试）→ 退回本地 exists。
@@ -106,23 +105,9 @@ export function createIdentity(cfg: IdentityCfg) {
     }));
   }
 
-  // 另存为：写新身份，旧的不动（Photoshop 语义）。
-  async function saveAs(newName: string, opts: SaveAsOpts): Promise<IdResult> {
-    const { encode, getEditVersion, cloud: doCloud = true, busy = _busy } = opts;
-    return serialize(newName, async () => {
-      await assertNameFree(newName, doCloud);       // 另存为目标占用 → collision（旧的不动、新的不覆盖既有）
-      const bytes = await toU8(await encode());
-      if (local) await local.save(newName, bytes);
-      if (!doCloud) return { status: "saved", where: "local", newName };
-      try {
-        await doPush(newName, { encode: () => bytes, getEditVersion });
-        return { status: "saved", where: "cloud", newName };
-      } catch (e) {
-        reportStoreError(e, "warning");   // saveAs 云端推失败、newName 留本地 dirty 待推 → surface
-        return { status: "saved", where: "local", newName, cloudDeferred: true, error: e };
-      }
-    });
-  }
+  // saveAs 已删（2026-07）：它只是「写新身份」的一个别名，语义上和 file(name,{mode:"new"}).save(bytes)
+  //   完全重合，却多出一条平行的落盘+推云路径要各自维护（撞名护栏、seal、dirty 收尾都得抄一遍）。
+  //   零 app 调用者。撞名不覆盖的红线由 mode:"new" 的 nameOccupied 护栏承担（create-store.ts）。
 
   // 首取：云端 item → 本地（无冲突，本地本来没有）。
   async function acquire(cloudName: string, opts: AcquireOpts = {}): Promise<IdResult> {
@@ -137,5 +122,5 @@ export function createIdentity(cfg: IdentityCfg) {
     }));
   }
 
-  return { rename, saveAs, acquire };
+  return { rename, acquire };
 }
