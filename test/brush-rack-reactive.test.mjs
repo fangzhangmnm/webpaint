@@ -87,3 +87,36 @@ describe("笔架 ↔ collection 绑定（★v415 漏接过，别再漏）", () =
     eq(rack._view().brushes.find((b) => b.id === "b1").name, "笔A改名后", "变更来源不影响刷新");
   });
 });
+
+// ── 空笔架自愈（v423）─────────────────────────────────────────────────────────────────
+// 用户提的场景：新用户首开时 builtin-brushes.json 没加载到（离线 / SW 没缓上 / 404）
+//   → 笔架是空的，而他**根本不知道**要去调试菜单点「还原内置笔刷」= app 开箱即坏。
+//   所以补笔失败**不许认命**：会话内退避重试 + online 事件重试，直到有笔为止。
+// node 下 fetch 必失败（无 document）→ 正好用来测「失败之后」这半边。
+describe("空笔架自愈 · 补内置笔失败不认命（v423）", () => {
+  it("笔架空 + 内置笔数据拿不到 → 挂上会话内重试（不是补一次就放弃）", async () => {
+    const { rack } = await mkRack([]);                       // 空笔架
+    eq(rack._view().brushes.length, 0, "前提：node 下补不进内置笔，笔架确实是空的");
+    assert(rack._healTimer != null, "★必须挂着重试定时器——否则新用户首开离线就永远是空笔架");
+    assert(rack._healAttempt > 0, "重试计数应已推进（退避）");
+    assert(rack._healOnline == null || typeof rack._healOnline === "function", "online 重试钩子形态正常");
+    rack._stopHeal();
+  });
+
+  it("重试时笔架已经有笔了（云端拉到 / 用户自己新建）→ 停掉重试，不再打扰", async () => {
+    const { rack, collection } = await mkRack([]);
+    assert(rack._healTimer != null, "前提：先挂着重试");
+    collection.setItem("b1", brush("b1", "笔A"));             // 笔架有笔了
+    await rack._healEmptyRack();                             // 模拟下一次重试 tick
+    assert(rack._healTimer == null, "★有笔了必须停止重试");
+    eq(rack._healAttempt, 0, "重试计数应复位");
+  });
+
+  it("手点还原也失败 → 同样挂上后台重试（用户不必自己盯着反复点）", async () => {
+    const { rack } = await mkRack([]);
+    rack._stopHeal();
+    eq(await rack.restoreBuiltins(), 0, "node 下必失败，如实返 0（0 = 失败，别谎报成功）");
+    assert(rack._healTimer != null, "★手点失败后也要接管重试");
+    rack._stopHeal();
+  });
+});

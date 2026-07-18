@@ -186,7 +186,7 @@ export const S = {
   "ld.opacity":      { zh: "不透明度", en: "Opacity",      ja: "不透明度" },
 
   // ── 笔架 sheet（rack-sheet.ts）切片 3a ──
-  "rs.rackEmpty":    { zh: "笔架是空的。", en: "The rack is empty.", ja: "ブラシ棚が空です。" },
+  "rs.rackEmpty":    { zh: "笔架是空的——内置笔刷可能还没加载好（离线时会自动重试）。", en: "The rack is empty \u2014 the built-in brushes may not have loaded yet (it retries automatically when offline).", ja: "ブラシ棚が空です \u2014 内蔵ブラシがまだ読み込めていない可能性があります（オフライン時は自動で再試行します）。" },
   "rs.resetRack":    { zh: "还原内置笔刷", en: "Restore built-in brushes", ja: "内蔵ブラシを復元" },
   "rs.empty":        { zh: "此工具暂无笔刷。点「+ 新建」加一个。", en: "No brushes for this tool. Tap “+ New” to add one.", ja: "このツールにブラシがありません。「+ 新規」で追加。" },
   "rs.edit":         { zh: "编辑",     en: "Edit",         ja: "編集" },

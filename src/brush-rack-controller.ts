@@ -106,9 +106,47 @@ export class BrushRackController {
     // 自愈：collection **存在但一支笔都没有**（store 的 seed 只认 idb 有无、不认空——
     //   历史上被空 seed / emergency-only 腌坏的库，或用户把笔全删了）→ 自动补回内置笔。
     //   只在**完全空**时触发，不会跟「用户故意删掉某几支内置笔」打架。
-    if (this._brushesRef.value.length === 0) await this._restoreBuiltins();
+    await this._healEmptyRack();
     this.applyToolState(this.d.editMode().current());
     return this.get();
+  }
+
+  // ---- 空笔架自愈（会话内持续重试）----
+  // 为什么不是「补一次不行就算了、等下次开 app」：新用户首开如果正好离线 / json 还没缓上，
+  //   笔架就是空的，而他**根本不知道**要去调试菜单点「还原内置笔刷」——等于 app 开箱即坏。
+  //   所以失败不认命：退避重试 + online 事件重试，直到笔架有笔为止。
+  // 静默（reportError 走 log 不弹 banner）：首开离线是良性场景，不该糊用户一脸红条；
+  //   用户**手点**还原时才 surface（那是他主动发起的动作，必须给回音）。
+  _healTimer: ReturnType<typeof setTimeout> | null = null;
+  _healAttempt = 0;
+  _healOnline: (() => void) | null = null;
+  static HEAL_DELAYS_MS = [1000, 3000, 8000, 20000, 60000];   // 末项反复（空笔架 = app 不可用，值得一直试）
+
+  async _healEmptyRack(): Promise<void> {
+    if (this._brushesRef.value.length > 0) return this._stopHeal();   // 已经有笔（含用户自己新建/云端拉到）
+    const n = await this._restoreBuiltins(true);
+    if (n > 0) return this._stopHeal();
+    this._scheduleHeal();
+  }
+  _scheduleHeal(): void {
+    if (this._healTimer != null) return;
+    const D = BrushRackController.HEAL_DELAYS_MS;
+    const delay = D[Math.min(this._healAttempt++, D.length - 1)];
+    this._healTimer = setTimeout(() => { this._healTimer = null; void this._healEmptyRack(); }, delay);
+    // node 测试里别把进程吊住（浏览器返回 number，没有 unref）
+    (this._healTimer as unknown as { unref?: () => void })?.unref?.();
+    if (!this._healOnline && typeof addEventListener === "function") {
+      this._healOnline = () => { void this._healEmptyRack(); };   // 联网即刻重试，不等退避
+      addEventListener("online", this._healOnline);
+    }
+  }
+  _stopHeal(): void {
+    if (this._healTimer != null) { clearTimeout(this._healTimer); this._healTimer = null; }
+    if (this._healOnline && typeof removeEventListener === "function") {
+      removeEventListener("online", this._healOnline);
+      this._healOnline = null;
+    }
+    this._healAttempt = 0;
   }
 
   /** collection → 笔架的**唯一**绑定。本地写和云端写在 store 层已一视同仁，这里也不分。
@@ -194,13 +232,17 @@ export class BrushRackController {
   //   返回还原了几支；**0 = 失败**（内置笔数据没加载到，已 surface）——调用方据此报真话，别谎报成功。----
   async restoreBuiltins(): Promise<number> {
     await this.load();            // boot 未 resolve 就点按钮 → 否则 setItem 抛「在 init() 前调用」
-    return this._restoreBuiltins();
+    const n = await this._restoreBuiltins();
+    if (n === 0) this._scheduleHeal();   // 手点也失败了 → 挂上后台重试，用户不必自己盯着再点
+    return n;
   }
-  async _restoreBuiltins(): Promise<number> {
+  /** @param silent 后台自愈用：失败只 log，不弹 banner（首开离线是良性场景）。 */
+  async _restoreBuiltins(silent = false): Promise<number> {
     const builtins = await loadBuiltinBrushes();
     if (!builtins) {
       // 兜底的 emergency 笔**不写库**（会被推上云、污染所有设备）。如实报错，让用户知道该重试/联网。
-      reportError(new Error("[笔架] 内置笔刷数据没加载到（离线或站点缺 builtin-brushes.json），本次还原已取消。"), "warning");
+      reportError(new Error("[笔架] 内置笔刷数据没加载到（离线或站点缺 builtin-brushes.json），本次还原已取消。"),
+                  silent ? "log" : "warning");
       return 0;
     }
     // 批量写：collection 现在每次 setItem 都 fire onChange（本地写也通知）。~60 支笔逐条刷 = 60 次
