@@ -801,7 +801,16 @@ input[type=range] {
   opacity: 0.55;
 }
 .reference-resize-handle:hover { opacity: 1; }
-.reference-resize-handle svg { width: 16px; height: 16px; display: block; }
+/* 抓手不是图标，是贴角纹理——纯 CSS 画，不进 sprite、也不留内联 <svg>。
+   （同 .board 的透明棋盘格：那个也是 repeating-linear-gradient 画的。）
+   斜纹整块铺满，再用 clip-path 裁成右下三角 → 经典的 resize grip。 */
+.reference-resize-handle::after {
+  content: "";
+  position: absolute; inset: 3px;
+  background: repeating-linear-gradient(-45deg,
+    currentColor 0 1.6px, transparent 1.6px 5px);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
 .reference-action-btn {
   background: transparent;
   border: none;

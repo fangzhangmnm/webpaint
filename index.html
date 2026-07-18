@@ -267,10 +267,6 @@
 
   <!-- ═══ legacy：WebPaint 现有图形，搬运入库候选 ═══ -->
 
-  <!-- resize-grip — 参考小窗右下角拖拽缩放抓手。原 index.html viewBox 0 0 16 16，已按 ×1.5 归一到 24。
-       库里曾有 resize-handle，因描边下渲染差被 sunset；这个是 WebPaint 一直在用的两道斜线版本。 -->
-  <symbol id="resize-grip" data-cat="legacy" data-note="缩放抓手:右下角两道对角线(WebPaint 参考小窗在用;库里 resize-handle 已 sunset)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="21" x2="21" y2="6"/><line x1="13.5" y1="21" x2="21" y2="13.5"/></symbol>
-
 
   <!-- cloud-pending — 云端文件消失、本地副本还干净，处在防抖宽限期内（还没判定为 cloud-gone）。
        库里有 cloud-unavailable（云+划叉，已确认消失），这个是它的「还在等」前置态，两者必须能区分。 -->
@@ -904,9 +900,7 @@
         <button class="float-panel-close" id="referencePanelClose" type="button" data-i18n-aria="common.close.aria"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#x"/></svg></button>
       </div>
       <!-- v134 (user：「参考窗口大小可以调整」) iPad touch 拖手柄：CSS resize:both 只支持鼠标 -->
-      <div class="reference-resize-handle" id="referenceResizeHandle" data-i18n-aria="ref.resizeAria" data-i18n-title="ref.resize">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#resize-grip"/></svg>
-      </div>
+      <div class="reference-resize-handle" id="referenceResizeHandle" data-i18n-aria="ref.resizeAria" data-i18n-title="ref.resize"></div>
       <div class="reference-body" id="referenceBody">
         <canvas id="referenceCanvas" class="reference-canvas"></canvas>
         <div class="reference-empty" id="referenceEmpty">
@@ -1268,6 +1262,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-d20e77dc958e.mjs"></script>
+    <script type="module" src="./dist/webpaint-7c7b38a4d6cc.mjs"></script>
   </body>
 </html>
