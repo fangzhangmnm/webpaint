@@ -712,6 +712,9 @@ input[type=range] {
    图标是语言无关的锚点——也给不认字的小孩和找不到语言设置的人一个能认的入口。
    with-icon 把 space-between 换成了 flex-start+gap，所以原先靠 space-between 顶到右边的
    状态字 / 副标题 / 语言下拉，要显式 margin-left:auto 才回得去。 */
+/* 没有图标的菜单项：占一个同宽空位，让这一列文字仍然对齐。
+   是「留空」不是「缺图标」——user 明确要求不为了填满而硬塞图标。 */
+.menu-item-icon-blank { width: 18px; height: 18px; flex: none; }
 .menu-item.menu-item-with-icon .menu-item-state,
 .menu-item.menu-item-with-icon .menu-item-sub,
 .menu-item.menu-item-with-icon .menu-lang-select { margin-left: auto; }
@@ -1016,6 +1019,9 @@ input[type="range"].color-ramp::-moz-range-thumb {
 .layer-tools-popup .menu-item { padding: 6px 14px; }
 /* v267 ⋯ 菜单里的层属性 toggle：勾选标记 + 标签 */
 .layer-menu-toggle { display: flex; align-items: center; gap: 8px; }
+/* toggle 行 = [勾选框] [前缀图标] [文字]。前缀图标是 button 的直接子 svg，
+   跟 .layer-menu-check 里那个勾选框 svg 分开定尺寸。 */
+.layer-menu-toggle > svg { width: 16px; height: 16px; flex: none; }
 .layer-menu-check { font-size: 14px; line-height: 1; width: 16px; text-align: center; flex: 0 0 auto; }
 
 /* 通用 in-app sheet input */
@@ -1282,6 +1288,8 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   width: 30px; height: 28px;
 }
 .brush-rack-action-icon svg { width: 18px; height: 18px; display: block; }
+.brush-rack-head-ic { display: inline-flex; align-items: center; margin-right: 6px; }
+.brush-rack-head-ic svg { width: 18px; height: 18px; display: block; }
 .brush-rack-close {
   font: inherit; font-size: 18px;
   width: 28px; height: 28px;

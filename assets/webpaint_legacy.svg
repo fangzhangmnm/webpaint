@@ -13,13 +13,50 @@
 
      ⚠ stopgap 的局限（写给美工 agent 看）：
        单汉字只解决「占地」问题——一个汉字 ≈ 一个图标宽，换成英文长词会把窄 UI 条撑爆。
-       它【不解决 pictogram 问题】：不认字的小孩看不懂「裁」「棋」「率」。
+       它【不解决 pictogram 问题】：不认字的小孩看不懂「裁」「棋」「散」。
        而 WebPaint 加图标的初衷正是给不认字的小孩和找不到语言设置的人用。
-       所以这 13 个单字全部是过渡态，每一个都需要真图形替换。优先级看下面 data-note。
+       所以 data-cat="stopgap" 的每一条都是过渡态，都需要真图形替换。优先级看各自的 data-note。
+
+     注：菜单里没有图标的项不是漏了——用户明确要求那些「留空」（空位保持文字对齐），
+     不要为了填满而硬塞图标。所以这个清单只覆盖确实需要图形的位置。
 
      样式契约沿用库的：viewBox 0 0 24 24 / fill=none stroke=currentColor stroke-width=1.7 / round caps。
      单字 symbol 例外：走 <text fill=currentColor stroke=none>（与库里 fx 图标同款做法）。
      字形依赖设备字体，中日文渲染会有差异；cairosvg 本地渲 CJK 出豆腐块属正常，别据此判断对错。
+
+     ══════════ 用户实测反馈（原话，2026-07-18）══════════
+     下面这些是【人】看着真界面提的，不是 AI 的推断。可信度跟本文件其它 data-note 不是一个级别，
+     有冲突时以这里为准：
+
+       ·「create a larger version of eye and eye-hide in legacy. current version is toooo small」
+          → 库里的 visibility-show / visibility-hide 在真界面上太小。本文件已做 1.35 倍放大覆盖。
+             【入库时请直接把库里那两个画大，别让 app 层长期分叉。】
+
+       ·「opacity have bugs, use 透 for placeholder」
+          → 库里的 transparency 图标用户实测有问题（具体现象未展开），已退回单字「透」顶位。
+             画 opacity 图标之前，先去核对 transparency 到底哪里不对。
+
+       ·「theme 应该是日/夜，用夜字placeholder」
+          → 主题切换的语义是日/夜。之前误用了 color-palette（那是取色，语义不对）。已换单字「夜」。
+
+       ·「dont use eraser for clear layer, use a 清 for both layers and selection.clear」
+          → 「清空图层内容」和「清除选区内像素」是同一件事，共用一个图标；且不要用橡皮
+             （橡皮是工具，这两个是一次性命令）。两处都指向 clear-pixels。
+
+       ·「we need a 名 for rename. also the rename in menu and in layer」
+          → 重命名出现在主菜单、图层菜单、图库瓦片菜单三处，统一用 rename（名）。
+
+       ·「use 复制选区到新层 for layer duplication」
+          → 图层「复制」与套索「复制选区到新层」共用 copy 图标，别拆成两个。
+
+       ·「export project用同样的export」
+          → 「导出项目(.ora)」与「导出图片」共用 export 图标，不另做区分。
+             （我原本给它单独做了「项」顶位，已按此删掉。）
+
+       ·「we do not need to add icons for all menu options. just make them blank (not missing)」
+          → 宁可留空也不要硬凑。留空 ≠ 缺图标占位框。已留空的菜单项见 index.html 的
+             .menu-item-icon-blank。别把它们当成待办塞进来。
+     ═════════════════════════════════════════════════
 -->
 
   <!-- ═══ legacy：WebPaint 现有图形，搬运入库候选 ═══ -->
@@ -59,7 +96,39 @@
   <symbol id="checkbox-checked" data-cat="legacy" data-note="勾选框·选中(原 ☑ 字符,跨平台字形差异大)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><polyline points="8 12.5 11 15.5 16.5 9.5"/></symbol>
   <symbol id="checkbox-empty" data-cat="legacy" data-note="勾选框·未选(原 ☐ 字符,跨平台字形差异大)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/></symbol>
 
+  <!-- ── visibility-show / visibility-hide：显式覆盖库版本（data-override="1"）──
+       库里那两个眼睛画得太小：眼形只占 24×24 高度的约 35%（上下眼睑二次曲线的实际顶点在
+       y≈7.75 和 y≈16.25），在图层行 22px 的显示尺寸下看着一小坨。
+       这里按中心 1.35 倍放大，并把 stroke-width 反向补偿（1.7/1.35≈1.259、2.2/1.35≈1.63），
+       所以线条粗细跟其余图标一致，只是眼睛本身更大更饱满。
+       斜杠端点从 4.5/19.5 收到 5.5/18.5，放大后正好落回 3.2..20.8，不超出其余图标的视觉边界。
+
+       ⚠ 这是本地分叉。正解是推动共享库把这两个图标本身画大——库里改好之后，
+       把这两条从本文件删掉即可自动切回库版本，宿主的 <use href="#visibility-show"> 不用动。 -->
+  <symbol id="visibility-show" data-override="1" data-cat="legacy" data-note="可见·放大版:库版眼形仅占高度35%,22px 下过小;按中心1.35倍放大+stroke反补偿。【入库后删本条】" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(12,12) scale(1.35) translate(-12,-12)" stroke-width="1.259"><path d="M3.5 12 Q12 3.5 20.5 12" stroke-width="1.63"/><path d="M3.5 12 Q12 20.5 20.5 12"/><circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="visibility-hide" data-override="1" data-cat="legacy" data-note="隐藏·放大版:与 visibility-show 成对同倍放大,mask 留 gap。【入库后删本条】" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="wpEyeHideMaskBig"><rect width="24" height="24" fill="#fff"/><path d="M5.5 18.5 L18.5 5.5" stroke="#000" stroke-width="2.96"/></mask><g transform="translate(12,12) scale(1.35) translate(-12,-12)" stroke-width="1.259"><g mask="url(#wpEyeHideMaskBig)"><path d="M3.5 12 Q12 3.5 20.5 12" stroke-width="1.63"/><path d="M3.5 12 Q12 20.5 20.5 12"/><circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/></g><path d="M5.5 18.5 L18.5 5.5"/></g></symbol>
+
   <!-- ═══ stopgap：单汉字顶位，全部待真图形替换 ═══ -->
+
+  <!-- theme — 主题切换（跟随系统 / 日 / 夜）。语义是「日夜」，不是调色板——
+       原先误用了库里的 color-palette（那是调色板/取色，语义不对）。
+       真图形建议：日月对分的圆（半边太阳半边月亮），或纯月牙。 -->
+  <symbol id="theme" data-cat="stopgap" data-note="单字顶位「夜」=主题(跟随系统/日/夜) · 待真图形替换(建议:日月对分圆 或 月牙;勿用 color-palette,那是取色不是日夜)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">夜</text></symbol>
+
+  <!-- opacity — 左栏不透明度滑块的标签。
+       原先用库里的 transparency（L.opacity），但用户实测那个图形有问题，先退回单字顶位。
+       真图形建议：圆内半边实心半边棋盘格（不透明度的通用画法），或渐变填充的圆。 -->
+  <symbol id="opacity" data-cat="stopgap" data-note="单字顶位「透」=不透明度 · 待真图形替换(建议:圆内半实心半棋盘格;库里 transparency 用户实测有问题故未采用)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">透</text></symbol>
+
+  <!-- lock-alpha — 图层「锁定不透明度」（只在已有像素上画，不扩边）。
+       ⚠ 不要复用库里的 lock：那个在 WebPaint 里表示「作品已加密」，两个语义撞了会误导。
+       真图形建议：棋盘格（透明区）+ 小锁，或方块内实心区被锁住的样子。 -->
+  <symbol id="lock-alpha" data-cat="stopgap" data-note="单字顶位「锁」=锁定不透明度 · 待真图形替换(建议:棋盘格+小锁;勿复用 lock,那个是作品加密)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">锁</text></symbol>
+
+  <!-- reference-layer — 图层「设为参考层」（吸色/魔术棒以它取样，而不是当前层）。
+       图层行上原本就用「参」字当徽章（i18n 里 en=R），所以单字顶位在这里格外自然。
+       真图形建议：图层 + 取样十字/靶心。注意与 picture-in-picture（参考小窗）是两回事。 -->
+  <symbol id="reference-layer" data-cat="stopgap" data-note="单字顶位「参」=设为参考层(取样源) · 待真图形替换(建议:图层+取样靶心;与 picture-in-picture 参考小窗无关)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">参</text></symbol>
 
   <!-- gallery — 图库入口（主菜单第一项）。真图形建议：网格状缩略图墙 / 相框堆叠。 -->
   <symbol id="gallery" data-cat="stopgap" data-note="单字顶位「库」=图库入口 · 待真图形替换(建议:缩略图网格墙)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">库</text></symbol>
@@ -74,9 +143,6 @@
        真图形建议：光标插入符 + 文字基线，或 tag+铅笔。 -->
   <symbol id="rename" data-cat="stopgap" data-note="单字顶位「名」=重命名 · 待真图形替换(建议:tag+铅笔 或 文字光标)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">名</text></symbol>
 
-  <!-- project — 「导出项目」(.ora，含图层)。要和「导出图片」(export，扁平 PNG) 视觉可区分：
-       前者是整包带图层，后者是压平一张。真图形建议：export 箭头 + 图层堆叠。 -->
-  <symbol id="project" data-cat="stopgap" data-note="单字顶位「项」=导出项目(.ora 含图层) · 待真图形替换(建议:导出箭头+图层堆叠,须与 export 可区分)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">项</text></symbol>
 
   <!-- crop — 裁切（有选区→裁到选区；无选区→自由裁切）。真图形建议：Photoshop 式两个 L 形直角交叠。
        这是最该优先画的一个：裁切是通用图形语言，全世界的绘图软件都用同一个图元。 -->
@@ -86,19 +152,17 @@
        这个也很好画且完全语言无关，建议优先。 -->
   <symbol id="checkerboard" data-cat="stopgap" data-note="单字顶位「棋」=透明背景棋盘开关 · 【优先】待真图形替换(建议:交替填充棋盘格,语言无关易画)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">棋</text></symbol>
 
-  <!-- pixel-grid — 「像素栅格（放大时）」开关。真图形建议：细网格 + 一个高亮像素方块。
-       注意要和 checkerboard 视觉区分：那个是透明底提示，这个是放大时的对齐辅助线。 -->
-  <symbol id="pixel-grid" data-cat="stopgap" data-note="单字顶位「格」=像素栅格开关 · 待真图形替换(建议:网格+高亮像素,须与 checkerboard 可区分)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">格</text></symbol>
 
   <!-- keyboard — 「快捷键」帮助表。真图形建议：键盘外框+按键点阵。语言无关，好画。 -->
   <symbol id="keyboard" data-cat="stopgap" data-note="单字顶位「键」=快捷键表 · 待真图形替换(建议:键盘外框+按键点阵,语言无关)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">键</text></symbol>
 
   <!-- brush-rack — 「重置笔架出厂」（危险操作，在调试段）。真图形建议：笔架/笔筒 + 回环箭头。
        注意库里 brush-width 是「笔刷宽度」的波浪线，不是这个。 -->
-  <symbol id="brush-rack" data-cat="stopgap" data-note="单字顶位「架」=重置笔架出厂 · 待真图形替换(建议:笔筒+回环箭头)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">架</text></symbol>
+  <!-- brush-rack — 笔架（底部弹出的笔刷抽屉）。用在抽屉标题上。
+       真图形建议：笔筒/笔架里插着几支笔的侧视轮廓。注意跟 pencil（单支笔=画笔工具）区分开，
+       这个要传达的是「一堆笔可以挑」，不是「正在用笔」。 -->
+  <symbol id="brush-rack" data-cat="stopgap" data-note="单字顶位「架」=笔架抽屉 · 待真图形替换(建议:笔筒插数支笔的侧视;须与 pencil 单支笔=画笔工具区分)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">架</text></symbol>
 
-  <!-- fps — 「FPS 计」开关（调试段）。真图形建议：仪表盘指针 / 折线图跳动。 -->
-  <symbol id="fps" data-cat="stopgap" data-note="单字顶位「率」=FPS 计开关 · 待真图形替换(建议:仪表盘指针 或 跳动折线)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">率</text></symbol>
 
   <!-- sign-out — 「退出登录」（OneDrive 账号菜单）。真图形建议：门框+向外箭头（通用 logout 图元）。 -->
   <symbol id="sign-out" data-cat="stopgap" data-note="单字顶位「出」=退出登录 · 待真图形替换(建议:门框+向外箭头,通用 logout 图元)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">出</text></symbol>

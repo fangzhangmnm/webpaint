@@ -552,9 +552,9 @@ const LayerRow = defineComponent({
 
         <hr class="menu-sep" />
         <!-- v267 (user)：层属性 toggle 收进 ⋯ 菜单（点了不关菜单，可连续切） -->
-        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleLock"><span class="layer-menu-check"><span v-html="layer.lockAlpha ? ICON_CHECKED : ICON_UNCHECKED"></span></span><span class="menu-item-label">{{ L.lockAlpha }}</span></button>
-        <button class="menu-item layer-menu-toggle" type="button" @click="toggleClip"><span class="layer-menu-check"><span v-html="layer.clippingMask ? ICON_CHECKED : ICON_UNCHECKED"></span></span><span class="menu-item-label">{{ isGroup ? L.clipGroup : L.clip }}</span></button>
-        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleRef"><span class="layer-menu-check"><span v-html="isRef ? ICON_CHECKED : ICON_UNCHECKED"></span></span><span class="menu-item-label">{{ L.refLayer }}</span></button>
+        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleLock"><span class="layer-menu-check"><span v-html="layer.lockAlpha ? ICON_CHECKED : ICON_UNCHECKED"></span></span><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lock-alpha"/></svg><span class="menu-item-label">{{ L.lockAlpha }}</span></button>
+        <button class="menu-item layer-menu-toggle" type="button" @click="toggleClip"><span class="layer-menu-check"><span v-html="layer.clippingMask ? ICON_CHECKED : ICON_UNCHECKED"></span></span><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clipping-mask"/></svg><span class="menu-item-label">{{ isGroup ? L.clipGroup : L.clip }}</span></button>
+        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleRef"><span class="layer-menu-check"><span v-html="isRef ? ICON_CHECKED : ICON_UNCHECKED"></span></span><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#reference-layer"/></svg><span class="menu-item-label">{{ L.refLayer }}</span></button>
 
         <hr class="menu-sep" />
         <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#merge-down"/></svg><span class="menu-item-label">{{ L.mergeDown }}</span></button>

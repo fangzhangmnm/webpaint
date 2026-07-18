@@ -1,6 +1,6 @@
 # 本 app 的图标
 
-65 icons · 提取自家族图标库 `../../../../20260708 SVG Icons/icons.svg` · 由 `extract-icons.py` 生成，别手改。
+62 icons · 提取自家族图标库 `../../../../20260708 SVG Icons/icons.svg` · 由 `extract-icons.py` 生成，别手改。
 
 用法：把 sprite 内联到 `<body>` 顶部（它是 `display:none`），然后按 id 引用；
 颜色跟随 CSS `color`（全部 `currentColor`）：
@@ -20,7 +20,6 @@
 | `hand` | 手/抓取:食指左线裁到与拇指指尖弧交点 y=11.44,不再穿出 |
 | `lasso` | tool.lasso |
 | `magic-wand` | la.magic |
-| `move` | 四向移动箭头 (move tool, for SketchUp-clone) |
 | `paint-bucket` | 线描桶+实心水滴 (定稿:把手弧高≈4.9=原 -3) |
 | `pencil` | 铅笔 Bootstrap Icons MIT |
 | `stamp` | 橡皮图章 |
@@ -31,10 +30,8 @@
 |------|------|
 | `brush-width` | 笔刷宽度:平行两条波浪(标准1.7/粗3.4) |
 | `color` | 三色文氏图(弱半透明填充,重叠处自然叠深) |
-| `color-palette` | 调色板:BI palette 身体(MIT)+四点非均匀,下方留空 |
 | `fx` | 滤镜/调整 fx (字形已烘焙成轮廓,不依赖设备字体) |
 | `sliders` | 不写类别 |
-| `transparency` | L.opacity |
 
 ## transform
 
@@ -110,7 +107,7 @@
 | `cloud` | 云 |
 | `cloud-synced` | 云+勾 |
 | `cloud-unavailable` | — |
-| `cloud-upload` | rack.cloudPush |
+| `cloud-upload` | 云+上传箭头 (云形统一为 feather 的) |
 | `download` | 下载 |
 | `refresh` | cloud.refresh |
 | `upload` | 上传 |

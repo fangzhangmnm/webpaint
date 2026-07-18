@@ -13,6 +13,12 @@
   也就是说：某个图标被美工画进共享库、重跑 extract 之后，legacy 里那份副本自动失效，
   宿主的 <use href="#name"> 一个字都不用改。把图标画进库 == 删掉 legacy 一条。
 
+显式覆盖（data-override="1"）：
+  反过来的情况——库里有这个图标，但它的画法在 WebPaint 里不合用（比如眼睛画得太小）。
+  给 legacy 的 symbol 加 data-override="1"，脚本就改成丢弃【库里那份】、保留本地这份。
+  好处是宿主仍旧引用同一个 id，等库里修好之后只要把 legacy 这条删掉，就自动切回库版本。
+  用之前先想清楚：这是本地分叉，能推动库改就别覆盖。
+
 用法：
   python3 tools/inline-sprites.py          # 贴
   python3 tools/inline-sprites.py --check   # 只检查是否已是最新（CI/提交前用），不写文件
@@ -58,17 +64,23 @@ def build() -> tuple[str, list[str]]:
     lib_body = inner(LIB.read_text(encoding="utf-8"))
     lib_ids = set(SYMBOL_ID.findall(lib_body))
 
-    kept, dropped = [], []
-    # legacy 逐 symbol 过滤：库里已有同名 → 丢弃（连它前面的注释块一起丢）
+    kept, dropped, overridden = [], [], []
+    # legacy 逐 symbol 过滤：
+    #   库里已有同名 → 丢弃 legacy（连它前面的注释块一起丢）
+    #   除非 legacy 那条带 data-override="1" → 反过来丢库里那条
     pending_comment = ""
     for sid, chunk in split_symbols(inner(LEGACY.read_text(encoding="utf-8"))):
         if sid is None:
             pending_comment = chunk
             continue
-        if sid in lib_ids:
+        if sid in lib_ids and 'data-override="1"' not in chunk:
             dropped.append(sid)
             pending_comment = ""
             continue
+        if sid in lib_ids:
+            overridden.append(sid)
+            # 把库里那条摘掉，避免同 id 两份（<use> 只认第一个，行为取决于顺序，太脆）
+            lib_body = re.sub(r'<symbol id="' + re.escape(sid) + r'"\b.*?</symbol>', "", lib_body, flags=re.S)
         kept.append(pending_comment + chunk)
         pending_comment = ""
 
@@ -79,12 +91,12 @@ def build() -> tuple[str, list[str]]:
         parts.append("<!-- WebPaint 本地补丁（assets/webpaint_legacy.svg，库里还没有的） -->")
         parts.extend(kept)
     parts.append("</svg>")
-    return "\n".join(parts), dropped
+    return "\n".join(parts), dropped, overridden
 
 
 def main() -> int:
     check = "--check" in sys.argv
-    sprite, dropped = build()
+    sprite, dropped, overridden = build()
     html = HTML.read_text(encoding="utf-8")
 
     if BEGIN not in html or END not in html:
@@ -108,6 +120,9 @@ def main() -> int:
     if dropped:
         print(f"↳ legacy 里 {len(dropped)} 个已进共享库，自动丢弃：{' '.join(dropped)}")
         print("  （可以把它们从 assets/webpaint_legacy.svg 里删掉了）")
+    if overridden:
+        print(f"↳ {len(overridden)} 个显式覆盖了库版本：{' '.join(overridden)}")
+        print("  （库里改好后删掉 legacy 那条即可切回，宿主不用动）")
     return 0
 
 
