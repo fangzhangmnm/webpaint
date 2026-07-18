@@ -4,7 +4,7 @@
 //   （cloud-sync / local-head / push / seal / safe-resolve / folder-* / store.ts …）——
 //   那些是红线 guts，绕过 = 绕过红线（见 README.md 铁律）。build.sh 的 lint 会挡 app 的 deep import。
 export { createStore } from "./create-store.ts";
-export type { StoreConfig, StoreUI, RawFile, ZipFile, Store } from "./create-store.ts";
+export type { StoreConfig, StoreUI, RawFile, ZipFile, Store, EncryptedBlob } from "./create-store.ts";
 // 统一列举面（README §2）：Item/SyncState/ListContext + syncState 便利判定（isCached/isDirty）。
 export type { Item, SyncState, ListContext } from "./listing.ts";
 export { isCached, isDirty } from "./listing.ts";

@@ -240,3 +240,50 @@ describe("互操作性 · 外壳明文 zip + payload 真 .7z（7-Zip 可开）",
     eq(code, "WRONG_PASSWORD");
   });
 });
+
+// ── getEncryptedBlob：at-rest 密文原样读（v415，E1）─────────────────────────────────────────
+// 存在的理由：open() 是**透明解壳**的，所以「原样搬密文」的场景（导出加密作品 / 拷贝加密作品 /
+//   给加密作品存 checkpoint）以前根本没接口，只能退化成「解密再存」= 明文落盘（红线失守）。
+describe("getEncryptedBlob · at-rest 密文原样读（v415，E1）", () => {
+  it("加密件 → 返密文原样（不解壳）；明文件 → null", async () => {
+  const { createStore } = await import("../src/store/create-store.ts");
+  const { createMockProvider } = await import("../src/store/mock-provider.ts");
+  const { createMockLocal } = await import("../src/store/mock-local.ts");
+  const { memKv } = await import("../src/store/cloud-sync.ts");
+  const local = createMockLocal();
+  const store = createStore({
+    appId: "test", provider: createMockProvider(),
+    ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {} },
+    validateAdopt: () => true, kv: memKv(), local,
+    isOnline: () => false, signedIn: () => false, skipMigration: true,
+  });
+
+  // 明文件 → null（brand 的运行时真相：非加密件一律不发牌）
+  await store.file("plain", { isZip: true, mode: "new" }).save(new TextEncoder().encode("PLAIN"), { tryPush: false });
+  eq(await store.file("plain", { isZip: true, mode: "existing" }).getEncryptedBlob(), null,
+     "明文件不得被当成密文发出去");
+
+  // 手工把一个真容器塞进本地（绕过 seal，模拟"这份 at-rest 就是密文"）
+  const container = await packContainer({ dataBytes: new TextEncoder().encode("SECRET"), fileName: "enc", password: "pw" });
+  await local.save("enc", new Uint8Array(await container.arrayBuffer()));
+  const got = await store.file("enc", { isZip: true, mode: "existing" }).getEncryptedBlob();
+  assert(got != null, "加密件必须给得出密文字节");
+  const bytes = new Uint8Array(await got.arrayBuffer());
+  assert(await looksEncryptedContainer(new Blob([bytes])), "★拿到的是**密文容器**，没有被解壳");
+  assert(!new TextDecoder().decode(bytes).includes("SECRET"), "★明文绝不出现在返回字节里");
+});
+
+  it("无本地副本（纯云端未缓存）→ null（拿不到 at-rest 就诚实说没有）", async () => {
+  const { createStore } = await import("../src/store/create-store.ts");
+  const { createMockProvider } = await import("../src/store/mock-provider.ts");
+  const { createMockLocal } = await import("../src/store/mock-local.ts");
+  const { memKv } = await import("../src/store/cloud-sync.ts");
+  const store = createStore({
+    appId: "test", provider: createMockProvider(),
+    ui: { busy: (_l, fn) => fn(), resolveConflict: async () => ({ choice: "cancel" }), reportError: () => {} },
+    validateAdopt: () => true, kv: memKv(), local: createMockLocal(),
+    isOnline: () => false, signedIn: () => false, skipMigration: true,
+  });
+    eq(await store.file("nope", { isZip: true, mode: "existing" }).getEncryptedBlob(), null);
+  });
+});

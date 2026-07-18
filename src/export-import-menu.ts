@@ -98,11 +98,20 @@ export function initExportImportMenu(ctx: AppContext) {
   els.menuExportProject.addEventListener("click", async () => {
     setMenuOpen(false);
     const exp = getExporter(_getExpPrj().format) || getExporter("ora");
-    // ⚠ 加密作品的 project(.ora/.psd) 导出目前只能产出**明文**（store.seal cutover 删后没有读 at-rest
-    //   密文的导出接口，详 exporters.ts）。为不让「导出」成无声明文泄漏口，加密态直接拦截并提示先解密。
-    //   （image png/jpg 导出是显式拍平出图、从没承诺密文，不在此拦。）
-    if (session.enc.encrypted) { setStatus(t("tm.encryptedExportBlocked"), true); return; }
     try {
+      // 加密作品 + .ora → **原样导出 at-rest 密文容器**（不解不封，因此也不问密码）。
+      //   文件名 <名>.ora.zip：诚实反映它是加密容器（与云端 at-rest 命名一致），
+      //   也免得被别的 ORA 软件当普通 .ora 打开然后报一个看不懂的错。
+      //   导入侧已能嗅探密文容器（import-image 的 looksEncrypted 分支），原样收得回来。
+      if (session.enc.encrypted && exp.id === "ora") {
+        const cipher = await session.readEncryptedBytes();   // 内部先 saveNow（否则导的是上次保存的旧内容）
+        if (!cipher) { setStatus(t("tm.exportNoCipher"), true); return; }
+        triggerDownload(cipher, `${session.name}.ora.zip`);
+        setStatus(t("tm.dotExtDownloaded", { ext: "ora.zip" }));
+        return;
+      }
+      // 加密作品 + .psd：psd 格式本身不支持加密 → 只能出明文。**user 已明确 consent**
+      //   （「导出 psd/png 就当 user consent 了，正常导出」）。不拦、不额外弹窗。
       if (exp.busyHint) setStatus(exp.busyHint, true);
       const blob = await exp.encode(doc);
       triggerDownload(blob, `${session.name}.${exp.ext}`);

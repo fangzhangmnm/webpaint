@@ -334,19 +334,20 @@ function makeGallery(host: GalleryHost) {
       }
 
       // 复制项目：源字节 → 新名（同文件夹「<名> 副本」自动去重）。app 层组合 file(mode:"new").save，
-      //   不碰红线 store 内部。源字节走**原始字节**（loadRaw / cloud.pull）原样搬运：
-      //   · 加密源 → 拷贝的是同一个加密容器（saveAs→_doPush→_seal 见 plain 已是容器即透传，**无需密码**）；
-      //   · 纯云端源（无本地副本）→ cloud.pull 拉原始容器字节（同样原样，不解壳）；
-      //   · 明文源 → 明文拷贝。新名是全新身份 → _seal 里 local.get(newName)=null → 当明文文件透传。
+      //   不碰红线 store 内部。
+      //   · **加密源** → 用 getEncryptedBlob() 拿 at-rest 密文**原样**搬（不解壳、不问密码）。
+      //     v415 前这里只有 open()，而 open 是透明解壳的 → 拷贝加密作品会产出**明文副本**落进 IDB
+      //     （明文派生物落持久层 = 红线失守，旧注释还写着"无需密码、原样搬"，是谎注释）。
+      //   · 明文源 / 纯云端未缓存源 → open() 取字节（明文拷贝，本来如此）。
       async function copy(item: GItem) {
         openMenu.value = null;
         const isCloud = !!item.cloud;
         const cloudOn = host.signedIn() && host.online();
         await host.busy(t("gal.busy.copy", { base: pathBasename(item.name) }), async () => {
           try {
-            // 取源原始字节：有本地副本 → loadRaw（离线可用、不弹密码）；纯云端 → 拉云端原始容器。
-            // 取源字节：file.open 本地有读本地、无则拉云（明文；⚠TODO 加密源拷贝会解密，待内容盲 raw-read 原语）。
-            const bytes: Blob | null = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).open();
+            // 加密源优先走密文原样搬；非加密件 getEncryptedBlob 返 null → 回落 open()（明文源本来就该明文拷）。
+            const src = _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" });
+            const bytes: Blob | null = (await src.getEncryptedBlob()) ?? (await src.open());
             if (!bytes) { host.status(t("gal.st.copyNoBytes"), true); return; }
             // 目标名：同文件夹下「<名> 副本」「<名> 副本2」…取首个不占用的。源在当前夹 → 直接用手上的单夹快照，不 poll、不列全库。
             //   data.files 已经是本地⊕云端归并过的当前夹全集（app-store.itemToG）。

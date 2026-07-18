@@ -18,6 +18,7 @@ import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.ts";
 import { PaintDoc } from "./doc.ts";
 import type { Layer } from "./doc.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
+import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字节（branded：明文流不进只收密文的 sink）
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
 import { stripSessionExt, sessionFileName } from "./config.ts";
@@ -472,6 +473,13 @@ export const session = {
   save: saveNow, saveAndPush, adopt: adoptLoadedDoc, adoptWithOpts: adoptLoadedDocWithOpts,
   rename: renameCurrentSession, exit: exitCanvasToGallery, newDoc, pull: pullCloudPath, open: openItem, push: pushItem, unload: unloadItem,
   encodeOra: _encodeCurrentOra, buildOraMeta: _buildOraMeta,
+  /** 当前作品的 at-rest **密文**字节（原样，不解壳、不要密码）。非加密件 → null。
+   *  先 saveNow()：at-rest 字节是「上次保存」的内容，不先落盘就会导出成旧版本。 */
+  async readEncryptedBytes(): Promise<EncryptedBlob | null> {
+    if (!_activeSessionName) return null;
+    await saveNow();                              // 未保存编辑先落盘（seal 会在写入前包壳 → 落地即密文）
+    return await _file(_activeSessionName).getEncryptedBlob();
+  },
   writeCheckpoint: _writeSessionCheckpoint, readCheckpoint: _readSessionCheckpoint,
   awaitCloudPushIdle: async () => { /* 薄库 push 内联 await，无独立在飞态 */ },
   markOpenedNow() { _sessionOpenedAt = Date.now(); },

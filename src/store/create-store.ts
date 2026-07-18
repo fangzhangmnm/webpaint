@@ -97,6 +97,10 @@ export interface StoreConfig {
 // tryMove 结果式返回（不抛，UI 渲染 where 标签）。移动/改身份的唯一入口 = file.tryMove(to)。
 export type TryMoveResult = { ok: true } | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
 
+/** 加密容器的 at-rest 字节（branded）。唯一发牌方 = ZipFile.getEncryptedBlob()。
+ *  只收密文的下游（导出 / 拷贝 / checkpoint）用它当形参类型 → 传明文 Blob 编译不过。 */
+export type EncryptedBlob = Blob & { readonly __encryptedAtRest: unique symbol };
+
 // ── 文件对象（README.md §2）。isZip 在编译期分出两种：RawFile 无 getPeek/setPeek ──
 export interface RawFile {
   //  save(bytes)               = 本地落盘 + best-effort 推云（默认 tryPush:true）
@@ -135,6 +139,17 @@ export interface ZipFile extends RawFile {
   getPeek(opts: { bytesLength: number; zipEntry: string }): Promise<Blob | null>;
   // 把 getPeek 返回的密文 peek blob 非交互解密成明文（内存密码；锁定/错密码→null）。已是明文(非 ENC_PEEK_MIME)→原样返。
   decryptPeek(encPeek: Blob): Promise<Blob | null>;
+  /** 本地 at-rest 字节**原样**（内容盲，不解壳）——仅当这份是加密容器时给，否则 null。
+   *
+   *  为什么需要：`open()` 是**透明解壳**的（拿到的是明文），所以「原样搬密文」的场景——
+   *  导出加密作品、拷贝加密作品、给加密作品存 checkpoint——以前根本没有接口，
+   *  只能退化成「解密再存/再导出」，那就是明文落盘/明文外流（红线）。
+   *
+   *  返回 EncryptedBlob（branded）：下游只收密文的 sink 用这个类型签名，
+   *  传普通 Blob 直接编译错 —— 把「别把明文当密文传」从人的自觉变成编译期约束。
+   *  ⚠ 诚实的边界：TS 证明不了「这坨字节运行时真是密文」；brand 挡的是编码错误，
+   *    运行时真相由本方法保证（它是唯一发牌方，非加密件一律返 null）。 */
+  getEncryptedBlob(): Promise<EncryptedBlob | null>;
 }
 
 function localStorageKv(): KeyedKv {
@@ -611,7 +626,15 @@ export function createStore(config: StoreConfig) {
       return bytes ? new Blob([bytes as BlobPart]) : null;                             // 格式盲：不贴 MIME
     };
     const decryptPeekFn = (encPeek: Blob): Promise<Blob | null> => decryptEncPeek(name, encPeek);
-    return Object.assign(raw, { getPeek, decryptPeek: decryptPeekFn }) as ZipFile;
+    // at-rest 密文字节原样（内容盲、不解壳、不碰密码）。非加密件 / 无本地副本 → null。
+    const getEncryptedBlob = async (): Promise<EncryptedBlob | null> => {
+      const blob = await local.get(name);
+      if (!blob) return null;                                   // 没有本地副本（纯云端未缓存）→ 拿不到 at-rest 字节
+      const asBlob = blob instanceof Blob ? blob : new Blob([blob as BlobPart]);
+      if (!(await looksEncryptedContainer(asBlob))) return null;   // 明文件 → null（brand 的运行时真相由这一行保证）
+      return asBlob as EncryptedBlob;
+    };
+    return Object.assign(raw, { getPeek, decryptPeek: decryptPeekFn, getEncryptedBlob }) as ZipFile;
   }
 
   // ── collection / settings ──

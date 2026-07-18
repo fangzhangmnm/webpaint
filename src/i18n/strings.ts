@@ -628,7 +628,7 @@ export const S = {
   "tm.offset": { zh: "已偏移 {dx},{dy}（环绕）", en: "Offset {dx},{dy} (wrap)", ja: "{dx},{dy} オフセットしました（ラップ）" },
   "tm.dotExtDownloaded": { zh: ".{ext} 已下载", en: ".{ext} downloaded", ja: ".{ext} をダウンロードしました" },
   "tm.exportFailed": { zh: "导出失败：{err}", en: "Export failed: {err}", ja: "エクスポートに失敗しました：{err}" },
-  "tm.encryptedExportBlocked": { zh: "作品已加密：导出会生成明文文件，已阻止。请先在菜单解除加密再导出。", en: "Artwork is encrypted: export would produce a plaintext file, so it was blocked. Remove encryption from the menu first, then export.", ja: "作品は暗号化されています：エクスポートは平文ファイルを生成するため、ブロックしました。先にメニューで暗号化を解除してからエクスポートしてください。" },
+  "tm.exportNoCipher": { zh: "取不到加密字节（本地无副本？），导出已取消。", en: "Could not read the encrypted bytes (no local copy?); export cancelled.", ja: "暗号化されたバイトを取得できませんでした（ローカルにコピーがない？）。エクスポートを中止しました。" },
   "tm.copiedPngToClipboard": { zh: "已复制 PNG 到剪贴板（{scope}）", en: "Copied PNG to clipboard ({scope})", ja: "PNG をクリップボードにコピーしました（{scope}）" },
   "tm.scopeActiveLayer": { zh: "当前层", en: "active layer", ja: "現在のレイヤー" },
   "tm.scopeMerged": { zh: "合并", en: "merged", ja: "統合" },
