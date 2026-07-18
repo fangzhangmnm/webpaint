@@ -41,20 +41,27 @@ export async function ensureUnlocked(name: string): Promise<boolean> {
 }
 
 /**
- * 同上但验一段**明文容器字节**（导入外来加密文件——文件还没进 store，没 name 可查 peek）。
- * 返回验证过的密码（调用方拿去 unsealWith 解；不污染全局，记忆由调用方按落库 name 决定），
- * 取消 → null。**busy 外调用。**
+ * 解锁一段**外来的加密容器字节**（导入的文件还没进 store，没 name 可查 peek，只能全量解）。
+ * 返回 { pw, plain }：验过的密码 + **解出来的明文**；取消 → null。**busy 外调用。**
+ *
+ * ⚠ 一次尝试 = 一次解密（v415）。旧版是 verifyContainer(全量解一遍验) + 调用方再 unsealWith(全量解第二遍)，
+ *   导入一个加密作品要把整幅画用 7z-wasm 解**两遍**（密码试错时更多）。现在合一，成功那次的明文直接给调用方。
+ * 明文只在返回的 Blob 里（内存）；密码不污染全局，记忆由调用方按落库 name 决定。
  */
-export async function ensureUnlockedForBlob(blob: Blob) {
+export async function unlockImportedContainer(blob: Blob): Promise<{ pw: string; plain: Blob } | null> {
   const cur = getPassword(null);
-  if (cur && await store.verifyContainer(blob, cur)) return cur;
+  if (cur) {
+    const plain = await store.encryption.tryDecryptEncryptedBlob(blob, cur);
+    if (plain) return { pw: cur, plain };
+  }
   for (let attempt = 0; ; attempt++) {
     const pw = await promptPassword({
       title: "解锁导入的加密文件",
       message: attempt > 0 ? "密码不对，再试一次" : "这是加密文件。输入它的密码。",
     });
     if (pw == null) return null;
-    if (await store.verifyContainer(blob, pw)) return pw;
+    const plain = await store.encryption.tryDecryptEncryptedBlob(blob, pw);
+    if (plain) return { pw, plain };
   }
 }
 

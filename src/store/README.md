@@ -12,7 +12,7 @@
 1. **禁止**直接碰 `localStorage`、`IndexedDB`、任何 cloud vendor（Microsoft Graph / MSAL / 裸 `fetch` 云端）。全部走本库。
 2. 本库**零内容格式知识**——你的文件是 `.ora`/`.glb`/`.pdf`/`.txt` 都一样，对库只是**不透明 binary blob**。库永不解码你的内容。（唯一例外：库懂 **zip 这种通用容器**，见 §2 `isZip`——那是容器机制，不是内容知识。）
 3. **缺接口、库没实现你要的行为 → escalate to human 改库 API。绝不在 app 端绕过库自己实现。**
-4. **不要 deep import 库内部文件**。只从 `index.ts` 拿 `createStore` + 一个 provider。内部文件顶部有 WARNING，构建 lint 会挡 deep import。
+4. **不要 deep import 库内部文件**。只从 `index.ts` 拿 `createStore` + 一个 provider。内部文件顶部有 WARNING，`scripts/build.sh` 的 deep-import lint 会挡（v415 起真的有这道 lint；在那之前这句只是约定）。
 5. **API 难用是故意的**（§7）。觉得别扭、想绕——**停下 escalate**，别绕。
 6. 对本库的修改，重构，API修改前，需要阅读`DATA SAFETY GUIDELINE.md`
 
@@ -80,8 +80,8 @@ const store = createStore({
 | `store.files.drainOfflineQueue()` | 离线队列统一重放（按序：新文件夹→新上传→删文件→删文件夹深→浅）；app 在 online/boot/reconnect 调 | §6 |
 | `store.files.listTrash · listBackup · restoreTrash · purgeTrash · emptyTrash · emptyBackup` | 回收站/备份箱：**本地↔云聚合**列举（TrashItem：side/encrypted/conflictLive，只元数据无 blob）·恢复·彻底删·清空 | §2 |
 | `store.files.reconcileAll({activeFileName?})` | **全库** cloud-gone 收敛（仅用户显式指令）：clean 孤儿**去抖后 send trash**（首次见 gone 标 candidate、跨 ~24h GRACE 第二次+ 才动手；重现/被编辑自愈）。日常开夹惰性收敛走 watchFolder 内的 per-folder reconcile（同 converge SSOT） | §6 |
-| `store.looksEncrypted · verifyContainer · unsealWith` | 加密导入辅助（文件还没进 store、无 name 可查时） | §5 |
-| 加密（at-rest，对齐 WebPaint） | config 注入 `crypto`(zip/7z codec) + `crypt`(ext/makePeek/getPassword)；透明封解 + `file.encrypt/decrypt`；不注入 = dormant。`store.encryption`/salt 超集未采用 | §5 |
+| `store.encryption.*` | **裸字节**级加密面（文件还没进 store、无 name 可查时）：`isEncryptedBlob`（便宜嗅探）· `tryDecryptEncryptedBlob`（验+解**合一**，null=错密码）· `isEncryptedPeekBlob` | §5 |
+| 加密（at-rest，对齐 WebPaint） | config 注入 `crypto`(zip/7z codec) + `crypt`(ext/makePeek/getPassword)；透明封解 + `file.encrypt/decrypt/getEncryptedBlob`；不注入 = dormant | §5 |
 
 ---
 
@@ -245,7 +245,8 @@ const store = createStore({
 - **预览**：`ZipFile.getPeek({bytesLength, zipEntry})` 取尾片 + 库内 zip 解析该 entry（本地切片或云端 byte-range，不全量下载）。明文→PNG blob；加密→**密文** peek blob（`ENC_PEEK_MIME`，不解密→你缓存原样存密文=明文不落盘）；密文再经 `decryptPeek(blob)` 非交互解（内存密码；锁定→null）。写侧 peek 经 `crypt.makePeek` 自动派生（无显式 `setPeek`）。
 - **导入辅助**（文件还没进 store）：`store.looksEncrypted(blob)` / `store.verifyContainer(blob,pw)` / `store.unsealWith(blob,pw)`。
 
-> **未采用**：README 早期草拟的 `store.encryption`（库统一密钥 + `vault.salt` + `encrypted:true` + `saveEncrypted` + `addEncryption`）超集**本版不实现**——对齐 WebPaint 真机验过的 `getPassword`/`encrypt` 模型（见 `docs/11`）。要库统一密钥再单独 escalate。
+> **未采用**：README 早期草拟的 `store.encryption` **超集**（库统一密钥 + `vault.salt` + `encrypted:true` + `saveEncrypted` + `addEncryption`）本版不实现
+> —— 注意别和 v415 落地的 `store.encryption`（只有三个**裸字节**级 helper，无密钥管理）混为一谈；那个是窄面，这个是被否掉的宽面——对齐 WebPaint 真机验过的 `getPassword`/`encrypt` 模型（见 `docs/11`）。要库统一密钥再单独 escalate。
 
 ---
 

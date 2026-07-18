@@ -2,13 +2,16 @@
 //
 // ⚠ 接库只准从这里拿 createStore + 一个 provider。**绝不 deep import 内部文件**
 //   （cloud-sync / local-head / push / seal / safe-resolve / folder-* / store.ts …）——
-//   那些是红线 guts，绕过 = 绕过红线（见 README.md 铁律）。build.sh 的 lint 会挡 app 的 deep import。
+//   那些是红线 guts，绕过 = 绕过红线（见 README.md 铁律）。
+//   ✅ scripts/build.sh 有真的 deep-import lint 挡着（v415 补——在那之前这句是**谎注释**，只有约定没有守卫）。
+//   要用的东西这里没导出 → 说明公开面缺了，补这里的 export（并想清楚该不该暴露），别绕过封口。
 export { createStore } from "./create-store.ts";
 export type { StoreConfig, StoreUI, RawFile, ZipFile, Store, EncryptedBlob } from "./create-store.ts";
 // 统一列举面（README §2）：Item/SyncState/ListContext + syncState 便利判定（isCached/isDirty）。
 export type { Item, SyncState, ListContext } from "./listing.ts";
 export { isCached, isDirty } from "./listing.ts";
 export type { Bytes } from "./types.ts";   // 字节别名（host adapter 的类型用；不暴露内部文件路径）
+// 加密：**裸字节**级的面走 store.encryption（有 name 的场景走 file.*）；EncryptedBlob 是 at-rest 密文的 branded 类型。
 export type { Collection, CollectionEntry } from "./collection.ts";
 // 本地缓存 adapter（host 装配 createStore 时注入 local 用；prod=idb）。
 export { createLocalCache } from "./local-cache.ts";

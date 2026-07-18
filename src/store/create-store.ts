@@ -730,12 +730,30 @@ export function createStore(config: StoreConfig) {
       //   日常开夹的惰性收敛已在 watchFolder 内走 reconcileFolder（看到夹才收敛，同一 converge SSOT）。
       reconcileAll: (opts?: { activeFileName?: string }) => reconcileMod.reconcile(opts),
     },
-    // ── 加密导入辅助（文件还没进 store、无 name 可查时；对齐 WebPaint）──
-    looksEncrypted: (blob: Blob | Uint8Array) => looksEncryptedContainer(blob),   // 是否加密容器（导入分流）
-    verifyContainer: async (blob: Blob, pw: string): Promise<boolean> => { if (!pw) return false; try { await unpackContainer(blob, pw); return true; } catch { return false; } },
-    unsealWith: async (blob: Blob, pw: string): Promise<Blob | null> => {   // 显式密码解一段字节（导入：不走 getPassword、不污染全局）
-      if (!(await looksEncryptedContainer(blob))) return blob;
-      try { return (await unpackContainer(blob, pw)).dataBlob; } catch { return null; }
+    // ── store.encryption：**裸字节**级的加密面（文件还没进 store、无 name 可查时用）。──────────
+    //   有 name 的场景一律走 file.*（isEncrypted / encrypt / decrypt / verifyPassword /
+    //   getPeek / decryptPeek / getEncryptedBlob）——那些能用便宜的 peek 路径，别走这里。
+    //   设计约束：① 不做重复的计算 ② 不做不必要的计算。
+    encryption: {
+      /** 是不是加密容器。**只嗅魔数/尾窗**，不派生密钥、不解密（便宜，可用于分流）。 */
+      isEncryptedBlob: (blob: Blob | Uint8Array): Promise<boolean> => looksEncryptedContainer(blob),
+
+      /** 验密码 + 解出明文，**合一**。null = 错密码（或不是容器）。
+       *
+       *  为什么合一（这就是「不做重复的计算」）：旧面把它拆成 verifyContainer(验) + unsealWith(解)，
+       *  而两者内部都是完整的 unpackContainer —— 导入一个加密文件要把整幅作品**解密两遍**
+       *  （密码试错时更多）。7z-wasm 全量解一幅画不是小钱。合一后一次尝试 = 一次解密，
+       *  且成功那次的明文直接给调用方复用。
+       *  明文只在返回的 Blob 里（内存），库不缓存、不落盘。 */
+      tryDecryptEncryptedBlob: async (blob: Blob, pw: string): Promise<Blob | null> => {
+        if (!pw) return null;
+        if (!(await looksEncryptedContainer(blob))) return null;   // 不是容器 → null（"明文原样返"是旧 unsealWith 的糊涂语义，已去掉：调用方自己先分流）
+        try { return (await unpackContainer(blob, pw)).dataBlob; } catch { return null; }
+      },
+
+      /** 这块 blob 是不是**密文 peek**（getPeek 对加密件返回的那种）。纯类型判定，零计算。
+       *  取代把 ENC_PEEK_MIME 这个魔法常量导出给 app —— app 要问的是语义，不是常量值。 */
+      isEncryptedPeekBlob: (blob: Blob | null | undefined): boolean => !!blob && blob.type === ENC_PEEK_MIME,
     },
     // 无 _internal —— app 绝不碰 head/cloud/sub（库内测试直接 import 对应模块）。
   };

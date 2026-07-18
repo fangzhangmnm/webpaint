@@ -49,6 +49,25 @@ else
   echo "[build] ⚠ 未装 tsc（node_modules 缺）——跳过类型检查。装一下：npm install" >&2
 fi
 
+# 0.5 deep-import lint（红线封口的**真**守卫）。
+#     src/store/ 是深模块，唯一公开入口 = src/store/index.ts。app 层绕过 index 直接 import 内部文件
+#     = 绕过红线 guts（cloud-sync / local-head / push / seal / safe-resolve / …）。
+#     ⚠ 这道 lint 以前**不存在**，而 index.ts 和 README.md 都白纸黑字声称「build.sh 的 lint 会挡」——
+#       封口只是口头约定、无守卫。v415 补上，谎注释同步改掉。
+#     零依赖实现（仓库无 eslint/dep-cruiser，也不该为这一条引；MASTER §B: vendor every dependency）。
+echo "[build] deep-import lint（app 层不得绕过 src/store/index.ts）…"
+DEEP_HITS=$(grep -rnE 'from "(\./|\.\./)+store/[A-Za-z0-9_-]+\.ts"' src --include='*.ts' \
+            | grep -v '^src/store/' \
+            | grep -vE 'store/index\.ts"' || true)
+if [ -n "$DEEP_HITS" ]; then
+  echo "[build] ✗ 发现 deep import（app 层直接钻进 src/store/ 内部文件）：" >&2
+  echo "$DEEP_HITS" >&2
+  echo "[build]   → 改成从 './store/index.ts' 拿；index 没导出就说明公开面缺东西，" >&2
+  echo "[build]     补 index 的 export（并想清楚这是不是该暴露），别绕过封口。" >&2
+  exit 1
+fi
+echo "[build] ✓ 无 deep import"
+
 # 1. esbuild bundle 到临时名
 "$ESBUILD" "$ENTRY" \
   --bundle --format=esm --target=es2020 \

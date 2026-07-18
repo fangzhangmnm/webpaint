@@ -5,7 +5,6 @@
 import { createStore, createOneDriveProvider, isCached, isDirty } from "./store/index.ts";
 import { stripSessionExt, sessionFileName } from "./config.ts";
 import { storeUI } from "./store-ui.ts";
-import { looksEncryptedContainer } from "./crypto-format.ts";
 import { CLIENT_ID, SCOPES } from "./config.ts";
 import { zipReadEntry, zipPack, zipUnpack } from "./zip.ts";
 import { pack7z, unpack7z } from "./sevenzip.ts";
@@ -38,10 +37,16 @@ export const store = createStore({
     makePeek: async (blob) => { try { return await zipReadEntry(blob, "Thumbnails/thumbnail.png"); } catch { return null; } },  // ora 内容知识只此一行
     getPassword,
   },
+  // 采纳云字节前验真内容。**只看魔数**，不解密（这是 createStore 的 config，此刻 store 还没建好，
+  //   也拿不到 store.encryption；而且这里本就只需要便宜的分流判定）。
+  //   明文 ora = zip（PK\x03\x04）；加密容器 = 外壳 zip 或裸 7z —— 两者的头都在这四个字节里判得出，
+  //   7z 魔数 "7z\xBC\xAF\x27\x1C" 前四字节即可识别。挡的是 captive-portal HTML / 截断字节。
   validateAdopt: async (blob) => {
-    const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
-    if (head[0] === 0x50 && head[1] === 0x4B && head[2] === 0x03 && head[3] === 0x04) return true;   // ZIP PK\x03\x04
-    return looksEncryptedContainer(blob);
+    const h = new Uint8Array(await blob.slice(0, 6).arrayBuffer());
+    const eq = (...b: number[]) => b.every((v, i) => h[i] === v);
+    if (eq(0x50, 0x4B, 0x03, 0x04)) return true;                     // ZIP "PK\x03\x04"：明文 ora，或加密件的明文外壳
+    if (eq(0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C)) return true;         // 7z  "7z\xBC\xAF\x27\x1C"：裸 .7z 容器（老格式）
+    return false;
   },
   autoCacheOpenedFile: true,
   signedIn: () => _auth.isSignedIn(),   // 连接态 store 自持（网盘模型）：watchFolder/云列举不再由 app 每次传 ctx

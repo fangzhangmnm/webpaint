@@ -24,7 +24,6 @@ import { reportError } from "../error-badge.ts";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
 // crypt seam）。图库只做 per-app 的部分：首次设密码双输 UX、活动项预检、明文残留清理、
 // 以及把 peek 字节解释成缩略图（enc-thumbs）。
-import { ENC_PEEK_MIME } from "../crypto-format.ts";
 import { isUnlocked, onLockChange, setPassword } from "../crypto-state.ts";
 import { localPeekThumb, decryptCloudPeekThumb, ensureNewPassword, ensureUnlocked } from "../enc-thumbs.ts";
 import { copyTargetName } from "../gallery-model.ts";
@@ -75,7 +74,7 @@ export interface GalleryHost {
 // 缩略图格子：本地 blob 直显；纯云端进视口才 byte-range 拉；都无 → 名字首字。
 // 对象 URL 生命周期归自己（onUnmounted revoke）——取代旧 _galleryUrls 全局数组手动 revoke。
 // 加密：本地加密作品（encName）经 store.readPeek（非交互——批量渲染绝不弹窗伏击）；
-// 云端拉回 ENC_PEEK_MIME 密文 → store.decryptPeekBytes。锁定 → 锁 icon
+// 云端拉回密文 peek（store.encryption.isEncryptedPeekBlob 判）→ file.decryptPeek。锁定 → 锁 icon
 // （点它 emit('unlock', name) → 图库走交互解锁）；解锁 → watch 锁态原地重试。
 // 解出的 PNG 只进 objectURL，永不写 IDB。
 const ThumbCell = defineComponent({
@@ -139,7 +138,7 @@ const ThumbCell = defineComponent({
             getOrFetchCloudThumb(props.alt, props.thumbToken, props.thumbSize)
               .then(({ blob }: { blob: Blob }) => {
                 showCloud.value = false;
-                if (blob && blob.type === ENC_PEEK_MIME) { cloudEncBlob = blob; return tryDecrypt(); }
+                if (_store.encryption.isEncryptedPeekBlob(blob)) { cloudEncBlob = blob; return tryDecrypt(); }
                 setBlob(blob);
               })
               .catch((err: unknown) => reportError(new Error("[gallery] thumb: " + String(err)), "log"));

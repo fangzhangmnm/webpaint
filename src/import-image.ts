@@ -16,7 +16,7 @@ import { decodeImageFile, smartResample } from "./resample.ts";
 import { decodeOraToDoc } from "./ora.ts";
 import { store as _store } from "./app-store.ts";
 import { stripSessionExt } from "./config.ts";
-import { ensureUnlockedForBlob } from "./enc-thumbs.ts";
+import { unlockImportedContainer } from "./enc-thumbs.ts";
 import { onPasswordVerified } from "./crypto-state.ts";
 import { setTool, updateLassoToolbar } from "./toolbar.ts";
 import { _makeFullLayerSelection } from "./selection-ops.ts";
@@ -246,13 +246,12 @@ export function initImportImage(ctx: AppContext) {
         // 外来文件可能是加密容器（可能用与图库不同的密码）→ busy 外解锁 + 显式密码解，
         //   再按落库 name 记忆（onPasswordVerified：全局空→上位 / 否则 per-name 覆盖）。
         let plain: Blob = file;
-        if (await _store.looksEncrypted(file)) {
-          const pw = await ensureUnlockedForBlob(file);
-          if (pw == null) { setStatus(t("mi.importCancelledNeedPw"), true); return; }
-          const out = await _store.unsealWith(file, pw);
-          if (!out) { setStatus(t("mi.importFailedWrongPw"), true); return; }
-          plain = out;
-          onPasswordVerified(nm, pw);
+        if (await _store.encryption.isEncryptedBlob(file)) {   // 便宜嗅探（不解密）→ 分流
+          // 解锁循环一次尝试 = 一次解密，成功那次的明文直接拿来用（旧版要全量解两遍）。
+          const got = await unlockImportedContainer(file);
+          if (!got) { setStatus(t("mi.importCancelledNeedPw"), true); return; }
+          plain = got.plain;
+          onPasswordVerified(nm, got.pw);
         }
         const loaded = await decodeOraToDoc(plain);
         session.adopt(loaded as PaintDoc, nm);
