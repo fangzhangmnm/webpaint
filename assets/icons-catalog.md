@@ -1,6 +1,6 @@
 # 本 app 的图标
 
-56 icons · 提取自家族图标库 `../../../../20260708 SVG Icons/icons.svg` · 由 `extract-icons.py` 生成，别手改。
+65 icons · 提取自家族图标库 `../../../../20260708 SVG Icons/icons.svg` · 由 `extract-icons.py` 生成，别手改。
 
 用法：把 sprite 内联到 `<body>` 顶部（它是 `display:none`），然后按 id 引用；
 颜色跟随 CSS `color`（全部 `currentColor`）：
@@ -21,15 +21,18 @@
 | `lasso` | tool.lasso |
 | `magic-wand` | la.magic |
 | `move` | 四向移动箭头 (move tool, for SketchUp-clone) |
+| `paint-bucket` | 线描桶+实心水滴 (定稿:把手弧高≈4.9=原 -3) |
 | `pencil` | 铅笔 Bootstrap Icons MIT |
+| `stamp` | 橡皮图章 |
 
 ## image-processing
 
 | name | 说明 |
 |------|------|
 | `brush-width` | 笔刷宽度:平行两条波浪(标准1.7/粗3.4) |
+| `color` | 三色文氏图(弱半透明填充,重叠处自然叠深) |
 | `color-palette` | 调色板:BI palette 身体(MIT)+四点非均匀,下方留空 |
-| `fx` | 滤镜/调整 fx (WebPaint topAdjustBtn) |
+| `fx` | 滤镜/调整 fx (字形已烘焙成轮廓,不依赖设备字体) |
 | `sliders` | 不写类别 |
 | `transparency` | L.opacity |
 
@@ -38,7 +41,10 @@
 | name | 说明 |
 |------|------|
 | `flip-horizontal` | 水平翻转 |
+| `free-transform` | 定界框+四角手柄 |
+| `perspective-transform` | 透视四边形(侧向 v3)+四角手柄 |
 | `rotate-ccw` | 逆时针旋转+轴 (WebPaint 在用) |
+| `scale-free` | 自由缩放(矩形框+小方虚线) |
 | `scale-uniform` | 等比缩放(正方框+小方虚线) |
 
 ## selection
@@ -62,6 +68,7 @@
 |------|------|
 | `arrow-redo` | action.redo |
 | `arrow-undo` | action.undo |
+| `copy` | 两个文件叠放 |
 | `move-to-layer` | 文件+绕行箭头(移到新层) |
 | `trash-can` | 垃圾桶 |
 
@@ -91,8 +98,10 @@
 
 | name | 说明 |
 |------|------|
+| `check` | 勾 |
 | `chevron-down` | lp.foot.down |
 | `chevron-up` | lp.foot.up |
+| `x` | 叉 |
 
 ## cloud
 

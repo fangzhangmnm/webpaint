@@ -557,7 +557,7 @@ function makeGallery(host: GalleryHost) {
               <div class="gallery-tile-name" :title="ft.path">{{ ft.name }}</div>
               <div class="gallery-tile-meta">{{ L.folder }}</div>
             </div>
-            <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu('F:'+ft.path)">⋯</button>
+            <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu('F:'+ft.path)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
             <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!=='F:'+ft.path }" @click.stop>
               <button type="button" class="danger" @click="folderDelete(ft)">{{ L.delEmptyFolder }}</button>
             </div>
@@ -573,7 +573,7 @@ function makeGallery(host: GalleryHost) {
                 <span>{{ fmtMeta(row.t) }}</span>
               </div>
             </div>
-            <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu(row.t.name)">⋯</button>
+            <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu(row.t.name)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
             <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!==row.t.name }" @click.stop>
               <template v-if="row.t.ghost">
                 <div class="gallery-menu-note">{{ L.divergedNote }}</div>
@@ -607,7 +607,7 @@ function makeGallery(host: GalleryHost) {
               <div class="gallery-tile-name" :title="row.t.name">{{ row.t.name }}</div>
               <div class="gallery-tile-meta">{{ row.t.source }} · {{ fmtMeta({time: row.t.deletedAt, size: 0}).split(' · ')[0] }} {{ L.deleted }}</div>
             </div>
-            <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu('T:'+row.t.name+row.t.deletedAt)">⋯</button>
+            <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu('T:'+row.t.name+row.t.deletedAt)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
             <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!=='T:'+row.t.name+row.t.deletedAt }" @click.stop>
               <button type="button" @click="trashRestore(row.item)">{{ L.restore }}</button>
               <button type="button" class="danger" @click="trashPurge(row.item)">{{ L.purge }}</button>

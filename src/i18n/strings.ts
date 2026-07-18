@@ -376,7 +376,7 @@ export const S = {
   // ── index.html 静态 chrome（切片 5b-1：gallery 菜单/回收站 + 新建作品 sheet + 浮窗标题 + 图层脚 + 参考窗）──
   "gal.chrome.add":       { zh: "新增", en: "Add", ja: "追加" },
   "gal.chrome.menuTip":   { zh: "图库菜单（更新 / 设置）", en: "Gallery menu (updates / settings)", ja: "ギャラリーメニュー（更新 / 設定）" },
-  "gal.chrome.back":      { zh: "← 返回图库", en: "← Back to gallery", ja: "← ギャラリーに戻る" },
+  "gal.chrome.back":      { zh: "返回图库", en: "Back to gallery", ja: "ギャラリーに戻る" },   // ← 已改用 #back 图标
   "gal.chrome.trashOps":  { zh: "回收站操作", en: "Trash actions", ja: "ゴミ箱の操作" },
   "gal.chrome.emptyLocal":{ zh: "清空本地回收站", en: "Empty local trash", ja: "ローカルのゴミ箱を空に" },
   "gal.chrome.emptyCloud":{ zh: "清空云端回收站", en: "Empty cloud trash", ja: "クラウドのゴミ箱を空に" },

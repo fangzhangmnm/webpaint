@@ -88,6 +88,9 @@ const EYE_OFF = iconHtml("visibility-hide", { size: 22 });
 // 组折叠图标 SVG（去三角，点文件夹切折叠）：展开 = 打开的文件夹；折叠 = 合上的文件夹。
 const FOLDER_OPEN = iconHtml("folder-open", { size: 20 });
 const FOLDER_CLOSED = iconHtml("folder", { size: 20 });
+// ⋯ 菜单里三个开关的勾选框（原来是 ☑ / ☐ 字符——那两个符号跨平台字形差异大，画成图形才一致）
+const ICON_CHECKED = iconHtml("checkbox-checked", { size: 16 });
+const ICON_UNCHECKED = iconHtml("checkbox-empty", { size: 16 });
 
 // ---- 面板-UI-本地反应式状态（折叠 / 内联重命名 / ⋯菜单）----
 // 注：doc/图层结构变更的版本信号已外迁到 signals.ts 的 docVersion（跨切面共享）。
@@ -494,6 +497,7 @@ const LayerRow = defineComponent({
       toggleBadge, toggleMenu, vis, toggleCollapse,
       opaInput, opaCommit, modeChange, act, onMoveSelect,
       toggleClip, toggleRef, toggleLock,
+      ICON_CHECKED, ICON_UNCHECKED,
     };
   },
   template: `
@@ -518,13 +522,13 @@ const LayerRow = defineComponent({
         @click.stop @blur="onRenameCommit" @keydown="onRenameKey" />
       <span v-else class="layer-name" @click="onNameClick">{{ layer.name }}<span v-if="isGroup && collapsed" class="layer-group-count"> ({{ childLeafCount }})</span></span>
 
-      <span v-if="layer.clippingMask" class="layer-clip-chip" :title="L.clippedTip">↘</span>
+      <span v-if="layer.clippingMask" class="layer-clip-chip" :title="L.clippedTip"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clipping-mask"/></svg></span>
       <span v-if="!isGroup && layer.lockAlpha" class="layer-lock-chip" :title="L.lockAlphaTip">
         <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><use href="#lock"/></svg>
       </span>
       <span v-if="isRef" class="layer-ref-chip" :title="L.refTip">{{ L.refChip }}</span>
 
-      <button type="button" class="layer-tools-btn" :title="L.layerMenu" @click="toggleMenu">⋯</button>
+      <button type="button" class="layer-tools-btn" :title="L.layerMenu" @click="toggleMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
 
       <button type="button" class="layer-mode-badge" :class="{ active: expanded }"
         :title="badgeTitle" @click="toggleBadge">{{ modeBadge }}</button>
@@ -549,9 +553,9 @@ const LayerRow = defineComponent({
 
         <hr class="menu-sep" />
         <!-- v267 (user)：层属性 toggle 收进 ⋯ 菜单（点了不关菜单，可连续切） -->
-        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleLock"><span class="layer-menu-check">{{ layer.lockAlpha ? '☑' : '☐' }}</span><span class="menu-item-label">{{ L.lockAlpha }}</span></button>
-        <button class="menu-item layer-menu-toggle" type="button" @click="toggleClip"><span class="layer-menu-check">{{ layer.clippingMask ? '☑' : '☐' }}</span><span class="menu-item-label">{{ isGroup ? L.clipGroup : L.clip }}</span></button>
-        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleRef"><span class="layer-menu-check">{{ isRef ? '☑' : '☐' }}</span><span class="menu-item-label">{{ L.refLayer }}</span></button>
+        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleLock"><span class="layer-menu-check"><span v-html="layer.lockAlpha ? ICON_CHECKED : ICON_UNCHECKED"></span></span><span class="menu-item-label">{{ L.lockAlpha }}</span></button>
+        <button class="menu-item layer-menu-toggle" type="button" @click="toggleClip"><span class="layer-menu-check"><span v-html="layer.clippingMask ? ICON_CHECKED : ICON_UNCHECKED"></span></span><span class="menu-item-label">{{ isGroup ? L.clipGroup : L.clip }}</span></button>
+        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleRef"><span class="layer-menu-check"><span v-html="isRef ? ICON_CHECKED : ICON_UNCHECKED"></span></span><span class="menu-item-label">{{ L.refLayer }}</span></button>
 
         <hr class="menu-sep" />
         <button v-if="!isGroup" class="menu-item" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><span class="menu-item-label">{{ L.mergeDown }}</span></button>

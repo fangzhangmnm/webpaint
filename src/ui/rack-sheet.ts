@@ -78,7 +78,7 @@ export function mountRackSheet(el: HTMLElement, opts: RackSheetOpts): RackSheetH
             :aria-pressed="b.id === activeId" @click="selectBrush(b.id)">
             <div class="brush-rack-tile-preview" :style="tileStyle(b)"></div>
             <span class="brush-rack-tile-name">{{ b.name }}</span>
-            <button type="button" class="brush-rack-tile-edit" :title="L.edit" @click.stop="editBrush(b.id)">⋯</button>
+            <button type="button" class="brush-rack-tile-edit" :title="L.edit" @click.stop="editBrush(b.id)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
           </div>
         </div>
       </template>

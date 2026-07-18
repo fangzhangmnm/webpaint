@@ -32,6 +32,33 @@
        库里有 cloud-unavailable（云+划叉，已确认消失），这个是它的「还在等」前置态，两者必须能区分。 -->
   <symbol id="cloud-pending" data-cat="legacy" data-note="云+时钟:云端消失但在宽限期内待判定(区别于 cloud-unavailable 的已确认划叉)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><circle cx="12" cy="13" r="3.2"/><path d="M12 11.4v1.6l1.1.9"/></symbol>
 
+  <!-- spinner-arc — 只有弧，没有云。用来叠在 #cloud 上做「连接中」的旋转。
+       为什么不用库里的 cloud-busy：那个把云和弧焊在一个 symbol 里，整体旋转会连云一起转。
+       而 <use> 生成的是影子内容，外部 CSS 选择器进不去，没法只转里面那条弧。
+       拆成独立 symbol 后就能两层叠放、把 .spin-arc 挂在外层 <svg>（light DOM）上，动画正常。
+       入库建议：库里也补一个 arc-only 的版本，cloud-busy 保留给不需要动画的场合。 -->
+  <symbol id="spinner-arc" data-cat="legacy" data-note="纯弧+箭头(叠在 cloud 上转;库里 cloud-busy 是云弧一体,整体转会连云一起转)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 13a3 3 0 0 1 5.5-1.6"/><polyline points="14.5 9.5 14.5 11.4 12.6 11.4"/></symbol>
+
+  <!-- ── 以下 5 个是把原本的排版字符（⋯ ← ↘ ☑ ☐）画成了真图形。
+       不用单汉字顶位，因为这几个是全世界通用的图元、语言无关、且形状简单没有误读空间。
+       原本用字符的问题：☑/☐ 这类符号跨平台字形差异大（iOS/Android/桌面各画各的），
+       ⋯ 的三个点在不同字体里间距和垂直位置都会跳。画成 SVG 后各端一致。 ── -->
+
+  <!-- more — 溢出菜单入口（原 ⋯，全仓 15 处：图层行 / 图库瓦片 / 回收站 / 笔架 / 菜单配置）。 -->
+  <symbol id="more" data-cat="legacy" data-note="溢出菜单:横向三点(原 ⋯ 字符,跨平台字形不一致故画成图形)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+
+  <!-- back — 返回（原 ← 字符，回收站→图库）。整箭头而非裸 chevron：库里 chevron-left 当初就是
+       因为描边下渲染差被 sunset 的，带杆的箭头在小尺寸下辨识度好得多。 -->
+  <symbol id="back" data-cat="legacy" data-note="返回:左向整箭头(原 ← 字符;库里裸 chevron-left 曾因小尺寸渲染差被 sunset,故带杆)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12H5"/><polyline points="11 6 5 12 11 18"/></symbol>
+
+  <!-- clipping-mask — 图层行上的剪贴蒙版标记（原 ↘ 字符）。
+       Photoshop 的剪贴蒙版指示就是这个「下折再指向右」的折角箭头，画成图形比 ↘ 准确。 -->
+  <symbol id="clipping-mask" data-cat="legacy" data-note="剪贴蒙版:折角箭头(原 ↘ 字符;PS 同款下折指向语义)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v8a2 2 0 0 0 2 2h6"/><polyline points="13 12 17 15 13 18"/></symbol>
+
+  <!-- checkbox-checked / checkbox-empty — 图层 ⋯ 菜单里的三个开关（原 ☑ / ☐ 字符）。 -->
+  <symbol id="checkbox-checked" data-cat="legacy" data-note="勾选框·选中(原 ☑ 字符,跨平台字形差异大)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><polyline points="8 12.5 11 15.5 16.5 9.5"/></symbol>
+  <symbol id="checkbox-empty" data-cat="legacy" data-note="勾选框·未选(原 ☐ 字符,跨平台字形差异大)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/></symbol>
+
   <!-- ═══ stopgap：单汉字顶位，全部待真图形替换 ═══ -->
 
   <!-- gallery — 图库入口（主菜单第一项）。真图形建议：网格状缩略图墙 / 相框堆叠。 -->
@@ -75,6 +102,15 @@
 
   <!-- sign-out — 「退出登录」（OneDrive 账号菜单）。真图形建议：门框+向外箭头（通用 logout 图元）。 -->
   <symbol id="sign-out" data-cat="stopgap" data-note="单字顶位「出」=退出登录 · 待真图形替换(建议:门框+向外箭头,通用 logout 图元)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">出</text></symbol>
+
+  <!-- clear-pixels — 套索第二行「清除」：抹掉选区内的像素（选区本身还在）。
+       注意跟 selection-clear（取消选区，选区没了但像素还在）是两回事，必须视觉可分。
+       真图形建议：虚线选框内部被擦空 / 选框 + 橡皮。 -->
+  <symbol id="clear-pixels" data-cat="stopgap" data-note="单字顶位「清」=清除选区内像素 · 待真图形替换(建议:虚线框内被擦空;须与 selection-clear「取消选区」可分)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">清</text></symbol>
+
+  <!-- clear-canvas — 调色板小窗的「清空」：把 256×256 混色画布擦干净。
+       跟 clear-pixels 是不同动作（那个作用于选区，这个作用于调色板），所以分两个 id。 -->
+  <symbol id="clear-canvas" data-cat="stopgap" data-note="单字顶位「清」=清空调色板画布 · 待真图形替换(建议:画布+扫除;与 clear-pixels 不同动作故分两个 id)" viewBox="0 0 24 24" fill="none"><text x="12" y="18.5" text-anchor="middle" font-family="system-ui,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif" font-size="18" font-weight="500" fill="currentColor" stroke="none">清</text></symbol>
 
   <!-- blender — 「Blender sync…」（跟 Blender 的贴图往返通道）。
        真图形建议：Blender 那个经典的橙色环形靶标轮廓（单色描边版），或双向同步箭头。 -->

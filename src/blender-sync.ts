@@ -38,15 +38,15 @@ const ICON_OFF = iconHtml("cloud", { size: 18 });
 const ICON_ON = iconHtml("cloud-synced", { size: 18 });
 const ICON_DL = iconHtml("download", { size: 18 });
 const ICON_UL = iconHtml("upload", { size: 18 });
-// ⚠ ICON_BUSY 是本轮唯一保留内联的图标，不是漏改。
-// 它的旋转弧靠 styles.css 的外部选择器 `.btp-connbtn[data-state="connecting"] .spin-arc` 驱动，
-// 而 <use> 生成的是影子内容——外部 CSS 选择器匹配不到里面的 .spin-arc，动画会静默失效。
-// （共享库的 #cloud-busy 图形本身是对的、class 也在，纯粹是 CSS 够不到。）
-// 要收进 sprite 得先把「只在 connecting 时转」这个条件换掉，那是行为改动，不属于本轮机械替换。
+// 「连接中」= 静态云 + 独立的弧叠在上面转。两层，不是一个图标。
+// 为什么不用库里的 cloud-busy：那个云弧一体，<use> 生成的是影子内容，外部 CSS 选择器
+// （styles.css 的 `.btp-connbtn[data-state="connecting"] .spin-arc`）进不去，没法只转里面那条弧；
+// 整体转又会连云一起转。拆成两层后 .spin-arc 挂在外层 <svg> 上（普通 light DOM），选择器就够得到了。
 const ICON_BUSY =
-  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
-  `<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>` +
-  `<g class="spin-arc" style="transform-origin:12px 13px"><path d="M9 13a3 3 0 0 1 5.5-1.6"/></g></svg>`;
+  `<span class="icon-stack">` +
+  iconHtml("cloud", { size: 18 }) +
+  iconHtml("spinner-arc", { size: 18, cls: "spin-arc" }) +
+  `</span>`;
 
 // ─── 模块状态（单实例；panel 与连接随 app 生命周期常驻）───
 let ctx: AppContext;
@@ -411,7 +411,7 @@ function buildPanel() {
   panel.innerHTML = `
     <div class="float-panel-head" id="btpHead">
       <span class="float-panel-title">${t("bl.panelTitle")}</span>
-      <button class="float-panel-close" id="btpClose" type="button" aria-label="${t("bl.close")}">×</button>
+      <button class="float-panel-close" id="btpClose" type="button" aria-label="${t("bl.close")}">${iconHtml("x")}</button>
     </div>
     <div class="float-panel-body">
       <div class="btp-row">
@@ -435,7 +435,7 @@ function buildPanel() {
           <span class="btp-action-label">${t("bl.pullTextureLabel")}</span>
           <span class="btp-action-sub" id="btpDownloadSub">${t("bl.newLayer")}</span>
         </button>
-        <button class="menu-item-wrench" id="btpDownloadCfg" type="button" title="${t("bl.pullSettingsTitle")}">⋯</button>
+        <button class="menu-item-wrench" id="btpDownloadCfg" type="button" title="${t("bl.pullSettingsTitle")}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
         <div class="menu-config-popup btp-popup hidden" id="btpDownloadPop">
           <div class="menu-config-section">
             <div class="menu-config-title">${t("bl.pullToTitle")}</div>
@@ -450,7 +450,7 @@ function buildPanel() {
           <span class="btp-action-label">${t("bl.pushTextureLabel")}</span>
           <span class="btp-action-sub" id="btpUploadSub">${t("bl.mergedCanvas")}</span>
         </button>
-        <button class="menu-item-wrench" id="btpUploadCfg" type="button" title="${t("bl.pushSettingsTitle")}">⋯</button>
+        <button class="menu-item-wrench" id="btpUploadCfg" type="button" title="${t("bl.pushSettingsTitle")}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
         <div class="menu-config-popup btp-popup hidden" id="btpUploadPop">
           <div class="menu-config-section">
             <div class="menu-config-title">${t("bl.pushSourceTitle")}</div>
@@ -466,7 +466,7 @@ function buildPanel() {
         <label class="btp-label">${t("bl.sizeLabel")}</label>
         <div class="btp-sizerow">
           <input id="btpSizeW" class="btp-input" placeholder="${t("bl.widthPlaceholder")}" inputmode="numeric" />
-          <span class="btp-x">×</span>
+          <span class="btp-x"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#x"/></svg></span>
           <input id="btpSizeH" class="btp-input" placeholder="${t("bl.heightPlaceholder")}" inputmode="numeric" />
           <select id="btpSizePreset" class="btp-sizepreset" aria-label="${t("bl.sizePresetAria")}">
             <option value="">${t("bl.presetPlaceholder")}</option>
