@@ -81,7 +81,8 @@ export interface LocalCache {
    *  ⚠ **只返标量，永不返名字** —— 这是刻意的：全库列举是被否决的退化设计（列举只走 per-folder watchFolder）。 */
   usage(): Promise<{ bytes: number; count: number }>;
   backup(name: string): Promise<string>;
-  trash(name: string): Promise<string>;
+  /** 移进本地 .trash。deleteEventId 由 delete.ts 生成、与云端腿**共用**（trash-merge 据此精确配对）。返 trashKey。 */
+  trash(name: string, deleteEventId: string): Promise<string>;
   hardDelete(name: string): Promise<void>;
   restore(trashKey: string): Promise<string>;
   purgeTrash?(trashKey: string): Promise<void>;
@@ -124,7 +125,8 @@ export interface CloudSync {
   /** 任意绝对偏移 byte-range 纯读（getPeek 的「CD / entry 溢出尾片时二次拉」用）。越界自动钳。 */
   pullRange(name: string, offset: number, length: number): Promise<{ bytes: Bytes; item: CloudItem } | null>;
   weakOverride(name: string, bytes: Bytes, opts?: { encrypted?: boolean }): Promise<WeakOverrideResult>;
-  trash(name: string): Promise<unknown>;
+  /** 移进云端 .trash。deleteEventId 同上——两条腿必须是同一个，否则回收站里一次删除会裂成两行/误配。 */
+  trash(name: string, deleteEventId: string): Promise<unknown>;
   /** enc.encrypted：trash 里的字节是加密容器（.zip 尾）→ 恢复必须落 encFileName（否则加密件被恢复到明文路径 = 打不开）。 */
   restore(cloudItemId: string, name: string, opts?: { encrypted?: boolean }): Promise<unknown>;
   purge(cloudItemId: string): Promise<unknown>;

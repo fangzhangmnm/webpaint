@@ -52,8 +52,8 @@ export function createLocalCache(dbName: string): LocalCache {
       await backupP.put(inner, { ...r, updatedAt: Date.now() });
       return `backup/${inner}`;
     },
-    async trash(name: string) {
-      const inner = `${stamp()}:${name}`;
+    async trash(name: string, deleteEventId: string) {
+      const inner = `${deleteEventId}:${name}`;   // 与云端腿共用同一个 id → trash-merge 精确配对
       await files.moveTo(name, "trash", inner);   // 原子移进 trash 分区（绝不硬删用户字节）
       return `trash/${inner}`;
     },

@@ -67,3 +67,49 @@ test("drainDeleteQueue：离线删入队 → 重连排空", async () => {
   const r = await drainDeleteQueue();
   eq(r.drained, 1, "排空 1 条");
 });
+
+// ── deleteEventId：一次删除 = 一个 id，两条腿共用（v415；trash-merge 据此精确配对）─────────────
+const idOfLocalKey = (k: string) => k.slice(k.indexOf("/") + 1).split(":")[0];
+const idOfCloudName = (n: string) => (n.match(/\[([^\]]+)\]/) || [])[1];
+
+test("[deleteEventId] 在线删两端 → 本地 trashKey 与云端 trash 名带**同一个** id", async () => {
+  const { cloud, local, head, del } = rig();
+  await cloud.push("f", enc("X")); await local.save("f", enc("MINE"));
+  head.markSeen("f", cloud.getETag("f")); head.recordEdit("f");   // dirty → 两条腿都落 trash
+  const r = await del("f");
+  eq(r.where, "both", "两端");
+  const trashed = await cloud.listTrash();
+  eq(trashed.length, 1, "云端一条");
+  eq(idOfLocalKey(r.trashKey as string), idOfCloudName(trashed[0].name),
+     "★两条腿必须共用同一个 deleteEventId（否则回收站里配不上对 / 误配）");
+});
+
+test("[deleteEventId] 离线删 → id 持久化进队列；回线 drain 的云腿用**同一个** id", async () => {
+  const { cloud, local, head, kv, del, drainDeleteQueue } = rig();
+  await cloud.push("f", enc("X")); await local.save("f", enc("X"));
+  head.markSeen("f", cloud.getETag("f"));
+  const r = await del("f", { isOnline: () => false });          // 离线：只落本地腿 + 排队
+  eq(r.where, "local", "离线只动本地");
+  assert(r.queuedCloudDelete, "云删已排队");
+
+  const q = JSON.parse(kv.get("internal.pending_deletions") as string);
+  eq(q.length, 1, "队列一条");
+  const localId = idOfLocalKey(r.trashKey as string);
+  eq(q[0].deleteEventId, localId, "★id 必须随队列持久化（不然回线时本地腿的 id 已经找不回来了）");
+
+  await drainDeleteQueue();                                      // 回线重放 → 云腿此刻才生成
+  const trashed = await cloud.listTrash();
+  eq(trashed.length, 1, "云端一条");
+  eq(idOfCloudName(trashed[0].name), localId, "★跨了一次重启/回线，两条腿仍是同一个 id");
+});
+
+test("[deleteEventId] 旧队列条目（升级前入队、无 id）→ 仍能 drain，不炸", async () => {
+  const { cloud, local, head, kv, drainDeleteQueue } = rig();
+  await cloud.push("f", enc("X")); await local.save("f", enc("X"));
+  head.markSeen("f", cloud.getETag("f"));
+  // 手工写一条旧格式（只有 name + baseEtag）
+  kv.set("internal.pending_deletions", JSON.stringify([{ name: "f", baseEtag: cloud.getETag("f") }]));
+  const r = await drainDeleteQueue();
+  eq(r.drained, 1, "旧条目照样重放成功（现生成 id，代价仅是这条配不上对）");
+  eq((await cloud.listTrash()).length, 1, "云端已进 trash");
+});

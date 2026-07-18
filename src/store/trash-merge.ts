@@ -21,24 +21,25 @@ export interface TrashItem {
   cloudItemId: string | null; // 云端 item id（云端腿 restore/purge）
 }
 
-// stamped 名 = `<base> [<yyyymmddhhmmss>-<guid>]`（明文）或同名尾接 `.zip`（加密容器，encFileName 追加）。见 move-aside.ts / cloud-sync.stampedName。
-const STAMP_RE = /^(.*) \[(\d{14})-[0-9a-fA-F-]+\](\.zip)?$/;
+// stamped 名 = `<base> [<deleteEventId>]`（明文）或同名尾接 `.zip`（加密容器，encFileName 追加）。
+//   deleteEventId = `<yyyymmddhhmmss>-<guid>`，见 move-aside.asideStamp / cloud-sync.stampedName。
+const STAMP_RE = /^(.*) \[((\d{14})-[0-9a-fA-F-]+)\](\.zip)?$/;
 const baseNameOf = (n: string): string => (n.includes("/") ? n.slice(n.lastIndexOf("/") + 1) : n);
 
-// 云端 trash 文件名 → { 原 basename, 时间戳, 是否加密 }。无戳（异常/手工放入）→ 原名 + 裸 .zip 尾推断。
-function parseCloudTrashName(cloudName: string): { base: string; ts: string | null; encrypted: boolean } {
+// 云端 trash 文件名 → { 原 basename, deleteEventId, 时间戳, 是否加密 }。无戳（异常/手工放入）→ 原名 + 裸 .zip 尾推断。
+function parseCloudTrashName(cloudName: string): { base: string; id: string | null; ts: string | null; encrypted: boolean } {
   const m = cloudName.match(STAMP_RE);
-  if (m) return { base: m[1], ts: m[2], encrypted: !!m[3] };
+  if (m) return { base: m[1], id: m[2], ts: m[3], encrypted: !!m[4] };
   const encrypted = cloudName.endsWith(".zip");
-  return { base: encrypted ? cloudName.slice(0, -4) : cloudName, ts: null, encrypted };
+  return { base: encrypted ? cloudName.slice(0, -4) : cloudName, id: null, ts: null, encrypted };
 }
 
-// 本地 trashKey → 时间戳（真 local-cache：`trash/<yyyymmddhhmmss-guid>:<name>`；mock：`trash:N:name` → 无戳）。
-function parseLocalTs(trashKey: string): string | null {
+// 本地 trashKey → deleteEventId（`trash/<yyyymmddhhmmss-guid>:<name>`）。无戳（异常/手工放入）→ null。
+function parseLocalStamp(trashKey: string): { id: string | null; ts: string | null } {
   const slash = trashKey.indexOf("/");
   const inner = slash < 0 ? trashKey : trashKey.slice(slash + 1);
-  const m = inner.match(/^(\d{14})-/);
-  return m ? m[1] : null;
+  const m = inner.match(/^((\d{14})-[0-9a-fA-F-]+):/);
+  return m ? { id: m[1], ts: m[2] } : { id: null, ts: null };
 }
 
 const byTs = (a: { ts: string | null }, b: { ts: string | null }): number => (a.ts || "").localeCompare(b.ts || "");
@@ -54,18 +55,19 @@ export function mergeTrash(
   cloudEntries: CloudItem[],
   liveCloudNames: Set<string> = new Set(),
 ): TrashItem[] {
-  const localByBase = new Map<string, Array<{ entry: TrashEntry; ts: string | null }>>();
+  const localByBase = new Map<string, Array<{ entry: TrashEntry; id: string | null; ts: string | null }>>();
   for (const e of localEntries) {
     const base = baseNameOf(e.name);
     const bucket = localByBase.get(base) ?? [];
-    bucket.push({ entry: e, ts: parseLocalTs(e.trashKey) });
+    const st = parseLocalStamp(e.trashKey);
+    bucket.push({ entry: e, id: st.id, ts: st.ts });
     localByBase.set(base, bucket);
   }
-  const cloudByBase = new Map<string, Array<{ item: CloudItem; ts: string | null; encrypted: boolean }>>();
+  const cloudByBase = new Map<string, Array<{ item: CloudItem; id: string | null; ts: string | null; encrypted: boolean }>>();
   for (const it of cloudEntries) {
     const p = parseCloudTrashName(it.name);
     const bucket = cloudByBase.get(p.base) ?? [];
-    bucket.push({ item: it, ts: p.ts, encrypted: p.encrypted });
+    bucket.push({ item: it, id: p.id, ts: p.ts, encrypted: p.encrypted });
     cloudByBase.set(p.base, bucket);
   }
 
@@ -74,20 +76,32 @@ export function mergeTrash(
   for (const base of bases) {
     const locals = (localByBase.get(base) ?? []).slice().sort(byTs);
     const clouds = (cloudByBase.get(base) ?? []).slice().sort(byTs);
-    const pairN = Math.min(locals.length, clouds.length);   // 同名多个：按时间戳序两两配对成 both，余下单边（罕见；主键=原名，戳仅次级消歧）
-    for (let i = 0; i < pairN; i++) {
-      const l = locals[i], c = clouds[i];
+    // ── 按 deleteEventId **精确**配对 ────────────────────────────────────────────────────────
+    //   一次删除 = 一个 id，两条腿共用（delete.ts 生成并传给两端）。id 相同 ⟺ 同一次删除。
+    //   ⚠ 以前是「按时间戳排序后按下标配对」，那在**单腿删除交叉**时会出人命：
+    //     离线删 A（只落本地腿）→ 之后在线删重建的 A（只落云腿）→ 下标配对把这两次无关的删除
+    //     配成一行 both → 用户点「彻底删除」时 purge 同时送 trashKey + cloudItemId，
+    //     一次删掉两个不相干的文件，UI 还只说删了一件。restore 同理会张冠李戴。
+    //   配不上 = 就是两次独立的删除，各出各的行。**不做下标兜底**（那等于把 bug 留一条后门）。
+    const usedCloud = new Set<number>();
+    const byId = new Map<string, number>();
+    clouds.forEach((c, i) => { if (c.id) byId.set(c.id, i); });
+    const lonelyLocals: typeof locals = [];
+    for (const l of locals) {
+      const ci = l.id != null ? byId.get(l.id) : undefined;
+      if (ci == null || usedCloud.has(ci)) { lonelyLocals.push(l); continue; }
+      usedCloud.add(ci);
+      const c = clouds[ci];
       out.push({ name: l.entry.name, ts: l.ts ?? c.ts, side: "both", encrypted: c.encrypted, conflictLive: false, localKey: l.entry.trashKey, cloudItemId: c.item.id });
     }
-    for (let i = pairN; i < locals.length; i++) {
-      const l = locals[i];
+    for (const l of lonelyLocals) {
       // 纯本地行才可能 conflictLive：本地 trash 有、原名却仍活在权威云端 = 离线删被 edit-wins 撤销 → 两存。
       out.push({ name: l.entry.name, ts: l.ts, side: "local", encrypted: false, conflictLive: liveCloudNames.has(l.entry.name), localKey: l.entry.trashKey, cloudItemId: null });
     }
-    for (let i = pairN; i < clouds.length; i++) {
-      const c = clouds[i];
+    clouds.forEach((c, i) => {
+      if (usedCloud.has(i)) return;
       out.push({ name: base, ts: c.ts, side: "cloud", encrypted: c.encrypted, conflictLive: false, localKey: null, cloudItemId: c.item.id });
-    }
+    });
   }
   return out;
 }

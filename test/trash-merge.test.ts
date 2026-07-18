@@ -69,3 +69,41 @@ test("mergeTrash · 同名各两条 → 配对两 both，无残留单边", () =>
   eq(out.length, 2, "两行");
   assert(out.every((r) => r.side === "both"), "都配成 both");
 });
+
+// ── deleteEventId 精确配对（v415 修 purge 误配）──────────────────────────────────────────────
+// 旧实现按「时间戳排序后按下标」配对，同名多次删除时会把无关的两条腿配成一行 both →
+//   彻底删除会一次 purge 掉两个不相干的文件（UI 还只说删了一件），restore 则张冠李戴。
+const ID_A = "20260717120000-aaaa1111-0000-0000-0000-000000000000";
+const ID_B = "20260718090000-bbbb2222-0000-0000-0000-000000000000";
+
+test("[配对] 单腿交叉（本地只有事件A、云端只有事件B）→ 绝不配成 both", () => {
+  // 真实场景：离线删 A（只落本地腿）→ 之后在线删「重建的同名文件」（只落云腿）。
+  const out = mergeTrash([le(`trash/${ID_A}:A.ora`, "A.ora")], [ci("c-B", `A.ora [${ID_B}]`)], new Set());
+  eq(out.length, 2, "★两次独立删除 = 两行，绝不合并");
+  const local = out.find((r) => r.side === "local")!;
+  const cloud = out.find((r) => r.side === "cloud")!;
+  assert(local && cloud, "一行本地、一行云端");
+  eq(local.cloudItemId, null, "★本地行不得挂上别人的 cloudItemId（否则 purge 连删两个）");
+  eq(cloud.localKey, null, "★云端行不得挂上别人的 trashKey");
+});
+
+test("[配对] 同名删两次、两端俱全 → 按 id 各自配对，绝不交叉", () => {
+  const out = mergeTrash(
+    // 故意打乱顺序：本地先 B 后 A，云端先 A 后 B
+    [le(`trash/${ID_B}:A.ora`, "A.ora"), le(`trash/${ID_A}:A.ora`, "A.ora")],
+    [ci("c-A", `A.ora [${ID_A}]`), ci("c-B", `A.ora [${ID_B}]`)],
+    new Set(),
+  );
+  eq(out.length, 2, "两行");
+  assert(out.every((r) => r.side === "both"), "都配上了");
+  const rowA = out.find((r) => r.localKey === `trash/${ID_A}:A.ora`)!;
+  const rowB = out.find((r) => r.localKey === `trash/${ID_B}:A.ora`)!;
+  eq(rowA.cloudItemId, "c-A", "★事件A 的本地腿配事件A 的云端腿（不看顺序，只看 id）");
+  eq(rowB.cloudItemId, "c-B", "★事件B 同理");
+});
+
+test("[配对] 无 stamp 的异常条目（手工放进 .trash）→ 各自单边，不瞎配", () => {
+  const out = mergeTrash([le("trash/A.ora", "A.ora")], [ci("c1", "A.ora")], new Set());
+  eq(out.length, 2, "两边都解不出 id → 不配对，各出一行");
+  assert(out.some((r) => r.side === "local") && out.some((r) => r.side === "cloud"), "一本地一云端");
+});

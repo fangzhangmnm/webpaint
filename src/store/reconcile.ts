@@ -16,7 +16,8 @@ import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 import type { PendingGone } from "./pending-gone.ts";
 import { isHidden } from "./is-hidden.ts";   // 隐藏项（.trash/.backup/.<appId>/任意 dot）：云端已过滤，本地侧也别据此误判 gone
-import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
+import { reportStoreError } from "./error-handling.ts";
+import { asideStamp } from "./move-aside.ts";   // 单腿 trash 事件的 deleteEventId 生成器
 
 // 纯分类器（零 IO、可穷举单测）：返回该 demote 的 clean 孤儿名。
 //   规则（对齐 WebPaint gallery-model.classifyCloudGone，去掉 ghost/pin 轴——JRP 无 pin，dirty 孤儿一律留）：
@@ -78,7 +79,8 @@ export function createReconcile(cfg: ReconcileCfg) {
     const demoted: string[] = [];
     for (const name of demote) {
       if (!pending.seenGone(name, now())) continue;   // 首次见 gone / grace 内 → 标记+留着（badge），不删
-      await local.trash(name);                        // 跨 GRACE 第二次+ → 本地 send trash（move-aside，可恢复）
+      // 单腿事件（云端已经没了，只有本地这一条腿）→ 自己生成 id，无配对需求。
+      await local.trash(name, asideStamp(now()));     // 跨 GRACE 第二次+ → 本地 send trash（move-aside，可恢复）
       cloud.clearState(name); head.forget(name); pending.clear(name);   // 清两条 etag 轨道 + candidate
       demoted.push(name);
     }

@@ -6,7 +6,8 @@
 //   串行 against 两名 in-flight（serialize2）。编排 push 深模块 + cloud.rename + local-head。
 import { toU8 } from "./substrate.ts";
 import type { BytesSource } from "./substrate.ts";
-import { reportStoreError } from "./error-handling.ts";   // 全接但分级：静默 swallow 也 funnel（不改控制流）
+import { reportStoreError } from "./error-handling.ts";
+import { asideStamp } from "./move-aside.ts";   // 单腿 trash 事件的 deleteEventId 生成器
 import { CloudNameCollisionError } from "./cloud-sync.ts";
 import type { CloudSync, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
@@ -91,7 +92,8 @@ export function createIdentity(cfg: IdentityCfg) {
         await doPush(newName, { encode: () => bytes!, getEditVersion });   // dirty/无旧云文件 → 推当前字节（含 B5/retry/conflict）
         // 旧名进 .trash（不 hard-delete，C5）。失败 → oldCloudOrphan 让 caller surface（新名已推成功，不回滚）。
         let oldCloudOrphan = false;
-        if (cloudOld) { try { await cloud.trash(oldName); } catch (e) { reportStoreError(e, "warning"); oldCloudOrphan = true; } }   // 旧名进 .trash 失败→云端遗留孤儿：surface
+        // 单腿事件（只有云端这一条腿，本地旧名没有对应的 trash 项）→ 自己生成 id，无配对需求。
+        if (cloudOld) { try { await cloud.trash(oldName, asideStamp(Date.now())); } catch (e) { reportStoreError(e, "warning"); oldCloudOrphan = true; } }   // 旧名进 .trash 失败→云端遗留孤儿：surface
         head.forget(oldName);
         return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, oldCloudOrphan };
       } catch (e) {

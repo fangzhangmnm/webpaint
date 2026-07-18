@@ -6,7 +6,8 @@
 //   get(name)             → bytes|null
 //   exists(name)          → bool
 //   backup(name)          → backupName   复制一份（原件留着；pull 前的安全网）；本地无此项则抛
-//   trash(name)           → trashKey     move-aside 进本地 trash（绝不硬删用户数据）
+//   trash(name,eventId)   → trashKey     move-aside 进本地 trash（绝不硬删用户数据）。key 用真格式
+//                                       `trash/<deleteEventId>:<name>` → 测试能走 trash-merge 的真解析路径
 //   hardDelete(name)      → void         真删（仅用于「云端已进 trash、不留双份」的本地侧）
 //   restore(trashKey)     → name|null    从本地 trash 恢复
 
@@ -37,7 +38,7 @@ export interface MockLocal extends LocalCache {
 export function createMockLocal(): MockLocal {
   const items = new Map<string, Bytes>();           // name → Uint8Array
   const trash = new Map<string, TrashItem>();        // trashKey → { name, bytes }
-  let tk = 0, bk = 0;
+  let bk = 0;
   // 注：本测试替身内部以 Uint8Array 存取（测试断言 .length / u8txt），而真 LocalCache
   // 契约「内部落 Blob、get 出 Blob」。二者在「字节 vs Blob」上有意背离 —— 测试只关心字节内容。
   // 故 get 运行时回 Bytes，但声明为契约的 Blob（下方 as 处擦除），保持 MockLocal ⊆ LocalCache。
@@ -66,10 +67,10 @@ export function createMockLocal(): MockLocal {
       items.set(backupName, items.get(name)!);              // 复制：原件不动
       return backupName;
     },
-    async trash(name: string) {
+    async trash(name: string, deleteEventId: string) {
       // 契约 trash 出 string；本替身在缺名时回 null（测试断言 null），类型按契约擦除。
       if (!items.has(name)) return null as unknown as string;
-      const key = `trash:${++tk}:${name}`;
+      const key = `trash/${deleteEventId}:${name}`;   // 真格式（含 deleteEventId），trash-merge 据此配对
       trash.set(key, { name, bytes: items.get(name)! });
       items.delete(name);
       return key;

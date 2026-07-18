@@ -108,8 +108,10 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   const baseName = (n: string) => (n.includes("/") ? n.slice(n.lastIndexOf("/") + 1) : n);
   // move-aside（.trash/.backup）的防撞名：<base> [<yyyymmddhhmmss>-<guid>]（命名策略在深模块 move-aside.js）。
   // guid 防同名多次 move-aside 撞（旧版 [ts] 同 ms → conflictBehavior:"fail" 抛错的真 bug）。trash/backup 共用。
-  const stampedName = (n: string, enc = false) =>
-    (enc && encFileName ? encFileName : fileName)(`${baseName(n)} [${asideStamp(now())}]`);
+  // stamp 可由调用方传入：trash 走 delete.ts 给的 **deleteEventId**（两条腿共用同一个 → trash-merge 精确配对）；
+  //   backup/weakOverride 没有配对需求，现生成。
+  const stampedName = (n: string, enc = false, stamp = asideStamp(now())) =>
+    (enc && encFileName ? encFileName : fileName)(`${baseName(n)} [${stamp}]`);
 
   function getETag(name: string): string | null { return kv.get(etagKey(name)) || null; }
   function setETag(name: string, eTag: string | null): void { if (eTag) kv.set(etagKey(name), eTag); else kv.remove(etagKey(name)); }
@@ -253,11 +255,13 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   }
 
   // move-aside：原文件 → ensureFolder(.trash) → move，**始终加 [ts] 后缀**（多次删同名永不冲突）。
-  async function trash(name: string): Promise<CloudItem | null> {
+  // deleteEventId：由 delete.ts 生成、**两条腿共用**，嵌进 trash 名里 → trash-merge 据此精确配对。
+  //   必填不给默认：可选参数等于给未来留了"两端各生成"的口子，而那正是本次要修掉的 bug。
+  async function trash(name: string, deleteEventId: string): Promise<CloudItem | null> {
     const { item, enc } = await _find(name);
     if (!item) { clearState(name); return null; }
     const folderId = await provider.ensureFolder(trashFolder);
-    const stamped = stampedName(name, enc);   // basename + ts-counter（trash 内丢 folder context；防同名撞）；保留加密扩展名
+    const stamped = stampedName(name, enc, deleteEventId);   // basename + deleteEventId（trash 内丢 folder context；防同名撞）；保留加密扩展名
     const moved = await provider.move(item.id, folderId, { newName: stamped, conflictBehavior: "fail" });
     clearState(name);
     return moved;
