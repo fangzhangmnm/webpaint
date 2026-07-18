@@ -122,9 +122,15 @@ async function cacheFirst(req) {
 //   Ctrl+Shift+R 尤其容易撞上：硬刷新绕过缓存重取 service-worker.js → 每次都装一个新 SW →
 //   skipWaiting + clients.claim 主动接管那个还在加载中的页面 → 它剩下的子资源全部转进这里。
 // 超过就当离线：宁可给缓存的旧版，也不让页面吊死。
-// self.__NETWORK_FIRST_TIMEOUT_MS 是**测试 seam**（test/sw-strategy.test.mjs 调成几十 ms，否则每跑一次套件等 6 秒）；
-//   prod 里没人设它 → 恒为 6000。
-const NETWORK_FIRST_TIMEOUT_MS = self.__NETWORK_FIRST_TIMEOUT_MS ?? 6000;
+//
+// ⚠ **这个数只用来把「永远挂着」变成「有界失败」，不是用来判断「慢」的**（v421 修：原来是 6000，太激进）。
+//   真机 Ctrl+Shift+R 抓包实测：同一次加载里 styles.css **30.7 秒**、msal 15.4 秒、icon.svg 10.6 秒，
+//   全部最终 200。6 秒的话这些正常但慢的请求会被判死 → 回退缓存 → dev 的「改完即见」当场失效，
+//   而用户还以为自己在看新版本。半开 TCP 是**无限**，不是 30 秒——所以门槛设在远高于「慢」的地方，
+//   仍然能达成原目的（页面不再无限转圈），却不会误伤慢网。
+// self.__NETWORK_FIRST_TIMEOUT_MS 是**测试 seam**（test/sw-strategy.test.mjs 调成几十 ms，否则每跑一次套件干等）；
+//   prod 里没人设它 → 恒为下面这个值。
+const NETWORK_FIRST_TIMEOUT_MS = self.__NETWORK_FIRST_TIMEOUT_MS ?? 60000;
 
 async function networkFirst(req) {
   const cache = await caches.open(CACHE_NAME);

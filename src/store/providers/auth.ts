@@ -76,10 +76,13 @@ function _emitAuth(): void {
   try { if (typeof window !== "undefined") window.dispatchEvent(new Event("wp:auth-changed")); } catch (_) {}
 }
 
-// ⚠ **必须带超时**（v417）：`onerror` 只在请求明确失败时触发。请求**挂着**（半开连接 / 强制门户）
+// ⚠ **必须带超时**（v418）：`onerror` 只在请求明确失败时触发。请求**挂着**（半开连接 / 强制门户）
 //   时 onload 和 onerror 都不来，于是这个 promise 永不 settle —— 下面的重试永远不会发生、也永远
 //   不会放弃，而动态插入的 script 仍然吊着 window 的 load 事件 → 浏览器标签页一直转圈。
-const SCRIPT_LOAD_TIMEOUT_MS = 8000;
+// ⚠ 但这个数只用来兜「永远挂着」，**不是用来判断「慢」的**（v421 修：原来是 8000，太激进）。
+//   真机抓包实测 msal-browser.min.js 单次加载花了 **15.4 秒**、最终 200。8 秒会把它判死 →
+//   三次重试全部超时 → MSAL 根本载不进来 → **慢网下登录彻底不可用**。这比它要修的 bug 更糟。
+const SCRIPT_LOAD_TIMEOUT_MS = 45000;
 
 function loadScript(url: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
