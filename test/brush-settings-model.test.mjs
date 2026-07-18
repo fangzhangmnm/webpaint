@@ -6,7 +6,7 @@ describe("ensureBrushConfigDefaults", () => {
   it("空 draft 补齐全部字段（模板可无脑 v-model）", () => {
     const b = ensureBrushConfigDefaults({});
     eq(b.shape.kind, "round");
-    eq(b.shape.hardness, 1.0);
+    eq(b.shape.hardness, 0.75);   // v415：与 DEFAULT_CONFIG / resolveBrush / makeBrush 统一
     eq(b.size.base, 12);
     eq(b.size.max, 200);
     eq(b.sizeCoeff, 0.6);
@@ -14,6 +14,9 @@ describe("ensureBrushConfigDefaults", () => {
     eq(b.blendMode, "source-over");
     eq(b.pixelMode, false);
     eq(b.smooth.streamline, 0.15);
+    // taperFloor 必须被补齐：brush-config-view 的滑块直接 `draft.taperFloor.toFixed(2)`，
+    //   缺了会在模板求值时炸（v415 给它补上 UI 之后这条才有牙）。
+    eq(b.taperFloor, 0.4);
     eq(b.taper.in, 0);
     eq(b.spacing, 0.06, "spacing 缺省 fraction");
   });

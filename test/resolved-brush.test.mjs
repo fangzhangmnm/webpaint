@@ -73,9 +73,11 @@ describe("resolveBrush · 预设字段映射（对齐旧 applyBrushPresetFrozen�
 });
 
 describe("resolveBrush · 预设缺字段走 ?? 默认（与旧逐字对齐）", () => {
-  it("空 shape/taper → kind round / aspect 1 / hardness 1 / taper 0 / spacing 0.06", () => {
+  it("空 shape/taper → kind round / aspect 1 / hardness 0.75 / taper 0 / spacing 0.06", () => {
     const b = resolveBrush({ preset: {} });
-    eq(b.shapeKind, "round"); eq(b.shapeAspect, 1.0); eq(b.hardness, 1.0);
+    eq(b.shapeKind, "round"); eq(b.shapeAspect, 1.0);
+    // v415 四处默认统一 0.75（此前 DEFAULT_CONFIG 0.75 vs resolveBrush/ensure/brush-io 1.0，各说各话）
+    eq(b.hardness, 0.75); eq(b.hardness, DEFAULT_CONFIG.hardness, "★必须和 DEFAULT_CONFIG 一致");
     eq(b.taperFloor, 0.4, "preset 没写 taperFloor → 回退 0.4");
     eq(b.taperIn, 0); eq(b.taperOut, 0); eq(b.spacing, 0.06);
     eq(b.sizeCoeff, 0.6); eq(b.opaCoeff, 0.6); eq(b.flowCoeff, 0);

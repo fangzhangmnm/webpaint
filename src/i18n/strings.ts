@@ -204,7 +204,6 @@ export const S = {
   "bs.shapeKind":    { zh: "类型",     en: "Type",         ja: "種類" },
   "bs.round":        { zh: "圆",       en: "Round",        ja: "円" },
   "bs.ellipse":      { zh: "椭圆",     en: "Ellipse",      ja: "楕円" },
-  "bs.texture":      { zh: "纹理",     en: "Texture",      ja: "テクスチャ" },
   "bs.aspect":       { zh: "长短轴",   en: "Aspect",       ja: "縦横比" },
   "bs.rotation":     { zh: "旋转°",    en: "Rotation°",    ja: "回転°" },
   "bs.hardness":     { zh: "硬度",     en: "Hardness",     ja: "硬さ" },
@@ -225,6 +224,7 @@ export const S = {
   "bs.taper":        { zh: "收尾",     en: "Taper",        ja: "テーパー" },
   "bs.taperIn":      { zh: "入端",     en: "In",           ja: "入り" },
   "bs.taperOut":     { zh: "出端",     en: "Out",          ja: "抜き" },
+  "bs.taperFloor":   { zh: "收尾下限", en: "Taper floor",  ja: "テーパー下限" },
   "bs.exportBrush":  { zh: "导出此笔为 JSON 文件", en: "Export this brush as JSON", ja: "このブラシをJSONで書き出す" },
   "bs.deleteBrush":  { zh: "删除此笔", en: "Delete this brush", ja: "このブラシを削除" },
 

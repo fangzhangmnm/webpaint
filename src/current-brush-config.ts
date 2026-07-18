@@ -73,7 +73,7 @@ export function ensureBrushConfigDefaults(b: BrushDraft): BrushDraft {
   if (b.shape.kind == null) b.shape.kind = "round";
   if (b.shape.aspect == null) b.shape.aspect = 1.0;
   if (b.shape.rotation == null) b.shape.rotation = 0;
-  if (b.shape.hardness == null) b.shape.hardness = 1.0;
+  if (b.shape.hardness == null) b.shape.hardness = 0.75;
 
   if (!b.size) b.size = {};
   if (b.size.base == null) b.size.base = 12;

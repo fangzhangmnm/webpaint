@@ -5,8 +5,10 @@
 // 隐式 any 收成一处可复用的形状。改 brushes.js 的字段时同步收紧此处（as-of v305 / 2026-06-19）。
 
 export interface BrushSize { base: number; max?: number; }
+// kind: "round" | "ellipse"。**没有 texture** —— 纹理笔尚未实现，v415 把那条死线整条清了
+//   （下拉项选了没反应、textureB64 存而不读）。将来真做纹理笔时 greenfield 重来，别复活这些残骸。
 export interface BrushShape {
-  kind?: string; aspect?: number; rotation?: number; hardness?: number; textureB64?: string | null;
+  kind?: string; aspect?: number; rotation?: number; hardness?: number;
 }
 export interface BrushTaper { in?: number; out?: number; }
 export interface BrushSmooth { streamline?: number; stabilization?: number; }

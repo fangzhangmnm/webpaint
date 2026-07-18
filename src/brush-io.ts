@@ -53,7 +53,7 @@ export function buildRackCode(rack: BrushRackData): string {
     const args: Record<string, unknown> = {};
     args.size = b.size?.base ?? 12;
     args.sizeBaseMax = b.size?.max ?? 200;
-    args.hardness = b.shape?.hardness ?? 1.0;
+    args.hardness = b.shape?.hardness ?? 0.75;   // 与其余三处统一（v415）
     if (b.shape?.kind && b.shape.kind !== "round") args.shapeKind = b.shape.kind;
     if (b.shape?.aspect != null && b.shape.aspect !== 1) args.aspect = b.shape.aspect;
     if (b.shape?.rotation) args.rotation = b.shape.rotation;

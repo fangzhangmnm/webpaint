@@ -50,7 +50,6 @@ interface MakeBrushArgs {
   aspect?: number;
   rotation?: number;
   hardness?: number;
-  textureB64?: string | null;
   spacingValue?: number;
   pixelMode?: boolean;
   taperIn?: number;
@@ -104,8 +103,7 @@ export function makeBrush({
   pressureLPF = 0,
   compositeMode = "wash",
   blendMode = "source-over",   // v163: per-brush 混合模式（multiply/screen/... ＝ Canvas2D globalCompositeOperation）
-  shapeKind = "round", aspect = 1.0, rotation = 0, hardness = 1.0,
-  textureB64 = null,
+  shapeKind = "round", aspect = 1.0, rotation = 0, hardness = 0.75,   // 与 DEFAULT_CONFIG / ensureBrushConfigDefaults / resolveBrush 统一（v415：此前三处 0.75/1.0/1.0 各说各话）
   spacingValue = 0.06,
   pixelMode = false,
   taperIn = 0, taperOut = 0,
@@ -116,7 +114,7 @@ export function makeBrush({
 }: MakeBrushArgs): Brush {
   return {
     id, name, tool, folder,
-    shape: { kind: shapeKind, aspect, rotation, hardness, textureB64 },
+    shape: { kind: shapeKind, aspect, rotation, hardness },
     size: { base: size, max: sizeBaseMax },
     sizeCoeff, opaCoeff, flowCoeff,
     pressureGamma,

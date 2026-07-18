@@ -324,11 +324,9 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 /* hand 工具：触屏设备双指 pan 已足够，不显示 */
 body[data-input-touchscreen="1"] .tool-hand-conditional { display: none; }
 
-/* v110: smudge / shapes engine 待实装；按钮灰 + 不响应 click。setTool 会先弹状态条 */
-.tool[data-tool="smudge"], .tool[data-tool="shapes"] {
-  opacity: 0.4;
-  filter: grayscale(0.6);
-}
+/* v415 删：smudge / shapes 两个工具按钮早已从 index.html purge（v309 / v120），
+   .tool[data-tool="smudge"|"shapes"] 和 .tool-disabled 都已无 DOM 命中。
+   将来真做这两个功能时 greenfield 重来，别复活这些残骸。 */
 
 /* 左侧栏 (drawing 时常驻) */
 /* v134 (user：「左 panel 还是有点粗」) 紧 12px：52→40
@@ -421,9 +419,6 @@ body[data-mode="gallery"] .left-sidebar { display: none; }
 }
 .env-chip.hidden { display: none; }
 
-/* v124 工具 disabled 视觉 (smudge engine 待实装) */
-.tool.tool-disabled { opacity: 0.35; cursor: not-allowed; }
-.tool.tool-disabled:hover { background: transparent; }
 .tool {
   display: inline-flex;
   align-items: center;

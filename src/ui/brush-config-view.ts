@@ -36,11 +36,11 @@ export const BrushSettings = defineComponent({
     const L = {
       basic: t("bs.basic"), name: t("bs.name"), tool: t("bs.tool"), toolBrush: t("bs.toolBrush"), toolEraser: t("bs.toolEraser"),
       blendMode: t("bs.blendMode"), folder: t("bs.folder"), shape: t("bs.shape"), shapeKind: t("bs.shapeKind"),
-      round: t("bs.round"), ellipse: t("bs.ellipse"), texture: t("bs.texture"), aspect: t("bs.aspect"), rotation: t("bs.rotation"), hardness: t("bs.hardness"),
+      round: t("bs.round"), ellipse: t("bs.ellipse"), aspect: t("bs.aspect"), rotation: t("bs.rotation"), hardness: t("bs.hardness"),
       sizeTitle: t("bs.sizeTitle"), sizeBase: t("bs.sizeBase"), sizeMax: t("bs.sizeMax"), dynamics: t("bs.dynamics"),
       defaults: t("bs.defaults"), defaultOpa: t("bs.defaultOpa"), smooth: t("bs.smooth"), advanced: t("bs.advanced"),
       composite: t("bs.composite"), wash: t("bs.wash"), buildup: t("bs.buildup"), pixelModeHelp: t("bs.pixelModeHelp"),
-      spacingTitle: t("bs.spacingTitle"), spacing: t("bs.spacing"), taper: t("bs.taper"), taperIn: t("bs.taperIn"), taperOut: t("bs.taperOut"),
+      spacingTitle: t("bs.spacingTitle"), spacing: t("bs.spacing"), taper: t("bs.taper"), taperIn: t("bs.taperIn"), taperOut: t("bs.taperOut"), taperFloor: t("bs.taperFloor"),
       exportBrush: t("bs.exportBrush"), deleteBrush: t("bs.deleteBrush"), on: t("common.on"), off: t("common.off"),
     };
     // quantizeSize 暴露给 template（size base/max 的 fmt + onInput 都用它）
@@ -70,7 +70,7 @@ export const BrushSettings = defineComponent({
       <div class="${TITLE}">{{ L.shape }}</div>
       <div class="${ROW_FULL}"><label>{{ L.shapeKind }}</label>
         <select v-model="draft.shape.kind">
-          <option value="round">{{ L.round }}</option><option value="ellipse">{{ L.ellipse }}</option><option value="texture">{{ L.texture }}</option>
+          <option value="round">{{ L.round }}</option><option value="ellipse">{{ L.ellipse }}</option>
         </select>
       </div>
       <template v-if="draft.shape.kind === 'ellipse'">
@@ -136,6 +136,9 @@ export const BrushSettings = defineComponent({
       <div class="${TITLE}">{{ L.taper }}</div>
       <div class="${ROW}"><label>{{ L.taperIn }}</label><input type="range" min="0" max="5" step="0.1" v-model.number="draft.taper.in"><span class="${VAL}">{{ draft.taper.in.toFixed(1) }}</span></div>
       <div class="${ROW}"><label>{{ L.taperOut }}</label><input type="range" min="0" max="5" step="0.1" v-model.number="draft.taper.out"><span class="${VAL}">{{ draft.taper.out.toFixed(1) }}</span></div>
+      <!-- taperFloor：收尾包络能压到的最低压感系数。1 = 不收（taper 失效），0 = 收到全无。
+           v415 接线时才发现它一直没有 UI —— 存了、同步了，却没人能改。 -->
+      <div class="${ROW}"><label>{{ L.taperFloor }}</label><input type="range" min="0" max="1" step="0.05" v-model.number="draft.taperFloor"><span class="${VAL}">{{ draft.taperFloor.toFixed(2) }}</span></div>
     </div>
 
     <!-- 导出 / 删除（编排在 app：confirm / 落 trash / 下载文件） -->

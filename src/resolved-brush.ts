@@ -92,7 +92,7 @@ export function resolveBrush({
     b.shapeKind     = sh.kind || "round";
     b.shapeAspect   = sh.aspect ?? 1.0;
     b.shapeRotation = (sh.rotation ?? 0) * Math.PI / 180;   // 度 → 弧度
-    b.hardness      = sh.hardness ?? 1.0;
+    b.hardness      = sh.hardness ?? 0.75;   // 四处默认统一 0.75（v415；此前 DEFAULT_CONFIG 0.75 vs 这里/ensure 1.0）
     const tp = preset.taper || {};
     b.taperIn       = tp.in ?? 0;   // taper 纯 stylistic·per-preset，默认 0（无「硬件 taper」概念）
     b.taperOut      = tp.out ?? 0;
