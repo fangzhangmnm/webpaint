@@ -6,7 +6,7 @@ import { describe, it, assert, eq } from "./runner.mjs";
 import {
   makeBrush, migrateBrush, defaultBrushForTool,
   getAllBrushes, getMeta, emptyMeta, metaAppend, metaRemove, metaMove,
-  metaPrependBuiltins, buildInitMeta, builtinBrushInitData, RACK_META_ID, DEFAULT_FOLDER,
+  metaPrependBuiltins, buildInitMeta, builtinBrushInitData, builtinBrushes, RACK_META_ID, DEFAULT_FOLDER,
 } from "../src/brushes.ts";
 import { resolveBrush } from "../src/resolved-brush.ts";
 import { DEFAULT_CONFIG } from "../src/current-brush-config.ts";
@@ -94,18 +94,30 @@ describe("brushes · .meta 纯操作", () => {
 });
 
 describe("brushes · builtinBrushInitData（新库 seed 载荷）", () => {
-  it("含 .meta 项 + 笔项无 uat（node 下 fetch 失败走 emergency 兜底）", async () => {
-    const data = await builtinBrushInitData();
-    const meta = data.find((d) => d.id === RACK_META_ID);
-    assert(meta, "载荷应含 .meta 项");
-    const brushes = data.filter((d) => d.id !== RACK_META_ID);
-    assert(brushes.length >= 1, "至少一支笔（emergency 兜底）");
-    for (const d of brushes) assert(!("uat" in d.value), "seed 笔不应带 uat");
-    // .meta 覆盖所有笔的 folder
-    for (const d of brushes) {
-      const f = d.value.folder || DEFAULT_FOLDER;
-      assert((meta.value.order[f] || []).includes(d.id), `.meta 应含 ${d.id}`);
+  // v423 契约反转（用户报「清空 IDB/localStorage 后没有自动填充工厂笔」的根因防退化）：
+  //   builtin-brushes.json 加载不到时 seed 必须**返空**，而不是把 emergency 兜底笔当内置笔腌进去。
+  //   store 的 seed 只认「idb 里这个 collection 有没有」、不认空——一旦腌了一支笔，这个库就永远
+  //   算「已存在」，内置笔再也回不来了（还会被推上云污染所有设备）。返空 → store 不写本地 →
+  //   下次开 app 重新 seed、重新 fetch = 自愈。
+  it("加载不到内置笔数据 → 返空载荷（绝不 seed emergency 兜底笔）", async () => {
+    const data = await builtinBrushInitData();   // node 下无 document/fetch → 必失败
+    eq(data.length, 0, "载荷应为空");
+  });
+  it("但显示路径仍有 emergency 兜底（UI 至少一支能画的笔）", async () => {
+    const brushes = await builtinBrushes();
+    assert(brushes.length >= 1, "builtinBrushes 应有兜底");
+    assert(brushes.every((b) => b.id !== undefined), "兜底笔要有 id");
+  });
+  it("有数据时：笔项无 uat + .meta 覆盖每支笔的 folder", () => {
+    // 不依赖 fetch：直接用 buildInitMeta 钉住 seed 载荷的结构约定。
+    const bs = [makeBrush({ id: "a", name: "A", tool: "brush", folder: "F1" }),
+                makeBrush({ id: "b", name: "B", tool: "brush", folder: "F2" })];
+    const meta = buildInitMeta(bs);
+    for (const b of bs) {
+      assert(!("uat" in b), "seed 笔不应带 uat");
+      assert((meta.order[b.folder || DEFAULT_FOLDER] || []).includes(b.id), `.meta 应含 ${b.id}`);
     }
+    assert(RACK_META_ID === ".meta", ".meta 特殊 id 不变");
   });
 });
 

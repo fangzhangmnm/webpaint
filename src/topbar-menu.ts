@@ -285,7 +285,9 @@ export function initTopbarMenu(ctx: AppContext) {
       t("tm.resetRackBody"),
     );
     if (!ok) return;
-    await rack.resetBuiltin();   // 非破坏性：出厂笔 setItem 覆盖同 id + .meta 提前；collection 自持久化/同步
-    setStatus(t("tm.rackReset", { count: rack.get()?.brushes.length ?? 0 }), true);
+    // 非破坏性：内置笔 setItem 覆盖同 id + .meta 提前；collection 自持久化/同步。
+    // 报**还原了几支内置笔**，不是笔架总数（旧版报总数 = 把用户自建笔也算进「已重置」，是谎报）。
+    const n = await rack.restoreBuiltins();
+    setStatus(n ? t("tm.rackRestored", { count: n }) : t("br.rackRestoreFailed"), true);
   });
 }

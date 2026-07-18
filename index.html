@@ -1104,9 +1104,12 @@
 
       <hr class="menu-sep" />
       <div class="menu-section-label" data-i18n="menu.section.debug">调试</div>
-      <!-- v134 重置出厂从笔架 toolbar 挪过来（safety net 防误触）-->
+      <!-- v134 从笔架 toolbar 挪过来（safety net 防误触）。
+           v423 正名：这个功能**从来就是**「还原内置笔刷」（非破坏性覆盖同 id + 提到分组最前），
+           不删任何用户笔——旧文案「重置笔架出厂 / 会删除全部自定义笔刷」是谎报，已改。
+           menu-danger 红色保留：仍会覆盖用户对内置笔的改动。 -->
       <button class="menu-item menu-danger menu-item-with-icon" id="menuResetBrushRack" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#brush-rack"/></svg>
-        <span class="menu-item-label" data-i18n="menu.resetRack">重置笔架出厂…</span>
+        <span class="menu-item-label" data-i18n="menu.resetRack">还原内置笔刷…</span>
       </button>
       <div class="menu-item-info" id="versionLabel">版本：—</div>
       <button class="menu-item menu-item-with-icon" id="menuForcePwaReset" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#refresh"/></svg>

@@ -60,7 +60,7 @@ export interface RackHandle {
   // 云端事件驱动重拉（刷新按钮 / 前台）：
   reconcileWithRemote(): Promise<void>;
   // 重置出厂笔（topbar-menu · 非破坏性覆盖同 id）：
-  resetBuiltin(): Promise<void>;
+  restoreBuiltins(): Promise<number>;   // 返回还原了几支内置笔；0 = 失败（已 surface）
   // v319：去掉 [k:string]:unknown index sig —— 真 controller 类无 index sig 故装不进；
   //   去掉后 controller 直接 assignable（已满足上列全部具名成员），ctx 得以验证而非 cast。
 }

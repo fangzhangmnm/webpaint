@@ -18,7 +18,7 @@
 import { reactive, shallowRef } from "../vendor/vue/vue.esm-browser.prod.js";
 import {
   defaultBrushForTool, brushesByTool, findBrush, newBrushId, brushFromJSON,
-  makeBrush, builtinBrushes, getAllBrushes, getMeta, metaAppend, metaRemove, metaMove,
+  makeBrush, loadBuiltinBrushes, getAllBrushes, getMeta, metaAppend, metaRemove, metaMove,
   metaPrependBuiltins, RACK_META_ID, DEFAULT_FOLDER,
   type RackMeta,
 } from "./brushes.ts";
@@ -35,6 +35,7 @@ import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.t
 import type { EditMode } from "./edit-mode.ts";
 import type { Collection } from "./store/index.ts";
 import { t } from "./i18n/index.ts";
+import { reportError } from "./error-badge.ts";
 
 // 惰性（不在模块 eval 期调 t()——那时 boot 门的 lang 还没 hydrate）：按 tool 现取标签。
 const toolLabel = (tool: string): string => tool === "eraser" ? t("br.toolEraser") : tool === "brush" ? t("br.toolBrush") : tool;
@@ -94,10 +95,18 @@ export class BrushRackController {
   get(): BrushRackData { return this._view(); }
 
   // ---- 预设存储：collection.init（本地 hydrate → 后台 reconcile + 新库 seed）----
-  async load(): Promise<BrushRackData> {
+  // **幂等**：memo 住首次 load 的 promise。boot 是 fire-and-forget 的，用户可能在它 resolve 前
+  //   就点了「还原内置笔刷」——那时 collection.setItem 会抛「在 init() 前调用」。所以写路径先 await load()。
+  _loadPromise: Promise<BrushRackData> | null = null;
+  load(): Promise<BrushRackData> { return (this._loadPromise ??= this._load()); }
+  async _load(): Promise<BrushRackData> {
     await this.d.collection.init();
     this.subscribeToCollection();
     this._syncFromCollection();   // collection.init 的 hydrate 发生在订阅之前 → 首帧手动灌一次
+    // 自愈：collection **存在但一支笔都没有**（store 的 seed 只认 idb 有无、不认空——
+    //   历史上被空 seed / emergency-only 腌坏的库，或用户把笔全删了）→ 自动补回内置笔。
+    //   只在**完全空**时触发，不会跟「用户故意删掉某几支内置笔」打架。
+    if (this._brushesRef.value.length === 0) await this._restoreBuiltins();
     this.applyToolState(this.d.editMode().current());
     return this.get();
   }
@@ -180,10 +189,20 @@ export class BrushRackController {
     void this.d.collection.flushLocal();   // 卸载兜底：内存 env 立即落本地缓存（云推由 collection 自持防抖 / reconcile 兜底）
   }
 
-  // ---- reset-builtin（非破坏性）：出厂笔逐 setItem 覆盖同 id（uat=now 胜过任何用户改动），
-  //   不删任何用户笔；.meta 里把出厂 id 提到各 folder 最前。取代旧 makeDefaultRack 全量抹除。----
-  async resetBuiltin() {
-    const builtins = await builtinBrushes();
+  // ---- 还原内置笔刷（**非破坏性**）：内置笔逐 setItem 覆盖同 id（uat=now 胜过任何用户改动），
+  //   **不删任何用户笔**；.meta 里把内置 id 提到各 folder 最前。取代旧 makeDefaultRack 全量抹除。
+  //   返回还原了几支；**0 = 失败**（内置笔数据没加载到，已 surface）——调用方据此报真话，别谎报成功。----
+  async restoreBuiltins(): Promise<number> {
+    await this.load();            // boot 未 resolve 就点按钮 → 否则 setItem 抛「在 init() 前调用」
+    return this._restoreBuiltins();
+  }
+  async _restoreBuiltins(): Promise<number> {
+    const builtins = await loadBuiltinBrushes();
+    if (!builtins) {
+      // 兜底的 emergency 笔**不写库**（会被推上云、污染所有设备）。如实报错，让用户知道该重试/联网。
+      reportError(new Error("[笔架] 内置笔刷数据没加载到（离线或站点缺 builtin-brushes.json），本次还原已取消。"), "warning");
+      return 0;
+    }
     // 批量写：collection 现在每次 setItem 都 fire onChange（本地写也通知）。~60 支笔逐条刷 = 60 次
     //   applyToolState + 60 次镜像刷新。压住信号，收尾统一刷一次。
     this._bulkWrite = true;
@@ -195,6 +214,7 @@ export class BrushRackController {
     } finally { this._bulkWrite = false; }
     this._syncFromCollection();   // 批量写期间压住了 onChange → 收尾统一刷一次镜像
     this.applyToolState(this.d.editMode().current());
+    return builtins.length;
   }
 
   _nextBrushName() {
@@ -292,7 +312,10 @@ export class BrushRackController {
       onSelectFolder: (f: string) => { this.ui.folder = f; },
       onSelectBrush: (id: string) => { this.selectBrushPresetForTool(this.ui.tool, id); this.d.closeExclusive(); },
       onEditBrush: (id: string) => { this.d.closeExclusive(); this.openBrushSettings(id); },
-      onReset: async () => { await this.resetBuiltin(); this.d.setStatus(t("br.rackRestored", { n: getAllBrushes(this.d.collection).length }), true); },
+      onReset: async () => {
+        const n = await this.restoreBuiltins();
+        this.d.setStatus(n ? t("br.rackRestored", { n }) : t("br.rackRestoreFailed"), true);
+      },
     });
 
     // brush-settings 编辑器 Vue 组件
@@ -336,8 +359,8 @@ export class BrushRackController {
     });
     if (els.resetBtn) els.resetBtn.addEventListener("click", async () => {
       if (!(await this.d.confirm(t("br.resetRackTitle"), t("br.resetRackMsg")))) return;
-      await this.resetBuiltin();
-      this.d.setStatus(t("br.rackReset", { n: getAllBrushes(this.d.collection).length }), true);
+      const n = await this.restoreBuiltins();
+      this.d.setStatus(n ? t("br.rackRestored", { n }) : t("br.rackRestoreFailed"), true);
     });
     if (els.dumpCodeBtn) els.dumpCodeBtn.addEventListener("click", async () => {
       await shareOrDownloadJSON(new Blob([buildRackCode(this._view())], { type: "text/javascript" }), "builtin-brushes.js", "笔架代码");

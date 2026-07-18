@@ -138,21 +138,34 @@ export function makeBrush({
 // 什么时候拿到什么时候填，之前填空」）。SW precache 离线兜底；fetch 失败也不卡 boot。
 // **stable ID**：以 "default-{tool}-{slug}" 形式固定——resetBuiltin 靠 id 比对覆盖同 id 用户笔。
 // **shapes/airbrush 工具已撤**（v96/v120）——BRUSH_GROUP 仍含其 tool 值，仅为老 preset 数据向后兼容。
-let _builtinSpec: BrushSpec[] = [];      // fetch 回来前是空，回来后就是 builtin-brushes.json 内容
-const _builtinPromise = (async () => {
-  try {
-    const url = new URL("./builtin-brushes.json", document.baseURI).href;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const json = await r.json();
-    if (!Array.isArray(json)) throw new Error("builtin-brushes.json 不是数组");
-    _builtinSpec = json;
-  } catch (e) {
-    reportError(new Error("[brushes] builtin-brushes.json 加载失败 → 走空兜底（emergency brush 顶上）。" + String(e)), "log");
-    _builtinSpec = [];
+let _builtinSpec: BrushSpec[] = [];          // fetch 回来前是空，回来后就是 builtin-brushes.json 内容
+let _builtinInflight: Promise<BrushSpec[]> | null = null;
+
+// v423：**加载失败不再是终身的**。旧版把 fetch 写成 module-eval 的一次性 IIFE memo——
+//   只要首帧那次 fetch 挂了（离线首开 / SW 没缓上 / 部署漏文件，v422 那个 404 正是），
+//   整个会话里 builtinBrushes() 就永远只有 emergency 一支笔，用户点「还原内置笔刷」也纹丝不动
+//   （=用户报的「按了没用」），只有刷新页面才有下一次机会。
+//   现在：成功才缓存；失败不留缓存 → 下次调用（含用户手点还原）自动重试。
+async function _loadBuiltinSpec(): Promise<BrushSpec[]> {
+  if (_builtinSpec.length) return _builtinSpec;              // 成功过 → 恒定缓存
+  if (!_builtinInflight) {
+    _builtinInflight = (async () => {
+      try {
+        const url = new URL("./builtin-brushes.json", document.baseURI).href;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const json = await r.json();
+        if (!Array.isArray(json)) throw new Error("builtin-brushes.json 不是数组");
+        _builtinSpec = json;
+      } catch (e) {
+        reportError(new Error("[brushes] builtin-brushes.json 加载失败 → 本次没有内置笔刷（下次调用会重试）。" + String(e)), "log");
+      }
+      return _builtinSpec;
+    })().finally(() => { _builtinInflight = null; });         // 无论成败都释放；成功由 _builtinSpec 兜住
   }
-  return _builtinSpec;
-})();
+  return _builtinInflight;
+}
+void _loadBuiltinSpec();   // 模块加载即预热（保持「async fetch，什么时候拿到什么时候填」的老行为）
 
 // fetch 失败时的兜底：至少一个能画的笔，UI 不挂。
 function _emergencyBrush(): Brush {
@@ -162,12 +175,17 @@ function _emergencyBrush(): Brush {
   });
 }
 
-// 出厂笔（specToBrush 化；fetch 失败 → emergency 兜底）。await 内部 fetch promise（幂等缓存）。
-//   给 collection.getInitData（新库 seed）与 controller.resetBuiltin（非破坏性覆盖同 id）共用。
+// 内置笔（specToBrush 化）。**加载不到 → null**，调用方自己决定怎么办。
+//   持久化路径（collection seed / 还原内置笔刷）必须走这个：绝不能把 emergency 兜底笔
+//   当成内置笔写进 collection（会被推上云、并让这个库永远「已存在」，见 builtinBrushInitData）。
+export async function loadBuiltinBrushes(): Promise<Brush[] | null> {
+  const specs = await _loadBuiltinSpec();
+  return specs.length ? specs.map((s) => specToBrush(s)) : null;
+}
+
+// 出厂笔（加载失败 → emergency 兜底）。**只给瞬态/显示路径**用，保证 UI 至少有一支能画的笔。
 export async function builtinBrushes(): Promise<Brush[]> {
-  const specs = await _builtinPromise;
-  const brushes = specs.map((s) => specToBrush(s));
-  return brushes.length ? brushes : [_emergencyBrush()];
+  return (await loadBuiltinBrushes()) ?? [_emergencyBrush()];
 }
 
 // —— .meta（per-folder 有序 brushId）纯操作（无副作用，node 可测）——
@@ -213,9 +231,13 @@ export function buildInitMeta(brushes: Brush[]): RackMeta {
   return meta;
 }
 
-// collection.getInitData（新库 seed）：出厂笔逐 item + 一条 .meta。store 内容无关，此为 app 域构造。
+// collection.getInitData（新库 seed）：内置笔逐 item + 一条 .meta。store 内容无关，此为 app 域构造。
+// **加载失败 → 返空、不 seed**，这是自愈的关键：seed 为空 → store 不写本地 → collection 在 idb 里
+//   仍然「不存在」→ 下次开 app 重新 seed、重新 fetch。反之若把 emergency 兜底笔腌进去，这个库就
+//   永远「已存在」了（seed 只认 idb 有无，不认空），于是清了存储也再拿不回内置笔——正是用户报的现象。
 export async function builtinBrushInitData(): Promise<BrushInitItem[]> {
-  const brushes = await builtinBrushes();
+  const brushes = await loadBuiltinBrushes();
+  if (!brushes) return [];
   const meta = buildInitMeta(brushes);
   return [
     ...brushes.map((b) => ({ id: b.id, value: b as unknown })),
