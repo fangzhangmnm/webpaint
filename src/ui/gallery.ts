@@ -453,6 +453,7 @@ function makeGallery(host: GalleryHost) {
         await host.busy(t("gal.busy.del", { name: item.name }), async () => {
           try {
             await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).delete();
+            void session.dropCheckpoint(item.name);   // 作品没了 → 丢掉它的 revert 快照（按 key 精确清，不扫全库）
             if (isActive) await session.exit();
             host.status(t("gal.st.deleted", { name: item.name }));
           } catch (e: unknown) { host.status(t("gal.st.delFail", { e: String((e as { message?: unknown })?.message || e) }), true); }

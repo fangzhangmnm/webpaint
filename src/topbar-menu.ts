@@ -19,6 +19,7 @@
 //   listCloudSessionsRecursive、decodeOraToDoc、compressPixelSnap、maybeFastForwardActive。
 
 import { session } from "./session-state.ts";
+import { isUnlocked } from "./crypto-state.ts";
 import {
   store as _store,
 } from "./app-store.ts";
@@ -203,7 +204,8 @@ export function initTopbarMenu(ctx: AppContext) {
     if (!session.name) { setStatus(t("tm.noActiveSession"), true); return; }
     const cp = await session.readCheckpoint(session.name);
     if (!cp || !cp.blob) {
-      setStatus(t("tm.noOpenSnapshot"), true);
+      // 加密作品的快照按密文存；锁定/密码不对时解不出 → 说清楚是"要密码"，别含糊成"没有快照"。
+      setStatus(session.enc.encrypted && !isUnlocked() ? t("tm.revertFailedNeedPassword") : t("tm.noOpenSnapshot"), true);
       return;
     }
     const ageMin = Math.max(1, Math.round((Date.now() - (cp.at || session.sessionOpenedAt)) / 60000));
@@ -218,11 +220,12 @@ export function initTopbarMenu(ctx: AppContext) {
     if (choice !== "ok") return;
     editMode.applyPendingTransient();
     try {
-      // checkpoint 字节按文件加密态包过壳 → 先 unseal（明文原样过；密码在内存则无感）
-      const plain = cp.blob;   // ⚠TODO checkpoint 重构后过透明解壳；当前 readCheckpoint stub 返 null，此路不可达
-      if (!plain) { setStatus(t("tm.revertFailedNeedPassword"), true); return; }
-      const loaded = await decodeOraToDoc(plain);
-      session.adoptWithOpts(loaded as PaintDoc, session.name, { skipCheckpoint: true });
+      // cp.blob 已是**明文**：加密作品的快照按密文容器存，readCheckpoint 里用内存密码解好了
+      //   （锁定/错密码 → readCheckpoint 返 null，上面那个分支已提示"无快照"）。
+      const loaded = await decodeOraToDoc(cp.blob);
+      // 既有身份（不是新建）→ 首存 mode:"existing"，就是要写回原文件；且**不重新封存快照**
+      //   （否则刚回滚掉的状态立刻覆盖快照，只能 revert 一次）。
+      session.adoptAsExisting(loaded as PaintDoc, session.name);
       // R4：revert 是内容变化（像素回到旧快照）→ 必须走 clean→dirty 门标云脏。
       //   旧版只 edits.mark() 不标云脏 → 云端永远收不到 revert，且 clean 快进会无备份吃掉 revert 结果。
       session.markEdited();

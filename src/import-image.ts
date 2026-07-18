@@ -254,7 +254,9 @@ export function initImportImage(ctx: AppContext) {
           onPasswordVerified(nm, got.pw);
         }
         const loaded = await decodeOraToDoc(plain);
-        session.adopt(loaded as PaintDoc, nm);
+        // ★新身份：首存走 mode:"new"，撞名抛而不静默覆盖。
+        //   v415 前这里走的是 existing → **导入同名 .ora 会静默盖掉已有作品**（活的数据丢失）。
+        session.adoptAsNew(loaded as PaintDoc, nm);
         setStatus(t("mi.imported", { name: nm }));
         setGalleryOpen(false);
       } else if (isImage) {

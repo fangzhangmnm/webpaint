@@ -25,7 +25,9 @@ import { stripSessionExt, sessionFileName } from "./config.ts";
 import { serializedToolStatePatch, editorState } from "./editor-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
-import { setPassword } from "./crypto-state.ts";
+import { setPassword, getPassword } from "./crypto-state.ts";
+import { shouldCapture, checkpointKey, type CheckpointTrigger } from "./checkpoint-policy.ts";
+import { getCheckpoint, putCheckpoint, deleteCheckpoint } from "./storage.ts";
 import { els } from "./els.ts";
 import type { AppContext } from "./app-context.ts";
 import type { GalleryItem } from "./gallery-model.ts";
@@ -183,18 +185,62 @@ function adoptModel(loaded: LoadedDoc) {
   } finally { _loadingDoc = false; }
 }
 
-// app.js 兼容：session.adopt(loaded, name) —— revert/saveAs 直接把一个解好的 doc 装入 + 设为当前（脏，待存）。
-function adoptLoadedDoc(loaded: LoadedDoc, name: string) {
+// ── adopt 的两个意图，显式拆开（v415）────────────────────────────────────────────────────
+// 以前只有一个 adoptLoadedDoc + 一个**被完全忽略**的 opts（adoptLoadedDocWithOpts 的 _opts 没人读），
+// 两个语义相反的调用方共用它：
+//   · 外部 import 一个 .ora  = **新身份**，首存必须 mode:"new"（撞名不覆盖）
+//   · revert 回滚            = **既有身份**，首存 mode:"existing"（就是要写回原文件）
+// 结果 import 走了 existing → **导入同名 .ora 会静默覆盖已有作品**（活的数据丢失）。
+// 拆成两个函数后，意图写在名字里，调用方不可能选错。
+
+/** 外部导入：装入一个解好的 doc，作为**新身份**。首存 mode:"new"（撞名抛，不静默覆盖）。 */
+function adoptAsNew(loaded: LoadedDoc, name: string) {
+  _adoptCommon(loaded, name, { create: true });
+  void _captureCheckpoint(name, "gallery-open");   // 新身份的「打开态」就是此刻
+}
+/** revert 回滚：装入一个解好的 doc，身份**不变**（首存 mode:"existing"，就是要写回原文件）。
+ *  **不封存 checkpoint** —— 否则刚回滚掉的状态立刻把快照覆盖了，只能 revert 一次。 */
+function adoptAsExisting(loaded: LoadedDoc, name: string) {
+  _adoptCommon(loaded, name, {});
+}
+function _adoptCommon(loaded: LoadedDoc, name: string, opts: { create?: boolean }) {
   adoptModel(loaded);
   _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase();
-  es.adopted(toFull(name));
+  es.adopted(toFull(name), opts);
   _docLastSavedAt = Date.now(); updateSaveStatus(); _refreshEncrypted();
 }
-function adoptLoadedDocWithOpts(loaded: LoadedDoc, name: string, _opts: { skipCheckpoint?: boolean }) { adoptLoadedDoc(loaded, name); }
 
-// ---- checkpoint / revert（⚠TODO：旧走 _store.seal(已删)；待重构为 store 本地文件。暂 stub，revert 功能挂起）----
-async function _writeSessionCheckpoint(_name: string) { /* TODO: store.file(".revert/"+name, local-only) */ }
-async function _readSessionCheckpoint(_name: string): Promise<{ blob: Blob; at: number } | null> { return null; }
+// ---- checkpoint / revert（v415 重接；prod 有、dev 在 store cutover 删 _store.seal 后成了 stub）----
+// 落盘 = app 自己的 webpaint 库的 checkpoints store；策略（key/何时封/加密怎么办）在纯模块 checkpoint-policy.ts。
+/** 封存「本次打开这幅画」的快照。fire-and-forget：**绝不阻塞开画**，失败只 log。
+ *  加密作品存**密文容器**字节（getEncryptedBlob）——绝不退化成 encodeDocToOra 的明文（红线）。 */
+async function _captureCheckpoint(name: string, trigger: CheckpointTrigger) {
+  if (!shouldCapture(trigger)) return;
+  try {
+    const full = toFull(name);
+    const f = _file(name);
+    const cipher = await f.getEncryptedBlob();          // 加密件 → at-rest 密文；明文件 → null
+    const bytes: Blob | null = cipher ?? await f.open();   // 明文件取当前 at-rest 明文字节
+    if (!bytes) return;                                 // 没字节可封（纯云端未缓存 / 锁定）→ 静默跳过
+    await putCheckpoint(checkpointKey(full), { name: full, slot: 0, at: Date.now(), bytes, encrypted: cipher != null });
+  } catch (e) { reportError(new Error("[checkpoint] 封存失败（不影响打开）: " + String(e)), "log"); }
+}
+/** 读回快照。加密的先解壳（内存密码；锁定/错密码 → null 由调用方提示要密码）。 */
+async function _readSessionCheckpoint(name: string): Promise<{ blob: Blob; at: number } | null> {
+  try {
+    const rec = await getCheckpoint(checkpointKey(toFull(name)));
+    if (!rec || !rec.bytes) return null;
+    if (!rec.encrypted) return { blob: rec.bytes, at: rec.at };
+    const pw = getPassword(name);
+    if (!pw) return null;                                // 锁定 → 调用方提示「需要密码」
+    const plain = await _store.encryption.tryDecryptEncryptedBlob(rec.bytes, pw);
+    return plain ? { blob: plain, at: rec.at } : null;
+  } catch (e) { reportError(new Error("[checkpoint] 读取失败: " + String(e)), "log"); return null; }
+}
+/** 作品被删/改名 → 丢掉它的快照（按 key 精确清，**不做全库扫描**）。 */
+async function _dropCheckpoint(name: string) {
+  try { await deleteCheckpoint(checkpointKey(toFull(name))); } catch (e) { reportError(new Error("[checkpoint] 清理失败: " + String(e)), "log"); }
+}
 
 // ---- 保存（本地）----
 async function saveNow(opts: { implicit?: boolean } = {}) {
@@ -299,6 +345,8 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
       try {
         const r = await es.rename(toFull(trimmed));   // es 先 flushLocal 旧内容 → store.tryMove（唯一入口，含占用检查）；边界转全名
         if (!r.ok) return { conflict: true };  // 目标占用（local/cloud）→ 循环重问；未改 _name
+        // 改名 = 换身份 → 旧 key 的快照丢掉（不搬：搬要连密文一起复制，而"改名丢一次快照"是诚实的小代价）。
+        void _dropCheckpoint(oldName);
         _activeSessionName = trimmed; setCurrentSessionName(trimmed); _recomputePhase();
         _docLastSavedAt = Date.now(); updateSaveStatus();
         setStatus(t("ss.renamedWithCloud", { oldName, newName: trimmed }));
@@ -349,6 +397,7 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
   es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
   _docLastSavedAt = 0; updateSaveStatus();
   await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
+  void _captureCheckpoint(name, "new-doc");   // 空白态封一份 → revert = 回到刚新建的样子
   setGalleryOpen(false);
 }
 
@@ -365,6 +414,7 @@ async function pullCloudPath(path: string) {
   try {
     await es.open(toFull(name));   // file.open：本地无→拉云落本地→adopt。freshness/冲突经 store ui。边界转全名。
     _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
+    void _captureCheckpoint(name, "cloud-pull");
     setGalleryOpen(false); setStatus(t("ss.openedFromCloud", { name }));
   } catch (err) { reportError(new Error("[cloud] pull failed: " + String(err)), "log"); setStatus(t("ss.pullFailed", { error: errMsg(err) })); }
   finally { hideFullscreenBusy(); }
@@ -386,6 +436,7 @@ async function openItem(item: GalleryItem) {
     }
     await es.open(toFull(item.name));   // file.open：load + freshness + 冲突 surface + 崩溃恢复；返 null（锁定/缺失）→ adopt 跳过。边界转全名。
     _activeSessionName = item.name; setCurrentSessionName(item.name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
+    void _captureCheckpoint(item.name, "gallery-open");
     setGalleryOpen(false); setStatus(t("ss.opened", { name: item.name }));
   } catch (err) { setStatus(t("ss.openFailed", { error: errMsg(err) })); }
 }
@@ -449,6 +500,7 @@ async function saveAs(newName: string): Promise<void> {
   await _store.file(toFull(newName), { isZip: true, mode: "new" }).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
   _activeSessionName = newName; setCurrentSessionName(newName); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(newName));   // es 切到新名（内容即新名的；下轮 autosave 若跑=同内容 re-save，无害）。边界转全名。
+  void _captureCheckpoint(newName, "save-as");   // 新身份的「打开态」= 此刻
   _docLastSavedAt = Date.now(); updateSaveStatus(); gallery.refresh();
 }
 
@@ -478,7 +530,9 @@ export const session = {
   get dirty() { return es ? es.isDirty() : false; },            // 内存脏（save-status 徽章用）
   markEdited() { if (es) es.markDirty(); },                     // app 驱动内容变化（导入/blender/参考窗）→ 标脏
   setName, restore: restoreSession, saveAs,
-  save: saveNow, saveAndPush, adopt: adoptLoadedDoc, adoptWithOpts: adoptLoadedDocWithOpts,
+  save: saveNow, saveAndPush,
+  // adopt 的两个意图显式分开（别再合成一个带 flag 的）：import=新身份 / revert=既有身份。
+  adoptAsNew, adoptAsExisting,
   rename: renameCurrentSession, exit: exitCanvasToGallery, newDoc, pull: pullCloudPath, open: openItem, push: pushItem, unload: unloadItem,
   encodeOra: _encodeCurrentOra, buildOraMeta: _buildOraMeta,
   /** 当前作品的 at-rest **密文**字节（原样，不解壳、不要密码）。非加密件 → null。
@@ -488,7 +542,7 @@ export const session = {
     await saveNow();                              // 未保存编辑先落盘（seal 会在写入前包壳 → 落地即密文）
     return await _file(_activeSessionName).getEncryptedBlob();
   },
-  writeCheckpoint: _writeSessionCheckpoint, readCheckpoint: _readSessionCheckpoint,
+  readCheckpoint: _readSessionCheckpoint, dropCheckpoint: _dropCheckpoint,
   awaitCloudPushIdle: async () => { /* 薄库 push 内联 await，无独立在飞态 */ },
   markOpenedNow() { _sessionOpenedAt = Date.now(); },
   markNewerConfirmed() { _loadedDocNewerConfirmed = true; },
