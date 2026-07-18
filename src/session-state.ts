@@ -425,6 +425,14 @@ async function restoreSession(name: string): Promise<boolean> {
   //   不该让开画等网络（且离线/local-only 内部本就 no-op）。
   pullSettingsAndState();
   try {
+    // 加密件的冷启动/tab 重开契约（v415 核对确认现状即正确，勿"优化"掉）：
+    //   ① 先问密码（ensureUnlocked 在 busy 外弹，验的是 peek，便宜）；
+    //   ② 取消 → 直接 return false，**在 es.open 之前**——所以这张画从头到尾没被装入编辑器：
+    //      es 无 doc ⇒ session.dirty=false ⇒ 随后 boot 的 setGalleryOpen(true) 里那句
+    //      `if (session.dirty) await session.save()` 不会触发 ⇒ **退出时不推**（不会拿空/旧状态盖云端）；
+    //   ③ boot 收到 false 只把**内存**名降回 null，持久的 currentFile 有意保留（防幻影路径 +
+    //      取消密码常是瞬态的，清了下次冷启动就再也不自动开这张画）——见 boot.ts。
+    //   store 侧的两半已有 node 覆盖（seal.test.ts：无密码写抛 LOCKED 绝不静默存明文；锁定读返 null）。
     if (await _file(name).isEncrypted()) { if (!(await ensureUnlocked(name))) return false; }
     if (!(await es.open(toFull(name)))) return false;   // 文件缺失/锁定 → 未装入。边界转全名。
     _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
