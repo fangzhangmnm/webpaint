@@ -658,6 +658,12 @@ export function createStore(config: StoreConfig) {
       // 名字占用（**boolean**）：在线云端+本地都看，离线只看本地（靠 push conflictBehavior:fail 兜底）。app 新建/另存/改名前预检。
       nameOccupied: (name: string): Promise<boolean> => nameOccupied(name).then((o) => o != null),
       watchFolder,
+      // 本地已缓存文件的总占用（字节 + 件数）。给 app 显示「本地存了多少」用。
+      //   **口径**：只量本库 files 分区；**不含** trash/backup/collections 分区、不含 app 自己别的 IDB 库
+      //   （如缩略图缓存）、不含纯云端未缓存的作品。
+      //   ⚠ **只返两个标量、永不返名字** —— 它不是、也不能变成全库列举（列举唯一面 = watchFolder）。
+      //   一次本地 IDB cursor（无网络），但仍是全表走一遍 → app 只在图库打开/刷新时调，别挂每帧。
+      usage: () => local.usage(),
       // 文件夹增删（gallery folder-tree）：空文件夹增删。**离线也能建**（本地登记 + 回线 drainOfflineQueue 补建）。删除「必须证实为空」库内强制（removeFolder 权威判空）。
       ensureFolder: (path: string) => ensureFolderLocalFirst(path),
       newFolder: singleFlight("新建文件夹", (path: string) => ui.busy("新建文件夹…", async () => { await ensureFolderLocalFirst(path); notifyFolderOf(path); })),   // 子夹出现在父夹 → 重画父夹

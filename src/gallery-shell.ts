@@ -9,17 +9,18 @@
 //   RELOCATE 原样（参数/顺序/语义保持），绝不改。要改 store/session 行为 → STOP，escalate。
 //
 // 对外导出（被 ctx 注入 app.js，session-state / import-image 经 ctx 消费）：
-//   setGalleryOpen / checkQuotaAndWarn / uniqueLocalName / updateIdbUsage / openNewDocSheet。
+//   setGalleryOpen / checkQuotaAndWarn / uniqueNameFor / updateIdbUsage / openNewDocSheet。
 //
 // 依赖：editMode / board / gallery / store(_store) / setStatus 经 initGalleryShell(ctx) 绑入；
-//   doc 同样经 ctx（openNewDocSheet 读 doc.width/height）。session / els / listSessions /
-//   listCloudSessionsRecursive / isSignedIn / anchorPopupToBtn / setAddImportAsNewDoc /
-//   importImageAsNewDoc / readImageFromClipboard 直接 import（leaf/singleton）。
+//   doc 同样经 ctx（openNewDocSheet 读 doc.width/height）。session / els / isSignedIn /
+//   anchorPopupToBtn / setAddImportAsNewDoc / importImageAsNewDoc / readImageFromClipboard
+//   直接 import（leaf/singleton）。
 
 import { session } from "./session-state.ts";
 import { reportError } from "./error-badge.ts";
 import { els } from "./els.ts";
-import { listSessions, readImageFromClipboard } from "./session.ts";
+import { readImageFromClipboard } from "./session.ts";
+import { sessionFileName } from "./config.ts";   // 边界：裸 session 名 → 库全名（占用检查按库身份查）
 import { isSignedIn } from "./app-store.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
@@ -97,16 +98,18 @@ function _selectPreset(val: string) {
   els.newDocCustomRow.style.display = val === "custom" ? "" : "none";
 }
 
-// 本地占用 = 实际所有 IDB session blob 大小之和（**不**走 storage.estimate —— 它把 SW
+// 作品占用 = store 本地缓存 files 分区的字节和件数（**不**走 storage.estimate —— 它把 SW
 // 预缓存 / localStorage 算进去虚高几 MB）。
+//   口径诚实交代：这是「本地存了多少作品」，**不含**缩略图缓存（在 app 自己的 webpaint 库）、
+//   不含回收站/备份箱、不含纯云端未缓存的作品。所以文案是「作品占用」不是「本地占用」。
+//   （v415 前这里读的是早已没有写入者的 sessions 库 → 恒显 0 B / 0 件。）
 // quota 来自 storage.estimate，是**浏览器愿意分配的上限**（iOS Safari 通常 ~ 60-80% 可用
 // 磁盘；动辄几十 GB），不是 "我们申请了多少"。所以放 title 里给好奇用户看，不主显。
+// ⚠ 只在图库打开/刷新时调：内部是一次全表 cursor（本地、无网络，但别挂每帧）。
 export async function updateIdbUsage() {
   try {
-    const sessions = await listSessions();
-    let total = 0;
-    for (const s of sessions) total += (s.size || 0);
-    let label = t("gs.footUsage", { size: humanSize(total), count: sessions.length });
+    const { bytes, count } = await _store.files.usage();
+    let label = t("gs.footUsage", { size: humanSize(bytes), count });
     let level = "ok";   // ok | warn | critical
     if (navigator.storage && navigator.storage.estimate) {
       const est = await navigator.storage.estimate();
@@ -160,13 +163,17 @@ function humanSize(b: number | null | undefined): string {
   return `${(b / 1073741824).toFixed(2)} GB`;
 }
 
-// 给本地拿一个不冲突的名字（X / X 1 / X 2 / ...）
-export async function uniqueLocalName(stem: string) {
-  const existing = new Set((await listSessions()).map((s) => s.name));
-  if (!existing.has(stem)) return stem;
-  for (let i = 1; i < 100; i++) {
+// 拿一个不占用的名字（X / X 1 / X 2 / ...）。
+//   走 store.files.nameOccupied = **唯一权威**占用检查（本地 + 在线时云端；本地命中即短路，
+//   常见 0-1 次网络往返）。不列举任何文件夹——全库 list 是被否决的退化设计。
+//   （旧名 uniqueLocalName 撒谎：它现在也查云端。且旧实现读死了的 sessions 库 → 恒不撞名。）
+//   上限 20（旧 100）：每次未命中最坏一次 fetchMeta，别让「新建」确认卡在上百次往返上；
+//   兜底加时间戳，保证一定返回一个名字。
+export async function uniqueNameFor(stem: string) {
+  if (!(await _store.files.nameOccupied(sessionFileName(stem)))) return stem;
+  for (let i = 1; i < 20; i++) {
     const candidate = `${stem} ${i}`;
-    if (!existing.has(candidate)) return candidate;
+    if (!(await _store.files.nameOccupied(sessionFileName(candidate)))) return candidate;
   }
   return `${stem} ${Date.now()}`;
 }
@@ -242,14 +249,12 @@ export function initGalleryShell(ctx: AppContext) {
       gallery.refresh();
       return;
     }
-    // 找一件本地加密作品 → ensureUnlocked（busy 外 prompt + verifyPassword 验 peek + 记忆）。
-    // 一件都没有 → 收下未验证的密码当统一密码（用到时自然验证，错了会重问）。
+    // 在**当前夹**找一件本地加密作品 → 交互解锁（busy 外 prompt + verifyPassword 验 peek + 记忆）。
+    //   本夹一件都没有 → 收下未验证的密码当统一密码（用到时自然验证，错了会重问）。
+    //   刻意只看当前夹：列举唯一面 = watchFolder，不做全库扫描。
+    //   （v415 前这里读死了的 sessions 库 → 恒找不到，永远走下面的未验证分支。）
     try {
-      const enc = (await listSessions()).find((s: { encrypted?: boolean }) => s.encrypted);
-      if (enc) {
-        if (await ensureUnlocked(enc.name)) { setStatus(t("gs.unlocked")); gallery.refresh(); }
-        return;
-      }
+      if (await gallery.requestUnlock()) { setStatus(t("gs.unlocked")); gallery.refresh(); return; }
     } catch (_) {}
     const pw = await promptPassword({ title: t("gs.unlockTitle"), message: t("gs.unlockNoLocalMsg") });
     if (pw != null) { setPassword(pw); setStatus(t("gs.pwRecorded")); gallery.refresh(); }
@@ -305,7 +310,7 @@ export function initGalleryShell(ctx: AppContext) {
       w = Math.max(16, Math.min(8192, parseInt(parts[0], 10) || 2048));
       h = Math.max(16, Math.min(8192, parseInt(parts[1], 10) || w));
     }
-    const name = await uniqueLocalName(nameRaw);
+    const name = await uniqueNameFor(nameRaw);
     closeNewDocSheet();
     // doc 替换 + 落盘 + 切指针 + checkpoint + 关库全在 session.newDoc（session-state.ts）。
     await session.newDoc({ name, w, h });

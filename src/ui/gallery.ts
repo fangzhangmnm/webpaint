@@ -19,7 +19,6 @@ import {
   store as _store,
   watchFolder, listGalleryTrash,
 } from "../app-store.ts";
-import { listSessions } from "../session.ts";
 import { getOrFetchCloudThumb, invalidateCachedThumb } from "../cloud-thumb-cache.ts";
 import { reportError } from "../error-badge.ts";
 // 加密（ADR-0012）：tile 锁样式 + 解锁浏览；transform/密码循环全在 store（flow.encrypt/decrypt +
@@ -66,6 +65,10 @@ export interface GalleryHost {
   chooseFolder(title: string, msg: string, options: { label: string; value: string }[]): Promise<string | null>;
   status(msg: string, isError?: boolean): void;
   busy<T>(label: string, fn: () => Promise<T>): Promise<T>;
+  /** 本地字节是不是加密容器（纯本地 IDB 读文件头，无网络）。gallery 按夹探测锁态用。 */
+  isEncrypted(name: string): Promise<boolean>;
+  /** 交互解锁（busy 外弹密码 + verifyPassword）。成功 → true。 */
+  unlock(name: string): Promise<boolean>;
   // 画布耦合操作已搬到 session-state（session.open/push/unload/rename/exit/setName），不再经 host。
 }
 
@@ -188,7 +191,38 @@ function makeGallery(host: GalleryHost) {
           data.files = snap.items as unknown as GItem[];
           data.folderNames = snap.folderNames;
           loading.value = false;
+          void probeEncrypted();                    // 本夹本地项的加密态（锁图标/缩略图路径/加密菜单都靠它）
         });
+      }
+
+      // ── 加密态探测（**app 侧**）───────────────────────────────────────────────────────
+      // store 的 Item 刻意没有 encrypted 轴（它内容盲；给它加一个就是让 store 懂内容）。
+      // 之前 view-model 读 item.local.encrypted，而 app-store 从不写这个字段 → tile.encrypted **恒 false**，
+      //   于是锁图标、加密缩略图路径、加密/解除菜单三样全是死的。改成本夹按需探测。
+      // 代价可控：只探当前夹的**本地**项，file.isEncrypted() 是纯本地 IDB 读文件头，无网络。
+      const encByName = reactive<Record<string, boolean>>({});
+      async function probeEncrypted() {
+        const snapshot = data.files.filter((it) => it.local).map((it) => it.name);
+        for (const nm of snapshot) {
+          if (nm in encByName) continue;            // 已探过（换夹回来复用；bytes 变了走 invalidate）
+          try { encByName[nm] = await host.isEncrypted(nm); }
+          catch { encByName[nm] = false; }
+        }
+      }
+      // 字节变了（加密/解除/revert/覆盖保存）→ 该项重探。
+      function invalidateEncrypted(name: string) { delete encByName[name]; void probeEncrypted(); }
+
+      // 图库「解锁」菜单：在**当前夹**找一件本地加密作品，走交互解锁（验它的 peek = 便宜且真验）。
+      //   本夹没有 → 返 false，调用方退回「收下未验证密码」分支。
+      //   刻意不搜全库：列举只走 watchFolder（全库 list 是被否决的退化设计）。代价 = 站在没有加密件的
+      //   夹里解锁拿不到即时验证——可接受，密码会在真正打开/渲染加密件时验，错了那里会重问。
+      async function requestUnlock(): Promise<boolean> {
+        await probeEncrypted();
+        for (const it of data.files) {
+          if (!it.local || !encByName[it.name]) continue;
+          return await host.unlock(it.name);
+        }
+        return false;
       }
       async function loadTrash() {
         loading.value = true;
@@ -211,7 +245,7 @@ function makeGallery(host: GalleryHost) {
       const folderTiles = computed(() => data.folderNames.map((fn) => ({ name: fn, path: pathJoin(folder.value, fn) })));
       const fileTiles = computed(() => data.files.map((it) => ({
         item: it,
-        t: tileFor(it, { signedIn: host.signedIn(), activeName: host.activeName() }),
+        t: tileFor(it, { signedIn: host.signedIn(), activeName: host.activeName(), encrypted: !!encByName[it.name] }),
       })));
       const trashTiles = computed(() => trash.value.map((it) => ({ item: it, t: trashTileFor(it) })));
       const crumbs = computed(() => breadcrumb(folder.value));
@@ -314,10 +348,12 @@ function makeGallery(host: GalleryHost) {
             // 取源字节：file.open 本地有读本地、无则拉云（明文；⚠TODO 加密源拷贝会解密，待内容盲 raw-read 原语）。
             const bytes: Blob | null = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).open();
             if (!bytes) { host.status(t("gal.st.copyNoBytes"), true); return; }
-            // 目标名：同文件夹下「<名> 副本」「<名> 副本2」…取首个本地⊕云端都不占用的。源在当前夹 → 用手上单夹快照，不 poll。
-            const localNames = new Set((await listSessions()).map((s) => s.name));
-            const cloudNames = new Set(data.files.filter((it) => it.cloud).map((it) => it.name));   // 当前夹云端名
-            const newName = copyTargetName(item.name, (n: string) => localNames.has(n) || cloudNames.has(n));
+            // 目标名：同文件夹下「<名> 副本」「<名> 副本2」…取首个不占用的。源在当前夹 → 直接用手上的单夹快照，不 poll、不列全库。
+            //   data.files 已经是本地⊕云端归并过的当前夹全集（app-store.itemToG）。
+            //   v415 前这里做了两件错事：本地名单读早已没有写入者的 sessions 库（恒空），
+            //   云端名单又 .filter(it => it.cloud) 把**本地-only 项滤掉** → 撞名去重形同虚设。
+            const taken = new Set(data.files.map((it) => it.name));
+            const newName = copyTargetName(item.name, (n: string) => taken.has(n));
             // 写新身份：本地存 + 云端 push（云端 best-effort，离线/失败标未推送，下次 Ctrl+S 续）。
             await _store.file(sessionFileName(newName), { isZip: true, mode: "new" }).save(bytes, { tryPush: cloudOn });   // 新身份：本地存 + best-effort 推。边界转全名。
             host.status(t("gal.st.copied", { name: pathBasename(newName) }));
@@ -365,6 +401,7 @@ function makeGallery(host: GalleryHost) {
         else host.status(okMsg);
         // 旧 token 的云 thumb 缓存条目立即作废（明文/密文残留都清）。缓存按 store 身份 key，走模块入口（不裸碰 IDB）。
         await invalidateCachedThumb(item.name);
+        invalidateEncrypted(item.name);   // 字节换了体 → 重探锁态（锁图标/缩略图路径/菜单跟着翻）
         return true;
       }
 
@@ -496,7 +533,7 @@ function makeGallery(host: GalleryHost) {
         folderTiles, fileTiles, trashTiles, crumbs,
         badgeIcon, fmtMeta, ICON, toggleMenu, setFolder, hydrateFolder, enterFolder,
         openTile, rename, move, copy, push, reupload, unload, del, folderDelete, trashRestore, trashPurge, emptyTrash,
-        encryptItem, decryptItem, onUnlock,
+        encryptItem, decryptItem, onUnlock, requestUnlock,
         reload, setView: (v: "files" | "trash") => { view.value = v; reload(); },
       };
     },
@@ -590,6 +627,8 @@ export interface GalleryHandle {
   hydrateFolder(path: string): void;   // boot fixup：灌"上次的夹"，不写盘
   getFolder(): string;
   emptyTrash(scope?: "local" | "cloud" | "both"): void;
+  /** 在当前夹找一件本地加密作品并交互解锁；本夹没有 → false。 */
+  requestUnlock(): Promise<boolean>;
   unmount(): void;
 }
 
@@ -602,6 +641,7 @@ interface GalleryVM {
   hydrateFolder(p: string): void;
   folder: string;
   emptyTrash(scope?: "local" | "cloud" | "both"): void;
+  requestUnlock(): Promise<boolean>;
 }
 
 export function mountGallery(el: HTMLElement, host: GalleryHost): GalleryHandle {
@@ -615,6 +655,7 @@ export function mountGallery(el: HTMLElement, host: GalleryHost): GalleryHandle 
     hydrateFolder: (p) => vm.hydrateFolder(p),
     getFolder: () => vm.folder,
     emptyTrash: (scope) => vm.emptyTrash(scope),
+    requestUnlock: () => vm.requestUnlock(),
     unmount: () => app.unmount(),
   };
 }

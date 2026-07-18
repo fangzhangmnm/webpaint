@@ -11,7 +11,7 @@ import { pathBasename } from "../gallery-path.ts";
 import { itemTime } from "../gallery-model.ts";
 import type { GalleryItem, CloudFile, LocalSession } from "../gallery-model.ts";
 
-// 本地 session 包（listSessions 的元素 + 图库消费的运行态字段：缩略图 Blob / 字节大小 /
+// 本地项（watchFolder 单夹快照的元素 + 图库消费的运行态字段：缩略图 Blob / 字节大小 /
 // 加密标志 / 回收站 key）。store 本体仍是 .js，这里只声明图库读到的字段。
 export interface LocalSessionMeta extends LocalSession {
   size?: number;
@@ -54,12 +54,12 @@ export interface GalleryTile {
   hasLocalThumb: boolean;
   cloud: CloudFileMeta | null;     // {size,lastModifiedDateTime} 给 thumb provider（按 name+token 拉）；纯本地 = null
   isActive: boolean;
-  encrypted: boolean;    // 本地字节是加密容器（ADR-0012）。纯云端项未知（thumb 拉回时按 MIME 现场识别）
+  encrypted: boolean;    // 本地字节是加密容器（ADR-0012），由 gallery 按夹探测注入。纯云端项未知（thumb 拉回时按 MIME 现场识别）
 }
 
 export function tileFor(
   item: GItem,
-  opts: { signedIn: boolean; activeName: string | null },
+  opts: { signedIn: boolean; activeName: string | null; encrypted?: boolean },
 ): GalleryTile {
   const isLocal = !!item.local, isCloud = !!item.cloud;
   let badge: BadgeKind, badgeTitle: string;
@@ -91,7 +91,9 @@ export function tileFor(
     hasLocalThumb: !!(item.local && item.local.thumb),
     cloud: item.cloud || null,
     isActive: !!opts.activeName && item.name === opts.activeName,
-    encrypted: !!(item.local && item.local.encrypted),
+    // 加密态由调用方探测后注入（store 的 Item 内容盲、没有 encrypted 轴）。
+    //   v415 前这里读 item.local.encrypted —— 那个字段**从来没有写入者**，故恒 false。
+    encrypted: !!opts.encrypted,
   };
 }
 

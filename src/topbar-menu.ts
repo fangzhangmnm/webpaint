@@ -15,7 +15,7 @@
 //   input / doc / board / history / editMode / setStatus / updateSaveStatus / updateZoomLabel /
 //   gallery / rack。
 // 直接 import（leaf/singleton）：session、_store(store)、els、
-//   openInputSheet/openConfirmSheet/lockSyncGate、setMenuOpen、listSessions、
+//   openInputSheet/openConfirmSheet/lockSyncGate、setMenuOpen、
 //   listCloudSessionsRecursive、decodeOraToDoc、compressPixelSnap、maybeFastForwardActive。
 
 import { session } from "./session-state.ts";

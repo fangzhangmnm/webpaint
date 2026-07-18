@@ -139,7 +139,7 @@ export interface AppContext {
   renderLayersPanel: () => void;
   setGalleryOpen: (open: boolean) => void;
   checkQuotaAndWarn: () => Promise<void>;   // v319：真实现 gallery-shell，async 无参无返回值
-  uniqueLocalName: (stem: string) => Promise<string>;   // v319：真实现 gallery-shell，async
+  uniqueNameFor: (stem: string) => Promise<string>;    // 取一个不占用的名字（走 store.files.nameOccupied；本地+在线云端）
   showFullscreenBusy: (msg?: string) => void;   // v319：真实现 fullscreen-busy
   hideFullscreenBusy: () => void;
 

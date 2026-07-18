@@ -709,7 +709,7 @@ export const S = {
   "bl.presetSquare512": { zh: "方 512²", en: "Square 512²", ja: "正方 512²" },
   "bl.presetSquare1024": { zh: "方 1024²", en: "Square 1024²", ja: "正方 1024²" },
   "bl.presetSquare2048": { zh: "方 2048²", en: "Square 2048²", ja: "正方 2048²" },
-  "gs.footUsage": { zh: "本地占用：{size}（{count} 件）", en: "Local usage: {size} ({count} items)", ja: "ローカル使用：{size}（{count} 件）" },
+  "gs.footUsage": { zh: "作品占用：{size}（{count} 件）", en: "Artwork usage: {size} ({count} items)", ja: "作品の使用量：{size}（{count} 件）" },
   "gs.footUsageTitle": { zh: "浏览器分配上限约 {size}；当前 {pct}% 已用（含 SW 缓存等）", en: "Browser allocation cap ~{size}; {pct}% used now (incl. SW cache, etc.)", ja: "ブラウザ割り当て上限は約 {size}；現在 {pct}% 使用中（SW キャッシュ等を含む）" },
   "gs.usedSuffix": { zh: " · 已用 {pct}%", en: " · {pct}% used", ja: " · {pct}% 使用" },
   "gs.usageUnknown": { zh: "占用：未知", en: "Usage: unknown", ja: "使用量：不明" },

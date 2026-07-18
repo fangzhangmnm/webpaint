@@ -43,6 +43,26 @@ export function createIdbCache(dbName: string) {
       return reqTx<IDBValidKey[]>("readonly", (s) => s.getAllKeys())
         .then((ks) => ks.filter((k): k is string => typeof k === "string"));
     },
+    /** 按 key 前缀汇总占用（单事务 cursor 走一遍；`Blob.size` 是引用属性，**不把字节读进内存**）。
+     *  只返两个标量，不返任何名字 —— 拿不到清单，故**不能**当全库列举用（那是被否决的退化设计）。 */
+    usage(prefix: string): Promise<{ bytes: number; count: number }> {
+      return openDb().then((db) => new Promise<{ bytes: number; count: number }>((resolve, reject) => {
+        const t = db.transaction(STORE, "readonly");
+        let bytes = 0, count = 0;
+        const c = t.objectStore(STORE).openCursor();
+        c.onsuccess = (): void => {
+          const cur = c.result;
+          if (!cur) return;                                  // 走完 → 等 oncomplete
+          if (typeof cur.key === "string" && cur.key.startsWith(prefix)) {
+            const rec = cur.value as CacheRecord | undefined;
+            if (rec && rec.blob) { bytes += rec.blob.size || 0; count++; }
+          }
+          cur.continue();
+        };
+        t.oncomplete = (): void => resolve({ bytes, count });
+        t.onerror = (): void => reject(t.error);
+      }));
+    },
     /** 原子改名(同一事务 get→put 新→del 旧):trash/restore/backup 用。源不存在则 noop。 */
     rename(from: string, to: string): Promise<void> {
       return openDb().then((db) => new Promise<void>((resolve, reject) => {

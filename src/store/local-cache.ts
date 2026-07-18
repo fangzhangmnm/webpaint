@@ -42,6 +42,8 @@ export function createLocalCache(dbName: string): LocalCache {
     async stat(name: string) { const r = await files.get(name); return r ? { size: r.blob.size, updatedAt: r.updatedAt } : null; },
     // 已缓存的应用文件名 = files 分区键（trash/backup/collections 天然隔离在别分区，无需按名过滤）。
     async appKeys() { return files.keys(); },
+    // files 分区占用（字节 + 件数）。**不含** trash/backup/collections 分区，也不含纯云端未缓存的文件。
+    async usage() { return files.usage(); },
     // 覆盖前留底:复制到 backup 分区(yyyymmddhhmmss-guid 防撞;原件不动)。
     async backup(name: string) {
       const r = await files.get(name);

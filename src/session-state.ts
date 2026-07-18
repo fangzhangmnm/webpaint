@@ -50,7 +50,7 @@ let updateSaveStatus: AppContext["updateSaveStatus"], updateNewerBanner: AppCont
 let pullSettingsAndState: AppContext["pullSettingsAndState"];
 let setColor: AppContext["setColor"], applyCheckerboard: AppContext["applyCheckerboard"], renderLayersPanel: AppContext["renderLayersPanel"];
 let setGalleryOpen: AppContext["setGalleryOpen"];
-let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"], uniqueLocalName: AppContext["uniqueLocalName"];
+let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"], uniqueNameFor: AppContext["uniqueNameFor"];
 let gallery: AppContext["gallery"];
 let showFullscreenBusy: AppContext["showFullscreenBusy"], hideFullscreenBusy: AppContext["hideFullscreenBusy"];
 
@@ -489,7 +489,7 @@ export function initSession(ctx: AppContext) {
   pullSettingsAndState = ctx.pullSettingsAndState;
   setColor = ctx.setColor; applyCheckerboard = ctx.applyCheckerboard; renderLayersPanel = ctx.renderLayersPanel;
   setGalleryOpen = ctx.setGalleryOpen;
-  checkQuotaAndWarn = ctx.checkQuotaAndWarn; uniqueLocalName = ctx.uniqueLocalName;
+  checkQuotaAndWarn = ctx.checkQuotaAndWarn; uniqueNameFor = ctx.uniqueNameFor;
   showFullscreenBusy = ctx.showFullscreenBusy; hideFullscreenBusy = ctx.hideFullscreenBusy;
   gallery = ctx.gallery;
 

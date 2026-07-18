@@ -31,6 +31,7 @@ import { PwaShell } from "./pwa-shell.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";   // settleSyncGate→cloud-freshness
 import { setPasswordPrompt } from "./crypto-state.ts";   // 加密：密码弹窗注入（ADR-0012）
 import { sessionFileName } from "./config.ts";   // 边界：裸 session 名 → 库全名（薄库身份=X.ora）
+import { ensureUnlocked } from "./enc-thumbs.ts";   // 交互解锁（busy 外）——图库 host.unlock 用
 import { els } from "./els.ts";
 import type { AppContext } from "./app-context.ts";
 import { makeDialControls } from "./dial-controls.ts";   // dial 写入（setSize/setOpacity）+ 当前 dial + 键盘 [ ] 调粗
@@ -53,7 +54,7 @@ import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels,
 import { initLayerUndo, _afterDocChange, layerSpecFrom } from "./layer-undo.ts";
 import { initImportImage, importImageAsLayer } from "./import-image.ts";   // importImageAsNewDoc/setAddImportAsNewDoc 仅 gallery-shell/export-menu 用
 import { initExportImportMenu } from "./export-import-menu.ts";
-import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueLocalName } from "./gallery-shell.ts";
+import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueNameFor } from "./gallery-shell.ts";
 import { initTopbarMenu } from "./topbar-menu.ts";
 import { initBlenderSync, reconcileBlenderUrlFromPrefs } from "./blender-sync.ts";   // 推/拉贴图到 Blender（BlenderTextureProtocol，插件式隔离子功能）
 import { initPlatformGuards } from "./platform-guards.ts";
@@ -236,7 +237,7 @@ const ctx: AppContext = freezeCtx({
   afterDocChange: _afterDocChange,
   referenceWindow, paletteWindow,   // side-windows.ts 的 import（module-eval 即构造，早可用）
   setColor, applyCheckerboard, renderLayersPanel,
-  setGalleryOpen, checkQuotaAndWarn, uniqueLocalName,
+  setGalleryOpen, checkQuotaAndWarn, uniqueNameFor,
   showFullscreenBusy, hideFullscreenBusy,
   get gallery() { return gallery; },   // 晚绑：gallery const 在下方 mountGallery 处构造
 });
@@ -318,7 +319,7 @@ initDevConsole();
 // withBusy / showFullscreenBusy / hideFullscreenBusy = fullscreen-busy.ts。
 // 等云端 push 完成（防 status race）= session.awaitCloudPushIdle()，定义在 session-state.ts。
 
-// 图库外壳（setGalleryOpen/chrome/新建sheet/IDB占用/配额/popup接线/uniqueLocalName）= gallery-shell.ts。
+// 图库外壳（setGalleryOpen/chrome/新建sheet/占用/配额/popup接线/uniqueNameFor）= gallery-shell.ts。
 // ===== 图库 = <Gallery> 深模块（src/ui/gallery.ts）。app 只供画布耦合 host 回调 + 无系统弹窗 UI =====
 const gallery = mountGallery(document.getElementById("galleryMount")!, {
   signedIn: () => isSignedIn(),
@@ -332,6 +333,10 @@ const gallery = mountGallery(document.getElementById("galleryMount")!, {
   },
   status: (m, e) => setStatus(m, e),
   busy: (label, fn) => withBusy(label, fn),
+  // 加密态探测 / 交互解锁：store 的 Item 内容盲（没有 encrypted 轴），由图库按夹自己探。
+  //   isEncrypted = 纯本地 IDB 读文件头，无网络；unlock = busy 外弹密码 + verifyPassword（验 peek，便宜）。
+  isEncrypted: (name) => _store.file(sessionFileName(name), { isZip: true, mode: "existing" }).isEncrypted(),
+  unlock: (name) => ensureUnlocked(name),
   // 画布耦合操作（open/push/unload/rename/exit/setName）gallery.ts 直调 session.*，不再经 host。
 });
 

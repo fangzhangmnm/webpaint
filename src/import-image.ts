@@ -40,7 +40,7 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 // app 单例 / 跨模块函数（initImportImage(ctx) 装入）。
 let doc: AppContext["doc"], board: AppContext["board"], input: AppContext["input"], editMode: AppContext["editMode"];
 let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"];
-let renderLayersPanel: AppContext["renderLayersPanel"], setGalleryOpen: AppContext["setGalleryOpen"], uniqueLocalName: AppContext["uniqueLocalName"];
+let renderLayersPanel: AppContext["renderLayersPanel"], setGalleryOpen: AppContext["setGalleryOpen"], uniqueNameFor: AppContext["uniqueNameFor"];
 
 // 图库「导入照片」会 set 此 flag=true，oraFileInput change 读后立即复位（语义：照片打底新 doc）。
 let _addImportAsNewDoc = false;
@@ -63,7 +63,7 @@ export async function importImageAsNewDoc(file: File) {
   const w = Math.min(8192, bitmap.width);
   const h = Math.min(8192, bitmap.height);
   const stem = file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImportName");
-  const name = await uniqueLocalName(stem);
+  const name = await uniqueNameFor(stem);
   // 共用 session.newDoc 骨架（消 survey rec #4 孪生）：照片绘制 = fillLayer0；doc 替换/全部重置/
   // 落盘/checkpoint 归 session。照片导入因此与空白新建完全对齐（清 selection/参考窗 + color 归黑 +
   // 加密归明文 + 关图库）——human 定：之前不重置这些反而是小 bug。
@@ -226,7 +226,7 @@ export function initImportImage(ctx: AppContext) {
   updateSaveStatus = ctx.updateSaveStatus;
   renderLayersPanel = ctx.renderLayersPanel;
   setGalleryOpen = ctx.setGalleryOpen;
-  uniqueLocalName = ctx.uniqueLocalName;
+  uniqueNameFor = ctx.uniqueNameFor;
 
   // 图层面板「导入图片」按钮 → file picker（强制叠层，复位 _addImportAsNewDoc）。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);

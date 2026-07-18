@@ -1,22 +1,10 @@
-// IndexedDB 持久化 —— **一个 session = 一个 atomic 包**。
+// app 自己的 IndexedDB（库名 `webpaint`）。**注意和 store 的库分开**：
+//   作品字节在 store 的 `webpaint.defaultStore` 库（分区 files/trash/backup/collections）；
+//   这里只放 app 专属、store 管不着的东西。
 //
-// 抄 AtlasMaker v0.7 的设计（docs/20260527-persistence-and-encryption-shareback.md
-// TL;DR 第 1 条）：**不要**拆 layer-blobs 多 store 多 tx。refresh 在中间
-// 截断会丢半边。
-//
-// 一条记录 = { name, updatedAt, ora: Blob, thumb: Blob }
-// 一次 put 一次 tx。要么全有要么全无。
-//
-// 代价：每次保存重序列化整个 .ora。所以保存频率必须低（Ctrl+S 主导 +
-// 3-min 兜底 + visibility/pagehide 抢救）。不要走 debounce 路径。
-
-/** 一条 session 记录 = 一个 atomic 包。pkg 整体作为一个 IDB value 写入。 */
-export interface SessionPkg {
-  name: string;
-  updatedAt: number;
-  ora: Blob;
-  thumb: Blob | null;
-}
+// 现存 object store：
+//   · gallery-thumbs —— 图库缩略图缓存（加密件存**密文** peek，明文永不落盘）
+//   （sessions —— 已死，v415 删掉全部读写；object store 在 v4 upgrade 里 deleteObjectStore）
 
 const DB_NAME = "webpaint";
 const DB_VERSION = 3;             // v3：加 gallery-thumbs store（bump 让已存在的库触发 onupgradeneeded 补建；additive、无迁移）
@@ -42,89 +30,12 @@ function openDB(): Promise<IDBDatabase> {
   return _dbPromise;
 }
 
-/**
- * 取一个 session 包。返回 { name, updatedAt, ora: Blob, thumb: Blob? } 或 null。
- */
-export async function getSession(id = "current"): Promise<SessionPkg | null> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_SESSIONS, "readonly");
-    const req = tx.objectStore(STORE_SESSIONS).get(id);
-    req.onsuccess = () => resolve(req.result || null);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/**
- * 原子写一个 session 包。pkg 整个作为一个 value 写入，IDB 保证 tx 内全有全无。
- */
-export async function putSession(id: string, pkg: SessionPkg): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_SESSIONS, "readwrite");
-    tx.objectStore(STORE_SESSIONS).put(pkg, id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export async function deleteSession(id: string): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_SESSIONS, "readwrite");
-    tx.objectStore(STORE_SESSIONS).delete(id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export async function listSessionIds(): Promise<string[]> {
-  const db = await openDB();
-  return new Promise<string[]>((resolve, reject) => {
-    const tx = db.transaction(STORE_SESSIONS, "readonly");
-    const req = tx.objectStore(STORE_SESSIONS).getAllKeys();
-    req.onsuccess = () => resolve(req.result as string[]);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-// trash 用：原子 rename。put new key + delete old key 同一 tx，保证不会出现两份 / 都没的中间态。
-// 不读 pkg 出来再 put（多一次复制 + tx 跨 turn 风险），用 get 之后 put 整对象。
-// 若 newKey 已存在，抛 'destination-exists'（caller 负责改名重试）。
-export async function renameSessionKey(oldKey: string, newKey: string): Promise<void> {
-  if (oldKey === newKey) return;
-  const db = await openDB();
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_SESSIONS, "readwrite");
-    const store = tx.objectStore(STORE_SESSIONS);
-    const getOld = store.get(oldKey);
-    const checkNew = store.get(newKey);
-    let oldPkg: SessionPkg | null = null;
-    getOld.onsuccess = () => { oldPkg = getOld.result; };
-    checkNew.onsuccess = () => {
-      if (checkNew.result !== undefined) {
-        // newKey 已占用
-        tx.abort();
-        const err = new Error("destination-exists") as Error & { code?: string };
-        err.code = "destination-exists";
-        reject(err);
-        return;
-      }
-      if (!oldPkg) {
-        tx.abort();
-        const err = new Error("source-missing") as Error & { code?: string };
-        err.code = "source-missing";
-        reject(err);
-        return;
-      }
-      store.put(oldPkg, newKey);
-      store.delete(oldKey);
-    };
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => { /* reject 已经在 onsuccess 调过 */ };
-  });
-}
+// sessions object store 的整套读写（getSession / putSession / deleteSession / listSessionIds /
+//   renameSessionKey + SessionPkg）已于 v415 删除。
+//   它是 store cutover 之前的本地 autosave 层。cutover 后写入侧（putSession）零调用者，
+//   于是这个 store **只出不进、恒空**，而读侧 session.listSessions 还在读它 → 四个消费方静默失效
+//   （详见 session.ts 里那段说明）。落盘真相现在唯一走 store.file + editor-session。
+//   object store 本身在 DB_VERSION v4 的 upgrade 里删（本轮末尾统一 bump，见 openDB）。
 
 // meta store（getMeta/setMeta + STORE_META object store）已于 2026-07 删除：笔架本地持久化迁到
 //   store.collection("brush-rack")；设置/状态早已走 collection（app-prefs.ts / app-state.ts）。别再加回。

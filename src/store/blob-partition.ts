@@ -14,6 +14,7 @@ export interface PartitionView {
   del(name: string): Promise<void>;
   exists(name: string): Promise<boolean>;
   keys(): Promise<string[]>;                                            // 本分区内、**去前缀**的 name
+  usage(): Promise<{ bytes: number; count: number }>;                   // 本分区占用（字节 + 件数）；只返标量，拿不到清单
   moveTo(name: string, to: Partition, toName: string): Promise<void>;   // 跨分区原子改名（同 object store 内 rename）
 }
 
@@ -32,6 +33,7 @@ export function createPartitionedBlobStore(dbName: string): PartitionedBlobStore
       del: (name) => idb.del(key(p, name)),
       exists: async (name) => (await idb.get(key(p, name))) !== undefined,
       keys: async () => (await idb.keys()).filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length)),
+      usage: () => idb.usage(prefix),
       moveTo: (name, to, toName) => idb.rename(key(p, name), key(to, toName)),
     };
   }

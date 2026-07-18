@@ -20,10 +20,7 @@
 
 import { encodeDocToOra, decodeOraToDoc } from "./ora.ts";
 import { compositeLayers } from "./layer-composite.ts";
-import { looksEncryptedContainer } from "./crypto-format.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
-import { getSession, listSessionIds } from "./storage.ts";
-import { LOCAL_BACKUP_PREFIX } from "./store/move-aside.ts";   // 深模块的隐藏命名空间约定（backup 不进图库）
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
 import type { PaintDoc } from "./doc.ts";
 
@@ -34,15 +31,7 @@ type FileShareNavigator = Navigator & {
   share?: (data?: { files?: File[]; title?: string }) => Promise<void>;
 };
 
-interface SessionPkg {
-  name: string;
-  updatedAt: number;
-  ora: Blob;
-  thumb: Blob | null;
-}
-
 const DEFAULT_NAME = "未命名";
-const LEGACY_SLOT = "current";   // 旧 v35 单 slot key；冷启动会迁移到 DEFAULT_NAME
 
 // gallery-first: 空字符串 = 没活动 session（在 gallery）。
 // active session = appState.currentFile（synced-app-state，非 null → boot 自动 open；跨设备 resume）。
@@ -84,54 +73,17 @@ export async function renderThumbBlob(doc: PaintDoc, maxSide = 256) {
   return await canvasToBlob(thumb, "image/png");
 }
 
-/** trash 用 key prefix：listSessions 据此把 trash:* 从图库列表过滤掉。
- *  （本地 session 的 trash 生命周期 rename/restore/purge/empty 已退役——图库回收站走 store 的 .trash，
- *   见 gallery + store.listTrash/restore。此处只保留过滤用的前缀判定。） */
-const TRASH_PREFIX = "trash:";
-function isTrashKey(key: string) { return typeof key === "string" && key.startsWith(TRASH_PREFIX); }
-// 本地 backup 的命名/防撞/命名空间策略在深模块（src/store/move-aside.js + local-adapter）。
-// 这里只消费它的前缀常量，把这道隐藏命名空间从图库列表过滤掉（覆盖前留底，不该 flood 用户文件夹）。
-
-/** 列所有 session 元信息（name + updatedAt + size + thumb Blob + encrypted）。不解码 .ora。
- *  默认过滤 trash:* keys（本地 session trash 生命周期已退役——图库回收站走 store 的 .trash）。 */
-// 加密探测 memo：尾部 96KB 扫一次 MAGIC 就够，但图库每次 reload 都列 → 按 (name, updatedAt, size) 缓存
-const _encDetectMemo = new Map();
-async function _detectEncrypted(id: string, pkg: SessionPkg) {
-  if (!pkg.ora) return false;
-  const key = `${id}\x00${pkg.updatedAt || 0}\x00${pkg.ora.size || 0}`;
-  const hit = _encDetectMemo.get(key);
-  if (hit !== undefined) return hit;
-  let enc = false;
-  try { enc = await looksEncryptedContainer(pkg.ora); } catch (_) {}
-  _encDetectMemo.set(key, enc);
-  return enc;
-}
-export async function listSessions() {
-  const ids = await listSessionIds();
-  const out = [];
-  for (const id of ids) {
-    if (id === LEGACY_SLOT) continue;
-    if (isTrashKey(id)) continue;                       // trash 单独列
-    if (id.startsWith(LOCAL_BACKUP_PREFIX)) continue;   // .backup-local/ 隐藏安全网（深模块所有），不进图库
-    const pkg = await getSession(id);
-    if (!pkg) continue;
-    out.push({
-      name: id,
-      updatedAt: pkg.updatedAt || 0,
-      size: (pkg.ora && pkg.ora.size) || 0,
-      thumb: pkg.thumb || null,
-      encrypted: await _detectEncrypted(id, pkg),
-    });
-  }
-  out.sort((a, b) => b.updatedAt - a.updatedAt);
-  return out;
-}
-
+// 本地 session 列举（listSessions / isTrashKey / _detectEncrypted）已删（v415）：它读的 `sessions`
+//   object store **早已没有写入者**（putSession 在 store cutover 后成死码），于是恒返空数组——
+//   四个消费方（图库底栏占用 / uniqueLocalName / 找加密作品解锁 / 复制改名去重）全在静默失效。
+//   现在各走真 SSoT：store.files.usage() / store.files.nameOccupied() / gallery.requestUnlock()
+//   （当前夹）/ gallery 手上的 watchFolder 单夹快照。**不要再引入任何"列全库"的函数**——
+//   列举唯一面 = store.files.watchFolder(当前夹)。
 // 本地 session trash 生命周期（listTrashedSessions / trashSession / restoreSession / purgeFromTrash /
 //   emptyTrash / removeSession / renameLocalSession）已删（v410）——七个零 importer 的死符号；图库回收站
 //   走 store 的 .trash（store.listTrash / restore / purge / emptyTrash），本地不再自管一套 trash。
 // loadCurrentSession / openSession 已退役（v235）：本地读取统一走 store.flow.load（加密容器自动解壳）。
-//   boot 在 app.js、打开在 session-state.openItem。LEGACY_SLOT 常量留 listSessions 过滤用。
+//   boot 在 app.js、打开在 session-state.openItem。
 
 /** 导出 .ora 到本地下载 */
 export async function exportOraDownload(doc: PaintDoc, filename = "未命名.ora") {
