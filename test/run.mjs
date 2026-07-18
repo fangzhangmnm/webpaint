@@ -83,6 +83,7 @@ import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序�
 //   "注册 app-boot 就有别的测试挂"，先怀疑又一条没拆的全局监听，别直接把 app-boot 摘掉了事。
 //   完整方案（子进程 vs 全面 disposer 化）见 docs/reports/20260718-boot-disposability-and-test-infra.html。
 import "./app-boot.test.mjs";        // 组合根 boot smoke：22×initX + 5×Vue mount + reactive flush 全程不抛。
+import "./i18n-localize-dom.test.mjs";  // v421：data-i18n 桥不得冲掉内联 <svg><use> 图标（v419 出过）。
 import "./editor-session-safety.test.mjs";   // v417 止血：开文件事务性 / 保存失败不宣布干净 / create 标记 per-name。全是曾会丢画的路径。
 import "./dial-controls.test.mjs";   // dial 写入 setSize/setOpacity + 键盘 [ ] 段量化调粗。
 import "./current-brush.test.mjs";   // currentBrush 反应式接线 + 纯度。v415 发现它一直**没被注册**=从没跑过。

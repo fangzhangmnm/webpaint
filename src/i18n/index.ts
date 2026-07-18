@@ -88,10 +88,36 @@ export function reconcileLangFromPrefs(): void {
   if (want !== lang()) location.reload();
 }
 
+// 写入 data-i18n 元素的文本，**不碰它的元素子节点**。
+//
+// ⚠ 为什么不能直接 `el.textContent = s`：那会清空**所有**子节点，包括内联的 `<svg><use>` 图标。
+//   v419 把一批菜单项前面加上图标后，boot 期的 localizeDom 当场把它们全冲掉了（v420 逐个把文案/结构
+//   挪开修的——但那只修了当时那几个，机制没堵）。只要有人再给一个带图标的元素加 data-i18n，
+//   图标就会在 boot 时**静默消失**：不报错、不 tsc 失败，只有真机上肉眼能看见。这里从根上堵掉。
+//
+// 策略：纯文本元素走原来的快路径（行为逐字不变）；有元素子节点时就地改**第一个非空白文本节点**，
+//   图标和前后顺序原样保留（`<button><svg/>文字</button>` 和 `<span>文字<svg/></span>` 都对）。
+// export 是为了可测：不变式「写文本但不碰元素子节点」只有直接测它才立得住——
+//   测试垫片的 textContent 是个普通属性、不会清空子节点，透过 localizeDom 测等于没测（旧代码也能过）。
+export function setLocalizedText(el: HTMLElement, s: string): void {
+  if (el.children.length === 0) { el.textContent = s; return; }   // 无元素子节点 → 老路径
+  const texts = Array.from(el.childNodes).filter((n): n is Text => n.nodeType === 3);
+  const target = texts.find((n) => (n.textContent ?? "").trim() !== "");
+  if (!target) {
+    // 只有图标、没有文案 → 补一个文本节点在末尾。
+    //   ⚠ 用 appendChild(createTextNode)，别用 el.append(s)：测试垫片的 append 会忽略字符串参数。
+    el.appendChild(document.createTextNode(s));
+    return;
+  }
+  target.textContent = s;
+  // 清掉其余**非空白**文本节点（重复标签）；空白节点留着，它们是 HTML 排版产生的、无害。
+  for (const n of texts) if (n !== target && (n.textContent ?? "").trim() !== "") n.remove();
+}
+
 // data-i18n 桥：静态 HTML 一次性填充。textContent / title / aria-label / placeholder 四种 attr。
 export function localizeDom(root: ParentNode = document) {
   const k = (s: string | undefined) => s as Key;   // 桥 attr 值是运行时字符串（不受 tsc 检查）；t() 内部对未知 key 兜底
-  root.querySelectorAll<HTMLElement>("[data-i18n]").forEach(el => { if (el.dataset.i18n) el.textContent = t(k(el.dataset.i18n)); });
+  root.querySelectorAll<HTMLElement>("[data-i18n]").forEach(el => { if (el.dataset.i18n) setLocalizedText(el, t(k(el.dataset.i18n))); });
   root.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach(el => { if (el.dataset.i18nTitle) el.title = t(k(el.dataset.i18nTitle)); });
   root.querySelectorAll<HTMLElement>("[data-i18n-aria]").forEach(el => { if (el.dataset.i18nAria) el.setAttribute("aria-label", t(k(el.dataset.i18nAria))); });
   root.querySelectorAll<HTMLInputElement>("[data-i18n-ph]").forEach(el => { if (el.dataset.i18nPh) el.placeholder = t(k(el.dataset.i18nPh)); });
