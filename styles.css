@@ -703,7 +703,6 @@ input[type=range] {
 .gallery-back-btn { display: inline-flex; align-items: center; gap: 6px; }
 .gallery-back-btn svg { width: 18px; height: 18px; flex: none; }
 .layer-clip-chip svg { width: 13px; height: 13px; display: block; }
-.layer-menu-check svg { width: 16px; height: 16px; display: block; margin: 0 auto; }
 
 /* v124 menu-item 带 SVG icon（目前只用于图库）：左对齐 + 间距 */
 .menu-item.menu-item-with-icon { justify-content: flex-start; gap: 10px; }
@@ -1022,7 +1021,8 @@ input[type="range"].color-ramp::-moz-range-thumb {
 /* toggle 行 = [勾选框] [前缀图标] [文字]。前缀图标是 button 的直接子 svg，
    跟 .layer-menu-check 里那个勾选框 svg 分开定尺寸。 */
 .layer-menu-toggle > svg { width: 16px; height: 16px; flex: none; }
-.layer-menu-check { font-size: 14px; line-height: 1; width: 16px; text-align: center; flex: 0 0 auto; }
+/* 开/关状态字顶到右边，跟主菜单的 menuitemcheckbox 排版一致 */
+.layer-menu-toggle .menu-item-state { margin-left: auto; }
 
 /* 通用 in-app sheet input */
 .generic-sheet-input {

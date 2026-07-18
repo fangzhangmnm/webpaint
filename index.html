@@ -285,9 +285,8 @@
   <symbol id="spinner-arc" data-cat="legacy" data-note="纯弧+箭头(叠在 cloud 上转;库里 cloud-busy 是云弧一体,整体转会连云一起转)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 13a3 3 0 0 1 5.5-1.6"/><polyline points="14.5 9.5 14.5 11.4 12.6 11.4"/></symbol>
 
 
-  <!-- ── 以下 5 个是把原本的排版字符（⋯ ← ↘ ☑ ☐）画成了真图形。
+  <!-- ── 以下 3 个是把原本的排版字符（⋯ ← ↘）画成了真图形。
        不用单汉字顶位，因为这几个是全世界通用的图元、语言无关、且形状简单没有误读空间。
-       原本用字符的问题：☑/☐ 这类符号跨平台字形差异大（iOS/Android/桌面各画各的），
        ⋯ 的三个点在不同字体里间距和垂直位置都会跳。画成 SVG 后各端一致。 ── -->
 
   <!-- more — 溢出菜单入口（原 ⋯，全仓 15 处：图层行 / 图库瓦片 / 回收站 / 笔架 / 菜单配置）。 -->
@@ -303,11 +302,6 @@
        Photoshop 的剪贴蒙版指示就是这个「下折再指向右」的折角箭头，画成图形比 ↘ 准确。 -->
   <symbol id="clipping-mask" data-cat="legacy" data-note="剪贴蒙版:折角箭头(原 ↘ 字符;PS 同款下折指向语义)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v8a2 2 0 0 0 2 2h6"/><polyline points="13 12 17 15 13 18"/></symbol>
 
-
-  <!-- checkbox-checked / checkbox-empty — 图层 ⋯ 菜单里的三个开关（原 ☑ / ☐ 字符）。 -->
-  <symbol id="checkbox-checked" data-cat="legacy" data-note="勾选框·选中(原 ☑ 字符,跨平台字形差异大)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><polyline points="8 12.5 11 15.5 16.5 9.5"/></symbol>
-
-  <symbol id="checkbox-empty" data-cat="legacy" data-note="勾选框·未选(原 ☐ 字符,跨平台字形差异大)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/></symbol>
 
 
   <!-- ── visibility-show / visibility-hide：显式覆盖库版本（data-override="1"）──
@@ -1274,6 +1268,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-ed5479fba2f8.mjs"></script>
+    <script type="module" src="./dist/webpaint-d20e77dc958e.mjs"></script>
   </body>
 </html>
