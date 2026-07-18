@@ -41,7 +41,6 @@ export interface EditorRuntimeState {
 export interface DialReactive {
   tool: string;
   color: string;
-  rackVersion: number;
   canDraw: boolean;
 }
 

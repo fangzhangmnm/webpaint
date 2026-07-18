@@ -136,8 +136,8 @@ const _leftDial = () => state.toolStates[rack.getRackToolKey(dialReactive.tool)]
 const leftDial = mountLeftDial(els.leftDialMount, {
   getSize: () => _leftDial().size,
   getOpacity: () => _leftDial().opacity ?? 1.0,
-  getSizeMax: () => { void dialReactive.rackVersion; return rack.findToolBrushPure(_leftDial())?.size?.max || 200; },
-  getBrushName: () => { void dialReactive.rackVersion; return rack.findToolBrushPure(_leftDial())?.name || "—"; },
+  getSizeMax: () => rack.findToolBrushPure(_leftDial())?.size?.max || 200,
+  getBrushName: () => rack.findToolBrushPure(_leftDial())?.name || "—",
   getCanDraw: () => dialReactive.canDraw,
   getZoom: () => board?.viewport?.scale ?? 1,
   onSize: (px) => setSize(px),

@@ -1,7 +1,7 @@
 // 笔架 sheet 的 folder tabs + 笔刷 grid（UI 深化 candidate 1 · 第四个 Vue 子系统）。
 //
 // 取代 app.js 的 _renderRackSheet（命令式重建 folder 按钮 + tile）。数据驱动：folders/tiles/活动高亮
-// 全是 computed（读反应式 dialReactive.rackVersion + rackUi + toolStates → 笔架内容/工具/文件夹/选中变即自动重渲）。
+// 全是 computed（getter 里读 controller 的 shallowRef 镜像 + rackUi + toolStates → 笔架内容/工具/文件夹/选中变即自动重渲）。
 // 各处 _renderRackSheet() 手动刷新调用全删（reactivity 替代）。
 //
 // 边界：sheet head 的动作工具条（导入/导出/刷新/新建/重置/关闭）留 controller 命令式（chrome + 绑 collection）。
@@ -16,7 +16,7 @@ import type { Brush } from "../brush-types.ts";
 
 export interface RackSheetOpts {
   defaultFolder: string;
-  getBrushes(): Brush[];      // 当前工具的笔（读 _brushRack，gated rackVersion）
+  getBrushes(): Brush[];      // 当前工具的笔（读 controller 的反应式镜像）
   getRackEmpty(): boolean;    // 整个笔架空（显「恢复默认」）
   getFolder(): string;        // rackUi.folder
   getActiveId(): string | null;

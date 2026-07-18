@@ -24,7 +24,6 @@ export function initRackBoot(ctx: AppContext) {
   rack.load().then(() => {
     backfillToolStates();
     rack.applyToolState(editMode.current());
-    dialReactive.rackVersion++;
   }).catch((e: unknown) => {
     reportError(new Error("[brush-rack] init failed: " + String(e)), "log");
     setStatus(t("mi.rackPersistFailed"), true);

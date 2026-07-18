@@ -7,12 +7,15 @@
 //   revert=reconcile/reset-builtin/new/delete/rename/move-to-folder）。**手感数值/公式全在 brushes.ts
 //   与 resolved-brush.ts，本类一个数字不碰。**
 //
-// 反应式接线（消费方 currentBrush computed 靠此重算）：
-//   · 任何本地写（编辑保存 / 删除 / 新建落地 / 导入 / resetBuiltin / move）→ bump dialReactive.rackVersion。
-//   · 云端 pull（collection.onChange）→ bump rackVersion + applyToolState（非编辑期）。
-//   collection.entries() 非反应式；rackVersion 是唯一反应式触发（沿用旧设计）。
+// 反应式接线（v415 重做，消费方 currentBrush computed 靠此重算）：
+//   笔架内容的**唯一反应式来源 = _brushesRef / _metaRef 两个 shallowRef**，
+//   而它们的**唯一写入点 = collection.onChange**（本地写和云端写 store 一视同仁，见 collection.ts）。
+//   → 依赖关系就是数据本身，结构上不可能"忘了通知"。
+//
+//   v415 前是手动计数器 dialReactive.rackVersion：12 处 `rackVersion++` + 3 处 `void rackVersion` 建依赖。
+//   漏 bump 一处 = 改了笔但界面/引擎不更新（"功能不响应"级 bug，且 boot-smoke 抓不到）。已全部删除。
 
-import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
+import { reactive, shallowRef } from "../vendor/vue/vue.esm-browser.prod.js";
 import {
   defaultBrushForTool, brushesByTool, findBrush, newBrushId, brushFromJSON,
   makeBrush, builtinBrushes, getAllBrushes, getMeta, metaAppend, metaRemove, metaMove,
@@ -40,7 +43,7 @@ const toolLabel = (tool: string): string => tool === "eraser" ? t("br.toolEraser
 export interface BrushRackDeps {
   collection: Collection;     // store.collection("brush-rack")：持久化 + 云同步唯一入口（红线在库内）
   state: EditorRuntimeState;  // 共享 SSoT（state.toolStates 反应式）
-  dialReactive: DialReactive; // 共享 SSoT（rackVersion bump / tool）
+  dialReactive: DialReactive; // 共享 SSoT（当前 tool）
   editMode: () => EditMode;   // thunk：构造时 editMode 尚未定义
   setStatus: (text: string, persist?: boolean) => void;   // 第二参 = persist（消息是否常驻）
   confirm: (title: string, msg: string) => Promise<boolean>;
@@ -77,16 +80,24 @@ export class BrushRackController {
     this.ui = reactive({ tool: "brush", folder: DEFAULT_FOLDER });
   }
 
-  // 瞬态 rack 视图（给 brushes.ts 的 { brushes } 型 helper 复用）。每次现攒（collection 非反应式，rackVersion 触发重算）。
-  _view(): BrushRackData { return { brushes: getAllBrushes(this.d.collection) }; }
-  _meta(): RackMeta { return getMeta(this.d.collection); }
+  // 笔架内容的反应式镜像。**唯一写入点 = _syncFromCollection（只由 collection.onChange 与 load 调）**。
+  //   读这两个 ref 就自动建立 Vue 依赖 → 不需要任何手动 bump。
+  _brushesRef = shallowRef<Brush[]>([]);
+  _metaRef = shallowRef<RackMeta>({ order: {} } as RackMeta);
+  _syncFromCollection() {
+    this._brushesRef.value = getAllBrushes(this.d.collection);
+    this._metaRef.value = getMeta(this.d.collection);
+  }
+  // 瞬态 rack 视图（给 brushes.ts 的 { brushes } 型 helper 复用）——现在读的是反应式镜像。
+  _view(): BrushRackData { return { brushes: this._brushesRef.value }; }
+  _meta(): RackMeta { return this._metaRef.value; }
   get(): BrushRackData { return this._view(); }
 
   // ---- 预设存储：collection.init（本地 hydrate → 后台 reconcile + 新库 seed）----
   async load(): Promise<BrushRackData> {
     await this.d.collection.init();
+    this._syncFromCollection();   // init 的 hydrate 发生在订阅之前 → 这里手动灌一次首帧
     this.applyToolState(this.d.editMode().current());
-    this.d.dialReactive.rackVersion++;
     return this.get();
   }
   // 事件驱动重拉云端（刷新按钮 / 前台）。
@@ -102,14 +113,15 @@ export class BrushRackController {
   // healing 回写版（显式路径用）
   findToolBrush(ts: ToolDial | null | undefined) {
     if (!ts) return null;
-    const b = resolveRef(getAllBrushes(this.d.collection), { id: ts.activeBrushId, name: ts.activeBrushName }) as Brush | null;
+    const b = resolveRef(this._brushesRef.value, { id: ts.activeBrushId, name: ts.activeBrushName }) as Brush | null;
     if (b) { ts.activeBrushId = b.id; ts.activeBrushName = b.name; }
     return b;
   }
   // 纯查找（currentBrush computed 用：computed 内绝不可写 reactive）
   findToolBrushPure(ts: ToolDial | null | undefined) {
     if (!ts) return null;
-    return resolveRef(getAllBrushes(this.d.collection), { id: ts.activeBrushId, name: ts.activeBrushName }) as Brush | null;
+    // 读镜像 = 建立反应式依赖（currentBrush computed 靠这条重算）。**只读不写**——computed 内绝不可写 reactive。
+    return resolveRef(this._brushesRef.value, { id: ts.activeBrushId, name: ts.activeBrushName }) as Brush | null;
   }
   applyToolState(tool: string) {
     const key = this.getRackToolKey(tool);
@@ -157,7 +169,7 @@ export class BrushRackController {
   async resetBuiltin() {
     const builtins = await builtinBrushes();
     // 批量写：collection 现在每次 setItem 都 fire onChange（本地写也通知）。~60 支笔逐条刷 = 60 次
-    //   applyToolState + 60 次 rackVersion 失效。压住信号，收尾统一刷一次。
+    //   applyToolState + 60 次镜像刷新。压住信号，收尾统一刷一次。
     this._bulkWrite = true;
     try {
       for (const b of builtins) this.d.collection.setItem(b.id, b);
@@ -165,7 +177,7 @@ export class BrushRackController {
       for (const b of builtins) (byFolder[b.folder || DEFAULT_FOLDER] ||= []).push(b.id);
       this.d.collection.setItem(RACK_META_ID, metaPrependBuiltins(this._meta(), byFolder));
     } finally { this._bulkWrite = false; }
-    this.d.dialReactive.rackVersion++;
+    this._syncFromCollection();   // 批量写期间压住了 onChange → 收尾统一刷一次镜像
     this.applyToolState(this.d.editMode().current());
   }
 
@@ -209,7 +221,6 @@ export class BrushRackController {
       } else {
         this.selectBrushPresetForTool(targetTool, draft.id);
       }
-      this.d.dialReactive.rackVersion++;
       this.d.setStatus(t("br.saved", { name: draft.name }));
     }
     this._editingId = null;
@@ -232,7 +243,6 @@ export class BrushRackController {
     const id = this._editingId;
     this.d.collection.deleteItem(id);                                   // null 墓碑（LWW；跨设备传播删除）
     this.d.collection.setItem(RACK_META_ID, metaRemove(this._meta(), id));
-    this.d.dialReactive.rackVersion++;
     this._editingId = null;
     this._editingDraft = null;
     this._settingsUI!.close();
@@ -249,7 +259,6 @@ export class BrushRackController {
     if (!b) return;
     this.d.collection.setItem(id, { ...b, folder });
     this.d.collection.setItem(RACK_META_ID, metaMove(this._meta(), id, folder));
-    this.d.dialReactive.rackVersion++;
   }
 
   // ---- 装配：mount sheet/settings 组件 + 注册 panel + 绑 DOM 事件 + 订阅云变 ----
@@ -260,8 +269,8 @@ export class BrushRackController {
     // rack-sheet Vue 组件
     mountRackSheet(els.mount, {
       defaultFolder: DEFAULT_FOLDER,
-      getBrushes: () => { void this.d.dialReactive.rackVersion; return brushesByTool(this._view(), this.getRackToolKey(this.ui.tool)); },
-      getRackEmpty: () => { void this.d.dialReactive.rackVersion; return getAllBrushes(this.d.collection).length === 0; },
+      getBrushes: () => brushesByTool(this._view(), this.getRackToolKey(this.ui.tool)),
+      getRackEmpty: () => this._brushesRef.value.length === 0,
       getFolder: () => this.ui.folder,
       getActiveId: () => this.d.state.toolStates[this.getRackToolKey(this.ui.tool)]?.activeBrushId ?? null,
       onSelectFolder: (f: string) => { this.ui.folder = f; },
@@ -285,7 +294,6 @@ export class BrushRackController {
     //   ② 只有 .meta 变（纯排序/归夹）→ 活动笔不可能受影响，跳过 applyToolState。
     this.d.collection.onChange((ids: string[]) => {
       if (this._bulkWrite) return;                       // 批量写（resetBuiltin）自己在收尾统一刷一次
-      this.d.dialReactive.rackVersion++;
       const onlyMeta = ids.length > 0 && ids.every((id) => id === RACK_META_ID);
       if (this._editingId == null && !onlyMeta) this.applyToolState(this.d.editMode().current());
     });
@@ -312,7 +320,6 @@ export class BrushRackController {
     if (els.refreshBtn) els.refreshBtn.addEventListener("click", async () => {
       this.d.setStatus(t("br.refreshing"));
       await this.reconcileWithRemote();
-      this.d.dialReactive.rackVersion++;
     });
     if (els.resetBtn) els.resetBtn.addEventListener("click", async () => {
       if (!(await this.d.confirm(t("br.resetRackTitle"), t("br.resetRackMsg")))) return;
@@ -362,8 +369,7 @@ export class BrushRackController {
         b.creation_time = Date.now();
         this.d.collection.setItem(b.id, b);
         this.d.collection.setItem(RACK_META_ID, metaAppend(this._meta(), b.folder || DEFAULT_FOLDER, b.id));
-        this.d.dialReactive.rackVersion++;
-        this.d.setStatus(t("br.imported", { name: b.name }));
+          this.d.setStatus(t("br.imported", { name: b.name }));
       } catch (e) { this.d.setStatus(t("br.importFailed", { error: String((e as { message?: unknown })?.message || e) }), true); }
       document.body.removeChild(inp);
     });

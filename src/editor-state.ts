@@ -61,7 +61,6 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
   const dialReactive: DialReactive = reactive({
     tool: "brush",                 // 镜像 editMode.current()（含 transient）；_syncEditModeUI 同步
     color: state.color,
-    rackVersion: 0,                // 笔架内容改了（编辑保存/重置）bump，让 computed 重算活动预设
     canDraw: true,                 // 镜像 editMode.canDraw()；_syncEditModeUI 同步 → <LeftDial> 滑块 disabled
   });
   // color 读写代理回 dialReactive（app 里 state.color 零改动，背后反应式）。

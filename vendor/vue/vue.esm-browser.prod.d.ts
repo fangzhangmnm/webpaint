@@ -4,6 +4,9 @@
 
 export interface Ref<T> { value: T; }
 export function ref<T>(value: T): Ref<T>;
+// shallowRef：只在 .value **整体替换**时触发（不深追踪内部）。适合「整块换掉的不可变快照」——
+//   如笔架的 Brush[] 镜像：每次 collection 变就整体重算换上，不需要也不该深代理每支笔。
+export function shallowRef<T>(value: T): Ref<T>;
 export function reactive<T extends object>(target: T): T;
 export interface ComputedRef<T> { readonly value: T; }
 export function computed<T>(getter: () => T): ComputedRef<T>;

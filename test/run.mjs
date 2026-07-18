@@ -73,7 +73,13 @@ import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序�
 // document 缓存成 module 级 const（createText 等用它）。boot-smoke 装了 DOM shim 后才 import app.js，
 // 故 Vue 求值时 document 有效（=shim doc）；若让别的 import-Vue 的测试先跑（node 无 document），
 // Vue 缓存 doc=null，boot-smoke 里 Vue mount 即 `null.createTextNode` 炸。current-brush 故排其后。
+// ⚠ test/app-boot.test.mjs **故意不在这里注册**（v415 查明并记录）：
+//   它一直没被注册 = 从来没跑过（不是"排在某处"，是根本没 import）。试着注册后 dial-controls
+//   立刻挂两条——app-boot 会 boot 整个 app.js，装上全局 `wp:adjsize` 监听，于是 dial-controls
+//   派发的键盘事件被**处理两次**（12→14 而非 13）。即测试间的全局状态污染，不是产品 bug。
+//   要救它得先让 app.js 的全局监听可拆卸（或给 boot smoke 独立进程）。攒着 escalate，别硬塞进来。
 import "./dial-controls.test.mjs";   // dial 写入 setSize/setOpacity + 键盘 [ ] 段量化调粗。
+import "./current-brush.test.mjs";   // currentBrush 反应式接线 + 纯度。v415 发现它一直**没被注册**=从没跑过。
 import "./editor-state-restore.test.mjs";   // adoptLoadedDoc 的 toolStates 反序列化下沉（v98 兼容）。
 
 console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");

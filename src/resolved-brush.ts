@@ -132,7 +132,7 @@ export function resolveBrush({
 //
 // currentBrush = Vue computed，把 4 个反应式 SSoT 装配成引擎唯一吃的不可变 ResolvedBrush：
 //   ① 当前工具 dial（toolStates：size/opacity，per-doc reactive）
-//   ② 活动预设（笔架，rackVersion 触发重算）③ 全局 color ④ 全局压感开关
+//   ② 活动预设（笔架：findToolBrushPure 读 controller 的 shallowRef 镜像 → 依赖自动建立）③ 全局 color
 // **手感数学全在 resolveBrush（上方），这里只装配、不碰任何公式/时间常数。**
 // 引擎只读 currentBrush.value（stroke begin 时取，非每 stamp）。
 //
@@ -145,7 +145,6 @@ interface CurrentBrushDeps { state: EditorRuntimeState; dialReactive: DialReacti
 export function makeCurrentBrush({ state, dialReactive, rack }: CurrentBrushDeps) {
   // **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。
   const currentBrush = computed(() => {
-    void dialReactive.rackVersion;   // 依赖笔架版本（编辑/重置预设后重算活动预设字段）
     const ts = state.toolStates[rack.getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
     const preset = rack.findToolBrushPure(ts);   // 无笔架 → null → DEFAULT 兜底
     return resolveBrush({
