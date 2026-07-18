@@ -18,6 +18,9 @@
 //
 // 读写 = **同步内存**（getItem/setItem 不 await）；两侧 value 浅拷贝隔离（app 拿到/传入的对象改动不与信封互相污染）。
 //   但内存 env 在 init() 前为空（getItem 返 default，setItem 抛错）。onChange(cb) 整库 / onChange(id,cb) 绑单 key。
+//   **onChange 对本地写和云端写一视同仁**：本地 setItem/deleteItem 同步 fire（内存已更新，不等 IDB 防抖、
+//   不等云），云端 reconcile 照旧 fire。app 读侧因此完全声明式，且**分不出变更来自本地还是远端**
+//   （网盘模型：你只知道"盘更新了"——刻意不给区分度，免得两条路径各写一套逻辑而漂移）。
 //   init()（编排锁库内，照 file.open）：先 await hydrateLocal（本地 IDB，快）→ 再**后台 fire-and-forget**
 //   reconcile 云端（不 await）→ resolve。boot await init() 拿本地即够；云端后台对齐、onChange 通知。
 //   reconcileWithRemote()：事件驱动（focus/visible/online）重拉+resolve，per-key LWW（同 file.refresh）。
@@ -66,7 +69,7 @@ export interface Collection {
   getEntry(id: string): CollectionEntry | undefined;  // 带 uat 的完整 entry（墓碑 → undefined）
   entries(): CollectionEntry[];                       // 全部 entry（过滤墓碑）
   keys(): string[];                                   // 全部 id（过滤墓碑）
-  onChange(cb: ChangeCb): () => void;                 // 整库：云端 reconcile/refresh 带来值变→通知 changedIds（返退订）
+  onChange(cb: ChangeCb): () => void;                 // 整库：**任何**值变（本地 setItem 同步 fire / 云端 reconcile）→ 通知 changedIds（返退订）
   onChange(id: string, cb: () => void): () => void;   // 单 key：绑某个 key，其值变→通知（返退订）
   flushLocal(): Promise<void>;                        // 仅把内存 env 立即写本地缓存（卸载兜底；无网络）——云推由 reconcileWithRemote 兜底
   isDirty(): boolean;
@@ -104,20 +107,38 @@ export function createCollection(cfg: CollectionConfig): Collection {
   let ready = false;                              // init 后置 true：pre-init 守卫（setItem 抛、getItem 返 default）
   const listeners = new Set<ChangeCb>();
 
-  // ── onChange：云端 reconcile/refresh 带来值变 → 通知订阅者（如 theme 云变热重贴）。──────────
-  //   墓碑（value:null）也计入快照 → 删除会触发 onChange（别台删了本地要跟着移除）。
+  // ── onChange：**任何**值变（本地 setItem / 云端 reconcile）→ 通知订阅者。────────────────────
+  //   本地写同步 fire（内存已即时更新，不等 400ms IDB 防抖、不等云）；远端 reconcile 照旧。
+  //   读侧因此完全声明式，且**分不出本地还是远端**——那正是设计目标（网盘模型：你只知道"盘更新了"）。
+  //   墓碑（value:null）也计入 → 删除同样触发（别台删了本地要跟着移除）。
+  let _firing = false;
+  const _queued: string[] = [];
+  function emit(changed: string[]): void {
+    if (!changed.length || !listeners.size) return;
+    if (_firing) { _queued.push(...changed); return; }   // 重入（listener 里又 setItem）→ 排队合并，绝不递归
+    _firing = true;
+    try {
+      let batch = changed;
+      while (batch.length) {
+        for (const cb of listeners) { try { cb(batch); } catch (e) { reportStoreError(e, "log"); } }
+        batch = _queued.splice(0, _queued.length);
+      }
+    } finally { _firing = false; }
+  }
   const snapshotValues = (): Map<string, string> => {
     const m = new Map<string, string>();
     for (const e of env.items) if (e.id != null) m.set(String(e.id), JSON.stringify(valueOf(e)));
     return m;
   };
+  // 远端路径专用：整表快照 diff（云端合并可能动任意多 key，只能全表比）。
+  //   ⚠ 本地 setItem **不**走这条——它只动一个 id，却要 JSON.stringify 全表；resetBuiltin 连写 ~60 项就是 O(N²)。
   const fireChanged = (before: Map<string, string>): void => {
     if (!listeners.size) return;
     const after = snapshotValues();
     const changed: string[] = [];
     for (const [id, v] of after) if (before.get(id) !== v) changed.push(id);
     for (const [id] of before) if (!after.has(id)) changed.push(id);
-    if (changed.length) for (const cb of listeners) { try { cb(changed); } catch (e) { reportStoreError(e, "log"); } }
+    emit(changed);
   };
 
   // ── 本地缓存（IDB）：透明镜像内存 env（含 uat 的完整 envelope）。──────────────────────
@@ -232,9 +253,13 @@ export function createCollection(cfg: CollectionConfig): Collection {
     if (!ready) throw new Error(`collection(${name}).setItem 在 init() 前调用——设置未就绪`);
     if (id == null) throw new Error("collection.setItem: id 必填");
     if (value === undefined) throw new Error(`collection(${name}).setItem: value 不可为 undefined（删除请用 deleteItem 或传 null 墓碑）`);
+    const prev = env.items.find((e) => e.id === id);
+    const valueChanged = !prev || JSON.stringify(valueOf(prev)) !== JSON.stringify(value);   // 同值重写不惊动订阅者
     const fi: FolderItem = { id, uat: now(), value: shallowCopy(value) };   // 信封 {id, uat, value}；uat 内部盖戳；value 浅拷贝隔离（null=墓碑）
     env = { ...env, items: [...env.items.filter((e) => e.id !== id), fi] };
     scheduleSync();
+    // fire 在 scheduleSync **之后**：listener 若同步调 flushLocal()，此时定时器已挂好，语义一致。
+    if (valueChanged) emit([id]);
   }
 
   function deleteItem(id: string): void {

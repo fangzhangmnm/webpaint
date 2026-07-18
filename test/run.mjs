@@ -7,6 +7,7 @@ import "./substrate.test.mjs";
 import "./editor-session.test.mjs";   // 家族共享模块 editor-session 生命周期编排（mock store+editor）
 import "./folder-merge.test.mjs";
 import "./folder-flow.test.mjs";
+import "./collection.test.mjs";
 import "./brush-rack-migrate.test.mjs";
 import "./engine-registry.test.mjs";
 import "./registry.test.mjs";

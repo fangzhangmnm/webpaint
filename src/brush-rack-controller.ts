@@ -69,6 +69,7 @@ export class BrushRackController {
   ui: { tool: string; folder: string };
   _editingId: string | null = null;
   _editingDraft: Brush | null = null;
+  _bulkWrite = false;                 // 批量 setItem 期间压住 onChange（收尾统一刷一次），见 resetBuiltin
   _settingsUI: ReturnType<typeof mountBrushSettings> | null = null;
 
   constructor(deps: BrushRackDeps) {
@@ -156,10 +157,15 @@ export class BrushRackController {
   //   不删任何用户笔；.meta 里把出厂 id 提到各 folder 最前。取代旧 makeDefaultRack 全量抹除。----
   async resetBuiltin() {
     const builtins = await builtinBrushes();
-    for (const b of builtins) this.d.collection.setItem(b.id, b);
-    const byFolder: Record<string, string[]> = {};
-    for (const b of builtins) (byFolder[b.folder || DEFAULT_FOLDER] ||= []).push(b.id);
-    this.d.collection.setItem(RACK_META_ID, metaPrependBuiltins(this._meta(), byFolder));
+    // 批量写：collection 现在每次 setItem 都 fire onChange（本地写也通知）。~60 支笔逐条刷 = 60 次
+    //   applyToolState + 60 次 rackVersion 失效。压住信号，收尾统一刷一次。
+    this._bulkWrite = true;
+    try {
+      for (const b of builtins) this.d.collection.setItem(b.id, b);
+      const byFolder: Record<string, string[]> = {};
+      for (const b of builtins) (byFolder[b.folder || DEFAULT_FOLDER] ||= []).push(b.id);
+      this.d.collection.setItem(RACK_META_ID, metaPrependBuiltins(this._meta(), byFolder));
+    } finally { this._bulkWrite = false; }
     this.d.dialReactive.rackVersion++;
     this.applyToolState(this.d.editMode().current());
   }
@@ -232,6 +238,9 @@ export class BrushRackController {
     this._editingDraft = null;
     this._settingsUI!.close();
     this.d.els.settings.view.classList.add("hidden");
+    // 删的若正是当前活动笔，toolState 还指着这个死 id。上面两次 setItem 都发生在 _editingId 清空**前**，
+    //   被 onChange 的编辑期守卫挡掉了 → 必须在这里显式补一次自愈，否则笔要到下次别的事件才恢复。
+    this.applyToolState(this.d.editMode().current());
     this.d.setStatus(t("br.deleted"));
   }
 
@@ -269,10 +278,17 @@ export class BrushRackController {
       onExport: () => { if (this._editingDraft) exportBrush(this._editingDraft); },
     });
 
-    // 云端 pull（collection.onChange）→ 刷 sheet/currentBrush + 补活动笔（编辑期不动 toolState，免打扰 draft）。
-    this.d.collection.onChange(() => {
+    // collection.onChange = 笔架的**唯一**变更信号（本地 setItem 与云端 pull 一视同仁，store 刻意不给区分度）。
+    //   → 刷 sheet/currentBrush + 补活动笔。
+    // ⚠ 两个守卫都是**载重**的，不是巧合，别删：
+    //   ① _editingId != null（笔设置编辑中）→ 不碰 toolState，免打扰用户正在改的 draft。
+    //      closeBrushSettings 里 setItem 先发生、_editingId 后清，靠的就是这条挡住重入自打扰。
+    //   ② 只有 .meta 变（纯排序/归夹）→ 活动笔不可能受影响，跳过 applyToolState。
+    this.d.collection.onChange((ids: string[]) => {
+      if (this._bulkWrite) return;                       // 批量写（resetBuiltin）自己在收尾统一刷一次
       this.d.dialReactive.rackVersion++;
-      if (this._editingId == null) this.applyToolState(this.d.editMode().current());
+      const onlyMeta = ids.length > 0 && ids.every((id) => id === RACK_META_ID);
+      if (this._editingId == null && !onlyMeta) this.applyToolState(this.d.editMode().current());
     });
 
     // 注册 exclusive panel（多 tool → 同 panel id 去重，第一个赢）
