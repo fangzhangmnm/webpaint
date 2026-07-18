@@ -64,6 +64,13 @@ describe("app.js 组合根 boot smoke", () => {
       globalThis.setInterval = origSI; globalThis.setTimeout = origST;
       for (const h of intervals) clearInterval(h);
       for (const h of timeouts) clearTimeout(h);
+      // ★ 拆掉 boot 装的全局监听（v417）。dom-shim 是套件级单例、二次 install 是 no-op，所以
+      //   uninstallDomShim() **拆不掉**这些监听——它们会留在共享的 win._listeners 上污染后续测试。
+      //   具体后果：app.ts 的 wp:adjsize 监听留着 → dial-controls 测试派发一次键盘事件被处理两次
+      //   （12→14 而非 13）。这就是本文件长期没被注册进 run.mjs 的原因。
+      //   ⚠ 目前只拆了这一条（app.ts 显式收进 __wpBootTeardown 的）；boot 并非真正可拆卸。
+      for (const off of (globalThis.__wpBootTeardown || [])) { try { off(); } catch { /* 拆卸尽力而为 */ } }
+      globalThis.__wpBootTeardown = [];
       globalThis.OffscreenCanvas = prevOSC;
       uninstallDomShim();
     }

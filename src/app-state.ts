@@ -36,6 +36,12 @@ export function wireAppState(synced: Collection, local: Collection): void { _syn
 export function initAppState(): Promise<void> {
   return Promise.all([_synced?.init() ?? Promise.resolve(), _local?.init() ?? Promise.resolve()]).then(() => undefined);
 }
+// 导航前屏障（v417）：冷字段 setter 只改内存 + 排 400ms 防抖写（collection.ts:169-172）。
+//   页面被关/reload 时定时器随页面死 → currentFile 等于没写 → 下次冷启动开不回上次那张画。
+//   app.ts 在 pagehide / visibilitychange:hidden 调（那两个是移动端唯一可靠的"要走了"信号）。
+export function flushAppState(): Promise<void> {
+  return Promise.all([_synced?.flushLocal() ?? Promise.resolve(), _local?.flushLocal() ?? Promise.resolve()]).then(() => undefined);
+}
 
 // 冷字段直读写助手：未注入前（boot 极早 / 测试）安全返 default / no-op。
 const getC = <V>(c: Collection | undefined, k: AppStateKey): V =>

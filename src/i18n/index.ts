@@ -5,7 +5,7 @@
 //   · data-i18n 是过渡桥（非终点）：静态 index.html 一次性填充；新内容/需动的段走 Vue + t()。
 
 import { S, type Lang } from "./strings.ts";
-import { syncedUserPreference, PREF_DEFAULTS } from "../app-prefs.ts";   // 语言 = 跨设备偏好（synced-user-preference collection）
+import { syncedUserPreference, preferencesReady, PREF_DEFAULTS } from "../app-prefs.ts";   // 语言 = 跨设备偏好（synced-user-preference collection）
 import { readBootSnapshot, writeBootSnapshot } from "../boot-snapshot.ts";   // eval 期读得到的 lang 快照（IDB 异步，见该文件）
 
 export type { Lang } from "./strings.ts";
@@ -60,16 +60,27 @@ export function applyHtmlLang() { document.documentElement.lang = htmlLangFor(la
 
 // （cycleLang 已删 v415：零调用者——语言在设置菜单里显式选，没有"循环切换"的入口。）
 
-export function setLang(l: Lang) {
+// ⚠ async：reload 之前必须**确认字节落了 IDB**。
+//   v417 之前这里是同步的 setItem + 立刻 location.reload() —— setItem 只改内存并排一个 400ms
+//   防抖写（collection.ts:169-172），reload 把定时器连页面一起杀掉，语言**从没进过 IDB**。
+//   于是 reload 后 reconcileLangFromPrefs 读到 null → 连快照一起清 → 再 reload → 弹回系统语言。
+//   观感就是「切了闪一下又回去」。对照组 theme 能用，正因为它写完不 reload。
+export async function setLang(l: Lang): Promise<void> {
   if (!LANGS.includes(l) || l === lang()) return;   // 值没变就早退：别白盖 uat 触发无谓云同步
+  await preferencesReady();                  // hydrate 前 setItem 会抛（collection.ts:253），而设置菜单一 boot 就可点
   syncedUserPreference.setItem("lang", l);   // SSoT：synced-user-preference collection（跨设备）
   writeBootSnapshot("lang", l);              // 先刷快照，再 reload —— 顺序不能反，否则 reload 后 eval 期读回旧值
+  await syncedUserPreference.flushLocal();   // ★ 导航前屏障：不等这一下，上面那行等于没写
   location.reload();     // reload 制
 }
 
 // collection hydrate/reconcile 后对账（app.ts 的 fixup 相调）：先刷快照 → 语言不对就 reload。
 //   触发场景：① 别的设备改了语言、云端 reconcile 拉回来 ② 本机快照丢了（清缓存/隐私模式）而 IDB 还在。
 //   ⚠ 必须先写快照再 reload：reload 后 eval 期只读得到快照，不刷就无限 reload。
+//   ⚠ `real == null → 清快照` 的正确性**依赖 setLang 的导航前屏障**（上面那个 await flushLocal）：
+//     只有当"写了就一定落了盘"成立时，null 才真的等于"用户没选过语言"。屏障没了的话（v417 之前），
+//     null 会混进"写丢了"的情形，这里就会把用户刚选的语言连快照一起抹掉。别把那个 await 优化掉。
+//     反向喂回 collection **不是**选项——boot-snapshot.ts 纪律 #1：快照单向只写，绝不回灌 SSoT。
 export function reconcileLangFromPrefs(): void {
   const real = langFromPrefs();
   writeBootSnapshot("lang", real);          // null（跟系统）→ 清快照

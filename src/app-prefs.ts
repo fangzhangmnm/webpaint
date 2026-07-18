@@ -33,8 +33,18 @@ let _synced: Collection | undefined;
 export function wirePreferences(local: Collection, synced: Collection): void { _local = local; _synced = synced; }
 
 // boot 门：hydrate 两个 collection（各自 init 内部先 hydrate 本地再后台对齐云端）。快、离线 OK。
+//   **memoized**：init() 不可重入（seedInit / ready 翻转），而 preferencesReady() 需要同一个 promise。
+let _ready: Promise<void> | undefined;
 export function initPreferences(): Promise<void> {
-  return Promise.all([_local?.init() ?? Promise.resolve(), _synced?.init() ?? Promise.resolve()]).then(() => undefined);
+  return (_ready ??= Promise.all([_local?.init() ?? Promise.resolve(), _synced?.init() ?? Promise.resolve()]).then(() => undefined));
+}
+// 冷路径写入方（setLang 等）用：collection 未 hydrate 时 setItem 会抛（collection.ts:253），
+//   而设置菜单一 boot 就可点。await 这个再写。未 init（测试/极早）→ 立即 resolve，setItem 照常抛（是想要的）。
+export function preferencesReady(): Promise<void> { return _ready ?? Promise.resolve(); }
+// 导航前屏障（v417）：两个 preference collection 的内存 env 立即落本地缓存。
+//   见下面 face().flushLocal 的注释——凡"写完就走"的路径都得先过这一关。
+export function flushPreferences(): Promise<void> {
+  return Promise.all([_local?.flushLocal() ?? Promise.resolve(), _synced?.flushLocal() ?? Promise.resolve()]).then(() => undefined);
 }
 // 事件驱动（focus/visible/online）重拉云端 + resolve（per-key LWW）。app 在既有 foreground/online 钩子调。
 export function refreshPreferences(): Promise<void> {
@@ -47,6 +57,10 @@ function face(get: () => Collection | undefined) {
     getItem<V = unknown>(id: PrefKey, def: V): V { const c = get(); return c ? c.getItem<V>(id, def) as V : def; },
     setItem(id: PrefKey, value: unknown): void { get()?.setItem(id, value); },
     onChange(cb: (changedIds: string[]) => void): () => void { return get()?.onChange(cb) ?? (() => undefined); },
+    // 导航前屏障：setItem 只改内存 + 排 400ms 防抖写（collection.ts:169-172）。
+    //   凡"写完就 reload / 就关页"的调用方**必须** await 这个，否则定时器随页面一起死、字节从没进 IDB。
+    //   （v417：语言切换无效的根因就是这个——setLang 写完立刻 location.reload()。theme 不 reload 所以没事。）
+    flushLocal(): Promise<void> { return get()?.flushLocal() ?? Promise.resolve(); },
   };
 }
 // 设备本地偏好（color-theme）。

@@ -68,9 +68,9 @@ import { initRackBoot, bootRestoreSession } from "./boot.ts";   // 启动编排�
 import "./plugins/index.ts";    // 触发 HSB / ColorBalance / Curves / SharpenBlur 自注册
 // candidate 2：导出格式 = 注册表插件（含第一方 ora/psd/png/jpg 自注册）
 import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, brushRackCollection, store as _store } from "./app-store.ts";   // cut-over：cloud/auth/graph 全走 lib
-import { initPreferences, refreshPreferences } from "./app-prefs.ts";   // boot 门 + 前台/online 拉云对齐 user-preference（lang/theme/手势）
+import { initPreferences, refreshPreferences, flushPreferences } from "./app-prefs.ts";   // boot 门 + 前台/online 拉云对齐 user-preference（lang/theme/手势）+ 导航前屏障
 import { hydrateSmoothFromPrefs } from "./smooth-config.ts";   // boot 门后合并 synced 平滑调参进 SMOOTH
-import { initAppState, appState } from "./app-state.ts";                // boot 门 + 前台/online 拉云对齐 app-state（current-dir/file/blenderUrl）
+import { initAppState, appState, flushAppState } from "./app-state.ts";  // boot 门 + 前台/online 拉云对齐 app-state（current-dir/file/blenderUrl）+ 导航前屏障
 
 // 前台（focus/visible）/ online 时把 4 个 settings/state collection 拉云对齐（per-key LWW；离线/local-only 内部 no-op）。
 const pullSettingsAndState = (): void => { void refreshPreferences(); void appState.pullFromPersistent(); };
@@ -146,7 +146,14 @@ const leftDial = mountLeftDial(els.leftDialMount, {
   onBrushLongpress: () => { const b = rack.findToolBrush(_leftDial()); if (b) { closeExclusive(); rack.openBrushSettings(b.id); } },
 });
 // 键盘 [ ] 调粗接线（需 board/leftDial，已建好）。
-bindSizeKeyboard({ board, leftDial });
+// disposer 收进 __wpBootTeardown（v417）：真 app 永不调（监听活到页面结束）；**测试**要靠它拆。
+//   app.ts 是纯 top-level 副作用模块、ESM 缓存下只能 import 一次，boot smoke（test/app-boot.test.mjs）
+//   跑完若不拆掉这条 window 监听，后面的 dial-controls 测试派发 wp:adjsize 就会被处理两次（12→14 而非 13）
+//   —— 这正是那个测试一直没被注册的原因（见 test/run.mjs 的说明）。
+//   ⚠ 这只是**止血**：全 app 还有 20 个模块 57 处 addEventListener 没有 disposer，boot 并非真正可拆卸。
+//   完整方案（子进程跑 boot smoke vs 全面 disposer 化）见 docs/reports/20260718-boot-disposability-and-test-infra.html。
+const _disposeSizeKeyboard = bindSizeKeyboard({ board, leftDial });
+(globalThis as { __wpBootTeardown?: Array<() => void> }).__wpBootTeardown = [_disposeSizeKeyboard];
 
 // 当前笔（ResolvedBrush）派生 + 引擎桥 = resolved-brush.ts makeCurrentBrush，input 前构造（见下）。手感数学全在 resolveBrush。
 
@@ -393,6 +400,22 @@ window.addEventListener("online", async () => {
   if (isSignedIn() && session.name) _store.file(sessionFileName(session.name), { isZip: true, mode: "existing" }).pullIfClean().catch(() => {});   // 回线：事件驱动干净快进（freshness 进库；无 idle-lock）。边界转全名。
 });
 window.addEventListener("offline", () => { updateCloudAuthUI(); });
+
+// ============ 设置/状态的导航前屏障（v417）============
+// 4 个 collection 的 setItem 只改内存 + 排一个 400ms 防抖本地写（collection.ts:169-172）。
+//   页面被关/被 reload 时那个定时器**随页面一起死**，最近 400ms 内的设置写入就此蒸发。
+//   v417 之前这里什么都没有，症状是「语言切换无效」（setLang 写完立刻 reload，见 i18n/index.ts）
+//   和「上次打开的画偶尔记不住」（currentFile 同一个防抖窗）。
+//   文档有自己的落盘（editor-session.start 的 visibilitychange/pagehide），这里补的是**设置侧**。
+// 为什么是这两个事件：pagehide 是移动端唯一可靠的"页面要走了"；visibilitychange:hidden 覆盖切后台
+//   被系统回收的情况。beforeunload 在 iOS PWA 上不可靠，故不依赖它（topbar-menu 那个只管挽留对话框）。
+// 不 await：卸载期没有时间预算，写请求发出去就行（IDB 事务已排队，浏览器会让它跑完）。
+const flushSettingsNow = (): void => {
+  void flushPreferences();
+  void flushAppState();
+};
+window.addEventListener("pagehide", flushSettingsNow);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSettingsNow(); });
 
 // 前台新鲜度活动监听 + idle tick 接线已切到 cloud-freshness.ts initCloudFreshness。
 //

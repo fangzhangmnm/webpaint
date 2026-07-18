@@ -76,13 +76,24 @@ function _emitAuth(): void {
   try { if (typeof window !== "undefined") window.dispatchEvent(new Event("wp:auth-changed")); } catch (_) {}
 }
 
+// ⚠ **必须带超时**（v417）：`onerror` 只在请求明确失败时触发。请求**挂着**（半开连接 / 强制门户）
+//   时 onload 和 onerror 都不来，于是这个 promise 永不 settle —— 下面的重试永远不会发生、也永远
+//   不会放弃，而动态插入的 script 仍然吊着 window 的 load 事件 → 浏览器标签页一直转圈。
+const SCRIPT_LOAD_TIMEOUT_MS = 8000;
+
 function loadScript(url: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const s = document.createElement("script");
+    let done = false;
+    const settle = (fn: () => void) => { if (done) return; done = true; clearTimeout(timer); fn(); };
+    const timer = setTimeout(() => settle(() => {
+      s.remove();   // 摘掉挂死的 script，别继续吊着 load 事件
+      reject(new Error(`timeout loading ${url}`));
+    }), SCRIPT_LOAD_TIMEOUT_MS);
     s.src = url;
     s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error(`failed to load ${url}`));
+    s.onload = () => settle(resolve);
+    s.onerror = () => settle(() => reject(new Error(`failed to load ${url}`)));
     document.head.appendChild(s);
   });
 }
@@ -156,7 +167,18 @@ export async function initAuth(): Promise<AuthState> {
 }
 
 // 后台 silent token 探测：成功 → 设 activeAccount + 广播。绝不阻塞 init / sign-in（iOS iframe 卡不要紧）。
+// ⚠ 推迟到 window `load` 之后（v417）：acquireTokenSilent 内部开一个隐藏 iframe，而**同文档 iframe 在
+//   load 事件之前创建会一直吊着 load 事件**。上一行注释已经写明这个 iframe 在 iOS 上会卡住——卡住的
+//   iframe + 未触发的 load = 浏览器标签页永远转圈，即使 app 本身已经完全可用（这正是区分本症状的判据：
+//   转圈但能操作 = 这里；整页空白 = SW/head 脚本那条）。探测本就是纯后台的锦上添花，晚几百毫秒无损。
+function _afterWindowLoad(fn: () => void): void {
+  const w = globalThis as { document?: { readyState?: string }; addEventListener?: typeof addEventListener };
+  if (!w.addEventListener || w.document?.readyState === "complete") { fn(); return; }
+  w.addEventListener("load", () => fn(), { once: true });
+}
+
 async function _probeSilent(account: Account): Promise<void> {
+  await new Promise<void>((r) => _afterWindowLoad(r));
   try {
     await pca.acquireTokenSilent({ scopes: SCOPES, account });
     pca.setActiveAccount(account);

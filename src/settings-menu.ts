@@ -14,6 +14,7 @@ import { t, lang, setLang, LANGS, LANG_NAME, type Key, type Lang } from "./i18n/
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
 import { positionPopup } from "./anchored-popup.ts";
+import { reportError } from "./error-badge.ts";   // 全 app 唯一错误汇拢点（CLAUDE.md）
 import type { AppContext } from "./app-context.ts";
 
 // KEYBOARD_SHORTCUTS 元素（input.js 未类型化 → 描述渲染用到的字段）。
@@ -178,7 +179,14 @@ export function initSettingsMenu(ctx: AppContext) {
     // endonym 是静态语言名（中文/English/日本語/toki pona），非用户数据 → innerHTML 安全。
     menuLanguageSelect.innerHTML = LANGS.map((l) =>
       `<option value="${l}"${l === lang() ? " selected" : ""}>${LANG_NAME[l]}</option>`).join("");
-    menuLanguageSelect.addEventListener("change", () => setLang(menuLanguageSelect.value as Lang));   // setLang 内部 reload
+    // setLang 是 async（要等 IDB 落盘再 reload，见 i18n/index.ts）——失败必须 surface，不能让下拉框
+    //   停在新值上却什么都没发生（那就是 UI 谎报成功）。成功路径不会走到 catch：reload 了。
+    menuLanguageSelect.addEventListener("change", () => {
+      void setLang(menuLanguageSelect.value as Lang).catch((e) => {
+        menuLanguageSelect.value = lang();   // 回滚显示，别让 UI 显示一个没生效的语言
+        reportError(e);
+      });
+    });
   }
   // v100：删「检测更新」menu (实测在 iPad PWA 上不可靠，user：「检测更新功能没用」)。
   // 强制更新一律走「强制清缓存重启」（menuForcePwaReset）— 详 docs/20260526-pwa-update-detection.md。

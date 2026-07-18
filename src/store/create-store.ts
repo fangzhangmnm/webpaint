@@ -528,7 +528,8 @@ export function createStore(config: StoreConfig) {
         await migrationReady;
         if (!_createChecked) {                                   // mode="new" 首存护栏：撞名不覆盖（本地/在线云端任一占用即抛）
           _createChecked = true;
-          if (await nameOccupied(name)) throw new CloudNameCollisionError(name);
+          const where = await nameOccupied(name);                // v417：把 where 带进错误——本地占用别谎称"云端同名"
+          if (where) throw new CloudNameCollisionError(name, where);
         }
         head.recordEdit(name);                                   // 同步标脏：offload 的 isDirty 守卫立即可见（防驱逐吃未推字节）
         pendingGone.clear(name);                                 // 编辑取消 candidate-gone：grace 内被编辑 → 立即当正常 dirty 文件处理（不等下轮 reconcile）

@@ -74,11 +74,16 @@ import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序�
 // document 缓存成 module 级 const（createText 等用它）。boot-smoke 装了 DOM shim 后才 import app.js，
 // 故 Vue 求值时 document 有效（=shim doc）；若让别的 import-Vue 的测试先跑（node 无 document），
 // Vue 缓存 doc=null，boot-smoke 里 Vue mount 即 `null.createTextNode` 炸。current-brush 故排其后。
-// ⚠ test/app-boot.test.mjs **故意不在这里注册**（v415 查明并记录）：
-//   它一直没被注册 = 从来没跑过（不是"排在某处"，是根本没 import）。试着注册后 dial-controls
-//   立刻挂两条——app-boot 会 boot 整个 app.js，装上全局 `wp:adjsize` 监听，于是 dial-controls
-//   派发的键盘事件被**处理两次**（12→14 而非 13）。即测试间的全局状态污染，不是产品 bug。
-//   要救它得先让 app.js 的全局监听可拆卸（或给 boot smoke 独立进程）。攒着 escalate，别硬塞进来。
+// app-boot 于 v417 **重新注册**（v415 查明它从没跑过）。当时的阻塞：boot 装的全局 `wp:adjsize` 监听
+//   拆不掉 → dial-controls 派发的键盘事件被处理两次（12→14 而非 13）。dom-shim 是套件级单例、二次
+//   install 是 no-op，所以 uninstallDomShim 救不了。
+//   止血修法：app.ts 把 bindSizeKeyboard 的 disposer 收进 globalThis.__wpBootTeardown，
+//   app-boot.test.mjs 的 finally 里调掉。它**必须排在 dial-controls 之前**（上面 Vue 求值顺序那条约束）。
+//   ⚠ 这不等于 boot 可拆卸：全 app 还有 20 个模块 57 处 addEventListener 没有 disposer。将来若又出现
+//   "注册 app-boot 就有别的测试挂"，先怀疑又一条没拆的全局监听，别直接把 app-boot 摘掉了事。
+//   完整方案（子进程 vs 全面 disposer 化）见 docs/reports/20260718-boot-disposability-and-test-infra.html。
+import "./app-boot.test.mjs";        // 组合根 boot smoke：22×initX + 5×Vue mount + reactive flush 全程不抛。
+import "./editor-session-safety.test.mjs";   // v417 止血：开文件事务性 / 保存失败不宣布干净 / create 标记 per-name。全是曾会丢画的路径。
 import "./dial-controls.test.mjs";   // dial 写入 setSize/setOpacity + 键盘 [ ] 段量化调粗。
 import "./current-brush.test.mjs";   // currentBrush 反应式接线 + 纯度。v415 发现它一直**没被注册**=从没跑过。
 import "./editor-state-restore.test.mjs";   // adoptLoadedDoc 的 toolStates 反序列化下沉（v98 兼容）。

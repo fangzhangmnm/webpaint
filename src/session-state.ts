@@ -103,7 +103,7 @@ function resetEditorState() {
 
 // desk apply-on-load（stage5）：editorState.Unserialize/reset 后，把面板/视口等**回灌到 UI**。
 //   各面板模块（color/layers/ref/blender panel）在 init 里监听 wp:applyEditorState，读 editorState.<panel>
-//   开/关/定位自己（**只读 editorState + 裸 DOM 操作，不回写 editorState → 不 mark workspaceDirty**）。
+//   开/关/定位自己（**只读 editorState + 裸 DOM 操作，不回写 editorState**）。
 function applyEditorStateToUI(): void { window.dispatchEvent(new CustomEvent("wp:applyEditorState")); }
 function restoreEditorStateFromOra(loaded: LoadedDoc) {
   const ws = loaded?._webpaintState;
@@ -421,7 +421,11 @@ async function openItem(item: GalleryItem) {
     if (await _file(item.name).isEncrypted()) {
       if (!(await ensureUnlocked(item.name))) { setStatus(t("ss.notOpenedNeedPasswordCancelled"), true); return; }
     }
-    await es.open(toFull(item.name));   // file.open：load + freshness + 冲突 surface + 崩溃恢复；返 null（锁定/缺失）→ adopt 跳过。边界转全名。
+    // ★ 返回值**必须**看（v417 修，优先级 1 = OneDrive 不丢画）：false = 字节没装进来
+    //   （离线纯云端 / 文件锁定 / 本地副本没了）。旧版把它扔了，于是画布上还是**上一张画**、身份却换成了
+    //   新名字、状态栏还报「已打开」——下次 autosave 就把上一张画的像素写进新身份，退出时推上 OneDrive
+    //   覆盖掉目标那张画。es.open 现在失败即不改自身 _name，这里也必须不改活动名、留在图库。
+    if (!(await es.open(toFull(item.name)))) { setStatus(t("ss.openFailed", { error: t("mi.lastNotFound", { name: item.name }) }), true); return; }
     _activeSessionName = item.name; setCurrentSessionName(item.name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     void _captureCheckpoint(item.name, "gallery-open");
     setGalleryOpen(false); setStatus(t("ss.opened", { name: item.name }));
@@ -446,10 +450,19 @@ async function pushItem(item: GalleryItem) {
 // ---- 卸载本地副本（offload：清 shadow；非法=唯一副本→store 抛 OffloadIllegalError→banner）----
 async function unloadItem(item: GalleryItem) {
   const isActive = item.name === _activeSessionName;
+  // ⚠ 顺序（v417 修）：**先退出画布（落盘+推云），再 offload**。反过来的后果是数据安全问题，不只是 badge 错：
+  //   store 的 head dirty（head.isDirty，落盘才置）和 es 的**内容脏**（wp:histchange 驱动）是两个不同的东西
+  //   —— 注意这里说的不是 desk/workspaceDirty，那个概念 v409 已撤销（editor-state.ts:117）。用户画了几笔但还没
+  //   触发 autosave 时，head 仍是 clean —— offload 的「dirty 不驱逐」守卫看不见内存里的未保存编辑，于是
+  //   一路放行把本地副本 hardDelete 掉。紧接着旧代码才调 exitCanvasToGallery，退出 flush 又把 doc 写回本地
+  //   并 recordEdit 重新标脏；而 head.forget 刚清空谱系 → 这次 push 是 no-base → 409 → CloudNameCollisionError
+  //   被 create-store 吞成 banner → dirty 永远清不掉 → item 钉死在「待推」而不是「云端 only」。
+  //   先退出后 offload：head 此时才真实反映"还有没有未推字节"，守卫就能正常拦住（抛 OffloadIllegalError）。
+  // ⚠ exitCanvasToGallery 必须在 withBusy **之外**调：它内部可能弹「重试/丢弃」sheet，而交互输入永不在 busy 内。
+  if (isActive) await exitCanvasToGallery();
   await withBusy(t("ss.unloadingBusy", { name: item.name }), async () => {
     try {
       await _file(item.name).offload();
-      if (isActive) await exitCanvasToGallery();
       setStatus(t("ss.unloaded", { name: item.name }));
       gallery.refresh();
     } catch (err) { setStatus(t("ss.unloadFailed", { error: errMsg(err) })); }

@@ -93,7 +93,13 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
   }
 
   const fileOf = (name: string) => store.file(name, { isZip, mode: "existing" });   // open/rename/删：已建身份
-  let _createNext = false;   // adopted({create:true})（新建画布/import）→ 下一次 persist 用 mode:"new"（撞名不覆盖），首存成功即转 existing
+  // adopted({create:true})（新建画布/import）→ 该身份的**首存**用 mode:"new"（撞名不覆盖），首存成功即转 existing。
+  // ⚠ **per-name，不是会话级布尔**（v417 修）：旧版是 `let _createNext = false`，只在 save() **resolve** 后
+  //   才复位，且 open() 从不复位它。于是任意一次 save 抛异常（比如导入一个重名 .ora）就把它永久钉在 true
+  //   直到关标签页——之后**每个文件的每次保存**都走 mode:"new" → create-store 的 nameOccupied 先查本地 →
+  //   刚打开的文件本地当然有 → 抛 CloudNameCollisionError（文案还说"云端同名"）。自我延续：让 flag 卡住的
+  //   那个抛错，本身就是 flag 造成的。绑到具体身份上，跨文档泄漏就不可表示了。
+  let _createFor: string | null = null;
 
   // tryPush=false（flushLocal/autosave）：内存脏才动。tryPush=true（flushAndPush/**退出**）：内存脏 **或** push-pending 就动
   //   （= autosave 已把内容落本地、内存不脏但还没推 → 退出仍要推，否则本次编辑只在本地）。
@@ -104,14 +110,25 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     const need = force || (tryPush ? (_dirty || _pushPending) : _dirty);
     if (!_name || !need || _saving) return;
     _saving = true;
+    // ★ 失败回滚用（v417）：下面会**先**乐观清脏、**再** await save()。save() 抛异常时若不还原，
+    //   本次编辑就在内存里被宣布"已落盘"而实际一个字节都没写 —— badge 画干净、autosave 看 need=false
+    //   永不重试、退出时那个专为保存失败设计的「重试/丢弃」循环（session-state 的 while (es.isDirty())）
+    //   也被一并解除武装。那是 K2 红线（绝不无条件宣布干净）破在执行它的模块下面一层。
+    const wasDirty = _dirty, wasPushPending = _pushPending;
     try {
       const { bytes, peek } = await editor.encode();
       _dirty = false;                              // 清内存脏：encode 已取快照；期间再改会重新置脏（下轮 autosave 收）
       if (tryPush) _pushPending = false;           // 乐观清 push-pending（push 失败留 sync-dirty，store 内部 queue 补推）
       // 新建画布/import 首存 → mode:"new"（撞名不静默覆盖，抛 CloudNameCollisionError；saveNow 已 try/catch surface）；成功即转 existing（后续 autosave = 编辑）。
-      const mode = _createNext ? "new" : "existing";
+      const mode = _createFor === _name ? "new" : "existing";
       await store.file(_name, { isZip, mode }).save(bytes, { tryPush, hint: peek != null ? { peek } : undefined });
-      _createNext = false;
+      if (_createFor === _name) _createFor = null;   // 首存成功 → 这个身份已建，后续都是编辑
+    } catch (e) {
+      // 还原**入场时的真实状态**（不是无脑置脏）：本来脏就继续脏（工作没丢、重试武装着）；
+      //   本来干净（force save 一个未改动的 doc）就保持干净，别造一个假的脏 badge。
+      //   store.save() 内部已吞掉 push 失败（只 reportError），所以能抛到这里的基本都是"本地也没写成"。
+      _dirty = wasDirty; _pushPending = wasPushPending;
+      throw e;
     } finally {
       _saving = false;
     }
@@ -131,17 +148,28 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
       if (_name && _name !== name) await persist(pushOn.has("exit"));   // 切 doc 前先存旧的（退出语义）
       wireOnChange();
       const blob = await fileOf(name).open();      // open 内含 freshness / 冲突 surface（store 的 ui）/ 崩溃恢复
-      if (blob) await editor.adopt(blob);
+      // ★ 开一个身份是**事务性**的：没真的装入字节，会话就绝不指向它（v417 修，优先级 1 = OneDrive 不丢画）。
+      //   旧版无条件 `_name = name`，于是 blob==null（离线纯云端 / 文件锁定 / 本地字节没了）时：
+      //     · 画布上还是**上一张画**，身份却已经换成新名字 → 下次 autosave 把上一张画的像素写进新身份
+      //       → 退出时 pushOn:["exit"] 推上 OneDrive，覆盖掉目标那张画。
+      //     · boot 失败路径更隐蔽：boot.ts 的 session.setName(null) 只清 app 层的 _activeSessionName，
+      //       es._name 还留着 X.ora → 用户在空白画布上画一笔 → autosave 把空白覆盖到 X.ora。
+      //   `session.ts:48-52` 记着 AtlasMaker 0.7.2 就是这么吃掉一个加密文件的：**app 层的幽灵路径守卫
+      //   本身是对的**，它是被这里私留的第二份名字绕过去的。
+      //   失败时**保持原有 _name/_dirty 不动**（不是清成 null）：画布上仍是旧文档，它就该继续存回自己的身份。
+      if (!blob) return false;                     // false = 文件缺失/锁定，doc 未装入（caller 据此回图库、别改活动名）
+      await editor.adopt(blob);
       _name = name;
       _dirty = false; _pushPending = false;        // 刚 adopt = 干净（本会话未编辑；desk 由 Unserialize 载入）
-      return blob != null;                          // false = 文件缺失/锁定，doc 未装入（boot 据此回图库）
+      if (_createFor === name) _createFor = null;  // 这个名字已能从 store 打开 → 身份已建，不该再走 mode:"new"
+      return true;
     },
 
     adopted(name: string, opts?: { create?: boolean }): void {   // new-doc/import：编辑器内容由 app 装入（非 store.open）→ 当前 + 脏
       wireOnChange();
       _name = name;
       _dirty = true; _pushPending = true;          // 新内容未落盘/未推；desk=默认（reset 过）
-      _createNext = !!opts?.create;                // 新建画布/import → 首存 mode:"new"（撞名不覆盖）；纯 adopt(revert/切名) 不设 = existing
+      _createFor = opts?.create ? name : null;     // 新建画布/import → **该身份**首存 mode:"new"（撞名不覆盖）；纯 adopt(revert/切名) 不设 = existing
     },
 
     markDirty(): void { _dirty = true; _pushPending = true; },   // app 驱动内容变化（onChange 之外）→ 标脏

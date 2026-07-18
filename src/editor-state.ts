@@ -152,7 +152,7 @@ const S = { g: freshGroups() };       // mutable holder（reset 时整份换，�
 
 // ── 反应式引擎绑定（stage5）：brushTool(size/opacity/activeBrushId/color) + colorPicker.layerMode 是引擎**每笔读**的
 //   反应式态。editorState 作 SSoT 接口，底层存储绑到 createEditorState 的 reactive state —— 引擎一行不改、
-//   Vue 反应式不断（改 editorState.brushTool.size 直接写 reactive → currentBrush 重算 + workspaceDirty）。
+//   Vue 反应式不断（改 editorState.brushTool.size 直接写 reactive → currentBrush 重算）。
 //   未绑定（pre-boot / node 测）→ 回落 S.g 纯值。
 interface EngineBind {
   getSize(): number; setSize(v: number): void;

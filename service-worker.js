@@ -114,10 +114,26 @@ async function cacheFirst(req) {
 }
 
 // dev：network-first——在线永远拿最新（「改完即见」/强制更新不变），离线才回退缓存（崩溃后能离线重开）。
+//
+// ⚠ **必须带超时**（v417）：`fetch` 只在连接被明确拒绝时才 reject。半开 TCP / 强制门户 / 蜂窝切换
+//   下它会**永远挂着**，而 respondWith 拿到的就是一个永不 settle 的 promise —— 浏览器标签页
+//   就一直转圈（不是 app 内的加载指示器，是页面本身没加载完）。下面那个 catch 里的离线回退
+//   在没有超时的情况下**永远到不了**：我们从来没离开过 try。
+//   Ctrl+Shift+R 尤其容易撞上：硬刷新绕过缓存重取 service-worker.js → 每次都装一个新 SW →
+//   skipWaiting + clients.claim 主动接管那个还在加载中的页面 → 它剩下的子资源全部转进这里。
+// 超过就当离线：宁可给缓存的旧版，也不让页面吊死。
+// self.__NETWORK_FIRST_TIMEOUT_MS 是**测试 seam**（test/sw-strategy.test.mjs 调成几十 ms，否则每跑一次套件等 6 秒）；
+//   prod 里没人设它 → 恒为 6000。
+const NETWORK_FIRST_TIMEOUT_MS = self.__NETWORK_FIRST_TIMEOUT_MS ?? 6000;
+
 async function networkFirst(req) {
   const cache = await caches.open(CACHE_NAME);
   try {
-    const resp = await fetch(req);
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), NETWORK_FIRST_TIMEOUT_MS);
+    let resp;
+    try { resp = await fetch(req, { signal: ac.signal }); }
+    finally { clearTimeout(timer); }
     if (resp && resp.ok) cache.put(req, resp.clone()).catch(() => {});   // 顺手刷缓存，供下次离线回退
     return resp;
   } catch {

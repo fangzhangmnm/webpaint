@@ -54,8 +54,12 @@
     <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon-180.png" />
     <link rel="stylesheet" href="./styles.css" />
-    <!-- zip.js UMD bundle：自挂 window.zip。必须在 module bundle 之前。 -->
-    <script src="./vendor/zip-js/zip-full.min.js"></script>
+    <!-- zip.js UMD bundle：自挂 window.zip。必须在 module bundle 之前。
+         defer（v417）：原来是 parser-blocking 的，硬刷新时 SW 被绕过 → 直奔网络 → 网络一卡整个
+         文档解析就停住（浏览器标签页转圈）。defer 后它与下面的 type=module bundle 同属延迟脚本、
+         按文档顺序执行（本行在 bundle 之前），顺序保持不变；且 src/zip.ts 的 Z() 是**首次用到才读**
+         window.zip（非模块 eval 期），双保险。 -->
+    <script defer src="./vendor/zip-js/zip-full.min.js"></script>
   </head>
   <body>
     <canvas id="board" class="board" aria-label="paint canvas"></canvas>

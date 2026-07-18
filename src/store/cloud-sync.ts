@@ -26,12 +26,20 @@ export class CloudConflictError extends Error {
 // 新建/无基准的 push 撞上云端**已存在的同名异文件**（两设备各建同名）。
 // ≠ CloudConflictError（那是「同一文件版本分叉」走 keep/pull/branch）。这里是「两个不同文件抢同一个名」，
 // **绝不覆盖**（否则静默吃掉别人的作品 = 数据丢失）→ caller 留本地 + 提示改名。
+// `where` = 占用是在哪一侧发现的（v417）。旧版文案硬编码"云端已有同名"，但 mode:"new" 的首存护栏
+//   走的是 nameOccupied()，它**先查本地**——本地撞名照样报"云端同名"，而云端可能根本没这个文件。
+//   这条假线索直接把 v417 那次排查引向了错误的方向（人去翻 OneDrive，那里干干净净）。诊断要说实话。
+export type NameCollisionWhere = "local" | "cloud";
 export class CloudNameCollisionError extends Error {
   sessionName: string;
-  constructor(sessionName: string) {
-    super(`云端已有同名「${sessionName}」（不同文件）`);
+  where: NameCollisionWhere;
+  constructor(sessionName: string, where: NameCollisionWhere = "cloud") {
+    super(where === "local"
+      ? `本地已有同名「${sessionName}」（不同文件）`
+      : `云端已有同名「${sessionName}」（不同文件）`);
     this.name = "CloudNameCollisionError";
     this.sessionName = sessionName;
+    this.where = where;
   }
 }
 
