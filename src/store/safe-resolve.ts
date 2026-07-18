@@ -31,11 +31,16 @@ export interface SafeResolveCfg {
   looksEncrypted?: (bytes: Blob | Bytes) => Promise<boolean>;  // 是否加密容器（weakOverride 扩展名 + 锁定时退验封套）
 }
 
+// 化解冲突的终态（联合类型，非裸 string）：resolved=已化解 · unresolved=没化解（字节仍在 .backup）· cancelled=用户取消（留 dirty）
+export type ResolveStatus = "resolved" | "unresolved" | "cancelled";
+
+export interface ResolveConflictResult { status: ResolveStatus; resolution?: string; reason?: string; backupName?: string; backedUp?: string | null }
+
 export interface SafeResolve {
   safePull(name: string, opts?: { adopt?: AdoptFn }): Promise<SafePullResult>;
   tryHeal(name: string, bytes: Bytes): Promise<boolean>;
   weakOverride(name: string, bytes: Bytes): Promise<{ backedUp: string | null }>;
-  resolveConflict(name: string, choice: ResolveChoice, ctx?: { bytes?: Bytes | null; adopt?: AdoptFn }): Promise<{ status: string; resolution?: string; reason?: string; backupName?: string; backedUp?: string | null }>;
+  resolveConflict(name: string, choice: ResolveChoice, ctx?: { bytes?: Bytes | null; adopt?: AdoptFn }): Promise<ResolveConflictResult>;
 }
 
 export function createSafeResolve(cfg: SafeResolveCfg): SafeResolve {
@@ -96,7 +101,7 @@ export function createSafeResolve(cfg: SafeResolveCfg): SafeResolve {
   }
 
   // 3 选项派发（README.md §7）：takeCloud=safePull · keepMine=weakOverride · cancel=什么都不动（留 dirty）。
-  async function resolveConflict(name: string, choice: ResolveChoice, ctx: { bytes?: Bytes | null; adopt?: AdoptFn } = {}) {
+  async function resolveConflict(name: string, choice: ResolveChoice, ctx: { bytes?: Bytes | null; adopt?: AdoptFn } = {}): Promise<ResolveConflictResult> {
     if (choice === "takeCloud") {
       const r = await safePull(name, { adopt: ctx.adopt });
       return r.ok

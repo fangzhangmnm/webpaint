@@ -43,7 +43,12 @@ export interface PushOpts {
   adopt?: AdoptFn;
 }
 
-export interface PushResult { status: string; dirtyAfter?: boolean; resolution?: string; reason?: string; backupName?: string; backedUp?: string | null }
+// push 的终态全集（收成联合类型，别再用裸 string —— "deferred" 拼错要在编译期就炸）：
+//   pushed     落地已确认（拿到新 etag）· deferred 落地**未**确认（provider 没回 item/eTag）→ 仍算未推
+//   healed     lost-response 自愈 · resolved/unresolved/cancelled 由 safeResolve.resolveConflict 产出
+export type PushStatus = "pushed" | "deferred" | "healed" | "resolved" | "unresolved" | "cancelled";
+
+export interface PushResult { status: PushStatus; dirtyAfter?: boolean; resolution?: string; reason?: string; backupName?: string; backedUp?: string | null }
 
 export function createPush(cfg: PushCfg) {
   const { cloud, head, seal, safeResolve, serialize, editVersion,
@@ -61,8 +66,13 @@ export function createPush(cfg: PushCfg) {
         attempt++;
         try {
           const { item } = await cloud.push(name, bytes, { baseEtag: ifMatch, encrypted: isEnc });
+          // F0 红线：provider 没回 item/eTag = **落地未确认**（分块响应 / 代理吞 body / provider 违约）。
+          //   绝不能当成功——onPushed(null,false) 会清 dirty 且 base 停在旧值，未推字节随后被 offload
+          //   合法驱逐（MASTER §A「dirty 永不驱逐」直接失守），UI 还显示「已同步」。
+          //   → 不调 onPushed（dirty/parent 原样保住），报 deferred，让上层重推。
+          if (!(item && item.eTag)) return { status: "deferred", dirtyAfter: true };
           const dirtyAfter = getEditVersion() !== v0;   // PUT 期间又改过 → 仍 unpushed
-          head.onPushed(name, item?.eTag ?? null, dirtyAfter);
+          head.onPushed(name, item.eTag, dirtyAfter);
           return { status: "pushed", dirtyAfter };
         } catch (e: unknown) {
           if (isConflict(e)) {

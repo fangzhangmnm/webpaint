@@ -456,7 +456,13 @@ export function createStore(config: StoreConfig) {
     if (!tracked) return { status: "swapped" };
     try {
       const { item } = await cloud.push(name, bytes, { baseEtag: head.seenBase(name), encrypted });   // If-Match + 扩展名翻转
-      head.onPushed(name, item?.eTag ?? null, false);            // 落地：base←新 etag、清 dirty/parent
+      // F0 同款：没回 eTag = 云端落地**未确认**。本地字节已经换了（①），所以这和"云没跟上"是同一种局面
+      //   → 走下面 catch 分支的等价路径（base/parent←换前云版 + 标脏），交 push 流接力，绝不当 swapped 清脏。
+      if (!(item && item.eTag)) {
+        head.onPushed(name, prevEtag, true);
+        return { status: "cloud-deferred" };
+      }
+      head.onPushed(name, item.eTag, false);                     // 落地：base←新 etag、清 dirty/parent
       return { status: "swapped" };
     } catch (e: unknown) {
       head.onPushed(name, prevEtag, true);                       // ② 本地已换、云没跟上 → base/parent←换前云版 + dirty，push 流接力（下次 If-Match 旧云版：没人动→换成功；动过→412 surface）

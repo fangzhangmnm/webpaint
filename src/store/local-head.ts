@@ -89,6 +89,13 @@ export function createLocalHead({ kv, getCloudEtag, keyPrefix = "head" }: LocalH
   }
 
   function onPushed(name: string, newEtag: string | null, dirtyAfter: boolean): void {
+    // 护栏（F0）：「没拿到新 etag」+「当干净落地」= 不可表示的状态——清了 dirty，base 却停在旧值，
+    //   未推字节就此可被 offload 合法驱逐（MASTER §A 红线）。这**不应该发生**；发生了就是调用方
+    //   把「落地未确认」当成了「落地成功」（push.ts 曾犯，见那里的 deferred 分支）。响亮抛，别自愈——
+    //   护栏的意义就是同一个错再犯时能被拦住，而不是悄悄产出错误结果。
+    if (newEtag == null && !dirtyAfter) {
+      throw new Error(`local-head: "${name}" onPushed(null etag, dirtyAfter=false) —— 落地未确认不得清 dirty`);
+    }
     if (newEtag != null) _base.set(name, newEtag);        // 只推进自己的 base
     if (dirtyAfter) {
       _setDirty(name, true);                              // 幂等：显式标脏（不依赖入场态，兼 heal 后路径）

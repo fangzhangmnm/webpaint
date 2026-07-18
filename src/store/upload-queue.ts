@@ -61,7 +61,9 @@ export function createUploadReplay(cfg: UploadReplayCfg) {
       const r = await serialize(name, async (): Promise<string> => {
         if (!(await local.exists(name))) return "gone";                        // 被删/superseded → 出队
         if (!head.isDirty(name) || head.seenBase(name) != null) return "synced"; // 已推/已同步 → 出队
-        try { await pushLocal(name); return "pushed"; }
+        // 必须看结果：deferred = 云端落地未确认（push.ts 的 F0 分支），本模块头部立的规矩是
+        //   「没确认成功绝不出队」→ 当 keep 留队重试，绝不计入 pushed（否则又是一次谎报 + 自动重推永久丢失）。
+        try { const r = await pushLocal(name); return r?.status === "deferred" ? "keep" : "pushed"; }
         catch (e) {
           if ((e as { name?: string } | null)?.name === "CloudNameCollisionError") return "collision";  // 同名异文件：surface + 出队（重试无用，等改名）
           reportStoreError(e, "log");   // 离线/transient → 留队重试，funnel 但不打扰

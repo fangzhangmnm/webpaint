@@ -6,6 +6,7 @@ import { createLocalHead, BypassError } from "../src/store/local-head.ts";
 import { createSafeResolve } from "../src/store/safe-resolve.ts";
 import { createSubstrate } from "../src/store/substrate.ts";
 import { createPush } from "../src/store/push.ts";
+import { createOffload } from "../src/store/offload.ts";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 async function asStr(x: unknown): Promise<string | null> {
@@ -64,4 +65,53 @@ test("lost-response 自愈 → healed + 干净（云端==本地推的）", async
   const r = await push("f", { encode: () => enc("SAME") });   // If-Match=STALE → 412 → heal
   eq(r.status, "healed", "自愈");
   assert(!head.isDirty("f"), "自愈后干净");
+});
+
+// ── F0 红线：cloud.push 返 {item:null}（有 baseEtag，落地**未确认**）────────────────────────
+//   旧行为：onPushed(null,false) 清 dirty + 报 "pushed" → 未推字节被 offload 合法驱逐（MASTER §A 失守）+ UI 谎报「已同步」。
+//   现行为：不调 onPushed、报 "deferred"、dirty 保住、offload 拒绝驱逐。
+function rigNullItem() {
+  const local = createMockLocal();
+  const headKv = memKv();
+  const head = createLocalHead({ kv: headKv, getCloudEtag: () => null });
+  const sub = createSubstrate();
+  // provider 违约：resolve 了但不带 item（分块响应 / 代理吞 body）
+  const cloud = { push: async () => ({ item: null }) };
+  const safeResolve = { tryHeal: async () => false, resolveConflict: async () => ({ status: "cancelled" as const }) };
+  const { push } = createPush({ cloud: cloud as never, head, seal: sealPass, safeResolve: safeResolve as never, serialize: sub.serialize, editVersion: () => 0 });
+  return { local, head, push };
+}
+
+test("[F0] push 收到 {item:null} → deferred + 保 dirty（绝不报 pushed）", async () => {
+  const { head, push } = rigNullItem();
+  head.markSeen("f", "e1");     // 曾 synced（有 baseEtag）
+  head.recordEdit("f");
+  const r = await push("f", { encode: () => enc("EDIT") });
+  eq(r.status, "deferred", "落地未确认 → deferred，不得是 pushed");
+  eq(r.dirtyAfter, true, "dirtyAfter=true（仍算未推）");
+  assert(head.isDirty("f"), "★dirty 必须保住——清了就会被 offload 吃掉");
+});
+
+test("[F0] 承接：deferred 之后 offload 拒绝驱逐（reason=dirty）", async () => {
+  const { local, head, push } = rigNullItem();
+  await local.save("f", enc("EDIT"));
+  head.markSeen("f", "e1"); head.recordEdit("f");
+  await push("f", { encode: () => enc("EDIT") });          // → deferred，dirty 留着
+  const off = createOffload({
+    cloud: { fetchMeta: async () => ({ etag: "e1", lastModified: 0, size: 10, item: {} as never }) },
+    local: { exists: (n: string) => local.exists(n), hardDelete: async (n: string) => { await local.hardDelete(n); } },
+    head: { isDirty: (n: string) => head.isDirty(n), seenBase: (n: string) => head.seenBase(n), forget: (n: string) => head.forget(n) },
+    isOnline: () => true,
+  });
+  let reason = "";
+  try { await off.offload("f"); } catch (e) { reason = (e as { reason?: string }).reason ?? ""; }
+  eq(reason, "dirty", "未确认落地的字节绝不驱逐");
+  assert(await local.exists("f"), "★字节还在（F0 的真实损失就是这里丢字节）");
+});
+
+test("[F0] 护栏：onPushed(null etag, dirtyAfter=false) 必须 throw", () => {
+  const head = createLocalHead({ kv: memKv(), getCloudEtag: () => null });
+  let threw = false;
+  try { head.onPushed("f", null, false); } catch { threw = true; }
+  assert(threw, "不可表示的状态要响亮拦住，不能自愈成错误结果");
 });
