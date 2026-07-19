@@ -75,3 +75,38 @@ describe("TileResidency · 备份归属（缺陷 F：doc 变换换掉 LayerPixel
       "旧备份的 tile key 按旧 across 编码，绝不能用来判定新几何对象可驱逐");
   });
 });
+
+// ---------------------------------------------------------------------------
+// v440 / R7：归属判据不得是**强引用**——否则 backup 把换下来的 LayerPixels 整个吊住。
+// ---------------------------------------------------------------------------
+describe("TileResidency · 备份归属不得吊住旧实例（R7 回归）", () => {
+  it("备份记录里不含 LayerPixels 实例本身（doc 变换换实例后旧的必须能被回收）", async () => {
+    const res = new TileResidency(identityCodec);
+    const lp = new LayerPixels(W, H);
+    filled(lp, 0, 0, 256, 256, 42);
+    await res.backupLayer(5, lp);
+
+    // 遍历备份记录的所有字段（含嵌套一层），断言没有任何一个 === 该 LayerPixels 实例。
+    const rec = res._backups.get(5);
+    assert(rec, "备份存在");
+    const holdsInstance = Object.values(rec).some(
+      (v) => v === lp || (Array.isArray(v) && v.some((x) => x === lp)),
+    );
+    assert(!holdsInstance,
+      "备份不得持有 LayerPixels 强引用：doc 变换（setPixels 换实例）后它会把 ~16MB 的孤儿吊到下次重新备份，可能永远不释放");
+  });
+
+  it("归属判据仍然有效：换实例后不可驱逐，重新备份后恢复可驱逐", async () => {
+    const res = new TileResidency(identityCodec);
+    const a = new LayerPixels(W, H); filled(a, 0, 0, 128, 128, 7);
+    await res.backupLayer(5, a);
+    assert(res.canEvictRaw(5, a), "原实例可驱逐");
+
+    const b = new LayerPixels(W, H); filled(b, 0, 0, 128, 128, 9);
+    assert(b.contentVersion === a.contentVersion, "前置：两实例版本号撞号");
+    assert(!res.canEvictRaw(5, b), "换实例 → 拒绝驱逐（归属判据仍生效）");
+
+    await res.backupLayer(5, b);
+    assert(res.canEvictRaw(5, b), "为新实例重新备份 → 恢复可驱逐（不是把这层永久钉死）");
+  });
+});

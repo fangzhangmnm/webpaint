@@ -16,6 +16,8 @@ import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from ".
 
 const TILE_RGBA = TILE_SIZE * TILE_SIZE * 4;
 
+let _layerPixelsTokenCounter = 0;
+
 export class LayerPixels {
   readonly docW: number;
   readonly docH: number;
@@ -25,6 +27,10 @@ export class LayerPixels {
   private _contentVersion = 0;                              // 单调递增，每次内容 mutation +1（TileResidency 驱逐门用）
   private _evicted = false;                                 // raw 被 TileResidency 驱逐（只剩 GPU tiles + 压缩备份）
   private _provider: ((lp: LayerPixels) => void) | null = null;   // 重物化回调（sync GPU readback，TileResidency 装）
+
+  // 实例身份 token（单调、进程内唯一）。给 TileResidency 判"这份备份属不属于当前这个实例"用——
+  //   必须是**值**不是对象引用，否则备份会把换下来的 LayerPixels（满 2K 层 ~16MB raw）整个吊住。
+  readonly token: number = ++_layerPixelsTokenCounter;
 
   constructor(docW: number, docH: number) {
     this.docW = docW;
