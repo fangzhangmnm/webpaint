@@ -452,8 +452,10 @@ async function pushItem(item: GalleryItem) {
       const f = _file(item.name);
       const bytes = await f.open();
       if (!bytes) { setStatus(t("ss.notFound", { name: item.name })); return; }
-      await f.save(bytes, { tryPush: true });
-      setStatus(t("ss.pushed", { name: item.name }));
+      // 这个按钮的**全部意义**就是云端那条腿 —— 必须读 pushed（v436）。
+      //   以前丢掉 SaveResult：离线 / 冲突面取消 / deferred 一律照报「已推送」。
+      const res = await f.save(bytes, { tryPush: true });
+      setStatus(res.pushed ? t("ss.pushed", { name: item.name }) : t("ss.pushNotDone", { name: item.name }), !res.pushed);
       gallery.refresh();
     } catch (err) { setStatus(t("ss.pushFailed", { error: errMsg(err) })); }
   });

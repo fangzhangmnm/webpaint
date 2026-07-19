@@ -60,9 +60,13 @@ export interface CollectionConfig {
   getInitData?: () => CollectionInitItem[] | Promise<CollectionInitItem[]>;
 }
 
+// reconcileWithRemote 的终态。status 来自 folder-flow.sync（synced/offline/invalid/dirty），
+//   外加 unchanged（云端 etag 没变，压根没拉）和 error（意外抛）。
+export interface ReconcileResult { status: string; pushed?: boolean; error?: unknown }
+
 export interface Collection {
   init(): Promise<void>;                              // 先 hydrate 本地（快）→ 后台 reconcile 云端（不 await）+ 新库 seed
-  reconcileWithRemote(): Promise<void>;               // 事件驱动（focus/visible/online）重拉云端 + resolve（per-key LWW；local newer/pending 一并 push）
+  reconcileWithRemote(): Promise<ReconcileResult>;    // 事件驱动重拉 + resolve。**读 status**：unchanged/synced/offline/invalid/dirty/error（别只 await 就报成功）
   setItem(id: string, value: unknown): void;          // 同步写内存 + 防抖持久化（init 前抛错；value===undefined 报错）
   deleteItem(id: string): void;                       // ≡ setItem(id, null)：null 墓碑，LWW
   getItem<V = unknown>(id: string, def?: V | (() => V)): V | undefined;   // 同步读 value（无值 / 墓碑 → default）
@@ -71,7 +75,7 @@ export interface Collection {
   keys(): string[];                                   // 全部 id（过滤墓碑）
   onChange(cb: ChangeCb): () => void;                 // 整库：**任何**值变（本地 setItem 同步 fire / 云端 reconcile）→ 通知 changedIds（返退订）
   onChange(id: string, cb: () => void): () => void;   // 单 key：绑某个 key，其值变→通知（返退订）
-  flushLocal(): Promise<void>;                        // 仅把内存 env 立即写本地缓存（卸载兜底；无网络）——云推由 reconcileWithRemote 兜底
+  flushLocal(): Promise<{ ok: boolean; error?: unknown }>;   // 立即写本地缓存（卸载兜底）。**ok=false 表示本地都没写进去**（配额/IDB 拒绝）——别忽略
   isDirty(): boolean;
 }
 
@@ -146,7 +150,7 @@ export function createCollection(cfg: CollectionConfig): Collection {
   let hydrated = false;
   let idbHad = false;                             // hydrate 时本地是否已有这份 collection（新库判定用）
   let localTimer: ReturnType<typeof setTimeout> | null = null;
-  let localChain: Promise<void> = Promise.resolve();
+  let localChain: Promise<{ ok: boolean; error?: unknown }> = Promise.resolve({ ok: true });
 
   async function bytesOf(b: Blob | Uint8Array | null): Promise<Uint8Array | null> {
     if (!b) return null;
@@ -170,11 +174,18 @@ export function createCollection(cfg: CollectionConfig): Collection {
     if (!local || localTimer != null) return;
     localTimer = setTimeout(() => { localTimer = null; void writeLocalNow(); }, localWriteDelayMs);
   }
-  function writeLocalNow(): Promise<void> {
-    if (!local) return Promise.resolve();
+  // ★ v436：本地写**失败也要说出来**。旧版 `.catch(reportStoreError(e,"log"))` 之后返回 localChain，
+  //   于是 IDB 写被拒（配额满 / 存储被阻塞 / 隐私模式）时这个 promise 照样 resolve，且只进 console。
+  //   三个 unload 屏障（app-prefs / app-state / brush-rack-controller）全靠它当「关机前落盘」的保证——
+  //   一旦它说谎，用户的设置和笔架就**静默丢失**。而这是**本地**那条腿，不是云端：
+  //   离线是正常坏天气，本地写不进去不是。分级也从 "log" 提到 "warning"（要出 banner）。
+  function writeLocalNow(): Promise<{ ok: boolean; error?: unknown }> {
+    if (!local) return Promise.resolve({ ok: true as const });
     clearLocalTimer();
     const snap = encode(env);                         // 抓当前 env 快照（含 uat）
-    localChain = localChain.then(() => local.save(localKey, snap).then(() => undefined)).catch((e) => reportStoreError(e, "log"));
+    localChain = localChain
+      .then(() => local.save(localKey, snap).then(() => ({ ok: true as const })))
+      .catch((e) => { reportStoreError(e, "warning"); return { ok: false as const, error: e }; });
     return localChain;
   }
 
@@ -217,9 +228,13 @@ export function createCollection(cfg: CollectionConfig): Collection {
   }
 
   // 事件驱动重拉（focus/visible/online）。错误接 reportError（意外 throw；flow 内部的离线/push 失败已各自 funnel）。
-  async function reconcileWithRemote(): Promise<void> {
-    try { await reconcile(); }
-    catch (e) { reportStoreError(e, "warning"); }
+  //   ★ v436：**返回结果，别收窄成 void**。folder-flow.sync 本来就产出
+  //   {status:"synced"|"offline"|"invalid"|"dirty", pushed, error}，collection.sync/reconcile 一路带上来，
+  //   却在这最后一步被抹平——于是「离线」「云端字节非法被拒」「push 没成、配置仍未上传」
+  //   在每个调用点都和成功长得一模一样。笔架点「刷新」永远停在「正在刷新…」就是这么来的。
+  async function reconcileWithRemote(): Promise<ReconcileResult> {
+    try { return (await reconcile()) ?? { status: "unchanged" }; }
+    catch (e) { reportStoreError(e, "warning"); return { status: "error", error: e }; }
   }
 
   // 新库 seed：getInitData() → uat=1 填入（最低戳，真数据必胜）。**eager**：idb 无就填，不等云端判定。
@@ -288,7 +303,7 @@ export function createCollection(cfg: CollectionConfig): Collection {
     return () => { listeners.delete(cb); };
   }
 
-  function flushLocal(): Promise<void> { return writeLocalNow(); }
+  function flushLocal(): Promise<{ ok: boolean; error?: unknown }> { return writeLocalNow(); }
   function isDirty(): boolean { return cloudless ? false : cloud.isDirty(name); }
 
   return { init, reconcileWithRemote, setItem, deleteItem, getItem, getEntry, entries, keys, onChange, flushLocal, isDirty };

@@ -60,7 +60,8 @@ function face(get: () => Collection | undefined) {
     // 导航前屏障：setItem 只改内存 + 排 400ms 防抖写（collection.ts:169-172）。
     //   凡"写完就 reload / 就关页"的调用方**必须** await 这个，否则定时器随页面一起死、字节从没进 IDB。
     //   （v417：语言切换无效的根因就是这个——setLang 写完立刻 location.reload()。theme 不 reload 所以没事。）
-    flushLocal(): Promise<void> { return get()?.flushLocal() ?? Promise.resolve(); },
+    //   ok=false = 本地压根没写进去（配额满/IDB 被拒）→ 调用方该 surface，别当成功（v436）。
+    flushLocal(): Promise<{ ok: boolean; error?: unknown }> { return get()?.flushLocal() ?? Promise.resolve({ ok: true }); },
   };
 }
 // 设备本地偏好（color-theme）。

@@ -453,10 +453,15 @@ function makeGallery(host: GalleryHost) {
         if (!(await host.confirm(t("gal.dlg.delTitle", { name: item.name }), detail))) return;
         await host.busy(t("gal.busy.del", { name: item.name }), async () => {
           try {
-            await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).delete();
+            // 读 DelResult（v436）：以前丢掉它，于是用户在脏文件警告里点「取消」也报「已删除」，
+            //   离线且谱系不明（云端那份还在）同样报「已删除」。范本就在隔壁：emptyTrash 一直正确读 res.failed。
+            const del = await _store.file(sessionFileName(item.name), { isZip: true, mode: "existing" }).delete();
+            if (del.status === "cancelled") { host.status(t("gal.st.delCancelled", { name: item.name })); return; }
             void session.dropCheckpoint(item.name);   // 作品没了 → 丢掉它的 revert 快照（按 key 精确清，不扫全库）
             if (isActive) await session.exit();
-            host.status(t("gal.st.deleted", { name: item.name }));
+            host.status(del.status === "noop" ? t("gal.st.delNothing", { name: item.name })
+              : del.queuedCloudDelete === false ? t("gal.st.delLocalOnly", { name: item.name })
+              : t("gal.st.deleted", { name: item.name }), del.status === "noop" || del.queuedCloudDelete === false);
           } catch (e: unknown) { host.status(t("gal.st.delFail", { e: String((e as { message?: unknown })?.message || e) }), true); }
         });
         await reload();

@@ -12,7 +12,7 @@ import { looksEncryptedContainer, packContainer, unpackContainer, configureCrypt
 import { createSafeResolve, type ResolveChoice } from "./safe-resolve.ts";
 import { createPush } from "./push.ts";
 import { createFreshness, type RefreshOpts, type FreshResult } from "./freshness.ts";
-import { createDelete } from "./delete.ts";
+import { createDelete, type DelResult } from "./delete.ts";
 import { createIdentity } from "./identity.ts";
 import { createTrash } from "./trash.ts";
 import { createOffload } from "./offload.ts";
@@ -130,7 +130,10 @@ export interface RawFile {
   pullIfClean(opts?: RefreshOpts): Promise<FreshResult>;
   // 改身份/移动**唯一入口 = file.tryMove(to)**（含 nameOccupied 占用检查，结果式不抛；ok:false→UI surface where）。无独立 rename。
   tryMove(to: string): Promise<TryMoveResult>;
-  delete(): Promise<void>;
+  //  返 DelResult：**别只 await 就报「已删除」**（v436）。status 至少有三种不是成功：
+  //    cancelled（用户在脏文件警告里选了取消）· noop（本地云端都没有这个文件）
+  //    · queuedCloudDelete:false（离线且谱系不明 → 本地 move-aside 了，但云端那份还在）
+  delete(): Promise<DelResult>;
   // 重新上传（candidate-gone 的「保留重传」动作）：本地 clean 字节推云到空 path。撞名(乌龙云端已有)→抛 CloudNameCollisionError
   //   （app surface conflict）；成功→采纳新 etag 变 synced + 清 candidate。gallery 层没开文件 → 必须 store 内解决，不靠编辑器 save。
   reupload(): Promise<{ status: string }>;
@@ -607,7 +610,7 @@ export function createStore(config: StoreConfig) {
       },
       pullIfClean(opts) { return fresh.refresh(name, { isOnline, ...opts }); },   // 事件驱动干净快进（clean→FF、dirty→no-op）；默认注入 store 的 isOnline（离线早退，不空跑 fetchMeta）
       tryMove(to) { return tryMoveSF(name, to); },
-      async delete() { await delSF(name); notifyFolderOf(name); },
+      async delete() { const r = await delSF(name); notifyFolderOf(name); return r; },   // 返 DelResult（v436）：cancelled/noop/queuedCloudDelete 都不是「已删除」
       reupload() {
         return ui.busy("重新上传…", async () => {
           if (!(await local.exists(name))) return { status: "no-local" };

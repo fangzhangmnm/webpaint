@@ -39,7 +39,7 @@ export interface StoreLike {
     // pushed=false 不是错误，是事实（离线/冲突未解决/只落本地）→ 据此保住 push-pending，别乐观清。
     save(bytes: Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<{ pushed: boolean; reason?: string }>;
     tryMove(to: string): Promise<TryMoveResult>;   // 改身份/移动唯一入口（含 nameOccupied 占用检查）——挂在 file 上
-    delete(): Promise<void>;
+    delete(): Promise<{ status: string }>;   // status 不是「成功」的同义词（cancelled/noop 也走这里）
   };
 }
 

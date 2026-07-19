@@ -164,7 +164,7 @@ export class BrushRackController {
     });
   }
   // 事件驱动重拉云端（刷新按钮 / 前台）。
-  reconcileWithRemote(): Promise<void> { return this.d.collection.reconcileWithRemote(); }
+  reconcileWithRemote() { return this.d.collection.reconcileWithRemote(); }   // 返 ReconcileResult：调用方须读 status（v436）
 
   // ---- 活动预设 ↔ tool dial 绑定 ----
   getRackToolKey(tool: string) { return tool === "airbrush" ? "brush" : tool; }
@@ -397,7 +397,11 @@ export class BrushRackController {
     });
     if (els.refreshBtn) els.refreshBtn.addEventListener("click", async () => {
       this.d.setStatus(t("br.refreshing"));
-      await this.reconcileWithRemote();
+      // 读 status，别只 await（v436）：以前这里没有任何终态提示，离线/被拒/推失败
+      //   全都表现为「正在刷新…」永远挂着。
+      const r = await this.reconcileWithRemote();
+      const bad = r.status === "offline" || r.status === "invalid" || r.status === "dirty" || r.status === "error";
+      this.d.setStatus(bad ? t("br.refreshFailed", { status: r.status }) : t("br.refreshed"), bad);
     });
     if (els.resetBtn) els.resetBtn.addEventListener("click", async () => {
       if (!(await this.d.confirm(t("br.resetRackTitle"), t("br.resetRackMsg")))) return;

@@ -289,3 +289,33 @@ test("[narrow-waist] cloud-sync backupFolder 默认 .backup（weakOverride 把�
     await store.files.deleteFolder("F");   // 现在本地空（cloud 也无此夹）→ 不抛
   });
 }
+
+// ── P3（v436）：接缝不许把 store 的诚实结果收窄成 void ────────────────────────────────────
+//   本次审计的核心发现：深模块的返回类型早就是有信息量的联合类型，所有活着的谎报都发生在
+//   store 与 UI 之间那一层。这几条锁住「结果确实流出来了」。
+test("collection.flushLocal 本地写失败 → ok:false（不得 resolve 成功；三个 unload 屏障全靠它）", async () => {
+  const { createCollection } = await import("../src/store/collection.ts");
+  const col = createCollection({
+    name: "c", cloudless: true,
+    local: { save: async () => { throw new Error("QuotaExceeded"); }, get: async () => null },
+    reportError: () => {},
+  } as never);
+  await col.init();
+  col.setItem("k", 1);
+  const r = await col.flushLocal();
+  eq(r.ok, false, "IDB 拒绝 → ok:false（旧版这里 resolve 成功且只进 console）");
+});
+
+test("collection.flushLocal 正常路径 → ok:true", async () => {
+  const { createCollection } = await import("../src/store/collection.ts");
+  const saved: unknown[] = [];
+  const col = createCollection({
+    name: "c", cloudless: true,
+    local: { save: async (_k: string, b: unknown) => { saved.push(b); }, get: async () => null },
+    reportError: () => {},
+  } as never);
+  await col.init();
+  col.setItem("k", 1);
+  eq((await col.flushLocal()).ok, true, "写成功 → ok:true");
+  assert(saved.length > 0, "确实落了盘");
+});

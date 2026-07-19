@@ -58,7 +58,7 @@ export interface RackHandle {
   defaultToolStateFor(tool: string): Partial<ToolDial>;
   get(): { brushes: unknown[] };
   // 云端事件驱动重拉（刷新按钮 / 前台）：
-  reconcileWithRemote(): Promise<void>;
+  reconcileWithRemote(): Promise<{ status: string; pushed?: boolean; error?: unknown }>;   // 读 status，别只 await（v436）
   // 重置出厂笔（topbar-menu · 非破坏性覆盖同 id）：
   restoreBuiltins(): Promise<number>;   // 返回还原了几支内置笔；0 = 失败（已 surface）
   // v319：去掉 [k:string]:unknown index sig —— 真 controller 类无 index sig 故装不进；
