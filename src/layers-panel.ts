@@ -30,6 +30,7 @@ import { els } from "./els.ts";
 import { editorState } from "./editor-state.ts";
 import { raiseWindow } from "./surfaces.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
+import { runTreeOp } from "./tree-ops.ts";   // 树结构变更的提交信封（见该模块头注释）
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";
 
@@ -149,13 +150,13 @@ function _deleteLayer(L: LayerNode | null) {
   // 组删除：连带 children，撤销底座 = snapshotTree（保叶活引用）。
   // 允许删非空组（含删到 0 叶）—— 删空了就补一张空层保 ≥1 叶（不卡在「非空组删不掉」）。
   if (L.isGroup) {
-    const before = doc.snapshotTree();
-    doc.removeLayer(L.id, true);
-    if (countLeaves(doc.layers) === 0) doc.addLayer();   // 清空 → 补空层
-    const after = doc.snapshotTree();
-    history.push({ type: "treeStructure", before, after,
-      undoStatus: t("lp.st.restoredGroup", { name: L.name }), redoStatus: t("lp.st.deletedGroup", { name: L.name }) });
-    _afterDocChange();
+    runTreeOp(
+      { undo: t("lp.st.restoredGroup", { name: L.name }), redo: t("lp.st.deletedGroup", { name: L.name }) },
+      () => {
+        doc.removeLayer(L.id, true);
+        if (countLeaves(doc.layers) === 0) doc.addLayer();   // 清空 → 补空层
+      },
+    );
     return;
   }
   const loc = doc.locateNode(L.id)!;                   // 先记位置（removeLayer 后就找不到了）
@@ -168,39 +169,34 @@ function _deleteLayer(L: LayerNode | null) {
 // ---- 图层组 op caller（都走 snapshotTree 结构撤销；纯结构变、零像素拷贝）----
 // 新建**空**图层组（创建入口 = 「+」菜单；编组当前层已砍，靠空组 + 移入「某组」达成）。
 function _addEmptyGroup() {
-  const before = doc.snapshotTree();
-  const g = doc.addGroup();
-  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.deletedGroup", { name: g.name }), redoStatus: t("lp.st.newGroup", { name: g.name }) });
-  _afterDocChange();
-  setStatus(t("lp.st.newGroupColon", { name: g.name }));
+  let g: ReturnType<typeof doc.addGroup>;
+  // labels 传函数 → 在 applyFn 之后求值（组名要等 addGroup() 返回才知道）。
+  runTreeOp(
+    () => ({ undo: t("lp.st.deletedGroup", { name: g.name }), redo: t("lp.st.newGroup", { name: g.name }),
+             status: t("lp.st.newGroupColon", { name: g.name }) }),
+    () => { g = doc.addGroup(); },
+  );
 }
 function _ungroupLayer(L: LayerNode | null) {
   if (!L || !L.isGroup) return;
-  const before = doc.snapshotTree();
-  if (!doc.ungroup(L.id).ok) return;
-  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.regrouped"), redoStatus: t("lp.st.ungrouped") });
-  _afterDocChange();
-  setStatus(t("lp.st.ungroupedName", { name: L.name }));
+  runTreeOp(
+    { undo: t("lp.st.regrouped"), redo: t("lp.st.ungrouped"), status: t("lp.st.ungroupedName", { name: L.name }) },
+    () => doc.ungroup(L.id).ok,
+  );
 }
 function _moveIntoGroup(L: LayerNode | null, groupId: number) {
   if (!L || groupId == null) return;
-  const before = doc.snapshotTree();
-  if (!doc.moveIntoGroup(L.id, groupId)) return;
-  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.movedOut"), redoStatus: t("lp.st.movedIn") });
-  _afterDocChange();
-  setStatus(t("lp.st.movedInColon", { name: L.name }));
+  runTreeOp(
+    { undo: t("lp.st.movedOut"), redo: t("lp.st.movedIn"), status: t("lp.st.movedInColon", { name: L.name }) },
+    () => doc.moveIntoGroup(L.id, groupId),
+  );
 }
 function _moveOutOfGroup(L: LayerNode | null) {
   if (!L) return;
-  const before = doc.snapshotTree();
-  if (!doc.moveOutOfGroup(L.id)) return;
-  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.movedBack"), redoStatus: t("lp.st.movedOut") });
-  _afterDocChange();
-  setStatus(t("lp.st.movedOutColon", { name: L.name }));
+  runTreeOp(
+    { undo: t("lp.st.movedBack"), redo: t("lp.st.movedOut"), status: t("lp.st.movedOutColon", { name: L.name }) },
+    () => doc.moveOutOfGroup(L.id),
+  );
 }
 // v132：清空当前图层像素，保留图层 + 名字 + opacity / mode，bbox 归零
 function _clearLayerPixels(L: LayerNode | null) {

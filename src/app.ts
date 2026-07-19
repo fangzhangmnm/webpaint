@@ -38,6 +38,7 @@ import { makeDialControls } from "./dial-controls.ts";   // dial 写入（setSiz
 import { initTheme, reconcileThemeFromPrefs } from "./theme.ts";
 import { initLayersPanel, renderLayersPanel, LAYER_MODE_LABEL } from "./layers-panel.ts";
 import { initDocOps } from "./doc-ops.ts";
+import { initTreeOps } from "./tree-ops.ts";   // 图层树结构变更的提交信封（runTreeOp）
 import { initCloudAuthUI, updateCloudAuthUI } from "./cloud-auth-ui.ts";
 import { initSettingsMenu, applyCheckerboard, renderSettingsFromPrefs } from "./settings-menu.ts";   // setMenuOpen→各菜单模块
 import { initFiltersAdjust } from "./filters-adjust.ts";
@@ -254,6 +255,7 @@ const ctx: AppContext = freezeCtx({
 initColorPanel(ctx);
 initTheme(ctx);
 initLayersPanel(ctx);
+initTreeOps(ctx);
 initDocOps(ctx);
 initSettingsMenu(ctx);
 initExportImportMenu(ctx);
