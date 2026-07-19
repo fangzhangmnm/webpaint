@@ -386,28 +386,28 @@ export class InputController {
       // v119: commit 时清了 selection，undo 时把它恢复回来
       // 多层 entry：e.layers = [{layerId, before, after, beforeBlob, afterBlob}]（组变换 = 多层；单层 = 1 项）。
       this.history.registerHandler("lasso", {
-        undo: (e: LassoEntry) => {
-          for (const L of e.layers) applyPixelSnap(this.doc, L.layerId, L.before, L.beforeBlob, this.board);
+        // async + await：applyPixelSnap 在快照已压成 blob 时返回真 promise（常态）。不 await 的话
+        //   handler 提前返回、UndoStack 移游标并释放 _busy 闩，而像素写入还在飞 → 连按 Ctrl+Z 时
+        //   两条 createImageBitmap 链在同一层上竞态，后落地的赢。组变换是多层，更容易撞上。
+        undo: async (e: LassoEntry) => {
+          await Promise.all(e.layers.map((L) => applyPixelSnap(this.doc, L.layerId, L.before, L.beforeBlob, this.board)));
           if (e.prevSelection !== undefined) {
             this.doc.selection = e.prevSelection;
             this.board.invalidateAll();
           }
         },
-        redo: (e: LassoEntry) => {
-          for (const L of e.layers) applyPixelSnap(this.doc, L.layerId, L.after, L.afterBlob, this.board);
+        redo: async (e: LassoEntry) => {
+          await Promise.all(e.layers.map((L) => applyPixelSnap(this.doc, L.layerId, L.after, L.afterBlob, this.board)));
           if (e.prevSelection !== undefined) {
             this.doc.selection = null;       // redo 后再清
             this.board.invalidateAll();
           }
         },
-        refsLayer: (e: LassoEntry, id: number) => e.layers.some((L) => L.layerId === id),
       } satisfies UndoHandler);
       // 选区变化（lasso 圈 / 取消选区 / 反选 等）也进 undo，但不动像素
       this.history.registerHandler("selectionChange", {
         undo: (e: SelectionChangeEntry) => { this.doc.selection = e.before; this.board.invalidateAll(); },
         redo: (e: SelectionChangeEntry) => { this.doc.selection = e.after;  this.board.invalidateAll(); },
-        // 选区不属于某一 layer；refsLayer 永远 false（删图层不影响选区 entry）
-        refsLayer: () => false,
       } satisfies UndoHandler);
     }
     // 把 doc 引用给 lasso，便于直接操作 doc.selection

@@ -20,7 +20,10 @@ type UndoEntry = Record<string, any>;
 // ---- 图层面板 ----
 export function _afterDocChange() {
   renderLayersPanel();
-  board.invalidateAll();
+  // 结构脏（不是像素脏）：本函数是**整个图层树变更面**的漏斗——10 个 undo handler + layers-panel
+  //   的全部 op + selection-ops 都经此。结构同步不可被 livePreview 推迟，否则新叶不进 _layerTiles
+  //   → 合成抛 LAYER_NOT_SYNCED（浮层活着时做结构操作曾必然中招）。
+  board.invalidateStructure();
   board.requestRender();
 }
 
@@ -38,7 +41,7 @@ export function initLayerUndo(ctx: AppContext) {
   //   addLayer.undo（撤销创建）：remove 后 active 落回兜底层，toast 提示
   history.registerHandler("addLayer", {
     undo: (e: UndoEntry) => {
-      doc.removeLayer(e.layerSpec.id);
+      doc.removeLayer(e.layerSpec.id, false, { materialize: false });   // 撤销"新建"：栈序保证此刻它是空层，且 spec 在 entry 里
       if (e.prevActiveId != null) doc.setActiveById(e.prevActiveId);   // 回到创建前的活动层（不误导）
       _afterDocChange();
       setStatus(t("se.undoCreateLayer", { name: e.layerSpec.name || "" }));
@@ -49,7 +52,6 @@ export function initLayerUndo(ctx: AppContext) {
       _afterDocChange();
       setStatus(t("se.restoredLayer", { name: e.layerSpec.name || "" }));
     },
-    refsLayer: (e: UndoEntry, id: number) => e.layerSpec.id === id,
   });
   // removeLayer：undo 在 (parentId, index) 处恢复层（含 pixel）；redo 再删
   // v125: 一律 setActive 到恢复的图层 + toast
@@ -71,18 +73,17 @@ export function initLayerUndo(ctx: AppContext) {
       setStatus(t("se.restoredLayer", { name: spec.name || "" }));
     },
     redo: (e: UndoEntry) => {
-      doc.removeLayer(e.layerSpec.id);
+      doc.removeLayer(e.layerSpec.id, false, { materialize: false });   // e.layerSpec 自带 imageData/blob
       _afterDocChange();
       setStatus(t("se.deletedLayer", { name: e.layerSpec.name || "" }));
     },
-    refsLayer: (e: UndoEntry, id: number) => e.layerSpec.id === id,
   });
   // v124b mergeDown：undo 还原 under 像素 + opacity/mode（+ v258 clippingMask），再 insert active 回 activeIndex；redo 应用 underAfter + 删 active
   history.registerHandler("mergeDown", {
     undo: async (e: UndoEntry) => {
       const under = doc.findLayer(e.underId);
       if (under) {
-        applyPixelSnap(doc, e.underId, e.underBefore, e.underBefore.blob, board);
+        await applyPixelSnap(doc, e.underId, e.underBefore, e.underBefore.blob, board);   // 必须 await：不然 UndoStack 的 _busy 闩在像素还在飞的时候就放行了
         under.opacity = e.underBeforeOpacity;
         under.mode = e.underBeforeMode;
         if (typeof e.underBeforeClipping === "boolean") under.clippingMask = e.underBeforeClipping;
@@ -95,6 +96,7 @@ export function initLayerUndo(ctx: AppContext) {
       } else if (spec.blob) {
         const bitmap = await createImageBitmap(spec.blob);
         doc.insertLayerAt(al.index, { ...spec, bitmap }, al.parentId);
+        bitmap.close?.();   // 与本文件另两处 createImageBitmap 对齐（独这处漏了 → 每次 mergeDown 撤销泄一张位图）
       } else {
         doc.insertLayerAt(al.index, spec, al.parentId);
       }
@@ -102,20 +104,19 @@ export function initLayerUndo(ctx: AppContext) {
       _afterDocChange();
       setStatus(t("se.undoMergeRestore", { name: spec.name || "" }));
     },
-    redo: (e: UndoEntry) => {
+    redo: async (e: UndoEntry) => {
       const under = doc.findLayer(e.underId);
       if (under) {
-        applyPixelSnap(doc, e.underId, e.underAfter, e.underAfter.blob, board);
+        await applyPixelSnap(doc, e.underId, e.underAfter, e.underAfter.blob, board);   // 同上
         under.opacity = 1;
         under.mode = "source-over";
         under.clippingMask = !!e.resultClipping;   // 链内合并结果仍剪裁；基底合并结果转普通层
       }
-      doc.removeLayer(e.activeSpec.id);
+      doc.removeLayer(e.activeSpec.id, false, { materialize: false });   // e.activeSpec 自带像素
       doc.setActiveById(e.underId);
       _afterDocChange();
       setStatus(t("se.mergedDown"));
     },
-    refsLayer: (e: UndoEntry, id: number) => e.underId === id || e.activeSpec.id === id,
   });
   // moveLayer：同级 ±delta 移动。undo = 反向 delta；redo = 原 delta（树安全：moveLayer 自身按同级解析）。
   history.registerHandler("moveLayer", {
@@ -131,15 +132,34 @@ export function initLayerUndo(ctx: AppContext) {
       const L = doc.findLayer(e.layerId);
       setStatus(t("se.layerMoved", { name: L?.name || "" }));
     },
-    refsLayer: (e: UndoEntry, id: number) => e.layerId === id,
   });
   // treeStructure：组结构变（编组/解组/移入移出/删组）的撤销底座 —— snapshotTree（保叶活引用、零像素拷贝）
   //   前后两张结构快照，undo/redo 直接 restoreTree。像素历史不受影响（叶对象 id 不变）。
   history.registerHandler("treeStructure", {
     undo: (e: UndoEntry) => { doc.restoreTree(e.before); _afterDocChange(); if (e.undoStatus) setStatus(e.undoStatus); },
     redo: (e: UndoEntry) => { doc.restoreTree(e.after); _afterDocChange(); if (e.redoStatus) setStatus(e.redoStatus); },
-    // 结构快照里可能含任意 id（叶或组）→ 保守返 true（撤销/重做都全量重挂）。
-    refsLayer: () => true,
+    validate: (e: UndoEntry) => (e.before && e.after ? null : "缺 before/after 结构快照"),
+    // 本条 entry 实际吊住多少字节：只数**已离树**的叶（仍在树里的层不算这条 entry 的账，
+    //   它们本来就活着）。离树叶自 v439 起在离树时被强制物化 → 每片满 2K 层 ~16MB，
+    //   而内存预算只有 256–768MB：删几个满内容的组就能吃掉整个预算，条数上限（50）管不住。
+    weight: (e: UndoEntry) => {
+      const snap = e.before as { nodes?: unknown[] } | null;
+      if (!snap?.nodes) return 0;
+      let bytes = 0;
+      const walk = (recs: unknown[]) => {
+        for (const r of recs as Array<Record<string, any>>) {
+          if (r.isGroup) walk(r.children || []);
+          else if (r.ref && !doc.findLayer(r.ref.id)) bytes += r.ref.pixels?.byteUsage ?? 0;
+        }
+      };
+      walk(snap.nodes);
+      return bytes;
+    },
+    // 这条 entry 持有**离树叶子的活对象引用**（snapshotTree 的零拷贝设计）；自 v439 起那些叶子在
+    //   离树时被强制物化（materializeDetaching），于是每片 raw ≈16MB/满 2K 层都吊在这条 entry 上。
+    //   entry 一旦被淘汰（超 max / redo 段截断 / clear）就必须放手，否则这 50 条栈能钉住整场编辑
+    //   的所有已删图层。
+    dispose: (e: UndoEntry) => { e.before = null; e.after = null; },
   });
   // renameLayer：oldName / newName
   history.registerHandler("renameLayer", {
@@ -151,7 +171,6 @@ export function initLayerUndo(ctx: AppContext) {
       const L = doc.findLayer(e.layerId);
       if (L) { L.name = e.newName; renderLayersPanel(); setStatus(t("se.layerRenamed", { name: e.newName })); }
     },
-    refsLayer: (e: UndoEntry, id: number) => e.layerId === id,
   });
   // setLayerProp：visibility / opacity / mode
   const _LP_LABEL: Record<string, Key> = { visible: "se.propVisible", opacity: "se.propOpacity", mode: "se.propMode", clippingMask: "se.propClipping", lockAlpha: "se.propLockAlpha" };
@@ -165,13 +184,11 @@ export function initLayerUndo(ctx: AppContext) {
       const L = doc.findLayer(e.layerId);
       if (L) { (L as unknown as Record<string, unknown>)[e.prop as string] = e.newVal; _afterDocChange(); setStatus(t("se.propUpdated", { name: L.name, prop: _lpLabel(e.prop) })); }
     },
-    refsLayer: (e: UndoEntry, id: number) => e.layerId === id,
   });
   // setReferenceLayer：unique doc-level state
   history.registerHandler("setReferenceLayer", {
     undo: (e: UndoEntry) => { doc.referenceLayerId = e.oldVal; renderLayersPanel(); },
     redo: (e: UndoEntry) => { doc.referenceLayerId = e.newVal; renderLayersPanel(); },
-    refsLayer: (e: UndoEntry, id: number) => e.oldVal === id || e.newVal === id,
   });
   // v110/114: docTransform —— crop / resample 一次 op 影响所有 layer + doc 尺寸 + viewport
   // entry shape: { before: {doc, viewport}, after: {doc, viewport} }
@@ -179,27 +196,22 @@ export function initLayerUndo(ctx: AppContext) {
     undo: (e: UndoEntry) => {
       doc.restoreSnapshotAll(e.before.doc);
       if (e.before.viewport) Object.assign(board.viewport, e.before.viewport);
-      _afterDocChange();
+      _afterDocChange();   // 已含 renderLayersPanel + invalidateStructure（doc 变换换掉全部图层）
       if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-      board.invalidateAll();
-      renderLayersPanel();
     },
     redo: (e: UndoEntry) => {
       doc.restoreSnapshotAll(e.after.doc);
       if (e.after.viewport) Object.assign(board.viewport, e.after.viewport);
-      _afterDocChange();
+      _afterDocChange();   // 已含 renderLayersPanel + invalidateStructure（doc 变换换掉全部图层）
       if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-      board.invalidateAll();
-      renderLayersPanel();
     },
-    refsLayer: () => true,        // 所有层都受影响
   });
 
   // selectionToLayer：复合 entry。undo / redo 同步处理 newLayer + active 改变
   history.registerHandler("selectionToLayer", {
     undo: async (e: UndoEntry) => {
       // 1. 删 new layer
-      doc.removeLayer(e.newLayerSpec.id);
+      doc.removeLayer(e.newLayerSpec.id, false, { materialize: false });   // e.newLayerSpec 自带像素（layerSpecFrom + 异步 blob）
       // 2. 还原 active layer（仅 move 模式）
       if (e.isMove && e.beforeActive) {
         const L = doc.findLayer(e.activeLayerId);
@@ -226,6 +238,5 @@ export function initLayerUndo(ctx: AppContext) {
       doc.setActiveById(spec.id);
       _afterDocChange();
     },
-    refsLayer: (e: UndoEntry, id: number) => e.newLayerSpec.id === id || e.activeLayerId === id,
   });
 }

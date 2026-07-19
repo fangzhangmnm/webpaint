@@ -189,7 +189,7 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   layer.replaceFromCanvas(c, bx, by, w, h);
   (bitmap as ImageBitmap).close?.();
   renderLayersPanel();
-  board.invalidateAll();
+  board.invalidateStructure();   // 上面 doc.addLayer 新建了一层 → 结构脏
   board.requestRender();
   session.markEdited();
   updateSaveStatus();

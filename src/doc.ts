@@ -335,6 +335,8 @@ export class PaintDoc {
   //   保守）；GL 模式 release 物化 canvas → false（单份 tile 计费 → 多放层）。
   _memBudgetBytes: number | null = null;
   _memCountMat = true;
+  // 离树物化失败回调（见 materializeDetaching）。模型层不碰 DOM → app 层接到 reportError 报红条。
+  onMaterializeFailure: ((layerIds: number[]) => void) | null = null;
   constructor({ width = DEFAULT_DOC_SIZE, height = DEFAULT_DOC_SIZE }: { width?: number; height?: number } = {}) {
     this.width = width;
     this.height = height;
@@ -481,11 +483,16 @@ export class PaintDoc {
 
   // 删除指定节点（id；叶或组——组连带 children）。默认 doc 至少留 1 个叶（守底）。
   //   allowEmpty=true：允许删到 0 叶（组删除用——清空后 caller 补一张空层，保证不卡在「非空组删不掉」）。
-  removeLayer(id: number, allowEmpty = false) {
+  // opts.materialize=false：**调用方保证自己已经持有这些叶的像素**（undo/redo handler 的 entry 里
+  //   带着 imageData/blob），因此不必为它们做离树物化。这不是优化洁癖：物化对**被驱逐**的层意味着
+  //   逐 tile 的阻塞式 gl.readPixels（满 2K 层 64 次），重建一份下一行就被丢弃的缓冲区。
+  //   默认 true —— 漏传只会变慢，不会丢数据；传错才会（所以只在能证明 entry 自带像素的地方传 false）。
+  removeLayer(id: number, allowEmpty = false, opts: { materialize?: boolean } = {}) {
     const loc = findParentOf(this.layers, id);
     if (!loc) return false;
     const removingLeaves = countLeaves([loc.node]);
     if (!allowEmpty && countLeaves(this.layers) - removingLeaves < 1) return false;
+    if (opts.materialize !== false) this._materializeLeaves(flattenLeaves([loc.node]));   // 离树前自带像素（见 materializeDetaching）
     loc.parent.splice(loc.index, 1);
     if (!findNodeById(this.layers, this.activeId)) {   // active 被删（或在被删组内）→ 重选末叶
       const leaves = flattenLeaves(this.layers);
@@ -729,24 +736,44 @@ export class PaintDoc {
   }
 
   // 解组：组的 children 提到组在 parent 的原位（保序），删组。返回 { ok, childIds } 或 { ok:false }。
-  ungroup(groupId: number) {
+  // ---- 树 op 的**纯前置谓词**（SSoT 留在模型层）----
+  // 给 runTreeOp 的 guard 用：调用方需要在"烤定用户 transient 之前"知道这次操作会不会发生，
+  //   而 ungroup/moveIntoGroup/moveOutOfGroup 是 try-and-report 式 API（判定与变更同体）。
+  //   把判定抽出来给它们自己复用，调用方就不必复制一份、也不会漂移。
+  canUngroup(groupId: number): boolean {
     const loc = findParentOf(this.layers, groupId);
-    if (!loc || !loc.node.isGroup) return { ok: false, reason: "not-group" };
-    const kids = loc.node.children;
-    loc.parent.splice(loc.index, 1, ...kids);
-    if (!findNodeById(this.layers, this.activeId)) {
-      this.activeId = kids[0] ? kids[0].id : (flattenLeaves(this.layers).slice(-1)[0]?.id ?? null);
-    }
-    return { ok: true, childIds: kids.map((k) => k.id) };
+    return !!(loc && loc.node.isGroup);
   }
-
-  // 把节点移入组（到组内顶部 = children 末尾）。拒绝把组移进自己的子孙。返回 ok。
-  moveIntoGroup(id: number, groupId: number) {
+  canMoveIntoGroup(id: number, groupId: number): boolean {
     if (id === groupId) return false;
     const g = findNodeById(this.layers, groupId);
     const node = findNodeById(this.layers, id);
     if (!g || !g.isGroup || !node) return false;
     if (node.isGroup && findNodeById(node.children, groupId)) return false;   // g 是 node 后代 → 环
+    return true;
+  }
+  canMoveOutOfGroup(id: number): boolean {
+    const loc = findParentOf(this.layers, id);
+    if (!loc || !loc.parentNode) return false;
+    return !!findParentOf(this.layers, loc.parentNode.id);
+  }
+
+  ungroup(groupId: number) {
+    if (!this.canUngroup(groupId)) return { ok: false, reason: "not-group" };
+    const loc = findParentOf(this.layers, groupId)!;
+    const kids = (loc.node as LayerGroup).children;   // canUngroup 已保证是组（谓词外置后 TS 无法就地收窄）
+    loc.parent.splice(loc.index, 1, ...kids);
+    if (!findNodeById(this.layers, this.activeId)) {
+      this.activeId = kids[0] ? kids[0].id : (flattenLeaves(this.layers).slice(-1)[0]?.id ?? null);
+    }
+    return { ok: true, childIds: kids.map((k: Node) => k.id) };
+  }
+
+  // 把节点移入组（到组内顶部 = children 末尾）。拒绝把组移进自己的子孙。返回 ok。
+  moveIntoGroup(id: number, groupId: number) {
+    if (!this.canMoveIntoGroup(id, groupId)) return false;
+    const g = findNodeById(this.layers, groupId) as LayerGroup;
+    const node = findNodeById(this.layers, id)!;
     const loc = findParentOf(this.layers, id)!;
     loc.parent.splice(loc.index, 1);
     g.children.push(node);
@@ -755,13 +782,38 @@ export class PaintDoc {
 
   // 把节点移出其所在组（提到组的同级、组之上）。已在根 → no-op。返回 ok。
   moveOutOfGroup(id: number) {
-    const loc = findParentOf(this.layers, id);
-    if (!loc || !loc.parentNode) return false;
-    const gloc = findParentOf(this.layers, loc.parentNode.id);
-    if (!gloc) return false;
+    if (!this.canMoveOutOfGroup(id)) return false;
+    const loc = findParentOf(this.layers, id)!;
+    const gloc = findParentOf(this.layers, loc.parentNode!.id)!;
     const [n] = loc.parent.splice(loc.index, 1);
     gloc.parent.splice(gloc.index + 1, 0, n);
     return true;
+  }
+
+  // ---- 离树物化护栏（缺陷 A）----
+  // 不变量：**任何叶子离开图层树之前，必须自带 CPU 像素。**
+  //
+  // 为什么需要：GL 侧的 TileResidency 允许把非活动层的 CPU raw 驱逐掉（省 ~16MB/满层），像素只留在
+  //   GPU tiles + 压缩备份里；而 GLDocRenderer.syncAll 没有单独的删层钩子，**用「树差」当删层信号**——
+  //   不在当前树里的 id 一律 dropLayer + forgetExcept，两份副本一起销毁。这对真删除是对的，但 undo
+  //   的存在否定了「离树 = 永久删除」这个前提：restoreTree 保的是活引用、零像素拷贝，撤销时把同一个
+  //   Layer 对象重挂回来——对象回来了，像素已经被回收了。
+  // 时机：必须在 detach **之前**调（此刻 GPU tiles 还活着，readback 必成功）；syncAll 要到下一帧 rAF
+  //   才跑，所以这个窗口是稳的。
+  // 代价（诚实交代）：物化后该层占 raw ≈ 16MB/满 2K 层，换掉的是即将被销毁的压缩备份。单叶删除无人
+  //   持有 → readback 后即 GC；删组时 treeStructure 的 before 快照会持有它 → 由 handler 的 dispose 释放。
+  //
+  // 返回物化**失败**的层 id（GL context 已丢，provider 拿不到 tiles）。模型层保持无 DOM，故经
+  //   onMaterializeFailure 钩子交给 app 层报红条——静默丢层正是 CLAUDE.md 禁止的煤气灯。
+  materializeDetaching(beforeNodes: Node[], afterNodes: Node[]): number[] {
+    const live = new Set(flattenLeaves(afterNodes).map((L) => L.id));
+    return this._materializeLeaves(flattenLeaves(beforeNodes).filter((L) => !live.has(L.id)));
+  }
+  _materializeLeaves(leaves: Layer[]): number[] {
+    const failed: number[] = [];
+    for (const L of leaves) if (!L.pixels.forceResident()) failed.push(L.id);
+    if (failed.length) this.onMaterializeFailure?.(failed);
+    return failed;
   }
 
   // ---- 结构撤销底座：保叶子**活引用**（零像素拷贝）+ 组记录 ----
@@ -778,14 +830,29 @@ export class PaintDoc {
   restoreTree(snap: { activeId: number | null; nodes: TreeSnapNode[] } | null) {
     if (!snap) return;
     const build = (rec: TreeSnapNode): Node => {
-      if (!rec.isGroup) return rec.ref;     // 同一个活 Layer 对象
+      if (!rec.isGroup) {
+        // **按 id 在当前树里解析**，只有该叶确实已离树时才回退到快照存的对象引用。
+        //   为什么不能直接用 rec.ref：结构快照存的是活对象指针（零拷贝），但**别的** undo 路径会把
+        //   Layer 对象整批换掉——docTransform.undo 的 restoreSnapshotAll 用同样的 id 重建全新对象，
+        //   而正向的 crop/flip/rotate/offset 又是就地 setPixels 改老对象。于是
+        //   「做个树操作 → 翻转画布 → 撤销翻转 → 再撤销树操作」会把**已翻转的孤儿对象**挂回树里：
+        //   画面静默镜像；crop 情形更糟，孤儿的 LayerPixels.docW/_across 还是裁切后的几何，
+        //   与 doc 尺寸不符 → 之后越界的 putRegion 被静默裁掉。
+        //   身份是 id，不是对象指针——按 id 解析即可免疫任何"对象被换掉"的路径。
+        const cur = findNodeById(this.layers, rec.ref.id);
+        return cur && !cur.isGroup ? cur : rec.ref;
+      }
       const g = new LayerGroup({ name: rec.name });
       g.id = rec.id; g.visible = rec.visible; g.opacity = rec.opacity; g.mode = rec.mode;
       g.clippingMask = rec.clippingMask; g.collapsed = !!rec.collapsed;
       g.children = rec.children.map(build);
       return g;
     };
-    this.layers = snap.nodes.map(build);
+    const next = snap.nodes.map(build);
+    // undo/redo 结构变更同样会让叶子离树——**redo 尤其**：treeStructure.redo 直接调本方法重放
+    // 「删组」，不经过 layers-panel。所以护栏必须在这里，不能只包 UI 调用点。
+    this.materializeDetaching(this.layers, next);
+    this.layers = next;
     reseedLayerIdCounter(this.layers);
     if (snap.activeId != null && findNodeById(this.layers, snap.activeId)) {
       this.activeId = snap.activeId;

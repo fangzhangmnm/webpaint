@@ -35,7 +35,7 @@ function _captureDocAfter() {
 function _pushDocTransform(before: unknown, after: unknown, label: string) {
   history.push({ type: "docTransform", before, after });   // history.push 同步派 wp:histchange → 编辑门已标游标+云脏（无需再标）
   if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-  board.invalidateAll();
+  board.invalidateStructure();   // doc 变换换掉了全部图层（restoreSnapshotAll）+ doc 尺寸 → 结构脏
   bumpDoc();
   setStatus(label);
 }

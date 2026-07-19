@@ -38,9 +38,18 @@ class StubCanvas {
   constructor(w, h) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(w * h * 4); this._ctx = new StubCtx(this); }
   getContext() { return this._ctx; }
 }
-globalThis.OffscreenCanvas = StubCanvas;
-
+// **per-test 安装 stub**（与 layer-tree/ora-tree 的 T() 同约定）。
+// 曾经这里只在模块顶层设一次全局、且从不还原，然后依赖它在 it() 体跑的时候还活着——但别的测试文件
+// 是「设 stub → 动态 import → 还原成 import 前的值」，谁的还原恰好排在这句之后，就把这份 stub 抹掉了。
+// 于是「run.mjs 里新增一个 TLA 模块」就能让本文件莫名转红（历史上反复中招，见 layer-tree/ora-tree 的
+// 头注释）。改成每个 it() 开头自己装，顺序无关，不再需要靠 await 个数去碰运气。
+const _prevOSC = globalThis.OffscreenCanvas;
+function useStub() { globalThis.OffscreenCanvas = StubCanvas; }
+useStub();
 const { Selection } = await import("../src/selection.ts");
+globalThis.OffscreenCanvas = _prevOSC;
+
+const T = (name, fn) => it(name, (...a) => { useStub(); return fn(...a); });
 
 // mask 局部 (lx,ly) 的 alpha
 function maskA(sel, lx, ly) {
@@ -54,12 +63,12 @@ function count255(sel) {
 }
 
 describe("Selection.morphed · 硬扩张/收缩", () => {
-  it("expand 0 = 原对象不变（同引用）", () => {
+  T("expand 0 = 原对象不变（同引用）", () => {
     const s = Selection.full(4, 4, 3, 3);
     assert(s.morphed(0, 20, 20) === s, "radius 0 应原样返回");
   });
 
-  it("expand +1：实心 4×4 → bbox 外扩 1，6×6 全实心", () => {
+  T("expand +1：实心 4×4 → bbox 外扩 1，6×6 全实心", () => {
     const s = Selection.full(4, 4, 3, 3);          // (3,3) 处 4×4
     const e = s.morphed(1, 20, 20);
     assert(e.bboxX === 2 && e.bboxY === 2, `bbox 应外扩到 (2,2)，实得 (${e.bboxX},${e.bboxY})`);
@@ -67,7 +76,7 @@ describe("Selection.morphed · 硬扩张/收缩", () => {
     assert(count255(e) === 36, `应全 36 实心，实得 ${count255(e)}`);
   });
 
-  it("shrink −1：实心 4×4 → bbox 不变，中心 2×2 留存", () => {
+  T("shrink −1：实心 4×4 → bbox 不变，中心 2×2 留存", () => {
     const s = Selection.full(4, 4, 3, 3);
     const e = s.morphed(-1, 20, 20);
     assert(e.bboxX === 3 && e.bboxY === 3 && e.bboxW === 4 && e.bboxH === 4, "收缩沿用原 bbox");
@@ -76,12 +85,12 @@ describe("Selection.morphed · 硬扩张/收缩", () => {
     assert(maskA(e, 0, 0) === 0 && maskA(e, 3, 3) === 0, "四角被腐蚀");
   });
 
-  it("shrink −2：实心 4×4 腐蚀光 → null", () => {
+  T("shrink −2：实心 4×4 腐蚀光 → null", () => {
     const s = Selection.full(4, 4, 3, 3);
     assert(s.morphed(-2, 20, 20) === null, "腐蚀到空应返 null");
   });
 
-  it("expand 在 doc 边界 clamp：贴角 2×2 + expand 5 → 不越界", () => {
+  T("expand 在 doc 边界 clamp：贴角 2×2 + expand 5 → 不越界", () => {
     const s = Selection.full(2, 2, 0, 0);          // 贴 (0,0)
     const e = s.morphed(5, 3, 3);                   // doc 仅 3×3
     assert(e.bboxX === 0 && e.bboxY === 0, "左上 clamp 到 0");

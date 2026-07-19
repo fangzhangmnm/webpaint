@@ -760,6 +760,8 @@ export const S = {
   "se.duplicatedAsFloat": { zh: "已复制选区为浮层（拖动定位 → 应用 / 取消）", en: "Duplicated selection as a floating layer (drag to position → apply / cancel)", ja: "選択範囲をフローティングに複製しました（ドラッグで配置 → 適用 / キャンセル）" },
   "se.undoCreateLayer": { zh: "已撤销创建图层「{name}」", en: "Undid creating layer \"{name}\"", ja: "レイヤー「{name}」の作成を取り消しました" },
   "se.restoredLayer": { zh: "已恢复图层「{name}」", en: "Restored layer \"{name}\"", ja: "レイヤー「{name}」を復元しました" },
+  // 离树物化失败（GL context 在删层瞬间丢失）——像素可能不完整，提醒人类别覆盖存盘。
+  "err.layerMaterializeFailed": { zh: "图层 {ids} 的像素未能取回（显卡上下文丢失），撤销后可能不完整——请先另存备份", en: "Could not retrieve pixels for layer {ids} (GPU context lost); undo may be incomplete — save a backup copy first", ja: "レイヤー {ids} のピクセルを取得できませんでした（GPU コンテキスト消失）。取り消し後に欠損の可能性——先に別名保存を" },
   "se.deletedLayer": { zh: "已删除图层「{name}」", en: "Deleted layer \"{name}\"", ja: "レイヤー「{name}」を削除しました" },
   "se.undoMergeRestore": { zh: "已撤销合并 · 恢复「{name}」", en: "Undid merge · restored \"{name}\"", ja: "結合を取り消し ·「{name}」を復元しました" },
   "se.mergedDown": { zh: "已向下合并", en: "Merged down", ja: "下のレイヤーと結合しました" },

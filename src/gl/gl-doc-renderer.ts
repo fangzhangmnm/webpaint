@@ -41,6 +41,27 @@ export interface StampOverlayInput {
   selMask: { canvas: CanvasImageSource; ox: number; oy: number; ow: number; oh: number } | null;
 }
 
+// 待驱逐清单的**纯决策**（抽出来给 node 测；GLDocRenderer 构造函数急切创建 4 个 GL 对象、
+//   类在 node 里造不出来，但这段逻辑一个 GL 对象都不碰——"类构造不了"不等于"逻辑测不了"）。
+//   · 已离树的叶：**永不驱逐**——它的像素此刻只剩 CPU raw 这一份（GPU tiles 已被 syncAll 回收），
+//     驱逐即永久丢失。从待办里去掉（它不会再回到这个对象身份上）。
+//   · 在树但 GPU 上还没有它的 tiles：**留到下一帧**（驱逐后无处 readback；下次 syncAll 后就有了）。
+//   · 在树且有 tiles：驱逐。
+export function planEvictions(
+  pending: Iterable<DocLeaf>,
+  liveLeaves: Set<DocLeaf>,
+  hasTiles: (id: number) => boolean,
+): { evict: DocLeaf[]; keep: Set<DocLeaf> } {
+  const evict: DocLeaf[] = [];
+  const keep = new Set<DocLeaf>();
+  for (const leaf of pending) {
+    if (!liveLeaves.has(leaf)) continue;          // 离树 → 丢弃待办，绝不驱逐
+    if (!hasTiles(leaf.id)) { keep.add(leaf); continue; }   // 还没上 GPU → 下帧再说
+    evict.push(leaf);
+  }
+  return { evict, keep };
+}
+
 export class GLDocRenderer {
   private _glctx: GLContext;
   private _backend: GLTileBackend;
@@ -57,6 +78,8 @@ export class GLDocRenderer {
   // 冷层驻留：活动层 pin、切走的层备份后驱逐 CPU raw（省 ~16MB/满层），只留 GPU tiles + 压缩备份。
   private _residency = new TileResidency();
   private _activeLeaf: DocLeaf | null = null;
+  private _pendingEvict = new Set<DocLeaf>();     // 待驱逐的前活动叶（见 setActiveLeaf/drainPendingEvict）
+  private _surrogateId: number | null = null;    // 当前有调色替身的层（必须 pin：见 applySurrogate）
 
   constructor(glctx: GLContext, capacity: number, accumPrec: FBOPrec = "f16") {
     this._glctx = glctx;
@@ -85,10 +108,30 @@ export class GLDocRenderer {
     const prev = this._activeLeaf;
     if (prev && (!leaf || prev.id !== leaf.id)) {
       this._residency.unpin(prev.id);
-      void this._backupAndEvict(prev);
+      // **不在这里立刻驱逐**：board 每帧先调本方法、再 render，所以「删掉含活动层的组」时，这里拿到的
+      //   prev 是一个**刚离树**的 Layer 对象，而树差对账（syncAll）要到 render 里才跑。当场驱逐 =
+      //   把 doc.materializeDetaching 刚为它物化出来的 raw 又丢掉，随后 syncAll 再 dropLayer 掉它的
+      //   GPU tiles 和备份 → 三份副本全没 → 撤销复活空壳层 + 每帧抛 LAYER_NOT_SYNCED。
+      //   （这正是缺陷 A 被"晚一帧"重新打开的口子。）
+      // 改为登记待驱逐，由 drainPendingEvict 在**拿得到当前树**的时候做成员校验后再执行。
+      // 用 **Set 而非单槽**：gl-board.render 在 context-lost / recovering 时会早返回、drain 跑不到，
+      //   而 setActiveLeaf 是在 render **之外**每帧被调的 → 单槽会被后来者覆盖，前一个永不被驱逐
+      //   （内存回归）。Set 让它们攒着，等第一个跑完整的帧一起处理。上界 = 图层数。
+      this._pendingEvict.add(prev);
     }
     this._activeLeaf = leaf;
     if (leaf) this._residency.pin(leaf.id);
+  }
+
+  // 执行待驱逐（gl-board 在 syncAll 之后调，此刻 nodes 是当前树）。离树的叶**绝不驱逐**——它的像素
+  //   此时只剩 CPU raw 这一份（GPU tiles 已被 syncAll 回收），驱逐即永久丢失。
+  drainPendingEvict(nodes: DocNode[]): void {
+    if (this._pendingEvict.size === 0) return;
+    const live = new Set<DocLeaf>();
+    this._eachLeaf(nodes, (l) => live.add(l));
+    const plan = planEvictions(this._pendingEvict, live, (id) => this._layerTiles.has(id));
+    this._pendingEvict = plan.keep;
+    for (const leaf of plan.evict) void this._backupAndEvict(leaf);
   }
 
   private async _backupAndEvict(leaf: DocLeaf): Promise<void> {
@@ -131,6 +174,25 @@ export class GLDocRenderer {
   // 把一张 canvas（doc (bx,by) 起 w×h）当某层的 GPU tiles 上传（颜色调整 live preview 的替身 surrogate）。
   //   **非破坏**：不碰 layer.pixels（真 SoT），只覆盖该层 GPU tiles；surrogate 清除后 board markContentDirty →
   //   syncAll 从真像素重传恢复。临时 LayerPixels（preview 滑块驱动，非每帧热循环）。
+  // 每帧由 gl-board 调（null = 本帧没有替身）。除了上传替身，还负责**把替身层 pin 住**。
+  //
+  // 为什么 pin 是必需的、而不是"反正替身层就是活动层所以已经 pin 了"：那个前提不成立。图层面板的行
+  //   点击（layers-panel 的 onRowClick）只调 doc.setActiveById，**不**关调色面板、也不烤定 transient；
+  //   于是 setActiveLeaf 会 unpin 并驱逐前活动层 A，而此刻 _layerTiles[A] 里装的是**替身**。之后任何
+  //   一次读 A.pixels（缩略图/自动保存/导出/undo 快照）都会经 _ensureResident → _readbackProvider →
+  //   把预览像素 adopt 成 CPU 真值：静默、无 undo entry、连按「取消」也救不回来（取消只清替身，
+  //   而 syncLayer 因 A 已驱逐而早退，覆盖不回去）。
+  //   pin 住就把这条路堵死在源头：A 不被驱逐 → 永不 readback → 关面板后 syncAll 用真像素重传。
+  applySurrogate(s: SurrogateInput | null, docW: number, docH: number): void {
+    const prevId = this._surrogateId;
+    const nextId = s ? s.layerId : null;
+    if (prevId !== null && prevId !== nextId && prevId !== this._activeLeaf?.id) this._residency.unpin(prevId);
+    this._surrogateId = nextId;
+    if (!s) return;
+    this._residency.pin(s.layerId);
+    this.syncLayerFromCanvas(s.layerId, s.canvas, s.bx, s.by, s.w, s.h, docW, docH);
+  }
+
   syncLayerFromCanvas(leafId: number, canvas: CanvasImageSource, bx: number, by: number, w: number, h: number, docW: number, docH: number): void {
     const tmp = new LayerPixels(docW, docH);
     replaceFromCanvas(tmp, canvas, bx, by, w, h);
@@ -283,6 +345,15 @@ export class GLDocRenderer {
   returnFBO(fbo: PooledFBO): void { this._glctx.returnFBO(fbo); }
 
   private _composite(nodes: DocNode[], docW: number, docH: number, bg?: Background): PooledFBO {
+    try {
+      return this._compositeInner(nodes, docW, docH, bg);
+    } finally {
+      // **必须在 finally**：docTreeToComp 的叶解析器会抛 LAYER_NOT_SYNCED，早年那条 throw 会越过下面
+      //   这句归还 → 每抛一帧漏一个 doc 尺寸 FBO。抛错本身已被结构脏修掉，但归还不该依赖“不抛”。
+      if (this._overlayOwnedFBO) { this._glctx.returnFBO(this._overlayOwnedFBO); this._overlayOwnedFBO = null; }
+    }
+  }
+  private _compositeInner(nodes: DocNode[], docW: number, docH: number, bg?: Background): PooledFBO {
     const ov = this._overlay;
     const tree = docTreeToComp(
       nodes,
@@ -294,9 +365,7 @@ export class GLDocRenderer {
       ov ? (leaf): OverlayDesc | null => (leaf.id === ov.layerId ? { tex: ov.tex, opacity: ov.opacity, erase: ov.erase, blendMode: safeMode(ov.blendMode), ox: ov.ox, oy: ov.oy, ow: ov.ow, oh: ov.oh, lockAlpha: ov.lockAlpha, selMask: ov.selMask } : null) : undefined,
       this._floats.size ? (leaf): FloatDesc | null => this._floats.get(leaf.id) ?? null : undefined,
     );
-    const result = this._comp.composite(this._backend.texture, tree, docW, docH, bg);
-    if (this._overlayOwnedFBO) { this._glctx.returnFBO(this._overlayOwnedFBO); this._overlayOwnedFBO = null; }   // overlay tex 已烤进 accum
-    return result;
+    return this._comp.composite(this._backend.texture, tree, docW, docH, bg);   // overlay tex 已烤进 accum；FBO 由 _composite 的 finally 归还
   }
 
   private _eachLeaf(nodes: DocNode[], fn: (leaf: DocLeaf) => void): void {

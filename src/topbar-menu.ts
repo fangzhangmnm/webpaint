@@ -16,7 +16,7 @@
 //   input / doc / board / history / editMode / setStatus / updateSaveStatus / updateZoomLabel /
 //   gallery / rack。
 // 直接 import（leaf/singleton）：session、els、openInputSheet/openConfirmSheet/lockSyncGate、
-//   setMenuOpen、decodeOraToDoc、compressPixelSnap 等（以实际 import 块为准）。
+//   setMenuOpen、decodeOraToDoc 等（以实际 import 块为准）。
 
 import { session } from "./session-state.ts";
 import { isUnlocked } from "./crypto-state.ts";
@@ -26,7 +26,6 @@ import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { sessionNameConflict } from "./session-name.ts";
 import { decodeOraToDoc } from "./ora.ts";
-import { compressPixelSnap } from "./pixel-edit.ts";
 import { t } from "./i18n/index.ts";
 import type { Layer, PaintDoc } from "./doc.ts";
 
@@ -37,6 +36,7 @@ const errMsg = (e: unknown): string => String((e as { message?: unknown })?.mess
 let input: AppContext["input"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], editMode: AppContext["editMode"];
 let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"], updateZoomLabel: AppContext["updateZoomLabel"];
 let gallery: AppContext["gallery"], rack: AppContext["rack"];
+let pixelHistory: AppContext["pixelHistory"];
 
 // 通用 sheet 开关（清空图层 sheet 等）——纯 class toggle，无状态。
 function openSheet(sheet: HTMLElement, backdrop: HTMLElement) {
@@ -53,6 +53,7 @@ export function initTopbarMenu(ctx: AppContext) {
   doc = ctx.doc;
   board = ctx.board;
   history = ctx.history;
+  pixelHistory = ctx.pixelHistory;
   editMode = ctx.editMode;
   setStatus = ctx.setStatus;
   updateSaveStatus = ctx.updateSaveStatus;
@@ -78,14 +79,11 @@ export function initTopbarMenu(ctx: AppContext) {
     if (a !== "confirm") return;
     const layer = doc.activeLayer as Layer | null;
     if (!layer) return;
-    // 走 stroke handler 让 Ctrl+Z 能复活。before = 当前像素；after = 空层快照。
-    const before = layer.snapshot();
+    // 走 PixelEdit 事务（**唯一** stroke entry 构造点；图层面板那份「清空」也走同一条）。
+    const tx = pixelHistory.begin(layer, "stroke");
+    if (!doc.findLayer(layer.id)) return;   // 同 layers-panel：确认仍在树里再动像素
     doc.clearActiveLayer();
-    const after = layer.snapshot();
-    const entry: { type: string; layerId: number; before: unknown; after: unknown; beforeBlob: Blob | null; afterBlob: Blob | null } = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-    history.push(entry);
-    compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after  as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.afterBlob  = blob; });
+    if (!tx.commit()) return;
     board.invalidateAll();
     setStatus(t("tm.clearedActiveLayer"));
   });

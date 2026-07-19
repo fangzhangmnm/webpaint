@@ -30,6 +30,7 @@ import { els } from "./els.ts";
 import { editorState } from "./editor-state.ts";
 import { raiseWindow } from "./surfaces.ts";
 import { compressPixelSnap } from "./pixel-edit.ts";
+import { runTreeOp } from "./tree-ops.ts";   // 树结构变更的提交信封（见该模块头注释）
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";
 
@@ -60,6 +61,7 @@ interface LayerRowData {
 interface LayerRowProps { layer: LayerLeafSnap; depth: number; isGroup: boolean; }
 
 let doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
+let pixelHistory: AppContext["pixelHistory"];
 // 留在 app.js、经 ctx 绑入的协作件（被非图层代码也调用）
 let _afterDocChange: AppContext["afterDocChange"], layerSpecFrom: AppContext["layerSpecFrom"];
 
@@ -148,13 +150,13 @@ function _deleteLayer(L: LayerNode | null) {
   // 组删除：连带 children，撤销底座 = snapshotTree（保叶活引用）。
   // 允许删非空组（含删到 0 叶）—— 删空了就补一张空层保 ≥1 叶（不卡在「非空组删不掉」）。
   if (L.isGroup) {
-    const before = doc.snapshotTree();
-    doc.removeLayer(L.id, true);
-    if (countLeaves(doc.layers) === 0) doc.addLayer();   // 清空 → 补空层
-    const after = doc.snapshotTree();
-    history.push({ type: "treeStructure", before, after,
-      undoStatus: t("lp.st.restoredGroup", { name: L.name }), redoStatus: t("lp.st.deletedGroup", { name: L.name }) });
-    _afterDocChange();
+    runTreeOp(
+      { undo: t("lp.st.restoredGroup", { name: L.name }), redo: t("lp.st.deletedGroup", { name: L.name }) },
+      () => {
+        doc.removeLayer(L.id, true);
+        if (countLeaves(doc.layers) === 0) doc.addLayer();   // 清空 → 补空层
+      },
+    );
     return;
   }
   const loc = doc.locateNode(L.id)!;                   // 先记位置（removeLayer 后就找不到了）
@@ -167,51 +169,52 @@ function _deleteLayer(L: LayerNode | null) {
 // ---- 图层组 op caller（都走 snapshotTree 结构撤销；纯结构变、零像素拷贝）----
 // 新建**空**图层组（创建入口 = 「+」菜单；编组当前层已砍，靠空组 + 移入「某组」达成）。
 function _addEmptyGroup() {
-  const before = doc.snapshotTree();
-  const g = doc.addGroup();
-  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.deletedGroup", { name: g.name }), redoStatus: t("lp.st.newGroup", { name: g.name }) });
-  _afterDocChange();
-  setStatus(t("lp.st.newGroupColon", { name: g.name }));
+  let g: ReturnType<typeof doc.addGroup>;
+  // labels 传函数 → 在 applyFn 之后求值（组名要等 addGroup() 返回才知道）。
+  runTreeOp(
+    () => ({ undo: t("lp.st.deletedGroup", { name: g.name }), redo: t("lp.st.newGroup", { name: g.name }),
+             status: t("lp.st.newGroupColon", { name: g.name }) }),
+    () => { g = doc.addGroup(); },
+  );
 }
 function _ungroupLayer(L: LayerNode | null) {
   if (!L || !L.isGroup) return;
-  const before = doc.snapshotTree();
-  if (!doc.ungroup(L.id).ok) return;
-  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.regrouped"), redoStatus: t("lp.st.ungrouped") });
-  _afterDocChange();
-  setStatus(t("lp.st.ungroupedName", { name: L.name }));
+  runTreeOp(
+    { undo: t("lp.st.regrouped"), redo: t("lp.st.ungrouped"), status: t("lp.st.ungroupedName", { name: L.name }) },
+    () => doc.ungroup(L.id).ok,
+    () => doc.canUngroup(L.id),
+  );
 }
 function _moveIntoGroup(L: LayerNode | null, groupId: number) {
   if (!L || groupId == null) return;
-  const before = doc.snapshotTree();
-  if (!doc.moveIntoGroup(L.id, groupId)) return;
-  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.movedOut"), redoStatus: t("lp.st.movedIn") });
-  _afterDocChange();
-  setStatus(t("lp.st.movedInColon", { name: L.name }));
+  runTreeOp(
+    { undo: t("lp.st.movedOut"), redo: t("lp.st.movedIn"), status: t("lp.st.movedInColon", { name: L.name }) },
+    () => doc.moveIntoGroup(L.id, groupId),
+    () => doc.canMoveIntoGroup(L.id, groupId),
+  );
 }
 function _moveOutOfGroup(L: LayerNode | null) {
   if (!L) return;
-  const before = doc.snapshotTree();
-  if (!doc.moveOutOfGroup(L.id)) return;
-  history.push({ type: "treeStructure", before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.movedBack"), redoStatus: t("lp.st.movedOut") });
-  _afterDocChange();
-  setStatus(t("lp.st.movedOutColon", { name: L.name }));
+  runTreeOp(
+    { undo: t("lp.st.movedBack"), redo: t("lp.st.movedOut"), status: t("lp.st.movedOutColon", { name: L.name }) },
+    () => doc.moveOutOfGroup(L.id),
+    () => doc.canMoveOutOfGroup(L.id),
+  );
 }
 // v132：清空当前图层像素，保留图层 + 名字 + opacity / mode，bbox 归零
 function _clearLayerPixels(L: LayerNode | null) {
   if (!L) return;
   // 清空像素是叶专属 op（template gates on !isGroup）；组无 bbox/snapshot → 就地 as Layer 视之。
   if ((L as Layer).bboxW <= 0 || (L as Layer).bboxH <= 0) { setStatus(t("lp.st.alreadyEmpty")); return; }
-  const before = (L as Layer).snapshot() as LayerSpec;
-  (L as Layer).restoreFromSnapshot({ bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null, bitmap: null });
-  const after = (L as Layer).snapshot() as LayerSpec;
-  history.push({ type: "stroke", layerId: L.id, before, after, beforeBlob: null, afterBlob: null });
-  compressPixelSnap(before, (blob: Blob | null) => { before.blob = blob; });
-  compressPixelSnap(after,  (blob: Blob | null) => { after.blob  = blob; });
+  // 走 PixelEdit 事务（**唯一** stroke entry 构造点）。曾经这里手搓 entry，且把压缩结果写进
+  //   `before.blob` 而 handler 读的是 `e.beforeBlob` → 压缩一落地 imageData 被置 null、两头皆空 →
+  //   撤销恢复出「旧 bbox + 零像素」，静默丢画且是竞态（压缩前撤销反而正常）。见 v439。
+  const tx = pixelHistory.begin(L as Layer, "stroke");
+  // 先确认这层还在树里再动像素：commit() 返 false 的唯一原因就是它已不在树中，
+  //   而那时像素若已被 clearAll() 抹掉，就是"无 entry、无重绘、无提示"的静默不可恢复清空。
+  if (!doc.findLayer(L.id)) return;
+  (L as Layer).clearAll();
+  if (!tx.commit()) return;
   _afterDocChange();
   board.invalidateAll();
   setStatus(t("lp.st.cleared", { name: L.name }));
@@ -706,7 +709,7 @@ function _syncChrome() {
 let _layersDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
 
 export function initLayersPanel(ctx: AppContext) {
-  ({ doc, board, history, setStatus, afterDocChange: _afterDocChange, layerSpecFrom } = ctx);
+  ({ doc, board, history, setStatus, pixelHistory, afterDocChange: _afterDocChange, layerSpecFrom } = ctx);
 
   // 挂 Vue 应用到图层列表容器（旧 renderLayersPanel 渲染进的 #layersList）。
   _vueApp = createApp(LayersPanel);

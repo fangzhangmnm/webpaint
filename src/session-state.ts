@@ -176,7 +176,7 @@ function adoptModel(loaded: LoadedDoc) {
     resetEditorState();
     els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
     input.clearHistory();
-    board.invalidateAll(); board.requestRender(); renderLayersPanel();
+    board.invalidateStructure(); board.requestRender(); renderLayersPanel();   // 载入新 doc = 全新一批叶
     // 版本降级检测：写这画的 WebPaint 版本 > 当前 → 警告（守卫 saveNow/saveAndPush 覆盖）。
     _loadedDocIsNewer = false; _loadedDocNewerConfirmed = false;
     const writerN = parseAppVersion(loaded._wroteWith), selfN = parseAppVersion(WEBPAINT_VERSION);
@@ -414,7 +414,7 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
   els.canvasSizeLabel.textContent = `${w}×${h}`;
   if (fillLayer0) fillLayer0(doc.layers[0]);
   _setActive(name); _recomputePhase();
-  _enc.encrypted = false; input.clearHistory(); board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
+  _enc.encrypted = false; input.clearHistory(); board.invalidateStructure(); board.fitToScreen(); renderLayersPanel();   // 新建空 doc = 全新叶
   resetEditorState();
   applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
   es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。

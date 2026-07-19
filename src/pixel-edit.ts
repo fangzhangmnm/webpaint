@@ -32,8 +32,8 @@ type LayerSnapArg = Parameters<Layer["restoreFromSnapshot"]>[0];
 interface PixelEntry extends UndoEntry {
   type: string;
   layerId: number;
-  before: PixelSnap;
-  after: PixelSnap;
+  before: PixelSnap | null;   // dispose 后置 null（entry 被淘汰即放手；applyPixelSnap 本就收 null）
+  after: PixelSnap | null;
   beforeBlob: Blob | null;
   afterBlob: Blob | null;
 }
@@ -136,7 +136,15 @@ export class PixelEdit {
       history.registerHandler(type, {
         undo: (e: PixelEntry) => applyPixelSnap(this.doc, e.layerId, e.before, e.beforeBlob, this.board),
         redo: (e: PixelEntry) => applyPixelSnap(this.doc, e.layerId, e.after,  e.afterBlob,  this.board),
-        refsLayer: (e: PixelEntry, id: number) => e.layerId === id,
+        // 契约：像素 entry 必须自带 beforeBlob/afterBlob 这两个**槽**（值可以先是 null，压缩是异步的）。
+        //   缺槽 = push 方手搓了别的壳、压缩结果会落到没人读的字段上 → 撤销恢复出空像素（缺陷 B）。
+        //   现在只有 PixelEditTx.commit 会造这种 entry，此校验是防它将来又被绕开。
+        validate: (e: PixelEntry) => {
+          if (typeof e.layerId !== "number") return "layerId 不是 number";
+          if (!("beforeBlob" in e) || !("afterBlob" in e)) return "缺 beforeBlob/afterBlob 槽（压缩结果会落到 handler 读不到的地方）";
+          return null;
+        },
+        dispose: (e: PixelEntry) => { e.before = null; e.after = null; e.beforeBlob = null; e.afterBlob = null; },
       } satisfies UndoHandler);
     }
   }
