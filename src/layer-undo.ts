@@ -41,7 +41,7 @@ export function initLayerUndo(ctx: AppContext) {
   //   addLayer.undo（撤销创建）：remove 后 active 落回兜底层，toast 提示
   history.registerHandler("addLayer", {
     undo: (e: UndoEntry) => {
-      doc.removeLayer(e.layerSpec.id);
+      doc.removeLayer(e.layerSpec.id, false, { materialize: false });   // 撤销"新建"：栈序保证此刻它是空层，且 spec 在 entry 里
       if (e.prevActiveId != null) doc.setActiveById(e.prevActiveId);   // 回到创建前的活动层（不误导）
       _afterDocChange();
       setStatus(t("se.undoCreateLayer", { name: e.layerSpec.name || "" }));
@@ -73,7 +73,7 @@ export function initLayerUndo(ctx: AppContext) {
       setStatus(t("se.restoredLayer", { name: spec.name || "" }));
     },
     redo: (e: UndoEntry) => {
-      doc.removeLayer(e.layerSpec.id);
+      doc.removeLayer(e.layerSpec.id, false, { materialize: false });   // e.layerSpec 自带 imageData/blob
       _afterDocChange();
       setStatus(t("se.deletedLayer", { name: e.layerSpec.name || "" }));
     },
@@ -112,7 +112,7 @@ export function initLayerUndo(ctx: AppContext) {
         under.mode = "source-over";
         under.clippingMask = !!e.resultClipping;   // 链内合并结果仍剪裁；基底合并结果转普通层
       }
-      doc.removeLayer(e.activeSpec.id);
+      doc.removeLayer(e.activeSpec.id, false, { materialize: false });   // e.activeSpec 自带像素
       doc.setActiveById(e.underId);
       _afterDocChange();
       setStatus(t("se.mergedDown"));
@@ -195,7 +195,7 @@ export function initLayerUndo(ctx: AppContext) {
   history.registerHandler("selectionToLayer", {
     undo: async (e: UndoEntry) => {
       // 1. 删 new layer
-      doc.removeLayer(e.newLayerSpec.id);
+      doc.removeLayer(e.newLayerSpec.id, false, { materialize: false });   // e.newLayerSpec 自带像素（layerSpecFrom + 异步 blob）
       // 2. 还原 active layer（仅 move 模式）
       if (e.isMove && e.beforeActive) {
         const L = doc.findLayer(e.activeLayerId);

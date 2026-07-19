@@ -41,6 +41,27 @@ export interface StampOverlayInput {
   selMask: { canvas: CanvasImageSource; ox: number; oy: number; ow: number; oh: number } | null;
 }
 
+// 待驱逐清单的**纯决策**（抽出来给 node 测；GLDocRenderer 构造函数急切创建 4 个 GL 对象、
+//   类在 node 里造不出来，但这段逻辑一个 GL 对象都不碰——"类构造不了"不等于"逻辑测不了"）。
+//   · 已离树的叶：**永不驱逐**——它的像素此刻只剩 CPU raw 这一份（GPU tiles 已被 syncAll 回收），
+//     驱逐即永久丢失。从待办里去掉（它不会再回到这个对象身份上）。
+//   · 在树但 GPU 上还没有它的 tiles：**留到下一帧**（驱逐后无处 readback；下次 syncAll 后就有了）。
+//   · 在树且有 tiles：驱逐。
+export function planEvictions(
+  pending: Iterable<DocLeaf>,
+  liveLeaves: Set<DocLeaf>,
+  hasTiles: (id: number) => boolean,
+): { evict: DocLeaf[]; keep: Set<DocLeaf> } {
+  const evict: DocLeaf[] = [];
+  const keep = new Set<DocLeaf>();
+  for (const leaf of pending) {
+    if (!liveLeaves.has(leaf)) continue;          // 离树 → 丢弃待办，绝不驱逐
+    if (!hasTiles(leaf.id)) { keep.add(leaf); continue; }   // 还没上 GPU → 下帧再说
+    evict.push(leaf);
+  }
+  return { evict, keep };
+}
+
 export class GLDocRenderer {
   private _glctx: GLContext;
   private _backend: GLTileBackend;
@@ -57,7 +78,7 @@ export class GLDocRenderer {
   // 冷层驻留：活动层 pin、切走的层备份后驱逐 CPU raw（省 ~16MB/满层），只留 GPU tiles + 压缩备份。
   private _residency = new TileResidency();
   private _activeLeaf: DocLeaf | null = null;
-  private _pendingEvict: DocLeaf | null = null;   // 待驱逐的前活动叶（见 setActiveLeaf/drainPendingEvict）
+  private _pendingEvict = new Set<DocLeaf>();     // 待驱逐的前活动叶（见 setActiveLeaf/drainPendingEvict）
   private _surrogateId: number | null = null;    // 当前有调色替身的层（必须 pin：见 applySurrogate）
 
   constructor(glctx: GLContext, capacity: number, accumPrec: FBOPrec = "f16") {
@@ -93,7 +114,10 @@ export class GLDocRenderer {
       //   GPU tiles 和备份 → 三份副本全没 → 撤销复活空壳层 + 每帧抛 LAYER_NOT_SYNCED。
       //   （这正是缺陷 A 被"晚一帧"重新打开的口子。）
       // 改为登记待驱逐，由 drainPendingEvict 在**拿得到当前树**的时候做成员校验后再执行。
-      this._pendingEvict = prev;
+      // 用 **Set 而非单槽**：gl-board.render 在 context-lost / recovering 时会早返回、drain 跑不到，
+      //   而 setActiveLeaf 是在 render **之外**每帧被调的 → 单槽会被后来者覆盖，前一个永不被驱逐
+      //   （内存回归）。Set 让它们攒着，等第一个跑完整的帧一起处理。上界 = 图层数。
+      this._pendingEvict.add(prev);
     }
     this._activeLeaf = leaf;
     if (leaf) this._residency.pin(leaf.id);
@@ -102,14 +126,12 @@ export class GLDocRenderer {
   // 执行待驱逐（gl-board 在 syncAll 之后调，此刻 nodes 是当前树）。离树的叶**绝不驱逐**——它的像素
   //   此时只剩 CPU raw 这一份（GPU tiles 已被 syncAll 回收），驱逐即永久丢失。
   drainPendingEvict(nodes: DocNode[]): void {
-    const leaf = this._pendingEvict;
-    this._pendingEvict = null;
-    if (!leaf) return;
-    let live = false;
-    this._eachLeaf(nodes, (l) => { if (l === leaf) live = true; });   // 比 id 更严：必须是**同一个对象**
-    if (!live) return;
-    if (!this._layerTiles.has(leaf.id)) return;   // GPU 上没有它 → 驱逐后无处 readback
-    void this._backupAndEvict(leaf);
+    if (this._pendingEvict.size === 0) return;
+    const live = new Set<DocLeaf>();
+    this._eachLeaf(nodes, (l) => live.add(l));
+    const plan = planEvictions(this._pendingEvict, live, (id) => this._layerTiles.has(id));
+    this._pendingEvict = plan.keep;
+    for (const leaf of plan.evict) void this._backupAndEvict(leaf);
   }
 
   private async _backupAndEvict(leaf: DocLeaf): Promise<void> {

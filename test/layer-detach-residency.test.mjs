@@ -183,3 +183,20 @@ describe("restoreTree 按 id 解析（缺陷 I：别的 undo 路径会换掉 Lay
     assert(d.findLayer(keep.id) === keep, "没动过的叶不受影响");
   });
 });
+
+describe("removeLayer 的物化 opt-out（v440 / R8）", () => {
+  TA("默认仍强制物化（缺陷 A 的护栏不得被 opt-out 削弱）", async () => {
+    const { d, leaf, g } = await setup();
+    assert(!leaf.pixels.isRawResident(), "前置：被驱逐");
+    assert(d.removeLayer(g.id, true), "删组（默认 materialize）");
+    assert(leaf.pixels.isRawResident(), "默认路径必须物化");
+  });
+
+  TA("materialize:false → 跳过物化（调用方自带像素时省掉逐 tile 阻塞 readback）", async () => {
+    const { d, leaf, g } = await setup();
+    assert(!leaf.pixels.isRawResident(), "前置：被驱逐");
+    assert(d.removeLayer(g.id, true, { materialize: false }), "删组（opt-out）");
+    assert(!leaf.pixels.isRawResident(),
+      "显式 opt-out 时不该物化——这条路径的调用方（undo/redo handler）entry 里本就带着像素");
+  });
+});

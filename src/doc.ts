@@ -483,12 +483,16 @@ export class PaintDoc {
 
   // 删除指定节点（id；叶或组——组连带 children）。默认 doc 至少留 1 个叶（守底）。
   //   allowEmpty=true：允许删到 0 叶（组删除用——清空后 caller 补一张空层，保证不卡在「非空组删不掉」）。
-  removeLayer(id: number, allowEmpty = false) {
+  // opts.materialize=false：**调用方保证自己已经持有这些叶的像素**（undo/redo handler 的 entry 里
+  //   带着 imageData/blob），因此不必为它们做离树物化。这不是优化洁癖：物化对**被驱逐**的层意味着
+  //   逐 tile 的阻塞式 gl.readPixels（满 2K 层 64 次），重建一份下一行就被丢弃的缓冲区。
+  //   默认 true —— 漏传只会变慢，不会丢数据；传错才会（所以只在能证明 entry 自带像素的地方传 false）。
+  removeLayer(id: number, allowEmpty = false, opts: { materialize?: boolean } = {}) {
     const loc = findParentOf(this.layers, id);
     if (!loc) return false;
     const removingLeaves = countLeaves([loc.node]);
     if (!allowEmpty && countLeaves(this.layers) - removingLeaves < 1) return false;
-    this._materializeLeaves(flattenLeaves([loc.node]));   // 离树前自带像素（见 materializeDetaching）
+    if (opts.materialize !== false) this._materializeLeaves(flattenLeaves([loc.node]));   // 离树前自带像素（见 materializeDetaching）
     loc.parent.splice(loc.index, 1);
     if (!findNodeById(this.layers, this.activeId)) {   // active 被删（或在被删组内）→ 重选末叶
       const leaves = flattenLeaves(this.layers);
