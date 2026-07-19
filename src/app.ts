@@ -15,7 +15,7 @@
 
 import { WEBPAINT_VERSION } from "./version.ts";
 import { initI18n, t, reconcileLangFromPrefs } from "./i18n/index.ts";   // 本地化：<html lang> + 静态 HTML data-i18n 填充
-import { PaintDoc } from "./doc.ts";
+import { PaintDoc, layerByteBudget } from "./doc.ts";
 import { Board } from "./board.ts";
 import { InputController } from "./input.ts";
 import { PixelEdit } from "./pixel-edit.ts";   // compressPixelSnap/applyPixelSnap 切到 layer-undo/topbar-menu
@@ -165,7 +165,13 @@ const _disposeSizeKeyboard = bindSizeKeyboard({ board, leftDial });
 // Undo / redo 共享栈（command pattern + 注册 handler，详见
 // docs/20260527-undo-architecture.md）。input.js 注册 "stroke" handler；layer
 // 操作的 5 个 handler 在下方 boot 段集中注册（四条纪律 #1）。
-const history = new UndoStack({ max: 50 });
+const history = new UndoStack({
+  max: 50,
+  // 字节上限：条数管不住"每条有多重"。treeStructure entry 吊着已离树图层的活引用（自 v439 起
+  //   它们在离树时被强制物化，~16MB/满 2K 层），删几个满内容的组就能占掉整个内存预算
+  //   （layerByteBudget 只有 256–768MB）。取预算的 1/4 给 undo 栈的重资源。
+  maxBytes: layerByteBudget() * 0.25,
+});
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。
 const editMode = new EditMode({ initialTool: "brush" });
 // 当前笔派生（dial+预设+color+压感 → ResolvedBrush，resolved-brush.ts）。input 前建（getResolvedBrush 读它）。

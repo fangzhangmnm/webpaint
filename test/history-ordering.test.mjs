@@ -209,3 +209,41 @@ describe("UndoStack · 缺 handler 不得锁死更老的历史（R3 回归）", 
     assert(h.index === -1, `应已撤到底，实得 index=${h.index}`);
   });
 });
+
+describe("UndoStack · 字节上限驱逐（R11：离树像素被钉在栈里）", () => {
+  it("总重量超上限 → 从最老的开始淘汰（并 dispose）", () => {
+    const h = new UndoStack({ max: 50, maxBytes: 100 });
+    const disposed = [];
+    h.registerHandler("t", {
+      undo: () => {}, redo: () => {},
+      weight: (e) => e.bytes,
+      dispose: (e) => disposed.push(e.n),
+    });
+    h.push({ type: "t", n: 1, bytes: 60 });
+    h.push({ type: "t", n: 2, bytes: 60 });   // 合计 120 > 100 → 淘汰最老的 n=1
+    eq(disposed.join(","), "1", "最老的被淘汰");
+    eq(h.entries.length, 1, "只剩一条");
+    eq(h.index, 0, "游标随之调整");
+  });
+
+  it("永不淘汰到空（至少留最后一条，哪怕它自己就超标）", () => {
+    const h = new UndoStack({ max: 50, maxBytes: 10 });
+    h.registerHandler("t", { undo: () => {}, redo: () => {}, weight: (e) => e.bytes });
+    h.push({ type: "t", bytes: 999 });
+    eq(h.entries.length, 1, "单条超标也保留——否则刚做的这步立刻不可撤销");
+  });
+
+  it("没有 weight 的 handler 记 0（不影响既有类型）", () => {
+    const h = new UndoStack({ max: 50, maxBytes: 10 });
+    h.registerHandler("t", { undo: () => {}, redo: () => {} });
+    for (let i = 0; i < 5; i++) h.push({ type: "t" });
+    eq(h.entries.length, 5, "无 weight → 不触发字节淘汰");
+  });
+
+  it("默认无字节上限（不传 maxBytes 时行为不变）", () => {
+    const h = new UndoStack({ max: 50 });
+    h.registerHandler("t", { undo: () => {}, redo: () => {}, weight: () => 1e9 });
+    h.push({ type: "t" }); h.push({ type: "t" });
+    eq(h.entries.length, 2, "不传上限就不淘汰");
+  });
+});

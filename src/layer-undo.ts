@@ -139,6 +139,22 @@ export function initLayerUndo(ctx: AppContext) {
     undo: (e: UndoEntry) => { doc.restoreTree(e.before); _afterDocChange(); if (e.undoStatus) setStatus(e.undoStatus); },
     redo: (e: UndoEntry) => { doc.restoreTree(e.after); _afterDocChange(); if (e.redoStatus) setStatus(e.redoStatus); },
     validate: (e: UndoEntry) => (e.before && e.after ? null : "缺 before/after 结构快照"),
+    // 本条 entry 实际吊住多少字节：只数**已离树**的叶（仍在树里的层不算这条 entry 的账，
+    //   它们本来就活着）。离树叶自 v439 起在离树时被强制物化 → 每片满 2K 层 ~16MB，
+    //   而内存预算只有 256–768MB：删几个满内容的组就能吃掉整个预算，条数上限（50）管不住。
+    weight: (e: UndoEntry) => {
+      const snap = e.before as { nodes?: unknown[] } | null;
+      if (!snap?.nodes) return 0;
+      let bytes = 0;
+      const walk = (recs: unknown[]) => {
+        for (const r of recs as Array<Record<string, any>>) {
+          if (r.isGroup) walk(r.children || []);
+          else if (r.ref && !doc.findLayer(r.ref.id)) bytes += r.ref.pixels?.byteUsage ?? 0;
+        }
+      };
+      walk(snap.nodes);
+      return bytes;
+    },
     // 这条 entry 持有**离树叶子的活对象引用**（snapshotTree 的零拷贝设计）；自 v439 起那些叶子在
     //   离树时被强制物化（materializeDetaching），于是每片 raw ≈16MB/满 2K 层都吊在这条 entry 上。
     //   entry 一旦被淘汰（超 max / redo 段截断 / clear）就必须放手，否则这 50 条栈能钉住整场编辑

@@ -45,3 +45,42 @@ describe("shouldSyncAll · 结构脏 ⟂ live-preview（缺陷 D）", () => {
     }
   });
 });
+
+// v440：补上计划里欠的第二条 —— board 两个 invalidate 入口的**接线**测试。
+// （v439 只写了 shouldSyncAll 的纯真值表，没验证 board 侧到底把哪个信号送给了 GL。
+//  分类错了照样会复发缺陷 D，而真值表全绿也发现不了。）
+describe("board invalidate 接线（缺陷 D 的另一半）", () => {
+  // 只造一个假 _glBoard，直接调 Board.prototype 上的两个方法——避免构造真 Board（需要 DOM canvas）。
+  function probe() {
+    const hits = [];
+    const self = {
+      _compositeCacheDirty: false,
+      _glBoard: {
+        markContentDirty: () => hits.push("content"),
+        markStructureDirty: () => hits.push("structure"),
+      },
+      requestRender: () => hits.push("render"),
+    };
+    return { self, hits };
+  }
+
+  it("invalidateStructure() → markStructureDirty（不可被 livePreview 推迟的那条）", async () => {
+    const { Board } = await import("../src/board.ts");
+    const { self, hits } = probe();
+    Board.prototype.invalidateStructure.call(self);
+    assert(hits.includes("structure"), "必须送结构脏");
+    assert(!hits.includes("content"), "不该只送内容脏");
+    assert(self._compositeCacheDirty === true, "合成缓存作废");
+    assert(hits.includes("render"), "请求重绘");
+  });
+
+  it("invalidateAll() → 只 markContentDirty（描边热路径仍可延迟）", async () => {
+    const { Board } = await import("../src/board.ts");
+    const { self, hits } = probe();
+    Board.prototype.invalidateAll.call(self);
+    assert(hits.includes("content"), "送内容脏");
+    assert(!hits.includes("structure"),
+      "绝不能顺手升级成结构脏——那会让每次描边 commit 都强制全量 syncAll");
+    assert(self._compositeCacheDirty === true, "合成缓存作废");
+  });
+});

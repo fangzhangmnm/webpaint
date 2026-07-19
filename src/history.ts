@@ -9,7 +9,7 @@
 //
 // 四条纪律（α → β 升级路径用）：
 //   1. handler 注册集中（boot 时段，grep registerHandler 见全集）
-//   2. handler shape 统一 { undo(e), redo(e), validate?(e), dispose?(e) }
+//   2. handler shape 统一 { undo(e), redo(e), validate?(e), weight?(e), dispose?(e) }
 //   3. entry data schema 一致（同类 op 用同一壳）
 //   4. handler 之间不互相调
 
@@ -32,7 +32,11 @@ export interface UndoHandler {
   //   entry 把压缩结果写进 before.blob 而 handler 读 e.beforeBlob，编译期运行期都没人吭声，
   //   一直到用户按下 Ctrl+Z 才发现画没了。push 每次用户操作只跑一次，不在热路径，故常开。
   validate?(e: UndoEntry): string | null;
-  // entry 被淘汰（超出 max / 被 redo 段截断 / clear）时释放它持有的重资源。
+  // 本条 entry 当前占用的**重资源字节**（估算）。栈只把它当数字加总、不理解含义（领域无关，纪律 #3）；
+  //   由 handler 自报。用途见 UndoStack 的 maxBytes：条数上限管不住"每条有多重"——
+  //   一条 treeStructure 可能吊着几个满内容图层（~16MB/层），50 条的名义上限能占掉整个内存预算。
+  weight?(e: UndoEntry): number;
+  // entry 被淘汰（超出 max / 超出 maxBytes / 被 redo 段截断 / clear）时释放它持有的重资源。
   dispose?(e: UndoEntry): void;
 }
 
@@ -40,14 +44,16 @@ export class UndoStack {
   entries: UndoEntry[];
   index: number;
   max: number;
+  maxBytes: number;   // 重资源字节上限（Infinity = 不限）。见 UndoHandler.weight
   handlers: Map<string, UndoHandler>;
   _busy = false;   // undo/redo 进行中（async handler 让出期间挡住第二次按键；见 undo()）
   _generation = 0; // 栈代际：clear() 递增 → 作废在途 async handler 的游标写入（切文档竞态）
 
-  constructor({ max = 50 }: { max?: number } = {}) {
+  constructor({ max = 50, maxBytes = Infinity }: { max?: number; maxBytes?: number } = {}) {
     this.entries = [];
     this.index = -1;          // index of "currently applied" entry; -1 = nothing applied
     this.max = max;
+    this.maxBytes = maxBytes;
     this.handlers = new Map();  // type → { undo, redo, validate?, dispose? }
   }
 
@@ -76,6 +82,12 @@ export class UndoStack {
     this.entries.push(entry);
     this.index++;
     while (this.entries.length > this.max) {
+      const evicted = this.entries.shift()!;
+      this._dispose(evicted);
+      this.index--;
+    }
+    // 字节上限：条数管不住"每条有多重"。**至少留一条**——把刚做的这步也淘汰掉等于它立刻不可撤销。
+    while (this.entries.length > 1 && this._totalWeight() > this.maxBytes) {
       const evicted = this.entries.shift()!;
       this._dispose(evicted);
       this.index--;
@@ -162,6 +174,16 @@ export class UndoStack {
     this._generation++;
     this._busy = false;
     this._emit();
+  }
+
+  // 栈内重资源字节合计（handler 自报；没实现 weight 的记 0）。
+  _totalWeight(): number {
+    let n = 0;
+    for (const e of this.entries) {
+      const w = this.handlers.get(e.type)?.weight?.(e);
+      if (typeof w === "number" && w > 0) n += w;
+    }
+    return n;
   }
 
   _dispose(entry: UndoEntry) {
