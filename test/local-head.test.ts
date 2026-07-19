@@ -129,3 +129,40 @@ test("markSynced：采纳云版 → 清 dirty + base 推进", () => {
   assert(!lh.isDirty("f"), "采纳后 clean");
   eq(lh.seenBase("f"), "v5", "base 推进到 v5");
 });
+
+// ── P2（v434）：两条轨道的病 ────────────────────────────────────────────────────────────────
+test("★ 跨 tab：B 写的未推字节，A 的驱逐守卫必须看得见（isDirtyAnywhere）", () => {
+  const kv = memKv();                                  // 两 tab 共享 localStorage
+  const cloud = cloudEtagRef("v1");
+  const A = createLocalHead({ kv, getCloudEtag: cloud.get, setCloudEtag: cloud.set });
+  const B = createLocalHead({ kv, getCloudEtag: cloud.get, setCloudEtag: cloud.set });
+  A.markSynced("f", "v1");                             // A 这边是干净的（刚采纳云版）
+  eq(A.isDirty("f"), false, "A 的 per-tab 视角：干净");
+
+  B.recordEdit("f");                                   // B 画了几笔，未推 → durable dirty=1
+  eq(A.isDirty("f"), false, "A 的 per-tab 视角仍是干净——这是对的，谱系视角本就 per-tab（W2）");
+  eq(A.isDirtyAnywhere("f"), true, "★ 但驱逐守卫问的是「任何 tab 有没有未推字节」→ 必须是 true");
+});
+
+test("isDirty 保持 per-tab（别改成 durable 优先，会把 ifMatchFor 打进 BypassError）", () => {
+  const kv = memKv();
+  const cloud = cloudEtagRef("v1");
+  const A = createLocalHead({ kv, getCloudEtag: cloud.get, setCloudEtag: cloud.set });
+  const B = createLocalHead({ kv, getCloudEtag: cloud.get, setCloudEtag: cloud.set });
+  A.markSeen("f", "v1"); A.recordEdit("f");
+  A.onPushed("f", "v2", false);                        // A 推成功 → A 的 episode 结束（_parent 已删）
+  B.markSeen("f", "v2"); B.recordEdit("f");            // B 开始自己的 episode → durable dirty=1
+  // 若 isDirty 改成 durable 优先，A 这里会进 dirty 分支、无 _parent 而 _base 已知 → 抛 BypassError。
+  eq(A.ifMatchFor("f"), "v2", "A 仍能正常推（clean 走 seenBase），没被别 tab 的 dirty 打瘫");
+});
+
+test("★ forget 两条轨道同清：死 etag 不得把 offload 的 local-only 守卫变成放行", () => {
+  const kv = memKv();
+  const cloud = cloudEtagRef(null);
+  const H = createLocalHead({ kv, getCloudEtag: cloud.get, setCloudEtag: cloud.set });
+  H.markSynced("f", "v1");
+  eq(cloud.ref.v, "v1", "durable 轨有值");
+  H.forget("f");                                        // 删除 / 卸载 / 改名后的旧名
+  eq(cloud.ref.v, null, "durable 轨也被清（旧版只清内存，留下死 etag）");
+  eq(H.seenBase("f"), null, "★ 同名新文件的 seenBase 必须是 null → offload 判 local-only 拒绝驱逐");
+});

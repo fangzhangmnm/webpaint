@@ -35,7 +35,8 @@ export interface LocalHead {
   // ── 读 ──
   ifMatchFor(name: string): string | null;     // push 的 If-Match（封装 bypass 守卫）
   seenBase(name: string): string | null;       // open/refresh「云端动没动」比对
-  isDirty(name: string): boolean;
+  isDirty(name: string): boolean;               // **本 tab** 视角（驱动 If-Match/episode；W2 要求它 per-tab）
+  isDirtyAnywhere(name: string): boolean;      // 任何 tab 有未推字节吗（durable ∨ 内存）——**驱逐守卫专用**
   // ── 写（状态迁移）──
   recordEdit(name: string): void;              // 唯一标脏：原子 dirty + 头一次捕获 _parent←_base
   markSeen(name: string, etag: string | null): void;     // 看到云版(open/refresh meta)：set _base；dirty 缺 parent(reload)→re-capture
@@ -53,6 +54,22 @@ export function createLocalHead({ kv, getCloudEtag, setCloudEtag, keyPrefix = "h
   function isDirty(name: string): boolean {
     if (_dirtyMem.has(name)) return _dirtyMem.get(name)!;   // per-tab 活视图优先
     return kv.get(dirtyKey(name)) === "1";                  // durable 兜底（reload 后）
+  }
+
+  // 「**任何** tab 有未推字节吗」——durable ∨ 本 tab 内存。给**驱逐守卫**用，别拿它做 If-Match 判断。
+  //
+  // 为什么不能把 isDirty 本身改成「durable 的 true 赢」（审计提过，试过，会炸）：
+  //   isDirty 驱动 ifMatchFor 的 episode 语义。tab A 推成功后自己 clean（_parent 已删、_base 已知），
+  //   此时 tab B 编辑写了 durable dirty=1 —— 若 A 的 isDirty 因此变 true，A 的 ifMatchFor 就会走进
+  //   dirty 分支、发现没有 _parent 而 _base 已知 → 抛 BypassError，A 从此推不动。
+  //   谱系视角**本来就该是 per-tab 的**（W2 红线），这一点没错。
+  //
+  // 错的是拿 per-tab 视角去回答一个**全局**问题。驱逐问的是「这份字节别处还有没有」——
+  //   tab B 刚写下的未推字节，对 tab A 的内存不可见，但它在 durable 轨上明明白白。
+  //   旧版 offload 用 isDirty 守门：B 编辑 → A 的内存仍是 false → 守卫放行 → hardDelete 掉 B 的未推字节。
+  //   §A「dirty 永不被驱逐」在这里直接失守。
+  function isDirtyAnywhere(name: string): boolean {
+    return kv.get(dirtyKey(name)) === "1" || isDirty(name);
   }
   function _setDirty(name: string, d: boolean): void {
     _dirtyMem.set(name, d);
@@ -130,12 +147,18 @@ export function createLocalHead({ kv, getCloudEtag, setCloudEtag, keyPrefix = "h
     }
   }
 
+  // 清掉该 name 的全部云端谱系（删除 / 降级 local-only / 改名后的旧名）。
+  //   ★ **两条轨道一起清**（v434）。旧版只清内存那条，把 durable 的 files.etag:<name> 留在原地，
+  //   于是后来一个**同名新文件**的 seenBase 会回退到那个死 etag（local-head.ts 的 seenBase 回退）→
+  //   offload 的 `seenBase(name) == null → local-only 拒绝驱逐` 守卫**从拒绝变成放行**，
+  //   而那正是「云端有个同名但不是我的文件」这一情形——守卫存在的理由本身。
   function forget(name: string): void {
     _base.delete(name);
     _parent.delete(name);
     _dirtyMem.delete(name);
     kv.remove(dirtyKey(name));
+    setCloudEtag?.(name, null);
   }
 
-  return { ifMatchFor, seenBase, isDirty, recordEdit, markSeen, markSynced, onPushed, forget };
+  return { ifMatchFor, seenBase, isDirty, isDirtyAnywhere, recordEdit, markSeen, markSynced, onPushed, forget };
 }

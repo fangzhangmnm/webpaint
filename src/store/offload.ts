@@ -28,7 +28,7 @@ export class OffloadIllegalError extends Error {
 export interface OffloadCfg {
   cloud: Pick<CloudSync, "fetchMeta">;
   local: Pick<LocalCache, "exists" | "hardDelete">;
-  head: Pick<LocalHead, "isDirty" | "seenBase" | "forget">;
+  head: Pick<LocalHead, "isDirty" | "isDirtyAnywhere" | "seenBase" | "forget">;
   isOnline?: () => boolean;
   // 同名串行（sub.serialize）：让 offload 的 hardDelete 与 file.save 的 local 写互斥。
   //   缺它（默认直通）= 退回旧 TOCTOU 行为，仅靠下面的 re-check 兜宽窗口。
@@ -45,18 +45,20 @@ export function createOffload(cfg: OffloadCfg) {
   async function offload(name: string): Promise<void> {
     return serialize(name, async () => {
       if (!(await local.exists(name))) return;                                      // 本地没副本 → 无事可做（非危险，no-op）
-      if (head.isDirty(name)) throw new OffloadIllegalError(name, "dirty");          // 未推唯一字节
+      if (head.isDirtyAnywhere(name)) throw new OffloadIllegalError(name, "dirty");   // 未推唯一字节（**任何** tab 写的都算——per-tab 视角看不见别 tab 刚写的 durable dirty）
       if (isOnline && !isOnline()) throw new OffloadIllegalError(name, "offline");   // 不可重取
       // ⚠ 这道守卫依赖 seenBase 的**durable** 半边（local-head.markSynced 写的 etag kv）。
       //   v431 之前 markSynced 只写内存 _base：一幅 pull 来的画，守卫靠内存 _base 放行，
-      //   而下面 head.forget 又正好把那个 _base 删掉（etag kv 从没写过）→ 谱系归零。
-      //   **守卫被它自己随后删掉的东西满足** = 卸载本地是通往「保存永远推不上去」的第二条入口。
+      //   而下面 head.forget 又正好把那个 _base 删掉 → 谱系归零，卸载本地成了「保存永远推不上去」的第二条入口。
       //   别把 markSynced 里那行 setCloudEtag 当 R1 违规删掉，删了这里就重新破。
+      //   （v434 更正 v433 的注释：**不需要** etag 在 forget 之后存活。forget 现在两轨同清，
+      //    卸载后文件变纯云端，下次 open 走 identity.acquire → markSynced 重建 etag。守卫只需要在
+      //    **它自己执行的那一刻** durable 轨上有值即可。）
       if (head.seenBase(name) == null) throw new OffloadIllegalError(name, "local-only");  // 从没 synced = 无已知云版 = 唯一本地
       const meta = await cloud.fetchMeta(name).catch((e) => { reportStoreError(e, "log"); return null; });   // 未登录/取不到 → null
       if (!meta) throw new OffloadIllegalError(name, "cloud-gone");                  // 云端没了 → 唯一好副本，保留
       if (!(meta.size > 0)) throw new OffloadIllegalError(name, "incomplete");       // 0B 云端幻象 → 不可信，绝不据此丢本地
-      if (head.isDirty(name)) throw new OffloadIllegalError(name, "dirty");          // ② TOCTOU re-check：fetchMeta 期内被并发 save 写脏 → 拒
+      if (head.isDirtyAnywhere(name)) throw new OffloadIllegalError(name, "dirty");   // ② TOCTOU re-check：fetchMeta 期内被并发 save 写脏 → 拒
       await local.hardDelete(name);   // 合法：clean ∧ 在线 ∧ 曾synced ∧ 云端有完整版 → 安全丢本地副本（可重下）
       head.forget(name);              // 清云端谱系（下次 open 重新 acquire）
     });

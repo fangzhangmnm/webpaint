@@ -100,7 +100,7 @@ test("[F0] 承接：deferred 之后 offload 拒绝驱逐（reason=dirty）", asy
   const off = createOffload({
     cloud: { fetchMeta: async () => ({ etag: "e1", lastModified: 0, size: 10, item: {} as never }) },
     local: { exists: (n: string) => local.exists(n), hardDelete: async (n: string) => { await local.hardDelete(n); } },
-    head: { isDirty: (n: string) => head.isDirty(n), seenBase: (n: string) => head.seenBase(n), forget: (n: string) => head.forget(n) },
+    head: { isDirty: (n: string) => head.isDirty(n), isDirtyAnywhere: (n: string) => head.isDirtyAnywhere(n), seenBase: (n: string) => head.seenBase(n), forget: (n: string) => head.forget(n) },
     isOnline: () => true,
   });
   let reason = "";

@@ -12,7 +12,7 @@ function setup(opts: { online?: boolean } = {}) {
   const off = createOffload({
     cloud: { fetchMeta: async (n: string) => { const m = cloudMeta.get(n); return m ? ({ etag: m.etag, lastModified: 0, size: m.size, item: {} as any }) : null; } },
     local: { exists: async (n: string) => localSet.has(n), hardDelete: async (n: string) => { localSet.delete(n); } },
-    head: { isDirty: (n: string) => dirtySet.has(n), seenBase: (n: string) => baseEtag.has(n) ? baseEtag.get(n)! : null, forget: (n: string) => { forgotten.push(n); } },
+    head: { isDirty: (n: string) => dirtySet.has(n), isDirtyAnywhere: (n: string) => dirtySet.has(n), seenBase: (n: string) => baseEtag.has(n) ? baseEtag.get(n)! : null, forget: (n: string) => { forgotten.push(n); } },
     isOnline: () => opts.online !== false,
   });
   return { off, localSet, cloudMeta, dirtySet, baseEtag, forgotten };
@@ -77,7 +77,7 @@ test("[offload] TOCTOU：fetchMeta 网络期内并发 save 标脏 → re-check �
     // fetchMeta 在 await 中把文件标脏 = 模拟并发 file.save 的 recordEdit 落在 offload 的网络窗口内。
     cloud: { fetchMeta: async (_n: string) => { dirtySet.add("a.pdf"); return { etag: "e", lastModified: 0, size: 10, item: {} as any }; } },
     local: { exists: async (n: string) => localSet.has(n), hardDelete: async (n: string) => { localSet.delete(n); } },
-    head: { isDirty: (n: string) => dirtySet.has(n), seenBase: () => "e", forget: () => {} },
+    head: { isDirty: (n: string) => dirtySet.has(n), isDirtyAnywhere: (n: string) => dirtySet.has(n), seenBase: () => "e", forget: () => {} },
     isOnline: () => true,
   });
   await rejects(() => off.offload("a.pdf"), "dirty", "fetchMeta 后 re-check 抓到并发标脏");
