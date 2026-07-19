@@ -105,3 +105,51 @@ describe("LayerPixels 写路径 ⟂ 驱逐态（缺陷 C）", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// v440 / R9：缺陷 C 的**失败分支**。v439 只在 provider 成功时才解除驱逐态；provider 失败
+// （context 丢 / GPU 上没有该层 tiles）时 `_evicted` 保持 true（这是红线，为了让 recoverAll
+// 能从压缩备份兜底），于是写入落进空 _tiles 而标志仍为 true —— 稍后一次读再次触发 provider，
+// 若那时 GPU tiles 已在，adoptResidentTiles 会用**陈旧内容覆盖刚写进去的 tile**。
+//
+// 此时该层处于第三种状态：CPU 上有一批「本地新写、GPU 和备份都没有」的 tile。
+// 清 _evicted 会让 recoverAll 跳过（内容只剩备份没人读）；保持 true 又会被回填覆盖。
+// 合并规则才是正解：**本地写入的 tile 优先于任何回填**（GPU readback / 备份 restore 都不许盖它）。
+// ---------------------------------------------------------------------------
+describe("LayerPixels 写路径 · 重物化失败分支（R9）", () => {
+  it("provider 失败时写入 → 之后 provider 恢复，回填不得覆盖本地新写的 tile", () => {
+    const lp = new LayerPixels(W, H);
+    lp.putRegion(0, 0, 600, 600, region(0, 0, 600, 600, () => [11, 22, 33, 255]));
+    // 捕获"GPU 副本"，但先让 provider 处于失败态
+    let gpu = null, failing = true;
+    lp.setResidencyProvider((p) => { if (!failing && gpu) p.adoptResidentTiles(gpu); });
+    gpu = []; lp.forEachTile((tx, ty, px) => gpu.push({ tx, ty, px: new Uint8ClampedArray(px) }));
+    assert(lp.evictRaw(), "驱逐");
+
+    // context 丢期间写入（重物化失败）
+    lp.putRegion(0, 0, 4, 4, region(0, 0, 4, 4, () => [200, 100, 50, 255]));
+    const justWritten = lp.getRegion(0, 0, 4, 4);
+    eq(justWritten[0], 200, "刚写进去的读得到");
+
+    // context 恢复 → 下一次读触发回填
+    failing = false;
+    const after = lp.getRegion(0, 0, 4, 4);
+    eq(after[0], 200, "回填绝不能用陈旧 GPU 内容覆盖本地新写的 tile（当前会被覆盖回 11）");
+    // 未触及的区域应从 GPU 回填回来
+    const far = lp.getRegion(500, 500, 4, 4);
+    eq(far[0], 11, "本地没写过的 tile 仍从 GPU 正常回填");
+  });
+
+  it("整体替换（clear/restore）之后不再保留本地写标记（内容已全部换掉）", () => {
+    const lp = new LayerPixels(W, H);
+    lp.putRegion(0, 0, 600, 600, region(0, 0, 600, 600, () => [11, 22, 33, 255]));
+    let gpu = null, failing = true;
+    lp.setResidencyProvider((p) => { if (!failing && gpu) p.adoptResidentTiles(gpu); });
+    gpu = []; lp.forEachTile((tx, ty, px) => gpu.push({ tx, ty, px: new Uint8ClampedArray(px) }));
+    assert(lp.evictRaw(), "驱逐");
+    lp.putRegion(0, 0, 4, 4, region(0, 0, 4, 4, () => [200, 100, 50, 255]));   // 失败态下的本地写
+    lp.clear();                                                                 // 整体替换
+    assert(lp.isRawResident(), "clear 后已驻留");
+    eq(lp.tileCount, 0, "clear 后为空——本地写标记不该让它复活");
+  });
+});

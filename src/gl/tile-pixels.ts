@@ -27,6 +27,11 @@ export class LayerPixels {
   private _contentVersion = 0;                              // 单调递增，每次内容 mutation +1（TileResidency 驱逐门用）
   private _evicted = false;                                 // raw 被 TileResidency 驱逐（只剩 GPU tiles + 压缩备份）
   private _provider: ((lp: LayerPixels) => void) | null = null;   // 重物化回调（sync GPU readback，TileResidency 装）
+  // **驱逐态下本地写入**的 tile key。这类 tile 的内容只在 CPU 这一份上：GPU 没有（当时 readback
+  //   失败才会落到这个分支）、压缩备份也没有（备份是驱逐前拍的）。因此任何回填（GPU readback /
+  //   备份 restore）都**不许覆盖它们**，否则刚写进去的像素被陈旧内容盖掉（R9）。
+  //   整体替换（clear/restore）会清空本集合——那时内容已全部换掉，无所谓"本地更新"。
+  private _localKeys = new Set<number>();
 
   // 实例身份 token（单调、进程内唯一）。给 TileResidency 判"这份备份属不属于当前这个实例"用——
   //   必须是**值**不是对象引用，否则备份会把换下来的 LayerPixels（满 2K 层 ~16MB raw）整个吊住。
@@ -51,17 +56,21 @@ export class LayerPixels {
     if (!this._provider) return false;                      // 无重物化路径 → 拒绝（红线：不可无退路地丢 raw）
     this._tiles.clear();
     this._evicted = true;
+    this._localKeys.clear();
     return true;
   }
   // provider 回填：装入重物化 tile（不 bump contentVersion、不进 _dirty——GPU 已有这些像素，非 GL 上传源）。
   adoptResidentTiles(entries: Array<{ tx: number; ty: number; px: Uint8ClampedArray }>): void {
     for (const { tx, ty, px } of entries) {
       if (isAllTransparent(px)) continue;
+      const key = tileKey(tx, ty, this._across);
+      if (this._localKeys.has(key)) continue;   // 本地写优先：回填绝不覆盖只存在于 CPU 的那份（R9）
       const t = new Uint8ClampedArray(TILE_RGBA);
       t.set(px.subarray(0, TILE_RGBA));
-      this._tiles.set(tileKey(tx, ty, this._across), t);
+      this._tiles.set(key, t);
     }
     this._evicted = false;
+    this._localKeys.clear();   // 已并入常驻集合，不再需要特殊保护
   }
   // 强制重物化：把 `_ensureResident` 从「读方法的私有护栏」升格为**显式契约**。
   //   用途：叶子离开图层树之前（doc.removeLayer / doc.restoreTree），此刻 GPU tiles 还活着、readback
@@ -97,6 +106,7 @@ export class LayerPixels {
     this._ensureResident();   // 局部写：先把**其余** tile 拉回来，否则它们被搁浅成空（详见 putRegion 注释）
     this._contentVersion++;
     const key = tileKey(tx, ty, this._across);
+    if (this._evicted) this._localKeys.add(key);   // 重物化失败仍写入 → 这份内容只在 CPU 上（R9）
     if (isAllTransparent(pixels)) { this._tiles.delete(key); this._dirty.add(key); return; }
     const t = new Uint8ClampedArray(TILE_RGBA);
     t.set(pixels.subarray(0, TILE_RGBA));
@@ -137,6 +147,7 @@ export class LayerPixels {
       if (isAllTransparent(tile)) { if (!created) this._tiles.delete(key); /* created 空 tile 不存 */ }
       else this._tiles.set(key, tile);
       this._dirty.add(key);
+      if (this._evicted) this._localKeys.add(key);   // 重物化失败仍写入 → 这份内容只在 CPU 上（R9）
     });
   }
 
@@ -205,7 +216,7 @@ export class LayerPixels {
 
   // 整体替换（丢弃全部旧内容）→ 无需先重物化，但**必须**解除驱逐态：否则 _tiles 已空而 _evicted 仍 true，
   //   下一次读会把陈旧 GPU tile 整份 adopt 回来 = 清空被静默复活（缺陷 C）。
-  clear(): void { this._contentVersion++; this._tiles.forEach((_p, k) => this._dirty.add(k)); this._tiles.clear(); this._evicted = false; }
+  clear(): void { this._contentVersion++; this._tiles.forEach((_p, k) => this._dirty.add(k)); this._tiles.clear(); this._evicted = false; this._localKeys.clear(); }
 
   // ---- 纯变换（raw 数组操作，返回新 LayerPixels；doc 变换用，node 全可测、无 Canvas2D 往返、更快）----
   // 水平镜像（doc 尺寸不变）。
@@ -288,6 +299,7 @@ export class LayerPixels {
     this._tiles.clear();
     for (const [key, px] of snap.tiles) { this._tiles.set(key, new Uint8ClampedArray(px)); this._dirty.add(key); }
     this._evicted = false;
+    this._localKeys.clear();
   }
 }
 
