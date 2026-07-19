@@ -3,9 +3,19 @@
 // 与云同步 store（src/store/**）**正交**：store 管整-doc .ora↔云（If-Match/move-aside/.trash）；本模块只管
 //   **本地** GPU/RAM 冷层驻留 + 无损压缩备份 + context-loss 恢复。私有命名空间，**绝不写 store 的 .ora**。
 //
-// ── Slice A（本次，见 plan stateful-gathering-parrot）：备份基建 ──
-//   纯增量：只提供 backup/restore/canEvictRaw 原语 + pin/unpin，**不接进 live 渲染、不真驱逐** → 零数据风险。
-//   下一 slice 才把它接进 GLDocRenderer/doc.ts：冷层真驱逐 raw + 读前 ensureResident（那才动内存，smoke golden 守）。
+// ── 现状（v439 订正；此前这段头注释还写着 Slice A「不接进 live 渲染、不真驱逐」，而代码早已在驱逐，
+//    doc 与代码矛盾 → 信代码）──
+//   本模块**已接进 live 渲染并真驱逐**：GLDocRenderer.setActiveLeaf 每次切换活动层就 _backupAndEvict
+//   前一个活动层（gl-doc-renderer.ts 的 _backupAndEvict → leaf.pixels.evictRaw()）。也就是说
+//   「非活动层处于被驱逐态、CPU 无像素」是**常态而非边缘**，读取靠 LayerPixels._ensureResident 惰性
+//   重物化（provider = GPU readback）。
+//
+//   由此衍生的两条不变量（都曾被打穿，v439 修复；改这里前务必先读懂）：
+//   · **叶子离开图层树之前必须强制物化**（doc.materializeDetaching）。否则 syncAll 的树差对账会
+//     dropLayer + forgetExcept 把 GPU tiles 和本模块的备份一起销毁，而 undo 的 restoreTree 保的是
+//     活引用、不拷像素 → 撤销复活一个空壳层 = 数据丢失。
+//   · **LayerPixels 的写路径必须解除驱逐态**。_ensureResident 只守读方法；写完不清 _evicted 的话，
+//     下一次读会把陈旧 GPU tile merge 回来，把刚写进去的内容撕成新旧混合。
 //
 // ── 红线（MASTER §A，硬）──
 //   · 备份**无损**：deflate raw 字节（非有损 PNG——alpha=0 处 RGB 被清零=静默改像素=数据红线）。
@@ -95,7 +105,7 @@ export class TileResidency {
     this._backups.set(layerId, { epoch, tiles });
   }
 
-  // 驱逐门（Slice A 只判定，不真丢 raw；真丢在下一 slice）：
+  // 驱逐门（**判定**；真正丢 raw 在 LayerPixels.evictRaw，由 GLDocRenderer._backupAndEvict 调）：
   //   当且仅当 该层有备份 ∧ 备份覆盖当前内容(epoch===contentVersion) ∧ 非 pinned。这是红线的机器可检形式。
   canEvictRaw(layerId: number, pixels: LayerPixels): boolean {
     if (this._pinned.has(layerId)) return false;
