@@ -95,7 +95,19 @@ export interface StoreConfig {
 }
 
 // tryMove 结果式返回（不抛，UI 渲染 where 标签）。移动/改身份的唯一入口 = file.tryMove(to)。
-export type TryMoveResult = { ok: true } | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
+// ok:true 时**仍可能有话要说**（别只看 ok 就报「已重命名（含云端）」）：
+//   oldKept       谱系不明 → 降级为 save-as，云端旧名原地留着 → 必须告诉用户「旧的还在，叫 <oldName>」
+//   oldCloudOrphan 旧名进 .trash 失败 → 云端遗留孤儿
+//   cloudDeferred  云端推失败 → 新名只在本地，待推
+export type TryMoveResult =
+  | { ok: true; where?: string; oldName?: string; oldKept?: boolean; oldCloudOrphan?: boolean; cloudDeferred?: boolean }
+  | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
+
+// save 的结果：本地一定落了（没落会抛），云端**不一定**上去了。
+//   pushed:true  = 云端已确认落地（拿到新 etag）
+//   pushed:false = 只落了本地。reason：not-attempted(tryPush:false) / offline-or-error / deferred(落地未确认)
+//                  / unresolved|cancelled(冲突面用户没解决) —— 文件仍 dirty，等下次推。
+export type SaveResult = { pushed: boolean; reason?: string };
 
 /** 加密容器的 at-rest 字节（branded）。唯一发牌方 = ZipFile.getEncryptedBlob()。
  *  只收密文的下游（导出 / 拷贝 / checkpoint）用它当形参类型 → 传明文 Blob 编译不过。 */
@@ -106,7 +118,11 @@ export interface RawFile {
   //  save(bytes)               = 本地落盘 + best-effort 推云（默认 tryPush:true）
   //  save(bytes,{tryPush:false})= 只落本地不推（autosave/频繁保存；opaque Work 的 push 必须 consent-gated，ADR-0016/0018）
   //  tryPush 是 **best-effort**：离线/冲突/失败 → 文件留 dirty、下次补推（不保证同步到云）。hint 透传缩略图（store content-blind）。
-  save(bytes: Bytes | Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<void>;
+  //  返回值：**别忽略 pushed**。以前这里是 Promise<void>，push 失败被 catch 成 banner 后 save() 照常 resolve，
+  //  调用方无从分辨「已上云」和「只落了本地」→ 乐观清掉 push-pending → badge 画干净、退出不再重推
+  //  （= 用户报的「远端文件不一样」而 UI 从没说过失败）。pushed:false 不是错误，是**事实**：离线/冲突/
+  //  用户在冲突面选了 cancel 都会走到这里，调用方据此保住 push-pending 即可。
+  save(bytes: Bytes | Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<SaveResult>;
   open(): Promise<Blob | null>;
   // 事件驱动「干净快进」：本地 clean ∧ 云端有更新 → 拉新版覆盖本地缓存；本地 dirty → no-op（绝不在事件里弹 sheet，
   //   后续 push 的 412 会 surface 真分叉）。app 在 focus/visibility/online 调。（原 store.refresh(name)，2026-07 收上 file。）
@@ -184,7 +200,12 @@ export function createStore(config: StoreConfig) {
   //     （**无保留名**：2026-07-13 起 `settings` 也只是个普通 collection 名，assertValidCollectionName 只校验文件名合法性。）
   const collectionsCloud: CloudSync = createCloudSync({ provider, kv, fileName: (n: string) => `.${appId}/${n}.json`, appKey: "collections" });
   const sub = createSubstrate();
-  const head = createLocalHead({ kv, getCloudEtag: (n: string) => cloud.getETag(n), keyPrefix: "files" });   // → `${ns}.files.dirty:`（文件 dirty 权威）
+  const head = createLocalHead({
+    kv,
+    getCloudEtag: (n: string) => cloud.getETag(n),
+    setCloudEtag: (n: string, e: string | null) => cloud.setETag(n, e),   // 采纳云版时提交 durable etag（见 local-head.markSynced 注释：合 R1，非违规）
+    keyPrefix: "files",
+  });   // → `${ns}.files.dirty:`（文件 dirty 权威）
   // 数据迁移框架（ADR-0019）：**createStore 内部自跑、隐形**——app 看不见 migration。
   //   MIGRATIONS 现为空（无用户/无后向兼容，2026-07-13 清 tax）→ 编排跑空、无 op；框架留着待将来第一条真迁移。
   //   ops 首用前 await migrationReady（open/save/list）。测试/无 localStorage 环境跳过。
@@ -397,9 +418,11 @@ export function createStore(config: StoreConfig) {
   const tryMoveSF = singleFlight("移动", async (from: string, to: string): Promise<TryMoveResult> => {
     const occ = await nameOccupied(to);
     if (occ) return { ok: false, reason: "name-collision", where: occ };
-    await identity.rename(from, to, { skipOccupiedCheck: true });   // 已 nameOccupied 预检，跳过内部重复
-    notifyFolderOf(from); notifyFolderOf(to);                       // 旧夹移出 + 新夹移入，两边重画
-    return { ok: true };
+    const r = await identity.rename(from, to, { skipOccupiedCheck: true });   // 已 nameOccupied 预检，跳过内部重复
+    notifyFolderOf(from); notifyFolderOf(to);                                 // 旧夹移出 + 新夹移入，两边重画
+    // 结果必须透出去：以前这里整个丢掉 r，于是 app 无条件报「已重命名（含云端）」——
+    //   云端推失败(cloudDeferred)、旧名成孤儿(oldCloudOrphan)、旧名被留下(oldKept) 全被吞掉 = UI 谎报成功。
+    return { ok: true, where: r.where, oldKept: r.oldKept, oldCloudOrphan: r.oldCloudOrphan, cloudDeferred: r.cloudDeferred, oldName: from };
   });
 
   // ── ui 映射：冲突回调把 local/cloud 字节取来喂 ui.resolveConflict（必填，绝不静默 cancel）──
@@ -538,11 +561,20 @@ export function createStore(config: StoreConfig) {
         const sealed = await seal.sealForWrite(name, plain);
         await sub.serialize(name, () => local.save(name, sealed, opts?.hint));   // local 写同名串行链：与 offload.hardDelete 互斥（C2 红线）；hint 透传缩略图
         notifyFolderOf(name);                                    // 网盘模型：本夹 watcher 即时反映新增/变脏（无云往返；gallery 没开=cheap no-op）
-        if (opts?.tryPush === false) return;                     // 只落本地（autosave/consent-safe，ADR-0016/0018：opaque Work 的 push 必 consent-gated）
-        try { await pushMod.push(name, { encode: () => plain, onConflict }); }
-        catch (e) { ui.reportError(e); }
+        if (opts?.tryPush === false) return { pushed: false, reason: "not-attempted" };   // 只落本地（autosave/consent-safe，ADR-0016/0018：opaque Work 的 push 必 consent-gated）
+        // surfaceCollision：**编辑既有文件**时，谱系断裂撞名走冲突面而非抛 collision（push.ts 的长注释解释了为什么两者相反）。
+        //   mode:"new" 的首存不给 —— 那里撞名是「别的设备建了同名不同物」，抛错两份都留是 §A 身份行的保证。
+        let pushed = false, reason: string | undefined;
+        try {
+          const r = await pushMod.push(name, { encode: () => plain, onConflict, surfaceCollision: mode !== "new" });
+          // 只有拿到新 etag 的落地才算推上去了。deferred(落地未确认)/unresolved/cancelled 一律不算——
+          //   把它们当成功正是 F0 红线要拦的那类「落地未确认当落地成功」。
+          pushed = r.status === "pushed" || r.status === "healed" || r.status === "resolved";
+          if (!pushed) reason = r.status;
+        } catch (e) { ui.reportError(e); reason = "error"; }
         // ADR-0018：离线「新上传」补推——push 没成(仍 dirty) ∧ 从没 synced(seenBase null) → 入队，回线 drainUploadQueue 补推。
         if (head.isDirty(name) && head.seenBase(name) == null) uploadReplay.enqueue(name);
+        return { pushed, reason };
       },
       async open() {
         await migrationReady;

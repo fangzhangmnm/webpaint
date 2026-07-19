@@ -115,3 +115,41 @@ test("[F0] 护栏：onPushed(null etag, dirtyAfter=false) 必须 throw", () => {
   try { head.onPushed("f", null, false); } catch { threw = true; }
   assert(threw, "不可表示的状态要响亮拦住，不能自愈成错误结果");
 });
+
+// ── 谱系断裂撞名的两条相反去向（v432）──────────────────────────────────────────────────────
+//   同一个 CloudNameCollisionError，真·新建该抛（§A：两设备各建同名不同物，both kept），
+//   编辑既有文件该 surface（本地云端都有、只是本机不知道派生自哪版；抛错=假原因+死路+自我延续）。
+test("谱系断裂撞名 · 默认（真·新建）→ 仍抛 collision，云端不被覆盖", async () => {
+  const { cloud, head, push } = rig();
+  await cloud.push("f", enc("SOMEONE-ELSE"));
+  cloud.setETag("f", null);                       // 无 base
+  head.recordEdit("f");
+  let name = null;
+  try { await push("f", { encode: () => enc("MINE") }); } catch (e) { name = (e as { name?: string }).name; }
+  eq(name, "CloudNameCollisionError", "默认行为不变（首存护栏是对的，别一起改掉）");
+  eq(await asStr((await cloud.pull("f"))?.blob), "SOMEONE-ELSE", "云端没被覆盖");
+});
+
+test("★ 谱系断裂撞名 · surfaceCollision → 走冲突面；选覆盖则云端 loser 进 .backup（never-lose）", async () => {
+  const { cloud, head, push } = rig();
+  await cloud.push("f", enc("CLOUD-VER"));
+  cloud.setETag("f", null);
+  head.recordEdit("f");
+  let asked = 0;
+  const r = await push("f", { encode: () => enc("MINE"), surfaceCollision: true, onConflict: () => { asked++; return "keepMine"; } });
+  eq(asked, 1, "弹冲突面（而不是抛一个假原因的 collision 把用户堵死）");
+  eq(r.resolution, "keepMine", "用户选了以我的为准");
+  eq(await asStr((await cloud.pull("f"))?.blob), "MINE", "本地版上去了 → 打破「永远推不上去」的自我延续");
+  assert(r.backedUp, "云端旧版进了 .backup（§A：永不 hard-override）");
+});
+
+test("谱系断裂撞名 · surfaceCollision + 用户取消 → 云端不动、本地仍 dirty（工作没丢）", async () => {
+  const { cloud, head, push } = rig();
+  await cloud.push("f", enc("CLOUD-VER"));
+  cloud.setETag("f", null);
+  head.recordEdit("f");
+  const r = await push("f", { encode: () => enc("MINE"), surfaceCollision: true, onConflict: () => "cancel" });
+  eq(r.status, "cancelled", "取消");
+  eq(await asStr((await cloud.pull("f"))?.blob), "CLOUD-VER", "云端原样");
+  assert(head.isDirty("f"), "本地保持 dirty（字节没丢，下次还能再推）");
+});

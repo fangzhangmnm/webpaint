@@ -86,6 +86,33 @@ test("rename dirty + 云推失败 → cloudDeferred + newName 标脏（待推，
   assert(head.isDirty("new.pdf"), "newName 标脏=待推（下次 push 自动带走 → 自动收敛，不必重跑 rename）");
 });
 
+// ── 改名 = 上传失败后的逃生通道（用户 2026-07-18 拍定）。────────────────────────────────────
+//   「推新名 + 旧名进 .trash」的 move 语义隐含前提：本地字节是旧名云端字节的**后代**。
+//   谱系断了这个前提就不成立 —— 而谱系断正是用户来改名的原因。此时必须降级为「另存」，
+//   否则逃生通道就是斩杀线（真机事故：用户改名自愈，远端旧画消失）。
+test("rename 谱系不明（reload 后 durable etag 空）→ 降级为另存：★云端旧画原封不动", async () => {
+  const { cloud, local, head, rename } = rig();
+  await cloud.push("old.pdf", enc("CLOUD-ORIG"));
+  cloud.setETag("old.pdf", null);                                           // 模拟：版本更新 reload，内存谱系没了、durable etag 从没写过
+  await local.save("old.pdf", enc("EDITED")); head.recordEdit("old.pdf");   // dirty，但 _parent=null ∧ seenBase=null → 谱系不明
+  const r = await rename("old.pdf", "new.pdf");
+  eq(r.where, "cloud-push+kept", "谱系不明 → 另存语义");
+  assert(r.oldKept, "oldKept=true（caller 必须告诉用户「旧的还在」）");
+  eq(await asStr((await cloud.pull("new.pdf"))?.blob), "EDITED", "新名 = 本地字节（逃生成功）");
+  eq(await asStr((await cloud.pull("old.pdf"))?.blob), "CLOUD-ORIG", "★ 云端旧画原封不动（没被挪进 .trash）");
+});
+
+test("rename 谱系已分叉（云端被别的设备推过新版）→ 同样降级为另存，不碰旧名", async () => {
+  const { cloud, local, head, rename } = rig();
+  await cloud.push("old.pdf", enc("V1"));
+  head.markSeen("old.pdf", cloud.getETag("old.pdf"));                       // 本机见到的是 V1
+  await local.save("old.pdf", enc("EDITED")); head.recordEdit("old.pdf");   // 基于 V1 编辑
+  await cloud.push("old.pdf", enc("V2-FROM-OTHER-DEVICE"));                 // 别的设备推了 V2 → 云端 etag 前进
+  const r = await rename("old.pdf", "new.pdf");
+  eq(r.where, "cloud-push+kept", "base≠云端 etag → 另存语义");
+  eq(await asStr((await cloud.pull("old.pdf"))?.blob), "V2-FROM-OTHER-DEVICE", "★ 别的设备那版没被吃掉");
+});
+
 test("rename：encode 抛错 → 旧名本地不丢（phantom-path：先存新再删旧，没存成就没删）", async () => {
   const { local, rename } = rig();
   await local.save("old.pdf", enc("DATA"));

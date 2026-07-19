@@ -27,12 +27,17 @@ export interface EditorAdapter {
 
 /** editor-session 消费的 store 最小面（结构类型；真 sync-store 天然满足，测试可 mock）。 */
 // tryMove 结果（rename/move 唯一入口；含目标占用检查，占用则不动字节返错，不抛）。
-export type TryMoveResult = { ok: true } | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
+//   ok:true 仍可能有话要说 —— 旧名的去向不是只有「搬走了」一种：
+//   oldKept=谱系不明，改名降级为另存、旧名原地留着 · oldCloudOrphan=旧名没能挪进回收站 · cloudDeferred=云端没推成。
+export type TryMoveResult =
+  | { ok: true; where?: string; oldName?: string; oldKept?: boolean; oldCloudOrphan?: boolean; cloudDeferred?: boolean }
+  | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
 export interface StoreLike {
   // mode 显式必填（new=新建、existing=打开已有）；editor-session 处理的都是已建身份 → 恒 "existing"。
   file(name: string, opts: { isZip: boolean; mode: "new" | "existing" }): {
     open(): Promise<Blob | null>;
-    save(bytes: Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<void>;
+    // pushed=false 不是错误，是事实（离线/冲突未解决/只落本地）→ 据此保住 push-pending，别乐观清。
+    save(bytes: Blob, opts?: { tryPush?: boolean; hint?: unknown }): Promise<{ pushed: boolean; reason?: string }>;
     tryMove(to: string): Promise<TryMoveResult>;   // 改身份/移动唯一入口（含 nameOccupied 占用检查）——挂在 file 上
     delete(): Promise<void>;
   };
@@ -118,10 +123,17 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
     try {
       const { bytes, peek } = await editor.encode();
       _dirty = false;                              // 清内存脏：encode 已取快照；期间再改会重新置脏（下轮 autosave 收）
-      if (tryPush) _pushPending = false;           // 乐观清 push-pending（push 失败留 sync-dirty，store 内部 queue 补推）
       // 新建画布/import 首存 → mode:"new"（撞名不静默覆盖，抛 CloudNameCollisionError；saveNow 已 try/catch surface）；成功即转 existing（后续 autosave = 编辑）。
       const mode = _createFor === _name ? "new" : "existing";
-      await store.file(_name, { isZip, mode }).save(bytes, { tryPush, hint: peek != null ? { peek } : undefined });
+      const res = await store.file(_name, { isZip, mode }).save(bytes, { tryPush, hint: peek != null ? { peek } : undefined });
+      // push-pending 按**实际结果**清，不再乐观清（v432）。旧版在 save 之前就 `_pushPending = false`，
+      //   而 store 内部把 push 失败 catch 成 banner 后 save() 照常 resolve → 这里永远看不到失败 →
+      //   badge 画干净、退出不再重推、下次 autosave 也不补 → 云端始终停在旧版而 UI 从没说过失败。
+      //   （旧注释说"store 内部 queue 补推"是假保证：WebPaint 用默认 "manual" 策略，upload-queue 第一行就返回，
+      //    那个队列永不 drain。）
+      //   `res?.pushed !== true` 而非 `!res.pushed`：store 没报告结果（旧适配器/mock）时**假定没推上去**，
+      //   保住 push-pending 下次重试。宁可多推一次，也不要静默清干净（优先级②）。
+      if (tryPush) _pushPending = res?.pushed !== true;
       if (_createFor === _name) _createFor = null;   // 首存成功 → 这个身份已建，后续都是编辑
     } catch (e) {
       // 还原**入场时的真实状态**（不是无脑置脏）：本来脏就继续脏（工作没丢、重试武装着）；

@@ -47,6 +47,11 @@ export function createOffload(cfg: OffloadCfg) {
       if (!(await local.exists(name))) return;                                      // 本地没副本 → 无事可做（非危险，no-op）
       if (head.isDirty(name)) throw new OffloadIllegalError(name, "dirty");          // 未推唯一字节
       if (isOnline && !isOnline()) throw new OffloadIllegalError(name, "offline");   // 不可重取
+      // ⚠ 这道守卫依赖 seenBase 的**durable** 半边（local-head.markSynced 写的 etag kv）。
+      //   v431 之前 markSynced 只写内存 _base：一幅 pull 来的画，守卫靠内存 _base 放行，
+      //   而下面 head.forget 又正好把那个 _base 删掉（etag kv 从没写过）→ 谱系归零。
+      //   **守卫被它自己随后删掉的东西满足** = 卸载本地是通往「保存永远推不上去」的第二条入口。
+      //   别把 markSynced 里那行 setCloudEtag 当 R1 违规删掉，删了这里就重新破。
       if (head.seenBase(name) == null) throw new OffloadIllegalError(name, "local-only");  // 从没 synced = 无已知云版 = 唯一本地
       const meta = await cloud.fetchMeta(name).catch((e) => { reportStoreError(e, "log"); return null; });   // 未登录/取不到 → null
       if (!meta) throw new OffloadIllegalError(name, "cloud-gone");                  // 云端没了 → 唯一好副本，保留

@@ -5,8 +5,42 @@ import { memKv } from "../src/store/cloud-sync.ts";
 // 一个可变的"云端当前 etag"，getCloudEtag 闭包读它（seenBase 回退 + 多 tab 共享 etag 模拟）。
 function cloudEtagRef(initial: string | null = null) {
   const ref = { v: initial };
-  return { ref, get: (_n: string) => ref.v };
+  return { ref, get: (_n: string) => ref.v, set: (_n: string, e: string | null) => { ref.v = e; } };
 }
+
+// ── 版本更新 reload 后仍能推（v432 真机事故的回归）─────────────────────────────────────────
+//   每次版本更新 = 一次 reload = 内存 _base/_parent 全丢。能不能重捕谱系，全看 durable 轨有没有值。
+test("markSynced 把 etag 提交进 durable 轨 → reload 后 seenBase 不为 null", () => {
+  const kv = memKv();
+  const cloud = cloudEtagRef(null);                     // durable 轨空 = 这幅画从没从本机 push 成功过（是 pull/acquire 来的）
+  const A = createLocalHead({ kv, getCloudEtag: cloud.get, setCloudEtag: cloud.set });
+  A.markSynced("f", "v1");                              // 采纳云版（safePull / acquire）
+  eq(cloud.ref.v, "v1", "采纳云版 = 断言「盘上字节 == 云端 v1」→ 必须落 durable 轨");
+  const B = createLocalHead({ kv, getCloudEtag: cloud.get, setCloudEtag: cloud.set });   // ← reload
+  eq(B.seenBase("f"), "v1", "reload 后仍知道自己派生自 v1");
+});
+
+test("★ 全链路：reload 后 durable etag → seenBase → markSeen 重捕 parent → If-Match 非空（保存推得上去）", () => {
+  const kv = memKv();
+  const cloud = cloudEtagRef(null);
+  const A = createLocalHead({ kv, getCloudEtag: cloud.get, setCloudEtag: cloud.set });
+  A.markSynced("f", "v1");                              // 从云端取来
+  A.recordEdit("f");                                    // 用户画了几笔（onBeforeReload 只落本地并标脏）
+  const B = createLocalHead({ kv, getCloudEtag: cloud.get, setCloudEtag: cloud.set });   // ← 版本更新 reload
+  assert(B.isDirty("f"), "dirty 跨 reload 存活（kv durable）");
+  B.markSeen("f", "v1");                                // freshness.open：云端没动（meta.etag === seenBase）→ 重捕
+  eq(B.ifMatchFor("f"), "v1", "If-Match 非空 → 正常 replace 上传");
+});
+
+test("对照组（v431 之前的行为）：不写 durable etag → reload 后谱系彻底丢失 → 退化成 no-base 首推", () => {
+  const kv = memKv();
+  const cloud = cloudEtagRef(null);
+  const A = createLocalHead({ kv, getCloudEtag: cloud.get });   // ← 不传 setCloudEtag = 旧行为
+  A.markSynced("f", "v1"); A.recordEdit("f");
+  const B = createLocalHead({ kv, getCloudEtag: cloud.get });
+  eq(B.seenBase("f"), null, "谱系没了 → freshness 的 `if (base != null)` 重捕守卫进不去");
+  eq(B.ifMatchFor("f"), null, "→ 无 If-Match 首推 → conflictBehavior:fail → 409 → 保存永远推不上去（真机事故）");
+});
 
 test("W2 双-tab：B 用自己的 parent 不是共享 etag → 不静默覆盖", () => {
   const kv = memKv();                          // 两 tab 共享 localStorage

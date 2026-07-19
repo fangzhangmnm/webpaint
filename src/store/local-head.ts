@@ -11,6 +11,8 @@
 //   · recordEdit 是**唯一**标脏入口：原子 set dirty + _parent←_base → **dirty-without-parent 不可表示**。
 //   · seenBase 缺 _base 时回退 cloud etag——**仅**用于 open/refresh 比对（非破坏性），永不作 dirty 的 If-Match。
 //     local-head 是唯一碰这个回退的地方（两条 etag 轨道唯一接触点）。
+//   · markSynced（且**只有** markSynced）把 etag 提交进 durable 轨：它是唯一一个断言「盘上字节 == 云端某版」
+//     的迁移，而那是跨 reload 的事实。markSeen 不写（只是"看到云端 meta"，盘上字节没动）。详见 markSynced 内注释。
 import type { Kv } from "./types.ts";
 
 export class BypassError extends Error {
@@ -24,6 +26,8 @@ export class BypassError extends Error {
 export interface LocalHeadCfg {
   kv: Kv;                                       // dirty 的 durable 持久（跨 reload）
   getCloudEtag: (name: string) => string | null;   // seenBase 回退（cloud-sync 的共享 etag）；唯一接触点
+  // 采纳云版时把 etag 提交到 durable 轨（cloud-sync.setETag）。见 markSynced 里的长注释。
+  setCloudEtag?: (name: string, etag: string | null) => void;
   keyPrefix?: string;
 }
 
@@ -40,7 +44,7 @@ export interface LocalHead {
   forget(name: string): void;                            // 清掉该 name 的全部云端谱系（删除/降级 local-only）
 }
 
-export function createLocalHead({ kv, getCloudEtag, keyPrefix = "head" }: LocalHeadCfg): LocalHead {
+export function createLocalHead({ kv, getCloudEtag, setCloudEtag, keyPrefix = "head" }: LocalHeadCfg): LocalHead {
   const _base = new Map<string, string | null>();     // 本 tab 已见云 tip（内存，per-tab）
   const _parent = new Map<string, string | null>();   // 未推枝分叉自哪（内存，per-tab）
   const _dirtyMem = new Map<string, boolean>();       // per-tab 活 dirty 视图（覆盖 kv durable）
@@ -86,6 +90,26 @@ export function createLocalHead({ kv, getCloudEtag, keyPrefix = "head" }: LocalH
     _base.set(name, etag);
     _setDirty(name, false);
     _parent.delete(name);                                 // 本地已=云端 → episode 结束
+    // ★ 采纳云版 = **本地 at-rest 字节此刻等同云端某一版**。这是关于「盘上那份字节是谁」的事实，
+    //   不是 per-tab 视角 → 必须落 durable 轨，否则 reload 后无人知道本地这份的出身。
+    //
+    //   ⚠ 别把这行当 R1 违规删掉（cloud-sync.ts:220 「pull 是纯读，绝不写 etag/dirty」）：
+    //   R1 防的是**字节还没落地就先写 etag**（写了就强退 → kv 指新版、盘上是旧字节 → 下次 push
+    //   If-Match 通过 = 静默覆盖云端分叉版）。markSynced 的四个调用点全在**字节落地成功之后**：
+    //   safe-resolve 的 safePull(local.save 之后) / tryHeal(逐字节确认相等) / weakOverride(推成功后)、
+    //   identity.acquire(local.save 之后)。所以这里写 etag 正是 R1 说的「由 caller 在字节真正落地
+    //   成功后显式提交」——R1 要求的就是这个时机，不是禁止提交。
+    //
+    //   ⚠ 也别当 W2 违规（_base/_parent 绝不进共享 kv）：W2 护的是**谱系视角**（别 tab 的 base 污染
+    //   本 tab 的 If-Match 判断）。这里写的是 cloud-sync 那条本来就共享的 etag 轨，语义是「盘上字节
+    //   对应云端哪一版」——盘本来就是跨 tab 共享的，写它不制造新的共享。
+    //
+    //   不写会怎样（v418→v431 的真机 bug）：从云端 acquire/pull 来的画只有内存 _base，
+    //   reload（**每次版本更新都是一次 reload**）后 seenBase 回退到空的 durable 轨 → null →
+    //   freshness.ts 的 `if (base != null)` 重捕守卫进不去 → _parent 永远补不回来 →
+    //   ifMatchFor 返 null → conflictBehavior:"fail" → 409 → 保存永远推不上去，且自我延续
+    //   （永远不 push 成功 = 永远不写 etag = 每次版本更新必复发）。
+    setCloudEtag?.(name, etag);   // etag 为 null（provider 没回）→ 清掉陈旧值，宁可退化成「谱系不明」走冲突面
   }
 
   function onPushed(name: string, newEtag: string | null, dirtyAfter: boolean): void {

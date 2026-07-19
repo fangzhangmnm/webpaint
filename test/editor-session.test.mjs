@@ -13,10 +13,16 @@ function mockStore() {
   return {
     saves, renames, deletes, opened,
     _openReturns: new Blob(["CLOUD-OR-LOCAL"]),
+    _pushResult: null,        // 覆写成 { pushed:false } 模拟「本地落了、云端没推成」
     file(name, opts) {
       return {
         open: async () => { opened.push({ name, isZip: opts.isZip, mode: opts.mode }); return this._openReturns; },
-        save: async (bytes, o) => { saves.push({ name, tryPush: o?.tryPush, hint: o?.hint, size: bytes.size, mode: opts.mode }); },
+        // save 返回 { pushed }（v432）：push 上没上去是**事实不是异常**，editor-session 据此决定 push-pending 留不留。
+        //   _pushResult 可被单测覆写成 { pushed:false } 来模拟「本地落了但云端没推成」。
+        save: async (bytes, o) => {
+          saves.push({ name, tryPush: o?.tryPush, hint: o?.hint, size: bytes.size, mode: opts.mode });
+          return this._pushResult ?? { pushed: o?.tryPush !== false };
+        },
         tryMove: async (to) => { renames.push({ from: name, to }); return { ok: true }; },   // 改身份/移动唯一入口（挂 file 上）
         delete: async () => { deletes.push(name); },
       };
@@ -176,6 +182,41 @@ describe("editor-session › push-pending（autosave 后退出仍推）", () => 
     await es.flushAndPush();                  // 内存不脏，但 push-pending → 应推
     eq(store.saves.length, 2); eq(store.saves[1].tryPush, true, "autosave 过的内容退出仍推");
   });
+  // ── push 失败不得宣布干净（v432 真机事故：「远端文件不一样」而 UI 从没说过失败）──
+  it("★ push 没成（store 报 pushed:false）→ push-pending 保住，下次退出还会再推", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    await es.open("a"); editor.fireChange();
+    store._pushResult = { pushed: false, reason: "offline-or-error" };   // 本地落了，云端没上去
+    await es.flushAndPush();
+    eq(store.saves.length, 1);
+    store._pushResult = null;                                            // 网络回来了
+    await es.flushAndPush();
+    eq(store.saves.length, 2, "push-pending 没被乐观清掉 → 仍会重推（旧版这里是 1：静默认为已同步）");
+  });
+
+  it("push 成功后才 no-op（对照：确认上面那条不是把 no-op 也一起破坏了）", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    await es.open("a"); editor.fireChange();
+    await es.flushAndPush();
+    await es.flushAndPush();
+    eq(store.saves.length, 1, "推成功且无新编辑 → 不重复推");
+  });
+
+  it("store 没报告结果（旧适配器返 undefined）→ 保守当没推上去，不静默清干净", async () => {
+    const store = mockStore(), editor = mockEditor();
+    store.file = (name, opts) => ({
+      open: async () => new Blob(["X"]),
+      save: async () => { store.saves.push({ name, mode: opts.mode }); },   // 返 undefined
+      tryMove: async () => ({ ok: true }), delete: async () => {},
+    });
+    const es = createEditorSession({ store, editor });
+    await es.open("a"); editor.fireChange();
+    await es.flushAndPush(); await es.flushAndPush();
+    eq(store.saves.length, 2, "拿不到确认 → 假定没推上去（宁可多推一次，不静默宣布干净）");
+  });
+
   it("flushAndPush 后再 flushAndPush no-op（无新编辑）", async () => {
     const store = mockStore(), editor = mockEditor();
     const es = createEditorSession({ store, editor });

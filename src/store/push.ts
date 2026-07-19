@@ -41,6 +41,10 @@ export interface PushOpts {
   getEditVersion?: () => number;
   onConflict?: (ctx: { name: string }) => ResolveChoice | Promise<ResolveChoice>;
   adopt?: AdoptFn;
+  // 谱系断裂（无 base 推撞上云端同名）时的去向。见 doPush 的 isCollision 分支。
+  //   false（默认）= 抛 CloudNameCollisionError（**真·新建**该走这条：两设备各建同名不同物，护栏正确）
+  //   true          = 走 onConflict 冲突面（**编辑既有文件**该走这条：本地云端都有、只是谱系断了）
+  surfaceCollision?: boolean;
 }
 
 // push 的终态全集（收成联合类型，别再用裸 string —— "deferred" 拼错要在编译期就炸）：
@@ -54,7 +58,7 @@ export function createPush(cfg: PushCfg) {
   const { cloud, head, seal, safeResolve, serialize, editVersion,
     busy = passBusy, maxAttempts = 4, backoffMs = 200, sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)) } = cfg;
 
-  async function doPush(name: string, { encode, getEditVersion = editVersion, onConflict, adopt }: PushOpts): Promise<PushResult> {
+  async function doPush(name: string, { encode, getEditVersion = editVersion, onConflict, adopt, surfaceCollision = false }: PushOpts): Promise<PushResult> {
     const ifMatch = head.ifMatchFor(name);              // 封装 bypass：dirty 缺 parent 且 base 已知 → throw BypassError
     const v0 = getEditVersion();
     // encode 出明文 → seal 按 at-rest 态包壳（调用方对加密零感知）。只编码+包壳一次，重试复用（B5 逐字节比对要相等）。
@@ -82,6 +86,19 @@ export function createPush(cfg: PushCfg) {
               return { status: "healed", dirtyAfter };
             }
             const choice = onConflict ? await onConflict({ name }) : "cancel";   // 真分叉 → 交 ui 选（默认 cancel=留 dirty）
+            return await safeResolve.resolveConflict(name, choice, { bytes, adopt });
+          }
+          // 谱系断裂：无 base 推撞上云端同名（cloud-sync 的 409 + 尾字节 differ → CloudNameCollisionError）。
+          //   两种情形共用这一个错误，但该走的路完全相反：
+          //     ① **真·新建**（surfaceCollision=false）→ 云端那个是「别的设备建的同名不同物」。
+          //        抛错、两份都留着，是 MASTER §A 身份行明写的保证（both kept）。不动。
+          //     ② **编辑既有文件**（surfaceCollision=true）→ 本地有、云端有，只是本机不知道自己派生自哪一版
+          //        （reload 冲掉内存谱系、durable etag 又从没写过）。抛 collision 在这里是**假原因 + 死路**：
+          //        用户的保存一个字节都上不去，且自我延续（永远推不成功 = 永远不写 etag = 每次版本更新必复发）。
+          //        → 交给和 412 同一个冲突面：拉云端 / 留本地 / 以我的覆盖（云端 loser 进 .backup，never-lose）。
+          //   两条路都不盲目覆盖、都不丢字节；差别只是 ② 给了用户一条出路。
+          if (surfaceCollision && (e as { name?: string })?.name === "CloudNameCollisionError") {
+            const choice = onConflict ? await onConflict({ name }) : "cancel";
             return await safeResolve.resolveConflict(name, choice, { bytes, adopt });
           }
           if (retriable(e) && attempt < maxAttempts) { lastErr = e; await sleep(backoffMs * attempt); continue; }

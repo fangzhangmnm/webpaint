@@ -2,7 +2,9 @@
 //
 // identity（深模块）—— 改身份：rename / acquire。单一职责 = 安全的身份变更：
 //   phantom-path 红线：**本地先存新名再删旧名**（绝不先删）。
-//   rename：synced/纯云端 → 服务端 move 保 etag 不重传；dirty 有本地字节 → push 当前字节到新名 + 旧名进 .trash。
+//   rename：synced/纯云端 → 服务端 move 保 etag 不重传；dirty 有本地字节 → push 当前字节到新名，
+//     旧名的去向**看谱系**：完好 → 进 .trash（move 语义）；不明/分叉 → 原地留着（save-as 语义，
+//     因为改名是「上传失败后的逃生通道」，此时本地并非旧名的后代）。详见 rename 内的长注释。
 //   串行 against 两名 in-flight（serialize2）。编排 push 深模块 + cloud.rename + local-head。
 import { toU8 } from "./substrate.ts";
 import type { BytesSource } from "./substrate.ts";
@@ -22,7 +24,7 @@ type PushFn = (name: string, opts: { encode: () => BytesSource | Promise<BytesSo
 export interface IdentityCfg {
   cloud: Pick<CloudSync, "fetchMeta" | "rename" | "getETag" | "pull" | "trash">;
   local?: Pick<LocalCache, "exists" | "get" | "save" | "hardDelete">;
-  head: Pick<LocalHead, "isDirty" | "markSeen" | "markSynced" | "forget" | "recordEdit">;
+  head: Pick<LocalHead, "isDirty" | "markSeen" | "markSynced" | "forget" | "recordEdit" | "seenBase">;
   doPush: PushFn;   // 未串行版（identity 已在自己 serialize/serialize2 段内，调串行 push 会同名自锁）
   serialize: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
   serialize2: <T>(a: string, b: string, fn: () => Promise<T>) => Promise<T>;
@@ -36,7 +38,13 @@ export interface IdentityCfg {
 }
 export interface RenameOpts { encode?: () => BytesSource | Promise<BytesSource>; getEditVersion?: () => number; cloud?: boolean; busy?: Busy; skipOccupiedCheck?: boolean }
 export interface AcquireOpts { localName?: string; adopt?: AdoptFn; busy?: Busy }
-export interface IdResult { status: string; where?: string; newName?: string; localName?: string; oldCloudOrphan?: boolean; cloudDeferred?: boolean; item?: unknown; error?: unknown }
+export interface IdResult {
+  status: string; where?: string; newName?: string; oldName?: string; localName?: string;
+  oldCloudOrphan?: boolean;   // 旧名进 .trash 失败 → 云端遗留孤儿
+  oldKept?: boolean;          // 谱系不明/分叉 → 改名降级为 save-as，云端旧名**原地留着**（须告知用户）
+  cloudDeferred?: boolean;    // 云端推失败 → newName 留本地 dirty 待推
+  item?: unknown; error?: unknown;
+}
 
 export function createIdentity(cfg: IdentityCfg) {
   const { cloud, local, head, doPush, serialize, serialize2, seal, busy: _busy = passBusy, isOnline, deleteOffline, queueUpload, nameOccupied } = cfg;
@@ -90,12 +98,35 @@ export function createIdentity(cfg: IdentityCfg) {
         }
         if (bytes == null) { head.forget(oldName); return { status: "renamed", where: "local", newName }; }
         await doPush(newName, { encode: () => bytes!, getEditVersion });   // dirty/无旧云文件 → 推当前字节（含 B5/retry/conflict）
-        // 旧名进 .trash（不 hard-delete，C5）。失败 → oldCloudOrphan 让 caller surface（新名已推成功，不回滚）。
+        // ── 旧名怎么办：move（搬走）还是 save-as（留着）───────────────────────────────────────
+        //   「推新名 + 旧名进 .trash」是 **move** 语义，它隐含一个前提：
+        //        本地这份字节，是旧名云端那份的**后代**。
+        //   前提成立时搬走旧的不丢信息（新的就是它的续集）——正常改名走这条，正确。
+        //
+        //   ⚠ 前提**不成立**时（本机不知道自己派生自云端哪一版，或云端已被别的设备推过新版），
+        //   旧名那份含有本地根本没有的内容。此时搬走它 = 把用户没见过的工作挪进 .trash。
+        //   而这恰恰是 rename 最常被使用的场景：**改名是上传失败之后的逃生通道**（用户 2026-07-18 拍定），
+        //   用户来改名，正是因为原名推不上去 —— 也就是正因为谱系断了。
+        //   → 逃生通道与斩杀线本是同一条代码，差别只在这个当时「已知不知道」的变量，旧版默认了「是」。
+        //
+        //   谱系不明/已分叉 → 降级为 **save-as**：新名照推，旧名一个指头都不碰。
+        //   （不在这里弹冲突面：逃生通道必须畅通，不许在用户正要逃的时候再拦一道。保存那条路才是 surface 的地方。）
+        const base = head.seenBase(oldName);
+        const lineageIntact = cloudOld != null && base != null && base === cloudOld.etag;
         let oldCloudOrphan = false;
-        // 单腿事件（只有云端这一条腿，本地旧名没有对应的 trash 项）→ 自己生成 id，无配对需求。
-        if (cloudOld) { try { await cloud.trash(oldName, asideStamp(Date.now())); } catch (e) { reportStoreError(e, "warning"); oldCloudOrphan = true; } }   // 旧名进 .trash 失败→云端遗留孤儿：surface
+        let oldKept = false;
+        if (cloudOld && lineageIntact) {
+          // 单腿事件（只有云端这一条腿，本地旧名没有对应的 trash 项）→ 自己生成 id，无配对需求。
+          try { await cloud.trash(oldName, asideStamp(Date.now())); } catch (e) { reportStoreError(e, "warning"); oldCloudOrphan = true; }   // 旧名进 .trash 失败→云端遗留孤儿：surface
+        } else if (cloudOld) {
+          oldKept = true;   // 谱系不明/分叉 → 云端旧名原地留着（caller 须告知用户「旧的还在，叫 X」）
+        }
         head.forget(oldName);
-        return { status: "renamed", where: cloudOld ? "cloud-push+trash" : "cloud-push", newName, oldCloudOrphan };
+        return {
+          status: "renamed",
+          where: !cloudOld ? "cloud-push" : oldKept ? "cloud-push+kept" : "cloud-push+trash",
+          newName, oldCloudOrphan, oldKept, oldName,
+        };
       } catch (e) {
         reportStoreError(e, "warning");   // 云端推失败、newName 留本地 dirty 待推 → surface
         // 云端推失败（网络）→ 本地已是 newName，标脏让它成待推（下次 push/sync 自动带走 newName，

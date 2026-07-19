@@ -529,6 +529,11 @@ export const S = {
   "ss.nameCannotBeEmpty": { zh: "名字不能空", en: "Name can't be empty", ja: "名前は空にできません" },
   "ss.renamingBusy": { zh: "正在重命名 {oldName} → {newName}…", en: "Renaming {oldName} → {newName}…", ja: "{oldName} → {newName} に名前を変更しています…" },
   "ss.renamedWithCloud": { zh: "已重命名（含云端）：{oldName} → {newName}", en: "Renamed (including cloud): {oldName} → {newName}", ja: "名前を変更しました（クラウドを含む）：{oldName} → {newName}" },
+  // 改名的旧名去向三态（v432）：谱系不明时改名降级为「另存」，旧名留在云端 —— 必须说清楚，
+  //   否则用户以为旧的没了（而上一版是真把它挪进回收站了）。
+  "ss.renamedOldKept": { zh: "已另存为「{newName}」。云端的「{oldName}」原样留着（本地这份的来历不明，没敢动它）", en: "Saved as \"{newName}\". The cloud copy \"{oldName}\" was left untouched (this local copy's lineage is unknown).", ja: "「{newName}」として保存しました。クラウドの「{oldName}」はそのまま残しています（このローカル版の由来が不明なため）" },
+  "ss.renamedLocalOnly": { zh: "已重命名为「{newName}」，但云端没推成功——目前只在本地，稍后会重试", en: "Renamed to \"{newName}\", but the cloud push failed — it's local-only for now and will retry later.", ja: "「{newName}」に名前を変更しましたが、クラウドへの送信に失敗しました。現在はローカルのみで、後で再試行します" },
+  "ss.renamedOldOrphan": { zh: "已重命名为「{newName}」，但云端的「{oldName}」没能移进回收站，仍留在原处", en: "Renamed to \"{newName}\", but the cloud copy \"{oldName}\" couldn't be moved to the recycle bin and remains in place.", ja: "「{newName}」に名前を変更しましたが、クラウドの「{oldName}」をごみ箱に移動できず、元の場所に残っています" },
   "ss.renameFailed": { zh: "重命名失败：{error}", en: "Rename failed: {error}", ja: "名前の変更に失敗しました：{error}" },
   "ss.localNameTakenStatus": { zh: "本地已有同名 \"{name}\"，换一个", en: "\"{name}\" already exists locally; choose another", ja: "ローカルに同名の「{name}」がすでにあります。別の名前にしてください" },
   "ss.nameTakenNote": { zh: "已有同名 \"{name}\"，换一个", en: "\"{name}\" already exists; choose another", ja: "同名の「{name}」がすでにあります。別の名前にしてください" },

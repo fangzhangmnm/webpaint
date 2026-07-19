@@ -352,7 +352,14 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
         void _dropCheckpoint(oldName);
         _activeSessionName = trimmed; setCurrentSessionName(trimmed); _recomputePhase();
         _docLastSavedAt = Date.now(); updateSaveStatus();
-        setStatus(t("ss.renamedWithCloud", { oldName, newName: trimmed }));
+        // 别再无条件报「已重命名（含云端）」：store 现在会透出旧名到底怎么了。
+        //   oldKept   谱系不明 → 改名降级为「另存」，云端旧名**原地留着** → 必须说清楚，否则用户以为旧的没了
+        //   cloudDeferred 云端没推成 → 新名只在本地
+        //   oldCloudOrphan 旧名进回收站失败 → 云端留了个孤儿
+        if (r.cloudDeferred) setStatus(t("ss.renamedLocalOnly", { oldName, newName: trimmed }), true);
+        else if (r.oldKept) setStatus(t("ss.renamedOldKept", { oldName, newName: trimmed }), true);
+        else if (r.oldCloudOrphan) setStatus(t("ss.renamedOldOrphan", { oldName, newName: trimmed }), true);
+        else setStatus(t("ss.renamedWithCloud", { oldName, newName: trimmed }));
         gallery.refresh();
         return { ok: true };
       } catch (e) { setStatus(t("ss.renameFailed", { error: errMsg(e) })); return {}; }
