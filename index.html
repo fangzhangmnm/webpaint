@@ -62,12 +62,15 @@
     <script defer src="./vendor/zip-js/zip-full.min.js"></script>
   </head>
   <body>
-    <!-- 图标 sprite：共享库子集 + WebPaint 本地补丁，静态内联（display:none）。
+    <!-- 图标 sprite：共享库子集 + WebPaint 本地补丁，静态内联（1×1 + opacity:0 藏起来）。
+         ⚠ sprite 根别改成 display:none —— 不渲染的子树里 <mask>/<clipPath> 静默失效，
+         18 个靠遮罩留白的图标会全糊成一坨且不报错（v428 前就是这样）。理由详见
+         20260708 SVG Icons/extract-icons.py 的 SPRITE_ROOT_STYLE 注释。
          用 <svg><use href="#name"/></svg> 引用。零 JS、零请求；file:// 下外部 use 会被跨域挡死。
          内容由 tools/inline-sprites.py 生成 —— 改图标请改 assets/ 下的源文件再重跑脚本，别手改这里。
          共享库图标要增删：改 20260708 SVG Icons 那边（另有专人/专 agent 管），然后重跑 extract-icons.py。 -->
     <!-- ICON-SPRITE:BEGIN — 由 tools/inline-sprites.py 生成，勿手改 -->
-<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none">
 <!-- WebPaint 图标 sprite —— 本文件就是 WebPaint 的图标 SSoT。
 
      一份【钉死的拷贝】。上游共享库怎么改都跟本文件无关，直到我们主动去 pull。
@@ -1041,6 +1044,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-7cd120f355ff.mjs"></script>
+    <script type="module" src="./dist/webpaint-027321390016.mjs"></script>
   </body>
 </html>

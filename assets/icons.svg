@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none">
 <!-- WebPaint 图标 sprite —— 本文件就是 WebPaint 的图标 SSoT。
 
      一份【钉死的拷贝】。上游共享库怎么改都跟本文件无关，直到我们主动去 pull。
