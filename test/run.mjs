@@ -36,6 +36,7 @@ import "./local-head.test.ts";       // 本地权威态机（dirty/clean/parentB
 import "./offload.test.ts";          // offload 合法性：世界唯一副本 offload 非法抛错
 import "./identity.test.ts";         // saveAs/rename/move 身份换（含撞名、离线 move）
 import "./cloud-write-ifmatch.test.ts";   // P1: 非 upload 的云写(move/rename/purge)也必须带 If-Match
+import "./name-normalization.test.ts";   // P4: 身份在赋值处归一化（非单射的 sessionFileName）
 import "./reconcile.test.ts";        // cloud-gone 收敛去抖：首次标 candidate、跨 GRACE send trash、重现/编辑自愈
 import "./pending-gone.test.ts";     // 云端防抖 candidate-gone 深模块 + classifySyncState pendingGone 分支
 import "./cloud-sync.test.ts";       // provider↔本地缓存低层同步 + memKv

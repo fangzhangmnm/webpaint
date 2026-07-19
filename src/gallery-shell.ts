@@ -21,7 +21,7 @@ import { session } from "./session-state.ts";
 import { reportError } from "./error-badge.ts";
 import { els } from "./els.ts";
 import { readImageFromClipboard } from "./session.ts";
-import { sessionFileName } from "./config.ts";   // 边界：裸 session 名 → 库全名（占用检查按库身份查）
+import { sessionFileName, sessionBareName } from "./config.ts";   // 边界：裸 session 名 → 库全名（占用检查按库身份查）
 import { isSignedIn } from "./app-store.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
@@ -169,13 +169,17 @@ function humanSize(b: number | null | undefined): string {
 //   （旧名 uniqueLocalName 撒谎：它现在也查云端。且旧实现读死了的 sessions 库 → 恒不撞名。）
 //   上限 20（旧 100）：每次未命中最坏一次 fetchMeta，别让「新建」确认卡在上百次往返上；
 //   兜底加时间戳，保证一定返回一个名字。
+//   ⚠ 返回**归一化后**的裸名（v437）：以前查占用用 sessionFileName(stem)（归一）却把**原始** stem
+//   返回去，于是 newDoc 拿着 `a:b` 当活动名，而 store/gallery 那边是 `a_b` → 五处 `===` 比较失配。
+//   归一化必须发生在名字**诞生的地方**，不是比较的地方。
 export async function uniqueNameFor(stem: string) {
-  if (!(await _store.files.nameOccupied(sessionFileName(stem)))) return stem;
+  const base = sessionBareName(stem);
+  if (!(await _store.files.nameOccupied(sessionFileName(base)))) return base;
   for (let i = 1; i < 20; i++) {
-    const candidate = `${stem} ${i}`;
+    const candidate = `${base} ${i}`;
     if (!(await _store.files.nameOccupied(sessionFileName(candidate)))) return candidate;
   }
-  return `${stem} ${Date.now()}`;
+  return `${base} ${Date.now()}`;
 }
 
 export function initGalleryShell(ctx: AppContext) {

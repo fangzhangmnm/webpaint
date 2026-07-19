@@ -21,7 +21,7 @@ import { isSignedIn, store as _store } from "./app-store.ts";
 import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字节（branded：明文流不进只收密文的 sink）
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
-import { stripSessionExt, sessionFileName } from "./config.ts";
+import { stripSessionExt, sessionFileName, sessionBareName } from "./config.ts";
 import { serializedToolStatePatch, editorState } from "./editor-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
@@ -75,6 +75,14 @@ const _enc = reactive<{ encrypted: boolean }>({ encrypted: false });
 // 边界（薄库身份=全名）：app 内部 _activeSessionName 是**裸** session 名；跨到库/editor-session 前统一 sessionFileName
 //   转全名（X→X.ora）。加密件 .zip 由库内部据字节态翻转，app 只传明文全名。OUT 侧（itemToG）用 stripSessionExt 还原。
 const toFull = (name: string) => sessionFileName(name);
+// **活动文档名的唯一写入口**（v437）。在这里归一化一次，之后全 app 的 `item.name === session.name`
+//   比较就恒等可比 —— 而不是在五个比较点各自补 sessionFileName()（补漏一个就是一个 bug）。
+//   为什么必须归一：store 那边的身份是 sessionBareName 之后的；app 若存用户敲进来的原始名，
+//   `a:b` 与 `a_b` 会永久失配（详见 config.ts 的长注释）。
+function _setActive(name: string | null): void {
+  _activeSessionName = name == null ? null : sessionBareName(name);
+  setCurrentSessionName(_activeSessionName ?? "");
+}
 const _file = (name: string) => _store.file(toFull(name), { isZip: true, mode: "existing" });   // WebPaint work-file = ora-zip 容器（有 peek）
 async function _refreshEncrypted() {
   try { _enc.encrypted = _activeSessionName ? await _file(_activeSessionName).isEncrypted() : false; }
@@ -208,7 +216,7 @@ function adoptAsExisting(loaded: LoadedDoc, name: string) {
 }
 function _adoptCommon(loaded: LoadedDoc, name: string, opts: { create?: boolean }) {
   adoptModel(loaded);
-  _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase();
+  _setActive(name); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(name), opts);
   _docLastSavedAt = Date.now(); updateSaveStatus(); _refreshEncrypted();
 }
@@ -354,7 +362,7 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
         if (!r.ok) return { conflict: true };  // 目标占用（local/cloud）→ 循环重问；未改 _name
         // 改名 = 换身份 → 旧 key 的快照丢掉（不搬：搬要连密文一起复制，而"改名丢一次快照"是诚实的小代价）。
         void _dropCheckpoint(oldName);
-        _activeSessionName = trimmed; setCurrentSessionName(trimmed); _recomputePhase();
+        _setActive(trimmed); _recomputePhase();
         _docLastSavedAt = Date.now(); updateSaveStatus();
         // 别再无条件报「已重命名（含云端）」：store 现在会透出旧名到底怎么了。
         //   oldKept   谱系不明 → 改名降级为「另存」，云端旧名**原地留着** → 必须说清楚，否则用户以为旧的没了
@@ -393,7 +401,7 @@ async function exitCanvasToGallery() {
     }
     gallery.setFolder(pathFolder(_activeSessionName));
   }
-  _activeSessionName = null; setCurrentSessionName(""); _recomputePhase();
+  _setActive(null); _recomputePhase();
   _enc.encrypted = false; _isLazyBlankSession = false; updateSaveStatus();
   await setGalleryOpen(true);
 }
@@ -405,7 +413,7 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
   doc.layers = fresh.layers; doc.activeIndex = 0; doc.width = w; doc.height = h; doc.selection = null; doc.referenceLayerId = null;
   els.canvasSizeLabel.textContent = `${w}×${h}`;
   if (fillLayer0) fillLayer0(doc.layers[0]);
-  _activeSessionName = name; setCurrentSessionName(name); _recomputePhase();
+  _setActive(name); _recomputePhase();
   _enc.encrypted = false; input.clearHistory(); board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
   resetEditorState();
   applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
@@ -438,7 +446,7 @@ async function openItem(item: GalleryItem) {
     //   新名字、状态栏还报「已打开」——下次 autosave 就把上一张画的像素写进新身份，退出时推上 OneDrive
     //   覆盖掉目标那张画。es.open 现在失败即不改自身 _name，这里也必须不改活动名、留在图库。
     if (!(await es.open(toFull(item.name)))) { setStatus(t("ss.openFailed", { error: t("mi.lastNotFound", { name: item.name }) }), true); return; }
-    _activeSessionName = item.name; setCurrentSessionName(item.name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
+    _setActive(item.name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     void _captureCheckpoint(item.name, "gallery-open");
     setGalleryOpen(false); setStatus(t("ss.opened", { name: item.name }));
   } catch (err) { setStatus(t("ss.openFailed", { error: errMsg(err) })); }
@@ -500,7 +508,7 @@ async function restoreSession(name: string): Promise<boolean> {
     //   store 侧的两半已有 node 覆盖（seal.test.ts：无密码写抛 LOCKED 绝不静默存明文；锁定读返 null）。
     if (await _file(name).isEncrypted()) { if (!(await ensureUnlocked(name))) return false; }
     if (!(await es.open(toFull(name)))) return false;   // 文件缺失/锁定 → 未装入。边界转全名。
-    _activeSessionName = name; setCurrentSessionName(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
+    _setActive(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
     _docLastSavedAt = Date.now(); updateSaveStatus();
     return true;
   } catch (e) { reportError(new Error("[session] restore failed: " + String(e)), "log"); return false; }
@@ -512,7 +520,7 @@ async function saveAs(newName: string): Promise<void> {
   const peek = await renderThumbBlob(doc, 256);
   // 另存为=写**新身份** → mode:"new"（撞名不静默覆盖；topbar 已 nameOccupied 预检，这里 store 层再兜底红线）。
   await _store.file(toFull(newName), { isZip: true, mode: "new" }).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
-  _activeSessionName = newName; setCurrentSessionName(newName); _isLazyBlankSession = false; _recomputePhase();
+  _setActive(newName); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(newName));   // es 切到新名（内容即新名的；下轮 autosave 若跑=同内容 re-save，无害）。边界转全名。
   void _captureCheckpoint(newName, "save-as");   // 新身份的「打开态」= 此刻
   _docLastSavedAt = Date.now(); updateSaveStatus(); gallery.refresh();
@@ -524,8 +532,10 @@ async function saveAs(newName: string): Promise<void> {
 //   路径把"加载失败的 path"当 oldName 删掉），但**持久的 currentFile 必须留着**，好让用户下次冷启动重试。
 //   失败不只是"文件真没了"：加密画取消密码框 / 离线只有云端副本 都会返 false。清了它们就再也不自动开了。
 function setName(name: string | null, opts: { persist?: boolean } = {}) {
-  _activeSessionName = name;
-  if (opts.persist !== false) setCurrentSessionName(name as string);
+  // 同样归一化（v437）：这条路是 gallery 移动文件后同步活动名的，不归一就会把用户敲的
+  //   原始名塞回来，重新制造 `item.name === session.name` 的失配。
+  _activeSessionName = name == null ? null : sessionBareName(name);
+  if (opts.persist !== false) setCurrentSessionName(_activeSessionName as string);
   _recomputePhase();
 }
 
