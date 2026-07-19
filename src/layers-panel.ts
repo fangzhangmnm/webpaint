@@ -539,7 +539,7 @@ const LayerRow = defineComponent({
         <!-- 图层组 reparent：解组（仅组）/ 移入某组（dropdown，不挤占菜单空间）/ 移出组。编组 = 「+」里新建空组 -->
         <hr class="menu-sep" v-if="isGroup || moveTargets.length || canMoveOut" />
         <button v-if="isGroup" class="menu-item menu-item-with-icon" type="button" @click="act('ungroup')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#explode-folder"/></svg><span class="menu-item-label">{{ L.ungroup }}</span></button>
-        <label v-if="moveTargets.length" class="menu-item layer-move-into menu-item-with-icon" @click.stop><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#collection"/></svg><span class="menu-item-label">{{ L.moveIntoGroup }}</span>
+        <label v-if="moveTargets.length" class="menu-item layer-move-into menu-item-with-icon" @click.stop><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-folder"/></svg><span class="menu-item-label">{{ L.moveIntoGroup }}</span>
           <select class="layer-move-select" @change="onMoveSelect" @click.stop>
             <option value="" selected>{{ L.choose }}</option>
             <option v-for="g in moveTargets" :key="'mi'+g.id" :value="String(g.id)">{{ g.name }}</option>
@@ -680,7 +680,18 @@ function _syncChrome() {
   els.layerAddBtn.disabled = leaves >= max;
   const delBtn = document.getElementById("layerDeleteBtn") as HTMLButtonElement;
   // 组永远可删（删空补空层）；叶要留底（≥1 叶）。
-  if (delBtn) delBtn.disabled = !doc.activeLayer?.isGroup && leaves <= 1;
+  // 只剩最后一张叶层时删不掉 —— 与其摆个灰按钮，不如就地变成「清空内容」（v430，user 提）。
+  // 模式写进 dataset，click handler 照它分派；别在两处各判一次条件。
+  const asClear = !doc.activeLayer?.isGroup && leaves <= 1;
+  if (delBtn) {
+    const lay = doc.activeLayer;
+    const hasPx = !!lay && !lay.isGroup && lay.bboxW > 0 && lay.bboxH > 0;
+    delBtn.dataset.mode = asClear ? "clear" : "del";
+    delBtn.disabled = asClear ? !hasPx : false;   // 已经是空的就没什么可清
+    delBtn.title = t(asClear ? "lp.clearContent" : "lp.foot.del");
+    delBtn.setAttribute("aria-label", delBtn.title);
+    delBtn.querySelector("use")?.setAttribute("href", asClear ? "#clear-document" : "#trash-can");
+  }
   // v267 上移/下移按钮按活动节点的**同级**边界禁用（树化：top/bottom 按同级算）
   const upBtn = document.getElementById("layerMoveUpBtn") as HTMLButtonElement;
   const downBtn = document.getElementById("layerMoveDownBtn") as HTMLButtonElement;
@@ -774,7 +785,10 @@ export function initLayersPanel(ctx: AppContext) {
   document.getElementById("layerMoveDownBtn")?.addEventListener("click", () => {
     if (doc.activeLayer) _moveLayerDelta(doc.activeLayer, -1);
   });
-  document.getElementById("layerDeleteBtn")?.addEventListener("click", () => {
-    if (doc.activeLayer) _deleteLayer(doc.activeLayer);
+  document.getElementById("layerDeleteBtn")?.addEventListener("click", (e) => {
+    if (!doc.activeLayer) return;
+    // 模式由 _syncChrome 写在 dataset 上（最后一张叶层 → 清空内容，否则删除）。
+    if ((e.currentTarget as HTMLElement).dataset.mode === "clear") _clearLayerPixels(doc.activeLayer);
+    else _deleteLayer(doc.activeLayer);
   });
 }

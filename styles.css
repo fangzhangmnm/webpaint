@@ -984,9 +984,12 @@ input[type="range"].color-ramp::-moz-range-thumb {
 .layer-move-into { display: flex; align-items: center; gap: 8px; cursor: default; }
 .layer-move-into .menu-item-label { flex: 0 0 auto; }
 .layer-move-select { flex: 1 1 auto; min-width: 0; max-width: 110px; }
+/* 眼睛：按钮盒子必须比图标大，否则图标被盒子卡住。
+   v123 把 icon 从 16 调到 22 却没动这里的 20px，于是那次放大一直没生效（v430 修）。
+   尺寸以 .layer-vis svg 为准，别再只改 layers-panel.ts 里的 size。 */
 .layer-vis {
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -996,6 +999,7 @@ input[type="range"].color-ramp::-moz-range-thumb {
   color: var(--ink);
   flex: 0 0 auto;
 }
+.layer-vis svg { width: 24px; height: 24px; display: block; }
 .layer-vis.hidden-icon { opacity: 0.3; }
 .layer-name {
   flex: 1;

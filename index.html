@@ -76,10 +76,10 @@
      一份【钉死的拷贝】。上游共享库怎么改都跟本文件无关，直到我们主动去 pull。
      构建路径里没有任何东西会读那个仓库。
 
-       上游 commit    : b4c76ed（2026-07-18）
-       上游 icons.svg : sha256 c4cf883bf56d83fe…   ← 提取时的实际文件，可独立校验
+       上游 commit    : d0a8e74（2026-07-18）
+       上游 icons.svg : sha256 bec1b7974e40a200…   ← 提取时的实际文件，可独立校验
        拉取日期       : 2026-07-18
-       symbol 数      : 91（全部来自上游，零本地追加）
+       symbol 数      : 90（全部来自上游，零本地追加）
 
      用 no-notes 生成（去掉每个图标的说明注释块）：本文件整份内联进 index.html，
      是每个用户都要下载的东西，说明文字留在上游即可。
@@ -91,9 +91,8 @@
      样式契约：viewBox 0 0 24 24 / fill=none stroke=currentColor stroke-width=1.7 / round caps。
      全部 currentColor，尺寸由 CSS 给。
 -->
-
 <!--
-  91 icons extracted from the family icon library (../../../../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead.
+  90 icons extracted from the family icon library (../../../../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead.
   Family SVG Icons — MIT License, Copyright (c) 2026 fangzhangmnm.
   Contains work derived from (per-icon provenance in data-src):
     Bootstrap Icons — MIT License, Copyright (c) 2019-2024 The Bootstrap Authors · https://github.com/twbs/icons
@@ -160,7 +159,6 @@
   <symbol id="trash-can" data-cat="file" data-src="own" data-note="垃圾桶:桶身收口(feather 是直筒);与 fluent(圆提手/更低)、heroicons(弧形透视)亦不同 — own" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 9.5v9"/><path d="M14 9.5v9"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
   <!-- hierarchy -->
   <symbol id="clipping-mask" data-cat="hierarchy" data-src="own" data-note="剪贴蒙版:折角箭头(PS 同款下折指向语义)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v8a2 2 0 0 0 2 2h6"/><polyline points="13 12 17 15 13 18"/></symbol>
-  <symbol id="collection" data-cat="hierarchy" data-src="lucide:archive" data-note="收纳箱 (Blender collection · copy of archive-box)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v4H3z"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></symbol>
   <symbol id="create-folder" data-cat="hierarchy" data-src="own" data-note="加号做成右下角徽标" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icCfd"><rect width="24" height="24" fill="#fff" stroke="none"/><circle cx="17.6" cy="17.6" r="4.6" fill="#000" stroke="none"/></mask><g mask="url(#icCfd)"><g transform="translate(-1.2 -1.6) scale(0.86)"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></g></g><path d="M14.6 17.6 H20.6 M17.6 14.6 V20.6"/></symbol>
   <symbol id="explode-folder" data-cat="hierarchy" data-src="own" data-note="解散文件夹:虚线 folder 残影 + 内容三方块排成一行落在下方" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(4.6 0.8) scale(0.6)" stroke-width="2.83"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" stroke-dasharray="4.00 3.67"/></g><rect x="3.0" y="15.0" width="5.0" height="5.0" rx="0.8"/><rect x="9.5" y="15.0" width="5.0" height="5.0" rx="0.8"/><rect x="16.0" y="15.0" width="5.0" height="5.0" rx="0.8"/></symbol>
   <symbol id="layers-stack" data-cat="hierarchy" data-src="own" data-note="tool.layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 22 8 12 14 2 8 12 2"></polygon> <polyline points="2 13 12 19 22 13"></polyline> <polyline points="2 18 12 24 22 18" transform="translate(0,-2)"></polyline></symbol>
@@ -199,9 +197,9 @@
   <!-- ui -->
   <symbol id="archive-box" data-cat="ui" data-src="lucide:archive" data-note="nav.trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v4H3z"/> <path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/> <path d="M10 13h4"/></symbol>
   <symbol id="database" data-cat="ui" data-src="own" data-note="" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
-  <symbol id="keyboard" data-cat="ui" data-src="own" data-note="键盘:圆点加大收紧+空格上移不压框(与 shortcut 不同语义)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="7.2" cy="9.7" r="1.15" fill="currentColor" stroke="none"/><circle cx="10.4" cy="9.7" r="1.15" fill="currentColor" stroke="none"/><circle cx="13.6" cy="9.7" r="1.15" fill="currentColor" stroke="none"/><circle cx="16.8" cy="9.7" r="1.15" fill="currentColor" stroke="none"/><circle cx="7.2" cy="12.8" r="1.15" fill="currentColor" stroke="none"/><circle cx="10.4" cy="12.8" r="1.15" fill="currentColor" stroke="none"/><circle cx="13.6" cy="12.8" r="1.15" fill="currentColor" stroke="none"/><circle cx="16.8" cy="12.8" r="1.15" fill="currentColor" stroke="none"/><path d="M8.6 15.6 H15.4"/></symbol>
   <symbol id="menu" data-cat="ui" data-src="own" data-note="tool.menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"></line> <line x1="4" y1="12" x2="20" y2="12"></line> <line x1="4" y1="17" x2="20" y2="17"></line></symbol>
   <symbol id="more" data-cat="ui" data-src="own" data-note="溢出菜单:横向三点(原 ⋯ 字符跨平台字形不一)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="shortcut" data-cat="ui" data-src="own" data-note="快捷键:键帽圆角方块内放 V" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M8.8 9.2 L12 15.4 L15.2 9.2"/></symbol>
   <symbol id="theme" data-cat="ui" data-src="own" data-note="主题日月同辉:细月牙(大圆挖近等大圆) + 八芒太阳嵌在缺口里, 光芒是与太阳脱开的短线。日月直径比 1.00, 分离角 -30°, 分离距离 1.05 倍月半径;太阳用遮罩描边留白从月牙上抠出白边" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icTq30近"><rect width="24" height="24" fill="#fff" stroke="none"/><g fill="#000" stroke="#000" stroke-width="3.0" stroke-linecap="round"><circle cx="15.46" cy="9.90" r="3.06"/><path d="M20.56 12.01 L21.87 12.55"/><path d="M17.57 15.00 L18.11 16.31"/><path d="M13.35 15.00 L12.81 16.31"/><path d="M10.36 12.01 L9.05 12.55"/><path d="M10.36 7.79 L9.05 7.25"/><path d="M13.35 4.80 L12.81 3.49"/><path d="M17.57 4.80 L18.11 3.49"/><path d="M20.56 7.79 L21.87 7.25"/></g></mask><g mask="url(#icTq30近)"><path d="M14.10 18.44 A6.97 6.97 0 1 1 7.39 6.81 A6.86 6.86 0 0 0 14.10 18.44 Z"/></g><circle cx="15.46" cy="9.90" r="3.06"/><path d="M20.56 12.01 L21.87 12.55"/><path d="M17.57 15.00 L18.11 16.31"/><path d="M13.35 15.00 L12.81 16.31"/><path d="M10.36 12.01 L9.05 12.55"/><path d="M10.36 7.79 L9.05 7.25"/><path d="M13.35 4.80 L12.81 3.49"/><path d="M17.57 4.80 L18.11 3.49"/><path d="M20.56 7.79 L21.87 7.25"/></symbol>
   <!-- misc -->
   <symbol id="blender" data-cat="misc" data-src="trademark:Blender" data-note="Blender sync:瘦长体 Bl + Adobe 式圆角方框(PT Sans Narrow Bold, l 带钩不与 i/1 混; 宽高比 0.96)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="2.6" width="18.8" height="18.8" rx="4.2"/><path d="M12.88 9.07Q12.88 9.47 12.8 9.87Q12.71 10.27 12.52 10.62Q12.34 10.97 12.03 11.23Q11.73 11.5 11.31 11.64V11.73Q11.68 11.83 12.02 12.01Q12.35 12.2 12.6 12.52Q12.85 12.84 13 13.3Q13.15 13.76 13.15 14.38Q13.15 15.22 12.86 15.84Q12.57 16.45 12.08 16.84Q11.59 17.23 10.94 17.42Q10.28 17.61 9.55 17.61Q9.33 17.61 8.99 17.61Q8.65 17.61 8.25 17.58Q7.85 17.56 7.43 17.51Q7.01 17.47 6.65 17.37V6.62Q7.17 6.53 7.92 6.46Q8.68 6.39 9.42 6.39Q10.11 6.39 10.74 6.5Q11.37 6.61 11.85 6.9Q12.32 7.2 12.6 7.72Q12.88 8.24 12.88 9.07ZM9.6 15.91Q10.25 15.91 10.67 15.49Q11.09 15.07 11.09 14.26Q11.09 13.74 10.95 13.44Q10.81 13.13 10.58 12.97Q10.34 12.81 10.04 12.76Q9.74 12.71 9.41 12.71H8.61V15.81Q8.74 15.86 9.04 15.88Q9.35 15.91 9.6 15.91ZM9.07 11.17Q9.24 11.17 9.46 11.15Q9.69 11.12 9.83 11.09Q10.28 10.92 10.6 10.53Q10.92 10.14 10.92 9.52Q10.92 9.11 10.81 8.83Q10.7 8.55 10.51 8.39Q10.33 8.23 10.07 8.16Q9.81 8.09 9.52 8.09Q8.88 8.09 8.61 8.15V11.17Z M16.14 14.93Q16.14 15.47 16.25 15.71Q16.36 15.94 16.61 15.94Q16.75 15.94 16.89 15.91Q17.04 15.88 17.23 15.8L17.4 17.29Q17.21 17.42 16.76 17.53Q16.31 17.64 15.84 17.64Q15.06 17.64 14.67 17.25Q14.29 16.86 14.29 15.92V6.54H16.14Z" fill="currentColor" stroke="none"/></symbol>
@@ -654,8 +652,8 @@
       <!-- "+" 弹出菜单：新图层 / 新建图层组(空) / 导入图片到新层（layerImportPhotoBtn 仍由 import-image 接线） -->
       <div class="menu-panel layer-add-popup hidden" id="layerAddPopup" role="menu">
         <button class="menu-item menu-item-with-icon" id="layerAddNewBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#new"/></svg><span class="menu-item-label" data-i18n="sub.newLayer">新图层</span></button>
-        <button class="menu-item menu-item-with-icon" id="layerAddGroupBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#collection"/></svg><span class="menu-item-label" data-i18n="lp.foot.newGroup">新建图层组</span></button>
-        <button class="menu-item menu-item-with-icon" id="layerImportPhotoBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span class="menu-item-label" data-i18n="lp.foot.importPhoto">导入图片到新层</span></button>
+        <button class="menu-item menu-item-with-icon" id="layerAddGroupBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#create-folder"/></svg><span class="menu-item-label" data-i18n="lp.foot.newGroup">新建图层组</span></button>
+        <button class="menu-item menu-item-with-icon" id="layerImportPhotoBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#image"/></svg><span class="menu-item-label" data-i18n="lp.foot.importPhoto">导入图片到新层</span></button>
       </div>
     </div>
 
@@ -920,7 +918,7 @@
       <button class="menu-item menu-item-with-icon" id="menuBlender" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#blender"/></svg>
         <span class="menu-item-label">Blender sync…</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="menuShortcuts" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#keyboard"/></svg>
+      <button class="menu-item menu-item-with-icon" id="menuShortcuts" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#shortcut"/></svg>
         <span class="menu-item-label" data-i18n="menu.shortcuts">快捷键</span>
       </button>
       <!-- v267 (user)：视口复位（画布拖出屏幕时一键找回）= fitToScreen -->
@@ -1044,6 +1042,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-027321390016.mjs"></script>
+    <script type="module" src="./dist/webpaint-0a23feb96386.mjs"></script>
   </body>
 </html>
