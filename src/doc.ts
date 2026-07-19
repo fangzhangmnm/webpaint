@@ -335,6 +335,8 @@ export class PaintDoc {
   //   保守）；GL 模式 release 物化 canvas → false（单份 tile 计费 → 多放层）。
   _memBudgetBytes: number | null = null;
   _memCountMat = true;
+  // 离树物化失败回调（见 materializeDetaching）。模型层不碰 DOM → app 层接到 reportError 报红条。
+  onMaterializeFailure: ((layerIds: number[]) => void) | null = null;
   constructor({ width = DEFAULT_DOC_SIZE, height = DEFAULT_DOC_SIZE }: { width?: number; height?: number } = {}) {
     this.width = width;
     this.height = height;
@@ -486,6 +488,7 @@ export class PaintDoc {
     if (!loc) return false;
     const removingLeaves = countLeaves([loc.node]);
     if (!allowEmpty && countLeaves(this.layers) - removingLeaves < 1) return false;
+    this._materializeLeaves(flattenLeaves([loc.node]));   // 离树前自带像素（见 materializeDetaching）
     loc.parent.splice(loc.index, 1);
     if (!findNodeById(this.layers, this.activeId)) {   // active 被删（或在被删组内）→ 重选末叶
       const leaves = flattenLeaves(this.layers);
@@ -764,6 +767,32 @@ export class PaintDoc {
     return true;
   }
 
+  // ---- 离树物化护栏（缺陷 A）----
+  // 不变量：**任何叶子离开图层树之前，必须自带 CPU 像素。**
+  //
+  // 为什么需要：GL 侧的 TileResidency 允许把非活动层的 CPU raw 驱逐掉（省 ~16MB/满层），像素只留在
+  //   GPU tiles + 压缩备份里；而 GLDocRenderer.syncAll 没有单独的删层钩子，**用「树差」当删层信号**——
+  //   不在当前树里的 id 一律 dropLayer + forgetExcept，两份副本一起销毁。这对真删除是对的，但 undo
+  //   的存在否定了「离树 = 永久删除」这个前提：restoreTree 保的是活引用、零像素拷贝，撤销时把同一个
+  //   Layer 对象重挂回来——对象回来了，像素已经被回收了。
+  // 时机：必须在 detach **之前**调（此刻 GPU tiles 还活着，readback 必成功）；syncAll 要到下一帧 rAF
+  //   才跑，所以这个窗口是稳的。
+  // 代价（诚实交代）：物化后该层占 raw ≈ 16MB/满 2K 层，换掉的是即将被销毁的压缩备份。单叶删除无人
+  //   持有 → readback 后即 GC；删组时 treeStructure 的 before 快照会持有它 → 由 handler 的 dispose 释放。
+  //
+  // 返回物化**失败**的层 id（GL context 已丢，provider 拿不到 tiles）。模型层保持无 DOM，故经
+  //   onMaterializeFailure 钩子交给 app 层报红条——静默丢层正是 CLAUDE.md 禁止的煤气灯。
+  materializeDetaching(beforeNodes: Node[], afterNodes: Node[]): number[] {
+    const live = new Set(flattenLeaves(afterNodes).map((L) => L.id));
+    return this._materializeLeaves(flattenLeaves(beforeNodes).filter((L) => !live.has(L.id)));
+  }
+  _materializeLeaves(leaves: Layer[]): number[] {
+    const failed: number[] = [];
+    for (const L of leaves) if (!L.pixels.forceResident()) failed.push(L.id);
+    if (failed.length) this.onMaterializeFailure?.(failed);
+    return failed;
+  }
+
   // ---- 结构撤销底座：保叶子**活引用**（零像素拷贝）+ 组记录 ----
   // 给 group/ungroup/reparent/组删除 的撤销用。纯结构变（不改像素）→ 不必像 snapshotAll 那样
   // dump 每层 imageData（iPad 内存紧）。叶子存活对象引用：撤销重挂同一 Layer，id/像素历史不变。
@@ -785,7 +814,11 @@ export class PaintDoc {
       g.children = rec.children.map(build);
       return g;
     };
-    this.layers = snap.nodes.map(build);
+    const next = snap.nodes.map(build);
+    // undo/redo 结构变更同样会让叶子离树——**redo 尤其**：treeStructure.redo 直接调本方法重放
+    // 「删组」，不经过 layers-panel。所以护栏必须在这里，不能只包 UI 调用点。
+    this.materializeDetaching(this.layers, next);
+    this.layers = next;
     reseedLayerIdCounter(this.layers);
     if (snap.activeId != null && findNodeById(this.layers, snap.activeId)) {
       this.activeId = snap.activeId;

@@ -67,11 +67,13 @@ import "./brush-collect-stamps.test.mjs";    // Stage 3：brush.collectStamps GP
 import "./layer-composite.test.mjs";        // deep module A：clip 基底解析（同级/链共基底/基底隐显/组作基底）
 import "./tile-store.test.mjs";             // WebGL2+tiling Stage 1：tile 几何 + 稀疏存储簿记（fake backend round-trip）
 import "./tile-pixels.test.mjs";
-import "./tile-residency.test.mjs";         // TileResidency Slice A：无损压缩备份 + dirty-never-evict 门 + contentVersion          
+import "./tile-residency.test.mjs";         // TileResidency Slice A：无损压缩备份 + dirty-never-evict 门 + contentVersion
+import "./tile-pixels-write.test.mjs";      // ★缺陷 C 回归：写路径 ⟂ 驱逐态（_ensureResident 只守读不守写 → undo 被撕裂覆盖）
 import "./blend-glsl.test.mjs";             // WebGL2+tiling Stage 2：12 blend GLSL 生成（像素 parity 在 npm run smoke）
 import "./gl-compose-plan.test.mjs";        // WebGL2+tiling Stage 2：clip 基底解析 + 组隔离判定（与 layer-composite 对齐）
 import "./gl-doc-bridge.test.mjs";       // WebGL2+tiling 接 board：doc 树→CompNode 翻译 + safeMode
 import "./layer-tree.test.mjs";             // batch 2：图层树模型（嵌套树 op + activeId + 组 op + snapshotAll 往返）
+import "./layer-detach-residency.test.mjs"; // ★缺陷 A 回归：叶离树前强制物化（删组 + restoreTree redo 路径）——防被驱逐层像素被 syncAll 对账销毁
 import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序列化（buildStackXml↔parseStackXml + id + active 往返）
 // app-boot 必须是套件里**第一个**触发 Vue 求值的测试：Vue（vue.esm-browser）在 module-eval 时把
 // document 缓存成 module 级 const（createText 等用它）。boot-smoke 装了 DOM shim 后才 import app.js，

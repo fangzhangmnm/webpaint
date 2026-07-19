@@ -103,6 +103,9 @@ if (navigator.maxTouchPoints > 0) {
 }
 initI18n();   // 本地化 boot：设 <html lang> + 填静态 HTML data-i18n（早于任何 JS 设标签/首帧）
 const doc = new PaintDoc({ width: 2048, height: 2048 });
+// 离树物化失败（GL context 在删层瞬间丢了 → 该层像素可能只剩即将被回收的备份）。红条，不静默。
+doc.onMaterializeFailure = (ids) =>
+  reportError(new Error(t("err.layerMaterializeFailed", { ids: ids.join("、") })), "error");
 const board = new Board(els.board as HTMLCanvasElement, doc);
 els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
 els.versionLabel.textContent = t("menu.version", { v: WEBPAINT_VERSION || "?" });   // 挪到「强制更新」旁的菜单信息行

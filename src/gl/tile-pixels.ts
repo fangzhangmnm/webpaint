@@ -57,6 +57,13 @@ export class LayerPixels {
     }
     this._evicted = false;
   }
+  // 强制重物化：把 `_ensureResident` 从「读方法的私有护栏」升格为**显式契约**。
+  //   用途：叶子离开图层树之前（doc.removeLayer / doc.restoreTree），此刻 GPU tiles 还活着、readback
+  //   必成功；离树之后 syncAll 会按树差把 GPU tiles + 压缩备份一并回收（gl-doc-renderer.ts:147-148），
+  //   而 restoreTree 保的是活引用、不拷像素 → 不在这里物化 = 撤销时复活一个空壳层 = 数据丢失（缺陷 A）。
+  //   返回 false = 重物化失败（GL context 已丢，provider 拿不到 tiles）→ caller 必须报出来，不许静默。
+  forceResident(): boolean { this._ensureResident(); return !this._evicted; }
+
   private _ensureResident(): void {
     if (!this._evicted) return;
     // provider **成功**（调 adoptResidentTiles）才清 _evicted；失败（context 丢/无 GPU tiles，不 adopt）则**保持
@@ -81,6 +88,7 @@ export class LayerPixels {
   }
   // 整 tile 写入（拷贝进来；全透明则回收）。给 GL readback / wholesale 重建用。
   putTile(tx: number, ty: number, pixels: Uint8ClampedArray): void {
+    this._ensureResident();   // 局部写：先把**其余** tile 拉回来，否则它们被搁浅成空（详见 putRegion 注释）
     this._contentVersion++;
     const key = tileKey(tx, ty, this._across);
     if (isAllTransparent(pixels)) { this._tiles.delete(key); this._dirty.add(key); return; }
@@ -98,6 +106,10 @@ export class LayerPixels {
   // src 的透明像素也会写入（= 该处变透明）。覆盖后全透明的 tile 回收。
   putRegion(sx0: number, sy0: number, sw: number, sh: number, src: Uint8ClampedArray): void {
     if (sw <= 0 || sh <= 0) return;
+    // **局部**写必须先重物化：只写一块、其余 tile 仍在 GPU 那份里。不先拉回来的话，_evicted 保持 true →
+    //   下一次读触发 provider → adoptResidentTiles **merge** 陈旧 GPU tile，把刚写的这块撕成新旧混合。
+    //   （读侧护栏管不到写侧——这正是缺陷 C。整体替换的 clear/restore 不需要，见其各自注释。）
+    this._ensureResident();
     this._contentVersion++;
     forEachTileInRect(sx0, sy0, sw, sh, this.docW, this.docH, (tx, ty) => {
       const key = tileKey(tx, ty, this._across);
@@ -185,7 +197,9 @@ export class LayerPixels {
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
-  clear(): void { this._contentVersion++; this._tiles.forEach((_p, k) => this._dirty.add(k)); this._tiles.clear(); }
+  // 整体替换（丢弃全部旧内容）→ 无需先重物化，但**必须**解除驱逐态：否则 _tiles 已空而 _evicted 仍 true，
+  //   下一次读会把陈旧 GPU tile 整份 adopt 回来 = 清空被静默复活（缺陷 C）。
+  clear(): void { this._contentVersion++; this._tiles.forEach((_p, k) => this._dirty.add(k)); this._tiles.clear(); this._evicted = false; }
 
   // ---- 纯变换（raw 数组操作，返回新 LayerPixels；doc 变换用，node 全可测、无 Canvas2D 往返、更快）----
   // 水平镜像（doc 尺寸不变）。
@@ -260,11 +274,14 @@ export class LayerPixels {
     this._tiles.forEach((px, key) => tiles.push([key, new Uint8ClampedArray(px)]));
     return { across: this._across, tiles };
   }
+  // 整体替换（快照即全部内容）→ 同 clear()：无需先重物化，但必须解除驱逐态，否则这次 undo 会被
+  //   下一次读的 GPU 回填撕裂覆盖（缺陷 C）。
   restore(snap: { across: number; tiles: [number, Uint8ClampedArray][] }): void {
     this._contentVersion++;
     this._tiles.forEach((_p, k) => this._dirty.add(k));
     this._tiles.clear();
     for (const [key, px] of snap.tiles) { this._tiles.set(key, new Uint8ClampedArray(px)); this._dirty.add(key); }
+    this._evicted = false;
   }
 }
 
