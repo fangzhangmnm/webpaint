@@ -19,9 +19,10 @@
 //
 // ── 红线（MASTER §A，硬）──
 //   · 备份**无损**：deflate raw 字节（非有损 PNG——alpha=0 处 RGB 被清零=静默改像素=数据红线）。
-//   · **dirty/未备份的 raw 永不驱逐**：canEvictRaw 当且仅当 `backupEpoch === pixels.contentVersion`
-//     （备份覆盖当前内容）**且**该层非 pinned —— 即 "evict iff clean ∧ re-fetchable"。
-//     任何编辑 bump contentVersion → 备份陈旧 → 拒绝驱逐，直到重新备份。
+//   · **dirty/未备份的 raw 永不驱逐**：canEvictRaw 当且仅当 备份属于**同一个 LayerPixels 实例**
+//     ∧ `backupEpoch === pixels.contentVersion`（备份覆盖当前内容）∧ 该层非 pinned
+//     —— 即 "evict iff clean ∧ re-fetchable"。任何编辑 bump contentVersion → 备份陈旧 → 拒绝驱逐，
+//     直到重新备份；doc 变换换掉 pixels 实例 → 归属不符 → 同样拒绝（见 LayerBackup.owner）。
 
 import type { LayerPixels } from "./tile-pixels.ts";
 
@@ -65,7 +66,14 @@ async function streamThrough(stream: CompressionStream | DecompressionStream, in
 }
 
 interface LayerBackup {
-  epoch: number;                                       // 备份时的 pixels.contentVersion
+  // 备份归属的那个 LayerPixels **实例**。epoch 只是同一实例内的版本号，跨实例比较毫无意义：
+  //   doc 变换（crop/flip/rotate90/offsetWrapped）走 Layer.setPixels()，整个 LayerPixels 被换成
+  //   新实例、contentVersion 从 0 重数，而这份变换**前**的备份还挂在同一个 layerId 上。两个不同
+  //   实例的版本号撞号是很平常的事（画过一笔的层 epoch=1，cropped() 内部也就 putRegion 一次）。
+  //   撞上 → 误判可驱逐 → 该层 CPU raw 被丢，而唯一的备份描述的是旧像素、且 tile key 按**旧 docW**
+  //   的 across 编码；GPU context 一丢，recoverAll 就静默还原出错像素 + 错几何。
+  owner: LayerPixels;
+  epoch: number;                                       // 备份时的 pixels.contentVersion（仅在 owner 内有效）
   tiles: Array<{ tx: number; ty: number; comp: Uint8Array }>;   // 压缩后的稀疏 tile
 }
 
@@ -102,7 +110,7 @@ export class TileResidency {
     });
     const tiles: LayerBackup["tiles"] = [];
     for (const { tx, ty, bytes } of snap) tiles.push({ tx, ty, comp: await this._codec.compress(bytes) });
-    this._backups.set(layerId, { epoch, tiles });
+    this._backups.set(layerId, { owner: pixels, epoch, tiles });
   }
 
   // 驱逐门（**判定**；真正丢 raw 在 LayerPixels.evictRaw，由 GLDocRenderer._backupAndEvict 调）：
@@ -111,6 +119,7 @@ export class TileResidency {
     if (this._pinned.has(layerId)) return false;
     const b = this._backups.get(layerId);
     if (!b) return false;                            // 无完整备份 → 永不驱逐（红线）
+    if (b.owner !== pixels) return false;             // 备份属于另一个 LayerPixels 实例（doc 变换换过对象）→ 拒绝
     return b.epoch === pixels.contentVersion;         // 备份陈旧（层被编辑过）→ 拒绝
   }
 
@@ -119,6 +128,9 @@ export class TileResidency {
   async restoreLayer(layerId: number, pixels: LayerPixels): Promise<boolean> {
     const b = this._backups.get(layerId);
     if (!b) return false;
+    // 这里**不**校验 owner：restoreLayer 是低层原语，"把某份备份灌进任意 LayerPixels" 是合法用法
+    //   （往返验证就这么用）。防线在 canEvictRaw：归属不符的层根本不会被驱逐，recoverAll 的
+    //   `if (!isRawResident())` 也就不会为它触发 → 拿不到陈旧几何的机会。
     const entries: Array<{ tx: number; ty: number; px: Uint8ClampedArray }> = [];
     for (const { tx, ty, comp } of b.tiles) {
       const bytes = await this._codec.decompress(comp);

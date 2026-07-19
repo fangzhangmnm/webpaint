@@ -83,7 +83,7 @@ export function initLayerUndo(ctx: AppContext) {
     undo: async (e: UndoEntry) => {
       const under = doc.findLayer(e.underId);
       if (under) {
-        applyPixelSnap(doc, e.underId, e.underBefore, e.underBefore.blob, board);
+        await applyPixelSnap(doc, e.underId, e.underBefore, e.underBefore.blob, board);   // 必须 await：不然 UndoStack 的 _busy 闩在像素还在飞的时候就放行了
         under.opacity = e.underBeforeOpacity;
         under.mode = e.underBeforeMode;
         if (typeof e.underBeforeClipping === "boolean") under.clippingMask = e.underBeforeClipping;
@@ -104,10 +104,10 @@ export function initLayerUndo(ctx: AppContext) {
       _afterDocChange();
       setStatus(t("se.undoMergeRestore", { name: spec.name || "" }));
     },
-    redo: (e: UndoEntry) => {
+    redo: async (e: UndoEntry) => {
       const under = doc.findLayer(e.underId);
       if (under) {
-        applyPixelSnap(doc, e.underId, e.underAfter, e.underAfter.blob, board);
+        await applyPixelSnap(doc, e.underId, e.underAfter, e.underAfter.blob, board);   // 同上
         under.opacity = 1;
         under.mode = "source-over";
         under.clippingMask = !!e.resultClipping;   // 链内合并结果仍剪裁；基底合并结果转普通层

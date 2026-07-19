@@ -148,3 +148,38 @@ describe("叶子离开树 ⟂ 驱逐态（缺陷 A：删组丢像素）", () => 
       "叶没离开过树 → 不该被强制物化（保住 TileResidency 省的那份内存）");
   });
 });
+
+describe("restoreTree 按 id 解析（缺陷 I：别的 undo 路径会换掉 Layer 对象）", () => {
+  T("对象被整批替换后，restoreTree 必须挂回**当前**对象，而不是快照里的旧指针", () => {
+    const d = new PaintDoc();
+    const leaf = d.layers[0];
+    const g = d.addGroup();
+    d.moveIntoGroup(leaf.id, g.id);
+    const before = d.snapshotTree();          // 存的是 leaf 这个**活对象**
+
+    // 模拟 docTransform.undo：restoreSnapshotAll 用同样的 id 重建全新 Layer 对象
+    const all = d.snapshotAll();
+    d.restoreSnapshotAll(all);
+    const rebuilt = d.findLayer(leaf.id);
+    assert(rebuilt && rebuilt !== leaf, "前置：同 id、但已是另一个对象");
+
+    d.restoreTree(before);                     // 撤销那次树操作
+    assert(d.findLayer(leaf.id) === rebuilt,
+      "必须挂回当前对象（挂回旧指针 = 把已变换的孤儿塞回树里，画面静默出错）");
+  });
+
+  T("确实离树的叶仍回退到快照存的引用（删组撤销照常工作）", () => {
+    const d = new PaintDoc();
+    const keep = d.layers[0];
+    const leaf = d.addLayer();
+    const g = d.addGroup();
+    d.moveIntoGroup(leaf.id, g.id);
+    const before = d.snapshotTree();
+
+    assert(d.removeLayer(g.id, true), "删组");
+    assert(!d.findLayer(leaf.id), "叶已离树");
+    d.restoreTree(before);
+    assert(d.findLayer(leaf.id) === leaf, "离树的叶回退到快照引用 → 原对象回来");
+    assert(d.findLayer(keep.id) === keep, "没动过的叶不受影响");
+  });
+});

@@ -122,9 +122,12 @@ export class GLBoard {
     // live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中，contentChanged 被 live 门控挡住 →
     //   只把活动叶每帧重传 GPU，下面 livePreview 重合成就能显 live 预览（buffered brush 走 overlay，liveSyncLeaf=null）。
     else if (livePreview && liveSyncLeaf) { this._renderer.syncLayer(liveSyncLeaf, doc.width, doc.height); }
+    // 冷层驱逐推迟到这里执行：setActiveLeaf 是在本帧 render **之前**调的，那时树差还没对账，
+    //   拿到的「前活动叶」可能是刚离树的对象——当场驱逐会把它仅存的 CPU raw 丢掉（见 setActiveLeaf 注释）。
+    this._renderer.drainPendingEvict(doc.layers);
     // 颜色调整 live preview：把活动层的替身 canvas 当它的 GPU tiles 上传（非破坏，layer.pixels 不动）。livePreview
     //   下 syncAll 已被门控挡住 → 不会覆盖。清除替身后 board markContentDirty → syncAll 从真像素恢复。
-    if (surrogate) this._renderer.syncLayerFromCanvas(surrogate.layerId, surrogate.canvas, surrogate.bx, surrogate.by, surrogate.w, surrogate.h, doc.width, doc.height);
+    this._renderer.applySurrogate(surrogate, doc.width, doc.height);   // null 也要调：负责撤掉上一个替身层的 pin
 
     if (contentChanged || livePreview || !this._cache) {
       // brush live = GPU stamp overlay（描边中）；否则清掉上帧 overlay（filter/liquify/pixel 走 live-sync seam，无 overlay）。

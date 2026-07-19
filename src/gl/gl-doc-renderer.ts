@@ -57,6 +57,8 @@ export class GLDocRenderer {
   // 冷层驻留：活动层 pin、切走的层备份后驱逐 CPU raw（省 ~16MB/满层），只留 GPU tiles + 压缩备份。
   private _residency = new TileResidency();
   private _activeLeaf: DocLeaf | null = null;
+  private _pendingEvict: DocLeaf | null = null;   // 待驱逐的前活动叶（见 setActiveLeaf/drainPendingEvict）
+  private _surrogateId: number | null = null;    // 当前有调色替身的层（必须 pin：见 applySurrogate）
 
   constructor(glctx: GLContext, capacity: number, accumPrec: FBOPrec = "f16") {
     this._glctx = glctx;
@@ -85,10 +87,29 @@ export class GLDocRenderer {
     const prev = this._activeLeaf;
     if (prev && (!leaf || prev.id !== leaf.id)) {
       this._residency.unpin(prev.id);
-      void this._backupAndEvict(prev);
+      // **不在这里立刻驱逐**：board 每帧先调本方法、再 render，所以「删掉含活动层的组」时，这里拿到的
+      //   prev 是一个**刚离树**的 Layer 对象，而树差对账（syncAll）要到 render 里才跑。当场驱逐 =
+      //   把 doc.materializeDetaching 刚为它物化出来的 raw 又丢掉，随后 syncAll 再 dropLayer 掉它的
+      //   GPU tiles 和备份 → 三份副本全没 → 撤销复活空壳层 + 每帧抛 LAYER_NOT_SYNCED。
+      //   （这正是缺陷 A 被"晚一帧"重新打开的口子。）
+      // 改为登记待驱逐，由 drainPendingEvict 在**拿得到当前树**的时候做成员校验后再执行。
+      this._pendingEvict = prev;
     }
     this._activeLeaf = leaf;
     if (leaf) this._residency.pin(leaf.id);
+  }
+
+  // 执行待驱逐（gl-board 在 syncAll 之后调，此刻 nodes 是当前树）。离树的叶**绝不驱逐**——它的像素
+  //   此时只剩 CPU raw 这一份（GPU tiles 已被 syncAll 回收），驱逐即永久丢失。
+  drainPendingEvict(nodes: DocNode[]): void {
+    const leaf = this._pendingEvict;
+    this._pendingEvict = null;
+    if (!leaf) return;
+    let live = false;
+    this._eachLeaf(nodes, (l) => { if (l === leaf) live = true; });   // 比 id 更严：必须是**同一个对象**
+    if (!live) return;
+    if (!this._layerTiles.has(leaf.id)) return;   // GPU 上没有它 → 驱逐后无处 readback
+    void this._backupAndEvict(leaf);
   }
 
   private async _backupAndEvict(leaf: DocLeaf): Promise<void> {
@@ -131,6 +152,25 @@ export class GLDocRenderer {
   // 把一张 canvas（doc (bx,by) 起 w×h）当某层的 GPU tiles 上传（颜色调整 live preview 的替身 surrogate）。
   //   **非破坏**：不碰 layer.pixels（真 SoT），只覆盖该层 GPU tiles；surrogate 清除后 board markContentDirty →
   //   syncAll 从真像素重传恢复。临时 LayerPixels（preview 滑块驱动，非每帧热循环）。
+  // 每帧由 gl-board 调（null = 本帧没有替身）。除了上传替身，还负责**把替身层 pin 住**。
+  //
+  // 为什么 pin 是必需的、而不是"反正替身层就是活动层所以已经 pin 了"：那个前提不成立。图层面板的行
+  //   点击（layers-panel 的 onRowClick）只调 doc.setActiveById，**不**关调色面板、也不烤定 transient；
+  //   于是 setActiveLeaf 会 unpin 并驱逐前活动层 A，而此刻 _layerTiles[A] 里装的是**替身**。之后任何
+  //   一次读 A.pixels（缩略图/自动保存/导出/undo 快照）都会经 _ensureResident → _readbackProvider →
+  //   把预览像素 adopt 成 CPU 真值：静默、无 undo entry、连按「取消」也救不回来（取消只清替身，
+  //   而 syncLayer 因 A 已驱逐而早退，覆盖不回去）。
+  //   pin 住就把这条路堵死在源头：A 不被驱逐 → 永不 readback → 关面板后 syncAll 用真像素重传。
+  applySurrogate(s: SurrogateInput | null, docW: number, docH: number): void {
+    const prevId = this._surrogateId;
+    const nextId = s ? s.layerId : null;
+    if (prevId !== null && prevId !== nextId && prevId !== this._activeLeaf?.id) this._residency.unpin(prevId);
+    this._surrogateId = nextId;
+    if (!s) return;
+    this._residency.pin(s.layerId);
+    this.syncLayerFromCanvas(s.layerId, s.canvas, s.bx, s.by, s.w, s.h, docW, docH);
+  }
+
   syncLayerFromCanvas(leafId: number, canvas: CanvasImageSource, bx: number, by: number, w: number, h: number, docW: number, docH: number): void {
     const tmp = new LayerPixels(docW, docH);
     replaceFromCanvas(tmp, canvas, bx, by, w, h);

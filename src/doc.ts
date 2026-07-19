@@ -807,7 +807,18 @@ export class PaintDoc {
   restoreTree(snap: { activeId: number | null; nodes: TreeSnapNode[] } | null) {
     if (!snap) return;
     const build = (rec: TreeSnapNode): Node => {
-      if (!rec.isGroup) return rec.ref;     // 同一个活 Layer 对象
+      if (!rec.isGroup) {
+        // **按 id 在当前树里解析**，只有该叶确实已离树时才回退到快照存的对象引用。
+        //   为什么不能直接用 rec.ref：结构快照存的是活对象指针（零拷贝），但**别的** undo 路径会把
+        //   Layer 对象整批换掉——docTransform.undo 的 restoreSnapshotAll 用同样的 id 重建全新对象，
+        //   而正向的 crop/flip/rotate/offset 又是就地 setPixels 改老对象。于是
+        //   「做个树操作 → 翻转画布 → 撤销翻转 → 再撤销树操作」会把**已翻转的孤儿对象**挂回树里：
+        //   画面静默镜像；crop 情形更糟，孤儿的 LayerPixels.docW/_across 还是裁切后的几何，
+        //   与 doc 尺寸不符 → 之后越界的 putRegion 被静默裁掉。
+        //   身份是 id，不是对象指针——按 id 解析即可免疫任何"对象被换掉"的路径。
+        const cur = findNodeById(this.layers, rec.ref.id);
+        return cur && !cur.isGroup ? cur : rec.ref;
+      }
       const g = new LayerGroup({ name: rec.name });
       g.id = rec.id; g.visible = rec.visible; g.opacity = rec.opacity; g.mode = rec.mode;
       g.clippingMask = rec.clippingMask; g.collapsed = !!rec.collapsed;
