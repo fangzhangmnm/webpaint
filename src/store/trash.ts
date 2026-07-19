@@ -71,7 +71,7 @@ export function createTrash(cfg: TrashCfg) {
         items = items || [];
         for (let i = 0; i < items.length; i += concurrency) {   // bounded 并发，快约 N×
           await Promise.all(items.slice(i, i + concurrency).map(async (it) => {
-            try { await cloud.purge(it.id); purged++; }
+            try { await cloud.purge(it.id, it.eTag); purged++; }
             catch (e) { reportStoreError(e, "warning"); failed.push({ name: it.name, where: "cloud", error: errMsg(e) }); }
           }));
         }
@@ -99,7 +99,7 @@ export function createTrash(cfg: TrashCfg) {
         items = items || [];
         for (let i = 0; i < items.length; i += concurrency) {
           await Promise.all(items.slice(i, i + concurrency).map(async (it) => {
-            try { await cloud.purge(it.id); purged++; }
+            try { await cloud.purge(it.id, it.eTag); purged++; }
             catch (e) { reportStoreError(e, "warning"); failed.push({ name: it.name, where: "cloud", error: errMsg(e) }); }
           }));
         }

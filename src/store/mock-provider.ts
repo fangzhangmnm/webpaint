@@ -274,12 +274,15 @@ export function createMockProvider(opts: MockProviderOpts = {}): MockProvider {
       return ensureFolderSync(path);
     },
 
-    async delete(id: string) {
-      await hook("delete", { id });
+    async delete(id: string, eTag?: string) {
+      await hook("delete", { id, eTag });
       const fault = consumeFault("delete");
       if (fault) throw faultError(fault);
       const n = byId.get(id);
       if (!n) throw httpError(404, `item 不存在: ${id}`);
+      // If-Match（真 provider 的 graph.deleteItem 一直支持；mock 之前没实现 = 沙箱比真机宽松，
+      //   会让「忘了传 eTag」这类缺陷在测试里静默通过。同 v418 的 AbortController 教训）。
+      if (eTag && n.eTag !== eTag) throw httpError(412, `If-Match 失败: ${id}`);
       if (n.isFolder) {
         const prefix = n.path + "/";
         for (const [pth, sub] of [...byPath]) {

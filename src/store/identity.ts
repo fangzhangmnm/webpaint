@@ -104,7 +104,7 @@ export function createIdentity(cfg: IdentityCfg) {
         const before = await probeOld(oldName);
         // synced 或没本地字节可推（纯云端）→ 服务端 move，etag 顺延。
         if (before.known && before.meta && (!head.isDirty(oldName) || bytes == null)) {
-          await cloud.rename(oldName, newName);
+          await cloud.rename(oldName, newName, { baseEtag: before.meta.etag });   // If-Match：别设备在我们判定「synced」之后推了新版 → 412，不静默改它的名
           head.markSeen(newName, cloud.getETag(newName)); head.forget(oldName);
           return { status: "renamed", where: "cloud-move", newName };
         }
@@ -137,7 +137,7 @@ export function createIdentity(cfg: IdentityCfg) {
         } else if (baseAtStart != null && baseAtStart === after.meta.etag) {
           // 谱系完好 → move 语义成立，旧名进 .trash（不 hard-delete，C5）。
           // 单腿事件（只有云端这一条腿，本地旧名没有对应的 trash 项）→ 自己生成 id，无配对需求。
-          try { await cloud.trash(oldName, asideStamp(Date.now())); } catch (e) { reportStoreError(e, "warning"); oldCloudOrphan = true; }   // 旧名进 .trash 失败→云端遗留孤儿：surface
+          try { await cloud.trash(oldName, asideStamp(Date.now()), { baseEtag: after.meta.etag }); } catch (e) { reportStoreError(e, "warning"); oldCloudOrphan = true; }   // If-Match 锁住刚重取的那一版   // 旧名进 .trash 失败→云端遗留孤儿：surface
         } else {
           oldKept = true;   // 谱系不明/分叉 → 云端旧名原地留着（caller 须告知用户「旧的还在，叫 X」）
         }

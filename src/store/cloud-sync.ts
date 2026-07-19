@@ -265,19 +265,26 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   // move-aside：原文件 → ensureFolder(.trash) → move，**始终加 [ts] 后缀**（多次删同名永不冲突）。
   // deleteEventId：由 delete.ts 生成、**两条腿共用**，嵌进 trash 名里 → trash-merge 据此精确配对。
   //   必填不给默认：可选参数等于给未来留了"两端各生成"的口子，而那正是本次要修掉的 bug。
-  async function trash(name: string, deleteEventId: string): Promise<CloudItem | null> {
+  //   opts.baseEtag：**delete-vs-edit 的 edit-wins 由这里强制**（v435）。delete.ts 之前只做「读比对」——
+  //     fetchMeta 的 etag 对上了就搬，而搬这个动作本身不带 If-Match，中间隔着 _find + ensureFolder 两次往返。
+  //     别设备在这个窗口推新版 → 比对已通过 → 新字节被搬进 .trash。现在 412 会把它变成 conflict-edit-wins。
+  //     不传时退回 item.eTag（仍闭合 _find→move 的窗口，比裸奔强）。
+  async function trash(name: string, deleteEventId: string, opts: { baseEtag?: string | null } = {}): Promise<CloudItem | null> {
     const { item, enc } = await _find(name);
     if (!item) { clearState(name); return null; }
     const folderId = await provider.ensureFolder(trashFolder);
     const stamped = stampedName(name, enc, deleteEventId);   // basename + deleteEventId（trash 内丢 folder context；防同名撞）；保留加密扩展名
-    const moved = await provider.move(item.id, folderId, { newName: stamped, conflictBehavior: "fail" });
+    const moved = await provider.move(item.id, folderId, { newName: stamped, conflictBehavior: "fail", eTag: opts.baseEtag ?? item.eTag });
     clearState(name);
     return moved;
   }
 
   // 从 trash 移回；conflictBehavior=fail 防覆盖目标位置同名（关键 data-loss 点）；撞名 (2)(3) 重试。
   //   opts.encrypted：trash 里是加密容器（.zip 尾）→ 落 encFileName（否则加密字节被恢复到明文路径、双击打不开）。
-  async function restore(itemId: string, targetName: string, opts: { encrypted?: boolean } = {}): Promise<CloudItem> {
+  //   opts.eTag：源 item 的 If-Match。⚠ 412 和 409 含义不同，**不能都当撞名重试**：
+  //     409 = 目标位置已有同名 → 换个候选名重试（下面的循环）。
+  //     412 = 回收站里那个源 item 已经变了（别设备恢复/清空了它）→ 换名重试毫无意义，直接抛。
+  async function restore(itemId: string, targetName: string, opts: { encrypted?: boolean; eTag?: string | null } = {}): Promise<CloudItem> {
     const clean = targetName;
     const folder = clean.includes("/") ? clean.slice(0, clean.lastIndexOf("/")) : "";
     const base = baseName(clean);
@@ -286,18 +293,20 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     for (let attempt = 1; attempt < 100; attempt++) {
       const candidate = attempt === 1 ? base : `${base} (${attempt})`;
       try {
-        return await provider.move(itemId, folderId, { newName: mkName(candidate), conflictBehavior: "fail" });
+        return await provider.move(itemId, folderId, { newName: mkName(candidate), conflictBehavior: "fail", eTag: opts.eTag ?? null });
       } catch (e) {
         const status = (e as { status?: number })?.status;
-        if (status === 409 || status === 412) continue;
-        throw e;
+        if (status === 409) continue;          // 目标撞名 → 换候选名
+        throw e;                               // 412（源变了）/ 其它 → 抛，别拿换名去掩盖
       }
     }
-    return await provider.move(itemId, folderId, { newName: mkName(`${base} [${now()}]`), conflictBehavior: "fail" });
+    return await provider.move(itemId, folderId, { newName: mkName(`${base} [${now()}]`), conflictBehavior: "fail", eTag: opts.eTag ?? null });
   }
 
-  async function purge(itemId: string): Promise<void> {
-    await provider.delete(itemId);
+  //   eTag：硬删是不可逆的，必须 If-Match（v435）。窄 TOCTOU 但后果最重：别设备在 list 与 delete 之间
+  //   把这项从 .trash 恢复出去 → 我方按 id 硬删掉那个**已经活过来的**文件。调用方手上本来就有 it.eTag。
+  async function purge(itemId: string, eTag?: string | null): Promise<void> {
+    await provider.delete(itemId, eTag ?? undefined);
   }
 
   // weak-override（ADR-0009 / share-file-model）：用本地覆盖云端，但**云端 loser 先 stash 进 .backup 不丢**。
@@ -309,7 +318,9 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     if (cur.item) {
       const folderId = await provider.ensureFolder(backupFolder);
       const stamped = stampedName(name, cur.enc);   // ts-counter 防同名多次备份撞（旧版同 ms 会 fail 抛错）；loser 保留其扩展名
-      await provider.move(cur.item.id, folderId, { newName: stamped, conflictBehavior: "fail" });
+      // If-Match（v435）：_find 与本次 move 之间别设备可能又推了一版。没有它就会把「用户从没见过的
+      //   那一版」当作 loser 搬进 .backup（不丢，但错位）。412 → 抛，让上层重新 surface。
+      await provider.move(cur.item.id, folderId, { newName: stamped, conflictBehavior: "fail", eTag: cur.item.eTag });
       backedUp = `${backupFolder}/${stamped}`;
     }
     // 原 path 现已空 → force-push 本地（无 If-Match）。
@@ -380,7 +391,10 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   }
 
   // 同 folder → rename；跨 folder → ensureFolder + move。caller 保证 newName 不冲突。
-  async function rename(oldName: string, newName: string): Promise<void> {
+  //   opts.baseEtag：v435 补。**同一个文件里 push 的扩展名翻转（L185 一带）早就传 eTag 了，这里却没传** ——
+  //     这条自相矛盾正是「非 upload 的写整片漏掉 If-Match」这个 pattern 最直白的证据。
+  //     不传时退回 item.eTag（闭合 _find→rename 的窗口）。
+  async function rename(oldName: string, newName: string, opts: { baseEtag?: string | null } = {}): Promise<void> {
     if (oldName === newName) return;
     const found = await _find(oldName);
     const item = found.item;
@@ -392,10 +406,10 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     const newBase = mkName(newName.includes("/") ? newName.slice(newName.lastIndexOf("/") + 1) : newName);
     let moved: CloudItem | null;
     if (oldFolder === newFolder) {
-      moved = await provider.rename(item.id, newBase);
+      moved = await provider.rename(item.id, newBase, opts.baseEtag ?? item.eTag);
     } else {
       const targetId = newFolder ? await provider.ensureFolder(newFolder) : await provider.getApprootId();
-      moved = await provider.move(item.id, targetId, { newName: newBase, conflictBehavior: "fail" });
+      moved = await provider.move(item.id, targetId, { newName: newBase, conflictBehavior: "fail", eTag: opts.baseEtag ?? item.eTag });
     }
     // S1 根因：OneDrive 的 rename/move 是 metadata PATCH → **etag 一定会变**。绝不把新名锚在旧 etag 上
     //   （旧 bug：setETag(new, getETag(old)) → base 永久过期 → 下次 open 必弹假「云端有新版本」）。
@@ -406,12 +420,9 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
     clearState(oldName);
   }
 
-  // 硬删（gallery「彻底删」非 trash 路径用；日常删走 store.flow.delete=trash）。
-  async function remove(name: string): Promise<void> {
-    const { item } = await _find(name);
-    if (item) await provider.delete(item.id);
-    clearState(name);
-  }
+  // remove()（活文件硬删）已删除（v435）：**零调用者**，却在 CloudSync 契约上挂着一条绕过
+  //   「删除 = 移到 .trash」红线的现成通道——唯一的作用就是等着某天被人顺手用上。
+  //   真要「彻底删」也应当先 trash 再 purge（两步都可审计、都可恢复到中途）。
 
   // ---- 空文件夹（gallery 文件夹模型：OneDrive 真文件夹为单一真相源）----
   // 新建：idempotent（已存在则复用 id，不报错）。
@@ -431,7 +442,7 @@ export function createCloudSync(cfg: CloudSyncCfg): CloudSync {
   return {
     push, pull, fetchMeta, pullTail, pullRange, weakOverride,
     trash, restore, purge,
-    list, listAll, listFolder, listFolders, listTrash, listBackup, rename, remove,
+    list, listAll, listFolder, listFolders, listTrash, listBackup, rename,
     ensureFolder, deleteEmptyFolder,
     getETag, setETag, isDirty, setDirty, clearState,
   };

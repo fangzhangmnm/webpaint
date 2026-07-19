@@ -54,7 +54,7 @@ export interface CloudProvider {
   downloadRange(id: string, offset: number, length: number): Promise<Uint8Array | ArrayBuffer | Blob>;
   upload(path: string, blob: Bytes | Blob, opts?: UploadOpts): Promise<CloudItem>;
   ensureFolder(path: string): Promise<string>;
-  delete(id: string): Promise<void>;   // 文件硬删（trash purge / hard remove）。**文件夹删除不走它**——走 deleteEmptyFolder（护栏在 provider）。
+  delete(id: string, eTag?: string): Promise<void>;   // 文件硬删（trash purge）。eTag=If-Match（硬删不可逆，必带）。**文件夹删除不走它**——走 deleteEmptyFolder（护栏在 provider）。
   // 删**空**文件夹（唯一文件夹删除面）：provider 内部证实空才删（Graph 无 native「删空夹」→ list-then-delete，带 If-Match folder etag best-effort）。
   deleteEmptyFolder(path: string): Promise<FolderDeleteResult>;
   move(id: string, targetFolderId: string, opts?: MoveOpts): Promise<CloudItem>;
@@ -126,10 +126,10 @@ export interface CloudSync {
   pullRange(name: string, offset: number, length: number): Promise<{ bytes: Bytes; item: CloudItem } | null>;
   weakOverride(name: string, bytes: Bytes, opts?: { encrypted?: boolean }): Promise<WeakOverrideResult>;
   /** 移进云端 .trash。deleteEventId 同上——两条腿必须是同一个，否则回收站里一次删除会裂成两行/误配。 */
-  trash(name: string, deleteEventId: string): Promise<unknown>;
+  trash(name: string, deleteEventId: string, opts?: { baseEtag?: string | null }): Promise<unknown>;
   /** enc.encrypted：trash 里的字节是加密容器（.zip 尾）→ 恢复必须落 encFileName（否则加密件被恢复到明文路径 = 打不开）。 */
-  restore(cloudItemId: string, name: string, opts?: { encrypted?: boolean }): Promise<unknown>;
-  purge(cloudItemId: string): Promise<unknown>;
+  restore(cloudItemId: string, name: string, opts?: { encrypted?: boolean; eTag?: string | null }): Promise<unknown>;
+  purge(cloudItemId: string, eTag?: string | null): Promise<unknown>;
   list(): Promise<CloudItem[]>;
   listAll(): Promise<{ files: CloudItem[]; folders: string[]; complete: boolean }>;
   /** 单夹列举（非递归，一次 provider.list 往返）——watchFolder / per-folder reconcile 用。
@@ -139,8 +139,7 @@ export interface CloudSync {
   listFolders(): Promise<string[]>;
   listTrash(): Promise<CloudItem[]>;
   listBackup(): Promise<CloudItem[]>;
-  rename(oldName: string, newName: string): Promise<unknown>;
-  remove(name: string): Promise<unknown>;
+  rename(oldName: string, newName: string, opts?: { baseEtag?: string | null }): Promise<unknown>;
   ensureFolder(path: string): Promise<void>;
   deleteEmptyFolder(path: string): Promise<FolderDeleteResult>;   // 薄委托 provider.deleteEmptyFolder（护栏在 backend）
   isDirty(name: string): boolean;

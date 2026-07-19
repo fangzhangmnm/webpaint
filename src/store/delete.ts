@@ -107,7 +107,15 @@ export function createDelete(cfg: DeleteCfg) {
     //   （可能是别设备同名新文件）。正常路径 del() 已不再为 null base 排队；这里再兜一层，保护 drainDeleteQueue 直调。终态。
     if (!baseEtag) return { status: "skipped-no-base" };
     if (meta.etag !== baseEtag) return { status: "conflict-edit-wins" };
-    return { status: "trashed", trashed: await cloud.trash(name, deleteEventId) };
+    // ★ 读比对只是**第一道**。真正的 edit-wins 由 trash 里的 If-Match 强制（v435）：
+    //   上面这次 fetchMeta 与下面那次 move 之间隔着 _find + ensureFolder 两次往返，
+    //   别设备在这个窗口推新版 → 比对已放行 → 新字节被搬进 .trash。412 → 同样收敛成 conflict-edit-wins。
+    try {
+      return { status: "trashed", trashed: await cloud.trash(name, deleteEventId, { baseEtag }) };
+    } catch (e) {
+      if ((e as { status?: number })?.status === 412) return { status: "conflict-edit-wins" };
+      throw e;
+    }
   }
 
   async function drainDeleteQueue(): Promise<DelResult> {
