@@ -76,6 +76,7 @@ import "./gl-sync-policy.test.mjs";        // ★缺陷 D 回归：结构脏不�
 import "./gl-compose-plan.test.mjs";        // WebGL2+tiling Stage 2：clip 基底解析 + 组隔离判定（与 layer-composite 对齐）
 import "./gl-doc-bridge.test.mjs";       // WebGL2+tiling 接 board：doc 树→CompNode 翻译 + safeMode
 import "./layer-tree.test.mjs";             // batch 2：图层树模型（嵌套树 op + activeId + 组 op + snapshotAll 往返）
+import "./tree-ops.test.mjs";              // ★R4 回归：runTreeOp 守卫先行（守卫不过绝不烤定用户在制的 transient）
 import "./layer-detach-residency.test.mjs"; // ★缺陷 A 回归：叶离树前强制物化（删组 + restoreTree redo 路径）——防被驱逐层像素被 syncAll 对账销毁
 import "./pixel-edit-entry.test.mjs";       // ★缺陷 B 回归：PixelEdit entry 契约（压缩结果必须落在 handler 读的字段上）
 import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序列化（buildStackXml↔parseStackXml + id + active 往返）

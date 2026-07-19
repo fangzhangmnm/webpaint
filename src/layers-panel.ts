@@ -182,6 +182,7 @@ function _ungroupLayer(L: LayerNode | null) {
   runTreeOp(
     { undo: t("lp.st.regrouped"), redo: t("lp.st.ungrouped"), status: t("lp.st.ungroupedName", { name: L.name }) },
     () => doc.ungroup(L.id).ok,
+    () => doc.canUngroup(L.id),
   );
 }
 function _moveIntoGroup(L: LayerNode | null, groupId: number) {
@@ -189,6 +190,7 @@ function _moveIntoGroup(L: LayerNode | null, groupId: number) {
   runTreeOp(
     { undo: t("lp.st.movedOut"), redo: t("lp.st.movedIn"), status: t("lp.st.movedInColon", { name: L.name }) },
     () => doc.moveIntoGroup(L.id, groupId),
+    () => doc.canMoveIntoGroup(L.id, groupId),
   );
 }
 function _moveOutOfGroup(L: LayerNode | null) {
@@ -196,6 +198,7 @@ function _moveOutOfGroup(L: LayerNode | null) {
   runTreeOp(
     { undo: t("lp.st.movedBack"), redo: t("lp.st.movedOut"), status: t("lp.st.movedOutColon", { name: L.name }) },
     () => doc.moveOutOfGroup(L.id),
+    () => doc.canMoveOutOfGroup(L.id),
   );
 }
 // v132：清空当前图层像素，保留图层 + 名字 + opacity / mode，bbox 归零
@@ -207,6 +210,9 @@ function _clearLayerPixels(L: LayerNode | null) {
   //   `before.blob` 而 handler 读的是 `e.beforeBlob` → 压缩一落地 imageData 被置 null、两头皆空 →
   //   撤销恢复出「旧 bbox + 零像素」，静默丢画且是竞态（压缩前撤销反而正常）。见 v439。
   const tx = pixelHistory.begin(L as Layer, "stroke");
+  // 先确认这层还在树里再动像素：commit() 返 false 的唯一原因就是它已不在树中，
+  //   而那时像素若已被 clearAll() 抹掉，就是"无 entry、无重绘、无提示"的静默不可恢复清空。
+  if (!doc.findLayer(L.id)) return;
   (L as Layer).clearAll();
   if (!tx.commit()) return;
   _afterDocChange();

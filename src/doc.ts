@@ -732,24 +732,44 @@ export class PaintDoc {
   }
 
   // 解组：组的 children 提到组在 parent 的原位（保序），删组。返回 { ok, childIds } 或 { ok:false }。
-  ungroup(groupId: number) {
+  // ---- 树 op 的**纯前置谓词**（SSoT 留在模型层）----
+  // 给 runTreeOp 的 guard 用：调用方需要在"烤定用户 transient 之前"知道这次操作会不会发生，
+  //   而 ungroup/moveIntoGroup/moveOutOfGroup 是 try-and-report 式 API（判定与变更同体）。
+  //   把判定抽出来给它们自己复用，调用方就不必复制一份、也不会漂移。
+  canUngroup(groupId: number): boolean {
     const loc = findParentOf(this.layers, groupId);
-    if (!loc || !loc.node.isGroup) return { ok: false, reason: "not-group" };
-    const kids = loc.node.children;
-    loc.parent.splice(loc.index, 1, ...kids);
-    if (!findNodeById(this.layers, this.activeId)) {
-      this.activeId = kids[0] ? kids[0].id : (flattenLeaves(this.layers).slice(-1)[0]?.id ?? null);
-    }
-    return { ok: true, childIds: kids.map((k) => k.id) };
+    return !!(loc && loc.node.isGroup);
   }
-
-  // 把节点移入组（到组内顶部 = children 末尾）。拒绝把组移进自己的子孙。返回 ok。
-  moveIntoGroup(id: number, groupId: number) {
+  canMoveIntoGroup(id: number, groupId: number): boolean {
     if (id === groupId) return false;
     const g = findNodeById(this.layers, groupId);
     const node = findNodeById(this.layers, id);
     if (!g || !g.isGroup || !node) return false;
     if (node.isGroup && findNodeById(node.children, groupId)) return false;   // g 是 node 后代 → 环
+    return true;
+  }
+  canMoveOutOfGroup(id: number): boolean {
+    const loc = findParentOf(this.layers, id);
+    if (!loc || !loc.parentNode) return false;
+    return !!findParentOf(this.layers, loc.parentNode.id);
+  }
+
+  ungroup(groupId: number) {
+    if (!this.canUngroup(groupId)) return { ok: false, reason: "not-group" };
+    const loc = findParentOf(this.layers, groupId)!;
+    const kids = (loc.node as LayerGroup).children;   // canUngroup 已保证是组（谓词外置后 TS 无法就地收窄）
+    loc.parent.splice(loc.index, 1, ...kids);
+    if (!findNodeById(this.layers, this.activeId)) {
+      this.activeId = kids[0] ? kids[0].id : (flattenLeaves(this.layers).slice(-1)[0]?.id ?? null);
+    }
+    return { ok: true, childIds: kids.map((k: Node) => k.id) };
+  }
+
+  // 把节点移入组（到组内顶部 = children 末尾）。拒绝把组移进自己的子孙。返回 ok。
+  moveIntoGroup(id: number, groupId: number) {
+    if (!this.canMoveIntoGroup(id, groupId)) return false;
+    const g = findNodeById(this.layers, groupId) as LayerGroup;
+    const node = findNodeById(this.layers, id)!;
     const loc = findParentOf(this.layers, id)!;
     loc.parent.splice(loc.index, 1);
     g.children.push(node);
@@ -758,10 +778,9 @@ export class PaintDoc {
 
   // 把节点移出其所在组（提到组的同级、组之上）。已在根 → no-op。返回 ok。
   moveOutOfGroup(id: number) {
-    const loc = findParentOf(this.layers, id);
-    if (!loc || !loc.parentNode) return false;
-    const gloc = findParentOf(this.layers, loc.parentNode.id);
-    if (!gloc) return false;
+    if (!this.canMoveOutOfGroup(id)) return false;
+    const loc = findParentOf(this.layers, id)!;
+    const gloc = findParentOf(this.layers, loc.parentNode!.id)!;
     const [n] = loc.parent.splice(loc.index, 1);
     gloc.parent.splice(gloc.index + 1, 0, n);
     return true;

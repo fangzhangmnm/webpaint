@@ -81,6 +81,7 @@ export function initTopbarMenu(ctx: AppContext) {
     if (!layer) return;
     // 走 PixelEdit 事务（**唯一** stroke entry 构造点；图层面板那份「清空」也走同一条）。
     const tx = pixelHistory.begin(layer, "stroke");
+    if (!doc.findLayer(layer.id)) return;   // 同 layers-panel：确认仍在树里再动像素
     doc.clearActiveLayer();
     if (!tx.commit()) return;
     board.invalidateAll();
