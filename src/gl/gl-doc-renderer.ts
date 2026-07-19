@@ -283,6 +283,15 @@ export class GLDocRenderer {
   returnFBO(fbo: PooledFBO): void { this._glctx.returnFBO(fbo); }
 
   private _composite(nodes: DocNode[], docW: number, docH: number, bg?: Background): PooledFBO {
+    try {
+      return this._compositeInner(nodes, docW, docH, bg);
+    } finally {
+      // **必须在 finally**：docTreeToComp 的叶解析器会抛 LAYER_NOT_SYNCED，早年那条 throw 会越过下面
+      //   这句归还 → 每抛一帧漏一个 doc 尺寸 FBO。抛错本身已被结构脏修掉，但归还不该依赖“不抛”。
+      if (this._overlayOwnedFBO) { this._glctx.returnFBO(this._overlayOwnedFBO); this._overlayOwnedFBO = null; }
+    }
+  }
+  private _compositeInner(nodes: DocNode[], docW: number, docH: number, bg?: Background): PooledFBO {
     const ov = this._overlay;
     const tree = docTreeToComp(
       nodes,
@@ -294,9 +303,7 @@ export class GLDocRenderer {
       ov ? (leaf): OverlayDesc | null => (leaf.id === ov.layerId ? { tex: ov.tex, opacity: ov.opacity, erase: ov.erase, blendMode: safeMode(ov.blendMode), ox: ov.ox, oy: ov.oy, ow: ov.ow, oh: ov.oh, lockAlpha: ov.lockAlpha, selMask: ov.selMask } : null) : undefined,
       this._floats.size ? (leaf): FloatDesc | null => this._floats.get(leaf.id) ?? null : undefined,
     );
-    const result = this._comp.composite(this._backend.texture, tree, docW, docH, bg);
-    if (this._overlayOwnedFBO) { this._glctx.returnFBO(this._overlayOwnedFBO); this._overlayOwnedFBO = null; }   // overlay tex 已烤进 accum
-    return result;
+    return this._comp.composite(this._backend.texture, tree, docW, docH, bg);   // overlay tex 已烤进 accum；FBO 由 _composite 的 finally 归还
   }
 
   private _eachLeaf(nodes: DocNode[], fn: (leaf: DocLeaf) => void): void {

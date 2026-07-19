@@ -70,6 +70,7 @@ import "./tile-pixels.test.mjs";
 import "./tile-residency.test.mjs";         // TileResidency Slice A：无损压缩备份 + dirty-never-evict 门 + contentVersion
 import "./tile-pixels-write.test.mjs";      // ★缺陷 C 回归：写路径 ⟂ 驱逐态（_ensureResident 只守读不守写 → undo 被撕裂覆盖）
 import "./blend-glsl.test.mjs";             // WebGL2+tiling Stage 2：12 blend GLSL 生成（像素 parity 在 npm run smoke）
+import "./gl-sync-policy.test.mjs";        // ★缺陷 D 回归：结构脏不受 live-preview 门控（否则合成抛 LAYER_NOT_SYNCED）
 import "./gl-compose-plan.test.mjs";        // WebGL2+tiling Stage 2：clip 基底解析 + 组隔离判定（与 layer-composite 对齐）
 import "./gl-doc-bridge.test.mjs";       // WebGL2+tiling 接 board：doc 树→CompNode 翻译 + safeMode
 import "./layer-tree.test.mjs";             // batch 2：图层树模型（嵌套树 op + activeId + 组 op + snapshotAll 往返）

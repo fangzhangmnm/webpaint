@@ -20,7 +20,10 @@ type UndoEntry = Record<string, any>;
 // ---- 图层面板 ----
 export function _afterDocChange() {
   renderLayersPanel();
-  board.invalidateAll();
+  // 结构脏（不是像素脏）：本函数是**整个图层树变更面**的漏斗——10 个 undo handler + layers-panel
+  //   的全部 op + selection-ops 都经此。结构同步不可被 livePreview 推迟，否则新叶不进 _layerTiles
+  //   → 合成抛 LAYER_NOT_SYNCED（浮层活着时做结构操作曾必然中招）。
+  board.invalidateStructure();
   board.requestRender();
 }
 
@@ -179,18 +182,14 @@ export function initLayerUndo(ctx: AppContext) {
     undo: (e: UndoEntry) => {
       doc.restoreSnapshotAll(e.before.doc);
       if (e.before.viewport) Object.assign(board.viewport, e.before.viewport);
-      _afterDocChange();
+      _afterDocChange();   // 已含 renderLayersPanel + invalidateStructure（doc 变换换掉全部图层）
       if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-      board.invalidateAll();
-      renderLayersPanel();
     },
     redo: (e: UndoEntry) => {
       doc.restoreSnapshotAll(e.after.doc);
       if (e.after.viewport) Object.assign(board.viewport, e.after.viewport);
-      _afterDocChange();
+      _afterDocChange();   // 已含 renderLayersPanel + invalidateStructure（doc 变换换掉全部图层）
       if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-      board.invalidateAll();
-      renderLayersPanel();
     },
     refsLayer: () => true,        // 所有层都受影响
   });

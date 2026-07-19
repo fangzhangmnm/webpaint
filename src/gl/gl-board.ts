@@ -1,7 +1,8 @@
 // GLBoard —— board.ts 的 GL 渲染委托（v351 起唯一 display 路径；docs/20260614-perf-webgl-memory-clip.md §5.5）。
 // board canvas(alpha:true) 在前只画 lasso overlay/边框，本 GL canvas 垫在后面渲 doc。
-// 脏策略：内容变(markContentDirty)且非 live-preview 时才 syncAll；描边中靠 GPU stamp overlay/live-sync seam，
+// 脏策略：**像素**脏(markContentDirty)且非 live-preview 时才 syncAll；描边中靠 GPU stamp overlay/live-sync seam，
 //   不重传；pan/zoom 不重传（视口变不碰内容）。per-layer 脏 + bbox-sub = 后续优化（见 perf-optimization-backlog）。
+//   **结构**脏(markStructureDirty)是另一回事：不可延迟，见 shouldSyncAll。
 
 import { GLContext } from "./gl-context.ts";
 import { GLDocRenderer } from "./gl-doc-renderer.ts";
@@ -22,6 +23,21 @@ function hexToRgb(hex: string): [number, number, number] {
   return [parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255];
 }
 
+// 本帧是否要全量 syncAll。抽成纯函数以便 node 测（同 gl-compose-plan 的接缝惯例）。
+//
+// 三条互不相同的理由，**只有像素脏那条**可以被 live-preview 推迟：
+//   · structureDirty —— 图层树变了。不可延迟：新叶子不在 _layerTiles 里，_composite 立刻抛
+//     LAYER_NOT_SYNCED。曾经它和像素脏共用一个标志位，于是「自由变换/描边进行中做结构操作」
+//     会被 !livePreview 一起挡掉 → 每帧抛错 + 画布冻结，直到浮层结束。这是缺陷 D。
+//   · forceSync —— 自由变换 lift 那一帧（挖洞改了源层 tile，但浮层已激活）。
+//   · contentDirty —— 像素变了。描边中 live stamp 走 GPU overlay、CPU tile 尚未变，可以等抬笔。
+//
+// livePreview 下跑 syncAll 是安全的（已核）：描边期 live stamp 在 overlay 不在 CPU tile；浮层期源层
+//   在 lift 时已 forceSync 过；调整替身在 syncAll **之后**才重新施加（见 render 里 surrogate 那行）。
+export function shouldSyncAll(contentDirty: boolean, structureDirty: boolean, livePreview: boolean, forceSync: boolean): boolean {
+  return structureDirty || forceSync || (contentDirty && !livePreview);
+}
+
 export class GLBoard {
   readonly canvas: HTMLCanvasElement;
   private _glctx: GLContext;
@@ -38,10 +54,11 @@ export class GLBoard {
     //   被驱逐层的 raw 也随 GPU 没了（只剩压缩备份）→ 先 recoverAll 从备份解驱逐（_needRecover 门），再 syncAll 重传。
     this._glctx.onRestored = () => {
       this._renderer.handleContextRestored();   // 重建后端 array texture + 复位池 + 清陈旧 _layerTiles（旧句柄已死）
-      this._contentDirty = true; this._cache = null; this._needRecover = true;
+      this._contentDirty = true; this._structureDirty = true; this._cache = null; this._needRecover = true;
     };
   }
 
+  private _structureDirty = true;  // 图层树结构脏（增删/编组/移动/换 doc）——**不受 livePreview 门控**，见 shouldSyncAll
   private _needRecover = false;    // context-loss 后待从备份重物化被驱逐层（recoverAll 在 syncAll 前跑）
   private _recovering = false;     // recoverAll 进行中：跳过合成帧（别从空 raw 合成）
 
@@ -54,6 +71,12 @@ export class GLBoard {
   get stats(): { passes: number; floatPasses: number } { return this._renderer.stats; }
   get fboPoolStats(): { count: number; bytes: number } { return this._renderer.fboPoolStats; }
   markContentDirty(): void { this._contentDirty = true; }
+  // **结构**脏（图层增删/编组/移动/换 doc）——与像素脏分开，因为二者的可延迟性不同：
+  //   像素脏可以等到抬笔再同步（描边中 live stamp 走 GPU overlay，CPU tile 还没变）；
+  //   结构脏**不可延迟**——新叶子没进 _layerTiles，下一帧 _composite 就会抛 LAYER_NOT_SYNCED
+  //   （gl-doc-renderer.ts:291）。而 _isLivePreview() 在**整个浮层生命期**为真（不只描边那一瞬），
+  //   所以「自由变换进行中删个图层」曾经必然打出每帧抛错的风暴。见 shouldSyncAll。
+  markStructureDirty(): void { this._structureDirty = true; this._contentDirty = true; }
 
   // 渲染一帧。affine6 = board _applyDocTransform 的 device-px 6 参；canvasW/H = device px；scale = 视口缩放；
   //   voidColor = doc 外底色；docBg = doc 背景色（null=棋盘/透明，first cut 显 void）；
@@ -77,8 +100,8 @@ export class GLBoard {
     if (this._needRecover && !this._recovering) {
       this._needRecover = false; this._recovering = true;
       this._renderer.recoverAll(doc.layers)
-        .then(() => { this._recovering = false; this._contentDirty = true; })
-        .catch(() => { this._recovering = false; this._contentDirty = true; });
+        .then(() => { this._recovering = false; this._contentDirty = true; this._structureDirty = true; })
+        .catch(() => { this._recovering = false; this._contentDirty = true; this._structureDirty = true; });
     }
     if (this._recovering) return;
     // doc 尺寸变（改分辨率/裁剪）：池里全是旧 doc 尺寸 FBO，永不再命中 → 主动清掉真删 GL（旧的大、早放早好），
@@ -86,13 +109,16 @@ export class GLBoard {
     if (doc.width !== this._lastDocW || doc.height !== this._lastDocH) {
       if (this._cache) { this._renderer.returnFBO(this._cache); this._cache = null; }
       this._glctx.clearPool();
-      this._contentDirty = true;
+      this._contentDirty = true; this._structureDirty = true;
       this._lastDocW = doc.width; this._lastDocH = doc.height;
     }
     // forceSync：livePreview 帧也强制全量同步一次（自由变换 lift 那帧——挖洞改了源层 tile，但 livePreview
     //   门控会挡住 syncAll → 否则 GPU 上是陈旧的无洞源层）。拖动中源层静止 → 不再 forceSync，保住 v352 零 per 帧成本。
-    const contentChanged = (this._contentDirty && !livePreview) || forceSync;
-    if (contentChanged) { this._renderer.syncAll(doc.layers, doc.width, doc.height); this._contentDirty = false; }
+    const contentChanged = shouldSyncAll(this._contentDirty, this._structureDirty, livePreview, forceSync);
+    if (contentChanged) {
+      this._renderer.syncAll(doc.layers, doc.width, doc.height);
+      this._contentDirty = false; this._structureDirty = false;
+    }
     // live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中，contentChanged 被 live 门控挡住 →
     //   只把活动叶每帧重传 GPU，下面 livePreview 重合成就能显 live 预览（buffered brush 走 overlay，liveSyncLeaf=null）。
     else if (livePreview && liveSyncLeaf) { this._renderer.syncLayer(liveSyncLeaf, doc.width, doc.height); }

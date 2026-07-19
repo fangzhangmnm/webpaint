@@ -234,7 +234,7 @@ export class Board {
     this.doc = doc;
     this._configureDocMemory();
     this._compositeCacheDirty = true;   // 新 doc → 合成缓存作废
-    this._glBoard?.markContentDirty();   // GL：新 doc → 全量重传
+    this._glBoard?.markStructureDirty();   // GL：新 doc = 全新一批叶 → 结构脏（不可被 livePreview 推迟）
     this.fitToScreen();
   }
 
@@ -372,10 +372,21 @@ export class Board {
     this.setViewport(tx, ty, scale, 0);   // 复位 rotation
   }
 
-  // 公共 API：layer 像素被改了（图层结构变 / 切换 / putImageData 等）
+  // 公共 API：layer **像素**被改了（putImageData / 滤镜 / undo 像素快照等）。
+  // 图层树结构变了（增删层/编组/移动/换 doc）→ 用 invalidateStructure()，不是这个。
   invalidateAll() {
-    this._compositeCacheDirty = true;   // 图层/结构/doc-transform 变 → 合成缓存作废
-    this._glBoard?.markContentDirty();   // GL：图层/结构变 → 全量重传
+    this._compositeCacheDirty = true;   // 像素变 → 合成缓存作废
+    this._glBoard?.markContentDirty();   // GL：内容脏（描边中 livePreview 守门不重传，抬笔 commit 后才同步）
+    this.requestRender();
+  }
+
+  // 公共 API：图层**树结构**变了（增删层 / 编组解组 / 移动 / 换 doc / doc 变换）。
+  // 与 invalidateAll 分开：结构同步**不可被 livePreview 推迟**（新叶不进 _layerTiles → 合成即抛
+  //   LAYER_NOT_SYNCED）。二者曾共用一个标志位，导致「浮层活着时做结构操作」每帧抛错。见 gl-board
+  //   的 shouldSyncAll。
+  invalidateStructure() {
+    this._compositeCacheDirty = true;
+    this._glBoard?.markStructureDirty();
     this.requestRender();
   }
 
