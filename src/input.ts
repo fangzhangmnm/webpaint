@@ -400,14 +400,11 @@ export class InputController {
             this.board.invalidateAll();
           }
         },
-        refsLayer: (e: LassoEntry, id: number) => e.layers.some((L) => L.layerId === id),
       } satisfies UndoHandler);
       // 选区变化（lasso 圈 / 取消选区 / 反选 等）也进 undo，但不动像素
       this.history.registerHandler("selectionChange", {
         undo: (e: SelectionChangeEntry) => { this.doc.selection = e.before; this.board.invalidateAll(); },
         redo: (e: SelectionChangeEntry) => { this.doc.selection = e.after;  this.board.invalidateAll(); },
-        // 选区不属于某一 layer；refsLayer 永远 false（删图层不影响选区 entry）
-        refsLayer: () => false,
       } satisfies UndoHandler);
     }
     // 把 doc 引用给 lasso，便于直接操作 doc.selection

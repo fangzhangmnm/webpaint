@@ -68,6 +68,7 @@ import "./layer-composite.test.mjs";        // deep module A：clip 基底解析
 import "./tile-store.test.mjs";             // WebGL2+tiling Stage 1：tile 几何 + 稀疏存储簿记（fake backend round-trip）
 import "./tile-pixels.test.mjs";
 import "./tile-residency.test.mjs";         // TileResidency Slice A：无损压缩备份 + dirty-never-evict 门 + contentVersion
+import "./history-ordering.test.mjs";      // ★缺陷 E 回归：游标只在 handler 兑现后移动 + _busy 闩 + dispose 释放 + push 校验
 import "./tile-pixels-write.test.mjs";      // ★缺陷 C 回归：写路径 ⟂ 驱逐态（_ensureResident 只守读不守写 → undo 被撕裂覆盖）
 import "./blend-glsl.test.mjs";             // WebGL2+tiling Stage 2：12 blend GLSL 生成（像素 parity 在 npm run smoke）
 import "./gl-sync-policy.test.mjs";        // ★缺陷 D 回归：结构脏不受 live-preview 门控（否则合成抛 LAYER_NOT_SYNCED）

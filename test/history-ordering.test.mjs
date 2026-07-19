@@ -1,0 +1,131 @@
+// UndoStack 游标/并发/释放语义（缺陷 E 回归）。
+//
+// 三条旧行为，合起来正是「group 操作把 editor history 搞坏」时最难定位的那部分：
+//   1. undo() 在 await handler **之前**就 this.index--。handler 抛了 → doc 半改、游标却已前移
+//      → 下一次 undo 跳过一条，doc 与 history 从此错位。
+//   2. handler 的错误被吞成 reportError(..., "log")（只进 console，UI 无感）。
+//   3. removeLayer/mergeDown/selectionToLayer 的 handler 是 async（await createImageBitmap 会让出），
+//      连按两次 Ctrl+Z 会让两个半应用的 handler 交错改同一个 doc。
+// 外加 dispose 从来没有任何实现（契约里有、_dispose 三处调用），于是 treeStructure entry 持有的
+// 离树图层活引用永远不放手。
+import { describe, it, assert, eq } from "./runner.mjs";
+import { UndoStack } from "../src/history.ts";
+
+const defer = () => { let r; const p = new Promise((res) => { r = res; }); return { p, resolve: r }; };
+
+describe("UndoStack · 游标只在 handler 兑现后移动（缺陷 E）", () => {
+  it("undo handler 抛错 → 游标不动、canUndo 仍为真（不假装撤销成功）", async () => {
+    const h = new UndoStack();
+    h.registerHandler("boom", { undo: () => { throw new Error("handler 炸了"); }, redo: () => {} });
+    h.push({ type: "boom" });
+    eq(h.index, 0, "push 后游标在 0");
+
+    await h.undo();
+    eq(h.index, 0, "handler 抛错 → 游标停在原位");
+    assert(h.canUndo(), "仍可撤销（用户可重试；红条已告知失败）");
+  });
+
+  it("redo handler 抛错 → 游标不动", async () => {
+    const h = new UndoStack();
+    let boom = false;
+    h.registerHandler("t", { undo: () => {}, redo: () => { if (boom) throw new Error("redo 炸"); } });
+    h.push({ type: "t" });
+    await h.undo();
+    eq(h.index, -1, "撤销成功 → 游标退到 -1");
+    boom = true;
+    await h.redo();
+    eq(h.index, -1, "redo 抛错 → 游标不动（不会误认为已重做）");
+    assert(h.canRedo(), "仍可重做");
+  });
+
+  it("成功路径照旧：undo/redo 正常推进游标", async () => {
+    const h = new UndoStack();
+    const seen = [];
+    h.registerHandler("t", { undo: (e) => seen.push("u" + e.n), redo: (e) => seen.push("r" + e.n) });
+    h.push({ type: "t", n: 1 }); h.push({ type: "t", n: 2 });
+    await h.undo(); await h.undo();
+    eq(h.index, -1, "两次撤销到底");
+    await h.redo(); await h.redo();
+    eq(h.index, 1, "两次重做回顶");
+    eq(seen.join(","), "u2,u1,r1,r2", "顺序正确");
+  });
+});
+
+describe("UndoStack · async handler 不交错（_busy 闩）", () => {
+  it("连按两次 Ctrl+Z：第二次被丢弃，绝不与第一次交错改 doc", async () => {
+    const h = new UndoStack();
+    const d = defer();
+    const log = [];
+    h.registerHandler("slow", {
+      undo: async (e) => { log.push("enter" + e.n); await d.p; log.push("exit" + e.n); },
+      redo: () => {},
+    });
+    h.push({ type: "slow", n: 1 }); h.push({ type: "slow", n: 2 });
+
+    const first = h.undo();          // 进入 handler、卡在 await
+    const second = h.undo();         // 第二次按键：应被闩挡掉
+    d.resolve();
+    await Promise.all([first, second]);
+
+    eq(log.join(","), "enter2,exit2", "只跑了一个 handler，没有 enter2,enter1 交错");
+    eq(h.index, 0, "只撤销了一步");
+  });
+
+  it("闩释放后可继续撤销（不是把栈锁死）", async () => {
+    const h = new UndoStack();
+    h.registerHandler("t", { undo: async () => {}, redo: () => {} });
+    h.push({ type: "t" }); h.push({ type: "t" });
+    await h.undo();
+    await h.undo();
+    eq(h.index, -1, "闩只挡并发，不挡串行");
+  });
+});
+
+describe("UndoStack · dispose 释放（缺陷 E：契约有、实现无）", () => {
+  it("超出 max 被淘汰的 entry 会 dispose", () => {
+    const h = new UndoStack({ max: 2 });
+    const disposed = [];
+    h.registerHandler("t", { undo: () => {}, redo: () => {}, dispose: (e) => disposed.push(e.n) });
+    h.push({ type: "t", n: 1 }); h.push({ type: "t", n: 2 }); h.push({ type: "t", n: 3 });
+    eq(disposed.join(","), "1", "最老的一条被淘汰即释放");
+    eq(h.entries.length, 2, "栈长受 max 限制");
+  });
+
+  it("被 redo 段截断的 entry 会 dispose", async () => {
+    const h = new UndoStack();
+    const disposed = [];
+    h.registerHandler("t", { undo: () => {}, redo: () => {}, dispose: (e) => disposed.push(e.n) });
+    h.push({ type: "t", n: 1 }); h.push({ type: "t", n: 2 });
+    await h.undo();                       // 游标退到 0，n=2 进入 redo 段
+    h.push({ type: "t", n: 3 });          // 新动作 → 截断 redo 段
+    eq(disposed.join(","), "2", "被截断的 n=2 释放");
+  });
+
+  it("clear() 释放全部（切文档时别把上一张画的图层引用钉住）", () => {
+    const h = new UndoStack();
+    const disposed = [];
+    h.registerHandler("t", { undo: () => {}, redo: () => {}, dispose: (e) => disposed.push(e.n) });
+    h.push({ type: "t", n: 1 }); h.push({ type: "t", n: 2 });
+    h.clear();
+    eq(disposed.join(","), "1,2", "全部释放");
+    eq(h.index, -1, "游标复位");
+  });
+});
+
+describe("UndoStack · push 时校验 entry 契约", () => {
+  it("validate 返回错误 → 仍入栈（doc 已改，不能假装没发生），但会报出来", () => {
+    const h = new UndoStack();
+    h.registerHandler("t", { undo: () => {}, redo: () => {}, validate: (e) => (e.ok ? null : "缺 ok 字段") });
+    h.push({ type: "t", ok: true });
+    eq(h.entries.length, 1, "合契约的正常入栈");
+    h.push({ type: "t" });                 // 不合契约
+    eq(h.entries.length, 2, "仍入栈——doc 已经改过了，丢掉 entry 只会让状态更不一致");
+  });
+
+  it("没有 validate 的 handler 照常工作（可选契约）", () => {
+    const h = new UndoStack();
+    h.registerHandler("t", { undo: () => {}, redo: () => {} });
+    h.push({ type: "t" });
+    eq(h.entries.length, 1, "无 validate 不影响");
+  });
+});

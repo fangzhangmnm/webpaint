@@ -9,7 +9,7 @@
 //
 // 四条纪律（α → β 升级路径用）：
 //   1. handler 注册集中（boot 时段，grep registerHandler 见全集）
-//   2. handler shape 统一 { undo(e), redo(e), refsLayer?(e, id) }
+//   2. handler shape 统一 { undo(e), redo(e), validate?(e), dispose?(e) }
 //   3. entry data schema 一致（同类 op 用同一壳）
 //   4. handler 之间不互相调
 
@@ -26,7 +26,13 @@ export interface UndoEntry extends Record<string, unknown> {
 export interface UndoHandler {
   undo(e: UndoEntry): void | Promise<void>;
   redo(e: UndoEntry): void | Promise<void>;
-  refsLayer?(e: UndoEntry, id: number): boolean;   // layer id 全程是 number
+  // push 时校验 entry 契约：返回错误说明 = 这条 entry 跟本 handler 对不上（push 方写错了壳）。
+  //   **不抛**——doc 已经改过了，抛只会把 doc 和 history 撕得更开；走 reportError("error") 红条。
+  //   动机：UndoEntry 是 Record<string, unknown>，push 什么都能过 TS。曾经「清空图层」手搓的
+  //   entry 把压缩结果写进 before.blob 而 handler 读 e.beforeBlob，编译期运行期都没人吭声，
+  //   一直到用户按下 Ctrl+Z 才发现画没了。push 每次用户操作只跑一次，不在热路径，故常开。
+  validate?(e: UndoEntry): string | null;
+  // entry 被淘汰（超出 max / 被 redo 段截断 / clear）时释放它持有的重资源。
   dispose?(e: UndoEntry): void;
 }
 
@@ -35,12 +41,13 @@ export class UndoStack {
   index: number;
   max: number;
   handlers: Map<string, UndoHandler>;
+  _busy = false;   // undo/redo 进行中（async handler 让出期间挡住第二次按键；见 undo()）
 
   constructor({ max = 50 }: { max?: number } = {}) {
     this.entries = [];
     this.index = -1;          // index of "currently applied" entry; -1 = nothing applied
     this.max = max;
-    this.handlers = new Map();  // type → { undo, redo, refsLayer?, dispose? }
+    this.handlers = new Map();  // type → { undo, redo, validate?, dispose? }
   }
 
   registerHandler(type: string, handler: UndoHandler) {
@@ -63,6 +70,8 @@ export class UndoStack {
       const dropped = this.entries.splice(this.index + 1);
       for (const e of dropped) this._dispose(e);
     }
+    const why = this.handlers.get(entry.type)?.validate?.(entry);
+    if (why) reportError(new Error(`[history] entry "${entry.type}" 不合契约：${why}（这一步将无法正确撤销）`), "error");
     this.entries.push(entry);
     this.index++;
     while (this.entries.length > this.max) {
@@ -73,32 +82,42 @@ export class UndoStack {
     this._emit();
   }
 
+  // 游标**只在 handler 兑现之后**才移动。若 handler 抛了，doc 已处于半改状态，此时保持
+  //   `entries[index] == 最后一条已应用` 这个不变量比"假装撤销成功了"重要得多——否则下一次
+  //   undo 会跳过一条、doc 与 history 从此错位（本次 group 事故的第二重原因）。
+  // 错误级别 "log"→"error"：撤销失败是数据完整性事件，必须弹红条。CLAUDE.md 里 "log" 是留给
+  //   良性 offline/fallback 的，这不是。
+  // _busy 闩：removeLayer/mergeDown/selectionToLayer 的 handler 是 async（await createImageBitmap
+  //   会让出），连按两次 Ctrl+Z 会让两个半应用的 handler 交错改同一个 doc。丢弃第二次按键是对的；
+  //   排队只是把同样的树形态危险往后推。canUndo() 不反映这个闩（按钮不闪，多余的按键静默忽略）。
   async undo() {
-    if (!this.canUndo()) return;
-    const e = this.entries[this.index];
-    this.index--;
+    if (this._busy || !this.canUndo()) return;
+    this._busy = true;
+    const i = this.index;
+    const e = this.entries[i];
     const h = this.handlers.get(e.type);
-    if (h) {
-      try { await h.undo(e); }
-      catch (err) { reportError(new Error(`[history] undo handler "${e.type}" failed: ` + String(err)), "log"); }
-    } else {
-      reportError(`[history] no handler for "${e.type}"`, "log");
-    }
-    this._emit();
+    try {
+      if (!h) { reportError(new Error(`[history] 没有 "${e.type}" 的 handler，这一步未能撤销`), "error"); return; }
+      await h.undo(e);
+      this.index = i - 1;
+    } catch (err) {
+      reportError(new Error(`[history] 撤销 "${e.type}" 失败，历史游标停在原位：` + String(err)), "error");
+    } finally { this._busy = false; this._emit(); }
   }
 
   async redo() {
-    if (!this.canRedo()) return;
-    this.index++;
-    const e = this.entries[this.index];
+    if (this._busy || !this.canRedo()) return;
+    this._busy = true;
+    const i = this.index + 1;
+    const e = this.entries[i];
     const h = this.handlers.get(e.type);
-    if (h) {
-      try { await h.redo(e); }
-      catch (err) { reportError(new Error(`[history] redo handler "${e.type}" failed: ` + String(err)), "log"); }
-    } else {
-      reportError(`[history] no handler for "${e.type}"`, "log");
-    }
-    this._emit();
+    try {
+      if (!h) { reportError(new Error(`[history] 没有 "${e.type}" 的 handler，这一步未能重做`), "error"); return; }
+      await h.redo(e);
+      this.index = i;
+    } catch (err) {
+      reportError(new Error(`[history] 重做 "${e.type}" 失败，历史游标停在原位：` + String(err)), "error");
+    } finally { this._busy = false; this._emit(); }
   }
 
   clear() {
