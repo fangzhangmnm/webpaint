@@ -34,10 +34,16 @@ export function updateNewerBanner() {
 //    对应的 ICON_UPLOAD / ICON_CLOUD_BUSY 图标和 styles.css 的 [data-state] 选择器一并作废。）
 export const ICON_DISK = iconHtml("floppy-disk");
 export const ICON_CLOUD_CHECK = iconHtml("cloud-synced");
+export const ICON_CLOUD_PENDING = iconHtml("cloud-pending");   // 已落本地、云端没成（终态，非「在飞中」）
 
 function computeSaveState() {
   // cutover：busy/cloud 状态不再暴露（sync 脏进 listAllItems，非徽章热路径）。内存脏=session.dirty，其余按登录态。
   if (session.dirty) return "dirty";                       // 内存脏（未落盘）
+  // ⚠ unpushed **不是**被 cutover 删掉的那批状态之一（saving/cloud-dirty/cloud-busy 是「在飞中」的过程态，
+  //   删得对，别加回来）。这条是**终态**：已经存完了、而且云端那条腿确定没成——离线 / 冲突面选了取消 /
+  //   deferred 落地未确认。v432 之前它没有任何渲染面，于是 push 失败后徽章照画云朵对勾、状态栏照报「已同步」，
+  //   正是用户报的「远端文件不一样，而 UI 从没说过失败」。别为了「3 态更简洁」把它再删一次。
+  if (session.pushPending && isSignedIn()) return "unpushed";
   return isSignedIn() ? "synced" : "local-only";
 }
 export function updateSaveStatus() {
@@ -55,6 +61,7 @@ export function updateSaveStatus() {
   //   v409 起点它必 encode+推（forceSaveAndPush，让时间戳走字）。徽章只看内容脏，desk 改动 UI 静默。
   const name = session.name;
   if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.dirty", { name }); }
+  else if (state === "unpushed") { els.topSaveBtn.innerHTML = ICON_CLOUD_PENDING; els.topSaveBtn.title = t("save.unpushed", { name }); }
   else if (state === "synced") {
     // synced = 云✓（上次保存时已同步）。中性可按态色；点击=检查云端有没有新版本（动作走 tooltip+行为）。
     els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK;

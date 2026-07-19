@@ -111,6 +111,9 @@ export const S = {
   "save.dirty":      { zh: "保存 + 推送 (Ctrl+S) · {name} · 未保存", en: "Save + push (Ctrl+S) · {name} · unsaved", ja: "保存＋アップロード (Ctrl+S) · {name} · 未保存" },
   "save.synced":     { zh: "已同步云端（上次保存时）· 点击检查是否有新版本 · {name}", en: "Synced to cloud (at last save) · tap to check for newer · {name}", ja: "クラウド同期済み（前回保存時）· タップで更新確認 · {name}" },
   "save.localOnly":  { zh: "已存本地（IDB 易失，登录云端更安全） · {name}", en: "Saved locally (IDB is volatile; sign in for safety) · {name}", ja: "ローカル保存済み（IDBは揮発性、クラウド推奨） · {name}" },
+  // 终态：存进本地了，但云端那条腿没成（离线/冲突取消/落地未确认）。必须和 synced 长得不一样——
+  //   这正是「远端文件不一样而 UI 从没说过」的渲染面。
+  "save.unpushed":   { zh: "已存本地，未上云（点击重试推送） · {name}", en: "Saved locally, not uploaded (tap to retry) · {name}", ja: "ローカル保存済み、クラウド未送信（タップで再試行） · {name}" },
 
   // ── 混合模式名（LAYER_MODE_LABEL 单一源；图层面板 + 笔刷设置下拉共用）切片 3a ──
   "mode.normal":     { zh: "正常",     en: "Normal",       ja: "通常" },
@@ -505,6 +508,7 @@ export const S = {
   "ss.notPushedNewer": { zh: "未推送：这画由更新版本写成，你取消了覆盖（本地与云端都保持原样）", en: "Not pushed: this artwork was written by a newer version and you cancelled the overwrite (local and cloud both left unchanged)", ja: "プッシュしていません：この作品は新しいバージョンで作成されており、上書きをキャンセルしました（ローカルとクラウドはどちらもそのまま）" },
   "ss.savedLocalIdb": { zh: "已存本地：{name}（IDB 易失，登录云端更安全）", en: "Saved locally: {name} (IndexedDB is volatile; sign in to the cloud for safety)", ja: "ローカルに保存しました：{name}（IndexedDB は消えやすいため、クラウドにサインインすると安全です）" },
   "ss.synced": { zh: "已同步到云端：{name}", en: "Synced to cloud: {name}", ja: "クラウドに同期しました：{name}" },
+  "ss.savedNotPushed": { zh: "已存本地，但没能上传到云端：{name}（稍后会重试）", en: "Saved locally but the upload to cloud failed: {name} (will retry later)", ja: "ローカルに保存しましたが、クラウドへの送信に失敗しました：{name}（後で再試行します）" },
   "ss.pushFailed": { zh: "推送失败：{error}", en: "Push failed: {error}", ja: "プッシュに失敗しました：{error}" },
   "ss.openOrSaveBeforeEncrypt": { zh: "先打开或保存一张画再加密", en: "Open or save an artwork before encrypting", ja: "暗号化する前に作品を開くか保存してください" },
   "ss.alreadyEncrypted": { zh: "已是加密作品", en: "Already an encrypted artwork", ja: "すでに暗号化された作品です" },
@@ -532,6 +536,7 @@ export const S = {
   // 改名的旧名去向三态（v432）：谱系不明时改名降级为「另存」，旧名留在云端 —— 必须说清楚，
   //   否则用户以为旧的没了（而上一版是真把它挪进回收站了）。
   "ss.renamedOldKept": { zh: "已另存为「{newName}」。云端的「{oldName}」原样留着（本地这份的来历不明，没敢动它）", en: "Saved as \"{newName}\". The cloud copy \"{oldName}\" was left untouched (this local copy's lineage is unknown).", ja: "「{newName}」として保存しました。クラウドの「{oldName}」はそのまま残しています（このローカル版の由来が不明なため）" },
+  "ss.renamedOldUnknown": { zh: "已另存为「{newName}」。云端的「{oldName}」没能查到状态（离线？），所以没有动它——请稍后自行确认", en: "Saved as \"{newName}\". Couldn't reach the cloud to check \"{oldName}\", so it was left alone — please verify later.", ja: "「{newName}」として保存しました。クラウドの「{oldName}」の状態を確認できなかったため（オフライン？）、触れていません。後でご確認ください" },
   "ss.renamedLocalOnly": { zh: "已重命名为「{newName}」，但云端没推成功——目前只在本地，稍后会重试", en: "Renamed to \"{newName}\", but the cloud push failed — it's local-only for now and will retry later.", ja: "「{newName}」に名前を変更しましたが、クラウドへの送信に失敗しました。現在はローカルのみで、後で再試行します" },
   "ss.renamedOldOrphan": { zh: "已重命名为「{newName}」，但云端的「{oldName}」没能移进回收站，仍留在原处", en: "Renamed to \"{newName}\", but the cloud copy \"{oldName}\" couldn't be moved to the recycle bin and remains in place.", ja: "「{newName}」に名前を変更しましたが、クラウドの「{oldName}」をごみ箱に移動できず、元の場所に残っています" },
   "ss.renameFailed": { zh: "重命名失败：{error}", en: "Rename failed: {error}", ja: "名前の変更に失敗しました：{error}" },

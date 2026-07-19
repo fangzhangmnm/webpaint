@@ -284,7 +284,11 @@ async function saveAndPush() {
     //   冲突/错误经 store 的 ui bundle surface。
     await es.forceSaveAndPush();
     _docLastSavedAt = Date.now();
-    setStatus(isSignedIn() ? t("ss.synced", { name }) : t("ss.savedLocalIdb", { name }));
+    // 别无条件报「已同步」：push 失败在 store 内部被 catch 成 banner，这里**不会**抛。
+    //   唯一可靠的判据是 es.isPushPending()（v433）——它是 save() 返回的 pushed 一路带上来的。
+    setStatus(!isSignedIn() ? t("ss.savedLocalIdb", { name })
+      : es.isPushPending() ? t("ss.savedNotPushed", { name })
+      : t("ss.synced", { name }));
     gallery.refresh();
   } catch (e) { reportError(new Error("[cloud] push failed: " + String(e)), "log"); setStatus(t("ss.pushFailed", { error: errMsg(e) })); }
   finally { updateSaveStatus(); }
@@ -358,6 +362,7 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
         //   oldCloudOrphan 旧名进回收站失败 → 云端留了个孤儿
         if (r.cloudDeferred) setStatus(t("ss.renamedLocalOnly", { oldName, newName: trimmed }), true);
         else if (r.oldKept) setStatus(t("ss.renamedOldKept", { oldName, newName: trimmed }), true);
+        else if (r.oldUnknown) setStatus(t("ss.renamedOldUnknown", { oldName, newName: trimmed }), true);
         else if (r.oldCloudOrphan) setStatus(t("ss.renamedOldOrphan", { oldName, newName: trimmed }), true);
         else setStatus(t("ss.renamedWithCloud", { oldName, newName: trimmed }));
         gallery.refresh();
@@ -531,6 +536,7 @@ export const session = {
   get loadedDocIsNewer() { return _loadedDocIsNewer; },
   get loadedDocNewerConfirmed() { return _loadedDocNewerConfirmed; },
   get dirty() { return es ? es.isDirty() : false; },            // 内存脏（save-status 徽章用）
+  get pushPending() { return es ? es.isPushPending() : false; },   // 已落本地但没上云（徽章第四态；与 dirty 正交）
   markEdited() { if (es) es.markDirty(); },                     // app 驱动内容变化（导入/blender/参考窗）→ 标脏
   setName, restore: restoreSession, saveAs,
   save: saveNow, saveAndPush,

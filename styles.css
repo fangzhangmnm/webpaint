@@ -1864,6 +1864,10 @@ body[data-mode="gallery"] .board { display: none !important; }
   to   { transform: rotate(360deg); }
 }
 .tool[data-state="synced"] { color: #8a8a8a; }
+/* unpushed（v433）：已落本地、云端那条腿没成。**必须**和 synced 的灰区分开——
+   它是「你的工作还没到安全的地方」，不是「没什么可做」。琥珀 = 提醒但不报错（离线是正常天气）。
+   注意这不是上面注释里被删掉的那批「在飞中」过程态的回归，它是终态。 */
+.tool[data-state="unpushed"] { color: #d99a20; }
 .gallery-grid {
   /* 内容高、不伸不缩（flex:none）——滚动交给 #galleryMount。这样 aspect-ratio 卡片行不会被收缩压扁。 */
   flex: none;

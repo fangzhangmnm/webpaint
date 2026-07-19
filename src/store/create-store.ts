@@ -97,10 +97,11 @@ export interface StoreConfig {
 // tryMove 结果式返回（不抛，UI 渲染 where 标签）。移动/改身份的唯一入口 = file.tryMove(to)。
 // ok:true 时**仍可能有话要说**（别只看 ok 就报「已重命名（含云端）」）：
 //   oldKept       谱系不明 → 降级为 save-as，云端旧名原地留着 → 必须告诉用户「旧的还在，叫 <oldName>」
+//   oldUnknown    云端旧名状态取不到（离线/错误）→ 没碰它；「取不到」≠「没有」，别报「已含云端」
 //   oldCloudOrphan 旧名进 .trash 失败 → 云端遗留孤儿
 //   cloudDeferred  云端推失败 → 新名只在本地，待推
 export type TryMoveResult =
-  | { ok: true; where?: string; oldName?: string; oldKept?: boolean; oldCloudOrphan?: boolean; cloudDeferred?: boolean }
+  | { ok: true; where?: string; oldName?: string; oldKept?: boolean; oldUnknown?: boolean; oldCloudOrphan?: boolean; cloudDeferred?: boolean }
   | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
 
 // save 的结果：本地一定落了（没落会抛），云端**不一定**上去了。
@@ -422,7 +423,7 @@ export function createStore(config: StoreConfig) {
     notifyFolderOf(from); notifyFolderOf(to);                                 // 旧夹移出 + 新夹移入，两边重画
     // 结果必须透出去：以前这里整个丢掉 r，于是 app 无条件报「已重命名（含云端）」——
     //   云端推失败(cloudDeferred)、旧名成孤儿(oldCloudOrphan)、旧名被留下(oldKept) 全被吞掉 = UI 谎报成功。
-    return { ok: true, where: r.where, oldKept: r.oldKept, oldCloudOrphan: r.oldCloudOrphan, cloudDeferred: r.cloudDeferred, oldName: from };
+    return { ok: true, where: r.where, oldKept: r.oldKept, oldUnknown: r.oldUnknown, oldCloudOrphan: r.oldCloudOrphan, cloudDeferred: r.cloudDeferred, oldName: from };
   });
 
   // ── ui 映射：冲突回调把 local/cloud 字节取来喂 ui.resolveConflict（必填，绝不静默 cancel）──

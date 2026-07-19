@@ -132,3 +132,46 @@ test("acquire：云端 item → 本地 + adopt", async () => {
   eq(await asStr(await local.get("remote.pdf")), "REMOTE", "落本地");
   eq(adopted, "remote.pdf", "adopt 回调");
 });
+
+// ── P0-2 / P0-3（v433）：改名对旧名的判断，既不能拿「未知」当「没有」，也不能拿陈旧读做破坏性动作 ──
+test("★ 改名时云端取不到（离线）→ oldUnknown，绝不谎称已含云端、也绝不碰旧名", async () => {
+  const { cloud, local, head } = rig();
+  await cloud.push("old.pdf", enc("CLOUD-ORIG"));
+  head.markSeen("old.pdf", cloud.getETag("old.pdf"));
+  await local.save("old.pdf", enc("EDITED")); head.recordEdit("old.pdf");
+  // fetchMeta 抛 = 离线/云不可达（mock-provider 的 injectFault 只挂 upload/delete/move/rename，
+  //   getItemByPath 没有钩子，所以直接代理这一层——要验的正是 probeOld 怎么对待「问不到」）。
+  const offlineCloud = { ...cloud, fetchMeta: async () => { throw new Error("offline"); } };
+  const sub2 = createSubstrate();
+  const sr2 = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
+  const dp2 = createPush({ cloud, head, seal: sealPass, safeResolve: sr2, serialize: sub2.serialize, editVersion: () => 0 }).doPush;
+  const { rename } = createIdentity({ cloud: offlineCloud, local, head, doPush: dp2, serialize: sub2.serialize, serialize2: sub2.serialize2 });
+  const r = await rename("old.pdf", "new.pdf");
+  assert(r.oldUnknown, "oldUnknown=true（「取不到」≠「没有」）");
+  assert(!r.oldKept && !r.oldCloudOrphan, "不是 kept 也不是 orphan——就是不知道");
+  eq(r.where, "cloud-push+unknown", "where 必须说不知道，不得报 'cloud-push'（那意思是旧名本来就没云端副本）");
+  eq(await asStr((await cloud.pull("old.pdf"))?.blob), "CLOUD-ORIG", "★ 旧画原封不动（不知道就别动）");
+});
+
+test("★ 判据取自 push **之后**：推的过程中云端被别的设备改了 → 旧名必须留着", async () => {
+  const { cloud, local, head } = rig();
+  await cloud.push("old.pdf", enc("V1"));
+  head.markSeen("old.pdf", cloud.getETag("old.pdf"));
+  await local.save("old.pdf", enc("EDITED")); head.recordEdit("old.pdf");
+
+  // 包一层 doPush：推完 new.pdf 的瞬间，模拟别的设备推了 old.pdf 的新版（正是 doPush 那几十秒的窗口）。
+  const sub = createSubstrate();
+  const safeResolve = createSafeResolve({ cloud, local, head, validateAdopt: () => true });
+  const inner = createPush({ cloud, head, seal: sealPass, safeResolve, serialize: sub.serialize, editVersion: () => 0 }).doPush;
+  let bumped = false;
+  const doPush = async (name: string, opts: Parameters<typeof inner>[1]) => {
+    const r = await inner(name, opts);
+    if (!bumped) { bumped = true; await cloud.push("old.pdf", enc("V2-FROM-OTHER-DEVICE")); }
+    return r;
+  };
+  const id = createIdentity({ cloud, local, head, doPush, serialize: sub.serialize, serialize2: sub.serialize2 });
+
+  const r = await id.rename("old.pdf", "new.pdf");
+  eq(r.where, "cloud-push+kept", "重取判据发现云端已前进 → 降级为另存（用 push 前那次读会错判成 trash）");
+  eq(await asStr((await cloud.pull("old.pdf"))?.blob), "V2-FROM-OTHER-DEVICE", "★ 别的设备那一版没被搬进 .trash");
+});

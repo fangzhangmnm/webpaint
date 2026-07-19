@@ -30,7 +30,7 @@ export interface EditorAdapter {
 //   ok:true 仍可能有话要说 —— 旧名的去向不是只有「搬走了」一种：
 //   oldKept=谱系不明，改名降级为另存、旧名原地留着 · oldCloudOrphan=旧名没能挪进回收站 · cloudDeferred=云端没推成。
 export type TryMoveResult =
-  | { ok: true; where?: string; oldName?: string; oldKept?: boolean; oldCloudOrphan?: boolean; cloudDeferred?: boolean }
+  | { ok: true; where?: string; oldName?: string; oldKept?: boolean; oldUnknown?: boolean; oldCloudOrphan?: boolean; cloudDeferred?: boolean }
   | { ok: false; reason: "name-collision"; where: "local" | "cloud" };
 export interface StoreLike {
   // mode 显式必填（new=新建、existing=打开已有）；editor-session 处理的都是已建身份 → 恒 "existing"。
@@ -70,6 +70,10 @@ export interface EditorSession {
   delete(): Promise<void>;                        // 删当前 doc
   currentName(): string | null;
   isDirty(): boolean;                             // **内存脏**（自上次落盘后 editor 改过）——app 层概念，非 sync 脏
+  // **未上云**：字节已落本地，但云端那条腿没成（离线 / 冲突面选了取消 / deferred 落地未确认）。
+  //   与 isDirty 正交：isDirty=false ∧ isPushPending=true 是最要命的组合——「存过了」但「没上云」，
+  //   而 v432 之前它没有任何渲染面，于是徽章照画云朵对勾（用户报的「远端文件不一样而 UI 从没说过」）。
+  isPushPending(): boolean;
   start(): void;                                  // 挂 autosave timer + 失焦/pagehide 监听（按 policy）；DOM 无则 no-op
   dispose(): void;                                // 拆监听 + 停 timer
 }
@@ -155,6 +159,7 @@ export function createEditorSession(config: EditorSessionConfig): EditorSession 
   return {
     currentName: () => _name,
     isDirty: () => _dirty,
+    isPushPending: () => _pushPending,
 
     async open(name: string): Promise<boolean> {
       if (_name && _name !== name) await persist(pushOn.has("exit"));   // 切 doc 前先存旧的（退出语义）

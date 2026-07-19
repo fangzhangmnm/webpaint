@@ -195,6 +195,19 @@ describe("editor-session › push-pending（autosave 后退出仍推）", () => 
     eq(store.saves.length, 2, "push-pending 没被乐观清掉 → 仍会重推（旧版这里是 1：静默认为已同步）");
   });
 
+  it("★ isPushPending 暴露出来：push 没成 → true（徽章/状态栏据此不再谎报「已同步」）", async () => {
+    const store = mockStore(), editor = mockEditor();
+    const es = createEditorSession({ store, editor });
+    await es.open("a"); editor.fireChange();
+    store._pushResult = { pushed: false, reason: "offline-or-error" };
+    await es.flushAndPush();
+    eq(es.isDirty(), false, "内存不脏了（本地确实存了）");
+    eq(es.isPushPending(), true, "但没上云 —— 这个正交事实必须能被读到");
+    store._pushResult = null;
+    await es.flushAndPush();
+    eq(es.isPushPending(), false, "补推成功后归位");
+  });
+
   it("push 成功后才 no-op（对照：确认上面那条不是把 no-op 也一起破坏了）", async () => {
     const store = mockStore(), editor = mockEditor();
     const es = createEditorSession({ store, editor });

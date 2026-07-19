@@ -11,7 +11,7 @@ import type { BytesSource } from "./substrate.ts";
 import { reportStoreError } from "./error-handling.ts";
 import { asideStamp } from "./move-aside.ts";   // 单腿 trash 事件的 deleteEventId 生成器
 import { CloudNameCollisionError } from "./cloud-sync.ts";
-import type { CloudSync, LocalCache } from "./types.ts";
+import type { CloudSync, FetchMetaResult, LocalCache } from "./types.ts";
 import type { LocalHead } from "./local-head.ts";
 import type { Seal } from "./seal.ts";
 
@@ -42,6 +42,7 @@ export interface IdResult {
   status: string; where?: string; newName?: string; oldName?: string; localName?: string;
   oldCloudOrphan?: boolean;   // 旧名进 .trash 失败 → 云端遗留孤儿
   oldKept?: boolean;          // 谱系不明/分叉 → 改名降级为 save-as，云端旧名**原地留着**（须告知用户）
+  oldUnknown?: boolean;       // 云端旧名的状态取不到（离线/错误）→ 没碰它；「取不到」≠「没有」，必须如实说
   cloudDeferred?: boolean;    // 云端推失败 → newName 留本地 dirty 待推
   item?: unknown; error?: unknown;
 }
@@ -57,6 +58,18 @@ export function createIdentity(cfg: IdentityCfg) {
     // doCloud=false（本地-only rename）→ 只查本地；否则走注入的统一 nameOccupied（local+在线 remote）。缺注入（裸测试）→ 退回本地 exists。
     if (doCloud && nameOccupied) { if (await nameOccupied(newName)) throw new CloudNameCollisionError(newName); return; }
     if (local && await local.exists(newName)) throw new CloudNameCollisionError(newName);
+  }
+
+  // 云端某名字的探测结果 —— **三态，别塌缩成 null**。
+  //   { known:true, meta:非空 } 云端有这个文件
+  //   { known:true, meta:null } 云端确实没有
+  //   { known:false }           取不到（离线 / 瞬时错误 / 未登录）
+  // 旧版把第三种 catch 成 null，于是「云端不可达」和「云端没有」变成同一件事：
+  //   rename 会安静地什么都不做，却报 where:"cloud-push"（意思是「旧名本来就没有云端副本」），
+  //   app 一路穿到「已重命名（含云端）」—— 而云端旧文件原封不动还在那儿，谱系刚被 forget 掉。
+  async function probeOld(name: string): Promise<{ known: true; meta: FetchMetaResult | null } | { known: false }> {
+    try { return { known: true, meta: await cloud.fetchMeta(name) }; }
+    catch (e) { reportStoreError(e, "log"); return { known: false }; }
   }
 
   async function rename(oldName: string, newName: string, opts: RenameOpts = {}): Promise<IdResult> {
@@ -88,15 +101,15 @@ export function createIdentity(cfg: IdentityCfg) {
       }
       if (!doCloud) { head.forget(oldName); return { status: "renamed", where: "local", newName }; }
       try {
-        let cloudOld = null;
-        try { cloudOld = await cloud.fetchMeta(oldName); } catch (e) { reportStoreError(e, "log"); cloudOld = null; }
+        const before = await probeOld(oldName);
         // synced 或没本地字节可推（纯云端）→ 服务端 move，etag 顺延。
-        if (cloudOld && (!head.isDirty(oldName) || bytes == null)) {
+        if (before.known && before.meta && (!head.isDirty(oldName) || bytes == null)) {
           await cloud.rename(oldName, newName);
           head.markSeen(newName, cloud.getETag(newName)); head.forget(oldName);
           return { status: "renamed", where: "cloud-move", newName };
         }
         if (bytes == null) { head.forget(oldName); return { status: "renamed", where: "local", newName }; }
+        const baseAtStart = head.seenBase(oldName);   // 「用户按下改名时，本机认为自己派生自哪一版」
         await doPush(newName, { encode: () => bytes!, getEditVersion });   // dirty/无旧云文件 → 推当前字节（含 B5/retry/conflict）
         // ── 旧名怎么办：move（搬走）还是 save-as（留着）───────────────────────────────────────
         //   「推新名 + 旧名进 .trash」是 **move** 语义，它隐含一个前提：
@@ -111,21 +124,31 @@ export function createIdentity(cfg: IdentityCfg) {
         //
         //   谱系不明/已分叉 → 降级为 **save-as**：新名照推，旧名一个指头都不碰。
         //   （不在这里弹冲突面：逃生通道必须畅通，不许在用户正要逃的时候再拦一道。保存那条路才是 surface 的地方。）
-        const base = head.seenBase(oldName);
-        const lineageIntact = cloudOld != null && base != null && base === cloudOld.etag;
-        let oldCloudOrphan = false;
-        let oldKept = false;
-        if (cloudOld && lineageIntact) {
+        //   ★ 判据必须在 doPush **之后**重取（TOCTOU；同 offload.ts 网络往返后 re-check 的纪律）：
+        //   doPush 含最多 4 次重试 + 可能的冲突面**用户交互**，可以长达几十秒。push 之前那次读早就陈旧了，
+        //   拿它决定「要不要搬走云端旧名」= 用几十秒前的世界观做破坏性动作。
+        const after = await probeOld(oldName);
+        let oldCloudOrphan = false, oldKept = false, oldUnknown = false;
+        if (!after.known) {
+          // 云端状态取不到（离线/瞬时错误）。**「取不到」≠「没有」**——绝不能拿未知当空白然后什么都不说。
+          oldUnknown = true;                                   // 一个指头都不碰，并让 caller 如实告知
+        } else if (after.meta == null) {
+          /* 云端确实没有旧名（本来就是纯本地文件）→ 无事可做 */
+        } else if (baseAtStart != null && baseAtStart === after.meta.etag) {
+          // 谱系完好 → move 语义成立，旧名进 .trash（不 hard-delete，C5）。
           // 单腿事件（只有云端这一条腿，本地旧名没有对应的 trash 项）→ 自己生成 id，无配对需求。
           try { await cloud.trash(oldName, asideStamp(Date.now())); } catch (e) { reportStoreError(e, "warning"); oldCloudOrphan = true; }   // 旧名进 .trash 失败→云端遗留孤儿：surface
-        } else if (cloudOld) {
+        } else {
           oldKept = true;   // 谱系不明/分叉 → 云端旧名原地留着（caller 须告知用户「旧的还在，叫 X」）
         }
         head.forget(oldName);
         return {
           status: "renamed",
-          where: !cloudOld ? "cloud-push" : oldKept ? "cloud-push+kept" : "cloud-push+trash",
-          newName, oldCloudOrphan, oldKept, oldName,
+          where: oldUnknown ? "cloud-push+unknown"
+            : oldKept ? "cloud-push+kept"
+            : oldCloudOrphan || (after.known && after.meta) ? "cloud-push+trash"
+            : "cloud-push",
+          newName, oldCloudOrphan, oldKept, oldUnknown, oldName,
         };
       } catch (e) {
         reportStoreError(e, "warning");   // 云端推失败、newName 留本地 dirty 待推 → surface
