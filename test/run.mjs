@@ -74,6 +74,7 @@ import "./gl-compose-plan.test.mjs";        // WebGL2+tiling Stage 2：clip 基�
 import "./gl-doc-bridge.test.mjs";       // WebGL2+tiling 接 board：doc 树→CompNode 翻译 + safeMode
 import "./layer-tree.test.mjs";             // batch 2：图层树模型（嵌套树 op + activeId + 组 op + snapshotAll 往返）
 import "./layer-detach-residency.test.mjs"; // ★缺陷 A 回归：叶离树前强制物化（删组 + restoreTree redo 路径）——防被驱逐层像素被 syncAll 对账销毁
+import "./pixel-edit-entry.test.mjs";       // ★缺陷 B 回归：PixelEdit entry 契约（压缩结果必须落在 handler 读的字段上）
 import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序列化（buildStackXml↔parseStackXml + id + active 往返）
 // app-boot 必须是套件里**第一个**触发 Vue 求值的测试：Vue（vue.esm-browser）在 module-eval 时把
 // document 缓存成 module 级 const（createText 等用它）。boot-smoke 装了 DOM shim 后才 import app.js，

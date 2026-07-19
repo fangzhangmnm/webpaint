@@ -60,6 +60,7 @@ interface LayerRowData {
 interface LayerRowProps { layer: LayerLeafSnap; depth: number; isGroup: boolean; }
 
 let doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
+let pixelHistory: AppContext["pixelHistory"];
 // 留在 app.js、经 ctx 绑入的协作件（被非图层代码也调用）
 let _afterDocChange: AppContext["afterDocChange"], layerSpecFrom: AppContext["layerSpecFrom"];
 
@@ -206,12 +207,12 @@ function _clearLayerPixels(L: LayerNode | null) {
   if (!L) return;
   // 清空像素是叶专属 op（template gates on !isGroup）；组无 bbox/snapshot → 就地 as Layer 视之。
   if ((L as Layer).bboxW <= 0 || (L as Layer).bboxH <= 0) { setStatus(t("lp.st.alreadyEmpty")); return; }
-  const before = (L as Layer).snapshot() as LayerSpec;
-  (L as Layer).restoreFromSnapshot({ bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null, bitmap: null });
-  const after = (L as Layer).snapshot() as LayerSpec;
-  history.push({ type: "stroke", layerId: L.id, before, after, beforeBlob: null, afterBlob: null });
-  compressPixelSnap(before, (blob: Blob | null) => { before.blob = blob; });
-  compressPixelSnap(after,  (blob: Blob | null) => { after.blob  = blob; });
+  // 走 PixelEdit 事务（**唯一** stroke entry 构造点）。曾经这里手搓 entry，且把压缩结果写进
+  //   `before.blob` 而 handler 读的是 `e.beforeBlob` → 压缩一落地 imageData 被置 null、两头皆空 →
+  //   撤销恢复出「旧 bbox + 零像素」，静默丢画且是竞态（压缩前撤销反而正常）。见 v439。
+  const tx = pixelHistory.begin(L as Layer, "stroke");
+  (L as Layer).clearAll();
+  if (!tx.commit()) return;
   _afterDocChange();
   board.invalidateAll();
   setStatus(t("lp.st.cleared", { name: L.name }));
@@ -706,7 +707,7 @@ function _syncChrome() {
 let _layersDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
 
 export function initLayersPanel(ctx: AppContext) {
-  ({ doc, board, history, setStatus, afterDocChange: _afterDocChange, layerSpecFrom } = ctx);
+  ({ doc, board, history, setStatus, pixelHistory, afterDocChange: _afterDocChange, layerSpecFrom } = ctx);
 
   // 挂 Vue 应用到图层列表容器（旧 renderLayersPanel 渲染进的 #layersList）。
   _vueApp = createApp(LayersPanel);
