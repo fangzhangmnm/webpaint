@@ -33,9 +33,14 @@ test("[app-state] struct 冷字段直读写 collection（不落 RAM）+ 默认 +
   eq(synced.getItem("current-directory", "?"), "folder/a", "直写落 synced collection（无 RAM 缓存）");
   eq(appState.blenderPanelUrl === synced.getItem("blender-panel-url", "?"), true, "blenderPanelUrl 落 synced-app-state（非 local）");
 
-  // v409 回归锁：local-app-state 回归**空**。last-session-signed-in 已删（零 consumer；
-  //   登录态 SSoT 归 auth provider，不在这存影子）。要加设备级字段时才往这写。
-  eq(local.keys().length, 0, "local-app-state 无字段（v409）");
+  // ★ v438：current-file 迁到 **local**（它是「这台设备此刻打开着哪张画」，没有合并语义）。
+  //   放 synced 里有真数据安全后果：store 拿它当 cloud-gone 防抖守卫，而 LWW 会让
+  //   设备 B 打开的画翻掉设备 A 的守卫 → A 不再保护自己真正打开的那张。
+  eq(local.getItem("current-file", "?"), "x.ora", "current-file 落 local-app-state");
+  eq(synced.getItem("current-file", "MISSING"), "MISSING", "★ 不再写进 synced（跨设备不互相翻）");
+
+  // local-app-state 从此有且仅有 current-file（v409 的「回归空」被 v438 有意打破，理由见上）。
+  eq(local.keys().join(","), "current-file", "local-app-state 只有 current-file");
   eq(typeof appState.lastSessionSignedIn, "undefined", "lastSessionSignedIn 已删");
 
   // 除字段外仅两方法：pushHot no-op、pullFrom 不抛

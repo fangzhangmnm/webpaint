@@ -16,7 +16,14 @@ import type { Collection } from "./store/index.ts";
 export const APP_STATE_DEFAULTS = {
   // 跨设备（synced-app-state）：跟人/identity 走的跨文件持久态
   "current-directory": "" as string,          // 上次所在图库文件夹（Cold）
-  "current-file": null as string | null,      // 上次打开的文档名（非 null → boot 自动 open）（Cold）
+  // ⚠ current-file **住 local-app-state，不是 synced**（v438 迁移）。它是「这台设备此刻打开着哪张画」，
+  //   没有合并语义，也不该有。放在 synced 里有一条真数据安全后果：
+  //     store 把它读回去当守卫（app-store.activeFileName → reconcile 的 skipName，K1 红线：
+  //     cloud-gone 防抖绝不碰打开着的文件）。而 synced 是 LWW 跨设备的 ——
+  //     **设备 B 打开 Y 会同步过来，把设备 A 的 activeFileName() 翻成 Y，
+  //     于是设备 A 不再保护自己真正打开的 X。** 远端设备的选择在驾驶本机的驱逐守卫。
+  //   键名保持 "current-file" 不变（两个 collection 各有独立命名空间，不冲突）。
+  "current-file": null as string | null,      // 上次打开的文档名（非 null → boot 自动 open）（Cold，**device-local**）
   "blender-panel-url": "" as string,          // Blender 同步远端 URL（2026-07-14 决策：全账号同步，tailscale 稳定端点）（Cold）
   // 设备本地（local-app-state）：**当前为空**。
   //   v407 曾放过 "last-session-signed-in"（"控静默重认证"），但它零 consumer——只写不读，
@@ -34,7 +41,19 @@ let _local: Collection | undefined;
 export function wireAppState(synced: Collection, local: Collection): void { _synced = synced; _local = local; }
 // boot 门：hydrate 两个 collection（各自 init 内部先 hydrate 本地再后台对齐云端）。快、离线 OK。
 export function initAppState(): Promise<void> {
-  return Promise.all([_synced?.init() ?? Promise.resolve(), _local?.init() ?? Promise.resolve()]).then(() => undefined);
+  return Promise.all([_synced?.init() ?? Promise.resolve(), _local?.init() ?? Promise.resolve()])
+    .then(() => { _seedCurrentFileFromLegacy(); });
+}
+
+// current-file 从 synced 迁到 local 的**幂等播种**（v438）。
+//   · 本地已有值（含用户显式清空）→ 一律不覆盖，所以重复跑无副作用。
+//   · **不删**云端那个旧键：删跨设备数据的风险高于留一个死键；老版本的其它设备可能还在读它。
+//     它从此只写不读地躺着，等所有设备都升上来之后再单独清理（那是另一次改动，要另外拍板）。
+function _seedCurrentFileFromLegacy(): void {
+  if (!_local || !_synced) return;
+  if (_local.getEntry("current-file") !== undefined) return;      // 本地已有 → 不动
+  const legacy = _synced.getItem<string | null>("current-file", null);
+  if (legacy != null) _local.setItem("current-file", legacy);     // 只在有旧值时播种一次
 }
 // 导航前屏障（v417）：冷字段 setter 只改内存 + 排 400ms 防抖写（collection.ts:169-172）。
 //   页面被关/reload 时定时器随页面死 → currentFile 等于没写 → 下次冷启动开不回上次那张画。
@@ -53,8 +72,9 @@ export const appState = {
   // ── 跨设备（synced-app-state）冷字段 ──
   get currentDirectory(): string { return getC<string>(_synced, "current-directory"); },
   set currentDirectory(v: string) { setC(_synced, "current-directory", v); },
-  get currentFile(): string | null { return getC<string | null>(_synced, "current-file"); },
-  set currentFile(v: string | null) { setC(_synced, "current-file", v); },
+  // **local**（v438 从 synced 迁出，见 APP_STATE_DEFAULTS 处的长注释）
+  get currentFile(): string | null { return getC<string | null>(_local, "current-file"); },
+  set currentFile(v: string | null) { setC(_local, "current-file", v); },
   get blenderPanelUrl(): string { return getC<string>(_synced, "blender-panel-url"); },
   set blenderPanelUrl(v: string) { setC(_synced, "blender-panel-url", v); },
   // ── 设备本地（local-app-state）冷字段：当前无（见 APP_STATE_DEFAULTS 注）──

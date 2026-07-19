@@ -9,6 +9,7 @@ import { t } from "./i18n/index.ts";
 import { reportError } from "./error-badge.ts";
 import { session } from "./session-state.ts";
 import { getCurrentSessionName } from "./session.ts";
+import { restoreLastSession } from "./boot-restore.ts";
 import type { AppContext } from "./app-context.ts";
 
 // 笔架 boot：collection.init（本地缓存 hydrate → 后台 reconcile 云端 + 新库 seed）→
@@ -38,17 +39,14 @@ export function initRackBoot(ctx: AppContext) {
 //   早调 = 永远落图库、不再自动开上次的画。
 export async function bootRestoreSession(ctx: AppContext) {
   const { setGalleryOpen, updateSaveStatus, setStatus } = ctx;
-  const wantedName = getCurrentSessionName();
-  if (!wantedName) { session.setName(null, { persist: false }); updateSaveStatus(); await setGalleryOpen(true); return; }
-  // session.restore：es.open（store.file.open 内含本地/云端 + freshness + unseal）+ 设活动。失败=文件缺失/取消解锁。
-  const ok = await session.restore(wantedName);
-  if (ok) { setStatus(t("ss.opened", { name: wantedName })); return; }
-  // 失败 → 内存名降回 safe default（防幽灵 path），但**持久的 currentFile 留着**：失败常常是瞬态的
-  //   （加密画取消密码框 / 离线只有云端副本 / 文件锁定），清了用户下次冷启动就再也不会自动开这张画。
-  //   v406-v408 这里是无条件 `setName(null)`，把 currentFile 一起清了 —— 与本函数注释 3) 和
-  //   session.ts 的「boot load 失败时不要重置」自相矛盾。v409 修。
-  session.setName(null, { persist: false });
-  updateSaveStatus();
-  await setGalleryOpen(true);
-  setStatus(t("mi.lastNotFound", { name: wantedName }));
+  // 编排本身在 boot-restore.ts（零 app 依赖 → 可测）。这里只接线。
+  await restoreLastSession({
+    getWantedName: getCurrentSessionName,
+    restore: (name) => session.restore(name),
+    setNameMemoryOnly: (name) => session.setName(name, { persist: false }),   // 幽灵路径纪律：不动持久的 currentFile
+    openGallery: async () => { await setGalleryOpen(true); },
+    updateSaveStatus,
+    onOpened: (name) => setStatus(t("ss.opened", { name })),
+    onNotFound: (name) => setStatus(t("mi.lastNotFound", { name })),
+  });
 }
