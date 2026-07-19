@@ -88,9 +88,6 @@ const EYE_OFF = iconHtml("visibility-hide", { size: 22 });
 // 组折叠图标 SVG（去三角，点文件夹切折叠）：展开 = 打开的文件夹；折叠 = 合上的文件夹。
 const FOLDER_OPEN = iconHtml("folder-open", { size: 20 });
 const FOLDER_CLOSED = iconHtml("folder", { size: 20 });
-// ⋯ 菜单里三个开关的勾选框（原来是 ☑ / ☐ 字符——那两个符号跨平台字形差异大，画成图形才一致）
-const ICON_CHECKED = iconHtml("checkbox-checked", { size: 16 });
-const ICON_UNCHECKED = iconHtml("checkbox-empty", { size: 16 });
 
 // ---- 面板-UI-本地反应式状态（折叠 / 内联重命名 / ⋯菜单）----
 // 注：doc/图层结构变更的版本信号已外迁到 signals.ts 的 docVersion（跨切面共享）。
@@ -489,6 +486,7 @@ const LayerRow = defineComponent({
       lockAlpha: t("lp.lockAlpha"), clip: t("lp.clip"), clipGroup: t("lp.clipGroup"), refLayer: t("lp.refLayer"),
       mergeDown: t("lp.mergeDown"), clearContent: t("lp.clearContent"), delGroup: t("lp.delGroup"), del: t("lp.del"),
       opa: t("lp.opa"), mode: t("lp.mode"),
+      on: t("common.on"), off: t("common.off"),
     };
     return {
       modeBadge, opacityPct, badgeTitle, layersUi, railPad, modeOptions, L,
@@ -497,7 +495,6 @@ const LayerRow = defineComponent({
       toggleBadge, toggleMenu, vis, toggleCollapse,
       opaInput, opaCommit, modeChange, act, onMoveSelect,
       toggleClip, toggleRef, toggleLock,
-      ICON_CHECKED, ICON_UNCHECKED,
     };
   },
   template: `
@@ -534,33 +531,32 @@ const LayerRow = defineComponent({
         :title="badgeTitle" @click="toggleBadge">{{ modeBadge }}</button>
 
       <div v-if="menuOpen" class="menu-panel layer-tools-popup" @click.stop>
-        <button class="menu-item" type="button" @click="act('rename')"><span class="menu-item-label">{{ L.rename }}</span></button>
+        <button class="menu-item menu-item-with-icon" type="button" @click="act('rename')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rename"/></svg><span class="menu-item-label">{{ L.rename }}</span></button>
 
         <!-- 叶专属：复制 -->
-        <button v-if="!isGroup" class="menu-item" type="button" :disabled="!canDuplicate" @click="act('duplicate')"><span class="menu-item-label">{{ L.duplicate }}</span></button>
+        <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!canDuplicate" @click="act('duplicate')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg><span class="menu-item-label">{{ L.duplicate }}</span></button>
 
         <!-- 图层组 reparent：解组（仅组）/ 移入某组（dropdown，不挤占菜单空间）/ 移出组。编组 = 「+」里新建空组 -->
         <hr class="menu-sep" v-if="isGroup || moveTargets.length || canMoveOut" />
-        <button v-if="isGroup" class="menu-item" type="button" @click="act('ungroup')"><span class="menu-item-label">{{ L.ungroup }}</span></button>
-        <label v-if="moveTargets.length" class="menu-item layer-move-into" @click.stop>
-          <span class="menu-item-label">{{ L.moveIntoGroup }}</span>
+        <button v-if="isGroup" class="menu-item menu-item-with-icon" type="button" @click="act('ungroup')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#explode-folder"/></svg><span class="menu-item-label">{{ L.ungroup }}</span></button>
+        <label v-if="moveTargets.length" class="menu-item layer-move-into menu-item-with-icon" @click.stop><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#collection"/></svg><span class="menu-item-label">{{ L.moveIntoGroup }}</span>
           <select class="layer-move-select" @change="onMoveSelect" @click.stop>
             <option value="" selected>{{ L.choose }}</option>
             <option v-for="g in moveTargets" :key="'mi'+g.id" :value="String(g.id)">{{ g.name }}</option>
           </select>
         </label>
-        <button v-if="canMoveOut" class="menu-item" type="button" @click="act('moveOut')"><span class="menu-item-label">{{ L.moveOut }}</span></button>
+        <button v-if="canMoveOut" class="menu-item menu-item-with-icon" type="button" @click="act('moveOut')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-out-folder"/></svg><span class="menu-item-label">{{ L.moveOut }}</span></button>
 
         <hr class="menu-sep" />
         <!-- v267 (user)：层属性 toggle 收进 ⋯ 菜单（点了不关菜单，可连续切） -->
-        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleLock"><span class="layer-menu-check"><span v-html="layer.lockAlpha ? ICON_CHECKED : ICON_UNCHECKED"></span></span><span class="menu-item-label">{{ L.lockAlpha }}</span></button>
-        <button class="menu-item layer-menu-toggle" type="button" @click="toggleClip"><span class="layer-menu-check"><span v-html="layer.clippingMask ? ICON_CHECKED : ICON_UNCHECKED"></span></span><span class="menu-item-label">{{ isGroup ? L.clipGroup : L.clip }}</span></button>
-        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" @click="toggleRef"><span class="layer-menu-check"><span v-html="isRef ? ICON_CHECKED : ICON_UNCHECKED"></span></span><span class="menu-item-label">{{ L.refLayer }}</span></button>
+        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" role="menuitemcheckbox" :aria-pressed="layer.lockAlpha ? 'true' : 'false'" @click="toggleLock"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lock-alpha"/></svg><span class="menu-item-label">{{ L.lockAlpha }}</span><span class="menu-item-state">{{ layer.lockAlpha ? L.on : L.off }}</span></button>
+        <button class="menu-item layer-menu-toggle" type="button" role="menuitemcheckbox" :aria-pressed="layer.clippingMask ? 'true' : 'false'" @click="toggleClip"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clipping-mask"/></svg><span class="menu-item-label">{{ isGroup ? L.clipGroup : L.clip }}</span><span class="menu-item-state">{{ layer.clippingMask ? L.on : L.off }}</span></button>
+        <button v-if="!isGroup" class="menu-item layer-menu-toggle" type="button" role="menuitemcheckbox" :aria-pressed="isRef ? 'true' : 'false'" @click="toggleRef"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#reference-layer"/></svg><span class="menu-item-label">{{ L.refLayer }}</span><span class="menu-item-state">{{ isRef ? L.on : L.off }}</span></button>
 
         <hr class="menu-sep" />
-        <button v-if="!isGroup" class="menu-item" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><span class="menu-item-label">{{ L.mergeDown }}</span></button>
-        <button v-if="!isGroup" class="menu-item" type="button" :disabled="!hasPx" @click="act('clear')"><span class="menu-item-label">{{ L.clearContent }}</span></button>
-        <button class="menu-item menu-danger" type="button" :disabled="!canDel" @click="act('del')"><span class="menu-item-label">{{ isGroup ? L.delGroup : L.del }}</span></button>
+        <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#merge-down"/></svg><span class="menu-item-label">{{ L.mergeDown }}</span></button>
+        <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!hasPx" @click="act('clear')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-document"/></svg><span class="menu-item-label">{{ L.clearContent }}</span></button>
+        <button class="menu-item menu-danger menu-item-with-icon" type="button" :disabled="!canDel" @click="act('del')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span class="menu-item-label">{{ isGroup ? L.delGroup : L.del }}</span></button>
       </div>
     </div>
 

@@ -117,7 +117,7 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
       <input ref="opaSlider" id="opacitySlider" class="left-sidebar-slider" type="range" min="1" max="100" step="1"
         :value="opaPct" :disabled="!canDraw" orient="vertical" :aria-label="L.opacity" @input="onOpaInput" />
       <span class="left-sidebar-label" :title="L.opacity" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><use href="#transparency"/></svg>
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><use href="#opacity"/></svg>
       </span>
     `,
   });
