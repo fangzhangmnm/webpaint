@@ -1,6 +1,6 @@
 // UndoStack 游标/并发/释放语义（缺陷 E 回归）。
 //
-// 三条旧行为，合起来正是「group 操作把 editor history 搞坏」时最难定位的那部分：
+// 三条旧行为（v439 修），外加 v439 自己引入的三条回归（v440 修，见文件下半部）：
 //   1. undo() 在 await handler **之前**就 this.index--。handler 抛了 → doc 半改、游标却已前移
 //      → 下一次 undo 跳过一条，doc 与 history 从此错位。
 //   2. handler 的错误被吞成 reportError(..., "log")（只进 console，UI 无感）。
@@ -127,5 +127,85 @@ describe("UndoStack · push 时校验 entry 契约", () => {
     h.registerHandler("t", { undo: () => {}, redo: () => {} });
     h.push({ type: "t" });
     eq(h.entries.length, 1, "无 validate 不影响");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v440：v439 自身引入的回归（R1/R2/R3）。这三条都是"修 E 时改法本身"制造的新伤。
+// ---------------------------------------------------------------------------
+
+describe("UndoStack · async 期间的外部改动（R1/R2 回归）", () => {
+  it("R1：async undo 在途时 clear() → 闩不卡死，后续 undo/redo 仍可用", async () => {
+    const h = new UndoStack();
+    const d = defer();
+    h.registerHandler("slow", { undo: async () => { await d.p; }, redo: () => {} });
+    // **三条**：让 i-1 != -1，否则 clear 后的 index 恰好与 handler 写回值撞巧一致，测不出问题
+    h.push({ type: "slow" }); h.push({ type: "slow" }); h.push({ type: "slow" });
+
+    const inflight = h.undo();      // 撤销 index=2 那条，卡在 await
+    h.clear();                      // 切文档：entries 清空、index=-1
+    d.resolve();
+    await inflight;
+
+    // 在途 handler 恢复后绝不能在空栈上恢复出正索引
+    assert(h.index === -1, `clear 后游标必须仍是 -1，实得 ${h.index}`);
+    assert(!h.canUndo(), "空栈不可撤销");
+
+    // 闩必须已释放：新文档里推一条并撤销，要真的跑起来
+    let ran = false;
+    h.registerHandler("t", { undo: () => { ran = true; }, redo: () => {} });
+    h.push({ type: "t" });
+    await h.undo();
+    assert(ran, "clear 之后 undo 必须仍然可用（_busy 卡死会让它永远不跑）");
+  });
+
+  it("R1b：entries[index] 缺失时不得抛出逃逸异常（否则 finally 不跑、闩永久卡死）", async () => {
+    const h = new UndoStack();
+    h.registerHandler("t", { undo: () => {}, redo: () => {} });
+    h.push({ type: "t" });
+    // 人为制造 index 与 entries 失配（R1 的真实成因是 clear/async 竞态，这里直接构造该状态）
+    h.entries.length = 0;
+    // 不应抛；应安全退出并保持闩可用
+    await h.undo();
+    let ran = false;
+    h.registerHandler("u", { undo: () => { ran = true; }, redo: () => {} });
+    h.push({ type: "u" });
+    await h.undo();
+    assert(ran, "失配后闩仍须可用");
+  });
+
+  it("R2：async undo 在途时 push() → 游标一致，redo 不双重应用", async () => {
+    const h = new UndoStack();
+    const d = defer();
+    const applied = [];
+    h.registerHandler("slow", { undo: async () => { await d.p; applied.push("undo-slow"); }, redo: () => applied.push("redo-slow") });
+    h.registerHandler("stroke", { undo: () => applied.push("undo-stroke"), redo: () => applied.push("redo-stroke") });
+
+    h.push({ type: "slow" });                 // index 0
+    const inflight = h.undo();                // 撤销它，卡在 await
+    h.push({ type: "stroke" });               // 期间用户画了一笔（已应用到 doc）
+    d.resolve();
+    await inflight;
+
+    // 承重：新笔画是最后一条**已应用**的动作，游标必须指着它，而不是被拽回去
+    const top = h.entries[h.index];
+    assert(top && top.type === "stroke",
+      `游标必须停在已应用的 stroke 上，实得 ${top ? top.type : "(空)"} @index=${h.index}`);
+    assert(!h.canRedo(), "已应用的 stroke 不该躺在 redo 段里（否则 Ctrl+Y 会双重应用）");
+  });
+});
+
+describe("UndoStack · 缺 handler 不得锁死更老的历史（R3 回归）", () => {
+  it("无 handler 的 entry 被跳过，之前的历史仍可达", async () => {
+    const h = new UndoStack();
+    let older = false;
+    h.registerHandler("known", { undo: () => { older = true; }, redo: () => {} });
+    h.push({ type: "known" });        // index 0 —— 更老的一条
+    h.push({ type: "orphan" });       // index 1 —— 没有注册 handler
+
+    await h.undo();                   // 撞上 orphan：应报错但**跳过**
+    await h.undo();                   // 应能撤销到 known
+    assert(older, "无 handler 的 entry 不得把它之前的历史永久锁死");
+    assert(h.index === -1, `应已撤到底，实得 index=${h.index}`);
   });
 });
