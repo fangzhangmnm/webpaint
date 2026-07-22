@@ -14,6 +14,12 @@ S7 是纯渲染重构，**用户可见语义零变化**——四个旧模块死�
 tile-store/tile-index），换来：commit 只传变更 tile、描边中静止图层并进缓存段（pass 数从层数
 掉到个位）、累积器 straight rgba8 显存减半、GPU 态可随时蒸发自愈。
 
+> **第五棒补记（2026-07-22）**：分支重连 node_modules 后三重再验绿（tsc 0 / 824 node / GL smoke），
+> merge-ready（可 ff）。四份真机清单已去重并批成 **`docs/20260722-v04-device-test-batch.md`**（总单，
+> 按 iPad 动线排序，行为变化预告在前）。本棒为后台 job，按 2026-07-18 指令只 commit 分支不动 main——
+> **merge PR #8 仍留给用户**（本地 `git merge --ff-only worktree-v04-s7-render-tree && git push origin main`
+> 即可，别用 GitHub squash——会砸掉成对 commit）。下下棒从总单接 bug 反馈批。
+
 ## 下一棒是什么
 
 1. **用户 merge PR #8 → main**（或 agent 按用户指示 merge+push dev）——真机要走 /dev/ 部署，
