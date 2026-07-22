@@ -7,7 +7,7 @@
 //   - FBO 池：按尺寸借/还离屏渲染目标（合成 ping-pong / 笔刷 stroke FBO 复用）。
 //   - 单位 quad VAO（纹理 quad / 全屏 pass 共用）。
 //   - **context-loss 生命周期**：listen lost(preventDefault)+restored(重编 program/重建 FBO/
-//     fire onRestored → TileResidency 从压缩备份重上传所有 tile)。iOS Safari/PWA 后台必丢 → 这是命门。
+//     fire onRestored → 下帧 syncAll 从 CPU tile 池全量重传)。iOS Safari/PWA 后台必丢 → 这是命门。
 //
 // 验证边界：本模块全是 gl.* 调用，node DOM-shim 下是 no-op → **node 测不了，真机批验证**。
 //   故刻意只放标准、可读、无分支魔法的 GL 样板；易错点（FBO 完整性 / float 目标 params）逐行注释。
@@ -88,7 +88,7 @@ export class GLContext {
     el.addEventListener?.("webglcontextrestored", () => {
       this._lost = false;
       this._rebuildAfterRestore();
-      this.onRestored?.();   // TileResidency 在此从备份重上传所有 tile
+      this.onRestored?.();   // gl-board 在此重建后端并标脏 → 下帧从 CPU tile 池重传
     });
   }
 
@@ -232,7 +232,7 @@ export class GLContext {
   }
 
   // context restored 后：旧 GL 对象句柄全失效 → 重编所有 program、清空 FBO 池（按需重建）、丢 quad。
-  // tile 纹理由 TileResidency 在 onRestored 回调里从备份重上传（本模块不持 tile）。
+  // tile 纹理由 onRestored 回调链重传（gl-board 标脏 → syncAll 从 CPU tile 池；本模块不持 tile）。
   private _rebuildAfterRestore(): void {
     this._gen++;   // 旧 program/FBO/VAO 句柄全废 → 代际 +1，持久对象 holder 据此重建
     this._programs.clear();

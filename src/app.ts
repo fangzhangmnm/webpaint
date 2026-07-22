@@ -71,6 +71,7 @@ import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, brushRackCol
 import { initPreferences, refreshPreferences, flushPreferences } from "./app-prefs.ts";   // boot 门 + 前台/online 拉云对齐 user-preference（lang/theme/手势）+ 导航前屏障
 import { hydrateSmoothFromPrefs } from "./smooth-config.ts";   // boot 门后合并 synced 平滑调参进 SMOOTH
 import { initAppState, appState, flushAppState } from "./app-state.ts";  // boot 门 + 前台/online 拉云对齐 app-state（current-dir/file/blenderUrl）+ 导航前屏障
+import { initTileJobs } from "./tile-jobs.ts";   // v0.4.3：tile 池压缩后台化（deflate codec + 空闲切片 + 切后台 compactAll）
 
 // 前台（focus/visible）/ online 时把 4 个 settings/state collection 拉云对齐（per-key LWW；离线/local-only 内部 no-op）。
 const pullSettingsAndState = (): void => { void refreshPreferences(); void appState.pullFromPersistent(); };
@@ -153,7 +154,8 @@ const leftDial = mountLeftDial(els.leftDialMount, {
 //   ⚠ 这只是**止血**：全 app 还有 20 个模块 57 处 addEventListener 没有 disposer，boot 并非真正可拆卸。
 //   完整方案（子进程跑 boot smoke vs 全面 disposer 化）见 docs/reports/20260718-boot-disposability-and-test-infra.html。
 const _disposeSizeKeyboard = bindSizeKeyboard({ board, leftDial });
-(globalThis as { __wpBootTeardown?: Array<() => void> }).__wpBootTeardown = [_disposeSizeKeyboard];
+const _tileJobs = initTileJobs();   // interval + input 监听有 disposer（app-boot 测试要拆，否则 node 挂死）
+(globalThis as { __wpBootTeardown?: Array<() => void> }).__wpBootTeardown = [_disposeSizeKeyboard, _tileJobs.dispose];
 
 // 当前笔（ResolvedBrush）派生 + 引擎桥 = resolved-brush.ts makeCurrentBrush，input 前构造（见下）。手感数学全在 resolveBrush。
 
