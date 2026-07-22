@@ -74,6 +74,21 @@ if [ -n "$DEEP_HITS" ]; then
 fi
 echo "[build] ✓ 无 deep import"
 
+# 0.6 v0.4 分层 lint（workpiece/tiles 红线 + 已死模块防复活）。
+#   · workpiece/** 不碰 store（持久化归 importer/exporter/persistency；spec journal/20260721 §workpiece）
+#   · tiles/** 不碰 gl/**（CPU tile 池是纯底座；GPU 侧经 bridge 反向依赖它）
+#   · history.ts / pixel-edit.ts / layer-undo.ts / gl/tile-residency.ts 已日落（v0.4.3-0.4.5），不得复活 import
+echo "[build] v0.4 分层 lint…"
+LAYER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/store/|app-store)" src/workpiece --include='*.ts' 2>/dev/null || true)
+TILES_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*/gl/" src/tiles --include='*.ts' 2>/dev/null || true)
+DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/history\.ts|/pixel-edit\.ts|/layer-undo\.ts|/tile-residency\.ts)" src test --include='*.ts' --include='*.mjs' 2>/dev/null | grep -v "undo-history" || true)
+if [ -n "$LAYER_HITS$TILES_HITS$DEAD_HITS" ]; then
+  echo "[build] ✗ v0.4 分层违规：" >&2
+  echo "$LAYER_HITS$TILES_HITS$DEAD_HITS" >&2
+  exit 1
+fi
+echo "[build] ✓ v0.4 分层干净"
+
 # 1. esbuild bundle 到临时名
 "$ESBUILD" "$ENTRY" \
   --bundle --format=esm --target=es2020 \
