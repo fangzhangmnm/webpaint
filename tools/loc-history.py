@@ -3,9 +3,13 @@
 
 用法（在 repo 任意子目录里跑都行）：
     python3 tools/loc-history.py                 # 全套：图 + csv + 概述 + benchmark
+    python3 tools/loc-history.py --by session --gap 120   # benchmark 按「心流一坐」聚（默认）
+    python3 tools/loc-history.py --by commit     # 或按 commit/day/month（都偏噪声/偏粗）
     python3 tools/loc-history.py --out /tmp/foo  # 换输出目录
     python3 tools/loc-history.py --branch prod   # 换分支/ref（默认当前 HEAD）
     python3 tools/loc-history.py --no-lizard     # 跳过静态复杂度（不装 lizard 也能跑）
+
+  （建议用 venv 跑：~/venvs/pwa-tools/bin/python tools/loc-history.py）
 
 产物（默认落 docs/reports/loc/）：
     loc-history.png      —— 上图=累计代码行数曲线，下图=每 commit 增删柱
@@ -50,7 +54,7 @@ def excluded(path):
 def collect(ref):
     """返回按时间正序的 commit 记录列表。"""
     SEP = '\x1f'
-    fmt = '@@@' + SEP.join(['%H', '%h', '%ad', '%an', '%s'])
+    fmt = '@@@' + SEP.join(['%H', '%h', '%ad', '%at', '%an', '%s'])
     out = subprocess.run(
         ['git', 'log', '--reverse', '--numstat', '--date=short',
          '--pretty=format:' + fmt, ref],
@@ -63,9 +67,9 @@ def collect(ref):
         if line.startswith('@@@'):
             if cur:
                 commits.append(cur)
-            h, sh, date, author, subj = (line[3:].split(SEP) + [''] * 4)[:5]
-            cur = dict(hash=h, short=sh, date=date, author=author,
-                       subject=subj, added=0, deleted=0, files={})
+            h, sh, date, at, author, subj = (line[3:].split(SEP) + [''] * 5)[:6]
+            cur = dict(hash=h, short=sh, date=date, epoch=int(at or 0),
+                       author=author, subject=subj, added=0, deleted=0, files={})
         elif line.strip() and cur is not None:
             parts = line.split('\t')
             if len(parts) < 3:
@@ -135,11 +139,42 @@ def bench_bucket(commits):
         per_commit=(gross / len(commits)) if commits else 0.0, # 每 commit 毛改动
     )
 
-def bench_by_month(commits):
-    months = defaultdict(list)
+def sessionize(commits, gap_min):
+    """按提交时间间隔聚成「工作 session / 心流一坐」：
+    相邻 commit 间隔 < gap_min 分钟 → 同一坐；超过就断新一坐。
+    这才贴 solo-hobby-hyperfocus 的现实——一坐里那些来回小修都并进它该在的 burst。"""
+    gap = gap_min * 60
+    sessions, cur = [], []
+    for c in commits:                  # commits 已是时间正序
+        if cur and c['epoch'] - cur[-1]['epoch'] > gap:
+            sessions.append(cur); cur = []
+        cur.append(c)
+    if cur:
+        sessions.append(cur)
+    return sessions
+
+def session_label(sess):
+    """一坐的标签：起始日期时间 + 时长 + commit 数。"""
+    import datetime
+    start = datetime.datetime.fromtimestamp(sess[0]['epoch'])
+    dur_h = (sess[-1]['epoch'] - sess[0]['epoch']) / 3600
+    return f"{start:%m-%d %H:%M} ({dur_h:.1f}h·{len(sess)}c)"
+
+def bench_buckets(commits, by, gap_min=120):
+    """按 by 聚桶。返回 [(label, 记分卡), ...]，时间正序。
+    by='session' → 心流一坐一桶（默认，gap_min 分钟断坐）——solo vibe coding 的自然单位
+    by='commit'  → 每 commit 一桶（噪声大：bundle/docs/revert/来回小修都各算一桶）
+    by='day'     → 每天一桶（跨午夜会切断通宵坐）
+    by='month'   → 每月一桶（太粗，只当趋势看）"""
+    if by == 'session':
+        return [(session_label(s), bench_bucket(s)) for s in sessionize(commits, gap_min)]
+    if by == 'commit':
+        return [(c['short'], bench_bucket([c])) for c in commits]
+    keyf = (lambda c: c['date']) if by == 'day' else (lambda c: c['date'][:7])
+    groups = defaultdict(list)
     for c in commits:
-        months[c['date'][:7]].append(c)   # YYYY-MM
-    return [(m, bench_bucket(months[m])) for m in sorted(months)]
+        groups[keyf(c)].append(c)
+    return [(k, bench_bucket(groups[k])) for k in sorted(groups)]
 
 def static_metrics(root, use_lizard):
     """当前 tree 的静态复杂度标量（需 lizard）。缺了返回 None。"""
@@ -175,9 +210,11 @@ def static_metrics(root, use_lizard):
         hotspots=hotspots, long_fns=long_fns,
     )
 
-def write_benchmark(overall, by_month, static, path):
+def write_benchmark(overall, buckets, static, path, by):
     def f(x, d=2):
         return f'{x:.{d}f}'
+    col = {'session': '一坐(起始·时长·commit数)', 'commit': 'commit',
+           'day': '日期', 'month': '月份'}[by]
     with open(path, 'w', encoding='utf-8') as o:
         o.write('# 自省 benchmark 记分卡\n\n')
         o.write('> 都是「越大越乱 / 越大越费」的标量，比 LOC 更贴手感。归一化过，'
@@ -202,42 +239,53 @@ def write_benchmark(overall, by_month, static, path):
         else:
             o.write('## 静态复杂度\n\n> 没装 lizard，跳过。`pip install lizard` 后重跑即出。\n\n')
 
-        o.write('## 逐月（season-over-season）\n\n')
-        o.write('| 月份 | commits | 净增 | 毛改动 | 返工率 | 净留存 | 变更熵 | 每commit |\n')
-        o.write('|---|--:|--:|--:|--:|--:|--:|--:|\n')
-        for m, b in by_month:
-            o.write(f"| {m} | {b['commits']} | {b['net']} | {b['gross']} | "
-                    f"{f(b['rework'])} | {f(b['retention'])} | {f(b['entropy'])} | "
-                    f"{f(b['per_commit'], 0)} |\n")
+        gran = {'session': '每个心流一坐', 'commit': '每次 commit',
+                'day': '每天', 'month': '每月'}[by]
+        o.write(f'## 逐桶（{gran}）\n\n')
+        o.write(f'| {col} | commits | 净增 | 毛改动 | 返工率 | 净留存 | 变更熵 |\n')
+        o.write('|---|--:|--:|--:|--:|--:|--:|\n')
+        for label, b in buckets:
+            o.write(f"| {label} | {b['commits']} | {b['net']} | {b['gross']} | "
+                    f"{f(b['rework'])} | {f(b['retention'])} | {f(b['entropy'])} |\n")
 
-def draw_bench(by_month, path, zh):
+def draw_bench(buckets, path, zh, by):
     try:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
     except ImportError:
         return False
-    if not by_month:
+    if not buckets:
         return False
-    L = dict(title='WebPaint 逐月自省 benchmark', ent='变更熵 (0–1)',
-             rew='返工率 (删/增)', x='月份') if zh else \
-        dict(title='WebPaint monthly self-benchmark', ent='change entropy (0–1)',
-             rew='rework ratio (del/add)', x='month')
-    months = [m for m, _ in by_month]
-    ent = [b['entropy'] for _, b in by_month]
-    rew = [b['rework'] for _, b in by_month]
-    xs = list(range(len(months)))
+    unit = {'session': '坐', 'commit': 'commit', 'day': '天', 'month': '月'}[by] if zh else by
+    L = dict(title=f'WebPaint 逐{unit}自省 benchmark（每点=一次{unit}）', ent='变更熵 (0–1)',
+             rew='返工率 (删/增)', x=f'{unit}（时间正序）') if zh else \
+        dict(title=f'WebPaint self-benchmark per {unit}', ent='change entropy (0–1)',
+             rew='rework ratio (del/add)', x=f'{by} (chronological)')
+    labels = [k for k, _ in buckets]
+    ent = [b['entropy'] for _, b in buckets]
+    rew = [b['rework'] for _, b in buckets]
+    xs = list(range(len(labels)))
+    n = len(labels)
+    wide = n > 60   # commit 粒度：几百个点，细线 + 稀疏刻度
 
-    fig, ax1 = plt.subplots(figsize=(12, 5))
-    ax1.bar(xs, rew, color='#e45756', alpha=0.55, label=L['rew'])
+    fig, ax1 = plt.subplots(figsize=(13, 5))
+    ax1.bar(xs, rew, color='#e45756', alpha=0.5,
+            width=1.0 if wide else 0.8, label=L['rew'])
     ax1.set_ylabel(L['rew'], color='#c0392b')
-    ax1.set_xticks(xs)
-    ax1.set_xticklabels(months, rotation=45, ha='right')
     ax1.set_xlabel(L['x'])
     ax2 = ax1.twinx()
-    ax2.plot(xs, ent, color='#4c78a8', lw=2, marker='o', ms=4, label=L['ent'])
+    if wide:
+        ax2.plot(xs, ent, color='#4c78a8', lw=0.8, alpha=0.9, label=L['ent'])
+    else:
+        ax2.plot(xs, ent, color='#4c78a8', lw=2, marker='o', ms=4, label=L['ent'])
     ax2.set_ylabel(L['ent'], color='#2c5985')
     ax2.set_ylim(0, 1)
+    # 稀疏刻度：点太多就只标 ~12 个
+    step = max(1, n // 12)
+    ticks = xs[::step]
+    ax1.set_xticks(ticks)
+    ax1.set_xticklabels([labels[i] for i in ticks], rotation=45, ha='right')
     ax1.set_title(L['title'])
     ax1.grid(True, alpha=0.3)
     fig.tight_layout()
@@ -322,6 +370,10 @@ def main():
     ap.add_argument('--branch', default='HEAD', help='ref（默认当前 HEAD）')
     ap.add_argument('--out', default=None, help='输出目录（默认 docs/reports/loc/）')
     ap.add_argument('--width', type=int, default=80, help='概述单行截断宽度')
+    ap.add_argument('--by', choices=['session', 'commit', 'day', 'month'],
+                    default='session', help='benchmark 聚桶粒度（默认 session=心流一坐）')
+    ap.add_argument('--gap', type=int, default=120,
+                    help='session 断坐间隔（分钟，默认 120）；只在 --by session 时有意义')
     ap.add_argument('--no-lizard', action='store_true', help='跳过静态复杂度（不装 lizard）')
     args = ap.parse_args()
 
@@ -346,12 +398,12 @@ def main():
 
     # benchmark
     overall = bench_bucket(commits)
-    by_month = bench_by_month(commits)
+    buckets = bench_buckets(commits, args.by, args.gap)
     static = static_metrics(root, not args.no_lizard)
     bench_md = os.path.join(out, 'benchmark.md')
     bench_png = os.path.join(out, 'benchmark.png')
-    write_benchmark(overall, by_month, static, bench_md)
-    drew_b = draw_bench(by_month, bench_png, zh)
+    write_benchmark(overall, buckets, static, bench_md, args.by)
+    drew_b = draw_bench(buckets, bench_png, zh, args.by)
 
     print(f'✓ {len(commits)} commits，现 ≈ {commits[-1]["total"]} 行')
     print(f'  返工率 {overall["rework"]:.2f} · 净留存 {overall["retention"]:.2f} · '
