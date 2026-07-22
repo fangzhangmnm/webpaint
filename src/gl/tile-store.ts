@@ -12,7 +12,7 @@
 // 不在本模块：判断「tile 变全透明该回收」需扫像素/占用查询，是 commit/TileResidency 的策略，
 //   本模块只提供 freeTile 原语（见 §4.3 per-tile delta、§4.2 冷层逐出）。
 
-import { TILE_SIZE, tileKey } from "./tile-geometry.ts";
+import { TILE_SIZE, tileKey } from "../tiles/tile-geometry.ts";
 
 // 单 tile：网格坐标 + 它占的池 slice 索引。像素本体在 backend 的 slice 里，不在此。
 export interface Tile {

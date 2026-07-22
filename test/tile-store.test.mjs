@@ -4,7 +4,7 @@ import { describe, it, assert } from "./runner.mjs";
 import {
   TILE_SIZE, tilesAcross, tilesDown, tileCount,
   tileKey, tileCoord, tileDocOrigin, tileRangeForRect, forEachTileInRect,
-} from "../src/gl/tile-geometry.ts";
+} from "../src/tiles/tile-geometry.ts";
 import { TilePool, LayerTileMap, TILE_BYTES } from "../src/gl/tile-store.ts";
 
 // ---- fake backend：内存存每 slice 的像素，验上传/读回 round-trip ----

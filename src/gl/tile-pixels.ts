@@ -12,7 +12,7 @@
 // 纯核心（putRegion/getRegion/sampleAt/contentBounds/snapshot…）零 DOM 依赖 → node 全测。
 // Canvas2D facade 需浏览器 → Chromium golden 验。
 
-import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "./tile-geometry.ts";
+import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "../tiles/tile-geometry.ts";
 
 const TILE_RGBA = TILE_SIZE * TILE_SIZE * 4;
 

@@ -5,7 +5,7 @@
 //   ② docTreeToComp：doc 节点树（Layer|LayerGroup）→ CompNode 树（纯翻译，node 可测）。
 // 用**结构化类型**接 doc 节点（不 import doc.ts）→ gl/ 保持独立深模块；board 传结构兼容的真节点即可。
 
-import { tilesAcross } from "./tile-geometry.ts";
+import { tilesAcross } from "../tiles/tile-geometry.ts";
 import { LayerTileMap } from "./tile-store.ts";
 import type { TilePool } from "./tile-store.ts";
 import { TileIndexTexture } from "./tile-index.ts";

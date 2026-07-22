@@ -11,7 +11,7 @@
 //
 // 验证边界：纯 gl.*，node no-op → 由 Playwright 真 Chromium WebGL2 smoke 验上传→读回 round-trip。
 
-import { TILE_SIZE } from "./tile-geometry.ts";
+import { TILE_SIZE } from "../tiles/tile-geometry.ts";
 import { TILE_BYTES } from "./tile-store.ts";
 import type { TileBackend } from "./tile-store.ts";
 import type { GLContext } from "./gl-context.ts";

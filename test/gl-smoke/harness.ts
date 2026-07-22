@@ -9,7 +9,7 @@
 import { GLContext } from "../../src/gl/gl-context.ts";
 import { GLTileBackend } from "../../src/gl/tile-backend-gl.ts";
 import { TilePool, LayerTileMap, TILE_BYTES } from "../../src/gl/tile-store.ts";
-import { TILE_SIZE } from "../../src/gl/tile-geometry.ts";
+import { TILE_SIZE } from "../../src/tiles/tile-geometry.ts";
 import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { TileIndexTexture } from "../../src/gl/tile-index.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";

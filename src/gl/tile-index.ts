@@ -5,7 +5,7 @@
 // 大小极小（2K doc = 8×8 个 float）→ 整图重传成本可忽略；commit 后单 tile 变更也整传。
 // 验证：纯 gl.*，node no-op → smoke harness 多 tile 自 diff（跨 tile 内容 vs Canvas2D 整图）。
 
-import { tilesAcross, tilesDown } from "./tile-geometry.ts";
+import { tilesAcross, tilesDown } from "../tiles/tile-geometry.ts";
 import type { LayerTileMap } from "./tile-store.ts";
 import type { GLContext } from "./gl-context.ts";
 
