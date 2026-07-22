@@ -23,12 +23,12 @@ interface LayerLike {
   bboxX: number;
   bboxY: number;
   ctx: Ctx;
-  snapshot(): LayerSnapLike;
+  snapshotImageData(): LayerSnapLike;
   putImageData(docX: number, docY: number, img: ImageData): void;
   editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void;
 }
 
-// Layer.snapshot() 产物（applyMaskPostStroke 的 preSnap/afterSnap 形状）。
+// Layer.snapshotImageData() 产物（applyMaskPostStroke 的 preSnap/afterSnap 形状——CPU 算法的只读物化，非 undo 包）。
 interface LayerSnapLike {
   bboxX: number;
   bboxY: number;
@@ -224,7 +224,7 @@ export class Selection {
   // per-pixel：选区外取 pre，选区内取 after。brush/eraser 都对（按 mask 选 pre/after，不是 composite）。
   applyMaskPostStroke(layer: LayerLike, preSnap: LayerSnapLike | null): void {
     if (!preSnap) return;
-    const afterSnap = layer.snapshot();
+    const afterSnap = layer.snapshotImageData();
     const px0 = preSnap.bboxX, py0 = preSnap.bboxY;
     const px1 = px0 + preSnap.bboxW, py1 = py0 + preSnap.bboxH;
     const ax0 = afterSnap.bboxX, ay0 = afterSnap.bboxY;

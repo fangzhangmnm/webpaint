@@ -17,7 +17,7 @@
 //     layer, settings,
 //     lastX, lastY,
 //     dirty,
-//     startSnap: layer.snapshot(),       // { bboxX, bboxY, bboxW, bboxH, imageData }
+//     startSnap: layer.snapshotImageData(),  // { bboxX, bboxY, bboxW, bboxH, imageData }（只读物化，非 undo 包）
 //     dispField: {                       // 和 layer.bbox 同步（ensureBbox 后 _regrow）
 //       bboxX, bboxY, bboxW, bboxH,
 //       data: Float32Array(2 * W * H),   // 交错 [dx0,dy0,dx1,dy1,...]
@@ -55,6 +55,7 @@ interface DispField {
   data: Float32Array;
 }
 
+// Layer.snapshotImageData() 产物（CPU 算法读者的只读物化——不是 undo 包，别拿去 restore）。
 interface LayerSnapshot {
   bboxX: number;
   bboxY: number;
@@ -112,8 +113,8 @@ export class LiquifyEngine {
       lastX: x,
       lastY: y,
       dirty: null,
-      // startSnap = layer 当前像素的快照（笔触全程只读源头）
-      startSnap: layer.snapshot(),
+      // startSnap = layer 当前像素的只读物化（笔触全程只读源头）
+      startSnap: layer.snapshotImageData(),
       // dispField 和 layer bbox 对齐；空层 bbox=0 时占位 1×1 全 0
       dispField: {
         bboxX: layer.bboxX, bboxY: layer.bboxY,

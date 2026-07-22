@@ -17,6 +17,7 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // ctx 绑入：core 单例
 let editMode: AppContext["editMode"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
+let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
 // 命令 = 拥有它的模块的接口（显式 import，不经 ctx）
 import { setMenuOpen } from "./settings-menu.ts";
 import { setAdjustOpen } from "./filters-adjust.ts";
@@ -32,8 +33,10 @@ function _captureDocBefore() {
 function _captureDocAfter() {
   return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
 }
-function _pushDocTransform(before: unknown, after: unknown, label: string) {
-  history.push({ type: "docTransform", before, after });   // history.push 同步派 wp:histchange → 编辑门已标游标+云脏（无需再标）
+type DocSnap = { doc: ReturnType<AppContext["doc"]["snapshotAll"]>; viewport: Record<string, number> };
+function _pushDocTransform(before: DocSnap, after: DocSnap, label: string) {
+  // 事务型 pre-applied：变换已在两次快照之间跑完，首跑 forward 只收下 undo 包。
+  history.run(workpiece, ops.docTransform, { before, after });   // run 同步派 wp:histchange → 编辑门已标游标+云脏（无需再标）
   if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   board.invalidateAll();
   bumpDoc();
@@ -156,7 +159,7 @@ function _closeOffsetDialog() {
 }
 
 export function initDocOps(ctx: AppContext) {
-  ({ editMode, doc, board, history, setStatus,
+  ({ editMode, doc, board, history, setStatus, workpiece, ops,
      _suppressTransientPanels, _restoreTransientPanels } = ctx);
 
   // 裁到选区 ----

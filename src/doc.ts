@@ -11,7 +11,7 @@
 
 import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
-import { LayerPixels, materialize, editRegion as editPixels, replaceFromCanvas as replacePixels } from "./gl/tile-pixels.ts";
+import { LayerPixels, materialize, editRegion as editPixels, replaceFromCanvas as replacePixels, disposePixelsSnapshot, type PixelsSnapshot } from "./gl/tile-pixels.ts";
 
 export const DEFAULT_DOC_SIZE = 2048;
 
@@ -25,18 +25,16 @@ type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 // 树节点 = 叶（Layer）| 组（LayerGroup）。
 type Node = Layer | LayerGroup;
 
-// Layer.snapshot() / restoreFromSnapshot() 共用的像素快照形状。
-interface LayerSnap {
-  bboxX: number;
-  bboxY: number;
-  bboxW: number;
-  bboxH: number;
-  imageData?: ImageData | null;
-  bitmap?: ImageBitmap | null;   // blob 解码路径 restoreFromSnapshot 收 ImageBitmap（pixel-edit PixelSnap 同形）
+// Layer.snapshot() / restoreFromSnapshot() 共用的像素快照：v0.4.5 起 = **tile 句柄共享**（零拷贝
+// undo 包，池的压缩管管内存）。用完必须 disposeLayerSnap（js 无析构）。CPU 算法读者（液化/选区
+// mask）要 ImageData 的走 Layer.snapshotImageData()——那是只读物化，不是 undo 包。
+export interface LayerSnap { pixels: PixelsSnapshot }
+export function disposeLayerSnap(snap: LayerSnap | null | undefined): void {
+  if (snap) disposePixelsSnapshot(snap.pixels);
 }
 
-// layerSpec() 产物（undo 入栈 / insertLayerAt 复位用）。
-interface LayerSpecShape {
+// layerSpec() 产物（undo 入栈 / insertLayerAt 复位用）。snap = 句柄快照（同上，需 dispose）。
+export interface LayerSpecShape {
   id: number;
   name: string;
   visible?: boolean;
@@ -44,13 +42,18 @@ interface LayerSpecShape {
   mode?: string;
   clippingMask?: boolean;
   lockAlpha?: boolean;
-  bboxX?: number;
-  bboxY?: number;
-  bboxW?: number;
-  bboxH?: number;
-  imageData?: ImageData | null;
-  bitmap?: ImageBitmap | null;
-  blob?: Blob | null;
+  snap?: LayerSnap | null;
+}
+export function disposeLayerSpec(spec: LayerSpecShape | null | undefined): void {
+  if (spec?.snap) disposeLayerSnap(spec.snap);
+}
+
+// 深快照的句柄释放（DocTransformOp 驱逐/清栈时用；组递归，叶放 snap）。
+export function disposeDeepSnapNodes(nodes: DeepSnapNode[]): void {
+  for (const n of nodes) {
+    if (n.isGroup) disposeDeepSnapNodes(n.children || []);
+    else disposeLayerSnap(n.snap);
+  }
 }
 
 // snapshotTree() / restoreTree() 的结构记录（叶存活引用，组存元信息 + children）。
@@ -69,7 +72,7 @@ type TreeSnapNode =
     };
 
 // snapshotAll() / _nodeSnap() 的深快照记录（叶含像素 snap，组含 children specs）。
-type DeepSnapNode =
+export type DeepSnapNode =
   | {
       isGroup: false;
       id: number;
@@ -213,25 +216,24 @@ export class Layer {
     this._invalidate();
   }
 
-  // undo 快照：仍出 imageData + tight bbox 形状（pixel-edit / layer-undo / save 不改；tile-delta = 切片③）。
+  // undo 快照：句柄共享，零拷贝（v0.4.5）。归属交给 caller，用完 disposeLayerSnap。
   snapshot(): LayerSnap {
+    return { pixels: this.pixels.snapshot() };
+  }
+
+  // 还原快照（装 acquire 副本；快照可反复用，最终仍由 owner dispose）。
+  restoreFromSnapshot(snap: LayerSnap) {
+    this.pixels.restore(snap.pixels);
+    this._invalidate();
+  }
+
+  // CPU 算法读者的**只读物化**（液化 startSnap / 选区 applyMaskPostStroke）：紧 bbox + ImageData。
+  //   不是 undo 包（别拿去 restore；undo 走 snapshot() 句柄）。空层 → imageData:null。
+  snapshotImageData(): { bboxX: number; bboxY: number; bboxW: number; bboxH: number; imageData: ImageData | null } {
     const m = materialize(this.pixels, true);   // tight
     if (!m) return { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
     const ctx = (m.canvas as HTMLCanvasElement).getContext("2d", { willReadFrequently: true }) as Ctx;
     return { bboxX: m.ox, bboxY: m.oy, bboxW: m.canvas.width, bboxH: m.canvas.height, imageData: ctx.getImageData(0, 0, m.canvas.width, m.canvas.height) };
-  }
-
-  // 还原快照：清空 + 按 bbox 位置切片回 tile。
-  restoreFromSnapshot(snap: LayerSnap) {
-    this.pixels.clear();
-    if (snap.bboxW > 0 && snap.bboxH > 0) {
-      if (snap.imageData) {
-        this.pixels.putRegion(snap.bboxX, snap.bboxY, snap.bboxW, snap.bboxH, snap.imageData.data);
-      } else if (snap.bitmap) {
-        replacePixels(this.pixels, snap.bitmap as CanvasImageSource, snap.bboxX, snap.bboxY, snap.bboxW, snap.bboxH);
-      }
-    }
-    this._invalidate();
   }
 }
 
@@ -493,8 +495,8 @@ export class PaintDoc {
     const removingLeaves = countLeaves([loc.node]);
     if (!allowEmpty && countLeaves(this.layers) - removingLeaves < 1) return false;
     loc.parent.splice(loc.index, 1);
-    // v0.4：tile 句柄需显式释放（undo 走 spec 深拷贝重建，不复用此对象——见 layer-undo removeLayer）。
-    eachLeaf([loc.node], (l) => l.pixels.dispose());
+    // 像素句柄的释放归 caller/operator：RemoveLayerRecordOp 捕快照后显式 dispose；
+    // treeStructure（删组）持**活引用**进 undo，绝不能在这里 dispose（会把 undo 恢复出空层）。
     if (!findNodeById(this.layers, this.activeId)) {   // active 被删（或在被删组内）→ 重选末叶
       const leaves = flattenLeaves(this.layers);
       this.activeId = leaves.length ? leaves[leaves.length - 1].id : null;
@@ -506,12 +508,11 @@ export class PaintDoc {
   // 模型层拥有「层 ↔ spec」的形状（undo 入栈、mergeDown、insertLayerAt 共用）。
   // blob 留 null：异步压缩是 undo 编排的事，由 caller 填。
   layerSpec(L: Layer): LayerSpecShape {
-    const snap = L.snapshot();
     return {
       id: L.id, name: L.name, visible: L.visible,
       opacity: L.opacity, mode: L.mode,
-      bboxX: snap.bboxX, bboxY: snap.bboxY, bboxW: snap.bboxW, bboxH: snap.bboxH,
-      imageData: snap.imageData, blob: null,
+      clippingMask: L.clippingMask, lockAlpha: L.lockAlpha,
+      snap: L.snapshot(),
     };
   }
 
@@ -609,6 +610,7 @@ export class PaintDoc {
     // 链内合并：结果仍剪裁到同一基底；基底 case：结果是普通基底层（非剪裁）。
     under.clippingMask = resultClipping;
     this.removeLayer(L.id);
+    L.pixels.dispose();   // activeSpec.snap 已持句柄副本；被合并层对象就此退场，释放它自己那份
     const underAfter = under.snapshot();
     this.setActiveById(under.id);
     return {
@@ -641,12 +643,7 @@ export class PaintDoc {
     if (typeof spec.mode === "string") L.mode = spec.mode;
     if (typeof spec.clippingMask === "boolean") L.clippingMask = spec.clippingMask;
     if (typeof spec.lockAlpha === "boolean") L.lockAlpha = spec.lockAlpha;
-    L.restoreFromSnapshot({
-      bboxX: (spec.bboxX as number) | 0, bboxY: (spec.bboxY as number) | 0,
-      bboxW: (spec.bboxW as number) | 0, bboxH: (spec.bboxH as number) | 0,
-      imageData: spec.imageData || null,
-      bitmap: spec.bitmap || null,
-    });
+    if (spec.snap) L.restoreFromSnapshot(spec.snap);
     const i = Math.max(0, Math.min(index, parent.length));
     parent.splice(i, 0, L);
     // 防止 _layerIdCounter 撞到一个 spec.id（避免后续 addLayer 复用 id）
@@ -695,17 +692,15 @@ export class PaintDoc {
     if (!loc) return { ok: false, reason: "missing" };
     const src = loc.node;
     if (src.isGroup) return { ok: false, reason: "missing" };   // 组复制留 P2（深拷整子树）
-    const snap = src.snapshot();   // getImageData → 全新像素 buffer（不与源共享）
+    const snap = src.snapshot();   // 句柄共享（tile 只读 + copy-on-write：编辑任一方才分叉）→ 复制瞬时零拷贝
     const L = new Layer({ width: this.width, height: this.height, name: `${src.name} 副本`, empty: true });
     L.visible = src.visible;
     L.opacity = src.opacity;
     L.mode = src.mode;
     L.clippingMask = src.clippingMask;
     L.lockAlpha = src.lockAlpha;
-    L.restoreFromSnapshot({
-      bboxX: snap.bboxX, bboxY: snap.bboxY, bboxW: snap.bboxW, bboxH: snap.bboxH,
-      imageData: snap.imageData || null,
-    });
+    L.restoreFromSnapshot(snap);
+    disposeLayerSnap(snap);
     loc.parent.splice(loc.index + 1, 0, L);   // 源**同级**之上
     this.activeId = L.id;
     // loc = 新层在**同级**的插入位（撤销 insertLayerAt(parentId,index) 用；组内也精确）。
@@ -808,18 +803,6 @@ export class PaintDoc {
     const L = this.activeLayer;
     if (!L || L.isGroup) return;
     L.clearAll();
-  }
-
-  // 整张 doc 的像素 dump（旧 API 兼容；新代码直接用 Layer.snapshot()）。
-  snapshotActiveLayer() {
-    const L = this.activeLayer;
-    if (!L) return null;
-    return (L as Layer).snapshot();
-  }
-  restoreActiveLayer(snap: LayerSnap | null) {
-    const L = this.activeLayer;
-    if (!L || !snap) return;
-    (L as Layer).restoreFromSnapshot(snap);
   }
 
   // v110: doc 整状态 snapshot（给 crop / resample 等 doc-level transform 的 undo 用）

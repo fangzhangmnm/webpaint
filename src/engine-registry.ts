@@ -21,7 +21,7 @@
 //   usesResolvedBrush _move 是否取 getResolvedBrush() 喂四件套平滑（液化 / filterBrush 传 null）。
 //   finalize          endStroke 时是否按选区 applyMaskPostStroke
 //                     （filterBrush 在 begin 已吃 selection，故 false）。
-//   historyType       PixelEdit.begin 的事务类型（handler 见 pixel-edit.js）。
+//   historyType       pixelHistory.begin 的事务标签（workpiece/pixel-tx）。
 export interface PixelStrokeSpec {
   engineKey: string;
   coalesceLatest: boolean;

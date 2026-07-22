@@ -15,6 +15,7 @@ import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";
 
 import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式 import）
 import { requireEditableLeaf } from "./editable-leaf.ts";
+import { disposeLayerSnap, type LayerSnap } from "./doc.ts";
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";
 
@@ -28,18 +29,21 @@ interface FilterLike {
   boundaryModes?: { id: string; title: string }[];
 }
 // adjust panel 操作的 doc 活层（doc.js 未类型化 → 只描述用到的）。
-interface AdjustLayer { id: number; name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; ctx: CanvasRenderingContext2D; snapshot(): unknown; replaceFromCanvas(src: CanvasImageSource, ox: number, oy: number, w: number, h: number): void; }
+interface AdjustLayer { id: number; name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; ctx: CanvasRenderingContext2D; snapshot(): LayerSnap; replaceFromCanvas(src: CanvasImageSource, ox: number, oy: number, w: number, h: number): void; }
 // editMode.enterTransient 的 apply/abort（edit-mode.js 未类型化默认 null → 调用处断言真签名）。
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 // filter region preview 态（surrogate canvas + 提取的源/掩码数据）。
 interface AdjustState {
   Filter: FilterLike; active: AdjustLayer; params: Record<string, unknown>;
-  beforeSnap: unknown; sur: HTMLCanvasElement; surCtx: CanvasRenderingContext2D;
+  // beforeSnap = tile 句柄快照（undo 包用）：apply 时所有权交给 pixels op；cancel 时须 disposeLayerSnap。
+  // 预览数学不读它 —— 预览用的源像素是 surrogate canvas 的 srcImg（getImageData 物化）。
+  beforeSnap: LayerSnap; sur: HTMLCanvasElement; surCtx: CanvasRenderingContext2D;
   srcImg: ImageData; maskData: Uint8ClampedArray | null; _rafId: number;
   picker: FilterLike[] | null;
 }
 
 let state: AppContext["state"], editMode: AppContext["editMode"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"];
+let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
 let setStatus: AppContext["setStatus"], store: AppContext["store"], updateSaveStatus: AppContext["updateSaveStatus"];
 let _bringPanelTop: AppContext["_bringPanelTop"];
 let _suppressTransientPanels: AppContext["_suppressTransientPanels"], _restoreTransientPanels: AppContext["_restoreTransientPanels"];
@@ -178,9 +182,12 @@ function _closeFilterPanel(applied: boolean) {
   if (applied) {
     // 烤进 layer（surrogate 已是最终结果，整体替换图层像素 → 切片回 tile）
     L.replaceFromCanvas(_adjustState.sur, L.bboxX, L.bboxY, _adjustState.sur.width, _adjustState.sur.height);
-    const after = L.snapshot();
-    history.push({ type: "stroke", layerId: L.id, before: _adjustState.beforeSnap, after, beforeBlob: null, afterBlob: null });   // history.push 同步派 wp:histchange → 编辑门已标
+    // 事务型 pre-applied 像素 op：beforeSnap 所有权交给 op（勿 dispose）。run 同步派 wp:histchange → 编辑门已标。
+    history.run(workpiece, ops.pixels, { layerId: L.id, _initialBefore: _adjustState.beforeSnap });
     setStatus(t("mi.filterApplied", { title: _adjustState.Filter.title, name: L.name }));
+  } else {
+    // cancel/abort：层从未被改（预览全在 surrogate 上），beforeSnap 没交给任何 op → 这里释放句柄。
+    disposeLayerSnap(_adjustState.beforeSnap);
   }
   _adjustState = null;
   els.adjustPanel.classList.add("hidden");
@@ -360,7 +367,7 @@ function _renderFilterBrushToolbar() {
 }
 
 export function initFiltersAdjust(ctx: AppContext) {
-  ({ state, editMode, doc, board, history, setStatus, store, updateSaveStatus,
+  ({ state, editMode, doc, board, history, setStatus, store, updateSaveStatus, workpiece, ops,
      _bringPanelTop, _suppressTransientPanels, _restoreTransientPanels } = ctx);
 
   els.topAdjustBtn.addEventListener("click", (e: Event) => {

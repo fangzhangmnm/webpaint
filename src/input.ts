@@ -30,25 +30,26 @@ import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./pointer-gesture.ts";
 import { assignRole, effectiveTool, toolToRole } from "./pointer-route.ts";
 import { inputSmooth } from "./stroke-input-smooth.ts";
-import { compressPixelSnap, applyPixelSnap } from "./pixel-edit.ts";
 import { SMOOTH } from "./smooth-config.ts";
 import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { UndoStack, UndoEntry, UndoHandler } from "./history.ts";
-import type { PixelEdit } from "./pixel-edit.ts";
+import type { UndoHistory } from "./workpiece/undo-history.ts";
+import type { Workpiece } from "./workpiece/workpiece.ts";
+import type { OperatorRegistry } from "./workpiece/operators.ts";
+import type { PixelEdits, PixelTx as PixelTxClass } from "./workpiece/pixel-tx.ts";
+import type { LayerSnap } from "./doc.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Selection } from "./selection.ts";
 
 // ---- 引擎真类型已全部 .ts 化，直接 import（见各引擎模块）。本文件仅保留以下接缝别名/最小壳。----
-// doc 现取 PaintDoc 真类型（board/lasso/pixel-edit 都吃它）。
+// doc 现取 PaintDoc 真类型（board/lasso 都吃它）。
 type Doc = PaintDoc;
-// 共享 UndoStack（history.ts）。
-type History = UndoStack;
-// PixelEdit 实例（pixel-edit.ts）。begin() 回的事务句柄无 named export → 取 ReturnType。
-type PixelHistory = PixelEdit;
-type PixelTx = ReturnType<PixelEdit["begin"]>;
+// 共享 UndoHistory（workpiece/undo-history.ts；v0.4.5 配额制 operator 栈）。
+type History = UndoHistory;
+type PixelHistory = PixelEdits;
+type PixelTx = PixelTxClass;
 // liquify settings：引擎的 LiquifySettings 未 export；input 只用 mode/size/strength，
 //   bleed 等其余字段引擎内部从 settings 取 → 用 ResolvedBrush 同惯例的最小壳 + unknown 兜底。
 interface LiquifySettings { mode: string; size: number; strength: number; bleed?: string; }
@@ -65,13 +66,11 @@ interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; i
 
 // 本文件注册的两类 handler 的 entry shape（lasso 复合像素 + 选区变化）。
 //   lasso entry 由 floating-transform.commit 产；selectionChange 由 lasso.endPath/setSelection 产。
-type PixelSnapRef = Parameters<typeof applyPixelSnap>[2];
-type BlobRef = Parameters<typeof applyPixelSnap>[3];
-interface LassoEntry extends UndoEntry {
-  layers: Array<{ layerId: number; before: PixelSnapRef; after: PixelSnapRef; beforeBlob: BlobRef; afterBlob: BlobRef }>;
+interface LassoEntry {
+  layers: Array<{ layerId: number; before: LayerSnap }>;
   prevSelection?: Selection | null;
 }
-interface SelectionChangeEntry extends UndoEntry { before: Selection | null; after: Selection | null; }
+interface SelectionChangeEntry { before?: Selection | null; after?: Selection | null; }
 
 // pointer 记录：down 时建立、move/up 累积手感状态（平滑 / 压感 / 死区 / long-press）。
 interface PointerRec {
@@ -125,6 +124,8 @@ interface InputOpts {
   onColorSampled?: (hex: string) => void;
   status?: (msg: string) => void;
   history?: History | null;
+  workpiece?: Workpiece | null;
+  ops?: OperatorRegistry | null;
   pixelHistory?: PixelHistory | null;
   isContentReplacing?: () => boolean;   // N10：云端快进正在换画布内容时为 true → draw-role 起笔降级（同 !canDraw 路径）
 }
@@ -218,8 +219,7 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   { combo: "Escape",           desc: "sc.deselect", category: "sc.cat.lasso",
     when: _hasSelectionIdle,
     run: (i) => {
-      const entry = i.lasso.setSelection(null);
-      if (entry && i.history) i.history.push(entry);
+      i._pushSelEntry(i.lasso.setSelection(null));
       i.board.invalidateAll();
     },
   },
@@ -332,6 +332,8 @@ export class InputController {
   _lastTap: TapRef | null;
   _lastPenActivity: number = -Infinity;   // 最近笔尖落/移/抬时刻 (ms)。掌触 tap 门用
   history: History | null;
+  workpiece: Workpiece | null;
+  ops: OperatorRegistry | null;
   pixelHistory: PixelHistory | null;
   _activeStroke: ActiveStroke | null = null;
 
@@ -376,40 +378,12 @@ export class InputController {
     // - undo: index--, putImageData(chain[index])
     // - redo: index++, putImageData(chain[index])
     this._lastTap = null;
-    // history: 共享 UndoStack 实例（由 app.js 创建并注入）。
+    // history: 共享 UndoHistory（app.js 创建注入）+ workpiece + operator 注册表。
+    // v0.4.5：不再注册 handler——lasso/selectionChange 走 ops.pixels/ops.selection（对称 swap，全同步）。
     this.history = opts.history || null;
-    // pixelHistory: PixelEdit 实例（app.js 注入）。纯像素三件套的事务 + "stroke"/"liquify"
-    // handler 由它注册（见 pixel-edit.js）。input 这里只留 lasso / selectionChange。
+    this.workpiece = opts.workpiece || null;
+    this.ops = opts.ops || null;
     this.pixelHistory = opts.pixelHistory || null;
-    if (this.history) {
-      // 套索 transform commit 是 raster snap：lift + transform + commit 整体作为单步 undo
-      // v119: commit 时清了 selection，undo 时把它恢复回来
-      // 多层 entry：e.layers = [{layerId, before, after, beforeBlob, afterBlob}]（组变换 = 多层；单层 = 1 项）。
-      this.history.registerHandler("lasso", {
-        undo: (e: LassoEntry) => {
-          for (const L of e.layers) applyPixelSnap(this.doc, L.layerId, L.before, L.beforeBlob, this.board);
-          if (e.prevSelection !== undefined) {
-            this.doc.selection = e.prevSelection;
-            this.board.invalidateAll();
-          }
-        },
-        redo: (e: LassoEntry) => {
-          for (const L of e.layers) applyPixelSnap(this.doc, L.layerId, L.after, L.afterBlob, this.board);
-          if (e.prevSelection !== undefined) {
-            this.doc.selection = null;       // redo 后再清
-            this.board.invalidateAll();
-          }
-        },
-        refsLayer: (e: LassoEntry, id: number) => e.layers.some((L) => L.layerId === id),
-      } satisfies UndoHandler);
-      // 选区变化（lasso 圈 / 取消选区 / 反选 等）也进 undo，但不动像素
-      this.history.registerHandler("selectionChange", {
-        undo: (e: SelectionChangeEntry) => { this.doc.selection = e.before; this.board.invalidateAll(); },
-        redo: (e: SelectionChangeEntry) => { this.doc.selection = e.after;  this.board.invalidateAll(); },
-        // 选区不属于某一 layer；refsLayer 永远 false（删图层不影响选区 entry）
-        refsLayer: () => false,
-      } satisfies UndoHandler);
-    }
     // 把 doc 引用给 lasso，便于直接操作 doc.selection
     this.lasso.setDoc(this.doc);
     this._bind();
@@ -981,7 +955,7 @@ export class InputController {
       try {
         const entry = this.lasso.endPath(this.doc.getFloodSourceLayer());
         if (entry) {
-          if (this.history) this.history.push(entry);
+          this._pushSelEntry(entry);
           this.board.invalidateAll();
         } else {
           // v125: rasterize 后全在 doc 外 → status 提示，不静默
@@ -1005,7 +979,7 @@ export class InputController {
           this.lasso.beginPath(dx, dy);
           const entry = this.lasso.endPath(this.doc.getFloodSourceLayer());
           if (entry) {
-            if (this.history) this.history.push(entry);
+            this._pushSelEntry(entry);
             this.board.invalidateAll();
           } else {
             this.status("魔术棒：tap 在线 / 边界上，没选到");
@@ -1018,8 +992,7 @@ export class InputController {
         // v134 (user：「自由/矩形/圆 单击在新建选区模式下 = 取消当前选区」)
         //   add / subtract / intersect 模式 = 防误触静默（user 还想加，但 tap 不应改）
         if (this.lasso.getSetOpMode() === "new" && this.lasso.hasSelection()) {
-          const entry = this.lasso.setSelection(null);
-          if (entry && this.history) this.history.push(entry);
+          this._pushSelEntry(this.lasso.setSelection(null));
           this.board.invalidateAll();
           this.status("已取消选区");
         }
@@ -1027,17 +1000,23 @@ export class InputController {
     }
   }
   _commitLasso() {
-    const entry = this.lasso.commit();
+    const entry = this.lasso.commit() as LassoEntry | null;
     if (!entry) return;
-    if (this.history) this.history.push(entry);
-    this.board.invalidateAll();
-    // 各层 before/after 懒压缩成 blob（多层 entry：组变换 = 多层）。
-    for (const L of entry.layers) {
-      // L 来自未类型化的 lasso entry（beforeBlob/afterBlob 运行时收 Blob）；在 seam 处窄化赋值目标。
-      const Lb = L as { beforeBlob: Blob | null; afterBlob: Blob | null };
-      compressPixelSnap(L.before, (blob: Blob | null) => { Lb.beforeBlob = blob; });
-      compressPixelSnap(L.after,  (blob: Blob | null) => { Lb.afterBlob  = blob; });
+    // lift+transform+commit 整体一个 checkpoint：多层像素 swap + 选区清空，compound 封整点。
+    if (this.history && this.workpiece && this.ops) {
+      const r = this.history.compound(this.workpiece, () => {
+        for (const L of entry.layers) {
+          const st = this.history!.run(this.workpiece!, this.ops!.pixels, { layerId: L.layerId, _initialBefore: L.before }, { checkpoint: false });
+          if (!st.ok) throw new Error(st.msg);
+        }
+        if (entry.prevSelection !== undefined) {
+          const st = this.history!.run(this.workpiece!, this.ops!.selection, { _initialBefore: { v: entry.prevSelection ?? null } }, { checkpoint: false });
+          if (!st.ok) throw new Error(st.msg);
+        }
+      });
+      if (!r.ok) this.status("变换提交出错：" + (r.msg || "?"));
     }
+    this.board.invalidateAll();
   }
   _abortLasso() {
     // floating（变换中）→ 还原 pre-snapshot
@@ -1246,13 +1225,19 @@ export class InputController {
     this.undo();
   }
   undo() {   // 纯 history undo（transient 取消走 ctrlZ → editMode.abortTransient）
-    if (this.history) this.history.undo();
+    if (this.history && this.workpiece) this.history.undo(this.workpiece);
   }
   redo() {
     if (this.editMode && this.editMode.isTransient()) return;        // transient 期间禁 redo
-    if (this.history) this.history.redo();
+    if (this.history && this.workpiece) this.history.redo(this.workpiece);
   }
   clearHistory() { if (this.history) this.history.clear(); }
+
+  // 选区变化 entry（lasso.setSelection/endPath 产，选区已应用）→ ops.selection 事务型入栈。
+  _pushSelEntry(entry: SelectionChangeEntry | null | undefined) {
+    if (!entry || !this.history || !this.workpiece || !this.ops) return;
+    this.history.run(this.workpiece, this.ops.selection, { _initialBefore: { v: entry.before ?? null } });
+  }
 
   // ---- 防误触 / ghost pointer 清理 ----
   // iOS 在 PalmRejection / 系统 gesture 抢断 / 应用切换时偶尔不发 pointerup。
@@ -1304,7 +1289,7 @@ export class InputController {
   }
 }
 
-// compressPixelSnap / applyPixelSnap 已搬到 pixel-edit.js（顶部 import 复用，lasso 复合 entry 也用）。
+// （v0.4.5：compressPixelSnap/applyPixelSnap 随 pixel-edit 退场——快照底座换 tile 句柄后无压缩舞蹈。）
 
 // 抬笔瞬间 e.pressure === 0 → 沿用 rec.lastP，不退回 0.5（v4）。
 // 起手 warmup 也 0 但 lastP 还没 → 退到 **0.2**（v6，原本 0.5 → 起手鼓 bulb）。

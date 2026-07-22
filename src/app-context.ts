@@ -16,8 +16,10 @@ import type { PaintDoc } from "./doc.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { UndoStack } from "./history.ts";
-import type { PixelEdit } from "./pixel-edit.ts";
+import type { UndoHistory } from "./workpiece/undo-history.ts";
+import type { Workpiece } from "./workpiece/workpiece.ts";
+import type { OperatorRegistry } from "./workpiece/operators.ts";
+import type { PixelEdits } from "./workpiece/pixel-tx.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 
 // ---- 反应式 RAM 态（editor-state.ts 的 state/dialReactive；此处描述消费方读到的字段）----
@@ -100,8 +102,10 @@ export interface AppContext {
   doc: PaintDoc;
   board: Board;
   input: InputController;
-  history: UndoStack;
-  pixelHistory: PixelEdit;
+  history: UndoHistory;          // v0.4.5：配额制 undo（workpiece/undo-history）
+  workpiece: Workpiece;          // 文档聚合根（operator 的作用对象；undo/redo/run 都要传它）
+  ops: OperatorRegistry;         // document-operator 注册表（workpiece/operators）
+  pixelHistory: PixelEdits;      // 像素编辑事务门面（workpiece/pixel-tx；begin(layer,label) 形状不变）
   rack: RackHandle;
 
   // 同步存储 / HUD
@@ -116,7 +120,7 @@ export interface AppContext {
   updateZoomLabel: () => void;
   updateNewerBanner: () => void;   // v319：真实现无参（save-status.ts）
 
-  // transient 面板 / 变换护栏（transient-panels.ts / layer-undo.ts）
+  // transient 面板 / 变换护栏（transient-panels.ts）
   _suppressTransientPanels: (mode: string) => void;   // v319：真实现 mode 必填（allow[mode]），原 reason?: 太松
   _restoreTransientPanels: () => void;
   layerSpecFrom: (L: unknown) => ReturnType<PaintDoc["layerSpec"]>;   // v319：真返回 doc.layerSpec 的 LayerSpecShape（doc.ts 未导出 → 经 ReturnType 取）
@@ -125,7 +129,7 @@ export interface AppContext {
   _cancelTransform: () => void;
   selectionToNewLayer: (arg: { move: boolean }) => void;   // v319：真实现解构 { move }
   importImageAsLayer: (file: File, opts?: { center?: { x: number; y: number } }) => Promise<void>;   // v319：真实现 async，opts 有默认值
-  afterDocChange: () => void;   // v319：= layer-undo._afterDocChange，无参
+  afterDocChange: () => void;   // 面板刷新+重绘（组合根内联定义）
 
   // 浮窗（side-windows.ts，module-eval 即构造）
   referenceWindow: ReferenceWindowHandle;

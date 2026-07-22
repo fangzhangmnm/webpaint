@@ -19,6 +19,7 @@ import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";
 import "./background-sync-jobs.test.mjs";
 import "./undo-history.test.mjs";
+import "./operators.test.mjs";
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
 import "./liquify-bilinear.test.mjs";

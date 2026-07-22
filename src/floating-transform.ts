@@ -14,8 +14,8 @@
 
 import { Selection } from "./selection.ts";
 import { makeBitmap } from "./bitmap.ts";
-import { eachLeaf } from "./doc.ts";
-import type { Layer, LayerGroup } from "./doc.ts";
+import { eachLeaf, disposeLayerSnap } from "./doc.ts";
+import type { Layer, LayerGroup, LayerSnap } from "./doc.ts";
 
 // ---- 局部几何/数据类型（type-strip 后纯运行时无变化）----
 type Node = Layer | LayerGroup;
@@ -31,12 +31,14 @@ export type WarpBakeFn = (srcCanvas: CanvasImageSource, srcW: number, srcH: numb
 
 // 一个浮层源：未 warp 的 lift 像素（canvas/imageData，trim 到 selection bbox）+ 落回它哪个 layer。
 //   display/commit 的 warp 全走 GPU（board._glFloatInputs→_floatPass / glBoard.warpToCanvas），无 CPU render 缓存。
+//   preSnap = lift 前源层的 undo 句柄快照（LayerSnap）。所有权：commit 时转给返回的 entry
+//   （input.ts 喂 ops.pixels 当 _initialBefore）；cancel 时 restore 后就地 dispose 并置 null。
 interface Source {
   layer: Layer;
   canvas: Bitmap;
   imageData: ImageData;
   rect: Rect;
-  preSnap: ReturnType<Layer["snapshot"]>;
+  preSnap: LayerSnap | null;
 }
 
 interface Floating {
@@ -252,14 +254,18 @@ export class FloatingTransform {
   }
 
   // -------- commit / cancel --------
-  // commit(doc, bakeFn)：各 source 落回各自 layer，返回多层 "lasso" history entry；自动清 doc.selection（v119）。
+  // commit(doc, bakeFn)：各 source 落回各自 layer，返回最小 "lasso" entry（每层只带 before=preSnap；
+  //   对称 swap 模型下 after 由 ops.pixels 在 undo 时惰性捕获）。preSnap 所有权随 entry 转出
+  //   （input.ts 喂 ops.pixels 的 _initialBefore，之后归 operator 管，本模块不再 dispose）。
+  //   自动清 doc.selection（v119）。
   commit(doc: DocLike | null, bakeFn?: WarpBakeFn | null) {
     const f = this._floating;
     if (!f) return null;
-    const layers: Array<{ layerId: number; before: Source["preSnap"]; after: ReturnType<Layer["snapshot"]>; beforeBlob: null; afterBlob: null }> = [];
+    const layers: Array<{ layerId: number; before: LayerSnap }> = [];
     for (const src of f.sources) {
       this._bakeDown(src, bakeFn);
-      layers.push({ layerId: src.layer.id, before: src.preSnap, after: src.layer.snapshot(), beforeBlob: null, afterBlob: null });
+      layers.push({ layerId: src.layer.id, before: src.preSnap! });
+      src.preSnap = null;   // 所有权已转给 entry
     }
     const prevSelection = doc?.selection || null;
     if (doc) doc.selection = null;
@@ -272,7 +278,12 @@ export class FloatingTransform {
   cancel() {
     const f = this._floating;
     if (!f) return null;
-    for (const src of f.sources) src.layer.restoreFromSnapshot(src.preSnap);
+    for (const src of f.sources) {
+      if (!src.preSnap) continue;
+      src.layer.restoreFromSnapshot(src.preSnap);
+      disposeLayerSnap(src.preSnap);   // restore 装的是 acquire 副本 → 就地释放句柄
+      src.preSnap = null;
+    }
     this._floating = null;
     this._drag = null;
     this.onChange();

@@ -4,7 +4,7 @@
 //   组一个显式 ctx → 调各深模块的 initX(ctx) 接线 → 挂 boot 加载 / auth / PWA 外壳。
 //   god-file 已肢解：UI 与业务分散到单一职责模块（session-state / editor-state / gallery-shell /
 //   topbar-menu / cloud-freshness / import-image / export-import-menu / side-windows / selection-ops /
-//   layer-undo / transient-panels / save-status / smooth-dev-panel / platform-guards / dev-console /
+//   transient-panels / save-status / smooth-dev-panel / platform-guards / dev-console /
 //   anchored-popup / fullscreen-busy …）。每个模块 export 函数 + initX(ctx) 绑 app 单例。
 //
 // 状态归属（SSoT）：
@@ -18,10 +18,12 @@ import { initI18n, t, reconcileLangFromPrefs } from "./i18n/index.ts";   // 本�
 import { PaintDoc } from "./doc.ts";
 import { Board } from "./board.ts";
 import { InputController } from "./input.ts";
-import { PixelEdit } from "./pixel-edit.ts";   // compressPixelSnap/applyPixelSnap 切到 layer-undo/topbar-menu
 import { makeCurrentBrush } from "./resolved-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolveBrush，同文件）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
-import { UndoStack } from "./history.ts";
+import { Workpiece } from "./workpiece/workpiece.ts";
+import { UndoHistory } from "./workpiece/undo-history.ts";
+import { makeOperators } from "./workpiece/operators.ts";
+import { PixelEdits } from "./workpiece/pixel-tx.ts";
 import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
 import { initDevConsole } from "./dev-console.ts";   // window.WebPaint 调试接口
@@ -51,7 +53,6 @@ import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
 import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
-import { initLayerUndo, _afterDocChange, layerSpecFrom } from "./layer-undo.ts";
 import { initImportImage, importImageAsLayer } from "./import-image.ts";   // importImageAsNewDoc/setAddImportAsNewDoc 仅 gallery-shell/export-menu 用
 import { initExportImportMenu } from "./export-import-menu.ts";
 import { initGalleryShell, setGalleryOpen, checkQuotaAndWarn, uniqueNameFor } from "./gallery-shell.ts";
@@ -160,17 +161,40 @@ const _tileJobs = initTileJobs();   // interval + input 监听有 disposer（app
 // 当前笔（ResolvedBrush）派生 + 引擎桥 = resolved-brush.ts makeCurrentBrush，input 前构造（见下）。手感数学全在 resolveBrush。
 
 
-// Undo / redo 共享栈（command pattern + 注册 handler，详见
-// docs/20260527-undo-architecture.md）。input.js 注册 "stroke" handler；layer
-// 操作的 5 个 handler 在下方 boot 段集中注册（四条纪律 #1）。
-const history = new UndoStack({ max: 50 });
+// v0.4.5：workpiece 聚合根 + 配额制 UndoHistory（operator 是唯一写入口；见 workpiece/*.ts + test charter）。
+const workpiece = new Workpiece(doc);
+const UNDO_QUOTA_BYTES = 128 * 1024 * 1024;   // undo 配额（tile 压缩前记 0，压缩后计入；整 checkpoint 驱逐）
+const history = new UndoHistory({
+  maxQuotaBytes: UNDO_QUOTA_BYTES,
+  // 不可恢复（operator 抛非原子异常 / backward 失败）：栈已弃 → 从当前文档态重建画面 + error banner。
+  onUnrecoverable: (e) => {
+    reportError(new Error("[undo] 不可恢复的 operator 异常，撤销历史已重置（画面已从当前文档态重建）：" + String(e)), "error");
+    renderLayersPanel(); board.invalidateAll(); board.requestRender();
+  },
+  // 栈形状变化 → wp:histchange（session-state 编辑门 / topbar undo 按钮态 都吃这个事件，契约不变）。
+  onChange: () => window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: history.canUndo(), canRedo: history.canRedo() } })),
+  // undo/redo 应用后统一刷新（旧 handler 里散落的 _afterDocChange/toast 收拢到这一处）。
+  onApplied: (info) => {
+    if (info.dir !== "do") { renderLayersPanel(); board.invalidateAll(); board.requestRender(); }
+    if (info.status) setStatus(info.status);
+  },
+});
+const ops = makeOperators({
+  // docTransform 的 UI 随行（viewport 复位 + 尺寸标签；operator 本体不碰 DOM）。
+  applyDocTransformUi: (viewport) => {
+    if (viewport) Object.assign(board.viewport, viewport);
+    if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
+    board.invalidateAll();
+  },
+});
+const _afterDocChange = () => { renderLayersPanel(); board.invalidateAll(); board.requestRender(); };
+const layerSpecFrom = (L: unknown) => doc.layerSpec(L as Parameters<typeof doc.layerSpec>[0]);
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。
 const editMode = new EditMode({ initialTool: "brush" });
 // 当前笔派生（dial+预设+color+压感 → ResolvedBrush，resolved-brush.ts）。input 前建（getResolvedBrush 读它）。
 const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack });
-// PixelEdit：纯像素（stroke/liquify/filterBrush）的 undo 事务 + handler。
-// 和 UndoStack 平级，注入 input。见 pixel-edit.js / CONTEXT.md。
-const pixelHistory = new PixelEdit({ doc, history, board });
+// 像素编辑事务门面（begin(layer,label) 形状同旧 PixelEdit；底层 = 句柄快照 + SwapPixelsOp）。
+const pixelHistory = new PixelEdits({ doc, w: workpiece, history, ops, board });
 
 const input = new InputController(board, doc, {
   getTool: () => editMode.current(),
@@ -184,6 +208,8 @@ const input = new InputController(board, doc, {
   onColorSampled: (hex) => setColor(hex),
   status: setStatus,
   history,
+  workpiece,
+  ops,
   pixelHistory,
   editMode,
 });
@@ -237,7 +263,7 @@ function freezeCtx<T extends object>(obj: T): T {
   return Object.freeze(obj);
 }
 const ctx: AppContext = freezeCtx({
-  state, dialReactive, currentBrush, editMode, doc, board, input, history, pixelHistory,
+  state, dialReactive, currentBrush, editMode, doc, board, input, history, workpiece, ops, pixelHistory,
   rack, store: _store, setStatus, withBusy, leftDial,
   updateSaveStatus, updateZoomLabel, updateNewerBanner, pullSettingsAndState,
   _suppressTransientPanels, _restoreTransientPanels, layerSpecFrom, _bringPanelTop,
@@ -261,7 +287,6 @@ initToolbar(ctx);
 initSelectionOps(ctx);
 initSmoothDevPanel(ctx);
 initTransientPanels(ctx);
-initLayerUndo(ctx);
 initSideWindows(ctx);
 initPlatformGuards(ctx);
 

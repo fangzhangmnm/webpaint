@@ -7,8 +7,7 @@
 //     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
 import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.ts";
 import { Selection } from "./selection.ts";
-import { countLeaves } from "./doc.ts";
-import { compressPixelSnap } from "./pixel-edit.ts";
+import { countLeaves, disposeLayerSnap, type LayerSnap } from "./doc.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { updateLassoToolbar } from "./toolbar.ts";
 import { t } from "./i18n/index.ts";
@@ -17,10 +16,6 @@ import type { AppContext } from "./app-context.ts";
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
-// PixelSnap 未从 pixel-edit.ts export → 借 compressPixelSnap 第一参取之（snap-with-blob 是 app 记账叠加字段）。
-type PixelSnap = NonNullable<Parameters<typeof compressPixelSnap>[0]>;
-type PixelSnapWithBlob = PixelSnap & { blob?: Blob | null };
-
 // doc 活层 / Selection 的最小结构（doc/selection.js 未类型化 → 只描述本文件用到的几何字段）。
 interface LayerLike { bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; }
 interface TransientOpts { apply?: () => void; abort?: () => void; }
@@ -28,7 +23,8 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 // app 单例 / 跨模块函数（initSelectionOps 注入）
 let doc: AppContext["doc"], board: AppContext["board"], input: AppContext["input"];
 let editMode: AppContext["editMode"], history: AppContext["history"];
-let setStatus: AppContext["setStatus"], layerSpecFrom: AppContext["layerSpecFrom"], _afterDocChange: AppContext["afterDocChange"];
+let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
+let setStatus: AppContext["setStatus"], _afterDocChange: AppContext["afterDocChange"];
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"], _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let importImageAsLayer: AppContext["importImageAsLayer"];
 
@@ -49,7 +45,8 @@ function _extractSelectionRegionCanvas(layer: LayerLike, sel: Selection) {
   return c;
 }
 
-// 选区 → 新层。move=true 同时从源层挖洞（移动语义），含 undo 记账。
+// 选区 → 新层。move=true 同时从源层挖洞（移动语义）。undo = compound(addLayer 记录 + 源层 pixels swap)：
+//   compound 倒序回放 → undo 先还原源层像素、再摘掉新层 + active 回到源层（与旧 selectionToLayer entry 语义一致）。
 export function selectionToNewLayer({ move }: { move: boolean }) {
   const sel = doc.selection;
   if (!sel) { setStatus(t("se.noSelection")); return; }
@@ -57,9 +54,10 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   const src = doc.activeLayer;
   if (!src) return;
   if (src.isGroup) { setStatus(t("se.selectLayerFirstGroup")); return; }
-  const beforeActive: PixelSnapWithBlob | null = move ? src.snapshot() : null;
+  // move 模式：挖洞前拍源层 before（归属转给 ops.pixels）；copy 模式不碰源层，不拍。
+  const beforeActive: LayerSnap | null = move ? src.snapshot() : null;
   const newL = doc.addLayer(move ? "移到新层" : "复制层");
-  if (!newL) return;
+  if (!newL) { disposeLayerSnap(beforeActive); return; }
   // 把 active ∩ selection 的像素 copy 进 newL（建一张 selection bbox 大小的 canvas 再切片回 tile）
   const nc = document.createElement("canvas");
   nc.width = sel.bboxW; nc.height = sel.bboxH;
@@ -76,20 +74,18 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
       ctx.drawImage(sel.maskCanvas, sel.bboxX - ox, sel.bboxY - oy);
     });
   }
-  const loc = doc.locateNode(newL.id)!;   // {parentId, index}：组内也精确（撤销 insertLayerAt 用）
-  const newLayerSpec = layerSpecFrom(newL) as unknown as { blob?: Blob | null; [k: string]: unknown };   // LayerSpecShape→带 index sig 形（同对象，经 unknown 转）
-  const afterActive: PixelSnapWithBlob | null = move ? src.snapshot() : null;
-  history.push({
-    type: "selectionToLayer",
-    isMove: move,
-    newLayerSpec, insertIndex: loc.index, parentId: loc.parentId,
-    activeLayerId: src.id,
-    beforeActive, afterActive,
+  const loc = doc.locateNode(newL.id)!;   // {parentId, index}：组内也精确（undo 摘层 / redo insertLayerAt 用）
+  const r = history.compound(workpiece, () => {
+    const st1 = history.run(workpiece, ops.addLayer,
+      { layerId: newL.id, index: loc.index, parentId: loc.parentId, prevActiveId: src.id, layerName: newL.name },
+      { checkpoint: false });
+    if (!st1.ok) throw new Error(st1.msg);
+    if (move) {
+      const st2 = history.run(workpiece, ops.pixels, { layerId: src.id, _initialBefore: beforeActive }, { checkpoint: false });
+      if (!st2.ok) throw new Error(st2.msg);
+    }
   });
-  // 异步压缩 newL pixels（同 removeLayer 路径）
-  compressPixelSnap(newLayerSpec as unknown as PixelSnap, (blob: Blob | null) => { newLayerSpec.blob = blob; });
-  if (move && beforeActive) compressPixelSnap(beforeActive, (blob: Blob | null) => { beforeActive.blob = blob; });
-  if (move && afterActive)  compressPixelSnap(afterActive,  (blob: Blob | null) => { afterActive.blob = blob; });
+  if (!r.ok) { setStatus(errMsg(r.msg), true); _afterDocChange(); return; }
   _afterDocChange();
   setStatus(move ? t("se.movedToNewLayer") : t("se.copiedToNewLayer"));
 }
@@ -105,8 +101,9 @@ export function initSelectionOps(ctx: AppContext) {
   input = ctx.input;
   editMode = ctx.editMode;
   history = ctx.history;
+  workpiece = ctx.workpiece;
+  ops = ctx.ops;
   setStatus = ctx.setStatus;
-  layerSpecFrom = ctx.layerSpecFrom;
   _afterDocChange = ctx.afterDocChange;
   _commitTransform = ctx._commitTransform;
   _cancelTransform = ctx._cancelTransform;

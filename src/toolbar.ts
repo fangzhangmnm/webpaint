@@ -2,30 +2,27 @@
 // 即「选当前工具、把按钮高亮/可点从 EditMode 派生、lasso 子工具/集合运算/变换/选区动作工具栏」。
 // drawing app 只经 editMode（持久工具 + transient）这一个轴跟工具耦合：
 //   setTool → editMode.setTool → emit wp:modechange → _syncEditModeUI 重新派生整套 UI。
-// ctx 绑：editMode/state/doc/board/input/history/dialReactive/rack/setStatus/leftDial,
+// ctx 绑：editMode/state/doc/board/input/history/workpiece/ops/dialReactive/rack/setStatus/leftDial,
 //        + app-local（仍在 app.js，经 ctx 绑）：_suppressTransientPanels/_restoreTransientPanels/
-//          _commitTransform/_cancelTransform/selectionToNewLayer/layerSpecFrom/afterDocChange。
-// importable：Selection（选区取反/全选）、compressPixelSnap（fill/clear undo 快照压缩）、
-//             fillResampleSelect（变换采样 dropdown SSoT）。
+//          _commitTransform/_cancelTransform/selectionToNewLayer/afterDocChange。
+// importable：Selection（选区取反/全选）、fillResampleSelect（变换采样 dropdown SSoT）。
+// undo：selection-entry 走 ops.selection（事务型 swap）、fill/clear 走 ops.pixels（事务型 swap）。
 
 import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { Selection } from "./selection.ts";
-import { compressPixelSnap } from "./pixel-edit.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { editorState } from "./editor-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
-import type { UndoEntry } from "./history.ts";
+import type { LayerSnap } from "./doc.ts";
 
 // 静态存在的工具栏元素查表 helper（initToolbar 在 DOM 就绪后调）。
 const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-// requireEditableLeaf / transform 收到的 doc 活层（doc/selection.js 未类型化 → 只描述本文件用到的）。
-interface LayerLike { id: number; snapshot(): unknown; }
-// fill/clear 的 stroke undo entry（异步压缩回填 blob）。
-interface StrokeEntry extends UndoEntry { layerId: number; before: unknown; after: unknown; beforeBlob: Blob | null; afterBlob: Blob | null; }
+// requireEditableLeaf / transform 收到的 doc 活层（只描述本文件用到的）。
+interface LayerLike { id: number; snapshot(): LayerSnap; }
 // 选区编辑 modal 态（仅 modal 开着时非 null）。Selection 取自 selection.js 的 class（值导入兼作类型）。
 interface SelEditState { before: Selection; op: "expand" | "shrink"; rafId: number; }
 // editMode.enterTransient 的 apply/abort 回调（edit-mode.js 未类型化，默认 null 把推断窄成 null|undefined → 在调用处断言真签名）。
@@ -33,10 +30,16 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 let editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"], board: AppContext["board"];
 let input: AppContext["input"], history: AppContext["history"], dialReactive: AppContext["dialReactive"];
+let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
 let rack: AppContext["rack"], setStatus: AppContext["setStatus"], leftDial: AppContext["leftDial"];
 let _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"];
 let selectionToNewLayer: AppContext["selectionToNewLayer"];
+
+// selection-entry → SwapSelectionOp（事务型：setSelection 已把 after 应用到 doc，run 只交 before）。
+const pushSel = (entry: { before: Selection | null } | null | undefined) => {
+  if (entry) history.run(workpiece, ops.selection, { _initialBefore: { v: entry.before ?? null } });
+};
 
 // 套索工具栏 DOM（initToolbar 里查表）。静态元素 → 非空；btn 组 → 数组；下拉 → select。
 let lassoToolbarStack: HTMLElement, lassoToolbarRow1: HTMLElement, lassoToolbarRow2: HTMLElement;
@@ -225,7 +228,7 @@ function _finishSelEdit(applied: boolean) {
   _selEdit = null;                          // 先清，防 exitTransient → updateLassoToolbar 重入
   if (applied) {
     const before = s.before, after = doc.selection;
-    if (after !== before && history) history.push({ type: "selectionChange", before, after });
+    if (after !== before) pushSel({ before });
     setStatus(s.op === "expand" ? t("se.selectionExpanded") : t("se.selectionShrunk"));
   } else {
     doc.selection = s.before as (typeof doc)["selection"];               // 还原
@@ -272,7 +275,7 @@ let _lastNonLassoTool = "brush";
 
 export function initToolbar(ctx: AppContext) {
   ({
-    editMode, state, doc, board, input, history, dialReactive, rack, setStatus, leftDial,
+    editMode, state, doc, board, input, history, workpiece, ops, dialReactive, rack, setStatus, leftDial,
     _suppressTransientPanels, _commitTransform, _cancelTransform,
     selectionToNewLayer,
   } = ctx);
@@ -348,8 +351,7 @@ export function initToolbar(ctx: AppContext) {
     } else if (doc.selection) {
       // v232 (user)：选区里没有可变换的像素（全透明 / 与图层无交集 / 小于 2×2）→ 不进变换，
       // 顺手清掉这个没用的选区，别让它卡在那。
-      const entry = input.lasso.setSelection(null);
-      if (entry && history) history.push(entry);
+      pushSel(input.lasso.setSelection(null));
       board.invalidateAll();
       updateLassoToolbar();
       setStatus(t("se.noPixelsToTransform"));
@@ -359,22 +361,17 @@ export function initToolbar(ctx: AppContext) {
   });
 
   byId("lassoDeselectBtn").addEventListener("click", () => {
-    const entry = input.lasso.setSelection(null);
-    if (entry && history) history.push(entry);
+    pushSel(input.lasso.setSelection(null));
     board.invalidateAll();
     updateLassoToolbar();
   });
-  // 填色：选区内填当前颜色（push stroke-type entry，可 Ctrl+Z）
+  // 填色：选区内填当前颜色（事务型 ops.pixels：先改像素，再交 before 快照，可 Ctrl+Z）
   byId("lassoFillBtn").addEventListener("click", () => {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
-    const before = layer.snapshot();
+    const before = layer.snapshot();   // 归属转给 ops.pixels（run 之后不许 dispose）
     (doc.selection as Selection).fillOnLayer(layer as unknown as Parameters<Selection["fillOnLayer"]>[0], state.color);
-    const after = layer.snapshot();
-    const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-    history.push(entry);
-    compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after as Parameters<typeof compressPixelSnap>[0],  (blob: Blob | null) => { entry.afterBlob  = blob; });
+    history.run(workpiece, ops.pixels, { layerId: layer.id, _initialBefore: before });
     board.invalidateAll();
     setStatus(t("se.filled", { color: state.color }));
   });
@@ -382,21 +379,16 @@ export function initToolbar(ctx: AppContext) {
   byId("lassoClearBtn").addEventListener("click", () => {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
-    const before = layer.snapshot();
+    const before = layer.snapshot();   // 归属转给 ops.pixels
     (doc.selection as Selection).clearOnLayer(layer as unknown as Parameters<Selection["clearOnLayer"]>[0]);
-    const after = layer.snapshot();
-    const entry: StrokeEntry = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-    history.push(entry);
-    compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after as Parameters<typeof compressPixelSnap>[0],  (blob: Blob | null) => { entry.afterBlob  = blob; });
+    history.run(workpiece, ops.pixels, { layerId: layer.id, _initialBefore: before });
     board.invalidateAll();
     setStatus(t("se.clearedSelection"));
   });
   // v112: 全选（user：「lasso 加全选」）
   byId("lassoSelectAllBtn").addEventListener("click", () => {
     const sel = Selection.full(doc.width, doc.height);
-    const entry = input.lasso.setSelection(sel);
-    if (entry && history) history.push(entry);
+    pushSel(input.lasso.setSelection(sel));
     board.invalidateAll();
     updateLassoToolbar();
   });
@@ -404,8 +396,7 @@ export function initToolbar(ctx: AppContext) {
   // 反选：在 docW×docH 上 mask 取反
   byId("lassoInvertBtn").addEventListener("click", () => {
     const inv = doc.selection ? (doc.selection as Selection).invert(doc.width, doc.height) : Selection.full(doc.width, doc.height);
-    const entry = input.lasso.setSelection(inv);
-    if (entry && history) history.push(entry);
+    pushSel(input.lasso.setSelection(inv));
     board.invalidateAll();
     updateLassoToolbar();
   });
@@ -485,8 +476,7 @@ export function initToolbar(ctx: AppContext) {
       // v124 (user) 第二次按 lasso = Esc 语义：清选区 + 回上一个非 lasso 工具
       if (editMode.current() === "lasso" && tool === "lasso") {
         if (doc.selection) {
-          const entry = input.lasso.setSelection(null);
-          if (entry) history.push(entry);
+          pushSel(input.lasso.setSelection(null));
           board.invalidateAll();
         }
         setTool(_lastNonLassoTool || "brush");

@@ -16,7 +16,7 @@
 //   input / doc / board / history / editMode / setStatus / updateSaveStatus / updateZoomLabel /
 //   gallery / rack。
 // 直接 import（leaf/singleton）：session、els、openInputSheet/openConfirmSheet/lockSyncGate、
-//   setMenuOpen、decodeOraToDoc、compressPixelSnap 等（以实际 import 块为准）。
+//   setMenuOpen、decodeOraToDoc 等（以实际 import 块为准）。
 
 import { session } from "./session-state.ts";
 import { isUnlocked } from "./crypto-state.ts";
@@ -26,7 +26,6 @@ import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { sessionNameConflict } from "./session-name.ts";
 import { decodeOraToDoc } from "./ora.ts";
-import { compressPixelSnap } from "./pixel-edit.ts";
 import { t } from "./i18n/index.ts";
 import type { Layer, PaintDoc } from "./doc.ts";
 
@@ -35,6 +34,7 @@ const errMsg = (e: unknown): string => String((e as { message?: unknown })?.mess
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initTopbarMenu(ctx) 注入）----
 let input: AppContext["input"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], editMode: AppContext["editMode"];
+let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
 let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"], updateZoomLabel: AppContext["updateZoomLabel"];
 let gallery: AppContext["gallery"], rack: AppContext["rack"];
 
@@ -53,6 +53,8 @@ export function initTopbarMenu(ctx: AppContext) {
   doc = ctx.doc;
   board = ctx.board;
   history = ctx.history;
+  workpiece = ctx.workpiece;
+  ops = ctx.ops;
   editMode = ctx.editMode;
   setStatus = ctx.setStatus;
   updateSaveStatus = ctx.updateSaveStatus;
@@ -78,14 +80,10 @@ export function initTopbarMenu(ctx: AppContext) {
     if (a !== "confirm") return;
     const layer = doc.activeLayer as Layer | null;
     if (!layer) return;
-    // 走 stroke handler 让 Ctrl+Z 能复活。before = 当前像素；after = 空层快照。
+    // 事务型 pre-applied 像素 op：before 快照所有权交给 op（勿 dispose），Ctrl+Z 能复活。
     const before = layer.snapshot();
     doc.clearActiveLayer();
-    const after = layer.snapshot();
-    const entry: { type: string; layerId: number; before: unknown; after: unknown; beforeBlob: Blob | null; afterBlob: Blob | null } = { type: "stroke", layerId: layer.id, before, after, beforeBlob: null, afterBlob: null };
-    history.push(entry);
-    compressPixelSnap(entry.before as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.beforeBlob = blob; });
-    compressPixelSnap(entry.after  as Parameters<typeof compressPixelSnap>[0], (blob: Blob | null) => { entry.afterBlob  = blob; });
+    history.run(workpiece, ops.pixels, { layerId: layer.id, _initialBefore: before });
     board.invalidateAll();
     setStatus(t("tm.clearedActiveLayer"));
   });
