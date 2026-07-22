@@ -111,7 +111,7 @@ LayerPixels 被替换/丢弃前必须 `dispose()`（现有落点：`Layer.setPix
 
 （次序建议：**先真机验完 §3 再动 S7**——GL 大改前底座必须被验过。S5/S6 node 可测，可先行。）
 
-### S5 · selection-mask tile 化 + 蚂蚁线深模块
+### S5 · selection-mask tile 化 + 蚂蚁线深模块 ✅ 已落 v0.4.6（分支 worktree-v04-s5-selection-tiles，未 merge/未真机；报告 = docs/20260722-v04-s5-selection-tiles.md）
 - 目标：选区 = workpiece 内 gray8 tile 层（池 `"gray8"` 格式现成）；每次选区编辑 =
   SelectionMaskOperator checkpoint；蚂蚁线抽 `src/marching-ants.ts` 深模块（自持久化 outline
   缓存 keyed by commitVersion，重算走 background-sync-jobs；蚂蚁线不是 workpiece 的职责）。
