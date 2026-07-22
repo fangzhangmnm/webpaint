@@ -20,6 +20,7 @@ import "./cpu-tile-pool.test.mjs";
 import "./background-sync-jobs.test.mjs";
 import "./undo-history.test.mjs";
 import "./operators.test.mjs";
+import "./float-ops.test.mjs";     // S6：float 入 workpiece（lift/transform/reject/accept 整链 + 所有权/驱逐）
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
 import "./liquify-bilinear.test.mjs";

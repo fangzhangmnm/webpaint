@@ -39,7 +39,6 @@ import type { UndoHistory } from "./workpiece/undo-history.ts";
 import type { Workpiece } from "./workpiece/workpiece.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
 import type { PixelEdits, PixelTx as PixelTxClass } from "./workpiece/pixel-tx.ts";
-import type { LayerSnap } from "./doc.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Selection } from "./selection.ts";
 
@@ -64,12 +63,8 @@ type StrokeEngine = BrushEngine | LiquifyEngine | FilterBrushEngine;
 //   GL 模式下这类笔的 live 预览要靠 board 每帧把活动层重传 GPU（buffered brush 走 GPU stamp overlay，不算）。
 interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; inPlace: boolean; }
 
-// 本文件注册的两类 handler 的 entry shape（lasso 复合像素 + 选区变化）。
-//   lasso entry 由 floating-transform.commit 产；selectionChange 由 lasso.endPath/setSelection 产。
-interface LassoEntry {
-  layers: Array<{ layerId: number; before: LayerSnap }>;
-  prevSelection?: Selection | null;
-}
+// 选区变化 entry（lasso.endPath/setSelection 产 → _pushSelEntry 走 ops.selection）。
+//   （LassoEntry 已死 v0.4.7：accept/reject 的 operator 编排收进 FloatingTransform。）
 interface SelectionChangeEntry { before?: Selection | null; after?: Selection | null; }
 
 // pointer 记录：down 时建立、move/up 累积手感状态（平滑 / 压感 / 死区 / long-press）。
@@ -386,6 +381,10 @@ export class InputController {
     this.pixelHistory = opts.pixelHistory || null;
     // 把 doc 引用给 lasso，便于直接操作 doc.selection
     this.lasso.setDoc(this.doc);
+    // v0.4.7（S6）：float 状态在 workpiece——lasso 的 lift/变换/stamp/accept/reject 走 operator。
+    if (this.workpiece && this.history && this.ops) {
+      this.lasso.attachWorkpiece(this.workpiece, this.history, this.ops);
+    }
     this._bind();
   }
 
@@ -1000,22 +999,9 @@ export class InputController {
     }
   }
   _commitLasso() {
-    const entry = this.lasso.commit() as LassoEntry | null;
-    if (!entry) return;
-    // lift+transform+commit 整体一个 checkpoint：多层像素 swap + 选区清空，compound 封整点。
-    if (this.history && this.workpiece && this.ops) {
-      const r = this.history.compound(this.workpiece, () => {
-        for (const L of entry.layers) {
-          const st = this.history!.run(this.workpiece!, this.ops!.pixels, { layerId: L.layerId, _initialBefore: L.before }, { checkpoint: false });
-          if (!st.ok) throw new Error(st.msg);
-        }
-        if (entry.prevSelection !== undefined) {
-          const st = this.history!.run(this.workpiece!, this.ops!.selection, { _initialBefore: { v: entry.prevSelection ?? null } }, { checkpoint: false });
-          if (!st.ok) throw new Error(st.msg);
-        }
-      });
-      if (!r.ok) this.status("变换提交出错：" + (r.msg || "?"));
-    }
+    // v0.4.7（S6）：accept 的 operator 编排（烤层 ops.pixels × N + DropFloatOp，compound 封整点）
+    // 全在 FloatingTransform；旧「commit 返回手拼 entry → 这里再 push」链死。
+    if (!this.lasso.commit()) return;
     this.board.invalidateAll();
   }
   _abortLasso() {
@@ -1206,17 +1192,19 @@ export class InputController {
 
   // undo / redo / canUndo / canRedo 现在都走共享 history（v44 起）。
   // 留这几个 wrapper 给绑了快捷键 / 老 listener 用，**不**自己保存状态。
+  // v0.4.7（S6）：transform transient 的 ctrl-z 语义从「取消」改「history」（spec:214——lift/拖动/
+  //   stamp 都在栈上，undo 逐整点回退；undo 过 lift 自然退出浮层）。crop/adjust 仍 abort-transient。
   canUndo() {
-    if (this.editMode && this.editMode.isTransient()) return true;   // transient：ctrl-z = 取消
+    if (this.editMode && this.editMode.isTransient() && this.editMode.ctrlZMeans() === "abort-transient") return true;   // crop/adjust：ctrl-z = 取消
     return !!this.history && this.history.canUndo();
   }
   canRedo() {
-    if (this.editMode && this.editMode.isTransient()) return false;  // transient 期间无 redo 语义
+    if (this.editMode && this.editMode.isTransient() && this.editMode.ctrlZMeans() === "abort-transient") return false;  // crop/adjust 期间无 redo 语义
     return !!this.history && this.history.canRedo();
   }
   // #6 ctrl-z 路由（所有 undo 入口走这：键盘 Ctrl+Z / 双指 tap / undo 按钮）。
-  // 语义由 EditMode 决定：transient(abort-transient) = 取消当前 transient（transform/crop/adjust 统一）；
-  // 否则 = 正常 history undo。取代旧的"只在 lasso.hasFloating 时 cancel"的 ad-hoc。
+  // 语义由 EditMode 决定：transient(abort-transient) = 取消当前 transient（crop/adjust）；
+  // 否则 = 正常 history undo（transform 走这条：变换微整点逐个回退）。
   ctrlZ() {
     if (this.editMode && this.editMode.ctrlZMeans() === "abort-transient") {
       this.editMode.abortTransient();
@@ -1224,14 +1212,19 @@ export class InputController {
     }
     this.undo();
   }
-  undo() {   // 纯 history undo（transient 取消走 ctrlZ → editMode.abortTransient）
+  undo() {   // 纯 history undo（crop/adjust 的取消走 ctrlZ → editMode.abortTransient）
     if (this.history && this.workpiece) this.history.undo(this.workpiece);
   }
   redo() {
-    if (this.editMode && this.editMode.isTransient()) return;        // transient 期间禁 redo
+    if (this.editMode && this.editMode.isTransient() && this.editMode.ctrlZMeans() === "abort-transient") return;   // crop/adjust 期间禁 redo
     if (this.history && this.workpiece) this.history.redo(this.workpiece);
   }
-  clearHistory() { if (this.history) this.history.clear(); }
+  clearHistory() {
+    if (this.history) this.history.clear();
+    // 换文档：浮层状态直接清（不走 operator——栈都没了）+ lasso 状态对齐。
+    this.workpiece?.dropFloats();
+    this.lasso.syncFloating();
+  }
 
   // 选区变化 entry（lasso.setSelection/endPath 产，选区已应用）→ ops.selection 事务型入栈。
   _pushSelEntry(entry: SelectionChangeEntry | null | undefined) {

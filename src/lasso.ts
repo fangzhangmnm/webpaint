@@ -6,16 +6,9 @@
 //   - uniform   (同 free 但锁长宽比)
 //   - distort   (4 角自由，一般四边形 / 透视)
 //
-// 数据模型：
-//   floating = {
-//     canvas, imageData,   // 源像素（不变；lift 时一次性烤好）
-//     srcW, srcH,          // canvas 的像素尺寸
-//     layer, preSnap,      // undo / cancel 用
-//     mode,                // "free" | "uniform" | "distort"
-//     meshN,               // 恒 = 2（2×2 四角网格）
-//     mesh,                // [2][2] doc 坐标点；初始 = src bbox 对齐
-//     uniformAspect,       // uniform 模式锁定的 W/H 比（lift 时记一次）
-//   }
+// 数据模型（v0.4.7 S6）：float 像素 + transform metadata 在 **workpiece internals**
+//   （workpiece/float-ops.ts）；本类经 FloatingTransform 编排 operator（lift/拖动整点/stamp/
+//   accept/reject 全入 undo 栈），渲染视图 = _ft.current()（懒物化 canvas + live mesh）。
 //
 // 渲染：2×2 mesh → GPU warp（gl-compositor WARP_FRAG，per-pixel inverse homography + 双三次/双线性），
 //   数学精确（无 PS1 三角化 artifact）。display/commit 全 GPU（board._glFloatInputs / glBoard.warpToCanvas）。
@@ -32,6 +25,9 @@ import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
+import type { Workpiece } from "./workpiece/workpiece.ts";
+import type { UndoHistory } from "./workpiece/undo-history.ts";
+import type { OperatorRegistry } from "./workpiece/operators.ts";
 
 // ---- 本文件用到的最小局部类型（selection/doc/layer 的真类型在各自模块；此处只描述本类消费面）----
 interface Point { x: number; y: number; }
@@ -46,7 +42,7 @@ interface LassoDoc {
   selection: SelectionLike | null;
 }
 type LassoNode = Layer | LayerGroup;
-type LiftOpts = { cut?: boolean; fallbackFullLayer?: boolean };
+type LiftOpts = { cut?: boolean; fallbackFullLayer?: boolean; ignoreSelection?: boolean };
 type LassoState =
   | "idle"
   | "drawing-freehand"
@@ -88,6 +84,17 @@ export class LassoEngine {
     this.onChange = () => {};
   }
   setDoc(doc: LassoDoc | null) { this.doc = doc; }
+  // v0.4.7（S6）：float 状态在 workpiece——lift/变换/stamp/accept/reject 全走 operator，接线在此注入。
+  attachWorkpiece(w: Workpiece, history: UndoHistory, ops: OperatorRegistry) { this._ft.attach(w, history, ops); }
+  // undo/redo 可能让浮层出现/消失（lift/drop 都在栈上）：把 _state 与 workpiece 对齐 + 引擎重采纳
+  // transform metadata。app 侧 reconciler（transient-panels.syncFloatTransient）每次 histchange 后调。
+  syncFloating() {
+    this._ft.syncFromWorkpiece();
+    const active = this._ft.isActive();
+    if (active && this._state !== "floating") this._state = "floating";
+    else if (!active && this._state === "floating") this._state = "idle";
+    this.onChange();
+  }
   setSubTool(name: SubTool) {
     if (this._subTool === name) return;
     this._subTool = name;
@@ -195,13 +202,12 @@ export class LassoEngine {
     this.onChange();
   }
 
-  // 用 doc.selection 作 mask source，把对应 layer 像素 lift 到 floating。
-  // 完成后进 floating 状态（transform 子状态）。
-  // 默认进入 free 模式（不再走 v56 那种"selected sub-state"）
+  // 用 doc.selection 作 mask source，把对应 layer 像素 lift 到 floating（LiftFloatOp 整点：
+  // 清选区 + 建 float tiles + 挖洞，可撤销）。完成后进 floating 状态（transform 子状态）。
   // opts.cut: true(默认) = 挖空源层（Ctrl+T 变换）；false = 不挖洞，源层保留（Ctrl+D 复制为浮层）
-  // opts.fallbackFullLayer: 没选区时用整层做隐式全选（v218；selection 局部构造，不写 doc.selection）
+  // opts.fallbackFullLayer: 没选区时用整层做隐式全选（v218；operator 内部构造，不写 doc.selection）
   liftSelectionForTransform(layer: LassoNode | null, opts: LiftOpts = {}) {
-    const ok = this._ft.lift(this.doc?.selection as Selection | null, layer, opts);
+    const ok = this._ft.lift(layer, opts);
     if (ok) this._state = "floating";
     return ok;
   }
@@ -369,17 +375,20 @@ export class LassoEngine {
   _warpBakeProvider: (() => WarpBakeFn | null) | null = null;
   setWarpBakeProvider(fn: (() => WarpBakeFn | null) | null) { this._warpBakeProvider = fn; }
   stamp() { return this._ft.stamp(this._warpBakeProvider?.() ?? null); }
-  commit() {
+  // accept：烤层 + 收摊浮层，一个 compound 整点（operator 编排全在 FloatingTransform；
+  //   旧「手拼 entry → input 再 push」链 v0.4.7 死）。返回是否真提交了。
+  commit(): boolean {
     const wasActive = this._ft.isActive();
-    const entry = this._ft.commit(this.doc, this._warpBakeProvider?.() ?? null);
+    const ok = this._ft.commit(this._warpBakeProvider?.() ?? null);
     if (wasActive) this._state = "idle";
-    return entry;
+    return ok;
   }
-  cancel() {
+  // reject：identity 写回 operator（非 undo；stamp 保留）。返回是否真回滚了。
+  cancel(): boolean {
     const wasActive = this._ft.isActive();
-    const snap = this._ft.cancel();
+    const ok = this._ft.cancel();
     if (wasActive) this._state = "idle";
-    return snap;
+    return ok;
   }
 
   // -------- 外部查询 --------

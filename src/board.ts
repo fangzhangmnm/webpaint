@@ -28,9 +28,10 @@ interface Cursor { x: number; y: number; size: number; square?: boolean; aspect?
 import type { Selection } from "./selection.ts";
 import { antsOutline } from "./marching-ants.ts";
 
-// 自由变换浮层网格点 / source / float 描述（lassoInfo.floating）
+// 自由变换浮层网格点 / source / float 描述（lassoInfo.floating = FloatingTransform.current() 视图；
+//   v0.4.7 S6：源像素在 workpiece float tiles，这里拿到的是懒物化 canvas + identity rect）
 interface MeshPt { x: number; y: number; }
-interface FloatSource { layer: Layer; }   // float 像素 warp 全走 GPU（_glFloatInputs→_floatPass），board 端不持 render 缓存
+interface FloatSource { layerId: number; canvas: CanvasImageSource; rect: { x: number; y: number; w: number; h: number } }
 interface FloatInfo {
   sources: FloatSource[];
   gizmoBbox: unknown;
@@ -671,7 +672,8 @@ export class Board {
   }
 
   // 自由变换浮层 → GL warp 输入（floatFor 接缝）：每源层传**未 warp 源纹理 + Hinv**（GPU 在 shader 里 gather
-  //   warp，源纹理只在内容变时重传）。替代旧 CPU renderSource。落源层 z（floatFor 按 leaf.id 匹配）。
+  //   warp，源纹理只在内容变时重传）。落源层 z（floatFor 按 leaf.id 匹配）。
+  //   v0.4.7：源 = workpiece float 的懒物化 canvas（FloatViewSource），layerId 直读。
   _glFloatInputs(): FloatInput[] {
     const lassoInfo = this._lassoProvider?.();
     const float = (lassoInfo && lassoInfo.floating) ? lassoInfo.floating : null;
@@ -679,10 +681,9 @@ export class Board {
     const mode = _sampleModeInt(lassoInfo!.sampleMode);
     const out: FloatInput[] = [];
     for (const src of float.sources) {
-      const wp = sourceWarpMatrix(src as unknown as Parameters<typeof sourceWarpMatrix>[0], float.gizmoBbox as Parameters<typeof sourceWarpMatrix>[1], float.mesh as Parameters<typeof sourceWarpMatrix>[2]);
+      const wp = sourceWarpMatrix(src, float.gizmoBbox as Parameters<typeof sourceWarpMatrix>[1], float.mesh as Parameters<typeof sourceWarpMatrix>[2]);
       if (!wp) continue;
-      const s = src as unknown as { canvas: CanvasImageSource; rect: { w: number; h: number } };
-      out.push({ layerId: src.layer.id, srcCanvas: s.canvas, srcW: s.rect.w, srcH: s.rect.h, hinv: wp.hinv, mode });
+      out.push({ layerId: src.layerId, srcCanvas: src.canvas, srcW: src.rect.w, srcH: src.rect.h, hinv: wp.hinv, mode });
     }
     return out;
   }

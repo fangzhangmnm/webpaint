@@ -123,7 +123,7 @@ LayerPixels 被替换/丢弃前必须 `dispose()`（现有落点：`Layer.setPix
   charter 里的液化选区边界测试在此落 **RED**（S8 转绿）。
 - 风险：AA 视觉 parity（真机批）；大 mask outline 性能（bg-jobs 切片）。
 
-### S6 · float 层入 workpiece ← **下一片。auto 模式按本条+S5 报告干即可**（不必先开 plan；S7 才必须 plan）
+### S6 · float 层入 workpiece ✅ 已落 v0.4.7（分支 worktree-v04-s6-float-workpiece，未 merge/未真机；报告 = docs/20260722-v04-s6-float-workpiece.md。⚠ 行为变化：transform 期 Ctrl+Z=history、reject=identity 写回 stamp 保留、lift 即清选区——详报告 §2。下一片 = **S7，须先真机验完再动 + 单独轻量 plan**）
 **S5 交接给本片的硬约束**（详 docs/20260722-v04-s5-selection-tiles.md）：
 - Selection 已是 gray8 tile + clone()/dispose() 所有权（对齐 LayerSnap）。lift 消费 doc.selection、
   commit 记 prevSelection 的链路今天是：commit() 把 doc.selection 交给 entry.prevSelection →

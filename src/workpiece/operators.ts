@@ -16,6 +16,7 @@ import {
   findNodeById, disposeLayerSnap, disposeLayerSpec, disposeDeepSnapNodes,
   Layer, type LayerSpecShape, type LayerSnap, type PaintDoc, type DeepSnapNode,
 } from "../doc.ts";
+import { LiftFloatOp, FloatTransformOp, DropFloatOp } from "./float-ops.ts";
 import type { Selection } from "../selection.ts";
 import { t } from "../i18n/index.ts";
 
@@ -381,6 +382,9 @@ export interface OperatorRegistry {
   treeStructure: TreeStructureOp;
   mergeDown: MergeDownOp;
   docTransform: DocTransformOp;
+  liftFloat: LiftFloatOp;
+  floatTransform: FloatTransformOp;
+  dropFloat: DropFloatOp;
 }
 export function makeOperators(deps: { applyDocTransformUi: (viewport: Record<string, number> | null | undefined) => void }): OperatorRegistry {
   return {
@@ -394,5 +398,8 @@ export function makeOperators(deps: { applyDocTransformUi: (viewport: Record<str
     treeStructure: new TreeStructureOp(),
     mergeDown: new MergeDownOp(),
     docTransform: new DocTransformOp(deps.applyDocTransformUi),
+    liftFloat: new LiftFloatOp(),
+    floatTransform: new FloatTransformOp(),
+    dropFloat: new DropFloatOp(),
   };
 }

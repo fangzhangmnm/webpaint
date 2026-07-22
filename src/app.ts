@@ -175,7 +175,12 @@ const history = new UndoHistory({
   onChange: () => window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: history.canUndo(), canRedo: history.canRedo() } })),
   // undo/redo 应用后统一刷新（旧 handler 里散落的 _afterDocChange/toast 收拢到这一处）。
   onApplied: (info) => {
-    if (info.dir !== "do") { renderLayersPanel(); board.invalidateAll(); board.requestRender(); }
+    if (info.dir !== "do") {
+      renderLayersPanel(); board.invalidateAll(); board.requestRender();
+      // v0.4.7（S6）：浮层活动中 undo/redo 可能改了源层像素（撤 stamp/reject/lift）——livePreview 门
+      // 会挡住 syncAll，借 lift 的 forceSync 机制强制下一帧重传（同盖印按钮的处理）。
+      if (input.lasso.hasFloating()) board.forceGLResyncUnderFloat();
+    }
     if (info.status) setStatus(info.status);
   },
 });

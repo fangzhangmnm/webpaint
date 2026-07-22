@@ -50,10 +50,12 @@ const CAPS: Record<string, Cap> = {
   picker:      { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },
   lasso:       { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },
   hand:        { canDraw: false, allowsColor: false, cursor: "grab",  ctrlZ: "history",         transient: false },
-  // 半模态 transient（多 step、commit/cancel、ctrl-z=取消）。canDraw=false → 期间不可能起 stroke。
+  // 半模态 transient（多 step、commit/cancel；crop/adjust ctrl-z=取消）。canDraw=false → 期间不可能起 stroke。
   //   onToolSwitch: 期间点别的工具 = "apply"(commit) 还是 "cancel" 这个 transient
   //   returnTo:     commit/cancel 按钮 + 非工具决定性动作落到哪个工具；null = 回到进来前那个持久工具
-  transform:   { canDraw: false, allowsColor: false, cursor: "none",  ctrlZ: "abort-transient", transient: true, onToolSwitch: "apply", returnTo: null },
+  //   transform ctrlZ="history"（v0.4.7 S6，spec:214）：lift/拖动/stamp 都是栈上整点，ctrl-z 逐个回退
+  //   （undo 过 lift 自然退出浮层，reconciler 收 transient）；取消浮层 = Esc/取消按钮（reject operator）。
+  transform:   { canDraw: false, allowsColor: false, cursor: "none",  ctrlZ: "history",         transient: true, onToolSwitch: "apply", returnTo: null },
   crop:        { canDraw: false, allowsColor: false, cursor: "none",  ctrlZ: "abort-transient", transient: true, onToolSwitch: "apply", returnTo: null },
   adjust:      { canDraw: false, allowsColor: false, cursor: "none",  ctrlZ: "abort-transient", transient: true, onToolSwitch: "apply", returnTo: null },
 };

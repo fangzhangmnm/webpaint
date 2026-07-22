@@ -62,6 +62,8 @@ export class LayerPixels {
   getTileHandle(tx: number, ty: number): TileHandle | null {
     return this._tiles.get(tileKey(tx, ty, this._across)) ?? null;
   }
+  // 只读句柄遍历（undo 配额估计用；不 acquire，别持有）。
+  handles(): IterableIterator<TileHandle> { return this._tiles.values(); }
   // 整 tile 写入（拷贝进来；全透明则回收该格）。
   putTile(tx: number, ty: number, pixels: Uint8ClampedArray): void {
     this._contentVersion++;

@@ -19,7 +19,6 @@ import { stripSessionExt } from "./config.ts";
 import { unlockImportedContainer } from "./enc-thumbs.ts";
 import { onPasswordVerified } from "./crypto-state.ts";
 import { setTool, updateLassoToolbar } from "./toolbar.ts";
-import { _makeFullLayerSelection } from "./selection-ops.ts";
 import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import type { AppContext } from "./app-context.ts";
 import type { PaintDoc } from "./doc.ts";
@@ -197,12 +196,12 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
 
   // v111: 自动 lift 全图入 transform（user：「导入图片到图层之后自动全选图片进入 transform 模式」）
+  // v0.4.7：不再手写 doc.selection——lift 的隐式全选走 fallbackFullLayer（operator 内部构造，
+  //   lift 本就清选区，省一条不进栈的裸赋值）。
   try {
-    const sel = _makeFullLayerSelection(layer);
-    if (sel) {
-      doc.selection = sel as typeof doc.selection;
+    {
       setTool("lasso");
-      const ok = input.lasso.liftSelectionForTransform(layer);
+      const ok = input.lasso.liftSelectionForTransform(layer, { fallbackFullLayer: true, ignoreSelection: true });
       if (ok) {
         (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("transform", { apply: _commitTransform, abort: _cancelTransform });
         input.lasso.setMode("free");

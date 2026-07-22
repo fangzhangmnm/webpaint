@@ -8,9 +8,11 @@ import { FloatingTransform, sourceDestQuad } from "../src/floating-transform.ts"
 const SQ = () => [[{ x: 0, y: 0 }, { x: 10, y: 0 }], [{ x: 0, y: 10 }, { x: 10, y: 10 }]];
 function mkFloat(mode = "free", aspect = 1, mesh = SQ()) {
   const ft = new FloatingTransform();
-  ft._floating = {
-    canvas: null, imageData: null, srcW: 10, srcH: 10, layer: null, preSnap: null,
-    mode, meshN: 2, uniformAspect: aspect, _renderCache: null,
+  // v0.4.7（S6）：float 状态在 workpiece，_live 是引擎的本地网格视图——数学测试直接播种 _live
+  //   （geometry 驱动路径 beginDrag/extendDrag/setMode/hitTest 不变；未 attach → setMode 不入栈，纯投影）。
+  ft._live = {
+    gizmoBbox: { x: mesh[0][0].x, y: mesh[0][0].y, w: 10, h: 10 },
+    mode, meshN: 2, uniformAspect: aspect,
     mesh: mesh.map((r) => r.map((p) => ({ ...p }))),
   };
   return ft;
@@ -27,7 +29,7 @@ describe("FloatingTransform · 平移 / 旋转（mode 无关）", () => {
     const ft = mkFloat("free");
     ft.beginDrag({ kind: "translate" }, 100, 100);
     ft.extendDrag(105, 103);
-    const m = ft._floating.mesh;
+    const m = ft._live.mesh;
     cNear(m[0][0], 5, 3, "TL"); cNear(m[0][1], 15, 3, "TR");
     cNear(m[1][0], 5, 13, "BL"); cNear(m[1][1], 15, 13, "BR");
   });
@@ -37,7 +39,7 @@ describe("FloatingTransform · 平移 / 旋转（mode 无关）", () => {
     // centroid=(5,5)。start 在角 0（(10,5)），end 在角 π/2（(5,10)）→ dθ=π/2。
     ft.beginDrag({ kind: "rotate" }, 10, 5);
     ft.extendDrag(5, 10);
-    const m = ft._floating.mesh;
+    const m = ft._live.mesh;
     // TL(0,0) rel(-5,-5) 旋转 90°(cos0 sin1) → (cx - relY, cy + relX) = (10,0)
     cNear(m[0][0], 10, 0, "TL→");
     // 形状不变：边长仍 10
@@ -51,7 +53,7 @@ describe("FloatingTransform · distort（4 角 / 边端点自由）", () => {
     const ft = mkFloat("distort");
     ft.beginDrag({ kind: "corner", row: 0, col: 1 }, 10, 0);   // 拖 TR
     ft.extendDrag(15, -2);
-    const m = ft._floating.mesh;
+    const m = ft._live.mesh;
     cNear(m[0][1], 15, -2, "TR 动");
     cNear(m[0][0], 0, 0, "TL 不动"); cNear(m[1][0], 0, 10, "BL 不动"); cNear(m[1][1], 10, 10, "BR 不动");
   });
@@ -60,7 +62,7 @@ describe("FloatingTransform · distort（4 角 / 边端点自由）", () => {
     const ft = mkFloat("distort");
     ft.beginDrag({ kind: "edge", edge: "top" }, 5, 0);
     ft.extendDrag(5, -3);                                      // dy=-3
-    const m = ft._floating.mesh;
+    const m = ft._live.mesh;
     cNear(m[0][0], 0, -3, "TL"); cNear(m[0][1], 10, -3, "TR");
     cNear(m[1][0], 0, 10, "BL 不动"); cNear(m[1][1], 10, 10, "BR 不动");
   });
@@ -71,7 +73,7 @@ describe("FloatingTransform · free（平行四边形约束）", () => {
     const ft = mkFloat("free");
     ft.beginDrag({ kind: "corner", row: 1, col: 1 }, 10, 10);  // 拖 BR
     ft.extendDrag(16, 16);
-    const m = ft._floating.mesh;
+    const m = ft._live.mesh;
     cNear(m[0][0], 0, 0, "TL（对角锚）不动");
     const top = sub(m[0][1], m[0][0]);   // TR-TL
     const bot = sub(m[1][1], m[1][0]);   // BR-BL
@@ -82,7 +84,7 @@ describe("FloatingTransform · free（平行四边形约束）", () => {
     const ft = mkFloat("free");
     ft.beginDrag({ kind: "edge", edge: "top" }, 5, 0);
     ft.extendDrag(5, -4);                                      // 上拖 4 → 高变 14
-    const m = ft._floating.mesh;
+    const m = ft._live.mesh;
     cNear(m[0][0], 0, -4, "TL 上移"); cNear(m[0][1], 10, -4, "TR 上移");
     cNear(m[1][0], 0, 10, "BL 锚定"); cNear(m[1][1], 10, 10, "BR 锚定");
   });
@@ -93,7 +95,7 @@ describe("FloatingTransform · uniform（锁纵横比）", () => {
     const ft = mkFloat("uniform", 1);
     ft.beginDrag({ kind: "corner", row: 1, col: 1 }, 10, 10);
     ft.extendDrag(16, 16);                                     // 沿对角放大
-    const m = ft._floating.mesh;
+    const m = ft._live.mesh;
     cNear(m[0][0], 0, 0, "TL（对角锚）不动");
     assert(near(dist(m[0][0], m[0][1]), dist(m[0][0], m[1][0])), "宽 == 高（锁比）");
   });
@@ -105,7 +107,7 @@ describe("FloatingTransform · setMode 投影 + adapter 元数据", () => {
     const sheared = [[{ x: 4, y: 0 }, { x: 14, y: 0 }], [{ x: 0, y: 10 }, { x: 10, y: 10 }]];
     const ft = mkFloat("distort", 1, sheared);
     ft.setMode("free");
-    const m = ft._floating.mesh;
+    const m = ft._live.mesh;
     const u = sub(m[0][1], m[0][0]);
     const v = sub(m[1][0], m[0][0]);
     assert(near(dot(u, v), 0), `投影后 u⊥v（dot=${dot(u, v).toFixed(4)}）`);

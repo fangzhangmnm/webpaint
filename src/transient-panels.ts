@@ -9,7 +9,7 @@ import { updateLassoToolbar } from "./toolbar.ts";
 import { raiseWindow, registerWindow } from "./surfaces.ts";
 import type { AppContext } from "./app-context.ts";
 
-let input: AppContext["input"], board: AppContext["board"];
+let input: AppContext["input"], board: AppContext["board"], editMode: AppContext["editMode"];
 
 // v116: transient mode panel suppression
 // user：「transient 的时候有些窗口应该暂时 hide... 大部分窗口都是准模态的，而不是一直留在画布上」
@@ -55,16 +55,49 @@ export function _commitTransform() {
 }
 export function _cancelTransform() {
   if (input.lasso.hasFloating()) {
-    input.lasso.cancel();
+    input.lasso.cancel();   // v0.4.7：reject = identity 写回 operator（非 undo；stamp 保留），可再撤销
     board.invalidateAll();
     updateLassoToolbar();
   }
   _restoreTransientPanels();
 }
 
+// ---- 浮层 ↔ transient 对账（v0.4.7 S6）----
+// lift/drop 都在 undo 栈上 → undo/redo 会让浮层凭空出现/消失。每次 histchange 后（微任务防重入：
+// commit/undo 流程自己也在动 editMode，等本轮同步代码走完再对账）把 UI 三件套对齐 workpiece：
+//   lasso._state / 引擎 live mesh（syncFloating）、editMode transient、面板抑制。幂等——状态一致时零动作。
+let _floatSyncScheduled = false;
+export function scheduleFloatTransientSync() {
+  if (_floatSyncScheduled) return;
+  _floatSyncScheduled = true;
+  queueMicrotask(() => {
+    _floatSyncScheduled = false;
+    if (!input || !editMode) return;
+    input.lasso.syncFloating();
+    const active = input.lasso.hasFloating();
+    const inTransform = editMode.current() === "transform";
+    if (active && !inTransform) {
+      // redo 进 lift / undo 回 accept·reject：浮层回来了 → 进 transform transient（同按钮路径的进场件套）
+      (editMode.enterTransient as (n: string, o?: { apply?: () => void; abort?: () => void }) => void)(
+        "transform", { apply: _commitTransform, abort: _cancelTransform });
+      _suppressTransientPanels("transform");
+      updateLassoToolbar();
+      board.invalidateAll();
+    } else if (!active && inTransform) {
+      // undo 过 lift / redo 进 drop：浮层没了 → 静默退出 transient（不跑 apply/abort——状态已经对）
+      editMode.exitTransient();
+      _restoreTransientPanels();
+      updateLassoToolbar();
+      board.invalidateAll();
+    }
+  });
+}
+
 export function initTransientPanels(ctx: AppContext) {
   input = ctx.input;
   board = ctx.board;
+  editMode = ctx.editMode;
+  window.addEventListener("wp:histchange", scheduleFloatTransientSync);
 
   // 所有浮窗注册进 surfaces 的 window band（pointerdown 置顶；open 路径各自调 raiseWindow）
   // v232：补上 layersPanel（user：「toggle layers 之后 layers 应该 pop up 到 reference 上面」）

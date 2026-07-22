@@ -13,9 +13,37 @@
 // workpiece 不碰 store（红线；持久化归 importer/exporter/persistency 管，它们只读写快照）。
 
 import type { PaintDoc } from "../doc.ts";
+import type { LayerPixels } from "../gl/tile-pixels.ts";
+
+// ---- 浮层变换状态（S6：float 从 floating-transform 的 _ft 私有态收进 workpiece internals）----
+// 像素所有权：WorkpieceFloat.pixels 归当前持有者（internals 或某个 operator 的 undo 包）所有，
+// 状态对象在 internals ↔ undo 包之间**整体移交**（同一时刻只有一个 owner），漏 dispose 由池 FR 点名。
+export interface FloatRect { x: number; y: number; w: number; h: number }
+export type FloatMesh = { x: number; y: number }[][];   // 2×2：[[TL,TR],[BL,BR]]（doc 坐标）
+export interface WorkpieceFloat {
+  id: number;
+  sourceLayerId: number;
+  /** lift 时像素的 identity 位置（内容紧 bbox）；reject 按此写回，不走 warp 采样器。 */
+  rect: FloatRect;
+  /** doc 网格对齐的稀疏 tile（池驻留、可压缩；不可变——变换只动 transform metadata）。 */
+  pixels: LayerPixels;
+}
+/** 共享 gizmo 的变换元数据（组 lift 多 float 共用一份；per-float dest quad 由 rect×单应性派生）。 */
+export interface FloatTransformMeta {
+  gizmoBbox: FloatRect;
+  mesh: FloatMesh;
+  meshN: number;
+  mode: "free" | "uniform" | "distort" | null;
+  uniformAspect: number;
+}
+export interface FloatState {
+  floats: WorkpieceFloat[];
+  transform: FloatTransformMeta;
+}
 
 export interface WorkpieceInternals {
   doc: PaintDoc;
+  floats: FloatState | null;
 }
 
 const INTERNALS = new WeakMap<Workpiece, WorkpieceInternals>();
@@ -28,7 +56,7 @@ export class Workpiece {
   private _lockHolder: string | null = null;
 
   constructor(doc: PaintDoc) {
-    INTERNALS.set(this, { doc });
+    INTERNALS.set(this, { doc, floats: null });
   }
 
   /** 每次 operator 提交 +1。render-tree 重建 / 缓存失效的 key。 */
@@ -37,6 +65,18 @@ export class Workpiece {
   // ---- 窄读接口（迁移期最小集：导出数据的 escape hatch。写必须走 operator。）----
   /** 只读视图。⚠ 迁移期 escape hatch：老代码（board 渲染/导出/吸管）直读；新代码请依赖更窄的读口。 */
   readDoc(): Readonly<PaintDoc> { return INTERNALS.get(this)!.doc; }
+
+  /** 浮层变换状态只读视图（board GPU warp 预览 / gizmo 引擎消费）。null = 无活动浮层。 */
+  readFloatState(): Readonly<FloatState> | null { return INTERNALS.get(this)!.floats; }
+
+  /** 换文档 escape hatch：直接清浮层状态并释放句柄（clearHistory/adoptState 同步调；
+   *  正常编辑流走 DropFloatOp，别拿这个绕 undo）。 */
+  dropFloats(): void {
+    const its = INTERNALS.get(this)!;
+    if (!its.floats) return;
+    for (const f of its.floats.floats) f.pixels.dispose();
+    its.floats = null;
+  }
 
   // ---- 锁（operator/undo-history 协作面；外部勿碰）----
   _acquireLock(holder: string): void {

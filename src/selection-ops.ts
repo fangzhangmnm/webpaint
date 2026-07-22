@@ -91,10 +91,8 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   setStatus(move ? t("se.movedToNewLayer") : t("se.copiedToNewLayer"));
 }
 
-// v111: 给 layer 当前 bbox 做一个全白 mask 当 selection（占满整个 layer 像素）
-export function _makeFullLayerSelection(layer: LayerLike) {
-  return Selection.full(layer.bboxW, layer.bboxH, layer.bboxX, layer.bboxY);
-}
+// （_makeFullLayerSelection 已删 v0.4.7：唯一调用方 import-image 改走 lift 的 fallbackFullLayer——
+//   隐式全选在 LiftFloatOp 内部构造，不再手写 doc.selection。）
 
 export function initSelectionOps(ctx: AppContext) {
   doc = ctx.doc;
