@@ -576,7 +576,10 @@ export class Board {
     const pool = this._glBoard?.fboPoolStats;
     // 第二行末尾加 FBO 池占用（确认有界不单增）：Nfbo 张 / Mmb。
     const poolStr = pool ? ` ${pool.count}fbo/${Math.round(pool.bytes / 1048576)}mb` : "";
-    const line2 = s ? `\n${s.passes}p ${s.floatPasses}f ${this._lastStampCount}s${poolStr}` : "";
+    // S7 段缓存读数：sb=本帧建段 sh=段命中 !=降级（quota 塞不下段缓存）。描边中理想形态 = sb0 shN。
+    const fs = this._glBoard?.frameStats;
+    const segStr = fs ? ` sb${fs.segBuilds} sh${fs.segHits}${fs.cachingDegraded ? "!" : ""}` : "";
+    const line2 = s ? `\n${s.passes}p ${s.floatPasses}f ${this._lastStampCount}s${poolStr}${segStr}` : "";
     this._ensureFpsEl().textContent = `${this._fps ? this._fps.toFixed(0) : "--"} fps${line2}`;
   }
 
