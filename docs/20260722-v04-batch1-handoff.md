@@ -5,10 +5,11 @@
 
 ## 0. 一句话现状
 
-0.4 = 渲染与 undo 大重构。**batch 1（S0–S4）已 merge main（105cc5c，v0.4.5）**：版本换制、不可变
-tile 池、后台压缩、workpiece/document-operator/配额制 undo 全量切换完成，769 node 测试 + tsc +
-esbuild 全绿；**未真机**。batch 2+（S5–S9：选区 tile 化、float 入 workpiece、render-tree/GPU 池、
-编辑逻辑迁移、日落清理）本文 §4 有每片的施工图。
+0.4 = 渲染与 undo 大重构。**S0–S6 已全部 merge main（80bedc1，v0.4.7，2026-07-22）**：版本换制、
+不可变 tile 池、后台压缩、workpiece/document-operator/配额制 undo、选区 tile 化（S5）、float 入
+workpiece（S6）切换完成，803 node 测试 + tsc + esbuild 全绿；**全部未真机**。
+**下一棒 = 真机批**（batch1 §3 + S5 报告 §3 + S6 报告 §4 三份清单同批交付），验完才动 S7
+（S7 开工前对该片单独轻量 plan）。S7–S9 施工图在本文 §4。
 
 ## 1. batch 1 落了什么（新读者地图）
 
@@ -123,7 +124,7 @@ LayerPixels 被替换/丢弃前必须 `dispose()`（现有落点：`Layer.setPix
   charter 里的液化选区边界测试在此落 **RED**（S8 转绿）。
 - 风险：AA 视觉 parity（真机批）；大 mask outline 性能（bg-jobs 切片）。
 
-### S6 · float 层入 workpiece ✅ 已落 v0.4.7（分支 worktree-v04-s6-float-workpiece，未 merge/未真机；报告 = docs/20260722-v04-s6-float-workpiece.md。⚠ 行为变化：transform 期 Ctrl+Z=history、reject=identity 写回 stamp 保留、lift 即清选区——详报告 §2。下一片 = **S7，须先真机验完再动 + 单独轻量 plan**）
+### S6 · float 层入 workpiece ✅ 已落 v0.4.7 并 **merge main（80bedc1，2026-07-22）**，未真机；报告 = docs/20260722-v04-s6-float-workpiece.md。⚠ 行为变化：transform 期 Ctrl+Z=history、reject=identity 写回 stamp 保留、lift 即清选区——详报告 §2。下一片 = **S7，须先真机验完 batch1+S5+S6 再动 + 单独轻量 plan**）
 **S5 交接给本片的硬约束**（详 docs/20260722-v04-s5-selection-tiles.md）：
 - Selection 已是 gray8 tile + clone()/dispose() 所有权（对齐 LayerSnap）。lift 消费 doc.selection、
   commit 记 prevSelection 的链路今天是：commit() 把 doc.selection 交给 entry.prevSelection →
