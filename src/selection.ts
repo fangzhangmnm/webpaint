@@ -1,20 +1,32 @@
-// Selection —— 选区，doc 的一等公民。**不可变值对象 + mask 操作**。
+// Selection —— 选区，doc 的一等公民。**不可变值对象**，底座 = 稀疏 gray8 tile（S5，v0.4.6）。
 //
-// 设计见 CONTEXT.md (Selection) / docs/20260528-lasso-and-selection.md。给下个 AI：
+// 设计见 CONTEXT.md (Selection) / docs/20260528-lasso-and-selection.md / journal/20260721 Architecture.md
+// （spec:18「selection-mask 单通道 tile 层，进 undo history」、spec:208-210）。给下个 AI：
 //
-// - 之前选区是裸结构体 { bboxX,bboxY,bboxW,bboxH, maskCanvas }，6 个 mask 操作以自由函数
-//   散在 lasso.js（combineSelections / invert / extractMaskOutline / chainMaskOutline /
-//   applySelectionMaskPostStroke / fill / clearSelectionOnLayer），结构体上还偷挂 _outline/_chains
-//   缓存、doc.js 手动失效。全收进这个类。
-// - **不可变**：构造后 bbox/maskCanvas 不再原地改；compose/invert/croppedTo/resampledTo 返回新 Selection。
-//   所以 undo 只存引用、不深拷（删了 doc._cloneSelection）。outline() 懒算缓存进对象内部。
-// - 纯 in-process（内存 canvas）：拿已知 mask canvas 造 Selection 即可测 compose/invert/outline /
-//   applyMaskPostStroke，不碰 board/DOM。
-// - 实例字段 bboxX/bboxY/bboxW/bboxH/maskCanvas 保持公开（board/filters drawImage 直接读）。
-//   lasso 的自由变换/mesh gizmo 不在这里（另一个 concern，留 lasso）。
+// - **maskCanvas 死了**（v0.4.6）。mask = doc 网格对齐的稀疏 gray8 tile（0..255 = AA 覆盖度），
+//   句柄来自共享 appTilePool() → 选区自动吃池的压缩驻留 + 配额，undo 里按压缩字节计费。
+//   doc 空间寻址（不再与任何 layer.bbox 对齐）——这是杀 H7（液化选区按 layer.bbox 烤半拉）的数据结构前提。
+// - **不可变**：构造后 tiles/bbox 不再改；compose/invert/morphed/croppedTo/… 返回新 Selection（或 null）。
+//   退化（空 mask）一律返回 **null**（= 没选区）——包括 subtract 减光（旧 canvas 版会留一个全透明
+//   的“隐形选区”，v0.4.6 起按 tile bbox 精确判空，行为更诚实）。
+// - **所有权纪律**（对齐 LayerSnap）：Selection 持有 tile 句柄，js 无析构 → 被丢弃前必须 dispose()。
+//   别名持有（doc 快照等）用 clone()（零拷贝，句柄 acquire）。漏网由池 FR assert 点名。
+//   持有点：doc.selection 槽、SwapSelectionOp 包（disposeData）、doc.snapshotAll 快照、
+//   lasso/toolbar 的中间产物（消费后就地 dispose）。瞬时读者（stroke 引擎烤 mask、GL 上传）不持有。
+// - bboxX/Y/W/H 保持公开（消费面到处在读）；v0.4.6 起 = per-tile 内容 bbox 聚合（**紧**——
+//   旧版 compose 的“合成 bbox 可能略大”TODO 就此了账）。
+// - 蚂蚁线 outline 已抽 src/marching-ants.ts 深模块（自持缓存，keyed by Selection 对象身份）。
+// - Canvas2D 消费者（filters / 浮层 lift / 剪贴板）走 materializeMaskCanvas()（懒缓存物化，
+//   RGBA 白 + alpha=mask，与旧 maskCanvas drawImage 语义逐像素一致）。CPU 算法读者走
+//   materializeMaskRegion()/sampleAt() 窄读口（gray8，无 4 倍 RGBA 浪费）。
+// - GPU：bboxMask() 给 bbox 对齐的 gray8 平面（懒缓存）→ gl-doc-renderer 直传 R8 纹理
+//   （S7 改走 cpu-gpu-tile-bridge）。
+// - 纯 in-process：除 fromAlphaCanvas/resampledTo/materializeMaskCanvas 外全部零 canvas 依赖，node 直测。
 
-// 本文件用到的最小 canvas/层接口（selection.ts 拥有 Selection 真类型；
-// doc.ts 的 SelectionLike 镜像本类公开成员，集成时以本文件为准对齐）。
+import { TILE_SIZE } from "./tiles/tile-geometry.ts";
+import { appTilePool } from "./tiles/app-tile-pool.ts";
+import { computeBBox, type TileHandle, type TileBBox } from "./tiles/cpu-tile-pool.ts";
+
 type Bitmap = OffscreenCanvas | HTMLCanvasElement;
 type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
@@ -22,7 +34,6 @@ type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 interface LayerLike {
   bboxX: number;
   bboxY: number;
-  ctx: Ctx;
   snapshotImageData(): LayerSnapLike;
   putImageData(docX: number, docY: number, img: ImageData): void;
   editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void;
@@ -38,6 +49,15 @@ interface LayerSnapLike {
 }
 
 type ComposeMode = "new" | "union" | "subtract" | "intersect";
+
+// tile 键：与 doc 宽度无关的打包（Selection 不知道 doc 尺寸；网格恒对齐 doc 原点，tx/ty ≥ 0）。
+// 32768 tiles ≈ 8M px 边长，够到天荒地老。
+const PACK = 32768;
+const packKey = (tx: number, ty: number) => ty * PACK + tx;
+const unpackTx = (k: number) => k % PACK;
+const unpackTy = (k: number) => Math.floor(k / PACK);
+
+const GRAY_TILE = TILE_SIZE * TILE_SIZE;
 
 function makeBitmap(w: number, h: number): Bitmap {
   return (typeof OffscreenCanvas !== "undefined")
@@ -80,94 +100,205 @@ function morphBinary(grid: Uint8Array, w: number, h: number, radius: number, gro
 }
 
 export class Selection {
+  // 内容 bbox（doc 坐标，per-tile bbox 聚合 = 紧）。公开只读消费（到处在读，别写）。
   bboxX: number;
   bboxY: number;
   bboxW: number;
   bboxH: number;
-  maskCanvas: Bitmap;
-  _outlineChains: Float32Array[] | null;
 
-  constructor(bboxX: number, bboxY: number, bboxW: number, bboxH: number, maskCanvas: Bitmap) {
-    this.bboxX = bboxX; this.bboxY = bboxY;
-    this.bboxW = bboxW; this.bboxH = bboxH;
-    this.maskCanvas = maskCanvas;
-    this._outlineChains = null;   // 懒算缓存（行军蚁 polyline）
+  private _tiles: Map<number, TileHandle>;
+  private _disposed = false;
+  // 懒缓存（不可变 → 一次算永远对）：bbox 对齐 gray8 平面（GL 上传 / CPU 密集读者）；Canvas2D 物化。
+  private _bboxMask: { x: number; y: number; w: number; h: number; data: Uint8Array } | null = null;
+  private _maskCanvas: Bitmap | null = null;
+
+  /** 内部构造：接管 tiles 里句柄的所有权。外部走工厂（full/fromGray8Region/fromAlphaCanvas/compose…）。 */
+  private constructor(tiles: Map<number, TileHandle>, bbox: { x: number; y: number; w: number; h: number }) {
+    this._tiles = tiles;
+    this.bboxX = bbox.x; this.bboxY = bbox.y;
+    this.bboxW = bbox.w; this.bboxH = bbox.h;
   }
+
+  // ---- 生命周期（所有权纪律，文件头）----
+
+  /** 零拷贝别名副本（句柄 acquire）。存进快照/长期持有处用它，别裸存引用。 */
+  clone(): Selection {
+    this._assertAlive();
+    const tiles = new Map<number, TileHandle>();
+    this._tiles.forEach((h, k) => tiles.set(k, h.acquire()));
+    return new Selection(tiles, { x: this.bboxX, y: this.bboxY, w: this.bboxW, h: this.bboxH });
+  }
+
+  /** 释放全部 tile 句柄。**被丢弃前必须调**；双 dispose 立刻 throw（所有权 bug 就地暴露）。 */
+  dispose(): void {
+    if (this._disposed) throw new Error("Selection: double dispose");
+    this._disposed = true;
+    this._tiles.forEach((h) => { if (!h.released) h.release(); });
+    this._tiles.clear();
+    this._bboxMask = null;
+    this._maskCanvas = null;
+  }
+
+  get disposed(): boolean { return this._disposed; }
+
+  private _assertAlive(): void {
+    if (this._disposed) throw new Error("Selection: use after dispose");
+  }
+
+  /** 只读句柄迭代（undo 配额估计用；别 release 这些）。 */
+  tileHandles(): IterableIterator<TileHandle> {
+    this._assertAlive();
+    return this._tiles.values();
+  }
+  get tileCount(): number { return this._tiles.size; }
 
   // ---- 工厂 ----
 
-  // 全白选区（select all / 反选-无选区 / 整层选区）。x/y 给 layer 偏移用。
+  /** 从 tiles 建；空 map → null（退化=没选区）。接管句柄所有权。 */
+  private static _fromTiles(tiles: Map<number, TileHandle>): Selection | null {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    tiles.forEach((h, k) => {
+      const b = h.bbox();
+      if (!b) return;   // 防御：全零格不该入 map（建造侧已滤）
+      const ox = unpackTx(k) * TILE_SIZE, oy = unpackTy(k) * TILE_SIZE;
+      if (ox + b.x < minX) minX = ox + b.x;
+      if (oy + b.y < minY) minY = oy + b.y;
+      if (ox + b.x + b.w > maxX) maxX = ox + b.x + b.w;
+      if (oy + b.y + b.h > maxY) maxY = oy + b.y + b.h;
+    });
+    if (minX === Infinity) {
+      tiles.forEach((h) => h.release());
+      return null;
+    }
+    return new Selection(tiles, { x: minX, y: minY, w: maxX - minX, h: maxY - minY });
+  }
+
+  /**
+   * 核心工厂：doc 矩形 (x0,y0,w,h) 的 gray8 数据（行优先，w 宽）→ 稀疏 tile。
+   * 全零格不建 tile；整体全零 → null。data 只读（拷贝进 tile，不接管）。
+   * 负坐标部分裁掉（选区恒在 doc 网格 ≥0 侧；v125 起所有入口 clip 到 doc）。
+   */
+  static fromGray8Region(x0: number, y0: number, w: number, h: number, data: Uint8Array | Uint8ClampedArray): Selection | null {
+    if (w <= 0 || h <= 0) return null;
+    const pool = appTilePool();
+    const tiles = new Map<number, TileHandle>();
+    const ix0 = Math.max(0, x0), iy0 = Math.max(0, y0);
+    const ix1 = x0 + w, iy1 = y0 + h;
+    if (ix1 <= ix0 || iy1 <= iy0) return null;
+    const tx0 = Math.floor(ix0 / TILE_SIZE), ty0 = Math.floor(iy0 / TILE_SIZE);
+    const tx1 = Math.floor((ix1 - 1) / TILE_SIZE), ty1 = Math.floor((iy1 - 1) / TILE_SIZE);
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const tox = tx * TILE_SIZE, toy = ty * TILE_SIZE;
+        const cx0 = Math.max(tox, ix0), cy0 = Math.max(toy, iy0);
+        const cx1 = Math.min(tox + TILE_SIZE, ix1), cy1 = Math.min(toy + TILE_SIZE, iy1);
+        if (cx1 <= cx0 || cy1 <= cy0) continue;
+        let buf: Uint8Array | null = null;
+        for (let y = cy0; y < cy1; y++) {
+          const srow = (y - y0) * w;
+          const drow = (y - toy) * TILE_SIZE;
+          for (let x = cx0; x < cx1; x++) {
+            const v = data[srow + (x - x0)];
+            if (v === 0) continue;
+            if (!buf) buf = new Uint8Array(GRAY_TILE);
+            buf[drow + (x - tox)] = v;
+          }
+        }
+        if (buf) {
+          const bbox = computeBBox("gray8", buf, TILE_SIZE);
+          if (bbox) tiles.set(packKey(tx, ty), pool.createTile("gray8", buf, bbox));
+        }
+      }
+    }
+    return Selection._fromTiles(tiles);
+  }
+
+  /** 从「alpha = mask」的 canvas 建（lasso freehand/ellipse 的 AA 光栅器仍是 Canvas2D，vetted）。 */
+  static fromAlphaCanvas(x0: number, y0: number, canvas: Bitmap): Selection | null {
+    const w = (canvas as HTMLCanvasElement).width, h = (canvas as HTMLCanvasElement).height;
+    if (w <= 0 || h <= 0) return null;
+    const d = (canvas.getContext("2d") as Ctx).getImageData(0, 0, w, h).data;
+    const g = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) g[i] = d[i * 4 + 3];
+    return Selection.fromGray8Region(x0, y0, w, h, g);
+  }
+
+  /** 全白选区（select all / 反选-无选区 / 整层选区）。x/y 给 layer 偏移用。 */
   static full(docW: number, docH: number, x = 0, y = 0): Selection | null {
     const w = docW | 0, h = docH | 0;
     if (w <= 0 || h <= 0) return null;
-    const mask = makeBitmap(w, h);
-    const mctx = mask.getContext("2d")!;
-    mctx.fillStyle = "#fff";
-    mctx.fillRect(0, 0, w, h);
-    return new Selection(x, y, w, h, mask);
+    const g = new Uint8Array(w * h).fill(255);
+    return Selection.fromGray8Region(x, y, w, h, g);
   }
 
-  // ---- 组合 ----
+  // ---- 组合（per-tile 布尔，8-bit AA 边）----
 
-  // 把 newSel 按 mode 合并到 oldSel（两者皆 Selection|null）。退化（空）→ null。
-  //   new → 替换；union → ∪；subtract → \；intersect → ∩
+  /**
+   * 把 newSel 按 mode 合并到 oldSel（两者皆 Selection|null）。退化（空）→ null。
+   *   new → 替换；union → ∪；subtract → \；intersect → ∩
+   * AA 公式对齐旧 Canvas2D 合成（union=src-over、subtract=dst-out、intersect=dst-in），偏差 ≤1/255。
+   * 只读两个入参（不接管所有权；调用方自己管 dispose）。mode="new"/!oldSel 时**原样返回 newSel**、
+   * !newSel 时原样返回 oldSel（与旧版同——调用方按“返回 === 入参”判断所有权是否转移）。
+   */
   static compose(oldSel: Selection | null, newSel: Selection | null, mode: ComposeMode): Selection | null {
     if (!newSel) return oldSel;
     if (mode === "new" || !oldSel) return newSel;
-    let x0, y0, x1, y1;
+    oldSel._assertAlive(); newSel._assertAlive();
+    const pool = appTilePool();
+    const tiles = new Map<number, TileHandle>();
+    const keys = new Set<number>();
     if (mode === "intersect") {
-      x0 = Math.max(oldSel.bboxX, newSel.bboxX);
-      y0 = Math.max(oldSel.bboxY, newSel.bboxY);
-      x1 = Math.min(oldSel.bboxX + oldSel.bboxW, newSel.bboxX + newSel.bboxW);
-      y1 = Math.min(oldSel.bboxY + oldSel.bboxH, newSel.bboxY + newSel.bboxH);
-      if (x1 <= x0 || y1 <= y0) return null;           // 不交 = 空选区
-    } else {
-      x0 = Math.min(oldSel.bboxX, newSel.bboxX);
-      y0 = Math.min(oldSel.bboxY, newSel.bboxY);
-      x1 = Math.max(oldSel.bboxX + oldSel.bboxW, newSel.bboxX + newSel.bboxW);
-      y1 = Math.max(oldSel.bboxY + oldSel.bboxH, newSel.bboxY + newSel.bboxH);
-      if (mode === "subtract") {
-        x0 = oldSel.bboxX; y0 = oldSel.bboxY;
-        x1 = oldSel.bboxX + oldSel.bboxW; y1 = oldSel.bboxY + oldSel.bboxH;
-      }
-    }
-    const w = x1 - x0, h = y1 - y0;
-    const canvas = makeBitmap(w, h);
-    const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(oldSel.maskCanvas, oldSel.bboxX - x0, oldSel.bboxY - y0);
-    if (mode === "union") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.drawImage(newSel.maskCanvas, newSel.bboxX - x0, newSel.bboxY - y0);
+      oldSel._tiles.forEach((_h, k) => { if (newSel._tiles.has(k)) keys.add(k); });
     } else if (mode === "subtract") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(newSel.maskCanvas, newSel.bboxX - x0, newSel.bboxY - y0);
-    } else if (mode === "intersect") {
-      ctx.globalCompositeOperation = "destination-in";
-      ctx.drawImage(newSel.maskCanvas, newSel.bboxX - x0, newSel.bboxY - y0);
+      oldSel._tiles.forEach((_h, k) => keys.add(k));
+    } else {   // union
+      oldSel._tiles.forEach((_h, k) => keys.add(k));
+      newSel._tiles.forEach((_h, k) => keys.add(k));
     }
-    ctx.globalCompositeOperation = "source-over";
-    // TODO（P2）：trim bbox 到 mask 实际范围。暂用合成 bbox（可能略大）
-    return new Selection(x0, y0, w, h, canvas);
+    for (const k of keys) {
+      const oh = oldSel._tiles.get(k) ?? null;
+      const nh = newSel._tiles.get(k) ?? null;
+      if (mode === "union" && oh && !nh) { tiles.set(k, oh.acquire()); continue; }   // 无对手格：原样共享
+      if (mode === "union" && nh && !oh) { tiles.set(k, nh.acquire()); continue; }
+      if (mode === "subtract" && !nh) { tiles.set(k, oh!.acquire()); continue; }
+      const o = oh ? oh.bytes() : null;
+      const n = nh ? nh.bytes() : null;
+      const buf = new Uint8Array(GRAY_TILE);
+      let any = false;
+      for (let i = 0; i < GRAY_TILE; i++) {
+        const ov = o ? o[i] : 0;
+        const nv = n ? n[i] : 0;
+        let r: number;
+        if (mode === "union") r = nv + Math.round(ov * (255 - nv) / 255);
+        else if (mode === "subtract") r = Math.round(ov * (255 - nv) / 255);
+        else r = Math.round(ov * nv / 255);   // intersect
+        buf[i] = r;
+        if (r !== 0) any = true;
+      }
+      if (!any) continue;
+      const bbox = computeBBox("gray8", buf, TILE_SIZE);
+      if (bbox) tiles.set(k, pool.createTile("gray8", buf, bbox));
+    }
+    return Selection._fromTiles(tiles);
   }
 
-  // 反选：在 docW×docH 上 全白 - 本选区 mask。返回新 Selection。
-  invert(docW: number, docH: number): Selection {
-    const canvas = makeBitmap(docW, docH);
-    const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, docW, docH);
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.drawImage(this.maskCanvas, this.bboxX, this.bboxY);
-    ctx.globalCompositeOperation = "source-over";
-    return new Selection(0, 0, docW, docH, canvas);
+  /** 反选：docW×docH 内 255-v。返回新 Selection（全选的反 = null 由调用方语义兜——mask 全零时返 null）。 */
+  invert(docW: number, docH: number): Selection | null {
+    this._assertAlive();
+    const g = this.materializeMaskRegion(0, 0, docW, docH);
+    for (let i = 0; i < g.length; i++) g[i] = 255 - g[i];
+    return Selection.fromGray8Region(0, 0, docW, docH, g);
   }
 
-  // 硬形态学 扩张(radius>0)/收缩(radius<0)：选区编辑 op。返回新 Selection（或 null=收没了）。
-  //   - 二值化阈值 128（与蚂蚁线 outline 的 >128 一致——选区"在不在"按半透明分界）。
-  //   - 8-连通（Chebyshev/方形增长），|radius| 轮，pixel-art 逻辑（硬边，不羽化）。
-  //   - 膨胀时 bbox 每边外扩 radius 并 clamp 到 doc；收缩沿用原 bbox。
-  //   白边场景：魔术棒停在线稿 AA 半透明处 → 对选区 expand 几 px 钻到线下 → 填色无白边。
+  /**
+   * 硬形态学 扩张(radius>0)/收缩(radius<0)：选区编辑 op。返回新 Selection（或 null=收没了）。
+   *   - 二值化阈值 128（与蚂蚁线 outline 的 >128 一致——选区"在不在"按半透明分界）。
+   *   - 8-连通（Chebyshev/方形增长），|radius| 轮，pixel-art 逻辑（硬边，不羽化）。
+   *   - 膨胀时 bbox 每边外扩 radius 并 clamp 到 doc；收缩沿用原 bbox。
+   *   白边场景：魔术棒停在线稿 AA 半透明处 → 对选区 expand 几 px 钻到线下 → 填色无白边。
+   */
   morphed(radius: number, docW: number, docH: number): Selection | null {
+    this._assertAlive();
     const r = Math.round(radius);
     if (r === 0) return this;
     if (this.bboxW <= 0 || this.bboxH <= 0) return this;
@@ -180,42 +311,85 @@ export class Selection {
     nx1 = Math.min(docW, nx1); ny1 = Math.min(docH, ny1);
     const nw = nx1 - nx0, nh = ny1 - ny0;
     if (nw <= 0 || nh <= 0) return null;
-    // 旧 mask → 二值网格（放进新 bbox 的对应位置）
-    const srcCtx = this.maskCanvas.getContext("2d")!;
-    const srcData = srcCtx.getImageData(0, 0, this.bboxW, this.bboxH).data;
+    const src = this.materializeMaskRegion(nx0, ny0, nw, nh);
     const grid = new Uint8Array(nw * nh);
-    for (let y = 0; y < this.bboxH; y++) {
-      for (let x = 0; x < this.bboxW; x++) {
-        if (srcData[(y * this.bboxW + x) * 4 + 3] >= 128) {
-          const gx = this.bboxX + x - nx0, gy = this.bboxY + y - ny0;
-          if (gx >= 0 && gx < nw && gy >= 0 && gy < nh) grid[gy * nw + gx] = 1;
-        }
-      }
-    }
+    for (let i = 0; i < nw * nh; i++) if (src[i] >= 128) grid[i] = 1;
     morphBinary(grid, nw, nh, a, grow);
-    // 网格 → mask canvas（硬边 0/255）
-    const m = makeBitmap(nw, nh);
-    const mctx = m.getContext("2d")!;
-    const out = mctx.createImageData(nw, nh);
-    const od = out.data;
+    // 网格 → 硬边 0/255 gray8
     let any = false;
     for (let i = 0; i < nw * nh; i++) {
-      const al = grid[i] ? 255 : 0;
-      if (al) any = true;
-      od[i * 4] = 255; od[i * 4 + 1] = 255; od[i * 4 + 2] = 255; od[i * 4 + 3] = al;
+      src[i] = grid[i] ? 255 : 0;
+      if (grid[i]) any = true;
     }
     if (!any) return null;          // 收缩到空 = 没选区
-    mctx.putImageData(out, 0, 0);
-    return new Selection(nx0, ny0, nw, nh, m);
+    return Selection.fromGray8Region(nx0, ny0, nw, nh, src);
   }
 
-  // ---- 行军蚁描边（懒算缓存）----
-  // 返回 Array<Float32Array>，每条 = 一条 polyline（doc 坐标，[x,y,x,y,...]）。board 画虚线用。
-  outline(): Float32Array[] {
-    if (!this._outlineChains) {
-      this._outlineChains = chainMaskOutline(extractMaskOutline(this));
+  // ---- 窄读口（CPU 算法读者：applyMaskPostStroke / liquify / filters / 魔棒下游）----
+
+  /** doc 矩形 → gray8 平面（缺 tile / bbox 外 = 0）。每次新分配（调用方可写）。 */
+  materializeMaskRegion(x0: number, y0: number, w: number, h: number): Uint8Array {
+    this._assertAlive();
+    const out = new Uint8Array(Math.max(0, w * h));
+    if (w <= 0 || h <= 0) return out;
+    const ix1 = x0 + w, iy1 = y0 + h;
+    this._tiles.forEach((handle, k) => {
+      const tox = unpackTx(k) * TILE_SIZE, toy = unpackTy(k) * TILE_SIZE;
+      const cx0 = Math.max(tox, x0), cy0 = Math.max(toy, y0);
+      const cx1 = Math.min(tox + TILE_SIZE, ix1), cy1 = Math.min(toy + TILE_SIZE, iy1);
+      if (cx1 <= cx0 || cy1 <= cy0) return;
+      const tile = handle.bytes();
+      for (let y = cy0; y < cy1; y++) {
+        let si = (y - toy) * TILE_SIZE + (cx0 - tox);
+        let di = (y - y0) * w + (cx0 - x0);
+        for (let x = cx0; x < cx1; x++) out[di++] = tile[si++];
+      }
+    });
+    return out;
+  }
+
+  /** 单点采样（0..255；界外 0）。 */
+  sampleAt(docX: number, docY: number): number {
+    this._assertAlive();
+    const x = Math.floor(docX), y = Math.floor(docY);
+    if (x < 0 || y < 0) return 0;
+    const h = this._tiles.get(packKey(Math.floor(x / TILE_SIZE), Math.floor(y / TILE_SIZE)));
+    if (!h) return 0;
+    return h.bytes()[(y % TILE_SIZE) * TILE_SIZE + (x % TILE_SIZE)];
+  }
+
+  /** bbox 对齐 gray8 平面（懒缓存；**只读**，别写）。GL R8 直传 / 反复读者用。 */
+  bboxMask(): { x: number; y: number; w: number; h: number; data: Uint8Array } {
+    this._assertAlive();
+    if (!this._bboxMask) {
+      this._bboxMask = {
+        x: this.bboxX, y: this.bboxY, w: this.bboxW, h: this.bboxH,
+        data: this.materializeMaskRegion(this.bboxX, this.bboxY, this.bboxW, this.bboxH),
+      };
     }
-    return this._outlineChains;
+    return this._bboxMask;
+  }
+
+  /**
+   * Canvas2D 物化（懒缓存；**只读**，别画上去）：bbox 尺寸，RGBA 白 + alpha=mask——
+   * 与旧 maskCanvas 的 drawImage 语义逐像素一致。剩余 Canvas2D 消费者（filters/浮层 lift/剪贴板）
+   * 的过渡口，S8/S9 收缩 Canvas2D 残余时一并日落。
+   */
+  materializeMaskCanvas(): Bitmap {
+    this._assertAlive();
+    if (!this._maskCanvas) {
+      const { w, h, data } = this.bboxMask();
+      const c = makeBitmap(Math.max(1, w), Math.max(1, h));
+      const ctx = c.getContext("2d") as Ctx;
+      const img = ctx.createImageData(Math.max(1, w), Math.max(1, h));
+      const od = img.data;
+      for (let i = 0; i < w * h; i++) {
+        od[i * 4] = 255; od[i * 4 + 1] = 255; od[i * 4 + 2] = 255; od[i * 4 + 3] = data[i];
+      }
+      ctx.putImageData(img, 0, 0);
+      this._maskCanvas = c;
+    }
+    return this._maskCanvas;
   }
 
   // ---- 作用到 layer（改 layer 像素，不改自身）----
@@ -224,6 +398,7 @@ export class Selection {
   // per-pixel：选区外取 pre，选区内取 after。brush/eraser 都对（按 mask 选 pre/after，不是 composite）。
   applyMaskPostStroke(layer: LayerLike, preSnap: LayerSnapLike | null): void {
     if (!preSnap) return;
+    this._assertAlive();
     const afterSnap = layer.snapshotImageData();
     const px0 = preSnap.bboxX, py0 = preSnap.bboxY;
     const px1 = px0 + preSnap.bboxW, py1 = py0 + preSnap.bboxH;
@@ -234,11 +409,7 @@ export class Selection {
     const uw = ux1 - ux0, uh = uy1 - uy0;
     if (uw <= 0 || uh <= 0) return;
 
-    let maskData: Uint8ClampedArray | null = null;
-    if (this.bboxW > 0 && this.bboxH > 0) {
-      const mctx = this.maskCanvas.getContext("2d")!;
-      maskData = mctx.getImageData(0, 0, this.bboxW, this.bboxH).data;
-    }
+    const mask = this.materializeMaskRegion(ux0, uy0, uw, uh);   // doc 空间窄读（gray8）
     const preData = preSnap.imageData ? preSnap.imageData.data : null;
     const afterData = afterSnap.imageData ? afterSnap.imageData.data : null;
 
@@ -247,13 +418,8 @@ export class Selection {
     for (let y = 0; y < uh; y++) {
       for (let x = 0; x < uw; x++) {
         const docX = ux0 + x, docY = uy0 + y;
-        let maskAlpha = 0;
-        const mx = docX - this.bboxX, my = docY - this.bboxY;
-        if (maskData && mx >= 0 && mx < this.bboxW && my >= 0 && my < this.bboxH) {
-          maskAlpha = maskData[(my * this.bboxW + mx) * 4 + 3];
-        }
         const oi = (y * uw + x) * 4;
-        const useAfter = maskAlpha > 0;
+        const useAfter = mask[y * uw + x] > 0;
         if (useAfter && afterData) {
           const aix = docX - ax0, aiy = docY - ay0;
           if (aix >= 0 && aix < afterSnap.bboxW && aiy >= 0 && aiy < afterSnap.bboxH) {
@@ -274,17 +440,20 @@ export class Selection {
     layer.putImageData(ux0, uy0, out);   // out 已是 post-stroke-masked 结果，整块替换该区
   }
 
-  // 选区内填色（调用方负责 push history）。source-over 叠在已有像素上。
+  // 选区内填色（调用方负责 push history）。source-over 叠在已有像素上（color RGB + alpha=mask）。
   fillOnLayer(layer: LayerLike, color: string): void {
     if (!layer) return;
-    const tmp = makeBitmap(this.bboxW, this.bboxH);
-    const tctx = tmp.getContext("2d")!;
+    this._assertAlive();
+    const w = this.bboxW, h = this.bboxH;
+    if (w <= 0 || h <= 0) return;
+    const tmp = makeBitmap(w, h);
+    const tctx = tmp.getContext("2d") as Ctx;
     tctx.fillStyle = color;
-    tctx.fillRect(0, 0, this.bboxW, this.bboxH);
+    tctx.fillRect(0, 0, w, h);
     tctx.globalCompositeOperation = "destination-in";
-    tctx.drawImage(this.maskCanvas, 0, 0);
+    tctx.drawImage(this.materializeMaskCanvas() as CanvasImageSource, 0, 0);
     tctx.globalCompositeOperation = "source-over";
-    layer.editRegion(this.bboxX, this.bboxY, this.bboxW, this.bboxH, (ctx, ox, oy) => {
+    layer.editRegion(this.bboxX, this.bboxY, w, h, (ctx, ox, oy) => {
       ctx.drawImage(tmp as CanvasImageSource, this.bboxX - ox, this.bboxY - oy);
     });
   }
@@ -292,169 +461,80 @@ export class Selection {
   // 清除选区内像素（dst-out mask）。
   clearOnLayer(layer: LayerLike): void {
     if (!layer) return;
+    this._assertAlive();
     layer.editRegion(this.bboxX, this.bboxY, this.bboxW, this.bboxH, (ctx, ox, oy) => {
       ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(this.maskCanvas, this.bboxX - ox, this.bboxY - oy);
+      ctx.drawImage(this.materializeMaskCanvas() as CanvasImageSource, this.bboxX - ox, this.bboxY - oy);
     });
   }
 
-  // ---- crop / resample 时变换自身 → 新 Selection（doc.cropTo/resampleTo 用）----
+  // ---- crop / resample 时变换自身 → 新 Selection（doc.cropTo/resampleTo 用；region 式，对齐 LayerPixels 先例）----
 
-  // 裁剪：doc 原点平移 (dx,dy)，新画布 nw×nh。clamp 到画布内，全裁掉 → null。
+  /** 裁剪：doc 原点平移 (dx,dy)，新画布 nw×nh。clamp 到画布内，全裁掉 → null。 */
   croppedTo(dx: number, dy: number, nw: number, nh: number): Selection | null {
+    this._assertAlive();
     const tL = this.bboxX - dx, tT = this.bboxY - dy;
     const tR = tL + this.bboxW, tB = tT + this.bboxH;
     const newL = Math.max(0, tL), newT = Math.max(0, tT);
     const newR = Math.min(nw, tR), newB = Math.min(nh, tB);
     const newW = newR - newL, newH = newB - newT;
     if (newW <= 0 || newH <= 0) return null;
-    const srcX = newL - tL, srcY = newT - tT;
-    const m = makeBitmap(newW, newH);
-    m.getContext("2d")!.drawImage(this.maskCanvas, srcX, srcY, newW, newH, 0, 0, newW, newH);
-    return new Selection(newL, newT, newW, newH, m);
+    const src = this.materializeMaskRegion(newL + dx, newT + dy, newW, newH);
+    return Selection.fromGray8Region(newL, newT, newW, newH, src);
   }
 
-  // 水平翻转：mask 左右镜像，bbox 在 docW 内镜像。返回新 Selection。
-  flippedHorizontal(docW: number): Selection {
-    const m = makeBitmap(this.bboxW, this.bboxH);
-    const mctx = m.getContext("2d")!;
-    mctx.setTransform(-1, 0, 0, 1, this.bboxW, 0);
-    mctx.drawImage(this.maskCanvas, 0, 0);
-    return new Selection(docW - (this.bboxX + this.bboxW), this.bboxY, this.bboxW, this.bboxH, m);
+  /** 水平翻转：mask 左右镜像，bbox 在 docW 内镜像。 */
+  flippedHorizontal(docW: number): Selection | null {
+    this._assertAlive();
+    const w = this.bboxW, h = this.bboxH;
+    const src = this.materializeMaskRegion(this.bboxX, this.bboxY, w, h);
+    const dst = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) dst[y * w + (w - 1 - x)] = src[y * w + x];
+    return Selection.fromGray8Region(docW - (this.bboxX + w), this.bboxY, w, h, dst);
   }
 
-  // 逆时针旋转 90°：mask 旋转，bbox 按 doc 旋转公式变换。docW/docH = **旧** doc 尺寸。返回新 Selection。
-  //   局部旋转与 doc.rotate90CCW 一致：旧局部 (lx,ly)→新局部 (ly, bboxW-lx)，矩阵 (0,-1,1,0,0,bboxW)。
-  //   新 bbox：newX=bboxY, newY=docW-(bboxX+bboxW), newW=bboxH, newH=bboxW。
-  rotated90CCW(docW: number, docH: number): Selection {
-    const m = makeBitmap(this.bboxH, this.bboxW);   // 新 mask = (bboxH × bboxW)
-    const mctx = m.getContext("2d")!;
-    mctx.imageSmoothingEnabled = false;
-    mctx.setTransform(0, -1, 1, 0, 0, this.bboxW);
-    mctx.drawImage(this.maskCanvas, 0, 0);
-    mctx.setTransform(1, 0, 0, 1, 0, 0);
-    return new Selection(
-      this.bboxY,
-      docW - (this.bboxX + this.bboxW),
-      this.bboxH,
-      this.bboxW,
-      m,
-    );
+  /**
+   * 逆时针旋转 90°。docW = **旧** doc 宽。与 doc.rotate90CCW 一致：旧 (x,y) → 新 (y, W-1-x)。
+   *   新 bbox：newX=bboxY, newY=docW-(bboxX+bboxW), newW=bboxH, newH=bboxW。
+   */
+  rotated90CCW(docW: number, _docH: number): Selection | null {
+    this._assertAlive();
+    const w = this.bboxW, h = this.bboxH;
+    const src = this.materializeMaskRegion(this.bboxX, this.bboxY, w, h);
+    const nw = h, nh = w;
+    const dst = new Uint8Array(nw * nh);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) dst[(w - 1 - x) * nw + y] = src[y * w + x];
+    return Selection.fromGray8Region(this.bboxY, docW - (this.bboxX + w), nw, nh, dst);
   }
 
-  // 重采样：mask 同步缩放 (sx,sy)。
-  resampledTo(sx: number, sy: number, smooth: boolean, quality: ImageSmoothingQuality): Selection {
+  /** 重采样：mask 同步缩放 (sx,sy)。缩放器 = Canvas2D drawImage（与 layer 同一 vetted 路径）。 */
+  resampledTo(sx: number, sy: number, smooth: boolean, quality: ImageSmoothingQuality): Selection | null {
+    this._assertAlive();
     const oW = this.bboxW, oH = this.bboxH;
     const nbw = Math.max(1, Math.round(oW * sx));
     const nbh = Math.max(1, Math.round(oH * sy));
     const m = makeBitmap(nbw, nbh);
-    const mctx = m.getContext("2d")!;
+    const mctx = m.getContext("2d") as Ctx;
     mctx.imageSmoothingEnabled = smooth;
     mctx.imageSmoothingQuality = quality;
-    mctx.drawImage(this.maskCanvas, 0, 0, oW, oH, 0, 0, nbw, nbh);
-    return new Selection(Math.round(this.bboxX * sx), Math.round(this.bboxY * sy), nbw, nbh, m);
+    mctx.drawImage(this.materializeMaskCanvas() as CanvasImageSource, 0, 0, oW, oH, 0, 0, nbw, nbh);
+    return Selection.fromAlphaCanvas(Math.round(this.bboxX * sx), Math.round(this.bboxY * sy), m);
   }
 
-  // 偏移环绕：随 doc.offsetWrap 平移选区。mask 合成进整幅 doc mask 的 4 个环绕位，bbox 设为整幅。
-  //   dx,dy 已由调用方归一化到 [0,W)/[0,H)。整数平移 → 关插值保边沿锐利。
-  offsetWrapped(dx: number, dy: number, docW: number, docH: number): Selection {
-    const m = makeBitmap(docW, docH);
-    const mctx = m.getContext("2d")!;
-    mctx.imageSmoothingEnabled = false;
-    for (const sx of [0, -docW]) {
-      for (const sy of [0, -docH]) {
-        mctx.drawImage(this.maskCanvas, this.bboxX + dx + sx, this.bboxY + dy + sy);
+  /** 偏移环绕：随 doc.offsetWrap 平移。dx,dy 已归一化到 [0,W)/[0,H)。整数平移，硬搬像素。 */
+  offsetWrapped(dx: number, dy: number, docW: number, docH: number): Selection | null {
+    this._assertAlive();
+    const bx = this.bboxX, by = this.bboxY, w = this.bboxW, h = this.bboxH;
+    const src = this.materializeMaskRegion(bx, by, w, h);
+    const dst = new Uint8Array(docW * docH);
+    for (let y = 0; y < h; y++) {
+      const ny = (by + y + dy) % docH;
+      for (let x = 0; x < w; x++) {
+        const v = src[y * w + x];
+        if (v === 0) continue;
+        dst[ny * docW + ((bx + x + dx) % docW)] = v;
       }
     }
-    return new Selection(0, 0, docW, docH, m);
+    return Selection.fromGray8Region(0, 0, docW, docH, dst);
   }
-}
-
-// ============ 内部：marching squares 描边 ============
-
-// 从 maskCanvas 抽轮廓 polyline 段。输出 Float32Array 平铺 [x0,y0,x1,y1,...]（doc 坐标）。
-// O(bboxW×bboxH)，一次性（outline() 缓存）。
-function extractMaskOutline(sel: Selection): Float32Array {
-  const w = sel.bboxW, h = sel.bboxH;
-  if (w <= 1 || h <= 1) return new Float32Array(0);
-  const ctx = sel.maskCanvas.getContext("2d")!;
-  const data = ctx.getImageData(0, 0, w, h).data;
-  const segs: number[] = [];
-  // v113: virtual padding —— canvas 外侧一圈 alpha=0，让 mask 占满边时也能 detect transition。
-  const alpha = (x: number, y: number) => (x < 0 || x >= w || y < 0 || y >= h) ? 0 : (data[(y * w + x) * 4 + 3] > 128 ? 1 : 0);
-  for (let y = -1; y < h; y++) {
-    for (let x = -1; x < w; x++) {
-      const a00 = alpha(x, y), a10 = alpha(x + 1, y), a01 = alpha(x, y + 1), a11 = alpha(x + 1, y + 1);
-      const idx = a00 | (a10 << 1) | (a11 << 2) | (a01 << 3);
-      if (idx === 0 || idx === 15) continue;
-      const cxL = Math.max(0, Math.min(w, x)), cxR = Math.max(0, Math.min(w, x + 1));
-      const cyT = Math.max(0, Math.min(h, y)), cyB = Math.max(0, Math.min(h, y + 1));
-      const xL = sel.bboxX + cxL, xR = sel.bboxX + cxR, xM = (xL + xR) / 2;
-      const yT = sel.bboxY + cyT, yB = sel.bboxY + cyB, yM = (yT + yB) / 2;
-      switch (idx) {
-        case 1:  segs.push(xM, yT, xL, yM); break;
-        case 2:  segs.push(xM, yT, xR, yM); break;
-        case 3:  segs.push(xL, yM, xR, yM); break;
-        case 4:  segs.push(xR, yM, xM, yB); break;
-        case 5:  segs.push(xM, yT, xR, yM); segs.push(xM, yB, xL, yM); break;
-        case 6:  segs.push(xM, yT, xM, yB); break;
-        case 7:  segs.push(xM, yB, xL, yM); break;
-        case 8:  segs.push(xL, yM, xM, yB); break;
-        case 9:  segs.push(xM, yT, xM, yB); break;
-        case 10: segs.push(xM, yT, xL, yM); segs.push(xR, yM, xM, yB); break;
-        case 11: segs.push(xR, yM, xM, yB); break;
-        case 12: segs.push(xL, yM, xR, yM); break;
-        case 13: segs.push(xM, yT, xR, yM); break;
-        case 14: segs.push(xM, yT, xL, yM); break;
-      }
-    }
-  }
-  return new Float32Array(segs);
-}
-
-// 把碎段链成连续 polyline（dash 才能沿整条边流，否则每段当 subpath dash 重置）。
-function chainMaskOutline(segs: Float32Array): Float32Array[] {
-  const out: Float32Array[] = [];
-  if (segs.length < 4) return out;
-  const n = segs.length / 4;
-  const key = (x: number, y: number) => `${Math.round(x * 2)},${Math.round(y * 2)}`;
-  const endpoints = new Map<string, number[]>();
-  for (let i = 0; i < n; i++) {
-    const k0 = key(segs[i * 4], segs[i * 4 + 1]);
-    const k1 = key(segs[i * 4 + 2], segs[i * 4 + 3]);
-    if (!endpoints.has(k0)) endpoints.set(k0, []);
-    if (!endpoints.has(k1)) endpoints.set(k1, []);
-    endpoints.get(k0)!.push(i * 2);
-    endpoints.get(k1)!.push(i * 2 + 1);
-  }
-  const used = new Uint8Array(n);
-  const findUnused = (k: string) => {
-    const arr = endpoints.get(k);
-    if (!arr) return -1;
-    for (const slot of arr) if (!used[slot >> 1]) return slot;
-    return -1;
-  };
-  for (let i = 0; i < n; i++) {
-    if (used[i]) continue;
-    used[i] = 1;
-    const chain = [segs[i * 4], segs[i * 4 + 1], segs[i * 4 + 2], segs[i * 4 + 3]];
-    while (true) {
-      const ex = chain[chain.length - 2], ey = chain[chain.length - 1];
-      const slot = findUnused(key(ex, ey));
-      if (slot < 0) break;
-      const segIdx = slot >> 1; used[segIdx] = 1; const si = segIdx * 4;
-      if (slot & 1) chain.push(segs[si], segs[si + 1]);
-      else          chain.push(segs[si + 2], segs[si + 3]);
-    }
-    while (true) {
-      const sx = chain[0], sy = chain[1];
-      const slot = findUnused(key(sx, sy));
-      if (slot < 0) break;
-      const segIdx = slot >> 1; used[segIdx] = 1; const si = segIdx * 4;
-      if (slot & 1) chain.unshift(segs[si], segs[si + 1]);
-      else          chain.unshift(segs[si + 2], segs[si + 3]);
-    }
-    out.push(new Float32Array(chain));
-  }
-  return out;
 }

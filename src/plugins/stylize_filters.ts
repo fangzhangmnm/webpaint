@@ -33,7 +33,7 @@ export class MosaicFilter {
     src: Uint8ClampedArray,
     dst: Uint8ClampedArray,
     p: { cellSize: number },
-    mask: Uint8ClampedArray | null,
+    mask: Uint8Array | null,
     w: number,
     h: number,
   ) {
@@ -55,7 +55,7 @@ export class MosaicFilter {
         for (let y = cy; y < ey; y++) {
           for (let x = cx; x < ex; x++) {
             const o = (y * w + x) * 4;
-            if (mask && mask[o + 3] < 128) {
+            if (mask && mask[o >> 2] < 128) {
               dst[o] = src[o]; dst[o+1] = src[o+1];
               dst[o+2] = src[o+2]; dst[o+3] = src[o+3];
               continue;
@@ -102,7 +102,7 @@ export class HalftoneFilter {
     src: Uint8ClampedArray,
     dst: Uint8ClampedArray,
     p: { cellSize: number; dotScale: number; mode: string },
-    mask: Uint8ClampedArray | null,
+    mask: Uint8Array | null,
     w: number,
     h: number,
   ) {
@@ -133,7 +133,7 @@ export class HalftoneFilter {
         for (let y = cy; y < ey; y++) {
           for (let x = cx; x < ex; x++) {
             const o = (y * w + x) * 4;
-            if (mask && mask[o + 3] < 128) {
+            if (mask && mask[o >> 2] < 128) {
               dst[o] = src[o]; dst[o+1] = src[o+1]; dst[o+2] = src[o+2]; dst[o+3] = src[o+3];
               continue;
             }
@@ -173,7 +173,7 @@ export class StainedGlassFilter {
     src: Uint8ClampedArray,
     dst: Uint8ClampedArray,
     p: { cellSize: number; leadWidth: number },
-    mask: Uint8ClampedArray | null,
+    mask: Uint8Array | null,
     w: number,
     h: number,
   ) {
@@ -241,7 +241,7 @@ export class StainedGlassFilter {
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
         const o = i * 4;
-        if (mask && mask[o + 3] < 128) {
+        if (mask && mask[o >> 2] < 128) {
           dst[o] = src[o]; dst[o+1] = src[o+1]; dst[o+2] = src[o+2]; dst[o+3] = src[o+3];
           continue;
         }

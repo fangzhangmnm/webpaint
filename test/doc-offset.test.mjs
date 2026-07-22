@@ -138,14 +138,27 @@ describe("doc.offsetWrap · 恒等性", () => {
   });
 });
 
-describe("Selection.offsetWrapped · bbox=整幅 + 环绕", () => {
-  it("bbox 设为整幅 doc", () => {
+describe("Selection.offsetWrapped · 环绕映射（v0.4.6 紧 bbox）", () => {
+  it("内容随偏移平移；bbox = 紧内容框（旧 canvas 版的整幅 bbox 是实现副产品）", () => {
     useStub();
     const s0 = Selection.full(3, 2, 1, 1);   // bbox (1,1) 3×2
     const s1 = s0.offsetWrapped(1, 1, 8, 6);
-    eq(s1.bboxX, 0, "selX=0");
-    eq(s1.bboxY, 0, "selY=0");
-    eq(s1.bboxW, 8, "selW=docW");
-    eq(s1.bboxH, 6, "selH=docH");
+    eq(s1.bboxX, 2, "selX=2（平移后紧框）");
+    eq(s1.bboxY, 2, "selY=2");
+    eq(s1.bboxW, 3, "selW=3");
+    eq(s1.bboxH, 2, "selH=2");
+    eq(s1.sampleAt(2, 2), 255, "旧 (1,1) → 新 (2,2)");
+    eq(s1.sampleAt(1, 1), 0, "原位已空");
+    s0.dispose(); s1.dispose();
+  });
+  it("越边环绕：贴右下的选区偏移后绕回左上", () => {
+    useStub();
+    const s0 = Selection.full(2, 2, 6, 4);   // 贴 8×6 doc 右下角
+    const s1 = s0.offsetWrapped(1, 1, 8, 6);
+    eq(s1.sampleAt(7, 5), 255, "(6,4)→(7,5) 仍在幅内");
+    eq(s1.sampleAt(0, 0), 255, "(7,5)→环绕到 (0,0)");
+    eq(s1.sampleAt(0, 5), 255, "(7,4)→环绕到 (0,5)");
+    eq(s1.sampleAt(7, 0), 255, "(6,5)→环绕到 (7,0)");
+    s0.dispose(); s1.dispose();
   });
 });

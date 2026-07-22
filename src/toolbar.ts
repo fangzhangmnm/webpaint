@@ -192,7 +192,11 @@ function _runSelEditPreview() {
   if (!s) return;
   const amt = _selEditAmount();
   const signed = s.op === "expand" ? amt : -amt;
-  doc.selection = s.before.morphed(signed, doc.width, doc.height) as (typeof doc)["selection"];
+  const prev = doc.selection as Selection | null;
+  const next = s.before.morphed(signed, doc.width, doc.height);
+  doc.selection = next as (typeof doc)["selection"];
+  // v0.4.6：上一个预览产物无人接手 → 就地 dispose（before 本体和新预览除外）。morphed(0) 返回 before 本体。
+  if (prev && prev !== s.before && prev !== next && !prev.disposed) prev.dispose();
   input.lasso.onChange?.();   // requestRender（重画蚂蚁线）+ wp:lassochange（派生工具栏，已对 _selEdit 免疫）
 }
 function _onSelEditInput() {
@@ -228,10 +232,12 @@ function _finishSelEdit(applied: boolean) {
   _selEdit = null;                          // 先清，防 exitTransient → updateLassoToolbar 重入
   if (applied) {
     const before = s.before, after = doc.selection;
-    if (after !== before) pushSel({ before });
+    if (after !== before) pushSel({ before });   // before 所有权交给 ops.selection；after 留在 doc
     setStatus(s.op === "expand" ? t("se.selectionExpanded") : t("se.selectionShrunk"));
   } else {
+    const preview = doc.selection as Selection | null;
     doc.selection = s.before as (typeof doc)["selection"];               // 还原
+    if (preview && preview !== s.before && !preview.disposed) preview.dispose();   // v0.4.6：弃预览产物
   }
   popup?.classList.add("hidden");
   input.lasso.onChange?.();

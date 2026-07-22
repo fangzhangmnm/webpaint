@@ -36,7 +36,8 @@ import type { Layer, LayerGroup } from "./doc.ts";
 // ---- 本文件用到的最小局部类型（selection/doc/layer 的真类型在各自模块；此处只描述本类消费面）----
 interface Point { x: number; y: number; }
 interface DraftRect { x0: number; y0: number; x1: number; y1: number; }
-// Selection 实例的消费面（bbox + maskCanvas；真类型在 selection.ts）
+// Selection 实例的消费面（bbox + tile mask；真类型在 selection.ts。v0.4.6：maskCanvas 死，
+// 光栅器出 gray8 tile Selection；中间产物消费后就地 dispose——所有权纪律见 selection.ts 头注释）
 type SelectionLike = Selection;
 // doc 的消费面：选区是 doc 的一等公民
 interface LassoDoc {
@@ -167,21 +168,15 @@ export class LassoEngine {
     if (!newSel) { this.onChange(); return null; }
     return this._applySelectionUpdate(newSel);
   }
-  // v125: 把 selection bbox 与 doc 矩形相交。完全在外 → null
+  // v125: 把 selection 裁到 doc 矩形内。完全在外 → null。
+  // v0.4.6：走 Selection.croppedTo（tile 级）；产生新对象时旧的就地 dispose（中间产物无人接手）。
   _clipSelectionToDoc(sel: SelectionLike | null): SelectionLike | null {
     if (!sel || !this.doc) return sel;
     const docW = this.doc.width, docH = this.doc.height;
-    const x0 = Math.max(0, sel.bboxX);
-    const y0 = Math.max(0, sel.bboxY);
-    const x1 = Math.min(docW, sel.bboxX + sel.bboxW);
-    const y1 = Math.min(docH, sel.bboxY + sel.bboxH);
-    const w = x1 - x0, h = y1 - y0;
-    if (w <= 0 || h <= 0) return null;
-    if (x0 === sel.bboxX && y0 === sel.bboxY && w === sel.bboxW && h === sel.bboxH) return sel;
-    const c = makeBitmap(w, h);
-    const cctx = c.getContext("2d")!;
-    cctx.drawImage(sel.maskCanvas, sel.bboxX - x0, sel.bboxY - y0);
-    return new Selection(x0, y0, w, h, c);
+    if (sel.bboxX >= 0 && sel.bboxY >= 0 && sel.bboxX + sel.bboxW <= docW && sel.bboxY + sel.bboxH <= docH) return sel;
+    const clipped = sel.croppedTo(0, 0, docW, docH);
+    if (clipped !== sel) sel.dispose();
+    return clipped;
   }
   // 编程入口（取消选区 / 反选 / 由 history undo 调用恢复）
   setSelection(sel: SelectionLike | null) {
@@ -236,7 +231,7 @@ export class LassoEngine {
     }
     mctx.closePath();
     mctx.fill("evenodd");
-    return new Selection(x0, y0, w, h, maskCanvas);
+    return Selection.fromAlphaCanvas(x0, y0, maskCanvas);   // AA 多边形光栅仍走 Canvas2D（vetted），入库转 gray8 tile
   }
   _rasterizeRectToSelection(r: DraftRect | null): SelectionLike | null {
     if (!r) return null;
@@ -246,11 +241,7 @@ export class LassoEngine {
     const y1 = Math.ceil(Math.max(r.y0, r.y1));
     const w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) return null;
-    const maskCanvas = makeBitmap(w, h);
-    const mctx = maskCanvas.getContext("2d")!;
-    mctx.fillStyle = "#fff";
-    mctx.fillRect(0, 0, w, h);
-    return new Selection(x0, y0, w, h, maskCanvas);
+    return Selection.full(w, h, x0, y0);   // 整数硬边矩形：直接全 255（旧 fillRect 同语义，省 canvas）
   }
   _rasterizeEllipseToSelection(r: DraftRect | null): SelectionLike | null {
     if (!r) return null;
@@ -266,7 +257,7 @@ export class LassoEngine {
     mctx.beginPath();
     mctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
     mctx.fill();
-    return new Selection(x0, y0, w, h, maskCanvas);
+    return Selection.fromAlphaCanvas(x0, y0, maskCanvas);   // AA 椭圆同 freehand：Canvas2D 光栅 → gray8 tile
   }
   // 魔术棒：tap → flood fill 颜色差 ≤ threshold 的相邻像素入选。
   //
@@ -346,28 +337,23 @@ export class LassoEngine {
     // v242：魔术棒只产生「贴着 AA 边缘半透明处停下」的原始选区，不再 bake 任何膨胀。
     //   白边修法 = 对选区跑「扩张」编辑 op（Selection.morphed），用户自己把控量。
     const tw = mxx - mnx + 1, th = mxy - mny + 1;
-    const maskCanvas = makeBitmap(tw, th);
-    const mctx = maskCanvas.getContext("2d")!;
-    const out = mctx.createImageData(tw, th);
-    const odata = out.data;
+    const g = new Uint8Array(tw * th);
     for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
-      const accepted = combined[(mny + y) * docW + (mnx + x)] === 1;
-      const o = (y * tw + x) * 4;
-      odata[o] = 255; odata[o + 1] = 255; odata[o + 2] = 255;
-      odata[o + 3] = accepted ? 255 : 0;
+      if (combined[(mny + y) * docW + (mnx + x)] === 1) g[y * tw + x] = 255;
     }
-    mctx.putImageData(out, 0, 0);
-    return new Selection(mnx, mny, tw, th, maskCanvas);
+    return Selection.fromGray8Region(mnx, mny, tw, th, g);   // v0.4.6：flood 结果直转 gray8 tile，canvas 中转死
   }
   // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
   _applySelectionUpdate(newSel: SelectionLike) {
     if (!this.doc) return null;
     const oldSel = this.doc.selection;
     const merged = Selection.compose(oldSel, newSel, this._setOpMode);
+    if (merged !== newSel) newSel.dispose();   // v0.4.6：union/subtract/intersect 只读消费 newSel → 就地释放
     if (oldSel === merged) { this.onChange(); return null; }
     this.doc.selection = merged;
     this.onChange();
     return { type: "selectionChange", before: oldSel, after: merged };
+    // before(=oldSel) 所有权随 entry 交给 ops.selection（input._pushSelEntry）；merged 归 doc.selection。
   }
 
   // -------- 模式切换 --------

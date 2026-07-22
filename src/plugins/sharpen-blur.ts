@@ -48,7 +48,7 @@ export class SharpenBlurFilter {
   //   - threshold（|luma diff| < 4 跳过）= 抗噪（PS Unsharp Mask 的 threshold 参数）
   //   - k = amt/100（不再 ×2）减弱过冲
   //   模糊 path 保持 box blur N iter
-  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: FilterParams, mask: Uint8ClampedArray | null, w: number, h: number): void {
+  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: FilterParams, mask: Uint8Array | null, w: number, h: number): void {
     const amt = (p.amount as number) | 0;
     if (amt === 0) { dstData.set(srcData); return; }
     if (amt < 0) {
@@ -71,7 +71,7 @@ export class SharpenBlurFilter {
     const N = srcData.length / 4;
     for (let i = 0; i < N; i++) {
       const o = i * 4;
-      if (mask && mask[o + 3] < 128) {
+      if (mask && mask[o >> 2] < 128) {
         dstData[o] = srcData[o]; dstData[o+1] = srcData[o+1];
         dstData[o+2] = srcData[o+2]; dstData[o+3] = srcData[o+3];
         continue;
@@ -113,11 +113,11 @@ export class SharpenBlurFilter {
       }
     }
   }
-  static _boxBlur3(src: Uint8ClampedArray, dst: Uint8ClampedArray, w: number, h: number, mask: Uint8ClampedArray | null): void {
+  static _boxBlur3(src: Uint8ClampedArray, dst: Uint8ClampedArray, w: number, h: number, mask: Uint8Array | null): void {
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const o = (y * w + x) * 4;
-        if (mask && mask[o + 3] < 128) {
+        if (mask && mask[o >> 2] < 128) {
           dst[o] = src[o]; dst[o+1] = src[o+1]; dst[o+2] = src[o+2]; dst[o+3] = src[o+3];
           continue;
         }

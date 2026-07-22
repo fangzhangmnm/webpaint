@@ -24,12 +24,9 @@ interface Viewport { tx: number; ty: number; scale: number; rot: number; }
 // 光标预览（screen CSS px；size 是 doc px）
 interface Cursor { x: number; y: number; size: number; square?: boolean; aspect?: number; rotation?: number; }   // aspect=椭圆度(0..1)、rotation=斜度(弧度，resolved 值)：footprint 预览
 
-// 选区（doc.selection）：alpha mask + bbox（与 selection-ops 的形状一致）
-interface Selection {
-  bboxX: number; bboxY: number; bboxW: number; bboxH: number;
-  maskCanvas: CanvasImageSource;
-  outline(): number[][];
-}
+// 选区（doc.selection）：gray8 tile mask + 紧 bbox（真类型在 selection.ts；v0.4.6 maskCanvas 死）
+import type { Selection } from "./selection.ts";
+import { antsOutline } from "./marching-ants.ts";
 
 // 自由变换浮层网格点 / source / float 描述（lassoInfo.floating）
 interface MeshPt { x: number; y: number; }
@@ -654,7 +651,7 @@ export class Board {
       stamps: cs.stamps, shape: cs.shape, bx: cs.bx, by: cs.by, bw: cs.bw, bh: cs.bh,
       layerId: cs.layer.id, opacity: cs.opacity, erase: cs.mode === "erase", blendMode: cs.blendMode,
       lockAlpha: !!cs.layer.lockAlpha,
-      selMask: sel ? { canvas: sel.maskCanvas as unknown as CanvasImageSource, ox: sel.bboxX, oy: sel.bboxY, ow: sel.bboxW, oh: sel.bboxH } : null,
+      selMask: sel ? (() => { const m = (sel as Selection).bboxMask(); return { data: m.data, ox: m.x, oy: m.y, ow: m.w, oh: m.h }; })() : null,
     };
   }
 
@@ -758,7 +755,7 @@ export class Board {
     // 不要动画（user 反馈太干扰）。线宽 1 / scale = 1 CSS px。
     if (info.selection && !info.floating) {
       const s = info.selection;
-      const chains = s.outline();
+      const chains = antsOutline(s as Selection);
       ctx.save();
       // 用 polyline chains（每条 = 一个 subpath）让 dash 沿整条边流。
       // 否则 marching squares 几百段都是 ~1 doc px 短 subpath，dash 在每段

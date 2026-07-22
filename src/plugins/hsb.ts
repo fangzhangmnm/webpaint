@@ -54,7 +54,7 @@ export class HsbFilter {
     }));
   }
 
-  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: HsbParams, mask: Uint8ClampedArray | null) {
+  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: HsbParams, mask: Uint8Array | null) {
     const b = 1 + (p.brightness / 100);
     const c = 1 + (p.contrast / 100);
     const sat = p.saturation / 100;       // -1..1
@@ -76,7 +76,7 @@ export class HsbFilter {
     const N = srcData.length / 4;
     for (let i = 0; i < N; i++) {
       const o = i * 4;
-      if (mask && mask[o + 3] < 128) {
+      if (mask && mask[o >> 2] < 128) {
         dstData[o] = srcData[o]; dstData[o+1] = srcData[o+1];
         dstData[o+2] = srcData[o+2]; dstData[o+3] = srcData[o+3];
         continue;

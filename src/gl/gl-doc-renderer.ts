@@ -37,7 +37,9 @@ export interface StampOverlayInput {
   bx: number; by: number; bw: number; bh: number;
   layerId: number; opacity: number; erase: boolean; blendMode: string;
   lockAlpha: boolean;
-  selMask: { canvas: CanvasImageSource; ox: number; oy: number; ow: number; oh: number } | null;
+  // v0.4.6：选区 mask 直传 gray8 平面（Selection.bboxMask() 的缓存 buffer；R8 纹理，shader 采 .r）。
+  //   S7 改走 cpu-gpu-tile-bridge（per-tile 上传 + 复用）。
+  selMask: { data: Uint8Array; ox: number; oy: number; ow: number; oh: number } | null;
 }
 
 export class GLDocRenderer {
@@ -48,7 +50,8 @@ export class GLDocRenderer {
   private _rasterizer: GLStampRasterizer;
   private _overlayOwnedFBO: PooledFBO | null = null;   // setStampOverlay 借的 straight FBO，合成后归还
   private _layerTiles = new Map<number, LayerTiles>();
-  private _selTex: WebGLTexture | null = null;   // GPU overlay 选区蒙版（复用，每帧重传）
+  private _selTex: WebGLTexture | null = null;   // GPU overlay 选区蒙版（复用；同一 buffer 不重传）
+  private _selTexSrc: Uint8Array | null = null;  // 上次上传的 gray8 buffer 身份（Selection 不可变 → 身份即内容）
   private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number; lockAlpha: boolean; selMask: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null } | null = null;
   // 自由变换浮层：per-源层 id 一张复用纹理（warp 每帧变，重传）+ 当前帧描述。
   private _floatTex = new Map<number, { tex: WebGLTexture; canvas: CanvasImageSource | null }>();
@@ -108,6 +111,8 @@ export class GLDocRenderer {
     this._backend.recreate();
     this._pool.reset();
     this._layerTiles.clear();   // 旧 index/tileMap 的 GL 句柄已随 context 失效，弃引用（死对象 GC；不 dispose）
+    this._selTex = null;        // v0.4.6：选区纹理随 context 死 → 弃引用，下次 setStampOverlay 重建重传
+    this._selTexSrc = null;
   }
 
   // 删层时释放其 GPU tiles。
@@ -144,10 +149,15 @@ export class GLDocRenderer {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       }
-      gl.bindTexture(gl.TEXTURE_2D, this._selTex);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, ov.selMask.canvas as TexImageSource);
-      gl.bindTexture(gl.TEXTURE_2D, null);
+      if (this._selTexSrc !== ov.selMask.data) {   // 选区没换就不重传（Selection 不可变，buffer 身份稳定）
+        gl.bindTexture(gl.TEXTURE_2D, this._selTex);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);    // gray8 行宽任意 → 必须 1 字节对齐（默认 4 会读歪）
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, ov.selMask.ow, ov.selMask.oh, 0, gl.RED, gl.UNSIGNED_BYTE, ov.selMask.data);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        this._selTexSrc = ov.selMask.data;
+      }
       selMask = { tex: this._selTex, ox: ov.selMask.ox, oy: ov.selMask.oy, ow: ov.selMask.ow, oh: ov.selMask.oh };
     }
     this._overlay = { tex: fboS.tex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: 0, oy: 0, ow: docW, oh: docH, lockAlpha: ov.lockAlpha, selMask };

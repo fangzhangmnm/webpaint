@@ -24,7 +24,7 @@ interface FilterLike {
   id: string; title: string; modes: string[]; category?: string;
   defaults(): Record<string, unknown>;
   buildBody(body: HTMLElement, state: unknown, onChange: () => void): void;
-  bake(src: Uint8ClampedArray, out: Uint8ClampedArray, params: unknown, mask: Uint8ClampedArray | null, w: number, h: number): void;
+  bake(src: Uint8ClampedArray, out: Uint8ClampedArray, params: unknown, mask: Uint8Array | null, w: number, h: number): void;
   brushVariants?: { id: string; title: string; params: Record<string, unknown> }[];
   boundaryModes?: { id: string; title: string }[];
 }
@@ -38,7 +38,7 @@ interface AdjustState {
   // beforeSnap = tile 句柄快照（undo 包用）：apply 时所有权交给 pixels op；cancel 时须 disposeLayerSnap。
   // 预览数学不读它 —— 预览用的源像素是 surrogate canvas 的 srcImg（getImageData 物化）。
   beforeSnap: LayerSnap; sur: HTMLCanvasElement; surCtx: CanvasRenderingContext2D;
-  srcImg: ImageData; maskData: Uint8ClampedArray | null; _rafId: number;
+  srcImg: ImageData; maskData: Uint8Array | null; _rafId: number;
   picker: FilterLike[] | null;
 }
 
@@ -79,14 +79,10 @@ function _initFilterSurrogate(L: AdjustLayer) {
   const surCtx = sur.getContext("2d")!;
   surCtx.drawImage(L.canvas, 0, 0);
   const srcImg = surCtx.getImageData(0, 0, L.bboxW, L.bboxH);
-  let maskData = null;
+  let maskData: Uint8Array | null = null;
   if (doc.selection) {
-    const m = document.createElement("canvas");
-    m.width = L.bboxW; m.height = L.bboxH;
-    const mctx = m.getContext("2d")!;
-    mctx.drawImage(doc.selection.maskCanvas,
-      doc.selection.bboxX - L.bboxX, doc.selection.bboxY - L.bboxY);
-    maskData = mctx.getImageData(0, 0, L.bboxW, L.bboxH).data;
+    // v0.4.6：gray8 窄读口（layer.bbox 对齐平面），canvas 中转死
+    maskData = doc.selection.materializeMaskRegion(L.bboxX, L.bboxY, L.bboxW, L.bboxH);
   }
   return { sur, surCtx, srcImg, maskData };
 }

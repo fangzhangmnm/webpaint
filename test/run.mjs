@@ -62,6 +62,7 @@ import "./pointer-route.test.mjs";
 import "./stroke-input-smooth.test.mjs";
 import "./stroke-smoother.test.mjs";
 import "./selection-morph.test.mjs";
+import "./selection-tiles.test.mjs";       // S5：gray8 tile 选区底座（布尔/所有权/ants/SwapSelectionOp）
 import "./floating-transform.test.mjs";     // Slice 1/3：浮层变换深模块（free/uniform/distort/旋转/平移/投影 + 多 source 映射）
 import "./editable-leaf.test.mjs";          // Slice 4：requireEditableLeaf 单谓词（组/隐藏 gate）
 import "./doc-rotate.test.mjs";             // v258 逆时针旋转 90°（bbox 公式 + 4 次恒等 + 方向）

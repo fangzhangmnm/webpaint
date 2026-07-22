@@ -18,6 +18,7 @@ const errMsg = (e: unknown): string => String((e as { message?: unknown })?.mess
 
 // doc 活层 / Selection 的最小结构（doc/selection.js 未类型化 → 只描述本文件用到的几何字段）。
 interface LayerLike { bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; }
+// （v0.4.6：Selection.maskCanvas 死 → 本文件 Canvas2D 合成走 materializeMaskCanvas() 物化缓存）
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // app 单例 / 跨模块函数（initSelectionOps 注入）
@@ -40,7 +41,7 @@ function _extractSelectionRegionCanvas(layer: LayerLike, sel: Selection) {
   const cx = c.getContext("2d")!;
   cx.drawImage(layer.canvas, x0 - lbX, y0 - lbY, w, h, 0, 0, w, h);
   cx.globalCompositeOperation = "destination-in";   // 裁到选区形状
-  cx.drawImage(sel.maskCanvas, sel.bboxX - x0, sel.bboxY - y0);
+  cx.drawImage(sel.materializeMaskCanvas() as CanvasImageSource, sel.bboxX - x0, sel.bboxY - y0);
   cx.globalCompositeOperation = "source-over";
   return c;
 }
@@ -64,14 +65,14 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   const nctx = nc.getContext("2d", { willReadFrequently: false })!;
   nctx.drawImage(src.canvas, src.bboxX - sel.bboxX, src.bboxY - sel.bboxY);
   nctx.globalCompositeOperation = "destination-in";
-  nctx.drawImage(sel.maskCanvas, 0, 0);
+  nctx.drawImage(sel.materializeMaskCanvas() as CanvasImageSource, 0, 0);
   nctx.globalCompositeOperation = "source-over";
   newL.replaceFromCanvas(nc, sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
   if (move) {
     // 从源层挖洞（destination-out 选区形状）
     src.editRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (ctx, ox, oy) => {
       ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(sel.maskCanvas, sel.bboxX - ox, sel.bboxY - oy);
+      ctx.drawImage(sel.materializeMaskCanvas() as CanvasImageSource, sel.bboxX - ox, sel.bboxY - oy);
     });
   }
   const loc = doc.locateNode(newL.id)!;   // {parentId, index}：组内也精确（undo 摘层 / redo insertLayerAt 用）

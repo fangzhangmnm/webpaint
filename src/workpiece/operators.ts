@@ -78,6 +78,17 @@ export class SwapPixelsOp extends DocumentOperator<SwapPixelsArgs, LayerSnap> {
 }
 
 // ---- ① 选区 swap（selectionChange：圈选/清选/反选/全选）。Selection 不可变 → 纯引用交换 ----
+// v0.4.6：Selection 底座换 gray8 tile 句柄 → 配额与 LayerSnap 同规（压缩前 0、压缩后按压缩字节/refCount），
+// 驱逐/截断经 disposeData 释放句柄（Selection.dispose）。
+function estimateSelectionBytes(sel: Selection | null | undefined): number {
+  if (!sel || sel.disposed) return 0;
+  let sum = 0;
+  for (const h of sel.tileHandles()) {
+    if (h.released) continue;
+    if (h.isCompressed()) sum += Math.ceil(h.compressedByteLength() / Math.max(1, h.refCount()));
+  }
+  return sum;
+}
 export interface SwapSelectionArgs { _initialBefore?: { v: Selection | null } | null }
 type SelBox = { v: Selection | null };
 export class SwapSelectionOp extends DocumentOperator<SwapSelectionArgs, SelBox> {
@@ -100,8 +111,15 @@ export class SwapSelectionOp extends DocumentOperator<SwapSelectionArgs, SelBox>
     doc.selection = data.v;
     return { ok: true, replaced: cur };
   }
-  override estimateQuotaBytes(_a: SwapSelectionArgs, data: SelBox | undefined): number {
-    return data?.v ? Math.max(1024, data.v.bboxW * data.v.bboxH) : 64;
+  override estimateQuotaBytes(args: SwapSelectionArgs, data: SelBox | undefined): number {
+    return 512 + estimateSelectionBytes(data?.v) + estimateSelectionBytes(args._initialBefore?.v);
+  }
+  override disposeData(args: SwapSelectionArgs, data: SelBox | undefined): void {
+    if (args._initialBefore) {
+      if (args._initialBefore.v && !args._initialBefore.v.disposed) args._initialBefore.v.dispose();
+      args._initialBefore = null;
+    }
+    if (data?.v && !data.v.disposed) data.v.dispose();
   }
 }
 
@@ -339,11 +357,15 @@ export class DocTransformOp extends DocumentOperator<DocTransformArgs, boolean> 
     return { ok: true, replaced: true };
   }
   override estimateQuotaBytes(args: DocTransformArgs): number {
-    return 1024 + estimateDeepBytes(args.before.doc.layers) + estimateDeepBytes(args.after.doc.layers);
+    return 1024 + estimateDeepBytes(args.before.doc.layers) + estimateDeepBytes(args.after.doc.layers)
+      + estimateSelectionBytes(args.before.doc.selection) + estimateSelectionBytes(args.after.doc.selection);
   }
   override disposeData(args: DocTransformArgs): void {
     disposeDeepSnapNodes(args.before.doc.layers);
     disposeDeepSnapNodes(args.after.doc.layers);
+    // v0.4.6：快照持有的 selection clone（tile 句柄）一并释放。
+    if (args.before.doc.selection && !args.before.doc.selection.disposed) args.before.doc.selection.dispose();
+    if (args.after.doc.selection && !args.after.doc.selection.disposed) args.after.doc.selection.dispose();
   }
 }
 

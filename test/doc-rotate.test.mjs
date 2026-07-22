@@ -164,10 +164,11 @@ describe("Selection.rotated90CCW · bbox 公式 + 4 次恒等", () => {
     eq(s1.bboxH, exp.h, "selH");
     // 4 次回原：尺寸 20×12 →(旋)→ 12×20 →20×12 →12×20 →20×12
     let s = s0, dims = [[20, 12], [12, 20], [20, 12], [12, 20]];
-    for (let k = 0; k < 4; k++) s = s.rotated90CCW(dims[k][0], dims[k][1]);
+    for (let k = 0; k < 4; k++) { const prev = s; s = s.rotated90CCW(dims[k][0], dims[k][1]); if (prev !== s0) prev.dispose(); }
     eq(s.bboxX, s0.bboxX, "sel bboxX 回原");
     eq(s.bboxY, s0.bboxY, "sel bboxY 回原");
     eq(s.bboxW, s0.bboxW, "sel bboxW 回原");
     eq(s.bboxH, s0.bboxH, "sel bboxH 回原");
+    s0.dispose(); s.dispose(); s1.dispose();
   });
 });

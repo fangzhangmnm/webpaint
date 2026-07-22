@@ -63,7 +63,7 @@ export class ColorBalanceFilter {
     axisRows("hi");
   }
 
-  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: ColorBalanceParams, mask: Uint8ClampedArray | null) {
+  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: ColorBalanceParams, mask: Uint8Array | null) {
     // 三段 luma 权重函数（每段高斯 σ≈0.25，中心 0 / 0.5 / 1）
     const wShadow = new Float32Array(256);
     const wMid    = new Float32Array(256);
@@ -87,7 +87,7 @@ export class ColorBalanceFilter {
     const N = srcData.length / 4;
     for (let i = 0; i < N; i++) {
       const o = i * 4;
-      if (mask && mask[o + 3] < 128) {
+      if (mask && mask[o >> 2] < 128) {
         dstData[o] = srcData[o]; dstData[o+1] = srcData[o+1];
         dstData[o+2] = srcData[o+2]; dstData[o+3] = srcData[o+3];
         continue;

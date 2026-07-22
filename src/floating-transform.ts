@@ -143,6 +143,7 @@ export class FloatingTransform {
     }
     if (!sel || !layer) return [];
     const src = bakeSource(sel, layer, opts);
+    if (sel !== selection) sel.dispose();   // v0.4.6：本地隐式全选（tile 句柄）用完即弃
     return src ? [src] : [];
   }
 
@@ -156,8 +157,10 @@ export class FloatingTransform {
         // 无选区：fallback = 每叶整层全选（整组按各自内容一起动）。无 fallback → 不动该叶。
         if (!opts.fallbackFullLayer || leaf.bboxW <= 0 || leaf.bboxH <= 0) continue;
         sel = Selection.full(leaf.bboxW, leaf.bboxH, leaf.bboxX, leaf.bboxY);
+        if (!sel) continue;
       }
-      const src = bakeSource(sel!, leaf, opts);
+      const src = bakeSource(sel, leaf, opts);
+      if (sel !== selection) sel.dispose();   // v0.4.6：本地隐式全选用完即弃
       if (src) sources.push(src);
     }
     return sources;
@@ -636,7 +639,7 @@ export function bakeSource(sel: Selection, layer: Layer, opts: LiftOpts = {}): S
   const fctx = floating.getContext("2d")!;
   fctx.drawImage(layer.canvas, x0 - lbX, y0 - lbY, w, h, 0, 0, w, h);
   fctx.globalCompositeOperation = "destination-in";
-  fctx.drawImage(sel.maskCanvas, sel.bboxX - x0, sel.bboxY - y0);
+  fctx.drawImage(sel.materializeMaskCanvas() as CanvasImageSource, sel.bboxX - x0, sel.bboxY - y0);
   fctx.globalCompositeOperation = "source-over";
   const floatingImageData = fctx.getImageData(0, 0, w, h);
 
@@ -672,7 +675,7 @@ export function bakeSource(sel: Selection, layer: Layer, opts: LiftOpts = {}): S
   if (opts.cut !== false) {
     layer.editRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (ctx, ox, oy) => {
       ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(sel.maskCanvas, sel.bboxX - ox, sel.bboxY - oy);
+      ctx.drawImage(sel.materializeMaskCanvas() as CanvasImageSource, sel.bboxX - ox, sel.bboxY - oy);
     });
   }
 

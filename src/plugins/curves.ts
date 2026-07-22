@@ -227,7 +227,7 @@ export class CurvesFilter {
     draw();
   }
 
-  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: CurvesParams, mask: Uint8ClampedArray | null): void {
+  static bake(srcData: Uint8ClampedArray, dstData: Uint8ClampedArray, p: CurvesParams, mask: Uint8Array | null): void {
     const lutComp = CurvesFilter._buildLut(p.comp);
     const lutR    = CurvesFilter._buildLut(p.r);
     const lutG    = CurvesFilter._buildLut(p.g);
@@ -236,7 +236,7 @@ export class CurvesFilter {
     const N = srcData.length / 4;
     for (let i = 0; i < N; i++) {
       const o = i * 4;
-      if (mask && mask[o + 3] < 128) {
+      if (mask && mask[o >> 2] < 128) {
         dstData[o] = srcData[o]; dstData[o+1] = srcData[o+1];
         dstData[o+2] = srcData[o+2]; dstData[o+3] = srcData[o+3];
         continue;

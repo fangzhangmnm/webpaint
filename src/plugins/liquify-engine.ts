@@ -73,7 +73,7 @@ interface LiquifyStroke {
   dirty: [number, number, number, number] | null;
   startSnap: LayerSnapshot;
   dispField: DispField;
-  maskData: Uint8ClampedArray | null;
+  maskData: Uint8Array | null;
   maskBbox: { x: number; y: number; w: number; h: number } | null;
 }
 
@@ -84,7 +84,7 @@ export class LiquifyEngine {
     this._stroke = null;
   }
 
-  // v124 selection 参数：{ maskCanvas, bboxX, bboxY, bboxW, bboxH } 来自 doc.selection。
+  // v124 selection 参数：Selection（gray8 tile mask）来自 doc.selection。
   // 给了就在每个 stamp 内 mask 外像素**保留 startSnap**（不液化）→ live preview 立刻
   // 看到选区限制，跟 brush 一致；commit 时 Selection.applyMaskPostStroke 兜底也无害。
   //
@@ -97,14 +97,12 @@ export class LiquifyEngine {
     const lbW = Math.max(1, layer.bboxW);
     const lbH = Math.max(1, layer.bboxH);
     const bleed = settings.bleed || "edge";
-    // 把 selection mask 烤进一个 Uint8 array 与 layer.bbox 对齐 (mask alpha 通道 0..255)
-    let maskData: Uint8ClampedArray | null = null;
+    // 把 selection mask 烤进一个 gray8 平面，与 layer.bbox 对齐（0..255）。
+    // ⚠ H7 已知 bug 保留：mask 按 layer.bbox 烤 → 内容被推出旧 bbox 的部分误判"选区外"。
+    //   S5 只换数据源（doc 空间 tile → 窄读口）；按 doc 空间采样的根治属 S8 液化重写（charter H7，RED）。
+    let maskData: Uint8Array | null = null;
     if (selection) {
-      const c = document.createElement("canvas");
-      c.width = lbW; c.height = lbH;
-      const cctx = c.getContext("2d")!;
-      cctx.drawImage(selection.maskCanvas, selection.bboxX - layer.bboxX, selection.bboxY - layer.bboxY);
-      maskData = cctx.getImageData(0, 0, lbW, lbH).data;   // RGBA, 看 [i*4+3]
+      maskData = selection.materializeMaskRegion(layer.bboxX, layer.bboxY, lbW, lbH);
     }
     this._stroke = {
       layer,
@@ -179,7 +177,7 @@ export class LiquifyEngine {
     const cellIn = (ix: number, iy: number) => {
       const mx = ix - maskX, my = iy - maskY;
       if (mx < 0 || my < 0 || mx >= maskW || my >= maskH) return false;
-      return maskData![(my * maskW + mx) * 4 + 3] >= 128;
+      return maskData![my * maskW + mx] >= 128;
     };
     // doc 坐标 (px,py)（四舍五入到最近 cell）是否在选区内
     const inMask = (px: number, py: number) => cellIn(Math.round(px), Math.round(py));

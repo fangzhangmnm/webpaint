@@ -348,7 +348,7 @@ export class PaintDoc {
     // 背景色：手感期固定白纸。后期开 doc.background 概念时再补。
     this.backgroundColor = "#ffffff";
     // 选区（一等公民）。null = 没选区 = 所有像素都可作用。详见 docs/20260528-lasso-and-selection.md。
-    //   { bboxX, bboxY, bboxW, bboxH, maskCanvas } —— maskCanvas alpha = mask（255 内 / 0 外）
+    //   （v0.4.6：gray8 tile mask + 紧 bbox；类型/所有权纪律见 selection.ts 头注释）
     this.selection = null;
     // 参考层：unique。null = 用 active 层做魔棒 / 油漆桶的源。否则用这一层
     // （线稿在它上面、上色在 active 上的工作流）
@@ -379,6 +379,7 @@ export class PaintDoc {
     this.height = loaded.height;
     this.backgroundColor = loaded.backgroundColor;
     this.referenceLayerId = loaded.referenceLayerId ?? null;
+    if (this.selection && !this.selection.disposed) this.selection.dispose();   // v0.4.6：句柄释放
     this.selection = null;
   }
 
@@ -845,7 +846,7 @@ export class PaintDoc {
       activeId: this.activeId,
       activeIndex: this.activeIndex,   // 兼容：旧 restore 走 index
       referenceLayerId: this.referenceLayerId,
-      selection: this.selection,   // 不可变 → 存引用，不深拷
+      selection: this.selection ? this.selection.clone() : null,   // v0.4.6：句柄别名 clone（零拷贝），快照自持所有权
       layers: this.layers.map((n) => this._nodeSnap(n)),
     };
   }
@@ -862,7 +863,10 @@ export class PaintDoc {
     this.width = snap.width;
     this.height = snap.height;
     this.referenceLayerId = snap.referenceLayerId;
-    this.selection = snap.selection;   // 不可变引用
+    // v0.4.6：快照可反复 restore（undo/redo 往复）→ 装 clone，快照自身的 clone 仍归快照（op disposeData 释放）。
+    const oldSel = this.selection;
+    this.selection = snap.selection && !snap.selection.disposed ? snap.selection.clone() : null;
+    if (oldSel && !oldSel.disposed) oldSel.dispose();
     this.layers = snap.layers.map((s) => this._nodeFromSnap(s));
     if (snap.activeId != null && findNodeById(this.layers, snap.activeId)) this.activeId = snap.activeId;
     else this.activeIndex = snap.activeIndex || 0;
@@ -877,7 +881,9 @@ export class PaintDoc {
       L.setPixels(L.pixels.cropped(dx, dy, nw, nh), nw, nh);   // 纯 tile：裁切 + 新 doc 尺寸
     }
     if (this.selection) {
-      this.selection = this.selection.croppedTo(dx, dy, nw, nh);
+      const old = this.selection;
+      this.selection = old.croppedTo(dx, dy, nw, nh);
+      if (old !== this.selection) old.dispose();   // v0.4.6：旧 mask 句柄释放（undo 侧有 snapshotAll clone）
     }
     this.width = nw;
     this.height = nh;
@@ -891,7 +897,9 @@ export class PaintDoc {
       L.setPixels(L.pixels.flippedHorizontal(), L.docW, L.docH);   // 纯 tile 水平镜像
     }
     if (this.selection) {
-      this.selection = this.selection.flippedHorizontal(W);
+      const old = this.selection;
+      this.selection = old.flippedHorizontal(W);
+      if (old !== this.selection) old.dispose();
     }
   }
 
@@ -910,7 +918,9 @@ export class PaintDoc {
       L.setPixels(L.pixels.rotated90CCW(), H, W);   // 纯 tile 逆时针 90°（新 doc = H×W）
     }
     if (this.selection) {
-      this.selection = this.selection.rotated90CCW(W, H);
+      const old = this.selection;
+      this.selection = old.rotated90CCW(W, H);
+      if (old !== this.selection) old.dispose();
     }
     this.width = H;
     this.height = W;
@@ -943,7 +953,9 @@ export class PaintDoc {
       L.remapPixels(nw, nh, nc, nbx, nby, nbw, nbh);
     }
     if (this.selection) {
-      this.selection = this.selection.resampledTo(sx, sy, smooth, quality);
+      const old = this.selection;
+      this.selection = old.resampledTo(sx, sy, smooth, quality);
+      if (old !== this.selection) old.dispose();
     }
     this.width = nw;
     this.height = nh;
@@ -967,7 +979,9 @@ export class PaintDoc {
       L.setPixels(L.pixels.offsetWrapped(ox, oy), W, H);   // 纯 tile 环绕偏移
     }
     if (this.selection) {
-      this.selection = this.selection.offsetWrapped(ox, oy, W, H);
+      const old = this.selection;
+      this.selection = old.offsetWrapped(ox, oy, W, H);
+      if (old !== this.selection) old.dispose();
     }
     // doc 尺寸不变
   }

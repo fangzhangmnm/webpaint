@@ -71,7 +71,7 @@ export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled", 
          if (u_ovLockAlpha == 1) ovA *= base.a;                    // 锁α：裁到层现有 alpha（dst-in 层）
          if (u_ovHasSel == 1) {                                    // 选区：裁到 mask（dst-in 选区）
            vec2 suv = (docPos - u_ovSelOrigin) / u_ovSelSize;
-           ovA *= (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) ? 0.0 : texture(u_ovSel, suv).a;
+           ovA *= (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) ? 0.0 : texture(u_ovSel, suv).r;   // R8 gray8 直传（v0.4.6）
          }
          float srcA; vec3 Cs;
          if (u_overlayErase == 1) {
@@ -108,7 +108,7 @@ uniform vec2 u_ovOrigin;
 uniform vec2 u_ovSize;
 uniform int u_ovLockAlpha;      // 1=锁α（overlay 裁到 base 现有 alpha，对齐 2D _clipOverlayMasks dst-in 层）
 uniform int u_ovHasSel;         // 1=有选区蒙版
-uniform sampler2D u_ovSel;      // 选区 mask（bbox 直值）
+uniform sampler2D u_ovSel;      // 选区 mask（R8 gray8，bbox 直值；采 .r）
 uniform vec2 u_ovSelOrigin;     // 选区 mask 的 doc bbox 左上
 uniform vec2 u_ovSelSize;       // 选区 mask 的 doc bbox 尺寸
 out vec4 o;

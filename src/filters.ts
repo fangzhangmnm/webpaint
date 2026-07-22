@@ -23,8 +23,8 @@
 //     在 container 里建 DOM。改 state.params 后调 onChange() 触发预览。
 //     插件可放任何 UI——slider、色环、canvas、color ramp 等。
 //   static bake(srcData, dstData, params, mask, w, h) :
-//     纯函数 src→dst（同尺寸）。mask=null 时全图，mask = Uint8ClampedArray，
-//     mask[i*4+3] = alpha；< 128 时该像素 passthrough。
+//     纯函数 src→dst（同尺寸）。mask=null 时全图，mask = gray8 Uint8Array（v0.4.6：
+//     Selection.materializeMaskRegion 窄读口产物），mask[i] < 128 时该像素 passthrough。
 //
 // ============= 插件加载（future）=============
 // window.WebPaint.registerFilter(MyFilterClass) — 暴露在 app.js 末尾
@@ -54,7 +54,7 @@ export interface Filter {
     srcData: Uint8ClampedArray,
     dstData: Uint8ClampedArray,
     params: FilterParams,
-    mask: Uint8ClampedArray | null,
+    mask: Uint8Array | null,
     w: number,
     h: number,
   ): void;
@@ -93,9 +93,9 @@ export interface BrushSettings {
 }
 
 export interface BrushSelection {
-  maskCanvas: CanvasImageSource;
   bboxX: number;
   bboxY: number;
+  materializeMaskRegion(x0: number, y0: number, w: number, h: number): Uint8Array;   // gray8 窄读口（selection.ts）
 }
 
 export type DirtyRect = [number, number, number, number];
@@ -263,14 +263,8 @@ function _colorBrushStamp(state: ColorBrushState, cx: number, cy: number, pressu
   FilterClass.bake(srcImg.data, dstImg.data, params, null, ew, eh);
   const ox = sx0 - ex0, oy = sy0 - ey0;
   const sw = sx1 - sx0, sh = sy1 - sy0;
-  let selData: Uint8ClampedArray | null = null;
-  if (selection) {
-    const sc = document.createElement("canvas");
-    sc.width = sw; sc.height = sh;
-    const sctx = sc.getContext("2d")!;
-    sctx.drawImage(selection.maskCanvas, selection.bboxX - sx0, selection.bboxY - sy0);
-    selData = sctx.getImageData(0, 0, sw, sh).data;
-  }
+  let selData: Uint8Array | null = null;
+  if (selection) selData = selection.materializeMaskRegion(sx0, sy0, sw, sh);   // v0.4.6：gray8 窄读，canvas 中转死
   const layerImg = layer.getImageData(sx0, sy0, sw, sh);
   const layerData = layerImg.data;
   const flow = Math.max(0, Math.min(1, brushSettings.flow ?? brushSettings.opacity ?? 1));
@@ -288,7 +282,7 @@ function _colorBrushStamp(state: ColorBrushState, cx: number, cy: number, pressu
         stampA = 1 - (t * t * (3 - 2 * t));
       }
       let a = stampA * flow;
-      if (selData) a *= selData[(j * sw + i) * 4 + 3] / 255;
+      if (selData) a *= selData[j * sw + i] / 255;
       if (a <= 0) continue;
       const lo = (j * sw + i) * 4;
       const fo = ((j + oy) * ew + (i + ox)) * 4;
