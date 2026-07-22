@@ -12,11 +12,15 @@
   （建议用 venv 跑：~/venvs/pwa-tools/bin/python tools/loc-history.py）
 
 产物（默认落 docs/reports/loc/）：
-    loc-history.png      —— 上图=累计代码行数曲线，下图=每 commit 增删柱
+    loc-history.png      —— 上图=累计代码行数曲线(+里程碑竖线)，下图=每 commit 增删柱
     loc-history.csv      —— 同数据的表（seq,hash,date,added,deleted,net,total,subject）
     commit-summaries.md  —— 每次 commit 一行短概述
-    benchmark.md         —— 自省记分卡（总览 + 逐月表）
-    benchmark.png        —— 逐月「变更熵 + 返工率」图（season-over-season 用）
+    benchmark.md         —— 自省记分卡（过程质量 + 成品质量 + 逐 session 表）
+    benchmark.png        —— 逐 session「变更熵 + 返工率」图
+
+里程碑（LOC 图上的竖线）来自 tools/loc-milestones.json（跟脚本同目录，已入库）。
+要重新找里程碑：`--print-milestone-prompt` 打印固化规程，喂给一个读代码的 agent
+让它读 commit-summaries.md 产出新 json；缺 json 时自动退化到「版本号跳变」启发式。
 
 benchmark 里都是「越大越乱 / 越大越费」的标量，比 LOC 更能反映手感（尤其 AI 协作）：
   · 变更熵 Hassan–Holt（0–1，归一化）：一段时间里改动摊在多少文件上、多分散。越高越散。
@@ -34,10 +38,18 @@ benchmark 里都是「越大越乱 / 越大越费」的标量，比 LOC 更能�
 import subprocess, sys, os, csv, argparse, math, glob
 from collections import defaultdict
 
-# 不算进「代码行数」的路径前缀 / 文件（可按需加）
-EXCLUDE_PREFIX = ('vendor/', 'dist/', 'node_modules/', '.claude/')
+# 不算进「代码行数」的路径（只留「代码库本身的代码」）：
+#   排除 vendored 依赖、构建产物、测试套件、文档、归档/人类区、所有 markdown。
+EXCLUDE_PREFIX = ('vendor/', 'dist/', 'node_modules/', '.claude/',
+                  'test/', 'tests/', 'docs/', 'doc/', 'ARCHIVE/', 'bench/',
+                  'README.files/', 'journal/', 'journals/', 'workbench/',
+                  '.deprecated/', '.github/')
+EXCLUDE_SUFFIX = ('.md',)                       # 文档不算代码
 EXCLUDE_SUBSTR = ('package-lock.json', 'esbuild')
+# 测试文件也可能散在 src 里（*.test.ts / *.spec.ts）——一并排除
 # 二进制文件 numstat 出 '-' '-'，本来就会被跳过
+# 注：git 历史按 diff 原始行数累计，含注释（逐版剥注释代价太大）；
+#     当前 tree 的「真·代码行数」用 lizard NLOC（去注释/空行），见 benchmark.md。
 
 def repo_root():
     r = subprocess.run(['git', 'rev-parse', '--show-toplevel'],
@@ -46,8 +58,43 @@ def repo_root():
         sys.exit('不在 git 仓库里：' + r.stderr.strip())
     return r.stdout.strip()
 
+def model_family(trailer):
+    """把 Co-Authored-By 值归一成模型名（Opus 4.7/4.8、Fable 5…）。"""
+    t = trailer or ''
+    if 'Fable' in t:
+        return 'Fable 5'
+    if 'Opus 4.8' in t:
+        return 'Opus 4.8'          # 合并 (1M context) 与普通
+    if 'Opus 4.7' in t:
+        return 'Opus 4.7'
+    if 'Opus' in t:
+        return 'Opus (其他)'
+    if 'Sonnet' in t:
+        return 'Sonnet'
+    if 'Haiku' in t:
+        return 'Haiku'
+    if 'Claude' in t:
+        return 'Claude (其他)'
+    return '(无标注)'
+
+def commit_models(ref):
+    """{full_hash: 模型名}——从 Co-Authored-By trailer 抽（多 co-author 取第一个模型）。"""
+    r = subprocess.run(
+        ['git', 'log',
+         '--format=%H\x1f%(trailers:key=Co-authored-by,valueonly,separator=%x1e)', ref],
+        capture_output=True, text=True, errors='replace')
+    m = {}
+    for line in r.stdout.splitlines():
+        if '\x1f' not in line:
+            continue
+        h, tr = line.split('\x1f', 1)
+        m[h] = model_family(tr.split('\x1e')[0] if tr else '')
+    return m
+
 def excluded(path):
-    if path.startswith(EXCLUDE_PREFIX):
+    if path.startswith(EXCLUDE_PREFIX) or path.endswith(EXCLUDE_SUFFIX):
+        return True
+    if '.test.' in path or '.spec.' in path:   # 散在 src 里的测试文件
         return True
     return any(s in path for s in EXCLUDE_SUBSTR)
 
@@ -139,6 +186,21 @@ def bench_bucket(commits):
         per_commit=(gross / len(commits)) if commits else 0.0, # 每 commit 毛改动
     )
 
+def bench_by_model(commits):
+    """按 Co-Authored-By 模型分桶——Opus vs Fable performance eval 用。
+    附时间跨度，因为不同模型往往只在某段时间用（这是比模型差异更大的混淆项）。"""
+    groups = defaultdict(list)
+    for c in commits:
+        groups[c.get('model', '(无标注)')].append(c)
+    rows = []
+    for name, g in groups.items():
+        b = bench_bucket(g)
+        b['model'] = name
+        b['date_min'] = min(c['date'] for c in g)
+        b['date_max'] = max(c['date'] for c in g)
+        rows.append(b)
+    return sorted(rows, key=lambda b: -b['commits'])
+
 def sessionize(commits, gap_min):
     """按提交时间间隔聚成「工作 session / 心流一坐」：
     相邻 commit 间隔 < gap_min 分钟 → 同一坐；超过就断新一坐。
@@ -153,12 +215,16 @@ def sessionize(commits, gap_min):
         sessions.append(cur)
     return sessions
 
-def session_label(sess):
-    """一坐的标签：起始日期时间 + 时长 + commit 数。"""
+WEEKDAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+def session_fields(sess):
+    """一坐的结构化字段：起始(带星期) / 时长小时 / 短标签(给图用)。"""
     import datetime
-    start = datetime.datetime.fromtimestamp(sess[0]['epoch'])
+    s = datetime.datetime.fromtimestamp(sess[0]['epoch'])
     dur_h = (sess[-1]['epoch'] - sess[0]['epoch']) / 3600
-    return f"{start:%m-%d %H:%M} ({dur_h:.1f}h·{len(sess)}c)"
+    start = f'{s:%Y-%m-%d %H:%M} {WEEKDAYS[s.weekday()]}'   # 2026-06-10 14:03 周三
+    short = f'{s:%m-%d %H:%M}'                              # 图上 x 轴用
+    return start, dur_h, short
 
 def bench_buckets(commits, by, gap_min=120):
     """按 by 聚桶。返回 [(label, 记分卡), ...]，时间正序。
@@ -167,7 +233,12 @@ def bench_buckets(commits, by, gap_min=120):
     by='day'     → 每天一桶（跨午夜会切断通宵坐）
     by='month'   → 每月一桶（太粗，只当趋势看）"""
     if by == 'session':
-        return [(session_label(s), bench_bucket(s)) for s in sessionize(commits, gap_min)]
+        out = []
+        for s in sessionize(commits, gap_min):
+            b = bench_bucket(s)
+            b['start'], b['dur_h'], short = session_fields(s)
+            out.append((short, b))
+        return out
     if by == 'commit':
         return [(c['short'], bench_bucket([c])) for c in commits]
     keyf = (lambda c: c['date']) if by == 'day' else (lambda c: c['date'][:7])
@@ -176,8 +247,78 @@ def bench_buckets(commits, by, gap_min=120):
         groups[keyf(c)].append(c)
     return [(k, bench_bucket(groups[k])) for k in sorted(groups)]
 
+# --- 代码库「本身」质量（跟 rework 无关，只看当前 tree 的成品状态） ---------
+
+import re as _re
+
+# 去注释/字符串（含模板串），免得把注释里的词算进 Halstead
+_STRIP = _re.compile(
+    r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`',
+    _re.DOTALL)
+# 多字符运算符优先，再单字符标点；标识符；数字
+_TOK = _re.compile(
+    r'>>>=|\.\.\.|===|!==|>>>|\*\*=|<<=|>>=|&&=|\|\|=|\?\?=|=>|==|!=|<=|>=|'
+    r'&&|\|\||\?\?|\?\.|\+\+|--|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<|>>|\*\*|'
+    r'[-+*/%=<>!~&|^?:;,.()\[\]{}]|'
+    r'[A-Za-z_$][A-Za-z0-9_$]*|'
+    r'\d[\w.]*')
+_ID = _re.compile(r'[A-Za-z_$]')
+# 当作 operator 的关键字（控制流/声明），其余标识符算 operand
+_KW_OP = {'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'return', 'new',
+          'delete', 'typeof', 'instanceof', 'in', 'of', 'void', 'throw', 'try',
+          'catch', 'finally', 'function', 'class', 'extends', 'await', 'async',
+          'yield', 'break', 'continue', 'const', 'let', 'var', 'import', 'export',
+          'from', 'as', 'default', 'this', 'super'}
+
+def halstead_volume(text):
+    """轻量估算 Halstead Volume V = N·log2(n)（非 AST 精确，但 MI 对它取 log，稳）。"""
+    code = _STRIP.sub(' ', text)
+    ops, opnds = {}, {}
+    for t in _TOK.findall(code):
+        if _ID.match(t):
+            (ops if t in _KW_OP else opnds).setdefault(t, 0)
+            (ops if t in _KW_OP else opnds)[t] += 1
+        else:
+            ops[t] = ops.get(t, 0) + 1
+    N = sum(ops.values()) + sum(opnds.values())
+    n = len(ops) + len(opnds)
+    return N * math.log2(n) if n > 0 else 0.0
+
+def maintainability_index(volume, cc, loc):
+    """Microsoft 变体，归一化到 0–100（越高越好维护）。"""
+    if volume <= 0 or loc <= 0:
+        return 100.0
+    raw = 171 - 5.2 * math.log(volume) - 0.23 * cc - 16.2 * math.log(loc)
+    return max(0.0, min(100.0, raw * 100 / 171))
+
+def duplication_pct(file_lines, k=6):
+    """块级重复率：k 行滑窗，出现≥2 次的窗覆盖了多少「有效行」。
+    近似 PMD-CPD / GitClear 的 copy-paste 信号；语言无关，零依赖。"""
+    TRIVIAL = {'{', '}', '},', '});', ')', ');', '};', '(', '/*', '*/', ''}
+    win_count = defaultdict(int)
+    per_file = []
+    for lines in file_lines:
+        norm = [ln.strip() for ln in lines]
+        sig = [(i, s) for i, s in enumerate(norm) if s not in TRIVIAL and len(s) > 3]
+        per_file.append((norm, sig))
+        idxs = [i for i, _ in sig]
+        for j in range(len(sig) - k + 1):
+            key = tuple(s for _, s in sig[j:j + k])
+            win_count[key] += 1
+    dup_lines, total = 0, 0
+    for norm, sig in per_file:
+        total += len(sig)
+        covered = set()
+        for j in range(len(sig) - k + 1):
+            key = tuple(s for _, s in sig[j:j + k])
+            if win_count[key] >= 2:
+                for i, _ in sig[j:j + k]:
+                    covered.add(i)
+        dup_lines += len(covered)
+    return (100.0 * dup_lines / total) if total else 0.0
+
 def static_metrics(root, use_lizard):
-    """当前 tree 的静态复杂度标量（需 lizard）。缺了返回 None。"""
+    """当前 tree 的成品质量标量（需 lizard 拿 CC/LOC；MI/重复率零依赖）。缺 lizard 返回 None。"""
     if not use_lizard:
         return None
     try:
@@ -187,20 +328,32 @@ def static_metrics(root, use_lizard):
     files = glob.glob(os.path.join(root, 'src', '**', '*.ts'), recursive=True)
     files = [f for f in files if not excluded(os.path.relpath(f, root).replace(os.sep, '/'))]
     ccn, lengths, nloc_tot, hotspots, long_fns, n = [], [], 0, 0, 0, 0
+    mi_weighted, mi_files, mi_bad = 0.0, 0, 0
+    all_lines = []
     for f in files:
         try:
             info = lizard.analyze_file(f)
+            text = open(f, encoding='utf-8', errors='replace').read()
         except Exception:
             continue
         nloc_tot += info.nloc
+        file_cc = 0
         for fn in info.function_list:
             n += 1
             ccn.append(fn.cyclomatic_complexity)
             lengths.append(fn.length)
+            file_cc += fn.cyclomatic_complexity
             if fn.cyclomatic_complexity > 10:
                 hotspots += 1
             if fn.length > 60:
                 long_fns += 1
+        # 每文件一个 MI，按 NLOC 加权求库级平均
+        mi = maintainability_index(halstead_volume(text), file_cc, info.nloc or 1)
+        mi_weighted += mi * (info.nloc or 1)
+        mi_files += 1
+        if mi < 65:
+            mi_bad += 1
+        all_lines.append(text.splitlines())
     if not n:
         return None
     return dict(
@@ -208,45 +361,82 @@ def static_metrics(root, use_lizard):
         ccn_mean=sum(ccn) / n, ccn_max=max(ccn),
         len_mean=sum(lengths) / n, len_max=max(lengths),
         hotspots=hotspots, long_fns=long_fns,
+        mi=mi_weighted / nloc_tot if nloc_tot else 100.0,
+        mi_bad=mi_bad, mi_files=mi_files,
+        dup=duplication_pct(all_lines),
     )
 
-def write_benchmark(overall, buckets, static, path, by):
+def write_benchmark(overall, buckets, static, path, by, by_model=None):
     def f(x, d=2):
         return f'{x:.{d}f}'
-    col = {'session': '一坐(起始·时长·commit数)', 'commit': 'commit',
-           'day': '日期', 'month': '月份'}[by]
     with open(path, 'w', encoding='utf-8') as o:
-        o.write('# 自省 benchmark 记分卡\n\n')
-        o.write('> 都是「越大越乱 / 越大越费」的标量，比 LOC 更贴手感。归一化过，'
-                'season-over-season 可直接比。\n\n')
+        o.write('# 自省记分卡\n\n')
+        o.write('两类指标，别混：**过程质量**（怎么写出来的）和**成品质量**（现在代码本身好不好）。\n\n')
 
-        o.write('## 总览（全历史）\n\n')
-        o.write(f"- 代码量：**{overall['net']}** 行净增（毛改动 {overall['gross']}，"
-                f"{overall['commits']} commits，触及 {overall['touched']} 个文件）\n")
-        o.write(f"- 返工率（删/增）：**{f(overall['rework'])}** —— 越高说明写完又删/改得越多\n")
-        o.write(f"- 净留存（净/毛）：**{f(overall['retention'])}** —— 写下的东西留住了几成\n")
-        o.write(f"- 变更熵 Hassan–Holt：**{f(overall['entropy'])}** / 1 —— 改动摊得多散\n")
-        o.write(f"- 每 commit 毛改动：**{f(overall['per_commit'], 0)}** 行\n\n")
+        # ---- Opus vs Fable：performance eval 的正主 ----
+        if by_model:
+            o.write('## 按模型（Opus vs Fable）\n\n')
+            o.write('| 模型 | commits | 起讫 | 净增 | 总改动 | 返工率 | 净留存 | 变更熵 | 每commit |\n')
+            o.write('|---|--:|:--|--:|--:|--:|--:|--:|--:|\n')
+            for b in by_model:
+                span = b['date_min'] if b['date_min'] == b['date_max'] else f"{b['date_min'][5:]}→{b['date_max'][5:]}"
+                o.write(f"| {b['model']} | {b['commits']} | {span} | {b['net']} | {b['gross']} | "
+                        f"{f(b['rework'])} | {f(b['retention'])} | {f(b['entropy'])} | {f(b['per_commit'],0)} |\n")
+            o.write('\n> ⚠ 两个大坑，别急着下「A 比 B 强」：\n'
+                    '> 1. **时间混淆**：每个模型往往只在某段时间用（看「起讫」）。项目越往后返工天然越高'
+                    '（脚手架期 vs 深水区重构期），所以晚来的模型返工看着高、早退的看着低，未必是模型的功劳。\n'
+                    '> 2. **返工率是「commit 内」删/增，不是「代码存活率」**：一个模型只做加法（新功能），'
+                    '它当次 commit 返工=0；但它写的代码可能过几天被另一个模型删掉——那笔返工记在**别人**头上。'
+                    '要真比「谁的代码留得住」，得按行做跨 commit 存活追踪（见 README 里 TODO），这张表还做不到。\n\n')
 
+        # ---- 名词表：一句话说清每个数，怎么读、好坏往哪边 ----
+        o.write('## 先看这个：每个数是什么意思\n\n')
+        o.write('| 指标 | 是什么 | 往哪边好 | 你现在 |\n|---|---|---|--:|\n')
+        o.write(f"| 返工率 | 删掉的行 ÷ 新写的行 | **越低越好**（0=从不回头改；0.5=写2删1） | {f(overall['rework'])} |\n")
+        o.write(f"| 净留存 | 净增 ÷ 总改动 | **越高越好**（1=写下就留住；0=白忙） | {f(overall['retention'])} |\n")
+        o.write(f"| 变更熵 | 改动摊在多少文件、多分散 (0–1) | 看情况（高=东一榔头西一棒，低=专注一处） | {f(overall['entropy'])} |\n")
         if static:
-            o.write('## 静态复杂度（当前 tree · src/*.ts · lizard）\n\n')
-            o.write(f"- 函数 **{static['functions']}** 个（{static['files']} 文件，"
-                    f"{static['nloc']} NLOC）\n")
-            o.write(f"- 圈复杂度：平均 **{f(static['ccn_mean'])}**，最大 **{static['ccn_max']}**\n")
-            o.write(f"- 函数长度：平均 **{f(static['len_mean'], 0)}** 行，最大 **{static['len_max']}**\n")
-            o.write(f"- 复杂度热点（CCN>10）：**{static['hotspots']}** 个；"
-                    f"超长函数（>60 行）：**{static['long_fns']}** 个\n\n")
+            o.write(f"| 可维护性 MI | 综合复杂度+体量的 0–100 分 | **越高越好**（>85 好维护，65–85 一般，<65 难缠） | {f(static['mi'],0)} |\n")
+            o.write(f"| 重复率 | 复制粘贴的代码占比 | **越低越好**（<5% 健康，>10% 该抽函数了） | {f(static['dup'],1)}% |\n")
+            o.write(f"| 圈复杂度 | 单函数平均分支数 | **越低越好**（<5 简单，>10 是热点） | {f(static['ccn_mean'],1)} |\n")
+        o.write('\n')
+
+        o.write('## 过程质量（全历史怎么写出来的）\n\n')
+        o.write(f"- 代码量：净增 **{overall['net']}** 行（总改动 {overall['gross']}，"
+                f"{overall['commits']} commits，碰过 {overall['touched']} 个文件）\n")
+        o.write(f"- 返工率 **{f(overall['rework'])}** ｜ 净留存 **{f(overall['retention'])}** ｜ "
+                f"变更熵 **{f(overall['entropy'])}** ｜ 每 commit 均改 **{f(overall['per_commit'],0)}** 行\n\n")
+
+        o.write('## 成品质量（当前 tree · 只算 src/*.ts · 去测试/文档/注释）\n\n')
+        if static:
+            o.write(f"- **可维护性 MI = {f(static['mi'],0)}/100**"
+                    f"（{static['mi_bad']}/{static['mi_files']} 个文件 <65 需盯）\n")
+            o.write(f"- **重复率 = {f(static['dup'],1)}%**（块级，复制粘贴信号）\n")
+            o.write(f"- 圈复杂度：平均 **{f(static['ccn_mean'])}**、最大 **{static['ccn_max']}**；"
+                    f"热点(>10) **{static['hotspots']}** 个\n")
+            o.write(f"- 规模：**{static['functions']}** 函数 / **{static['nloc']}** 行真·代码"
+                    f"（NLOC，去注释空行）；函数均长 **{f(static['len_mean'],0)}** 行、最长 **{static['len_max']}**、"
+                    f"超长(>60) **{static['long_fns']}** 个\n")
+            o.write('> MI 里的 Halstead 体量用轻量 tokenizer 估（非 AST 精确，但 MI 对它取 log，够稳）。\n\n')
         else:
-            o.write('## 静态复杂度\n\n> 没装 lizard，跳过。`pip install lizard` 后重跑即出。\n\n')
+            o.write('> 没装 lizard，跳过成品质量。`pip install lizard` 后重跑即出。\n\n')
 
         gran = {'session': '每个心流一坐', 'commit': '每次 commit',
                 'day': '每天', 'month': '每月'}[by]
         o.write(f'## 逐桶（{gran}）\n\n')
-        o.write(f'| {col} | commits | 净增 | 毛改动 | 返工率 | 净留存 | 变更熵 |\n')
-        o.write('|---|--:|--:|--:|--:|--:|--:|\n')
-        for label, b in buckets:
-            o.write(f"| {label} | {b['commits']} | {b['net']} | {b['gross']} | "
-                    f"{f(b['rework'])} | {f(b['retention'])} | {f(b['entropy'])} |\n")
+        if by == 'session':
+            o.write('| 起始 | 时长 | commits | 净增 | 总改动 | 返工率 | 净留存 | 变更熵 |\n')
+            o.write('|---|--:|--:|--:|--:|--:|--:|--:|\n')
+            for _, b in buckets:
+                o.write(f"| {b['start']} | {f(b['dur_h'],1)}h | {b['commits']} | {b['net']} | "
+                        f"{b['gross']} | {f(b['rework'])} | {f(b['retention'])} | {f(b['entropy'])} |\n")
+        else:
+            head = {'commit': 'commit', 'day': '日期', 'month': '月份'}[by]
+            o.write(f'| {head} | commits | 净增 | 总改动 | 返工率 | 净留存 | 变更熵 |\n')
+            o.write('|---|--:|--:|--:|--:|--:|--:|\n')
+            for label, b in buckets:
+                o.write(f"| {label} | {b['commits']} | {b['net']} | {b['gross']} | "
+                        f"{f(b['rework'])} | {f(b['retention'])} | {f(b['entropy'])} |\n")
 
 def draw_bench(buckets, path, zh, by):
     try:
@@ -293,9 +483,129 @@ def draw_bench(buckets, path, zh, by):
     plt.close(fig)
     return True
 
+# ------------------------------------------------------------------ milestones ---
+#
+# 里程碑 = 时间线上值得标一笔的时刻（不是每个 commit）。语义判断 LLM 干得比正则好，
+# 所以规程是：**派一个 explore/阅读 agent 按下面这段 prompt 读 commit-summaries.md，
+# 产出 loc-milestones.json**；本工具读该 json 在 LOC 曲线上标竖线。
+# json 没有时，自动退化到「版本号跳变」启发式(auto_milestones)先顶着。
+#
+# 固化的 agent prompt/规程（要重生成里程碑，就把这段喂给一个读代码的 agent）：
+MILESTONE_PROMPT = r"""
+你在为一条「代码行数随时间」曲线找**里程碑**，标在图上讲项目故事。
+输入：commit 概述文件 commit-summaries.md，每行 `` `hash` YYYY-MM-DD (+增/-删) 标题 ``，旧→新。
+挑人类会在时间线上标一笔的时刻，不是每个 commit：
+  · 大功能/子系统首次登场（云同步、加密、笔刷引擎、图层组、选区、WebGL、i18n…）
+  · 大架构落地/大重构（god-file 肢解、store 重写、渲染管线换代、语言迁移）
+  · 版本纪元边界（v0.1.0/v0.2.0 这种 minor，或特别大的 vN 跳变），优先纪元而非每个补丁
+  · 正式发布 / 生产 cutover
+全历史挑 ~12–25 个，铺开别扎堆。每个输出对象：
+  hash（该里程碑落地那次 commit 的短 hash）、date(YYYY-MM-DD)、
+  label（≤16 字短标签，上图用，如「云同步」「加密」「WebGL重构」）、
+  kind（release|feature|architecture|perf）、note（一句话为什么算里程碑）。
+只输出一个 JSON 数组（旧→新），放在 ```json 代码块里，前后别加话。
+""".strip()
+
+# 数据文件 schema（loc-milestones.json）：
+#   [ {hash, date, label, kind, note}, ... ]  —— 旧→新；hash 用来定位到曲线的 x 位置
+
+KIND_COLOR = {'release': '#c0392b', 'feature': '#2c7fb8',
+              'architecture': '#6a51a3', 'perf': '#2e8b57'}
+
+def load_milestones(path, commits):
+    """读 loc-milestones.json；没有就用启发式(版本号跳变)自动生成。
+    返回 [(idx, milestone_dict), ...]，idx = 在 commits 里的序号。"""
+    import json
+    ms = None
+    if path and os.path.exists(path):
+        try:
+            ms = json.load(open(path, encoding='utf-8'))
+        except Exception as e:
+            print(f'  (里程碑 json 读失败：{e}，退化到自动启发式)')
+    if ms is None:
+        ms = auto_milestones(commits)
+        print(f'  (无 loc-milestones.json，自动挑了 {len(ms)} 个版本号里程碑；'
+              f'想要语义里程碑就按 MILESTONE_PROMPT 派 agent 生成 json)')
+    idx_of = {c['short']: i for i, c in enumerate(commits)}
+    # 兼容全 hash：也按前缀匹配
+    out, miss = [], 0
+    for m in ms:
+        h = m.get('hash', '')
+        i = idx_of.get(h)
+        if i is None:
+            i = next((j for j, c in enumerate(commits)
+                      if c['hash'].startswith(h) or c['short'].startswith(h)), None)
+        if i is None:
+            miss += 1
+            continue
+        out.append((i, m))
+    if miss:
+        print(f'  (里程碑有 {miss} 个 hash 在当前 ref 找不到，已跳过)')
+    return sorted(out)
+
+def auto_milestones(commits):
+    """启发式兜底：挑「minor 版本纪元」——v0.X.0，以及每逢 vN 跨过 25 的整段首个 commit。"""
+    import re as _re2
+    out, last_bucket = [], None
+    minor = _re2.compile(r'\bv(\d+)\.(\d+)\.0\b')          # v0.4.0 这种
+    plain = _re2.compile(r'\bv(\d+)\b')                    # v351 这种
+    for c in commits:
+        s = c['subject']
+        m = minor.search(s)
+        if m:
+            out.append(dict(hash=c['short'], date=c['date'],
+                            label=f'v{m.group(1)}.{m.group(2)}.0', kind='release',
+                            note=s[:40]))
+            continue
+        p = plain.search(s)
+        if p:
+            bucket = int(p.group(1)) // 25
+            if bucket != last_bucket:
+                last_bucket = bucket
+                out.append(dict(hash=c['short'], date=c['date'],
+                                label=f'v{p.group(1)}', kind='feature', note=s[:40]))
+    return out
+
+def draw_models(by_model, path, zh):
+    """每模型：返工率 vs 变更熵 分组条，气泡大小=commits。诚实起见标注时间跨度。"""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return False
+    rows = [b for b in by_model if b['model'] != '(无标注)' and b['commits'] >= 2]
+    if not rows:
+        return False
+    labels = [f"{b['model']}\n{b['commits']}c" for b in rows]
+    rew = [b['rework'] for b in rows]
+    ent = [b['entropy'] for b in rows]
+    xs = list(range(len(rows)))
+    w = 0.38
+    L = dict(title='按模型：返工率 vs 变更熵（注意时间混淆，见 benchmark.md）',
+             rew='返工率(删/增)', ent='变更熵(0–1)') if zh else \
+        dict(title='per model: rework vs entropy (mind the time confound)',
+             rew='rework (del/add)', ent='entropy (0–1)')
+    fig, ax = plt.subplots(figsize=(max(7, len(rows) * 1.6), 5))
+    ax.bar([x - w / 2 for x in xs], rew, w, color='#e45756', label=L['rew'])
+    ax.bar([x + w / 2 for x in xs], ent, w, color='#4c78a8', label=L['ent'])
+    ax.set_xticks(xs)
+    ax.set_xticklabels(labels)
+    ax.set_title(L['title'])
+    ax.legend()
+    ax.grid(True, axis='y', alpha=0.3)
+    for x, b in zip(xs, rows):
+        ax.text(x, max(b['rework'], b['entropy']) + 0.02,
+                f"{b['date_min'][5:]}→{b['date_max'][5:]}",
+                ha='center', va='bottom', fontsize=7, color='#555')
+    fig.tight_layout()
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    return True
+
 # --------------------------------------------------------------------- charts ---
 
-def draw(commits, path, zh):
+def draw(commits, path, zh, milestones=None):
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -322,6 +632,18 @@ def draw(commits, path, zh):
     ax1.set_ylabel(L['y_total'])
     ax1.set_title(L['title'])
     ax1.grid(True, alpha=0.3)
+
+    # 里程碑：竖线 + 顶部斜标签（label 交错高低，避免挤成一团）
+    if milestones:
+        ymax = max(total) if total else 1
+        for k, (i, m) in enumerate(milestones):
+            col = KIND_COLOR.get(m.get('kind'), '#888')
+            ax1.axvline(i, color=col, lw=0.9, ls='--', alpha=0.55)
+            ax2.axvline(i, color=col, lw=0.9, ls='--', alpha=0.35)
+            y = ymax * (1.02 + 0.06 * (k % 2))     # 交错两档高度
+            ax1.text(i, y, m.get('label', ''), rotation=45, ha='left', va='bottom',
+                     fontsize=7.5, color=col, clip_on=False)
+        ax1.set_ylim(top=ymax * 1.18)
 
     ax2.bar(xs, added, color='#54a24b', width=1.0, label=L['add'])
     ax2.bar(xs, deleted, color='#e45756', width=1.0, label=L['rm'])
@@ -375,7 +697,15 @@ def main():
     ap.add_argument('--gap', type=int, default=120,
                     help='session 断坐间隔（分钟，默认 120）；只在 --by session 时有意义')
     ap.add_argument('--no-lizard', action='store_true', help='跳过静态复杂度（不装 lizard）')
+    ap.add_argument('--milestones', default=None,
+                    help='里程碑 json（默认找 tools/loc-milestones.json；缺了退化到版本号启发式）')
+    ap.add_argument('--print-milestone-prompt', action='store_true',
+                    help='打印固化的里程碑寻找 prompt（喂给读代码 agent 重生成 json 用）')
     args = ap.parse_args()
+
+    if args.print_milestone_prompt:
+        print(MILESTONE_PROMPT)
+        return
 
     root = repo_root()
     out = args.out or os.path.join(root, 'docs', 'reports', 'loc')
@@ -385,6 +715,9 @@ def main():
     commits = collect(args.branch)
     if not commits:
         sys.exit('没读到 commit')
+    models = commit_models(args.branch)         # 归属到 Opus/Fable/…
+    for c in commits:
+        c['model'] = models.get(c['hash'], '(无标注)')
 
     csv_p = os.path.join(out, 'loc-history.csv')
     md_p = os.path.join(out, 'commit-summaries.md')
@@ -394,22 +727,39 @@ def main():
     zh = pick_font()
     if not zh:
         print('  (没找到中文字体，图里标签退英文——数据不受影响)')
-    drew = draw(commits, png_p, zh)
+    # 里程碑：默认找 tools/loc-milestones.json（挨着本脚本）
+    ms_path = args.milestones or os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                              'loc-milestones.json')
+    milestones = load_milestones(ms_path, commits)
+    drew = draw(commits, png_p, zh, milestones)
 
     # benchmark
     overall = bench_bucket(commits)
     buckets = bench_buckets(commits, args.by, args.gap)
+    by_model = bench_by_model(commits)
     static = static_metrics(root, not args.no_lizard)
     bench_md = os.path.join(out, 'benchmark.md')
     bench_png = os.path.join(out, 'benchmark.png')
-    write_benchmark(overall, buckets, static, bench_md, args.by)
+    models_png = os.path.join(out, 'models.png')
+    write_benchmark(overall, buckets, static, bench_md, args.by, by_model)
     drew_b = draw_bench(buckets, bench_png, zh, args.by)
+    drew_m = draw_models(by_model, models_png, zh)
 
-    print(f'✓ {len(commits)} commits，现 ≈ {commits[-1]["total"]} 行')
-    print(f'  返工率 {overall["rework"]:.2f} · 净留存 {overall["retention"]:.2f} · '
+    print(f'✓ {len(commits)} commits，产品代码累计 ≈ {commits[-1]["total"]} 行'
+          f'（已去测试/文档/vendor；含注释）')
+    if static:
+        print(f'  成品质量：MI {static["mi"]:.0f}/100 · 重复率 {static["dup"]:.1f}% · '
+              f'真·代码 {static["nloc"]} 行(去注释) · 圈复杂度均 {static["ccn_mean"]:.1f}/最大 {static["ccn_max"]}')
+    print(f'  过程质量：返工率 {overall["rework"]:.2f} · 净留存 {overall["retention"]:.2f} · '
           f'变更熵 {overall["entropy"]:.2f}'
-          + (f' · 平均圈复杂度 {static["ccn_mean"]:.1f}/最大 {static["ccn_max"]}'
-             if static else ' · (无 lizard)'))
+          + ('' if static else ' ·（无 lizard，成品质量跳过）'))
+    print('  按模型（返工率/熵/commits，⚠时间混淆见 benchmark.md）：')
+    for b in by_model:
+        if b['model'] == '(无标注)':
+            continue
+        print(f'    {b["model"]:<12} 返工 {b["rework"]:.2f} · 熵 {b["entropy"]:.2f} · '
+              f'{b["commits"]}c · {b["date_min"][5:]}→{b["date_max"][5:]}')
+    print(f'  里程碑：{len(milestones)} 个标在 LOC 图上')
     print(f'  表   {csv_p}')
     print(f'  概述 {md_p}')
     print(f'  记分卡 {bench_md}')
