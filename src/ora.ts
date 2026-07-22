@@ -280,10 +280,18 @@ export async function decodeOraToDoc(blob: Blob) {
   return doc;
 }
 
-// 把版本号字符串（"v71-2026-05-28" 或 "v71"）解析成可比较的整数。
+// 把版本号字符串解析成可比较的整数，横跨新旧两种命名制（0.4 纪元换制）：
+//   新制 "v0.4.0-2026-07-22" / "v0.4.0" → (major*100+minor)*1e6+patch
+//   旧制 "v438-2026-07-18" / "v438"     → 统一归入 0.3 纪元（= v0.3.438），与新制全序可比
+// （旧制 patch 是单调单序列，所以 v438 < v0.4.0 < v0.4.10 < v0.5.0 成立。）
 // 失败 → null（caller 跳过比较；零信息时不警告）
 export function parseAppVersion(s: string | null | undefined): number | null {
   if (!s) return null;
-  const m = String(s).match(/^v(\d+)/);
-  return m ? parseInt(m[1], 10) : null;
+  const str = String(s);
+  const dotted = str.match(/^v(\d+)\.(\d+)\.(\d+)/);
+  if (dotted) {
+    return (parseInt(dotted[1], 10) * 100 + parseInt(dotted[2], 10)) * 1_000_000 + parseInt(dotted[3], 10);
+  }
+  const legacy = str.match(/^v(\d+)/);
+  return legacy ? 3 * 1_000_000 + parseInt(legacy[1], 10) : null;
 }

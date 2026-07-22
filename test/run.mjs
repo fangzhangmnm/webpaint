@@ -15,6 +15,7 @@ import "./registry.test.mjs";
 import "./resolved-brush.test.mjs";
 import "./pointer-gesture.test.mjs";
 import "./crop-geometry.test.mjs";
+import "./app-version.test.mjs";
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
 import "./liquify-bilinear.test.mjs";
