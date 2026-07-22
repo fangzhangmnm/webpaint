@@ -65,7 +65,7 @@ export class GLDocRenderer {
   private _floatTex = new Map<number, { tex: WebGLTexture; canvas: CanvasImageSource | null }>();
   private _floats = new Map<number, FloatDesc>();
 
-  constructor(glctx: GLContext, maxSlices: number, accumPrec: FBOPrec = "f16") {
+  constructor(glctx: GLContext, maxSlices: number, accumPrec: FBOPrec = "u8") {   // S7：直值 rgba8 累积器（spec:247，省一半显存）
     this._glctx = glctx;
     // 惰性容量（spec:170）：初始 64 slices（16MiB），reserve 时 quota 内翻倍 grow。
     this._backend = new GLGpuTileBackend(glctx, Math.min(64, maxSlices));
@@ -203,7 +203,7 @@ export class GLDocRenderer {
     //   零重复 malloc、零泄露；着色靠 scissor 限回 stamp bbox（GPU 成本不变）。overlay 描述符随之变整屏（ox0/oy0/ow=docW）。
     const fboP = this._rasterizer.rasterize(ov.stamps, ov.shape, 0, 0, docW, docH, { x: ov.bx, y: ov.by, w: ov.bw, h: ov.bh });   // 预乘，整屏
     const fboS = this._glctx.borrowFBO(docW, docH, "u8");
-    this._comp.presentTo(fboP.tex, fboS, docW, docH);                          // → straight（整屏，bbox 外透明）
+    this._comp.presentTo(fboP.tex, fboS, docW, docH, true);                    // 栅格器预乘 → straight（整屏，bbox 外透明）
     this._glctx.returnFBO(fboP);
     if (this._overlayOwnedFBO) this._glctx.returnFBO(this._overlayOwnedFBO);   // 上帧残留（保险）
     this._overlayOwnedFBO = fboS;
@@ -238,7 +238,7 @@ export class GLDocRenderer {
     const gl = this._glctx.gl;
     const fboP = this._rasterizer.rasterize(stamps, shape, bx, by, bw, bh);
     const fboS = this._glctx.borrowFBO(bw, bh, "u8");
-    this._comp.presentTo(fboP.tex, fboS, bw, bh);                              // 解预乘
+    this._comp.presentTo(fboP.tex, fboS, bw, bh, true);                        // 栅格器预乘 → 解预乘
     const px = new Uint8Array(bw * bh * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fboS.fbo);
     gl.readPixels(0, 0, bw, bh, gl.RGBA, gl.UNSIGNED_BYTE, px);

@@ -59,7 +59,7 @@ export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled", 
     src === "group"
       ? `vec4 sp = texture(u_groupSrc, v_uv);
          float srcA = sp.a;
-         vec3 Cs = (sp.a > 0.0) ? (sp.rgb / sp.a) : vec3(0.0);   // 解预乘`
+         vec3 Cs = sp.rgb;   // sub-accumulator 也是直值（S7 起全链 straight）`
     : src === "overlay"
       // 活动叶 ⊕ overlay：overlay 是 **bbox 尺寸**纹理（doc 坐标 u_ovOrigin 起、u_ovSize 大）——按 bbox 映射，
       //   bbox 外透明（避免每帧传 doc 尺寸纹理）。erase = destination-out（叶 alpha 削减）；否则按 **brush blendMode**
@@ -89,6 +89,10 @@ export function compositeFragSource(mode: BlendMode, src: SourceKind = "tiled", 
     ? `float bfn_ov(float Cb, float Cs){ ${BLEND_BODY[overlayMode]} }
        vec3 blendRGB_ov(vec3 b, vec3 s){ return vec3(bfn_ov(b.r,s.r), bfn_ov(b.g,s.g), bfn_ov(b.b,s.b)); }`
     : "";
+  // S7：累积器改 **straight rgba8**（spec:246-247，省一半显存）——u_dst 读直值、输出直值。
+  //   数学不变（W3C 直值公式），只挪「预乘↔直值」转换点：过去每 pass 解/回预乘，现在直存直读，
+  //   仅输出时按 ao 归一（ao=0 出 0）。u8 直值的量化误差在预乘空间 ≤ 预乘 u8（误差×ao），
+  //   与 Canvas2D（内部预乘 u8）同量级——smoke 拿 compositeLayers 当 golden 对拍兜视觉回归。
   return `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
@@ -131,14 +135,14 @@ void main(){
   float as = srcA * u_opacity;
   if (u_hasClip == 1) as *= sampleTiled(u_clipIndex, docPos).a;   // clip 蒙版
 
-  vec4 dst = texture(u_dst, v_uv);    // 预乘 (Pb, ab)
+  vec4 dst = texture(u_dst, v_uv);    // 直值 (Cb, ab)
   float ab = dst.a;
-  vec3 Cb = (ab > 0.0) ? (dst.rgb / ab) : vec3(0.0);   // 还原背景直值
+  vec3 Cb = dst.rgb;
 
   vec3 Csb = (1.0 - ab) * Cs + ab * blendRGB(Cb, Cs);  // W3C §10.2：blend 只在背景存在处生效
-  vec3 Po = as * Csb + dst.rgb * (1.0 - as);           // 预乘输出 rgb（dst.rgb 已是 ab*Cb）
+  vec3 Po = as * Csb + Cb * ab * (1.0 - as);           // 合成（预乘空间瞬时值）
   float ao = as + ab * (1.0 - as);
-  o = vec4(Po, ao);
+  o = vec4((ao > 0.0) ? (Po / ao) : vec3(0.0), ao);    // 归一回直值存储
 }`;
 }
 

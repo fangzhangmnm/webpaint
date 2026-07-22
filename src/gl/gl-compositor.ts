@@ -114,7 +114,7 @@ uniform int u_baseMode;
 out vec4 o;
 ${WARP_FUNCS}
 void main(){
-  vec4 dst = texture(u_dst, v_uv);                   // 预乘 (Pd, ad)
+  vec4 dst = texture(u_dst, v_uv);                   // 直值 (Cd, ad)（S7：累积器 straight）
   vec2 docXY = v_uv * u_docSize;                     // dst 像素中心（fragment 中心 → +0.5 自带）
   vec4 s = warpSample(u_src, u_srcSize, u_Hinv, u_mode, docXY);   // 直值
   if (u_clip == 1 && s.a > 0.0){                     // 裁到基底浮层 warp 后 alpha（clip 链共基底也对）
@@ -122,8 +122,9 @@ void main(){
     float baseA = warpSample(u_baseTex, u_baseSize, u_baseHinv, u_baseMode, docXY).a;
     s.a *= baseA;
   }
-  vec4 src = vec4(s.rgb * s.a, s.a);                  // → 预乘
-  o = src + dst * (1.0 - src.a);                     // source-over（预乘）
+  float ao = s.a + dst.a * (1.0 - s.a);              // source-over（直值存储：预乘空间合成后归一）
+  vec3 Po = s.rgb * s.a + dst.rgb * dst.a * (1.0 - s.a);
+  o = vec4((ao > 0.0) ? (Po / ao) : vec3(0.0), ao);
 }`;
 
 // commit 烤定：warp 源 → **straight** RGBA 进 bbox FBO（readback→canvas→editRegion）。FBO 像素 → doc 坐标
@@ -148,11 +149,12 @@ precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_src;
 uniform int u_flipY;        // 屏显=1（clip y+1=画布顶=accum v=N-1=doc 底 → 需翻）；FBO readback=0
+uniform int u_unpremult;    // 1=源是预乘（stamp 栅格器中间 FBO）→ 解预乘；0=源已直值（累积器，S7 起）
 out vec4 o;
 void main(){
   vec2 uv = (u_flipY == 1) ? vec2(v_uv.x, 1.0 - v_uv.y) : v_uv;
   vec4 p = texture(u_src, uv);
-  vec3 c = (p.a > 0.0) ? (p.rgb / p.a) : vec3(0.0);   // 解预乘 → 直值
+  vec3 c = (u_unpremult == 1 && p.a > 0.0) ? (p.rgb / p.a) : p.rgb;
   o = vec4(c, p.a);
 }`;
 
@@ -176,7 +178,7 @@ export class GLCompositor {
   // 性能计数（dev HUD 用，零成本——只在 _pass/_floatPass 自增整数）。composite() 入口清零，调用方读 stats。
   //   passes = blend pass 数（≈ 可见层/组单元数，§2 layer-count 假说的直读量）；floatPasses = 浮层 warp pass 数。
   readonly stats = { passes: 0, floatPasses: 0 };
-  constructor(glctx: GLContext, accumPrec: FBOPrec = "f16") {
+  constructor(glctx: GLContext, accumPrec: FBOPrec = "u8") {
     this._glctx = glctx;
     this._prec = accumPrec;
   }
@@ -344,12 +346,13 @@ export class GLCompositor {
     if (loc) this._glctx.gl.uniform1i(loc, unit);
   }
 
-  // 预乘累积器 → 直值 RGBA8 目标 FBO（解预乘 present）。给 readback 用（不翻 Y）。
-  presentTo(srcTex: WebGLTexture, target: PooledFBO, w: number, h: number): void {
-    this._present(srcTex, target.fbo, w, h, false);
+  // 任意纹理 → 直值 RGBA8 目标 FBO（不翻 Y）。unpremult=true 时源按预乘解（stamp 栅格器中间 FBO 用）；
+  //   累积器（S7 起直值）传 false = 纯拷贝。
+  presentTo(srcTex: WebGLTexture, target: PooledFBO, w: number, h: number, unpremult = false): void {
+    this._present(srcTex, target.fbo, w, h, false, unpremult);
   }
 
-  // 预乘累积器 → 默认 framebuffer（可见画布），翻 Y、解预乘、整文档铺满（1:1 fit，预览页用）。
+  // 直值累积器 → 默认 framebuffer（可见画布），翻 Y、整文档铺满（1:1 fit，预览页用）。
   presentToScreen(srcTex: WebGLTexture, canvasW: number, canvasH: number): void {
     this._present(srcTex, null, canvasW, canvasH, true);
   }
@@ -383,7 +386,7 @@ export class GLCompositor {
     gl.bindVertexArray(null);
   }
 
-  private _present(srcTex: WebGLTexture, fbo: WebGLFramebuffer | null, w: number, h: number, flipY: boolean): void {
+  private _present(srcTex: WebGLTexture, fbo: WebGLFramebuffer | null, w: number, h: number, flipY: boolean, unpremult = false): void {
     const gl = this._glctx.gl;
     const prog = this._glctx.program("present", COMPOSITE_VERT, PRESENT_FRAG);
     gl.bindVertexArray(this._glctx.quadVAO());
@@ -391,6 +394,7 @@ export class GLCompositor {
     gl.disable(gl.BLEND);
     gl.useProgram(prog);
     gl.uniform1i(gl.getUniformLocation(prog, "u_flipY"), flipY ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(prog, "u_unpremult"), unpremult ? 1 : 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, srcTex);
     this._setSampler(prog, "u_src", 0);

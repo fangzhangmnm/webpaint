@@ -192,7 +192,7 @@ function L(srcIndex: IndexTexture, opacity: number, mode: string, clip = false):
 function readComposite(glctx: GLContext, comp: GLCompositor, accum: { tex: WebGLTexture }, n: number): Uint8Array {
   const gl = glctx.gl;
   const out = glctx.borrowFBO(n, n, "u8");
-  comp.presentTo(accum.tex, out, n, n);
+  comp.presentTo(accum.tex, out, n, n);   // 累积器已直值（S7）→ 纯拷贝
   const px = new Uint8Array(n * n * 4);
   gl.bindFramebuffer(gl.FRAMEBUFFER, out.fbo);
   gl.readPixels(0, 0, n, n, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -861,7 +861,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
 
   try {
     const cb = new GLGpuTileBackend(glctx, 4);
-    blendParity(glctx, cb, add, "f32"); blendParity(glctx, cb, add, "f16");
+    blendParity(glctx, cb, add, "f32"); blendParity(glctx, cb, add, "f16"); blendParity(glctx, cb, add, "u8");   // u8=S7 显示路径默认精度
     opaqueProbe(glctx, add); clipParity(glctx, add);
   } catch (e) { add("blend/clip parity", false, String(e)); }
   try { multiTileParity(glctx, add); } catch (e) { add("multitile parity", false, String(e)); }
