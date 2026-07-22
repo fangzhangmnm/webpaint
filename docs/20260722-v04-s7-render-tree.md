@@ -134,6 +134,86 @@ interface Plan {
 - layer-composite.ts 日落、Canvas2D 残余收缩 —— S9。
 - 段缓存跨 doc 尺寸变化的保留 —— 不做（doc 尺寸变=全清，现行为）。
 
-## 1. 施工记录
+## 1. 施工记录（v0.4.8 / 2026-07-22 完工；分支 worktree-v04-s7-render-tree，未 merge 未真机）
 
-（施工中补写。）
+> 824 node 测试 + tsc + esbuild + smoke（SwiftShader 真 WebGL2）全绿。四个源 commit：
+> 2dadf0a(7a) → 8db507c(7c-前半 straight) → d5fb643(7b) → c5127d8+958d893(v0.4.8+bundle)。
+
+### 落了什么（按 §0 计划次序，全部按计划落地）
+
+1. **7a**：`gl/gpu-tile-pool.ts`（纯记账核+GL backend+IndexTexture 并入）+ `gl/tile-bridge.ts`。
+   §0 计划全部成立，施工中追加的点：
+   - `reserve()` 语义改为**绝对目标**（调用方给「本帧工作集 tile 总数」），比「增量 n」精确。
+   - 池加**「本帧 touch 过的 tile 不驱逐」不变式**——压力驱逐若帧内易主 slice，已 rebuild 的
+     index 纹理会采到别人的像素（一帧视觉污染）。帧间驱逐无此问题（每帧先 isAlive 校验）。
+   - 叶 sync 快路径 = (LayerPixels 实例身份, contentVersion, pool 代) 三元组；bridge 惰性取
+     bytes → 压缩驻留的 tile 在 GPU 副本活着时**连解压都不发生**。
+2. **7c-前半**：累积器 straight rgba8（blend-glsl 主 shader / warp live / group 源 / present 全链；
+   present 留 `unpremult` 开关给 stamp 栅格器的预乘中间 FBO）。smoke 增 u8 精度 12 blend parity：
+   ⚠ **color-dodge/color-burn maxΔ=10**（阈 ≤10 过；误差放大器模式，真机批留意观感，
+   不行就把累积器精度参数拨回 "f16"——参数留着，一行换）。
+3. **7b**：`render/render-plan.ts` + `gl/render-tree-gl.ts`，`gl-doc-renderer.ts` 死，
+   `gl-board.ts` 薄壳化。计划外的收获：**livePreview/forceSync 门控整个消亡**——旧门控存在
+   是因为 syncAll 全量重传太贵；增量 sync 后「lift 挖洞要 forceSync」「liquify 要 live-sync 例外」
+   全变成 contentVersion 快路径的自然路径。板级参数保留（board.ts 不用改调用），执行器忽略。
+4. **7c-后半**：`compositeOnce()` export 一次性路径（不建缓存不失效；本轮交付+smoke，S9 接线
+   导出/缩略图时消费）；golden 基线机制；build.sh 防复活 lint（S7 四死模块）+ render/ 层次 lint
+   （**当场抓到 preview.ts 一处死 import** 并移植——lint 值回票价）。
+
+### 与 handoff §4-S7 的两处偏差（诚实交代）
+
+- **7c 拆两半夹在 7a/7b 两侧**（straight 切换先行）：让 7b 的段缓存生在干净底座上，
+  免写预乘↔straight 双轨。每步独立 smoke 可验，风险更低。
+- **golden 用 16×16 平均池化快照（tol=6）而非图像 hash**：SwiftShader 版本间 LSB 抖动会让
+  精确 hash 假红；池化快照抓的正是「预乘→straight 视觉移位」这个量级的回归，且现有
+  vs-compositeLayers 逐像素 diff（maxΔ≤4）本来就比 hash 强。基线 `test/gl-smoke/goldens.json`
+  已录（缺文件自动首录；`SMOKE_UPDATE_GOLDEN=1` 重录）。
+
+### 测试落点
+
+- node：`gpu-tile-pool.test.mjs`（批次/pin 两档/LRU/grow/quota/**leaky-GPU 对抗模拟**）、
+  `tile-bridge.test.mjs`（身份跳传/purgeDead/FBO 切片）、`render-plan.test.mjs`（17 条分区 golden）、
+  `tile-geometry.test.mjs`（自 tile-store.test 迁出）。824 总量。
+- smoke：原有全部 parity 保住（含 u8 新档）+ **11 条执行器端到端**（干净帧/快路径/live 分区/
+  段命中改层/markDirty 失效/context-loss 自愈/compositeOnce，全 maxΔ=1 vs compositeLayers）
+  + 2 张 golden 基线。
+- HUD：第二行加 `sb<建段> sh<段命中>`（`!`=quota 降级）。**描边中的理想形态 = sb0 shN**。
+
+### 帧算法一句话（给下个读者）
+
+markContentDirty → 段全失效；每帧 buildPlan(树+updated+bg) → 缺段现算入池（copyTexSubImage3D
+零 readback）→ live 叶增量 sync（tile 身份去重）→ rootSteps 合成 → display FBO → presentAffine；
+无 dirty 无动态且 plan 签名没变 → 只 present（pan/zoom 帧）。所有 gpu 侧状态可随时蒸发
+（evict/grow/context-loss），下帧从 CPU SSoT 自愈。
+
+## 2. 真机待验（并入 batch1 §3 + S5 §3 + S6 §4，同批交付）
+
+**S7 是纯渲染重构，语义零变化**——验法 = 全功能回归 + 盯性能/显存读数：
+
+- 描边性能（本片主收益）：多层文档（10+ 层，含 clip/组）画笔描边 fps vs v0.4.7；
+  HUD 第二行 `Np` 应从 层数 掉到 个位数、`sb0 shN`（描边首帧 sbN 一次，后续全命中）。
+- clip 层繁重场景（v339 动态预算的 11 层痛点）＋液化（live-sync 路径：每帧 sb0 且只重传变更 tile）。
+- 混合模式观感：**color-dodge/color-burn**（u8 累积器 Δ10 处）+ 半透明多层叠、软边笔刷淡色累积
+  （u8 straight 的量化最可见区）。刺眼 → 累积器拨回 f16（一行）。
+- 变换整链（S6 清单重跑一遍——float pass 走了新执行器）：lift/拖动/stamp/accept/reject/undo 穿越。
+- 颜色调整 live preview（surrogate 换源路径）+ 抬手恢复。
+- 图层操作全家（增删/移动/显隐/透明度/模式/编组）——每一下都该 markDirty → 重建正确。
+- pan/zoom 手感（快路径）+ 长 session 显存曲线（HUD tile 数有界、FBO 池有界、`!` 不常亮）。
+- 切后台回来 / GPU context-loss 恢复；加密件、云同步、导出 ora/psd/png 不回归（导出仍 CPU 路径）。
+- 大文档（4K²）：池惰性增长（初始 16MiB → 按需翻倍）不再一上来承诺 256MiB。
+
+## 3. 遗留 / S8 交接
+
+- **brush ready/commit 改 doc-FBO + bridge 批量 readback**（spec:187-205）= S8 主菜。
+  消费口已备好：`sliceRegionToTiles`（bbox 一次 readPixels 切 tile，测过）+ `registerPair`。
+  现 commit 仍走 rasterize→canvas→editRegion 旧径（本片未动，行为不变）。
+- 吸管 `ensureCompositeCache` 仍 CPU 合成（S8 换 render-tree 单帧 GPU read——`compositeOnce`
+  已能当基础）；导出/缩略图仍 layer-composite.ts（S9 日落时接 compositeOnce）。
+- 选区 mask 仍 R8 bbox 平面直传（S5 注释里说的「S7 改 bridge per-tile」**没做**：一次描边一传、
+  身份缓存已够，等 S8 brush ready 重做时一起收，不值得单独铺 gray8 gpu 池）。
+- board.ts 的 `forceGLResyncUnderFloat`/`_wasFloatActive`/liveSync provider 机器现已冗余
+  （执行器忽略这些 hint，contentVersion 自愈）——**留着无害**，S8 动 brush 接缝时顺手拆。
+- GLCompositor 自己的树递归 composite() 保留：smoke harness 的规范执行器 + 对拍参照，
+  生产路径不再走它（执行器直接驱动 pass 原语）。
+- 段建造在极端显存压力下可能与后续建段互抢（reserve 预检大幅降低概率；抢败=该段本帧临时
+  直算，不缓存，正确性无损）。真机若见 `!` 常亮 = quota 太小，调 poolCapacityForBudget 预算。

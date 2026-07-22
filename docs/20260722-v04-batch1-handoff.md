@@ -146,7 +146,11 @@ LayerPixels 被替换/丢弃前必须 `dispose()`（现有落点：`Layer.setPix
   lift→stamp→accept 序列 undo。
 - 风险：与层级 op 的复合（挖洞 + 结构一个 compound）；GPU warp 预览要继续吃 workpiece 持有的 float tiles。
 
-### S7 · render-tree + gpu-tile-pool + cpu-gpu-tile-bridge（最重，分三小片）
+### S7 · render-tree + gpu-tile-pool + cpu-gpu-tile-bridge ✅ 已落 v0.4.8（分支 worktree-v04-s7-render-tree，未 merge/未真机；报告 = docs/20260722-v04-s7-render-tree.md——含轻量 plan、两处偏差交代、真机待验、S8 交接。7a/7b/7c 全交付：pool+bridge+straight rgba8+render-plan+执行器+compositeOnce+golden 基线；gl-doc-renderer/tile-backend-gl/tile-store/tile-index 死）
+
+（下面是开工前的原施工图，留档；现状以上一行+报告为准。）
+
+### S7 · 原施工图（最重，分三小片）
 - 7a `src/gl/gpu-tile-pool.ts` + `src/gl/tile-bridge.ts` 切上传路径：GPU tile 永不承诺 pin、
   随时 evict、用户注册 pin 回调（必须/建议两档）、batch-only 创建、大 FBO+bbox 批量
   readback（per-tile readPixels 太慢）、双向映射只防重复劳动、禁反查、resize=删→glFlush→重建
