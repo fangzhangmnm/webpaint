@@ -123,7 +123,18 @@ LayerPixels 被替换/丢弃前必须 `dispose()`（现有落点：`Layer.setPix
   charter 里的液化选区边界测试在此落 **RED**（S8 转绿）。
 - 风险：AA 视觉 parity（真机批）；大 mask outline 性能（bg-jobs 切片）。
 
-### S6 · float 层入 workpiece
+### S6 · float 层入 workpiece ← **下一片。auto 模式按本条+S5 报告干即可**（不必先开 plan；S7 才必须 plan）
+**S5 交接给本片的硬约束**（详 docs/20260722-v04-s5-selection-tiles.md）：
+- Selection 已是 gray8 tile + clone()/dispose() 所有权（对齐 LayerSnap）。lift 消费 doc.selection、
+  commit 记 prevSelection 的链路今天是：commit() 把 doc.selection 交给 entry.prevSelection →
+  input._commitLasso 喂 ops.selection（所有权归包）。S6 把 lift/stamp/accept operator 化时**必须
+  沿用这条所有权链**，别让同一个 Selection 出现两个 owner（漏 dispose 由池 FR 点名）。
+- 浮层源像素今天在 bakeSource 里走 `sel.materializeMaskCanvas()`（Canvas2D 过渡口）+ layer.canvas
+  drawImage。S6 把 float tiles 收进 workpiece internals 时优先改成句柄交换（挖洞 = per-tile
+  dst-out 也行，但 pixel-accurate 优先级更高——spec:222-223 reject 必须 identity 写回）。
+- **一个 UX 未拍板**（spec:219 原文「恢复选区到新地方(或者清选区，看UX)」）：现状 = commit 清选区。
+  S6 先保持现状（清），要改成"选区跟到新位置"需人类点头——别自作主张换行为。
+
 - 目标：float 状态从 `floating-transform.ts` 的 `_ft` 私有态移入 workpiece internals
   （`floats: {id, tiles, transform, insertBeforeLeafId, sourceLayerId}[]`）；lift/调 transform
   （metadata 微步）/stamp/accept 全部 operator 化；**reject = identity 写回 operator（非 undo）**，
