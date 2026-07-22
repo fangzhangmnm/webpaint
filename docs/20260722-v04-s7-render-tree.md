@@ -134,7 +134,7 @@ interface Plan {
 - layer-composite.ts 日落、Canvas2D 残余收缩 —— S9。
 - 段缓存跨 doc 尺寸变化的保留 —— 不做（doc 尺寸变=全清，现行为）。
 
-## 1. 施工记录（v0.4.8 / 2026-07-22 完工；分支 worktree-v04-s7-render-tree，未 merge 未真机）
+## 1. 施工记录（v0.4.8 / 2026-07-22 完工；同日已 merge main（PR #8）；未真机——总单=docs/20260722-v04-device-test-batch.md）
 
 > 824 node 测试 + tsc + esbuild + smoke（SwiftShader 真 WebGL2）全绿。四个源 commit：
 > 2dadf0a(7a) → 8db507c(7c-前半 straight) → d5fb643(7b) → c5127d8+958d893(v0.4.8+bundle)。

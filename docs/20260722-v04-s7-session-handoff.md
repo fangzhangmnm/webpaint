@@ -1,37 +1,28 @@
-# WebPaint 0.4 · S7 会话交接（第四棒 → 第五棒）
+# WebPaint 0.4 · S7 会话交接（第五棒 → 第六棒）
 
-> 写于 2026-07-22，S7 完工之后。给下一个 fresh agent；自包含，但内容细节一律以 repo 文档为准
-> （本文只做路由，不复述）。上一棒交接 = docs/20260722-v04-s6-session-handoff.md（已过时，留档）。
+> 首版写于 2026-07-22 S7 完工后（第四棒→第五棒）；同日第五棒按用户指令 merge 后改写为现状。
+> 给下一个 fresh agent；自包含，但内容细节一律以 repo 文档为准（本文只做路由，不复述）。
+> 上一棒交接 = docs/20260722-v04-s6-session-handoff.md（已过时，留档）。
 
 ## 现状一句话
 
-**S7（render-tree + gpu-tile-pool + cpu-gpu-tile-bridge，7a/7b/7c 全片）已落 v0.4.8**，在分支
-`worktree-v04-s7-render-tree`（0b3caf0，worktree = `.claude/worktrees/v04-s7-render-tree`）+
-**draft PR #8**（https://github.com/fangzhangmnm/webpaint/pull/8）。**未 merge main、未真机**；
-main = origin/main 仍是 e2bd316（v0.4.7）。824 node 测试 + tsc + esbuild + SwiftShader smoke 全绿
+**S0–S7 全部已 merge main 并 push dev（v0.4.8）**；S7（render-tree + gpu-tile-pool +
+cpu-gpu-tile-bridge，7a/7b/7c 全片）经 draft PR #8 ff 并入
+（https://github.com/fangzhangmnm/webpaint/pull/8）。**全部未真机**。
+merge 前第五棒三重再验绿：tsc 0 / 824 node 测试 / SwiftShader smoke
 （smoke 含 11 条执行器端到端 vs compositeLayers，maxΔ=1）。
 S7 是纯渲染重构，**用户可见语义零变化**——四个旧模块死（gl-doc-renderer/tile-backend-gl/
 tile-store/tile-index），换来：commit 只传变更 tile、描边中静止图层并进缓存段（pass 数从层数
 掉到个位）、累积器 straight rgba8 显存减半、GPU 态可随时蒸发自愈。
 
-> **第五棒补记（2026-07-22）**：分支重连 node_modules 后三重再验绿（tsc 0 / 824 node / GL smoke），
-> merge-ready（可 ff）。四份真机清单已去重并批成 **`docs/20260722-v04-device-test-batch.md`**（总单，
-> 按 iPad 动线排序，行为变化预告在前）。本棒为后台 job，按 2026-07-18 指令只 commit 分支不动 main——
-> **merge PR #8 仍留给用户**（本地 `git merge --ff-only worktree-v04-s7-render-tree && git push origin main`
-> 即可，别用 GitHub squash——会砸掉成对 commit）。下下棒从总单接 bug 反馈批。
-
 ## 下一棒是什么
 
-1. **用户 merge PR #8 → main**（或 agent 按用户指示 merge+push dev）——真机要走 /dev/ 部署，
-   必须先上 main。worktree 政策：merge 后改动要真正回到主 checkout 的 main（别只留 remote）。
-2. **真机批（S0–S7 全部积压，四份清单同批交付）**：
-   - `docs/20260722-v04-batch1-handoff.md` §3（batch1 全家）
-   - `docs/20260722-v04-s5-selection-tiles.md` §3（选区 tile 化）
-   - `docs/20260722-v04-s6-float-workpiece.md` §4（浮层整链 + 三个行为变化）
-   - `docs/20260722-v04-s7-render-tree.md` §2（S7：性能/显存读数 + dodge/burn u8 观感）
-   真机是用户在 iPad 上做；agent 的活是接 bug 反馈批逐条修（math/手感类 bug 禁猜测式调试，
-   先写清输入/输出问题陈述）。
-3. **S8（编辑逻辑迁移）**：真机验完才准动；开工前轻量 plan（施工图 = batch1-handoff §4-S8 +
+1. **真机批（S0–S7 全部积压，一次交付）**：总单 = **`docs/20260722-v04-device-test-batch.md`**
+   （四份来源清单——batch1-handoff §3 / s5 §3 / s6 §4 / s7-render-tree §2——的去重合并版，
+   按 iPad 动线排序，行为变化预告在前，HUD 读数速查在其 §7）。
+   真机是用户在 iPad 上做（/dev/ 部署，先对水印 v0.4.8）；agent 的活是接 bug 反馈批逐条修
+   （math/手感类 bug 禁猜测式调试，先写清输入/输出问题陈述）。
+2. **S8（编辑逻辑迁移）**：真机验完才准动；开工前轻量 plan（施工图 = batch1-handoff §4-S8 +
    S7 报告 §3 交接点）。注意 S8 里 checkpoint-autosave 归属要**先跟人类对齐**（spec:26 明说）。
 
 ## 必读文档（顺序）
