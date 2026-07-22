@@ -204,7 +204,8 @@ export class Board {
   //   2D 模式——_mat 常驻 → tile + 物化 canvas 双份计费；预算 = 设备 RAM 预算（诚实计 actual bytes，防 OOM）。
   _configureDocMemory() {
     if (this._glBoard) {
-      this.doc.configureMemory(Math.min(this._glBoard.memory.committedBytes, layerByteBudget()), false);
+      // S7：GPU 池惰性增长——预算口径用 quota（增长上限），别用 committed（初始才 16MiB）。
+      this.doc.configureMemory(Math.min(this._glBoard.memory.quotaBytes, layerByteBudget()), false);
     } else {
       this.doc.configureMemory(layerByteBudget(), true);
     }

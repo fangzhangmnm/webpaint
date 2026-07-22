@@ -7,13 +7,11 @@
 // 结果 → window.__SMOKE__ = { ok, checks:[{name,ok,detail}], error }。
 
 import { GLContext } from "../../src/gl/gl-context.ts";
-import { GLTileBackend } from "../../src/gl/tile-backend-gl.ts";
-import { TilePool, LayerTileMap, TILE_BYTES } from "../../src/gl/tile-store.ts";
-import { TILE_SIZE } from "../../src/tiles/tile-geometry.ts";
+import { GLGpuTileBackend, GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../../src/gl/gpu-tile-pool.ts";
+import { TILE_SIZE, tilesAcross } from "../../src/tiles/tile-geometry.ts";
 import { GLCompositor } from "../../src/gl/gl-compositor.ts";
-import { TileIndexTexture } from "../../src/gl/tile-index.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
-import { uploadLayerToTiles, docTreeToComp } from "../../src/gl/gl-doc-bridge.ts";
+import { docTreeToComp } from "../../src/gl/gl-doc-bridge.ts";
 import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/gl/tile-pixels.ts";
 import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
 import type { Stamp } from "../../src/gl/gl-stamp.ts";
@@ -81,9 +79,39 @@ function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number,
   return { canvas, dstX: minX, dstY: minY };
 }
 
+
+// S7 起上传统一走池批量口；harness 本地复刻旧 uploadLayerToTiles 形（LayerPixels → 池 tiles + index）。
+function uploadLayerToTiles(glctx: GLContext, pool: GpuTilePool, layer: { pixels: LayerPixels }, docW: number, docH: number): { index: IndexTexture; tileCount: number } {
+  const across = tilesAcross(docW);
+  const keys: number[] = []; const items: { bytes: Uint8Array }[] = [];
+  layer.pixels.forEachTile((tx, ty, data) => {
+    keys.push(ty * across + tx);
+    items.push({ bytes: new Uint8Array(data.buffer, data.byteOffset, data.byteLength) });
+  });
+  const ids = pool.uploadBatch(items);
+  const byKey = new Map<number, number>();
+  keys.forEach((k, i) => byKey.set(k, ids[i]));
+  const index = new IndexTexture(glctx, docW, docH);
+  index.rebuild(byKey, pool);
+  return { index, tileCount: keys.length };
+}
+
+// 单 slice 读回（生产路径无 per-slice readback——batch 大 FBO 归 bridge；这里只为 smoke 验上传真到了 GPU）。
+function readSliceRaw(glctx: GLContext, backend: GLGpuTileBackend, slice: number): Uint8Array {
+  const gl = glctx.gl;
+  const fbo = gl.createFramebuffer()!;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, backend.texture, 0, slice);
+  const out = new Uint8Array(GPU_TILE_BYTES);
+  gl.readPixels(0, 0, TILE_SIZE, TILE_SIZE, gl.RGBA, gl.UNSIGNED_BYTE, out);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  return out;
+}
+
 interface Check { name: string; ok: boolean; detail: string; }
 type Add = (name: string, ok: boolean, detail?: string) => void;
-type Leaf = { kind: "leaf"; srcIndex: TileIndexTexture; opacity: number; mode: string; clip: boolean; visible: boolean; hasContent: boolean };
+type Leaf = { kind: "leaf"; srcIndex: IndexTexture; opacity: number; mode: string; clip: boolean; visible: boolean; hasContent: boolean };
 
 // ---- 像素工具 ----
 function makeImg(n: number, fn: (x: number, y: number) => [number, number, number, number]): Uint8Array {
@@ -95,7 +123,7 @@ function makeImg(n: number, fn: (x: number, y: number) => [number, number, numbe
   return a;
 }
 function subTile(img: Uint8Array, imgN: number, tx: number, ty: number): Uint8Array {
-  const t = new Uint8Array(TILE_BYTES);
+  const t = new Uint8Array(GPU_TILE_BYTES);
   for (let y = 0; y < TILE_SIZE; y++) for (let x = 0; x < TILE_SIZE; x++) {
     const sx = tx * TILE_SIZE + x, sy = ty * TILE_SIZE + y;
     if (sx < imgN && sy < imgN) {
@@ -144,8 +172,8 @@ function maxPremulDiff(ref: Uint8ClampedArray, glpx: Uint8Array, n: number): { m
   const px = (ai / 4) % n, py = Math.floor((ai / 4) / n);
   return { md: Math.round(md), at: `@(${px},${py}) ref=[${ref[ai]},${ref[ai + 1]},${ref[ai + 2]},${ref[ai + 3]}] gl=[${glpx[ai]},${glpx[ai + 1]},${glpx[ai + 2]},${glpx[ai + 3]}]` };
 }
-function idx1(glctx: GLContext, slice: number): TileIndexTexture {
-  const t = new TileIndexTexture(glctx, TILE_SIZE, TILE_SIZE); t.setTile(0, 0, slice); return t;
+function idx1(glctx: GLContext, slice: number): IndexTexture {
+  const t = new IndexTexture(glctx, TILE_SIZE, TILE_SIZE); t.setSlice(0, 0, slice); return t;
 }
 // doc 尺寸直值 RGBA8 2D 纹理（live overlay 用）。
 function makeTex2D(glctx: GLContext, img: Uint8Array, n: number): WebGLTexture {
@@ -158,7 +186,7 @@ function makeTex2D(glctx: GLContext, img: Uint8Array, n: number): WebGLTexture {
   gl.bindTexture(gl.TEXTURE_2D, null);
   return tex;
 }
-function L(srcIndex: TileIndexTexture, opacity: number, mode: string, clip = false): Leaf {
+function L(srcIndex: IndexTexture, opacity: number, mode: string, clip = false): Leaf {
   return { kind: "leaf", srcIndex, opacity, mode, clip, visible: true, hasContent: true };
 }
 function readComposite(glctx: GLContext, comp: GLCompositor, accum: { tex: WebGLTexture }, n: number): Uint8Array {
@@ -191,7 +219,7 @@ function blendParity(glctx: GLContext, backend: GLTileBackend, add: Add, prec: "
   i0.dispose(); i1.dispose();
 }
 function opaqueProbe(glctx: GLContext, add: Add): void {
-  const n = TILE_SIZE; const backend = new GLTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
+  const n = TILE_SIZE; const backend = new GLGpuTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
   const bd = makeImg(n, (x) => [x, x, x, 255]); const src = makeImg(n, (_x, y) => [y, y, y, 255]);
   backend.uploadSlice(0, bd); backend.uploadSlice(1, src);
   const i0 = idx1(glctx, 0), i1 = idx1(glctx, 1);
@@ -205,7 +233,7 @@ function opaqueProbe(glctx: GLContext, add: Add): void {
   i0.dispose(); i1.dispose();
 }
 function clipParity(glctx: GLContext, add: Add): void {
-  const n = TILE_SIZE; const backend = new GLTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
+  const n = TILE_SIZE; const backend = new GLGpuTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
   const base = makeImg(n, (x, y) => [200, 40 + (x % 200), 40 + (y % 200), (x + y < n) ? 255 : ((x + y) % 256)]);
   const clip = makeImg(n, (x, y) => [40 + (y % 200), 8 + (x % 240), 200, 255]);
   backend.uploadSlice(0, base); backend.uploadSlice(1, clip);
@@ -224,14 +252,14 @@ function clipParity(glctx: GLContext, add: Add): void {
 
 // ---- C) 多 tile ----
 function multiTileParity(glctx: GLContext, add: Add): void {
-  const N = 512; const backend = new GLTileBackend(glctx, 8); const comp = new GLCompositor(glctx, "f32");
+  const N = 512; const backend = new GLGpuTileBackend(glctx, 8); const comp = new GLCompositor(glctx, "f32");
   const bd = makeImg(N, (x, y) => [8 + (x % 240), 8 + (y % 240), 8 + ((x + y) % 240), 255]);
   const top = makeImg(N, (x, y) => ((x < 256 && y < 256) || (x >= 256 && y >= 256)) ? [240 - (x % 240), 8 + (y % 240), 100, 200] : [0, 0, 0, 0]);
-  const bdIdx = new TileIndexTexture(glctx, N, N); let s = 0;
-  for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 2; tx++) { backend.uploadSlice(s, subTile(bd, N, tx, ty)); bdIdx.setTile(tx, ty, s); s++; }
-  const topIdx = new TileIndexTexture(glctx, N, N);
-  backend.uploadSlice(4, subTile(top, N, 0, 0)); topIdx.setTile(0, 0, 4);
-  backend.uploadSlice(5, subTile(top, N, 1, 1)); topIdx.setTile(1, 1, 5);
+  const bdIdx = new IndexTexture(glctx, N, N); let s = 0;
+  for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 2; tx++) { backend.uploadSlice(s, subTile(bd, N, tx, ty)); bdIdx.setSlice(tx, ty, s); s++; }
+  const topIdx = new IndexTexture(glctx, N, N);
+  backend.uploadSlice(4, subTile(top, N, 0, 0)); topIdx.setSlice(0, 0, 4);
+  backend.uploadSlice(5, subTile(top, N, 1, 1)); topIdx.setSlice(1, 1, 5);
   const accum = comp.composite(backend.texture, [L(bdIdx, 1, "source-over"), L(topIdx, 1, "source-over")], N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = canvas2dRef(N, bd, top, "source-over", 1);
@@ -262,8 +290,8 @@ function groupParity(glctx: GLContext, add: Add): void {
   ];
 
   for (const { name, spec } of scenes) {
-    const backend = new GLTileBackend(glctx, 16); const comp = new GLCompositor(glctx, "f32");
-    const indices: TileIndexTexture[] = [];
+    const backend = new GLGpuTileBackend(glctx, 16); const comp = new GLCompositor(glctx, "f32");
+    const indices: IndexTexture[] = [];
     let slice = 0;
     const build = (s: Spec): { gl: unknown; twoD: unknown } => {
       if (s.t === "leaf") {
@@ -297,7 +325,7 @@ function groupParity(glctx: GLContext, add: Add): void {
 
 // ---- live overlay 注入 vs compositeLayers overlayFor（normal + erase）----
 function overlayParity(glctx: GLContext, add: Add): void {
-  const n = TILE_SIZE; const backend = new GLTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
+  const n = TILE_SIZE; const backend = new GLGpuTileBackend(glctx, 4); const comp = new GLCompositor(glctx, "f32");
   const bg = makeImg(n, (x, y) => [60, 120 + (x % 120), 60 + (y % 180), 255]);          // 底
   const layer = makeImg(n, (x, y) => [200, 60 + (x % 180), 80, 180 + ((x + y) % 76)]);   // 活动叶
   const ov = makeImg(n, (x, y) => ((x + y) % 64 < 40) ? [40 + (x % 200), 220, 60, 160 + (y % 80)] : [0, 0, 0, 0]);  // 描边（带空隙）
@@ -373,7 +401,7 @@ function pixelsFromCanvas(docW: number, docH: number, bx: number, by: number, c:
 }
 function bridgeParity(glctx: GLContext, add: Add): void {
   const N = 512;
-  const backend = new GLTileBackend(glctx, 40); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  const backend = new GLGpuTileBackend(glctx, 40); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   // fake-Layer：bbox 裁剪、含偏移层；canvas=compositeLayers golden 输入，pixels=GL 直读 SoT（同源）。
   const cA = makeLayerCanvas(N, N, (x, y) => [60, 120 + (x % 120), 60 + (y % 160), 255]);
   const cB = makeLayerCanvas(300, 260, (x, y) => [220, 80 + (x % 150), 60, 200]);
@@ -385,14 +413,14 @@ function bridgeParity(glctx: GLContext, add: Add): void {
   const nodes = [A, grp];
 
   const res = new Map<number, ReturnType<typeof uploadLayerToTiles>>();
-  for (const leaf of [A, B, C]) res.set(leaf.id, uploadLayerToTiles(glctx, backend, pool, leaf, N, N));
+  for (const leaf of [A, B, C]) res.set(leaf.id, uploadLayerToTiles(glctx, pool, leaf, N, N));
 
   const gc = document.createElement("canvas"); gc.width = N; gc.height = N;
   const gctx = gc.getContext("2d")!; gctx.clearRect(0, 0, N, N);
   compositeLayers(gctx as unknown as CanvasRenderingContext2D, nodes as never, {});
   const ref = gctx.getImageData(0, 0, N, N).data;
 
-  const tree = docTreeToComp(nodes as never, (leaf) => { const r = res.get((leaf as { id: number }).id)!; return { index: r.index, hasContent: r.tileMap.tileCount > 0 }; });
+  const tree = docTreeToComp(nodes as never, (leaf) => { const r = res.get((leaf as { id: number }).id)!; return { index: r.index, hasContent: r.tileCount > 0 }; });
   const accum = comp.composite(backend.texture, tree, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const { md, at } = maxPremulDiff(ref, glpx, N);
@@ -548,11 +576,11 @@ function drawCheckerRef(ctx: CanvasRenderingContext2D, w: number, h: number): vo
 }
 function checkerParity(glctx: GLContext, add: Add): void {
   const N = 192;
-  const backend = new GLTileBackend(glctx, 16); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  const backend = new GLGpuTileBackend(glctx, 16); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   // 半透明层（部分覆盖）→ 透明处应显棋盘
   const layerCanvas = makeLayerCanvas(N, N, (x, y) => (x > 48 && x < 144 && y > 48 && y < 144) ? [200, 40, 40, 128] : [0, 0, 0, 0]);
-  const lt = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, layerCanvas) }, N, N);
-  const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: lt.tileMap.tileCount > 0, overlay: null }];
+  const lt = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, layerCanvas) }, N, N);
+  const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: lt.tileCount > 0, overlay: null }];
   const accum = comp.composite(backend.texture, tree as never, N, N, "checker");
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
@@ -584,9 +612,9 @@ function texFromCanvas(glctx: GLContext, c: HTMLCanvasElement): WebGLTexture {
 }
 function floatParity(glctx: GLContext, add: Add): void {
   const N = 192;
-  const backend = new GLTileBackend(glctx, 16); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  const backend = new GLGpuTileBackend(glctx, 16); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   const baseCanvas = makeLayerCanvas(N, N, () => [40, 80, 160, 255]);   // 不透明底
-  const lt = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, baseCanvas) }, N, N);
+  const lt = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, baseCanvas) }, N, N);
   const fw = 80, fh = 70, fx = 50, fy = 40;
   const floatCanvas = makeLayerCanvas(fw, fh, (x, y) => [220, 60, 60, (x + y) % 200 + 40]);   // 半透明渐变
   const ftex = texFromCanvas(glctx, floatCanvas);
@@ -602,7 +630,7 @@ function floatParity(glctx: GLContext, add: Add): void {
   lt.index.dispose(); glctx.gl.deleteTexture(ftex);
 
   // clip 层空基底 + float（变换图层组时 clip 层基底被提空）→ 层不渲染但 float 仍显（修「变换组 clip 消失」）。
-  const eb = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, makeLayerCanvas(N, N, () => [0, 0, 0, 0])) }, N, N);
+  const eb = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, makeLayerCanvas(N, N, () => [0, 0, 0, 0])) }, N, N);
   const fc2 = makeLayerCanvas(70, 60, () => [80, 200, 120, 200]); const ftex2 = texFromCanvas(glctx, fc2);
   const tree2 = [
     { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: null },
@@ -621,9 +649,9 @@ function floatParity(glctx: GLContext, add: Add): void {
 //   核心证据：WARP_FRAG 的逆单应性 gather + 手写 Catmull-Rom 采样器逐位复刻 CPU。源带 alpha 变化（测 premult）。
 function warpParity(glctx: GLContext, add: Add): void {
   const N = 192;
-  const backend = new GLTileBackend(glctx, 16); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  const backend = new GLGpuTileBackend(glctx, 16); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   const baseCanvas = makeLayerCanvas(N, N, () => [30, 30, 30, 255]);   // 不透明底（warp source-over 其上）
-  const lt = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, baseCanvas) }, N, N);
+  const lt = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, baseCanvas) }, N, N);
   const sw = 64, sh = 48;
   const srcCanvas = makeLayerCanvas(sw, sh, (x, y) => {
     const cell = (((x >> 3) + (y >> 3)) & 1) === 1;       // 8px 棋盘色
@@ -666,10 +694,10 @@ function warpParity(glctx: GLContext, add: Add): void {
 //   基底源 alpha=蒙版形状（左实右透），clip 源全不透明 → clip 应只显在基底实处。两者同 mesh warp。
 function warpClipParity(glctx: GLContext, add: Add): void {
   const N = 192;
-  const backend = new GLTileBackend(glctx, 16); const pool = new TilePool(backend); const comp = new GLCompositor(glctx, "f32");
+  const backend = new GLGpuTileBackend(glctx, 16); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
   const bgCanvas = makeLayerCanvas(N, N, () => [30, 30, 30, 255]);
-  const bg = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, bgCanvas) }, N, N);
-  const empty = uploadLayerToTiles(glctx, backend, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, makeLayerCanvas(N, N, () => [0, 0, 0, 0])) }, N, N);
+  const bg = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, bgCanvas) }, N, N);
+  const empty = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, makeLayerCanvas(N, N, () => [0, 0, 0, 0])) }, N, N);
   const sw = 64, sh = 48;
   const baseSrc = makeLayerCanvas(sw, sh, (x) => x < sw / 2 ? [40, 120, 230, 255] : [40, 120, 230, 0]);   // 蒙版：左实右透
   const clipSrc = makeLayerCanvas(sw, sh, () => [230, 80, 40, 255]);                                       // clip 内容：全不透明红
@@ -788,46 +816,51 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
     catch (e) { add(`fbo.${p}.complete`, false, String(e)); }
   }
 
-  const backend = new GLTileBackend(glctx, 8);
+  const backend = new GLGpuTileBackend(glctx, 8);
   try {
-    const px = new Uint8Array(TILE_BYTES);
-    px[0] = 12; px[1] = 34; px[2] = 56; px[3] = 78; px[TILE_BYTES - 4] = 9; px[TILE_BYTES - 1] = 255;
+    const px = new Uint8Array(GPU_TILE_BYTES);
+    px[0] = 12; px[1] = 34; px[2] = 56; px[3] = 78; px[GPU_TILE_BYTES - 4] = 9; px[GPU_TILE_BYTES - 1] = 255;
     backend.uploadSlice(2, px);
-    const out = backend.readSlice(2);
+    const out = readSliceRaw(glctx, backend, 2);
     const head = out[0] === 12 && out[1] === 34 && out[2] === 56 && out[3] === 78;
-    const tail = out[TILE_BYTES - 4] === 9 && out[TILE_BYTES - 1] === 255;
+    const tail = out[GPU_TILE_BYTES - 4] === 9 && out[GPU_TILE_BYTES - 1] === 255;
     add("backend.upload→read round-trip", head && tail, `head=[${out[0]},${out[1]},${out[2]},${out[3]}]`);
   } catch (e) { add("backend.upload→read round-trip", false, String(e)); }
 
   try {
-    backend.uploadSlice(3, new Uint8Array(TILE_BYTES).fill(200)); backend.clearSlice(3);
-    const out = backend.readSlice(3); let z = true;
-    for (let i = 0; i < TILE_BYTES; i += 997) if (out[i] !== 0) { z = false; break; }
-    add("backend.clearSlice→zero", z);
-  } catch (e) { add("backend.clearSlice→zero", false, String(e)); }
+    // 覆盖上传：同 slice 重传后读到新内容（新池不做 clearSlice——index 不指向即不可达）。
+    backend.uploadSlice(3, new Uint8Array(GPU_TILE_BYTES).fill(200));
+    const p2 = new Uint8Array(GPU_TILE_BYTES); p2[0] = 5; p2[3] = 255;
+    backend.uploadSlice(3, p2);
+    const out = readSliceRaw(glctx, backend, 3);
+    add("backend.reupload→overwrite", out[0] === 5 && out[3] === 255, `got=[${out[0]},${out[3]}]`);
+  } catch (e) { add("backend.reupload→overwrite", false, String(e)); }
 
   try {
     // context-loss 后端重建：recreate() → 全新空 array texture（旧内容没了）+ 重建后上传/读回正常。
-    const rb = new GLTileBackend(glctx, 4);
-    rb.uploadSlice(1, new Uint8Array(TILE_BYTES).fill(77));
-    rb.recreate();
-    const after = rb.readSlice(1); const isEmpty = after[0] === 0 && after[TILE_BYTES - 1] === 0;
-    const p = new Uint8Array(TILE_BYTES); p[0] = 55; p[3] = 255; rb.uploadSlice(2, p);
-    const back = rb.readSlice(2); const rt = back[0] === 55 && back[3] === 255;
+    const rb = new GLGpuTileBackend(glctx, 4);
+    rb.uploadSlice(1, new Uint8Array(GPU_TILE_BYTES).fill(77));
+    rb.recreate(8);   // grow 语义：先删→flush→新建更大（spec:175）
+    const after = readSliceRaw(glctx, rb, 1); const isEmpty = after[0] === 0 && after[GPU_TILE_BYTES - 1] === 0;
+    const p = new Uint8Array(GPU_TILE_BYTES); p[0] = 55; p[3] = 255; rb.uploadSlice(2, p);
+    const back = readSliceRaw(glctx, rb, 2); const rt = back[0] === 55 && back[3] === 255;
     add("residency:backend.recreate → 空纹理 + 重建后上传读回正常", isEmpty && rt, `empty=${isEmpty} rt=${rt}`);
   } catch (e) { add("residency:backend.recreate", false, String(e)); }
 
   try {
-    const pool = new TilePool(backend); const lm = new LayerTileMap(pool, 8);
-    const t = lm.tileAt(1, 1, { create: true }); if (!t) throw new Error("tileAt create null");
-    const p = new Uint8Array(TILE_BYTES); p[0] = 99; p[3] = 255; backend.uploadSlice(t.slice, p);
-    const back = backend.readSlice(t.slice); const rt = back[0] === 99 && back[3] === 255; const sl = t.slice;
-    lm.freeTile(1, 1); const t2 = lm.tileAt(5, 5, { create: true });
-    add("pool+layermap over real GPU", rt && !!t2 && t2.slice === sl, `rt=${rt}`);
-  } catch (e) { add("pool+layermap over real GPU", false, String(e)); }
+    // 池批量分配 + 真 GPU 上传读回；evict 后 slice 复用（旧 LayerTileMap 往返测试的池化版）。
+    const pool = new GpuTilePool(backend, backend.capacity);
+    const p = new Uint8Array(GPU_TILE_BYTES); p[0] = 99; p[3] = 255;
+    const [id] = pool.uploadBatch([{ bytes: p }]);
+    const sl = pool.slotOf(id);
+    const back = readSliceRaw(glctx, backend, sl); const rt = back[0] === 99 && back[3] === 255;
+    pool.evict(id);
+    const [id2] = pool.uploadBatch([{ bytes: p }]);
+    add("pool over real GPU（批量+evict 复用）", rt && pool.slotOf(id2) === sl && id2 !== id, `rt=${rt}`);
+  } catch (e) { add("pool over real GPU（批量+evict 复用）", false, String(e)); }
 
   try {
-    const cb = new GLTileBackend(glctx, 4);
+    const cb = new GLGpuTileBackend(glctx, 4);
     blendParity(glctx, cb, add, "f32"); blendParity(glctx, cb, add, "f16");
     opaqueProbe(glctx, add); clipParity(glctx, add);
   } catch (e) { add("blend/clip parity", false, String(e)); }

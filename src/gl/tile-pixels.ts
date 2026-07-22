@@ -74,6 +74,10 @@ export class LayerPixels {
   forEachTile(cb: (tx: number, ty: number, pixels: Uint8ClampedArray) => void): void {
     this._tiles.forEach((h, key) => { const { tx, ty } = tileCoord(key, this._across); cb(tx, ty, h.clampedView()); });
   }
+  // 带句柄遍历（GPU 上传走 cpu-gpu-tile-bridge 按 handle.id 去重；不 acquire，别持有）。
+  forEachTileHandle(cb: (tx: number, ty: number, h: TileHandle) => void): void {
+    this._tiles.forEach((h, key) => { const { tx, ty } = tileCoord(key, this._across); cb(tx, ty, h); });
+  }
 
   // ---- 写：把 doc 矩形 [sx0,sy0,sw,sh] 的像素**整块替换**为 src（flat RGBA，行优先，sw 宽）----
   // src 的透明像素也会写入（= 该处变透明）。覆盖后全透明的格回收。copy-on-write：每格封新 tile。

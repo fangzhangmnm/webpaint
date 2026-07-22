@@ -5,7 +5,7 @@
 // CompNode = 合成器输入节点（与 doc.ts 的 Layer/LayerGroup 解耦——board 接线时翻译过来）。
 //   叶携带 GL 资源（srcIndex），但本文件纯判定不碰它。
 
-import type { TileIndexTexture } from "./tile-index.ts";
+import type { IndexTexture } from "./gpu-tile-pool.ts";
 import type { BlendMode } from "./blend-glsl.ts";
 
 // live 描边 overlay（活动叶层叠加）：**bbox 尺寸**直值纹理 + doc 坐标 bbox（origin/size）+ 不透明度 + 擦除。
@@ -30,7 +30,7 @@ export interface FloatDesc {
 }
 export interface CompLeaf {
   kind: "leaf";
-  srcIndex: TileIndexTexture;
+  srcIndex: IndexTexture;
   opacity: number;
   mode: BlendMode;
   clip: boolean;          // 是否剪裁层

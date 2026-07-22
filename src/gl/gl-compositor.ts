@@ -15,7 +15,7 @@ import { COMPOSITE_VERT, compositeFragSource, compositeProgramKey } from "./blen
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
 import { resolveClipBases, needsIsolation, groupUnitMode } from "./gl-compose-plan.ts";
 import type { CompNode, OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
-import type { TileIndexTexture } from "./tile-index.ts";
+import type { IndexTexture } from "./gpu-tile-pool.ts";
 import type { GLContext, PooledFBO, FBOPrec } from "./gl-context.ts";
 
 // 文档背景接缝（对齐 2D compositeLayers 的 bg + board._drawCheckerboard）：
@@ -261,8 +261,8 @@ export class GLCompositor {
   // 一个 blend pass：src(tiled 叶 / group 预乘纹理) 与 acc.read 合 → acc.write，交换。
   private _pass(
     arrayTex: WebGLTexture, srcKind: SourceKind,
-    srcIndex: TileIndexTexture | null, groupTex: WebGLTexture | null,
-    mode: BlendMode, opacity: number, clipIndex: TileIndexTexture | null,
+    srcIndex: IndexTexture | null, groupTex: WebGLTexture | null,
+    mode: BlendMode, opacity: number, clipIndex: IndexTexture | null,
     acc: Acc, docW: number, docH: number, overlay: OverlayDesc | null = null,
   ): void {
     const gl = this._glctx.gl;

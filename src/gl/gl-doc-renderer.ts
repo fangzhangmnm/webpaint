@@ -5,13 +5,15 @@
 // 接 board 时：board 持一个 GLDocRenderer；内容变更 syncLayer(脏层)；每帧 renderToScreen(doc.layers)。
 // 视口 pan/zoom 暂为整文档 1:1 fit；真视口变换 = 接 board 时加（present 带 view matrix）。
 
-import { GLTileBackend } from "./tile-backend-gl.ts";
-import { TilePool, TILE_BYTES } from "./tile-store.ts";
+import { GpuTilePool, GLGpuTileBackend, IndexTexture, GPU_TILE_BYTES } from "./gpu-tile-pool.ts";
+import { CpuGpuTileBridge } from "./tile-bridge.ts";
+import { appTilePool } from "../tiles/app-tile-pool.ts";
+import { tilesAcross, tilesDown } from "../tiles/tile-geometry.ts";
 import { GLCompositor } from "./gl-compositor.ts";
 import type { Background } from "./gl-compositor.ts";
-import { uploadLayerToTiles, docTreeToComp, safeMode } from "./gl-doc-bridge.ts";
+import { docTreeToComp, safeMode } from "./gl-doc-bridge.ts";
 import { LayerPixels, replaceFromCanvas } from "./tile-pixels.ts";
-import type { DocNode, DocLeaf, LayerTiles } from "./gl-doc-bridge.ts";
+import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
@@ -42,14 +44,20 @@ export interface StampOverlayInput {
   selMask: { data: Uint8Array; ox: number; oy: number; ow: number; oh: number } | null;
 }
 
+// 每叶的 GPU 侧驻留记录：tileKey → gpuId + 寻址纹理。
+// 快路径三元组：(src 实例身份, contentVersion, pool 代) 全中 → 整层跳过（零遍历零上传）。
+//   身份防「层被 setPixels 换了新 LayerPixels 但 version 撞号」；代防「pool recreate 后 id 全死」。
+interface LeafTiles { index: IndexTexture; byKey: Map<number, number>; src: LayerPixels | null; cpuVersion: number; gen: number }
+
 export class GLDocRenderer {
   private _glctx: GLContext;
-  private _backend: GLTileBackend;
-  private _pool: TilePool;
+  private _backend: GLGpuTileBackend;
+  private _pool: GpuTilePool;
+  private _bridge: CpuGpuTileBridge;
   private _comp: GLCompositor;
   private _rasterizer: GLStampRasterizer;
   private _overlayOwnedFBO: PooledFBO | null = null;   // setStampOverlay 借的 straight FBO，合成后归还
-  private _layerTiles = new Map<number, LayerTiles>();
+  private _layerTiles = new Map<number, LeafTiles>();
   private _selTex: WebGLTexture | null = null;   // GPU overlay 选区蒙版（复用；同一 buffer 不重传）
   private _selTexSrc: Uint8Array | null = null;  // 上次上传的 gray8 buffer 身份（Selection 不可变 → 身份即内容）
   private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number; lockAlpha: boolean; selMask: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null } | null = null;
@@ -57,20 +65,30 @@ export class GLDocRenderer {
   private _floatTex = new Map<number, { tex: WebGLTexture; canvas: CanvasImageSource | null }>();
   private _floats = new Map<number, FloatDesc>();
 
-  constructor(glctx: GLContext, capacity: number, accumPrec: FBOPrec = "f16") {
+  constructor(glctx: GLContext, maxSlices: number, accumPrec: FBOPrec = "f16") {
     this._glctx = glctx;
-    this._backend = new GLTileBackend(glctx, capacity);
-    this._pool = new TilePool(this._backend);
+    // 惰性容量（spec:170）：初始 64 slices（16MiB），reserve 时 quota 内翻倍 grow。
+    this._backend = new GLGpuTileBackend(glctx, Math.min(64, maxSlices));
+    this._pool = new GpuTilePool(this._backend, maxSlices);
+    this._bridge = new CpuGpuTileBridge(this._pool);
+    // 显示中的叶层 tile 全部 required（7b render-tree 化后细分为 plan 的 pinLeaves/段两档）。
+    this._pool.registerPinProvider(() => {
+      const required = new Set<number>();
+      for (const rec of this._layerTiles.values()) for (const id of rec.byKey.values()) required.add(id);
+      return { required, preferred: new Set<number>() };
+    });
     this._comp = new GLCompositor(glctx, accumPrec);
     this._rasterizer = new GLStampRasterizer(glctx);
   }
 
-  // （v0.4.3：TileResidency 日落——CPU tile 池不可变 + deflate 压缩驻留后，CPU 恒为 SSoT，
-  //   「备份→驱逐→GPU readback 重物化」整条机器失去存在理由。context-loss 恢复 = 直接 syncAll 重传。）
-
-  // 内存核算（接 computeMaxLayers 软上限 / HUD）。committed = 池预分配；used = 实占 tile。
-  get memory(): { usedTiles: number; capacity: number; usedBytes: number; committedBytes: number } {
-    return { usedTiles: this._pool.allocatedCount, capacity: this._pool.capacity, usedBytes: this._pool.byteUsage, committedBytes: this._backend.committedBytes };
+  // 内存核算（接 computeMaxLayers 软上限 / HUD）。committed = 当前已分配纹理（惰性增长）；
+  //   quota = 增长上限（board 预算口径用它，别用 committed——初始才 16MiB）。
+  get memory(): { usedTiles: number; capacity: number; usedBytes: number; committedBytes: number; quotaBytes: number } {
+    return {
+      usedTiles: this._pool.allocatedCount, capacity: this._pool.capacity,
+      usedBytes: this._pool.allocatedCount * GPU_TILE_BYTES,
+      committedBytes: this._pool.committedBytes, quotaBytes: this._pool.quotaBytes,
+    };
   }
 
   // 上一次合成的 pass 计数（dev HUD；compositor 在 composite() 入口清零）。
@@ -78,11 +96,49 @@ export class GLDocRenderer {
   // FBO 池占用（dev HUD：确认有界）。
   get fboPoolStats(): { count: number; bytes: number } { return this._glctx.fboPoolStats; }
 
-  // 重传一个叶层像素 → tiles（内容变更后调）。CPU 恒驻留（池管压缩），直接读直接传。
+  // 同步一个叶层像素 → GPU tiles。**增量**：tile 不可变 + bridge 按 cpu id 去重 → 只有内容
+  //   变了的 tile 真上传；(身份,版本,代) 三元组全中直接整层跳过。压缩驻留的 tile 若 GPU 副本
+  //   还活着，连解压都不发生（bridge 惰性取 bytes）。
   syncLayer(leaf: DocLeaf, docW: number, docH: number): void {
-    const old = this._layerTiles.get(leaf.id);
-    if (old) { old.index.dispose(); old.tileMap.clear(); }
-    this._layerTiles.set(leaf.id, uploadLayerToTiles(this._glctx, this._backend, this._pool, leaf, docW, docH));
+    try { this._syncPixels(leaf.id, leaf.pixels, docW, docH); } catch (e) {
+      // 池连驱逐后都塞不下（内容超显存 quota）：该层保持陈旧/部分显示，压力缓解后自愈。
+      //   与旧「池满 tileAt 返 null 跳过」降级对齐；不让渲染循环崩。
+      if (!(e instanceof Error) || !e.message.startsWith("GPU_POOL_EXHAUSTED")) throw e;
+    }
+  }
+
+  private _syncPixels(leafId: number, pixels: LayerPixels, docW: number, docH: number): void {
+    const across = tilesAcross(docW), down = tilesDown(docH);
+    let rec = this._layerTiles.get(leafId);
+    if (rec && (rec.index.across !== across || rec.index.down !== down)) {
+      rec.index.dispose();
+      this._layerTiles.delete(leafId);
+      rec = undefined;
+    }
+    const gen = this._pool.generation;
+    if (rec && rec.src === pixels && rec.cpuVersion === pixels.contentVersion && rec.gen === gen) return;   // 快路径
+    if (!rec) {
+      rec = { index: new IndexTexture(this._glctx, docW, docH), byKey: new Map(), src: null, cpuVersion: -1, gen };
+      this._layerTiles.set(leafId, rec);
+    }
+    const keys: number[] = [];
+    const entries: { cpuId: number; bytes: () => Uint8Array }[] = [];
+    pixels.forEachTileHandle((tx, ty, h) => {
+      keys.push(ty * across + tx);
+      entries.push({ cpuId: h.id, bytes: () => h.bytes() });
+    });
+    const gpuIds = this._bridge.ensureUploaded(entries);
+    // 映射变没变（gpu id 集合逐格比对）→ 变了才重建 index 纹理。
+    let changed = rec.byKey.size !== keys.length || rec.gen !== gen;
+    if (!changed) for (let i = 0; i < keys.length; i++) if (rec.byKey.get(keys[i]) !== gpuIds[i]) { changed = true; break; }
+    if (changed) {
+      rec.byKey.clear();
+      for (let i = 0; i < keys.length; i++) rec.byKey.set(keys[i], gpuIds[i]);
+      rec.index.rebuild(rec.byKey, this._pool);
+    }
+    rec.src = pixels;
+    rec.cpuVersion = pixels.contentVersion;
+    rec.gen = gen;
   }
 
   // 把一张 canvas（doc (bx,by) 起 w×h）当某层的 GPU tiles 上传（颜色调整 live preview 的替身 surrogate）。
@@ -91,34 +147,47 @@ export class GLDocRenderer {
   syncLayerFromCanvas(leafId: number, canvas: CanvasImageSource, bx: number, by: number, w: number, h: number, docW: number, docH: number): void {
     const tmp = new LayerPixels(docW, docH);
     replaceFromCanvas(tmp, canvas, bx, by, w, h);
-    const old = this._layerTiles.get(leafId);
-    if (old) { old.index.dispose(); old.tileMap.clear(); }
-    this._layerTiles.set(leafId, uploadLayerToTiles(this._glctx, this._backend, this._pool, { pixels: tmp }, docW, docH));
-    tmp.dispose();   // v0.4：上传已完成（uploadLayerToTiles 同步读完），临时实例的 tile 句柄立即释放
+    this._syncPixels(leafId, tmp, docW, docH);
+    this._layerTiles.get(leafId)!.src = null;   // tmp 即将 dispose，快路径身份作废（下次必走慢路径）
+    tmp.dispose();   // 上传已完成（ensureUploaded 同步读完）；映射里的死 cpu id 由 purge 清
+    this._bridge.purgeDead(this._cpuAlive());
   }
 
-  // 重传整棵树所有叶（correctness-first）+ 对账已删层（board 无单独删层钩子 → 在此按当前树回收
-  //   陈旧 _layerTiles 的 GPU slices + residency 备份，修既有删层泄露）。
+  // 同步整棵树所有叶 + 对账已删层（陈旧 _layerTiles 丢记录，其 gpu tile 变孤儿由 frameMaintain 回收）。
+  //   帧首 reserve：容量一次到位（grow 若发生，随后的逐层 sync 因 gen 变自动走全量重传）。
   syncAll(nodes: DocNode[], docW: number, docH: number): void {
+    let total = 0;
+    this._eachLeaf(nodes, (l) => { total += l.pixels.tileCount; });
+    if (!this._pool.reserve(total)) {
+      // quota 也放不下（层数×内容超显存预算）：尽力同步，塞不进的 tile 由 GPU_POOL_EXHAUSTED
+      //   降级为该层部分缺 tile（缺格 index=-1=透明）。与旧「池满 tileAt 返 null 跳过」行为对齐。
+    }
     const live = new Set<number>();
     this._eachLeaf(nodes, (l) => { live.add(l.id); this.syncLayer(l, docW, docH); });
     for (const id of [...this._layerTiles.keys()]) if (!live.has(id)) this.dropLayer(id);
+    this._bridge.purgeDead(this._cpuAlive());
   }
 
-  // context-loss 恢复：底层 array texture 随 context 失效 → 重建全新空后端 + 复位池 + 清陈旧 _layerTiles。
-  //   之后 gl-board 先 recoverAll（被驱逐层的 CPU raw 从压缩备份重物化），再 syncAll 从各层 CPU raw 全新重传。
+  private _cpuAlive(): (id: number) => boolean {
+    const alive = new Set<number>();
+    appTilePool().forEachLiveId((id: number) => alive.add(id));
+    return (id) => alive.has(id);
+  }
+
+  // context-loss 恢复：底层 array texture 随 context 失效 → 全部作废重建；bridge 映射清空；
+  //   之后 syncAll 从各层 CPU SSoT 全新重传（CPU 恒驻留，池管压缩）。
   handleContextRestored(): void {
-    this._backend.recreate();
-    this._pool.reset();
-    this._layerTiles.clear();   // 旧 index/tileMap 的 GL 句柄已随 context 失效，弃引用（死对象 GC；不 dispose）
+    this._pool.clearAll();      // recreate backend（旧纹理句柄已死，删除无害）+ 全 id 作废
+    this._bridge.clear();
+    this._layerTiles.clear();   // 旧 index 的 GL 句柄已随 context 失效，弃引用（死对象 GC；不 dispose）
     this._selTex = null;        // v0.4.6：选区纹理随 context 死 → 弃引用，下次 setStampOverlay 重建重传
     this._selTexSrc = null;
   }
 
-  // 删层时释放其 GPU tiles。
+  // 删层时丢弃记录；其 gpu tile 变孤儿，syncAll 尾部的 frameMaintain 回收。
   dropLayer(id: number): void {
     const r = this._layerTiles.get(id);
-    if (r) { r.index.dispose(); r.tileMap.clear(); this._layerTiles.delete(id); }
+    if (r) { r.index.dispose(); this._layerTiles.delete(id); }
   }
 
   // 清掉上帧 live overlay（无 brush stamp overlay 的帧调；CPU canvas overlay 路径已删，brush live 走 setStampOverlay）。
@@ -245,13 +314,16 @@ export class GLDocRenderer {
   returnFBO(fbo: PooledFBO): void { this._glctx.returnFBO(fbo); }
 
   private _composite(nodes: DocNode[], docW: number, docH: number, bg?: Background): PooledFBO {
+    // 每帧维护：孤儿 gpu tile（live-sync/CoW 换出的旧 tile、删层残留）回收（spec:174）。
+    //   叶层现存 tile 全在 pin required（provider 见 ctor）→ 只清真孤儿，安全。
+    this._pool.frameMaintain();
     const ov = this._overlay;
     const tree = docTreeToComp(
       nodes,
       (leaf) => {
         const r = this._layerTiles.get(leaf.id);
         if (!r) throw new Error(`LAYER_NOT_SYNCED:${leaf.id}`);   // syncAll 后每叶都在表（空层=空 index）
-        return { index: r.index, hasContent: r.tileMap.tileCount > 0 };
+        return { index: r.index, hasContent: r.byKey.size > 0 };
       },
       ov ? (leaf): OverlayDesc | null => (leaf.id === ov.layerId ? { tex: ov.tex, opacity: ov.opacity, erase: ov.erase, blendMode: safeMode(ov.blendMode), ox: ov.ox, oy: ov.oy, ow: ov.ow, oh: ov.oh, lockAlpha: ov.lockAlpha, selMask: ov.selMask } : null) : undefined,
       this._floats.size ? (leaf): FloatDesc | null => this._floats.get(leaf.id) ?? null : undefined,
@@ -269,7 +341,7 @@ export class GLDocRenderer {
   }
 }
 
-// 给 capacity 取整的便利：按显存预算（字节）算 tile 池深度（§4.2 软上限，Stage 0 真机校准）。
+// 给 quota 取整的便利：按显存预算（字节）算 tile 池深度上限（惰性增长的顶；Stage 0 真机校准）。
 export function poolCapacityForBudget(budgetBytes: number): number {
-  return Math.max(64, Math.floor(budgetBytes / TILE_BYTES));
+  return Math.max(64, Math.floor(budgetBytes / GPU_TILE_BYTES));
 }

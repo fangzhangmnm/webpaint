@@ -1,19 +1,12 @@
-// doc 图层树 → GL 合成器输入的桥（docs/20260614-perf-webgl-memory-clip.md §5.5 接 board）。
-// 两件事：
-//   ① uploadLayerToTiles：Layer 的**稀疏 tile 直接上传** GPU（无 Canvas2D 中转 = canvas 不在 GPU 路径上，
-//      切片④）。空 / 全透明 tile 已被 LayerPixels 剪枝 → forEachTile 只吐有内容的 tile。
-//   ② docTreeToComp：doc 节点树（Layer|LayerGroup）→ CompNode 树（纯翻译，node 可测）。
+// doc 图层树 → GL 合成器输入的桥：docTreeToComp（doc 节点树 Layer|LayerGroup → CompNode 树，
+//   纯翻译，node 可测）+ safeMode。
 // 用**结构化类型**接 doc 节点（不 import doc.ts）→ gl/ 保持独立深模块；board 传结构兼容的真节点即可。
+// （S7：uploadLayerToTiles 死——上传统一走 cpu-gpu-tile-bridge（tile-bridge.ts），增量、按 tile 身份去重。）
 
-import { tilesAcross } from "../tiles/tile-geometry.ts";
-import { LayerTileMap } from "./tile-store.ts";
-import type { TilePool } from "./tile-store.ts";
-import { TileIndexTexture } from "./tile-index.ts";
 import { BLEND_MODES } from "./blend-glsl.ts";
 import type { BlendMode } from "./blend-glsl.ts";
+import type { IndexTexture } from "./gpu-tile-pool.ts";
 import type { CompNode, OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
-import type { GLTileBackend } from "./tile-backend-gl.ts";
-import type { GLContext } from "./gl-context.ts";
 import type { LayerPixels } from "./tile-pixels.ts";
 
 // 结构化 doc 节点（与 doc.ts Layer/LayerGroup 字段兼容）。
@@ -36,37 +29,12 @@ export function safeMode(mode: string): BlendMode {
   return MODE_SET.has(mode) ? (mode as BlendMode) : "source-over";
 }
 
-export interface LayerTiles {
-  index: TileIndexTexture;
-  tileMap: LayerTileMap;
-}
-
-// 把一个 Layer 的稀疏 tile **直接上传** GPU（无 Canvas2D 中转，切片④）。
-// LayerPixels 已剪枝空/全透明 tile → forEachTile 只吐有内容的 tile，且每 tile = 满 256² RGBA、
-// 对齐全局 tile 网格 → 1:1 拷进 GPU slice，零重切片/零 drawImage/零 getImageData。
-export function uploadLayerToTiles(
-  glctx: GLContext, backend: GLTileBackend, pool: TilePool,
-  layer: { pixels: LayerPixels },
-  docW: number, docH: number,
-): LayerTiles {
-  const across = tilesAcross(docW);
-  const tileMap = new LayerTileMap(pool, across);
-  const index = new TileIndexTexture(glctx, docW, docH);
-  layer.pixels.forEachTile((tx, ty, data) => {
-    const tile = tileMap.tileAt(tx, ty, { create: true });
-    if (!tile) return;  // 池满（软上限压力，TileResidency 接入后逐冷 tile）
-    backend.uploadSlice(tile.slice, new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-    index.setTile(tx, ty, tile.slice);
-  });
-  return { index, tileMap };
-}
-
 // doc 节点树 → CompNode 树。resourceFor(leaf) 给该叶的 index + 是否有内容（空层不能当 clip 基底）。
 // overlayFor(leaf) 可选：给某叶（通常活动层）挂 live 描边 overlay（null=无）。
 // floatFor(leaf) 可选：给某叶（自由变换源层）挂 warp 后的浮层（null=无）。
 export function docTreeToComp(
   nodes: DocNode[],
-  resourceFor: (leaf: DocLeaf) => { index: TileIndexTexture; hasContent: boolean },
+  resourceFor: (leaf: DocLeaf) => { index: IndexTexture; hasContent: boolean },
   overlayFor?: (leaf: DocLeaf) => OverlayDesc | null,
   floatFor?: (leaf: DocLeaf) => FloatDesc | null,
 ): CompNode[] {
@@ -74,7 +42,7 @@ export function docTreeToComp(
 }
 function docNodeToComp(
   n: DocNode,
-  resourceFor: (leaf: DocLeaf) => { index: TileIndexTexture; hasContent: boolean },
+  resourceFor: (leaf: DocLeaf) => { index: IndexTexture; hasContent: boolean },
   overlayFor?: (leaf: DocLeaf) => OverlayDesc | null,
   floatFor?: (leaf: DocLeaf) => FloatDesc | null,
 ): CompNode {
