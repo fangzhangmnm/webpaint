@@ -141,8 +141,11 @@ export class CpuTilePool {
       : null;
   }
 
-  /** 收养 adoptBytes（**转移所有权**，调用方之后不得再写/持有），封成只读 tile，返回持有句柄。 */
-  createTile(format: TileFormat, adoptBytes: Uint8Array): TileHandle {
+  /**
+   * 收养 adoptBytes（**转移所有权**，调用方之后不得再写/持有），封成只读 tile，返回持有句柄。
+   * knownBBox：调用方已算过 bbox 时直通（省一次全 tile 扫描；LayerPixels 写路径用）。
+   */
+  createTile(format: TileFormat, adoptBytes: Uint8Array, knownBBox?: TileBBox | null): TileHandle {
     const expect = bytesPerTile(format, this.tileSize);
     if (adoptBytes.byteLength !== expect) {
       throw new Error(`CpuTilePool.createTile: ${format} expects ${expect} bytes, got ${adoptBytes.byteLength}`);
@@ -153,7 +156,7 @@ export class CpuTilePool {
       raw: adoptBytes,
       clamped: null,
       compressed: null,
-      bbox: computeBBox(format, adoptBytes, this.tileSize),
+      bbox: knownBBox !== undefined ? knownBBox : computeBBox(format, adoptBytes, this.tileSize),
       refCount: 1,
       freed: false,
     };
@@ -220,6 +223,11 @@ export class CpuTilePool {
   setRawQuotaBytes(n: number): void {
     this._rawQuotaBytes = n;
     this._enforceRawQuotaBlocking();
+  }
+
+  /** codec 热接（S3 boot 顺序解耦用）。tile 只读 → 换 codec 只影响之后的压缩/解压。 */
+  setCodec(codec: TileCodec | null): void {
+    this._codec = codec;
   }
 
   /** 开新文档 / reload：清空整池。所有存活句柄立即失效（再用即 throw）。 */

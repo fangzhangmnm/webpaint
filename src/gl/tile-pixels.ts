@@ -1,30 +1,39 @@
-// LayerPixels —— 图层像素的新真源（SoT）：**稀疏 256² CPU tile**，doc 坐标接口，**bbox-free**。
-// 取代 doc.ts 旧的「单张 Canvas2D bbox 画布 + bboxX/Y/W/H + ensureBbox」。
+// LayerPixels —— 图层像素门面：**稀疏 256² tile**，doc 坐标接口，**bbox-free**。
+// v0.4 起底层换到 cpu-tile-pool：每格是**不可变、引用计数**的 TileHandle（copy-on-write），
+// 不再是可变裸数组。这带来：
+//   - snapshot()/restore() = 句柄 acquire/release，**零拷贝**（undo 内存压力交给池的压缩管）。
+//   - 压缩驻留对读者透明（handle.bytes() 同步解压），tile-residency 的备份/驱逐机器失去存在理由（S3 删）。
+//   - **js 没析构**：LayerPixels 被替换/丢弃前必须显式 dispose()（释放句柄），漏了由池的
+//     FinalizationRegistry 泄漏 assert 兜底上报。持有点：Layer.setPixels/remapPixels、doc.adoptState、
+//     doc.removeLayer、gl-doc-renderer 的 tmp、undo 快照 disposePixelsSnapshot。
 //
-// 设计（greenfield，深模块窄接口）：
-//   - 像素按 256² tile 稀疏存（空 tile 不分配 = 内存杠杆）。每 tile = RGBA Uint8ClampedArray。
-//   - **bbox 不是身份**：内容框由 contentBounds() 从已分配 tile **派生**（要紧可扫 alpha）。
-//   - 写：putRegion(doc 矩形, 源 RGBA) —— 把该矩形像素**整块替换**进相关 tile；变全透明的 tile 回收。
-//   - 读：getRegion(doc 矩形) → 拼 tile 出 flat RGBA（缺 tile=透明）。
-//   - Canvas2D facade（materialize/editRegion，browser-only，本文件末）给旧的 layer.canvas/ctx 写者读者过渡。
-//   - dirty tile 跟踪给 GL 增量上传 / flush 用。snapshot/restore 给 undo（先全 tile，后续 per-tile delta）。
+// 接口不变（putRegion/getRegion/sampleAt/contentBounds/editRegion facade…），写者读者照旧。
+// ⚠ getTile/forEachTile 返回的数组是句柄的零拷贝视图，**只读红线**——要改走 putRegion/putTile。
 //
-// 纯核心（putRegion/getRegion/sampleAt/contentBounds/snapshot…）零 DOM 依赖 → node 全测。
-// Canvas2D facade 需浏览器 → Chromium golden 验。
+// 纯核心零 DOM 依赖 → node 全测。Canvas2D facade（materialize/editRegion）需浏览器。
 
 import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "../tiles/tile-geometry.ts";
+import { appTilePool } from "../tiles/app-tile-pool.ts";
+import { computeBBox, type TileHandle } from "../tiles/cpu-tile-pool.ts";
 
 const TILE_RGBA = TILE_SIZE * TILE_SIZE * 4;
+
+// undo 快照：共享句柄（acquire 过的）。用完必须 disposePixelsSnapshot 释放。
+export interface PixelsSnapshot { across: number; tiles: [number, TileHandle][] }
+export function disposePixelsSnapshot(snap: PixelsSnapshot): void {
+  for (const [, h] of snap.tiles) if (!h.released) h.release();
+  snap.tiles.length = 0;
+}
 
 export class LayerPixels {
   readonly docW: number;
   readonly docH: number;
   private _across: number;
-  private _tiles = new Map<number, Uint8ClampedArray>();   // tileKey → RGBA 256²
+  private _tiles = new Map<number, TileHandle>();           // tileKey → 只读 tile 句柄
   private _dirty = new Set<number>();                       // 自上次 markAllClean 后变更的 tileKey
-  private _contentVersion = 0;                              // 单调递增，每次内容 mutation +1（TileResidency 驱逐门用）
-  private _evicted = false;                                 // raw 被 TileResidency 驱逐（只剩 GPU tiles + 压缩备份）
-  private _provider: ((lp: LayerPixels) => void) | null = null;   // 重物化回调（sync GPU readback，TileResidency 装）
+  private _contentVersion = 0;                              // 单调递增，每次内容 mutation +1
+  private _evicted = false;                                 // raw 被 TileResidency 驱逐（S3 连机器一起删）
+  private _provider: ((lp: LayerPixels) => void) | null = null;   // 重物化回调（TileResidency 装）
 
   constructor(docW: number, docH: number) {
     this.docW = docW;
@@ -32,78 +41,73 @@ export class LayerPixels {
     this._across = tilesAcross(docW);
   }
 
-  // ---- 冷层驻留（TileResidency 接线）----
-  // 中心护栏：被驱逐层被任何 read 命中时，先 sync 重物化 raw（provider = GPU readback 回填）。所有 read 方法
-  //   首行调 _ensureResident() → 覆盖全部 LayerPixels 读者（导出/合成/变换/undo/吸管），零 per-caller 扇出。
-  //   重物化不改内容 → 不 bump contentVersion（驱逐门 epoch 不变，重物化对读者透明）。
+  // 释放全部句柄。**被替换/丢弃前必须调**（js 无析构；漏调 = 池泄漏，FR assert 会点名）。
+  // dispose 后这个实例语义 = 空层；再写会重新长 tile（无害，但通常是 bug 的味道）。
+  dispose(): void { this.clear(); }
+
+  // ---- 冷层驻留（TileResidency 接线；S3 随 residency 一起删）----
   setResidencyProvider(fn: (lp: LayerPixels) => void): void { this._provider = fn; }
   isRawResident(): boolean { return !this._evicted; }
-  // 驱逐 raw：丢 CPU _tiles（省 ~16MB/满层），只留 GPU tiles + 压缩备份。需已设 provider（否则无退路 → 拒绝）。
-  //   caller(TileResidency) 须先 canEvictRaw（备份完整且非 pinned）。不 bump contentVersion（内容没变，只驻留变）。
   evictRaw(): boolean {
     if (this._evicted) return true;
-    if (!this._provider) return false;                      // 无重物化路径 → 拒绝（红线：不可无退路地丢 raw）
-    this._tiles.clear();
+    if (!this._provider) return false;                      // 无重物化路径 → 拒绝（红线）
+    this._releaseAll();
     this._evicted = true;
     return true;
   }
-  // provider 回填：装入重物化 tile（不 bump contentVersion、不进 _dirty——GPU 已有这些像素，非 GL 上传源）。
   adoptResidentTiles(entries: Array<{ tx: number; ty: number; px: Uint8ClampedArray }>): void {
     for (const { tx, ty, px } of entries) {
-      if (isAllTransparent(px)) continue;
-      const t = new Uint8ClampedArray(TILE_RGBA);
-      t.set(px.subarray(0, TILE_RGBA));
-      this._tiles.set(tileKey(tx, ty, this._across), t);
+      const buf = new Uint8ClampedArray(TILE_RGBA);
+      buf.set(px.subarray(0, TILE_RGBA));
+      this._setTileBuf(tileKey(tx, ty, this._across), buf, /*markDirty*/ false);
     }
     this._evicted = false;
   }
   private _ensureResident(): void {
     if (!this._evicted) return;
-    // provider **成功**（调 adoptResidentTiles）才清 _evicted；失败（context 丢/无 GPU tiles，不 adopt）则**保持
-    //   evicted** → 让 recoverAll 从压缩备份兜。红线：绝不因一次失败的重物化把 evicted 误清成"已驻留但空"→
-    //   recoverAll 会跳过 → 内容只剩备份没人读 → 存盘丢数据。provider 非递归（不碰 guarded read），无自旋。
-    this._provider?.(this);
+    this._provider?.(this);   // 成功才清 _evicted（provider 调 adoptResidentTiles）；失败保持 evicted
   }
 
   get tileCount(): number { this._ensureResident(); return this._tiles.size; }
-  // 内容版本：单调递增，任何像素 mutation（putRegion/putTile/clear/restore）+1。**不是** _dirty（那是 GL 上传脏）。
-  //   TileResidency 记 backupEpoch=contentVersion；驱逐冷层 raw 当且仅当 backupEpoch===contentVersion（备份仍覆盖当前内容）。
   get contentVersion(): number { return this._contentVersion; }
-  // 实占 CPU tile 字节（稀疏：只数已分配 tile）。给 computeMaxLayers 动态字节预算 / 内存 HUD。
-  get byteUsage(): number { return this._tiles.size * TILE_RGBA; }   // 实占 CPU 字节：驱逐后为 0（正是省的那份），不重物化
-  isEmpty(): boolean { if (this._evicted) return false; return this._tiles.size === 0; }   // 只驱逐非空层 → 驱逐即非空
+  // 名义 CPU tile 字节（稀疏：只数已分配格）。压缩驻留的格也按 raw 计（预算取保守上界）。
+  get byteUsage(): number { return this._tiles.size * TILE_RGBA; }
+  isEmpty(): boolean { if (this._evicted) return false; return this._tiles.size === 0; }
 
   // ---- 低层 tile 访问 ----
-  // 取 tile 像素（不存在返 null）。返回的是内部引用，调用方别越界写。
+  // 取 tile 像素视图（不存在返 null）。**零拷贝只读**——写走 putTile/putRegion。
   getTile(tx: number, ty: number): Uint8ClampedArray | null {
+    this._ensureResident();
+    const h = this._tiles.get(tileKey(tx, ty, this._across));
+    return h ? h.clampedView() : null;
+  }
+  // 取 tile 句柄（S4+ 的 operator/undo 用；不 acquire，需持有请自己 acquire）。
+  getTileHandle(tx: number, ty: number): TileHandle | null {
     this._ensureResident();
     return this._tiles.get(tileKey(tx, ty, this._across)) ?? null;
   }
-  // 整 tile 写入（拷贝进来；全透明则回收）。给 GL readback / wholesale 重建用。
+  // 整 tile 写入（拷贝进来；全透明则回收该格）。
   putTile(tx: number, ty: number, pixels: Uint8ClampedArray): void {
     this._contentVersion++;
-    const key = tileKey(tx, ty, this._across);
-    if (isAllTransparent(pixels)) { this._tiles.delete(key); this._dirty.add(key); return; }
-    const t = new Uint8ClampedArray(TILE_RGBA);
-    t.set(pixels.subarray(0, TILE_RGBA));
-    this._tiles.set(key, t);
-    this._dirty.add(key);
+    const buf = new Uint8ClampedArray(TILE_RGBA);
+    buf.set(pixels.subarray(0, TILE_RGBA));
+    this._setTileBuf(tileKey(tx, ty, this._across), buf, true);
   }
   forEachTile(cb: (tx: number, ty: number, pixels: Uint8ClampedArray) => void): void {
     this._ensureResident();
-    this._tiles.forEach((px, key) => { const { tx, ty } = tileCoord(key, this._across); cb(tx, ty, px); });
+    this._tiles.forEach((h, key) => { const { tx, ty } = tileCoord(key, this._across); cb(tx, ty, h.clampedView()); });
   }
 
   // ---- 写：把 doc 矩形 [sx0,sy0,sw,sh] 的像素**整块替换**为 src（flat RGBA，行优先，sw 宽）----
-  // src 的透明像素也会写入（= 该处变透明）。覆盖后全透明的 tile 回收。
+  // src 的透明像素也会写入（= 该处变透明）。覆盖后全透明的格回收。copy-on-write：每格封新 tile。
   putRegion(sx0: number, sy0: number, sw: number, sh: number, src: Uint8ClampedArray): void {
     if (sw <= 0 || sh <= 0) return;
     this._contentVersion++;
     forEachTileInRect(sx0, sy0, sw, sh, this.docW, this.docH, (tx, ty) => {
       const key = tileKey(tx, ty, this._across);
-      let tile = this._tiles.get(key);
-      const created = !tile;
-      if (!tile) tile = new Uint8ClampedArray(TILE_RGBA);
+      const old = this._tiles.get(key);
+      const tile = new Uint8ClampedArray(TILE_RGBA);
+      if (old) tile.set(old.clampedView());
       const tox = tx * TILE_SIZE, toy = ty * TILE_SIZE;
       // 该 tile 与 src 矩形的交集（doc 坐标）
       const ix0 = Math.max(tox, sx0), iy0 = Math.max(toy, sy0);
@@ -116,9 +120,7 @@ export class LayerPixels {
           di += 4; si += 4;
         }
       }
-      if (isAllTransparent(tile)) { if (!created) this._tiles.delete(key); /* created 空 tile 不存 */ }
-      else this._tiles.set(key, tile);
-      this._dirty.add(key);
+      this._setTileBuf(key, tile, true);
     });
   }
 
@@ -127,8 +129,9 @@ export class LayerPixels {
     this._ensureResident();
     const out = new Uint8ClampedArray(w * h * 4);
     forEachTileInRect(x0, y0, w, h, this.docW, this.docH, (tx, ty) => {
-      const tile = this._tiles.get(tileKey(tx, ty, this._across));
-      if (!tile) return;   // 透明
+      const handle = this._tiles.get(tileKey(tx, ty, this._across));
+      if (!handle) return;   // 透明
+      const tile = handle.clampedView();
       const tox = tx * TILE_SIZE, toy = ty * TILE_SIZE;
       const ix0 = Math.max(tox, x0), iy0 = Math.max(toy, y0);
       const ix1 = Math.min(tox + TILE_SIZE, x0 + w), iy1 = Math.min(toy + TILE_SIZE, y0 + h);
@@ -148,47 +151,48 @@ export class LayerPixels {
     if (x < 0 || y < 0 || x >= this.docW || y >= this.docH) return [0, 0, 0, 0];
     this._ensureResident();
     const tx = Math.floor(x / TILE_SIZE), ty = Math.floor(y / TILE_SIZE);
-    const tile = this._tiles.get(tileKey(tx, ty, this._across));
-    if (!tile) return [0, 0, 0, 0];
+    const h = this._tiles.get(tileKey(tx, ty, this._across));
+    if (!h) return [0, 0, 0, 0];
+    const tile = h.clampedView();
     const i = ((y - ty * TILE_SIZE) * TILE_SIZE + (x - tx * TILE_SIZE)) * 4;
     return [tile[i], tile[i + 1], tile[i + 2], tile[i + 3]];
   }
 
   // ---- 派生内容框（bbox 替代）----
-  // tile 粒度并集；tight=true 时扫边缘 tile 的 alpha 收紧到像素。空 → null。
+  // tile 粒度并集；tight=true 用池里各 tile 的 per-tile bbox 聚合（池建 tile 时已扫过，不再全量扫像素）。
   contentBounds(tight = false): { x: number; y: number; w: number; h: number } | null {
     this._ensureResident();
     if (this._tiles.size === 0) return null;
+    if (tight) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      this._tiles.forEach((h, key) => {
+        const b = h.bbox();
+        if (!b) return;   // 全透明格（理论上不存——_setTileBuf 会回收；防御）
+        const { tx, ty } = tileCoord(key, this._across);
+        const x0 = tx * TILE_SIZE + b.x, y0 = ty * TILE_SIZE + b.y;
+        if (x0 < minX) minX = x0; if (y0 < minY) minY = y0;
+        if (x0 + b.w > maxX) maxX = x0 + b.w; if (y0 + b.h > maxY) maxY = y0 + b.h;
+      });
+      if (minX === Infinity) return null;
+      return { x: minX, y: minY, w: Math.min(maxX, this.docW) - minX, h: Math.min(maxY, this.docH) - minY };
+    }
     let tx0 = Infinity, ty0 = Infinity, tx1 = -Infinity, ty1 = -Infinity;
-    this._tiles.forEach((_px, key) => {
+    this._tiles.forEach((_h, key) => {
       const { tx, ty } = tileCoord(key, this._across);
       if (tx < tx0) tx0 = tx; if (tx > tx1) tx1 = tx; if (ty < ty0) ty0 = ty; if (ty > ty1) ty1 = ty;
     });
-    let x0 = tx0 * TILE_SIZE, y0 = ty0 * TILE_SIZE;
-    let x1 = Math.min(this.docW, (tx1 + 1) * TILE_SIZE), y1 = Math.min(this.docH, (ty1 + 1) * TILE_SIZE);
-    if (tight) {
-      // 扫所有 tile 的非透明像素收紧（O(已分配像素)，只在导出/crop 等低频调）。
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      this._tiles.forEach((px, key) => {
-        const { tx, ty } = tileCoord(key, this._across);
-        const tox = tx * TILE_SIZE, toy = ty * TILE_SIZE;
-        for (let ly = 0; ly < TILE_SIZE; ly++) for (let lx = 0; lx < TILE_SIZE; lx++) {
-          if (px[(ly * TILE_SIZE + lx) * 4 + 3] !== 0) {
-            const dx = tox + lx, dy = toy + ly;
-            if (dx < minX) minX = dx; if (dx > maxX) maxX = dx; if (dy < minY) minY = dy; if (dy > maxY) maxY = dy;
-          }
-        }
-      });
-      if (minX === Infinity) return null;   // 全透明
-      x0 = minX; y0 = minY; x1 = maxX + 1; y1 = maxY + 1;
-    }
+    const x0 = tx0 * TILE_SIZE, y0 = ty0 * TILE_SIZE;
+    const x1 = Math.min(this.docW, (tx1 + 1) * TILE_SIZE), y1 = Math.min(this.docH, (ty1 + 1) * TILE_SIZE);
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
-  clear(): void { this._contentVersion++; this._tiles.forEach((_p, k) => this._dirty.add(k)); this._tiles.clear(); }
+  clear(): void {
+    this._contentVersion++;
+    this._tiles.forEach((_h, k) => this._dirty.add(k));
+    this._releaseAll();
+  }
 
-  // ---- 纯变换（raw 数组操作，返回新 LayerPixels；doc 变换用，node 全可测、无 Canvas2D 往返、更快）----
-  // 水平镜像（doc 尺寸不变）。
+  // ---- 纯变换（返回新 LayerPixels；doc 变换用。老实例由 Layer.setPixels dispose）----
   flippedHorizontal(): LayerPixels {
     const np = new LayerPixels(this.docW, this.docH);
     const b = this.contentBounds();
@@ -212,7 +216,6 @@ export class LayerPixels {
     const nw = b.h, nh = b.w;
     const dst = new Uint8ClampedArray(nw * nh * 4);
     for (let y = 0; y < b.h; y++) for (let x = 0; x < b.w; x++) {
-      // 新 local：ndx = y，ndy = b.w-1-x（新 bbox 在 (b.y, W-(b.x+b.w))）
       const si = (y * b.w + x) * 4, di = ((b.w - 1 - x) * nw + y) * 4;
       dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = src[si + 3];
     }
@@ -253,24 +256,47 @@ export class LayerPixels {
   dirtyTileKeys(): number[] { return [...this._dirty]; }
   markAllClean(): void { this._dirty.clear(); }
 
-  // ---- undo 快照（先全 tile 深拷贝；per-tile delta = 后续切片③）----
-  snapshot(): { across: number; tiles: [number, Uint8ClampedArray][] } {
+  // ---- undo 快照：**句柄共享，零拷贝**（tile 只读 → 快照与活层安全共享同一批 tile）----
+  snapshot(): PixelsSnapshot {
     this._ensureResident();
-    const tiles: [number, Uint8ClampedArray][] = [];
-    this._tiles.forEach((px, key) => tiles.push([key, new Uint8ClampedArray(px)]));
+    const tiles: [number, TileHandle][] = [];
+    this._tiles.forEach((h, key) => tiles.push([key, h.acquire()]));
     return { across: this._across, tiles };
   }
-  restore(snap: { across: number; tiles: [number, Uint8ClampedArray][] }): void {
+  // 还原快照（快照可反复用：restore 装的是 acquire 副本，快照自身句柄不消耗，
+  // 最终仍需 disposePixelsSnapshot）。
+  restore(snap: PixelsSnapshot): void {
     this._contentVersion++;
-    this._tiles.forEach((_p, k) => this._dirty.add(k));
+    this._tiles.forEach((_h, k) => this._dirty.add(k));
+    this._releaseAll();
+    for (const [key, h] of snap.tiles) {
+      this._tiles.set(key, h.acquire());
+      this._dirty.add(key);
+    }
+  }
+
+  // ---- 内部 ----
+  // 收养 buf（调用方新建、之后不得再碰）为该格的新 tile；全透明 → 回收该格。释放旧句柄。
+  private _setTileBuf(key: number, buf: Uint8ClampedArray, markDirty: boolean): void {
+    const bbox = computeBBox("rgba8", asBytes(buf), TILE_SIZE);
+    const old = this._tiles.get(key);
+    if (bbox === null) {
+      if (old) { old.release(); this._tiles.delete(key); }
+    } else {
+      this._tiles.set(key, appTilePool().createTile("rgba8", asBytes(buf), bbox));
+      if (old) old.release();
+    }
+    if (markDirty) this._dirty.add(key);
+  }
+
+  private _releaseAll(): void {
+    this._tiles.forEach((h) => { if (!h.released) h.release(); });
     this._tiles.clear();
-    for (const [key, px] of snap.tiles) { this._tiles.set(key, new Uint8ClampedArray(px)); this._dirty.add(key); }
   }
 }
 
-function isAllTransparent(px: Uint8ClampedArray): boolean {
-  for (let i = 3; i < px.length; i += 4) if (px[i] !== 0) return false;
-  return true;
+function asBytes(buf: Uint8ClampedArray): Uint8Array {
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
 // ---- Canvas2D facade（browser-only；给旧 layer.canvas/ctx 写者读者过渡）----
@@ -281,7 +307,7 @@ function scratch2D(w: number, h: number): Bitmap2D {
 }
 
 // 物化整个内容为一张 bbox 画布（+ doc 原点）。给 2D 读者（旧 layer.canvas）。空 → null。
-//   tight=true 扫 alpha 收紧（导出/crop）；默认 tile 粒度（够 2D 合成用）。
+//   tight=true 用 per-tile bbox 聚合收紧（导出/crop）；默认 tile 粒度（够 2D 合成用）。
 export function materialize(lp: LayerPixels, tight = false): { canvas: Bitmap2D; ox: number; oy: number } | null {
   const b = lp.contentBounds(tight);
   if (!b) return null;

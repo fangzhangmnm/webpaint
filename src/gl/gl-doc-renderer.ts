@@ -137,6 +137,7 @@ export class GLDocRenderer {
     const old = this._layerTiles.get(leafId);
     if (old) { old.index.dispose(); old.tileMap.clear(); }
     this._layerTiles.set(leafId, uploadLayerToTiles(this._glctx, this._backend, this._pool, { pixels: tmp }, docW, docH));
+    tmp.dispose();   // v0.4：上传已完成（uploadLayerToTiles 同步读完），临时实例的 tile 句柄立即释放
   }
 
   // 重传整棵树所有叶（correctness-first）+ 对账已删层（board 无单独删层钩子 → 在此按当前树回收

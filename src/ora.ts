@@ -202,6 +202,7 @@ export async function decodeOraToDoc(blob: Blob) {
   const meta = parseStackXml(xml);
 
   const doc = new PaintDoc({ width: meta.w, height: meta.h }) as DecodedDoc;
+  for (const l of flattenLeaves(doc.layers)) l.pixels.dispose();   // v0.4：tile 句柄显式释放
   doc.layers = [];                                // 清掉 ctor 默认的 1 层
   let activeId: number | null = null;
 

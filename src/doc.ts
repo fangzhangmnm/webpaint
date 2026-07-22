@@ -185,7 +185,9 @@ export class Layer {
 
   // 换一整套 pixels（纯变换 flip/rotate/offset/crop 用：变换返回新 LayerPixels）+ 新 doc 尺寸。
   setPixels(p: LayerPixels, newDocW: number, newDocH: number) {
+    const old = this.pixels;
     this.pixels = p; this.docW = newDocW; this.docH = newDocH; this._invalidate();
+    if (old && old !== p) old.dispose();   // v0.4：句柄显式释放（变换已把内容拷进新实例）
   }
 
   // 重置像素到**新 doc 尺寸** + 可选填入一张 canvas（crop / rotate / resample 等改 doc 尺寸的变换用——
@@ -193,6 +195,7 @@ export class Layer {
   remapPixels(newDocW: number, newDocH: number, src: CanvasImageSource | null, ox = 0, oy = 0, w = 0, h = 0) {
     this.docW = newDocW;
     this.docH = newDocH;
+    this.pixels.dispose();   // v0.4：句柄显式释放
     this.pixels = new LayerPixels(newDocW, newDocH);
     if (src && w > 0 && h > 0) replacePixels(this.pixels, src, ox, oy, w, h);
     this._invalidate();
@@ -361,6 +364,9 @@ export class PaintDoc {
     backgroundColor: string;
     referenceLayerId?: number | null;
   }) {
+    // v0.4：旧树的 tile 句柄显式释放（caller=adoptModel 随后 clearHistory，无人再引用旧树；
+    //   loaded.layers 是解码出的新树，与旧树不共对象）。
+    if (loaded.layers !== this.layers) eachLeaf(this.layers, (l) => l.pixels.dispose());
     this.layers = loaded.layers;
     if (loaded.activeId != null && findNodeById(this.layers, loaded.activeId)) {
       this.activeId = loaded.activeId;
@@ -487,6 +493,8 @@ export class PaintDoc {
     const removingLeaves = countLeaves([loc.node]);
     if (!allowEmpty && countLeaves(this.layers) - removingLeaves < 1) return false;
     loc.parent.splice(loc.index, 1);
+    // v0.4：tile 句柄需显式释放（undo 走 spec 深拷贝重建，不复用此对象——见 layer-undo removeLayer）。
+    eachLeaf([loc.node], (l) => l.pixels.dispose());
     if (!findNodeById(this.layers, this.activeId)) {   // active 被删（或在被删组内）→ 重选末叶
       const leaves = flattenLeaves(this.layers);
       this.activeId = leaves.length ? leaves[leaves.length - 1].id : null;

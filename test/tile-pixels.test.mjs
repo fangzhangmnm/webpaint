@@ -146,3 +146,55 @@ describe("LayerPixels · snapshot/restore + dirty", () => {
     assert(lp.isEmpty() && lp.dirtyTileKeys().length === 4, "清空+4脏");
   });
 });
+
+// ── v0.4：底层换 cpu-tile-pool 句柄后的新契约 ──────────────────────────────────
+import { disposePixelsSnapshot } from "../src/gl/tile-pixels.ts";
+import { appTilePool } from "../src/tiles/app-tile-pool.ts";
+
+describe("LayerPixels · v0.4 句柄语义（零拷贝快照 + dispose）", () => {
+  it("snapshot 与活层共享同一批 tile（零拷贝：句柄指同 id）", () => {
+    const lp = new LayerPixels(W, H);
+    lp.putRegion(10, 10, 4, 4, region(10, 10, 4, 4, () => [5, 5, 5, 255]));
+    const liveId = lp.getTileHandle(0, 0).id;
+    const snap = lp.snapshot();
+    assert(snap.tiles.length === 1 && snap.tiles[0][1].id === liveId, "快照句柄与活层同 tile id（没拷贝）");
+    // copy-on-write：改活层 → 活层换新 tile，快照仍指旧 tile
+    lp.putRegion(10, 10, 1, 1, new Uint8ClampedArray([1, 1, 1, 255]));
+    assert(lp.getTileHandle(0, 0).id !== liveId, "写后活层是新 tile");
+    assert(snap.tiles[0][1].id === liveId, "快照不受写影响");
+    disposePixelsSnapshot(snap);
+    lp.dispose();
+  });
+
+  it("restore 装 acquire 副本：快照可反复 restore，最后 dispose 一次", () => {
+    const lp = new LayerPixels(W, H);
+    lp.putRegion(0, 0, 2, 2, region(0, 0, 2, 2, () => [9, 0, 0, 255]));
+    const snap = lp.snapshot();
+    lp.clear();
+    lp.restore(snap);
+    lp.clear();
+    lp.restore(snap);   // 第二次 restore 依旧可用
+    assert(lp.sampleAt(0, 0)[0] === 9, "反复 restore 内容还在");
+    disposePixelsSnapshot(snap);
+    assert(lp.sampleAt(0, 0)[0] === 9, "快照释放后活层仍持有自己的引用");
+    lp.dispose();
+  });
+
+  it("dispose 释放池引用（池 count 回落）", () => {
+    const before = appTilePool().stats().count;
+    const lp = new LayerPixels(W, H);
+    lp.putRegion(0, 0, 300, 300, region(0, 0, 300, 300, () => [1, 2, 3, 4]));   // 跨 4 tile
+    assert(appTilePool().stats().count === before + 4, "池里多 4 tile");
+    lp.dispose();
+    assert(appTilePool().stats().count === before, "dispose 全还回去");
+  });
+
+  it("Layer.setPixels 场景：换 pixels 后旧实例 dispose 不影响新实例（内容已拷贝）", () => {
+    const lp = new LayerPixels(W, H);
+    lp.putRegion(100, 100, 8, 8, region(100, 100, 8, 8, () => [7, 7, 7, 255]));
+    const flipped = lp.flippedHorizontal();
+    lp.dispose();
+    assert(flipped.sampleAt(W - 1 - 100, 100)[0] === 7, "纯变换结果独立于旧实例");
+    flipped.dispose();
+  });
+});
