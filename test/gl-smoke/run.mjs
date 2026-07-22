@@ -5,6 +5,7 @@
 import { chromium } from "playwright";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -23,6 +24,13 @@ const browser = await chromium.launch({
   args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--ignore-gpu-blocklist", "--enable-webgl"],
 });
 const page = await browser.newPage();
+// golden 基线注入（S7c）：16×16 池化快照。缺基线首跑自动落盘；SMOKE_UPDATE_GOLDEN=1 强制重录。
+const goldensPath = path.join(dir, "goldens.json");
+const haveGoldens = existsSync(goldensPath) && !process.env.SMOKE_UPDATE_GOLDEN;
+if (haveGoldens) {
+  const g = readFileSync(goldensPath, "utf8");
+  await page.addInitScript(`window.__GOLDENS__ = ${g};`);
+}
 const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 page.on("console", (m) => { if (m.type() === "error") pageErrors.push(m.text()); });
@@ -46,6 +54,10 @@ for (const c of result.checks) {
 }
 if (result.error) console.log("  ERROR:", result.error);
 if (pageErrors.length) console.log("  page errors:", pageErrors.join(" | "));
+if (!haveGoldens && result.newGoldens && Object.keys(result.newGoldens).length) {
+  writeFileSync(goldensPath, JSON.stringify(result.newGoldens));
+  console.log(`  [golden] 基线已落盘 → ${goldensPath}（${Object.keys(result.newGoldens).join(", ")}）`);
+}
 const ok = result.ok && !result.error;
 console.log(ok ? "\n  GL smoke PASSED\n" : "\n  GL smoke FAILED\n");
 process.exit(ok ? 0 : 1);

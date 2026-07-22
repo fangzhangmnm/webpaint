@@ -75,6 +75,7 @@ import "./layer-composite.test.mjs";        // deep module A：clip 基底解析
 import "./tile-geometry.test.mjs";          // tile 几何纯函数（自 tile-store.test 迁出）
 import "./gpu-tile-pool.test.mjs";          // S7：GPU tile 池（fake backend；pin 两档/批次/grow/leaky-GPU 对抗）
 import "./tile-bridge.test.mjs";            // S7：cpu-gpu-tile-bridge（身份去重/purgeDead/FBO 切片）
+import "./render-plan.test.mjs";            // S7b：render-plan 分区 golden（prefix/iso 并段/clip pin/pass-through 展开）
 import "./tile-pixels.test.mjs";
 import "./blend-glsl.test.mjs";             // WebGL2+tiling Stage 2：12 blend GLSL 生成（像素 parity 在 npm run smoke）
 import "./gl-compose-plan.test.mjs";        // WebGL2+tiling Stage 2：clip 基底解析 + 组隔离判定（与 layer-composite 对齐）

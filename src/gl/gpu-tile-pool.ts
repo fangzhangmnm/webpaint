@@ -28,8 +28,10 @@ export interface GpuTileBackend {
   // 重建为 newCapacity 的全新空存储（先删旧 + flush 再建，防显存双峰）。旧内容全丢。
   recreate(newCapacity: number): void;
   uploadSlice(slice: number, pixels: Uint8Array): void;
-  // 从**当前绑定的 READ_FRAMEBUFFER** 拷 (srcX,srcY) 起 256² 进 slice（segment 缓存零 readback 入池）。
-  copySliceFromFramebuffer(slice: number, srcX: number, srcY: number): void;
+  // 从**当前绑定的 READ_FRAMEBUFFER** 拷 (srcX,srcY) 起 w×h（≤256²）进 slice 左上（segment 缓存零
+  //   readback 入池；doc 边缘 tile 不足 256 → 部分拷贝，slice 余下 texel 是旧值但永不被采样——
+  //   sampleTiled 的 docPos < docSize 保证 local uv 不越进 padding）。
+  copySliceFromFramebuffer(slice: number, srcX: number, srcY: number, w: number, h: number): void;
 }
 
 export interface PinSets { required: Set<number>; preferred: Set<number> }
@@ -137,11 +139,12 @@ export class GpuTilePool {
     return ids;
   }
 
-  // 分配 + 从当前绑定的 READ_FRAMEBUFFER 拷一批 256² 区域（segment 缓存入池）。
-  copyBatchFromFramebuffer(items: { srcX: number; srcY: number }[]): number[] {
+  // 分配 + 从当前绑定的 READ_FRAMEBUFFER 拷一批区域（segment 缓存入池；边缘 tile 传 clamp 后的 w/h）。
+  copyBatchFromFramebuffer(items: { srcX: number; srcY: number; w: number; h: number }[]): number[] {
     const ids = this.allocBatch(items.length);
     for (let i = 0; i < items.length; i++) {
-      this._backend.copySliceFromFramebuffer(this._slot.get(ids[i])!, items[i].srcX, items[i].srcY);
+      const it = items[i];
+      this._backend.copySliceFromFramebuffer(this._slot.get(ids[i])!, it.srcX, it.srcY, it.w, it.h);
       this.stats.copies++;
     }
     return ids;
@@ -179,12 +182,16 @@ export class GpuTilePool {
   }
 
   // 压力驱逐：孤儿先走，然后 preferred 按 LRU；required/protected 绝不动。
+  // **本帧不变式**：本帧（frameMaintain 之后）touch 过的 tile 不驱逐——它的 slice 可能已被
+  //   某张 index 纹理引用，帧内易主 = 采到别人的像素（一帧视觉污染）。帧间驱逐无此问题
+  //   （使用者每帧先 isAlive 校验再采）。
   private _evictForSpace(need: number, protectedIds: Set<number>): void {
     const pins = this._collectPins();
     const orphans: number[] = [];
     const preferred: number[] = [];
     for (const id of this._slot.keys()) {
       if (pins.required.has(id) || protectedIds.has(id) || this._lastBatch.has(id)) continue;
+      if (this._lastUse.get(id) === this._frame) continue;   // 本帧用过 → 不动
       (pins.preferred.has(id) ? preferred : orphans).push(id);
     }
     preferred.sort((a, b) => (this._lastUse.get(a) ?? 0) - (this._lastUse.get(b) ?? 0));
@@ -245,10 +252,10 @@ export class GLGpuTileBackend implements GpuTileBackend {
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
   }
 
-  copySliceFromFramebuffer(slice: number, srcX: number, srcY: number): void {
+  copySliceFromFramebuffer(slice: number, srcX: number, srcY: number, w: number, h: number): void {
     const gl = this._glctx.gl;
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this._tex);
-    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, slice, srcX, srcY, TILE_SIZE, TILE_SIZE);
+    gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, slice, srcX, srcY, w, h);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
   }
 }

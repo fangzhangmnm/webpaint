@@ -6,8 +6,8 @@ import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT�
 import { makeBitmap } from "./bitmap.ts";
 import { reportError } from "./error-badge.ts";
 import { GLBoard } from "./gl/gl-board.ts";
-import { poolCapacityForBudget } from "./gl/gl-doc-renderer.ts";
-import type { FloatInput, StampOverlayInput, SurrogateInput } from "./gl/gl-doc-renderer.ts";
+import { poolCapacityForBudget } from "./gl/render-tree-gl.ts";
+import type { FloatInput, StampOverlayInput, SurrogateInput } from "./gl/render-tree-gl.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
 // brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。

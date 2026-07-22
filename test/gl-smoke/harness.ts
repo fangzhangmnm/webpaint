@@ -4,7 +4,7 @@
 //   C) 多 tile：512²(2×2) + 空 tile 稀疏 vs Canvas2D 整图。
 //   D) 组：隔离/pass-through/嵌套/组内 clip vs **真 layer-composite.ts compositeLayers**（产品 2D 合成器=golden）。
 // Chromium≠iPad GPU，故不当像素美学真相；blend 公式确定性 → 自 diff 对 iPad 也有效。
-// 结果 → window.__SMOKE__ = { ok, checks:[{name,ok,detail}], error }。
+// 结果 → window.__SMOKE__ = { ok, checks:[{name,ok,detail}], error, newGoldens }。
 
 import { GLContext } from "../../src/gl/gl-context.ts";
 import { GLGpuTileBackend, GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../../src/gl/gpu-tile-pool.ts";
@@ -12,6 +12,7 @@ import { TILE_SIZE, tilesAcross } from "../../src/tiles/tile-geometry.ts";
 import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
 import { docTreeToComp } from "../../src/gl/gl-doc-bridge.ts";
+import { RenderTreeGL } from "../../src/gl/render-tree-gl.ts";
 import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/gl/tile-pixels.ts";
 import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
 import type { Stamp } from "../../src/gl/gl-stamp.ts";
@@ -107,6 +108,36 @@ function readSliceRaw(glctx: GLContext, backend: GLGpuTileBackend, slice: number
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
   return out;
+}
+
+
+// ---- golden 快照（S7c）：16×16 平均池化缩略（RGBA u8）。抗驱动 LSB 抖动（cell 均值 tol=6），
+//   抓的是「预乘→straight 这类整体视觉移位」级别的回归。基线存 test/gl-smoke/goldens.json
+//   （run.mjs 注入 window.__GOLDENS__；缺基线首跑自动落盘）。----
+declare global { interface Window { __GOLDENS__?: Record<string, number[]>; __SMOKE__?: unknown } }
+const _newGoldens: Record<string, number[]> = {};
+function downsample16(px: Uint8Array, n: number): number[] {
+  const out = new Array(16 * 16 * 4).fill(0);
+  const cell = n / 16;
+  for (let cy = 0; cy < 16; cy++) for (let cx = 0; cx < 16; cx++) {
+    let r = 0, g = 0, b = 0, a = 0, cnt = 0;
+    for (let y = Math.floor(cy * cell); y < Math.floor((cy + 1) * cell); y++)
+      for (let x = Math.floor(cx * cell); x < Math.floor((cx + 1) * cell); x++) {
+        const i = (y * n + x) * 4;
+        r += px[i]; g += px[i + 1]; b += px[i + 2]; a += px[i + 3]; cnt++;
+      }
+    const o = (cy * 16 + cx) * 4;
+    out[o] = Math.round(r / cnt); out[o + 1] = Math.round(g / cnt); out[o + 2] = Math.round(b / cnt); out[o + 3] = Math.round(a / cnt);
+  }
+  return out;
+}
+function checkGolden(add: Add, name: string, px: Uint8Array, n: number): void {
+  const got = downsample16(px, n);
+  const ref = window.__GOLDENS__?.[name];
+  if (!ref) { _newGoldens[name] = got; add(`golden:${name}（基线首录）`, true, "recorded"); return; }
+  let md = 0, at = -1;
+  for (let i = 0; i < got.length; i++) { const d = Math.abs(got[i] - ref[i]); if (d > md) { md = d; at = i; } }
+  add(`golden:${name}`, md <= 6, `maxΔ=${md}${md > 6 ? ` @cell${Math.floor(at / 4)}` : ""}`);
 }
 
 interface Check { name: string; ok: boolean; detail: string; }
@@ -429,6 +460,92 @@ function bridgeParity(glctx: GLContext, add: Add): void {
 }
 
 // ---- E2)（v0.4.3 删）TileResidency 已日落：CPU tile 池恒驻留，GPU-readback 重物化机器不复存在。
+
+
+// ---- F) render-tree 执行器端到端（S7b）：RenderTreeGL.renderFrame 真跑（含段缓存/快路径/自愈），
+//        canvas backbuffer 读回 vs compositeLayers golden。identity affine + N×N canvas = 1:1 像素。----
+function rendertreeParity(glctx: GLContext, add: Add): void {
+  const N = 512;
+  const gl = glctx.gl;
+  glctx.canvas.width = N; glctx.canvas.height = N;
+  const tree = new RenderTreeGL(glctx, 512);
+
+  const cA = makeLayerCanvas(N, N, (x, y) => [60, 120 + (x % 120), 60 + (y % 160), 255]);
+  const cM = makeLayerCanvas(N, N, (x, y) => [200, 200 - (x % 100), 150 + (y % 40), 120]);
+  const cB = makeLayerCanvas(300, 260, (x, y) => [220, 80 + (x % 150), 60, 200]);
+  const cC = makeLayerCanvas(260, 220, (x, y) => [60, 200, 200, (x + y < 200) ? 255 : 90]);
+  const cD = makeLayerCanvas(200, 200, (x, y) => [250, 250, 90 + (y % 80), (x % 200 < 150) ? 180 : 60]);
+  const A = { isGroup: false, id: 1, opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: cA, pixels: pixelsFromCanvas(N, N, 0, 0, cA) };
+  const M = { isGroup: false, id: 2, opacity: 0.8, mode: "multiply", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: cM, pixels: pixelsFromCanvas(N, N, 0, 0, cM) };
+  const B = { isGroup: false, id: 3, opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 100, bboxY: 80, bboxW: 300, bboxH: 260, canvas: cB, pixels: pixelsFromCanvas(N, N, 100, 80, cB) };
+  const C = { isGroup: false, id: 4, opacity: 1, mode: "source-over", clippingMask: true, visible: true, bboxX: 120, bboxY: 100, bboxW: 260, bboxH: 220, canvas: cC, pixels: pixelsFromCanvas(N, N, 120, 100, cC) };
+  const grp = { isGroup: true, id: 5, opacity: 0.85, mode: "source-over", clippingMask: false, visible: true, children: [B, C] };
+  const D = { isGroup: false, id: 6, opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 260, bboxY: 260, bboxW: 200, bboxH: 200, canvas: cD, pixels: pixelsFromCanvas(N, N, 260, 260, cD) };
+  const nodes = [A, M, grp, D];
+
+  const golden = (): Uint8ClampedArray => {
+    const gc = document.createElement("canvas"); gc.width = N; gc.height = N;
+    const gctx = gc.getContext("2d")!; gctx.clearRect(0, 0, N, N);
+    compositeLayers(gctx as unknown as CanvasRenderingContext2D, nodes as never, {});
+    return gctx.getImageData(0, 0, N, N).data;
+  };
+  // renderFrame → 读 canvas backbuffer（默认 FB 行序自下而上 → 翻回 doc 行序）。
+  const renderAndRead = (liveId: number | null): Uint8Array => {
+    tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], null, null, liveId);
+    const raw = new Uint8Array(N * N * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    const out = new Uint8Array(N * N * 4);
+    for (let y = 0; y < N; y++) out.set(raw.subarray((N - 1 - y) * N * 4, (N - y) * N * 4), y * N * 4);
+    return out;
+  };
+  const cmp = (name: string, ref: Uint8ClampedArray, got: Uint8Array, tol = 4) => {
+    const { md, at } = maxPremulDiff(ref, got, N);
+    add(name, md <= tol, `maxΔ=${md} ${md > tol ? at : ""}`);
+  };
+
+  const ref0 = golden();
+  const got0 = renderAndRead(null);
+  cmp("rt:干净帧（整树 prefix 段）vs compositeLayers", ref0, got0);
+  checkGolden(add, "rt-clean", got0, N);
+  add("rt:干净帧建段", tree.frameStats.segBuilds >= 1, `builds=${tree.frameStats.segBuilds}`);
+  cmp("rt:快路径重放（display 缓存）", ref0, renderAndRead(null));
+  add("rt:快路径零建段", tree.frameStats.segBuilds === 0, `builds=${tree.frameStats.segBuilds}`);
+
+  // live 帧（B 标 updated）：prefix/上方段 + live 叶 分区合成 ≡ 全量（内容没变 → 同 golden）。
+  cmp("rt:live 分区帧（B updated，段+直画）", ref0, renderAndRead(3));
+  add("rt:live 帧建了分区段", tree.frameStats.segBuilds >= 1, `builds=${tree.frameStats.segBuilds}`);
+  const b1 = tree.frameStats.segBuilds;
+  void b1;
+
+  // 描边模拟：改 B 的像素（canvas + pixels 双改保持同源），不 markDirty——段命中 + live 叶 contentVersion 重传。
+  const patch = new Uint8ClampedArray(80 * 80 * 4);
+  for (let i = 0; i < patch.length; i += 4) { patch[i] = 255; patch[i + 3] = 255; }
+  (B.pixels as LayerPixels).putRegion(150, 150, 80, 80, patch);
+  const bctx = cB.getContext("2d")!; bctx.fillStyle = "rgb(255,0,0)"; bctx.fillRect(50, 70, 80, 80);
+  const ref1 = golden();
+  cmp("rt:live 改层帧（段命中 + 增量重传）", ref1, renderAndRead(3));
+  add("rt:改层帧段全命中零重建", tree.frameStats.segBuilds === 0 && tree.frameStats.segHits >= 1, `builds=${tree.frameStats.segBuilds} hits=${tree.frameStats.segHits}`);
+
+  // commit：markDirty → 段全失效重建，回干净帧。
+  tree.markDirty();
+  const got2 = renderAndRead(null);
+  cmp("rt:markDirty 后重建（commit 语义）", ref1, got2);
+  checkGolden(add, "rt-edited", got2, N);
+
+  // context-loss 自愈：全部 GPU 态作废 → 下帧从 CPU SSoT 重建。
+  tree.handleContextRestored();
+  cmp("rt:context-loss 自愈重建", ref1, renderAndRead(null));
+
+  // export 一次性合成（不碰缓存）。
+  const once = tree.compositeOnce(nodes as never, N, N);
+  const oncePx = new Uint8Array(N * N * 4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, once.fbo);
+  gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, oncePx);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  glctx.returnFBO(once);
+  cmp("rt:compositeOnce（export 路径）", ref1, oncePx);
+}
 
 // LayerPixels Canvas2D facade golden：editRegion 画 → 经 tile → materialize，对比直接 Canvas2D 参考。
 function tilePixelsParity(add: Add): void {
@@ -873,14 +990,14 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { brushPipelineParity(glctx, add); } catch (e) { add("brushpipe parity", false, String(e)); }
   try { checkerParity(glctx, add); } catch (e) { add("checker parity", false, String(e)); }
   try { floatParity(glctx, add); } catch (e) { add("float parity", false, String(e)); }
+  try { rendertreeParity(glctx, add); } catch (e) { add("rendertree parity", false, String(e)); }
   try { warpParity(glctx, add); } catch (e) { add("warp parity", false, String(e)); }
   try { warpClipParity(glctx, add); } catch (e) { add("warpclip parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);
-  return { ok: checks.every((c) => c.ok), checks, error: null };
+  return { ok: checks.every((c) => c.ok), checks, error: null, newGoldens: _newGoldens };
 }
 
-declare global { interface Window { __SMOKE__?: unknown; } }
 try { (window as Window).__SMOKE__ = run(); }
 catch (e) { (window as Window).__SMOKE__ = { ok: false, checks: [], error: String(e) }; }

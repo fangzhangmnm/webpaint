@@ -79,14 +79,18 @@ echo "[build] ✓ 无 deep import"
 #   · tiles/** 不碰 gl/**（CPU tile 池是纯底座；GPU 侧经 bridge 反向依赖它）
 #   · selection.ts / marching-ants.ts 不碰 gl/**、store（S5：选区是纯 CPU tile 值对象；GL 上传走 board 接缝）
 #   · history.ts / pixel-edit.ts / layer-undo.ts / gl/tile-residency.ts 已日落（v0.4.3-0.4.5），不得复活 import
+#   · S7：gl/tile-backend-gl.ts / gl/tile-store.ts / gl/tile-index.ts / gl/gl-doc-renderer.ts 已死
+#     （gpu-tile-pool + tile-bridge + render-tree-gl 取代），不得复活 import
+#   · render/** 是纯规划（node 全测），不 import gl/**、store
 echo "[build] v0.4 分层 lint…"
 LAYER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/store/|app-store)" src/workpiece --include='*.ts' 2>/dev/null || true)
 TILES_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*/gl/" src/tiles --include='*.ts' 2>/dev/null || true)
 SEL_HITS=$(grep -nE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/gl/|/store/|app-store)" src/selection.ts src/marching-ants.ts 2>/dev/null || true)
-DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/history\.ts|/pixel-edit\.ts|/layer-undo\.ts|/tile-residency\.ts)" src test --include='*.ts' --include='*.mjs' 2>/dev/null | grep -v "undo-history" || true)
-if [ -n "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS" ]; then
+DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/history\.ts|/pixel-edit\.ts|/layer-undo\.ts|/tile-residency\.ts|/tile-backend-gl\.ts|/tile-store\.ts|/tile-index\.ts|/gl-doc-renderer\.ts)" src test --include='*.ts' --include='*.mjs' 2>/dev/null | grep -v "undo-history" || true)
+RENDER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/gl/|/store/|app-store)" src/render --include='*.ts' 2>/dev/null || true)
+if [ -n "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS$RENDER_HITS" ]; then
   echo "[build] ✗ v0.4 分层违规：" >&2
-  echo "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS" >&2
+  echo "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS$RENDER_HITS" >&2
   exit 1
 fi
 echo "[build] ✓ v0.4 分层干净"

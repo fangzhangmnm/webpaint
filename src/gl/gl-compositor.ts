@@ -23,7 +23,9 @@ import type { GLContext, PooledFBO, FBOPrec } from "./gl-context.ts";
 export type Background = [number, number, number, number] | "checker";
 
 // 可变 ping-pong 对（pass-through 组要在同一累积器上续 pass，故按引用传递）。
-interface Acc { read: PooledFBO; write: PooledFBO; }
+// S7 起导出：render-tree-gl 执行器直接驱动 pass 原语（begin/newAcc/pass/floatPass/finishAcc/end），
+//   本类自己的 composite() 树递归保留（smoke harness 的规范执行器 + 对拍参照）。
+export interface Acc { read: PooledFBO; write: PooledFBO; }
 
 // 棋盘背景（doc 空间，16px 格，#fff/#c8c8c8）——逐位匹配 board._drawCheckerboard。预乘不透明。
 //   docPos = v_uv·docSize（与 composite frag 的层采样同约定 → 自动对齐）。
@@ -192,14 +194,38 @@ export class GLCompositor {
   // bg = 底色（**预乘** [r,g,b,a]，doc 背景色；缺省透明）。顶层用 doc bg；组 sub-accumulator 永远透明。
   // VAO/viewport 在此绑定一次；隔离组递归走 _composeFresh（**不碰 VAO**，否则解绑会废掉外层后续 pass）。
   composite(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
+    this.begin(docW, docH, true);
+    const result = this._composeFresh(arrayTex, nodes, docW, docH, bg);
+    this.end();
+    return result;
+  }
+
+  // ---- S7 执行器原语（render-tree-gl 驱动；composite() 也建其上） ----
+
+  // 帧作用域：绑 VAO + viewport（doc 尺寸）一次。resetStats=false 时保留计数（执行器整帧统计）。
+  begin(docW: number, docH: number, resetStats = true): void {
     const gl = this._glctx.gl;
-    this.stats.passes = 0; this.stats.floatPasses = 0;   // 本次合成清零（含递归隔离组的 pass）
+    if (resetStats) { this.stats.passes = 0; this.stats.floatPasses = 0; }
     gl.bindVertexArray(this._glctx.quadVAO());
     gl.viewport(0, 0, docW, docH);
     gl.disable(gl.BLEND);
-    const result = this._composeFresh(arrayTex, nodes, docW, docH, bg);
-    gl.bindVertexArray(null);
-    return result;
+  }
+  end(): void { this._glctx.gl.bindVertexArray(null); }
+
+  // 借一对累积器并铺底（bg 缺省=透明；"checker"=棋盘）。须在 begin() 作用域内。
+  newAcc(docW: number, docH: number, bg?: Background): Acc {
+    const acc: Acc = {
+      read: this._glctx.borrowFBO(docW, docH, this._prec),
+      write: this._glctx.borrowFBO(docW, docH, this._prec),
+    };
+    if (bg === "checker") { this._clear(acc.read, undefined); this._drawChecker(acc.read, docW, docH); }
+    else this._clear(acc.read, bg);
+    return acc;
+  }
+  // 收口：还 write，交出 read（caller 负责 returnFBO(read)）。
+  finishAcc(acc: Acc): PooledFBO {
+    this._glctx.returnFBO(acc.write);
+    return acc.read;
   }
 
   // 内部：合兄弟数组进一张新累积器返回（假设 VAO 已绑、viewport 已设）。隔离组递归用它（清透明）。
@@ -211,8 +237,7 @@ export class GLCompositor {
     if (bg === "checker") { this._clear(acc.read, undefined); this._drawChecker(acc.read, docW, docH); }
     else this._clear(acc.read, bg);
     this._applyNodes(arrayTex, nodes, acc, docW, docH);
-    this._glctx.returnFBO(acc.write);
-    return acc.read;
+    return this.finishAcc(acc);
   }
 
   // 棋盘背景 pass → 填进累积器（doc 空间）。VAO 已由 composite() 绑、viewport 已设。
@@ -243,16 +268,16 @@ export class GLCompositor {
       if (node.kind === "leaf") {
         if (!clipNoBase) {
           const srcKind = node.overlay ? "overlay" : "tiled";
-          this._pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
+          this.pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
         }
         // 自由变换浮层：源层 z 之上 source-over α=1（独立 pass）。clip 浮层 + 基底也是浮层（组变换）→ 裁到基底
         //   浮层 warp 后 alpha（base.float）；基底静止/非叶则不裁（见 docs/20260628-transform-clip-gpu-warp.md 边界）。
-        if (node.float) this._floatPass(node.float, acc, docW, docH, (node.clip && base && base.kind === "leaf") ? base.float ?? null : null);
+        if (node.float) this.floatPass(node.float, acc, docW, docH, (node.clip && base && base.kind === "leaf") ? base.float ?? null : null);
       } else if (clipNoBase) {
         continue;
       } else if (needsIsolation(node)) {
         const sub = this._composeFresh(arrayTex, node.children, docW, docH);   // 独立 sub-accumulator（不碰 VAO）
-        this._pass(arrayTex, "group", null, sub.tex, groupUnitMode(node), node.opacity, clipIndex, acc, docW, docH);
+        this.pass(arrayTex, "group", null, sub.tex, groupUnitMode(node), node.opacity, clipIndex, acc, docW, docH);
         this._glctx.returnFBO(sub);
       } else {
         this._applyNodes(arrayTex, node.children, acc, docW, docH);        // pass-through：续同一 acc
@@ -260,8 +285,8 @@ export class GLCompositor {
     }
   }
 
-  // 一个 blend pass：src(tiled 叶 / group 预乘纹理) 与 acc.read 合 → acc.write，交换。
-  private _pass(
+  // 一个 blend pass：src(tiled 叶或段 / group 直值纹理) 与 acc.read 合 → acc.write，交换。
+  pass(
     arrayTex: WebGLTexture, srcKind: SourceKind,
     srcIndex: IndexTexture | null, groupTex: WebGLTexture | null,
     mode: BlendMode, opacity: number, clipIndex: IndexTexture | null,
@@ -310,7 +335,7 @@ export class GLCompositor {
   // 浮层 pass = GPU warp（gather）：源纹理 + Hinv → 逐 dst 像素逆映射采样 → source-over α=1 → acc.write，交换。
   //   全屏 quad（按 doc 像素 gather，剔除 quad 外）；blend 关、预乘 source-over 在 fragment 手算。
   //   clipBase 非空（组变换里 clip 浮层的基底浮层）→ shader 里 clipα ×= gather 基底 alpha（零额外内存）。
-  private _floatPass(f: FloatDesc, acc: Acc, docW: number, docH: number, clipBase: FloatDesc | null = null): void {
+  floatPass(f: FloatDesc, acc: Acc, docW: number, docH: number, clipBase: FloatDesc | null = null): void {
     const gl = this._glctx.gl;
     this.stats.floatPasses++;
     const prog = this._glctx.program("warp", COMPOSITE_VERT, WARP_FRAG);
