@@ -110,7 +110,8 @@ LayerPixels 被替换/丢弃前必须 `dispose()`（现有落点：`Layer.setPix
 
 ## 4. batch 2+ 路线图（S5–S9 施工图）
 
-（次序建议：**先真机验完 §3 再动 S7**——GL 大改前底座必须被验过。S5/S6 node 可测，可先行。）
+（~~次序建议：先真机验完 §3 再动 S7~~ **已被用户 2026-07-22 拍板推翻：完整做完 S8+S9 再统一
+真机，中途不插验收**——见 docs/20260722-v04-s7-session-handoff.md 的 Sequencing 节。）
 
 ### S5 · selection-mask tile 化 + 蚂蚁线深模块 ✅ 已落 v0.4.6 并 merge main（未真机；报告 = docs/20260722-v04-s5-selection-tiles.md）
 - 目标：选区 = workpiece 内 gray8 tile 层（池 `"gray8"` 格式现成）；每次选区编辑 =
