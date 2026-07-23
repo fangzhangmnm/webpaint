@@ -829,8 +829,7 @@ export class InputController {
     const scale = this.board.viewport.scale || 1;
     // v249：时间常数指数追踪 + 死区。{tau, deadzone}。
     const smooth = buffered ? _resolveSmooth(settings, scale) : {};
-    // GL 模式：buffered 描边 live+commit 全 GPU → 引擎跳 CPU frozen 烤/CPU overlay（Stage 2）。
-    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp, this.board.isGLBoard());
+    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
     const bbox = this.brush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
@@ -843,19 +842,25 @@ export class InputController {
     const as = this._activeStroke;
     if (!as) return;
     this._activeStroke = null;
-    // Stage 3：brush 描边在 GL 模式走 GPU commit（栅格 stamp→readback→editRegion，buildup 解析）；
-    //   其它引擎(liquify/filterBrush) 或 2D 模式照旧 CPU。选区由下方 finalize 的 applyMaskPostStroke 兜。
-    const glRaster = (as.engine === this.brush) ? this.board.glStrokeRasterizeFn() : null;
-    if (glRaster) this.brush.endStroke(glRaster);
-    else as.engine.endStroke();
-    const sel = as.finalize ? this.doc.selection : null;
-    // commit 的 finalize 形参是可选（运行时 falsy 即跳过）；保留旧的 `: null` 分支，仅 type 上窄到入参类型。
+    // S8：buffered brush 的落层 = board.commitBrushStroke（GPU merge，live 同一 shader → 选区/锁α/
+    //   blendMode/opacity 全在 shader，live 即 commit 所见）。其它引擎（liquify/filterBrush/pixel）
+    //   在描边中已 in-place 落层，endStroke 只清状态。
+    let gpuCommitted = false;
+    if (as.engine === this.brush) {
+      const cs = this.brush.endStroke();   // 最终 stamps（含 tail/taper）；pixelMode/空笔 → null
+      if (cs && cs.stamps.length) gpuCommitted = this.board.commitBrushStroke(cs);
+    } else {
+      as.engine.endStroke();
+    }
+    // finalize（applyMaskPostStroke CPU 兜选区）只兜没走 GPU commit 的路径（pixel 笔/液化）：
+    //   GPU commit 的选区已由 shader 裁（与 live 一致），再兜是重复劳动 + 一次整层物化。
+    const sel = (as.finalize && !gpuCommitted) ? this.doc.selection : null;
     type CommitFn = NonNullable<Parameters<PixelTx["commit"]>[0]>;
     const finalize: CommitFn | null = sel
       ? (layer, pre) => sel.applyMaskPostStroke(layer as Parameters<Selection["applyMaskPostStroke"]>[0], pre)
       : null;
     as.tx.commit(finalize as Parameters<PixelTx["commit"]>[0]);
-    // 抬笔 commit：endStroke 已把像素烤进 layer → invalidateAll 触发重渲 + GL markContentDirty（下一帧 syncAll 同步）。
+    // 抬笔 commit：像素已落 layer → invalidateAll 触发重渲 + GL markContentDirty。
     this.board.invalidateAll();
   }
   _abortStroke() {

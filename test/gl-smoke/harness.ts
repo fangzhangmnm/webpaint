@@ -547,6 +547,77 @@ function rendertreeParity(glctx: GLContext, add: Add): void {
   cmp("rt:compositeOnce（export 路径）", ref1, oncePx);
 }
 
+// ---- G) S8 brush GPU commit ≡ live：commitBrushStroke（merge 同一 overlay shader → tile-diff 落层
+//        → GPU 收养）后的静态帧，必须与 commit 前带 stampOverlay 的 live 帧逐像素一致（u8 量化容差）。----
+function commitParity(glctx: GLContext, add: Add): void {
+  const N = 512;
+  const gl = glctx.gl;
+  glctx.canvas.width = N; glctx.canvas.height = N;
+  const tree = new RenderTreeGL(glctx, 512);
+
+  const readBack = (): Uint8Array => {
+    const raw = new Uint8Array(N * N * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    const out = new Uint8Array(N * N * 4);
+    for (let y = 0; y < N; y++) out.set(raw.subarray((N - 1 - y) * N * 4, (N - y) * N * 4), y * N * 4);
+    return out;
+  };
+  // stamps 串（斜跨多 tile）+ collectStamps 同式 bbox。
+  // 笔迹限制在左上象限（bbox ⊂ tile(0,0)∪…，tile(1,1) 恒不被覆盖 → 可验「bbox 外 tile 不动」）。
+  const stamps: { x: number; y: number; size: number; alpha: number }[] = [];
+  for (let i = 0; i < 8; i++) stamps.push({ x: 80 + i * 16, y: 90 + i * 14, size: 48, alpha: 0.85 });
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of stamps) { const r = s.size / 2 + 1; x0 = Math.min(x0, s.x - r); y0 = Math.min(y0, s.y - r); x1 = Math.max(x1, s.x + r); y1 = Math.max(y1, s.y + r); }
+  const bx = Math.max(0, Math.floor(x0)), by = Math.max(0, Math.floor(y0));
+  const bw = Math.min(N, Math.ceil(x1)) - bx, bh = Math.min(N, Math.ceil(y1)) - by;
+  // 选区：bbox 左半 255 右半 0（硬边足够验 shader 裁剪 = commit 裁剪）。
+  const selData = new Uint8Array(bw * bh);
+  for (let y = 0; y < bh; y++) for (let x = 0; x < Math.floor(bw / 2); x++) selData[y * bw + x] = 255;
+
+  const cases: { name: string; buildup: boolean; erase: boolean; blendMode: string; lockAlpha: boolean; sel: boolean; opacity: number }[] = [
+    { name: "wash", buildup: false, erase: false, blendMode: "source-over", lockAlpha: false, sel: false, opacity: 0.7 },
+    { name: "buildup", buildup: true, erase: false, blendMode: "source-over", lockAlpha: false, sel: false, opacity: 1 },
+    { name: "erase", buildup: false, erase: true, blendMode: "source-over", lockAlpha: false, sel: false, opacity: 1 },
+    { name: "multiply+lockAlpha", buildup: false, erase: false, blendMode: "multiply", lockAlpha: true, sel: false, opacity: 0.9 },
+    { name: "selMask", buildup: false, erase: false, blendMode: "source-over", lockAlpha: false, sel: true, opacity: 1 },
+  ];
+  let nextId = 100;
+  for (const c of cases) {
+    const id = nextId++;
+    // base：含透明区（lockAlpha/erase 有的可锁可擦）+ 渐变。
+    const cBase = makeLayerCanvas(N, N, (x, y) => [80 + (x % 120), 90 + (y % 100), 140, (x + y) % 3 === 0 ? 0 : 230]);
+    const pixels = pixelsFromCanvas(N, N, 0, 0, cBase);
+    const leaf = { isGroup: false, id, opacity: 0.9, mode: "source-over", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: cBase, pixels };
+    const nodes = [leaf];
+    const ov = {
+      stamps, shape: { hardness: 0.6, color: [0.9, 0.3, 0.2] as [number, number, number], buildup: c.buildup },
+      bx, by, bw, bh, layerId: id, opacity: c.opacity, erase: c.erase, blendMode: c.blendMode,
+      lockAlpha: c.lockAlpha, selMask: c.sel ? { data: selData, ox: bx, oy: by, ow: bw, oh: bh } : null,
+    };
+    // live 帧（overlay 在 shader 内合成显示）
+    tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], ov as never, null, null);
+    const live = readBack();
+    // 远处 tile 句柄：commit 后必须不动（tile-diff 不背未变 tile）。bbox ⊂ 左上 → tile(1,1) 在外。
+    const farBefore = pixels.getTileHandle(1, 1);
+    // commit → 静态帧
+    const ok = tree.commitBrushStroke(id, pixels, ov as never, N, N, (px, x, y, w, h) => pixels.applyRegionDiff(x, y, w, h, px));
+    add(`commit:${c.name} 提交成功`, ok);
+    // eslint 类似场合：私有 stats 只在 smoke 里窥（断言收养生效 = 下一帧零上传）。
+    const bridge = (tree as unknown as { _bridge: { stats: { uploads: number } } })._bridge;
+    const upBefore = bridge.stats.uploads;
+    tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], null, null, null);
+    const committed = readBack();
+    let md = 0, ai = -1;
+    for (let i = 0; i < live.length; i++) { const d = Math.abs(live[i] - committed[i]); if (d > md) { md = d; ai = i; } }
+    const p = ai >= 0 ? ai / 4 : 0;
+    add(`commit:${c.name} ≡ live`, md <= 2, `maxΔ=${md} @(${p % N},${Math.floor(p / N)})`);
+    add(`commit:${c.name} 收养生效（下一帧零上传）`, bridge.stats.uploads === upBefore, `uploads +${bridge.stats.uploads - upBefore}`);
+    add(`commit:${c.name} bbox 外 tile 不动`, pixels.getTileHandle(1, 1) === farBefore);
+    pixels.dispose();
+  }
+}
+
 // LayerPixels Canvas2D facade golden：editRegion 画 → 经 tile → materialize，对比直接 Canvas2D 参考。
 function tilePixelsParity(add: Add): void {
   const N = 512;
@@ -991,6 +1062,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { checkerParity(glctx, add); } catch (e) { add("checker parity", false, String(e)); }
   try { floatParity(glctx, add); } catch (e) { add("float parity", false, String(e)); }
   try { rendertreeParity(glctx, add); } catch (e) { add("rendertree parity", false, String(e)); }
+  try { commitParity(glctx, add); } catch (e) { add("commit parity", false, String(e)); }
   try { warpParity(glctx, add); } catch (e) { add("warp parity", false, String(e)); }
   try { warpClipParity(glctx, add); } catch (e) { add("warpclip parity", false, String(e)); }
 

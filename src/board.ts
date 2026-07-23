@@ -646,11 +646,9 @@ export class Board {
   _stampProvider: (() => StampCollect) | null = null;
   setStampProvider(fn: () => StampCollect) { this._stampProvider = fn; }
 
-  // GPU brush stamp overlay（Stage 3，替 CPU overlayCanvas）。selection/lockAlpha 在 GPU overlay shader 内裁
-  //   （setStampOverlay 上传选区 mask + base.a 锁α），与 commit 一致；commit 始终 GPU（选区另由 applyMaskPostStroke 兜）。
-  _glStampOverlay(): StampOverlayInput | null {
-    const cs = this._stampProvider?.();
-    if (!cs || !cs.stamps.length) return null;
+  // StampCollect → GPU overlay 输入（live 每帧 + commit 共用一个构造 = 同源输入喂同一 shader）。
+  //   selection/lockAlpha/erase/blendMode/Π-outer opacity 全在 shader 内（live 即 commit 所见）。
+  _overlayInputFrom(cs: NonNullable<StampCollect>): StampOverlayInput {
     const sel = this.doc.selection;
     return {
       stamps: cs.stamps, shape: cs.shape, bx: cs.bx, by: cs.by, bw: cs.bw, bh: cs.bh,
@@ -660,13 +658,25 @@ export class Board {
     };
   }
 
-  // GL board 是否启用（brush beginStroke 据此设 glMode；与 glStrokeRasterizeFn 同源）。
+  // GPU brush stamp overlay（live 每帧；替 CPU overlayCanvas）。
+  _glStampOverlay(): StampOverlayInput | null {
+    const cs = this._stampProvider?.();
+    if (!cs || !cs.stamps.length) return null;
+    return this._overlayInputFrom(cs);
+  }
+
+  // GL board 是否启用（brush beginStroke 据此设 glMode）。
   isGLBoard(): boolean { return !!this._glBoard; }
 
-  // commit 用：GL 模式返回「stamp 列表 → straight canvas」的 GPU 栅格 fn；否则 null（brush.endStroke 走 CPU buffer）。
-  glStrokeRasterizeFn(): ((stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null) | null {
-    if (!this._glBoard) return null;
-    return (stamps, shape, bx, by, bw, bh) => this._glBoard!.rasterizeStrokeToCanvas(stamps, shape, bx, by, bw, bh);
+  // S8 brush commit：抬笔的最终 stamps（含 tail/taper）→ GPU merge（live 同一 shader）→ 只封真变 tile 落层
+  //   → 变更 tile GPU 收养。返回 false = 没提交（GL 失败/池到顶保底），调用方别当成功。
+  commitBrushStroke(cs: NonNullable<StampCollect>): boolean {
+    if (!this._glBoard || !cs.stamps.length) return false;
+    const layer = cs.layer;
+    return this._glBoard.commitBrushStroke(
+      layer.id, layer.pixels, this._overlayInputFrom(cs), this.doc.width, this.doc.height,
+      (px, x, y, w, h) => layer.applyRegionDiff(x, y, w, h, px),
+    );
   }
 
   // 自由变换 commit 烤定用：GPU warp 源 → straight canvas（_bakeDown 注入；GL 失败=null，commit 不烤）。

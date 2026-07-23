@@ -9,7 +9,7 @@
 import { GLContext } from "./gl-context.ts";
 import { RenderTreeGL } from "./render-tree-gl.ts";
 import type { FloatInput, StampOverlayInput, SurrogateInput } from "./render-tree-gl.ts";
-import type { Stamp, StrokeShape } from "./gl-stamp.ts";
+import type { LayerPixels } from "./tile-pixels.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { Background } from "./gl-compositor.ts";
 
@@ -43,9 +43,14 @@ export class GLBoard {
   get frameStats() { return this._tree.frameStats; }
   markContentDirty(): void { this._tree.markDirty(); }
 
-  // 给 commit 用：栅格化 stroke stamp 列表 → straight RGBA canvas（board GL-commit 走 readback→editRegion）。
-  rasterizeStrokeToCanvas(stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number) {
-    return this._tree.rasterizeStrokeToCanvas(stamps, shape, bx, by, bw, bh);
+  // S8 brush commit：merge(base⊕stroke) 在 GPU（live 同一 shader）→ tile-diff 落盘 → GPU 收养。
+  //   apply = CPU 落盘回调（Layer.applyRegionDiff）。false = GPU 无法保证完整（调用方按未提交处理）。
+  commitBrushStroke(
+    leafId: number, pixels: LayerPixels, ov: StampOverlayInput, docW: number, docH: number,
+    apply: (px: Uint8ClampedArray, x: number, y: number, w: number, h: number) => { tx: number; ty: number }[],
+  ): boolean {
+    if (this._glctx.isLost) return false;
+    return this._tree.commitBrushStroke(leafId, pixels, ov, docW, docH, apply);
   }
 
   // 给自由变换 commit 用：warp 源 → straight RGBA canvas（_bakeDown 走 readback→editRegion，复用 live warp）。

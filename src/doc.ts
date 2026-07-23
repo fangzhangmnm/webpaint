@@ -216,6 +216,13 @@ export class Layer {
     this._invalidate();
   }
 
+  // S8 brush GPU commit 落盘口：整块区域替换但只封真变 tile（见 LayerPixels.applyRegionDiff）。
+  applyRegionDiff(docX: number, docY: number, w: number, h: number, src: Uint8ClampedArray): { tx: number; ty: number }[] {
+    const changed = this.pixels.applyRegionDiff(docX, docY, w, h, src);
+    if (changed.length) this._invalidate();
+    return changed;
+  }
+
   // undo 快照：句柄共享，零拷贝（v0.4.5）。归属交给 caller，用完 disposeLayerSnap。
   snapshot(): LayerSnap {
     return { pixels: this.pixels.snapshot() };

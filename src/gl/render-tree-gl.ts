@@ -130,21 +130,68 @@ export class RenderTreeGL {
     this._dirty = true;
   }
 
-  // ---- commit 工具（原 gl-doc-renderer 迁入，行为不变） ----
-  rasterizeStrokeToCanvas(stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
-    if (stamps.length === 0 || bw <= 0 || bh <= 0) return null;
+  // ---- S8 brush commit（spec:199-205）：merge(base tiles ⊕ stroke) 复用 live 同一 overlay shader
+  //   （SSOT：mode=source-over、opacity=1、透明底 → 输出恰为合成好的新图层数据）→ bbox 一次 readPixels
+  //   → apply 回调（Layer.applyRegionDiff，只封真变 tile）→ 变更 tile 从 merged FBO 直拷入池 +
+  //   registerPair + 叶记录就地更新 —— activeLayer 的 GPU 驻留不再依赖「render-tree 会 pin
+  //   updatedNodes」的隐式契约（spec:205），下一帧 sync 走快路径零上传。
+  //   返回 false = GPU 侧无法保证 base 完整（池超 quota 等）→ 调用方按未提交处理（不落半拉笔）。
+  commitBrushStroke(
+    leafId: number, pixels: LayerPixels, ov: StampOverlayInput, docW: number, docH: number,
+    apply: (px: Uint8ClampedArray, x: number, y: number, w: number, h: number) => { tx: number; ty: number }[],
+  ): boolean {
+    if (ov.stamps.length === 0 || ov.bw <= 0 || ov.bh <= 0) return false;
     const gl = this._glctx.gl;
-    const fboP = this._rasterizer.rasterize(stamps, shape, bx, by, bw, bh);
-    const fboS = this._glctx.borrowFBO(bw, bh, "u8");
-    this._comp.presentTo(fboP.tex, fboS, bw, bh, true);   // 栅格器预乘 → 解预乘
-    const px = new Uint8Array(bw * bh * 4);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fboS.fbo);
-    gl.readPixels(0, 0, bw, bh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    // ready：base tiles 搭 render-tree 便车（身份命中零上传）。cpuVersion 不齐 = sync 降级（超 quota）→ 放弃。
+    this._syncLeafSafe(leafId, pixels, docW, docH);
+    const rec = this._layerTiles.get(leafId);
+    if (!rec || rec.src !== pixels || rec.cpuVersion !== pixels.contentVersion || rec.gen !== this._pool.generation) return false;
+    // 先备 overlay 再 begin（_setStampOverlay 内部的 rasterize/present 会解绑 VAO——与 renderFrame 同序）。
+    this._setStampOverlay(ov, docW, docH);
+    const ovDesc = this._overlayDesc();
+    if (!ovDesc) return false;
+    this._comp.begin(docW, docH, false);
+    const acc = this._comp.newAcc(docW, docH);   // 透明底：source-over/op=1 输出 = merged 层内容
+    this._comp.pass(this._backend.texture, "overlay", rec.index, null, "source-over", 1, null, acc, docW, docH, ovDesc);
+    const merged = this._comp.finishAcc(acc);
+    if (this._overlayOwnedFBO) { this._glctx.returnFBO(this._overlayOwnedFBO); this._overlayOwnedFBO = null; }
+    this._overlay = null;
+    // bbox 一次 readPixels（merged FBO texel 行 0 = doc 行 0，无翻转——与栅格器/present 同约定）。
+    const px = new Uint8Array(ov.bw * ov.bh * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, merged.fbo);
+    gl.readPixels(ov.bx, ov.by, ov.bw, ov.bh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const changed = apply(new Uint8ClampedArray(px.buffer), ov.bx, ov.by, ov.bw, ov.bh);
+    if (changed.length) {
+      const across = tilesAcross(docW);
+      const withHandle = changed.map(({ tx, ty }) => ({ tx, ty, h: pixels.getTileHandle(tx, ty) }));
+      const toCopy = withHandle.filter((c) => c.h);   // 擦空回收的格不拷（byKey 直接删）
+      try {
+        const gpuIds = this._pool.copyBatchFromFramebuffer(toCopy.map(({ tx, ty }) => {
+          const x = tx * TILE_SIZE, y = ty * TILE_SIZE;
+          return { srcX: x, srcY: y, w: Math.min(TILE_SIZE, docW - x), h: Math.min(TILE_SIZE, docH - y) };
+        }));
+        toCopy.forEach((c, i) => {
+          this._bridge.registerPair(c.h!.id, gpuIds[i]);
+          rec.byKey.set(c.ty * across + c.tx, gpuIds[i]);
+        });
+        for (const c of withHandle) if (!c.h) rec.byKey.delete(c.ty * across + c.tx);
+        rec.index.rebuild(rec.byKey, this._pool);
+        rec.cpuVersion = pixels.contentVersion;
+        rec.gen = this._pool.generation;
+      } catch (e) {
+        // 收养失败（池到顶）：不更新 rec 记账 → 下一帧 sync 走 bridge 慢路径重传，正确性无损。
+        if (!(e instanceof Error) || !e.message.startsWith("GPU_POOL_EXHAUSTED")) {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          this._glctx.returnFBO(merged); this._comp.end();
+          throw e;
+        }
+      }
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    this._glctx.returnFBO(fboP); this._glctx.returnFBO(fboS);
-    const canvas = document.createElement("canvas"); canvas.width = bw; canvas.height = bh;
-    canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), bw, bh), 0, 0);
-    return { canvas, dstX: bx, dstY: by };
+    this._glctx.returnFBO(merged);
+    this._comp.end();
+    this.markDirty();   // commit → 重算树（spec:134）
+    return true;
   }
 
   warpToCanvas(srcCanvas: TexImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {

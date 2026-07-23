@@ -105,6 +105,43 @@ export class LayerPixels {
     });
   }
 
+  // ---- 写（S8 brush GPU commit 落盘口）：语义同 putRegion（整块替换，区域内透明也写入），
+  //   区别是逐 tile 与现有字节比对，**只封真变了的 tile**——undo 快照交换不背未变 tile，
+  //   GPU 收养（registerPair）也只对变更 tile 做。返回变更 tile 坐标（含被擦空回收的）。
+  applyRegionDiff(sx0: number, sy0: number, sw: number, sh: number, src: Uint8ClampedArray): { tx: number; ty: number }[] {
+    const changed: { tx: number; ty: number }[] = [];
+    if (sw <= 0 || sh <= 0) return changed;
+    forEachTileInRect(sx0, sy0, sw, sh, this.docW, this.docH, (tx, ty) => {
+      const key = tileKey(tx, ty, this._across);
+      const old = this._tiles.get(key);
+      const tile = new Uint8ClampedArray(TILE_RGBA);
+      if (old) tile.set(old.clampedView());
+      const tox = tx * TILE_SIZE, toy = ty * TILE_SIZE;
+      const ix0 = Math.max(tox, sx0), iy0 = Math.max(toy, sy0);
+      const ix1 = Math.min(tox + TILE_SIZE, sx0 + sw), iy1 = Math.min(toy + TILE_SIZE, sy0 + sh);
+      for (let y = iy0; y < iy1; y++) {
+        const di = ((y - toy) * TILE_SIZE + (ix0 - tox)) * 4;
+        const si = ((y - sy0) * sw + (ix0 - sx0)) * 4;
+        tile.set(src.subarray(si, si + (ix1 - ix0) * 4), di);
+      }
+      // 比对（u32 视图 memcmp）：无旧 tile 时与全透明比。相同 → 跳过（零封装零 dirty）。
+      const cand32 = new Uint32Array(tile.buffer);
+      let differs = false;
+      if (old) {
+        const oldV = old.clampedView();
+        const old32 = new Uint32Array(oldV.buffer, oldV.byteOffset, oldV.byteLength >> 2);
+        for (let i = 0; i < cand32.length; i++) if (cand32[i] !== old32[i]) { differs = true; break; }
+      } else {
+        for (let i = 0; i < cand32.length; i++) if (cand32[i] !== 0) { differs = true; break; }
+      }
+      if (!differs) return;
+      this._contentVersion++;
+      this._setTileBuf(key, tile, true);
+      changed.push({ tx, ty });
+    });
+    return changed;
+  }
+
   // ---- 读：doc 矩形 → flat RGBA（缺 tile = 透明 0）----
   getRegion(x0: number, y0: number, w: number, h: number): Uint8ClampedArray {
     const out = new Uint8ClampedArray(w * h * 4);

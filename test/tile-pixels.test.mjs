@@ -198,3 +198,58 @@ describe("LayerPixels · v0.4 句柄语义（零拷贝快照 + dispose）", () =
     flipped.dispose();
   });
 });
+
+// ---- S8 applyRegionDiff：brush GPU commit 的落盘口（只封真变 tile）----
+describe("LayerPixels · applyRegionDiff（S8 tile-diff 落盘）", () => {
+  it("语义同 putRegion：整块替换（含透明写入），往返一致", () => {
+    const lp = new LayerPixels(W, H);
+    const src = region(100, 100, 300, 300, (x, y) => [x & 255, y & 255, 7, 200]);
+    lp.applyRegionDiff(100, 100, 300, 300, src);
+    assert(eqRegion(lp.getRegion(100, 100, 300, 300), src), "往返一致");
+  });
+
+  it("未变 tile 不封新 tile（句柄身份不换、contentVersion 不涨）", () => {
+    const lp = new LayerPixels(W, H);
+    const src = region(0, 0, 512, 256, (x, y) => [x & 255, y & 255, 1, 255]);   // 恰覆盖 tile(0,0)(1,0)
+    lp.putRegion(0, 0, 512, 256, src);
+    const h00 = lp.getTileHandle(0, 0), h10 = lp.getTileHandle(1, 0);
+    const v0 = lp.contentVersion;
+    // 重放同样内容：全部相同 → 零变更
+    const changed = lp.applyRegionDiff(0, 0, 512, 256, src);
+    assert(changed.length === 0, `无变更应返空，实 ${changed.length}`);
+    assert(lp.getTileHandle(0, 0) === h00 && lp.getTileHandle(1, 0) === h10, "句柄身份不换");
+    assert(lp.contentVersion === v0, "contentVersion 不涨");
+    // 只改右半 tile 一个像素 → 只有 (1,0) 换
+    const src2 = src.slice();
+    src2[(0 * 512 + 300) * 4] ^= 0xff;
+    const changed2 = lp.applyRegionDiff(0, 0, 512, 256, src2);
+    assert(changed2.length === 1 && changed2[0].tx === 1 && changed2[0].ty === 0, "只报真变的 tile");
+    assert(lp.getTileHandle(0, 0) === h00, "未变 tile 句柄不动");
+    assert(lp.getTileHandle(1, 0) !== h10, "变更 tile 换新句柄");
+  });
+
+  it("部分覆盖 tile：区域外像素保留（与旧字节先合再比）", () => {
+    const lp = new LayerPixels(W, H);
+    lp.putRegion(0, 0, 256, 256, region(0, 0, 256, 256, () => [9, 9, 9, 255]));
+    // 只替换 tile 内一小块
+    lp.applyRegionDiff(10, 10, 20, 20, region(10, 10, 20, 20, () => [1, 2, 3, 255]));
+    const out = lp.getRegion(0, 0, 256, 256);
+    const at = (x, y) => out.subarray((y * 256 + x) * 4, (y * 256 + x) * 4 + 4);
+    assert(at(15, 15)[0] === 1 && at(15, 15)[3] === 255, "区域内被替换");
+    assert(at(5, 5)[0] === 9 && at(200, 200)[0] === 9, "区域外原样保留");
+  });
+
+  it("擦空整 tile → 格回收 + 报为变更", () => {
+    const lp = new LayerPixels(W, H);
+    lp.putRegion(0, 0, 256, 256, region(0, 0, 256, 256, () => [9, 9, 9, 255]));
+    const changed = lp.applyRegionDiff(0, 0, 256, 256, new Uint8ClampedArray(256 * 256 * 4));
+    assert(changed.length === 1, "擦空报变更");
+    assert(lp.getTileHandle(0, 0) === null && lp.tileCount === 0, "格被回收");
+  });
+
+  it("对空层写全透明区域：零变更零分配", () => {
+    const lp = new LayerPixels(W, H);
+    const changed = lp.applyRegionDiff(0, 0, 512, 512, new Uint8ClampedArray(512 * 512 * 4));
+    assert(changed.length === 0 && lp.tileCount === 0, "空对空 = 无事发生");
+  });
+});
