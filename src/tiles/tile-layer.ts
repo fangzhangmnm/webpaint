@@ -30,7 +30,6 @@ export class LayerPixels {
   readonly docH: number;
   private _across: number;
   private _tiles = new Map<number, TileHandle>();           // tileKey → 只读 tile 句柄
-  private _dirty = new Set<number>();                       // 自上次 markAllClean 后变更的 tileKey
   private _contentVersion = 0;                              // 单调递增，每次内容 mutation +1
 
   constructor(docW: number, docH: number) {
@@ -69,7 +68,7 @@ export class LayerPixels {
     this._contentVersion++;
     const buf = new Uint8ClampedArray(TILE_RGBA);
     buf.set(pixels.subarray(0, TILE_RGBA));
-    this._setTileBuf(tileKey(tx, ty, this._across), buf, true);
+    this._setTileBuf(tileKey(tx, ty, this._across), buf);
   }
   forEachTile(cb: (tx: number, ty: number, pixels: Uint8ClampedArray) => void): void {
     this._tiles.forEach((h, key) => { const { tx, ty } = tileCoord(key, this._across); cb(tx, ty, h.clampedView()); });
@@ -101,7 +100,7 @@ export class LayerPixels {
           di += 4; si += 4;
         }
       }
-      this._setTileBuf(key, tile, true);
+      this._setTileBuf(key, tile);
     });
   }
 
@@ -136,7 +135,7 @@ export class LayerPixels {
       }
       if (!differs) return;
       this._contentVersion++;
-      this._setTileBuf(key, tile, true);
+      this._setTileBuf(key, tile);
       changed.push({ tx, ty });
     });
     return changed;
@@ -203,7 +202,6 @@ export class LayerPixels {
 
   clear(): void {
     this._contentVersion++;
-    this._tiles.forEach((_h, k) => this._dirty.add(k));
     this._releaseAll();
   }
 
@@ -267,10 +265,6 @@ export class LayerPixels {
     return np;
   }
 
-  // ---- dirty 跟踪（GL 增量上传）----
-  dirtyTileKeys(): number[] { return [...this._dirty]; }
-  markAllClean(): void { this._dirty.clear(); }
-
   // ---- undo 快照：**句柄共享，零拷贝**（tile 只读 → 快照与活层安全共享同一批 tile）----
   snapshot(): PixelsSnapshot {
     const tiles: [number, TileHandle][] = [];
@@ -281,17 +275,15 @@ export class LayerPixels {
   // 最终仍需 disposePixelsSnapshot）。
   restore(snap: PixelsSnapshot): void {
     this._contentVersion++;
-    this._tiles.forEach((_h, k) => this._dirty.add(k));
     this._releaseAll();
     for (const [key, h] of snap.tiles) {
       this._tiles.set(key, h.acquire());
-      this._dirty.add(key);
     }
   }
 
   // ---- 内部 ----
   // 收养 buf（调用方新建、之后不得再碰）为该格的新 tile；全透明 → 回收该格。释放旧句柄。
-  private _setTileBuf(key: number, buf: Uint8ClampedArray, markDirty: boolean): void {
+  private _setTileBuf(key: number, buf: Uint8ClampedArray): void {
     const bbox = computeBBox("rgba8", asBytes(buf), TILE_SIZE);
     const old = this._tiles.get(key);
     if (bbox === null) {
@@ -300,7 +292,6 @@ export class LayerPixels {
       this._tiles.set(key, appTilePool().createTile("rgba8", asBytes(buf), bbox));
       if (old) old.release();
     }
-    if (markDirty) this._dirty.add(key);
   }
 
   private _releaseAll(): void {

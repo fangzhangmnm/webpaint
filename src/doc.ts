@@ -99,9 +99,6 @@ export type DeepSnapNode =
 // 选区对象：selection.ts 拥有真类型（batch 14 起直接 import，替原本地 SelectionLike 镜像）。
 import type { Selection } from "./selection.ts";
 
-// 层 bbox 长大时给的边距，防 stamp 进出边界反复 realloc
-const BBOX_GROW_MARGIN = 32;
-
 export class Layer {
   id: number;
   isGroup: false;

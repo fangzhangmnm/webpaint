@@ -114,7 +114,7 @@ describe("LayerPixels · sampleAt / putTile / getTile", () => {
   });
 });
 
-describe("LayerPixels · snapshot/restore + dirty", () => {
+describe("LayerPixels · snapshot/restore", () => {
   it("snapshot/restore 像素一致且独立", () => {
     const lp = new LayerPixels(W, H);
     lp.putRegion(50, 50, 20, 20, region(50, 50, 20, 20, () => [9, 8, 7, 255]));
@@ -128,22 +128,12 @@ describe("LayerPixels · snapshot/restore + dirty", () => {
     assert(lp2.sampleAt(55, 55)[0] === 9, "snap 未被污染");
   });
 
-  it("dirty 跟踪：写标脏、markAllClean 清", () => {
-    const lp = new LayerPixels(W, H);
-    lp.putRegion(0, 0, 4, 4, region(0, 0, 4, 4, () => [1, 1, 1, 255]));
-    assert(lp.dirtyTileKeys().length === 1, "1 脏");
-    lp.markAllClean();
-    assert(lp.dirtyTileKeys().length === 0, "清");
-    lp.putRegion(900, 0, 4, 4, region(900, 0, 4, 4, () => [2, 2, 2, 255]));
-    assert(lp.dirtyTileKeys().length === 1, "新脏");
-  });
 
-  it("clear 标全部脏 + 清空", () => {
+  it("clear 清空", () => {
     const lp = new LayerPixels(W, H);
-    lp.putRegion(0, 0, 300, 300, region(0, 0, 300, 300, () => [1, 1, 1, 255]));   // 4 tile
-    lp.markAllClean();
+    lp.putRegion(0, 0, 300, 300, region(0, 0, 300, 300, () => [1, 2, 3, 255]));
     lp.clear();
-    assert(lp.isEmpty() && lp.dirtyTileKeys().length === 4, "清空+4脏");
+    assert(lp.tileCount === 0, "清空");
   });
 });
 

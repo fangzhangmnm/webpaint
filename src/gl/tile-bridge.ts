@@ -14,7 +14,7 @@
 // bytes 惰性取（entry.bytes 是回调）：映射命中时**不物化** CPU 字节——压缩驻留的 tile
 //   在 GPU 副本还活着时零解压成本。
 
-import { TILE_SIZE, tilesAcross, tileRangeForRect } from "../tiles/tile-geometry.ts";
+import { TILE_SIZE, tileRangeForRect } from "../tiles/tile-geometry.ts";
 import type { GpuTilePool } from "./gpu-tile-pool.ts";
 
 export interface UploadEntry { cpuId: number; bytes: () => Uint8Array }
@@ -93,9 +93,4 @@ export function sliceRegionToTiles(
     }
   }
   return out;
-}
-
-// 便利：一层 tile 坐标集合的稳定 key（IndexTexture.rebuild 的 map 键；tileKey 同式）。
-export function coordKey(tx: number, ty: number, docW: number): number {
-  return ty * tilesAcross(docW) + tx;
 }
