@@ -545,6 +545,15 @@ function rendertreeParity(glctx: GLContext, add: Add): void {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   glctx.returnFBO(once);
   cmp("rt:compositeOnce（export 路径）", ref1, oncePx);
+
+  // S8 吸管：pickColor（compositeOnce + 1px readback）vs golden 采样点（含 alpha）。
+  let pickMd = 0;
+  for (const [sx, sy] of [[150, 150], [300, 300], [30, 470], [470, 30]] as [number, number][]) {
+    const p = tree.pickColor(nodes as never, N, N, undefined, sx, sy);
+    const o = (sy * N + sx) * 4;
+    for (let k = 0; k < 4; k++) pickMd = Math.max(pickMd, Math.abs(p[k] - ref1[o + k]));
+  }
+  add("rt:pickColor 吸管 vs golden 采样点", pickMd <= 4, `maxΔ=${pickMd}`);
 }
 
 // ---- G) S8 brush GPU commit ≡ live：commitBrushStroke（merge 同一 overlay shader → tile-diff 落层

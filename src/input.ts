@@ -1007,16 +1007,15 @@ export class InputController {
     // 两种取样模式（吸色 context toolbar 的下拉，state.pickMode）：
     //   "layer"     = 当前编辑图层的 **raw 像素**（无视该层叠加模式 / clip / 图层 opacity）；
     //                 active 是组 / 无可取叶 → 退回 composite。
-    //   "composite" = **最终合成可见颜色**（board 1:1 合成缓存 = 规范合成器产物，respect mode+clip+组隔离）。
+    //   "composite" = **最终合成可见颜色**（S8：render-tree 一次性 GPU 合成 + 1px readback，
+    //                 respect mode+clip+组隔离；合成组没有 CPU tile，必须 GPU 读，spec:243-244）。
     // 两路都 over doc 背景得不透明色。
     let px;
     const active = this.doc.activeLayer;
     if (this.getPickMode() === "layer" && active && !active.isGroup && active.sampleAt) {
       px = active.sampleAt(ix, iy);
     } else {
-      const off = this.board.ensureCompositeCache();
-      const octx = off.getContext("2d", { willReadFrequently: true });
-      try { px = octx!.getImageData(ix, iy, 1, 1).data; } catch { px = [0, 0, 0, 0]; }
+      px = this.board.pickCompositeColor(ix, iy) ?? [0, 0, 0, 0];
     }
     const bg = parseHex(this.doc.backgroundColor || "#ffffff");
     const la = px[3] / 255;

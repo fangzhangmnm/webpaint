@@ -53,6 +53,14 @@ export class GLBoard {
     return this._tree.commitBrushStroke(leafId, pixels, ov, docW, docH, apply);
   }
 
+  // S8 吸管：一次性合成（compositeOnce，不建缓存）+ 1px readback。bg 语义同 render 的 docBg。
+  pickColor(doc: GLDoc, docBg: string | null, x: number, y: number): [number, number, number, number] | null {
+    if (this._glctx.isLost) return null;
+    const bg: Background | undefined = docBg === "checker" ? "checker"
+      : docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;
+    return this._tree.pickColor(doc.layers, doc.width, doc.height, bg, x, y);
+  }
+
   // 给自由变换 commit 用：warp 源 → straight RGBA canvas（_bakeDown 走 readback→editRegion，复用 live warp）。
   warpToCanvas(srcCanvas: TexImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {
     return this._tree.warpToCanvas(srcCanvas, srcW, srcH, hinv, mode, bx, by, bw, bh);

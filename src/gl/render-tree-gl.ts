@@ -316,6 +316,18 @@ export class RenderTreeGL {
     return out;
   }
 
+  // S8 吸管（spec:243-244）：一次性合成 + 单像素 readPixels（合成组无 CPU tile → 必须走 GPU 读）。
+  pickColor(nodes: DocNode[], docW: number, docH: number, bg: Background | undefined, x: number, y: number): [number, number, number, number] {
+    const gl = this._glctx.gl;
+    const fbo = this.compositeOnce(nodes, docW, docH, bg);
+    const px = new Uint8Array(4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
+    gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this._glctx.returnFBO(fbo);
+    return [px[0], px[1], px[2], px[3]];
+  }
+
   // ---- 内部：plan 翻译 / 签名 ----
   private _toPlanNodes(nodes: DocNode[], updated: Set<number>, overlayLeafId: number | null, leafById: Map<number, DocLeaf>): PlanNode[] {
     return nodes.map((n): PlanNode => {

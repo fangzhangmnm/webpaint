@@ -1,9 +1,7 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
 import { sourceWarpMatrix } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
-import { compositeLayers } from "./layer-composite.ts";
 import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT（别在本文件硬编码第二份）
-import { makeBitmap } from "./bitmap.ts";
 import { reportError } from "./error-badge.ts";
 import { GLBoard } from "./gl/gl-board.ts";
 import { poolCapacityForBudget } from "./gl/render-tree-gl.ts";
@@ -64,8 +62,6 @@ function _sampleModeInt(mode?: string): number {
 
 type Ctx2D = CanvasRenderingContext2D;
 type ViewportChangeCb = (() => void) | null;
-// makeBitmap 的回值：OffscreenCanvas（优先）或 HTMLCanvasElement（回退）
-type Bitmap = HTMLCanvasElement | OffscreenCanvas;
 //
 // 坐标系：
 //   doc 坐标 = 像素左上原点，单位 = doc 像素（document px）
@@ -103,15 +99,11 @@ export class Board {
   _voidColor: string;
   _showCheckerboard: boolean;
   _pixelGridEnabled: boolean;
-  _eraseComposite: HTMLCanvasElement | null;
-  _eraseCompositeKey: string | null;
   gridCanvas: HTMLCanvasElement | null;
   gctx: Ctx2D | null;
   cursorEl: HTMLElement | null;
   _gridSig: string;
   // 按需创建 / 延迟初始化的字段
-  _compositeCacheDirty?: boolean;
-  _compositeCache?: Bitmap | null;
   _strokeActiveHint?: (() => unknown) | null;
   // GL live-sync：原地改像素的笔描边中要重传 GPU 的活动叶（无=不重传，buffered brush/无描边）。
   _liveSyncProvider?: (() => Layer | null) | null;
@@ -121,7 +113,6 @@ export class Board {
   _activeSurrogateCanvas?: CanvasImageSource | null;
   _activeSurrogateBx?: number;   // 替身 canvas 的 doc 左上（GL 上传 tiles 用）
   _activeSurrogateBy?: number;
-  _clipTmp?: HTMLCanvasElement;
   _showFps?: boolean;
   _lastFrameT?: number | null;
   _fps?: number | null;
@@ -158,9 +149,6 @@ export class Board {
     //   真值由 app.ts 的 fixup 相经 settings-menu 的 renderSettingsFromPrefs() 灌入（SSoT = PREF_DEFAULTS["pixel-grid"]）；
     //   这里只是构造期占位，别在这硬编码第二份默认值。
     this._pixelGridEnabled = PREF_DEFAULTS["pixel-grid"];
-
-    this._eraseComposite = null;
-    this._eraseCompositeKey = null;
 
     // v163 瞬态 UI 分层（省 hot-path + 显存，详 docs/20260604-overlay-grid-cursor-layers.md）：
     //   像素栅格 = 独立 canvas，**仅视口变时重画**（_syncGrid sig 守卫）→ 画笔行进时不碰它，零逐帧成本；
@@ -232,7 +220,6 @@ export class Board {
   setDoc(doc: PaintDoc) {
     this.doc = doc;
     this._configureDocMemory();
-    this._compositeCacheDirty = true;   // 新 doc → 合成缓存作废
     this._glBoard?.markContentDirty();   // GL：新 doc → 全量重传
     this.fitToScreen();
   }
@@ -253,8 +240,7 @@ export class Board {
 
   // 由 BrushEngine 报告："layer 像素被改"（脏 bbox 参数现仅语义/旁观者用；GL-only 后无 partial-blit 消费它）。
   markDocDirty(_x0: number, _y0: number, _x1: number, _y1: number) {
-    this._compositeCacheDirty = true;   // 像素改 → 合成缓存作废（吸管 composite 缓存；commit 后重建）
-    this._glBoard?.markContentDirty();   // GL：内容脏（描边中 livePreview 守门不重传，抬笔 commit 后才同步）
+    this._glBoard?.markContentDirty();   // GL：内容脏
     // 通知挂在 doc 上的旁观者（如 reference live 镜像）。每个 brush stamp 都会触发，
     // 但 reference 端 markLiveDirty 仅置 flag + 走 rAF，不真合成，开销 ≪ 1ms。
     if (!Board._dispatchingDirty) {
@@ -373,7 +359,6 @@ export class Board {
 
   // 公共 API：layer 像素被改了（图层结构变 / 切换 / putImageData 等）
   invalidateAll() {
-    this._compositeCacheDirty = true;   // 图层/结构/doc-transform 变 → 合成缓存作废
     this._glBoard?.markContentDirty();   // GL：图层/结构变 → 全量重传
     this.requestRender();
   }
@@ -417,32 +402,8 @@ export class Board {
     return { layerId: this._activeSurrogateLayerId, canvas: c, bx: this._activeSurrogateBx ?? 0, by: this._activeSurrogateBy ?? 0, w, h };
   }
 
-  // 复用 erase 临时合成 canvas（同 doc 尺寸；改了重新分配）
-  _getEraseComposite(w: number, h: number) {
-    const key = `${w}x${h}`;
-    if (!this._eraseComposite || this._eraseCompositeKey !== key) {
-      this._eraseComposite = document.createElement("canvas");
-      this._eraseComposite.width = w;
-      this._eraseComposite.height = h;
-      this._eraseCompositeKey = key;
-    }
-    return this._eraseComposite;
-  }
-  // Clipping mask 临时合成 canvas。grow-only：取所有用过的 layer.bbox 最大值。
-  // 不和 _eraseComposite 共用（同一帧可能两者都要）。
-  _getClipTmp(w: number, h: number) {
-    if (!this._clipTmp || this._clipTmp.width < w || this._clipTmp.height < h) {
-      const nw = Math.max(this._clipTmp?.width || 0, w);
-      const nh = Math.max(this._clipTmp?.height || 0, h);
-      this._clipTmp = document.createElement("canvas");
-      this._clipTmp.width = nw;
-      this._clipTmp.height = nh;
-    }
-    return this._clipTmp;
-  }
-  // 注：层合成（含 clip dst-in 基底、erase/混合复合通路）在 src/layer-composite.ts（deep module A）；
-  //   board 仅经 _layerCompositeOpts 给 ensureCompositeCache（吸管）注入 surrogate / tmp 池。display 全走 GL。
-  //   （CPU 笔刷 live overlay 裁剪 _clipOverlayMasks 已删——brush live 走 GPU stamp overlay，shader 内裁选区/锁α。）
+  // 注：层合成全在 GL（render-tree 执行器）。旧 2D 规范合成器接缝（ensureCompositeCache/_layerCompositeOpts/
+  //   erase/clip tmp 池）已随吸管迁 GL 一并退役（S8c）——board 与 layer-composite.ts 断开。
 
   // 把 ctx 设到 "doc 坐标系"：doc (0,0) 映射到 ctx 当前 origin，含 dpr +
   // viewport (tx,ty,scale,rot) 全部。setTransform 接 6 浮点 a,b,c,d,e,f：
@@ -584,8 +545,7 @@ export class Board {
   }
 
   // v351 起 GL board 是唯一 display 路径（2D display 归档进 ARCHIVE/old-board-2d-display.ts）。
-  //   GL init 失败（无 WebGL2）→ 不回退 2D，显「需 WebGL2」提示（吸管/导出/缩略图的 CPU compositeLayers 仍保留，
-  //   见 ensureCompositeCache）。
+  //   GL init 失败（无 WebGL2）→ 不回退 2D，显「需 WebGL2」提示。
   _renderFull() {
     const ctx = this.ctx;
     const W = this.canvas.width, H = this.canvas.height;
@@ -702,32 +662,9 @@ export class Board {
     return out;
   }
 
-  // doc 底色（棋盘 = 透明指示；否则 backgroundColor）。实时路径画到屏幕、缓存路径画到离屏——
-  //   两处用同一底，保混合模式合成一致（见 _renderFull / ensureCompositeCache）。
-  _drawDocBg(ctx: Ctx2D) {
-    if (this._showCheckerboard) {
-      this._drawCheckerboard(ctx, this.doc.width, this.doc.height);
-    } else {
-      ctx.fillStyle = this.doc.backgroundColor || "#ffffff";
-      ctx.fillRect(0, 0, this.doc.width, this.doc.height);
-    }
-  }
-
   // （旧 _renderPartial / clip-window + Windows 黑缝 floor-ceil 补丁已删：v275 拥抱 full-composite，
   //   静态走 1:1 缓存、实时直接合成。partial 的两类缝隙问题（白缝/黑缝）随之消失。）
 
-  // 规范合成器 opts —— **现仅 ensureCompositeCache（吸管 composite 取色）用**，非 display（display 全走 GL）。
-  //   source：活动层若有调整 surrogate 则用替身。overlay/float 已去（display 浮层/描边 overlay 全在 GL 合成器；
-  //   吸管不会在描边/变换进行中触发，gizmo/笔占指针）。clipTmp/eraseTmp：clip-mask/erase 合成的复用离屏池。
-  _layerCompositeOpts() {
-    return {
-      source: (layer: Layer) =>
-        (this._activeSurrogateLayerId === layer.id && this._activeSurrogateCanvas)
-          ? this._activeSurrogateCanvas : layer.canvas,
-      clipTmp: (w: number, h: number) => this._getClipTmp(w, h),
-      eraseTmp: (w: number, h: number) => this._getEraseComposite(w, h),
-    };
-  }
   // 实时预览中？= 调整 surrogate / stroke 进行中 / 活动浮层。GL 路径用它门控 syncAll/release。
   _isLivePreview() {
     return !!(this._activeSurrogateCanvas
@@ -735,27 +672,13 @@ export class Board {
       // 活动浮层（自由变换）→ 走实时合成（浮层经 floatFor 插在源层 z；mesh 每帧变，不能用静态缓存）。
       || this._lassoProvider?.()?.floating);
   }
-  // 白边修：把全 doc 合成到 1:1 doc 像素离屏缓存（层间整数对齐，无亚像素缝），再单次缩放 blit。
-  //   缓存只在内容脏时重建；pan/zoom（视口变、内容没变）→ 命中缓存只 re-blit（比旧逐层缩放更快）。
-  //   吸管取色也读这块缓存（= 最终合成像素，respect mode/clip）。
-  ensureCompositeCache() {
-    const W = this.doc.width, H = this.doc.height;
-    let off = this._compositeCache;
-    if (!off || off.width !== W || off.height !== H) {
-      off = this._compositeCache = makeBitmap(W, H);
-      this._compositeCacheDirty = true;
-    }
-    if (this._compositeCacheDirty) {
-      const octx = (off as HTMLCanvasElement).getContext("2d", { willReadFrequently: true })!;
-      octx.setTransform(1, 0, 0, 1, 0, 0);
-      octx.clearRect(0, 0, W, H);
-      octx.imageSmoothingEnabled = true;
-      octx.imageSmoothingQuality = "low";
-      this._drawDocBg(octx);   // 缓存含 doc bg → 混合模式 over bg，与实时同底（修抬笔"弹回"）
-      compositeLayers(octx, this.doc.layers, this._layerCompositeOpts() as unknown as Parameters<typeof compositeLayers>[2]);
-      this._compositeCacheDirty = false;
-    }
-    return off!;
+  // 吸管 composite 取色（S8c，spec:243-244）：GL 一次性合成（compositeOnce，不建缓存）+ 1px readback。
+  //   走 GPU 的动机：合成组是没有 CPU tile 的（spec:244），CPU 全量 compositeLayers 缓存随之退役。
+  //   GL 失败态返 null（v351 起无 WebGL2 = 无画布）。底与显示同源（棋盘/背景色）。
+  pickCompositeColor(ix: number, iy: number): [number, number, number, number] | null {
+    if (!this._glBoard) return null;
+    const docBg = this._showCheckerboard ? "checker" : (this.doc.backgroundColor || "#ffffff");
+    return this._glBoard.pickColor(this.doc as unknown as GLDoc, docBg, ix, iy);
   }
   // 套索 overlay：
   //   drawing 期间：画 polyline overlay
@@ -902,18 +825,6 @@ export class Board {
     }
   }
 
-  // 画 doc 区半透明灰白格背景。在 doc 坐标系下画（cell = 16 doc-px）。
-  _drawCheckerboard(ctx: Ctx2D, W: number, H: number) {
-    const cell = 16;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = "#c8c8c8";
-    for (let y = 0; y < H; y += cell) {
-      for (let x = ((y / cell) | 0) % 2 ? 0 : cell; x < W; x += cell * 2) {
-        ctx.fillRect(x, y, cell, cell);
-      }
-    }
-  }
   // 像素栅格：独立 canvas，仅视口变（sig 变）才重画。stroke 中视口不变 → no-op → 零逐帧成本（所有笔型）。
   _syncGrid() {
     const cv = this.gridCanvas;
