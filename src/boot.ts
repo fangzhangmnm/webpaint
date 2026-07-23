@@ -16,7 +16,7 @@ import type { AppContext } from "./app-context.ts";
 //   toolStates 缺失字段从 rack 补齐 → 应用当前 tool 的 state。云端 pull 由 collection.onChange
 //   自动刷（controller 内订阅）；不再有 IDB 迁移 / defaults retro-merge / 云图标态机。
 export function initRackBoot(ctx: AppContext) {
-  const { rack, state, editMode, dialReactive, setStatus } = ctx;
+  const { rack, state, editMode, setStatus } = ctx;
   const backfillToolStates = () => {
     for (const tk of Object.keys(state.toolStates)) {
       if (state.toolStates[tk].activeBrushId == null) Object.assign(state.toolStates[tk], rack.defaultToolStateFor(tk));

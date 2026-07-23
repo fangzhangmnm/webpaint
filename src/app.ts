@@ -133,7 +133,7 @@ const rack = new BrushRackController({
 
 // dial 写入（setSize/setOpacity 写 dial SSoT + LS）+ 当前 dial + 键盘 [ ] 调粗 = dial-controls.ts。
 // editMode thunk：setSize 要早于 leftDial 可用，editMode const 晚声明。bindKeyboard 待 board/leftDial 后调。
-const { setSize, setOpacity, currentDials, bindKeyboard: bindSizeKeyboard } = makeDialControls({ state, rack, getEditMode: () => editMode });
+const { setSize, setOpacity, bindKeyboard: bindSizeKeyboard } = makeDialControls({ state, rack, getEditMode: () => editMode });
 
 const _leftDial = () => state.toolStates[rack.getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
 const leftDial = mountLeftDial(els.leftDialMount, {

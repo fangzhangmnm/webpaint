@@ -11,7 +11,6 @@
 import { createApp, defineComponent, reactive, ref, computed, watch } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { sliderPosToSize, sizeToSliderPos, sliderMaxPos } from "./brush-size.ts";
 import { t } from "../i18n/index.ts";
-import { iconHtml } from "./icon.ts";
 
 const POPUP_FRAME = 64;
 const LONGPRESS_MS = 600;

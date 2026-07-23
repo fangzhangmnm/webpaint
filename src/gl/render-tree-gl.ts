@@ -204,7 +204,6 @@ export class RenderTreeGL {
     floats: FloatInput[], stampOverlay: StampOverlayInput | null, surrogate: SurrogateInput | null,
     liveSyncLeafId: number | null,
   ): void {
-    const gl = this._glctx.gl;
     this.frameStats.segBuilds = 0; this.frameStats.segHits = 0; this.frameStats.cachingDegraded = false;
     // doc 尺寸变：FBO 池全清（旧尺寸永不再命中）+ 段/display/叶记录作废（index 尺寸不符会逐个重建，主动清更干净）。
     if (docW !== this._lastDocW || docH !== this._lastDocH) {

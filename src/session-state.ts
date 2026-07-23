@@ -24,7 +24,7 @@ import { isSignedIn, store as _store } from "./app-store.ts";
 import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字节（branded：明文流不进只收密文的 sink）
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
-import { stripSessionExt, sessionFileName, sessionBareName } from "./config.ts";
+import { sessionFileName, sessionBareName } from "./config.ts";
 import { serializedToolStatePatch, editorState } from "./workbench-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
@@ -56,14 +56,12 @@ let updateSaveStatus: AppContext["updateSaveStatus"], updateNewerBanner: AppCont
 let pullSettingsAndState: AppContext["pullSettingsAndState"];
 let setColor: AppContext["setColor"], applyCheckerboard: AppContext["applyCheckerboard"], renderLayersPanel: AppContext["renderLayersPanel"];
 let setGalleryOpen: AppContext["setGalleryOpen"];
-let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"], uniqueNameFor: AppContext["uniqueNameFor"];
+let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"];
 let gallery: AppContext["gallery"];
-let showFullscreenBusy: AppContext["showFullscreenBusy"], hideFullscreenBusy: AppContext["hideFullscreenBusy"];
 
 // ---- session 拥有的 SSoT 状态 ----
 let _activeSessionName: string | null = "未命名";   // 幽灵 path 保护：boot 成功/主动 open/new/save-as 才升级真名
 let _isLazyBlankSession = false;
-let _docLastSavedAt = 0;
 let _loadedDocIsNewer = false;
 let _loadedDocWriterVer: string | null = null;
 let _loadedDocNewerConfirmed = false;
@@ -237,7 +235,7 @@ function _adoptCommon(loaded: LoadedDoc, name: string, opts: { create?: boolean 
   adoptModel(loaded);
   _setActive(name); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(name), opts);
-  _docLastSavedAt = Date.now(); updateSaveStatus(); _refreshEncrypted();
+  updateSaveStatus(); _refreshEncrypted();
 }
 
 // ---- checkpoint / revert（v415 重接；prod 有、dev 在 store cutover 删 _store.seal 后成了 stub）----
@@ -287,7 +285,6 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
   try {
     await es.flushLocal();   // encode（+peek）→ store.file.save({tryPush:false})；只落本地（consent-safe）
                              // desk 不进 need：内容脏时顺手被 _buildOraMeta 捞走，不自己驱动落盘（v409）
-    _docLastSavedAt = Date.now();
     setStatus(t("ss.saved", { name: _activeSessionName ?? "" }));
     checkQuotaAndWarn();
   } catch (e) { reportError(new Error("[session] save failed: " + String(e)), "log"); setStatus(t("ss.saveFailed", { error: errMsg(e) })); }
@@ -310,7 +307,6 @@ async function saveAndPush() {
     //   顺带把当前 desk 捞进 ora（_buildOraMeta → syncRuntimeForSave + Serialize）。
     //   冲突/错误经 store 的 ui bundle surface。
     await es.forceSaveAndPush();
-    _docLastSavedAt = Date.now();
     // 别无条件报「已同步」：push 失败在 store 内部被 catch 成 banner，这里**不会**抛。
     //   唯一可靠的判据是 es.isPushPending()（v433）——它是 save() 返回的 pushed 一路带上来的。
     setStatus(!isSignedIn() ? t("ss.savedLocalIdb", { name })
@@ -382,7 +378,7 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
         // 改名 = 换身份 → 旧 key 的快照丢掉（不搬：搬要连密文一起复制，而"改名丢一次快照"是诚实的小代价）。
         void _dropCheckpoint(oldName);
         _setActive(trimmed); _recomputePhase();
-        _docLastSavedAt = Date.now(); updateSaveStatus();
+        updateSaveStatus();
         // 别再无条件报「已重命名（含云端）」：store 现在会透出旧名到底怎么了。
         //   oldKept   谱系不明 → 改名降级为「另存」，云端旧名**原地留着** → 必须说清楚，否则用户以为旧的没了
         //   cloudDeferred 云端没推成 → 新名只在本地
@@ -437,7 +433,7 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
   resetEditorState();
   applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
   es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
-  _docLastSavedAt = 0; updateSaveStatus();
+  updateSaveStatus();
   await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
   void _captureCheckpoint(name, "new-doc");   // 空白态封一份 → revert = 回到刚新建的样子
   setGalleryOpen(false);
@@ -528,7 +524,7 @@ async function restoreSession(name: string): Promise<boolean> {
     if (await _file(name).isEncrypted()) { if (!(await ensureUnlocked(name))) return false; }
     if (!(await es.open(toFull(name)))) return false;   // 文件缺失/锁定 → 未装入。边界转全名。
     _setActive(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
-    _docLastSavedAt = Date.now(); updateSaveStatus();
+    updateSaveStatus();
     return true;
   } catch (e) { reportError(new Error("[session] restore failed: " + String(e)), "log"); return false; }
 }
@@ -541,7 +537,7 @@ async function saveAs(newName: string): Promise<void> {
   _setActive(newName); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(newName));   // es 切到新名（内容即新名的；下轮 autosave 若跑=同内容 re-save，无害）。边界转全名。
   void _captureCheckpoint(newName, "save-as");   // 新身份的「打开态」= 此刻
-  _docLastSavedAt = Date.now(); updateSaveStatus(); gallery.refresh();
+  updateSaveStatus(); gallery.refresh();
 }
 
 // setName(name)：改活动身份（内存 + 持久 appState.currentFile 两轨齐动）。
@@ -596,8 +592,7 @@ export function initSession(ctx: AppContext) {
   pullSettingsAndState = ctx.pullSettingsAndState;
   setColor = ctx.setColor; applyCheckerboard = ctx.applyCheckerboard; renderLayersPanel = ctx.renderLayersPanel;
   setGalleryOpen = ctx.setGalleryOpen;
-  checkQuotaAndWarn = ctx.checkQuotaAndWarn; uniqueNameFor = ctx.uniqueNameFor;
-  showFullscreenBusy = ctx.showFullscreenBusy; hideFullscreenBusy = ctx.hideFullscreenBusy;
+  checkQuotaAndWarn = ctx.checkQuotaAndWarn;
   gallery = ctx.gallery;
 
   // ora editor 适配器 + editor-session（生命周期编排全塌进这里）。

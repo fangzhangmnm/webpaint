@@ -21,7 +21,6 @@
 import { makeRegistry } from "./registry.ts";
 import { encodeDocToOra } from "./ora.ts";
 import { renderDocToImageBlob } from "./session.ts";
-import { session } from "./session-state.ts";
 import type { PaintDoc } from "./doc.ts";
 
 export interface ExportOpts {

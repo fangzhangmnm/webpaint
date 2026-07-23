@@ -29,7 +29,6 @@ import { buildStackXml, parseStackXml } from "./ora-stack-xml.ts";
 import type { ParsedNode } from "./ora-stack-xml.ts";
 
 // 2D 上下文：OffscreenCanvas / <canvas> 两种 ctx 共有 API（与 doc.ts 的 Ctx 同形）。
-type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 // renderMerged / encode 只读 doc 的 width/height/layers，与 PaintDoc 形状兼容。
 type EncodeDoc = { width: number; height: number; layers: PaintDoc["layers"] };
 // encode opts：两个可选 WebPaint 私有扩展。

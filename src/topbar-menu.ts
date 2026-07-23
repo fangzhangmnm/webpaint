@@ -36,13 +36,8 @@ const errMsg = (e: unknown): string => String((e as { message?: unknown })?.mess
 let input: AppContext["input"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], editMode: AppContext["editMode"];
 let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
 let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"], updateZoomLabel: AppContext["updateZoomLabel"];
-let gallery: AppContext["gallery"], rack: AppContext["rack"];
+let rack: AppContext["rack"];
 
-// 通用 sheet 开关（清空图层 sheet 等）——纯 class toggle，无状态。
-function openSheet(sheet: HTMLElement, backdrop: HTMLElement) {
-  backdrop.classList.remove("hidden");
-  sheet.classList.remove("hidden");
-}
 function closeSheet(sheet: HTMLElement, backdrop: HTMLElement) {
   backdrop.classList.add("hidden");
   sheet.classList.add("hidden");
@@ -59,7 +54,6 @@ export function initTopbarMenu(ctx: AppContext) {
   setStatus = ctx.setStatus;
   updateSaveStatus = ctx.updateSaveStatus;
   updateZoomLabel = ctx.updateZoomLabel;
-  gallery = ctx.gallery;
   rack = ctx.rack;
 
   // ---- undo / redo ----

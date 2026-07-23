@@ -128,7 +128,6 @@ interface KeyboardShortcut {
   run: (i: InputController) => void;
 }
 
-const ERASER_RADIUS_SCREEN = 0;   // 用 BrushEngine 自己的 size，不再独立
 const TAP_MAX_DURATION = 220;
 const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
@@ -459,7 +458,7 @@ export class InputController {
       for (const [, p] of this.pointers) {
         if (p.longPressTimer) { clearTimeout(p.longPressTimer); p.longPressTimer = null; }
       }
-      for (const [pid, p] of this.pointers) {
+      for (const p of this.pointers.values()) {
         if (isPixelStroke(p.role as string)) {
           this._abortStroke();
         } else if (p.role === "lasso") {

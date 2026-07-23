@@ -30,7 +30,6 @@ type FileShareNavigator = Navigator & {
   share?: (data?: { files?: File[]; title?: string }) => Promise<void>;
 };
 
-const DEFAULT_NAME = "未命名";
 
 // gallery-first: 空字符串 = 没活动 session（在 gallery）。
 // active session = appState.currentFile（synced-app-state，非 null → boot 自动 open；跨设备 resume）。

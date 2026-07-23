@@ -14,7 +14,6 @@
 // 画布 pointerdown 默认关全部（user：「画画时别让 panel 挡着」）。
 // 在 panel 内 click 不要冒泡到 canvas（panel 自己 stopPropagation）。
 
-import { reportError } from "./error-badge.ts";
 
 interface PanelHandlers {
   show?: () => void;

@@ -29,7 +29,6 @@ interface Cap {
   onToolSwitch?: string;
   returnTo?: string | null;
 }
-type EditModeName = keyof typeof CAPS;
 
 // 进 transient 时携带的 apply/abort 闭包。
 interface TransientHooks {
