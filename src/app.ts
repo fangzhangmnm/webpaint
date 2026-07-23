@@ -47,7 +47,7 @@ import { initToolbar, RACK_PANEL_BY_TOOL } from "./toolbar.ts";
 import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
 import { setDocCompositor } from "./doc-render.ts";
-import { createEditorState } from "./editor-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
+import { createEditorState } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";

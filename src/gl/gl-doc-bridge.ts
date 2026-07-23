@@ -5,7 +5,7 @@
 
 import { BLEND_MODES } from "./blend-glsl.ts";
 import type { BlendMode } from "./blend-glsl.ts";
-import type { LayerPixels } from "./tile-pixels.ts";
+import type { LayerPixels } from "../tiles/tile-layer.ts";
 
 // 结构化 doc 节点（与 doc.ts Layer/LayerGroup 字段兼容）。
 // pixels = 该层稀疏 tile SoT（GL 直读上传；canvas/bbox 是派生视图，GL 路径不再需要）。

@@ -1,4 +1,4 @@
-// LayerPixels —— 图层像素门面：**稀疏 256² tile**，doc 坐标接口，**bbox-free**。
+// tile-layer（原 gl/tile-pixels，S9 归位 tiles/——纯 tile 门面非 GL 专属）。LayerPixels —— 图层像素门面：**稀疏 256² tile**，doc 坐标接口，**bbox-free**。
 // v0.4 起底层换到 cpu-tile-pool：每格是**不可变、引用计数**的 TileHandle（copy-on-write），
 // 不再是可变裸数组。这带来：
 //   - snapshot()/restore() = 句柄 acquire/release，**零拷贝**（undo 内存压力交给池的压缩管）。
@@ -12,9 +12,9 @@
 //
 // 纯核心零 DOM 依赖 → node 全测。Canvas2D facade（materialize/editRegion）需浏览器。
 
-import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "../tiles/tile-geometry.ts";
-import { appTilePool } from "../tiles/app-tile-pool.ts";
-import { computeBBox, type TileHandle } from "../tiles/cpu-tile-pool.ts";
+import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "./tile-geometry.ts";
+import { appTilePool } from "./app-tile-pool.ts";
+import { computeBBox, type TileHandle } from "./cpu-tile-pool.ts";
 
 const TILE_RGBA = TILE_SIZE * TILE_SIZE * 4;
 

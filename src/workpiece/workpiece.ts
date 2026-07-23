@@ -13,7 +13,7 @@
 // workpiece 不碰 store（红线；持久化归 importer/exporter/persistency 管，它们只读写快照）。
 
 import type { PaintDoc } from "../doc.ts";
-import type { LayerPixels } from "../gl/tile-pixels.ts";
+import type { LayerPixels } from "../tiles/tile-layer.ts";
 
 // ---- 浮层变换状态（S6：float 从 floating-transform 的 _ft 私有态收进 workpiece internals）----
 // 像素所有权：WorkpieceFloat.pixels 归当前持有者（internals 或某个 operator 的 undo 包）所有，

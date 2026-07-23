@@ -1,6 +1,6 @@
 // EditorState struct：默认 / 门面只有四方法 / Serialize 往返 / Unserialize 容错 / reset。
 import { test, eq, assert } from "./runner.mjs";
-import { editorState } from "../src/editor-state.ts";
+import { editorState } from "../src/workbench-state.ts";
 
 const J = (v) => JSON.stringify(v);
 

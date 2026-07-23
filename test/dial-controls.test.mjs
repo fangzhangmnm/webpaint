@@ -3,7 +3,7 @@
 
 import { describe, it, assert, eq } from "./runner.mjs";
 import { makeDialControls } from "../src/dial-controls.ts";
-import { createEditorState } from "../src/editor-state.ts";
+import { createEditorState } from "../src/workbench-state.ts";
 
 // 假笔架：write* 直接写 toolStates（复刻真 rack 行为的最小子集）；按 getEditMode 当前工具。
 function fakeRack(state, sizeMax = 200) {

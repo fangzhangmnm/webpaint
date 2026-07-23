@@ -9,7 +9,7 @@
 import { GLContext } from "./gl-context.ts";
 import { RenderTreeGL } from "./render-tree-gl.ts";
 import type { FloatInput, StampOverlayInput, SurrogateInput } from "./render-tree-gl.ts";
-import type { LayerPixels } from "./tile-pixels.ts";
+import type { LayerPixels } from "../tiles/tile-layer.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { Background } from "./gl-compositor.ts";
 

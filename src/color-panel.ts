@@ -6,7 +6,7 @@ import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
 import { mountColorWheel } from "./ui/color-wheel.ts";
 import { raiseWindow } from "./surfaces.ts";
-import { editorState } from "./editor-state.ts";
+import { editorState } from "./workbench-state.ts";
 
 let state: AppContext["state"], colorWheel: ReturnType<typeof mountColorWheel>;
 

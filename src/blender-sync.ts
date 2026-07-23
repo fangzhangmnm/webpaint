@@ -22,7 +22,7 @@ import { renderDocToImageBlob } from "./session.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { setMenuOpen } from "./settings-menu.ts";
-import { editorState } from "./editor-state.ts";
+import { editorState } from "./workbench-state.ts";
 import { appState } from "./app-state.ts";
 import { BTPClient, BTPError } from "../vendor/btp/v1/index.js";
 import { t } from "./i18n/index.ts";

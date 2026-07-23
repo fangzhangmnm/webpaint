@@ -8,7 +8,7 @@
 
 import { els } from "./els.ts";
 import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关 = 跨设备偏好
-import { editorState } from "./editor-state.ts";   // checkboard = per-doc editorState（载入时经 wp:applyEditorState 应用到 board）
+import { editorState } from "./workbench-state.ts";   // checkboard = per-doc editorState（载入时经 wp:applyEditorState 应用到 board）
 import { applyTheme, cycleTheme, themeLabel } from "./theme.ts";
 import { t, lang, setLang, LANGS, LANG_NAME, type Key, type Lang } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";

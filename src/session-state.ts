@@ -25,7 +25,7 @@ import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字�
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
 import { stripSessionExt, sessionFileName, sessionBareName } from "./config.ts";
-import { serializedToolStatePatch, editorState } from "./editor-state.ts";
+import { serializedToolStatePatch, editorState } from "./workbench-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
 import { setPassword, getPassword } from "./crypto-state.ts";

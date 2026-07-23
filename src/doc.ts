@@ -11,7 +11,7 @@
 
 import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
-import { LayerPixels, materialize, editRegion as editPixels, replaceFromCanvas as replacePixels, disposePixelsSnapshot, type PixelsSnapshot } from "./gl/tile-pixels.ts";
+import { LayerPixels, materialize, editRegion as editPixels, replaceFromCanvas as replacePixels, disposePixelsSnapshot, type PixelsSnapshot } from "./tiles/tile-layer.ts";
 
 export const DEFAULT_DOC_SIZE = 2048;
 

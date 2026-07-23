@@ -4,7 +4,7 @@
 //   但**读侧兼容必须留**：老 ORA 里的 flow 仍会被当 opacity 用，只是不再往 toolState 写回 flow。
 
 import { describe, it, assert, eq } from "./runner.mjs";
-import { serializedToolStatePatch } from "../src/editor-state.ts";
+import { serializedToolStatePatch } from "../src/workbench-state.ts";
 
 const cur = () => ({ size: 12, opacity: 0.9, activeBrushId: "a", activeBrushName: "笔A" });
 

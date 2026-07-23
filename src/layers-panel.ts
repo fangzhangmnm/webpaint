@@ -27,7 +27,7 @@ import { t } from "./i18n/index.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";
-import { editorState } from "./editor-state.ts";
+import { editorState } from "./workbench-state.ts";
 import { raiseWindow } from "./surfaces.ts";
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";

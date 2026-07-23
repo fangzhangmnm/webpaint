@@ -8,7 +8,7 @@
 // （与 brush-rack 构造里的 editMode:()=>editMode 同款）。board/leftDial 也晚 → bindKeyboard 分离调。
 
 import { stepFor, quantizeSize } from "./ui/brush-size.ts";
-import { editorState } from "./editor-state.ts";   // brush dial → editorState.brushTool SSoT（binding 写反应式）
+import { editorState } from "./workbench-state.ts";   // brush dial → editorState.brushTool SSoT（binding 写反应式）
 import type { EditorRuntimeState } from "./app-context.ts";
 import type { BrushRackController } from "./brush-rack-controller.ts";
 import type { EditMode } from "./edit-mode.ts";

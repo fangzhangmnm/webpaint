@@ -13,7 +13,7 @@ import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
 import { docTreeToComp, compositeTree } from "./reference-gl-compositor.ts";
 import { RenderTreeGL } from "../../src/gl/render-tree-gl.ts";
-import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/gl/tile-pixels.ts";
+import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/tiles/tile-layer.ts";
 import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
 import type { Stamp } from "../../src/gl/gl-stamp.ts";
 import { compositeLayers } from "./reference-2d.ts";

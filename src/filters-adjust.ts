@@ -8,7 +8,7 @@
 // state.filterBrush 是 active filter-brush 的 SSoT（在 state 上，经绑定的 state 读写）。
 import { els } from "./els.ts";
 import { t } from "./i18n/index.ts";
-import { editorState } from "./editor-state.ts";
+import { editorState } from "./workbench-state.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { getFilter, listFilters, onFilterRegistered } from "./filters.ts";
 import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";

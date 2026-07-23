@@ -20,7 +20,7 @@ import {
   type FloatState, type FloatTransformMeta, type FloatRect, type WorkpieceFloat,
 } from "./workpiece.ts";
 import { findNodeById, eachLeaf, disposeLayerSnap, type Layer, type LayerSnap, type PaintDoc } from "../doc.ts";
-import { LayerPixels } from "../gl/tile-pixels.ts";
+import { LayerPixels } from "../tiles/tile-layer.ts";
 import type { Selection } from "../selection.ts";
 
 let _floatIdCounter = 1;

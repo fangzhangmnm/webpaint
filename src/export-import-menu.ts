@@ -16,7 +16,7 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
-import { editorState } from "./editor-state.ts";
+import { editorState } from "./workbench-state.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);

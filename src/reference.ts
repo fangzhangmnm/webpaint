@@ -23,7 +23,7 @@
 import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.ts";
 import type { GestureViewport } from "./pointer-gesture.ts";
 import { raiseWindow } from "./surfaces.ts";
-import { editorState } from "./editor-state.ts";
+import { editorState } from "./workbench-state.ts";
 import { renderNodesToCanvas } from "./doc-render.ts";
 import type { PaintDoc } from "./doc.ts";
 

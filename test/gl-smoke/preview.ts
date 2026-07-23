@@ -4,7 +4,7 @@
 
 import { GLContext } from "../../src/gl/gl-context.ts";
 import { RenderTreeGL, poolCapacityForBudget } from "../../src/gl/render-tree-gl.ts";
-import { LayerPixels, replaceFromCanvas } from "../../src/gl/tile-pixels.ts";
+import { LayerPixels, replaceFromCanvas } from "../../src/tiles/tile-layer.ts";
 import type { DocNode } from "../../src/gl/gl-doc-bridge.ts";
 
 const N = 1024;   // doc 尺寸（4×4 tile/满层）

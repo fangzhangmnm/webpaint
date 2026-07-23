@@ -22,7 +22,7 @@ import { GLCompositor } from "./gl-compositor.ts";
 import type { Background, Acc, OverlayDesc, FloatDesc } from "./gl-compositor.ts";
 import { safeMode } from "./gl-doc-bridge.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
-import { LayerPixels, replaceFromCanvas } from "./tile-pixels.ts";
+import { LayerPixels, replaceFromCanvas } from "../tiles/tile-layer.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import { buildPlan } from "../render/render-plan.ts";

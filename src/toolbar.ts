@@ -12,7 +12,7 @@ import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { Selection } from "./selection.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
-import { editorState } from "./editor-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
+import { editorState } from "./workbench-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
