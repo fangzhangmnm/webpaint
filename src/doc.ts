@@ -223,6 +223,36 @@ export class Layer {
     return changed;
   }
 
+  // S8 encode 冻结（freezeDocForEncode 用）：本叶的零拷贝快照 + 惰性物化视图。
+  _freezeLeafView(): FrozenLeaf & { _snap: PixelsSnapshot } {
+    const snap = this.pixels.snapshot();
+    const docW = this.docW, docH = this.docH;
+    const empty = snap.tiles.length === 0;
+    let mat: { canvas: Bitmap; ox: number; oy: number } | null = null;
+    let tmp: LayerPixels | null = null;
+    const ensure = () => {
+      if (mat) return mat;
+      tmp = new LayerPixels(docW, docH);
+      tmp.restore(snap);
+      const m = materialize(tmp, true);
+      tmp.dispose(); tmp = null;   // 物化后即弃（句柄仍由 snap 持有）
+      mat = m ? { canvas: m.canvas as Bitmap, ox: m.ox, oy: m.oy } : { canvas: makeBitmap(1, 1), ox: 0, oy: 0 };
+      return mat;
+    };
+    return {
+      isGroup: false as const, id: this.id, name: this.name, opacity: this.opacity, mode: this.mode,
+      visible: this.visible, clippingMask: this.clippingMask, lockAlpha: this.lockAlpha,
+      docW, docH, _snap: snap,
+      get canvas() { return ensure().canvas; },
+      get bboxX() { return empty ? 0 : ensure().ox; },
+      get bboxY() { return empty ? 0 : ensure().oy; },
+      get bboxW() { return empty ? 0 : ensure().canvas.width; },
+      get bboxH() { return empty ? 0 : ensure().canvas.height; },
+      get width() { return this.bboxW; },
+      get height() { return this.bboxH; },
+    };
+  }
+
   // undo 快照：句柄共享，零拷贝（v0.4.5）。归属交给 caller，用完 disposeLayerSnap。
   snapshot(): LayerSnap {
     return { pixels: this.pixels.snapshot() };
@@ -1019,4 +1049,54 @@ export function layerByteBudget(): number {
 export function computeMaxLayers(currentLeafCount: number, residentBytes: number, budgetBytes = layerByteBudget()): number {
   if (residentBytes >= budgetBytes) return Math.max(2, currentLeafCount);   // 已达字节预算：冻结
   return LAYER_HARD_CEIL;                                                    // 预算内：放到硬顶
+}
+
+// ---- S8 · encode 冻结视图（spec:41「保存阻塞锁 workpiece 写」的达意实现，详 S8 报告 §S8d）----
+// encode（ora/缩略图）是 async、逐层 await——编码中一笔 commit / 一次层结构操作会撕裂存档
+// （stack.xml 与 layer PNG 不同刻，最坏解不开）。这里在 encode 入口**同步**冻结：
+//   结构元数据浅拷 + 每叶 tile 句柄快照（O(tiles) 引用计数，零拷贝）。tile 不可变 ⇒
+//   之后任何编辑都是 CoW 新 tile / 新结构，冻结视图物理不变 → 存档一致，且不阻塞用户。
+// canvas / bbox 惰性物化（紧 bbox，与 Layer getter 同语义）。用完必须 dispose()（释放句柄）。
+
+export interface FrozenLeaf {
+  isGroup: false; id: number; name: string; opacity: number; mode: string;
+  visible: boolean; clippingMask: boolean; lockAlpha: boolean;
+  docW: number; docH: number;
+  readonly canvas: Bitmap;
+  readonly bboxX: number; readonly bboxY: number; readonly bboxW: number; readonly bboxH: number;
+  readonly width: number; readonly height: number;
+}
+export interface FrozenGroup {
+  isGroup: true; id: number; name: string; opacity: number; mode: string;
+  visible: boolean; clippingMask: boolean;
+  children: FrozenNode[];
+}
+export type FrozenNode = FrozenLeaf | FrozenGroup;
+export interface FrozenDoc {
+  width: number; height: number; backgroundColor: string;
+  layers: FrozenNode[];
+}
+
+export function freezeDocForEncode(doc: PaintDoc): { frozen: FrozenDoc; dispose(): void } {
+  const snaps: PixelsSnapshot[] = [];
+  const freezeNode = (n: Node): FrozenNode => {
+    if (n.isGroup) {
+      const g = n as LayerGroup;
+      return {
+        isGroup: true, id: g.id, name: g.name, opacity: g.opacity, mode: g.mode,
+        visible: g.visible, clippingMask: g.clippingMask,
+        children: g.children.map(freezeNode),
+      };
+    }
+    const view = (n as Layer)._freezeLeafView();
+    snaps.push(view._snap);
+    return view;
+  };
+  return {
+    frozen: {
+      width: doc.width, height: doc.height, backgroundColor: doc.backgroundColor,
+      layers: doc.layers.map(freezeNode),
+    },
+    dispose() { for (const s of snaps) disposePixelsSnapshot(s); snaps.length = 0; },
+  };
 }

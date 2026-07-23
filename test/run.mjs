@@ -24,6 +24,7 @@ import "./float-ops.test.mjs";     // S6：float 入 workpiece（lift/transform/
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
 import "./liquify-docspace-mask.test.mjs";
+import "./freeze-encode.test.mjs";
 import "./liquify-bilinear.test.mjs";
 import "./gallery-model.test.mjs";
 import "./store-folder-listing.test.mjs";   // 2026-07-11 网盘模型：per-folder listFolder/reconcileFolder/watchFolder + 数据安全 guardrail

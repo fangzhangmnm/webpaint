@@ -15,6 +15,8 @@ import { WEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
 import { renderThumbBlob, setCurrentSessionName } from "./session.ts";
 import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.ts";
+import { freezeDocForEncode } from "./doc.ts";
+import { makeAutosaveGate } from "./checkpoint-policy.ts";
 import { PaintDoc } from "./doc.ts";
 import type { Layer } from "./doc.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
@@ -67,6 +69,7 @@ let _loadedDocNewerConfirmed = false;
 let _loadingDoc = false;
 
 const AUTOSAVE_MS = 3 * 60 * 1000;
+const _autosaveGate = makeAutosaveGate(AUTOSAVE_MS, () => Date.now());
 
 const _phase = reactive<{ current: "gallery" | "editing" | "lazyblank" }>({ current: "gallery" });
 function _recomputePhase() { _phase.current = !_activeSessionName ? "gallery" : _isLazyBlankSession ? "lazyblank" : "editing"; }
@@ -151,7 +154,18 @@ function _buildOraMeta() {
   );
   return { referenceImage: referenceWindow.getPersistBlob(), webpaintState: storeEditorStateToOra(), editorState: editorState.Serialize() };
 }
-function _encodeCurrentOra(): Promise<Blob> { return encodeDocToOra(doc, _buildOraMeta() as Parameters<typeof encodeDocToOra>[1]) as Promise<Blob>; }
+// S8（spec:41 存档一致性）：encode 前**同步**冻结 {结构 + 每叶 tile 快照}（零拷贝），bytes 与 peek
+//   读同一冻结视图 → encode 的 await 间隙里任何编辑（描边 commit / 层结构操作）都不撕存档，
+//   且不阻塞用户（tile 不可变 ⇒ 后续编辑全是 CoW 新 tile）。达意实现 spec「保存阻塞锁写不锁读」，
+//   比字面锁更强——待追认（S8 报告拍板清单）。
+async function _encodeCurrentOraWithPeek(): Promise<{ bytes: Blob; peek: Blob | null }> {
+  const { frozen, dispose } = freezeDocForEncode(doc as Parameters<typeof freezeDocForEncode>[0]);
+  try {
+    const bytes = await encodeDocToOra(frozen as unknown as Parameters<typeof encodeDocToOra>[0], _buildOraMeta() as Parameters<typeof encodeDocToOra>[1]) as Blob;
+    const peek = await renderThumbBlob(frozen as unknown as Parameters<typeof renderThumbBlob>[0], 256);
+    return { bytes, peek };
+  } finally { dispose(); }
+}
 
 // ---- blank-unnamed 自检 ----
 function _docIsBlankUnnamed() {
@@ -516,8 +530,7 @@ async function restoreSession(name: string): Promise<boolean> {
 
 // 另存为：当前内容写新身份（旧的不动）+ 切到新名继续编辑。
 async function saveAs(newName: string): Promise<void> {
-  const bytes = await _encodeCurrentOra();
-  const peek = await renderThumbBlob(doc, 256);
+  const { bytes, peek } = await _encodeCurrentOraWithPeek();
   // 另存为=写**新身份** → mode:"new"（撞名不静默覆盖；topbar 已 nameOccupied 预检，这里 store 层再兜底红线）。
   await _store.file(toFull(newName), { isZip: true, mode: "new" }).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
   _setActive(newName); _isLazyBlankSession = false; _recomputePhase();
@@ -588,15 +601,22 @@ export function initSession(ctx: AppContext) {
 
     editor: {
       adopt: async (bytes: Blob) => { const loaded = await decodeOraToDoc(bytes) as LoadedDoc; adoptModel(loaded); },
-      encode: async () => ({ bytes: await _encodeCurrentOra(), peek: await renderThumbBlob(doc, 256) }),
+      encode: async () => await _encodeCurrentOraWithPeek(),
       // ⚠ wp:histchange 在 **window** 上 dispatch（history.ts）——绑 document 收不到 → 打开的文档编辑永不标脏、
       //   保存静默 no-op、编辑丢失（2026-07-12 真机抓到的数据丢失根因；其余监听者都用 window）。
       onChange: (cb: () => void) => { window.addEventListener("wp:histchange", () => { if (!_loadingDoc) cb(); }); },
     },
     isZip: true,
-    policy: { autosaveMs: AUTOSAVE_MS, pushOn: ["exit"] },
+    policy: { autosaveMs: 0, pushOn: ["exit"] },   // S8：interval autosave 退役，改挂 bg-jobs（下方）
   });
-  es.start();   // autosave 3min（只本地）+ visibility/pagehide flush（内部按 policy）
+  es.start();   // visibility/pagehide/blur 抢救 flush（崩溃安全直调，不受空闲节流）
+  // S8（spec:40/42）：autosave 挂 background-sync-jobs 低优先级——只在空闲跑（输入插队自动让路，
+  //   不再有 setInterval 在描边中途 encode 卡主线程）；makeAutosaveGate 给 min 周期（不折腾 idb）。
+  //   encode 内部有冻结快照 → 即使 flushLocal 的 await 期间用户开画，存档也一致。
+  ctx.bgJobs.register("autosave", 5, () => {
+    if (_autosaveGate(es.isDirty())) void es.flushLocal();
+    return "done";
+  });
   // （v409：无 desk 改动桥 —— desk 不标脏、不驱动落盘，只在顺路 encode 时被 _buildOraMeta 捞走。详 editor-state.ts ⚠）
 
   _recomputePhase();

@@ -279,6 +279,7 @@ const ctx: AppContext = freezeCtx({
   setColor, applyCheckerboard, renderLayersPanel,
   setGalleryOpen, checkQuotaAndWarn, uniqueNameFor,
   showFullscreenBusy, hideFullscreenBusy,
+  bgJobs: _tileJobs.jobs,
   get gallery() { return gallery; },   // 晚绑：gallery const 在下方 mountGallery 处构造
 });
 initColorPanel(ctx);
