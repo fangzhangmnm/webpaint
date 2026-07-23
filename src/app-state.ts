@@ -25,6 +25,9 @@ export const APP_STATE_DEFAULTS = {
   //   键名保持 "current-file" 不变（两个 collection 各有独立命名空间，不冲突）。
   "current-file": null as string | null,      // 上次打开的文档名（非 null → boot 自动 open）（Cold，**device-local**）
   "blender-panel-url": "" as string,          // Blender 同步远端 URL（2026-07-14 决策：全账号同步，tailscale 稳定端点）（Cold）
+  // 图库密码验证器 sentinel（v0.4.11，真机 2.3）：{v,salt,iv,ct} | null。**跟账号走**（synced）——
+  //   重装/换设备后仍知道「图库已有密码」，创建流程变输入校验。语义见 password-verifier.ts。
+  "gallery-password-verifier": null as { v: 1; salt: string; iv: string; ct: string } | null,
   // 设备本地（local-app-state）：**当前为空**。
   //   v407 曾放过 "last-session-signed-in"（"控静默重认证"），但它零 consumer——只写不读，
   //   而真正的判定走 `!isSignedIn()`（app.ts 的 retrySilentSignIn）。v409 删：登录态的 SSoT 是
@@ -77,6 +80,8 @@ export const appState = {
   set currentFile(v: string | null) { setC(_local, "current-file", v); },
   get blenderPanelUrl(): string { return getC<string>(_synced, "blender-panel-url"); },
   set blenderPanelUrl(v: string) { setC(_synced, "blender-panel-url", v); },
+  get galleryPasswordVerifier(): { v: 1; salt: string; iv: string; ct: string } | null { return getC(_synced, "gallery-password-verifier"); },
+  set galleryPasswordVerifier(v: { v: 1; salt: string; iv: string; ct: string } | null) { setC(_synced, "gallery-password-verifier", v); },
   // ── 设备本地（local-app-state）冷字段：当前无（见 APP_STATE_DEFAULTS 注）──
 
   // ── 序列化持久化相关（除字段外仅此二法，无应用逻辑）──

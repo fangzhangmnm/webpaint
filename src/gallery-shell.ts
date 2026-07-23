@@ -24,10 +24,11 @@ import { readImageFromClipboard } from "./session.ts";
 import { sessionFileName, sessionBareName } from "./config.ts";   // 边界：裸 session 名 → 库全名（占用检查按库身份查）
 import { isSignedIn } from "./app-store.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
-import { openInputSheet } from "./sheets.ts";
+import { openInputSheet, openConfirmSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.ts";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.ts";
+import { hasVerifier, checkVerifier, clearVerifier } from "./password-verifier.ts";
 import { t } from "./i18n/index.ts";
 
 import type { AppContext } from "./app-context.ts";
@@ -260,6 +261,17 @@ export function initGalleryShell(ctx: AppContext) {
     try {
       if (await gallery.requestUnlock()) { setStatus(t("gs.unlocked")); gallery.refresh(); return; }
     } catch (_) {}
+    // v0.4.11（真机 2.3）：有 verifier（跟账号走）→ 输入并校验；三错给唯一的重置出口。
+    //   旧病：本夹无本地加密件时未验证密码被直接坐实成全局——错密码随后被 encrypt 复用 = 两套密码 softlock。
+    if (hasVerifier()) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const pw = await promptPassword({ title: t("gs.unlockTitle"), message: attempt > 0 ? t("gs.pwWrongRetry") : t("gs.unlockVerifierMsg") });
+        if (pw == null) return;
+        if ((await checkVerifier(pw)) === "ok") { setPassword(pw); setStatus(t("gs.unlocked")); gallery.refresh(); return; }
+      }
+      if (await openConfirmSheet(t("gs.resetPwTitle"), t("gs.resetPwMsg"))) { clearVerifier(); setStatus(t("gs.pwResetDone")); }
+      return;
+    }
     const pw = await promptPassword({ title: t("gs.unlockTitle"), message: t("gs.unlockNoLocalMsg") });
     if (pw != null) { setPassword(pw); setStatus(t("gs.pwRecorded")); gallery.refresh(); }
   });

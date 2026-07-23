@@ -6,6 +6,7 @@ import { store } from "./app-store.ts";
 import { sessionFileName } from "./config.ts";   // 边界：裸 item.name → 库全名（薄库身份=X.ora）
 import { SUFFIX_BYTES, THUMB_PATH } from "./cloud-thumbs.ts";
 import { isUnlocked, getPassword, onPasswordVerified, promptPassword } from "./crypto-state.ts";
+import { hasVerifier, checkVerifier, createVerifier } from "./password-verifier.ts";
 
 // 边界：app 传裸 session 名，库身份是全名 → sessionFileName 统一转（与 session-state/gallery 一致）。
 const encFile = (name: string) => store.file(sessionFileName(name), { isZip: true, mode: "existing" });
@@ -36,7 +37,12 @@ export async function ensureUnlocked(name: string): Promise<boolean> {
       message: attempt > 0 ? "密码不对，再试一次" : "输入图库密码。密码只存在内存里，关页即忘。",
     });
     if (pw == null) return false;
-    if (await encFile(name).verifyPassword(pw)) { onPasswordVerified(name, pw); return true; }
+    if (await encFile(name).verifyPassword(pw)) {
+      onPasswordVerified(name, pw);
+      // v0.4.11：老账号迁移——真文件验证过的统一密码回填 verifier（此后重装/换设备不再走「创建」）。
+      if (getPassword(null) === pw && !hasVerifier()) void createVerifier(pw);
+      return true;
+    }
   }
 }
 
@@ -71,6 +77,19 @@ export async function unlockImportedContainer(blob: Blob): Promise<{ pw: string;
  */
 export async function ensureNewPassword() {
   if (isUnlocked()) return getPassword(null);
+  // v0.4.11（真机 2.3 softlock 根治）：verifier 在（本机或别的设备设过密码）→ 走「输入并校验」，
+  //   **绝不再进创建流程**——旧病：重装后每次都「设置图库密码」，输错一个新密码 = 两套密码并存。
+  if (hasVerifier()) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const pw = await promptPassword({
+        title: "输入图库密码",
+        message: attempt > 0 ? "密码不对，再试一次" : "图库已设过密码（跟账号走）。输入原密码；忘记 = 内容永久找不回。",
+      });
+      if (pw == null) return null;
+      if ((await checkVerifier(pw)) === "ok") return pw;
+    }
+    return null;   // 连错三轮 → 退出（重置入口在图库锁按钮的解锁流程里）
+  }
   for (let round = 0; round < 3; round++) {
     const p1 = await promptPassword({
       title: "设置图库密码",
@@ -81,7 +100,7 @@ export async function ensureNewPassword() {
     if (p1 == null) return null;
     const p2 = await promptPassword({ title: "再输一遍确认", message: "两次输入需一致" });
     if (p2 == null) return null;
-    if (p1 === p2) return p1;
+    if (p1 === p2) { await createVerifier(p1); return p1; }   // v0.4.11：创建即落 verifier（跟账号走）
   }
   return null;   // 连错三轮 → 退出，别困住用户
 }
