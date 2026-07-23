@@ -78,6 +78,9 @@ export class RenderTreeGL {
   private _floatTex = new Map<number, { tex: WebGLTexture; canvas: CanvasImageSource | null }>();
   private _floats = new Map<number, FloatDesc>();
 
+  // v0.4.11：live 描边中给 clip-above 用的 merged(base⊕stroke) 整幅纹理（帧内缓存，帧末归还）。
+  private _liveMergedClip: PooledFBO | null = null;
+
   // 帧统计（HUD）：segBuilds/segHits = 段现算/命中数；passes 从 compositor 读。
   readonly frameStats = { segBuilds: 0, segHits: 0, cachingDegraded: false };
 
@@ -126,6 +129,7 @@ export class RenderTreeGL {
     this._selTex = null; this._selTexSrc = null;
     this._floatTex.clear(); this._floats.clear();
     this._overlay = null; this._overlayOwnedFBO = null;
+    this._liveMergedClip = null;   // GL 句柄已随 context 死
     this._dirty = true;
   }
 
@@ -288,6 +292,7 @@ export class RenderTreeGL {
     for (const f of transient.values()) this._glctx.returnFBO(f);
     this._comp.end();
     if (this._overlayOwnedFBO) { this._glctx.returnFBO(this._overlayOwnedFBO); this._overlayOwnedFBO = null; }
+    if (this._liveMergedClip) { this._glctx.returnFBO(this._liveMergedClip); this._liveMergedClip = null; }
 
     if (this._display) this._glctx.returnFBO(this._display);
     this._display = fresh;
@@ -310,6 +315,7 @@ export class RenderTreeGL {
     this._composeSteps(plan.rootSteps, acc, docW, docH, transient, plan);
     const out = this._comp.finishAcc(acc);
     for (const f of transient.values()) this._glctx.returnFBO(f);
+    if (this._liveMergedClip) { this._glctx.returnFBO(this._liveMergedClip); this._liveMergedClip = null; }   // 防御：一次性合成不留帧内缓存
     this._comp.end();
     return out;
   }
@@ -480,6 +486,23 @@ export class RenderTreeGL {
     return this._comp.finishAcc(acc);
   }
 
+  // v0.4.11：clip 基底正被 live 描边（= 活动 overlay 叶）时，clip-above 的蒙版改采
+  //   merged(base⊕stroke) 整幅 alpha——用 commit 同一配方（透明底 + overlay pass source-over/op1）
+  //   现算一张、帧内缓存。修「clip 层不实时跟随基底 live 笔迹」（真机 2026-07-22）。
+  //   基底非活动叶 / 无描边 → null（走原 tile-index 路径）。
+  private _liveClipTexFor(clipBaseId: number | null, docW: number, docH: number): WebGLTexture | null {
+    if (clipBaseId === null || !this._overlay || this._overlay.layerId !== clipBaseId) return null;
+    if (!this._liveMergedClip) {
+      const rec = this._layerTiles.get(clipBaseId);
+      const ovDesc = this._overlayDesc();
+      if (!rec || !ovDesc) return null;
+      const acc = this._comp.newAcc(docW, docH);
+      this._comp.pass(this._backend.texture, "overlay", rec.index, null, "source-over", 1, null, acc, docW, docH, ovDesc);
+      this._liveMergedClip = this._comp.finishAcc(acc);
+    }
+    return this._liveMergedClip.tex;
+  }
+
   private _composeSteps(steps: PlanStep[], acc: Acc, docW: number, docH: number, transient: Map<string, PooledFBO>, plan: Plan | null): void {
     const arrayTex = this._backend.texture;
     for (const step of steps) {
@@ -487,24 +510,27 @@ export class RenderTreeGL {
         const rec = this._layerTiles.get(step.id);
         if (!rec) continue;   // sync 降级（超 quota）→ 跳层（自愈后回来）
         const clipIdx = step.clipBaseId !== null ? this._layerTiles.get(step.clipBaseId)?.index ?? null : null;
+        const clipTex = this._liveClipTexFor(step.clipBaseId, docW, docH);
         const ov = step.overlay && this._overlay && this._overlay.layerId === step.id ? this._overlayDesc() : null;
-        this._comp.pass(arrayTex, ov ? "overlay" : "tiled", rec.index, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, ov);
+        this._comp.pass(arrayTex, ov ? "overlay" : "tiled", rec.index, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, ov, clipTex);
       } else if (step.t === "seg") {
         const seg = this._segCache.get(step.key);
         const clipIdx = step.clipBaseId !== null ? this._layerTiles.get(step.clipBaseId)?.index ?? null : null;
+        const clipTex = this._liveClipTexFor(step.clipBaseId, docW, docH);
         if (seg) {
-          this._comp.pass(arrayTex, "tiled", seg.index, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH);
+          this._comp.pass(arrayTex, "tiled", seg.index, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
         } else {
           const f = transient.get(step.key);
           if (!f) continue;   // 不可达（缺段必在 transient）；防御性跳过
-          this._comp.pass(arrayTex, "group", null, f.tex, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH);
+          this._comp.pass(arrayTex, "group", null, f.tex, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
         }
       } else if (step.t === "group") {
         const sub = this._comp.newAcc(docW, docH);
         this._composeSteps(step.body, sub, docW, docH, transient, plan);
         const res = this._comp.finishAcc(sub);
         const clipIdx = step.clipBaseId !== null ? this._layerTiles.get(step.clipBaseId)?.index ?? null : null;
-        this._comp.pass(arrayTex, "group", null, res.tex, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH);
+        const clipTex = this._liveClipTexFor(step.clipBaseId, docW, docH);
+        this._comp.pass(arrayTex, "group", null, res.tex, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
         this._glctx.returnFBO(res);
       } else {   // float
         const desc = this._floats.get(step.id);

@@ -106,6 +106,8 @@ uniform sampler2D u_dst;
 uniform vec2 u_docSize;
 uniform float u_opacity;
 uniform int u_hasClip;
+uniform int u_clipMode;         // 0=clip 采基底 tile-index；1=采 u_clipTex（doc 尺寸 2D，live 描边中的 merged 基底）
+uniform sampler2D u_clipTex;
 uniform float u_overlayOpacity;
 uniform int u_overlayErase;
 uniform vec2 u_ovOrigin;
@@ -133,7 +135,9 @@ void main(){
   vec2 docPos = v_uv * u_docSize;
   ${srcSnippet}
   float as = srcA * u_opacity;
-  if (u_hasClip == 1) as *= sampleTiled(u_clipIndex, docPos).a;   // clip 蒙版
+  // clip 蒙版：常规采基底 tile-index；基底正被 live 描边时采 merged(base⊕stroke) 整幅纹理
+  //   （u_clipMode=1，v0.4.11——修「clip 层不实时跟随基底 live 笔迹」）。
+  if (u_hasClip == 1) as *= (u_clipMode == 1) ? texture(u_clipTex, v_uv).a : sampleTiled(u_clipIndex, docPos).a;
 
   vec4 dst = texture(u_dst, v_uv);    // 直值 (Cb, ab)
   float ab = dst.a;

@@ -627,6 +627,55 @@ function commitParity(glctx: GLContext, add: Add): void {
   }
 }
 
+// ---- G2) v0.4.11 clip-above 实时跟随 live 描边：带 stampOverlay 的 live 帧（clip 蒙版采 merged
+//        整幅纹理）必须与 commit 后的静态帧一致——旧病：live 中 clip 采已提交 tile index，不含笔迹。----
+function clipLiveParity(glctx: GLContext, add: Add): void {
+  const N = 512;
+  const gl = glctx.gl;
+  glctx.canvas.width = N; glctx.canvas.height = N;
+  const tree = new RenderTreeGL(glctx, 512);
+  const readBack = (): Uint8Array => {
+    const raw = new Uint8Array(N * N * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    const out = new Uint8Array(N * N * 4);
+    for (let y = 0; y < N; y++) out.set(raw.subarray((N - 1 - y) * N * 4, (N - y) * N * 4), y * N * 4);
+    return out;
+  };
+  const stamps: { x: number; y: number; size: number; alpha: number }[] = [];
+  for (let i = 0; i < 8; i++) stamps.push({ x: 90 + i * 14, y: 100 + i * 12, size: 56, alpha: 0.9 });
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const st of stamps) { const r = st.size / 2 + 1; x0 = Math.min(x0, st.x - r); y0 = Math.min(y0, st.y - r); x1 = Math.max(x1, st.x + r); y1 = Math.max(y1, st.y + r); }
+  const bx = Math.max(0, Math.floor(x0)), by = Math.max(0, Math.floor(y0));
+  const bw = Math.min(N, Math.ceil(x1)) - bx, bh = Math.min(N, Math.ceil(y1)) - by;
+
+  for (const erase of [false, true]) {
+    // base：小块不透明区（笔迹会把 alpha 画出去/擦回来）；clip 层：全幅纯色（可见范围=基底 alpha）。
+    const cBase = makeLayerCanvas(N, N, (x, y) => (x < 120 && y < 140) ? [80, 90, 200, 230] : [0, 0, 0, 0]);
+    const basePx = pixelsFromCanvas(N, N, 0, 0, cBase);
+    const cClip = makeLayerCanvas(N, N, () => [250, 200, 40, 255]);
+    const clipPx = pixelsFromCanvas(N, N, 0, 0, cClip);
+    const B = { isGroup: false, id: 300 + (erase ? 10 : 0), opacity: 1, mode: "source-over", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: cBase, pixels: basePx };
+    const C = { isGroup: false, id: 301 + (erase ? 10 : 0), opacity: 0.8, mode: "source-over", clippingMask: true, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: cClip, pixels: clipPx };
+    const nodes = [B, C];
+    const ov = {
+      stamps, shape: { hardness: 0.7, color: [0.2, 0.8, 0.3] as [number, number, number], buildup: false },
+      bx, by, bw, bh, layerId: B.id, opacity: 1, erase, blendMode: "source-over", lockAlpha: false, selMask: null,
+    };
+    tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], ov as never, null, null);
+    const live = readBack();
+    const ok = tree.commitBrushStroke(B.id, basePx, ov as never, N, N, (px, x, y, w, h) => basePx.applyRegionDiff(x, y, w, h, px));
+    add(`clipLive:${erase ? "erase" : "draw"} 提交成功`, ok);
+    tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], null, null, null);
+    const committed = readBack();
+    let md = 0, ai = -1;
+    for (let i = 0; i < live.length; i++) { const d = Math.abs(live[i] - committed[i]); if (d > md) { md = d; ai = i; } }
+    const p = ai >= 0 ? ai / 4 : 0;
+    add(`clipLive:${erase ? "erase" : "draw"} live ≡ commit（clip 蒙版实时跟随）`, md <= 2, `maxΔ=${md} @(${p % N},${Math.floor(p / N)})`);
+    basePx.dispose(); clipPx.dispose();
+  }
+}
+
 // LayerPixels Canvas2D facade golden：editRegion 画 → 经 tile → materialize，对比直接 Canvas2D 参考。
 function tilePixelsParity(add: Add): void {
   const N = 512;
@@ -1072,6 +1121,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { floatParity(glctx, add); } catch (e) { add("float parity", false, String(e)); }
   try { rendertreeParity(glctx, add); } catch (e) { add("rendertree parity", false, String(e)); }
   try { commitParity(glctx, add); } catch (e) { add("commit parity", false, String(e)); }
+  try { clipLiveParity(glctx, add); } catch (e) { add("clip-live parity", false, String(e)); }
   try { warpParity(glctx, add); } catch (e) { add("warp parity", false, String(e)); }
   try { warpClipParity(glctx, add); } catch (e) { add("warpclip parity", false, String(e)); }
 

@@ -250,6 +250,7 @@ export class GLCompositor {
     srcIndex: IndexTexture | null, groupTex: WebGLTexture | null,
     mode: BlendMode, opacity: number, clipIndex: IndexTexture | null,
     acc: Acc, docW: number, docH: number, overlay: OverlayDesc | null = null,
+    clipTex: WebGLTexture | null = null,   // 非空 = clip 蒙版改采这张 doc 尺寸 2D 纹理（live 中的 merged 基底）
   ): void {
     const gl = this._glctx.gl;
     this.stats.passes++;
@@ -258,7 +259,8 @@ export class GLCompositor {
     const u = (name: string) => gl.getUniformLocation(prog, name);
     gl.uniform2f(u("u_docSize"), docW, docH);
     gl.uniform1f(u("u_opacity"), opacity);
-    gl.uniform1i(u("u_hasClip"), clipIndex ? 1 : 0);
+    gl.uniform1i(u("u_hasClip"), (clipIndex || clipTex) ? 1 : 0);
+    gl.uniform1i(u("u_clipMode"), clipTex ? 1 : 0);
     gl.uniform1f(u("u_overlayOpacity"), overlay ? overlay.opacity : 1);
     gl.uniform1i(u("u_overlayErase"), overlay && overlay.erase ? 1 : 0);
     gl.uniform2f(u("u_ovOrigin"), overlay ? overlay.ox : 0, overlay ? overlay.oy : 0);
@@ -285,6 +287,8 @@ export class GLCompositor {
     this._setSampler(prog, "u_overlay", 5);
     gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, sel?.tex ?? ph);
     this._setSampler(prog, "u_ovSel", 6);
+    gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, clipTex ?? ph);
+    this._setSampler(prog, "u_clipTex", 7);
     gl.bindFramebuffer(gl.FRAMEBUFFER, acc.write.fbo);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
