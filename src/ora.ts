@@ -22,7 +22,6 @@
 import { reportError } from "./error-badge.ts";
 import { zipPack, zipUnpack } from "./zip.ts";
 import { Layer, LayerGroup, PaintDoc, flattenLeaves, findNodeById, reseedLayerIdCounter } from "./doc.ts";
-import { compositeLayers } from "./layer-composite.ts";
 import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
 // 纯树↔stack.xml 序列化（嵌套组 + id + active）抽到独立深模块（无 canvas 依赖，可纯 node 测）。
@@ -35,6 +34,7 @@ type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 type EncodeDoc = { width: number; height: number; layers: PaintDoc["layers"] };
 // encode opts：两个可选 WebPaint 私有扩展。
 interface EncodeOpts {
+  mergedCanvas?: OffscreenCanvas | HTMLCanvasElement | null;   // S9：调用方渲好的合成图（GL）；缺省=透明占位
   referenceImage?: Blob;
   webpaintState?: object;
   editorState?: object;   // editorState.Serialize() → .webpaint/editor-state.json（desk per-doc；不向后兼容 webpaint/state.json）
@@ -72,19 +72,6 @@ function bytesToString(bytes: Uint8Array): string {
 }
 
 // ---- encode：PaintDoc → .ora Blob ----
-
-/**
- * 渲染整图合成预览。doc-size canvas + 逐 layer drawImage（带 bbox 偏移 + opacity + mode）。
- */
-function renderMerged(doc: EncodeDoc) {
-  const c = makeBitmap(doc.width, doc.height);
-  const ctx = c.getContext("2d")!;
-  // v134 (user：「即使 merged 也保留 alpha；ora 里 merged 同处理」)
-  //   不涂 doc.backgroundColor 作 base —— ora 的 mergedimage.png 保 alpha，user 想要白底自己加层。
-  // 合成走规范合成器（deep module A，含 clip + 组隔离）。ctx 已在 doc 坐标 1:1。无 live overlay。
-  compositeLayers(ctx, doc.layers);
-  return c;
-}
 
 /** 缩略图自适应：先按 256 编码，超 70KB 降 192，再超降 128，最后档不论大小都收。
  *  cloud-thumbs.js suffix budget = 80KB；留 ~10KB 给 zip 尾巴（CD + EOCD + 扫描余量）→ thumb ≤ 70KB
@@ -128,7 +115,10 @@ function renderThumbnail(merged: OffscreenCanvas | HTMLCanvasElement, maxSide = 
  * opts.webpaintState:  optional object（直接 JSON.stringify）
  */
 export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
-  const merged = renderMerged(doc);
+  // S9：merged 由调用方渲入（opts.mergedCanvas，GL 合成、与 display 同源；v134 约定保 alpha 不涂底）。
+  //   缺省（node 测试 / GL lost 的 autosave 兜底）= 透明占位——层数据完整，mergedimage 只是预览件。
+  let merged = opts.mergedCanvas ?? null;
+  if (!merged) { merged = makeBitmap(doc.width, doc.height); merged.getContext("2d"); }
   const mergedPng = await canvasToPngBytes(merged);
   // thumb：自适应尺寸 256→192→128，目标 ≤ 80KB（让云端 48KB suffix 大概率命中）
   const { png: thumbPng } = await renderThumbnailAdaptive(merged);

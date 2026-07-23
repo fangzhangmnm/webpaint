@@ -662,6 +662,12 @@ export class Board {
       // 活动浮层（自由变换）→ 走实时合成（浮层经 floatFor 插在源层 z；mesh 每帧变，不能用静态缓存）。
       || this._lassoProvider?.()?.floating);
   }
+  // S9 导出/缩略图/mergedimage/镜像的合成面（doc-render.setDocCompositor 的后端）：透明底。
+  compositeNodesToCanvas(nodes: unknown[], docW: number, docH: number): HTMLCanvasElement | null {
+    if (!this._glBoard) return null;
+    return this._glBoard.compositeToCanvas(nodes as unknown as Parameters<GLBoard["compositeToCanvas"]>[0], docW, docH);
+  }
+
   // 吸管 composite 取色（S8c，spec:243-244）：GL 一次性合成（compositeOnce，不建缓存）+ 1px readback。
   //   走 GPU 的动机：合成组是没有 CPU tile 的（spec:244），CPU 全量 compositeLayers 缓存随之退役。
   //   GL 失败态返 null（v351 起无 WebGL2 = 无画布）。底与显示同源（棋盘/背景色）。

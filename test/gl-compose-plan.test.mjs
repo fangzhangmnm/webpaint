@@ -1,6 +1,6 @@
 // GL 合成计划纯逻辑测试：clip 基底解析 + 组隔离判定（与 layer-composite.ts 语义对齐）。
 import { describe, it, assert } from "./runner.mjs";
-import { resolveClipBases, needsIsolation, groupUnitMode } from "../src/gl/gl-compose-plan.ts";
+import { resolveClipBases, needsIsolation, groupUnitMode } from "./gl-smoke/reference-gl-compositor.ts";
 
 const leaf = (o = {}) => ({ kind: "leaf", opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, srcIndex: null, ...o });
 const group = (o = {}) => ({ kind: "group", children: [], opacity: 1, mode: "pass-through", clip: false, visible: true, ...o });

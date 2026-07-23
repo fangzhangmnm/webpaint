@@ -20,7 +20,7 @@
 //   const blob = await encodeDocToPsd(doc);
 //   // → image/vnd.adobe.photoshop blob，触发下载或 share
 
-import { compositeLayers } from "./layer-composite.ts";
+import { renderNodesToCanvas } from "./doc-render.ts";
 import { flattenLeaves } from "./doc.ts";
 import type { Layer, PaintDoc } from "./doc.ts";
 
@@ -383,9 +383,10 @@ function writeMergedImage(w: BinaryWriter, doc: PaintDoc, docW: number, docH: nu
   const ctx = c.getContext("2d") as Ctx;
   // 透明背景；merged 自带 alpha
   ctx.clearRect(0, 0, docW, docH);
-  // 走规范合成器（deep module A）：respect clip + mode + 组隔离（修旧实现无视 clip 的 bug）。
-  // ctx 在 doc 坐标 1:1。组在 PSD 子集里没有原生表达 → 合成器把组拍平进 merged 通道（视觉一致）。
-  compositeLayers(ctx, doc.layers);
+  // S9：合成走 GL（doc-render，与 display 同源；respect clip + mode + 组隔离）。
+  //   GL 不可用 → merged 透明占位（层数据仍完整；导出场景 GL 必在——无 GL app 无画布）。
+  const merged = renderNodesToCanvas(doc.layers, docW, docH);
+  if (merged) ctx.drawImage(merged, 0, 0);
   const img = ctx.getImageData(0, 0, docW, docH);
   const ch = splitRGBAChannels(img.data, docW, docH);
 

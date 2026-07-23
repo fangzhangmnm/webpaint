@@ -11,12 +11,12 @@ import { GLGpuTileBackend, GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../
 import { TILE_SIZE, tilesAcross } from "../../src/tiles/tile-geometry.ts";
 import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
-import { docTreeToComp } from "../../src/gl/gl-doc-bridge.ts";
+import { docTreeToComp, compositeTree } from "./reference-gl-compositor.ts";
 import { RenderTreeGL } from "../../src/gl/render-tree-gl.ts";
 import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/gl/tile-pixels.ts";
 import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
 import type { Stamp } from "../../src/gl/gl-stamp.ts";
-import { compositeLayers } from "../../src/layer-composite.ts";
+import { compositeLayers } from "./reference-2d.ts";
 import { BrushEngine } from "../../src/brush.ts";
 import { resolveBrush } from "../../src/resolved-brush.ts";
 import { PaintDoc } from "../../src/doc.ts";
@@ -242,7 +242,7 @@ function blendParity(glctx: GLContext, backend: GLTileBackend, add: Add, prec: "
   const i0 = idx1(glctx, 0), i1 = idx1(glctx, 1); const opacity = 0.8;
   for (const mode of BLEND_MODES) {
     const ref = canvas2dRef(n, bd, src, mode, opacity);
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode)], n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode)], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n); const tol = tolFor(mode);
     add(`blend:${mode} [${prec}] vs Canvas2D`, md <= tol, `maxΔ=${md} ${md > tol ? at : ""}`);
@@ -256,7 +256,7 @@ function opaqueProbe(glctx: GLContext, add: Add): void {
   const i0 = idx1(glctx, 0), i1 = idx1(glctx, 1);
   for (const mode of ["color-dodge", "color-burn"] as const) {
     const ref = canvas2dRef(n, bd, src, mode, 1);
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), L(i1, 1, mode)], n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), L(i1, 1, mode)], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`probe:${mode} opaque B()`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -273,7 +273,7 @@ function clipParity(glctx: GLContext, add: Add): void {
     const opacity = 0.9;
     const ref = canvas2dClipRef(n, base, clip, mode, opacity);
     // clip 基底由 composite 内部 resolveClipBases 自动定位（base=底层叶）
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode, true)], n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode, true)], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`clip:${mode} vs Canvas2D`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -291,7 +291,7 @@ function multiTileParity(glctx: GLContext, add: Add): void {
   const topIdx = new IndexTexture(glctx, N, N);
   backend.uploadSlice(4, subTile(top, N, 0, 0)); topIdx.setSlice(0, 0, 4);
   backend.uploadSlice(5, subTile(top, N, 1, 1)); topIdx.setSlice(1, 1, 5);
-  const accum = comp.composite(backend.texture, [L(bdIdx, 1, "source-over"), L(topIdx, 1, "source-over")], N, N);
+  const accum = compositeTree(comp, backend.texture, [L(bdIdx, 1, "source-over"), L(topIdx, 1, "source-over")], N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = canvas2dRef(N, bd, top, "source-over", 1);
   const { md, at } = maxPremulDiff(ref, glpx, N);
@@ -346,7 +346,7 @@ function groupParity(glctx: GLContext, add: Add): void {
     compositeLayers(gctx as unknown as CanvasRenderingContext2D, built.map((b) => b.twoD) as never, {});
     const ref = gctx.getImageData(0, 0, n, n).data;
     // GL
-    const accum = comp.composite(backend.texture, built.map((b) => b.gl) as never, n, n);
+    const accum = compositeTree(comp, backend.texture, built.map((b) => b.gl) as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`group:${name} vs compositeLayers`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -380,7 +380,7 @@ function overlayParity(glctx: GLContext, add: Add): void {
     // GL：活动叶带 overlay（blendMode）
     const active = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase, blendMode: bm, ox: 0, oy: 0, ow: n, oh: n } };
     glctx.gl.getError();  // 清掉之前残留
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const err = glctx.gl.getError();
     const { md, at } = maxPremulDiff(ref, glpx, n);
@@ -401,7 +401,7 @@ function overlayParity(glctx: GLContext, add: Add): void {
     const ref = gctx.getImageData(0, 0, n, n).data;
     const active = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase: false, blendMode: "source-over", lockAlpha: true, selMask: null, ox: 0, oy: 0, ow: n, oh: n } };
     glctx.gl.getError();
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const err = glctx.gl.getError();
     const { md, at } = maxPremulDiff(ref, glpx, n);
@@ -452,7 +452,7 @@ function bridgeParity(glctx: GLContext, add: Add): void {
   const ref = gctx.getImageData(0, 0, N, N).data;
 
   const tree = docTreeToComp(nodes as never, (leaf) => { const r = res.get((leaf as { id: number }).id)!; return { index: r.index, hasContent: r.tileCount > 0 }; });
-  const accum = comp.composite(backend.texture, tree, N, N);
+  const accum = compositeTree(comp, backend.texture, tree, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const { md, at } = maxPremulDiff(ref, glpx, N);
   add("bridge:doc→tiles→GL full-doc vs compositeLayers", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -778,7 +778,7 @@ function checkerParity(glctx: GLContext, add: Add): void {
   const layerCanvas = makeLayerCanvas(N, N, (x, y) => (x > 48 && x < 144 && y > 48 && y < 144) ? [200, 40, 40, 128] : [0, 0, 0, 0]);
   const lt = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, layerCanvas) }, N, N);
   const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: lt.tileCount > 0, overlay: null }];
-  const accum = comp.composite(backend.texture, tree as never, N, N, "checker");
+  const accum = compositeTree(comp, backend.texture, tree as never, N, N, "checker");
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
   const rctx = ref.getContext("2d")!;
@@ -816,7 +816,7 @@ function floatParity(glctx: GLContext, add: Add): void {
   const floatCanvas = makeLayerCanvas(fw, fh, (x, y) => [220, 60, 60, (x + y) % 200 + 40]);   // 半透明渐变
   const ftex = texFromCanvas(glctx, floatCanvas);
   const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: ftex, srcW: fw, srcH: fh, hinv: rectHinv(fx, fy, fw, fh), mode: 0 } }];
-  const accum = comp.composite(backend.texture, tree as never, N, N);
+  const accum = compositeTree(comp, backend.texture, tree as never, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
   const rctx = ref.getContext("2d")!;
@@ -833,7 +833,7 @@ function floatParity(glctx: GLContext, add: Add): void {
     { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: null },
     { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: { tex: ftex2, srcW: 70, srcH: 60, hinv: rectHinv(40, 35, 70, 60), mode: 0 } },
   ];
-  const acc2 = comp.composite(backend.texture, tree2 as never, N, N);
+  const acc2 = compositeTree(comp, backend.texture, tree2 as never, N, N);
   const glpx2 = readComposite(glctx, comp, acc2, N); glctx.returnFBO(acc2);
   const ref2 = document.createElement("canvas"); ref2.width = N; ref2.height = N;
   const rctx2 = ref2.getContext("2d")!; rctx2.clearRect(0, 0, N, N); rctx2.drawImage(fc2, 40, 35);   // clip 层空基底=不显，仅 float
@@ -862,7 +862,7 @@ function warpParity(glctx: GLContext, add: Add): void {
   for (const [name, mode, sm] of [["bilinear", 1, "bilinear"], ["bicubic", 2, "bicubic"]] as const) {
     if (!q) { add(`warp:${name} 取 quadWarp`, false, "null"); continue; }
     const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: stex, srcW: sw, srcH: sh, hinv: q.hinv, mode } }];
-    const accum = comp.composite(backend.texture, tree as never, N, N);
+    const accum = compositeTree(comp, backend.texture, tree as never, N, N);
     const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
     const rr = renderQuadPerPixel(srcImg, sw, sh, mesh as never, sm);   // CPU 参照（straight）
     const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
@@ -912,7 +912,7 @@ function warpClipParity(glctx: GLContext, add: Add): void {
     { kind: "leaf", srcIndex: empty.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: baseFD },
     { kind: "leaf", srcIndex: empty.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: clipFD },
   ];
-  const accum = comp.composite(backend.texture, tree as never, N, N);
+  const accum = compositeTree(comp, backend.texture, tree as never, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   // CPU 参照：base/clip 各 warp（同 mesh → 同 dst），clip 用 base alpha destination-in，再依次 source-over 底。
   const bw = renderQuadPerPixel(baseImg, sw, sh, mesh as never, "bicubic");

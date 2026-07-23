@@ -53,6 +53,12 @@ export class GLBoard {
     return this._tree.commitBrushStroke(leafId, pixels, ov, docW, docH, apply);
   }
 
+  // S9 导出/缩略图合成面：一次性合成 → canvas（透明底）。GL lost → null（调用方兜）。
+  compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement | null {
+    if (this._glctx.isLost) return null;
+    return this._tree.compositeToCanvas(nodes, docW, docH);
+  }
+
   // S8 吸管：一次性合成（compositeOnce，不建缓存）+ 1px readback。bg 语义同 render 的 docBg。
   pickColor(doc: GLDoc, docBg: string | null, x: number, y: number): [number, number, number, number] | null {
     if (this._glctx.isLost) return null;

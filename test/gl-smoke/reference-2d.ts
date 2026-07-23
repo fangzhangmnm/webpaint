@@ -1,4 +1,6 @@
-// 规范图层合成器（deep module A）。「图层树 → 像素」的**唯一**实现。
+// 【S9 归档】旧 2D 规范图层合成器 —— 生产零调用（display/导出/吸管/缩略图全走 GL render-tree）。
+// 保留在 test 域当 **golden 对拍参照**（smoke 的 vs-compositeLayers diff + node clip 语义测试）。
+// 「别删对拍能力」= handoff 琐碎第 6 条。别在 src 里 import 它（build.sh 防复活 lint 把守）。
 //
 // 历史上合成逻辑重复 5 处（board 实时 / ORA merged / PNG-JPG 导出 / PSD merged / 吸管），
 // 各抄一份 clip+mode+opacity，已出现漂移 bug（PSD 无视 clip、吸管无视 mode/clip）。
@@ -17,8 +19,8 @@
 // 组隔离：组满足 mode≠source-over || opacity<1 || clippingMask || isolate → 先把子树合到独立 buffer
 //   再按 group.opacity/mode（+clip）整体混；否则 pass-through（子层直接落 ctx，能与组下方层混）。
 
-import { makeBitmap } from "./bitmap.ts";
-import type { Layer, LayerGroup } from "./doc.ts";
+import { makeBitmap } from "../../src/bitmap.ts";
+import type { Layer, LayerGroup } from "../../src/doc.ts";
 
 // 合成树节点 = 叶(Layer) | 组(LayerGroup)（doc.ts 的 Node 未 export，本地等价重建）。
 type CompositeNode = Layer | LayerGroup;

@@ -18,7 +18,7 @@
 //     把"加载失败的 path"当 oldName 删掉
 //   - **破坏性操作永远用「真正载入的路径」**，不用这里的 getCurrentSessionName()
 
-import { compositeLayers } from "./layer-composite.ts";
+import { renderNodesToCanvas } from "./doc-render.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
 import type { PaintDoc } from "./doc.ts";
@@ -51,23 +51,15 @@ export function setCurrentSessionName(name: string) {
 //  吃掉一个加密文件的（见 feedback-phantom-current-path）。留着 = 一把上了膛的枪，删掉最省心。
 //  现役破坏性操作全部用「真正载入的路径」（item.name / _activeSessionName，后者只在 es.open() 成功后升级）。）
 
-/** 渲染缩略图 blob（最长边 = maxSide）。给图库 grid 用。
- *  PNG 保留 alpha → 容器 CSS 背景可独立调色，立绘透明区跟容器自然融合。
- */
-export async function renderThumbBlob(doc: PaintDoc, maxSide = 256) {
-  const W = doc.width, H = doc.height;
-  const merged = document.createElement("canvas");
-  merged.width = W; merged.height = H;
-  const mctx = merged.getContext("2d")!;
-  // 不涂底：保 alpha，PNG 编码透出来 → 容器 CSS bg 直接生效（调色不用改 JS）。
-  // 走规范合成器（deep module A）：respect clip/mode + **组隔离**（手抄扁平 loop 会漏掉组内层）。
-  compositeLayers(mctx, doc.layers);
+/** 合成图 canvas → 缩略图 blob（最长边 = maxSide）。PNG 保 alpha（容器 CSS 背景可独立调色）。
+ *  S9：不再自己合成——merged 由调用方给（GL doc-render 渲出，与 display/存档同源同刻）。 */
+export async function thumbBlobFromCanvas(merged: HTMLCanvasElement | OffscreenCanvas, maxSide = 256) {
+  const W = merged.width, H = merged.height;
   const scale = Math.min(1, maxSide / Math.max(W, H));
   const tw = Math.max(1, Math.round(W * scale));
   const th = Math.max(1, Math.round(H * scale));
-  // step-halving 缩小（抗锯齿，缩略图更干净）；scale=1（doc 比 maxSide 小）时 smartResample 直接收尾不失真
+  // step-halving 缩小（抗锯齿，缩略图更干净）；scale=1 时 smartResample 直接收尾不失真
   const thumb = smartResample(merged, tw, th);
-
   // PNG 保 alpha；体积通常 5-25KB（立绘透明区压缩好），可接受
   return await canvasToBlob(thumb, "image/png");
 }
@@ -108,14 +100,15 @@ export async function renderDocToImageBlob(doc: PaintDoc, mime = "image/png", qu
     ctx.fillStyle = doc.backgroundColor || "#ffffff";
     ctx.fillRect(0, 0, doc.width, doc.height);
   }
-  // 合成走规范合成器（deep module A，含 clip + 组隔离）。ctx 在 doc 坐标 1:1，无 live overlay。
-  //   scope==="active"：仅当前层。若选中的是组 → 导出该组合并结果（组内 clip/blend/隔离照常）；
-  //   ignoreSelfClip 只忽略被选节点**自身**对外部兄弟的 clip（基底不在导出里），不影响组内部 clip。
-  if (scope === "active") {
-    if (doc.activeLayer) compositeLayers(ctx, [doc.activeLayer], { ignoreSelfClip: true });
-  } else {
-    compositeLayers(ctx, doc.layers);
-  }
+  // S9：合成走 GL（doc-render，与 display 同源，含 clip + 组隔离）。
+  //   scope==="active"：仅当前节点（组照常整树合成）；剥掉节点**自身**的 clippingMask（基底不在导出里，
+  //   否则 planner 判 clip 无基底不渲染——对齐旧 ignoreSelfClip 语义），组/叶内部 clip 不受影响。
+  const nodes = scope === "active"
+    ? (doc.activeLayer ? [{ ...(doc.activeLayer as unknown as Record<string, unknown>), clippingMask: false }] : [])
+    : (doc.layers as unknown[]);
+  const merged = nodes.length ? renderNodesToCanvas(nodes, doc.width, doc.height) : null;
+  if (nodes.length && !merged) throw new Error("GL 不可用，无法合成导出图");
+  if (merged) ctx.drawImage(merged, 0, 0);
   const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, mime, quality));
   if (blob) return blob;
   // jpg 返 null 兜底走 png

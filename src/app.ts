@@ -46,6 +46,7 @@ import { initFiltersAdjust } from "./filters-adjust.ts";
 import { initToolbar, RACK_PANEL_BY_TOOL } from "./toolbar.ts";
 import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
+import { setDocCompositor } from "./doc-render.ts";
 import { createEditorState } from "./editor-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
@@ -155,7 +156,9 @@ const leftDial = mountLeftDial(els.leftDialMount, {
 //   ⚠ 这只是**止血**：全 app 还有 20 个模块 57 处 addEventListener 没有 disposer，boot 并非真正可拆卸。
 //   完整方案（子进程跑 boot smoke vs 全面 disposer 化）见 docs/reports/20260718-boot-disposability-and-test-infra.html。
 const _disposeSizeKeyboard = bindSizeKeyboard({ board, leftDial });
-const _tileJobs = initTileJobs();   // interval + input 监听有 disposer（app-boot 测试要拆，否则 node 挂死）
+const _tileJobs = initTileJobs();
+// S9：doc→合成像素的唯一生产面接 GL board（导出/缩略图/mergedimage/PSD/参考窗镜像共用）。
+setDocCompositor((nodes, w, h) => board.compositeNodesToCanvas(nodes, w, h));   // interval + input 监听有 disposer（app-boot 测试要拆，否则 node 挂死）
 (globalThis as { __wpBootTeardown?: Array<() => void> }).__wpBootTeardown = [_disposeSizeKeyboard, _tileJobs.dispose];
 
 // 当前笔（ResolvedBrush）派生 + 引擎桥 = resolved-brush.ts makeCurrentBrush，input 前构造（见下）。手感数学全在 resolveBrush。

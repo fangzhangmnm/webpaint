@@ -19,11 +19,10 @@ import { CpuGpuTileBridge } from "./tile-bridge.ts";
 import { appTilePool } from "../tiles/app-tile-pool.ts";
 import { TILE_SIZE, tilesAcross, tilesDown, tileCoord } from "../tiles/tile-geometry.ts";
 import { GLCompositor } from "./gl-compositor.ts";
-import type { Background, Acc } from "./gl-compositor.ts";
+import type { Background, Acc, OverlayDesc, FloatDesc } from "./gl-compositor.ts";
 import { safeMode } from "./gl-doc-bridge.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import { LayerPixels, replaceFromCanvas } from "./tile-pixels.ts";
-import type { OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import { buildPlan } from "../render/render-plan.ts";
@@ -314,6 +313,20 @@ export class RenderTreeGL {
     for (const f of transient.values()) this._glctx.returnFBO(f);
     this._comp.end();
     return out;
+  }
+
+  // S9 导出/缩略图/mergedimage 合成面：compositeOnce → 整幅 readPixels → canvas（透明底，straight）。
+  compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement {
+    const gl = this._glctx.gl;
+    const fbo = this.compositeOnce(nodes, docW, docH);
+    const px = new Uint8Array(docW * docH * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
+    gl.readPixels(0, 0, docW, docH, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this._glctx.returnFBO(fbo);
+    const canvas = document.createElement("canvas"); canvas.width = docW; canvas.height = docH;
+    canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), docW, docH), 0, 0);
+    return canvas;
   }
 
   // S8 吸管（spec:243-244）：一次性合成 + 单像素 readPixels（合成组无 CPU tile → 必须走 GPU 读）。

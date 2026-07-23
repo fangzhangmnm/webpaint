@@ -13,7 +13,8 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
-import { renderThumbBlob, setCurrentSessionName } from "./session.ts";
+import { thumbBlobFromCanvas, setCurrentSessionName } from "./session.ts";
+import { renderNodesToCanvas } from "./doc-render.ts";
 import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.ts";
 import { freezeDocForEncode } from "./doc.ts";
 import { makeAutosaveGate } from "./checkpoint-policy.ts";
@@ -159,10 +160,14 @@ function _buildOraMeta() {
 //   且不阻塞用户（tile 不可变 ⇒ 后续编辑全是 CoW 新 tile）。达意实现 spec「保存阻塞锁写不锁读」，
 //   比字面锁更强——待追认（S8 报告拍板清单）。
 async function _encodeCurrentOraWithPeek(): Promise<{ bytes: Blob; peek: Blob | null }> {
+  // merged（GL 合成）与 freeze 在**同一同步刻**取自活 doc → mergedimage/缩略图/层数据三者一致。
+  //   GL 不可用（context lost 中的 autosave）→ merged=null：ora 用透明占位、peek 省略——层数据照常落盘。
+  const merged = renderNodesToCanvas(doc.layers, doc.width, doc.height);
   const { frozen, dispose } = freezeDocForEncode(doc as Parameters<typeof freezeDocForEncode>[0]);
   try {
-    const bytes = await encodeDocToOra(frozen as unknown as Parameters<typeof encodeDocToOra>[0], _buildOraMeta() as Parameters<typeof encodeDocToOra>[1]) as Blob;
-    const peek = await renderThumbBlob(frozen as unknown as Parameters<typeof renderThumbBlob>[0], 256);
+    const meta = _buildOraMeta() as Record<string, unknown>;
+    const bytes = await encodeDocToOra(frozen as unknown as Parameters<typeof encodeDocToOra>[0], { ...meta, mergedCanvas: merged } as Parameters<typeof encodeDocToOra>[1]) as Blob;
+    const peek = merged ? await thumbBlobFromCanvas(merged, 256) : null;
     return { bytes, peek };
   } finally { dispose(); }
 }
