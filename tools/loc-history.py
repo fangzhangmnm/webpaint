@@ -44,7 +44,9 @@ EXCLUDE_PREFIX = ('vendor/', 'dist/', 'node_modules/', '.claude/',
                   'test/', 'tests/', 'docs/', 'doc/', 'ARCHIVE/', 'bench/',
                   'README.files/', 'journal/', 'journals/', 'workbench/',
                   '.deprecated/', '.github/')
-EXCLUDE_SUFFIX = ('.md',)                       # 文档不算代码
+EXCLUDE_SUFFIX = ('.md', '.txt',                # 文档不算代码
+                  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp',
+                  '.woff', '.woff2', '.ttf', '.otf', '.pdf', '.zip')  # 二进制/资源
 EXCLUDE_SUBSTR = ('package-lock.json', 'esbuild')
 # 测试文件也可能散在 src 里（*.test.ts / *.spec.ts）——一并排除
 # 二进制文件 numstat 出 '-' '-'，本来就会被跳过
@@ -137,18 +139,111 @@ def collect(ref):
         c['total'] = total
     return commits
 
+# ---- 状态法（不用 diff）：直接量每个 commit「代码库当时的样子」的统计量 --------
+# 动机：vibe coding 里 diff churn 噪声大（来回改、AI 重写），但代码库本身的统计量
+# （真实 LOC、结构熵）演化更实在。看「统计量的 per-commit delta」而非「删/增行」。
+
+def _blob_line_counts(shas):
+    """一次 git cat-file --batch 批量数每个 blob 的行数（按 sha 去重，快）。"""
+    if not shas:
+        return {}
+    r = subprocess.run(['git', 'cat-file', '--batch'],
+                       input='\n'.join(shas).encode(), capture_output=True)
+    out, i, counts = r.stdout, 0, {}
+    n = len(out)
+    while i < n:
+        j = out.find(b'\n', i)
+        if j < 0:
+            break
+        header = out[i:j].split(b' ')
+        i = j + 1
+        if len(header) < 3 or header[1] != b'blob':
+            # 坏对象/缺失：跳过这一行
+            continue
+        sha, size = header[0].decode(), int(header[2])
+        content = out[i:i + size]
+        i += size + 1                       # 跳过 content 后的换行
+        counts[sha] = content.count(b'\n') + (1 if content and not content.endswith(b'\n') else 0)
+    return counts
+
+def snapshot_stats(ref):
+    """重放 git 历史，量每个 commit 当时**整库**的：真实 LOC、文件数、结构熵。
+    结构熵 = 各文件行数分布的 Shannon 熵(bit)——代码越铺散/文件越多越高（会随规模长）。
+    返回按时间正序、与 collect() 对齐的 [{loc, files, entropy}] 列表。"""
+    r = subprocess.run(
+        ['git', 'log', '--reverse', '--raw', '--no-renames', '--no-abbrev',
+         '--format=@@@%H', ref],   # --no-abbrev：blob sha 出全 40 位，跟 cat-file 对得上
+        capture_output=True, text=True, errors='replace')
+    # 第一遍：重建每个 commit 的 path→sha，收集所有需要数行的 blob
+    events = []          # [('commit', hash) | ('change', path, newsha, status)]
+    need = set()
+    for line in r.stdout.splitlines():
+        if line.startswith('@@@'):
+            events.append(('commit', line[3:]))
+        elif line.startswith(':'):
+            meta, _, path = line[1:].partition('\t')
+            f = meta.split()
+            if len(f) < 5 or excluded(path):
+                continue
+            newsha, status = f[3], f[4]
+            events.append(('change', path, newsha, status[0]))
+            if status[0] != 'D' and set(newsha) != {'0'}:
+                need.add(newsha)
+    lc = _blob_line_counts(list(need))
+    # 第二遍：顺着事件维护 path→lines，每到 commit 边界结算一次
+    tree, stats, started = {}, [], False
+    def snap():
+        vals = [v for v in tree.values() if v]
+        loc = sum(vals)
+        if loc > 0:
+            H = -sum((v / loc) * math.log2(v / loc) for v in vals if v)
+        else:
+            H = 0.0
+        return dict(loc=loc, files=len(tree), entropy=H)
+    for ev in events:
+        if ev[0] == 'commit':
+            if started:
+                stats.append(snap())
+            started = True
+        else:
+            _, path, newsha, status = ev
+            if status == 'D':
+                tree.pop(path, None)
+            else:
+                tree[path] = lc.get(newsha, 0)
+    if started:
+        stats.append(snap())        # 最后一个 commit
+    return stats
+
+def attach_snapshots(commits, stats):
+    """把状态统计贴回 commits，并算 per-commit delta（状态法的「loc growth」）。"""
+    prev_loc = 0
+    for c, s in zip(commits, stats):
+        c['real_loc'] = s['loc']
+        c['file_count'] = s['files']
+        c['struct_entropy'] = s['entropy']
+        c['loc_delta'] = s['loc'] - prev_loc
+        prev_loc = s['loc']
+
 def write_csv(commits, path):
     with open(path, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
-        w.writerow(['seq', 'hash', 'date', 'added', 'deleted', 'net', 'total', 'subject'])
+        # 状态法列(real_loc/loc_delta/files/struct_entropy) + diff 法列(added/deleted…)
+        w.writerow(['seq', 'hash', 'date', 'model',
+                    'real_loc', 'loc_delta', 'files', 'struct_entropy',
+                    'added', 'deleted', 'net', 'diff_total', 'subject'])
         for i, c in enumerate(commits):
-            w.writerow([i, c['short'], c['date'], c['added'], c['deleted'],
-                        c['net'], c['total'], c['subject']])
+            w.writerow([i, c['short'], c['date'], c.get('model', ''),
+                        c.get('real_loc', ''), c.get('loc_delta', ''),
+                        c.get('file_count', ''),
+                        f"{c.get('struct_entropy', 0):.3f}",
+                        c['added'], c['deleted'], c['net'], c['total'], c['subject']])
 
 def write_summaries(commits, path, width=80):
     with open(path, 'w', encoding='utf-8') as f:
         f.write('# Commit 概述（每行一次）\n\n')
-        f.write(f'共 {len(commits)} 次 commit；最新代码行数 ≈ {commits[-1]["total"]}\n\n')
+        f.write(f'共 {len(commits)} 次 commit；当前整库真实代码行数 = '
+                f'{commits[-1].get("real_loc", commits[-1]["total"])}\n\n')
         for i, c in enumerate(commits):
             subj = c['subject']
             if len(subj) > width:
@@ -606,6 +701,7 @@ def draw_models(by_model, path, zh):
 # --------------------------------------------------------------------- charts ---
 
 def draw(commits, path, zh, milestones=None):
+    """状态法（不用 diff）：整库真实 LOC + 结构熵随时间，下面是每 commit 的 ΔLOC。"""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -613,78 +709,109 @@ def draw(commits, path, zh, milestones=None):
     except ImportError:
         print('  (没装 matplotlib，跳过 PNG；csv/md 已生成)')
         return False
-    # 有中文字体走中文，没有就退纯 ASCII，绝不留豆腐块
-    L = dict(y_total='累计代码行数 (LOC)', y_churn='每 commit 增删',
-             x='commit 序号（时间正序）', add='新增', rm='删除',
-             title=f'WebPaint 代码行数演进 — {len(commits)} commits，现 ≈ {commits[-1]["total"]} 行') if zh else \
-        dict(y_total='cumulative LOC', y_churn='per-commit churn',
-             x='commit # (chronological)', add='added', rm='deleted',
-             title=f'WebPaint LOC history — {len(commits)} commits, now ~{commits[-1]["total"]} lines')
+    loc = [c.get('real_loc', c['total']) for c in commits]
+    delta = [c.get('loc_delta', c['net']) for c in commits]
+    ent = [c.get('struct_entropy', 0.0) for c in commits]
+    now = loc[-1] if loc else 0
+    L = dict(y_loc='整库真实代码行数 (LOC)', y_ent='结构熵 (bit)', y_delta='每 commit ΔLOC',
+             x='commit 序号（时间正序）', up='净长', dn='净缩',
+             title=f'WebPaint 代码库演进（状态法）— {len(commits)} commits，现 {now} 行',
+             entl='结构熵') if zh else \
+        dict(y_loc='real codebase LOC', y_ent='structural entropy (bit)', y_delta='per-commit ΔLOC',
+             x='commit # (chronological)', up='grew', dn='shrank',
+             title=f'WebPaint codebase (state method) — {len(commits)} commits, now {now} lines',
+             entl='structural entropy')
     xs = list(range(len(commits)))
-    total = [c['total'] for c in commits]
-    added = [c['added'] for c in commits]
-    deleted = [-c['deleted'] for c in commits]
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 8), sharex=True,
+    fig, (ax1, ax3) = plt.subplots(2, 1, figsize=(13, 8), sharex=True,
                                    gridspec_kw={'height_ratios': [2, 1]})
-    ax1.fill_between(xs, total, color='#4c78a8', alpha=0.25)
-    ax1.plot(xs, total, color='#4c78a8', lw=1.5)
-    ax1.set_ylabel(L['y_total'])
+    # 上：真实 LOC（左轴）+ 结构熵（右轴）
+    ax1.fill_between(xs, loc, color='#4c78a8', alpha=0.18)
+    ax1.plot(xs, loc, color='#4c78a8', lw=1.6, label=L['y_loc'])
+    ax1.set_ylabel(L['y_loc'], color='#2c5985')
     ax1.set_title(L['title'])
     ax1.grid(True, alpha=0.3)
+    axE = ax1.twinx()
+    axE.plot(xs, ent, color='#d1802a', lw=1.3, alpha=0.9, label=L['entl'])
+    axE.set_ylabel(L['y_ent'], color='#b5651d')
 
-    # 里程碑：竖线 + 顶部斜标签（label 交错高低，避免挤成一团）
+    # 里程碑：竖线 + 顶部斜标签（交错高低）
     if milestones:
-        ymax = max(total) if total else 1
+        ymax = max(loc) if loc else 1
         for k, (i, m) in enumerate(milestones):
             col = KIND_COLOR.get(m.get('kind'), '#888')
-            ax1.axvline(i, color=col, lw=0.9, ls='--', alpha=0.55)
-            ax2.axvline(i, color=col, lw=0.9, ls='--', alpha=0.35)
-            y = ymax * (1.02 + 0.06 * (k % 2))     # 交错两档高度
+            ax1.axvline(i, color=col, lw=0.8, ls='--', alpha=0.5)
+            ax3.axvline(i, color=col, lw=0.8, ls='--', alpha=0.3)
+            y = ymax * (1.02 + 0.055 * (k % 3))    # 交错三档，31 个也不挤
             ax1.text(i, y, m.get('label', ''), rotation=45, ha='left', va='bottom',
-                     fontsize=7.5, color=col, clip_on=False)
-        ax1.set_ylim(top=ymax * 1.18)
+                     fontsize=7, color=col, clip_on=False)
+        ax1.set_ylim(top=ymax * 1.20)
 
-    ax2.bar(xs, added, color='#54a24b', width=1.0, label=L['add'])
-    ax2.bar(xs, deleted, color='#e45756', width=1.0, label=L['rm'])
-    ax2.axhline(0, color='#888', lw=0.6)
-    ax2.set_ylabel(L['y_churn'])
-    ax2.set_xlabel(L['x'])
-    ax2.legend(loc='upper left', fontsize=9)
-    ax2.grid(True, alpha=0.3)
+    # 下：每 commit ΔLOC（状态法的「loc growth」，可正可负）
+    up = [d if d >= 0 else 0 for d in delta]
+    dn = [d if d < 0 else 0 for d in delta]
+    ax3.bar(xs, up, color='#54a24b', width=1.0, label=L['up'])
+    ax3.bar(xs, dn, color='#e45756', width=1.0, label=L['dn'])
+    ax3.axhline(0, color='#888', lw=0.6)
+    ax3.set_ylabel(L['y_delta'])
+    ax3.set_xlabel(L['x'])
+    ax3.legend(loc='upper left', fontsize=9)
+    ax3.grid(True, alpha=0.3)
 
-    # x 轴标少量日期刻度
     n = len(commits)
     step = max(1, n // 10)
     ticks = xs[::step]
-    ax2.set_xticks(ticks)
-    ax2.set_xticklabels([commits[i]['date'] for i in ticks], rotation=45, ha='right')
+    ax3.set_xticks(ticks)
+    ax3.set_xticklabels([commits[i]['date'] for i in ticks], rotation=45, ha='right')
 
     fig.tight_layout()
     fig.savefig(path, dpi=120)
     plt.close(fig)
     return True
 
+# 优先直接注册这些「整套中文字体」文件（自带拉丁+数字，单字体全包，不靠逐字回退）。
+# 覆盖 WSL 直读 Windows 字体 + 常见 Linux CJK。找不到才退英文，绝不留豆腐块。
+CJK_FONT_FILES = (
+    '/mnt/c/Windows/Fonts/msyh.ttc',        # 微软雅黑（WSL→Windows）
+    '/mnt/c/Windows/Fonts/simhei.ttf',      # 黑体
+    '/mnt/c/Windows/Fonts/simsun.ttc',
+    '/mnt/c/Windows/Fonts/Deng.ttf',        # 等线
+    '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+    '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+    '/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf',
+    '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+    '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+)
+
 def pick_font():
-    """只在装了「自带拉丁+数字的整套中文字体」时用中文标签，否则退英文。
-    matplotlib 的逐字体回退在不少环境不可靠，所以不混字体——要么单字体全包，要么纯英文。
-    Droid Sans Fallback 这类「只有汉字、没有拉丁/数字」的字体故意排除。"""
-    FULL_CJK = ('Noto Sans CJK SC', 'Noto Sans CJK JP', 'Source Han Sans SC',
-                'Microsoft YaHei', 'SimHei', 'SimSun', 'WenQuanYi Zen Hei',
-                'WenQuanYi Micro Hei', 'Arial Unicode MS', 'PingFang SC')
+    """能显示中文就用中文标签，否则退英文。
+    先直接 addfont 注册整套中文字体文件（雅黑/黑体/Noto…），单字体全包最稳；
+    再退回按字体族名查找。都没有才 return False（走英文）。"""
     try:
         import matplotlib
         from matplotlib import font_manager
-        for name in FULL_CJK:
-            try:
-                font_manager.findfont(name, fallback_to_default=False)
-                matplotlib.rcParams['font.sans-serif'] = [name]
-                matplotlib.rcParams['axes.unicode_minus'] = False
-                return True
-            except Exception:
-                continue
     except ImportError:
-        pass
+        return False
+    for path in CJK_FONT_FILES:
+        if not os.path.exists(path):
+            continue
+        try:
+            font_manager.fontManager.addfont(path)
+            name = font_manager.FontProperties(fname=path).get_name()
+            matplotlib.rcParams['font.sans-serif'] = [name]
+            matplotlib.rcParams['axes.unicode_minus'] = False
+            return True
+        except Exception:
+            continue
+    for name in ('Noto Sans CJK SC', 'Microsoft YaHei', 'SimHei', 'SimSun',
+                 'WenQuanYi Micro Hei', 'Arial Unicode MS', 'PingFang SC'):
+        try:
+            font_manager.findfont(name, fallback_to_default=False)
+            matplotlib.rcParams['font.sans-serif'] = [name]
+            matplotlib.rcParams['axes.unicode_minus'] = False
+            return True
+        except Exception:
+            continue
     return False
 
 def main():
@@ -718,6 +845,10 @@ def main():
     models = commit_models(args.branch)         # 归属到 Opus/Fable/…
     for c in commits:
         c['model'] = models.get(c['hash'], '(无标注)')
+    stats = snapshot_stats(args.branch)         # 状态法：每 commit 整库真实 LOC/熵
+    if len(stats) != len(commits):
+        print(f'  (注意：状态快照 {len(stats)} 条 vs commit {len(commits)} 条，按短的对齐)')
+    attach_snapshots(commits, stats)
 
     csv_p = os.path.join(out, 'loc-history.csv')
     md_p = os.path.join(out, 'commit-summaries.md')
@@ -745,8 +876,9 @@ def main():
     drew_b = draw_bench(buckets, bench_png, zh, args.by)
     drew_m = draw_models(by_model, models_png, zh)
 
-    print(f'✓ {len(commits)} commits，产品代码累计 ≈ {commits[-1]["total"]} 行'
-          f'（已去测试/文档/vendor；含注释）')
+    print(f'✓ {len(commits)} commits，整库真实代码 {commits[-1].get("real_loc", commits[-1]["total"])} 行'
+          f'（状态法直接量，非 diff 累计；去测试/文档/二进制/vendor；含注释）'
+          f' · 结构熵 {commits[-1].get("struct_entropy", 0):.1f} bit')
     if static:
         print(f'  成品质量：MI {static["mi"]:.0f}/100 · 重复率 {static["dup"]:.1f}% · '
               f'真·代码 {static["nloc"]} 行(去注释) · 圈复杂度均 {static["ccn_mean"]:.1f}/最大 {static["ccn_max"]}')
