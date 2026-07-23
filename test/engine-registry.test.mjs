@@ -9,15 +9,15 @@ import {
 // 重构前散在 input.js 各处的字面成员集合（_down/_move/_up/_discardPointer/gesture-abort）。
 // 把它们当 oracle：新谓词必须对**所有可能 role**与旧字面表达式逐一相等（回归锁）。
 const ALL_ROLES = [
-  "draw", "erase", "liquify", "filterBrush",   // pixel-stroke
+  "draw", "erase", "filterBrush",              // pixel-stroke（液化 = filterBrush payload，S8 删直连 role）
   "lasso",                                      // 各有专门生命周期
   "pick", "pan", "gesture", "ignore",           // 非绘制
   null, undefined, "",                          // 边界（pointer 还没定角色 / 被清）
 ];
 const oldPixelStrokeChain = (r) =>
-  r === "draw" || r === "erase" || r === "liquify" || r === "filterBrush";
-const oldCoalesceLatest = (r) => r === "liquify" || r === "filterBrush";
-const oldUsesBrushSettings = (r) => !(r === "liquify" || r === "filterBrush");
+  r === "draw" || r === "erase" || r === "filterBrush";
+const oldCoalesceLatest = (r) => r === "filterBrush";
+const oldUsesBrushSettings = (r) => !(r === "filterBrush");
 
 describe("engine-registry · dispatch 决策", () => {
   it("isPixelStroke 与旧字面成员链对所有 role 逐一相等（回归锁）", () => {
@@ -26,7 +26,7 @@ describe("engine-registry · dispatch 决策", () => {
     }
   });
 
-  it("spec.coalesceLatest（丢帧策略）只对液化 / filterBrush 为真", () => {
+  it("spec.coalesceLatest（丢帧策略）只对 filterBrush（含液化 payload）为真", () => {
     for (const r of ALL_ROLES) {
       const spec = pixelStrokeSpec(r);
       const v = spec ? spec.coalesceLatest : false;
@@ -36,29 +36,26 @@ describe("engine-registry · dispatch 决策", () => {
   });
 
   it("spec.usesResolvedBrush（喂四件套平滑）只对 draw / erase 为真", () => {
-    for (const r of ["draw", "erase", "liquify", "filterBrush"]) {
+    for (const r of ["draw", "erase", "filterBrush"]) {
       eq(pixelStrokeSpec(r).usesResolvedBrush, oldUsesBrushSettings(r), `usesResolvedBrush(${r})`);
     }
   });
 
-  it("finalize：draw/erase/liquify=true（按选区收尾），filterBrush=false（begin 已吃选区）", () => {
+  it("finalize：draw/erase=true（按选区收尾），filterBrush=false（begin 已吃选区）", () => {
     eq(pixelStrokeSpec("draw").finalize, true);
     eq(pixelStrokeSpec("erase").finalize, true);
-    eq(pixelStrokeSpec("liquify").finalize, true);
     eq(pixelStrokeSpec("filterBrush").finalize, false);
   });
 
-  it("historyType：liquify 走独立 'liquify' 事务，其余走 'stroke'", () => {
-    eq(pixelStrokeSpec("liquify").historyType, "liquify");
+  it("historyType：全部走 'stroke'（液化独立 'liquify' 事务随直连 role 一起退役）", () => {
     for (const r of ["draw", "erase", "filterBrush"]) {
       eq(pixelStrokeSpec(r).historyType, "stroke", `historyType(${r})`);
     }
   });
 
-  it("engineKey：draw/erase 共用 brush；liquify→liquify；filterBrush→filterBrush", () => {
+  it("engineKey：draw/erase 共用 brush；filterBrush→filterBrush", () => {
     eq(pixelStrokeSpec("draw").engineKey, "brush");
     eq(pixelStrokeSpec("erase").engineKey, "brush");
-    eq(pixelStrokeSpec("liquify").engineKey, "liquify");
     eq(pixelStrokeSpec("filterBrush").engineKey, "filterBrush");
   });
 
@@ -70,7 +67,7 @@ describe("engine-registry · dispatch 决策", () => {
 
   it("表与谓词不漂移：PIXEL_STROKE_SPECS 的每个 key 都 isPixelStroke", () => {
     const keys = Object.keys(PIXEL_STROKE_SPECS);
-    eq(keys.length, 4, "恰好 4 个 pixel-stroke role");
+    eq(keys.length, 3, "恰好 3 个 pixel-stroke role（draw/erase/filterBrush）");
     for (const k of keys) assert(isPixelStroke(k), `${k} 应 isPixelStroke`);
   });
 

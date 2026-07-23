@@ -23,7 +23,6 @@
 
 import { BrushEngine } from "./brush.ts";
 import { reportError } from "./error-badge.ts";
-import { LiquifyEngine } from "./plugins/liquify-engine.ts";
 import { LassoEngine } from "./lasso.ts";
 import { FilterBrushEngine } from "./filter-brush.ts";
 import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
@@ -49,16 +48,13 @@ type Doc = PaintDoc;
 type History = UndoHistory;
 type PixelHistory = PixelEdits;
 type PixelTx = PixelTxClass;
-// liquify settings：引擎的 LiquifySettings 未 export；input 只用 mode/size/strength，
-//   bleed 等其余字段引擎内部从 settings 取 → 用 ResolvedBrush 同惯例的最小壳 + unknown 兜底。
-interface LiquifySettings { mode: string; size: number; strength: number; bleed?: string; }
 // filterBrush 当前激活态：Filter 是 filter-brush.ts 的 BrushFilter（未 export，对 input 不透明）+ params。
 //   beginStroke 调用点再断言到引擎签名；这里 Filter/params 对 input 不透明 → unknown。
 interface FilterBrushState { Filter: unknown; params: unknown; }
 
-// 活动笔画（brush / liquify / filterBrush 共享 begin/extend/end/cancel 协议）。
-// 三引擎的 begin*/extend/end/cancel/flushDirty 接口一致 → 用并集做 engine 字段。
-type StrokeEngine = BrushEngine | LiquifyEngine | FilterBrushEngine;
+// 活动笔画（brush / filterBrush 共享 begin/extend/end/cancel 协议；液化 = filterBrush 的
+//   LiquifyFilter payload，v132 user：「液化先 migrate 到 filter brush」——S8 删掉了残留的直连双轨）。
+type StrokeEngine = BrushEngine | FilterBrushEngine;
 // inPlace = 描边中原地改 layer 像素（liquify/filterBrush/pixelMode brush），非 overlay 预览。
 //   GL 模式下这类笔的 live 预览要靠 board 每帧把活动层重传 GPU（buffered brush 走 GPU stamp overlay，不算）。
 interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; inPlace: boolean; }
@@ -111,7 +107,6 @@ interface InputOpts {
   getTool?: () => string;
   editMode?: EditMode | null;
   getResolvedBrush?: () => ResolvedBrush | null;
-  getLiquifySettings?: () => LiquifySettings;
   getFilterBrushState?: () => FilterBrushState | null;
   getLongPressPickEnabled?: () => boolean;
   getSingleFingerDraw?: () => boolean;
@@ -304,13 +299,11 @@ export class InputController {
   doc: Doc;
   canvas: HTMLCanvasElement;
   brush: BrushEngine;
-  liquify: LiquifyEngine;
   lasso: LassoEngine;
   filterBrush: FilterBrushEngine;
   getTool: () => string;
   editMode: EditMode | null;
   getResolvedBrush: () => ResolvedBrush | null;
-  getLiquifySettings: () => LiquifySettings;
   getFilterBrushState: () => FilterBrushState | null;
   getLongPressPickEnabled: () => boolean;
   getSingleFingerDraw: () => boolean;
@@ -337,7 +330,6 @@ export class InputController {
     this.doc = doc;
     this.canvas = board.canvas;
     this.brush = new BrushEngine();
-    this.liquify = new LiquifyEngine();
     this.lasso = new LassoEngine();
     // v132 filter brush（user：「blur/sharpen/液化 走 filter brush engine」）
     //   引擎本身是薄 delegate；filter 自己提供 begin/extend/end brush 方法
@@ -349,7 +341,6 @@ export class InputController {
     this.getTool = opts.getTool || (() => "brush");
     this.editMode = opts.editMode || null;   // EditMode 独占状态机（路由/gate/ctrl-z 用，见 edit-mode.js）
     this.getResolvedBrush = opts.getResolvedBrush || (() => null);   // 必须传
-    this.getLiquifySettings = opts.getLiquifySettings || (() => ({ mode: "push", size: 50, strength: 0.5 }));
     // v132 filter brush 当前激活的 { Filter, params } 或 null
     this.getFilterBrushState = opts.getFilterBrushState || (() => null);
     this.getLongPressPickEnabled = opts.getLongPressPickEnabled || (() => false);
@@ -412,17 +403,14 @@ export class InputController {
   _updateCursorPreview(e: PointerEvent) {
     // #6 stage 4b：圆的显隐从 EditMode.cursor() 派生（取代硬编码 tool 列表）。
     //   "none"/"grab"（picker/lasso/hand + transform/crop/adjust）→ 不显（修"transient 时圆没隐藏"）
-    //   "ring"（liquify）→ 显，用液化笔大小；"brush"（笔/橡皮/filterBrush）→ 显，用画笔大小
+    //   "brush"（笔/橡皮/filterBrush 含液化）→ 显，用画笔大小
     const cur = this.editMode ? this.editMode.cursor() : "brush";
     if (cur === "none" || cur === "grab") {
       this.board.setCursor(null);
       return;
     }
     let size, square = false, aspect = 1, rotation = 0;
-    if (cur === "ring") {
-      const q = this.getLiquifySettings();
-      size = (q && q.size) ? q.size * 2 : 100;     // size 是半径 → 直径 = ×2
-    } else {
+    {
       const settings = this.getResolvedBrush();
       size = settings ? settings.size : 12;
       // v232：像素笔 stamp 是方的（fillRect），preview 跟着方，别用圆误导
@@ -558,8 +546,7 @@ export class InputController {
       // 即时笔（pixel）二参平滑状态：累积 raw / 死区锚 / EMA 输出(smX/Y 已在 rec 字面量锚为起点)
       rec.rawSX = x; rec.rawSY = y;
       rec.stabX = x; rec.stabY = y;
-      if (role === "liquify") this._beginLiquify(rec);
-      else if (role === "filterBrush") this._beginFilterBrush(rec);
+      if (role === "filterBrush") this._beginFilterBrush(rec);
       else {
         // mode 推断：erase / brush
         const mode = role === "erase" ? "erase" : "brush";
@@ -881,21 +868,6 @@ export class InputController {
     if (!as || !as.inPlace) return null;
     const layer = this.doc.activeLayer;
     return (layer && !(layer as Layer).isGroup) ? (layer as Layer) : null;
-  }
-
-  // ---- 液化 ----
-  // 一次"按-拖-抬"= 一个 "liquify" history entry。schema 同 stroke。
-  _beginLiquify(rec: PointerRec) {
-    const settings = this.getLiquifySettings();
-    if (!settings || !this.doc.activeLayer) { rec.role = null; return; }
-    const layer = this.doc.activeLayer as Layer;   // 组已被上游硬拒，此处确为叶
-    const spec = pixelStrokeSpec(rec.role as string)!;   // liquify → 独立 "liquify" 事务 + finalize
-    const tx = this.pixelHistory!.begin(layer, spec.historyType);
-    this._activeStroke = { engine: this.liquify, tx, finalize: spec.finalize, inPlace: true };
-    const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
-    // v124 (user：「preview 没 apply 选区」) 把 selection 传给 liquify，stamp 内 mask 外保留 startSnap
-    this.liquify.beginStroke(layer, settings, dx, dy, this.doc.selection);
-    this.board.requestRender();
   }
 
   // ---- Filter brush (v132) ----

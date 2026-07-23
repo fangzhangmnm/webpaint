@@ -64,6 +64,10 @@ interface LayerSnapshot {
   imageData?: ImageData | null;
 }
 
+// doc-space 选区 mask 平面：与 dispField 同 bbox 同步增长（S8 · charter H7 根治）。
+//   判定基底 = doc 空间（不再 tie layer.bbox）——内容被推出旧内容包围盒的像素照常按选区裁剪。
+interface MaskPlane { x: number; y: number; w: number; h: number; data: Uint8Array }
+
 interface LiquifyStroke {
   layer: Layer;
   settings: LiquifySettings;
@@ -73,8 +77,8 @@ interface LiquifyStroke {
   dirty: [number, number, number, number] | null;
   startSnap: LayerSnapshot;
   dispField: DispField;
-  maskData: Uint8Array | null;
-  maskBbox: { x: number; y: number; w: number; h: number } | null;
+  selection: Selection | null;
+  mask: MaskPlane | null;   // selection 非空时非空；覆盖 dispField bbox；平面外查 selection.sampleAt
 }
 
 export class LiquifyEngine {
@@ -97,13 +101,11 @@ export class LiquifyEngine {
     const lbW = Math.max(1, layer.bboxW);
     const lbH = Math.max(1, layer.bboxH);
     const bleed = settings.bleed || "edge";
-    // 把 selection mask 烤进一个 gray8 平面，与 layer.bbox 对齐（0..255）。
-    // ⚠ H7 已知 bug 保留：mask 按 layer.bbox 烤 → 内容被推出旧 bbox 的部分误判"选区外"。
-    //   S5 只换数据源（doc 空间 tile → 窄读口）；按 doc 空间采样的根治属 S8 液化重写（charter H7，RED）。
-    let maskData: Uint8Array | null = null;
-    if (selection) {
-      maskData = selection.materializeMaskRegion(layer.bboxX, layer.bboxY, lbW, lbH);
-    }
+    // S8（charter H7 根治）：mask 是 **doc-space 平面**，初始覆盖 dispField 起始 bbox，随
+    //   _growDispField 同步增长；平面外的查询（位移源可能落在扫过区之外）直查 selection tile。
+    const mask: MaskPlane | null = selection
+      ? { x: layer.bboxX, y: layer.bboxY, w: lbW, h: lbH, data: selection.materializeMaskRegion(layer.bboxX, layer.bboxY, lbW, lbH) }
+      : null;
     this._stroke = {
       layer,
       settings,
@@ -119,8 +121,8 @@ export class LiquifyEngine {
         bboxW: lbW, bboxH: lbH,
         data: new Float32Array(2 * lbW * lbH),
       },
-      maskData,
-      maskBbox: selection ? { x: layer.bboxX, y: layer.bboxY, w: lbW, h: lbH } : null,
+      selection,
+      mask,
     };
   }
 
@@ -167,17 +169,17 @@ export class LiquifyEngine {
     const ssX = ss.bboxX, ssY = ss.bboxY;
     const ssW = ss.bboxW, ssH = ss.bboxH;
     const ssData = ss.imageData ? ss.imageData.data : null;
-    // v124 (user：「预览的时候没有 apply 选区」) selection mask
-    const maskData = st.maskData;
-    const maskBox = st.maskBbox;
+    // v124 (user：「预览的时候没有 apply 选区」) selection mask —— S8 起 doc-space（charter H7）。
+    const mask = st.mask;
+    const maskData = mask ? mask.data : null;   // 有选区与否的开关（下方分支沿用旧名）
     const bleed = st.bleed;
-    const maskX = maskBox ? maskBox.x : 0, maskY = maskBox ? maskBox.y : 0;
-    const maskW = maskBox ? maskBox.w : 0, maskH = maskBox ? maskBox.h : 0;
-    // 整数 cell (ix,iy) 是否在选区内（mask alpha>=128）
+    // 整数 cell (ix,iy) 是否在选区内（alpha>=128）。doc 坐标判定：平面内读平面（热路径），
+    //   平面外直查选区 tile（sampleAt 自带出 doc = 0）——不再有「layer.bbox 外一律 false」的半拉。
     const cellIn = (ix: number, iy: number) => {
-      const mx = ix - maskX, my = iy - maskY;
-      if (mx < 0 || my < 0 || mx >= maskW || my >= maskH) return false;
-      return maskData![my * maskW + mx] >= 128;
+      const m = mask!;
+      const mx = ix - m.x, my = iy - m.y;
+      if (mx < 0 || my < 0 || mx >= m.w || my >= m.h) return st.selection!.sampleAt(ix, iy) >= 128;
+      return m.data[my * m.w + mx] >= 128;
     };
     // doc 坐标 (px,py)（四舍五入到最近 cell）是否在选区内
     const inMask = (px: number, py: number) => cellIn(Math.round(px), Math.round(py));
@@ -307,9 +309,9 @@ export class LiquifyEngine {
     return d;
   }
 
-  // dispField 长到覆盖 [x0,y0,x1,y1)（= 当前 ∪ 该矩形；只扩不缩，调用方已夹到 doc）。
-  //   tile era 取代 _syncDispFieldToLayer：位移场跟「笔触扫过的区域」走，不再 tie 现有内容 bbox
-  //   （否则推出旧内容边的像素被截，见 extendStroke 注释）。
+  // dispField（+ doc-space mask 平面）长到覆盖 [x0,y0,x1,y1)（= 当前 ∪ 该矩形；只扩不缩，
+  //   调用方已夹到 doc）。tile era 取代 _syncDispFieldToLayer：位移场跟「笔触扫过的区域」走，
+  //   不再 tie 现有内容 bbox（否则推出旧内容边的像素被截，见 extendStroke 注释）。
   _growDispField(x0: number, y0: number, x1: number, y1: number) {
     const st = this._stroke!;
     const f = st.dispField;
@@ -332,6 +334,10 @@ export class LiquifyEngine {
       bboxX: nx, bboxY: ny, bboxW: nw, bboxH: nh,
       data: newData,
     };
+    // mask 平面同步长到同一 bbox（重烤 = 一次 tile 读，O(新面积)，与拷旧+补边同阶但零缝隙 bug 面）。
+    if (st.selection) {
+      st.mask = { x: nx, y: ny, w: nw, h: nh, data: st.selection.materializeMaskRegion(nx, ny, nw, nh) };
+    }
   }
 }
 

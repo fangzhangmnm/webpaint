@@ -289,6 +289,13 @@ export function installDomShim() {
   const assign = {
     window: win,
     document,
+    // 最小 ImageData（液化引擎等纯 CPU 像素算法在 node 里跑真像素用）。支持 (w,h) 与 (data,w,h?) 两形。
+    ImageData: class ImageData {
+      constructor(a, b, c) {
+        if (typeof a === "number") { this.width = a; this.height = b; this.data = new Uint8ClampedArray(a * b * 4); }
+        else { this.data = a; this.width = b; this.height = c ?? (a.length / 4 / b); }
+      }
+    },
     navigator: win.navigator,
     location: win.location,
     localStorage: _storage,

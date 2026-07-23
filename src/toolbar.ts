@@ -155,7 +155,7 @@ export function _syncEditModeUI() {
   // 工具按钮高亮：transient 时一个都不亮；持久工具高亮对应按钮
   for (const b of els.toolBtns) b.setAttribute("aria-pressed", (!transient && b.dataset.tool === m) ? "true" : "false");
   // 液化 / filterBrush 没独立 data-tool 按钮，用 adjust 按钮高亮（transient 期间也不亮）
-  els.topAdjustBtn?.setAttribute("aria-pressed", (m === "liquify" || m === "filterBrush") ? "true" : "false");
+  els.topAdjustBtn?.setAttribute("aria-pressed", (m === "filterBrush") ? "true" : "false");
   // 注：body.dataset.tool 保持"持久工具"（在 setTool 里设），不在这改成 transient 名——避免扰乱
   // 依赖 body[data-tool] 的 CSS（且 data-mode 被图库占用）。transient 的 UI 抑制走面板 suppress + 按钮高亮。
   // slider 禁用：size/opacity 仅 canDraw 模式可调 → 反应式镜像，<LeftDial> 绑 :disabled。color 仅 allowsColor 可点。

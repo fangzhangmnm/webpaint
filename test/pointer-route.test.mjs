@@ -12,7 +12,7 @@ describe("pointer-route · effectiveTool", () => {
 describe("pointer-route · toolToRole", () => {
   it("各工具 → role", () => {
     eq(toolToRole("eraser"), "erase"); eq(toolToRole("picker"), "pick");
-    eq(toolToRole("liquify"), "liquify"); eq(toolToRole("filterBrush"), "filterBrush");
+    eq(toolToRole("filterBrush"), "filterBrush");   // 液化 = filterBrush payload（S8 删直连 role）
     eq(toolToRole("lasso"), "lasso");
     eq(toolToRole("brush"), "draw"); eq(toolToRole("未知"), "draw");
   });
@@ -61,7 +61,7 @@ describe("pointer-route · assignRole", () => {
   });
 
   it("回归锁：三设备分支对同一非特殊工具给同一 role（旧 map 抄 3 份的去重）", () => {
-    for (const t of ["brush", "eraser", "picker", "liquify", "filterBrush", "lasso"]) {
+    for (const t of ["brush", "eraser", "picker", "filterBrush", "lasso"]) {
       const expected = toolToRole(effectiveTool(t, false));
       eq(role({ tool: t, pointerType: "mouse", button: 0 }), expected, `mouse ${t}`);
       eq(role({ tool: t, pointerType: "pen", button: 0, buttons: 1 }), expected, `pen ${t}`);

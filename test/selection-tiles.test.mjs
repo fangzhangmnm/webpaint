@@ -253,7 +253,4 @@ describe("marching-ants · outline golden + 缓存", () => {
   });
 });
 
-// ===== charter H7（液化选区 doc-space）——现在 RED，S8 液化重写后改 it() 转绿 =====
-todo("H7-RED：选区 mask 是 doc 空间——液化对旧 layer.bbox 外像素仍按选区裁剪（liquify-engine 仍按 layer.bbox 烤 mask，S8 重写后转绿）");
-todo("H7-RED：液化把内容推出旧 layer.bbox，越界那半仍受选区语义约束（不再『半拉』；S8 转绿）");
-todo("H7-RED：bleed 三模式（import/clip/edge）在 doc-space mask 下语义不变（edge 的整数 cell march 保留；S8 转绿）");
+// charter H7（液化选区 doc-space）：S8 液化重写后已转绿 → 真测试在 test/liquify-docspace-mask.test.mjs。

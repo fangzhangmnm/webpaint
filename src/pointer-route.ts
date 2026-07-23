@@ -15,7 +15,6 @@ export function toolToRole(et: string): string {
   switch (et) {
     case "eraser": return "erase";
     case "picker": return "pick";
-    case "liquify": return "liquify";
     case "filterBrush": return "filterBrush";
     case "lasso": return "lasso";
     default: return "draw";         // brush / 未知 → draw
