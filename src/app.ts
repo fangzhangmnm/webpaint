@@ -177,9 +177,8 @@ const history = new UndoHistory({
   onApplied: (info) => {
     if (info.dir !== "do") {
       renderLayersPanel(); board.invalidateAll(); board.requestRender();
-      // v0.4.7（S6）：浮层活动中 undo/redo 可能改了源层像素（撤 stamp/reject/lift）——livePreview 门
-      // 会挡住 syncAll，借 lift 的 forceSync 机制强制下一帧重传（同盖印按钮的处理）。
-      if (input.lasso.hasFloating()) board.forceGLResyncUnderFloat();
+      // （S8e：旧 forceGLResyncUnderFloat hint 已拆——执行器把 float 源层标 updated，
+      //   contentVersion 快路径自会重传变更 tile，无需强制信号。）
     }
     if (info.status) setStatus(info.status);
   },

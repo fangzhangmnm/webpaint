@@ -67,9 +67,9 @@ export class GLBoard {
   }
 
   // 渲染一帧。affine6 = board _applyDocTransform 的 device-px 6 参；canvasW/H = device px。
-  // livePreview/forceSync 参数保留但不再门控（见文件头）；liveSyncLeaf 只取 id（标 updated，
-  //   像素变更由 contentVersion 快路径自己发现）。
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, _livePreview: boolean, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, _forceSync = false, surrogate: SurrogateInput | null = null): void {
+  // liveSyncLeaf 只取 id（标 updated，像素变更由 contentVersion 快路径自己发现）。
+  //   （S8e：旧 livePreview/forceSync 门控参数已拆——执行器增量 sync 后它们只剩历史意义。）
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, surrogate: SurrogateInput | null = null): void {
     if (this._glctx.isLost) return;
     const bg: Background | undefined = docBg === "checker" ? "checker"
       : docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;

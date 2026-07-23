@@ -107,7 +107,6 @@ export class Board {
   _strokeActiveHint?: (() => unknown) | null;
   // GL live-sync：原地改像素的笔描边中要重传 GPU 的活动叶（无=不重传，buffered brush/无描边）。
   _liveSyncProvider?: (() => Layer | null) | null;
-  _wasFloatActive?: boolean;   // 上帧是否有活动浮层（检测 lift 过渡帧 → forceSync 一次，同步挖洞）
   _lassoProvider?: (() => LassoInfo | null | undefined) | null;
   _activeSurrogateLayerId?: number | null;
   _activeSurrogateCanvas?: CanvasImageSource | null;
@@ -240,7 +239,11 @@ export class Board {
 
   // 由 BrushEngine 报告："layer 像素被改"（脏 bbox 参数现仅语义/旁观者用；GL-only 后无 partial-blit 消费它）。
   markDocDirty(_x0: number, _y0: number, _x1: number, _y1: number) {
-    this._glBoard?.markContentDirty();   // GL：内容脏
+    // S8e：原地引擎（液化/滤镜笔/像素笔）描边中每 move 都到这里——活动叶已在执行器 updated 集
+    //   （liveSyncProvider），contentVersion 快路径只重传变更 tile；此时若 markContentDirty 会把
+    //   全部段缓存每帧掀翻（S7 承诺的「液化每帧 sb0」被它打破）。描边中只请求重渲，
+    //   抬笔 commit 的 invalidateAll 才全失效。
+    if (!this._liveSyncProvider?.()) this._glBoard?.markContentDirty();
     // 通知挂在 doc 上的旁观者（如 reference live 镜像）。每个 brush stamp 都会触发，
     // 但 reference 端 markLiveDirty 仅置 flag + 走 rAF，不真合成，开销 ≪ 1ms。
     if (!Board._dispatchingDirty) {
@@ -360,15 +363,6 @@ export class Board {
   // 公共 API：layer 像素被改了（图层结构变 / 切换 / putImageData 等）
   invalidateAll() {
     this._glBoard?.markContentDirty();   // GL：图层/结构变 → 全量重传
-    this.requestRender();
-  }
-
-  // 盖印（stamp）落层后但 float 仍活：盖印经 _bakeDown 改了源层 tile，但 livePreview 门控会挡住 syncAll
-  //   → 盖印像素卡在 CPU tile、要等 commit 结束 float 才显。这里把"上帧无浮层"伪装出来，让下一帧重走 lift 的
-  //   forceSync 一次（_renderFullGL: floatActive && !_wasFloatActive），把盖印写进的源层 tile 同步上 GPU。
-  //   拖动中源层再次静止 → 不增加 per-帧成本（与 lift forceSync 同一机制）。
-  forceGLResyncUnderFloat() {
-    this._wasFloatActive = false;
     this.requestRender();
   }
 
@@ -571,21 +565,17 @@ export class Board {
   //   本 2D canvas 清透明、只画 lasso overlay + doc 边框（GL 透出 doc）。
   _renderFullGL(ctx: Ctx2D, W: number, H: number) {
     const docBg = this._showCheckerboard ? "checker" : (this.doc.backgroundColor || "#ffffff");   // 棋盘背景接缝（GL 合成器 doc 空间棋盘）
-    // live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中把活动叶每帧重传 GPU（否则 live 门控挡住 syncAll → 预览不动）。
+    // live-sync：原地改像素的笔（liquify/filterBrush/pixelMode）描边中把活动叶标 updated
+    //   （执行器 contentVersion 快路径每帧只重传变更 tile）。
     const liveSync = this._liveSyncProvider?.() ?? null;
-    // 自由变换 lift 那帧强制全量同步一次：lift 挖洞改了源层 tile，但 float 激活 → livePreview 真 → syncAll 被门控挡住
-    //   → GPU 仍是无洞源层（源内容+浮层双显）。检测 float 由无变有的过渡帧 forceSync 一次；拖动中源层静止不再同步。
-    const floatActive = !!this._lassoProvider?.()?.floating;
-    const forceSync = floatActive && !this._wasFloatActive;
-    this._wasFloatActive = floatActive;
     const stampOverlay = this._glStampOverlay();
     this._lastStampCount = this._showFps ? (stampOverlay?.stamps.length ?? 0) : 0;   // HUD only
     this._glBoard!.render(
       this.doc as unknown as GLDoc,
       this._docTransformParams(),
       W, H, this.viewport.scale, this._voidColor, docBg,
-      this._isLivePreview(), this._glFloatInputs(), stampOverlay,
-      liveSync as unknown as GLLeaf | null, forceSync, this._glSurrogate(),
+      this._glFloatInputs(), stampOverlay,
+      liveSync as unknown as GLLeaf | null, this._glSurrogate(),
     );
     // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。
     //   非 live-preview 帧（已 syncAll 把 tile 传 GPU）后释放各层物化缓存 → GL 模式不常驻第二份拷贝。

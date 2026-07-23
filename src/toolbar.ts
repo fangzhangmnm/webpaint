@@ -425,8 +425,7 @@ export function initToolbar(ctx: AppContext) {
   byId("lassoStampBtn").addEventListener("click", () => {
     if (!input.lasso.hasFloating()) return;
     if (input.lasso.stamp()) {
-      board.invalidateAll();
-      board.forceGLResyncUnderFloat();   // float 仍活 → 强制下一帧把盖印写进的源层 tile 同步上 GPU（否则等 commit 才显）
+      board.invalidateAll();   // S8e：执行器按 contentVersion 自愈，旧 forceGLResyncUnderFloat hint 已拆
       setStatus(t("se.stamped"));
     }
   });
