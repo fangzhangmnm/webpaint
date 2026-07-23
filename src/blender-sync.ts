@@ -22,7 +22,7 @@ import { renderDocToImageBlob } from "./session.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { setMenuOpen } from "./settings-menu.ts";
-import { editorState } from "./editor-state.ts";
+import { editorState } from "./workbench-state.ts";
 import { appState } from "./app-state.ts";
 import { BTPClient, BTPError } from "../vendor/btp/v1/index.js";
 import { t } from "./i18n/index.ts";
@@ -53,7 +53,6 @@ const ICON_BUSY =
 let ctx: AppContext;
 let client: BTPClient | null = null;        // 连上后的客户端（本机或远程 HTTPS，API 同形）
 let connState: "off" | "connecting" | "on" = "off";
-let connDetail = "";
 let pullTarget: "new" | "overwrite" = "new";    // 拉取去向
 let uploadSource: "merged" | "active" = "merged"; // 推送来源
 let uploadAsRef = false;                           // 推送后是否建/更新参考图（名字同贴图名）
@@ -125,7 +124,6 @@ function applyBlenderPanelFromEditorState() {
 
 function setConnState(s: "off" | "connecting" | "on", detail = "") {
   connState = s;
-  connDetail = detail;
   connBtn.dataset.state = s;
   connBtn.disabled = s === "connecting";
   const icon = s === "on" ? ICON_ON : s === "connecting" ? ICON_BUSY : ICON_OFF;

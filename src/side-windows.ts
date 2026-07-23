@@ -16,7 +16,7 @@ import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
 // initSideWindows(ctx) 填入；construct 期 null，仅 config 回调（lazy）/ button 接线读取。
-let setStatus: AppContext["setStatus"], editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"], input: AppContext["input"], _store: AppContext["store"], updateSaveStatus: AppContext["updateSaveStatus"];
+let setStatus: AppContext["setStatus"], editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"], input: AppContext["input"], updateSaveStatus: AppContext["updateSaveStatus"];
 
 // ---- 参考小窗 ----
 // 浮动 panel + 独立 viewport（pinch / zoom / rotate）。状态在 ReferenceWindow 内部维护。
@@ -82,7 +82,6 @@ export function initSideWindows(ctx: AppContext) {
   state = ctx.state;
   doc = ctx.doc;
   input = ctx.input;
-  _store = ctx.store;
   updateSaveStatus = ctx.updateSaveStatus;
 
   window.addEventListener("wp:toggleReference", () => referenceWindow.toggle());

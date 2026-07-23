@@ -173,7 +173,7 @@ LayerPixels 被替换/丢弃前必须 `dispose()`（现有落点：`Layer.setPix
 - ⚠ 开工前值得对本片单独做一次轻量 plan：spec 的兄弟合并/驻留规则是需求级，实现级的数据结构
   （pass 列表形状、缓存 key、pin 回调协议）需要落定。
 
-### S8 · 编辑逻辑迁移
+### S8 · 编辑逻辑迁移 ✅ 已落 v0.4.9（分支 worktree-v04-s8-s9-edit-migration，未 merge 未真机；报告 = docs/20260722-v04-s8-edit-migration.md）
 - brush：live = doc-size FBO 单张方案（替换下方图层的 pseudo-layer，继承其合成模式）；commit =
   tile-diff（bbox+逐 tile 变更检测）→ bridge 批量 readback → SwapPixels/UpsertTiles；旧
   rasterize→presentTo→readPixels→canvas→editRegion 路径死。**手感数学（smoother/taper/gamma）
@@ -187,7 +187,7 @@ LayerPixels 被替换/丢弃前必须 `dispose()`（现有落点：`Layer.setPix
 - 异步操作范式（SD 生成等）：await 期间不算 operator、锁 UI，图片到了走 new-layer operator，
   generative 一律写新图层（spec lines 241-242）——文档化即可，无 UI。
 
-### S9 · 日落 + 改名
+### S9 · 日落 + 改名 ✅ 已落 v0.4.10（同分支；体重合同未达标，诚实交代见 docs/20260722-v04-s9-sunset-weight.md §2；下一棒 = 真机总批，交接 = docs/20260722-v04-s8-s9-session-handoff.md）
 - 删 `src/layer-composite.ts`（消费方 ora renderMerged/psd/session 缩略图/board 2D fallback →
   render-tree export 路径）；删 `reference.ts` 手抄扁平合成；Canvas2D 残余（materialize/editRegion
   收缩到 import/export 边界）。

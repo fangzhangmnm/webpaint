@@ -13,16 +13,19 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
 import { WEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
-import { renderThumbBlob, setCurrentSessionName } from "./session.ts";
+import { thumbBlobFromCanvas, setCurrentSessionName } from "./session.ts";
+import { renderNodesToCanvas } from "./doc-render.ts";
 import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.ts";
+import { freezeDocForEncode } from "./doc.ts";
+import { makeAutosaveGate } from "./checkpoint-policy.ts";
 import { PaintDoc } from "./doc.ts";
 import type { Layer } from "./doc.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
 import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字节（branded：明文流不进只收密文的 sink）
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
-import { stripSessionExt, sessionFileName, sessionBareName } from "./config.ts";
-import { serializedToolStatePatch, editorState } from "./editor-state.ts";
+import { sessionFileName, sessionBareName } from "./config.ts";
+import { serializedToolStatePatch, editorState } from "./workbench-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
 import { setPassword, getPassword } from "./crypto-state.ts";
@@ -53,20 +56,19 @@ let updateSaveStatus: AppContext["updateSaveStatus"], updateNewerBanner: AppCont
 let pullSettingsAndState: AppContext["pullSettingsAndState"];
 let setColor: AppContext["setColor"], applyCheckerboard: AppContext["applyCheckerboard"], renderLayersPanel: AppContext["renderLayersPanel"];
 let setGalleryOpen: AppContext["setGalleryOpen"];
-let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"], uniqueNameFor: AppContext["uniqueNameFor"];
+let checkQuotaAndWarn: AppContext["checkQuotaAndWarn"];
 let gallery: AppContext["gallery"];
-let showFullscreenBusy: AppContext["showFullscreenBusy"], hideFullscreenBusy: AppContext["hideFullscreenBusy"];
 
 // ---- session 拥有的 SSoT 状态 ----
 let _activeSessionName: string | null = "未命名";   // 幽灵 path 保护：boot 成功/主动 open/new/save-as 才升级真名
 let _isLazyBlankSession = false;
-let _docLastSavedAt = 0;
 let _loadedDocIsNewer = false;
 let _loadedDocWriterVer: string | null = null;
 let _loadedDocNewerConfirmed = false;
 let _loadingDoc = false;
 
 const AUTOSAVE_MS = 3 * 60 * 1000;
+const _autosaveGate = makeAutosaveGate(AUTOSAVE_MS, () => Date.now());
 
 const _phase = reactive<{ current: "gallery" | "editing" | "lazyblank" }>({ current: "gallery" });
 function _recomputePhase() { _phase.current = !_activeSessionName ? "gallery" : _isLazyBlankSession ? "lazyblank" : "editing"; }
@@ -151,7 +153,22 @@ function _buildOraMeta() {
   );
   return { referenceImage: referenceWindow.getPersistBlob(), webpaintState: storeEditorStateToOra(), editorState: editorState.Serialize() };
 }
-function _encodeCurrentOra(): Promise<Blob> { return encodeDocToOra(doc, _buildOraMeta() as Parameters<typeof encodeDocToOra>[1]) as Promise<Blob>; }
+// S8（spec:41 存档一致性）：encode 前**同步**冻结 {结构 + 每叶 tile 快照}（零拷贝），bytes 与 peek
+//   读同一冻结视图 → encode 的 await 间隙里任何编辑（描边 commit / 层结构操作）都不撕存档，
+//   且不阻塞用户（tile 不可变 ⇒ 后续编辑全是 CoW 新 tile）。达意实现 spec「保存阻塞锁写不锁读」，
+//   比字面锁更强——待追认（S8 报告拍板清单）。
+async function _encodeCurrentOraWithPeek(): Promise<{ bytes: Blob; peek: Blob | null }> {
+  // merged（GL 合成）与 freeze 在**同一同步刻**取自活 doc → mergedimage/缩略图/层数据三者一致。
+  //   GL 不可用（context lost 中的 autosave）→ merged=null：ora 用透明占位、peek 省略——层数据照常落盘。
+  const merged = renderNodesToCanvas(doc.layers, doc.width, doc.height);
+  const { frozen, dispose } = freezeDocForEncode(doc as Parameters<typeof freezeDocForEncode>[0]);
+  try {
+    const meta = _buildOraMeta() as Record<string, unknown>;
+    const bytes = await encodeDocToOra(frozen as unknown as Parameters<typeof encodeDocToOra>[0], { ...meta, mergedCanvas: merged } as Parameters<typeof encodeDocToOra>[1]) as Blob;
+    const peek = merged ? await thumbBlobFromCanvas(merged, 256) : null;
+    return { bytes, peek };
+  } finally { dispose(); }
+}
 
 // ---- blank-unnamed 自检 ----
 function _docIsBlankUnnamed() {
@@ -218,7 +235,7 @@ function _adoptCommon(loaded: LoadedDoc, name: string, opts: { create?: boolean 
   adoptModel(loaded);
   _setActive(name); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(name), opts);
-  _docLastSavedAt = Date.now(); updateSaveStatus(); _refreshEncrypted();
+  updateSaveStatus(); _refreshEncrypted();
 }
 
 // ---- checkpoint / revert（v415 重接；prod 有、dev 在 store cutover 删 _store.seal 后成了 stub）----
@@ -268,7 +285,6 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
   try {
     await es.flushLocal();   // encode（+peek）→ store.file.save({tryPush:false})；只落本地（consent-safe）
                              // desk 不进 need：内容脏时顺手被 _buildOraMeta 捞走，不自己驱动落盘（v409）
-    _docLastSavedAt = Date.now();
     setStatus(t("ss.saved", { name: _activeSessionName ?? "" }));
     checkQuotaAndWarn();
   } catch (e) { reportError(new Error("[session] save failed: " + String(e)), "log"); setStatus(t("ss.saveFailed", { error: errMsg(e) })); }
@@ -291,7 +307,6 @@ async function saveAndPush() {
     //   顺带把当前 desk 捞进 ora（_buildOraMeta → syncRuntimeForSave + Serialize）。
     //   冲突/错误经 store 的 ui bundle surface。
     await es.forceSaveAndPush();
-    _docLastSavedAt = Date.now();
     // 别无条件报「已同步」：push 失败在 store 内部被 catch 成 banner，这里**不会**抛。
     //   唯一可靠的判据是 es.isPushPending()（v433）——它是 save() 返回的 pushed 一路带上来的。
     setStatus(!isSignedIn() ? t("ss.savedLocalIdb", { name })
@@ -363,7 +378,7 @@ async function renameCurrentSession({ suggested, reason }: { suggested?: string;
         // 改名 = 换身份 → 旧 key 的快照丢掉（不搬：搬要连密文一起复制，而"改名丢一次快照"是诚实的小代价）。
         void _dropCheckpoint(oldName);
         _setActive(trimmed); _recomputePhase();
-        _docLastSavedAt = Date.now(); updateSaveStatus();
+        updateSaveStatus();
         // 别再无条件报「已重命名（含云端）」：store 现在会透出旧名到底怎么了。
         //   oldKept   谱系不明 → 改名降级为「另存」，云端旧名**原地留着** → 必须说清楚，否则用户以为旧的没了
         //   cloudDeferred 云端没推成 → 新名只在本地
@@ -418,7 +433,7 @@ async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: 
   resetEditorState();
   applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
   es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
-  _docLastSavedAt = 0; updateSaveStatus();
+  updateSaveStatus();
   await saveNow();   // 落盘（tryPush:false；撞名 → saveNow try/catch surface）
   void _captureCheckpoint(name, "new-doc");   // 空白态封一份 → revert = 回到刚新建的样子
   setGalleryOpen(false);
@@ -509,21 +524,20 @@ async function restoreSession(name: string): Promise<boolean> {
     if (await _file(name).isEncrypted()) { if (!(await ensureUnlocked(name))) return false; }
     if (!(await es.open(toFull(name)))) return false;   // 文件缺失/锁定 → 未装入。边界转全名。
     _setActive(name); _isLazyBlankSession = false; _recomputePhase(); _refreshEncrypted();
-    _docLastSavedAt = Date.now(); updateSaveStatus();
+    updateSaveStatus();
     return true;
   } catch (e) { reportError(new Error("[session] restore failed: " + String(e)), "log"); return false; }
 }
 
 // 另存为：当前内容写新身份（旧的不动）+ 切到新名继续编辑。
 async function saveAs(newName: string): Promise<void> {
-  const bytes = await _encodeCurrentOra();
-  const peek = await renderThumbBlob(doc, 256);
+  const { bytes, peek } = await _encodeCurrentOraWithPeek();
   // 另存为=写**新身份** → mode:"new"（撞名不静默覆盖；topbar 已 nameOccupied 预检，这里 store 层再兜底红线）。
   await _store.file(toFull(newName), { isZip: true, mode: "new" }).save(bytes, { tryPush: true, hint: peek ? { peek } : undefined });
   _setActive(newName); _isLazyBlankSession = false; _recomputePhase();
   es.adopted(toFull(newName));   // es 切到新名（内容即新名的；下轮 autosave 若跑=同内容 re-save，无害）。边界转全名。
   void _captureCheckpoint(newName, "save-as");   // 新身份的「打开态」= 此刻
-  _docLastSavedAt = Date.now(); updateSaveStatus(); gallery.refresh();
+  updateSaveStatus(); gallery.refresh();
 }
 
 // setName(name)：改活动身份（内存 + 持久 appState.currentFile 两轨齐动）。
@@ -578,8 +592,7 @@ export function initSession(ctx: AppContext) {
   pullSettingsAndState = ctx.pullSettingsAndState;
   setColor = ctx.setColor; applyCheckerboard = ctx.applyCheckerboard; renderLayersPanel = ctx.renderLayersPanel;
   setGalleryOpen = ctx.setGalleryOpen;
-  checkQuotaAndWarn = ctx.checkQuotaAndWarn; uniqueNameFor = ctx.uniqueNameFor;
-  showFullscreenBusy = ctx.showFullscreenBusy; hideFullscreenBusy = ctx.hideFullscreenBusy;
+  checkQuotaAndWarn = ctx.checkQuotaAndWarn;
   gallery = ctx.gallery;
 
   // ora editor 适配器 + editor-session（生命周期编排全塌进这里）。
@@ -588,15 +601,22 @@ export function initSession(ctx: AppContext) {
 
     editor: {
       adopt: async (bytes: Blob) => { const loaded = await decodeOraToDoc(bytes) as LoadedDoc; adoptModel(loaded); },
-      encode: async () => ({ bytes: await _encodeCurrentOra(), peek: await renderThumbBlob(doc, 256) }),
+      encode: async () => await _encodeCurrentOraWithPeek(),
       // ⚠ wp:histchange 在 **window** 上 dispatch（history.ts）——绑 document 收不到 → 打开的文档编辑永不标脏、
       //   保存静默 no-op、编辑丢失（2026-07-12 真机抓到的数据丢失根因；其余监听者都用 window）。
       onChange: (cb: () => void) => { window.addEventListener("wp:histchange", () => { if (!_loadingDoc) cb(); }); },
     },
     isZip: true,
-    policy: { autosaveMs: AUTOSAVE_MS, pushOn: ["exit"] },
+    policy: { autosaveMs: 0, pushOn: ["exit"] },   // S8：interval autosave 退役，改挂 bg-jobs（下方）
   });
-  es.start();   // autosave 3min（只本地）+ visibility/pagehide flush（内部按 policy）
+  es.start();   // visibility/pagehide/blur 抢救 flush（崩溃安全直调，不受空闲节流）
+  // S8（spec:40/42）：autosave 挂 background-sync-jobs 低优先级——只在空闲跑（输入插队自动让路，
+  //   不再有 setInterval 在描边中途 encode 卡主线程）；makeAutosaveGate 给 min 周期（不折腾 idb）。
+  //   encode 内部有冻结快照 → 即使 flushLocal 的 await 期间用户开画，存档也一致。
+  ctx.bgJobs.register("autosave", 5, () => {
+    if (_autosaveGate(es.isDirty())) void es.flushLocal();
+    return "done";
+  });
   // （v409：无 desk 改动桥 —— desk 不标脏、不驱动落盘，只在顺路 encode 时被 _buildOraMeta 捞走。详 editor-state.ts ⚠）
 
   _recomputePhase();

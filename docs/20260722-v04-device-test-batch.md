@@ -1,4 +1,4 @@
-# WebPaint 0.4 · 真机批总单（S0–S7 全部积压，一次交付）
+# WebPaint 0.4 · 真机批总单（S0–S9 全部积压，一次交付）
 
 > as-of v0.4.8 / 2026-07-22。四份来源清单的**去重合并版**，按 iPad 上一遍过的动线排序。
 > 细节以来源为准：batch1 = `20260722-v04-batch1-handoff.md` §3 · S5 = `…-s5-selection-tiles.md` §3
@@ -90,3 +90,32 @@ HUD 第二行速查：`Np`=pass 数 · `sb`=本帧建段 · `sh`=段命中 · `!
 ## 9. 待人类拍板项（测的时候顺手感受，别当 bug 报）
 
 ① accept 后选区去留（现状=清）；② reject 在 AA 软边的覆盖率损失（§1.2）；③ 点选图层是否入 undo。(S6)
+
+## 10. S8 · 编辑逻辑迁移新增（对水印 ≥ v0.4.10）
+
+- **画笔 commit=GPU merge（根治点）**：全矩阵重验——普通/橡皮/锁α/笔刷混合模式/带选区描边/
+  buildup vs wash/低不透明度。重点盯「**live 预览 vs 抬笔后**」必须完全一致（旧 Canvas2D commit
+  与 GPU live 是两套引擎，本批起同一个，smoke 已 maxΔ=0）；每种各 undo/redo 一次。
+- 大笔刷长描边抬笔延迟感（commit 换 bbox 单次 readback + tile-diff）。
+- **液化带选区把内容推出原内容边界**：越界那半照常液化（H7 半拉根治）；bleed 三模式
+  （拉边界外/不拉/边缘拉伸）观感不变。
+- 液化/滤镜笔/像素笔**描边中** HUD 第二行 sb 应恒 0（原地描边不再每帧掀翻段缓存）+ 顺滑度体感。
+- 吸管 composite 模式（组/clip/混合模式/棋盘背景场景）取色 = 所见颜色；「layer」模式不回归。
+- 变换中盖印立即显示（v360 场景重验——hint 机器拆除后走 contentVersion 自愈）；浮层中 undo/redo
+  源层像素立即刷新（app onApplied 的 forceGLResync 调用点已删）。
+- autosave：长时间画画不再有周期性卡顿（encode 挪到空闲 + 冻结快照）；画到一半杀 app →
+  重开恢复到最近 autosave；加密件 autosave/恢复正常；Ctrl+S 时间戳照走。
+- 拍板项追加：④ encode 一致性用 tile 快照替代「阻塞锁写」（spec:41 达意，待追认）；
+  ⑤ 调整预览开着时吸管取真像素而非预览替身（UI 上两者互斥，理论不可达——顺手确认）。
+
+## 11. S9 · 合成引擎收敛新增（对水印 ≥ v0.4.10）
+
+- **导出/缩略图全链换 GL 合成**（与画布显示同引擎）：导出 png（透明保留）/jpg（涂底）/
+  仅当前层（含组、含 clip 层）/ora/psd、复制到剪贴板、打印、Blender 推拉——观感与画布一致。
+- **图库缩略图**（.ora 内 mergedimage/thumbnail 也换了源）：新保存的画缩略图正确、含组/clip 的
+  画不再与画布有出入；加密件缩略图照常。
+- 参考窗「镜像画布」模式：组/clip 图层正确显示（旧手抄扁平合成会漏）；描边中镜像 300ms 节流的
+  跟手观感（拍板项⑥：节流值要不要调）。
+- GL context lost 期间 autosave 不崩（mergedimage 落透明占位、层数据完整）——切后台催丢
+  context 后回来看保存状态。
+- 改名迁移无感：旧 .ora 打开正常（.webpaint/editor-state.json key 未动）。

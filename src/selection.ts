@@ -25,7 +25,7 @@
 
 import { TILE_SIZE } from "./tiles/tile-geometry.ts";
 import { appTilePool } from "./tiles/app-tile-pool.ts";
-import { computeBBox, type TileHandle, type TileBBox } from "./tiles/cpu-tile-pool.ts";
+import { computeBBox, type TileHandle } from "./tiles/cpu-tile-pool.ts";
 
 type Bitmap = OffscreenCanvas | HTMLCanvasElement;
 type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;

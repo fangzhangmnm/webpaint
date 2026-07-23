@@ -23,7 +23,6 @@
 
 import { BrushEngine } from "./brush.ts";
 import { reportError } from "./error-badge.ts";
-import { LiquifyEngine } from "./plugins/liquify-engine.ts";
 import { LassoEngine } from "./lasso.ts";
 import { FilterBrushEngine } from "./filter-brush.ts";
 import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
@@ -49,16 +48,13 @@ type Doc = PaintDoc;
 type History = UndoHistory;
 type PixelHistory = PixelEdits;
 type PixelTx = PixelTxClass;
-// liquify settings：引擎的 LiquifySettings 未 export；input 只用 mode/size/strength，
-//   bleed 等其余字段引擎内部从 settings 取 → 用 ResolvedBrush 同惯例的最小壳 + unknown 兜底。
-interface LiquifySettings { mode: string; size: number; strength: number; bleed?: string; }
 // filterBrush 当前激活态：Filter 是 filter-brush.ts 的 BrushFilter（未 export，对 input 不透明）+ params。
 //   beginStroke 调用点再断言到引擎签名；这里 Filter/params 对 input 不透明 → unknown。
 interface FilterBrushState { Filter: unknown; params: unknown; }
 
-// 活动笔画（brush / liquify / filterBrush 共享 begin/extend/end/cancel 协议）。
-// 三引擎的 begin*/extend/end/cancel/flushDirty 接口一致 → 用并集做 engine 字段。
-type StrokeEngine = BrushEngine | LiquifyEngine | FilterBrushEngine;
+// 活动笔画（brush / filterBrush 共享 begin/extend/end/cancel 协议；液化 = filterBrush 的
+//   LiquifyFilter payload，v132 user：「液化先 migrate 到 filter brush」——S8 删掉了残留的直连双轨）。
+type StrokeEngine = BrushEngine | FilterBrushEngine;
 // inPlace = 描边中原地改 layer 像素（liquify/filterBrush/pixelMode brush），非 overlay 预览。
 //   GL 模式下这类笔的 live 预览要靠 board 每帧把活动层重传 GPU（buffered brush 走 GPU stamp overlay，不算）。
 interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; inPlace: boolean; }
@@ -111,7 +107,6 @@ interface InputOpts {
   getTool?: () => string;
   editMode?: EditMode | null;
   getResolvedBrush?: () => ResolvedBrush | null;
-  getLiquifySettings?: () => LiquifySettings;
   getFilterBrushState?: () => FilterBrushState | null;
   getLongPressPickEnabled?: () => boolean;
   getSingleFingerDraw?: () => boolean;
@@ -133,7 +128,6 @@ interface KeyboardShortcut {
   run: (i: InputController) => void;
 }
 
-const ERASER_RADIUS_SCREEN = 0;   // 用 BrushEngine 自己的 size，不再独立
 const TAP_MAX_DURATION = 220;
 const TAP_MAX_MOVE = 16;
 const DOUBLETAP_WINDOW = 500;
@@ -304,13 +298,11 @@ export class InputController {
   doc: Doc;
   canvas: HTMLCanvasElement;
   brush: BrushEngine;
-  liquify: LiquifyEngine;
   lasso: LassoEngine;
   filterBrush: FilterBrushEngine;
   getTool: () => string;
   editMode: EditMode | null;
   getResolvedBrush: () => ResolvedBrush | null;
-  getLiquifySettings: () => LiquifySettings;
   getFilterBrushState: () => FilterBrushState | null;
   getLongPressPickEnabled: () => boolean;
   getSingleFingerDraw: () => boolean;
@@ -337,7 +329,6 @@ export class InputController {
     this.doc = doc;
     this.canvas = board.canvas;
     this.brush = new BrushEngine();
-    this.liquify = new LiquifyEngine();
     this.lasso = new LassoEngine();
     // v132 filter brush（user：「blur/sharpen/液化 走 filter brush engine」）
     //   引擎本身是薄 delegate；filter 自己提供 begin/extend/end brush 方法
@@ -349,7 +340,6 @@ export class InputController {
     this.getTool = opts.getTool || (() => "brush");
     this.editMode = opts.editMode || null;   // EditMode 独占状态机（路由/gate/ctrl-z 用，见 edit-mode.js）
     this.getResolvedBrush = opts.getResolvedBrush || (() => null);   // 必须传
-    this.getLiquifySettings = opts.getLiquifySettings || (() => ({ mode: "push", size: 50, strength: 0.5 }));
     // v132 filter brush 当前激活的 { Filter, params } 或 null
     this.getFilterBrushState = opts.getFilterBrushState || (() => null);
     this.getLongPressPickEnabled = opts.getLongPressPickEnabled || (() => false);
@@ -412,17 +402,14 @@ export class InputController {
   _updateCursorPreview(e: PointerEvent) {
     // #6 stage 4b：圆的显隐从 EditMode.cursor() 派生（取代硬编码 tool 列表）。
     //   "none"/"grab"（picker/lasso/hand + transform/crop/adjust）→ 不显（修"transient 时圆没隐藏"）
-    //   "ring"（liquify）→ 显，用液化笔大小；"brush"（笔/橡皮/filterBrush）→ 显，用画笔大小
+    //   "brush"（笔/橡皮/filterBrush 含液化）→ 显，用画笔大小
     const cur = this.editMode ? this.editMode.cursor() : "brush";
     if (cur === "none" || cur === "grab") {
       this.board.setCursor(null);
       return;
     }
     let size, square = false, aspect = 1, rotation = 0;
-    if (cur === "ring") {
-      const q = this.getLiquifySettings();
-      size = (q && q.size) ? q.size * 2 : 100;     // size 是半径 → 直径 = ×2
-    } else {
+    {
       const settings = this.getResolvedBrush();
       size = settings ? settings.size : 12;
       // v232：像素笔 stamp 是方的（fillRect），preview 跟着方，别用圆误导
@@ -471,7 +458,7 @@ export class InputController {
       for (const [, p] of this.pointers) {
         if (p.longPressTimer) { clearTimeout(p.longPressTimer); p.longPressTimer = null; }
       }
-      for (const [pid, p] of this.pointers) {
+      for (const p of this.pointers.values()) {
         if (isPixelStroke(p.role as string)) {
           this._abortStroke();
         } else if (p.role === "lasso") {
@@ -558,8 +545,7 @@ export class InputController {
       // 即时笔（pixel）二参平滑状态：累积 raw / 死区锚 / EMA 输出(smX/Y 已在 rec 字面量锚为起点)
       rec.rawSX = x; rec.rawSY = y;
       rec.stabX = x; rec.stabY = y;
-      if (role === "liquify") this._beginLiquify(rec);
-      else if (role === "filterBrush") this._beginFilterBrush(rec);
+      if (role === "filterBrush") this._beginFilterBrush(rec);
       else {
         // mode 推断：erase / brush
         const mode = role === "erase" ? "erase" : "brush";
@@ -829,8 +815,7 @@ export class InputController {
     const scale = this.board.viewport.scale || 1;
     // v249：时间常数指数追踪 + 死区。{tau, deadzone}。
     const smooth = buffered ? _resolveSmooth(settings, scale) : {};
-    // GL 模式：buffered 描边 live+commit 全 GPU → 引擎跳 CPU frozen 烤/CPU overlay（Stage 2）。
-    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp, this.board.isGLBoard());
+    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
     const bbox = this.brush.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
@@ -843,19 +828,25 @@ export class InputController {
     const as = this._activeStroke;
     if (!as) return;
     this._activeStroke = null;
-    // Stage 3：brush 描边在 GL 模式走 GPU commit（栅格 stamp→readback→editRegion，buildup 解析）；
-    //   其它引擎(liquify/filterBrush) 或 2D 模式照旧 CPU。选区由下方 finalize 的 applyMaskPostStroke 兜。
-    const glRaster = (as.engine === this.brush) ? this.board.glStrokeRasterizeFn() : null;
-    if (glRaster) this.brush.endStroke(glRaster);
-    else as.engine.endStroke();
-    const sel = as.finalize ? this.doc.selection : null;
-    // commit 的 finalize 形参是可选（运行时 falsy 即跳过）；保留旧的 `: null` 分支，仅 type 上窄到入参类型。
+    // S8：buffered brush 的落层 = board.commitBrushStroke（GPU merge，live 同一 shader → 选区/锁α/
+    //   blendMode/opacity 全在 shader，live 即 commit 所见）。其它引擎（liquify/filterBrush/pixel）
+    //   在描边中已 in-place 落层，endStroke 只清状态。
+    let gpuCommitted = false;
+    if (as.engine === this.brush) {
+      const cs = this.brush.endStroke();   // 最终 stamps（含 tail/taper）；pixelMode/空笔 → null
+      if (cs && cs.stamps.length) gpuCommitted = this.board.commitBrushStroke(cs);
+    } else {
+      as.engine.endStroke();
+    }
+    // finalize（applyMaskPostStroke CPU 兜选区）只兜没走 GPU commit 的路径（pixel 笔/液化）：
+    //   GPU commit 的选区已由 shader 裁（与 live 一致），再兜是重复劳动 + 一次整层物化。
+    const sel = (as.finalize && !gpuCommitted) ? this.doc.selection : null;
     type CommitFn = NonNullable<Parameters<PixelTx["commit"]>[0]>;
     const finalize: CommitFn | null = sel
       ? (layer, pre) => sel.applyMaskPostStroke(layer as Parameters<Selection["applyMaskPostStroke"]>[0], pre)
       : null;
     as.tx.commit(finalize as Parameters<PixelTx["commit"]>[0]);
-    // 抬笔 commit：endStroke 已把像素烤进 layer → invalidateAll 触发重渲 + GL markContentDirty（下一帧 syncAll 同步）。
+    // 抬笔 commit：像素已落 layer → invalidateAll 触发重渲 + GL markContentDirty。
     this.board.invalidateAll();
   }
   _abortStroke() {
@@ -876,21 +867,6 @@ export class InputController {
     if (!as || !as.inPlace) return null;
     const layer = this.doc.activeLayer;
     return (layer && !(layer as Layer).isGroup) ? (layer as Layer) : null;
-  }
-
-  // ---- 液化 ----
-  // 一次"按-拖-抬"= 一个 "liquify" history entry。schema 同 stroke。
-  _beginLiquify(rec: PointerRec) {
-    const settings = this.getLiquifySettings();
-    if (!settings || !this.doc.activeLayer) { rec.role = null; return; }
-    const layer = this.doc.activeLayer as Layer;   // 组已被上游硬拒，此处确为叶
-    const spec = pixelStrokeSpec(rec.role as string)!;   // liquify → 独立 "liquify" 事务 + finalize
-    const tx = this.pixelHistory!.begin(layer, spec.historyType);
-    this._activeStroke = { engine: this.liquify, tx, finalize: spec.finalize, inPlace: true };
-    const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
-    // v124 (user：「preview 没 apply 选区」) 把 selection 传给 liquify，stamp 内 mask 外保留 startSnap
-    this.liquify.beginStroke(layer, settings, dx, dy, this.doc.selection);
-    this.board.requestRender();
   }
 
   // ---- Filter brush (v132) ----
@@ -1030,16 +1006,15 @@ export class InputController {
     // 两种取样模式（吸色 context toolbar 的下拉，state.pickMode）：
     //   "layer"     = 当前编辑图层的 **raw 像素**（无视该层叠加模式 / clip / 图层 opacity）；
     //                 active 是组 / 无可取叶 → 退回 composite。
-    //   "composite" = **最终合成可见颜色**（board 1:1 合成缓存 = 规范合成器产物，respect mode+clip+组隔离）。
+    //   "composite" = **最终合成可见颜色**（S8：render-tree 一次性 GPU 合成 + 1px readback，
+    //                 respect mode+clip+组隔离；合成组没有 CPU tile，必须 GPU 读，spec:243-244）。
     // 两路都 over doc 背景得不透明色。
     let px;
     const active = this.doc.activeLayer;
     if (this.getPickMode() === "layer" && active && !active.isGroup && active.sampleAt) {
       px = active.sampleAt(ix, iy);
     } else {
-      const off = this.board.ensureCompositeCache();
-      const octx = off.getContext("2d", { willReadFrequently: true });
-      try { px = octx!.getImageData(ix, iy, 1, 1).data; } catch { px = [0, 0, 0, 0]; }
+      px = this.board.pickCompositeColor(ix, iy) ?? [0, 0, 0, 0];
     }
     const bg = parseHex(this.doc.backgroundColor || "#ffffff");
     const la = px[3] / 255;

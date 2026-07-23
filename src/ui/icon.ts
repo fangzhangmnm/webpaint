@@ -24,8 +24,3 @@ export function iconHtml(name: IconName, opts: { size?: number; cls?: string } =
 }
 
 /** 图标 DOM 节点（给 appendChild 用）。 */
-export function iconEl(name: IconName, opts: { size?: number; cls?: string } = {}): SVGSVGElement {
-  const tpl = document.createElement("template");
-  tpl.innerHTML = iconHtml(name, opts);
-  return tpl.content.firstElementChild as SVGSVGElement;
-}

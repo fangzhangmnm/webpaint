@@ -1,22 +1,34 @@
 // GLCompositor —— WebGL2 图层合成器（docs/20260614-perf-webgl-memory-clip.md §3 模块 4）。
 //
-// 算法：ping-pong 两张预乘累积器，**一层一 pass**——每 pass 全屏，shader 按 doc 坐标查 tile-index
-//   采源 + 累积器（预乘）→ W3C blend + source-over → 写另一张、交换。clip = 源α×基底α（无 2D dst-in）。
-// 组（递归）：
-//   - pass-through 组（唯一非隔离态）：子层直接落**同一**累积器（能与组下方层混）。
-//   - 隔离组（mode≠pass-through || opacity<1 || clip）：子层先合到**独立** sub-accumulator，
-//     再当一个组单元（group 源 shader：采预乘 sub-accumulator 解预乘）按 group.opacity/mode/clip 整体混。
-//   隔离/clip 判定与基底解析全走 gl-compose-plan.ts（与 2D layer-composite.ts 逐条对齐）。
-//
-// 待续：overlay/float 注入（2c）；组作 clip 基底（罕见，现仅支持叶作基底）。
-// 验证：纯 gl.*，node no-op → smoke 拿真 layer-composite.ts compositeLayers 当 golden 对拍（组/clip/嵌套）。
+// 算法：ping-pong 两张直值累积器，**一层一 pass**——每 pass 全屏，shader 按 doc 坐标查 tile-index
+//   采源 + 累积器 → W3C blend + source-over → 写另一张、交换。clip = 源α×基底α（无 2D dst-in）。
+// S9 起本类只剩 **pass 原语**（begin/newAcc/pass/floatPass/finishAcc/end/present/warp）——
+//   树递归执行器归档进 test/gl-smoke/reference-gl-compositor.ts（smoke 对拍参照），
+//   生产唯一执行器 = render-tree-gl（render-plan 驱动）。
 
 import { COMPOSITE_VERT, compositeFragSource, compositeProgramKey } from "./blend-glsl.ts";
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
-import { resolveClipBases, needsIsolation, groupUnitMode } from "./gl-compose-plan.ts";
-import type { CompNode, OverlayDesc, FloatDesc } from "./gl-compose-plan.ts";
 import type { IndexTexture } from "./gpu-tile-pool.ts";
 import type { GLContext, PooledFBO, FBOPrec } from "./gl-context.ts";
+
+// live 描边 overlay（活动叶层叠加）：直值纹理 + doc 坐标 bbox + 不透明度/擦除/锁α/选区蒙版。
+export interface OverlayDesc {
+  tex: WebGLTexture;
+  opacity: number;
+  erase: boolean;
+  blendMode: BlendMode;   // 笔刷混合模式（overlay 合到 base 用；erase 时忽略）
+  ox: number; oy: number; ow: number; oh: number;   // doc 坐标 bbox（shader 按此映射，bbox 外透明）
+  lockAlpha?: boolean;    // 锁α：overlay 裁到 base 现有 alpha
+  selMask?: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null;
+}
+// 自由变换浮层 = GPU warp 输入：未 warp 源纹理 + 逆单应性 Hinv（doc→源单位方格）+ sampleMode。
+//   在源层 z 之上 source-over α=1，忽略源层 mode/opacity（与 overlay 不同——overlay 随层）。
+export interface FloatDesc {
+  tex: WebGLTexture;      // 源纹理（未 warp，直值，srcW×srcH，常驻——拖动中只换 hinv）
+  srcW: number; srcH: number;
+  hinv: number[];         // 9，row-major，doc(x,y,1)→源 (u,v,w) 透视除
+  mode: number;           // 0=nearest 1=bilinear 2=bicubic
+}
 
 // 文档背景接缝（对齐 2D compositeLayers 的 bg + board._drawCheckerboard）：
 //   undefined = 透明（present 时 void 色透出）；[r,g,b,a] = 预乘纯色（doc 背景色）；"checker" = 透明棋盘。
@@ -189,18 +201,7 @@ export class GLCompositor {
     return this._glctx.program(compositeProgramKey(mode, src, overlayMode), COMPOSITE_VERT, compositeFragSource(mode, src, overlayMode));
   }
 
-  // 合成一个层级的兄弟节点（自底向上）进一张预乘累积器 FBO 返回。caller 负责 returnFBO。
-  // arrayTex = TileBackend 稀疏 tile 池纹理；docW/H = doc 像素尺寸。
-  // bg = 底色（**预乘** [r,g,b,a]，doc 背景色；缺省透明）。顶层用 doc bg；组 sub-accumulator 永远透明。
-  // VAO/viewport 在此绑定一次；隔离组递归走 _composeFresh（**不碰 VAO**，否则解绑会废掉外层后续 pass）。
-  composite(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
-    this.begin(docW, docH, true);
-    const result = this._composeFresh(arrayTex, nodes, docW, docH, bg);
-    this.end();
-    return result;
-  }
-
-  // ---- S7 执行器原语（render-tree-gl 驱动；composite() 也建其上） ----
+  // ---- 执行器原语（render-tree-gl / 对拍 harness 驱动） ----
 
   // 帧作用域：绑 VAO + viewport（doc 尺寸）一次。resetStats=false 时保留计数（执行器整帧统计）。
   begin(docW: number, docH: number, resetStats = true): void {
@@ -228,19 +229,10 @@ export class GLCompositor {
     return acc.read;
   }
 
-  // 内部：合兄弟数组进一张新累积器返回（假设 VAO 已绑、viewport 已设）。隔离组递归用它（清透明）。
-  private _composeFresh(arrayTex: WebGLTexture, nodes: CompNode[], docW: number, docH: number, bg?: Background): PooledFBO {
-    const acc: Acc = {
-      read: this._glctx.borrowFBO(docW, docH, this._prec),
-      write: this._glctx.borrowFBO(docW, docH, this._prec),
-    };
-    if (bg === "checker") { this._clear(acc.read, undefined); this._drawChecker(acc.read, docW, docH); }
-    else this._clear(acc.read, bg);
-    this._applyNodes(arrayTex, nodes, acc, docW, docH);
-    return this.finishAcc(acc);
-  }
+  // FBO 归还公共透传（执行器/对拍 harness 归还 finishAcc / 隔离组结果用）。
+  returnFBO(f: PooledFBO): void { this._glctx.returnFBO(f); }
 
-  // 棋盘背景 pass → 填进累积器（doc 空间）。VAO 已由 composite() 绑、viewport 已设。
+  // 棋盘背景 pass → 填进累积器（doc 空间）。VAO 已由 begin() 绑、viewport 已设。
   private _drawChecker(f: PooledFBO, docW: number, docH: number): void {
     const gl = this._glctx.gl;
     const prog = this._glctx.program("checker", COMPOSITE_VERT, CHECKER_FRAG);
@@ -250,39 +242,6 @@ export class GLCompositor {
     gl.disable(gl.BLEND);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  }
-
-  // 把兄弟节点逐个 pass 到 acc（pass-through 组递归到同一 acc；隔离组先合 sub 再整体混）。
-  private _applyNodes(arrayTex: WebGLTexture, nodes: CompNode[], acc: Acc, docW: number, docH: number): void {
-    const bases = resolveClipBases(nodes);
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i];
-      if (!node.visible) continue;
-      const base = bases[i];
-      // clip 无基底 → 层本身不渲染，**但浮层仍要显**（变换中整层被提起、基底变空时，clip 层的 float 不能跟着消失；
-      //   对齐 2D layer-composite.ts:131/143 —— float 独立于 clip 绘制）。组无 float → clip 无基底直接跳。
-      const clipNoBase = node.clip && !base;
-      // clip 基底：仅支持叶作基底（其 tile-index 即蒙版）。组作基底罕见，暂不支持（当无 clip）。
-      const clipIndex = base && base.kind === "leaf" ? base.srcIndex : null;
-
-      if (node.kind === "leaf") {
-        if (!clipNoBase) {
-          const srcKind = node.overlay ? "overlay" : "tiled";
-          this.pass(arrayTex, srcKind, node.srcIndex, null, node.mode, node.opacity, clipIndex, acc, docW, docH, node.overlay ?? null);
-        }
-        // 自由变换浮层：源层 z 之上 source-over α=1（独立 pass）。clip 浮层 + 基底也是浮层（组变换）→ 裁到基底
-        //   浮层 warp 后 alpha（base.float）；基底静止/非叶则不裁（见 docs/20260628-transform-clip-gpu-warp.md 边界）。
-        if (node.float) this.floatPass(node.float, acc, docW, docH, (node.clip && base && base.kind === "leaf") ? base.float ?? null : null);
-      } else if (clipNoBase) {
-        continue;
-      } else if (needsIsolation(node)) {
-        const sub = this._composeFresh(arrayTex, node.children, docW, docH);   // 独立 sub-accumulator（不碰 VAO）
-        this.pass(arrayTex, "group", null, sub.tex, groupUnitMode(node), node.opacity, clipIndex, acc, docW, docH);
-        this._glctx.returnFBO(sub);
-      } else {
-        this._applyNodes(arrayTex, node.children, acc, docW, docH);        // pass-through：续同一 acc
-      }
-    }
   }
 
   // 一个 blend pass：src(tiled 叶或段 / group 直值纹理) 与 acc.read 合 → acc.write，交换。

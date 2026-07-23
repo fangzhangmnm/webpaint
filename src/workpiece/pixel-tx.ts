@@ -10,7 +10,7 @@
 //   - 全同步。
 
 import { findNodeById, disposeLayerSnap, Layer, type LayerSnap, type PaintDoc } from "../doc.ts";
-import { LayerPixels, materialize } from "../gl/tile-pixels.ts";
+import { LayerPixels, materialize } from "../tiles/tile-layer.ts";
 import type { Workpiece } from "./workpiece.ts";
 import type { UndoHistory } from "./undo-history.ts";
 import type { OperatorRegistry } from "./operators.ts";

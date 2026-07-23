@@ -39,9 +39,6 @@ import type { Layer } from "./doc.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
-// commit canvas 可能是 OffscreenCanvas 或 <canvas>（GPU readback canvas / 像素 editRegion）
-type AnyCanvas = OffscreenCanvas | HTMLCanvasElement;
-
 interface RgbColor { r: number; g: number; b: number; }
 
 interface StampParams { size: number; stampAlpha: number; }
@@ -63,9 +60,6 @@ interface StrokeState {
   settings: ResolvedBrush;
   mode: string;
   buffered: boolean;
-  // GL board 模式标志（v351 GL-only 后恒 true；GL init 失败的降级态为 false → 不提交，app 显「需 WebGL2」）。
-  //   保留作显式语义门：buffered 描边 live+commit 全 GPU（collectStamps→GPU 栅格），CPU 栅格已归档。
-  glMode: boolean;
   lastX: number;
   lastY: number;
   lastP: number;
@@ -110,7 +104,7 @@ export class BrushEngine {
 
   // smooth: { tau(ms), deadzone(doc px) }。t = 起手事件时间戳(ms)。详 docs/20260613-brush-procreate-smoothing.md。
   //   tau=0 & deadzone=0 → 不平滑（直通 raw）。
-  beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, pressure: number, mode: string = "brush", smooth: { tau?: number; deadzone?: number; tailBow?: number } = {}, t: number | null = null, glMode: boolean = false) {
+  beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, pressure: number, mode: string = "brush", smooth: { tau?: number; deadzone?: number; tailBow?: number } = {}, t: number | null = null) {
     const isBuildup = (settings.compositeMode || "wash") === "buildup";
     // buffered = 走 frozen/tail 平滑（进 buffer）；pixel = immediate（直接进 layer）
     const buffered = !settings.pixelMode;
@@ -118,7 +112,6 @@ export class BrushEngine {
     this._stroke = {
       layer, settings, mode,
       buffered,
-      glMode,
       lastX: x, lastY: y, lastP: pLPF0,
       pLPF: pLPF0,                              // 当前 LPF 态
       lastEventTime: performance.now(),
@@ -231,12 +224,13 @@ export class BrushEngine {
     }
   }
 
-  // 抬笔提交（GL board 路径）：smoother finish + 出端 taper 量算 → collectStamps（含 final tail + taper）
-  //   → board 注入的 GPU 栅格器 rasterizeStroke → readback canvas → _commitStrokeCanvas/editRegion。
-  //   CPU buffer commit 路径已归档（GL board 唯一）；GL init 失败的降级态无 rasterizeStroke → 不提交（app 已显「需 WebGL2」）。
-  endStroke(rasterizeStroke?: (stamps: Stamp[], shape: StrokeShape, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null) {
+  // 抬笔（S8）：smoother finish + 出端 taper 量算 → 返回最终 collectStamps（含 final tail + taper）。
+  //   落层由调用方走 board.commitBrushStroke（GPU merge = live 同一 shader，SSOT）；本引擎不再自己合成
+  //   ——旧 readback-canvas→editRegion Canvas2D 路径死（live 与 commit 的合成引擎从此同一个）。
+  //   pixelMode / 非 buffered / 空 stroke → null（pixel 已 immediate 落层，无需 commit）。
+  endStroke(): ReturnType<BrushEngine["collectStamps"]> {
     const st = this._stroke;
-    const gpu = !!rasterizeStroke && !!st && st.buffered && !st.settings.pixelMode;
+    let out: ReturnType<BrushEngine["collectStamps"]> = null;
     if (st && st.buffered) {
       st.sm!.update();
       st.sm!.finish();                    // 抬笔收尾：把直线桥换成带动量的弧尾、钉终点（画到头）
@@ -247,36 +241,13 @@ export class BrushEngine {
         this._walkStamps(dry, last, () => {});
         st._taperTotal = dry.strokeDist;
       }
-    }
-    if (gpu) {
-      const cs = this.collectStamps();   // 含 final tail + taper（_taperTotal 已设）
-      if (cs && cs.stamps.length) {
-        const r = rasterizeStroke!(cs.stamps, cs.shape, cs.bx, cs.by, cs.bw, cs.bh);
-        if (r) this._commitStrokeCanvas(r.canvas, r.dstX, r.dstY, r.canvas.width, r.canvas.height);
-      }
+      out = this.collectStamps();   // 含 final tail + taper（_taperTotal 已设）
     }
     this._stroke = null;
+    return out;
   }
 
   cancelStroke() { this._stroke = null; }
-
-  // 把一张 stroke 像素 canvas（straight RGBA，doc (bx,by) 起 bw×bh）commit 进 layer——CPU buffer 路径与
-  //   GPU readback 路径共用。editRegion 物化该区现有像素 → Π-outer opacity × blendMode/erase/lockAlpha
-  //   drawImage → 切片回 tile（source-atop/destination-out 对已有像素合成正确）。layer 存储是 bbox 裁剪过的，
-  //   editRegion 负责把 bbox 扩到覆盖整条 stroke（否则超旧 bbox 像素 pen-up 才丢）。
-  _commitStrokeCanvas(composeCanvas: AnyCanvas, bx: number, by: number, bw: number, bh: number) {
-    if (bw <= 0 || bh <= 0) return;
-    const st = this._stroke!;
-    const layer = st.layer;
-    layer.editRegion(bx, by, bw, bh, (ctx, ox, oy) => {
-      ctx.globalAlpha = Math.max(0, Math.min(1, st.settings.opacity ?? 1.0));   // Π 外 × opacity
-      // v242 锁定不透明度：source-atop = 只在已有 alpha 上画、保留目标 alpha。覆盖 per-brush blendMode。橡皮不锁。
-      ctx.globalCompositeOperation = (st.mode === "erase"
-        ? "destination-out"
-        : (layer.lockAlpha ? "source-atop" : (st.settings.blendMode || "source-over"))) as GlobalCompositeOperation;
-      ctx.drawImage(composeCanvas, bx - ox, by - oy);
-    });
-  }
 
   // Stage 3：收集当前 stroke 全部 stamp（frozen 0..count-1，含 tail）为列表 + stroke 笔形 —— 给 GPU 栅格器
   //   (GLStampRasterizer，board 消费)。**复用 _walkStamps(手感间距) + _stampParams(压感/taper)**，与 CPU

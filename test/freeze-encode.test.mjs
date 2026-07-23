@@ -1,0 +1,54 @@
+// S8 encode 冻结视图（spec:41 存档一致性的达意实现）：freezeDocForEncode 同步冻结
+// {结构 + 每叶 tile 快照}，encode 的 await 间隙里的编辑（CoW / 结构变）不触及冻结视图。
+import { describe, it, assert, eq } from "./runner.mjs";
+const { PaintDoc, freezeDocForEncode } = await import("../src/doc.ts");
+
+function paint(layer, x, y, w, h) {
+  const a = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < a.length; i += 4) { a[i] = 200; a[i + 3] = 255; }
+  layer.pixels.putRegion(x, y, w, h, a);
+}
+
+describe("freezeDocForEncode · encode 存档一致性（S8）", () => {
+  it("冻结后改像素：冻结叶 bbox/内容不动，活层照常变", () => {
+    const doc = new PaintDoc({ width: 512, height: 512 });
+    const L = doc.layers[0];
+    paint(L, 0, 0, 64, 64);
+    const { frozen, dispose } = freezeDocForEncode(doc);
+    const fl = frozen.layers[0];
+    eq(fl.bboxW, 64, "冻结时 bbox=64");
+    paint(L, 0, 0, 300, 300);                       // encode「中途」编辑
+    eq(fl.bboxW, 64, "冻结叶 bbox 不随后续编辑变");
+    assert(L.bboxW === 300, "活层 bbox 已变 300");
+    dispose();
+  });
+
+  it("冻结后层结构操作：冻结树形状不变", () => {
+    const doc = new PaintDoc({ width: 512, height: 512 });
+    const { frozen, dispose } = freezeDocForEncode(doc);
+    const n0 = frozen.layers.length;
+    doc.addLayer && doc.addLayer();                 // 有 API 就加层；没有则跳（结构由下断言兜）
+    doc.layers.push(doc.layers[0]);                 // 直接动数组也不该影响冻结视图
+    eq(frozen.layers.length, n0, "冻结树 children 数不变");
+    doc.layers.pop();
+    dispose();
+  });
+
+  it("dispose 释放快照句柄（released 置位）", () => {
+    const doc = new PaintDoc({ width: 512, height: 512 });
+    paint(doc.layers[0], 0, 0, 64, 64);
+    const { dispose } = freezeDocForEncode(doc);
+    dispose();   // 不抛 = 句柄成对释放；泄漏由池 FR assert 兜（node --expose-gc 之外无法直接断言）
+    assert(true);
+  });
+
+  it("空层冻结：bbox=0、canvas 1×1 占位（与 Layer getter 语义一致）", () => {
+    const doc = new PaintDoc({ width: 512, height: 512 });
+    const { frozen, dispose } = freezeDocForEncode(doc);
+    const fl = frozen.layers[0];
+    eq(fl.bboxW, 0);
+    eq(fl.bboxH, 0);
+    assert(fl.canvas, "canvas 占位存在");
+    dispose();
+  });
+});

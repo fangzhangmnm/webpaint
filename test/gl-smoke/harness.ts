@@ -11,12 +11,12 @@ import { GLGpuTileBackend, GpuTilePool, IndexTexture, GPU_TILE_BYTES } from "../
 import { TILE_SIZE, tilesAcross } from "../../src/tiles/tile-geometry.ts";
 import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
-import { docTreeToComp } from "../../src/gl/gl-doc-bridge.ts";
+import { docTreeToComp, compositeTree } from "./reference-gl-compositor.ts";
 import { RenderTreeGL } from "../../src/gl/render-tree-gl.ts";
-import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/gl/tile-pixels.ts";
+import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/tiles/tile-layer.ts";
 import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
 import type { Stamp } from "../../src/gl/gl-stamp.ts";
-import { compositeLayers } from "../../src/layer-composite.ts";
+import { compositeLayers } from "./reference-2d.ts";
 import { BrushEngine } from "../../src/brush.ts";
 import { resolveBrush } from "../../src/resolved-brush.ts";
 import { PaintDoc } from "../../src/doc.ts";
@@ -242,7 +242,7 @@ function blendParity(glctx: GLContext, backend: GLTileBackend, add: Add, prec: "
   const i0 = idx1(glctx, 0), i1 = idx1(glctx, 1); const opacity = 0.8;
   for (const mode of BLEND_MODES) {
     const ref = canvas2dRef(n, bd, src, mode, opacity);
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode)], n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode)], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n); const tol = tolFor(mode);
     add(`blend:${mode} [${prec}] vs Canvas2D`, md <= tol, `maxΔ=${md} ${md > tol ? at : ""}`);
@@ -256,7 +256,7 @@ function opaqueProbe(glctx: GLContext, add: Add): void {
   const i0 = idx1(glctx, 0), i1 = idx1(glctx, 1);
   for (const mode of ["color-dodge", "color-burn"] as const) {
     const ref = canvas2dRef(n, bd, src, mode, 1);
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), L(i1, 1, mode)], n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), L(i1, 1, mode)], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`probe:${mode} opaque B()`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -273,7 +273,7 @@ function clipParity(glctx: GLContext, add: Add): void {
     const opacity = 0.9;
     const ref = canvas2dClipRef(n, base, clip, mode, opacity);
     // clip 基底由 composite 内部 resolveClipBases 自动定位（base=底层叶）
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode, true)], n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), L(i1, opacity, mode, true)], n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`clip:${mode} vs Canvas2D`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -291,7 +291,7 @@ function multiTileParity(glctx: GLContext, add: Add): void {
   const topIdx = new IndexTexture(glctx, N, N);
   backend.uploadSlice(4, subTile(top, N, 0, 0)); topIdx.setSlice(0, 0, 4);
   backend.uploadSlice(5, subTile(top, N, 1, 1)); topIdx.setSlice(1, 1, 5);
-  const accum = comp.composite(backend.texture, [L(bdIdx, 1, "source-over"), L(topIdx, 1, "source-over")], N, N);
+  const accum = compositeTree(comp, backend.texture, [L(bdIdx, 1, "source-over"), L(topIdx, 1, "source-over")], N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = canvas2dRef(N, bd, top, "source-over", 1);
   const { md, at } = maxPremulDiff(ref, glpx, N);
@@ -346,7 +346,7 @@ function groupParity(glctx: GLContext, add: Add): void {
     compositeLayers(gctx as unknown as CanvasRenderingContext2D, built.map((b) => b.twoD) as never, {});
     const ref = gctx.getImageData(0, 0, n, n).data;
     // GL
-    const accum = comp.composite(backend.texture, built.map((b) => b.gl) as never, n, n);
+    const accum = compositeTree(comp, backend.texture, built.map((b) => b.gl) as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(ref, glpx, n);
     add(`group:${name} vs compositeLayers`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -380,7 +380,7 @@ function overlayParity(glctx: GLContext, add: Add): void {
     // GL：活动叶带 overlay（blendMode）
     const active = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase, blendMode: bm, ox: 0, oy: 0, ow: n, oh: n } };
     glctx.gl.getError();  // 清掉之前残留
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const err = glctx.gl.getError();
     const { md, at } = maxPremulDiff(ref, glpx, n);
@@ -401,7 +401,7 @@ function overlayParity(glctx: GLContext, add: Add): void {
     const ref = gctx.getImageData(0, 0, n, n).data;
     const active = { ...L(i1, 1, "source-over"), overlay: { tex: ovTex, opacity, erase: false, blendMode: "source-over", lockAlpha: true, selMask: null, ox: 0, oy: 0, ow: n, oh: n } };
     glctx.gl.getError();
-    const accum = comp.composite(backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
+    const accum = compositeTree(comp, backend.texture, [L(i0, 1, "source-over"), active] as never, n, n);
     const glpx = readComposite(glctx, comp, accum, n); glctx.returnFBO(accum);
     const err = glctx.gl.getError();
     const { md, at } = maxPremulDiff(ref, glpx, n);
@@ -452,7 +452,7 @@ function bridgeParity(glctx: GLContext, add: Add): void {
   const ref = gctx.getImageData(0, 0, N, N).data;
 
   const tree = docTreeToComp(nodes as never, (leaf) => { const r = res.get((leaf as { id: number }).id)!; return { index: r.index, hasContent: r.tileCount > 0 }; });
-  const accum = comp.composite(backend.texture, tree, N, N);
+  const accum = compositeTree(comp, backend.texture, tree, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const { md, at } = maxPremulDiff(ref, glpx, N);
   add("bridge:doc→tiles→GL full-doc vs compositeLayers", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
@@ -545,6 +545,86 @@ function rendertreeParity(glctx: GLContext, add: Add): void {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   glctx.returnFBO(once);
   cmp("rt:compositeOnce（export 路径）", ref1, oncePx);
+
+  // S8 吸管：pickColor（compositeOnce + 1px readback）vs golden 采样点（含 alpha）。
+  let pickMd = 0;
+  for (const [sx, sy] of [[150, 150], [300, 300], [30, 470], [470, 30]] as [number, number][]) {
+    const p = tree.pickColor(nodes as never, N, N, undefined, sx, sy);
+    const o = (sy * N + sx) * 4;
+    for (let k = 0; k < 4; k++) pickMd = Math.max(pickMd, Math.abs(p[k] - ref1[o + k]));
+  }
+  add("rt:pickColor 吸管 vs golden 采样点", pickMd <= 4, `maxΔ=${pickMd}`);
+}
+
+// ---- G) S8 brush GPU commit ≡ live：commitBrushStroke（merge 同一 overlay shader → tile-diff 落层
+//        → GPU 收养）后的静态帧，必须与 commit 前带 stampOverlay 的 live 帧逐像素一致（u8 量化容差）。----
+function commitParity(glctx: GLContext, add: Add): void {
+  const N = 512;
+  const gl = glctx.gl;
+  glctx.canvas.width = N; glctx.canvas.height = N;
+  const tree = new RenderTreeGL(glctx, 512);
+
+  const readBack = (): Uint8Array => {
+    const raw = new Uint8Array(N * N * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    const out = new Uint8Array(N * N * 4);
+    for (let y = 0; y < N; y++) out.set(raw.subarray((N - 1 - y) * N * 4, (N - y) * N * 4), y * N * 4);
+    return out;
+  };
+  // stamps 串（斜跨多 tile）+ collectStamps 同式 bbox。
+  // 笔迹限制在左上象限（bbox ⊂ tile(0,0)∪…，tile(1,1) 恒不被覆盖 → 可验「bbox 外 tile 不动」）。
+  const stamps: { x: number; y: number; size: number; alpha: number }[] = [];
+  for (let i = 0; i < 8; i++) stamps.push({ x: 80 + i * 16, y: 90 + i * 14, size: 48, alpha: 0.85 });
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of stamps) { const r = s.size / 2 + 1; x0 = Math.min(x0, s.x - r); y0 = Math.min(y0, s.y - r); x1 = Math.max(x1, s.x + r); y1 = Math.max(y1, s.y + r); }
+  const bx = Math.max(0, Math.floor(x0)), by = Math.max(0, Math.floor(y0));
+  const bw = Math.min(N, Math.ceil(x1)) - bx, bh = Math.min(N, Math.ceil(y1)) - by;
+  // 选区：bbox 左半 255 右半 0（硬边足够验 shader 裁剪 = commit 裁剪）。
+  const selData = new Uint8Array(bw * bh);
+  for (let y = 0; y < bh; y++) for (let x = 0; x < Math.floor(bw / 2); x++) selData[y * bw + x] = 255;
+
+  const cases: { name: string; buildup: boolean; erase: boolean; blendMode: string; lockAlpha: boolean; sel: boolean; opacity: number }[] = [
+    { name: "wash", buildup: false, erase: false, blendMode: "source-over", lockAlpha: false, sel: false, opacity: 0.7 },
+    { name: "buildup", buildup: true, erase: false, blendMode: "source-over", lockAlpha: false, sel: false, opacity: 1 },
+    { name: "erase", buildup: false, erase: true, blendMode: "source-over", lockAlpha: false, sel: false, opacity: 1 },
+    { name: "multiply+lockAlpha", buildup: false, erase: false, blendMode: "multiply", lockAlpha: true, sel: false, opacity: 0.9 },
+    { name: "selMask", buildup: false, erase: false, blendMode: "source-over", lockAlpha: false, sel: true, opacity: 1 },
+  ];
+  let nextId = 100;
+  for (const c of cases) {
+    const id = nextId++;
+    // base：含透明区（lockAlpha/erase 有的可锁可擦）+ 渐变。
+    const cBase = makeLayerCanvas(N, N, (x, y) => [80 + (x % 120), 90 + (y % 100), 140, (x + y) % 3 === 0 ? 0 : 230]);
+    const pixels = pixelsFromCanvas(N, N, 0, 0, cBase);
+    const leaf = { isGroup: false, id, opacity: 0.9, mode: "source-over", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: cBase, pixels };
+    const nodes = [leaf];
+    const ov = {
+      stamps, shape: { hardness: 0.6, color: [0.9, 0.3, 0.2] as [number, number, number], buildup: c.buildup },
+      bx, by, bw, bh, layerId: id, opacity: c.opacity, erase: c.erase, blendMode: c.blendMode,
+      lockAlpha: c.lockAlpha, selMask: c.sel ? { data: selData, ox: bx, oy: by, ow: bw, oh: bh } : null,
+    };
+    // live 帧（overlay 在 shader 内合成显示）
+    tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], ov as never, null, null);
+    const live = readBack();
+    // 远处 tile 句柄：commit 后必须不动（tile-diff 不背未变 tile）。bbox ⊂ 左上 → tile(1,1) 在外。
+    const farBefore = pixels.getTileHandle(1, 1);
+    // commit → 静态帧
+    const ok = tree.commitBrushStroke(id, pixels, ov as never, N, N, (px, x, y, w, h) => pixels.applyRegionDiff(x, y, w, h, px));
+    add(`commit:${c.name} 提交成功`, ok);
+    // eslint 类似场合：私有 stats 只在 smoke 里窥（断言收养生效 = 下一帧零上传）。
+    const bridge = (tree as unknown as { _bridge: { stats: { uploads: number } } })._bridge;
+    const upBefore = bridge.stats.uploads;
+    tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], null, null, null);
+    const committed = readBack();
+    let md = 0, ai = -1;
+    for (let i = 0; i < live.length; i++) { const d = Math.abs(live[i] - committed[i]); if (d > md) { md = d; ai = i; } }
+    const p = ai >= 0 ? ai / 4 : 0;
+    add(`commit:${c.name} ≡ live`, md <= 2, `maxΔ=${md} @(${p % N},${Math.floor(p / N)})`);
+    add(`commit:${c.name} 收养生效（下一帧零上传）`, bridge.stats.uploads === upBefore, `uploads +${bridge.stats.uploads - upBefore}`);
+    add(`commit:${c.name} bbox 外 tile 不动`, pixels.getTileHandle(1, 1) === farBefore);
+    pixels.dispose();
+  }
 }
 
 // LayerPixels Canvas2D facade golden：editRegion 画 → 经 tile → materialize，对比直接 Canvas2D 参考。
@@ -698,7 +778,7 @@ function checkerParity(glctx: GLContext, add: Add): void {
   const layerCanvas = makeLayerCanvas(N, N, (x, y) => (x > 48 && x < 144 && y > 48 && y < 144) ? [200, 40, 40, 128] : [0, 0, 0, 0]);
   const lt = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, layerCanvas) }, N, N);
   const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: lt.tileCount > 0, overlay: null }];
-  const accum = comp.composite(backend.texture, tree as never, N, N, "checker");
+  const accum = compositeTree(comp, backend.texture, tree as never, N, N, "checker");
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
   const rctx = ref.getContext("2d")!;
@@ -736,7 +816,7 @@ function floatParity(glctx: GLContext, add: Add): void {
   const floatCanvas = makeLayerCanvas(fw, fh, (x, y) => [220, 60, 60, (x + y) % 200 + 40]);   // 半透明渐变
   const ftex = texFromCanvas(glctx, floatCanvas);
   const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: ftex, srcW: fw, srcH: fh, hinv: rectHinv(fx, fy, fw, fh), mode: 0 } }];
-  const accum = comp.composite(backend.texture, tree as never, N, N);
+  const accum = compositeTree(comp, backend.texture, tree as never, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
   const rctx = ref.getContext("2d")!;
@@ -753,7 +833,7 @@ function floatParity(glctx: GLContext, add: Add): void {
     { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: null },
     { kind: "leaf", srcIndex: eb.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: { tex: ftex2, srcW: 70, srcH: 60, hinv: rectHinv(40, 35, 70, 60), mode: 0 } },
   ];
-  const acc2 = comp.composite(backend.texture, tree2 as never, N, N);
+  const acc2 = compositeTree(comp, backend.texture, tree2 as never, N, N);
   const glpx2 = readComposite(glctx, comp, acc2, N); glctx.returnFBO(acc2);
   const ref2 = document.createElement("canvas"); ref2.width = N; ref2.height = N;
   const rctx2 = ref2.getContext("2d")!; rctx2.clearRect(0, 0, N, N); rctx2.drawImage(fc2, 40, 35);   // clip 层空基底=不显，仅 float
@@ -782,7 +862,7 @@ function warpParity(glctx: GLContext, add: Add): void {
   for (const [name, mode, sm] of [["bilinear", 1, "bilinear"], ["bicubic", 2, "bicubic"]] as const) {
     if (!q) { add(`warp:${name} 取 quadWarp`, false, "null"); continue; }
     const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: stex, srcW: sw, srcH: sh, hinv: q.hinv, mode } }];
-    const accum = comp.composite(backend.texture, tree as never, N, N);
+    const accum = compositeTree(comp, backend.texture, tree as never, N, N);
     const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
     const rr = renderQuadPerPixel(srcImg, sw, sh, mesh as never, sm);   // CPU 参照（straight）
     const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
@@ -832,7 +912,7 @@ function warpClipParity(glctx: GLContext, add: Add): void {
     { kind: "leaf", srcIndex: empty.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: false, overlay: null, float: baseFD },
     { kind: "leaf", srcIndex: empty.index, opacity: 1, mode: "source-over", clip: true, visible: true, hasContent: false, overlay: null, float: clipFD },
   ];
-  const accum = comp.composite(backend.texture, tree as never, N, N);
+  const accum = compositeTree(comp, backend.texture, tree as never, N, N);
   const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
   // CPU 参照：base/clip 各 warp（同 mesh → 同 dst），clip 用 base alpha destination-in，再依次 source-over 底。
   const bw = renderQuadPerPixel(baseImg, sw, sh, mesh as never, "bicubic");
@@ -991,6 +1071,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { checkerParity(glctx, add); } catch (e) { add("checker parity", false, String(e)); }
   try { floatParity(glctx, add); } catch (e) { add("float parity", false, String(e)); }
   try { rendertreeParity(glctx, add); } catch (e) { add("rendertree parity", false, String(e)); }
+  try { commitParity(glctx, add); } catch (e) { add("commit parity", false, String(e)); }
   try { warpParity(glctx, add); } catch (e) { add("warp parity", false, String(e)); }
   try { warpClipParity(glctx, add); } catch (e) { add("warpclip parity", false, String(e)); }
 

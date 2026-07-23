@@ -87,8 +87,11 @@ LAYER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/st
 TILES_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*/gl/" src/tiles --include='*.ts' 2>/dev/null || true)
 SEL_HITS=$(grep -nE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/gl/|/store/|app-store)" src/selection.ts src/marching-ants.ts 2>/dev/null || true)
 DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/history\.ts|/pixel-edit\.ts|/layer-undo\.ts|/tile-residency\.ts|/tile-backend-gl\.ts|/tile-store\.ts|/tile-index\.ts|/gl-doc-renderer\.ts)" src test --include='*.ts' --include='*.mjs' 2>/dev/null | grep -v "undo-history" || true)
+# S9 归档模块防复活（src 禁 import；test/gl-smoke 的 reference-*.ts 是合法归档地）：
+S9DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/layer-composite\.ts|/gl-compose-plan\.ts)" src --include='*.ts' 2>/dev/null || true)
+
 RENDER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/gl/|/store/|app-store)" src/render --include='*.ts' 2>/dev/null || true)
-if [ -n "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS$RENDER_HITS" ]; then
+if [ -n "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS$RENDER_HITS$S9DEAD_HITS" ]; then
   echo "[build] ✗ v0.4 分层违规：" >&2
   echo "$LAYER_HITS$TILES_HITS$SEL_HITS$DEAD_HITS$RENDER_HITS" >&2
   exit 1

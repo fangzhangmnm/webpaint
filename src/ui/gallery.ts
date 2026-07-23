@@ -341,7 +341,6 @@ function makeGallery(host: GalleryHost) {
       //   · 明文源 / 纯云端未缓存源 → open() 取字节（明文拷贝，本来如此）。
       async function copy(item: GItem) {
         openMenu.value = null;
-        const isCloud = !!item.cloud;
         const cloudOn = host.signedIn() && host.online();
         await host.busy(t("gal.busy.copy", { base: pathBasename(item.name) }), async () => {
           try {

@@ -1,4 +1,4 @@
-// LayerPixels —— 图层像素门面：**稀疏 256² tile**，doc 坐标接口，**bbox-free**。
+// tile-layer（原 gl/tile-pixels，S9 归位 tiles/——纯 tile 门面非 GL 专属）。LayerPixels —— 图层像素门面：**稀疏 256² tile**，doc 坐标接口，**bbox-free**。
 // v0.4 起底层换到 cpu-tile-pool：每格是**不可变、引用计数**的 TileHandle（copy-on-write），
 // 不再是可变裸数组。这带来：
 //   - snapshot()/restore() = 句柄 acquire/release，**零拷贝**（undo 内存压力交给池的压缩管）。
@@ -12,9 +12,9 @@
 //
 // 纯核心零 DOM 依赖 → node 全测。Canvas2D facade（materialize/editRegion）需浏览器。
 
-import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "../tiles/tile-geometry.ts";
-import { appTilePool } from "../tiles/app-tile-pool.ts";
-import { computeBBox, type TileHandle } from "../tiles/cpu-tile-pool.ts";
+import { TILE_SIZE, tilesAcross, tileKey, tileCoord, forEachTileInRect } from "./tile-geometry.ts";
+import { appTilePool } from "./app-tile-pool.ts";
+import { computeBBox, type TileHandle } from "./cpu-tile-pool.ts";
 
 const TILE_RGBA = TILE_SIZE * TILE_SIZE * 4;
 
@@ -30,7 +30,6 @@ export class LayerPixels {
   readonly docH: number;
   private _across: number;
   private _tiles = new Map<number, TileHandle>();           // tileKey → 只读 tile 句柄
-  private _dirty = new Set<number>();                       // 自上次 markAllClean 后变更的 tileKey
   private _contentVersion = 0;                              // 单调递增，每次内容 mutation +1
 
   constructor(docW: number, docH: number) {
@@ -69,7 +68,7 @@ export class LayerPixels {
     this._contentVersion++;
     const buf = new Uint8ClampedArray(TILE_RGBA);
     buf.set(pixels.subarray(0, TILE_RGBA));
-    this._setTileBuf(tileKey(tx, ty, this._across), buf, true);
+    this._setTileBuf(tileKey(tx, ty, this._across), buf);
   }
   forEachTile(cb: (tx: number, ty: number, pixels: Uint8ClampedArray) => void): void {
     this._tiles.forEach((h, key) => { const { tx, ty } = tileCoord(key, this._across); cb(tx, ty, h.clampedView()); });
@@ -101,8 +100,45 @@ export class LayerPixels {
           di += 4; si += 4;
         }
       }
-      this._setTileBuf(key, tile, true);
+      this._setTileBuf(key, tile);
     });
+  }
+
+  // ---- 写（S8 brush GPU commit 落盘口）：语义同 putRegion（整块替换，区域内透明也写入），
+  //   区别是逐 tile 与现有字节比对，**只封真变了的 tile**——undo 快照交换不背未变 tile，
+  //   GPU 收养（registerPair）也只对变更 tile 做。返回变更 tile 坐标（含被擦空回收的）。
+  applyRegionDiff(sx0: number, sy0: number, sw: number, sh: number, src: Uint8ClampedArray): { tx: number; ty: number }[] {
+    const changed: { tx: number; ty: number }[] = [];
+    if (sw <= 0 || sh <= 0) return changed;
+    forEachTileInRect(sx0, sy0, sw, sh, this.docW, this.docH, (tx, ty) => {
+      const key = tileKey(tx, ty, this._across);
+      const old = this._tiles.get(key);
+      const tile = new Uint8ClampedArray(TILE_RGBA);
+      if (old) tile.set(old.clampedView());
+      const tox = tx * TILE_SIZE, toy = ty * TILE_SIZE;
+      const ix0 = Math.max(tox, sx0), iy0 = Math.max(toy, sy0);
+      const ix1 = Math.min(tox + TILE_SIZE, sx0 + sw), iy1 = Math.min(toy + TILE_SIZE, sy0 + sh);
+      for (let y = iy0; y < iy1; y++) {
+        const di = ((y - toy) * TILE_SIZE + (ix0 - tox)) * 4;
+        const si = ((y - sy0) * sw + (ix0 - sx0)) * 4;
+        tile.set(src.subarray(si, si + (ix1 - ix0) * 4), di);
+      }
+      // 比对（u32 视图 memcmp）：无旧 tile 时与全透明比。相同 → 跳过（零封装零 dirty）。
+      const cand32 = new Uint32Array(tile.buffer);
+      let differs = false;
+      if (old) {
+        const oldV = old.clampedView();
+        const old32 = new Uint32Array(oldV.buffer, oldV.byteOffset, oldV.byteLength >> 2);
+        for (let i = 0; i < cand32.length; i++) if (cand32[i] !== old32[i]) { differs = true; break; }
+      } else {
+        for (let i = 0; i < cand32.length; i++) if (cand32[i] !== 0) { differs = true; break; }
+      }
+      if (!differs) return;
+      this._contentVersion++;
+      this._setTileBuf(key, tile);
+      changed.push({ tx, ty });
+    });
+    return changed;
   }
 
   // ---- 读：doc 矩形 → flat RGBA（缺 tile = 透明 0）----
@@ -166,7 +202,6 @@ export class LayerPixels {
 
   clear(): void {
     this._contentVersion++;
-    this._tiles.forEach((_h, k) => this._dirty.add(k));
     this._releaseAll();
   }
 
@@ -230,10 +265,6 @@ export class LayerPixels {
     return np;
   }
 
-  // ---- dirty 跟踪（GL 增量上传）----
-  dirtyTileKeys(): number[] { return [...this._dirty]; }
-  markAllClean(): void { this._dirty.clear(); }
-
   // ---- undo 快照：**句柄共享，零拷贝**（tile 只读 → 快照与活层安全共享同一批 tile）----
   snapshot(): PixelsSnapshot {
     const tiles: [number, TileHandle][] = [];
@@ -244,17 +275,15 @@ export class LayerPixels {
   // 最终仍需 disposePixelsSnapshot）。
   restore(snap: PixelsSnapshot): void {
     this._contentVersion++;
-    this._tiles.forEach((_h, k) => this._dirty.add(k));
     this._releaseAll();
     for (const [key, h] of snap.tiles) {
       this._tiles.set(key, h.acquire());
-      this._dirty.add(key);
     }
   }
 
   // ---- 内部 ----
   // 收养 buf（调用方新建、之后不得再碰）为该格的新 tile；全透明 → 回收该格。释放旧句柄。
-  private _setTileBuf(key: number, buf: Uint8ClampedArray, markDirty: boolean): void {
+  private _setTileBuf(key: number, buf: Uint8ClampedArray): void {
     const bbox = computeBBox("rgba8", asBytes(buf), TILE_SIZE);
     const old = this._tiles.get(key);
     if (bbox === null) {
@@ -263,7 +292,6 @@ export class LayerPixels {
       this._tiles.set(key, appTilePool().createTile("rgba8", asBytes(buf), bbox));
       if (old) old.release();
     }
-    if (markDirty) this._dirty.add(key);
   }
 
   private _releaseAll(): void {

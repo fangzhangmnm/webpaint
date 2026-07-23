@@ -2,7 +2,7 @@
 //
 // 背景：CONTEXT.md 把 Engine 写成「统一节律 begin/extend/end/cancel」的一道接缝，
 // 但在 input.js 里这道接缝曾是**假的**——同一组 pixel-stroke role 的成员判定
-//   `role === "draw" || role === "erase" || role === "liquify" || role === "filterBrush"`
+//   `role === "draw" || role === "erase" || role === "filterBrush"`（液化 = filterBrush payload）
 // 散在 _down / _move / _up 至少 4 处，每处都要记得列全；per-role 策略
 // （丢帧 coalesceLatest、是否喂 brushSettings、finalize、history 事务类型）也散落。
 // 加一个引擎要在多处同改，且无任何测试。
@@ -33,7 +33,6 @@ export interface PixelStrokeSpec {
 export const PIXEL_STROKE_SPECS: Readonly<Record<string, PixelStrokeSpec>> = Object.freeze({
   draw:        Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesResolvedBrush: true,  finalize: true,  historyType: "stroke" }),
   erase:       Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesResolvedBrush: true,  finalize: true,  historyType: "stroke" }),
-  liquify:     Object.freeze({ engineKey: "liquify",     coalesceLatest: true,  usesResolvedBrush: false, finalize: true,  historyType: "liquify" }),
   filterBrush: Object.freeze({ engineKey: "filterBrush", coalesceLatest: true,  usesResolvedBrush: false, finalize: false, historyType: "stroke" }),
 });
 

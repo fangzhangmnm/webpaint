@@ -23,8 +23,9 @@
 import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.ts";
 import type { GestureViewport } from "./pointer-gesture.ts";
 import { raiseWindow } from "./surfaces.ts";
-import { editorState } from "./editor-state.ts";
-import type { PaintDoc, Layer } from "./doc.ts";
+import { editorState } from "./workbench-state.ts";
+import { renderNodesToCanvas } from "./doc-render.ts";
+import type { PaintDoc } from "./doc.ts";
 
 // 参考窗内部 viewport（image-origin 约定）。形同 GestureViewport。
 type RefViewport = GestureViewport;
@@ -87,6 +88,8 @@ export class ReferenceWindow {
   _resizeDrag: unknown;
   _pointers: Map<number, PointerPos>;
   _gestureStart: GestureStartState | null;
+  _lastLiveComposeT?: number;
+  _liveThrottle?: ReturnType<typeof setTimeout> | null;
   _applying: boolean;   // apply-on-load 期间：抑制 _savePos/_saveVp 回写 editorState（否则载入即标脏）
 
   constructor(opts: ReferenceWindowOpts) {
@@ -188,9 +191,23 @@ export class ReferenceWindow {
     this._liveDirty = true;
     this._invalidate();
   }
-  _recomposeLive() {
+  // S9：镜像合成走 GL（doc-render，respect clip/mode/组——旧手抄扁平 loop 漏组和 clip）。
+  //   节流 300ms：描边中 wp:docpixeldirty 每 stamp 都来，全量合成+readback 不该每帧陪跑；
+  //   到期由 timer 补一帧收尾（不会停在旧画面）。返回 false = 本帧没合成（保留脏标）。
+  _recomposeLive(): boolean {
     const doc = this._liveDoc;
-    if (!doc) return;
+    if (!doc) return true;
+    const now = performance.now();
+    const since = now - (this._lastLiveComposeT ?? -Infinity);
+    if (since < 300) {
+      if (this._liveThrottle == null) {
+        this._liveThrottle = setTimeout(() => { this._liveThrottle = null; this._invalidate(); }, 320 - since);
+      }
+      return false;
+    }
+    const merged = renderNodesToCanvas(doc.layers, doc.width, doc.height);
+    if (!merged) return true;   // GL 不可用 → 保留上帧（丢脏标，避免空转）
+    this._lastLiveComposeT = now;
     const W = doc.width, H = doc.height;
     if (this._composeCanvas!.width !== W || this._composeCanvas!.height !== H) {
       this._composeCanvas!.width = W;
@@ -200,15 +217,8 @@ export class ReferenceWindow {
     cx.clearRect(0, 0, W, H);
     cx.fillStyle = doc.backgroundColor || "#ffffff";
     cx.fillRect(0, 0, W, H);
-    for (const node of doc.layers) {
-      const layer = node as Layer;   // live 合成假设扁平叶层（运行期既有约定）
-      if (!layer.visible) continue;
-      if (!(layer.bboxW > 0 && layer.bboxH > 0)) continue;
-      cx.globalAlpha = layer.opacity ?? 1;
-      cx.globalCompositeOperation = (layer.mode || "source-over") as GlobalCompositeOperation;
-      cx.drawImage(layer.canvas, layer.bboxX, layer.bboxY);
-    }
-    cx.globalAlpha = 1; cx.globalCompositeOperation = "source-over";
+    cx.drawImage(merged, 0, 0);
+    return true;
   }
   open() {
     editorState.refPanel.enabled = true;   // desk：开窗随 doc 走（标脏，per-doc）
@@ -458,10 +468,9 @@ export class ReferenceWindow {
     });
   }
   _render() {
-    // live 模式下：只在 _liveDirty=true 时才重新合成 layers → compose canvas
+    // live 模式下：只在 _liveDirty=true 时才重新合成 layers → compose canvas（节流内=保留脏标等补帧）
     if (this._liveDoc && this._liveDirty) {
-      this._recomposeLive();
-      this._liveDirty = false;
+      if (this._recomposeLive()) this._liveDirty = false;
     }
     const dpr = window.devicePixelRatio || 1;
     const W = this.canvas.width, H = this.canvas.height;
