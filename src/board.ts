@@ -674,7 +674,8 @@ export class Board {
   pickCompositeColor(ix: number, iy: number): [number, number, number, number] | null {
     if (!this._glBoard) return null;
     const docBg = this._showCheckerboard ? "checker" : (this.doc.backgroundColor || "#ffffff");
-    return this._glBoard.pickColor(this.doc as unknown as GLDoc, docBg, ix, iy);
+    // v0.4.11（拍板#8）：调整预览开着时取替身（WYSIWYG——吸到的=眼睛看到的）。
+    return this._glBoard.pickColor(this.doc as unknown as GLDoc, docBg, ix, iy, this._glSurrogate());
   }
   // 套索 overlay：
   //   drawing 期间：画 polyline overlay

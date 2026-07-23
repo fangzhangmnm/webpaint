@@ -60,11 +60,11 @@ export class GLBoard {
   }
 
   // S8 吸管：一次性合成（compositeOnce，不建缓存）+ 1px readback。bg 语义同 render 的 docBg。
-  pickColor(doc: GLDoc, docBg: string | null, x: number, y: number): [number, number, number, number] | null {
+  pickColor(doc: GLDoc, docBg: string | null, x: number, y: number, surrogate: SurrogateInput | null = null): [number, number, number, number] | null {
     if (this._glctx.isLost) return null;
     const bg: Background | undefined = docBg === "checker" ? "checker"
       : docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;
-    return this._tree.pickColor(doc.layers, doc.width, doc.height, bg, x, y);
+    return this._tree.pickColor(doc.layers, doc.width, doc.height, bg, x, y, surrogate);
   }
 
   // 给自由变换 commit 用：warp 源 → straight RGBA canvas（_bakeDown 走 readback→editRegion，复用 live warp）。

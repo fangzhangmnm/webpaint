@@ -554,6 +554,17 @@ function rendertreeParity(glctx: GLContext, add: Add): void {
     for (let k = 0; k < 4; k++) pickMd = Math.max(pickMd, Math.abs(p[k] - ref1[o + k]));
   }
   add("rt:pickColor 吸管 vs golden 采样点", pickMd <= 4, `maxΔ=${pickMd}`);
+
+  // v0.4.11（拍板#8）：调整预览中吸管取替身（WYSIWYG）。替身整幅品红换掉顶层 D → 取到品红；
+  //   随后无替身再取 → 回真像素（替身不污染后续）。
+  const surCanvas = makeLayerCanvas(N, N, () => [255, 0, 255, 255]);
+  const sur = { layerId: 6, canvas: surCanvas, bx: 0, by: 0, w: N, h: N };
+  const pSur = tree.pickColor(nodes as never, N, N, undefined, 300, 300, sur as never);
+  add("rt:pickColor 带替身 = 替身色", Math.abs(pSur[0] - 255) <= 2 && pSur[1] <= 2 && Math.abs(pSur[2] - 255) <= 2, `got=${pSur}`);
+  const pReal = tree.pickColor(nodes as never, N, N, undefined, 300, 300);
+  let realMd = 0;
+  for (let k = 0; k < 4; k++) realMd = Math.max(realMd, Math.abs(pReal[k] - ref1[(300 * N + 300) * 4 + k]));
+  add("rt:替身后无替身取色回真像素", realMd <= 4, `maxΔ=${realMd}`);
 }
 
 // ---- G) S8 brush GPU commit ≡ live：commitBrushStroke（merge 同一 overlay shader → tile-diff 落层

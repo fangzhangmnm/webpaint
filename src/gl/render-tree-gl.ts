@@ -301,13 +301,17 @@ export class RenderTreeGL {
   }
 
   // export/吸管专用一次性合成（spec:157）：不建缓存、不失效、不碰 display。caller 负责 returnFBO。
-  compositeOnce(nodes: DocNode[], docW: number, docH: number, bg?: Background): PooledFBO {
+  //   surrogate（v0.4.11，拍板#8）：调整预览的替身叶换源——吸管 WYSIWYG（导出路径不传，仍取真像素）。
+  compositeOnce(nodes: DocNode[], docW: number, docH: number, bg?: Background, surrogate: SurrogateInput | null = null): PooledFBO {
     const leafById = new Map<number, DocLeaf>();
     const planNodes = this._toPlanNodes(nodes, new Set(), null, leafById);
     const plan = buildPlan(planNodes, new Set(), bg === "checker" ? "checker" : bg ? "color" : "none");
     const all = new Set<number>(plan.liveLeaves);
     for (const b of plan.builds.values()) for (const id of b.members) all.add(id);
-    for (const id of all) { const leaf = leafById.get(id); if (leaf) this._syncLeafSafe(id, leaf.pixels, docW, docH); }
+    for (const id of all) {
+      if (surrogate && id === surrogate.layerId) { this._syncSurrogate(surrogate, docW, docH); continue; }
+      const leaf = leafById.get(id); if (leaf) this._syncLeafSafe(id, leaf.pixels, docW, docH);
+    }
     this._comp.begin(docW, docH);
     const transient = new Map<string, PooledFBO>();
     for (const b of plan.builds.values()) transient.set(b.key, this._composeSegTransient(b, docW, docH, bg));
@@ -335,9 +339,10 @@ export class RenderTreeGL {
   }
 
   // S8 吸管（spec:243-244）：一次性合成 + 单像素 readPixels（合成组无 CPU tile → 必须走 GPU 读）。
-  pickColor(nodes: DocNode[], docW: number, docH: number, bg: Background | undefined, x: number, y: number): [number, number, number, number] {
+  //   surrogate 非空 = 调整预览中取替身（WYSIWYG，拍板#8）。
+  pickColor(nodes: DocNode[], docW: number, docH: number, bg: Background | undefined, x: number, y: number, surrogate: SurrogateInput | null = null): [number, number, number, number] {
     const gl = this._glctx.gl;
-    const fbo = this.compositeOnce(nodes, docW, docH, bg);
+    const fbo = this.compositeOnce(nodes, docW, docH, bg, surrogate);
     const px = new Uint8Array(4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
     gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -514,15 +519,18 @@ export class RenderTreeGL {
         const ov = step.overlay && this._overlay && this._overlay.layerId === step.id ? this._overlayDesc() : null;
         this._comp.pass(arrayTex, ov ? "overlay" : "tiled", rec.index, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, ov, clipTex);
       } else if (step.t === "seg") {
-        const seg = this._segCache.get(step.key);
+        // transient 优先（v0.4.11）：compositeOnce 把所有段都现算进 transient——若先查 _segCache
+        //   会命中上帧真内容、绕过替身换源（吸管 WYSIWYG 取不到替身的病根）。renderFrame 路径
+        //   transient 只装建段失败的 key，先查它无副作用。
+        const f = transient.get(step.key);
         const clipIdx = step.clipBaseId !== null ? this._layerTiles.get(step.clipBaseId)?.index ?? null : null;
         const clipTex = this._liveClipTexFor(step.clipBaseId, docW, docH);
-        if (seg) {
-          this._comp.pass(arrayTex, "tiled", seg.index, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
-        } else {
-          const f = transient.get(step.key);
-          if (!f) continue;   // 不可达（缺段必在 transient）；防御性跳过
+        if (f) {
           this._comp.pass(arrayTex, "group", null, f.tex, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
+        } else {
+          const seg = this._segCache.get(step.key);
+          if (!seg) continue;   // 不可达（缺段必在 transient）；防御性跳过
+          this._comp.pass(arrayTex, "tiled", seg.index, null, step.mode as BlendMode, step.opacity, clipIdx, acc, docW, docH, null, clipTex);
         }
       } else if (step.t === "group") {
         const sub = this._comp.newAcc(docW, docH);

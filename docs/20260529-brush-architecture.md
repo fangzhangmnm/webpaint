@@ -214,3 +214,13 @@ v97 之前一直混在一起，导致用户改 taper 会破坏 anti-spike 行为
 - Krita 4.2 changelog：flow × opacity 从加算改乘算的 bug fix
 - Adobe 论坛专家回复：PS dab spacing 100% 时 10%flow×100%opa = 100%flow×10%opa
 - WebPaint v98 commit 体例：sizeCoeff/opaCoeff/flowCoeff/pressureGamma/compositeMode/defaultOpa/defaultFlow
+
+---
+
+> **as-of v0.4.11 / 2026-07-23 · GPU 时代考古注记（真机 2026-07-22 疑问的定论）**
+> GPU 栅格路径（gl-stamp + overlay 合成）与本文 v98 数学**逐位保真**：wash = max(dab_α)、
+> buildup = 1−∏(1−dab_α)、opacity 恒在 Π 外一次性乘——两模式的**单笔天花板都是 opacity**，
+> 差别只在单笔内自叠加曲线。「按时长无限叠加」的观感来自 **pre-v98 的 direct-layer airbrush**
+> （每 dab 直接以 α×opacity 上层、无单笔天花板），v98 统一进 buildup 时**有意删除**（见上文
+> 「为什么 opacity 在 Π 外」）。复活它 = 新增第三种 compositeMode（per-dab opacity 进 Π），
+> 已拍板推 0.5 era（journal 2026-07-23 用户：push to 0.5 era todo）。
