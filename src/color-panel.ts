@@ -29,7 +29,7 @@ export function toggleColorPanel(force?: boolean) {
     let left = saved?.left, top = saved?.top;
     if (left == null || top == null) { left = window.innerWidth - w - 16; top = 60; }
     left = Math.max(0, Math.min(window.innerWidth - w, left));
-    top = Math.max(0, Math.min(window.innerHeight - h, top));
+    top = Math.max(60, Math.min(window.innerHeight - h, top));   // top 地板=出血区（v0.4.11）
     els.colorPanel.style.left = left + "px";
     els.colorPanel.style.top = top + "px";
   } else {
@@ -52,7 +52,7 @@ function applyColorPanelFromEditorState() {
     let left = saved?.left, top = saved?.top;
     if (left == null || top == null) { left = window.innerWidth - w - 16; top = 60; }
     left = Math.max(0, Math.min(window.innerWidth - w, left));
-    top = Math.max(0, Math.min(window.innerHeight - h, top));
+    top = Math.max(60, Math.min(window.innerHeight - h, top));   // top 地板=出血区（v0.4.11）
     els.colorPanel.style.left = left + "px";
     els.colorPanel.style.top = top + "px";
   } else {
@@ -83,7 +83,7 @@ export function initColorPanel(ctx: AppContext) {
     const w = els.colorPanel.offsetWidth;
     const h = els.colorPanel.offsetHeight;
     const left = Math.max(0, Math.min(window.innerWidth - w, _panelDrag.ol + (e.clientX - _panelDrag.sx)));
-    const top = Math.max(0, Math.min(window.innerHeight - h, _panelDrag.ot + (e.clientY - _panelDrag.sy)));
+    const top = Math.max(60, Math.min(window.innerHeight - h, _panelDrag.ot + (e.clientY - _panelDrag.sy)));   // top 地板=出血区（v0.4.11，同 layers-panel）
     els.colorPanel.style.left = left + "px";
     els.colorPanel.style.top = top + "px";
     editorState.colorPanel.position = { left, top };

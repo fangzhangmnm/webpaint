@@ -21,7 +21,12 @@
 // 仍留 app.js 的协作件经 ctx 绑入：doc / board / history / workpiece / ops / setStatus（核心单例）
 // + _afterDocChange（lasso / history handler 也调）。
 
-import { createApp, defineComponent, reactive, computed, watch, nextTick } from "../vendor/vue/vue.esm-browser.prod.js";
+import { createApp, defineComponent, reactive, computed, watch, nextTick, ref } from "../vendor/vue/vue.esm-browser.prod.js";
+import { positionPopup } from "./anchored-popup.ts";
+
+// 浮窗 top 出血区（v0.4.11，真机 1.1 softlock）：iPad 顶部 hidden title bar / 系统手势区会拦截
+//   贴顶元素的拖动——面板头一旦钻进去就拉不回来。地板 ≈ safe-area + 顶栏（同 reference MIN_TOP 先例）。
+export const PANEL_MIN_TOP = 60;
 import { countLeaves, findNodeById } from "./doc.ts";
 import { t } from "./i18n/index.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
@@ -51,7 +56,7 @@ interface LayerRowData {
   hasPx: boolean; childLeafCount?: number;
 }
 // <LayerRow> setup 里读到的 props（其余 props 只在 template 用）。
-interface LayerRowProps { layer: LayerLeafSnap; depth: number; isGroup: boolean; }
+interface LayerRowProps { layer: LayerLeafSnap; depth: number; isGroup: boolean; menuOpen: boolean; }
 
 let doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
 let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
@@ -111,7 +116,7 @@ function applyLayersPanelFromEditorState() {
   if (pos) {
     els.layersPanel.style.left = pos.left + "px";
     els.layersPanel.style.right = "auto";
-    els.layersPanel.style.top = pos.top + "px";
+    els.layersPanel.style.top = Math.max(PANEL_MIN_TOP, pos.top) + "px";   // 陈旧持久化位置也不许钻顶（v0.4.11）
   }
   const enabled = editorState.layersPanel.enabled;
   els.layersPanel.classList.toggle("hidden", !enabled);
@@ -380,6 +385,14 @@ const LayerRow = defineComponent({
       e.stopPropagation();
       layersUi.menuId = layersUi.menuId === snap().id ? null : snap().id;
     }
+    // v0.4.11（真机 1.1）：⋯菜单 Teleport 到 body（逃出 .float-panel backdrop-filter 的包含块——
+    //   否则 position:fixed 被扭曲成面板相对、left:12px 盖住下方各行）+ positionPopup 锚到按钮
+    //   （safe-area floor + 视口夹，全仓 popup 定位唯一入口）。
+    const menuBtn = ref<HTMLElement | null>(null);
+    const menuEl = ref<HTMLElement | null>(null);
+    watch(() => props.menuOpen, (open: boolean) => {
+      if (open) nextTick(() => positionPopup(menuEl.value, { anchor: menuBtn.value, align: "right", clampViewport: true }));
+    });
     function vis(e: Event) { e.stopPropagation(); _toggleVisible(live()); }
 
     // 透明度 slider（coalescing：首个 input 记 old —— 键盘步进没有 pointerdown 也照样进 history）
@@ -459,7 +472,7 @@ const LayerRow = defineComponent({
       modeBadge, opacityPct, badgeTitle, layersUi, railPad, modeOptions, L,
       EYE_OPEN, EYE_OFF, FOLDER_OPEN, FOLDER_CLOSED, LAYER_MODE_LABEL,
       onRowClick, onNameClick, onRenameCommit, onRenameKey,
-      toggleBadge, toggleMenu, vis, toggleCollapse,
+      toggleBadge, toggleMenu, vis, toggleCollapse, menuBtn, menuEl,
       opaInput, opaCommit, modeChange, act, onMoveSelect,
       toggleClip, toggleRef, toggleLock,
     };
@@ -492,12 +505,12 @@ const LayerRow = defineComponent({
       </span>
       <span v-if="isRef" class="layer-ref-chip" :title="L.refTip">{{ L.refChip }}</span>
 
-      <button type="button" class="layer-tools-btn" :title="L.layerMenu" @click="toggleMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
+      <button type="button" ref="menuBtn" class="layer-tools-btn" :title="L.layerMenu" @click="toggleMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
 
       <button type="button" class="layer-mode-badge" :class="{ active: expanded }"
         :title="badgeTitle" @click="toggleBadge">{{ modeBadge }}</button>
 
-      <div v-if="menuOpen" class="menu-panel layer-tools-popup" @click.stop>
+      <Teleport to="body"><div v-if="menuOpen" ref="menuEl" class="menu-panel layer-tools-popup" @click.stop>
         <button class="menu-item menu-item-with-icon" type="button" @click="act('rename')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rename"/></svg><span class="menu-item-label">{{ L.rename }}</span></button>
 
         <!-- 叶专属：复制 -->
@@ -524,7 +537,7 @@ const LayerRow = defineComponent({
         <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#merge-down"/></svg><span class="menu-item-label">{{ L.mergeDown }}</span></button>
         <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!hasPx" @click="act('clear')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-document"/></svg><span class="menu-item-label">{{ L.clearContent }}</span></button>
         <button class="menu-item menu-danger menu-item-with-icon" type="button" :disabled="!canDel" @click="act('del')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span class="menu-item-label">{{ isGroup ? L.delGroup : L.del }}</span></button>
-      </div>
+      </div></Teleport>
     </div>
 
     <div v-if="expanded" class="layer-row-expand" :style="{ marginLeft: railPad + 'px' }" @click.stop>
@@ -710,8 +723,10 @@ export function initLayersPanel(ctx: AppContext) {
     if (!_layersDrag || e.pointerId !== _layersDrag.id) return;
     const w = els.layersPanel.offsetWidth;
     const h = els.layersPanel.offsetHeight;
+    // v0.4.11（真机 1.1 softlock）：top 地板 = 顶部出血区——面板头钻进 iPad hidden title bar
+    //   后拖不回来（系统手势拦截），文档被软锁。仿 reference._loadPos 的 MIN_TOP 先例。
     const left = Math.max(0, Math.min(window.innerWidth - w, _layersDrag.ol + (e.clientX - _layersDrag.sx)));
-    const top  = Math.max(0, Math.min(window.innerHeight - h, _layersDrag.ot + (e.clientY - _layersDrag.sy)));
+    const top  = Math.max(PANEL_MIN_TOP, Math.min(window.innerHeight - h, _layersDrag.ot + (e.clientY - _layersDrag.sy)));
     els.layersPanel.style.left = left + "px";
     els.layersPanel.style.right = "auto";
     els.layersPanel.style.top = top + "px";

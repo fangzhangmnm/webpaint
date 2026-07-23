@@ -3,8 +3,10 @@
 :root {
   /* ---- Surface 层级表（z-order SSoT，v232；详 docs/20260611-surfaces-z-order.md）----
      全仓唯一允许出现 z-index 数字的地方。band 间不变量（结构性，不靠手填数字）：
-       chrome < toolbar < window < sheet < overlay < menu < toast < modal < gate < busy < popout < dev < error
+       chrome < toolbar < window < sheet < overlay < menu < toast < modal < busy < gate < popout < dev < error
      「菜单/popup 永远在浮窗和全屏 overlay 上面」由 band 序保证。
+     v0.4.11：gate 抬到 busy 之上——「冲突必 surface」（ADR-0009）优先于防误点遮罩。store 收敛后
+     push 在 busy 内 surface 冲突面（push.ts 包 busy），gate<busy 会把冲突选择盖死（真机 2026-07-22 0.2）。
      新 UI 选 band 用 var(--z-*)；浮窗（window band）内的动态顺序归 src/surfaces.ts 管。
      例外（不在表内）：board-grid/board-cursor（1/2，垫底）、局部 stacking context 内的相对值
      （menu-config-popup、gallery tile 内 ⋯popup 等）。 */
@@ -16,8 +18,8 @@
   --z-menu: 400;     /* 一切菜单 / popup（汉堡 / 调整 / 图库 / size popup / 回收站⋯） */
   --z-toast: 450;
   --z-modal: 500;    /* .backdrop / .sheet 确认对话（resample = -2/-1，确认能盖住它） */
-  --z-gate: 520;     /* sync gate 锁屏 */
-  --z-busy: 540;     /* fullscreen-busy 防误点锁 */
+  --z-busy: 520;     /* fullscreen-busy 防误点锁 */
+  --z-gate: 540;     /* sync gate 锁屏 / 冲突选择——必须盖过 busy（冲突必 surface，ADR-0009） */
   --z-popout: 600;   /* anchored-popup / picker-pin：永远在 modal 之上 */
   --z-dev: 700;
   --z-error: 9999;   /* index.html __errBar 的 inline 值与此对齐 */

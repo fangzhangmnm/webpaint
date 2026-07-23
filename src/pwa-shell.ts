@@ -59,6 +59,11 @@ export class PwaShell {
     };
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") onFg(); });
     window.addEventListener("focus", onFg);
+    // v0.4.11（真机 2.2）：切后台时主动 blur 当前焦点——iOS 回前台会把焦点还给上次聚焦的文本框
+    //   （重命名/新建名/密码 sheet 等），凭空弹一块键盘。收口一刀：进后台即失焦。
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") (document.activeElement as HTMLElement | null)?.blur?.();
+    });
 
     // 注册 SW：prod 和 dev(/dev/)都装（worker 按 scope 分 cache-first / network-first）；只跳 localhost（dev server 无 SW 文件）。
     if ("serviceWorker" in navigator && !LOCAL_DEV_HOSTS.has(location.hostname)) {

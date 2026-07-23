@@ -289,7 +289,7 @@ export class ReferenceWindow {
       if (!this._panelDrag || e.pointerId !== this._panelDrag.id) return;
       const w = this.panel.offsetWidth, h = this.panel.offsetHeight;
       const left = clamp(this._panelDrag.ol + (e.clientX - this._panelDrag.sx), 0, window.innerWidth - w);
-      const top  = clamp(this._panelDrag.ot + (e.clientY - this._panelDrag.sy), 0, window.innerHeight - h);
+      const top  = clamp(this._panelDrag.ot + (e.clientY - this._panelDrag.sy), 60, window.innerHeight - h);   // top 地板=出血区（v0.4.11，同 layers-panel）
       this.panel.style.left = left + "px";
       this.panel.style.top = top + "px";
       this._savePos();
