@@ -17,7 +17,6 @@ import { thumbBlobFromCanvas, setCurrentSessionName } from "./session.ts";
 import { renderNodesToCanvas } from "./doc-render.ts";
 import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.ts";
 import { freezeDocForEncode } from "./doc.ts";
-import { makeAutosaveGate } from "./checkpoint-policy.ts";
 import { PaintDoc } from "./doc.ts";
 import type { Layer } from "./doc.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
@@ -67,8 +66,7 @@ let _loadedDocWriterVer: string | null = null;
 let _loadedDocNewerConfirmed = false;
 let _loadingDoc = false;
 
-const AUTOSAVE_MS = 3 * 60 * 1000;
-const _autosaveGate = makeAutosaveGate(AUTOSAVE_MS, () => Date.now());
+const AUTOSAVE_IDLE_MS = 30_000;   // v0.4.11 用户拍板：停笔 30 秒即落盘（旧 3min 墙钟 gate 删——dirty 门已足够：存完即净，再编辑本身重置空闲时钟）
 
 const _phase = reactive<{ current: "gallery" | "editing" | "lazyblank" }>({ current: "gallery" });
 function _recomputePhase() { _phase.current = !_activeSessionName ? "gallery" : _isLazyBlankSession ? "lazyblank" : "editing"; }
@@ -610,13 +608,13 @@ export function initSession(ctx: AppContext) {
     policy: { autosaveMs: 0, pushOn: ["exit"] },   // S8：interval autosave 退役，改挂 bg-jobs（下方）
   });
   es.start();   // visibility/pagehide/blur 抢救 flush（崩溃安全直调，不受空闲节流）
-  // S8（spec:40/42）：autosave 挂 background-sync-jobs 低优先级——只在空闲跑（输入插队自动让路，
-  //   不再有 setInterval 在描边中途 encode 卡主线程）；makeAutosaveGate 给 min 周期（不折腾 idb）。
+  // S8/v0.4.11：autosave 挂 background-sync-jobs（minIdleMs=30s：停笔 30 秒才落盘，输入插队自动让路，
+  //   不在描边中途 encode）。dirty 门足够防重复（flushLocal 后即净；encode 中的重入由 es._saving 挡）。
   //   encode 内部有冻结快照 → 即使 flushLocal 的 await 期间用户开画，存档也一致。
   ctx.bgJobs.register("autosave", 5, () => {
-    if (_autosaveGate(es.isDirty())) void es.flushLocal();
+    if (es.isDirty()) void es.flushLocal();
     return "done";
-  });
+  }, { minIdleMs: AUTOSAVE_IDLE_MS });
   // （v409：无 desk 改动桥 —— desk 不标脏、不驱动落盘，只在顺路 encode 时被 _buildOraMeta 捞走。详 editor-state.ts ⚠）
 
   _recomputePhase();

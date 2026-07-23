@@ -146,7 +146,7 @@ export interface AppContext {
   hideFullscreenBusy: () => void;
 
   // S8：空闲调度深模块（tile 压缩 + autosave 共用；app.ts 的 initTileJobs 造）。
-  bgJobs: { register(name: string, priority: number, handler: (deadlineTs: number) => "done" | "requeue"): () => void };
+  bgJobs: { register(name: string, priority: number, handler: (deadlineTs: number) => "done" | "requeue", opts?: { minIdleMs?: number }): () => void };
 
   // 晚绑（app.js 用 getter 透传，gallery const 在 mountGallery 后构造）
   readonly gallery: GalleryHandle;

@@ -17,6 +17,7 @@ interface Job {
   name: string;
   priority: number;                              // 大 = 先跑
   handler: (deadlineTs: number) => JobResult;    // deadlineTs = 本 tick 预算耗尽的时间戳（now() 系）
+  minIdleMs: number;                             // 只在空闲 ≥ 此值时才入队（0 = 有预算就跑）
   alive: boolean;
 }
 
@@ -42,9 +43,11 @@ export class BackgroundSyncJobs {
     this._lastInput = this._now();
   }
 
-  /** 注册 handler。返回注销函数。同一模块可注册多个不同优先级的 handler。 */
-  register(name: string, priority: number, handler: (deadlineTs: number) => JobResult): () => void {
-    const job: Job = { name, priority, handler, alive: true };
+  /** 注册 handler。返回注销函数。同一模块可注册多个不同优先级的 handler。
+   *  opts.minIdleMs：该 handler 只在空闲 ≥ 此值时才有资格跑（与 quota 表同一套 idle 账；
+   *  v0.4.11 给 autosave 用——「停笔 30 秒后才落盘」）。 */
+  register(name: string, priority: number, handler: (deadlineTs: number) => JobResult, opts: { minIdleMs?: number } = {}): () => void {
+    const job: Job = { name, priority, handler, minIdleMs: opts.minIdleMs ?? 0, alive: true };
     this._jobs.push(job);
     return () => {
       job.alive = false;
@@ -69,8 +72,8 @@ export class BackgroundSyncJobs {
     this._interrupted = false;
     const deadline = t0 + quotaMs;
     if (this._queue.length === 0) {
-      // 新一轮：全部存活 handler 按优先级降序入队（稳定排序 → 同优先级按注册序）
-      this._queue = this._jobs.filter((j) => j.alive).sort((a, b) => b.priority - a.priority);
+      // 新一轮：存活且满足自己 minIdleMs 档的 handler 按优先级降序入队（稳定排序 → 同优先级按注册序）
+      this._queue = this._jobs.filter((j) => j.alive && idle >= j.minIdleMs).sort((a, b) => b.priority - a.priority);
     }
     while (this._queue.length > 0) {
       if (this._interrupted || this._now() >= deadline) break;   // 只在 handler 间停（跑完上一个才停）

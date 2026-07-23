@@ -54,22 +54,4 @@ describe("checkpoint · 年龄显示", () => {
   });
 });
 
-// ---- S8 autosave 节流门（spec:42 min 周期）----
-const { makeAutosaveGate } = await import("../src/checkpoint-policy.ts");
-describe("makeAutosaveGate · autosave 节流（S8）", () => {
-  it("dirty 且距上次放行 ≥ minMs 才放行；放行即记时", () => {
-    let t = 0;
-    const gate = makeAutosaveGate(1000, () => t);
-    eq(gate(true), false, "刚建门（t=0）不放行");
-    t = 999; eq(gate(true), false, "未满周期不放行");
-    t = 1000; eq(gate(true), true, "满周期放行");
-    t = 1500; eq(gate(true), false, "放行后重新计时");
-    t = 2000; eq(gate(true), true, "再满周期再放行");
-  });
-  it("不 dirty 永不放行，也不消耗计时", () => {
-    let t = 0;
-    const gate = makeAutosaveGate(100, () => t);
-    t = 500; eq(gate(false), false, "clean 不放行");
-    eq(gate(true), true, "同刻 dirty 立即放行（clean 探测不吃周期）");
-  });
-});
+// （S8 的 makeAutosaveGate 已随 v0.4.11「minIdleMs=30s 空闲触发」退役——节流职责并进 background-sync-jobs.register 的 minIdleMs，测试在 background-sync-jobs.test.mjs。）

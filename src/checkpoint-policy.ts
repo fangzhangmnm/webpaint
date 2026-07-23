@@ -51,15 +51,3 @@ export function checkpointAgeMinutes(at: number, now: number): number {
   return Math.max(1, Math.round((now - at) / 60000));
 }
 
-/** S8 autosave 节流门（spec:42「checkpoint 有最小时间周期，不要一有空就折腾 idb」）。
- *  返回判定函数：dirty 且距上次放行 >= minMs 才放行（放行即记时）。起点 = 建门时刻
- *  （开画后至少等满一个周期才第一次 autosave）。纯函数注入时钟可测。 */
-export function makeAutosaveGate(minMs: number, now: () => number): (dirty: boolean) => boolean {
-  let last = now();
-  return (dirty: boolean): boolean => {
-    const t = now();
-    if (!dirty || t - last < minMs) return false;
-    last = t;
-    return true;
-  };
-}

@@ -122,3 +122,28 @@ describe("cpu-tile-compression · deflate codec", () => {
     assert(same, "deflate 往返逐字节无损");
   });
 });
+
+// ---- v0.4.11 minIdleMs：per-handler 空闲门（autosave「停笔 30 秒才落盘」）----
+describe("bg-jobs · register minIdleMs", () => {
+  it("空闲不足 minIdleMs 的 handler 不入队；到档后照常跑", () => {
+    let t = 0;
+    const jobs = new BackgroundSyncJobs({ now: () => t, quotaTable: [{ afterIdleMs: 1000, quotaMs: 100 }] });
+    const runs = { fast: 0, slow: 0 };
+    jobs.register("fast", 5, () => { runs.fast++; return "done"; });
+    jobs.register("slow", 9, () => { runs.slow++; return "done"; }, { minIdleMs: 30_000 });
+    t = 2000; jobs.tick();                       // 空闲 2s：fast 跑，slow（要 30s）不跑
+    eq(runs.fast, 1); eq(runs.slow, 0);
+    t = 31_000; jobs.tick();                     // 空闲 31s：两个都跑（slow 优先级高先跑）
+    eq(runs.fast, 2); eq(runs.slow, 1);
+  });
+  it("noteInput 归零空闲时钟 → minIdleMs handler 重新等档", () => {
+    let t = 0;
+    const jobs = new BackgroundSyncJobs({ now: () => t, quotaTable: [{ afterIdleMs: 1000, quotaMs: 100 }] });
+    let runs = 0;
+    jobs.register("as", 5, () => { runs++; return "done"; }, { minIdleMs: 30_000 });
+    t = 40_000; jobs.tick(); eq(runs, 1, "40s 空闲已跑");
+    jobs.noteInput();                            // t=40s 输入 → 时钟归零
+    t = 60_000; jobs.tick(); eq(runs, 1, "输入后仅 20s 空闲，不够 30s");
+    t = 71_000; jobs.tick(); eq(runs, 2, "输入后 31s 空闲，再跑");
+  });
+});
