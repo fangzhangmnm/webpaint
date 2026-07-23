@@ -128,6 +128,61 @@ commit 后 `applyMaskPostStroke` CPU 兜底。live 与 commit 的合成引擎不
 - 等待期间用户强退/崩溃 = cancel（家规 interrupt=cancel）：无半成品持久化。
 - kill-previous-job：重量在线预览（spec:239-240）用 float 层 last-write-win，杀旧任务起新任务。
 
-## 1. 施工记录
+## 1. 施工记录（v0.4.9 / 2026-07-22 完工；839 node + tsc + SwiftShader smoke 全绿）
 
-（施工中补写。）
+> 分支 `worktree-v04-s8-s9-edit-migration`；commit 链：ad94548(S8a) → b8ab867(S8b) →
+> e0e1607(S8c) → 4ed5e11(S8d) → S8e → 版本 bump。§0 计划全部落地，偏差见下。
+
+### 落了什么
+
+1. **S8a**：`RenderTreeGL.commitBrushStroke`（merge = overlay 叶 pass 打透明底/source-over/op1
+   → bbox readPixels → `Layer.applyRegionDiff` 只封真变 tile → `copyBatchFromFramebuffer` 入池
+   + `registerPair` + 叶记录就地更新）。**commit ≡ live 逐位一致（smoke 五用例 maxΔ=0）**——
+   旧 Canvas2D commit 与 GPU live 是两套合成引擎，从此同一个。收养后下一帧 sync 零上传
+   （断言过）。死：rasterizeStrokeToCanvas 链、brush._commitStrokeCanvas、GL buffered brush 的
+   applyMaskPostStroke finalize、glMode 旗标。
+2. **S8b**：液化 mask 改 doc-space 平面（与 dispField 同 bbox 同步长、平面外回落
+   `selection.sampleAt`）→ **H7 三条 RED 转绿**（test/liquify-docspace-mask.test.mjs 四条真像素
+   测试，node 全跑）。**考古发现**：v132 起液化真身已走 filterBrush（plugins/liquify.ts 的
+   BrushFilter），input 的 role="liquify" 直连 LiquifyEngine 是**无人触发的死双轨**（没有任何
+   代码再 setTool("liquify")）——整条删除（input/engine-registry/pointer-route/edit-mode/toolbar）。
+   「filter-brush 抽象类」的落点 = 既有 BrushFilter 契约 + FilterBrushEngine dispatcher 成为唯一
+   路径（TS interface 即抽象类，无共享实现时更薄）；CPU 实现暂留（spec 原话）。
+3. **S8c**：吸管 composite 模式 = `RenderTreeGL.pickColor`（compositeOnce + 1px readback，
+   底与显示同源）。board 合成缓存 cluster 死（ensureCompositeCache/_compositeCache/
+   _layerCompositeOpts/erase/clip tmp 池/_drawDocBg/_drawCheckerboard）——board 与
+   layer-composite.ts 断开。行为注：调整面板开着时吸管取的是真像素非 surrogate 替身
+   （旧缓存路径喂替身；吸管与调整面板在 UI 上互斥，实际不可达——真机批顺手确认）。
+4. **S8d**：`doc.freezeDocForEncode`——encode 入口同步冻结{结构 + 每叶 tile 句柄快照}（零拷贝），
+   ora bytes 与 peek 读同一冻结视图；**修掉一类真损坏**：encode 逐层 await 中的结构操作会让
+   stack.xml 与 layer PNG 列表错位（最坏解不开）。autosave 从 setInterval 改挂
+   background-sync-jobs（输入插队让路 + makeAutosaveGate min 周期）；visibility/pagehide 抢救
+   直调不受节流。「写成功再删旧」= store 同 key IDB put 事务原子替换（无先删窗口）。
+5. **S8e**：forceGLResyncUnderFloat/_wasFloatActive/render 死参数拆除；
+   `markDocDirty` 在原地描边中不再全局失效段缓存（真正兑现「液化每帧 sb0」）。
+
+### 与 §0 计划 / handoff 的偏差（诚实交代）
+
+- **liveSyncProvider 没拆**：handoff S8 条目把它列进「冗余 hint」，勘探结论相反——它是执行器
+  updated 集的喂口（原地引擎的叶靠它不进段缓存）。拆了功能不坏（每帧全段重建兜底）但性能退化。
+  保留，并借它做了 markDocDirty 的描边中免全失效。
+- **brush live 未改独立 merged-FBO 物化**：现行 overlay 叶 pass 已是「替换下方图层」语义
+  （见 §0-S8a 论证）；commit 用同一 shader 重跑一次（含 tail/taper 的最终 stamps）→
+  「live 即 commit 所见」由 smoke maxΔ=0 钉死。少一张常驻 doc-size FBO。
+- **选区 per-tile GPU 上传不做**（§0 已声明）：R8 bbox 平面 + Selection 不可变身份缓存已零重复
+  上传；per-tile 需第二座 R8 池。等真机数据。
+
+### 测试落点
+
+- node（839）：applyRegionDiff ×5、液化 doc-space ×4（含 bleed 三模式回归）、freeze ×4、
+  autosave gate ×2、engine-registry/pointer-route 死双轨清理后的回归锁更新。
+- smoke：commit≡live 五用例（wash/buildup/erase/multiply+lockAlpha/selMask）全 maxΔ=0 +
+  收养零上传断言 + pickColor vs golden（maxΔ=1）。
+
+## 2. 拍板累积清单新增（并入 handoff 总清单，不阻塞）
+
+1. encode 一致性用「不可变 tile 快照」而非 spec 字面的「阻塞锁 workpiece 写」（spec:41）——
+   效果严格更强（一致 + 不打断用户），待追认。
+2. 吸管在调整预览中取真像素（非 surrogate；见 S8c 行为注）。
+3. 液化死双轨删除后 undo 历史标签统一为 "stroke"（旧 "liquify" 独立事务类型随之退役，
+   UI 无感知——该 label 无 UI 面）。
