@@ -31,9 +31,14 @@ export function initErrorBadge(deps: { status: (text: string, persist?: boolean)
 function errToText(err: unknown): string {
   if (err == null) return "未知错误";
   if (typeof err === "string") return err;
-  if (err instanceof Error) return err.message || String(err);
-  const anyErr = err as { message?: unknown };
-  if (anyErr && typeof anyErr.message === "string") return anyErr.message;
+  // v0.4.11 插桩（真机 2.3「总是同步错误弹窗」）：Error 带上 err.name——旧库残留类故障
+  //   （如 IDB NotFoundError）在 banner 上直接可辨，给下轮 store 大修留诊断证据。
+  if (err instanceof Error) return (err.name && err.name !== "Error" ? `[${err.name}] ` : "") + (err.message || String(err));
+  const anyErr = err as { message?: unknown; name?: unknown };
+  if (anyErr && typeof anyErr.message === "string") {
+    const n = typeof anyErr.name === "string" && anyErr.name !== "Error" ? `[${anyErr.name}] ` : "";
+    return n + anyErr.message;
+  }
   try { return JSON.stringify(err); } catch { return String(err); }
 }
 
