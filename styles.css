@@ -238,6 +238,10 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 .lasso-picker, .lasso-transform-ctrl { display: flex; align-items: center; gap: 4px; }
 .lasso-picker.hidden, .lasso-transform-ctrl.hidden { display: none; }
 .lasso-section { display: flex; align-items: center; gap: 4px; }
+/* v0.5.12 魔棒配置内联（阈值滑条+扩张toggle+px）+ ⋯ 菜单禁用态 */
+.lasso-magic-ctx { display: flex; align-items: center; gap: 6px; }
+.lasso-magic-ctx input[type="range"] { width: 88px; }
+#lassoSelEditMenu button[disabled] { opacity: .38; pointer-events: none; }
 .lasso-section.hidden { display: none; }
 /* 其他工具模式下有选区：lasso 工具栏只露"取消选区"（选区只是蒙板，不给 lasso 全套） */
 #lassoSubToolBar.lasso-deselect-only > *:not(#lassoDeselectBtn) { display: none !important; }

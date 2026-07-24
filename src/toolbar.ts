@@ -15,7 +15,7 @@ import { requireEditableLeaf } from "./editable-leaf.ts";
 import { editorState } from "./workbench-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
-import { fillModeOn, fillPreviewActive, setFillMode, commitFillNow } from "./fill-mode.ts";
+import { fillPreviewActive, commitFillNow } from "./fill-mode.ts";
 import type { AppContext } from "./app-context.ts";
 import type { LayerSnap } from "./doc.ts";
 
@@ -44,13 +44,25 @@ const pushSel = (entry: { before: Selection | null } | null | undefined) => {
 
 // 套索工具栏 DOM（initToolbar 里查表）。静态元素 → 非空；btn 组 → 数组；下拉 → select。
 let lassoToolbarStack: HTMLElement, lassoToolbarRow1: HTMLElement, lassoToolbarRow2: HTMLElement;
-let lassoSubToolBar: HTMLElement, lassoSelectionActions: HTMLElement, lassoTransformCtrl: HTMLElement;
-let lassoSubBtns: HTMLElement[], lassoSetOpBtns: HTMLElement[], lassoTransformModeBtns: HTMLElement[];
-let lassoThresholdInput: HTMLInputElement, lassoThresholdVal: HTMLElement, lassoMagicCfgBtn: HTMLElement;
-let lassoMagicPopup: HTMLElement, lassoConstrainBtn: HTMLElement, lassoConstrainSep: HTMLElement;
-let lassoSelEditBtn: HTMLElement;   // v242 选区编辑齿轮（有选区才亮；扩张/收缩 op）
-let lassoFillModeBtn: HTMLElement, lassoFillCommitBtn: HTMLElement, lassoFillCancelBtn: HTMLElement;   // v0.5.11 填充模式
+let lassoSubToolBar: HTMLElement, lassoTransformCtrl: HTMLElement;
+let lassoSubBtns: HTMLElement[], lassoTransformModeBtns: HTMLElement[];
+let lassoThresholdInput: HTMLInputElement, lassoThresholdVal: HTMLElement;
+let lassoConstrainBtn: HTMLElement, lassoConstrainSep: HTMLElement;
+let lassoSelEditBtn: HTMLElement, lassoSelEditMenu: HTMLElement;   // v0.5.12 ⋯ 菜单（低频选区操作收纳）
+let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement, lassoSetOpMenu: HTMLElement, lassoSetOpMenuBtns: HTMLElement[];   // 布尔单槽
+let lassoMagicCtx: HTMLElement, lassoExpandToggle: HTMLElement, lassoMagicExpandPx: HTMLInputElement;   // 魔棒配置内联
+let lassoTransformBtn: HTMLElement, lassoFillCommitBtn: HTMLElement, lassoDeselectBtn: HTMLElement;
+let toolWandBtn: HTMLElement | null = null, toolLassoBtn: HTMLElement | null = null;   // 主栏预设钮（高亮特判）
 let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
+
+// v0.5.12 「跟 session 走」的 RAM 记忆（user 拍板：不进 editorState/文件）：
+//   每工具各记子工具与布尔模式；_lassoShapeSub = 套索预设钮的形状类记忆（永不为 magic——魔棒有自己的主栏钮）。
+const _toolMem: Record<"lasso" | "fill", { sub: string; setOp: string }> = {
+  lasso: { sub: "freehand", setOp: "new" },
+  fill:  { sub: "magic",    setOp: "union" },
+};
+const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
+function closeSetOpMenu() { lassoSetOpMenu?.classList.add("hidden"); }
 
 // ===== 套索/选区工具栏（v65 重做）=====
 // 三个 section 按状态切换：subToolBar（lasso 激活）/ selectionActions（有选区且非 floating）/ transformCtrl（floating）
@@ -64,43 +76,57 @@ export function updateLassoToolbar() {
   }
   const floating = input.lasso.hasFloating();
   const hasSelection = !!doc.selection;
-  const lassoActive = editMode.current() === "lasso";
-  const showAny = (floating || hasSelection || lassoActive) && !pickerActive;
+  const m = editMode.current();
+  const lassoActive = m === "lasso";
+  const fillActive = m === "fill";
+  const selToolActive = lassoActive || fillActive;   // v0.5.12：选区/填充共用同一 Row1（UI 独立≠第二套代码）
+  // 主栏预设钮高亮特判（必须在 early-return 之前——切去别的工具也要把 pressed 态清掉）：
+  //   魔棒亮=(lasso&&magic)，套索亮=(lasso&&非magic)；fill 走 data-tool 循环自动。
+  const sub = input.lasso.getSubTool();
+  toolLassoBtn?.setAttribute("aria-pressed", lassoActive && sub !== "magic" ? "true" : "false");
+  toolWandBtn?.setAttribute("aria-pressed", lassoActive && sub === "magic" ? "true" : "false");
+  const showAny = (floating || hasSelection || selToolActive) && !pickerActive;
   lassoToolbarStack.classList.toggle("hidden", !showAny);
-  if (!showAny) return;
+  if (!showAny) { closeSelEditUI(); closeSetOpMenu(); return; }
 
   // 其他工具模式下有选区：选区只是个蒙板，工具栏只给一个"取消选区"（否则去选还得切回 lasso）。
-  const otherToolSel = hasSelection && !floating && !lassoActive;
-  // Row 1：lasso 模式给全套；其他工具+有选区只露 deselect（加 class，CSS 藏其余）。floating 时都不给。
-  const showRow1 = (lassoActive && !floating) || otherToolSel;
+  const otherToolSel = hasSelection && !floating && !selToolActive;
+  // Row 1（唯一常驻行，v0.5.12 单排化）：选区/填充给全套；其他工具+有选区只露 deselect。floating 时不给。
+  const showRow1 = (selToolActive && !floating) || otherToolSel;
   lassoToolbarRow1.classList.toggle("hidden", !showRow1);
   lassoSubToolBar.classList.toggle("hidden", !showRow1);
   lassoSubToolBar.classList.toggle("lasso-deselect-only", otherToolSel);
 
-  // Row 2：selectionActions（变换/填色/清除/复制/移层）只在 lasso 模式给；其他工具模式不给。floating 显 transformCtrl。
-  // v217：没选区时也露 row2（至少有变换按钮）——点变换自动全选当前层。
-  const showSelectionActions = !floating && lassoActive;
-  const showTransformCtrl = floating;
-  const showRow2 = showSelectionActions || showTransformCtrl;
-  lassoToolbarRow2.classList.toggle("hidden", !showRow2);
-  lassoSelectionActions.classList.toggle("hidden", !showSelectionActions);
-  // 没选区时只露"变换"（隐式全选），其余 .lasso-needs-sel 靠此 class 隐藏
-  lassoSelectionActions.classList.toggle("transform-only", !hasSelection);
-  lassoTransformCtrl.classList.toggle("hidden", !showTransformCtrl);
+  // Row 2：只剩浮层变换控制（selectionActions 段 v0.5.12 退役）。
+  lassoToolbarRow2.classList.toggle("hidden", !floating);
+  lassoTransformCtrl.classList.toggle("hidden", !floating);
 
-  // 高亮当前 sub-tool / set-op / transform mode
-  const sub = input.lasso.getSubTool();
+  // 高亮当前 sub-tool / 布尔槽图标 / transform mode
   for (const b of lassoSubBtns) {
     b.setAttribute("aria-pressed", b.dataset.lassoSub === sub ? "true" : "false");
   }
-  lassoMagicCfgBtn.classList.toggle("hidden", sub !== "magic");
-  // 子工具切走 → 关掉魔术棒 popup（油漆桶按工具栏没装；按 ⚙ 仅在 magic 下出）
-  if (sub !== "magic") lassoMagicPopup.classList.add("hidden");
-  // v242 选区编辑齿轮：有选区 + lasso 模式 + 非 floating 才亮（扩张/收缩对任何来源的选区都能用）。
-  //   modal 开着时(_selEdit)恒亮——预览 shrink 到空会让 doc.selection=null，不能因此把 modal 撕掉。
-  const showSelEdit = !!_selEdit || (hasSelection && showRow1 && !otherToolSel);
+  // 布尔单槽：槽图标 = 当前模式；菜单里「新建」在 fill 隐藏（填充=累积工作流）。
+  const setOp = input.lasso.getSetOpMode();
+  lassoSetOpSlotUse.setAttribute("href", SETOP_ICON[setOp] || "#selection-new");
+  for (const b of lassoSetOpMenuBtns) {
+    b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
+    if (b.dataset.lassoSetop === "new") b.classList.toggle("hidden", fillActive);
+  }
+  // 魔棒配置内联：magic 子工具时显示；px 输入仅扩张开着时显。
+  const magicOn = sub === "magic";
+  lassoMagicCtx.classList.toggle("hidden", !magicOn);
+  if (magicOn) {
+    lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
+    lassoMagicExpandPx.classList.toggle("hidden", !editorState.magicWand.expand);
+  }
+  // ⋯ 菜单钮：选区/填充工具常显（menu 内按 needs-sel / lasso-only 逐项禁用·隐藏——见 openSelEditUI）。
+  //   modal 开着时(_selEdit)恒亮（预览 shrink 到空不能把 modal 撕掉）。
+  const showSelEdit = !!_selEdit || (showRow1 && !otherToolSel);
   lassoSelEditBtn.classList.toggle("hidden", !showSelEdit);
-  if (!showSelEdit) closeSelEditUI();   // 选区没了 / 切走 → 收起齿轮菜单（此时 _selEdit 必为 null）
+  if (!showSelEdit) closeSelEditUI();
+  // ⋯ 菜单逐项：needs-sel 无选区禁用；lasso-only（清除/复制/移层）fill 里隐藏
+  for (const el of lassoSelEditMenu.querySelectorAll<HTMLButtonElement>(".lasso-menu-needs-sel")) el.disabled = !hasSelection;
+  for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-lasso-only")) el.classList.toggle("hidden", fillActive);
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
   lassoConstrainBtn.classList.toggle("hidden", !showConstrain);
@@ -108,15 +134,9 @@ export function updateLassoToolbar() {
   if (showConstrain) {
     lassoConstrainBtn.setAttribute("aria-pressed", input.lasso.getConstrainSquare() ? "true" : "false");
   }
-  const setOp = input.lasso.getSetOpMode();
-  for (const b of lassoSetOpBtns) {
-    b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
-  }
-  // v0.5.11 填充模式：开关 pressed 态跟 per-doc SSoT；✓/✗ 只在预览挂着时露（有选区 + 非浮层）。
-  lassoFillModeBtn.setAttribute("aria-pressed", fillModeOn() ? "true" : "false");
-  const fillPrev = fillPreviewActive();
-  lassoFillCommitBtn.classList.toggle("hidden", !fillPrev);
-  lassoFillCancelBtn.classList.toggle("hidden", !fillPrev);
+  // 行尾动作组：变换=选区工具专属；✓=填充工具+有选区（commit+清选区）。
+  lassoTransformBtn.classList.toggle("hidden", !lassoActive);
+  lassoFillCommitBtn.classList.toggle("hidden", !(fillActive && fillPreviewActive()));
   if (floating) {
     const mode = input.lasso.getMode();
     for (const b of lassoTransformModeBtns) {
@@ -137,8 +157,8 @@ export function setTool(tool: string) {
   // v309：smudge 工具（一直只是 disabled 占位、从未实装）整体 purge，待将来重写。
   //   老 doc 持久化里可能存了 "smudge" → 透明回退 brush（同 airbrush/shapes）
   if (tool === "smudge") tool = "brush";
-  // v0.5.11：油漆桶独立工具退役（填色收进套索 fill mode）。老 doc 持久化里可能存了 "bucket" → 回退 brush
-  if (tool === "bucket") tool = "brush";
+  // v0.5.11 曾把 "bucket" 回退 brush；v0.5.12 油漆桶以 "fill" 第一类工具回归。老 doc 的 "bucket" → fill。
+  if (tool === "bucket") tool = "fill";
   // 切工具 = 决定性动作 → editMode.setTool 内部按 onToolSwitch 把停驻 transient apply/cancel（不在这单独调）
   // v132: 切到非 filterBrush 工具时自动退出 filter brush 模式（藏 toolbar / 清 state）
   if (state.filterBrush && tool !== "filterBrush") {
@@ -151,6 +171,15 @@ export function setTool(tool: string) {
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
   if (tool === "brush" || tool === "eraser" || tool === "filterBrush") {
     rack.applyToolState(tool);
+  }
+  // v0.5.12：选区/填充的「跟 session 走」记忆——进工具即恢复各自的子工具+布尔模式。
+  //   fill 里禁「新建」：记忆若无效回退 union（填充=累积工作流）。
+  if (tool === "lasso" || tool === "fill") {
+    const mem = _toolMem[tool];
+    input.lasso.setSubTool(mem.sub as Parameters<typeof input.lasso.setSubTool>[0]);
+    const op = (tool === "fill" && mem.setOp === "new") ? "union" : mem.setOp;
+    input.lasso.setSetOpMode(op as Parameters<typeof input.lasso.setSetOpMode>[0]);
+    updateLassoToolbar();
   }
 }
 
@@ -301,42 +330,56 @@ export function initToolbar(ctx: AppContext) {
   lassoToolbarRow1 = byId("lassoToolbarRow1");
   lassoToolbarRow2 = byId("lassoToolbarRow2");
   lassoSubToolBar = byId("lassoSubToolBar");
-  lassoSelectionActions = byId("lassoSelectionActions");
   lassoTransformCtrl = byId("lassoTransformCtrl");
   lassoSubBtns = [...lassoSubToolBar.querySelectorAll<HTMLElement>("[data-lasso-sub]")];
-  lassoSetOpBtns = [...lassoSubToolBar.querySelectorAll<HTMLElement>("[data-lasso-setop]")];
   lassoTransformModeBtns = [...lassoTransformCtrl.querySelectorAll<HTMLElement>("[data-lasso-mode]")];
   lassoThresholdInput = byId<HTMLInputElement>("lassoThreshold");
   lassoThresholdVal = byId("lassoThresholdVal");
-  lassoMagicCfgBtn = byId("lassoMagicCfgBtn");
-  lassoMagicPopup = byId("lassoMagicPopup");
   lassoConstrainBtn = byId("lassoConstrainBtn");
   lassoConstrainSep = document.querySelector(".lasso-constrain-sep") as HTMLElement;
   lassoSelEditBtn = byId("lassoSelEditBtn");
-  // v0.5.11 填充模式：开关/✓/✗（语义在 fill-mode.ts；本处纯接线）。开关变化经 wp:fillmodechange 回派生。
-  lassoFillModeBtn = byId("lassoFillModeBtn");
+  lassoSelEditMenu = byId("lassoSelEditMenu");
+  lassoTransformBtn = byId("lassoTransformBtn");
+  lassoDeselectBtn = byId("lassoDeselectBtn");
   lassoFillCommitBtn = byId("lassoFillCommitBtn");
-  lassoFillCancelBtn = byId("lassoFillCancelBtn");
-  lassoFillModeBtn.addEventListener("click", () => setFillMode(!fillModeOn()));
-  lassoFillCommitBtn.addEventListener("click", () => commitFillNow());
-  lassoFillCancelBtn.addEventListener("click", () => setFillMode(false));
-  window.addEventListener("wp:fillmodechange", updateLassoToolbar);
-  window.addEventListener("wp:applyEditorState", updateLassoToolbar);   // 换文档：开关 pressed 态回灌
+  lassoFillCommitBtn.addEventListener("click", () => { commitFillNow(); updateLassoToolbar(); });
+  window.addEventListener("wp:applyEditorState", updateLassoToolbar);   // 换文档：阈值/扩张态回灌后重派生
 
-  // sub-tool picker
+  // sub-tool picker（点选即记进当前工具的 session 记忆；lasso 的形状类记忆永不为 magic——魔棒有主栏钮）
   for (const b of lassoSubBtns) {
     b.addEventListener("click", () => {
-      input.lasso.setSubTool(b.dataset.lassoSub as Parameters<typeof input.lasso.setSubTool>[0]);
+      const subName = b.dataset.lassoSub as Parameters<typeof input.lasso.setSubTool>[0];
+      input.lasso.setSubTool(subName);
+      const m = editMode.current();
+      if (m === "fill") _toolMem.fill.sub = subName;
+      else if (m === "lasso" && subName !== "magic") _toolMem.lasso.sub = subName;
       updateLassoToolbar();
     });
   }
-  // set-op modifier
-  for (const b of lassoSetOpBtns) {
+  // v0.5.12 布尔单槽：点槽 → 菜单选（user：「点了再选择」）；选择记进当前工具的 session 记忆。
+  lassoSetOpSlot = byId("lassoSetOpSlot");
+  lassoSetOpSlotUse = byId("lassoSetOpSlotUse") as unknown as SVGUseElement;
+  lassoSetOpMenu = byId("lassoSetOpMenu");
+  lassoSetOpMenuBtns = [...lassoSetOpMenu.querySelectorAll<HTMLElement>("[data-lasso-setop]")];
+  lassoSetOpSlot.addEventListener("click", (e: Event) => {
+    e.stopPropagation();
+    lassoSetOpMenu.classList.toggle("hidden");
+  });
+  for (const b of lassoSetOpMenuBtns) {
     b.addEventListener("click", () => {
-      input.lasso.setSetOpMode(b.dataset.lassoSetop as Parameters<typeof input.lasso.setSetOpMode>[0]);
+      const op = b.dataset.lassoSetop as Parameters<typeof input.lasso.setSetOpMode>[0];
+      input.lasso.setSetOpMode(op);
+      const m = editMode.current();
+      if (m === "fill" || m === "lasso") _toolMem[m].setOp = op;
+      lassoSetOpMenu.classList.add("hidden");
       updateLassoToolbar();
     });
   }
+  document.addEventListener("pointerdown", (e: Event) => {
+    if (lassoSetOpMenu.classList.contains("hidden")) return;
+    if (lassoSetOpMenu.contains(e.target as Node) || lassoSetOpSlot.contains(e.target as Node)) return;
+    lassoSetOpMenu.classList.add("hidden");
+  });
   // v242：扩展滑块从魔术棒拆走（改成选区编辑 op，见 initSelEditUI）。魔术棒只剩阈值。
   // v0.5.11：阈值 per-doc 持久化（editorState.magicWand.threshold，原 editorState.bucket 退役后归魔棒）。
   //   UI 改 → 写 editorState + 灌引擎；换文档 → syncMagicThresholdUI 回灌（wp:applyEditorState）。
@@ -352,47 +395,36 @@ export function initToolbar(ctx: AppContext) {
     input.lasso.setMagicThreshold(v);
     lassoThresholdVal.textContent = String(v);
   });
-  // #31 魔棒 flood 后自动扩张（toggle+px，per-doc：editorState.magicWand）。引擎只认一个数：
-  //   effective px = toggle 开 ? px : 0。UI 改 → 写 editorState + 灌引擎；换文档 → 从 editorState 回灌。
-  const magicExpandOn = byId<HTMLInputElement>("lassoMagicExpandOn");
-  const magicExpandPx = byId<HTMLInputElement>("lassoMagicExpandPx");
+  // #31 魔棒 flood 后自动扩张（v0.5.12 内联化：aria-pressed toggle 钮 + px 输入，⚙/popup 退役）。
+  //   引擎只认一个数：effective px = toggle 开 ? px : 0。UI 改 → 写 editorState + 灌引擎；换文档回灌。
+  lassoMagicCtx = byId("lassoMagicCtx");
+  lassoExpandToggle = byId("lassoExpandToggle");
+  lassoMagicExpandPx = byId<HTMLInputElement>("lassoMagicExpandPx");
   const pushMagicExpandToEngine = () => {
     input.lasso.setMagicAutoExpand(editorState.magicWand.expand ? editorState.magicWand.expandPx : 0);
   };
   const syncMagicExpandUI = () => {
-    magicExpandOn.checked = editorState.magicWand.expand;
-    magicExpandPx.value = String(editorState.magicWand.expandPx);
+    lassoMagicExpandPx.value = String(editorState.magicWand.expandPx);
     pushMagicExpandToEngine();
+    updateLassoToolbar();   // toggle pressed 态/px 显隐在 updateLassoToolbar 派生
   };
-  magicExpandOn.addEventListener("change", () => {
-    editorState.magicWand.expand = magicExpandOn.checked;
+  lassoExpandToggle.addEventListener("click", () => {
+    editorState.magicWand.expand = !editorState.magicWand.expand;
     pushMagicExpandToEngine();
+    updateLassoToolbar();
   });
-  magicExpandPx.addEventListener("change", () => {
-    const v = Math.max(0, Math.min(100, parseInt(magicExpandPx.value, 10) || 0));
-    magicExpandPx.value = String(v);
+  lassoMagicExpandPx.addEventListener("change", () => {
+    const v = Math.max(0, Math.min(100, parseInt(lassoMagicExpandPx.value, 10) || 0));
+    lassoMagicExpandPx.value = String(v);
     editorState.magicWand.expandPx = v;
     pushMagicExpandToEngine();
   });
   // 文本框会吞快捷键（合法），Enter=确认并释放焦点——画布点按 preventDefault 夺不回焦点，必须给出口
-  magicExpandPx.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") magicExpandPx.blur(); });
+  lassoMagicExpandPx.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") lassoMagicExpandPx.blur(); });
   window.addEventListener("wp:applyEditorState", syncMagicExpandUI);
   window.addEventListener("wp:applyEditorState", syncMagicThresholdUI);
   syncMagicThresholdUI();
   syncMagicExpandUI();
-  // 设置按钮 → popup toggle
-  function toggleMagicPopup(e: Event) {
-    e.stopPropagation();
-    lassoMagicPopup.classList.toggle("hidden");
-  }
-  lassoMagicCfgBtn.addEventListener("click", toggleMagicPopup);
-  // 点 popup 外侧 → 关
-  document.addEventListener("pointerdown", (e: Event) => {
-    if (lassoMagicPopup.classList.contains("hidden")) return;
-    if (lassoMagicPopup.contains(e.target as Node)) return;
-    if (lassoMagicCfgBtn.contains(e.target as Node)) return;
-    lassoMagicPopup.classList.add("hidden");
-  });
   // 1:1 约束 toggle（rect / ellipse 用）
   lassoConstrainBtn.addEventListener("click", () => {
     input.lasso.setConstrainSquare(!input.lasso.getConstrainSquare());
@@ -403,6 +435,7 @@ export function initToolbar(ctx: AppContext) {
   // 选区动作：变换。v217/218：没选区时让 lasso 用整层做隐式全选（fallbackFullLayer）。
   // selection 状态全归 lasso 管，toolbar 不直接动 doc.selection。
   byId("lassoTransformBtn").addEventListener("click", () => {
+    if (editMode.current() !== "lasso") return;   // v0.5.12：fill 无变换（按钮隐藏；T 键点的是隐藏钮，一并挡）
     if (!doc.activeLayer) return;
     // #17 隐藏层护栏：自身或祖先组隐藏 → 变换的是看不见的像素，commit 后无反馈，软拒。
     if (doc.activeNodeHidden()) { setStatus(t("se.hiddenNoTransform"), true); return; }
@@ -438,16 +471,8 @@ export function initToolbar(ctx: AppContext) {
     board.invalidateAll();
     updateLassoToolbar();
   });
-  // 填色：选区内填当前颜色（事务型 ops.pixels：先改像素，再交 before 快照，可 Ctrl+Z）
-  byId("lassoFillBtn").addEventListener("click", () => {
-    const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
-    if (!layer || !doc.selection) return;
-    const before = layer.snapshot();   // 归属转给 ops.pixels（run 之后不许 dispose）
-    (doc.selection as Selection).fillOnLayer(layer as unknown as Parameters<Selection["fillOnLayer"]>[0], state.color);
-    history.run(workpiece, ops.pixels, { layerId: layer.id, _initialBefore: before });
-    board.invalidateAll();
-    setStatus(t("se.filled", { color: state.color }));
-  });
+  // （v0.5.12：一次性「选区填色」按钮退役——与 fill 工具重复、图标打架（user）。CPU fillOnLayer 仍是
+  //   smoke fillParity 的 golden 参考实现，selection.ts 保留。）
   // 清除：选区内 dst-out
   byId("lassoClearBtn").addEventListener("click", () => {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
@@ -555,12 +580,25 @@ export function initToolbar(ctx: AppContext) {
         closeExclusive();
         return;
       }
-      if (editMode.current() !== "lasso") _lastNonLassoTool = editMode.current();
+      const cur = editMode.current();
+      if (cur !== "lasso" && cur !== "fill") _lastNonLassoTool = cur;   // fill 属选区家族，不算「上一个非选区工具」
       setTool(tool);
       // 切到新 tool 时关掉之前开的 rack（防止 stale）
       closeExclusive();
     });
   }
+  // v0.5.12 主栏魔棒预设钮（无 data-tool，不进上面的循环）：选区工具 + magic 子工具。
+  //   不动 lasso 的形状类记忆（_toolMem.lasso.sub 只记非 magic——套索钮/L 键恢复的是形状类）。
+  toolLassoBtn = document.getElementById("toolLasso");
+  toolWandBtn = document.getElementById("toolWand");
+  toolWandBtn?.addEventListener("click", () => {
+    const cur = editMode.current();
+    if (cur !== "lasso" && cur !== "fill") _lastNonLassoTool = cur;
+    setTool("lasso");
+    input.lasso.setSubTool("magic");
+    closeExclusive();
+    updateLassoToolbar();
+  });
   window.addEventListener("wp:settool", (e: Event) => setTool((e as CustomEvent).detail));
 
   // v120 删：Shapes 子工具栏。shapes tool 撤了 → 以后 shapes 改 brush preset 的 toggle 字段

@@ -23,7 +23,6 @@
 
 import { BrushEngine } from "./brush.ts";
 import { reportError } from "./error-badge.ts";
-import { setFillMode } from "./fill-mode.ts";
 import { LassoEngine } from "./lasso.ts";
 import { FilterBrushEngine } from "./filter-brush.ts";
 import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
@@ -245,11 +244,12 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("eraser") },
   { combo: "I",                desc: "sc.picker",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("picker") },
-  // v0.5.11（user 拍板）：G = 一键「油漆桶工作流」= 套索+魔棒子工具+填充模式开；L = 套索且填充模式关。
+  // v0.5.12：fill = 第一类工具。G = 油漆桶（fill，记忆子工具默认魔棒）；L = 套索。
+  //   从 fill 切走 = commit（fill-mode.ts 的 modechange 钩子），键位本身零填色知识。
   { combo: "G",                desc: "sc.fillMode",  category: "sc.cat.tools",
-    when: (i) => _editMode(i) && !_floating(i), run: (i) => { i._emitTool("lasso"); i.lasso.setSubTool("magic"); setFillMode(true); } },
+    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("fill") },
   { combo: "L",                desc: "sc.lasso",     category: "sc.cat.tools",
-    when: (i) => _editMode(i) && !_floating(i), run: (i) => { i._emitTool("lasso"); setFillMode(false); } },
+    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("lasso") },
   { combo: "H",                desc: "sc.pan",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("hand") },
 

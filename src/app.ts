@@ -51,7 +51,7 @@ import { createEditorState } from "./workbench-state.ts";   // candidate 3 · �
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
-import { initFillMode, fillPreviewActive } from "./fill-mode.ts";
+import { initFillMode } from "./fill-mode.ts";
 import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
@@ -74,7 +74,8 @@ import { isAuthConfigured, initAuth, isSignedIn, retrySilentSignIn, brushRackCol
 import { initPreferences, refreshPreferences, flushPreferences } from "./app-prefs.ts";   // boot 门 + 前台/online 拉云对齐 user-preference（lang/theme/手势）+ 导航前屏障
 import { hydrateSmoothFromPrefs } from "./smooth-config.ts";   // boot 门后合并 synced 平滑调参进 SMOOTH
 import { initAppState, appState, flushAppState } from "./app-state.ts";  // boot 门 + 前台/online 拉云对齐 app-state（current-dir/file/blenderUrl）+ 导航前屏障
-import { initTileJobs } from "./tile-jobs.ts";   // v0.4.3：tile 池压缩后台化（deflate codec + 空闲切片 + 切后台 compactAll）
+import { initTileJobs } from "./tile-jobs.ts";
+import { docVersion } from "./signals.ts";   // board 订阅图层面板失效信号（v0.5.12，见下方 watch）   // v0.4.3：tile 池压缩后台化（deflate codec + 空闲切片 + 切后台 compactAll）
 
 // 前台（focus/visible）/ online 时把 4 个 settings/state collection 拉云对齐（per-key LWW；离线/local-only 内部 no-op）。
 const pullSettingsAndState = (): void => { void refreshPreferences(); void appState.pullFromPersistent(); };
@@ -273,8 +274,10 @@ function freezeCtx<T extends object>(obj: T): T {
 // 「操作做到一半」统一谓词（user pin：auto 不打断半成品操作；消费者=idle autosave 让路）。
 //   笔画进行中（brush/像素笔/liquify/filterBrush）| 浮层变换挂着 | transient 待决（调整/裁剪）
 //   。crash-safety flush 不走这道门（数据安全词典序优先）。
+//   ⚠fill 预览**不在**此谓词内（v0.5.12 复盘）：预览是可无限挂着的模式而非手势，塞进来 = idle autosave
+//   饿死（脏内容永不落盘，数据安全词典序更高）；且 encode 拿冻结快照，本来就不打扰预览。
 const isMidOperation = () =>
-  input.isStrokeActive() || input.lasso.hasFloating() || editMode.hasPendingTransient() || fillPreviewActive();
+  input.isStrokeActive() || input.lasso.hasFloating() || editMode.hasPendingTransient();
 
 const ctx: AppContext = freezeCtx({
   state, dialReactive, currentBrush, editMode, doc, board, input, history, workpiece, ops, pixelHistory, isMidOperation,
@@ -399,6 +402,12 @@ initGalleryShell(ctx);     // 图库外壳（需 ctx.gallery + late keys）
 initTopbarMenu(ctx);       // 顶栏/菜单/sheet/save 触发 事件接线（需 ctx.gallery）
 initBlenderSync(ctx);      // Blender 同步面板（菜单入口 menuBlender → 自建 float panel）
 initCloudAuthUI(ctx);
+
+// v0.5.12（真机 bug 架构修）：board 订阅 docVersion——合成输出如今依赖 activeId/lockAlpha
+//   （fill 预览落活动层 slot、尊重锁α），而 docVersion 正是图层面板态的既有失效信号；此前 board
+//   缺席这个订阅 → 切图层/切锁α预览不刷。requestRender 无预览时走 present-only 快路径，近零成本。
+//   一处闭环：未来一切 bumpDoc 的 UI 自动正确，不再逐处撒 requestRender。
+watch(() => docVersion.value, () => board.requestRender());
 
 // v236 加密常驻指示（顶栏小锁 + 菜单 label）：反应式跟 session.enc.encrypted。
 watch(() => session.enc.encrypted, (enc) => {

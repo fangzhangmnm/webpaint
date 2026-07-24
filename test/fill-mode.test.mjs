@@ -1,70 +1,106 @@
-// v0.5.11 fill-mode：active 谓词真值表 + 开关事件 + pre-init 安全（isMidOperation 可能早于 init 调用）。
+// v0.5.12 fill-mode（第一类工具版）：active 谓词真值表 + 切出=commit 钩子（transient 括号不算切出）。
 // 像素正确性不在这里——gl-smoke fillParity（golden/commit≡live/lockAlpha/导出不漏）。
 import { test, eq } from "./runner.mjs";
-import { editorState } from "../src/workbench-state.ts";
-import { initFillMode, fillModeOn, fillPreviewActive, setFillMode } from "../src/fill-mode.ts";
+import { initFillMode, fillPreviewActive, commitFillNow } from "../src/fill-mode.ts";
 
-// 最小 fake ctx（fill-mode 只碰这些面；provider/watch 接线烟囱式验证）。
+// 最小 fake ctx：fill-mode 只碰这些面。editMode 状态机用字段模拟 + 手动派 wp:modechange。
 function makeCtx() {
-  const calls = { requestRender: 0, provider: null };
+  const calls = { commitFill: 0, setSelectionNull: 0, provider: null, requestRender: 0 };
+  const layer = {
+    id: 7,
+    snapshot: () => ({ snap: true }),
+    restoreFromSnapshot: () => { calls.restored = true; },
+  };
   const ctx = {
-    doc: { selection: null },
-    editMode: { current: () => ctx._mode },
-    input: { lasso: { hasFloating: () => ctx._floating } },
+    _mode: "brush", _transient: false, _floating: false,
+    doc: {
+      selection: null,
+      activeEditableLeaf: () => ({ leaf: layer, reason: null }),
+    },
+    editMode: { current: () => ctx._mode, isTransient: () => ctx._transient },
+    input: { lasso: {
+      hasFloating: () => ctx._floating,
+      setSelection: (v) => { const before = ctx.doc.selection; ctx.doc.selection = v; if (v === null) calls.setSelectionNull++; return { before, after: v }; },
+    } },
     board: {
       setFillProvider: (fn) => { calls.provider = fn; },
       requestRender: () => { calls.requestRender++; },
       invalidateAll: () => {},
-      commitFill: () => true,
+      commitFill: () => { calls.commitFill++; return true; },
     },
+    history: {
+      compound: (_w, fn) => { try { fn(); return { ok: true }; } catch (e) { return { ok: false, msg: String(e) }; } },
+      run: () => ({ ok: true }),
+    },
+    workpiece: {}, ops: { pixels: {}, selection: {} },
     state: { color: "#ff0000" },
     dialReactive: { color: "#ff0000" },
     setStatus: () => {},
-    _mode: "lasso", _floating: false,
   };
-  return { ctx, calls };
+  return { ctx, calls, layer };
 }
 
-test("[fill-mode] pre-init：谓词恒 false（isMidOperation 早调不炸）", () => {
-  // 模块可能已被别的用例 init 过 → 只验不炸 + 布尔返回
-  eq(typeof fillPreviewActive(), "boolean", "不炸且返回布尔");
-});
+function setMode(ctx, mode, transient = false) {
+  ctx._mode = mode; ctx._transient = transient;
+  window.dispatchEvent(new CustomEvent("wp:modechange"));
+}
 
-test("[fill-mode] active 谓词真值表：开关 && 选区 && lasso && 非浮层", () => {
-  const { ctx, calls } = makeCtx();
+test("[fill-mode] 谓词：fill 工具 && 有选区 && 非浮层", () => {
+  const { ctx } = makeCtx();
   initFillMode(ctx);
-  editorState.reset();
-  eq(fillModeOn(), false, "默认关（freshGroups SSoT）");
-  eq(fillPreviewActive(), false, "关 → 不预览");
-  setFillMode(true);
-  eq(fillModeOn(), true, "开关写入 editorState（per-doc 持久化面）");
-  eq(fillPreviewActive(), false, "开但无选区 → 不预览");
-  ctx.doc.selection = {};   // 结构占位：谓词只判非空
-  eq(fillPreviewActive(), true, "开+选区+lasso → 预览");
   ctx._mode = "brush";
-  eq(fillPreviewActive(), false, "切走工具 → 预览丢弃（interrupt=cancel）");
-  ctx._mode = "lasso"; ctx._floating = true;
-  eq(fillPreviewActive(), false, "浮层变换中 → 预览让位");
+  eq(fillPreviewActive(), false, "非 fill 工具不预览");
+  ctx._mode = "fill";
+  eq(fillPreviewActive(), false, "无选区不预览");
+  ctx.doc.selection = {};
+  eq(fillPreviewActive(), true, "fill+选区 → 预览");
+  ctx._floating = true;
+  eq(fillPreviewActive(), false, "浮层中让位");
   ctx._floating = false;
-  eq(fillPreviewActive(), true, "浮层收摊 → 预览回来");
-  // provider 接线：active 时给 {color, layer}?——此 fake doc 无 activeEditableLeaf，只验注册发生
-  eq(typeof calls.provider, "function", "board.setFillProvider 已注册");
-  editorState.reset();
 });
 
-test("[fill-mode] setFillMode：写 SSoT + 派 wp:fillmodechange + 请求重绘", () => {
+test("[fill-mode] ✓ = commit + 清选区（一个 compound 整点）", () => {
   const { ctx, calls } = makeCtx();
   initFillMode(ctx);
-  editorState.reset();
-  let events = 0;
-  const onChange = () => { events++; };
-  window.addEventListener("wp:fillmodechange", onChange);
-  setFillMode(true);
-  setFillMode(true);   // 幂等：同值不重复派事件
-  eq(events, 1, "开关变化派一次事件（幂等）");
-  eq(calls.requestRender >= 1, true, "请求重绘（plan 签名含 overlay → 下帧重合成）");
-  setFillMode(false);
-  eq(events, 2, "关同样派事件");
-  window.removeEventListener("wp:fillmodechange", onChange);
-  editorState.reset();
+  ctx._mode = "fill"; ctx.doc.selection = {};
+  commitFillNow();
+  eq(calls.commitFill, 1, "GPU commit 走了一次");
+  eq(calls.setSelectionNull, 1, "选区清空（选区的 commit）");
+  eq(ctx.doc.selection, null, "doc.selection 已空");
+});
+
+test("[fill-mode] 切出=commit（选区保留）；transient 括号不算切出", () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  // 建立基线：当前持久模式 = fill
+  setMode(ctx, "fill");
+  ctx.doc.selection = {};
+  // fill → adjust（transient 括号，如扩张 modal）→ 回 fill：不 commit
+  setMode(ctx, "adjust", true);
+  setMode(ctx, "fill");
+  eq(calls.commitFill, 0, "transient 括号往返不 commit");
+  // fill → brush（真切出）：commit 且选区保留
+  setMode(ctx, "brush");
+  eq(calls.commitFill, 1, "切出 fill = commit");
+  eq(calls.setSelectionNull, 0, "切出 commit 不清选区（选区照常当蒙板）");
+  eq(!!ctx.doc.selection, true, "选区还在");
+  // brush → fill → adjust → brush（transient 中途切工具 = 括号展开落到新工具）：commit 一次
+  setMode(ctx, "fill");
+  setMode(ctx, "adjust", true);
+  setMode(ctx, "brush");
+  eq(calls.commitFill, 2, "transient 中途切工具也算切出 fill → commit");
+});
+
+test("[fill-mode] 切出时无选区 / 活动层不可编辑 → 静默跳过", () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "fill");
+  ctx.doc.selection = null;
+  setMode(ctx, "brush");
+  eq(calls.commitFill, 0, "无选区切出不 commit");
+  setMode(ctx, "fill");
+  ctx.doc.selection = {};
+  ctx.doc.activeEditableLeaf = () => ({ leaf: null, reason: "group" });
+  setMode(ctx, "brush");
+  eq(calls.commitFill, 0, "活动层是组（预览本没显示）切出不 commit、不炸");
 });

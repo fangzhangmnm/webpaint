@@ -47,6 +47,9 @@ const CAPS: Record<string, Cap> = {
   // 非绘画持久工具
   picker:      { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },
   lasso:       { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },
+  // v0.5.12 fill：第一类工具（选区机器 + 填色消费视图）。指针全走 lasso role（pointer-route），
+  //   本行=克隆 lasso。切出 fill = commit（语义在 fill-mode.ts 的 modechange 钩子，不走 transient）。
+  fill:        { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },
   hand:        { canDraw: false, allowsColor: false, cursor: "grab",  ctrlZ: "history",         transient: false },
   // 半模态 transient（多 step、commit/cancel；crop/adjust ctrl-z=取消）。canDraw=false → 期间不可能起 stroke。
   //   onToolSwitch: 期间点别的工具 = "apply"(commit) 还是 "cancel" 这个 transient

@@ -17,6 +17,7 @@ export function toolToRole(et: string): string {
     case "picker": return "pick";
     case "filterBrush": return "filterBrush";
     case "lasso": return "lasso";
+    case "fill": return "lasso";      // v0.5.12：fill 第一类工具，指针行为 = 选区机器（零新指针代码）
     default: return "draw";         // brush / 未知 → draw
   }
 }
