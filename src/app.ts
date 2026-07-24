@@ -270,8 +270,14 @@ function freezeCtx<T extends object>(obj: T): T {
   }
   return Object.freeze(obj);
 }
+// 「操作做到一半」统一谓词（user pin：auto 不打断半成品操作；消费者=idle autosave 让路）。
+//   笔画进行中（brush/像素笔/liquify/filterBrush）| 浮层变换挂着 | transient 待决（调整/裁剪）
+//   。crash-safety flush 不走这道门（数据安全词典序优先）。
+const isMidOperation = () =>
+  input.isStrokeActive() || input.lasso.hasFloating() || editMode.hasPendingTransient();
+
 const ctx: AppContext = freezeCtx({
-  state, dialReactive, currentBrush, editMode, doc, board, input, history, workpiece, ops, pixelHistory,
+  state, dialReactive, currentBrush, editMode, doc, board, input, history, workpiece, ops, pixelHistory, isMidOperation,
   rack, store: _store, setStatus, withBusy, leftDial,
   updateSaveStatus, updateZoomLabel, updateNewerBanner, pullSettingsAndState,
   _suppressTransientPanels, _restoreTransientPanels, layerSpecFrom, _bringPanelTop,

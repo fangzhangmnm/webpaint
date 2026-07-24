@@ -627,8 +627,11 @@ export function initSession(ctx: AppContext) {
   // S8/v0.4.11：autosave 挂 background-sync-jobs（minIdleMs=30s：停笔 30 秒才落盘，输入插队自动让路，
   //   不在描边中途 encode）。dirty 门足够防重复（flushLocal 后即净；encode 中的重入由 es._saving 挡）。
   //   encode 内部有冻结快照 → 即使 flushLocal 的 await 期间用户开画，存档也一致。
+  //   v0.5.11（user pin）：操作做到一半（笔画/浮层变换/transient/fill 预览）时 autosave 让路——
+  //   bgJobs 每轮重排队 = 天然 defer，谓词翻 false 后下个空闲窗自动补上。saveNow 的显式路径
+  //   有自己的 hasPendingTransient 门（:284），此处是 idle 路径的对应门。crash-safety flush 不受此门。
   ctx.bgJobs.register("autosave", 5, () => {
-    if (es.isDirty()) void es.flushLocal();
+    if (es.isDirty() && !ctx.isMidOperation()) void es.flushLocal();
     return "done";
   }, { minIdleMs: AUTOSAVE_IDLE_MS });
   // （v409：无 desk 改动桥 —— desk 不标脏、不驱动落盘，只在顺路 encode 时被 _buildOraMeta 捞走。详 editor-state.ts ⚠）

@@ -114,6 +114,10 @@ export interface AppContext {
   withBusy: <T>(label: string, fn: () => Promise<T> | T) => Promise<T>;
   leftDial: LeftDialHandle;
   updateSaveStatus: () => void;
+  // 「操作做到一半」统一谓词（user pin 2026-07-24：auto 不打断半成品操作）。true = 笔画进行中 /
+  //   浮层变换挂着 / transient 待决 / fill 预览挂着。idle autosave 之类的自动动作据此让路；
+  //   crash-safety flush（pagehide/blur）**不受此门**——数据安全词典序优先。
+  isMidOperation: () => boolean;
   // 把 4 个 settings/state collection 拉云对齐（per-key LWW；离线/local-only 内部 no-op）。
   // 组合根拥有（它是唯一同时认识 app-prefs 和 app-state 的地方）。**fire-and-forget，调用方别 await。**
   pullSettingsAndState: () => void;
