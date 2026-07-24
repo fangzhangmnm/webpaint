@@ -14,6 +14,7 @@ import { t, lang, setLang, LANGS, LANG_NAME, type Key, type Lang } from "./i18n/
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
 import { positionPopup } from "./anchored-popup.ts";
+import { openInputSheet } from "./sheets.ts";
 import { reportError } from "./error-badge.ts";   // 全 app 唯一错误汇拢点（CLAUDE.md）
 import type { AppContext } from "./app-context.ts";
 
@@ -162,6 +163,33 @@ export function initSettingsMenu(ctx: AppContext) {
     applyPixelGrid(next);
     setStatus(t("status.pixelGrid", { s: next ? t("common.on") : t("common.off") }));
   });
+
+  // #10 主栅格（tilemap 对齐）：per-doc（editorState.grid），一直显示不渐隐（对照像素栅格的放大渐显）。
+  //   同 checkerboard 纪律：观感开关不 mark dirty（editorState setter 本就不标脏）。
+  const applyDocGrid = () => {
+    board.setDocGrid?.(editorState.grid.on, editorState.grid.cell);
+    setMenuItem(els.menuDocGrid, editorState.grid.on);
+    const cellLabel = els.menuDocGridCell?.querySelector(".menu-item-state");
+    if (cellLabel) cellLabel.textContent = `${editorState.grid.cell}px`;
+  };
+  window.addEventListener("wp:applyEditorState", applyDocGrid);
+  els.menuDocGrid?.addEventListener("click", () => {
+    editorState.grid.on = !editorState.grid.on;
+    applyDocGrid();
+    setStatus(t("status.docGrid", { s: editorState.grid.on ? t("common.on") : t("common.off") }));
+  });
+  els.menuDocGridCell?.addEventListener("click", async () => {
+    setMenuOpen(false);
+    const v = await openInputSheet(t("menu.docGridCellTitle"), String(editorState.grid.cell), { placeholder: "16" });
+    if (v == null) return;
+    const n = Math.max(2, Math.min(1024, parseInt(v, 10) || 0));
+    if (!n) return;
+    editorState.grid.cell = n;
+    if (!editorState.grid.on) editorState.grid.on = true;   // 设了尺寸=想看到它，顺手打开
+    applyDocGrid();
+    setStatus(t("status.docGridCell", { n }));
+  });
+  applyDocGrid();
 
   if (els.menuFps) els.menuFps.addEventListener("click", () => {
     const next = !board.getShowFps?.();

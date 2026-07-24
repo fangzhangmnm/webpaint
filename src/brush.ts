@@ -354,7 +354,23 @@ export class BrushEngine {
       ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : (layer.lockAlpha ? "source-atop" : "source-over");
       ctx.fillStyle = st.mode === "erase" ? "#000" : (s.color || "#000");
       ctx.imageSmoothingEnabled = false;
-      ctx.fillRect(ix - ox, iy - oy, intSize, intSize);
+      // #28（v0.5）：像素笔/橡皮 stamp 从正方形改像素化圆盘（Bresenham disc；行 span 不重叠 → 低 alpha 不双叠）。
+      //   r_eff = r-0.25 让 3px=十字、4px 切角，对齐像素画圈的惯例；≤2px 圆=方，走 fillRect。
+      if (intSize <= 2) {
+        ctx.fillRect(ix - ox, iy - oy, intSize, intSize);
+      } else {
+        const r = intSize / 2;
+        const re2 = (r - 0.25) * (r - 0.25);
+        for (let j = 0; j < intSize; j++) {
+          const dy = j + 0.5 - r;
+          const w2 = re2 - dy * dy;
+          if (w2 <= 0) continue;
+          const w = Math.sqrt(w2);
+          const a = Math.max(0, Math.ceil(r - w - 0.5));
+          const b = Math.min(intSize - 1, Math.floor(r + w - 0.5));
+          if (b >= a) ctx.fillRect(ix - ox + a, iy - oy + j, b - a + 1, 1);
+        }
+      }
     });
   }
 

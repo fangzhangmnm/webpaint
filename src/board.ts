@@ -82,6 +82,10 @@ const MAX_SCALE = 64;   // v163：放大上限提到 64，给像素画 + 像素�
 const PIXEL_GRID_FADE_LO = 4;
 const PIXEL_GRID_FULL = 7;
 const PIXEL_GRID_ALPHA = 0.4;   // 满强度 alpha（线已是 1 device px 最细，靠 alpha 调细的观感）
+// #10 主栅格（tilemap 对齐）：中性灰同款、比像素栅格醒目一档、**一直显示**（不渐隐）。
+//   grill 拍板：反色/difference 要读合成像素，破坏「独立 canvas 零成本」设计 → 用 128 灰（黑白画面等对比）。
+const MAIN_GRID_ALPHA = 0.35;
+const MAIN_GRID_MIN_SPACING = 6;   // cell 在屏幕上密于此 px → 退化成每 2/4/8… 格一根
 const PAN_KEEP_VISIBLE = 48;    // 平移时至少留这么多 px 画布在屏内（防拖出屏幕抓不回）
 
 export class Board {
@@ -99,6 +103,8 @@ export class Board {
   _voidColor: string;
   _showCheckerboard: boolean;
   _pixelGridEnabled: boolean;
+  _docGridOn: boolean;      // #10 主栅格（per-doc，editorState.grid）
+  _docGridCell: number;
   gridCanvas: HTMLCanvasElement | null;
   gctx: Ctx2D | null;
   cursorEl: HTMLElement | null;
@@ -148,6 +154,9 @@ export class Board {
     //   真值由 app.ts 的 fixup 相经 settings-menu 的 renderSettingsFromPrefs() 灌入（SSoT = PREF_DEFAULTS["pixel-grid"]）；
     //   这里只是构造期占位，别在这硬编码第二份默认值。
     this._pixelGridEnabled = PREF_DEFAULTS["pixel-grid"];
+    // #10 主栅格：per-doc 配置（editorState.grid），由 settings-menu 经 setDocGrid 灌入；这里只是占位默认。
+    this._docGridOn = false;
+    this._docGridCell = 16;
 
     // v163 瞬态 UI 分层（省 hot-path + 显存，详 docs/20260604-overlay-grid-cursor-layers.md）：
     //   像素栅格 = 独立 canvas，**仅视口变时重画**（_syncGrid sig 守卫）→ 画笔行进时不碰它，零逐帧成本；
@@ -232,6 +241,13 @@ export class Board {
     this.requestRender();
   }
   getPixelGridEnabled() { return this._pixelGridEnabled; }
+  // #10 主栅格：per-doc 配置灌入口（settings-menu 从 editorState.grid 调）
+  setDocGrid(on: boolean, cell: number) {
+    this._docGridOn = !!on;
+    this._docGridCell = Math.max(2, Math.round(cell) || 16);
+    this._gridSig = "";
+    this.requestRender();
+  }
   setThemeColors({ voidColor }: { voidColor?: string }) {
     if (voidColor) this._voidColor = voidColor;
     this.requestRender();
@@ -353,7 +369,10 @@ export class Board {
     if (!this.doc) return;
     const sx = (w - padding * 2) / this.doc.width;
     const sy = (h - padding * 2) / this.doc.height;
-    const s = Math.min(sx, sy);
+    let s = Math.min(sx, sy);
+    // #26（v0.5）：小画布（像素画）fit 出 ≥2 的倍率时向下取整到整数倍——像素格与屏幕像素对齐，
+    //   开 16²/512² 模板不再落在 13.7× 这类倍率上。大画布 fit（<2×）不受影响。
+    if (s >= 2) s = Math.floor(s);
     const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
     const tx = (w - this.doc.width * scale) / 2;
     const ty = (h - this.doc.height * scale) / 2;
@@ -828,7 +847,7 @@ export class Board {
     const cv = this.gridCanvas;
     if (!cv || !this.doc) return;
     const v = this.viewport;
-    const sig = `${v.scale}|${v.tx}|${v.ty}|${v.rot}|${this._pixelGridEnabled}|${this.doc.width}|${this.doc.height}|${this.canvas.width}`;
+    const sig = `${v.scale}|${v.tx}|${v.ty}|${v.rot}|${this._pixelGridEnabled}|${this._docGridOn}|${this._docGridCell}|${this.doc.width}|${this.doc.height}|${this.canvas.width}`;
     if (sig === this._gridSig) return;
     this._gridSig = sig;
     this._drawGrid();
@@ -836,18 +855,16 @@ export class Board {
   }
   _drawGrid() {
     const cv = this.gridCanvas;
-    if (!cv) return;
+    if (!cv || !this.doc) return;
     const { scale, tx, ty, rot } = this.viewport;
-    // 隐藏：释放 backing（width=0）→ 不占显存
-    if (!this._pixelGridEnabled || scale < PIXEL_GRID_FADE_LO) {
+    const pixelOn = this._pixelGridEnabled && scale >= PIXEL_GRID_FADE_LO;   // 像素栅格：保留自动隐藏/渐显
+    const mainOn = this._docGridOn && this._docGridCell >= 2;                // #10 主栅格：一直显示
+    // 两套都不显 → 释放 backing（width=0）不占显存
+    if (!pixelOn && !mainOn) {
       cv.style.display = "none";
       if (cv.width) { cv.width = 0; cv.height = 0; }
       return;
     }
-    // LO→FULL 线性渐隐
-    const fade = Math.min(1, (scale - PIXEL_GRID_FADE_LO) / (PIXEL_GRID_FULL - PIXEL_GRID_FADE_LO));
-    const alpha = PIXEL_GRID_ALPHA * fade;
-    const stroke = `rgba(128,128,128,${alpha})`;
     const cw = this.canvas.width, ch = this.canvas.height;   // device px（同主 canvas）
     if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
     cv.style.display = "block";
@@ -863,33 +880,49 @@ export class Board {
       if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
     }
-    const x0 = Math.max(0, Math.floor(minX)), x1 = Math.min(W, Math.ceil(maxX));
-    const y0 = Math.max(0, Math.floor(minY)), y1 = Math.min(H, Math.ceil(maxY));
-    if (x1 <= x0 || y1 <= y0) return;
     const dpr = this.dpr;
-    g.fillStyle = stroke;
-    if (!rot) {
-      // rot=0：device-px 取整 fillRect → 1 device px 清晰均匀（无 AA、无 sub-pixel 糊）
-      const vy0 = Math.max(0, Math.round((ty + y0 * scale) * dpr));
-      const vy1 = Math.min(ch, Math.round((ty + y1 * scale) * dpr));
-      const vx0 = Math.max(0, Math.round((tx + x0 * scale) * dpr));
-      const vx1 = Math.min(cw, Math.round((tx + x1 * scale) * dpr));
-      for (let x = x0; x <= x1; x++) g.fillRect(Math.round((tx + x * scale) * dpr), vy0, 1, vy1 - vy0);
-      for (let y = y0; y <= y1; y++) g.fillRect(vx0, Math.round((ty + y * scale) * dpr), vx1 - vx0, 1);
-    } else {
-      // rot≠0（罕见）：斜线走 stroke（AA），不强求 device 对齐
-      g.strokeStyle = stroke;
-      g.lineWidth = 1;
-      g.beginPath();
-      for (let x = x0; x <= x1; x++) {
-        const a = this.docToScreen(x, y0), b = this.docToScreen(x, y1);
-        g.moveTo(a.x * dpr, a.y * dpr); g.lineTo(b.x * dpr, b.y * dpr);
+    // 画一族间隔 step doc-px 的网格线（像素/主栅格共用；线对齐 doc 原点的 step 倍数格）
+    const drawLines = (step: number, stroke: string) => {
+      const x0 = Math.max(0, Math.floor(minX / step) * step), x1 = Math.min(W, Math.ceil(maxX / step) * step);
+      const y0 = Math.max(0, Math.floor(minY / step) * step), y1 = Math.min(H, Math.ceil(maxY / step) * step);
+      if (x1 < x0 || y1 < y0) return;
+      const cy0 = Math.max(0, minY), cy1 = Math.min(H, maxY);   // 线段在 doc 内的可见跨度
+      const cx0 = Math.max(0, minX), cx1 = Math.min(W, maxX);
+      g.fillStyle = stroke;
+      if (!rot) {
+        // rot=0：device-px 取整 fillRect → 1 device px 清晰均匀（无 AA、无 sub-pixel 糊）
+        const vy0 = Math.max(0, Math.round((ty + cy0 * scale) * dpr));
+        const vy1 = Math.min(ch, Math.round((ty + cy1 * scale) * dpr));
+        const vx0 = Math.max(0, Math.round((tx + cx0 * scale) * dpr));
+        const vx1 = Math.min(cw, Math.round((tx + cx1 * scale) * dpr));
+        for (let x = x0; x <= x1; x += step) g.fillRect(Math.round((tx + x * scale) * dpr), vy0, 1, vy1 - vy0);
+        for (let y = y0; y <= y1; y += step) g.fillRect(vx0, Math.round((ty + y * scale) * dpr), vx1 - vx0, 1);
+      } else {
+        // rot≠0（罕见）：斜线走 stroke（AA），不强求 device 对齐
+        g.strokeStyle = stroke;
+        g.lineWidth = 1;
+        g.beginPath();
+        for (let x = x0; x <= x1; x += step) {
+          const a = this.docToScreen(x, Math.max(0, y0)), b = this.docToScreen(x, Math.min(H, y1));
+          g.moveTo(a.x * dpr, a.y * dpr); g.lineTo(b.x * dpr, b.y * dpr);
+        }
+        for (let y = y0; y <= y1; y += step) {
+          const a = this.docToScreen(Math.max(0, x0), y), b = this.docToScreen(Math.min(W, x1), y);
+          g.moveTo(a.x * dpr, a.y * dpr); g.lineTo(b.x * dpr, b.y * dpr);
+        }
+        g.stroke();
       }
-      for (let y = y0; y <= y1; y++) {
-        const a = this.docToScreen(x0, y), b = this.docToScreen(x1, y);
-        g.moveTo(a.x * dpr, a.y * dpr); g.lineTo(b.x * dpr, b.y * dpr);
-      }
-      g.stroke();
+    };
+    if (pixelOn) {
+      // LO→FULL 线性渐隐
+      const fade = Math.min(1, (scale - PIXEL_GRID_FADE_LO) / (PIXEL_GRID_FULL - PIXEL_GRID_FADE_LO));
+      drawLines(1, `rgba(128,128,128,${PIXEL_GRID_ALPHA * fade})`);
+    }
+    if (mainOn) {
+      // #10：不渐隐——缩小到 cell 间距 < MAIN_GRID_MIN_SPACING 屏幕px 时退化成每 2/4/8… 格画一根，防糊成片
+      let step = this._docGridCell;
+      while (step * scale < MAIN_GRID_MIN_SPACING && step < 1 << 20) step *= 2;
+      drawLines(step, `rgba(128,128,128,${MAIN_GRID_ALPHA})`);
     }
   }
 }

@@ -125,6 +125,9 @@ export const els = {
   topEncLock: byId("topEncLock"),
   menuCheckerboard: byId("menuCheckerboard"),
   menuPixelGrid: byId("menuPixelGrid"),
+  menuDocGrid: byId("menuDocGrid"),           // #10 主栅格开关
+  menuDocGridCell: byId("menuDocGridCell"),   // #10 主栅格尺寸…
+
   menuFps: byId("menuFps"),
   menuCheckUpdate: byId("menuCheckUpdate"),
   oraFileInput: byId<HTMLInputElement>("oraFileInput"),

@@ -59,6 +59,7 @@ export class LassoEngine {
   _setOpMode: SetOpMode;
   _constrainSquare: boolean;
   _magicThreshold: number;
+  _magicAutoExpandPx: number;
   _points: Point[];
   _rect: DraftRect | null;
   _magicStart: Point | null;
@@ -71,9 +72,12 @@ export class LassoEngine {
     this._subTool = "freehand";   // freehand | rect | ellipse | magic
     this._setOpMode = "new";      // new | union | subtract | intersect
     this._constrainSquare = false; // rect / ellipse 是否强制 1:1（正方形 / 圆）
-    this._magicThreshold = 20;    // 0..100；魔术棒颜色相似度（魔术棒唯一参数）
+    this._magicThreshold = 20;    // 0..100；魔术棒颜色相似度
     // v242：扩展/收缩从魔术棒拆走 → 改成「选区编辑 op」(Selection.morphed)，详 toolbar 选区编辑齿轮。
     //   魔术棒不再 bake 任何 expand（之前默认 +2 是错误——魔术棒就该是纯净的颜色 flood）。
+    // #31（v0.5，user 拍板）：重新提供**可选**的 flood 后自动扩张（toggle，默认 0=关，per-doc 配置由
+    //   toolbar 从 editorState 灌入）。与 v242 不冲突：默认仍是纯净 flood，手动「扩张…」op 保留。
+    this._magicAutoExpandPx = 0;
     this._points = [];            // freehand draft
     this._rect = null;            // {x0, y0, x1, y1} during rect / ellipse draw
     this._magicStart = null;      // for magic-tap path
@@ -107,6 +111,8 @@ export class LassoEngine {
   getSetOpMode() { return this._setOpMode; }
   setMagicThreshold(v: number) { this._magicThreshold = Math.max(0, Math.min(100, v)); }
   getMagicThreshold() { return this._magicThreshold; }
+  setMagicAutoExpand(px: number) { this._magicAutoExpandPx = Math.max(0, Math.min(100, Math.round(px) || 0)); }
+  getMagicAutoExpand() { return this._magicAutoExpandPx; }
   setSampleMode(m: string) { this._ft.setSampleMode(m); }
   getSampleMode() { return this._ft.getSampleMode(); }
   setConstrainSquare(on: unknown) { this._constrainSquare = !!on; this.onChange(); }
@@ -276,79 +282,17 @@ export class LassoEngine {
   // 内存（2048² doc）：layerData 16MB + visited buffer 4MB + maskCanvas
   // 仅 bbox 大小。barrier 不再单独 alloc（diff 算在 flood fill 里 inline）。
   _magicWandToSelection(start: Point | null, sourceLayer: Layer | null): SelectionLike | null {
-    if (!start || !this.doc) return null;
-    const docW = this.doc.width, docH = this.doc.height;
-    const sx = Math.floor(start.x);
-    const sy = Math.floor(start.y);
-    if (sx < 0 || sx >= docW || sy < 0 || sy >= docH) return null;
-
-    const lbX = sourceLayer?.bboxX ?? 0;
-    const lbY = sourceLayer?.bboxY ?? 0;
-    const lbW = sourceLayer?.bboxW ?? 0;
-    const lbH = sourceLayer?.bboxH ?? 0;
-    let layerData: Uint8ClampedArray | null = null;
-    if (sourceLayer && lbW > 0 && lbH > 0) {
-      layerData = sourceLayer.ctx.getImageData(0, 0, lbW, lbH).data;
+    if (!this.doc) return null;
+    let sel = floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold);
+    // #31：可选 flood 后自动扩张（默认关）。在 setOp 合并**之前**做，語义 = 「这一下点出来的区域」本身变胖。
+    if (sel && this._magicAutoExpandPx > 0) {
+      const m = sel.morphed(this._magicAutoExpandPx, this.doc.width, this.doc.height);
+      if (m) { sel.dispose(); sel = m; }
     }
-    // tap 点颜色（layer 外 → 透明）
-    let sr = 0, sg = 0, sb = 0, sa = 0;
-    if (layerData && sx >= lbX && sx < lbX + lbW && sy >= lbY && sy < lbY + lbH) {
-      const idx = ((sy - lbY) * lbW + (sx - lbX)) * 4;
-      sr = layerData[idx]; sg = layerData[idx + 1]; sb = layerData[idx + 2]; sa = layerData[idx + 3];
-    }
-    const tCh = this._magicThreshold * 2.55;
-    const total = docW * docH;
-
-    // 「layer 外」的 barrier 算一次：透明 (0,0,0,0) 跟 tap 色的 max-diff
-    const outsideIsBarrier = Math.max(sr, sg, sb, sa) > tCh;
-    // inline barrier 检查：返回 true = 是 barrier = flood 不能进
-    const isBarrier = (p: number) => {
-      const py = (p / docW) | 0;
-      const px = p - py * docW;
-      if (!layerData || px < lbX || px >= lbX + lbW || py < lbY || py >= lbY + lbH) {
-        return outsideIsBarrier;
-      }
-      const i4 = ((py - lbY) * lbW + (px - lbX)) * 4;
-      const dr = Math.abs(layerData[i4]     - sr);
-      const dg = Math.abs(layerData[i4 + 1] - sg);
-      const db = Math.abs(layerData[i4 + 2] - sb);
-      const da = Math.abs(layerData[i4 + 3] - sa);
-      return Math.max(dr, dg, db, da) > tCh;
-    };
-
-    // combined buffer：0 = 未访问；1 = 进入 mask；2 = 访问过但是 barrier
-    // 比之前的 barrier + visited + mask 三个数组省 8MB
-    const combined = new Uint8Array(total);
-    const startIdx = sx + sy * docW;
-    if (isBarrier(startIdx)) return null;
-
-    const stack = [startIdx];
-    let mnx = docW, mny = docH, mxx = -1, mxy = -1;
-    while (stack.length) {
-      const p = stack.pop()!;
-      if (combined[p] !== 0) continue;
-      if (isBarrier(p)) { combined[p] = 2; continue; }
-      combined[p] = 1;
-      const px = p % docW;
-      const py = (p - px) / docW;
-      if (px < mnx) mnx = px; if (px > mxx) mxx = px;
-      if (py < mny) mny = py; if (py > mxy) mxy = py;
-      if (px > 0        && combined[p - 1]    === 0) stack.push(p - 1);
-      if (px < docW - 1 && combined[p + 1]    === 0) stack.push(p + 1);
-      if (py > 0        && combined[p - docW] === 0) stack.push(p - docW);
-      if (py < docH - 1 && combined[p + docW] === 0) stack.push(p + docW);
-    }
-    if (mxx < 0) return null;
-
-    // v242：魔术棒只产生「贴着 AA 边缘半透明处停下」的原始选区，不再 bake 任何膨胀。
-    //   白边修法 = 对选区跑「扩张」编辑 op（Selection.morphed），用户自己把控量。
-    const tw = mxx - mnx + 1, th = mxy - mny + 1;
-    const g = new Uint8Array(tw * th);
-    for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
-      if (combined[(mny + y) * docW + (mnx + x)] === 1) g[y * tw + x] = 255;
-    }
-    return Selection.fromGray8Region(mnx, mny, tw, th, g);   // v0.4.6：flood 结果直转 gray8 tile，canvas 中转死
+    return sel;
   }
+  // （flood 内核本体在文件尾 floodSelectFrom——#22 提取为模块级纯函数，LassoEngine 与 bucket.ts 共用）
+
   // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
   _applySelectionUpdate(newSel: SelectionLike) {
     if (!this.doc) return null;
@@ -402,4 +346,87 @@ export class LassoEngine {
   // 给 board overlay 用：当前可拖的 handle 列表（v117: screenScale 让 rotate handle 按屏幕 px 偏移定位）
   visibleHandles(screenScale = 1) { return this._ft.visibleHandles(screenScale); }
   // 渲染 floating：GPU warp（board._glFloatInputs→gl-compositor _floatPass）。
+}
+
+// ---- 魔棒 flood 内核（#22 提取为模块级纯函数：LassoEngine._magicWandToSelection 与 bucket.ts 共用）----
+// 行为逐字保留 v242 语义：贴着 AA 边缘半透明处停下的原始选区，不 bake 任何膨胀。
+//
+// 经典 bug（v66 + v69 又犯）：iteration 局限在 layer.bbox 内 → 点空白只选到 bbox 矩形。
+// 修：迭代**整 doc 尺寸**，layer.bbox 外当 (0,0,0,0) 透明像素。
+// 历史「容隙」功能 v71→v79 撤掉（barrier dilate 会盖住 tap 点），详 docs/20260528-lessons-magic-wand-gap-closing.md。
+// 内存（2048² doc）：layerData 16MB + combined buffer 4MB（0=未访问 1=进mask 2=barrier，三数组合一省 8MB）。
+export function floodSelectFrom(
+  doc: { width: number; height: number },
+  start: Point | null,
+  sourceLayer: Layer | null,
+  thresholdPct: number,
+): Selection | null {
+  if (!start) return null;
+  const docW = doc.width, docH = doc.height;
+  const sx = Math.floor(start.x);
+  const sy = Math.floor(start.y);
+  if (sx < 0 || sx >= docW || sy < 0 || sy >= docH) return null;
+
+  const lbX = sourceLayer?.bboxX ?? 0;
+  const lbY = sourceLayer?.bboxY ?? 0;
+  const lbW = sourceLayer?.bboxW ?? 0;
+  const lbH = sourceLayer?.bboxH ?? 0;
+  let layerData: Uint8ClampedArray | null = null;
+  if (sourceLayer && lbW > 0 && lbH > 0) {
+    layerData = sourceLayer.ctx.getImageData(0, 0, lbW, lbH).data;
+  }
+  // tap 点颜色（layer 外 → 透明）
+  let sr = 0, sg = 0, sb = 0, sa = 0;
+  if (layerData && sx >= lbX && sx < lbX + lbW && sy >= lbY && sy < lbY + lbH) {
+    const idx = ((sy - lbY) * lbW + (sx - lbX)) * 4;
+    sr = layerData[idx]; sg = layerData[idx + 1]; sb = layerData[idx + 2]; sa = layerData[idx + 3];
+  }
+  const tCh = thresholdPct * 2.55;
+  const total = docW * docH;
+
+  // 「layer 外」的 barrier 算一次：透明 (0,0,0,0) 跟 tap 色的 max-diff
+  const outsideIsBarrier = Math.max(sr, sg, sb, sa) > tCh;
+  // inline barrier 检查：返回 true = 是 barrier = flood 不能进
+  const isBarrier = (p: number) => {
+    const py = (p / docW) | 0;
+    const px = p - py * docW;
+    if (!layerData || px < lbX || px >= lbX + lbW || py < lbY || py >= lbY + lbH) {
+      return outsideIsBarrier;
+    }
+    const i4 = ((py - lbY) * lbW + (px - lbX)) * 4;
+    const dr = Math.abs(layerData[i4]     - sr);
+    const dg = Math.abs(layerData[i4 + 1] - sg);
+    const db = Math.abs(layerData[i4 + 2] - sb);
+    const da = Math.abs(layerData[i4 + 3] - sa);
+    return Math.max(dr, dg, db, da) > tCh;
+  };
+
+  const combined = new Uint8Array(total);
+  const startIdx = sx + sy * docW;
+  if (isBarrier(startIdx)) return null;
+
+  const stack = [startIdx];
+  let mnx = docW, mny = docH, mxx = -1, mxy = -1;
+  while (stack.length) {
+    const p = stack.pop()!;
+    if (combined[p] !== 0) continue;
+    if (isBarrier(p)) { combined[p] = 2; continue; }
+    combined[p] = 1;
+    const px = p % docW;
+    const py = (p - px) / docW;
+    if (px < mnx) mnx = px; if (px > mxx) mxx = px;
+    if (py < mny) mny = py; if (py > mxy) mxy = py;
+    if (px > 0        && combined[p - 1]    === 0) stack.push(p - 1);
+    if (px < docW - 1 && combined[p + 1]    === 0) stack.push(p + 1);
+    if (py > 0        && combined[p - docW] === 0) stack.push(p - docW);
+    if (py < docH - 1 && combined[p + docW] === 0) stack.push(p + docW);
+  }
+  if (mxx < 0) return null;
+
+  const tw = mxx - mnx + 1, th = mxy - mny + 1;
+  const g = new Uint8Array(tw * th);
+  for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
+    if (combined[(mny + y) * docW + (mnx + x)] === 1) g[y * tw + x] = 255;
+  }
+  return Selection.fromGray8Region(mnx, mny, tw, th, g);   // v0.4.6：flood 结果直转 gray8 tile，canvas 中转死
 }

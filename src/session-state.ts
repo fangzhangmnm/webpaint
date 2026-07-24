@@ -207,6 +207,10 @@ function adoptModel(loaded: LoadedDoc) {
     if (vp && typeof vp.scale === "number") {
       board.setViewport(vp.tx ?? 0, vp.ty ?? 0, vp.scale, typeof vp.rot === "number" ? vp.rot : undefined);
       board.invalidateAll();
+    } else {
+      // #26：没存过视口（新建 / 新设备首开）→ fit 到合适倍率（小画布 snap 整数倍），
+      //   而不是沿用上一幅画留下的视口。
+      board.fitToScreen();
     }
     applyEditorStateToUI();   // desk：Unserialize 后把面板/checkboard 回灌 UI（各模块订阅 wp:applyEditorState）
   } finally { _loadingDoc = false; }

@@ -245,6 +245,10 @@
         <button class="tool" id="toolLasso" type="button" data-tool="lasso" data-i18n-title="tool.lasso">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lasso"/></svg>
         </button>
+        <!-- #22 油漆桶（v0.5）：tap = 魔棒同款 flood + 一次性填色。配置在 bucketToolbar（跟文件走） -->
+        <button class="tool" id="toolBucket" type="button" data-tool="bucket" data-i18n-title="tool.bucket">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg>
+        </button>
         <button class="tool tool-hand-conditional" id="toolHand" type="button" data-tool="hand" data-i18n-title="tool.pan">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#hand"/></svg>
         </button>
@@ -383,11 +387,17 @@
           <button type="button" data-preset="1080x1920" aria-pressed="false">1080×1920</button>
         </div>
         <div class="new-doc-preset-label" data-i18n="nd.pixelart">像素画</div>
+        <!-- #21（v0.5）：像素画尺寸改下拉框（+256/512；纯文本 option，无 SVG 需求） -->
         <div class="preset-chips">
-          <button type="button" data-preset="16x16" aria-pressed="false">16²</button>
-          <button type="button" data-preset="32x32" aria-pressed="false">32²</button>
-          <button type="button" data-preset="64x64" aria-pressed="false">64²</button>
-          <button type="button" data-preset="128x128" aria-pressed="false">128²</button>
+          <select id="newDocPixelPreset" class="generic-sheet-input new-doc-pixel-select" data-i18n-aria="nd.pixelart">
+            <option value="" data-i18n="nd.pixelSizePlaceholder">选择尺寸…</option>
+            <option value="16x16">16 × 16</option>
+            <option value="32x32">32 × 32</option>
+            <option value="64x64">64 × 64</option>
+            <option value="128x128">128 × 128</option>
+            <option value="256x256">256 × 256</option>
+            <option value="512x512">512 × 512</option>
+          </select>
         </div>
         <div class="preset-chips">
           <button type="button" data-preset="custom" aria-pressed="false" data-i18n="nd.custom">自定义…</button>
@@ -512,6 +522,31 @@
         <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" />
         <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
       </label>
+      <!-- #31 flood 后自动扩张（toggle + px；配置跟文件走 editorState.magicWand；与油漆桶的分开） -->
+      <label class="lasso-popup-row" style="grid-template-columns: auto 1fr auto auto;">
+        <input type="checkbox" id="lassoMagicExpandOn" />
+        <span data-i18n="la.autoExpand">自动扩张</span>
+        <input type="text" inputmode="numeric" id="lassoMagicExpandPx" value="1" style="width:44px;text-align:right;" data-i18n-aria="la.pixelCount" />
+        <span>px</span>
+      </label>
+    </div>
+
+    <!-- #22 油漆桶 context toolbar（复用 lasso stack 视觉类；与 lasso/picker stack 互斥同位） -->
+    <div class="lasso-toolbar-stack hidden" id="bucketToolbar" role="toolbar" data-i18n-aria="bk.toolbar">
+      <div class="lasso-toolbar">
+        <div class="lasso-section">
+          <span class="lasso-tool-text" aria-hidden="true" data-i18n="la.threshold">阈值</span>
+          <input type="range" id="bucketThreshold" min="0" max="100" step="1" value="20" style="width:110px;" />
+          <span id="bucketThresholdVal" class="lasso-popup-val">20</span>
+          <span class="lasso-tool-sep" aria-hidden="true">|</span>
+          <label class="lasso-tool-text" style="display:inline-flex;align-items:center;gap:4px;">
+            <input type="checkbox" id="bucketExpandOn" />
+            <span data-i18n="la.autoExpand">自动扩张</span>
+          </label>
+          <input type="text" inputmode="numeric" id="bucketExpandPx" value="1" style="width:44px;text-align:right;" data-i18n-aria="la.pixelCount" />
+          <span class="lasso-tool-text" aria-hidden="true">px</span>
+        </div>
+      </div>
     </div>
 
     <!-- v242 选区编辑：齿轮 → 这个菜单 → 选扩张/收缩 → 开 lassoSelOpPopup 实时预览 -->
@@ -947,6 +982,15 @@
       <button class="menu-item menu-item-with-icon" id="menuPixelGrid" type="button" role="menuitemcheckbox" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
         <span class="menu-item-label" data-i18n="menu.pixelGrid">像素栅格（放大时）</span>
         <span class="menu-item-state" data-state-for="pixelGrid">开</span>
+      </button>
+      <!-- #10 主栅格（v0.5）：tilemap 对齐网格，一直显示；配置跟文件走（editorState.grid） -->
+      <button class="menu-item menu-item-with-icon" id="menuDocGrid" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
+        <span class="menu-item-label" data-i18n="menu.docGrid">主栅格（对齐网格）</span>
+        <span class="menu-item-state" data-state-for="docGrid">关</span>
+      </button>
+      <button class="menu-item menu-item-with-icon" id="menuDocGridCell" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
+        <span class="menu-item-label" data-i18n="menu.docGridCell">主栅格尺寸…</span>
+        <span class="menu-item-state">16px</span>
       </button>
       <button class="menu-item menu-item-with-icon" id="menuTheme" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
         <span class="menu-item-label" data-i18n="menu.theme">主题</span>

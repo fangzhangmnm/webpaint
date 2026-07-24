@@ -46,6 +46,8 @@ const CAPS: Record<string, Cap> = {
   filterBrush: { canDraw: true,  allowsColor: false, cursor: "brush", ctrlZ: "history",         transient: false }, // liquify/色彩笔 = payload
   // 非绘画持久工具
   picker:      { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },
+  // #22 油漆桶：tap 工具（不 stroke）。canDraw=false（不走笔刷管线）；填色走事务型 ops.pixels，ctrl-z 照常。
+  bucket:      { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },
   lasso:       { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },
   hand:        { canDraw: false, allowsColor: false, cursor: "grab",  ctrlZ: "history",         transient: false },
   // 半模态 transient（多 step、commit/cancel；crop/adjust ctrl-z=取消）。canDraw=false → 期间不可能起 stroke。

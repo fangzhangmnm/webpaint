@@ -49,6 +49,7 @@ let lassoThresholdInput: HTMLInputElement, lassoThresholdVal: HTMLElement, lasso
 let lassoMagicPopup: HTMLElement, lassoConstrainBtn: HTMLElement, lassoConstrainSep: HTMLElement;
 let lassoSelEditBtn: HTMLElement;   // v242 选区编辑齿轮（有选区才亮；扩张/收缩 op）
 let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
+let bucketToolbar: HTMLElement | null;   // #22 油漆桶 context toolbar（阈值 + 自动扩张；配置跟文件走）
 
 // ===== 套索/选区工具栏（v65 重做）=====
 // 三个 section 按状态切换：subToolBar（lasso 激活）/ selectionActions（有选区且非 floating）/ transformCtrl（floating）
@@ -56,6 +57,8 @@ export function updateLassoToolbar() {
   // 吸色 context toolbar：吸色工具激活时显示。两 stack 同位 fixed → 必须互斥（picker 在场则 lasso stack 让位，
   //   即便有选区也不露 deselect-only；Ctrl+D 仍可去选）。本函数 = 上下文工具栏统一同步点。
   const pickerActive = editMode.current() === "picker";
+  const bucketActive = editMode.current() === "bucket";   // #22：桶 stack 与 lasso/picker stack 同位互斥
+  if (bucketToolbar) bucketToolbar.classList.toggle("hidden", !bucketActive);
   if (pickerToolbar) {
     pickerToolbar.classList.toggle("hidden", !pickerActive);
     if (pickerActive && pickModeSel && pickModeSel.value !== state.pickMode) pickModeSel.value = state.pickMode;
@@ -63,7 +66,7 @@ export function updateLassoToolbar() {
   const floating = input.lasso.hasFloating();
   const hasSelection = !!doc.selection;
   const lassoActive = editMode.current() === "lasso";
-  const showAny = (floating || hasSelection || lassoActive) && !pickerActive;
+  const showAny = (floating || hasSelection || lassoActive) && !pickerActive && !bucketActive;
   lassoToolbarStack.classList.toggle("hidden", !showAny);
   if (!showAny) return;
 
@@ -325,6 +328,30 @@ export function initToolbar(ctx: AppContext) {
     input.lasso.setMagicThreshold(v);
     lassoThresholdVal.textContent = String(v);
   });
+  // #31 魔棒 flood 后自动扩张（toggle+px，per-doc：editorState.magicWand）。引擎只认一个数：
+  //   effective px = toggle 开 ? px : 0。UI 改 → 写 editorState + 灌引擎；换文档 → 从 editorState 回灌。
+  const magicExpandOn = byId<HTMLInputElement>("lassoMagicExpandOn");
+  const magicExpandPx = byId<HTMLInputElement>("lassoMagicExpandPx");
+  const pushMagicExpandToEngine = () => {
+    input.lasso.setMagicAutoExpand(editorState.magicWand.expand ? editorState.magicWand.expandPx : 0);
+  };
+  const syncMagicExpandUI = () => {
+    magicExpandOn.checked = editorState.magicWand.expand;
+    magicExpandPx.value = String(editorState.magicWand.expandPx);
+    pushMagicExpandToEngine();
+  };
+  magicExpandOn.addEventListener("change", () => {
+    editorState.magicWand.expand = magicExpandOn.checked;
+    pushMagicExpandToEngine();
+  });
+  magicExpandPx.addEventListener("change", () => {
+    const v = Math.max(0, Math.min(100, parseInt(magicExpandPx.value, 10) || 0));
+    magicExpandPx.value = String(v);
+    editorState.magicWand.expandPx = v;
+    pushMagicExpandToEngine();
+  });
+  window.addEventListener("wp:applyEditorState", syncMagicExpandUI);
+  syncMagicExpandUI();
   // 设置按钮 → popup toggle
   function toggleMagicPopup(e: Event) {
     e.stopPropagation();
@@ -446,6 +473,34 @@ export function initToolbar(ctx: AppContext) {
   // 吸色取样模式 dropdown（composite 合并 / layer 当前图层 raw）。
   //   持久化 = editorState.colorPicker.layerMode（per-doc desk，进 .webpaint/editor-state.json）——**不是 LS**，
   //   v406 起设备级 webpaint.pickMode 已删。input._doPick 经 getPickMode 读（走 bindEditorReactive 的桥）。
+  // #22 油漆桶 context toolbar：阈值 + 自动扩张（editorState.bucket，跟文件走；bucket.ts 直接读同一 SSoT）
+  bucketToolbar = document.getElementById("bucketToolbar");
+  {
+    const th = byId<HTMLInputElement>("bucketThreshold");
+    const thVal = byId("bucketThresholdVal");
+    const exOn = byId<HTMLInputElement>("bucketExpandOn");
+    const exPx = byId<HTMLInputElement>("bucketExpandPx");
+    const syncBucketUI = () => {
+      th.value = String(editorState.bucket.threshold);
+      thVal.textContent = String(editorState.bucket.threshold);
+      exOn.checked = editorState.bucket.expand;
+      exPx.value = String(editorState.bucket.expandPx);
+    };
+    th.addEventListener("input", () => {
+      const v = Math.max(0, Math.min(100, parseInt(th.value, 10) || 0));
+      editorState.bucket.threshold = v;
+      thVal.textContent = String(v);
+    });
+    exOn.addEventListener("change", () => { editorState.bucket.expand = exOn.checked; });
+    exPx.addEventListener("change", () => {
+      const v = Math.max(0, Math.min(100, parseInt(exPx.value, 10) || 0));
+      exPx.value = String(v);
+      editorState.bucket.expandPx = v;
+    });
+    window.addEventListener("wp:applyEditorState", syncBucketUI);
+    syncBucketUI();
+  }
+
   pickerToolbar = document.getElementById("pickerToolbar");
   pickModeSel = document.getElementById("pickModeSel") as HTMLSelectElement | null;
   if (pickModeSel) {

@@ -139,6 +139,11 @@ function freshGroups() {
     refPanel:      { enabled: false, position: null as PanelPos | null, viewport: { tx: 0, ty: 0, scale: 1, rot: 0 } as EditorViewport },
     blenderPanel:  { show: false, position: null as PanelPos | null },
     brushTool:     { activeBrushId: null as string | null, size: 12, opacity: 1, color: "#1b1b1b" },
+    // v0.5（user 拍板）：桶/魔棒扩张/主栅格三份配置**跟文件走**。桶与选区的 expand 配置分开；
+    //   expand 是 toggle（开了才用 expandPx，默认 1），具体 px 在详细配置里调。
+    bucket:        { threshold: 20, expand: false, expandPx: 1 },        // #22 油漆桶
+    magicWand:     { expand: false, expandPx: 1 },                       // #31 魔棒 flood 后自动扩张
+    grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
     viewport:      null as EditorViewport | null,
@@ -222,6 +227,19 @@ export const editorState = {
     set opacity(v: number) { if (_bind) _bind.setOpacity(v); else S.g.brushTool.opacity = v; },
     get color(): string { return _bind ? _bind.getColor() : S.g.brushTool.color; },
     set color(v: string) { if (_bind) _bind.setColor(v); else S.g.brushTool.color = v; },
+  },
+  bucket: {
+    get threshold(): number { return S.g.bucket.threshold; }, set threshold(v: number) { S.g.bucket.threshold = v; },
+    get expand(): boolean { return S.g.bucket.expand; }, set expand(v: boolean) { S.g.bucket.expand = v; },
+    get expandPx(): number { return S.g.bucket.expandPx; }, set expandPx(v: number) { S.g.bucket.expandPx = v; },
+  },
+  magicWand: {
+    get expand(): boolean { return S.g.magicWand.expand; }, set expand(v: boolean) { S.g.magicWand.expand = v; },
+    get expandPx(): number { return S.g.magicWand.expandPx; }, set expandPx(v: number) { S.g.magicWand.expandPx = v; },
+  },
+  grid: {
+    get on(): boolean { return S.g.grid.on; }, set on(v: boolean) { S.g.grid.on = v; },
+    get cell(): number { return S.g.grid.cell; }, set cell(v: number) { S.g.grid.cell = v; },
   },
   liquify:     { get bleed(): string { return S.g.liquify.bleed; }, set bleed(v: string) { S.g.liquify.bleed = v; } },
   colorPicker: {

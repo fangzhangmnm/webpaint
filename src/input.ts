@@ -240,6 +240,8 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("eraser") },
   { combo: "I",                desc: "sc.picker",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("picker") },
+  { combo: "G",                desc: "sc.bucket",     category: "sc.cat.tools",
+    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("bucket") },
   { combo: "L",                desc: "sc.lasso",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("lasso") },
   { combo: "H",                desc: "sc.pan",     category: "sc.cat.tools",
@@ -412,8 +414,9 @@ export class InputController {
     {
       const settings = this.getResolvedBrush();
       size = settings ? settings.size : 12;
-      // v232：像素笔 stamp 是方的（fillRect），preview 跟着方，别用圆误导
-      square = !!(settings && settings.pixelMode);
+      // v232：像素笔 stamp 是方的 → preview 方。#28（v0.5）改像素化圆盘 stamp：
+      //   ≥3px 圆盘 → 圆 preview；1-2px 圆=方 → 维持方（跟 stamp 形状一致，不误导）。
+      square = !!(settings && settings.pixelMode) && size <= 2;
       // 椭圆度/斜度也照 resolved-brush（shapeRotation 是弧度）——footprint 预览
       aspect = settings ? settings.shapeAspect : 1;
       rotation = settings ? settings.shapeRotation : 0;
@@ -556,6 +559,8 @@ export class InputController {
       this._beginLasso(rec);
     } else if (role === "pick") {
       this._doPick(x, y);
+    } else if (role === "bucket") {
+      this._doBucket(x, y);
     } else if (role === "pan") {
       document.body.dataset.panning = "1";
     }
@@ -996,6 +1001,13 @@ export class InputController {
   }
 
   // ---- 吸色 ----
+  // #22 油漆桶：tap → doc 坐标派 wp:bucketTap（填色逻辑在 bucket.ts 深模块；input 只做坐标换算）
+  _doBucket(sx: number, sy: number) {
+    const { x, y } = this.board.screenToDoc(sx, sy);
+    if (x < 0 || y < 0 || x >= this.doc.width || y >= this.doc.height) return;
+    window.dispatchEvent(new CustomEvent("wp:bucketTap", { detail: { x, y } }));
+  }
+
   _doPick(sx: number, sy: number) {
     const { x: dx, y: dy } = this.board.screenToDoc(sx, sy);
     const ix = Math.floor(dx), iy = Math.floor(dy);

@@ -93,9 +93,18 @@ function closeNewDocSheet() {
   els.newDocBackdrop.classList.add("hidden");
   els.newDocSheet.classList.add("hidden");
 }
+let _presetVal = "2048x2048";   // #21：preset 单一真相（confirm 读它，不再翻按钮 aria-pressed——下拉框不是按钮）
 function _selectPreset(val: string) {
+  _presetVal = val;
   const btns = els.newDocSheet.querySelectorAll<HTMLElement>("[data-preset]");
   btns.forEach((b) => b.setAttribute("aria-pressed", b.dataset.preset === val ? "true" : "false"));
+  // #21 像素画尺寸下拉框：值属于它 → 显示该值并高亮；否则复位占位项
+  const pixSel = document.getElementById("newDocPixelPreset") as HTMLSelectElement | null;
+  if (pixSel) {
+    const isPix = Array.from(pixSel.options).some((o) => o.value && o.value === val);
+    pixSel.value = isPix ? val : "";
+    pixSel.classList.toggle("active", isPix);
+  }
   els.newDocCustomRow.style.display = val === "custom" ? "" : "none";
 }
 
@@ -313,11 +322,14 @@ export function initGalleryShell(ctx: AppContext) {
   });
   els.newDocBackdrop.addEventListener("click", closeNewDocSheet);
   els.newDocCancel.addEventListener("click", closeNewDocSheet);
+  // #21：像素画尺寸下拉框接入 preset 单一真相
+  const pixPresetSel = document.getElementById("newDocPixelPreset") as HTMLSelectElement | null;
+  pixPresetSel?.addEventListener("change", () => { if (pixPresetSel.value) _selectPreset(pixPresetSel.value); });
+
   els.newDocConfirm.addEventListener("click", async () => {
     const nameRaw = (els.newDocName.value || "").trim() || t("gs.untitled");
     let w, h;
-    const sel = els.newDocSheet.querySelector("[data-preset][aria-pressed='true']") as HTMLElement | null;
-    const presetVal = (sel?.dataset.preset) || "2048x2048";
+    const presetVal = _presetVal || "2048x2048";
     if (presetVal === "custom") {
       w = Math.max(16, Math.min(8192, parseInt(els.newDocW.value, 10) || 2048));
       h = Math.max(16, Math.min(8192, parseInt(els.newDocH.value, 10) || 2048));
