@@ -1146,13 +1146,14 @@ input[type="range"].color-ramp::-moz-range-thumb {
 .layer-ref-chip {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px;
-  font-size: 11px; font-weight: 600;
   color: #fff;
   background: var(--accent, #4c8bf5);
   border-radius: 4px;
   margin-left: 4px;
   user-select: none;
 }
+/* v0.5.7：文字「参/R」→ SVG（#reference-layer），语言中性 */
+.layer-ref-chip svg { width: 13px; height: 13px; }
 .layer-clip-toggle {
   font: inherit;
   background: var(--bg-soft);

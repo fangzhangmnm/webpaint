@@ -513,7 +513,7 @@ const LayerRow = defineComponent({
     // i18n 模板标签清单：t() 在 setup 调（§5a 纪律，key 受 tsc 检查），模板只引 L.*。
     const L = {
       visible: t("lp.visible"), hidden: t("lp.hidden"), expandGroup: t("lp.expandGroup"), collapseGroup: t("lp.collapseGroup"),
-      clippedTip: t("lp.clippedTip"), lockAlphaTip: t("lp.lockAlphaTip"), refTip: t("lp.refTip"), refChip: t("lp.refChip"),
+      clippedTip: t("lp.clippedTip"), lockAlphaTip: t("lp.lockAlphaTip"), refTip: t("lp.refTip"),
       layerMenu: t("lp.layerMenu"), rename: t("lp.rename"), duplicate: t("lp.duplicate"), ungroup: t("lp.ungroup"),
       collapseToLayer: t("lp.collapseToLayer"),
       moveIntoGroup: t("lp.moveIntoGroup"), choose: t("lp.choose"), moveOut: t("lp.moveOut"),
@@ -557,7 +557,8 @@ const LayerRow = defineComponent({
       <span v-if="!isGroup && layer.lockAlpha" class="layer-lock-chip" :title="L.lockAlphaTip">
         <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><use href="#lock"/></svg>
       </span>
-      <span v-if="isRef" class="layer-ref-chip" :title="L.refTip">{{ L.refChip }}</span>
+      <!-- 参考层 chip：SVG（#reference-layer），不用语言相关的文字图标（家族规则；旧「参/R」已废） -->
+      <span v-if="isRef" class="layer-ref-chip" :title="L.refTip"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#reference-layer"/></svg></span>
 
       <button type="button" ref="menuBtn" class="layer-tools-btn" :title="L.layerMenu" @click="toggleMenu"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
 

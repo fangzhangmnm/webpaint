@@ -150,7 +150,6 @@ export const S = {
   "lp.clippedTip":   { zh: "已剪裁到下方第一颗非剪裁层", en: "Clipped to first non-clip layer below", ja: "下の最初の非クリップ層にクリップ" },
   "lp.lockAlphaTip": { zh: "锁定不透明度：笔只改已有像素的颜色", en: "Lock alpha: brush only recolors existing pixels", ja: "不透明度をロック：既存ピクセルの色のみ変更" },
   "lp.refTip":       { zh: "参考层：魔棒 / 油漆桶读这一层", en: "Reference layer: magic wand / bucket read this layer", ja: "参照レイヤー：自動選択 / 塗りつぶしがこの層を参照" },
-  "lp.refChip":      { zh: "参",       en: "R",            ja: "参" },
   "lp.layerMenu":    { zh: "图层菜单", en: "Layer menu",   ja: "レイヤーメニュー" },
   "lp.rename":       { zh: "重命名…",  en: "Rename…",      ja: "名前を変更…" },
   "lp.duplicate":    { zh: "复制图层", en: "Duplicate layer", ja: "レイヤーを複製" },
