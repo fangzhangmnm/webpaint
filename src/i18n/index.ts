@@ -114,13 +114,15 @@ export function setLocalizedText(el: HTMLElement, s: string): void {
   for (const n of texts) if (n !== target && (n.textContent ?? "").trim() !== "") n.remove();
 }
 
-// data-i18n 桥：静态 HTML 一次性填充。textContent / title / aria-label / placeholder 四种 attr。
+// data-i18n 桥：静态 HTML 一次性填充。textContent / title / aria-label / placeholder / optgroup label 五种 attr。
 export function localizeDom(root: ParentNode = document) {
   const k = (s: string | undefined) => s as Key;   // 桥 attr 值是运行时字符串（不受 tsc 检查）；t() 内部对未知 key 兜底
   root.querySelectorAll<HTMLElement>("[data-i18n]").forEach(el => { if (el.dataset.i18n) setLocalizedText(el, t(k(el.dataset.i18n))); });
   root.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach(el => { if (el.dataset.i18nTitle) el.title = t(k(el.dataset.i18nTitle)); });
   root.querySelectorAll<HTMLElement>("[data-i18n-aria]").forEach(el => { if (el.dataset.i18nAria) el.setAttribute("aria-label", t(k(el.dataset.i18nAria))); });
   root.querySelectorAll<HTMLInputElement>("[data-i18n-ph]").forEach(el => { if (el.dataset.i18nPh) el.placeholder = t(k(el.dataset.i18nPh)); });
+  // v0.5.10：<optgroup label> 走属性而非文本节点（新建作品尺寸下拉的分组标题用）
+  root.querySelectorAll<HTMLOptGroupElement>("optgroup[data-i18n-label]").forEach(el => { if (el.dataset.i18nLabel) el.label = t(k(el.dataset.i18nLabel)); });
 }
 
 // boot：设 <html lang> + 填静态 HTML。app.ts 早期调（DOM 已就绪，module 默认 deferred）。

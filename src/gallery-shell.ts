@@ -93,18 +93,12 @@ function closeNewDocSheet() {
   els.newDocBackdrop.classList.add("hidden");
   els.newDocSheet.classList.add("hidden");
 }
-let _presetVal = "2048x2048";   // #21：preset 单一真相（confirm 读它，不再翻按钮 aria-pressed——下拉框不是按钮）
+let _presetVal = "2048x2048";   // #21：preset 单一真相（confirm 读它）
+// #21 终版（v0.5.10）：全部预设进一个下拉框（#newDocPreset，三 optgroup + 自定义）——chips 已删。
 function _selectPreset(val: string) {
   _presetVal = val;
-  const btns = els.newDocSheet.querySelectorAll<HTMLElement>("[data-preset]");
-  btns.forEach((b) => b.setAttribute("aria-pressed", b.dataset.preset === val ? "true" : "false"));
-  // #21 像素画尺寸下拉框：值属于它 → 显示该值并高亮；否则复位占位项
-  const pixSel = document.getElementById("newDocPixelPreset") as HTMLSelectElement | null;
-  if (pixSel) {
-    const isPix = Array.from(pixSel.options).some((o) => o.value && o.value === val);
-    pixSel.value = isPix ? val : "";
-    pixSel.classList.toggle("active", isPix);
-  }
+  const sel = document.getElementById("newDocPreset") as HTMLSelectElement | null;
+  if (sel && sel.value !== val) sel.value = val;
   els.newDocCustomRow.style.display = val === "custom" ? "" : "none";
 }
 
@@ -314,17 +308,11 @@ export function initGalleryShell(ctx: AppContext) {
   });
 
   // 新建作品 sheet 接线
-  // v217：preset 改成按钮组（_selectPreset + 委托事件）
-  els.newDocSheet.addEventListener("click", (e: Event) => {
-    const btn = (e.target as HTMLElement | null)?.closest("[data-preset]") as HTMLElement | null;
-    if (!btn) return;
-    _selectPreset(btn.dataset.preset || "2048x2048");
-  });
+  // #21 终版（v0.5.10）：唯一的尺寸下拉框（v217 的 chips 按钮组已删）
+  const presetSel = document.getElementById("newDocPreset") as HTMLSelectElement | null;
+  presetSel?.addEventListener("change", () => { if (presetSel.value) _selectPreset(presetSel.value); });
   els.newDocBackdrop.addEventListener("click", closeNewDocSheet);
   els.newDocCancel.addEventListener("click", closeNewDocSheet);
-  // #21：像素画尺寸下拉框接入 preset 单一真相
-  const pixPresetSel = document.getElementById("newDocPixelPreset") as HTMLSelectElement | null;
-  pixPresetSel?.addEventListener("change", () => { if (pixPresetSel.value) _selectPreset(pixPresetSel.value); });
 
   els.newDocConfirm.addEventListener("click", async () => {
     const nameRaw = (els.newDocName.value || "").trim() || t("gs.untitled");

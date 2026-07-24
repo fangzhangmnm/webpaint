@@ -375,33 +375,35 @@
         <span class="brush-slider-label" data-i18n="bs.name">名字</span>
         <input id="newDocName" type="text" class="generic-sheet-input" data-i18n-ph="nd.untitled" />
       </label>
+      <!-- #21 终版（v0.5.10，user 拍板）：全部预设进**一个**下拉框（三 optgroup + 自定义）。
+           删 A4（拍板：没人用 A4 打印画）/删 4096²；512² 归绘画组；打印组=每比例 basket 一个代表，
+           全 300dpi 竖版（3:2→6寸=用户打印机、4:3→8寸、√2族→明信片）。纯文本 option，无 SVG 需求。 -->
       <div class="new-doc-preset-section">
-        <div class="new-doc-preset-label" data-i18n="nd.painting">绘画</div>
-        <div class="preset-chips">
-          <button type="button" data-preset="2048x2048" aria-pressed="true">2048²</button>
-          <button type="button" data-preset="1024x1024" aria-pressed="false">1024²</button>
-          <button type="button" data-preset="4096x4096" aria-pressed="false">4096²</button>
-          <button type="button" data-preset="2480x3508" aria-pressed="false" data-i18n="nd.a4portrait">A4 竖</button>
-          <button type="button" data-preset="3508x2480" aria-pressed="false" data-i18n="nd.a4landscape">A4 横</button>
-          <button type="button" data-preset="1920x1080" aria-pressed="false">1920×1080</button>
-          <button type="button" data-preset="1080x1920" aria-pressed="false">1080×1920</button>
-        </div>
-        <div class="new-doc-preset-label" data-i18n="nd.pixelart">像素画</div>
-        <!-- #21（v0.5）：像素画尺寸改下拉框（+256/512；纯文本 option，无 SVG 需求） -->
-        <div class="preset-chips">
-          <select id="newDocPixelPreset" class="generic-sheet-input new-doc-pixel-select" data-i18n-aria="nd.pixelart">
-            <option value="" data-i18n="nd.pixelSizePlaceholder">选择尺寸…</option>
-            <option value="16x16">16 × 16</option>
-            <option value="32x32">32 × 32</option>
-            <option value="64x64">64 × 64</option>
-            <option value="128x128">128 × 128</option>
-            <option value="256x256">256 × 256</option>
-            <option value="512x512">512 × 512</option>
+        <label class="brush-slider-row" style="grid-template-columns: 80px 1fr;">
+          <span class="brush-slider-label" data-i18n="nd.size">尺寸</span>
+          <select id="newDocPreset" class="generic-sheet-input new-doc-pixel-select">
+            <optgroup data-i18n-label="nd.grp.painting" label="绘画">
+              <option value="2048x2048" selected>2048 × 2048</option>
+              <option value="1024x1024">1024 × 1024</option>
+              <option value="512x512">512 × 512</option>
+              <option value="1920x1080" data-i18n="nd.o1920">1920 × 1080（横）</option>
+              <option value="1080x1920" data-i18n="nd.o1080">1080 × 1920（竖）</option>
+            </optgroup>
+            <optgroup data-i18n-label="nd.grp.print" label="打印 · 300dpi">
+              <option value="1200x1800" data-i18n="nd.print6in">6寸照片 1200 × 1800</option>
+              <option value="1800x2400" data-i18n="nd.print8in">8寸照片 1800 × 2400</option>
+              <option value="1181x1748" data-i18n="nd.printPostcard">明信片 1181 × 1748</option>
+            </optgroup>
+            <optgroup data-i18n-label="nd.grp.pixel" label="像素画">
+              <option value="16x16">16 × 16</option>
+              <option value="32x32">32 × 32</option>
+              <option value="64x64">64 × 64</option>
+              <option value="128x128">128 × 128</option>
+              <option value="256x256">256 × 256</option>
+            </optgroup>
+            <option value="custom" data-i18n="nd.custom">自定义…</option>
           </select>
-        </div>
-        <div class="preset-chips">
-          <button type="button" data-preset="custom" aria-pressed="false" data-i18n="nd.custom">自定义…</button>
-        </div>
+        </label>
       </div>
       <label class="brush-slider-row" id="newDocCustomRow" style="grid-template-columns: 80px 1fr 1fr; display:none;">
         <span class="brush-slider-label" data-i18n="nd.size">尺寸</span>
