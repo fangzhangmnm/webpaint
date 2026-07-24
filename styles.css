@@ -1154,6 +1154,9 @@ input[type="range"].color-ramp::-moz-range-thumb {
 }
 /* v0.5.7：文字「参/R」→ SVG（#reference-layer），语言中性 */
 .layer-ref-chip svg { width: 13px; height: 13px; }
+/* v0.5.8：透明度滑条标签「透」→ #opacity 图标（语言中性；文字留 title 提示） */
+.layer-slider-icon { display: inline-flex; align-items: center; color: var(--ink-soft); }
+.layer-slider-icon svg { width: 15px; height: 15px; }
 .layer-clip-toggle {
   font: inherit;
   background: var(--bg-soft);

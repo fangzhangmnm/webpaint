@@ -508,7 +508,14 @@ const LayerRow = defineComponent({
 
     // 不缩进（Q2：左竖条方案）：组内层（depth>0）靠左竖色条标归属，只留极小的每级位移（rail 宽）。
     const railPad = computed(() => 6 + props.depth * 9);    // px：rail 自身宽，非传统缩进
-    const modeOptions = computed(() => (props.isGroup ? GROUP_MODE_LABEL : LAYER_MODE_LABEL));
+    // v0.5.8（user）：下拉项带拉丁字母前缀「[N] 普通」——与 badge 单字符对得上号。
+    //   **现场合成**（INITIAL 表 + i18n label 拼接），不写死进 localization。
+    const modeOptions = computed(() => {
+      const src = props.isGroup ? GROUP_MODE_LABEL : LAYER_MODE_LABEL;
+      const out: Record<string, string> = {};
+      for (const [val, lbl] of Object.entries(src)) out[val] = `[${LAYER_MODE_INITIAL[val] || "?"}] ${lbl}`;
+      return out;
+    });
 
     // i18n 模板标签清单：t() 在 setup 调（§5a 纪律，key 受 tsc 检查），模板只引 L.*。
     const L = {
@@ -554,8 +561,9 @@ const LayerRow = defineComponent({
       <span v-else class="layer-name" @click="onNameClick">{{ layer.name }}<span v-if="isGroup && collapsed" class="layer-group-count"> ({{ childLeafCount }})</span></span>
 
       <span v-if="layer.clippingMask" class="layer-clip-chip" :title="L.clippedTip"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clipping-mask"/></svg></span>
+      <!-- v0.5.8：锁α chip 用 #lock-alpha（不透明度锁）而非通用 #lock——与 ⋯ 菜单 toggle 同图形 -->
       <span v-if="!isGroup && layer.lockAlpha" class="layer-lock-chip" :title="L.lockAlphaTip">
-        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><use href="#lock"/></svg>
+        <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><use href="#lock-alpha"/></svg>
       </span>
       <!-- 参考层 chip：SVG（#reference-layer），不用语言相关的文字图标（家族规则；旧「参/R」已废） -->
       <span v-if="isRef" class="layer-ref-chip" :title="L.refTip"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#reference-layer"/></svg></span>
@@ -598,7 +606,7 @@ const LayerRow = defineComponent({
 
     <div v-if="expanded" class="layer-row-expand" :style="{ marginLeft: railPad + 'px' }" @click.stop>
       <label class="layer-slider-row">
-        <span>{{ L.opa }}</span>
+        <span class="layer-slider-icon" :title="L.opa"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#opacity"/></svg></span>
         <input type="range" min="0" max="100" :value="opacityPct"
           @input="opaInput" @change="opaCommit" @pointerup="opaCommit" @pointercancel="opaCommit" @click.stop />
         <span class="layer-slider-val">{{ opacityPct }}</span>
