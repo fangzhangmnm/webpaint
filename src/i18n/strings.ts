@@ -15,7 +15,6 @@ export const S = {
   "tool.brush":     { zh: "笔刷 (B)",          en: "Brush (B)",       ja: "ブラシ (B)",            tok: "ilo sitelen (B)" },
   "tool.eraser":    { zh: "橡皮 (E)",          en: "Eraser (E)",      ja: "消しゴム (E)",          tok: "ilo weka (E)" },
   "tool.picker":    { zh: "吸色 (I)",          en: "Eyedropper (I)",  ja: "スポイト (I)",          tok: "ilo pi kama kule (I)" },
-  "tool.wand":      { zh: "魔棒选区", en: "Magic wand select", ja: "自動選択" },
   "tool.fill":      { zh: "油漆桶 (G)", en: "Paint bucket (G)", ja: "塗りつぶし (G)", tok: "ilo pi telo kule (G)" },
   "tool.lasso":     { zh: "套索 (L)",          en: "Lasso (L)",       ja: "投げ縄 (L)",            tok: "ilo pi kama lili (L)" },
   "tool.pan":       { zh: "平移 (H / Space)",  en: "Pan (H / Space)", ja: "手のひら (H / Space)",  tok: "ilo tawa (H / Space)" },
@@ -465,6 +464,7 @@ export const S = {
   "la.sampleMode":   { zh: "采样模式", en: "Sample mode", ja: "サンプリングモード" },
 
   "la.threshold":    { zh: "阈值", en: "Threshold", ja: "しきい値" },
+  "la.subSlot":      { zh: "选区方式（自由 / 矩形 / 椭圆 / 魔棒）", en: "Selection mode (freehand / rect / ellipse / wand)", ja: "選択方式（フリー / 矩形 / 楕円 / 自動）" },
   "la.setOpSlot":    { zh: "布尔模式（点选：新建 / 添加 / 减去）", en: "Boolean mode (tap to choose)", ja: "ブールモード（タップで選択）" },
   "la.more":         { zh: "更多选区操作", en: "More selection actions", ja: "その他の選択操作" },
   "la.expandShort":  { zh: "扩张", en: "Expand", ja: "拡張" },

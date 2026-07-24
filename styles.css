@@ -233,11 +233,21 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 .lasso-tool-sep { color: var(--ink-soft); margin: 0 4px; opacity: 0.4; }
 .lasso-tool-text { color: var(--ink-soft); font-size: 12px; padding: 0 2px; white-space: nowrap; }
 .lasso-tool-confirm { color: var(--accent, #4c8bf5); font-weight: 600; }
-.lasso-tool-cancel { color: var(--ink-soft); }
+.lasso-tool-cancel { color: var(--ink); }   /* v0.5.14 user：去选不要半透明观感 */
 .lasso-tool-label { font-size: 13px; color: var(--ink); font-weight: 600; padding: 0 8px; }
 .lasso-picker, .lasso-transform-ctrl { display: flex; align-items: center; gap: 4px; }
 .lasso-picker.hidden, .lasso-transform-ctrl.hidden { display: none; }
 .lasso-section { display: flex; align-items: center; gap: 4px; }
+/* v0.5.14 工具组槽：右下角小三角=「这是组 toggle 不是指令」；紧凑图标下拉（JS 锚定槽下方） */
+.lasso-slot { position: relative; }
+.lasso-slot .lasso-slot-caret { position: absolute; right: 1px; bottom: 1px; width: 8px; height: 8px; opacity: .55; pointer-events: none; }
+.lasso-icon-menu {
+  position: fixed; display: flex; gap: 2px; padding: 4px;
+  z-index: var(--z-menu);
+  background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
+  color: var(--ink);
+}
+.lasso-icon-menu.hidden { display: none; }
 /* v0.5.12 魔棒配置内联（阈值滑条+扩张toggle+px）+ ⋯ 菜单禁用态 */
 .lasso-magic-ctx { display: flex; align-items: center; gap: 6px; }
 .lasso-magic-ctx input[type="range"] { width: 88px; }
