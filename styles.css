@@ -1071,7 +1071,10 @@ input[type="range"].color-ramp::-moz-range-thumb {
 /* per-row "⋯" 工具菜单：item 内容少，让宽度自适应内容；min 用 auto 取消 .menu-panel 的 200px
    v124：覆盖 .menu-panel 的 right: 12px / top: 56px（不然 JS 设 left 也会被 right 拉宽到全屏） */
 .layer-tools-popup { padding: 4px; min-width: auto; right: auto; top: auto; }
-.layer-tools-popup .menu-item { padding: 6px 14px; }
+.layer-tools-popup .menu-item { padding: 5px 12px; }
+/* v0.5.22 user：图层面板的菜单字号与行(12px)对齐、条目边距同步收紧 */
+.layer-tools-popup .menu-item, .layer-add-popup .menu-item { font-size: 12px; padding-top: 6px; padding-bottom: 6px; }
+.layer-add-popup .menu-item { padding-left: 10px; padding-right: 10px; }
 /* v267 ⋯ 菜单里的层属性 toggle：勾选标记 + 标签 */
 .layer-menu-toggle { display: flex; align-items: center; gap: 8px; }
 /* toggle 行 = [勾选框] [前缀图标] [文字]。前缀图标是 button 的直接子 svg，
@@ -1201,13 +1204,13 @@ input[type="range"].color-ramp::-moz-range-thumb {
 }
 .layers-foot {
   display: flex;
-  gap: 4px;
-  padding: 6px;
+  gap: 3px;
+  padding: 4px;
   border-top: 1px solid var(--line);
 }
 .layers-foot-btn {
   flex: 1;
-  padding: 6px;
+  padding: 3px;   /* v0.5.22 user：跟紧凑后的图层行高对齐 */
   background: transparent;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1215,7 +1218,7 @@ input[type="range"].color-ramp::-moz-range-thumb {
   cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.layers-foot-btn svg { width: 18px; height: 18px; display: block; }
+.layers-foot-btn svg { width: 16px; height: 16px; display: block; }
 .layers-foot-btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
 .layers-foot-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 /* v267 "+" 弹出菜单：浮在底栏上方、左对齐（layers-panel 是 position:fixed → 作绝对定位容器） */
