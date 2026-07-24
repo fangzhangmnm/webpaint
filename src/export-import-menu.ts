@@ -17,6 +17,7 @@ import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
 import { editorState } from "./workbench-state.ts";
+import { reportError } from "./error-badge.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -149,7 +150,7 @@ export function initExportImportMenu(ctx: AppContext) {
         const r = await shareOrDownloadBlob(blob, `${session.name}-${stampNow()}.${exp.ext}`, exp.mime);
         setStatus(r.method === "share" ? t("tm.sharePanelOpened") : r.method === "cancel" ? t("tm.shareCancelled") : t("tm.extDownloadedUpper", { ext: exp.ext.toUpperCase() }));
       }
-    } catch (e) { setStatus(t("tm.exportFailed", { err: String(errMsg(e)) })); }
+    } catch (e) { reportError(new Error(t("tm.exportFailed", { err: String(errMsg(e)) })), "warning"); }   // #34：剪贴板/分享权限被拒也走 banner，不再静默状态栏
   });
   els.menuImportImage.addEventListener("click", async () => {
     setMenuOpen(false);
@@ -160,7 +161,7 @@ export function initExportImportMenu(ctx: AppContext) {
         if (!blob) { setStatus(t("tm.clipboardNoImage")); return; }
         const fakeFile = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
         await importImageAsLayer(fakeFile);
-      } catch (e) { setStatus(t("tm.clipboardPasteFailed", { err: String(errMsg(e)) })); }
+      } catch (e) { reportError(new Error(t("tm.clipboardPasteFailed", { err: String(errMsg(e)) })), "warning"); }   // #34
     } else {
       els.oraFileInput.value = "";
       els.oraFileInput.click();

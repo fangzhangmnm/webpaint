@@ -112,11 +112,17 @@ export function toggleLayersPanel(force?: boolean) {
 // doc 的 editorState 加载/重置后，把面板开关 + 位置**只读地**应用到 DOM（绝不回写 editorState → 不误标 dirty）。
 // 直接走裸 DOM 开关，不经 toggleLayersPanel（那条路径会写 editorState）。session-state 在 editorState 就绪后派发 wp:applyEditorState。
 function applyLayersPanelFromEditorState() {
-  const pos = editorState.layersPanel.position;   // {left,top} | null（null = 自动摆放，不动位置）
+  const pos = editorState.layersPanel.position;   // {left,top,width?,height?} | null（null = 自动摆放，不动位置）
   if (pos) {
     els.layersPanel.style.left = pos.left + "px";
     els.layersPanel.style.right = "auto";
     els.layersPanel.style.top = Math.max(PANEL_MIN_TOP, pos.top) + "px";   // 陈旧持久化位置也不许钻顶（v0.4.11）
+    // #13：宽/列表高随文档走；大屏存的尺寸小屏恢复也夹进视口
+    els.layersPanel.style.width = pos.width ? Math.max(200, Math.min(window.innerWidth - 24, pos.width)) + "px" : "";
+    _userListH = typeof pos.height === "number" ? pos.height : null;
+  } else {
+    els.layersPanel.style.width = "";
+    _userListH = null;
   }
   const enabled = editorState.layersPanel.enabled;
   els.layersPanel.classList.toggle("hidden", !enabled);
@@ -643,12 +649,16 @@ let _vueApp: { mount(el: Element): unknown } | null = null;
 
 // 把图层列表的 max-height 钉到「列表顶 → 视口底」可用空间，列表内部 overflow 滚动。
 //   修：层多 / 面板被拖到屏幕下半 时，最底 item 掉出视口够不着。CSS 的 50vh 是固定上限、不跟位置走。
+let _userListH: number | null = null;   // #13：用户拖出来的列表高度（null = 自动占满可用空间）；随 position.height 持久化
 function _clampListHeight() {
   const list = els.layersList;
   if (!list || els.layersPanel.classList.contains("hidden")) return;
   const top = list.getBoundingClientRect().top;
-  const avail = window.innerHeight - top - 12;   // 留 12px 余量
-  list.style.maxHeight = Math.max(96, avail) + "px";
+  // #13：列表**下方**还有 .layers-foot 指令栏——可用空间不减掉它，列表钉到视口底时指令栏被顶出屏幕。
+  const footH = els.layersPanel.querySelector<HTMLElement>(".layers-foot")?.offsetHeight ?? 0;
+  const avail = window.innerHeight - top - footH - 12;   // 留 12px 余量
+  const want = _userListH != null ? Math.min(_userListH, avail) : avail;
+  list.style.maxHeight = Math.max(96, want) + "px";
 }
 
 // 面板外 chrome 同步（计数标签 / 加按钮禁用 / 删按钮禁用 / 滚到活动层）—— 这些 DOM 不在 mount
@@ -731,8 +741,34 @@ export function initLayersPanel(ctx: AppContext) {
     els.layersPanel.style.right = "auto";
     els.layersPanel.style.top = top + "px";
     _clampListHeight();   // 拖动改了面板顶 → 重钉列表高度，底部 item 始终够得着
-    editorState.layersPanel.position = { left, top };   // 位置随文档走（setter 自动标记 dirty）
+    // 位置随文档走；保留已持久化的 width/height（#13），别整枝盖掉
+    editorState.layersPanel.position = { ...(editorState.layersPanel.position ?? {}), left, top };
   });
+  // #13 右下角拖拽调大小：宽 = 面板宽，高 = 列表高（_userListH）。尺寸随 position 一起持久化（PanelPos.width/height）。
+  const resizeEl = document.getElementById("layersPanelResize");
+  let _layersResize: { id: number; sx: number; sy: number; ow: number; oh: number } | null = null;
+  resizeEl?.addEventListener("pointerdown", (e: PointerEvent) => {
+    const listH = els.layersList.getBoundingClientRect().height;
+    _layersResize = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ow: els.layersPanel.offsetWidth, oh: listH };
+    resizeEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  resizeEl?.addEventListener("pointermove", (e: PointerEvent) => {
+    if (!_layersResize || e.pointerId !== _layersResize.id) return;
+    const r = els.layersPanel.getBoundingClientRect();
+    const w = Math.max(200, Math.min(window.innerWidth - r.left - 8, _layersResize.ow + (e.clientX - _layersResize.sx)));
+    _userListH = Math.max(96, _layersResize.oh + (e.clientY - _layersResize.sy));
+    els.layersPanel.style.width = w + "px";
+    _clampListHeight();   // 高走 maxHeight 夹取：往下拖也永远够不出视口底（含 foot）
+    editorState.layersPanel.position = { left: r.left, top: r.top, width: w, height: _userListH };   // 整枝赋值
+  });
+  resizeEl?.addEventListener("pointerup", (e: PointerEvent) => {
+    if (_layersResize && e.pointerId === _layersResize.id) {
+      try { resizeEl.releasePointerCapture(e.pointerId); } catch {}
+      _layersResize = null;
+    }
+  });
+
   els.layersPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
     if (_layersDrag && e.pointerId === _layersDrag.id) {
       try { els.layersPanelHead.releasePointerCapture(e.pointerId); } catch {}

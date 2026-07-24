@@ -785,6 +785,7 @@ export const S = {
   "se.selectionShrunk": { zh: "选区已收缩", en: "Selection shrunk", ja: "選択範囲を収縮しました" },
   "se.noPixelsToTransform": { zh: "选区里没有可变换的像素，已取消选区", en: "No transformable pixels in the selection; selection cleared", ja: "選択範囲に変形できるピクセルがないため、選択を解除しました" },
   "se.layerEmptyNoTransform": { zh: "图层是空的，没东西可变换", en: "The layer is empty, nothing to transform", ja: "レイヤーが空で、変形するものがありません" },
+  "se.hiddenNoTransform": { zh: "当前图层已隐藏，不能变换", en: "The current layer is hidden and cannot be transformed", ja: "現在のレイヤーは非表示のため変形できません" },
   "se.filled": { zh: "已填色：{color}", en: "Filled: {color}", ja: "塗りつぶしました：{color}" },
   "se.clearedSelection": { zh: "已清除选区内像素", en: "Cleared pixels within the selection", ja: "選択範囲内のピクセルを消去しました" },
   "se.stamped": { zh: "已盖印", en: "Stamped", ja: "スタンプしました" },

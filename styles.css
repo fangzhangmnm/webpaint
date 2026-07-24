@@ -930,7 +930,20 @@ input[type="range"].color-ramp::-moz-range-thumb {
   top: 60px;
   right: 16px;
   left: auto;        /* 覆盖 .float-panel 默认 left:16 */
-  width: 240px;
+  width: 240px;      /* 默认宽；#13 用户可拖右下角手柄调，随 editorState 持久化 */
+}
+/* #13 面板右下角调大小手柄：22px 触控热区，三道斜纹（纯 CSS，不是图标）。 */
+.float-panel-resize {
+  position: absolute; right: 0; bottom: 0;
+  width: 22px; height: 22px;
+  cursor: nwse-resize;
+  touch-action: none;
+  opacity: 0.55;
+  background: linear-gradient(135deg,
+    transparent 0 45%, var(--ink-soft) 45% 52%,
+    transparent 52% 66%, var(--ink-soft) 66% 73%,
+    transparent 73%);
+  border-bottom-right-radius: inherit;
 }
 .float-panel-subtle { color: var(--ink-soft); font-weight: normal; font-size: 12px; margin-left: 6px; }
 .float-panel-close {
@@ -1980,6 +1993,8 @@ body[data-mode="gallery"] .board { display: none !important; }
   overflow: hidden;
 }
 .gallery-tile-menu-popup.hidden { display: none; }
+/* #14：卡片贴屏幕下缘时菜单向上翻（JS 量 bbox 超视口底 → 加 .up），底部行不再伸出屏外 */
+.gallery-tile-menu-popup.up { top: auto; bottom: 34px; }
 .gallery-tile-menu-popup button {
   padding: 8px 12px;
   text-align: left;

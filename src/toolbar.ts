@@ -349,6 +349,8 @@ export function initToolbar(ctx: AppContext) {
   // selection 状态全归 lasso 管，toolbar 不直接动 doc.selection。
   byId("lassoTransformBtn").addEventListener("click", () => {
     if (!doc.activeLayer) return;
+    // #17 隐藏层护栏：自身或祖先组隐藏 → 变换的是看不见的像素，commit 后无反馈，软拒。
+    if (doc.activeNodeHidden()) { setStatus(t("se.hiddenNoTransform"), true); return; }
     const ok = input.lasso.liftSelectionForTransform(doc.activeLayer, { fallbackFullLayer: true });
     if (ok) {
       (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("transform", { apply: _commitTransform, abort: _cancelTransform });

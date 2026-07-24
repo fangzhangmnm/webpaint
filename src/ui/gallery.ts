@@ -262,7 +262,17 @@ function makeGallery(host: GalleryHost) {
       const whereLabel = (where: "local" | "cloud") => (where === "local" ? t("gal.loc.local") : t("gal.loc.cloud"));
 
       // ---- intents（文件管理：本模块自管；画布耦合：转 host）----
-      const toggleMenu = (key: string) => { openMenu.value = openMenu.value === key ? null : key; };
+      const menuUp = ref(false);                   // #14：⋯ 菜单贴屏幕下缘时向上翻，防止底部行伸出屏外
+      const toggleMenu = (key: string) => {
+        const opening = openMenu.value !== key;
+        openMenu.value = opening ? key : null;
+        if (!opening) return;
+        menuUp.value = false;
+        nextTick(() => {   // 开在下缘 → 渲染后量一次实际 bbox，超出视口底就翻到按钮上方
+          const el = document.querySelector<HTMLElement>(".gallery-tile-menu-popup:not(.hidden)");
+          if (el && el.getBoundingClientRect().bottom > window.innerHeight - 8) menuUp.value = true;
+        });
+      };
 
       async function openTile(item: GItem) {
         openMenu.value = null;
@@ -537,7 +547,7 @@ function makeGallery(host: GalleryHost) {
       return {
         view, folder, loading, openMenu, isEmpty, emptyText, L,
         folderTiles, fileTiles, trashTiles, crumbs,
-        badgeIcon, fmtMeta, ICON, toggleMenu, setFolder, hydrateFolder, enterFolder,
+        badgeIcon, fmtMeta, ICON, toggleMenu, menuUp, invalidateEncrypted, setFolder, hydrateFolder, enterFolder,
         openTile, rename, move, copy, push, reupload, unload, del, folderDelete, trashRestore, trashPurge, emptyTrash,
         encryptItem, decryptItem, onUnlock, requestUnlock,
         reload, setView: (v: "files" | "trash") => { view.value = v; reload(); },
@@ -562,7 +572,7 @@ function makeGallery(host: GalleryHost) {
               <div class="gallery-tile-meta">{{ L.folder }}</div>
             </div>
             <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu('F:'+ft.path)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
-            <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!=='F:'+ft.path }" @click.stop>
+            <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!=='F:'+ft.path, up: menuUp }" @click.stop>
               <button type="button" class="danger" @click="folderDelete(ft)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span>{{ L.delEmptyFolder }}</span></button>
             </div>
           </div>
@@ -578,7 +588,7 @@ function makeGallery(host: GalleryHost) {
               </div>
             </div>
             <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu(row.t.name)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
-            <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!==row.t.name }" @click.stop>
+            <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!==row.t.name, up: menuUp }" @click.stop>
               <template v-if="row.t.ghost">
                 <div class="gallery-menu-note">{{ L.divergedNote }}</div>
                 <button type="button" @click="rename(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rename"/></svg><span>{{ L.renameKeep }}</span></button>
@@ -612,7 +622,7 @@ function makeGallery(host: GalleryHost) {
               <div class="gallery-tile-meta">{{ row.t.source }} · {{ fmtMeta({time: row.t.deletedAt, size: 0}).split(' · ')[0] }} {{ L.deleted }}</div>
             </div>
             <button type="button" class="gallery-tile-menu-btn" :aria-label="L.more" @click.stop="toggleMenu('T:'+row.t.name+row.t.deletedAt)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
-            <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!=='T:'+row.t.name+row.t.deletedAt }" @click.stop>
+            <div class="gallery-tile-menu-popup" :class="{ hidden: openMenu!=='T:'+row.t.name+row.t.deletedAt, up: menuUp }" @click.stop>
               <button type="button" @click="trashRestore(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#restore-trash"/></svg><span>{{ L.restore }}</span></button>
               <button type="button" class="danger" @click="trashPurge(row.item)"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span>{{ L.purge }}</span></button>
             </div>
@@ -635,6 +645,9 @@ export interface GalleryHandle {
   emptyTrash(scope?: "local" | "cloud" | "both"): void;
   /** 在当前夹找一件本地加密作品并交互解锁；本夹没有 → false。 */
   requestUnlock(): Promise<boolean>;
+  /** #11：某项的加密态字节换了体（编辑器侧加密/解除）→ 清该项锁态缓存重探。
+   *  没有它 refresh() 不够——probeEncrypted 的 `nm in encByName` 缓存守卫会跳过已探项，小锁图标 stale。 */
+  invalidateEncrypted(name: string): void;
   unmount(): void;
 }
 
@@ -648,6 +661,7 @@ interface GalleryVM {
   folder: string;
   emptyTrash(scope?: "local" | "cloud" | "both"): void;
   requestUnlock(): Promise<boolean>;
+  invalidateEncrypted(name: string): void;
 }
 
 export function mountGallery(el: HTMLElement, host: GalleryHost): GalleryHandle {
@@ -662,6 +676,7 @@ export function mountGallery(el: HTMLElement, host: GalleryHost): GalleryHandle 
     getFolder: () => vm.folder,
     emptyTrash: (scope) => vm.emptyTrash(scope),
     requestUnlock: () => vm.requestUnlock(),
+    invalidateEncrypted: (name) => vm.invalidateEncrypted(name),
     unmount: () => app.unmount(),
   };
 }

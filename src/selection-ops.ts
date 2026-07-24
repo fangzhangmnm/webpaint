@@ -9,6 +9,7 @@ import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.ts"
 import { Selection } from "./selection.ts";
 import { countLeaves, disposeLayerSnap, type LayerSnap } from "./doc.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
+import { reportError } from "./error-badge.ts";
 import { updateLassoToolbar } from "./toolbar.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
@@ -128,14 +129,14 @@ export function initSelectionOps(ctx: AppContext) {
       await writeImageBlobToClipboard(new Promise<Blob>((res) => canvas.toBlob(res as BlobCallback, "image/png")));
       setStatus(doc.selection ? t("se.copiedSelectionToClipboard") : t("se.copiedLayerToClipboard"));
     } catch (e) {
-      setStatus(t("se.copyFailed", { error: errMsg(e) }), true);
+      reportError(new Error(t("se.copyFailed", { error: errMsg(e) })), "warning");   // #34：iPad 剪贴板权限被拒走 banner
     }
   });
   // Ctrl+V：系统剪贴板图 → 新层，视口居中（复用 importImageAsLayer）
   window.addEventListener("wp:paste", async () => {
     let blob;
     try { blob = await readImageFromClipboard(); }
-    catch (e) { setStatus(t("se.clipboardReadFailed", { error: errMsg(e) }), true); return; }
+    catch (e) { reportError(new Error(t("se.clipboardReadFailed", { error: errMsg(e) })), "warning"); return; }   // #34
     if (!blob) { setStatus(t("se.clipboardNoImage"), true); return; }
     const file = new File([blob], "paste.png", { type: blob.type || "image/png" });
     const r = board.canvas.getBoundingClientRect();

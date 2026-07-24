@@ -202,7 +202,12 @@ function adoptModel(loaded: LoadedDoc) {
     updateNewerBanner();
     restoreEditorStateFromOra(loaded);
     const vp = editorState.viewport;   // 视口从 editorState（.webpaint/editor-state.json）回灌 board
-    if (vp && typeof vp.scale === "number") { Object.assign(board.viewport, vp); board.invalidateAll(); board.requestRender(); }
+    // #27：必须经 setViewport（scale 夹取 + _clampPan），不许 Object.assign 裸灌——大屏存的
+    // viewport 换小屏/旋转后画布整体落屏外，且交互 pan 夹取之外没有任何路径能把它拉回。
+    if (vp && typeof vp.scale === "number") {
+      board.setViewport(vp.tx ?? 0, vp.ty ?? 0, vp.scale, typeof vp.rot === "number" ? vp.rot : undefined);
+      board.invalidateAll();
+    }
     applyEditorStateToUI();   // desk：Unserialize 后把面板/checkboard 回灌 UI（各模块订阅 wp:applyEditorState）
   } finally { _loadingDoc = false; }
 }
@@ -331,6 +336,7 @@ async function encryptCurrent() {
       if (res.status === "already") { setStatus(t("ss.alreadyEncrypted")); return; }
       await _refreshEncrypted(); updateSaveStatus();
       setStatus(res.status === "cloud-deferred" ? t("ss.encryptedDeferred", { name: _activeSessionName ?? "" }) : t("ss.encrypted", { name: _activeSessionName ?? "" }), res.status === "cloud-deferred");
+      gallery?.invalidateEncrypted?.(_activeSessionName!);   // #11：清图库锁态缓存（refresh 不清，probe 有缓存守卫）
       gallery?.refresh?.();
     } catch (e) { setStatus(t("ss.encryptFailed", { error: errMsg(e) }), true); }
   });
@@ -351,6 +357,7 @@ async function decryptCurrent() {
       if (res.status === "not-encrypted") { setStatus(t("ss.notEncrypted")); return; }
       await _refreshEncrypted(); updateSaveStatus();
       setStatus(t("ss.decrypted", { name: _activeSessionName ?? "" }));
+      gallery?.invalidateEncrypted?.(_activeSessionName!);   // #11：解除加密后小锁图标不清的病根——缓存守卫跳过已探项
       gallery?.refresh?.();
     } catch (e) { setStatus(t("ss.decryptFailed", { error: errMsg(e) }), true); }
   });

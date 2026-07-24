@@ -300,7 +300,7 @@ export function initGalleryShell(ctx: AppContext) {
       await importImageAsNewDoc(file);
       setGalleryOpen(false);
     } catch (e) {
-      setStatus(t("gs.clipboardNewFailed", { err: errMsg(e) }));
+      reportError(new Error(t("gs.clipboardNewFailed", { err: errMsg(e) })), "warning");   // #34：iPad 权限被拒要看得见
     }
   });
 

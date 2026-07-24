@@ -440,6 +440,7 @@ export class Board {
     this.canvas.height = th;
     if (this._glCanvas) { this._glCanvas.width = tw; this._glCanvas.height = th; }   // GL canvas 跟随 device px
     this._gridSig = "";   // 尺寸变 → 强制重算栅格 div
+    this._clampPan();     // #27：屏幕尺寸/旋转变小后画布可能整体落屏外，同一约束一并夹回
     this.requestRender();
   }
 

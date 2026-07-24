@@ -444,6 +444,16 @@ export class PaintDoc {
     if (!a.visible && !allowHidden) return { leaf: null, reason: "hidden" };
     return { leaf: a, reason: null };
   }
+  // #17：active 节点（叶或组）自身或任一祖先组隐藏？变换类操作的护栏——它们合法作用于组、
+  //   不走 activeEditableLeaf，但对看不见的内容变换 = 盲改（commit 后无视觉反馈），须软拒。
+  activeNodeHidden(): boolean {
+    let n: Node | null = this.activeLayer;
+    while (n) {
+      if (!n.visible) return true;
+      n = findParentOf(this.layers, n.id)?.parentNode ?? null;
+    }
+    return false;
+  }
   // 兼容垫片：扁平**叶序** index ↔ activeId。旧 consumer（panel 高亮 / session-state 持久化 /
   //   undo 结构 entry）无组时照常用 index；树化后逐个迁到 id。
   get activeIndex() {
