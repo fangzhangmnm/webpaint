@@ -716,7 +716,7 @@ function _clampListHeight() {
   const footH = els.layersPanel.querySelector<HTMLElement>(".layers-foot")?.offsetHeight ?? 0;
   const avail = window.innerHeight - top - footH - 12;   // 留 12px 余量
   const want = _userListH != null ? Math.min(_userListH, avail) : avail;
-  list.style.maxHeight = Math.max(96, want) + "px";
+  list.style.maxHeight = Math.max(0, want) + "px";   // v0.5.21 user：无最小高度，可拉出空白
 }
 
 // 面板外 chrome 同步（计数标签 / 加按钮禁用 / 删按钮禁用 / 滚到活动层）—— 这些 DOM 不在 mount
@@ -815,7 +815,7 @@ export function initLayersPanel(ctx: AppContext) {
     if (!_layersResize || e.pointerId !== _layersResize.id) return;
     const r = els.layersPanel.getBoundingClientRect();
     const w = Math.max(200, Math.min(window.innerWidth - r.left - 8, _layersResize.ow + (e.clientX - _layersResize.sx)));
-    _userListH = Math.max(96, _layersResize.oh + (e.clientY - _layersResize.sy));
+    _userListH = Math.max(0, _layersResize.oh + (e.clientY - _layersResize.sy));
     els.layersPanel.style.width = w + "px";
     _clampListHeight();   // 高走 maxHeight 夹取：往下拖也永远够不出视口底（含 foot）
     editorState.layersPanel.position = { left: r.left, top: r.top, width: w, height: _userListH };   // 整枝赋值

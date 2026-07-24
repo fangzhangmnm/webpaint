@@ -26,6 +26,7 @@ export const els = {
   layerAddBtn: byId<HTMLButtonElement>("layerAddBtn"),
   // v123：del/up/down 挪进 per-row "⋯" 菜单；footer 只剩 layerAddBtn
   menuBtn: byId("menuButton"),
+  menuGallery: byId("menuGallery"),
   menuPanel: byId("menuPanel"),
   menuLongPressPick: byId("menuLongPressPick"),
   menuSingleFingerDraw: byId("menuSingleFingerDraw"),

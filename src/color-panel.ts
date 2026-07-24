@@ -26,6 +26,7 @@ export function toggleColorPanel(force?: boolean) {
     const saved = editorState.colorPanel.position;
     const w = els.colorPanel.offsetWidth || 264;
     const h = els.colorPanel.offsetHeight || 320;
+    if (saved?.width) els.colorPanel.style.width = Math.max(180, saved.width) + "px";   // v0.5.21 持久化宽
     let left = saved?.left, top = saved?.top;
     if (left == null || top == null) { left = window.innerWidth - w - 16; top = 60; }
     left = Math.max(0, Math.min(window.innerWidth - w, left));
@@ -47,6 +48,7 @@ function applyColorPanelFromEditorState() {
   if (editorState.colorPanel.enabled) {
     els.colorPanel.classList.remove("hidden");
     const saved = editorState.colorPanel.position;
+    if (saved?.width) els.colorPanel.style.width = Math.max(180, saved.width) + "px";   // v0.5.21 持久化宽
     const w = els.colorPanel.offsetWidth || 264;
     const h = els.colorPanel.offsetHeight || 320;
     let left = saved?.left, top = saved?.top;
@@ -86,12 +88,33 @@ export function initColorPanel(ctx: AppContext) {
     const top = Math.max(60, Math.min(window.innerHeight - h, _panelDrag.ot + (e.clientY - _panelDrag.sy)));   // top 地板=出血区（v0.4.11，同 layers-panel）
     els.colorPanel.style.left = left + "px";
     els.colorPanel.style.top = top + "px";
-    editorState.colorPanel.position = { left, top };
+    editorState.colorPanel.position = { ...(editorState.colorPanel.position ?? {}), left, top };
   });
   els.colorPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
     if (_panelDrag && e.pointerId === _panelDrag.id) {
       try { els.colorPanelHead.releasePointerCapture(e.pointerId); } catch {}
       _panelDrag = null;
+    }
+  });
+  // v0.5.21 user：颜色窗口调大小（宽；sv-pad 已流体化，高随内容）。同 layers #13 手柄纪律。
+  const resizeEl = document.getElementById("colorPanelResize");
+  let _resize: { id: number; sx: number; ow: number } | null = null;
+  resizeEl?.addEventListener("pointerdown", (e: PointerEvent) => {
+    _resize = { id: e.pointerId, sx: e.clientX, ow: els.colorPanel.offsetWidth };
+    resizeEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  resizeEl?.addEventListener("pointermove", (e: PointerEvent) => {
+    if (!_resize || e.pointerId !== _resize.id) return;
+    const r = els.colorPanel.getBoundingClientRect();
+    const w = Math.max(180, Math.min(window.innerWidth - r.left - 8, _resize.ow + (e.clientX - _resize.sx)));
+    els.colorPanel.style.width = w + "px";
+    editorState.colorPanel.position = { ...(editorState.colorPanel.position ?? {}), left: r.left, top: r.top, width: w };
+  });
+  resizeEl?.addEventListener("pointerup", (e: PointerEvent) => {
+    if (_resize && e.pointerId === _resize.id) {
+      try { resizeEl.releasePointerCapture(e.pointerId); } catch {}
+      _resize = null;
     }
   });
   window.addEventListener("wp:toggleColor", () => toggleColorPanel());

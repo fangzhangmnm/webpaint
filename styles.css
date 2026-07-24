@@ -327,8 +327,6 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   scrollbar-width: none;
 }
 .top-bar::-webkit-scrollbar { display: none; }
-/* v0.5.19 图库独立入口：同 top-bar pill 视觉，钉最左（等高由同款 padding+.tool 保证） */
-.top-bar.top-gallery-wrap { left: max(env(safe-area-inset-left, 0px), 6px); transform: none; }
 
 .tool-group, .color-group {
   display: flex;
@@ -547,8 +545,8 @@ input[type=range] {
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px;
+  gap: 6px;
+  padding: 10px;   /* v0.5.21 user：sheet 极简省空间——不妨碍点击就省 */
   width: min(320px, calc(100% - 32px));
   background: var(--bg);
   border: 1px solid var(--line);
@@ -987,16 +985,16 @@ input[type="range"].color-ramp::-moz-range-thumb {
 .layers-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px;
+  gap: 1px;
+  padding: 4px;
   max-height: 50vh;
   overflow-y: auto;
 }
 .layer-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 3px 8px;   /* v0.5.21 user：紧凑 compact——删不必要行间距 */
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -1033,8 +1031,8 @@ input[type="range"].color-ramp::-moz-range-thumb {
    v123 把 icon 从 16 调到 22 却没动这里的 20px，于是那次放大一直没生效（v430 修）。
    尺寸以 .layer-vis svg 为准，别再只改 layers-panel.ts 里的 size。 */
 .layer-vis {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1044,12 +1042,12 @@ input[type="range"].color-ramp::-moz-range-thumb {
   color: var(--ink);
   flex: 0 0 auto;
 }
-.layer-vis svg { width: 24px; height: 24px; display: block; }
+.layer-vis svg { width: 20px; height: 20px; display: block; }
 .layer-vis.hidden-icon { opacity: 0.3; }
 .layer-name {
   flex: 1;
   color: var(--ink);
-  font-size: 13px;
+  font-size: 12px;   /* v0.5.21 user：小一号 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1350,8 +1348,6 @@ body[data-doc-newer="1"] #statusLabel { color: #dc2626; font-weight: 600; }
   width: 30px; height: 28px;
 }
 .brush-rack-action-icon svg { width: 18px; height: 18px; display: block; }
-.brush-rack-head-ic { display: inline-flex; align-items: center; margin-right: 6px; }
-.brush-rack-head-ic svg { width: 18px; height: 18px; display: block; }
 .brush-rack-close {
   font: inherit; font-size: 18px;
   width: 28px; height: 28px;
@@ -2263,7 +2259,7 @@ body[data-mode="gallery"] .board { display: none !important; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: 4px 8px;   /* v0.5.21 user：紧凑默认 */
   border-bottom: 1px solid var(--line);
   cursor: grab;
   user-select: none;
@@ -2277,8 +2273,8 @@ body[data-mode="gallery"] .board { display: none !important; }
 .float-panel-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 8px;   /* v0.5.21 user：紧凑默认（color panel 等） */
 }
 /* Blender 同步面板（btp，插件式子功能；沿用 .float-panel 框架，紧凑 + 小屏不溢出） */
 .btp-panel { width: 268px; }
@@ -2365,8 +2361,8 @@ body[data-mode="gallery"] .board { display: none !important; }
 /* HSV picker */
 .sv-pad {
   display: block;
-  width: 240px;
-  height: 180px;
+  width: 100%;
+  height: auto;   /* v0.5.21：面板可调宽——canvas 属性 240×180 定比例，指针走 boundingRect 缩放安全 */
   border-radius: 6px;
   cursor: crosshair;
   touch-action: none;

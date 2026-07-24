@@ -152,8 +152,8 @@ export function initTopbarMenu(ctx: AppContext) {
   //   留 getElementById?. 兜底防旧缓存 DOM（有就接上，无则 no-op）。
   // gallery-first：进图库 = 关闭当前画作（active = null）+ refresh 后停 gallery
   document.getElementById("topGalleryBtn")?.addEventListener("click", () => session.exit());
-  // v0.5.19：图库=独立入口（最左 pill），主菜单条目退役
-  document.getElementById("topGalleryBtn")?.addEventListener("click", () => { setMenuOpen(false); session.exit(); });
+  // v0.5.21：图库回三条杠菜单（独立 pill 一日游——user：visually distracting）
+  els.menuGallery?.addEventListener("click", () => { setMenuOpen(false); session.exit(); });
 
   // ---- 菜单：导入 / 导出 / 剪贴板 / 适应 ----
   els.menuRename.addEventListener("click", () => {
