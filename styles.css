@@ -987,8 +987,7 @@ input[type="range"].color-ramp::-moz-range-thumb {
   flex-direction: column;
   gap: 1px;
   padding: 4px;
-  max-height: 50vh;
-  overflow-y: auto;
+  overflow-y: auto;   /* 高度恒由 _clampListHeight 写死（v0.5.23 硬高度拍板），50vh 上限退役 */
 }
 .layer-row {
   display: flex;
@@ -2278,7 +2277,9 @@ body[data-mode="gallery"] .board { display: none !important; }
   flex-direction: column;
   gap: 8px;
   padding: 8px;   /* v0.5.21 user：紧凑默认（color panel 等） */
+  font-size: 12px;   /* v0.5.23 user：所有浮窗（颜色/滤镜配置…）字号与图层面板对齐 */
 }
+.float-panel-body input, .float-panel-body select, .float-panel-body button { font-size: 12px; }
 /* Blender 同步面板（btp，插件式子功能；沿用 .float-panel 框架，紧凑 + 小屏不溢出） */
 .btp-panel { width: 268px; }
 /* 关键：body 封顶高度 + 滚动 → 小屏也看得全（head 常驻，body 内滚） */
@@ -2371,7 +2372,7 @@ body[data-mode="gallery"] .board { display: none !important; }
   touch-action: none;
 }
 .hue-slider {
-  width: 240px;
+  width: 100%;   /* v0.5.23 user：resize 时 hue 跟着动 */
   height: 18px;
   appearance: none;
   border-radius: 999px;
@@ -2393,6 +2394,7 @@ body[data-mode="gallery"] .board { display: none !important; }
   align-items: center;
   gap: 8px;
 }
+.picker-row input[type="text"] { flex: 1 1 auto; min-width: 0; }   /* v0.5.23 user：hex 跟面板宽 */
 .picker-preview {
   width: 36px;
   height: 36px;

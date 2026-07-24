@@ -715,12 +715,11 @@ function _clampListHeight() {
   // #13：列表**下方**还有 .layers-foot 指令栏——可用空间不减掉它，列表钉到视口底时指令栏被顶出屏幕。
   const footH = els.layersPanel.querySelector<HTMLElement>(".layers-foot")?.offsetHeight ?? 0;
   const avail = window.innerHeight - top - footH - 12;   // 留 12px 余量
-  const want = _userListH != null ? Math.min(_userListH, avail) : avail;
-  const h = Math.max(0, want);
-  list.style.maxHeight = h + "px";
-  // v0.5.23：用户拖过 = **硬高度**（maxHeight 只是上限——图层少时内容矮，光调上限拉不高、
-  //   也拉不出空白）；没拖过（auto）保持随内容。
-  list.style.height = _userListH != null ? h + "px" : "";
+  // v0.5.23（user 拍板）：**永远硬高度**——图层数量变动时面板高度不变；默认高度固定，
+  //   用户拖过按拖的来（随 position.height 持久化），仅被「视口可用空间」夹取。
+  const want = Math.min(_userListH ?? 260, avail);
+  list.style.height = Math.max(0, want) + "px";
+  list.style.maxHeight = "none";
 }
 
 // 面板外 chrome 同步（计数标签 / 加按钮禁用 / 删按钮禁用 / 滚到活动层）—— 这些 DOM 不在 mount
