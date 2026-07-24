@@ -245,10 +245,6 @@
         <button class="tool" id="toolLasso" type="button" data-tool="lasso" data-i18n-title="tool.lasso">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lasso"/></svg>
         </button>
-        <!-- #22 油漆桶（v0.5）：tap = 魔棒同款 flood + 一次性填色。配置在 bucketToolbar（跟文件走） -->
-        <button class="tool" id="toolBucket" type="button" data-tool="bucket" data-i18n-title="tool.bucket">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg>
-        </button>
         <button class="tool tool-hand-conditional" id="toolHand" type="button" data-tool="hand" data-i18n-title="tool.pan">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#hand"/></svg>
         </button>
@@ -535,24 +531,6 @@
         <input type="text" inputmode="numeric" id="lassoMagicExpandPx" value="1" style="width:44px;text-align:right;" data-i18n-aria="la.pixelCount" />
         <span>px</span>
       </label>
-    </div>
-
-    <!-- #22 油漆桶 context toolbar（复用 lasso stack 视觉类；与 lasso/picker stack 互斥同位） -->
-    <div class="lasso-toolbar-stack hidden" id="bucketToolbar" role="toolbar" data-i18n-aria="bk.toolbar">
-      <div class="lasso-toolbar">
-        <div class="lasso-section">
-          <span class="lasso-tool-text" aria-hidden="true" data-i18n="la.threshold">阈值</span>
-          <input type="range" id="bucketThreshold" min="0" max="100" step="1" value="20" style="width:110px;" />
-          <span id="bucketThresholdVal" class="lasso-popup-val">20</span>
-          <span class="lasso-tool-sep" aria-hidden="true">|</span>
-          <label class="lasso-tool-text" style="display:inline-flex;align-items:center;gap:4px;">
-            <input type="checkbox" id="bucketExpandOn" />
-            <span data-i18n="la.autoExpand">自动扩张</span>
-          </label>
-          <input type="text" inputmode="numeric" id="bucketExpandPx" value="1" style="width:44px;text-align:right;" data-i18n-aria="la.pixelCount" />
-          <span class="lasso-tool-text" aria-hidden="true">px</span>
-        </div>
-      </div>
     </div>
 
     <!-- v242 选区编辑：齿轮 → 这个菜单 → 选扩张/收缩 → 开 lassoSelOpPopup 实时预览 -->

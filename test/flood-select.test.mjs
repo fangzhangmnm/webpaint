@@ -1,7 +1,6 @@
-// #22 油漆桶 / #31 魔棒 · flood 内核提取验收（floodSelectFrom，v242 语义原样）。
+// #22/#31 魔棒 · flood 内核验收（floodSelectFrom，v242 语义原样；v0.5.11 油漆桶退役后内核归魔棒独有）。
 // 内核吃 { width, height } + sourceLayer{bbox*, ctx.getImageData} 纯数据 → node 直测无 DOM。
-// 桶的「被现有选区裁剪」走 Selection.compose("intersect")，一并回归（compose 语义已在 selection-tiles 测，
-// 这里测的是桶的用法：flood ∩ 选区、不碰输入选区）。
+// Selection.compose("intersect") 的非消费语义（输入选区不被 dispose）一并回归——lasso setOp / fill-mode 都依赖它。
 import { describe, it, assert, eq } from "./runner.mjs";
 
 const { floodSelectFrom } = await import("../src/lasso.ts");

@@ -291,7 +291,7 @@ export class LassoEngine {
     }
     return sel;
   }
-  // （flood 内核本体在文件尾 floodSelectFrom——#22 提取为模块级纯函数，LassoEngine 与 bucket.ts 共用）
+  // （flood 内核本体在文件尾 floodSelectFrom——#22 提取为模块级纯函数）
 
   // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
   _applySelectionUpdate(newSel: SelectionLike) {
@@ -351,7 +351,7 @@ export class LassoEngine {
   // 渲染 floating：GPU warp（board._glFloatInputs→gl-compositor _floatPass）。
 }
 
-// ---- 魔棒 flood 内核（#22 提取为模块级纯函数：LassoEngine._magicWandToSelection 与 bucket.ts 共用）----
+// ---- 魔棒 flood 内核（#22 提取为模块级纯函数；vetted，v0.5.11 油漆桶退役后唯一消费者=魔棒）----
 // 行为逐字保留 v242 语义：贴着 AA 边缘半透明处停下的原始选区，不 bake 任何膨胀。
 //
 // 经典 bug（v66 + v69 又犯）：iteration 局限在 layer.bbox 内 → 点空白只选到 bbox 矩形。

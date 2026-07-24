@@ -87,3 +87,14 @@ test("[editor-state] Unserialize 容错（缺字段留 default、多字段忽略
   editorState.Unserialize(null); editorState.Unserialize("x"); editorState.Unserialize(42);
   eq(editorState.brushTool.size, 12, "坏输入 → 回 default（freshGroups）");
 });
+
+test("[editor-state] v0.5.11 迁移：stale bucket 键忽略、magicWand.threshold 默认+覆盖", () => {
+  editorState.reset();
+  eq(editorState.magicWand.threshold, 20, "threshold 默认 20（原 bucket 配置退役归魔棒）");
+  // 旧 doc 的 editor-state.json 带已退役的 bucket 组 → mergeInto 按 dst 键迭代，静默忽略不崩
+  editorState.Unserialize({ bucket: { threshold: 55, expand: true, expandPx: 3 }, magicWand: { threshold: 40, expand: true } });
+  eq(editorState.magicWand.threshold, 40, "magicWand.threshold 覆盖");
+  eq(editorState.magicWand.expand, true, "magicWand.expand 覆盖");
+  eq(editorState.magicWand.expandPx, 1, "缺字段留 default");
+  eq("bucket" in editorState, false, "bucket facade 已删");
+});

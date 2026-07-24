@@ -244,8 +244,6 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("eraser") },
   { combo: "I",                desc: "sc.picker",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("picker") },
-  { combo: "G",                desc: "sc.bucket",     category: "sc.cat.tools",
-    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("bucket") },
   { combo: "L",                desc: "sc.lasso",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("lasso") },
   { combo: "H",                desc: "sc.pan",     category: "sc.cat.tools",
@@ -563,8 +561,6 @@ export class InputController {
       this._beginLasso(rec);
     } else if (role === "pick") {
       this._doPick(x, y);
-    } else if (role === "bucket") {
-      this._doBucket(x, y);
     } else if (role === "pan") {
       document.body.dataset.panning = "1";
     }
@@ -1005,13 +1001,6 @@ export class InputController {
   }
 
   // ---- 吸色 ----
-  // #22 油漆桶：tap → doc 坐标派 wp:bucketTap（填色逻辑在 bucket.ts 深模块；input 只做坐标换算）
-  _doBucket(sx: number, sy: number) {
-    const { x, y } = this.board.screenToDoc(sx, sy);
-    if (x < 0 || y < 0 || x >= this.doc.width || y >= this.doc.height) return;
-    window.dispatchEvent(new CustomEvent("wp:bucketTap", { detail: { x, y } }));
-  }
-
   _doPick(sx: number, sy: number) {
     const { x: dx, y: dy } = this.board.screenToDoc(sx, sy);
     const ix = Math.floor(dx), iy = Math.floor(dy);

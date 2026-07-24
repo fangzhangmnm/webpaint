@@ -51,7 +51,6 @@ import { createEditorState } from "./workbench-state.ts";   // candidate 3 · �
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
-import { initBucket } from "./bucket.ts";
 import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
@@ -300,7 +299,6 @@ initExportImportMenu(ctx);
 initFiltersAdjust(ctx);
 initToolbar(ctx);
 initSelectionOps(ctx);
-initBucket(ctx);   // #22 油漆桶（v0.5）：wp:bucketTap → flood+fill
 initSmoothDevPanel(ctx);
 initTransientPanels(ctx);
 initSideWindows(ctx);

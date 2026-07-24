@@ -139,10 +139,10 @@ function freshGroups() {
     refPanel:      { enabled: false, position: null as PanelPos | null, viewport: { tx: 0, ty: 0, scale: 1, rot: 0 } as EditorViewport },
     blenderPanel:  { show: false, position: null as PanelPos | null },
     brushTool:     { activeBrushId: null as string | null, size: 12, opacity: 1, color: "#1b1b1b" },
-    // v0.5（user 拍板）：桶/魔棒扩张/主栅格三份配置**跟文件走**。桶与选区的 expand 配置分开；
-    //   expand 是 toggle（开了才用 expandPx，默认 1），具体 px 在详细配置里调。
-    bucket:        { threshold: 20, expand: false, expandPx: 1 },        // #22 油漆桶
-    magicWand:     { expand: false, expandPx: 1 },                       // #31 魔棒 flood 后自动扩张
+    // v0.5（user 拍板）：魔棒/主栅格配置**跟文件走**。expand 是 toggle（开了才用 expandPx，默认 1）。
+    //   v0.5.11：threshold 归魔棒（油漆桶独立工具及 editorState.bucket 退役——填色收进套索 fill mode，
+    //   flood 只剩魔棒一条路；旧 doc 里 stale 的 bucket 键被 mergeInto 静默忽略）。
+    magicWand:     { threshold: 20, expand: false, expandPx: 1 },        // #31 自动扩张 + v0.5.11 阈值
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
@@ -229,12 +229,8 @@ export const editorState = {
     get color(): string { return _bind ? _bind.getColor() : S.g.brushTool.color; },
     set color(v: string) { if (_bind) _bind.setColor(v); else S.g.brushTool.color = v; },
   },
-  bucket: {
-    get threshold(): number { return S.g.bucket.threshold; }, set threshold(v: number) { S.g.bucket.threshold = v; },
-    get expand(): boolean { return S.g.bucket.expand; }, set expand(v: boolean) { S.g.bucket.expand = v; },
-    get expandPx(): number { return S.g.bucket.expandPx; }, set expandPx(v: number) { S.g.bucket.expandPx = v; },
-  },
   magicWand: {
+    get threshold(): number { return S.g.magicWand.threshold; }, set threshold(v: number) { S.g.magicWand.threshold = v; },
     get expand(): boolean { return S.g.magicWand.expand; }, set expand(v: boolean) { S.g.magicWand.expand = v; },
     get expandPx(): number { return S.g.magicWand.expandPx; }, set expandPx(v: number) { S.g.magicWand.expandPx = v; },
   },
