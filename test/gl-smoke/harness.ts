@@ -638,6 +638,116 @@ function commitParity(glctx: GLContext, add: Add): void {
   }
 }
 
+
+// ---- G3) v0.5.11 fill overlay（选区填色预览/commit）：1×1 填色纹理拉伸到选区 bbox，
+//      live vs CPU fillOnLayer 式 golden；commit ≡ live（同 shader SSoT）；lockAlpha 变体（user 拍板：
+//      填色尊重锁α）；compositeOnce/pickColor 不带 overlay 不漏预览（导出安全）。----
+function fillParity(glctx: GLContext, add: Add): void {
+  const N = 512;
+  const gl = glctx.gl;
+  glctx.canvas.width = N; glctx.canvas.height = N;
+  const tree = new RenderTreeGL(glctx, 512);
+  const readBack = (): Uint8Array => {
+    const raw = new Uint8Array(N * N * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+    const out = new Uint8Array(N * N * 4);
+    for (let y = 0; y < N; y++) out.set(raw.subarray((N - 1 - y) * N * 4, (N - y) * N * 4), y * N * 4);
+    return out;
+  };
+  // 选区 mask（bbox ⊂ 左上象限 → tile(1,1) 恒不被盖）：三段 0 / 128 / 255 竖带——半透明带验 AA 边等价。
+  const bx = 64, by = 72, bw = 180, bh = 160;
+  const selData = new Uint8Array(bw * bh);
+  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+    selData[y * bw + x] = x < 60 ? 0 : x < 120 ? 128 : 255;
+  }
+  const maskCanvas = document.createElement("canvas"); maskCanvas.width = bw; maskCanvas.height = bh;
+  {
+    const md = maskCanvas.getContext("2d")!.createImageData(bw, bh);
+    for (let i = 0; i < bw * bh; i++) { md.data[i * 4 + 3] = selData[i]; }
+    maskCanvas.getContext("2d")!.putImageData(md, 0, 0);
+  }
+  const FILL: [number, number, number] = [230, 60, 40];
+  for (const lockAlpha of [false, true]) {
+    const id = lockAlpha ? 201 : 200;
+    // base：含全透明格（lockAlpha 有的可锁）+ 渐变。
+    const cBase = makeLayerCanvas(N, N, (x, y) => [80 + (x % 120), 90 + (y % 100), 140, (x + y) % 3 === 0 ? 0 : 230]);
+    const pixels = pixelsFromCanvas(N, N, 0, 0, cBase);
+    const leaf = { isGroup: false, id, opacity: 0.9, mode: "source-over", clippingMask: false, visible: true, bboxX: 0, bboxY: 0, bboxW: N, bboxH: N, canvas: cBase, pixels };
+    const nodes = [leaf];
+    const ov = { kind: "fill", color: FILL, bx, by, bw, bh, layerId: id, lockAlpha, selMask: { data: selData, ox: bx, oy: by, ow: bw, oh: bh } };
+    // golden：CPU fillOnLayer 同式——tmp = 纯色 rect dst-in mask（lockAlpha 再 dst-in base）→ source-over 进层副本 → compositeLayers。
+    const filled = document.createElement("canvas"); filled.width = N; filled.height = N;
+    const fctx = filled.getContext("2d")!;
+    fctx.drawImage(cBase, 0, 0);
+    const tmp = document.createElement("canvas"); tmp.width = bw; tmp.height = bh;
+    const tctx = tmp.getContext("2d")!;
+    tctx.fillStyle = `rgb(${FILL[0]},${FILL[1]},${FILL[2]})`;
+    tctx.fillRect(0, 0, bw, bh);
+    tctx.globalCompositeOperation = "destination-in"; tctx.drawImage(maskCanvas, 0, 0);
+    if (lockAlpha) { tctx.drawImage(cBase, -bx, -by); }   // 再 dst-in base alpha（shader ovA *= base.a 的 2D 等价）
+    fctx.drawImage(tmp, bx, by);
+    const goldenLeaf = { ...leaf, canvas: filled };
+    const gc = document.createElement("canvas"); gc.width = N; gc.height = N;
+    const gctx2 = gc.getContext("2d")!; gctx2.clearRect(0, 0, N, N);
+    compositeLayers(gctx2 as unknown as CanvasRenderingContext2D, [goldenLeaf] as never, {});
+    const ref = gctx2.getImageData(0, 0, N, N).data;
+    // golden 对比走 compositeOnce（透明底 FBO——屏幕 backbuffer 会被 void 清屏压掉透明度，不能当 golden 对比面）。
+    //   这条路径同时就是吸管 pickColor 的合成面（一石二鸟）。
+    {
+      const once = tree.compositeOnce(nodes as never, N, N, undefined, null, ov as never);
+      const px = new Uint8Array(N * N * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, once.fbo);
+      gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      glctx.returnFBO(once);
+      const { md, at } = maxPremulDiff(ref, px, N);
+      add(`fill:overlay 合成${lockAlpha ? "+lockAlpha" : ""} vs CPU fillOnLayer golden`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+    }
+    // live 帧（commit ≡ live 用；屏幕面）
+    tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], ov as never, null, null);
+    const live = readBack();
+    // 导出安全：compositeOnce 不带 overlay = 预览不漏进导出（等于未填的 base 合成）。
+    {
+      const gc0 = document.createElement("canvas"); gc0.width = N; gc0.height = N;
+      const g0 = gc0.getContext("2d")!; g0.clearRect(0, 0, N, N);
+      compositeLayers(g0 as unknown as CanvasRenderingContext2D, [leaf] as never, {});
+      const refClean = g0.getImageData(0, 0, N, N).data;
+      const once = tree.compositeOnce(nodes as never, N, N);
+      const px = new Uint8Array(N * N * 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, once.fbo);
+      gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      glctx.returnFBO(once);
+      const { md } = maxPremulDiff(refClean, px, N);
+      add(`fill:${lockAlpha ? "lockAlpha " : ""}compositeOnce 无 overlay 不漏预览`, md <= 4, `maxΔ=${md}`);
+    }
+    // 吸管 WYSIWYG：带 overlay 在 mask=255 带内 = golden 所见（透明底直值，与 CPU ref 同面）。
+    {
+      const sx = bx + 150, sy = by + 80;   // mask=255 带
+      const pOv = tree.pickColor(nodes as never, N, N, undefined, sx, sy, null, ov as never);
+      let dOv = 0; const o = (sy * N + sx) * 4;
+      for (let k = 0; k < 4; k++) dOv = Math.max(dOv, Math.abs(pOv[k] - ref[o + k]));
+      add(`fill:${lockAlpha ? "lockAlpha " : ""}pickColor 带 overlay = golden 所见`, dOv <= 4, `maxΔ=${dOv}`);
+    }
+    // commit ≡ live（同 shader SSoT）+ bbox 外 tile 不动 + 收养生效。
+    const farBefore = pixels.getTileHandle(1, 1);
+    const ok = tree.commitBrushStroke(id, pixels, ov as never, N, N, (px, x, y, w, h) => pixels.applyRegionDiff(x, y, w, h, px));
+    add(`fill:${lockAlpha ? "lockAlpha " : ""}commit 提交成功`, ok);
+    const bridge = (tree as unknown as { _bridge: { stats: { uploads: number } } })._bridge;
+    const upBefore = bridge.stats.uploads;
+    tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], null, null, null);
+    const committed = readBack();
+    let md2 = 0, ai = -1;
+    for (let i = 0; i < live.length; i++) { const d = Math.abs(live[i] - committed[i]); if (d > md2) { md2 = d; ai = i; } }
+    const p2 = ai >= 0 ? ai / 4 : 0;
+    add(`fill:${lockAlpha ? "lockAlpha " : ""}commit ≡ live`, md2 <= 2, `maxΔ=${md2} @(${p2 % N},${Math.floor(p2 / N)})`);
+    add(`fill:${lockAlpha ? "lockAlpha " : ""}收养生效（下一帧零上传）`, bridge.stats.uploads === upBefore, `uploads +${bridge.stats.uploads - upBefore}`);
+    add(`fill:${lockAlpha ? "lockAlpha " : ""}bbox 外 tile 不动`, pixels.getTileHandle(1, 1) === farBefore);
+    pixels.dispose();
+  }
+}
+
 // ---- G2) v0.4.11 clip-above 实时跟随 live 描边：带 stampOverlay 的 live 帧（clip 蒙版采 merged
 //        整幅纹理）必须与 commit 后的静态帧一致——旧病：live 中 clip 采已提交 tile index，不含笔迹。----
 function clipLiveParity(glctx: GLContext, add: Add): void {
@@ -1133,6 +1243,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { rendertreeParity(glctx, add); } catch (e) { add("rendertree parity", false, String(e)); }
   try { commitParity(glctx, add); } catch (e) { add("commit parity", false, String(e)); }
   try { clipLiveParity(glctx, add); } catch (e) { add("clip-live parity", false, String(e)); }
+  try { fillParity(glctx, add); } catch (e) { add("fill parity", false, String(e)); }
   try { warpParity(glctx, add); } catch (e) { add("warp parity", false, String(e)); }
   try { warpClipParity(glctx, add); } catch (e) { add("warpclip parity", false, String(e)); }
 

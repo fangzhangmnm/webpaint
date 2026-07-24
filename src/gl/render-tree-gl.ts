@@ -49,6 +49,26 @@ export interface StampOverlayInput {
   selMask: { data: Uint8Array; ox: number; oy: number; ow: number; oh: number } | null;
 }
 
+// v0.5.11 fill-mode：填色预览/commit 走同一 overlay 槽（journal「pseudoLayer 会有不同渲染模式」预留的路）。
+//   内容 = 1×1 填色纹理拉伸到选区 bbox（shader overlay 分支 bbox 外自透明，:blend-glsl 越界检查）；
+//   选区裁剪走既有 selMask 管道（此处必填——fill 只在有选区时存在）。语义钉死 source-over/opacity=1/无 erase；
+//   lockAlpha 跟活动层（user 拍板：填色尊重锁α）。stamp 光栅器不参与（它只会圆/椭圆 dab）。
+export interface FillOverlayInput {
+  kind: "fill";
+  color: [number, number, number];   // 0..255 直值（1×1 纹理字节）
+  bx: number; by: number; bw: number; bh: number;   // = 选区 bbox（doc 坐标）
+  layerId: number;
+  lockAlpha: boolean;
+  selMask: { data: Uint8Array; ox: number; oy: number; ow: number; oh: number };
+}
+export type OverlayInput = StampOverlayInput | FillOverlayInput;
+
+// overlay 空判据（kind-aware——fill 没有 stamps，旧 stamps.length 守卫会把 fill 静默早退成 false）。
+function overlayEmpty(ov: OverlayInput): boolean {
+  if (ov.bw <= 0 || ov.bh <= 0) return true;
+  return "kind" in ov ? false : ov.stamps.length === 0;
+}
+
 // 每叶 GPU 驻留记录（7a 引入，原 gl-doc-renderer 迁入）。
 interface LeafRec { index: IndexTexture; byKey: Map<number, number>; src: LayerPixels | null; cpuVersion: number; gen: number }
 // 段缓存：合成结果切 tile + 寻址（内容 straight，与叶同一条 sampleTiled 路径）。
@@ -74,6 +94,8 @@ export class RenderTreeGL {
   private _overlayOwnedFBO: PooledFBO | null = null;
   private _selTex: WebGLTexture | null = null;
   private _selTexSrc: Uint8Array | null = null;
+  private _fillTex: WebGLTexture | null = null;    // fill-mode：1×1 填色纹理（颜色变才重传）
+  private _fillTexColor = -1;
   private _overlay: { tex: WebGLTexture; layerId: number; opacity: number; erase: boolean; blendMode: string; ox: number; oy: number; ow: number; oh: number; lockAlpha: boolean; selMask: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null } | null = null;
   private _floatTex = new Map<number, { tex: WebGLTexture; canvas: CanvasImageSource | null }>();
   private _floats = new Map<number, FloatDesc>();
@@ -127,6 +149,7 @@ export class RenderTreeGL {
     this._segCache.clear();
     this._display = null; this._displaySig = null;
     this._selTex = null; this._selTexSrc = null;
+    this._fillTex = null; this._fillTexColor = -1;
     this._floatTex.clear(); this._floats.clear();
     this._overlay = null; this._overlayOwnedFBO = null;
     this._liveMergedClip = null;   // GL 句柄已随 context 死
@@ -140,10 +163,10 @@ export class RenderTreeGL {
   //   updatedNodes」的隐式契约（spec:205），下一帧 sync 走快路径零上传。
   //   返回 false = GPU 侧无法保证 base 完整（池超 quota 等）→ 调用方按未提交处理（不落半拉笔）。
   commitBrushStroke(
-    leafId: number, pixels: LayerPixels, ov: StampOverlayInput, docW: number, docH: number,
+    leafId: number, pixels: LayerPixels, ov: OverlayInput, docW: number, docH: number,
     apply: (px: Uint8ClampedArray, x: number, y: number, w: number, h: number) => { tx: number; ty: number }[],
   ): boolean {
-    if (ov.stamps.length === 0 || ov.bw <= 0 || ov.bh <= 0) return false;
+    if (overlayEmpty(ov)) return false;
     const gl = this._glctx.gl;
     // ready：base tiles 搭 render-tree 便车（身份命中零上传）。cpuVersion 不齐 = sync 降级（超 quota）→ 放弃。
     this._syncLeafSafe(leafId, pixels, docW, docH);
@@ -205,7 +228,7 @@ export class RenderTreeGL {
   renderFrame(
     nodes: DocNode[], docW: number, docH: number, bg: Background | undefined,
     affine6: number[], canvasW: number, canvasH: number, scale: number, voidRgb: [number, number, number],
-    floats: FloatInput[], stampOverlay: StampOverlayInput | null, surrogate: SurrogateInput | null,
+    floats: FloatInput[], stampOverlay: OverlayInput | null, surrogate: SurrogateInput | null,
     liveSyncLeafId: number | null,
   ): void {
     this.frameStats.segBuilds = 0; this.frameStats.segHits = 0; this.frameStats.cachingDegraded = false;
@@ -302,9 +325,11 @@ export class RenderTreeGL {
 
   // export/吸管专用一次性合成（spec:157）：不建缓存、不失效、不碰 display。caller 负责 returnFBO。
   //   surrogate（v0.4.11，拍板#8）：调整预览的替身叶换源——吸管 WYSIWYG（导出路径不传，仍取真像素）。
-  compositeOnce(nodes: DocNode[], docW: number, docH: number, bg?: Background, surrogate: SurrogateInput | null = null): PooledFBO {
+  //   overlay（v0.5.11）：fill 预览挂着时吸管也要 WYSIWYG——同款待遇；导出路径不传，预览不漏进导出。
+  compositeOnce(nodes: DocNode[], docW: number, docH: number, bg?: Background, surrogate: SurrogateInput | null = null, overlay: OverlayInput | null = null): PooledFBO {
+    if (overlay) this._setStampOverlay(overlay, docW, docH);   // 须在 _toPlanNodes 前（plan 的 overlay 标记读 this._overlay）
     const leafById = new Map<number, DocLeaf>();
-    const planNodes = this._toPlanNodes(nodes, new Set(), null, leafById);
+    const planNodes = this._toPlanNodes(nodes, new Set(), overlay?.layerId ?? null, leafById);
     const plan = buildPlan(planNodes, new Set(), bg === "checker" ? "checker" : bg ? "color" : "none");
     const all = new Set<number>(plan.liveLeaves);
     for (const b of plan.builds.values()) for (const id of b.members) all.add(id);
@@ -321,6 +346,10 @@ export class RenderTreeGL {
     for (const f of transient.values()) this._glctx.returnFBO(f);
     if (this._liveMergedClip) { this._glctx.returnFBO(this._liveMergedClip); this._liveMergedClip = null; }   // 防御：一次性合成不留帧内缓存
     this._comp.end();
+    if (overlay) {   // 一次性合成不留 overlay 状态（下一 renderFrame 会重灌；stamp 分支还占着借来的 FBO）
+      this._overlay = null;
+      if (this._overlayOwnedFBO) { this._glctx.returnFBO(this._overlayOwnedFBO); this._overlayOwnedFBO = null; }
+    }
     return out;
   }
 
@@ -340,9 +369,9 @@ export class RenderTreeGL {
 
   // S8 吸管（spec:243-244）：一次性合成 + 单像素 readPixels（合成组无 CPU tile → 必须走 GPU 读）。
   //   surrogate 非空 = 调整预览中取替身（WYSIWYG，拍板#8）。
-  pickColor(nodes: DocNode[], docW: number, docH: number, bg: Background | undefined, x: number, y: number, surrogate: SurrogateInput | null = null): [number, number, number, number] {
+  pickColor(nodes: DocNode[], docW: number, docH: number, bg: Background | undefined, x: number, y: number, surrogate: SurrogateInput | null = null, overlay: OverlayInput | null = null): [number, number, number, number] {
     const gl = this._glctx.gl;
-    const fbo = this.compositeOnce(nodes, docW, docH, bg, surrogate);
+    const fbo = this.compositeOnce(nodes, docW, docH, bg, surrogate, overlay);
     const px = new Uint8Array(4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
     gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -565,38 +594,67 @@ export class RenderTreeGL {
     return { tex: ov.tex, opacity: ov.opacity, erase: ov.erase, blendMode: safeMode(ov.blendMode), ox: ov.ox, oy: ov.oy, ow: ov.ow, oh: ov.oh, lockAlpha: ov.lockAlpha, selMask: ov.selMask };
   }
 
-  private _setStampOverlay(ov: StampOverlayInput, docW: number, docH: number): void {
-    if (ov.stamps.length === 0 || ov.bw <= 0 || ov.bh <= 0) { this._overlay = null; return; }
+  private _setStampOverlay(ov: OverlayInput, docW: number, docH: number): void {
+    if (overlayEmpty(ov)) { this._overlay = null; return; }
     const gl = this._glctx.gl;
-    // 整屏 doc FBO + scissor（池每帧同尺寸命中零 malloc）；着色靠 scissor 限回 stamp bbox。
+    if ("kind" in ov) {
+      // fill：1×1 填色纹理拉伸到选区 bbox。不碰 stamp 光栅器、不借 FBO；shader overlay 分支
+      //   bbox 外自透明（uv 越界检查）+ selMask dst-in = 恰为「选区内 source-over 填色」。
+      if (!this._fillTex) {
+        this._fillTex = gl.createTexture()!;
+        gl.bindTexture(gl.TEXTURE_2D, this._fillTex);
+        // 1×1 也必须给全采样参数（默认 MIN_FILTER 要 mip → 纹理不完整采黑），同 _selTex 参数块。
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      }
+      const colorKey = (ov.color[0] << 16) | (ov.color[1] << 8) | ov.color[2];
+      if (this._fillTexColor !== colorKey) {
+        gl.bindTexture(gl.TEXTURE_2D, this._fillTex);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+          new Uint8Array([ov.color[0], ov.color[1], ov.color[2], 255]));   // straight，alpha=1（裁剪全靠 selMask）
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        this._fillTexColor = colorKey;
+      }
+      const selMask = this._uploadSelMask(ov.selMask);
+      this._overlay = { tex: this._fillTex, layerId: ov.layerId, opacity: 1, erase: false, blendMode: "source-over", ox: ov.bx, oy: ov.by, ow: ov.bw, oh: ov.bh, lockAlpha: ov.lockAlpha, selMask };
+      return;
+    }
+    // 整屏 doc FBO + scissor（池每帧同尺寸命中零 malloc)；着色靠 scissor 限回 stamp bbox。
     const fboP = this._rasterizer.rasterize(ov.stamps, ov.shape, 0, 0, docW, docH, { x: ov.bx, y: ov.by, w: ov.bw, h: ov.bh });
     const fboS = this._glctx.borrowFBO(docW, docH, "u8");
     this._comp.presentTo(fboP.tex, fboS, docW, docH, true);   // 栅格器预乘 → straight
     this._glctx.returnFBO(fboP);
     if (this._overlayOwnedFBO) this._glctx.returnFBO(this._overlayOwnedFBO);
     this._overlayOwnedFBO = fboS;
-    let selMask: { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } | null = null;
-    if (ov.selMask) {
-      if (!this._selTex) {
-        this._selTex = gl.createTexture()!;
-        gl.bindTexture(gl.TEXTURE_2D, this._selTex);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      }
-      if (this._selTexSrc !== ov.selMask.data) {   // Selection 不可变 → buffer 身份即内容
-        gl.bindTexture(gl.TEXTURE_2D, this._selTex);
-        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, ov.selMask.ow, ov.selMask.oh, 0, gl.RED, gl.UNSIGNED_BYTE, ov.selMask.data);
-        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-        gl.bindTexture(gl.TEXTURE_2D, null);
-        this._selTexSrc = ov.selMask.data;
-      }
-      selMask = { tex: this._selTex, ox: ov.selMask.ox, oy: ov.selMask.oy, ow: ov.selMask.ow, oh: ov.selMask.oh };
-    }
+    const selMask = ov.selMask ? this._uploadSelMask(ov.selMask) : null;
     this._overlay = { tex: fboS.tex, layerId: ov.layerId, opacity: ov.opacity, erase: ov.erase, blendMode: ov.blendMode, ox: 0, oy: 0, ow: docW, oh: docH, lockAlpha: ov.lockAlpha, selMask };
+  }
+
+  // 选区 mask 上传（stamp/fill 两分支共用）：单张复用纹理，buffer 身份即内容（Selection 不可变）。
+  //   ⚠ 若 mask buffer 未来被池化复用，这个身份缓存就是地雷（同 identity 不同内容）——届时换显式版本号。
+  private _uploadSelMask(sm: { data: Uint8Array; ox: number; oy: number; ow: number; oh: number }): { tex: WebGLTexture; ox: number; oy: number; ow: number; oh: number } {
+    const gl = this._glctx.gl;
+    if (!this._selTex) {
+      this._selTex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, this._selTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+    if (this._selTexSrc !== sm.data) {   // Selection 不可变 → buffer 身份即内容
+      gl.bindTexture(gl.TEXTURE_2D, this._selTex);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, sm.ow, sm.oh, 0, gl.RED, gl.UNSIGNED_BYTE, sm.data);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      this._selTexSrc = sm.data;
+    }
+    return { tex: this._selTex, ox: sm.ox, oy: sm.oy, ow: sm.ow, oh: sm.oh };
   }
 
   private _setFloats(floats: FloatInput[]): void {

@@ -5,7 +5,7 @@ import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT�
 import { reportError } from "./error-badge.ts";
 import { GLBoard } from "./gl/gl-board.ts";
 import { poolCapacityForBudget } from "./gl/render-tree-gl.ts";
-import type { FloatInput, StampOverlayInput, SurrogateInput } from "./gl/render-tree-gl.ts";
+import type { FloatInput, StampOverlayInput, FillOverlayInput, OverlayInput, SurrogateInput } from "./gl/render-tree-gl.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
 // brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。
@@ -61,6 +61,13 @@ function _sampleModeInt(mode?: string): number {
 }
 
 type Ctx2D = CanvasRenderingContext2D;
+
+// "#rrggbb" → [r,g,b] 0..255（fill overlay 1×1 纹理字节；容错回退黑，同 brush/gl-board 的私有解析器惯例）。
+function hexToRgb255(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec((hex || "").trim());
+  if (!m) return [0, 0, 0];
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
 type ViewportChangeCb = (() => void) | null;
 //
 // 坐标系：
@@ -589,7 +596,7 @@ export class Board {
     //   （执行器 contentVersion 快路径每帧只重传变更 tile）。
     const liveSync = this._liveSyncProvider?.() ?? null;
     const stampOverlay = this._glStampOverlay();
-    this._lastStampCount = this._showFps ? (stampOverlay?.stamps.length ?? 0) : 0;   // HUD only
+    this._lastStampCount = this._showFps ? ((stampOverlay && !("kind" in stampOverlay)) ? stampOverlay.stamps.length : 0) : 0;   // HUD only（fill overlay 无 stamps）
     this._glBoard!.render(
       this.doc as unknown as GLDoc,
       this._docTransformParams(),
@@ -629,10 +636,40 @@ export class Board {
   }
 
   // GPU brush stamp overlay（live 每帧；替 CPU overlayCanvas）。
-  _glStampOverlay(): StampOverlayInput | null {
+  //   v0.5.11：同一 overlay 槽复用给 fill 预览（brush 优先；lasso 模式下 brush 必空 → 结构上互斥）。
+  _glStampOverlay(): OverlayInput | null {
     const cs = this._stampProvider?.();
-    if (!cs || !cs.stamps.length) return null;
-    return this._overlayInputFrom(cs);
+    const brush = (cs && cs.stamps.length) ? this._overlayInputFrom(cs) : null;
+    const fill = this._glFillOverlay();
+    if (brush && fill) {
+      // 结构上不可达（fill 只在 lasso 模式 active，lasso canDraw=false 起不了 stroke）。真到了=接线坏了，
+      //   响亮报错并取 brush（别哑着渲染错误合成）。
+      reportError(new Error("[board] stamp overlay 与 fill overlay 同时非空——edit-mode 互斥被破坏"), "warning");
+      return brush;
+    }
+    return brush ?? fill;
+  }
+
+  // v0.5.11 fill-mode：填色预览 provider（fill-mode.ts 注入；active 才返 {color, layer}）。
+  _fillProvider: (() => { color: string; layer: Layer } | null) | null = null;
+  setFillProvider(fn: (() => { color: string; layer: Layer } | null) | null) { this._fillProvider = fn; }
+
+  // fill 输入构造（live 每帧 + commit 共用 = 同源输入喂同一 shader，对齐 _overlayInputFrom 的 SSoT 纪律）。
+  _glFillOverlay(): FillOverlayInput | null {
+    const f = this._fillProvider?.();
+    if (!f) return null;
+    return this._fillInputFrom(f);
+  }
+  _fillInputFrom(f: { color: string; layer: Layer }): FillOverlayInput | null {
+    const sel = this.doc.selection as Selection | null;
+    if (!sel) return null;
+    const m = sel.bboxMask();
+    return {
+      kind: "fill", color: hexToRgb255(f.color),
+      bx: m.x, by: m.y, bw: m.w, bh: m.h,
+      layerId: f.layer.id, lockAlpha: !!f.layer.lockAlpha,   // user 拍板：填色尊重锁α（预览=commit 同 shader 同参）
+      selMask: { data: m.data, ox: m.x, oy: m.y, ow: m.w, oh: m.h },
+    };
   }
 
   // GL board 是否启用（brush beginStroke 据此设 glMode）。
@@ -646,6 +683,19 @@ export class Board {
     return this._glBoard.commitBrushStroke(
       layer.id, layer.pixels, this._overlayInputFrom(cs), this.doc.width, this.doc.height,
       (px, x, y, w, h) => layer.applyRegionDiff(x, y, w, h, px),
+    );
+  }
+
+  // v0.5.11 fill commit：镜像 commitBrushStroke——同一 GPU merge→tile diff→applyRegionDiff 路径，
+  //   输入构造与 live 共用 _fillInputFrom（SSoT：预览所见即 commit 所得，含 lockAlpha）。
+  //   返回 false = 没提交（无选区/GL 失败/池到顶），调用方别当成功。
+  commitFill(f: { color: string; layer: Layer }): boolean {
+    if (!this._glBoard) return false;
+    const ov = this._fillInputFrom(f);
+    if (!ov) return false;
+    return this._glBoard.commitBrushStroke(
+      f.layer.id, f.layer.pixels, ov, this.doc.width, this.doc.height,
+      (px, x, y, w, h) => f.layer.applyRegionDiff(x, y, w, h, px),
     );
   }
 
@@ -675,12 +725,14 @@ export class Board {
   // （旧 _renderPartial / clip-window + Windows 黑缝 floor-ceil 补丁已删：v275 拥抱 full-composite，
   //   静态走 1:1 缓存、实时直接合成。partial 的两类缝隙问题（白缝/黑缝）随之消失。）
 
-  // 实时预览中？= 调整 surrogate / stroke 进行中 / 活动浮层。GL 路径用它门控 syncAll/release。
+  // 实时预览中？= 调整 surrogate / stroke 进行中 / 活动浮层 / fill 预览挂着。GL 路径用它门控 syncAll/release。
   _isLivePreview() {
     return !!(this._activeSurrogateCanvas
       || (this._strokeActiveHint && this._strokeActiveHint())
       // 活动浮层（自由变换）→ 走实时合成（浮层经 floatFor 插在源层 z；mesh 每帧变，不能用静态缓存）。
-      || this._lassoProvider?.()?.floating);
+      || this._lassoProvider?.()?.floating
+      // fill 预览（v0.5.11）：overlay 插在活动层 slot，同 floating 待遇（渲染仍按需触发，静置零成本）。
+      || this._fillProvider?.());
   }
   // S9 导出/缩略图/mergedimage/镜像的合成面（doc-render.setDocCompositor 的后端）：透明底。
   compositeNodesToCanvas(nodes: unknown[], docW: number, docH: number): HTMLCanvasElement | null {
@@ -695,7 +747,8 @@ export class Board {
     if (!this._glBoard) return null;
     const docBg = this._showCheckerboard ? "checker" : (this.doc.backgroundColor || "#ffffff");
     // v0.4.11（拍板#8）：调整预览开着时取替身（WYSIWYG——吸到的=眼睛看到的）。
-    return this._glBoard.pickColor(this.doc as unknown as GLDoc, docBg, ix, iy, this._glSurrogate());
+    // v0.5.11（user 拍板）：fill 预览挂着时同款待遇——吸到的=预览色，不是底下真实像素。
+    return this._glBoard.pickColor(this.doc as unknown as GLDoc, docBg, ix, iy, this._glSurrogate(), this._glFillOverlay());
   }
   // 套索 overlay：
   //   drawing 期间：画 polyline overlay

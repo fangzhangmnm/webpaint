@@ -8,7 +8,7 @@
 
 import { GLContext } from "./gl-context.ts";
 import { RenderTreeGL } from "./render-tree-gl.ts";
-import type { FloatInput, StampOverlayInput, SurrogateInput } from "./render-tree-gl.ts";
+import type { FloatInput, OverlayInput, SurrogateInput } from "./render-tree-gl.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 import type { Background } from "./gl-compositor.ts";
@@ -46,7 +46,7 @@ export class GLBoard {
   // S8 brush commit：merge(base⊕stroke) 在 GPU（live 同一 shader）→ tile-diff 落盘 → GPU 收养。
   //   apply = CPU 落盘回调（Layer.applyRegionDiff）。false = GPU 无法保证完整（调用方按未提交处理）。
   commitBrushStroke(
-    leafId: number, pixels: LayerPixels, ov: StampOverlayInput, docW: number, docH: number,
+    leafId: number, pixels: LayerPixels, ov: OverlayInput, docW: number, docH: number,
     apply: (px: Uint8ClampedArray, x: number, y: number, w: number, h: number) => { tx: number; ty: number }[],
   ): boolean {
     if (this._glctx.isLost) return false;
@@ -60,11 +60,11 @@ export class GLBoard {
   }
 
   // S8 吸管：一次性合成（compositeOnce，不建缓存）+ 1px readback。bg 语义同 render 的 docBg。
-  pickColor(doc: GLDoc, docBg: string | null, x: number, y: number, surrogate: SurrogateInput | null = null): [number, number, number, number] | null {
+  pickColor(doc: GLDoc, docBg: string | null, x: number, y: number, surrogate: SurrogateInput | null = null, overlay: OverlayInput | null = null): [number, number, number, number] | null {
     if (this._glctx.isLost) return null;
     const bg: Background | undefined = docBg === "checker" ? "checker"
       : docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;
-    return this._tree.pickColor(doc.layers, doc.width, doc.height, bg, x, y, surrogate);
+    return this._tree.pickColor(doc.layers, doc.width, doc.height, bg, x, y, surrogate, overlay);
   }
 
   // 给自由变换 commit 用：warp 源 → straight RGBA canvas（_bakeDown 走 readback→editRegion，复用 live warp）。
@@ -75,7 +75,7 @@ export class GLBoard {
   // 渲染一帧。affine6 = board _applyDocTransform 的 device-px 6 参；canvasW/H = device px。
   // liveSyncLeaf 只取 id（标 updated，像素变更由 contentVersion 快路径自己发现）。
   //   （S8e：旧 livePreview/forceSync 门控参数已拆——执行器增量 sync 后它们只剩历史意义。）
-  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, floats: FloatInput[] = [], stampOverlay: StampOverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, surrogate: SurrogateInput | null = null): void {
+  render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, floats: FloatInput[] = [], stampOverlay: OverlayInput | null = null, liveSyncLeaf: DocLeaf | null = null, surrogate: SurrogateInput | null = null): void {
     if (this._glctx.isLost) return;
     const bg: Background | undefined = docBg === "checker" ? "checker"
       : docBg ? [...hexToRgb(docBg), 1] as [number, number, number, number] : undefined;
