@@ -132,7 +132,6 @@ export interface EditorViewport { tx: number; ty: number; scale: number; rot: nu
 function freshGroups() {
   return {
     export:        { format: "png" as string, target: "file" as string, layerMode: "merged" as string, clipSelection: false },   // layerMode=scope "merged"|"active"；clipSelection=#16 仅导出选区范围
-    exportProject: { format: "ora" as string },                                    // "ora" | "psd"
     colorPanel:    { enabled: false, position: null as PanelPos | null },
     layersPanel:   { enabled: false, position: null as PanelPos | null },
     refPanel:      { enabled: false, position: null as PanelPos | null, viewport: { tx: 0, ty: 0, scale: 1, rot: 0 } as EditorViewport },
@@ -197,7 +196,6 @@ export const editorState = {
     get layerMode(): string { return S.g.export.layerMode; }, set layerMode(v: string) { S.g.export.layerMode = v; },
     get clipSelection(): boolean { return S.g.export.clipSelection; }, set clipSelection(v: boolean) { S.g.export.clipSelection = v; },
   },
-  exportProject: { get format(): string { return S.g.exportProject.format; }, set format(v: string) { S.g.exportProject.format = v; } },
   // panels（enabled/position 全 per-doc，决策1「desk 跟画走」）──
   colorPanel: {
     get enabled(): boolean { return S.g.colorPanel.enabled; }, set enabled(v: boolean) { S.g.colorPanel.enabled = v; },

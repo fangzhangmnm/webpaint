@@ -33,8 +33,6 @@ export const els = {
   menuClear: byId("menuClear"),
   // v120 (user：「导出项目和导出语义分开 + 小扳手」)
   // 旧 5 项 (menuImport / menuExportPng/Jpg/Ora/Psd / menuClipboardCopy/Paste) → 新 3 行
-  menuExportProject: byId("menuExportProject"),
-  menuExportProjectConfig: byId("menuExportProjectConfig"),
   menuExportImage: byId("menuExportImage"),
   menuExportImageConfig: byId("menuExportImageConfig"),
   menuFit: byId("menuFit"),

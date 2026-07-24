@@ -785,6 +785,13 @@ input[type=range] {
 .menu-config-popup label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; color: var(--ink); }
 .menu-config-popup .menu-config-section { display: flex; flex-direction: column; gap: 4px; }
 .menu-config-popup .menu-config-title { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; }
+.menu-config-select {
+  font: inherit; font-size: 12px; padding: 4px 6px; border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
+  background: transparent; color: var(--ink); cursor: pointer; max-width: 100%;
+}
+.menu-config-select option { background: var(--bg); color: var(--ink); }
+.menu-config-select:disabled { opacity: .5; }
 
 /* v120：lasso 工具栏的 dropdown（采样模式 3 按钮 → 1 select） */
 .lasso-tool-select {

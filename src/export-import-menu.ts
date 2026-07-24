@@ -33,9 +33,6 @@ function stampNow() {
 // - 主行 = 按 sticky config 一键执行；🔧 = 弹 inline popup 改 config
 // - 偏好存 editorState（per-doc desk state，setter 自动标 workspace dirty）
 //   getter/setter 返回形保持不变（scope ↔ editorState.export.layerMode 映射），call site 不动。
-function _getExpPrj(): { format: string } {
-  return { format: editorState.exportProject.format };
-}
 function _getExpImg(): { format: string; target: string; scope: string; clipSelection: boolean } {
   // scope ← editorState.export.layerMode ("merged" | "active")
   return { format: editorState.export.format, target: editorState.export.target, scope: editorState.export.layerMode, clipSelection: editorState.export.clipSelection };
@@ -47,20 +44,17 @@ function _selCropRect(): { x: number; y: number; w: number; h: number } | null {
   if (!sel || !(sel.bboxW > 0) || !(sel.bboxH > 0)) return null;
   return { x: sel.bboxX, y: sel.bboxY, w: sel.bboxW, h: sel.bboxH };
 }
-function _setExpPrj(v: { format: string }) { editorState.exportProject.format = v.format; _updateMenuSubLabels(); }
-function _setExpImg(v: { format: string; target: string; scope: string }) {
-  editorState.export.format = v.format;
-  editorState.export.target = v.target;
-  editorState.export.layerMode = v.scope;   // scope → layerMode
-  _updateMenuSubLabels();
-}
+// v0.5.20：导出图片/导出项目合并为一个「导出」入口——format=ora/psd 即项目语义（所有图层·文件）。
+function _isProjectFormat(fmt: string): boolean { return (getExporter(fmt)?.kind ?? "image") === "project"; }
 function _updateMenuSubLabels() {
-  const ep = _getExpPrj();
   const ei = _getExpImg();
-  const epEl = document.getElementById("menuExportProjectSub");
   const eiEl = document.getElementById("menuExportImageSub");
-  if (epEl) epEl.textContent = "." + ((getExporter(ep.format) || getExporter("ora")).ext);
-  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : t("sub.file")}${ei.clipSelection ? " · " + t("sub.selection") : ""}`;
+  if (!eiEl) return;
+  if (_isProjectFormat(ei.format)) {
+    eiEl.textContent = `.${(getExporter(ei.format) || getExporter("ora")).ext} · ${t("tm.scopeAllLayers")} · ${t("sub.file")}`;
+  } else {
+    eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : t("sub.file")}${ei.clipSelection ? " · " + t("sub.selection") : ""}`;
+  }
 }
 
 // 🔧 配置 popup（点开 / 点别处关）。setMenuOpen 不变，popup 嵌在 menu-item-row 里
@@ -96,32 +90,30 @@ export function initExportImportMenu(ctx: AppContext) {
   // desk 载入：换画后导入导出偏好（editorState）变了 → 刷新折叠菜单 sub-label（值本身按需读，无数据问题；仅显示同步）。
   window.addEventListener("wp:applyEditorState", _updateMenuSubLabels);
 
-  els.menuExportProject.addEventListener("click", async () => {
-    setMenuOpen(false);
-    const exp = getExporter(_getExpPrj().format) || getExporter("ora");
-    try {
-      // 加密作品 + .ora → **原样导出 at-rest 密文容器**（不解不封，因此也不问密码）。
-      //   文件名 <名>.ora.zip：诚实反映它是加密容器（与云端 at-rest 命名一致），
-      //   也免得被别的 ORA 软件当普通 .ora 打开然后报一个看不懂的错。
-      //   导入侧已能嗅探密文容器（import-image 的 looksEncrypted 分支），原样收得回来。
-      if (session.enc.encrypted && exp.id === "ora") {
-        const cipher = await session.readEncryptedBytes();   // 内部先 saveNow（否则导的是上次保存的旧内容）
-        if (!cipher) { setStatus(t("tm.exportNoCipher"), true); return; }
-        triggerDownload(cipher, `${session.name}.ora.zip`);
-        setStatus(t("tm.dotExtDownloaded", { ext: "ora.zip" }));
-        return;
-      }
-      // 加密作品 + .psd：psd 格式本身不支持加密 → 只能出明文。**user 已明确 consent**
-      //   （「导出 psd/png 就当 user consent 了，正常导出」）。不拦、不额外弹窗。
-      if (exp.busyHint) setStatus(exp.busyHint, true);
-      const blob = await exp.encode(doc);
-      triggerDownload(blob, `${session.name}.${exp.ext}`);
-      setStatus(t("tm.dotExtDownloaded", { ext: exp.ext }));
-    } catch (e) { setStatus(t("tm.exportFailed", { err: String(errMsg(e)) })); }
-  });
   els.menuExportImage.addEventListener("click", async () => {
     setMenuOpen(false);
     const c = _getExpImg();
+    // v0.5.20：ora/psd = 项目语义（所有图层含隐藏 · 文件），与图片路径在此分流。
+    if (_isProjectFormat(c.format)) {
+      const exp = getExporter(c.format) || getExporter("ora");
+      try {
+        // 加密作品 + .ora → **原样导出 at-rest 密文容器**（不解不封，因此也不问密码）。
+        //   文件名 <名>.ora.zip：诚实反映它是加密容器（与云端 at-rest 命名一致）。导入侧能嗅探收回。
+        if (session.enc.encrypted && exp.id === "ora") {
+          const cipher = await session.readEncryptedBytes();   // 内部先 saveNow（否则导的是上次保存的旧内容）
+          if (!cipher) { setStatus(t("tm.exportNoCipher"), true); return; }
+          triggerDownload(cipher, `${session.name}.ora.zip`);
+          setStatus(t("tm.dotExtDownloaded", { ext: "ora.zip" }));
+          return;
+        }
+        // 加密 + .psd：格式不支持加密 → 出明文（user 已 consent：「导出 psd/png 就当 consent 了」）。
+        if (exp.busyHint) setStatus(exp.busyHint, true);
+        const blob = await exp.encode(doc);
+        triggerDownload(blob, `${session.name}.${exp.ext}`);
+        setStatus(t("tm.dotExtDownloaded", { ext: exp.ext }));
+      } catch (e) { setStatus(t("tm.exportFailed", { err: String(errMsg(e)) })); }
+      return;
+    }
     const cropRect = _selCropRect();   // #16：仅导出选区范围（三种去向统一生效）
     try {
       if (c.target === "clipboard") {
@@ -161,55 +153,55 @@ export function initExportImportMenu(ctx: AppContext) {
   //   双 click() 在 iPad Safari 上 picker 干脆不开。删掉；layerImportPhotoBtn
   //   已在 line ~1788 通过 _openImagePicker 接管（含 _addImportAsNewDoc 复位）。
 
-  els.menuExportProjectConfig.addEventListener("click", (e: Event) => {
-    e.stopPropagation();
-    const c = _getExpPrj();
-    const fmtRadios = listExportersByKind("project").map((exp) =>
-      `<label><input type="radio" name="fmt" value="${exp.id}" ${c.format === exp.id ? "checked" : ""} /> ${exp.label}</label>`
-    ).join("");
-    _openMenuConfigPopup(e.currentTarget as HTMLElement, `
-      <div class="menu-config-section">
-        <div class="menu-config-title">${t("tm.configFormat")}</div>
-        ${fmtRadios}
-      </div>
-    `, (popup) => {
-      const fmt = (popup.querySelector('input[name="fmt"]:checked') as HTMLInputElement | null)?.value || "ora";
-      _setExpPrj({ format: fmt });
-    });
-  });
+  // v0.5.20：统一导出配置（user：选项改下拉框；ora/psd 锁 图层=所有图层、去向=文件、裁剪禁用）。
+  //   onApply 每次 change 触发 → 动态锁定就地生效（选回图片格式即解锁）。
   els.menuExportImageConfig.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     const c = _getExpImg();
-    const fmtRadios = listExportersByKind("image").map((exp) =>
-      `<label><input type="radio" name="fmt" value="${exp.id}" ${c.format === exp.id ? "checked" : ""} /> ${exp.label}</label>`
-    ).join("");
+    const proj0 = _isProjectFormat(c.format);
+    const fmtOptions = [...listExportersByKind("image"), ...listExportersByKind("project")].map((exp) =>
+      `<option value="${exp.id}" ${c.format === exp.id ? "selected" : ""}>${exp.label}</option>`).join("");
+    const applyLocks = (popup: HTMLElement) => {
+      const fmtSel = popup.querySelector('select[name="fmt"]') as HTMLSelectElement;
+      const scopeSel = popup.querySelector('select[name="scope"]') as HTMLSelectElement;
+      const tgtSel = popup.querySelector('select[name="tgt"]') as HTMLSelectElement;
+      const clipEl = popup.querySelector('input[name="clipsel"]') as HTMLInputElement;
+      const proj = _isProjectFormat(fmtSel.value);
+      if (proj) { scopeSel.value = "all"; tgtSel.value = "file"; }
+      else if (scopeSel.value === "all") scopeSel.value = "merged";   // 「所有图层」仅项目格式可选
+      scopeSel.disabled = proj; tgtSel.disabled = proj;
+      clipEl.disabled = proj || !doc.selection;
+      editorState.export.format = fmtSel.value;
+      editorState.export.target = tgtSel.value;
+      editorState.export.layerMode = scopeSel.value;
+      if (!clipEl.disabled) editorState.export.clipSelection = clipEl.checked;
+      _updateMenuSubLabels();
+    };
     _openMenuConfigPopup(e.currentTarget as HTMLElement, `
       <div class="menu-config-section">
         <div class="menu-config-title">${t("tm.configFormat")}</div>
-        ${fmtRadios}
+        <select name="fmt" class="menu-config-select">${fmtOptions}</select>
       </div>
       <div class="menu-config-section">
         <div class="menu-config-title">${t("tm.configScope")}</div>
-        <label><input type="radio" name="scope" value="merged" ${c.scope === "merged" ? "checked" : ""} /> ${t("tm.mergeAllVisible")}</label>
-        <label><input type="radio" name="scope" value="active" ${c.scope === "active" ? "checked" : ""} /> ${t("tm.onlyActiveLayer")}</label>
+        <select name="scope" class="menu-config-select" ${proj0 ? "disabled" : ""}>
+          <option value="merged" ${!proj0 && c.scope === "merged" ? "selected" : ""}>${t("tm.mergeAllVisible")}</option>
+          <option value="active" ${!proj0 && c.scope === "active" ? "selected" : ""}>${t("tm.onlyActiveLayer")}</option>
+          <option value="all" ${proj0 ? "selected" : ""}>${t("tm.scopeAllLayers")}</option>
+        </select>
       </div>
       <div class="menu-config-section">
         <div class="menu-config-title">${t("tm.configTarget")}</div>
-        <label><input type="radio" name="tgt" value="file" ${c.target === "file" ? "checked" : ""} /> ${t("tm.targetFile")}</label>
-        <label><input type="radio" name="tgt" value="clipboard" ${c.target === "clipboard" ? "checked" : ""} /> ${t("tm.targetClipboard")}</label>
-        <label><input type="radio" name="tgt" value="print" ${c.target === "print" ? "checked" : ""} /> ${t("tm.targetPrint")}</label>
+        <select name="tgt" class="menu-config-select" ${proj0 ? "disabled" : ""}>
+          <option value="file" ${proj0 || c.target === "file" ? "selected" : ""}>${t("tm.targetFile")}</option>
+          <option value="clipboard" ${!proj0 && c.target === "clipboard" ? "selected" : ""}>${t("tm.targetClipboard")}</option>
+          <option value="print" ${!proj0 && c.target === "print" ? "selected" : ""}>${t("tm.targetPrint")}</option>
+        </select>
       </div>
       <div class="menu-config-section">
         <div class="menu-config-title">${t("tm.configRange")}</div>
-        <label><input type="checkbox" name="clipsel" ${c.clipSelection ? "checked" : ""} ${doc.selection ? "" : "disabled"} /> ${t("tm.clipToSelection")}${doc.selection ? "" : `（${t("tm.noSelectionNow")}）`}</label>
+        <label><input type="checkbox" name="clipsel" ${c.clipSelection ? "checked" : ""} ${(proj0 || !doc.selection) ? "disabled" : ""} /> ${t("tm.clipToSelection")}${doc.selection ? "" : `（${t("tm.noSelectionNow")}）`}</label>
       </div>
-    `, (popup) => {
-      const fmt = (popup.querySelector('input[name="fmt"]:checked') as HTMLInputElement | null)?.value || "png";
-      const tgt = (popup.querySelector('input[name="tgt"]:checked') as HTMLInputElement | null)?.value || "file";
-      const scope = (popup.querySelector('input[name="scope"]:checked') as HTMLInputElement | null)?.value || "merged";
-      _setExpImg({ format: fmt, target: tgt, scope });
-      const clipEl = popup.querySelector('input[name="clipsel"]') as HTMLInputElement | null;
-      if (clipEl && !clipEl.disabled) { editorState.export.clipSelection = clipEl.checked; _updateMenuSubLabels(); }
-    });
+    `, applyLocks);
   });
 }

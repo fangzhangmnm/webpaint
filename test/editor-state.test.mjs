@@ -8,7 +8,6 @@ test("[editor-state] 默认值 = freshGroups SSoT", () => {
   editorState.reset();
   eq(editorState.export.format, "png", "export.format 默认 png");
   eq(editorState.export.layerMode, "merged", "export.layerMode 默认 merged");
-  eq(editorState.exportProject.format, "ora", "exportProject.format 默认 ora");
   eq(editorState.colorPanel.enabled, false, "colorPanel.enabled 默认 false");
   eq(editorState.colorPanel.position, null, "colorPanel.position 默认 null");
   eq(J(editorState.refPanel.viewport), J({ tx: 0, ty: 0, scale: 1, rot: 0 }), "refPanel.viewport 默认");

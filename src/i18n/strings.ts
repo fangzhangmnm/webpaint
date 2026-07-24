@@ -50,8 +50,8 @@ export const S = {
   "nd.print6in":        { zh: "6寸照片 1200 × 1800", en: "4×6″ photo 1200 × 1800", ja: "写真 KG判 1200 × 1800" },
   "nd.print8in":        { zh: "8寸照片 1800 × 2400", en: "6×8″ photo 1800 × 2400", ja: "写真 6×8″ 1800 × 2400" },
   "nd.printPostcard":   { zh: "明信片 1181 × 1748", en: "Postcard 1181 × 1748", ja: "はがき 1181 × 1748" },
-  "tm.configRange":     { zh: "范围", en: "Range", ja: "範囲" },
-  "tm.clipToSelection": { zh: "仅导出选区范围", en: "Export selection bounds only", ja: "選択範囲のみ書き出し" },
+  "tm.configRange":     { zh: "裁剪", en: "Crop", ja: "切り抜き" },
+  "tm.clipToSelection": { zh: "裁到选区", en: "Clip to selection", ja: "選択範囲に切り抜き" },
   "tm.noSelectionNow":  { zh: "当前无选区", en: "no selection", ja: "選択なし" },
   "sub.selection":      { zh: "选区", en: "selection", ja: "選択範囲" },
   "menu.docGridCell":      { zh: "主栅格尺寸…", en: "Main grid size…", ja: "メイングリッドのサイズ…" },
@@ -96,8 +96,7 @@ export const S = {
 
   // ── ⋯ 菜单：文件段（切片 2）────────────────────────────────────
   "menu.section.file":   { zh: "文件",        en: "File",            ja: "ファイル" },
-  "menu.exportImage":    { zh: "导出图片",    en: "Export image",    ja: "画像を書き出す" },
-  "menu.exportProject":  { zh: "导出项目",    en: "Export project",  ja: "プロジェクトを書き出す" },
+  "menu.exportImage":    { zh: "导出",    en: "Export",    ja: "書き出す" },
   "menu.rename":         { zh: "重命名当前画作…", en: "Rename artwork…", ja: "作品名を変更…" },
   "menu.saveAs":         { zh: "另存为…",     en: "Save as…",        ja: "名前を付けて保存…" },
   "menu.revert":         { zh: "撤销修改…",   en: "Revert changes…", ja: "変更を取り消す…" },
@@ -111,8 +110,7 @@ export const S = {
   "menu.resample":       { zh: "调整尺寸",    en: "Resize",          ja: "サイズ変更" },
   "menu.reference":      { zh: "参考小窗",    en: "Reference window", ja: "参考ウィンドウ" },
   "menu.fit":            { zh: "视口复位",    en: "Reset view",      ja: "ビューをリセット" },
-  "menu.config.exportImage":  { zh: "配置导出图片", en: "Export settings", ja: "書き出し設定" },
-  "menu.config.exportProject":{ zh: "配置导出项目", en: "Project export settings", ja: "プロジェクト書き出し設定" },
+  "menu.config.exportImage":  { zh: "配置导出", en: "Export settings", ja: "書き出し設定" },
 
   // ── 菜单子标签片段（导入/导出行的 sub；组合成 "PNG · 合并 · 文件"）──
   "sub.activeLayer": { zh: "当前层",   en: "Active layer", ja: "アクティブ層" },
@@ -649,7 +647,8 @@ export const S = {
   "tm.clipboardNoImage": { zh: "剪贴板里没有图片", en: "No image in the clipboard", ja: "クリップボードに画像がありません" },
   "tm.clipboardPasteFailed": { zh: "从剪贴板粘贴失败：{err}", en: "Paste from clipboard failed: {err}", ja: "クリップボードからの貼り付けに失敗しました：{err}" },
   "tm.configFormat": { zh: "格式", en: "Format", ja: "形式" },
-  "tm.configScope": { zh: "范围", en: "Scope", ja: "範囲" },
+  "tm.configScope": { zh: "图层", en: "Layers", ja: "レイヤー" },
+  "tm.scopeAllLayers": { zh: "所有图层（含隐藏）", en: "All layers (incl. hidden)", ja: "すべてのレイヤー（非表示含む）" },
   "tm.mergeAllVisible": { zh: "合并所有可见层", en: "Merge all visible layers", ja: "表示中の全レイヤーを統合" },
   "tm.onlyActiveLayer": { zh: "仅当前层", en: "Active layer only", ja: "現在のレイヤーのみ" },
   "tm.configTarget": { zh: "去向", en: "Destination", ja: "出力先" },
