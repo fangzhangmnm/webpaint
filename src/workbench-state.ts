@@ -143,6 +143,7 @@ function freshGroups() {
     //   v0.5.11：threshold 归魔棒（油漆桶独立工具及 editorState.bucket 退役——填色收进套索 fill mode，
     //   flood 只剩魔棒一条路；旧 doc 里 stale 的 bucket 键被 mergeInto 静默忽略）。
     magicWand:     { threshold: 20, expand: false, expandPx: 1 },        // #31 自动扩张 + v0.5.11 阈值
+    fillMode:      { on: false },                                        // v0.5.11 套索填充模式开关（与其他 toolstate 一视同仁跟文件走）
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
@@ -233,6 +234,9 @@ export const editorState = {
     get threshold(): number { return S.g.magicWand.threshold; }, set threshold(v: number) { S.g.magicWand.threshold = v; },
     get expand(): boolean { return S.g.magicWand.expand; }, set expand(v: boolean) { S.g.magicWand.expand = v; },
     get expandPx(): number { return S.g.magicWand.expandPx; }, set expandPx(v: number) { S.g.magicWand.expandPx = v; },
+  },
+  fillMode: {
+    get on(): boolean { return S.g.fillMode.on; }, set on(v: boolean) { S.g.fillMode.on = v; },
   },
   grid: {
     get on(): boolean { return S.g.grid.on; }, set on(v: boolean) { S.g.grid.on = v; },

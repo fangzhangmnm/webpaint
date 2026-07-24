@@ -51,6 +51,7 @@ import { createEditorState } from "./workbench-state.ts";   // candidate 3 · �
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
+import { initFillMode, fillPreviewActive } from "./fill-mode.ts";
 import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
@@ -273,7 +274,7 @@ function freezeCtx<T extends object>(obj: T): T {
 //   笔画进行中（brush/像素笔/liquify/filterBrush）| 浮层变换挂着 | transient 待决（调整/裁剪）
 //   。crash-safety flush 不走这道门（数据安全词典序优先）。
 const isMidOperation = () =>
-  input.isStrokeActive() || input.lasso.hasFloating() || editMode.hasPendingTransient();
+  input.isStrokeActive() || input.lasso.hasFloating() || editMode.hasPendingTransient() || fillPreviewActive();
 
 const ctx: AppContext = freezeCtx({
   state, dialReactive, currentBrush, editMode, doc, board, input, history, workpiece, ops, pixelHistory, isMidOperation,
@@ -299,6 +300,7 @@ initExportImportMenu(ctx);
 initFiltersAdjust(ctx);
 initToolbar(ctx);
 initSelectionOps(ctx);
+initFillMode(ctx);   // v0.5.11 套索填充模式（原 #22 油漆桶的重生，见 fill-mode.ts 头注释）
 initSmoothDevPanel(ctx);
 initTransientPanels(ctx);
 initSideWindows(ctx);

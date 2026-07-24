@@ -15,6 +15,7 @@ import { requireEditableLeaf } from "./editable-leaf.ts";
 import { editorState } from "./workbench-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
+import { fillModeOn, fillPreviewActive, setFillMode, commitFillNow } from "./fill-mode.ts";
 import type { AppContext } from "./app-context.ts";
 import type { LayerSnap } from "./doc.ts";
 
@@ -48,6 +49,7 @@ let lassoSubBtns: HTMLElement[], lassoSetOpBtns: HTMLElement[], lassoTransformMo
 let lassoThresholdInput: HTMLInputElement, lassoThresholdVal: HTMLElement, lassoMagicCfgBtn: HTMLElement;
 let lassoMagicPopup: HTMLElement, lassoConstrainBtn: HTMLElement, lassoConstrainSep: HTMLElement;
 let lassoSelEditBtn: HTMLElement;   // v242 选区编辑齿轮（有选区才亮；扩张/收缩 op）
+let lassoFillModeBtn: HTMLElement, lassoFillCommitBtn: HTMLElement, lassoFillCancelBtn: HTMLElement;   // v0.5.11 填充模式
 let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
 
 // ===== 套索/选区工具栏（v65 重做）=====
@@ -110,6 +112,11 @@ export function updateLassoToolbar() {
   for (const b of lassoSetOpBtns) {
     b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
   }
+  // v0.5.11 填充模式：开关 pressed 态跟 per-doc SSoT；✓/✗ 只在预览挂着时露（有选区 + 非浮层）。
+  lassoFillModeBtn.setAttribute("aria-pressed", fillModeOn() ? "true" : "false");
+  const fillPrev = fillPreviewActive();
+  lassoFillCommitBtn.classList.toggle("hidden", !fillPrev);
+  lassoFillCancelBtn.classList.toggle("hidden", !fillPrev);
   if (floating) {
     const mode = input.lasso.getMode();
     for (const b of lassoTransformModeBtns) {
@@ -306,6 +313,15 @@ export function initToolbar(ctx: AppContext) {
   lassoConstrainBtn = byId("lassoConstrainBtn");
   lassoConstrainSep = document.querySelector(".lasso-constrain-sep") as HTMLElement;
   lassoSelEditBtn = byId("lassoSelEditBtn");
+  // v0.5.11 填充模式：开关/✓/✗（语义在 fill-mode.ts；本处纯接线）。开关变化经 wp:fillmodechange 回派生。
+  lassoFillModeBtn = byId("lassoFillModeBtn");
+  lassoFillCommitBtn = byId("lassoFillCommitBtn");
+  lassoFillCancelBtn = byId("lassoFillCancelBtn");
+  lassoFillModeBtn.addEventListener("click", () => setFillMode(!fillModeOn()));
+  lassoFillCommitBtn.addEventListener("click", () => commitFillNow());
+  lassoFillCancelBtn.addEventListener("click", () => setFillMode(false));
+  window.addEventListener("wp:fillmodechange", updateLassoToolbar);
+  window.addEventListener("wp:applyEditorState", updateLassoToolbar);   // 换文档：开关 pressed 态回灌
 
   // sub-tool picker
   for (const b of lassoSubBtns) {

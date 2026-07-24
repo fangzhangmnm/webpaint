@@ -474,6 +474,10 @@
       <div class="lasso-toolbar hidden" id="lassoToolbarRow2">
         <div class="lasso-section hidden" id="lassoSelectionActions">
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
+          <!-- v0.5.11 填充模式（G）：开关常显（无选区也能先开）；预览挂着时露 ✓（填充+清选区一整点）/ ✗（退出丢弃） -->
+          <button class="lasso-tool-btn lasso-tool-icon" id="lassoFillModeBtn" type="button" data-i18n-title="fm.toggle"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg></button>
+          <button class="lasso-tool-btn lasso-tool-confirm lasso-tool-icon hidden" id="lassoFillCommitBtn" type="button" data-i18n-title="fm.commit"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#check"/></svg></button>
+          <button class="lasso-tool-btn lasso-tool-cancel lasso-tool-icon hidden" id="lassoFillCancelBtn" type="button" data-i18n-title="fm.cancel"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#x"/></svg></button>
           <!-- v218：以下操作需选区；没选区时（变换会隐式全选）整组靠 .transform-only 隐藏 -->
           <button class="lasso-tool-btn lasso-needs-sel lasso-tool-icon" id="lassoFillBtn" type="button" title="用当前颜色填选区"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg></button>
           <button class="lasso-tool-btn lasso-needs-sel lasso-tool-icon" id="lassoClearBtn" type="button" title="清除选区内像素"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-document"/></svg></button>
