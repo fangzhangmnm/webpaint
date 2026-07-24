@@ -222,10 +222,12 @@ function _stampAllToNewLayer() {
       if (n.isGroup) { if (n.visible) n.visible = false; }
       else if (n.visible) rootLeavesToHide.push(n);
     }
+    // compound 纪律：微步全传 checkpoint:false，compound 收口时统一 sealCheckpoint——
+    // 否则每个 run 各自封口，undo 会拆成 N 步（先只恢复一层可见性）而不是一次撤掉整个盖印。
     history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
-      undoStatus: t("lp.st.unstamped"), redoStatus: t("lp.st.stamped") });
+      undoStatus: t("lp.st.unstamped"), redoStatus: t("lp.st.stamped") }, { checkpoint: false });
     for (const leaf of rootLeavesToHide) {
-      history.run(workpiece, ops.layerProp, { layerId: leaf.id, prop: "visible", value: false });
+      history.run(workpiece, ops.layerProp, { layerId: leaf.id, prop: "visible", value: false }, { checkpoint: false });
     }
   });
   _afterDocChange();
