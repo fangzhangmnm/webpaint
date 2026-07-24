@@ -212,12 +212,6 @@
 
     <!-- 顶栏 (v123 起 Procreate 顺序)：菜单 | 保存 | 工具组 | 调整 | 图层 | 颜色
          operator 全在这（点了有动作，要 user consent）。read-only 状态在右下 HUD。 -->
-    <!-- v0.5.19 图库独立入口（user：从主菜单移出，最左、与工具栏等高、独立于工具栏） -->
-    <div class="top-bar top-gallery-wrap" id="topGalleryWrap">
-      <button class="tool" id="topGalleryBtn" type="button" data-i18n-title="nav.gallery" aria-label="图库">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#gallery"/></svg>
-      </button>
-    </div>
     <header class="top-bar" id="topBar">
       <button class="tool" id="menuButton" type="button" data-i18n-title="tool.menu" aria-haspopup="true" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#menu"/></svg>
@@ -570,7 +564,6 @@
       <div class="brush-rack-head">
         <!-- 图标是 #brushRackTitle 的兄弟节点，不能塞进去：那个 span 的 textContent 由 JS 按
              br.rackTitle 整体重写（笔架 · {tool}），塞进去会被冲掉。 -->
-        <span class="brush-rack-head-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#brush-rack"/></svg></span>
         <span id="brushRackTitle">笔架 · 笔刷</span>
         <div class="brush-rack-actions">
           <!-- v134 全 SVG icon；重置出厂挪进菜单 → 调试（safety net）；导入/导出/新建/云备份 都 icon -->
@@ -861,6 +854,11 @@
       <!-- v94 重组：清晰分组，操作 / 导入 / 导出 / 设置 / 调试 / 危险
            user：「主菜单分导入，导出，调试等子菜单」
            user：「压感 -> 颜色，不透明度 这些应该只在笔刷设置页出现」→ 删 -->
+      <!-- 图库（v0.5.21 user：独立 pill 一日游——visually distracting，放回菜单） -->
+      <button class="menu-item menu-item-with-icon" id="menuGallery" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#gallery"/></svg>
+        <span class="menu-item-label" data-i18n="nav.gallery">图库</span>
+      </button>
+      <hr class="menu-sep" />
       <!-- v124 (user) 文件操作扁平化：删 section label / inner separator / 居中画布；
            裁切 context-aware（有选区→裁选区；否则开自由裁切 8-handle）；
            重采样 renamed 成 Resize；参考小窗 挪进来一起 -->
@@ -1027,6 +1025,8 @@
       </div>
       <!-- 色轮 = 薄 Vue 组件（src/ui/color-wheel.ts）挂载于此；SV pad / 色相 / HEX / 预览由组件渲染 -->
       <div class="float-panel-body"></div>
+      <!-- v0.5.21 user：颜色窗口加调大小（宽；同 layers #13 手柄） -->
+      <div class="float-panel-resize" id="colorPanelResize" aria-hidden="true"></div>
     </div>
 
     <!-- 清空确认（只清当前图层；可撤销） -->
