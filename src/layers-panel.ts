@@ -716,7 +716,11 @@ function _clampListHeight() {
   const footH = els.layersPanel.querySelector<HTMLElement>(".layers-foot")?.offsetHeight ?? 0;
   const avail = window.innerHeight - top - footH - 12;   // 留 12px 余量
   const want = _userListH != null ? Math.min(_userListH, avail) : avail;
-  list.style.maxHeight = Math.max(0, want) + "px";   // v0.5.21 user：无最小高度，可拉出空白
+  const h = Math.max(0, want);
+  list.style.maxHeight = h + "px";
+  // v0.5.23：用户拖过 = **硬高度**（maxHeight 只是上限——图层少时内容矮，光调上限拉不高、
+  //   也拉不出空白）；没拖过（auto）保持随内容。
+  list.style.height = _userListH != null ? h + "px" : "";
 }
 
 // 面板外 chrome 同步（计数标签 / 加按钮禁用 / 删按钮禁用 / 滚到活动层）—— 这些 DOM 不在 mount
