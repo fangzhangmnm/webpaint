@@ -7,10 +7,11 @@
 //     工具身份即模式——editorState.fillMode 开关已删（工具不 per-doc 持久化，与笔/套索一视同仁）。
 //   · **只 preview 不落文档**：fill 工具 + 有选区 → GPU 预览（board fill provider → 笔刷 overlay 同槽，
 //     journal v0.4 Plan L81「commit 和 live 同一个 shader，ssot」）。
-//   · 三条出口（v0.5.12 拍板，改判「切出=丢弃」）：
-//       切走工具 = **commit**（落层、选区保留——"填好了就是填好了"，切去笔刷选区照常当蒙板）；
-//       ✓        = commit + 清选区（选区的 commit，compound 一整点，留在 fill 连续填下一块）；
-//       去选     = 丢弃（唯一 cancel 路径，undo 兜底）。
+//   · 出口语义（v0.5.15 user 修正）：
+//       回套索（油漆桶 toggle 关 / L 键）= **取消**——丢弃预览、选区保留，回去继续编辑选区；
+//       切去其他工具（笔/橡皮/…）   = **commit**（落层、选区保留——"填好了就是填好了"）；
+//       ✓  = commit + 清选区（选区的 commit，compound 一整点，留在 fill 连续填下一块）；
+//       去选 = 丢弃（选区一起清，undo 兜底）。
 //     文档关闭/切换 = 丢弃（interrupt=cancel 家规；commit 只对显式的工具切换）。
 //   · 填色**尊重 lockAlpha**（预览=commit 同 shader 同参）；吸管吸预览色（拍板#8 同款）。
 //
@@ -71,15 +72,21 @@ function _doCommit(clearSelection: boolean): void {
   setStatus(t("se.filled", { color: state.color }));
 }
 
-// 切出 fill → commit（选区保留）。只认「持久模式 → 持久模式」的真切换；transient 括号不算。
+// fill 边界钩子。只认「持久模式 → 持久模式」的真切换；transient 括号（扩张 modal 等）不算。
+//   出口分叉（v0.5.15）：→lasso = 取消（预览是派生视图，重绘即消）；→其他工具 = commit（选区保留）。
+//   进 fill 也要补一帧（有选区时预览要立即出现——board 只在被请求时出帧）。
 function _onModeChange(): void {
-  const { editMode, doc } = _ctx!;
+  const { editMode, doc, board } = _ctx!;
   const m = editMode.current();
   if (editMode.isTransient()) return;   // 括号里：不更新、不判
-  const left = _lastPersistentMode === "fill" && m !== "fill";
+  const prev = _lastPersistentMode;
   _lastPersistentMode = m;
-  // 只在「预览确实挂着」时 commit：活动层是组/隐藏（预览本就没显示）→ 静默跳过，不弹状态行。
-  if (left && doc.selection && requireEditableLeaf(doc, null)) _doCommit(false);
+  if (m === "fill" && prev !== "fill") { board.requestRender(); return; }
+  if (prev !== "fill" || m === "fill") return;
+  if (m === "lasso") { board.requestRender(); return; }   // 取消油漆桶：丢弃预览，回去继续编辑选区
+  // 真切去别的工具：预览确实挂着才 commit（组/隐藏层本就没显示 → 静默跳过）。
+  if (doc.selection && requireEditableLeaf(doc, null)) _doCommit(false);
+  else board.requestRender();   // 没得 commit 也要刷掉残余 overlay
 }
 
 export function initFillMode(ctx: AppContext): void {

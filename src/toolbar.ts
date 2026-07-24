@@ -249,13 +249,26 @@ function _onSelEditInput() {
     _runSelEditPreview();
   });
 }
+function _syncSelEditOpUI(op: "expand" | "shrink") {
+  document.getElementById("lassoSelOpExpandBtn")?.setAttribute("aria-pressed", op === "expand" ? "true" : "false");
+  document.getElementById("lassoSelOpShrinkBtn")?.setAttribute("aria-pressed", op === "shrink" ? "true" : "false");
+  const title = document.getElementById("lassoSelOpTitle");
+  if (title) title.textContent = op === "expand" ? t("se.expandSelection") : t("se.shrinkSelection");
+}
+function _setSelEditOp(op: "expand" | "shrink") {
+  if (!_selEdit || _selEdit.op === op) return;
+  _selEdit.op = op;
+  _syncSelEditOpUI(op);
+  _runSelEditPreview();
+}
 function _openSelEdit(op: "expand" | "shrink") {
   if (!doc.selection) return;
   const { menu, popup, title, amount } = _selEditEls();
   menu?.classList.add("hidden");
   if (_selEdit) _finishSelEdit(false);    // 已开着另一个 → 先取消旧的（还原）再开新的
   _selEdit = { before: doc.selection as Selection, op, rafId: 0 };
-  if (title) title.textContent = op === "expand" ? t("se.expandSelection") : t("se.shrinkSelection");
+  void title;   // 标题/方向 pressed 统一走 _syncSelEditOpUI
+  _syncSelEditOpUI(op);
   if (amount) amount.value = "1";         // 默认 1px（最常用的轻微扩缩）
   popup?.classList.remove("hidden");
   _runSelEditPreview();                    // 初次预览
@@ -298,8 +311,10 @@ function initSelEditUI() {
     menu?.classList.toggle("hidden");
     if (wasHidden && menu) anchorPopupToBtn(menu, lassoSelEditBtn, { align: "left", offsetY: 6 });   // v0.5.14 贴钮
   });
-  document.getElementById("lassoSelExpandBtn")?.addEventListener("click", () => _openSelEdit("expand"));
-  document.getElementById("lassoSelShrinkBtn")?.addEventListener("click", () => _openSelEdit("shrink"));
+  document.getElementById("lassoSelResizeBtn")?.addEventListener("click", () => _openSelEdit("expand"));   // v0.5.15 合一钮，默认扩张
+  // modal 内方向切换（v0.5.15 user：扩张/收缩同一入口）：切方向 = 换 op 就地重预览（预览恒从 before 派生）。
+  document.getElementById("lassoSelOpExpandBtn")?.addEventListener("click", () => _setSelEditOp("expand"));
+  document.getElementById("lassoSelOpShrinkBtn")?.addEventListener("click", () => _setSelEditOp("shrink"));
   amount?.addEventListener("input", _onSelEditInput);
   amount?.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter") { e.preventDefault(); _finishSelEdit(true); }

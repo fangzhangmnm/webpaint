@@ -502,11 +502,11 @@
     <!-- v242：只剩阈值；扩展/收缩拆成选区编辑 op（见下 lassoSelEditMenu / lassoSelOpPopup） -->
     <!-- v0.5.14 ⋯ 菜单：横排图标（user）。needs-sel 项无选区禁用；lasso-only 项 fill 里隐藏。
          扩张/收缩暂留文字 pill——库里没有收缩图标，不盲画（进库要走 workbench 评审）。 -->
-    <div class="lasso-icon-menu hidden" id="lassoSelEditMenu" role="menu" data-i18n-aria="la.editSel">
+    <div class="lasso-icon-menu lasso-icon-grid hidden" id="lassoSelEditMenu" role="menu" data-i18n-aria="la.editSel">
       <button class="lasso-tool-btn lasso-tool-icon" id="lassoSelectAllBtn" type="button" role="menuitem" data-i18n-title="la.selectAll"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" id="lassoInvertBtn" type="button" role="menuitem" data-i18n-title="la.invert"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg></button>
-      <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoSelExpandBtn" type="button" role="menuitem" data-i18n="la.expand">扩张…</button>
-      <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoSelShrinkBtn" type="button" role="menuitem" data-i18n="la.shrink">收缩…</button>
+      <!-- v0.5.15 user：扩张/收缩合一钮 → modal 内切方向 -->
+      <button class="lasso-tool-btn lasso-tool-icon lasso-menu-needs-sel" id="lassoSelResizeBtn" type="button" role="menuitem" data-i18n-title="la.expandShrink"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoClearBtn" type="button" role="menuitem" data-i18n-title="la.clearPixels"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-document"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoDuplicateBtn" type="button" role="menuitem" data-i18n-title="la.duplicate"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoMoveToLayerBtn" type="button" role="menuitem" data-i18n-title="la.moveToLayer"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg></button>
@@ -526,7 +526,9 @@
 
     <!-- v242 选区扩张/收缩 modal：走 adjust 逻辑（transient + 实时预览），数字输入 -->
     <div class="lasso-popup hidden" id="lassoSelOpPopup" role="dialog" data-i18n-aria="la.expandShrink">
-      <div class="lasso-popup-row" style="grid-template-columns: 1fr auto auto;">
+      <div class="lasso-popup-row" style="grid-template-columns: auto auto 1fr auto auto; gap:6px;">
+        <button class="lasso-tool-btn lasso-tool-icon" id="lassoSelOpExpandBtn" type="button" data-i18n-title="la.expand"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg></button>
+        <button class="lasso-tool-btn lasso-tool-icon" id="lassoSelOpShrinkBtn" type="button" data-i18n-title="la.shrink"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2.5"/><rect x="8" y="8" width="8" height="8" rx="1.5" stroke-dasharray="3 2"/></svg></button>
         <span id="lassoSelOpTitle">扩张选区</span>
         <input type="text" inputmode="numeric" id="lassoSelOpAmount" value="1"
           style="width:56px;text-align:right;" data-i18n-aria="la.pixelCount" />

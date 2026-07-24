@@ -55,11 +55,21 @@ export function positionPopup(popupEl: HTMLElement | null, opts: PositionOpts = 
   popupEl.style.position = "fixed";
   const safeTop = safeAreaTop();
   let top: number;
+  // 横向：先按 align 求名义位置，再夹进视口左右缘（v0.5.15——紧凑图标菜单锚偏边缘的槽按钮时曾溢出；
+  //   与纵向同一条纪律：坐标只此一处算。popup 隐藏时量不到宽 → 跳过夹，与纵向旧行为一致）。
+  const w = popupEl.offsetWidth || 0;
   if (anchor) {
     const r = anchor.getBoundingClientRect();
     top = r.bottom + offsetY;
-    if (align === "right") { popupEl.style.right = (window.innerWidth - r.right) + "px"; popupEl.style.left = "auto"; }
-    else { popupEl.style.left = r.left + "px"; popupEl.style.right = "auto"; }
+    if (align === "right") {
+      let right = window.innerWidth - r.right;
+      if (w) right = Math.max(edgeMargin, Math.min(right, window.innerWidth - w - edgeMargin));
+      popupEl.style.right = right + "px"; popupEl.style.left = "auto";
+    } else {
+      let left = r.left;
+      if (w) left = Math.max(edgeMargin, Math.min(left, window.innerWidth - w - edgeMargin));
+      popupEl.style.left = left + "px"; popupEl.style.right = "auto";
+    }
   } else {
     top = safeTop + offsetY;
     if (align === "right") { popupEl.style.right = edgeMargin + "px"; popupEl.style.left = "auto"; }
