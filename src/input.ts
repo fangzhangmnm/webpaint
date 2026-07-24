@@ -29,6 +29,7 @@ import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./pointer-gesture.ts";
 import { assignRole, effectiveTool, toolToRole } from "./pointer-route.ts";
 import { inputSmooth } from "./stroke-input-smooth.ts";
+import { t } from "./i18n/index.ts";
 import { SMOOTH } from "./smooth-config.ts";
 import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
@@ -153,6 +154,9 @@ const PALM_PEN_GUARD_MS = 600;
 
 // 单指长按 → 临时切到 picker；user 设置可开关。延迟阈值参考 iOS 系统 longpress。
 const LONG_PRESS_MS = 450;
+// v0.5.9 快速捏合复位（Procreate 方言）：手势寿命 < MS 且结束 scale < 起手 × RATIO → fitToScreen
+const QUICK_PINCH_FIT_MS = 230;
+const QUICK_PINCH_FIT_RATIO = 0.8;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
 // v249: 两参 → 引擎平滑参数（时间常数指数追踪 + 死区，详 docs/20260613-brush-procreate-smoothing.md）。
@@ -316,7 +320,7 @@ export class InputController {
   penEverSeen: boolean;
   spaceDown: boolean;
   altDown: boolean;
-  gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport } | null;
+  gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport; startTime: number } | null;
   _gestureTap: GestureTap | null;
   _lastTap: TapRef | null;
   _lastPenActivity: number = -Infinity;   // 最近笔尖落/移/抬时刻 (ms)。掌触 tap 门用
@@ -1085,6 +1089,7 @@ export class InputController {
       midY: (a.y + b.y) / 2,
       angle: Math.atan2(dy, dx),          // 起手两指连线角度
       vp: { ...this.board.viewport },
+      startTime: performance.now(),       // v0.5.9：快速捏合复位判定用
     };
     document.body.dataset.panning = "1";
   }
@@ -1101,8 +1106,18 @@ export class InputController {
     this.board.setViewport(vp.tx, vp.ty, vp.scale, vp.rot);
   }
   _endGesture() {
+    const g = this.gestureStart;
     this.gestureStart = null;
     delete document.body.dataset.panning;
+    // v0.5.9（user）：快速捏合 = 视口复位（Procreate 方言）——短促（<230ms）且明显缩小（<0.8×）
+    //   → fitToScreen（含旋转复位，user 拍板「旋转也一起复位」）。两指 tap（undo）位移小、scale≈1
+    //   不会误触；慢捏合不触发。
+    if (g && performance.now() - g.startTime < QUICK_PINCH_FIT_MS &&
+        this.board.viewport.scale < g.vp.scale * QUICK_PINCH_FIT_RATIO) {
+      this.board.fitToScreen();
+      this.status(t("tm.viewportReset"));
+      return;   // 已复位，不再跑旋转吸附
+    }
     // 松手时旋转吸附（±5° 内吸到 0/90/180/270°；进行中不吸=不粘手）。判定见 pointer-gesture.js。
     const cur = this.board.viewport.rot;
     const snapped = snapRotation(cur, 5);

@@ -469,6 +469,7 @@ export const S = {
   "la.autoExpand":   { zh: "自动扩张", en: "Auto expand", ja: "自動拡張" },
   "la.flipH":        { zh: "水平翻转", en: "Flip horizontal", ja: "左右反転" },
   "mi.dropChoiceTitle":  { zh: "拖入的图片怎么用？", en: "How to use the dropped image?", ja: "ドロップした画像をどう使いますか？" },
+  "save.saving":         { zh: "「{name}」保存中…", en: "Saving “{name}”…", ja: "「{name}」を保存中…" },
   "mi.dropAsLayer":      { zh: "插入为新图层", en: "Insert as new layer", ja: "新しいレイヤーとして挿入" },
   "mi.dropAsReference":  { zh: "设为参考图", en: "Set as reference", ja: "参考画像に設定" },
   "la.rotate90":     { zh: "旋转 90°", en: "Rotate 90°", ja: "90° 回転" },

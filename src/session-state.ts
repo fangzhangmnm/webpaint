@@ -299,6 +299,9 @@ async function saveNow(opts: { implicit?: boolean } = {}) {
 }
 
 // ---- 保存 + 推云（consent push）----
+// v0.5.9（user）：保存/推送在飞标志——纯 app 层内存态，不碰 store 契约。
+//   没有它，保存瞬间 dirty 已翻 false、pushPending 还挂着 → 徽章闪「问号虚云」（unpushed 终态），语义不对。
+let _pushInFlight = false;
 async function saveAndPush() {
   if (!_activeSessionName) { setStatus(t("ss.noDocCannotSave"), true); return; }
   // 版本降级守卫：新版本文档未确认 → 只本地不推（saveNow 的 confirm 已挡本地覆盖，这里挡推）。
@@ -307,6 +310,7 @@ async function saveAndPush() {
     if (!_loadedDocNewerConfirmed) { setStatus(t("ss.notPushedNewer"), true); return; }
   }
   const name = _activeSessionName;
+  _pushInFlight = true;
   updateSaveStatus();
   try {
     // v409：用户**显式**按 save → forceSaveAndPush 无条件 encode+推，不脏也动。
@@ -321,7 +325,7 @@ async function saveAndPush() {
       : t("ss.synced", { name }));
     gallery.refresh();
   } catch (e) { reportError(new Error("[cloud] push failed: " + String(e)), "log"); setStatus(t("ss.pushFailed", { error: errMsg(e) })); }
-  finally { updateSaveStatus(); }
+  finally { _pushInFlight = false; updateSaveStatus(); }
 }
 
 // ---- 加密 / 解除（对活动 doc；at-rest 字节换容器，内存态透明不动）----
@@ -572,6 +576,7 @@ export const session = {
   get loadedDocNewerConfirmed() { return _loadedDocNewerConfirmed; },
   get dirty() { return es ? es.isDirty() : false; },            // 内存脏（save-status 徽章用）
   get pushPending() { return es ? es.isPushPending() : false; },   // 已落本地但没上云（徽章第四态；与 dirty 正交）
+  get saving() { return _pushInFlight; },   // v0.5.9：saveAndPush 在飞（app 层过程态，徽章显转圈云）
   markEdited() { if (es) es.markDirty(); },                     // app 驱动内容变化（导入/blender/参考窗）→ 标脏
   setName, restore: restoreSession, saveAs,
   save: saveNow, saveAndPush,

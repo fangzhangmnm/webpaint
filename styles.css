@@ -2297,6 +2297,8 @@ body[data-mode="gallery"] .board { display: none !important; }
 .icon-stack > svg + svg { position: absolute; left: 0; top: 0; }
 .icon-stack .spin-arc { transform-origin: 50% 50%; }   /* 上游 spinner 圆心已在 (12,12) */
 .btp-connbtn[data-state="connecting"] .spin-arc { animation: wp-spin 1s linear infinite; }
+/* v0.5.9：save 按钮「保存中」态——同款双件云 + 转弧（app 层 in-flight flag，见 save-status.ts） */
+#topSaveBtn[data-state="saving"] .spin-arc { animation: wp-spin 1s linear infinite; }
 
 /* 拉取 / 推送 主键：图标 + 标签 + 行内 sub（当前配置） */
 .btp-action { display: flex; align-items: center; gap: 8px; text-align: left; }
