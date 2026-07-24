@@ -125,6 +125,15 @@ else
   echo "[build] 警告：index.html 里没找到 ./dist/webpaint-*.mjs script tag" >&2
 fi
 
+# 4b. styles.css 版本 buster（v0.5.18：新 HTML+HTTP缓存旧 CSS 曾出真机 UI 崩——bundle 有 hash CSS 没有）。
+#   buster = styles.css 自身内容 hash（CSS-only 改动也会 bust；SW 端 cache.match 均已 ignoreSearch）。
+CSSHASH=$(sha256sum styles.css | awk '{print substr($1, 1, 12)}')
+if grep -q 'href="./styles.css' index.html; then
+  sed -i "s|href=\"./styles.css?v=[A-Za-z0-9-]*\"|href=\"./styles.css?v=$CSSHASH\"|" index.html
+else
+  echo "[build] 警告：index.html 里没找到 styles.css link" >&2
+fi
+
 size=$(stat -c%s "$OUT" 2>/dev/null || wc -c < "$OUT")
 echo "[build] $OUT ($size bytes, hash=$HASH)"
 echo "[build] 完成。提交：git add . && git commit && git push origin main"
