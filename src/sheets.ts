@@ -22,6 +22,7 @@ const g = {
   title: () => $("genericSheetTitle"),
   message: () => $("genericSheetMessage"),
   input: () => $("genericSheetInput") as HTMLInputElement,
+  choices: () => $("genericSheetChoices"),
   confirm: () => $("genericSheetConfirm"),
   cancel: () => $("genericSheetCancel"),
 };
@@ -98,6 +99,41 @@ export function openConfirmSheet(title: string, message: string): Promise<boolea
       g.backdrop().removeEventListener("click", onCancel);
     };
     g.confirm().addEventListener("click", onConfirm);
+    g.cancel().addEventListener("click", onCancel);
+    g.backdrop().addEventListener("click", onCancel);
+  });
+}
+
+// 多选项对话框 → Promise<T|null>（取消/点背板 = null）。#19 首用（拖入图片：新图层/设为参考）。
+//   确认按钮隐藏，取消保留；选项按钮动态生成进 #genericSheetChoices。
+export function openChoiceSheet<T>(title: string, message: string, choices: { label: string; value: T; primary?: boolean }[]): Promise<T | null> {
+  _assertNotBusy("选择框");
+  return new Promise((resolve) => {
+    g.title().textContent = title;
+    g.input().classList.add("hidden");
+    if (message) { g.message().classList.remove("hidden"); g.message().textContent = message; }
+    else g.message().classList.add("hidden");
+    const box = g.choices();
+    box.innerHTML = "";
+    box.classList.remove("hidden");
+    g.confirm().classList.add("hidden");
+    const cleanup = () => {
+      g.cancel().removeEventListener("click", onCancel);
+      g.backdrop().removeEventListener("click", onCancel);
+      box.innerHTML = "";
+      box.classList.add("hidden");
+      g.confirm().classList.remove("hidden");
+    };
+    const onCancel = () => resolveAndClose(resolve, null as T | null, cleanup);
+    for (const c of choices) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "sheet-action" + (c.primary ? "" : " ghost");
+      btn.textContent = c.label;
+      btn.addEventListener("click", () => resolveAndClose(resolve, c.value as T | null, cleanup));
+      box.appendChild(btn);
+    }
+    openSheet(g.sheet(), g.backdrop());
     g.cancel().addEventListener("click", onCancel);
     g.backdrop().addEventListener("click", onCancel);
   });

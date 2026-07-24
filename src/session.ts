@@ -87,7 +87,8 @@ export async function thumbBlobFromCanvas(merged: HTMLCanvasElement | OffscreenC
 //   "active" = 仅当前 active layer。JPG 仍涂 doc 背景（无 alpha）；PNG 保 alpha
 // candidate 2：导出格式（png/jpg exporter）只负责把 doc 渲成 image blob；
 // 去向（分享/下载/剪贴板）是正交的 sink，见 shareOrDownloadBlob。故此函数公开。
-export async function renderDocToImageBlob(doc: PaintDoc, mime = "image/png", quality?: number, scope = "merged") {
+// #16（v0.5）：cropRect = 「仅导出选区范围」（选区 bbox，doc 坐标）；null/undefined = 全文档（旧行为）。
+export async function renderDocToImageBlob(doc: PaintDoc, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null) {
   const c = document.createElement("canvas");
   c.width = doc.width;
   c.height = doc.height;
@@ -108,17 +109,27 @@ export async function renderDocToImageBlob(doc: PaintDoc, mime = "image/png", qu
   const merged = nodes.length ? renderNodesToCanvas(nodes, doc.width, doc.height) : null;
   if (nodes.length && !merged) throw new Error("GL 不可用，无法合成导出图");
   if (merged) ctx.drawImage(merged, 0, 0);
-  const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, mime, quality));
+  // #16：裁剪到选区 bbox（合成仍整 doc 做——GL 合成一次性的，裁剪只是末端取样）
+  let out = c;
+  if (cropRect && cropRect.w > 0 && cropRect.h > 0) {
+    const cc = document.createElement("canvas");
+    cc.width = cropRect.w; cc.height = cropRect.h;
+    cc.getContext("2d")!.drawImage(c, -cropRect.x, -cropRect.y);
+    out = cc;
+  }
+  const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, mime, quality));
   if (blob) return blob;
   // jpg 返 null 兜底走 png
   if (mime !== "image/png") {
-    return await new Promise<Blob | null>((resolve) => c.toBlob(resolve, "image/png"));
+    return await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"));
   }
   throw new Error("canvas.toBlob 返 null");
 }
 
 // 只有移动端（iOS/iPadOS/Android）才优先 share（→ 相册/Files 才是自然"保存"路径）。
 // 桌面（Windows/Mac/Linux）的 share 面板不能存文件（user：「windows 的 share 没有保存」）→ 直接下载。
+// #23：导出菜单的打印路径也按它分流（iOS 打印走分享面板，分享单里自带「打印」）→ 导出为公开谓词。
+export function prefersShare() { return _prefersShare(); }
 function _prefersShare() {
   const ua = navigator.userAgent || "";
   if (/iPhone|iPad|iPod|Android/i.test(ua)) return true;
@@ -156,11 +167,11 @@ export async function shareOrDownloadBlob(blob: Blob, filename: string, mime?: s
 // ---- 剪贴板 IO ----
 
 /** 把 doc 合成图复制到剪贴板（PNG）。iPad Safari / 桌面都支持。 */
-export async function copyImageToClipboard(doc: PaintDoc, scope = "merged") {
+export async function copyImageToClipboard(doc: PaintDoc, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null) {
   // iOS Safari 要求 clipboard.write 在 user gesture 内"同步"触达；**不能**先 await blob 再 write
   // （那个 await 跨过 gesture 窗口 → NotAllowedError）。把 renderDocToImageBlob 的 Promise<Blob>
   // 直接交给 ClipboardItem（lazy promise 写法），复用 writeImageBlobToClipboard 同款路径。
-  const blobPromise = renderDocToImageBlob(doc, "image/png", undefined, scope)
+  const blobPromise = renderDocToImageBlob(doc, "image/png", undefined, scope, cropRect)
     .then((blob) => { if (!blob) throw new Error("生成 PNG 失败"); return blob; });
   await writeImageBlobToClipboard(blobPromise);
 }

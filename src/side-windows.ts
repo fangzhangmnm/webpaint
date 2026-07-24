@@ -98,17 +98,7 @@ export function initSideWindows(ctx: AppContext) {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
     try {
-      const decoded = await decodeImageFile(file);          // C：鲁棒解码（修 Windows createImageBitmap 失效）
-      const REF_MAX = 2048;                                 // B：参考图最大边（≈2048² 面积上限）
-      const fit = fitWithin(decoded, REF_MAX, REF_MAX);     // 超了 step-halving 缩小
-      // 缩了就存缩小后的 PNG（省 .ora 体积）；没缩存原文件 Blob
-      const persistBlob = fit.scaled ? await canvasToBlob(fit.source as Parameters<typeof canvasToBlob>[0]) : file;
-      referenceWindow.setBitmap(fit.source, { persistBlob });
-      if (fit.scaled) (decoded as ImageBitmap).close?.();                    // 缩放后原 bitmap 没用了，释放
-      session.markEdited();
-      updateSaveStatus();
-      window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
-      setStatus(t("mi.referenceLoaded", { name: file.name, scaled: fit.scaled ? t("mi.referenceScaled", { w: fit.w, h: fit.h }) : "" }));
+      await setReferenceFromFile(file);
     } catch (err) {
       setStatus(t("mi.referenceLoadFailed", { err: errMsg(err) }));
     }
@@ -119,4 +109,21 @@ export function initSideWindows(ctx: AppContext) {
     setStatus(referenceWindow.isLive() ? t("mi.referenceLive") : t("mi.referenceLiveExit"));
   });
   els.referenceFitBtn.addEventListener("click", () => referenceWindow.fitToPanel());
+}
+
+// #19（v0.5）：把一张图片文件设为参考图——decode → 2048² 内缩放 → 开窗 + setBitmap + 标脏。
+//   referenceFileInput 与「拖入图片 → 设为参考」（import-image drop 路径）共用；开窗幂等。
+export async function setReferenceFromFile(file: File | Blob): Promise<void> {
+  const decoded = await decodeImageFile(file);          // C：鲁棒解码（修 Windows createImageBitmap 失效）
+  const REF_MAX = 2048;                                 // B：参考图最大边（≈2048² 面积上限）
+  const fit = fitWithin(decoded, REF_MAX, REF_MAX);     // 超了 step-halving 缩小
+  // 缩了就存缩小后的 PNG（省 .ora 体积）；没缩存原文件 Blob
+  const persistBlob = fit.scaled ? await canvasToBlob(fit.source as Parameters<typeof canvasToBlob>[0]) : file;
+  referenceWindow.open();
+  referenceWindow.setBitmap(fit.source, { persistBlob });
+  if (fit.scaled) (decoded as ImageBitmap).close?.();   // 缩放后原 bitmap 没用了，释放
+  session.markEdited();
+  updateSaveStatus();
+  window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
+  setStatus(t("mi.referenceLoaded", { name: (file as File).name || "", scaled: fit.scaled ? t("mi.referenceScaled", { w: fit.w, h: fit.h }) : "" }));
 }

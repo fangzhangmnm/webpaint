@@ -489,6 +489,10 @@
           <button class="lasso-tool-btn lasso-tool-icon" data-lasso-mode="uniform" type="button" title="等比缩放"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#scale-uniform"/></svg></button>
           <button class="lasso-tool-btn lasso-tool-icon" data-lasso-mode="distort" type="button" title="透视变换"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#perspective-transform"/></svg></button>
           <span class="lasso-tool-sep" aria-hidden="true">|</span>
+          <!-- #12（v0.5）浮层整体 水平翻转 / 旋转90°（一次一个 undo 整点） -->
+          <button class="lasso-tool-btn lasso-tool-icon" id="lassoFlipHBtn" type="button" data-i18n-title="la.flipH"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#flip-horizontal"/></svg></button>
+          <button class="lasso-tool-btn lasso-tool-icon" id="lassoRotate90Btn" type="button" data-i18n-title="la.rotate90"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rotate-ccw"/></svg></button>
+          <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <!-- v120: 3 个按钮意义不明，改 dropdown；nearest 改成「像素画」直说语义 -->
           <!-- 选项由 JS 从 resample.js RESAMPLE_MODES (SSoT) 填，见 fillResampleSelect -->
           <select class="lasso-tool-select" id="lassoSampleSel" data-i18n-title="la.sampleMode"></select>
@@ -649,6 +653,8 @@
       <h3 id="genericSheetTitle" data-i18n="common.notice">提示</h3>
       <p id="genericSheetMessage" class="sheet-hint hidden"></p>
       <input id="genericSheetInput" type="text" class="generic-sheet-input hidden" />
+      <!-- #19（v0.5）：多选项容器（openChoiceSheet 动态填按钮；空=隐藏，不影响确认/输入两态） -->
+      <div id="genericSheetChoices" class="hidden"></div>
       <button class="sheet-action" id="genericSheetConfirm" type="button" data-i18n="common.ok">确定</button>
       <button class="sheet-action ghost" id="genericSheetCancel" type="button" data-i18n="common.cancel">取消</button>
     </div>
@@ -690,6 +696,8 @@
         <button class="menu-item menu-item-with-icon" id="layerAddNewBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#new"/></svg><span class="menu-item-label" data-i18n="sub.newLayer">新图层</span></button>
         <button class="menu-item menu-item-with-icon" id="layerAddGroupBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#create-folder"/></svg><span class="menu-item-label" data-i18n="lp.foot.newGroup">新建图层组</span></button>
         <button class="menu-item menu-item-with-icon" id="layerImportPhotoBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#image"/></svg><span class="menu-item-label" data-i18n="lp.foot.importPhoto">导入图片到新层</span></button>
+        <!-- #25（v0.5）盖印全部为新层（置顶 + 其他层自动隐藏） -->
+        <button class="menu-item menu-item-with-icon" id="layerStampAllBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#stamp"/></svg><span class="menu-item-label" data-i18n="lp.foot.stampAll">盖印全部为新层</span></button>
       </div>
     </div>
 

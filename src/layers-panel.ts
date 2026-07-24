@@ -28,6 +28,7 @@ import { positionPopup } from "./anchored-popup.ts";
 //   贴顶元素的拖动——面板头一旦钻进去就拉不回来。地板 ≈ safe-area + 顶栏（同 reference MIN_TOP 先例）。
 export const PANEL_MIN_TOP = 60;
 import { countLeaves, findNodeById } from "./doc.ts";
+import { renderNodesToCanvas } from "./doc-render.ts";
 import { t } from "./i18n/index.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
 import { docVersion, bumpDoc } from "./signals.ts";
@@ -187,6 +188,49 @@ function _ungroupLayer(L: LayerNode | null) {
     undoStatus: t("lp.st.regrouped"), redoStatus: t("lp.st.ungrouped") });
   _afterDocChange();
   setStatus(t("lp.st.ungroupedName", { name: L.name }));
+}
+// #25（v0.5）：组 → 合并成一层（同位替换；组的 opacity/mode/clip/visible 保留到新叶，视觉不变）。
+function _collapseGroup(L: LayerNode | null) {
+  if (!L || !L.isGroup) return;
+  const kids = (L as LayerGroup).children;
+  const merged = countLeaves(kids) > 0 ? renderNodesToCanvas(kids as unknown[], doc.width, doc.height) : null;
+  if (countLeaves(kids) > 0 && !merged) { setStatus(t("lp.st.glNeeded"), true); return; }
+  const before = doc.snapshotTree();
+  const nl = doc.collapseGroupToLayer(L.id, merged as CanvasImageSource | null);
+  if (!nl) return;
+  history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
+    undoStatus: t("lp.st.restoredGroup", { name: L.name }), redoStatus: t("lp.st.collapsedGroup", { name: L.name }) });
+  _afterDocChange();
+  board.invalidateAll();
+  setStatus(t("lp.st.collapsedGroup", { name: L.name }));
+}
+// #25（v0.5）：盖印全部可见层为新层（强制置顶 + 其他根级图层自动隐藏）。
+//   组 visible 走 treeStructure 快照恢复；叶 visible 不入快照 → 每叶一个 layerProp op，
+//   全部 compound 封一个 undo 整点。
+function _stampAllToNewLayer() {
+  if (countLeaves(doc.layers) >= doc.maxLayers) { setStatus(t("lp.st.maxLayers", { n: doc.maxLayers })); return; }
+  const merged = renderNodesToCanvas(doc.layers as unknown[], doc.width, doc.height);
+  if (!merged) { setStatus(t("lp.st.glNeeded"), true); return; }
+  history.compound(workpiece, () => {
+    const before = doc.snapshotTree();
+    const nl = doc.stampAllToTopLayer(merged as CanvasImageSource);
+    if (!nl) return;
+    // 其他根级**组**先藏（进 after 快照 → undo 恢复）；根级**叶**记下来走 layerProp
+    const rootLeavesToHide: LayerNode[] = [];
+    for (const n of doc.layers) {
+      if (n === (nl as unknown as LayerNode)) continue;
+      if (n.isGroup) { if (n.visible) n.visible = false; }
+      else if (n.visible) rootLeavesToHide.push(n);
+    }
+    history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
+      undoStatus: t("lp.st.unstamped"), redoStatus: t("lp.st.stamped") });
+    for (const leaf of rootLeavesToHide) {
+      history.run(workpiece, ops.layerProp, { layerId: leaf.id, prop: "visible", value: false });
+    }
+  });
+  _afterDocChange();
+  board.invalidateAll();
+  setStatus(t("lp.st.stamped"));
 }
 function _moveIntoGroup(L: LayerNode | null, groupId: number) {
   if (!L || groupId == null) return;
@@ -444,6 +488,7 @@ const LayerRow = defineComponent({
       else if (a === "del")       _deleteLayer(live());
       // 图层组动作（编组已移到「+」菜单 = 新建空组；这里只留 reparent）
       else if (a === "ungroup")   _ungroupLayer(live());
+      else if (a === "collapseToLayer") _collapseGroup(live());   // #25 组烤成单叶
       else if (a === "moveOut")   _moveOutOfGroup(live());
     }
     // 移入选中的已有组（high：把外面的层加入已知组，不限上方相邻；dropdown 不挤占菜单）
@@ -468,6 +513,7 @@ const LayerRow = defineComponent({
       visible: t("lp.visible"), hidden: t("lp.hidden"), expandGroup: t("lp.expandGroup"), collapseGroup: t("lp.collapseGroup"),
       clippedTip: t("lp.clippedTip"), lockAlphaTip: t("lp.lockAlphaTip"), refTip: t("lp.refTip"), refChip: t("lp.refChip"),
       layerMenu: t("lp.layerMenu"), rename: t("lp.rename"), duplicate: t("lp.duplicate"), ungroup: t("lp.ungroup"),
+      collapseToLayer: t("lp.collapseToLayer"),
       moveIntoGroup: t("lp.moveIntoGroup"), choose: t("lp.choose"), moveOut: t("lp.moveOut"),
       lockAlpha: t("lp.lockAlpha"), clip: t("lp.clip"), clipGroup: t("lp.clipGroup"), refLayer: t("lp.refLayer"),
       mergeDown: t("lp.mergeDown"), clearContent: t("lp.clearContent"), delGroup: t("lp.delGroup"), del: t("lp.del"),
@@ -525,6 +571,7 @@ const LayerRow = defineComponent({
         <!-- 图层组 reparent：解组（仅组）/ 移入某组（dropdown，不挤占菜单空间）/ 移出组。编组 = 「+」里新建空组 -->
         <hr class="menu-sep" v-if="isGroup || moveTargets.length || canMoveOut" />
         <button v-if="isGroup" class="menu-item menu-item-with-icon" type="button" @click="act('ungroup')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#explode-folder"/></svg><span class="menu-item-label">{{ L.ungroup }}</span></button>
+        <button v-if="isGroup" class="menu-item menu-item-with-icon" type="button" @click="act('collapseToLayer')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#merge-down"/></svg><span class="menu-item-label">{{ L.collapseToLayer }}</span></button>
         <label v-if="moveTargets.length" class="menu-item layer-move-into menu-item-with-icon" @click.stop><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-folder"/></svg><span class="menu-item-label">{{ L.moveIntoGroup }}</span>
           <select class="layer-move-select" @change="onMoveSelect" @click.stop>
             <option value="" selected>{{ L.choose }}</option>
@@ -790,6 +837,8 @@ export function initLayersPanel(ctx: AppContext) {
   document.getElementById("layerAddGroupBtn")?.addEventListener("click", () => { closeAddPopup(); _addEmptyGroup(); });
   // 导入图片到新层：实际逻辑由 import-image.ts 给 layerImportPhotoBtn 接线，这里只负责收起菜单。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", closeAddPopup);
+  // #25：盖印全部为新层（置顶 + 其他层自动隐藏）
+  document.getElementById("layerStampAllBtn")?.addEventListener("click", () => { closeAddPopup(); _stampAllToNewLayer(); });
   // 点别处收起 "+" 菜单
   document.addEventListener("pointerdown", (e: Event) => {
     if (addPopup?.classList.contains("hidden")) return;

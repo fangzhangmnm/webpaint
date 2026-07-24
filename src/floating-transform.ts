@@ -258,6 +258,22 @@ export class FloatingTransform {
     if (moved) this._pushTransformCheckpoint();
   }
 
+  // #12（v0.5）：浮层整体水平翻转 / 逆时针转 90°。绕当前 mesh 四外角的质心变换，
+  //   一次一个 undo 整点（同 endDrag 的事务节奏）。画布级 flip/rotate 在 doc-ops，那是整文档，别混。
+  private _transformLivePoints(fn: (p: Point, cx: number, cy: number) => Point) {
+    const lv = this._live;
+    if (!lv || !this.isActive()) return;
+    const n = lv.meshN - 1;
+    const corners = [lv.mesh[0][0], lv.mesh[0][n], lv.mesh[n][0], lv.mesh[n][n]];
+    const cx = corners.reduce((s, p) => s + p.x, 0) / 4;
+    const cy = corners.reduce((s, p) => s + p.y, 0) / 4;
+    lv.mesh = lv.mesh.map((row) => row.map((p) => fn(p, cx, cy)));
+    this._pushTransformCheckpoint();
+    this.onChange();
+  }
+  flipHorizontal() { this._transformLivePoints((p, cx, _cy) => ({ x: 2 * cx - p.x, y: p.y })); }
+  rotate90CCW()    { this._transformLivePoints((p, cx, cy) => ({ x: cx + (p.y - cy), y: cy - (p.x - cx) })); }
+
   private _pushTransformCheckpoint() {
     if (!this._w || !this._history || !this._ops || !this._live) return;
     const lv = this._live;

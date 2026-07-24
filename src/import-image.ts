@@ -19,6 +19,8 @@ import { stripSessionExt } from "./config.ts";
 import { unlockImportedContainer } from "./enc-thumbs.ts";
 import { onPasswordVerified } from "./crypto-state.ts";
 import { setTool, updateLassoToolbar } from "./toolbar.ts";
+import { openChoiceSheet } from "./sheets.ts";
+import { setReferenceFromFile } from "./side-windows.ts";
 import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import type { AppContext } from "./app-context.ts";
 import type { PaintDoc } from "./doc.ts";
@@ -274,7 +276,8 @@ export function initImportImage(ctx: AppContext) {
     }
   });
 
-  // v156 桌面拖拽图片到画布 → 导入为新层（落点 = 拖放位置）。external image = new layer 语义。
+  // v156 桌面拖拽图片到画布；#19（v0.5）iOS 手指拖图同路径。两个常见意图（photobash 新图层 /
+  //   参考图）→ 落点弹 in-app 选择 sheet（无系统对话框红线）。取消 = 什么都不做。
   window.addEventListener("dragover", (e: DragEvent) => {
     if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) e.preventDefault();   // 允许 drop
   });
@@ -285,8 +288,15 @@ export function initImportImage(ctx: AppContext) {
     e.preventDefault();
     if (document.body.dataset.mode === "gallery") { setStatus(t("mi.exitGalleryBeforeDrop"), true); return; }
     const center = board.screenToDoc(e.clientX, e.clientY);
-    try { await importImageAsLayer(img, { center }); }
-    catch (err) { setStatus(t("mi.dropFailed", { err: errMsg(err) }), true); }
+    const choice = await openChoiceSheet<"layer" | "ref">(t("mi.dropChoiceTitle"), img.name || "", [
+      { label: t("mi.dropAsLayer"), value: "layer", primary: true },
+      { label: t("mi.dropAsReference"), value: "ref" },
+    ]);
+    if (!choice) return;
+    try {
+      if (choice === "layer") await importImageAsLayer(img, { center });
+      else await setReferenceFromFile(img);
+    } catch (err) { setStatus(t("mi.dropFailed", { err: errMsg(err) }), true); }
   });
 
   // 图库「导入照片」入口（galleryAddPopup → addImportPhoto）设 _addImportAsNewDoc 经此函数。

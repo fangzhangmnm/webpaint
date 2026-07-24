@@ -311,6 +311,9 @@ export class LassoEngine {
   //      本类只在 lift/commit/cancel 维护 lasso 状态机 _state；其余纯转发。----
   setMode(mode: Parameters<FloatingTransform["setMode"]>[0]) { this._ft.setMode(mode); }
   getMode() { return this._ft.getMode(); }
+  // #12：浮层整体 水平翻转 / 逆时针 90°（facade 纯转发）
+  flipFloatHorizontal() { this._ft.flipHorizontal(); }
+  rotateFloat90() { this._ft.rotate90CCW(); }
   hitTest(x: number, y: number, screenScale = 1) { return this._ft.hitTest(x, y, screenScale); }
   beginDrag(hit: Parameters<FloatingTransform["beginDrag"]>[0], x: number, y: number) { this._ft.beginDrag(hit, x, y); }
   extendDrag(x: number, y: number) { this._ft.extendDrag(x, y); }

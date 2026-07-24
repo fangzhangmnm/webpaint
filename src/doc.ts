@@ -576,6 +576,34 @@ export class PaintDoc {
   //   - 剪裁链边界（active 与 under 都 clippingMask=true，共用同一基底）：合并后结果保持
   //       clippingMask=true（仍剪到同一基底），不在此处对基底再裁（那是渲染时的事）。
   //   - 反向（under 是剪裁层、active 普通）= "clipping-under"：语义不清，拒绝并给中文提示。
+  // #25（v0.5）：把组烤成单叶（同位替换）。merged = 组 children 的合成位图（调用方用 GL
+  //   renderNodesToCanvas 渲染，组自身 opacity/mode/clip/visible 保留到新叶上 → 视觉不变）；
+  //   null = 空组 → 空叶。撤销走 snapshotTree/treeStructure（新叶是活引用，undo 即从树上摘掉）。
+  collapseGroupToLayer(id: number, merged: CanvasImageSource | null) {
+    const loc = findParentOf(this.layers, id);
+    if (!loc || !loc.node.isGroup) return null;
+    const g = loc.node as LayerGroup;
+    const L = new Layer({ width: this.width, height: this.height, name: g.name, empty: true });
+    L.visible = g.visible; L.opacity = g.opacity; L.mode = g.mode; L.clippingMask = !!g.clippingMask;
+    if (merged) {
+      L.editRegion(0, 0, this.width, this.height, (ctx, ox, oy) => { ctx.drawImage(merged, -ox, -oy); });
+    }
+    loc.parent.splice(loc.index, 1, L);
+    this.activeId = L.id;
+    return L;
+  }
+
+  // #25（v0.5）：盖印全部可见层 → 新叶**强制置顶**（根级数组尾 = 最顶）。merged = 全树合成位图。
+  //   「其他图层自动隐藏」由调用方编排（组走 treeStructure 快照，叶 visible 走 layerProp op）。
+  stampAllToTopLayer(merged: CanvasImageSource) {
+    if (countLeaves(this.layers) >= this.maxLayers) return null;
+    const L = new Layer({ width: this.width, height: this.height, name: `盖印 ${this._nextLayerName().replace(/^图层\s*/, "")}`, empty: true });
+    L.editRegion(0, 0, this.width, this.height, (ctx, ox, oy) => { ctx.drawImage(merged, -ox, -oy); });
+    this.layers.push(L);
+    this.activeId = L.id;
+    return L;
+  }
+
   mergeDownLayer(L: Layer) {
     if (!L || L.isGroup) return { ok: false, reason: "bottom" };
     const loc = findParentOf(this.layers, L.id);

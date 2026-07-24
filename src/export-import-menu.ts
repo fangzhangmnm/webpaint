@@ -14,7 +14,7 @@ import { els } from "./els.ts";
 import { t } from "./i18n/index.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
-import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow } from "./session.ts";
+import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow, prefersShare } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
 import { editorState } from "./workbench-state.ts";
 import { reportError } from "./error-badge.ts";
@@ -36,9 +36,16 @@ function stampNow() {
 function _getExpPrj(): { format: string } {
   return { format: editorState.exportProject.format };
 }
-function _getExpImg(): { format: string; target: string; scope: string } {
+function _getExpImg(): { format: string; target: string; scope: string; clipSelection: boolean } {
   // scope ← editorState.export.layerMode ("merged" | "active")
-  return { format: editorState.export.format, target: editorState.export.target, scope: editorState.export.layerMode };
+  return { format: editorState.export.format, target: editorState.export.target, scope: editorState.export.layerMode, clipSelection: editorState.export.clipSelection };
+}
+// #16：有选区且开了「仅导出选区范围」→ 选区 bbox（doc 坐标）；否则 null=全文档
+function _selCropRect(): { x: number; y: number; w: number; h: number } | null {
+  if (!editorState.export.clipSelection) return null;
+  const sel = doc.selection as { bboxX: number; bboxY: number; bboxW: number; bboxH: number } | null;
+  if (!sel || !(sel.bboxW > 0) || !(sel.bboxH > 0)) return null;
+  return { x: sel.bboxX, y: sel.bboxY, w: sel.bboxW, h: sel.bboxH };
 }
 function _getImpImg(): { source: string } {
   return { source: editorState.import.source };
@@ -59,7 +66,7 @@ function _updateMenuSubLabels() {
   const eiEl = document.getElementById("menuExportImageSub");
   const iiEl = document.getElementById("menuImportImageSub");
   if (epEl) epEl.textContent = "." + ((getExporter(ep.format) || getExporter("ora")).ext);
-  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : t("sub.file")}`;
+  if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : t("sub.file")}${ei.clipSelection ? " · " + t("sub.selection") : ""}`;
   if (iiEl) iiEl.textContent = `${ii.source === "clipboard" ? t("sub.clipboard") : t("sub.file")} · ${t("sub.newLayer")}`;
 }
 
@@ -122,19 +129,20 @@ export function initExportImportMenu(ctx: AppContext) {
   els.menuExportImage.addEventListener("click", async () => {
     setMenuOpen(false);
     const c = _getExpImg();
+    const cropRect = _selCropRect();   // #16：仅导出选区范围（三种去向统一生效）
     try {
       if (c.target === "clipboard") {
         // 剪贴板恒为 PNG（ClipboardItem image/png）——格式选择只作用于文件/分享路径
-        await copyImageToClipboard(doc, c.scope);
+        await copyImageToClipboard(doc, c.scope, cropRect);
         setStatus(t("tm.copiedPngToClipboard", { scope: c.scope === "active" ? t("tm.scopeActiveLayer") : t("tm.scopeMerged") }));
-      } else if (c.target === "print") {
+      } else if (c.target === "print" && !prefersShare()) {
         // 打印恒走位图（PNG）——矢量/ora 之类没意义；scope 仍生效。
         const exp = getExporter(c.format === "jpg" ? "jpg" : "png") || getExporter("png");
         // 首选：新标签页打印（把打印彻底搬离脆弱的 WebGL 页，修 iOS 打印丢图，见 session.ts）。
         //   window.open 必须在此**手势同步期**就开好，不能等 encode 的 await（iOS transient-activation 严）。
         const win = window.open("", "_blank");
         if (exp.busyHint) setStatus(exp.busyHint, true);
-        const blob = await exp.encode(doc, { scope: c.scope });
+        const blob = await exp.encode(doc, { scope: c.scope, cropRect });
         if (win) {
           await printImageInNewWindow(win, blob);
           setStatus(t("tm.printOpenedNewTab"));
@@ -144,9 +152,10 @@ export function initExportImportMenu(ctx: AppContext) {
           setStatus(t("tm.popupBlockedInlinePrint"));
         }
       } else {
-        const exp = getExporter(c.format) || getExporter("png");
+        // 文件/分享——以及 #23：iOS/iPad 上「打印」也走这里（分享面板自带打印；PWA 里 window.open 打印脆弱）
+        const exp = getExporter(c.target === "print" ? (c.format === "jpg" ? "jpg" : "png") : c.format) || getExporter("png");
         if (exp.busyHint) setStatus(exp.busyHint, true);
-        const blob = await exp.encode(doc, { scope: c.scope });
+        const blob = await exp.encode(doc, { scope: c.scope, cropRect });
         const r = await shareOrDownloadBlob(blob, `${session.name}-${stampNow()}.${exp.ext}`, exp.mime);
         setStatus(r.method === "share" ? t("tm.sharePanelOpened") : r.method === "cancel" ? t("tm.shareCancelled") : t("tm.extDownloadedUpper", { ext: exp.ext.toUpperCase() }));
       }
@@ -211,11 +220,17 @@ export function initExportImportMenu(ctx: AppContext) {
         <label><input type="radio" name="tgt" value="clipboard" ${c.target === "clipboard" ? "checked" : ""} /> ${t("tm.targetClipboard")}</label>
         <label><input type="radio" name="tgt" value="print" ${c.target === "print" ? "checked" : ""} /> ${t("tm.targetPrint")}</label>
       </div>
+      <div class="menu-config-section">
+        <div class="menu-config-title">${t("tm.configRange")}</div>
+        <label><input type="checkbox" name="clipsel" ${c.clipSelection ? "checked" : ""} ${doc.selection ? "" : "disabled"} /> ${t("tm.clipToSelection")}${doc.selection ? "" : `（${t("tm.noSelectionNow")}）`}</label>
+      </div>
     `, (popup) => {
       const fmt = (popup.querySelector('input[name="fmt"]:checked') as HTMLInputElement | null)?.value || "png";
       const tgt = (popup.querySelector('input[name="tgt"]:checked') as HTMLInputElement | null)?.value || "file";
       const scope = (popup.querySelector('input[name="scope"]:checked') as HTMLInputElement | null)?.value || "merged";
       _setExpImg({ format: fmt, target: tgt, scope });
+      const clipEl = popup.querySelector('input[name="clipsel"]') as HTMLInputElement | null;
+      if (clipEl && !clipEl.disabled) { editorState.export.clipSelection = clipEl.checked; _updateMenuSubLabels(); }
     });
   });
   els.menuImportImageConfig.addEventListener("click", (e: Event) => {

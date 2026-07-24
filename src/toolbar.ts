@@ -395,6 +395,16 @@ export function initToolbar(ctx: AppContext) {
     }
   });
 
+  // #12：浮层变换 水平翻转 / 旋转90°（只在 floating 时该行可见；引擎自带 isActive 护栏）
+  byId("lassoFlipHBtn").addEventListener("click", () => {
+    input.lasso.flipFloatHorizontal();
+    board.invalidateAll();
+  });
+  byId("lassoRotate90Btn").addEventListener("click", () => {
+    input.lasso.rotateFloat90();
+    board.invalidateAll();
+  });
+
   byId("lassoDeselectBtn").addEventListener("click", () => {
     pushSel(input.lasso.setSelection(null));
     board.invalidateAll();

@@ -25,6 +25,7 @@ import type { PaintDoc } from "./doc.ts";
 
 export interface ExportOpts {
   scope?: string;
+  cropRect?: { x: number; y: number; w: number; h: number } | null;   // #16：仅导出选区范围（bbox，doc 坐标）
 }
 export interface Exporter {
   id: string;
@@ -73,9 +74,9 @@ registerExporter({
 });
 registerExporter({
   id: "png", label: "PNG", ext: "png", mime: "image/png", kind: "image",
-  encode: (doc, { scope = "merged" } = {}) => renderDocToImageBlob(doc, "image/png", undefined, scope) as Promise<Blob>,
+  encode: (doc, { scope = "merged", cropRect = null } = {}) => renderDocToImageBlob(doc, "image/png", undefined, scope, cropRect) as Promise<Blob>,
 });
 registerExporter({
   id: "jpg", label: "JPG", ext: "jpg", mime: "image/jpeg", kind: "image",
-  encode: (doc, { scope = "merged" } = {}) => renderDocToImageBlob(doc, "image/jpeg", 0.92, scope) as Promise<Blob>,
+  encode: (doc, { scope = "merged", cropRect = null } = {}) => renderDocToImageBlob(doc, "image/jpeg", 0.92, scope, cropRect) as Promise<Blob>,
 });
