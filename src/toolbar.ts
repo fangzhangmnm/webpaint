@@ -50,7 +50,7 @@ let lassoTransformModeBtns: HTMLElement[];
 let lassoThresholdInput: HTMLInputElement, lassoThresholdVal: HTMLElement;
 let lassoConstrainBtn: HTMLElement;
 let lassoSelEditBtn: HTMLElement, lassoSelEditMenu: HTMLElement;   // v0.5.12 ⋯ 菜单（低频选区操作收纳）
-let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement;   // 布尔槽（v0.5.16 点击轮换）
+let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement, lassoSetOpMenu: HTMLElement, lassoSetOpMenuBtns: HTMLElement[];   // 布尔组槽（v0.5.17 回下拉）
 let lassoSubSlot: HTMLElement, lassoSubSlotUse: SVGUseElement, lassoSubMenu: HTMLElement, lassoSubMenuBtns: HTMLElement[];   // 子工具组槽（v0.5.14）
 let lassoMagicCtx: HTMLElement, lassoExpandToggle: HTMLElement, lassoMagicExpandPx: HTMLInputElement;   // 魔棒配置内联
 let lassoTransformBtn: HTMLElement, lassoFillModeBtn: HTMLElement, lassoFillCommitBtn: HTMLElement, lassoDeselectBtn: HTMLElement;
@@ -63,6 +63,7 @@ const _selMem = { sub: "freehand" as string, setOp: "new" as string };
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
 const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", magic: "#magic-wand" };
 function closeSubMenu() { lassoSubMenu?.classList.add("hidden"); }
+function closeSetOpMenu() { lassoSetOpMenu?.classList.add("hidden"); }
 
 // ===== 套索/选区工具栏（v65 重做）=====
 // 三个 section 按状态切换：subToolBar（lasso 激活）/ selectionActions（有选区且非 floating）/ transformCtrl（floating）
@@ -83,7 +84,7 @@ export function updateLassoToolbar() {
   const sub = input.lasso.getSubTool();
   const showAny = (floating || hasSelection || selToolActive) && !pickerActive;
   lassoToolbarStack.classList.toggle("hidden", !showAny);
-  if (!showAny) { closeSelEditUI(); closeSubMenu(); return; }
+  if (!showAny) { closeSelEditUI(); closeSubMenu(); closeSetOpMenu(); return; }
 
   // 其他工具模式下有选区：选区只是个蒙板，工具栏只给一个"取消选区"（否则去选还得切回 lasso）。
   const otherToolSel = hasSelection && !floating && !selToolActive;
@@ -102,9 +103,13 @@ export function updateLassoToolbar() {
   for (const b of lassoSubMenuBtns) {
     b.setAttribute("aria-pressed", b.dataset.lassoSub === sub ? "true" : "false");
   }
-  // 布尔槽（点击轮换）：槽图标 = 当前模式（fill 循环里无「新建」——填充=累积工作流）。
+  // 布尔组槽：槽图标 = 当前模式；菜单里高亮当前项、「新建」在 fill 隐藏（填充=累积工作流）。
   const setOp = input.lasso.getSetOpMode();
   lassoSetOpSlotUse.setAttribute("href", SETOP_ICON[setOp] || "#selection-new");
+  for (const b of lassoSetOpMenuBtns) {
+    b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
+    if (b.dataset.lassoSetop === "new") b.classList.toggle("hidden", fillActive);
+  }
   // 魔棒配置内联：magic 子工具时显示；px 输入仅扩张开着时显。
   const magicOn = sub === "magic";
   lassoMagicCtx.classList.toggle("hidden", !magicOn);
@@ -386,17 +391,15 @@ export function initToolbar(ctx: AppContext) {
     input.lasso.setSubTool(subName);
     _selMem.sub = subName;   // v0.5.16 共享记忆
   });
-  // 布尔槽 = 点击轮换（v0.5.16 user：不用菜单）：lasso 循环 新建→并→减；fill 循环 并→减（禁新建）。
+  // 布尔组槽（v0.5.17 user：改回下拉，横排纯图标）
   lassoSetOpSlot = byId("lassoSetOpSlot");
   lassoSetOpSlotUse = byId("lassoSetOpSlotUse") as unknown as SVGUseElement;
-  lassoSetOpSlot.addEventListener("click", () => {
-    const cycle = editMode.current() === "fill" ? ["union", "subtract"] : ["new", "union", "subtract"];
-    const cur = input.lasso.getSetOpMode();
-    const next = cycle[(cycle.indexOf(cur) + 1) % cycle.length];
-    input.lasso.setSetOpMode(next as Parameters<typeof input.lasso.setSetOpMode>[0]);
-    _selMem.setOp = next;   // 共享记忆
-    setStatus(t(({ new: "la.new", union: "la.union", subtract: "la.subtract" } as const)[next as "new" | "union" | "subtract"]));   // 轮换反馈（角标变化不易察觉）
-    updateLassoToolbar();
+  lassoSetOpMenu = byId("lassoSetOpMenu");
+  lassoSetOpMenuBtns = [...lassoSetOpMenu.querySelectorAll<HTMLElement>("[data-lasso-setop]")];
+  wireSlotMenu(lassoSetOpSlot, lassoSetOpMenu, (b) => {
+    const op = b.dataset.lassoSetop as Parameters<typeof input.lasso.setSetOpMode>[0];
+    input.lasso.setSetOpMode(op);
+    _selMem.setOp = op;   // 共享记忆（fill 里「新建」项已隐）
   });
   // v242：扩展滑块从魔术棒拆走（改成选区编辑 op，见 initSelEditUI）。魔术棒只剩阈值。
   // v0.5.11：阈值 per-doc 持久化（editorState.magicWand.threshold，原 editorState.bucket 退役后归魔棒）。

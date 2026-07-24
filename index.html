@@ -431,10 +431,10 @@
           </button>
           <!-- v0.5.12 布尔收成单槽（user：「点了再选择」）：槽显当前模式图标，点开 lassoSetOpMenu 选。
                fill 工具里「新建」隐藏、默认并（填充工作流=累积）。 -->
-          <!-- v0.5.16 布尔=点击轮换（user）：右下角小循环箭头=「toggle 轮换」记号（小三角专属「弹菜单」） -->
-          <button class="lasso-tool-btn lasso-tool-icon lasso-slot" id="lassoSetOpSlot" type="button" data-i18n-title="la.setOpSlot">
+          <!-- v0.5.17 布尔改回下拉（user）：小三角=弹菜单记号；横排纯图标菜单锚槽下 -->
+          <button class="lasso-tool-btn lasso-tool-icon lasso-slot" id="lassoSetOpSlot" type="button" data-i18n-title="la.setOpSlot" aria-haspopup="true">
             <svg viewBox="0 0 24 24" aria-hidden="true"><use id="lassoSetOpSlotUse" href="#selection-new"/></svg>
-            <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M6.8 4.4 a2.8 2.8 0 1 1 -0.9 -2.1"/><path d="M7.0 1.0 V2.6 H5.4"/></svg>
+            <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg>
           </button>
           <!-- v0.5.12 魔棒配置内联（magic 子工具时显示；原 lassoMagicPopup 退役）：
                阈值滑条 + 自动扩张 toggle + px（扩张开着才显） -->
@@ -499,16 +499,21 @@
     <!-- v242：只剩阈值；扩展/收缩拆成选区编辑 op（见下 lassoSelEditMenu / lassoSelOpPopup） -->
     <!-- v0.5.14 ⋯ 菜单：横排图标（user）。needs-sel 项无选区禁用；lasso-only 项 fill 里隐藏。
          扩张/收缩暂留文字 pill——库里没有收缩图标，不盲画（进库要走 workbench 评审）。 -->
-    <div class="lasso-icon-menu lasso-icon-grid hidden" id="lassoSelEditMenu" role="menu" data-i18n-aria="la.editSel">
-      <button class="lasso-tool-btn lasso-tool-icon" id="lassoSelectAllBtn" type="button" role="menuitem" data-i18n-title="la.selectAll"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" id="lassoInvertBtn" type="button" role="menuitem" data-i18n-title="la.invert"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg></button>
-      <!-- v0.5.15 user：扩张/收缩合一钮 → modal 内切方向 -->
-      <button class="lasso-tool-btn lasso-tool-icon lasso-menu-needs-sel" id="lassoSelResizeBtn" type="button" role="menuitem" data-i18n-title="la.expandShrink"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoClearBtn" type="button" role="menuitem" data-i18n-title="la.clearPixels"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-document"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoDuplicateBtn" type="button" role="menuitem" data-i18n-title="la.duplicate"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoMoveToLayerBtn" type="button" role="menuitem" data-i18n-title="la.moveToLayer"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg></button>
+    <!-- v0.5.17 ⋯ 菜单=list 形态（user：竖排 图标+简短解说） -->
+    <div class="lasso-icon-menu lasso-icon-list hidden" id="lassoSelEditMenu" role="menu" data-i18n-aria="la.editSel">
+      <button class="lasso-tool-btn" id="lassoSelectAllBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
+      <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
+      <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoSelResizeBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
+      <button class="lasso-tool-btn lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoClearBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-document"/></svg><span data-i18n="la.clearPixels">清除选区内像素</span></button>
+      <button class="lasso-tool-btn lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoDuplicateBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg><span data-i18n="la.duplicate">复制选区到新层</span></button>
+      <button class="lasso-tool-btn lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoMoveToLayerBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span data-i18n="la.moveToLayer">选区移动到新层</span></button>
     </div>
-    <!-- v0.5.14 组槽下拉（紧凑图标排，JS 锚定在槽按钮下方）：子工具组 + 布尔组 -->
+    <!-- v0.5.14 组槽下拉（紧凑菜单深模块三形态：row=横排图标 / grid / list=竖排带解说；JS 锚定槽下） -->
+    <div class="lasso-icon-menu hidden" id="lassoSetOpMenu" role="menu" data-i18n-aria="la.setOpSlot">
+      <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" role="menuitem" data-i18n-title="la.new"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-new"/></svg></button>
+      <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" role="menuitem" data-i18n-title="la.union"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-union"/></svg></button>
+      <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="subtract" type="button" role="menuitem" data-i18n-title="la.subtract"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-difference"/></svg></button>
+    </div>
     <div class="lasso-icon-menu hidden" id="lassoSubMenu" role="menu" data-i18n-aria="la.subSlot">
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="freehand" type="button" role="menuitem" data-i18n-title="la.freehand"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-freehand"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="rect" type="button" role="menuitem" data-i18n-title="la.rect"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-rectangle"/></svg></button>

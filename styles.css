@@ -248,6 +248,9 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   color: var(--ink);
 }
 .lasso-icon-menu.lasso-icon-grid { display: grid; grid-template-columns: repeat(3, max-content); }
+.lasso-icon-menu.lasso-icon-list { flex-direction: column; align-items: stretch; min-width: 168px; }
+.lasso-icon-menu.lasso-icon-list > button { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 5px 8px; font-size: 12px; }
+.lasso-icon-menu.lasso-icon-list > button svg { width: 18px; height: 18px; flex: 0 0 auto; }
 .lasso-icon-menu.hidden { display: none; }
 /* v0.5.12 魔棒配置内联（阈值滑条+扩张toggle+px）+ ⋯ 菜单禁用态 */
 .lasso-magic-ctx { display: flex; align-items: center; gap: 6px; }
