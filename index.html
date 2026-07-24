@@ -429,25 +429,22 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><use id="lassoSubSlotUse" href="#select-freehand"/></svg>
             <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg>
           </button>
-          <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <!-- v0.5.12 布尔收成单槽（user：「点了再选择」）：槽显当前模式图标，点开 lassoSetOpMenu 选。
                fill 工具里「新建」隐藏、默认并（填充工作流=累积）。 -->
-          <button class="lasso-tool-btn lasso-tool-icon lasso-slot" id="lassoSetOpSlot" type="button" data-i18n-title="la.setOpSlot" aria-haspopup="true">
+          <!-- v0.5.16 布尔=点击轮换（user）：右下角小循环箭头=「toggle 轮换」记号（小三角专属「弹菜单」） -->
+          <button class="lasso-tool-btn lasso-tool-icon lasso-slot" id="lassoSetOpSlot" type="button" data-i18n-title="la.setOpSlot">
             <svg viewBox="0 0 24 24" aria-hidden="true"><use id="lassoSetOpSlotUse" href="#selection-new"/></svg>
-            <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg>
+            <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M6.8 4.4 a2.8 2.8 0 1 1 -0.9 -2.1"/><path d="M7.0 1.0 V2.6 H5.4"/></svg>
           </button>
           <!-- v0.5.12 魔棒配置内联（magic 子工具时显示；原 lassoMagicPopup 退役）：
                阈值滑条 + 自动扩张 toggle + px（扩张开着才显） -->
           <span class="lasso-section lasso-magic-ctx hidden" id="lassoMagicCtx">
-            <span class="lasso-tool-sep" aria-hidden="true">|</span>
             <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" style="width:88px;" data-i18n-aria="la.threshold" />
             <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
             <button class="lasso-tool-btn" id="lassoExpandToggle" type="button" data-i18n="la.expandShort" data-i18n-title="la.autoExpand">扩张</button>
             <input type="text" inputmode="numeric" id="lassoMagicExpandPx" value="1" class="hidden" style="width:40px;text-align:right;" data-i18n-aria="la.pixelCount" />
           </span>
-          <span class="lasso-tool-sep lasso-constrain-sep hidden" aria-hidden="true">|</span>
           <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain">1:1</button>
-          <span class="lasso-tool-sep" aria-hidden="true">|</span>
           <!-- v0.5.12 行尾动作组：变换（选区工具）/ ⋯（低频操作收纳）/ 去选（高频，=fill 的 cancel）/ ✓（fill） -->
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoFillModeBtn" type="button" data-i18n-title="tool.fill" aria-haspopup="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg></button>
@@ -517,11 +514,6 @@
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="rect" type="button" role="menuitem" data-i18n-title="la.rect"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-rectangle"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="ellipse" type="button" role="menuitem" data-i18n-title="la.ellipse"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-ellipse"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="magic" type="button" role="menuitem" data-i18n-title="la.magic"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#magic-wand"/></svg></button>
-    </div>
-    <div class="lasso-icon-menu hidden" id="lassoSetOpMenu" role="menu" data-i18n-aria="la.setOpSlot">
-      <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" role="menuitem" data-i18n-title="la.new"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-new"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" role="menuitem" data-i18n-title="la.union"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-union"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="subtract" type="button" role="menuitem" data-i18n-title="la.subtract"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-difference"/></svg></button>
     </div>
 
     <!-- v242 选区扩张/收缩 modal：走 adjust 逻辑（transient + 实时预览），数字输入 -->

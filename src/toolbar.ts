@@ -48,23 +48,20 @@ let lassoToolbarStack: HTMLElement, lassoToolbarRow1: HTMLElement, lassoToolbarR
 let lassoSubToolBar: HTMLElement, lassoTransformCtrl: HTMLElement;
 let lassoTransformModeBtns: HTMLElement[];
 let lassoThresholdInput: HTMLInputElement, lassoThresholdVal: HTMLElement;
-let lassoConstrainBtn: HTMLElement, lassoConstrainSep: HTMLElement;
+let lassoConstrainBtn: HTMLElement;
 let lassoSelEditBtn: HTMLElement, lassoSelEditMenu: HTMLElement;   // v0.5.12 ⋯ 菜单（低频选区操作收纳）
-let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement, lassoSetOpMenu: HTMLElement, lassoSetOpMenuBtns: HTMLElement[];   // 布尔组槽
+let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement;   // 布尔槽（v0.5.16 点击轮换）
 let lassoSubSlot: HTMLElement, lassoSubSlotUse: SVGUseElement, lassoSubMenu: HTMLElement, lassoSubMenuBtns: HTMLElement[];   // 子工具组槽（v0.5.14）
 let lassoMagicCtx: HTMLElement, lassoExpandToggle: HTMLElement, lassoMagicExpandPx: HTMLInputElement;   // 魔棒配置内联
 let lassoTransformBtn: HTMLElement, lassoFillModeBtn: HTMLElement, lassoFillCommitBtn: HTMLElement, lassoDeselectBtn: HTMLElement;
 let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
 
-// v0.5.12 「跟 session 走」的 RAM 记忆（user 拍板：不进 editorState/文件）：
-//   每工具各记子工具与布尔模式；_lassoShapeSub = 套索预设钮的形状类记忆（永不为 magic——魔棒有自己的主栏钮）。
-const _toolMem: Record<"lasso" | "fill", { sub: string; setOp: string }> = {
-  lasso: { sub: "freehand", setOp: "new" },
-  fill:  { sub: "magic",    setOp: "union" },
-};
+// 「跟 session 走」的 RAM 记忆（user 拍板：不进 editorState/文件）。
+//   v0.5.16 改判：填色/选区**共用一份**模式记忆（进油漆桶保持刚才的子工具，UX 更直觉）；
+//   fill 禁「新建」只在灌引擎时就地 coerce 成并，不改记忆本体。
+const _selMem = { sub: "freehand" as string, setOp: "new" as string };
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
 const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", magic: "#magic-wand" };
-function closeSetOpMenu() { lassoSetOpMenu?.classList.add("hidden"); }
 function closeSubMenu() { lassoSubMenu?.classList.add("hidden"); }
 
 // ===== 套索/选区工具栏（v65 重做）=====
@@ -86,7 +83,7 @@ export function updateLassoToolbar() {
   const sub = input.lasso.getSubTool();
   const showAny = (floating || hasSelection || selToolActive) && !pickerActive;
   lassoToolbarStack.classList.toggle("hidden", !showAny);
-  if (!showAny) { closeSelEditUI(); closeSetOpMenu(); closeSubMenu(); return; }
+  if (!showAny) { closeSelEditUI(); closeSubMenu(); return; }
 
   // 其他工具模式下有选区：选区只是个蒙板，工具栏只给一个"取消选区"（否则去选还得切回 lasso）。
   const otherToolSel = hasSelection && !floating && !selToolActive;
@@ -105,13 +102,9 @@ export function updateLassoToolbar() {
   for (const b of lassoSubMenuBtns) {
     b.setAttribute("aria-pressed", b.dataset.lassoSub === sub ? "true" : "false");
   }
-  // 布尔组槽：槽图标 = 当前模式；菜单里「新建」在 fill 隐藏（填充=累积工作流）。
+  // 布尔槽（点击轮换）：槽图标 = 当前模式（fill 循环里无「新建」——填充=累积工作流）。
   const setOp = input.lasso.getSetOpMode();
   lassoSetOpSlotUse.setAttribute("href", SETOP_ICON[setOp] || "#selection-new");
-  for (const b of lassoSetOpMenuBtns) {
-    b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
-    if (b.dataset.lassoSetop === "new") b.classList.toggle("hidden", fillActive);
-  }
   // 魔棒配置内联：magic 子工具时显示；px 输入仅扩张开着时显。
   const magicOn = sub === "magic";
   lassoMagicCtx.classList.toggle("hidden", !magicOn);
@@ -130,7 +123,6 @@ export function updateLassoToolbar() {
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
   lassoConstrainBtn.classList.toggle("hidden", !showConstrain);
-  lassoConstrainSep.classList.toggle("hidden", !showConstrain);
   if (showConstrain) {
     lassoConstrainBtn.setAttribute("aria-pressed", input.lasso.getConstrainSquare() ? "true" : "false");
   }
@@ -175,12 +167,10 @@ export function setTool(tool: string) {
   if (tool === "brush" || tool === "eraser" || tool === "filterBrush") {
     rack.applyToolState(tool);
   }
-  // v0.5.12：选区/填充的「跟 session 走」记忆——进工具即恢复各自的子工具+布尔模式。
-  //   fill 里禁「新建」：记忆若无效回退 union（填充=累积工作流）。
+  // 「跟 session 走」共享记忆（v0.5.16：填色/选区一份）——进工具恢复子工具+布尔；fill 禁新建→就地并。
   if (tool === "lasso" || tool === "fill") {
-    const mem = _toolMem[tool];
-    input.lasso.setSubTool(mem.sub as Parameters<typeof input.lasso.setSubTool>[0]);
-    const op = (tool === "fill" && mem.setOp === "new") ? "union" : mem.setOp;
+    input.lasso.setSubTool(_selMem.sub as Parameters<typeof input.lasso.setSubTool>[0]);
+    const op = (tool === "fill" && _selMem.setOp === "new") ? "union" : _selMem.setOp;
     input.lasso.setSetOpMode(op as Parameters<typeof input.lasso.setSetOpMode>[0]);
     updateLassoToolbar();
   }
@@ -355,7 +345,6 @@ export function initToolbar(ctx: AppContext) {
   lassoThresholdInput = byId<HTMLInputElement>("lassoThreshold");
   lassoThresholdVal = byId("lassoThresholdVal");
   lassoConstrainBtn = byId("lassoConstrainBtn");
-  lassoConstrainSep = document.querySelector(".lasso-constrain-sep") as HTMLElement;
   lassoSelEditBtn = byId("lassoSelEditBtn");
   lassoSelEditMenu = byId("lassoSelEditMenu");
   lassoTransformBtn = byId("lassoTransformBtn");
@@ -395,19 +384,19 @@ export function initToolbar(ctx: AppContext) {
   wireSlotMenu(lassoSubSlot, lassoSubMenu, (b) => {
     const subName = b.dataset.lassoSub as Parameters<typeof input.lasso.setSubTool>[0];
     input.lasso.setSubTool(subName);
-    const m = editMode.current();
-    if (m === "fill" || m === "lasso") _toolMem[m].sub = subName;
+    _selMem.sub = subName;   // v0.5.16 共享记忆
   });
-  // 布尔组槽
+  // 布尔槽 = 点击轮换（v0.5.16 user：不用菜单）：lasso 循环 新建→并→减；fill 循环 并→减（禁新建）。
   lassoSetOpSlot = byId("lassoSetOpSlot");
   lassoSetOpSlotUse = byId("lassoSetOpSlotUse") as unknown as SVGUseElement;
-  lassoSetOpMenu = byId("lassoSetOpMenu");
-  lassoSetOpMenuBtns = [...lassoSetOpMenu.querySelectorAll<HTMLElement>("[data-lasso-setop]")];
-  wireSlotMenu(lassoSetOpSlot, lassoSetOpMenu, (b) => {
-    const op = b.dataset.lassoSetop as Parameters<typeof input.lasso.setSetOpMode>[0];
-    input.lasso.setSetOpMode(op);
-    const m = editMode.current();
-    if (m === "fill" || m === "lasso") _toolMem[m].setOp = op;
+  lassoSetOpSlot.addEventListener("click", () => {
+    const cycle = editMode.current() === "fill" ? ["union", "subtract"] : ["new", "union", "subtract"];
+    const cur = input.lasso.getSetOpMode();
+    const next = cycle[(cycle.indexOf(cur) + 1) % cycle.length];
+    input.lasso.setSetOpMode(next as Parameters<typeof input.lasso.setSetOpMode>[0]);
+    _selMem.setOp = next;   // 共享记忆
+    setStatus(t(({ new: "la.new", union: "la.union", subtract: "la.subtract" } as const)[next as "new" | "union" | "subtract"]));   // 轮换反馈（角标变化不易察觉）
+    updateLassoToolbar();
   });
   // v242：扩展滑块从魔术棒拆走（改成选区编辑 op，见 initSelEditUI）。魔术棒只剩阈值。
   // v0.5.11：阈值 per-doc 持久化（editorState.magicWand.threshold，原 editorState.bucket 退役后归魔棒）。

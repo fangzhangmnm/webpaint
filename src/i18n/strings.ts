@@ -465,7 +465,7 @@ export const S = {
 
   "la.threshold":    { zh: "阈值", en: "Threshold", ja: "しきい値" },
   "la.subSlot":      { zh: "选区方式（自由 / 矩形 / 椭圆 / 魔棒）", en: "Selection mode (freehand / rect / ellipse / wand)", ja: "選択方式（フリー / 矩形 / 楕円 / 自動）" },
-  "la.setOpSlot":    { zh: "布尔模式（点选：新建 / 添加 / 减去）", en: "Boolean mode (tap to choose)", ja: "ブールモード（タップで選択）" },
+  "la.setOpSlot":    { zh: "布尔模式（点击轮换：新建 → 添加 → 减去）", en: "Boolean mode (tap to cycle)", ja: "ブールモード（タップで切替）" },
   "la.more":         { zh: "更多选区操作", en: "More selection actions", ja: "その他の選択操作" },
   "la.expandShort":  { zh: "扩张", en: "Expand", ja: "拡張" },
   "la.selectAllShort": { zh: "全选", en: "Select all", ja: "すべて選択" },
