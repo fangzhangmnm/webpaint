@@ -350,6 +350,8 @@ export function initToolbar(ctx: AppContext) {
     editorState.magicWand.expandPx = v;
     pushMagicExpandToEngine();
   });
+  // 文本框会吞快捷键（合法），Enter=确认并释放焦点——画布点按 preventDefault 夺不回焦点，必须给出口
+  magicExpandPx.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") magicExpandPx.blur(); });
   window.addEventListener("wp:applyEditorState", syncMagicExpandUI);
   syncMagicExpandUI();
   // 设置按钮 → popup toggle
@@ -507,6 +509,7 @@ export function initToolbar(ctx: AppContext) {
       exPx.value = String(v);
       editorState.bucket.expandPx = v;
     });
+    exPx.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") exPx.blur(); });   // 同 magicExpandPx：Enter 释放焦点
     window.addEventListener("wp:applyEditorState", syncBucketUI);
     syncBucketUI();
   }

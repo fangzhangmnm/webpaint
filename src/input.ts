@@ -1146,7 +1146,19 @@ export class InputController {
   //   - app.js 菜单的"快捷键"面板从这里读 desc 渲染
   // 加新快捷键：只改这一个数组。
   _keydown(e: KeyboardEvent) {
-    if (e.target && ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "TEXTAREA")) return;
+    // 只对**真文本输入**吞快捷键（它们需要打字 + 自己的 Ctrl+Z）。range/checkbox/radio/button
+    // 也是 INPUT，但不吃文本——不能整体 return：画布 pointerdown 是 preventDefault 的，点画布
+    // **夺不回焦点**，一旦点过工具条滑条/勾选框，焦点就永久困在控件里 → 全部快捷键假死
+    // （v0.5.5 油漆桶工具条真机撞上：Ctrl+Z 多次无反应，摆弄别的 UI 才恢复）。
+    const tgt = e.target as HTMLElement | null;
+    if (tgt) {
+      const tag = tgt.tagName;
+      const type = (tgt as HTMLInputElement).type;
+      const isTextEntry = tag === "TEXTAREA" ||
+        (tag === "INPUT" && type !== "range" && type !== "checkbox" && type !== "radio" && type !== "button") ||
+        tgt.isContentEditable;
+      if (isTextEntry) return;
+    }
     // Space hold = 临时 pan（特殊：需 keyup 解除，独立 state）
     if (e.code === "Space" && !this.spaceDown) {
       this.spaceDown = true;
