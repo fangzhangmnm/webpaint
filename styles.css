@@ -777,6 +777,9 @@ input[type=range] {
   border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
   background: transparent; color: var(--ink); cursor: pointer;
 }
+/* v0.5.13：夜间主题下拉列表（option）修——UA 弹层默认白底，文字继承了亮色 --ink → 白底白字看不见。
+   显式给 option 上主题底/字色（iPad 原生滚轮选择器不受影响，桌面 Chromium/Firefox 生效）。 */
+.lasso-tool-select option { background: var(--bg); color: var(--ink); }
 
 /* 笔刷设置浮动面板（沿用 .float-panel 框架） */
 .brush-panel { width: 280px; }
