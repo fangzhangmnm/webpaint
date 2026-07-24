@@ -327,6 +327,8 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
   scrollbar-width: none;
 }
 .top-bar::-webkit-scrollbar { display: none; }
+/* v0.5.19 图库独立入口：同 top-bar pill 视觉，钉最左（等高由同款 padding+.tool 保证） */
+.top-bar.top-gallery-wrap { left: max(env(safe-area-inset-left, 0px), 6px); transform: none; }
 
 .tool-group, .color-group {
   display: flex;

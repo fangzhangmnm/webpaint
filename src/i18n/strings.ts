@@ -96,7 +96,6 @@ export const S = {
 
   // ── ⋯ 菜单：文件段（切片 2）────────────────────────────────────
   "menu.section.file":   { zh: "文件",        en: "File",            ja: "ファイル" },
-  "menu.importImage":    { zh: "导入图片",    en: "Import image",    ja: "画像を読み込む" },
   "menu.exportImage":    { zh: "导出图片",    en: "Export image",    ja: "画像を書き出す" },
   "menu.exportProject":  { zh: "导出项目",    en: "Export project",  ja: "プロジェクトを書き出す" },
   "menu.rename":         { zh: "重命名当前画作…", en: "Rename artwork…", ja: "作品名を変更…" },
@@ -112,7 +111,6 @@ export const S = {
   "menu.resample":       { zh: "调整尺寸",    en: "Resize",          ja: "サイズ変更" },
   "menu.reference":      { zh: "参考小窗",    en: "Reference window", ja: "参考ウィンドウ" },
   "menu.fit":            { zh: "视口复位",    en: "Reset view",      ja: "ビューをリセット" },
-  "menu.config.importImage":  { zh: "配置导入图片", en: "Import settings", ja: "読み込み設定" },
   "menu.config.exportImage":  { zh: "配置导出图片", en: "Export settings", ja: "書き出し設定" },
   "menu.config.exportProject":{ zh: "配置导出项目", en: "Project export settings", ja: "プロジェクト書き出し設定" },
 
@@ -182,8 +180,8 @@ export const S = {
   "lp.collapseToLayer": { zh: "合并组为一层", en: "Flatten group to layer", ja: "グループを1レイヤーに統合" },
   "lp.st.collapsedGroup":{ zh: "已把组「{name}」合并为一层", en: "Flattened group “{name}” to a layer", ja: "グループ「{name}」を1レイヤーに統合しました" },
   "lp.st.glNeeded":     { zh: "合成需要 WebGL2，当前不可用", en: "Compositing needs WebGL2, which is unavailable", ja: "合成には WebGL2 が必要ですが利用できません" },
-  "lp.st.stamped":      { zh: "已盖印全部为新层（其他图层已隐藏）", en: "Stamped all into a new layer (others hidden)", ja: "すべてを新規レイヤーにスタンプしました（他は非表示）" },
-  "lp.st.unstamped":    { zh: "已撤销盖印", en: "Stamp undone", ja: "スタンプを取り消しました" },
+  "lp.st.stamped":      { zh: "已合并全部为新层（其他图层已隐藏）", en: "Collapsed all into a new layer (others hidden)", ja: "すべてを結合して新規レイヤーにしました（他は非表示）" },
+  "lp.st.unstamped":    { zh: "已撤销合并", en: "Collapse undone", ja: "結合を取り消しました" },
   "lp.st.deletedGroup":{ zh: "已删除组「{name}」", en: "Deleted group “{name}”", ja: "グループ「{name}」を削除" },
   "lp.st.keepOne":     { zh: "至少保留一层", en: "Keep at least one layer", ja: "最低1レイヤーは必要です" },
   "lp.st.newGroup":    { zh: "已新建组「{name}」", en: "Created group “{name}”", ja: "グループ「{name}」を作成" },
@@ -433,8 +431,9 @@ export const S = {
   "lp.foot.down":    { zh: "下移图层", en: "Move layer down", ja: "レイヤーを下へ" },
   "lp.foot.del":     { zh: "删除当前图层", en: "Delete current layer", ja: "現在のレイヤーを削除" },
   "lp.foot.newGroup":{ zh: "新建图层组", en: "New group", ja: "新規グループ" },
-  "lp.foot.importPhoto":{ zh: "导入图片到新层", en: "Import image to new layer", ja: "画像を新規レイヤーに読み込む" },
-  "lp.foot.stampAll":   { zh: "盖印全部为新层", en: "Stamp all to new layer", ja: "すべてを新規レイヤーにスタンプ" },
+  "lp.foot.importPhoto":{ zh: "导入文件", en: "Import file", ja: "ファイルを読み込む" },
+  "lp.foot.importClipboard":{ zh: "导入剪贴板", en: "Import from clipboard", ja: "クリップボードから読み込む" },
+  "lp.foot.stampAll":   { zh: "合并全部为新层", en: "Collapse all into new layer", ja: "すべてを結合して新規レイヤーへ" },
   "ref.load":        { zh: "从文件载入", en: "Load from file", ja: "ファイルから読み込む" },
   "ref.live":        { zh: "实时镜像主画布", en: "Live mirror of canvas", ja: "キャンバスをライブミラー" },
   "ref.fit":         { zh: "适应窗口", en: "Fit to window", ja: "ウィンドウに合わせる" },

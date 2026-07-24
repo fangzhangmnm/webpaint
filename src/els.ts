@@ -37,8 +37,6 @@ export const els = {
   menuExportProjectConfig: byId("menuExportProjectConfig"),
   menuExportImage: byId("menuExportImage"),
   menuExportImageConfig: byId("menuExportImageConfig"),
-  menuImportImage: byId("menuImportImage"),
-  menuImportImageConfig: byId("menuImportImageConfig"),
   menuFit: byId("menuFit"),
   // v109: brushPanel + brush* sliders 撤了（平滑 per-preset，进 brush settings 调）
   topSaveBtn: byId("topSaveBtn"),
@@ -65,8 +63,6 @@ export const els = {
   adjustPanelHead: byId("adjustPanelHead"),
   adjustPanelTitle: byId("adjustPanelTitle"),
   adjustParamsBody: byId("adjustParamsBody"),
-  // v123 topGalleryBtn 撤了，图库挪进菜单 (id=menuGallery)
-  menuGallery: byId("menuGallery"),
   menuReference: byId("menuReference"),
   menuResetBrushRack: byId("menuResetBrushRack"),
   menuForcePwaReset: byId("menuForcePwaReset"),

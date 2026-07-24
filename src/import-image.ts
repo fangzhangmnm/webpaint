@@ -231,6 +231,8 @@ export function initImportImage(ctx: AppContext) {
 
   // 图层面板「导入图片」按钮 → file picker（强制叠层，复位 _addImportAsNewDoc）。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);
+  // v0.5.19 导入剪贴板（+菜单）：复用 Ctrl+V 全链路（selection-ops 的 wp:paste——读剪贴板→新层视口居中→错误上 banner）
+  document.getElementById("layerImportClipboardBtn")?.addEventListener("click", () => window.dispatchEvent(new CustomEvent("wp:paste")));
 
   // file-input plumbing：按文件类型分流（.ora→adopt / image→As{NewDoc|Layer}）。
   els.oraFileInput.addEventListener("change", async (e: Event) => {

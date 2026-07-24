@@ -47,9 +47,6 @@ function _selCropRect(): { x: number; y: number; w: number; h: number } | null {
   if (!sel || !(sel.bboxW > 0) || !(sel.bboxH > 0)) return null;
   return { x: sel.bboxX, y: sel.bboxY, w: sel.bboxW, h: sel.bboxH };
 }
-function _getImpImg(): { source: string } {
-  return { source: editorState.import.source };
-}
 function _setExpPrj(v: { format: string }) { editorState.exportProject.format = v.format; _updateMenuSubLabels(); }
 function _setExpImg(v: { format: string; target: string; scope: string }) {
   editorState.export.format = v.format;
@@ -57,17 +54,13 @@ function _setExpImg(v: { format: string; target: string; scope: string }) {
   editorState.export.layerMode = v.scope;   // scope → layerMode
   _updateMenuSubLabels();
 }
-function _setImpImg(v: { source: string }) { editorState.import.source = v.source; _updateMenuSubLabels(); }
 function _updateMenuSubLabels() {
   const ep = _getExpPrj();
   const ei = _getExpImg();
-  const ii = _getImpImg();
   const epEl = document.getElementById("menuExportProjectSub");
   const eiEl = document.getElementById("menuExportImageSub");
-  const iiEl = document.getElementById("menuImportImageSub");
   if (epEl) epEl.textContent = "." + ((getExporter(ep.format) || getExporter("ora")).ext);
   if (eiEl) eiEl.textContent = `${ei.format.toUpperCase()} · ${ei.scope === "active" ? t("sub.activeLayer") : t("sub.merged")} · ${ei.target === "clipboard" ? t("sub.clipboard") : ei.target === "print" ? t("sub.print") : t("sub.file")}${ei.clipSelection ? " · " + t("sub.selection") : ""}`;
-  if (iiEl) iiEl.textContent = `${ii.source === "clipboard" ? t("sub.clipboard") : t("sub.file")} · ${t("sub.newLayer")}`;
 }
 
 // 🔧 配置 popup（点开 / 点别处关）。setMenuOpen 不变，popup 嵌在 menu-item-row 里
@@ -161,21 +154,7 @@ export function initExportImportMenu(ctx: AppContext) {
       }
     } catch (e) { reportError(new Error(t("tm.exportFailed", { err: String(errMsg(e)) })), "warning"); }   // #34：剪贴板/分享权限被拒也走 banner，不再静默状态栏
   });
-  els.menuImportImage.addEventListener("click", async () => {
-    setMenuOpen(false);
-    const { source } = _getImpImg();
-    if (source === "clipboard") {
-      try {
-        const blob = await readImageFromClipboard();
-        if (!blob) { setStatus(t("tm.clipboardNoImage")); return; }
-        const fakeFile = new File([blob], "clipboard.png", { type: blob.type || "image/png" });
-        await importImageAsLayer(fakeFile);
-      } catch (e) { reportError(new Error(t("tm.clipboardPasteFailed", { err: String(errMsg(e)) })), "warning"); }   // #34
-    } else {
-      els.oraFileInput.value = "";
-      els.oraFileInput.click();
-    }
-  });
+  // v0.5.19（user）：「导入图片」出主菜单——导入文件/剪贴板收进图层窗口 + 菜单（import-image.ts 接线）。
 
   // v126 (user：「图层窗口的导入照片还是不灵」)
   //   原本这里注册了第二个 click handler 重复触发 picker.click()，
@@ -231,20 +210,6 @@ export function initExportImportMenu(ctx: AppContext) {
       _setExpImg({ format: fmt, target: tgt, scope });
       const clipEl = popup.querySelector('input[name="clipsel"]') as HTMLInputElement | null;
       if (clipEl && !clipEl.disabled) { editorState.export.clipSelection = clipEl.checked; _updateMenuSubLabels(); }
-    });
-  });
-  els.menuImportImageConfig.addEventListener("click", (e: Event) => {
-    e.stopPropagation();
-    const c = _getImpImg();
-    _openMenuConfigPopup(e.currentTarget as HTMLElement, `
-      <div class="menu-config-section">
-        <div class="menu-config-title">${t("tm.configSource")}</div>
-        <label><input type="radio" name="src" value="file" ${c.source === "file" ? "checked" : ""} /> ${t("tm.targetFile")}</label>
-        <label><input type="radio" name="src" value="clipboard" ${c.source === "clipboard" ? "checked" : ""} /> ${t("tm.targetClipboard")}</label>
-      </div>
-    `, (popup) => {
-      const src = (popup.querySelector('input[name="src"]:checked') as HTMLInputElement | null)?.value || "file";
-      _setImpImg({ source: src });
     });
   });
 }

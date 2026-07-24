@@ -846,8 +846,9 @@ export function initLayersPanel(ctx: AppContext) {
   });
   document.getElementById("layerAddNewBtn")?.addEventListener("click", () => { closeAddPopup(); _addEmptyLayer(); });
   document.getElementById("layerAddGroupBtn")?.addEventListener("click", () => { closeAddPopup(); _addEmptyGroup(); });
-  // 导入图片到新层：实际逻辑由 import-image.ts 给 layerImportPhotoBtn 接线，这里只负责收起菜单。
+  // 导入文件/剪贴板：实际逻辑由 import-image.ts 接线，这里只负责收起菜单。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", closeAddPopup);
+  document.getElementById("layerImportClipboardBtn")?.addEventListener("click", closeAddPopup);
   // #25：盖印全部为新层（置顶 + 其他层自动隐藏）
   document.getElementById("layerStampAllBtn")?.addEventListener("click", () => { closeAddPopup(); _stampAllToNewLayer(); });
   // 点别处收起 "+" 菜单

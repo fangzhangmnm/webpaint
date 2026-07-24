@@ -6,7 +6,6 @@ const J = (v) => JSON.stringify(v);
 
 test("[editor-state] 默认值 = freshGroups SSoT", () => {
   editorState.reset();
-  eq(editorState.import.source, "file", "import.source 默认 file");
   eq(editorState.export.format, "png", "export.format 默认 png");
   eq(editorState.export.layerMode, "merged", "export.layerMode 默认 merged");
   eq(editorState.exportProject.format, "ora", "exportProject.format 默认 ora");

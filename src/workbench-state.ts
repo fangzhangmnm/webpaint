@@ -131,7 +131,6 @@ export interface EditorViewport { tx: number; ty: number; scale: number; rot: nu
 // 序列化形状 = `.webpaint/editor-state.json` 的内容（freshGroups() 即 defaults SSoT）。
 function freshGroups() {
   return {
-    import:        { source: "file" as string },                                   // "file" | "clipboard"
     export:        { format: "png" as string, target: "file" as string, layerMode: "merged" as string, clipSelection: false },   // layerMode=scope "merged"|"active"；clipSelection=#16 仅导出选区范围
     exportProject: { format: "ora" as string },                                    // "ora" | "psd"
     colorPanel:    { enabled: false, position: null as PanelPos | null },
@@ -191,8 +190,7 @@ function mergeInto<T extends object>(dst: T, src: unknown): void {
 
 // ── struct 门面：显式访问器 + 四方法（**setter 不标脏**——desk 无 dirty 标记，见上方 ⚠）───────────
 export const editorState = {
-  // import / export ──
-  import:        { get source(): string { return S.g.import.source; }, set source(v: string) { S.g.import.source = v; } },
+  // export ──（import 组 v0.5.19 退役：导入收进图层 + 菜单，无配置面）
   export: {
     get format(): string { return S.g.export.format; }, set format(v: string) { S.g.export.format = v; },
     get target(): string { return S.g.export.target; }, set target(v: string) { S.g.export.target = v; },

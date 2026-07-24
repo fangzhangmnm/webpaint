@@ -597,7 +597,7 @@ export class PaintDoc {
   //   「其他图层自动隐藏」由调用方编排（组走 treeStructure 快照，叶 visible 走 layerProp op）。
   stampAllToTopLayer(merged: CanvasImageSource) {
     if (countLeaves(this.layers) >= this.maxLayers) return null;
-    const L = new Layer({ width: this.width, height: this.height, name: `盖印 ${this._nextLayerName().replace(/^图层\s*/, "")}`, empty: true });
+    const L = new Layer({ width: this.width, height: this.height, name: `合并 ${this._nextLayerName().replace(/^图层\s*/, "")}`, empty: true });
     L.editRegion(0, 0, this.width, this.height, (ctx, ox, oy) => { ctx.drawImage(merged, -ox, -oy); });
     this.layers.push(L);
     this.activeId = L.id;
