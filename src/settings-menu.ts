@@ -141,6 +141,19 @@ export function setMenuOpen(open: boolean) {
 export function initSettingsMenu(ctx: AppContext) {
   ({ state, board, setStatus, store, updateSaveStatus } = ctx);
 
+  // v0.6C（user 拍板）：☰ 六 tab 分页（文件/画布/视图/设置/插件/dev）。停留页 RAM 记忆（session 内）。
+  {
+    const tabs = [...document.querySelectorAll<HTMLElement>("#menuPanel .menu-tab")];
+    const pages = [...document.querySelectorAll<HTMLElement>("#menuPanel .menu-page")];
+    let _menuTab = "file";
+    const applyMenuTab = () => {
+      for (const b of tabs) b.setAttribute("aria-pressed", b.dataset.menuTab === _menuTab ? "true" : "false");
+      for (const p of pages) p.classList.toggle("hidden", p.dataset.menuPage !== _menuTab);
+    };
+    for (const b of tabs) b.addEventListener("click", (e: Event) => { e.stopPropagation(); _menuTab = b.dataset.menuTab!; applyMenuTab(); });
+    applyMenuTab();
+  }
+
   els.menuLongPressPick.addEventListener("click", () => {
     applyLongPressPick(!state.longPressPick);
     setStatus(t("status.longPressPick", { s: state.longPressPick ? t("common.on") : t("common.off") }));

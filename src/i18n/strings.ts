@@ -35,8 +35,6 @@ export const S = {
   "account.add.aria":{ zh: "账号 / 新增",      en: "Account / Add",   ja: "アカウント / 追加" },
 
   // ── ⋯ 设置菜单 ────────────────────────────────────────────────
-  "menu.section.settings": { zh: "设置",       en: "Settings",        ja: "設定",                  tok: "nasin" },
-  "menu.section.debug":    { zh: "调试",       en: "Debug",           ja: "デバッグ" },
   "menu.checkerboard":     { zh: "透明背景显示棋盘", en: "Checkerboard for transparency", ja: "透明部分に市松模様" },
   "menu.longPressPick":    { zh: "单指长按吸色", en: "Long-press to pick color", ja: "長押しでスポイト" },
   "menu.singleFingerDraw": { zh: "单指绘画",   en: "One-finger drawing", ja: "一本指で描画" },
@@ -95,7 +93,12 @@ export const S = {
   "status.theme":         { zh: "主题 · {s}",  en: "Theme · {s}",     ja: "テーマ · {s}" },
 
   // ── ⋯ 菜单：文件段（切片 2）────────────────────────────────────
-  "menu.section.file":   { zh: "文件",        en: "File",            ja: "ファイル" },
+  "menu.tab.file":     { zh: "文件", en: "File", ja: "ファイル" },
+  "menu.tab.canvas":   { zh: "画布", en: "Canvas", ja: "キャンバス" },
+  "menu.tab.view":     { zh: "视图", en: "View", ja: "表示" },
+  "menu.tab.settings": { zh: "设置", en: "Settings", ja: "設定" },
+  "menu.tab.plugins":  { zh: "插件", en: "Plugins", ja: "プラグイン" },
+  "menu.tab.dev":      { zh: "dev", en: "dev", ja: "dev" },
   "menu.exportImage":    { zh: "导出",    en: "Export",    ja: "書き出す" },
   "menu.rename":         { zh: "重命名当前画作…", en: "Rename artwork…", ja: "作品名を変更…" },
   "menu.saveAs":         { zh: "另存为…",     en: "Save as…",        ja: "名前を付けて保存…" },
