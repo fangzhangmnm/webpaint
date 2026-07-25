@@ -38,8 +38,10 @@ function applyThemeColorsToBoard() {
 function renderTheme(th: string) {
   theme = th;
   document.documentElement.setAttribute("data-theme", th);
-  const lbl = els.menuTheme.querySelector('[data-state-for="theme"]');
+  const lbl = els.menuTheme?.querySelector?.('[data-state-for="theme"]');
   if (lbl) lbl.textContent = themeLabel(th);
+  const sel = document.getElementById("menuThemeSelect") as HTMLSelectElement | null;   // v0.6C 下拉化
+  if (sel && sel.value !== th) sel.value = th;
   requestAnimationFrame(applyThemeColorsToBoard);
 }
 

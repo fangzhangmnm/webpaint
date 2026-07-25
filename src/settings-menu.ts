@@ -9,7 +9,7 @@
 import { els } from "./els.ts";
 import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关 = 跨设备偏好
 import { editorState } from "./workbench-state.ts";   // checkboard = per-doc editorState（载入时经 wp:applyEditorState 应用到 board）
-import { applyTheme, cycleTheme, themeLabel } from "./theme.ts";
+import { applyTheme, themeLabel, THEMES } from "./theme.ts";
 import { t, lang, setLang, LANGS, LANG_NAME, type Key, type Lang } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
@@ -209,11 +209,16 @@ export function initSettingsMenu(ctx: AppContext) {
     applyFps(next);
     setStatus(t("status.fps", { s: next ? t("common.on") : t("common.off") }));
   });
-  els.menuTheme.addEventListener("click", () => {
-    const next = cycleTheme();
-    applyTheme(next);
-    setStatus(t("status.theme", { s: themeLabel(next) }));
-  });
+  // v0.6C（user）：主题改下拉框（原点击轮换退役）。option 由 THEMES 填，label 走 theme.* i18n。
+  const menuThemeSelect = document.getElementById("menuThemeSelect") as HTMLSelectElement | null;
+  if (menuThemeSelect) {
+    menuThemeSelect.innerHTML = THEMES.map((th) => `<option value="${th}">${themeLabel(th)}</option>`).join("");
+    menuThemeSelect.addEventListener("click", (e: Event) => e.stopPropagation());
+    menuThemeSelect.addEventListener("change", () => {
+      applyTheme(menuThemeSelect.value);
+      setStatus(t("status.theme", { s: themeLabel(menuThemeSelect.value) }));
+    });
+  }
   // 语言：下拉框选择（endonym = 各语母语名，任何 UI 语言都认得；change 即 setLang→reload）。
   const menuLanguageSelect = document.getElementById("menuLanguageSelect") as HTMLSelectElement | null;
   if (menuLanguageSelect) {

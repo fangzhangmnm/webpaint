@@ -670,7 +670,8 @@ input[type=range] {
   top: 56px;
   /* v123 菜单按钮从右挪到左 (Procreate 顺序)，panel 也跟着挪 */
   left: 12px;
-  min-width: 200px;
+  width: 300px;   /* v0.6C user：菜单定宽（自适应不舒服）；小屏由 max-width 兜 */
+  max-width: calc(100vw - 16px);
   /* 长菜单 + iPad mini 竖屏：限高 + 滚动 */
   max-height: calc(100vh - 80px);
   overflow-y: auto;
@@ -786,10 +787,12 @@ input[type=range] {
 /* v0.6C ☰ 六 tab 分页（图库直达在 tab 行上方常驻） */
 .menu-tabs { display: flex; gap: 2px; padding: 4px 4px 3px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .menu-tab {
-  flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 1px;
+  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px;
   padding: 3px 2px; background: transparent; border: none; border-radius: 6px;
   color: var(--ink-soft); cursor: pointer; font-size: 10px; line-height: 1.2;
 }
+/* Procreate 式定宽小字：非中文长词 nowrap+省略，不撑 tab（面板已定宽） */
+.menu-tab span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .menu-tab svg { width: 18px; height: 18px; display: block; }
 .menu-tab[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .menu-page { display: flex; flex-direction: column; }
