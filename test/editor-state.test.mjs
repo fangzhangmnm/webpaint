@@ -113,3 +113,28 @@ test("[editor-state] 形状笔（ADR-0005）：默认 / 往返 / 老 doc 缺组�
   editorState.Unserialize({ magicWand: { threshold: 30 } });
   eq(editorState.shapeBrush.sub, "line", "缺组 → 默认");
 });
+
+test("[editor-state] 透视 frame（ADR-0006）：默认 / 往返 / 老 doc 缺组补默认", () => {
+  editorState.reset();
+  eq(editorState.persp.vp1, null, "vp1 默认 null");
+  eq(editorState.persp.lockHorizon, true, "锁地平线默认开");
+  eq(editorState.persp.plane, "off", "平面默认关");
+  eq(editorState.shapeBrush.gridNu, 2, "grid 默认 2×6（头身比）");
+  eq(editorState.shapeBrush.gridNv, 6);
+  eq(editorState.shapeBrush.gridBorder, false, "外框默认关");
+  editorState.persp.vp1 = { x: 100.5, y: 50.5 };
+  editorState.persp.vp3 = { x: 30.5, y: 900.5 };
+  editorState.persp.plane = "ground";
+  editorState.shapeBrush.gridNv = 8;
+  const ser = editorState.Serialize();
+  editorState.reset();
+  editorState.Unserialize(ser);
+  eq(JSON.stringify(editorState.persp.vp1), JSON.stringify({ x: 100.5, y: 50.5 }), "vp1 往返");
+  eq(JSON.stringify(editorState.persp.vp3), JSON.stringify({ x: 30.5, y: 900.5 }), "vp3 往返");
+  eq(editorState.persp.plane, "ground", "plane 往返");
+  eq(editorState.shapeBrush.gridNv, 8, "gridNv 往返");
+  editorState.reset();
+  editorState.Unserialize({ magicWand: { threshold: 30 } });   // 老 doc 无 persp 组
+  eq(editorState.persp.vp1, null, "缺组 → 默认");
+  eq(editorState.persp.plane, "off");
+});
