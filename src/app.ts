@@ -52,6 +52,7 @@ import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-b
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
 import { initFillMode } from "./fill-mode.ts";
+import { initPerspEdit } from "./persp-edit.ts";
 import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
 import { initTransientPanels, _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop, _commitTransform, _cancelTransform } from "./transient-panels.ts";
@@ -307,6 +308,7 @@ initFiltersAdjust(ctx);
 initToolbar(ctx);
 initSelectionOps(ctx);
 initFillMode(ctx);   // v0.5.11 套索填充模式（原 #22 油漆桶的重生，见 fill-mode.ts 头注释）
+initPerspEdit(ctx);  // ADR-0006 VP 编辑（形状笔透视 frame 的消失点 gizmo，crop 同款 transient）
 initSmoothDevPanel(ctx);
 initTransientPanels(ctx);
 initSideWindows(ctx);

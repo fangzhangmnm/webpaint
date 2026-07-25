@@ -916,6 +916,23 @@
       <button class="crop-toolbar-btn crop-toolbar-cancel" id="cropToolbarCancel" type="button" data-i18n="common.cancel">取消</button>
     </div>
 
+    <!-- ADR-0006 VP 编辑 toolbar（crop 同款半模态）：VP/参考点增删 chips + 锁地平线 + 应用/取消 -->
+    <div class="crop-toolbar hidden" id="perspToolbar">
+      <span class="crop-toolbar-label" data-i18n="pe.hint">消失点：拖点定位</span>
+      <span class="crop-toolbar-sep" aria-hidden="true">|</span>
+      <button class="crop-toolbar-btn" id="perspVp1Btn" type="button" aria-pressed="false">VP1</button>
+      <button class="crop-toolbar-btn" id="perspVp2Btn" type="button" aria-pressed="false">VP2</button>
+      <button class="crop-toolbar-btn" id="perspVp3Btn" type="button" aria-pressed="false" data-i18n="pe.vp3">竖直VP</button>
+      <button class="crop-toolbar-btn" id="perspRefBtn" type="button" aria-pressed="false" data-i18n="pe.ref">参考点</button>
+      <span class="crop-toolbar-sep" aria-hidden="true">|</span>
+      <button class="crop-toolbar-btn" id="perspLockBtn" type="button" aria-pressed="true" data-i18n="pe.lock">锁地平线</button>
+      <span class="crop-toolbar-sep" aria-hidden="true">|</span>
+      <button class="crop-toolbar-btn" id="perspApplyBtn" type="button" data-i18n="common.apply">应用</button>
+      <button class="crop-toolbar-btn crop-toolbar-cancel" id="perspCancelBtn" type="button" data-i18n="common.cancel">取消</button>
+    </div>
+    <!-- VP 拖拽手柄层（screen 坐标 DOM；VP 常在画布外也能拖） -->
+    <div class="persp-handles hidden" id="perspHandles"></div>
+
     <!-- v132 Filter brush toolbar：进入模糊笔刷 / 锐化笔刷等 filter brush 模式时浮在顶栏下方 -->
     <div class="crop-toolbar hidden" id="filterBrushToolbar">
       <span class="crop-toolbar-label" id="filterBrushTitle" data-i18n="fb.title">滤镜笔刷</span>
