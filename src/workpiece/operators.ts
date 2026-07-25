@@ -337,24 +337,26 @@ export class MergeDownOp extends DocumentOperator<{ layerId: number }, MergeReco
 // ---- ① 整 doc 变换（crop/resample/flip/rotate/offset；事务型：调用方前后各拍 snapshotAll）----
 type DocSnapAll = ReturnType<PaintDoc["snapshotAll"]>;
 export interface DocTransformArgs {
-  before: { doc: DocSnapAll; viewport?: Record<string, number> | null };
-  after: { doc: DocSnapAll; viewport?: Record<string, number> | null };
+  // persp = 形状笔透视配置快照（ADR-0006：VP 是 doc 坐标的 desk 态，裁剪/旋转随 doc 几何重映射，
+  //   undo/redo 必须一起还原否则透视静默错位）。对 operator 不透明，还原经注入回调。
+  before: { doc: DocSnapAll; viewport?: Record<string, number> | null; persp?: unknown };
+  after: { doc: DocSnapAll; viewport?: Record<string, number> | null; persp?: unknown };
 }
 export class DocTransformOp extends DocumentOperator<DocTransformArgs, boolean> {
   readonly kind = "docTransform";
-  // viewport/尺寸标签是 board/UI 的事，注入回调（workpiece 不碰 DOM）。
-  private _applyUi: (viewport: Record<string, number> | null | undefined) => void;
-  constructor(applyUi: (viewport: Record<string, number> | null | undefined) => void) { super(); this._applyUi = applyUi; }
+  // viewport/尺寸标签/透视配置是 board/UI/desk 的事，注入回调（workpiece 不碰 DOM）。
+  private _applyUi: (viewport: Record<string, number> | null | undefined, persp?: unknown) => void;
+  constructor(applyUi: (viewport: Record<string, number> | null | undefined, persp?: unknown) => void) { super(); this._applyUi = applyUi; }
   forward(w: Workpiece, args: DocTransformArgs, data: boolean | undefined): OpResult<boolean> {
     if (data !== undefined) {                       // redo（首跑 pre-applied）
       this.mut(w).doc.restoreSnapshotAll(args.after.doc);
-      this._applyUi(args.after.viewport);
+      this._applyUi(args.after.viewport, args.after.persp);
     }
     return { ok: true, replaced: true };
   }
   backward(w: Workpiece, args: DocTransformArgs, _data: boolean): OpResult<boolean> {
     this.mut(w).doc.restoreSnapshotAll(args.before.doc);
-    this._applyUi(args.before.viewport);
+    this._applyUi(args.before.viewport, args.before.persp);
     return { ok: true, replaced: true };
   }
   override estimateQuotaBytes(args: DocTransformArgs): number {
@@ -386,7 +388,7 @@ export interface OperatorRegistry {
   floatTransform: FloatTransformOp;
   dropFloat: DropFloatOp;
 }
-export function makeOperators(deps: { applyDocTransformUi: (viewport: Record<string, number> | null | undefined) => void }): OperatorRegistry {
+export function makeOperators(deps: { applyDocTransformUi: (viewport: Record<string, number> | null | undefined, persp?: unknown) => void }): OperatorRegistry {
   return {
     pixels: new SwapPixelsOp(),
     selection: new SwapSelectionOp(),

@@ -17,6 +17,8 @@ import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
 import { fillPreviewActive, commitFillNow } from "./fill-mode.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
+import { normalizeConfig as normalizePerspConfig } from "./perspective-frame.ts";
+import type { PerspConfig } from "./perspective-frame.ts";
 import type { AppContext } from "./app-context.ts";
 import type { LayerSnap } from "./doc.ts";
 
@@ -62,10 +64,12 @@ let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   
 const _selMem = { sub: "freehand" as string, setOp: "new" as string };
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
 const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", magic: "#magic-wand" };
-// 形状笔（ADR-0005）：组槽 + 约束钮（约束图标按子工具换义：15° 吸附 / 正方 / 正圆）
+// 形状笔（ADR-0005/0006）：组槽 + 约束钮（图标按子工具换义）+ grid 配置 + 透视平面槽
 let shapeToolbarStack: HTMLElement, shapeSubSlot: HTMLElement, shapeSubSlotUse: SVGUseElement,
-    shapeSubMenu: HTMLElement, shapeSubMenuBtns: HTMLElement[], shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement;
-const SHAPE_SUB_ICON: Record<string, string> = { line: "#line", rect: "#rectangle", circle: "#circle" };
+    shapeSubMenu: HTMLElement, shapeSubMenuBtns: HTMLElement[], shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement,
+    shapeGridCtx: HTMLElement, shapeGridNuVal: HTMLElement, shapeGridNvVal: HTMLElement, shapeGridBorderBtn: HTMLElement,
+    shapePerspSlot: HTMLElement, shapePerspMenu: HTMLElement, shapePerspMenuBtns: HTMLElement[];
+const SHAPE_SUB_ICON: Record<string, string> = { line: "#line", rect: "#rectangle", circle: "#circle", grid: "#grid" };
 const SHAPE_CONSTRAIN_ICON: Record<string, string> = { line: "#snap-angle", rect: "#constrain-square", circle: "#constrain-circle" };
 
 // 形状笔上下文工具栏派生（对齐 updateLassoToolbar 的「统一同步点」纪律）
@@ -73,14 +77,36 @@ export function updateShapeToolbar() {
   if (!shapeToolbarStack) return;
   const active = editMode.current() === "shapeBrush";
   shapeToolbarStack.classList.toggle("hidden", !active);
-  if (!active) { shapeSubMenu?.classList.add("hidden"); return; }
+  if (!active) { shapeSubMenu?.classList.add("hidden"); shapePerspMenu?.classList.add("hidden"); return; }
   const sub = input.shapeBrush.getSubTool();
   shapeSubSlotUse.setAttribute("href", SHAPE_SUB_ICON[sub] || "#line");
   for (const b of shapeSubMenuBtns) {
     b.setAttribute("aria-pressed", b.dataset.shapeSub === sub ? "true" : "false");
   }
+  // 约束钮：grid 无约束语义 → 隐藏（透视平面下正方/正圆不可定义，但 line 的 VP snap 仍有意义，保留显示）
+  shapeConstrainBtn.classList.toggle("hidden", sub === "grid");
   shapeConstrainUse.setAttribute("href", SHAPE_CONSTRAIN_ICON[sub] || "#snap-angle");
   shapeConstrainBtn.setAttribute("aria-pressed", input.shapeBrush.getConstrain() ? "true" : "false");
+  // grid 配置区（sub=grid 时显）
+  shapeGridCtx.classList.toggle("hidden", sub !== "grid");
+  if (sub === "grid") {
+    shapeGridNuVal.textContent = String(editorState.shapeBrush.gridNu);
+    shapeGridNvVal.textContent = String(editorState.shapeBrush.gridNv);
+    shapeGridBorderBtn.setAttribute("aria-pressed", editorState.shapeBrush.gridBorder ? "true" : "false");
+  }
+  // 透视平面槽：亮 = 透视开着；菜单项按已配置 VP 过滤（ADR-0006 平面清单）
+  const g = editorState.persp;
+  const hasPair = !!(g.vp1 && g.vp2), hasOne = !!(g.vp1 || g.vp2 || g.vp3);
+  shapePerspSlot.setAttribute("aria-pressed", g.plane !== "off" && hasOne ? "true" : "false");
+  for (const b of shapePerspMenuBtns) {
+    const plane = b.dataset.shapePlane!;
+    let show = plane === "off";
+    if (plane === "ground") show = !!g.vp1;
+    else if (plane === "wall") show = !!g.vp1 && !g.vp2;
+    else if (plane === "wallL" || plane === "wallR") show = hasPair;
+    b.classList.toggle("hidden", !show);
+    b.setAttribute("aria-pressed", g.plane === plane ? "true" : "false");
+  }
 }
 function closeSubMenu() { lassoSubMenu?.classList.add("hidden"); }
 function closeSetOpMenu() { lassoSetOpMenu?.classList.add("hidden"); }
@@ -450,9 +476,56 @@ export function initToolbar(ctx: AppContext) {
     editorState.shapeBrush.constrain = v;
     updateShapeToolbar();
   });
+  // grid 配置（ADR-0006）：steppers（零键盘）+ 外框 toggle；per-doc（editorState），改 → 写 + 灌引擎
+  shapeGridCtx = byId("shapeGridCtx");
+  shapeGridNuVal = byId("shapeGridNuVal");
+  shapeGridNvVal = byId("shapeGridNvVal");
+  shapeGridBorderBtn = byId("shapeGridBorderBtn");
+  const pushGridToEngine = () => {
+    input.shapeBrush.setGridConfig({
+      nu: editorState.shapeBrush.gridNu, nv: editorState.shapeBrush.gridNv,
+      border: editorState.shapeBrush.gridBorder,
+    });
+  };
+  const stepGrid = (axis: "gridNu" | "gridNv", d: number) => {
+    if (input.isStrokeActive()) input.abortActiveStroke();
+    editorState.shapeBrush[axis] = Math.max(1, Math.min(24, editorState.shapeBrush[axis] + d));
+    pushGridToEngine();
+    updateShapeToolbar();
+  };
+  byId("shapeGridNuMinus").addEventListener("click", () => stepGrid("gridNu", -1));
+  byId("shapeGridNuPlus").addEventListener("click", () => stepGrid("gridNu", +1));
+  byId("shapeGridNvMinus").addEventListener("click", () => stepGrid("gridNv", -1));
+  byId("shapeGridNvPlus").addEventListener("click", () => stepGrid("gridNv", +1));
+  shapeGridBorderBtn.addEventListener("click", () => {
+    if (input.isStrokeActive()) input.abortActiveStroke();
+    editorState.shapeBrush.gridBorder = !editorState.shapeBrush.gridBorder;
+    pushGridToEngine();
+    updateShapeToolbar();
+  });
+  // 透视平面槽（ADR-0006）：菜单选平面（VP 编辑入口在 persp-edit）；引擎在起笔时拉取（provider）
+  shapePerspSlot = byId("shapePerspSlot");
+  shapePerspMenu = byId("shapePerspMenu");
+  shapePerspMenuBtns = [...shapePerspMenu.querySelectorAll<HTMLElement>("[data-shape-plane]")];
+  wireSlotMenu(shapePerspSlot, shapePerspMenu, (b) => {
+    if (!b.dataset.shapePlane) return;   // VP 编辑入口不在这处理（persp-edit 接）
+    if (input.isStrokeActive()) input.abortActiveStroke();
+    editorState.persp.plane = b.dataset.shapePlane;
+    updateShapeToolbar();
+  });
+  input.shapeBrush.setPerspProvider(() => {
+    const g = editorState.persp;
+    if (!g.vp1 && !g.vp2 && !g.vp3) return null;
+    return normalizePerspConfig({
+      vp1: g.vp1, vp2: g.vp2, vp3: g.vp3,
+      lockHorizon: g.lockHorizon, refPoint: g.refPoint,
+      plane: g.plane as PerspConfig["plane"],
+    });
+  });
   const syncShapeFromEditorState = () => {
     input.shapeBrush.setSubTool(editorState.shapeBrush.sub as Parameters<typeof input.shapeBrush.setSubTool>[0]);
     input.shapeBrush.setConstrain(editorState.shapeBrush.constrain);
+    pushGridToEngine();
     updateShapeToolbar();
   };
   window.addEventListener("wp:applyEditorState", syncShapeFromEditorState);

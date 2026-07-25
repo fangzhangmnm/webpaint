@@ -47,10 +47,9 @@ def text_path(text, box, font='cjk'):
 
 # (id, 文字, 盒, 语义 note)
 SPECS = [
-    ("line",             "线",  (3, 3, 18, 18),   "形状笔·直线子工具。stopgap 字形；真图标=斜线+两端点(与 arc 同族)"),
-    ("snap-angle",       "15°", (1.5, 5, 21, 14, "sans"), "形状笔·直线约束(画布相对 15° 角度吸附)。stopgap 字形；真图标=量角器/角度扇形(workbench protractor 可定稿顶上)"),
-    ("constrain-square", "方",  (3, 3, 18, 18),   "形状笔·矩形约束(屏幕系 1:1 正方)。stopgap 字形；真图标=正方+等边记号"),
-    ("constrain-circle", "圆",  (3, 3, 18, 18),   "形状笔·圆弧约束(正圆, max 范数半径)。stopgap 字形；真图标=正圆+等径记号"),
+    # line/snap-angle/constrain-* 已进库（2026-07-25），从 SPECS 划掉（extract 收货后自动让位其实也行，
+    # 但删掉 = 补丁文件不再含死条目）。
+    ("perspective", "透", (3, 3, 18, 18), "形状笔·透视平面槽(关/地板/墙, ADR-0006)。stopgap 字形；真图标=汇聚线/地平线+消失点"),
 ]
 syms = []
 for sid, text, box, note in SPECS:

@@ -17,6 +17,8 @@ import "./pointer-gesture.test.mjs";
 import "./crop-geometry.test.mjs";
 import "./shape-geometry.test.mjs";   // 形状笔几何层（ADR-0005）：吸附/视口相对矩形/圆弧拟合(max范数+winding)/采样
 import "./shape-brush.test.mjs";      // 形状笔引擎：恒压/taper覆写/三子工具全链/pixelMode restore/cancel 无痕
+import "./perspective-frame.test.mjs"; // 透视 frame（ADR-0006）：两角定形/homography/chart ε 护栏/snap 方向
+import "./pixel-conic.test.mjs";       // 像素透视圆：Zingl 有理二次 Bézier conic（双向 Hausdorff 验证）
 import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";
 import "./background-sync-jobs.test.mjs";

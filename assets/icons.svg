@@ -4,10 +4,11 @@
      一份【钉死的拷贝】。上游共享库怎么改都跟本文件无关，直到我们主动去 pull。
      构建路径里没有任何东西会读那个仓库。
 
-       上游 commit    : 64b83a0（2026-07-25）
-       上游 icons.svg : sha256 0454da07452b9826…   ← 提取时的实际文件，可独立校验
+       上游 commit    : 3894967（2026-07-25）
+       上游 icons.svg : sha256 c2b0f6721a0af080…   ← 提取时的实际文件，可独立校验
        拉取日期       : 2026-07-25
-       symbol 数      : 100（全部来自上游，零本地追加）
+       symbol 数      : 104（全部来自上游，零本地追加；本次收货：形状笔 4 真图标 +
+                        grid 直角细框新版）
 
      库里还没有的图标【不在本文件里】——放 assets/icons-local.svg（stopgap 字形补丁 sprite），
      由 tools/inline-sprites.py 合并内联；上游画出同名图标后重跑 extract + inline 自动让位（自愈）。
@@ -23,7 +24,7 @@
      全部 currentColor，尺寸由 CSS 给。
 -->
 <!--
-  100 icons extracted from the family icon library (../../../../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead.
+  104 icons extracted from the family icon library (../../../../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead.
   Family SVG Icons — MIT License, Copyright (c) 2026 fangzhangmnm.
   Contains work derived from (per-icon provenance in data-src):
     Bootstrap Icons — MIT License, Copyright (c) 2019-2024 The Bootstrap Authors · https://github.com/twbs/icons
@@ -46,6 +47,10 @@
   <!-- shapes -->
   <symbol id="rectangle" data-cat="shapes" data-src="own" data-note="矩形(shapes 基本图元)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="12" rx="0.6"/></symbol>
   <symbol id="circle" data-cat="shapes" data-src="own" data-note="圆(shapes 基本图元,无圆心点)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/></symbol>
+  <symbol id="line" data-cat="shapes" data-src="own" data-note="直线(shapes 基本图元):斜线+两端点, 与 arc 同族(同点径 1.2), 29° 防端点顶角; 20260725 入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 16.8 L20.5 7.2"/><circle cx="3.5" cy="16.8" r="1.2" fill="currentColor" stroke="none"/><circle cx="20.5" cy="7.2" r="1.2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="snap-angle" data-cat="shapes" data-src="own" data-note="角度吸附(15° 整数角):字样「15°」, 数字走 fps 同款几何圆角骨架(1=杆+旗, 5=fps 的 S 同形, °=小圆); 图形系四方案(量角器/扇形/方向扇/磁铁)均落选; 20260725 入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 6.4 L5.6 4 V19.4"/><path d="M14.8 4 H11.2 A1.6 1.6 0 0 0 9.6 5.6 V10.4 A1.6 1.6 0 0 0 11.2 12 H13.2 A1.6 1.6 0 0 1 14.8 13.6 V17.8 A1.6 1.6 0 0 1 13.2 19.4 H10.0"/><circle cx="19.2" cy="6.1" r="2.1"/></symbol>
+  <symbol id="constrain-square" data-cat="shapes" data-src="own" data-note="1:1 约束(正方/正圆共用图形):正方内手绘 1:1; constrain-circle 同形挂 id(同形多 id practice); 20260725 入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1"/><path d="M7.6 10.2 L8.8 9.2 V14.8"/><path d="M14 10.2 L15.2 9.2 V14.8"/><circle cx="12" cy="10.7" r="0.85" fill="currentColor" stroke="none"/><circle cx="12" cy="13.3" r="0.85" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="constrain-circle" data-cat="shapes" data-src="own" data-note="1:1 约束: constrain-square 的同形别名 id(WebPaint 圆弧约束钮用); 20260725 入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1"/><path d="M7.6 10.2 L8.8 9.2 V14.8"/><path d="M14 10.2 L15.2 9.2 V14.8"/><circle cx="12" cy="10.7" r="0.85" fill="currentColor" stroke="none"/><circle cx="12" cy="13.3" r="0.85" fill="currentColor" stroke="none"/></symbol>
   <!-- image-processing -->
   <symbol id="brush-rack" data-cat="image-processing" data-src="own" data-note="笔架:H 型架 + 三支平头刷。笔号只改梯形宽度, 长度与底边全部对齐到最大那支(梯形有底边所以不会像尖头那样读成箭头;杆的屁股探出横梁) —— 宽 1.0/1.5/2.1, 笔头长 3.8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 3.6 V21.0"/><path d="M20.8 3.6 V21.0"/><path d="M3.2 8.4 H20.8"/><path d="M7.40 6.10 V15.20"/><path d="M6.72 15.20 L6.40 19.00 L8.40 19.00 L8.08 15.20 Z" fill="currentColor" stroke="none"/><path d="M12.00 6.10 V15.20"/><path d="M10.98 15.20 L10.50 19.00 L13.50 19.00 L13.02 15.20 Z" fill="currentColor" stroke="none"/><path d="M16.60 6.10 V15.20"/><path d="M15.17 15.20 L14.50 19.00 L18.70 19.00 L18.03 15.20 Z" fill="currentColor" stroke="none"/></symbol>
   <symbol id="brush-width" data-cat="image-processing" data-src="own" data-note="笔刷宽度:平行两条波浪(标准1.7/粗3.4)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9 Q7.5 6 12 9 T21 9" stroke-width="1.7"/><path d="M3 15.5 Q7.5 12.5 12 15.5 T21 15.5" stroke-width="3.4"/></symbol>
@@ -131,7 +136,7 @@
   <!-- globalization -->
   <symbol id="globe-speech" data-cat="globalization" data-src="own" data-note="语言=地球+对话气泡(mask 抠洞遮挡,留 gap)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icGsMask"><rect width="24" height="24" fill="#fff"/><path d="M22 18.5 a1.7 1.7 0 0 1 -1.7 1.7 h-4 l-2.3 2 v-2 a1.7 1.7 0 0 1 -1.7 -1.7 v-2.6 a1.7 1.7 0 0 1 1.7 -1.7 h6.3 a1.7 1.7 0 0 1 1.7 1.7 z" fill="#000" stroke="#000" stroke-width="2.6"/></mask><g mask="url(#icGsMask)"><circle cx="10" cy="10" r="7"/><line x1="3" y1="10" x2="17" y2="10"/><ellipse cx="10" cy="10" rx="3" ry="7"/></g><path d="M22 18.5 a1.7 1.7 0 0 1 -1.7 1.7 h-4 l-2.3 2 v-2 a1.7 1.7 0 0 1 -1.7 -1.7 v-2.6 a1.7 1.7 0 0 1 1.7 -1.7 h6.3 a1.7 1.7 0 0 1 1.7 1.7 z"/></symbol>
   <!-- viewport -->
-  <symbol id="grid" data-cat="viewport" data-src="own" data-note="网格:圆角外框 1.7 + 内部 4x4 细网格线 1.2(细于外框才有层次;24px 实测 5x5 会糊成网眼)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g stroke-width="1.7"><rect x="3.5" y="3.5" width="17" height="17" rx="1.6"/></g><g stroke-width="1.2"><path d="M7.75 3.5 V20.5"/><path d="M3.5 7.75 H20.5"/><path d="M12.00 3.5 V20.5"/><path d="M3.5 12.00 H20.5"/><path d="M16.25 3.5 V20.5"/><path d="M3.5 16.25 H20.5"/></g></symbol>
+  <symbol id="grid" data-cat="viewport" data-src="own" data-note="网格:直角外框 1.2 与内网格线同宽(20260725 甲方定稿; 原 rx1.6 圆角粗框版退役), 内部 4x4 细网格" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g stroke-width="1.2" stroke-linejoin="miter"><rect x="3.5" y="3.5" width="17" height="17"/></g><g stroke-width="1.2"><path d="M7.75 3.5 V20.5"/><path d="M3.5 7.75 H20.5"/><path d="M12.00 3.5 V20.5"/><path d="M3.5 12.00 H20.5"/><path d="M16.25 3.5 V20.5"/><path d="M3.5 16.25 H20.5"/></g></symbol>
   <symbol id="maximize-viewport" data-cat="viewport" data-src="own" data-note="适配视口:四角向外的箭头" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 四角向外的箭头 --> <polyline points="4 9 4 4 9 4"/> <polyline points="20 9 20 4 15 4"/> <polyline points="4 15 4 20 9 20"/> <polyline points="20 15 20 20 15 20"/></symbol>
   <symbol id="picture-in-picture" data-cat="viewport" data-src="own" data-note="画中画:大框(主画布) + 右下角内嵌小窗(参考小窗自己)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 大框（主画布）+ 内嵌小窗（参考小窗自己）—— picture-in-picture 隐喻 --> <rect x="3" y="4" width="18" height="14" rx="2"/> <rect x="12" y="10" width="7" height="5" rx="1"/></symbol>
   <!-- ui -->

@@ -21,6 +21,12 @@ interface Viewport { tx: number; ty: number; scale: number; rot: number; }
 
 // 光标预览（screen CSS px；size 是 doc px）
 interface Cursor { x: number; y: number; size: number; square?: boolean; aspect?: number; rotation?: number; }   // aspect=椭圆度(0..1)、rotation=斜度(弧度，resolved 值)：footprint 预览
+// ADR-0006 VP 编辑 gizmo 数据（doc 坐标；persp-edit 算好，board 只画）
+export interface PerspGizmoData {
+  horizon: [{ x: number; y: number }, { x: number; y: number }] | null;
+  rays: Array<[{ x: number; y: number }, { x: number; y: number }]>;
+  vps: Array<{ x: number; y: number }>;
+}
 
 // 选区（doc.selection）：gray8 tile mask + 紧 bbox（真类型在 selection.ts；v0.4.6 maskCanvas 死）
 import type { Selection } from "./selection.ts";
@@ -614,9 +620,39 @@ export class Board {
     this._applyDocTransform(ctx);
     const { scale } = this.viewport;
     this._drawLassoOverlay(ctx, scale);
+    this._drawPerspGizmo(ctx, scale);
     ctx.strokeStyle = "rgba(0,0,0,0.18)";
     ctx.lineWidth = 1 / scale;
     ctx.strokeRect(0, 0, this.doc.width, this.doc.height);
+  }
+
+  // ADR-0006 VP 编辑模式的 gizmo（淡地平线 + 参考点射线 + VP 圈；只在编辑模式非空，
+  //   平时 provider 返 null 零成本）。拖拽手柄是 DOM（persp-edit），这里只画线。
+  setPerspGizmoProvider(fn: (() => PerspGizmoData | null) | null) { this._perspGizmoProvider = fn; }
+  _drawPerspGizmo(ctx: Ctx2D, scale: number) {
+    const g = this._perspGizmoProvider?.();
+    if (!g) return;
+    ctx.save();
+    ctx.lineCap = "round";
+    if (g.horizon) {
+      ctx.strokeStyle = "rgba(64,140,255,0.55)";
+      ctx.lineWidth = 1.4 / scale;
+      ctx.beginPath();
+      ctx.moveTo(g.horizon[0].x, g.horizon[0].y);
+      ctx.lineTo(g.horizon[1].x, g.horizon[1].y);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(64,140,255,0.28)";
+    ctx.lineWidth = 1 / scale;
+    for (const [a, b] of g.rays) {
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(64,140,255,0.8)";
+    ctx.lineWidth = 1.4 / scale;
+    for (const v of g.vps) {
+      ctx.beginPath(); ctx.arc(v.x, v.y, 5 / scale, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // Stage 3：brush stamp 列表提供者（app 注入 = () => input.brush.collectStamps()）。
@@ -652,6 +688,7 @@ export class Board {
 
   // v0.5.11 fill-mode：填色预览 provider（fill-mode.ts 注入；active 才返 {color, layer}）。
   _fillProvider: (() => { color: string; layer: Layer } | null) | null = null;
+  _perspGizmoProvider: (() => PerspGizmoData | null) | null = null;   // ADR-0006 VP 编辑 gizmo
   setFillProvider(fn: (() => { color: string; layer: Layer } | null) | null) { this._fillProvider = fn; }
 
   // fill 输入构造（live 每帧 + commit 共用 = 同源输入喂同一 shader，对齐 _overlayInputFrom 的 SSoT 纪律）。

@@ -9,6 +9,7 @@ import { els } from "./els.ts";
 import { bumpDoc } from "./signals.ts";
 import { t } from "./i18n/index.ts";
 import { resizeCropRect, cropRectToInts } from "./crop-geometry.ts";
+import { remapShapePersp, snapshotShapePersp } from "./workbench-state.ts";
 import type { AppContext } from "./app-context.ts";
 
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -28,12 +29,12 @@ let _suppressTransientPanels: AppContext["_suppressTransientPanels"], _restoreTr
 // 通用：op 前先 commit floating + 把当前 doc + viewport snapshot 当 before
 function _captureDocBefore() {
   editMode.applyPendingTransient();
-  return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
+  return { doc: doc.snapshotAll(), viewport: { ...board.viewport }, persp: snapshotShapePersp() };
 }
 function _captureDocAfter() {
-  return { doc: doc.snapshotAll(), viewport: { ...board.viewport } };
+  return { doc: doc.snapshotAll(), viewport: { ...board.viewport }, persp: snapshotShapePersp() };
 }
-type DocSnap = { doc: ReturnType<AppContext["doc"]["snapshotAll"]>; viewport: Record<string, number> };
+type DocSnap = { doc: ReturnType<AppContext["doc"]["snapshotAll"]>; viewport: Record<string, number>; persp: unknown };
 function _pushDocTransform(before: DocSnap, after: DocSnap, label: string) {
   // 事务型 pre-applied：变换已在两次快照之间跑完，首跑 forward 只收下 undo 包。
   history.run(workpiece, ops.docTransform, { before, after });   // run 同步派 wp:histchange → 编辑门已标游标+云脏（无需再标）
@@ -173,6 +174,7 @@ export function initDocOps(ctx: AppContext) {
     if (w < 1 || h < 1) { setStatus(t("tm.selectionTooSmall"), true); return; }
     runDocTransform(t("tm.croppedToSelection", { w, h }), () => {
       doc.cropTo({ x, y, w, h });
+      remapShapePersp((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移
       _shiftViewportAfterCrop({ x, y });
     });
   });
@@ -202,7 +204,11 @@ export function initDocOps(ctx: AppContext) {
       if (editMode.hasPendingTransient()) editMode.applyPendingTransient();   // v0.5.38 决定性动作=apply 悬浮 transient
       setMenuOpen(false);
       setAdjustOpen(false);
-      runDocTransform(t("tm.flippedHorizontal"), () => doc.flipHorizontal());
+      runDocTransform(t("tm.flippedHorizontal"), () => {
+        const W = doc.width;
+        doc.flipHorizontal();
+        remapShapePersp((p) => ({ x: W - p.x, y: p.y }));   // ADR-0006：像素中线 W−(i+.5)=(W−i−1)+.5 仍在格上
+      });
     });
   }
 
@@ -216,7 +222,11 @@ export function initDocOps(ctx: AppContext) {
       setMenuOpen(false);
       setAdjustOpen(false);
       runDocTransform(t("tm.rotated90CCW"), () => {
+        const W = doc.width;
         doc.rotate90CCW();
+        // ADR-0006：VP 随转（(x,y)→(y, W−x)，同 doc 像素映射）；VP 对的地平线转成竖直 →
+        //   自动解锁 lockHorizon（锁的语义 = doc 水平线，转后无法表示；下次 VP 编辑可重锁）。
+        remapShapePersp((p) => ({ x: p.y, y: W - p.x }), { unlockHorizon: true });
         board.fitToScreen();
       });
     });
@@ -230,6 +240,7 @@ export function initDocOps(ctx: AppContext) {
     const { x, y, w, h } = cropRectToInts(_cropState.rect, { min: 1, max: 8192 });
     runDocTransform(t("tm.cropped", { w, h }), () => {
       doc.cropTo({ x, y, w, h });
+      remapShapePersp((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移（含负向扩张）
       _shiftViewportAfterCrop({ x, y });
     });
     _closeCropMode();
@@ -310,7 +321,10 @@ export function initDocOps(ctx: AppContext) {
     const ox = ((dx % doc.width) + doc.width) % doc.width;
     const oy = ((dy % doc.height) + doc.height) % doc.height;
     if (ox === 0 && oy === 0) { _closeOffsetDialog(); return; }
-    runDocTransform(t("tm.offset", { dx, dy }), () => doc.offsetWrap(dx, dy));
+    runDocTransform(t("tm.offset", { dx, dy }), () => {
+      doc.offsetWrap(dx, dy);
+      remapShapePersp((p) => ({ x: p.x + ox, y: p.y + oy }));   // ADR-0006：VP 平移不 wrap（VP 本可在画布外）
+    });
     _closeOffsetDialog();
   });
 }

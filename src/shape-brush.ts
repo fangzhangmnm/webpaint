@@ -1,20 +1,26 @@
-// 形状笔引擎（ADR-0005）——CONTEXT [[Engine]] 名册里 ShapesEngine 的落位。
+// 形状笔引擎（ADR-0005 + ADR-0006 透视 frame）——CONTEXT [[Engine]] 名册里 ShapesEngine 的落位。
 //
 // 心智模型（user 2026-07-25）：形状笔是**笔**（对标滤镜笔），不是带 gizmo 的可编辑对象。
-//   一个 shape = 一个 stroke：按下→拖动（live 预览 = 每 move 按当前几何整条重合成）→抬手落像素。
+//   一个 shape = 一个 stroke：按下→拖动（live 预览 = 每 move 按当前几何整形重合成）→抬手落像素。
 //   中断（切子工具/手势接管）= cancel 不进 undo，同笔刷画一半（input._abortStroke）。
 //
-// 实现 = 几何(shape-geometry 纯函数) + 私有 BrushEngine 重合成：
-//   · buffered 笔刷：合成 stamps → collectStamps 走现有 GPU stamp overlay（live==commit 同一份）；
-//     endStroke 返回 StampCollect 由 input 走 board.commitBrushStroke（与主笔刷同路径）。
-//   · pixelMode 笔刷（像素画特化，user 2026-07-25）：immediate in-place——每帧
-//     restoreFromSnapshot(preSnap) 擦掉上一帧再整形重画（快照 = tile 句柄零拷贝；液化同款节律）。
-//     端点 clamp 整数像素中线、忽略视口旋转（像素格是 doc 轴的）；三种形状**每像素恰好一颗**
-//     （Bresenham 线/矩形周界/Zingl midpoint 椭圆 + stampAt，消 spacing 撒点双叠）；
-//     圆输入改 **AABB 拖拽**（传统 x0y0→x1y1 拉框，好控制），不走弧长识别/拟合、无弧。
-//   · 恒压 0.5（user 拍板：不记录笔压，专注形状 = 鼠标矢量绘图体验）；**强制无视 taper**
-//     （taper 是笔压修饰，笔压已禁用；机械绘制要粗细均匀）——覆写冻结 ResolvedBrush，不碰引擎。
-//   · smoother 直通（tau=0/deadzone=0，t=null 走 FALLBACK_DT）：几何已精确，平滑只会拖后腿。
+// 子工具：line / rect / circle(圆·弧) / grid(尺笔退化版：nu×nv 平行线格，outer border 可开关，
+//   默认 2×6 = 6 头身 + 中线；参考线画在图层上，不是 gizmo)。
+//
+// frame（形状笔全局，ADR-0006）：align-to-viewport（默认，几何相对视口轴）或 透视平面
+//   （editorState.persp：VP 0-3 个 + 平面选择）。透视下 rect=梯形/四边形、grid=透视缩短格、
+//   circle 徒手拟合在平面 chart 里做、line 约束吸向 VP（透视辅助线）。
+//   约束键在透视平面下只对 line 有意义（平面内"正方/正圆"需要度量，而深度尺度自由度在
+//   两角定形后已消掉——结构性不可定义，ADR-0006）。
+//
+// 渲染路径：
+//   · buffered 笔刷：几何 → 一组 polyline（grid 是多条！）→ 逐条驱动私有 BrushEngine →
+//     merge 成单个 StampCollect（一条 undo）→ 现有 GPU stamp overlay / commitBrushStroke。
+//   · pixelMode（像素画特化）：端点 clamp 整数像素中线、忽略视口旋转（透视 frame 照用——
+//     user：像素也透视）；每像素恰好一颗（Bresenham 线/周界/Zingl 盒椭圆/Zingl 有理 Bézier
+//     透视 conic + stampAt），全形状统一 seen-set 去重（格线交叉不双叠）；每帧
+//     restoreFromSnapshot 擦上一帧再整形重画。
+//   · 恒压 0.5、强制无 taper（覆写冻结 ResolvedBrush）。
 import { BrushEngine } from "./brush.ts";
 import { disposeLayerSnap } from "./doc.ts";
 import {
@@ -22,43 +28,73 @@ import {
   linePolyline, rectPolyline, ellipseArcPolyline, maxSegLenFor,
   clampPixelCenter, bresenhamLine, bresenhamRectPerimeter, bresenhamEllipseRect,
 } from "./shape-geometry.ts";
+import {
+  planeFamilies, quadFromCorners, homographyUnitSquare, applyMat3,
+  planeChart, snapDirections, snapToDirections,
+} from "./perspective-frame.ts";
+import { bresenhamConicInQuad } from "./pixel-conic.ts";
+import type { Family, PerspConfig, Mat3 } from "./perspective-frame.ts";
 import type { Layer, LayerSnap } from "./doc.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Pt } from "./shape-geometry.ts";
 
-export type ShapeSubTool = "line" | "rect" | "circle";
+export type ShapeSubTool = "line" | "rect" | "circle" | "grid";
+
+export interface GridConfig { nu: number; nv: number; border: boolean; }
 
 // 恒压值 = 鼠标主路径的既有常量（input.effectivePressureFor mouse 分支同款 0.5）
 const SHAPE_PRESSURE = 0.5;
 
 type Rect4 = [number, number, number, number];
+type StampCollect = NonNullable<ReturnType<BrushEngine["collectStamps"]>>;
+
+// begin 时冻结的 frame：viewport（rot）或已解析的透视平面（两族 + 可选 chart）
+type Frame =
+  | { kind: "viewport"; rot: number }
+  | { kind: "persp"; cfg: PerspConfig; famA: Family; famB: Family };
 
 interface ShapeStroke {
   layer: Layer;
   settings: ResolvedBrush;     // 已覆写 taperIn/Out=0 的冻结值
   mode: string;                // "brush" | "erase"
-  rot: number;                 // begin 时冻结的 viewport.rot（视口相对几何用；描边中转视口 = 手势接管即 abort）
-  x0: number; y0: number;      // 起点（line/rect 的锚）
+  frame: Frame;
+  x0: number; y0: number;      // 起点（line/rect/grid 的锚）
   x1: number; y1: number;      // 当前点
-  pts: Pt[];                   // circle：freehand raw 点列（拟合输入）
+  pts: Pt[];                   // circle 徒手拟合的 raw 点列（pixelMode 圆 = AABB 拖拽，不收集）
   preSnap: LayerSnap | null;   // pixelMode：每帧 restore 的基准
   lastPaint: Rect4 | null;     // pixelMode：上一帧画过的区（restore 后也要重渲）
   dirty: Rect4 | null;         // flushDirty 累计（input 每 move 取走喂 board.markDocDirty）
+  cs: StampCollect | null;     // buffered：本帧合成缓存（多 polyline merge；live==commit 同一份）
 }
 
 export class ShapeBrushEngine {
   _inner = new BrushEngine();
   _subTool: ShapeSubTool = "line";
   _constrain = false;
+  _grid: GridConfig = { nu: 2, nv: 6, border: false };   // 默认 6 头身 + 中线（user 拍板）
   _rotProvider: (() => number) | null = null;
+  _perspProvider: (() => PerspConfig | null) | null = null;
   _st: ShapeStroke | null = null;
 
   setSubTool(s: ShapeSubTool) { this._subTool = s; }
   getSubTool(): ShapeSubTool { return this._subTool; }
   setConstrain(b: boolean) { this._constrain = !!b; }
   getConstrain(): boolean { return this._constrain; }
-  // 视口 rot 注入（app 接线 board.viewport；引擎不认识 Board）
+  setGridConfig(g: Partial<GridConfig>) { this._grid = { ...this._grid, ...g }; }
+  getGridConfig(): GridConfig { return { ...this._grid }; }
+  // 视口 rot / 透视配置注入（app 接线 board.viewport 与 editorState；引擎不认识两者）
   setViewportRotProvider(fn: (() => number) | null) { this._rotProvider = fn; }
+  setPerspProvider(fn: (() => PerspConfig | null) | null) { this._perspProvider = fn; }
+
+  _resolveFrame(pixel: boolean): Frame {
+    const cfg = this._perspProvider?.();
+    if (cfg && cfg.plane !== "off") {
+      const fams = planeFamilies(cfg);
+      if (fams) return { kind: "persp", cfg, famA: fams[0], famB: fams[1] };
+    }
+    // 像素格是 doc 轴的 → pixelMode 忽略视口旋转（透视 frame 不受此限——user：像素也透视）
+    return { kind: "viewport", rot: pixel ? 0 : (this._rotProvider?.() ?? 0) };
+  }
 
   // 签名与 BrushEngine.beginStroke 一致 → input._beginStroke 按 engineKey 通用调用。
   //   pressure/smooth/t 有意忽略（恒压 + 直通 + 合成时间戳）。
@@ -66,17 +102,16 @@ export class ShapeBrushEngine {
               mode: string = "brush", _smooth: object = {}, _t: number | null = null) {
     const s = { ...settings, taperIn: 0, taperOut: 0 } as ResolvedBrush;
     Object.freeze(s);
-    // 像素笔模式（user 2026-07-25）：端点 clamp 到整数像素中线（预览即最终、落格对称）；
-    //   像素格是 doc 轴的 → 忽略视口旋转（斜矩形在像素模式下无意义）。
     if (s.pixelMode) { x = clampPixelCenter(x); y = clampPixelCenter(y); }
     this._st = {
       layer, settings: s, mode,
-      rot: s.pixelMode ? 0 : (this._rotProvider?.() ?? 0),
+      frame: this._resolveFrame(!!s.pixelMode),
       x0: x, y0: y, x1: x, y1: y,
       pts: [{ x, y }],
       preSnap: s.pixelMode ? layer.snapshot() : null,
       lastPaint: null,
       dirty: null,
+      cs: null,
     };
     this._resynth();
   }
@@ -87,19 +122,18 @@ export class ShapeBrushEngine {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;   // NaN 护栏（同 BrushEngine）
     if (st.settings.pixelMode) { x = clampPixelCenter(x); y = clampPixelCenter(y); }
     st.x1 = x; st.y1 = y;
-    // 像素模式的圆 = AABB 拖拽（Bresenham 椭圆，见 _resynth），不收集 freehand 点列
+    // 圆的徒手拟合只在非像素模式收点（像素圆 = AABB 拖拽）
     if (this._subTool === "circle" && !st.settings.pixelMode) st.pts.push({ x, y });
     this._resynth();
   }
 
-  // 抬手：buffered → 终版 StampCollect（input 走 board.commitBrushStroke，与主笔刷同路径）；
+  // 抬手：buffered → 本帧合成缓存（与 live 同一份 StampCollect，input 走 board.commitBrushStroke）；
   //   pixelMode → 像素已 in-place 落层，清态返 null。
-  endStroke(): ReturnType<BrushEngine["collectStamps"]> {
+  endStroke(): StampCollect | null {
     const st = this._st;
     if (!st) return null;
-    let out: ReturnType<BrushEngine["collectStamps"]> = null;
-    if (!st.settings.pixelMode) out = this._inner.endStroke();
-    else this._inner.cancelStroke();
+    const out = st.settings.pixelMode ? null : st.cs;
+    this._inner.cancelStroke();
     disposeLayerSnap(st.preSnap);
     this._st = null;
     return out;
@@ -119,9 +153,9 @@ export class ShapeBrushEngine {
   }
 
   // GPU stamp overlay 拉取口（live 预览）。pixelMode 走 live-sync（in-place），无 stamps。
-  collectStamps(): ReturnType<BrushEngine["collectStamps"]> {
+  collectStamps(): StampCollect | null {
     if (!this._st || this._st.settings.pixelMode) return null;
-    return this._inner.collectStamps();
+    return this._st.cs;
   }
 
   flushDirty(): Rect4 | null {
@@ -132,85 +166,188 @@ export class ShapeBrushEngine {
     return d;
   }
 
-  // 当前几何 → 采样点列。circle 拟合不足（起手几个点）→ 只出起点一颗（预览从小处长出来）。
-  _polyline(): Pt[] {
-    const st = this._st!;
-    const seg = maxSegLenFor(st.settings.size, st.settings.spacing);
-    if (this._subTool === "line") {
-      const end = this._constrain ? snapLineEnd(st.x0, st.y0, st.x1, st.y1) : { x: st.x1, y: st.y1 };
-      return linePolyline({ x: st.x0, y: st.y0 }, end, seg);
+  // ---- 几何（buffered）：当前拖拽 → 一组 polyline ----
+
+  // 统一四边形：viewport = 旋转 AABB 四角；persp = 两角定形（病态 → null）
+  _quad(st: ShapeStroke, constrain: boolean): [Pt, Pt, Pt, Pt] | null {
+    const c0 = { x: st.x0, y: st.y0 }, c1 = { x: st.x1, y: st.y1 };
+    if (st.frame.kind === "persp") {
+      return quadFromCorners(c0, c1, st.frame.famA, st.frame.famB);
     }
-    if (this._subTool === "rect") {
-      return rectPolyline(rectCorners({ x: st.x0, y: st.y0 }, { x: st.x1, y: st.y1 }, st.rot, this._constrain), seg);
-    }
-    const fit = fitEllipse(st.pts, st.rot, this._constrain);
-    return fit ? ellipseArcPolyline(fit, seg) : [{ x: st.x0, y: st.y0 }];
+    return rectCorners(c0, c1, st.frame.rot, constrain);
   }
 
-  // 整条重合成：buffered 只重建 stamps（无像素落地，走 spacing 走步器）；
-  //   O(点数+stamps)/move，与手绘同量级。pixelMode 走 _resynthPixel（逐像素 exact-once）。
+  _polylines(st: ShapeStroke): Pt[][] {
+    const seg = maxSegLenFor(st.settings.size, st.settings.spacing);
+    if (this._subTool === "line") {
+      let end: Pt = { x: st.x1, y: st.y1 };
+      if (this._constrain) {
+        end = st.frame.kind === "persp"
+          ? snapToDirections(st.x0, st.y0, st.x1, st.y1, snapDirections(st.frame.cfg, { x: st.x0, y: st.y0 }))
+          : snapLineEnd(st.x0, st.y0, st.x1, st.y1);
+      }
+      return [linePolyline({ x: st.x0, y: st.y0 }, end, seg)];
+    }
+    if (this._subTool === "rect") {
+      const q = this._quad(st, this._constrain && st.frame.kind === "viewport");
+      return q ? [rectPolyline(q, seg)] : [];
+    }
+    if (this._subTool === "grid") {
+      const q = this._quad(st, false);
+      if (!q) return [];
+      const H = homographyUnitSquare(q);
+      if (!H) return [];
+      return this._gridSegments(H).map(([a, b]) => linePolyline(a, b, seg));
+    }
+    // circle：徒手拟合。persp → 在平面 chart 里做（ε 护栏在 chart 内），映回 doc。
+    if (st.frame.kind === "persp") {
+      const chart = planeChart(st.frame.famA, st.frame.famB, { x: st.x0, y: st.y0 });
+      if (!chart) return [];
+      const planePts = st.pts.map((p) => chart.toPlane(p));
+      const fit = fitEllipse(planePts, 0, false);   // 平面内约束无度量（ADR-0006）→ constrain 忽略
+      if (!fit) return [];
+      // 平面 polyline → doc：密度按 doc 弧长控制（先粗映射估周长，再按 maxSegLen 重采样）
+      const coarse = ellipseArcPolyline(fit, Math.max(perimOf(fit) / 64, 1e-6));
+      const coarseDoc = coarse.map((p) => chart.toDoc(p.x, p.y)).filter((p): p is Pt => !!p);
+      if (coarseDoc.length < 3) return [];
+      let perim = 0;
+      for (let i = 1; i < coarseDoc.length; i++) perim += Math.hypot(coarseDoc[i].x - coarseDoc[i - 1].x, coarseDoc[i].y - coarseDoc[i - 1].y);
+      const n = Math.min(512, Math.max(24, Math.ceil(perim / seg)));
+      const fine = ellipseArcPolyline(fit, Math.max(perimOf(fit) / n, 1e-6));
+      return [fine.map((p) => chart.toDoc(p.x, p.y)).filter((p): p is Pt => !!p)];
+    }
+    const fit = fitEllipse(st.pts, st.frame.rot, this._constrain);
+    return fit ? [ellipseArcPolyline(fit, seg)] : [[{ x: st.x0, y: st.y0 }]];
+  }
+
+  // grid 的线段集（单位方坐标 → H 映射；H 把线段映成线段，端点映完连直线即可）：
+  //   内部分割线 nu-1 竖 + nv-1 横；border 开再加 4 边。
+  _gridSegments(H: Mat3): Array<[Pt, Pt]> {
+    const segs: Array<[Pt, Pt]> = [];
+    const T = (u: number, v: number) => applyMat3(H, u, v);
+    const { nu, nv, border } = this._grid;
+    for (let i = 1; i < nu; i++) segs.push([T(i / nu, 0), T(i / nu, 1)]);
+    for (let j = 1; j < nv; j++) segs.push([T(0, j / nv), T(1, j / nv)]);
+    if (border) {
+      segs.push([T(0, 0), T(1, 0)], [T(1, 0), T(1, 1)], [T(1, 1), T(0, 1)], [T(0, 1), T(0, 0)]);
+    }
+    return segs;
+  }
+
+  // ---- 合成 ----
+
+  // 整形重合成：buffered 把每条 polyline 各驱动一遍私有 BrushEngine，merge 成单个
+  //   StampCollect（grid 多线一条 undo）；O(点数+stamps)/move，与手绘同量级。
   _resynth() {
     const st = this._st!;
     if (st.settings.pixelMode) { this._resynthPixel(st); return; }
-    this._inner.cancelStroke();
-    const pts = this._polyline();
-    this._inner.beginStroke(st.layer, st.settings, pts[0].x, pts[0].y, SHAPE_PRESSURE, st.mode, { tau: 0, deadzone: 0 }, null);
-    for (let i = 1; i < pts.length; i++) {
-      this._inner.extendStroke(pts[i].x, pts[i].y, SHAPE_PRESSURE, null);
+    const lists: StampCollect[] = [];
+    for (const pts of this._polylines(st)) {
+      if (!pts.length) continue;
+      this._inner.cancelStroke();
+      this._inner.beginStroke(st.layer, st.settings, pts[0].x, pts[0].y, SHAPE_PRESSURE, st.mode, { tau: 0, deadzone: 0 }, null);
+      for (let i = 1; i < pts.length; i++) {
+        this._inner.extendStroke(pts[i].x, pts[i].y, SHAPE_PRESSURE, null);
+      }
+      const cs = this._inner.endStroke();
+      if (cs && cs.stamps.length) lists.push(cs);
     }
+    st.cs = mergeCollects(lists);
   }
 
-  // 像素模式（user 2026-07-25）：三种形状全部**每像素恰好一颗**（stampAt 绕过 spacing 走步器，
-  //   消双叠）；每帧 restore 擦上一帧再整形重画（in-place 节律）。
+  // 像素模式：全形状统一 seen-set 去重（格线交叉/共享角不双叠）→ 每像素恰好一颗 stampAt。
   _resynthPixel(st: ShapeStroke) {
     st.layer.restoreFromSnapshot(st.preSnap!);
     this._inner.cancelStroke();
-    const pts = this._pixelPixels(st);
-    this._inner.beginStroke(st.layer, st.settings, pts[0].x, pts[0].y, SHAPE_PRESSURE, st.mode, { tau: 0, deadzone: 0 }, null);
-    for (let i = 1; i < pts.length; i++) {
-      this._inner.stampAt(pts[i].x, pts[i].y, SHAPE_PRESSURE);
+    const raw = this._pixelPixels(st);
+    const seen = new Set<string>();
+    const pts: Pt[] = [];
+    for (const p of raw) {
+      const k = p.x + "," + p.y;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      pts.push(p);
     }
-    // 上一帧画过的区（已被 restore 擦掉）+ 本帧画的区 都要重渲
+    if (pts.length) {
+      this._inner.beginStroke(st.layer, st.settings, pts[0].x, pts[0].y, SHAPE_PRESSURE, st.mode, { tau: 0, deadzone: 0 }, null);
+      for (let i = 1; i < pts.length; i++) {
+        this._inner.stampAt(pts[i].x, pts[i].y, SHAPE_PRESSURE);
+      }
+    }
     const painted = this._inner.flushDirty();
     if (st.lastPaint) this._mergeDirty(st, st.lastPaint);
     if (painted) this._mergeDirty(st, painted);
     st.lastPaint = painted;
   }
 
-  // 像素模式几何（doc 轴整数格）：line=Bresenham 线（45° 倍数约束走整数空间精确逐格）；
-  //   rect=周界；circle=**AABB 拖拽**（x0y0→x1y1 传统拉框，不做弧长/拟合——好控制）+ midpoint 椭圆。
+  // 像素模式几何（doc 格点；透视 frame 照用）：line=Bresenham（45° 倍数约束整数空间精确；
+  //   透视约束吸 VP 方向后取整）；rect=周界/四边形四边；circle=**AABB/两角拖拽**（Zingl 盒椭圆
+  //   或透视 conic）；grid=格线 Bresenham。
   _pixelPixels(st: ShapeStroke): Pt[] {
     const i0 = Math.floor(st.x0), j0 = Math.floor(st.y0);
     let i1 = Math.floor(st.x1), j1 = Math.floor(st.y1);
+    const persp = st.frame.kind === "persp";
     if (this._subTool === "line") {
       if (this._constrain && (i1 !== i0 || j1 !== j0)) {
-        const k = Math.round(Math.atan2(j1 - j0, i1 - i0) / (Math.PI / 12));
-        if (k % 3 === 0) {
-          // 45° 的倍数：整数空间精确（像素画的轴向/对角必须逐格，连续 snap 后取整会差一格）
-          if (k % 12 === 0) j1 = j0;                                   // 水平
-          else if (k % 6 === 0) i1 = i0;                               // 竖直
-          else {                                                        // 对角 |di|==|dj|
-            const L = Math.max(Math.abs(i1 - i0), Math.abs(j1 - j0));
-            i1 = i0 + Math.sign(i1 - i0 || 1) * L;
-            j1 = j0 + Math.sign(j1 - j0 || 1) * L;
-          }
-        } else {
-          // 非 45° 档（15/30/60/75°）本就无法逐格完美：连续空间 snap 后取整
-          const e = snapLineEnd(st.x0, st.y0, st.x1, st.y1);
+        if (persp) {
+          const e = snapToDirections(st.x0, st.y0, st.x1, st.y1, snapDirections((st.frame as { cfg: PerspConfig }).cfg, { x: st.x0, y: st.y0 }));
           i1 = Math.floor(e.x); j1 = Math.floor(e.y);
+        } else {
+          const k = Math.round(Math.atan2(j1 - j0, i1 - i0) / (Math.PI / 12));
+          if (k % 3 === 0) {
+            if (k % 12 === 0) j1 = j0;                                   // 水平
+            else if (k % 6 === 0) i1 = i0;                               // 竖直
+            else {                                                        // 对角 |di|==|dj|
+              const L = Math.max(Math.abs(i1 - i0), Math.abs(j1 - j0));
+              i1 = i0 + Math.sign(i1 - i0 || 1) * L;
+              j1 = j0 + Math.sign(j1 - j0 || 1) * L;
+            }
+          } else {
+            const e = snapLineEnd(st.x0, st.y0, st.x1, st.y1);
+            i1 = Math.floor(e.x); j1 = Math.floor(e.y);
+          }
         }
       }
       return bresenhamLine(i0, j0, i1, j1);
     }
-    // rect / circle：AABB；constrain = 整数正方盒（边长 max，方向跟拖拽象限）
-    if (this._constrain) {
-      const side = Math.max(Math.abs(i1 - i0), Math.abs(j1 - j0));
-      i1 = i0 + Math.sign(i1 - i0 || 1) * side;
-      j1 = j0 + Math.sign(j1 - j0 || 1) * side;
+    if (this._subTool === "circle" || this._subTool === "rect" || this._subTool === "grid") {
+      if (!persp) {
+        // 非透视：整数 AABB（constrain = 正方盒；grid 不吃 constrain）
+        if (this._constrain && this._subTool !== "grid") {
+          const side = Math.max(Math.abs(i1 - i0), Math.abs(j1 - j0));
+          i1 = i0 + Math.sign(i1 - i0 || 1) * side;
+          j1 = j0 + Math.sign(j1 - j0 || 1) * side;
+        }
+        if (this._subTool === "rect") return bresenhamRectPerimeter(i0, j0, i1, j1);
+        if (this._subTool === "circle") return bresenhamEllipseRect(i0, j0, i1, j1);
+        // grid：轴对齐盒 + H（仿射）出格线端点 → Bresenham
+        const q: [Pt, Pt, Pt, Pt] = [
+          { x: i0 + 0.5, y: j0 + 0.5 }, { x: i1 + 0.5, y: j0 + 0.5 },
+          { x: i1 + 0.5, y: j1 + 0.5 }, { x: i0 + 0.5, y: j1 + 0.5 },
+        ];
+        return this._gridPixels(q);
+      }
+      // 透视：两角定形 → 四边形（病态 → 空）
+      const q = quadFromCorners(
+        { x: i0 + 0.5, y: j0 + 0.5 }, { x: i1 + 0.5, y: j1 + 0.5 },
+        (st.frame as { famA: Family }).famA, (st.frame as { famB: Family }).famB);
+      if (!q) return [];
+      if (this._subTool === "circle") return bresenhamConicInQuad(q);
+      if (this._subTool === "rect") return quadPerimeterPixels(q);
+      return this._gridPixels(q);
     }
-    return this._subTool === "rect"
-      ? bresenhamRectPerimeter(i0, j0, i1, j1)
-      : bresenhamEllipseRect(i0, j0, i1, j1);
+    return [];
+  }
+
+  _gridPixels(q: [Pt, Pt, Pt, Pt]): Pt[] {
+    const H = homographyUnitSquare(q);
+    if (!H) return [];
+    const out: Pt[] = [];
+    for (const [a, b] of this._gridSegments(H)) {
+      if (![a, b].every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) continue;
+      out.push(...bresenhamLine(Math.floor(a.x), Math.floor(a.y), Math.floor(b.x), Math.floor(b.y)));
+    }
+    return out;
   }
 
   _mergeDirty(st: ShapeStroke, r: Rect4) {
@@ -221,4 +358,35 @@ export class ShapeBrushEngine {
     if (r[2] > d[2]) d[2] = r[2];
     if (r[3] > d[3]) d[3] = r[3];
   }
+}
+
+// 椭圆整圈周长（采样密度用）
+function perimOf(fit: { rx: number; ry: number; sweep: number; closed: boolean }): number {
+  const h = ((fit.rx - fit.ry) ** 2) / ((fit.rx + fit.ry) ** 2);
+  const full = Math.PI * (fit.rx + fit.ry) * (1 + (3 * h) / (10 + Math.sqrt(4 - 3 * h)));
+  return fit.closed ? full : full * Math.abs(fit.sweep) / (Math.PI * 2);
+}
+
+// 透视四边形周界（像素）：四边 Bresenham（角点重复由上层 seen-set 去重）
+function quadPerimeterPixels(q: [Pt, Pt, Pt, Pt]): Pt[] {
+  const out: Pt[] = [];
+  for (let i = 0; i < 4; i++) {
+    const a = q[i], b = q[(i + 1) % 4];
+    out.push(...bresenhamLine(Math.floor(a.x), Math.floor(a.y), Math.floor(b.x), Math.floor(b.y)));
+  }
+  return out;
+}
+
+// 多 polyline 的 StampCollect 合并（grid 多线一条 undo；shape/layer/mode 同源取首个）
+function mergeCollects(lists: StampCollect[]): StampCollect | null {
+  if (!lists.length) return null;
+  if (lists.length === 1) return lists[0];
+  const base = lists[0];
+  const stamps = lists.flatMap((c) => c.stamps);
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  for (const c of lists) {
+    bx0 = Math.min(bx0, c.bx); by0 = Math.min(by0, c.by);
+    bx1 = Math.max(bx1, c.bx + c.bw); by1 = Math.max(by1, c.by + c.bh);
+  }
+  return { ...base, stamps, bx: bx0, by: by0, bw: bx1 - bx0, bh: by1 - by0 };
 }

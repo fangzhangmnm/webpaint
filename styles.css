@@ -2505,3 +2505,25 @@ body[data-mode="gallery"] .board { display: none !important; }
   #sizeSlider { width: 70px; }
   #opacitySlider { width: 60px; }
 }
+
+/* ═══ ADR-0006 VP 编辑手柄层：screen 坐标 fixed，只有手柄捕获指针（空白透传给画布 pan/zoom） ═══ */
+.persp-handles {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: calc(var(--z-toolbar) - 1);   /* 同 crop overlay：在画布上、toolbar/弹窗下 */
+}
+.persp-handles.hidden { display: none; }
+.persp-handle {
+  position: absolute;
+  width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: rgba(64, 140, 255, 0.92);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  color: #fff; font: 700 11px/18px system-ui, sans-serif; text-align: center;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.persp-handle[data-kind="ref"] { background: rgba(255, 165, 0, 0.92); }
