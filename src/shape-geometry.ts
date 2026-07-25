@@ -222,9 +222,10 @@ export function bresenhamLine(i0: number, j0: number, i1: number, j1: number): P
   const dx = Math.abs(i1 - i0), sx = i0 < i1 ? 1 : -1;
   const dy = -Math.abs(j1 - j0), sy = j0 < j1 ? 1 : -1;
   let err = dx + dy;
+  let guard = Math.min(dx - dy, 65536);   // 硬顶：透视裁剪漏网的超长段宁可截断不卡死
   for (;;) {
     out.push({ x: x + 0.5, y: y + 0.5 });
-    if (x === i1 && y === j1) break;
+    if ((x === i1 && y === j1) || guard-- < 0) break;
     const e2 = 2 * err;
     if (e2 >= dy) { err += dy; x += sx; }
     if (e2 <= dx) { err += dx; y += sy; }
@@ -292,10 +293,53 @@ export function maxSegLenFor(size: number, spacing: number): number {
   return Math.max(2, size * spacing * 0.75);
 }
 
-// 直线：两端点 + 等距中间点（统一过采样：taper 干走/平滑器对三种形状同路径，少一个特例）
+// 轴对齐裁剪盒 + Liang-Barsky 线段裁剪（透视几何在地平线附近会把交点甩到 1e5+ doc px——
+//   不裁剪的话 polyline/Bresenham 生成百万点级 = 卡死；ADR-0006 奇点护栏的采样面）
+export interface ClipBox { x0: number; y0: number; x1: number; y1: number; }
+export function clipSegToBox(a: Pt, b: Pt, box: ClipBox): [Pt, Pt] | null {
+  let t0 = 0, t1 = 1;
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const edge = (p: number, q: number): boolean => {
+    if (p === 0) return q >= 0;   // 平行且在外 → 拒
+    const r = q / p;
+    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+    else { if (r < t0) return false; if (r < t1) t1 = r; }
+    return true;
+  };
+  if (!edge(-dx, a.x - box.x0) || !edge(dx, box.x1 - a.x) ||
+      !edge(-dy, a.y - box.y0) || !edge(dy, box.y1 - a.y)) return null;
+  return [
+    { x: a.x + t0 * dx, y: a.y + t0 * dy },
+    { x: a.x + t1 * dx, y: a.y + t1 * dy },
+  ];
+}
+
+// 折线裁剪成盒内的若干段（跨界段截到边界；返回 run 列表，消费方按多 polyline 处理）
+export function clipPolylineToBox(pts: Pt[], box: ClipBox): Pt[][] {
+  const runs: Pt[][] = [];
+  let cur: Pt[] = [];
+  for (let i = 1; i < pts.length; i++) {
+    const seg = clipSegToBox(pts[i - 1], pts[i], box);
+    if (!seg) { if (cur.length > 1) runs.push(cur); cur = []; continue; }
+    if (!cur.length) cur.push(seg[0]);
+    else {
+      const last = cur[cur.length - 1];
+      if (Math.hypot(seg[0].x - last.x, seg[0].y - last.y) > 1e-6) {   // 断口 → 新 run
+        if (cur.length > 1) runs.push(cur);
+        cur = [seg[0]];
+      }
+    }
+    cur.push(seg[1]);
+  }
+  if (cur.length > 1) runs.push(cur);
+  return runs;
+}
+
+// 直线：两端点 + 等距中间点（统一过采样：taper 干走/平滑器对三种形状同路径，少一个特例）。
+//   n 硬顶 4096：极长段（透视裁剪漏网/未来调用方失误）宁可采样稀也不卡死。
 export function linePolyline(p0: Pt, p1: Pt, maxSegLen: number): Pt[] {
   const L = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-  const n = Math.max(1, Math.ceil(L / maxSegLen));
+  const n = Math.min(4096, Math.max(1, Math.ceil(L / maxSegLen)));
   const out: Pt[] = new Array(n + 1);
   for (let i = 0; i <= n; i++) {
     const t = i / n;

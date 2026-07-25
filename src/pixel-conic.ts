@@ -7,8 +7,8 @@
 //   权重=由 45° 弧中点的像解出} → Zingl 逐段栅格。退化护栏（角点飞向地平线/权重解不出）
 //   → 密采样折线 + Bresenham 连线 + 去重的逃生门（user：非常实在不行才用）。
 import { applyMat3, homographyUnitSquare } from "./perspective-frame.ts";
-import { bresenhamLine } from "./shape-geometry.ts";
-import type { Pt } from "./shape-geometry.ts";
+import { bresenhamLine, clipSegToBox } from "./shape-geometry.ts";
+import type { Pt, ClipBox } from "./shape-geometry.ts";
 
 type Plot = (px: number, py: number) => void;
 
@@ -115,9 +115,11 @@ const COORD_LIMIT = 1e5;   // 角点飞向地平线的护栏：超界走逃生�
 
 // 四边形内切 conic（= 单位圆经 unit-square→quad homography 的像）的逐像素环。
 //   返回像素中心坐标（i+0.5），去重。quad 顺序同 quadFromCorners。
-export function bresenhamConicInQuad(quad: [Pt, Pt, Pt, Pt]): Pt[] {
+//   clip：裁剪盒（透视四边形的角点近地平线会飞远——几何超盒 → 走逃生门 + 逐段裁剪，防卡死）。
+export function bresenhamConicInQuad(quad: [Pt, Pt, Pt, Pt], clip?: ClipBox): Pt[] {
   const H = homographyUnitSquare(quad);
   if (!H) return [];
+  const inClip = (p: Pt) => !clip || (p.x >= clip.x0 && p.x <= clip.x1 && p.y >= clip.y0 && p.y <= clip.y1);
   const T = (u: number, v: number) => applyMat3(H, u, v);
   const seen = new Set<string>();
   const out: Pt[] = [];
@@ -138,7 +140,7 @@ export function bresenhamConicInQuad(quad: [Pt, Pt, Pt, Pt]): Pt[] {
   let ok = true;
   const pts = [...tang, ...ctrl, ...mid];
   for (const p of pts) {
-    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || Math.abs(p.x) > COORD_LIMIT || Math.abs(p.y) > COORD_LIMIT) { ok = false; break; }
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || Math.abs(p.x) > COORD_LIMIT || Math.abs(p.y) > COORD_LIMIT || !inClip(p)) { ok = false; break; }
   }
   if (ok) {
     const px = (p: Pt) => Math.round(p.x - 0.5);   // doc 坐标 → 像素索引（+0.5 中心制）
@@ -155,18 +157,26 @@ export function bresenhamConicInQuad(quad: [Pt, Pt, Pt, Pt]): Pt[] {
     }
   }
   if (!ok) {
-    // 逃生门：密采样真 conic → Bresenham 连线 + 去重（视觉等价，非"每步整数"纯血）
+    // 逃生门：密采样真 conic → 逐段裁剪盒内 Bresenham 连线 + 去重（视觉等价，非"每步整数"纯血）
     seen.clear(); out.length = 0;
     const N = 256;
-    let prev: { x: number; y: number } | null = null;
+    let prevRaw: Pt | null = null;
     for (let i = 0; i <= N; i++) {
       const a = (i / N) * Math.PI * 2;
       const p = T(0.5 + 0.5 * Math.cos(a), 0.5 + 0.5 * Math.sin(a));
-      if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || Math.abs(p.x) > COORD_LIMIT || Math.abs(p.y) > COORD_LIMIT) { prev = null; continue; }
-      const ix = Math.round(p.x - 0.5), iy = Math.round(p.y - 0.5);
-      if (prev) for (const q of bresenhamLine(prev.x, prev.y, ix, iy)) plot(q.x - 0.5, q.y - 0.5);
-      else plot(ix, iy);
-      prev = { x: ix, y: iy };
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || Math.abs(p.x) > COORD_LIMIT || Math.abs(p.y) > COORD_LIMIT) { prevRaw = null; continue; }
+      if (prevRaw) {
+        let a0 = prevRaw, b0 = p;
+        if (clip) {
+          const c = clipSegToBox(a0, b0, clip);
+          if (!c) { prevRaw = p; continue; }
+          [a0, b0] = c;
+        }
+        for (const q of bresenhamLine(Math.round(a0.x - 0.5), Math.round(a0.y - 0.5), Math.round(b0.x - 0.5), Math.round(b0.y - 0.5))) plot(q.x - 0.5, q.y - 0.5);
+      } else if (inClip(p)) {
+        plot(Math.round(p.x - 0.5), Math.round(p.y - 0.5));
+      }
+      prevRaw = p;
     }
   }
   return out;

@@ -11,6 +11,7 @@ const {
   linePolyline, rectPolyline, ellipseArcPolyline, maxSegLenFor, perimeterRamanujan,
   clampPixelCenter, bresenhamLine, bresenhamRectPerimeter, bresenhamEllipseRect,
 } = await import("../src/shape-geometry.ts");
+const mod = await import("../src/shape-geometry.ts");
 
 const DEG = Math.PI / 180;
 const close = (a, b, tol = 1e-9) => assert(Math.abs(a - b) <= tol, `${a} !~ ${b}`);
@@ -283,5 +284,34 @@ describe("shape-geometry: 像素模式（clamp + Bresenham）", () => {
       }
       assert(n >= 2, `环上像素应有 ≥2 邻居：${key(p)}`);
     }
+  });
+});
+
+describe("shape-geometry: 裁剪原语（透视奇点护栏采样面）", () => {
+  const { clipSegToBox, clipPolylineToBox } = mod;
+  const box = { x0: 0, y0: 0, x1: 100, y1: 100 };
+  it("clipSegToBox：全内不动、跨界截边、全外 null", () => {
+    const inn = clipSegToBox({ x: 10, y: 10 }, { x: 90, y: 90 }, box);
+    eq(inn[0].x, 10); eq(inn[1].x, 90);
+    const cross = clipSegToBox({ x: -50, y: 50 }, { x: 50, y: 50 }, box);
+    close(cross[0].x, 0, 1e-9); eq(cross[1].x, 50);
+    eq(clipSegToBox({ x: -50, y: -50 }, { x: -10, y: -10 }, box), null);
+    // 甩到 1e6 的段截回盒内（透视交点飞远的真实场景）
+    const far = clipSegToBox({ x: 50, y: 50 }, { x: 1e6, y: 50 }, box);
+    close(far[1].x, 100, 1e-6);
+  });
+  it("clipPolylineToBox：跨界折线断成 runs、每 run 都在盒内", () => {
+    const pts = [{ x: -20, y: 50 }, { x: 50, y: 50 }, { x: 120, y: 50 }, { x: 120, y: 80 }, { x: 50, y: 80 }];
+    const runs = clipPolylineToBox(pts, box);
+    assert(runs.length >= 2, `断成多段，实得 ${runs.length}`);
+    for (const run of runs) for (const p of run) {
+      assert(p.x >= -1e-6 && p.x <= 100 + 1e-6 && p.y >= -1e-6 && p.y <= 100 + 1e-6, "run 全在盒内");
+    }
+  });
+  it("bresenhamLine 超长段硬顶不卡死", () => {
+    const t0 = Date.now();
+    const pts = bresenhamLine(0, 0, 5_000_000, 3);
+    assert(Date.now() - t0 < 2000, "秒级内返回");
+    assert(pts.length <= 65538, `硬顶截断，实得 ${pts.length}`);
   });
 });
