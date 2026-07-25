@@ -582,7 +582,7 @@ const LayerRow = defineComponent({
         <!-- 图层组 reparent：解组（仅组）/ 移入某组（dropdown，不挤占菜单空间）/ 移出组。编组 = 「+」里新建空组 -->
         <hr class="menu-sep" v-if="isGroup || moveTargets.length || canMoveOut" />
         <button v-if="isGroup" class="menu-item menu-item-with-icon" type="button" @click="act('ungroup')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#explode-folder"/></svg><span class="menu-item-label">{{ L.ungroup }}</span></button>
-        <button v-if="isGroup" class="menu-item menu-item-with-icon" type="button" @click="act('collapseToLayer')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#merge-layer-down"/></svg><span class="menu-item-label">{{ L.collapseToLayer }}</span></button>
+        <button v-if="isGroup" class="menu-item menu-item-with-icon" type="button" @click="act('collapseToLayer')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#merge-layers"/></svg><span class="menu-item-label">{{ L.collapseToLayer }}</span></button>
         <label v-if="moveTargets.length" class="menu-item layer-move-into menu-item-with-icon" @click.stop><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-folder"/></svg><span class="menu-item-label">{{ L.moveIntoGroup }}</span>
           <select class="layer-move-select" @change="onMoveSelect" @click.stop>
             <option value="" selected>{{ L.choose }}</option>
