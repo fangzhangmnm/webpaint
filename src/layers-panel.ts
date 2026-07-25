@@ -477,6 +477,10 @@ const LayerRow = defineComponent({
     // ⋯ 菜单动作
     function act(a: string) {
       layersUi.menuId = null;
+      // v0.5.38（user 拍板）：决定性图层动作先 apply 悬着的 transient（变换/调整）——
+      //   onToolSwitch:"apply" 只盖切工具路径，面板动作绕过它曾致「导入剪贴板浮层未 apply 就点向下合并
+      //   → 变换丢失」。rename 是纯 UI 不 settle（免惊讶）。
+      if (a !== "rename") _settlePendingTransient();
       if (a === "rename") {
         layersUi.renameId = snap().id;
         nextTick(() => {
@@ -704,6 +708,13 @@ const LayersPanel = defineComponent({
 });
 
 let _vueApp: { mount(el: Element): unknown } | null = null;
+let editMode: AppContext["editMode"];
+
+// v0.5.38：决定性动作前把悬着的 transient（transform/crop/adjust）按 apply 收口（user 拍板：
+//   interruption behavior = apply——"填好了就是填好了"同族直觉；abort 只属于显式 ✗/Esc/ctrl-z）。
+function _settlePendingTransient() {
+  if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
+}
 
 // 把图层列表的 max-height 钉到「列表顶 → 视口底」可用空间，列表内部 overflow 滚动。
 //   修：层多 / 面板被拖到屏幕下半 时，最底 item 掉出视口够不着。CSS 的 50vh 是固定上限、不跟位置走。
@@ -757,7 +768,7 @@ function _syncChrome() {
 let _layersDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
 
 export function initLayersPanel(ctx: AppContext) {
-  ({ doc, board, history, setStatus, workpiece, ops, afterDocChange: _afterDocChange } = ctx);
+  ({ doc, board, history, setStatus, workpiece, ops, editMode, afterDocChange: _afterDocChange } = ctx);
 
   // 挂 Vue 应用到图层列表容器（旧 renderLayersPanel 渲染进的 #layersList）。
   _vueApp = createApp(LayersPanel);
@@ -847,13 +858,13 @@ export function initLayersPanel(ctx: AppContext) {
     e.stopPropagation();
     addPopup?.classList.toggle("hidden");
   });
-  document.getElementById("layerAddNewBtn")?.addEventListener("click", () => { closeAddPopup(); _addEmptyLayer(); });
+  document.getElementById("layerAddNewBtn")?.addEventListener("click", () => { closeAddPopup(); _settlePendingTransient(); _addEmptyLayer(); });
   document.getElementById("layerAddGroupBtn")?.addEventListener("click", () => { closeAddPopup(); _addEmptyGroup(); });
   // 导入文件/剪贴板：实际逻辑由 import-image.ts 接线，这里只负责收起菜单。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", closeAddPopup);
   document.getElementById("layerImportClipboardBtn")?.addEventListener("click", closeAddPopup);
   // #25：盖印全部为新层（置顶 + 其他层自动隐藏）
-  document.getElementById("layerStampAllBtn")?.addEventListener("click", () => { closeAddPopup(); _stampAllToNewLayer(); });
+  document.getElementById("layerStampAllBtn")?.addEventListener("click", () => { closeAddPopup(); _settlePendingTransient(); _stampAllToNewLayer(); });
   // 点别处收起 "+" 菜单
   document.addEventListener("pointerdown", (e: Event) => {
     if (addPopup?.classList.contains("hidden")) return;

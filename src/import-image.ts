@@ -155,6 +155,8 @@ function _openBigImportSheet(ow: number, oh: number, docW: number, docH: number)
 }
 
 export async function importImageAsLayer(file: File, opts: { center?: { x: number; y: number } } = {}) {
+  // v0.5.38（user 拍板）：导入会 lift 新浮层——先把悬着的 transient 按 apply 收口（丢失变换的原始报告场景）。
+  if (editMode.hasPendingTransient()) editMode.applyPendingTransient();
   const bitmap = await decodeImageFile(file);
   const ow = bitmap.width, oh = bitmap.height;
   const docW = doc.width, docH = doc.height;

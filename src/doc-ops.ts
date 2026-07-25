@@ -199,6 +199,7 @@ export function initDocOps(ctx: AppContext) {
   const _menuFlipHBtn = document.getElementById("menuFlipH");
   if (_menuFlipHBtn) {
     _menuFlipHBtn.addEventListener("click", () => {
+      if (editMode.hasPendingTransient()) editMode.applyPendingTransient();   // v0.5.38 决定性动作=apply 悬浮 transient
       setMenuOpen(false);
       setAdjustOpen(false);
       runDocTransform(t("tm.flippedHorizontal"), () => doc.flipHorizontal());
@@ -211,6 +212,7 @@ export function initDocOps(ctx: AppContext) {
   const _menuRotate90Btn = document.getElementById("menuRotate90");
   if (_menuRotate90Btn) {
     _menuRotate90Btn.addEventListener("click", () => {
+      if (editMode.hasPendingTransient()) editMode.applyPendingTransient();   // v0.5.38 决定性动作=apply 悬浮 transient
       setMenuOpen(false);
       setAdjustOpen(false);
       runDocTransform(t("tm.rotated90CCW"), () => {

@@ -16,6 +16,7 @@
   --z-sheet: 220;    /* 笔架 sheet；笔设置全屏 view = +10 */
   --z-overlay: 300;  /* 全屏 overlay：图库 / 云端 */
   --z-menu: 400;     /* 一切菜单 / popup（汉堡 / 调整 / 图库 / size popup / 回收站⋯） */
+  --z-popover: 420;  /* 菜单内再弹出的下拉（主题/语言/组槽菜单）——必须压过 --z-menu（v0.5.38；深模块化 TODO） */
   --z-toast: 450;
   --z-modal: 500;    /* .backdrop / .sheet 确认对话（resample = -2/-1，确认能盖住它） */
   --z-busy: 520;     /* fullscreen-busy 防误点锁 */
@@ -263,7 +264,7 @@ body[data-tool="lasso"] .board { cursor: crosshair; }
 .lasso-slot .lasso-slot-caret { position: absolute; right: 1px; bottom: 1px; width: 8px; height: 8px; opacity: .55; pointer-events: none; }
 .lasso-icon-menu {
   position: fixed; display: flex; gap: 2px; padding: 4px;
-  z-index: var(--z-menu);
+  z-index: var(--z-popover);   /* v0.5.38：菜单内弹层要压过 menuPanel（同 z 时 DOM 序不可靠） */
   background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow);
   color: var(--ink);
 }
