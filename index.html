@@ -851,140 +851,130 @@
 
     <!-- 汉堡菜单：低频项收纳处。顺序见 user 2026-05-28 反馈 -->
     <div class="menu-panel hidden" id="menuPanel" role="menu">
-      <!-- v94 重组：清晰分组，操作 / 导入 / 导出 / 设置 / 调试 / 危险
-           user：「主菜单分导入，导出，调试等子菜单」
-           user：「压感 -> 颜色，不透明度 这些应该只在笔刷设置页出现」→ 删 -->
-      <!-- 图库（v0.5.21 user：独立 pill 一日游——visually distracting，放回菜单） -->
-      <button class="menu-item menu-item-with-icon" id="menuGallery" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#gallery"/></svg>
+      <!-- v0.6 候选 C 方案（user 拍板 2026-07-24）：☰ = 图库直达置顶 + 六 tab 分页
+           （文件/画布/视图/设置/插件/developer）。全部条目 图标+文字（精确表意，不做纯图标 grid）。
+           视图/设置分界判据（钉死防漂移）：视图=画布上显示什么辅助（不论存储 per-doc/设备级）；
+           设置=app 怎么响应你（手势/主题/语言）。条目 id 不变——handler 全按 id 接线，搬家零改动。 -->
+        <button class="menu-item menu-item-with-icon" id="menuGallery" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#gallery"/></svg>
         <span class="menu-item-label" data-i18n="nav.gallery">图库</span>
       </button>
-      <hr class="menu-sep" />
-      <!-- v124 (user) 文件操作扁平化：删 section label / inner separator / 居中画布；
-           裁切 context-aware（有选区→裁选区；否则开自由裁切 8-handle）；
-           重采样 renamed 成 Resize；参考小窗 挪进来一起 -->
-      <!-- v125 (user：「主目录第一个栏叫做文件」) 文件 label 回归 -->
-      <div class="menu-section-label" data-i18n="menu.section.file">文件</div>
-      <!-- v0.5.19（user）：「导入图片」出主菜单——导入文件/剪贴板收进图层窗口 + 菜单 -->
-      <div class="menu-item-row">
-        <button class="menu-item menu-item-main menu-item-with-icon" id="menuExportImage" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#export"/></svg>
+      <div class="menu-tabs" role="tablist">
+        <button class="menu-tab" data-menu-tab="file" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#floppy-disk"/></svg><span data-i18n="menu.tab.file">文件</span></button>
+        <button class="menu-tab" data-menu-tab="canvas" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#crop"/></svg><span data-i18n="menu.tab.canvas">画布</span></button>
+        <button class="menu-tab" data-menu-tab="view" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#maximize-viewport"/></svg><span data-i18n="menu.tab.view">视图</span></button>
+        <button class="menu-tab" data-menu-tab="settings" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#sliders"/></svg><span data-i18n="menu.tab.settings">设置</span></button>
+        <button class="menu-tab" data-menu-tab="plugins" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#blender"/></svg><span data-i18n="menu.tab.plugins">插件</span></button>
+        <button class="menu-tab" data-menu-tab="dev" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#fx"/></svg><span data-i18n="menu.tab.dev">dev</span></button>
+      </div>
+      <div class="menu-page" data-menu-page="file">
+        <div class="menu-item-row">
+          <button class="menu-item menu-item-main menu-item-with-icon" id="menuExportImage" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#export"/></svg>
           <span class="menu-item-label" data-i18n="menu.exportImage">导出</span>
           <span class="menu-item-sub" id="menuExportImageSub">PNG · 文件</span>
         </button>
-        <button class="menu-item-wrench" id="menuExportImageConfig" type="button" data-i18n-title="menu.config.exportImage" data-i18n-aria="menu.config.exportImage"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
-      </div>
-      <button class="menu-item menu-item-with-icon" id="menuRename" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rename"/></svg>
+          <button class="menu-item-wrench" id="menuExportImageConfig" type="button" data-i18n-title="menu.config.exportImage" data-i18n-aria="menu.config.exportImage"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
+        </div>
+        <button class="menu-item menu-item-with-icon" id="menuRename" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rename"/></svg>
         <span class="menu-item-label" data-i18n="menu.rename">重命名当前画作…</span>
       </button>
-      <!-- v125 (user：「菜单加另存为（画库，名字冲突检查）」) -->
-      <button class="menu-item menu-item-with-icon" id="menuSaveAs" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#floppy-disk"/></svg>
+        <button class="menu-item menu-item-with-icon" id="menuSaveAs" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#floppy-disk"/></svg>
         <span class="menu-item-label" data-i18n="menu.saveAs">另存为…</span>
       </button>
-      <!-- v133 (user：「revert + explicit save 重写 checkpoint」) -->
-      <!-- store-cutover：checkpoint 读写在 session-state.ts 仍是 stub（seal 删后未替）→ readCheckpoint 恒 null，
-           此项点了永远「无快照」。隐藏入口而非露一个必失败的按钮；handler / tm.revert* i18n 保留，
-           日后接回 checkpoint→本地文件时去掉 hidden 即复活。 -->
-      <button class="menu-item menu-item-with-icon" id="menuRevertToOpen" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#arrow-undo"/></svg>
+        <button class="menu-item menu-item-with-icon" id="menuRevertToOpen" type="button" role="menuitem" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#arrow-undo"/></svg>
         <span class="menu-item-label" data-i18n="menu.revert">撤销修改…</span>
       </button>
-      <!-- v236 加密：当前画作加密/解除（ADR-0012）。label 随加密态切换（JS t() 设，见 app.ts）-->
-      <button class="menu-item menu-item-with-icon" id="menuEncrypt" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lock"/></svg>
+        <button class="menu-item menu-item-with-icon" id="menuEncrypt" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lock"/></svg>
         <span class="menu-item-label" id="menuEncryptLabel">加密保护…</span>
       </button>
-      <!-- v124 裁切合并：有选区 → 裁切到选区；否则 → 自由裁切（label 随选区态 JS t() 设，见 doc-ops.ts）-->
-      <button class="menu-item menu-item-with-icon" id="menuCrop" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#crop"/></svg>
+      </div>
+      <div class="menu-page hidden" data-menu-page="canvas">
+        <button class="menu-item menu-item-with-icon" id="menuCrop" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#crop"/></svg>
         <span class="menu-item-label" id="menuCropLabel">裁切</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="menuFlipH" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#flip-horizontal"/></svg>
+        <button class="menu-item menu-item-with-icon" id="menuFlipH" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#flip-horizontal"/></svg>
         <span class="menu-item-label" data-i18n="menu.flipH">水平翻转</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="menuRotate90" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rotate-ccw"/></svg>
+        <button class="menu-item menu-item-with-icon" id="menuRotate90" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rotate-ccw"/></svg>
         <span class="menu-item-label" data-i18n="menu.rotate90">逆时针旋转 90°</span>
       </button>
-      <!-- 画 seamless 贴图：偏移画布（环绕），把藏在边上的接缝移到中央涂抹消除 -->
-      <button class="menu-item menu-item-with-icon" id="menuOffset" type="button" role="menuitem"><span class="menu-item-icon-blank" aria-hidden="true"></span>
+        <button class="menu-item menu-item-with-icon" id="menuOffset" type="button" role="menuitem"><span class="menu-item-icon-blank" aria-hidden="true"></span>
         <span class="menu-item-label" data-i18n="menu.offset">偏移接缝（环绕）…</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="adjustResample" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#scale-uniform"/></svg>
+        <button class="menu-item menu-item-with-icon" id="adjustResample" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#scale-uniform"/></svg>
         <span class="menu-item-label" data-i18n="menu.resample">调整尺寸</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="menuReference" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#picture-in-picture"/></svg>
-        <span class="menu-item-label" data-i18n="menu.reference">参考小窗</span>
-      </button>
-      <button class="menu-item menu-item-with-icon" id="menuBlender" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#blender"/></svg>
-        <span class="menu-item-label">Blender sync…</span>
-      </button>
-      <button class="menu-item menu-item-with-icon" id="menuShortcuts" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#shortcut"/></svg>
-        <span class="menu-item-label" data-i18n="menu.shortcuts">快捷键</span>
-      </button>
-      <!-- v267 (user)：视口复位（画布拖出屏幕时一键找回）= fitToScreen -->
-      <button class="menu-item menu-item-with-icon" id="menuFit" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#maximize-viewport"/></svg>
-        <span class="menu-item-label" data-i18n="menu.fit">视口复位</span>
-      </button>
-      <!-- v124 隐藏 stub：删了的旧入口 id 留着防 app.js getElementById 崩 -->
-      <button id="adjustCropToSelection" type="button" hidden></button>
-      <button id="adjustCropFree" type="button" hidden></button>
-
-      <hr class="menu-sep" />
-      <div class="menu-section-label" data-i18n="menu.section.settings">设置</div>
-      <button class="menu-item menu-item-with-icon" id="menuCheckerboard" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#checkerboard-background"/></svg>
+      </div>
+      <div class="menu-page hidden" data-menu-page="view">
+        <button class="menu-item menu-item-with-icon" id="menuCheckerboard" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#checkerboard-background"/></svg>
         <span class="menu-item-label" data-i18n="menu.checkerboard">透明背景显示棋盘</span>
         <span class="menu-item-state" data-state-for="checkerboard">关</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="menuLongPressPick" type="button" role="menuitemcheckbox" aria-pressed="false"><span class="menu-item-icon-blank" aria-hidden="true"></span>
-        <span class="menu-item-label" data-i18n="menu.longPressPick">单指长按吸色</span>
-        <span class="menu-item-state" data-state-for="longPressPick">关</span>
-      </button>
-      <button class="menu-item menu-item-with-icon" id="menuSingleFingerDraw" type="button" role="menuitemcheckbox" aria-pressed="false"><span class="menu-item-icon-blank" aria-hidden="true"></span>
-        <span class="menu-item-label" data-i18n="menu.singleFingerDraw">单指绘画</span>
-        <span class="menu-item-state" data-state-for="singleFingerDraw">关</span>
-      </button>
-      <button class="menu-item menu-item-with-icon" id="menuPixelGrid" type="button" role="menuitemcheckbox" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
+        <button class="menu-item menu-item-with-icon" id="menuPixelGrid" type="button" role="menuitemcheckbox" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
         <span class="menu-item-label" data-i18n="menu.pixelGrid">像素栅格（放大时）</span>
         <span class="menu-item-state" data-state-for="pixelGrid">开</span>
       </button>
-      <!-- #10 主栅格（v0.5）：tilemap 对齐网格，一直显示；配置跟文件走（editorState.grid） -->
-      <button class="menu-item menu-item-with-icon" id="menuDocGrid" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
+        <button class="menu-item menu-item-with-icon" id="menuDocGrid" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
         <span class="menu-item-label" data-i18n="menu.docGrid">主栅格（对齐网格）</span>
         <span class="menu-item-state" data-state-for="docGrid">关</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="menuDocGridCell" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
+        <button class="menu-item menu-item-with-icon" id="menuDocGridCell" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg>
         <span class="menu-item-label" data-i18n="menu.docGridCell">主栅格尺寸…</span>
         <span class="menu-item-state">16px</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="menuTheme" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
+        <button class="menu-item menu-item-with-icon" id="menuFit" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#maximize-viewport"/></svg>
+        <span class="menu-item-label" data-i18n="menu.fit">视口复位</span>
+      </button>
+        <button class="menu-item menu-item-with-icon" id="menuReference" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#picture-in-picture"/></svg>
+        <span class="menu-item-label" data-i18n="menu.reference">参考小窗</span>
+      </button>
+      </div>
+      <div class="menu-page hidden" data-menu-page="settings">
+        <button class="menu-item menu-item-with-icon" id="menuLongPressPick" type="button" role="menuitemcheckbox" aria-pressed="false"><span class="menu-item-icon-blank" aria-hidden="true"></span>
+        <span class="menu-item-label" data-i18n="menu.longPressPick">单指长按吸色</span>
+        <span class="menu-item-state" data-state-for="longPressPick">关</span>
+      </button>
+        <button class="menu-item menu-item-with-icon" id="menuSingleFingerDraw" type="button" role="menuitemcheckbox" aria-pressed="false"><span class="menu-item-icon-blank" aria-hidden="true"></span>
+        <span class="menu-item-label" data-i18n="menu.singleFingerDraw">单指绘画</span>
+        <span class="menu-item-state" data-state-for="singleFingerDraw">关</span>
+      </button>
+        <button class="menu-item menu-item-with-icon" id="menuTheme" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
         <span class="menu-item-label" data-i18n="menu.theme">主题</span>
         <span class="menu-item-state" data-state-for="theme">跟随系统</span>
       </button>
-      <!-- 语言：下拉框选择（JS 按 LANGS 填 endonym option；change 即切换+reload）。 -->
-      <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#globe-speech"/></svg>
+        <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#globe-speech"/></svg>
         <span class="menu-item-label" data-i18n="menu.language">语言</span>
         <select id="menuLanguageSelect" class="menu-lang-select"></select>
       </label>
-
-      <hr class="menu-sep" />
-      <div class="menu-section-label" data-i18n="menu.section.debug">调试</div>
-      <!-- v134 从笔架 toolbar 挪过来（safety net 防误触）。
-           v423 正名：这个功能**从来就是**「还原内置笔刷」（非破坏性覆盖同 id + 提到分组最前），
-           不删任何用户笔——旧文案「重置笔架出厂 / 会删除全部自定义笔刷」是谎报，已改。
-           menu-danger 红色保留：仍会覆盖用户对内置笔的改动。
-           图标位留空（v425 图标收敛后这颗还没定稿的真图形，走「菜单留空机制」）。 -->
-      <button class="menu-item menu-danger menu-item-with-icon" id="menuResetBrushRack" type="button" role="menuitem"><span class="menu-item-icon-blank" aria-hidden="true"></span>
+        <button class="menu-item menu-item-with-icon" id="menuShortcuts" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#shortcut"/></svg>
+        <span class="menu-item-label" data-i18n="menu.shortcuts">快捷键</span>
+      </button>
+      </div>
+      <div class="menu-page hidden" data-menu-page="plugins">
+        <!-- 插件页：BTP 是插件（user）；将来 AI 模块等同住。tab 图标暂用 #blender（库出通用 plugin 图标后换） -->
+        <button class="menu-item menu-item-with-icon" id="menuBlender" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#blender"/></svg>
+        <span class="menu-item-label">Blender sync…</span>
+      </button>
+      </div>
+      <div class="menu-page hidden" data-menu-page="dev">
+        <button class="menu-item menu-danger menu-item-with-icon" id="menuResetBrushRack" type="button" role="menuitem"><span class="menu-item-icon-blank" aria-hidden="true"></span>
         <span class="menu-item-label" data-i18n="menu.resetRack">还原内置笔刷…</span>
       </button>
-      <div class="menu-item-info" id="versionLabel">版本：—</div>
-      <button class="menu-item menu-item-with-icon" id="menuForcePwaReset" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#refresh"/></svg>
+        <div class="menu-item-info" id="versionLabel">版本：—</div>
+        <button class="menu-item menu-item-with-icon" id="menuForcePwaReset" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#refresh"/></svg>
         <span class="menu-item-label" data-i18n="menu.forceReset">强制更新（清缓存重启）</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="menuSmoothDev" type="button" role="menuitem"><span class="menu-item-icon-blank" aria-hidden="true"></span>
+        <button class="menu-item menu-item-with-icon" id="menuSmoothDev" type="button" role="menuitem"><span class="menu-item-icon-blank" aria-hidden="true"></span>
         <span class="menu-item-label" data-i18n="menu.smoothDev">平滑调参（dev）</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="menuFps" type="button" role="menuitemcheckbox" aria-pressed="false"><span class="menu-item-icon-blank" aria-hidden="true"></span>
+        <button class="menu-item menu-item-with-icon" id="menuFps" type="button" role="menuitemcheckbox" aria-pressed="false"><span class="menu-item-icon-blank" aria-hidden="true"></span>
         <span class="menu-item-label" data-i18n="menu.fps">FPS 计</span>
         <span class="menu-item-state" data-state-for="fps">关</span>
       </button>
+      </div>
+      <!-- 隐藏 stub / 兜底 id（防 getElementById 崩；不属任何 tab） -->
+      <button id="adjustCropToSelection" type="button" hidden></button>
+      <button id="adjustCropFree" type="button" hidden></button>
       <button class="menu-item" id="menuCheckUpdate" type="button" role="menuitem" hidden></button>
-
-      <!-- v124 删主菜单 "清空当前图层"——user 要求挪进图层 ⋯ menu。stub 留 id 给 app.js 兜底 -->
       <button id="menuClear" type="button" hidden></button>
 
     </div>
