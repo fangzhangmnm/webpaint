@@ -15,6 +15,7 @@ import "./registry.test.mjs";
 import "./resolved-brush.test.mjs";
 import "./pointer-gesture.test.mjs";
 import "./crop-geometry.test.mjs";
+import "./shape-geometry.test.mjs";   // 形状笔几何层（ADR-0005）：吸附/视口相对矩形/圆弧拟合(max范数+winding)/采样
 import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";
 import "./background-sync-jobs.test.mjs";
