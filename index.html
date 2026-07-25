@@ -76,10 +76,11 @@
      一份【钉死的拷贝】。上游共享库怎么改都跟本文件无关，直到我们主动去 pull。
      构建路径里没有任何东西会读那个仓库。
 
-       上游 commit    : 64b83a0（2026-07-25）
-       上游 icons.svg : sha256 0454da07452b9826…   ← 提取时的实际文件，可独立校验
+       上游 commit    : 3894967（2026-07-25）
+       上游 icons.svg : sha256 c2b0f6721a0af080…   ← 提取时的实际文件，可独立校验
        拉取日期       : 2026-07-25
-       symbol 数      : 100（全部来自上游，零本地追加）
+       symbol 数      : 104（全部来自上游，零本地追加；本次收货：形状笔 4 真图标 +
+                        grid 直角细框新版）
 
      库里还没有的图标【不在本文件里】——放 assets/icons-local.svg（stopgap 字形补丁 sprite），
      由 tools/inline-sprites.py 合并内联；上游画出同名图标后重跑 extract + inline 自动让位（自愈）。
@@ -95,7 +96,7 @@
      全部 currentColor，尺寸由 CSS 给。
 -->
 <!--
-  100 icons extracted from the family icon library (../../../../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead.
+  104 icons extracted from the family icon library (../../../../20260708 SVG Icons/icons.svg) by extract-icons.py — do not hand-edit; re-run the script instead.
   Family SVG Icons — MIT License, Copyright (c) 2026 fangzhangmnm.
   Contains work derived from (per-icon provenance in data-src):
     Bootstrap Icons — MIT License, Copyright (c) 2019-2024 The Bootstrap Authors · https://github.com/twbs/icons
@@ -118,6 +119,10 @@
   <!-- shapes -->
   <symbol id="rectangle" data-cat="shapes" data-src="own" data-note="矩形(shapes 基本图元)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="12" rx="0.6"/></symbol>
   <symbol id="circle" data-cat="shapes" data-src="own" data-note="圆(shapes 基本图元,无圆心点)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/></symbol>
+  <symbol id="line" data-cat="shapes" data-src="own" data-note="直线(shapes 基本图元):斜线+两端点, 与 arc 同族(同点径 1.2), 29° 防端点顶角; 20260725 入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 16.8 L20.5 7.2"/><circle cx="3.5" cy="16.8" r="1.2" fill="currentColor" stroke="none"/><circle cx="20.5" cy="7.2" r="1.2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="snap-angle" data-cat="shapes" data-src="own" data-note="角度吸附(15° 整数角):字样「15°」, 数字走 fps 同款几何圆角骨架(1=杆+旗, 5=fps 的 S 同形, °=小圆); 图形系四方案(量角器/扇形/方向扇/磁铁)均落选; 20260725 入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 6.4 L5.6 4 V19.4"/><path d="M14.8 4 H11.2 A1.6 1.6 0 0 0 9.6 5.6 V10.4 A1.6 1.6 0 0 0 11.2 12 H13.2 A1.6 1.6 0 0 1 14.8 13.6 V17.8 A1.6 1.6 0 0 1 13.2 19.4 H10.0"/><circle cx="19.2" cy="6.1" r="2.1"/></symbol>
+  <symbol id="constrain-square" data-cat="shapes" data-src="own" data-note="1:1 约束(正方/正圆共用图形):正方内手绘 1:1; constrain-circle 同形挂 id(同形多 id practice); 20260725 入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1"/><path d="M7.6 10.2 L8.8 9.2 V14.8"/><path d="M14 10.2 L15.2 9.2 V14.8"/><circle cx="12" cy="10.7" r="0.85" fill="currentColor" stroke="none"/><circle cx="12" cy="13.3" r="0.85" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="constrain-circle" data-cat="shapes" data-src="own" data-note="1:1 约束: constrain-square 的同形别名 id(WebPaint 圆弧约束钮用); 20260725 入库" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1"/><path d="M7.6 10.2 L8.8 9.2 V14.8"/><path d="M14 10.2 L15.2 9.2 V14.8"/><circle cx="12" cy="10.7" r="0.85" fill="currentColor" stroke="none"/><circle cx="12" cy="13.3" r="0.85" fill="currentColor" stroke="none"/></symbol>
   <!-- image-processing -->
   <symbol id="brush-rack" data-cat="image-processing" data-src="own" data-note="笔架:H 型架 + 三支平头刷。笔号只改梯形宽度, 长度与底边全部对齐到最大那支(梯形有底边所以不会像尖头那样读成箭头;杆的屁股探出横梁) —— 宽 1.0/1.5/2.1, 笔头长 3.8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 3.6 V21.0"/><path d="M20.8 3.6 V21.0"/><path d="M3.2 8.4 H20.8"/><path d="M7.40 6.10 V15.20"/><path d="M6.72 15.20 L6.40 19.00 L8.40 19.00 L8.08 15.20 Z" fill="currentColor" stroke="none"/><path d="M12.00 6.10 V15.20"/><path d="M10.98 15.20 L10.50 19.00 L13.50 19.00 L13.02 15.20 Z" fill="currentColor" stroke="none"/><path d="M16.60 6.10 V15.20"/><path d="M15.17 15.20 L14.50 19.00 L18.70 19.00 L18.03 15.20 Z" fill="currentColor" stroke="none"/></symbol>
   <symbol id="brush-width" data-cat="image-processing" data-src="own" data-note="笔刷宽度:平行两条波浪(标准1.7/粗3.4)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9 Q7.5 6 12 9 T21 9" stroke-width="1.7"/><path d="M3 15.5 Q7.5 12.5 12 15.5 T21 15.5" stroke-width="3.4"/></symbol>
@@ -203,7 +208,7 @@
   <!-- globalization -->
   <symbol id="globe-speech" data-cat="globalization" data-src="own" data-note="语言=地球+对话气泡(mask 抠洞遮挡,留 gap)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><mask id="icGsMask"><rect width="24" height="24" fill="#fff"/><path d="M22 18.5 a1.7 1.7 0 0 1 -1.7 1.7 h-4 l-2.3 2 v-2 a1.7 1.7 0 0 1 -1.7 -1.7 v-2.6 a1.7 1.7 0 0 1 1.7 -1.7 h6.3 a1.7 1.7 0 0 1 1.7 1.7 z" fill="#000" stroke="#000" stroke-width="2.6"/></mask><g mask="url(#icGsMask)"><circle cx="10" cy="10" r="7"/><line x1="3" y1="10" x2="17" y2="10"/><ellipse cx="10" cy="10" rx="3" ry="7"/></g><path d="M22 18.5 a1.7 1.7 0 0 1 -1.7 1.7 h-4 l-2.3 2 v-2 a1.7 1.7 0 0 1 -1.7 -1.7 v-2.6 a1.7 1.7 0 0 1 1.7 -1.7 h6.3 a1.7 1.7 0 0 1 1.7 1.7 z"/></symbol>
   <!-- viewport -->
-  <symbol id="grid" data-cat="viewport" data-src="own" data-note="网格:圆角外框 1.7 + 内部 4x4 细网格线 1.2(细于外框才有层次;24px 实测 5x5 会糊成网眼)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g stroke-width="1.7"><rect x="3.5" y="3.5" width="17" height="17" rx="1.6"/></g><g stroke-width="1.2"><path d="M7.75 3.5 V20.5"/><path d="M3.5 7.75 H20.5"/><path d="M12.00 3.5 V20.5"/><path d="M3.5 12.00 H20.5"/><path d="M16.25 3.5 V20.5"/><path d="M3.5 16.25 H20.5"/></g></symbol>
+  <symbol id="grid" data-cat="viewport" data-src="own" data-note="网格:直角外框 1.2 与内网格线同宽(20260725 甲方定稿; 原 rx1.6 圆角粗框版退役), 内部 4x4 细网格" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><g stroke-width="1.2" stroke-linejoin="miter"><rect x="3.5" y="3.5" width="17" height="17"/></g><g stroke-width="1.2"><path d="M7.75 3.5 V20.5"/><path d="M3.5 7.75 H20.5"/><path d="M12.00 3.5 V20.5"/><path d="M3.5 12.00 H20.5"/><path d="M16.25 3.5 V20.5"/><path d="M3.5 16.25 H20.5"/></g></symbol>
   <symbol id="maximize-viewport" data-cat="viewport" data-src="own" data-note="适配视口:四角向外的箭头" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 四角向外的箭头 --> <polyline points="4 9 4 4 9 4"/> <polyline points="20 9 20 4 15 4"/> <polyline points="4 15 4 20 9 20"/> <polyline points="20 15 20 20 15 20"/></symbol>
   <symbol id="picture-in-picture" data-cat="viewport" data-src="own" data-note="画中画:大框(主画布) + 右下角内嵌小窗(参考小窗自己)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><!-- 大框（主画布）+ 内嵌小窗（参考小窗自己）—— picture-in-picture 隐喻 --> <rect x="3" y="4" width="18" height="14" rx="2"/> <rect x="12" y="10" width="7" height="5" rx="1"/></symbol>
   <!-- ui -->
@@ -219,10 +224,7 @@
   <!-- misc -->
   <symbol id="blender" data-cat="misc" data-src="trademark:Blender" data-note="Blender sync:瘦长体 Bl + Adobe 式圆角方框(PT Sans Narrow Bold, l 带钩不与 i/1 混; 宽高比 0.96)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="2.6" width="18.8" height="18.8" rx="4.2"/><path d="M12.88 9.07Q12.88 9.47 12.8 9.87Q12.71 10.27 12.52 10.62Q12.34 10.97 12.03 11.23Q11.73 11.5 11.31 11.64V11.73Q11.68 11.83 12.02 12.01Q12.35 12.2 12.6 12.52Q12.85 12.84 13 13.3Q13.15 13.76 13.15 14.38Q13.15 15.22 12.86 15.84Q12.57 16.45 12.08 16.84Q11.59 17.23 10.94 17.42Q10.28 17.61 9.55 17.61Q9.33 17.61 8.99 17.61Q8.65 17.61 8.25 17.58Q7.85 17.56 7.43 17.51Q7.01 17.47 6.65 17.37V6.62Q7.17 6.53 7.92 6.46Q8.68 6.39 9.42 6.39Q10.11 6.39 10.74 6.5Q11.37 6.61 11.85 6.9Q12.32 7.2 12.6 7.72Q12.88 8.24 12.88 9.07ZM9.6 15.91Q10.25 15.91 10.67 15.49Q11.09 15.07 11.09 14.26Q11.09 13.74 10.95 13.44Q10.81 13.13 10.58 12.97Q10.34 12.81 10.04 12.76Q9.74 12.71 9.41 12.71H8.61V15.81Q8.74 15.86 9.04 15.88Q9.35 15.91 9.6 15.91ZM9.07 11.17Q9.24 11.17 9.46 11.15Q9.69 11.12 9.83 11.09Q10.28 10.92 10.6 10.53Q10.92 10.14 10.92 9.52Q10.92 9.11 10.81 8.83Q10.7 8.55 10.51 8.39Q10.33 8.23 10.07 8.16Q9.81 8.09 9.52 8.09Q8.88 8.09 8.61 8.15V11.17Z M16.14 14.93Q16.14 15.47 16.25 15.71Q16.36 15.94 16.61 15.94Q16.75 15.94 16.89 15.91Q17.04 15.88 17.23 15.8L17.4 17.29Q17.21 17.42 16.76 17.53Q16.31 17.64 15.84 17.64Q15.06 17.64 14.67 17.25Q14.29 16.86 14.29 15.92V6.54H16.14Z" fill="currentColor" stroke="none"/></symbol>
 <!-- 本地 stopgap 补丁（assets/icons-local.svg，待真图标） -->
-  <symbol id="line" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="形状笔·直线子工具。stopgap 字形；真图标=斜线+两端点(与 arc 同族)" viewBox="0 0 24 24"><path d="M8.59 6.14 9.98 6.69Q8.04 10.8 5.56 13.59L9.13 12.58L9.52 13.82Q6.88 14.83 3.62 15.38L3.16 14.06Q4.86 12.43 6.41 9.94L3.62 10.41L3.31 8.94Q5.09 6.76 6.26 3.04L7.73 3.5Q6.65 6.76 5.02 8.86L7.27 8.63ZM9.52 16.07 9.83 17.47 3.62 19.25 3 17.62ZM19.45 6.45 19.6 7.93 15.1 8.7 15.26 11.19 20.46 10.1 20.61 11.57 15.49 12.66 16.27 15.61Q17.59 14.37 18.67 12.74L20.07 13.44Q18.67 15.69 16.97 17.24Q18.21 19.18 18.91 19.18Q19.29 19.18 19.45 16.54L21 17.24Q20.38 20.96 18.91 20.96Q17.51 20.96 15.8 18.17Q13.71 19.56 11.07 20.5L10.22 18.94Q13.16 17.94 15.03 16.62Q14.33 15.14 13.94 12.97L9.98 13.82L9.75 12.35L13.78 11.5L13.55 8.94L10.6 9.4L10.37 7.93L13.47 7.46L13.4 3.04H14.95L15.03 7.15ZM17.12 3.12 18.75 5.13 17.59 6.06 15.88 3.97Z" fill="currentColor" stroke="none"/></symbol>
-  <symbol id="snap-angle" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="形状笔·直线约束(画布相对 15° 角度吸附)。stopgap 字形；真图标=量角器/角度扇形(workbench protractor 可定稿顶上)" viewBox="0 0 24 24"><path d="M1.55 14.95H3.62V9.1L1.5 9.53V7.95L3.6 7.51H5.82V14.95H7.89V16.56H1.55Z M10.06 7.51H15.86V9.23H11.92V10.63Q12.18 10.55 12.45 10.51Q12.72 10.47 13.02 10.47Q14.67 10.47 15.59 11.3Q16.51 12.13 16.51 13.61Q16.51 15.08 15.51 15.91Q14.51 16.74 12.72 16.74Q11.95 16.74 11.2 16.59Q10.44 16.44 9.7 16.14V14.3Q10.44 14.73 11.1 14.94Q11.77 15.15 12.35 15.15Q13.2 15.15 13.69 14.73Q14.18 14.32 14.18 13.61Q14.18 12.89 13.69 12.48Q13.2 12.07 12.35 12.07Q11.85 12.07 11.28 12.2Q10.71 12.33 10.06 12.6Z M20.49 8.24Q20.05 8.24 19.75 8.55Q19.44 8.85 19.44 9.29Q19.44 9.72 19.74 10.02Q20.04 10.32 20.49 10.32Q20.92 10.32 21.23 10.02Q21.53 9.72 21.53 9.29Q21.53 8.85 21.22 8.55Q20.92 8.24 20.49 8.24ZM20.49 7.26Q20.89 7.26 21.26 7.42Q21.63 7.57 21.92 7.86Q22.2 8.15 22.35 8.51Q22.5 8.87 22.5 9.29Q22.5 9.69 22.35 10.06Q22.2 10.43 21.93 10.7Q21.64 10.99 21.26 11.14Q20.89 11.3 20.47 11.3Q19.62 11.3 19.04 10.72Q18.46 10.14 18.46 9.29Q18.46 8.43 19.05 7.85Q19.63 7.26 20.49 7.26Z" fill="currentColor" stroke="none"/></symbol>
-  <symbol id="constrain-square" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="形状笔·矩形约束(屏幕系 1:1 正方)。stopgap 字形；真图标=正方+等边记号" viewBox="0 0 24 24"><path d="M11.65 3Q12.66 4.56 13.21 6.27H20.69V7.75H10.01L9.94 10.87H18.74Q18.74 18.19 18.12 19.6Q17.49 21 15.62 21L13.13 20.84L12.9 19.29L15.39 19.44Q16.32 19.44 16.68 18.55Q17.03 17.65 17.18 12.35H9.78Q9.39 18.35 4.4 21L3.55 19.6Q5.96 18.35 7.21 15.94Q8.45 13.52 8.45 7.75H3.31V6.27H11.34Q10.87 4.79 10.09 3.55Z" fill="currentColor" stroke="none"/></symbol>
-  <symbol id="constrain-circle" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="形状笔·圆弧约束(正圆, max 范数半径)。stopgap 字形；真图标=正圆+等径记号" viewBox="0 0 24 24"><path d="M8.11 5.43H16.05V9.57H8.11ZM9.57 8.19H14.59V6.81H9.57ZM16.62 10.38V15.41H15.16V11.76H9V15.41H7.54V10.38ZM11.19 12.24H12.81L12.73 14.19Q12.73 17.03 6.89 18.08L5.92 16.86Q11.19 16.05 11.19 13.7ZM13.86 15.41 17.92 16.95 16.78 18.08 12.73 16.22ZM20.43 3V21H18.89V20.27H5.11V21H3.57V3ZM5.11 18.81H18.89V4.46H5.11Z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="perspective" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="形状笔·透视平面槽(关/地板/墙, ADR-0006)。stopgap 字形；真图标=汇聚线/地平线+消失点" viewBox="0 0 24 24"><path d="M4.4 3.5Q5.95 4.51 7.19 5.91L6.1 7.23Q4.78 5.68 3.31 4.67ZM3.08 9.94H6.96V17.39Q8.12 18.25 9.83 18.48Q11.53 18.71 21 18.71L20.22 20.42H14.02Q8.59 20.42 6.34 18.48L4.09 20.73L3 19.1L5.41 17.62V11.42H3.08ZM18.83 3.27 19.6 4.59 15.03 4.9V6.3H20.38V7.62H16.19Q18.28 9.01 21 9.63L20.22 11.11Q17.12 10.02 15.03 8.08V10.56H13.55V8.24Q11.61 10.02 8.66 11.11L7.73 9.87Q10.53 9.01 12.54 7.62H8.28V6.3H13.55V4.98L9.44 5.13L8.97 3.74Q13.94 3.74 18.83 3.27ZM11.69 12.58H9.44V11.26H17.97L17.28 13.36H20.3Q20.15 16.69 19.72 17.47Q19.29 18.25 18.21 18.25L16.27 18.09L15.96 16.62L18.21 16.93Q18.52 16.93 18.63 16.62Q18.75 16.31 18.83 14.68H15.41L16.19 12.58H13.09Q12.78 16.31 9.21 17.94L8.2 16.85Q11.38 15.38 11.69 12.58Z" fill="currentColor" stroke="none"/></symbol>
 </svg>
 <!-- ICON-SPRITE:END -->
 
@@ -468,6 +470,22 @@
           <button class="lasso-tool-btn lasso-tool-icon" id="shapeConstrainBtn" type="button" data-i18n-title="sb.constrain" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><use id="shapeConstrainUse" href="#snap-angle"/></svg>
           </button>
+          <!-- grid 配置（sub=grid 时显示）：nu×nv steppers（零键盘，user 拍板）+ 外框 toggle（默认关） -->
+          <span class="lasso-section hidden" id="shapeGridCtx">
+            <button class="lasso-tool-btn" id="shapeGridNuMinus" type="button" aria-label="−">−</button>
+            <span class="lasso-popup-val" id="shapeGridNuVal">2</span>
+            <button class="lasso-tool-btn" id="shapeGridNuPlus" type="button" aria-label="＋">＋</button>
+            <span class="lasso-popup-val" aria-hidden="true">×</span>
+            <button class="lasso-tool-btn" id="shapeGridNvMinus" type="button" aria-label="−">−</button>
+            <span class="lasso-popup-val" id="shapeGridNvVal">6</span>
+            <button class="lasso-tool-btn" id="shapeGridNvPlus" type="button" aria-label="＋">＋</button>
+            <button class="lasso-tool-btn" id="shapeGridBorderBtn" type="button" data-i18n="sb.borderShort" data-i18n-title="sb.border" aria-pressed="false">框</button>
+          </span>
+          <!-- 透视平面组槽（ADR-0006）：关/地板/墙…（含 VP 编辑入口）；亮 = 透视开 -->
+          <button class="lasso-tool-btn lasso-tool-icon lasso-slot" id="shapePerspSlot" type="button" data-i18n-title="sb.perspSlot" aria-haspopup="true" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#perspective"/></svg>
+            <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -576,6 +594,16 @@
       <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="line" type="button" role="menuitem" data-i18n-title="sb.line"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#line"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="rect" type="button" role="menuitem" data-i18n-title="sb.rect"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rectangle"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="circle" type="button" role="menuitem" data-i18n-title="sb.circle"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#circle"/></svg></button>
+      <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="grid" type="button" role="menuitem" data-i18n-title="sb.grid"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg></button>
+    </div>
+    <!-- 透视平面菜单（ADR-0006）：按已配置 VP 动态过滤（updateShapeToolbar），文字项好懂过图标 -->
+    <div class="lasso-icon-menu lasso-icon-list hidden" id="shapePerspMenu" role="menu" data-i18n-aria="sb.perspSlot">
+      <button class="lasso-tool-btn" data-shape-plane="off" type="button" role="menuitem" data-i18n="sb.planeOff">关</button>
+      <button class="lasso-tool-btn" data-shape-plane="ground" type="button" role="menuitem" data-i18n="sb.planeGround">地板</button>
+      <button class="lasso-tool-btn" data-shape-plane="wall" type="button" role="menuitem" data-i18n="sb.planeWall">墙</button>
+      <button class="lasso-tool-btn" data-shape-plane="wallL" type="button" role="menuitem" data-i18n="sb.planeWallL">左墙</button>
+      <button class="lasso-tool-btn" data-shape-plane="wallR" type="button" role="menuitem" data-i18n="sb.planeWallR">右墙</button>
+      <button class="lasso-tool-btn" id="shapeVpEditBtn" type="button" role="menuitem" data-i18n="sb.vpEdit">编辑消失点…</button>
     </div>
     <div class="lasso-icon-menu hidden" id="lassoSubMenu" role="menu" data-i18n-aria="la.subSlot">
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="freehand" type="button" role="menuitem" data-i18n-title="la.freehand"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-freehand"/></svg></button>

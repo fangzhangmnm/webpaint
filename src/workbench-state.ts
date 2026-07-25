@@ -141,7 +141,18 @@ function freshGroups() {
     //   v0.5.11：threshold 归魔棒（油漆桶独立工具及 editorState.bucket 退役——填色收进套索 fill mode，
     //   flood 只剩魔棒一条路；旧 doc 里 stale 的 bucket 键被 mergeInto 静默忽略）。
     magicWand:     { threshold: 20, expand: false, expandPx: 1 },        // #31 自动扩张 + v0.5.11 阈值
-    shapeBrush:    { sub: "line" as string, constrain: false },          // ADR-0005 形状笔：子工具 + 约束（15°/正方/正圆）
+    // ADR-0005/0006 形状笔：子工具 + 约束 + grid 配置（默认 2×6 = 6 头身 + 中线，border 关）
+    shapeBrush:    { sub: "line" as string, constrain: false, gridNu: 2, gridNv: 6, gridBorder: false },
+    // ADR-0006 透视 frame（形状笔全局、per-ora）：VP 0-3 + 锁地平线（默认开）+ 参考点 + 当前平面。
+    //   坐标 doc 空间、snap 像素中线 +0.5。裁剪/旋转/翻转/偏移画布时必须过 remapShapePersp（doc-ops 挂钩）。
+    persp: {
+      vp1: null as { x: number; y: number } | null,
+      vp2: null as { x: number; y: number } | null,
+      vp3: null as { x: number; y: number } | null,
+      lockHorizon: true,
+      refPoint: null as { x: number; y: number } | null,
+      plane: "off" as string,
+    },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
@@ -234,6 +245,17 @@ export const editorState = {
   shapeBrush: {
     get sub(): string { return S.g.shapeBrush.sub; }, set sub(v: string) { S.g.shapeBrush.sub = v; },
     get constrain(): boolean { return S.g.shapeBrush.constrain; }, set constrain(v: boolean) { S.g.shapeBrush.constrain = v; },
+    get gridNu(): number { return S.g.shapeBrush.gridNu; }, set gridNu(v: number) { S.g.shapeBrush.gridNu = v; },
+    get gridNv(): number { return S.g.shapeBrush.gridNv; }, set gridNv(v: number) { S.g.shapeBrush.gridNv = v; },
+    get gridBorder(): boolean { return S.g.shapeBrush.gridBorder; }, set gridBorder(v: boolean) { S.g.shapeBrush.gridBorder = v; },
+  },
+  persp: {
+    get vp1() { return S.g.persp.vp1; }, set vp1(v: { x: number; y: number } | null) { S.g.persp.vp1 = v; },
+    get vp2() { return S.g.persp.vp2; }, set vp2(v: { x: number; y: number } | null) { S.g.persp.vp2 = v; },
+    get vp3() { return S.g.persp.vp3; }, set vp3(v: { x: number; y: number } | null) { S.g.persp.vp3 = v; },
+    get lockHorizon(): boolean { return S.g.persp.lockHorizon; }, set lockHorizon(v: boolean) { S.g.persp.lockHorizon = v; },
+    get refPoint() { return S.g.persp.refPoint; }, set refPoint(v: { x: number; y: number } | null) { S.g.persp.refPoint = v; },
+    get plane(): string { return S.g.persp.plane; }, set plane(v: string) { S.g.persp.plane = v; },
   },
   grid: {
     get on(): boolean { return S.g.grid.on; }, set on(v: boolean) { S.g.grid.on = v; },
@@ -270,3 +292,27 @@ export const editorState = {
   syncRuntimeForSave(vp: EditorViewport, checkboard: boolean): void { S.g.viewport = vp; S.g.checkboard = checkboard; },
 };
 export type EditorStateStruct = typeof editorState;
+
+// 画布几何操作（裁剪/旋转/翻转/偏移）时透视配置的重映射（ADR-0006；user：小心裁剪时 VP 坐标）。
+//   VP/参考点是 doc 坐标的 desk 态，doc 几何变了不跟着变 = 透视静默错位。调用点在 doc-ops.ts
+//   的五个几何 op 旁。rotate90 后若 VP 对存在，地平线变竖直 → 自动解锁 lockHorizon（锁的语义
+//   是 doc 水平线，转 90° 后无法表示；下次进 VP 编辑用户可重新锁）。
+export function remapShapePersp(f: (p: { x: number; y: number }) => { x: number; y: number }, opts: { unlockHorizon?: boolean } = {}): void {
+  const g = S.g.persp;
+  if (g.vp1) g.vp1 = f(g.vp1);
+  if (g.vp2) g.vp2 = f(g.vp2);
+  if (g.vp3) g.vp3 = f(g.vp3);
+  if (g.refPoint) g.refPoint = f(g.refPoint);
+  if (opts.unlockHorizon && g.vp1 && g.vp2) g.lockHorizon = false;
+}
+
+// 透视配置快照/还原（docTransform undo 信封用；深拷贝，desk 无自身 undo 所以只随 doc 变换走）
+export function snapshotShapePersp(): unknown {
+  return JSON.parse(JSON.stringify(S.g.persp));
+}
+export function restoreShapePersp(snap: unknown): void {
+  if (!snap || typeof snap !== "object") return;
+  const d = freshGroups().persp;
+  mergeInto(d, snap);
+  S.g.persp = d;
+}

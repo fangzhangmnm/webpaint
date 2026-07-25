@@ -47,7 +47,7 @@ import { initToolbar, RACK_PANEL_BY_TOOL } from "./toolbar.ts";
 import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
 import { setDocCompositor } from "./doc-render.ts";
-import { createEditorState } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
+import { createEditorState, restoreShapePersp } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
@@ -189,9 +189,10 @@ const history = new UndoHistory({
   },
 });
 const ops = makeOperators({
-  // docTransform 的 UI 随行（viewport 复位 + 尺寸标签；operator 本体不碰 DOM）。
-  applyDocTransformUi: (viewport) => {
+  // docTransform 的 UI 随行（viewport 复位 + 尺寸标签 + 透视配置还原；operator 本体不碰 DOM）。
+  applyDocTransformUi: (viewport, persp) => {
     if (viewport) Object.assign(board.viewport, viewport);
+    if (persp) restoreShapePersp(persp);   // ADR-0006：undo/redo 时 VP/参考点跟着 doc 几何还原
     if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
     board.invalidateAll();
   },
