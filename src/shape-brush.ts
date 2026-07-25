@@ -27,7 +27,9 @@ import {
   snapLineEnd, rectCorners, fitEllipse,
   linePolyline, rectPolyline, ellipseArcPolyline, maxSegLenFor,
   clampPixelCenter, bresenhamLine, bresenhamRectPerimeter, bresenhamEllipseRect,
+  clipSegToBox, clipPolylineToBox,
 } from "./shape-geometry.ts";
+import type { ClipBox } from "./shape-geometry.ts";
 import {
   planeFamilies, quadFromCorners, homographyUnitSquare, applyMat3,
   planeChart, snapDirections, snapToDirections,
@@ -177,8 +179,16 @@ export class ShapeBrushEngine {
     return rectCorners(c0, c1, st.frame.rot, constrain);
   }
 
+  // 裁剪盒（ADR-0006 奇点护栏的采样面）：透视交点在地平线附近会飞到 1e5+ doc px，
+  //   不裁剪 = 百万点级 polyline/Bresenham 卡死。pad 给足笔宽 + 出血。
+  _clipBox(st: ShapeStroke): ClipBox {
+    const pad = (st.settings.size || 4) + 64;
+    return { x0: -pad, y0: -pad, x1: st.layer.docW + pad, y1: st.layer.docH + pad };
+  }
+
   _polylines(st: ShapeStroke): Pt[][] {
     const seg = maxSegLenFor(st.settings.size, st.settings.spacing);
+    const box = this._clipBox(st);
     if (this._subTool === "line") {
       let end: Pt = { x: st.x1, y: st.y1 };
       if (this._constrain) {
@@ -190,14 +200,27 @@ export class ShapeBrushEngine {
     }
     if (this._subTool === "rect") {
       const q = this._quad(st, this._constrain && st.frame.kind === "viewport");
-      return q ? [rectPolyline(q, seg)] : [];
+      if (!q) return [];
+      if (st.frame.kind === "viewport") return [rectPolyline(q, seg)];
+      // 透视：四边逐段裁剪（角点可能在盒外很远）→ 各自一条 polyline
+      const out: Pt[][] = [];
+      for (let i = 0; i < 4; i++) {
+        const c = clipSegToBox(q[i], q[(i + 1) % 4], box);
+        if (c) out.push(linePolyline(c[0], c[1], seg));
+      }
+      return out;
     }
     if (this._subTool === "grid") {
       const q = this._quad(st, false);
       if (!q) return [];
       const H = homographyUnitSquare(q);
       if (!H) return [];
-      return this._gridSegments(H).map(([a, b]) => linePolyline(a, b, seg));
+      const out: Pt[][] = [];
+      for (const [a, b] of this._gridSegments(H)) {
+        const c = clipSegToBox(a, b, box);
+        if (c) out.push(linePolyline(c[0], c[1], seg));
+      }
+      return out;
     }
     // circle：徒手拟合。persp → 在平面 chart 里做（ε 护栏在 chart 内），映回 doc。
     if (st.frame.kind === "persp") {
@@ -206,15 +229,20 @@ export class ShapeBrushEngine {
       const planePts = st.pts.map((p) => chart.toPlane(p));
       const fit = fitEllipse(planePts, 0, false);   // 平面内约束无度量（ADR-0006）→ constrain 忽略
       if (!fit) return [];
-      // 平面 polyline → doc：密度按 doc 弧长控制（先粗映射估周长，再按 maxSegLen 重采样）
+      // 平面 polyline → doc：密度按 doc 弧长控制（先粗映射估周长，再按 maxSegLen 重采样）；
+      //   映射点可能飞远（近地平线）→ 裁剪盒截成若干 run
       const coarse = ellipseArcPolyline(fit, Math.max(perimOf(fit) / 64, 1e-6));
       const coarseDoc = coarse.map((p) => chart.toDoc(p.x, p.y)).filter((p): p is Pt => !!p);
       if (coarseDoc.length < 3) return [];
       let perim = 0;
-      for (let i = 1; i < coarseDoc.length; i++) perim += Math.hypot(coarseDoc[i].x - coarseDoc[i - 1].x, coarseDoc[i].y - coarseDoc[i - 1].y);
+      for (let i = 1; i < coarseDoc.length; i++) {
+        const d = Math.hypot(coarseDoc[i].x - coarseDoc[i - 1].x, coarseDoc[i].y - coarseDoc[i - 1].y);
+        perim += Math.min(d, st.layer.docW + st.layer.docH);   // 飞远段不计满（防 n 打顶失真）
+      }
       const n = Math.min(512, Math.max(24, Math.ceil(perim / seg)));
       const fine = ellipseArcPolyline(fit, Math.max(perimOf(fit) / n, 1e-6));
-      return [fine.map((p) => chart.toDoc(p.x, p.y)).filter((p): p is Pt => !!p)];
+      const fineDoc = fine.map((p) => chart.toDoc(p.x, p.y)).filter((p): p is Pt => !!p);
+      return clipPolylineToBox(fineDoc, box);
     }
     const fit = fitEllipse(st.pts, st.frame.rot, this._constrain);
     return fit ? [ellipseArcPolyline(fit, seg)] : [[{ x: st.x0, y: st.y0 }]];
@@ -327,24 +355,30 @@ export class ShapeBrushEngine {
         ];
         return this._gridPixels(q);
       }
-      // 透视：两角定形 → 四边形（病态 → 空）
+      // 透视：两角定形 → 四边形（病态 → 空）。全部过裁剪盒（交点近地平线会飞远）。
+      const box = this._clipBox(st);
       const q = quadFromCorners(
         { x: i0 + 0.5, y: j0 + 0.5 }, { x: i1 + 0.5, y: j1 + 0.5 },
         (st.frame as { famA: Family }).famA, (st.frame as { famB: Family }).famB);
       if (!q) return [];
-      if (this._subTool === "circle") return bresenhamConicInQuad(q);
-      if (this._subTool === "rect") return quadPerimeterPixels(q);
-      return this._gridPixels(q);
+      if (this._subTool === "circle") return bresenhamConicInQuad(q, box);
+      if (this._subTool === "rect") return quadPerimeterPixels(q, box);
+      return this._gridPixels(q, box);
     }
     return [];
   }
 
-  _gridPixels(q: [Pt, Pt, Pt, Pt]): Pt[] {
+  _gridPixels(q: [Pt, Pt, Pt, Pt], box?: ClipBox): Pt[] {
     const H = homographyUnitSquare(q);
     if (!H) return [];
     const out: Pt[] = [];
-    for (const [a, b] of this._gridSegments(H)) {
+    for (let [a, b] of this._gridSegments(H)) {
       if (![a, b].every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))) continue;
+      if (box) {
+        const c = clipSegToBox(a, b, box);
+        if (!c) continue;
+        [a, b] = c;
+      }
       out.push(...bresenhamLine(Math.floor(a.x), Math.floor(a.y), Math.floor(b.x), Math.floor(b.y)));
     }
     return out;
@@ -367,12 +401,13 @@ function perimOf(fit: { rx: number; ry: number; sweep: number; closed: boolean }
   return fit.closed ? full : full * Math.abs(fit.sweep) / (Math.PI * 2);
 }
 
-// 透视四边形周界（像素）：四边 Bresenham（角点重复由上层 seen-set 去重）
-function quadPerimeterPixels(q: [Pt, Pt, Pt, Pt]): Pt[] {
+// 透视四边形周界（像素）：四边裁剪后 Bresenham（角点重复由上层 seen-set 去重）
+function quadPerimeterPixels(q: [Pt, Pt, Pt, Pt], box: ClipBox): Pt[] {
   const out: Pt[] = [];
   for (let i = 0; i < 4; i++) {
-    const a = q[i], b = q[(i + 1) % 4];
-    out.push(...bresenhamLine(Math.floor(a.x), Math.floor(a.y), Math.floor(b.x), Math.floor(b.y)));
+    const c = clipSegToBox(q[i], q[(i + 1) % 4], box);
+    if (!c) continue;
+    out.push(...bresenhamLine(Math.floor(c[0].x), Math.floor(c[0].y), Math.floor(c[1].x), Math.floor(c[1].y)));
   }
   return out;
 }

@@ -401,3 +401,60 @@ describe("shape-brush · 透视 frame + grid 子工具（ADR-0006）", () => {
     for (const t of cs.stamps) assert(Number.isFinite(t.x) && Number.isFinite(t.y));
   });
 });
+
+describe("shape-brush · 透视奇点采样护栏（近地平线不卡死）", () => {
+  const CFGH = { vp1: { x: 256.5, y: 100.5 }, vp2: null, vp3: null, lockHorizon: true, refPoint: null, plane: "ground" };
+  function mkH(sub, pixel = false) {
+    const eng = new ShapeBrushEngine();
+    eng.setSubTool(sub);
+    eng.setViewportRotProvider(() => 0);
+    eng.setPerspProvider(() => CFGH);
+    return eng;
+  }
+  it("透视 rect 角点贴地平线（交点飞远）→ 秒级返回、stamps 有界", () => {
+    const s = resolveBrush({ size: 6, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = mkH("rect");
+    const t0 = Date.now();
+    eng.beginStroke(doc.layers[0], s, 150, 400, 0.5, "brush");
+    eng.extendStroke(300, 101, 0.5);   // 上边贴 VP 的水平线 → 交点 x 飞远
+    const cs = eng.endStroke();
+    assert(Date.now() - t0 < 3000, "秒级返回");
+    assert(!cs || cs.stamps.length < 30000, `stamps 有界，实得 ${cs ? cs.stamps.length : 0}`);
+  });
+  it("透视 grid 贴地平线 → 秒级返回、stamps 有界", () => {
+    const s = resolveBrush({ size: 4, color: "#000", spacing: 0.25 });
+    const doc = mkDoc();
+    const eng = mkH("grid");
+    eng.setGridConfig({ nu: 4, nv: 8, border: true });
+    const t0 = Date.now();
+    eng.beginStroke(doc.layers[0], s, 100, 450, 0.5, "brush");
+    eng.extendStroke(400, 100.6, 0.5);
+    const cs = eng.endStroke();
+    assert(Date.now() - t0 < 3000, "秒级返回");
+    assert(!cs || cs.stamps.length < 60000, `stamps 有界，实得 ${cs ? cs.stamps.length : 0}`);
+  });
+  it("透视像素 rect/圆 贴地平线 → 秒级返回、像素数有界", () => {
+    const s = resolveBrush({ size: 1, color: "#000000", preset: { pixelMode: true } });
+    for (const sub of ["rect", "circle"]) {
+      const doc = mkDoc();
+      const eng = mkH(sub, true);
+      const t0 = Date.now();
+      eng.beginStroke(doc.layers[0], s, 150.2, 400.7, 0.5, "brush");
+      eng.extendStroke(300.8, 101.2, 0.5);
+      eng.endStroke();
+      assert(Date.now() - t0 < 3000, `${sub} 秒级返回`);
+      assert(paintedCount(doc.layers[0]) < 200000, `${sub} 像素数有界`);
+    }
+  });
+  it("透视 rect 裁剪后仍画出盒内可见部分（不是整形消失）", () => {
+    const s = resolveBrush({ size: 6, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = mkH("rect");
+    eng.beginStroke(doc.layers[0], s, 150, 400, 0.5, "brush");
+    eng.extendStroke(300, 102, 0.5);
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 10, "可见段仍在");
+    assert(cs.stamps.some((t) => Math.abs(t.y - 400) < 1), "下水平边在");
+  });
+});

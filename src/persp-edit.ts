@@ -71,10 +71,11 @@ function _mkHandle(kind: Kind, label: string): HTMLElement {
 
 const LABELS: Record<Kind, string> = { vp1: "1", vp2: "2", vp3: "V", ref: "◎" };
 
-function _syncUi() {
+// 手柄定位（**不触发 requestRender**——它也被 onViewportChange 调，而 onViewportChange 在
+//   requestRender 内部同步发射，这里再 requestRender 会无限递归；真机教训 2026-07-25）
+function _syncHandles() {
   if (!_ctx || !_active) return;
   const { board } = _ctx;
-  const g = editorState.persp;
   for (const kind of ["vp1", "vp2", "vp3", "ref"] as Kind[]) {
     const p = _get(kind);
     let el = _handles.get(kind);
@@ -83,11 +84,15 @@ function _syncUi() {
     const s = board.docToScreen(p.x, p.y);
     el.style.left = `${s.x}px`;
     el.style.top = `${s.y}px`;
-    _chipsSync();
   }
+}
+
+function _syncUi() {
+  if (!_ctx || !_active) return;
+  _syncHandles();
   _chipsSync();
-  _lockBtn.setAttribute("aria-pressed", g.lockHorizon ? "true" : "false");
-  board.requestRender();
+  _lockBtn.setAttribute("aria-pressed", editorState.persp.lockHorizon ? "true" : "false");
+  _ctx.board.requestRender();
 }
 
 function _chipsSync() {
@@ -111,9 +116,9 @@ function _toggle(kind: Kind) {
       kind === "vp2" ? _snap({ x: doc.width * 1.25, y: horizonY }) :
       kind === "vp3" ? _snap({ x: doc.width / 2, y: doc.height * 1.6 }) :
       _snap({ x: doc.width / 2, y: doc.height / 2 });
-    if (kind === "vp2" && !g.vp1) { _set("vp1", def); }   // 没 VP1 先补 VP1（排序不变式）
-    else _set(kind, def);
-    if (kind === "vp2" && g.vp1 && g.vp2 && g.vp2.x < g.vp1.x) { const t = g.vp1; g.vp1 = g.vp2; g.vp2 = t; }
+    if (kind === "vp2" && !g.vp1) _set("vp1", _snap({ x: -doc.width * 0.25, y: horizonY }));   // 补齐水平对
+    _set(kind, def);
+    if (g.vp1 && g.vp2 && g.vp2.x < g.vp1.x) { const t = g.vp1; g.vp1 = g.vp2; g.vp2 = t; }
   }
   _syncUi();
 }
@@ -165,9 +170,11 @@ export function initPerspEdit(ctx: AppContext): void {
   document.getElementById("perspCancelBtn")!.addEventListener("click", () => { _finish(false); ctx.editMode.exitTransient(); });
   // 形状笔透视菜单里的入口
   document.getElementById("shapeVpEditBtn")?.addEventListener("click", () => enterPerspEdit());
-  // pan/zoom 中手柄跟随（单槽回调 → 链式包装，别打断 crop 的）
+  // pan/zoom 中手柄跟随（单槽回调 → 链式包装，别打断 crop 的；只定位不 render，防递归）
   const prev = ctx.board.onViewportChange;
-  ctx.board.onViewportChange = () => { prev?.(); if (_active) _syncUi(); };
+  ctx.board.onViewportChange = () => { prev?.(); if (_active) _syncHandles(); };
+  // 换文档：只收 UI 不动状态（新 doc 的 persp 已 Unserialize，绝不能拿旧快照 restore 污染）
+  window.addEventListener("wp:applyEditorState", () => { if (_active) _finish(true); });
   // gizmo：淡地平线 + VP 圈 + 参考点射线（只在本模式非空；平时零成本）
   ctx.board.setPerspGizmoProvider(() => {
     if (!_active) return null;
