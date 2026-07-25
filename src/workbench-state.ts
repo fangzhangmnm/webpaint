@@ -141,6 +141,7 @@ function freshGroups() {
     //   v0.5.11：threshold 归魔棒（油漆桶独立工具及 editorState.bucket 退役——填色收进套索 fill mode，
     //   flood 只剩魔棒一条路；旧 doc 里 stale 的 bucket 键被 mergeInto 静默忽略）。
     magicWand:     { threshold: 20, expand: false, expandPx: 1 },        // #31 自动扩张 + v0.5.11 阈值
+    shapeBrush:    { sub: "line" as string, constrain: false },          // ADR-0005 形状笔：子工具 + 约束（15°/正方/正圆）
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
@@ -229,6 +230,10 @@ export const editorState = {
     get threshold(): number { return S.g.magicWand.threshold; }, set threshold(v: number) { S.g.magicWand.threshold = v; },
     get expand(): boolean { return S.g.magicWand.expand; }, set expand(v: boolean) { S.g.magicWand.expand = v; },
     get expandPx(): number { return S.g.magicWand.expandPx; }, set expandPx(v: number) { S.g.magicWand.expandPx = v; },
+  },
+  shapeBrush: {
+    get sub(): string { return S.g.shapeBrush.sub; }, set sub(v: string) { S.g.shapeBrush.sub = v; },
+    get constrain(): boolean { return S.g.shapeBrush.constrain; }, set constrain(v: boolean) { S.g.shapeBrush.constrain = v; },
   },
   grid: {
     get on(): boolean { return S.g.grid.on; }, set on(v: boolean) { S.g.grid.on = v; },

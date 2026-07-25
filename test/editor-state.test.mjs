@@ -96,3 +96,20 @@ test("[editor-state] v0.5.11 迁移：stale bucket 键忽略、magicWand.thresho
   eq(editorState.magicWand.expandPx, 1, "缺字段留 default");
   eq("bucket" in editorState, false, "bucket facade 已删");
 });
+
+test("[editor-state] 形状笔（ADR-0005）：默认 / 往返 / 老 doc 缺组补默认", () => {
+  editorState.reset();
+  eq(editorState.shapeBrush.sub, "line", "sub 默认 line");
+  eq(editorState.shapeBrush.constrain, false, "constrain 默认 false");
+  editorState.shapeBrush.sub = "circle";
+  editorState.shapeBrush.constrain = true;
+  const ser = editorState.Serialize();
+  editorState.reset();
+  editorState.Unserialize(ser);
+  eq(editorState.shapeBrush.sub, "circle", "Serialize 往返 sub");
+  eq(editorState.shapeBrush.constrain, true, "Serialize 往返 constrain");
+  // 老 doc 的 editor-state.json 没有 shapeBrush 组 → 留默认不崩
+  editorState.reset();
+  editorState.Unserialize({ magicWand: { threshold: 30 } });
+  eq(editorState.shapeBrush.sub, "line", "缺组 → 默认");
+});

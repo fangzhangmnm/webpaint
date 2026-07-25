@@ -167,7 +167,8 @@ export class BrushRackController {
   reconcileWithRemote() { return this.d.collection.reconcileWithRemote(); }   // 返 ReconcileResult：调用方须读 status（v436）
 
   // ---- 活动预设 ↔ tool dial 绑定 ----
-  getRackToolKey(tool: string) { return tool === "airbrush" ? "brush" : tool; }
+  // shapeBrush alias 到 brush（ADR-0005）：形状笔共享笔架 + 共享当前笔/dial，零自有 toolState 持久化
+  getRackToolKey(tool: string) { return (tool === "airbrush" || tool === "shapeBrush") ? "brush" : tool; }
   defaultToolStateFor(tool: string) {
     const brush = defaultBrushForTool(this._view(), tool);
     if (brush) return { size: brush.size.base, opacity: 1.0, activeBrushId: brush.id, activeBrushName: brush.name };

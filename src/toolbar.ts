@@ -62,6 +62,26 @@ let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   
 const _selMem = { sub: "freehand" as string, setOp: "new" as string };
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
 const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", magic: "#magic-wand" };
+// 形状笔（ADR-0005）：组槽 + 约束钮（约束图标按子工具换义：15° 吸附 / 正方 / 正圆）
+let shapeToolbarStack: HTMLElement, shapeSubSlot: HTMLElement, shapeSubSlotUse: SVGUseElement,
+    shapeSubMenu: HTMLElement, shapeSubMenuBtns: HTMLElement[], shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement;
+const SHAPE_SUB_ICON: Record<string, string> = { line: "#line", rect: "#rectangle", circle: "#circle" };
+const SHAPE_CONSTRAIN_ICON: Record<string, string> = { line: "#snap-angle", rect: "#constrain-square", circle: "#constrain-circle" };
+
+// 形状笔上下文工具栏派生（对齐 updateLassoToolbar 的「统一同步点」纪律）
+export function updateShapeToolbar() {
+  if (!shapeToolbarStack) return;
+  const active = editMode.current() === "shapeBrush";
+  shapeToolbarStack.classList.toggle("hidden", !active);
+  if (!active) { shapeSubMenu?.classList.add("hidden"); return; }
+  const sub = input.shapeBrush.getSubTool();
+  shapeSubSlotUse.setAttribute("href", SHAPE_SUB_ICON[sub] || "#line");
+  for (const b of shapeSubMenuBtns) {
+    b.setAttribute("aria-pressed", b.dataset.shapeSub === sub ? "true" : "false");
+  }
+  shapeConstrainUse.setAttribute("href", SHAPE_CONSTRAIN_ICON[sub] || "#snap-angle");
+  shapeConstrainBtn.setAttribute("aria-pressed", input.shapeBrush.getConstrain() ? "true" : "false");
+}
 function closeSubMenu() { lassoSubMenu?.classList.add("hidden"); }
 function closeSetOpMenu() { lassoSetOpMenu?.classList.add("hidden"); }
 
@@ -82,7 +102,9 @@ export function updateLassoToolbar() {
   const fillActive = m === "fill";
   const selToolActive = lassoActive || fillActive;   // v0.5.12：选区/填充共用同一 Row1（UI 独立≠第二套代码）
   const sub = input.lasso.getSubTool();
-  const showAny = (floating || hasSelection || selToolActive) && !pickerActive;
+  // 形状笔与 lasso stack 同位 fixed → 互斥（同 picker 先例）；shape 中有选区时去选走 Ctrl+D
+  const shapeActive = m === "shapeBrush";
+  const showAny = (floating || hasSelection || selToolActive) && !pickerActive && !shapeActive;
   lassoToolbarStack.classList.toggle("hidden", !showAny);
   if (!showAny) { closeSelEditUI(); closeSubMenu(); closeSetOpMenu(); return; }
 
@@ -169,7 +191,8 @@ export function setTool(tool: string) {
   editMode.setTool(tool);   // emit wp:modechange → _syncEditModeUI 派生按钮高亮 / lasso 工具栏
   document.body.dataset.tool = tool;   // 持久工具的 CSS hook（transient 期间保持不变）
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
-  if (tool === "brush" || tool === "eraser" || tool === "filterBrush") {
+  //   shapeBrush alias 到 brush（getRackToolKey）：共享笔架 + 共享当前笔/dial（user：「笔和绘制用的笔刷共享笔架」）
+  if (tool === "brush" || tool === "eraser" || tool === "filterBrush" || tool === "shapeBrush") {
     rack.applyToolState(tool);
   }
   // 「跟 session 走」共享记忆（v0.5.16：填色/选区一份）——进工具恢复子工具+布尔；fill 禁新建→就地并。
@@ -198,6 +221,7 @@ export function _syncEditModeUI() {
   dialReactive.canDraw = editMode.canDraw();
   if (els.activeSwatch) (els.activeSwatch as HTMLButtonElement).disabled = !editMode.allowsColor();
   updateLassoToolbar();             // 选区/变换工具栏跟着重新派生
+  updateShapeToolbar();             // 形状笔工具栏跟着重新派生（与 lasso stack 互斥）
 }
 
 // ===== v242 选区编辑 op：扩张 / 收缩（走 adjust transient + 实时预览）=====
@@ -329,6 +353,7 @@ export const RACK_PANEL_BY_TOOL: Record<string, string> = {
   brush: PANELS.RACK_BRUSH,
   eraser: PANELS.RACK_ERASER,
   filterBrush: PANELS.RACK_FILTER_BRUSH,    // v132
+  shapeBrush: PANELS.RACK_BRUSH,            // ADR-0005：共享 brush 笔架
 };
 let _lastNonLassoTool = "brush";
 
@@ -401,6 +426,37 @@ export function initToolbar(ctx: AppContext) {
     input.lasso.setSetOpMode(op);
     _selMem.setOp = op;   // 共享记忆（fill 里「新建」项已隐）
   });
+  // ---- 形状笔上下文工具栏（ADR-0005）：组槽 + 约束。状态 per-doc（editorState.shapeBrush），UI 改 → 写
+  //   editorState + 灌引擎；换文档 wp:applyEditorState 回灌（对齐魔棒阈值样板）。
+  //   画一半切子工具/约束 = cancel 不进 undo（user 拍板，同两指手势接管语义）。
+  shapeToolbarStack = byId("shapeToolbarStack");
+  shapeSubSlot = byId("shapeSubSlot");
+  shapeSubSlotUse = byId("shapeSubSlotUse") as unknown as SVGUseElement;
+  shapeSubMenu = byId("shapeSubMenu");
+  shapeSubMenuBtns = [...shapeSubMenu.querySelectorAll<HTMLElement>("[data-shape-sub]")];
+  shapeConstrainBtn = byId("shapeConstrainBtn");
+  shapeConstrainUse = byId("shapeConstrainUse") as unknown as SVGUseElement;
+  wireSlotMenu(shapeSubSlot, shapeSubMenu, (b) => {
+    if (input.isStrokeActive()) input.abortActiveStroke();
+    const sub = b.dataset.shapeSub as Parameters<typeof input.shapeBrush.setSubTool>[0];
+    input.shapeBrush.setSubTool(sub);
+    editorState.shapeBrush.sub = sub;
+    updateShapeToolbar();
+  });
+  shapeConstrainBtn.addEventListener("click", () => {
+    if (input.isStrokeActive()) input.abortActiveStroke();
+    const v = !input.shapeBrush.getConstrain();
+    input.shapeBrush.setConstrain(v);
+    editorState.shapeBrush.constrain = v;
+    updateShapeToolbar();
+  });
+  const syncShapeFromEditorState = () => {
+    input.shapeBrush.setSubTool(editorState.shapeBrush.sub as Parameters<typeof input.shapeBrush.setSubTool>[0]);
+    input.shapeBrush.setConstrain(editorState.shapeBrush.constrain);
+    updateShapeToolbar();
+  };
+  window.addEventListener("wp:applyEditorState", syncShapeFromEditorState);
+  syncShapeFromEditorState();
   // v242：扩展滑块从魔术棒拆走（改成选区编辑 op，见 initSelEditUI）。魔术棒只剩阈值。
   // v0.5.11：阈值 per-doc 持久化（editorState.magicWand.threshold，原 editorState.bucket 退役后归魔棒）。
   //   UI 改 → 写 editorState + 灌引擎；换文档 → syncMagicThresholdUI 回灌（wp:applyEditorState）。
@@ -610,7 +666,8 @@ export function initToolbar(ctx: AppContext) {
   }
   window.addEventListener("wp:settool", (e: Event) => setTool((e as CustomEvent).detail));
 
-  // v120 删：Shapes 子工具栏。shapes tool 撤了 → 以后 shapes 改 brush preset 的 toggle 字段
+  // v120 删：Shapes 子工具栏（当时判「以后 shapes 改 brush preset 的 toggle 字段」）。
+  //   2026-07-25 该判决被推翻：形状笔以独立工具回归（ADR-0005，engine=shape-brush.ts，UI=shapeToolbarStack）。
   // pencil 模式下双击 → 笔↔橡皮。但 floating 选区存在时屏蔽（避免误触切工具 = 自动 apply 变换）
   window.addEventListener("wp:doubletap", () => {
     if (input.lasso.hasFloating()) {
