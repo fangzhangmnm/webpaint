@@ -30,9 +30,9 @@ export const S = {
   "save.tip":       { zh: "保存 / 上传",       en: "Save / Upload",   ja: "保存 / アップロード", tok: "awen / pana tawa poki sewi" },
   "enc.locked":     { zh: "已加密 · 点击解除加密", en: "Encrypted · tap to decrypt", ja: "暗号化済み · タップで解除", tok: "ni li len. sina luka e ni la len li weka." },
   "enc.locked.aria":{ zh: "已加密",            en: "Encrypted",       ja: "暗号化済み", tok: "len" },
-  "cloud.account":  { zh: "云端账号",          en: "Cloud account",   ja: "クラウドアカウント", tok: "nimi jan pi poki sewi" },
+  "cloud.account":  { zh: "云端账号",          en: "Cloud account",   ja: "クラウドアカウント", tok: "jan pi poki sewi" },
   "cloud.refresh":  { zh: "刷新云端列表",      en: "Refresh cloud list", ja: "クラウド一覧を更新", tok: "o lukin sin e poki sewi" },
-  "account.add.aria":{ zh: "账号 / 新增",      en: "Account / Add",   ja: "アカウント / 追加", tok: "nimi jan / sin" },
+  "account.add.aria":{ zh: "账号 / 新增",      en: "Account / Add",   ja: "アカウント / 追加", tok: "jan pi poki sewi / sin" },
 
   // ── ⋯ 设置菜单 ────────────────────────────────────────────────
   "menu.checkerboard":     { zh: "透明背景显示棋盘", en: "Checkerboard for transparency", ja: "透明部分に市松模様" },
@@ -66,7 +66,7 @@ export const S = {
   "menu.version":          { zh: "版本：{v}",  en: "Version: {v}",    ja: "バージョン：{v}" },
 
   // ── 主题状态标签 ──────────────────────────────────────────────
-  "theme.auto":     { zh: "跟随系统",          en: "System",          ja: "システムに従う", tok: "sama ilo" },
+  "theme.auto":     { zh: "跟随系统",          en: "System",          ja: "システムに従う", tok: "sama tenpo" },
   "theme.day":      { zh: "日",                en: "Light",           ja: "ライト", tok: "suno" },
   "theme.night":    { zh: "夜",                en: "Dark",            ja: "ダーク", tok: "pimeja" },
 
@@ -361,7 +361,7 @@ export const S = {
   "gal.st.restoreFail":    { zh: "恢复失败：{e}", en: "Restore failed: {e}", ja: "復元失敗：{e}", tok: "kama sin li pakala: {e}" },
   "gal.st.purged":         { zh: "已永久删除：{name}", en: "Permanently deleted: {name}", ja: "完全に削除：{name}", tok: "moli li pini: {name}" },
   "gal.st.purgeFail":      { zh: "永久删除失败：{e}", en: "Permanent delete failed: {e}", ja: "完全削除失敗：{e}", tok: "moli li pakala: {e}" },
-  "gal.st.emptyTrashCloudNeedLogin":{ zh: "清空云端回收站需先登录并联网", en: "Emptying cloud trash requires sign-in and network", ja: "クラウドのゴミ箱を空にするにはサインインと接続が必要です", tok: "sina wile moli e ale pi poki jaki sewi la o open e nimi jan. ilo li wile ken toki tawa poki sewi." },
+  "gal.st.emptyTrashCloudNeedLogin":{ zh: "清空云端回收站需先登录并联网", en: "Emptying cloud trash requires sign-in and network", ja: "クラウドのゴミ箱を空にするにはサインインと接続が必要です", tok: "poki sewi li wile sona e sina. o open e sona ni. ilo li wile ken toki tawa poki sewi." },
   "gal.st.emptyTrashCloudFail":{ zh: "{n} 项云端没清（可能离线），回线再清", en: "{n} cloud item(s) not cleared (maybe offline); retry when online", ja: "{n} 件がクラウドで未削除（オフライン？）。オンライン復帰後に再試行", tok: "ijo {n} pi poki sewi li moli ala (ken la toki li pakala). o pali sin lon tenpo kama." },
   "gal.st.emptyTrashPartial":{ zh: "清空时部分失败", en: "Some items failed to clear", ja: "一部の削除に失敗しました", tok: "ijo lili li moli ala" },
   "gal.st.emptyTrashDone": { zh: "已清空{label}回收站", en: "Emptied {label} trash", ja: "{label}のゴミ箱を空にしました", tok: "poki jaki {label} li jo e ala" },
@@ -413,8 +413,8 @@ export const S = {
   "gal.menu.newFromImage":{ zh: "从图片新建…", en: "New from image…", ja: "画像から新規…", tok: "sitelen sin tan sitelen ante…" },
   "gal.menu.newFromClipboard":{ zh: "从剪切板新建", en: "New from clipboard", ja: "クリップボードから新規", tok: "sitelen sin tan poki kipisi" },
   "gal.menu.newFolder":   { zh: "新建文件夹…", en: "New folder…", ja: "新規フォルダ…", tok: "poki sin…" },
-  "gal.menu.signIn":      { zh: "登录 OneDrive", en: "Sign in to OneDrive", ja: "OneDrive にサインイン", tok: "o open e nimi jan pi ilo \"OneDrive\"" },
-  "gal.menu.signOut":     { zh: "退出登录", en: "Sign out", ja: "サインアウト", tok: "o pini e nimi jan" },
+  "gal.menu.signIn":      { zh: "登录 OneDrive", en: "Sign in to OneDrive", ja: "OneDrive にサインイン", tok: "poki sewi \"OneDrive\" o kama sona e mi" },
+  "gal.menu.signOut":     { zh: "退出登录", en: "Sign out", ja: "サインアウト", tok: "poki sewi o weka e sona mi" },
   // 新建作品 sheet
   "nd.title":        { zh: "新建作品", en: "New artwork", ja: "新規作品", tok: "sitelen sin" },
   "nd.untitled":     { zh: "未命名", en: "Untitled", ja: "無題", tok: "nimi ala" },
