@@ -29,7 +29,7 @@ import { positionPopup } from "./anchored-popup.ts";
 export const PANEL_MIN_TOP = 60;
 import { countLeaves, findNodeById } from "./doc.ts";
 import { renderNodesToCanvas } from "./doc-render.ts";
-import { t } from "./i18n/index.ts";
+import { t, tLatin } from "./i18n/index.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";
@@ -739,7 +739,7 @@ function _syncChrome() {
     const hasPx = !!lay && !lay.isGroup && lay.bboxW > 0 && lay.bboxH > 0;
     delBtn.dataset.mode = asClear ? "clear" : "del";
     delBtn.disabled = asClear ? !hasPx : false;   // 已经是空的就没什么可清
-    delBtn.title = t(asClear ? "lp.clearContent" : "lp.foot.del");
+    delBtn.title = tLatin(asClear ? "lp.clearContent" : "lp.foot.del");
     delBtn.setAttribute("aria-label", delBtn.title);
     delBtn.querySelector("use")?.setAttribute("href", asClear ? "#clear-document" : "#trash-can");
   }

@@ -5,6 +5,7 @@
 //   · data-i18n 是过渡桥（非终点）：静态 index.html 一次性填充；新内容/需动的段走 Vue + t()。
 
 import { S, type Lang } from "./strings.ts";
+import { tokGlyphsCached, stripTokMarkup, ucsurActive, initTokFontGate } from "./ucsur.ts";
 import { syncedUserPreference, preferencesReady, PREF_DEFAULTS } from "../app-prefs.ts";   // 语言 = 跨设备偏好（synced-user-preference collection）
 import { readBootSnapshot, writeBootSnapshot } from "../boot-snapshot.ts";   // eval 期读得到的 lang 快照（IDB 异步，见该文件）
 
@@ -45,10 +46,23 @@ let _lang: Lang | null = null;
 export function lang(): Lang { return (_lang ??= readLang()); }
 
 // t(key, params?)：读当前语言一次（reload 制，无需响应式订阅）。fallback：请求语言 → en → zh。
+//   tok（v0.5.35）：字体门开着 → 模板先转写 UCSUR（{param} 跨度保留，用户数据绝不被转写）；
+//   门没开 → 剥反引号标记出 ASCII 拉丁。**title/aria 上下文用 tLatin**（浏览器 chrome/读屏渲 UCSUR 必豆腐）。
 export function t(key: Key, params?: Record<string, string | number>): string {
+  return _interp(_resolve(key, /*latin*/ false), params);
+}
+export function tLatin(key: Key, params?: Record<string, string | number>): string {
+  return _interp(_resolve(key, /*latin*/ true), params);
+}
+function _resolve(key: Key, latin: boolean): string {
   const e = S[key] as Record<string, string> | undefined;
   if (!e) { console.warn("[i18n] missing key:", key); return String(key); }   // 桥的 data-i18n 不受 tsc 检查 → 防崩
   const raw = e[lang()] ?? e.en ?? e.zh;
+  if (lang() !== "tok") return raw;
+  if (!latin && ucsurActive()) return tokGlyphsCached(key, raw);
+  return stripTokMarkup(raw);
+}
+function _interp(raw: string, params?: Record<string, string | number>): string {
   if (!params) return raw;
   return raw.replace(/\{(\w+)\}/g, (_m, k) => (k in params ? String(params[k]) : `{${k}}`));
 }
@@ -118,8 +132,9 @@ export function setLocalizedText(el: HTMLElement, s: string): void {
 export function localizeDom(root: ParentNode = document) {
   const k = (s: string | undefined) => s as Key;   // 桥 attr 值是运行时字符串（不受 tsc 检查）；t() 内部对未知 key 兜底
   root.querySelectorAll<HTMLElement>("[data-i18n]").forEach(el => { if (el.dataset.i18n) setLocalizedText(el, t(k(el.dataset.i18n))); });
-  root.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach(el => { if (el.dataset.i18nTitle) el.title = t(k(el.dataset.i18nTitle)); });
-  root.querySelectorAll<HTMLElement>("[data-i18n-aria]").forEach(el => { if (el.dataset.i18nAria) el.setAttribute("aria-label", t(k(el.dataset.i18nAria))); });
+  // title/aria = 浏览器 chrome / 读屏渲染，永远 ASCII 拉丁（UCSUR 必豆腐）——tLatin。
+  root.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach(el => { if (el.dataset.i18nTitle) el.title = tLatin(k(el.dataset.i18nTitle)); });
+  root.querySelectorAll<HTMLElement>("[data-i18n-aria]").forEach(el => { if (el.dataset.i18nAria) el.setAttribute("aria-label", tLatin(k(el.dataset.i18nAria))); });
   root.querySelectorAll<HTMLInputElement>("[data-i18n-ph]").forEach(el => { if (el.dataset.i18nPh) el.placeholder = t(k(el.dataset.i18nPh)); });
   // v0.5.10：<optgroup label> 走属性而非文本节点（新建作品尺寸下拉的分组标题用）
   root.querySelectorAll<HTMLOptGroupElement>("optgroup[data-i18n-label]").forEach(el => { if (el.dataset.i18nLabel) el.label = t(k(el.dataset.i18nLabel)); });
@@ -128,5 +143,7 @@ export function localizeDom(root: ParentNode = document) {
 // boot：设 <html lang> + 填静态 HTML。app.ts 早期调（DOM 已就绪，module 默认 deferred）。
 export function initI18n() {
   applyHtmlLang();
+  // tok 字体门（方案 C）：命中缓存立即 UCSUR；迟到促成 → 翻开关 + 静态重灌（动态标签下次更新自愈）。
+  if (lang() === "tok") initTokFontGate(() => localizeDom());
   localizeDom();
 }

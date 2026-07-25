@@ -7,7 +7,7 @@
 import { els } from "./els.ts";
 import { isSignedIn } from "./app-store.ts";
 import { session } from "./session-state.ts";
-import { t } from "./i18n/index.ts";
+import { t, tLatin } from "./i18n/index.ts";
 import { iconHtml } from "./ui/icon.ts";
 
 // 文档版本警告：在 setStatus 之上再呈现一个持久 banner（用 doc.body.dataset 给 CSS 染色）
@@ -57,7 +57,7 @@ export function updateSaveStatus() {
   if (!session.name) {
     els.topSaveBtn.dataset.state = "none";
     els.topSaveBtn.innerHTML = ICON_DISK;
-    els.topSaveBtn.title = t("save.none");
+    els.topSaveBtn.title = tLatin("save.none");
     return;
   }
   const state = computeSaveState();
@@ -66,13 +66,13 @@ export function updateSaveStatus() {
   //   ⚠ 按钮**永远可点**（零 disabled 逻辑）：synced 态的灰只是"没什么可存"的视觉，不是禁用。
   //   v409 起点它必 encode+推（forceSaveAndPush，让时间戳走字）。徽章只看内容脏，desk 改动 UI 静默。
   const name = session.name;
-  if (state === "saving") { els.topSaveBtn.innerHTML = ICON_CLOUD_SAVING; els.topSaveBtn.title = t("save.saving", { name }); }
-  else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.dirty", { name }); }
-  else if (state === "unpushed") { els.topSaveBtn.innerHTML = ICON_CLOUD_PENDING; els.topSaveBtn.title = t("save.unpushed", { name }); }
+  if (state === "saving") { els.topSaveBtn.innerHTML = ICON_CLOUD_SAVING; els.topSaveBtn.title = tLatin("save.saving", { name }); }
+  else if (state === "dirty")  { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = tLatin("save.dirty", { name }); }
+  else if (state === "unpushed") { els.topSaveBtn.innerHTML = ICON_CLOUD_PENDING; els.topSaveBtn.title = tLatin("save.unpushed", { name }); }
   else if (state === "synced") {
     // synced = 云✓（上次保存时已同步）。中性可按态色；点击=检查云端有没有新版本（动作走 tooltip+行为）。
     els.topSaveBtn.innerHTML = ICON_CLOUD_CHECK;
-    els.topSaveBtn.title = t("save.synced", { name });
+    els.topSaveBtn.title = tLatin("save.synced", { name });
   }
-  else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = t("save.localOnly", { name }); }
+  else                          { els.topSaveBtn.innerHTML = ICON_DISK; els.topSaveBtn.title = tLatin("save.localOnly", { name }); }
 }

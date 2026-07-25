@@ -8,7 +8,7 @@
 // auth 是公共面：直接 import 自 app-store.js。setStatus / updateSaveStatus / gallery
 // 经 ctx 注册表晚绑（拆分期权宜）。
 
-import { t } from "./i18n/index.ts";
+import { t, tLatin } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
 import { iconHtml } from "./ui/icon.ts";
@@ -42,7 +42,7 @@ export function updateCloudAuthUI() {
     els.cloudIconBtn.innerHTML = ICON_CLOUD_OUT;
     els.cloudIconBtn.dataset.cloudState = configured ? "out" : "unconfigured";
     if (offline && configured) {
-      els.cloudIconBtn.title = t("cf.cloudOfflineTitle");
+      els.cloudIconBtn.title = tLatin("cf.cloudOfflineTitle");
       els.cloudAccountInfo.textContent = t("cf.cloudOffline");
     } else {
       els.cloudIconBtn.title = configured ? t("cf.cloudNotSignedInTitle") : t("cf.cloudNotConfigured");

@@ -68,7 +68,8 @@ import "./stroke-smoother.test.mjs";
 import "./selection-morph.test.mjs";
 import "./selection-tiles.test.mjs";       // S5：gray8 tile 选区底座（布尔/所有权/ants/SwapSelectionOp）
 import "./flood-select.test.mjs";
-import "./fill-mode.test.mjs";           // v0.5.11 填充模式：active 谓词/开关事件（像素正确性在 gl-smoke fillParity）          // v0.5 #22/#31 flood 内核 + compose 非消费语义（v0.5.11 桶退役，内核归魔棒）
+import "./fill-mode.test.mjs";
+import "./tok-ucsur.test.mjs";           // v0.5.35 tok→UCSUR 转写四条件+escape 规则           // v0.5.11 填充模式：active 谓词/开关事件（像素正确性在 gl-smoke fillParity）          // v0.5 #22/#31 flood 内核 + compose 非消费语义（v0.5.11 桶退役，内核归魔棒）
 import "./floating-transform.test.mjs";     // Slice 1/3：浮层变换深模块（free/uniform/distort/旋转/平移/投影 + 多 source 映射）
 import "./editable-leaf.test.mjs";          // Slice 4：requireEditableLeaf 单谓词（组/隐藏 gate）
 import "./doc-rotate.test.mjs";             // v258 逆时针旋转 90°（bbox 公式 + 4 次恒等 + 方向）

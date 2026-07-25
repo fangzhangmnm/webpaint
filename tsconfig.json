@@ -3,6 +3,7 @@
   // 本轮只把 store 深模块（src/store/**）纳入 strict 检查（被 Uint8Array/Blob 类型 bug 雷击两次）；
   // 其余 src/ 暂不检（增量推进，别一次铺满全仓引爆历史错误）。
   "compilerOptions": {
+    "resolveJsonModule": true,
     "strict": true,
     "noEmit": true,
 

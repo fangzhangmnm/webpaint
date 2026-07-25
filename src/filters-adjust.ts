@@ -7,7 +7,7 @@
 // 拆分期约定：import { ctx }，在 initFiltersAdjust() 把用到的 core 单例绑进私有 let，函数体逐字搬迁。
 // state.filterBrush 是 active filter-brush 的 SSoT（在 state 上，经绑定的 state 读写）。
 import { els } from "./els.ts";
-import { t } from "./i18n/index.ts";
+import { t, tLatin } from "./i18n/index.ts";
 import { editorState } from "./workbench-state.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { getFilter, listFilters, onFilterRegistered } from "./filters.ts";
@@ -342,7 +342,7 @@ function _renderFilterBrushToolbar() {
     bsel.id = "filterBrushBleedSel";
     bsel.className = "crop-toolbar-btn";
     bsel.style.padding = "2px 6px";
-    bsel.title = t("mi.boundaryTooltip");
+    bsel.title = tLatin("mi.boundaryTooltip");
     const curBleed = fb.params.bleed || "edge";
     for (const b of Filter.boundaryModes) {
       const opt = document.createElement("option");
