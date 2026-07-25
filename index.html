@@ -860,7 +860,7 @@
       </button>
       <div class="menu-tabs" role="tablist">
         <button class="menu-tab" data-menu-tab="file" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#floppy-disk"/></svg><span data-i18n="menu.tab.file">文件</span></button>
-        <button class="menu-tab" data-menu-tab="canvas" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#crop"/></svg><span data-i18n="menu.tab.canvas">画布</span></button>
+        <button class="menu-tab" data-menu-tab="canvas" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#image"/></svg><span data-i18n="menu.tab.canvas">画布</span></button>
         <button class="menu-tab" data-menu-tab="view" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#maximize-viewport"/></svg><span data-i18n="menu.tab.view">视图</span></button>
         <button class="menu-tab" data-menu-tab="settings" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#sliders"/></svg><span data-i18n="menu.tab.settings">设置</span></button>
         <button class="menu-tab" data-menu-tab="plugins" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#blender"/></svg><span data-i18n="menu.tab.plugins">插件</span></button>
@@ -937,10 +937,11 @@
         <span class="menu-item-label" data-i18n="menu.singleFingerDraw">单指绘画</span>
         <span class="menu-item-state" data-state-for="singleFingerDraw">关</span>
       </button>
-        <button class="menu-item menu-item-with-icon" id="menuTheme" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
-        <span class="menu-item-label" data-i18n="menu.theme">主题</span>
-        <span class="menu-item-state" data-state-for="theme">跟随系统</span>
-      </button>
+        <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
+          <span class="menu-item-label" data-i18n="menu.theme">主题</span>
+          <select id="menuThemeSelect" class="menu-lang-select"></select>
+        </label>
+        <button id="menuTheme" type="button" hidden></button><!-- 旧 id stub：theme.ts renderTheme 查它，v0.6C 下拉化后留防崩 -->
         <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#globe-speech"/></svg>
         <span class="menu-item-label" data-i18n="menu.language">语言</span>
         <select id="menuLanguageSelect" class="menu-lang-select"></select>
