@@ -670,8 +670,7 @@ input[type=range] {
   top: 56px;
   /* v123 菜单按钮从右挪到左 (Procreate 顺序)，panel 也跟着挪 */
   left: 12px;
-  width: 300px;   /* v0.6C user：菜单定宽（自适应不舒服）；小屏由 max-width 兜 */
-  max-width: calc(100vw - 16px);
+  min-width: 200px;
   /* 长菜单 + iPad mini 竖屏：限高 + 滚动 */
   max-height: calc(100vh - 80px);
   overflow-y: auto;
@@ -784,6 +783,9 @@ input[type=range] {
 .menu-config-popup label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; color: var(--ink); }
 .menu-config-popup .menu-config-section { display: flex; flex-direction: column; gap: 4px; }
 .menu-config-popup .menu-config-title { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; }
+/* v0.6C：定宽只给 ☰ 主菜单（.menu-panel 是共享类——图层 +菜单/⋯菜单也穿它，v0.5.28 真机撑宽事故） */
+#menuPanel { width: 300px; max-width: calc(100vw - 16px); }
+
 /* v0.5.28 生成式 AI 总开关接缝：未启用时一切 AI 相关 UI 隐藏（挂 .needs-gen-ai 类即受控） */
 body:not([data-gen-ai="1"]) .needs-gen-ai { display: none !important; }
 
