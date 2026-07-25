@@ -97,6 +97,18 @@ body:lang(ja) {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, "Noto Sans JP", sans-serif;
 }
 
+/* tok = sitelen pona：nasin nanpa（vendor/nasin-nanpa，MIT，用户拍板 2026-07-25）。
+   ASCII ligature 把拉丁 toki pona 词自动渲成 sitelen pona 字形（liga 默认开）；
+   非 tp 字面量（PNG / Ctrl+Z / 中文作品名）落到 fallback 栈。 */
+@font-face {
+  font-family: "nasin nanpa";
+  src: url("vendor/nasin-nanpa/nasin-nanpa-4.0.2.otf") format("opentype");
+  font-display: swap;
+}
+body:lang(tok) {
+  font-family: "nasin nanpa", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
 /* 顶栏 / 浮窗 / sheet / toast 上的所有 button / input：也明确写一遍，防 iOS
    在某些 Safari 版本上 element 默认仍允许 double-tap zoom */
 button, input, .swatch, .tool, .float-panel, .top-bar, .hud, .sheet, .backdrop, .toast {

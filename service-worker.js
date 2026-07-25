@@ -20,6 +20,7 @@ const STATIC_PRECACHE = [
   "./styles.css",
   "./builtin-brushes.json",   // v122 r2: 改 runtime fetch，必须 precache 保证离线
   "./vendor/zip-js/zip-full.min.js",
+  "./vendor/nasin-nanpa/nasin-nanpa-4.0.2.otf",  // tok=sitelen pona 字体，离线必须在
   // msal / 其它惰性加载的库 SW 不预缓存。用到才下，那时候 fetch 会自动 cache。
 ];
 
