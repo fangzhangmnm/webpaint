@@ -168,3 +168,49 @@ describe("shape-geometry: 采样", () => {
     close(perimeterRamanujan(10, 10), 2 * Math.PI * 10, 1e-6);
   });
 });
+
+describe("shape-geometry: 椭圆弧拟合（LSQ，消圆→椭圆跳变）", () => {
+  const ellipsePts = (rx, ry, a0Deg, sweepDeg, n = 240) => {
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const a = (a0Deg + (sweepDeg * i) / n) * DEG;
+      out.push({ x: rx * Math.cos(a), y: ry * Math.sin(a) });
+    }
+    return out;
+  };
+  it("半椭圆弧（60×20，180°）→ 恢复两条半轴（不再退化成圆）", () => {
+    const fit = fitEllipse(ellipsePts(60, 20, 0, 180), 0, false);
+    assert(!fit.closed);
+    close(fit.rx, 60, 1); close(fit.ry, 20, 1);
+    close(fit.sweep / DEG, 180, 3);
+  });
+  it("连续性：355° 椭圆弧 与 375° 闭合椭圆 参数差在小量级（无跳变）", () => {
+    const arc = fitEllipse(ellipsePts(60, 20, 30, 355), 0, false);
+    const closed = fitEllipse(ellipsePts(60, 20, 30, 375), 0, false);
+    assert(!arc.closed && closed.closed);
+    close(arc.rx, closed.rx, 1.5); close(arc.ry, closed.ry, 1.5);
+    close(arc.cx, closed.cx, 1.5); close(arc.cy, closed.cy, 1.5);
+  });
+  it("圆弧仍是圆（LSQ 对圆数据 t≈0）", () => {
+    const fit = fitEllipse(circlePts(10, -5, 40, 20, 200), 0, false);
+    close(fit.rx, fit.ry, 0.5);
+    close(fit.rx, 40, 0.5);
+  });
+  it("constrain 下弧仍走正圆（LSQ 被跳过）", () => {
+    const fit = fitEllipse(ellipsePts(60, 20, 0, 120), 0, true);
+    close(fit.rx, fit.ry, 1e-9);
+  });
+  it("近直线笔迹不炸（LSQ 护栏回落，返回有限值）", () => {
+    const pts = [];
+    for (let i = 0; i <= 50; i++) pts.push({ x: i * 4, y: Math.sin(i / 8) * 1.5 });
+    const fit = fitEllipse(pts, 0, false);
+    assert(fit && Number.isFinite(fit.rx) && Number.isFinite(fit.ry) && Number.isFinite(fit.sweep));
+  });
+  it("视口 rot 下的椭圆弧 roundtrip", () => {
+    const rot = 25 * DEG;
+    const pts = ellipsePts(60, 20, 10, 200).map((p) => rotatePt(p, -rot));
+    const fit = fitEllipse(pts, rot, false);
+    assert(!fit.closed);
+    close(fit.rx, 60, 1.5); close(fit.ry, 20, 1.5);
+  });
+});

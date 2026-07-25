@@ -7,10 +7,11 @@
 // 拟合哲学（user 2026-07-25）：用户对「圆的切线边界在哪」掌握最精确——**闭合**形状用
 //   **max 范数**（AABB 极值点 = 用户画到的切线），不用最小二乘的 mean 平均（全笔触平均会把
 //   边界抖糊）。切线语义只对闭合成立：**弧**（部分笔迹）的 AABB 是半截框、中心/半径全错，
-//   弧改用 Kasa 代数圆拟合（弧贴着笔迹走 = 弧场景下的「精确」）。
-// 弧判定（user 拍板）：绕圆心记 winding（累计有向扫角）；|扫角| ≥ 2π → 闭合
-//   （过冲多绕没关系）→ AABB max 范数出椭圆；< 2π → Kasa 圆上从起笔扫 sweep 出圆弧
-//   （355° 想留口子就留得住）。winding 的中心用 Kasa 圆心（AABB 中心对弧偏得离谱）。
+//   弧改用拟合（弧贴着笔迹走 = 弧场景下的「精确」）：轴对齐 LSQ **椭圆**（user 2026-07-25
+//   「圆弧突然从圆变成椭圆不好」→ 弧期就得是椭圆弧，闭合瞬间才不跳）→ 退化回落 Kasa 圆。
+// 弧判定（user 拍板）：绕弧模型中心记 winding（累计有向参数角）；|扫角| ≥ 2π → 闭合
+//   （过冲多绕没关系）→ AABB max 范数出椭圆；< 2π → 拟合椭圆/圆上从起笔扫 sweep 出弧
+//   （355° 想留口子就留得住）。winding 中心不用 AABB 中心（对弧偏得离谱：半圆的在弦上）。
 
 export interface Pt { x: number; y: number; }
 
@@ -83,14 +84,19 @@ export function fitEllipse(pts: Pt[], rot: number, constrain: boolean): EllipseF
     if (p.y < minY) minY = p.y;
     if (p.y > maxY) maxY = p.y;
   }
-  // winding 中心 = Kasa 圆心（AABB 中心对弧偏得离谱：半圆的 AABB 中心在弦上）。
-  //   Kasa 退化（近共线）→ 退回 AABB 中心（sweep≈0，反正出不了像样的弧）。
+  // 弧模型（三级回落）：constrain=正圆 → Kasa 圆；否则先试**轴对齐 LSQ 椭圆**（消「画椭圆时
+  //   过 360° 从圆突跳成椭圆」的断裂——弧期预览就已是椭圆弧）；LSQ 退化（短弧/近直线/病态）→
+  //   Kasa 圆；再退化 → AABB 中心兜底（sweep≈0，反正出不了像样的弧）。
   const kasa = kasaCircle(q);
-  const wc = kasa ?? { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, r: 0 };
-  const ang0 = Math.atan2(q[0].y - wc.cy, q[0].x - wc.cx);
+  const lsq = constrain ? null : alignedEllipseLSQ(q, minX, maxX, minY, maxY);
+  const arc = lsq
+    ?? (kasa ? { cx: kasa.cx, cy: kasa.cy, rx: kasa.r, ry: kasa.r } : null)
+    ?? { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, rx: MIN_RADIUS, ry: MIN_RADIUS };
+  // winding：绕弧模型中心累计参数角增量（正圆时 = 几何角）
+  const ang0 = paramAng(q[0], arc);
   let prev = ang0, sweep = 0;
   for (let i = 1; i < q.length; i++) {
-    const a = Math.atan2(q[i].y - wc.cy, q[i].x - wc.cx);
+    const a = paramAng(q[i], arc);
     let d = a - prev;
     if (d > Math.PI) d -= TWO_PI;
     else if (d < -Math.PI) d += TWO_PI;
@@ -98,17 +104,83 @@ export function fitEllipse(pts: Pt[], rot: number, constrain: boolean): EllipseF
     prev = a;
   }
   if (Math.abs(sweep) >= TWO_PI) {
-    // 闭合：AABB max 范数出椭圆（切线边界哲学）；起角对全圆无观感影响，取起笔点参数角。
+    // 闭合：AABB max 范数出椭圆（切线边界哲学；LSQ 只是弧期模型，闭合了极值点=用户画的切线更权威）。
+    //   闭合前后同为椭圆、参数差在抖动量级 → 无可见跳变。起角对全圆无观感影响，取起笔点参数角。
     const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
     let rx = Math.max(MIN_RADIUS, (maxX - minX) / 2);
     let ry = Math.max(MIN_RADIUS, (maxY - minY) / 2);
     if (constrain) { const r = Math.max(rx, ry); rx = r; ry = r; }   // 正圆 = max 范数
-    const startAng = Math.atan2((q[0].y - cy) / ry, (q[0].x - cx) / rx);
+    const startAng = paramAng(q[0], { cx, cy, rx, ry });
     return { cx, cy, rx, ry, rot, startAng, sweep, closed: true };
   }
-  // 弧：Kasa 圆（rx==ry），从起笔扫 sweep。constrain 对弧无义（本就是圆）。
-  const r = Math.max(MIN_RADIUS, wc.r);
-  return { cx: wc.cx, cy: wc.cy, rx: r, ry: r, rot, startAng: ang0, sweep, closed: false };
+  return { cx: arc.cx, cy: arc.cy, rx: Math.max(MIN_RADIUS, arc.rx), ry: Math.max(MIN_RADIUS, arc.ry), rot, startAng: ang0, sweep, closed: false };
+}
+
+function paramAng(p: Pt, e: { cx: number; cy: number; rx: number; ry: number }): number {
+  return Math.atan2((p.y - e.cy) / (e.ry || 1), (p.x - e.cx) / (e.rx || 1));
+}
+
+// 轴对齐椭圆最小二乘（A x² + C y² + D x + E y + F = 0，规范化 A+C=2 → A=1+t, C=1−t）。
+//   线性最小二乘：min Σ((u²+v²) + t(u²−v²) + Du + Ev + F)²，4×4 正规方程。
+//   我们的椭圆天然轴对齐视口 frame（斜的转视口画）→ 不需要一般二次曲线的 5 参数拟合，
+//   少两个自由度 = 短弧下稳得多。中心化提数值稳定。
+//   有效性护栏（短弧/近直线时 LSQ 会飞）：A,C>0（椭圆非双曲线）、G0>0、长宽比 ≤ 8、
+//   半轴 ≤ 4× AABB 对角线。不过关 → null（caller 回落 Kasa 圆）。
+function alignedEllipseLSQ(q: Pt[], minX: number, maxX: number, minY: number, maxY: number):
+    { cx: number; cy: number; rx: number; ry: number } | null {
+  const n = q.length;
+  if (n < 8) return null;   // 起手几个点不够定 4 参数，先让 Kasa 圆顶着
+  let mx = 0, my = 0;
+  for (const p of q) { mx += p.x; my += p.y; }
+  mx /= n; my /= n;
+  // 正规方程 M·(t,D,E,F)ᵀ = b，回归元 r=(u²−v², u, v, 1)，目标 −(u²+v²)
+  const M = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
+  const b = [0, 0, 0, 0];
+  for (const p of q) {
+    const u = p.x - mx, v = p.y - my;
+    const r = [u * u - v * v, u, v, 1];
+    const y = -(u * u + v * v);
+    for (let i = 0; i < 4; i++) {
+      b[i] += r[i] * y;
+      for (let j = i; j < 4; j++) M[i][j] += r[i] * r[j];
+    }
+  }
+  for (let i = 1; i < 4; i++) for (let j = 0; j < i; j++) M[i][j] = M[j][i];
+  const sol = solve4(M, b);
+  if (!sol) return null;
+  const [t, D, E, F] = sol;
+  const A = 1 + t, C = 1 - t;
+  if (A <= 1e-6 || C <= 1e-6) return null;                    // 双曲线/抛物线退化
+  const cu = -D / (2 * A), cv = -E / (2 * C);
+  const G0 = A * cu * cu + C * cv * cv - F;
+  if (G0 <= 0) return null;
+  const rx = Math.sqrt(G0 / A), ry = Math.sqrt(G0 / C);
+  if (rx / ry > 8 || ry / rx > 8) return null;                // 病态长宽比 → 不如圆稳
+  const diag = Math.hypot(maxX - minX, maxY - minY) || 1;
+  if (rx > 4 * diag || ry > 4 * diag) return null;            // 半径远超笔迹尺度 = 近直线
+  return { cx: cu + mx, cy: cv + my, rx, ry };
+}
+
+// 4×4 高斯消元（部分主元）。奇异 → null。
+function solve4(M: number[][], b: number[]): number[] | null {
+  const a = M.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < 4; col++) {
+    let piv = col;
+    for (let r = col + 1; r < 4; r++) if (Math.abs(a[r][col]) > Math.abs(a[piv][col])) piv = r;
+    if (Math.abs(a[piv][col]) < 1e-12) return null;
+    if (piv !== col) { const tmp = a[col]; a[col] = a[piv]; a[piv] = tmp; }
+    for (let r = col + 1; r < 4; r++) {
+      const f = a[r][col] / a[col][col];
+      for (let c = col; c < 5; c++) a[r][c] -= f * a[col][c];
+    }
+  }
+  const x = [0, 0, 0, 0];
+  for (let r = 3; r >= 0; r--) {
+    let s = a[r][4];
+    for (let c = r + 1; c < 4; c++) s -= a[r][c] * x[c];
+    x[r] = s / a[r][r];
+  }
+  return x;
 }
 
 // Kasa 代数圆拟合（最小二乘 x²+y²+Dx+Ey+F=0，中心化提数值稳定）。近共线 → null。
