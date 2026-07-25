@@ -9,6 +9,7 @@ import { describe, it, assert, eq } from "./runner.mjs";
 const {
   snapLineEnd, rectCorners, fitEllipse, rotatePt,
   linePolyline, rectPolyline, ellipseArcPolyline, maxSegLenFor, perimeterRamanujan,
+  clampPixelCenter, bresenhamLine, bresenhamRectPerimeter, bresenhamEllipseRect,
 } = await import("../src/shape-geometry.ts");
 
 const DEG = Math.PI / 180;
@@ -212,5 +213,75 @@ describe("shape-geometry: 椭圆弧拟合（LSQ，消圆→椭圆跳变）", () 
     const fit = fitEllipse(pts, rot, false);
     assert(!fit.closed);
     close(fit.rx, 60, 1.5); close(fit.ry, 20, 1.5);
+  });
+});
+
+describe("shape-geometry: 像素模式（clamp + Bresenham）", () => {
+  const key = (p) => `${p.x},${p.y}`;
+  const uniq = (pts) => new Set(pts.map(key)).size === pts.length;
+
+  it("clampPixelCenter：10.3→10.5、10.9→10.5、-0.2→-0.5", () => {
+    eq(clampPixelCenter(10.3), 10.5);
+    eq(clampPixelCenter(10.9), 10.5);
+    eq(clampPixelCenter(-0.2), -0.5);
+  });
+  it("bresenhamLine：水平/对角每像素恰好一次，端点在", () => {
+    const h = bresenhamLine(2, 5, 9, 5);
+    eq(h.length, 8); assert(uniq(h));
+    for (const p of h) eq(p.y, 5.5);
+    const d = bresenhamLine(0, 0, 6, 6);
+    eq(d.length, 7); assert(uniq(d));
+    for (const p of d) eq(p.x, p.y);
+    const g = bresenhamLine(0, 0, 10, 4);   // 一般斜线：连通、去重、端点在
+    assert(uniq(g));
+    eq(g[0].x, 0.5); eq(g[g.length - 1].x, 10.5); eq(g[g.length - 1].y, 4.5);
+    for (let i = 1; i < g.length; i++) {
+      assert(Math.abs(g[i].x - g[i - 1].x) <= 1 && Math.abs(g[i].y - g[i - 1].y) <= 1, "8-连通");
+    }
+  });
+  it("bresenhamRectPerimeter：周界像素数 = 2w+2h-4，去重，角点在", () => {
+    const pts = bresenhamRectPerimeter(0, 0, 6, 4);   // 7×5 盒
+    eq(pts.length, 2 * 7 + 2 * 5 - 4); assert(uniq(pts));
+    const s = new Set(pts.map(key));
+    for (const c of ["0.5,0.5", "6.5,0.5", "0.5,4.5", "6.5,4.5"]) assert(s.has(c), `角点 ${c}`);
+    const line = bresenhamRectPerimeter(3, 2, 3, 8);   // 退化成竖线
+    eq(line.length, 7); assert(uniq(line));
+  });
+  it("bresenhamEllipseRect：5×5 盒 = r2 midpoint 圆（四重对称、触盒四边中点、去重）", () => {
+    const pts = bresenhamEllipseRect(0, 0, 4, 4);
+    assert(uniq(pts));
+    const s = new Set(pts.map(key));
+    for (const p of pts) {
+      assert(p.x >= 0.5 && p.x <= 4.5 && p.y >= 0.5 && p.y <= 4.5, "不出盒");
+      assert(s.has(`${5 - p.x + 0},${p.y}`) || s.has(`${4 - (p.x - 0.5) + 0.5},${p.y}`), "左右对称");
+      assert(s.has(`${p.x},${4 - (p.y - 0.5) + 0.5}`), "上下对称");
+    }
+    for (const c of ["0.5,2.5", "4.5,2.5", "2.5,0.5", "2.5,4.5"]) assert(s.has(c), `触边中点 ${c}`);
+  });
+  it("bresenhamEllipseRect：6×4 偶径不出盒且对称；1×1 单像素；1×5 竖线", () => {
+    const pts = bresenhamEllipseRect(0, 0, 5, 3);
+    assert(uniq(pts));
+    const s = new Set(pts.map(key));
+    for (const p of pts) {
+      assert(p.x >= 0.5 && p.x <= 5.5 && p.y >= 0.5 && p.y <= 3.5, "不出盒");
+      assert(s.has(`${5 - (p.x - 0.5) + 0.5},${p.y}`), "左右对称(偶径)");
+    }
+    eq(bresenhamEllipseRect(2, 2, 2, 2).length, 1);
+    const v = bresenhamEllipseRect(3, 0, 3, 4);
+    assert(uniq(v));
+    for (const p of v) eq(p.x, 3.5);
+    eq(v.length, 5);
+  });
+  it("bresenhamEllipseRect：环 8-连通（12×7 盒每像素有邻居）", () => {
+    const pts = bresenhamEllipseRect(0, 0, 11, 6);
+    const s = new Set(pts.map(key));
+    for (const p of pts) {
+      let n = 0;
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        if (!dx && !dy) continue;
+        if (s.has(`${p.x + dx},${p.y + dy}`)) n++;
+      }
+      assert(n >= 2, `环上像素应有 ≥2 邻居：${key(p)}`);
+    }
   });
 });

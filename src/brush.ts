@@ -249,6 +249,14 @@ export class BrushEngine {
 
   cancelStroke() { this._stroke = null; }
 
+  // 形状笔像素圆（ADR-0005）：在指定位置补一颗 stamp——每像素恰好一次，绕过 spacing 走步器。
+  //   落格/圆盘/lockAlpha 语义复用 _stampOne 单一实现（别在上层重抄）。仅 pixelMode 有可见效果
+  //   （buffered 的可见 stamp 走 collectStamps，_stampOne 只记 dirty）。
+  stampAt(x: number, y: number, pressure: number) {
+    if (!this._stroke) return;
+    this._stampOne(x, y, pressure);
+  }
+
   // Stage 3：收集当前 stroke 全部 stamp（frozen 0..count-1，含 tail）为列表 + stroke 笔形 —— 给 GPU 栅格器
   //   (GLStampRasterizer，board 消费)。**复用 _walkStamps(手感间距) + _stampParams(压感/taper)**，与 CPU
   //   _emitFrozen 同源 → 手感逐位一致；纯读（传 fresh walk，不碰 live cursor/buffer）。endStroke 后 _taperTotal

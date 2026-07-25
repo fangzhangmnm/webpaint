@@ -7,8 +7,11 @@
 // 实现 = 几何(shape-geometry 纯函数) + 私有 BrushEngine 重合成：
 //   · buffered 笔刷：合成 stamps → collectStamps 走现有 GPU stamp overlay（live==commit 同一份）；
 //     endStroke 返回 StampCollect 由 input 走 board.commitBrushStroke（与主笔刷同路径）。
-//   · pixelMode 笔刷：immediate in-place——每帧 restoreFromSnapshot(preSnap) 擦掉上一帧再整条
-//     重驱动（快照 = tile 句柄共享零拷贝，可反复 restore；液化同款 in-place + live-sync 节律）。
+//   · pixelMode 笔刷（像素画特化，user 2026-07-25）：immediate in-place——每帧
+//     restoreFromSnapshot(preSnap) 擦掉上一帧再整形重画（快照 = tile 句柄零拷贝；液化同款节律）。
+//     端点 clamp 整数像素中线、忽略视口旋转（像素格是 doc 轴的）；三种形状**每像素恰好一颗**
+//     （Bresenham 线/矩形周界/Zingl midpoint 椭圆 + stampAt，消 spacing 撒点双叠）；
+//     圆输入改 **AABB 拖拽**（传统 x0y0→x1y1 拉框，好控制），不走弧长识别/拟合、无弧。
 //   · 恒压 0.5（user 拍板：不记录笔压，专注形状 = 鼠标矢量绘图体验）；**强制无视 taper**
 //     （taper 是笔压修饰，笔压已禁用；机械绘制要粗细均匀）——覆写冻结 ResolvedBrush，不碰引擎。
 //   · smoother 直通（tau=0/deadzone=0，t=null 走 FALLBACK_DT）：几何已精确，平滑只会拖后腿。
@@ -17,6 +20,7 @@ import { disposeLayerSnap } from "./doc.ts";
 import {
   snapLineEnd, rectCorners, fitEllipse,
   linePolyline, rectPolyline, ellipseArcPolyline, maxSegLenFor,
+  clampPixelCenter, bresenhamLine, bresenhamRectPerimeter, bresenhamEllipseRect,
 } from "./shape-geometry.ts";
 import type { Layer, LayerSnap } from "./doc.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
@@ -62,9 +66,12 @@ export class ShapeBrushEngine {
               mode: string = "brush", _smooth: object = {}, _t: number | null = null) {
     const s = { ...settings, taperIn: 0, taperOut: 0 } as ResolvedBrush;
     Object.freeze(s);
+    // 像素笔模式（user 2026-07-25）：端点 clamp 到整数像素中线（预览即最终、落格对称）；
+    //   像素格是 doc 轴的 → 忽略视口旋转（斜矩形在像素模式下无意义）。
+    if (s.pixelMode) { x = clampPixelCenter(x); y = clampPixelCenter(y); }
     this._st = {
       layer, settings: s, mode,
-      rot: this._rotProvider?.() ?? 0,
+      rot: s.pixelMode ? 0 : (this._rotProvider?.() ?? 0),
       x0: x, y0: y, x1: x, y1: y,
       pts: [{ x, y }],
       preSnap: s.pixelMode ? layer.snapshot() : null,
@@ -78,8 +85,10 @@ export class ShapeBrushEngine {
     const st = this._st;
     if (!st) return;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;   // NaN 护栏（同 BrushEngine）
+    if (st.settings.pixelMode) { x = clampPixelCenter(x); y = clampPixelCenter(y); }
     st.x1 = x; st.y1 = y;
-    if (this._subTool === "circle") st.pts.push({ x, y });
+    // 像素模式的圆 = AABB 拖拽（Bresenham 椭圆，见 _resynth），不收集 freehand 点列
+    if (this._subTool === "circle" && !st.settings.pixelMode) st.pts.push({ x, y });
     this._resynth();
   }
 
@@ -138,24 +147,70 @@ export class ShapeBrushEngine {
     return fit ? ellipseArcPolyline(fit, seg) : [{ x: st.x0, y: st.y0 }];
   }
 
-  // 整条重合成：pixelMode 先 restore 擦上一帧，再从头驱动私有 BrushEngine。
-  //   buffered 只重建 stamps（无像素落地）；O(点数+stamps)/move，与手绘同量级。
+  // 整条重合成：buffered 只重建 stamps（无像素落地，走 spacing 走步器）；
+  //   O(点数+stamps)/move，与手绘同量级。pixelMode 走 _resynthPixel（逐像素 exact-once）。
   _resynth() {
     const st = this._st!;
-    if (st.preSnap) st.layer.restoreFromSnapshot(st.preSnap);
+    if (st.settings.pixelMode) { this._resynthPixel(st); return; }
     this._inner.cancelStroke();
     const pts = this._polyline();
     this._inner.beginStroke(st.layer, st.settings, pts[0].x, pts[0].y, SHAPE_PRESSURE, st.mode, { tau: 0, deadzone: 0 }, null);
     for (let i = 1; i < pts.length; i++) {
       this._inner.extendStroke(pts[i].x, pts[i].y, SHAPE_PRESSURE, null);
     }
-    if (st.preSnap) {
-      // in-place：上一帧画过的区（已被 restore 擦掉）+ 本帧画的区 都要重渲
-      const painted = this._inner.flushDirty();
-      if (st.lastPaint) this._mergeDirty(st, st.lastPaint);
-      if (painted) this._mergeDirty(st, painted);
-      st.lastPaint = painted;
+  }
+
+  // 像素模式（user 2026-07-25）：三种形状全部**每像素恰好一颗**（stampAt 绕过 spacing 走步器，
+  //   消双叠）；每帧 restore 擦上一帧再整形重画（in-place 节律）。
+  _resynthPixel(st: ShapeStroke) {
+    st.layer.restoreFromSnapshot(st.preSnap!);
+    this._inner.cancelStroke();
+    const pts = this._pixelPixels(st);
+    this._inner.beginStroke(st.layer, st.settings, pts[0].x, pts[0].y, SHAPE_PRESSURE, st.mode, { tau: 0, deadzone: 0 }, null);
+    for (let i = 1; i < pts.length; i++) {
+      this._inner.stampAt(pts[i].x, pts[i].y, SHAPE_PRESSURE);
     }
+    // 上一帧画过的区（已被 restore 擦掉）+ 本帧画的区 都要重渲
+    const painted = this._inner.flushDirty();
+    if (st.lastPaint) this._mergeDirty(st, st.lastPaint);
+    if (painted) this._mergeDirty(st, painted);
+    st.lastPaint = painted;
+  }
+
+  // 像素模式几何（doc 轴整数格）：line=Bresenham 线（45° 倍数约束走整数空间精确逐格）；
+  //   rect=周界；circle=**AABB 拖拽**（x0y0→x1y1 传统拉框，不做弧长/拟合——好控制）+ midpoint 椭圆。
+  _pixelPixels(st: ShapeStroke): Pt[] {
+    const i0 = Math.floor(st.x0), j0 = Math.floor(st.y0);
+    let i1 = Math.floor(st.x1), j1 = Math.floor(st.y1);
+    if (this._subTool === "line") {
+      if (this._constrain && (i1 !== i0 || j1 !== j0)) {
+        const k = Math.round(Math.atan2(j1 - j0, i1 - i0) / (Math.PI / 12));
+        if (k % 3 === 0) {
+          // 45° 的倍数：整数空间精确（像素画的轴向/对角必须逐格，连续 snap 后取整会差一格）
+          if (k % 12 === 0) j1 = j0;                                   // 水平
+          else if (k % 6 === 0) i1 = i0;                               // 竖直
+          else {                                                        // 对角 |di|==|dj|
+            const L = Math.max(Math.abs(i1 - i0), Math.abs(j1 - j0));
+            i1 = i0 + Math.sign(i1 - i0 || 1) * L;
+            j1 = j0 + Math.sign(j1 - j0 || 1) * L;
+          }
+        } else {
+          // 非 45° 档（15/30/60/75°）本就无法逐格完美：连续空间 snap 后取整
+          const e = snapLineEnd(st.x0, st.y0, st.x1, st.y1);
+          i1 = Math.floor(e.x); j1 = Math.floor(e.y);
+        }
+      }
+      return bresenhamLine(i0, j0, i1, j1);
+    }
+    // rect / circle：AABB；constrain = 整数正方盒（边长 max，方向跟拖拽象限）
+    if (this._constrain) {
+      const side = Math.max(Math.abs(i1 - i0), Math.abs(j1 - j0));
+      i1 = i0 + Math.sign(i1 - i0 || 1) * side;
+      j1 = j0 + Math.sign(j1 - j0 || 1) * side;
+    }
+    return this._subTool === "rect"
+      ? bresenhamRectPerimeter(i0, j0, i1, j1)
+      : bresenhamEllipseRect(i0, j0, i1, j1);
   }
 
   _mergeDirty(st: ShapeStroke, r: Rect4) {

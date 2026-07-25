@@ -15,6 +15,11 @@ Procreate 级绘画 PWA + **家族 sync-store 引擎的开发面**（shared-lib-
 - **worktree 落地**：在 worktree 里改完别只 push remote——改动也要带回 local 工作区（merge/ff 本地 main，或把文件落回主 checkout），否则 local 落后于 remote、下个 agent 在旧版上接着改（曾出现 remote=v256 而 local main=v242）。
 
 ## 发版 ritual（main → /dev/；prod 另说）
+
+> **版本号权限（user 2026-07-25 硬规则）**：patch（0.0.x）随发版 ritual 由 AI 例行 bump；
+> **minor（0.x.0）必须人类 explicit consent**——AI 有权**提议** bump minor，但只有人类明确
+> 说出版本号（或明确批准）才准动手；把提议藏在 plan / 一大段文字里不算 consent。
+> （背景：形状笔上线时 AI 自判 0.5→0.6——决定本身合理，但未获显式批准。）
 > as-of v326 / 2026-06-26。`main` 分支 = dev 渠道：push 后 GH Actions 把 main 的 `dist/` + 源原样部署到 `/dev/` 路径。`prod` 是**另一条分支**，push prod 前必问 human（家族总规则 #5）。
 
 每次push dev 走这 4 步（**成对 commit**：先源、后 bundle）：
