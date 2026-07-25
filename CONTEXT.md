@@ -26,7 +26,12 @@ _Avoid_: controller, handler
 _Avoid_: rt（旧全局占位）, DI container / service locator（这只是显式参数对象，不是框架）, god-object
 
 **Engine**:
-把一笔落到 layer 像素上的东西（BrushEngine / LiquifyEngine / FilterBrushEngine / ShapesEngine / LassoEngine）。统一节律 begin/extend/end/cancel。
+把一笔落到 layer 像素上的东西（BrushEngine / LiquifyEngine / FilterBrushEngine / ShapeBrushEngine / LassoEngine）。统一节律 begin/extend/end/cancel。pixel-stroke 家族的成员判定与 begin 期策略 = `engine-registry.ts` 的纯数据表（加引擎 = 加一行）。
+_Avoid_: ShapesEngine（旧名——v257 删掉的 ctx.fillRect 直填旧实现；现行 = ADR-0005 形状笔 `src/shape-brush.ts`）
+
+**形状笔（ShapeBrushEngine）**:
+一个 shape = 一个 stroke 的笔（对标滤镜笔，**不是**带 gizmo 的可编辑对象；ADR-0005）。按下→拖动（live 预览 = 每 move 按几何整条重合成）→抬手落像素；中断 = cancel 不进 undo。几何纯函数层 `src/shape-geometry.ts`（直线 15° 画布吸附 / 矩形视口相对 AABB / 圆弧鼠绘拟合：闭合 = 视口轴 AABB **max 范数**（切线边界哲学）、弧 = Kasa 圆 + **winding ≥360° 才闭合**）。恒压 0.5、强制无 taper（覆写冻结 ResolvedBrush）；共享 brush 笔架与当前笔（`getRackToolKey` alias）。live/commit 走既有 stamp overlay 与 `commitBrushStroke`（同一份 StampCollect）；pixelMode = 每帧 `restoreFromSnapshot` + 重驱动。
+_Avoid_: 手势识别自动 snap（判定延迟，被否）, adjusting 态/手柄（从没要过）, defaultPressure 字段（撤案——鼠标主路径本就恒 0.5）, 旧 src/shapes.js 的直填路线
 _Avoid_: tool (tool 是 UI 层的工具选择), brush (brush 专指圆笔引擎)
 
 **Stroke smoother**:

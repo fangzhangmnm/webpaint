@@ -119,12 +119,13 @@ describe("pointer-gesture · 共享 kernel（参考窗复用同一套）", () =>
   });
 });
 
-describe("pointer-gesture · snapRotation", () => {
+describe("pointer-gesture · snapRotation（v0.5 形状笔配套：网格 90°→15°）", () => {
   const d2r = (d) => d * Math.PI / 180;
   it("3° 偏离 → 吸到 0", () => assert(approx(snapRotation(d2r(3), 5), 0)));
   it("87° → 吸到 90°(π/2)", () => assert(approx(snapRotation(d2r(87), 5), Math.PI / 2)));
-  it("偏 10°（> 阈值）→ null（不吸）", () => assert(snapRotation(d2r(10), 5) === null));
-  it("正好 45° → null（离两边都 45°）", () => assert(snapRotation(d2r(45), 5) === null));
+  it("17° → 吸到 15°（新档位）", () => assert(approx(snapRotation(d2r(17), 5), d2r(15), 1e-9)));
+  it("44° → 吸到 45°（15° 的倍数）", () => assert(approx(snapRotation(d2r(44), 5), d2r(45), 1e-9)));
+  it("7.4°（档间自由区）→ null（不吸）", () => assert(snapRotation(d2r(7.4), 5) === null));
   it("负角 -2° → 吸到 0", () => assert(approx(snapRotation(d2r(-2), 5), 0)));
 });
 

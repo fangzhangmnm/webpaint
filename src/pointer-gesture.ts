@@ -70,10 +70,12 @@ export function computePinchViewport(start: PinchStart, a: Vec2, b: Vec2, limits
   return { tx: cen.tx - W * scale / 2, ty: cen.ty - H * scale / 2, scale, rot };
 }
 
-// 松手旋转吸附（Procreate：±5° 内吸到 0/90/180/270°）。
-//   cur 弧度接近某个 k·90° 且差 < snapDeg° → 返回该吸附角；否则 null（不吸，原样）。
+// 松手旋转吸附。v0.5 形状笔配套（user 2026-07-25）：网格 90°→**15°**（±5° 内吸到 k·15°）——
+//   转视口画斜矩形时松手自动摆正到 15° 档；不顺手再退 45°。0/90/180/270 仍是 15° 的倍数，
+//   Procreate 式回正不受影响；非档位角照旧自由（每 15° 档间还有 5° 死区外的自由区）。
+//   cur 弧度接近某个 k·step 且差 < snapDeg° → 返回该吸附角；否则 null（不吸，原样）。
 export function snapRotation(cur: number, snapDeg = 5): number | null {
-  const step = Math.PI / 2;
+  const step = Math.PI / 12;
   const snapped = Math.round(cur / step) * step;
   if (cur !== snapped && Math.abs(cur - snapped) < snapDeg * Math.PI / 180) {
     return snapped;

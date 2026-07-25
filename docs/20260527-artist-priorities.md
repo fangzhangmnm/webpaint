@@ -73,12 +73,16 @@ WebPaint 是 user 兄弟项目家族里的一员，家族远景是消除 Blender
 - **液化 + lasso + 自由变换**：核心的"denoising step" 工具。必须够廉价、够大力，鼓励用户多迭代。
 - **多图层 + 高 undo 深度**：每次大变形保留备份，允许 try-and-discard cycle。
 - **"形状工具" / "对称笔刷"** = anti-feature：它们假设用户能"一笔到位"，违背 denoising 心智。
+  > [superseded 2026-07-25 → ADR-0005] 形状工具部分被 user 本人推翻：机械绘制场景（建筑透视线/
+  > 角色大头圆底）成立，做成「形状笔」独立工具（恒压无 taper，非手势识别）。对称笔刷判决仍有效。
 
 **类比 Blender vertex tweak**：3D 里也是这样 —— 没人 box-modeling 一次到位，都是 sculpt + retopo + 反复改 verts 直到模型对。WebPaint 在栅格世界做同件事。但**这是类比，不是 WebPaint 的身份**。Procreate 用户也走 denoising 工作流。
 
 ## 工程师直觉的反例（我犯过的错）
 
 - ❌ **形状工具（直线/椭圆/矩形）**：完全没人用。眼睛 ≠ 两个椭圆。画师靠手画 + stabilizer + 修，不靠 tool 出形状。顶多 Procreate 那种"长按笔画末尾自动拉直 / 拉成弧"的辅助。
+  > [superseded 2026-07-25 → ADR-0005] user 本人推翻：机械绘制（建筑线/圆底）需要形状笔；
+  > 且长按辅助恰被否（判定延迟伤效率），独立工具+子工具组胜出。
 - ❌ **对称镜像笔刷**：anime 不用。anime 角色基本是 3/4 视角，对称工具反而打死立体感。
 - ❌ **Alpha lock 替代 clipping mask**：alpha lock 能勉强做 cel shading 平涂，但**画师真正要 clip 的是喷枪涂渐变**。alpha lock 在喷枪渐变上不等价，必须真 clipping mask。
 - ❌ **用 cel-shading-single-layer 作为 MVP**：忽略了 ref 导入 / 草稿迭代 / 线稿叠层这套工作流。
