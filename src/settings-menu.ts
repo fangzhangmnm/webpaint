@@ -13,7 +13,8 @@ import { applyTheme, themeLabel, THEMES, currentTheme } from "./theme.ts";
 import { t, lang, setLang, LANGS, langDisplayName, type Key } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
-import { positionPopup, anchorPopupToBtn } from "./anchored-popup.ts";
+import { positionPopup } from "./anchored-popup.ts";
+import { wireInlineSelect } from "./inline-select.ts";
 import { openInputSheet } from "./sheets.ts";
 import { reportError } from "./error-badge.ts";   // 全 app 唯一错误汇拢点（CLAUDE.md）
 import type { AppContext } from "./app-context.ts";
@@ -102,10 +103,12 @@ export function genAiEnabled(): boolean {
 }
 function renderGenAI(on: boolean) {
   document.body.dataset.genAi = on ? "1" : "";
-  const btn = document.getElementById("menuGenAI");
-  btn?.setAttribute("aria-pressed", on ? "true" : "false");
-  const st = btn?.querySelector('[data-state-for="genAI"]');
-  if (st) st.textContent = on ? t("common.on") : t("common.off");
+  // 主菜单 + 图库菜单两处开关同步（v0.5.40 图库补 gen-AI 后按 data-state-for 批扫）
+  for (const id of ["menuGenAI", "galleryMenuGenAI"]) {
+    const btn = document.getElementById(id);
+    btn?.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  document.querySelectorAll('[data-state-for="genAI"]').forEach((st) => { st.textContent = on ? t("common.on") : t("common.off"); });
 }
 function applyGenAI(on: boolean) {
   renderGenAI(on);
@@ -249,36 +252,6 @@ export function initSettingsMenu(ctx: AppContext) {
   // v0.5.37（user）：主题/语言换 in-app 下拉——原生 select 打开态是 chrome 域（iPad 弹层系统字体，
   //   UCSUR 必豆腐；夜间白底、装不了 SVG 同根性坑）。弹层复用紧凑菜单 list 形态 + 锚定。
   //   条目开时现建 → 标签永远新鲜（字体门迟到翻转后 endonym/主题名自动带字形）。
-  const wireInlineSelect = <V extends string>(
-    btnId: string, menuId: string,
-    items: () => { value: V; label: string }[],
-    current: () => V,
-    onPick: (v: V) => void,
-  ) => {
-    const btn = document.getElementById(btnId);
-    const menu = document.getElementById(menuId);
-    if (!btn || !menu) return;
-    btn.addEventListener("click", (e: Event) => {
-      e.stopPropagation();
-      if (!menu.classList.contains("hidden")) { menu.classList.add("hidden"); return; }
-      menu.innerHTML = "";
-      for (const it of items()) {
-        const b = document.createElement("button");
-        b.type = "button"; b.className = "lasso-tool-btn"; b.setAttribute("role", "menuitem");
-        b.textContent = it.label;
-        b.setAttribute("aria-pressed", it.value === current() ? "true" : "false");
-        b.addEventListener("click", () => { menu.classList.add("hidden"); onPick(it.value); });
-        menu.appendChild(b);
-      }
-      menu.classList.remove("hidden");
-      anchorPopupToBtn(menu, btn, { align: "right", offsetY: 4 });
-    });
-    document.addEventListener("pointerdown", (e: Event) => {
-      if (menu.classList.contains("hidden")) return;
-      if (menu.contains(e.target as Node) || btn.contains(e.target as Node)) return;
-      menu.classList.add("hidden");
-    });
-  };
   wireInlineSelect("menuThemeBtn", "menuThemeMenu",
     () => THEMES.map((th) => ({ value: th, label: themeLabel(th) })),
     () => currentTheme(),

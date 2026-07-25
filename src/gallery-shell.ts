@@ -24,6 +24,9 @@ import { readImageFromClipboard } from "./session.ts";
 import { sessionFileName, sessionBareName } from "./config.ts";   // 边界：裸 session 名 → 库全名（占用检查按库身份查）
 import { isSignedIn } from "./app-store.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
+import { wireInlineSelect } from "./inline-select.ts";
+import { applyTheme, themeLabel, THEMES, currentTheme } from "./theme.ts";
+import { lang, setLang, LANGS, langDisplayName } from "./i18n/index.ts";
 import { openInputSheet, openConfirmSheet } from "./sheets.ts";
 import { pathJoin } from "./gallery-path.ts";
 import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
@@ -313,6 +316,11 @@ export function initGalleryShell(ctx: AppContext) {
   presetSel?.addEventListener("change", () => { if (presetSel.value) _selectPreset(presetSel.value); });
   els.newDocBackdrop.addEventListener("click", closeNewDocSheet);
   els.newDocCancel.addEventListener("click", closeNewDocSheet);
+  // v0.5.40（user：「确认总是要点好几下」）：名字输入框聚焦时点按钮，pointerdown 默认行为先 blur →
+  //   键盘收起 → 底部 sheet 位移 → click 落空。preventDefault 挡掉焦点转移，按钮原位吃到 click。
+  for (const b of [els.newDocConfirm, els.newDocCancel]) {
+    b.addEventListener("pointerdown", (e: Event) => e.preventDefault());
+  }
 
   els.newDocConfirm.addEventListener("click", async () => {
     const nameRaw = (els.newDocName.value || "").trim() || t("gs.untitled");
@@ -338,10 +346,18 @@ export function initGalleryShell(ctx: AppContext) {
     els.galleryMenuPopup.classList.add("hidden");
     els.menuForcePwaReset?.click();
   });
-  els.galleryMenuTheme?.addEventListener("click", () => {
-    els.galleryMenuPopup.classList.add("hidden");
-    els.menuTheme?.click();
-  });
+  // v0.5.40：主题/语言 in-app 下拉（同设置页机制）；gen-AI 代理主菜单同一 handler。
+  wireInlineSelect("galleryThemeBtn", "galleryThemeMenu",
+    () => THEMES.map((th) => ({ value: th, label: themeLabel(th) })),
+    () => currentTheme(),
+    (th) => { applyTheme(th); });
+  const galLangLabel = document.getElementById("galleryLanguageBtnLabel");
+  if (galLangLabel) galLangLabel.textContent = langDisplayName(lang());
+  wireInlineSelect("galleryLanguageBtn", "galleryLanguageMenu",
+    () => LANGS.map((l) => ({ value: l, label: langDisplayName(l) })),
+    () => lang(),
+    (l) => { void setLang(l).catch((e) => reportError(e)); });
+  els.galleryMenuGenAI?.addEventListener("click", () => { els.menuGenAI?.click(); });
   // 三个 popup 的 outside-click 关闭
   document.addEventListener("pointerdown", (e: Event) => {
     if (!els.galleryAddPopup.classList.contains("hidden") &&

@@ -837,7 +837,8 @@ body:not([data-gen-ai="1"]) .needs-gen-ai { display: none !important; }
   border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
   background: transparent; color: var(--ink); cursor: pointer; max-width: 100%;
 }
-.menu-config-select option { background: var(--bg); color: var(--ink); }
+/* v0.5.40 系统排查：所有原生 select 的 option 一次主题化（夜间白底白字这坑第三次出现，全局绝根） */
+option { background: var(--bg); color: var(--ink); }
 .menu-config-select:disabled { opacity: .5; }
 
 /* v120：lasso 工具栏的 dropdown（采样模式 3 按钮 → 1 select） */
@@ -849,7 +850,6 @@ body:not([data-gen-ai="1"]) .needs-gen-ai { display: none !important; }
 }
 /* v0.5.13：夜间主题下拉列表（option）修——UA 弹层默认白底，文字继承了亮色 --ink → 白底白字看不见。
    显式给 option 上主题底/字色（iPad 原生滚轮选择器不受影响，桌面 Chromium/Firefox 生效）。 */
-.lasso-tool-select option { background: var(--bg); color: var(--ink); }
 
 /* 笔刷设置浮动面板（沿用 .float-panel 框架） */
 .brush-panel { width: 280px; }

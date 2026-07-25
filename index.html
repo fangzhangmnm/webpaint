@@ -335,8 +335,19 @@
       <button class="menu-item menu-item-with-icon" id="galleryMenuForceUpdate" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#refresh"/></svg>
         <span class="menu-item-label" data-i18n="menu.forceReset">强制更新（清缓存重启）</span>
       </button>
-      <button class="menu-item menu-item-with-icon" id="galleryMenuTheme" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
-        <span class="menu-item-label" data-i18n="gal.menu.theme">主题…</span>
+      <!-- v0.5.40：原「主题…」代理点的 menuTheme 在 v0.5.25 下拉化后只剩 stub——按钮其实已死（user 盘点抓出）。
+           换 in-app 下拉（同设置页）；语言补齐（user：「语言没有进图库的菜单」）；gen-AI 开关代理主菜单同款。 -->
+      <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
+        <span class="menu-item-label" data-i18n="menu.theme">主题</span>
+        <button class="menu-lang-select menu-inline-select" id="galleryThemeBtn" type="button" aria-haspopup="true"><span id="galleryThemeBtnLabel">跟随系统</span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </label>
+      <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#globe-speech"/></svg>
+        <span class="menu-item-label" data-i18n="menu.language">语言</span>
+        <button class="menu-lang-select menu-inline-select" id="galleryLanguageBtn" type="button" aria-haspopup="true"><span id="galleryLanguageBtnLabel">中文</span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </label>
+      <button class="menu-item menu-item-with-icon" id="galleryMenuGenAI" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ai-slop"/></svg>
+        <span class="menu-item-label" data-i18n="menu.genAI">启用生成式 AI 功能</span>
+        <span class="menu-item-state" data-state-for="genAI">关</span>
       </button>
       <button class="menu-item menu-item-with-icon" id="galleryMenuLock" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#unlock"/></svg>
         <span class="menu-item-label" data-i18n="gal.menu.unlock">解锁加密作品…</span>
@@ -519,6 +530,8 @@
     <!-- v0.5.37 in-app 下拉（原生 select 打开态=chrome 域，UCSUR 必豆腐；夜间白底/装不了SVG 同根）：
          主题/语言两处；条目 JS 现建（i18n/endonym 动态） -->
     <div class="lasso-icon-menu lasso-icon-list hidden" id="menuThemeMenu" role="menu"></div>
+    <div class="lasso-icon-menu lasso-icon-list hidden" id="galleryThemeMenu" role="menu"></div>
+    <div class="lasso-icon-menu lasso-icon-list hidden" id="galleryLanguageMenu" role="menu"></div>
     <div class="lasso-icon-menu lasso-icon-list hidden" id="menuLanguageMenu" role="menu"></div>
     <div class="lasso-icon-menu hidden" id="lassoSetOpMenu" role="menu" data-i18n-aria="la.setOpSlot">
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" role="menuitem" data-i18n-title="la.new"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-new"/></svg></button>

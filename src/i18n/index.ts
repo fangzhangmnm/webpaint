@@ -135,13 +135,18 @@ export function setLocalizedText(el: HTMLElement, s: string): void {
 // data-i18n 桥：静态 HTML 一次性填充。textContent / title / aria-label / placeholder / optgroup label 五种 attr。
 export function localizeDom(root: ParentNode = document) {
   const k = (s: string | undefined) => s as Key;   // 桥 attr 值是运行时字符串（不受 tsc 检查）；t() 内部对未知 key 兜底
-  root.querySelectorAll<HTMLElement>("[data-i18n]").forEach(el => { if (el.dataset.i18n) setLocalizedText(el, t(k(el.dataset.i18n))); });
+  root.querySelectorAll<HTMLElement>("[data-i18n]").forEach(el => {
+    if (!el.dataset.i18n) return;
+    // option/optgroup 显示在原生下拉弹层（chrome 域，iPad 系统字体）→ 同 title 纪律走拉丁
+    const chrome = el.tagName === "OPTION" || el.tagName === "OPTGROUP";
+    setLocalizedText(el, chrome ? tLatin(k(el.dataset.i18n)) : t(k(el.dataset.i18n)));
+  });
   // title/aria = 浏览器 chrome / 读屏渲染，永远 ASCII 拉丁（UCSUR 必豆腐）——tLatin。
   root.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach(el => { if (el.dataset.i18nTitle) el.title = tLatin(k(el.dataset.i18nTitle)); });
   root.querySelectorAll<HTMLElement>("[data-i18n-aria]").forEach(el => { if (el.dataset.i18nAria) el.setAttribute("aria-label", tLatin(k(el.dataset.i18nAria))); });
   root.querySelectorAll<HTMLInputElement>("[data-i18n-ph]").forEach(el => { if (el.dataset.i18nPh) el.placeholder = t(k(el.dataset.i18nPh)); });
   // v0.5.10：<optgroup label> 走属性而非文本节点（新建作品尺寸下拉的分组标题用）
-  root.querySelectorAll<HTMLOptGroupElement>("optgroup[data-i18n-label]").forEach(el => { if (el.dataset.i18nLabel) el.label = t(k(el.dataset.i18nLabel)); });
+  root.querySelectorAll<HTMLOptGroupElement>("optgroup[data-i18n-label]").forEach(el => { if (el.dataset.i18nLabel) el.label = tLatin(k(el.dataset.i18nLabel)); });   // chrome 域
 }
 
 // boot：设 <html lang> + 填静态 HTML。app.ts 早期调（DOM 已就绪，module 默认 deferred）。
