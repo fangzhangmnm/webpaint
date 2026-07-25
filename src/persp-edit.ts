@@ -8,7 +8,9 @@
 //   应用=保留（transient apply），取消/ctrl-z=回快照。3D grid 弃案（两角点拖不出来，手动画）。
 import { editorState, snapshotShapePersp, restoreShapePersp } from "./workbench-state.ts";
 import { clampPixelCenter } from "./shape-geometry.ts";
+import { defaultVpsForMode } from "./perspective-frame.ts";
 import { updateShapeToolbar } from "./toolbar.ts";
+import type { PerspMode } from "./perspective-frame.ts";
 import type { AppContext } from "./app-context.ts";
 import type { PerspGizmoData } from "./board.ts";
 
@@ -19,8 +21,23 @@ let _ctx: AppContext | null = null;
 let _active = false;
 let _snapshot: unknown = null;
 let _toolbar: HTMLElement, _layer: HTMLElement;
-let _chips: Record<Kind, HTMLElement>, _lockBtn: HTMLElement;
+let _lockBtn: HTMLElement, _refBtn: HTMLElement;
 const _handles = new Map<Kind, HTMLElement>();
+
+// mode 决定显示哪些 VP（UI v2：VP 数量 = 模式的属性，不再增删 chips）
+function _mode(): PerspMode {
+  const m = editorState.persp.mode;
+  return (m === "p1" || m === "p2" || m === "p3") ? m : "off";
+}
+function _visibleKinds(): Kind[] {
+  const m = _mode();
+  const ks: Kind[] = [];
+  if (m !== "off") ks.push("vp1");
+  if (m === "p2" || m === "p3") ks.push("vp2");
+  if (m === "p3") ks.push("vp3");
+  if (editorState.persp.refPoint) ks.push("ref");
+  return ks;
+}
 
 const _get = (k: Kind): Vp | null =>
   k === "vp1" ? editorState.persp.vp1 : k === "vp2" ? editorState.persp.vp2 :
@@ -76,12 +93,14 @@ const LABELS: Record<Kind, string> = { vp1: "1", vp2: "2", vp3: "V", ref: "◎" 
 function _syncHandles() {
   if (!_ctx || !_active) return;
   const { board } = _ctx;
+  const vis = _visibleKinds();
   for (const kind of ["vp1", "vp2", "vp3", "ref"] as Kind[]) {
     const p = _get(kind);
+    const show = vis.includes(kind) && !!p;
     let el = _handles.get(kind);
-    if (!p) { if (el) { el.remove(); _handles.delete(kind); } continue; }
+    if (!show) { if (el) { el.remove(); _handles.delete(kind); } continue; }
     if (!el) { el = _mkHandle(kind, LABELS[kind]); _handles.set(kind, el); _layer.appendChild(el); }
-    const s = board.docToScreen(p.x, p.y);
+    const s = board.docToScreen(p!.x, p!.y);
     el.style.left = `${s.x}px`;
     el.style.top = `${s.y}px`;
   }
@@ -90,36 +109,26 @@ function _syncHandles() {
 function _syncUi() {
   if (!_ctx || !_active) return;
   _syncHandles();
-  _chipsSync();
   _lockBtn.setAttribute("aria-pressed", editorState.persp.lockHorizon ? "true" : "false");
+  _refBtn.setAttribute("aria-pressed", editorState.persp.refPoint ? "true" : "false");
   _ctx.board.requestRender();
 }
 
-function _chipsSync() {
-  for (const kind of ["vp1", "vp2", "vp3", "ref"] as Kind[]) {
-    _chips[kind].setAttribute("aria-pressed", _get(kind) ? "true" : "false");
-  }
+// 重置默认（user 拍板）：一点=画布正中；二点=中线 ∓2.0×H；三点=+上方 2.5×H（仰视）
+function _resetDefaults() {
+  const { doc } = _ctx!;
+  const m = _mode();
+  if (m === "off") return;
+  const def = defaultVpsForMode(m, doc.width, doc.height);
+  const g = editorState.persp;
+  g.vp1 = def.vp1; g.vp2 = def.vp2; g.vp3 = def.vp3;
+  _syncUi();
 }
 
-// chip 点击：无 → 在合理默认位创建；有 → 移除（移除 vp1 时 vp2 顶上——planeFamilies 以 vp1 为先）
-function _toggle(kind: Kind) {
+function _toggleRef() {
   const { doc } = _ctx!;
   const g = editorState.persp;
-  const cur = _get(kind);
-  if (cur) {
-    _set(kind, null);
-    if (kind === "vp1" && g.vp2) { g.vp1 = g.vp2; g.vp2 = null; }
-  } else {
-    const horizonY = g.vp1 ? g.vp1.y : clampPixelCenter(doc.height * 0.4);
-    const def: Vp =
-      kind === "vp1" ? _snap({ x: -doc.width * 0.25, y: horizonY }) :
-      kind === "vp2" ? _snap({ x: doc.width * 1.25, y: horizonY }) :
-      kind === "vp3" ? _snap({ x: doc.width / 2, y: doc.height * 1.6 }) :
-      _snap({ x: doc.width / 2, y: doc.height / 2 });
-    if (kind === "vp2" && !g.vp1) _set("vp1", _snap({ x: -doc.width * 0.25, y: horizonY }));   // 补齐水平对
-    _set(kind, def);
-    if (g.vp1 && g.vp2 && g.vp2.x < g.vp1.x) { const t = g.vp1; g.vp1 = g.vp2; g.vp2 = t; }
-  }
+  g.refPoint = g.refPoint ? null : _snap({ x: doc.width / 2, y: doc.height / 2 });
   _syncUi();
 }
 
@@ -138,8 +147,15 @@ function _finish(keep: boolean) {
 
 export function enterPerspEdit(): void {
   if (!_ctx || _active) return;
+  if (_mode() === "off") return;   // 视口对齐无 VP 可编（按钮本就藏着）
   _snapshot = snapshotShapePersp();
   _active = true;
+  // 进场把本模式缺的 VP 按默认位补齐（正常由模式切换补，这里兜底老档/异常态）
+  const def = defaultVpsForMode(_mode(), _ctx.doc.width, _ctx.doc.height);
+  const g = editorState.persp;
+  if (!g.vp1 && def.vp1) g.vp1 = def.vp1;
+  if (!g.vp2 && def.vp2) g.vp2 = def.vp2;
+  if (!g.vp3 && def.vp3) g.vp3 = def.vp3;
   _ctx.editMode.enterTransient("perspEdit", { apply: () => _finish(true), abort: () => _finish(false) });
   _toolbar.classList.remove("hidden");
   _layer.classList.remove("hidden");
@@ -150,16 +166,10 @@ export function initPerspEdit(ctx: AppContext): void {
   _ctx = ctx;
   _toolbar = document.getElementById("perspToolbar")!;
   _layer = document.getElementById("perspHandles")!;
-  _chips = {
-    vp1: document.getElementById("perspVp1Btn")!,
-    vp2: document.getElementById("perspVp2Btn")!,
-    vp3: document.getElementById("perspVp3Btn")!,
-    ref: document.getElementById("perspRefBtn")!,
-  };
+  _refBtn = document.getElementById("perspRefBtn")!;
   _lockBtn = document.getElementById("perspLockBtn")!;
-  for (const kind of ["vp1", "vp2", "vp3", "ref"] as Kind[]) {
-    _chips[kind].addEventListener("click", () => _toggle(kind));
-  }
+  document.getElementById("perspResetBtn")!.addEventListener("click", () => _resetDefaults());
+  _refBtn.addEventListener("click", () => _toggleRef());
   _lockBtn.addEventListener("click", () => {
     const g = editorState.persp;
     g.lockHorizon = !g.lockHorizon;
@@ -179,31 +189,35 @@ export function initPerspEdit(ctx: AppContext): void {
   ctx.board.setPerspGizmoProvider(() => {
     if (!_active) return null;
     const g = editorState.persp;
+    const m = _mode();
+    if (m === "off") return null;
+    // 按模式取活跃 VP（存着的多余 VP 不显——mode 决定数量，UI v2）
+    const vp1 = g.vp1, vp2 = (m === "p2" || m === "p3") ? g.vp2 : null, vp3 = m === "p3" ? g.vp3 : null;
     const L = (ctx.doc.width + ctx.doc.height) * 4;
     const out: PerspGizmoData = { horizon: null, rays: [], vps: [] };
-    for (const v of [g.vp1, g.vp2, g.vp3]) if (v) out.vps.push(v);
-    if (g.vp1) {
+    for (const v of [vp1, vp2, vp3]) if (v) out.vps.push(v);
+    if (vp1) {
       let d = { x: 1, y: 0 };
-      if (g.vp2) {
-        const len = Math.hypot(g.vp2.x - g.vp1.x, g.vp2.y - g.vp1.y) || 1;
-        d = { x: (g.vp2.x - g.vp1.x) / len, y: (g.vp2.y - g.vp1.y) / len };
+      if (vp2) {
+        const len = Math.hypot(vp2.x - vp1.x, vp2.y - vp1.y) || 1;
+        d = { x: (vp2.x - vp1.x) / len, y: (vp2.y - vp1.y) / len };
       }
       out.horizon = [
-        { x: g.vp1.x - d.x * L, y: g.vp1.y - d.y * L },
-        { x: g.vp1.x + d.x * L, y: g.vp1.y + d.y * L },
+        { x: vp1.x - d.x * L, y: vp1.y - d.y * L },
+        { x: vp1.x + d.x * L, y: vp1.y + d.y * L },
       ];
     }
     const ref = g.refPoint;
     if (ref) {
-      for (const v of [g.vp1, g.vp2, g.vp3]) {
+      for (const v of [vp1, vp2, vp3]) {
         if (!v) continue;
         const len = Math.hypot(v.x - ref.x, v.y - ref.y) || 1;
         const d = { x: (v.x - ref.x) / len, y: (v.y - ref.y) / len };
         out.rays.push([ref, { x: ref.x + d.x * L, y: ref.y + d.y * L }]);
       }
-      // 尚存平行族的参考线（水平族：<2 个水平 VP；竖直族：无 VP3）
-      if (!(g.vp1 && g.vp2)) out.rays.push([{ x: ref.x - L, y: ref.y }, { x: ref.x + L, y: ref.y }]);
-      if (!g.vp3) out.rays.push([{ x: ref.x, y: ref.y - L }, { x: ref.x, y: ref.y + L }]);
+      // 尚存平行族的参考线（水平族：一点透视；竖直族：非三点）
+      if (m === "p1") out.rays.push([{ x: ref.x - L, y: ref.y }, { x: ref.x + L, y: ref.y }]);
+      if (m !== "p3") out.rays.push([{ x: ref.x, y: ref.y - L }, { x: ref.x, y: ref.y + L }]);
     }
     return out;
   });

@@ -146,12 +146,13 @@ function freshGroups() {
     // ADR-0006 透视 frame（形状笔全局、per-ora）：VP 0-3 + 锁地平线（默认开）+ 参考点 + 当前平面。
     //   坐标 doc 空间、snap 像素中线 +0.5。裁剪/旋转/翻转/偏移画布时必须过 remapShapePersp（doc-ops 挂钩）。
     persp: {
+      mode: "off" as string,   // "off"|"p1"|"p2"|"p3"（UI 重做 2026-07-25：显式模式 subtool）
       vp1: null as { x: number; y: number } | null,
       vp2: null as { x: number; y: number } | null,
       vp3: null as { x: number; y: number } | null,
       lockHorizon: true,
       refPoint: null as { x: number; y: number } | null,
-      plane: "off" as string,
+      plane: "ground" as string,   // "ground"|"wall"|"wallL"|"wallR"（按 mode 过滤；关透视在 mode）
     },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
@@ -250,6 +251,7 @@ export const editorState = {
     get gridBorder(): boolean { return S.g.shapeBrush.gridBorder; }, set gridBorder(v: boolean) { S.g.shapeBrush.gridBorder = v; },
   },
   persp: {
+    get mode(): string { return S.g.persp.mode; }, set mode(v: string) { S.g.persp.mode = v; },
     get vp1() { return S.g.persp.vp1; }, set vp1(v: { x: number; y: number } | null) { S.g.persp.vp1 = v; },
     get vp2() { return S.g.persp.vp2; }, set vp2(v: { x: number; y: number } | null) { S.g.persp.vp2 = v; },
     get vp3() { return S.g.persp.vp3; }, set vp3(v: { x: number; y: number } | null) { S.g.persp.vp3 = v; },
