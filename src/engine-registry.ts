@@ -34,6 +34,9 @@ export const PIXEL_STROKE_SPECS: Readonly<Record<string, PixelStrokeSpec>> = Obj
   draw:        Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesResolvedBrush: true,  finalize: true,  historyType: "stroke" }),
   erase:       Object.freeze({ engineKey: "brush",       coalesceLatest: false, usesResolvedBrush: true,  finalize: true,  historyType: "stroke" }),
   filterBrush: Object.freeze({ engineKey: "filterBrush", coalesceLatest: true,  usesResolvedBrush: false, finalize: false, historyType: "stroke" }),
+  // 形状笔（ADR-0005）：每 move 按几何整条重合成 → 丢帧只保最新（圆拟合吃采样极值，60Hz 足够）；
+  //   一个 shape = 一条标准 "stroke" 事务；选区走 finalize（buffered 由 GPU commit shader 裁，见 _endStroke）。
+  shapeBrush:  Object.freeze({ engineKey: "shapeBrush",  coalesceLatest: true,  usesResolvedBrush: true,  finalize: true,  historyType: "stroke" }),
 });
 
 // role 是否走 pixel-stroke 生命周期（begin → extend×N → end/abort，落 layer 像素 + PixelEdit 事务）。

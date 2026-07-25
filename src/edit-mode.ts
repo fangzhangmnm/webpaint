@@ -44,6 +44,8 @@ const CAPS: Record<string, Cap> = {
   //   （看着像坏了/弹不出来）。放开 = 橡皮时可预选下一笔颜色，免去 iPad 来回切工具。别改回 false。
   eraser:      { canDraw: true,  allowsColor: true,  cursor: "brush", ctrlZ: "history",         transient: false },
   filterBrush: { canDraw: true,  allowsColor: false, cursor: "brush", ctrlZ: "history",         transient: false }, // liquify/色彩笔 = payload
+  // 形状笔（ADR-0005）：一个 shape = 一个 stroke 的笔（对标滤镜笔），非 gizmo 对象——本行=克隆 brush
+  shapeBrush:  { canDraw: true,  allowsColor: true,  cursor: "brush", ctrlZ: "history",         transient: false },
   // 非绘画持久工具
   picker:      { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },
   lasso:       { canDraw: false, allowsColor: true,  cursor: "none",  ctrlZ: "history",         transient: false },

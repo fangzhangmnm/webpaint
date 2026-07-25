@@ -230,8 +230,10 @@ const input = new InputController(board, doc, {
 // iPad 系统手势抢断 canvas pointer 后偶尔不发 pointercancel 到 canvas，map 里残留 ghost。
 // pointer 自愈 + iPad/触屏系统手势拦截 = platform-guards.ts initPlatformGuards。
 
-// brush live 预览：GPU stamp overlay（collectStamps→GPU 栅格；选区/lockAlpha 在 shader 内裁）。
-board.setStampProvider(() => input.brush.collectStamps());
+// brush/形状笔 live 预览：GPU stamp overlay（活动引擎 collectStamps→GPU 栅格；选区/lockAlpha 在 shader 内裁）。
+board.setStampProvider(() => input.collectActiveStamps());
+// 形状笔视口相对几何（矩形/圆拟合沿屏幕轴；斜的 = 转视口画）——rot 注入，引擎不认识 Board。
+input.shapeBrush.setViewportRotProvider(() => board.viewport.rot);
 // strokeActiveHint：任一笔画进行中 → board 走 livePreview（直接合成，不用静态缓存）。
 //   含 brush/像素笔/liquify/filterBrush（liquify/filter/pixel 另经 setLiveSyncProvider 把活动层每帧重传 GPU）。
 board.setStrokeActiveHint(() => input.isStrokeActive());

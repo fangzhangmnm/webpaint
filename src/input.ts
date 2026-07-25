@@ -25,6 +25,7 @@ import { BrushEngine } from "./brush.ts";
 import { reportError } from "./error-badge.ts";
 import { LassoEngine } from "./lasso.ts";
 import { FilterBrushEngine } from "./filter-brush.ts";
+import { ShapeBrushEngine } from "./shape-brush.ts";
 import { isPixelStroke, pixelStrokeSpec } from "./engine-registry.ts";
 import { computePinchViewport, snapRotation, isTap, isDoubleTap, gestureTapAction } from "./pointer-gesture.ts";
 import { assignRole, effectiveTool, toolToRole } from "./pointer-route.ts";
@@ -55,7 +56,7 @@ interface FilterBrushState { Filter: unknown; params: unknown; }
 
 // 活动笔画（brush / filterBrush 共享 begin/extend/end/cancel 协议；液化 = filterBrush 的
 //   LiquifyFilter payload，v132 user：「液化先 migrate 到 filter brush」——S8 删掉了残留的直连双轨）。
-type StrokeEngine = BrushEngine | FilterBrushEngine;
+type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
 // inPlace = 描边中原地改 layer 像素（liquify/filterBrush/pixelMode brush），非 overlay 预览。
 //   GL 模式下这类笔的 live 预览要靠 board 每帧把活动层重传 GPU（buffered brush 走 GPU stamp overlay，不算）。
 interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; inPlace: boolean; }
@@ -308,6 +309,7 @@ export class InputController {
   brush: BrushEngine;
   lasso: LassoEngine;
   filterBrush: FilterBrushEngine;
+  shapeBrush: ShapeBrushEngine;
   getTool: () => string;
   editMode: EditMode | null;
   getResolvedBrush: () => ResolvedBrush | null;
@@ -341,6 +343,8 @@ export class InputController {
     // v132 filter brush（user：「blur/sharpen/液化 走 filter brush engine」）
     //   引擎本身是薄 delegate；filter 自己提供 begin/extend/end brush 方法
     this.filterBrush = new FilterBrushEngine();
+    // 形状笔（ADR-0005）：几何重合成引擎，与 brush 共享 ResolvedBrush + stroke 事务
+    this.shapeBrush = new ShapeBrushEngine();
     this.lasso.onChange = () => {
       this.board.requestRender();
       window.dispatchEvent(new CustomEvent("wp:lassochange"));
@@ -811,21 +815,24 @@ export class InputController {
     if (!settings || !this.doc.activeLayer) return;
     // activeLayer 是 Node（叶|组）；上游 activeEditableLeaf 已硬拒组 → 此处确为可写叶。
     const layer = this.doc.activeLayer as Layer;
-    const spec = pixelStrokeSpec(rec.role as string)!;   // draw / erase → 同 stroke 事务 + finalize
+    const spec = pixelStrokeSpec(rec.role as string)!;   // draw / erase / shapeBrush → 同 stroke 事务 + finalize
+    // engineKey 查表（registry 注释的本意）：draw/erase → brush；shapeBrush → 形状笔。签名一致。
+    const eng = this[spec.engineKey as "brush" | "shapeBrush"];
     const tx = this.pixelHistory!.begin(layer, spec.historyType);
-    this._activeStroke = { engine: this.brush, tx, finalize: spec.finalize, inPlace: !!settings.pixelMode };
+    this._activeStroke = { engine: eng, tx, finalize: spec.finalize, inPlace: !!settings.pixelMode };
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, e);
     // v148: buffered（brush/erase 非 pixel）位置平滑由引擎做（lookahead/frozen/tail），
     //   input 直传 raw（见 pointermove 的 rec.rawToEngine 分支）。pixel 仍走四件套。
+    //   形状笔恒吃 raw（几何/拟合要原始点；input 平滑会跟吸附打架），pixelMode 也不例外。
     const buffered = !settings.pixelMode;
-    rec.rawToEngine = buffered;
+    rec.rawToEngine = buffered || rec.role === "shapeBrush";
     const scale = this.board.viewport.scale || 1;
     // v249：时间常数指数追踪 + 死区。{tau, deadzone}。
     const smooth = buffered ? _resolveSmooth(settings, scale) : {};
-    this.brush.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
-    const bbox = this.brush.flushDirty();
+    eng.beginStroke(layer, settings, dx, dy, pressure, mode, smooth, e.timeStamp);
+    const bbox = eng.flushDirty();
     if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
     this.board.requestRender();
   }
@@ -841,12 +848,10 @@ export class InputController {
     //   blendMode/opacity 全在 shader，live 即 commit 所见）。其它引擎（liquify/filterBrush/pixel）
     //   在描边中已 in-place 落层，endStroke 只清状态。
     let gpuCommitted = false;
-    if (as.engine === this.brush) {
-      const cs = this.brush.endStroke();   // 最终 stamps（含 tail/taper）；pixelMode/空笔 → null
-      if (cs && cs.stamps.length) gpuCommitted = this.board.commitBrushStroke(cs);
-    } else {
-      as.engine.endStroke();
-    }
+    // endStroke 返 StampCollect（brush/形状笔的 buffered 路径）→ GPU commit；
+    //   liquify/filterBrush/pixelMode 返 null/undefined（描边中已 in-place 落层）→ 只清状态。
+    const cs = as.engine.endStroke() ?? null;
+    if (cs && cs.stamps.length) gpuCommitted = this.board.commitBrushStroke(cs);
     // finalize（applyMaskPostStroke CPU 兜选区）只兜没走 GPU commit 的路径（pixel 笔/液化）：
     //   GPU commit 的选区已由 shader 裁（与 live 一致），再兜是重复劳动 + 一次整层物化。
     const sel = (as.finalize && !gpuCommitted) ? this.doc.selection : null;
@@ -865,9 +870,17 @@ export class InputController {
     as.engine.cancelStroke();
     as.tx.abort();
   }
-  // 任一像素笔画进行中（brush / 像素笔 / liquify / filterBrush 都设 _activeStroke）。
+  // 任一像素笔画进行中（brush / 像素笔 / liquify / filterBrush / 形状笔 都设 _activeStroke）。
   // board._strokeActiveHint 用它判 livePreview（描边中走直接合成 / GL 门控），含像素笔/liquify/filterBrush。
   isStrokeActive() { return !!this._activeStroke; }
+  // GPU stamp overlay 拉取口（app 接给 board.setStampProvider）：当前活动引擎的 stamps。
+  //   brush 与形状笔都有 collectStamps；liquify/filterBrush 无（in-place，走 live-sync）。
+  collectActiveStamps(): ReturnType<BrushEngine["collectStamps"]> {
+    const eng = this._activeStroke?.engine as { collectStamps?: () => ReturnType<BrushEngine["collectStamps"]> } | undefined;
+    return eng?.collectStamps?.() ?? null;
+  }
+  // 公开取消口（toolbar 描边中切形状笔子工具 = cancel 不进 undo，同画一半被手势接管）
+  abortActiveStroke() { this._abortStroke(); }
 
   // GL live-sync 接缝：描边中原地改像素的笔（liquify/filterBrush/pixelMode brush）→ 返回活动叶，
   //   board 每帧把它重传 GPU 才能显 live 预览（buffered brush 走 GPU stamp overlay，返 null）。非描边 / overlay 笔 → null。
