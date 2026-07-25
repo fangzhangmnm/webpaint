@@ -108,6 +108,11 @@ body:lang(ja) {
 body:lang(tok) {
   font-family: "nasin nanpa", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
+/* v0.5.34：字体走继承，但 button/select/input 默认**不继承**字体（UA 默认）——凡没写 font:inherit 的
+   控件（如 .menu-tab 小字）在 tok 下漏成拉丁。tok 域下全控件强制继承，其他语言零影响。 */
+body:lang(tok) button, body:lang(tok) select, body:lang(tok) input, body:lang(tok) textarea {
+  font-family: inherit;
+}
 
 /* 顶栏 / 浮窗 / sheet / toast 上的所有 button / input：也明确写一遍，防 iOS
    在某些 Safari 版本上 element 默认仍允许 double-tap zoom */
