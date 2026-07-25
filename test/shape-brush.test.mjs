@@ -284,3 +284,120 @@ describe("shape-brush · 像素模式特化（clamp + Bresenham exact-once）", 
     for (const st of cs.stamps) assert(Math.abs(st.y - 100.7) < 0.5, "y 保持 100.7 非 100.5");
   });
 });
+
+describe("shape-brush · 透视 frame + grid 子工具（ADR-0006）", () => {
+  const CFG1 = (vp) => ({ vp1: vp, vp2: null, vp3: null, lockHorizon: true, refPoint: null, plane: "ground" });
+  const collinear = (a, b, c, tol = 1.5) =>
+    Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) /
+      Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)) <= tol;
+  function mkPerspEngine(sub, vp, constrain = false) {
+    const eng = new ShapeBrushEngine();
+    eng.setSubTool(sub);
+    eng.setConstrain(constrain);
+    eng.setViewportRotProvider(() => 0);
+    eng.setPerspProvider(() => CFG1(vp));
+    return eng;
+  }
+  it("透视 rect = 梯形：两边过 VP、两边水平", () => {
+    const s = resolveBrush({ size: 6, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const vp = { x: 256.5, y: 50.5 };
+    const eng = mkPerspEngine("rect", vp);
+    eng.beginStroke(doc.layers[0], s, 150, 300, 0.5, "brush");
+    eng.extendStroke(300, 400, 0.5);
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 20);
+    // 水平边：y≈300 与 y≈400 上都有横向散布的 stamps
+    assert(cs.stamps.some((t) => Math.abs(t.y - 300) < 1 && Math.abs(t.x - 200) < 60), "上水平边");
+    assert(cs.stamps.some((t) => Math.abs(t.y - 400) < 1), "下水平边");
+    // 收敛边：存在与 (150,300)-VP 共线的 stamps（非水平的）
+    assert(cs.stamps.some((t) => Math.abs(t.y - 300) > 5 && Math.abs(t.y - 400) > 5 &&
+      collinear({ x: 150, y: 300 }, vp, t)), "过 VP 的边");
+  });
+  it("透视 line 约束：吸向 VP 方向", () => {
+    const s = resolveBrush({ size: 6, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const vp = { x: 400.5, y: 20.5 };
+    const eng = mkPerspEngine("line", vp, true);
+    eng.beginStroke(doc.layers[0], s, 100, 400, 0.5, "brush");
+    eng.extendStroke(180, 290, 0.5);   // 大致朝 VP
+    const cs = eng.endStroke();
+    for (const t of cs.stamps) assert(collinear({ x: 100, y: 400 }, vp, t), `在 VP 线上 ${t.x},${t.y}`);
+  });
+  it("grid（视口 frame）：默认 2×6 → 1 竖 + 5 横，一条 undo（单 StampCollect）", () => {
+    const s = resolveBrush({ size: 4, color: "#000", spacing: 0.25 });
+    const doc = mkDoc();
+    const eng = mkEngine("grid");
+    eng.beginStroke(doc.layers[0], s, 100, 100, 0.5, "brush");
+    eng.extendStroke(300, 460, 0.5);   // 高盒（头身比用法）
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 30, "多线合成");
+    // 5 条内部横线的 y：160, 220, 280, 340, 400
+    for (const y of [160, 220, 280, 340, 400]) {
+      assert(cs.stamps.some((t) => Math.abs(t.y - y) < 1 && t.x > 150 && t.x < 250), `横线 y=${y}`);
+    }
+    // 1 条中线 x=200
+    assert(cs.stamps.some((t) => Math.abs(t.x - 200) < 1 && t.y > 150), "竖中线");
+    // 默认无 border：上边 y=100 上除竖中线的线头（x≈200）外无横向铺开
+    assert(!cs.stamps.some((t) => Math.abs(t.y - 100) < 0.5 && ((t.x > 120 && t.x < 190) || (t.x > 210 && t.x < 280))), "默认无外框");
+  });
+  it("grid（透视 frame）：横线仍横、竖分割线过 VP；border 开时四边在", () => {
+    const s = resolveBrush({ size: 4, color: "#000", spacing: 0.25 });
+    const doc = mkDoc();
+    const vp = { x: 250.5, y: 40.5 };
+    const eng = mkPerspEngine("grid", vp);
+    eng.setGridConfig({ nu: 2, nv: 4, border: true });
+    eng.beginStroke(doc.layers[0], s, 150, 300, 0.5, "brush");
+    eng.extendStroke(350, 450, 0.5);
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 30);
+    assert(cs.stamps.some((t) => Math.abs(t.y - 300) < 1), "border 上边（水平）");
+    assert(cs.stamps.some((t) => Math.abs(t.y - 450) < 1), "border 下边");
+    // 竖分割线（u=1/2）过 VP：找非水平 stamps 验共线
+    const mid = cs.stamps.filter((t) => t.y > 320 && t.y < 430 &&
+      collinear({ x: 250.5, y: 40.5 }, { x: 250, y: 500 }, { x: t.x, y: t.y }, 8));
+    assert(mid.length > 0, "中线在 VP 与盒中之间的走廊里");
+  });
+  it("透视像素圆：AABB 拖拽 → conic 环 exact-once（alpha 全等）", () => {
+    const s = resolveBrush({ size: 1, color: "#000000", opacity: 0.5, preset: { pixelMode: true } });
+    const doc = mkDoc();
+    const eng = mkPerspEngine("circle", { x: 60.5, y: 10.5 });
+    eng.beginStroke(doc.layers[0], s, 30.2, 60.7, 0.5, "brush");
+    eng.extendStroke(90.8, 100.3, 0.5);
+    eng.endStroke();
+    const snap = doc.layers[0].snapshotImageData();
+    const d = snap.imageData.data;
+    const alphas = new Set();
+    let n = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 0) { alphas.add(d[i]); n++; }
+    assert(n > 10, "conic 环有像素");
+    eq(alphas.size, 1, "alpha 全等 = 每像素恰好一次");
+  });
+  it("像素 grid：交叉点不双叠（全形状 seen-set）", () => {
+    const s = resolveBrush({ size: 1, color: "#000000", opacity: 0.5, preset: { pixelMode: true } });
+    const doc = mkDoc();
+    const eng = mkEngine("grid");
+    eng.setGridConfig({ nu: 3, nv: 3, border: true });
+    eng.beginStroke(doc.layers[0], s, 10.2, 10.7, 0.5, "brush");
+    eng.extendStroke(40.8, 40.3, 0.5);
+    eng.endStroke();
+    const snap = doc.layers[0].snapshotImageData();
+    const d = snap.imageData.data;
+    const alphas = new Set();
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 0) alphas.add(d[i]);
+    eq(alphas.size, 1, "交叉/共角像素 alpha 全等");
+  });
+  it("透视徒手拟合圆：地平线下画一圈不炸、出 stamps", () => {
+    const s = resolveBrush({ size: 8, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = mkPerspEngine("circle", { x: 256.5, y: 30.5 });
+    eng.beginStroke(doc.layers[0], s, 256 + 60, 300, 0.5, "brush");
+    for (let i = 1; i <= 80; i++) {
+      const a = (375 * (i / 80)) * Math.PI / 180;
+      eng.extendStroke(256 + 60 * Math.cos(a), 300 + 35 * Math.sin(a), 0.5);
+    }
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 10, "透视拟合出 stamps");
+    for (const t of cs.stamps) assert(Number.isFinite(t.x) && Number.isFinite(t.y));
+  });
+});
