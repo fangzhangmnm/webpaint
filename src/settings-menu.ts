@@ -7,7 +7,7 @@
 // 仍留 app.js 的协作件经 ctx 绑入：state / board / setStatus / store / updateSaveStatus（核心单例）。
 
 import { els } from "./els.ts";
-import { syncedUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关 = 跨设备偏好
+import { syncedUserPreference, localUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关=跨设备；menu-tab=设备本地
 import { editorState } from "./workbench-state.ts";   // checkboard = per-doc editorState（载入时经 wp:applyEditorState 应用到 board）
 import { applyTheme, themeLabel, THEMES } from "./theme.ts";
 import { t, lang, setLang, LANGS, LANG_NAME, type Key, type Lang } from "./i18n/index.ts";
@@ -121,6 +121,10 @@ function _renderShortcutsSheet() {
 // collection hydrate 后由 app.ts 的 fixup 相调：把 4 个 synced 开关的**真值**灌进 RAM/DOM/board。
 //   **只 render 不写盘**（见上方纪律）——这是 P0-1 的修复核心：boot 路径永不 setItem。
 export function renderSettingsFromPrefs(): void {
+  // v0.5.27：☰ 停留页回灌（设备本地 pref；无效值回 file）
+  const savedTab = localUserPreference.getItem<string>("menu-tab", PREF_DEFAULTS["menu-tab"]);
+  if (_menuTabs.some((b) => b.dataset.menuTab === savedTab)) { _menuTab = savedTab; _applyMenuTab(); }
+
   renderPixelGrid(syncedUserPreference.getItem<boolean>("pixel-grid", PREF_DEFAULTS["pixel-grid"]));
   renderFps(syncedUserPreference.getItem<boolean>("show-fps", PREF_DEFAULTS["show-fps"]));
   renderLongPressPick(syncedUserPreference.getItem<boolean>("long-press-pick", PREF_DEFAULTS["long-press-pick"]));
@@ -138,20 +142,30 @@ export function setMenuOpen(open: boolean) {
   }
 }
 
+// v0.6C tab 分页状态（module 级：init 建，renderSettingsFromPrefs 回灌持久化值）
+let _menuTab = "file";
+let _menuTabs: HTMLElement[] = [];
+let _menuPages: HTMLElement[] = [];
+function _applyMenuTab() {
+  for (const b of _menuTabs) b.setAttribute("aria-pressed", b.dataset.menuTab === _menuTab ? "true" : "false");
+  for (const p of _menuPages) p.classList.toggle("hidden", p.dataset.menuPage !== _menuTab);
+}
+
 export function initSettingsMenu(ctx: AppContext) {
   ({ state, board, setStatus, store, updateSaveStatus } = ctx);
 
   // v0.6C（user 拍板）：☰ 六 tab 分页（文件/画布/视图/设置/插件/dev）。停留页 RAM 记忆（session 内）。
   {
-    const tabs = [...document.querySelectorAll<HTMLElement>("#menuPanel .menu-tab")];
-    const pages = [...document.querySelectorAll<HTMLElement>("#menuPanel .menu-page")];
-    let _menuTab = "file";
-    const applyMenuTab = () => {
-      for (const b of tabs) b.setAttribute("aria-pressed", b.dataset.menuTab === _menuTab ? "true" : "false");
-      for (const p of pages) p.classList.toggle("hidden", p.dataset.menuPage !== _menuTab);
-    };
-    for (const b of tabs) b.addEventListener("click", (e: Event) => { e.stopPropagation(); _menuTab = b.dataset.menuTab!; applyMenuTab(); });
-    applyMenuTab();
+    _menuTabs = [...document.querySelectorAll<HTMLElement>("#menuPanel .menu-tab")];
+    _menuPages = [...document.querySelectorAll<HTMLElement>("#menuPanel .menu-page")];
+    for (const b of _menuTabs) b.addEventListener("click", (e: Event) => {
+      e.stopPropagation();
+      _menuTab = b.dataset.menuTab!;
+      localUserPreference.setItem("menu-tab", _menuTab);   // v0.5.27：停留页持久化（设备本地 pref）
+      _applyMenuTab();
+    });
+    _applyMenuTab();
+    // 持久化回灌走 renderSettingsFromPrefs（fixup 相，prefs 已 hydrate——同其它 pref 的时序纪律）
   }
 
   els.menuLongPressPick.addEventListener("click", () => {

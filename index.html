@@ -851,22 +851,23 @@
 
     <!-- 汉堡菜单：低频项收纳处。顺序见 user 2026-05-28 反馈 -->
     <div class="menu-panel hidden" id="menuPanel" role="menu">
-      <!-- v0.6 候选 C 方案（user 拍板 2026-07-24）：☰ = 图库直达置顶 + 六 tab 分页
+      <!-- v0.6 候选 C 方案（user 拍板 2026-07-24）：☰ = 六 tab 分页（图库=文件页首项，v0.5.27 改判）
            （文件/画布/视图/设置/插件/developer）。全部条目 图标+文字（精确表意，不做纯图标 grid）。
            视图/设置分界判据（钉死防漂移）：视图=画布上显示什么辅助（不论存储 per-doc/设备级）；
            设置=app 怎么响应你（手势/主题/语言）。条目 id 不变——handler 全按 id 接线，搬家零改动。 -->
-        <button class="menu-item menu-item-with-icon" id="menuGallery" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#gallery"/></svg>
-        <span class="menu-item-label" data-i18n="nav.gallery">图库</span>
-      </button>
       <div class="menu-tabs" role="tablist">
         <button class="menu-tab" data-menu-tab="file" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#floppy-disk"/></svg><span data-i18n="menu.tab.file">文件</span></button>
         <button class="menu-tab" data-menu-tab="canvas" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#image"/></svg><span data-i18n="menu.tab.canvas">画布</span></button>
         <button class="menu-tab" data-menu-tab="view" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#maximize-viewport"/></svg><span data-i18n="menu.tab.view">视图</span></button>
-        <button class="menu-tab" data-menu-tab="settings" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#sliders"/></svg><span data-i18n="menu.tab.settings">设置</span></button>
         <button class="menu-tab" data-menu-tab="plugins" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#blender"/></svg><span data-i18n="menu.tab.plugins">插件</span></button>
+        <button class="menu-tab" data-menu-tab="settings" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#sliders"/></svg><span data-i18n="menu.tab.settings">设置</span></button>
         <button class="menu-tab" data-menu-tab="dev" type="button" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#fx"/></svg><span data-i18n="menu.tab.dev">dev</span></button>
       </div>
       <div class="menu-page" data-menu-page="file">
+        <!-- v0.5.27 user：图库直达撤置顶，收进文件页首位 -->
+        <button class="menu-item menu-item-with-icon" id="menuGallery" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#gallery"/></svg>
+        <span class="menu-item-label" data-i18n="nav.gallery">图库</span>
+      </button>
         <div class="menu-item-row">
           <button class="menu-item menu-item-main menu-item-with-icon" id="menuExportImage" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#export"/></svg>
           <span class="menu-item-label" data-i18n="menu.exportImage">导出</span>
