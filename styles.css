@@ -104,6 +104,9 @@ body:lang(ja) {
   font-family: "nasin nanpa";
   src: url("vendor/nasin-nanpa/nasin-nanpa-4.0.2.otf") format("opentype");
   font-display: swap;
+  /* v0.5.36：只认领 UCSUR sitelen pona 块——nasin-nanpa 自带 ASCII 字形（拉丁被它画成怪样，
+     真机 "dev"→"d≫"），限定 range 后 ASCII 逐字符回退系统字体。ligature 路线就此彻底退役。 */
+  unicode-range: U+F1900-F19FF;
 }
 body:lang(tok) {
   font-family: "nasin nanpa", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
