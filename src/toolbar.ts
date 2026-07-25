@@ -17,8 +17,8 @@ import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
 import { fillPreviewActive, commitFillNow } from "./fill-mode.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
-import { normalizeConfig as normalizePerspConfig } from "./perspective-frame.ts";
-import type { PerspConfig } from "./perspective-frame.ts";
+import { configFromModeState, planesForMode, defaultVpsForMode } from "./perspective-frame.ts";
+import type { PerspMode } from "./perspective-frame.ts";
 import type { AppContext } from "./app-context.ts";
 import type { LayerSnap } from "./doc.ts";
 
@@ -68,7 +68,7 @@ const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rec
 let shapeToolbarStack: HTMLElement, shapeSubSlot: HTMLElement, shapeSubSlotUse: SVGUseElement,
     shapeSubMenu: HTMLElement, shapeSubMenuBtns: HTMLElement[], shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement,
     shapeGridCtx: HTMLElement, shapeGridNuVal: HTMLElement, shapeGridNvVal: HTMLElement, shapeGridBorderBtn: HTMLElement,
-    shapePerspSlot: HTMLElement, shapePerspMenu: HTMLElement, shapePerspMenuBtns: HTMLElement[];
+    shapePerspModeBtns: HTMLElement[], shapePlaneCtl: HTMLElement, shapePlaneBtns: HTMLElement[], shapeVpEditBtn: HTMLElement;
 const SHAPE_SUB_ICON: Record<string, string> = { line: "#line", rect: "#rectangle", circle: "#circle", grid: "#grid" };
 const SHAPE_CONSTRAIN_ICON: Record<string, string> = { line: "#snap-angle", rect: "#constrain-square", circle: "#constrain-circle" };
 
@@ -77,7 +77,7 @@ export function updateShapeToolbar() {
   if (!shapeToolbarStack) return;
   const active = editMode.current() === "shapeBrush";
   shapeToolbarStack.classList.toggle("hidden", !active);
-  if (!active) { shapeSubMenu?.classList.add("hidden"); shapePerspMenu?.classList.add("hidden"); return; }
+  if (!active) { shapeSubMenu?.classList.add("hidden"); return; }
   const sub = input.shapeBrush.getSubTool();
   shapeSubSlotUse.setAttribute("href", SHAPE_SUB_ICON[sub] || "#line");
   for (const b of shapeSubMenuBtns) {
@@ -94,18 +94,20 @@ export function updateShapeToolbar() {
     shapeGridNvVal.textContent = String(editorState.shapeBrush.gridNv);
     shapeGridBorderBtn.setAttribute("aria-pressed", editorState.shapeBrush.gridBorder ? "true" : "false");
   }
-  // 透视平面槽：亮 = 透视开着；菜单项按已配置 VP 过滤（ADR-0006 平面清单）
+  // 透视模式行（UI v2，transform 风格）：四态高亮；透视开着 → 平面行 + VP 编辑钮出现
   const g = editorState.persp;
-  const hasPair = !!(g.vp1 && g.vp2), hasOne = !!(g.vp1 || g.vp2 || g.vp3);
-  shapePerspSlot.setAttribute("aria-pressed", g.plane !== "off" && hasOne ? "true" : "false");
-  for (const b of shapePerspMenuBtns) {
-    const plane = b.dataset.shapePlane!;
-    let show = plane === "off";
-    if (plane === "ground") show = !!g.vp1;
-    else if (plane === "wall") show = !!g.vp1 && !g.vp2;
-    else if (plane === "wallL" || plane === "wallR") show = hasPair;
-    b.classList.toggle("hidden", !show);
-    b.setAttribute("aria-pressed", g.plane === plane ? "true" : "false");
+  const mode = (["p1", "p2", "p3"].includes(g.mode) ? g.mode : "off") as PerspMode;
+  for (const b of shapePerspModeBtns) {
+    b.setAttribute("aria-pressed", b.dataset.perspMode === mode ? "true" : "false");
+  }
+  shapePlaneCtl.classList.toggle("hidden", mode === "off");
+  if (mode !== "off") {
+    const planes = planesForMode(mode) as string[];
+    for (const b of shapePlaneBtns) {
+      const plane = b.dataset.shapePlane!;
+      b.classList.toggle("hidden", !planes.includes(plane));
+      b.setAttribute("aria-pressed", g.plane === plane ? "true" : "false");
+    }
   }
 }
 function closeSubMenu() { lassoSubMenu?.classList.add("hidden"); }
@@ -503,25 +505,37 @@ export function initToolbar(ctx: AppContext) {
     pushGridToEngine();
     updateShapeToolbar();
   });
-  // 透视平面槽（ADR-0006）：菜单选平面（VP 编辑入口在 persp-edit）；引擎在起笔时拉取（provider）
-  shapePerspSlot = byId("shapePerspSlot");
-  shapePerspMenu = byId("shapePerspMenu");
-  shapePerspMenuBtns = [...shapePerspMenu.querySelectorAll<HTMLElement>("[data-shape-plane]")];
-  wireSlotMenu(shapePerspSlot, shapePerspMenu, (b) => {
-    if (!b.dataset.shapePlane) return;   // VP 编辑入口不在这处理（persp-edit 接）
-    if (input.isStrokeActive()) input.abortActiveStroke();
-    editorState.persp.plane = b.dataset.shapePlane;
-    updateShapeToolbar();
-  });
-  input.shapeBrush.setPerspProvider(() => {
-    const g = editorState.persp;
-    if (!g.vp1 && !g.vp2 && !g.vp3) return null;
-    return normalizePerspConfig({
-      vp1: g.vp1, vp2: g.vp2, vp3: g.vp3,
-      lockHorizon: g.lockHorizon, refPoint: g.refPoint,
-      plane: g.plane as PerspConfig["plane"],
+  // 透视模式行 + 平面行（ADR-0006 UI v2）：mode 决定 VP 数量（切模式时缺的 VP 按默认位补齐，
+  //   已有的保留用户调过的位置）；引擎在起笔时经 configFromModeState 拉取。
+  shapePerspModeBtns = [...byId("shapePerspModeCtl").querySelectorAll<HTMLElement>("[data-persp-mode]")];
+  shapePlaneCtl = byId("shapePlaneCtl");
+  shapePlaneBtns = [...shapePlaneCtl.querySelectorAll<HTMLElement>("[data-shape-plane]")];
+  shapeVpEditBtn = byId("shapeVpEditBtn");
+  for (const b of shapePerspModeBtns) {
+    b.addEventListener("click", () => {
+      if (input.isStrokeActive()) input.abortActiveStroke();
+      const mode = b.dataset.perspMode as PerspMode;
+      const g = editorState.persp;
+      g.mode = mode;
+      if (mode !== "off") {
+        const def = defaultVpsForMode(mode, doc.width, doc.height);
+        if (!g.vp1 && def.vp1) g.vp1 = def.vp1;
+        if (!g.vp2 && def.vp2) g.vp2 = def.vp2;
+        if (!g.vp3 && def.vp3) g.vp3 = def.vp3;
+        const planes = planesForMode(mode) as string[];
+        if (!planes.includes(g.plane)) g.plane = "ground";
+      }
+      updateShapeToolbar();
     });
-  });
+  }
+  for (const b of shapePlaneBtns) {
+    b.addEventListener("click", () => {
+      if (input.isStrokeActive()) input.abortActiveStroke();
+      editorState.persp.plane = b.dataset.shapePlane!;
+      updateShapeToolbar();
+    });
+  }
+  input.shapeBrush.setPerspProvider(() => configFromModeState(editorState.persp));
   const syncShapeFromEditorState = () => {
     input.shapeBrush.setSubTool(editorState.shapeBrush.sub as Parameters<typeof input.shapeBrush.setSubTool>[0]);
     input.shapeBrush.setConstrain(editorState.shapeBrush.constrain);

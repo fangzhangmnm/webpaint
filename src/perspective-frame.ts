@@ -266,6 +266,55 @@ export function snapToDirections(x0: number, y0: number, x: number, y: number, d
   return { x: x0 + best.x * proj, y: y0 + best.y * proj };
 }
 
+// ---- 透视模式（UI 重做 2026-07-25：显式四态 subtool 取代"按 VP 数隐式判"）----
+
+export type PerspMode = "off" | "p1" | "p2" | "p3";
+
+// 各模式的合法平面（p1 无左右墙——user 拍板；纵深墙叫「墙」）
+export function planesForMode(mode: PerspMode): PlaneId[] {
+  if (mode === "p1") return ["ground", "wall"];
+  if (mode === "p2" || mode === "p3") return ["ground", "wallL", "wallR"];
+  return [];
+}
+
+// 模式 + 存的 VP 位置 → 引擎吃的 PerspConfig（mode gate：p1 只喂 vp1，p2 喂对，p3 全喂；
+//   off/缺 VP → null=视口对齐）。plane 不合法时 coerce 到 ground。纯函数可测。
+export function configFromModeState(g: {
+  mode: string; vp1: Vp | null; vp2: Vp | null; vp3: Vp | null;
+  lockHorizon: boolean; refPoint: Vp | null; plane: string;
+}): PerspConfig | null {
+  const mode = g.mode as PerspMode;
+  if (mode !== "p1" && mode !== "p2" && mode !== "p3") return null;
+  if (!g.vp1) return null;
+  if ((mode === "p2" || mode === "p3") && !g.vp2) return null;
+  if (mode === "p3" && !g.vp3) return null;
+  const planes = planesForMode(mode);
+  const plane = (planes as string[]).includes(g.plane) ? (g.plane as PlaneId) : "ground";
+  return normalizeConfig({
+    vp1: g.vp1,
+    vp2: mode === "p1" ? null : g.vp2,
+    vp3: mode === "p3" ? g.vp3 : null,
+    lockHorizon: g.lockHorizon,
+    refPoint: g.refPoint,
+    plane,
+  });
+}
+
+// 各模式的 VP 默认位（user 拍板：一点=画布正中；二/三点按 H 定比例——主体高≈画布高时
+//   VP 距≈4×主体高≈标准镜头感；VP3 默认仰视（上方），俯视拖下去即可）。坐标 snap 像素中线。
+export function defaultVpsForMode(mode: PerspMode, docW: number, docH: number): { vp1: Vp | null; vp2: Vp | null; vp3: Vp | null } {
+  const c = (v: number) => Math.floor(v) + 0.5;
+  const cx = c(docW / 2), cy = c(docH / 2);
+  if (mode === "p1") return { vp1: { x: cx, y: cy }, vp2: null, vp3: null };
+  if (mode === "p2") return { vp1: { x: c(docW / 2 - 2.0 * docH), y: cy }, vp2: { x: c(docW / 2 + 2.0 * docH), y: cy }, vp3: null };
+  if (mode === "p3") return {
+    vp1: { x: c(docW / 2 - 2.0 * docH), y: cy },
+    vp2: { x: c(docW / 2 + 2.0 * docH), y: cy },
+    vp3: { x: cx, y: c(docH / 2 - 2.5 * docH) },
+  };
+  return { vp1: null, vp2: null, vp3: null };
+}
+
 // ---- VP1/VP2 规范化（左=1 右=2；lockHorizon 锁 y）----
 export function normalizeConfig(cfg: PerspConfig): PerspConfig {
   let { vp1, vp2 } = cfg;

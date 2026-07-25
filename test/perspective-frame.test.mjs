@@ -10,6 +10,7 @@ import { describe, it, assert, eq } from "./runner.mjs";
 const {
   planeFamilies, quadFromCorners, homographyUnitSquare, applyMat3, invertMat3,
   planeChart, snapDirections, snapToDirections, normalizeConfig, HORIZON_EPS,
+  configFromModeState, planesForMode, defaultVpsForMode,
 } = await import("../src/perspective-frame.ts");
 
 const close = (a, b, tol = 1e-6) => assert(Math.abs(a - b) <= tol, `${a} !~ ${b} (tol ${tol})`);
@@ -142,5 +143,42 @@ describe("perspective-frame · snap 方向 + 配置规范化", () => {
     eq(n.vp2.y, 30 === n.vp1.y ? 30 : n.vp1.y);   // lock 开：vp2.y = vp1.y
     const free = normalizeConfig({ ...CFG0, lockHorizon: false, vp1: { x: 200, y: 10 }, vp2: { x: -100, y: 30 } });
     eq(free.vp2.y, 10);   // 排序后原 vp1(y=10) 成为右点，y 保留（可歪地平线）
+  });
+});
+
+describe("perspective-frame · 模式映射（UI v2）", () => {
+  const base = { vp1: { x: 1.5, y: 2.5 }, vp2: { x: 100.5, y: 2.5 }, vp3: { x: 50.5, y: 900.5 }, lockHorizon: true, refPoint: null, plane: "ground" };
+  it("off/缺 VP → null（视口对齐）", () => {
+    eq(configFromModeState({ ...base, mode: "off" }), null);
+    eq(configFromModeState({ ...base, mode: "p2", vp2: null }), null);
+    eq(configFromModeState({ ...base, mode: "p3", vp3: null }), null);
+  });
+  it("p1 只喂 vp1；p2 喂对；p3 全喂（多余 VP 被 mode gate 掉）", () => {
+    const c1 = configFromModeState({ ...base, mode: "p1" });
+    eq(c1.vp2, null); eq(c1.vp3, null); assert(c1.vp1);
+    const c2 = configFromModeState({ ...base, mode: "p2" });
+    assert(c2.vp1 && c2.vp2); eq(c2.vp3, null);
+    const c3 = configFromModeState({ ...base, mode: "p3" });
+    assert(c3.vp1 && c3.vp2 && c3.vp3);
+  });
+  it("plane 不合法 → coerce ground（p1 拿到 wallL 之类）", () => {
+    eq(configFromModeState({ ...base, mode: "p1", plane: "wallL" }).plane, "ground");
+    eq(configFromModeState({ ...base, mode: "p2", plane: "wall" }).plane, "ground");
+  });
+  it("planesForMode 清单：p1=地板/墙；p2/p3=地板/左墙/右墙", () => {
+    eq(JSON.stringify(planesForMode("p1")), JSON.stringify(["ground", "wall"]));
+    eq(JSON.stringify(planesForMode("p2")), JSON.stringify(["ground", "wallL", "wallR"]));
+    eq(JSON.stringify(planesForMode("off")), "[]");
+  });
+  it("默认位：p1 画布正中；p2 中线 ∓2H；p3 +上方 2.5H（全在像素中线）", () => {
+    const d1 = defaultVpsForMode("p1", 800, 600);
+    eq(d1.vp1.x, 400.5); eq(d1.vp1.y, 300.5); eq(d1.vp2, null);
+    const d2 = defaultVpsForMode("p2", 800, 600);
+    eq(d2.vp1.x, Math.floor(400 - 1200) + 0.5);
+    eq(d2.vp2.x, Math.floor(400 + 1200) + 0.5);
+    eq(d2.vp1.y, 300.5);
+    const d3 = defaultVpsForMode("p3", 800, 600);
+    assert(d3.vp3.y < 0, "VP3 默认在画布上方（仰视）");
+    eq(((d3.vp3.y % 1) + 1) % 1, 0.5, "负坐标也在像素中线格");
   });
 });
