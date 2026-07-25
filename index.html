@@ -516,6 +516,10 @@
       <button class="lasso-tool-btn lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoMoveToLayerBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span data-i18n="la.moveToLayer">选区移动到新层</span></button>
     </div>
     <!-- v0.5.14 组槽下拉（紧凑菜单深模块三形态：row=横排图标 / grid / list=竖排带解说；JS 锚定槽下） -->
+    <!-- v0.5.37 in-app 下拉（原生 select 打开态=chrome 域，UCSUR 必豆腐；夜间白底/装不了SVG 同根）：
+         主题/语言两处；条目 JS 现建（i18n/endonym 动态） -->
+    <div class="lasso-icon-menu lasso-icon-list hidden" id="menuThemeMenu" role="menu"></div>
+    <div class="lasso-icon-menu lasso-icon-list hidden" id="menuLanguageMenu" role="menu"></div>
     <div class="lasso-icon-menu hidden" id="lassoSetOpMenu" role="menu" data-i18n-aria="la.setOpSlot">
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" role="menuitem" data-i18n-title="la.new"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-new"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" role="menuitem" data-i18n-title="la.union"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-union"/></svg></button>
@@ -947,12 +951,12 @@
       </button>
         <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#theme"/></svg>
           <span class="menu-item-label" data-i18n="menu.theme">主题</span>
-          <select id="menuThemeSelect" class="menu-lang-select"></select>
+          <button class="menu-lang-select menu-inline-select" id="menuThemeBtn" type="button" aria-haspopup="true"><span id="menuThemeBtnLabel">跟随系统</span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </label>
         <button id="menuTheme" type="button" hidden></button><!-- 旧 id stub：theme.ts renderTheme 查它，v0.6C 下拉化后留防崩 -->
         <label class="menu-item menu-lang-row menu-item-with-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#globe-speech"/></svg>
         <span class="menu-item-label" data-i18n="menu.language">语言</span>
-        <select id="menuLanguageSelect" class="menu-lang-select"></select>
+        <button class="menu-lang-select menu-inline-select" id="menuLanguageBtn" type="button" aria-haspopup="true"><span id="menuLanguageBtnLabel">中文</span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </label>
         <!-- v0.5.28 user：生成式 AI 总开关——控制未来 AI 相关 UI 显隐（body[data-gen-ai] 热切换 + .needs-gen-ai CSS 接缝，不进 boot） -->
         <button class="menu-item menu-item-with-icon" id="menuGenAI" type="button" role="menuitemcheckbox" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ai-slop"/></svg>

@@ -9,11 +9,11 @@
 import { els } from "./els.ts";
 import { syncedUserPreference, localUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关=跨设备；menu-tab=设备本地
 import { editorState } from "./workbench-state.ts";   // checkboard = per-doc editorState（载入时经 wp:applyEditorState 应用到 board）
-import { applyTheme, themeLabel, THEMES } from "./theme.ts";
-import { t, lang, setLang, LANGS, LANG_NAME, type Key, type Lang } from "./i18n/index.ts";
+import { applyTheme, themeLabel, THEMES, currentTheme } from "./theme.ts";
+import { t, lang, setLang, LANGS, langDisplayName, type Key } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
 import { _updateMenuCropLabel } from "./doc-ops.ts";
-import { positionPopup } from "./anchored-popup.ts";
+import { positionPopup, anchorPopupToBtn } from "./anchored-popup.ts";
 import { openInputSheet } from "./sheets.ts";
 import { reportError } from "./error-badge.ts";   // 全 app 唯一错误汇拢点（CLAUDE.md）
 import type { AppContext } from "./app-context.ts";
@@ -246,31 +246,56 @@ export function initSettingsMenu(ctx: AppContext) {
     applyGenAI(next);
     setStatus(t("status.genAI", { s: next ? t("common.on") : t("common.off") }));
   });
-  // v0.6C（user）：主题改下拉框（原点击轮换退役）。option 由 THEMES 填，label 走 theme.* i18n。
-  const menuThemeSelect = document.getElementById("menuThemeSelect") as HTMLSelectElement | null;
-  if (menuThemeSelect) {
-    menuThemeSelect.innerHTML = THEMES.map((th) => `<option value="${th}">${themeLabel(th)}</option>`).join("");
-    menuThemeSelect.addEventListener("click", (e: Event) => e.stopPropagation());
-    menuThemeSelect.addEventListener("change", () => {
-      applyTheme(menuThemeSelect.value);
-      setStatus(t("status.theme", { s: themeLabel(menuThemeSelect.value) }));
+  // v0.5.37（user）：主题/语言换 in-app 下拉——原生 select 打开态是 chrome 域（iPad 弹层系统字体，
+  //   UCSUR 必豆腐；夜间白底、装不了 SVG 同根性坑）。弹层复用紧凑菜单 list 形态 + 锚定。
+  //   条目开时现建 → 标签永远新鲜（字体门迟到翻转后 endonym/主题名自动带字形）。
+  const wireInlineSelect = <V extends string>(
+    btnId: string, menuId: string,
+    items: () => { value: V; label: string }[],
+    current: () => V,
+    onPick: (v: V) => void,
+  ) => {
+    const btn = document.getElementById(btnId);
+    const menu = document.getElementById(menuId);
+    if (!btn || !menu) return;
+    btn.addEventListener("click", (e: Event) => {
+      e.stopPropagation();
+      if (!menu.classList.contains("hidden")) { menu.classList.add("hidden"); return; }
+      menu.innerHTML = "";
+      for (const it of items()) {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "lasso-tool-btn"; b.setAttribute("role", "menuitem");
+        b.textContent = it.label;
+        b.setAttribute("aria-pressed", it.value === current() ? "true" : "false");
+        b.addEventListener("click", () => { menu.classList.add("hidden"); onPick(it.value); });
+        menu.appendChild(b);
+      }
+      menu.classList.remove("hidden");
+      anchorPopupToBtn(menu, btn, { align: "right", offsetY: 4 });
     });
-  }
+    document.addEventListener("pointerdown", (e: Event) => {
+      if (menu.classList.contains("hidden")) return;
+      if (menu.contains(e.target as Node) || btn.contains(e.target as Node)) return;
+      menu.classList.add("hidden");
+    });
+  };
+  wireInlineSelect("menuThemeBtn", "menuThemeMenu",
+    () => THEMES.map((th) => ({ value: th, label: themeLabel(th) })),
+    () => currentTheme(),
+    (th) => { applyTheme(th); setStatus(t("status.theme", { s: themeLabel(th) })); });
   // 语言：下拉框选择（endonym = 各语母语名，任何 UI 语言都认得；change 即 setLang→reload）。
-  const menuLanguageSelect = document.getElementById("menuLanguageSelect") as HTMLSelectElement | null;
-  if (menuLanguageSelect) {
-    // endonym 是静态语言名（中文/English/日本語/toki pona），非用户数据 → innerHTML 安全。
-    menuLanguageSelect.innerHTML = LANGS.map((l) =>
-      `<option value="${l}"${l === lang() ? " selected" : ""}>${LANG_NAME[l]}</option>`).join("");
-    // setLang 是 async（要等 IDB 落盘再 reload，见 i18n/index.ts）——失败必须 surface，不能让下拉框
-    //   停在新值上却什么都没发生（那就是 UI 谎报成功）。成功路径不会走到 catch：reload 了。
-    menuLanguageSelect.addEventListener("change", () => {
-      void setLang(menuLanguageSelect.value as Lang).catch((e) => {
-        menuLanguageSelect.value = lang();   // 回滚显示，别让 UI 显示一个没生效的语言
+  // 语言：endonym 各语自称；tok 在字形可用时=sitelen pona（langDisplayName）。setLang async 失败必 surface。
+  const langBtnLabel = document.getElementById("menuLanguageBtnLabel");
+  if (langBtnLabel) langBtnLabel.textContent = langDisplayName(lang());
+  wireInlineSelect("menuLanguageBtn", "menuLanguageMenu",
+    () => LANGS.map((l) => ({ value: l, label: langDisplayName(l) })),
+    () => lang(),
+    (l) => {
+      void setLang(l).catch((e) => {
+        if (langBtnLabel) langBtnLabel.textContent = langDisplayName(lang());   // 回滚显示
         reportError(e);
       });
     });
-  }
   // v100：删「检测更新」menu (实测在 iPad PWA 上不可靠，user：「检测更新功能没用」)。
   // 强制更新一律走「强制清缓存重启」（menuForcePwaReset）— 详 docs/20260526-pwa-update-detection.md。
   // 老 element 在 HTML 里 hidden，handler 留空保 element exists 防 null deref。

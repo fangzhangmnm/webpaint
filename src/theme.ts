@@ -40,8 +40,8 @@ function renderTheme(th: string) {
   document.documentElement.setAttribute("data-theme", th);
   const lbl = els.menuTheme?.querySelector?.('[data-state-for="theme"]');
   if (lbl) lbl.textContent = themeLabel(th);
-  const sel = document.getElementById("menuThemeSelect") as HTMLSelectElement | null;   // v0.6C 下拉化
-  if (sel && sel.value !== th) sel.value = th;
+  const lbl2 = document.getElementById("menuThemeBtnLabel");   // v0.5.37 in-app 下拉按钮 label
+  if (lbl2) lbl2.textContent = themeLabel(th);
   requestAnimationFrame(applyThemeColorsToBoard);
 }
 
@@ -52,6 +52,7 @@ export function applyTheme(th: string) {
   writeBootSnapshot("theme", th);                   // 单向镜像：只给下次 boot 的 guard 读
 }
 export function cycleTheme() { return THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]; }
+export function currentTheme(): string { return theme; }
 // （currentTheme 已删 v415：零调用者。）
 
 // collection hydrate 后对账（app.ts 的 fixup 相调）：先刷快照 → 值不对就地换（主题=css，无需 reload）。

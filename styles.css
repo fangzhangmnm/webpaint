@@ -764,6 +764,14 @@ input[type=range] {
 /* 语言：⋯ 菜单里的下拉框行（label + select） */
 .menu-lang-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; }
 .menu-lang-select { flex: 0 0 auto; max-width: 140px; }
+/* v0.5.37 in-app 下拉按钮（替代原生 select）：沿用 select 的视觉位，加 caret */
+.menu-inline-select {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
+  background: transparent; color: var(--ink); cursor: pointer;
+}
+.menu-inline-caret { width: 8px; height: 8px; opacity: .6; flex: 0 0 auto; }
 .menu-item-state { color: var(--ink-soft); font-size: 12px; }
 .menu-item[aria-pressed="true"] .menu-item-state { color: var(--accent, #4c8bf5); font-weight: 600; }
 .menu-item.menu-danger { color: #c0392b; }

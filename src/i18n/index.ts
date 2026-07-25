@@ -5,7 +5,7 @@
 //   · data-i18n 是过渡桥（非终点）：静态 index.html 一次性填充；新内容/需动的段走 Vue + t()。
 
 import { S, type Lang } from "./strings.ts";
-import { tokGlyphsCached, stripTokMarkup, ucsurActive, initTokFontGate } from "./ucsur.ts";
+import { tokGlyphsCached, tokGlyphs, stripTokMarkup, ucsurActive, initTokFontGate } from "./ucsur.ts";
 import { syncedUserPreference, preferencesReady, PREF_DEFAULTS } from "../app-prefs.ts";   // 语言 = 跨设备偏好（synced-user-preference collection）
 import { readBootSnapshot, writeBootSnapshot } from "../boot-snapshot.ts";   // eval 期读得到的 lang 快照（IDB 异步，见该文件）
 
@@ -15,6 +15,10 @@ export type Key = keyof typeof S;
 export const LANGS: Lang[] = ["zh", "en", "ja", "tok"];
 // 语言名用 endonym（各语言自称，不翻译）——菜单里显示当前语言用。
 export const LANG_NAME: Record<Lang, string> = { zh: "中文", en: "English", ja: "日本語", tok: "toki pona" };
+// endonym 显示名：tok 在字形可用时用 sitelen pona 自称（DOM 渲染域才安全——只给 in-app 下拉用，别塞 title）。
+export function langDisplayName(l: Lang): string {
+  return l === "tok" && ucsurActive() ? tokGlyphs(LANG_NAME.tok) : LANG_NAME[l];
+}
 
 // 首次运行（无持久化）按系统语言判定。未支持的系统语言 → 英文（更国际；用户 2026-07-07 定）。
 function detectLang(): Lang {
