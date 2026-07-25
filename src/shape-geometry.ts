@@ -206,6 +206,85 @@ function kasaCircle(q: Pt[]): { cx: number; cy: number; r: number } | null {
   return { cx: uc + mx, cy: vc + my, r: Math.sqrt(uc * uc + vc * vc + (suu + svv) / n) };
 }
 
+// ---- 像素笔模式（pixelMode）特化 ----
+
+// 整数像素中线：pixel i 覆盖 [i, i+1)，中线 = i+0.5。像素模式下形状端点全 clamp 到这
+//   （user 2026-07-25：预览即最终、线落格对称）。
+export function clampPixelCenter(v: number): number {
+  return Math.floor(v) + 0.5;
+}
+
+// 整数 Bresenham 直线：每像素恰好一次（像素模式下形状直线不走 spacing 撒点——撒点会双叠）。
+//   返回像素中心坐标，起点→终点有序。
+export function bresenhamLine(i0: number, j0: number, i1: number, j1: number): Pt[] {
+  const out: Pt[] = [];
+  let x = i0, y = j0;
+  const dx = Math.abs(i1 - i0), sx = i0 < i1 ? 1 : -1;
+  const dy = -Math.abs(j1 - j0), sy = j0 < j1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    out.push({ x: x + 0.5, y: y + 0.5 });
+    if (x === i1 && y === j1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x += sx; }
+    if (e2 <= dx) { err += dx; y += sy; }
+  }
+  return out;
+}
+
+// 整数矩形周界：每像素恰好一次（角点不重复；退化成线/点的盒也对）。
+export function bresenhamRectPerimeter(i0: number, j0: number, i1: number, j1: number): Pt[] {
+  const x0 = Math.min(i0, i1), x1 = Math.max(i0, i1);
+  const y0 = Math.min(j0, j1), y1 = Math.max(j0, j1);
+  const out: Pt[] = [];
+  for (let x = x0; x <= x1; x++) {
+    out.push({ x: x + 0.5, y: y0 + 0.5 });
+    if (y1 !== y0) out.push({ x: x + 0.5, y: y1 + 0.5 });
+  }
+  for (let y = y0 + 1; y < y1; y++) {
+    out.push({ x: x0 + 0.5, y: y + 0.5 });
+    if (x1 !== x0) out.push({ x: x1 + 0.5, y: y + 0.5 });
+  }
+  return out;
+}
+
+// 按包围盒的 midpoint 椭圆栅格化（Zingl plotEllipseRect）：像素模式下圆/椭圆输入改 AABB 拖拽，
+//   输出格点完美的椭圆环（w==h 即 midpoint 圆）。天然支持奇/偶直径与退化盒（线/单点）。
+//   入参 = 含端像素索引盒；返回像素**中心**坐标（i+0.5），去重、不保证顺序（消费方逐像素 stamp）。
+export function bresenhamEllipseRect(i0: number, j0: number, i1: number, j1: number): Pt[] {
+  let x0 = Math.min(i0, i1), x1 = Math.max(i0, i1);
+  let y0 = Math.min(j0, j1), y1 = Math.max(j0, j1);
+  const seen = new Set<string>();
+  const out: Pt[] = [];
+  const plot = (px: number, py: number) => {
+    const k = px + "," + py;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ x: px + 0.5, y: py + 0.5 });
+  };
+  if (x0 === x1 || y0 === y1) {   // 退化盒（宽/高=1）：Zingl 会漏端点，直接出线段
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) plot(x, y);
+    return out;
+  }
+  const a = x1 - x0;
+  const b = y1 - y0, b1 = b & 1;
+  let dx = 4 * (1 - a) * b * b, dy = 4 * (b1 + 1) * a * a;
+  let err = dx + dy + b1 * a * a, e2;
+  y0 += (b + 1) >> 1; y1 = y0 - b1;
+  const a8 = 8 * a * a, b8 = 8 * b * b;
+  do {
+    plot(x1, y0); plot(x0, y0); plot(x0, y1); plot(x1, y1);
+    e2 = 2 * err;
+    if (e2 <= dy) { y0++; y1--; dy += a8; err += dy; }
+    if (e2 >= dx || 2 * err > dy) { x0++; x1--; dx += b8; err += dx; }
+  } while (x0 <= x1);
+  while (y0 - y1 < b) {   // 扁椭圆（a 很小）提前停：补两侧竖列
+    plot(x0 - 1, y0); plot(x1 + 1, y0++);
+    plot(x0 - 1, y1); plot(x1 + 1, y1--);
+  }
+  return out;
+}
+
 // ---- 点列采样（喂 BrushEngine 合成描边）----
 
 // 段长上限：< stamp 间距（size×spacing）→ 折线在 stamp 粒度下不可见；下限 2 doc-px 防细笔过密。

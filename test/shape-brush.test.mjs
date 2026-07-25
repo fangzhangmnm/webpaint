@@ -9,6 +9,7 @@ import { describe, it, assert, eq } from "./runner.mjs";
 const { ShapeBrushEngine } = await import("../src/shape-brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
 const { PaintDoc } = await import("../src/doc.ts");
+const { bresenhamEllipseRect } = await import("../src/shape-geometry.ts");
 
 const mkDoc = () => new PaintDoc({ width: 512, height: 512 });
 
@@ -185,5 +186,101 @@ describe("shape-brush · 生命周期", () => {
     eng.extendStroke(300, 200, 0.5);
     const cs = eng.endStroke();
     assert(cs && cs.stamps.length > 10, "rot 下正常出 stamps");
+  });
+});
+
+describe("shape-brush · 像素模式特化（clamp + Bresenham exact-once）", () => {
+  const pixBrush = (opacity = 1) =>
+    resolveBrush({ size: 1, color: "#000000", opacity, preset: { pixelMode: true } });
+  // 落层像素集合 {x,y → alpha}
+  function painted(layer) {
+    const s = layer.snapshotImageData();
+    const m = new Map();
+    if (!s.imageData) return m;
+    const d = s.imageData.data;
+    for (let j = 0; j < s.bboxH; j++) for (let i = 0; i < s.bboxW; i++) {
+      const a = d[(j * s.bboxW + i) * 4 + 3];
+      if (a > 0) m.set(`${i + s.bboxX},${j + s.bboxY}`, a);
+    }
+    return m;
+  }
+  it("端点 clamp：line(10.3,10.7)→(20.9,10.2) 全在 y=10 一行，每像素恰好一次", () => {
+    const doc = mkDoc();
+    const eng = mkEngine("line");
+    eng.beginStroke(doc.layers[0], pixBrush(0.5), 10.3, 10.7, 0.5, "brush");
+    eng.extendStroke(20.9, 10.2, 0.5);
+    eng.endStroke();
+    const m = painted(doc.layers[0]);
+    eq(m.size, 11, "10..20 共 11 像素");
+    const alphas = new Set(m.values());
+    eq(alphas.size, 1, "alpha 全等 = 无双叠");
+    for (const k of m.keys()) assert(k.endsWith(",10"), `全在 y=10 行：${k}`);
+  });
+  it("45° 约束：整数空间精确对角（|di|==|dj| 逐格）", () => {
+    const doc = mkDoc();
+    const eng = mkEngine("line", true);
+    eng.beginStroke(doc.layers[0], pixBrush(), 5.2, 5.8, 0.5, "brush");
+    eng.extendStroke(15.6, 16.9, 0.5);   // ≈47° → 吸 45°
+    eng.endStroke();
+    const m = painted(doc.layers[0]);
+    for (const k of m.keys()) {
+      const [x, y] = k.split(",").map(Number);
+      eq(x - 5, y - 5, `对角逐格：${k}`);
+    }
+  });
+  it("矩形周界：每像素恰好一次（alpha 全等）、角不重叠", () => {
+    const doc = mkDoc();
+    const eng = mkEngine("rect");
+    eng.beginStroke(doc.layers[0], pixBrush(0.5), 3.4, 4.6, 0.5, "brush");
+    eng.extendStroke(12.2, 10.9, 0.5);
+    eng.endStroke();
+    const m = painted(doc.layers[0]);
+    eq(m.size, 2 * 10 + 2 * 7 - 4, "周界像素数 2w+2h-4");
+    eq(new Set(m.values()).size, 1, "alpha 全等 = 角点无双叠");
+  });
+  it("像素圆 = AABB 拖拽 → bresenham 集合逐位一致，alpha 全等", () => {
+    const doc = mkDoc();
+    const eng = mkEngine("circle");
+    eng.beginStroke(doc.layers[0], pixBrush(0.5), 10.2, 10.8, 0.5, "brush");
+    eng.extendStroke(15.7, 20.3, 0.5);   // 拖一下中间几何（顺便验每帧 restore）
+    eng.extendStroke(20.7, 16.3, 0.5);
+    eng.endStroke();
+    const m = painted(doc.layers[0]);
+    const want = new Set(bresenhamEllipseRect(10, 10, 20, 16).map((p) => `${p.x - 0.5},${p.y - 0.5}`));
+    eq(m.size, want.size, "像素数一致");
+    for (const k of m.keys()) assert(want.has(k), `多余像素 ${k}`);
+    eq(new Set(m.values()).size, 1, "alpha 全等 = 每像素恰好一次");
+  });
+  it("像素圆 constrain → 整数正方盒（painted bbox w==h）", () => {
+    const doc = mkDoc();
+    const eng = mkEngine("circle", true);
+    eng.beginStroke(doc.layers[0], pixBrush(), 10.1, 10.1, 0.5, "brush");
+    eng.extendStroke(24.9, 18.2, 0.5);
+    eng.endStroke();
+    const m = painted(doc.layers[0]);
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    for (const k of m.keys()) {
+      const [x, y] = k.split(",").map(Number);
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    eq(x1 - x0, y1 - y0, "正方");
+  });
+  it("像素模式忽略视口旋转（rect 按 doc 轴）", () => {
+    const doc = mkDoc();
+    const eng = mkEngine("rect", false, Math.PI / 6);   // rot=30° 应被无视
+    eng.beginStroke(doc.layers[0], pixBrush(), 5.5, 5.5, 0.5, "brush");
+    eng.extendStroke(15.5, 12.5, 0.5);
+    eng.endStroke();
+    const m = painted(doc.layers[0]);
+    eq(m.size, 2 * 11 + 2 * 8 - 4, "doc 轴周界像素数（斜了就对不上）");
+  });
+  it("非像素笔行为不变（连续坐标不 clamp）", () => {
+    const s = resolveBrush({ size: 10, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = mkEngine("line", false, 0);
+    eng.beginStroke(doc.layers[0], s, 10.3, 100.7, 0.5, "brush");
+    eng.extendStroke(400.9, 100.7, 0.5);
+    const cs = eng.endStroke();
+    for (const st of cs.stamps) assert(Math.abs(st.y - 100.7) < 0.5, "y 保持 100.7 非 100.5");
   });
 });
