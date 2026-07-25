@@ -11,28 +11,28 @@ export type Entry = { zh: string; en: string; ja: string; tok?: string };
 
 export const S = {
   // ── 工具栏 tooltip（SVG 图标的中文提示；括号内快捷键各语保留）──────────────
-  "tool.menu":      { zh: "菜单",              en: "Menu",            ja: "メニュー",              tok: "lipu" },
-  "tool.brush":     { zh: "笔刷 (B)",          en: "Brush (B)",       ja: "ブラシ (B)",            tok: "ilo sitelen (B)" },
-  "tool.eraser":    { zh: "橡皮 (E)",          en: "Eraser (E)",      ja: "消しゴム (E)",          tok: "ilo weka (E)" },
-  "tool.picker":    { zh: "吸色 (I)",          en: "Eyedropper (I)",  ja: "スポイト (I)",          tok: "ilo pi kama kule (I)" },
+  "tool.menu":      { zh: "菜单",              en: "Menu",            ja: "メニュー", tok: "nasin" },
+  "tool.brush":     { zh: "笔刷 (B)",          en: "Brush (B)",       ja: "ブラシ (B)", tok: "ilo sitelen (B)" },
+  "tool.eraser":    { zh: "橡皮 (E)",          en: "Eraser (E)",      ja: "消しゴム (E)", tok: "ilo weka (E)" },
+  "tool.picker":    { zh: "吸色 (I)",          en: "Eyedropper (I)",  ja: "スポイト (I)", tok: "ilo pi kama kule (I)" },
   "tool.fill":      { zh: "油漆桶 (G)", en: "Paint bucket (G)", ja: "塗りつぶし (G)", tok: "ilo pi telo kule (G)" },
-  "tool.lasso":     { zh: "套索 (L)",          en: "Lasso (L)",       ja: "投げ縄 (L)",            tok: "ilo pi kama lili (L)" },
-  "tool.pan":       { zh: "平移 (H / Space)",  en: "Pan (H / Space)", ja: "手のひら (H / Space)",  tok: "ilo tawa (H / Space)" },
-  "tool.adjust":    { zh: "调整",              en: "Adjust",          ja: "調整",                  tok: "ante" },
-  "tool.layers":    { zh: "图层",              en: "Layers",          ja: "レイヤー",              tok: "lipu" },
-  "tool.color":     { zh: "颜色 (C)",          en: "Color (C)",       ja: "カラー (C)",            tok: "kule (C)" },
-  "action.undo":    { zh: "撤销 (Ctrl+Z)",     en: "Undo (Ctrl+Z)",   ja: "元に戻す (Ctrl+Z)",     tok: "weka (Ctrl+Z)" },
-  "action.redo":    { zh: "重做 (Ctrl+Shift+Z)", en: "Redo (Ctrl+Shift+Z)", ja: "やり直す (Ctrl+Shift+Z)", tok: "sin (Ctrl+Shift+Z)" },
+  "tool.lasso":     { zh: "套索 (L)",          en: "Lasso (L)",       ja: "投げ縄 (L)", tok: "ilo pi ma wile (L)" },
+  "tool.pan":       { zh: "平移 (H / Space)",  en: "Pan (H / Space)", ja: "手のひら (H / Space)", tok: "ilo tawa (H / Space)" },
+  "tool.adjust":    { zh: "调整",              en: "Adjust",          ja: "調整", tok: "ante" },
+  "tool.layers":    { zh: "图层",              en: "Layers",          ja: "レイヤー", tok: "lipu" },
+  "tool.color":     { zh: "颜色 (C)",          en: "Color (C)",       ja: "カラー (C)", tok: "kule (C)" },
+  "action.undo":    { zh: "撤销 (Ctrl+Z)",     en: "Undo (Ctrl+Z)",   ja: "元に戻す (Ctrl+Z)", tok: "o weka e pali pini (Ctrl+Z)" },
+  "action.redo":    { zh: "重做 (Ctrl+Shift+Z)", en: "Redo (Ctrl+Shift+Z)", ja: "やり直す (Ctrl+Shift+Z)", tok: "o pali sin (Ctrl+Shift+Z)" },
 
   // ── 顶栏 / 导航 ────────────────────────────────────────────────
-  "nav.gallery":    { zh: "图库",              en: "Gallery",         ja: "ギャラリー",            tok: "poki lipu" },
-  "nav.trash":      { zh: "回收站",            en: "Trash",           ja: "ゴミ箱",                tok: "poki jaki" },
-  "save.tip":       { zh: "保存 / 上传",       en: "Save / Upload",   ja: "保存 / アップロード" },
-  "enc.locked":     { zh: "已加密 · 点击解除加密", en: "Encrypted · tap to decrypt", ja: "暗号化済み · タップで解除" },
-  "enc.locked.aria":{ zh: "已加密",            en: "Encrypted",       ja: "暗号化済み" },
-  "cloud.account":  { zh: "云端账号",          en: "Cloud account",   ja: "クラウドアカウント" },
-  "cloud.refresh":  { zh: "刷新云端列表",      en: "Refresh cloud list", ja: "クラウド一覧を更新" },
-  "account.add.aria":{ zh: "账号 / 新增",      en: "Account / Add",   ja: "アカウント / 追加" },
+  "nav.gallery":    { zh: "图库",              en: "Gallery",         ja: "ギャラリー", tok: "tomo sitelen" },
+  "nav.trash":      { zh: "回收站",            en: "Trash",           ja: "ゴミ箱", tok: "poki jaki" },
+  "save.tip":       { zh: "保存 / 上传",       en: "Save / Upload",   ja: "保存 / アップロード", tok: "awen / pana tawa poki sewi" },
+  "enc.locked":     { zh: "已加密 · 点击解除加密", en: "Encrypted · tap to decrypt", ja: "暗号化済み · タップで解除", tok: "ni li len. sina luka e ni la len li weka." },
+  "enc.locked.aria":{ zh: "已加密",            en: "Encrypted",       ja: "暗号化済み", tok: "len" },
+  "cloud.account":  { zh: "云端账号",          en: "Cloud account",   ja: "クラウドアカウント", tok: "nimi jan pi poki sewi" },
+  "cloud.refresh":  { zh: "刷新云端列表",      en: "Refresh cloud list", ja: "クラウド一覧を更新", tok: "o lukin sin e poki sewi" },
+  "account.add.aria":{ zh: "账号 / 新增",      en: "Account / Add",   ja: "アカウント / 追加", tok: "nimi jan / sin" },
 
   // ── ⋯ 设置菜单 ────────────────────────────────────────────────
   "menu.checkerboard":     { zh: "透明背景显示棋盘", en: "Checkerboard for transparency", ja: "透明部分に市松模様" },
@@ -55,9 +55,9 @@ export const S = {
   "menu.docGridCell":      { zh: "主栅格尺寸…", en: "Main grid size…", ja: "メイングリッドのサイズ…" },
   "menu.docGridCellTitle": { zh: "主栅格尺寸（doc 像素，2–1024）", en: "Main grid cell size (doc px, 2–1024)", ja: "メイングリッドのサイズ（docピクセル、2–1024）" },
   "menu.genAI":            { zh: "启用生成式 AI 功能", en: "Enable generative AI", ja: "生成 AI 機能を有効化" },
-  "status.genAI":          { zh: "生成式 AI 功能：{s}", en: "Generative AI: {s}", ja: "生成 AI 機能：{s}" },
-  "menu.theme":            { zh: "主题",       en: "Theme",           ja: "テーマ",                tok: "kule pi lipu" },
-  "menu.language":         { zh: "语言",       en: "Language",        ja: "言語",                  tok: "toki" },
+  "status.genAI":          { zh: "生成式 AI 功能：{s}", en: "Generative AI: {s}", ja: "生成 AI 機能：{s}", tok: "ilo sona: {s}" },
+  "menu.theme":            { zh: "主题",       en: "Theme",           ja: "テーマ" },
+  "menu.language":         { zh: "语言",       en: "Language",        ja: "言語" },
   "menu.shortcuts":        { zh: "快捷键",     en: "Shortcuts",       ja: "ショートカット" },
   "menu.resetRack":        { zh: "还原内置笔刷…", en: "Restore built-in brushes…", ja: "内蔵ブラシを復元…" },
   "menu.forceReset":       { zh: "强制更新（清缓存重启）", en: "Force update (clear cache & restart)", ja: "強制更新（キャッシュ削除して再起動）" },
@@ -66,34 +66,33 @@ export const S = {
   "menu.version":          { zh: "版本：{v}",  en: "Version: {v}",    ja: "バージョン：{v}" },
 
   // ── 主题状态标签 ──────────────────────────────────────────────
-  "theme.auto":     { zh: "跟随系统",          en: "System",          ja: "システムに従う" },
-  "theme.day":      { zh: "日",                en: "Light",           ja: "ライト" },
-  "theme.night":    { zh: "夜",                en: "Dark",            ja: "ダーク" },
+  "theme.auto":     { zh: "跟随系统",          en: "System",          ja: "システムに従う", tok: "sama ilo" },
+  "theme.day":      { zh: "日",                en: "Light",           ja: "ライト", tok: "suno" },
+  "theme.night":    { zh: "夜",                en: "Dark",            ja: "ダーク", tok: "pimeja" },
 
   // ── 通用 ──────────────────────────────────────────────────────
-  "common.on":      { zh: "开",                en: "On",              ja: "オン",                  tok: "lon" },
-  "common.off":     { zh: "关",                en: "Off",             ja: "オフ",                  tok: "ala" },
-  "common.ok":      { zh: "确定",              en: "OK",              ja: "OK",                    tok: "pona" },
-  "common.cancel":  { zh: "取消",              en: "Cancel",          ja: "キャンセル",            tok: "weka" },
-  "common.notice":  { zh: "提示",              en: "Notice",          ja: "お知らせ" },
-  "common.close.aria":{ zh: "关闭",            en: "Close",           ja: "閉じる" },
-  "common.apply":   { zh: "应用",              en: "Apply",           ja: "適用" },
-  "common.save":    { zh: "保存",              en: "Save",            ja: "保存" },
-  "common.reset":   { zh: "重置",              en: "Reset",           ja: "リセット" },
-  "common.exit":    { zh: "退出",              en: "Exit",            ja: "終了" },
-  "common.custom":  { zh: "自定义",            en: "Custom",          ja: "カスタム" },
+  "common.on":      { zh: "开",                en: "On",              ja: "オン", tok: "lon" },
+  "common.off":     { zh: "关",                en: "Off",             ja: "オフ", tok: "ala" },
+  "common.ok":      { zh: "确定",              en: "OK",              ja: "OK", tok: "pona" },
+  "common.cancel":  { zh: "取消",              en: "Cancel",          ja: "キャンセル", tok: "weka" },
+  "common.notice":  { zh: "提示",              en: "Notice",          ja: "お知らせ", tok: "toki" },
+  "common.close.aria":{ zh: "关闭",            en: "Close",           ja: "閉じる", tok: "pini" },
+  "common.apply":   { zh: "应用",              en: "Apply",           ja: "適用", tok: "o kepeken" },
+  "common.save":    { zh: "保存",              en: "Save",            ja: "保存", tok: "awen" },
+  "common.reset":   { zh: "重置",              en: "Reset",           ja: "リセット", tok: "kama sin" },
+  "common.exit":    { zh: "退出",              en: "Exit",            ja: "終了", tok: "weka" },
+  "common.custom":  { zh: "自定义",            en: "Custom",          ja: "カスタム", tok: "nasin sina" },
 
   // ── 状态行（本切片只接静态默认值 + 设置菜单反馈；setStatus 大面留后续切片）──
-  "status.ready":         { zh: "就绪",        en: "Ready",           ja: "準備完了",              tok: "pona" },
-  "status.checkerboard":  { zh: "透明棋盘 · {s}", en: "Checkerboard · {s}", ja: "市松模様 · {s}" },
-  "status.longPressPick": { zh: "长按吸色 · {s}", en: "Long-press pick · {s}", ja: "長押しスポイト · {s}" },
-  "status.singleFingerDraw":{ zh: "单指绘画 · {s}", en: "One-finger draw · {s}", ja: "一本指描画 · {s}" },
-  "status.pixelGrid":     { zh: "像素栅格 · {s}", en: "Pixel grid · {s}", ja: "ピクセルグリッド · {s}" },
-  "status.docGrid":       { zh: "主栅格 · {s}", en: "Main grid · {s}", ja: "メイングリッド · {s}" },
-  "status.docGridCell":   { zh: "主栅格尺寸 · {n}px", en: "Main grid size · {n}px", ja: "メイングリッドのサイズ · {n}px" },
-  "status.fps":           { zh: "FPS 计 · {s}", en: "FPS meter · {s}", ja: "FPS 表示 · {s}" },
-  "status.theme":         { zh: "主题 · {s}",  en: "Theme · {s}",     ja: "テーマ · {s}" },
-
+  "status.ready":         { zh: "就绪",        en: "Ready",           ja: "準備完了", tok: "pona" },
+  "status.checkerboard":  { zh: "透明棋盘 · {s}", en: "Checkerboard · {s}", ja: "市松模様 · {s}", tok: "leko pi kule kon · {s}" },
+  "status.longPressPick": { zh: "长按吸色 · {s}", en: "Long-press pick · {s}", ja: "長押しスポイト · {s}", tok: "luka awen li kama e kule · {s}" },
+  "status.singleFingerDraw":{ zh: "单指绘画 · {s}", en: "One-finger draw · {s}", ja: "一本指描画 · {s}", tok: "luka wan li sitelen · {s}" },
+  "status.pixelGrid":     { zh: "像素栅格 · {s}", en: "Pixel grid · {s}", ja: "ピクセルグリッド · {s}", tok: "kulupu leko lili · {s}" },
+  "status.docGrid":       { zh: "主栅格 · {s}", en: "Main grid · {s}", ja: "メイングリッド · {s}", tok: "kulupu leko suli · {s}" },
+  "status.docGridCell":   { zh: "主栅格尺寸 · {n}px", en: "Main grid size · {n}px", ja: "メイングリッドのサイズ · {n}px", tok: "suli pi kulupu leko · {n}px" },
+  "status.fps":           { zh: "FPS 计 · {s}", en: "FPS meter · {s}", ja: "FPS 表示 · {s}", tok: "nanpa pi sitelen tawa · {s}" },
+  "status.theme":         { zh: "主题 · {s}",  en: "Theme · {s}",     ja: "テーマ · {s}", tok: "nasin kule · {s}" },
   // ── ⋯ 菜单：文件段（切片 2）────────────────────────────────────
   "menu.tab.file":     { zh: "文件", en: "File", ja: "ファイル" },
   "menu.tab.canvas":   { zh: "画布", en: "Canvas", ja: "キャンバス" },
@@ -126,14 +125,13 @@ export const S = {
   "sub.newLayer":    { zh: "新图层",   en: "New layer",    ja: "新規レイヤー" },
 
   // ── 顶栏保存按钮 tooltip（save-status.ts 按态动态设，{name}=作品名）──
-  "save.none":       { zh: "未打开作品", en: "No artwork open", ja: "作品が開かれていません" },
-  "save.dirty":      { zh: "保存 + 推送 (Ctrl+S) · {name} · 未保存", en: "Save + push (Ctrl+S) · {name} · unsaved", ja: "保存＋アップロード (Ctrl+S) · {name} · 未保存" },
-  "save.synced":     { zh: "已同步云端（上次保存时）· 点击检查是否有新版本 · {name}", en: "Synced to cloud (at last save) · tap to check for newer · {name}", ja: "クラウド同期済み（前回保存時）· タップで更新確認 · {name}" },
-  "save.localOnly":  { zh: "已存本地（IDB 易失，登录云端更安全） · {name}", en: "Saved locally (IDB is volatile; sign in for safety) · {name}", ja: "ローカル保存済み（IDBは揮発性、クラウド推奨） · {name}" },
+  "save.none":       { zh: "未打开作品", en: "No artwork open", ja: "作品が開かれていません", tok: "sitelen li lon ala" },
+  "save.dirty":      { zh: "保存 + 推送 (Ctrl+S) · {name} · 未保存", en: "Save + push (Ctrl+S) · {name} · unsaved", ja: "保存＋アップロード (Ctrl+S) · {name} · 未保存", tok: "o awen (Ctrl+S) · {name} · awen ala" },
+  "save.synced":     { zh: "已同步云端（上次保存时）· 点击检查是否有新版本 · {name}", en: "Synced to cloud (at last save) · tap to check for newer · {name}", ja: "クラウド同期済み（前回保存時）· タップで更新確認 · {name}", tok: "sitelen li lon poki sewi · sina luka la mi alasa e sin · {name}" },
+  "save.localOnly":  { zh: "已存本地（IDB 易失，登录云端更安全） · {name}", en: "Saved locally (IDB is volatile; sign in for safety) · {name}", ja: "ローカル保存済み（IDBは揮発性、クラウド推奨） · {name}", tok: "sitelen li awen lon ilo ni taso · poki sewi li awen pona · {name}" },
   // 终态：存进本地了，但云端那条腿没成（离线/冲突取消/落地未确认）。必须和 synced 长得不一样——
   //   这正是「远端文件不一样而 UI 从没说过」的渲染面。
-  "save.unpushed":   { zh: "已存本地，未上云（点击重试推送） · {name}", en: "Saved locally, not uploaded (tap to retry) · {name}", ja: "ローカル保存済み、クラウド未送信（タップで再試行） · {name}" },
-
+  "save.unpushed":   { zh: "已存本地，未上云（点击重试推送） · {name}", en: "Saved locally, not uploaded (tap to retry) · {name}", ja: "ローカル保存済み、クラウド未送信（タップで再試行） · {name}", tok: "awen lon ilo ni · pana tawa poki sewi li pakala · sina luka la mi pana sin · {name}" },
   // ── 混合模式名（LAYER_MODE_LABEL 单一源；图层面板 + 笔刷设置下拉共用）切片 3a ──
   "mode.normal":     { zh: "正常",     en: "Normal",       ja: "通常" },
   "mode.multiply":   { zh: "正片叠底", en: "Multiply",     ja: "乗算" },
@@ -157,8 +155,8 @@ export const S = {
   "lp.collapseGroup":{ zh: "折叠组",   en: "Collapse group", ja: "グループを折りたたむ" },
   "lp.clippedTip":   { zh: "已剪裁到下方第一颗非剪裁层", en: "Clipped to first non-clip layer below", ja: "下の最初の非クリップ層にクリップ" },
   "lp.lockAlphaTip": { zh: "锁定不透明度：笔只改已有像素的颜色", en: "Lock alpha: brush only recolors existing pixels", ja: "不透明度をロック：既存ピクセルの色のみ変更" },
-  "fm.commit":       { zh: "填充并清除选区", en: "Fill and clear selection", ja: "塗りつぶして選択解除" },
-  "fm.commitFailed": { zh: "填充提交失败", en: "Fill commit failed", ja: "塗りつぶしの確定に失敗しました" },
+  "fm.commit":       { zh: "填充并清除选区", en: "Fill and clear selection", ja: "塗りつぶして選択解除", tok: "o kule e ma wile o weka e ona" },
+  "fm.commitFailed": { zh: "填充提交失败", en: "Fill commit failed", ja: "塗りつぶしの確定に失敗しました", tok: "pali kule li pakala" },
   "lp.refTip":       { zh: "参考层：魔棒 / 填充读这一层", en: "Reference layer: magic wand / fill read this layer", ja: "参照レイヤー：自動選択 / 塗りつぶしがこの層を参照" },
   "lp.layerMenu":    { zh: "图层菜单", en: "Layer menu",   ja: "レイヤーメニュー" },
   "lp.rename":       { zh: "重命名…",  en: "Rename…",      ja: "名前を変更…" },
@@ -205,8 +203,8 @@ export const S = {
   "lp.st.mergeFail":   { zh: "无法向下合并", en: "Can't merge down", ja: "下と結合できません" },
 
   // ── 颜色轮（color-wheel.ts）切片 3a ──
-  "cw.svPad":        { zh: "饱和度 / 明度面板", en: "Saturation / Value panel", ja: "彩度 / 明度パネル" },
-  "cw.hue":          { zh: "色相",     en: "Hue",          ja: "色相" },
+  "cw.svPad":        { zh: "饱和度 / 明度面板", en: "Saturation / Value panel", ja: "彩度 / 明度パネル", tok: "mute kule / suno" },
+  "cw.hue":          { zh: "色相",     en: "Hue",          ja: "色相", tok: "kule" },
 
   // ── 左侧笔刷 dial（left-dial.ts）切片 3a ──
   "ld.brush":        { zh: "当前笔刷（tap 切换 / 长按编辑）", en: "Current brush (tap to switch / long-press to edit)", ja: "現在のブラシ（タップで切替 / 長押しで編集）" },
@@ -428,7 +426,7 @@ export const S = {
   "nd.size":         { zh: "尺寸", en: "Size", ja: "サイズ" },
   "nd.create":       { zh: "创建", en: "Create", ja: "作成" },
   // 浮窗标题 + 图层脚 + 参考窗
-  "fp.reference":    { zh: "参考", en: "Reference", ja: "参考" },
+  "fp.reference":    { zh: "参考", en: "Reference", ja: "参考", tok: "sitelen lukin" },
   "lp.foot.add":     { zh: "新建 / 导入", en: "New / import", ja: "新規 / インポート" },
   "lp.foot.up":      { zh: "上移图层", en: "Move layer up", ja: "レイヤーを上へ" },
   "lp.foot.down":    { zh: "下移图层", en: "Move layer down", ja: "レイヤーを下へ" },
@@ -482,20 +480,20 @@ export const S = {
   "la.expandShrink": { zh: "扩张 / 收缩选区", en: "Expand / shrink selection", ja: "選択範囲の拡張 / 縮小" },
   "la.pixelCount":   { zh: "像素数", en: "Pixels", ja: "ピクセル数" },
   // 吸色取样
-  "pick.toolbar":    { zh: "吸色取样", en: "Eyedropper sampling", ja: "スポイトのサンプリング" },
+  "pick.toolbar":    { zh: "吸色取样", en: "Eyedropper sampling", ja: "スポイトのサンプリング", tok: "kama kule" },
   "la.autoExpand":   { zh: "自动扩张", en: "Auto expand", ja: "自動拡張" },
   "la.flipH":        { zh: "水平翻转", en: "Flip horizontal", ja: "左右反転" },
   "mi.dropChoiceTitle":  { zh: "拖入的图片怎么用？", en: "How to use the dropped image?", ja: "ドロップした画像をどう使いますか？" },
-  "save.saving":         { zh: "「{name}」保存中…", en: "Saving “{name}”…", ja: "「{name}」を保存中…" },
+  "save.saving":         { zh: "「{name}」保存中…", en: "Saving “{name}”…", ja: "「{name}」を保存中…", tok: "mi awen e “{name}”…" },
   "mi.dropAsLayer":      { zh: "插入为新图层", en: "Insert as new layer", ja: "新しいレイヤーとして挿入" },
   "mi.dropAsReference":  { zh: "设为参考图", en: "Set as reference", ja: "参考画像に設定" },
   "la.rotate90":     { zh: "旋转 90°", en: "Rotate 90°", ja: "90° 回転" },
-  "pick.sampleLabel":{ zh: "取样", en: "Sample", ja: "サンプル" },
-  "pick.sampleTip":  { zh: "吸色取样：合并最终颜色 / 当前图层原色", en: "Eyedropper: merged final color / active layer color", ja: "スポイト：合成後の色 / アクティブ層の色" },
-  "pick.composite":  { zh: "合并颜色", en: "Merged", ja: "合成" },
-  "pick.active":     { zh: "当前图层", en: "Active layer", ja: "アクティブ層" },
+  "pick.sampleLabel":{ zh: "取样", en: "Sample", ja: "サンプル", tok: "kama jo" },
+  "pick.sampleTip":  { zh: "吸色取样：合并最终颜色 / 当前图层原色", en: "Eyedropper: merged final color / active layer color", ja: "スポイト：合成後の色 / アクティブ層の色", tok: "kama kule: kule pini pi lipu ale / kule pi lipu ni" },
+  "pick.composite":  { zh: "合并颜色", en: "Merged", ja: "合成", tok: "kule pi lipu ale" },
+  "pick.active":     { zh: "当前图层", en: "Active layer", ja: "アクティブ層", tok: "lipu ni" },
   // 调色板面板标题
-  "palette.title":   { zh: "调色板", en: "Palette", ja: "パレット" },
+  "palette.title":   { zh: "调色板", en: "Palette", ja: "パレット", tok: "poki kule" },
   // 笔架 sheet
   "rack.sheet":      { zh: "笔架", en: "Brush rack", ja: "ブラシ棚" },
   "rack.importJson": { zh: "导入笔架 JSON", en: "Import rack JSON", ja: "ブラシ棚JSONを読み込む" },
@@ -505,7 +503,7 @@ export const S = {
   // 笔刷设置 view header
   "bsv.title":       { zh: "笔刷设置", en: "Brush settings", ja: "ブラシ設定" },
   // sync gate spinner
-  "sg.checking":     { zh: "正在检查云端…", en: "Checking cloud…", ja: "クラウドを確認中…" },
+  "sg.checking":     { zh: "正在检查云端…", en: "Checking cloud…", ja: "クラウドを確認中…", tok: "mi lukin e poki sewi…" },
   // 尺寸/插值（多对话框共用）
   "dim.width":       { zh: "宽 (px)", en: "Width (px)", ja: "幅 (px)" },
   "dim.height":      { zh: "高 (px)", en: "Height (px)", ja: "高さ (px)" },
@@ -521,25 +519,25 @@ export const S = {
   "rs2.title":       { zh: "画布重采样", en: "Resize canvas", ja: "キャンバスをリサイズ" },
   "rs2.lock":        { zh: "锁比例", en: "Lock ratio", ja: "比率をロック" },
   // 偏移接缝
-  "off.title":       { zh: "偏移接缝（环绕）", en: "Offset seam (wrap)", ja: "シームをずらす（ラップ）" },
-  "off.x":           { zh: "水平 (px)", en: "Horizontal (px)", ja: "水平 (px)" },
-  "off.y":           { zh: "垂直 (px)", en: "Vertical (px)", ja: "垂直 (px)" },
-  "off.half":        { zh: "居中接缝（半幅 ½）", en: "Center seam (half ½)", ja: "シームを中央に（半分 ½）" },
+  "off.title":       { zh: "偏移接缝（环绕）", en: "Offset seam (wrap)", ja: "シームをずらす（ラップ）", tok: "tawa sike" },
+  "off.x":           { zh: "水平 (px)", en: "Horizontal (px)", ja: "水平 (px)", tok: "nasin poka (px)" },
+  "off.y":           { zh: "垂直 (px)", en: "Vertical (px)", ja: "垂直 (px)", tok: "nasin sewi (px)" },
+  "off.half":        { zh: "居中接缝（半幅 ½）", en: "Center seam (half ½)", ja: "シームを中央に（半分 ½）", tok: "tawa pi kipisi tu (½)" },
   // 裁切工具栏
   "crop.hint":       { zh: "裁切：拖角 / 边 / 框内移动", en: "Crop: drag corner / edge / inside to move", ja: "切り抜き：角 / 辺 / 内側をドラッグで移動" },
   // 滤镜笔刷工具栏
-  "fb.title":        { zh: "滤镜笔刷", en: "Filter brush", ja: "フィルターブラシ" },
+  "fb.title":        { zh: "滤镜笔刷", en: "Filter brush", ja: "フィルターブラシ", tok: "ilo sitelen pi ante kule" },
   // 颜色浮窗
-  "color.title":     { zh: "颜色", en: "Color", ja: "カラー" },
+  "color.title":     { zh: "颜色", en: "Color", ja: "カラー", tok: "kule" },
   // 清空确认 sheet
-  "clr.aria":        { zh: "清空确认", en: "Clear confirmation", ja: "消去の確認" },
-  "clr.title":       { zh: "清空当前图层？", en: "Clear current layer?", ja: "現在のレイヤーを消去？" },
-  "clr.msg":         { zh: "把当前图层的像素全部抹掉。可以 Ctrl+Z 撤销。", en: "Erase all pixels on the current layer. Undo with Ctrl+Z.", ja: "現在のレイヤーのピクセルをすべて消去します。Ctrl+Z で元に戻せます。" },
-  "clr.confirm":     { zh: "清空", en: "Clear", ja: "消去" },
+  "clr.aria":        { zh: "清空确认", en: "Clear confirmation", ja: "消去の確認", tok: "toki pi weka ale" },
+  "clr.title":       { zh: "清空当前图层？", en: "Clear current layer?", ja: "現在のレイヤーを消去？", tok: "sina wile ala wile weka e ale pi lipu ni?" },
+  "clr.msg":         { zh: "把当前图层的像素全部抹掉。可以 Ctrl+Z 撤销。", en: "Erase all pixels on the current layer. Undo with Ctrl+Z.", ja: "現在のレイヤーのピクセルをすべて消去します。Ctrl+Z で元に戻せます。", tok: "ni li weka e kule ale pi lipu ni. sina ken weka e pali ni (Ctrl+Z)." },
+  "clr.confirm":     { zh: "清空", en: "Clear", ja: "消去", tok: "o weka e ale" },
   // 更新 toast
-  "upd.available":   { zh: "有新版本", en: "New version available", ja: "新しいバージョンあり" },
-  "upd.reload":      { zh: "刷新", en: "Reload", ja: "再読み込み" },
-  "upd.dismiss":     { zh: "忽略", en: "Dismiss", ja: "閉じる" },
+  "upd.available":   { zh: "有新版本", en: "New version available", ja: "新しいバージョンあり", tok: "ilo sin li lon" },
+  "upd.reload":      { zh: "刷新", en: "Reload", ja: "再読み込み", tok: "o open sin" },
+  "upd.dismiss":     { zh: "忽略", en: "Dismiss", ja: "閉じる", tok: "weka" },
 
   // ── 切片 5c：命令式散点 fan-out（session/topbar/blender/gallery-shell/cloud/rack/selection/import 等 8 簇）──
   "ss.saveCancelled": { zh: "已取消保存", en: "Save cancelled", ja: "保存をキャンセルしました" },
