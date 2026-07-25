@@ -95,6 +95,23 @@ function applyFps(on: boolean) {
   syncedUserPreference.setItem("show-fps", !!on);
 }
 
+// v0.5.28 生成式 AI 总开关：body[data-gen-ai] = 全 app 热切换钩子（未来 AI UI 挂 .needs-gen-ai 类即受控；
+//   JS 消费者直读 pref）。不进 boot——功能入口显隐，fixup 相回灌晚一拍无感知（boot 门只配 lang/theme 那类 eval 期锁死值）。
+export function genAiEnabled(): boolean {
+  return syncedUserPreference.getItem<boolean>("gen-ai", PREF_DEFAULTS["gen-ai"]);
+}
+function renderGenAI(on: boolean) {
+  document.body.dataset.genAi = on ? "1" : "";
+  const btn = document.getElementById("menuGenAI");
+  btn?.setAttribute("aria-pressed", on ? "true" : "false");
+  const st = btn?.querySelector('[data-state-for="genAI"]');
+  if (st) st.textContent = on ? t("common.on") : t("common.off");
+}
+function applyGenAI(on: boolean) {
+  renderGenAI(on);
+  syncedUserPreference.setItem("gen-ai", !!on);
+}
+
 // v124 快捷键 sheet：从 KEYBOARD_SHORTCUTS 自动渲染（input.js 注册的唯一真理源）
 const _shortcutsSheet = document.getElementById("shortcutsSheet");
 const _shortcutsBackdrop = document.getElementById("shortcutsBackdrop");
@@ -127,6 +144,7 @@ export function renderSettingsFromPrefs(): void {
 
   renderPixelGrid(syncedUserPreference.getItem<boolean>("pixel-grid", PREF_DEFAULTS["pixel-grid"]));
   renderFps(syncedUserPreference.getItem<boolean>("show-fps", PREF_DEFAULTS["show-fps"]));
+  renderGenAI(genAiEnabled());
   renderLongPressPick(syncedUserPreference.getItem<boolean>("long-press-pick", PREF_DEFAULTS["long-press-pick"]));
   renderSingleFingerDraw(syncedUserPreference.getItem<boolean>("single-finger-draw", PREF_DEFAULTS["single-finger-draw"]));
 }
@@ -222,6 +240,11 @@ export function initSettingsMenu(ctx: AppContext) {
     const next = !board.getShowFps?.();
     applyFps(next);
     setStatus(t("status.fps", { s: next ? t("common.on") : t("common.off") }));
+  });
+  document.getElementById("menuGenAI")?.addEventListener("click", () => {
+    const next = !genAiEnabled();
+    applyGenAI(next);
+    setStatus(t("status.genAI", { s: next ? t("common.on") : t("common.off") }));
   });
   // v0.6C（user）：主题改下拉框（原点击轮换退役）。option 由 THEMES 填，label 走 theme.* i18n。
   const menuThemeSelect = document.getElementById("menuThemeSelect") as HTMLSelectElement | null;

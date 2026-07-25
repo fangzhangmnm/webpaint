@@ -23,6 +23,7 @@ export const PREF_DEFAULTS = {
   "show-fps": false as boolean,             // FPS 计叠层
   "pixel-grid": true as boolean,            // 像素栅格叠层
   "stylus-smooth-params": {} as Record<string, number>,   // 手写笔平滑调参（hidden debug；对象存 SMOOTH 覆盖，默认{}=全用 SMOOTH_DEFAULTS）
+  "gen-ai": false as boolean,               // 生成式 AI 功能总开关（v0.5.28；控制未来 AI UI 显隐——热切换不进 boot）
 } as const;
 export type PrefKey = keyof typeof PREF_DEFAULTS;
 

@@ -54,6 +54,8 @@ export const S = {
   "sub.selection":      { zh: "选区", en: "selection", ja: "選択範囲" },
   "menu.docGridCell":      { zh: "主栅格尺寸…", en: "Main grid size…", ja: "メイングリッドのサイズ…" },
   "menu.docGridCellTitle": { zh: "主栅格尺寸（doc 像素，2–1024）", en: "Main grid cell size (doc px, 2–1024)", ja: "メイングリッドのサイズ（docピクセル、2–1024）" },
+  "menu.genAI":            { zh: "启用生成式 AI 功能", en: "Enable generative AI", ja: "生成 AI 機能を有効化" },
+  "status.genAI":          { zh: "生成式 AI 功能：{s}", en: "Generative AI: {s}", ja: "生成 AI 機能：{s}" },
   "menu.theme":            { zh: "主题",       en: "Theme",           ja: "テーマ",                tok: "kule pi lipu" },
   "menu.language":         { zh: "语言",       en: "Language",        ja: "言語",                  tok: "toki" },
   "menu.shortcuts":        { zh: "快捷键",     en: "Shortcuts",       ja: "ショートカット" },

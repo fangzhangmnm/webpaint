@@ -784,7 +784,10 @@ input[type=range] {
 .menu-config-popup label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; color: var(--ink); }
 .menu-config-popup .menu-config-section { display: flex; flex-direction: column; gap: 4px; }
 .menu-config-popup .menu-config-title { font-size: 11px; color: var(--ink-soft); text-transform: uppercase; }
-/* v0.6C ☰ 六 tab 分页（图库直达在 tab 行上方常驻） */
+/* v0.5.28 生成式 AI 总开关接缝：未启用时一切 AI 相关 UI 隐藏（挂 .needs-gen-ai 类即受控） */
+body:not([data-gen-ai="1"]) .needs-gen-ai { display: none !important; }
+
+/* v0.6C ☰ 六 tab 分页（图库=文件页首项） */
 .menu-tabs { display: flex; gap: 2px; padding: 4px 4px 3px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
 .menu-tab {
   flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px;
