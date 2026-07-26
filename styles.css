@@ -2527,3 +2527,9 @@ body[data-mode="gallery"] .board { display: none !important; }
   user-select: none;
 }
 .persp-handle[data-kind="ref"] { background: rgba(255, 165, 0, 0.92); }
+.persp-box-handle {
+  width: 14px; height: 14px; margin: -7px 0 0 -7px;
+  border-radius: 3px;
+  background: rgba(255, 165, 0, 0.92);
+  font-size: 0;
+}

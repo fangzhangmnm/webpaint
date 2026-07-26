@@ -8,9 +8,9 @@
 //   应用=保留（transient apply），取消/ctrl-z=回快照。3D grid 弃案（两角点拖不出来，手动画）。
 import { editorState, snapshotShapePersp, restoreShapePersp } from "./workbench-state.ts";
 import { clampPixelCenter } from "./shape-geometry.ts";
-import { defaultVpsForMode } from "./perspective-frame.ts";
+import { defaultVpsForMode, boxAxesForMode, boxCorners, solveBoxDrag, BOX_EDGES } from "./perspective-frame.ts";
 import { updateShapeToolbar } from "./toolbar.ts";
-import type { PerspMode } from "./perspective-frame.ts";
+import type { PerspMode, BoxParams } from "./perspective-frame.ts";
 import type { AppContext } from "./app-context.ts";
 import type { PerspGizmoData } from "./board.ts";
 
@@ -23,6 +23,10 @@ let _snapshot: unknown = null;
 let _toolbar: HTMLElement, _layer: HTMLElement;
 let _lockBtn: HTMLElement, _refBtn: HTMLElement;
 const _handles = new Map<Kind, HTMLElement>();
+// 参考 box（UI v2.1）：VP = SSoT，box 参数只是编辑会话的控制面（进模式时按画布重构默认）。
+//   拖 box 角 → solveBoxDrag（阻尼 GN）反算 VP——弱透视时把控制灵敏度从 10×H 外搬回画布内。
+let _box: BoxParams | null = null;
+const _boxHandles: HTMLElement[] = [];
 
 // mode 决定显示哪些 VP（UI v2：VP 数量 = 模式的属性，不再增删 chips）
 function _mode(): PerspMode {
@@ -90,6 +94,34 @@ const LABELS: Record<Kind, string> = { vp1: "1", vp2: "2", vp3: "V", ref: "◎" 
 
 // 手柄定位（**不触发 requestRender**——它也被 onViewportChange 调，而 onViewportChange 在
 //   requestRender 内部同步发射，这里再 requestRender 会无限递归；真机教训 2026-07-25）
+// 当前 (mode, VP, box) 下的八角（病态 → null）
+function _boxCornersNow(): Vp[] | null {
+  if (!_ctx || !_box) return null;
+  const g = editorState.persp;
+  const m = _mode();
+  if (m === "off" || !g.vp1) return null;
+  const axes = boxAxesForMode(m, g.vp1, m !== "p1" ? g.vp2 : null, m === "p3" ? g.vp3 : null);
+  return axes ? boxCorners(axes, _box) : null;
+}
+
+function _defaultBox(): BoxParams {
+  const { doc } = _ctx!;
+  const m = _mode();
+  // 锚角放画布中下（人物/建筑常规站位）；pencil 轴走 1/4 行程，parallel 轴 = H/3 px
+  const A = { x: clampPixelCenter(doc.width / 2 - doc.height / 6), y: clampPixelCenter(doc.height * 0.72) };
+  const axes = boxAxesForMode(m, editorState.persp.vp1, m !== "p1" ? editorState.persp.vp2 : null, m === "p3" ? editorState.persp.vp3 : null);
+  const t: [number, number, number] = [0.25, 0.25, 0.25];
+  if (axes) {
+    for (let i = 0; i < 3; i++) {
+      if (axes[i].kind === "parallel") {
+        const d = (axes[i] as { dir: Vp }).dir;
+        t[i] = (d.y !== 0 ? -1 : 1) * doc.height / 3;   // 竖直轴向上长
+      }
+    }
+  }
+  return { A, t };
+}
+
 function _syncHandles() {
   if (!_ctx || !_active) return;
   const { board } = _ctx;
@@ -104,6 +136,64 @@ function _syncHandles() {
     el.style.left = `${s.x}px`;
     el.style.top = `${s.y}px`;
   }
+  // box 八角手柄
+  const cs = _boxCornersNow();
+  for (let k = 0; k < 8; k++) {
+    let el = _boxHandles[k];
+    if (!cs) { if (el) el.classList.add("hidden"); continue; }
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "persp-handle persp-box-handle";
+      el.addEventListener("pointerdown", (e: PointerEvent) => {
+        e.preventDefault(); e.stopPropagation();
+        el!.setPointerCapture(e.pointerId);
+        const onMove = (ev: PointerEvent) => _boxDragTo(k, ev.clientX, ev.clientY);
+        const onUp = (ev: PointerEvent) => {
+          el!.releasePointerCapture(ev.pointerId);
+          el!.removeEventListener("pointermove", onMove);
+          el!.removeEventListener("pointerup", onUp);
+          el!.removeEventListener("pointercancel", onUp);
+          _snapVpsToGrid();   // 拖完把 VP 钉回像素中线
+        };
+        el!.addEventListener("pointermove", onMove);
+        el!.addEventListener("pointerup", onUp);
+        el!.addEventListener("pointercancel", onUp);
+      });
+      _boxHandles[k] = el;
+      _layer.appendChild(el);
+    }
+    el.classList.remove("hidden");
+    const s = board.docToScreen(cs[k].x, cs[k].y);
+    el.style.left = `${s.x}px`;
+    el.style.top = `${s.y}px`;
+  }
+}
+
+// 拖 box 角：反算 (VP, box) 并写回 editorState（求解期间 VP 保持 float，抬手再 snap）
+function _boxDragTo(cornerIdx: number, screenX: number, screenY: number) {
+  if (!_ctx || !_box) return;
+  const g = editorState.persp;
+  const m = _mode();
+  if (m === "off" || !g.vp1) return;
+  const target = _ctx.board.screenToDoc(screenX, screenY);
+  const solved = solveBoxDrag({
+    mode: m, lockHorizon: g.lockHorizon,
+    vp1: g.vp1, vp2: m !== "p1" ? g.vp2 : null, vp3: m === "p3" ? g.vp3 : null,
+    box: _box,
+  }, cornerIdx, target);
+  g.vp1 = solved.vp1;
+  if (m !== "p1" && solved.vp2) g.vp2 = solved.vp2;
+  if (m === "p3" && solved.vp3) g.vp3 = solved.vp3;
+  _box = solved.box;
+  _syncUi();
+}
+
+function _snapVpsToGrid() {
+  const g = editorState.persp;
+  if (g.vp1) g.vp1 = _snap(g.vp1);
+  if (g.vp2) g.vp2 = _snap(g.vp2);
+  if (g.vp3) g.vp3 = _snap(g.vp3);
+  _syncUi();
 }
 
 function _syncUi() {
@@ -114,7 +204,8 @@ function _syncUi() {
   _ctx.board.requestRender();
 }
 
-// 重置默认（user 拍板）：一点=画布正中；二点=中线 ∓2.0×H；三点=+上方 2.5×H（仰视）
+// 重置默认（user 拍板）：VP 回默认位 + 锁地平线回开 + box 回默认（一点=正中；二点=总间隔 2H；
+//   三点=+上方 1.5H 仰视）
 function _resetDefaults() {
   const { doc } = _ctx!;
   const m = _mode();
@@ -122,6 +213,8 @@ function _resetDefaults() {
   const def = defaultVpsForMode(m, doc.width, doc.height);
   const g = editorState.persp;
   g.vp1 = def.vp1; g.vp2 = def.vp2; g.vp3 = def.vp3;
+  g.lockHorizon = true;
+  _box = _defaultBox();
   _syncUi();
 }
 
@@ -137,10 +230,13 @@ function _finish(keep: boolean) {
   _active = false;
   if (!keep && _snapshot) restoreShapePersp(_snapshot);
   _snapshot = null;
+  _box = null;
   _toolbar.classList.add("hidden");
   _layer.classList.add("hidden");
   for (const el of _handles.values()) el.remove();
   _handles.clear();
+  for (const el of _boxHandles) el?.remove();
+  _boxHandles.length = 0;
   updateShapeToolbar();
   _ctx!.board.requestRender();
 }
@@ -156,6 +252,8 @@ export function enterPerspEdit(): void {
   if (!g.vp1 && def.vp1) g.vp1 = def.vp1;
   if (!g.vp2 && def.vp2) g.vp2 = def.vp2;
   if (!g.vp3 && def.vp3) g.vp3 = def.vp3;
+  if (!g.refPoint) g.refPoint = _snap({ x: _ctx.doc.width / 2, y: _ctx.doc.height / 2 });   // 参考点默认开
+  _box = _defaultBox();
   _ctx.editMode.enterTransient("perspEdit", { apply: () => _finish(true), abort: () => _finish(false) });
   _toolbar.classList.remove("hidden");
   _layer.classList.remove("hidden");
@@ -187,10 +285,27 @@ export function initPerspEdit(ctx: AppContext): void {
   window.addEventListener("wp:applyEditorState", () => { if (_active) _finish(true); });
   // gizmo：淡地平线 + VP 圈 + 参考点射线（只在本模式非空；平时零成本）
   ctx.board.setPerspGizmoProvider(() => {
-    if (!_active) return null;
     const g = editorState.persp;
     const m = _mode();
     if (m === "off") return null;
+    // 绘图态（非编辑模式）：showGizmo 开且形状笔激活 → 只显 VP+地平线（user：作画时也要看得到）
+    if (!_active) {
+      if (!g.showGizmo || _ctx!.editMode.current() !== "shapeBrush" || !g.vp1) return null;
+      const vp2d = (m === "p2" || m === "p3") ? g.vp2 : null, vp3d = m === "p3" ? g.vp3 : null;
+      const Ld = (ctx.doc.width + ctx.doc.height) * 4;
+      const outd: PerspGizmoData = { horizon: null, rays: [], vps: [] };
+      for (const v of [g.vp1, vp2d, vp3d]) if (v) outd.vps.push(v);
+      let dd = { x: 1, y: 0 };
+      if (vp2d) {
+        const len = Math.hypot(vp2d.x - g.vp1.x, vp2d.y - g.vp1.y) || 1;
+        dd = { x: (vp2d.x - g.vp1.x) / len, y: (vp2d.y - g.vp1.y) / len };
+      }
+      outd.horizon = [
+        { x: g.vp1.x - dd.x * Ld, y: g.vp1.y - dd.y * Ld },
+        { x: g.vp1.x + dd.x * Ld, y: g.vp1.y + dd.y * Ld },
+      ];
+      return outd;
+    }
     // 按模式取活跃 VP（存着的多余 VP 不显——mode 决定数量，UI v2）
     const vp1 = g.vp1, vp2 = (m === "p2" || m === "p3") ? g.vp2 : null, vp3 = m === "p3" ? g.vp3 : null;
     const L = (ctx.doc.width + ctx.doc.height) * 4;
@@ -218,6 +333,11 @@ export function initPerspEdit(ctx: AppContext): void {
       // 尚存平行族的参考线（水平族：一点透视；竖直族：非三点）
       if (m === "p1") out.rays.push([{ x: ref.x - L, y: ref.y }, { x: ref.x + L, y: ref.y }]);
       if (m !== "p3") out.rays.push([{ x: ref.x, y: ref.y - L }, { x: ref.x, y: ref.y + L }]);
+    }
+    // 参考 box 的 12 条棱
+    const cs = _boxCornersNow();
+    if (cs) {
+      out.boxEdges = BOX_EDGES.map(([a, b]) => [cs[a], cs[b]] as [Vp, Vp]);
     }
     return out;
   });

@@ -26,6 +26,7 @@ export interface PerspGizmoData {
   horizon: [{ x: number; y: number }, { x: number; y: number }] | null;
   rays: Array<[{ x: number; y: number }, { x: number; y: number }]>;
   vps: Array<{ x: number; y: number }>;
+  boxEdges?: Array<[{ x: number; y: number }, { x: number; y: number }]>;   // 参考 box 12 棱（编辑模式）
 }
 
 // 选区（doc.selection）：gray8 tile mask + 紧 bbox（真类型在 selection.ts；v0.4.6 maskCanvas 死）
@@ -651,6 +652,13 @@ export class Board {
     ctx.lineWidth = 1.4 / scale;
     for (const v of g.vps) {
       ctx.beginPath(); ctx.arc(v.x, v.y, 5 / scale, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (g.boxEdges) {
+      ctx.strokeStyle = "rgba(255,165,0,0.75)";
+      ctx.lineWidth = 1.4 / scale;
+      for (const [a, b] of g.boxEdges) {
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
     }
     ctx.restore();
   }

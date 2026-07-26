@@ -153,6 +153,7 @@ function freshGroups() {
       lockHorizon: true,
       refPoint: null as { x: number; y: number } | null,
       plane: "ground" as string,   // "ground"|"wall"|"wallL"|"wallR"（按 mode 过滤；关透视在 mode）
+      showGizmo: true,             // 绘图时显示 VP+地平线（user：作画时也要看得到，给显隐钮）
     },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
@@ -258,6 +259,7 @@ export const editorState = {
     get lockHorizon(): boolean { return S.g.persp.lockHorizon; }, set lockHorizon(v: boolean) { S.g.persp.lockHorizon = v; },
     get refPoint() { return S.g.persp.refPoint; }, set refPoint(v: { x: number; y: number } | null) { S.g.persp.refPoint = v; },
     get plane(): string { return S.g.persp.plane; }, set plane(v: string) { S.g.persp.plane = v; },
+    get showGizmo(): boolean { return S.g.persp.showGizmo; }, set showGizmo(v: boolean) { S.g.persp.showGizmo = v; },
   },
   grid: {
     get on(): boolean { return S.g.grid.on; }, set on(v: boolean) { S.g.grid.on = v; },

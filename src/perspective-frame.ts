@@ -300,17 +300,17 @@ export function configFromModeState(g: {
   });
 }
 
-// 各模式的 VP 默认位（user 拍板：一点=画布正中；二/三点按 H 定比例——主体高≈画布高时
-//   VP 距≈4×主体高≈标准镜头感；VP3 默认仰视（上方），俯视拖下去即可）。坐标 snap 像素中线。
+// 各模式的 VP 默认位（user 拍板两轮：一点=画布正中；二点 VP1-VP2 **总间隔 2×H**（每侧 ±1H；
+//   曾误给每侧 2H 被打回「太开」）；VP3 上方 1.5×H 仰视，俯视拖下去即可）。坐标 snap 像素中线。
 export function defaultVpsForMode(mode: PerspMode, docW: number, docH: number): { vp1: Vp | null; vp2: Vp | null; vp3: Vp | null } {
   const c = (v: number) => Math.floor(v) + 0.5;
   const cx = c(docW / 2), cy = c(docH / 2);
   if (mode === "p1") return { vp1: { x: cx, y: cy }, vp2: null, vp3: null };
-  if (mode === "p2") return { vp1: { x: c(docW / 2 - 2.0 * docH), y: cy }, vp2: { x: c(docW / 2 + 2.0 * docH), y: cy }, vp3: null };
+  if (mode === "p2") return { vp1: { x: c(docW / 2 - 1.0 * docH), y: cy }, vp2: { x: c(docW / 2 + 1.0 * docH), y: cy }, vp3: null };
   if (mode === "p3") return {
-    vp1: { x: c(docW / 2 - 2.0 * docH), y: cy },
-    vp2: { x: c(docW / 2 + 2.0 * docH), y: cy },
-    vp3: { x: cx, y: c(docH / 2 - 2.5 * docH) },
+    vp1: { x: c(docW / 2 - 1.0 * docH), y: cy },
+    vp2: { x: c(docW / 2 + 1.0 * docH), y: cy },
+    vp3: { x: cx, y: c(docH / 2 - 1.5 * docH) },
   };
   return { vp1: null, vp2: null, vp3: null };
 }
@@ -323,4 +323,162 @@ export function normalizeConfig(cfg: PerspConfig): PerspConfig {
     if (cfg.lockHorizon) vp2 = { x: vp2.x, y: vp1.y };
   }
   return { ...cfg, vp1, vp2 };
+}
+
+// ═══ 参考 box（UI v2.1，user 拍板：与 VP 手柄同时启用，VP = SSoT，box 只是控制面）═══
+//
+// 弱透视（尤其三点）时 VP 在 10×H 外，拖 VP 本体控制灵敏度全在远端；box 把灵敏度搬回
+// 画布内：拖 box 的角点 → 非线性求解（阻尼 Gauss-Newton，数值 Jacobian）反算 VP。
+// box 参数化保证「透视可实现」：锚角 A + 三个轴向行程 t（pencil 轴 = 走向 VP 的分数，
+// parallel 轴 = doc px 长度），八角全部由族线交点构造——不存在摆不成 box 的自由角点。
+
+export interface BoxParams { A: Vp; t: [number, number, number]; }
+
+export function boxAxesForMode(mode: PerspMode, vp1: Vp | null, vp2: Vp | null, vp3: Vp | null): [Family, Family, Family] | null {
+  if (mode === "p1" && vp1) return [{ kind: "pencil", vp: vp1 }, { kind: "parallel", dir: { x: 1, y: 0 } }, { kind: "parallel", dir: { x: 0, y: 1 } }];
+  if (mode === "p2" && vp1 && vp2) return [{ kind: "pencil", vp: vp1 }, { kind: "pencil", vp: vp2 }, { kind: "parallel", dir: { x: 0, y: 1 } }];
+  if (mode === "p3" && vp1 && vp2 && vp3) return [{ kind: "pencil", vp: vp1 }, { kind: "pencil", vp: vp2 }, { kind: "pencil", vp: vp3 }];
+  return null;
+}
+
+function _alongAxis(A: Pt, axis: Family, t: number): Pt {
+  return axis.kind === "pencil"
+    ? { x: A.x + t * (axis.vp.x - A.x), y: A.y + t * (axis.vp.y - A.y) }
+    : { x: A.x + t * axis.dir.x, y: A.y + t * axis.dir.y };
+}
+
+// 八角：A, B1, B2, B3, C12, C13, C23, D123（任一交点病态 → null）
+export function boxCorners(axes: [Family, Family, Family], box: BoxParams): Pt[] | null {
+  const [a1, a2, a3] = axes;
+  const A = box.A;
+  const B1 = _alongAxis(A, a1, box.t[0]);
+  const B2 = _alongAxis(A, a2, box.t[1]);
+  const B3 = _alongAxis(A, a3, box.t[2]);
+  const C12 = intersectLines(familyLineThrough(B1, a2), familyLineThrough(B2, a1));
+  const C13 = intersectLines(familyLineThrough(B1, a3), familyLineThrough(B3, a1));
+  const C23 = intersectLines(familyLineThrough(B2, a3), familyLineThrough(B3, a2));
+  if (!C12 || !C13 || !C23) return null;
+  const D = intersectLines(familyLineThrough(C12, a3), familyLineThrough(C13, a2));
+  if (!D) return null;
+  return [A, B1, B2, B3, C12, C13, C23, D];
+}
+
+// box 的 12 条棱（画 gizmo 用；索引对 boxCorners 的顺序）
+export const BOX_EDGES: Array<[number, number]> = [
+  [0, 1], [0, 2], [0, 3],
+  [1, 4], [2, 4], [1, 5], [3, 5], [2, 6], [3, 6],
+  [4, 7], [5, 7], [6, 7],
+];
+
+// n×n 高斯消元（部分主元）。奇异 → null。
+function solveN(M: number[][], b: number[]): number[] | null {
+  const n = b.length;
+  const a = M.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(a[r][col]) > Math.abs(a[piv][col])) piv = r;
+    if (Math.abs(a[piv][col]) < 1e-12) return null;
+    if (piv !== col) { const t = a[col]; a[col] = a[piv]; a[piv] = t; }
+    for (let r = col + 1; r < n; r++) {
+      const f = a[r][col] / a[col][col];
+      for (let c = col; c <= n; c++) a[r][c] -= f * a[col][c];
+    }
+  }
+  const x = new Array(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) {
+    let s = a[r][n];
+    for (let c = r + 1; c < n; c++) s -= a[r][c] * x[c];
+    x[r] = s / a[r][r];
+  }
+  return x;
+}
+
+export interface BoxDragState {
+  mode: PerspMode;
+  lockHorizon: boolean;
+  vp1: Vp; vp2: Vp | null; vp3: Vp | null;
+  box: BoxParams;
+}
+
+// 拖 box 角 → 阻尼 Gauss-Newton 反算 (VP, box)。cornerIdx 目标权重 1，其余角权重 0.15
+//   （既跟手又不让 box 整体乱跑）。解不动/病态 → 返原状态（拖拽无响应但不崩）。
+export function solveBoxDrag(st: BoxDragState, cornerIdx: number, target: Pt): BoxDragState {
+  const pack = (s: BoxDragState): number[] => {
+    const p = [s.box.A.x, s.box.A.y, s.box.t[0], s.box.t[1], s.box.t[2], s.vp1.x, s.vp1.y];
+    if (s.mode !== "p1" && s.vp2) { p.push(s.vp2.x); if (!s.lockHorizon) p.push(s.vp2.y); }
+    if (s.mode === "p3" && s.vp3) { p.push(s.vp3.x, s.vp3.y); }
+    return p;
+  };
+  const unpack = (p: number[]): BoxDragState => {
+    let i = 0;
+    const A = { x: p[i++], y: p[i++] };
+    const t: [number, number, number] = [p[i++], p[i++], p[i++]];
+    const vp1 = { x: p[i++], y: p[i++] };
+    let vp2: Vp | null = null, vp3: Vp | null = null;
+    if (st.mode !== "p1" && st.vp2) {
+      const x = p[i++];
+      const y = st.lockHorizon ? vp1.y : p[i++];
+      vp2 = { x, y };
+    }
+    if (st.mode === "p3" && st.vp3) vp3 = { x: p[i++], y: p[i++] };
+    return { mode: st.mode, lockHorizon: st.lockHorizon, vp1, vp2, vp3, box: { A, t } };
+  };
+  const cornersOf = (s: BoxDragState): Pt[] | null => {
+    const axes = boxAxesForMode(s.mode, s.vp1, s.vp2, s.vp3);
+    return axes ? boxCorners(axes, s.box) : null;
+  };
+  const base = cornersOf(st);
+  if (!base) return st;
+  const HOLD = 0.15;
+  const residuals = (s: BoxDragState): number[] | null => {
+    const cs = cornersOf(s);
+    if (!cs) return null;
+    const r: number[] = [];
+    for (let k = 0; k < 8; k++) {
+      const w = k === cornerIdx ? 1 : HOLD;
+      const ref = k === cornerIdx ? target : base[k];
+      r.push(w * (cs[k].x - ref.x), w * (cs[k].y - ref.y));
+    }
+    return r;
+  };
+  let p = pack(st);
+  const n = p.length;
+  for (let iter = 0; iter < 4; iter++) {
+    const s0 = unpack(p);
+    const r0 = residuals(s0);
+    if (!r0) break;
+    // 数值 Jacobian（前向差分；坐标步长 0.5px、行程步长 0.002）
+    const J: number[][] = [];
+    for (let j = 0; j < n; j++) {
+      const h = j >= 2 && j <= 4 && st.mode !== "p1" ? 0.002 : (j >= 2 && j <= 4 ? 0.5 : 0.5);
+      const pj = [...p]; pj[j] += h;
+      const rj = residuals(unpack(pj));
+      if (!rj) { J.push(new Array(r0.length).fill(0)); continue; }
+      J.push(r0.map((v, k) => (rj[k] - v) / h));
+    }
+    // (JᵀJ + λI) δ = −Jᵀr
+    const M: number[][] = [], b: number[] = [];
+    for (let i2 = 0; i2 < n; i2++) {
+      b.push(-J[i2].reduce((acc, v, k) => acc + v * r0[k], 0));
+      const row: number[] = [];
+      for (let j2 = 0; j2 < n; j2++) {
+        row.push(J[i2].reduce((acc, v, k) => acc + v * J[j2][k], 0));
+      }
+      row[i2] += 1e-3 * (row[i2] || 1);
+      M.push(row);
+    }
+    const delta = solveN(M, b);
+    if (!delta || delta.some((d) => !Number.isFinite(d))) break;
+    for (let j = 0; j < n; j++) p[j] += delta[j];
+    // 行程护栏：pencil 轴 t ∈ [0.02, 0.9]（越过 VP = 翻面）；parallel 轴不限号
+    const s1 = unpack(p);
+    const axes = boxAxesForMode(s1.mode, s1.vp1, s1.vp2, s1.vp3);
+    if (axes) {
+      for (let ax = 0; ax < 3; ax++) {
+        if (axes[ax].kind === "pencil") p[2 + ax] = Math.max(0.02, Math.min(0.9, p[2 + ax]));
+      }
+    }
+  }
+  const out = unpack(p);
+  return cornersOf(out) ? out : st;
 }
