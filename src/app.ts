@@ -17,7 +17,7 @@ import { WEBPAINT_VERSION } from "./version.ts";
 import { initI18n, t, reconcileLangFromPrefs } from "./i18n/index.ts";   // 本地化：<html lang> + 静态 HTML data-i18n 填充
 import { PaintDoc } from "./doc.ts";
 import { Board } from "./board.ts";
-import { InputController, setPressureDisabled, isPressureDisabled } from "./input.ts";
+import { InputController, bindPressureDisabled } from "./input.ts";
 import { makeCurrentBrush } from "./resolved-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolveBrush，同文件）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
 import { Workpiece } from "./workpiece/workpiece.ts";
@@ -47,7 +47,7 @@ import { initToolbar, RACK_PANEL_BY_TOOL } from "./toolbar.ts";
 import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
 import { setDocCompositor } from "./doc-render.ts";
-import { createEditorState, restoreShapePersp } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
+import { createEditorState, restoreShapePersp, editorState } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
@@ -151,10 +151,11 @@ const leftDial = mountLeftDial(els.leftDialMount, {
   onOpacity: (frac) => setOpacity(frac),
   onBrushTap: () => { const id = RACK_PANEL_BY_TOOL[editMode.current()]; if (id) openExclusive(id); },
   onBrushLongpress: () => { const b = rack.findToolBrush(_leftDial()); if (b) { closeExclusive(); rack.openBrushSettings(b.id); } },
-  // v0.6.14 禁用笔压（session 态，见 input.ts）：开 = 恒定 0.5
-  getPressureDisabled: () => isPressureDisabled(),
-  onTogglePressure: (v) => { setPressureDisabled(v); setStatus(t(v ? "status.pressureOff" : "status.pressureOn")); },
+  // v0.6.15 禁用笔压（per-doc desk：editorState.pressureDisabled ⇄ dialReactive.pressureOff）：开 = 恒定 0.5
+  getPressureDisabled: () => dialReactive.pressureOff,
+  onTogglePressure: (v) => { editorState.pressureDisabled = v; setStatus(t(v ? "status.pressureOff" : "status.pressureOn")); },
 });
+bindPressureDisabled(() => dialReactive.pressureOff);   // 引擎 thunk（每 pointer 事件读；载入/重置经 applyBoundFromGroups 自动回灌）
 // 键盘 [ ] 调粗接线（需 board/leftDial，已建好）。
 // disposer 收进 __wpBootTeardown（v417）：真 app 永不调（监听活到页面结束）；**测试**要靠它拆。
 //   app.ts 是纯 top-level 副作用模块、ESM 缓存下只能 import 一次，boot smoke（test/app-boot.test.mjs）

@@ -56,6 +56,7 @@ test("[editor-state] Serialize 往返 + 深拷贝解耦", () => {
   editorState.refPanel.viewport = { tx: 5, ty: 6, scale: 2, rot: 90 };
   editorState.viewport = { tx: 1, ty: 2, scale: 3, rot: 0 };
   editorState.checkboard = true;
+  editorState.pressureDisabled = true;   // v0.6.15 禁用笔压 = per-doc desk（跟 ora 走）
   const snap = editorState.Serialize();
   // 深拷贝解耦：改 snap 不影响 live
   const decoupleProbe = editorState.Serialize();
@@ -64,6 +65,7 @@ test("[editor-state] Serialize 往返 + 深拷贝解耦", () => {
   // 往返（用未被篡改的 snap）
   editorState.reset();
   eq(editorState.brushTool.size, 12, "reset 回默认");
+  eq(editorState.pressureDisabled, false, "reset 回默认：笔压恢复启用");
   editorState.Unserialize(snap);
   eq(editorState.brushTool.size, 42, "Unserialize 复原 size");
   eq(editorState.brushTool.color, "#abcdef", "复原 color");
@@ -71,6 +73,7 @@ test("[editor-state] Serialize 往返 + 深拷贝解耦", () => {
   eq(J(editorState.refPanel.viewport), J({ tx: 5, ty: 6, scale: 2, rot: 90 }), "复原 refPanel.viewport");
   eq(J(editorState.viewport), J({ tx: 1, ty: 2, scale: 3, rot: 0 }), "复原 viewport");
   eq(editorState.checkboard, true, "复原 checkboard");
+  eq(editorState.pressureDisabled, true, "复原 pressureDisabled（禁用笔压跟 ora 走）");
 });
 
 test("[editor-state] Unserialize 容错（缺字段留 default、多字段忽略）", () => {

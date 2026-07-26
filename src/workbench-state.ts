@@ -62,6 +62,7 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     tool: "brush",                 // 镜像 editMode.current()（含 transient）；_syncEditModeUI 同步
     color: state.color,
     canDraw: true,                 // 镜像 editMode.canDraw()；_syncEditModeUI 同步 → <LeftDial> 滑块 disabled
+    pressureOff: false,            // 禁用笔压（per-doc desk：editorState.pressureDisabled 绑定于此；引擎经 input.ts thunk 读）
   });
   // color 读写代理回 dialReactive（app 里 state.color 零改动，背后反应式）。
   Object.defineProperty(state, "color", {
@@ -77,6 +78,7 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     getActiveBrushId: () => toolStates.brush.activeBrushId ?? null, setActiveBrushId: (v) => { toolStates.brush.activeBrushId = v; },
     getColor: () => dialReactive.color, setColor: (v) => { dialReactive.color = v; },
     getPickMode: () => state.pickMode, setPickMode: (v) => { state.pickMode = v; },
+    getPressureOff: () => dialReactive.pressureOff, setPressureOff: (v) => { dialReactive.pressureOff = v; },
   });
 
   return { state, dialReactive };
@@ -163,6 +165,8 @@ function freshGroups() {
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
     viewport:      null as EditorViewport | null,
     checkboard:    false,
+    // v0.6.15 禁用笔压（user：「显然跟着 ora 走，是 editor state」）：开 = 忽略压感恒定 0.5
+    pressureDisabled: false,
   };
 }
 export type EditorGroups = ReturnType<typeof freshGroups>;
@@ -180,6 +184,7 @@ interface EngineBind {
   getActiveBrushId(): string | null; setActiveBrushId(v: string | null): void;
   getColor(): string; setColor(v: string): void;
   getPickMode(): string; setPickMode(v: string): void;
+  getPressureOff(): boolean; setPressureOff(v: boolean): void;
 }
 let _bind: EngineBind | null = null;
 // 用 _bind 的 raw setter 灌值（不经 editorState setter → 不 mark dirty；load/reset/bind 用）。
@@ -188,6 +193,7 @@ function applyBoundFromGroups(g: EditorGroups): void {
   _bind.setSize(g.brushTool.size); _bind.setOpacity(g.brushTool.opacity);
   _bind.setActiveBrushId(g.brushTool.activeBrushId); _bind.setColor(g.brushTool.color);
   _bind.setPickMode(g.colorPicker.layerMode);
+  _bind.setPressureOff(g.pressureDisabled);
 }
 // boot 时 createEditorState 调：把当前 S.g（默认/已载入）灌进反应式引擎，二者对齐。
 export function bindEditorReactive(b: EngineBind): void { _bind = b; applyBoundFromGroups(S.g); }
@@ -279,6 +285,9 @@ export const editorState = {
   //   故 setter 生产代码不调；留着是为了 Unserialize/测试能构造完整 desk。
   get viewport(): EditorViewport | null { return S.g.viewport; }, set viewport(v: EditorViewport | null) { S.g.viewport = v; },
   get checkboard(): boolean { return S.g.checkboard; }, set checkboard(v: boolean) { S.g.checkboard = v; },
+  // 禁用笔压（per-doc desk）：绑 dialReactive.pressureOff（UI 反应式 + 引擎 thunk 同源），未绑定回落 S.g
+  get pressureDisabled(): boolean { return _bind ? _bind.getPressureOff() : S.g.pressureDisabled; },
+  set pressureDisabled(v: boolean) { if (_bind) _bind.setPressureOff(v); else S.g.pressureDisabled = v; },
 
   // ── 除各字段外仅此四法 ──
   // 深拷贝：与 live 解耦；即 .webpaint/editor-state.json 内容。绑定字段（brushTool/pickMode）从引擎 live 取。
@@ -287,6 +296,7 @@ export const editorState = {
     if (_bind) {
       out.brushTool = { activeBrushId: _bind.getActiveBrushId(), size: _bind.getSize(), opacity: _bind.getOpacity(), color: _bind.getColor() };
       out.colorPicker = { layerMode: _bind.getPickMode() };
+      out.pressureDisabled = _bind.getPressureOff();
     }
     return out;
   },

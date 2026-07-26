@@ -44,6 +44,7 @@ export interface DialReactive {
   tool: string;
   color: string;
   canDraw: boolean;
+  pressureOff: boolean;   // 禁用笔压（per-doc desk：editorState.pressureDisabled 绑定于此）
 }
 
 // ---- 句柄类（深源未入门，先描述消费方用到的接口；grow as needed）----
