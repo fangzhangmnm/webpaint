@@ -146,14 +146,15 @@ function freshGroups() {
     // ADR-0006 透视 frame（形状笔全局、per-ora）：VP 0-3 + 锁地平线（默认开）+ 参考点 + 当前平面。
     //   坐标 doc 空间、snap 像素中线 +0.5。裁剪/旋转/翻转/偏移画布时必须过 remapShapePersp（doc-ops 挂钩）。
     persp: {
-      mode: "off" as string,   // "off"|"p1"|"p2"|"p3"（UI 重做 2026-07-25：显式模式 subtool）
-      vp1: null as { x: number; y: number } | null,
-      vp2: null as { x: number; y: number } | null,
-      vp3: null as { x: number; y: number } | null,
+      mode: "off" as string,   // "off"|"p1"|"p2"|"p3"（显式模式组槽）
       lockHorizon: true,
-      refPoint: null as { x: number; y: number } | null,
       plane: "ground" as string,   // "ground"|"wall"|"wallL"|"wallR"（按 mode 过滤；关透视在 mode）
       showGizmo: true,             // 绘图时显示 VP+地平线（user：作画时也要看得到，给显隐钮）
+      // per-mode VP 槽位（user 拍板：一/二/三点分开存互不污染）。参考点已删（box 取代——
+      //   「那个本来就是低配的方块」）。
+      p1: { vp1: null as { x: number; y: number } | null },
+      p2: { vp1: null as { x: number; y: number } | null, vp2: null as { x: number; y: number } | null },
+      p3: { vp1: null as { x: number; y: number } | null, vp2: null as { x: number; y: number } | null, vp3: null as { x: number; y: number } | null },
     },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
@@ -253,13 +254,12 @@ export const editorState = {
   },
   persp: {
     get mode(): string { return S.g.persp.mode; }, set mode(v: string) { S.g.persp.mode = v; },
-    get vp1() { return S.g.persp.vp1; }, set vp1(v: { x: number; y: number } | null) { S.g.persp.vp1 = v; },
-    get vp2() { return S.g.persp.vp2; }, set vp2(v: { x: number; y: number } | null) { S.g.persp.vp2 = v; },
-    get vp3() { return S.g.persp.vp3; }, set vp3(v: { x: number; y: number } | null) { S.g.persp.vp3 = v; },
     get lockHorizon(): boolean { return S.g.persp.lockHorizon; }, set lockHorizon(v: boolean) { S.g.persp.lockHorizon = v; },
-    get refPoint() { return S.g.persp.refPoint; }, set refPoint(v: { x: number; y: number } | null) { S.g.persp.refPoint = v; },
     get plane(): string { return S.g.persp.plane; }, set plane(v: string) { S.g.persp.plane = v; },
     get showGizmo(): boolean { return S.g.persp.showGizmo; }, set showGizmo(v: boolean) { S.g.persp.showGizmo = v; },
+    get p1() { return S.g.persp.p1; },
+    get p2() { return S.g.persp.p2; },
+    get p3() { return S.g.persp.p3; },
   },
   grid: {
     get on(): boolean { return S.g.grid.on; }, set on(v: boolean) { S.g.grid.on = v; },
@@ -303,11 +303,13 @@ export type EditorStateStruct = typeof editorState;
 //   是 doc 水平线，转 90° 后无法表示；下次进 VP 编辑用户可重新锁）。
 export function remapShapePersp(f: (p: { x: number; y: number }) => { x: number; y: number }, opts: { unlockHorizon?: boolean } = {}): void {
   const g = S.g.persp;
-  if (g.vp1) g.vp1 = f(g.vp1);
-  if (g.vp2) g.vp2 = f(g.vp2);
-  if (g.vp3) g.vp3 = f(g.vp3);
-  if (g.refPoint) g.refPoint = f(g.refPoint);
-  if (opts.unlockHorizon && g.vp1 && g.vp2) g.lockHorizon = false;
+  if (g.p1.vp1) g.p1.vp1 = f(g.p1.vp1);
+  if (g.p2.vp1) g.p2.vp1 = f(g.p2.vp1);
+  if (g.p2.vp2) g.p2.vp2 = f(g.p2.vp2);
+  if (g.p3.vp1) g.p3.vp1 = f(g.p3.vp1);
+  if (g.p3.vp2) g.p3.vp2 = f(g.p3.vp2);
+  if (g.p3.vp3) g.p3.vp3 = f(g.p3.vp3);
+  if (opts.unlockHorizon && (g.p2.vp1 || g.p3.vp1)) g.lockHorizon = false;
 }
 
 // 透视配置快照/还原（docTransform undo 信封用；深拷贝，desk 无自身 undo 所以只随 doc 变换走）

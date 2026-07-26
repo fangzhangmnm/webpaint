@@ -25,7 +25,6 @@ export interface PerspConfig {
   vp2: Vp | null;
   vp3: Vp | null;
   lockHorizon: boolean;   // 默认 true：vp2.y 锁 = vp1.y（极端场景关掉可歪地平线）
-  refPoint: Vp | null;    // 参考点：数学无用，VP 编辑模式里向各 VP 发淡射线帮美工立框架
   plane: PlaneId;
 }
 
@@ -277,25 +276,29 @@ export function planesForMode(mode: PerspMode): PlaneId[] {
   return [];
 }
 
-// 模式 + 存的 VP 位置 → 引擎吃的 PerspConfig（mode gate：p1 只喂 vp1，p2 喂对，p3 全喂；
-//   off/缺 VP → null=视口对齐）。plane 不合法时 coerce 到 ground。纯函数可测。
-export function configFromModeState(g: {
-  mode: string; vp1: Vp | null; vp2: Vp | null; vp3: Vp | null;
-  lockHorizon: boolean; refPoint: Vp | null; plane: string;
-}): PerspConfig | null {
+// per-mode VP 槽位（user 拍板：一/二/三点透视分开存，切模式互不污染）
+export interface PerspModeState {
+  mode: string; lockHorizon: boolean; plane: string;
+  p1: { vp1: Vp | null };
+  p2: { vp1: Vp | null; vp2: Vp | null };
+  p3: { vp1: Vp | null; vp2: Vp | null; vp3: Vp | null };
+}
+
+// 模式 + 该模式槽位的 VP → 引擎吃的 PerspConfig（off/缺 VP → null=视口对齐）。
+//   plane 不合法时 coerce 到 ground。纯函数可测。
+export function configFromModeState(g: PerspModeState): PerspConfig | null {
   const mode = g.mode as PerspMode;
   if (mode !== "p1" && mode !== "p2" && mode !== "p3") return null;
-  if (!g.vp1) return null;
-  if ((mode === "p2" || mode === "p3") && !g.vp2) return null;
-  if (mode === "p3" && !g.vp3) return null;
+  const slot = mode === "p1" ? { ...g.p1, vp2: null, vp3: null }
+    : mode === "p2" ? { ...g.p2, vp3: null } : g.p3;
+  if (!slot.vp1) return null;
+  if ((mode === "p2" || mode === "p3") && !slot.vp2) return null;
+  if (mode === "p3" && !slot.vp3) return null;
   const planes = planesForMode(mode);
   const plane = (planes as string[]).includes(g.plane) ? (g.plane as PlaneId) : "ground";
   return normalizeConfig({
-    vp1: g.vp1,
-    vp2: mode === "p1" ? null : g.vp2,
-    vp3: mode === "p3" ? g.vp3 : null,
+    vp1: slot.vp1, vp2: slot.vp2, vp3: slot.vp3,
     lockHorizon: g.lockHorizon,
-    refPoint: g.refPoint,
     plane,
   });
 }
