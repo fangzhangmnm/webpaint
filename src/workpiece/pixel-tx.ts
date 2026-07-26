@@ -50,6 +50,12 @@ export class PixelTx {
     const before = this._before;
     this._before = null;
     if (!L || L.isGroup || !before) { disposeLayerSnap(before); return false; }
+    // no-op 守卫（v0.6.17，user：笔/滤镜笔/形状笔画下去若画布无任何实质变化，不占 undo 步）：
+    //   tile 句柄图与 before 逐格同 id ⇔ 这笔没写过任何像素（画布外/零 stamps/被选区全裁/
+    //   擦空白区——CoW 纪律保证真实写入必换句柄）。跳过 finalize（没写过就没有要 mask 还原的），
+    //   不入栈 → 不 bump dirty、不发 histchange（保存/脏标记随之天然跳过）。
+    //   返回 false 与「层没了」共用（调用方 input.ts 本就不读返回值）。
+    if (L.pixels.snapshotEquals(before.pixels)) { disposeLayerSnap(before); return false; }
     if (finalize) finalize(L, snapToImage(before, L.docW, L.docH));
     const st = history.run(w, ops.pixels, { layerId: this._layerId, _initialBefore: before }, { label: this._label });
     return st.ok;

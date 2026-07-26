@@ -268,6 +268,7 @@ function _colorBrushStamp(state: ColorBrushState, cx: number, cy: number, pressu
   const layerImg = layer.getImageData(sx0, sy0, sw, sh);
   const layerData = layerImg.data;
   const flow = Math.max(0, Math.min(1, brushSettings.flow ?? brushSettings.opacity ?? 1));
+  let blended = false;   // v0.6.17：一个像素都没混过（选区全裁/flow=0）→ 跳过写回，免得同字节换新 tile 句柄骗过 no-op 守卫
   for (let j = 0; j < sh; j++) {
     for (let i = 0; i < sw; i++) {
       const px = sx0 + i, py = sy0 + j;
@@ -284,6 +285,7 @@ function _colorBrushStamp(state: ColorBrushState, cx: number, cy: number, pressu
       let a = stampA * flow;
       if (selData) a *= selData[j * sw + i] / 255;
       if (a <= 0) continue;
+      blended = true;
       const lo = (j * sw + i) * 4;
       const fo = ((j + oy) * ew + (i + ox)) * 4;
       layerData[lo]     = layerData[lo]     * (1 - a) + dstImg.data[fo]     * a;
@@ -292,6 +294,7 @@ function _colorBrushStamp(state: ColorBrushState, cx: number, cy: number, pressu
       layerData[lo + 3] = layerData[lo + 3] * (1 - a) + dstImg.data[fo + 3] * a;
     }
   }
+  if (!blended) return;   // 零像素混合 → 不写回、不标 dirty（见上）
   layer.putImageData(sx0, sy0, layerImg);   // doc 坐标写回 tile
   const d = state.dirty;
   if (!d) state.dirty = [sx0, sy0, sx1, sy1];

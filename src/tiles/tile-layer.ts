@@ -271,6 +271,18 @@ export class LayerPixels {
     this._tiles.forEach((h, key) => tiles.push([key, h.acquire()]));
     return { across: this._across, tiles };
   }
+  // 快照等价判定（v0.6.17 no-op stroke 守卫用）：tile 图与快照逐格同 id ⇔ 内容逐字节相同。
+  //   依据 CoW 纪律：任何真实写入都经 _setTileBuf 换新句柄（或删格/新增格），id 不变 ⇒ 没写过。
+  //   O(tiles) 整数比较、零像素读（2048² 满层 = 64 格）。
+  snapshotEquals(snap: PixelsSnapshot): boolean {
+    if (snap.across !== this._across) return false;
+    if (snap.tiles.length !== this._tiles.size) return false;
+    for (const [key, h] of snap.tiles) {
+      const cur = this._tiles.get(key);
+      if (!cur || cur.id !== h.id) return false;
+    }
+    return true;
+  }
   // 还原快照（快照可反复用：restore 装的是 acquire 副本，快照自身句柄不消耗，
   // 最终仍需 disposePixelsSnapshot）。
   restore(snap: PixelsSnapshot): void {
