@@ -100,14 +100,17 @@ test("[editor-state] v0.5.11 迁移：stale bucket 键忽略、magicWand.thresho
 test("[editor-state] 形状笔（ADR-0005）：默认 / 往返 / 老 doc 缺组补默认", () => {
   editorState.reset();
   eq(editorState.shapeBrush.sub, "line", "sub 默认 line");
-  eq(editorState.shapeBrush.constrain, false, "constrain 默认 false");
+  eq(editorState.shapeBrush.constrainLine, false, "per-图形约束默认全不锁");
+  eq(editorState.shapeBrush.constrainRect, false);
+  eq(editorState.shapeBrush.constrainCircle, false);
   editorState.shapeBrush.sub = "circle";
-  editorState.shapeBrush.constrain = true;
+  editorState.shapeBrush.constrainCircle = true;
   const ser = editorState.Serialize();
   editorState.reset();
   editorState.Unserialize(ser);
   eq(editorState.shapeBrush.sub, "circle", "Serialize 往返 sub");
-  eq(editorState.shapeBrush.constrain, true, "Serialize 往返 constrain");
+  eq(editorState.shapeBrush.constrainCircle, true, "Serialize 往返 per-图形约束");
+  eq(editorState.shapeBrush.constrainRect, false, "别的图形不受影响");
   // 老 doc 的 editor-state.json 没有 shapeBrush 组 → 留默认不崩
   editorState.reset();
   editorState.Unserialize({ magicWand: { threshold: 30 } });

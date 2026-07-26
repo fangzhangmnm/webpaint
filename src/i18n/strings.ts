@@ -457,6 +457,7 @@ export const S = {
   "sb.border":       { zh: "外框（默认关）", en: "Outer border (default off)", ja: "外枠（既定オフ）", tok: "selo sinpin" },
   "sb.rows":         { zh: "行", en: "Rows", ja: "行", tok: "linja" },
   "sb.cols":         { zh: "列", en: "Cols", ja: "列", tok: "palisa" },
+  "sb.gridMore":     { zh: "格线配置（行 / 列 / 外框）", en: "Grid settings (rows / cols / border)", ja: "グリッド設定", tok: "nasin pi linja mute" },
   "sb.borderShort":  { zh: "框", en: "Box", ja: "枠", tok: "selo" },
   "sb.perspModeSlot": { zh: "透视模式（视口对齐 / 一点 / 二点 / 三点）", en: "Perspective mode", ja: "パースモード", tok: "nasin lukin weka" },
   "sb.planeSlot":    { zh: "作业平面（地板 / 墙）", en: "Working plane", ja: "作業平面", tok: "ma pali" },
