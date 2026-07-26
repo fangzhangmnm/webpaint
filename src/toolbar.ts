@@ -83,13 +83,16 @@ export function updateShapeToolbar() {
   shapeToolbarStack.classList.toggle("hidden", !active);
   if (!active) { shapeSubMenu?.classList.add("hidden"); return; }
   const sub = input.shapeBrush.getSubTool();
+  const gPersp = editorState.persp;
+  const perspMode = (["p1", "p2", "p3"].includes(gPersp.mode) ? gPersp.mode : "off") as PerspMode;
   shapeSubSlotUse.setAttribute("href", SHAPE_SUB_ICON[sub] || "#line");
   for (const b of shapeSubMenuBtns) {
     b.setAttribute("aria-pressed", b.dataset.shapeSub === sub ? "true" : "false");
   }
-  // 约束钮：grid 无约束语义 → 隐藏（透视平面下正方/正圆不可定义，但 line 的 VP snap 仍有意义，保留显示）
+  // 约束钮：grid 无约束语义 → 隐藏；line 在透视下语义换成「吸向消失点」→ 换图标（user）
   shapeConstrainBtn.classList.toggle("hidden", sub === "grid");
-  shapeConstrainUse.setAttribute("href", SHAPE_CONSTRAIN_ICON[sub] || "#snap-angle");
+  const constrainIcon = sub === "line" && perspMode !== "off" ? "#snap-vp" : (SHAPE_CONSTRAIN_ICON[sub] || "#snap-angle");
+  shapeConstrainUse.setAttribute("href", constrainIcon);
   shapeConstrainBtn.setAttribute("aria-pressed", input.shapeBrush.getConstrain() ? "true" : "false");
   // grid 配置区（sub=grid 时显）
   shapeGridCtx.classList.toggle("hidden", sub !== "grid");
@@ -100,8 +103,8 @@ export function updateShapeToolbar() {
   }
   // 透视模式组槽（UI v2.1）：槽显当前模式；透视开着 → 平面槽（line 智能吸附不吃平面 → 藏）+
   //   VP 编辑钮 + 绘图 gizmo 显隐钮出现
-  const g = editorState.persp;
-  const mode = (["p1", "p2", "p3"].includes(g.mode) ? g.mode : "off") as PerspMode;
+  const g = gPersp;
+  const mode = perspMode;
   shapePerspModeSlotUse.setAttribute("href", PERSP_MODE_ICON[mode]);
   for (const b of shapePerspModeMenuBtns) {
     b.setAttribute("aria-pressed", b.dataset.perspMode === mode ? "true" : "false");
@@ -141,8 +144,8 @@ export function updateLassoToolbar() {
   const fillActive = m === "fill";
   const selToolActive = lassoActive || fillActive;   // v0.5.12：选区/填充共用同一 Row1（UI 独立≠第二套代码）
   const sub = input.lasso.getSubTool();
-  // 形状笔与 lasso stack 同位 fixed → 互斥（同 picker 先例）；shape 中有选区时去选走 Ctrl+D
-  const shapeActive = m === "shapeBrush";
+  // 形状笔/VP 编辑与 lasso stack 同位 fixed → 互斥（同 picker 先例）；shape 中去选走 Ctrl+D
+  const shapeActive = m === "shapeBrush" || m === "perspEdit";
   const showAny = (floating || hasSelection || selToolActive) && !pickerActive && !shapeActive;
   lassoToolbarStack.classList.toggle("hidden", !showAny);
   if (!showAny) { closeSelEditUI(); closeSubMenu(); closeSetOpMenu(); return; }
@@ -536,11 +539,18 @@ export function initToolbar(ctx: AppContext) {
     const g = editorState.persp;
     g.mode = mode;
     if (mode !== "off") {
+      // per-mode 槽位（一/二/三点分开存）：本模式缺的 VP 按默认位补齐，调过的保留
       const def = defaultVpsForMode(mode, doc.width, doc.height);
-      if (!g.vp1 && def.vp1) g.vp1 = def.vp1;
-      if (!g.vp2 && def.vp2) g.vp2 = def.vp2;
-      if (!g.vp3 && def.vp3) g.vp3 = def.vp3;
-      if (!g.refPoint) g.refPoint = { x: Math.floor(doc.width / 2) + 0.5, y: Math.floor(doc.height / 2) + 0.5 };   // 参考点默认开
+      if (mode === "p1") {
+        if (!g.p1.vp1 && def.vp1) g.p1.vp1 = def.vp1;
+      } else if (mode === "p2") {
+        if (!g.p2.vp1 && def.vp1) g.p2.vp1 = def.vp1;
+        if (!g.p2.vp2 && def.vp2) g.p2.vp2 = def.vp2;
+      } else {
+        if (!g.p3.vp1 && def.vp1) g.p3.vp1 = def.vp1;
+        if (!g.p3.vp2 && def.vp2) g.p3.vp2 = def.vp2;
+        if (!g.p3.vp3 && def.vp3) g.p3.vp3 = def.vp3;
+      }
       const planes = planesForMode(mode) as string[];
       if (!planes.includes(g.plane)) g.plane = "ground";
     }

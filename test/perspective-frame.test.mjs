@@ -147,19 +147,25 @@ describe("perspective-frame · snap 方向 + 配置规范化", () => {
   });
 });
 
-describe("perspective-frame · 模式映射（UI v2）", () => {
-  const base = { vp1: { x: 1.5, y: 2.5 }, vp2: { x: 100.5, y: 2.5 }, vp3: { x: 50.5, y: 900.5 }, lockHorizon: true, refPoint: null, plane: "ground" };
+describe("perspective-frame · 模式映射（UI v2.2：per-mode 槽位分开存）", () => {
+  const V = (x, y) => ({ x, y });
+  const base = { lockHorizon: true, plane: "ground",
+    p1: { vp1: V(1.5, 2.5) },
+    p2: { vp1: V(1.5, 2.5), vp2: V(100.5, 2.5) },
+    p3: { vp1: V(1.5, 2.5), vp2: V(100.5, 2.5), vp3: V(50.5, 900.5) } };
   it("off/缺 VP → null（视口对齐）", () => {
     eq(configFromModeState({ ...base, mode: "off" }), null);
-    eq(configFromModeState({ ...base, mode: "p2", vp2: null }), null);
-    eq(configFromModeState({ ...base, mode: "p3", vp3: null }), null);
+    eq(configFromModeState({ ...base, mode: "p2", p2: { vp1: V(1, 2), vp2: null } }), null);
+    eq(configFromModeState({ ...base, mode: "p3", p3: { ...base.p3, vp3: null } }), null);
   });
-  it("p1 只喂 vp1；p2 喂对；p3 全喂（多余 VP 被 mode gate 掉）", () => {
-    const c1 = configFromModeState({ ...base, mode: "p1" });
-    eq(c1.vp2, null); eq(c1.vp3, null); assert(c1.vp1);
-    const c2 = configFromModeState({ ...base, mode: "p2" });
+  it("各模式读各自槽位（一点不复用二点的数据）", () => {
+    const st = { ...base, p1: { vp1: V(9.5, 8.5) } };
+    const c1 = configFromModeState({ ...st, mode: "p1" });
+    eq(c1.vp1.x, 9.5); eq(c1.vp2, null); eq(c1.vp3, null);
+    const c2 = configFromModeState({ ...st, mode: "p2" });
+    eq(c2.vp1.x, 1.5);   // p2 槽位，不受 p1 槽影响
     assert(c2.vp1 && c2.vp2); eq(c2.vp3, null);
-    const c3 = configFromModeState({ ...base, mode: "p3" });
+    const c3 = configFromModeState({ ...st, mode: "p3" });
     assert(c3.vp1 && c3.vp2 && c3.vp3);
   });
   it("plane 不合法 → coerce ground（p1 拿到 wallL 之类）", () => {
