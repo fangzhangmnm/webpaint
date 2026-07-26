@@ -8,8 +8,11 @@ const { BrushEngine } = await import("../src/brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
 const { PaintDoc } = await import("../src/doc.ts");
 
+// v0.6.14 测试卫生：doc 收集起来文件末尾统一 dispose（防 tile-pool FR 泄漏 assert 刷屏；非产品泄漏）
+const _docs = [];
 function drive(settings) {
   const doc = new PaintDoc({ width: 512, height: 512 });
+  _docs.push(doc);
   const eng = new BrushEngine();
   eng.beginStroke(doc.layers[0], settings, 50, 50, 1.0, "brush");
   eng.extendStroke(150, 60, 0.9);
@@ -48,5 +51,12 @@ describe("brush.collectStamps · GPU stamp-list 出栈", () => {
   it("pixelMode → null（caller 回退 CPU 直绘）", () => {
     const s = resolveBrush({ size: 10, color: "#000000", preset: { pixelMode: true } });
     eq(drive(s).collectStamps(), null, "pixelMode → null");
+  });
+
+  it("收尾：释放本文件的 doc tiles（防 tile-pool FR 泄漏误报刷屏）", async () => {
+    const { eachLeaf } = await import("../src/doc.ts");
+    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
+    _docs.length = 0;
+    assert(true, "disposed");
   });
 });

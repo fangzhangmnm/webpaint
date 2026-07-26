@@ -99,6 +99,11 @@ useStub();
 const { PaintDoc } = await import("../src/doc.ts");
 globalThis.OffscreenCanvas = _prevOSC;   // import 完还原，避免毒到不设 stub 的 test 文件
 
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+const _docs = [], _merges = [];
+const mkDoc = () => { const d = new PaintDoc({ width: 4, height: 2 }); _docs.push(d); return d; };
+const trackMerge = (r) => { _merges.push(r); return r; };
+
 // 填一个 layer 的整块矩形（tile-SoT：putImageData 纯路径），rgba
 function fillLayer(L, w, h, r, g, b, a) {
   const d = new Uint8ClampedArray(w * h * 4);
@@ -119,7 +124,7 @@ function px(L, x, y) { return [...L.sampleAt(x, y)]; }
 describe("mergeDownLayer · 剪裁层向下合并到基底", () => {
   it("active 剪裁(满红) + under 基底(左半蓝) → 合并：右半被裁掉(透明)，左半=红覆盖蓝", () => {
     useStub();
-    const doc = new PaintDoc({ width: 4, height: 2 });
+    const doc = mkDoc();
     const base = doc.layers[0];
     fillLeftHalf(base, 4, 2, 0, 0, 255);   // under 基底：x<2 蓝不透明，x>=2 透明
     const clip = doc.addLayer("剪裁");
@@ -127,7 +132,7 @@ describe("mergeDownLayer · 剪裁层向下合并到基底", () => {
     clip.clippingMask = true;
     doc.activeIndex = doc.layers.indexOf(clip);
 
-    const r = doc.mergeDownLayer(clip);
+    const r = trackMerge(doc.mergeDownLayer(clip));
     assert(r.ok, `应合并成功，实得 ${JSON.stringify(r)}`);
     eq(r.resultClipping, false, "基底合并结果非剪裁");
     eq(r.underBeforeClipping, false, "under 合并前非剪裁");
@@ -145,7 +150,7 @@ describe("mergeDownLayer · 剪裁层向下合并到基底", () => {
 
   it("active 与 under 都剪裁（链内）→ 合并结果仍 clippingMask=true", () => {
     useStub();
-    const doc = new PaintDoc({ width: 4, height: 2 });
+    const doc = mkDoc();
     const baseLayer = doc.layers[0];      // 真正基底（非剪裁）
     fillLayer(baseLayer, 4, 2, 0, 255, 0, 255);
     const clipA = doc.addLayer("剪裁A");
@@ -156,7 +161,7 @@ describe("mergeDownLayer · 剪裁层向下合并到基底", () => {
     clipB.clippingMask = true;
     doc.activeIndex = doc.layers.indexOf(clipB);
 
-    const r = doc.mergeDownLayer(clipB);   // B 合到 A（两者都剪裁）
+    const r = trackMerge(doc.mergeDownLayer(clipB));   // B 合到 A（两者都剪裁）
     assert(r.ok, "链内合并应成功");
     eq(r.resultClipping, true, "链内合并结果仍剪裁");
     const merged = doc.findLayer(r.underId);
@@ -165,7 +170,7 @@ describe("mergeDownLayer · 剪裁层向下合并到基底", () => {
 
   it("under 剪裁、active 普通 → reason clipping-under（拒绝）", () => {
     useStub();
-    const doc = new PaintDoc({ width: 4, height: 2 });
+    const doc = mkDoc();
     const base = doc.layers[0];
     fillLayer(base, 4, 2, 0, 255, 0, 255);
     const clipUnder = doc.addLayer("剪裁");
@@ -175,24 +180,38 @@ describe("mergeDownLayer · 剪裁层向下合并到基底", () => {
     fillLayer(normal, 4, 2, 255, 0, 0, 255);
     doc.activeIndex = doc.layers.indexOf(normal);
 
-    const r = doc.mergeDownLayer(normal);  // 普通合到剪裁层上
+    const r = trackMerge(doc.mergeDownLayer(normal));  // 普通合到剪裁层上
     assert(!r.ok, "应拒绝");
     eq(r.reason, "clipping-under", "reason=clipping-under");
   });
 
   it("普通向下合并仍工作（回归）", () => {
     useStub();
-    const doc = new PaintDoc({ width: 4, height: 2 });
+    const doc = mkDoc();
     const base = doc.layers[0];
     fillLayer(base, 4, 2, 0, 255, 0, 255);
     const top = doc.addLayer("上");
     fillLayer(top, 4, 2, 255, 0, 0, 255);
     doc.activeIndex = doc.layers.indexOf(top);
-    const r = doc.mergeDownLayer(top);
+    const r = trackMerge(doc.mergeDownLayer(top));
     assert(r.ok, "普通合并应成功");
     eq(r.resultClipping, false, "普通合并非剪裁");
     const m = doc.findLayer(r.underId);
     const p = px(m, 0, 0);
     assert(p[0] === 255 && p[1] === 0 && p[2] === 0, `上层红盖下层绿，实得 ${p}`);
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+describe("doc-mergedown-clip 收尾", () => {
+  it("释放本文件的 doc/merge 快照", async () => {
+    const { eachLeaf, disposeLayerSnap, disposeLayerSpec } = await import("../src/doc.ts");
+    for (const r of _merges) {
+      if (!r || !r.ok) continue;
+      disposeLayerSnap(r.underBefore); disposeLayerSnap(r.underAfter); disposeLayerSpec(r.activeSpec);
+    }
+    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
+    _docs.length = 0; _merges.length = 0;
+    assert(true, "disposed");
   });
 });

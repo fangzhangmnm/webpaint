@@ -17,7 +17,7 @@ import { WEBPAINT_VERSION } from "./version.ts";
 import { initI18n, t, reconcileLangFromPrefs } from "./i18n/index.ts";   // 本地化：<html lang> + 静态 HTML data-i18n 填充
 import { PaintDoc } from "./doc.ts";
 import { Board } from "./board.ts";
-import { InputController } from "./input.ts";
+import { InputController, setPressureDisabled, isPressureDisabled } from "./input.ts";
 import { makeCurrentBrush } from "./resolved-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolveBrush，同文件）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
 import { Workpiece } from "./workpiece/workpiece.ts";
@@ -142,14 +142,18 @@ const _leftDial = () => state.toolStates[rack.getRackToolKey(dialReactive.tool)]
 const leftDial = mountLeftDial(els.leftDialMount, {
   getSize: () => _leftDial().size,
   getOpacity: () => _leftDial().opacity ?? 1.0,
-  getSizeMax: () => rack.findToolBrushPure(_leftDial())?.size?.max || 200,
-  getBrushName: () => rack.findToolBrushPure(_leftDial())?.name || "—",
+  // v0.6.14 缺笔自愈：resolveActiveBrushPure 与 currentBrush 同一套兜底（缺笔退默认笔），显示与手感一致
+  getSizeMax: () => rack.resolveActiveBrushPure(_leftDial(), dialReactive.tool)?.size?.max || 200,
+  getBrushName: () => rack.resolveActiveBrushPure(_leftDial(), dialReactive.tool)?.name || "—",
   getCanDraw: () => dialReactive.canDraw,
   getZoom: () => board?.viewport?.scale ?? 1,
   onSize: (px) => setSize(px),
   onOpacity: (frac) => setOpacity(frac),
   onBrushTap: () => { const id = RACK_PANEL_BY_TOOL[editMode.current()]; if (id) openExclusive(id); },
   onBrushLongpress: () => { const b = rack.findToolBrush(_leftDial()); if (b) { closeExclusive(); rack.openBrushSettings(b.id); } },
+  // v0.6.14 禁用笔压（session 态，见 input.ts）：开 = 恒定 0.5
+  getPressureDisabled: () => isPressureDisabled(),
+  onTogglePressure: (v) => { setPressureDisabled(v); setStatus(t(v ? "status.pressureOff" : "status.pressureOn")); },
 });
 // 键盘 [ ] 调粗接线（需 board/leftDial，已建好）。
 // disposer 收进 __wpBootTeardown（v417）：真 app 永不调（监听活到页面结束）；**测试**要靠它拆。

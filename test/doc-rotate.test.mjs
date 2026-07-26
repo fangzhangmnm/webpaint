@@ -93,6 +93,10 @@ const { PaintDoc, Layer } = await import("../src/doc.ts");
 const { Selection } = await import("../src/selection.ts");
 globalThis.OffscreenCanvas = _prevOSC;
 
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+const _docs = [];
+const mkDoc = (o) => { const d = new PaintDoc(o); _docs.push(d); return d; };
+
 // 直接验证 bbox 旋转公式（纯数字，不碰像素）
 function expectedBbox(b, W) {
   return { x: b.bboxY, y: W - (b.bboxX + b.bboxW), w: b.bboxH, h: b.bboxW };
@@ -108,14 +112,14 @@ function tb(L) { return L.pixels.contentBounds(true); }   // 紧内容框（tile
 describe("doc.rotate90CCW · 纯数字 bbox + 尺寸", () => {
   it("尺寸 W↔H 互换", () => {
     useStub();
-    const doc = new PaintDoc({ width: 10, height: 4 });
+    const doc = mkDoc({ width: 10, height: 4 });
     doc.rotate90CCW();
     eq(doc.width, 4, "新宽=旧高");
     eq(doc.height, 10, "新高=旧宽");
   });
 
   it("content 紧框按公式 newX=bboxY, newY=W-(bboxX+bboxW), newW=bboxH, newH=bboxW（tile-SoT）", () => {
-    const doc = new PaintDoc({ width: 20, height: 12 });
+    const doc = mkDoc({ width: 20, height: 12 });
     const L = doc.layers[0];
     fillRegion(L, 3, 2, 5, 4);   // 内容在 (3,2) 5×4
     const exp = expectedBbox({ bboxX: 3, bboxY: 2, bboxW: 5, bboxH: 4 }, 20);
@@ -126,7 +130,7 @@ describe("doc.rotate90CCW · 纯数字 bbox + 尺寸", () => {
   });
 
   it("旋转 4 次 = 恒等（尺寸 + content 紧框都回原）", () => {
-    const doc = new PaintDoc({ width: 20, height: 12 });
+    const doc = mkDoc({ width: 20, height: 12 });
     const L = doc.layers[0];
     fillRegion(L, 3, 2, 5, 4);
     const o = tb(L);
@@ -140,7 +144,7 @@ describe("doc.rotate90CCW · 纯数字 bbox + 尺寸", () => {
 describe("doc.rotate90CCW · 像素方向（一个角点）", () => {
   it("旧 doc 左上角像素 (0,0) → 新 doc 左下角 (0, W-1=H'-1)", () => {
     // W=4, H=2 → 新 doc 2×4。在旧 (0,0) 放红，验证旋转后落到新左下 (0,3)。
-    const doc = new PaintDoc({ width: 4, height: 2 });
+    const doc = mkDoc({ width: 4, height: 2 });
     const L = doc.layers[0];
     fillRegion(L, 0, 0, 1, 1);   // 仅 (0,0) 红不透明
     doc.rotate90CCW();
@@ -170,5 +174,15 @@ describe("Selection.rotated90CCW · bbox 公式 + 4 次恒等", () => {
     eq(s.bboxW, s0.bboxW, "sel bboxW 回原");
     eq(s.bboxH, s0.bboxH, "sel bboxH 回原");
     s0.dispose(); s.dispose(); s1.dispose();
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+describe("doc-rotate 收尾", () => {
+  it("释放本文件的 doc tiles", async () => {
+    const { eachLeaf } = await import("../src/doc.ts");
+    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
+    _docs.length = 0;
+    assert(true, "disposed");
   });
 });

@@ -6,6 +6,10 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 const { PaintDoc } = await import("../src/doc.ts");
 
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+const _docs = [];
+const mkDoc = (o) => { const d = new PaintDoc(o); _docs.push(d); return d; };
+
 const TILE = 256 * 256 * 4;   // 一 tile 字节
 function fillFull(L, w, h) {
   L.putImageData(0, 0, { width: w, height: h, data: new Uint8ClampedArray(w * h * 4).fill(255) });
@@ -13,13 +17,13 @@ function fillFull(L, w, h) {
 
 describe("doc.maxLayers · 动态字节预算", () => {
   it("预算内（空层稀疏）→ 放到硬顶 64", () => {
-    const d = new PaintDoc({ width: 512, height: 512 });
+    const d = mkDoc({ width: 512, height: 512 });
     d.configureMemory(10 * 1e6, false);   // 10MB 预算，空层 resident≈0
     eq(d.maxLayers, 64, "预算内 → HARD_CEIL=64");
   });
 
   it("驻留达预算 → 冻结在当前层数（防 OOM；floor 2）", () => {
-    const d = new PaintDoc({ width: 512, height: 512 });
+    const d = mkDoc({ width: 512, height: 512 });
     d.addLayer(); d.addLayer();            // 共 3 层（空 → 默认大预算下可加）
     d.configureMemory(3 * TILE, false);   // 预算 = 3 tile
     fillFull(d.layers[0], 512, 512);      // 512² = 2×2 = 4 tile ≥ 3 → 达预算
@@ -27,7 +31,7 @@ describe("doc.maxLayers · 动态字节预算", () => {
   });
 
   it("稀疏层（只画一角）远不达预算 → 仍放硬顶（破 11 的真赢）", () => {
-    const d = new PaintDoc({ width: 4096, height: 4096 });   // 16×16=256 tile/满层（旧公式 cap 极小）
+    const d = mkDoc({ width: 4096, height: 4096 });   // 16×16=256 tile/满层（旧公式 cap 极小）
     d.configureMemory(20 * TILE, false);                     // 20 tile 预算
     // 画一角 1 tile
     d.layers[0].putImageData(0, 0, { width: 200, height: 200, data: new Uint8ClampedArray(200 * 200 * 4).fill(255) });
@@ -35,7 +39,7 @@ describe("doc.maxLayers · 动态字节预算", () => {
   });
 
   it("countMat=true 把物化 canvas 计入（2D 模式更保守）", () => {
-    const d = new PaintDoc({ width: 512, height: 512 });
+    const d = mkDoc({ width: 512, height: 512 });
     fillFull(d.layers[0], 512, 512);      // tile = 4 tile = 1MB
     void d.layers[0].canvas;              // 触发物化 _mat（紧框 512² ≈ 1MB）
     const tileBytes = 4 * TILE;
@@ -44,5 +48,15 @@ describe("doc.maxLayers · 动态字节预算", () => {
     eq(d.maxLayers, 64, "不计 mat：tile<预算 → 硬顶");
     d.configureMemory(tileBytes + 0.5 * TILE, true);
     eq(d.maxLayers, 2, "计 mat：tile+mat≥预算 → 冻结(floor 2)");
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+describe("layer-cap-budget 收尾", () => {
+  it("释放本文件的 doc tiles", async () => {
+    const { eachLeaf } = await import("../src/doc.ts");
+    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
+    _docs.length = 0;
+    assert(true, "disposed");
   });
 });

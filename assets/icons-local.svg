@@ -10,5 +10,5 @@
      需求登记：全局清单 ../20260708 SVG Icons/TODO.md（美工 agent 的取活处）。
      重新烤制：仓库根跑 python3 tools/bake-stopgap-glyphs.py（SPECS 即声明）。
 -->
-
+  <symbol id="pen-pressure-off" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="左栏size栏·禁用笔压toggle(恒定0.5)。真图标建议=触控笔尖+压力波纹被斜线禁用" viewBox="0 0 24 24"><path d="M21 3.2V4.7H6.08V11.25Q6.08 16.54 4.42 20.8L3 19.93Q4.5 15.75 4.5 10.78V3.2ZM12.55 6.2H14.13V10.22H19.34V11.72H14.13V18.43H20.76V19.93H6.24V18.43H12.55V11.72H7.66V10.22H12.55ZM17.13 12.91Q18.71 14.49 19.66 16.38L18.32 17.17Q17.37 15.36 15.87 13.7Z" fill="currentColor" stroke="none"/></symbol>
 </svg>

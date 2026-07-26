@@ -415,6 +415,19 @@ body[data-mode="gallery"] .left-sidebar { display: none; }
   user-select: none;
   margin-top: -4px;
 }
+/* v0.6.14 禁用笔压 toggle（size 栏下）：按下态 = 笔压已禁用（恒 0.5），走 accent 提示 */
+.left-sidebar-toggle {
+  width: 26px; height: 26px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: transparent; color: var(--ink-soft); cursor: pointer;
+}
+.left-sidebar-toggle[aria-pressed="true"] {
+  color: var(--accent, #4c8bf5);
+  border-color: var(--accent, #4c8bf5);
+  background: color-mix(in srgb, var(--accent, #4c8bf5) 12%, transparent);
+}
+.left-sidebar-toggle:disabled { opacity: .4; cursor: default; }
 /* 当前笔指示器 + 编辑入口 */
 .left-sidebar-brush {
   width: 32px;
@@ -774,6 +787,9 @@ input[type=range] {
 }
 .menu-inline-caret { width: 8px; height: 8px; opacity: .6; flex: 0 0 auto; }
 .menu-item-state { color: var(--ink-soft); font-size: 12px; }
+/* v0.6.14 版本号（menu/图库两处）：去「版本：」前缀后再压瘦——字号降一档 + 横向 92% 压缩省行宽 */
+.version-slim { display: inline-block; font-size: 10.5px; letter-spacing: -0.02em; transform: scaleX(0.92); transform-origin: right center; white-space: nowrap; }
+div.version-slim { transform-origin: left center; }   /* 图库菜单的 info 行左对齐，压缩锚点跟着靠左 */
 .menu-item[aria-pressed="true"] .menu-item-state { color: var(--accent, #4c8bf5); font-weight: 600; }
 .menu-item.menu-danger { color: #c0392b; }
 

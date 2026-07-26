@@ -146,7 +146,8 @@ export function makeCurrentBrush({ state, dialReactive, rack }: CurrentBrushDeps
   // **必须纯**：computed 内不写 toolStates（GUID healing 回写用 findToolBrushPure 的纯版；写回留显式路径）。
   const currentBrush = computed(() => {
     const ts = state.toolStates[rack.getRackToolKey(dialReactive.tool)] || state.toolStates.brush;
-    const preset = rack.findToolBrushPure(ts);   // 无笔架 → null → DEFAULT 兜底
+    // v0.6.14 缺笔自愈：id/name 解析不到 → 退该工具默认笔（纯派生不回写；无笔架 → null → DEFAULT 兜底）
+    const preset = rack.resolveActiveBrushPure(ts, dialReactive.tool);
     return resolveBrush({
       // 同一运行时 brush 对象的两个视图：rack 存的是完整 Brush，resolveBrush 只读 BrushPreset 子集。
       preset: preset as BrushPreset | null,

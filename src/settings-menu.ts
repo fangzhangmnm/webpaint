@@ -103,11 +103,8 @@ export function genAiEnabled(): boolean {
 }
 function renderGenAI(on: boolean) {
   document.body.dataset.genAi = on ? "1" : "";
-  // 主菜单 + 图库菜单两处开关同步（v0.5.40 图库补 gen-AI 后按 data-state-for 批扫）
-  for (const id of ["menuGenAI", "galleryMenuGenAI"]) {
-    const btn = document.getElementById(id);
-    btn?.setAttribute("aria-pressed", on ? "true" : "false");
-  }
+  // v0.6.14：图库菜单的 gen-AI 代理开关已撤（user：不影响图库）——只剩主菜单一处
+  document.getElementById("menuGenAI")?.setAttribute("aria-pressed", on ? "true" : "false");
   document.querySelectorAll('[data-state-for="genAI"]').forEach((st) => { st.textContent = on ? t("common.on") : t("common.off"); });
 }
 function applyGenAI(on: boolean) {

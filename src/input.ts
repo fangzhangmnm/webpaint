@@ -1314,9 +1314,15 @@ export class InputController {
 // 注：这里永远 return 真值。压感**是否**影响 size/opacity/flow 由每笔的 sizeCoeff / opaCoeff / flowCoeff
 // 决定（brush.ts 的 signedLerp，0=不响应）。v409 删了 pressureToSize/pressureToOpacity——那对字段
 // 从 v30 起就没人读了，这条注释在此之前一直是假的。
+// v0.6.14 禁用笔压（左栏 size 栏的 toggle）：开 = 忽略传感器，恒定 0.5（与鼠标路径同值）。
+//   session RAM 态，不持久化（临时开关；要持久化得走 synced-user-preference，需 user 拍板）。
+let _pressureDisabled = false;
+export function setPressureDisabled(v: boolean): void { _pressureDisabled = !!v; }
+export function isPressureDisabled(): boolean { return _pressureDisabled; }
+
 function effectivePressureFor(rec: PointerRec, ev: { pointerType?: string; pressure?: number }): number {
   let raw: number;
-  if (ev.pointerType === "mouse") {
+  if (_pressureDisabled || ev.pointerType === "mouse") {
     raw = 0.5;
   } else {
     const r = typeof ev.pressure === "number" ? ev.pressure : null;

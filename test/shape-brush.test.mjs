@@ -12,7 +12,10 @@ const { PaintDoc } = await import("../src/doc.ts");
 const { bresenhamEllipseRect } = await import("../src/shape-geometry.ts");
 const { BrushEngine } = await import("../src/brush.ts");
 
-const mkDoc = () => new PaintDoc({ width: 512, height: 512 });
+// v0.6.14 测试卫生：本文件建的 doc 收集起来，文件末尾统一 dispose——否则 tile 句柄随 doc 被 GC，
+//   触发池的 FR 泄漏 assert（[tile-pool] GC'd without release），糊满 npm test 尾部。非产品泄漏。
+const _docs = [];
+const mkDoc = () => { const d = new PaintDoc({ width: 512, height: 512 }); _docs.push(d); return d; };
 
 function mkEngine(sub, constrain = false, rot = 0) {
   const eng = new ShapeBrushEngine();
@@ -613,5 +616,19 @@ describe("shape-brush · 正方/正圆 respect 透视（UI v2.4 接线烟测）"
     eng.extendStroke(420, 400, 0.5);
     const cs = eng.endStroke();
     assert(cs && cs.stamps.length > 10, "透视正方出 stamps");
+  });
+});
+
+// 收尾（v0.6.14 测试卫生）：统一释放本文件建的所有 doc 的 tile 句柄。
+//   泄漏 assert 是池的正当兜底（所有权纪律在 src 是完整的），别删 assert，别 clearAll。
+describe("shape-brush 收尾", () => {
+  it("释放本文件的 doc tiles（防 tile-pool FR 泄漏误报刷屏）", async () => {
+    const { eachLeaf } = await import("../src/doc.ts");
+    for (const d of _docs) {
+      eachLeaf(d.layers, (l) => l.pixels?.dispose?.());
+      d.selection?.dispose?.();
+    }
+    _docs.length = 0;
+    assert(true, "disposed");
   });
 });

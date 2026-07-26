@@ -24,6 +24,10 @@ const { PaintDoc, LayerGroup, findNodeById, findParentOf, countLeaves, flattenLe
   await import("../src/doc.ts");
 globalThis.OffscreenCanvas = _prevOSC;   // import 完还原，避免毒别的文件
 
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+const _docs = [], _merges = [];
+const mkDoc = () => { const d = new PaintDoc(); _docs.push(d); return d; };
+
 // 每个 it() 开头 useStub()（PaintDoc 构造/快照走 OffscreenCanvas）。
 const T = (name, fn) => it(name, () => { useStub(); fn(); });
 
@@ -31,14 +35,14 @@ const ids = (nodes) => nodes.map((n) => n.id);
 
 describe("layer-tree · 基础树工具", () => {
   T("新建 doc：1 叶，active = 它", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     assert(d.layers.length === 1 && !d.layers[0].isGroup, "1 叶");
     assert(d.activeId === d.layers[0].id, "active = 叶");
     assert(countLeaves(d.layers) === 1, "countLeaves=1");
   });
 
   T("addLayer 插在 active 同级之上 + 设 active", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     assert(d.layers.length === 2 && d.layers[1] === L1, "L1 在 L0 之上");
     assert(d.activeId === L1.id, "active=L1");
@@ -46,7 +50,7 @@ describe("layer-tree · 基础树工具", () => {
   });
 
   T("findNodeById / findParentOf 递归", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.groupSelection(L1.id);
     const g = d.layers.find((n) => n.isGroup);
@@ -58,7 +62,7 @@ describe("layer-tree · 基础树工具", () => {
 
 describe("layer-tree · 组 op", () => {
   T("groupSelection 把节点包进组、替换原位、active=组", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L0 = d.layers[0];
     const r = d.groupSelection(L0.id);
     assert(r.ok && r.group.isGroup, "建组");
@@ -68,7 +72,7 @@ describe("layer-tree · 组 op", () => {
   });
 
   T("ungroup 把 children 提回原位、删组", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.groupSelection(L1.id);
     const g = d.layers[1];
@@ -79,7 +83,7 @@ describe("layer-tree · 组 op", () => {
   });
 
   T("moveIntoGroup / moveOutOfGroup", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     const g = new LayerGroup({});
     d.layers.push(g);
@@ -90,7 +94,7 @@ describe("layer-tree · 组 op", () => {
   });
 
   T("moveIntoGroup 拒绝环（组移进自己的子孙）", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const inner = new LayerGroup({});
     const outer = new LayerGroup({ children: [inner] });
     d.layers.push(outer);
@@ -98,7 +102,7 @@ describe("layer-tree · 组 op", () => {
   });
 
   T("countLeaves 不计组；嵌套照数", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.groupSelection(L1.id);
     assert(countLeaves(d.layers) === 2, "2 叶");
@@ -107,7 +111,7 @@ describe("layer-tree · 组 op", () => {
 
 describe("layer-tree · 删除 / active 稳定", () => {
   T("removeLayer 删组连带 children", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     const L2 = d.addLayer();
     d.setActiveById(L1.id);
@@ -119,12 +123,12 @@ describe("layer-tree · 删除 / active 稳定", () => {
   });
 
   T("不可删到 0 叶（最后一叶守住）", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     assert(d.removeLayer(d.layers[0].id) === false, "最后一叶不可删");
   });
 
   T("moveLayer 不改 activeId", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.moveLayer(L1.id, -1);
     assert(d.activeId === L1.id, "active 仍 L1（按 id）");
@@ -134,13 +138,13 @@ describe("layer-tree · 删除 / active 稳定", () => {
 
 describe("layer-tree · snapshotAll 树往返", () => {
   T("嵌套组 + props + id 往返一致", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.groupSelection(L1.id);
     const g = d.layers[1];
     g.name = "组A"; g.opacity = 0.5; g.mode = "multiply"; g.clippingMask = true;
     const snap = d.snapshotAll();
-    const d2 = new PaintDoc();
+    const d2 = mkDoc();
     d2.restoreSnapshotAll(snap);
     assert(d2.layers.length === 2 && d2.layers[1].isGroup, "结构：[叶,组]");
     const g2 = d2.layers[1];
@@ -153,7 +157,7 @@ describe("layer-tree · snapshotAll 树往返", () => {
 
 describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
   T("locateNode：根层级 + 组内", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();              // [L0, L1]
     const root = d.locateNode(L1.id);
     assert(root.parentId === null && root.index === 1, "L1 根层 index1");
@@ -164,7 +168,7 @@ describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
   });
 
   T("insertLayerAt(parentId)：插进组内同级", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.groupSelection(L1.id);             // [L0, G{L1}]
     const g = d.layers[1];
@@ -175,7 +179,7 @@ describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
   });
 
   T("canMoveLayer：同级边界", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();             // [L0, L1]
     assert(d.canMoveLayer(L1.id, 1) === false, "L1 已在顶，不能上");
     assert(d.canMoveLayer(L1.id, -1) === true, "L1 能下");
@@ -183,7 +187,7 @@ describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
   });
 
   T("snapshotTree/restoreTree：结构往返 + 叶活引用保持", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L0 = d.layers[0];
     const L1 = d.addLayer();
     d.groupSelection(L1.id);            // [L0, G{L1}]
@@ -204,13 +208,13 @@ describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
   });
 
   T("删组内叶 → insertLayerAt(parentId) 复位回组", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.setActiveById(L1.id);
     const L2 = d.addLayer();           // [L0, L1, L2]
     d.groupSelection(L2.id);          // active=G... 重新组 L1+L2 手动
     // 造 G{L1, L2}
-    const d2 = new PaintDoc();
+    const d2 = mkDoc();
     const a = d2.addLayer();          // L0,a
     d2.groupSelection(a.id);          // [L0, G{a}]
     const G = d2.layers[1];
@@ -226,10 +230,10 @@ describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
   });
 
   T("mergeDownLayer 返回 activeLoc；duplicateLayer 返回 loc", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     L1.putImageData(0, 0, { width: 4, height: 4, data: new Uint8ClampedArray(4 * 4 * 4).fill(255) });   // 给点像素让 mergeDown 不走 empty-active
-    const r = d.mergeDownLayer(L1);
+    const r = d.mergeDownLayer(L1); _merges.push(r);
     assert(r.ok && r.activeLoc && r.activeLoc.parentId === null && r.activeLoc.index === 1, "activeLoc 同级位");
     const dup = d.duplicateLayer(d.layers[0].id);
     assert(dup.ok && dup.loc && typeof dup.loc.index === "number", "duplicate 返回 loc");
@@ -238,7 +242,7 @@ describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
 
 describe("layer-tree · addGroup 空组（v278）", () => {
   T("建空组：默认 pass-through、插 active 之上、设 active、不计叶", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L0 = d.layers[0];
     const g = d.addGroup();
     assert(g.isGroup && g.children.length === 0, "空组无 children");
@@ -251,7 +255,7 @@ describe("layer-tree · addGroup 空组（v278）", () => {
 
 describe("layer-tree · 选中组时新建进组内 + 组删除允许清空（v281）", () => {
   T("addLayer：active=组 → 进组内顶部（子组同理）", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.groupSelection(L1.id);           // [L0, G{L1}], active=G
     const G = d.layers[1];
@@ -268,7 +272,7 @@ describe("layer-tree · 选中组时新建进组内 + 组删除允许清空（v2
   });
 
   T("addGroup：active=组 → 嵌进去", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.groupSelection(L1.id);
     const G = d.layers[1];
@@ -278,12 +282,26 @@ describe("layer-tree · 选中组时新建进组内 + 组删除允许清空（v2
   });
 
   T("removeLayer(group, allowEmpty)：删非空组可清空（caller 补层）", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L0 = d.layers[0];
     d.groupSelection(L0.id);           // [G{L0}]，组含 doc 唯一叶
     const G = d.layers[0];
     assert(d.removeLayer(G.id) === false, "默认守底：含唯一叶的组删不掉");
     assert(d.removeLayer(G.id, true) === true, "allowEmpty：删得掉");
     assert(countLeaves(d.layers) === 0, "删空 → 0 叶（caller 负责补）");
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+describe("layer-tree 收尾", () => {
+  it("释放本文件的 doc tiles", async () => {
+    const { eachLeaf, disposeLayerSnap, disposeLayerSpec } = await import("../src/doc.ts");
+    for (const r of _merges) {
+      if (!r || !r.ok) continue;
+      disposeLayerSnap(r.underBefore); disposeLayerSnap(r.underAfter); disposeLayerSpec(r.activeSpec);
+    }
+    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
+    _docs.length = 0; _merges.length = 0;
+    assert(true, "disposed");
   });
 });

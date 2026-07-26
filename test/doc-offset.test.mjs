@@ -76,6 +76,10 @@ const { PaintDoc } = await import("../src/doc.ts");
 const { Selection } = await import("../src/selection.ts");
 globalThis.OffscreenCanvas = _prevOSC;
 
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+const _docs = [];
+const mkDoc = (o) => { const d = new PaintDoc(o); _docs.push(d); return d; };
+
 // tile-SoT：putImageData/sampleAt 纯路径（无 canvas）。markPixel 在 doc (x,y) 放标记色。
 function markPixel(L, x, y, val) {
   L.putImageData(x, y, { width: 1, height: 1, data: new Uint8ClampedArray([val, val, val, 255]) });
@@ -85,7 +89,7 @@ function redAt(L, x, y) { return L.sampleAt(x, y)[0]; }
 
 describe("doc.offsetWrap · 尺寸不变 + 像素环绕映射", () => {
   it("doc 尺寸偏移后不变", () => {
-    const doc = new PaintDoc({ width: 10, height: 6 });
+    const doc = mkDoc({ width: 10, height: 6 });
     markPixel(doc.layers[0], 2, 2, 50);
     doc.offsetWrap(3, 2);
     eq(doc.width, 10, "宽不变");
@@ -95,7 +99,7 @@ describe("doc.offsetWrap · 尺寸不变 + 像素环绕映射", () => {
 
   it("偏移 (1,1)：每个角点按 (x+1)%W,(y+1)%H 环绕", () => {
     // W=4,H=2。四角放不同灰度 r，验证落点。
-    const doc = new PaintDoc({ width: 4, height: 2 });
+    const doc = mkDoc({ width: 4, height: 2 });
     const L = doc.layers[0];
     markPixel(L, 0, 0, 10);   // 左上 → (1,1)
     markPixel(L, 3, 0, 20);   // 右上 → (0,1)
@@ -109,7 +113,7 @@ describe("doc.offsetWrap · 尺寸不变 + 像素环绕映射", () => {
   });
 
   it("负偏移也环绕：(-1,0) 把左列移到右边", () => {
-    const doc = new PaintDoc({ width: 4, height: 1 });
+    const doc = mkDoc({ width: 4, height: 1 });
     const L = doc.layers[0];
     markPixel(L, 0, 0, 99);   // 左列 → (-1)%4 = 3
     doc.offsetWrap(-1, 0);
@@ -119,7 +123,7 @@ describe("doc.offsetWrap · 尺寸不变 + 像素环绕映射", () => {
 
 describe("doc.offsetWrap · 恒等性", () => {
   it("偏移整幅 (W,H) = 无变化", () => {
-    const doc = new PaintDoc({ width: 4, height: 2 });
+    const doc = mkDoc({ width: 4, height: 2 });
     const L = doc.layers[0];
     markPixel(L, 2, 1, 77);
     doc.offsetWrap(4, 2);
@@ -127,7 +131,7 @@ describe("doc.offsetWrap · 恒等性", () => {
   });
 
   it("偏移 a 再偏移 (W-a, H-b) 回到原图", () => {
-    const doc = new PaintDoc({ width: 4, height: 2 });
+    const doc = mkDoc({ width: 4, height: 2 });
     const L = doc.layers[0];
     markPixel(L, 0, 0, 12);
     markPixel(L, 2, 1, 34);
@@ -160,5 +164,15 @@ describe("Selection.offsetWrapped · 环绕映射（v0.4.6 紧 bbox）", () => {
     eq(s1.sampleAt(0, 5), 255, "(7,4)→环绕到 (0,5)");
     eq(s1.sampleAt(7, 0), 255, "(6,5)→环绕到 (7,0)");
     s0.dispose(); s1.dispose();
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+describe("doc-offset 收尾", () => {
+  it("释放本文件的 doc tiles", async () => {
+    const { eachLeaf } = await import("../src/doc.ts");
+    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
+    _docs.length = 0;
+    assert(true, "disposed");
   });
 });

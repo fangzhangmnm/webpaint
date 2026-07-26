@@ -187,6 +187,14 @@ export class BrushRackController {
     // 读镜像 = 建立反应式依赖（currentBrush computed 靠这条重算）。**只读不写**——computed 内绝不可写 reactive。
     return resolveRef(this._brushesRef.value, { id: ts.activeBrushId, name: ts.activeBrushName }) as Brush | null;
   }
+  // v0.6.14 缺笔自愈（纯派生，**不回写 dial**）：dial 指的笔 id+name 都解析不到（被删/还没 sync 到）
+  //   → 当前笔退到该工具默认笔，保证引擎吃到的是笔架里真实存在的笔（而非 DEFAULT_CONFIG 幽灵笔）。
+  //   不回写是有意的：存档里的 activeBrushId 保持原样，缺的笔从云端 sync 回来那一刻自动复原。
+  //   空笔架（还没 hydrate / 真空）→ null，交给 resolveBrush 的 DEFAULT 兜底 + _healEmptyRack。
+  resolveActiveBrushPure(ts: ToolDial | null | undefined, tool: string) {
+    return this.findToolBrushPure(ts)
+      ?? (defaultBrushForTool(this._view(), this.getRackToolKey(tool)) as Brush | null);
+  }
   applyToolState(tool: string) {
     const key = this.getRackToolKey(tool);
     const ts = this.d.state.toolStates[key];

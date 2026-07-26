@@ -113,13 +113,15 @@ describe("cpu-tile-compression · deflate codec", () => {
     const mk = (seed) => { const b = new Uint8Array(one); for (let i = 3; i < one; i += 4) b[i] = (seed + i) % 251; return b; };
     const h1 = pool.createTile("rgba8", mk(1));
     const ref = h1.bytes().slice();          // 压缩前基准
-    pool.createTile("rgba8", mk(2));
-    pool.createTile("rgba8", mk(3));         // 超额 → h1 被真 deflate
+    const h2 = pool.createTile("rgba8", mk(2));
+    const h3 = pool.createTile("rgba8", mk(3));   // 超额 → h1 被真 deflate
     assert(h1.isCompressed(), "最古老被压");
     const back = h1.bytes();                 // 同步解压
     let same = true;
     for (let i = 0; i < one; i++) if (back[i] !== ref[i]) { same = false; break; }
     assert(same, "deflate 往返逐字节无损");
+    // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+    for (const h of [h1, h2, h3]) if (!h.released) h.release();
   });
 });
 

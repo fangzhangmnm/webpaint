@@ -16,6 +16,8 @@ import { makeOperators } from "../src/workpiece/operators.ts";
 import { Selection } from "../src/selection.ts";
 import { FloatingTransform } from "../src/floating-transform.ts";
 
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+const _ctxs = [], _orphans = [];   // _orphans：测试有意造成的「脱离 doc 的层」（所有权归测试）
 function mk() {
   const doc = new PaintDoc({ width: 512, height: 512 });
   const w = new Workpiece(doc);
@@ -24,6 +26,7 @@ function mk() {
   const ops = makeOperators({ applyDocTransformUi: () => {} });
   const ft = new FloatingTransform();
   ft.attach(w, h, ops);
+  _ctxs.push({ doc, w, h });
   return { doc, w, h, ops, ft, unrec: () => unrec };
 }
 const px = (r, g, b, a) => new Uint8ClampedArray([r, g, b, a]);
@@ -284,9 +287,24 @@ describe("S6 · accept（commit = 烤层 + DropFloat 整点）+ 所有权/驱逐
     doc.selection = rectSel(30, 30, 16, 16);
     doc.setActiveById(L.id);
     ft.lift(L);
-    doc.removeLayer(L.id);                      // 绕栈直接删（模拟腐坏）
+    doc.removeLayer(L.id); _orphans.push(L);    // 绕栈直接删（模拟腐坏；像素释放归 caller=本测试）
     eq(h.undo(w), false);
     eq(unrec(), 1, "layer gone → 不可恢复弃栈");
     assert(!flattenLeaves(doc.layers).some((x) => x.id === L.id), "不错删别的层");
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+describe("float-ops 收尾", () => {
+  it("清栈、收浮层并释放本文件的 doc tiles", () => {
+    for (const { doc, w, h } of _ctxs) {
+      h.clear();
+      w.dropFloats();
+      for (const leaf of flattenLeaves(doc.layers)) leaf.pixels?.dispose?.();
+      doc.selection?.dispose?.();
+    }
+    for (const L of _orphans) L.pixels?.dispose?.();
+    _ctxs.length = 0; _orphans.length = 0;
+    assert(true, "disposed");
   });
 });

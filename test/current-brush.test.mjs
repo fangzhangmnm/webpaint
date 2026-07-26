@@ -12,7 +12,10 @@ import { shallowRef } from "../vendor/vue/vue.esm-browser.prod.js";
 
 // 最小假笔架：getRackToolKey 直返工具名；findToolBrushPure 默认返 null（→ resolveBrush 走 DEFAULT 兜底）。
 function fakeRack(preset = null) {
-  return { getRackToolKey: (t) => t, findToolBrushPure: () => preset };
+  // resolveActiveBrushPure（v0.6.14 缺笔自愈）：mock 无「默认笔」概念，直通 findToolBrushPure
+  const r = { getRackToolKey: (t) => t, findToolBrushPure: () => preset };
+  r.resolveActiveBrushPure = (ts) => r.findToolBrushPure(ts);
+  return r;
 }
 
 describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖断裂）", () => {
@@ -51,6 +54,7 @@ describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖�
     const rack = {
       getRackToolKey: (t) => t,
       findToolBrushPure: (ts) => mirror.value.find((b) => b.id === ts.activeBrushId) ?? null,
+      resolveActiveBrushPure(ts) { return this.findToolBrushPure(ts); },
     };
     state.toolStates.brush.activeBrushId = "b1";
     const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack });

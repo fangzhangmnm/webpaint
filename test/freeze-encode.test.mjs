@@ -3,6 +3,10 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 const { PaintDoc, freezeDocForEncode } = await import("../src/doc.ts");
 
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+const _docs = [];
+const mkDoc = (o) => { const d = new PaintDoc(o); _docs.push(d); return d; };
+
 function paint(layer, x, y, w, h) {
   const a = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < a.length; i += 4) { a[i] = 200; a[i + 3] = 255; }
@@ -11,7 +15,7 @@ function paint(layer, x, y, w, h) {
 
 describe("freezeDocForEncode · encode 存档一致性（S8）", () => {
   it("冻结后改像素：冻结叶 bbox/内容不动，活层照常变", () => {
-    const doc = new PaintDoc({ width: 512, height: 512 });
+    const doc = mkDoc({ width: 512, height: 512 });
     const L = doc.layers[0];
     paint(L, 0, 0, 64, 64);
     const { frozen, dispose } = freezeDocForEncode(doc);
@@ -24,7 +28,7 @@ describe("freezeDocForEncode · encode 存档一致性（S8）", () => {
   });
 
   it("冻结后层结构操作：冻结树形状不变", () => {
-    const doc = new PaintDoc({ width: 512, height: 512 });
+    const doc = mkDoc({ width: 512, height: 512 });
     const { frozen, dispose } = freezeDocForEncode(doc);
     const n0 = frozen.layers.length;
     doc.addLayer && doc.addLayer();                 // 有 API 就加层；没有则跳（结构由下断言兜）
@@ -35,7 +39,7 @@ describe("freezeDocForEncode · encode 存档一致性（S8）", () => {
   });
 
   it("dispose 释放快照句柄（released 置位）", () => {
-    const doc = new PaintDoc({ width: 512, height: 512 });
+    const doc = mkDoc({ width: 512, height: 512 });
     paint(doc.layers[0], 0, 0, 64, 64);
     const { dispose } = freezeDocForEncode(doc);
     dispose();   // 不抛 = 句柄成对释放；泄漏由池 FR assert 兜（node --expose-gc 之外无法直接断言）
@@ -43,12 +47,22 @@ describe("freezeDocForEncode · encode 存档一致性（S8）", () => {
   });
 
   it("空层冻结：bbox=0、canvas 1×1 占位（与 Layer getter 语义一致）", () => {
-    const doc = new PaintDoc({ width: 512, height: 512 });
+    const doc = mkDoc({ width: 512, height: 512 });
     const { frozen, dispose } = freezeDocForEncode(doc);
     const fl = frozen.layers[0];
     eq(fl.bboxW, 0);
     eq(fl.bboxH, 0);
     assert(fl.canvas, "canvas 占位存在");
     dispose();
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+describe("freeze-encode 收尾", () => {
+  it("释放本文件的 doc tiles", async () => {
+    const { eachLeaf } = await import("../src/doc.ts");
+    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
+    _docs.length = 0;
+    assert(true, "disposed");
   });
 });

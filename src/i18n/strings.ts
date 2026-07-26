@@ -27,6 +27,8 @@ export const S = {
 
   // ── 顶栏 / 导航 ────────────────────────────────────────────────
   "nav.gallery":    { zh: "图库",              en: "Gallery",         ja: "ギャラリー", tok: "tomo sitelen" },
+  // v0.6.14 workbench ☰ 文件页首项专用（user：「图库」两字看不出会关闭当前画；「退出」又太怪 → 回到图库）
+  "menu.backToGallery": { zh: "回到图库",      en: "Back to gallery", ja: "ギャラリーに戻る", tok: "o tawa tomo sitelen" },
   "nav.trash":      { zh: "回收站",            en: "Trash",           ja: "ゴミ箱", tok: "poki jaki" },
   "save.tip":       { zh: "保存 / 上传",       en: "Save / Upload",   ja: "保存 / アップロード", tok: "awen / pana tawa poki sewi" },
   "enc.locked":     { zh: "已加密 · 点击解除加密", en: "Encrypted · tap to decrypt", ja: "暗号化済み · タップで解除", tok: "ni li len. sina luka e ni la len li weka." },
@@ -61,10 +63,12 @@ export const S = {
   "menu.language":         { zh: "语言",       en: "Language",        ja: "言語", tok: "toki" }, 
   "menu.shortcuts":        { zh: "快捷键",     en: "Shortcuts",       ja: "ショートカット", tok: "nena pi tenpo lili" }, 
   "menu.resetRack":        { zh: "还原内置笔刷…", en: "Restore built-in brushes…", ja: "内蔵ブラシを復元…", tok: "o kama sin e ilo pi tan open…" }, 
-  "menu.forceReset":       { zh: "强制更新（清缓存重启）", en: "Force update (clear cache & restart)", ja: "強制更新（キャッシュ削除して再起動）", tok: "o sin wawa e mi (weka poki tenpo · open sin)" }, 
+  // v0.6.14「清缓存重启」括号删了（user：菜单里说不清；确认弹窗 tm.forceResetTitle/Body 有完整解释）
+  "menu.forceReset":       { zh: "强制更新", en: "Force update", ja: "強制更新", tok: "o sin wawa e mi" },
   "menu.smoothDev":        { zh: "平滑调参（dev）", en: "Smoothing tuning (dev)", ja: "スムージング調整（dev）", tok: "nasin pi linja pona (\"dev\")" }, 
   "menu.fps":              { zh: "FPS 计",     en: "FPS meter",       ja: "FPS 表示", tok: "nanpa pi sitelen tawa" }, 
-  "menu.version":          { zh: "版本：{v}",  en: "Version: {v}",    ja: "バージョン：{v}", tok: "nanpa mi: {v}" }, // ── 主题状态标签 ──────────────────────────────────────────────
+  // v0.6.14 去「版本：」前缀（user：只显版本号本体；何物之版本由所在行自明）
+  "menu.version":          { zh: "{v}",  en: "{v}",    ja: "{v}", tok: "{v}" }, // ── 主题状态标签 ──────────────────────────────────────────────
   "theme.auto":     { zh: "跟随系统",          en: "System",          ja: "システムに従う", tok: "sama tenpo" },
   "theme.day":      { zh: "日",                en: "Light",           ja: "ライト", tok: "suno" },
   "theme.night":    { zh: "夜",                en: "Dark",            ja: "ダーク", tok: "pimeja" },
@@ -200,6 +204,9 @@ export const S = {
   // ── 左侧笔刷 dial（left-dial.ts）切片 3a ──
   "ld.brush":        { zh: "当前笔刷（tap 切换 / 长按编辑）", en: "Current brush (tap to switch / long-press to edit)", ja: "現在のブラシ（タップで切替 / 長押しで編集）", tok: "ilo sitelen ni · luka la ante · luka awen la nasin" },
   "ld.size":         { zh: "笔粗",     en: "Brush size",   ja: "筆の太さ", tok: "suli linja" },
+  "ld.pressureOff":  { zh: "禁用笔压（恒定 0.5）", en: "Disable pen pressure (constant 0.5)", ja: "筆圧を無効化（0.5 固定）", tok: "o weka e wawa luka (0.5 sama ale)" },
+  "status.pressureOff": { zh: "已禁用笔压（恒定 0.5）", en: "Pen pressure disabled (constant 0.5)", ja: "筆圧を無効化しました（0.5 固定）", tok: "wawa luka li weka (0.5 sama ale)" },
+  "status.pressureOn":  { zh: "已恢复笔压", en: "Pen pressure restored", ja: "筆圧を有効化しました", tok: "wawa luka li kama sin" },
   "ld.opacity":      { zh: "不透明度", en: "Opacity",      ja: "不透明度", tok: "wawa kule" },
   // ── 笔架 sheet（rack-sheet.ts）切片 3a ──
   "rs.rackEmpty":    { zh: "笔架是空的——内置笔刷可能还没加载好（离线时会自动重试）。", en: "The rack is empty \u2014 the built-in brushes may not have loaded yet (it retries automatically when offline).", ja: "ブラシ棚が空です \u2014 内蔵ブラシがまだ読み込めていない可能性があります（オフライン時は自動で再試行します）。", tok: "poki pi ilo sitelen li jo e ala. ilo pi tan open li kama ala lon tenpo ni. mi alasa sin e ona." },

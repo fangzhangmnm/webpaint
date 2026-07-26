@@ -102,7 +102,6 @@ export const els = {
   galleryMenuPopup: byId("galleryMenuPopup"),
   galleryMenuVersion: byId("galleryMenuVersion"),
   galleryMenuForceUpdate: byId("galleryMenuForceUpdate"),
-  galleryMenuGenAI: byId("galleryMenuGenAI"),
   menuGenAI: byId("menuGenAI"),
   galleryMenuLock: byId("galleryMenuLock"),
   newDocBackdrop: byId("newDocBackdrop"),

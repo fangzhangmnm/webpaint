@@ -357,7 +357,6 @@ export function initGalleryShell(ctx: AppContext) {
     () => LANGS.map((l) => ({ value: l, label: langDisplayName(l) })),
     () => lang(),
     (l) => { void setLang(l).catch((e) => reportError(e)); });
-  els.galleryMenuGenAI?.addEventListener("click", () => { els.menuGenAI?.click(); });
   // 三个 popup 的 outside-click 关闭
   document.addEventListener("pointerdown", (e: Event) => {
     if (!els.galleryAddPopup.classList.contains("hidden") &&

@@ -120,3 +120,32 @@ describe("空笔架自愈 · 补内置笔失败不认命（v423）", () => {
     rack._stopHeal();
   });
 });
+
+// v0.6.14 缺笔自愈（纯派生，不回写 dial）：dial 指的笔被删/还没 sync 到 → 当前笔退该工具默认笔；
+//   缺的笔从云端回来那一刻自动复原（正因为没回写，存档里的 id 没被销毁）。
+describe("缺笔自愈（v0.6.14 resolveActiveBrushPure）", () => {
+  it("dial 指着不存在的笔 → 退到该工具默认笔；dial 不被回写", async () => {
+    const { rack, toolStates } = await mkRack([brush("b1", "笔A"), brush("b2", "笔B")]);
+    toolStates.brush.activeBrushId = "ghost";
+    toolStates.brush.activeBrushName = "已删的笔";
+    const r = rack.resolveActiveBrushPure(toolStates.brush, "brush");
+    eq(r?.id, "b1", "★缺笔必须退默认笔（不再是 DEFAULT_CONFIG 幽灵笔）");
+    eq(toolStates.brush.activeBrushId, "ghost", "★不回写 dial——存档引用保留，等 sync 复原");
+  });
+
+  it("缺的笔 sync 回来（collection 写入同 id）→ 自动复原为原笔", async () => {
+    const { rack, collection, toolStates } = await mkRack([brush("b1", "笔A")]);
+    toolStates.brush.activeBrushId = "ghost";
+    toolStates.brush.activeBrushName = null;
+    eq(rack.resolveActiveBrushPure(toolStates.brush, "brush")?.id, "b1", "前提：先退默认");
+    collection.setItem("ghost", brush("ghost", "外域笔"));
+    eq(rack.resolveActiveBrushPure(toolStates.brush, "brush")?.id, "ghost", "★sync 到货即复原");
+  });
+
+  it("id 死但 name 还在 → 名字兜底命中，不算缺笔", async () => {
+    const { rack, toolStates } = await mkRack([brush("b1", "笔A")]);
+    toolStates.brush.activeBrushId = "ghost";
+    toolStates.brush.activeBrushName = "笔A";
+    eq(rack.resolveActiveBrushPure(toolStates.brush, "brush")?.id, "b1", "name 兜底优先于默认笔");
+  });
+});

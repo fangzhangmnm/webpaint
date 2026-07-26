@@ -26,6 +26,9 @@ export interface LeftDialOpts {
   onOpacity(frac: number): void;
   onBrushTap(): void;
   onBrushLongpress(): void;
+  // v0.6.14 禁用笔压 toggle（size 栏下方；开 = 恒定 0.5，见 input.ts setPressureDisabled）
+  getPressureDisabled(): boolean;
+  onTogglePressure(v: boolean): void;
 }
 export interface LeftDialHandle {
   flashSize(): void;              // 外部 [ ] 键盘调粗后闪 popup
@@ -90,11 +93,19 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
       function brushUp() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
       function brushClick() { if (lpFired) { lpFired = false; return; } opts.onBrushTap(); }
 
+      // 禁用笔压 toggle：真值在 input.ts（非反应式）→ 组件自持 ref 镜像，点按时双写。
+      const pressureOff = ref(opts.getPressureDisabled());
+      function togglePressure() {
+        pressureOff.value = !pressureOff.value;
+        opts.onTogglePressure(pressureOff.value);
+      }
+
       // i18n：t() 在 setup 调（§5a），模板引 L.*。
-      const L = { brush: t("ld.brush"), size: t("ld.size"), opacity: t("ld.opacity") };
+      const L = { brush: t("ld.brush"), size: t("ld.size"), opacity: t("ld.opacity"), pressureOff: t("ld.pressureOff") };
       return {
         size, opacity, sizePos, sizePosMax, opaPct, brushName, canDraw, popup,
         sizeSlider, opaSlider, onSizeInput, onOpaInput, brushDown, brushUp, brushClick, L,
+        pressureOff, togglePressure,
       };
     },
     template: `
@@ -107,6 +118,10 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
       <span class="left-sidebar-label" :title="L.size" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><use href="#brush-width"/></svg>
       </span>
+      <button class="left-sidebar-toggle" type="button" :title="L.pressureOff" :aria-label="L.pressureOff"
+        :aria-pressed="pressureOff" :disabled="!canDraw" @click="togglePressure">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><use href="#pen-pressure-off"/></svg>
+      </button>
       <div class="size-popup" :class="{ hidden: !popup.visible }" :style="{ left: popup.left + 'px', top: popup.top + 'px' }" aria-hidden="true">
         <div class="size-popup-circle-frame">
           <div class="size-popup-circle" :style="{ width: popup.dia + 'px', height: popup.dia + 'px', opacity: popup.opacity }"></div>

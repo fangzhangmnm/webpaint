@@ -80,13 +80,17 @@ const { PaintDoc } = _docMod;
 const { buildStackXml, parseStackXml } = _oraXmlMod;
 globalThis.OffscreenCanvas = _prevOSC;
 
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+const _docs = [];
+const mkDoc = () => { const d = new PaintDoc(); _docs.push(d); return d; };
+
 const useStub = () => { globalThis.OffscreenCanvas = StubCanvas; globalThis.DOMParser = FakeDOMParser; };
 const T = (name, fn) => it(name, () => { useStub(); fn(); });
 
 // 构造：[L0, G{ L1, L1b }, L2]，active=L1，ref=L2。
 //   注：v281 起「active 是组 → 新层进组内」，故 L2 在「flat 阶段」先建好（active=叶），避免进 G。
 function buildTreeDoc() {
-  const d = new PaintDoc();
+  const d = mkDoc();
   const L0 = d.layers[0];
   // tile-SoT：填 (5,7) 起 10×10 不透明内容 → contentBounds 紧框 = bbox(5,7,10,10)，驱动 ORA x/y 偏移
   L0.putImageData(5, 7, { width: 10, height: 10, data: new Uint8ClampedArray(10 * 10 * 4).fill(255) });
@@ -144,7 +148,7 @@ describe("ora-tree · 嵌套组 XML 往返", () => {
   });
 
   T("空组往返：<stack></stack> → children []", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const G = d.groupSelection(d.layers[0].id).group;   // 包住唯一叶
     G.children = [];                                     // 清空 → 空组（仅测序列化形状）
     const xml = buildStackXml(d);
@@ -179,7 +183,7 @@ describe("ora-tree · 向后兼容（旧扁平 .ora）", () => {
 
 describe("ora-tree · 组隔离 ↔ ORA 标准 isolation（v278 穿透）", () => {
   T("穿透→isolation=auto；正常(隔离)→isolation=isolate；混合模式→composite-op", () => {
-    const d = new PaintDoc();
+    const d = mkDoc();
     const L1 = d.addLayer();
     d.groupSelection(L1.id);                 // 新组默认 = pass-through
     const G = d.layers[1];
@@ -214,5 +218,15 @@ describe("ora-tree · 组隔离 ↔ ORA 标准 isolation（v278 穿透）", () =
     eq(nodes.length, 1, "1 组");
     eq(nodes[0].isGroup, true, "是组");
     eq(nodes[0].mode, "pass-through", "src-over + 无 isolation → 穿透（baseline 缺省 auto）");
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+describe("ora-tree 收尾", () => {
+  it("释放本文件的 doc tiles", async () => {
+    const { eachLeaf } = await import("../src/doc.ts");
+    for (const d of _docs) { eachLeaf(d.layers, (l) => l.pixels?.dispose?.()); d.selection?.dispose?.(); }
+    _docs.length = 0;
+    assert(true, "disposed");
   });
 });

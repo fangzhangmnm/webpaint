@@ -8,12 +8,15 @@ import { UndoHistory } from "../src/workpiece/undo-history.ts";
 import { makeOperators } from "../src/workpiece/operators.ts";
 import { appTilePool } from "../src/tiles/app-tile-pool.ts";
 
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+const _ctxs = [], _orphans = [];   // _orphans：测试有意造成的「脱离 doc 的层」（所有权归测试）
 function mk() {
   const doc = new PaintDoc({ width: 512, height: 512 });
   const w = new Workpiece(doc);
   let unrec = 0;
   const h = new UndoHistory({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => { unrec++; } });
   const ops = makeOperators({ applyDocTransformUi: () => {} });
+  _ctxs.push({ doc, h });
   return { doc, w, h, ops, unrec: () => unrec };
 }
 const px = (r, g, b, a) => new Uint8ClampedArray([r, g, b, a]);
@@ -43,7 +46,7 @@ describe("operators · SwapPixels（事务型：引擎先画，before 句柄零�
     const before = L.snapshot();
     L.pixels.putRegion(0, 0, 1, 1, px(7, 7, 7, 255));
     h.run(w, ops.pixels, { layerId: L.id, _initialBefore: before });
-    doc.removeLayer(L.id);                                   // 直接删（绕 undo——模拟腐坏场景）
+    doc.removeLayer(L.id); _orphans.push(L);                 // 直接删（绕 undo——模拟腐坏场景；像素释放归 caller=本测试）
     eq(h.undo(w), false);
     eq(unrec(), 1, "layer gone → 不可恢复弃栈（诚实，不吞错照报成功）");
   });
@@ -139,11 +142,14 @@ describe("operators · TreeStructure / DocTransform（结构与整 doc 快照）
     const after = { doc: doc.snapshotAll(), viewport: null };
     eq(h.run(w, ops.docTransform, { before, after }).ok, true);
     eq(doc.width, 256);
+    const orig = flattenLeaves(doc.layers);        // restoreSnapshotAll 整树替换——被换下的层归测试释放
     h.undo(w);
     eq(doc.width, 512, "undo 回原尺寸");
     eq(doc.activeLayer.sampleAt(400, 400)[0], 4, "裁掉的像素回来了");
+    const undoLayers = flattenLeaves(doc.layers);
     h.redo(w);
     eq(doc.width, 256, "redo 回裁后");
+    _orphans.push(...orig, ...undoLayers);
   });
 });
 
@@ -163,5 +169,19 @@ describe("operators · 句柄收支（清栈后池不留本套件的 tile）", (
     h.clear();
     for (const leaf of flattenLeaves(doc.layers)) leaf.pixels.dispose();
     eq(appTilePool().stats().count, before, "undo 包/层像素全部归还（无泄漏）");
+  });
+});
+
+// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+describe("operators 收尾", () => {
+  it("清栈并释放本文件的 doc tiles", () => {
+    for (const { doc, h } of _ctxs) {
+      h.clear();
+      for (const leaf of flattenLeaves(doc.layers)) leaf.pixels?.dispose?.();
+      doc.selection?.dispose?.();
+    }
+    for (const L of _orphans) L.pixels?.dispose?.();
+    _ctxs.length = 0; _orphans.length = 0;
+    assert(true, "disposed");
   });
 });
