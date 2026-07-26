@@ -320,9 +320,9 @@ export class ShapeBrushEngine {
     }
     if (pts.length) {
       this._inner.beginStroke(st.layer, st.settings, pts[0].x, pts[0].y, SHAPE_PRESSURE, st.mode, { tau: 0, deadzone: 0 }, null);
-      for (let i = 1; i < pts.length; i++) {
-        this._inner.stampAt(pts[i].x, pts[i].y, SHAPE_PRESSURE);
-      }
+      // 批量落点（begin 已 immediate 画第一颗）：128px 桶批 editRegion，替代逐像素 stampAt
+      //   ——像素透视大圆拖拽卡顿的修法（user 批准 2026-07-25）
+      this._inner.stampPixels(pts.slice(1), SHAPE_PRESSURE);
     }
     const painted = this._inner.flushDirty();
     if (st.lastPaint) this._mergeDirty(st, st.lastPaint);
