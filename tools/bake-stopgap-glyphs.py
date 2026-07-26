@@ -49,8 +49,8 @@ def text_path(text, box, font='cjk'):
 SPECS = [
     # 2026-07-25 晚：透视批 9 条全部落定（入库/合并/驳回），stopgap 清零。
     # 历史：line/snap-angle/constrain-*（入库）→ persp 四连/plane 三向/vp-edit/snap-vp（入库，
-    # 后两个缩写展开改名）→ reset-defaults（驳回，用库内 refresh）。当前无 stopgap。
-    ("pen-pressure-off", "压", (3, 3, 18, 18), "左栏size栏·禁用笔压toggle(恒定0.5)。真图标建议=触控笔尖+压力波纹被斜线禁用"),
+    # 后两个缩写展开改名）→ reset-defaults（驳回，用库内 refresh）→ pen-pressure-off
+    # （撤需求 v0.6.16：笔压 toggle 复用笔粗图标位 brush-width/brush-width-locked）。当前无 stopgap。
 ]
 syms = []
 for sid, text, box, note in SPECS:

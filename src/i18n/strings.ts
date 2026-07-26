@@ -205,6 +205,7 @@ export const S = {
   "ld.brush":        { zh: "当前笔刷（tap 切换 / 长按编辑）", en: "Current brush (tap to switch / long-press to edit)", ja: "現在のブラシ（タップで切替 / 長押しで編集）", tok: "ilo sitelen ni · luka la ante · luka awen la nasin" },
   "ld.size":         { zh: "笔粗",     en: "Brush size",   ja: "筆の太さ", tok: "suli linja" },
   "ld.pressureOff":  { zh: "禁用笔压（恒定 0.5）", en: "Disable pen pressure (constant 0.5)", ja: "筆圧を無効化（0.5 固定）", tok: "o weka e wawa luka (0.5 sama ale)" },
+  "ld.pressureOn":   { zh: "启用笔压", en: "Enable pen pressure", ja: "筆圧を有効化", tok: "o kama sin e wawa luka" },
   "status.pressureOff": { zh: "已禁用笔压（恒定 0.5）", en: "Pen pressure disabled (constant 0.5)", ja: "筆圧を無効化しました（0.5 固定）", tok: "wawa luka li weka (0.5 sama ale)" },
   "status.pressureOn":  { zh: "已恢复笔压", en: "Pen pressure restored", ja: "筆圧を有効化しました", tok: "wawa luka li kama sin" },
   "ld.opacity":      { zh: "不透明度", en: "Opacity",      ja: "不透明度", tok: "wawa kule" },

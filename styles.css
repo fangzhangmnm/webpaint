@@ -415,19 +415,11 @@ body[data-mode="gallery"] .left-sidebar { display: none; }
   user-select: none;
   margin-top: -4px;
 }
-/* v0.6.14 禁用笔压 toggle（size 栏下）：按下态 = 笔压已禁用（恒 0.5），走 accent 提示 */
-.left-sidebar-toggle {
-  width: 26px; height: 26px; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--line); border-radius: 7px;
-  background: transparent; color: var(--ink-soft); cursor: pointer;
-}
-.left-sidebar-toggle[aria-pressed="true"] {
-  color: var(--accent, #4c8bf5);
-  border-color: var(--accent, #4c8bf5);
-  background: color-mix(in srgb, var(--accent, #4c8bf5) 12%, transparent);
-}
-.left-sidebar-toggle:disabled { opacity: .4; cursor: default; }
+/* v0.6.16 笔压 toggle = 笔粗图标本体（user：不要多一个难受的按钮）：
+   禁用时图标换 brush-width-locked + accent 着色 */
+.left-sidebar-label-btn { background: none; border: none; padding: 2px; cursor: pointer; }
+.left-sidebar-label-btn[aria-pressed="true"] { color: var(--accent, #4c8bf5); }
+.left-sidebar-label-btn:disabled { opacity: .4; cursor: default; }
 /* 当前笔指示器 + 编辑入口 */
 .left-sidebar-brush {
   width: 32px;
