@@ -11,6 +11,7 @@ const {
   planeFamilies, quadFromCorners, homographyUnitSquare, applyMat3, invertMat3,
   planeChart, snapDirections, snapToDirections, normalizeConfig, HORIZON_EPS,
   configFromModeState, planesForMode, defaultVpsForMode,
+  boxAxesForMode, boxCorners, solveBoxDrag,
 } = await import("../src/perspective-frame.ts");
 
 const close = (a, b, tol = 1e-6) => assert(Math.abs(a - b) <= tol, `${a} !~ ${b} (tol ${tol})`);
@@ -170,15 +171,66 @@ describe("perspective-frame · 模式映射（UI v2）", () => {
     eq(JSON.stringify(planesForMode("p2")), JSON.stringify(["ground", "wallL", "wallR"]));
     eq(JSON.stringify(planesForMode("off")), "[]");
   });
-  it("默认位：p1 画布正中；p2 中线 ∓2H；p3 +上方 2.5H（全在像素中线）", () => {
+  it("默认位：p1 画布正中；p2 总间隔 2H（每侧 ±1H）；p3 +上方 1.5H（全在像素中线）", () => {
     const d1 = defaultVpsForMode("p1", 800, 600);
     eq(d1.vp1.x, 400.5); eq(d1.vp1.y, 300.5); eq(d1.vp2, null);
     const d2 = defaultVpsForMode("p2", 800, 600);
-    eq(d2.vp1.x, Math.floor(400 - 1200) + 0.5);
-    eq(d2.vp2.x, Math.floor(400 + 1200) + 0.5);
+    eq(d2.vp1.x, Math.floor(400 - 600) + 0.5);
+    eq(d2.vp2.x, Math.floor(400 + 600) + 0.5);
     eq(d2.vp1.y, 300.5);
     const d3 = defaultVpsForMode("p3", 800, 600);
     assert(d3.vp3.y < 0, "VP3 默认在画布上方（仰视）");
     eq(((d3.vp3.y % 1) + 1) % 1, 0.5, "负坐标也在像素中线格");
+  });
+});
+
+describe("perspective-frame · 参考 box（UI v2.1，拖角反算 VP）", () => {
+  const mkSt = () => ({
+    mode: "p3", lockHorizon: true,
+    vp1: { x: -600.5, y: 300.5 }, vp2: { x: 1400.5, y: 300.5 }, vp3: { x: 400.5, y: -900.5 },
+    box: { A: { x: 300.5, y: 430.5 }, t: [0.25, 0.25, 0.25] },
+  });
+  it("boxCorners：8 角有限、A/B 沿轴、D 存在", () => {
+    const st = mkSt();
+    const axes = boxAxesForMode("p3", st.vp1, st.vp2, st.vp3);
+    const cs = boxCorners(axes, st.box);
+    assert(cs && cs.length === 8);
+    for (const c of cs) assert(Number.isFinite(c.x) && Number.isFinite(c.y));
+    // B1 在 A→VP1 线段上
+    const t = (cs[1].x - st.box.A.x) / (st.vp1.x - st.box.A.x);
+    assert(Math.abs(t - 0.25) < 1e-9, "B1 = A + 0.25·(VP1−A)");
+  });
+  it("solveBoxDrag：拖角收敛到目标附近、其余角不乱跑、VP 有限且 lock 保持", () => {
+    const st = mkSt();
+    const axes = boxAxesForMode("p3", st.vp1, st.vp2, st.vp3);
+    const before = boxCorners(axes, st.box);
+    const target = { x: before[7].x + 12, y: before[7].y - 8 };   // 拖 D 角
+    const out = solveBoxDrag(st, 7, target);
+    const axes2 = boxAxesForMode("p3", out.vp1, out.vp2, out.vp3);
+    const after = boxCorners(axes2, out.box);
+    assert(after, "解后 box 仍可构造");
+    const dDrag = Math.hypot(after[7].x - target.x, after[7].y - target.y);
+    assert(dDrag < 4, `拖角贴目标，实差 ${dDrag.toFixed(2)}px`);
+    let maxOther = 0;
+    for (let k = 0; k < 7; k++) maxOther = Math.max(maxOther, Math.hypot(after[k].x - before[k].x, after[k].y - before[k].y));
+    assert(maxOther < 40, `其余角小幅让步，实最大 ${maxOther.toFixed(1)}px`);
+    assert(Math.abs(out.vp2.y - out.vp1.y) < 1e-6, "lockHorizon 保持");
+    for (const v of [out.vp1, out.vp2, out.vp3]) assert(Number.isFinite(v.x) && Number.isFinite(v.y));
+  });
+  it("solveBoxDrag：弱透视（VP 很远）拖角把 VP 拉近/推远而不炸", () => {
+    const st = { mode: "p2", lockHorizon: true,
+      vp1: { x: -20000.5, y: 300.5 }, vp2: { x: 20000.5, y: 300.5 }, vp3: null,
+      box: { A: { x: 300.5, y: 430.5 }, t: [0.02, 0.02, -180] } };
+    const axes = boxAxesForMode("p2", st.vp1, st.vp2, null);
+    const before = boxCorners(axes, st.box);
+    const out = solveBoxDrag(st, 4, { x: before[4].x + 6, y: before[4].y + 10 });   // 拖 C12
+    assert(Number.isFinite(out.vp1.x) && Number.isFinite(out.vp2.x));
+    const axes2 = boxAxesForMode("p2", out.vp1, out.vp2, null);
+    assert(boxCorners(axes2, out.box), "仍可构造");
+  });
+  it("p1/p2 模式的轴族形态", () => {
+    const a1 = boxAxesForMode("p1", { x: 0.5, y: 0.5 }, null, null);
+    eq(a1[0].kind, "pencil"); eq(a1[1].kind, "parallel"); eq(a1[2].kind, "parallel");
+    eq(boxAxesForMode("p2", { x: 0.5, y: 0.5 }, null, null), null);   // 缺 vp2
   });
 });

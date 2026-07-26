@@ -68,7 +68,11 @@ const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rec
 let shapeToolbarStack: HTMLElement, shapeSubSlot: HTMLElement, shapeSubSlotUse: SVGUseElement,
     shapeSubMenu: HTMLElement, shapeSubMenuBtns: HTMLElement[], shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement,
     shapeGridCtx: HTMLElement, shapeGridNuVal: HTMLElement, shapeGridNvVal: HTMLElement, shapeGridBorderBtn: HTMLElement,
-    shapePerspModeBtns: HTMLElement[], shapePlaneCtl: HTMLElement, shapePlaneBtns: HTMLElement[], shapeVpEditBtn: HTMLElement;
+    shapePerspModeSlotUse: SVGUseElement, shapePerspModeMenuBtns: HTMLElement[],
+    shapePlaneCtl: HTMLElement, shapePlaneSlotUse: SVGUseElement, shapePlaneMenu: HTMLElement, shapePlaneBtns: HTMLElement[],
+    shapePerspExtraCtl: HTMLElement, shapePerspShowBtn: HTMLElement, shapePerspShowUse: SVGUseElement;
+const PERSP_MODE_ICON: Record<string, string> = { off: "#persp-viewport", p1: "#persp-1p", p2: "#persp-2p", p3: "#persp-3p" };
+const PLANE_ICON: Record<string, string> = { ground: "#plane-ground", wall: "#plane-wall", wallL: "#plane-wall-left", wallR: "#plane-wall-right" };
 const SHAPE_SUB_ICON: Record<string, string> = { line: "#line", rect: "#rectangle", circle: "#circle", grid: "#grid" };
 const SHAPE_CONSTRAIN_ICON: Record<string, string> = { line: "#snap-angle", rect: "#constrain-square", circle: "#constrain-circle" };
 
@@ -94,20 +98,27 @@ export function updateShapeToolbar() {
     shapeGridNvVal.textContent = String(editorState.shapeBrush.gridNv);
     shapeGridBorderBtn.setAttribute("aria-pressed", editorState.shapeBrush.gridBorder ? "true" : "false");
   }
-  // 透视模式行（UI v2，transform 风格）：四态高亮；透视开着 → 平面行 + VP 编辑钮出现
+  // 透视模式组槽（UI v2.1）：槽显当前模式；透视开着 → 平面槽（line 智能吸附不吃平面 → 藏）+
+  //   VP 编辑钮 + 绘图 gizmo 显隐钮出现
   const g = editorState.persp;
   const mode = (["p1", "p2", "p3"].includes(g.mode) ? g.mode : "off") as PerspMode;
-  for (const b of shapePerspModeBtns) {
+  shapePerspModeSlotUse.setAttribute("href", PERSP_MODE_ICON[mode]);
+  for (const b of shapePerspModeMenuBtns) {
     b.setAttribute("aria-pressed", b.dataset.perspMode === mode ? "true" : "false");
   }
-  shapePlaneCtl.classList.toggle("hidden", mode === "off");
+  shapePlaneCtl.classList.toggle("hidden", mode === "off" || sub === "line");
+  shapePerspExtraCtl.classList.toggle("hidden", mode === "off");
   if (mode !== "off") {
     const planes = planesForMode(mode) as string[];
+    const plane = planes.includes(g.plane) ? g.plane : "ground";
+    shapePlaneSlotUse.setAttribute("href", PLANE_ICON[plane] || "#plane-ground");
     for (const b of shapePlaneBtns) {
-      const plane = b.dataset.shapePlane!;
-      b.classList.toggle("hidden", !planes.includes(plane));
-      b.setAttribute("aria-pressed", g.plane === plane ? "true" : "false");
+      const p = b.dataset.shapePlane!;
+      b.classList.toggle("hidden", !planes.includes(p));
+      b.setAttribute("aria-pressed", plane === p ? "true" : "false");
     }
+    shapePerspShowBtn.setAttribute("aria-pressed", g.showGizmo ? "true" : "false");
+    shapePerspShowUse.setAttribute("href", g.showGizmo ? "#visibility-show" : "#visibility-hide");
   }
 }
 function closeSubMenu() { lassoSubMenu?.classList.add("hidden"); }
@@ -505,36 +516,47 @@ export function initToolbar(ctx: AppContext) {
     pushGridToEngine();
     updateShapeToolbar();
   });
-  // 透视模式行 + 平面行（ADR-0006 UI v2）：mode 决定 VP 数量（切模式时缺的 VP 按默认位补齐，
-  //   已有的保留用户调过的位置）；引擎在起笔时经 configFromModeState 拉取。
-  shapePerspModeBtns = [...byId("shapePerspModeCtl").querySelectorAll<HTMLElement>("[data-persp-mode]")];
+  // 透视模式组槽 + 平面组槽（ADR-0006 UI v2.1，flyout）：mode 决定 VP 数量（切模式时缺的 VP
+  //   按默认位补齐，已有的保留用户调过的位置；参考点默认开）；引擎在起笔时经 configFromModeState 拉取。
+  const shapePerspModeSlot = byId("shapePerspModeSlot");
+  shapePerspModeSlotUse = byId("shapePerspModeSlotUse") as unknown as SVGUseElement;
+  const shapePerspModeMenu = byId("shapePerspModeMenu");
+  shapePerspModeMenuBtns = [...shapePerspModeMenu.querySelectorAll<HTMLElement>("[data-persp-mode]")];
   shapePlaneCtl = byId("shapePlaneCtl");
-  shapePlaneBtns = [...shapePlaneCtl.querySelectorAll<HTMLElement>("[data-shape-plane]")];
-  shapeVpEditBtn = byId("shapeVpEditBtn");
-  for (const b of shapePerspModeBtns) {
-    b.addEventListener("click", () => {
-      if (input.isStrokeActive()) input.abortActiveStroke();
-      const mode = b.dataset.perspMode as PerspMode;
-      const g = editorState.persp;
-      g.mode = mode;
-      if (mode !== "off") {
-        const def = defaultVpsForMode(mode, doc.width, doc.height);
-        if (!g.vp1 && def.vp1) g.vp1 = def.vp1;
-        if (!g.vp2 && def.vp2) g.vp2 = def.vp2;
-        if (!g.vp3 && def.vp3) g.vp3 = def.vp3;
-        const planes = planesForMode(mode) as string[];
-        if (!planes.includes(g.plane)) g.plane = "ground";
-      }
-      updateShapeToolbar();
-    });
-  }
-  for (const b of shapePlaneBtns) {
-    b.addEventListener("click", () => {
-      if (input.isStrokeActive()) input.abortActiveStroke();
-      editorState.persp.plane = b.dataset.shapePlane!;
-      updateShapeToolbar();
-    });
-  }
+  const shapePlaneSlot = byId("shapePlaneSlot");
+  shapePlaneSlotUse = byId("shapePlaneSlotUse") as unknown as SVGUseElement;
+  shapePlaneMenu = byId("shapePlaneMenu");
+  shapePlaneBtns = [...shapePlaneMenu.querySelectorAll<HTMLElement>("[data-shape-plane]")];
+  shapePerspExtraCtl = byId("shapePerspExtraCtl");
+  shapePerspShowBtn = byId("shapePerspShowBtn");
+  shapePerspShowUse = byId("shapePerspShowUse") as unknown as SVGUseElement;
+  wireSlotMenu(shapePerspModeSlot, shapePerspModeMenu, (b) => {
+    if (input.isStrokeActive()) input.abortActiveStroke();
+    const mode = b.dataset.perspMode as PerspMode;
+    const g = editorState.persp;
+    g.mode = mode;
+    if (mode !== "off") {
+      const def = defaultVpsForMode(mode, doc.width, doc.height);
+      if (!g.vp1 && def.vp1) g.vp1 = def.vp1;
+      if (!g.vp2 && def.vp2) g.vp2 = def.vp2;
+      if (!g.vp3 && def.vp3) g.vp3 = def.vp3;
+      if (!g.refPoint) g.refPoint = { x: Math.floor(doc.width / 2) + 0.5, y: Math.floor(doc.height / 2) + 0.5 };   // 参考点默认开
+      const planes = planesForMode(mode) as string[];
+      if (!planes.includes(g.plane)) g.plane = "ground";
+    }
+    updateShapeToolbar();
+    board.requestRender();   // 绘图 gizmo 跟着显隐
+  });
+  wireSlotMenu(shapePlaneSlot, shapePlaneMenu, (b) => {
+    if (input.isStrokeActive()) input.abortActiveStroke();
+    editorState.persp.plane = b.dataset.shapePlane!;
+    updateShapeToolbar();
+  });
+  shapePerspShowBtn.addEventListener("click", () => {
+    editorState.persp.showGizmo = !editorState.persp.showGizmo;
+    updateShapeToolbar();
+    board.requestRender();
+  });
   input.shapeBrush.setPerspProvider(() => configFromModeState(editorState.persp));
   const syncShapeFromEditorState = () => {
     input.shapeBrush.setSubTool(editorState.shapeBrush.sub as Parameters<typeof input.shapeBrush.setSubTool>[0]);
