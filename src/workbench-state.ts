@@ -152,9 +152,10 @@ function freshGroups() {
       showGizmo: true,             // 绘图时显示 VP+地平线（user：作画时也要看得到，给显隐钮）
       // per-mode VP 槽位（user 拍板：一/二/三点分开存互不污染）。参考点已删（box 取代——
       //   「那个本来就是低配的方块」）。
-      p1: { vp1: null as { x: number; y: number } | null },
-      p2: { vp1: null as { x: number; y: number } | null, vp2: null as { x: number; y: number } | null },
-      p3: { vp1: null as { x: number; y: number } | null, vp2: null as { x: number; y: number } | null, vp3: null as { x: number; y: number } | null },
+      // box = 参考 cube 控制面参数（user：随消失点一起持久化；A=锚角 doc 坐标、t=三轴行程）
+      p1: { vp1: null as { x: number; y: number } | null, box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
+      p2: { vp1: null as { x: number; y: number } | null, vp2: null as { x: number; y: number } | null, box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
+      p3: { vp1: null as { x: number; y: number } | null, vp2: null as { x: number; y: number } | null, vp3: null as { x: number; y: number } | null, box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
     },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
@@ -309,6 +310,10 @@ export function remapShapePersp(f: (p: { x: number; y: number }) => { x: number;
   if (g.p3.vp1) g.p3.vp1 = f(g.p3.vp1);
   if (g.p3.vp2) g.p3.vp2 = f(g.p3.vp2);
   if (g.p3.vp3) g.p3.vp3 = f(g.p3.vp3);
+  // 参考 box 锚角跟着重映射（t 行程是比例/相对量，不动）
+  for (const slot of [g.p1, g.p2, g.p3]) {
+    if (slot.box) slot.box = { A: f(slot.box.A), t: slot.box.t };
+  }
   if (opts.unlockHorizon && (g.p2.vp1 || g.p3.vp1)) g.lockHorizon = false;
 }
 

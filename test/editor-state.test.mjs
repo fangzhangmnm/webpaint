@@ -124,6 +124,7 @@ test("[editor-state] 透视 frame（ADR-0006）：默认 / 往返 / 老 doc 缺�
   eq(editorState.shapeBrush.gridNv, 6);
   eq(editorState.shapeBrush.gridBorder, false, "外框默认关");
   editorState.persp.p3.vp1 = { x: 100.5, y: 50.5 };
+  editorState.persp.p3.box = { A: { x: 10.5, y: 20.5 }, t: [0.3, 0.25, 0.2] };
   editorState.persp.p3.vp3 = { x: 30.5, y: 900.5 };
   editorState.persp.mode = "p3";
   editorState.persp.plane = "wallL";
@@ -134,6 +135,7 @@ test("[editor-state] 透视 frame（ADR-0006）：默认 / 往返 / 老 doc 缺�
   eq(JSON.stringify(editorState.persp.p3.vp1), JSON.stringify({ x: 100.5, y: 50.5 }), "p3.vp1 往返");
   eq(JSON.stringify(editorState.persp.p3.vp3), JSON.stringify({ x: 30.5, y: 900.5 }), "p3.vp3 往返");
   eq(editorState.persp.mode, "p3", "mode 往返");
+  eq(JSON.stringify(editorState.persp.p3.box), JSON.stringify({ A: { x: 10.5, y: 20.5 }, t: [0.3, 0.25, 0.2] }), "参考 box 随槽位往返（user：和消失点一起持久化）");
   eq(editorState.persp.plane, "wallL", "plane 往返");
   eq(editorState.shapeBrush.gridNv, 8, "gridNv 往返");
   editorState.reset();
