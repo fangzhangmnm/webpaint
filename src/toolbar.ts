@@ -73,7 +73,8 @@ let shapeToolbarStack: HTMLElement, shapeSubSlot: HTMLElement, shapeSubSlotUse: 
     shapePerspExtraCtl: HTMLElement, shapePerspShowBtn: HTMLElement, shapePerspShowUse: SVGUseElement;
 const PERSP_MODE_ICON: Record<string, string> = { off: "#persp-viewport", p1: "#persp-1p", p2: "#persp-2p", p3: "#persp-3p" };
 const SHAPE_SUB_ICON: Record<string, string> = { line: "#line", rect: "#rectangle", circle: "#circle", grid: "#grid" };
-const SHAPE_CONSTRAIN_ICON: Record<string, string> = { line: "#snap-angle", rect: "#constrain-square", circle: "#constrain-circle" };
+// constrain-square/circle 已合并成唯一 constrain-ratio（甲方裁定 2026-07-25，旧双 id sunset）
+const SHAPE_CONSTRAIN_ICON: Record<string, string> = { line: "#snap-angle", rect: "#constrain-ratio", circle: "#constrain-ratio" };
 
 // 形状笔上下文工具栏派生（对齐 updateLassoToolbar 的「统一同步点」纪律）
 export function updateShapeToolbar() {
@@ -90,7 +91,7 @@ export function updateShapeToolbar() {
   }
   // 约束钮：grid 无约束语义 → 隐藏；line 在透视下语义换成「吸向消失点」→ 换图标（user）
   shapeConstrainBtn.classList.toggle("hidden", sub === "grid");
-  const constrainIcon = sub === "line" && perspMode !== "off" ? "#snap-vp" : (SHAPE_CONSTRAIN_ICON[sub] || "#snap-angle");
+  const constrainIcon = sub === "line" && perspMode !== "off" ? "#snap-vanishing-point" : (SHAPE_CONSTRAIN_ICON[sub] || "#snap-angle");
   shapeConstrainUse.setAttribute("href", constrainIcon);
   shapeConstrainBtn.setAttribute("aria-pressed", input.shapeBrush.getConstrain() ? "true" : "false");
   // grid 配置区（sub=grid 时显）
