@@ -489,3 +489,123 @@ export function solveBoxDrag(st: BoxDragState, cornerIdx: number, target: Pt): B
   const out = unpack(p);
   return cornersOf(out) ? out : st;
 }
+
+// ═══ 平面欧氏度量（UI v2.4，user：正方/正圆也 respect 透视 frame）═══
+//
+// 之前判「平面内正方/正圆无度量」——升级：度量由**经典透视约定**确定（三族方向在 3D 互相
+// 垂直 + 主点约定），重建视点 E 即得平面真欧氏度量：
+//   · 三点：主点 P0 = VP 三角形垂心（经典），d² = −(vp1−P0)·(vp2−P0)（Thales/垂直关系）；
+//     钝角三角形 d²≤0 = 配置不可实现为三正交方向 → null（引擎回退）。
+//   · 二点：P0 = 画布中心在地平线上的投影（夹进 VP 区间 5% margin），d² = s·(len−s)。
+//   · 一点：P0 = VP，视距 d = docH（约定，与默认 VP 间距的观感一致）。
+// 有 E 就有 3D：族方向 D = (vp−P0, d) / 平行族 (dir, 0)；场景平面过锚点(锚在画板 z=0 上)、
+// 法线 = DA×DB。unproject = 视线∩平面；project = 3D→画板。正圆 = 平面上的欧氏圆的像；
+// 正方 = 平面内 |du|==|dv| 的四边形。
+
+type V3 = [number, number, number];
+const _sub3 = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const _dot3 = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const _scale3 = (a: V3, s: number): V3 => [a[0] * s, a[1] * s, a[2] * s];
+const _add3 = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const _cross3v = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const _len3 = (a: V3): number => Math.hypot(a[0], a[1], a[2]);
+
+// 垂心（两条高线的交点；2×2 线性解）
+function _orthocenter(a: Vp, b: Vp, c: Vp): Vp | null {
+  // 过 a ⊥ (b−c)：(b−c)·P = (b−c)·a；过 b ⊥ (a−c)：(a−c)·P = (a−c)·b
+  const r1x = b.x - c.x, r1y = b.y - c.y, k1 = r1x * a.x + r1y * a.y;
+  const r2x = a.x - c.x, r2y = a.y - c.y, k2 = r2x * b.x + r2y * b.y;
+  const det = r1x * r2y - r1y * r2x;
+  if (Math.abs(det) < 1e-9) return null;
+  return { x: (k1 * r2y - r1y * k2) / det, y: (r1x * k2 - k1 * r2x) / det };
+}
+
+export interface PlaneMetric {
+  project(P: V3): Pt | null;          // 3D → 画板（视线反向 → null）
+  unproject(q: Pt): V3 | null;        // 画板 → 场景平面（越地平线/背面 → null）
+  U: V3; V: V3;                       // 平面内正交单位基（U ∥ famA 方向）
+  A3: V3;                             // 锚点（在画板上，场景平面过它）
+}
+
+export function planeMetric(cfg: PerspConfig, famA: Family, famB: Family, anchor: Pt, docW: number, docH: number): PlaneMetric | null {
+  const { vp1, vp2, vp3 } = cfg;
+  let P0: Vp | null = null;
+  let d2 = 0;
+  if (vp1 && vp2 && vp3) {
+    P0 = _orthocenter(vp1, vp2, vp3);
+    if (!P0) return null;
+    d2 = -((vp1.x - P0.x) * (vp2.x - P0.x) + (vp1.y - P0.y) * (vp2.y - P0.y));
+  } else if (vp1 && vp2) {
+    const ex = vp2.x - vp1.x, ey = vp2.y - vp1.y;
+    const len = Math.hypot(ex, ey);
+    if (len < 1e-6) return null;
+    const ux = ex / len, uy = ey / len;
+    let s = (docW / 2 - vp1.x) * ux + (docH / 2 - vp1.y) * uy;
+    s = Math.max(0.05 * len, Math.min(0.95 * len, s));
+    P0 = { x: vp1.x + s * ux, y: vp1.y + s * uy };
+    d2 = s * (len - s);
+  } else if (vp1) {
+    P0 = vp1;
+    d2 = docH * docH;
+  } else return null;
+  if (!(d2 > 1)) return null;   // 不可实现（钝角三点配置等）
+  const d = Math.sqrt(d2);
+  const E: V3 = [P0.x, P0.y, -d];
+  const dir3 = (fam: Family): V3 => {
+    const v: V3 = fam.kind === "pencil" ? [fam.vp.x - P0!.x, fam.vp.y - P0!.y, d] : [fam.dir.x, fam.dir.y, 0];
+    const L = _len3(v);
+    return L > 1e-9 ? _scale3(v, 1 / L) : [1, 0, 0];
+  };
+  const U = dir3(famA);
+  const DB = dir3(famB);
+  let Vv = _sub3(DB, _scale3(U, _dot3(DB, U)));   // 约定下近正交，Gram-Schmidt 兜数值
+  const vl = _len3(Vv);
+  if (vl < 1e-6) return null;
+  Vv = _scale3(Vv, 1 / vl);
+  const n = _cross3v(U, Vv);
+  const A3: V3 = [anchor.x, anchor.y, 0];
+  const project = (P: V3): Pt | null => {
+    const dz = P[2] - E[2];
+    if (Math.abs(dz) < 1e-9) return null;
+    const t = (0 - E[2]) / dz;
+    if (t <= 1e-6) return null;   // 背面
+    return { x: E[0] + t * (P[0] - E[0]), y: E[1] + t * (P[1] - E[1]) };
+  };
+  const unproject = (q: Pt): V3 | null => {
+    const dir: V3 = [q.x - E[0], q.y - E[1], 0 - E[2]];
+    const denom = _dot3(dir, n);
+    if (Math.abs(denom) < 1e-12) return null;
+    const t = _dot3(_sub3(A3, E), n) / denom;
+    if (t <= 1e-6) return null;   // 越地平线/背面
+    return _add3(E, _scale3(dir, t));
+  };
+  return { project, unproject, U, V: Vv, A3 };
+}
+
+// 正方约束：把拖拽角 c1 调整到平面内 |du|==|dv|（边长取 max，象限跟拖拽——同 _constrainSquare 语义）
+export function constrainSquareOnPlane(m: PlaneMetric, c1: Pt): Pt | null {
+  const C1 = m.unproject(c1);
+  if (!C1) return null;
+  const off = _sub3(C1, m.A3);
+  const du = _dot3(off, m.U), dv = _dot3(off, m.V);
+  const side = Math.max(Math.abs(du), Math.abs(dv));
+  if (side < 1e-6) return null;
+  const C = _add3(m.A3, _add3(_scale3(m.U, Math.sign(du || 1) * side), _scale3(m.V, Math.sign(dv || 1) * side)));
+  return m.project(C);
+}
+
+// 正圆：平面欧氏圆（圆心=锚点、半径=到拖点的平面距离）的像，采样返回 doc 折线（背面点滤掉）
+export function metricCirclePolyline(m: PlaneMetric, drag: Pt, n: number): Pt[] {
+  const B = m.unproject(drag);
+  if (!B) return [];
+  const R = _len3(_sub3(B, m.A3));
+  if (R < 1e-6) return [];
+  const out: Pt[] = [];
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const P = _add3(m.A3, _add3(_scale3(m.U, R * Math.cos(a)), _scale3(m.V, R * Math.sin(a))));
+    const q = m.project(P);
+    if (q) out.push(q);
+  }
+  return out;
+}

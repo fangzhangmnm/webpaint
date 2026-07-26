@@ -10,8 +10,9 @@
 // frame（形状笔全局，ADR-0006）：align-to-viewport（默认，几何相对视口轴）或 透视平面
 //   （editorState.persp：VP 0-3 个 + 平面选择）。透视下 rect=梯形/四边形、grid=透视缩短格、
 //   circle 徒手拟合在平面 chart 里做、line 约束吸向 VP（透视辅助线）。
-//   约束键在透视平面下只对 line 有意义（平面内"正方/正圆"需要度量，而深度尺度自由度在
-//   两角定形后已消掉——结构性不可定义，ADR-0006）。
+//   约束键在透视下全子工具有效（UI v2.4）：line=吸 VP；rect=平面欧氏正方、circle=平面欧氏圆
+//   ——度量由经典约定重建视点（planeMetric：三点=垂心/二点=中心投影+Thales/一点=d=H），
+//   推翻早先"无度量不可定义"的判断（那时漏了经典透视的正交方向约定这最后一块拼图）。
 //
 // 渲染路径：
 //   · buffered 笔刷：几何 → 一组 polyline（grid 是多条！）→ 逐条驱动私有 BrushEngine →
@@ -33,6 +34,7 @@ import type { ClipBox } from "./shape-geometry.ts";
 import {
   planeFamilies, quadFromCorners, homographyUnitSquare, applyMat3,
   planeChart, snapDirections, snapToDirections,
+  planeMetric, constrainSquareOnPlane, metricCirclePolyline,
 } from "./perspective-frame.ts";
 import { bresenhamConicInQuad } from "./pixel-conic.ts";
 import type { Family, PerspConfig, Mat3 } from "./perspective-frame.ts";
@@ -178,11 +180,19 @@ export class ShapeBrushEngine {
 
   // ---- 几何（buffered）：当前拖拽 → 一组 polyline ----
 
-  // 统一四边形：viewport = 旋转 AABB 四角；persp = 两角定形（病态 → null）
+  // 统一四边形：viewport = 旋转 AABB 四角；persp = 两角定形（病态 → null）。
+  //   constrain 在 persp 下 = **平面欧氏正方**（UI v2.4，user：正方也 respect 透视 frame——
+  //   度量由经典约定重建视点得到，见 planeMetric；度量不可实现时静默回退不约束）。
   _quad(st: ShapeStroke, constrain: boolean): [Pt, Pt, Pt, Pt] | null {
     const c0 = { x: st.x0, y: st.y0 }, c1 = { x: st.x1, y: st.y1 };
     if (st.frame.kind === "persp") {
-      return quadFromCorners(c0, c1, st.frame.famA, st.frame.famB);
+      let cc = c1;
+      if (constrain) {
+        const m = planeMetric(st.frame.cfg, st.frame.famA, st.frame.famB, c0, st.layer.docW, st.layer.docH);
+        const adj = m && constrainSquareOnPlane(m, c1);
+        if (adj) cc = adj;
+      }
+      return quadFromCorners(c0, cc, st.frame.famA, st.frame.famB);
     }
     return rectCorners(c0, c1, st.frame.rot, constrain);
   }
@@ -207,7 +217,7 @@ export class ShapeBrushEngine {
       return [linePolyline({ x: st.x0, y: st.y0 }, end, seg)];
     }
     if (this._subTool === "rect") {
-      const q = this._quad(st, this._effConstrain() && st.frame.kind === "viewport");
+      const q = this._quad(st, this._effConstrain());
       if (!q) return [];
       if (st.frame.kind === "viewport") return [rectPolyline(q, seg)];
       // 透视：四边逐段裁剪（角点可能在盒外很远）→ 各自一条 polyline
@@ -230,9 +240,22 @@ export class ShapeBrushEngine {
       }
       return out;
     }
-    // circle 正圆约束（user 改规则）：**圆心拖半径**——起点=圆心，拖多远半径多大（仅非像素笔；
-    //   像素笔永远 AABB）。显式正圆 = doc 空间完美圆，透视 frame 也不投影（约束就是覆写）。
+    // circle 正圆约束（user 两轮改规则）：**圆心拖半径**——起点=圆心，拖多远半径多大（仅非像素笔；
+    //   像素笔永远 AABB）。透视 frame 下 = **平面欧氏圆的像**（UI v2.4：正圆也 respect 透视——
+    //   半径按平面度量、圆在场景平面上；度量不可实现/拖点越地平线 → 回退 doc 空间完美圆）。
     if (this._effConstrain()) {
+      if (st.frame.kind === "persp") {
+        const m = planeMetric(st.frame.cfg, st.frame.famA, st.frame.famB, { x: st.x0, y: st.y0 }, st.layer.docW, st.layer.docH);
+        if (m) {
+          const coarse = metricCirclePolyline(m, { x: st.x1, y: st.y1 }, 48);
+          if (coarse.length >= 8) {
+            let perim = 0;
+            for (let i = 1; i < coarse.length; i++) perim += Math.hypot(coarse[i].x - coarse[i - 1].x, coarse[i].y - coarse[i - 1].y);
+            const n = Math.min(512, Math.max(24, Math.ceil(perim / seg)));
+            return clipPolylineToBox(metricCirclePolyline(m, { x: st.x1, y: st.y1 }, n), box);
+          }
+        }
+      }
       const r = Math.hypot(st.x1 - st.x0, st.y1 - st.y0);
       if (r < 0.5) return [[{ x: st.x0, y: st.y0 }]];
       const n = Math.min(512, Math.max(24, Math.ceil((2 * Math.PI * r) / seg)));
@@ -378,10 +401,18 @@ export class ShapeBrushEngine {
         return this._gridPixels(q);
       }
       // 透视：两角定形 → 四边形（病态 → 空）。全部过裁剪盒（交点近地平线会飞远）。
+      //   constrain（Shift 同样生效）→ 平面欧氏正方角点调整（UI v2.4；正圆盒 = 平面正方盒的内切 conic）
       const box = this._clipBox(st);
+      const fr = st.frame as { cfg: PerspConfig; famA: Family; famB: Family };
+      let c1p = { x: i1 + 0.5, y: j1 + 0.5 };
+      if (this._effConstrain() && this._subTool !== "grid") {
+        const m = planeMetric(fr.cfg, fr.famA, fr.famB, { x: i0 + 0.5, y: j0 + 0.5 }, st.layer.docW, st.layer.docH);
+        const adj = m && constrainSquareOnPlane(m, c1p);
+        if (adj) c1p = { x: Math.floor(adj.x) + 0.5, y: Math.floor(adj.y) + 0.5 };
+      }
       const q = quadFromCorners(
-        { x: i0 + 0.5, y: j0 + 0.5 }, { x: i1 + 0.5, y: j1 + 0.5 },
-        (st.frame as { famA: Family }).famA, (st.frame as { famB: Family }).famB);
+        { x: i0 + 0.5, y: j0 + 0.5 }, c1p,
+        fr.famA, fr.famB);
       if (!q) return [];
       if (this._subTool === "circle") return bresenhamConicInQuad(q, box);
       if (this._subTool === "rect") return quadPerimeterPixels(q, box);

@@ -13,6 +13,7 @@ const {
   configFromModeState, planesForMode, defaultVpsForMode,
   boxAxesForMode, boxCorners, solveBoxDrag,
 } = await import("../src/perspective-frame.ts");
+const mod2 = await import("../src/perspective-frame.ts");
 
 const close = (a, b, tol = 1e-6) => assert(Math.abs(a - b) <= tol, `${a} !~ ${b} (tol ${tol})`);
 const collinear = (a, b, c, tol = 1e-6) =>
@@ -238,5 +239,60 @@ describe("perspective-frame · 参考 box（UI v2.1，拖角反算 VP）", () =>
     const a1 = boxAxesForMode("p1", { x: 0.5, y: 0.5 }, null, null);
     eq(a1[0].kind, "pencil"); eq(a1[1].kind, "parallel"); eq(a1[2].kind, "parallel");
     eq(boxAxesForMode("p2", { x: 0.5, y: 0.5 }, null, null), null);   // 缺 vp2
+  });
+});
+
+describe("perspective-frame · 平面欧氏度量（UI v2.4：正方/正圆 respect 透视）", () => {
+  const { planeMetric, constrainSquareOnPlane, metricCirclePolyline } = mod2;
+  const CFG2 = { vp1: { x: -600.5, y: 300.5 }, vp2: { x: 1400.5, y: 300.5 }, vp3: null, lockHorizon: true, plane: "ground" };
+  const [fa2, fb2] = mod2.planeFamilies(CFG2);
+  it("二点：主点=画布中心投影、d²=s(len−s)>0；U⊥V；project∘unproject=id", () => {
+    const m = planeMetric(CFG2, fa2, fb2, { x: 300, y: 450 }, 800, 600);
+    assert(m, "度量可实现");
+    const dotUV = m.U[0] * m.V[0] + m.U[1] * m.V[1] + m.U[2] * m.V[2];
+    assert(Math.abs(dotUV) < 1e-9, "U⊥V");
+    const P = m.unproject({ x: 350, y: 420 });
+    assert(P, "画布下方点可落平面");
+    const back = m.project(P);
+    assert(Math.abs(back.x - 350) < 1e-6 && Math.abs(back.y - 420) < 1e-6, "往返恒等");
+    eq(m.unproject({ x: 300, y: 200 }), null, "越地平线（y<300 远处）→ null 不进另一 patch");
+  });
+  it("constrainSquareOnPlane：调整后平面内 |du|==|dv|", () => {
+    const m = planeMetric(CFG2, fa2, fb2, { x: 300, y: 450 }, 800, 600);
+    const adj = constrainSquareOnPlane(m, { x: 420, y: 400 });
+    assert(adj, "可调整");
+    const C = m.unproject(adj);
+    const off = [C[0] - m.A3[0], C[1] - m.A3[1], C[2] - m.A3[2]];
+    const du = off[0] * m.U[0] + off[1] * m.U[1] + off[2] * m.U[2];
+    const dv = off[0] * m.V[0] + off[1] * m.V[1] + off[2] * m.V[2];
+    assert(Math.abs(Math.abs(du) - Math.abs(dv)) < 1e-6, `|du|=${Math.abs(du).toFixed(3)} == |dv|=${Math.abs(dv).toFixed(3)}`);
+  });
+  it("metricCirclePolyline：采样点在平面上到圆心等距（真欧氏圆）", () => {
+    const m = planeMetric(CFG2, fa2, fb2, { x: 300, y: 450 }, 800, 600);
+    const pts = metricCirclePolyline(m, { x: 380, y: 430 }, 48);
+    assert(pts.length > 40);
+    const B = m.unproject({ x: 380, y: 430 });
+    const R = Math.hypot(B[0] - m.A3[0], B[1] - m.A3[1], B[2] - m.A3[2]);
+    for (const q of pts) {
+      const P = m.unproject(q);
+      assert(P, "环上点都在平面前侧");
+      const r = Math.hypot(P[0] - m.A3[0], P[1] - m.A3[1], P[2] - m.A3[2]);
+      assert(Math.abs(r - R) < R * 0.01, `等距 ${r.toFixed(2)} vs ${R.toFixed(2)}`);
+    }
+  });
+  it("三点：默认 VP 布局的垂心度量可实现（d²>0）", () => {
+    const d3 = defaultVpsForMode("p3", 800, 600);
+    const CFG3 = { vp1: d3.vp1, vp2: d3.vp2, vp3: d3.vp3, lockHorizon: true, plane: "ground" };
+    const [fa3, fb3] = mod2.planeFamilies(CFG3);
+    const m = planeMetric(CFG3, fa3, fb3, { x: 400, y: 500 }, 800, 600);
+    assert(m, "p3 默认布局度量可实现");
+  });
+  it("一点：P0=VP、d=H 约定可用", () => {
+    const CFG1 = { vp1: { x: 400.5, y: 300.5 }, vp2: null, vp3: null, lockHorizon: true, plane: "ground" };
+    const [fa1, fb1] = mod2.planeFamilies(CFG1);
+    const m = planeMetric(CFG1, fa1, fb1, { x: 200, y: 500 }, 800, 600);
+    assert(m);
+    const P = m.unproject({ x: 250, y: 480 });
+    assert(P && m.project(P));
   });
 });
