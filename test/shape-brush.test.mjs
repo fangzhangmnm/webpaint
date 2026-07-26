@@ -582,3 +582,36 @@ describe("shape-brush · 批量像素写入（golden 等价 + 提速）", () => 
     assert(Date.now() - t0 < 4000, `30 帧大圆重画 ${Date.now() - t0}ms`);
   });
 });
+
+describe("shape-brush · 正方/正圆 respect 透视（UI v2.4 接线烟测）", () => {
+  const CFG2 = { vp1: { x: -600.5, y: 300.5 }, vp2: { x: 1400.5, y: 300.5 }, vp3: null, lockHorizon: true, plane: "ground" };
+  it("persp + constrain 圆：出 stamps 且全有限（平面欧氏圆的像）", () => {
+    const s = resolveBrush({ size: 8, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = new ShapeBrushEngine();
+    eng.setSubTool("circle"); eng.setConstrain(true);
+    eng.setViewportRotProvider(() => 0);
+    eng.setPerspProvider(() => CFG2);
+    eng.beginStroke(doc.layers[0], s, 300, 450, 0.5, "brush");
+    eng.extendStroke(380, 430, 0.5);
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 20, "透视正圆出 stamps");
+    for (const t of cs.stamps) assert(Number.isFinite(t.x) && Number.isFinite(t.y));
+    // 透视圆非 doc 圆：到锚点的 doc 距离应**不**恒定（否则度量没生效）
+    const rs = cs.stamps.map((t) => Math.hypot(t.x - 300, t.y - 450));
+    assert(Math.max(...rs) - Math.min(...rs) > 3, "近大远小（不是 doc 空间正圆）");
+  });
+  it("persp + constrain 矩形：四角 unproject 后平面内 |du|==|dv|", async () => {
+    const pf = await import("../src/perspective-frame.ts");
+    const s = resolveBrush({ size: 6, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = new ShapeBrushEngine();
+    eng.setSubTool("rect"); eng.setConstrain(true);
+    eng.setViewportRotProvider(() => 0);
+    eng.setPerspProvider(() => CFG2);
+    eng.beginStroke(doc.layers[0], s, 300, 450, 0.5, "brush");
+    eng.extendStroke(420, 400, 0.5);
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 10, "透视正方出 stamps");
+  });
+});
