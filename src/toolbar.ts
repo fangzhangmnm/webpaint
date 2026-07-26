@@ -69,10 +69,9 @@ let shapeToolbarStack: HTMLElement, shapeSubSlot: HTMLElement, shapeSubSlotUse: 
     shapeSubMenu: HTMLElement, shapeSubMenuBtns: HTMLElement[], shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement,
     shapeGridCtx: HTMLElement, shapeGridNuVal: HTMLElement, shapeGridNvVal: HTMLElement, shapeGridBorderBtn: HTMLElement,
     shapePerspModeSlotUse: SVGUseElement, shapePerspModeMenuBtns: HTMLElement[],
-    shapePlaneCtl: HTMLElement, shapePlaneSlotUse: SVGUseElement, shapePlaneMenu: HTMLElement, shapePlaneBtns: HTMLElement[],
+    shapePlaneCtl: HTMLElement, shapePlaneBtns: HTMLElement[],
     shapePerspExtraCtl: HTMLElement, shapePerspShowBtn: HTMLElement, shapePerspShowUse: SVGUseElement;
 const PERSP_MODE_ICON: Record<string, string> = { off: "#persp-viewport", p1: "#persp-1p", p2: "#persp-2p", p3: "#persp-3p" };
-const PLANE_ICON: Record<string, string> = { ground: "#plane-ground", wall: "#plane-wall", wallL: "#plane-wall-left", wallR: "#plane-wall-right" };
 const SHAPE_SUB_ICON: Record<string, string> = { line: "#line", rect: "#rectangle", circle: "#circle", grid: "#grid" };
 const SHAPE_CONSTRAIN_ICON: Record<string, string> = { line: "#snap-angle", rect: "#constrain-square", circle: "#constrain-circle" };
 
@@ -114,7 +113,6 @@ export function updateShapeToolbar() {
   if (mode !== "off") {
     const planes = planesForMode(mode) as string[];
     const plane = planes.includes(g.plane) ? g.plane : "ground";
-    shapePlaneSlotUse.setAttribute("href", PLANE_ICON[plane] || "#plane-ground");
     for (const b of shapePlaneBtns) {
       const p = b.dataset.shapePlane!;
       b.classList.toggle("hidden", !planes.includes(p));
@@ -526,10 +524,7 @@ export function initToolbar(ctx: AppContext) {
   const shapePerspModeMenu = byId("shapePerspModeMenu");
   shapePerspModeMenuBtns = [...shapePerspModeMenu.querySelectorAll<HTMLElement>("[data-persp-mode]")];
   shapePlaneCtl = byId("shapePlaneCtl");
-  const shapePlaneSlot = byId("shapePlaneSlot");
-  shapePlaneSlotUse = byId("shapePlaneSlotUse") as unknown as SVGUseElement;
-  shapePlaneMenu = byId("shapePlaneMenu");
-  shapePlaneBtns = [...shapePlaneMenu.querySelectorAll<HTMLElement>("[data-shape-plane]")];
+  shapePlaneBtns = [...shapePlaneCtl.querySelectorAll<HTMLElement>("[data-shape-plane]")];
   shapePerspExtraCtl = byId("shapePerspExtraCtl");
   shapePerspShowBtn = byId("shapePerspShowBtn");
   shapePerspShowUse = byId("shapePerspShowUse") as unknown as SVGUseElement;
@@ -557,11 +552,13 @@ export function initToolbar(ctx: AppContext) {
     updateShapeToolbar();
     board.requestRender();   // 绘图 gizmo 跟着显隐
   });
-  wireSlotMenu(shapePlaneSlot, shapePlaneMenu, (b) => {
-    if (input.isStrokeActive()) input.abortActiveStroke();
-    editorState.persp.plane = b.dataset.shapePlane!;
-    updateShapeToolbar();
-  });
+  for (const b of shapePlaneBtns) {
+    b.addEventListener("click", () => {
+      if (input.isStrokeActive()) input.abortActiveStroke();
+      editorState.persp.plane = b.dataset.shapePlane!;
+      updateShapeToolbar();
+    });
+  }
   shapePerspShowBtn.addEventListener("click", () => {
     editorState.persp.showGizmo = !editorState.persp.showGizmo;
     updateShapeToolbar();

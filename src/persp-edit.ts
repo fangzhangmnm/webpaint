@@ -9,7 +9,7 @@
 //     A（最前角）= 整体平移不动 VP；B1/B2/B3（连 A 的三个）= 主控——精确单轴（转该轴 VP + 行程，
 //     锁地平线时 VP 沿地平线滑）；C/D（更次级）= 阻尼 GN 全参数微调。
 //   · 应用=保留（transient apply），取消/ctrl-z=回快照。工具条 = lasso 图标风格（重置/锁/✓/✕）。
-import { editorState, snapshotShapePersp, restoreShapePersp } from "./workbench-state.ts";
+import { editorState } from "./workbench-state.ts";
 import { clampPixelCenter } from "./shape-geometry.ts";
 import { defaultVpsForMode, boxAxesForMode, boxCorners, solveBoxDrag, BOX_EDGES } from "./perspective-frame.ts";
 import { updateShapeToolbar } from "./toolbar.ts";
@@ -22,7 +22,6 @@ type Kind = "vp1" | "vp2" | "vp3";
 
 let _ctx: AppContext | null = null;
 let _active = false;
-let _snapshot: unknown = null;
 let _toolbar: HTMLElement, _layer: HTMLElement;
 let _lockBtn: HTMLElement, _lockUse: SVGUseElement;
 const _handles = new Map<Kind, HTMLElement>();
@@ -289,11 +288,10 @@ function _resetDefaults() {
   _syncUi();
 }
 
-function _finish(keep: boolean) {
+// 退出恒 apply（user：VP setting 是 editor state 不进 undo history → 没有 commit/cancel）
+function _finish() {
   if (!_active) return;
   _active = false;
-  if (!keep && _snapshot) restoreShapePersp(_snapshot);
-  _snapshot = null;
   _box = null;
   _toolbar.classList.add("hidden");
   _layer.classList.add("hidden");
@@ -308,7 +306,6 @@ function _finish(keep: boolean) {
 export function enterPerspEdit(): void {
   if (!_ctx || _active) return;
   if (_mode() === "off") return;   // 视口对齐无 VP 可编（按钮本就藏着）
-  _snapshot = snapshotShapePersp();
   _active = true;
   // 进场把本模式缺的 VP 按默认位补齐（正常由模式切换补，这里兜底老档/异常态）
   const def = defaultVpsForMode(_mode(), _ctx.doc.width, _ctx.doc.height);
@@ -316,7 +313,7 @@ export function enterPerspEdit(): void {
   if (_mode() !== "p1" && !_get("vp2") && def.vp2) _set("vp2", def.vp2);
   if (_mode() === "p3" && !_get("vp3") && def.vp3) _set("vp3", def.vp3);
   _box = _defaultBox();
-  _ctx.editMode.enterTransient("perspEdit", { apply: () => _finish(true), abort: () => _finish(false) });
+  _ctx.editMode.enterTransient("perspEdit", { apply: () => _finish(), abort: () => _finish() });
   _toolbar.classList.remove("hidden");
   _layer.classList.remove("hidden");
   _syncUi();
@@ -338,15 +335,16 @@ export function initPerspEdit(ctx: AppContext): void {
     }
     _syncUi();
   });
-  document.getElementById("perspApplyBtn")!.addEventListener("click", () => { _finish(true); ctx.editMode.exitTransient(); });
-  document.getElementById("perspCancelBtn")!.addEventListener("click", () => { _finish(false); ctx.editMode.exitTransient(); });
-  // 形状笔透视区里的入口
-  document.getElementById("shapeVpEditBtn")?.addEventListener("click", () => enterPerspEdit());
+  // 形状笔透视区里的入口（再点 = 退出，恒 apply；点其他工具 = onToolSwitch apply 同款）
+  document.getElementById("shapeVpEditBtn")?.addEventListener("click", () => {
+    if (_active) { _finish(); ctx.editMode.exitTransient(); }
+    else enterPerspEdit();
+  });
   // pan/zoom 中手柄跟随（单槽回调 → 链式包装，别打断 crop 的；只定位不 render，防递归）
   const prev = ctx.board.onViewportChange;
   ctx.board.onViewportChange = () => { prev?.(); if (_active) _syncHandles(); };
-  // 换文档：只收 UI 不动状态（新 doc 的 persp 已 Unserialize，绝不能拿旧快照 restore 污染）
-  window.addEventListener("wp:applyEditorState", () => { if (_active) _finish(true); });
+  // 换文档：收 UI（状态本就 live 在 editorState，新 doc 已 Unserialize）
+  window.addEventListener("wp:applyEditorState", () => { if (_active) _finish(); });
   // gizmo：淡地平线 + VP 圈 + box 棱线（编辑模式）；绘图态 showGizmo 开 → 只显 VP+地平线
   ctx.board.setPerspGizmoProvider(() => {
     const g = editorState.persp;

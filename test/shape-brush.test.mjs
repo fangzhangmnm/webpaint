@@ -458,3 +458,74 @@ describe("shape-brush · 透视奇点采样护栏（近地平线不卡死）", (
     assert(cs.stamps.some((t) => Math.abs(t.y - 400) < 1), "下水平边在");
   });
 });
+
+describe("shape-brush · 透视圆往返（chart 尺度修正回归）", () => {
+  it("平面圆投影成笔迹 → 拟合输出贴回真曲线（Hausdorff ≤3px）", async () => {
+    const pf = await import("../src/perspective-frame.ts");
+    const CFG = { vp1: { x: 256.5, y: 100.5 }, vp2: null, vp3: null, lockHorizon: true, plane: "ground" };
+    const [fa, fb] = pf.planeFamilies(CFG);
+    const anchorChart = pf.planeChart(fa, fb, { x: 256, y: 300 });
+    // 真曲线：平面空间半径 60 的圆（锚点尺度 ≈ doc px），投影到 doc = 用户该画的笔迹
+    const truth = [];
+    for (let i = 0; i <= 96; i++) {
+      const a = (i / 96) * Math.PI * 2;
+      const p = anchorChart.toDoc(60 * Math.cos(a), 60 * Math.sin(a));
+      if (p) truth.push(p);
+    }
+    assert(truth.length > 90, "真曲线可投影");
+    // 喂引擎：沿真曲线徒手画一圈（多绕 20°）
+    const s = resolveBrush({ size: 8, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = new ShapeBrushEngine();
+    eng.setSubTool("circle");
+    eng.setViewportRotProvider(() => 0);
+    eng.setPerspProvider(() => CFG);
+    eng.beginStroke(doc.layers[0], s, truth[0].x, truth[0].y, 0.5, "brush");
+    for (let i = 1; i <= 100; i++) {
+      const a = ((380 * (i / 100)) / 360) * Math.PI * 2;
+      const p = anchorChart.toDoc(60 * Math.cos(a), 60 * Math.sin(a));
+      if (p) eng.extendStroke(p.x, p.y, 0.5);
+    }
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 20, "出 stamps");
+    let dMax = 0;
+    for (const t of cs.stamps) {
+      let best = Infinity;
+      for (const c of truth) best = Math.min(best, Math.hypot(t.x - c.x, t.y - c.y));
+      dMax = Math.max(dMax, best);
+    }
+    assert(dMax <= 3, `拟合贴回真曲线，Hausdorff=${dMax.toFixed(2)}px`);
+  });
+});
+
+describe("shape-brush · 正圆=圆心拖半径（v2.3 改规则）+ Shift 反转", () => {
+  it("constrain 圆（buffered）：起点=圆心、拖多远半径多大", () => {
+    const s = resolveBrush({ size: 10, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = mkEngine("circle", true);
+    eng.beginStroke(doc.layers[0], s, 250, 250, 0.5, "brush");
+    eng.extendStroke(330, 250, 0.5);   // 半径 80
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 20);
+    for (const t of cs.stamps) {
+      const r = Math.hypot(t.x - 250, t.y - 250);
+      assert(Math.abs(r - 80) < 1, `圆心 250,250 半径 80，实得 ${r}`);
+    }
+  });
+  it("Shift 反转：constrain 关 + invert 开 → 直线临时吸附", () => {
+    const s = resolveBrush({ size: 10, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = mkEngine("line", false);
+    eng.setConstrainInvert(true);
+    const DEG = Math.PI / 180;
+    eng.beginStroke(doc.layers[0], s, 0, 0, 0.5, "brush");
+    eng.extendStroke(Math.cos(17 * DEG) * 400, Math.sin(17 * DEG) * 400, 0.5);
+    const cs = eng.endStroke();
+    for (const t of cs.stamps) {
+      if (Math.hypot(t.x, t.y) < 5) continue;
+      assert(Math.abs(Math.atan2(t.y, t.x) - 15 * DEG) < 0.01, "invert 生效吸到 15°");
+    }
+    eng.setConstrainInvert(false);
+    eq(eng.getConstrain(), false, "持久开关不被 invert 污染");
+  });
+});

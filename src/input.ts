@@ -1190,6 +1190,8 @@ export class InputController {
     if (e.key === "Alt" || e.code === "AltLeft" || e.code === "AltRight") {
       this.altDown = true;
     }
+    // Shift hold = 形状笔约束临时反转（行业惯例：PS/Figma 画线 Shift 约束、Blender Ctrl 反转 snap）
+    if (e.key === "Shift") this.shapeBrush.setConstrainInvert(true);
     for (const sc of KEYBOARD_SHORTCUTS) {
       if (sc.when && !sc.when(this)) continue;
       if (!_matchCombo(e, sc.combo)) continue;
@@ -1206,6 +1208,7 @@ export class InputController {
     if (e.key === "Alt" || e.code === "AltLeft" || e.code === "AltRight") {
       this.altDown = false;
     }
+    if (e.key === "Shift") this.shapeBrush.setConstrainInvert(false);
   }
   _emitTool(tool: string) { window.dispatchEvent(new CustomEvent("wp:settool", { detail: tool })); }
   _adjustSize(delta: number) { window.dispatchEvent(new CustomEvent("wp:adjsize", { detail: delta })); }

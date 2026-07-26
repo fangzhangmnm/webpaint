@@ -196,8 +196,11 @@ export function planeChart(famA: Family, famB: Family, anchor: Pt): PlaneChart |
   const det = da.x * db.y - da.y * db.x;
   if (Math.abs(det) < 1e-12) return null;
   // M：chart 方向 → 坐标轴。u 沿 famA 方向增长（u 枚举 famB 族的线），v 沿 famB 方向增长（枚举 famA 族）。
-  const m11 = db.y / det, m12 = -db.x / det;    // → u
-  const m21 = -da.y / det, m22 = da.x / det;    // → v
+  // **尺度归一 ×w0**：射影 chart 天然把坐标缩到 ~1/w0，锚点附近 1 plane 单位 ≈ 1/w0 doc px——
+  //   下游 fitEllipse 的 MIN_RADIUS/护栏阈值全是 doc px 语义，不归一小圆会被 MIN_RADIUS 撑爆
+  //   （真机现象：透视圆画出来不对，2026-07-25 修）。乘 w0 后锚点处 1 plane 单位 ≈ 1 doc px。
+  const m11 = w0 * db.y / det, m12 = -w0 * db.x / det;    // → u
+  const m21 = -w0 * da.y / det, m22 = w0 * da.x / det;    // → v
   // ε 规则：枚举 pencil 族的坐标饱和（u 枚举 famB、v 枚举 famA）；parallel 枚举坐标真发散 + clamp。
   const uSat = famB.kind === "pencil";
   const vSat = famA.kind === "pencil";
@@ -223,8 +226,9 @@ export function planeChart(famA: Family, famB: Family, anchor: Pt): PlaneChart |
   };
   // 逆映射（无 ε——生成几何时只喂有效域）：(u,v) → chart → T⁻¹ 齐次还原 → doc；异侧/无穷远 → null。
   const toDoc = (u: number, v: number): Pt | null => {
-    const cx = da.x * u + db.x * v + anchorChart.x;
-    const cy = da.y * u + db.y * v + anchorChart.y;
+    const su = u / w0, sv = v / w0;   // 尺度归一的逆
+    const cx = da.x * su + db.x * sv + anchorChart.x;
+    const cy = da.y * su + db.y * sv + anchorChart.y;
     const p = applyMat3(Tinv, cx, cy);
     if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
     if (wOf(p) <= 0) return null;

@@ -455,6 +455,8 @@ export const S = {
   "sb.constrain":    { zh: "约束（直线 15° 吸附 / 正方形 / 正圆；透视下=吸向消失点）", en: "Constrain (15° snap / square / circle; toward VP in perspective)", ja: "拘束（15°スナップ / 正方形 / 正円）", tok: "sama poka (15° / leko sama / sike sama)" },
   "sb.grid":         { zh: "格线（头身比 / 构图格；默认 2×6）", en: "Grid (proportions; default 2×6)", ja: "グリッド（頭身 / 構図、既定 2×6）", tok: "linja mute (2×6)" },
   "sb.border":       { zh: "外框（默认关）", en: "Outer border (default off)", ja: "外枠（既定オフ）", tok: "selo sinpin" },
+  "sb.rows":         { zh: "行", en: "Rows", ja: "行", tok: "linja" },
+  "sb.cols":         { zh: "列", en: "Cols", ja: "列", tok: "palisa" },
   "sb.borderShort":  { zh: "框", en: "Box", ja: "枠", tok: "selo" },
   "sb.perspModeSlot": { zh: "透视模式（视口对齐 / 一点 / 二点 / 三点）", en: "Perspective mode", ja: "パースモード", tok: "nasin lukin weka" },
   "sb.planeSlot":    { zh: "作业平面（地板 / 墙）", en: "Working plane", ja: "作業平面", tok: "ma pali" },

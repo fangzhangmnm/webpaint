@@ -482,13 +482,14 @@
           </button>
           <!-- grid 配置（sub=grid 时显示）：nu×nv steppers（零键盘，user 拍板）+ 外框 toggle（默认关） -->
           <span class="lasso-section hidden" id="shapeGridCtx">
-            <button class="lasso-tool-btn" id="shapeGridNuMinus" type="button" aria-label="−">−</button>
-            <span class="lasso-popup-val" id="shapeGridNuVal">2</span>
-            <button class="lasso-tool-btn" id="shapeGridNuPlus" type="button" aria-label="＋">＋</button>
-            <span class="lasso-popup-val" aria-hidden="true">×</span>
+            <span class="lasso-popup-val" data-i18n="sb.rows">行</span>
             <button class="lasso-tool-btn" id="shapeGridNvMinus" type="button" aria-label="−">−</button>
             <span class="lasso-popup-val" id="shapeGridNvVal">6</span>
             <button class="lasso-tool-btn" id="shapeGridNvPlus" type="button" aria-label="＋">＋</button>
+            <span class="lasso-popup-val" data-i18n="sb.cols">列</span>
+            <button class="lasso-tool-btn" id="shapeGridNuMinus" type="button" aria-label="−">−</button>
+            <span class="lasso-popup-val" id="shapeGridNuVal">2</span>
+            <button class="lasso-tool-btn" id="shapeGridNuPlus" type="button" aria-label="＋">＋</button>
             <button class="lasso-tool-btn" id="shapeGridBorderBtn" type="button" data-i18n="sb.borderShort" data-i18n-title="sb.border" aria-pressed="false">框</button>
           </span>
           <!-- 透视模式组槽（ADR-0006 UI v2.1，flyout/组槽同 lassoSubSlot）：视口对齐/一点/二点/三点 -->
@@ -497,11 +498,12 @@
             <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg>
           </button>
           <!-- 透视开着时：平面组槽（line 子工具智能吸附不吃平面 → 藏）+ VP 编辑 + 绘图 gizmo 显隐 -->
+          <!-- 平面按钮展开常驻（user：画画时高频切换，不收小三角） -->
           <span class="lasso-section hidden" id="shapePlaneCtl">
-            <button class="lasso-tool-btn lasso-tool-icon lasso-slot" id="shapePlaneSlot" type="button" data-i18n-title="sb.planeSlot" aria-haspopup="true">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><use id="shapePlaneSlotUse" href="#plane-ground"/></svg>
-              <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg>
-            </button>
+            <button class="lasso-tool-btn lasso-tool-icon" data-shape-plane="ground" type="button" data-i18n-title="sb.planeGround"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#plane-ground"/></svg></button>
+            <button class="lasso-tool-btn lasso-tool-icon" data-shape-plane="wall" type="button" data-i18n-title="sb.planeWall"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#plane-wall"/></svg></button>
+            <button class="lasso-tool-btn lasso-tool-icon" data-shape-plane="wallL" type="button" data-i18n-title="sb.planeWallL"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#plane-wall-left"/></svg></button>
+            <button class="lasso-tool-btn lasso-tool-icon" data-shape-plane="wallR" type="button" data-i18n-title="sb.planeWallR"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#plane-wall-right"/></svg></button>
           </span>
           <span class="lasso-section hidden" id="shapePerspExtraCtl">
             <button class="lasso-tool-btn lasso-tool-icon" id="shapeVpEditBtn" type="button" data-i18n-title="sb.vpEdit"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#vp-edit"/></svg></button>
@@ -622,12 +624,6 @@
       <button class="lasso-tool-btn lasso-tool-icon" data-persp-mode="p1" type="button" role="menuitem" data-i18n-title="sb.mode1p"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#persp-1p"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-persp-mode="p2" type="button" role="menuitem" data-i18n-title="sb.mode2p"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#persp-2p"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-persp-mode="p3" type="button" role="menuitem" data-i18n-title="sb.mode3p"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#persp-3p"/></svg></button>
-    </div>
-    <div class="lasso-icon-menu hidden" id="shapePlaneMenu" role="menu" data-i18n-aria="sb.planeSlot">
-      <button class="lasso-tool-btn lasso-tool-icon" data-shape-plane="ground" type="button" role="menuitem" data-i18n-title="sb.planeGround"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#plane-ground"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-shape-plane="wall" type="button" role="menuitem" data-i18n-title="sb.planeWall"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#plane-wall"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-shape-plane="wallL" type="button" role="menuitem" data-i18n-title="sb.planeWallL"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#plane-wall-left"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-shape-plane="wallR" type="button" role="menuitem" data-i18n-title="sb.planeWallR"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#plane-wall-right"/></svg></button>
     </div>
     <div class="lasso-icon-menu hidden" id="lassoSubMenu" role="menu" data-i18n-aria="la.subSlot">
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="freehand" type="button" role="menuitem" data-i18n-title="la.freehand"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-freehand"/></svg></button>
@@ -946,8 +942,6 @@
         <div class="lasso-section">
           <button class="lasso-tool-btn lasso-tool-icon" id="perspResetBtn" type="button" data-i18n-title="pe.reset"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#reset-defaults"/></svg></button>
           <button class="lasso-tool-btn lasso-tool-icon" id="perspLockBtn" type="button" aria-pressed="true" data-i18n-title="pe.lock"><svg viewBox="0 0 24 24" aria-hidden="true"><use id="perspLockUse" href="#lock"/></svg></button>
-          <button class="lasso-tool-btn lasso-tool-icon" id="perspApplyBtn" type="button" data-i18n-title="common.apply"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#check"/></svg></button>
-          <button class="lasso-tool-btn lasso-tool-icon" id="perspCancelBtn" type="button" data-i18n-title="common.cancel"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#x"/></svg></button>
         </div>
       </div>
     </div>
