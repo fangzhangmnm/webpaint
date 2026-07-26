@@ -452,7 +452,7 @@ export const S = {
   "sb.line":         { zh: "直线", en: "Line", ja: "直線", tok: "linja" },
   "sb.rect":         { zh: "矩形（相对屏幕拉框，斜的转视口画）", en: "Rectangle (screen-aligned; rotate view for tilted)", ja: "矩形（画面基準、斜めはビュー回転で）", tok: "leko" },
   "sb.circle":       { zh: "圆 / 弧（徒手画一圈自动拟合，不满一圈出弧）", en: "Circle / arc (freehand, auto-fit; partial sweep = arc)", ja: "円 / 弧（手描きフィット、一周未満は弧）", tok: "sike (open la sike pini ala li ken)" },
-  "sb.constrain":    { zh: "约束（直线 15° 吸附 / 正方形 / 正圆；透视下=吸向消失点）", en: "Constrain (15° snap / square / circle; toward VP in perspective)", ja: "拘束（15°スナップ / 正方形 / 正円）", tok: "sama poka (15° / leko sama / sike sama)" },
+  "sb.constrain":    { zh: "约束（直线 15° 吸附 / 正方 / 正圆；透视下吸向消失点·平面正形。按住 Shift 临时反转）", en: "Constrain (15° snap / square / circle; toward VP in perspective. Hold Shift to invert)", ja: "拘束（15°スナップ / 正方形 / 正円。Shift 長押しで一時反転）", tok: "sama poka (15° / leko sama / sike sama; luka Shift la ante)" },
   "sb.grid":         { zh: "格线（头身比 / 构图格；默认 2×6）", en: "Grid (proportions; default 2×6)", ja: "グリッド（頭身 / 構図、既定 2×6）", tok: "linja mute (2×6)" },
   "sb.border":       { zh: "外框（默认关）", en: "Outer border (default off)", ja: "外枠（既定オフ）", tok: "selo sinpin" },
   "sb.rows":         { zh: "行", en: "Rows", ja: "行", tok: "linja" },

@@ -25,8 +25,18 @@ let _active = false;
 let _toolbar: HTMLElement, _layer: HTMLElement;
 let _lockBtn: HTMLElement, _lockUse: SVGUseElement;
 const _handles = new Map<Kind, HTMLElement>();
-let _box: BoxParams | null = null;
+let _box: BoxParams | null = null;   // 工作引用；SSoT 在 editorState 槽位（随 VP 持久化，user 拍板）
 const _boxHandles: HTMLElement[] = [];
+
+function _saveBox() {
+  const s = _slot() as unknown as { box?: BoxParams | null } | null;
+  if (s && _box) s.box = { A: { ..._box.A }, t: [..._box.t] as [number, number, number] };
+}
+function _loadBox(): BoxParams | null {
+  const s = _slot() as { box?: BoxParams | null } | null;
+  const b = s?.box;
+  return b ? { A: { ...b.A }, t: [...b.t] as [number, number, number] } : null;
+}
 
 function _mode(): PerspMode {
   const m = editorState.persp.mode;
@@ -189,6 +199,7 @@ function _boxDragTo(cornerIdx: number, screenX: number, screenY: number) {
   const target = _ctx.board.screenToDoc(screenX, screenY);
   if (cornerIdx === 0) {
     _box = { A: target, t: _box.t };
+    _saveBox();
     _syncUi();
     return;
   }
@@ -204,6 +215,7 @@ function _boxDragTo(cornerIdx: number, screenX: number, screenY: number) {
       const tt: [number, number, number] = [..._box.t];
       tt[cornerIdx - 1] = t;
       _box = { A, t: tt };
+      _saveBox();
     } else {
       // pencil 轴：拖 B_i = 转轴向 + 设行程。锁地平线的水平 VP → 沿地平线滑（A→target 延长到地平线）；
       //   自由 VP → 绕 A 等距旋转（保持 |VP−A|）。
@@ -241,6 +253,7 @@ function _boxDragTo(cornerIdx: number, screenX: number, screenY: number) {
         _box = { A, t: tt };
       }
     }
+    _saveBox();
     _syncUi();
     return;
   }
@@ -254,6 +267,7 @@ function _boxDragTo(cornerIdx: number, screenX: number, screenY: number) {
   if (m !== "p1" && solved.vp2) _set("vp2", solved.vp2);
   if (m === "p3" && solved.vp3) _set("vp3", solved.vp3);
   _box = solved.box;
+  _saveBox();
   _syncUi();
 }
 
@@ -285,6 +299,7 @@ function _resetDefaults() {
   if (m === "p3") _set("vp3", def.vp3);
   editorState.persp.lockHorizon = true;
   _box = _defaultBox();
+  _saveBox();
   _syncUi();
 }
 
@@ -312,7 +327,8 @@ export function enterPerspEdit(): void {
   if (!_get("vp1") && def.vp1) _set("vp1", def.vp1);
   if (_mode() !== "p1" && !_get("vp2") && def.vp2) _set("vp2", def.vp2);
   if (_mode() === "p3" && !_get("vp3") && def.vp3) _set("vp3", def.vp3);
-  _box = _defaultBox();
+  _box = _loadBox() ?? _defaultBox();   // 存过的 box 跟文件走（user 拍板），首次用默认
+  _saveBox();
   _ctx.editMode.enterTransient("perspEdit", { apply: () => _finish(), abort: () => _finish() });
   _toolbar.classList.remove("hidden");
   _layer.classList.remove("hidden");
