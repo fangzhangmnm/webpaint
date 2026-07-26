@@ -73,6 +73,7 @@ export class ShapeBrushEngine {
   _inner = new BrushEngine();
   _subTool: ShapeSubTool = "line";
   _constrain = false;
+  _constrainInvert = false;   // Shift hold 临时反转（行业惯例；描边中切换即时重合成）
   _grid: GridConfig = { nu: 2, nv: 6, border: false };   // 默认 6 头身 + 中线（user 拍板）
   _rotProvider: (() => number) | null = null;
   _perspProvider: (() => PerspConfig | null) | null = null;
@@ -82,6 +83,13 @@ export class ShapeBrushEngine {
   getSubTool(): ShapeSubTool { return this._subTool; }
   setConstrain(b: boolean) { this._constrain = !!b; }
   getConstrain(): boolean { return this._constrain; }
+  // Shift hold = 临时反转约束（PS/Figma 同族语义）；描边进行中切换立即重合成
+  setConstrainInvert(b: boolean) {
+    if (this._constrainInvert === !!b) return;
+    this._constrainInvert = !!b;
+    if (this._st) this._resynth();
+  }
+  _effConstrain(): boolean { return this._constrain !== this._constrainInvert; }
   setGridConfig(g: Partial<GridConfig>) { this._grid = { ...this._grid, ...g }; }
   getGridConfig(): GridConfig { return { ...this._grid }; }
   // 视口 rot / 透视配置注入（app 接线 board.viewport 与 editorState；引擎不认识两者）
@@ -191,7 +199,7 @@ export class ShapeBrushEngine {
     const box = this._clipBox(st);
     if (this._subTool === "line") {
       let end: Pt = { x: st.x1, y: st.y1 };
-      if (this._constrain) {
+      if (this._effConstrain()) {
         end = st.frame.kind === "persp"
           ? snapToDirections(st.x0, st.y0, st.x1, st.y1, snapDirections(st.frame.cfg, { x: st.x0, y: st.y0 }))
           : snapLineEnd(st.x0, st.y0, st.x1, st.y1);
@@ -199,7 +207,7 @@ export class ShapeBrushEngine {
       return [linePolyline({ x: st.x0, y: st.y0 }, end, seg)];
     }
     if (this._subTool === "rect") {
-      const q = this._quad(st, this._constrain && st.frame.kind === "viewport");
+      const q = this._quad(st, this._effConstrain() && st.frame.kind === "viewport");
       if (!q) return [];
       if (st.frame.kind === "viewport") return [rectPolyline(q, seg)];
       // 透视：四边逐段裁剪（角点可能在盒外很远）→ 各自一条 polyline
@@ -221,6 +229,20 @@ export class ShapeBrushEngine {
         if (c) out.push(linePolyline(c[0], c[1], seg));
       }
       return out;
+    }
+    // circle 正圆约束（user 改规则）：**圆心拖半径**——起点=圆心，拖多远半径多大（仅非像素笔；
+    //   像素笔永远 AABB）。显式正圆 = doc 空间完美圆，透视 frame 也不投影（约束就是覆写）。
+    if (this._effConstrain()) {
+      const r = Math.hypot(st.x1 - st.x0, st.y1 - st.y0);
+      if (r < 0.5) return [[{ x: st.x0, y: st.y0 }]];
+      const n = Math.min(512, Math.max(24, Math.ceil((2 * Math.PI * r) / seg)));
+      const out: Pt[] = new Array(n + 1);
+      for (let i = 0; i <= n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        out[i] = { x: st.x0 + r * Math.cos(a), y: st.y0 + r * Math.sin(a) };
+      }
+      out[n] = { ...out[0] };
+      return [out];
     }
     // circle：徒手拟合。persp → 在平面 chart 里做（ε 护栏在 chart 内），映回 doc。
     if (st.frame.kind === "persp") {
@@ -244,7 +266,7 @@ export class ShapeBrushEngine {
       const fineDoc = fine.map((p) => chart.toDoc(p.x, p.y)).filter((p): p is Pt => !!p);
       return clipPolylineToBox(fineDoc, box);
     }
-    const fit = fitEllipse(st.pts, st.frame.rot, this._constrain);
+    const fit = fitEllipse(st.pts, st.frame.rot, false);   // 正圆已在上方走圆心拖半径，拟合恒椭圆
     return fit ? [ellipseArcPolyline(fit, seg)] : [[{ x: st.x0, y: st.y0 }]];
   }
 
@@ -316,7 +338,7 @@ export class ShapeBrushEngine {
     let i1 = Math.floor(st.x1), j1 = Math.floor(st.y1);
     const persp = st.frame.kind === "persp";
     if (this._subTool === "line") {
-      if (this._constrain && (i1 !== i0 || j1 !== j0)) {
+      if (this._effConstrain() && (i1 !== i0 || j1 !== j0)) {
         if (persp) {
           const e = snapToDirections(st.x0, st.y0, st.x1, st.y1, snapDirections((st.frame as { cfg: PerspConfig }).cfg, { x: st.x0, y: st.y0 }));
           i1 = Math.floor(e.x); j1 = Math.floor(e.y);
@@ -341,7 +363,7 @@ export class ShapeBrushEngine {
     if (this._subTool === "circle" || this._subTool === "rect" || this._subTool === "grid") {
       if (!persp) {
         // 非透视：整数 AABB（constrain = 正方盒；grid 不吃 constrain）
-        if (this._constrain && this._subTool !== "grid") {
+        if (this._effConstrain() && this._subTool !== "grid") {
           const side = Math.max(Math.abs(i1 - i0), Math.abs(j1 - j0));
           i1 = i0 + Math.sign(i1 - i0 || 1) * side;
           j1 = j0 + Math.sign(j1 - j0 || 1) * side;
