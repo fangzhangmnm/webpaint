@@ -10,6 +10,7 @@ const { ShapeBrushEngine } = await import("../src/shape-brush.ts");
 const { resolveBrush } = await import("../src/resolved-brush.ts");
 const { PaintDoc } = await import("../src/doc.ts");
 const { bresenhamEllipseRect } = await import("../src/shape-geometry.ts");
+const { BrushEngine } = await import("../src/brush.ts");
 
 const mkDoc = () => new PaintDoc({ width: 512, height: 512 });
 
@@ -527,5 +528,57 @@ describe("shape-brush · 正圆=圆心拖半径（v2.3 改规则）+ Shift 反�
     }
     eng.setConstrainInvert(false);
     eq(eng.getConstrain(), false, "持久开关不被 invert 污染");
+  });
+});
+
+describe("shape-brush · 批量像素写入（golden 等价 + 提速）", () => {
+  function pixelsOf(layer) {
+    const s = layer.snapshotImageData();
+    const m = new Map();
+    if (!s.imageData) return m;
+    const d = s.imageData.data;
+    for (let j = 0; j < s.bboxH; j++) for (let i = 0; i < s.bboxW; i++) {
+      const a = d[(j * s.bboxW + i) * 4 + 3];
+      if (a > 0) m.set(`${i + s.bboxX},${j + s.bboxY}`, a);
+    }
+    return m;
+  }
+  const ringPts = (n = 800, r = 150) => {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      out.push({ x: Math.floor(250 + r * Math.cos(a)) + 0.5, y: Math.floor(250 + r * Math.sin(a)) + 0.5 });
+    }
+    return out;
+  };
+  it("stampPixels ≡ 逐像素 stampAt（size1 与 size5 disc、alpha 半透明，逐位一致）", () => {
+    for (const size of [1, 5]) {
+      const s = resolveBrush({ size, color: "#000000", opacity: 0.5, preset: { pixelMode: true } });
+      const pts = ringPts(400, 100);
+      const mk = (batch) => {
+        const doc = mkDoc();
+        const eng = new BrushEngine();
+        eng.beginStroke(doc.layers[0], s, pts[0].x, pts[0].y, 0.5, "brush");
+        if (batch) eng.stampPixels(pts.slice(1), 0.5);
+        else for (let i = 1; i < pts.length; i++) eng.stampAt(pts[i].x, pts[i].y, 0.5);
+        eng.cancelStroke();   // 只清引擎态，像素已 in-place
+        return pixelsOf(doc.layers[0]);
+      };
+      const a = mk(false), b = mk(true);
+      eq(a.size, b.size, `size=${size} 像素数一致`);
+      for (const [k, v] of a) eq(b.get(k), v, `size=${size} 像素 ${k} alpha 一致`);
+    }
+  });
+  it("大圆 30 帧重画在时限内（批量路径生效）", () => {
+    const s = resolveBrush({ size: 1, color: "#000000", preset: { pixelMode: true } });
+    const doc = mkDoc();
+    const eng = mkEngine("circle");
+    const t0 = Date.now();
+    eng.beginStroke(doc.layers[0], s, 50.2, 50.7, 0.5, "brush");
+    for (let f = 0; f < 30; f++) {
+      eng.extendStroke(450.5 - f, 450.5 - f, 0.5);   // 每帧改几何 → 全量重画
+    }
+    eng.endStroke();
+    assert(Date.now() - t0 < 4000, `30 帧大圆重画 ${Date.now() - t0}ms`);
   });
 });

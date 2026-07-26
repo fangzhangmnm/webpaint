@@ -257,6 +257,62 @@ export class BrushEngine {
     this._stampOne(x, y, pressure);
   }
 
+  // 批量像素落点（user 2026-07-25 批准）：逐像素 stampAt = 每点一次 editRegion，是像素透视大圆
+  //   拖拽卡顿的热点（几千次调用/帧）。这里按 **128px 桶**分组、每桶一次 editRegion 批画——
+  //   不能整批一个大 bbox：圆环的 bbox 盖住整圆面积，editRegion 会把途中所有 tile 标写 →
+  //   GPU 全区重传反而更卡。绘制语义逐位同 _pixelStampDirect（v104 落格 + #28 Bresenham disc +
+  //   v242 lockAlpha source-atop）。恒压场景专用（params 只算一次）。
+  stampPixels(pts: Array<{ x: number; y: number }>, pressure: number) {
+    const st = this._stroke;
+    if (!st || !pts.length) return;
+    const s = st.settings;
+    if (!s.pixelMode) { for (const p of pts) this._stampOne(p.x, p.y, pressure); return; }
+    const params = this._stampParams(pressure, st.strokeDist);
+    if (!params) return;
+    const { size, stampAlpha } = params;
+    const intSize = Math.max(1, Math.round(size));
+    const B = 128;
+    // 分桶（桶键 = 落格左上角所在的 128 格；stamp 全身落在「桶矩形 + intSize 出血」内）
+    const buckets = new Map<string, number[]>();
+    let dx0 = Infinity, dy0 = Infinity, dx1 = -Infinity, dy1 = -Infinity;
+    for (const p of pts) {
+      const ix = Math.floor(p.x - (intSize - 1) / 2);
+      const iy = Math.floor(p.y - (intSize - 1) / 2);
+      const k = Math.floor(ix / B) + "," + Math.floor(iy / B);
+      let arr = buckets.get(k);
+      if (!arr) { arr = []; buckets.set(k, arr); }
+      arr.push(ix, iy);
+      if (ix < dx0) dx0 = ix; if (iy < dy0) dy0 = iy;
+      if (ix + intSize > dx1) dx1 = ix + intSize;
+      if (iy + intSize > dy1) dy1 = iy + intSize;
+    }
+    const r = intSize / 2, re2 = (r - 0.25) * (r - 0.25);
+    for (const [k, cells] of buckets) {
+      const [bx, by] = k.split(",").map(Number);
+      const rx = bx * B, ry = by * B;
+      st.layer.editRegion(rx, ry, B + intSize, B + intSize, (ctx, ox, oy) => {
+        ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));
+        ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : (st.layer.lockAlpha ? "source-atop" : "source-over");
+        ctx.fillStyle = st.mode === "erase" ? "#000" : (s.color || "#000");
+        ctx.imageSmoothingEnabled = false;
+        for (let i = 0; i < cells.length; i += 2) {
+          const ix = cells[i], iy = cells[i + 1];
+          if (intSize <= 2) { ctx.fillRect(ix - ox, iy - oy, intSize, intSize); continue; }
+          for (let j = 0; j < intSize; j++) {
+            const dy = j + 0.5 - r;
+            const w2 = re2 - dy * dy;
+            if (w2 <= 0) continue;
+            const w = Math.sqrt(w2);
+            const a = Math.max(0, Math.ceil(r - w - 0.5));
+            const b = Math.min(intSize - 1, Math.floor(r + w - 0.5));
+            if (b >= a) ctx.fillRect(ix - ox + a, iy - oy + j, b - a + 1, 1);
+          }
+        }
+      });
+    }
+    this._markDirty(dx0 - 1, dy0 - 1, dx1 + 1, dy1 + 1);
+  }
+
   // Stage 3：收集当前 stroke 全部 stamp（frozen 0..count-1，含 tail）为列表 + stroke 笔形 —— 给 GPU 栅格器
   //   (GLStampRasterizer，board 消费)。**复用 _walkStamps(手感间距) + _stampParams(压感/taper)**，与 CPU
   //   _emitFrozen 同源 → 手感逐位一致；纯读（传 fresh walk，不碰 live cursor/buffer）。endStroke 后 _taperTotal
