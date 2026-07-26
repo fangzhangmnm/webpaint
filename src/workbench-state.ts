@@ -141,8 +141,9 @@ function freshGroups() {
     //   v0.5.11：threshold 归魔棒（油漆桶独立工具及 editorState.bucket 退役——填色收进套索 fill mode，
     //   flood 只剩魔棒一条路；旧 doc 里 stale 的 bucket 键被 mergeInto 静默忽略）。
     magicWand:     { threshold: 20, expand: false, expandPx: 1 },        // #31 自动扩张 + v0.5.11 阈值
-    // ADR-0005/0006 形状笔：子工具 + 约束 + grid 配置（默认 2×6 = 6 头身 + 中线，border 关）
-    shapeBrush:    { sub: "line" as string, constrain: false, gridNu: 2, gridNv: 6, gridBorder: false },
+    // ADR-0005/0006 形状笔：子工具 + **per-图形约束**（user：每个图形的 lock 分别持久化，默认全不锁）
+    //   + grid 配置（默认 2×6 = 6 头身 + 中线，border 关）
+    shapeBrush:    { sub: "line" as string, constrainLine: false, constrainRect: false, constrainCircle: false, gridNu: 2, gridNv: 6, gridBorder: false },
     // ADR-0006 透视 frame（形状笔全局、per-ora）：VP 0-3 + 锁地平线（默认开）+ 参考点 + 当前平面。
     //   坐标 doc 空间、snap 像素中线 +0.5。裁剪/旋转/翻转/偏移画布时必须过 remapShapePersp（doc-ops 挂钩）。
     persp: {
@@ -248,7 +249,9 @@ export const editorState = {
   },
   shapeBrush: {
     get sub(): string { return S.g.shapeBrush.sub; }, set sub(v: string) { S.g.shapeBrush.sub = v; },
-    get constrain(): boolean { return S.g.shapeBrush.constrain; }, set constrain(v: boolean) { S.g.shapeBrush.constrain = v; },
+    get constrainLine(): boolean { return S.g.shapeBrush.constrainLine; }, set constrainLine(v: boolean) { S.g.shapeBrush.constrainLine = v; },
+    get constrainRect(): boolean { return S.g.shapeBrush.constrainRect; }, set constrainRect(v: boolean) { S.g.shapeBrush.constrainRect = v; },
+    get constrainCircle(): boolean { return S.g.shapeBrush.constrainCircle; }, set constrainCircle(v: boolean) { S.g.shapeBrush.constrainCircle = v; },
     get gridNu(): number { return S.g.shapeBrush.gridNu; }, set gridNu(v: number) { S.g.shapeBrush.gridNu = v; },
     get gridNv(): number { return S.g.shapeBrush.gridNv; }, set gridNv(v: number) { S.g.shapeBrush.gridNv = v; },
     get gridBorder(): boolean { return S.g.shapeBrush.gridBorder; }, set gridBorder(v: boolean) { S.g.shapeBrush.gridBorder = v; },

@@ -74,7 +74,8 @@ interface ShapeStroke {
 export class ShapeBrushEngine {
   _inner = new BrushEngine();
   _subTool: ShapeSubTool = "line";
-  _constrain = false;
+  // per-图形约束（user：分别持久化，默认全不锁）；grid 无约束语义
+  _constrain: Record<"line" | "rect" | "circle", boolean> = { line: false, rect: false, circle: false };
   _constrainInvert = false;   // Shift hold 临时反转（行业惯例；描边中切换即时重合成）
   _grid: GridConfig = { nu: 2, nv: 6, border: false };   // 默认 6 头身 + 中线（user 拍板）
   _rotProvider: (() => number) | null = null;
@@ -83,15 +84,16 @@ export class ShapeBrushEngine {
 
   setSubTool(s: ShapeSubTool) { this._subTool = s; }
   getSubTool(): ShapeSubTool { return this._subTool; }
-  setConstrain(b: boolean) { this._constrain = !!b; }
-  getConstrain(): boolean { return this._constrain; }
+  setConstrain(b: boolean) { if (this._subTool !== "grid") this._constrain[this._subTool] = !!b; }
+  getConstrain(): boolean { return this._subTool === "grid" ? false : this._constrain[this._subTool]; }
+  setConstrainFor(sub: "line" | "rect" | "circle", b: boolean) { this._constrain[sub] = !!b; }
   // Shift hold = 临时反转约束（PS/Figma 同族语义）；描边进行中切换立即重合成
   setConstrainInvert(b: boolean) {
     if (this._constrainInvert === !!b) return;
     this._constrainInvert = !!b;
     if (this._st) this._resynth();
   }
-  _effConstrain(): boolean { return this._constrain !== this._constrainInvert; }
+  _effConstrain(): boolean { return this.getConstrain() !== this._constrainInvert; }
   setGridConfig(g: Partial<GridConfig>) { this._grid = { ...this._grid, ...g }; }
   getGridConfig(): GridConfig { return { ...this._grid }; }
   // 视口 rot / 透视配置注入（app 接线 board.viewport 与 editorState；引擎不认识两者）

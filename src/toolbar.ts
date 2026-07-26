@@ -65,9 +65,9 @@ const _selMem = { sub: "freehand" as string, setOp: "new" as string };
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
 const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", magic: "#magic-wand" };
 // 形状笔（ADR-0005/0006）：组槽 + 约束钮（图标按子工具换义）+ grid 配置 + 透视平面槽
-let shapeToolbarStack: HTMLElement, shapeSubSlot: HTMLElement, shapeSubSlotUse: SVGUseElement,
-    shapeSubMenu: HTMLElement, shapeSubMenuBtns: HTMLElement[], shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement,
-    shapeGridCtx: HTMLElement, shapeGridNuVal: HTMLElement, shapeGridNvVal: HTMLElement, shapeGridBorderBtn: HTMLElement,
+let shapeToolbarStack: HTMLElement, shapeSubBtns: HTMLElement[],
+    shapeGridMoreBtn: HTMLElement, shapeGridMenu: HTMLElement, shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement,
+    shapeGridNuVal: HTMLElement, shapeGridNvVal: HTMLElement, shapeGridBorderBtn: HTMLElement,
     shapePerspModeSlotUse: SVGUseElement, shapePerspModeMenuBtns: HTMLElement[],
     shapePlaneCtl: HTMLElement, shapePlaneBtns: HTMLElement[],
     shapePerspExtraCtl: HTMLElement, shapePerspShowBtn: HTMLElement, shapePerspShowUse: SVGUseElement;
@@ -81,12 +81,11 @@ export function updateShapeToolbar() {
   if (!shapeToolbarStack) return;
   const active = editMode.current() === "shapeBrush";
   shapeToolbarStack.classList.toggle("hidden", !active);
-  if (!active) { shapeSubMenu?.classList.add("hidden"); return; }
+  if (!active) { shapeGridMenu?.classList.add("hidden"); return; }
   const sub = input.shapeBrush.getSubTool();
   const gPersp = editorState.persp;
   const perspMode = (["p1", "p2", "p3"].includes(gPersp.mode) ? gPersp.mode : "off") as PerspMode;
-  shapeSubSlotUse.setAttribute("href", SHAPE_SUB_ICON[sub] || "#line");
-  for (const b of shapeSubMenuBtns) {
+  for (const b of shapeSubBtns) {
     b.setAttribute("aria-pressed", b.dataset.shapeSub === sub ? "true" : "false");
   }
   // 约束钮：grid 无约束语义 → 隐藏；line 在透视下语义换成「吸向消失点」→ 换图标（user）
@@ -94,8 +93,9 @@ export function updateShapeToolbar() {
   const constrainIcon = sub === "line" && perspMode !== "off" ? "#snap-vanishing-point" : (SHAPE_CONSTRAIN_ICON[sub] || "#snap-angle");
   shapeConstrainUse.setAttribute("href", constrainIcon);
   shapeConstrainBtn.setAttribute("aria-pressed", input.shapeBrush.getConstrain() ? "true" : "false");
-  // grid 配置区（sub=grid 时显）
-  shapeGridCtx.classList.toggle("hidden", sub !== "grid");
+  // grid 配置 ⋯（sub=grid 时显；行列收进弹出——user）
+  shapeGridMoreBtn.classList.toggle("hidden", sub !== "grid");
+  if (sub !== "grid") shapeGridMenu?.classList.add("hidden");
   if (sub === "grid") {
     shapeGridNuVal.textContent = String(editorState.shapeBrush.gridNu);
     shapeGridNvVal.textContent = String(editorState.shapeBrush.gridNv);
@@ -471,28 +471,44 @@ export function initToolbar(ctx: AppContext) {
   //   editorState + 灌引擎；换文档 wp:applyEditorState 回灌（对齐魔棒阈值样板）。
   //   画一半切子工具/约束 = cancel 不进 undo（user 拍板，同两指手势接管语义）。
   shapeToolbarStack = byId("shapeToolbarStack");
-  shapeSubSlot = byId("shapeSubSlot");
-  shapeSubSlotUse = byId("shapeSubSlotUse") as unknown as SVGUseElement;
-  shapeSubMenu = byId("shapeSubMenu");
-  shapeSubMenuBtns = [...shapeSubMenu.querySelectorAll<HTMLElement>("[data-shape-sub]")];
+  shapeSubBtns = [...byId("shapeSubCtl").querySelectorAll<HTMLElement>("[data-shape-sub]")];
   shapeConstrainBtn = byId("shapeConstrainBtn");
   shapeConstrainUse = byId("shapeConstrainUse") as unknown as SVGUseElement;
-  wireSlotMenu(shapeSubSlot, shapeSubMenu, (b) => {
-    if (input.isStrokeActive()) input.abortActiveStroke();
-    const sub = b.dataset.shapeSub as Parameters<typeof input.shapeBrush.setSubTool>[0];
-    input.shapeBrush.setSubTool(sub);
-    editorState.shapeBrush.sub = sub;
-    updateShapeToolbar();
-  });
+  for (const b of shapeSubBtns) {
+    b.addEventListener("click", () => {
+      if (input.isStrokeActive()) input.abortActiveStroke();
+      const sub = b.dataset.shapeSub as Parameters<typeof input.shapeBrush.setSubTool>[0];
+      input.shapeBrush.setSubTool(sub);
+      editorState.shapeBrush.sub = sub;
+      updateShapeToolbar();
+    });
+  }
+  const CONSTRAIN_KEY: Record<string, "constrainLine" | "constrainRect" | "constrainCircle"> = {
+    line: "constrainLine", rect: "constrainRect", circle: "constrainCircle",
+  };
   shapeConstrainBtn.addEventListener("click", () => {
     if (input.isStrokeActive()) input.abortActiveStroke();
     const v = !input.shapeBrush.getConstrain();
     input.shapeBrush.setConstrain(v);
-    editorState.shapeBrush.constrain = v;
+    const key = CONSTRAIN_KEY[input.shapeBrush.getSubTool()];
+    if (key) editorState.shapeBrush[key] = v;
     updateShapeToolbar();
   });
-  // grid 配置（ADR-0006）：steppers（零键盘）+ 外框 toggle；per-doc（editorState），改 → 写 + 灌引擎
-  shapeGridCtx = byId("shapeGridCtx");
+  // grid 配置（ADR-0006）：⋯ 弹出里的 steppers（零键盘）+ 外框 toggle；per-doc（editorState）。
+  //   弹出不用 wireSlotMenu（它每次点击关菜单——steppers 要连按）：手动 toggle + 外点关。
+  shapeGridMoreBtn = byId("shapeGridMoreBtn");
+  shapeGridMenu = byId("shapeGridMenu");
+  shapeGridMoreBtn.addEventListener("click", (e: Event) => {
+    e.stopPropagation();
+    const wasHidden = shapeGridMenu.classList.contains("hidden");
+    shapeGridMenu.classList.toggle("hidden");
+    if (wasHidden) anchorPopupToBtn(shapeGridMenu, shapeGridMoreBtn, { align: "left", offsetY: 6 });
+  });
+  document.addEventListener("pointerdown", (e: Event) => {
+    if (shapeGridMenu.classList.contains("hidden")) return;
+    if (shapeGridMenu.contains(e.target as Node) || shapeGridMoreBtn.contains(e.target as Node)) return;
+    shapeGridMenu.classList.add("hidden");
+  });
   shapeGridNuVal = byId("shapeGridNuVal");
   shapeGridNvVal = byId("shapeGridNvVal");
   shapeGridBorderBtn = byId("shapeGridBorderBtn");
@@ -568,7 +584,9 @@ export function initToolbar(ctx: AppContext) {
   input.shapeBrush.setPerspProvider(() => configFromModeState(editorState.persp));
   const syncShapeFromEditorState = () => {
     input.shapeBrush.setSubTool(editorState.shapeBrush.sub as Parameters<typeof input.shapeBrush.setSubTool>[0]);
-    input.shapeBrush.setConstrain(editorState.shapeBrush.constrain);
+    input.shapeBrush.setConstrainFor("line", editorState.shapeBrush.constrainLine);
+    input.shapeBrush.setConstrainFor("rect", editorState.shapeBrush.constrainRect);
+    input.shapeBrush.setConstrainFor("circle", editorState.shapeBrush.constrainCircle);
     pushGridToEngine();
     updateShapeToolbar();
   };

@@ -473,25 +473,18 @@
     <div class="lasso-toolbar-stack hidden" id="shapeToolbarStack" role="toolbar" data-i18n-aria="sb.stack">
       <div class="lasso-toolbar" id="shapeToolbarRow1">
         <div class="lasso-section">
-          <button class="lasso-tool-btn lasso-tool-icon lasso-slot" id="shapeSubSlot" type="button" data-i18n-title="sb.subSlot" aria-haspopup="true">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><use id="shapeSubSlotUse" href="#line"/></svg>
-            <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg>
-          </button>
+          <!-- 子工具平铺（user：图形间切换高频，不折叠） -->
+          <span class="lasso-section" id="shapeSubCtl">
+            <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="line" type="button" data-i18n-title="sb.line"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#line"/></svg></button>
+            <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="rect" type="button" data-i18n-title="sb.rect"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rectangle"/></svg></button>
+            <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="circle" type="button" data-i18n-title="sb.circle"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#circle"/></svg></button>
+            <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="grid" type="button" data-i18n-title="sb.grid"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg></button>
+          </span>
           <button class="lasso-tool-btn lasso-tool-icon" id="shapeConstrainBtn" type="button" data-i18n-title="sb.constrain" aria-pressed="false">
             <svg viewBox="0 0 24 24" aria-hidden="true"><use id="shapeConstrainUse" href="#snap-angle"/></svg>
           </button>
-          <!-- grid 配置（sub=grid 时显示）：nu×nv steppers（零键盘，user 拍板）+ 外框 toggle（默认关） -->
-          <span class="lasso-section hidden" id="shapeGridCtx">
-            <span class="lasso-popup-val" data-i18n="sb.rows">行</span>
-            <button class="lasso-tool-btn" id="shapeGridNvMinus" type="button" aria-label="−">−</button>
-            <span class="lasso-popup-val" id="shapeGridNvVal">6</span>
-            <button class="lasso-tool-btn" id="shapeGridNvPlus" type="button" aria-label="＋">＋</button>
-            <span class="lasso-popup-val" data-i18n="sb.cols">列</span>
-            <button class="lasso-tool-btn" id="shapeGridNuMinus" type="button" aria-label="−">−</button>
-            <span class="lasso-popup-val" id="shapeGridNuVal">2</span>
-            <button class="lasso-tool-btn" id="shapeGridNuPlus" type="button" aria-label="＋">＋</button>
-            <button class="lasso-tool-btn" id="shapeGridBorderBtn" type="button" data-i18n="sb.borderShort" data-i18n-title="sb.border" aria-pressed="false">框</button>
-          </span>
+          <!-- grid 配置收进 ⋯（user：行列调整放 more 里）；sub=grid 时显 ⋯ 钮 -->
+          <button class="lasso-tool-btn lasso-tool-icon hidden" id="shapeGridMoreBtn" type="button" data-i18n-title="sb.gridMore" aria-haspopup="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#more"/></svg></button>
           <!-- 透视模式组槽（ADR-0006 UI v2.1，flyout/组槽同 lassoSubSlot）：视口对齐/一点/二点/三点 -->
           <button class="lasso-tool-btn lasso-tool-icon lasso-slot" id="shapePerspModeSlot" type="button" data-i18n-title="sb.perspModeSlot" aria-haspopup="true">
             <svg viewBox="0 0 24 24" aria-hidden="true"><use id="shapePerspModeSlotUse" href="#persp-viewport"/></svg>
@@ -613,11 +606,18 @@
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" role="menuitem" data-i18n-title="la.union"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-union"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="subtract" type="button" role="menuitem" data-i18n-title="la.subtract"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-difference"/></svg></button>
     </div>
-    <div class="lasso-icon-menu hidden" id="shapeSubMenu" role="menu" data-i18n-aria="sb.subSlot">
-      <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="line" type="button" role="menuitem" data-i18n-title="sb.line"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#line"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="rect" type="button" role="menuitem" data-i18n-title="sb.rect"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#rectangle"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="circle" type="button" role="menuitem" data-i18n-title="sb.circle"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#circle"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-shape-sub="grid" type="button" role="menuitem" data-i18n-title="sb.grid"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid"/></svg></button>
+    <div class="lasso-popup hidden" id="shapeGridMenu" role="menu" data-i18n-aria="sb.gridMore">
+      <div class="lasso-popup-row" style="display:flex; align-items:center; gap:6px;">
+        <span class="lasso-popup-val" data-i18n="sb.rows">行</span>
+        <button class="lasso-tool-btn" id="shapeGridNvMinus" type="button" aria-label="−">−</button>
+        <span class="lasso-popup-val" id="shapeGridNvVal">6</span>
+        <button class="lasso-tool-btn" id="shapeGridNvPlus" type="button" aria-label="＋">＋</button>
+        <span class="lasso-popup-val" data-i18n="sb.cols">列</span>
+        <button class="lasso-tool-btn" id="shapeGridNuMinus" type="button" aria-label="−">−</button>
+        <span class="lasso-popup-val" id="shapeGridNuVal">2</span>
+        <button class="lasso-tool-btn" id="shapeGridNuPlus" type="button" aria-label="＋">＋</button>
+        <button class="lasso-tool-btn" id="shapeGridBorderBtn" type="button" data-i18n="sb.borderShort" data-i18n-title="sb.border" aria-pressed="false">框</button>
+      </div>
     </div>
     <div class="lasso-icon-menu hidden" id="shapePerspModeMenu" role="menu" data-i18n-aria="sb.perspModeSlot">
       <button class="lasso-tool-btn lasso-tool-icon" data-persp-mode="off" type="button" role="menuitem" data-i18n-title="sb.modeViewport"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#persp-viewport"/></svg></button>
