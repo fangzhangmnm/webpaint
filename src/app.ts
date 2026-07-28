@@ -43,7 +43,7 @@ import { initDocOps } from "./doc-ops.ts";
 import { initCloudAuthUI, updateCloudAuthUI } from "./cloud-auth-ui.ts";
 import { initSettingsMenu, applyCheckerboard, renderSettingsFromPrefs } from "./settings-menu.ts";   // setMenuOpen→各菜单模块
 import { initFiltersAdjust } from "./filters-adjust.ts";
-import { initToolbar, RACK_PANEL_BY_TOOL } from "./toolbar.ts";
+import { initToolbar, RACK_PANEL_BY_TOOL, closeTransientMenus } from "./toolbar.ts";
 import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
 import { setDocCompositor } from "./doc-render.ts";
@@ -536,8 +536,10 @@ rack.init({
 });
 
 // canvas pointerdown → 关 exclusive panel（user：「画画时别让 panel 挡着」）
+//   v0.6.27：浮出小菜单（组槽/变体/stepper/⋯）同待遇——下笔一把关（user：「slot 在下笔时也应该自动关」）
 els.board.addEventListener("pointerdown", () => {
   if (getCurrentExclusive()) closeExclusive();
+  closeTransientMenus();
 }, { capture: true });   // capture 在 input.js 处理 stroke 之前
 
 

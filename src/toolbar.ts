@@ -73,6 +73,28 @@ function _pushSelToolToEngine(tool: string) {
 // v0.6.24 顶栏工具组槽（点=激活记忆成员/已激活再点=开组菜单；"再点开笔架"整体废除——user 一直不喜欢）
 const TOOL_ICON: Record<string, string> = { brush: "#pencil", shapeBrush: "#shapes", lasso: "#lasso", fill: "#paint-bucket" };
 const _toolSlots: Array<{ members: string[]; btn: HTMLElement; use: SVGUseElement; menu: HTMLElement; openMenu: () => void; closeMenu: () => void; consumeLp: () => boolean }> = [];
+// v0.6.27 小三角统一语义（user）：单击=控件主动作（激活/toggle；纯选择槽=开菜单）；
+//   **长按 ≈450ms=开该控件的菜单**；菜单开着再点=关。共享 helper：返回 consume()——
+//   长按已触发时吞掉随后的 click。
+function wireLongPress(btn: HTMLElement, fire: () => void): () => boolean {
+  let timer = 0, fired = false;
+  btn.addEventListener("pointerdown", () => {
+    fired = false;
+    timer = window.setTimeout(() => { fired = true; timer = 0; fire(); }, 450);
+  });
+  const cancel = () => { if (timer) { window.clearTimeout(timer); timer = 0; } };
+  btn.addEventListener("pointerup", cancel);
+  btn.addEventListener("pointerleave", cancel);
+  btn.addEventListener("pointercancel", cancel);
+  btn.addEventListener("contextmenu", (e: Event) => e.preventDefault());   // 触摸长按防系统菜单
+  return () => { const f = fired; fired = false; return f; };
+}
+// v0.6.27（user：下笔时 slot 菜单也该自动关）：全部浮出小菜单的统一登记 + 一把关
+const _transientMenus: HTMLElement[] = [];
+export function closeTransientMenus() {
+  for (const m of _transientMenus) m.classList.add("hidden");
+  document.body.classList.toggle("tool-slot-open", _toolSlots.some((s) => !s.menu.classList.contains("hidden")));
+}
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
 const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", polygon: "#select-polygon", magic: "#magic-wand" };
 // 形状笔（ADR-0005/0006）：组槽 + 约束钮（图标按子工具换义）+ grid 配置 + 透视平面槽
@@ -103,7 +125,7 @@ export function updateShapeToolbar() {
   }
   // v0.6.25 变体钮面：line=自由/15°snap（透视下 snap 换「吸向消失点」义）；rect=长方/正方；circle=椭圆/正圆
   const es = editorState.shapeBrush;
-  const lineSnapIcon = perspMode !== "off" ? "#snap-vanishing-point" : "#snap-angle";
+  const lineSnapIcon = perspMode !== "off" ? "#snap-vanishing-point" : "#line-snap";   // v0.6.27：15° 字样图标退位（user），line-snap stopgap 待真图
   shapeSubLineUse.setAttribute("href", es.constrainLine ? lineSnapIcon : "#line");
   shapeSubRectUse.setAttribute("href", es.constrainRect ? "#square" : "#rectangle");
   shapeSubCircleUse.setAttribute("href", es.constrainCircle ? "#circle" : "#ellipse");
@@ -459,6 +481,7 @@ export function initToolbar(ctx: AppContext) {
   lassoConstrainBtn = byId("lassoConstrainBtn");
   lassoSelEditBtn = byId("lassoSelEditBtn");
   lassoSelEditMenu = byId("lassoSelEditMenu");
+  _transientMenus.push(lassoSelEditMenu);
   lassoTransformBtn = byId("lassoTransformBtn");
   lassoDeselectBtn = byId("lassoDeselectBtn");
   lassoFillCommitBtn = byId("lassoFillCommitBtn");
@@ -470,8 +493,15 @@ export function initToolbar(ctx: AppContext) {
 
   // v0.5.14 组槽通用：点槽 → 锚定槽下方弹紧凑图标排（user：下拉要贴槽、图标不要文字）。
   const wireSlotMenu = (slot: HTMLElement, menu: HTMLElement, onPick: (b: HTMLElement) => void) => {
+    _transientMenus.push(menu);
+    // 纯选择槽的主动作就是"选"→ 单击=开/关菜单；长按=也开（v0.6.27 小三角统一语义）
+    const consumeLp = wireLongPress(slot, () => {
+      menu.classList.remove("hidden");
+      anchorPopupToBtn(menu, slot, { align: "left", offsetY: 6 });
+    });
     slot.addEventListener("click", (e: Event) => {
       e.stopPropagation();
+      if (consumeLp()) return;
       const wasHidden = menu.classList.contains("hidden");
       menu.classList.toggle("hidden");
       if (wasHidden) anchorPopupToBtn(menu, slot, { align: "left", offsetY: 6 });
@@ -516,6 +546,7 @@ export function initToolbar(ctx: AppContext) {
   shapeSubCircleUse = byId("shapeSubCircleUse") as unknown as SVGUseElement;
   shapeGridMenu = byId("shapeGridMenu");
   shapeVarMenus = { line: byId("shapeLineVarMenu"), rect: byId("shapeRectVarMenu"), circle: byId("shapeCircleVarMenu"), grid: shapeGridMenu };
+  for (const m of Object.values(shapeVarMenus)) _transientMenus.push(m);
   // v0.6.25：已选中的子工具再点 = 开变体/配置菜单（grid=行列配置 steppers 连按不关——外点关统一挂这）
   for (const [s2, menu] of Object.entries(shapeVarMenus)) {
     if (s2 !== "grid") {
@@ -537,22 +568,22 @@ export function initToolbar(ctx: AppContext) {
       menu.classList.add("hidden");
     });
   }
+  // v0.6.27 小三角统一语义：单击=切换子工具（已选中=无事）；长按=开变体/配置菜单；菜单开着再点=关
   for (const b of shapeSubBtns) {
+    const sub2 = b.dataset.shapeSub as Parameters<typeof input.shapeBrush.setSubTool>[0];
+    const menu2 = shapeVarMenus[sub2];
+    const consumeLp = wireLongPress(b, () => {
+      if (!menu2) return;
+      menu2.classList.remove("hidden");
+      anchorPopupToBtn(menu2, b, { align: "left", offsetY: 6 });
+    });
     b.addEventListener("click", (e: Event) => {
+      if (consumeLp()) { e.stopPropagation(); return; }
+      if (menu2 && !menu2.classList.contains("hidden")) { e.stopPropagation(); menu2.classList.add("hidden"); return; }
       if (input.isStrokeActive()) input.abortActiveStroke();
-      const sub = b.dataset.shapeSub as Parameters<typeof input.shapeBrush.setSubTool>[0];
-      if (input.shapeBrush.getSubTool() === sub) {
-        e.stopPropagation();
-        const menu = shapeVarMenus[sub];
-        if (menu) {
-          const wasHidden = menu.classList.contains("hidden");
-          menu.classList.toggle("hidden");
-          if (wasHidden) anchorPopupToBtn(menu, b, { align: "left", offsetY: 6 });
-        }
-        return;
-      }
-      input.shapeBrush.setSubTool(sub);
-      editorState.shapeBrush.sub = sub;
+      if (input.shapeBrush.getSubTool() === sub2) return;   // 已选中=无事（对齐工具组槽 v0.6.27）
+      input.shapeBrush.setSubTool(sub2);
+      editorState.shapeBrush.sub = sub2;
       updateShapeToolbar();
     });
   }
@@ -669,8 +700,14 @@ export function initToolbar(ctx: AppContext) {
     pushMagicExpandToEngine();
     updateLassoToolbar();   // toggle pressed 态/stepper 显隐在 updateLassoToolbar 派生
   };
+  _transientMenus.push(lassoMagicExpandMenu);
+  const consumeExpandLp = wireLongPress(lassoExpandToggle, () => {
+    lassoMagicExpandMenu.classList.remove("hidden");
+    anchorPopupToBtn(lassoMagicExpandMenu, lassoExpandToggle, { align: "left", offsetY: 6 });
+  });
   lassoExpandToggle.addEventListener("click", (e: Event) => {
     e.stopPropagation();
+    if (consumeExpandLp()) return;   // 长按=只开 stepper 不切开关
     editorState.magicWand.expand = !editorState.magicWand.expand;
     pushMagicExpandToEngine();
     if (editorState.magicWand.expand) {
@@ -866,8 +903,9 @@ export function initToolbar(ctx: AppContext) {
       _setToolSlotOpen();
     };
     const closeMenu = () => { menu.classList.add("hidden"); _setToolSlotOpen(); };
-    let lpTimer = 0, lpFired = false;
-    _toolSlots.push({ members, btn, use, menu, openMenu, closeMenu, consumeLp: () => { const f = lpFired; lpFired = false; return f; } });
+    _transientMenus.push(menu);
+    const consumeLp = wireLongPress(btn, openMenu);
+    _toolSlots.push({ members, btn, use, menu, openMenu, closeMenu, consumeLp });
     for (const mb of [...menu.querySelectorAll<HTMLElement>("[data-slot-tool]")]) {
       mb.addEventListener("click", () => {
         closeMenu();
@@ -880,16 +918,6 @@ export function initToolbar(ctx: AppContext) {
       if (menu.contains(e.target as Node) || btn.contains(e.target as Node)) return;
       closeMenu();
     });
-    // 长按（Blender/Photoshop 同款；小三角徽标=有组的记号）
-    btn.addEventListener("pointerdown", () => {
-      lpFired = false;
-      lpTimer = window.setTimeout(() => { lpFired = true; lpTimer = 0; openMenu(); }, 450);
-    });
-    const cancelLp = () => { if (lpTimer) { window.clearTimeout(lpTimer); lpTimer = 0; } };
-    btn.addEventListener("pointerup", cancelLp);
-    btn.addEventListener("pointerleave", cancelLp);
-    btn.addEventListener("pointercancel", cancelLp);
-    btn.addEventListener("contextmenu", (e: Event) => e.preventDefault());   // 触摸长按防系统菜单
   };
   wireToolSlot("toolPen", "toolBrushSlotUse", "toolBrushSlotMenu", ["brush", "shapeBrush"]);
   wireToolSlot("toolLasso", "toolSelSlotUse", "toolSelSlotMenu", ["lasso", "fill"]);
