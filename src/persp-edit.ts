@@ -11,7 +11,7 @@
 //   · 应用=保留（transient apply），取消/ctrl-z=回快照。工具条 = lasso 图标风格（重置/锁/✓/✕）。
 import { editorState } from "./workbench-state.ts";
 import { clampPixelCenter } from "./shape-geometry.ts";
-import { defaultVpsForMode, boxAxesForMode, boxCorners, solveBoxDrag, BOX_EDGES } from "./perspective-frame.ts";
+import { defaultVpsForMode, boxAxesForMode, boxCorners, solveBoxDrag, BOX_EDGES, ISO_AXES } from "./perspective-frame.ts";
 import { updateShapeToolbar } from "./toolbar.ts";
 import type { PerspMode, BoxParams, Family } from "./perspective-frame.ts";
 import type { AppContext } from "./app-context.ts";
@@ -40,28 +40,29 @@ function _loadBox(): BoxParams | null {
 
 function _mode(): PerspMode {
   const m = editorState.persp.mode;
-  return (m === "p1" || m === "p2" || m === "p3") ? m : "off";
+  return (m === "p1" || m === "p2" || m === "p3" || m === "iso") ? m : "off";
 }
 // 当前模式的 VP 槽（per-mode 分开存）
-function _slot(): { vp1: Vp | null; vp2?: Vp | null; vp3?: Vp | null } | null {
+function _slot(): { vp1?: Vp | null; vp2?: Vp | null; vp3?: Vp | null; box?: BoxParams | null } | null {
   const m = _mode();
   const g = editorState.persp;
-  return m === "p1" ? g.p1 : m === "p2" ? g.p2 : m === "p3" ? g.p3 : null;
+  return m === "p1" ? g.p1 : m === "p2" ? g.p2 : m === "p3" ? g.p3 : m === "iso" ? g.iso : null;
 }
 function _get(kind: Kind): Vp | null {
   const s = _slot();
   if (!s) return null;
-  return kind === "vp1" ? s.vp1 : kind === "vp2" ? (s.vp2 ?? null) : (s.vp3 ?? null);
+  return kind === "vp1" ? (s.vp1 ?? null) : kind === "vp2" ? (s.vp2 ?? null) : (s.vp3 ?? null);
 }
 function _set(kind: Kind, v: Vp | null) {
   const s = _slot();
   if (!s) return;
-  if (kind === "vp1") s.vp1 = v;
+  if (kind === "vp1" && "vp1" in s) s.vp1 = v;
   else if (kind === "vp2" && "vp2" in s) s.vp2 = v;
   else if (kind === "vp3" && "vp3" in s) s.vp3 = v;
 }
 function _visibleKinds(): Kind[] {
   const m = _mode();
+  if (m === "iso") return [];   // iso 轴固定无 VP，编辑面 = box
   if (m === "p1") return ["vp1"];
   if (m === "p2") return ["vp1", "vp2"];
   if (m === "p3") return ["vp1", "vp2", "vp3"];
@@ -114,6 +115,7 @@ const LABELS: Record<Kind, string> = { vp1: "1", vp2: "2", vp3: "V" };
 function _axesNow(): [Family, Family, Family] | null {
   const m = _mode();
   if (m === "off") return null;
+  if (m === "iso") return ISO_AXES;
   return boxAxesForMode(m, _get("vp1"), m !== "p1" ? _get("vp2") : null, m === "p3" ? _get("vp3") : null);
 }
 
@@ -132,7 +134,7 @@ function _defaultBox(): BoxParams {
     for (let i = 0; i < 3; i++) {
       if (axes[i].kind === "parallel") {
         const d = (axes[i] as { dir: Vp }).dir;
-        t[i] = (d.y !== 0 ? -1 : 1) * doc.height / 3;   // 竖直轴向上长
+        t[i] = (d.y > 0 ? -1 : 1) * doc.height / 3;   // 有向上分量则正向，纯竖直(y>0)取负=向上长
       }
     }
   }
@@ -195,7 +197,7 @@ function _boxDragTo(cornerIdx: number, screenX: number, screenY: number) {
   const g = editorState.persp;
   const m = _mode();
   const vp1 = _get("vp1");
-  if (m === "off" || !vp1) return;
+  if (m === "off" || (m !== "iso" && !vp1)) return;
   const target = _ctx.board.screenToDoc(screenX, screenY);
   if (cornerIdx === 0) {
     _box = { A: _snap(target), t: _box.t };   // 锚角同 VP 格系（+0.5 像素中线；漏钉的 pixel-perfect 缺口）
@@ -257,10 +259,34 @@ function _boxDragTo(cornerIdx: number, screenX: number, screenY: number) {
     _syncUi();
     return;
   }
+  // iso：全平行轴 → C/D 解析精确解（无 VP 无 GN）：C_ij 解 (t_i,t_j) 2×2；D 只调竖直行程 t3（高度手柄）
+  if (m === "iso") {
+    const axes = ISO_AXES;
+    const d = axes.map((a) => (a as { kind: "parallel"; dir: Vp }).dir);
+    const A = _box.A;
+    const rx = target.x - A.x, ry = target.y - A.y;
+    const tt: [number, number, number] = [..._box.t];
+    const solve2 = (i: number, j: number) => {
+      const det = d[i].x * d[j].y - d[i].y * d[j].x;
+      if (Math.abs(det) < 1e-9) return;
+      tt[i] = (rx * d[j].y - ry * d[j].x) / det;
+      tt[j] = (ry * d[i].x - rx * d[i].y) / det;
+    };
+    if (cornerIdx === 4) solve2(0, 1);            // C12
+    else if (cornerIdx === 5) solve2(0, 2);       // C13
+    else if (cornerIdx === 6) solve2(1, 2);       // C23
+    else {                                        // D：竖直高度手柄（保持 t1/t2）
+      tt[2] = (rx - tt[0] * d[0].x - tt[1] * d[1].x) * d[2].x + (ry - tt[0] * d[0].y - tt[1] * d[1].y) * d[2].y;
+    }
+    _box = { A, t: tt };
+    _saveBox();
+    _syncUi();
+    return;
+  }
   // C/D：阻尼 GN 全参数（次级微调）
   const solved = solveBoxDrag({
     mode: m, lockHorizon: g.lockHorizon,
-    vp1, vp2: m !== "p1" ? _get("vp2") : null, vp3: m === "p3" ? _get("vp3") : null,
+    vp1: vp1!, vp2: m !== "p1" ? _get("vp2") : null, vp3: m === "p3" ? _get("vp3") : null,
     box: _box,
   }, cornerIdx, target);
   _set("vp1", solved.vp1);
@@ -283,6 +309,7 @@ function _syncUi() {
   if (!_ctx || !_active) return;
   _syncHandles();
   const lock = editorState.persp.lockHorizon;
+  _lockBtn.classList.toggle("hidden", _mode() === "iso");   // iso 无地平线
   _lockBtn.setAttribute("aria-pressed", lock ? "true" : "false");
   _lockUse.setAttribute("href", lock ? "#lock" : "#unlock");
   _ctx.board.requestRender();
@@ -366,9 +393,25 @@ export function initPerspEdit(ctx: AppContext): void {
     const g = editorState.persp;
     const m = _mode();
     if (m === "off") return null;
+    if (!_active && (!g.showGizmo || _ctx!.editMode.current() !== "shapeBrush")) return null;
+    if (m === "iso") {
+      // iso 无地平线/VP：常显 gizmo = 过锚点的三轴参考线（rays 槽复活）；编辑态另加 box 棱线
+      const out: PerspGizmoData = { horizon: null, rays: [], vps: [] };
+      const b = _active ? _box : _loadBox();
+      const A = b?.A ?? { x: clampPixelCenter(ctx.doc.width / 2), y: clampPixelCenter(ctx.doc.height / 2) };
+      const L = (ctx.doc.width + ctx.doc.height) * 2;
+      for (const f of ISO_AXES) {
+        const d = (f as { kind: "parallel"; dir: Vp }).dir;
+        out.rays.push([{ x: A.x - d.x * L, y: A.y - d.y * L }, { x: A.x + d.x * L, y: A.y + d.y * L }]);
+      }
+      if (_active) {
+        const cs = _boxCornersNow();
+        if (cs) out.boxEdges = BOX_EDGES.map(([a2, b2]) => [cs[a2], cs[b2]] as [Vp, Vp]);
+      }
+      return out;
+    }
     const vp1 = _get("vp1"), vp2 = m !== "p1" ? _get("vp2") : null, vp3 = m === "p3" ? _get("vp3") : null;
     if (!vp1) return null;
-    if (!_active && (!g.showGizmo || _ctx!.editMode.current() !== "shapeBrush")) return null;
     const L = (ctx.doc.width + ctx.doc.height) * 4;
     const out: PerspGizmoData = { horizon: null, rays: [], vps: [] };
     for (const v of [vp1, vp2, vp3]) if (v) out.vps.push(v);

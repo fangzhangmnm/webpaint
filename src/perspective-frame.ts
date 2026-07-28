@@ -28,6 +28,9 @@ export interface PerspConfig {
   vp3: Vp | null;
   lockHorizon: boolean;   // 默认 true：vp2.y 锁 = vp1.y（极端场景关掉可歪地平线）
   plane: PlaneId;
+  // isometric（v0.6.20）：纯平行三轴。有 axes = iso 模式，vp1-3 恒 null；
+  //   平行×平行无消失线（vanishingLineOf→null）→ 全管线走仿射路径，零奇点。
+  axes?: [Family, Family, Family] | null;
 }
 
 // 方向族：pencil = 过 VP 的线束；parallel = 平行族（dir 单位向量）
@@ -38,6 +41,26 @@ export type Family =
 const H_DIR: Pt = { x: 1, y: 0 };
 const V_DIR: Pt = { x: 0, y: 1 };
 
+// ---- isometric（2:1 像素惯例，ADR-0006「排队」项 → v0.6.20 落地）----
+// 方向：对角 ±(2,∓1)/√5 + 竖直——2:1 斜率是有理数，格点连线 Bresenham 对称（非 22.5°/30°，user 拍板）。
+// 世界单位屏向量（正方/正圆度量用）：对角 (±2,−1)、竖直 (0,2)——单位立方 = 顶面菱形 4×2 + 侧高 2
+//   （经典 2:1 像素 iso 立方，sprite 恰 4×4）。
+const ISO_S5 = Math.sqrt(5);
+export const ISO_AXES: [Family, Family, Family] = [
+  { kind: "parallel", dir: { x: 2 / ISO_S5, y: -1 / ISO_S5 } },   // 轴1 右上对角
+  { kind: "parallel", dir: { x: -2 / ISO_S5, y: -1 / ISO_S5 } },  // 轴2 左上对角
+  { kind: "parallel", dir: V_DIR },                                // 轴3 竖直
+];
+const ISO_UNIT: [Pt, Pt, Pt] = [{ x: 2, y: -1 }, { x: -2, y: -1 }, { x: 0, y: 2 }];
+function isoUnitFor(fam: Family): Pt | null {
+  if (fam.kind !== "parallel") return null;
+  for (let i = 0; i < 3; i++) {
+    const d = (ISO_AXES[i] as { kind: "parallel"; dir: Pt }).dir;
+    if (Math.abs(d.x - fam.dir.x) < 1e-9 && Math.abs(d.y - fam.dir.y) < 1e-9) return ISO_UNIT[i];
+  }
+  return null;
+}
+
 // 地平线奇点 ε（doc px）：pencil 枚举坐标的 1/w 饱和阈值（user：过线后梯度按 1/ε 不按 1/z）。
 export const HORIZON_EPS = 2;
 // parallel 枚举坐标（真发散方向）的 clamp（"按无穷大算"的有限替身；过线不翻负、钉在 +BIG）
@@ -46,6 +69,13 @@ const DEPTH_BIG = 1e6;
 // 当前配置下某平面的两个方向族。配置凑不齐该平面 → null（UI 应据此过滤菜单）。
 export function planeFamilies(cfg: PerspConfig): [Family, Family] | null {
   const { vp1, vp2, vp3, plane } = cfg;
+  if (cfg.axes) {   // iso：ground=顶面(轴1×轴2) / wallL=左面(轴2×竖直) / wallR=右面(轴1×竖直)
+    const [f1, f2, f3] = cfg.axes;
+    if (plane === "ground") return [f1, f2];
+    if (plane === "wallL") return [f2, f3];
+    if (plane === "wallR") return [f1, f3];
+    return null;
+  }
   switch (plane) {
     case "ground":
       if (vp1 && vp2) return [{ kind: "pencil", vp: vp1 }, { kind: "pencil", vp: vp2 }];
@@ -277,6 +307,7 @@ export function planeChart(famA: Family, famB: Family, anchor: Pt): PlaneChart |
 // 吸向所有已配置 VP 的方向 + 尚存的平行族（有水平 VP 对 → 水平族已收敛、退场；
 // 有 vp3 → 竖直族退场；三点透视只剩三个 VP 方向）。离拖拽方向最近者胜（caller 做投影）。
 export function snapDirections(cfg: PerspConfig, from: Pt): Pt[] {
+  if (cfg.axes) return cfg.axes.map((f) => (f as { dir: Pt }).dir);   // iso：只吸三轴
   const dirs: Pt[] = [];
   const addVp = (vp: Vp | null) => {
     if (!vp) return;
@@ -306,12 +337,13 @@ export function snapToDirections(x0: number, y0: number, x: number, y: number, d
 
 // ---- 透视模式（UI 重做 2026-07-25：显式四态 subtool 取代"按 VP 数隐式判"）----
 
-export type PerspMode = "off" | "p1" | "p2" | "p3";
+export type PerspMode = "off" | "p1" | "p2" | "p3" | "iso";
 
 // 各模式的合法平面（p1 无左右墙——user 拍板；纵深墙叫「墙」）
 export function planesForMode(mode: PerspMode): PlaneId[] {
   if (mode === "p1") return ["ground", "wall"];
   if (mode === "p2" || mode === "p3") return ["ground", "wallL", "wallR"];
+  if (mode === "iso") return ["ground", "wallL", "wallR"];   // 顶面/左面/右面（复用 UI 行）
   return [];
 }
 
@@ -327,6 +359,11 @@ export interface PerspModeState {
 //   plane 不合法时 coerce 到 ground。纯函数可测。
 export function configFromModeState(g: PerspModeState): PerspConfig | null {
   const mode = g.mode as PerspMode;
+  if (mode === "iso") {
+    const planes = planesForMode("iso") as string[];
+    const plane = planes.includes(g.plane) ? (g.plane as PlaneId) : "ground";
+    return { vp1: null, vp2: null, vp3: null, lockHorizon: g.lockHorizon, plane, axes: ISO_AXES };
+  }
   if (mode !== "p1" && mode !== "p2" && mode !== "p3") return null;
   const slot = mode === "p1" ? { ...g.p1, vp2: null, vp3: null }
     : mode === "p2" ? { ...g.p2, vp3: null } : g.p3;
@@ -377,6 +414,7 @@ export function normalizeConfig(cfg: PerspConfig): PerspConfig {
 export interface BoxParams { A: Vp; t: [number, number, number]; }
 
 export function boxAxesForMode(mode: PerspMode, vp1: Vp | null, vp2: Vp | null, vp3: Vp | null): [Family, Family, Family] | null {
+  if (mode === "iso") return ISO_AXES;   // 轴固定（2:1 惯例），无 VP
   if (mode === "p1" && vp1) return [{ kind: "pencil", vp: vp1 }, { kind: "parallel", dir: { x: 1, y: 0 } }, { kind: "parallel", dir: { x: 0, y: 1 } }];
   if (mode === "p2" && vp1 && vp2) return [{ kind: "pencil", vp: vp1 }, { kind: "pencil", vp: vp2 }, { kind: "parallel", dir: { x: 0, y: 1 } }];
   if (mode === "p3" && vp1 && vp2 && vp3) return [{ kind: "pencil", vp: vp1 }, { kind: "pencil", vp: vp2 }, { kind: "pencil", vp: vp3 }];
@@ -563,6 +601,24 @@ export interface PlaneMetric {
 }
 
 export function planeMetric(cfg: PerspConfig, famA: Family, famB: Family, anchor: Pt, docW: number, docH: number): PlaneMetric | null {
+  if (cfg.axes) {
+    // iso：平行投影（视点在无穷远）——经典约定的视点重建发散，改**解析仿射度量**。
+    // 3D 坐标系直接取平面坐标 (u,v,0)：project = 仿射映回屏；unproject = 2×2 线性解。
+    // 接口不变 → constrainSquareOnPlane / metricCirclePolyline 下游零改动。
+    const wA = isoUnitFor(famA), wB = isoUnitFor(famB);
+    if (!wA || !wB) return null;
+    const det = wA.x * wB.y - wA.y * wB.x;
+    if (Math.abs(det) < 1e-9) return null;
+    const ax = anchor.x, ay = anchor.y;
+    return {
+      project: (P: V3): Pt => ({ x: ax + P[0] * wA.x + P[1] * wB.x, y: ay + P[0] * wA.y + P[1] * wB.y }),
+      unproject: (q: Pt): V3 => {
+        const rx = q.x - ax, ry = q.y - ay;
+        return [(rx * wB.y - ry * wB.x) / det, (ry * wA.x - rx * wA.y) / det, 0];
+      },
+      U: [1, 0, 0], V: [0, 1, 0], A3: [0, 0, 0],
+    };
+  }
   const { vp1, vp2, vp3 } = cfg;
   let P0: Vp | null = null;
   let d2 = 0;

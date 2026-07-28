@@ -663,7 +663,9 @@ export class Board {
     ctx.strokeStyle = "rgba(64,140,255,0.28)";
     ctx.lineWidth = 1 / scale;
     for (const [a, b] of g.rays) {
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      const seg = clipSegToBox(a, b, vbox);
+      if (!seg) continue;
+      ctx.beginPath(); ctx.moveTo(seg[0].x, seg[0].y); ctx.lineTo(seg[1].x, seg[1].y); ctx.stroke();
     }
     ctx.strokeStyle = "rgba(64,140,255,0.8)";
     ctx.lineWidth = 1.4 / scale;
