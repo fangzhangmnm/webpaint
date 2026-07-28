@@ -210,6 +210,12 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     when: _floating, run: (i) => i._commitLasso() },
   { combo: "Escape",           desc: "sc.cancelTransform", category: "sc.cat.lasso",
     when: _floating, run: (i) => i._abortLasso() },
+  { combo: "Escape",           desc: "sc.polygonCancel", category: "sc.cat.lasso",
+    when: (i) => i.lasso.polygonSessionActive() && !_floating(i),
+    run: (i) => { i.lasso.polygonCancelSession(); i.board.requestRender(); } },
+  { combo: "Enter",            desc: "sc.polygonClose", category: "sc.cat.lasso",
+    when: (i) => i.lasso.polygonSessionActive() && !_floating(i),
+    run: (i) => i._polygonClose() },
   { combo: "Escape",           desc: "sc.deselect", category: "sc.cat.lasso",
     when: _hasSelectionIdle,
     run: (i) => {
@@ -391,6 +397,12 @@ export class InputController {
   }
 
   _bind() {
+    // 切离 lasso（真切换，transient 括号不算）= 多边形会话 abort（fill _onModeChange 同款判法）
+    window.addEventListener("wp:modechange", () => {
+      if (this.editMode && !this.editMode.isTransient() && this.editMode.current() !== "lasso") {
+        this.lasso.polygonCancelSession();
+      }
+    });
     const c = this.canvas;
     c.addEventListener("pointerdown", (e) => this._down(e));
     c.addEventListener("pointermove", (e) => this._move(e));
@@ -948,6 +960,10 @@ export class InputController {
     rec._lassoStartDocY = dy;
   }
   _endLasso(rec: PointerRec) {
+    if (this.lasso.getSubTool() === "polygon" && (rec._lassoMode === "drawing" || rec._lassoMode === "tentative")) {
+      this._polygonUp(rec);   // 多边形：一笔=落一个顶点（首笔 p1→p2 连落两个）；点回起点=闭合
+      return;
+    }
     if (rec._lassoMode === "drawing") {
       try {
         const entry = this.lasso.endPath(this.doc.getFloodSourceLayer());
@@ -995,6 +1011,33 @@ export class InputController {
         }
       }
     }
+  }
+  // 多边形套索（v0.6.19）：up = 落顶点；≥3 顶点后收笔点距起点 ≤14 screen px = 闭合。
+  //   tap 在 polygon 下不再是「清选区」（落点语义优先；清选区走 Esc/Ctrl+D/去选钮）。
+  _polygonUp(rec: PointerRec) {
+    const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
+    const first = this.lasso.polygonFirstVertex();
+    if (first && this.lasso.polygonVertexCount() >= 3) {
+      const s0 = this.board.docToScreen(first.x, first.y);
+      if (Math.hypot(s0.x - rec.x, s0.y - rec.y) <= 14) { this._polygonClose(); return; }
+    }
+    if (rec._lassoMode === "drawing" && this.lasso.polygonVertexCount() === 0) {
+      this.lasso.polygonAddVertex(rec._lassoStartDocX!, rec._lassoStartDocY!);   // 首笔起点也是顶点
+    }
+    this.lasso.polygonAddVertex(dx, dy);
+    this.board.requestRender();
+  }
+  _polygonClose() {
+    try {
+      const entry = this.lasso.polygonClose();
+      if (entry) { this._pushSelEntry(entry); this.board.invalidateAll(); }
+      else this.status("多边形选区无效（不足三点 / 全在画布外），已取消");
+    } catch (e) {
+      reportError(new Error("[polygon close] " + String(e)), "log");
+      this.status("选区操作出错：" + ((e as { message?: unknown })?.message || e));
+      this.lasso.polygonCancelSession();
+    }
+    this.board.requestRender();
   }
   _commitLasso() {
     // v0.4.7（S6）：accept 的 operator 编排（烤层 ops.pixels × N + DropFloatOp，compound 封整点）
@@ -1246,6 +1289,7 @@ export class InputController {
     if (this.history) this.history.clear();
     // 换文档：浮层状态直接清（不走 operator——栈都没了）+ lasso 状态对齐。
     this.workpiece?.dropFloats();
+    this.lasso.polygonCancelSession();   // 换文档：多边形会话丢弃（interrupt=cancel 家规）
     this.lasso.syncFloating();
   }
 

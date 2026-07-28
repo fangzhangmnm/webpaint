@@ -538,3 +538,42 @@ export class Selection {
     return Selection.fromGray8Region(0, 0, docW, docH, dst);
   }
 }
+
+// ---- 多边形栅格器（v0.6.19 多边形套索，模块级纯函数，node 直测）----
+// 整数格点顶点 → 0/255 硬边 gray8（锁像素格点边缘；与蚂蚁线/morphed 的 128 阈值族天然对齐）。
+// 判据 = 像素中心 (px+0.5, py+0.5) 的 even-odd 交叉数（与 Canvas2D fill("evenodd") 同语义，无 AA）。
+// 中心恰在边上的平局用半开区间 [xa, xb)（左含右不含）——每像素归属唯一，邻接多边形不重叠不漏缝。
+export function rasterizePolygonGray8(
+  verts: Array<{ x: number; y: number }>,
+): { x0: number; y0: number; w: number; h: number; g: Uint8Array } | null {
+  if (verts.length < 3) return null;
+  let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+  for (const v of verts) {
+    if (v.x < mnx) mnx = v.x; if (v.x > mxx) mxx = v.x;
+    if (v.y < mny) mny = v.y; if (v.y > mxy) mxy = v.y;
+  }
+  const x0 = Math.floor(mnx), y0 = Math.floor(mny);
+  const w = Math.ceil(mxx) - x0, h = Math.ceil(mxy) - y0;
+  if (w <= 0 || h <= 0) return null;   // 共线/零面积
+  const g = new Uint8Array(w * h);
+  const xs: number[] = [];
+  let any = false;
+  for (let py = y0; py < y0 + h; py++) {
+    const yc = py + 0.5;
+    xs.length = 0;
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i], b = verts[(i + 1) % verts.length];
+      if ((a.y <= yc) === (b.y <= yc)) continue;   // 不跨扫描线（水平边天然跳过）
+      xs.push(a.x + ((yc - a.y) * (b.x - a.x)) / (b.y - a.y));
+    }
+    if (xs.length < 2) continue;
+    xs.sort((u, v) => u - v);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      // 填 px 使 px+0.5 ∈ [xa, xb)
+      const pxA = Math.max(x0, Math.ceil(xs[k] - 0.5));
+      const pxB = Math.min(x0 + w - 1, Math.ceil(xs[k + 1] - 0.5) - 1);
+      for (let px = pxA; px <= pxB; px++) { g[(py - y0) * w + (px - x0)] = 255; any = true; }
+    }
+  }
+  return any ? { x0, y0, w, h, g } : null;
+}

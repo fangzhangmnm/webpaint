@@ -69,7 +69,7 @@ test("[fill-mode] ✓ = commit + 清选区（一个 compound 整点）", () => {
   eq(ctx.doc.selection, null, "doc.selection 已空");
 });
 
-test("[fill-mode] 切出=commit（选区保留）；transient 括号不算切出", () => {
+test("[fill-mode] 切出=commit+清选区（v0.6.19 修订）；transient 括号不算切出", () => {
   const { ctx, calls } = makeCtx();
   initFillMode(ctx);
   // 建立基线：当前持久模式 = fill
@@ -79,13 +79,14 @@ test("[fill-mode] 切出=commit（选区保留）；transient 括号不算切出
   setMode(ctx, "adjust", true);
   setMode(ctx, "fill");
   eq(calls.commitFill, 0, "transient 括号往返不 commit");
-  // fill → brush（真切出）：commit 且选区保留
+  // fill → brush（真切出）：commit + 清选区（v0.6.19 user 拍板：进其他工具不留选区；原 v0.5.15 保留）
   setMode(ctx, "brush");
   eq(calls.commitFill, 1, "切出 fill = commit");
-  eq(calls.setSelectionNull, 0, "切出 commit 不清选区（选区照常当蒙板）");
-  eq(!!ctx.doc.selection, true, "选区还在");
+  eq(calls.setSelectionNull, 1, "切出 commit 清选区（填完切笔要画画，蚂蚁线留着碍事）");
+  eq(ctx.doc.selection, null, "选区已清");
   // brush → fill → adjust → brush（transient 中途切工具 = 括号展开落到新工具）：commit 一次
   setMode(ctx, "fill");
+  ctx.doc.selection = {};
   setMode(ctx, "adjust", true);
   setMode(ctx, "brush");
   eq(calls.commitFill, 2, "transient 中途切工具也算切出 fill → commit");

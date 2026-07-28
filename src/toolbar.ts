@@ -54,7 +54,7 @@ let lassoConstrainBtn: HTMLElement;
 let lassoSelEditBtn: HTMLElement, lassoSelEditMenu: HTMLElement;   // v0.5.12 ⋯ 菜单（低频选区操作收纳）
 let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement, lassoSetOpMenu: HTMLElement, lassoSetOpMenuBtns: HTMLElement[];   // 布尔组槽（v0.5.17 回下拉）
 let lassoSubSlot: HTMLElement, lassoSubSlotUse: SVGUseElement, lassoSubMenu: HTMLElement, lassoSubMenuBtns: HTMLElement[];   // 子工具组槽（v0.5.14）
-let lassoMagicCtx: HTMLElement, lassoExpandToggle: HTMLElement, lassoMagicExpandPx: HTMLInputElement;   // 魔棒配置内联
+let lassoExpandToggle: HTMLElement, lassoMagicExpandVal: HTMLElement, lassoMagicExpandStep: HTMLElement;   // 魔棒配置（v0.6.19 收进 ⋯ 菜单，stepper 化）
 let lassoTransformBtn: HTMLElement, lassoFillModeBtn: HTMLElement, lassoFillCommitBtn: HTMLElement, lassoDeselectBtn: HTMLElement;
 let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
 
@@ -63,7 +63,7 @@ let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   
 //   fill 禁「新建」只在灌引擎时就地 coerce 成并，不改记忆本体。
 const _selMem = { sub: "freehand" as string, setOp: "new" as string };
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
-const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", magic: "#magic-wand" };
+const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", polygon: "#select-polygon", magic: "#magic-wand" };
 // 形状笔（ADR-0005/0006）：组槽 + 约束钮（图标按子工具换义）+ grid 配置 + 透视平面槽
 let shapeToolbarStack: HTMLElement, shapeSubBtns: HTMLElement[],
     shapeGridMoreBtn: HTMLElement, shapeGridMenu: HTMLElement, shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement,
@@ -173,13 +173,13 @@ export function updateLassoToolbar() {
     b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
     if (b.dataset.lassoSetop === "new") b.classList.toggle("hidden", fillActive);
   }
-  // 魔棒配置内联：magic 子工具时显示；px 输入仅扩张开着时显。
+  // 魔棒配置（v0.6.19 收进 ⋯ 菜单）：magic 子工具时显示；stepper 仅扩张开着时显。
   const magicOn = sub === "magic";
-  lassoMagicCtx.classList.toggle("hidden", !magicOn);
-  if (magicOn) {
-    lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
-    lassoMagicExpandPx.classList.toggle("hidden", !editorState.magicWand.expand);
-  }
+  for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-magic-only")) el.classList.toggle("hidden", !magicOn);
+  lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
+  lassoMagicExpandStep.classList.toggle("hidden", !editorState.magicWand.expand);
+  // 清除选区内像素（v0.6.19 从 ⋯ 提到 Row1）：套索模式+有选区才显（fill 藏，同旧 lasso-only 语义）
+  document.getElementById("lassoClearBtn")?.classList.toggle("hidden", !(lassoActive && hasSelection));
   // ⋯ 菜单钮：选区/填充工具常显（menu 内按 needs-sel / lasso-only 逐项禁用·隐藏——见 openSelEditUI）。
   //   modal 开着时(_selEdit)恒亮（预览 shrink 到空不能把 modal 撕掉）。
   const showSelEdit = !!_selEdit || (showRow1 && !otherToolSel);
@@ -188,6 +188,9 @@ export function updateLassoToolbar() {
   // ⋯ 菜单逐项：needs-sel 无选区禁用；lasso-only（清除/复制/移层）fill 里隐藏
   for (const el of lassoSelEditMenu.querySelectorAll<HTMLButtonElement>(".lasso-menu-needs-sel")) el.disabled = !hasSelection;
   for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-lasso-only")) el.classList.toggle("hidden", fillActive);
+  // fill-only（蚂蚁线 toggle，v0.6.19）：非 fill 恒显示无开关 → 项本身藏；pressed 态从 editorState 派生
+  for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-fill-only")) el.classList.toggle("hidden", !fillActive);
+  document.getElementById("lassoAntsBtn")?.setAttribute("aria-pressed", editorState.fill.showAnts ? "true" : "false");
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
   lassoConstrainBtn.classList.toggle("hidden", !showConstrain);
@@ -374,6 +377,12 @@ function initSelEditUI() {
     if (wasHidden && menu) anchorPopupToBtn(menu, lassoSelEditBtn, { align: "left", offsetY: 6 });   // v0.5.14 贴钮
   });
   document.getElementById("lassoSelResizeBtn")?.addEventListener("click", () => _openSelEdit("expand"));   // v0.5.15 合一钮，默认扩张
+  // 蚂蚁线 toggle（v0.6.19，ADR-0004 修订）：写 editorState（per-doc）+ 重绘；不关菜单（toggle 类操作连按友好）
+  document.getElementById("lassoAntsBtn")?.addEventListener("click", () => {
+    editorState.fill.showAnts = !editorState.fill.showAnts;
+    board.requestRender();
+    updateLassoToolbar();
+  });
   // modal 内方向切换（v0.5.15 user：扩张/收缩同一入口）：切方向 = 换 op 就地重预览（预览恒从 before 派生）。
   document.getElementById("lassoSelOpExpandBtn")?.addEventListener("click", () => _setSelEditOp("expand"));
   document.getElementById("lassoSelOpShrinkBtn")?.addEventListener("click", () => _setSelEditOp("shrink"));
@@ -611,30 +620,30 @@ export function initToolbar(ctx: AppContext) {
   });
   // #31 魔棒 flood 后自动扩张（v0.5.12 内联化：aria-pressed toggle 钮 + px 输入，⚙/popup 退役）。
   //   引擎只认一个数：effective px = toggle 开 ? px : 0。UI 改 → 写 editorState + 灌引擎；换文档回灌。
-  lassoMagicCtx = byId("lassoMagicCtx");
   lassoExpandToggle = byId("lassoExpandToggle");
-  lassoMagicExpandPx = byId<HTMLInputElement>("lassoMagicExpandPx");
+  lassoMagicExpandVal = byId("lassoMagicExpandVal");
+  lassoMagicExpandStep = byId("lassoMagicExpandStep");
   const pushMagicExpandToEngine = () => {
     input.lasso.setMagicAutoExpand(editorState.magicWand.expand ? editorState.magicWand.expandPx : 0);
   };
   const syncMagicExpandUI = () => {
-    lassoMagicExpandPx.value = String(editorState.magicWand.expandPx);
+    lassoMagicExpandVal.textContent = String(editorState.magicWand.expandPx);
     pushMagicExpandToEngine();
-    updateLassoToolbar();   // toggle pressed 态/px 显隐在 updateLassoToolbar 派生
+    updateLassoToolbar();   // toggle pressed 态/stepper 显隐在 updateLassoToolbar 派生
   };
   lassoExpandToggle.addEventListener("click", () => {
     editorState.magicWand.expand = !editorState.magicWand.expand;
     pushMagicExpandToEngine();
     updateLassoToolbar();
   });
-  lassoMagicExpandPx.addEventListener("change", () => {
-    const v = Math.max(0, Math.min(100, parseInt(lassoMagicExpandPx.value, 10) || 0));
-    lassoMagicExpandPx.value = String(v);
-    editorState.magicWand.expandPx = v;
+  // −1+ stepper（v0.6.19 文本框退役——文本框吞快捷键+弹键盘；样板 = shapeGrid steppers 连按不关菜单）
+  const stepMagicExpand = (d: number) => {
+    editorState.magicWand.expandPx = Math.max(0, Math.min(100, editorState.magicWand.expandPx + d));
+    lassoMagicExpandVal.textContent = String(editorState.magicWand.expandPx);
     pushMagicExpandToEngine();
-  });
-  // 文本框会吞快捷键（合法），Enter=确认并释放焦点——画布点按 preventDefault 夺不回焦点，必须给出口
-  lassoMagicExpandPx.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") lassoMagicExpandPx.blur(); });
+  };
+  byId("lassoMagicExpandMinus").addEventListener("click", () => stepMagicExpand(-1));
+  byId("lassoMagicExpandPlus").addEventListener("click", () => stepMagicExpand(+1));
   window.addEventListener("wp:applyEditorState", syncMagicExpandUI);
   window.addEventListener("wp:applyEditorState", syncMagicThresholdUI);
   syncMagicThresholdUI();
@@ -703,6 +712,7 @@ export function initToolbar(ctx: AppContext) {
     pushSel(input.lasso.setSelection(sel));
     board.invalidateAll();
     updateLassoToolbar();
+    closeSelEditUI();   // v0.6.19：指令项点完关菜单（toggle/slider 类不关）
   });
 
   // 反选：在 docW×docH 上 mask 取反
@@ -711,6 +721,7 @@ export function initToolbar(ctx: AppContext) {
     pushSel(input.lasso.setSelection(inv));
     board.invalidateAll();
     updateLassoToolbar();
+    closeSelEditUI();   // v0.6.19：指令项点完关菜单
   });
 
   // transform 模式 picker + 应用 / 取消
@@ -762,9 +773,11 @@ export function initToolbar(ctx: AppContext) {
   // 选区 → 新层 / 复制层
   byId("lassoDuplicateBtn").addEventListener("click", () => {
     selectionToNewLayer({ move: false });
+    closeSelEditUI();   // v0.6.19：指令项点完关菜单
   });
   byId("lassoMoveToLayerBtn").addEventListener("click", () => {
     selectionToNewLayer({ move: true });
+    closeSelEditUI();
   });
   window.addEventListener("wp:lassochange", updateLassoToolbar);
   // 任何 history push/undo/redo 都可能改 doc.selection → 刷新 toolbar 显隐

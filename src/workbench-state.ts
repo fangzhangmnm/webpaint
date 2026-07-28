@@ -143,6 +143,9 @@ function freshGroups() {
     //   v0.5.11：threshold 归魔棒（油漆桶独立工具及 editorState.bucket 退役——填色收进套索 fill mode，
     //   flood 只剩魔棒一条路；旧 doc 里 stale 的 bucket 键被 mergeInto 静默忽略）。
     magicWand:     { threshold: 20, expand: false, expandPx: 1 },        // #31 自动扩张 + v0.5.11 阈值
+    // v0.6.19 蚂蚁线（user 拍板+持久化同意 2026-07-28）：fill 模式下可关（默认开）；
+    //   toggle 只存在于 fill，非 fill 恒显示（ADR-0004 修订记录）。
+    fill:          { showAnts: true },
     // ADR-0005/0006 形状笔：子工具 + **per-图形约束**（user：每个图形的 lock 分别持久化，默认全不锁）
     //   + grid 配置（默认 2×6 = 6 头身 + 中线，border 关）
     shapeBrush:    { sub: "line" as string, constrainLine: false, constrainRect: false, constrainCircle: false, gridNu: 2, gridNv: 6, gridBorder: false },
@@ -247,6 +250,9 @@ export const editorState = {
     set opacity(v: number) { if (_bind) _bind.setOpacity(v); else S.g.brushTool.opacity = v; },
     get color(): string { return _bind ? _bind.getColor() : S.g.brushTool.color; },
     set color(v: string) { if (_bind) _bind.setColor(v); else S.g.brushTool.color = v; },
+  },
+  fill: {
+    get showAnts(): boolean { return S.g.fill.showAnts; }, set showAnts(v: boolean) { S.g.fill.showAnts = v; },
   },
   magicWand: {
     get threshold(): number { return S.g.magicWand.threshold; }, set threshold(v: number) { S.g.magicWand.threshold = v; },

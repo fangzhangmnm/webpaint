@@ -10,5 +10,5 @@
      需求登记：全局清单 ../20260708 SVG Icons/TODO.md（美工 agent 的取活处）。
      重新烤制：仓库根跑 python3 tools/bake-stopgap-glyphs.py（SPECS 即声明）。
 -->
-
+  <symbol id="select-polygon" data-cat="stopgap" data-src="baked:DroidSansFallbackFull(Apache-2.0)/DejaVuSans-Bold(Bitstream-Vera)" data-note="套索·多边形子工具(逐点落顶点/回起点闭合/锁格点硬边)。真图标建议=虚线五边形(对齐 select-freehand/rectangle 家族)" viewBox="0 0 24 24"><path d="M3.23 6.31H6.12V3.04H7.68V6.31H10.09V7.79H7.68V11.84L10.09 10.83L10.4 12.23L7.68 13.48V19.25Q7.6 20.96 5.96 20.96L3.62 20.73L3.31 19.09L5.73 19.4Q6.12 19.4 6.12 18.47V14.1L3.55 15.04L3 13.4L6.12 12.39V7.79H3.23ZM19.52 3.19 20.45 4.68Q17.18 5.61 12.74 5.77V9.12H21V10.6H18.04V20.96H16.32V10.6H12.74Q12.74 16.36 9.62 20.88L8.38 19.71Q11.03 15.66 11.1 11.61V4.29Q15.94 4.21 19.52 3.19Z" fill="currentColor" stroke="none"/></symbol>
 </svg>

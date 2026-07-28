@@ -55,6 +55,7 @@ interface Handle {
 // _lassoProvider 返回：选区蚂蚁线 / drawing path / shape / floating / handles
 interface LassoInfo {
   selection?: Selection | null;
+  showAnts?: boolean;      // false = 静止选区不画蚂蚁线（fill 模式 toggle；拖拽中虚线不受影响）
   floating?: FloatInfo | null;
   drawingPath?: MeshPt[] | null;
   drawingRect?: { x0: number; y0: number; x1: number; y1: number } | null;
@@ -824,7 +825,7 @@ export class Board {
     // (a) 选区蚂蚁线：marching squares 抽 mask 轮廓 → 黑白相间虚线。
     // 真"相间"：dash 和 gap 等长，白色 dashOffset 偏一个 dash，正好填黑的空位。
     // 不要动画（user 反馈太干扰）。线宽 1 / scale = 1 CSS px。
-    if (info.selection && !info.floating) {
+    if (info.selection && !info.floating && info.showAnts !== false) {
       const s = info.selection;
       const chains = antsOutline(s as Selection);
       ctx.save();
