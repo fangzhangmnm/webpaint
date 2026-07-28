@@ -76,17 +76,22 @@ const _toolSlots: Array<{ members: string[]; btn: HTMLElement; use: SVGUseElemen
 // v0.6.27 小三角统一语义（user）：单击=控件主动作（激活/toggle；纯选择槽=开菜单）；
 //   **长按 ≈450ms=开该控件的菜单**；菜单开着再点=关。共享 helper：返回 consume()——
 //   长按已触发时吞掉随后的 click。
+// 阈值 300ms（user 拍板 2026-07-28；Android 默认 400/iOS 500，300 靠桌面软件档——慢 tap 误触
+//   风险由 :active 按压蓄力动画垫着，真机不行回 350）。右键 = 立即开菜单（PS 同款；也兜底
+//   iOS 系统级长按 ~500ms 才发的 contextmenu）。
+const LONG_PRESS_MS = 300;
 function wireLongPress(btn: HTMLElement, fire: () => void): () => boolean {
   let timer = 0, fired = false;
+  btn.classList.add("lp-btn");   // 按压蓄力动画（styles.css :active，transition 与阈值同步）
   btn.addEventListener("pointerdown", () => {
     fired = false;
-    timer = window.setTimeout(() => { fired = true; timer = 0; fire(); }, 450);
+    timer = window.setTimeout(() => { fired = true; timer = 0; fire(); }, LONG_PRESS_MS);
   });
   const cancel = () => { if (timer) { window.clearTimeout(timer); timer = 0; } };
   btn.addEventListener("pointerup", cancel);
   btn.addEventListener("pointerleave", cancel);
   btn.addEventListener("pointercancel", cancel);
-  btn.addEventListener("contextmenu", (e: Event) => e.preventDefault());   // 触摸长按防系统菜单
+  btn.addEventListener("contextmenu", (e: Event) => { e.preventDefault(); if (!fired) { fired = true; cancel(); fire(); } });
   return () => { const f = fired; fired = false; return f; };
 }
 // v0.6.27（user：下笔时 slot 菜单也该自动关）：全部浮出小菜单的统一登记 + 一把关
