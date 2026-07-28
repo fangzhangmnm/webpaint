@@ -198,7 +198,7 @@ function _boxDragTo(cornerIdx: number, screenX: number, screenY: number) {
   if (m === "off" || !vp1) return;
   const target = _ctx.board.screenToDoc(screenX, screenY);
   if (cornerIdx === 0) {
-    _box = { A: target, t: _box.t };
+    _box = { A: _snap(target), t: _box.t };   // 锚角同 VP 格系（+0.5 像素中线；漏钉的 pixel-perfect 缺口）
     _saveBox();
     _syncUi();
     return;

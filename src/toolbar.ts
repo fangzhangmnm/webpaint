@@ -263,6 +263,8 @@ export function _syncEditModeUI() {
   if (els.activeSwatch) (els.activeSwatch as HTMLButtonElement).disabled = !editMode.allowsColor();
   updateLassoToolbar();             // 选区/变换工具栏跟着重新派生
   updateShapeToolbar();             // 形状笔工具栏跟着重新派生（与 lasso stack 互斥）
+  board.requestRender();            // overlay chrome（透视 gizmo/蚂蚁线）随工具显隐——不补这刀
+                                    //   切工具后 gizmo 残留/不出现，直到下次 pan/落笔（"闪"，2026-07-28 修）
 }
 
 // ===== v242 选区编辑 op：扩张 / 收缩（走 adjust transient + 实时预览）=====

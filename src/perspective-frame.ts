@@ -10,8 +10,10 @@
 //     homography 唯一 → 透视矩形=四边、透视椭圆=内切圆的像、grid 间距=cross-ratio，
 //     深度缩放自由度在四角固定后不存在（不需要显式"缩短率"参数）。
 //   · 地平线奇点（user：像越过史瓦西半径——另一张 manifold patch，不 make sense）：
-//     rect/grid/像素椭圆全走角点+homography（doc 锚定，结构上不碰奇点）；只有徒手拟合
-//     需要 chart（doc→plane 逆映射），按 ε 规则护栏（见 planeChart）。
+//     所有跨线路径都要 ε 护栏。徒手拟合走 chart（doc→plane 逆映射，见 planeChart）；
+//     rect/grid/像素椭圆的两角定形只有**用户角点** doc 锚定，导出角是族线交点、
+//     跨线时正落在奇点上（真机：天空里长出第二个矩形，2026-07-28）——quadFromCorners
+//     在任一角进 ε 带/越线时改走 chart 平面坐标（同一套 ε 规则）钉回锚点 patch。
 import type { Pt } from "./shape-geometry.ts";
 
 export interface Vp { x: number; y: number; }
@@ -88,10 +90,47 @@ export function intersectLines(l1: H3, l2: H3): Pt | null {
   return { x: p[0] / p[2], y: p[1] / p[2] };
 }
 
+// 两族的消失线（归一化齐次，w(p)=ℓ·p = 到消失线的有向 doc 距离）。
+//   两族都 parallel（0 VP，仿射）→ null = 无奇点。
+function vanishingLineOf(famA: Family, famB: Family): H3 | null {
+  const pa: H3 = famA.kind === "pencil" ? [famA.vp.x, famA.vp.y, 1] : [famA.dir.x, famA.dir.y, 0];
+  const pb: H3 = famB.kind === "pencil" ? [famB.vp.x, famB.vp.y, 1] : [famB.dir.x, famB.dir.y, 0];
+  const l = cross3(pa, pb);
+  const n = Math.hypot(l[0], l[1]);
+  if (n < 1e-12) return null;
+  return [l[0] / n, l[1] / n, l[2] / n];
+}
+
 // 两个对角点 → 四边形（顺序 c0 → A(c0)∩B(c1) → c1 → A(c1)∩B(c0)，对应单位方
 //   (0,0)(1,0)(1,1)(0,1)：famA 线 = v=const 边族，famB 线 = u=const 边族）。
-//   任一交点病态（角点贴 VP / 跨地平线撕裂）→ null，caller 按无效拖拽处理。
+//   c0 贴 VP/消失线（病态）→ null，caller 按无效拖拽处理。
+//   跨地平线（任一角 w < ε）不再解析延拓（旧行为 = 导出角翻到对侧 → bowtie →
+//   天空里长出第二个矩形）：改走 chart 平面坐标（ε 规则），quad 恒在 c0 的
+//   manifold patch 内——过线的角钉在无穷远的有限替身上、收敛进 VP。
 export function quadFromCorners(c0: Pt, c1: Pt, famA: Family, famB: Family): [Pt, Pt, Pt, Pt] | null {
+  const l = vanishingLineOf(famA, famB);
+  if (l) {
+    const w0raw = l[0] * c0.x + l[1] * c0.y + l[2];
+    const s = w0raw < 0 ? -1 : 1;                      // 锚点(c0)侧为正
+    const w0 = s * w0raw;
+    const w1 = s * (l[0] * c1.x + l[1] * c1.y + l[2]);
+    if (w0 < HORIZON_EPS || w1 < HORIZON_EPS) {
+      const chart = planeChart(famA, famB, c0);
+      if (!chart) return null;                          // c0 就在消失线上：病态
+      // c1 进 ε 带/越线 → 垂直回缩钉在 ε 带上（"读作 ε 带上的替身"）。拖多深都等价于
+      //   贴带：横向仍跟手（1/ε 梯度）、纵深钉住不再前进——路收敛进 VP、宽度不抖。
+      //   （不能拿越线点直接喂 toPlane：饱和分母下分子在对侧深处可再变号 → 翻面复活。）
+      const c1e = w1 < HORIZON_EPS
+        ? { x: c1.x + s * l[0] * (HORIZON_EPS - w1), y: c1.y + s * l[1] * (HORIZON_EPS - w1) }
+        : c1;
+      const P1 = chart.toPlane(c1e);
+      const p10 = chart.toDoc(P1.x, 0);
+      const p01 = chart.toDoc(0, P1.y);
+      const c1p = chart.toDoc(P1.x, P1.y);
+      if (!p10 || !p01 || !c1p) return null;
+      return [c0, p10, c1p, p01];
+    }
+  }
   const a0 = familyLineThrough(c0, famA), a1 = familyLineThrough(c1, famA);
   const b0 = familyLineThrough(c0, famB), b1 = familyLineThrough(c1, famB);
   const p10 = intersectLines(a0, b1);
@@ -155,13 +194,9 @@ export interface PlaneChart {
 }
 
 export function planeChart(famA: Family, famB: Family, anchor: Pt): PlaneChart | null {
-  // 消失线 ℓ = 两族无穷远点的连线（parallel 族的点在无穷远，pencil 族的点 = VP）
-  const pa: H3 = famA.kind === "pencil" ? [famA.vp.x, famA.vp.y, 1] : [famA.dir.x, famA.dir.y, 0];
-  const pb: H3 = famB.kind === "pencil" ? [famB.vp.x, famB.vp.y, 1] : [famB.dir.x, famB.dir.y, 0];
-  let l = cross3(pa, pb);
-  const n = Math.hypot(l[0], l[1]);
-  if (n < 1e-12) l = [0, 0, 1];               // 两族都 parallel（0 VP）→ 仿射 frame
-  else l = [l[0] / n, l[1] / n, l[2] / n];    // 归一：w(p) = 到消失线的**有向 doc 距离**（px）
+  // 消失线 ℓ = 两族无穷远点的连线（parallel 族的点在无穷远，pencil 族的点 = VP）；
+  //   归一后 w(p) = 到消失线的**有向 doc 距离**（px）。0 VP → 仿射 frame。
+  let l: H3 = vanishingLineOf(famA, famB) ?? [0, 0, 1];
   let w0 = l[0] * anchor.x + l[1] * anchor.y + l[2];
   if (w0 < 0) { l = [-l[0], -l[1], -l[2]]; w0 = -w0; }   // 锚点侧为正
   if (w0 < 1e-9) return null;   // 锚点就在消失线上：病态

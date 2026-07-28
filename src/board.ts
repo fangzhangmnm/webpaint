@@ -32,6 +32,7 @@ export interface PerspGizmoData {
 // 选区（doc.selection）：gray8 tile mask + 紧 bbox（真类型在 selection.ts；v0.4.6 maskCanvas 死）
 import type { Selection } from "./selection.ts";
 import { antsOutline } from "./marching-ants.ts";
+import { clipSegToBox } from "./shape-geometry.ts";
 
 // 自由变换浮层网格点 / source / float 描述（lassoInfo.floating = FloatingTransform.current() 视图；
 //   v0.4.7 S6：源像素在 workpiece float tiles，这里拿到的是懒物化 canvas + identity rect）
@@ -633,15 +634,30 @@ export class Board {
   _drawPerspGizmo(ctx: Ctx2D, scale: number) {
     const g = this._perspGizmoProvider?.();
     if (!g) return;
+    // 线段裁到可见 doc 区（弱 VP 时地平线端点可到 1e5 doc px，高倍 zoom 下 canvas 坐标
+    //   到 1e6+，部分浏览器极端坐标丢线/抖动——gizmo 线没走形状几何的 _clipBox，这里自己裁）
+    const cw = this.canvas.clientWidth || window.innerWidth;
+    const ch = this.canvas.clientHeight || window.innerHeight;
+    let vx0 = Infinity, vy0 = Infinity, vx1 = -Infinity, vy1 = -Infinity;
+    for (const [sx, sy] of [[0, 0], [cw, 0], [0, ch], [cw, ch]]) {
+      const p = this.screenToDoc(sx, sy);
+      if (p.x < vx0) vx0 = p.x; if (p.x > vx1) vx1 = p.x;
+      if (p.y < vy0) vy0 = p.y; if (p.y > vy1) vy1 = p.y;
+    }
+    const pad = 16 / scale;
+    const vbox = { x0: vx0 - pad, y0: vy0 - pad, x1: vx1 + pad, y1: vy1 + pad };
     ctx.save();
     ctx.lineCap = "round";
     if (g.horizon) {
-      ctx.strokeStyle = "rgba(64,140,255,0.55)";
-      ctx.lineWidth = 1.4 / scale;
-      ctx.beginPath();
-      ctx.moveTo(g.horizon[0].x, g.horizon[0].y);
-      ctx.lineTo(g.horizon[1].x, g.horizon[1].y);
-      ctx.stroke();
+      const seg = clipSegToBox(g.horizon[0], g.horizon[1], vbox);
+      if (seg) {
+        ctx.strokeStyle = "rgba(64,140,255,0.55)";
+        ctx.lineWidth = 1.4 / scale;
+        ctx.beginPath();
+        ctx.moveTo(seg[0].x, seg[0].y);
+        ctx.lineTo(seg[1].x, seg[1].y);
+        ctx.stroke();
+      }
     }
     ctx.strokeStyle = "rgba(64,140,255,0.28)";
     ctx.lineWidth = 1 / scale;
@@ -657,7 +673,9 @@ export class Board {
       ctx.strokeStyle = "rgba(255,165,0,0.75)";
       ctx.lineWidth = 1.4 / scale;
       for (const [a, b] of g.boxEdges) {
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        const seg = clipSegToBox(a, b, vbox);
+        if (!seg) continue;
+        ctx.beginPath(); ctx.moveTo(seg[0].x, seg[0].y); ctx.lineTo(seg[1].x, seg[1].y); ctx.stroke();
       }
     }
     ctx.restore();
