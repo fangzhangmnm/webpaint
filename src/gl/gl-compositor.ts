@@ -102,12 +102,16 @@ vec4 sampleSrc(sampler2D tex, vec2 size, int mode, float sx, float sy){
   return vec4(clamp(r/a,0.0,1.0), clamp(g/a,0.0,1.0), clamp(b/a,0.0,1.0), aOut);
 }
 // doc 像素 → 某浮层源 (u,v)，落 [0,1]² 采样直值，否则透明（quad 外）。
+// u*size 是 edge 约定（texel i 占 [i,i+1)）：nearest 的 floor(sx) 天然吻合；bilinear/bicubic 内核
+// 按 center 约定（texel 中心在整数）插值 → 喂 sx-0.5，否则 identity 时 fx=0.5 = 半 texel 相位错
+// （lift 一瞬间就糊 + 0.5px 左上移的根因）。修后 identity/整数平移下三种模式都逐 texel 精确。
 vec4 warpSample(sampler2D tex, vec2 size, mat3 hinv, int mode, vec2 docXY){
   vec3 uvw = hinv * vec3(docXY, 1.0);
   if (abs(uvw.z) < 1.0e-9) return vec4(0.0);
   float u = uvw.x / uvw.z, v = uvw.y / uvw.z;
   if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) return vec4(0.0);
-  return sampleSrc(tex, size, mode, u * size.x, v * size.y);
+  float off = (mode == 0) ? 0.0 : 0.5;
+  return sampleSrc(tex, size, mode, u * size.x - off, v * size.y - off);
 }`;
 
 // live 浮层 pass（合成到累积器）。clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather，docs/20260628-transform-clip-gpu-warp.md）。

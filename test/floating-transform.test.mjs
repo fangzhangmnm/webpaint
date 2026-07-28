@@ -2,8 +2,8 @@
 // 纯 mesh→mesh（无 canvas），驱动真实公开路径 beginDrag/extendDrag/setMode/hitTest/visibleHandles。
 // 守的是「从 lasso.js 抽出 Float 深模块 + TransformMode adapter 后，free/uniform/distort/旋转/平移/投影
 //   的几何与旧实现逐点一致」。warp 已删（不测）。
-import { describe, it, assert } from "./runner.mjs";
-import { FloatingTransform, sourceDestQuad } from "../src/floating-transform.ts";
+import { describe, it, assert, eq } from "./runner.mjs";
+import { FloatingTransform, sourceDestQuad, integerTranslationOf } from "../src/floating-transform.ts";
 
 const SQ = () => [[{ x: 0, y: 0 }, { x: 10, y: 0 }], [{ x: 0, y: 10 }, { x: 10, y: 10 }]];
 function mkFloat(mode = "free", aspect = 1, mesh = SQ()) {
@@ -219,5 +219,32 @@ describe("FloatingTransform · 多 source 映射 sourceDestQuad", () => {
     const mesh = quad({ x: 10, y: 10, w: 100, h: 100 });        // +10,+10 平移
     const q = sourceDestQuad({ x: 100, y: 100, w: 50, h: 50 }, fr(gb), mesh);   // 框外
     qNear(q, [110, 110], [160, 110], [110, 160], [160, 160], "框外 source 同样 +10,+10");
+  });
+});
+
+describe("FloatingTransform · integerTranslationOf（commit 整数平移快路判定）", () => {
+  const quad = (b) => [[{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }],
+                       [{ x: b.x, y: b.y + b.h }, { x: b.x + b.w, y: b.y + b.h }]];
+  const fr = (b) => ({ origin: { x: b.x, y: b.y }, ux: { x: b.w, y: 0 }, uy: { x: 0, y: b.h } });
+  const rect = { x: 30, y: 40, w: 16, h: 12 };
+  const dq = (mesh) => sourceDestQuad(rect, fr(rect), mesh);
+
+  it("identity → {0,0}", () => {
+    const off = integerTranslationOf(rect, dq(quad(rect)));
+    assert(off && off.x === 0 && off.y === 0, `期望 {0,0} 实得 ${JSON.stringify(off)}`);
+  });
+  it("整数平移 (+8,-3) → {8,-3}", () => {
+    const off = integerTranslationOf(rect, dq(quad({ x: 38, y: 37, w: 16, h: 12 })));
+    assert(off && off.x === 8 && off.y === -3, `期望 {8,-3} 实得 ${JSON.stringify(off)}`);
+  });
+  it("小数平移 (+7.5,0) → null（走 warp，不入快路）", () => {
+    eq(integerTranslationOf(rect, dq(quad({ x: 37.5, y: 40, w: 16, h: 12 }))), null);
+  });
+  it("缩放 → null", () => {
+    eq(integerTranslationOf(rect, dq(quad({ x: 30, y: 40, w: 32, h: 12 }))), null);
+  });
+  it("旋转/透视 quad → null", () => {
+    const mesh = [[{ x: 30, y: 41 }, { x: 46, y: 39 }], [{ x: 31, y: 52 }, { x: 47, y: 53 }]];
+    eq(integerTranslationOf(rect, dq(mesh)), null);
   });
 });

@@ -23,7 +23,8 @@ import { PaintDoc } from "../../src/doc.ts";
 import { quadWarp } from "../../src/floating-transform.ts";
 
 // ---- CPU warp 参照（golden 基准）：v355 从 src/floating-transform 归档进 harness（运行时单一 GPU SSoT；
-//   这份 CPU 逐像素逆单应性 + 采样器只在测试里当 GPU warp 的对照基准，不在产品路径）。verbatim 复刻原实现。----
+//   这份 CPU 逐像素逆单应性 + 采样器只在测试里当 GPU warp 的对照基准，不在产品路径）。verbatim 复刻原实现，
+//   唯一后续修正：bilinear/bicubic 喂 center 约定坐标（sx-0.5，v0.6.33 与 shader 同步修半 texel 相位）。----
 type CpuMesh = { x: number; y: number }[][];
 function cpuNearest(sdat: Uint8ClampedArray, w: number, h: number, sx: number, sy: number, ddat: Uint8ClampedArray, di: number) {
   const ix = Math.floor(sx), iy = Math.floor(sy);
@@ -70,10 +71,12 @@ function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number,
     if (Math.abs(w) < 1e-9) continue;
     const u = (Hinv[0] * docX + Hinv[1] * docY + Hinv[2]) / w, v = (Hinv[3] * docX + Hinv[4] * docY + Hinv[5]) / w;
     if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+    // edge 约定坐标（texel i 占 [i,i+1)）：nearest 的 floor 天然吻合；bilinear/bicubic 内核是
+    // center 约定 → -0.5（与 gl-compositor warpSample 同步修的半 texel 相位；identity 时逐 texel 精确）。
     const sx = u * srcW, sy = v * srcH, di = (dy * dstW + dx) * 4;
     if (sampleMode === "nearest") cpuNearest(sdata, srcW, srcH, sx, sy, odata, di);
-    else if (sampleMode === "bicubic") cpuBicubic(sdata, srcW, srcH, sx, sy, odata, di);
-    else cpuBilinear(sdata, srcW, srcH, sx, sy, odata, di);
+    else if (sampleMode === "bicubic") cpuBicubic(sdata, srcW, srcH, sx - 0.5, sy - 0.5, odata, di);
+    else cpuBilinear(sdata, srcW, srcH, sx - 0.5, sy - 0.5, odata, di);
   }
   const canvas = document.createElement("canvas"); canvas.width = dstW; canvas.height = dstH;
   canvas.getContext("2d")!.putImageData(out, 0, 0);
@@ -983,17 +986,24 @@ function floatParity(glctx: GLContext, add: Add): void {
   const baseCanvas = makeLayerCanvas(N, N, () => [40, 80, 160, 255]);   // 不透明底
   const lt = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, baseCanvas) }, N, N);
   const fw = 80, fh = 70, fx = 50, fy = 40;
-  const floatCanvas = makeLayerCanvas(fw, fh, (x, y) => [220, 60, 60, (x + y) % 200 + 40]);   // 半透明渐变
+  // 1px 棋盘 + alpha 变化：任何 2-tap/4-tap 均值（半 texel 相位错）都会把棋盘糊成中间色 → 必炸。
+  // （旧图案恒定 RGB+线性 alpha 对 bilinear 均值不敏感，糊了测不出——防退化自查抓到的盲点。）
+  const floatCanvas = makeLayerCanvas(fw, fh, (x, y) =>
+    ((x ^ y) & 1) === 1 ? [230, 80, 40, 40 + ((x * 3 + y * 5) % 196)] : [40, 120, 230, 40 + ((x * 3 + y * 5) % 196)]);
   const ftex = texFromCanvas(glctx, floatCanvas);
-  const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: ftex, srcW: fw, srcH: fh, hinv: rectHinv(fx, fy, fw, fh), mode: 0 } }];
-  const accum = compositeTree(comp, backend.texture, tree as never, N, N);
-  const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
+  // 身份 warp 三采样模式都必须 = drawImage 放 (fx,fy)（无糊、无半像素移）。修半 texel 相位前
+  // bilinear/bicubic 在此必炸（fx=0.5 → 2-tap 均值 + 0.5px 左上移，maxΔ 巨大）——回归护栏。
   const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
   const rctx = ref.getContext("2d")!;
-  rctx.drawImage(baseCanvas, 0, 0); rctx.drawImage(floatCanvas, fx, fy);   // 身份 warp(nearest) → 等价 drawImage 放 (fx,fy)
+  rctx.drawImage(baseCanvas, 0, 0); rctx.drawImage(floatCanvas, fx, fy);
   const refData = rctx.getImageData(0, 0, N, N).data;
-  const { md, at } = maxPremulDiff(refData, glpx, N);
-  add("float:GPU warp pass(身份) vs 2D drawImage source-over", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  for (const [name, mode] of [["nearest", 0], ["bilinear", 1], ["bicubic", 2]] as const) {
+    const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: ftex, srcW: fw, srcH: fh, hinv: rectHinv(fx, fy, fw, fh), mode } }];
+    const accum = compositeTree(comp, backend.texture, tree as never, N, N);
+    const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
+    const { md, at } = maxPremulDiff(refData, glpx, N);
+    add(`float:GPU warp pass(身份 ${name}) vs 2D drawImage source-over`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  }
   lt.index.dispose(); glctx.gl.deleteTexture(ftex);
 
   // clip 层空基底 + float（变换图层组时 clip 层基底被提空）→ 层不渲染但 float 仍显（修「变换组 clip 消失」）。

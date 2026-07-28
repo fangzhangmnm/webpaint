@@ -298,8 +298,18 @@ export class FloatingTransform {
   //   bakeFn（board.glWarpBakeFn = GPU warp readback）→ straight canvas → editRegion 落层。与 live warp 同采样器，
   //   零 preview/commit 漂移。bakeFn 缺省（GL 失败）→ 不烤（app 已显「需 WebGL2」）。
   private _bakeDown(f: WorkpieceFloat, leaf: Layer, bakeFn: WarpBakeFn | null) {
-    if (!bakeFn || !this._live) return;
+    if (!this._live) return;
     const lv = this._live;
+    // 整数平移快路（含 identity）：destQuad = rect 整平移 → 跳过 GPU warp，typed-array 逐字节
+    //   source-over 写回。绕开 GPU float 误差 + putImageData/drawImage 的 premultiply 往返 →
+    //   「不旋转时 pixel perfect」，与采样模式无关。不需要 bakeFn（GL 失败也能落）。
+    const dq = sourceDestQuad(f.rect, lv.gizmoFrame, lv.mesh);
+    const off = dq ? integerTranslationOf(f.rect, dq) : null;
+    if (off) {
+      applyRegionBuf(leaf, composeIdentityWriteback(leaf, f, off.x, off.y));
+      return;
+    }
+    if (!bakeFn) return;
     const wp = sourceWarpMatrix(f, lv.gizmoFrame, lv.mesh);
     if (!wp || wp.bw <= 0 || wp.bh <= 0) return;
     const mode = this._sampleMode === "nearest" ? 0 : this._sampleMode === "bicubic" ? 2 : 1;
@@ -795,6 +805,22 @@ export function sourceDestQuad(rect: Rect, frame: FloatFrame, mesh: Mesh): Mesh 
     [map(rect.x, rect.y + rect.h), map(rect.x + rect.w, rect.y + rect.h)],
   ];
 }
+// destQuad 是否 = rect 的**整数像素平移**（含 identity）。是 → 返回整数偏移，否则 null。
+//   commit/stamp 快路判定用：命中则跳过 GPU 重采样，typed-array 逐字节写回（无损，与采样模式无关）。
+//   ε=1e-6 只放行数学上就是整平移的 mesh（未动过 / 程序化整移）；拖动出的小数平移不入快路（走 warp）。
+export function integerTranslationOf(rect: Rect, dq: Mesh): { x: number; y: number } | null {
+  const rx = Math.round(dq[0][0].x - rect.x), ry = Math.round(dq[0][0].y - rect.y);
+  const EPS = 1e-6;
+  const corners: Array<[number, number, Point]> = [
+    [rect.x, rect.y, dq[0][0]], [rect.x + rect.w, rect.y, dq[0][1]],
+    [rect.x, rect.y + rect.h, dq[1][0]], [rect.x + rect.w, rect.y + rect.h, dq[1][1]],
+  ];
+  for (const [cx, cy, p] of corners) {
+    if (Math.abs(p.x - (cx + rx)) > EPS || Math.abs(p.y - (cy + ry)) > EPS) return null;
+  }
+  return { x: rx, y: ry };
+}
+
 // 单位方格 → quad 的前向求值（sourceDestQuad 把 source 角投到 dest 用）。
 function homographySample(H: Homography, u: number, v: number): Point {
   const w = H.g * u + H.h * v + 1;

@@ -6,8 +6,9 @@
 //     中途 stamp 保留、reject 本身可再撤销；
 //   - accept（commit）= 烤层 + DropFloat 一个整点，undo 浮层回来（状态对象 internals↔包移交）；
 //   - 驱逐/截断释放 float tiles（disposeData；池 FR 兜底不该响）。
-// GPU warp 烤定（bakeFn）路径 node 不可测（无 GL）——stamp/accept 的像素烤制归真机批；
-// 这里 accept 用 bakeFn=null（烤制跳过，结构/所有权照测）。
+// GPU warp 烤定（bakeFn）路径 node 不可测（无 GL）——扭曲/缩放的像素烤制归 gl-smoke + 真机批。
+// v0.6.33 起 identity/整数平移 commit 走 CPU 快路（typed-array 逐字节，不需要 bakeFn）——
+// 这条路 node 可测且必须测（「不旋转时 pixel perfect」的行为锁）。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { PaintDoc, flattenLeaves } from "../src/doc.ts";
 import { Workpiece } from "../src/workpiece/workpiece.ts";
@@ -217,7 +218,7 @@ describe("S6 · accept（commit = 烤层 + DropFloat 整点）+ 所有权/驱逐
     doc.selection = rectSel(30, 30, 16, 16);
     ft.lift(L);
     const fsRef = w.readFloatState();
-    eq(ft.commit(null), true, "accept ok（GL 缺席：烤制跳过，结构照走）");
+    eq(ft.commit(null), true, "accept ok（identity → CPU 快路烤回，GL 缺席也落）");
     eq(w.readFloatState(), null, "浮层收摊");
     h.undo(w);
     eq(w.readFloatState(), fsRef, "undo accept：同一个 FloatState 对象回 internals（移交非复制）");
@@ -246,7 +247,9 @@ describe("S6 · accept（commit = 烤层 + DropFloat 整点）+ 所有权/驱逐
     assert(origBytes.every((v, i) => v === after[i]), "像素回起点");
     h.redo(w); h.redo(w); h.redo(w);
     eq(w.readFloatState(), null, "回终点：已 accept");
-    eq(L.sampleAt(35, 35)[3], 0, "洞在（bakeFn=null 未烤回）");
+    // +8 整数平移 → CPU 快路烤回（bakeFn=null 也落）：旧位置留洞、新位置有像素
+    eq(L.sampleAt(35, 35)[3], 0, "旧位置洞在（内容移去 +8）");
+    eq(L.sampleAt(43, 35)[3], 255, "新位置像素落了（整数平移快路）");
     eq(h.canRedo(), false);
   });
 
@@ -291,6 +294,61 @@ describe("S6 · accept（commit = 烤层 + DropFloat 整点）+ 所有权/驱逐
     eq(h.undo(w), false);
     eq(unrec(), 1, "layer gone → 不可恢复弃栈");
     assert(!flattenLeaves(doc.layers).some((x) => x.id === L.id), "不错删别的层");
+  });
+});
+
+// v0.6.33 整数平移快路：destQuad = rect 整平移（含 identity）→ commit/stamp 跳过 GPU warp，
+// composeIdentityWriteback(leaf, f, ox, oy) typed-array 写回。行为锁 =「不旋转时 pixel perfect」：
+// 逐字节精确、与采样模式无关、bakeFn=null（GL 缺席）也落；小数平移不入快路。
+describe("S6 · commit 整数平移快路（不旋转时 pixel perfect）", () => {
+  // 花纹（RGB 变化 + 可选 alpha 变化）：byte-exact 断言才有意义
+  function paintPattern(L, x0, y0, w, h, semiAlpha) {
+    const buf = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      buf[i] = (x * 7 + y * 13) % 256; buf[i + 1] = (x * 31 + 9) % 256; buf[i + 2] = (y * 17 + 3) % 256;
+      buf[i + 3] = semiAlpha ? 55 + ((x + y * 3) % 200) : 255;
+    }
+    L.pixels.putRegion(x0, y0, w, h, buf);
+  }
+
+  it("identity commit（半透明花纹）：逐字节复原（洞上写回，任意 alpha 精确）", () => {
+    const { doc, w, h, ft } = mk();
+    const L = doc.activeLayer;
+    paintPattern(L, 20, 20, 40, 40, true);
+    const orig = L.pixels.getRegion(30, 30, 16, 16);
+    doc.selection = rectSel(30, 30, 16, 16);
+    ft.lift(L);
+    eq(ft.commit(null), true, "commit ok（无 bakeFn）");
+    const after = L.pixels.getRegion(30, 30, 16, 16);
+    assert(orig.every((v, i) => v === after[i]), "lift→commit 往返逐字节 = 原像素");
+  });
+
+  it("整数平移 (+7,+3) commit（不透明花纹）：新位置逐字节 = 源；旧位置留洞", () => {
+    const { doc, w, h, ft } = mk();
+    const L = doc.activeLayer;
+    paintPattern(L, 20, 20, 40, 40, false);
+    const orig = L.pixels.getRegion(30, 30, 16, 16);
+    doc.selection = rectSel(30, 30, 16, 16);
+    ft.lift(L);
+    ft.beginDrag({ kind: "translate" }, 0, 0); ft.extendDrag(7, 3); ft.endDrag();
+    eq(ft.commit(null), true, "commit ok");
+    const moved = L.pixels.getRegion(37, 33, 16, 16);
+    assert(orig.every((v, i) => v === moved[i]), "新位置逐字节 = lift 前源像素（不透明 → 盖底无混合）");
+    eq(L.sampleAt(31, 31)[3], 0, "旧位置未被新 rect 覆盖处留洞");
+  });
+
+  it("小数平移 (+7.5,0)：不入快路（bakeFn=null → 不烤，洞原样）", () => {
+    const { doc, w, h, ft } = mk();
+    const L = doc.activeLayer;
+    paintPattern(L, 20, 20, 40, 40, false);
+    doc.selection = rectSel(30, 30, 16, 16);
+    ft.lift(L);
+    ft.beginDrag({ kind: "translate" }, 0, 0); ft.extendDrag(7.5, 0); ft.endDrag();
+    eq(ft.commit(null), true, "commit 结构照走");
+    const hole = L.pixels.getRegion(30, 30, 16, 16);
+    for (let i = 3; i < hole.length; i += 4) if (hole[i] !== 0) { assert(false, "小数平移误入快路（洞被写了）"); return; }
+    assert(true, "洞原样（小数平移归 GPU warp，node 无 GL 不烤）");
   });
 });
 

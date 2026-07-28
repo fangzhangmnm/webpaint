@@ -144,10 +144,12 @@ export function applyRegionBuf(leaf: Layer, r: { x: number; y: number; w: number
 // reject 的 identity 写回：float 像素在原 rect 处 source-over 落到 leaf 当前内容之上
 // （straight-alpha 合成；stamp 保留、float 在其上；无重采样）。返回合成好的 region 缓冲，
 // 调用方负责 leaf.putImageData（保 Layer 物化缓存失效）。
-export function composeIdentityWriteback(leaf: Layer, f: WorkpieceFloat): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
-  const { x, y, w, h } = f.rect;
+// (ox,oy)：整数像素偏移（commit/stamp 的整数平移快路用；reject 传缺省 0,0 = 原位）。
+export function composeIdentityWriteback(leaf: Layer, f: WorkpieceFloat, ox = 0, oy = 0): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
+  const { w, h } = f.rect;
+  const x = f.rect.x + ox, y = f.rect.y + oy;
   const dst = leaf.pixels.getRegion(x, y, w, h);
-  const src = f.pixels.getRegion(x, y, w, h);
+  const src = f.pixels.getRegion(f.rect.x, f.rect.y, w, h);
   for (let i = 0; i < dst.length; i += 4) {
     const fa = src[i + 3];
     if (fa === 0) continue;
