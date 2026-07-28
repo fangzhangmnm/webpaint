@@ -851,8 +851,9 @@ export function initToolbar(ctx: AppContext) {
 
   // ---- 工具按钮 ----
   // v0.6.24 顶栏组槽菜单；v0.6.26 grill 定稿（Blender/PS 惯例，user 拍板"改长按方案"）：
-  //   单击=立即激活记忆成员（高频手感）；**长按 ≈450ms=开组菜单**；已激活再点=也开（第二条路）；
+  //   单击=立即激活记忆成员（高频手感，已激活=无事）；**长按 ≈450ms=开组菜单**；Alt+点=循环成员；
   //   组菜单开着时上下文子工具栏整体压下（body.tool-slot-open，不同时显示）。
+  //   （v0.6.27 user："二次点击混淆"→ 已激活再点=开菜单 已删，只留菜单开着时再点=关。）
   const _setToolSlotOpen = () => {
     document.body.classList.toggle("tool-slot-open", _toolSlots.some((s) => !s.menu.classList.contains("hidden")));
   };
@@ -907,13 +908,14 @@ export function initToolbar(ctx: AppContext) {
         closeExclusive();
         return;
       }
-      // 已激活的组槽成员再点 = 开/关组菜单（长按之外的第二条可发现路径）
-      if (slot && editMode.current() === tool) {
+      // v0.6.27（user："二次点击比较混淆"）：已激活再点 = 无事（对齐 Blender/PS——组菜单只走长按/Alt）；
+      //   唯一例外：菜单已开着时再点按钮 = 关掉它（长按开的菜单要能同指关闭）。
+      if (slot && !slot.menu.classList.contains("hidden")) {
         e.stopPropagation();
-        if (slot.menu.classList.contains("hidden")) slot.openMenu();
-        else slot.closeMenu();
+        slot.closeMenu();
         return;
       }
+      if (slot && editMode.current() === tool) { e.stopPropagation(); return; }
       setTool(tool);
       // 切到新 tool 时关掉之前开的 rack（防止 stale）
       closeExclusive();
