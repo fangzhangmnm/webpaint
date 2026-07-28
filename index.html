@@ -269,11 +269,12 @@
       <span class="top-bar-sep" aria-hidden="true"></span>
 
       <div class="tool-group" role="group" aria-label="tools">
-        <!-- v0.6.24 组槽（user：形状笔画线时误认铅笔图标→笔/形状笔收同一组槽；点=激活记忆成员、
-             已激活再点=开组菜单——"再点开笔架"行为整体废除，笔架统一走左栏按钮） -->
-        <button class="tool lasso-slot" id="toolPen" type="button" data-tool="brush" aria-pressed="true" data-i18n-title="tool.brush">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use id="toolBrushSlotUse" href="#pencil"/></svg>
-          <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg>
+        <!-- v0.6.31 回滚（user：长按真机难受）：组槽拆回并列四按钮；"再点开笔架"仍废除（笔架走左栏） -->
+        <button class="tool" id="toolPen" type="button" data-tool="brush" aria-pressed="true" data-i18n-title="tool.brush">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#pencil"/></svg>
+        </button>
+        <button class="tool" id="toolShape" type="button" data-tool="shapeBrush" data-i18n-title="tool.shapeBrush">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#shapes"/></svg>
         </button>
         <!-- v309: smudge 工具（一直 disabled、从未实装）已 purge，待将来重写时连按钮一起加回 -->
         <button class="tool" id="toolEraser" type="button" data-tool="eraser" data-i18n-title="tool.eraser">
@@ -287,13 +288,13 @@
         <button class="tool" id="toolPicker" type="button" data-tool="picker" data-i18n-title="tool.picker">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#eyedropper"/></svg>
         </button>
-        <!-- v0.6.24：fill 升一等工具与 lasso 收组槽（mental model 两个不互通的工具、实现一条路；
-             Row1 油漆桶 toggle 钮退役；lasso 二击=Esc 清选区(v124) 让位给组菜单——去选走 Esc/去选钮） -->
-        <button class="tool lasso-slot" id="toolLasso" type="button" data-tool="lasso" data-i18n-title="tool.lasso">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use id="toolSelSlotUse" href="#lasso"/></svg>
-          <svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg>
+        <!-- v0.6.31：套索/填色并列（fill 仍一等工具、不互通语义不变；lasso 二击 Esc v124 仍废除） -->
+        <button class="tool" id="toolLasso" type="button" data-tool="lasso" data-i18n-title="tool.lasso">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lasso"/></svg>
         </button>
-        <!-- 形状笔（ADR-0005）v0.6.24 收进 brush 组槽（toolPen），独立钮退役 -->
+        <button class="tool" id="toolFill" type="button" data-tool="fill" data-i18n-title="tool.fill">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg>
+        </button>
         <button class="tool tool-hand-conditional" id="toolHand" type="button" data-tool="hand" data-i18n-title="tool.pan">
           <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#hand"/></svg>
         </button>
@@ -670,15 +671,6 @@
         <button class="lasso-tool-btn" id="shapeGridNuPlus" type="button" aria-label="＋">＋</button>
         <button class="lasso-tool-btn lasso-tool-icon" id="shapeGridBorderBtn" type="button" data-i18n-title="sb.border" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#grid-border"/></svg></button>
       </div>
-    </div>
-    <!-- v0.6.24 顶栏工具组槽菜单：已激活成员再点槽时弹出 -->
-    <div class="lasso-icon-menu hidden" id="toolBrushSlotMenu" role="menu" aria-label="brush tools">
-      <button class="lasso-tool-btn lasso-tool-icon" data-slot-tool="brush" type="button" role="menuitem" data-i18n-title="tool.brush"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#pencil"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-slot-tool="shapeBrush" type="button" role="menuitem" data-i18n-title="tool.shapeBrush"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#shapes"/></svg></button>
-    </div>
-    <div class="lasso-icon-menu hidden" id="toolSelSlotMenu" role="menu" aria-label="selection tools">
-      <button class="lasso-tool-btn lasso-tool-icon" data-slot-tool="lasso" type="button" role="menuitem" data-i18n-title="tool.lasso"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#lasso"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-slot-tool="fill" type="button" role="menuitem" data-i18n-title="tool.fill"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg></button>
     </div>
     <div class="lasso-icon-menu hidden" id="shapePerspModeMenu" role="menu" data-i18n-aria="sb.perspModeSlot">
       <button class="lasso-tool-btn lasso-tool-icon" data-persp-mode="off" type="button" role="menuitem" data-i18n-title="sb.modeViewport"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#persp-viewport"/></svg></button>
