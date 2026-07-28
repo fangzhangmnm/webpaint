@@ -47,18 +47,8 @@ def text_path(text, box, font='cjk'):
 
 # (id, 文字, 盒, 语义 note)
 SPECS = [
-    # 2026-07-25 晚：透视批 9 条全部落定（入库/合并/驳回），stopgap 清零。
-    # 历史：line/snap-angle/constrain-*（入库）→ persp 四连/plane 三向/vp-edit/snap-vp（入库，
-    # 后两个缩写展开改名）→ reset-defaults（驳回，用库内 refresh）→ pen-pressure-off
-    # （撤需求 v0.6.16：笔压 toggle 复用笔粗图标位 brush-width/brush-width-locked）。
-    # 2026-07-28：多边形套索子工具 +1。
-    ("select-polygon", "折", (3, 3, 18, 18), "套索·多边形子工具(逐点落顶点/回起点闭合/锁格点硬边)。真图标建议=虚线五边形(对齐 select-freehand/rectangle 家族)"),
-    ("persp-iso", "等", (3, 3, 18, 18), "形状笔·透视模式:等轴测(2:1 像素惯例,三平行轴无 VP)。真图标建议=2:1 iso 立方线框(对齐 persp-1p/2p/3p 家族)"),
-    # 2026-07-28 晚：形状笔变体化（正方/长方、正圆/椭圆成对可选——推翻 7-25 constrain-ratio 合并）
-    ("square", "方", (3, 3, 18, 18), "形状笔·rect 变体:正方(与 rectangle 成对可辨)。真图标建议=正方形轮廓(与 rectangle 同笔重,比例 1:1)"),
-    ("ellipse", "椭", (3, 3, 18, 18), "形状笔·circle 变体:椭圆(与 circle 成对可辨)。真图标建议=横椭圆轮廓(与 circle 同笔重)"),
-    # 2026-07-28 深夜：user——线段 snap 变体不该用 snap-angle 的「15°」字样图标（变体项要图形语言）
-    ("line-snap", "吸", (3, 3, 18, 18), "形状笔·line 变体:吸附线条(15° 角度族)。真图标建议=斜线+吸附刻度记号(与 line 同笔重,别用文字)"),
+    # 2026-07-28 晚：20260728 交付批入库（square/ellipse/line-snap/select-polygon/persp-iso 全真图），
+    # stopgap 再度**清零**。历史见 git（透视批/形状变体批）。当前无 stopgap。
 ]
 syms = []
 for sid, text, box, note in SPECS:
