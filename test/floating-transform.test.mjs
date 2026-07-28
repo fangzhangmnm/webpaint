@@ -157,6 +157,19 @@ describe("FloatingTransform · setMode 投影 + adapter 元数据", () => {
     assert(Math.abs(ft._live.gizmoFrame.ux.y) > 1, "frame 轴转了");
     // 转完仍是仿射（平行四边形）→ 方手柄仍在（圆手柄旋转不 disable 方手柄的同款判据）
     assert(ft.visibleHandles(1).some((x) => x.kind === "basisRotate"), "转轴后方手柄仍在");
+    // v0.6.23 外接（user 真机："选区大小没自动变化"）：新 mesh 必须包住全部内容角点，
+    //   且尺寸随角度呼吸（≠ 原 100 边长）
+    const mm = ft._live.mesh;
+    const be1 = { x: mm[0][1].x - mm[0][0].x, y: mm[0][1].y - mm[0][0].y };
+    const be2 = { x: mm[1][0].x - mm[0][0].x, y: mm[1][0].y - mm[0][0].y };
+    const bdet = be1.x * be2.y - be1.y * be2.x;
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+      const p = after[i][j];
+      const rx = p.x - mm[0][0].x, ry = p.y - mm[0][0].y;
+      const a = (rx * be2.y - ry * be2.x) / bdet, b = (ry * be1.x - rx * be1.y) / bdet;
+      assert(a > -1e-6 && a < 1 + 1e-6 && b > -1e-6 && b < 1 + 1e-6, `内容角 (${p.x},${p.y}) 在外接框外`);
+    }
+    assert(Math.abs(Math.hypot(be1.x, be1.y) - 100) > 1, "外接框尺寸随角度呼吸（≠原边长）");
   });
 
   it("hitTest：命中角 handle", () => {
