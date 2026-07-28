@@ -177,6 +177,7 @@ body[data-tool="hand"] .board { cursor: grab; }
 body[data-panning="1"] .board { cursor: grabbing !important; }
 /* 橡皮 / 吸色 都跟画笔同 pointer style（默认 crosshair）；不再用 cell / copy 那种出戏光标 */
 body[data-tool="lasso"] .board { cursor: crosshair; }
+body[data-tool="fill"] .board { cursor: crosshair; }   /* v0.6.24：fill 与 lasso 同为选区族（审计#13 光标缺口） */
 
 /* 套索浮层工具栏 —— 浮在顶栏下方居中，floating 选区存在时显示 */
 /* 两行 stack 容器：1 行 = 选区方式，2 行 = 选区操作 / 变换 */

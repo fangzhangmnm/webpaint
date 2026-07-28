@@ -247,6 +247,8 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   // 工具切换（gallery / floating 时跳过）
   { combo: "B",                desc: "sc.brush",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("brush") },
+  { combo: "S",                desc: "sc.shapeBrush", category: "sc.cat.tools",
+    when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("shapeBrush") },
   { combo: "E",                desc: "sc.eraser",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("eraser") },
   { combo: "I",                desc: "sc.picker",     category: "sc.cat.tools",

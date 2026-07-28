@@ -145,6 +145,7 @@ export function initSelectionOps(ctx: AppContext) {
   });
   // Ctrl+D：当前选区 → 原位浮层（不挖洞）= 非破坏性 lift + transform
   window.addEventListener("wp:duplicateFloat", () => {
+    if (editMode.current() === "fill") { setStatus(t("fm.noTransform"), true); return; }   // v0.6.24：fill 不 lift（半定义态审计#10）
     if (input.lasso.hasFloating()) return;
     if (!doc.selection) { setStatus(t("se.selectBeforeDuplicateFloat"), true); return; }
     const ok = input.lasso.liftSelectionForTransform(doc.activeLayer, { cut: false });

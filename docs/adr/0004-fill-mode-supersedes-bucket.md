@@ -42,6 +42,15 @@ commit 时才落图层；阈值/自动扩张回归魔棒属性。
 - **v0.6.19 / 2026-07-28（user 拍板）**：**切去其他工具 = commit + 清选区**（原"选区保留"
   再修订——进其他工具不留选区，填完切笔要画画，蚂蚁线留着碍事；undo 兜底）。
   回套索出口不变（取消、选区保留）。
+- **v0.6.24 / 2026-07-28 晚（user grill 拍板）「彻底不互通」+ fill 顶栏化**：
+  - mental model = **两个不能互通的工具、实现共用一条 lasso 管线**。fill 升顶栏一等工具，
+    与 lasso 收一个组槽（Row1 油漆桶 toggle 钮退役）；点=激活记忆成员、已激活再点=开组菜单。
+  - **进 fill（从任何工具）= 清选区**（undo 兜底）；**切去任何工具（含回 lasso）= commit+清**
+    ——对称无特例（v0.5.15「回套索保留选区」与 v0.6.19 的不对称 supersede）。
+  - **per-tool 持久化**：editorState.lassoTool{ sub:"rect", setOp:"new" } / fillTool{ sub:"magic",
+    setOp:"union" }（v0.5.16 共享 RAM 记忆 _selMem 作废；§7 的「G=魔棒」至此才是真的）。
+  - 顺手修混淆审计硬伤：T/Ctrl+J 在 fill 给状态行说法不再静默；多边形会话在 fill 合法；
+    fill 补 crosshair 光标；扩张 toggle 提回 Row1（magic 时显，fill 默认魔棒 ≈ 常显 cue）。
 - **v0.6.19 / 2026-07-28 蚂蚁线（user 拍板）**：fill 模式下蚂蚁线可关——⋯菜单
   「蚂蚁线」toggle，**默认开**、持久化 `editorState.fillShowAnts`（per-doc desk，已获
   持久化同意）；**toggle 只存在于 fill 模式，非 fill 恒显示无开关**（预览色块本身是选区
