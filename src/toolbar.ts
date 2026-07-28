@@ -51,7 +51,7 @@ let lassoSubToolBar: HTMLElement, lassoTransformCtrl: HTMLElement;
 let lassoTransformModeBtns: HTMLElement[];
 let lassoThresholdInput: HTMLInputElement, lassoThresholdVal: HTMLElement;
 let lassoConstrainBtn: HTMLElement;
-let lassoSelEditBtn: HTMLElement, lassoSelEditMenu: HTMLElement;   // v0.5.12 ⋯ 菜单（低频选区操作收纳）
+let lassoSelEditBtn: HTMLElement, lassoSelEditMenu: HTMLElement, fillSelEditMenu: HTMLElement;   // v0.6.30 选区/填色 ⋯ 分家（共享动作处理器）
 let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement, lassoSetOpMenu: HTMLElement, lassoSetOpMenuBtns: HTMLElement[];   // 布尔组槽（v0.5.17 回下拉）
 let lassoSubSlot: HTMLElement, lassoSubSlotUse: SVGUseElement, lassoSubMenu: HTMLElement, lassoSubMenuBtns: HTMLElement[];   // 子工具组槽（v0.5.14）
 let lassoExpandToggle: HTMLElement, lassoMagicExpandVal: HTMLElement, lassoMagicExpandMenu: HTMLElement;   // 扩张钮（v0.6.26 图标+小三角，stepper 收弹出）
@@ -223,7 +223,10 @@ export function updateLassoToolbar() {
   }
   // 魔棒配置（v0.6.19 收进 ⋯ 菜单）：magic 子工具时显示；stepper 仅扩张开着时显。
   const magicOn = sub === "magic";
-  for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-magic-only")) el.classList.toggle("hidden", !magicOn);
+  for (const menu of [lassoSelEditMenu, fillSelEditMenu]) {
+    for (const el of menu.querySelectorAll<HTMLElement>(".lasso-menu-magic-only")) el.classList.toggle("hidden", !magicOn);
+    for (const el of menu.querySelectorAll<HTMLButtonElement>(".lasso-menu-needs-sel")) el.disabled = !hasSelection;
+  }
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
   lassoExpandToggle.classList.toggle("hidden", !magicOn);
   lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
@@ -235,11 +238,7 @@ export function updateLassoToolbar() {
   const showSelEdit = !!_selEdit || (showRow1 && !otherToolSel);
   lassoSelEditBtn.classList.toggle("hidden", !showSelEdit);
   if (!showSelEdit) closeSelEditUI();
-  // ⋯ 菜单逐项：needs-sel 无选区禁用；lasso-only（清除/复制/移层）fill 里隐藏
-  for (const el of lassoSelEditMenu.querySelectorAll<HTMLButtonElement>(".lasso-menu-needs-sel")) el.disabled = !hasSelection;
-  for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-lasso-only")) el.classList.toggle("hidden", fillActive);
-  // fill-only（蚂蚁线 toggle，v0.6.19）：非 fill 恒显示无开关 → 项本身藏；pressed 态从 editorState 派生
-  for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-fill-only")) el.classList.toggle("hidden", !fillActive);
+  // v0.6.30 分家后 lasso-only/fill-only 类开关退役（漏显温床）；蚂蚁线只活在 fill 菜单
   document.getElementById("lassoAntsBtn")?.setAttribute("aria-pressed", editorState.fill.showAnts ? "true" : "false");
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
@@ -336,7 +335,8 @@ let _selEdit: SelEditState | null = null;   // { before, op:'expand'|'shrink', r
 
 function _selEditEls() {
   return {
-    menu: document.getElementById("lassoSelEditMenu"),
+    // v0.6.30 分家：⋯ 开当前工具自己的菜单
+    menu: document.getElementById(editMode.current() === "fill" ? "fillSelEditMenu" : "lassoSelEditMenu"),
     popup: document.getElementById("lassoSelOpPopup"),
     title: document.getElementById("lassoSelOpTitle"),
     amount: document.getElementById("lassoSelOpAmount") as HTMLInputElement | null,
@@ -422,18 +422,21 @@ function _finishSelEdit(applied: boolean) {
 }
 // 收起齿轮菜单（updateLassoToolbar 在选区没了/切走时调；此时 _selEdit 必为 null，不碰 modal）
 function closeSelEditUI() {
-  _selEditEls().menu?.classList.add("hidden");
+  document.getElementById("lassoSelEditMenu")?.classList.add("hidden");
+  document.getElementById("fillSelEditMenu")?.classList.add("hidden");
 }
 function initSelEditUI() {
-  const { menu, amount } = _selEditEls();
+  const { amount } = _selEditEls();
   lassoSelEditBtn.addEventListener("click", (e: Event) => {
     e.stopPropagation();
     if (_selEdit) return;                   // modal 开着时不响应
+    const menu = _selEditEls().menu;        // v0.6.30：开当前工具的菜单（另一份先收）
+    const other = document.getElementById(editMode.current() === "fill" ? "lassoSelEditMenu" : "fillSelEditMenu");
+    other?.classList.add("hidden");
     const wasHidden = menu?.classList.contains("hidden");
     menu?.classList.toggle("hidden");
     if (wasHidden && menu) anchorPopupToBtn(menu, lassoSelEditBtn, { align: "left", offsetY: 6 });   // v0.5.14 贴钮
   });
-  document.getElementById("lassoSelResizeBtn")?.addEventListener("click", () => _openSelEdit("expand"));   // v0.5.15 合一钮，默认扩张
   // 蚂蚁线 toggle（v0.6.19，ADR-0004 修订）：写 editorState（per-doc）+ 重绘；不关菜单（toggle 类操作连按友好）
   document.getElementById("lassoAntsBtn")?.addEventListener("click", () => {
     editorState.fill.showAnts = !editorState.fill.showAnts;
@@ -449,11 +452,14 @@ function initSelEditUI() {
   });
   document.getElementById("lassoSelOpApply")?.addEventListener("click", () => _finishSelEdit(true));
   document.getElementById("lassoSelOpCancel")?.addEventListener("click", () => _finishSelEdit(false));
-  // 点菜单外侧 → 关菜单（modal 自有 apply/cancel，不在此关）
+  // 点菜单外侧 → 关菜单（modal 自有 apply/cancel，不在此关）；v0.6.30 两份都管
   document.addEventListener("pointerdown", (e: Event) => {
-    if (!menu || menu.classList.contains("hidden")) return;
-    if (menu.contains(e.target as Node) || lassoSelEditBtn.contains(e.target as Node)) return;
-    menu.classList.add("hidden");
+    for (const id of ["lassoSelEditMenu", "fillSelEditMenu"]) {
+      const menu = document.getElementById(id);
+      if (!menu || menu.classList.contains("hidden")) continue;
+      if (menu.contains(e.target as Node) || lassoSelEditBtn.contains(e.target as Node)) continue;
+      menu.classList.add("hidden");
+    }
   });
 }
 
@@ -486,7 +492,9 @@ export function initToolbar(ctx: AppContext) {
   lassoConstrainBtn = byId("lassoConstrainBtn");
   lassoSelEditBtn = byId("lassoSelEditBtn");
   lassoSelEditMenu = byId("lassoSelEditMenu");
+  fillSelEditMenu = byId("fillSelEditMenu");
   _transientMenus.push(lassoSelEditMenu);
+  _transientMenus.push(fillSelEditMenu);
   lassoTransformBtn = byId("lassoTransformBtn");
   lassoDeselectBtn = byId("lassoDeselectBtn");
   lassoFillCommitBtn = byId("lassoFillCommitBtn");
@@ -680,18 +688,29 @@ export function initToolbar(ctx: AppContext) {
   // v242：扩展滑块从魔术棒拆走（改成选区编辑 op，见 initSelEditUI）。魔术棒只剩阈值。
   // v0.5.11：阈值 per-doc 持久化（editorState.magicWand.threshold，原 editorState.bucket 退役后归魔棒）。
   //   UI 改 → 写 editorState + 灌引擎；换文档 → syncMagicThresholdUI 回灌（wp:applyEditorState）。
+  const fillThresholdInput = byId<HTMLInputElement>("fillThreshold");
+  const fillThresholdVal = byId("fillThresholdVal");
   const syncMagicThresholdUI = () => {
     const v = editorState.magicWand.threshold;
     lassoThresholdInput.value = String(v);
     lassoThresholdVal.textContent = String(v);
+    fillThresholdInput.value = String(v);
+    fillThresholdVal.textContent = String(v);
     input.lasso.setMagicThreshold(v);
   };
-  lassoThresholdInput.addEventListener("input", () => {
-    const v = Math.max(0, Math.min(100, parseInt(lassoThresholdInput.value, 10) || 0));
-    editorState.magicWand.threshold = v;
-    input.lasso.setMagicThreshold(v);
-    lassoThresholdVal.textContent = String(v);
-  });
+  const wireThreshold = (inp: HTMLInputElement, val: HTMLElement) => {
+    inp.addEventListener("input", () => {
+      const v = Math.max(0, Math.min(100, parseInt(inp.value, 10) || 0));
+      editorState.magicWand.threshold = v;
+      input.lasso.setMagicThreshold(v);
+      val.textContent = String(v);
+      const o = inp === lassoThresholdInput ? fillThresholdInput : lassoThresholdInput;
+      const ov = inp === lassoThresholdInput ? fillThresholdVal : lassoThresholdVal;
+      o.value = String(v); ov.textContent = String(v);   // 两份滑条互为镜像（magicWand 配置共享）
+    });
+  };
+  wireThreshold(lassoThresholdInput, lassoThresholdVal);
+  wireThreshold(fillThresholdInput, fillThresholdVal);
   // #31 魔棒 flood 后自动扩张（v0.5.12 内联化：aria-pressed toggle 钮 + px 输入，⚙/popup 退役）。
   //   引擎只认一个数：effective px = toggle 开 ? px : 0。UI 改 → 写 editorState + 灌引擎；换文档回灌。
   lassoExpandToggle = byId("lassoExpandToggle");
@@ -811,22 +830,36 @@ export function initToolbar(ctx: AppContext) {
     setStatus(t("se.clearedSelection"));
   });
   // v112: 全选（user：「lasso 加全选」）
-  byId("lassoSelectAllBtn").addEventListener("click", () => {
-    const sel = Selection.full(doc.width, doc.height);
-    pushSel(input.lasso.setSelection(sel));
-    board.invalidateAll();
-    updateLassoToolbar();
-    closeSelEditUI();   // v0.6.19：指令项点完关菜单（toggle/slider 类不关）
-  });
+  // v0.6.30：⋯ 动作共享处理器（两份菜单 data-sel-act 委托；快捷键仍 click 老 id，冒泡进委托）
+  const SEL_ACTIONS: Record<string, () => void> = {
+    selectAll: () => {
+      const sel = Selection.full(doc.width, doc.height);
+      pushSel(input.lasso.setSelection(sel));
+      board.invalidateAll();
+      updateLassoToolbar();
+      closeSelEditUI();   // 指令项点完关菜单（toggle/slider 类不关）
+    },
+    invert: () => {
+      const inv = doc.selection ? (doc.selection as Selection).invert(doc.width, doc.height) : Selection.full(doc.width, doc.height);
+      pushSel(input.lasso.setSelection(inv));
+      board.invalidateAll();
+      updateLassoToolbar();
+      closeSelEditUI();
+    },
+    resize: () => _openSelEdit("expand"),   // v0.5.15 合一入口，默认扩张
+    dup: () => { selectionToNewLayer({ move: false }); closeSelEditUI(); },
+    move: () => { selectionToNewLayer({ move: true }); closeSelEditUI(); },
+  };
+  for (const id of ["lassoSelEditMenu", "fillSelEditMenu"]) {
+    document.getElementById(id)?.addEventListener("click", (e: Event) => {
+      const b = (e.target as HTMLElement).closest?.("[data-sel-act]") as HTMLButtonElement | null;
+      if (!b || b.disabled) return;
+      SEL_ACTIONS[b.dataset.selAct!]?.();
+    });
+  }
 
   // 反选：在 docW×docH 上 mask 取反
-  byId("lassoInvertBtn").addEventListener("click", () => {
-    const inv = doc.selection ? (doc.selection as Selection).invert(doc.width, doc.height) : Selection.full(doc.width, doc.height);
-    pushSel(input.lasso.setSelection(inv));
-    board.invalidateAll();
-    updateLassoToolbar();
-    closeSelEditUI();   // v0.6.19：指令项点完关菜单
-  });
+
 
   // transform 模式 picker + 应用 / 取消
   for (const b of lassoTransformModeBtns) {
@@ -875,14 +908,7 @@ export function initToolbar(ctx: AppContext) {
     window.addEventListener("wp:applyEditorState", () => { psel.value = editorState.colorPicker.layerMode; });
   }
   // 选区 → 新层 / 复制层
-  byId("lassoDuplicateBtn").addEventListener("click", () => {
-    selectionToNewLayer({ move: false });
-    closeSelEditUI();   // v0.6.19：指令项点完关菜单
-  });
-  byId("lassoMoveToLayerBtn").addEventListener("click", () => {
-    selectionToNewLayer({ move: true });
-    closeSelEditUI();
-  });
+
   window.addEventListener("wp:lassochange", updateLassoToolbar);
   // 任何 history push/undo/redo 都可能改 doc.selection → 刷新 toolbar 显隐
   window.addEventListener("wp:histchange", updateLassoToolbar);
