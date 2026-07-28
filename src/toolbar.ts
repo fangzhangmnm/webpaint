@@ -54,7 +54,7 @@ let lassoConstrainBtn: HTMLElement;
 let lassoSelEditBtn: HTMLElement, lassoSelEditMenu: HTMLElement;   // v0.5.12 ⋯ 菜单（低频选区操作收纳）
 let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement, lassoSetOpMenu: HTMLElement, lassoSetOpMenuBtns: HTMLElement[];   // 布尔组槽（v0.5.17 回下拉）
 let lassoSubSlot: HTMLElement, lassoSubSlotUse: SVGUseElement, lassoSubMenu: HTMLElement, lassoSubMenuBtns: HTMLElement[];   // 子工具组槽（v0.5.14）
-let lassoExpandToggle: HTMLElement, lassoMagicExpandVal: HTMLElement, lassoMagicExpandStep: HTMLElement;   // 魔棒配置（v0.6.19 收进 ⋯ 菜单，stepper 化）
+let lassoExpandToggle: HTMLElement, lassoMagicExpandVal: HTMLElement, lassoMagicExpandMenu: HTMLElement;   // 扩张钮（v0.6.26 图标+小三角，stepper 收弹出）
 let lassoTransformBtn: HTMLElement, lassoFillCommitBtn: HTMLElement, lassoDeselectBtn: HTMLElement;
 let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
 
@@ -72,7 +72,7 @@ function _pushSelToolToEngine(tool: string) {
 }
 // v0.6.24 顶栏工具组槽（点=激活记忆成员/已激活再点=开组菜单；"再点开笔架"整体废除——user 一直不喜欢）
 const TOOL_ICON: Record<string, string> = { brush: "#pencil", shapeBrush: "#shapes", lasso: "#lasso", fill: "#paint-bucket" };
-const _toolSlots: Array<{ members: string[]; btn: HTMLElement; use: SVGUseElement; menu: HTMLElement }> = [];
+const _toolSlots: Array<{ members: string[]; btn: HTMLElement; use: SVGUseElement; menu: HTMLElement; openMenu: () => void; closeMenu: () => void; consumeLp: () => boolean }> = [];
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
 const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", polygon: "#select-polygon", magic: "#magic-wand" };
 // 形状笔（ADR-0005/0006）：组槽 + 约束钮（图标按子工具换义）+ grid 配置 + 透视平面槽
@@ -197,10 +197,10 @@ export function updateLassoToolbar() {
   // 魔棒配置（v0.6.19 收进 ⋯ 菜单）：magic 子工具时显示；stepper 仅扩张开着时显。
   const magicOn = sub === "magic";
   for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-magic-only")) el.classList.toggle("hidden", !magicOn);
-  // v0.6.24：扩张 toggle+stepper 在 Row1（user：fill 要显眼 cue）——magic 子工具时显；stepper 还要扩张开
+  // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
   lassoExpandToggle.classList.toggle("hidden", !magicOn);
   lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
-  lassoMagicExpandStep.classList.toggle("hidden", !magicOn || !editorState.magicWand.expand);
+  if (!magicOn || !editorState.magicWand.expand) lassoMagicExpandMenu?.classList.add("hidden");
   // 清除选区内像素（v0.6.19 从 ⋯ 提到 Row1）：套索模式+有选区才显（fill 藏，同旧 lasso-only 语义）
   document.getElementById("lassoClearBtn")?.classList.toggle("hidden", !(lassoActive && hasSelection));
   // ⋯ 菜单钮：选区/填充工具常显（menu 内按 needs-sel / lasso-only 逐项禁用·隐藏——见 openSelEditUI）。
@@ -254,8 +254,9 @@ export function setTool(tool: string) {
     const tb = document.getElementById("filterBrushToolbar");
     if (tb) tb.classList.add("hidden");
   }
+  document.body.dataset.tool = tool;   // 持久工具的 CSS hook（transient 期间保持不变）。
+  //   v0.6.26：必须先于 editMode.setTool——modechange 里的组槽同步读它，后写会慢一拍（真机：图标反了）
   editMode.setTool(tool);   // emit wp:modechange → _syncEditModeUI 派生按钮高亮 / lasso 工具栏
-  document.body.dataset.tool = tool;   // 持久工具的 CSS hook（transient 期间保持不变）
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
   //   shapeBrush alias 到 brush（getRackToolKey）：共享笔架 + 共享当前笔/dial（user：「笔和绘制用的笔刷共享笔架」）
   if (tool === "brush" || tool === "eraser" || tool === "filterBrush" || tool === "shapeBrush") {
@@ -659,7 +660,7 @@ export function initToolbar(ctx: AppContext) {
   //   引擎只认一个数：effective px = toggle 开 ? px : 0。UI 改 → 写 editorState + 灌引擎；换文档回灌。
   lassoExpandToggle = byId("lassoExpandToggle");
   lassoMagicExpandVal = byId("lassoMagicExpandVal");
-  lassoMagicExpandStep = byId("lassoMagicExpandStep");
+  lassoMagicExpandMenu = byId("lassoMagicExpandMenu");
   const pushMagicExpandToEngine = () => {
     input.lasso.setMagicAutoExpand(editorState.magicWand.expand ? editorState.magicWand.expandPx : 0);
   };
@@ -668,10 +669,23 @@ export function initToolbar(ctx: AppContext) {
     pushMagicExpandToEngine();
     updateLassoToolbar();   // toggle pressed 态/stepper 显隐在 updateLassoToolbar 派生
   };
-  lassoExpandToggle.addEventListener("click", () => {
+  lassoExpandToggle.addEventListener("click", (e: Event) => {
+    e.stopPropagation();
     editorState.magicWand.expand = !editorState.magicWand.expand;
     pushMagicExpandToEngine();
+    if (editorState.magicWand.expand) {
+      // 开的瞬间顺势弹 stepper 调 px（v0.6.26；外点关，steppers 连按不关）
+      lassoMagicExpandMenu.classList.remove("hidden");
+      anchorPopupToBtn(lassoMagicExpandMenu, lassoExpandToggle, { align: "left", offsetY: 6 });
+    } else {
+      lassoMagicExpandMenu.classList.add("hidden");
+    }
     updateLassoToolbar();
+  });
+  document.addEventListener("pointerdown", (e: Event) => {
+    if (lassoMagicExpandMenu.classList.contains("hidden")) return;
+    if (lassoMagicExpandMenu.contains(e.target as Node) || lassoExpandToggle.contains(e.target as Node)) return;
+    lassoMagicExpandMenu.classList.add("hidden");
   });
   // −1+ stepper（v0.6.19 文本框退役——文本框吞快捷键+弹键盘；样板 = shapeGrid steppers 连按不关菜单）
   const stepMagicExpand = (d: number) => {
@@ -836,14 +850,26 @@ export function initToolbar(ctx: AppContext) {
   _syncEditModeUI();   // 初始同步（boot setTool 同工具会 early-return 不 emit，这里兜一次）
 
   // ---- 工具按钮 ----
-  // v0.6.24 顶栏组槽菜单接线（手动 toggle + 外点关；选完即关）
+  // v0.6.24 顶栏组槽菜单；v0.6.26 grill 定稿（Blender/PS 惯例，user 拍板"改长按方案"）：
+  //   单击=立即激活记忆成员（高频手感）；**长按 ≈450ms=开组菜单**；已激活再点=也开（第二条路）；
+  //   组菜单开着时上下文子工具栏整体压下（body.tool-slot-open，不同时显示）。
+  const _setToolSlotOpen = () => {
+    document.body.classList.toggle("tool-slot-open", _toolSlots.some((s) => !s.menu.classList.contains("hidden")));
+  };
   const wireToolSlot = (btnId: string, useId: string, menuId: string, members: string[]) => {
     const btn = byId(btnId), menu = byId(menuId);
     const use = byId(useId) as unknown as SVGUseElement;
-    _toolSlots.push({ members, btn, use, menu });
+    const openMenu = () => {
+      menu.classList.remove("hidden");
+      anchorPopupToBtn(menu, btn, { align: "left", offsetY: 6 });
+      _setToolSlotOpen();
+    };
+    const closeMenu = () => { menu.classList.add("hidden"); _setToolSlotOpen(); };
+    let lpTimer = 0, lpFired = false;
+    _toolSlots.push({ members, btn, use, menu, openMenu, closeMenu, consumeLp: () => { const f = lpFired; lpFired = false; return f; } });
     for (const mb of [...menu.querySelectorAll<HTMLElement>("[data-slot-tool]")]) {
       mb.addEventListener("click", () => {
-        menu.classList.add("hidden");
+        closeMenu();
         setTool(mb.dataset.slotTool!);
         closeExclusive();
       });
@@ -851,22 +877,41 @@ export function initToolbar(ctx: AppContext) {
     document.addEventListener("pointerdown", (e: Event) => {
       if (menu.classList.contains("hidden")) return;
       if (menu.contains(e.target as Node) || btn.contains(e.target as Node)) return;
-      menu.classList.add("hidden");
+      closeMenu();
     });
+    // 长按（Blender/Photoshop 同款；小三角徽标=有组的记号）
+    btn.addEventListener("pointerdown", () => {
+      lpFired = false;
+      lpTimer = window.setTimeout(() => { lpFired = true; lpTimer = 0; openMenu(); }, 450);
+    });
+    const cancelLp = () => { if (lpTimer) { window.clearTimeout(lpTimer); lpTimer = 0; } };
+    btn.addEventListener("pointerup", cancelLp);
+    btn.addEventListener("pointerleave", cancelLp);
+    btn.addEventListener("pointercancel", cancelLp);
+    btn.addEventListener("contextmenu", (e: Event) => e.preventDefault());   // 触摸长按防系统菜单
   };
   wireToolSlot("toolPen", "toolBrushSlotUse", "toolBrushSlotMenu", ["brush", "shapeBrush"]);
   wireToolSlot("toolLasso", "toolSelSlotUse", "toolSelSlotMenu", ["lasso", "fill"]);
   for (const b of els.toolBtns) {
     b.addEventListener("click", (e: Event) => {
       const tool = b.dataset.tool!;   // .tool[data-tool] 选择器保证存在（组槽的 data-tool 随成员就地改）
-      // v0.6.24：已激活的组槽成员再点 = 开/关组菜单（"再点开笔架"v79 与 lasso 二击 Esc v124 双双让位；
-      //   笔架统一走左栏按钮，去选走 Esc/Ctrl+D/去选钮）
       const slot = _toolSlots.find((s) => s.btn === b);
+      if (slot?.consumeLp()) { e.stopPropagation(); return; }   // 长按已开菜单：吞掉随后的 click
+      // v0.6.26 user："alt 循环也顺便加上"（Photoshop 同款）：Alt+点击 = 循环组内成员
+      if (slot && (e as MouseEvent).altKey) {
+        e.stopPropagation();
+        const curMember = slot.btn.dataset.tool!;
+        const next = slot.members[(slot.members.indexOf(curMember) + 1) % slot.members.length];
+        slot.closeMenu();
+        setTool(next);
+        closeExclusive();
+        return;
+      }
+      // 已激活的组槽成员再点 = 开/关组菜单（长按之外的第二条可发现路径）
       if (slot && editMode.current() === tool) {
         e.stopPropagation();
-        const wasHidden = slot.menu.classList.contains("hidden");
-        slot.menu.classList.toggle("hidden");
-        if (wasHidden) anchorPopupToBtn(slot.menu, slot.btn, { align: "left", offsetY: 6 });
+        if (slot.menu.classList.contains("hidden")) slot.openMenu();
+        else slot.closeMenu();
         return;
       }
       setTool(tool);

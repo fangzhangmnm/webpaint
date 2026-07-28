@@ -529,13 +529,9 @@
           </button>
           <!-- v0.6.19 魔棒配置收进 ⋯ 菜单（magic-only 行；v0.5.12 的 Row1 内联退役——
                user：子工具栏重排，低频配置收纳） -->
-          <!-- v0.6.24 user：fill 的扩张 toggle 要显眼 UI cue，从 ⋯ 提回 Row1（magic 子工具时显；阈值滑条留 ⋯） -->
-          <button class="lasso-tool-btn hidden" id="lassoExpandToggle" type="button" data-i18n="la.expandShort" data-i18n-title="la.autoExpand">扩张</button>
-          <span id="lassoMagicExpandStep" class="hidden" style="display:inline-flex; align-items:center; gap:6px;">
-            <button class="lasso-tool-btn" id="lassoMagicExpandMinus" type="button" aria-label="−">−</button>
-            <span class="lasso-popup-val" id="lassoMagicExpandVal">1</span>
-            <button class="lasso-tool-btn" id="lassoMagicExpandPlus" type="button" aria-label="＋">＋</button>
-          </span>
+          <!-- v0.6.26：扩张钮用真图标 selection-expand（user：有 svg 的）+ 小三角；−1+ stepper 收进弹出。
+               点=开关；开的瞬间顺势弹 stepper 调 px（外点关）；magic 子工具时显（fill 默认魔棒≈常显 cue） -->
+          <button class="lasso-tool-btn lasso-tool-icon lasso-slot hidden" id="lassoExpandToggle" type="button" data-i18n-title="la.autoExpand" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
           <button class="lasso-tool-btn hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain">1:1</button>
           <!-- v0.5.12 行尾动作组：变换（选区工具）/ ⋯（低频操作收纳）/ 去选（高频，=fill 的 cancel）/ ✓（fill） -->
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
@@ -620,6 +616,14 @@
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" role="menuitem" data-i18n-title="la.new"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-new"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" role="menuitem" data-i18n-title="la.union"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-union"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="subtract" type="button" role="menuitem" data-i18n-title="la.subtract"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-difference"/></svg></button>
+    </div>
+    <!-- v0.6.26 扩张 px stepper 弹出（扩张钮小三角；steppers 连按不关，外点关） -->
+    <div class="lasso-popup hidden" id="lassoMagicExpandMenu" role="menu" data-i18n-aria="la.autoExpand">
+      <div class="lasso-popup-row" style="display:flex; align-items:center; gap:6px;">
+        <button class="lasso-tool-btn" id="lassoMagicExpandMinus" type="button" aria-label="−">−</button>
+        <span class="lasso-popup-val" id="lassoMagicExpandVal">1</span>
+        <button class="lasso-tool-btn" id="lassoMagicExpandPlus" type="button" aria-label="＋">＋</button>
+      </div>
     </div>
     <!-- v0.6.25 形状变体菜单（已选中子工具再点开；二选一） -->
     <div class="lasso-icon-menu hidden" id="shapeLineVarMenu" role="menu" data-i18n-aria="sb.line">
