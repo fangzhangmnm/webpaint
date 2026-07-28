@@ -19,6 +19,7 @@ import "./shape-geometry.test.mjs";   // 形状笔几何层（ADR-0005）：吸�
 import "./shape-brush.test.mjs";      // 形状笔引擎：恒压/taper覆写/三子工具全链/pixelMode restore/cancel 无痕
 import "./perspective-frame.test.mjs"; // 透视 frame（ADR-0006）：两角定形/homography/chart ε 护栏/snap 方向
 import "./pixel-conic.test.mjs";       // 像素透视圆：Zingl 有理二次 Bézier conic（双向 Hausdorff 验证）
+import "./polygon-lasso.test.mjs";     // 多边形套索：整数扫描线栅格器 + 会话两级 abort
 import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";
 import "./background-sync-jobs.test.mjs";

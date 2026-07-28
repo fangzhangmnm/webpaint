@@ -50,7 +50,9 @@ SPECS = [
     # 2026-07-25 晚：透视批 9 条全部落定（入库/合并/驳回），stopgap 清零。
     # 历史：line/snap-angle/constrain-*（入库）→ persp 四连/plane 三向/vp-edit/snap-vp（入库，
     # 后两个缩写展开改名）→ reset-defaults（驳回，用库内 refresh）→ pen-pressure-off
-    # （撤需求 v0.6.16：笔压 toggle 复用笔粗图标位 brush-width/brush-width-locked）。当前无 stopgap。
+    # （撤需求 v0.6.16：笔压 toggle 复用笔粗图标位 brush-width/brush-width-locked）。
+    # 2026-07-28：多边形套索子工具 +1。
+    ("select-polygon", "折", (3, 3, 18, 18), "套索·多边形子工具(逐点落顶点/回起点闭合/锁格点硬边)。真图标建议=虚线五边形(对齐 select-freehand/rectangle 家族)"),
 ]
 syms = []
 for sid, text, box, note in SPECS:

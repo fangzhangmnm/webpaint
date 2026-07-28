@@ -20,7 +20,7 @@
 // 选区值 + mask 操作（compose/invert/outline/applyMaskPostStroke/fill/clear/crop）已搬到
 // selection.js 的 Selection 类。lasso 只负责手势光栅化（产 Selection）+ 自由变换 gizmo。
 
-import { Selection } from "./selection.ts";
+import { Selection, rasterizePolygonGray8 } from "./selection.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
@@ -49,8 +49,9 @@ type LassoState =
   | "drawing-rect"
   | "drawing-ellipse"
   | "magic-tentative"
+  | "drawing-polygon"
   | "floating";
-type SubTool = "freehand" | "rect" | "ellipse" | "magic";
+type SubTool = "freehand" | "rect" | "ellipse" | "polygon" | "magic";
 type SetOpMode = "new" | "union" | "subtract" | "intersect";
 
 export class LassoEngine {
@@ -63,6 +64,8 @@ export class LassoEngine {
   _points: Point[];
   _rect: DraftRect | null;
   _magicStart: Point | null;
+  _polyVerts: Point[];
+  _polyPreview: Point | null;
   _ft: FloatingTransform;
   doc: LassoDoc | null;
   onChange: () => void;
@@ -81,6 +84,10 @@ export class LassoEngine {
     this._points = [];            // freehand draft
     this._rect = null;            // {x0, y0, x1, y1} during rect / ellipse draw
     this._magicStart = null;      // for magic-tap path
+    // v0.6.19 多边形套索会话（跨多笔 transient）：顶点=会话级，段预览=笔级——
+    //   cancelDrawing 只丢段（双指/掌触救回会话）；polygonCancelSession 才清顶点。
+    this._polyVerts = [];
+    this._polyPreview = null;
     // 自由变换浮层 = FloatingTransform 深模块。本类只管 lasso 状态机（_state）+ 选区构造，
     //   变换全委托 _ft；onChange 晚绑定（input.js 之后才赋 this.onChange）。
     this._ft = new FloatingTransform(() => this.onChange());
@@ -103,6 +110,7 @@ export class LassoEngine {
     if (this._subTool === name) return;
     this._subTool = name;
     this._points = []; this._rect = null; this._magicStart = null;
+    this._polyVerts = []; this._polyPreview = null;   // 切子工具 = 会话级 abort
     this._state = "idle";
     this.onChange();
   }
@@ -130,6 +138,10 @@ export class LassoEngine {
     } else if (this._subTool === "ellipse") {
       this._state = "drawing-ellipse";
       this._rect = { x0: x, y0: y, x1: x, y1: y };
+    } else if (this._subTool === "polygon") {
+      // 多边形：本 down 只开段预览；顶点在 up 落（input._polygonUp）。会话跨多笔存活。
+      this._state = "drawing-polygon";
+      this._polyPreview = { x, y };
     } else if (this._subTool === "magic") {
       // 单击：不进 drawing 状态；input.js 的 _endLasso 看 magicStart 做 flood fill
       this._state = "magic-tentative";
@@ -142,6 +154,9 @@ export class LassoEngine {
       const p = this._points[this._points.length - 1];
       if (p && Math.abs(p.x - x) < 1 && Math.abs(p.y - y) < 1) return;
       this._points.push({ x, y });
+      this.onChange();
+    } else if (this._state === "drawing-polygon") {
+      this._polyPreview = { x, y };
       this.onChange();
     } else if (this._state === "drawing-rect" || this._state === "drawing-ellipse") {
       let nx = x, ny = y;
@@ -162,6 +177,7 @@ export class LassoEngine {
   // v125 (user：「lasso 全在外面时行为奇怪，应该自动清掉在外面，然后判断没选中任何」)
   //   rasterize 出 newSel 后先 clip 到 doc 边界。完全在外 → 返 null
   endPath(sourceLayer: Layer | null) {
+    if (this._state === "drawing-polygon") return null;   // polygon 走 polygonAddVertex/polygonClose，不在此收笔
     let newSel = null;
     if (this._state === "drawing-freehand") {
       newSel = this._rasterizeFreehandToSelection(this._points);
@@ -203,8 +219,47 @@ export class LassoEngine {
   hasSelection() { return !!this.doc?.selection; }
   getSelection() { return this.doc?.selection || null; }
   cancelDrawing() {
+    if (this._subTool === "polygon") {
+      // 笔级 abort（双指手势/掌触 purge/pointercancel）：只丢当前段预览，顶点会话保留——
+      //   画到第 7 个顶点被误触双指清空 = 灾难（abortStroke ≠ abortSession）。
+      this._polyPreview = null;
+      if (!this._polyVerts.length) this._state = "idle";
+      this.onChange();
+      return;
+    }
     this._state = "idle";
     this._points = []; this._rect = null; this._magicStart = null;
+    this.onChange();
+  }
+
+  // ---- 多边形套索会话（v0.6.19）----
+  polygonAddVertex(x: number, y: number) {
+    const v = { x: Math.round(x), y: Math.round(y) };   // 顶点锁整数格点（锁像素格点边缘）
+    const last = this._polyVerts[this._polyVerts.length - 1];
+    if (!last || last.x !== v.x || last.y !== v.y) this._polyVerts.push(v);
+    this._state = "drawing-polygon";
+    this._polyPreview = null;
+    this.onChange();
+  }
+  polygonVertexCount() { return this._polyVerts.length; }
+  polygonFirstVertex(): Point | null { return this._polyVerts[0] ?? null; }
+  polygonSessionActive() { return this._subTool === "polygon" && this._polyVerts.length > 0; }
+  // 闭合：栅格化（整数扫描线，无 AA）→ setOp 合并。<3 顶点/零面积/全在画布外 → null（会话已清）。
+  polygonClose() {
+    const verts = this._polyVerts;
+    this._polyVerts = []; this._polyPreview = null; this._state = "idle";
+    if (verts.length < 3) { this.onChange(); return null; }
+    const r = rasterizePolygonGray8(verts);
+    let newSel: SelectionLike | null = r ? Selection.fromGray8Region(r.x0, r.y0, r.w, r.h, r.g) : null;
+    newSel = this._clipSelectionToDoc(newSel);
+    if (!newSel) { this.onChange(); return null; }
+    return this._applySelectionUpdate(newSel);
+  }
+  // 会话级 abort（Esc / 切工具 / 换文档）。
+  polygonCancelSession() {
+    if (!this._polyVerts.length && !this._polyPreview) return;
+    this._polyVerts = []; this._polyPreview = null;
+    if (this._state === "drawing-polygon") this._state = "idle";
     this.onChange();
   }
 
@@ -340,7 +395,15 @@ export class LassoEngine {
 
   // -------- 外部查询 --------
   hasFloating() { return this._ft.isActive(); }
-  getDrawingPath() { return this._state === "drawing-freehand" ? this._points : null; }
+  getDrawingPath() {
+    if (this._state === "drawing-freehand") return this._points;
+    if (this._state === "drawing-polygon") {
+      const pts = this._polyVerts.slice();
+      if (this._polyPreview) pts.push(this._polyPreview);
+      return pts.length >= 2 ? pts : null;   // 单点画不出线
+    }
+    return null;
+  }
   getDrawingRect() { return this._state === "drawing-rect" ? this._rect : null; }
   getDrawingEllipse() { return this._state === "drawing-ellipse" ? this._rect : null; }
   getFloating() { return this._ft.current(); }

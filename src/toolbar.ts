@@ -63,7 +63,7 @@ let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   
 //   fill 禁「新建」只在灌引擎时就地 coerce 成并，不改记忆本体。
 const _selMem = { sub: "freehand" as string, setOp: "new" as string };
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
-const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", magic: "#magic-wand" };
+const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", polygon: "#select-polygon", magic: "#magic-wand" };
 // 形状笔（ADR-0005/0006）：组槽 + 约束钮（图标按子工具换义）+ grid 配置 + 透视平面槽
 let shapeToolbarStack: HTMLElement, shapeSubBtns: HTMLElement[],
     shapeGridMoreBtn: HTMLElement, shapeGridMenu: HTMLElement, shapeConstrainBtn: HTMLElement, shapeConstrainUse: SVGUseElement,
