@@ -251,7 +251,7 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("eraser") },
   { combo: "I",                desc: "sc.picker",     category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("picker") },
-  // v0.5.12：fill = 第一类工具。G = 油漆桶（fill，记忆子工具默认魔棒）；L = 套索。
+  // v0.6.24：fill/lasso 分家 per-tool 持久化——G = 填色（默认魔棒+并）；L = 套索（默认矩形+新建）。
   //   从 fill 切走 = commit（fill-mode.ts 的 modechange 钩子），键位本身零填色知识。
   { combo: "G",                desc: "sc.fillMode",  category: "sc.cat.tools",
     when: (i) => _editMode(i) && !_floating(i), run: (i) => i._emitTool("fill") },
@@ -399,9 +399,10 @@ export class InputController {
   _bind() {
     // 切离 lasso（真切换，transient 括号不算）= 多边形会话 abort（fill _onModeChange 同款判法）
     window.addEventListener("wp:modechange", () => {
-      if (this.editMode && !this.editMode.isTransient() && this.editMode.current() !== "lasso") {
-        this.lasso.polygonCancelSession();
-      }
+      if (!this.editMode || this.editMode.isTransient()) return;
+      const m = this.editMode.current();
+      // v0.6.24：fill 里多边形是合法选区生产者（fill/lasso 共用 lasso 管线）——两者之外才清会话
+      if (m !== "lasso" && m !== "fill") this.lasso.polygonCancelSession();
     });
     const c = this.canvas;
     c.addEventListener("pointerdown", (e) => this._down(e));

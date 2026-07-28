@@ -58,10 +58,18 @@ let lassoExpandToggle: HTMLElement, lassoMagicExpandVal: HTMLElement, lassoMagic
 let lassoTransformBtn: HTMLElement, lassoFillModeBtn: HTMLElement, lassoFillCommitBtn: HTMLElement, lassoDeselectBtn: HTMLElement;
 let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
 
-// 「跟 session 走」的 RAM 记忆（user 拍板：不进 editorState/文件）。
-//   v0.5.16 改判：填色/选区**共用一份**模式记忆（进油漆桶保持刚才的子工具，UX 更直觉）；
-//   fill 禁「新建」只在灌引擎时就地 coerce 成并，不改记忆本体。
-const _selMem = { sub: "freehand" as string, setOp: "new" as string };
+// v0.6.24 fill/lasso 分家（v0.5.16 的共享 RAM 记忆 _selMem 作废）：子工具/布尔/1:1 per-tool
+//   持久化在 editorState.lassoTool / fillTool（跟 ora 走）。当前选区工具的记录：
+function _selToolRec() {
+  return editMode.current() === "fill" ? editorState.fillTool : editorState.lassoTool;
+}
+// 把指定工具的记录灌进引擎（setTool 进入时 + 换文档 applyEditorState 时）
+function _pushSelToolToEngine(tool: string) {
+  const rec = tool === "fill" ? editorState.fillTool : editorState.lassoTool;
+  input.lasso.setSubTool(rec.sub as Parameters<typeof input.lasso.setSubTool>[0]);
+  input.lasso.setSetOpMode(rec.setOp as Parameters<typeof input.lasso.setSetOpMode>[0]);
+  input.lasso.setConstrainSquare(rec.constrainSquare);
+}
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
 const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", polygon: "#select-polygon", magic: "#magic-wand" };
 // 形状笔（ADR-0005/0006）：组槽 + 约束钮（图标按子工具换义）+ grid 配置 + 透视平面槽
@@ -239,11 +247,10 @@ export function setTool(tool: string) {
   if (tool === "brush" || tool === "eraser" || tool === "filterBrush" || tool === "shapeBrush") {
     rack.applyToolState(tool);
   }
-  // 「跟 session 走」共享记忆（v0.5.16：填色/选区一份）——进工具恢复子工具+布尔；fill 禁新建→就地并。
+  // v0.6.24：进选区/填色工具 → 灌该工具自己的持久化记录（fill 默认魔棒+并、selection 默认矩形+新建；
+  //   fill 的「新建」菜单项本就隐藏，无需 coerce）。
   if (tool === "lasso" || tool === "fill") {
-    input.lasso.setSubTool(_selMem.sub as Parameters<typeof input.lasso.setSubTool>[0]);
-    const op = (tool === "fill" && _selMem.setOp === "new") ? "union" : _selMem.setOp;
-    input.lasso.setSetOpMode(op as Parameters<typeof input.lasso.setSetOpMode>[0]);
+    _pushSelToolToEngine(tool);
     updateLassoToolbar();
   }
 }
@@ -458,7 +465,8 @@ export function initToolbar(ctx: AppContext) {
       menu.classList.add("hidden");
     });
   };
-  // 子工具组槽（freehand/rect/ellipse/flood 收一组；套索/油漆桶各记各的默认——user 拍板两份记忆）
+  // 子工具组槽（freehand/rect/ellipse/polygon/flood 收一组；v0.6.24 套索/填色真·各记各的
+  //   ——editorState.lassoTool/fillTool per-tool 持久化）
   lassoSubSlot = byId("lassoSubSlot");
   lassoSubSlotUse = byId("lassoSubSlotUse") as unknown as SVGUseElement;
   lassoSubMenu = byId("lassoSubMenu");
@@ -466,7 +474,7 @@ export function initToolbar(ctx: AppContext) {
   wireSlotMenu(lassoSubSlot, lassoSubMenu, (b) => {
     const subName = b.dataset.lassoSub as Parameters<typeof input.lasso.setSubTool>[0];
     input.lasso.setSubTool(subName);
-    _selMem.sub = subName;   // v0.5.16 共享记忆
+    _selToolRec().sub = subName;   // 写当前工具自己的持久化记录
   });
   // 布尔组槽（v0.5.17 user：改回下拉，横排纯图标）
   lassoSetOpSlot = byId("lassoSetOpSlot");
@@ -476,7 +484,7 @@ export function initToolbar(ctx: AppContext) {
   wireSlotMenu(lassoSetOpSlot, lassoSetOpMenu, (b) => {
     const op = b.dataset.lassoSetop as Parameters<typeof input.lasso.setSetOpMode>[0];
     input.lasso.setSetOpMode(op);
-    _selMem.setOp = op;   // 共享记忆（fill 里「新建」项已隐）
+    _selToolRec().setOp = op;   // 写当前工具自己的记录（fill 里「新建」项已隐）
   });
   // ---- 形状笔上下文工具栏（ADR-0005）：组槽 + 约束。状态 per-doc（editorState.shapeBrush），UI 改 → 写
   //   editorState + 灌引擎；换文档 wp:applyEditorState 回灌（对齐魔棒阈值样板）。
@@ -650,8 +658,15 @@ export function initToolbar(ctx: AppContext) {
   syncMagicExpandUI();
   // 1:1 约束 toggle（rect / ellipse 用）
   lassoConstrainBtn.addEventListener("click", () => {
-    input.lasso.setConstrainSquare(!input.lasso.getConstrainSquare());
+    const v = !input.lasso.getConstrainSquare();
+    input.lasso.setConstrainSquare(v);
+    _selToolRec().constrainSquare = v;   // v0.6.24 per-tool 持久化
     updateLassoToolbar();
+  });
+  // v0.6.24：换文档回灌当前选区工具的记录（现有 applyEditorState 监听只派生 UI 不灌引擎——补缺口）
+  window.addEventListener("wp:applyEditorState", () => {
+    const m = editMode.current();
+    if (m === "lasso" || m === "fill") { _pushSelToolToEngine(m); updateLassoToolbar(); }
   });
   initSelEditUI();   // v242 选区编辑（扩张/收缩）齿轮 + 菜单 + 实时预览 modal
 
