@@ -114,13 +114,10 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
       </button>
       <input ref="sizeSlider" id="sizeSlider" class="left-sidebar-slider" type="range" min="0" :max="sizePosMax" step="1"
         :value="sizePos" :disabled="!canDraw" orient="vertical" :aria-label="L.size" @input="onSizeInput" />
-      <!-- 笔粗图标本体 = 笔压 toggle（v0.6.16，user：不要多一个难受的按钮）：
-           笔压开（默认）= brush-width 波浪；禁用（恒 0.5）= brush-width-locked 锁徽标 -->
-      <button class="left-sidebar-label left-sidebar-label-btn" type="button"
-        :title="pressureOff ? L.pressureOn : L.pressureOff" :aria-label="pressureOff ? L.pressureOn : L.pressureOff"
-        :aria-pressed="pressureOff" :disabled="!canDraw" @click="togglePressure">
-        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><use :href="pressureOff ? '#brush-width-locked' : '#brush-width'"/></svg>
-      </button>
+      <!-- v0.6.32：笔压 toggle 迁出（独立按钮在 undo/redo 上方，app.ts 接线）；笔粗图标位恢复纯标签 -->
+      <span class="left-sidebar-label" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><use href="#brush-width"/></svg>
+      </span>
       <div class="size-popup" :class="{ hidden: !popup.visible }" :style="{ left: popup.left + 'px', top: popup.top + 'px' }" aria-hidden="true">
         <div class="size-popup-circle-frame">
           <div class="size-popup-circle" :style="{ width: popup.dia + 'px', height: popup.dia + 'px', opacity: popup.opacity }"></div>

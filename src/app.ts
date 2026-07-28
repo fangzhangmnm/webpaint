@@ -156,6 +156,26 @@ const leftDial = mountLeftDial(els.leftDialMount, {
   onTogglePressure: (v) => { editorState.pressureDisabled = v; setStatus(t(v ? "status.pressureOff" : "status.pressureOn")); },
 });
 bindPressureDisabled(() => dialReactive.pressureOff);   // 引擎 thunk（每 pointer 事件读；载入/重置经 applyBoundFromGroups 自动回灌）
+// v0.6.32 笔压独立按钮（user：undo/redo 上方；原笔粗图标位 v0.6.16 方案退役）。
+//   SSoT 不变：editorState.pressureDisabled ⇄ dialReactive.pressureOff；换文档 applyEditorState 回灌后重派生。
+{
+  const btn = document.getElementById("pressureToggleBtn")!;
+  const use = document.getElementById("pressureToggleUse")!;
+  const sync = () => {
+    const off = dialReactive.pressureOff;
+    btn.setAttribute("aria-pressed", off ? "true" : "false");
+    btn.title = t(off ? "ld.pressureOn" : "ld.pressureOff");
+    use.setAttribute("href", off ? "#pen-pressure-off" : "#pen-pressure");
+  };
+  btn.addEventListener("click", () => {
+    const v = !dialReactive.pressureOff;
+    editorState.pressureDisabled = v;
+    setStatus(t(v ? "status.pressureOff" : "status.pressureOn"));
+    sync();
+  });
+  window.addEventListener("wp:applyEditorState", sync);
+  sync();
+}
 // 键盘 [ ] 调粗接线（需 board/leftDial，已建好）。
 // disposer 收进 __wpBootTeardown（v417）：真 app 永不调（监听活到页面结束）；**测试**要靠它拆。
 //   app.ts 是纯 top-level 副作用模块、ESM 缓存下只能 import 一次，boot smoke（test/app-boot.test.mjs）
