@@ -251,6 +251,8 @@ board.setLiveSyncProvider(() => input.liveMutatedLeaf());
 input.lasso.setWarpBakeProvider(() => board.glWarpBakeFn());
 board.setLassoProvider((() => ({
   selection:      doc.selection,
+  // fill 模式蚂蚁线 toggle（ADR-0004 修订 v0.6.19）：非 fill 恒显；fill 按 editorState（默认开）
+  showAnts:       editMode.current() !== "fill" || editorState.fill.showAnts,
   drawingPath:    input.lasso.getDrawingPath(),
   drawingRect:    input.lasso.getDrawingRect(),
   drawingEllipse: input.lasso.getDrawingEllipse(),

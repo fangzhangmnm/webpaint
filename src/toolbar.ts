@@ -188,6 +188,9 @@ export function updateLassoToolbar() {
   // ⋯ 菜单逐项：needs-sel 无选区禁用；lasso-only（清除/复制/移层）fill 里隐藏
   for (const el of lassoSelEditMenu.querySelectorAll<HTMLButtonElement>(".lasso-menu-needs-sel")) el.disabled = !hasSelection;
   for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-lasso-only")) el.classList.toggle("hidden", fillActive);
+  // fill-only（蚂蚁线 toggle，v0.6.19）：非 fill 恒显示无开关 → 项本身藏；pressed 态从 editorState 派生
+  for (const el of lassoSelEditMenu.querySelectorAll<HTMLElement>(".lasso-menu-fill-only")) el.classList.toggle("hidden", !fillActive);
+  document.getElementById("lassoAntsBtn")?.setAttribute("aria-pressed", editorState.fill.showAnts ? "true" : "false");
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
   lassoConstrainBtn.classList.toggle("hidden", !showConstrain);
@@ -374,6 +377,12 @@ function initSelEditUI() {
     if (wasHidden && menu) anchorPopupToBtn(menu, lassoSelEditBtn, { align: "left", offsetY: 6 });   // v0.5.14 贴钮
   });
   document.getElementById("lassoSelResizeBtn")?.addEventListener("click", () => _openSelEdit("expand"));   // v0.5.15 合一钮，默认扩张
+  // 蚂蚁线 toggle（v0.6.19，ADR-0004 修订）：写 editorState（per-doc）+ 重绘；不关菜单（toggle 类操作连按友好）
+  document.getElementById("lassoAntsBtn")?.addEventListener("click", () => {
+    editorState.fill.showAnts = !editorState.fill.showAnts;
+    board.requestRender();
+    updateLassoToolbar();
+  });
   // modal 内方向切换（v0.5.15 user：扩张/收缩同一入口）：切方向 = 换 op 就地重预览（预览恒从 before 派生）。
   document.getElementById("lassoSelOpExpandBtn")?.addEventListener("click", () => _setSelEditOp("expand"));
   document.getElementById("lassoSelOpShrinkBtn")?.addEventListener("click", () => _setSelEditOp("shrink"));

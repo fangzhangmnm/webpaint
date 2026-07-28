@@ -7,9 +7,10 @@
 //     工具身份即模式——editorState.fillMode 开关已删（工具不 per-doc 持久化，与笔/套索一视同仁）。
 //   · **只 preview 不落文档**：fill 工具 + 有选区 → GPU 预览（board fill provider → 笔刷 overlay 同槽，
 //     journal v0.4 Plan L81「commit 和 live 同一个 shader，ssot」）。
-//   · 出口语义（v0.5.15 user 修正）：
+//   · 出口语义（v0.5.15 user 修正；切工具出口 v0.6.19 再修订，ADR-0004 修订记录）：
 //       回套索（油漆桶 toggle 关 / L 键）= **取消**——丢弃预览、选区保留，回去继续编辑选区；
-//       切去其他工具（笔/橡皮/…）   = **commit**（落层、选区保留——"填好了就是填好了"）；
+//       切去其他工具（笔/橡皮/…）   = **commit + 清选区**（v0.6.19：原"选区保留"改清——
+//         填完切笔就是要画画了，蚂蚁线留着碍事；undo 兜底可回）；
 //       ✓  = commit + 清选区（选区的 commit，compound 一整点，留在 fill 连续填下一块）；
 //       去选 = 丢弃（选区一起清，undo 兜底）。
 //     文档关闭/切换 = 丢弃（interrupt=cancel 家规；commit 只对显式的工具切换）。
@@ -85,7 +86,8 @@ function _onModeChange(): void {
   if (prev !== "fill" || m === "fill") return;
   if (m === "lasso") { board.requestRender(); return; }   // 取消油漆桶：丢弃预览，回去继续编辑选区
   // 真切去别的工具：预览确实挂着才 commit（组/隐藏层本就没显示 → 静默跳过）。
-  if (doc.selection && requireEditableLeaf(doc, null)) _doCommit(false);
+  //   v0.6.19：commit 后清选区（原保留；user 2026-07-28——进其他工具不留选区）。
+  if (doc.selection && requireEditableLeaf(doc, null)) _doCommit(true);
   else board.requestRender();   // 没得 commit 也要刷掉残余 overlay
 }
 
