@@ -254,6 +254,7 @@ board.setLassoProvider((() => ({
   // fill 模式蚂蚁线 toggle（ADR-0004 修订 v0.6.19）：非 fill 恒显；fill 按 editorState（默认开）
   showAnts:       editMode.current() !== "fill" || editorState.fill.showAnts,
   drawingPath:    input.lasso.getDrawingPath(),
+  polyFirst:      input.lasso.polygonFirstVertex(),   // v0.6.25 多边形首顶点标记（闭合提示）
   drawingRect:    input.lasso.getDrawingRect(),
   drawingEllipse: input.lasso.getDrawingEllipse(),
   floating:       input.lasso.getFloating(),
