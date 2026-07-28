@@ -618,6 +618,14 @@ export class InputController {
     if (!rec) {
       // 没按下时也更新 cursor preview（pen hover / mouse hover）
       if (e.pointerType !== "touch") this._updateCursorPreview(e);
+      // v0.6.25 多边形 hover 跟随：会话活着时段预览跟光标（触摸无 hover 自然退化为拖拽预览）
+      if (e.pointerType !== "touch" && this.lasso.polygonSessionActive() && this.editMode && !this.editMode.isTransient()) {
+        const m = this.editMode.current();
+        if (m === "lasso" || m === "fill") {
+          const { x, y } = this.board.screenToDoc(e.clientX, e.clientY);
+          this.lasso.polygonHover(x, y);
+        }
+      }
       return;
     }
     rec.x = e.clientX;

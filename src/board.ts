@@ -58,6 +58,7 @@ interface LassoInfo {
   showAnts?: boolean;      // false = 静止选区不画蚂蚁线（fill 模式 toggle；拖拽中虚线不受影响）
   floating?: FloatInfo | null;
   drawingPath?: MeshPt[] | null;
+  polyFirst?: MeshPt | null;   // 多边形会话首顶点（v0.6.25 闭合提示：常显小方点/进范围实心圆）
   drawingRect?: { x0: number; y0: number; x1: number; y1: number } | null;
   drawingEllipse?: { x0: number; y0: number; x1: number; y1: number } | null;
   handles?: Handle[] | null;
@@ -870,6 +871,34 @@ export class Board {
       ctx.lineDashOffset = dash;
       ctx.strokeStyle = "#fff";
       ctx.stroke();
+      ctx.restore();
+    }
+    // (b2) v0.6.25 多边形闭合提示（user 拍板）：首顶点常显小方点；光标/预览端进 14 screen px
+    //   闭合范围（同 input._polygonUp 的判定半径，视口坐标）→ 变 transform 手柄同款实心圆
+    if (info.polyFirst) {
+      const f0 = info.polyFirst;
+      const path = info.drawingPath;
+      const tip = path && path.length >= 2 ? path[path.length - 1] : null;
+      const inRange = !!tip && Math.hypot(tip.x - f0.x, tip.y - f0.y) * scale <= 14;
+      ctx.save();
+      if (inRange) {
+        ctx.beginPath();
+        ctx.arc(f0.x, f0.y, 7 / scale, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.lineWidth = 1.5 / scale;
+        ctx.stroke();
+      } else {
+        const r = 3.5 / scale;
+        ctx.beginPath();
+        ctx.rect(f0.x - r, f0.y - r, r * 2, r * 2);
+        ctx.fillStyle = "#fff";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.7)";
+        ctx.lineWidth = 1.2 / scale;
+        ctx.stroke();
+      }
       ctx.restore();
     }
     // (c) 正在拖的矩形 / 椭圆 —— 同 style

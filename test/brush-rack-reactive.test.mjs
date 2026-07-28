@@ -149,3 +149,15 @@ describe("缺笔自愈（v0.6.14 resolveActiveBrushPure）", () => {
     eq(rack.resolveActiveBrushPure(toolStates.brush, "brush")?.id, "b1", "name 兜底优先于默认笔");
   });
 });
+
+// v0.6.25 pin（user：「shape brush 和 brush 的默认笔刷是同一个同步的吧，pin 一下」）：
+// 形状笔与笔刷共享 rack/当前笔的 alias 是行为契约（ADR-0005），别被将来重构悄悄拆散。
+describe("rack · getRackToolKey alias（形状笔=笔刷同一支笔）", () => {
+  it("shapeBrush/airbrush → brush；eraser 独立", async () => {
+    const { rack } = await mkRack();
+    eq(rack.getRackToolKey("shapeBrush"), "brush", "形状笔与笔刷同一支笔（ADR-0005）");
+    eq(rack.getRackToolKey("airbrush"), "brush", "喷枪 alias（v96）");
+    eq(rack.getRackToolKey("eraser"), "eraser", "橡皮各自独立");
+    eq(rack.getRackToolKey("brush"), "brush");
+  });
+});

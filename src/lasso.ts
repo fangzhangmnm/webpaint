@@ -242,6 +242,13 @@ export class LassoEngine {
     this.onChange();
   }
   polygonVertexCount() { return this._polyVerts.length; }
+  // v0.6.25 hover 跟随（桌面鼠标/悬停笔）：会话活着时段预览跟光标走（无按下）
+  polygonHover(x: number, y: number) {
+    if (!this.polygonSessionActive()) return;
+    this._state = "drawing-polygon";
+    this._polyPreview = { x, y };
+    this.onChange();
+  }
   polygonFirstVertex(): Point | null { return this._polyVerts[0] ?? null; }
   polygonSessionActive() { return this._subTool === "polygon" && this._polyVerts.length > 0; }
   // 闭合：栅格化（整数扫描线，无 AA）→ setOp 合并。<3 顶点/零面积/全在画布外 → null（会话已清）。

@@ -30,7 +30,7 @@ _Avoid_: rt（旧全局占位）, DI container / service locator（这只是显�
 _Avoid_: ShapesEngine（旧名——v257 删掉的 ctx.fillRect 直填旧实现；现行 = ADR-0005 形状笔 `src/shape-brush.ts`）
 
 **形状笔（ShapeBrushEngine）**:
-一个 shape = 一个 stroke 的笔（对标滤镜笔，**不是**带 gizmo 的可编辑对象；ADR-0005）。按下→拖动（live 预览 = 每 move 按几何整形重合成）→抬手落像素；中断 = cancel 不进 undo。子工具 line/rect/circle/**grid**（尺笔退化版：nu×nv 格默认 2×6=6头身+中线，border 默认关，多线一条 undo）。几何纯函数层 `src/shape-geometry.ts`（直线 15° 画布吸附 / 矩形 frame 相对 AABB / 圆弧鼠绘拟合：闭合 = frame 轴 AABB **max 范数**（切线边界哲学）、弧 = LSQ 椭圆→Kasa 圆回落 + **winding ≥360° 才闭合**）。恒压 0.5、强制无 taper（覆写冻结 ResolvedBrush）；共享 brush 笔架与当前笔（`getRackToolKey` alias）。live/commit 走既有 stamp overlay 与 `commitBrushStroke`（同一份 StampCollect，多 polyline 引擎内 merge）；pixelMode = 每帧 `restoreFromSnapshot` + 逐像素 exact-once（Bresenham 家族 + 全形状 seen-set 去重）。
+一个 shape = 一个 stroke 的笔（对标滤镜笔，**不是**带 gizmo 的可编辑对象；ADR-0005）。按下→拖动（live 预览 = 每 move 按几何整形重合成）→抬手落像素；中断 = cancel 不进 undo。子工具 line/rect/circle/**grid**（尺笔退化版：nu×nv 格默认 2×6=6头身+中线，border 默认关，多线一条 undo）。几何纯函数层 `src/shape-geometry.ts`（直线 15° 画布吸附 / 矩形 frame 相对 AABB / 圆弧鼠绘拟合：闭合 = frame 轴 AABB **max 范数**（切线边界哲学）、弧 = LSQ 椭圆→Kasa 圆回落 + **winding ≥360° 才闭合**）。恒压 0.5、强制无 taper（覆写冻结 ResolvedBrush）；共享 brush 笔架与当前笔（`getRackToolKey` alias；v0.6.25 pin 进 brush-rack-reactive 测试）。live/commit 走既有 stamp overlay 与 `commitBrushStroke`（同一份 StampCollect，多 polyline 引擎内 merge）；pixelMode = 每帧 `restoreFromSnapshot` + 逐像素 exact-once（Bresenham 家族 + 全形状 seen-set 去重）。
 _Avoid_: 手势识别自动 snap（判定延迟，被否）, adjusting 态/手柄（从没要过）, defaultPressure 字段（撤案——鼠标主路径本就恒 0.5）, 旧 src/shapes.js 的直填路线
 
 **透视 frame（PerspConfig / [[形状笔（ShapeBrushEngine）]] 全局）**:
