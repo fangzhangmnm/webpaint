@@ -489,6 +489,8 @@ export const S = {
   "la.selectAllShort": { zh: "全选", en: "Select all", ja: "すべて選択", tok: "wile ale" }, 
   "la.invertShort":  { zh: "反选", en: "Invert selection", ja: "選択を反転", tok: "wile ante" }, 
   "la.clearPixels":  { zh: "清除选区内像素", en: "Clear pixels in selection", ja: "選択範囲のピクセルを消去", tok: "o weka e kule lon ma wile" },
+  "fm.noTransform":  { zh: "填色模式没有变换——先回套索", en: "No transform in fill mode — switch to lasso first", ja: "塗りつぶしモードでは変形できません", tok: "ilo pi kule ma la sina ken ala ante e ma" },
+  "sc.shapeBrush":   { zh: "形状笔", en: "Shape brush", ja: "シェイプブラシ", tok: "ilo pi sitelen selo" },
   "la.antsToggle":   { zh: "蚂蚁线", en: "Marching ants", ja: "選択範囲の点線", tok: "linja pi ma wile" },
   "la.polygon":      { zh: "多边形套索（逐点落顶点，点回起点闭合）", en: "Polygon lasso (tap to add vertices, tap start to close)", ja: "多角形選択（頂点をタップで追加、始点で閉じる）", tok: "ma wile pi linja mute" },
   "sc.polygonCancel": { zh: "取消多边形", en: "Cancel polygon", ja: "多角形をキャンセル", tok: "o pini ala e linja mute" },

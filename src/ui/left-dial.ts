@@ -109,7 +109,8 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
     template: `
       <button class="left-sidebar-brush" type="button" :title="L.brush"
         @pointerdown="brushDown" @pointerup="brushUp" @pointerleave="brushUp" @pointercancel="brushUp" @click="brushClick">
-        <span class="left-sidebar-brush-name">{{ brushName }}</span>
+        <!-- v0.6.24 user：笔架按钮用笔架图标不用笔名（多语言是坑；将来可能放笔形 svg 预览） -->
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><use href="#brush-rack"/></svg>
       </button>
       <input ref="sizeSlider" id="sizeSlider" class="left-sidebar-slider" type="range" min="0" :max="sizePosMax" step="1"
         :value="sizePos" :disabled="!canDraw" orient="vertical" :aria-label="L.size" @input="onSizeInput" />

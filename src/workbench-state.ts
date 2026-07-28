@@ -146,6 +146,11 @@ function freshGroups() {
     // v0.6.19 蚂蚁线（user 拍板+持久化同意 2026-07-28）：fill 模式下可关（默认开）；
     //   toggle 只存在于 fill，非 fill 恒显示（ADR-0004 修订记录）。
     fill:          { showAnts: true },
+    // v0.6.24 fill/lasso 分家（user 拍板：mental model 两个不互通的工具、实现一条路）：
+    //   子工具/布尔/1:1 per-tool 持久化（v0.5.16 共享一份 RAM 记忆 _selMem 作废）。
+    //   fill 默认魔棒+并（赛璐璐点色工作流）；selection 默认矩形+新建。
+    lassoTool:     { sub: "rect" as string, setOp: "new" as string, constrainSquare: false },
+    fillTool:      { sub: "magic" as string, setOp: "union" as string, constrainSquare: false },
     // ADR-0005/0006 形状笔：子工具 + **per-图形约束**（user：每个图形的 lock 分别持久化，默认全不锁）
     //   + grid 配置（默认 2×6 = 6 头身 + 中线，border 关）
     shapeBrush:    { sub: "line" as string, constrainLine: false, constrainRect: false, constrainCircle: false, gridNu: 2, gridNv: 6, gridBorder: false },
@@ -256,6 +261,16 @@ export const editorState = {
   },
   fill: {
     get showAnts(): boolean { return S.g.fill.showAnts; }, set showAnts(v: boolean) { S.g.fill.showAnts = v; },
+  },
+  lassoTool: {
+    get sub(): string { return S.g.lassoTool.sub; }, set sub(v: string) { S.g.lassoTool.sub = v; },
+    get setOp(): string { return S.g.lassoTool.setOp; }, set setOp(v: string) { S.g.lassoTool.setOp = v; },
+    get constrainSquare(): boolean { return S.g.lassoTool.constrainSquare; }, set constrainSquare(v: boolean) { S.g.lassoTool.constrainSquare = v; },
+  },
+  fillTool: {
+    get sub(): string { return S.g.fillTool.sub; }, set sub(v: string) { S.g.fillTool.sub = v; },
+    get setOp(): string { return S.g.fillTool.setOp; }, set setOp(v: string) { S.g.fillTool.setOp = v; },
+    get constrainSquare(): boolean { return S.g.fillTool.constrainSquare; }, set constrainSquare(v: boolean) { S.g.fillTool.constrainSquare = v; },
   },
   magicWand: {
     get threshold(): number { return S.g.magicWand.threshold; }, set threshold(v: number) { S.g.magicWand.threshold = v; },

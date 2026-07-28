@@ -7,12 +7,11 @@
 //     工具身份即模式——editorState.fillMode 开关已删（工具不 per-doc 持久化，与笔/套索一视同仁）。
 //   · **只 preview 不落文档**：fill 工具 + 有选区 → GPU 预览（board fill provider → 笔刷 overlay 同槽，
 //     journal v0.4 Plan L81「commit 和 live 同一个 shader，ssot」）。
-//   · 出口语义（v0.5.15 user 修正；切工具出口 v0.6.19 再修订，ADR-0004 修订记录）：
-//       回套索（油漆桶 toggle 关 / L 键）= **取消**——丢弃预览、选区保留，回去继续编辑选区；
-//       切去其他工具（笔/橡皮/…）   = **commit + 清选区**（v0.6.19：原"选区保留"改清——
-//         填完切笔就是要画画了，蚂蚁线留着碍事；undo 兜底可回）；
-//       ✓  = commit + 清选区（选区的 commit，compound 一整点，留在 fill 连续填下一块）；
-//       去选 = 丢弃（选区一起清，undo 兜底）。
+//   · 出口语义（v0.6.24「彻底不互通」拍板，ADR-0004 修订记录；супersede v0.5.15/v0.6.19）：
+//       **进 fill（从任何工具，含 lasso）= 清选区**（undo 兜底）——fill 从零开始自己点；
+//       切去任何工具（**含回 lasso**）= **commit + 清选区**（对称，无特例）；
+//       ✓  = commit + 清选区（留在 fill 连续填下一块）；去选 = 丢弃。
+//     mental model = 两个不能互通的工具（实现共用一条 lasso 管线）。
 //     文档关闭/切换 = 丢弃（interrupt=cancel 家规；commit 只对显式的工具切换）。
 //   · 填色**尊重 lockAlpha**（预览=commit 同 shader 同参）；吸管吸预览色（拍板#8 同款）。
 //
@@ -82,13 +81,26 @@ function _onModeChange(): void {
   if (editMode.isTransient()) return;   // 括号里：不更新、不判
   const prev = _lastPersistentMode;
   _lastPersistentMode = m;
-  if (m === "fill" && prev !== "fill") { board.requestRender(); return; }
+  if (m === "fill" && prev !== "fill") {
+    // v0.6.24 不互通：进 fill = 清掉带进来的选区（undo 兜底）——fill 从零开始自己点
+    const { input, history, workpiece, ops } = _ctx!;
+    if (doc.selection) {
+      const entry = input.lasso.setSelection(null);
+      if (entry) history.run(workpiece, ops.selection, { _initialBefore: { v: entry.before ?? null } });
+    }
+    board.requestRender();
+    return;
+  }
   if (prev !== "fill" || m === "fill") return;
-  if (m === "lasso") { board.requestRender(); return; }   // 取消油漆桶：丢弃预览，回去继续编辑选区
-  // 真切去别的工具：预览确实挂着才 commit（组/隐藏层本就没显示 → 静默跳过）。
-  //   v0.6.19：commit 后清选区（原保留；user 2026-07-28——进其他工具不留选区）。
+  // 真切去任何工具（v0.6.24 含回 lasso，无特例）：预览确实挂着才 commit + 清选区
+  //   （组/隐藏层本就没显示 → 静默跳过，但选区也要清——不互通）。
   if (doc.selection && requireEditableLeaf(doc, null)) _doCommit(true);
-  else board.requestRender();   // 没得 commit 也要刷掉残余 overlay
+  else if (doc.selection) {
+    const { input, history, workpiece, ops } = _ctx!;
+    const entry = input.lasso.setSelection(null);
+    if (entry) history.run(workpiece, ops.selection, { _initialBefore: { v: entry.before ?? null } });
+    board.requestRender();
+  } else board.requestRender();   // 没得 commit 也要刷掉残余 overlay
 }
 
 export function initFillMode(ctx: AppContext): void {

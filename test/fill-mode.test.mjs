@@ -105,3 +105,25 @@ test("[fill-mode] 切出时无选区 / 活动层不可编辑 → 静默跳过", 
   setMode(ctx, "brush");
   eq(calls.commitFill, 0, "活动层是组（预览本没显示）切出不 commit、不炸");
 });
+
+test("[fill-mode] v0.6.24 不互通：带选区进 fill = 清选区（undo 兜底）", () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "lasso");
+  ctx.doc.selection = {};             // lasso 里圈了个选区
+  setMode(ctx, "fill");               // 切进 fill
+  eq(calls.setSelectionNull, 1, "进 fill 清掉带进来的选区");
+  eq(ctx.doc.selection, null, "fill 从零开始");
+  eq(calls.commitFill, 0, "只清不 commit（没预览可 commit）");
+});
+
+test("[fill-mode] v0.6.24 不互通：fill→lasso 也 commit+清（对称无特例）", () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  setMode(ctx, "fill");
+  ctx.doc.selection = {};             // fill 里自己点出选区
+  setMode(ctx, "lasso");              // 回套索
+  eq(calls.commitFill, 1, "回 lasso 也 commit（v0.5.15 '保留' 作废）");
+  eq(calls.setSelectionNull, 1, "commit 后清选区");
+  eq(ctx.doc.selection, null, "选区不跟去 lasso");
+});
