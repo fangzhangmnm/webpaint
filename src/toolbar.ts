@@ -70,35 +70,15 @@ function _pushSelToolToEngine(tool: string) {
   input.lasso.setSetOpMode(rec.setOp as Parameters<typeof input.lasso.setSetOpMode>[0]);
   input.lasso.setConstrainSquare(rec.constrainSquare);
 }
-// v0.6.24 顶栏工具组槽（点=激活记忆成员/已激活再点=开组菜单；"再点开笔架"整体废除——user 一直不喜欢）
-const TOOL_ICON: Record<string, string> = { brush: "#pencil", shapeBrush: "#shapes", lasso: "#lasso", fill: "#paint-bucket" };
-const _toolSlots: Array<{ members: string[]; btn: HTMLElement; use: SVGUseElement; menu: HTMLElement; openMenu: () => void; closeMenu: () => void; consumeLp: () => boolean }> = [];
+// （v0.6.31 回滚：顶栏组槽/长按/Alt/右键全撤——user 真机"长按还是难受"；四工具并列，
+//   "再点开笔架"v79 与 lasso 二击 Esc v124 的废除**保留**。）
 // v0.6.27 小三角统一语义（user）：单击=控件主动作（激活/toggle；纯选择槽=开菜单）；
 //   **长按 ≈450ms=开该控件的菜单**；菜单开着再点=关。共享 helper：返回 consume()——
 //   长按已触发时吞掉随后的 click。
-// 阈值 300ms（user 拍板 2026-07-28；Android 默认 400/iOS 500，300 靠桌面软件档——慢 tap 误触
-//   风险由 :active 按压蓄力动画垫着，真机不行回 350）。右键 = 立即开菜单（PS 同款；也兜底
-//   iOS 系统级长按 ~500ms 才发的 contextmenu）。
-const LONG_PRESS_MS = 300;
-function wireLongPress(btn: HTMLElement, fire: () => void): () => boolean {
-  let timer = 0, fired = false;
-  btn.classList.add("lp-btn");   // 按压蓄力动画（styles.css :active，transition 与阈值同步）
-  btn.addEventListener("pointerdown", () => {
-    fired = false;
-    timer = window.setTimeout(() => { fired = true; timer = 0; fire(); }, LONG_PRESS_MS);
-  });
-  const cancel = () => { if (timer) { window.clearTimeout(timer); timer = 0; } };
-  btn.addEventListener("pointerup", cancel);
-  btn.addEventListener("pointerleave", cancel);
-  btn.addEventListener("pointercancel", cancel);
-  btn.addEventListener("contextmenu", (e: Event) => { e.preventDefault(); if (!fired) { fired = true; cancel(); fire(); } });
-  return () => { const f = fired; fired = false; return f; };
-}
 // v0.6.27（user：下笔时 slot 菜单也该自动关）：全部浮出小菜单的统一登记 + 一把关
 const _transientMenus: HTMLElement[] = [];
 export function closeTransientMenus() {
   for (const m of _transientMenus) m.classList.add("hidden");
-  document.body.classList.toggle("tool-slot-open", _toolSlots.some((s) => !s.menu.classList.contains("hidden")));
 }
 const SETOP_ICON: Record<string, string> = { new: "#selection-new", union: "#selection-union", subtract: "#selection-difference", intersect: "#selection-union" };
 const SUBTOOL_ICON: Record<string, string> = { freehand: "#select-freehand", rect: "#select-rectangle", ellipse: "#select-ellipse", polygon: "#select-polygon", magic: "#magic-wand" };
@@ -304,14 +284,7 @@ export function _syncEditModeUI() {
   dialReactive.tool = m;   // 反应式 dial 镜像当前工具（含 transient）→ currentBrush computed 重算
   const transient = editMode.isTransient();
   // 工具按钮高亮：transient 时一个都不亮；持久工具高亮对应按钮
-  // v0.6.24：组槽先跟上当前持久工具（data-tool 就地改 + 槽图标 + 菜单高亮），旧 lasso↔fill alias hack 删
-  const pt = document.body.dataset.tool || "brush";
-  for (const s of _toolSlots) {
-    if (s.members.includes(pt)) { s.btn.dataset.tool = pt; s.use.setAttribute("href", TOOL_ICON[pt] || s.use.getAttribute("href")!); }
-    for (const mb of s.menu.querySelectorAll<HTMLElement>("[data-slot-tool]")) {
-      mb.setAttribute("aria-pressed", mb.dataset.slotTool === s.btn.dataset.tool ? "true" : "false");
-    }
-  }
+  // v0.6.31：四工具并列（fill 有自己的顶栏钮），高亮 = data-tool 直配
   for (const b of els.toolBtns) b.setAttribute("aria-pressed", (!transient && b.dataset.tool === m) ? "true" : "false");
   // 液化 / filterBrush 没独立 data-tool 按钮，用 adjust 按钮高亮（transient 期间也不亮）
   els.topAdjustBtn?.setAttribute("aria-pressed", (m === "filterBrush") ? "true" : "false");
@@ -507,14 +480,9 @@ export function initToolbar(ctx: AppContext) {
   // v0.5.14 组槽通用：点槽 → 锚定槽下方弹紧凑图标排（user：下拉要贴槽、图标不要文字）。
   const wireSlotMenu = (slot: HTMLElement, menu: HTMLElement, onPick: (b: HTMLElement) => void) => {
     _transientMenus.push(menu);
-    // 纯选择槽的主动作就是"选"→ 单击=开/关菜单；长按=也开（v0.6.27 小三角统一语义）
-    const consumeLp = wireLongPress(slot, () => {
-      menu.classList.remove("hidden");
-      anchorPopupToBtn(menu, slot, { align: "left", offsetY: 6 });
-    });
+    // 纯选择槽（v0.6.31 唯一的小三角语义）：单击=开/关菜单
     slot.addEventListener("click", (e: Event) => {
       e.stopPropagation();
-      if (consumeLp()) return;
       const wasHidden = menu.classList.contains("hidden");
       menu.classList.toggle("hidden");
       if (wasHidden) anchorPopupToBtn(menu, slot, { align: "left", offsetY: 6 });
@@ -581,20 +549,21 @@ export function initToolbar(ctx: AppContext) {
       menu.classList.add("hidden");
     });
   }
-  // v0.6.27 小三角统一语义：单击=切换子工具（已选中=无事）；长按=开变体/配置菜单；菜单开着再点=关
+  // v0.6.31：单击=切换子工具；已选中再点=开变体/配置菜单（长按撤，回 v0.6.26 形态）
   for (const b of shapeSubBtns) {
     const sub2 = b.dataset.shapeSub as Parameters<typeof input.shapeBrush.setSubTool>[0];
     const menu2 = shapeVarMenus[sub2];
-    const consumeLp = wireLongPress(b, () => {
-      if (!menu2) return;
-      menu2.classList.remove("hidden");
-      anchorPopupToBtn(menu2, b, { align: "left", offsetY: 6 });
-    });
     b.addEventListener("click", (e: Event) => {
-      if (consumeLp()) { e.stopPropagation(); return; }
-      if (menu2 && !menu2.classList.contains("hidden")) { e.stopPropagation(); menu2.classList.add("hidden"); return; }
       if (input.isStrokeActive()) input.abortActiveStroke();
-      if (input.shapeBrush.getSubTool() === sub2) return;   // 已选中=无事（对齐工具组槽 v0.6.27）
+      if (input.shapeBrush.getSubTool() === sub2) {
+        e.stopPropagation();
+        if (menu2) {
+          const wasHidden = menu2.classList.contains("hidden");
+          menu2.classList.toggle("hidden");
+          if (wasHidden) anchorPopupToBtn(menu2, b, { align: "left", offsetY: 6 });
+        }
+        return;
+      }
       input.shapeBrush.setSubTool(sub2);
       editorState.shapeBrush.sub = sub2;
       updateShapeToolbar();
@@ -725,13 +694,8 @@ export function initToolbar(ctx: AppContext) {
     updateLassoToolbar();   // toggle pressed 态/stepper 显隐在 updateLassoToolbar 派生
   };
   _transientMenus.push(lassoMagicExpandMenu);
-  const consumeExpandLp = wireLongPress(lassoExpandToggle, () => {
-    lassoMagicExpandMenu.classList.remove("hidden");
-    anchorPopupToBtn(lassoMagicExpandMenu, lassoExpandToggle, { align: "left", offsetY: 6 });
-  });
   lassoExpandToggle.addEventListener("click", (e: Event) => {
     e.stopPropagation();
-    if (consumeExpandLp()) return;   // 长按=只开 stepper 不切开关
     editorState.magicWand.expand = !editorState.magicWand.expand;
     pushMagicExpandToEngine();
     if (editorState.magicWand.expand) {
@@ -918,63 +882,11 @@ export function initToolbar(ctx: AppContext) {
   _syncEditModeUI();   // 初始同步（boot setTool 同工具会 early-return 不 emit，这里兜一次）
 
   // ---- 工具按钮 ----
-  // v0.6.24 顶栏组槽菜单；v0.6.26 grill 定稿（Blender/PS 惯例，user 拍板"改长按方案"）：
-  //   单击=立即激活记忆成员（高频手感，已激活=无事）；**长按 ≈450ms=开组菜单**；Alt+点=循环成员；
-  //   组菜单开着时上下文子工具栏整体压下（body.tool-slot-open，不同时显示）。
-  //   （v0.6.27 user："二次点击混淆"→ 已激活再点=开菜单 已删，只留菜单开着时再点=关。）
-  const _setToolSlotOpen = () => {
-    document.body.classList.toggle("tool-slot-open", _toolSlots.some((s) => !s.menu.classList.contains("hidden")));
-  };
-  const wireToolSlot = (btnId: string, useId: string, menuId: string, members: string[]) => {
-    const btn = byId(btnId), menu = byId(menuId);
-    const use = byId(useId) as unknown as SVGUseElement;
-    const openMenu = () => {
-      menu.classList.remove("hidden");
-      anchorPopupToBtn(menu, btn, { align: "left", offsetY: 6 });
-      _setToolSlotOpen();
-    };
-    const closeMenu = () => { menu.classList.add("hidden"); _setToolSlotOpen(); };
-    _transientMenus.push(menu);
-    const consumeLp = wireLongPress(btn, openMenu);
-    _toolSlots.push({ members, btn, use, menu, openMenu, closeMenu, consumeLp });
-    for (const mb of [...menu.querySelectorAll<HTMLElement>("[data-slot-tool]")]) {
-      mb.addEventListener("click", () => {
-        closeMenu();
-        setTool(mb.dataset.slotTool!);
-        closeExclusive();
-      });
-    }
-    document.addEventListener("pointerdown", (e: Event) => {
-      if (menu.classList.contains("hidden")) return;
-      if (menu.contains(e.target as Node) || btn.contains(e.target as Node)) return;
-      closeMenu();
-    });
-  };
-  wireToolSlot("toolPen", "toolBrushSlotUse", "toolBrushSlotMenu", ["brush", "shapeBrush"]);
-  wireToolSlot("toolLasso", "toolSelSlotUse", "toolSelSlotMenu", ["lasso", "fill"]);
+  // v0.6.31 回滚：四工具并列，单击=切换（已激活=无事）。长按/Alt/右键/组菜单全撤（真机难受）。
   for (const b of els.toolBtns) {
-    b.addEventListener("click", (e: Event) => {
-      const tool = b.dataset.tool!;   // .tool[data-tool] 选择器保证存在（组槽的 data-tool 随成员就地改）
-      const slot = _toolSlots.find((s) => s.btn === b);
-      if (slot?.consumeLp()) { e.stopPropagation(); return; }   // 长按已开菜单：吞掉随后的 click
-      // v0.6.26 user："alt 循环也顺便加上"（Photoshop 同款）：Alt+点击 = 循环组内成员
-      if (slot && (e as MouseEvent).altKey) {
-        e.stopPropagation();
-        const curMember = slot.btn.dataset.tool!;
-        const next = slot.members[(slot.members.indexOf(curMember) + 1) % slot.members.length];
-        slot.closeMenu();
-        setTool(next);
-        closeExclusive();
-        return;
-      }
-      // v0.6.27（user："二次点击比较混淆"）：已激活再点 = 无事（对齐 Blender/PS——组菜单只走长按/Alt）；
-      //   唯一例外：菜单已开着时再点按钮 = 关掉它（长按开的菜单要能同指关闭）。
-      if (slot && !slot.menu.classList.contains("hidden")) {
-        e.stopPropagation();
-        slot.closeMenu();
-        return;
-      }
-      if (slot && editMode.current() === tool) { e.stopPropagation(); return; }
+    b.addEventListener("click", () => {
+      const tool = b.dataset.tool!;   // .tool[data-tool] 选择器保证存在
+      if (editMode.current() === tool) return;   // 已激活=无事（v0.6.27 语义保留）
       setTool(tool);
       // 切到新 tool 时关掉之前开的 rack（防止 stale）
       closeExclusive();
