@@ -61,8 +61,16 @@ function isoUnitFor(fam: Family): Pt | null {
   return null;
 }
 
-// 地平线奇点 ε（doc px）：pencil 枚举坐标的 1/w 饱和阈值（user：过线后梯度按 1/ε 不按 1/z）。
+// 地平线奇点 ε：pencil 枚举坐标的 1/w 饱和阈值。
+// v0.6.23（user 拍板）：ε **无量纲化** = 杠杆封顶——ε_lat = max(2px, w0/HORIZON_LEVER)，
+//   w0 = 锚点到消失线距离。绝对 px 是错量纲（杠杆 = w0/ε 随构图无界：锚点 300px 时 2px ε
+//   = 150× 放大，1px 拖拽近边跳 150px——真机"太小"的根源）。封顶 5× 后构图自适应、缩放不变。
 export const HORIZON_EPS = 2;
+export const HORIZON_LEVER = 5;
+export function horizonEpsFor(w0: number): number { return Math.max(HORIZON_EPS, w0 / HORIZON_LEVER); }
+// 越线回缩的发丝带（sub-pixel ≈ 就钉在施瓦西半径上）：纵深 1/PIN → BIG（"跑到 infinity"），
+//   横向由 ε_lat 饱和跟手。与 ε_lat 解耦（v0.6.23 拍板）——ε_lat 管梯度、PIN 管远边钉哪。
+export const HORIZON_PIN = 0.5;
 // parallel 枚举坐标（真发散方向）的 clamp（"按无穷大算"的有限替身；过线不翻负、钉在 +BIG）
 const DEPTH_BIG = 1e6;
 
@@ -144,14 +152,18 @@ export function quadFromCorners(c0: Pt, c1: Pt, famA: Family, famB: Family): [Pt
     const s = w0raw < 0 ? -1 : 1;                      // 锚点(c0)侧为正
     const w0 = s * w0raw;
     const w1 = s * (l[0] * c1.x + l[1] * c1.y + l[2]);
-    if (w0 < HORIZON_EPS || w1 < HORIZON_EPS) {
+    const bothPencil = famA.kind === "pencil" && famB.kind === "pencil";
+    const band = bothPencil ? HORIZON_EPS : HORIZON_PIN;   // 双 pencil：回缩带=饱和带（旧行为，见 planeChart 注）
+    if (w0 < HORIZON_EPS || w1 < (bothPencil ? HORIZON_EPS : horizonEpsFor(w0))) {
       const chart = planeChart(famA, famB, c0);
       if (!chart) return null;                          // c0 就在消失线上：病态
-      // c1 进 ε 带/越线 → 垂直回缩钉在 ε 带上（"读作 ε 带上的替身"）。拖多深都等价于
-      //   贴带：横向仍跟手（1/ε 梯度）、纵深钉住不再前进——路收敛进 VP、宽度不抖。
-      //   （不能拿越线点直接喂 toPlane：饱和分母下分子在对侧深处可再变号 → 翻面复活。）
-      const c1e = w1 < HORIZON_EPS
-        ? { x: c1.x + s * l[0] * (HORIZON_EPS - w1), y: c1.y + s * l[1] * (HORIZON_EPS - w1) }
+      // c1 进饱和带 → chart 平面坐标（横向被 ε_lat 饱和，杠杆 ≤5×）；越线 → 先垂直回缩：
+      //   有平行族 → **发丝带 PIN=0.5px**（≈ 钉在施瓦西半径上）——纵深 1/PIN→BIG（"跑到
+      //   infinity"）、横向按回缩点分子在 ε_lat 下跟手；双 pencil → 回缩到 2px 带（纠缠，
+      //   见 planeChart 注）。深天空原始分子可变号，直接喂 toPlane 会翻面/出负坐标
+      //   （v0.6.18/v0.6.23 两轮教训），回缩后符号恒稳。
+      const c1e = w1 < band
+        ? { x: c1.x + s * l[0] * (band - w1), y: c1.y + s * l[1] * (band - w1) }
         : c1;
       const P1 = chart.toPlane(c1e);
       const p10 = chart.toDoc(P1.x, 0);
@@ -267,13 +279,20 @@ export function planeChart(famA: Family, famB: Family, anchor: Pt): PlaneChart |
   const m11 = w0 * db.y / det, m12 = -w0 * db.x / det;    // → u
   const m21 = -w0 * da.y / det, m22 = w0 * da.x / det;    // → v
   // ε 规则：枚举 pencil 族的坐标饱和（u 枚举 famB、v 枚举 famA）；parallel 枚举坐标真发散 + clamp。
+  //   v0.6.23：ε = 杠杆封顶版（horizonEpsFor）；纵深(非饱和)坐标越线（w≤0）**强制钉 +BIG**——
+  //   user 原意"跑到 infinity 钉在施瓦西半径上，只要不跳到 -infinity"；不能用 max(w,1e-9) 除法，
+  //   对侧深处分子会变号翻 -BIG = 翻面复活（v0.6.18 教训）。w→0⁺ 真值本就 clamp +BIG，衔接连续。
   const uSat = famB.kind === "pencil";
   const vSat = famA.kind === "pencil";
+  // 双 pencil 平面（二/三点地面）：纵深与横向纠缠（两轴都收敛地平线），杠杆封顶的大 ε 会把
+  //   饱和坐标对拉出 patch（p10 出负坐标 toDoc null，2026-07-28 晚踩过）→ 保持 2px 带旧行为；
+  //   有平行族的模式（一点地面/各墙面）才享受 w0/5 无量纲封顶。
+  const epsLat = (uSat && vSat) ? HORIZON_EPS : horizonEpsFor(w0);
   const anchorChart = projC(anchor, w0);
   const toPlane = (p: Pt): Pt => {
     const w = wOf(p);
     const coord = (sat: boolean): Pt => {
-      const we = sat ? Math.max(w, HORIZON_EPS) : Math.max(w, 1e-9);
+      const we = sat ? Math.max(w, epsLat) : Math.max(w, 1e-9);
       const c = projC(p, we);
       return { x: c.x - anchorChart.x, y: c.y - anchorChart.y };
     };
@@ -284,6 +303,10 @@ export function planeChart(famA: Family, famB: Family, anchor: Pt): PlaneChart |
     let v = m21 * cv.x + m22 * cv.y;
     if (!Number.isFinite(u)) u = DEPTH_BIG;
     if (!Number.isFinite(v)) v = DEPTH_BIG;
+    if (w <= 0) {
+      if (!uSat) u = DEPTH_BIG;   // 纵深越线：钉无穷远替身（正向），横向仍按 1/ε 跟手
+      if (!vSat) v = DEPTH_BIG;
+    }
     return {
       x: Math.max(-DEPTH_BIG, Math.min(DEPTH_BIG, u)),
       y: Math.max(-DEPTH_BIG, Math.min(DEPTH_BIG, v)),

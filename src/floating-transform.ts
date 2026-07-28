@@ -248,10 +248,16 @@ export class FloatingTransform {
     } else if (d.kind === "rotate") {
       applyRotate(f.mesh, d.meshSnap, d, x, y);
     } else if (d.kind === "basisRotate") {
-      applyBasisRotate(f, d, x, y);
+      applyBasisRotate(f, d, x, y, this._contentRects());
     }
     this.onChange();                  // mesh 变 → board 每帧用新 mesh 重算 Hinv 重 warp（GPU，无 CPU 缓存）
   }
+  // basisRotate 外接用的内容 rect 集（workpiece floats；测试直接播种 _live 时为空 → 退化用 mesh 角）
+  _contentRects(): Rect[] {
+    const fs = this._w?.readFloatState();
+    return fs ? fs.floats.map((fl) => ({ ...fl.rect })) : [];
+  }
+
   endDrag() {
     const d = this._drag;
     this._drag = null;
@@ -495,7 +501,7 @@ function applyRotate(mesh: Mesh, meshSnap: Mesh, drag: Drag, x: number, y: numbe
 // v0.6.21 方手柄：**转参考 frame 的轴、不动像素**（Procreate 语义，user 拍板 2026-07-28）。
 //   mesh 绕质心转 dθ（同圆手柄）+ frame 复合 H⁻¹∘R∘H（H=旧 mesh 的仿射映射）→ 每个 source 的
 //   destQuad 恒等（display = H′∘F′⁻¹ = R∘H∘(F∘H⁻¹∘R∘H)⁻¹ = H∘F⁻¹）。仅仿射 mesh 可用。
-function applyBasisRotate(f: LiveMeta, d: Drag, x: number, y: number) {
+function applyBasisRotate(f: LiveMeta, d: Drag, x: number, y: number, rects: Rect[]) {
   const m = d.meshSnap;
   if (!isAffineQuad(m)) return;
   const cx = (m[0][0].x + m[0][1].x + m[1][0].x + m[1][1].x) / 4;
@@ -503,28 +509,56 @@ function applyBasisRotate(f: LiveMeta, d: Drag, x: number, y: number) {
   const a0 = Math.atan2(d.startY - cy, d.startX - cx);
   const a1 = Math.atan2(y - cy, x - cx);
   const cos = Math.cos(a1 - a0), sin = Math.sin(a1 - a0);
-  const rot = (p: Point): Point => {
-    const px = p.x - cx, py = p.y - cy;
-    return { x: cx + px * cos - py * sin, y: cy + px * sin + py * cos };
-  };
-  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) f.mesh[i][j] = rot(m[i][j]);
-  // A = H⁻¹∘R∘H 作用在单位方（H 仿射：tl + u·e1 + v·e2；back-solve 用 e1/e2 基）
-  const tl = m[0][0];
-  const e1 = { x: m[0][1].x - tl.x, y: m[0][1].y - tl.y };
-  const e2 = { x: m[1][0].x - tl.x, y: m[1][0].y - tl.y };
-  const det = e1.x * e2.y - e1.y * e2.x;
+  // v0.6.23（user 真机："选区大小没有自动变化，你不是说外切吗"）：转轴后**重新求外接**——
+  //   新 mesh = 内容（各 source destQuad 角点；display 映射在本操作下不变）在旋转基下的
+  //   有向包围平行四边形；新 frame = 新 mesh 经 display 映射 D=H∘F⁻¹（仿射可逆）的原像。
+  //   像素不动、框随角度呼吸、始终外接内容（45° 最大）。
+  // 1) 内容角点（display 固定 = 用 SNAP frame/mesh 算）
+  const pts: Point[] = [];
+  if (rects.length) {
+    for (const r of rects) {
+      const q = sourceDestQuad(r, d.frameSnap, m);
+      if (q) for (const row of q) for (const p of row) pts.push(p);
+    }
+  }
+  if (!pts.length) for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) pts.push(m[i][j]);
+  // 2) 旋转基（把 SNAP mesh 的两条边向量转 dθ；不平移）
+  const e1 = { x: m[0][1].x - m[0][0].x, y: m[0][1].y - m[0][0].y };
+  const e2 = { x: m[1][0].x - m[0][0].x, y: m[1][0].y - m[0][0].y };
+  const r1 = { x: e1.x * cos - e1.y * sin, y: e1.x * sin + e1.y * cos };
+  const r2 = { x: e2.x * cos - e2.y * sin, y: e2.x * sin + e2.y * cos };
+  const det = r1.x * r2.y - r1.y * r2.x;
   if (Math.abs(det) < 1e-9) return;
-  const A = (u: number, v: number): Point => {
-    const pr = rot({ x: tl.x + u * e1.x + v * e2.x, y: tl.y + u * e1.y + v * e2.y });
-    const rx = pr.x - tl.x, ry = pr.y - tl.y;
-    return { x: (rx * e2.y - ry * e2.x) / det, y: (ry * e1.x - rx * e1.y) / det };
+  // 3) 内容在旋转基下的坐标范围（相对 SNAP 质心；基可非正交——平行四边形包络）
+  let amin = Infinity, amax = -Infinity, bmin = Infinity, bmax = -Infinity;
+  for (const p of pts) {
+    const rx = p.x - cx, ry = p.y - cy;
+    const a = (rx * r2.y - ry * r2.x) / det;
+    const b = (ry * r1.x - rx * r1.y) / det;
+    if (a < amin) amin = a; if (a > amax) amax = a;
+    if (b < bmin) bmin = b; if (b > bmax) bmax = b;
+  }
+  if (!(amax > amin) || !(bmax > bmin)) return;
+  const at = (a: number, b: number): Point => ({ x: cx + a * r1.x + b * r2.x, y: cy + a * r1.y + b * r2.y });
+  const tl2 = at(amin, bmin), tr2 = at(amax, bmin), bl2 = at(amin, bmax), br2 = at(amax, bmax);
+  // 4) 新 frame = Dinv(新 mesh 角)。D：source→dest 仿射，由三对已知点定
+  //    （F_snap 的 (0,0)/(1,0)/(0,1) 角 ↦ SNAP mesh 的 TL/TR/BL）；Dinv 反解。
+  const fsn = d.frameSnap;
+  const s0 = fsn.origin;
+  const s1 = { x: fsn.origin.x + fsn.ux.x, y: fsn.origin.y + fsn.ux.y };
+  const s2 = { x: fsn.origin.x + fsn.uy.x, y: fsn.origin.y + fsn.uy.y };
+  const d1 = { x: m[0][1].x - m[0][0].x, y: m[0][1].y - m[0][0].y };   // = e1（dest 基）
+  const d2 = { x: m[1][0].x - m[0][0].x, y: m[1][0].y - m[0][0].y };
+  const dd = d1.x * d2.y - d1.y * d2.x;
+  if (Math.abs(dd) < 1e-9) return;
+  const Dinv = (p: Point): Point => {
+    const rx = p.x - m[0][0].x, ry = p.y - m[0][0].y;
+    const a = (rx * d2.y - ry * d2.x) / dd;
+    const b = (ry * d1.x - rx * d1.y) / dd;
+    return { x: s0.x + a * (s1.x - s0.x) + b * (s2.x - s0.x), y: s0.y + a * (s1.y - s0.y) + b * (s2.y - s0.y) };
   };
-  const fs = d.frameSnap;
-  const F = (q: Point): Point => ({
-    x: fs.origin.x + q.x * fs.ux.x + q.y * fs.uy.x,
-    y: fs.origin.y + q.x * fs.ux.y + q.y * fs.uy.y,
-  });
-  const o = F(A(0, 0)), pu = F(A(1, 0)), pv = F(A(0, 1));
+  f.mesh = [[tl2, tr2], [bl2, br2]];
+  const o = Dinv(tl2), pu = Dinv(tr2), pv = Dinv(bl2);
   f.gizmoFrame = { origin: o, ux: { x: pu.x - o.x, y: pu.y - o.y }, uy: { x: pv.x - o.x, y: pv.y - o.y } };
 }
 

@@ -9,7 +9,7 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 const {
   planeFamilies, quadFromCorners, homographyUnitSquare, applyMat3, invertMat3,
-  planeChart, snapDirections, snapToDirections, normalizeConfig, HORIZON_EPS,
+  planeChart, snapDirections, snapToDirections, normalizeConfig, HORIZON_EPS, HORIZON_LEVER,
   configFromModeState, planesForMode, defaultVpsForMode,
   boxAxesForMode, boxCorners, solveBoxDrag,
 } = await import("../src/perspective-frame.ts");
@@ -350,10 +350,21 @@ describe("perspective-frame · 跨地平线护栏（不解析延拓进另一张 
     const c0 = { x: 200, y: 400 };
     const q = quadFromCorners(c0, { x: 300, y: -200 }, famA, famB);
     assert(q);
-    // 远边两角（p10、c1'）钉在 ε 带上（= 地平线下 HORIZON_EPS，无穷远的有限替身）
-    assert(q[1].y >= vp.y - 1e-6 && q[1].y <= vp.y + HORIZON_EPS + 0.5, `p10 未收敛: y=${q[1].y}`);
-    assert(q[2].y >= vp.y - 1e-6 && q[2].y <= vp.y + HORIZON_EPS + 0.5, `c1' 未收敛: y=${q[2].y}`);
+    // 远边两角（p10、c1'）钉在发丝带上（≤1px ≈ 就在施瓦西半径上——v0.6.23 恢复"跑到 infinity"原意）
+    assert(q[1].y >= vp.y - 1e-6 && q[1].y <= vp.y + 1, `p10 未收敛: y=${q[1].y}`);
+    assert(q[2].y >= vp.y - 1e-6 && q[2].y <= vp.y + 1, `c1' 未收敛: y=${q[2].y}`);
     // 近边角 p01 仍在 c0 的水平线上（famB 线 = 同深度）
     close(q[3].y, 400, 1e-6);
+  });
+  it("ε 无量纲化（v0.6.23）：杠杆封顶 5×——c1 贴地平线横移 1px，近边角 p01 移 ≤5px+slack", () => {
+    const vp = { x: 256.5, y: 100.5 };
+    const [famA, famB] = planeFamilies({ ...CFG0, vp1: vp, plane: "ground" });
+    const c0 = { x: 200, y: 400 };   // w0=299.5 → ε_lat = w0/5 ≈ 59.9
+    const qa = quadFromCorners(c0, { x: 300, y: 101 }, famA, famB);
+    const qb = quadFromCorners(c0, { x: 301, y: 101 }, famA, famB);
+    assert(qa && qb);
+    const d = Math.hypot(qa[3].x - qb[3].x, qa[3].y - qb[3].y);
+    assert(d <= HORIZON_LEVER + 1, `近边杠杆 ${d.toFixed(2)} > ${HORIZON_LEVER}`);
+    // 旧绝对 ε=2 时这里是 ~150×——正是真机"太小"体感的来源
   });
 });
