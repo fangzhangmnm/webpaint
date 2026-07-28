@@ -61,7 +61,7 @@ function estimateSelectionBytes(sel: Selection | null): number {
 
 export function cloneFloatMeta(t: FloatTransformMeta): FloatTransformMeta {
   return {
-    gizmoBbox: { ...t.gizmoBbox },
+    gizmoFrame: { origin: { ...t.gizmoFrame.origin }, ux: { ...t.gizmoFrame.ux }, uy: { ...t.gizmoFrame.uy } },
     mesh: t.mesh.map((row) => row.map((p) => ({ x: p.x, y: p.y }))),
     meshN: t.meshN,
     mode: t.mode,
@@ -226,18 +226,19 @@ export class LiftFloatOp extends DocumentOperator<LiftFloatArgs, LiftSwapData> {
         if (r.x + r.w > gx1) gx1 = r.x + r.w;
         if (r.y + r.h > gy1) gy1 = r.y + r.h;
       }
-      const gizmoBbox = { x: gx0, y: gy0, w: gx1 - gx0, h: gy1 - gy0 };
+      const gw = gx1 - gx0, gh = gy1 - gy0;
       its.floats = {
         floats: baked.map((b) => b.float),
         transform: {
-          gizmoBbox,
+          // 初始 frame = AABB（轴对齐）；方手柄转轴后才是一般平行四边形（v0.6.21）
+          gizmoFrame: { origin: { x: gx0, y: gy0 }, ux: { x: gw, y: 0 }, uy: { x: 0, y: gh } },
           mesh: [
-            [{ x: gizmoBbox.x, y: gizmoBbox.y }, { x: gizmoBbox.x + gizmoBbox.w, y: gizmoBbox.y }],
-            [{ x: gizmoBbox.x, y: gizmoBbox.y + gizmoBbox.h }, { x: gizmoBbox.x + gizmoBbox.w, y: gizmoBbox.y + gizmoBbox.h }],
+            [{ x: gx0, y: gy0 }, { x: gx1, y: gy0 }],
+            [{ x: gx0, y: gy1 }, { x: gx1, y: gy1 }],
           ],
           meshN: 2,
           mode: "free",
-          uniformAspect: gizmoBbox.w / Math.max(1, gizmoBbox.h),
+          uniformAspect: gw / Math.max(1, gh),
         },
       };
       const prevSel = doc.selection;                 // 所有权 → undo 包（spec:213 lift 清选区）

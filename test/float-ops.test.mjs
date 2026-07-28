@@ -57,8 +57,8 @@ describe("S6 · LiftFloatOp（lift 整点：清选区 + float tiles + 挖洞）"
     eq(L.sampleAt(22, 22)[3], 255, "选区外没动");
     eq(doc.selection, null, "lift 清选区（spec:213）");
     eq(fs.floats[0].pixels.sampleAt(35, 35)[3], 255, "float tiles 有像素");
-    // gizmo = float rect
-    eq(fs.transform.gizmoBbox.x, 30); eq(fs.transform.gizmoBbox.w, 16);
+    // gizmo = float rect（v0.6.21 frame 化：origin/ux 轴对齐）
+    eq(fs.transform.gizmoFrame.origin.x, 30); eq(fs.transform.gizmoFrame.ux.x, 16);
     eq(fs.transform.mode, "free");
 
     h.undo(w);
@@ -109,9 +109,9 @@ describe("S6 · LiftFloatOp（lift 整点：清选区 + float tiles + 挖洞）"
     eq(fs.floats.length, 2, "两叶各一 float");
     const ids = fs.floats.map((f) => f.sourceLayerId).sort();
     eq(ids.join(","), [L1.id, L2.id].sort().join(","), "z 锚点 = 各自源叶");
-    // gizmo = 可见叶 rect 并集
-    eq(fs.transform.gizmoBbox.x, 10);
-    eq(fs.transform.gizmoBbox.w, 50, "10..60 并集");
+    // gizmo = 可见叶 rect 并集（v0.6.21 frame 化）
+    eq(fs.transform.gizmoFrame.origin.x, 10);
+    eq(fs.transform.gizmoFrame.ux.x, 50, "10..60 并集");
   });
 
   it("选区与图层无交集 / 选区内全透明 → ok:false", () => {

@@ -28,9 +28,13 @@ export interface WorkpieceFloat {
   /** doc 网格对齐的稀疏 tile（池驻留、可压缩；不可变——变换只动 transform metadata）。 */
   pixels: LayerPixels;
 }
+/** 参考 frame（v0.6.21 有向化，Procreate 方手柄语义）：p(u,v)=origin+u·ux+v·uy，u,v∈[0,1]。
+ *  lift 时 = 可见源并集 AABB（ux/uy 轴对齐）；方手柄转轴后为一般平行四边形——只改参数化不动像素。 */
+export interface FloatPt { x: number; y: number }
+export interface FloatFrame { origin: FloatPt; ux: FloatPt; uy: FloatPt; }
 /** 共享 gizmo 的变换元数据（组 lift 多 float 共用一份；per-float dest quad 由 rect×单应性派生）。 */
 export interface FloatTransformMeta {
-  gizmoBbox: FloatRect;
+  gizmoFrame: FloatFrame;
   mesh: FloatMesh;
   meshN: number;
   mode: "free" | "uniform" | "distort" | null;

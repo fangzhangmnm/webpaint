@@ -23,7 +23,7 @@
 import { makeBitmap } from "./bitmap.ts";
 import { findNodeById } from "./doc.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
-import type { Workpiece, FloatTransformMeta, WorkpieceFloat, FloatState } from "./workpiece/workpiece.ts";
+import type { FloatFrame, Workpiece, FloatTransformMeta, WorkpieceFloat, FloatState } from "./workpiece/workpiece.ts";
 import type { UndoHistory } from "./workpiece/undo-history.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
 import { cloneFloatMeta, composeIdentityWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
@@ -46,14 +46,14 @@ type TransformModeKind = "free" | "uniform" | "distort";
 export interface FloatViewSource { layerId: number; canvas: Bitmap; rect: Rect }
 export interface FloatView {
   sources: FloatViewSource[];
-  gizmoBbox: Rect;
+  gizmoFrame: FloatFrame;
   mesh: Mesh;
   meshN: number;
   mode: TransformModeKind | null;
 }
 
 interface Hit {
-  kind: "translate" | "corner" | "edge" | "rotate";
+  kind: "translate" | "corner" | "edge" | "rotate" | "basisRotate";
   row?: number;
   col?: number;
   edge?: string;
@@ -65,6 +65,7 @@ interface Drag extends Hit {
   startX: number;
   startY: number;
   meshSnap: Mesh;
+  frameSnap: FloatFrame;
 }
 
 interface LiftOpts { fallbackFullLayer?: boolean; cut?: boolean; ignoreSelection?: boolean; }
@@ -84,7 +85,7 @@ interface TransformMode {
 
 // live 网格（拖动热路径的本地副本；SSoT = workpiece.readFloatState().transform）。
 interface LiveMeta {
-  gizmoBbox: Rect;
+  gizmoFrame: FloatFrame;
   mesh: Mesh;
   meshN: number;
   mode: TransformModeKind | null;
@@ -153,7 +154,7 @@ export class FloatingTransform {
       sources = fs.floats.map((f) => ({ layerId: f.sourceLayerId, canvas: floatSourceCanvas(f), rect: f.rect }));
       _floatViewCache.set(fs, sources);
     }
-    return { sources, gizmoBbox: lv.gizmoBbox, mesh: lv.mesh, meshN: lv.meshN, mode: lv.mode };
+    return { sources, gizmoFrame: lv.gizmoFrame, mesh: lv.mesh, meshN: lv.meshN, mode: lv.mode };
   }
 
   // undo/redo/lift 后：live 网格重新采纳 workpiece 的 transform metadata。拖动中不采纳（防御）。
@@ -162,7 +163,7 @@ export class FloatingTransform {
     const fs = this._w?.readFloatState();
     if (!fs) { this._live = null; return; }
     const t = cloneFloatMeta(fs.transform);
-    this._live = { gizmoBbox: t.gizmoBbox, mesh: t.mesh as Mesh, meshN: t.meshN, mode: t.mode, uniformAspect: t.uniformAspect };
+    this._live = { gizmoFrame: t.gizmoFrame, mesh: t.mesh as Mesh, meshN: t.meshN, mode: t.mode, uniformAspect: t.uniformAspect };
   }
 
   // 把 active 节点 lift 成浮层（LiftFloatOp 整点：清选区 + 建 float tiles + 挖洞，全可撤销）。
@@ -227,6 +228,7 @@ export class FloatingTransform {
       ...hit,
       startX: x, startY: y,
       meshSnap: f.mesh.map((row) => row.map((p) => ({ x: p.x, y: p.y }))),
+      frameSnap: { origin: { ...f.gizmoFrame.origin }, ux: { ...f.gizmoFrame.ux }, uy: { ...f.gizmoFrame.uy } },
     };
   }
   extendDrag(x: number, y: number) {
@@ -245,6 +247,8 @@ export class FloatingTransform {
       if (md) md.edge(f.mesh, d.meshSnap, d, d.edge!, x, y, f.uniformAspect);
     } else if (d.kind === "rotate") {
       applyRotate(f.mesh, d.meshSnap, d, x, y);
+    } else if (d.kind === "basisRotate") {
+      applyBasisRotate(f, d, x, y);
     }
     this.onChange();                  // mesh 变 → board 每帧用新 mesh 重算 Hinv 重 warp（GPU，无 CPU 缓存）
   }
@@ -279,7 +283,7 @@ export class FloatingTransform {
     const lv = this._live;
     this._history.run(this._w, this._ops.floatTransform, {
       after: cloneFloatMeta({
-        gizmoBbox: lv.gizmoBbox, mesh: lv.mesh, meshN: lv.meshN, mode: lv.mode, uniformAspect: lv.uniformAspect,
+        gizmoFrame: lv.gizmoFrame, mesh: lv.mesh, meshN: lv.meshN, mode: lv.mode, uniformAspect: lv.uniformAspect,
       } as FloatTransformMeta),
     });
   }
@@ -290,7 +294,7 @@ export class FloatingTransform {
   private _bakeDown(f: WorkpieceFloat, leaf: Layer, bakeFn: WarpBakeFn | null) {
     if (!bakeFn || !this._live) return;
     const lv = this._live;
-    const wp = sourceWarpMatrix(f, lv.gizmoBbox, lv.mesh);
+    const wp = sourceWarpMatrix(f, lv.gizmoFrame, lv.mesh);
     if (!wp || wp.bw <= 0 || wp.bh <= 0) return;
     const mode = this._sampleMode === "nearest" ? 0 : this._sampleMode === "bicubic" ? 2 : 1;
     const rendered = bakeFn(floatSourceCanvas(f) as CanvasImageSource, f.rect.w, f.rect.h, wp.hinv, mode, wp.bx, wp.by, wp.bw, wp.bh);
@@ -402,7 +406,7 @@ export class FloatingTransform {
     out.push({ kind: "edge", edge: "right",  pos: mid(m[0][1], m[1][1]) });
     out.push({ kind: "edge", edge: "bottom", pos: mid(m[1][0], m[1][1]) });
     out.push({ kind: "edge", edge: "left",   pos: mid(m[0][0], m[1][0]) });
-    // v117: rotate handle —— 只 free/uniform 露（distort 4 角任意拖不需要）。
+    // v117: rotate handle（圆=转像素）；v0.6.21 全模式露（distort 也要——Procreate 双手柄语义）。
     if (MODES[f.mode] && MODES[f.mode].showsRotate) {
       const topMid = mid(m[0][0], m[0][1]);
       const ayU = norm(sub(m[1][0], m[0][0]));   // 单位向量：TL → BL（向下）
@@ -411,6 +415,18 @@ export class FloatingTransform {
         kind: "rotate",
         pos: { x: topMid.x - ayU.x * offset, y: topMid.y - ayU.y * offset },
         anchor: topMid,
+      });
+    }
+    // v0.6.21 方手柄（basisRotate）：只 distort + mesh 仍仿射时露——转参考 frame 的轴不动像素；
+    //   一旦拖过透视角（g,h≠0 ⇔ 非平行四边形）判据自动收回；圆手柄旋转保持仿射 → 永不误收。
+    if (f.mode === "distort" && isAffineQuad(f.mesh)) {
+      const botMid = mid(m[1][0], m[1][1]);
+      const ayU = norm(sub(m[1][0], m[0][0]));
+      const offset = 28 / Math.max(0.01, screenScale);
+      out.push({
+        kind: "basisRotate",
+        pos: { x: botMid.x + ayU.x * offset, y: botMid.y + ayU.y * offset },
+        anchor: botMid,
       });
     }
     return out;
@@ -444,7 +460,7 @@ const MODES: Record<TransformModeKind, TransformMode> = {
       (fromKind === "distort" || fromKind === "free") ? projectToUniformRect(mesh, asp) : null,
   },
   distort: {
-    kind: "distort", meshN: 2, showsRotate: false,
+    kind: "distort", meshN: 2, showsRotate: true,   // v0.6.21：透视前圆（转像素）方（转轴）双手柄
     corner: (mesh, snap, drag, r, c, x, y, _asp) => applyDistortCorner(mesh, snap, drag, r, c, x, y),
     edge:   (mesh, snap, drag, e, x, y, _asp) => applyDistortEdge(mesh, snap, drag, e, x, y),
     projectOnEnter: () => null,
@@ -474,6 +490,49 @@ function applyRotate(mesh: Mesh, meshSnap: Mesh, drag: Drag, x: number, y: numbe
     const py = m[i][j].y - cy;
     mesh[i][j] = { x: cx + px * cos - py * sin, y: cy + px * sin + py * cos };
   }
+}
+
+// v0.6.21 方手柄：**转参考 frame 的轴、不动像素**（Procreate 语义，user 拍板 2026-07-28）。
+//   mesh 绕质心转 dθ（同圆手柄）+ frame 复合 H⁻¹∘R∘H（H=旧 mesh 的仿射映射）→ 每个 source 的
+//   destQuad 恒等（display = H′∘F′⁻¹ = R∘H∘(F∘H⁻¹∘R∘H)⁻¹ = H∘F⁻¹）。仅仿射 mesh 可用。
+function applyBasisRotate(f: LiveMeta, d: Drag, x: number, y: number) {
+  const m = d.meshSnap;
+  if (!isAffineQuad(m)) return;
+  const cx = (m[0][0].x + m[0][1].x + m[1][0].x + m[1][1].x) / 4;
+  const cy = (m[0][0].y + m[0][1].y + m[1][0].y + m[1][1].y) / 4;
+  const a0 = Math.atan2(d.startY - cy, d.startX - cx);
+  const a1 = Math.atan2(y - cy, x - cx);
+  const cos = Math.cos(a1 - a0), sin = Math.sin(a1 - a0);
+  const rot = (p: Point): Point => {
+    const px = p.x - cx, py = p.y - cy;
+    return { x: cx + px * cos - py * sin, y: cy + px * sin + py * cos };
+  };
+  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) f.mesh[i][j] = rot(m[i][j]);
+  // A = H⁻¹∘R∘H 作用在单位方（H 仿射：tl + u·e1 + v·e2；back-solve 用 e1/e2 基）
+  const tl = m[0][0];
+  const e1 = { x: m[0][1].x - tl.x, y: m[0][1].y - tl.y };
+  const e2 = { x: m[1][0].x - tl.x, y: m[1][0].y - tl.y };
+  const det = e1.x * e2.y - e1.y * e2.x;
+  if (Math.abs(det) < 1e-9) return;
+  const A = (u: number, v: number): Point => {
+    const pr = rot({ x: tl.x + u * e1.x + v * e2.x, y: tl.y + u * e1.y + v * e2.y });
+    const rx = pr.x - tl.x, ry = pr.y - tl.y;
+    return { x: (rx * e2.y - ry * e2.x) / det, y: (ry * e1.x - rx * e1.y) / det };
+  };
+  const fs = d.frameSnap;
+  const F = (q: Point): Point => ({
+    x: fs.origin.x + q.x * fs.ux.x + q.y * fs.uy.x,
+    y: fs.origin.y + q.x * fs.ux.y + q.y * fs.uy.y,
+  });
+  const o = F(A(0, 0)), pu = F(A(1, 0)), pv = F(A(0, 1));
+  f.gizmoFrame = { origin: o, ux: { x: pu.x - o.x, y: pu.y - o.y }, uy: { x: pv.x - o.x, y: pv.y - o.y } };
+}
+
+// mesh 是否仿射（平行四边形；⇔ Heckbert g=h=0）：br−tr−bl+tl 残差 < 0.01px。
+export function isAffineQuad(mesh: Mesh): boolean {
+  const m = mesh;
+  return Math.abs(m[1][1].x - m[0][1].x - m[1][0].x + m[0][0].x) < 0.01 &&
+         Math.abs(m[1][1].y - m[0][1].y - m[1][0].y + m[0][0].y) < 0.01;
 }
 
 // ---- distort：4 角 / 边端点自由 ----
@@ -685,13 +744,18 @@ function meshBbox(mesh: Mesh): [number, number, number, number] {
 // （bakeSource 已死 v0.4.7：lift 的像素提取/挖洞下沉进 workpiece/float-ops.ts 的 LiftFloatOp——
 //   typed-array 路径，materializeMaskCanvas 过渡口在 lift 链上退场。）
 
-// 一个 source rect 经共享 gizmo（gizmoBbox 初始帧 → 当前 mesh quad 的 homography）映出的 dest quad。
-//   单 source 时 rect === gizmoBbox → destQuad === mesh（逐点等同旧单层），故单层行为不变。
-export function sourceDestQuad(rect: Rect, gizmoBbox: Rect, mesh: Mesh): Mesh | null {
+// 一个 source rect 经共享 gizmo（gizmoFrame 参数化 → 当前 mesh quad 的 homography）映出的 dest quad。
+//   frame 逆仿射把 doc 点变 (u,v)；轴对齐 frame 时 = 旧 (x−bbox)/w 归一（行为不变）；
+//   单 source + 轴对齐时 rect 角 ↦ (0,0)..(1,1) → destQuad === mesh（单层行为不变的保证）。
+export function sourceDestQuad(rect: Rect, frame: FloatFrame, mesh: Mesh): Mesh | null {
   const H = homographyFromUnitSquareToQuad(mesh[0][0], mesh[0][1], mesh[1][1], mesh[1][0]);
   if (!H) return null;
-  const gw = gizmoBbox.w || 1, gh = gizmoBbox.h || 1;
-  const map = (x: number, y: number) => homographySample(H, (x - gizmoBbox.x) / gw, (y - gizmoBbox.y) / gh);
+  const det = frame.ux.x * frame.uy.y - frame.ux.y * frame.uy.x;
+  if (Math.abs(det) < 1e-9) return null;
+  const map = (x: number, y: number) => {
+    const rx = x - frame.origin.x, ry = y - frame.origin.y;
+    return homographySample(H, (rx * frame.uy.y - ry * frame.uy.x) / det, (ry * frame.ux.x - rx * frame.ux.y) / det);
+  };
   return [
     [map(rect.x, rect.y), map(rect.x + rect.w, rect.y)],
     [map(rect.x, rect.y + rect.h), map(rect.x + rect.w, rect.y + rect.h)],
@@ -722,8 +786,8 @@ export function quadWarp(mesh: Mesh): { hinv: number[]; minX: number; minY: numb
 
 // 一个 source（经共享 gizmo 映出自己的 dest quad）→ GPU warp 参数：Hinv + dst bbox（doc 坐标）。
 //   board._glFloatInputs 用它喂 GPU（源纹理只传一次，每帧只更 hinv）。source 只消费 rect（identity 位置）。
-export function sourceWarpMatrix(source: { rect: Rect }, gizmoBbox: Rect, mesh: Mesh): { hinv: number[]; bx: number; by: number; bw: number; bh: number } | null {
-  const destQuad = sourceDestQuad(source.rect, gizmoBbox, mesh);
+export function sourceWarpMatrix(source: { rect: Rect }, gizmoFrame: FloatFrame, mesh: Mesh): { hinv: number[]; bx: number; by: number; bw: number; bh: number } | null {
+  const destQuad = sourceDestQuad(source.rect, gizmoFrame, mesh);
   if (!destQuad) return null;
   const q = quadWarp(destQuad);
   if (!q) return null;
