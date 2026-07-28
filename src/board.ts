@@ -40,7 +40,7 @@ interface MeshPt { x: number; y: number; }
 interface FloatSource { layerId: number; canvas: CanvasImageSource; rect: { x: number; y: number; w: number; h: number } }
 interface FloatInfo {
   sources: FloatSource[];
-  gizmoBbox: unknown;
+  gizmoFrame: unknown;
   mesh: MeshPt[][];
   meshN: number;
 }
@@ -781,7 +781,7 @@ export class Board {
     const mode = _sampleModeInt(lassoInfo!.sampleMode);
     const out: FloatInput[] = [];
     for (const src of float.sources) {
-      const wp = sourceWarpMatrix(src, float.gizmoBbox as Parameters<typeof sourceWarpMatrix>[1], float.mesh as Parameters<typeof sourceWarpMatrix>[2]);
+      const wp = sourceWarpMatrix(src, float.gizmoFrame as Parameters<typeof sourceWarpMatrix>[1], float.mesh as Parameters<typeof sourceWarpMatrix>[2]);
       if (!wp) continue;
       out.push({ layerId: src.layerId, srcCanvas: src.canvas, srcW: src.rect.w, srcH: src.rect.h, hinv: wp.hinv, mode });
     }
@@ -940,6 +940,24 @@ export class Board {
             }
             ctx.beginPath();
             ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+            ctx.fillStyle = "#fff";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(0,0,0,0.85)";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          } else if (h.kind === "basisRotate") {
+            // v0.6.21 方手柄（转参考 frame 轴不动像素）：白方 + 黑边 + anchor 连接线，与圆手柄成对
+            if (h.anchor) {
+              const a = this.docToScreen(h.anchor.x, h.anchor.y);
+              ctx.beginPath();
+              ctx.moveTo(a.x, a.y);
+              ctx.lineTo(s.x, s.y);
+              ctx.strokeStyle = "rgba(0,0,0,0.6)";
+              ctx.lineWidth = 1;
+              ctx.stroke();
+            }
+            ctx.beginPath();
+            ctx.rect(s.x - 6, s.y - 6, 12, 12);
             ctx.fillStyle = "#fff";
             ctx.fill();
             ctx.strokeStyle = "rgba(0,0,0,0.85)";

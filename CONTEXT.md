@@ -56,7 +56,7 @@ _Avoid_: mask (mask 是 Selection 的实现细节), marquee, selection state
 - **复数 source**：active 是单叶 → 1 个 source（= 今日行为）；active 是**组** → 组内**所有叶子和子树（含隐藏）各一个 source**（语义 = 整组一起动；图层无多选，**组是唯一多层语义**）。
 - **一个 gizmo / 一个 transform** 驱动全部 source。gizmo 包围盒 = 调**规范合成器**画**组的可见 composite** 再 trim-to-content（隐藏叶**不参与定框**，但**参与变换** = 随组移动、落回各自层）。每个 source = `{layer, canvas, srcRect, preSnap}`，commit **各自写回自己的 layer**（一条**多层 undo entry** `[{layerId,before,after}]`）。
 - **渲染接缝**：合成器新增 `floatFor(node)`（与 [[Board]] 注入的 `overlayFor` 平级），把浮层像素插在**源层 z 位**（修「浮层盖在所有层之上」的旧 board overlay 行为）；gizmo 框线/handles **仍是 board overlay**（工具 UI 永在最上）。2×2 homography（`renderQuadPerPixel`/`invertMat3`）**不变**——多 source 时每 source 各自的 dest quad = 同一 H 作用到该 source 的 srcRect 四角；只改「在哪合成、有几份」。
-- **变形模式 = 深模块 adapter**（[[TransformMode]]）：free/uniform/distort/(warp) 各自一个 adapter 满足共同 `TransformMode` 接口（handles / 约束 drag / meshN），Float 持当前 adapter。**warp 当前实现是错数学屎山，2026-06-19 删除**；以后用正确数学重加（届时也支持组）。v1 只 free/uniform/distort（均 2×2 单 homography）。
+- **变形模式 = 深模块 adapter**（[[TransformMode]]）：free/uniform/distort/(warp) 各自一个 adapter 满足共同 `TransformMode` 接口（handles / 约束 drag / meshN），Float 持当前 adapter。**warp 当前实现是错数学屎山，2026-06-19 删除**；以后用正确数学重加（届时也支持组）。v1 只 free/uniform/distort（均 2×2 单 homography）。 **v0.6.21 参考 frame 有向化**：gizmoBbox→gizmoFrame(origin/ux/uy)，distort 双手柄——圆=转像素（恒可用）、方=转参考 frame 轴不动像素（mesh 转 dθ + frame 复合 H⁻¹∘R∘H；仅 mesh 仿射时露，拖过透视角 isAffineQuad 判据自动收回，圆转不误收）；这是 warp 重加的 frame 地基。
 _Avoid_: 单层 float（旧 premise，已被复数 source 取代）, 把浮层画在所有层之上（旧 board overlay 行为）, 旧 4×4 warp / drawMesh / Catmull-Rom 升采样（已删的错数学）
 
 **TransformMode（变形模式）**:

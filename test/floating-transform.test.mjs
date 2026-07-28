@@ -11,7 +11,7 @@ function mkFloat(mode = "free", aspect = 1, mesh = SQ()) {
   // v0.4.7（S6）：float 状态在 workpiece，_live 是引擎的本地网格视图——数学测试直接播种 _live
   //   （geometry 驱动路径 beginDrag/extendDrag/setMode/hitTest 不变；未 attach → setMode 不入栈，纯投影）。
   ft._live = {
-    gizmoBbox: { x: mesh[0][0].x, y: mesh[0][0].y, w: 10, h: 10 },
+    gizmoFrame: { origin: { x: mesh[0][0].x, y: mesh[0][0].y }, ux: { x: 10, y: 0 }, uy: { x: 0, y: 10 } },
     mode, meshN: 2, uniformAspect: aspect,
     mesh: mesh.map((r) => r.map((p) => ({ ...p }))),
   };
@@ -113,11 +113,50 @@ describe("FloatingTransform · setMode 投影 + adapter 元数据", () => {
     assert(near(dot(u, v), 0), `投影后 u⊥v（dot=${dot(u, v).toFixed(4)}）`);
   });
 
-  it("rotate handle：free/uniform 露、distort 不露", () => {
+  it("rotate handle：全模式露（v0.6.21 distort 也要——双手柄语义）", () => {
     const has = (ft) => ft.visibleHandles(1).some((h) => h.kind === "rotate");
     assert(has(mkFloat("free")), "free 有 rotate handle");
     assert(has(mkFloat("uniform")), "uniform 有 rotate handle");
-    assert(!has(mkFloat("distort")), "distort 无 rotate handle");
+    assert(has(mkFloat("distort")), "distort 也有（圆=转像素恒可用）");
+  });
+
+  it("方手柄（basisRotate）：只 distort + 仿射 mesh 时露；拖过透视角自动收回", () => {
+    const hasB = (ft) => ft.visibleHandles(1).some((h) => h.kind === "basisRotate");
+    assert(!hasB(mkFloat("free")), "free 无方手柄");
+    const ft = mkFloat("distort");
+    assert(hasB(ft), "distort + 平行四边形 → 方手柄在");
+    // 拖一个透视角（applyDistortCorner 只动一角 → 非平行四边形）
+    ft.beginDrag({ kind: "corner", row: 1, col: 1, pos: { x: 10, y: 10 } }, 10, 10);
+    ft.extendDrag(14, 17);
+    ft.endDrag?.();
+    assert(!hasB(ft), "透视角拖过（g,h≠0）→ 方手柄收回");
+    assert(ft.visibleHandles(1).some((h) => h.kind === "rotate"), "圆手柄仍在");
+  });
+
+  it("basisRotate：转参考 frame 不动像素——source destQuad 逐点不变、mesh 旋转、frame 变斜", () => {
+    const big = [[{ x: 0, y: 0 }, { x: 100, y: 0 }], [{ x: 0, y: 100 }, { x: 100, y: 100 }]];
+    const ft = mkFloat("distort", 1, big);
+    ft._live.gizmoFrame = { origin: { x: 0, y: 0 }, ux: { x: 100, y: 0 }, uy: { x: 0, y: 100 } };
+    const rect = { x: 10, y: 20, w: 30, h: 40 };
+    const before = sourceDestQuad(rect, ft._live.gizmoFrame, ft._live.mesh);
+    // 从方手柄位置起拖，绕质心转 ~37°
+    const h = ft.visibleHandles(1).find((x) => x.kind === "basisRotate");
+    assert(h, "方手柄在");
+    ft.beginDrag(h, h.pos.x, h.pos.y);
+    // 目标点 = 手柄绕质心 (50,50) 转一个角度
+    const ang = 0.65;
+    const px = h.pos.x - 50, py = h.pos.y - 50;
+    ft.extendDrag(50 + px * Math.cos(ang) - py * Math.sin(ang), 50 + px * Math.sin(ang) + py * Math.cos(ang));
+    const after = sourceDestQuad(rect, ft._live.gizmoFrame, ft._live.mesh);
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+      cNear(after[i][j], before[i][j].x, before[i][j].y, `destQuad[${i}][${j}] 像素不动`);
+    }
+    // mesh 真转了（TL 不再在原位）
+    assert(dist(ft._live.mesh[0][0], big[0][0]) > 1, "mesh 旋转了");
+    // frame 不再轴对齐
+    assert(Math.abs(ft._live.gizmoFrame.ux.y) > 1, "frame 轴转了");
+    // 转完仍是仿射（平行四边形）→ 方手柄仍在（圆手柄旋转不 disable 方手柄的同款判据）
+    assert(ft.visibleHandles(1).some((x) => x.kind === "basisRotate"), "转轴后方手柄仍在");
   });
 
   it("hitTest：命中角 handle", () => {
@@ -130,10 +169,12 @@ describe("FloatingTransform · setMode 投影 + adapter 元数据", () => {
 });
 
 // Slice 3：多 source（组变换）= 一个 gizmo 驱动多 source。核心数学 = source.rect 经
-//   (gizmoBbox→mesh) homography 映出 dest quad。canvas 路径（bake/commit）真机验；这里压纯映射。
+//   (gizmoFrame→mesh) homography 映出 dest quad。canvas 路径（bake/commit）真机验；这里压纯映射。
 describe("FloatingTransform · 多 source 映射 sourceDestQuad", () => {
   const quad = (b) => [[{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }],
                        [{ x: b.x, y: b.y + b.h }, { x: b.x + b.w, y: b.y + b.h }]];
+  // v0.6.21：gizmo 由 AABB 升级成有向 frame——轴对齐 frame ≡ 旧 bbox 归一（本组断言意图不变）
+  const fr = (b) => ({ origin: { x: b.x, y: b.y }, ux: { x: b.w, y: 0 }, uy: { x: 0, y: b.h } });
   const qNear = (q, tl, tr, bl, br, msg) => {
     cNear(q[0][0], tl[0], tl[1], `${msg} TL`); cNear(q[0][1], tr[0], tr[1], `${msg} TR`);
     cNear(q[1][0], bl[0], bl[1], `${msg} BL`); cNear(q[1][1], br[0], br[1], `${msg} BR`);
@@ -142,28 +183,28 @@ describe("FloatingTransform · 多 source 映射 sourceDestQuad", () => {
   it("rect === gizmoBbox → destQuad === mesh（单 source 行为不变的保证）", () => {
     const gb = { x: 10, y: 20, w: 40, h: 30 };
     const mesh = [[{ x: 3, y: 5 }, { x: 60, y: 9 }], [{ x: 1, y: 70 }, { x: 55, y: 88 }]]; // 任意旋转/透视 quad
-    const q = sourceDestQuad({ x: gb.x, y: gb.y, w: gb.w, h: gb.h }, gb, mesh);
+    const q = sourceDestQuad({ x: gb.x, y: gb.y, w: gb.w, h: gb.h }, fr(gb), mesh);
     qNear(q, [3, 5], [60, 9], [1, 70], [55, 88], "destQuad==mesh");
   });
 
   it("平移 gizmo：子 rect 跟着平移", () => {
     const gb = { x: 0, y: 0, w: 100, h: 100 };
     const mesh = quad({ x: 50, y: 30, w: 100, h: 100 });        // 整体 +50,+30
-    const q = sourceDestQuad({ x: 0, y: 0, w: 50, h: 50 }, gb, mesh);   // TL 四分之一
+    const q = sourceDestQuad({ x: 0, y: 0, w: 50, h: 50 }, fr(gb), mesh);   // TL 四分之一
     qNear(q, [50, 30], [100, 30], [50, 80], [100, 80], "TL 子块平移");
   });
 
   it("放大 2× gizmo：子 rect 按比例放大", () => {
     const gb = { x: 0, y: 0, w: 100, h: 100 };
     const mesh = quad({ x: 0, y: 0, w: 200, h: 200 });          // 2×
-    const q = sourceDestQuad({ x: 0, y: 0, w: 50, h: 50 }, gb, mesh);
+    const q = sourceDestQuad({ x: 0, y: 0, w: 50, h: 50 }, fr(gb), mesh);
     qNear(q, [0, 0], [100, 0], [0, 100], [100, 100], "子块放大 2×");
   });
 
   it("source 在 gizmoBbox 之外（隐藏叶随组动）：外推一致", () => {
     const gb = { x: 0, y: 0, w: 100, h: 100 };
     const mesh = quad({ x: 10, y: 10, w: 100, h: 100 });        // +10,+10 平移
-    const q = sourceDestQuad({ x: 100, y: 100, w: 50, h: 50 }, gb, mesh);   // 框外
+    const q = sourceDestQuad({ x: 100, y: 100, w: 50, h: 50 }, fr(gb), mesh);   // 框外
     qNear(q, [110, 110], [160, 110], [110, 160], [160, 160], "框外 source 同样 +10,+10");
   });
 });
