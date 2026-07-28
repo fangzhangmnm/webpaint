@@ -52,6 +52,9 @@ export function updateCloudAuthUI() {
     els.cloudSignOutBtn.classList.add("hidden");
     els.cloudRefreshBtn.classList.add("hidden");
   }
+  // v0.6.22：editor 主菜单登录项（回到图库下方）——未登录+已配置+在线才显示，
+  //   与 cloudSignInBtn 同判据（离线时登录无意义；wp:auth-changed + online/offline 都会重进本函数）
+  els.menuSignIn?.classList.toggle("hidden", signed || !configured || offline);
   updateSaveStatus();
 }
 

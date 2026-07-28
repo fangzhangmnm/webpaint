@@ -24,6 +24,7 @@ import { checkpointAgeMinutes } from "./checkpoint-policy.ts";
 import { els } from "./els.ts";
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
+import { signIn, isAuthConfigured } from "./app-store.ts";   // auth 是公共面（cloud-auth-ui 同款直连；v415 红线针对的是 sync store，不含 auth）
 import { sessionNameConflict } from "./session-name.ts";
 import { decodeOraToDoc } from "./ora.ts";
 import { t } from "./i18n/index.ts";
@@ -36,6 +37,7 @@ const errMsg = (e: unknown): string => String((e as { message?: unknown })?.mess
 let input: AppContext["input"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], editMode: AppContext["editMode"];
 let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
 let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"], updateZoomLabel: AppContext["updateZoomLabel"];
+let _signInNav = false;   // v0.6.22：登录 redirect 导航中，beforeunload 别挡
 let rack: AppContext["rack"];
 
 function closeSheet(sheet: HTMLElement, backdrop: HTMLElement) {
@@ -107,6 +109,7 @@ export function initTopbarMenu(ctx: AppContext) {
   //    后台 IDB transaction 大概率能跑完；user 选「留下」→ 成果保住，选「离开」→
   //    至少有 dialog 那一两秒救了
   window.addEventListener("beforeunload", (e: BeforeUnloadEvent) => {
+    if (_signInNav) return;   // v0.6.22：用户主动点了「登录」→ loginRedirect 是有意导航，别拿挽留框挡它
     if (session.dirty) {
       e.preventDefault();
       e.returnValue = "";
@@ -154,6 +157,18 @@ export function initTopbarMenu(ctx: AppContext) {
   document.getElementById("topGalleryBtn")?.addEventListener("click", () => session.exit());
   // v0.5.21：图库回三条杠菜单（独立 pill 一日游——user：visually distracting）
   els.menuGallery?.addEventListener("click", () => { setMenuOpen(false); session.exit(); });
+  // v0.6.22（user, high）：editor 内登录。iOS 红线：loginRedirect 前不能有 await（丢 user-gesture
+  //   → Safari 静默拦截），所以 save 不 await（IDB 事务已排队，beforeunload 偷存同款姿态）。
+  els.menuSignIn?.addEventListener("click", () => {
+    setMenuOpen(false);
+    if (!isAuthConfigured()) return;   // 按钮本就只在已配置时显示，兜底
+    _signInNav = true;
+    session.save().catch(() => {});
+    signIn().catch((e) => {
+      _signInNav = false;
+      setStatus(t("cf.signInFailed", { err: String((e as Error)?.message || e) }), true);
+    });
+  });
 
   // ---- 菜单：导入 / 导出 / 剪贴板 / 适应 ----
   els.menuRename.addEventListener("click", () => {

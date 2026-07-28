@@ -1007,6 +1007,11 @@
         <button class="menu-item menu-item-with-icon" id="menuGallery" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#gallery"/></svg>
         <span class="menu-item-label" data-i18n="menu.backToGallery">回到图库</span>
       </button>
+        <!-- v0.6.22（user, high）：未登录导致离线时不用退回图库才能登录——editor 内直接给登录入口。
+             未登录+已配置+在线才显示（cloud-auth-ui 派生）；文案复用 gal.menu.signIn -->
+        <button class="menu-item menu-item-with-icon hidden" id="menuSignIn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#cloud"/></svg>
+        <span class="menu-item-label" data-i18n="gal.menu.signIn">登录 OneDrive</span>
+      </button>
         <div class="menu-item-row">
           <button class="menu-item menu-item-main menu-item-with-icon" id="menuExportImage" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#export"/></svg>
           <span class="menu-item-label" data-i18n="menu.exportImage">导出</span>
