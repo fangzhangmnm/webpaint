@@ -632,3 +632,54 @@ describe("shape-brush 收尾", () => {
     assert(true, "disposed");
   });
 });
+
+describe("shape-brush · 跨地平线不长天空矩形（2026-07-28 真机 bug）", () => {
+  const CFGH = { vp1: { x: 256.5, y: 100.5 }, vp2: null, vp3: null, lockHorizon: true, refPoint: null, plane: "ground" };
+  function mkH(sub) {
+    const eng = new ShapeBrushEngine();
+    eng.setSubTool(sub);
+    eng.setViewportRotProvider(() => 0);
+    eng.setPerspProvider(() => CFGH);
+    return eng;
+  }
+  it("矢量 rect 拖过地平线 → stamps 零天空、形状不消失", () => {
+    const s = resolveBrush({ size: 6, color: "#000", spacing: 0.2 });
+    const doc = mkDoc();
+    const eng = mkH("rect");
+    eng.beginStroke(doc.layers[0], s, 150, 400, 0.5, "brush");
+    eng.extendStroke(300, 50, 0.5);
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 10, "可见段仍在（不整形消失）");
+    for (const t of cs.stamps) assert(t.y >= 100.5 - 0.5, `stamp (${t.x},${t.y}) 落进天空`);
+    assert(cs.stamps.some((t) => Math.abs(t.y - 400) < 1), "下水平边在");
+  });
+  it("矢量 grid 拖过地平线 → stamps 零天空", () => {
+    const s = resolveBrush({ size: 4, color: "#000", spacing: 0.25 });
+    const doc = mkDoc();
+    const eng = mkH("grid");
+    eng.setGridConfig({ nu: 3, nv: 6, border: true });
+    eng.beginStroke(doc.layers[0], s, 100, 450, 0.5, "brush");
+    eng.extendStroke(400, 40, 0.5);
+    const cs = eng.endStroke();
+    assert(cs && cs.stamps.length > 10, "可见段仍在");
+    for (const t of cs.stamps) assert(t.y >= 100.5 - 0.5, `stamp (${t.x},${t.y}) 落进天空`);
+  });
+  it("像素 rect/圆 拖过地平线 → 天空零像素", () => {
+    const s = resolveBrush({ size: 1, color: "#000000", preset: { pixelMode: true } });
+    for (const sub of ["rect", "circle"]) {
+      const doc = mkDoc();
+      const eng = mkH(sub);
+      eng.beginStroke(doc.layers[0], s, 150.2, 400.7, 0.5, "brush");
+      eng.extendStroke(300.8, 50.2, 0.5);
+      eng.endStroke();
+      const snap = doc.layers[0].snapshotImageData();
+      const d = snap.imageData.data, W = snap.imageData.width;
+      let sky = 0;
+      for (let i = 3; i < d.length; i += 4) {
+        if (d[i] > 0 && snap.bboxY + Math.floor((i >> 2) / W) < 99) sky++;   // doc y = bboxY + 行（imageData 是 bbox 裁剪图）
+      }
+      eq(sky, 0, `${sub}: 天空像素 ${sky} 个`);
+      assert(paintedCount(doc.layers[0]) > 10, `${sub} 可见段仍在`);
+    }
+  });
+});

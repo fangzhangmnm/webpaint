@@ -296,3 +296,64 @@ describe("perspective-frame · 平面欧氏度量（UI v2.4：正方/正圆 resp
     assert(P && m.project(P));
   });
 });
+
+describe("perspective-frame · 跨地平线护栏（不解析延拓进另一张 patch，2026-07-28）", () => {
+  // user 语义（journal L86/L98/L184）：过线钉在无穷远的有限替身、收敛进 VP；
+  // 绝不翻到消失线另一侧（bowtie/天空矩形 = bug）。
+  it("p1 地面：c1 拖过地平线 → quad 不为 null 且全部在地平线下侧", () => {
+    const vp = { x: 256.5, y: 100.5 };
+    const [famA, famB] = planeFamilies({ ...CFG0, vp1: vp, plane: "ground" });
+    const q = quadFromCorners({ x: 150, y: 400 }, { x: 300, y: 50 }, famA, famB);
+    assert(q, "跨线拖拽仍应产出 quad（钉在地平线替身），不该 null");
+    for (const p of q) assert(p.y >= vp.y - 1e-6, `(${p.x},${p.y}) 跑进天空`);
+    for (const p of q) assert(Number.isFinite(p.x) && Number.isFinite(p.y));
+  });
+  it("p1 墙面：c1 拖过竖直消失线 → 全部在起笔侧", () => {
+    const vp = { x: 256.5, y: 100.5 };
+    const [famA, famB] = planeFamilies({ ...CFG0, vp1: vp, plane: "wall" });
+    const q = quadFromCorners({ x: 150, y: 400 }, { x: 300, y: 380 }, famA, famB);
+    assert(q, "跨线拖拽仍应产出 quad");
+    for (const p of q) assert(p.x <= vp.x + 1e-6, `(${p.x},${p.y}) 越过墙的消失线`);
+  });
+  it("p2 地面：两 pencil，c1 拖过地平线 → 全部在下侧", () => {
+    const cfg = { ...CFG0, vp1: { x: 30.5, y: 100.5 }, vp2: { x: 480.5, y: 100.5 }, plane: "ground" };
+    const [famA, famB] = planeFamilies(cfg);
+    const q = quadFromCorners({ x: 200, y: 400 }, { x: 320, y: 60 }, famA, famB);
+    assert(q, "跨线拖拽仍应产出 quad");
+    for (const p of q) assert(p.y >= 100.5 - 1e-6, `(${p.x},${p.y}) 跑进天空`);
+  });
+  it("起笔在天空侧 = 天空是锚点 patch（对称）：quad 全在上侧", () => {
+    const vp = { x: 256.5, y: 300.5 };
+    const [famA, famB] = planeFamilies({ ...CFG0, vp1: vp, plane: "ground" });
+    const q = quadFromCorners({ x: 150, y: 50 }, { x: 300, y: 450 }, famA, famB);
+    assert(q, "对称 patch 也产出 quad");
+    for (const p of q) assert(p.y <= vp.y + 1e-6, `(${p.x},${p.y}) 跑到地面侧`);
+  });
+  it("ε 缝续接：w1 = ε±δ 两侧 quad 连续（无跳变）", () => {
+    const vp = { x: 256.5, y: 100.5 };
+    const [famA, famB] = planeFamilies({ ...CFG0, vp1: vp, plane: "ground" });
+    const c0 = { x: 200, y: 400 };
+    const qa = quadFromCorners(c0, { x: 300, y: 100.5 + HORIZON_EPS + 0.01 }, famA, famB);
+    const qb = quadFromCorners(c0, { x: 300, y: 100.5 + HORIZON_EPS - 0.01 }, famA, famB);
+    assert(qa && qb);
+    for (let i = 0; i < 4; i++) {
+      // 贴地平线的射线横向坐标本就巨大且梯度 ~1/ε²（ε 规则有意），断言的是「连续、无翻侧」
+      //   不是「冻结」：用相对容差。
+      const mag = Math.max(1, Math.hypot(qa[i].x, qa[i].y));
+      assert(Math.hypot(qa[i].x - qb[i].x, qa[i].y - qb[i].y) < 0.01 * mag + 2,
+        `角 ${i} 跳变: (${qa[i].x},${qa[i].y}) vs (${qb[i].x},${qb[i].y})`);
+    }
+  });
+  it("L87 验收：无限长的路——远端深入天空后远边收敛进地平线、近边留在 c0 深度", () => {
+    const vp = { x: 256.5, y: 100.5 };
+    const [famA, famB] = planeFamilies({ ...CFG0, vp1: vp, plane: "ground" });
+    const c0 = { x: 200, y: 400 };
+    const q = quadFromCorners(c0, { x: 300, y: -200 }, famA, famB);
+    assert(q);
+    // 远边两角（p10、c1'）钉在 ε 带上（= 地平线下 HORIZON_EPS，无穷远的有限替身）
+    assert(q[1].y >= vp.y - 1e-6 && q[1].y <= vp.y + HORIZON_EPS + 0.5, `p10 未收敛: y=${q[1].y}`);
+    assert(q[2].y >= vp.y - 1e-6 && q[2].y <= vp.y + HORIZON_EPS + 0.5, `c1' 未收敛: y=${q[2].y}`);
+    // 近边角 p01 仍在 c0 的水平线上（famB 线 = 同深度）
+    close(q[3].y, 400, 1e-6);
+  });
+});
