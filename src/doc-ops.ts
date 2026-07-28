@@ -301,7 +301,14 @@ export function initDocOps(ctx: AppContext) {
     const mode = els.resampleMode.value || "bicubic";
     if (nw < 1 || nh < 1 || nw > 8192 || nh > 8192) { setStatus(t("tm.sizeOutOfRange"), true); return; }
     if (nw === doc.width && nh === doc.height) { _closeResampleDialog(); return; }
-    runDocTransform(t("tm.resampled", { w: nw, h: nh, mode }), () => doc.resampleTo(nw, nh, mode));
+    runDocTransform(t("tm.resampled", { w: nw, h: nh, mode }), () => {
+      const sx = nw / doc.width, sy = nh / doc.height;
+      doc.resampleTo(nw, nh, mode);
+      // ADR-0006 §7 补漏：resample 从未过 remapShapePersp（改画布尺寸后透视静默错位）。
+      //   缩放破 +0.5 格系 → 重钉像素中线（水平地平线仍水平，lockHorizon 不动）。
+      const c = (v: number) => Math.floor(v) + 0.5;
+      remapShapePersp((p) => ({ x: c(p.x * sx), y: c(p.y * sy) }));
+    });
     _closeResampleDialog();
   });
 
