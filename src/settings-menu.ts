@@ -6,6 +6,7 @@
 //
 // 仍留 app.js 的协作件经 ctx 绑入：state / board / setStatus / store / updateSaveStatus（核心单例）。
 
+import { updateCloudAuthUI } from "./cloud-auth-ui.ts";
 import { els } from "./els.ts";
 import { syncedUserPreference, localUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关=跨设备；menu-tab=设备本地
 import { editorState } from "./workbench-state.ts";   // checkboard = per-doc editorState（载入时经 wp:applyEditorState 应用到 board）
@@ -157,6 +158,7 @@ export function setMenuOpen(open: boolean) {
     // v270：改走统一 positionPopup（左对齐到按钮 + safe-area + 夹视口），不再手搓坐标。
     positionPopup(els.menuPanel, { anchor: els.menuBtn, align: "left", offsetY: 6 });
     _updateMenuCropLabel?.();
+    updateCloudAuthUI();   // v0.6.26：登录项显隐每次开菜单重派生（auth 静默恢复不触发 wp:auth-changed 的路径漏网——真机：登录后没隐藏）
   }
 }
 
