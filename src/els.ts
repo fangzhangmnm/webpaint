@@ -27,6 +27,7 @@ export const els = {
   // v123：del/up/down 挪进 per-row "⋯" 菜单；footer 只剩 layerAddBtn
   menuBtn: byId("menuButton"),
   menuGallery: byId("menuGallery"),
+  menuSignIn: byId("menuSignIn"),
   menuPanel: byId("menuPanel"),
   menuLongPressPick: byId("menuLongPressPick"),
   menuSingleFingerDraw: byId("menuSingleFingerDraw"),
