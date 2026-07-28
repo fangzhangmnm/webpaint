@@ -473,6 +473,7 @@ export const S = {
   "sb.mode1p":       { zh: "一点透视", en: "1-point perspective", ja: "一点透視", tok: "sike weka wan" },
   "sb.mode2p":       { zh: "二点透视", en: "2-point perspective", ja: "二点透視", tok: "sike weka tu" },
   "sb.mode3p":       { zh: "三点透视", en: "3-point perspective", ja: "三点透視", tok: "sike weka tu wan" },
+  "sb.modeIso":      { zh: "等轴测（2:1 像素惯例）", en: "Isometric (2:1 pixel convention)", ja: "アイソメトリック（2:1）", tok: "nasin sitelen leko" },
   "sb.planeGround":  { zh: "地板", en: "Ground", ja: "床", tok: "ma anpa" },
   "sb.planeWall":    { zh: "墙", en: "Wall", ja: "壁", tok: "sinpin" },
   "sb.planeWallL":   { zh: "左墙", en: "Left wall", ja: "左壁", tok: "sinpin pi poka soto" },

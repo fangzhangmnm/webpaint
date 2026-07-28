@@ -162,6 +162,9 @@ function freshGroups() {
       p1: { vp1: null as { x: number; y: number } | null, box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
       p2: { vp1: null as { x: number; y: number } | null, vp2: null as { x: number; y: number } | null, box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
       p3: { vp1: null as { x: number; y: number } | null, vp2: null as { x: number; y: number } | null, vp3: null as { x: number; y: number } | null, box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
+      // isometric（v0.6.20）：轴固定 2:1 惯例，无 VP——只存参考 box（A=锚点即 user 说的 anchor，
+      //   +0.5 格系；t=三轴 px 行程）。持久化同意随 2026-07-28 plan 批准。
+      iso: { box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
     },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     liquify:       { bleed: "edge" as string },
@@ -276,6 +279,7 @@ export const editorState = {
     get p1() { return S.g.persp.p1; },
     get p2() { return S.g.persp.p2; },
     get p3() { return S.g.persp.p3; },
+    get iso() { return S.g.persp.iso; },
   },
   grid: {
     get on(): boolean { return S.g.grid.on; }, set on(v: boolean) { S.g.grid.on = v; },
@@ -329,8 +333,8 @@ export function remapShapePersp(f: (p: { x: number; y: number }) => { x: number;
   if (g.p3.vp1) g.p3.vp1 = f(g.p3.vp1);
   if (g.p3.vp2) g.p3.vp2 = f(g.p3.vp2);
   if (g.p3.vp3) g.p3.vp3 = f(g.p3.vp3);
-  // 参考 box 锚角跟着重映射（t 行程是比例/相对量，不动）
-  for (const slot of [g.p1, g.p2, g.p3]) {
+  // 参考 box 锚角跟着重映射（t 行程是比例/相对量，不动）；iso 只有 box（轴固定无 VP）
+  for (const slot of [g.p1, g.p2, g.p3, g.iso]) {
     if (slot.box) slot.box = { A: f(slot.box.A), t: slot.box.t };
   }
   if (opts.unlockHorizon && (g.p2.vp1 || g.p3.vp1)) g.lockHorizon = false;

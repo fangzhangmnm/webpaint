@@ -65,8 +65,17 @@
 
 - **3D grid**（三点透视的立体格）：两个对角点拖不出来（需要第三轴输入），user 拍板手动画。
 - **grid 线最小间距护栏**：护栏造成不可控。
-- **isometric frame**：不是弃案，是**排队**（experimental，2:1 像素惯例非 22.5°；等透视真机
-  验过后单独 slice）。
+- ~~isometric frame：排队~~ **已落地 v0.6.20 / 2026-07-28**，要点：
+  - **轴固定 2:1 像素惯例**（对角 ±(2,∓1)/√5 + 竖直；有理斜率格点连线 Bresenham 对称，非 22.5°/30°）。
+  - **无 VP**：PerspConfig.axes 三平行族；平行×平行无消失线 → 全管线走仿射路径**零奇点**
+    （quadFromCorners 精确、chart 仿射、像素 conic g=h=0）。
+  - **编辑面 = 参考 box 独任**（editorState.persp.iso.box——anchor 即 box.A，+0.5 格系与 VP
+    同待遇，crop/翻转/旋转/resample 过 remapShapePersp）；C 角 2×2 解析解、D 角 = 竖直高度
+    手柄，无 Gauss-Newton。lockHorizon 钮在 iso 下隐藏（无地平线）。
+  - **度量 = 解析仿射**（planeMetric 的 iso 分支；经典约定视点重建对平行投影发散）：世界单位
+    屏向量 对角 (±2,−1)、竖直 (0,2) → 单位立方 = 顶面菱形 4×2 + 侧高 2（sprite 恰 4×4）；
+    正方/正圆下游（constrainSquareOnPlane/metricCirclePolyline）接口不变零改动。
+  - 平面清单复用 ground/wallL/wallR = 顶面/左面/右面；常显 gizmo = 过锚点三轴参考线（rays 槽复活）。
 
 ## 后果
 

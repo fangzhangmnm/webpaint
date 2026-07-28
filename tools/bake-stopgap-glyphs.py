@@ -53,6 +53,7 @@ SPECS = [
     # （撤需求 v0.6.16：笔压 toggle 复用笔粗图标位 brush-width/brush-width-locked）。
     # 2026-07-28：多边形套索子工具 +1。
     ("select-polygon", "折", (3, 3, 18, 18), "套索·多边形子工具(逐点落顶点/回起点闭合/锁格点硬边)。真图标建议=虚线五边形(对齐 select-freehand/rectangle 家族)"),
+    ("persp-iso", "等", (3, 3, 18, 18), "形状笔·透视模式:等轴测(2:1 像素惯例,三平行轴无 VP)。真图标建议=2:1 iso 立方线框(对齐 persp-1p/2p/3p 家族)"),
 ]
 syms = []
 for sid, text, box, note in SPECS:

@@ -71,7 +71,7 @@ let shapeToolbarStack: HTMLElement, shapeSubBtns: HTMLElement[],
     shapePerspModeSlotUse: SVGUseElement, shapePerspModeMenuBtns: HTMLElement[],
     shapePlaneCtl: HTMLElement, shapePlaneBtns: HTMLElement[],
     shapePerspExtraCtl: HTMLElement, shapePerspShowBtn: HTMLElement, shapePerspShowUse: SVGUseElement;
-const PERSP_MODE_ICON: Record<string, string> = { off: "#persp-viewport", p1: "#persp-1p", p2: "#persp-2p", p3: "#persp-3p" };
+const PERSP_MODE_ICON: Record<string, string> = { off: "#persp-viewport", p1: "#persp-1p", p2: "#persp-2p", p3: "#persp-3p", iso: "#persp-iso" };
 const SHAPE_SUB_ICON: Record<string, string> = { line: "#line", rect: "#rectangle", circle: "#circle", grid: "#grid" };
 // constrain-square/circle 已合并成唯一 constrain-ratio（甲方裁定 2026-07-25，旧双 id sunset）
 const SHAPE_CONSTRAIN_ICON: Record<string, string> = { line: "#snap-angle", rect: "#constrain-ratio", circle: "#constrain-ratio" };
@@ -84,7 +84,7 @@ export function updateShapeToolbar() {
   if (!active) { shapeGridMenu?.classList.add("hidden"); return; }
   const sub = input.shapeBrush.getSubTool();
   const gPersp = editorState.persp;
-  const perspMode = (["p1", "p2", "p3"].includes(gPersp.mode) ? gPersp.mode : "off") as PerspMode;
+  const perspMode = (["p1", "p2", "p3", "iso"].includes(gPersp.mode) ? gPersp.mode : "off") as PerspMode;
   for (const b of shapeSubBtns) {
     b.setAttribute("aria-pressed", b.dataset.shapeSub === sub ? "true" : "false");
   }
