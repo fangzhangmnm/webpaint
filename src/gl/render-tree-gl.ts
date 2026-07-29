@@ -33,14 +33,15 @@ import type { BlendMode } from "./blend-glsl.ts";
 // ---- board 输入（原 gl-doc-renderer 同名接口原样迁入） ----
 export interface SurrogateInput { layerId: number; canvas: CanvasImageSource; bx: number; by: number; w: number; h: number; }
 
+// v0.6.38 全 typed array（零 canvas premult 往返）：u8Plane = straight 源字节（原尺寸，或 rotsprite
+// 的 EPX 放大平面——此时 srcW/srcH 已是放大尺寸、mode=0）；mode 3 用 splinePlane（RGBA16F）。
 export interface FloatInput {
   layerId: number;
-  srcCanvas: CanvasImageSource;   // 未 warp 源像素（稳定引用 → 复用 GPU 纹理）
   srcW: number; srcH: number;
   hinv: number[];                 // 9，row-major，doc→源单位方格
   mode: number;                   // 0=nearest 1=bilinear 2=bicubic 3=spline（预滤波 B 样条）
   splinePlane?: { data: Float32Array; w: number; h: number } | null;   // mode 3 的系数平面（PAD 边距，src/bspline.ts）
-  u8Plane?: { data: Uint8ClampedArray; w: number; h: number } | null;  // rotsprite：EPX 放大 u8 平面（srcW/srcH 已是放大尺寸，mode=0）
+  u8Plane?: { data: Uint8ClampedArray; w: number; h: number } | null;  // 其余 mode 的 straight u8 源
 }
 
 export interface StampOverlayInput {
@@ -222,8 +223,8 @@ export class RenderTreeGL {
     return true;
   }
 
-  warpToCanvas(srcCanvas: TexImageSource | { data: Float32Array; w: number; h: number } | { data: Uint8ClampedArray; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {
-    return this._comp.warpToCanvas(srcCanvas, srcW, srcH, hinv, mode, bx, by, bw, bh);
+  warpToBytes(src: { data: Float32Array; w: number; h: number } | { data: Uint8ClampedArray; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {
+    return this._comp.warpToBytes(src, srcW, srcH, hinv, mode, bx, by, bw, bh);
   }
 
   // ---- 帧入口 ----
@@ -677,22 +678,20 @@ export class RenderTreeGL {
         entry = { tex, canvas: null };
         this._floatTex.set(f.layerId, entry);
       }
-      // 内容 key：spline/rotsprite 模式 = 派生平面身份，其余 = 源 canvas 身份（模式切换时 key 变 → 自动重传）
-      const contentKey = (f.mode === 3 && f.splinePlane) ? (f.splinePlane.data as unknown as CanvasImageSource)
-        : f.u8Plane ? (f.u8Plane.data as unknown as CanvasImageSource)
-        : f.srcCanvas;
+      // 内容 key = 平面身份（模式切换 spline↔u8 时 key 变 → 自动重传）。全 typed array 上传：
+      // UNPACK_PREMULTIPLY flag 对 typed array 不适用，字节 verbatim 上卡——canvas 源上传在 Safari
+      // 上的 premult 转换不可靠（柔边变黑），v0.6.38 起禁入浮层管线。
+      const contentKey = ((f.mode === 3 && f.splinePlane) ? f.splinePlane.data : f.u8Plane?.data) as unknown as CanvasImageSource;
+      if (!contentKey) continue;
       if (entry.canvas !== contentKey) {   // 源内容变（首次/换浮层/换采样族）才重传
         gl.bindTexture(gl.TEXTURE_2D, entry.tex);
         if (f.mode === 3 && f.splinePlane) {
           const p = f.splinePlane;
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, p.w + 16, p.h + 16, 0, gl.RGBA, gl.FLOAT, p.data);
-        } else if (f.u8Plane) {
-          const p = f.u8Plane;
+        } else {
+          const p = f.u8Plane!;
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, p.w, p.h, 0, gl.RGBA, gl.UNSIGNED_BYTE,
             new Uint8Array(p.data.buffer, p.data.byteOffset, p.data.byteLength));
-        } else {
-          gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, f.srcCanvas as TexImageSource);
         }
         entry.canvas = contentKey;
       }

@@ -427,10 +427,11 @@ export class GLCompositor {
     gl.bindVertexArray(null);
   }
 
-  // commit 烤定：warp 源 → **straight** RGBA bbox FBO → readback → canvas（floating-transform._bakeDown 用，
-  //   复用 live 同一套 warp 采样器 = preview/commit 零漂移）。源纹理临时上传（commit 一次性，可忽略）。
-  //   mode 3（spline）源 = 系数平面（Float32Array，PAD 边距）→ RGBA16F；其余 = canvas → u8。
-  warpToCanvas(srcCanvas: TexImageSource | { data: Float32Array; w: number; h: number } | { data: Uint8ClampedArray; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
+  // commit 烤定（产品路径 v0.6.38）：warp 源 → **straight** RGBA bbox FBO → readback 直接返回**字节**
+  //   （floating-transform._bakeDown 用 typed-array source-over 落层——零 canvas premult 往返）。
+  //   复用 live 同一套 warp 采样器 = preview/commit 零漂移。源纹理临时上传（commit 一次性，可忽略）。
+  //   mode 3（spline）源 = 系数平面（Float32Array，PAD 边距）→ RGBA16F；u8 平面（源字节/EPX 放大）→ u8。
+  warpToBytes(srcCanvas: TexImageSource | { data: Float32Array; w: number; h: number } | { data: Uint8ClampedArray; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { data: Uint8ClampedArray; w: number; h: number; dstX: number; dstY: number } | null {
     if (bw <= 0 || bh <= 0) return null;
     const gl = this._glctx.gl;
     const tex = gl.createTexture()!;
@@ -473,9 +474,16 @@ export class GLCompositor {
     gl.bindVertexArray(null);
     this._glctx.returnFBO(fbo);
     gl.deleteTexture(tex);
-    const canvas = document.createElement("canvas"); canvas.width = bw; canvas.height = bh;
-    canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), bw, bh), 0, 0);
-    return { canvas, dstX: bx, dstY: by };
+    return { data: new Uint8ClampedArray(px.buffer), w: bw, h: bh, dstX: bx, dstY: by };
+  }
+
+  // canvas 包装（gl-smoke 对拍参照用；产品路径走 warpToBytes 直落 typed array）。
+  warpToCanvas(src: Parameters<GLCompositor["warpToBytes"]>[0], srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
+    const r = this.warpToBytes(src, srcW, srcH, hinv, mode, bx, by, bw, bh);
+    if (!r) return null;
+    const canvas = document.createElement("canvas"); canvas.width = r.w; canvas.height = r.h;
+    canvas.getContext("2d")!.putImageData(new ImageData(r.data, r.w, r.h), 0, 0);
+    return { canvas, dstX: r.dstX, dstY: r.dstY };
   }
 
   private _clear(f: PooledFBO, bg?: [number, number, number, number]): void {

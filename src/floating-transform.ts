@@ -19,15 +19,14 @@
 //   切模式不悄悄改 mesh，降不回去的模式 UI 置灰）。warp 已删（旧 4×4 是错数学）。
 //
 // 渲染：2×2 mesh → GPU warp（gl-compositor，per-pixel inverse homography；本文件只出 warp 矩阵，
-//   栅格在 GPU）。浮层源纹理 = workpiece float tiles 的懒物化 canvas（WeakMap 缓存，S7 bridge 前过渡）。
+//   栅格在 GPU）。浮层源 = straight 字节平面 typed-array 直传（v0.6.38 去 canvas 化；WeakMap 缓存）。
 
-import { makeBitmap } from "./bitmap.ts";
 import { findNodeById } from "./doc.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
 import type { FloatFrame, Workpiece, FloatTransformMeta, WorkpieceFloat, FloatState } from "./workpiece/workpiece.ts";
 import type { UndoHistory } from "./workpiece/undo-history.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
-import { cloneFloatMeta, composeIdentityWriteback, composeRigidWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
+import { cloneFloatMeta, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
 import type { TransformClass } from "./workpiece/workpiece.ts";
 import { prefilterToSplinePlane } from "./bspline.ts";
@@ -37,23 +36,23 @@ import type { U8Plane } from "./rotsprite.ts";
 
 // ---- 局部几何/数据类型（type-strip 后纯运行时无变化）----
 type Node = Layer | LayerGroup;
-type Bitmap = OffscreenCanvas | HTMLCanvasElement;
 interface Point { x: number; y: number; }
 type Mesh = Point[][];                          // 2×2：[[TL,TR],[BL,BR]]
 interface Rect { x: number; y: number; w: number; h: number; }
 type SampleMode = "nearest" | "bilinear" | "bicubic" | "spline" | "rotsprite";
 
-// commit 烤定的 GPU warp fn（board.glWarpBakeFn 注入）：warp 源 → straight RGBA canvas + doc 坐标位置。
+// commit 烤定的 GPU warp fn（board.glWarpBakeFn 注入）：warp 源 → straight RGBA **字节** + doc 坐标位置。
 //   mode：0=nearest 1=bilinear 2=bicubic 3=spline（对齐 WARP shader）。GL 失败=null（commit 不烤）。
-//   mode 3 的 src = B 样条系数平面（SplinePlane）；rotsprite = EPX 放大 U8Plane + mode 0 + 放大后尺寸
-//   （shader 只见 nearest 采样大纹理，无独立 mode）；其余 = canvas。
-export type WarpBakeFn = (src: CanvasImageSource | SplinePlane | U8Plane, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null;
+//   源一律 typed array（v0.6.38 去 canvas 化，修柔边 premult 黑边）：mode 3 = B 样条系数平面
+//   （SplinePlane）；rotsprite = EPX 放大 U8Plane + mode 0 + 放大后尺寸；其余 = 源 straight 字节 U8Plane。
+export type WarpBakeFn = (src: SplinePlane | U8Plane, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) => { data: Uint8ClampedArray; w: number; h: number; dstX: number; dstY: number } | null;
 
 type TransformModeKind = "free" | "uniform" | "distort";
 
-// 渲染消费面（board._glFloatInputs / app lassoProvider）：workpiece float + 懒物化 canvas 的只读视图。
+// 渲染消费面（board._glFloatInputs / app lassoProvider）：workpiece float 的只读视图。
+// bytes = 源 straight 字节（typed array 直传 GPU，零 canvas premult 往返——v0.6.38 修柔边黑边）；
 // spline / rotsprite：对应采样模式激活时附带的派生平面（current() 懒算，per-float 缓存）。
-export interface FloatViewSource { layerId: number; canvas: Bitmap; rect: Rect; spline?: SplinePlane; rotsprite?: U8Plane }
+export interface FloatViewSource { layerId: number; bytes: U8Plane; rect: Rect; spline?: SplinePlane; rotsprite?: U8Plane }
 export interface FloatView {
   sources: FloatViewSource[];
   gizmoFrame: FloatFrame;
@@ -108,17 +107,17 @@ interface LiveMeta {
   usedClass?: TransformClass;   // 像素变换用过的最高自由度类（模式切换记账制；缺省 similarity）
 }
 
-// float tiles → GPU 源纹理的懒物化缓存（float 像素不可变 → 按对象身份缓存即自失效；S7 bridge 化后死）。
-const _floatCanvasCache = new WeakMap<WorkpieceFloat, Bitmap>();
-function floatSourceCanvas(f: WorkpieceFloat): Bitmap {
-  let c = _floatCanvasCache.get(f);
-  if (!c) {
-    c = makeBitmap(f.rect.w, f.rect.h);
-    const ctx = c.getContext("2d") as CanvasRenderingContext2D;
-    ctx.putImageData(new ImageData(f.pixels.getRegion(f.rect.x, f.rect.y, f.rect.w, f.rect.h), f.rect.w, f.rect.h), 0, 0);
-    _floatCanvasCache.set(f, c);
+// float tiles → straight 字节平面的懒物化缓存（float 像素不可变 → 按对象身份缓存即自失效）。
+// v0.6.38：取代旧 floatSourceCanvas（putImageData→canvas→texImage2D 的 premult 往返在 Safari
+// 上会把半透明柔边变黑——typed array 直传，UNPACK flag 对 typed array 不适用，字节 verbatim 上卡）。
+const _floatBytesCache = new WeakMap<WorkpieceFloat, U8Plane>();
+function floatBytes(f: WorkpieceFloat): U8Plane {
+  let p = _floatBytesCache.get(f);
+  if (!p) {
+    p = { data: f.pixels.getRegion(f.rect.x, f.rect.y, f.rect.w, f.rect.h), w: f.rect.w, h: f.rect.h };
+    _floatBytesCache.set(f, p);
   }
-  return c;
+  return p;
 }
 // FloatView.sources 按 FloatState 身份缓存（每帧 provider 调 current()，别每帧重建数组）。
 const _floatViewCache = new WeakMap<FloatState, FloatViewSource[]>();
@@ -127,7 +126,8 @@ const _floatSplineCache = new WeakMap<WorkpieceFloat, SplinePlane>();
 function floatSplinePlane(f: WorkpieceFloat): SplinePlane {
   let p = _floatSplineCache.get(f);
   if (!p) {
-    p = prefilterToSplinePlane(f.pixels.getRegion(f.rect.x, f.rect.y, f.rect.w, f.rect.h), f.rect.w, f.rect.h);
+    const b = floatBytes(f);
+    p = prefilterToSplinePlane(b.data, b.w, b.h);
     _floatSplineCache.set(f, p);
   }
   return p;
@@ -137,7 +137,8 @@ const _floatRotspriteCache = new WeakMap<WorkpieceFloat, U8Plane>();
 function floatRotspritePlane(f: WorkpieceFloat): U8Plane {
   let p = _floatRotspriteCache.get(f);
   if (!p) {
-    p = rotspriteUpscale(f.pixels.getRegion(f.rect.x, f.rect.y, f.rect.w, f.rect.h), f.rect.w, f.rect.h);
+    const b = floatBytes(f);
+    p = rotspriteUpscale(b.data, b.w, b.h);
     _floatRotspriteCache.set(f, p);
   }
   return p;
@@ -187,7 +188,7 @@ export class FloatingTransform {
     if (!lv) return null;
     let sources = _floatViewCache.get(fs);
     if (!sources) {
-      sources = fs.floats.map((f) => ({ layerId: f.sourceLayerId, canvas: floatSourceCanvas(f), rect: f.rect }));
+      sources = fs.floats.map((f) => ({ layerId: f.sourceLayerId, bytes: floatBytes(f), rect: f.rect }));
       _floatViewCache.set(fs, sources);
     }
     // spline / rotsprite 模式：附带派生平面（懒算 + per-float 缓存；切回其它模式留着无害，board 按 mode 消费）
@@ -406,15 +407,13 @@ export class FloatingTransform {
       rendered = bakeFn(up, up.w, up.h, wp.hinv, 0, wp.bx, wp.by, wp.bw, wp.bh);
     } else {
       const mode = this._sampleMode === "nearest" ? 0 : this._sampleMode === "bicubic" ? 2 : this._sampleMode === "spline" ? 3 : 1;
-      const src = this._sampleMode === "spline" ? floatSplinePlane(f) : floatSourceCanvas(f) as CanvasImageSource;
+      const src = this._sampleMode === "spline" ? floatSplinePlane(f) : floatBytes(f);
       rendered = bakeFn(src, f.rect.w, f.rect.h, wp.hinv, mode, wp.bx, wp.by, wp.bw, wp.bh);
     }
     if (!rendered) return;
-    const rx0 = Math.floor(rendered.dstX), ry0 = Math.floor(rendered.dstY);
-    const rx1 = Math.ceil(rendered.dstX + rendered.canvas.width), ry1 = Math.ceil(rendered.dstY + rendered.canvas.height);
-    leaf.editRegion(rx0, ry0, rx1 - rx0, ry1 - ry0, (ctx, ox, oy) => {
-      ctx.drawImage(rendered.canvas, rendered.dstX - ox, rendered.dstY - oy);
-    });
+    // typed-array source-over 落层（v0.6.38：取代 editRegion/drawImage 的 canvas premult 往返）。
+    // dstX/dstY = bbox 左上（整数，quadWarp floor/ceil 产）。
+    applyRegionBuf(leaf, composeOverWriteback(leaf, rendered.dstX, rendered.dstY, rendered.w, rendered.h, rendered.data));
   }
 
   // 源层 id → 活叶（消失容忍：跳过该 float，别的照常）。

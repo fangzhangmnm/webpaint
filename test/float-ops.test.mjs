@@ -353,6 +353,24 @@ describe("S6 · commit 整数平移快路（不旋转时 pixel perfect）", () =
     assert(orig.every((v, i) => v === moved[i]), "+8 处逐字节 = 源（预览=落地）");
   });
 
+  it("非刚体 commit 走 bakeFn 字节路：stub bake 输出 typed-array source-over 落层（v0.6.38 零 canvas）", () => {
+    const { doc, w, h, ft } = mk();
+    const L = doc.activeLayer;
+    paintPattern(L, 20, 20, 40, 40, false);
+    doc.selection = rectSel(30, 30, 16, 16);
+    ft.lift(L);
+    // 微旋转 → 非刚体 → 走 bakeFn。stub：无视 warp 参数，返回一块 2×2 半透明红 @ (100,100)
+    ft.beginDrag({ kind: "rotate" }, 54, 38); ft.extendDrag(53.8, 40.5); ft.endDrag();
+    const stub = (_src, _sw, _sh, _hinv, _mode, _bx, _by, _bw, _bh) => ({
+      data: new Uint8ClampedArray([200, 0, 0, 128, 200, 0, 0, 128, 200, 0, 0, 128, 200, 0, 0, 128]),
+      w: 2, h: 2, dstX: 100, dstY: 100,
+    });
+    eq(ft.commit(stub), true, "commit ok");
+    const px1 = L.sampleAt(100, 100);
+    // 半透明红 over 透明底 → 原样落地（straight，无 premult 往返损失）
+    eq(px1[0], 200); eq(px1[1], 0); eq(px1[3], 128, "字节精确落层（透明底 source-over = 原样）");
+  });
+
   it("非刚体态（微旋转后）：平移不取整、commit 不入快路（bakeFn=null 不烤，洞原样）", () => {
     const { doc, w, h, ft } = mk();
     const L = doc.activeLayer;

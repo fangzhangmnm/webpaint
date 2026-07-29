@@ -67,9 +67,10 @@ export class GLBoard {
     return this._tree.pickColor(doc.layers, doc.width, doc.height, bg, x, y, surrogate, overlay);
   }
 
-  // 给自由变换 commit 用：warp 源 → straight RGBA canvas（_bakeDown 走 readback→editRegion，复用 live warp）。
-  warpToCanvas(srcCanvas: TexImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {
-    return this._tree.warpToCanvas(srcCanvas, srcW, srcH, hinv, mode, bx, by, bw, bh);
+  // 给自由变换 commit 用：warp 源 → straight RGBA **字节**（_bakeDown typed-array source-over 落层，
+  //   复用 live warp；v0.6.38 去 canvas 化）。
+  warpToBytes(src: Parameters<RenderTreeGL["warpToBytes"]>[0], srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {
+    return this._tree.warpToBytes(src, srcW, srcH, hinv, mode, bx, by, bw, bh);
   }
 
   // 渲染一帧。affine6 = board _applyDocTransform 的 device-px 6 参；canvasW/H = device px。

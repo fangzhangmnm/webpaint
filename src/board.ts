@@ -37,7 +37,7 @@ import { clipSegToBox } from "./shape-geometry.ts";
 // 自由变换浮层网格点 / source / float 描述（lassoInfo.floating = FloatingTransform.current() 视图；
 //   v0.4.7 S6：源像素在 workpiece float tiles，这里拿到的是懒物化 canvas + identity rect）
 interface MeshPt { x: number; y: number; }
-interface FloatSource { layerId: number; canvas: CanvasImageSource; rect: { x: number; y: number; w: number; h: number }; spline?: { data: Float32Array; w: number; h: number }; rotsprite?: { data: Uint8ClampedArray; w: number; h: number } }
+interface FloatSource { layerId: number; bytes: { data: Uint8ClampedArray; w: number; h: number }; rect: { x: number; y: number; w: number; h: number }; spline?: { data: Float32Array; w: number; h: number }; rotsprite?: { data: Uint8ClampedArray; w: number; h: number } }
 interface FloatInfo {
   sources: FloatSource[];
   gizmoFrame: unknown;
@@ -769,7 +769,7 @@ export class Board {
   // 自由变换 commit 烤定用：GPU warp 源 → straight canvas（_bakeDown 注入；GL 失败=null，commit 不烤）。
   glWarpBakeFn(): WarpBakeFn | null {
     if (!this._glBoard) return null;
-    return (src, srcW, srcH, hinv, mode, bx, by, bw, bh) => this._glBoard!.warpToCanvas(src as Parameters<NonNullable<typeof this._glBoard>["warpToCanvas"]>[0], srcW, srcH, hinv, mode, bx, by, bw, bh);
+    return (src, srcW, srcH, hinv, mode, bx, by, bw, bh) => this._glBoard!.warpToBytes(src, srcW, srcH, hinv, mode, bx, by, bw, bh);
   }
 
   // 自由变换浮层 → GL warp 输入（floatFor 接缝）：每源层传**未 warp 源纹理 + Hinv**（GPU 在 shader 里 gather
@@ -791,15 +791,15 @@ export class Board {
         const dq = sourceDestQuad(src.rect, float.gizmoFrame as Parameters<typeof sourceDestQuad>[1], float.mesh as Parameters<typeof sourceDestQuad>[2]);
         const rigid = dq ? integerRigidOf(src.rect, dq as Parameters<typeof integerRigidOf>[1]) : null;
         if (rigid) {
-          out.push({ layerId: src.layerId, srcCanvas: src.canvas, srcW: src.rect.w, srcH: src.rect.h, hinv: wp.hinv, mode: 0 });
+          out.push({ layerId: src.layerId, srcW: src.rect.w, srcH: src.rect.h, hinv: wp.hinv, mode: 0, u8Plane: src.bytes });
         } else {
-          out.push({ layerId: src.layerId, srcCanvas: src.canvas, srcW: src.rotsprite.w, srcH: src.rotsprite.h, hinv: wp.hinv, mode: 0, u8Plane: src.rotsprite });
+          out.push({ layerId: src.layerId, srcW: src.rotsprite.w, srcH: src.rotsprite.h, hinv: wp.hinv, mode: 0, u8Plane: src.rotsprite });
         }
         continue;
       }
       // spline（mode 3）需要系数平面（floating-transform.current() 在 spline 模式下附带）；缺了退 bicubic
       const m = (mode === 3 && !src.spline) ? 2 : mode;
-      out.push({ layerId: src.layerId, srcCanvas: src.canvas, srcW: src.rect.w, srcH: src.rect.h, hinv: wp.hinv, mode: m, splinePlane: src.spline ?? null });
+      out.push({ layerId: src.layerId, srcW: src.rect.w, srcH: src.rect.h, hinv: wp.hinv, mode: m, splinePlane: src.spline ?? null, u8Plane: src.bytes });
     }
     return out;
   }

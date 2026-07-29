@@ -163,6 +163,31 @@ export interface RigidMap {
   m21: number; m22: number; s0y: number;
 }
 
+// 任意 straight RGBA 缓冲在 (x,y) 处 source-over 落到 leaf 当前内容之上（typed array，
+// 零 canvas premult 往返——v0.6.38 warp bake 落层用，取代 editRegion/drawImage）。
+// 调用方负责 leaf.putImageData（保 Layer 物化缓存失效）。
+export function composeOverWriteback(leaf: Layer, x: number, y: number, w: number, h: number, src: Uint8ClampedArray): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
+  const dst = leaf.pixels.getRegion(x, y, w, h);
+  for (let i = 0; i < dst.length; i += 4) {
+    const fa = src[i + 3];
+    if (fa === 0) continue;
+    if (fa === 255) {
+      dst[i] = src[i]; dst[i + 1] = src[i + 1]; dst[i + 2] = src[i + 2]; dst[i + 3] = 255;
+      continue;
+    }
+    const la = dst[i + 3];
+    const inv = (255 - fa);
+    const outA = fa + Math.round(la * inv / 255);
+    if (outA === 0) { dst[i + 3] = 0; continue; }
+    const wf = fa * 255, wl = la * inv;
+    dst[i]     = Math.round((src[i]     * wf + dst[i]     * wl) / (wf + wl));
+    dst[i + 1] = Math.round((src[i + 1] * wf + dst[i + 1] * wl) / (wf + wl));
+    dst[i + 2] = Math.round((src[i + 2] * wf + dst[i + 2] * wl) / (wf + wl));
+    dst[i + 3] = outA;
+  }
+  return { x, y, w, h, data: dst };
+}
+
 // 整数刚体写回：float 像素按置换映射 source-over 落到 leaf 当前内容之上（straight-alpha，
 // 逐字节精确、与采样模式无关）。调用方负责 leaf.putImageData（保 Layer 物化缓存失效）。
 export function composeRigidWriteback(leaf: Layer, f: WorkpieceFloat, m: RigidMap): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
