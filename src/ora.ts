@@ -24,6 +24,7 @@ import { zipPack, zipUnpack } from "./zip.ts";
 import { Layer, LayerGroup, PaintDoc, flattenLeaves, findNodeById, reseedLayerIdCounter } from "./doc.ts";
 import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
+import { encodePngFromBytes, encodePngFromCanvas, decodePngToBytes } from "./png-codec.ts";
 // 纯树↔stack.xml 序列化（嵌套组 + id + active）抽到独立深模块（无 canvas 依赖，可纯 node 测）。
 import { buildStackXml, parseStackXml } from "./ora-stack-xml.ts";
 import type { ParsedNode } from "./ora-stack-xml.ts";
@@ -51,20 +52,7 @@ type DecodedDoc = PaintDoc & {
 
 // ---- 工具 ----
 
-async function canvasToPngBytes(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Uint8Array> {
-  // OffscreenCanvas 用 convertToBlob，HTMLCanvasElement 用 toBlob —— 运行时 feature-detect 分支
-  let blob: Blob | null | undefined;
-  const oc = canvas as OffscreenCanvas, hc = canvas as HTMLCanvasElement;
-  if (typeof oc.convertToBlob === "function") {
-    blob = await oc.convertToBlob({ type: "image/png" });
-  } else if (typeof hc.toBlob === "function") {
-    blob = await new Promise<Blob | null>((resolve) => hc.toBlob(resolve, "image/png"));
-  } else {
-    throw new Error("canvas 无 toBlob / convertToBlob");
-  }
-  if (!blob) throw new Error("canvas → blob 失败");
-  return new Uint8Array(await blob.arrayBuffer());
-}
+// （canvasToPngBytes 已收进 src/png-codec.ts 止血 facade——PNG 编解码唯一接缝，库外禁越狱 canvas。）
 
 function bytesToString(bytes: Uint8Array): string {
   return new TextDecoder("utf-8").decode(bytes);
@@ -81,7 +69,7 @@ async function renderThumbnailAdaptive(merged: OffscreenCanvas | HTMLCanvasEleme
   let lastPng: Uint8Array | null = null, lastCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   for (let i = 0; i < sizes.length; i++) {
     const c = renderThumbnail(merged, sizes[i]);
-    const png = await canvasToPngBytes(c);
+    const png = await encodePngFromCanvas(c);
     lastPng = png; lastCanvas = c;
     if (png.byteLength <= maxBytes) return { canvas: c, png };
   }
@@ -118,7 +106,7 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
   //   缺省（node 测试 / GL lost 的 autosave 兜底）= 透明占位——层数据完整，mergedimage 只是预览件。
   let merged = opts.mergedCanvas ?? null;
   if (!merged) { merged = makeBitmap(doc.width, doc.height); merged.getContext("2d"); }
-  const mergedPng = await canvasToPngBytes(merged);
+  const mergedPng = await encodePngFromCanvas(merged);
   // thumb：自适应尺寸 256→192→128，目标 ≤ 80KB（让云端 48KB suffix 大概率命中）
   const { png: thumbPng } = await renderThumbnailAdaptive(merged);
 
@@ -137,14 +125,15 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
   for (const L of flattenLeaves(doc.layers)) {
     let png;
     if (L.bboxW > 0 && L.bboxH > 0) {
-      png = await canvasToPngBytes(L.canvas);
+      // v0.6.42：tiles 字节直读进 codec facade（不再经 L.canvas 物化）
+      png = await encodePngFromBytes(L.getImageData(L.bboxX, L.bboxY, L.bboxW, L.bboxH).data, L.bboxW, L.bboxH);
     } else {
       // 空层 → 1×1 透明 png。**必须先取一次 2d context**：OffscreenCanvas 从未 getContext 就
       // convertToBlob，Chromium 抛「offscreen canvas has no rendering content」→ 空层/空画布存不了。
       // （renderMerged 那条路径 makeBitmap 后立刻 getContext，所以不踩；只有这个占位分支漏了。）
       const c = makeBitmap(1, 1);
       c.getContext("2d");
-      png = await canvasToPngBytes(c);
+      png = await encodePngFromCanvas(c);
     }
     entries.push({ path: `data/layer${L.id}.png`, data: png });
   }
@@ -212,7 +201,7 @@ export async function decodeOraToDoc(blob: Blob) {
     }
     const png = files[spec.src];
     if (!png) throw new Error(`.ora 缺图层 PNG：${spec.src}`);
-    const bitmap = await createImageBitmap(new Blob([png], { type: "image/png" }));
+    const px = await decodePngToBytes(png);   // v0.6.42：走 codec facade（换 UPNG/自研只改 png-codec.ts）
     const layer = new Layer({
       width: meta.w,
       height: meta.h,
@@ -225,8 +214,7 @@ export async function decodeOraToDoc(blob: Blob) {
     layer.mode = spec.mode;
     layer.clippingMask = !!spec.clippingMask;
     layer.lockAlpha = !!spec.lockAlpha;
-    layer.replaceFromCanvas(bitmap, spec.x, spec.y, bitmap.width, bitmap.height);
-    bitmap.close?.();
+    layer.replaceFromBytes(px.data, spec.x, spec.y, px.w, px.h);
     if (spec.isActive) activeId = layer.id;
     if (spec.isReference) doc.referenceLayerId = layer.id;
     return layer;
