@@ -172,7 +172,8 @@ function freshGroups() {
       iso: { box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
     },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
-    liquify:       { bleed: "edge" as string },
+    // sample：液化采样核 "bilinear"|"nearest"|"spline"（v0.6.36 保锐模式；持久化同意随本批 2026-07-28 批准）
+    liquify:       { bleed: "edge" as string, sample: "bilinear" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
     viewport:      null as EditorViewport | null,
     checkboard:    false,
@@ -300,7 +301,8 @@ export const editorState = {
     get on(): boolean { return S.g.grid.on; }, set on(v: boolean) { S.g.grid.on = v; },
     get cell(): number { return S.g.grid.cell; }, set cell(v: number) { S.g.grid.cell = v; },
   },
-  liquify:     { get bleed(): string { return S.g.liquify.bleed; }, set bleed(v: string) { S.g.liquify.bleed = v; } },
+  liquify:     { get bleed(): string { return S.g.liquify.bleed; }, set bleed(v: string) { S.g.liquify.bleed = v; },
+                 get sample(): string { return S.g.liquify.sample; }, set sample(v: string) { S.g.liquify.sample = v; } },
   colorPicker: {
     get layerMode(): string { return _bind ? _bind.getPickMode() : S.g.colorPicker.layerMode; },
     set layerMode(v: string) { if (_bind) _bind.setPickMode(v); else S.g.colorPicker.layerMode = v; },

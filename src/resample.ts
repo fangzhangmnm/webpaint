@@ -8,11 +8,11 @@
 // contexts：transform = 自由变换的逐像素采样（GPU warp shader 支持 nearest/bilinear/bicubic）；scale = 轴对齐缩放（drawImage / smartResample）。
 // 以后 AI 放大多半只属于 scale（神经网络整图，非逐像素 kernel）→ contexts: ["scale"]。
 export const RESAMPLE_MODES = [
-  { id: "spline",   label: "样条（多次变换保真）", contexts: ["transform"] },     // 预滤波三次 B 样条（src/bspline.ts）：反复 commit 不积糊，采样成本=bicubic
+  { id: "spline",   label: "样条（多次变换保真）", contexts: ["transform", "liquify"] },   // 预滤波三次 B 样条（src/bspline.ts）：反复 commit 不积糊，采样成本=bicubic
   { id: "bicubic",  label: "双三次（高质量）",     contexts: ["transform", "scale"] },
   { id: "sharper",  label: "缩小优化（清晰）",     contexts: ["scale"] },         // step-halving，= PS Bicubic Sharper（适合缩小）；放大退回 bicubic
-  { id: "bilinear", label: "双线性（软）",         contexts: ["transform", "scale"] },
-  { id: "nearest",  label: "最近邻（像素画）",     contexts: ["transform", "scale"] },
+  { id: "bilinear", label: "双线性（软）",         contexts: ["transform", "scale", "liquify"] },
+  { id: "nearest",  label: "最近邻（像素画）",     contexts: ["transform", "scale", "liquify"] },
   // 以后：{ id: "ai", label: "AI 放大", contexts: ["scale"] }
 ];
 

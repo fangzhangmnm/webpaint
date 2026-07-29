@@ -15,6 +15,7 @@ import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";
 
 import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式 import）
 import { requireEditableLeaf } from "./editable-leaf.ts";
+import { fillResampleSelect } from "./resample.ts";
 import { disposeLayerSnap, type LayerSnap } from "./doc.ts";
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";
@@ -27,6 +28,7 @@ interface FilterLike {
   bake(src: Uint8ClampedArray, out: Uint8ClampedArray, params: unknown, mask: Uint8Array | null, w: number, h: number): void;
   brushVariants?: { id: string; title: string; params: Record<string, unknown> }[];
   boundaryModes?: { id: string; title: string }[];
+  sampleModes?: boolean;   // v0.6.36：声明即渲染采样核下拉（液化；选项 = RESAMPLE_MODES 的 liquify context）
 }
 // adjust panel 操作的 doc 活层（doc.js 未类型化 → 只描述用到的）。
 interface AdjustLayer { id: number; name: string; bboxX: number; bboxY: number; bboxW: number; bboxH: number; canvas: CanvasImageSource; ctx: CanvasRenderingContext2D; snapshot(): LayerSnap; replaceFromCanvas(src: CanvasImageSource, ox: number, oy: number, w: number, h: number): void; }
@@ -272,9 +274,10 @@ function _enterFilterBrushMode(Filter: FilterLike) {
   const savedVid = state.toolStates.filterBrush?.variantId;
   let variant = variants.find((v) => v.id === savedVid) || variants[0];
   // v147 声明了 boundaryModes 的 filter（液化）→ params 带上持久化的 bleed；其他 filter 不掺这个 key
-  const params = Filter.boundaryModes
+  let params = Filter.boundaryModes
     ? { ...variant.params, bleed: editorState.liquify.bleed }
     : variant.params;
+  if (Filter.sampleModes) params = { ...params, sample: editorState.liquify.sample };
   state.filterBrush = { Filter, params, variantId: variant.id, variantLabel: variant.title };
   if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = variant.id;
   setTool("filterBrush");
@@ -321,10 +324,12 @@ function _renderFilterBrushToolbar() {
     sel.addEventListener("change", () => {
       const v = variants.find((x) => x.id === sel.value);
       if (!v) return;
-      // 切 variant 别丢 bleed（boundaryModes filter 才有这个 key）
-      fb.params = Filter.boundaryModes
+      // 切 variant 别丢 bleed/sample（声明了对应能力的 filter 才有这些 key）
+      let np = Filter.boundaryModes
         ? { ...v.params, bleed: fb.params.bleed }
         : v.params;
+      if (Filter.sampleModes) np = { ...np, sample: fb.params.sample };
+      fb.params = np;
       fb.variantId = v.id;
       fb.variantLabel = v.title;
       if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = v.id;
@@ -359,6 +364,21 @@ function _renderFilterBrushToolbar() {
     });
     // 插在 variant select 后（没有 variant 就插 title 后）
     (document.getElementById("filterBrushVariantSel") || title).insertAdjacentElement("afterend", bsel);
+  }
+  // v0.6.36 采样核下拉：声明了 sampleModes 的 filter（液化）常驻渲染。选项 = RESAMPLE_MODES
+  // 的 liquify context（SSoT 复用，与 transform 下拉同源）；持久化 editorState.liquify.sample。
+  document.getElementById("filterBrushSampleSel")?.remove();
+  if (Filter.sampleModes) {
+    const ssel = document.createElement("select");
+    ssel.id = "filterBrushSampleSel";
+    ssel.className = "crop-toolbar-btn";
+    ssel.style.padding = "2px 6px";
+    fillResampleSelect(ssel, "liquify", (fb.params.sample as string) || "bilinear");
+    ssel.addEventListener("change", () => {
+      fb.params = { ...fb.params, sample: ssel.value };
+      editorState.liquify.sample = ssel.value;
+    });
+    (document.getElementById("filterBrushBleedSel") || document.getElementById("filterBrushVariantSel") || title).insertAdjacentElement("afterend", ssel);
   }
 }
 

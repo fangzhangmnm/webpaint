@@ -54,6 +54,10 @@ export class LiquifyFilter {
     { id: "import", title: "拉边界外" },   // 旧行为：把外部内容拉进选区
   ];
 
+  // v0.6.36 采样核（保锐模式）：声明存在即渲染下拉（选项从 RESAMPLE_MODES 的 liquify context 拉），
+  // 值经 params.sample → LiquifyEngine.settings.sample。像素画/线稿用 nearest/spline 免糊。
+  static sampleModes = true;
+
   // region 模式没意义（液化天生是 stroke-based），所以不提供 bake / buildBody
 
   // Filter brush 契约：begin / extend / end / cancel / flushDirty
@@ -65,6 +69,7 @@ export class LiquifyFilter {
       size: brushSettings.size,
       strength: (brushSettings.opacity ?? 1) * scale,    // opacity × variant scale
       bleed: (params.bleed as string) || "edge",          // v147 选区边界取样模式
+      sample: (params.sample as string) || "bilinear",    // v0.6.36 采样核
     };
     engine.beginStroke(layer as unknown as Layer, settings, x, y, selection as unknown as Selection | null);
     return { engine };

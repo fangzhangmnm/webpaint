@@ -38,10 +38,13 @@
 // 管线的 (x, y)，自身不再过滤 raw。
 
 import type { Layer } from "../doc.ts";
+import { prefilterToSplinePlane, sampleSplinePremult } from "../bspline.ts";
+import type { SplinePlane } from "../bspline.ts";
 import type { Selection } from "../selection.ts";
 
 interface LiquifySettings {
   bleed?: string;
+  sample?: string;   // v0.6.36 采样核："bilinear"(默认) | "nearest"(像素画) | "spline"(预滤波 B 样条，保锐)
   size: number;
   strength: number;
   mode: string;
@@ -76,6 +79,7 @@ interface LiquifyStroke {
   lastY: number;
   dirty: [number, number, number, number] | null;
   startSnap: LayerSnapshot;
+  splinePlane: SplinePlane | null;   // sample="spline" 时 startSnap 的 B 样条系数平面（beginStroke 一次性预滤波）
   dispField: DispField;
   selection: Selection | null;
   mask: MaskPlane | null;   // selection 非空时非空；覆盖 dispField bbox；平面外查 selection.sampleAt
@@ -106,6 +110,7 @@ export class LiquifyEngine {
     const mask: MaskPlane | null = selection
       ? { x: layer.bboxX, y: layer.bboxY, w: lbW, h: lbH, data: selection.materializeMaskRegion(layer.bboxX, layer.bboxY, lbW, lbH) }
       : null;
+    const snap = layer.snapshotImageData();
     this._stroke = {
       layer,
       settings,
@@ -114,7 +119,11 @@ export class LiquifyEngine {
       lastY: y,
       dirty: null,
       // startSnap = layer 当前像素的只读物化（笔触全程只读源头）
-      startSnap: layer.snapshotImageData(),
+      startSnap: snap,
+      // spline 采样核：startSnap 不变 → 一次性预滤波，全笔触复用（一次 O(n) IIR，snapshot 级开销）
+      splinePlane: (settings.sample === "spline" && snap.imageData)
+        ? prefilterToSplinePlane(snap.imageData.data, snap.bboxW, snap.bboxH)
+        : null,
       // dispField 和 layer bbox 对齐；空层 bbox=0 时占位 1×1 全 0
       dispField: {
         bboxX: layer.bboxX, bboxY: layer.bboxY,
@@ -169,6 +178,7 @@ export class LiquifyEngine {
     const ssX = ss.bboxX, ssY = ss.bboxY;
     const ssW = ss.bboxW, ssH = ss.bboxH;
     const ssData = ss.imageData ? ss.imageData.data : null;
+    const sampleNearest = st.settings.sample === "nearest";
     // v124 (user：「预览的时候没有 apply 选区」) selection mask —— S8 起 doc-space（charter H7）。
     const mask = st.mask;
     const maskData = mask ? mask.data : null;   // 有选区与否的开关（下方分支沿用旧名）
@@ -267,7 +277,21 @@ export class LiquifyEngine {
               }
             }
           }
-          bilinearSample(ssData, ssW, ssH, srcX - ssX, srcY - ssY, ddat, idx);
+          // v0.6.36 采样核切换（liquify 是 center-at-integer 约定：位移 0 → 整数坐标 → 三种核都
+          //   退化成精确点采样，v147 边缘 march 的"整数 cell 无斑马"性质三核通用）。
+          //   spline 的 4×4 footprint 比 srcFootprintIn 的 2×2 检查宽 2px——选区边缘 bleed 判定
+          //   偏保守地沿用 2×2（误差 ≤ 边界 2px 内的轻微掺样，接受）。
+          if (st.splinePlane) {
+            sampleSplinePremult(st.splinePlane, srcX - ssX, srcY - ssY, ddat, idx);
+          } else if (sampleNearest) {
+            const nx = Math.round(srcX - ssX), ny = Math.round(srcY - ssY);
+            if (nx >= 0 && nx < ssW && ny >= 0 && ny < ssH) {
+              const np = (ny * ssW + nx) * 4;
+              ddat[idx] = ssData[np]; ddat[idx + 1] = ssData[np + 1]; ddat[idx + 2] = ssData[np + 2]; ddat[idx + 3] = ssData[np + 3];
+            }
+          } else {
+            bilinearSample(ssData, ssW, ssH, srcX - ssX, srcY - ssY, ddat, idx);
+          }
         }
         // 空 startSnap → ddat 默认 0（透明黑），液化空层无源可推 = 不变
       }
