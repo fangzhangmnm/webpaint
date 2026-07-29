@@ -38,9 +38,9 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 interface AdjustState {
   Filter: FilterLike; active: AdjustLayer; params: Record<string, unknown>;
   // beforeSnap = tile 句柄快照（undo 包用）：apply 时所有权交给 pixels op；cancel 时须 disposeLayerSnap。
-  // 预览数学不读它 —— 预览用的源像素是 surrogate canvas 的 srcImg（getImageData 物化）。
-  beforeSnap: LayerSnap; sur: HTMLCanvasElement; surCtx: CanvasRenderingContext2D;
-  srcImg: ImageData; maskData: Uint8Array | null; _rafId: number;
+  // v0.6.39 去 canvas 化：srcImg = tiles 直读；out = 当前预览字节（surrogate 直传 GL / apply 直落 tile）。
+  beforeSnap: LayerSnap;
+  srcImg: ImageData; out: Uint8ClampedArray; maskData: Uint8Array | null; _rafId: number;
   picker: FilterLike[] | null;
 }
 
@@ -68,7 +68,7 @@ export function setAdjustOpen(open: boolean) {
 // 通用：op 前先 commit floating + 把当前 doc + viewport snapshot 当 before
 // v131 Filter 面板（重构自原 BCSH 颜色调整）
 // 所有 filter 走 src/filters.js 的 Filter 接口（含 id/title/menuId/modes/bleedRadius/defaults/buildBody/bake）
-// _adjustState = { Filter, active, params, beforeSnap, sur, surCtx, srcImg, maskData, _rafId }
+// _adjustState = { Filter, active, params, beforeSnap, srcImg, out, maskData, _rafId }
 // 入口 _openFilterPanel(filterId)；Reset / Cancel / Apply 共用
 // preview 用 rAF coalesce：slider drag 不堵队列（user：「液化笔刷事件 last commit，slider drag 也是，gaussian blur fps 低 OK，别 queue 卡半天」）
 let _adjustState: AdjustState | null = null;     // 见上注释
@@ -76,17 +76,15 @@ let _adjustState: AdjustState | null = null;     // 见上注释
 
 // 准备 surrogate canvas + 提取 src/mask 数据
 function _initFilterSurrogate(L: AdjustLayer) {
-  const sur = document.createElement("canvas");
-  sur.width = L.bboxW; sur.height = L.bboxH;
-  const surCtx = sur.getContext("2d")!;
-  surCtx.drawImage(L.canvas, 0, 0);
-  const srcImg = surCtx.getImageData(0, 0, L.bboxW, L.bboxH);
+  // v0.6.39 去 canvas 化：源像素 tiles 直读（旧 drawImage(L.canvas)+getImageData 走 canvas premult 往返）
+  const srcImg = (L as unknown as { getImageData: (x: number, y: number, w: number, h: number) => ImageData }).getImageData(L.bboxX, L.bboxY, L.bboxW, L.bboxH);
+  const out = new Uint8ClampedArray(srcImg.data);   // 初始预览 = 原样
   let maskData: Uint8Array | null = null;
   if (doc.selection) {
     // v0.4.6：gray8 窄读口（layer.bbox 对齐平面），canvas 中转死
     maskData = doc.selection.materializeMaskRegion(L.bboxX, L.bboxY, L.bboxW, L.bboxH);
   }
-  return { sur, surCtx, srcImg, maskData };
+  return { srcImg, out, maskData };
 }
 
 // v132 opts.picker = [Filter, ...]：在 panel body 顶部插一个 dropdown 切其他 filter
@@ -102,10 +100,10 @@ function _openFilterPanel(filterId: string, opts: { picker?: FilterLike[] } = {}
   // 开任何滤镜面板前先整个退出 filterBrush 模式（收 toolbar / 清 state / 回前一工具）。
   if (state.filterBrush) _exitFilterBrushMode();
   if (_adjustState) _closeFilterPanel(false);
-  const { sur, surCtx, srcImg, maskData } = _initFilterSurrogate(L);
+  const { srcImg, out, maskData } = _initFilterSurrogate(L);
   _adjustState = {
     Filter, active: L, params: Filter.defaults(),
-    beforeSnap: L.snapshot(), sur, surCtx, srcImg, maskData,
+    beforeSnap: L.snapshot(), srcImg, out, maskData,
     _rafId: 0,
     picker: opts.picker || null,
   };
@@ -145,7 +143,7 @@ function _openFilterPanel(filterId: string, opts: { picker?: FilterLike[] } = {}
   void w;   // 宽度由 CSS 定，右钉不再需要算 left
   positionPopup(els.adjustPanel, { align: "right", edgeMargin: 16, belowToolbars: true, offsetY: 8 });
   _bringPanelTop(els.adjustPanel);
-  board.setActiveLayerSurrogate?.(L.id, sur, L.bboxX, L.bboxY);   // bbox 给 GL 上传替身 tiles 用
+  board.setActiveLayerSurrogate?.(L.id, { data: out, w: L.bboxW, h: L.bboxH }, L.bboxX, L.bboxY);   // bbox 给 GL 上传替身 tiles 用（字节直传，就地更新）
   _runFilterPreview();      // 初次渲染（identity）
   _suppressTransientPanels("adjust-color");
   // adjust transient：apply=烤进(true)，abort=丢弃(false)。_closeFilterPanel 是 sync 点（见其尾 exitTransient）。
@@ -166,9 +164,7 @@ function _onFilterChange() {
 function _runFilterPreview() {
   const s = _adjustState;
   if (!s) return;
-  const outImg = s.surCtx.createImageData(s.srcImg.width, s.srcImg.height);
-  s.Filter.bake(s.srcImg.data, outImg.data, s.params, s.maskData, s.srcImg.width, s.srcImg.height);
-  s.surCtx.putImageData(outImg, 0, 0);
+  s.Filter.bake(s.srcImg.data, s.out, s.params, s.maskData, s.srcImg.width, s.srcImg.height);   // 就地写预览字节（surrogate 持同一 buffer）
   board.invalidateAll();
 }
 
@@ -178,8 +174,9 @@ function _closeFilterPanel(applied: boolean) {
   if (_adjustState._rafId) { cancelAnimationFrame(_adjustState._rafId); _adjustState._rafId = 0; }
   board.setActiveLayerSurrogate?.(null, null);
   if (applied) {
-    // 烤进 layer（surrogate 已是最终结果，整体替换图层像素 → 切片回 tile）
-    L.replaceFromCanvas(_adjustState.sur, L.bboxX, L.bboxY, _adjustState.sur.width, _adjustState.sur.height);
+    // 烤进 layer（surrogate 字节已是最终结果 → 直落 tile，零 canvas）
+    (L as unknown as { replaceFromBytes: (d: Uint8ClampedArray, x: number, y: number, w: number, h: number) => void })
+      .replaceFromBytes(_adjustState.out, L.bboxX, L.bboxY, _adjustState.srcImg.width, _adjustState.srcImg.height);
     // 事务型 pre-applied 像素 op：beforeSnap 所有权交给 op（勿 dispose）。run 同步派 wp:histchange → 编辑门已标。
     history.run(workpiece, ops.pixels, { layerId: L.id, _initialBefore: _adjustState.beforeSnap });
     setStatus(t("mi.filterApplied", { title: _adjustState.Filter.title, name: L.name }));

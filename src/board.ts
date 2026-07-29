@@ -132,7 +132,7 @@ export class Board {
   _liveSyncProvider?: (() => Layer | null) | null;
   _lassoProvider?: (() => LassoInfo | null | undefined) | null;
   _activeSurrogateLayerId?: number | null;
-  _activeSurrogateCanvas?: CanvasImageSource | null;
+  _activeSurrogateBytes?: { data: Uint8ClampedArray; w: number; h: number } | null;
   _activeSurrogateBx?: number;   // 替身 canvas 的 doc 左上（GL 上传 tiles 用）
   _activeSurrogateBy?: number;
   _showFps?: boolean;
@@ -412,12 +412,12 @@ export class Board {
   setLassoProvider(fn: (() => LassoInfo | null | undefined) | null) {
     this._lassoProvider = fn;
   }
-  // 颜色调整 live preview 走 surrogate canvas（per-pixel JS 滤镜结果塞进来）。GL 模式：该替身经 _glSurrogate
-  //   上传成活动层 GPU tiles 显示（非破坏）。(layerId, canvas, bx, by) 启动；(null, null) 关。
+  // 颜色调整 live preview 走 surrogate **字节平面**（per-pixel JS 滤镜结果就地写入；v0.6.39 去 canvas 化）。
+  //   GL 模式：该替身经 _glSurrogate 上传成活动层 GPU tiles 显示（非破坏）。(layerId, bytes, bx, by) 启动；(null, null) 关。
   //   invalidateAll → markContentDirty：关闭时下一帧（非 livePreview）syncAll 从真像素恢复 GPU。
-  setActiveLayerSurrogate(layerId: number | null, canvas: CanvasImageSource | null, bx = 0, by = 0) {
+  setActiveLayerSurrogate(layerId: number | null, bytes: { data: Uint8ClampedArray; w: number; h: number } | null, bx = 0, by = 0) {
     this._activeSurrogateLayerId = layerId;
-    this._activeSurrogateCanvas = canvas;
+    this._activeSurrogateBytes = bytes;
     this._activeSurrogateBx = bx;
     this._activeSurrogateBy = by;
     this.invalidateAll();
@@ -425,11 +425,9 @@ export class Board {
 
   // GL 渲染用：当前活动层替身（颜色调整 preview）→ SurrogateInput（无替身=null）。
   _glSurrogate(): SurrogateInput | null {
-    const c = this._activeSurrogateCanvas;
-    if (!c || this._activeSurrogateLayerId == null) return null;
-    const w = (c as HTMLCanvasElement).width, h = (c as HTMLCanvasElement).height;
-    if (!w || !h) return null;
-    return { layerId: this._activeSurrogateLayerId, canvas: c, bx: this._activeSurrogateBx ?? 0, by: this._activeSurrogateBy ?? 0, w, h };
+    const b = this._activeSurrogateBytes;
+    if (!b || this._activeSurrogateLayerId == null || !b.w || !b.h) return null;
+    return { layerId: this._activeSurrogateLayerId, bytes: b, bx: this._activeSurrogateBx ?? 0, by: this._activeSurrogateBy ?? 0, w: b.w, h: b.h };
   }
 
   // 注：层合成全在 GL（render-tree 执行器）。旧 2D 规范合成器接缝（ensureCompositeCache/_layerCompositeOpts/
@@ -809,7 +807,7 @@ export class Board {
 
   // 实时预览中？= 调整 surrogate / stroke 进行中 / 活动浮层 / fill 预览挂着。GL 路径用它门控 syncAll/release。
   _isLivePreview() {
-    return !!(this._activeSurrogateCanvas
+    return !!(this._activeSurrogateBytes
       || (this._strokeActiveHint && this._strokeActiveHint())
       // 活动浮层（自由变换）→ 走实时合成（浮层经 floatFor 插在源层 z；mesh 每帧变，不能用静态缓存）。
       || this._lassoProvider?.()?.floating

@@ -22,7 +22,7 @@ import { GLCompositor } from "./gl-compositor.ts";
 import type { Background, Acc, OverlayDesc, FloatDesc } from "./gl-compositor.ts";
 import { safeMode } from "./gl-doc-bridge.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
-import { LayerPixels, replaceFromCanvas } from "../tiles/tile-layer.ts";
+import { LayerPixels } from "../tiles/tile-layer.ts";
 import { GLStampRasterizer } from "./gl-stamp.ts";
 import type { Stamp, StrokeShape } from "./gl-stamp.ts";
 import { buildPlan } from "../render/render-plan.ts";
@@ -31,7 +31,8 @@ import type { PooledFBO, FBOPrec, GLContext } from "./gl-context.ts";
 import type { BlendMode } from "./blend-glsl.ts";
 
 // ---- board 输入（原 gl-doc-renderer 同名接口原样迁入） ----
-export interface SurrogateInput { layerId: number; canvas: CanvasImageSource; bx: number; by: number; w: number; h: number; }
+// v0.6.39 去 canvas 化：替身 = straight 字节平面（filters-adjust 的预览 buffer 直传，就地更新）。
+export interface SurrogateInput { layerId: number; bytes: { data: Uint8ClampedArray; w: number; h: number }; bx: number; by: number; w: number; h: number; }
 
 // v0.6.38 全 typed array（零 canvas premult 往返）：u8Plane = straight 源字节（原尺寸，或 rotsprite
 // 的 EPX 放大平面——此时 srcW/srcH 已是放大尺寸、mode=0）；mode 3 用 splinePlane（RGBA16F）。
@@ -477,7 +478,7 @@ export class RenderTreeGL {
 
   private _syncSurrogate(s: SurrogateInput, docW: number, docH: number): void {
     const tmp = new LayerPixels(docW, docH);
-    replaceFromCanvas(tmp, s.canvas, s.bx, s.by, s.w, s.h);
+    tmp.putRegion(s.bx, s.by, s.w, s.h, s.bytes.data);
     this._syncLeafSafe(s.layerId, tmp, docW, docH);
     const rec = this._layerTiles.get(s.layerId);
     if (rec) rec.src = null;   // tmp 即将 dispose → 快路径身份作废（surrogate 清除后必从真像素重传）

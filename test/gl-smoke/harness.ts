@@ -566,8 +566,10 @@ function rendertreeParity(glctx: GLContext, add: Add): void {
 
   // v0.4.11（拍板#8）：调整预览中吸管取替身（WYSIWYG）。替身整幅品红换掉顶层 D → 取到品红；
   //   随后无替身再取 → 回真像素（替身不污染后续）。
-  const surCanvas = makeLayerCanvas(N, N, () => [255, 0, 255, 255]);
-  const sur = { layerId: 6, canvas: surCanvas, bx: 0, by: 0, w: N, h: N };
+  // v0.6.39 去 canvas 化：替身 = 字节平面
+  const surBytes = new Uint8ClampedArray(N * N * 4);
+  for (let i = 0; i < N * N; i++) { surBytes[i * 4] = 255; surBytes[i * 4 + 2] = 255; surBytes[i * 4 + 3] = 255; }
+  const sur = { layerId: 6, bytes: { data: surBytes, w: N, h: N }, bx: 0, by: 0, w: N, h: N };
   const pSur = tree.pickColor(nodes as never, N, N, undefined, 300, 300, sur as never);
   add("rt:pickColor 带替身 = 替身色", Math.abs(pSur[0] - 255) <= 2 && pSur[1] <= 2 && Math.abs(pSur[2] - 255) <= 2, `got=${pSur}`);
   const pReal = tree.pickColor(nodes as never, N, N, undefined, 300, 300);
