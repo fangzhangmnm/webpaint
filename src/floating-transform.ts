@@ -15,7 +15,8 @@
 // （stamp 保留、无重采样，spec:220-225），可再撤销。
 //
 // 变形模式 = adapter（MODES）：free / uniform / distort 各定 meshN、是否露 rotate handle、
-//   corner/edge 约束数学、切入本模式时的 mesh 投影。warp 已删（旧 4×4 是错数学）。
+//   corner/edge 约束数学。模式切换 = usedClass 记账制（v0.6.34，projectOnEnter 投影已删——
+//   切模式不悄悄改 mesh，降不回去的模式 UI 置灰）。warp 已删（旧 4×4 是错数学）。
 //
 // 渲染：2×2 mesh → GPU warp（gl-compositor，per-pixel inverse homography；本文件只出 warp 矩阵，
 //   栅格在 GPU）。浮层源纹理 = workpiece float tiles 的懒物化 canvas（WeakMap 缓存，S7 bridge 前过渡）。
@@ -26,7 +27,9 @@ import type { Layer, LayerGroup } from "./doc.ts";
 import type { FloatFrame, Workpiece, FloatTransformMeta, WorkpieceFloat, FloatState } from "./workpiece/workpiece.ts";
 import type { UndoHistory } from "./workpiece/undo-history.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
-import { cloneFloatMeta, composeIdentityWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
+import { cloneFloatMeta, composeIdentityWriteback, composeRigidWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
+import type { RigidMap } from "./workpiece/float-ops.ts";
+import type { TransformClass } from "./workpiece/workpiece.ts";
 
 // ---- 局部几何/数据类型（type-strip 后纯运行时无变化）----
 type Node = Layer | LayerGroup;
@@ -66,6 +69,7 @@ interface Drag extends Hit {
   startY: number;
   meshSnap: Mesh;
   frameSnap: FloatFrame;
+  snapInt?: boolean;   // translate 拖动整数取整（起手时处于整数刚体态 → 平移保持无损，WYSIWYG）
 }
 
 interface LiftOpts { fallbackFullLayer?: boolean; cut?: boolean; ignoreSelection?: boolean; }
@@ -80,8 +84,12 @@ interface TransformMode {
   showsRotate: boolean;
   corner: (mesh: Mesh, snap: Mesh, drag: Drag, r: number, c: number, x: number, y: number, asp: number) => void;
   edge: (mesh: Mesh, snap: Mesh, drag: Drag, e: string, x: number, y: number, asp: number) => void;
-  projectOnEnter: (mesh: Mesh, fromKind: TransformModeKind | null, asp: number) => Mesh | null;
 }
+
+// 模式 ↔ 自由度类（记账制）：corner/edge 拖动把 usedClass 升到所在模式的类；切模式只比类别
+// （零几何判定 → basisRotate 转轴态不误判、浮点渣不积累过线）。
+const MODE_CLASS: Record<TransformModeKind, TransformClass> = { uniform: "similarity", free: "affine", distort: "projective" };
+const CLASS_LEVEL: Record<TransformClass, number> = { similarity: 1, affine: 2, projective: 3 };
 
 // live 网格（拖动热路径的本地副本；SSoT = workpiece.readFloatState().transform）。
 interface LiveMeta {
@@ -90,6 +98,7 @@ interface LiveMeta {
   meshN: number;
   mode: TransformModeKind | null;
   uniformAspect: number;
+  usedClass?: TransformClass;   // 像素变换用过的最高自由度类（模式切换记账制；缺省 similarity）
 }
 
 // float tiles → GPU 源纹理的懒物化缓存（float 像素不可变 → 按对象身份缓存即自失效；S7 bridge 化后死）。
@@ -163,7 +172,7 @@ export class FloatingTransform {
     const fs = this._w?.readFloatState();
     if (!fs) { this._live = null; return; }
     const t = cloneFloatMeta(fs.transform);
-    this._live = { gizmoFrame: t.gizmoFrame, mesh: t.mesh as Mesh, meshN: t.meshN, mode: t.mode, uniformAspect: t.uniformAspect };
+    this._live = { gizmoFrame: t.gizmoFrame, mesh: t.mesh as Mesh, meshN: t.meshN, mode: t.mode, uniformAspect: t.uniformAspect, usedClass: t.usedClass };
   }
 
   // 把 active 节点 lift 成浮层（LiftFloatOp 整点：清选区 + 建 float tiles + 挖洞，全可撤销）。
@@ -188,18 +197,22 @@ export class FloatingTransform {
   // -------- 模式切换 --------
   // mode = null（"selected"：只显轮廓、拖内 = 平移）或 "free" | "uniform" | "distort"。
   // 投影改网格 → metadata 整点入栈（FloatTransformOp）。
+  // 模式切换 = 记账制（v0.6.34，取代 projectOnEnter 投影）：目标模式的类 ≥ 已用过的最高类才允许切，
+  //   不悄悄改 mesh（投影 = 预览外的突变，user 否决）。降不回去的模式由 UI 置灰（canSetMode）。
   setMode(mode: TransformModeKind | null) {
     const lv = this._live;
     if (!lv) return;
     if (mode === lv.mode) return;
-    const mdef = MODES[mode as TransformModeKind];
-    if (mdef && mdef.projectOnEnter) {
-      const projected = mdef.projectOnEnter(lv.mesh, lv.mode, lv.uniformAspect);
-      if (projected) lv.mesh = projected;
-    }
+    if (!this.canSetMode(mode)) return;
     lv.mode = mode;
     this._pushTransformCheckpoint();
     this.onChange();
+  }
+  canSetMode(mode: TransformModeKind | null): boolean {
+    const lv = this._live;
+    if (!lv || mode === null) return true;
+    const used = lv.usedClass ?? "similarity";
+    return CLASS_LEVEL[MODE_CLASS[mode]] >= CLASS_LEVEL[used];
   }
   getMode() { return this._live?.mode || null; }
 
@@ -229,15 +242,19 @@ export class FloatingTransform {
       startX: x, startY: y,
       meshSnap: f.mesh.map((row) => row.map((p) => ({ x: p.x, y: p.y }))),
       frameSnap: { origin: { ...f.gizmoFrame.origin }, ux: { ...f.gizmoFrame.ux }, uy: { ...f.gizmoFrame.uy } },
+      // 起手处于整数刚体态（identity/整平移/90°族）→ 平移拖动取整：预览=落地（WYSIWYG，反煤气灯），
+      // commit 恒走置换快路。已旋转/缩放态不取整（反正重采样，别损摆位精度）。
+      snapInt: hit.kind === "translate" ? this._isIntegerRigidState() : false,
     };
   }
   extendDrag(x: number, y: number) {
     const f = this._live;
     const d = this._drag;
     if (!f || !d) return;
-    const dx = x - d.startX;
-    const dy = y - d.startY;
+    let dx = x - d.startX;
+    let dy = y - d.startY;
     if (d.kind === "translate") {
+      if (d.snapInt) { dx = Math.round(dx); dy = Math.round(dy); }
       applyTranslate(f.mesh, d.meshSnap, dx, dy);
     } else if (d.kind === "corner") {
       const md = MODES[f.mode as TransformModeKind];
@@ -258,6 +275,25 @@ export class FloatingTransform {
     return fs ? fs.floats.map((fl) => ({ ...fl.rect })) : [];
   }
 
+  // 当前是否整数刚体态：所有 float 的 destQuad 都是各自 rect 的整数刚体像（平移取整/90°奇偶取整的门）。
+  // 测试播种（无 workpiece）退化：frame 轴对齐时用 frame 单位方格自身当 rect。
+  private _isIntegerRigidState(): boolean {
+    const lv = this._live;
+    if (!lv) return false;
+    let rects = this._contentRects();
+    if (!rects.length) {
+      const fr = lv.gizmoFrame;
+      if (Math.abs(fr.ux.y) > RIGID_EPS || Math.abs(fr.uy.x) > RIGID_EPS) return false;
+      rects = [{ x: fr.origin.x, y: fr.origin.y, w: fr.ux.x, h: fr.uy.y }];
+    }
+    for (const r of rects) {
+      if (r.w <= 0 || r.h <= 0) continue;
+      const dq = sourceDestQuad(r, lv.gizmoFrame, lv.mesh);
+      if (!dq || !integerRigidOf(r, dq)) return false;
+    }
+    return true;
+  }
+
   endDrag() {
     const d = this._drag;
     this._drag = null;
@@ -265,7 +301,19 @@ export class FloatingTransform {
     if (!d || !f) return;
     // 网格真动了才入栈（点一下就松 ≠ 空整点）
     const moved = f.mesh.some((row, i) => row.some((p, j) => p.x !== d.meshSnap[i][j].x || p.y !== d.meshSnap[i][j].y));
-    if (moved) this._pushTransformCheckpoint();
+    if (moved) {
+      // 自由度记账：corner/edge 拖动把 usedClass 升到所在模式的类（uniform=相似、free=仿射、distort=透视）。
+      // translate/rotate/basisRotate/flip/rotate90 不升级（相似类内 / 不动像素）。只升不降，随 undo 整点回退。
+      if (d.kind === "corner" || d.kind === "edge") this._escalateClass(MODE_CLASS[f.mode as TransformModeKind] ?? "similarity");
+      this._pushTransformCheckpoint();
+    }
+  }
+
+  private _escalateClass(target: TransformClass) {
+    const f = this._live;
+    if (!f) return;
+    const cur = f.usedClass ?? "similarity";
+    if (CLASS_LEVEL[target] > CLASS_LEVEL[cur]) f.usedClass = target;
   }
 
   // #12（v0.5）：浮层整体水平翻转 / 逆时针转 90°。绕当前 mesh 四外角的质心变换，
@@ -273,11 +321,16 @@ export class FloatingTransform {
   private _transformLivePoints(fn: (p: Point, cx: number, cy: number) => Point) {
     const lv = this._live;
     if (!lv || !this.isActive()) return;
+    const wasRigid = this._isIntegerRigidState();
     const n = lv.meshN - 1;
     const corners = [lv.mesh[0][0], lv.mesh[0][n], lv.mesh[n][0], lv.mesh[n][n]];
     const cx = corners.reduce((s, p) => s + p.x, 0) / 4;
     const cy = corners.reduce((s, p) => s + p.y, 0) / 4;
     lv.mesh = lv.mesh.map((row) => row.map((p) => fn(p, cx, cy)));
+    // 整数刚体态下的 flip/rotate90 必须回整数格：绕质心转 90° 在 w、h 奇偶性不同时落 0.5 网格
+    //   （恰好半相位 = 最糊情形）。四角的小数部分一致 → 统一 round 只平移 ±0.5px、尺寸不变，
+    //   保住置换快路。非刚体态（任意角/缩放中）不取整，别毁摆位。
+    if (wasRigid) lv.mesh = lv.mesh.map((row) => row.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })));
     this._pushTransformCheckpoint();
     this.onChange();
   }
@@ -289,7 +342,7 @@ export class FloatingTransform {
     const lv = this._live;
     this._history.run(this._w, this._ops.floatTransform, {
       after: cloneFloatMeta({
-        gizmoFrame: lv.gizmoFrame, mesh: lv.mesh, meshN: lv.meshN, mode: lv.mode, uniformAspect: lv.uniformAspect,
+        gizmoFrame: lv.gizmoFrame, mesh: lv.mesh, meshN: lv.meshN, mode: lv.mode, uniformAspect: lv.uniformAspect, usedClass: lv.usedClass,
       } as FloatTransformMeta),
     });
   }
@@ -300,13 +353,14 @@ export class FloatingTransform {
   private _bakeDown(f: WorkpieceFloat, leaf: Layer, bakeFn: WarpBakeFn | null) {
     if (!this._live) return;
     const lv = this._live;
-    // 整数平移快路（含 identity）：destQuad = rect 整平移 → 跳过 GPU warp，typed-array 逐字节
-    //   source-over 写回。绕开 GPU float 误差 + putImageData/drawImage 的 premultiply 往返 →
-    //   「不旋转时 pixel perfect」，与采样模式无关。不需要 bakeFn（GL 失败也能落）。
+    // 整数刚体快路（v0.6.34：identity/整数平移/90°倍数旋转/翻转 全族）：destQuad = rect 的整数刚体像
+    //   → 跳过 GPU warp，typed-array 像素置换 source-over 写回。绕开 GPU float 误差 +
+    //   putImageData/drawImage 的 premultiply 往返 → 「摆正状态的 commit 逐字节无损」，与采样模式无关。
+    //   不需要 bakeFn（GL 失败也能落）。
     const dq = sourceDestQuad(f.rect, lv.gizmoFrame, lv.mesh);
-    const off = dq ? integerTranslationOf(f.rect, dq) : null;
-    if (off) {
-      applyRegionBuf(leaf, composeIdentityWriteback(leaf, f, off.x, off.y));
+    const rigid = dq ? integerRigidOf(f.rect, dq) : null;
+    if (rigid) {
+      applyRegionBuf(leaf, composeRigidWriteback(leaf, f, rigid));
       return;
     }
     if (!bakeFn) return;
@@ -466,22 +520,19 @@ const MODES: Record<TransformModeKind, TransformMode> = {
     kind: "free", meshN: 2, showsRotate: true,
     corner: (mesh, snap, drag, r, c, x, y, _asp) => solveAffineCorner(mesh, snap, drag, r, c, x, y, false),
     edge:   (mesh, snap, drag, e, x, y, asp) => solveAffineEdge(mesh, snap, drag, e, x, y, false, asp),
-    projectOnEnter: (mesh, fromKind, _asp) => fromKind === "distort" ? projectToRectangle(mesh) : null,
   },
   uniform: {
     kind: "uniform", meshN: 2, showsRotate: true,
     corner: (mesh, snap, drag, r, c, x, y, _asp) => solveAffineCorner(mesh, snap, drag, r, c, x, y, true),
     edge:   (mesh, snap, drag, e, x, y, asp) => solveAffineEdge(mesh, snap, drag, e, x, y, true, asp),
-    projectOnEnter: (mesh, fromKind, asp) =>
-      (fromKind === "distort" || fromKind === "free") ? projectToUniformRect(mesh, asp) : null,
   },
   distort: {
     kind: "distort", meshN: 2, showsRotate: true,   // v0.6.21：透视前圆（转像素）方（转轴）双手柄
     corner: (mesh, snap, drag, r, c, x, y, _asp) => applyDistortCorner(mesh, snap, drag, r, c, x, y),
     edge:   (mesh, snap, drag, e, x, y, _asp) => applyDistortEdge(mesh, snap, drag, e, x, y),
-    projectOnEnter: () => null,
   },
 };
+// （projectOnEnter 投影已删 v0.6.34：切模式不悄悄改 mesh——降自由度改为 canSetMode 记账制置灰。）
 // （TRANSFORM_MODE_KINDS 已删 v415：零调用者。模式在 TransformMode 类型里，运行时不需要这份字符串表。）
 
 // ---- 约束数学（mode-independent）----
@@ -705,55 +756,6 @@ function solveAffineEdge(mesh: Mesh, meshSnap: Mesh, drag: Drag, edge: string, x
   mesh[1][1] = { x: origin.x + newAx.x + newAy.x, y: origin.y + newAx.y + newAy.y };
 }
 
-// ---- 切入 mode 时的 mesh 投影 ----
-// v118：distort (任意 quad) → free (旋转矩形，shearless)。u=平均水平向量，v=u 转 90°（去 shear）。
-function projectToRectangle(mesh: Mesh): Mesh {
-  const tl = mesh[0][0], tr = mesh[0][1];
-  const bl = mesh[1][0], br = mesh[1][1];
-  const cx = (tl.x + tr.x + bl.x + br.x) / 4;
-  const cy = (tl.y + tr.y + bl.y + br.y) / 4;
-  const ux = ((tr.x - tl.x) + (br.x - bl.x)) / 2;
-  const uy = ((tr.y - tl.y) + (br.y - bl.y)) / 2;
-  const uLen = Math.hypot(ux, uy);
-  const uDirX = uLen > 0.01 ? ux / uLen : 1;
-  const uDirY = uLen > 0.01 ? uy / uLen : 0;
-  const vDirX = -uDirY, vDirY = uDirX;             // v ⊥ u（顺时针 90°）
-  const halfU = uLen / 2;
-  const vx = ((bl.x - tl.x) + (br.x - tr.x)) / 2;
-  const vy = ((bl.y - tl.y) + (br.y - tr.y)) / 2;
-  const halfV = (vx * vDirX + vy * vDirY) / 2;      // 原 vertical 投影到 vDir（带符号保 ↑/↓）
-  return [
-    [{ x: cx - halfU * uDirX - halfV * vDirX, y: cy - halfU * uDirY - halfV * vDirY },
-     { x: cx + halfU * uDirX - halfV * vDirX, y: cy + halfU * uDirY - halfV * vDirY }],
-    [{ x: cx - halfU * uDirX + halfV * vDirX, y: cy - halfU * uDirY + halfV * vDirY },
-     { x: cx + halfU * uDirX + halfV * vDirX, y: cy + halfU * uDirY + halfV * vDirY }],
-  ];
-}
-// v111: parallelogram → rectangle 锁纵横比（uniform）。v 长度 = u 长度 / aspect（保 v 投影符号）。
-function projectToUniformRect(mesh: Mesh, aspect: number): Mesh {
-  const tl = mesh[0][0], tr = mesh[0][1];
-  const bl = mesh[1][0], br = mesh[1][1];
-  const cx = (tl.x + tr.x + bl.x + br.x) / 4;
-  const cy = (tl.y + tr.y + bl.y + br.y) / 4;
-  const ux = ((tr.x - tl.x) + (br.x - bl.x)) / 2;
-  const uy = ((tr.y - tl.y) + (br.y - bl.y)) / 2;
-  const uLen = Math.hypot(ux, uy);
-  const uDirX = uLen > 0.01 ? ux / uLen : 1;
-  const uDirY = uLen > 0.01 ? uy / uLen : 0;
-  const vDirX = -uDirY, vDirY = uDirX;
-  const vx = ((bl.x - tl.x) + (br.x - tr.x)) / 2;
-  const vy = ((bl.y - tl.y) + (br.y - tr.y)) / 2;
-  const vProj = vx * vDirX + vy * vDirY;
-  const halfU = uLen / 2;
-  const halfV = (uLen / Math.max(0.01, aspect)) / 2 * (vProj >= 0 ? 1 : -1);
-  return [
-    [{ x: cx - halfU * uDirX - halfV * vDirX, y: cy - halfU * uDirY - halfV * vDirY },
-     { x: cx + halfU * uDirX - halfV * vDirX, y: cy + halfU * uDirY - halfV * vDirY }],
-    [{ x: cx - halfU * uDirX + halfV * vDirX, y: cy - halfU * uDirY + halfV * vDirY },
-     { x: cx + halfU * uDirX + halfV * vDirX, y: cy + halfU * uDirY + halfV * vDirY }],
-  ];
-}
-
 // ============ 几何工具 ============
 // （unionRects/bboxToQuad 已随 lift 下沉进 LiftFloatOp——初始 gizmo/mesh 归 operator 产。）
 function sub(a: Point, b: Point): Point { return { x: a.x - b.x, y: a.y - b.y }; }
@@ -762,6 +764,7 @@ function norm(v: Point): Point {
   const len = Math.hypot(v.x, v.y);
   return len > 1e-6 ? { x: v.x / len, y: v.y / len } : { x: 1, y: 0 };
 }
+
 function pointInPoly(poly: Point[], x: number, y: number) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -773,6 +776,7 @@ function pointInPoly(poly: Point[], x: number, y: number) {
   }
   return inside;
 }
+
 function meshBbox(mesh: Mesh): [number, number, number, number] {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const row of mesh) for (const p of row) {
@@ -805,20 +809,51 @@ export function sourceDestQuad(rect: Rect, frame: FloatFrame, mesh: Mesh): Mesh 
     [map(rect.x, rect.y + rect.h), map(rect.x + rect.w, rect.y + rect.h)],
   ];
 }
-// destQuad 是否 = rect 的**整数像素平移**（含 identity）。是 → 返回整数偏移，否则 null。
-//   commit/stamp 快路判定用：命中则跳过 GPU 重采样，typed-array 逐字节写回（无损，与采样模式无关）。
-//   ε=1e-6 只放行数学上就是整平移的 mesh（未动过 / 程序化整移）；拖动出的小数平移不入快路（走 warp）。
-export function integerTranslationOf(rect: Rect, dq: Mesh): { x: number; y: number } | null {
-  const rx = Math.round(dq[0][0].x - rect.x), ry = Math.round(dq[0][0].y - rect.y);
-  const EPS = 1e-6;
-  const corners: Array<[number, number, Point]> = [
-    [rect.x, rect.y, dq[0][0]], [rect.x + rect.w, rect.y, dq[0][1]],
-    [rect.x, rect.y + rect.h, dq[1][0]], [rect.x + rect.w, rect.y + rect.h, dq[1][1]],
-  ];
-  for (const [cx, cy, p] of corners) {
-    if (Math.abs(p.x - (cx + rx)) > EPS || Math.abs(p.y - (cy + ry)) > EPS) return null;
+// ---- 整数刚体判定（v0.6.34 90° 族置换快路）----
+// destQuad 是否 = rect 的整数刚体像（整数平移 × 90° 倍数旋转 × 翻转，8 朝向）。
+// 是 → 返回置换写回映射（commit/stamp 跳过 GPU 重采样，typed-array 逐字节）；否则 null。
+// ε=0.05px：吸收转过又转回/翻转组合留下的浮点渣（视觉零差），拖出的真小数平移不入（走 warp）。
+const RIGID_EPS = 0.05;
+export function integerRigidOf(rect: Rect, dq: Mesh): RigidMap | null {
+  const p00 = dq[0][0], p10 = dq[0][1], p01 = dq[1][0], p11 = dq[1][1];
+  // 平行四边形（排除透视残留）
+  if (Math.abs(p11.x - p10.x - p01.x + p00.x) > RIGID_EPS ||
+      Math.abs(p11.y - p10.y - p01.y + p00.y) > RIGID_EPS) return null;
+  const { w, h } = rect;
+  const ux = p10.x - p00.x, uy = p10.y - p00.y;   // rect +x 边的像
+  const vx = p01.x - p00.x, vy = p01.y - p00.y;   // rect +y 边的像
+  // 角点在整数格上
+  if (Math.abs(p00.x - Math.round(p00.x)) > RIGID_EPS || Math.abs(p00.y - Math.round(p00.y)) > RIGID_EPS) return null;
+  const dx0 = Math.round(Math.min(p00.x, p10.x, p01.x, p11.x));
+  const dy0 = Math.round(Math.min(p00.y, p10.y, p01.y, p11.y));
+  if (Math.abs(uy) <= RIGID_EPS && Math.abs(vx) <= RIGID_EPS) {
+    // 轴对齐（0°/180°/翻转族）：u 沿 x 长 w、v 沿 y 长 h
+    if (Math.abs(Math.abs(ux) - w) > RIGID_EPS || Math.abs(Math.abs(vy) - h) > RIGID_EPS) return null;
+    const su = ux > 0 ? 1 : -1, sv = vy > 0 ? 1 : -1;
+    return {
+      dx0, dy0, dw: w, dh: h,
+      m11: su, m12: 0, s0x: su > 0 ? 0 : w - 1,
+      m21: 0, m22: sv, s0y: sv > 0 ? 0 : h - 1,
+    };
   }
-  return { x: rx, y: ry };
+  if (Math.abs(ux) <= RIGID_EPS && Math.abs(vy) <= RIGID_EPS) {
+    // 四分之一转族（90°/270° × 翻转）：u 沿 y 长 w、v 沿 x 长 h → dest 尺寸 h×w
+    if (Math.abs(Math.abs(uy) - w) > RIGID_EPS || Math.abs(Math.abs(vx) - h) > RIGID_EPS) return null;
+    const su = uy > 0 ? 1 : -1, sv = vx > 0 ? 1 : -1;
+    return {
+      dx0, dy0, dw: h, dh: w,
+      m11: 0, m12: su, s0x: su > 0 ? 0 : w - 1,
+      m21: sv, m22: 0, s0y: sv > 0 ? 0 : h - 1,
+    };
+  }
+  return null;
+}
+
+// destQuad 是否 = rect 的**纯整数平移**（含 identity；integerRigidOf 的朝向 0 无翻转特例）。
+export function integerTranslationOf(rect: Rect, dq: Mesh): { x: number; y: number } | null {
+  const m = integerRigidOf(rect, dq);
+  if (!m || m.m11 !== 1 || m.m22 !== 1 || m.m12 !== 0 || m.m21 !== 0 || m.s0x !== 0 || m.s0y !== 0) return null;
+  return { x: m.dx0 - rect.x, y: m.dy0 - rect.y };
 }
 
 // 单位方格 → quad 的前向求值（sourceDestQuad 把 source 角投到 dest 用）。

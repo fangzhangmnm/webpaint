@@ -32,6 +32,9 @@ export interface WorkpieceFloat {
  *  lift 时 = 可见源并集 AABB（ux/uy 轴对齐）；方手柄转轴后为一般平行四边形——只改参数化不动像素。 */
 export interface FloatPt { x: number; y: number }
 export interface FloatFrame { origin: FloatPt; ux: FloatPt; uy: FloatPt; }
+/** 像素变换用过的最高自由度类（模式切换记账制，v0.6.34）：拖动升级、只升不降、随 undo 整点回退。
+ *  记的是**像素变换**的类而非 mesh 形状——basisRotate 转轴不动像素不升级（几何判定会误判它）。 */
+export type TransformClass = "similarity" | "affine" | "projective";
 /** 共享 gizmo 的变换元数据（组 lift 多 float 共用一份；per-float dest quad 由 rect×单应性派生）。 */
 export interface FloatTransformMeta {
   gizmoFrame: FloatFrame;
@@ -39,6 +42,7 @@ export interface FloatTransformMeta {
   meshN: number;
   mode: "free" | "uniform" | "distort" | null;
   uniformAspect: number;
+  usedClass?: TransformClass;   // 缺省视为 "similarity"（pristine lift / 旧测试播种）
 }
 export interface FloatState {
   floats: WorkpieceFloat[];

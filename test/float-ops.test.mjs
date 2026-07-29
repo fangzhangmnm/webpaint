@@ -338,17 +338,68 @@ describe("S6 · commit 整数平移快路（不旋转时 pixel perfect）", () =
     eq(L.sampleAt(31, 31)[3], 0, "旧位置未被新 rect 覆盖处留洞");
   });
 
-  it("小数平移 (+7.5,0)：不入快路（bakeFn=null → 不烤，洞原样）", () => {
+  it("拖动取整（v0.6.34 WYSIWYG）：整数刚体态拖 +7.5 → 落在 +8，commit 逐字节", () => {
+    const { doc, w, h, ft } = mk();
+    const L = doc.activeLayer;
+    paintPattern(L, 20, 20, 40, 40, false);
+    const orig = L.pixels.getRegion(30, 30, 16, 16);
+    doc.selection = rectSel(30, 30, 16, 16);
+    ft.lift(L);
+    ft.beginDrag({ kind: "translate" }, 0, 0); ft.extendDrag(7.5, 0.4); ft.endDrag();
+    eq(ft._live.mesh[0][0].x, 38, "mesh 取整到 +8");
+    eq(ft._live.mesh[0][0].y, 30, "y 取整到 +0");
+    eq(ft.commit(null), true, "commit ok");
+    const moved = L.pixels.getRegion(38, 30, 16, 16);
+    assert(orig.every((v, i) => v === moved[i]), "+8 处逐字节 = 源（预览=落地）");
+  });
+
+  it("非刚体态（微旋转后）：平移不取整、commit 不入快路（bakeFn=null 不烤，洞原样）", () => {
     const { doc, w, h, ft } = mk();
     const L = doc.activeLayer;
     paintPattern(L, 20, 20, 40, 40, false);
     doc.selection = rectSel(30, 30, 16, 16);
     ft.lift(L);
+    // 绕质心 (38,38) 转一个小角度 → 非整数刚体态
+    ft.beginDrag({ kind: "rotate" }, 54, 38); ft.extendDrag(53.8, 40.5); ft.endDrag();
     ft.beginDrag({ kind: "translate" }, 0, 0); ft.extendDrag(7.5, 0); ft.endDrag();
+    assert(Math.abs(ft._live.mesh[0][0].x - Math.round(ft._live.mesh[0][0].x)) > 0.01, "旋转态平移不取整（保摆位）");
     eq(ft.commit(null), true, "commit 结构照走");
     const hole = L.pixels.getRegion(30, 30, 16, 16);
-    for (let i = 3; i < hole.length; i += 4) if (hole[i] !== 0) { assert(false, "小数平移误入快路（洞被写了）"); return; }
-    assert(true, "洞原样（小数平移归 GPU warp，node 无 GL 不烤）");
+    let holeIntact = true;
+    for (let i = 3; i < hole.length; i += 4) if (hole[i] !== 0) { holeIntact = false; break; }
+    assert(holeIntact, "洞原样（真旋转归 GPU warp，node 无 GL 不烤）");
+  });
+
+  it("rotate90（奇偶尺寸 15×12）：mesh 取整回格 + commit 像素置换逐字节", () => {
+    const { doc, w, h, ft } = mk();
+    const L = doc.activeLayer;
+    paintPattern(L, 20, 20, 40, 40, false);
+    L.pixels.putRegion(30, 30, 1, 1, px(1, 2, 3, 255));   // TL 标记像素
+    doc.selection = rectSel(30, 30, 15, 12);
+    ft.lift(L);
+    ft.rotate90CCW();
+    for (const row of ft._live.mesh) for (const p of row) {
+      eq(p.x, Math.round(p.x), "mesh x 在整数格（奇偶取整）");
+      eq(p.y, Math.round(p.y), "mesh y 在整数格");
+    }
+    eq(ft.commit(null), true, "commit ok（置换快路，无 bakeFn）");
+    // 绕质心 (37.5,36) 转 90° + (+0.5,+0.5) 取整平移：源 texel (30,30) → dest texel (32,43)
+    const m = L.sampleAt(32, 43);
+    eq(m[0], 1); eq(m[1], 2); eq(m[2], 3); eq(m[3], 255, "标记像素置换到位");
+  });
+
+  it("flipHorizontal：commit 像素置换逐字节（镜像）", () => {
+    const { doc, w, h, ft } = mk();
+    const L = doc.activeLayer;
+    paintPattern(L, 20, 20, 40, 40, false);
+    L.pixels.putRegion(30, 30, 1, 1, px(1, 2, 3, 255));
+    doc.selection = rectSel(30, 30, 15, 12);
+    ft.lift(L);
+    ft.flipHorizontal();
+    eq(ft.commit(null), true, "commit ok");
+    // cx=37.5：texel (30,·) 镜像到 (44,·)
+    const m = L.sampleAt(44, 30);
+    eq(m[0], 1); eq(m[1], 2); eq(m[2], 3, "镜像标记像素到位");
   });
 });
 

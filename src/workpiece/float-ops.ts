@@ -66,6 +66,7 @@ export function cloneFloatMeta(t: FloatTransformMeta): FloatTransformMeta {
     meshN: t.meshN,
     mode: t.mode,
     uniformAspect: t.uniformAspect,
+    usedClass: t.usedClass ?? "similarity",
   };
 }
 
@@ -147,28 +148,54 @@ export function applyRegionBuf(leaf: Layer, r: { x: number; y: number; w: number
 // (ox,oy)：整数像素偏移（commit/stamp 的整数平移快路用；reject 传缺省 0,0 = 原位）。
 export function composeIdentityWriteback(leaf: Layer, f: WorkpieceFloat, ox = 0, oy = 0): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
   const { w, h } = f.rect;
-  const x = f.rect.x + ox, y = f.rect.y + oy;
-  const dst = leaf.pixels.getRegion(x, y, w, h);
+  return composeRigidWriteback(leaf, f, {
+    dx0: f.rect.x + ox, dy0: f.rect.y + oy, dw: w, dh: h,
+    m11: 1, m12: 0, s0x: 0, m21: 0, m22: 1, s0y: 0,
+  });
+}
+
+/** 整数刚体写回映射（v0.6.34 90° 族置换快路）：dest 整数矩形 (dx0,dy0,dw,dh)，
+ *  dest 内偏移 (u,v) 的源 texel 索引 = (m11·u+m12·v+s0x, m21·u+m22·v+s0y)。
+ *  系数 ∈ {−1,0,1} + 整数平移 → 纯像素置换，零重采样。 */
+export interface RigidMap {
+  dx0: number; dy0: number; dw: number; dh: number;
+  m11: number; m12: number; s0x: number;
+  m21: number; m22: number; s0y: number;
+}
+
+// 整数刚体写回：float 像素按置换映射 source-over 落到 leaf 当前内容之上（straight-alpha，
+// 逐字节精确、与采样模式无关）。调用方负责 leaf.putImageData（保 Layer 物化缓存失效）。
+export function composeRigidWriteback(leaf: Layer, f: WorkpieceFloat, m: RigidMap): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
+  const { w, h } = f.rect;
+  const { dx0, dy0, dw, dh } = m;
+  const dst = leaf.pixels.getRegion(dx0, dy0, dw, dh);
   const src = f.pixels.getRegion(f.rect.x, f.rect.y, w, h);
-  for (let i = 0; i < dst.length; i += 4) {
-    const fa = src[i + 3];
-    if (fa === 0) continue;
-    if (fa === 255) {
-      dst[i] = src[i]; dst[i + 1] = src[i + 1]; dst[i + 2] = src[i + 2]; dst[i + 3] = 255;
-      continue;
+  for (let v = 0; v < dh; v++) {
+    for (let u = 0; u < dw; u++) {
+      const sx = m.m11 * u + m.m12 * v + m.s0x;
+      const sy = m.m21 * u + m.m22 * v + m.s0y;
+      if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;   // 护栏（合法映射不该出界）
+      const si = (sy * w + sx) * 4;
+      const fa = src[si + 3];
+      if (fa === 0) continue;
+      const di = (v * dw + u) * 4;
+      if (fa === 255) {
+        dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = 255;
+        continue;
+      }
+      const la = dst[di + 3];
+      const inv = (255 - fa);
+      const outA = fa + Math.round(la * inv / 255);
+      if (outA === 0) { dst[di + 3] = 0; continue; }
+      // straight rgb：加权平均（权 = 各自贡献的覆盖率）
+      const wf = fa * 255, wl = la * inv;
+      dst[di]     = Math.round((src[si]     * wf + dst[di]     * wl) / (wf + wl));
+      dst[di + 1] = Math.round((src[si + 1] * wf + dst[di + 1] * wl) / (wf + wl));
+      dst[di + 2] = Math.round((src[si + 2] * wf + dst[di + 2] * wl) / (wf + wl));
+      dst[di + 3] = outA;
     }
-    const la = dst[i + 3];
-    const inv = (255 - fa);
-    const outA = fa + Math.round(la * inv / 255);
-    if (outA === 0) { dst[i + 3] = 0; continue; }
-    // straight rgb：加权平均（权 = 各自贡献的覆盖率）
-    const wf = fa * 255, wl = la * inv;
-    dst[i]     = Math.round((src[i]     * wf + dst[i]     * wl) / (wf + wl));
-    dst[i + 1] = Math.round((src[i + 1] * wf + dst[i + 1] * wl) / (wf + wl));
-    dst[i + 2] = Math.round((src[i + 2] * wf + dst[i + 2] * wl) / (wf + wl));
-    dst[i + 3] = outA;
   }
-  return { x, y, w, h, data: dst };
+  return { x: dx0, y: dy0, w: dw, h: dh, data: dst };
 }
 
 // ============ ① LiftFloatOp ============
@@ -241,6 +268,7 @@ export class LiftFloatOp extends DocumentOperator<LiftFloatArgs, LiftSwapData> {
           meshN: 2,
           mode: "free",
           uniformAspect: gw / Math.max(1, gh),
+          usedClass: "similarity",
         },
       };
       const prevSel = doc.selection;                 // 所有权 → undo 包（spec:213 lift 清选区）

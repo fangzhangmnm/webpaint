@@ -253,6 +253,12 @@ body[data-tool="fill"] .board { cursor: crosshair; }
   color: var(--accent, #4c8bf5);
   font-weight: 600;
 }
+/* v0.6.34 自由度记账制：降不回去的变换模式置灰（用过更高自由度后） */
+.lasso-tool-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
 .lasso-tool-sep { color: var(--ink-soft); margin: 0 4px; opacity: 0.4; }
 .lasso-tool-text { color: var(--ink-soft); font-size: 12px; padding: 0 2px; white-space: nowrap; }
 .lasso-tool-confirm { color: var(--accent, #4c8bf5); font-weight: 600; }

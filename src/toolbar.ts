@@ -235,6 +235,8 @@ export function updateLassoToolbar() {
     const mode = input.lasso.getMode();
     for (const b of lassoTransformModeBtns) {
       b.setAttribute("aria-pressed", b.dataset.lassoMode === mode ? "true" : "false");
+      // 自由度记账制（v0.6.34）：用过更高自由度后降不回去的模式置灰（不投影、不悄悄改 mesh）
+      (b as HTMLButtonElement).disabled = !input.lasso.canSetMode(b.dataset.lassoMode as never);
     }
     const sm = input.lasso.getSampleMode();
     const sel = document.getElementById("lassoSampleSel") as HTMLSelectElement | null;

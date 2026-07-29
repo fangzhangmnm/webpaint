@@ -373,6 +373,7 @@ export class LassoEngine {
   //      本类只在 lift/commit/cancel 维护 lasso 状态机 _state；其余纯转发。----
   setMode(mode: Parameters<FloatingTransform["setMode"]>[0]) { this._ft.setMode(mode); }
   getMode() { return this._ft.getMode(); }
+  canSetMode(mode: Parameters<FloatingTransform["setMode"]>[0]) { return this._ft.canSetMode(mode); }
   // #12：浮层整体 水平翻转 / 逆时针 90°（facade 纯转发）
   flipFloatHorizontal() { this._ft.flipHorizontal(); }
   rotateFloat90() { this._ft.rotate90CCW(); }

@@ -101,16 +101,70 @@ describe("FloatingTransform · uniform（锁纵横比）", () => {
   });
 });
 
-describe("FloatingTransform · setMode 投影 + adapter 元数据", () => {
-  it("distort → free：去 shear，投成 v⊥u 矩形", () => {
-    // 剪切平行四边形（顶边右移 4 = shear）
+describe("FloatingTransform · setMode 记账制（v0.6.34 替代投影）+ adapter 元数据", () => {
+  it("切模式不再投影：distort → free 允许（未用过透视自由度）且 mesh 原样不动", () => {
+    // 剪切平行四边形（basisRotate 会产生这种态；usedClass 缺省 similarity → 允许切）
     const sheared = [[{ x: 4, y: 0 }, { x: 14, y: 0 }], [{ x: 0, y: 10 }, { x: 10, y: 10 }]];
     const ft = mkFloat("distort", 1, sheared);
     ft.setMode("free");
+    eq(ft.getMode(), "free", "切换成功");
     const m = ft._live.mesh;
-    const u = sub(m[0][1], m[0][0]);
-    const v = sub(m[1][0], m[0][0]);
-    assert(near(dot(u, v), 0), `投影后 u⊥v（dot=${dot(u, v).toFixed(4)}）`);
+    cNear(m[0][0], 4, 0, "TL 不动"); cNear(m[1][0], 0, 10, "BL 不动（无投影突变）");
+  });
+
+  it("自由度记账：free corner 拖过 → uniform 置灰回不去，distort 仍可去", () => {
+    const ft = mkFloat("free");
+    eq(ft.canSetMode("uniform"), true, "pristine 什么模式都能去");
+    ft.beginDrag({ kind: "corner", row: 0, col: 1 }, 10, 0);
+    ft.extendDrag(17, -3);   // 非等比 → 仿射
+    ft.endDrag();
+    eq(ft.canSetMode("uniform"), false, "用过仿射 → 相似模式回不去");
+    eq(ft.canSetMode("distort"), true, "更高自由度照去");
+    ft.setMode("uniform");
+    eq(ft.getMode(), "free", "setMode 不兼容 = no-op（UI 已置灰，这是护栏）");
+  });
+
+  it("自由度记账：distort corner 拖过 → free/uniform 都回不去", () => {
+    const ft = mkFloat("distort");
+    ft.beginDrag({ kind: "corner", row: 1, col: 1 }, 10, 10);
+    ft.extendDrag(14, 17);
+    ft.endDrag();
+    eq(ft.canSetMode("free"), false, "透视用过 → 仿射回不去");
+    eq(ft.canSetMode("uniform"), false);
+  });
+
+  it("平移/旋转不升级自由度（相似类内）", () => {
+    const ft = mkFloat("free");
+    ft.beginDrag({ kind: "translate" }, 100, 100); ft.extendDrag(105, 103); ft.endDrag();
+    ft.beginDrag({ kind: "rotate" }, 10, 5); ft.extendDrag(5, 10); ft.endDrag();
+    eq(ft.canSetMode("uniform"), true, "转过平移过仍可去 uniform");
+  });
+
+  it("uniform corner 拖 = 相似类，不封 uniform", () => {
+    const ft = mkFloat("uniform");
+    ft.beginDrag({ kind: "corner", row: 1, col: 1 }, 10, 10);
+    ft.extendDrag(14, 14);
+    ft.endDrag();
+    eq(ft.canSetMode("uniform"), true);
+    eq(ft.canSetMode("free"), true);
+  });
+
+  it("拖动取整（WYSIWYG）：整数刚体态 translate 拖 +5.4,+3.6 → mesh 落 +5,+4", () => {
+    const ft = mkFloat("free");   // SQ 整数网格 + 轴对齐整数 frame → 刚体态
+    ft.beginDrag({ kind: "translate" }, 100, 100);
+    ft.extendDrag(105.4, 103.6);
+    const m = ft._live.mesh;
+    cNear(m[0][0], 5, 4, "TL 取整");
+    cNear(m[1][1], 15, 14, "BR 取整");
+  });
+
+  it("拖动取整：旋转态不取整（保摆位精度）", () => {
+    const ft = mkFloat("free");
+    ft.beginDrag({ kind: "rotate" }, 10, 5); ft.extendDrag(9.2, 6.5); ft.endDrag();   // 小角度
+    ft.beginDrag({ kind: "translate" }, 100, 100);
+    ft.extendDrag(105.4, 103.6);
+    const m = ft._live.mesh;
+    assert(Math.abs(m[0][0].x - Math.round(m[0][0].x)) > 0.01, "非刚体态平移保小数");
   });
 
   it("rotate handle：全模式露（v0.6.21 distort 也要——双手柄语义）", () => {
