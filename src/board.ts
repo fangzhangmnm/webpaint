@@ -1,5 +1,5 @@
 // Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
-import { sourceWarpMatrix } from "./floating-transform.ts";
+import { sourceWarpMatrix, sourceDestQuad, integerRigidOf } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT（别在本文件硬编码第二份）
 import { reportError } from "./error-badge.ts";
@@ -37,7 +37,7 @@ import { clipSegToBox } from "./shape-geometry.ts";
 // 自由变换浮层网格点 / source / float 描述（lassoInfo.floating = FloatingTransform.current() 视图；
 //   v0.4.7 S6：源像素在 workpiece float tiles，这里拿到的是懒物化 canvas + identity rect）
 interface MeshPt { x: number; y: number; }
-interface FloatSource { layerId: number; canvas: CanvasImageSource; rect: { x: number; y: number; w: number; h: number }; spline?: { data: Float32Array; w: number; h: number } }
+interface FloatSource { layerId: number; canvas: CanvasImageSource; rect: { x: number; y: number; w: number; h: number }; spline?: { data: Float32Array; w: number; h: number }; rotsprite?: { data: Uint8ClampedArray; w: number; h: number } }
 interface FloatInfo {
   sources: FloatSource[];
   gizmoFrame: unknown;
@@ -779,11 +779,24 @@ export class Board {
     const lassoInfo = this._lassoProvider?.();
     const float = (lassoInfo && lassoInfo.floating) ? lassoInfo.floating : null;
     if (!float) return [];
-    const mode = _sampleModeInt(lassoInfo!.sampleMode);
+    const smode = lassoInfo!.sampleMode;
+    const mode = _sampleModeInt(smode);
     const out: FloatInput[] = [];
     for (const src of float.sources) {
       const wp = sourceWarpMatrix(src, float.gizmoFrame as Parameters<typeof sourceWarpMatrix>[1], float.mesh as Parameters<typeof sourceWarpMatrix>[2]);
       if (!wp) continue;
+      // 像素完美（rotsprite）：整数刚体态 → 裸 nearest 1×（逐字节，与 commit 置换快路一致）；
+      //   真旋转/缩放 → EPX 放大平面 + nearest（shader 只见 mode 0 + 大纹理，无独立 mode）。
+      if (smode === "rotsprite" && src.rotsprite) {
+        const dq = sourceDestQuad(src.rect, float.gizmoFrame as Parameters<typeof sourceDestQuad>[1], float.mesh as Parameters<typeof sourceDestQuad>[2]);
+        const rigid = dq ? integerRigidOf(src.rect, dq as Parameters<typeof integerRigidOf>[1]) : null;
+        if (rigid) {
+          out.push({ layerId: src.layerId, srcCanvas: src.canvas, srcW: src.rect.w, srcH: src.rect.h, hinv: wp.hinv, mode: 0 });
+        } else {
+          out.push({ layerId: src.layerId, srcCanvas: src.canvas, srcW: src.rotsprite.w, srcH: src.rotsprite.h, hinv: wp.hinv, mode: 0, u8Plane: src.rotsprite });
+        }
+        continue;
+      }
       // spline（mode 3）需要系数平面（floating-transform.current() 在 spline 模式下附带）；缺了退 bicubic
       const m = (mode === 3 && !src.spline) ? 2 : mode;
       out.push({ layerId: src.layerId, srcCanvas: src.canvas, srcW: src.rect.w, srcH: src.rect.h, hinv: wp.hinv, mode: m, splinePlane: src.spline ?? null });

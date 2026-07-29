@@ -23,6 +23,8 @@ import { PaintDoc } from "../../src/doc.ts";
 import { quadWarp } from "../../src/floating-transform.ts";
 import { prefilterToSplinePlane, sampleSplinePremult } from "../../src/bspline.ts";
 import type { SplinePlane } from "../../src/bspline.ts";
+import { rotspriteUpscale } from "../../src/rotsprite.ts";
+import type { U8Plane } from "../../src/rotsprite.ts";
 
 // ---- CPU warp 参照（golden 基准）：v355 从 src/floating-transform 归档进 harness（运行时单一 GPU SSoT；
 //   这份 CPU 逐像素逆单应性 + 采样器只在测试里当 GPU warp 的对照基准，不在产品路径）。verbatim 复刻原实现，
@@ -970,6 +972,20 @@ function checkerParity(glctx: GLContext, add: Add): void {
 function rectHinv(x0: number, y0: number, w: number, h: number): number[] {
   return [1 / w, 0, -x0 / w, 0, 1 / h, -y0 / h, 0, 0, 1];
 }
+// rotsprite EPX 放大平面 → u8 纹理（对齐 render-tree-gl._setFloats u8Plane 上传）
+function texFromU8Plane(glctx: GLContext, p: U8Plane): WebGLTexture {
+  const gl = glctx.gl;
+  const t = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, p.w, p.h, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+    new Uint8Array(p.data.buffer, p.data.byteOffset, p.data.byteLength));
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return t;
+}
 // spline 系数平面 → RGBA16F 纹理（对齐 render-tree-gl._setFloats mode 3 上传）
 function texFromSplinePlane(glctx: GLContext, p: SplinePlane): WebGLTexture {
   const gl = glctx.gl;
@@ -1071,6 +1087,32 @@ function warpParity(glctx: GLContext, add: Add): void {
     if (rr) rctx.drawImage(rr.canvas as CanvasImageSource, rr.dstX, rr.dstY);   // warp source-over 底
     const { md, at } = maxPremulDiff(rctx.getImageData(0, 0, N, N).data, glpx, N);
     add(`warp:${name} 扭曲quad GPU vs CPU renderQuadPerPixel`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  }
+  // rotsprite（像素完美）：EPX 8× 放大 + nearest。live = 大纹理 mode 0；CPU 参照 = 同一份
+  //   rotspriteUpscale 输出上 nearest（shader 无独立 mode，upscale 在 CPU —— 同源零漂移）。
+  if (q) {
+    const up = rotspriteUpscale(srcImg.data, sw, sh);
+    const uptex = texFromU8Plane(glctx, up);
+    const upImg = new ImageData(up.data, up.w, up.h);
+    const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: uptex, srcW: up.w, srcH: up.h, hinv: q.hinv, mode: 0 } }];
+    const accum = compositeTree(comp, backend.texture, tree as never, N, N);
+    const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
+    const rr = renderQuadPerPixel(upImg, up.w, up.h, mesh as never, "nearest");
+    const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
+    const rctx = ref.getContext("2d")!;
+    rctx.drawImage(baseCanvas, 0, 0);
+    if (rr) rctx.drawImage(rr.canvas as CanvasImageSource, rr.dstX, rr.dstY);
+    const { md, at } = maxPremulDiff(rctx.getImageData(0, 0, N, N).data, glpx, N);
+    add("warp:rotsprite(EPX8×+nearest) GPU vs CPU", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+    // bake 同路（warpToCanvas 的 u8 平面上传分支）
+    const bake = comp.warpToCanvas(up, up.w, up.h, q.hinv, 0, q.minX, q.minY, q.maxX - q.minX, q.maxY - q.minY);
+    const gpC = document.createElement("canvas"); gpC.width = N; gpC.height = N; const gpx2 = gpC.getContext("2d")!;
+    if (bake) gpx2.drawImage(bake.canvas, bake.dstX, bake.dstY);
+    const cpC = document.createElement("canvas"); cpC.width = N; cpC.height = N; const cpx2 = cpC.getContext("2d")!;
+    if (rr) cpx2.drawImage(rr.canvas as CanvasImageSource, rr.dstX, rr.dstY);
+    const d2 = maxPremulDiff(cpx2.getImageData(0, 0, N, N).data, new Uint8Array(gpx2.getImageData(0, 0, N, N).data.buffer), N);
+    add("warpbake:commit(rotsprite) GPU warpToCanvas vs CPU", d2.md <= 4, `maxΔ=${d2.md} ${d2.md > 4 ? d2.at : ""}`);
+    glctx.gl.deleteTexture(uptex);
   }
   // commit 烤定路径：comp.warpToCanvas（straight，无合成）vs CPU renderQuadPerPixel（straight），同 bbox 逐位。
   if (q) {

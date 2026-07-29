@@ -78,7 +78,8 @@ import "./flood-select.test.mjs";
 import "./fill-mode.test.mjs";
 import "./tok-ucsur.test.mjs";           // v0.5.35 tok→UCSUR 转写四条件+escape 规则           // v0.5.11 填充模式：active 谓词/开关事件（像素正确性在 gl-smoke fillParity）          // v0.5 #22/#31 flood 内核 + compose 非消费语义（v0.5.11 桶退役，内核归魔棒）
 import "./floating-transform.test.mjs";
-import "./bspline.test.mjs";   // 预滤波 B 样条插值（多次变换保锐核）：插值性/单位分解/vs CR 累积误差     // Slice 1/3：浮层变换深模块（free/uniform/distort/旋转/平移/投影 + 多 source 映射）
+import "./bspline.test.mjs";   // 预滤波 B 样条插值（多次变换保锐核）：插值性/单位分解/vs CR 累积误差
+import "./rotsprite.test.mjs";  // RotSprite 像素完美：EPX 规则手算/级数预算     // Slice 1/3：浮层变换深模块（free/uniform/distort/旋转/平移/投影 + 多 source 映射）
 import "./editable-leaf.test.mjs";          // Slice 4：requireEditableLeaf 单谓词（组/隐藏 gate）
 import "./doc-rotate.test.mjs";             // v258 逆时针旋转 90°（bbox 公式 + 4 次恒等 + 方向）
 import "./doc-offset.test.mjs";             // 偏移接缝（环绕）：像素环绕映射 + 恒等性 + selection bbox

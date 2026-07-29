@@ -7,8 +7,10 @@
 // 重采样方法 SSoT。所有 dropdown（变换采样 / 调整尺寸 / 导入 sheet）从这拉，加新方法（以后 AI）只改这。
 // contexts：transform = 自由变换的逐像素采样（GPU warp shader 支持 nearest/bilinear/bicubic）；scale = 轴对齐缩放（drawImage / smartResample）。
 // 以后 AI 放大多半只属于 scale（神经网络整图，非逐像素 kernel）→ contexts: ["scale"]。
+// 排序 = 推荐度（user 2026-07-28 拍板）：spline 默认第一、像素完美第二，其余"吃灰"垫底。
 export const RESAMPLE_MODES = [
-  { id: "spline",   label: "样条（多次变换保真）", contexts: ["transform", "liquify"] },   // 预滤波三次 B 样条（src/bspline.ts）：反复 commit 不积糊，采样成本=bicubic
+  { id: "spline",    label: "样条（多次变换保真）", contexts: ["transform", "liquify"] },   // 预滤波三次 B 样条（src/bspline.ts）：反复 commit 不积糊，采样成本=bicubic
+  { id: "rotsprite", label: "像素完美（像素画）",   contexts: ["transform"] },              // RotSprite（src/rotsprite.ts）：EPX 放大+nearest，零糊；摆正态=逐字节置换
   { id: "bicubic",  label: "双三次（高质量）",     contexts: ["transform", "scale"] },
   { id: "sharper",  label: "缩小优化（清晰）",     contexts: ["scale"] },         // step-halving，= PS Bicubic Sharper（适合缩小）；放大退回 bicubic
   { id: "bilinear", label: "双线性（软）",         contexts: ["transform", "scale", "liquify"] },

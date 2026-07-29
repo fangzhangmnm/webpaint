@@ -69,7 +69,7 @@ export class LiquifyFilter {
       size: brushSettings.size,
       strength: (brushSettings.opacity ?? 1) * scale,    // opacity × variant scale
       bleed: (params.bleed as string) || "edge",          // v147 选区边界取样模式
-      sample: (params.sample as string) || "bilinear",    // v0.6.36 采样核
+      sample: (params.sample as string) || "spline",      // 采样核（默认样条，user 拍板）
     };
     engine.beginStroke(layer as unknown as Layer, settings, x, y, selection as unknown as Selection | null);
     return { engine };

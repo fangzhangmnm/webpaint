@@ -32,6 +32,8 @@ import type { RigidMap } from "./workpiece/float-ops.ts";
 import type { TransformClass } from "./workpiece/workpiece.ts";
 import { prefilterToSplinePlane } from "./bspline.ts";
 import type { SplinePlane } from "./bspline.ts";
+import { rotspriteUpscale } from "./rotsprite.ts";
+import type { U8Plane } from "./rotsprite.ts";
 
 // ---- 局部几何/数据类型（type-strip 后纯运行时无变化）----
 type Node = Layer | LayerGroup;
@@ -39,18 +41,19 @@ type Bitmap = OffscreenCanvas | HTMLCanvasElement;
 interface Point { x: number; y: number; }
 type Mesh = Point[][];                          // 2×2：[[TL,TR],[BL,BR]]
 interface Rect { x: number; y: number; w: number; h: number; }
-type SampleMode = "nearest" | "bilinear" | "bicubic" | "spline";
+type SampleMode = "nearest" | "bilinear" | "bicubic" | "spline" | "rotsprite";
 
 // commit 烤定的 GPU warp fn（board.glWarpBakeFn 注入）：warp 源 → straight RGBA canvas + doc 坐标位置。
 //   mode：0=nearest 1=bilinear 2=bicubic 3=spline（对齐 WARP shader）。GL 失败=null（commit 不烤）。
-//   mode 3 的 src = B 样条系数平面（SplinePlane），其余 = canvas。
-export type WarpBakeFn = (src: CanvasImageSource | SplinePlane, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null;
+//   mode 3 的 src = B 样条系数平面（SplinePlane）；rotsprite = EPX 放大 U8Plane + mode 0 + 放大后尺寸
+//   （shader 只见 nearest 采样大纹理，无独立 mode）；其余 = canvas。
+export type WarpBakeFn = (src: CanvasImageSource | SplinePlane | U8Plane, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null;
 
 type TransformModeKind = "free" | "uniform" | "distort";
 
 // 渲染消费面（board._glFloatInputs / app lassoProvider）：workpiece float + 懒物化 canvas 的只读视图。
-// spline：采样模式为 spline 时附带的 B 样条系数平面（current() 懒算，per-float 缓存）。
-export interface FloatViewSource { layerId: number; canvas: Bitmap; rect: Rect; spline?: SplinePlane }
+// spline / rotsprite：对应采样模式激活时附带的派生平面（current() 懒算，per-float 缓存）。
+export interface FloatViewSource { layerId: number; canvas: Bitmap; rect: Rect; spline?: SplinePlane; rotsprite?: U8Plane }
 export interface FloatView {
   sources: FloatViewSource[];
   gizmoFrame: FloatFrame;
@@ -129,6 +132,16 @@ function floatSplinePlane(f: WorkpieceFloat): SplinePlane {
   }
   return p;
 }
+// rotsprite EPX 放大平面缓存（同款节奏；只在 rotsprite 模式下懒算，浮层收摊即随 f 释放）。
+const _floatRotspriteCache = new WeakMap<WorkpieceFloat, U8Plane>();
+function floatRotspritePlane(f: WorkpieceFloat): U8Plane {
+  let p = _floatRotspriteCache.get(f);
+  if (!p) {
+    p = rotspriteUpscale(f.pixels.getRegion(f.rect.x, f.rect.y, f.rect.w, f.rect.h), f.rect.w, f.rect.h);
+    _floatRotspriteCache.set(f, p);
+  }
+  return p;
+}
 
 export class FloatingTransform {
   _live: LiveMeta | null;
@@ -143,7 +156,7 @@ export class FloatingTransform {
   constructor(onChange: () => void = () => {}) {
     this._live = null;
     this._drag = null;
-    this._sampleMode = "bicubic";   // nearest | bilinear | bicubic（transform 重采样质量；v125 默认双三次）
+    this._sampleMode = "spline";   // 默认样条（v0.6.37 user 拍板「先默认都 spline」；真机太卡再降）
     this.onChange = onChange;
   }
 
@@ -155,7 +168,7 @@ export class FloatingTransform {
   }
 
   setSampleMode(m: string) {
-    if (m === "nearest" || m === "bilinear" || m === "bicubic" || m === "spline") {
+    if (m === "nearest" || m === "bilinear" || m === "bicubic" || m === "spline" || m === "rotsprite") {
       this._sampleMode = m;
       if (this._live) this.onChange();   // GPU 每帧按 mode 重 warp，无 CPU 缓存可清
     }
@@ -177,9 +190,11 @@ export class FloatingTransform {
       sources = fs.floats.map((f) => ({ layerId: f.sourceLayerId, canvas: floatSourceCanvas(f), rect: f.rect }));
       _floatViewCache.set(fs, sources);
     }
-    // spline 模式：附带系数平面（懒算 + per-float 缓存；切回其它模式留着无害，board 只在 mode 3 消费）
+    // spline / rotsprite 模式：附带派生平面（懒算 + per-float 缓存；切回其它模式留着无害，board 按 mode 消费）
     if (this._sampleMode === "spline") {
       fs.floats.forEach((f, i) => { if (!sources![i].spline) sources![i].spline = floatSplinePlane(f); });
+    } else if (this._sampleMode === "rotsprite") {
+      fs.floats.forEach((f, i) => { if (!sources![i].rotsprite) sources![i].rotsprite = floatRotspritePlane(f); });
     }
     return { sources, gizmoFrame: lv.gizmoFrame, mesh: lv.mesh, meshN: lv.meshN, mode: lv.mode };
   }
@@ -384,9 +399,16 @@ export class FloatingTransform {
     if (!bakeFn) return;
     const wp = sourceWarpMatrix(f, lv.gizmoFrame, lv.mesh);
     if (!wp || wp.bw <= 0 || wp.bh <= 0) return;
-    const mode = this._sampleMode === "nearest" ? 0 : this._sampleMode === "bicubic" ? 2 : this._sampleMode === "spline" ? 3 : 1;
-    const src = this._sampleMode === "spline" ? floatSplinePlane(f) : floatSourceCanvas(f) as CanvasImageSource;
-    const rendered = bakeFn(src, f.rect.w, f.rect.h, wp.hinv, mode, wp.bx, wp.by, wp.bw, wp.bh);
+    let rendered;
+    if (this._sampleMode === "rotsprite") {
+      // 像素完美：EPX 放大平面 + nearest（mode 0）+ 放大后尺寸（hinv 不变——尺寸在 shader 里乘）
+      const up = floatRotspritePlane(f);
+      rendered = bakeFn(up, up.w, up.h, wp.hinv, 0, wp.bx, wp.by, wp.bw, wp.bh);
+    } else {
+      const mode = this._sampleMode === "nearest" ? 0 : this._sampleMode === "bicubic" ? 2 : this._sampleMode === "spline" ? 3 : 1;
+      const src = this._sampleMode === "spline" ? floatSplinePlane(f) : floatSourceCanvas(f) as CanvasImageSource;
+      rendered = bakeFn(src, f.rect.w, f.rect.h, wp.hinv, mode, wp.bx, wp.by, wp.bw, wp.bh);
+    }
     if (!rendered) return;
     const rx0 = Math.floor(rendered.dstX), ry0 = Math.floor(rendered.dstY);
     const rx1 = Math.ceil(rendered.dstX + rendered.canvas.width), ry1 = Math.ceil(rendered.dstY + rendered.canvas.height);

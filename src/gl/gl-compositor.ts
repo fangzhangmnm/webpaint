@@ -430,7 +430,7 @@ export class GLCompositor {
   // commit 烤定：warp 源 → **straight** RGBA bbox FBO → readback → canvas（floating-transform._bakeDown 用，
   //   复用 live 同一套 warp 采样器 = preview/commit 零漂移）。源纹理临时上传（commit 一次性，可忽略）。
   //   mode 3（spline）源 = 系数平面（Float32Array，PAD 边距）→ RGBA16F；其余 = canvas → u8。
-  warpToCanvas(srcCanvas: TexImageSource | { data: Float32Array; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
+  warpToCanvas(srcCanvas: TexImageSource | { data: Float32Array; w: number; h: number } | { data: Uint8ClampedArray; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
     if (bw <= 0 || bh <= 0) return null;
     const gl = this._glctx.gl;
     const tex = gl.createTexture()!;
@@ -442,6 +442,11 @@ export class GLCompositor {
     if (srcCanvas && (srcCanvas as { data?: Float32Array }).data instanceof Float32Array) {
       const p = srcCanvas as { data: Float32Array; w: number; h: number };
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, p.w + 16, p.h + 16, 0, gl.RGBA, gl.FLOAT, p.data);
+    } else if (srcCanvas && (srcCanvas as { data?: Uint8ClampedArray }).data instanceof Uint8ClampedArray) {
+      // rotsprite EPX 放大平面（u8 直值；srcW/srcH 已是放大尺寸，mode=0 nearest）
+      const p = srcCanvas as unknown as { data: Uint8ClampedArray; w: number; h: number };
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, p.w, p.h, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+        new Uint8Array(p.data.buffer, p.data.byteOffset, p.data.byteLength));
     } else {
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 直值
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcCanvas as TexImageSource);

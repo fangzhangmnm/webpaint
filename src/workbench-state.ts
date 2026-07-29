@@ -173,7 +173,7 @@ function freshGroups() {
     },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     // sample：液化采样核 "bilinear"|"nearest"|"spline"（v0.6.36 保锐模式；持久化同意随本批 2026-07-28 批准）
-    liquify:       { bleed: "edge" as string, sample: "bilinear" as string },
+    liquify:       { bleed: "edge" as string, sample: "spline" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
     viewport:      null as EditorViewport | null,
     checkboard:    false,
