@@ -290,22 +290,11 @@ export class LassoEngine {
       if (p.x > maxX) maxX = p.x;
       if (p.y > maxY) maxY = p.y;
     }
-    const x0 = Math.floor(minX), y0 = Math.floor(minY);
-    const x1 = Math.ceil(maxX),  y1 = Math.ceil(maxY);
-    const w = x1 - x0, h = y1 - y0;
-    if (w <= 0 || h <= 0) return null;
-    const maskCanvas = makeBitmap(w, h);
-    const mctx = maskCanvas.getContext("2d")!;
-    mctx.fillStyle = "#fff";
-    mctx.beginPath();
-    for (let i = 0; i < pts.length; i++) {
-      const px = pts[i].x - x0;
-      const py = pts[i].y - y0;
-      if (i === 0) mctx.moveTo(px, py); else mctx.lineTo(px, py);
-    }
-    mctx.closePath();
-    mctx.fill("evenodd");
-    return Selection.fromAlphaCanvas(x0, y0, maskCanvas);   // AA 多边形光栅仍走 Canvas2D（vetted），入库转 gray8 tile
+    // v0.6.43（user 拍板：选区全家二值，羽化=以后的后处理）：自由套索改走 rasterizePolygonGray8
+    //   （像素中心 even-odd，0/255 硬边——与多边形套索/魔棒/蚂蚁线同一判据族；顺手消 canvas 光栅）。
+    const r = rasterizePolygonGray8(pts);
+    if (!r) return null;
+    return Selection.fromGray8Region(r.x0, r.y0, r.w, r.h, r.g);
   }
   _rasterizeRectToSelection(r: DraftRect | null): SelectionLike | null {
     if (!r) return null;
@@ -325,13 +314,19 @@ export class LassoEngine {
     const y1 = Math.ceil(Math.max(r.y0, r.y1));
     const w = x1 - x0, h = y1 - y0;
     if (w <= 0 || h <= 0) return null;
-    const maskCanvas = makeBitmap(w, h);
-    const mctx = maskCanvas.getContext("2d")!;
-    mctx.fillStyle = "#fff";
-    mctx.beginPath();
-    mctx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    mctx.fill();
-    return Selection.fromAlphaCanvas(x0, y0, maskCanvas);   // AA 椭圆同 freehand：Canvas2D 光栅 → gray8 tile
+    // v0.6.43 二值椭圆：像素中心在椭圆内 → 255（解析判据，消 canvas AA 光栅）
+    const g = new Uint8Array(w * h);
+    const cx = w / 2, cy = h / 2, rx = w / 2, ry = h / 2;
+    let any = false;
+    for (let py = 0; py < h; py++) {
+      const dy = (py + 0.5 - cy) / ry;
+      for (let px = 0; px < w; px++) {
+        const dx = (px + 0.5 - cx) / rx;
+        if (dx * dx + dy * dy <= 1) { g[py * w + px] = 255; any = true; }
+      }
+    }
+    if (!any) return null;
+    return Selection.fromGray8Region(x0, y0, w, h, g);
   }
   // 魔术棒：tap → flood fill 颜色差 ≤ threshold 的相邻像素入选。
   //

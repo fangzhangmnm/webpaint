@@ -81,6 +81,8 @@ vec4 sampleSpline(sampler2D tex, vec2 size, float sx, float sy){
   float kx[4], ky[4];
   for (int i=0;i<4;i++){ kx[i]=bsp3(float(ix-1+i)-cx); ky[i]=bsp3(float(iy-1+i)-cy); }
   float r=0.0,g=0.0,b=0.0,a=0.0;
+  float ca[16];
+  for (int t=0;t<16;t++) ca[t]=0.0;
   for (int j=0;j<4;j++){
     int yy = iy-1+j; if (yy<0||yy>=PH) continue;
     for (int i=0;i<4;i++){
@@ -88,9 +90,26 @@ vec4 sampleSpline(sampler2D tex, vec2 size, float sx, float sy){
       vec4 c = texelFetch(tex, ivec2(xx,yy), 0);
       float ww = kx[i]*ky[j];
       r += c.r*ww; g += c.g*ww; b += c.b*ww; a += c.a*ww;
+      ca[j*4+i] = c.a;
     }
   }
   if (a < 1.0e-4) return vec4(0.0);            // 0..255 尺度阈值（对齐 CPU）
+  // 反振铃限幅（v0.6.43，user 方案 A）：源 α 在中央 2×2 整点的值 = 系数 3×3 × B3 整点权 [1,4,1]/6
+  //   重建；α clamp 进 [min,max]，premult RGB 等比缩 → C=r/α 比值不动（零色偏），只杀负瓣过冲
+  //   （半透明笔画旋转边缘"变深"病根）。整点采样时 a=整点值 ∈ 域内 → 恒 no-op，identity 无损保持。
+  float na[4];
+  for (int v=0; v<2; v++) for (int u=0; u<2; u++) {
+    float acc = 0.0;
+    for (int dv=-1; dv<=1; dv++) for (int du=-1; du<=1; du++) {
+      acc += ca[(v+1+dv)*4 + (u+1+du)] * ((du==0?4.0:1.0)/6.0) * ((dv==0?4.0:1.0)/6.0);
+    }
+    na[v*2+u] = acc;
+  }
+  float amin = min(min(na[0],na[1]),min(na[2],na[3]));
+  float amax = max(max(na[0],na[1]),max(na[2],na[3]));
+  float acl = clamp(a, amin, amax);
+  if (acl != a) { float sc = acl / a; r*=sc; g*=sc; b*=sc; a=acl; }
+  if (a < 1.0e-4) return vec4(0.0);
   // 系数尺度：rgb=C·α(0..255·α)、a=255α → r/a = 归一直值，a/255 = 归一 alpha
   return vec4(clamp(r/a,0.0,1.0), clamp(g/a,0.0,1.0), clamp(b/a,0.0,1.0), clamp(a/255.0,0.0,1.0));
 }
@@ -128,6 +147,14 @@ vec4 sampleSrc(sampler2D tex, vec2 size, int mode, float sx, float sy){
       r += c.r*av*ww; g += c.g*av*ww; b += c.b*av*ww; a += av*ww;
     }
   }
+  // 反振铃限幅（v0.6.43，user 方案 A）：α clamp 进中央 2×2 texel [min,max]（越界=0），
+  //   premult RGB 等比缩 → 零色偏，只杀 Catmull-Rom 负瓣过冲。
+  float n00 = (ix  >=0&&ix  <W&&iy  >=0&&iy  <H) ? texelFetch(tex, ivec2(ix,  iy  ), 0).a : 0.0;
+  float n10 = (ix+1>=0&&ix+1<W&&iy  >=0&&iy  <H) ? texelFetch(tex, ivec2(ix+1,iy  ), 0).a : 0.0;
+  float n01 = (ix  >=0&&ix  <W&&iy+1>=0&&iy+1<H) ? texelFetch(tex, ivec2(ix,  iy+1), 0).a : 0.0;
+  float n11 = (ix+1>=0&&ix+1<W&&iy+1>=0&&iy+1<H) ? texelFetch(tex, ivec2(ix+1,iy+1), 0).a : 0.0;
+  float acl = clamp(a, min(min(n00,n10),min(n01,n11)), max(max(n00,n10),max(n01,n11)));
+  if (acl != a && a > 4.0e-7) { float sc = acl / a; r*=sc; g*=sc; b*=sc; a=acl; }
   float aOut = clamp(a, 0.0, 1.0);
   if (a < 4.0e-7) return vec4(0.0);
   return vec4(clamp(r/a,0.0,1.0), clamp(g/a,0.0,1.0), clamp(b/a,0.0,1.0), aOut);

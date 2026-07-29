@@ -80,6 +80,8 @@ export function prefilterToSplinePlane(rgba: Uint8ClampedArray, w: number, h: nu
 /** CPU 采样（GPU shader mode 3 的逐位参照；液化保锐模式直接用）。
  *  (sx,sy) = center 约定源坐标（texel i 中心在 i；调用方已做 −0.5 相位）。
  *  写 straight RGBA 到 out[oi..oi+3]。越出系数平面的 tap 视 0（pad 外已衰减到 0）。 */
+const SAMPLE_CA = new Float32Array(16);   // 采样期 α 系数暂存（限幅域重建用；单线程复用零分配）
+
 export function sampleSplinePremult(plane: SplinePlane, sx: number, sy: number, out: Uint8ClampedArray | Float32Array, oi: number) {
   const P = BSPLINE_PAD;
   const pw = plane.w + 2 * P, ph = plane.h + 2 * P;
@@ -89,6 +91,7 @@ export function sampleSplinePremult(plane: SplinePlane, sx: number, sy: number, 
   const ky = [b3(iy - 1 - cy), b3(iy - cy), b3(iy + 1 - cy), b3(iy + 2 - cy)];
   let r = 0, g = 0, b = 0, a = 0;
   const d = plane.data;
+  const ca = SAMPLE_CA; ca.fill(0);
   for (let j = 0; j < 4; j++) {
     const yy = iy - 1 + j;
     if (yy < 0 || yy >= ph) continue;
@@ -99,8 +102,27 @@ export function sampleSplinePremult(plane: SplinePlane, sx: number, sy: number, 
       const ww = kx[i] * wy;
       const p = (yy * pw + xx) * 4;
       r += d[p] * ww; g += d[p + 1] * ww; b += d[p + 2] * ww; a += d[p + 3] * ww;
+      ca[j * 4 + i] = d[p + 3];
     }
   }
+  if (a < 1e-4) { out[oi] = out[oi + 1] = out[oi + 2] = out[oi + 3] = 0; return; }
+  // 反振铃限幅（v0.6.43，与 GPU shader 逐位同步）：源 α 在中央 2×2 整点的重建值（系数 3×3 ×
+  // B3 整点权 [1,4,1]/6）张成 [min,max]，α clamp 进去、premult RGB 等比缩 → 零色偏，只杀负瓣过冲。
+  let amin = Infinity, amax = -Infinity;
+  for (let v = 0; v < 2; v++) {
+    for (let u = 0; u < 2; u++) {
+      let acc = 0;
+      for (let dv = -1; dv <= 1; dv++) {
+        for (let du = -1; du <= 1; du++) {
+          acc += ca[(v + 1 + dv) * 4 + (u + 1 + du)] * ((du === 0 ? 4 : 1) / 6) * ((dv === 0 ? 4 : 1) / 6);
+        }
+      }
+      if (acc < amin) amin = acc;
+      if (acc > amax) amax = acc;
+    }
+  }
+  const acl = Math.max(amin, Math.min(amax, a));
+  if (acl !== a) { const sc = acl / a; r *= sc; g *= sc; b *= sc; a = acl; }
   if (a < 1e-4) { out[oi] = out[oi + 1] = out[oi + 2] = out[oi + 3] = 0; return; }
   const af = a / 255;   // premult → straight（透明 tap 不拖暗，同 warp 采样器口径）
   const clamp = (v: number) => v < 0 ? 0 : v > 255 ? 255 : v;

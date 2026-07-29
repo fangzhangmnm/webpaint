@@ -6,8 +6,9 @@
 //   spec 点名蚂蚁线不是 workpiece/selection 的职责 → 收进本模块）。
 // 计算时机：首次请求同步算（选区一变下一帧就要画蚂蚁线，异步化只会闪空；旧版也是同步 O(bbox)，
 //   iPad 实测扛得住）。若未来大 doc 出现卡顿，切片重算再走 background-sync-jobs——留在 S7/S8 观察。
-// 算法原封不动搬自旧 selection.ts（marching squares + 链化，v113 virtual padding），
-//   阈值 >128 与 Selection.morphed 的二值化一致。输入换成 gray8 窄读口（不再 getImageData RGBA）。
+// v0.6.43（user：「像素改成 boundary tracing」）：marching squares（半格中点+45°切角）→
+//   **像素边界阶梯轮廓**（整数格；每个入选像素的裸露边直接发段）。所见轮廓 = 将被操作的像素集
+//   真边界，像素画视角严格阶梯。阈值 >128 与 Selection.morphed/消费端二值化一致（选区已全二值）。
 
 import type { Selection } from "./selection.ts";
 
@@ -23,42 +24,24 @@ export function antsOutline(sel: Selection): Float32Array[] {
   return chains;
 }
 
-// ============ 内部：marching squares 描边 ============
+// ============ 内部：像素边界阶梯描边（boundary tracing） ============
 
-// 从 gray8 mask 抽轮廓 polyline 段。输出 Float32Array 平铺 [x0,y0,x1,y1,...]（doc 坐标）。
-// O(bboxW×bboxH)，一次性（antsOutline 缓存）。
+// 每个入选像素（>128）的四条边里，邻居不入选的那些边 → 整数格线段。链化后 = 阶梯轮廓。
+// O(bboxW×bboxH)，一次性（antsOutline 缓存）。出界视 0（mask 占满 bbox 边时也有轮廓）。
 function extractMaskOutline(sel: Selection): Float32Array {
   const w = sel.bboxW, h = sel.bboxH;
-  if (w <= 1 || h <= 1) return new Float32Array(0);
+  if (w < 1 || h < 1) return new Float32Array(0);
   const { data } = sel.bboxMask();
   const segs: number[] = [];
-  // v113: virtual padding —— mask 外侧一圈 0，让 mask 占满边时也能 detect transition。
-  const alpha = (x: number, y: number) => (x < 0 || x >= w || y < 0 || y >= h) ? 0 : (data[y * w + x] > 128 ? 1 : 0);
-  for (let y = -1; y < h; y++) {
-    for (let x = -1; x < w; x++) {
-      const a00 = alpha(x, y), a10 = alpha(x + 1, y), a01 = alpha(x, y + 1), a11 = alpha(x + 1, y + 1);
-      const idx = a00 | (a10 << 1) | (a11 << 2) | (a01 << 3);
-      if (idx === 0 || idx === 15) continue;
-      const cxL = Math.max(0, Math.min(w, x)), cxR = Math.max(0, Math.min(w, x + 1));
-      const cyT = Math.max(0, Math.min(h, y)), cyB = Math.max(0, Math.min(h, y + 1));
-      const xL = sel.bboxX + cxL, xR = sel.bboxX + cxR, xM = (xL + xR) / 2;
-      const yT = sel.bboxY + cyT, yB = sel.bboxY + cyB, yM = (yT + yB) / 2;
-      switch (idx) {
-        case 1:  segs.push(xM, yT, xL, yM); break;
-        case 2:  segs.push(xM, yT, xR, yM); break;
-        case 3:  segs.push(xL, yM, xR, yM); break;
-        case 4:  segs.push(xR, yM, xM, yB); break;
-        case 5:  segs.push(xM, yT, xR, yM); segs.push(xM, yB, xL, yM); break;
-        case 6:  segs.push(xM, yT, xM, yB); break;
-        case 7:  segs.push(xM, yB, xL, yM); break;
-        case 8:  segs.push(xL, yM, xM, yB); break;
-        case 9:  segs.push(xM, yT, xM, yB); break;
-        case 10: segs.push(xM, yT, xL, yM); segs.push(xR, yM, xM, yB); break;
-        case 11: segs.push(xR, yM, xM, yB); break;
-        case 12: segs.push(xL, yM, xR, yM); break;
-        case 13: segs.push(xM, yT, xR, yM); break;
-        case 14: segs.push(xM, yT, xL, yM); break;
-      }
+  const on = (x: number, y: number) => (x < 0 || x >= w || y < 0 || y >= h) ? 0 : (data[y * w + x] > 128 ? 1 : 0);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!on(x, y)) continue;
+      const X = sel.bboxX + x, Y = sel.bboxY + y;
+      if (!on(x, y - 1)) segs.push(X, Y, X + 1, Y);
+      if (!on(x, y + 1)) segs.push(X, Y + 1, X + 1, Y + 1);
+      if (!on(x - 1, y)) segs.push(X, Y, X, Y + 1);
+      if (!on(x + 1, y)) segs.push(X + 1, Y, X + 1, Y + 1);
     }
   }
   return new Float32Array(segs);

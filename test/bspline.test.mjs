@@ -96,3 +96,28 @@ describe("bspline · 插值性 + 核", () => {
     assert(eSp < eCR * 0.25, `6 次往返：spline 平均误差 ${eSp.toFixed(2)} 应 < CR 的 1/4（CR=${eCR.toFixed(2)}）`);
   });
 });
+
+describe("bspline · 反振铃限幅（v0.6.43 方案 A）", () => {
+  it("半透明 α=128 台阶边缘：任意亚像素采样 α 不过冲（旋转边缘'变深'病根）", () => {
+    // 左半 α=128 红、右半透明。修前：边缘内侧亚像素采样 α 冲到 ~140+（负瓣）。
+    const w = 24, h = 8;
+    const src = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (x < 12) { src[i] = 200; src[i + 1] = 40; src[i + 2] = 40; src[i + 3] = 128; }
+    }
+    const plane = prefilterToSplinePlane(src, w, h);
+    const out = new Uint8ClampedArray(4);
+    let maxA = 0;
+    for (let f = 0; f <= 20; f++) {
+      for (let y = 2; y < 6; y++) {
+        sampleSplinePremult(plane, 8 + f * 0.3, y, out, 0);   // 扫过台阶边缘的亚像素位置
+        if (out[3] > maxA) maxA = out[3];
+      }
+    }
+    assert(maxA <= 129, `限幅后 α 峰值 ${maxA} 应 ≤128(+1 舍入)`);
+    // 且色相不被限幅带偏（C=r/α 等比缩）：内部点仍是纯色
+    sampleSplinePremult(plane, 5.5, 3.5, out, 0);
+    assert(Math.abs(out[0] - 200) <= 2 && Math.abs(out[1] - 40) <= 2, `色相不动，实得 ${out[0]},${out[1]}`);
+  });
+});

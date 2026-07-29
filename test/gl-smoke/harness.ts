@@ -47,6 +47,11 @@ function cpuBicubic(sdat: Uint8ClampedArray, w: number, h: number, sx: number, s
     for (let i = 0; i < 4; i++) { const xx = ix - 1 + i; if (xx < 0 || xx >= w) continue;
       const p = (yy * w + xx) * 4, ww = kx[i] * ky[j], av = sdat[p + 3];
       r += sdat[p] * av * ww; g += sdat[p + 1] * av * ww; b += sdat[p + 2] * av * ww; a += av * ww; } }
+  // 反振铃限幅（v0.6.43，与 shader 逐位同步）：α clamp 进中央 2×2 [min,max]，premult RGB 等比缩。
+  const nA = (xx: number, yy: number) => (xx < 0 || xx >= w || yy < 0 || yy >= h) ? 0 : sdat[(yy * w + xx) * 4 + 3];
+  const n00 = nA(ix, iy), n10 = nA(ix + 1, iy), n01 = nA(ix, iy + 1), n11 = nA(ix + 1, iy + 1);
+  const acl = Math.max(Math.min(n00, n10, n01, n11), Math.min(Math.max(n00, n10, n01, n11), a));
+  if (acl !== a && a > 1e-4) { const sc = acl / a; r *= sc; g *= sc; b *= sc; a = acl; }
   ddat[di + 3] = Math.max(0, Math.min(255, a));
   if (a < 1e-4) { ddat[di] = ddat[di + 1] = ddat[di + 2] = 0; return; }
   ddat[di] = Math.max(0, Math.min(255, r / a)); ddat[di + 1] = Math.max(0, Math.min(255, g / a)); ddat[di + 2] = Math.max(0, Math.min(255, b / a));

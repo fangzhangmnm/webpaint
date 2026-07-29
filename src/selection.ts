@@ -214,12 +214,14 @@ export class Selection {
   }
 
   /** 从「alpha = mask」的 canvas 建（lasso freehand/ellipse 的 AA 光栅器仍是 Canvas2D，vetted）。 */
+  // ⚠不变量（user 拍板 2026-07-29）：**Selection mask 恒二值 0/255**——所有工厂出厂即二值，
+  //   羽化是将来的显式后处理，别让 AA 灰度从任何入口溜进来。本入口（canvas α → 选区）按 ≥128 阈值化。
   static fromAlphaCanvas(x0: number, y0: number, canvas: Bitmap): Selection | null {
     const w = (canvas as HTMLCanvasElement).width, h = (canvas as HTMLCanvasElement).height;
     if (w <= 0 || h <= 0) return null;
     const d = (canvas.getContext("2d") as Ctx).getImageData(0, 0, w, h).data;
     const g = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) g[i] = d[i * 4 + 3];
+    for (let i = 0; i < w * h; i++) g[i] = d[i * 4 + 3] >= 128 ? 255 : 0;
     return Selection.fromGray8Region(x0, y0, w, h, g);
   }
 

@@ -221,27 +221,34 @@ describe("SwapSelectionOp · 往返 + 句柄释放", () => {
 });
 
 describe("marching-ants · outline golden + 缓存", () => {
-  it("正方形块：闭合单链，外缘 clamp 到 bbox 边、内缘走 .5 网格（v113 行为）", () => {
+  it("正方形块：闭合单链，整数格阶梯轮廓 = 真像素边界（v0.6.43 boundary tracing）", () => {
     const s = solid(4, 4, 2, 2);
     const chains = antsOutline(s);
     eq(chains.length, 1, "单闭合链");
     const ch = chains[0];
-    // v113 virtual padding + clamp：外侧半格被夹到 bbox 边（x/y=4），内侧边在 .5 网格（5.5）。
+    // 2×2 块 @(4,4) 的像素边界 = 正方形 [4,6]×[4,6]，全整数格、无 .5 中点、无 45° 切角。
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, hasHalf = false;
     for (let i = 0; i < ch.length; i += 2) {
       minX = Math.min(minX, ch[i]); maxX = Math.max(maxX, ch[i]);
       minY = Math.min(minY, ch[i + 1]); maxY = Math.max(maxY, ch[i + 1]);
       if (ch[i] % 1 !== 0 || ch[i + 1] % 1 !== 0) hasHalf = true;
     }
-    eq(minX, 4, "左缘 clamp 到 bbox 左");
-    eq(minY, 4, "上缘 clamp 到 bbox 上");
-    eq(maxX, 5.5, "右缘在内侧 .5 网格");
-    eq(maxY, 5.5, "下缘在内侧 .5 网格");
-    assert(hasHalf, "有 .5 中点（marching squares 特征）");
+    eq(minX, 4, "左缘 = 像素边界 4");
+    eq(minY, 4, "上缘 = 像素边界 4");
+    eq(maxX, 6, "右缘 = 像素边界 6");
+    eq(maxY, 6, "下缘 = 像素边界 6");
+    assert(!hasHalf, "全整数格（阶梯轮廓，无 marching squares 半格中点）");
     // 闭合：首尾相接
     eq(ch[0], ch[ch.length - 2], "闭合 x");
     eq(ch[1], ch[ch.length - 1], "闭合 y");
     assert(antsOutline(s) === chains, "WeakMap 缓存：同对象同结果身份");
+    s.dispose();
+  });
+  it("单像素选区：1×1 也有完整方框轮廓（旧 marching squares w<=1 直接放弃）", () => {
+    const s = solid(7, 9, 1, 1);
+    const chains = antsOutline(s);
+    eq(chains.length, 1, "单链");
+    eq(chains[0].length, 10, "4 边闭合 = 5 个点");
     s.dispose();
   });
   it("AA 阈值 >128：129 算内、128 算外（与 morph 二值化一致）", () => {
