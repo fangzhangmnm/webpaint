@@ -3,6 +3,25 @@
 import { describe, it, assert, eq } from "./runner.mjs";
 const { PaintDoc, freezeDocForEncode } = await import("../src/doc.ts");
 
+// v0.6.44 回归：冻结视图必须带 getImageData（快照 tiles 字节直读）。
+// 真机事故：v0.6.42 ora 存层改 L.getImageData 直读，session push 走冻结视图（当时缺该方法）
+// → 「推送失败 getImageData is not a function」。unsafe cast 曾挡住 tsc——本测锁运行时行为。
+describe("freezeDocForEncode · 冻结视图字节读口（v0.6.44）", () => {
+  it("frozen leaf.getImageData = 冻结时刻像素（零 canvas；冻结后再画不影响）", () => {
+    const doc = mkDoc();
+    const L = doc.layers[0];
+    const buf = new Uint8ClampedArray(8 * 8 * 4);
+    for (let i = 0; i < 64; i++) { buf[i * 4] = 10 + i; buf[i * 4 + 1] = 20; buf[i * 4 + 2] = 30; buf[i * 4 + 3] = 255; }
+    L.putImageData(4, 6, { width: 8, height: 8, data: buf });
+    const { frozen, dispose } = freezeDocForEncode(doc);
+    L.putImageData(4, 6, { width: 8, height: 8, data: new Uint8ClampedArray(8 * 8 * 4).fill(255) });
+    const fl = frozen.layers[0];
+    const img = fl.getImageData(fl.bboxX, fl.bboxY, fl.bboxW, fl.bboxH);
+    assert(buf.every((v, i) => v === img.data[i]), "冻结视图逐字节 = 冻结时刻（后续编辑不撕）");
+    dispose();
+  });
+});
+
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
 const _docs = [];
 const mkDoc = (o) => { const d = new PaintDoc(o); _docs.push(d); return d; };
@@ -53,6 +72,25 @@ describe("freezeDocForEncode · encode 存档一致性（S8）", () => {
     eq(fl.bboxW, 0);
     eq(fl.bboxH, 0);
     assert(fl.canvas, "canvas 占位存在");
+    dispose();
+  });
+});
+
+// v0.6.44 回归：冻结视图必须带 getImageData（快照 tiles 字节直读）。
+// 真机事故：v0.6.42 ora 存层改 L.getImageData 直读，session push 走冻结视图（当时缺该方法）
+// → 「推送失败 getImageData is not a function」。unsafe cast 曾挡住 tsc——本测锁运行时行为。
+describe("freezeDocForEncode · 冻结视图字节读口（v0.6.44）", () => {
+  it("frozen leaf.getImageData = 冻结时刻像素（零 canvas；冻结后再画不影响）", () => {
+    const doc = mkDoc();
+    const L = doc.layers[0];
+    const buf = new Uint8ClampedArray(8 * 8 * 4);
+    for (let i = 0; i < 64; i++) { buf[i * 4] = 10 + i; buf[i * 4 + 1] = 20; buf[i * 4 + 2] = 30; buf[i * 4 + 3] = 255; }
+    L.putImageData(4, 6, { width: 8, height: 8, data: buf });
+    const { frozen, dispose } = freezeDocForEncode(doc);
+    L.putImageData(4, 6, { width: 8, height: 8, data: new Uint8ClampedArray(8 * 8 * 4).fill(255) });
+    const fl = frozen.layers[0];
+    const img = fl.getImageData(fl.bboxX, fl.bboxY, fl.bboxW, fl.bboxH);
+    assert(buf.every((v, i) => v === img.data[i]), "冻结视图逐字节 = 冻结时刻（后续编辑不撕）");
     dispose();
   });
 });

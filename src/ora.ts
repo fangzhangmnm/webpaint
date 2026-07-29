@@ -24,6 +24,7 @@ import { zipPack, zipUnpack } from "./zip.ts";
 import { Layer, LayerGroup, PaintDoc, flattenLeaves, findNodeById, reseedLayerIdCounter } from "./doc.ts";
 import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
+import type { FrozenNode } from "./doc.ts";
 import { encodePngFromBytes, encodePngFromCanvas, decodePngToBytes } from "./png-codec.ts";
 // 纯树↔stack.xml 序列化（嵌套组 + id + active）抽到独立深模块（无 canvas 依赖，可纯 node 测）。
 import { buildStackXml, parseStackXml } from "./ora-stack-xml.ts";
@@ -31,7 +32,9 @@ import type { ParsedNode } from "./ora-stack-xml.ts";
 
 // 2D 上下文：OffscreenCanvas / <canvas> 两种 ctx 共有 API（与 doc.ts 的 Ctx 同形）。
 // renderMerged / encode 只读 doc 的 width/height/layers，与 PaintDoc 形状兼容。
-type EncodeDoc = { width: number; height: number; layers: PaintDoc["layers"] };
+// layers 兼收活 doc 节点与冻结视图（session push 走 freezeDocForEncode）——叶必须带 getImageData
+// （v0.6.44：真机推送失败教训——unsafe cast 曾把冻结视图缺方法漏过 tsc，类型收紧堵回）。
+type EncodeDoc = { width: number; height: number; layers: PaintDoc["layers"] | FrozenNode[] };
 // encode opts：两个可选 WebPaint 私有扩展。
 interface EncodeOpts {
   mergedCanvas?: OffscreenCanvas | HTMLCanvasElement | null;   // S9：调用方渲好的合成图（GL）；缺省=透明占位
@@ -121,8 +124,9 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
     { path: "mergedimage.png", data: mergedPng },
   ];
 
-  // 只有叶（Layer）有像素 canvas；组（LayerGroup）无 PNG，结构全在 stack.xml。
-  for (const L of flattenLeaves(doc.layers)) {
+  // 只有叶（Layer）有像素；组（LayerGroup）无 PNG，结构全在 stack.xml。
+  // （FrozenLeaf 与 Layer 在本函数消费面同形：bbox*/getImageData/name/…——flattenLeaves 只走结构，cast 安全。）
+  for (const L of flattenLeaves(doc.layers as PaintDoc["layers"])) {
     let png;
     if (L.bboxW > 0 && L.bboxH > 0) {
       // v0.6.42：tiles 字节直读进 codec facade（不再经 L.canvas 物化）

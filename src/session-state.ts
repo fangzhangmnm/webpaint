@@ -162,7 +162,7 @@ async function _encodeCurrentOraWithPeek(): Promise<{ bytes: Blob; peek: Blob | 
   const { frozen, dispose } = freezeDocForEncode(doc as Parameters<typeof freezeDocForEncode>[0]);
   try {
     const meta = _buildOraMeta() as Record<string, unknown>;
-    const bytes = await encodeDocToOra(frozen as unknown as Parameters<typeof encodeDocToOra>[0], { ...meta, mergedCanvas: merged } as Parameters<typeof encodeDocToOra>[1]) as Blob;
+    const bytes = await encodeDocToOra(frozen, { ...meta, mergedCanvas: merged } as Parameters<typeof encodeDocToOra>[1]) as Blob;   // v0.6.44：unsafe cast 删（EncodeDoc 已兼收冻结视图）
     const peek = merged ? await thumbBlobFromCanvas(merged, 256) : null;
     return { bytes, peek };
   } finally { dispose(); }

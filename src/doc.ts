@@ -259,6 +259,16 @@ export class Layer {
       get bboxH() { return empty ? 0 : ensure().canvas.height; },
       get width() { return this.bboxW; },
       get height() { return this.bboxH; },
+      // v0.6.44 修真机「推送失败 getImageData is not a function」：v0.6.42 把 ora 存层改为
+      // L.getImageData 字节直读，但 session push 走的是本冻结视图（session-state unsafe cast 躲过
+      // tsc）——冻结视图没这方法。快照 tiles 直读补上（恰好零 canvas，比 ensure() 物化更纯）。
+      getImageData(x: number, y: number, w: number, h: number): ImageData {
+        const t = new LayerPixels(docW, docH);
+        t.restore(snap);
+        const d = t.getRegion(x, y, w, h);
+        t.dispose();
+        return new ImageData(d, w, h);
+      },
     };
   }
 
@@ -1093,6 +1103,8 @@ export interface FrozenLeaf {
   readonly canvas: Bitmap;
   readonly bboxX: number; readonly bboxY: number; readonly bboxW: number; readonly bboxH: number;
   readonly width: number; readonly height: number;
+  /** v0.6.44：快照 tiles 字节直读（ora 存层走它——真机曾因缺此方法推送失败，见下）。零 canvas。 */
+  getImageData(x: number, y: number, w: number, h: number): ImageData;
 }
 export interface FrozenGroup {
   isGroup: true; id: number; name: string; opacity: number; mode: string;
