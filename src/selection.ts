@@ -441,31 +441,44 @@ export class Selection {
   }
 
   // 选区内填色（调用方负责 push history）。source-over 叠在已有像素上（color RGB + alpha=mask）。
+  // v0.6.41 去 canvas 化：gray8 mask + 字节 over（同为 gl-smoke fillParity 的 golden 参照——精度只升不降）。
   fillOnLayer(layer: LayerLike, color: string): void {
     if (!layer) return;
     this._assertAlive();
     const w = this.bboxW, h = this.bboxH;
     if (w <= 0 || h <= 0) return;
-    const tmp = makeBitmap(w, h);
-    const tctx = tmp.getContext("2d") as Ctx;
-    tctx.fillStyle = color;
-    tctx.fillRect(0, 0, w, h);
-    tctx.globalCompositeOperation = "destination-in";
-    tctx.drawImage(this.materializeMaskCanvas() as CanvasImageSource, 0, 0);
-    tctx.globalCompositeOperation = "source-over";
-    layer.editRegion(this.bboxX, this.bboxY, w, h, (ctx, ox, oy) => {
-      ctx.drawImage(tmp as CanvasImageSource, this.bboxX - ox, this.bboxY - oy);
-    });
+    const m = parseInt(color.slice(1), 16);
+    const cr = (m >> 16) & 255, cg = (m >> 8) & 255, cb = m & 255;
+    const mask = this.materializeMaskRegion(this.bboxX, this.bboxY, w, h);
+    (layer as unknown as { editRegionBytes: (x: number, y: number, w: number, h: number, fn: (buf: Uint8ClampedArray) => void) => void })
+      .editRegionBytes(this.bboxX, this.bboxY, w, h, (buf) => {
+        for (let i = 0; i < w * h; i++) {
+          const as = mask[i] / 255;
+          if (as <= 0) continue;
+          const o = i * 4;
+          const ab = buf[o + 3] / 255;
+          const ao = as + ab * (1 - as);
+          buf[o]     = Math.round((cr * as + buf[o]     * ab * (1 - as)) / ao);
+          buf[o + 1] = Math.round((cg * as + buf[o + 1] * ab * (1 - as)) / ao);
+          buf[o + 2] = Math.round((cb * as + buf[o + 2] * ab * (1 - as)) / ao);
+          buf[o + 3] = Math.round(ao * 255);
+        }
+      });
   }
 
-  // 清除选区内像素（dst-out mask）。
+  // 清除选区内像素（dst-out mask；alpha 衰减、RGB 保留——tile 惯例）。v0.6.41 字节版。
   clearOnLayer(layer: LayerLike): void {
     if (!layer) return;
     this._assertAlive();
-    layer.editRegion(this.bboxX, this.bboxY, this.bboxW, this.bboxH, (ctx, ox, oy) => {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(this.materializeMaskCanvas() as CanvasImageSource, this.bboxX - ox, this.bboxY - oy);
-    });
+    const w = this.bboxW, h = this.bboxH;
+    if (w <= 0 || h <= 0) return;
+    const mask = this.materializeMaskRegion(this.bboxX, this.bboxY, w, h);
+    (layer as unknown as { editRegionBytes: (x: number, y: number, w: number, h: number, fn: (buf: Uint8ClampedArray) => void) => void })
+      .editRegionBytes(this.bboxX, this.bboxY, w, h, (buf) => {
+        for (let i = 0; i < w * h; i++) {
+          if (mask[i]) buf[i * 4 + 3] = Math.round(buf[i * 4 + 3] * (255 - mask[i]) / 255);
+        }
+      });
   }
 
   // ---- crop / resample 时变换自身 → 新 Selection（doc.cropTo/resampleTo 用；region 式，对齐 LayerPixels 先例）----

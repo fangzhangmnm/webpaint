@@ -30,20 +30,20 @@ let setStatus: AppContext["setStatus"], _afterDocChange: AppContext["afterDocCha
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"], _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let importImageAsLayer: AppContext["importImageAsLayer"];
 
-// 当前层 ∩ 选区（无交集 → null）→ 裁好选区形状的离屏 canvas
+// 当前层 ∩ 选区（无交集 → null）→ 裁好选区形状的离屏 canvas（仅剪贴板 PNG 编码用——
+// v0.6.41 去 canvas 化：像素在字节里裁好，canvas 只在编码边界包一次、不回流画作）。
 function _extractSelectionRegionCanvas(layer: LayerLike, sel: Selection) {
   const lbX = layer.bboxX, lbY = layer.bboxY, lbW = layer.bboxW, lbH = layer.bboxH;
   const x0 = Math.max(lbX, sel.bboxX), y0 = Math.max(lbY, sel.bboxY);
   const x1 = Math.min(lbX + lbW, sel.bboxX + sel.bboxW), y1 = Math.min(lbY + lbH, sel.bboxY + sel.bboxH);
   const w = x1 - x0, h = y1 - y0;
   if (w <= 0 || h <= 0) return null;
+  const img = (layer as unknown as { getImageData: (x: number, y: number, w: number, h: number) => ImageData }).getImageData(x0, y0, w, h);
+  const mask = sel.materializeMaskRegion(x0, y0, w, h);
+  for (let i = 0; i < w * h; i++) img.data[i * 4 + 3] = Math.round(img.data[i * 4 + 3] * mask[i] / 255);
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
-  const cx = c.getContext("2d")!;
-  cx.drawImage(layer.canvas, x0 - lbX, y0 - lbY, w, h, 0, 0, w, h);
-  cx.globalCompositeOperation = "destination-in";   // 裁到选区形状
-  cx.drawImage(sel.materializeMaskCanvas() as CanvasImageSource, sel.bboxX - x0, sel.bboxY - y0);
-  cx.globalCompositeOperation = "source-over";
+  c.getContext("2d")!.putImageData(img, 0, 0);
   return c;
 }
 
@@ -60,20 +60,17 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   const beforeActive: LayerSnap | null = move ? src.snapshot() : null;
   const newL = doc.addLayer(move ? "移到新层" : "复制层");
   if (!newL) { disposeLayerSnap(beforeActive); return; }
-  // 把 active ∩ selection 的像素 copy 进 newL（建一张 selection bbox 大小的 canvas 再切片回 tile）
-  const nc = document.createElement("canvas");
-  nc.width = sel.bboxW; nc.height = sel.bboxH;
-  const nctx = nc.getContext("2d", { willReadFrequently: false })!;
-  nctx.drawImage(src.canvas, src.bboxX - sel.bboxX, src.bboxY - sel.bboxY);
-  nctx.globalCompositeOperation = "destination-in";
-  nctx.drawImage(sel.materializeMaskCanvas() as CanvasImageSource, 0, 0);
-  nctx.globalCompositeOperation = "source-over";
-  newL.replaceFromCanvas(nc, sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
+  // 把 active ∩ selection 的像素 copy 进 newL（v0.6.41 全字节：tiles 直读 → alpha×mask → 直落 tile）
+  const region = src.getImageData(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
+  const selMask = sel.materializeMaskRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
+  for (let i = 0; i < sel.bboxW * sel.bboxH; i++) region.data[i * 4 + 3] = Math.round(region.data[i * 4 + 3] * selMask[i] / 255);
+  newL.replaceFromBytes(region.data, sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
   if (move) {
-    // 从源层挖洞（destination-out 选区形状）
-    src.editRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (ctx, ox, oy) => {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.drawImage(sel.materializeMaskCanvas() as CanvasImageSource, sel.bboxX - ox, sel.bboxY - oy);
+    // 从源层挖洞（dst-out 选区形状：alpha 衰减、RGB 保留）
+    src.editRegionBytes(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (buf) => {
+      for (let i = 0; i < sel.bboxW * sel.bboxH; i++) {
+        if (selMask[i]) buf[i * 4 + 3] = Math.round(buf[i * 4 + 3] * (255 - selMask[i]) / 255);
+      }
     });
   }
   const loc = doc.locateNode(newL.id)!;   // {parentId, index}：组内也精确（undo 摘层 / redo insertLayerAt 用）

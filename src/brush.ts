@@ -286,27 +286,17 @@ export class BrushEngine {
       if (ix + intSize > dx1) dx1 = ix + intSize;
       if (iy + intSize > dy1) dy1 = iy + intSize;
     }
-    const r = intSize / 2, re2 = (r - 0.25) * (r - 0.25);
+    // v0.6.41 去 canvas 化：每桶一次 editRegionBytes，圆盘走共享字节核（语义逐位同 _pixelStampDirect）
+    const as = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));
+    const comp = st.mode === "erase" ? "erase" as const : (st.layer.lockAlpha ? "atop" as const : "over" as const);
+    const rgb = st.mode === "erase" ? { r: 0, g: 0, b: 0 } : hexToRgbObj(s.color || "#000");
+    const rw = B + intSize, rh = B + intSize;
     for (const [k, cells] of buckets) {
       const [bx, by] = k.split(",").map(Number);
       const rx = bx * B, ry = by * B;
-      st.layer.editRegion(rx, ry, B + intSize, B + intSize, (ctx, ox, oy) => {
-        ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));
-        ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : (st.layer.lockAlpha ? "source-atop" : "source-over");
-        ctx.fillStyle = st.mode === "erase" ? "#000" : (s.color || "#000");
-        ctx.imageSmoothingEnabled = false;
+      st.layer.editRegionBytes(rx, ry, rw, rh, (buf, ox, oy) => {
         for (let i = 0; i < cells.length; i += 2) {
-          const ix = cells[i], iy = cells[i + 1];
-          if (intSize <= 2) { ctx.fillRect(ix - ox, iy - oy, intSize, intSize); continue; }
-          for (let j = 0; j < intSize; j++) {
-            const dy = j + 0.5 - r;
-            const w2 = re2 - dy * dy;
-            if (w2 <= 0) continue;
-            const w = Math.sqrt(w2);
-            const a = Math.max(0, Math.ceil(r - w - 0.5));
-            const b = Math.min(intSize - 1, Math.floor(r + w - 0.5));
-            if (b >= a) ctx.fillRect(ix - ox + a, iy - oy + j, b - a + 1, 1);
-          }
+          this._pixelDiscInto(buf, rw, rh, ox, oy, cells[i], cells[i + 1], intSize, rgb, as, comp);
         }
       });
     }
@@ -404,6 +394,55 @@ export class BrushEngine {
     this._markDirty(x0, y0, x1, y1);
   }
 
+  // ---- 像素模式字节核（v0.6.41 去 canvas 化）：纯色 stamp 的三种合成逐字节实现 ----
+  //   over = source-over；erase = destination-out（只衰减 alpha，RGB 保留——与 tile 惯例一致）；
+  //   atop = source-atop（v242 lockAlpha：只改已有像素颜色，不增删 alpha）。
+  //   语义对齐旧 canvas 版；精度更高（无 premult u8 往返）。
+  private _pixelBlendSpan(buf: Uint8ClampedArray, rw: number, px: number, py: number, n: number, rgb: { r: number; g: number; b: number }, as: number, comp: "over" | "erase" | "atop") {
+    let i = (py * rw + px) * 4;
+    for (let k = 0; k < n; k++, i += 4) {
+      if (comp === "erase") { buf[i + 3] = Math.round(buf[i + 3] * (1 - as)); continue; }
+      const ab = buf[i + 3] / 255;
+      if (comp === "atop") {
+        if (ab <= 0) continue;
+        buf[i] = Math.round(rgb.r * as + buf[i] * (1 - as));
+        buf[i + 1] = Math.round(rgb.g * as + buf[i + 1] * (1 - as));
+        buf[i + 2] = Math.round(rgb.b * as + buf[i + 2] * (1 - as));
+        continue;
+      }
+      const ao = as + ab * (1 - as);
+      if (ao <= 0) continue;
+      buf[i]     = Math.round((rgb.r * as + buf[i]     * ab * (1 - as)) / ao);
+      buf[i + 1] = Math.round((rgb.g * as + buf[i + 1] * ab * (1 - as)) / ao);
+      buf[i + 2] = Math.round((rgb.b * as + buf[i + 2] * ab * (1 - as)) / ao);
+      buf[i + 3] = Math.round(ao * 255);
+    }
+  }
+  // 一颗像素圆盘（Bresenham disc，#28 语义原样）写进区域缓冲。(ix,iy)=落格左上（doc），(ox,oy)=区域原点。
+  private _pixelDiscInto(buf: Uint8ClampedArray, rw: number, rh: number, ox: number, oy: number, ix: number, iy: number, intSize: number, rgb: { r: number; g: number; b: number }, as: number, comp: "over" | "erase" | "atop") {
+    const clip = (px: number, py: number, n: number) => {
+      if (py < 0 || py >= rh) return;
+      let a = px, b2 = px + n - 1;
+      if (a < 0) a = 0;
+      if (b2 >= rw) b2 = rw - 1;
+      if (b2 >= a) this._pixelBlendSpan(buf, rw, a, py, b2 - a + 1, rgb, as, comp);
+    };
+    if (intSize <= 2) {
+      for (let j = 0; j < intSize; j++) clip(ix - ox, iy - oy + j, intSize);
+      return;
+    }
+    const r = intSize / 2, re2 = (r - 0.25) * (r - 0.25);
+    for (let j = 0; j < intSize; j++) {
+      const dy = j + 0.5 - r;
+      const w2 = re2 - dy * dy;
+      if (w2 <= 0) continue;
+      const w = Math.sqrt(w2);
+      const a = Math.max(0, Math.ceil(r - w - 0.5));
+      const b = Math.min(intSize - 1, Math.floor(r + w - 0.5));
+      if (b >= a) clip(ix - ox + a, iy - oy + j, b - a + 1);
+    }
+  }
+
   _pixelStampDirect(x: number, y: number, size: number, stampAlpha: number) {
     const st = this._stroke!;
     const s = st.settings;
@@ -412,29 +451,12 @@ export class BrushEngine {
     // v104: 像素中心位置（doc 坐标）。pixel i 覆盖 [i, i+1)；floor(x - (intSize-1)/2)：intSize=1 时=floor(x) ✓。
     const ix = Math.floor(x - (intSize - 1) / 2);
     const iy = Math.floor(y - (intSize - 1) / 2);
-    layer.editRegion(ix, iy, intSize, intSize, (ctx, ox, oy) => {
-      ctx.globalAlpha = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));   // pixel 不走 buffer，opacity 这里乘
-      // v242 锁定不透明度：非橡皮走 source-atop（只改已有像素颜色，不增删 alpha）
-      ctx.globalCompositeOperation = st.mode === "erase" ? "destination-out" : (layer.lockAlpha ? "source-atop" : "source-over");
-      ctx.fillStyle = st.mode === "erase" ? "#000" : (s.color || "#000");
-      ctx.imageSmoothingEnabled = false;
-      // #28（v0.5）：像素笔/橡皮 stamp 从正方形改像素化圆盘（Bresenham disc；行 span 不重叠 → 低 alpha 不双叠）。
-      //   r_eff = r-0.25 让 3px=十字、4px 切角，对齐像素画圈的惯例；≤2px 圆=方，走 fillRect。
-      if (intSize <= 2) {
-        ctx.fillRect(ix - ox, iy - oy, intSize, intSize);
-      } else {
-        const r = intSize / 2;
-        const re2 = (r - 0.25) * (r - 0.25);
-        for (let j = 0; j < intSize; j++) {
-          const dy = j + 0.5 - r;
-          const w2 = re2 - dy * dy;
-          if (w2 <= 0) continue;
-          const w = Math.sqrt(w2);
-          const a = Math.max(0, Math.ceil(r - w - 0.5));
-          const b = Math.min(intSize - 1, Math.floor(r + w - 0.5));
-          if (b >= a) ctx.fillRect(ix - ox + a, iy - oy + j, b - a + 1, 1);
-        }
-      }
+    // v0.6.41 去 canvas 化：字节核（#28 Bresenham disc + v242 lockAlpha source-atop 语义原样）
+    const as = stampAlpha * Math.max(0, Math.min(1, s.opacity ?? 1.0));
+    const comp = st.mode === "erase" ? "erase" as const : (layer.lockAlpha ? "atop" as const : "over" as const);
+    const rgb = st.mode === "erase" ? { r: 0, g: 0, b: 0 } : hexToRgbObj(s.color || "#000");
+    layer.editRegionBytes(ix, iy, intSize, intSize, (buf, ox, oy) => {
+      this._pixelDiscInto(buf, intSize, intSize, ox, oy, ix, iy, intSize, rgb, as, comp);
     });
   }
 

@@ -11,7 +11,7 @@
 
 import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
-import { LayerPixels, materialize, editRegion as editPixels, replaceFromCanvas as replacePixels, disposePixelsSnapshot, type PixelsSnapshot } from "./tiles/tile-layer.ts";
+import { LayerPixels, materialize, editRegion as editPixels, editRegionBytes as editPixelsBytes, replaceFromCanvas as replacePixels, disposePixelsSnapshot, type PixelsSnapshot } from "./tiles/tile-layer.ts";
 import { renderNodesToBytes } from "./doc-render.ts";
 
 export const DEFAULT_DOC_SIZE = 2048;
@@ -174,6 +174,11 @@ export class Layer {
   //   blend/erase/lockAlpha 这类对已有像素合成的写法天然正确（fn 看到的就是现有像素）。
   editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void) {
     editPixels(this.pixels, x0, y0, w, h, fn);
+    this._invalidate();
+  }
+  // 字节版（v0.6.41）：fn 直改 straight RGBA 缓冲，零 canvas premult 往返（笔刷像素模式/选区填清用）。
+  editRegionBytes(x0: number, y0: number, w: number, h: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void) {
+    editPixelsBytes(this.pixels, x0, y0, w, h, fn);
     this._invalidate();
   }
   // 整体从一张 canvas 重建（变换 / 合并 / 导入 / ora）：srcCanvas 内容在 doc (ox,oy) 起、w×h。

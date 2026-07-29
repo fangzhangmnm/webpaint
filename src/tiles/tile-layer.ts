@@ -336,6 +336,16 @@ export function materialize(lp: LayerPixels, tight = false): { canvas: Bitmap2D;
 
 // 编辑事务（替代旧 ensureBbox + layer.ctx）：物化 doc 矩形 [rx0,ry0,rw,rh]（含已有像素）→ 给 ctx 让 fn 画
 //   → 结果切片回 tile。fn(ctx, ox, oy)：ctx 原点 = doc(ox,oy)，即在 doc 坐标 d 处画 = ctx 坐标 d-ox/d-oy。
+// 字节版 editRegion（v0.6.41 去 canvas 化）：fn 直接改 getRegion 缓冲（straight RGBA，rw×rh），
+// 写回 putRegion。旧 canvas facade 的 putImageData→getImageData 往返会把整块矩形过一遍 premult
+// 量化（哪怕 fn 没画到）——字节进出不走 canvas 硬原则。
+export function editRegionBytes(lp: LayerPixels, rx0: number, ry0: number, rw: number, rh: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void): void {
+  if (rw <= 0 || rh <= 0) return;
+  const buf = lp.getRegion(rx0, ry0, rw, rh);
+  fn(buf, rx0, ry0);
+  lp.putRegion(rx0, ry0, rw, rh, buf);
+}
+
 export function editRegion(lp: LayerPixels, rx0: number, ry0: number, rw: number, rh: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void {
   if (rw <= 0 || rh <= 0) return;
   const c = scratch2D(rw, rh);
