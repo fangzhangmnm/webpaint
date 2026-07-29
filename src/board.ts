@@ -821,6 +821,11 @@ export class Board {
     if (!this._glBoard) return null;
     return this._glBoard.compositeToCanvas(nodes as unknown as Parameters<GLBoard["compositeToCanvas"]>[0], docW, docH);
   }
+  // 字节合成面（doc-render.setDocCompositorBytes 的后端；merge-down 等字节 op 用）。
+  compositeNodesToBytes(nodes: unknown[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {
+    if (!this._glBoard) return null;
+    return this._glBoard.compositeToBytes(nodes as unknown as Parameters<GLBoard["compositeToBytes"]>[0], docW, docH);
+  }
 
   // 吸管 composite 取色（S8c，spec:243-244）：GL 一次性合成（compositeOnce，不建缓存）+ 1px readback。
   //   走 GPU 的动机：合成组是没有 CPU tile 的（spec:244），CPU 全量 compositeLayers 缓存随之退役。

@@ -20,7 +20,7 @@
 //   const blob = await encodeDocToPsd(doc);
 //   // → image/vnd.adobe.photoshop blob，触发下载或 share
 
-import { renderNodesToCanvas } from "./doc-render.ts";
+import { renderNodesToBytes } from "./doc-render.ts";
 import { flattenLeaves } from "./doc.ts";
 import type { Layer, PaintDoc } from "./doc.ts";
 
@@ -270,7 +270,8 @@ function encodeLayerChannels(layer: Layer): EncodedChannel[] {
   const lh = layer.bboxH || 0;
   let channels;
   if (lw > 0 && lh > 0) {
-    const img = layer.ctx.getImageData(0, 0, lw, lh);
+    // v0.6.39：tiles 直读（layer.ctx.getImageData 走物化 canvas 的 premult 往返——分层导出是可编辑数据）
+    const img = layer.getImageData(layer.bboxX, layer.bboxY, lw, lh);
     channels = splitRGBAChannels(img.data, lw, lh);
   } else {
     channels = { r: new Uint8Array(0), g: new Uint8Array(0), b: new Uint8Array(0), a: new Uint8Array(0) };
@@ -380,15 +381,11 @@ function writeMergedImage(w: BinaryWriter, doc: PaintDoc, docW: number, docH: nu
   const c = (typeof OffscreenCanvas !== "undefined")
     ? new OffscreenCanvas(docW, docH)
     : (() => { const x = document.createElement("canvas"); x.width = docW; x.height = docH; return x; })();
-  const ctx = c.getContext("2d") as Ctx;
-  // 透明背景；merged 自带 alpha
-  ctx.clearRect(0, 0, docW, docH);
   // S9：合成走 GL（doc-render，与 display 同源；respect clip + mode + 组隔离）。
+  //   v0.6.39 去 canvas 化：readPixels 字节直接分通道（旧 drawImage+getImageData 又一轮 premult 往返）。
   //   GL 不可用 → merged 透明占位（层数据仍完整；导出场景 GL 必在——无 GL app 无画布）。
-  const merged = renderNodesToCanvas(doc.layers, docW, docH);
-  if (merged) ctx.drawImage(merged, 0, 0);
-  const img = ctx.getImageData(0, 0, docW, docH);
-  const ch = splitRGBAChannels(img.data, docW, docH);
+  const merged = renderNodesToBytes(doc.layers, docW, docH);
+  const ch = splitRGBAChannels(merged ? merged.data : new Uint8ClampedArray(docW * docH * 4), docW, docH);
 
   w.writeUInt16(1);                              // compression = RLE
   const order = [ch.r, ch.g, ch.b, ch.a];

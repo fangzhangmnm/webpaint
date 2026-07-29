@@ -356,8 +356,9 @@ export class RenderTreeGL {
     return out;
   }
 
-  // S9 导出/缩略图/mergedimage 合成面：compositeOnce → 整幅 readPixels → canvas（透明底，straight）。
-  compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement {
+  // S9 字节合成面（v0.6.39 去 canvas 化）：compositeOnce → 整幅 readPixels 直接返回 straight 字节
+  //   （merge-down / collapse / stamp-all 等「字节进出」op 用——硬原则：字节进出不走 canvas）。
+  compositeToBytes(nodes: DocNode[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } {
     const gl = this._glctx.gl;
     const fbo = this.compositeOnce(nodes, docW, docH);
     const px = new Uint8Array(docW * docH * 4);
@@ -365,8 +366,14 @@ export class RenderTreeGL {
     gl.readPixels(0, 0, docW, docH, gl.RGBA, gl.UNSIGNED_BYTE, px);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     this._glctx.returnFBO(fbo);
+    return { data: new Uint8ClampedArray(px.buffer), w: docW, h: docH };
+  }
+
+  // S9 导出/缩略图/mergedimage 合成面：字节 → canvas 包装（消费方要 drawImage/toBlob 的场合）。
+  compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement {
+    const b = this.compositeToBytes(nodes, docW, docH);
     const canvas = document.createElement("canvas"); canvas.width = docW; canvas.height = docH;
-    canvas.getContext("2d")!.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), docW, docH), 0, 0);
+    canvas.getContext("2d")!.putImageData(new ImageData(b.data, docW, docH), 0, 0);
     return canvas;
   }
 

@@ -58,6 +58,11 @@ export class GLBoard {
     if (this._glctx.isLost) return null;
     return this._tree.compositeToCanvas(nodes, docW, docH);
   }
+  // 字节合成面（v0.6.39）：merge-down/collapse 等字节 op 用；GL lost → null。
+  compositeToBytes(nodes: DocNode[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {
+    if (this._glctx.isLost) return null;
+    return this._tree.compositeToBytes(nodes, docW, docH);
+  }
 
   // S8 吸管：一次性合成（compositeOnce，不建缓存）+ 1px readback。bg 语义同 render 的 docBg。
   pickColor(doc: GLDoc, docBg: string | null, x: number, y: number, surrogate: SurrogateInput | null = null, overlay: OverlayInput | null = null): [number, number, number, number] | null {

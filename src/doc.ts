@@ -12,6 +12,7 @@
 import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { LayerPixels, materialize, editRegion as editPixels, replaceFromCanvas as replacePixels, disposePixelsSnapshot, type PixelsSnapshot } from "./tiles/tile-layer.ts";
+import { renderNodesToBytes } from "./doc-render.ts";
 
 export const DEFAULT_DOC_SIZE = 2048;
 
@@ -180,6 +181,12 @@ export class Layer {
     replacePixels(this.pixels, srcCanvas, ox, oy, w, h);
     this._invalidate();
   }
+  // 整层替换（字节版，v0.6.39 去 canvas 化）：清空 + putRegion，零 premult 往返。
+  replaceFromBytes(data: Uint8ClampedArray, ox: number, oy: number, w: number, h: number) {
+    this.pixels.clear();
+    if (w > 0 && h > 0) this.pixels.putRegion(ox, oy, w, h, data);
+    this._invalidate();
+  }
   // 清空全层。
   clearAll() { this.pixels.clear(); this._invalidate(); }
 
@@ -263,11 +270,12 @@ export class Layer {
 
   // CPU 算法读者的**只读物化**（液化 startSnap / 选区 applyMaskPostStroke）：紧 bbox + ImageData。
   //   不是 undo 包（别拿去 restore；undo 走 snapshot() 句柄）。空层 → imageData:null。
+  //   v0.6.39 去 canvas 化：直接 getRegion 字节（旧 materialize→getImageData 走 canvas premult
+  //   往返，液化源/选区 preSnap 吃量化损——字节进出不走 canvas 硬原则）。ImageData 只当容器。
   snapshotImageData(): { bboxX: number; bboxY: number; bboxW: number; bboxH: number; imageData: ImageData | null } {
-    const m = materialize(this.pixels, true);   // tight
-    if (!m) return { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
-    const ctx = (m.canvas as HTMLCanvasElement).getContext("2d", { willReadFrequently: true }) as Ctx;
-    return { bboxX: m.ox, bboxY: m.oy, bboxW: m.canvas.width, bboxH: m.canvas.height, imageData: ctx.getImageData(0, 0, m.canvas.width, m.canvas.height) };
+    const b = this.pixels.contentBounds(true);   // tight
+    if (!b) return { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
+    return { bboxX: b.x, bboxY: b.y, bboxW: b.w, bboxH: b.h, imageData: new ImageData(this.pixels.getRegion(b.x, b.y, b.w, b.h), b.w, b.h) };
   }
 }
 
@@ -576,18 +584,17 @@ export class PaintDoc {
   //   - 剪裁链边界（active 与 under 都 clippingMask=true，共用同一基底）：合并后结果保持
   //       clippingMask=true（仍剪到同一基底），不在此处对基底再裁（那是渲染时的事）。
   //   - 反向（under 是剪裁层、active 普通）= "clipping-under"：语义不清，拒绝并给中文提示。
-  // #25（v0.5）：把组烤成单叶（同位替换）。merged = 组 children 的合成位图（调用方用 GL
-  //   renderNodesToCanvas 渲染，组自身 opacity/mode/clip/visible 保留到新叶上 → 视觉不变）；
-  //   null = 空组 → 空叶。撤销走 snapshotTree/treeStructure（新叶是活引用，undo 即从树上摘掉）。
-  collapseGroupToLayer(id: number, merged: CanvasImageSource | null) {
+  // #25（v0.5）：把组烤成单叶（同位替换）。merged = 组 children 的合成**字节**（调用方用 GL
+  //   renderNodesToBytes 渲染——v0.6.39 去 canvas 化：readPixels 字节直落 tile，零 premult 往返，
+  //   组自身 opacity/mode/clip/visible 保留到新叶上 → 视觉不变）；null = 空组 → 空叶。
+  //   撤销走 snapshotTree/treeStructure（新叶是活引用，undo 即从树上摘掉）。
+  collapseGroupToLayer(id: number, merged: { data: Uint8ClampedArray; w: number; h: number } | null) {
     const loc = findParentOf(this.layers, id);
     if (!loc || !loc.node.isGroup) return null;
     const g = loc.node as LayerGroup;
     const L = new Layer({ width: this.width, height: this.height, name: g.name, empty: true });
     L.visible = g.visible; L.opacity = g.opacity; L.mode = g.mode; L.clippingMask = !!g.clippingMask;
-    if (merged) {
-      L.editRegion(0, 0, this.width, this.height, (ctx, ox, oy) => { ctx.drawImage(merged, -ox, -oy); });
-    }
+    if (merged) L.replaceFromBytes(merged.data, 0, 0, merged.w, merged.h);
     loc.parent.splice(loc.index, 1, L);
     this.activeId = L.id;
     return L;
@@ -595,10 +602,10 @@ export class PaintDoc {
 
   // #25（v0.5）：盖印全部可见层 → 新叶**强制置顶**（根级数组尾 = 最顶）。merged = 全树合成位图。
   //   「其他图层自动隐藏」由调用方编排（组走 treeStructure 快照，叶 visible 走 layerProp op）。
-  stampAllToTopLayer(merged: CanvasImageSource) {
+  stampAllToTopLayer(merged: { data: Uint8ClampedArray; w: number; h: number }) {
     if (countLeaves(this.layers) >= this.maxLayers) return null;
     const L = new Layer({ width: this.width, height: this.height, name: `合并 ${this._nextLayerName().replace(/^图层\s*/, "")}`, empty: true });
-    L.editRegion(0, 0, this.width, this.height, (ctx, ox, oy) => { ctx.drawImage(merged, -ox, -oy); });
+    L.replaceFromBytes(merged.data, 0, 0, merged.w, merged.h);
     this.layers.push(L);
     this.activeId = L.id;
     return L;
@@ -633,41 +640,22 @@ export class PaintDoc {
     const y1 = uHasPx ? Math.max(under.bboxY + under.bboxH, L.bboxY + L.bboxH) : L.bboxY + L.bboxH;
     const newW = x1 - x0, newH = y1 - y0;
 
-    // active 的「待烤层」：剪裁基底 case 先把 active dst-in 裁到 under 的 alpha。
-    // 用一张和合并 bbox 同尺寸的离屏：画 active → dst-in under（只留 under 不透明处的 active 像素）。
-    let activeSrcCanvas = L.canvas;
-    let activeSrcX = L.bboxX - x0;     // active 在 srcCanvas 上对应 tmp 的偏移
-    let activeSrcY = L.bboxY - y0;
-    if (clipActiveToUnder) {
-      const clipTmp = makeBitmap(newW, newH);
-      const cctx = clipTmp.getContext("2d") as Ctx;
-      cctx.drawImage(L.canvas, L.bboxX - x0, L.bboxY - y0);
-      if (uHasPx) {
-        cctx.globalCompositeOperation = "destination-in";
-        cctx.drawImage(under.canvas, under.bboxX - x0, under.bboxY - y0);
-        cctx.globalCompositeOperation = "source-over";
-      } else {
-        // under 无像素（空基底）→ 整层裁没（dst-in 到全透明），剪裁层不可见。清空。
-        cctx.clearRect(0, 0, newW, newH);
-      }
-      activeSrcCanvas = clipTmp;
-      activeSrcX = 0;
-      activeSrcY = 0;
+    // v0.6.39 去 canvas 化 + 单引擎（user 拍板 ×2）：合并像素 = **GL render tree 的字节合成面**
+    //   （doc-render.renderNodesToBytes → compositeOnce readback，与 display/导出同一套混合数学——
+    //   旧 canvas globalCompositeOperation 版把混合交给浏览器 premult 空间，"严重违规"）。
+    //   节点 = 结构化临时 2 叶（gl-doc-bridge 明说"结构兼容即可"；同 id+同 pixels → GPU tile 直接复用）：
+    //   under 铺底（透明背景上 mode 退化为放置，opacity 原样）；active 按 clippingMask/mode/opacity 混上。
+    const comp = renderNodesToBytes([
+      { isGroup: false, id: under.id, opacity: under.opacity, mode: "source-over", clippingMask: false, visible: true, pixels: under.pixels },
+      { isGroup: false, id: L.id, opacity: L.opacity, mode: L.mode || "source-over", clippingMask: clipActiveToUnder, visible: true, pixels: L.pixels },
+    ], this.width, this.height);
+    if (!comp) return { ok: false, reason: "no-gl" };
+    // 全 doc 字节 → 并集 rect 切片
+    const out = new Uint8ClampedArray(newW * newH * 4);
+    for (let y = 0; y < newH; y++) {
+      const srcOff = ((y0 + y) * this.width + x0) * 4;
+      out.set(comp.data.subarray(srcOff, srcOff + newW * 4), y * newW * 4);
     }
-
-    // 离屏：under (source-over) → active (active.mode × active.opacity)
-    const tmp = makeBitmap(newW, newH);
-    const tctx = tmp.getContext("2d") as Ctx;
-    if (uHasPx) {
-      tctx.globalAlpha = under.opacity;
-      tctx.drawImage(under.canvas, under.bboxX - x0, under.bboxY - y0);
-      tctx.globalAlpha = 1;
-    }
-    tctx.globalAlpha = L.opacity;
-    tctx.globalCompositeOperation = (L.mode || "source-over") as GlobalCompositeOperation;
-    tctx.drawImage(activeSrcCanvas, activeSrcX, activeSrcY);
-    tctx.globalAlpha = 1;
-    tctx.globalCompositeOperation = "source-over";
 
     // 先抓「改前」状态再 mutate
     const underBefore = under.snapshot();
@@ -676,8 +664,8 @@ export class PaintDoc {
     const underBeforeClipping = under.clippingMask;
     const activeSpec = this.layerSpec(L);
     activeSpec.clippingMask = L.clippingMask;   // redo 还原 active 的剪裁标志
-    // 替换 under 像素 + 归一化（active.mode×active.opacity 已烤进 tmp）
-    under.replaceFromCanvas(tmp, x0, y0, newW, newH);
+    // 替换 under 像素 + 归一化（active.mode×active.opacity 已烤进 out）
+    under.replaceFromBytes(out, x0, y0, newW, newH);
     under.opacity = 1;
     under.mode = "source-over";
     // 链内合并：结果仍剪裁到同一基底；基底 case：结果是普通基底层（非剪裁）。

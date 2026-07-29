@@ -28,7 +28,7 @@ import { positionPopup } from "./anchored-popup.ts";
 //   贴顶元素的拖动——面板头一旦钻进去就拉不回来。地板 ≈ safe-area + 顶栏（同 reference MIN_TOP 先例）。
 export const PANEL_MIN_TOP = 60;
 import { countLeaves, findNodeById } from "./doc.ts";
-import { renderNodesToCanvas } from "./doc-render.ts";
+import { renderNodesToCanvas, renderNodesToBytes } from "./doc-render.ts";
 import { t, tLatin } from "./i18n/index.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
 import { docVersion, bumpDoc } from "./signals.ts";
@@ -193,10 +193,10 @@ function _ungroupLayer(L: LayerNode | null) {
 function _collapseGroup(L: LayerNode | null) {
   if (!L || !L.isGroup) return;
   const kids = (L as LayerGroup).children;
-  const merged = countLeaves(kids) > 0 ? renderNodesToCanvas(kids as unknown[], doc.width, doc.height) : null;
+  const merged = countLeaves(kids) > 0 ? renderNodesToBytes(kids as unknown[], doc.width, doc.height) : null;
   if (countLeaves(kids) > 0 && !merged) { setStatus(t("lp.st.glNeeded"), true); return; }
   const before = doc.snapshotTree();
-  const nl = doc.collapseGroupToLayer(L.id, merged as CanvasImageSource | null);
+  const nl = doc.collapseGroupToLayer(L.id, merged);
   if (!nl) return;
   history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
     undoStatus: t("lp.st.restoredGroup", { name: L.name }), redoStatus: t("lp.st.collapsedGroup", { name: L.name }) });
@@ -209,11 +209,11 @@ function _collapseGroup(L: LayerNode | null) {
 //   全部 compound 封一个 undo 整点。
 function _stampAllToNewLayer() {
   if (countLeaves(doc.layers) >= doc.maxLayers) { setStatus(t("lp.st.maxLayers", { n: doc.maxLayers })); return; }
-  const merged = renderNodesToCanvas(doc.layers as unknown[], doc.width, doc.height);
+  const merged = renderNodesToBytes(doc.layers as unknown[], doc.width, doc.height);
   if (!merged) { setStatus(t("lp.st.glNeeded"), true); return; }
   history.compound(workpiece, () => {
     const before = doc.snapshotTree();
-    const nl = doc.stampAllToTopLayer(merged as CanvasImageSource);
+    const nl = doc.stampAllToTopLayer(merged);
     if (!nl) return;
     // 其他根级**组**先藏（进 after 快照 → undo 恢复）；根级**叶**记下来走 layerProp
     const rootLeavesToHide: LayerNode[] = [];

@@ -20,6 +20,7 @@ import { compositeLayers } from "./reference-2d.ts";
 import { BrushEngine } from "../../src/brush.ts";
 import { resolveBrush } from "../../src/resolved-brush.ts";
 import { PaintDoc } from "../../src/doc.ts";
+import { setDocCompositorBytes } from "../../src/doc-render.ts";
 import { quadWarp } from "../../src/floating-transform.ts";
 import { prefilterToSplinePlane, sampleSplinePremult } from "../../src/bspline.ts";
 import type { SplinePlane } from "../../src/bspline.ts";
@@ -1136,6 +1137,35 @@ function warpParity(glctx: GLContext, add: Add): void {
 
 // ---- E5c) 组变换 clip 浮层 golden：clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather）vs CPU ----
 //   基底源 alpha=蒙版形状（左实右透），clip 源全不透明 → clip 应只显在基底实处。两者同 mesh warp。
+// ---- E5d) merge-down E2E（v0.6.39 GL 字节合成面）：合并前后整图 composite 逐位不变 ----
+//   覆盖：multiply 混合 + opacity + 剪裁 dst-in——merge-down 现在走 renderNodesToBytes（同一 GL 引擎），
+//   「合并不改观感」是它的定义性质。
+function mergeDownParity(glctx: GLContext, add: Add): void {
+  const N = 128;
+  const tree = new RenderTreeGL(glctx, 512);
+  setDocCompositorBytes((nodes, w, h) => tree.compositeToBytes(nodes as never, w, h));
+  const doc = new PaintDoc({ width: N, height: N });
+  const base = doc.layers[0];
+  const fill = (L: { putImageData: (x: number, y: number, img: unknown) => void }, fn: (x: number, y: number) => number[]) => {
+    const d = new Uint8ClampedArray(N * N * 4);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) d.set(fn(x, y), (y * N + x) * 4);
+    L.putImageData(0, 0, { width: N, height: N, data: d });
+  };
+  fill(base as never, (x, y) => [200, 150, (x * 3) % 256, x < N / 2 ? 255 : ((y * 2) % 200)]);   // 左实右渐变 alpha
+  const top = doc.addLayer("上");
+  fill(top as never, (x, y) => [(y * 5) % 256, 80, 220, 60 + ((x + y) % 180)]);
+  top.mode = "multiply"; top.opacity = 0.7; top.clippingMask = true;
+  doc.activeIndex = doc.layers.indexOf(top);
+  const before = tree.compositeToBytes(doc.layers as never, N, N).data;
+  const r = doc.mergeDownLayer(top as never) as { ok: boolean; reason?: string };
+  add("mergedown:GL 字节面合并成功", r.ok, r.ok ? "" : String(r.reason));
+  const after = tree.compositeToBytes(doc.layers as never, N, N).data;
+  const { md, at } = maxPremulDiff(before, new Uint8Array(after.buffer, after.byteOffset, after.byteLength), N);
+  add("mergedown:multiply+opacity+clip 合并前后 composite 不变", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+  for (const l of doc.layers) (l as { pixels?: { dispose?: () => void } }).pixels?.dispose?.();
+  tree.dispose?.();
+}
+
 function warpClipParity(glctx: GLContext, add: Add): void {
   const N = 192;
   const backend = new GLGpuTileBackend(glctx, 16); const pool = new GpuTilePool(backend, backend.capacity); const comp = new GLCompositor(glctx, "f32");
@@ -1323,6 +1353,7 @@ function run(): { ok: boolean; checks: Check[]; error: string | null } {
   try { fillParity(glctx, add); } catch (e) { add("fill parity", false, String(e)); }
   try { warpParity(glctx, add); } catch (e) { add("warp parity", false, String(e)); }
   try { warpClipParity(glctx, add); } catch (e) { add("warpclip parity", false, String(e)); }
+  try { mergeDownParity(glctx, add); } catch (e) { add("mergedown parity", false, String(e)); }
 
   const finalErr = gl.getError();   // 只读一次（getError 读后即清，二次读会误报 0）
   add("no GL error", finalErr === gl.NO_ERROR, `0x${finalErr.toString(16)}`);

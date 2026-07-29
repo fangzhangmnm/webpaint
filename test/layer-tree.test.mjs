@@ -3,6 +3,7 @@
 // 注：照 doc-rotate/doc-mergedown 的约定——**动态** import doc.js（静态 import 会给模块图加边、
 //   扰动 globalThis.OffscreenCanvas 的 stub 泄漏顺序，毒到 selection-morph）；每个 it() 开头 useStub()。
 import { describe, it, assert } from "./runner.mjs";
+import { setDocCompositorBytes as _setBytesComp } from "../src/doc-render.ts";
 
 // 完整 canvas stub（all-noop ctx + 空 getImageData）——结构测试够用（含 clearRect/setTransform，
 //   不像 selection/doc-mergedown 的极简 stub）。
@@ -230,6 +231,8 @@ describe("layer-tree · 撤销树化原语（batch 2 step5）", () => {
   });
 
   T("mergeDownLayer 返回 activeLoc；duplicateLayer 返回 loc", () => {
+    // v0.6.39：merge-down 走 GL 字节合成面 → node 测注入参照（透明结果即可，本测只验 loc 结构）
+    _setBytesComp((nodes, w, h) => ({ data: new Uint8ClampedArray(w * h * 4), w, h }));
     const d = mkDoc();
     const L1 = d.addLayer();
     L1.putImageData(0, 0, { width: 4, height: 4, data: new Uint8ClampedArray(4 * 4 * 4).fill(255) });   // 给点像素让 mergeDown 不走 empty-active

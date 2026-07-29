@@ -1,103 +1,37 @@
-// v258 剪裁层向下合并验收。
-// 问题陈述：
-//   - active 是剪裁层(clippingMask)，under 是其基底(非剪裁)：合并时 active 像素先 dst-in 裁到
-//     under 的 alpha（只在基底不透明处可见），再按 active.mode×opacity 烤进 under；结果 under 非剪裁。
-//   - active 与 under 都剪裁（剪裁链内）：合并后结果仍 clippingMask=true。
-//   - under 剪裁、active 普通 → reason "clipping-under"，拒绝。
-//   - 返回值含 activeSpec.clippingMask + underBeforeClipping + resultClipping（undo/redo 还原用）。
-// 用支持 globalAlpha + source-over/destination-in 的 stub canvas 验像素结果。
+// v258 剪裁层向下合并验收（v0.6.39 重写：merge-down 改走 GL render tree 字节合成面——
+// setDocCompositorBytes 注入。node 无 GL → 本文件注入一个**测试侧参照合成器**（straight 字节
+// source-over + clippingMask + opacity；非 source-over 模式直接抛——真混合模式的对拍在 gl-smoke）。
+// 守的语义不变：剪裁 dst-in 到基底 alpha / 链内合并仍剪裁 / clipping-under 拒绝 / undo 三元组。
 import { describe, it, assert, eq } from "./runner.mjs";
 
-class StubCtx {
-  constructor(cv) {
-    this.cv = cv;
-    this.fillStyle = "#000";
-    this.globalAlpha = 1;
-    this.globalCompositeOperation = "source-over";
-    this.imageSmoothingEnabled = true;
-    this.imageSmoothingQuality = "low";
-    this._t = [1, 0, 0, 1, 0, 0];
-  }
-  setTransform(a, b, c, d, e, f) { this._t = [a, b, c, d, e, f]; }
-  clearRect(x, y, w, h) {
-    const { data, width } = this.cv;
-    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
-      const i = (yy * width + xx) * 4;
-      data[i] = data[i + 1] = data[i + 2] = data[i + 3] = 0;
-    }
-  }
-  fillRect() { throw new Error("fillRect 未在此测试用到"); }
-  // 仅支持整数平移 transform（merge-down 全是 drawImage(src, intDx, intDy)）。
-  drawImage(src, dx, dy) {
-    const [a, b, c, d] = this._t;
-    if (a !== 1 || b !== 0 || c !== 0 || d !== 1) throw new Error("stub 只支持平移");
-    const ex = this._t[4], ey = this._t[5];
-    const ddx = Math.round((dx || 0) + ex), ddy = Math.round((dy || 0) + ey);
-    const sw = src.width, sh = src.height;
-    const sd = src.getContext("2d").cv.data;
-    const { data, width, height } = this.cv;
-    const op = this.globalCompositeOperation;
-    const ga = this.globalAlpha;
-    if (op === "destination-in") {
-      // 保留 dst，其 alpha *= src 在该处 alpha/255；src 覆盖不到的 dst → alpha 0
-      for (let py = 0; py < height; py++) for (let px = 0; px < width; px++) {
-        const sx = px - ddx, sy = py - ddy;
-        let sa = 0;
-        if (sx >= 0 && sx < sw && sy >= 0 && sy < sh) sa = sd[(sy * sw + sx) * 4 + 3];
-        const di = (py * width + px) * 4;
-        data[di + 3] = Math.round(data[di + 3] * (sa / 255));
-      }
-      return;
-    }
-    // source-over（含 globalAlpha）
-    for (let sy = 0; sy < sh; sy++) for (let sx = 0; sx < sw; sx++) {
-      const px = sx + ddx, py = sy + ddy;
-      if (px < 0 || px >= width || py < 0 || py >= height) continue;
-      const si = (sy * sw + sx) * 4;
-      const srcA = (sd[si + 3] / 255) * ga;
-      if (srcA <= 0) continue;
-      const di = (py * width + px) * 4;
-      const dstA = data[di + 3] / 255;
-      const outA = srcA + dstA * (1 - srcA);
-      if (outA <= 0) { data[di] = data[di + 1] = data[di + 2] = data[di + 3] = 0; continue; }
-      for (let k = 0; k < 3; k++) {
-        data[di + k] = Math.round((sd[si + k] * srcA + data[di + k] * dstA * (1 - srcA)) / outA);
-      }
-      data[di + 3] = Math.round(outA * 255);
-    }
-  }
-  getImageData(x, y, w, h) {
-    const { data, width } = this.cv;
-    const out = new Uint8ClampedArray(w * h * 4);
-    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
-      const si = ((y + yy) * width + (x + xx)) * 4;
-      const di = (yy * w + xx) * 4;
-      out[di] = data[si]; out[di + 1] = data[si + 1]; out[di + 2] = data[si + 2]; out[di + 3] = data[si + 3];
-    }
-    return { data: out, width: w, height: h };
-  }
-  putImageData(img, dx, dy) {
-    const { data, width } = this.cv;
-    for (let yy = 0; yy < img.height; yy++) for (let xx = 0; xx < img.width; xx++) {
-      const si = (yy * img.width + xx) * 4;
-      const di = ((dy + yy) * width + (dx + xx)) * 4;
-      data[di] = img.data[si]; data[di + 1] = img.data[si + 1]; data[di + 2] = img.data[si + 2]; data[di + 3] = img.data[si + 3];
-    }
-  }
-}
-class StubCanvas {
-  constructor(w, h) { this.width = w; this.height = h; this.data = new Uint8ClampedArray(w * h * 4); this._ctx = new StubCtx(this); }
-  getContext() { return this._ctx; }
-}
-// 本文件 stub 的 fillRect 故意抛错（验证 merge-down 不用 fillRect）。但 globalThis.OffscreenCanvas
-// 是跨 test 文件共享的：若让本 stub 在 import 后常驻，别的 test（selection-morph 用 fillRect）会被它毒。
-// 解法：import 期不污染全局——记下原 OffscreenCanvas，只在本文件 it() 内 useStub()，跑完不还原也行
-// （别的文件 it() 自己 useStub），但为保险：捕获原值供需要时参考。本文件每个 it() 开头 useStub()。
-const _prevOSC = globalThis.OffscreenCanvas;
-function useStub() { globalThis.OffscreenCanvas = StubCanvas; }
-useStub();
 const { PaintDoc } = await import("../src/doc.ts");
-globalThis.OffscreenCanvas = _prevOSC;   // import 完还原，避免毒到不设 stub 的 test 文件
+const { setDocCompositorBytes } = await import("../src/doc-render.ts");
+
+// 参照合成器：nodes（结构化叶）自底向上 source-over；clippingMask 叶的 as 乘最近非剪裁基底的 alpha。
+// ⚠注入是模块单例、后注入者赢（app-boot 测试 import app.ts 会覆盖成 node 下恒 null 的 board 后端）
+// → 每个 it 开头经 useStub() 重注入。
+const refCompositor = ((nodes, w, h) => {
+  const out = new Uint8ClampedArray(w * h * 4);
+  let baseA = null;   // 最近非剪裁叶的原始 alpha 平面
+  for (const n of nodes) {
+    if (!n.visible) continue;
+    if ((n.mode || "source-over") !== "source-over") throw new Error("参照合成器只支持 source-over（混合模式对拍归 gl-smoke）");
+    const src = n.pixels.getRegion(0, 0, w, h);
+    for (let i = 0; i < w * h; i++) {
+      const o = i * 4;
+      let as = (src[o + 3] / 255) * n.opacity;
+      if (n.clippingMask) as *= baseA ? baseA[o + 3] / 255 : 0;
+      if (as <= 0) continue;
+      const ab = out[o + 3] / 255;
+      const ao = as + ab * (1 - as);
+      for (let k = 0; k < 3; k++) out[o + k] = Math.round((src[o + k] * as + out[o + k] * ab * (1 - as)) / ao);
+      out[o + 3] = Math.round(ao * 255);
+    }
+    if (!n.clippingMask) baseA = src;
+  }
+  return { data: out, w, h };
+});
+const useStub = () => setDocCompositorBytes(refCompositor);
 
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
 const _docs = [], _merges = [];

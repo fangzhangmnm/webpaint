@@ -17,17 +17,16 @@ import type { OperatorRegistry } from "./operators.ts";
 
 export interface PreSnapImage { bboxX: number; bboxY: number; bboxW: number; bboxH: number; imageData: ImageData | null }
 
-// 句柄快照 → 紧 bbox ImageData（只读物化；browser-only，选区 finalize 才走）。
+// 句柄快照 → 紧 bbox ImageData（只读物化；选区 finalize 才走）。
+// v0.6.39 去 canvas 化：getRegion 字节直读（旧 materialize→getImageData 的 premult 往返会让
+// undo 依赖的 preSnap 带量化损）。ImageData 只当容器，node 也能跑。
 export function snapToImage(snap: LayerSnap, docW: number, docH: number): PreSnapImage {
   const tmp = new LayerPixels(docW, docH);
   tmp.restore(snap.pixels);
-  const m = materialize(tmp, true);
-  let out: PreSnapImage;
-  if (!m) out = { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
-  else {
-    const ctx = (m.canvas as HTMLCanvasElement).getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
-    out = { bboxX: m.ox, bboxY: m.oy, bboxW: m.canvas.width, bboxH: m.canvas.height, imageData: ctx.getImageData(0, 0, m.canvas.width, m.canvas.height) };
-  }
+  const b = tmp.contentBounds(true);
+  const out: PreSnapImage = b
+    ? { bboxX: b.x, bboxY: b.y, bboxW: b.w, bboxH: b.h, imageData: new ImageData(tmp.getRegion(b.x, b.y, b.w, b.h), b.w, b.h) }
+    : { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
   tmp.dispose();
   return out;
 }

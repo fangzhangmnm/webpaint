@@ -1,5 +1,5 @@
 // #22/#31 魔棒 · flood 内核验收（floodSelectFrom，v242 语义原样；v0.5.11 油漆桶退役后内核归魔棒独有）。
-// 内核吃 { width, height } + sourceLayer{bbox*, ctx.getImageData} 纯数据 → node 直测无 DOM。
+// 内核吃 { width, height } + sourceLayer{bbox*, getImageData}（tiles 直读）纯数据 → node 直测无 DOM。
 // Selection.compose("intersect") 的非消费语义（输入选区不被 dispose）一并回归——lasso setOp / fill-mode 都依赖它。
 import { describe, it, assert, eq } from "./runner.mjs";
 
@@ -10,7 +10,8 @@ const { Selection } = await import("../src/selection.ts");
 function fakeLayer(w, h, fill) {
   const data = new Uint8ClampedArray(w * h * 4);
   for (let i = 0; i < w * h; i++) fill(i % w, (i / w) | 0, data, i * 4);
-  return { bboxX: 0, bboxY: 0, bboxW: w, bboxH: h, ctx: { getImageData: () => ({ data }) } };
+  // v0.6.39：flood 内核改走 layer.getImageData（tiles 直读，去 canvas）——mock 同步换接口
+  return { bboxX: 0, bboxY: 0, bboxW: w, bboxH: h, getImageData: () => ({ data }) };
 }
 function count255(sel) {
   const g = sel.materializeMaskRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);

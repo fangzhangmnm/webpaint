@@ -46,7 +46,7 @@ import { initFiltersAdjust } from "./filters-adjust.ts";
 import { initToolbar, RACK_PANEL_BY_TOOL, closeTransientMenus } from "./toolbar.ts";
 import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
-import { setDocCompositor } from "./doc-render.ts";
+import { setDocCompositor, setDocCompositorBytes } from "./doc-render.ts";
 import { createEditorState, restoreShapePersp, editorState } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
@@ -187,6 +187,7 @@ const _disposeSizeKeyboard = bindSizeKeyboard({ board, leftDial });
 const _tileJobs = initTileJobs();
 // S9：doc→合成像素的唯一生产面接 GL board（导出/缩略图/mergedimage/PSD/参考窗镜像共用）。
 setDocCompositor((nodes, w, h) => board.compositeNodesToCanvas(nodes, w, h));   // interval + input 监听有 disposer（app-boot 测试要拆，否则 node 挂死）
+setDocCompositorBytes((nodes, w, h) => board.compositeNodesToBytes(nodes, w, h));   // v0.6.39 字节面（merge-down 等字节 op）
 (globalThis as { __wpBootTeardown?: Array<() => void> }).__wpBootTeardown = [_disposeSizeKeyboard, _tileJobs.dispose];
 
 // 当前笔（ResolvedBrush）派生 + 引擎桥 = resolved-brush.ts makeCurrentBrush，input 前构造（见下）。手感数学全在 resolveBrush。

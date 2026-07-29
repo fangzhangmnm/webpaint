@@ -447,7 +447,8 @@ export function floodSelectFrom(
   const lbH = sourceLayer?.bboxH ?? 0;
   let layerData: Uint8ClampedArray | null = null;
   if (sourceLayer && lbW > 0 && lbH > 0) {
-    layerData = sourceLayer.ctx.getImageData(0, 0, lbW, lbH).data;
+    // v0.6.39：tiles 直读（旧 ctx.getImageData 的 premult 往返会歪低 α 处 RGB → 魔棒容差边缘漂）
+    layerData = sourceLayer.getImageData(lbX, lbY, lbW, lbH).data;
   }
   // tap 点颜色（layer 外 → 透明）
   let sr = 0, sg = 0, sb = 0, sa = 0;
