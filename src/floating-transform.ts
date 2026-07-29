@@ -30,6 +30,8 @@ import type { OperatorRegistry } from "./workpiece/operators.ts";
 import { cloneFloatMeta, composeIdentityWriteback, composeRigidWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
 import type { TransformClass } from "./workpiece/workpiece.ts";
+import { prefilterToSplinePlane } from "./bspline.ts";
+import type { SplinePlane } from "./bspline.ts";
 
 // ---- 局部几何/数据类型（type-strip 后纯运行时无变化）----
 type Node = Layer | LayerGroup;
@@ -37,16 +39,18 @@ type Bitmap = OffscreenCanvas | HTMLCanvasElement;
 interface Point { x: number; y: number; }
 type Mesh = Point[][];                          // 2×2：[[TL,TR],[BL,BR]]
 interface Rect { x: number; y: number; w: number; h: number; }
-type SampleMode = "nearest" | "bilinear" | "bicubic";
+type SampleMode = "nearest" | "bilinear" | "bicubic" | "spline";
 
 // commit 烤定的 GPU warp fn（board.glWarpBakeFn 注入）：warp 源 → straight RGBA canvas + doc 坐标位置。
-//   mode：0=nearest 1=bilinear 2=bicubic（对齐 WARP shader）。GL 失败=null（commit 不烤）。
-export type WarpBakeFn = (srcCanvas: CanvasImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null;
+//   mode：0=nearest 1=bilinear 2=bicubic 3=spline（对齐 WARP shader）。GL 失败=null（commit 不烤）。
+//   mode 3 的 src = B 样条系数平面（SplinePlane），其余 = canvas。
+export type WarpBakeFn = (src: CanvasImageSource | SplinePlane, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) => { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null;
 
 type TransformModeKind = "free" | "uniform" | "distort";
 
 // 渲染消费面（board._glFloatInputs / app lassoProvider）：workpiece float + 懒物化 canvas 的只读视图。
-export interface FloatViewSource { layerId: number; canvas: Bitmap; rect: Rect }
+// spline：采样模式为 spline 时附带的 B 样条系数平面（current() 懒算，per-float 缓存）。
+export interface FloatViewSource { layerId: number; canvas: Bitmap; rect: Rect; spline?: SplinePlane }
 export interface FloatView {
   sources: FloatViewSource[];
   gizmoFrame: FloatFrame;
@@ -115,6 +119,16 @@ function floatSourceCanvas(f: WorkpieceFloat): Bitmap {
 }
 // FloatView.sources 按 FloatState 身份缓存（每帧 provider 调 current()，别每帧重建数组）。
 const _floatViewCache = new WeakMap<FloatState, FloatViewSource[]>();
+// spline 系数平面缓存（float 像素不可变 → 按身份缓存自失效；只在 spline 模式下懒算，一次 O(n) IIR）。
+const _floatSplineCache = new WeakMap<WorkpieceFloat, SplinePlane>();
+function floatSplinePlane(f: WorkpieceFloat): SplinePlane {
+  let p = _floatSplineCache.get(f);
+  if (!p) {
+    p = prefilterToSplinePlane(f.pixels.getRegion(f.rect.x, f.rect.y, f.rect.w, f.rect.h), f.rect.w, f.rect.h);
+    _floatSplineCache.set(f, p);
+  }
+  return p;
+}
 
 export class FloatingTransform {
   _live: LiveMeta | null;
@@ -141,7 +155,7 @@ export class FloatingTransform {
   }
 
   setSampleMode(m: string) {
-    if (m === "nearest" || m === "bilinear" || m === "bicubic") {
+    if (m === "nearest" || m === "bilinear" || m === "bicubic" || m === "spline") {
       this._sampleMode = m;
       if (this._live) this.onChange();   // GPU 每帧按 mode 重 warp，无 CPU 缓存可清
     }
@@ -162,6 +176,10 @@ export class FloatingTransform {
     if (!sources) {
       sources = fs.floats.map((f) => ({ layerId: f.sourceLayerId, canvas: floatSourceCanvas(f), rect: f.rect }));
       _floatViewCache.set(fs, sources);
+    }
+    // spline 模式：附带系数平面（懒算 + per-float 缓存；切回其它模式留着无害，board 只在 mode 3 消费）
+    if (this._sampleMode === "spline") {
+      fs.floats.forEach((f, i) => { if (!sources![i].spline) sources![i].spline = floatSplinePlane(f); });
     }
     return { sources, gizmoFrame: lv.gizmoFrame, mesh: lv.mesh, meshN: lv.meshN, mode: lv.mode };
   }
@@ -366,8 +384,9 @@ export class FloatingTransform {
     if (!bakeFn) return;
     const wp = sourceWarpMatrix(f, lv.gizmoFrame, lv.mesh);
     if (!wp || wp.bw <= 0 || wp.bh <= 0) return;
-    const mode = this._sampleMode === "nearest" ? 0 : this._sampleMode === "bicubic" ? 2 : 1;
-    const rendered = bakeFn(floatSourceCanvas(f) as CanvasImageSource, f.rect.w, f.rect.h, wp.hinv, mode, wp.bx, wp.by, wp.bw, wp.bh);
+    const mode = this._sampleMode === "nearest" ? 0 : this._sampleMode === "bicubic" ? 2 : this._sampleMode === "spline" ? 3 : 1;
+    const src = this._sampleMode === "spline" ? floatSplinePlane(f) : floatSourceCanvas(f) as CanvasImageSource;
+    const rendered = bakeFn(src, f.rect.w, f.rect.h, wp.hinv, mode, wp.bx, wp.by, wp.bw, wp.bh);
     if (!rendered) return;
     const rx0 = Math.floor(rendered.dstX), ry0 = Math.floor(rendered.dstY);
     const rx1 = Math.ceil(rendered.dstX + rendered.canvas.width), ry1 = Math.ceil(rendered.dstY + rendered.canvas.height);

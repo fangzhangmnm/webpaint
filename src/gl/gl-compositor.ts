@@ -64,8 +64,39 @@ float cubicK(float t){
   if (at < 2.0) return a*at*at*at - 5.0*a*at*at + 8.0*a*at - 4.0*a;
   return 0.0;
 }
+// 三次 B 样条核（mode 3 预滤波样条；逐位对齐 src/bspline.ts 的 b3）
+float bsp3(float t){
+  float at = abs(t);
+  if (at < 1.0) return 2.0/3.0 - at*at + at*at*at*0.5;
+  if (at < 2.0) { float u = 2.0 - at; return u*u*u/6.0; }
+  return 0.0;
+}
+// mode 3：预滤波 B 样条采样。tex = 系数纹理（RGBA16F，premult、0..255 尺度、PAD=8 边距，
+//   见 src/bspline.ts prefilterToSplinePlane）；size = 逻辑源尺寸。系数已 premult → 直接累加。
+vec4 sampleSpline(sampler2D tex, vec2 size, float sx, float sy){
+  const float PAD = 8.0;   // = BSPLINE_PAD
+  int PW = int(size.x) + 16, PH = int(size.y) + 16;
+  float cx = sx + PAD, cy = sy + PAD;
+  int ix = int(floor(cx)), iy = int(floor(cy));
+  float kx[4], ky[4];
+  for (int i=0;i<4;i++){ kx[i]=bsp3(float(ix-1+i)-cx); ky[i]=bsp3(float(iy-1+i)-cy); }
+  float r=0.0,g=0.0,b=0.0,a=0.0;
+  for (int j=0;j<4;j++){
+    int yy = iy-1+j; if (yy<0||yy>=PH) continue;
+    for (int i=0;i<4;i++){
+      int xx = ix-1+i; if (xx<0||xx>=PW) continue;
+      vec4 c = texelFetch(tex, ivec2(xx,yy), 0);
+      float ww = kx[i]*ky[j];
+      r += c.r*ww; g += c.g*ww; b += c.b*ww; a += c.a*ww;
+    }
+  }
+  if (a < 1.0e-4) return vec4(0.0);            // 0..255 尺度阈值（对齐 CPU）
+  // 系数尺度：rgb=C·α(0..255·α)、a=255α → r/a = 归一直值，a/255 = 归一 alpha
+  return vec4(clamp(r/a,0.0,1.0), clamp(g/a,0.0,1.0), clamp(b/a,0.0,1.0), clamp(a/255.0,0.0,1.0));
+}
 // 返回**直值** RGBA（与 CPU 采样器输出同：rgb 反预乘、a 钳）。sampler/size/mode 参数化 → 源与基底共用。
 vec4 sampleSrc(sampler2D tex, vec2 size, int mode, float sx, float sy){
+  if (mode == 3) return sampleSpline(tex, size, sx, sy);
   int W = int(size.x), H = int(size.y);
   int ix = int(floor(sx)), iy = int(floor(sy));
   if (mode == 0){                                    // nearest：越界透明
@@ -398,7 +429,8 @@ export class GLCompositor {
 
   // commit 烤定：warp 源 → **straight** RGBA bbox FBO → readback → canvas（floating-transform._bakeDown 用，
   //   复用 live 同一套 warp 采样器 = preview/commit 零漂移）。源纹理临时上传（commit 一次性，可忽略）。
-  warpToCanvas(srcCanvas: TexImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
+  //   mode 3（spline）源 = 系数平面（Float32Array，PAD 边距）→ RGBA16F；其余 = canvas → u8。
+  warpToCanvas(srcCanvas: TexImageSource | { data: Float32Array; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
     if (bw <= 0 || bh <= 0) return null;
     const gl = this._glctx.gl;
     const tex = gl.createTexture()!;
@@ -407,8 +439,13 @@ export class GLCompositor {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 直值
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcCanvas);
+    if (srcCanvas && (srcCanvas as { data?: Float32Array }).data instanceof Float32Array) {
+      const p = srcCanvas as { data: Float32Array; w: number; h: number };
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, p.w + 16, p.h + 16, 0, gl.RGBA, gl.FLOAT, p.data);
+    } else {
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 直值
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcCanvas as TexImageSource);
+    }
     const fbo = this._glctx.borrowFBO(bw, bh, "u8");
     const prog = this._glctx.program("warpbake", COMPOSITE_VERT, WARP_BAKE_FRAG);
     gl.bindVertexArray(this._glctx.quadVAO());

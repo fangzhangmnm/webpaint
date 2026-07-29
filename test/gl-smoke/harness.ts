@@ -21,6 +21,8 @@ import { BrushEngine } from "../../src/brush.ts";
 import { resolveBrush } from "../../src/resolved-brush.ts";
 import { PaintDoc } from "../../src/doc.ts";
 import { quadWarp } from "../../src/floating-transform.ts";
+import { prefilterToSplinePlane, sampleSplinePremult } from "../../src/bspline.ts";
+import type { SplinePlane } from "../../src/bspline.ts";
 
 // ---- CPU warp 参照（golden 基准）：v355 从 src/floating-transform 归档进 harness（运行时单一 GPU SSoT；
 //   这份 CPU 逐像素逆单应性 + 采样器只在测试里当 GPU warp 的对照基准，不在产品路径）。verbatim 复刻原实现，
@@ -59,7 +61,7 @@ function cpuBilinear(sdat: Uint8ClampedArray, w: number, h: number, sx: number, 
   if (a < 1e-4) { ddat[di] = ddat[di + 1] = ddat[di + 2] = 0; return; }
   for (let c = 0; c < 3; c++) ddat[di + c] = (sdat[p00 + c] * a00 * w00 + sdat[p10 + c] * a10 * w10 + sdat[p01 + c] * a01 * w01 + sdat[p11 + c] * a11 * w11) / a;
 }
-function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number, mesh: CpuMesh, sampleMode: string): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
+function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number, mesh: CpuMesh, sampleMode: string, plane?: SplinePlane): { canvas: HTMLCanvasElement; dstX: number; dstY: number } | null {
   const q = quadWarp(mesh as never);
   if (!q) return null;
   const { hinv: Hinv, minX, minY, maxX, maxY } = q;
@@ -76,6 +78,7 @@ function renderQuadPerPixel(srcImageData: ImageData, srcW: number, srcH: number,
     const sx = u * srcW, sy = v * srcH, di = (dy * dstW + dx) * 4;
     if (sampleMode === "nearest") cpuNearest(sdata, srcW, srcH, sx, sy, odata, di);
     else if (sampleMode === "bicubic") cpuBicubic(sdata, srcW, srcH, sx - 0.5, sy - 0.5, odata, di);
+    else if (sampleMode === "spline") sampleSplinePremult(plane!, sx - 0.5, sy - 0.5, odata, di);
     else cpuBilinear(sdata, srcW, srcH, sx - 0.5, sy - 0.5, odata, di);
   }
   const canvas = document.createElement("canvas"); canvas.width = dstW; canvas.height = dstH;
@@ -967,6 +970,19 @@ function checkerParity(glctx: GLContext, add: Add): void {
 function rectHinv(x0: number, y0: number, w: number, h: number): number[] {
   return [1 / w, 0, -x0 / w, 0, 1 / h, -y0 / h, 0, 0, 1];
 }
+// spline 系数平面 → RGBA16F 纹理（对齐 render-tree-gl._setFloats mode 3 上传）
+function texFromSplinePlane(glctx: GLContext, p: SplinePlane): WebGLTexture {
+  const gl = glctx.gl;
+  const t = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, p.w + 16, p.h + 16, 0, gl.RGBA, gl.FLOAT, p.data);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return t;
+}
 function texFromCanvas(glctx: GLContext, c: HTMLCanvasElement): WebGLTexture {
   const gl = glctx.gl;
   const t = gl.createTexture()!;
@@ -997,14 +1013,16 @@ function floatParity(glctx: GLContext, add: Add): void {
   const rctx = ref.getContext("2d")!;
   rctx.drawImage(baseCanvas, 0, 0); rctx.drawImage(floatCanvas, fx, fy);
   const refData = rctx.getImageData(0, 0, N, N).data;
-  for (const [name, mode] of [["nearest", 0], ["bilinear", 1], ["bicubic", 2]] as const) {
-    const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: ftex, srcW: fw, srcH: fh, hinv: rectHinv(fx, fy, fw, fh), mode } }];
+  const fplane = prefilterToSplinePlane(floatCanvas.getContext("2d")!.getImageData(0, 0, fw, fh).data, fw, fh);
+  const fstex = texFromSplinePlane(glctx, fplane);
+  for (const [name, mode] of [["nearest", 0], ["bilinear", 1], ["bicubic", 2], ["spline", 3]] as const) {
+    const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: mode === 3 ? fstex : ftex, srcW: fw, srcH: fh, hinv: rectHinv(fx, fy, fw, fh), mode } }];
     const accum = compositeTree(comp, backend.texture, tree as never, N, N);
     const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
     const { md, at } = maxPremulDiff(refData, glpx, N);
     add(`float:GPU warp pass(身份 ${name}) vs 2D drawImage source-over`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
   }
-  lt.index.dispose(); glctx.gl.deleteTexture(ftex);
+  lt.index.dispose(); glctx.gl.deleteTexture(ftex); glctx.gl.deleteTexture(fstex);
 
   // clip 层空基底 + float（变换图层组时 clip 层基底被提空）→ 层不渲染但 float 仍显（修「变换组 clip 消失」）。
   const eb = uploadLayerToTiles(glctx, pool, { pixels: pixelsFromCanvas(N, N, 0, 0, makeLayerCanvas(N, N, () => [0, 0, 0, 0])) }, N, N);
@@ -1039,12 +1057,14 @@ function warpParity(glctx: GLContext, add: Add): void {
   const stex = texFromCanvas(glctx, srcCanvas);
   const mesh = [[{ x: 30, y: 40 }, { x: 150, y: 25 }], [{ x: 50, y: 150 }, { x: 170, y: 130 }]];   // 透视扭曲 quad
   const q = quadWarp(mesh as never);
-  for (const [name, mode, sm] of [["bilinear", 1, "bilinear"], ["bicubic", 2, "bicubic"]] as const) {
+  const splane = prefilterToSplinePlane(srcImg.data, sw, sh);
+  const sptex = texFromSplinePlane(glctx, splane);
+  for (const [name, mode, sm] of [["bilinear", 1, "bilinear"], ["bicubic", 2, "bicubic"], ["spline", 3, "spline"]] as const) {
     if (!q) { add(`warp:${name} 取 quadWarp`, false, "null"); continue; }
-    const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: stex, srcW: sw, srcH: sh, hinv: q.hinv, mode } }];
+    const tree = [{ kind: "leaf", srcIndex: lt.index, opacity: 1, mode: "source-over", clip: false, visible: true, hasContent: true, overlay: null, float: { tex: mode === 3 ? sptex : stex, srcW: sw, srcH: sh, hinv: q.hinv, mode } }];
     const accum = compositeTree(comp, backend.texture, tree as never, N, N);
     const glpx = readComposite(glctx, comp, accum, N); glctx.returnFBO(accum);
-    const rr = renderQuadPerPixel(srcImg, sw, sh, mesh as never, sm);   // CPU 参照（straight）
+    const rr = renderQuadPerPixel(srcImg, sw, sh, mesh as never, sm, splane);   // CPU 参照（straight）
     const ref = document.createElement("canvas"); ref.width = N; ref.height = N;
     const rctx = ref.getContext("2d")!;
     rctx.drawImage(baseCanvas, 0, 0);
@@ -1054,17 +1074,22 @@ function warpParity(glctx: GLContext, add: Add): void {
   }
   // commit 烤定路径：comp.warpToCanvas（straight，无合成）vs CPU renderQuadPerPixel（straight），同 bbox 逐位。
   if (q) {
-    const bake = comp.warpToCanvas(srcCanvas as unknown as TexImageSource, sw, sh, q.hinv, 2, q.minX, q.minY, q.maxX - q.minX, q.maxY - q.minY);
-    const cpu = renderQuadPerPixel(srcImg, sw, sh, mesh as never, "bicubic");
-    const gpC = document.createElement("canvas"); gpC.width = N; gpC.height = N; const gpx2 = gpC.getContext("2d")!;
-    if (bake) gpx2.drawImage(bake.canvas, bake.dstX, bake.dstY);
-    const cpC = document.createElement("canvas"); cpC.width = N; cpC.height = N; const cpx2 = cpC.getContext("2d")!;
-    if (cpu) cpx2.drawImage(cpu.canvas as CanvasImageSource, cpu.dstX, cpu.dstY);
-    const gb = new Uint8Array(gpx2.getImageData(0, 0, N, N).data.buffer);
-    const { md, at } = maxPremulDiff(cpx2.getImageData(0, 0, N, N).data, gb, N);
-    add("warpbake:commit GPU warpToCanvas vs CPU renderQuadPerPixel", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+    for (const [bn, bmode, bsm, bsrc] of [
+      ["bicubic", 2, "bicubic", srcCanvas as unknown as TexImageSource],
+      ["spline", 3, "spline", splane],
+    ] as const) {
+      const bake = comp.warpToCanvas(bsrc, sw, sh, q.hinv, bmode, q.minX, q.minY, q.maxX - q.minX, q.maxY - q.minY);
+      const cpu = renderQuadPerPixel(srcImg, sw, sh, mesh as never, bsm, splane);
+      const gpC = document.createElement("canvas"); gpC.width = N; gpC.height = N; const gpx2 = gpC.getContext("2d")!;
+      if (bake) gpx2.drawImage(bake.canvas, bake.dstX, bake.dstY);
+      const cpC = document.createElement("canvas"); cpC.width = N; cpC.height = N; const cpx2 = cpC.getContext("2d")!;
+      if (cpu) cpx2.drawImage(cpu.canvas as CanvasImageSource, cpu.dstX, cpu.dstY);
+      const gb = new Uint8Array(gpx2.getImageData(0, 0, N, N).data.buffer);
+      const { md, at } = maxPremulDiff(cpx2.getImageData(0, 0, N, N).data, gb, N);
+      add(`warpbake:commit(${bn}) GPU warpToCanvas vs CPU renderQuadPerPixel`, md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
+    }
   }
-  lt.index.dispose(); glctx.gl.deleteTexture(stex);
+  lt.index.dispose(); glctx.gl.deleteTexture(stex); glctx.gl.deleteTexture(sptex);
 }
 
 // ---- E5c) 组变换 clip 浮层 golden：clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather）vs CPU ----

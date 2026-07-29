@@ -38,7 +38,8 @@ export interface FloatInput {
   srcCanvas: CanvasImageSource;   // 未 warp 源像素（稳定引用 → 复用 GPU 纹理）
   srcW: number; srcH: number;
   hinv: number[];                 // 9，row-major，doc→源单位方格
-  mode: number;                   // 0=nearest 1=bilinear 2=bicubic
+  mode: number;                   // 0=nearest 1=bilinear 2=bicubic 3=spline（预滤波 B 样条）
+  splinePlane?: { data: Float32Array; w: number; h: number } | null;   // mode 3 的系数平面（PAD 边距，src/bspline.ts）
 }
 
 export interface StampOverlayInput {
@@ -220,7 +221,7 @@ export class RenderTreeGL {
     return true;
   }
 
-  warpToCanvas(srcCanvas: TexImageSource, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {
+  warpToCanvas(srcCanvas: TexImageSource | { data: Float32Array; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number) {
     return this._comp.warpToCanvas(srcCanvas, srcW, srcH, hinv, mode, bx, by, bw, bh);
   }
 
@@ -675,11 +676,18 @@ export class RenderTreeGL {
         entry = { tex, canvas: null };
         this._floatTex.set(f.layerId, entry);
       }
-      if (entry.canvas !== f.srcCanvas) {   // 源内容变（首次/换浮层）才重传
+      // 内容 key：spline 模式 = 系数平面身份，其余 = 源 canvas 身份（模式切换时 key 变 → 自动重传）
+      const contentKey = (f.mode === 3 && f.splinePlane) ? (f.splinePlane.data as unknown as CanvasImageSource) : f.srcCanvas;
+      if (entry.canvas !== contentKey) {   // 源内容变（首次/换浮层/换采样族）才重传
         gl.bindTexture(gl.TEXTURE_2D, entry.tex);
-        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, f.srcCanvas as TexImageSource);
-        entry.canvas = f.srcCanvas;
+        if (f.mode === 3 && f.splinePlane) {
+          const p = f.splinePlane;
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, p.w + 16, p.h + 16, 0, gl.RGBA, gl.FLOAT, p.data);
+        } else {
+          gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, f.srcCanvas as TexImageSource);
+        }
+        entry.canvas = contentKey;
       }
       this._floats.set(f.layerId, { tex: entry.tex, srcW: f.srcW, srcH: f.srcH, hinv: f.hinv, mode: f.mode });
     }
