@@ -1117,7 +1117,7 @@ function warpParity(glctx: GLContext, add: Add): void {
   // commit 烤定路径：comp.warpToCanvas（straight，无合成）vs CPU renderQuadPerPixel（straight），同 bbox 逐位。
   if (q) {
     for (const [bn, bmode, bsm, bsrc] of [
-      ["bicubic", 2, "bicubic", srcCanvas as unknown as TexImageSource],
+      ["bicubic", 2, "bicubic", { data: srcImg.data, w: sw, h: sh }],
       ["spline", 3, "spline", splane],
     ] as const) {
       const bake = comp.warpToCanvas(bsrc, sw, sh, q.hinv, bmode, q.minX, q.minY, q.maxX - q.minX, q.maxY - q.minY);

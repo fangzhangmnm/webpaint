@@ -431,7 +431,7 @@ export class GLCompositor {
   //   （floating-transform._bakeDown 用 typed-array source-over 落层——零 canvas premult 往返）。
   //   复用 live 同一套 warp 采样器 = preview/commit 零漂移。源纹理临时上传（commit 一次性，可忽略）。
   //   mode 3（spline）源 = 系数平面（Float32Array，PAD 边距）→ RGBA16F；u8 平面（源字节/EPX 放大）→ u8。
-  warpToBytes(srcCanvas: TexImageSource | { data: Float32Array; w: number; h: number } | { data: Uint8ClampedArray; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { data: Uint8ClampedArray; w: number; h: number; dstX: number; dstY: number } | null {
+  warpToBytes(srcCanvas: { data: Float32Array; w: number; h: number } | { data: Uint8ClampedArray; w: number; h: number }, srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): { data: Uint8ClampedArray; w: number; h: number; dstX: number; dstY: number } | null {
     if (bw <= 0 || bh <= 0) return null;
     const gl = this._glctx.gl;
     const tex = gl.createTexture()!;
@@ -440,17 +440,16 @@ export class GLCompositor {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    if (srcCanvas && (srcCanvas as { data?: Float32Array }).data instanceof Float32Array) {
+    // 只收 typed-array 平面（v0.6.38 审计锁死：canvas 源 texImage2D 的 UNPACK_PREMULTIPLY 转换
+    // 在 Safari 不可靠 = 柔边黑边根源，该分支已整树拔除，别加回来）。
+    if (srcCanvas.data instanceof Float32Array) {
       const p = srcCanvas as { data: Float32Array; w: number; h: number };
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, p.w + 16, p.h + 16, 0, gl.RGBA, gl.FLOAT, p.data);
-    } else if (srcCanvas && (srcCanvas as { data?: Uint8ClampedArray }).data instanceof Uint8ClampedArray) {
-      // rotsprite EPX 放大平面（u8 直值；srcW/srcH 已是放大尺寸，mode=0 nearest）
-      const p = srcCanvas as unknown as { data: Uint8ClampedArray; w: number; h: number };
+    } else {
+      // u8 直值平面（源字节 / rotsprite EPX 放大；srcW/srcH 与平面尺寸一致由调用方保证）
+      const p = srcCanvas as { data: Uint8ClampedArray; w: number; h: number };
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, p.w, p.h, 0, gl.RGBA, gl.UNSIGNED_BYTE,
         new Uint8Array(p.data.buffer, p.data.byteOffset, p.data.byteLength));
-    } else {
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 直值
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, srcCanvas as TexImageSource);
     }
     const fbo = this._glctx.borrowFBO(bw, bh, "u8");
     const prog = this._glctx.program("warpbake", COMPOSITE_VERT, WARP_BAKE_FRAG);
