@@ -105,8 +105,10 @@ export function parseColorName(text: string): string | null {
   return parseIdx().get(norm(text)) ?? null;
 }
 
-/** 色名联想（autocomplete 数据面）：前缀命中优先、其余子串命中殿后；同档内 = 表序（priority）。
- *  名与别名（かな/拼音）都参与匹配，显示用正名。逐行线性扫（~2100 行/键击，个位 ms）。 */
+/** 色名联想（autocomplete 数据面）：前缀命中优先、**中间/尾缀子串命中保底一半槽位**
+ *  （2026-07-30 user：中文品类字在尾巴——输「黄」必须查得到「豆汁黄」，不能被黄x前缀挤光）。
+ *  名与别名（かな/拼音）都参与匹配，显示用正名；同档内 = 表序（priority）。
+ *  全表线性扫（~2100 行/键击，个位 ms）。 */
 export function searchColorNames(query: string, limit = 8): { name: string; hex: string }[] {
   const q = norm(query);
   if (!q) return [];
@@ -115,16 +117,19 @@ export function searchColorNames(query: string, limit = 8): { name: string; hex:
   const sub: { name: string; hex: string }[] = [];
   const seen = new Set<string>();
   for (const [, name, hex, alias] of COLOR_WORDS) {
-    if (pre.length >= limit) break;
+    if (pre.length >= limit && sub.length >= limit) break;
     const n = norm(name), nn = n.replace(/[ :]/g, "");
     const a = alias ? norm(alias) : "";
     const key = n + hex;
     if (seen.has(key)) continue;
-    if (n.startsWith(q) || nn.startsWith(qn) || (a && a.startsWith(q))) {
+    if (pre.length < limit && (n.startsWith(q) || nn.startsWith(qn) || (a && a.startsWith(q)))) {
       seen.add(key); pre.push({ name, hex });
     } else if (sub.length < limit && (n.includes(q) || (a && a.includes(q)))) {
       seen.add(key); sub.push({ name, hex });
     }
   }
-  return pre.concat(sub).slice(0, limit);
+  // 槽位分配：子串命中在场时给它保底 ⌈limit/2⌉，前缀拿剩下的；子串不足时前缀补满。
+  const subQuota = Math.min(sub.length, Math.ceil(limit / 2));
+  const preTake = Math.min(pre.length, limit - subQuota);
+  return pre.slice(0, preTake).concat(sub.slice(0, limit - preTake));
 }

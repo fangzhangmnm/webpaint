@@ -79,4 +79,8 @@ test("searchColorNames（IntelliSense 数据面）：前缀优先、别名命中
   eq(searchColorNames("あかね")[0].name, "茜色");      // かな前缀 → 正名
   for (const it of searchColorNames("las")) assert(/^#[0-9a-f]{6}$/.test(it.hex));
   assert(searchColorNames("las").some((x) => x.name.startsWith("laso")), "tok 词也可联想");
+  // 中间/尾缀命中保底槽位（user：输「黄」必须查得到「xx黄」，不能被黄x前缀挤光）
+  const huang = searchColorNames("黄");
+  assert(huang.some((x) => x.name.indexOf("黄") > 0), `尾缀命中被挤光: ${huang.map((x) => x.name).join(",")}`);
+  assert(huang.some((x) => x.name.startsWith("黄")), "前缀命中也该在");
 });
