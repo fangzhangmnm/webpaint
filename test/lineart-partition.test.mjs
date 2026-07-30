@@ -5,7 +5,7 @@ import { describe, it, assert, eq } from "./runner.mjs";
 
 const { edtSquared } = await import("../src/lineart/edt.ts");
 const { traceBorderCycles, keypointsFromBinary } = await import("../src/lineart/border.ts");
-const { digitizeSpline, transitionCount } = await import("../src/lineart/closing.ts");
+const { digitizeSpline, transitionCount, areaGuardOk } = await import("../src/lineart/closing.ts");
 const {
   binarizeLuma, buildPartitionFromBinary, regionMaskAt, DEFAULT_LINEART_PARAMS,
 } = await import("../src/lineart/partition.ts");
@@ -139,6 +139,25 @@ describe("lineart · 断口闭合与分区（论文主张：不闭合就没有�
     eq(labelAt(open, 30, 24), labelAt(open, 2, 2), "不闭合：漏通");
     const part = buildPartitionFromBinary(Ib, w, h);
     assert(labelAt(part, 30, 24) !== labelAt(part, 2, 2), "闭合后内外分开");
+  });
+  it("碎区守卫早退防污染（v0.7.6 真机指尖误毙回归）：大区多探测点不误判", () => {
+    // 不对称 U 型 1px 走廊共 41 格（左臂16+底9+右臂16），amin=30 → 41≥30 理应放行。
+    // 旧 bug：探测点1从左口 flood 数到 30 早退、残标留场；探测点2从右口 flood 撞残标当墙，
+    // 只数到右臂余量 ~11 格（5≤11<30）→ 误毙。修后：撞「本候选早前残标」= 同一大区 → 判大。
+    const w = 50, h = 50;
+    const base = new Uint8Array(w * h).fill(1);
+    for (let y = 10; y <= 25; y++) { base[y * w + 10] = 0; base[y * w + 20] = 0; }   // 两臂
+    for (let x = 11; x <= 19; x++) base[25 * w + x] = 0;                             // 底
+    const newPx = [9 * w + 10, 9 * w + 20];   // 候选桥像素：封在两个臂口上方
+    const visited = new Int32Array(w * h);
+    const ok = areaGuardOk(base, w, h, newPx, 30, visited, { v: 0 }, []);
+    eq(ok, true, "41 格大区不得因早退污染被误判成碎区");
+    // 对照：真碎区（走廊总长 20 < amin=30 且 ≥5）仍要拦
+    const base2 = new Uint8Array(w * h).fill(1);
+    for (let y = 10; y <= 19; y++) { base2[y * w + 10] = 0; base2[y * w + 12] = 0; }  // 两条 10 格短臂
+    base2[20 * w + 10] = 0; base2[20 * w + 11] = 0; base2[20 * w + 12] = 0;           // 底连通 → 共 23 格
+    const ok2 = areaGuardOk(base2, w, h, [9 * w + 10, 9 * w + 12], 30, new Int32Array(w * h), { v: 0 }, []);
+    eq(ok2, false, "真碎区（23 格 < 30）仍拦");
   });
   it("碎区守卫基底 = Ib∪候选（论文 §5.1.5）：已接受的桥不当墙，平行双缝都能闭", () => {
     // 两排 1px 横线同位缝（缝 6px，桥与线同行 → 真封死），中带 = y11 一行 32px；amin=40 时：

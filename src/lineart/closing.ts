@@ -78,12 +78,21 @@ export function transitionCount(path: number[], img: Uint8Array): number {
   return c;
 }
 
-/** 面积守卫：newPx 已画进 Ic 后，检查其毗邻的 4-连通背景区没有 5 ≤ |R| < amin 的。 */
-function areaGuardOk(
-  Ic: Uint8Array, w: number, h: number, newPx: number[], amin: number,
-  visited: Int32Array, gen: number, stack: number[],
+/** 面积守卫：候选 T 已画进 base（= Ib∪T）后，检查其毗邻的 4-连通背景区没有 5 ≤ |R| < amin 的。
+ *
+ *  有界 flood + 早退防污染（v0.7.6 修真机指尖误毙）：每个探测点数到 amin 即"判大早退"，
+ *  但早退会留下部分标记——同一候选的下一个探测点若从**同一个大区**的未标记部分起 flood，
+ *  会把残留标记当墙、只数到一小片余量（5..amin-1 就误毙，且余量大小随 amin 抖动）。
+ *  解法：每个探测点用自己的 probe 序号标记；flood 撞到「本候选内、更早 probe」的标记，
+ *  说明撞上了早退的大区（数满的区才会留残标；数完没满的区是封闭的、别的 probe 进不来）
+ *  → 同一连通区 → 直接判大。genState.v 全局单调，跨候选的旧标记（≤ candStart）视同未访问。
+ *  测试直连（lineart-partition.test.mjs 有毒化回归），导出仅供测试。 */
+export function areaGuardOk(
+  base: Uint8Array, w: number, h: number, newPx: number[], amin: number,
+  visited: Int32Array, genState: { v: number }, stack: number[],
 ): boolean {
   if (amin <= 5) return true;
+  const candStart = genState.v;
   for (const np of newPx) {
     const nx0 = np % w, ny0 = (np / w) | 0;
     for (let d = 0; d < 4; d++) {
@@ -91,22 +100,30 @@ function areaGuardOk(
       const qy = ny0 + (d === 2 ? 1 : d === 0 ? -1 : 0);
       if (qx < 0 || qx >= w || qy < 0 || qy >= h) continue;
       const q = qy * w + qx;
-      if (Ic[q] !== 0 || visited[q] === gen) continue;
-      // 有界 flood：数到 amin 就够了
+      if (base[q] !== 0 || visited[q] > candStart) continue;   // 墙 / 本候选已探过（判过大或 <5 封闭区）
+      const myGen = ++genState.v;
       let size = 0;
+      let big = false;
       stack.length = 0;
       stack.push(q);
-      visited[q] = gen;
-      let big = false;
-      while (stack.length) {
+      visited[q] = myGen;
+      outer: while (stack.length) {
         const p = stack.pop()!;
         size++;
-        if (size >= amin) { big = true; break; } // 剩余像素留 visited 标记也无妨：本代已判大
+        if (size >= amin) { big = true; break; }
         const px = p % w, py = (p / w) | 0;
-        if (px > 0 && Ic[p - 1] === 0 && visited[p - 1] !== gen) { visited[p - 1] = gen; stack.push(p - 1); }
-        if (px < w - 1 && Ic[p + 1] === 0 && visited[p + 1] !== gen) { visited[p + 1] = gen; stack.push(p + 1); }
-        if (py > 0 && Ic[p - w] === 0 && visited[p - w] !== gen) { visited[p - w] = gen; stack.push(p - w); }
-        if (py < h - 1 && Ic[p + w] === 0 && visited[p + w] !== gen) { visited[p + w] = gen; stack.push(p + w); }
+        for (let dd = 0; dd < 4; dd++) {
+          const bx = px + (dd === 1 ? 1 : dd === 3 ? -1 : 0);
+          const by = py + (dd === 2 ? 1 : dd === 0 ? -1 : 0);
+          if (bx < 0 || bx >= w || by < 0 || by >= h) continue;
+          const b = by * w + bx;
+          if (base[b] !== 0) continue;
+          const v = visited[b];
+          if (v === myGen) continue;
+          if (v > candStart) { big = true; break outer; }   // 撞早退大区残标 → 同一连通区 → 大
+          visited[b] = myGen;
+          stack.push(b);
+        }
       }
       if (!big && size >= 5) return false;
     }
@@ -134,7 +151,7 @@ export function closeStrokes(
   const K = kps.length;
   const counts = new Uint16Array(K);
   const visited = new Int32Array(w * h);
-  let gen = 0;
+  const genState = { v: 0 };   // areaGuardOk 的 probe 序号（全局单调，见其头注释）
   const floodStack: number[] = [];
   const cosA = Math.cos((Math.max(1, Math.min(90, params.alphaDeg)) * Math.PI) / 180);
 
@@ -154,8 +171,7 @@ export function closeStrokes(
     for (const p of path) {
       if (Iguard[p] === 0) { Iguard[p] = 1; guardPx.push(p); }
     }
-    gen++;
-    const guardOk = areaGuardOk(Iguard, w, h, guardPx, params.amin, visited, gen, floodStack);
+    const guardOk = areaGuardOk(Iguard, w, h, guardPx, params.amin, visited, genState, floodStack);
     for (const p of guardPx) Iguard[p] = 0;   // 恒回滚（无论采纳与否）
     if (!guardOk) {
       for (const p of newPx) Ic[p] = 0; // 回滚
