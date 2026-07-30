@@ -163,6 +163,11 @@ const LONG_PRESS_MS = 450;
 //   除以起手间距归一会把近距小抖动放大成巨大速度，恰是要防的噪声。
 const QUICK_PINCH_FIT_SPEED = 400;      // 收拢速度阈值（px/s；800 真机偏紧，2026-07-30 松一倍）
 const QUICK_PINCH_FIT_TAU_MS = 40;      // d(dist)/dt 的 EMA 时间常数（裸差分抖；同笔刷平滑的指数追踪思路）
+// v0.6.59（user）：velocity 之外补两道静态门——
+//   旋转门：手势累计转角 <30°（正在转画布的捏合不是复位意图）；
+//   比例门：末距 < 起手距 × 2/3（放宽版回归，纯方向 sanity 升级成幅度门）。
+const QUICK_PINCH_FIT_MAX_ROT = Math.PI / 6;
+const QUICK_PINCH_FIT_RATIO = 2 / 3;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
 // v249: 两参 → 引擎平滑参数（时间常数指数追踪 + 死区，详 docs/20260613-brush-procreate-smoothing.md）。
@@ -337,7 +342,7 @@ export class InputController {
   penEverSeen: boolean;
   spaceDown: boolean;
   altDown: boolean;
-  gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport; lastDist: number; velEma: number; lastMoveT: number } | null;
+  gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport; lastDist: number; lastAngle: number; velEma: number; lastMoveT: number } | null;
   _gestureTap: GestureTap | null;
   _lastTap: TapRef | null;
   _lastPenActivity: number = -Infinity;   // 最近笔尖落/移/抬时刻 (ms)。掌触 tap 门用
@@ -1156,6 +1161,7 @@ export class InputController {
       angle: Math.atan2(dy, dx),          // 起手两指连线角度
       vp: { ...this.board.viewport },
       lastDist: dist,                     // 追踪末距（松手时触点已 <2，现场取不到）
+      lastAngle: Math.atan2(dy, dx),      // v0.6.59：追踪末角（旋转门用）
       velEma: 0,                          // v0.6.57：滤波后的间距变化率（px/s，负=收拢）
       lastMoveT: performance.now(),
     };
@@ -1177,6 +1183,7 @@ export class InputController {
       g.lastMoveT = now;
     }
     g.lastDist = newDist;
+    g.lastAngle = Math.atan2(b.y - a.y, b.x - a.x);   // v0.6.59：旋转门
     // anchor-preserving 双指变换数学已抽到 pointer-gesture.js（纯函数·可单测）。
     // 旋转**不**在此 snap（进行中吸附粘手）；松手由 _endGesture/snapRotation 吸。
     const vp = computePinchViewport(this.gestureStart, a, b, {
@@ -1196,7 +1203,11 @@ export class InputController {
     //   **停顿衰减**：手指停住时 pointermove 不再来、EMA 会冻结在最后的运动值——按
     //   「距最后一次移动的时长」把速度指数衰减，停 ≥100ms 再抬就读≈0，不吃陈旧速度。
     const velAtLift = g ? g.velEma * Math.exp(-(performance.now() - g.lastMoveT) / QUICK_PINCH_FIT_TAU_MS) : 0;
-    if (g && velAtLift <= -QUICK_PINCH_FIT_SPEED && g.lastDist < g.dist) {
+    // v0.6.59：旋转门（累计转角 <30°，wrap 到 [-π,π]）+ 比例门（末距 < 起手 × 2/3）
+    const rotDelta = g ? Math.abs(Math.atan2(Math.sin(g.lastAngle - g.angle), Math.cos(g.lastAngle - g.angle))) : 0;
+    if (g && velAtLift <= -QUICK_PINCH_FIT_SPEED &&
+        rotDelta < QUICK_PINCH_FIT_MAX_ROT &&
+        g.lastDist < g.dist * QUICK_PINCH_FIT_RATIO) {
       this.board.fitToScreen();
       this.status(t("tm.viewportReset"));
       return;   // 已复位，不再跑旋转吸附
