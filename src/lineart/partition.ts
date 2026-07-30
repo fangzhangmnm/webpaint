@@ -40,7 +40,7 @@ export interface LineartParams {
 export const DEFAULT_LINEART_PARAMS: LineartParams = {
   binarizeThreshold: 128,
   kernelL: 5,
-  thetaKappa: 0.18,
+  thetaKappa: 0.24,
   dmax: 64,
   alphaDeg: 90,
   rho: 1.0,

@@ -115,7 +115,7 @@ describe("lineart-oracle · tap→Selection + contentRev 缓存", () => {
     eq(o.isReady(doc, L), false, "碎区下限变 → 失效");
     eq(o.getMinRegion(), 0, "0 = 关守卫");
     o.selectAt(doc, L, 32, 32).dispose();
-    o.setTipSensitivity(50);   // = 默认
+    o.setTipSensitivity(25);   // = 默认
     eq(o.isReady(doc, L), true, "同值不失效");
     o.setTipSensitivity(80);
     eq(o.isReady(doc, L), false, "灵敏度变 → 失效");

@@ -73,8 +73,10 @@ export class LineartOracle {
     this.invalidate();
   }
   getMinRegion(): number { return this._params.amin; }
-  /** 端点灵敏度（0..100，默认 50）：越高越能抓收尖/圆润的线头（曲率阈值越低），
-   *  代价是钝角处冒假端点。映射 θκ = 0.30 − 0.0024·pct（50 ↔ 论文默认 0.18）。 */
+  /** 端点灵敏度（0..100，默认 25）：越高越能抓收尖/圆润的线头（曲率阈值越低），
+   *  代价是钝角/紧凑小弧处冒假端点。映射 θκ = 0.30 − 0.0024·pct（不随默认值重排——
+   *  数值跨版本可比，v0.7.7 真机校准：25 ↔ 0.24 = 转角带(≤~0.25)与钝头带(≥~0.3)之间；
+   *  旧默认 50 ↔ 0.18 在真实画作上会把关节小弧当端点）。 */
   setTipSensitivity(pct: number): void {
     const v = Math.max(0, Math.min(100, Math.round(pct) || 0));
     if (v === this._tipSensPct) return;
@@ -83,7 +85,7 @@ export class LineartOracle {
     this.invalidate();
   }
   getTipSensitivity(): number { return this._tipSensPct; }
-  private _tipSensPct = 50;
+  private _tipSensPct = 25;
 
   /** 调试视图数据：分区已缓存（同层同版本）才返回，绝不在渲染路径里触发重建。 */
   debugInfo(
