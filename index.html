@@ -645,6 +645,9 @@
           <!-- v0.7 魔棒算法下拉（transform 采样 lassoSampleSel 同款文字 select）：选项 JS 从
                lasso.ts MAGIC_ALGORITHMS SSoT 填；magic 子工具时显；RAM-only（cache 与选择都不持久化） -->
           <select class="lasso-tool-select hidden" id="lassoAlgoSel" data-i18n-title="la.algoSel"></select>
+          <!-- v0.7.2 算法配置扳手（user：不常用命令进⋯，算法 configuration 进扳手小三角）：
+               弹出 #lassoAlgoCfgMenu，行按当前算法显隐 -->
+          <button class="lasso-tool-btn lasso-tool-icon lasso-slot hidden" id="lassoAlgoCfgBtn" type="button" data-i18n-title="la.algoCfg"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#wrench"/></svg><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
           <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#constrain-ratio"/></svg></button>
           <!-- v0.5.12 行尾动作组：变换（选区工具）/ ⋯（低频操作收纳）/ 去选（高频，=fill 的 cancel）/ ✓（fill） -->
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
@@ -705,11 +708,8 @@
     <!-- v0.5.17 ⋯ 菜单=list 形态（user：竖排 图标+简短解说） -->
     <!-- v0.6.30 选区/填色 ⋯ 分家（user：class 开关汤致漏显——蚂蚁线漏进选区菜单/fill 缺操作；
          两份菜单各自完整、动作走 data-sel-act 共享处理器；slider/stepper 连按不关=手动 toggle+外点关 -->
+    <!-- v0.7.2 user 裁定：⋯只留不常用命令，算法配置（容差/闭合距离…）搬进算法下拉旁扳手弹出 #lassoAlgoCfgMenu -->
     <div class="lasso-icon-menu lasso-icon-list hidden" id="lassoSelEditMenu" role="menu" data-i18n-aria="la.editSel">
-      <div class="lasso-popup-row lasso-menu-magic-only hidden" style="display:flex; align-items:center; gap:6px;">
-        <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" style="width:108px;" data-i18n-aria="la.threshold" />
-        <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
-      </div>
       <button class="lasso-tool-btn" id="lassoSelectAllBtn" data-sel-act="selectAll" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
       <button class="lasso-tool-btn" id="lassoInvertBtn" data-sel-act="invert" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoSelResizeBtn" data-sel-act="resize" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
@@ -717,10 +717,6 @@
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoMoveToLayerBtn" data-sel-act="move" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span data-i18n="la.moveToLayer">选区移动到新层</span></button>
     </div>
     <div class="lasso-icon-menu lasso-icon-list hidden" id="fillSelEditMenu" role="menu" data-i18n-aria="la.editSel">
-      <div class="lasso-popup-row lasso-menu-magic-only hidden" style="display:flex; align-items:center; gap:6px;">
-        <input type="range" id="fillThreshold" min="0" max="100" step="1" value="20" style="width:108px;" data-i18n-aria="la.threshold" />
-        <span id="fillThresholdVal" class="lasso-popup-val">20</span>
-      </div>
       <button class="lasso-tool-btn" id="fillSelectAllBtn" data-sel-act="selectAll" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
       <button class="lasso-tool-btn" id="fillInvertBtn" data-sel-act="invert" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="fillSelResizeBtn" data-sel-act="resize" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
@@ -750,6 +746,27 @@
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="subtract" type="button" role="menuitem" data-i18n-title="la.subtract"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-difference"/></svg></button>
     </div>
     <!-- v0.6.26 扩张 px stepper 弹出（扩张钮小三角；steppers 连按不关，外点关） -->
+    <!-- v0.7.2 魔棒算法配置弹出（扳手小三角锚定）：行按当前算法显隐（algo-cfg-classic / algo-cfg-lineart），
+         slider/stepper 连按不关（手动 toggle + 外点关，同 lassoMagicExpandMenu）。全 RAM-only 除经典容差
+         （容差沿用 editorState.magicWand.threshold，per-doc 持久化不变，只是 UI 搬家）。 -->
+    <div class="lasso-popup hidden" id="lassoAlgoCfgMenu" role="menu" data-i18n-aria="la.algoCfg" style="width:max-content; min-width:0;">
+      <div class="lasso-popup-row algo-cfg-classic" style="display:flex; align-items:center; gap:6px;">
+        <span data-i18n="la.threshold">阈值</span>
+        <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" style="width:108px;" data-i18n-aria="la.threshold" />
+        <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
+      </div>
+      <div class="lasso-popup-row algo-cfg-lineart" style="display:flex; align-items:center; gap:6px;">
+        <span data-i18n="la.closeDist">闭合距离</span>
+        <button class="lasso-tool-btn" id="lassoDmaxMinus" type="button" aria-label="−">−</button>
+        <span class="lasso-popup-val" id="lassoDmaxVal">64</span>
+        <button class="lasso-tool-btn" id="lassoDmaxPlus" type="button" aria-label="＋">＋</button>
+      </div>
+      <div class="lasso-popup-row algo-cfg-lineart" style="display:flex; align-items:center; gap:6px;">
+        <span data-i18n="la.inkThreshold">墨线判定</span>
+        <input type="range" id="lassoInkThreshold" min="0" max="100" step="1" value="50" style="width:88px;" data-i18n-aria="la.inkThreshold" />
+        <span id="lassoInkThresholdVal" class="lasso-popup-val">50</span>
+      </div>
+    </div>
     <div class="lasso-popup hidden" id="lassoMagicExpandMenu" role="menu" data-i18n-aria="la.autoExpand" style="width:max-content; min-width:0;">
       <div class="lasso-popup-row" style="display:flex; align-items:center; gap:6px;">
         <button class="lasso-tool-btn" id="lassoMagicExpandMinus" type="button" aria-label="−">−</button>
@@ -1354,6 +1371,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-b4f2247c254e.mjs"></script>
+    <script type="module" src="./dist/webpaint-992c6ada03a9.mjs"></script>
   </body>
 </html>
