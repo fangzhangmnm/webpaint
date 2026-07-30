@@ -110,7 +110,7 @@ export const S = {
   "menu.encrypt":        { zh: "加密保护…",   en: "Encrypt…",        ja: "暗号化…", tok: "len…" }, 
   "menu.decrypt":        { zh: "解除加密…",   en: "Decrypt…",        ja: "暗号化を解除…", tok: "weka len…" }, 
   "menu.cropToSelection":{ zh: "裁切到选区",  en: "Crop to selection", ja: "選択範囲で切り抜き", tok: "o kipisi tawa ma wile" }, 
-  "menu.cropFree":       { zh: "裁切（自由）", en: "Crop (free)",     ja: "切り抜き（自由）", tok: "kipisi (nasin sina)" }, 
+  "menu.cropFree":       { zh: "裁切…", en: "Crop…",     ja: "切り抜き…", tok: "kipisi…" }, 
   "menu.flipH":          { zh: "水平翻转",    en: "Flip horizontal", ja: "左右反転", tok: "o jasima e poka" }, 
   "menu.rotate90":       { zh: "逆时针旋转 90°", en: "Rotate 90° CCW", ja: "反時計回りに90°回転", tok: "o sike (90°)" }, 
   "menu.offset":         { zh: "偏移接缝（环绕）…", en: "Offset seam (wrap)…", ja: "シームをずらす（ラップ）…", tok: "tawa sike…" }, 

@@ -16,7 +16,7 @@ import { remapShapePersp, snapshotShapePersp } from "./workbench-state.ts";
 import type { AppContext } from "./app-context.ts";
 
 interface Rect { x: number; y: number; w: number; h: number; }
-interface CropState { rect: Rect; drag: string | null; startMouse: { x: number; y: number } | null; startRect: Rect | null; tpl: { tw: number; th: number; aspect: number; dpi?: number } | null; }
+interface CropState { rect: Rect; drag: string | null; startMouse: { x: number; y: number } | null; startRect: Rect | null; mode: "free" | "template"; tpl: { tw: number; th: number; aspect: number; dpi?: number } | null; }
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // ctx 绑入：core 单例
@@ -124,7 +124,9 @@ function _applyCropTemplate(tplId: string) {
 // 按 _cropState.tpl 有无同步 toolbar 控件 + 安全线 + Apply 文案。
 function _syncCropModeUI() {
   const tpl = _cropState?.tpl ?? null;
-  const isT = (document.getElementById("cropModeSel") as HTMLSelectElement).value === "template";
+  const isT = _cropState?.mode === "template";
+  document.getElementById("cropModeFree")!.setAttribute("aria-pressed", String(!isT));
+  document.getElementById("cropModeTemplate")!.setAttribute("aria-pressed", String(isT));
   const show = (id: string, on: boolean) => document.getElementById(id)!.classList.toggle("hidden", !on);
   show("cropTemplateSel", isT);
   const isCustom = isT && (document.getElementById("cropTemplateSel") as HTMLSelectElement).value === "custom";
@@ -144,9 +146,9 @@ function _openCropMode() {
   _cropState = {
     rect: { x: 0, y: 0, w: doc.width, h: doc.height },
     drag: null, startMouse: null, startRect: null,
-    tpl: null,   // v0.6.48 模板模式：{tw,th,aspect,dpi?}；null=自由
+    mode: "free",
+    tpl: null,   // 模板模式：{tw,th,aspect,dpi?}；null=自由（或自定义未填完）
   };
-  (document.getElementById("cropModeSel") as HTMLSelectElement).value = "free";
   _syncCropModeUI();
   document.getElementById("cropOverlay")!.classList.remove("hidden");
   document.getElementById("cropToolbar")!.classList.remove("hidden");
@@ -290,6 +292,20 @@ export function initDocOps(ctx: AppContext) {
   document.getElementById("cropToolbarCancel")!.addEventListener("click", () => _closeCropMode());
   document.getElementById("cropToolbarApply")!.addEventListener("click", () => {
     if (!_cropState) return;
+    const tpl = _cropState.tpl;
+    if (tpl) {
+      // v0.6.49 模板模式：裁剪+重采样原子 op（保层）。frame 保浮点（比例精确）；
+      //   VP 随裁缩重映射（ADR-0006 同款）；尺寸剧变 → fitToScreen。
+      const fr = { ..._cropState.rect };
+      const sx = tpl.tw / fr.w, sy = tpl.th / fr.h;
+      runDocTransform(t("crop.templated", { w: tpl.tw, h: tpl.th }), () => {
+        doc.cropResampleTo(fr, tpl.tw, tpl.th, "auto");
+        remapShapePersp((p) => ({ x: (p.x - fr.x) * sx, y: (p.y - fr.y) * sy }));
+        board.fitToScreen();
+      });
+      _closeCropMode();
+      return;
+    }
     // v127 (user：「裁切还可以扩张」)：允许 x/y 负（向左/向上扩），允许 w/h > doc（向右/向下扩）
     //   只保最小 1 + 最大 8192；doc.cropTo 已支持负 dx/dy
     const { x, y, w, h } = cropRectToInts(_cropState.rect, { min: 1, max: 8192 });
@@ -300,6 +316,49 @@ export function initDocOps(ctx: AppContext) {
     });
     _closeCropMode();
   });
+
+  // ---- v0.6.49 模板模式控件（v0.6.48 首版的接线块因文本替换静默漏落——本次补上）----
+  {
+    const tplSel = document.getElementById("cropTemplateSel") as HTMLSelectElement;
+    // 模板下拉：SSoT + 自定义（模板名=尺寸国际语不走 i18n）
+    for (const tp of CANVAS_TEMPLATES) {
+      const o = document.createElement("option");
+      o.value = tp.id; o.textContent = tp.label;
+      tplSel.appendChild(o);
+    }
+    const custom = document.createElement("option");
+    custom.value = "custom"; custom.textContent = t("crop.customTpl");
+    tplSel.appendChild(custom);
+    // 分段按钮 自由|模板（两项下拉太笨——user 2026-07-29 UI 意见）
+    document.getElementById("cropModeFree")!.addEventListener("click", () => {
+      if (!_cropState || _cropState.mode === "free") return;
+      _cropState.mode = "free";
+      _cropState.tpl = null;
+      _syncCropModeUI();
+      _renderCropOverlay();
+    });
+    document.getElementById("cropModeTemplate")!.addEventListener("click", () => {
+      if (!_cropState || _cropState.mode === "template") return;
+      _cropState.mode = "template";
+      const remembered = editorState.crop.templateId;
+      if (remembered && templateById(remembered)) tplSel.value = remembered;
+      _applyCropTemplate(tplSel.value);
+    });
+    tplSel.addEventListener("change", () => _applyCropTemplate(tplSel.value));
+    const onCustom = () => { if (tplSel.value === "custom") _applyCropTemplate("custom"); };
+    (document.getElementById("cropCustomW") as HTMLInputElement).addEventListener("input", onCustom);
+    (document.getElementById("cropCustomH") as HTMLInputElement).addEventListener("input", onCustom);
+    document.getElementById("cropFitCover")!.addEventListener("click", () => {
+      if (!_cropState?.tpl) return;
+      _cropState.rect = fitRectToBBox(_contentBBox(), _cropState.tpl.aspect, "cover");
+      _renderCropOverlay();
+    });
+    document.getElementById("cropFitContain")!.addEventListener("click", () => {
+      if (!_cropState?.tpl) return;
+      _cropState.rect = fitRectToBBox(_contentBBox(), _cropState.tpl.aspect, "contain");
+      _renderCropOverlay();
+    });
+  }
 
   // 裁切 overlay 拖拽 (handle / rect 内 = move)
   (function bindCropOverlayPointer() {
