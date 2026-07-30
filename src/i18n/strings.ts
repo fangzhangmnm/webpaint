@@ -442,6 +442,8 @@ export const S = {
   "la.rect":         { zh: "矩形选区", en: "Rectangle", ja: "長方形選択", tok: "leko" }, 
   "la.ellipse":      { zh: "椭圆选区", en: "Ellipse", ja: "楕円選択", tok: "sike" }, 
   "la.magic":        { zh: "魔术棒", en: "Magic wand", ja: "自動選択", tok: "ilo pi ma sama" },
+  "la.algoSel":      { zh: "魔棒算法", en: "Wand algorithm", ja: "選択アルゴリズム", tok: "nasin pi ilo wile" },
+  "la.algoClassic":  { zh: "经典", en: "Classic", ja: "クラシック", tok: "nasin pona" },
   "la.lineartAlgo":  { zh: "线稿闭合", en: "Line-art closing", ja: "線画クロージング", tok: "nasin pi linja pini" },
   "la.new":          { zh: "新建选区（替换当前）", en: "New selection (replace)", ja: "新規選択（置き換え）", tok: "sin (ma pini li weka)" }, 
   "la.union":        { zh: "添加到选区", en: "Add to selection", ja: "選択範囲に追加", tok: "namako" }, 

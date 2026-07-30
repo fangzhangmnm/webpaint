@@ -56,6 +56,11 @@ type LassoState =
 type SubTool = "freehand" | "rect" | "ellipse" | "polygon" | "magic";
 type SetOpMode = "new" | "union" | "subtract" | "intersect";
 export type MagicAlgorithm = "classic" | "lineart";
+// 魔棒算法下拉的 SSoT（transform 采样 RESAMPLE_MODES 同款）：以后加算法（EDT-Dijkstra/AI）只改这里+引擎分叉
+export const MAGIC_ALGORITHMS: { id: MagicAlgorithm; labelKey: string }[] = [
+  { id: "classic", labelKey: "la.algoClassic" },
+  { id: "lineart", labelKey: "la.lineartAlgo" },
+];
 
 export class LassoEngine {
   _state: LassoState;
@@ -99,7 +104,10 @@ export class LassoEngine {
     this.doc = null;              // 由 input.js 注入；选区是 doc 的一等公民
     this.onChange = () => {};
   }
-  setDoc(doc: LassoDoc | null) { this.doc = doc; }
+  setDoc(doc: LassoDoc | null) {
+    this.doc = doc;
+    this._lineartOracle.invalidate();   // 换文档释放 label map（16MB 级）；key 本身安全，这里纯腾内存
+  }
   // v0.4.7（S6）：float 状态在 workpiece——lift/变换/stamp/accept/reject 全走 operator，接线在此注入。
   attachWorkpiece(w: Workpiece, history: UndoHistory, ops: OperatorRegistry) { this._ft.attach(w, history, ops); }
   // undo/redo 可能让浮层出现/消失（lift/drop 都在栈上）：把 _state 与 workpiece 对齐 + 引擎重采纳

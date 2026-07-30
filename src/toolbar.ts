@@ -11,6 +11,7 @@
 import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { Selection } from "./selection.ts";
+import { MAGIC_ALGORITHMS } from "./lasso.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { editorState } from "./workbench-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./resample.ts";
@@ -207,10 +208,13 @@ export function updateLassoToolbar() {
     for (const el of menu.querySelectorAll<HTMLElement>(".lasso-menu-magic-only")) el.classList.toggle("hidden", !magicOn);
     for (const el of menu.querySelectorAll<HTMLButtonElement>(".lasso-menu-needs-sel")) el.disabled = !hasSelection;
   }
-  // v0.7 线稿闭合 toggle：两菜单镜像引擎里的算法态（RAM-only；持久化待 user 同意）
-  const lineartOn = input.lasso.getMagicAlgorithm() === "lineart";
-  document.getElementById("lassoLineartBtn")?.setAttribute("aria-pressed", lineartOn ? "true" : "false");
-  document.getElementById("fillLineartBtn")?.setAttribute("aria-pressed", lineartOn ? "true" : "false");
+  // v0.7 魔棒算法下拉（transform 采样同款）：magic 子工具时显，值镜像引擎态（RAM-only）
+  const algoSel = document.getElementById("lassoAlgoSel") as HTMLSelectElement | null;
+  if (algoSel) {
+    algoSel.classList.toggle("hidden", !magicOn);
+    const algo = input.lasso.getMagicAlgorithm();
+    if (algoSel.value !== algo) algoSel.value = algo;
+  }
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
   lassoExpandToggle.classList.toggle("hidden", !magicOn);
   lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
@@ -422,11 +426,20 @@ function initSelEditUI() {
     board.requestRender();
     updateLassoToolbar();
   });
-  // v0.7 魔棒算法 toggle（线稿闭合）：off=经典 flood / on=论文线稿分区（lineart-oracle，
-  //   断口自动闭合+填到线下）。toggle 不关菜单（同蚂蚁线）；首次 tap 会同步建分区（秒级）。
-  for (const id of ["lassoLineartBtn", "fillLineartBtn"]) {
-    document.getElementById(id)?.addEventListener("click", () => {
-      input.lasso.setMagicAlgorithm(input.lasso.getMagicAlgorithm() === "lineart" ? "classic" : "lineart");
+  // v0.7 魔棒算法下拉（user：文字下拉，transform 采样 lassoSampleSel 同款）：
+  //   classic=经典 flood / lineart=论文线稿分区（断口自动闭合+填到线下，lineart-oracle）。
+  //   选项从 MAGIC_ALGORITHMS SSoT 填；换算法首 tap 会同步建分区（2K 实测 <1s）。
+  const lassoAlgoSel = document.getElementById("lassoAlgoSel") as HTMLSelectElement | null;
+  if (lassoAlgoSel) {
+    lassoAlgoSel.innerHTML = "";
+    for (const a of MAGIC_ALGORITHMS) {
+      const opt = document.createElement("option");
+      opt.value = a.id;
+      opt.textContent = t(a.labelKey as Parameters<typeof t>[0]);
+      lassoAlgoSel.appendChild(opt);
+    }
+    lassoAlgoSel.addEventListener("change", () => {
+      input.lasso.setMagicAlgorithm(lassoAlgoSel.value as Parameters<typeof input.lasso.setMagicAlgorithm>[0]);
       updateLassoToolbar();
     });
   }

@@ -39,7 +39,8 @@ src/lasso.ts            setMagicAlgorithm("classic"|"lineart") 在 _magicWandToS
                         magic-drag 会话（beginMagicDrag/magicDragStep/End/Cancel）
 src/doc.ts              Layer.contentRev（_invalidate 汇拢点 bump——所有像素写路径必经）
 src/input.ts            magic 子工具 tap→drag 升级（8 screen-px 阈值，v134 同款）
-src/toolbar.ts          「线稿闭合」toggle（⋯菜单，lasso/fill 两份镜像，蚂蚁线样板）
+src/toolbar.ts          魔棒算法文字下拉 #lassoAlgoSel（transform 采样 lassoSampleSel 同款；
+                        选项 SSoT = lasso.ts MAGIC_ALGORITHMS，magic 子工具时显）
 ```
 
 测试：`test/lineart-partition.test.mjs`（14）/ `test/lineart-oracle.test.mjs`（4）/
@@ -71,13 +72,20 @@ magic 不再 tap-only：超 8 screen-px 升级 magic-drag 会话，沿路径逐�
 ——拖动大多数点免查询。预览直写 doc.selection（不进 undo），收笔一条 entry
 （一笔一整点），双指手势/pointercancel 走 cancelDrawing→magicDragCancel 无痕还原。
 
+## 缓存与持久化（user 拍板 2026-07-30）
+
+- **cache = 纯 RAM**（LassoEngine._lineartOracle 单条），关页即没、下次重算；
+  不进 editorState、不跟 ora 走。换文档 setDoc 顺手 invalidate（腾 16MB）。
+- **算法选择同 transform 采样模式**：RAM-only 文字下拉，不持久化。
+- 失效判据 = `Layer.contentRev`：**全局单调计数器**取号（构造+每次 _invalidate 换号）。
+  为什么不是 per-layer 自增：删层→undo 恢复保留同一 layer id、per-layer rev 从头数，
+  (id,rev) 可能撞上旧缓存 → 全局取号让 (id,rev) 永不复用。
+
 ## 悬而未决（下一个 AI / 下一轮）
 
-- **算法选择不持久化**（RAM-only）：往 `editorState.magicWand` 加 `algorithm` 字段
-  需 user 显式同意（持久化纪律）。同意后照蚂蚁线样板三行搞定。
-- toggle → 真下拉框：等第三个算法（EDT-Dijkstra 方案 A / AI）落地再改。
-  trapped-ball 搁置：user 网页端讨论过、实现要鸡尾酒，等 user 整理讨论结果。
-- 图标：`lineart-closing` 已登记 SVG Icons/TODO.md，暂借 `#magic-wand`。
+- trapped-ball 搁置：user 网页端讨论过、实现要鸡尾酒，等 user 整理讨论结果；
+  下拉 SSoT（MAGIC_ALGORITHMS）已留好插槽，EDT-Dijkstra / AI 同理。
 - 阈值滑条在 lineart 模式下无效（它是 flood 的容差）——现在还显示着，要不要藏/换成
   二值化 θ 滑条待 user 拍板。
 - dmax（最大闭合距离）要不要暴露成旋钮：默认 64px，真机手感说了算。
+- worker 化：真机首 tap 嫌卡再做。
