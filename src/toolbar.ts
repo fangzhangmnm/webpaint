@@ -202,10 +202,9 @@ export function updateLassoToolbar() {
     b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
     if (b.dataset.lassoSetop === "new") b.classList.toggle("hidden", fillActive);
   }
-  // 魔棒配置（v0.6.19 收进 ⋯ 菜单）：magic 子工具时显示；stepper 仅扩张开着时显。
+  // ⋯ 菜单：v0.7.2 起只剩命令（算法配置搬进扳手弹出）；按选区有无禁用
   const magicOn = sub === "magic";
   for (const menu of [lassoSelEditMenu, fillSelEditMenu]) {
-    for (const el of menu.querySelectorAll<HTMLElement>(".lasso-menu-magic-only")) el.classList.toggle("hidden", !magicOn);
     for (const el of menu.querySelectorAll<HTMLButtonElement>(".lasso-menu-needs-sel")) el.disabled = !hasSelection;
   }
   // v0.7 魔棒算法下拉（transform 采样同款）：magic 子工具时显，值镜像引擎态（RAM-only）
@@ -214,6 +213,20 @@ export function updateLassoToolbar() {
     algoSel.classList.toggle("hidden", !magicOn);
     const algo = input.lasso.getMagicAlgorithm();
     if (algoSel.value !== algo) algoSel.value = algo;
+  }
+  // v0.7.2 算法配置扳手：magic 时显；弹出行按当前算法显隐 + 值同步（关掉时收弹出）
+  const cfgBtn = document.getElementById("lassoAlgoCfgBtn");
+  const cfgMenu = document.getElementById("lassoAlgoCfgMenu");
+  cfgBtn?.classList.toggle("hidden", !magicOn);
+  if (!magicOn) cfgMenu?.classList.add("hidden");
+  if (cfgMenu) {
+    const lineartOn = input.lasso.getMagicAlgorithm() === "lineart";
+    for (const el of cfgMenu.querySelectorAll<HTMLElement>(".algo-cfg-classic")) el.classList.toggle("hidden", lineartOn);
+    for (const el of cfgMenu.querySelectorAll<HTMLElement>(".algo-cfg-lineart")) el.classList.toggle("hidden", !lineartOn);
+    const dv = document.getElementById("lassoDmaxVal");
+    if (dv) dv.textContent = String(input.lasso.getLineartCloseDist());
+    const iv = document.getElementById("lassoInkThresholdVal");
+    if (iv) iv.textContent = String(input.lasso.getLineartInkThreshold());
   }
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
   lassoExpandToggle.classList.toggle("hidden", !magicOn);
@@ -441,6 +454,42 @@ function initSelEditUI() {
     lassoAlgoSel.addEventListener("change", () => {
       input.lasso.setMagicAlgorithm(lassoAlgoSel.value as Parameters<typeof input.lasso.setMagicAlgorithm>[0]);
       updateLassoToolbar();
+    });
+  }
+  // v0.7.2 算法配置扳手弹出（user：⋯只留命令，configuration 进扳手小三角）。
+  //   slider/stepper 连按不关 = 手动 toggle + 外点关（lassoMagicExpandMenu 样板）；
+  //   knob 全 RAM-only，改了 oracle 自己丢缓存重建（经典容差除外——沿用 editorState per-doc）。
+  const lassoAlgoCfgBtn = document.getElementById("lassoAlgoCfgBtn");
+  const lassoAlgoCfgMenu = document.getElementById("lassoAlgoCfgMenu");
+  if (lassoAlgoCfgBtn && lassoAlgoCfgMenu) {
+    _transientMenus.push(lassoAlgoCfgMenu);
+    lassoAlgoCfgBtn.addEventListener("click", (e: Event) => {
+      e.stopPropagation();
+      const wasHidden = lassoAlgoCfgMenu.classList.contains("hidden");
+      lassoAlgoCfgMenu.classList.toggle("hidden");
+      if (wasHidden) anchorPopupToBtn(lassoAlgoCfgMenu, lassoAlgoCfgBtn, { align: "left", offsetY: 6 });
+      updateLassoToolbar();   // 行显隐/值同步
+    });
+    document.addEventListener("pointerdown", (e: Event) => {
+      if (lassoAlgoCfgMenu.classList.contains("hidden")) return;
+      if (lassoAlgoCfgMenu.contains(e.target as Node) || lassoAlgoCfgBtn.contains(e.target as Node)) return;
+      lassoAlgoCfgMenu.classList.add("hidden");
+    });
+    // 闭合距离 stepper（±16；8..256 clamp 在引擎侧）
+    const dmaxVal = document.getElementById("lassoDmaxVal");
+    const stepDmax = (d: number) => {
+      input.lasso.setLineartCloseDist(input.lasso.getLineartCloseDist() + d);
+      if (dmaxVal) dmaxVal.textContent = String(input.lasso.getLineartCloseDist());
+    };
+    document.getElementById("lassoDmaxMinus")?.addEventListener("click", () => stepDmax(-16));
+    document.getElementById("lassoDmaxPlus")?.addEventListener("click", () => stepDmax(+16));
+    // 墨线判定 slider（浅色线稿往上调）
+    const inkInp = document.getElementById("lassoInkThreshold") as HTMLInputElement | null;
+    const inkVal = document.getElementById("lassoInkThresholdVal");
+    inkInp?.addEventListener("input", () => {
+      const v = Math.max(0, Math.min(100, parseInt(inkInp.value, 10) || 0));
+      input.lasso.setLineartInkThreshold(v);
+      if (inkVal) inkVal.textContent = String(v);
     });
   }
   // modal 内方向切换（v0.5.15 user：扩张/收缩同一入口）：切方向 = 换 op 就地重预览（预览恒从 before 派生）。
@@ -684,29 +733,20 @@ export function initToolbar(ctx: AppContext) {
   // v242：扩展滑块从魔术棒拆走（改成选区编辑 op，见 initSelEditUI）。魔术棒只剩阈值。
   // v0.5.11：阈值 per-doc 持久化（editorState.magicWand.threshold，原 editorState.bucket 退役后归魔棒）。
   //   UI 改 → 写 editorState + 灌引擎；换文档 → syncMagicThresholdUI 回灌（wp:applyEditorState）。
-  const fillThresholdInput = byId<HTMLInputElement>("fillThreshold");
-  const fillThresholdVal = byId("fillThresholdVal");
+  // v0.7.2：容差滑条从两份 ⋯ 菜单搬进扳手弹出（#lassoAlgoCfgMenu，选区/填充共用一份 DOM）
+  //   ——fillThreshold 镜像退役。持久化不变（editorState.magicWand.threshold，per-doc）。
   const syncMagicThresholdUI = () => {
     const v = editorState.magicWand.threshold;
     lassoThresholdInput.value = String(v);
     lassoThresholdVal.textContent = String(v);
-    fillThresholdInput.value = String(v);
-    fillThresholdVal.textContent = String(v);
     input.lasso.setMagicThreshold(v);
   };
-  const wireThreshold = (inp: HTMLInputElement, val: HTMLElement) => {
-    inp.addEventListener("input", () => {
-      const v = Math.max(0, Math.min(100, parseInt(inp.value, 10) || 0));
-      editorState.magicWand.threshold = v;
-      input.lasso.setMagicThreshold(v);
-      val.textContent = String(v);
-      const o = inp === lassoThresholdInput ? fillThresholdInput : lassoThresholdInput;
-      const ov = inp === lassoThresholdInput ? fillThresholdVal : lassoThresholdVal;
-      o.value = String(v); ov.textContent = String(v);   // 两份滑条互为镜像（magicWand 配置共享）
-    });
-  };
-  wireThreshold(lassoThresholdInput, lassoThresholdVal);
-  wireThreshold(fillThresholdInput, fillThresholdVal);
+  lassoThresholdInput.addEventListener("input", () => {
+    const v = Math.max(0, Math.min(100, parseInt(lassoThresholdInput.value, 10) || 0));
+    editorState.magicWand.threshold = v;
+    input.lasso.setMagicThreshold(v);
+    lassoThresholdVal.textContent = String(v);
+  });
   // #31 魔棒 flood 后自动扩张（v0.5.12 内联化：aria-pressed toggle 钮 + px 输入，⚙/popup 退役）。
   //   引擎只认一个数：effective px = toggle 开 ? px : 0。UI 改 → 写 editorState + 灌引擎；换文档回灌。
   lassoExpandToggle = byId("lassoExpandToggle");

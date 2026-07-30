@@ -48,6 +48,24 @@ export class LineartOracle {
   /** 换文档 / 明确要丢缓存时调（16MB 级 label map，别赖着）。 */
   invalidate(): void { this._cache = null; }
 
+  // ---- 可调 knob（v0.7.2 扳手弹出；RAM-only）。改了就丢缓存，下次 tap 重建。 ----
+  /** 闭合距离 dmax（px，8..256）；补段上限 smax 跟随 = 0.75·dmax（一个旋钮管两种闭合笔画）。 */
+  setCloseDist(px: number): void {
+    const v = Math.max(8, Math.min(256, Math.round(px) || 0));
+    if (v === this._params.dmax) return;
+    this._params = { ...this._params, dmax: v, smax: Math.round(v * 0.75) };
+    this.invalidate();
+  }
+  getCloseDist(): number { return this._params.dmax; }
+  /** 墨线判定（0..100%）：白底合成亮度 ≤ pct·2.55 判为笔画。浅色线稿往上调。 */
+  setInkThreshold(pct: number): void {
+    const v = Math.max(0, Math.min(100, Math.round(pct) || 0));
+    if (v === Math.round(this._params.binarizeThreshold / 2.55)) return;
+    this._params = { ...this._params, binarizeThreshold: v * 2.55 };
+    this.invalidate();
+  }
+  getInkThreshold(): number { return Math.round(this._params.binarizeThreshold / 2.55); }
+
   private _ensurePartition(
     doc: { width: number; height: number },
     sourceLayer: OracleSourceLayer | null,

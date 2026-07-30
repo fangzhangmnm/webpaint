@@ -81,11 +81,22 @@ magic 不再 tap-only：超 8 screen-px 升级 magic-drag 会话，沿路径逐�
   为什么不是 per-layer 自增：删层→undo 恢复保留同一 layer id、per-layer rev 从头数，
   (id,rev) 可能撞上旧缓存 → 全局取号让 (id,rev) 永不复用。
 
+## knob（v0.7.2 user 裁定：⋯只留不常用命令，算法 configuration 进扳手小三角）
+
+扳手钮 `#lassoAlgoCfgBtn`（算法下拉旁，magic 时显）→ 弹出 `#lassoAlgoCfgMenu`，
+行按当前算法显隐：
+
+- 经典：**容差** slider（原 ⋯ 菜单里那个没文字的 20——已搬家+补标签；
+  持久化沿用 `editorState.magicWand.threshold` 不变）。
+- 线稿闭合（RAM-only）：**闭合距离**（dmax，±16 stepper，8..256，smax 跟随=0.75·dmax）
+  + **墨线判定**（二值化亮度阈值 %，浅色线稿往上调）。
+
+没暴露的参数（θκ/amin/α/ρ/cmax）按论文精神吃默认值；一个断口没被补上的合法原因：
+①距离 > 闭合距离 ②两端法线不相向（质量因子 ω=0）③补上会穿过别的线（τ 测试）
+④补上会造出 <amin 的小碎区 ⑤端点太圆润没过曲率阈值。
+
 ## 悬而未决（下一个 AI / 下一轮）
 
 - trapped-ball 搁置：user 网页端讨论过、实现要鸡尾酒，等 user 整理讨论结果；
   下拉 SSoT（MAGIC_ALGORITHMS）已留好插槽，EDT-Dijkstra / AI 同理。
-- 阈值滑条在 lineart 模式下无效（它是 flood 的容差）——现在还显示着，要不要藏/换成
-  二值化 θ 滑条待 user 拍板。
-- dmax（最大闭合距离）要不要暴露成旋钮：默认 64px，真机手感说了算。
-- worker 化：真机首 tap 嫌卡再做。
+- worker 化：真机首 tap 嫌卡再做（2K 实测无感，暂无必要）。

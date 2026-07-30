@@ -80,4 +80,25 @@ describe("lineart-oracle · tap→Selection + contentRev 缓存", () => {
     const o = new LineartOracle();
     eq(o.selectAt(doc, null, -1, 5), null, "出界 null");
   });
+
+  it("knob（v0.7.2 扳手）：变值丢缓存重建，同值 no-op", () => {
+    const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
+    const o = new LineartOracle();
+    o.selectAt(doc, L, 32, 32).dispose();
+    eq(L.calls, 1, "建一次");
+    o.setCloseDist(64);   // = 默认值
+    eq(o.isReady(doc, L), true, "同值不失效");
+    o.setCloseDist(128);
+    eq(o.isReady(doc, L), false, "闭合距离变 → 失效");
+    o.selectAt(doc, L, 32, 32).dispose();
+    eq(L.calls, 2, "重建");
+    eq(o.getCloseDist(), 128, "读回新值");
+    o.setInkThreshold(50);   // ≈ 默认 128/2.55
+    eq(o.isReady(doc, L), true, "同值不失效");
+    o.setInkThreshold(80);
+    eq(o.isReady(doc, L), false, "墨线判定变 → 失效");
+    eq(o.getInkThreshold(), 80, "读回新值");
+    o.setCloseDist(999);
+    eq(o.getCloseDist(), 256, "clamp 上限 256");
+  });
 });

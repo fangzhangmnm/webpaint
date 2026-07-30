@@ -142,6 +142,11 @@ export class LassoEngine {
   lineartReady(sourceLayer: Layer | null): boolean {
     return !this.doc || this._lineartOracle.isReady(this.doc, sourceLayer);
   }
+  // 线稿算法 knob 透传（扳手弹出用；RAM-only，改了 oracle 自己丢缓存）
+  setLineartCloseDist(px: number) { this._lineartOracle.setCloseDist(px); }
+  getLineartCloseDist() { return this._lineartOracle.getCloseDist(); }
+  setLineartInkThreshold(pct: number) { this._lineartOracle.setInkThreshold(pct); }
+  getLineartInkThreshold() { return this._lineartOracle.getInkThreshold(); }
   setSampleMode(m: string) { this._ft.setSampleMode(m); }
   getSampleMode() { return this._ft.getSampleMode(); }
   setConstrainSquare(on: unknown) { this._constrainSquare = !!on; this.onChange(); }
