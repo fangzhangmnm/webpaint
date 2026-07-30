@@ -155,12 +155,14 @@ const PALM_PEN_GUARD_MS = 600;
 
 // 单指长按 → 临时切到 picker；user 设置可开关。延迟阈值参考 iOS 系统 longpress。
 const LONG_PRESS_MS = 450;
-// v0.5.9 快速捏合复位（Procreate 方言）：手势寿命 < MS 且结束 scale < 起手 × RATIO → fitToScreen
-const QUICK_PINCH_FIT_MS = 230;
-const QUICK_PINCH_FIT_RATIO = 0.8;
-// v0.6.56（user：太敏感）：加绝对行程门——两指间距的**缩短量**还要 ≥ 视口短边 × PCT。
-//   纯比例判定的坑：两指落点很近时（起手 dist 小），指尖轻微一收比例就 <0.8×，误触复位。
-const QUICK_PINCH_FIT_TRAVEL_PCT = 0.08;
+// v0.5.9 快速捏合复位（Procreate 方言）→ v0.6.57 改纯 release-velocity 判定（user 拍板，grill 2026-07-30）：
+//   判据 = **松手瞬间两指仍在快速收拢**（甩尾离屏）。比例/时间窗/行程门全撤——Procreate 官方
+//   教学「捏合到最后手指在运动中离屏」，区分「缩一点→停→抬」（松手时速度≈0）与复位甩尾的
+//   就是离屏时刻的收拢速度；旧三门（寿命/比例/行程）在这两者上都不可分。
+//   速度单位 = CSS px/s（准物理单位，跨屏幕/zoom/视口解耦）；不用 UIKit 的 scale/s——
+//   除以起手间距归一会把近距小抖动放大成巨大速度，恰是要防的噪声。
+const QUICK_PINCH_FIT_SPEED = 800;      // 收拢速度阈值（px/s，≈15–20 cm/s 的果断一收；真机调）
+const QUICK_PINCH_FIT_TAU_MS = 40;      // d(dist)/dt 的 EMA 时间常数（裸差分抖；同笔刷平滑的指数追踪思路）
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
 // v249: 两参 → 引擎平滑参数（时间常数指数追踪 + 死区，详 docs/20260613-brush-procreate-smoothing.md）。
@@ -335,7 +337,7 @@ export class InputController {
   penEverSeen: boolean;
   spaceDown: boolean;
   altDown: boolean;
-  gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport; startTime: number; lastDist: number } | null;
+  gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport; lastDist: number; velEma: number; lastMoveT: number } | null;
   _gestureTap: GestureTap | null;
   _lastTap: TapRef | null;
   _lastPenActivity: number = -Infinity;   // 最近笔尖落/移/抬时刻 (ms)。掌触 tap 门用
@@ -1153,8 +1155,9 @@ export class InputController {
       midY: (a.y + b.y) / 2,
       angle: Math.atan2(dy, dx),          // 起手两指连线角度
       vp: { ...this.board.viewport },
-      startTime: performance.now(),       // v0.5.9：快速捏合复位判定用
-      lastDist: dist,                     // v0.6.56：行程门用（松手时触点可能已 <2，取不到末距）
+      lastDist: dist,                     // 追踪末距（松手时触点已 <2，现场取不到）
+      velEma: 0,                          // v0.6.57：滤波后的间距变化率（px/s，负=收拢）
+      lastMoveT: performance.now(),
     };
     document.body.dataset.panning = "1";
   }
@@ -1162,7 +1165,18 @@ export class InputController {
     const t = this._gestureTouches();
     if (t.length < 2 || !this.gestureStart) return;
     const [a, b] = t;
-    this.gestureStart.lastDist = Math.hypot(b.x - a.x, b.y - a.y) || 1;   // v0.6.56：行程门
+    // v0.6.57：EMA 追踪间距变化率（复位判定用）。dt 用 wall clock（_updateGesture 每
+    //   pointermove 调一次，事件 timeStamp 不在手边；EMA 对 dt 抖动不敏感）。
+    const g = this.gestureStart;
+    const newDist = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const now = performance.now();
+    const dt = now - g.lastMoveT;
+    if (dt > 0) {
+      const alpha = 1 - Math.exp(-dt / QUICK_PINCH_FIT_TAU_MS);
+      g.velEma += alpha * ((newDist - g.lastDist) / (dt / 1000) - g.velEma);
+      g.lastMoveT = now;
+    }
+    g.lastDist = newDist;
     // anchor-preserving 双指变换数学已抽到 pointer-gesture.js（纯函数·可单测）。
     // 旋转**不**在此 snap（进行中吸附粘手）；松手由 _endGesture/snapRotation 吸。
     const vp = computePinchViewport(this.gestureStart, a, b, {
@@ -1175,16 +1189,14 @@ export class InputController {
     const g = this.gestureStart;
     this.gestureStart = null;
     delete document.body.dataset.panning;
-    // v0.5.9（user）：快速捏合 = 视口复位（Procreate 方言）——短促（<230ms）且明显缩小（<0.8×）
-    //   → fitToScreen（含旋转复位，user 拍板「旋转也一起复位」）。两指 tap（undo）位移小、scale≈1
-    //   不会误触；慢捏合不触发。
-    // v0.6.56（user：太敏感）：叠加绝对行程门——两指间距实际缩短 ≥ 视口短边 × 8%。
-    //   比例门挡不住「两指落点近 + 指尖轻收」（起手 dist 小 → 比例天然剧烈）。
-    const vpMin = Math.min(this.board.canvas.clientWidth || window.innerWidth,
-                           this.board.canvas.clientHeight || window.innerHeight);
-    if (g && performance.now() - g.startTime < QUICK_PINCH_FIT_MS &&
-        this.board.viewport.scale < g.vp.scale * QUICK_PINCH_FIT_RATIO &&
-        g.dist - g.lastDist >= vpMin * QUICK_PINCH_FIT_TRAVEL_PCT) {
+    // v0.6.57 快速捏合复位 = release-velocity 判定（Procreate 方言，grill 定案 2026-07-30）：
+    //   松手瞬间仍在快速收拢（滤波速度 ≤ -SPEED）且净收拢（末距 < 起手距）→ fitToScreen
+    //   （含旋转复位，user 拍板「旋转也一起复位」）。「缩→停→抬」松手时速度衰减≈0 不触发；
+    //   两指 tap（undo）间距几乎不变不触发。
+    //   **停顿衰减**：手指停住时 pointermove 不再来、EMA 会冻结在最后的运动值——按
+    //   「距最后一次移动的时长」把速度指数衰减，停 ≥100ms 再抬就读≈0，不吃陈旧速度。
+    const velAtLift = g ? g.velEma * Math.exp(-(performance.now() - g.lastMoveT) / QUICK_PINCH_FIT_TAU_MS) : 0;
+    if (g && velAtLift <= -QUICK_PINCH_FIT_SPEED && g.lastDist < g.dist) {
       this.board.fitToScreen();
       this.status(t("tm.viewportReset"));
       return;   // 已复位，不再跑旋转吸附
