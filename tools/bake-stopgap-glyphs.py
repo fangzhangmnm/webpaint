@@ -49,10 +49,7 @@ def text_path(text, box, font='cjk'):
 SPECS = [
     # 2026-07-28 晚：20260728 交付批入库（square/ellipse/line-snap/select-polygon/persp-iso 全真图），
     # stopgap 再度**清零**。历史见 git（透视批/形状变体批）。
-    # 2026-07-29：裁剪·定尺寸模式三枚（需求已登记 ../20260708 SVG Icons/TODO.md）：
-    ("crop-fixed-size", "定", (3, 3, 18, 18), "定尺寸裁切模式（真图建议：裁切角标+尺寸标注线/小锁比例）"),
-    ("fit-fill",        "填", (3, 3, 18, 18), "填充 Fill（真图建议：实线框+内容四角外溢/四向外箭头；与 fit-contain 成对反向）"),
-    ("fit-contain",     "适", (3, 3, 18, 18), "适应 Fit（真图建议：实线框+内缩矩形/四向内箭头；与 fit-fill 成对反向）"),
+    # 2026-07-29 裁剪定尺寸三枚（定/填/适）→ 2026-07-30 真图入库收货（a069c8c），stopgap 又清零。
 ]
 syms = []
 for sid, text, box, note in SPECS:

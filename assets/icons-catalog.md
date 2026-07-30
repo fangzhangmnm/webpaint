@@ -1,6 +1,6 @@
 # 本 app 的图标
 
-122 icons · 提取自家族图标库 `../../../../20260708 SVG Icons/icons.svg` · 由 `extract-icons.py` 生成，别手改。
+125 icons · 提取自家族图标库 `../../../../20260708 SVG Icons/icons.svg` · 由 `extract-icons.py` 生成，别手改。
 
 用法：把 sprite 整段内联到 `<body>` 顶部，然后按 id 引用；
 ⚠ sprite 根自带的隐藏样式（1×1 + `opacity:0`）别换成 `display:none`——
@@ -86,6 +86,9 @@
 | `offset-wrap` | offset/wrap 无缝贴图平移取模 x=(x+512)%1024:箭头从右边穿出、虚线段从左边再进(pac-man wrap), 穿越处画框用遮罩留 gap; 20260724 候选 2 号入库 |
 | `merge-layers` | 合并多个图层:三层压缩交叠, z-sort 遮挡(bottom 被 top1+top2 联合遮罩留白, top2 被 top1 遮罩), 箭头置顶带白晕入底层 62%; 层宽19 斜率同 merge-layer-down; 20260724 候选 4 号入库 |
 | `crop` | 裁切:两 L 交叠, 线宽 1.5x 标准(2.55) |
+| `crop-fixed-size` | 定尺寸裁剪·案B:矩形缩到左上 + 底边与右边两条定长标记(宽高都定); 20260730 候选 2 号入库 |
+| `fit-fill` | 填充(Fill)·长颈瓶变体J:同瓶 s1.28 轻裁瓶底(整瓶轮廓保留); 20260730 候选 J 入库(长颈瓶 口7.0/腹11.0 颈占高32%) |
+| `fit-contain` | 适应(Fit)·长颈瓶变体J:口7.0/腹11.00=0.64, 颈段占高 32%(甲方 20260730: 瓶口长一点肚子小一点), 上下各留 2.6; 20260730 候选 J 入库(与 fit-fill 同一只瓶) |
 
 ## transform
 
