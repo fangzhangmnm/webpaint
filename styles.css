@@ -690,6 +690,37 @@ input[type=range] {
   font-size: 11px;
   color: var(--ink-soft);
 }
+/* 文本框 IntelliSense（共享控件 input-sense，usage-agnostic）：media 前导块 + label 候选。
+   z 走 popover band（420，压过菜单/浮窗；⚠ 在 sheet(500) 内用会被盖住——现消费者只有色轮浮窗）。 */
+.menu-panel.input-sense-menu {   /* 双类提 specificity：本规则在 .menu-panel 定义之前，单类会被其 z 反杀 */
+  z-index: var(--z-popover);
+  min-width: 150px;
+  max-height: 240px;
+}
+.input-sense-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.input-sense-item.active,
+.input-sense-item:hover { background: var(--line); }
+.color-chip {   /* 色名数据源的 media：色板小方块（explode swatch 同族视觉） */
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  flex: none;
+}
+
 .explode-swatch-name {   /* 颜色名（iPad 无 hover，不能只藏 title）——窄列省略号截断 */
   font-size: 10px;
   color: var(--ink-soft);

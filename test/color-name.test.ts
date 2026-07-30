@@ -2,7 +2,7 @@
 // 全语言 parse（行序 = 优先级 mpl > css > en > zh > ja > tok）。
 import { test, eq, assert } from "./runner.mjs";
 import { COLOR_WORDS } from "../src/color-words.ts";
-import { colorNameIn, parseColorName } from "../src/color-name.ts";
+import { colorNameIn, parseColorName, searchColorNames } from "../src/color-name.ts";
 
 test("表完整性：六类别都在、规模对、hex 合法、en/zh/ja 同语言内名字互异（tok 多锚点豁免）", () => {
   const counts = new Map<string, number>();
@@ -11,9 +11,9 @@ test("表完整性：六类别都在、规模对、hex 合法、en/zh/ja 同语�
     assert(/^#[0-9a-f]{6}$/.test(hex), `hex 非法: ${cat} ${name} ${hex}`);
     assert(name.length > 0, "空名");
   }
-  for (const cat of ["mpl", "css", "en", "zh", "ja", "tok"]) assert((counts.get(cat) ?? 0) > 0, `缺类别 ${cat}`);
-  assert(counts.get("en")! > 900 && counts.get("zh")! > 500 && counts.get("ja")! > 400, "全表规模不对");
-  for (const check of ["en", "zh", "ja"]) {
+  for (const cat of ["mpl", "css", "xkcd", "zh-trad", "ja-trad", "tok"]) assert((counts.get(cat) ?? 0) > 0, `缺类别 ${cat}`);
+  assert(counts.get("xkcd")! > 900 && counts.get("zh-trad")! > 500 && counts.get("ja-trad")! > 400, "全表规模不对");
+  for (const check of ["xkcd", "zh-trad", "ja-trad"]) {
     const seen = new Set<string>();
     for (const [cat, name] of COLOR_WORDS) {
       if (cat !== check) continue;
@@ -23,20 +23,20 @@ test("表完整性：六类别都在、规模对、hex 合法、en/zh/ja 同语�
   }
 });
 
-test("命名按语言分表：同一模块四语各得其名（OKLab nearest）", () => {
-  eq(colorNameIn("en", 229, 0, 0), "red");
-  eq(colorNameIn("zh", 0xee, 0xf7, 0xf2), "月白");
-  eq(colorNameIn("ja", 0xb7, 0x28, 0x2e), "茜色");
+test("命名按 culture 分表（≠localization）：同一颜色各词库各得其名（OKLab nearest）", () => {
+  eq(colorNameIn("xkcd", 229, 0, 0), "red");
+  eq(colorNameIn("zh-trad", 0xee, 0xf7, 0xf2), "月白");
+  eq(colorNameIn("ja-trad", 0xb7, 0x28, 0x2e), "茜色");
   eq(colorNameIn("tok", 3, 67, 223), "laso");
   eq(colorNameIn("tok", 255, 255, 255), "walo");
   eq(colorNameIn("tok", 0x75, 0xbb, 0xfd), "laso sewi");
 });
 
-test("slang flag：parse 照认、命名跳过；未收录语言 fallback en", () => {
+test("slang flag：parse 照认、命名跳过；未收录 culture fallback xkcd", () => {
   eq(parseColorName("puke green"), "#9aae07");
-  const n = colorNameIn("en", 0x9a, 0xae, 0x07);
+  const n = colorNameIn("xkcd", 0x9a, 0xae, 0x07);
   assert(n !== "puke green", `命名蹦出 slang: ${n}`);
-  eq(colorNameIn("fr", 229, 0, 0), "red");   // 加新语言只加行；没行的语言兜底 en
+  eq(colorNameIn("fr", 229, 0, 0), "red");   // 加新 culture 只加行；没行的兜底 xkcd
 });
 
 test("parse 全语言搜索，行序 = 优先级（universal → 小众）", () => {
@@ -62,9 +62,21 @@ test("parse 全语言搜索，行序 = 优先级（universal → 小众）", () 
 
 test("命名 ↔ parse 往返自洽（各语言抽查）", () => {
   // 抽几个各语言的锚点色：命名得 X，parse(X) 回到同一 hex（同表同行）
-  for (const [langCat, hex] of [["zh", "#f9f4dc"], ["ja", "#fef4f4"], ["en", "#75bbfd"]] as const) {
+  for (const [langCat, hex] of [["zh-trad", "#f9f4dc"], ["ja-trad", "#fef4f4"], ["xkcd", "#75bbfd"]] as const) {
     const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
     const name = colorNameIn(langCat, r, g, b);
     eq(parseColorName(name), hex, `${langCat} ${name}`);
   }
+});
+
+test("searchColorNames（IntelliSense 数据面）：前缀优先、别名命中、空查询空结果", () => {
+  eq(searchColorNames("").length, 0);
+  const sky = searchColorNames("sky");
+  assert(sky.length >= 2, "sky 候选太少");
+  assert(sky.some((x) => x.name === "skyblue") && sky.some((x) => x.name === "sky blue"), "css/xkcd 两写法都该在");
+  eq(searchColorNames("月白")[0].name, "月白");
+  eq(searchColorNames("yueb")[0].name, "月白");        // 拼音前缀 → 正名
+  eq(searchColorNames("あかね")[0].name, "茜色");      // かな前缀 → 正名
+  for (const it of searchColorNames("las")) assert(/^#[0-9a-f]{6}$/.test(it.hex));
+  assert(searchColorNames("las").some((x) => x.name.startsWith("laso")), "tok 词也可联想");
 });

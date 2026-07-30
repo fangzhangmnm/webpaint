@@ -271,6 +271,7 @@ function _clearLayerPixels(L: LayerNode | null) {
 const _MERGE_DOWN_STATUS: Record<string, string> = {
   bottom: t("lp.st.mergeBottom"),
   "clipping-under": t("lp.st.mergeClipUnder"),
+  "merge-into-group": t("lp.st.mergeIntoGroup"),   // 防御纵深：UI 双入口都已禁用，竞态到达才见
 };
 function _mergeDownLayer(L: LayerNode | null) {
   if (!L) return;
@@ -607,7 +608,7 @@ const LayerRow = defineComponent({
 
         <hr class="menu-sep" />
         <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#merge-layer-down"/></svg><span class="menu-item-label">{{ L.mergeDown }}</span></button>
-        <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!hasPx" @click="act('explodeColors')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#explode-color-layers"/></svg><span class="menu-item-label">{{ L.explodeColors }}</span></button>
+        <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!hasPx" @click="act('explodeColors')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#separate-colors"/></svg><span class="menu-item-label">{{ L.explodeColors }}</span></button>
         <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!hasPx" @click="act('clear')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-document"/></svg><span class="menu-item-label">{{ L.clearContent }}</span></button>
         <button class="menu-item menu-danger menu-item-with-icon" type="button" :disabled="!canDel" @click="act('del')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span class="menu-item-label">{{ isGroup ? L.delGroup : L.del }}</span></button>
       </div></Teleport>
@@ -764,6 +765,9 @@ function _syncChrome() {
   const downBtn = document.getElementById("layerMoveDownBtn") as HTMLButtonElement;
   if (upBtn) upBtn.disabled = !doc.canMoveLayer(doc.activeId!, 1);
   if (downBtn) downBtn.disabled = !doc.canMoveLayer(doc.activeId!, -1);
+  // v0.7.12 底栏向下合并（第二入口）：禁用规则与行内 canMergeDown 完全同源。
+  const mergeBtn = document.getElementById("layerMergeDownBtn") as HTMLButtonElement;
+  if (mergeBtn) mergeBtn.disabled = !_canMergeDownActive();
   nextTick(() => {
     _clampListHeight();   // 列表高度跟位置/层数走，保证最底 item 可滚到
     // v0.6.55：只在**活动层变了**才滚到活动行。原先每次 docVersion bump 都滚——快速连点
@@ -777,6 +781,18 @@ function _syncChrome() {
   });
 }
 let _lastScrolledActiveId: number | null = null;   // _syncChrome 上次滚到的活动层（换层才滚）
+
+// 活动叶能否向下合并（底栏按钮禁用判定；与 rows computed 的 canMergeDown 同一规则）：
+// 叶、同级下方存在、下方非组（不能合进组）、且不是「下方剪裁而本层不剪裁」（语义不清，拒绝）。
+function _canMergeDownActive(): boolean {
+  const L = doc.activeLayer;
+  if (!L || L.isGroup) return false;
+  const loc = doc.locateNode(L.id);
+  if (!loc || loc.index <= 0) return false;
+  const parent = loc.parentId == null ? doc.layers : (findNodeById(doc.layers, loc.parentId) as LayerGroup).children;
+  const under = parent[loc.index - 1];
+  return !under.isGroup && !(under.clippingMask && !L.clippingMask);
+}
 
 let _layersDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
 
@@ -892,6 +908,12 @@ export function initLayersPanel(ctx: AppContext) {
   });
   document.getElementById("layerMoveDownBtn")?.addEventListener("click", () => {
     if (doc.activeLayer) _moveLayerDelta(doc.activeLayer, -1);
+  });
+  // v0.7.12 底栏向下合并：与 ⋯ 菜单同一 caller（先 settle 悬着的 transient，同菜单纪律）。
+  document.getElementById("layerMergeDownBtn")?.addEventListener("click", () => {
+    if (!doc.activeLayer || !_canMergeDownActive()) return;
+    _settlePendingTransient();
+    _mergeDownLayer(doc.activeLayer);
   });
   document.getElementById("layerDeleteBtn")?.addEventListener("click", (e) => {
     if (!doc.activeLayer) return;

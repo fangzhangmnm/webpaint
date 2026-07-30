@@ -1,13 +1,16 @@
-// 职责（单一）：颜色 ↔ 名字（localization-aware）。纯函数、零 DOM/canvas。
-// 数据 = color-words.ts 的**全语言统一表**（一个大 list：[类别, 名, hex, 别名, slang]），
-// 本模块对类别零 special-case——**以后加语言只加行不改码**（2026-07-30 user 拍板）。
+// 职责（单一）：颜色 ↔ 名字。纯函数、零 DOM/canvas。
+// 数据 = color-words.ts 的**统一大表**（[类别, 名, hex, 别名, slang]）。**类别 = culture，
+// 不是 localization**（2026-07-30 user：二次元场景中国传统色远优于 western——culture awareness
+// is critical）：命名词库用户自选（explode sheet 的 inline-select），localization 只决定**默认值**
+// （defaultCulture）；色名不翻译，就用 culture 自己的语言。本模块对类别零 special-case——
+// **以后加 culture 只加行不改码**。
 //
-// · colorNameOf(r,g,b)：命名 = 表按当前 UI 语言过滤（slang 行跳过；mpl/css 是技术命名空间、
-//   不是 UI 语言 → 天然不参与命名；该语言无行则 fallback en）。nearest 在 OKLab（感知均匀，
-//   RGB 欧氏会把蓝紫认错）。产出是**死字符串**（图层名烘焙即定，换语言不回译）。
-// · parseColorName(text)：全语言搜索，大小写/空格不敏感（另挂去空格/冒号变体：skyblue /
-//   tab blue 也认）。撞名先到先得，**表行序 = 优先级**（mpl > css > en > zh > ja > tok，
-//   universal → 小众）；slang 照认——输入不 censor，只有输出不吓人。
+// · colorNameIn(culture, r,g,b)：命名 = 表按 culture 过滤（slang 行跳过；该 culture 无行则
+//   fallback xkcd）。nearest 在 OKLab（感知均匀，RGB 欧氏会把蓝紫认错）。产出是**死字符串**
+//   （图层名烘焙即定，换语言/culture 不回译）。
+// · parseColorName(text)：全 culture 搜索，大小写/空格不敏感（另挂去空格/冒号变体：skyblue /
+//   tab blue 也认）。撞名先到先得，**表行序 = 优先级**（mpl > css > xkcd > zh-trad > ja-trad
+//   > tok，universal → 小众）；slang 照认——输入不 censor，只有输出不吓人。
 //   注意「blue」落 css 档 = 标准化石值 #0000ff（user 点名跟标准对齐），非 xkcd 质心。
 
 import { COLOR_WORDS } from "./color-words.ts";
@@ -38,7 +41,7 @@ function namingTable(l: string): NamingTable {
   let t = _naming.get(l);
   if (!t) {
     let rows = COLOR_WORDS.filter((r) => r[0] === l && !r[4]);
-    if (rows.length === 0) rows = COLOR_WORDS.filter((r) => r[0] === "en" && !r[4]);   // 未收录语言兜底
+    if (rows.length === 0) rows = COLOR_WORDS.filter((r) => r[0] === "xkcd" && !r[4]);   // 未收录 culture 兜底
     const labels = rows.map((r) => r[1]);
     const labs = new Float64Array(rows.length * 3);
     for (let i = 0; i < rows.length; i++) {
@@ -52,7 +55,13 @@ function namingTable(l: string): NamingTable {
   return t;
 }
 
-/** 指定语言下这个颜色叫什么（测试面 / colorNameOf 的实现）。 */
+// localization → 默认 culture 的唯一映射点（sheet 的 dropdown 初值用它；用户选了就听用户的）。
+export function defaultCulture(): string {
+  const l = lang();
+  return l === "zh" ? "zh-trad" : l === "ja" ? "ja-trad" : l === "tok" ? "tok" : "xkcd";
+}
+
+/** 指定 culture 下这个颜色叫什么。 */
 export function colorNameIn(l: string, r: number, g: number, b: number): string {
   const { labels, labs } = namingTable(l);
   const [L, a, bb] = srgbToOklab(r, g, b);
@@ -65,9 +74,9 @@ export function colorNameIn(l: string, r: number, g: number, b: number): string 
   return labels[bi];
 }
 
-/** 当前语言下这个颜色叫什么（死字符串，烘焙即定）。 */
+/** 默认 culture（按 localization 映射）下这个颜色叫什么（死字符串，烘焙即定）。 */
 export function colorNameOf(r: number, g: number, b: number): string {
-  return colorNameIn(lang(), r, g, b);
+  return colorNameIn(defaultCulture(), r, g, b);
 }
 
 // parse 索引惰性建一次（~2100 行 → 约 5000 词条含变体，Map 常驻十 KB 级）。
@@ -94,4 +103,28 @@ function parseIdx(): Map<string, string> {
 /** 颜色名（任意语言）→ hex；认不出 → null。hex 本身不归这儿管（调用方先试 normalizeHex）。 */
 export function parseColorName(text: string): string | null {
   return parseIdx().get(norm(text)) ?? null;
+}
+
+/** 色名联想（autocomplete 数据面）：前缀命中优先、其余子串命中殿后；同档内 = 表序（priority）。
+ *  名与别名（かな/拼音）都参与匹配，显示用正名。逐行线性扫（~2100 行/键击，个位 ms）。 */
+export function searchColorNames(query: string, limit = 8): { name: string; hex: string }[] {
+  const q = norm(query);
+  if (!q) return [];
+  const qn = q.replace(/[ :]/g, "");
+  const pre: { name: string; hex: string }[] = [];
+  const sub: { name: string; hex: string }[] = [];
+  const seen = new Set<string>();
+  for (const [, name, hex, alias] of COLOR_WORDS) {
+    if (pre.length >= limit) break;
+    const n = norm(name), nn = n.replace(/[ :]/g, "");
+    const a = alias ? norm(alias) : "";
+    const key = n + hex;
+    if (seen.has(key)) continue;
+    if (n.startsWith(q) || nn.startsWith(qn) || (a && a.startsWith(q))) {
+      seen.add(key); pre.push({ name, hex });
+    } else if (sub.length < limit && (n.includes(q) || (a && a.includes(q)))) {
+      seen.add(key); sub.push({ name, hex });
+    }
+  }
+  return pre.concat(sub).slice(0, limit);
 }

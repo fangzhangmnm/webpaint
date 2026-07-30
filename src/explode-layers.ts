@@ -7,7 +7,8 @@
 //   最终硬分配，占比按全分辨率重数、全空簇丢弃——所以落地层数可能 < k（sheet 里如实说明）。
 
 import { clusterColors, partitionByNearest, hexOf, type ColorCluster } from "./color-cluster.ts";
-import { colorNameOf } from "./color-name.ts";
+import { colorNameIn, defaultCulture } from "./color-name.ts";
+import { wireInlineSelect } from "./inline-select.ts";
 import { countLeaves, type Layer } from "./doc.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
@@ -15,6 +16,22 @@ import type { AppContext } from "./app-context.ts";
 let ctx: AppContext;
 
 const byId = (id: string) => document.getElementById(id) as HTMLElement;
+// 色名 culture（≠ localization，user 2026-07-30：二次元场景中国传统色远优于 western）。
+// session 内记住上次选择；不持久化（进 editorState/store 需另获 user 同意）。初值按 localization。
+const CULTURES: { value: string; key: "ex.cul.zhTrad" | "ex.cul.jaTrad" | "ex.cul.xkcd" | "ex.cul.css" | "ex.cul.tok" }[] = [
+  { value: "zh-trad", key: "ex.cul.zhTrad" },
+  { value: "ja-trad", key: "ex.cul.jaTrad" },
+  { value: "xkcd", key: "ex.cul.xkcd" },
+  { value: "css", key: "ex.cul.css" },
+  { value: "tok", key: "ex.cul.tok" },
+];
+let _culture: string | null = null;
+function culture(): string { return _culture ?? (_culture = defaultCulture()); }
+function _cultureLabel(v: string): string {
+  const c = CULTURES.find((x) => x.value === v);
+  return c ? t(c.key) : v;
+}
+
 const el = {
   backdrop: () => byId("explodeBackdrop"),
   sheet: () => byId("explodeSheet"),
@@ -24,6 +41,7 @@ const el = {
   msg: () => byId("explodeMsg"),
   confirm: () => byId("explodeConfirm") as HTMLButtonElement,
   cancel: () => byId("explodeCancel") as HTMLButtonElement,
+  cultureLabel: () => byId("explodeCultureBtnLabel"),
 };
 
 // sheet 打开期间的瞬态（关闭即清，region 可达 16MB 级别，勿滞留）。
@@ -63,7 +81,7 @@ function _recompute() {
     em.textContent = `${Math.max(1, Math.round(c.share * 100))}%`;
     const nm = document.createElement("span");
     nm.className = "explode-swatch-name";
-    nm.textContent = colorNameOf(...c.center);
+    nm.textContent = colorNameIn(culture(), ...c.center);
     chip.append(i, em, nm);
     box.appendChild(chip);
   }
@@ -83,6 +101,7 @@ export function openExplodeSheet(L: Layer | null) {
   kInput.max = String(Math.min(8, room));
   if (parseInt(kInput.value, 10) > room) kInput.value = String(room);
   el.msg().classList.add("hidden");
+  el.cultureLabel().textContent = _cultureLabel(culture());
   el.backdrop().classList.remove("hidden");
   el.sheet().classList.remove("hidden");
   document.addEventListener("keydown", _onKey);
@@ -97,15 +116,16 @@ function _commit() {
   // 全分辨率硬分配（预览是采样估计；这里才是定案）。空簇丢弃 → 实际层数可能 < k。
   const centers = _state.clusters.map((c) => c.center);
   const { parts, counts } = partitionByNearest(_state.region, centers);
-  // 命名 = 「原名 颜色名」（颜色名按当前语言烘焙成死字符串）；两簇同名（tok 尤其）→ 加序号。
+  // 命名 = 颜色名本身，无前缀后缀（user 2026-07-30：面板窄，前缀只会挤掉信息量）；
+  //   按选中 culture 烘焙成死字符串；两簇同名（tok 尤其）→ 加序号。
   const kept: { data: Uint8ClampedArray; name: string }[] = [];
   const used = new Map<string, number>();
   for (let c = 0; c < parts.length; c++) {
     if (counts[c] === 0) continue;
-    const cn = colorNameOf(...centers[c]);
+    const cn = colorNameIn(culture(), ...centers[c]);
     const n = (used.get(cn) ?? 0) + 1;
     used.set(cn, n);
-    kept.push({ data: parts[c], name: `${L.name} ${cn}${n > 1 ? ` ${n}` : ""}` });
+    kept.push({ data: parts[c], name: n > 1 ? `${cn} ${n}` : cn });
   }
   if (kept.length < 2) { setStatus(t("ex.empty")); _close(); return; }
   kept.reverse();   // clusters 按占比降序 → 反转后大簇在 parts[0] = 同级最底
@@ -126,6 +146,11 @@ function _commit() {
 
 export function initExplodeSheet(c: AppContext) {
   ctx = c;
+  // 词库下拉：家规 in-app 控件（不用系统 <select>）。换词库只换名字，聚类结果不变。
+  wireInlineSelect("explodeCultureBtn", "explodeCultureMenu",
+    () => CULTURES.map((x) => ({ value: x.value, label: t(x.key) })),
+    () => culture(),
+    (v) => { _culture = v; el.cultureLabel().textContent = _cultureLabel(v); if (_state) _recompute(); });
   el.confirm().addEventListener("click", _commit);
   el.cancel().addEventListener("click", _close);
   el.backdrop().addEventListener("click", _close);

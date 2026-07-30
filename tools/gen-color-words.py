@@ -69,11 +69,11 @@ for k, v in mc.CSS4_COLORS.items():
 xkcd = [(k[5:], v.lower()) for k, v in mc.XKCD_COLORS.items()]
 xkcd.reverse()   # 热度降序（原文件升序）——同类别内先到先得
 for n, h in xkcd:
-    rows.append(("en", n, h, "", 1 if SLANG.search(n) else 0))
+    rows.append(("xkcd", n, h, "", 1 if SLANG.search(n) else 0))
 for c in json.load(io.open(V / "zhongguose-colors.json", encoding="utf-8")):
-    rows.append(("zh", c["name"], c["hex"].lower(), c["pinyin"], 0))
+    rows.append(("zh-trad", c["name"], c["hex"].lower(), c["pinyin"], 0))
 for name, kana, h in json.load(io.open(V / "colordic-wa-colors.json", encoding="utf-8")):
-    rows.append(("ja", name, h, kana, 0))
+    rows.append(("ja-trad", name, h, kana, 0))
 for n, h in TOK:
     rows.append(("tok", n, h, "", 0))
 
@@ -95,11 +95,11 @@ for r in rows:
 out = f'''// 生成物 —— 勿手改，改 tools/gen-color-words.py（含 tok 手工小表）/ vendor/color-words/ 快照后重跑。
 // 全语言统一色词表：行 = [类别, 名, hex, 别名(かな/拼音)?, slang?]。
 // **行序 = parse 优先级**（mpl > css > en > zh > ja > tok，universal → 小众；同类别内 = 热度/表序）。
-// 命名按 UI 语言过滤本表（mpl/css 不是 UI 语言 → 天然不参与命名；slang 行 parse 照认、命名跳过）。
-// 加新语言 = 只加行（消费端零 special-case）。档目：{" · ".join(f"{k} {v}" for k, v in counts.items())}
+// 命名按用户选的 culture 过滤本表（默认按 UI 语言映射；slang 行 parse 照认、命名跳过）。
+// 加新 culture = 只加行（消费端零 special-case）。档目：{" · ".join(f"{k} {v}" for k, v in counts.items())}
 
-/** 类别：技术命名空间（mpl/css）或 UI 语言码。加新语言直接扩这个联合 + 加行。 */
-export type ColorWordCat = "mpl" | "css" | "en" | "zh" | "ja" | "tok";
+/** 类别 = 命名 culture（或技术命名空间 mpl/css）。加新 culture 直接扩这个联合 + 加行。 */
+export type ColorWordCat = "mpl" | "css" | "xkcd" | "zh-trad" | "ja-trad" | "tok";
 /** [类别, 名, hex, 别名(かな/拼音)?, slang?] */
 export type ColorWordRow = [ColorWordCat, string, string, string?, (0 | 1)?];
 

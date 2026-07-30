@@ -15,7 +15,8 @@ import {
   createApp, defineComponent, reactive, ref, computed, watch, onMounted, onUnmounted,
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { hsvToHex, hexToHsv, normalizeHex, sameHex } from "./color-model.ts";
-import { parseColorName } from "../color-name.ts";
+import { parseColorName, searchColorNames } from "../color-name.ts";
+import { attachInputSense, type InputSenseHandle } from "./input-sense.ts";
 import { attachDragValue, type DragValueHandle } from "./drag-value.ts";
 import { t } from "../i18n/index.ts";
 
@@ -87,8 +88,26 @@ export const ColorWheel = defineComponent({
     const hueEl = ref<HTMLElement | null>(null);
     const hueDeg = computed(() => Math.round(hsv.h));
     let _drags: DragValueHandle[] = [];
+    const hexInput = ref<HTMLInputElement | null>(null);
+    let _sense: InputSenseHandle | null = null;
     onMounted(() => {
       draw();
+      // 色名 IntelliSense：通用 input-sense 控件 + 色名数据源（media = 色板 chip）。选中即换色。
+      if (hexInput.value) {
+        _sense = attachInputSense<string>(hexInput.value, {
+          search: (q) => searchColorNames(q).map((it) => {
+            const chip = document.createElement("i");
+            chip.className = "color-chip";
+            chip.style.background = it.hex;
+            return { label: it.name, value: it.hex, media: chip };
+          }),
+          onPick: (it) => {
+            const d = hexToHsv(it.value);
+            hsv.h = d.h; hsv.s = d.s; hsv.v = d.v;
+            commit();
+          },
+        });
+      }
       if (pad.value) {
         _drags.push(attachDragValue(pad.value, {
           getValue: () => ({ x: hsv.s, y: 1 - hsv.v }),
@@ -102,7 +121,7 @@ export const ColorWheel = defineComponent({
         }));
       }
     });
-    onUnmounted(() => { for (const d of _drags) d.dispose(); _drags = []; });
+    onUnmounted(() => { for (const d of _drags) d.dispose(); _drags = []; _sense?.dispose(); _sense = null; });
 
     function onHueKey(e: KeyboardEvent) {
       const d = e.key === "ArrowLeft" || e.key === "ArrowDown" ? -1
@@ -137,7 +156,7 @@ export const ColorWheel = defineComponent({
 
     // i18n：t() 在 setup 调（key 受 tsc 检查），模板只引 L.*（§5a 纪律）。
     const L = { svPad: t("cw.svPad"), hue: t("cw.hue") };
-    return { pad, hueEl, hueDeg, hsv, hex, hexText, onHueKey, onHexKey, onHexBlur, L };
+    return { pad, hueEl, hueDeg, hsv, hex, hexText, hexInput, onHueKey, onHexKey, onHexBlur, L };
   },
   // 多根 = fragment：挂进 .float-panel-body 后三个节点成为它的直接 flex 子节点，
   // DOM 结构与原 index.html 一字不差（样式全 class-based，照旧生效）。
@@ -150,7 +169,7 @@ export const ColorWheel = defineComponent({
     </div>
     <div class="picker-row">
       <span class="picker-preview" :style="{ background: hex }"></span>
-      <input type="text" maxlength="24" :value="hexText" @keydown="onHexKey" @blur="onHexBlur" aria-label="HEX" />
+      <input ref="hexInput" type="text" maxlength="24" :value="hexText" @keydown="onHexKey" @blur="onHexBlur" aria-label="HEX" />
     </div>
   `,
 });
