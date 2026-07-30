@@ -40,11 +40,13 @@
 import type { Layer } from "../doc.ts";
 import { prefilterToSplinePlane, sampleSplinePremult } from "../bspline.ts";
 import type { SplinePlane } from "../bspline.ts";
+import { bicubicSamplePremult } from "../resample-bytes.ts";
 import type { Selection } from "../selection.ts";
 
 interface LiquifySettings {
   bleed?: string;
-  sample?: string;   // v0.6.36 采样核："bilinear"(默认) | "nearest"(像素画) | "spline"(预滤波 B 样条，保锐)
+  sample?: string;   // v0.6.36 采样核 → v0.6.61 默认换双三次（user，对齐 transform 07-29 裁决）：
+                     //   "bicubic"(默认) | "bilinear"(软) | "nearest"(像素画) | "spline"(预滤波 B 样条)
   size: number;
   strength: number;
   mode: string;
@@ -179,6 +181,7 @@ export class LiquifyEngine {
     const ssW = ss.bboxW, ssH = ss.bboxH;
     const ssData = ss.imageData ? ss.imageData.data : null;
     const sampleNearest = st.settings.sample === "nearest";
+    const sampleBilinear = st.settings.sample === "bilinear";   // v0.6.61：不再是缺省核，需显式选
     // v124 (user：「预览的时候没有 apply 选区」) selection mask —— S8 起 doc-space（charter H7）。
     const mask = st.mask;
     const maskData = mask ? mask.data : null;   // 有选区与否的开关（下方分支沿用旧名）
@@ -279,8 +282,8 @@ export class LiquifyEngine {
           }
           // v0.6.36 采样核切换（liquify 是 center-at-integer 约定：位移 0 → 整数坐标 → 三种核都
           //   退化成精确点采样，v147 边缘 march 的"整数 cell 无斑马"性质三核通用）。
-          //   spline 的 4×4 footprint 比 srcFootprintIn 的 2×2 检查宽 2px——选区边缘 bleed 判定
-          //   偏保守地沿用 2×2（误差 ≤ 边界 2px 内的轻微掺样，接受）。
+          //   spline/bicubic 的 4×4 footprint 比 srcFootprintIn 的 2×2 检查宽 2px——选区边缘 bleed
+          //   判定偏保守地沿用 2×2（误差 ≤ 边界 2px 内的轻微掺样，接受）。
           if (st.splinePlane) {
             sampleSplinePremult(st.splinePlane, srcX - ssX, srcY - ssY, ddat, idx);
           } else if (sampleNearest) {
@@ -289,8 +292,11 @@ export class LiquifyEngine {
               const np = (ny * ssW + nx) * 4;
               ddat[idx] = ssData[np]; ddat[idx + 1] = ssData[np + 1]; ddat[idx + 2] = ssData[np + 2]; ddat[idx + 3] = ssData[np + 3];
             }
-          } else {
+          } else if (sampleBilinear) {
             bilinearSample(ssData, ssW, ssH, srcX - ssX, srcY - ssY, ddat, idx);
+          } else {
+            // 缺省核（v0.6.61）：双三次点采样（Catmull-Rom + α 反振铃，越界 tap=0 同 bilinear 口径）
+            bicubicSamplePremult(ssData, ssW, ssH, srcX - ssX, srcY - ssY, ddat, idx);
           }
         }
         // 空 startSnap → ddat 默认 0（透明黑），液化空层无源可推 = 不变

@@ -370,7 +370,7 @@ function _renderFilterBrushToolbar() {
     ssel.id = "filterBrushSampleSel";
     ssel.className = "crop-toolbar-btn";
     ssel.style.padding = "2px 6px";
-    fillResampleSelect(ssel, "liquify", (fb.params.sample as string) || "bilinear");
+    fillResampleSelect(ssel, "liquify", (fb.params.sample as string) || "bicubic");
     ssel.addEventListener("change", () => {
       fb.params = { ...fb.params, sample: ssel.value };
       editorState.liquify.sample = ssel.value;

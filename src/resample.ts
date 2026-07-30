@@ -10,7 +10,7 @@
 // 排序 = 推荐度（user 2026-07-29 真机裁决：加反振铃限幅后 spline 多次插值比双三次无显著提高、
 // 还有一点点卡 → 双三次回默认第一、像素完美第二，spline 降为吃灰档保留）。
 export const RESAMPLE_MODES = [
-  { id: "bicubic",   label: "双三次（高质量）",     contexts: ["transform", "scale"] },
+  { id: "bicubic",   label: "双三次（高质量）",     contexts: ["transform", "scale", "liquify"] },   // v0.6.61 液化补第四核并设默认（对齐 07-29 裁决）
   { id: "rotsprite", label: "像素完美（像素画）",   contexts: ["transform"] },              // RotSprite（src/rotsprite.ts）：EPX 放大+nearest，零糊；摆正态=逐字节置换
   { id: "spline",    label: "样条（多次变换）",     contexts: ["transform", "liquify"] },   // 预滤波三次 B 样条（src/bspline.ts）；真机裁决无显著优势，保留自选
   { id: "sharper",   label: "缩小优化（清晰）",     contexts: ["scale"] },         // step-halving，= PS Bicubic Sharper（适合缩小）；放大退回 bicubic

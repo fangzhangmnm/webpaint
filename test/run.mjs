@@ -36,6 +36,7 @@ import "./resample-bytes.test.mjs"; // 字节重采样：面积平均严格box/a
 import "./png-codec.test.mjs"; // PNG 接缝（UPNG 内脏）：低α无损roundtrip/pHYs
 import "./password-verifier.test.mjs";
 import "./liquify-bilinear.test.mjs";
+import "./liquify-bicubic.test.mjs";
 import "./gallery-model.test.mjs";
 import "./store-folder-listing.test.mjs";   // 2026-07-11 网盘模型：per-folder listFolder/reconcileFolder/watchFolder + 数据安全 guardrail
 import "./store-cloud-naming.test.ts";       // 2026-07-12 回归：裸 session name ↔ 云端 X.ora/X.zip 往返（cutover 漏 fileName + listing 按 path 归一 → 0B/打开空白）

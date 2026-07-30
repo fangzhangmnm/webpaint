@@ -175,7 +175,7 @@ function freshGroups() {
     // v0.6.48 裁剪·模板模式：本文档上次用的模板 id（便利记忆，无 DPI 语义——DPI 活在模板 SSoT，见设计定稿）
     crop:          { templateId: "" as string },
     // sample：液化采样核 "bilinear"|"nearest"|"spline"（v0.6.36 保锐模式；持久化同意随 2026-07-28 批；v0.6.45 默认回 bilinear——真机裁决 spline 无显著优势）
-    liquify:       { bleed: "edge" as string, sample: "bilinear" as string },
+    liquify:       { bleed: "edge" as string, sample: "bicubic" as string },   // v0.6.61 默认双三次（user）
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
     viewport:      null as EditorViewport | null,
     checkboard:    false,
