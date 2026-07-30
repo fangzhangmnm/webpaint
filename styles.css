@@ -2556,10 +2556,13 @@ body[data-mode="gallery"] .board { display: none !important; }
 .crop-wh-input { width: 64px; }
 .crop-safety {
   position: absolute;
-  inset: 3%;                       /* borderless overspray 量级的安全线 */
+  /* inset 由 JS 设（均匀 2% 短边——CSS 百分比 inset 是按轴的，长边会出更多） */
   border: 1px dashed color-mix(in srgb, #4c8bf5 70%, transparent);
   pointer-events: none;
 }
+.crop-rect.tpl-move { pointer-events: auto; cursor: move; }
+.crop-toolbar { flex-wrap: nowrap; white-space: nowrap; }
+.crop-toolbar-btn { white-space: nowrap; font: inherit; font-size: 13px; }
 
 .crop-toolbar-btn[aria-pressed="true"] {
   background: color-mix(in srgb, var(--accent, #4c8bf5) 14%, transparent);

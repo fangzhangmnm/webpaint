@@ -87,6 +87,12 @@ function _renderCropOverlay() {
   if (dim) dim.textContent = tpl
     ? `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)} → ${tpl.tw} × ${tpl.th}`
     : `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)}`;
+  // 安全线：均匀绝对边距 = 2% 短边（borderless overspray 是物理均匀量——按轴百分比会长边出更多，user 指正）
+  const safety = document.getElementById("cropSafety") as HTMLElement | null;
+  if (safety && !safety.classList.contains("hidden")) {
+    const inset = Math.max(2, 0.02 * Math.min(r.w, r.h));
+    safety.style.inset = `${inset}px`;
+  }
 }
 
 // ---- v0.6.48 裁剪·模板模式（设计定稿 docs/20260729-crop-template-mode.md）----
@@ -117,7 +123,8 @@ function _applyCropTemplate(tplId: string) {
     editorState.crop.templateId = tplId;   // desk 便利记忆（无 DPI 语义）
   }
   _cropState.tpl = { tw, th, aspect: tw / th, dpi: tplId === "custom" ? undefined : templateById(tplId)?.dpi };
-  _cropState.rect = fitRectToBBox(_contentBBox(), tw / th, "contain");
+  // 初始框 = 画布矩形的 cover（框⊆画布、居中、比例锁死——不跳出画布，可预期；fit 按钮才按内容 bbox）
+  _cropState.rect = fitRectToBBox({ x: 0, y: 0, w: doc.width, h: doc.height }, tw / th, "cover");
   _syncCropModeUI();
   _renderCropOverlay();
 }
@@ -134,7 +141,8 @@ function _syncCropModeUI() {
   show("cropFitCover", isT); show("cropFitContain", isT);
   show("cropSafety", !!tpl);
   const apply = document.getElementById("cropToolbarApply")!;
-  apply.textContent = tpl ? t("crop.applyTemplate", { w: tpl.tw, h: tpl.th }) : t("common.apply");
+  apply.textContent = t("crop.apply");   // user：commit 叫裁切就行（目标尺寸在框角标上）
+  document.getElementById("cropRect")!.classList.toggle("tpl-move", isT);   // 定尺寸模式框内可整体平移
 }
 function _openCropMode() {
   // v154 (user)：自由裁切要求 rot=0（裁切框是屏幕轴对齐 DOM，doc 旋转会错位）。
@@ -340,9 +348,11 @@ export function initDocOps(ctx: AppContext) {
     document.getElementById("cropModeTemplate")!.addEventListener("click", () => {
       if (!_cropState || _cropState.mode === "template") return;
       _cropState.mode = "template";
-      const remembered = editorState.crop.templateId;
-      if (remembered && templateById(remembered)) tplSel.value = remembered;
-      _applyCropTemplate(tplSel.value);
+      // 默认=自定义、预填当前画布尺寸（user 拍板）→ 初始比例=画布比例、框=整画布，零跳变。
+      tplSel.value = "custom";
+      (document.getElementById("cropCustomW") as HTMLInputElement).value = String(doc.width);
+      (document.getElementById("cropCustomH") as HTMLInputElement).value = String(doc.height);
+      _applyCropTemplate("custom");
     });
     tplSel.addEventListener("change", () => _applyCropTemplate(tplSel.value));
     const onCustom = () => { if (tplSel.value === "custom") _applyCropTemplate("custom"); };
@@ -368,9 +378,14 @@ export function initDocOps(ctx: AppContext) {
       e.preventDefault();
       e.stopPropagation();
       // v125 (user：「crop 的时候 选区不应该点击空白时可拖动，只有拖动 handler 才行」)
-      //   只有 [data-handle] 命中才进 drag；rect 内空白 → no-op（防误碰整体移动）
-      const handle = (e.target as HTMLElement | null)?.dataset?.handle || null;
-      if (!handle) return;
+      //   只有 [data-handle] 命中才进 drag；rect 内空白 → no-op（防误碰整体移动）。
+      // v0.6.50 定尺寸模式例外（user：「框内能不能整体平移」）：比例锁死误碰无损形，框内=move。
+      let handle = (e.target as HTMLElement | null)?.dataset?.handle || null;
+      if (!handle) {
+        const tid = (e.target as HTMLElement | null)?.id;
+        if (_cropState.mode === "template" && (tid === "cropRect" || tid === "cropDim")) handle = "move";
+        else return;
+      }
       // 捕获在 handle 上（overlay 现在 pointer-events:none，捕在它身上不稳）。pointerup 自动释放。
       try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch {}
       _cropState.drag = handle;

@@ -101,3 +101,33 @@ describe("doc.cropResampleTo · 裁剪+重采样原子 op", () => {
     eachLeaf(doc.layers, (l) => l.pixels?.dispose?.());
   });
 });
+
+describe("crop-geometry · fit 语义钉死（v0.6.50，user 报计算可疑后加）", () => {
+  const inside = (a, b) => a.x >= b.x - 1e-9 && a.y >= b.y - 1e-9 && a.x + a.w <= b.x + b.w + 1e-9 && a.y + a.h <= b.y + b.h + 1e-9;
+  const cases = [
+    { bbox: { x: 5, y: 9, w: 1000, h: 600 }, a: 2 / 3 },   // 横内容 × 竖模板
+    { bbox: { x: 0, y: 0, w: 300, h: 900 }, a: 3 / 2 },    // 竖内容 × 横模板
+    { bbox: { x: -20, y: 40, w: 512, h: 512 }, a: 1 },     // 方 × 方（负原点）
+    { bbox: { x: 0, y: 0, w: 640, h: 480 }, a: 4 / 3 },    // 同比例（应恰重合）
+  ];
+  it("填满(cover)：框 ⊆ 内容 bbox（结果无留白）+ 比例锁死 + 居中", () => {
+    for (const { bbox, a } of cases) {
+      const r = fitRectToBBox(bbox, a, "cover");
+      assert(inside(r, bbox), `框应在 bbox 内：${JSON.stringify(r)}`);
+      assert(Math.abs(r.w / r.h - a) < 1e-9, "比例");
+      assert(Math.abs((r.x + r.w / 2) - (bbox.x + bbox.w / 2)) < 1e-9, "水平居中");
+    }
+  });
+  it("全含(contain)：内容 bbox ⊆ 框（不丢东西）+ 比例锁死 + 居中", () => {
+    for (const { bbox, a } of cases) {
+      const r = fitRectToBBox(bbox, a, "contain");
+      assert(inside(bbox, r), `bbox 应在框内：${JSON.stringify(r)}`);
+      assert(Math.abs(r.w / r.h - a) < 1e-9, "比例");
+    }
+  });
+  it("同比例时 cover === contain === bbox", () => {
+    const r1 = fitRectToBBox({ x: 0, y: 0, w: 640, h: 480 }, 4 / 3, "cover");
+    const r2 = fitRectToBBox({ x: 0, y: 0, w: 640, h: 480 }, 4 / 3, "contain");
+    eq(r1.w, 640); eq(r1.h, 480); eq(r2.w, 640); eq(r2.h, 480);
+  });
+});

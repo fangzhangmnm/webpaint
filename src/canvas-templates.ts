@@ -14,15 +14,22 @@ export interface CanvasTemplate {
 }
 
 export const CANVAS_TEMPLATES: CanvasTemplate[] = [
-  // print（物理×DPI→px；打印精确性的来源=比例与像素由模板锁死）
-  { id: "print-4x6-300",  label: "4×6 in · 300dpi",  kind: "print", w: 4, h: 6, unit: "in", dpi: 300 },
-  { id: "print-5x7-300",  label: "5×7 in · 300dpi",  kind: "print", w: 5, h: 7, unit: "in", dpi: 300 },
-  { id: "print-a5-300",   label: "A5 · 300dpi",      kind: "print", w: 148, h: 210, unit: "mm", dpi: 300 },
-  { id: "print-a4-300",   label: "A4 · 300dpi",      kind: "print", w: 210, h: 297, unit: "mm", dpi: 300 },
-  // screen
+  // print（物理×DPI→px；打印精确性的来源=比例与像素由模板锁死）。照片横竖各一（user 2026-07-29）。
+  { id: "print-4x6-300",   label: "4×6 in 竖 · 300dpi", kind: "print", w: 4, h: 6, unit: "in", dpi: 300 },
+  { id: "print-6x4-300",   label: "6×4 in 横 · 300dpi", kind: "print", w: 6, h: 4, unit: "in", dpi: 300 },
+  { id: "print-5x7-300",   label: "5×7 in 竖 · 300dpi", kind: "print", w: 5, h: 7, unit: "in", dpi: 300 },
+  { id: "print-7x5-300",   label: "7×5 in 横 · 300dpi", kind: "print", w: 7, h: 5, unit: "in", dpi: 300 },
+  { id: "print-a5-300",    label: "A5 竖 · 300dpi",     kind: "print", w: 148, h: 210, unit: "mm", dpi: 300 },
+  { id: "print-a5l-300",   label: "A5 横 · 300dpi",     kind: "print", w: 210, h: 148, unit: "mm", dpi: 300 },
+  { id: "print-a4-300",    label: "A4 竖 · 300dpi",     kind: "print", w: 210, h: 297, unit: "mm", dpi: 300 },
+  { id: "print-a4l-300",   label: "A4 横 · 300dpi",     kind: "print", w: 297, h: 210, unit: "mm", dpi: 300 },
+  // screen / 方形工作画布
   { id: "screen-1080x1920", label: "1080×1920（竖屏）", kind: "screen", w: 1080, h: 1920, unit: "px" },
   { id: "screen-1920x1080", label: "1920×1080（横屏）", kind: "screen", w: 1920, h: 1080, unit: "px" },
+  { id: "screen-4096sq",    label: "4096×4096（方）",   kind: "screen", w: 4096, h: 4096, unit: "px" },
   { id: "screen-2048sq",    label: "2048×2048（方）",   kind: "screen", w: 2048, h: 2048, unit: "px" },
+  { id: "screen-1024sq",    label: "1024×1024（方）",   kind: "screen", w: 1024, h: 1024, unit: "px" },
+  { id: "screen-512sq",     label: "512×512（方）",     kind: "screen", w: 512, h: 512, unit: "px" },
   // pixel（「1024 草稿缩回像素」工作流；面积平均整数比=严格 box）
   { id: "pixel-256", label: "256×256（像素画）", kind: "pixel", w: 256, h: 256, unit: "px" },
   { id: "pixel-128", label: "128×128（像素画）", kind: "pixel", w: 128, h: 128, unit: "px" },
