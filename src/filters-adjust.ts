@@ -292,7 +292,9 @@ function _exitFilterBrushMode() {
   _filterBrushPreviousTool = null;
   setStatus(t("mi.exitedFilterBrush"));
 }
-// 渲染 toolbar：title + variant dropdown (if multi) + 退出
+// 渲染 toolbar（v0.6.62 模板化，user：「抽一个所有滤镜笔共用的模板」）：
+//   固定槽位 #filterBrushControls，按 filter 声明的能力**按序**重建 variant → sample → bleed；
+//   笔架/✓ 是模板静态件（index.html）。废掉旧的 insertAdjacentElement 链——位置由模板定，不由插入顺序拼。
 function _renderFilterBrushToolbar() {
   if (!state.filterBrush) return;
   const fb = state.filterBrush;                  // 捕获非空引用（闭包里 state.filterBrush 不被收窄）
@@ -300,17 +302,23 @@ function _renderFilterBrushToolbar() {
   const variantId = fb.variantId;
   const tb = document.getElementById("filterBrushToolbar");
   const title = document.getElementById("filterBrushTitle");
-  if (!tb || !title) return;
+  const slot = document.getElementById("filterBrushControls");
+  if (!tb || !title || !slot) return;
   tb.classList.remove("hidden");
   title.textContent = Filter.title;
-  // dropdown：清掉旧的，按 brushVariants 重建
-  document.getElementById("filterBrushVariantSel")?.remove();
-  const variants = Filter.brushVariants || [];
-  if (variants.length > 1) {
+  slot.innerHTML = "";
+  const mkSel = (id: string) => {
     const sel = document.createElement("select");
-    sel.id = "filterBrushVariantSel";
+    sel.id = id;
     sel.className = "crop-toolbar-btn";
     sel.style.padding = "2px 6px";
+    slot.appendChild(sel);
+    return sel;
+  };
+  // ① 子算法 dropdown（多 variant 才显）
+  const variants = Filter.brushVariants || [];
+  if (variants.length > 1) {
+    const sel = mkSel("filterBrushVariantSel");
     for (const v of variants) {
       const opt = document.createElement("option");
       opt.value = v.id;
@@ -333,17 +341,21 @@ function _renderFilterBrushToolbar() {
       // UI 态不 mark dirty（user 2026-06-10）：variant 选择是工具态，保存时顺手捞；真应用滤镜走 histchange 门。
       setStatus(t("mi.switchedTo", { title: v.title }));
     });
-    // 插在 title 后
-    title.insertAdjacentElement("afterend", sel);
   }
-  // v147 边界取样下拉：仅当 filter 声明 boundaryModes（液化）且有选区时渲染。
-  // feature 声明数据 + 通用渲染 → 删 filter 即删 UI，不再像旧 #liquifyPanel 那样静态腐烂。
-  document.getElementById("filterBrushBleedSel")?.remove();
+  // ② v0.6.36 采样核下拉：声明了 sampleModes 的 filter（液化）常驻渲染。选项 = RESAMPLE_MODES
+  //   的 liquify context（SSoT 复用，与 transform 下拉同源）；持久化 editorState.liquify.sample。
+  if (Filter.sampleModes) {
+    const ssel = mkSel("filterBrushSampleSel");
+    fillResampleSelect(ssel, "liquify", (fb.params.sample as string) || "bicubic");
+    ssel.addEventListener("change", () => {
+      fb.params = { ...fb.params, sample: ssel.value };
+      editorState.liquify.sample = ssel.value;
+    });
+  }
+  // ③ v147 边界取样下拉：仅当 filter 声明 boundaryModes（液化）且有选区时渲染。
+  //   feature 声明数据 + 通用渲染 → 删 filter 即删 UI，不再像旧 #liquifyPanel 那样静态腐烂。
   if (Filter.boundaryModes && doc.selection) {
-    const bsel = document.createElement("select");
-    bsel.id = "filterBrushBleedSel";
-    bsel.className = "crop-toolbar-btn";
-    bsel.style.padding = "2px 6px";
+    const bsel = mkSel("filterBrushBleedSel");
     bsel.title = tLatin("mi.boundaryTooltip");
     const curBleed = fb.params.bleed || "edge";
     for (const b of Filter.boundaryModes) {
@@ -359,23 +371,6 @@ function _renderFilterBrushToolbar() {
       const m = Filter.boundaryModes!.find((b) => b.id === bsel.value);
       setStatus(t("mi.boundary", { mode: m ? m.title : bsel.value }));
     });
-    // 插在 variant select 后（没有 variant 就插 title 后）
-    (document.getElementById("filterBrushVariantSel") || title).insertAdjacentElement("afterend", bsel);
-  }
-  // v0.6.36 采样核下拉：声明了 sampleModes 的 filter（液化）常驻渲染。选项 = RESAMPLE_MODES
-  // 的 liquify context（SSoT 复用，与 transform 下拉同源）；持久化 editorState.liquify.sample。
-  document.getElementById("filterBrushSampleSel")?.remove();
-  if (Filter.sampleModes) {
-    const ssel = document.createElement("select");
-    ssel.id = "filterBrushSampleSel";
-    ssel.className = "crop-toolbar-btn";
-    ssel.style.padding = "2px 6px";
-    fillResampleSelect(ssel, "liquify", (fb.params.sample as string) || "bicubic");
-    ssel.addEventListener("change", () => {
-      fb.params = { ...fb.params, sample: ssel.value };
-      editorState.liquify.sample = ssel.value;
-    });
-    (document.getElementById("filterBrushBleedSel") || document.getElementById("filterBrushVariantSel") || title).insertAdjacentElement("afterend", ssel);
   }
 }
 

@@ -1117,13 +1117,16 @@
     <!-- VP 拖拽手柄层（screen 坐标 DOM；VP 常在画布外也能拖） -->
     <div class="persp-handles hidden" id="perspHandles"></div>
 
-    <!-- v132 Filter brush toolbar：进入模糊笔刷 / 锐化笔刷等 filter brush 模式时浮在顶栏下方 -->
+    <!-- v132 Filter brush toolbar：进入模糊笔刷 / 锐化笔刷等 filter brush 模式时浮在顶栏下方。
+         v0.6.62 模板化（user）：所有滤镜笔共用一个固定槽位模板——
+         title | #filterBrushControls（variant/sample/bleed 按序重建）| sep | 笔架(SVG) | ✓(SVG，对齐裁切工具条图标化)。 -->
     <div class="crop-toolbar hidden" id="filterBrushToolbar">
       <span class="crop-toolbar-label" id="filterBrushTitle" data-i18n="fb.title">滤镜笔刷</span>
+      <span id="filterBrushControls" style="display:contents"></span>
       <span class="crop-toolbar-sep" aria-hidden="true">|</span>
       <!-- v132 (user：「ui 里有一个开笔架的功能，不然笔架关了开不了」) -->
-      <button class="crop-toolbar-btn" id="filterBrushOpenRack" type="button" data-i18n="rack.sheet">笔架</button>
-      <button class="crop-toolbar-btn crop-toolbar-cancel" id="filterBrushExit" type="button" data-i18n="common.exit">退出</button>
+      <button class="crop-toolbar-btn crop-toolbar-icon" id="filterBrushOpenRack" type="button" data-i18n-title="rack.sheet"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#brush-rack"/></svg></button>
+      <button class="crop-toolbar-btn crop-toolbar-icon" id="filterBrushExit" type="button" data-i18n-title="common.exit"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#check"/></svg></button>
     </div>
 
     <!-- v110 自由裁切 overlay：rect + 8 handles + dimmed mask -->
