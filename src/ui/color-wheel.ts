@@ -15,6 +15,7 @@ import {
   createApp, defineComponent, reactive, ref, computed, watch, onMounted, onUnmounted,
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { hsvToHex, hexToHsv, normalizeHex, sameHex } from "./color-model.ts";
+import { parseColorName } from "../color-name.ts";
 import { attachDragValue, type DragValueHandle } from "./drag-value.ts";
 import { t } from "../i18n/index.ts";
 
@@ -113,7 +114,8 @@ export const ColorWheel = defineComponent({
     }
     function onHex(e: Event) {
       const el = e.target as HTMLInputElement;
-      const norm = normalizeHex(el.value);
+      // hex 优先；不是 hex 再按颜色名认（xkcd top-120，四语都收：sky blue / 天蓝 / 空色 / laso sewi）
+      const norm = normalizeHex(el.value) ?? parseColorName(el.value);
       if (!norm) { el.value = props.color; return; }   // 非法：静默还原（组件不持 status）
       const d = hexToHsv(norm);
       hsv.h = d.h; hsv.s = d.s; hsv.v = d.v;
@@ -135,7 +137,7 @@ export const ColorWheel = defineComponent({
     </div>
     <div class="picker-row">
       <span class="picker-preview" :style="{ background: hex }"></span>
-      <input type="text" maxlength="9" :value="hexText" @change="onHex" aria-label="HEX" />
+      <input type="text" maxlength="24" :value="hexText" @change="onHex" aria-label="HEX" />
     </div>
   `,
 });

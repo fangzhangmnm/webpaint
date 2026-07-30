@@ -22,7 +22,8 @@ export function langDisplayName(l: Lang): string {
 
 // 首次运行（无持久化）按系统语言判定。未支持的系统语言 → 英文（更国际；用户 2026-07-07 定）。
 function detectLang(): Lang {
-  const n = (navigator.language || "en").toLowerCase();
+  // node（纯测试环境）没有 navigator → 视作 en；浏览器路径不变。
+  const n = ((globalThis as { navigator?: { language?: string } }).navigator?.language || "en").toLowerCase();
   if (n.startsWith("ja")) return "ja";
   if (n.startsWith("zh")) return "zh";
   if (n.startsWith("tok")) return "tok";

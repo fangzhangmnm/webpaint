@@ -7,6 +7,7 @@
 //   最终硬分配，占比按全分辨率重数、全空簇丢弃——所以落地层数可能 < k（sheet 里如实说明）。
 
 import { clusterColors, partitionByNearest, hexOf, type ColorCluster } from "./color-cluster.ts";
+import { colorNameOf } from "./color-name.ts";
 import { countLeaves, type Layer } from "./doc.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
@@ -60,7 +61,10 @@ function _recompute() {
     i.style.background = hexOf(c.center);
     const em = document.createElement("em");
     em.textContent = `${Math.max(1, Math.round(c.share * 100))}%`;
-    chip.append(i, em);
+    const nm = document.createElement("span");
+    nm.className = "explode-swatch-name";
+    nm.textContent = colorNameOf(...c.center);
+    chip.append(i, em, nm);
     box.appendChild(chip);
   }
   el.confirm().disabled = _state.clusters.length < 2;
@@ -93,10 +97,15 @@ function _commit() {
   // 全分辨率硬分配（预览是采样估计；这里才是定案）。空簇丢弃 → 实际层数可能 < k。
   const centers = _state.clusters.map((c) => c.center);
   const { parts, counts } = partitionByNearest(_state.region, centers);
+  // 命名 = 「原名 颜色名」（颜色名按当前语言烘焙成死字符串）；两簇同名（tok 尤其）→ 加序号。
   const kept: { data: Uint8ClampedArray; name: string }[] = [];
+  const used = new Map<string, number>();
   for (let c = 0; c < parts.length; c++) {
     if (counts[c] === 0) continue;
-    kept.push({ data: parts[c], name: `${L.name} ${hexOf(centers[c])}` });
+    const cn = colorNameOf(...centers[c]);
+    const n = (used.get(cn) ?? 0) + 1;
+    used.set(cn, n);
+    kept.push({ data: parts[c], name: `${L.name} ${cn}${n > 1 ? ` ${n}` : ""}` });
   }
   if (kept.length < 2) { setStatus(t("ex.empty")); _close(); return; }
   kept.reverse();   // clusters 按占比降序 → 反转后大簇在 parts[0] = 同级最底

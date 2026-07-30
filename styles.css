@@ -690,6 +690,14 @@ input[type=range] {
   font-size: 11px;
   color: var(--ink-soft);
 }
+.explode-swatch-name {   /* 颜色名（iPad 无 hover，不能只藏 title）——窄列省略号截断 */
+  font-size: 10px;
+  color: var(--ink-soft);
+  max-width: 52px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .hidden { display: none; }
 .sheet.hidden, .backdrop.hidden { display: block; }

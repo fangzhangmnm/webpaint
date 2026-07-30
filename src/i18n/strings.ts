@@ -181,6 +181,10 @@ export const S = {
   "lp.st.glNeeded":     { zh: "合成需要 WebGL2，当前不可用", en: "Compositing needs WebGL2, which is unavailable", ja: "合成には WebGL2 が必要ですが利用できません", tok: "wan lipu li wile e ilo \"WebGL2\". taso ilo ni li lon ala." }, 
   "lp.st.stamped":      { zh: "已合并全部为新层（其他图层已隐藏）", en: "Collapsed all into a new layer (others hidden)", ja: "すべてを結合して新規レイヤーにしました（他は非表示）", tok: "mi wan e lipu ale tawa lipu sin. lipu ante li kama lukin ala." }, 
   "lp.st.unstamped":    { zh: "已撤销合并", en: "Collapse undone", ja: "結合を取り消しました", tok: "wan li weka" },
+  // 默认图层名词根（doc.ts 起名用，tLatin 取值烘焙成死字符串——见 doc.ts 头注）
+  "doc.layerName":  { zh: "图层", en: "Layer", ja: "レイヤー", tok: "lipu" },
+  "doc.copySuffix": { zh: "副本", en: "copy", ja: "コピー", tok: "sama" },
+  "doc.stampName":  { zh: "合并", en: "Merged", ja: "統合", tok: "lipu wan" },
   // v0.7.9 按颜色拆分（explode-layers sheet）
   "lp.st.exploded":   { zh: "已把「{name}」按颜色拆分为 {k} 层", en: "Split “{name}” into {k} layers by color", ja: "「{name}」を色で {k} レイヤーに分解しました", tok: "lipu \"{name}\" li kama lipu {k} kepeken kule" },
   "lp.st.unexploded": { zh: "已还原拆分：「{name}」", en: "Split undone: “{name}”", ja: "分解を取り消しました：「{name}」", tok: "tu li weka: \"{name}\"" },

@@ -123,6 +123,7 @@ import "./dial-controls.test.mjs";   // dial 写入 setSize/setOpacity + 键盘 
 import "./current-brush.test.mjs";   // currentBrush 反应式接线 + 纯度。v415 发现它一直**没被注册**=从没跑过。
 import "./editor-state-restore.test.mjs";   // adoptLoadedDoc 的 toolStates 反序列化下沉（v98 兼容）。
 import "./color-cluster.test.ts";    // v0.7.9 按颜色拆分：确定性 k-means + 硬分配（分片互斥 ∪=原字节）。
+import "./color-name.test.ts";       // v0.7.10 颜色命名：xkcd top-120 表完整性/四语互异 + OKLab nearest + 四语 parse。
 
 console.log("\n  WebPaint —— vendored OneDriveProvider 适配验收（lib 契约在 sync-store/test/）\n");
 await run();

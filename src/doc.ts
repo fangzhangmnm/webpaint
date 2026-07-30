@@ -13,6 +13,10 @@ import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { LayerPixels, materialize, editRegion as editPixels, editRegionBytes as editPixelsBytes, replaceFromCanvas as replacePixels, disposePixelsSnapshot, type PixelsSnapshot } from "./tiles/tile-layer.ts";
 import { renderNodesToBytes } from "./doc-render.ts";
+// 默认图层名走 i18n 词表（2026-07-30 user：英文模式不该再蹦「图层 1」）。烘焙即定的**死字符串**
+// （换语言不回译）；用 tLatin 不用 t——tok 字体门开着时 t() 会把模板转写成 UCSUR 私区码位，
+// 烘进 .ora 的名字必须是可移植 ASCII/原文。i18n 模块刻意 node-eval 安全（见 app-prefs 头注）。
+import { tLatin } from "./i18n/index.ts";
 import { resampleBytes } from "./resample-bytes.ts";
 
 export const DEFAULT_DOC_SIZE = 2048;
@@ -126,7 +130,7 @@ export class Layer {
   constructor({ width, height, name }: { width: number; height: number; name?: string; empty?: boolean } = {} as { width: number; height: number; name?: string; empty?: boolean }) {
     this.id = _layerIdCounter++;
     this.isGroup = false;            // 树节点判别：Layer=叶。LayerGroup 覆为 true。
-    this.name = name || `图层 ${this.id}`;
+    this.name = name || `${tLatin("doc.layerName")} ${this.id}`;
     this.visible = true;
     this.opacity = 1;
     this.mode = "source-over";       // Canvas2D globalCompositeOperation
@@ -416,7 +420,7 @@ export class PaintDoc {
   constructor({ width = DEFAULT_DOC_SIZE, height = DEFAULT_DOC_SIZE }: { width?: number; height?: number } = {}) {
     this.width = width;
     this.height = height;
-    this.layers = [new Layer({ width, height, name: "图层 1" })];
+    this.layers = [new Layer({ width, height, name: `${tLatin("doc.layerName")} 1` })];
     this.activeId = this.layers[0].id;   // active = 节点 id（可叶可组）。activeIndex 是扁平叶序兼容垫片。
     // 背景色：手感期固定白纸。后期开 doc.background 概念时再补。
     this.backgroundColor = "#ffffff";
@@ -561,14 +565,19 @@ export class PaintDoc {
     return L;
   }
 
-  _nextLayerName() {
-    const re = /^图层\s*(\d+)$/;
+  // 找现有「<前缀> N」最大 N（前缀 = 当前语言的默认图层名；旧文档里别语言起的名不计数，共存无害）。
+  _nextLayerNum() {
+    const prefix = tLatin("doc.layerName") + " ";
     let max = 0;
     for (const L of flattenLeaves(this.layers)) {
-      const m = re.exec(L.name);
-      if (m) max = Math.max(max, parseInt(m[1], 10));
+      if (!L.name.startsWith(prefix)) continue;
+      const rest = L.name.slice(prefix.length);
+      if (/^\d+$/.test(rest)) max = Math.max(max, parseInt(rest, 10));
     }
-    return `图层 ${max + 1}`;
+    return max + 1;
+  }
+  _nextLayerName() {
+    return `${tLatin("doc.layerName")} ${this._nextLayerNum()}`;
   }
 
   // 删除指定节点（id；叶或组——组连带 children）。默认 doc 至少留 1 个叶（守底）。
@@ -663,7 +672,7 @@ export class PaintDoc {
   //   「其他图层自动隐藏」由调用方编排（组走 treeStructure 快照，叶 visible 走 layerProp op）。
   stampAllToTopLayer(merged: { data: Uint8ClampedArray; w: number; h: number }) {
     if (countLeaves(this.layers) >= this.maxLayers) return null;
-    const L = new Layer({ width: this.width, height: this.height, name: `合并 ${this._nextLayerName().replace(/^图层\s*/, "")}`, empty: true });
+    const L = new Layer({ width: this.width, height: this.height, name: `${tLatin("doc.stampName")} ${this._nextLayerNum()}`, empty: true });
     L.replaceFromBytes(merged.data, 0, 0, merged.w, merged.h);
     this.layers.push(L);
     this.activeId = L.id;
@@ -813,7 +822,7 @@ export class PaintDoc {
     const src = loc.node;
     if (src.isGroup) return { ok: false, reason: "missing" };   // 组复制留 P2（深拷整子树）
     const snap = src.snapshot();   // 句柄共享（tile 只读 + copy-on-write：编辑任一方才分叉）→ 复制瞬时零拷贝
-    const L = new Layer({ width: this.width, height: this.height, name: `${src.name} 副本`, empty: true });
+    const L = new Layer({ width: this.width, height: this.height, name: `${src.name} ${tLatin("doc.copySuffix")}`, empty: true });
     L.visible = src.visible;
     L.opacity = src.opacity;
     L.mode = src.mode;
