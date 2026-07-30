@@ -329,6 +329,11 @@ body[data-tool="fill"] .board { cursor: crosshair; }
   gap: 8px;
 }
 .lasso-popup-row > span:first-child { color: var(--ink-soft); }
+/* v0.7.3 扳手算法配置行：flex 布局走类不走 inline style——inline display 会压死 .hidden，
+   行按当前算法显隐就失效（v0.7.2 两套参数同显的根因） */
+.algo-cfg-row { display: flex; align-items: center; gap: 6px; }
+.algo-cfg-row.hidden { display: none; }
+.algo-cfg-row > span:first-child { color: var(--ink-soft); }
 .lasso-popup-val { text-align: right; font-variant-numeric: tabular-nums; }
 .lasso-popup-row input[type="range"] { width: 100%; }
 

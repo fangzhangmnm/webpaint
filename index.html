@@ -750,18 +750,18 @@
          slider/stepper 连按不关（手动 toggle + 外点关，同 lassoMagicExpandMenu）。全 RAM-only 除经典容差
          （容差沿用 editorState.magicWand.threshold，per-doc 持久化不变，只是 UI 搬家）。 -->
     <div class="lasso-popup hidden" id="lassoAlgoCfgMenu" role="menu" data-i18n-aria="la.algoCfg" style="width:max-content; min-width:0;">
-      <div class="lasso-popup-row algo-cfg-classic" style="display:flex; align-items:center; gap:6px;">
+      <div class="algo-cfg-row algo-cfg-classic">
         <span data-i18n="la.threshold">阈值</span>
         <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" style="width:108px;" data-i18n-aria="la.threshold" />
         <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
       </div>
-      <div class="lasso-popup-row algo-cfg-lineart" style="display:flex; align-items:center; gap:6px;">
+      <div class="algo-cfg-row algo-cfg-lineart">
         <span data-i18n="la.closeDist">闭合距离</span>
         <button class="lasso-tool-btn" id="lassoDmaxMinus" type="button" aria-label="−">−</button>
         <span class="lasso-popup-val" id="lassoDmaxVal">64</span>
         <button class="lasso-tool-btn" id="lassoDmaxPlus" type="button" aria-label="＋">＋</button>
       </div>
-      <div class="lasso-popup-row algo-cfg-lineart" style="display:flex; align-items:center; gap:6px;">
+      <div class="algo-cfg-row algo-cfg-lineart">
         <span data-i18n="la.inkThreshold">墨线判定</span>
         <input type="range" id="lassoInkThreshold" min="0" max="100" step="1" value="50" style="width:88px;" data-i18n-aria="la.inkThreshold" />
         <span id="lassoInkThresholdVal" class="lasso-popup-val">50</span>
