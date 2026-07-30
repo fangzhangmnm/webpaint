@@ -1,26 +1,35 @@
-// color-name（颜色 ↔ 名字，全语言统一大表）：表完整性门 + 按语言命名（OKLab nearest）+
-// 全语言 parse（行序 = 优先级 mpl > css > en > zh > ja > tok）。
+// color-name（颜色 ↔ 名字，数据 = color-words.json 独立 asset）：数据契约门 + 按 culture 命名
+// （OKLab nearest）+ 全词库 parse + 色温 + `category:` 前缀浏览。
+// 词库完整性（hex/类内唯一/别名撞车/parent 两级）由 20260730 Colors 的 build.py 把守；
+// 这里守的是**宿主消费契约**：格式能 adopt、各查询面行为对。
+import { readFileSync } from "node:fs";
 import { test, eq, assert } from "./runner.mjs";
-import { COLOR_WORDS } from "../src/color-words.ts";
-import { colorNameIn, parseColorName, searchColorNames } from "../src/color-name.ts";
+import {
+  _adoptColorWords, colorNameIn, parseColorName, searchColorNames,
+  kelvinToHex, namingCategories, categoryLabel,
+} from "../src/color-name.ts";
 
-test("表完整性：六类别都在、规模对、hex 合法、en/zh/ja 同语言内名字互异（tok 多锚点豁免）", () => {
+const DATA = JSON.parse(readFileSync(new URL("../color-words.json", import.meta.url), "utf-8"));
+_adoptColorWords(DATA);
+
+test("数据契约：categories 元数据齐全、六库都在、词行挂已知类", () => {
+  const ids = new Set<string>();
+  for (const c of DATA.categories) {
+    for (const k of ["id", "label", "aliases", "naming", "default_for"]) assert(k in c, `category ${c.id} 缺 ${k}`);
+    ids.add(c.id);
+  }
+  for (const want of ["mpl", "css", "xkcd", "zh-trad", "ja-trad", "tok"]) assert(ids.has(want), `缺 ${want}`);
   const counts = new Map<string, number>();
-  for (const [cat, name, hex] of COLOR_WORDS) {
+  for (const [cat, name, hex] of DATA.words) {
+    assert(ids.has(cat), `词行挂未知类: ${cat} ${name}`);
+    assert(/^#[0-9a-f]{6}$/.test(hex), `hex 非法: ${name} ${hex}`);
     counts.set(cat, (counts.get(cat) ?? 0) + 1);
-    assert(/^#[0-9a-f]{6}$/.test(hex), `hex 非法: ${cat} ${name} ${hex}`);
-    assert(name.length > 0, "空名");
   }
-  for (const cat of ["mpl", "css", "xkcd", "zh-trad", "ja-trad", "tok"]) assert((counts.get(cat) ?? 0) > 0, `缺类别 ${cat}`);
-  assert(counts.get("xkcd")! > 900 && counts.get("zh-trad")! > 500 && counts.get("ja-trad")! > 400, "全表规模不对");
-  for (const check of ["xkcd", "zh-trad", "ja-trad"]) {
-    const seen = new Set<string>();
-    for (const [cat, name] of COLOR_WORDS) {
-      if (cat !== check) continue;
-      assert(!seen.has(name), `${check} 表内撞名: ${name}`);
-      seen.add(name);
-    }
-  }
+  assert(counts.get("xkcd")! > 900 && counts.get("zh-trad")! > 500 && counts.get("ja-trad")! > 400, "规模不对");
+  // 命名词库清单（sheet 下拉数据源）来自元数据
+  const naming = namingCategories().map((c) => c.id);
+  assert(naming.includes("zh-trad") && naming.includes("tok") && !naming.includes("mpl") && !naming.includes("css"), `naming 清单不对: ${naming}`);
+  eq(categoryLabel("zh-trad"), "中国传统色");
 });
 
 test("命名按 culture 分表（≠localization）：同一颜色各词库各得其名（OKLab nearest）", () => {
@@ -30,59 +39,70 @@ test("命名按 culture 分表（≠localization）：同一颜色各词库各�
   eq(colorNameIn("tok", 3, 67, 223), "laso");
   eq(colorNameIn("tok", 255, 255, 255), "walo");
   eq(colorNameIn("tok", 0x75, 0xbb, 0xfd), "laso sewi");
+  eq(colorNameIn("fr", 229, 0, 0), "red");   // 未收录 culture 兜底 xkcd（加词库只加行）
 });
 
-test("slang flag：parse 照认、命名跳过；未收录 culture fallback xkcd", () => {
+test("slang flag：parse 照认、命名跳过", () => {
   eq(parseColorName("puke green"), "#9aae07");
   const n = colorNameIn("xkcd", 0x9a, 0xae, 0x07);
   assert(n !== "puke green", `命名蹦出 slang: ${n}`);
-  eq(colorNameIn("fr", 229, 0, 0), "red");   // 加新 culture 只加行；没行的兜底 xkcd
 });
 
-test("parse 全语言搜索，行序 = 优先级（universal → 小众）", () => {
+test("parse 全词库，行序 = 优先级（universal → 小众）", () => {
   eq(parseColorName("b"), "#0000ff");           // mpl 单字母
-  eq(parseColorName("K"), "#000000");
-  eq(parseColorName("tab:blue"), "#1f77b4");    // mpl tab: 配色（三种写法都认）
+  eq(parseColorName("tab:blue"), "#1f77b4");    // mpl tab:（"tab" 不是 category → 落回字典）
   eq(parseColorName("tab blue"), "#1f77b4");
-  eq(parseColorName("tabblue"), "#1f77b4");
   eq(parseColorName("blue"), "#0000ff");        // css 标准化石值压过 xkcd #0343df（user 点名对齐标准）
   eq(parseColorName("sky blue"), "#75bbfd");    // 带空格 = xkcd 写法 → 众包质心
   eq(parseColorName("skyblue"), "#87ceeb");     // 连写 = css 关键字写法 → css 值
-  eq(parseColorName("  Sky  BLUE "), "#75bbfd");
-  eq(parseColorName("月白"), "#eef7f2");         // 中国传统色（zhongguose 快照 526）
+  eq(parseColorName("月白"), "#eef7f2");
   eq(parseColorName("yuebai"), "#eef7f2");       // 拼音别名
-  eq(parseColorName("茜色"), "#b7282e");         // 和色大辞典（colordic 快照 462）
   eq(parseColorName("あかねいろ"), "#b7282e");   // かな别名
-  eq(parseColorName("苔色"), "#69821b");         // 和色值（命名/parse 同表自洽）
-  eq(parseColorName("laso"), "#0343df");         // tok 裸词首选 = 蓝（表内首行）
-  eq(parseColorName("laso sewi"), "#75bbfd");
+  eq(parseColorName("laso"), "#0343df");         // tok 裸词首选 = 蓝
   eq(parseColorName("nicht eine farbe"), null);
   eq(parseColorName("#ff0000"), null);           // hex 不归本模块（调用方先走 normalizeHex）
 });
 
-test("命名 ↔ parse 往返自洽（各语言抽查）", () => {
-  // 抽几个各语言的锚点色：命名得 X，parse(X) 回到同一 hex（同表同行）
-  for (const [langCat, hex] of [["zh-trad", "#f9f4dc"], ["ja-trad", "#fef4f4"], ["xkcd", "#75bbfd"]] as const) {
-    const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
-    const name = colorNameIn(langCat, r, g, b);
-    eq(parseColorName(name), hex, `${langCat} ${name}`);
+test("色温：5600k 等直接算 Planck 黑体色（纯数学，parse/sense 都认）", () => {
+  const d65 = kelvinToHex(6500);
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(d65.slice(i, i + 2), 16));
+  assert(r > 235 && g > 235 && b > 235, `6500K 应接近白: ${d65}`);
+  const warm = kelvinToHex(2000);
+  const [wr, , wb] = [1, 3, 5].map((i) => parseInt(warm.slice(i, i + 2), 16));
+  assert(wr === 255 && wb < 120, `2000K 应显著偏暖: ${warm}`);
+  // 蓝通道随色温单调不减（暖 → 冷）
+  let prev = -1;
+  for (const t of [2000, 3200, 4500, 5600, 6500, 9000]) {
+    const bb = parseInt(kelvinToHex(t).slice(5, 7), 16);
+    assert(bb >= prev, `蓝通道非单调 @${t}K`);
+    prev = bb;
   }
+  eq(parseColorName("5600k"), kelvinToHex(5600));
+  eq(parseColorName("5600 K"), kelvinToHex(5600));
+  const sense = searchColorNames("5600k");
+  eq(sense.length, 1);
+  eq(sense[0].name, "5600K");
 });
 
-test("searchColorNames（IntelliSense 数据面）：前缀优先、别名命中、空查询空结果", () => {
-  eq(searchColorNames("").length, 0);
+test("`category:` 前缀 = 浏览整板（id/别名/label 都认，rest 再过滤，保持源序）", () => {
+  eq(searchColorNames("zh-trad:").length, 526);          // 裸前缀 = 整板
+  eq(searchColorNames("中国传统色:").length, 526);        // label 也认
+  eq(searchColorNames("zh:").length, 526);               // 别名也认
+  eq(searchColorNames("zh-trad:")[0].name, DATA.words.find((w: string[]) => w[0] === "zh-trad")![1]);   // 源序
+  const bai = searchColorNames("zh:白");
+  assert(bai.length > 5 && bai.every((x) => x.name.includes("白")), "类内过滤全含「白」");
+  eq(parseColorName("css:blue"), "#0000ff");             // 类内精确取名
+  eq(parseColorName("ja:茜色"), "#b7282e");
+  eq(parseColorName("zh-trad:不存在的色"), null);         // 类内找不到不落回全字典
+  eq(searchColorNames("notacat:x").length, 0);           // 未知 token 落回普通查询（无命中）
+});
+
+test("普通联想：前缀优先/子串保底/别名命中/默认无上限", () => {
   const sky = searchColorNames("sky");
-  assert(sky.length >= 2, "sky 候选太少");
-  assert(sky.some((x) => x.name === "skyblue") && sky.some((x) => x.name === "sky blue"), "css/xkcd 两写法都该在");
-  eq(searchColorNames("月白")[0].name, "月白");
-  eq(searchColorNames("yueb")[0].name, "月白");        // 拼音前缀 → 正名
-  eq(searchColorNames("あかね")[0].name, "茜色");      // かな前缀 → 正名
-  for (const it of searchColorNames("las")) assert(/^#[0-9a-f]{6}$/.test(it.hex));
-  assert(searchColorNames("las").some((x) => x.name.startsWith("laso")), "tok 词也可联想");
-  // 中间/尾缀命中保底槽位（user：输「黄」必须查得到「xx黄」，不能被黄x前缀挤光）
-  const huang = searchColorNames("黄", 8);
-  assert(huang.some((x) => x.name.indexOf("黄") > 0), `尾缀命中被挤光: ${huang.map((x) => x.name).join(",")}`);
-  assert(huang.some((x) => x.name.startsWith("黄")), "前缀命中也该在");
-  // 默认无上限：全部命中都返回（菜单限高滚动）
-  assert(searchColorNames("黄").length > huang.length, "默认应不设上限");
+  assert(sky.some((x) => x.name === "skyblue") && sky.some((x) => x.name === "sky blue"));
+  eq(searchColorNames("yueb")[0].name, "月白");
+  const huang8 = searchColorNames("黄", 8);
+  assert(huang8.some((x) => x.name.indexOf("黄") > 0), "尾缀命中被挤光");
+  assert(huang8.some((x) => x.name.startsWith("黄")), "前缀命中也该在");
+  assert(searchColorNames("黄").length > huang8.length, "默认应不设上限");
 });

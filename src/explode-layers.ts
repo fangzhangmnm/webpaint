@@ -7,7 +7,7 @@
 //   最终硬分配，占比按全分辨率重数、全空簇丢弃——所以落地层数可能 < k（sheet 里如实说明）。
 
 import { clusterColors, partitionByNearest, hexOf, type ColorCluster } from "./color-cluster.ts";
-import { colorNameIn, defaultCulture } from "./color-name.ts";
+import { colorNameIn, defaultCulture, namingCategories, categoryLabel } from "./color-name.ts";
 import { wireInlineSelect } from "./inline-select.ts";
 import { makeRampSlider, type RampSliderHandle } from "./ui/ramp-slider.ts";
 import { countLeaves, type Layer } from "./doc.ts";
@@ -18,20 +18,11 @@ let ctx: AppContext;
 
 const byId = (id: string) => document.getElementById(id) as HTMLElement;
 // 色名 culture（≠ localization，user 2026-07-30：二次元场景中国传统色远优于 western）。
-// session 内记住上次选择；不持久化（进 editorState/store 需另获 user 同意）。初值按 localization。
-const CULTURES: { value: string; key: "ex.cul.zhTrad" | "ex.cul.jaTrad" | "ex.cul.xkcd" | "ex.cul.css" | "ex.cul.tok" }[] = [
-  { value: "zh-trad", key: "ex.cul.zhTrad" },
-  { value: "ja-trad", key: "ex.cul.jaTrad" },
-  { value: "xkcd", key: "ex.cul.xkcd" },
-  { value: "css", key: "ex.cul.css" },
-  { value: "tok", key: "ex.cul.tok" },
-];
+// 词库清单/显示名全部来自 color-words.json 的 category 元数据（加词库零改码）；
+// session 内记住上次选择、**不缓存默认值**（词库是异步 asset，数据到位前 defaultCulture
+// 只会兜底 xkcd——别把兜底烧死成用户选择）；不持久化（进 editorState/store 需另获 user 同意）。
 let _culture: string | null = null;
-function culture(): string { return _culture ?? (_culture = defaultCulture()); }
-function _cultureLabel(v: string): string {
-  const c = CULTURES.find((x) => x.value === v);
-  return c ? t(c.key) : v;
-}
+function culture(): string { return _culture ?? defaultCulture(); }
 
 const el = {
   backdrop: () => byId("explodeBackdrop"),
@@ -112,7 +103,7 @@ export function openExplodeSheet(L: Layer | null) {
   });
   el.kRow().appendChild(_kSlider.el);
   el.msg().classList.add("hidden");
-  el.cultureLabel().textContent = _cultureLabel(culture());
+  el.cultureLabel().textContent = categoryLabel(culture());
   el.backdrop().classList.remove("hidden");
   el.sheet().classList.remove("hidden");
   document.addEventListener("keydown", _onKey);
@@ -157,11 +148,11 @@ function _commit() {
 
 export function initExplodeSheet(c: AppContext) {
   ctx = c;
-  // 词库下拉：家规 in-app 控件（不用系统 <select>）。换词库只换名字，聚类结果不变。
+  // 词库下拉：家规 in-app 控件（不用系统 <select>）；条目开时现建 → 数据晚到也能拿到全清单。
   wireInlineSelect("explodeCultureBtn", "explodeCultureMenu",
-    () => CULTURES.map((x) => ({ value: x.value, label: t(x.key) })),
+    () => namingCategories().map((c) => ({ value: c.id, label: c.label })),
     () => culture(),
-    (v) => { _culture = v; el.cultureLabel().textContent = _cultureLabel(v); if (_state) _recompute(); });
+    (v) => { _culture = v; el.cultureLabel().textContent = categoryLabel(v); if (_state) _recompute(); });
   el.confirm().addEventListener("click", _commit);
   el.cancel().addEventListener("click", _close);
   el.backdrop().addEventListener("click", _close);

@@ -194,12 +194,7 @@ export const S = {
   "ex.commit":  { zh: "拆分",   en: "Split",  ja: "分解", tok: "o tu" },
   "ex.empty":   { zh: "图层没有可拆分的内容", en: "Layer has nothing to split", ja: "分解できる内容がありません", tok: "lipu li jo e ala" },
   "ex.culture": { zh: "色名词库", en: "Color names", ja: "色名辞典", tok: "nimi kule" },
-  // 词库名 = culture 固有名，各语言仅微调写法（色名本身不翻译，就用词库自己的语言）
-  "ex.cul.zhTrad": { zh: "中国传统色", en: "Chinese traditional", ja: "中国の伝統色", tok: "kule pi ma Sonko" },
-  "ex.cul.jaTrad": { zh: "日本传统色", en: "Japanese traditional", ja: "日本の伝統色", tok: "kule pi ma Nijon" },
-  "ex.cul.xkcd":   { zh: "xkcd 英文", en: "xkcd", ja: "xkcd", tok: "xkcd" },
-  "ex.cul.css":    { zh: "CSS 标准", en: "CSS", ja: "CSS", tok: "CSS" },
-  "ex.cul.tok":    { zh: "toki pona", en: "toki pona", ja: "toki pona", tok: "toki pona" },
+  // 词库显示名不再走 i18n——color-words.json 的 category.label（culture 自己语言）就是显示名。
   "ex.tooMany": { zh: "图层数已接近上限 {n}，放不下拆分结果", en: "Too close to the layer limit ({n}) to split", ja: "レイヤー上限 {n} に近く、分解結果を置けません", tok: "lipu li mute sewi ({n}). tu li ken ala." },
   "lp.st.deletedGroup":{ zh: "已删除组「{name}」", en: "Deleted group “{name}”", ja: "グループ「{name}」を削除", tok: "kulupu \"{name}\" li weka" }, 
   "lp.st.mergeIntoGroup": { zh: "下方是图层组，不能合并进去", en: "Below is a group — can't merge into it", ja: "下がグループのため結合できません", tok: "anpa li kulupu. wan li ken ala." },
