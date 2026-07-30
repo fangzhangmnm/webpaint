@@ -10,7 +10,6 @@ import { bumpDoc } from "./signals.ts";
 import { t } from "./i18n/index.ts";
 import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } from "./crop-geometry.ts";
 import { CANVAS_TEMPLATES, templatePx, templateById } from "./canvas-templates.ts";
-import { flattenLeaves } from "./doc.ts";
 import { editorState } from "./workbench-state.ts";
 import { remapShapePersp, snapshotShapePersp } from "./workbench-state.ts";
 import type { AppContext } from "./app-context.ts";
@@ -95,18 +94,7 @@ function _renderCropOverlay() {
   }
 }
 
-// ---- v0.6.48 裁剪·模板模式（设计定稿 docs/20260729-crop-template-mode.md）----
-// 内容 bbox = 所有叶非空 bbox 并集（fit 的基准；空 doc 退化画布矩形）。
-function _contentBBox() {
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const L of flattenLeaves(doc.layers)) {
-    if (L.bboxW <= 0 || L.bboxH <= 0) continue;
-    x0 = Math.min(x0, L.bboxX); y0 = Math.min(y0, L.bboxY);
-    x1 = Math.max(x1, L.bboxX + L.bboxW); y1 = Math.max(y1, L.bboxY + L.bboxH);
-  }
-  if (!(x1 > x0)) return { x: 0, y: 0, w: doc.width, h: doc.height };
-  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-}
+// ---- v0.6.48 裁剪·定尺寸模式（设计定稿 docs/20260729-crop-template-mode.md；fit 基准=原画布，v0.6.51 user 纠正）----
 // 模板控件显隐 + 目标换算 + 框吸到 contain-fit。tplId="custom" 读 wh 输入框。
 function _applyCropTemplate(tplId: string) {
   if (!_cropState) return;
@@ -358,14 +346,17 @@ export function initDocOps(ctx: AppContext) {
     const onCustom = () => { if (tplSel.value === "custom") _applyCropTemplate("custom"); };
     (document.getElementById("cropCustomW") as HTMLInputElement).addEventListener("input", onCustom);
     (document.getElementById("cropCustomH") as HTMLInputElement).addEventListener("input", onCustom);
+    // fit 基准 = **原画布**（user 2026-07-29 纠正——不是内容 bbox）。命名对齐 Windows 壁纸模式：
+    //   填充(Fill)=框⊆画布盖满无留白（画布出框部分裁掉）；适应(Fit)=画布⊆框全装进（四周留白）。
+    const canvasRect = () => ({ x: 0, y: 0, w: doc.width, h: doc.height });
     document.getElementById("cropFitCover")!.addEventListener("click", () => {
       if (!_cropState?.tpl) return;
-      _cropState.rect = fitRectToBBox(_contentBBox(), _cropState.tpl.aspect, "cover");
+      _cropState.rect = fitRectToBBox(canvasRect(), _cropState.tpl.aspect, "cover");
       _renderCropOverlay();
     });
     document.getElementById("cropFitContain")!.addEventListener("click", () => {
       if (!_cropState?.tpl) return;
-      _cropState.rect = fitRectToBBox(_contentBBox(), _cropState.tpl.aspect, "contain");
+      _cropState.rect = fitRectToBBox(canvasRect(), _cropState.tpl.aspect, "contain");
       _renderCropOverlay();
     });
   }
