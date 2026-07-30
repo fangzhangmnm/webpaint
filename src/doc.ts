@@ -960,6 +960,36 @@ export class PaintDoc {
   // v112: 裁切 doc 到 rect（doc 坐标 {x, y, w, h}）。
   // v110 偷懒只改 bbox 不真裁 canvas，导致裁后旧像素 bbox 偏到 -X 露在 void 上
   // → user 画的东西落在新 doc 外 (实际是落在旧 bbox 区域)。修：真 clip layer canvas。
+  // 裁剪·模板模式 commit（v0.6.48）：「裁剪 + 重采样到目标 px」原子 op，保层继续画。
+  //   frame 可超 doc（外=透明）；逐层只处理 frame∩bbox 子矩形（保 tile 稀疏性）；
+  //   resample-bytes：auto=缩小面积平均（整数比=严格 box，像素模板鲁棒）/放大双三次。
+  //   frame 恰 = 目标 px 且整数 → resampleBytes 恒等路径 = 纯裁剪逐字节。
+  cropResampleTo(frame: { x: number; y: number; w: number; h: number }, tw: number, th: number, mode = "auto") {
+    const fx = frame.x, fy = frame.y, fw = Math.max(1, frame.w), fh = Math.max(1, frame.h);
+    const sx = tw / fw, sy = th / fh;
+    for (const L of flattenLeaves(this.layers)) {
+      const ix0 = Math.max(fx, L.bboxX), iy0 = Math.max(fy, L.bboxY);
+      const ix1 = Math.min(fx + fw, L.bboxX + L.bboxW), iy1 = Math.min(fy + fh, L.bboxY + L.bboxH);
+      const iw = Math.ceil(ix1 - ix0), ih = Math.ceil(iy1 - iy0);
+      if (iw <= 0 || ih <= 0) { L.remapPixelsBytes(tw, th, null, 0, 0, 0, 0); continue; }
+      const srcBytes = L.pixels.getRegion(Math.floor(ix0), Math.floor(iy0), iw, ih);
+      const nbx = Math.floor((ix0 - fx) * sx), nby = Math.floor((iy0 - fy) * sy);
+      const nbw = Math.max(1, Math.min(tw - nbx, Math.round(iw * sx)));
+      const nbh = Math.max(1, Math.min(th - nby, Math.round(ih * sy)));
+      const out = resampleBytes(srcBytes, iw, ih, nbw, nbh, mode);
+      L.remapPixelsBytes(tw, th, out, nbx, nby, nbw, nbh);
+    }
+    if (this.selection) {
+      const old = this.selection;
+      const cropped = old.croppedTo(Math.round(fx), Math.round(fy), Math.round(fw), Math.round(fh));
+      if (cropped !== old) old.dispose();
+      this.selection = cropped ? cropped.resampledTo(sx, sy) : null;
+      if (cropped && cropped !== this.selection) cropped.dispose();
+    }
+    this.width = tw;
+    this.height = th;
+  }
+
   cropTo(rect: { x: number; y: number; w: number; h: number }) {
     const dx = rect.x | 0, dy = rect.y | 0, nw = Math.max(1, rect.w | 0), nh = Math.max(1, rect.h | 0);
     for (const L of flattenLeaves(this.layers)) {

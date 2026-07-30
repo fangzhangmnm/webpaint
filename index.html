@@ -53,7 +53,7 @@
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon-180.png" />
-    <link rel="stylesheet" href="./styles.css?v=8c56b21f9340" />
+    <link rel="stylesheet" href="./styles.css?v=7efd8d2a12f0" />
     <!-- zip.js UMD bundle：自挂 window.zip。必须在 module bundle 之前。
          defer（v417）：原来是 parser-blocking 的，硬刷新时 SW 被绕过 → 直奔网络 → 网络一卡整个
          文档解析就停住（浏览器标签页转圈）。defer 后它与下面的 type=module bundle 同属延迟脚本、
@@ -993,7 +993,17 @@
 
     <!-- v110 自由裁切：toolbar (8-handle crop) -->
     <div class="crop-toolbar hidden" id="cropToolbar">
-      <span class="crop-toolbar-label" data-i18n="crop.hint">裁切：拖角 / 边 / 框内移动</span>
+      <select class="crop-toolbar-btn" id="cropModeSel" data-i18n-title="crop.mode">
+        <option value="free" data-i18n="crop.modeFree">自由</option>
+        <option value="template" data-i18n="crop.modeTemplate">模板</option>
+      </select>
+      <select class="crop-toolbar-btn hidden" id="cropTemplateSel"></select>
+      <input class="crop-toolbar-btn crop-wh-input hidden" id="cropCustomW" type="number" min="1" max="8192" placeholder="宽px" />
+      <span class="hidden" id="cropCustomX" aria-hidden="true">×</span>
+      <input class="crop-toolbar-btn crop-wh-input hidden" id="cropCustomH" type="number" min="1" max="8192" placeholder="高px" />
+      <button class="crop-toolbar-btn hidden" id="cropFitCover" type="button" data-i18n="crop.fitCover">填满</button>
+      <button class="crop-toolbar-btn hidden" id="cropFitContain" type="button" data-i18n="crop.fitContain">全含</button>
+      <span class="crop-toolbar-label" id="cropHintLabel" data-i18n="crop.hint">裁切：拖角 / 边 / 框内移动</span>
       <span class="crop-toolbar-sep" aria-hidden="true">|</span>
       <button class="crop-toolbar-btn" id="cropToolbarApply" type="button" data-i18n="common.apply">应用</button>
       <button class="crop-toolbar-btn crop-toolbar-cancel" id="cropToolbarCancel" type="button" data-i18n="common.cancel">取消</button>
@@ -1023,6 +1033,7 @@
     <!-- v110 自由裁切 overlay：rect + 8 handles + dimmed mask -->
     <div class="crop-overlay hidden" id="cropOverlay">
       <div class="crop-rect" id="cropRect">
+        <div class="crop-safety hidden" id="cropSafety" aria-hidden="true"></div>
         <div class="crop-dim" id="cropDim"></div>
         <div class="crop-handle" data-handle="nw"></div>
         <div class="crop-handle" data-handle="n"></div>
@@ -1237,6 +1248,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-35fccd8ea1a5.mjs"></script>
+    <script type="module" src="./dist/webpaint-691cd23c4ec4.mjs"></script>
   </body>
 </html>

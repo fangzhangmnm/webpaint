@@ -8,12 +8,15 @@
 import { els } from "./els.ts";
 import { bumpDoc } from "./signals.ts";
 import { t } from "./i18n/index.ts";
-import { resizeCropRect, cropRectToInts } from "./crop-geometry.ts";
+import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } from "./crop-geometry.ts";
+import { CANVAS_TEMPLATES, templatePx, templateById } from "./canvas-templates.ts";
+import { flattenLeaves } from "./doc.ts";
+import { editorState } from "./workbench-state.ts";
 import { remapShapePersp, snapshotShapePersp } from "./workbench-state.ts";
 import type { AppContext } from "./app-context.ts";
 
 interface Rect { x: number; y: number; w: number; h: number; }
-interface CropState { rect: Rect; drag: string | null; startMouse: { x: number; y: number } | null; startRect: Rect | null; }
+interface CropState { rect: Rect; drag: string | null; startMouse: { x: number; y: number } | null; startRect: Rect | null; tpl: { tw: number; th: number; aspect: number; dpi?: number } | null; }
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // ctx 绑入：core 单例
@@ -78,9 +81,58 @@ function _renderCropOverlay() {
   el.style.top  = r.y + "px";
   el.style.width  = Math.max(2, r.w) + "px";
   el.style.height = Math.max(2, r.h) + "px";
-  // L69：实时显示裁切后分辨率（doc 像素，非屏幕）
+  // L69：实时显示裁切后分辨率（doc 像素，非屏幕）；模板模式 = 「框 → 目标」两段
   const dim = document.getElementById("cropDim");
-  if (dim) dim.textContent = `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)}`;
+  const tpl = _cropState.tpl;
+  if (dim) dim.textContent = tpl
+    ? `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)} → ${tpl.tw} × ${tpl.th}`
+    : `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)}`;
+}
+
+// ---- v0.6.48 裁剪·模板模式（设计定稿 docs/20260729-crop-template-mode.md）----
+// 内容 bbox = 所有叶非空 bbox 并集（fit 的基准；空 doc 退化画布矩形）。
+function _contentBBox() {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const L of flattenLeaves(doc.layers)) {
+    if (L.bboxW <= 0 || L.bboxH <= 0) continue;
+    x0 = Math.min(x0, L.bboxX); y0 = Math.min(y0, L.bboxY);
+    x1 = Math.max(x1, L.bboxX + L.bboxW); y1 = Math.max(y1, L.bboxY + L.bboxH);
+  }
+  if (!(x1 > x0)) return { x: 0, y: 0, w: doc.width, h: doc.height };
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+// 模板控件显隐 + 目标换算 + 框吸到 contain-fit。tplId="custom" 读 wh 输入框。
+function _applyCropTemplate(tplId: string) {
+  if (!_cropState) return;
+  let tw = 0, th = 0;
+  if (tplId === "custom") {
+    tw = parseInt((document.getElementById("cropCustomW") as HTMLInputElement).value, 10) | 0;
+    th = parseInt((document.getElementById("cropCustomH") as HTMLInputElement).value, 10) | 0;
+    if (tw < 1 || th < 1) { _cropState.tpl = null; _syncCropModeUI(); return; }   // 未填完 → 暂不锁
+  } else {
+    const t = templateById(tplId);
+    if (!t) return;
+    const px = templatePx(t);
+    tw = px.w; th = px.h;
+    editorState.crop.templateId = tplId;   // desk 便利记忆（无 DPI 语义）
+  }
+  _cropState.tpl = { tw, th, aspect: tw / th, dpi: tplId === "custom" ? undefined : templateById(tplId)?.dpi };
+  _cropState.rect = fitRectToBBox(_contentBBox(), tw / th, "contain");
+  _syncCropModeUI();
+  _renderCropOverlay();
+}
+// 按 _cropState.tpl 有无同步 toolbar 控件 + 安全线 + Apply 文案。
+function _syncCropModeUI() {
+  const tpl = _cropState?.tpl ?? null;
+  const isT = (document.getElementById("cropModeSel") as HTMLSelectElement).value === "template";
+  const show = (id: string, on: boolean) => document.getElementById(id)!.classList.toggle("hidden", !on);
+  show("cropTemplateSel", isT);
+  const isCustom = isT && (document.getElementById("cropTemplateSel") as HTMLSelectElement).value === "custom";
+  show("cropCustomW", isCustom); show("cropCustomH", isCustom); show("cropCustomX", isCustom);
+  show("cropFitCover", isT); show("cropFitContain", isT);
+  show("cropSafety", !!tpl);
+  const apply = document.getElementById("cropToolbarApply")!;
+  apply.textContent = tpl ? t("crop.applyTemplate", { w: tpl.tw, h: tpl.th }) : t("common.apply");
 }
 function _openCropMode() {
   // v154 (user)：自由裁切要求 rot=0（裁切框是屏幕轴对齐 DOM，doc 旋转会错位）。
@@ -92,7 +144,10 @@ function _openCropMode() {
   _cropState = {
     rect: { x: 0, y: 0, w: doc.width, h: doc.height },
     drag: null, startMouse: null, startRect: null,
+    tpl: null,   // v0.6.48 模板模式：{tw,th,aspect,dpi?}；null=自由
   };
+  (document.getElementById("cropModeSel") as HTMLSelectElement).value = "free";
+  _syncCropModeUI();
   document.getElementById("cropOverlay")!.classList.remove("hidden");
   document.getElementById("cropToolbar")!.classList.remove("hidden");
   _renderCropOverlay();
@@ -271,7 +326,10 @@ export function initDocOps(ctx: AppContext) {
       const dx = dx_screen / scale;
       const dy = dy_screen / scale;
       // 8-handle resize 几何（含「缩到下限对边不动」+ v127 向外扩张）抽到 crop-geometry.js
-      _cropState.rect = resizeCropRect(_cropState.drag, _cropState.startRect!, dx, dy, { min: 4, max: 8192 });
+      // 模板模式：锁比版（v0.6.48）
+      _cropState.rect = _cropState.tpl
+        ? resizeCropRectAspect(_cropState.drag, _cropState.startRect!, dx, dy, _cropState.tpl.aspect, { min: 4, max: 8192 })
+        : resizeCropRect(_cropState.drag, _cropState.startRect!, dx, dy, { min: 4, max: 8192 });
       _renderCropOverlay();
     });
     overlay.addEventListener("pointerup", (e: PointerEvent) => {

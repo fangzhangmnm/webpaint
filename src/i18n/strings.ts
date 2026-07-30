@@ -552,6 +552,14 @@ export const S = {
   "off.half":        { zh: "居中接缝（半幅 ½）", en: "Center seam (half ½)", ja: "シームを中央に（半分 ½）", tok: "tawa pi kipisi tu (½)" },
   // 裁切工具栏
   "crop.hint":       { zh: "裁切：拖角 / 边 / 框内移动", en: "Crop: drag corner / edge / inside to move", ja: "切り抜き：角 / 辺 / 内側をドラッグで移動", tok: "kipisi: sina luka e selo la suli li ante · sina luka e insa la ona li tawa" },
+  "crop.mode":       { zh: "裁切模式", en: "Crop mode", ja: "切り抜きモード", tok: "nasin kipisi" },
+  "crop.modeFree":   { zh: "自由", en: "Free", ja: "自由", tok: "nasin ale" },
+  "crop.modeTemplate": { zh: "模板", en: "Template", ja: "テンプレート", tok: "nasin lipu" },
+  "crop.fitCover":   { zh: "填满", en: "Fill", ja: "全面", tok: "insa ale" },
+  "crop.fitContain": { zh: "全含", en: "Fit all", ja: "全体", tok: "jo ale" },
+  "crop.customTpl":  { zh: "自定义…", en: "Custom…", ja: "カスタム…", tok: "sina wile…" },
+  "crop.applyTemplate": { zh: "裁剪并缩放到 {w}×{h}", en: "Crop & scale to {w}×{h}", ja: "{w}×{h} に切り抜き＆拡縮", tok: "kipisi e ona tawa suli {w}×{h}" },
+  "crop.templated":  { zh: "已裁剪并缩放到 {w}×{h}", en: "Cropped & scaled to {w}×{h}", ja: "{w}×{h} に切り抜き＆拡縮した", tok: "kipisi pini: suli li {w}×{h}" },
   // 滤镜笔刷工具栏
   "fb.title":        { zh: "滤镜笔刷", en: "Filter brush", ja: "フィルターブラシ", tok: "ilo sitelen pi ante kule" },
   // 颜色浮窗

@@ -172,6 +172,8 @@ function freshGroups() {
       iso: { box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
     },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
+    // v0.6.48 裁剪·模板模式：本文档上次用的模板 id（便利记忆，无 DPI 语义——DPI 活在模板 SSoT，见设计定稿）
+    crop:          { templateId: "" as string },
     // sample：液化采样核 "bilinear"|"nearest"|"spline"（v0.6.36 保锐模式；持久化同意随 2026-07-28 批；v0.6.45 默认回 bilinear——真机裁决 spline 无显著优势）
     liquify:       { bleed: "edge" as string, sample: "bilinear" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
@@ -303,6 +305,7 @@ export const editorState = {
   },
   liquify:     { get bleed(): string { return S.g.liquify.bleed; }, set bleed(v: string) { S.g.liquify.bleed = v; },
                  get sample(): string { return S.g.liquify.sample; }, set sample(v: string) { S.g.liquify.sample = v; } },
+  crop:        { get templateId(): string { return S.g.crop.templateId; }, set templateId(v: string) { S.g.crop.templateId = v; } },
   colorPicker: {
     get layerMode(): string { return _bind ? _bind.getPickMode() : S.g.colorPicker.layerMode; },
     set layerMode(v: string) { if (_bind) _bind.setPickMode(v); else S.g.colorPicker.layerMode = v; },

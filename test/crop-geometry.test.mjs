@@ -46,3 +46,58 @@ describe("crop-geometry · cropRectToInts", () => {
     eq(cropRectToInts({ x: 0, y: 0, w: 0, h: 0 }, { min: 1, max: 8192 }).w, 1);
   });
 });
+
+// ---- v0.6.48 模板模式：锁比 resize + fit ----
+import { resizeCropRectAspect, fitRectToBBox } from "../src/crop-geometry.ts";
+
+describe("crop-geometry · 模板锁比", () => {
+  const r0 = { x: 10, y: 20, w: 40, h: 60 };   // aspect 2/3
+  const a = 2 / 3;
+  it("角 se：主导轴定尺寸、对角(nw)锚定、比例恒定", () => {
+    const r = resizeCropRectAspect("se", r0, 20, 5, a);
+    assert(Math.abs(r.w / r.h - a) < 1e-9, "比例锁死");
+    eq(r.x, 10); eq(r.y, 20, "nw 锚不动");
+    eq(r.w, 60, "dx=20 主导 → w=60");
+  });
+  it("角 nw：锚在 se（右下角坐标不变）", () => {
+    const r = resizeCropRectAspect("nw", r0, -20, 0, a);
+    assert(Math.abs((r.x + r.w) - 50) < 1e-9 && Math.abs((r.y + r.h) - 80) < 1e-9, "se 角锚定");
+    assert(Math.abs(r.w / r.h - a) < 1e-9);
+  });
+  it("边 e：垂直居中；边 s：水平居中", () => {
+    const re = resizeCropRectAspect("e", r0, 10, 0, a);
+    assert(Math.abs((re.y + re.h / 2) - 50) < 1e-9, "中线不动");
+    const rs = resizeCropRectAspect("s", r0, 0, 30, a);
+    assert(Math.abs((rs.x + rs.w / 2) - 30) < 1e-9, "中线不动");
+    assert(Math.abs(rs.w / rs.h - a) < 1e-9);
+  });
+  it("fit：cover=内含最大比例框；contain=外接最小比例框（都居中）", () => {
+    const bbox = { x: 0, y: 0, w: 100, h: 50 };
+    const cov = fitRectToBBox(bbox, 1, "cover");     // 方框 inside 100×50 → 50×50 居中
+    eq(cov.w, 50); eq(cov.h, 50); eq(cov.x, 25); eq(cov.y, 0);
+    const con = fitRectToBBox(bbox, 1, "contain");   // 方框 contain → 100×100 居中
+    eq(con.w, 100); eq(con.h, 100); eq(con.x, 0); eq(con.y, -25);
+  });
+});
+
+describe("doc.cropResampleTo · 裁剪+重采样原子 op", () => {
+  it("frame=目标 px 整数 → 纯裁剪逐字节；÷2 → 面积平均", async () => {
+    const { PaintDoc, eachLeaf } = await import("../src/doc.ts");
+    const doc = new PaintDoc({ width: 64, height: 64 });
+    const L = doc.layers[0];
+    const buf = new Uint8ClampedArray(16 * 16 * 4);
+    for (let i = 0; i < 256; i++) { buf[i * 4] = i % 256; buf[i * 4 + 1] = 77; buf[i * 4 + 2] = 200; buf[i * 4 + 3] = 255; }
+    L.putImageData(8, 8, { width: 16, height: 16, data: buf });
+    // 纯裁剪：frame (8,8,16,16) → 16×16
+    doc.cropResampleTo({ x: 8, y: 8, w: 16, h: 16 }, 16, 16);
+    eq(doc.width, 16); eq(doc.height, 16);
+    const back = doc.layers[0].pixels.getRegion(0, 0, 16, 16);
+    assert(buf.every((v, i) => v === back[i]), "恒等路径逐字节");
+    // ÷2：16×16 → 8×8 面积平均（纯色区仍纯色）
+    doc.cropResampleTo({ x: 0, y: 0, w: 16, h: 16 }, 8, 8);
+    eq(doc.width, 8);
+    const px = doc.layers[0].sampleAt(4, 4);
+    eq(px[1], 77, "G 通道纯色不变"); eq(px[3], 255);
+    eachLeaf(doc.layers, (l) => l.pixels?.dispose?.());
+  });
+});
