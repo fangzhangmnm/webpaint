@@ -128,8 +128,7 @@ function _syncCropModeUI() {
   show("cropCustomW", isCustom); show("cropCustomH", isCustom); show("cropCustomX", isCustom);
   show("cropFitCover", isT); show("cropFitContain", isT);
   show("cropSafety", !!tpl);
-  const apply = document.getElementById("cropToolbarApply")!;
-  apply.textContent = t("crop.apply");   // user：commit 叫裁切就行（目标尺寸在框角标上）
+  // apply/cancel 已图标化（#check/#x，v0.6.52）——文案在 title；别写 textContent（会抹掉 svg）
   document.getElementById("cropRect")!.classList.toggle("tpl-move", isT);   // 定尺寸模式框内可整体平移
 }
 function _openCropMode() {

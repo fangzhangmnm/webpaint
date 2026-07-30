@@ -2569,3 +2569,9 @@ body[data-mode="gallery"] .board { display: none !important; }
   color: var(--accent, #4c8bf5);
   font-weight: 600;
 }
+
+.crop-toolbar-icon {
+  min-width: 32px; padding: 4px 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.crop-toolbar-icon svg { width: 20px; height: 20px; }
