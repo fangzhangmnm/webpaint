@@ -116,6 +116,9 @@ export class Layer {
   pixels: LayerPixels;
   private _mat: { canvas: Bitmap; ox: number; oy: number } | null = null;   // 物化视图缓存（读者用；写后失效）
   private _empty: Bitmap | null = null;                                      // 空层 1×1 占位
+  // 内容版本：每次像素写 bump（_invalidate 是所有写路径的汇拢点）。消费者=线稿分区缓存
+  //   （lineart-oracle）这类「按层内容做贵预计算」的失效判据。releaseMaterialized 纯腾内存不 bump。
+  contentRev = 0;
 
   constructor({ width, height, name }: { width: number; height: number; name?: string; empty?: boolean } = {} as { width: number; height: number; name?: string; empty?: boolean }) {
     this.id = _layerIdCounter++;
@@ -144,7 +147,7 @@ export class Layer {
     this._mat = { canvas: this._empty, ox: 0, oy: 0 };
     return this._mat;
   }
-  private _invalidate() { this._mat = null; }
+  private _invalidate() { this._mat = null; this.contentRev++; }
 
   // 释放物化 canvas 缓存（保留 tile SoT，下次 getter 访问按需重建）。切片②：GL 模式下合成直读 tile、
   //   不碰 layer.canvas → 非活动层的物化 canvas 是纯冗余（~docW·docH·4，2K≈16.8MB/层）。board 每帧 GL 渲染后

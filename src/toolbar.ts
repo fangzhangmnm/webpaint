@@ -207,6 +207,10 @@ export function updateLassoToolbar() {
     for (const el of menu.querySelectorAll<HTMLElement>(".lasso-menu-magic-only")) el.classList.toggle("hidden", !magicOn);
     for (const el of menu.querySelectorAll<HTMLButtonElement>(".lasso-menu-needs-sel")) el.disabled = !hasSelection;
   }
+  // v0.7 线稿闭合 toggle：两菜单镜像引擎里的算法态（RAM-only；持久化待 user 同意）
+  const lineartOn = input.lasso.getMagicAlgorithm() === "lineart";
+  document.getElementById("lassoLineartBtn")?.setAttribute("aria-pressed", lineartOn ? "true" : "false");
+  document.getElementById("fillLineartBtn")?.setAttribute("aria-pressed", lineartOn ? "true" : "false");
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
   lassoExpandToggle.classList.toggle("hidden", !magicOn);
   lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
@@ -418,6 +422,14 @@ function initSelEditUI() {
     board.requestRender();
     updateLassoToolbar();
   });
+  // v0.7 魔棒算法 toggle（线稿闭合）：off=经典 flood / on=论文线稿分区（lineart-oracle，
+  //   断口自动闭合+填到线下）。toggle 不关菜单（同蚂蚁线）；首次 tap 会同步建分区（秒级）。
+  for (const id of ["lassoLineartBtn", "fillLineartBtn"]) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      input.lasso.setMagicAlgorithm(input.lasso.getMagicAlgorithm() === "lineart" ? "classic" : "lineart");
+      updateLassoToolbar();
+    });
+  }
   // modal 内方向切换（v0.5.15 user：扩张/收缩同一入口）：切方向 = 换 op 就地重预览（预览恒从 before 派生）。
   document.getElementById("lassoSelOpExpandBtn")?.addEventListener("click", () => _setSelEditOp("expand"));
   document.getElementById("lassoSelOpShrinkBtn")?.addEventListener("click", () => _setSelEditOp("shrink"));

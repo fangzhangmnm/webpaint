@@ -1,0 +1,83 @@
+// 线稿 oracle 接缝（lineart-oracle.ts）验收：tap→Selection 同构、按 contentRev 缓存/失效。
+// fake layer 走 OracleSourceLayer 结构面（≈ floodSelectFrom 的 mock 风格），node 直测无 DOM。
+import { describe, it, assert, eq } from "./runner.mjs";
+
+const { LineartOracle } = await import("../src/lineart-oracle.ts");
+
+/** 断口圆线稿 RGBA（黑线白透明底），断口朝 +x ~6px */
+function gapRingRgba(w, h, cx, cy, r, thick, gapHalf) {
+  const rgba = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const dx = x - cx, dy = y - cy;
+    if (Math.abs(Math.hypot(dx, dy) - r) > thick / 2) continue;
+    let da = Math.atan2(dy, dx);
+    if (Math.abs(da) <= gapHalf) continue;
+    rgba[(y * w + x) * 4 + 3] = 255;   // 不透明黑
+  }
+  return rgba;
+}
+function fakeLayer(rgba, w, h) {
+  return {
+    id: 7, contentRev: 0, calls: 0,
+    getImageData(x, y, gw, gh) {
+      this.calls++;
+      if (x !== 0 || y !== 0 || gw !== w || gh !== h) throw new Error("oracle 应读整 doc");
+      return { data: rgba };
+    },
+  };
+}
+function count255(sel) {
+  const g = sel.materializeMaskRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
+  let n = 0;
+  for (let i = 0; i < g.length; i++) if (g[i] === 255) n++;
+  return n;
+}
+
+describe("lineart-oracle · tap→Selection + contentRev 缓存", () => {
+  const w = 64, h = 64;
+  const doc = { width: w, height: h };
+
+  it("断口圆内 tap → 有界选区（闭合生效），且吃进线下", () => {
+    const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
+    const o = new LineartOracle();
+    const sel = o.selectAt(doc, L, 32, 32);
+    assert(sel, "应有选区");
+    const n = count255(sel);
+    assert(n > 800 && n < 1800, `圆内区 ≈ π·20²·部分线下（实得 ${n}）`);
+    assert(sel.bboxW < w, "有界，不是整图");
+    sel.dispose();
+  });
+
+  it("缓存：同层再 tap 不重建；contentRev bump 后重建", () => {
+    const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
+    const o = new LineartOracle();
+    eq(o.isReady(doc, L), false, "建前未就绪");
+    o.selectAt(doc, L, 32, 32).dispose();
+    eq(L.calls, 1, "首 tap 读一次像素");
+    eq(o.isReady(doc, L), true, "建后就绪");
+    const outside = o.selectAt(doc, L, 2, 2);
+    eq(L.calls, 1, "第二 tap 走缓存");
+    assert(outside && count255(outside) > w * h * 0.4, "外部区大片");
+    outside.dispose();
+    L.contentRev++;
+    eq(o.isReady(doc, L), false, "rev 变 → 失效");
+    o.selectAt(doc, L, 32, 32).dispose();
+    eq(L.calls, 2, "rev 变 → 重建");
+    o.invalidate();
+    o.selectAt(doc, L, 32, 32).dispose();
+    eq(L.calls, 3, "显式 invalidate → 重建");
+  });
+
+  it("空源层：整图一区（对齐 flood 点透明全选的语义）", () => {
+    const o = new LineartOracle();
+    const sel = o.selectAt(doc, null, 5, 5);
+    assert(sel, "应有选区");
+    eq(count255(sel), w * h, "全图");
+    sel.dispose();
+  });
+
+  it("出界 tap → null", () => {
+    const o = new LineartOracle();
+    eq(o.selectAt(doc, null, -1, 5), null, "出界 null");
+  });
+});

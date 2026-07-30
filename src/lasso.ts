@@ -21,6 +21,7 @@
 // selection.js 的 Selection 类。lasso 只负责手势光栅化（产 Selection）+ 自由变换 gizmo。
 
 import { Selection, rasterizePolygonGray8 } from "./selection.ts";
+import { LineartOracle } from "./lineart-oracle.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
@@ -53,6 +54,7 @@ type LassoState =
   | "floating";
 type SubTool = "freehand" | "rect" | "ellipse" | "polygon" | "magic";
 type SetOpMode = "new" | "union" | "subtract" | "intersect";
+export type MagicAlgorithm = "classic" | "lineart";
 
 export class LassoEngine {
   _state: LassoState;
@@ -61,6 +63,8 @@ export class LassoEngine {
   _constrainSquare: boolean;
   _magicThreshold: number;
   _magicAutoExpandPx: number;
+  _magicAlgorithm: MagicAlgorithm = "classic";
+  _lineartOracle = new LineartOracle();
   _points: Point[];
   _rect: DraftRect | null;
   _magicStart: Point | null;
@@ -121,6 +125,14 @@ export class LassoEngine {
   getMagicThreshold() { return this._magicThreshold; }
   setMagicAutoExpand(px: number) { this._magicAutoExpandPx = Math.max(0, Math.min(100, Math.round(px) || 0)); }
   getMagicAutoExpand() { return this._magicAutoExpandPx; }
+  // 魔棒算法（v0.7 线稿填色）：classic=经典 flood；lineart=论文分区 oracle（断口自动闭合+填到线下）。
+  //   RAM-only（持久化进 editorState 待 user 同意）；交互完全同构，tap → Selection。
+  setMagicAlgorithm(v: MagicAlgorithm) { this._magicAlgorithm = v === "lineart" ? "lineart" : "classic"; }
+  getMagicAlgorithm(): MagicAlgorithm { return this._magicAlgorithm; }
+  /** 线稿分区缓存是否已就绪（首次 tap 前 UI 可提示「分析线稿中…」） */
+  lineartReady(sourceLayer: Layer | null): boolean {
+    return !this.doc || this._lineartOracle.isReady(this.doc, sourceLayer);
+  }
   setSampleMode(m: string) { this._ft.setSampleMode(m); }
   getSampleMode() { return this._ft.getSampleMode(); }
   setConstrainSquare(on: unknown) { this._constrainSquare = !!on; this.onChange(); }
@@ -340,7 +352,11 @@ export class LassoEngine {
   // 仅 bbox 大小。barrier 不再单独 alloc（diff 算在 flood fill 里 inline）。
   _magicWandToSelection(start: Point | null, sourceLayer: Layer | null): SelectionLike | null {
     if (!this.doc) return null;
-    let sel = floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold);
+    // v0.7 线稿模式：tap → 分区 label 查表（缓存 miss 时同步构建，见 lineart-oracle.ts）。
+    //   与 flood 完全同构：产原始选区，后续 auto-expand / setOp 合并共用同一条路。
+    let sel: SelectionLike | null = this._magicAlgorithm === "lineart" && start
+      ? this._lineartOracle.selectAt(this.doc, sourceLayer, start.x, start.y)
+      : floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold);
     // #31：可选 flood 后自动扩张（默认关）。在 setOp 合并**之前**做，語义 = 「这一下点出来的区域」本身变胖。
     if (sel && this._magicAutoExpandPx > 0) {
       const m = sel.morphed(this._magicAutoExpandPx, this.doc.width, this.doc.height);

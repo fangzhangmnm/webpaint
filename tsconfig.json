@@ -158,6 +158,7 @@
     "src/resolved-brush.ts",
     "src/ora-stack-xml.ts",
     "src/lineart/**/*.ts",
+    "src/lineart-oracle.ts",
     "src/gl/tile-geometry.ts",
     "src/gl/tile-store.ts",
     "src/gl/gl-context.ts",
