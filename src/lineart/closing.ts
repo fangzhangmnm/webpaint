@@ -123,6 +123,12 @@ export function closeStrokes(
   Ib: Uint8Array, w: number, h: number, kps: Keypoint[], params: ClosingParams,
 ): { Ic: Uint8Array; bridges: BridgeDebug[] } {
   const Ic = Ib.slice();
+  // 碎区守卫基底（论文 §5.1.5 原文：R ⊂ 非(I_b ∪ T)）：**只有真墨水 + 当前候选**当墙，
+  //   已接受的闭合桥不算——两条桥夹出的小缝是作者接受的轻微过分割，不拦。
+  //   每次检查画入候选后恒回滚，让下一条候选的基底仍是纯 Ib。
+  //   （v0.7.5 修：此前误用 Ic 当基底 → 幻觉端点长出的桥会把邻近 innocent 桥夹死。
+  //     τ 相交测试仍按 §5.1.4「禁互穿」语义用 Ic，别混。）
+  const Iguard = Ib.slice();
   const bridges: BridgeDebug[] = [];
   const MAX_BRIDGE_RECORDS = 1000;   // 病态图护栏（正常线稿几十条）
   const K = kps.length;
@@ -142,8 +148,16 @@ export function closeStrokes(
       if (Ic[p] === 0) { Ic[p] = 1; newPx.push(p); }
     }
     if (newPx.length === 0) return false;   // 全在已有笔画里 = 无效候选，不记
+    // 守卫在 Iguard（= Ib ∪ T）上做：候选像素按 Ib 基底重算（可能比 newPx 多——
+    //   与已接受桥重叠的像素在 Ic 里已是 1，但对 Ib 仍是新增）
+    const guardPx: number[] = [];
+    for (const p of path) {
+      if (Iguard[p] === 0) { Iguard[p] = 1; guardPx.push(p); }
+    }
     gen++;
-    if (!areaGuardOk(Ic, w, h, newPx, params.amin, visited, gen, floodStack)) {
+    const guardOk = areaGuardOk(Iguard, w, h, guardPx, params.amin, visited, gen, floodStack);
+    for (const p of guardPx) Iguard[p] = 0;   // 恒回滚（无论采纳与否）
+    if (!guardOk) {
       for (const p of newPx) Ic[p] = 0; // 回滚
       record(path, false, "amin");
       return false;

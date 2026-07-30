@@ -140,6 +140,21 @@ describe("lineart · 断口闭合与分区（论文主张：不闭合就没有�
     const part = buildPartitionFromBinary(Ib, w, h);
     assert(labelAt(part, 30, 24) !== labelAt(part, 2, 2), "闭合后内外分开");
   });
+  it("碎区守卫基底 = Ib∪候选（论文 §5.1.5）：已接受的桥不当墙，平行双缝都能闭", () => {
+    // 两排 1px 横线同位缝（缝 6px，桥与线同行 → 真封死），中带 = y11 一行 32px；amin=40 时：
+    //   旧（Ic 基底）bug：先闭的桥把中带封死 → 第二条桥看到 32<40 被毙（本测试对旧代码红）；
+    //   论文基底：第二条桥的守卫里首桥不是墙，中带从另一条缝逃去大区 → 两条都过，
+    //   最终中带 32 < amin 是作者接受的轻微过分割。
+    const w = 32, h = 32;
+    const Ib = blank(w, h);
+    fillRect(Ib, w, 0, 10, 12, 10); fillRect(Ib, w, 19, 10, 31, 10);   // 线 A（y=10）
+    fillRect(Ib, w, 0, 12, 12, 12); fillRect(Ib, w, 19, 12, 31, 12);   // 线 B（y=12）
+    // cmax=1：一端一桥，排除「从桥侧腹溜出去的斜跨桥」搅乱中带（那是 τ 的已知宽松面，另议）
+    const part = buildPartitionFromBinary(Ib, w, h, { ...DEFAULT_LINEART_PARAMS, amin: 40, erode: false, cmax: 1 });
+    assert(part.bridges.filter((b) => b.ok).length >= 2, "两条缝都补上");
+    const top = labelAt(part, 16, 3), mid = labelAt(part, 16, 11), bot = labelAt(part, 16, 24);
+    assert(top !== mid && mid !== bot && top !== bot, `三带分区（实得 ${top}/${mid}/${bot}）`);
+  });
   it("粗笔画（厚 8）断口圆：腐蚀细化后仍闭合分区", () => {
     const w = 80, h = 80;
     const Ib = ring(w, h, 40, 40, 24, 8, 0, 5 / 24); // 缝 ~10px
