@@ -33,6 +33,7 @@ import "./liquify-bbox.test.mjs";
 import "./liquify-docspace-mask.test.mjs";
 import "./freeze-encode.test.mjs";
 import "./resample-bytes.test.mjs"; // 字节重采样：面积平均严格box/alpha加权/限幅
+import "./png-codec.test.mjs"; // PNG 接缝（UPNG 内脏）：低α无损roundtrip/pHYs
 import "./password-verifier.test.mjs";
 import "./liquify-bilinear.test.mjs";
 import "./gallery-model.test.mjs";

@@ -1,30 +1,84 @@
-// PNG 编解码深模块（v0.6.42 止血 facade，user 2026-07-29：「把 canvas 封成一个伪装的 png 库，
-// 这样下次不会再越狱 canvas」）。
-//
-// 现状：内部实现**暂时仍是 canvas**（putImageData→toBlob / createImageBitmap→getImageData），
-// 所以像素数据仍吃一轮 straight→premult→straight 量化——这不是终态，是把全库的 PNG 编解码
-// 收进**唯一接缝**：将来换 UPNG/自研 codec 只改本文件，调用方零动。
+// PNG 编解码深模块（全库唯一接缝——user 2026-07-29：「把 canvas 封成伪装的 png 库，下次不会再
+// 越狱 canvas」）。v0.6.47 起内脏 = vendored UPNG（Photopea，MIT）+ fflate zlib：
+//   - 编码：无损 RGBA8（cnum=0），**straight alpha 逐字节保真**（canvas toBlob 的 premult 往返
+//     从此退出画作持久化路径）；压缩级旋钮 setDeflateLevel（未来自定义压缩比的入口）；
+//     可选 pHYs（DPI 元数据——只进导出文件，永不进 ora，user 拍板）。
+//   - 解码：UPNG 全格式吃（1-16bit/灰度/调色板/隔行/APNG 首帧）→ RGBA8。
+//   - 回退安全网（**永不删**）：带 iCCP 色彩配置的外来 PNG（浏览器解码会应用 profile，UPNG 忽略
+//     → 观感差异）与任何 UPNG 解码失败 → createImageBitmap 老路一次性读出。
 //
 // 【硬原则（user）】：库外任何地方不许再为 PNG 编解码创建 canvas / createImageBitmap——
-// 字节进出一律走这里。发现新需求（压缩级/调色板量化/16bit）改本库，别在外面绕。
-//
-// 展望（已拍板方向）：解码什么都吃（UPNG：16bit/隔行/调色板）；编码走专业绘图软件路线
-// （自定义压缩比、调色板/GIF 式配置——push to future，本版不做）。
+// 字节进出一律走这里。新需求（调色板量化/16bit/APNG）改本库，别在外面绕。
 
 import { makeBitmap } from "./bitmap.ts";
+import UPNG from "../vendor/upng/upng.esm.js";
 
 export interface RgbaPlane { data: Uint8ClampedArray; w: number; h: number }
 
-// straight RGBA 字节 → PNG 字节。⚠当前 canvas 实现：低 α 像素 RGB 有 premult 量化损（换 codec 后消失）。
-export async function encodePngFromBytes(data: Uint8ClampedArray, w: number, h: number): Promise<Uint8Array> {
-  const c = makeBitmap(w, h);
-  const ctx = c.getContext("2d") as CanvasRenderingContext2D;
-  ctx.putImageData(new ImageData(data, w, h), 0, 0);
-  return encodePngFromCanvas(c);
+// ---- CRC32（PNG chunk 校验；pHYs 注入用）----
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes: Uint8Array, from: number, to: number): number {
+  let c = 0xffffffff;
+  for (let i = from; i < to; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+// 在 IHDR 后插入 pHYs chunk（unit=meter；ppm = dpi/0.0254）。输入输出都是完整 PNG 字节。
+export function insertPhys(png: Uint8Array, dpi: number): Uint8Array {
+  const ppm = Math.round(dpi / 0.0254);
+  const chunk = new Uint8Array(8 + 9 + 4);
+  const dv = new DataView(chunk.buffer);
+  dv.setUint32(0, 9);                       // length
+  chunk[4] = 0x70; chunk[5] = 0x48; chunk[6] = 0x59; chunk[7] = 0x73;   // "pHYs"
+  dv.setUint32(8, ppm); dv.setUint32(12, ppm);
+  chunk[16] = 1;                            // unit = meter
+  dv.setUint32(17, crc32(chunk, 4, 17));
+  // IHDR = 首 chunk：8 字节魔数 + (4+4+13+4)=25 → 插入点 33
+  const at = 33;
+  const out = new Uint8Array(png.length + chunk.length);
+  out.set(png.subarray(0, at), 0);
+  out.set(chunk, at);
+  out.set(png.subarray(at), at + chunk.length);
+  return out;
+}
+
+// 扫 chunk 表看有没有某 chunk（如 iCCP）。容错：解析越界即停。
+function hasChunk(png: Uint8Array, name: string): boolean {
+  if (png.length < 8) return false;
+  const target = [name.charCodeAt(0), name.charCodeAt(1), name.charCodeAt(2), name.charCodeAt(3)];
+  let p = 8;
+  const dv = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  while (p + 8 <= png.length) {
+    const len = dv.getUint32(p);
+    if (png[p + 4] === target[0] && png[p + 5] === target[1] && png[p + 6] === target[2] && png[p + 7] === target[3]) return true;
+    if (png[p + 4] === 0x49 && png[p + 5] === 0x45 && png[p + 6] === 0x4e && png[p + 7] === 0x44) return false;   // IEND
+    p += 12 + len;
+    if (len > png.length) return false;   // 坏文件护栏
+  }
+  return false;
+}
+
+// ---- 编码 ----
+
+/** straight RGBA 字节 → PNG（无损，逐字节保真）。opts.dpi → 写 pHYs（导出打印文件用；ora 不传）。 */
+export async function encodePngFromBytes(data: Uint8ClampedArray, w: number, h: number, opts: { dpi?: number } = {}): Promise<Uint8Array> {
+  // UPNG 需要独立 ArrayBuffer（防 subarray 偏移）
+  const buf = new Uint8Array(data).buffer;
+  let png = new Uint8Array(UPNG.encode([buf], w, h, 0));
+  if (opts.dpi) png = insertPhys(png, opts.dpi);
+  return png;
 }
 
 // canvas → PNG 字节（扁平化导出/缩略图这类"canvas 语义即输出"的 B 类调用方用；
-// 像素管线调用方请走 encodePngFromBytes）。原 ora.canvasToPngBytes 原样搬入。
+// 像素管线调用方请走 encodePngFromBytes）。
 export async function encodePngFromCanvas(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Uint8Array> {
   let blob: Blob | null | undefined;
   const oc = canvas as OffscreenCanvas, hc = canvas as HTMLCanvasElement;
@@ -39,10 +93,25 @@ export async function encodePngFromCanvas(canvas: OffscreenCanvas | HTMLCanvasEl
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-// PNG 字节 → straight RGBA 字节。⚠当前 createImageBitmap+getImageData 实现：同上 premult 量化损；
-// 浏览器解码会应用内嵌色彩 profile（换自研/UPNG 后此行为会变——届时对非 sRGB profile 保留本路径回退）。
+// ---- 解码 ----
+
+/** PNG 字节 → straight RGBA。主路 UPNG（全格式、零 canvas、零 premult 损）；
+ *  iCCP 色彩配置 / 解码失败 → canvas 回退（安全网，永不删——数据安全 >> 纯度）。 */
 export async function decodePngToBytes(bytes: Uint8Array | Blob): Promise<RgbaPlane> {
-  const blob = bytes instanceof Blob ? bytes : new Blob([bytes as unknown as BlobPart], { type: "image/png" });
+  const u8 = bytes instanceof Blob ? new Uint8Array(await bytes.arrayBuffer()) : bytes;
+  if (!hasChunk(u8, "iCCP")) {
+    try {
+      const img = UPNG.decode(u8.buffer === undefined ? (u8 as unknown as ArrayBuffer) : new Uint8Array(u8).buffer);
+      const rgba = UPNG.toRGBA8(img)[0];
+      return { data: new Uint8ClampedArray(rgba), w: img.width, h: img.height };
+    } catch (_) { /* 回退 */ }
+  }
+  return decodePngViaCanvas(u8);
+}
+
+// 回退路：浏览器原生解码（会应用色彩 profile）+ 一次 canvas 读出。
+async function decodePngViaCanvas(u8: Uint8Array): Promise<RgbaPlane> {
+  const blob = new Blob([u8 as unknown as BlobPart], { type: "image/png" });
   const bmp = await createImageBitmap(blob);
   const c = makeBitmap(bmp.width, bmp.height);
   const ctx = c.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
@@ -51,3 +120,5 @@ export async function decodePngToBytes(bytes: Uint8Array | Blob): Promise<RgbaPl
   const img = ctx.getImageData(0, 0, c.width, c.height);
   return { data: img.data, w: img.width, h: img.height };
 }
+
+export { setDeflateLevel } from "../vendor/upng/upng.esm.js";
