@@ -129,7 +129,7 @@ function _syncCropModeUI() {
   show("cropFitCover", isT); show("cropFitContain", isT);
   show("cropSafety", !!tpl);
   // apply/cancel 已图标化（#check/#x，v0.6.52）——文案在 title；别写 textContent（会抹掉 svg）
-  document.getElementById("cropRect")!.classList.toggle("tpl-move", isT);   // 定尺寸模式框内可整体平移
+  document.getElementById("cropRect")!.classList.add("tpl-move");   // v0.6.63：两模式框内均可整体平移（v125 只 handle 语义废止）
 }
 function _openCropMode() {
   // v154 (user)：自由裁切要求 rot=0（裁切框是屏幕轴对齐 DOM，doc 旋转会错位）。
@@ -367,13 +367,12 @@ export function initDocOps(ctx: AppContext) {
       if (!_cropState) return;
       e.preventDefault();
       e.stopPropagation();
-      // v125 (user：「crop 的时候 选区不应该点击空白时可拖动，只有拖动 handler 才行」)
-      //   只有 [data-handle] 命中才进 drag；rect 内空白 → no-op（防误碰整体移动）。
-      // v0.6.50 定尺寸模式例外（user：「框内能不能整体平移」）：比例锁死误碰无损形，框内=move。
+      // v125「只有拖 handle 才行」→ v0.6.50 模板模式框内=move → v0.6.63（user）自由模式跟进：
+      //   两模式统一，rect 内部拖 = 整体平移（rect 外的 overlay 空白仍 no-op）。
       let handle = (e.target as HTMLElement | null)?.dataset?.handle || null;
       if (!handle) {
         const tid = (e.target as HTMLElement | null)?.id;
-        if (_cropState.mode === "template" && (tid === "cropRect" || tid === "cropDim")) handle = "move";
+        if (tid === "cropRect" || tid === "cropDim") handle = "move";
         else return;
       }
       // 捕获在 handle 上（overlay 现在 pointer-events:none，捕在它身上不稳）。pointerup 自动释放。
