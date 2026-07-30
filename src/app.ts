@@ -281,6 +281,8 @@ board.setLassoProvider((() => ({
   floating:       input.lasso.getFloating(),
   handles:        input.lasso.visibleHandles(board.viewport.scale),
   sampleMode:     input.lasso.getSampleMode(),
+  // v0.7.4 线稿调试视图：开着+lineart+分区已缓存才非 null（lasso 内部判，渲染不触发重建）
+  lineartDebug:   input.lasso.lineartDebugInfo(doc.getFloodSourceLayer()),
 })) as Parameters<typeof board.setLassoProvider>[0]);
 
 // 蚂蚁线无动画（user 反馈太干扰）；选区改变时 setLassoProvider 已触发 invalidateAll。

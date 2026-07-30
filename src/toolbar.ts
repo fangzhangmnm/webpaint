@@ -227,6 +227,12 @@ export function updateLassoToolbar() {
     if (dv) dv.textContent = String(input.lasso.getLineartCloseDist());
     const iv = document.getElementById("lassoInkThresholdVal");
     if (iv) iv.textContent = String(input.lasso.getLineartInkThreshold());
+    const av = document.getElementById("lassoAminVal");
+    if (av) av.textContent = String(input.lasso.getLineartMinRegion());
+    const sv = document.getElementById("lassoTipSensVal");
+    if (sv) sv.textContent = String(input.lasso.getLineartTipSensitivity());
+    document.getElementById("lassoLineartDebugBtn")?.setAttribute(
+      "aria-pressed", input.lasso.getLineartDebugView() ? "true" : "false");
   }
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
   lassoExpandToggle.classList.toggle("hidden", !magicOn);
@@ -490,6 +496,29 @@ function initSelEditUI() {
       const v = Math.max(0, Math.min(100, parseInt(inkInp.value, 10) || 0));
       input.lasso.setLineartInkThreshold(v);
       if (inkVal) inkVal.textContent = String(v);
+    });
+    // v0.7.4 碎区下限 stepper（±8；0=关守卫）
+    const aminVal = document.getElementById("lassoAminVal");
+    const stepAmin = (d: number) => {
+      input.lasso.setLineartMinRegion(input.lasso.getLineartMinRegion() + d);
+      if (aminVal) aminVal.textContent = String(input.lasso.getLineartMinRegion());
+    };
+    document.getElementById("lassoAminMinus")?.addEventListener("click", () => stepAmin(-8));
+    document.getElementById("lassoAminPlus")?.addEventListener("click", () => stepAmin(+8));
+    // v0.7.4 端点灵敏度 slider（高=抓得住收尖线头，代价=假端点）
+    const sensInp = document.getElementById("lassoTipSens") as HTMLInputElement | null;
+    const sensVal = document.getElementById("lassoTipSensVal");
+    sensInp?.addEventListener("input", () => {
+      const v = Math.max(0, Math.min(100, parseInt(sensInp.value, 10) || 0));
+      input.lasso.setLineartTipSensitivity(v);
+      if (sensVal) sensVal.textContent = String(v);
+    });
+    // v0.7.4 调试视图 toggle：端点+候选桥 overlay（绿=补上/橙=τ毙/红=碎区毙；有点无桥=ω 结构排除）。
+    //   数据只在分区已缓存时出现——开了之后先 tap 一下让分区建起来。
+    document.getElementById("lassoLineartDebugBtn")?.addEventListener("click", () => {
+      input.lasso.setLineartDebugView(!input.lasso.getLineartDebugView());
+      board.invalidateAll();
+      updateLassoToolbar();
     });
   }
   // modal 内方向切换（v0.5.15 user：扩张/收缩同一入口）：切方向 = 换 op 就地重预览（预览恒从 before 派生）。

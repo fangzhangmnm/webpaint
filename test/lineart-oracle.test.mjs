@@ -101,4 +101,24 @@ describe("lineart-oracle · tap→Selection + contentRev 缓存", () => {
     o.setCloseDist(999);
     eq(o.getCloseDist(), 256, "clamp 上限 256");
   });
+
+  it("knob（v0.7.4）：碎区下限/端点灵敏度失效逻辑 + 调试数据只在缓存就绪时给", () => {
+    const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
+    const o = new LineartOracle();
+    eq(o.debugInfo(doc, L), null, "未建缓存 → 无调试数据（渲染路径不触发重建）");
+    o.selectAt(doc, L, 32, 32).dispose();
+    const dbg = o.debugInfo(doc, L);
+    assert(dbg && dbg.keypoints.length >= 2 && dbg.bridges.some((b) => b.ok), "就绪后给端点+桥");
+    o.setMinRegion(32);   // = 默认
+    eq(o.isReady(doc, L), true, "同值不失效");
+    o.setMinRegion(0);
+    eq(o.isReady(doc, L), false, "碎区下限变 → 失效");
+    eq(o.getMinRegion(), 0, "0 = 关守卫");
+    o.selectAt(doc, L, 32, 32).dispose();
+    o.setTipSensitivity(50);   // = 默认
+    eq(o.isReady(doc, L), true, "同值不失效");
+    o.setTipSensitivity(80);
+    eq(o.isReady(doc, L), false, "灵敏度变 → 失效");
+    eq(o.getTipSensitivity(), 80, "读回新值");
+  });
 });

@@ -10,6 +10,8 @@
 import { edtSquared } from "./edt.ts";
 import { keypointsFromBinary } from "./border.ts";
 import { closeStrokes } from "./closing.ts";
+import type { Keypoint } from "./border.ts";
+import type { BridgeDebug } from "./closing.ts";
 
 export interface LineartParams {
   /** 白底合成亮度 ≤ 此值（0..255）判为笔画 */
@@ -58,6 +60,9 @@ export interface LineartPartition {
   bboxes: Int32Array;
   /** 估出的笔画半宽（px），调参/诊断用 */
   strokeHalfWidth: number;
+  /** 调试视图（v0.7.4）：检出的端点（腐蚀后坐标）+ 候选桥（含被守卫毙的） */
+  keypoints: Keypoint[];
+  bridges: BridgeDebug[];
 }
 
 /** RGBA（straight alpha）→ 二值笔画图：合成到白底的亮度 ≤ θ 判为笔画。透明 = 白 = 背景。 */
@@ -189,11 +194,15 @@ export function buildPartitionFromBinary(
   const kps = hasStroke
     ? keypointsFromBinary(Ib, w, h, { kernelL: params.kernelL, thetaKappa: params.thetaKappa })
     : [];
-  const Ic = hasStroke ? closeStrokes(Ib, w, h, kps, params) : Ib;
+  const closed = hasStroke ? closeStrokes(Ib, w, h, kps, params) : null;
+  const Ic = closed ? closed.Ic : Ib;
 
   const { labels, count, bboxes } = labelRegions(Ic, w, h);
   if (count > 0) propagateUnderStrokes(labels, w, h, bboxes);
-  return { w, h, labels, regionCount: count, bboxes: Int32Array.from(bboxes), strokeHalfWidth: halfW };
+  return {
+    w, h, labels, regionCount: count, bboxes: Int32Array.from(bboxes), strokeHalfWidth: halfW,
+    keypoints: kps, bridges: closed ? closed.bridges : [],
+  };
 }
 
 /** 总入口：RGBA → 分区。 */

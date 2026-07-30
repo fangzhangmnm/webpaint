@@ -63,6 +63,12 @@ interface LassoInfo {
   drawingEllipse?: { x0: number; y0: number; x1: number; y1: number } | null;
   handles?: Handle[] | null;
   sampleMode?: string;
+  // v0.7.4 线稿调试视图：端点（青点+法线箭头）+ 候选桥（绿=已补 / 橙=τ毙 / 红=碎区毙）
+  lineartDebug?: {
+    w: number; h: number;
+    keypoints: { x: number; y: number; nx: number; ny: number; kappa: number }[];
+    bridges: { px: number[]; ok: boolean; reason?: string }[];
+  } | null;
 }
 
 // 采样模式字符串 → GPU warp shader 的 int（0=nearest 1=bilinear 2=bicubic 3=spline；默认 bilinear）。
@@ -870,6 +876,36 @@ export class Board {
       ctx.lineDashOffset = dash;
       ctx.strokeStyle = "#fff";
       ctx.stroke();
+      ctx.restore();
+    }
+    // (a2) v0.7.4 线稿调试视图：候选桥 + 端点。doc 坐标系直画，线宽 /scale 保屏幕常量。
+    if (info.lineartDebug) {
+      const dbg = info.lineartDebug;
+      ctx.save();
+      for (const b of dbg.bridges) {
+        if (!b.px.length) continue;
+        ctx.beginPath();
+        ctx.moveTo((b.px[0] % dbg.w) + 0.5, ((b.px[0] / dbg.w) | 0) + 0.5);
+        for (let i = 1; i < b.px.length; i++) {
+          ctx.lineTo((b.px[i] % dbg.w) + 0.5, ((b.px[i] / dbg.w) | 0) + 0.5);
+        }
+        ctx.lineWidth = 2 / scale;
+        ctx.strokeStyle = b.ok ? "rgba(0,190,70,0.95)"
+          : b.reason === "tau" ? "rgba(255,150,0,0.95)" : "rgba(255,40,40,0.95)";
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(0,150,255,0.95)";
+      ctx.strokeStyle = "rgba(0,150,255,0.95)";
+      ctx.lineWidth = 1.5 / scale;
+      for (const k of dbg.keypoints) {
+        ctx.beginPath();
+        ctx.arc(k.x + 0.5, k.y + 0.5, 3 / scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(k.x + 0.5, k.y + 0.5);
+        ctx.lineTo(k.x + 0.5 + (k.nx * 12) / scale, k.y + 0.5 + (k.ny * 12) / scale);
+        ctx.stroke();
+      }
       ctx.restore();
     }
     // (b) 正在画的 path —— 风格跟蚂蚁线一致（user：drawing → endPath 不要突变）

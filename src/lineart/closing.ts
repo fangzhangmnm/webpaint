@@ -114,11 +114,17 @@ function areaGuardOk(
   return true;
 }
 
-/** 主入口：Ib + 端点 → 闭合后的 Ic（不改 Ib）。 */
+/** 调试记录：一条候选闭合笔画的像素路径 + 是否被采纳（false 时给守卫原因）。
+ *  ω=0 被结构性排除的配对（如 U 型平行开口）不产生记录——画面上「有端点无桥」即是它。 */
+export interface BridgeDebug { px: number[]; ok: boolean; reason?: "tau" | "amin" }
+
+/** 主入口：Ib + 端点 → 闭合后的 Ic（不改 Ib）+ 桥调试记录（v0.7.4 调试视图）。 */
 export function closeStrokes(
   Ib: Uint8Array, w: number, h: number, kps: Keypoint[], params: ClosingParams,
-): Uint8Array {
+): { Ic: Uint8Array; bridges: BridgeDebug[] } {
   const Ic = Ib.slice();
+  const bridges: BridgeDebug[] = [];
+  const MAX_BRIDGE_RECORDS = 1000;   // 病态图护栏（正常线稿几十条）
   const K = kps.length;
   const counts = new Uint16Array(K);
   const visited = new Int32Array(w * h);
@@ -126,20 +132,25 @@ export function closeStrokes(
   const floodStack: number[] = [];
   const cosA = Math.cos((Math.max(1, Math.min(90, params.alphaDeg)) * Math.PI) / 180);
 
+  const record = (path: number[], ok: boolean, reason?: "tau" | "amin") => {
+    if (bridges.length < MAX_BRIDGE_RECORDS) bridges.push({ px: path, ok, reason });
+  };
   const tryStroke = (path: number[], ki: number, kj: number): boolean => {
-    if (transitionCount(path, Ic) !== 2) return false;
+    if (transitionCount(path, Ic) !== 2) { record(path, false, "tau"); return false; }
     const newPx: number[] = [];
     for (const p of path) {
       if (Ic[p] === 0) { Ic[p] = 1; newPx.push(p); }
     }
-    if (newPx.length === 0) return false;
+    if (newPx.length === 0) return false;   // 全在已有笔画里 = 无效候选，不记
     gen++;
     if (!areaGuardOk(Ic, w, h, newPx, params.amin, visited, gen, floodStack)) {
       for (const p of newPx) Ic[p] = 0; // 回滚
+      record(path, false, "amin");
       return false;
     }
     counts[ki]++;
     if (kj >= 0) counts[kj]++;
+    record(path, true);
     return true;
   };
 
@@ -192,5 +203,5 @@ export function closeStrokes(
     }
   }
 
-  return Ic;
+  return { Ic, bridges };
 }

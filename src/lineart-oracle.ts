@@ -65,6 +65,35 @@ export class LineartOracle {
     this.invalidate();
   }
   getInkThreshold(): number { return Math.round(this._params.binarizeThreshold / 2.55); }
+  /** 碎区下限（0..128px）：闭合笔画不许切出比这小的背景碎片区；0 = 关守卫。 */
+  setMinRegion(px: number): void {
+    const v = Math.max(0, Math.min(128, Math.round(px) || 0));
+    if (v === this._params.amin) return;
+    this._params = { ...this._params, amin: v };
+    this.invalidate();
+  }
+  getMinRegion(): number { return this._params.amin; }
+  /** 端点灵敏度（0..100，默认 50）：越高越能抓收尖/圆润的线头（曲率阈值越低），
+   *  代价是钝角处冒假端点。映射 θκ = 0.30 − 0.0024·pct（50 ↔ 论文默认 0.18）。 */
+  setTipSensitivity(pct: number): void {
+    const v = Math.max(0, Math.min(100, Math.round(pct) || 0));
+    if (v === this._tipSensPct) return;
+    this._tipSensPct = v;
+    this._params = { ...this._params, thetaKappa: 0.30 - 0.0024 * v };
+    this.invalidate();
+  }
+  getTipSensitivity(): number { return this._tipSensPct; }
+  private _tipSensPct = 50;
+
+  /** 调试视图数据：分区已缓存（同层同版本）才返回，绝不在渲染路径里触发重建。 */
+  debugInfo(
+    doc: { width: number; height: number },
+    sourceLayer: OracleSourceLayer | null,
+  ): { w: number; h: number; keypoints: LineartPartition["keypoints"]; bridges: LineartPartition["bridges"] } | null {
+    if (!this.isReady(doc, sourceLayer)) return null;
+    const p = this._cache!.part;
+    return { w: p.w, h: p.h, keypoints: p.keypoints, bridges: p.bridges };
+  }
 
   private _ensurePartition(
     doc: { width: number; height: number },

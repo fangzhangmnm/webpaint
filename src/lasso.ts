@@ -147,6 +147,18 @@ export class LassoEngine {
   getLineartCloseDist() { return this._lineartOracle.getCloseDist(); }
   setLineartInkThreshold(pct: number) { this._lineartOracle.setInkThreshold(pct); }
   getLineartInkThreshold() { return this._lineartOracle.getInkThreshold(); }
+  setLineartMinRegion(px: number) { this._lineartOracle.setMinRegion(px); }
+  getLineartMinRegion() { return this._lineartOracle.getMinRegion(); }
+  setLineartTipSensitivity(pct: number) { this._lineartOracle.setTipSensitivity(pct); }
+  getLineartTipSensitivity() { return this._lineartOracle.getTipSensitivity(); }
+  // 调试视图（v0.7.4）：端点+候选桥 overlay。开着且分区已缓存才有数据（渲染路径绝不触发重建）。
+  _lineartDebugView = false;
+  setLineartDebugView(on: unknown) { this._lineartDebugView = !!on; }
+  getLineartDebugView() { return this._lineartDebugView; }
+  lineartDebugInfo(sourceLayer: Layer | null) {
+    if (!this._lineartDebugView || this._magicAlgorithm !== "lineart" || !this.doc) return null;
+    return this._lineartOracle.debugInfo(this.doc, sourceLayer);
+  }
   setSampleMode(m: string) { this._ft.setSampleMode(m); }
   getSampleMode() { return this._ft.getSampleMode(); }
   setConstrainSquare(on: unknown) { this._constrainSquare = !!on; this.onChange(); }

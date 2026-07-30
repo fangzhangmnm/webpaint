@@ -128,6 +128,9 @@ describe("lineart · 断口闭合与分区（论文主张：不闭合就没有�
     const part = buildPartitionFromBinary(Ib, w, h);
     assert(part.regionCount >= 2, "闭合后至少内外两区");
     assert(labelAt(part, 32, 32) !== labelAt(part, 2, 2), "闭合后内外分开");
+    // v0.7.4 调试视图数据：端点+被采纳的桥都要在
+    assert(part.keypoints.length >= 2, `断口两侧应有端点（实得 ${part.keypoints.length}）`);
+    assert(part.bridges.some((b) => b.ok && b.px.length >= 2), "至少一条被采纳的桥");
   });
   it("缺口矩形框（缝 9px）：同上", () => {
     const w = 64, h = 48;
