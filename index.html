@@ -53,7 +53,7 @@
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon-180.png" />
-    <link rel="stylesheet" href="./styles.css?v=e5db454dfc2a" />
+    <link rel="stylesheet" href="./styles.css?v=84733799c18e" />
     <!-- zip.js UMD bundle：自挂 window.zip。必须在 module bundle 之前。
          defer（v417）：原来是 parser-blocking 的，硬刷新时 SW 被绕过 → 直奔网络 → 网络一卡整个
          文档解析就停住（浏览器标签页转圈）。defer 后它与下面的 type=module bundle 同属延迟脚本、
@@ -642,9 +642,10 @@
           <!-- v0.6.26：扩张钮用真图标 selection-expand（user：有 svg 的）+ 小三角；−1+ stepper 收进弹出。
                点=开关；开的瞬间顺势弹 stepper 调 px（外点关）；magic 子工具时显（fill 默认魔棒≈常显 cue） -->
           <button class="lasso-tool-btn lasso-tool-icon lasso-slot hidden" id="lassoExpandToggle" type="button" data-i18n-title="la.autoExpand" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
-          <!-- v0.7 魔棒算法下拉（transform 采样 lassoSampleSel 同款文字 select）：选项 JS 从
-               lasso.ts MAGIC_ALGORITHMS SSoT 填；magic 子工具时显；RAM-only（cache 与选择都不持久化） -->
-          <select class="lasso-tool-select hidden" id="lassoAlgoSel" data-i18n-title="la.algoSel"></select>
+          <!-- v0.7 魔棒算法选择；v0.7.8 从系统 <select> 换组槽+弹出（家规：不用系统控件——UA 弹层
+               夜间主题/iPad 滚轮选择器两头受罪，且 option 装不了 SVG）。选项 JS 从 lasso.ts
+               MAGIC_ALGORITHMS SSoT 填进 #lassoAlgoMenu；magic 子工具时显；RAM-only（cache 与选择都不持久化） -->
+          <button class="lasso-tool-btn lasso-tool-select lasso-slot hidden" id="lassoAlgoBtn" type="button" data-i18n-title="la.algoSel" aria-haspopup="true"><span id="lassoAlgoBtnLabel"></span><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
           <!-- v0.7.2 算法配置扳手（user：不常用命令进⋯，算法 configuration 进扳手小三角）：
                弹出 #lassoAlgoCfgMenu，行按当前算法显隐 -->
           <button class="lasso-tool-btn lasso-tool-icon lasso-slot hidden" id="lassoAlgoCfgBtn" type="button" data-i18n-title="la.algoCfg"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#wrench"/></svg><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
@@ -740,6 +741,8 @@
     <div class="lasso-icon-menu lasso-icon-list hidden" id="galleryThemeMenu" role="menu"></div>
     <div class="lasso-icon-menu lasso-icon-list hidden" id="galleryLanguageMenu" role="menu"></div>
     <div class="lasso-icon-menu lasso-icon-list hidden" id="menuLanguageMenu" role="menu"></div>
+    <!-- v0.7.8 魔棒算法弹出（lassoAlgoBtn 组槽；文字行，选项 JS 从 MAGIC_ALGORITHMS SSoT 填） -->
+    <div class="lasso-icon-menu lasso-icon-list hidden" id="lassoAlgoMenu" role="menu" data-i18n-aria="la.algoSel"></div>
     <div class="lasso-icon-menu hidden" id="lassoSetOpMenu" role="menu" data-i18n-aria="la.setOpSlot">
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" role="menuitem" data-i18n-title="la.new"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-new"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" role="menuitem" data-i18n-title="la.union"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-union"/></svg></button>
@@ -1384,6 +1387,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-2fb326dd00d4.mjs"></script>
+    <script type="module" src="./dist/webpaint-4c05dbe9b505.mjs"></script>
   </body>
 </html>

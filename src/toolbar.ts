@@ -207,12 +207,21 @@ export function updateLassoToolbar() {
   for (const menu of [lassoSelEditMenu, fillSelEditMenu]) {
     for (const el of menu.querySelectorAll<HTMLButtonElement>(".lasso-menu-needs-sel")) el.disabled = !hasSelection;
   }
-  // v0.7 魔棒算法下拉（transform 采样同款）：magic 子工具时显，值镜像引擎态（RAM-only）
-  const algoSel = document.getElementById("lassoAlgoSel") as HTMLSelectElement | null;
-  if (algoSel) {
-    algoSel.classList.toggle("hidden", !magicOn);
+  // v0.7 魔棒算法选择（v0.7.8 组槽+弹出替代系统 select）：magic 子工具时显，label/pressed 镜像引擎态（RAM-only）
+  const algoBtn = document.getElementById("lassoAlgoBtn");
+  if (algoBtn) {
+    algoBtn.classList.toggle("hidden", !magicOn);
     const algo = input.lasso.getMagicAlgorithm();
-    if (algoSel.value !== algo) algoSel.value = algo;
+    const lbl = document.getElementById("lassoAlgoBtnLabel");
+    const cur = MAGIC_ALGORITHMS.find((a) => a.id === algo);
+    if (lbl && cur) lbl.textContent = t(cur.labelKey as Parameters<typeof t>[0]);
+    const algoMenu = document.getElementById("lassoAlgoMenu");
+    if (algoMenu) {
+      if (!magicOn) algoMenu.classList.add("hidden");
+      for (const b of algoMenu.querySelectorAll<HTMLElement>("[data-lasso-algo]")) {
+        b.setAttribute("aria-pressed", b.dataset.lassoAlgo === algo ? "true" : "false");
+      }
+    }
   }
   // v0.7.2 算法配置扳手：magic 时显；弹出行按当前算法显隐 + 值同步（关掉时收弹出）
   const cfgBtn = document.getElementById("lassoAlgoCfgBtn");
@@ -447,23 +456,6 @@ function initSelEditUI() {
     board.requestRender();
     updateLassoToolbar();
   });
-  // v0.7 魔棒算法下拉（user：文字下拉，transform 采样 lassoSampleSel 同款）：
-  //   classic=经典 flood / lineart=论文线稿分区（断口自动闭合+填到线下，lineart-oracle）。
-  //   选项从 MAGIC_ALGORITHMS SSoT 填；换算法首 tap 会同步建分区（2K 实测 <1s）。
-  const lassoAlgoSel = document.getElementById("lassoAlgoSel") as HTMLSelectElement | null;
-  if (lassoAlgoSel) {
-    lassoAlgoSel.innerHTML = "";
-    for (const a of MAGIC_ALGORITHMS) {
-      const opt = document.createElement("option");
-      opt.value = a.id;
-      opt.textContent = t(a.labelKey as Parameters<typeof t>[0]);
-      lassoAlgoSel.appendChild(opt);
-    }
-    lassoAlgoSel.addEventListener("change", () => {
-      input.lasso.setMagicAlgorithm(lassoAlgoSel.value as Parameters<typeof input.lasso.setMagicAlgorithm>[0]);
-      updateLassoToolbar();
-    });
-  }
   // v0.7.2 算法配置扳手弹出（user：⋯只留命令，configuration 进扳手小三角）。
   //   slider/stepper 连按不关 = 手动 toggle + 外点关（lassoMagicExpandMenu 样板）；
   //   knob 全 RAM-only，改了 oracle 自己丢缓存重建（经典容差除外——沿用 editorState per-doc）。
@@ -623,6 +615,23 @@ export function initToolbar(ctx: AppContext) {
     const op = b.dataset.lassoSetop as Parameters<typeof input.lasso.setSetOpMode>[0];
     input.lasso.setSetOpMode(op);
     _selToolRec().setOp = op;   // 写当前工具自己的记录（fill 里「新建」项已隐）
+  });
+  // v0.7.8 魔棒算法组槽（原系统 <select> 退役，家规：不用系统控件）：
+  //   classic=经典 flood / lineart=论文线稿分区（断口自动闭合+填到线下，lineart-oracle）。
+  //   选项从 MAGIC_ALGORITHMS SSoT 填；换算法首 tap 会同步建分区（2K 实测 <1s）。
+  const lassoAlgoBtn = byId("lassoAlgoBtn");
+  const lassoAlgoMenu = byId("lassoAlgoMenu");
+  for (const a of MAGIC_ALGORITHMS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "lasso-tool-btn";
+    b.setAttribute("role", "menuitem");
+    b.dataset.lassoAlgo = a.id;
+    b.textContent = t(a.labelKey as Parameters<typeof t>[0]);
+    lassoAlgoMenu.appendChild(b);
+  }
+  wireSlotMenu(lassoAlgoBtn, lassoAlgoMenu, (b) => {
+    input.lasso.setMagicAlgorithm(b.dataset.lassoAlgo as Parameters<typeof input.lasso.setMagicAlgorithm>[0]);
   });
   // ---- 形状笔上下文工具栏（ADR-0005）：组槽 + 约束。状态 per-doc（editorState.shapeBrush），UI 改 → 写
   //   editorState + 灌引擎；换文档 wp:applyEditorState 回灌（对齐魔棒阈值样板）。
