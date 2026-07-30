@@ -157,6 +157,7 @@
     "src/pointer-gesture.ts",
     "src/resolved-brush.ts",
     "src/ora-stack-xml.ts",
+    "src/lineart/**/*.ts",
     "src/gl/tile-geometry.ts",
     "src/gl/tile-store.ts",
     "src/gl/gl-context.ts",
