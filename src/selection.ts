@@ -523,17 +523,15 @@ export class Selection {
   }
 
   /** 重采样：mask 同步缩放 (sx,sy)。缩放器 = Canvas2D drawImage（与 layer 同一 vetted 路径）。 */
-  resampledTo(sx: number, sy: number, smooth: boolean, quality: ImageSmoothingQuality): Selection | null {
+  // v0.6.46 字节版：面积平均缩放 mask → ≥128 二值化（选区不变量：恒 0/255）。零 canvas。
+  resampledTo(sx: number, sy: number): Selection | null {
     this._assertAlive();
     const oW = this.bboxW, oH = this.bboxH;
     const nbw = Math.max(1, Math.round(oW * sx));
     const nbh = Math.max(1, Math.round(oH * sy));
-    const m = makeBitmap(nbw, nbh);
-    const mctx = m.getContext("2d") as Ctx;
-    mctx.imageSmoothingEnabled = smooth;
-    mctx.imageSmoothingQuality = quality;
-    mctx.drawImage(this.materializeMaskCanvas() as CanvasImageSource, 0, 0, oW, oH, 0, 0, nbw, nbh);
-    return Selection.fromAlphaCanvas(Math.round(this.bboxX * sx), Math.round(this.bboxY * sy), m);
+    const src = this.materializeMaskRegion(this.bboxX, this.bboxY, oW, oH);
+    const g = resampleMaskArea(src, oW, oH, nbw, nbh);
+    return Selection.fromGray8Region(Math.round(this.bboxX * sx), Math.round(this.bboxY * sy), nbw, nbh, g);
   }
 
   /** 偏移环绕：随 doc.offsetWrap 平移。dx,dy 已归一化到 [0,W)/[0,H)。整数平移，硬搬像素。 */
@@ -552,6 +550,32 @@ export class Selection {
     }
     return Selection.fromGray8Region(0, 0, docW, docH, dst);
   }
+}
+
+// gray8 mask 面积平均缩放 + ≥128 二值化（resampledTo 用；模块级纯函数，node 直测）。
+function resampleMaskArea(src: Uint8Array, sw: number, sh: number, tw: number, th: number): Uint8Array {
+  const out = new Uint8Array(tw * th);
+  const xr = sw / tw, yr = sh / th;
+  for (let dy = 0; dy < th; dy++) {
+    const y0 = dy * yr, y1 = (dy + 1) * yr;
+    const iy0 = Math.floor(y0), iy1 = Math.min(sh, Math.ceil(y1));
+    for (let dx = 0; dx < tw; dx++) {
+      const x0 = dx * xr, x1 = (dx + 1) * xr;
+      const ix0 = Math.floor(x0), ix1 = Math.min(sw, Math.ceil(x1));
+      let acc = 0, area = 0;
+      for (let yy = iy0; yy < iy1; yy++) {
+        const wy = Math.min(y1, yy + 1) - Math.max(y0, yy);
+        if (wy <= 0) continue;
+        for (let xx = ix0; xx < ix1; xx++) {
+          const wx = Math.min(x1, xx + 1) - Math.max(x0, xx);
+          if (wx <= 0) continue;
+          acc += src[yy * sw + xx] * wx * wy; area += wx * wy;
+        }
+      }
+      out[dy * tw + dx] = (area > 0 && acc / area >= 128) ? 255 : 0;
+    }
+  }
+  return out;
 }
 
 // ---- 多边形栅格器（v0.6.19 多边形套索，模块级纯函数，node 直测）----

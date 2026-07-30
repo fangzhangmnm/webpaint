@@ -13,6 +13,7 @@ import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { LayerPixels, materialize, editRegion as editPixels, editRegionBytes as editPixelsBytes, replaceFromCanvas as replacePixels, disposePixelsSnapshot, type PixelsSnapshot } from "./tiles/tile-layer.ts";
 import { renderNodesToBytes } from "./doc-render.ts";
+import { resampleBytes } from "./resample-bytes.ts";
 
 export const DEFAULT_DOC_SIZE = 2048;
 
@@ -210,6 +211,15 @@ export class Layer {
     this.pixels.dispose();   // v0.4：句柄显式释放
     this.pixels = new LayerPixels(newDocW, newDocH);
     if (src && w > 0 && h > 0) replacePixels(this.pixels, src, ox, oy, w, h);
+    this._invalidate();
+  }
+  // 字节版（v0.6.46）：resize/裁剪模板 commit 用，零 canvas。
+  remapPixelsBytes(newDocW: number, newDocH: number, data: Uint8ClampedArray | null, ox: number, oy: number, w: number, h: number) {
+    this.docW = newDocW;
+    this.docH = newDocH;
+    this.pixels.dispose();
+    this.pixels = new LayerPixels(newDocW, newDocH);
+    if (data && w > 0 && h > 0) this.pixels.putRegion(ox, oy, w, h, data);
     this._invalidate();
   }
 
@@ -1008,28 +1018,22 @@ export class PaintDoc {
     const nh = Math.max(1, newH | 0);
     const sx = nw / this.width;
     const sy = nh / this.height;
-    const smooth = mode !== "nearest";
-    const quality = mode === "bicubic" ? "high" : "low";
+    // v0.6.46 字节管线（去 canvas 化 F 批）：逐层 getRegion → resample-bytes（sharper=面积平均
+    //   正解，bicubic 带 α 反振铃限幅、口径同 warp 采样器）→ 直落新 tile。零 premult 往返。
     for (const L of flattenLeaves(this.layers)) {
       const bx = L.bboxX, by = L.bboxY, oW = L.bboxW, oH = L.bboxH;
-      if (oW <= 0 || oH <= 0) { L.remapPixels(nw, nh, null); continue; }
-      const ox = L.canvas;
+      if (oW <= 0 || oH <= 0) { L.remapPixelsBytes(nw, nh, null, 0, 0, 0, 0); continue; }
+      const srcBytes = L.pixels.getRegion(bx, by, oW, oH);
       const nbw = Math.max(1, Math.round(oW * sx));
       const nbh = Math.max(1, Math.round(oH * sy));
       const nbx = Math.round(bx * sx);
       const nby = Math.round(by * sy);
-      const nc = makeBitmap(nbw, nbh);
-      const nctx = nc.getContext("2d", { willReadFrequently: false }) as Ctx;
-      nctx.imageSmoothingEnabled = smooth;
-      nctx.imageSmoothingQuality = quality;
-      // "sharper" 模式 = step-halving；其余单遍 browser
-      if (mode === "sharper") nctx.drawImage(smartResample(ox, nbw, nbh), 0, 0);
-      else nctx.drawImage(ox, 0, 0, oW, oH, 0, 0, nbw, nbh);
-      L.remapPixels(nw, nh, nc, nbx, nby, nbw, nbh);
+      const out = resampleBytes(srcBytes, oW, oH, nbw, nbh, mode);
+      L.remapPixelsBytes(nw, nh, out, nbx, nby, nbw, nbh);
     }
     if (this.selection) {
       const old = this.selection;
-      this.selection = old.resampledTo(sx, sy, smooth, quality);
+      this.selection = old.resampledTo(sx, sy);
       if (old !== this.selection) old.dispose();
     }
     this.width = nw;

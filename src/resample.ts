@@ -96,6 +96,18 @@ export async function decodeImageFile(file: Blob): Promise<ImageBitmap | HTMLIma
   }
 }
 
+// 解码边界的唯一 canvas 读出（政策注：外来格式 jpeg/webp/heic 只有原生解码器；读出这一次后
+// 管线全字节——见 docs/reports/20260728-canvas-audit.md Ⅰ 类）。
+export function imageSourceToBytes(src: ResampleSource): { data: Uint8ClampedArray; w: number; h: number } {
+  const w = src.width || (src as HTMLImageElement).naturalWidth;
+  const h = src.height || (src as HTMLImageElement).naturalHeight;
+  const c = makeCanvas(w, h);
+  const cx = c.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
+  cx.drawImage(src as CanvasImageSource, 0, 0);
+  const img = cx.getImageData(0, 0, w, h);
+  return { data: img.data, w, h };
+}
+
 // canvas → PNG Blob（持久化用）。OffscreenCanvas 用 convertToBlob，普通 canvas 用 toBlob。
 export function canvasToBlob(canvas: OffscreenCanvas | HTMLCanvasElement, type = "image/png") {
   if ((canvas as OffscreenCanvas).convertToBlob) return (canvas as OffscreenCanvas).convertToBlob({ type });

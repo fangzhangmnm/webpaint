@@ -19,7 +19,7 @@ import { reportError } from "./error-badge.ts";
 import { session } from "./session-state.ts";
 import type { Layer } from "./doc.ts";
 import { renderDocToImageBlob } from "./session.ts";
-import { smartResample, canvasToBlob } from "./resample.ts";
+import { smartResample, canvasToBlob , imageSourceToBytes } from "./resample.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { editorState } from "./workbench-state.ts";
@@ -284,7 +284,8 @@ function placeBitmapAsNewLayer(bmp: ImageBitmap, name: string): boolean {
   }
   const w = bmp.width, h = bmp.height;
   // 贴图居中放进新层（replaceFromCanvas 内部先 clear 再整块写入）
-  layer.replaceFromCanvas(bmp, Math.floor((doc.width - w) / 2), Math.floor((doc.height - h) / 2), w, h);
+  const px = imageSourceToBytes(bmp);   // 解码边界唯一读出（v0.6.46 字节管线）
+  layer.replaceFromBytes(px.data, Math.floor((doc.width - w) / 2), Math.floor((doc.height - h) / 2), w, h);
   session.markEdited();
   ctx.updateSaveStatus();
   ctx.afterDocChange();
@@ -295,7 +296,8 @@ function placeBitmapAsNewLayer(bmp: ImageBitmap, name: string): boolean {
 function overwriteLeaf(leaf: Layer, bmp: ImageBitmap) {
   const tx = ctx.pixelHistory.begin(leaf, "stroke");   // 立刻拍 before
   const w = bmp.width, h = bmp.height;
-  leaf.replaceFromCanvas(bmp, 0, 0, w, h);   // 内部先 clear 再整块写入（= 旧 restoreFromSnapshot 换像素语义）
+  const px = imageSourceToBytes(bmp);   // 解码边界唯一读出（v0.6.46 字节管线）
+  leaf.replaceFromBytes(px.data, 0, 0, w, h);   // 先 clear 再整块写入（= 旧 restoreFromSnapshot 换像素语义）
   tx.commit();                                         // 拍 after + 入 undo 栈（自带 wp:histchange）
   ctx.board.invalidateAll();
   ctx.board.requestRender();
