@@ -161,7 +161,7 @@ const LONG_PRESS_MS = 450;
 //   就是离屏时刻的收拢速度；旧三门（寿命/比例/行程）在这两者上都不可分。
 //   速度单位 = CSS px/s（准物理单位，跨屏幕/zoom/视口解耦）；不用 UIKit 的 scale/s——
 //   除以起手间距归一会把近距小抖动放大成巨大速度，恰是要防的噪声。
-const QUICK_PINCH_FIT_SPEED = 800;      // 收拢速度阈值（px/s，≈15–20 cm/s 的果断一收；真机调）
+const QUICK_PINCH_FIT_SPEED = 400;      // 收拢速度阈值（px/s；800 真机偏紧，2026-07-30 松一倍）
 const QUICK_PINCH_FIT_TAU_MS = 40;      // d(dist)/dt 的 EMA 时间常数（裸差分抖；同笔刷平滑的指数追踪思路）
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
