@@ -648,7 +648,10 @@ export class PaintDoc {
       const L = new Layer({ width: this.width, height: this.height, name: p.name, empty: true });
       L.visible = src.visible; L.opacity = src.opacity; L.mode = src.mode;
       L.clippingMask = src.clippingMask; L.lockAlpha = src.lockAlpha;
-      L.replaceFromBytes(p.data, rect.ox, rect.oy, rect.w, rect.h);
+      // applyRegionDiff 而非 replaceFromBytes：分片大多是稀疏的（互斥硬分配），
+      //   diff 对空层只物化非全透明 tile——putRegion 会把 bbox 内每个 tile 都物化，
+      //   k 张新层 × 全画布 bbox 就是白吃 k 倍显存/内存。
+      L.applyRegionDiff(rect.ox, rect.oy, rect.w, rect.h, p.data);
       out.push(L);
     }
     loc.parent.splice(loc.index, 1, ...out);
