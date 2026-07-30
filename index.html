@@ -766,6 +766,19 @@
         <input type="range" id="lassoInkThreshold" min="0" max="100" step="1" value="50" style="width:88px;" data-i18n-aria="la.inkThreshold" />
         <span id="lassoInkThresholdVal" class="lasso-popup-val">50</span>
       </div>
+      <!-- v0.7.4 追加两旋钮 + 调试视图（user 2026-07-30：加 high 手感价值的两个 + 调试视图定案漏网原因） -->
+      <div class="algo-cfg-row algo-cfg-lineart">
+        <span data-i18n="la.minRegion">碎区下限</span>
+        <button class="lasso-tool-btn" id="lassoAminMinus" type="button" aria-label="−">−</button>
+        <span class="lasso-popup-val" id="lassoAminVal">32</span>
+        <button class="lasso-tool-btn" id="lassoAminPlus" type="button" aria-label="＋">＋</button>
+      </div>
+      <div class="algo-cfg-row algo-cfg-lineart">
+        <span data-i18n="la.tipSens">端点灵敏度</span>
+        <input type="range" id="lassoTipSens" min="0" max="100" step="1" value="50" style="width:88px;" data-i18n-aria="la.tipSens" />
+        <span id="lassoTipSensVal" class="lasso-popup-val">50</span>
+      </div>
+      <button class="lasso-tool-btn algo-cfg-row algo-cfg-lineart" id="lassoLineartDebugBtn" type="button" role="menuitem" aria-pressed="false"><span data-i18n="la.lineartDebug">调试视图</span></button>
     </div>
     <div class="lasso-popup hidden" id="lassoMagicExpandMenu" role="menu" data-i18n-aria="la.autoExpand" style="width:max-content; min-width:0;">
       <div class="lasso-popup-row" style="display:flex; align-items:center; gap:6px;">
@@ -1371,6 +1384,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-49efcba23234.mjs"></script>
+    <script type="module" src="./dist/webpaint-f97a9f7ce3ee.mjs"></script>
   </body>
 </html>
