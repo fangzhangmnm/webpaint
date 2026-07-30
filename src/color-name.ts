@@ -1,14 +1,19 @@
-// 职责（单一）：颜色 ↔ 名字（localization-aware）。数据 = color-name-table.ts（xkcd top-120）。
-//   · colorNameOf(r,g,b)：最近锚点的**当前语言**名（OKLab 距离——RGB 欧氏会把蓝紫认错）。
-//     产出是**死字符串**（图层名等烘焙即定，换语言不回译，user 2026-07-30 拍板）。
-//   · parseColorName(text)：名字 → hex。**四语全收**（中文界面输 "sky blue" 照样认），
-//     大小写/空格不敏感，撞名（tok 合体词多锚点共用）按表序 = 热度先到先得。
-// 纯函数、零 DOM/canvas。lang() 只在 colorNameOf 调用时读（reload 制，安全）。
+// 职责（单一）：颜色 ↔ 名字（localization-aware）。纯函数、零 DOM/canvas。
+// 数据 = color-words.ts 的**全语言统一表**（一个大 list：[类别, 名, hex, 别名, slang]），
+// 本模块对类别零 special-case——**以后加语言只加行不改码**（2026-07-30 user 拍板）。
+//
+// · colorNameOf(r,g,b)：命名 = 表按当前 UI 语言过滤（slang 行跳过；mpl/css 是技术命名空间、
+//   不是 UI 语言 → 天然不参与命名；该语言无行则 fallback en）。nearest 在 OKLab（感知均匀，
+//   RGB 欧氏会把蓝紫认错）。产出是**死字符串**（图层名烘焙即定，换语言不回译）。
+// · parseColorName(text)：全语言搜索，大小写/空格不敏感（另挂去空格/冒号变体：skyblue /
+//   tab blue 也认）。撞名先到先得，**表行序 = 优先级**（mpl > css > en > zh > ja > tok，
+//   universal → 小众）；slang 照认——输入不 censor，只有输出不吓人。
+//   注意「blue」落 css 档 = 标准化石值 #0000ff（user 点名跟标准对齐），非 xkcd 质心。
 
-import { COLOR_NAMES, type ColorNameEntry } from "./color-name-table.ts";
+import { COLOR_WORDS } from "./color-words.ts";
 import { lang } from "./i18n/index.ts";
 
-// sRGB → OKLab（Björn Ottosson 2020 标准系数）。感知均匀：nearest 在这儿做才符合直觉。
+// sRGB → OKLab（Björn Ottosson 2020 标准系数）。
 function srgbToOklab(r8: number, g8: number, b8: number): [number, number, number] {
   const lin = (c: number) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
   const r = lin(r8), g = lin(g8), b = lin(b8);
@@ -26,52 +31,62 @@ function hexRgb(hex: string): [number, number, number] {
   return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
 }
 
-// 锚点 OKLab 惰性预算一次（120 × 3 float，模块常驻可忽略）。
-let _labs: Float64Array | null = null;
-function labs(): Float64Array {
-  if (!_labs) {
-    _labs = new Float64Array(COLOR_NAMES.length * 3);
-    for (let i = 0; i < COLOR_NAMES.length; i++) {
-      const [r, g, b] = hexRgb(COLOR_NAMES[i].hex);
+// 每语言的命名表（labels + 锚点 OKLab），按需惰性建。key = 类别字符串，泛化零 special-case。
+interface NamingTable { labels: string[]; labs: Float64Array }
+const _naming = new Map<string, NamingTable>();
+function namingTable(l: string): NamingTable {
+  let t = _naming.get(l);
+  if (!t) {
+    let rows = COLOR_WORDS.filter((r) => r[0] === l && !r[4]);
+    if (rows.length === 0) rows = COLOR_WORDS.filter((r) => r[0] === "en" && !r[4]);   // 未收录语言兜底
+    const labels = rows.map((r) => r[1]);
+    const labs = new Float64Array(rows.length * 3);
+    for (let i = 0; i < rows.length; i++) {
+      const [r, g, b] = hexRgb(rows[i][2]);
       const [L, a, bb] = srgbToOklab(r, g, b);
-      _labs[i * 3] = L; _labs[i * 3 + 1] = a; _labs[i * 3 + 2] = bb;
+      labs[i * 3] = L; labs[i * 3 + 1] = a; labs[i * 3 + 2] = bb;
     }
+    t = { labels, labs };
+    _naming.set(l, t);
   }
-  return _labs;
+  return t;
 }
 
-// 最近锚点条目（纯，测试面）。
-export function nearestColorEntry(r: number, g: number, b: number): ColorNameEntry {
+/** 指定语言下这个颜色叫什么（测试面 / colorNameOf 的实现）。 */
+export function colorNameIn(l: string, r: number, g: number, b: number): string {
+  const { labels, labs } = namingTable(l);
   const [L, a, bb] = srgbToOklab(r, g, b);
-  const t = labs();
   let bi = 0, bd = Infinity;
-  for (let i = 0; i < COLOR_NAMES.length; i++) {
-    const dL = L - t[i * 3], da = a - t[i * 3 + 1], db = bb - t[i * 3 + 2];
+  for (let i = 0; i < labels.length; i++) {
+    const dL = L - labs[i * 3], da = a - labs[i * 3 + 1], db = bb - labs[i * 3 + 2];
     const d = dL * dL + da * da + db * db;
     if (d < bd) { bd = d; bi = i; }
   }
-  return COLOR_NAMES[bi];
+  return labels[bi];
 }
 
 /** 当前语言下这个颜色叫什么（死字符串，烘焙即定）。 */
 export function colorNameOf(r: number, g: number, b: number): string {
-  return nearestColorEntry(r, g, b)[lang()];
+  return colorNameIn(lang(), r, g, b);
 }
 
-// parse 索引惰性建一次：四语标签（+en 去空格变体，CSS 习惯的 "skyblue" 也认）→ hex。
-//   先到先得（表序 = 热度）：tok "laso" 撞 N 个锚点时给最常用的那个。
+// parse 索引惰性建一次（~2100 行 → 约 5000 词条含变体，Map 常驻十 KB 级）。
 let _parseIdx: Map<string, string> | null = null;
 function norm(s: string): string { return s.trim().toLowerCase().replace(/\s+/g, " "); }
 function parseIdx(): Map<string, string> {
   if (!_parseIdx) {
-    _parseIdx = new Map();
+    const idx = _parseIdx = new Map<string, string>();
     const put = (label: string, hex: string) => {
       const k = norm(label);
-      if (!_parseIdx!.has(k)) _parseIdx!.set(k, hex);
-      const nospace = k.replace(/ /g, "");
-      if (!_parseIdx!.has(nospace)) _parseIdx!.set(nospace, hex);
+      if (!idx.has(k)) idx.set(k, hex);
+      const nospace = k.replace(/[ :]/g, "");   // skyblue / tabblue / tab:blue→tabblue
+      if (!idx.has(nospace)) idx.set(nospace, hex);
     };
-    for (const e of COLOR_NAMES) { put(e.en, e.hex); put(e.zh, e.hex); put(e.ja, e.hex); put(e.tok, e.hex); }
+    for (const [, name, hex, alias] of COLOR_WORDS) {   // 表行序 = 优先级，先到先得
+      put(name, hex);
+      if (name.includes(":")) put(name.replace(":", " "), hex);   // "tab blue"（带空格变体）
+      if (alias) put(alias, hex);                                  // かな读音 / 拼音
+    }
   }
   return _parseIdx;
 }

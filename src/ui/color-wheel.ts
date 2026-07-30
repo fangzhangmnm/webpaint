@@ -112,19 +112,32 @@ export const ColorWheel = defineComponent({
       commit();
       e.preventDefault();
     }
-    function onHex(e: Event) {
+    // 文本框契约（2026-07-30 user）：**只有回车才 commit**；失焦/Esc 一律弹回现有 truth
+    //   （半输入永不生效——原 @change 在 blur 也 commit，点别处会把没敲完的字当输入吞掉）。
+    // 解析：hex 优先；不是 hex 再按颜色名认——统一词表**全语言搜索**（优先级 mpl > css > en >
+    //   zh > ja > tok：单字母 b / tab:blue / CSS 关键字 / xkcd 全表含 slang / 传统色+拼音 / 和色+かな）。
+    function onHexKey(e: KeyboardEvent) {
       const el = e.target as HTMLInputElement;
-      // hex 优先；不是 hex 再按颜色名认（xkcd top-120，四语都收：sky blue / 天蓝 / 空色 / laso sewi）
-      const norm = normalizeHex(el.value) ?? parseColorName(el.value);
-      if (!norm) { el.value = props.color; return; }   // 非法：静默还原（组件不持 status）
-      const d = hexToHsv(norm);
-      hsv.h = d.h; hsv.s = d.s; hsv.v = d.v;
-      commit();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const norm = normalizeHex(el.value) ?? parseColorName(el.value);
+        if (!norm) { el.value = hexText.value; return; }   // 非法：静默弹回（组件不持 status）
+        const d = hexToHsv(norm);
+        hsv.h = d.h; hsv.s = d.s; hsv.v = d.v;
+        commit();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        el.value = hexText.value;
+        el.blur();
+      }
+    }
+    function onHexBlur(e: Event) {
+      (e.target as HTMLInputElement).value = hexText.value;   // :value 绑定不会自己拉回未 commit 的 DOM 值
     }
 
     // i18n：t() 在 setup 调（key 受 tsc 检查），模板只引 L.*（§5a 纪律）。
     const L = { svPad: t("cw.svPad"), hue: t("cw.hue") };
-    return { pad, hueEl, hueDeg, hsv, hex, hexText, onHueKey, onHex, L };
+    return { pad, hueEl, hueDeg, hsv, hex, hexText, onHueKey, onHexKey, onHexBlur, L };
   },
   // 多根 = fragment：挂进 .float-panel-body 后三个节点成为它的直接 flex 子节点，
   // DOM 结构与原 index.html 一字不差（样式全 class-based，照旧生效）。
@@ -137,7 +150,7 @@ export const ColorWheel = defineComponent({
     </div>
     <div class="picker-row">
       <span class="picker-preview" :style="{ background: hex }"></span>
-      <input type="text" maxlength="24" :value="hexText" @change="onHex" aria-label="HEX" />
+      <input type="text" maxlength="24" :value="hexText" @keydown="onHexKey" @blur="onHexBlur" aria-label="HEX" />
     </div>
   `,
 });
