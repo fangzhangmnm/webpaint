@@ -70,6 +70,8 @@ function _pushSelToolToEngine(tool: string) {
   input.lasso.setSubTool(rec.sub as Parameters<typeof input.lasso.setSubTool>[0]);
   input.lasso.setSetOpMode(rec.setOp as Parameters<typeof input.lasso.setSetOpMode>[0]);
   input.lasso.setConstrainSquare(rec.constrainSquare);
+  // v0.7.17 算法 per-tool（user 拍板：油漆桶默认线稿闭合、选区默认像素精确 flood）
+  input.lasso.setMagicAlgorithm(rec.algo as Parameters<typeof input.lasso.setMagicAlgorithm>[0]);
 }
 // （v0.6.31 回滚：顶栏组槽/长按/Alt/右键全撤——user 真机"长按还是难受"；四工具并列，
 //   lasso 二击 Esc v124 的废除**保留**；"再点开笔架"v79 于 v0.6.55 恢复（user 2026-07-30）。）
@@ -240,6 +242,11 @@ export function updateLassoToolbar() {
     if (av) av.textContent = String(input.lasso.getLineartMinRegion());
     const sv = document.getElementById("lassoTipSensVal");
     if (sv) sv.textContent = String(input.lasso.getLineartTipSensitivity());
+    const bv = document.getElementById("lassoBleedVal");
+    if (bv) {
+      const bl = input.lasso.getLineartBleed();
+      bv.textContent = bl < 0 ? t("la.bleedAuto") : String(bl);
+    }
     document.getElementById("lassoLineartDebugBtn")?.setAttribute(
       "aria-pressed", input.lasso.getLineartDebugView() ? "true" : "false");
   }
@@ -457,8 +464,10 @@ function initSelEditUI() {
     updateLassoToolbar();
   });
   // v0.7.2 算法配置扳手弹出（user：⋯只留命令，configuration 进扳手小三角）。
-  //   slider/stepper 连按不关 = 手动 toggle + 外点关（lassoMagicExpandMenu 样板）；
-  //   knob 全 RAM-only，改了 oracle 自己丢缓存重建（经典容差除外——沿用 editorState per-doc）。
+  //   slider/stepper 连按不关 = 手动 toggle + 外点关（lassoMagicExpandMenu 样板）。
+  //   v0.7.17（user 授权）：线稿 knob 全部 editorState.magicWand 持久化（跟文件走）——
+  //   UI 改 → 写 editorState + 灌引擎；换文档 wp:applyEditorState 回灌（阈值同款样板）。
+  //   调试视图仍 RAM-only（诊断开关不是作品属性）。
   const lassoAlgoCfgBtn = document.getElementById("lassoAlgoCfgBtn");
   const lassoAlgoCfgMenu = document.getElementById("lassoAlgoCfgMenu");
   if (lassoAlgoCfgBtn && lassoAlgoCfgMenu) {
@@ -475,10 +484,12 @@ function initSelEditUI() {
       if (lassoAlgoCfgMenu.contains(e.target as Node) || lassoAlgoCfgBtn.contains(e.target as Node)) return;
       lassoAlgoCfgMenu.classList.add("hidden");
     });
-    // 闭合距离 stepper（±16；8..256 clamp 在引擎侧）
+    const bleedLabel = (v: number) => (v < 0 ? t("la.bleedAuto") : String(v));
+    // 闭合距离 stepper（±16；8..256 clamp 在引擎侧，写回 clamp 后的真值）
     const dmaxVal = document.getElementById("lassoDmaxVal");
     const stepDmax = (d: number) => {
       input.lasso.setLineartCloseDist(input.lasso.getLineartCloseDist() + d);
+      editorState.magicWand.lineartCloseDist = input.lasso.getLineartCloseDist();
       if (dmaxVal) dmaxVal.textContent = String(input.lasso.getLineartCloseDist());
     };
     document.getElementById("lassoDmaxMinus")?.addEventListener("click", () => stepDmax(-16));
@@ -489,12 +500,14 @@ function initSelEditUI() {
     inkInp?.addEventListener("input", () => {
       const v = Math.max(0, Math.min(100, parseInt(inkInp.value, 10) || 0));
       input.lasso.setLineartInkThreshold(v);
+      editorState.magicWand.lineartInk = v;
       if (inkVal) inkVal.textContent = String(v);
     });
     // v0.7.4 碎区下限 stepper（±8；0=关守卫）
     const aminVal = document.getElementById("lassoAminVal");
     const stepAmin = (d: number) => {
       input.lasso.setLineartMinRegion(input.lasso.getLineartMinRegion() + d);
+      editorState.magicWand.lineartMinRegion = input.lasso.getLineartMinRegion();
       if (aminVal) aminVal.textContent = String(input.lasso.getLineartMinRegion());
     };
     document.getElementById("lassoAminMinus")?.addEventListener("click", () => stepAmin(-8));
@@ -505,8 +518,42 @@ function initSelEditUI() {
     sensInp?.addEventListener("input", () => {
       const v = Math.max(0, Math.min(100, parseInt(sensInp.value, 10) || 0));
       input.lasso.setLineartTipSensitivity(v);
+      editorState.magicWand.lineartTipSens = v;
       if (sensVal) sensVal.textContent = String(v);
     });
+    // v0.7.17 蔓延距离 stepper（-1=自动填到中线 / 0=像素画不碰真墨水 / 1..8 陷 n px；
+    //   档位数组步进；query-time 参数不作废分区缓存，拨了即时生效）
+    const BLEED_STEPS = [-1, 0, 1, 2, 3, 4, 6, 8];
+    const bleedVal = document.getElementById("lassoBleedVal");
+    const stepBleed = (d: number) => {
+      const cur = input.lasso.getLineartBleed();
+      let i = BLEED_STEPS.indexOf(cur);
+      if (i < 0) i = 0;
+      i = Math.max(0, Math.min(BLEED_STEPS.length - 1, i + d));
+      input.lasso.setLineartBleed(BLEED_STEPS[i]);
+      editorState.magicWand.lineartBleed = BLEED_STEPS[i];
+      if (bleedVal) bleedVal.textContent = bleedLabel(BLEED_STEPS[i]);
+    };
+    document.getElementById("lassoBleedMinus")?.addEventListener("click", () => stepBleed(-1));
+    document.getElementById("lassoBleedPlus")?.addEventListener("click", () => stepBleed(+1));
+    // 换文档回灌：editorState → 引擎 + UI（阈值 syncMagicThresholdUI 同款）
+    const syncLineartFromEditorState = () => {
+      const mw = editorState.magicWand;
+      input.lasso.setLineartCloseDist(mw.lineartCloseDist);
+      input.lasso.setLineartInkThreshold(mw.lineartInk);
+      input.lasso.setLineartMinRegion(mw.lineartMinRegion);
+      input.lasso.setLineartTipSensitivity(mw.lineartTipSens);
+      input.lasso.setLineartBleed(mw.lineartBleed);
+      if (dmaxVal) dmaxVal.textContent = String(input.lasso.getLineartCloseDist());
+      if (inkInp) inkInp.value = String(input.lasso.getLineartInkThreshold());
+      if (inkVal) inkVal.textContent = String(input.lasso.getLineartInkThreshold());
+      if (aminVal) aminVal.textContent = String(input.lasso.getLineartMinRegion());
+      if (sensInp) sensInp.value = String(input.lasso.getLineartTipSensitivity());
+      if (sensVal) sensVal.textContent = String(input.lasso.getLineartTipSensitivity());
+      if (bleedVal) bleedVal.textContent = bleedLabel(input.lasso.getLineartBleed());
+    };
+    window.addEventListener("wp:applyEditorState", syncLineartFromEditorState);
+    syncLineartFromEditorState();
     // v0.7.4 调试视图 toggle：端点+候选桥 overlay（绿=补上/橙=τ毙/红=碎区毙；有点无桥=ω 结构排除）。
     //   数据只在分区已缓存时出现——开了之后先 tap 一下让分区建起来。
     document.getElementById("lassoLineartDebugBtn")?.addEventListener("click", () => {
@@ -632,6 +679,7 @@ export function initToolbar(ctx: AppContext) {
   }
   wireSlotMenu(lassoAlgoBtn, lassoAlgoMenu, (b) => {
     input.lasso.setMagicAlgorithm(b.dataset.lassoAlgo as Parameters<typeof input.lasso.setMagicAlgorithm>[0]);
+    _selToolRec().algo = b.dataset.lassoAlgo!;   // v0.7.17 per-tool 持久化（user 授权）
   });
   // ---- 形状笔上下文工具栏（ADR-0005）：组槽 + 约束。状态 per-doc（editorState.shapeBrush），UI 改 → 写
   //   editorState + 灌引擎；换文档 wp:applyEditorState 回灌（对齐魔棒阈值样板）。

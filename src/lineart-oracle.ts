@@ -32,7 +32,7 @@ export class LineartOracle {
     x: number, y: number,
   ): Selection | null {
     const part = this._ensurePartition(doc, sourceLayer);
-    const rm = regionMaskAt(part, x, y);
+    const rm = regionMaskAt(part, x, y, this._bleed);
     if (!rm) return null;
     return Selection.fromGray8Region(rm.x, rm.y, rm.w, rm.h, rm.mask);
   }
@@ -86,6 +86,13 @@ export class LineartOracle {
   }
   getTipSensitivity(): number { return this._tipSensPct; }
   private _tipSensPct = 25;
+  /** 蔓延距离（v0.7.17）：-1=自动（填到中线）；0=像素画模式（真墨水一个不碰）；1..16=最多陷 n px。
+   *  **query-time 参数**——不作废分区缓存，拨了即时生效（比构建类旋钮便宜）。 */
+  setBleed(px: number): void {
+    this._bleed = Math.max(-1, Math.min(16, Math.round(px)));
+  }
+  getBleed(): number { return this._bleed; }
+  private _bleed = -1;
 
   /** 调试视图数据：分区已缓存（同层同版本）才返回，绝不在渲染路径里触发重建。 */
   debugInfo(

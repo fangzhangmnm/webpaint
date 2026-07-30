@@ -134,8 +134,9 @@ export class LassoEngine {
   getMagicThreshold() { return this._magicThreshold; }
   setMagicAutoExpand(px: number) { this._magicAutoExpandPx = Math.max(0, Math.min(100, Math.round(px) || 0)); }
   getMagicAutoExpand() { return this._magicAutoExpandPx; }
-  // 魔棒算法（v0.7 线稿填色）：classic=经典 flood；lineart=论文分区 oracle（断口自动闭合+填到线下）。
-  //   RAM-only（持久化进 editorState 待 user 同意）；交互完全同构，tap → Selection。
+  // 魔棒算法（v0.7 线稿填色）：classic=像素精确 flood；lineart=论文分区 oracle（断口自动闭合+填到线下）。
+  //   交互完全同构，tap → Selection。v0.7.17 起 per-tool 持久化（editorState.lassoTool/fillTool.algo，
+  //   toolbar._pushSelToolToEngine 灌入；油漆桶默认 lineart、选区默认 classic，user 拍板）。
   setMagicAlgorithm(v: MagicAlgorithm) { this._magicAlgorithm = v === "lineart" ? "lineart" : "classic"; }
   getMagicAlgorithm(): MagicAlgorithm { return this._magicAlgorithm; }
   /** 线稿分区缓存是否已就绪（首次 tap 前 UI 可提示「分析线稿中…」） */
@@ -151,6 +152,8 @@ export class LassoEngine {
   getLineartMinRegion() { return this._lineartOracle.getMinRegion(); }
   setLineartTipSensitivity(pct: number) { this._lineartOracle.setTipSensitivity(pct); }
   getLineartTipSensitivity() { return this._lineartOracle.getTipSensitivity(); }
+  setLineartBleed(px: number) { this._lineartOracle.setBleed(px); }
+  getLineartBleed() { return this._lineartOracle.getBleed(); }
   // 调试视图（v0.7.4）：端点+候选桥 overlay。开着且分区已缓存才有数据（渲染路径绝不触发重建）。
   _lineartDebugView = false;
   setLineartDebugView(on: unknown) { this._lineartDebugView = !!on; }

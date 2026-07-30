@@ -218,6 +218,43 @@ describe("lineart · 线下 label 瓜分与 mask 查询", () => {
     }
     eq(overlap, 0, "两区 mask 无重叠");
   });
+  it("蔓延距离（v0.7.17 像素画模式）：0=真墨水一个不碰、虚拟闭合桥仍可跨、自动=现行为", () => {
+    // 整宽横杆（真墨水）：bleed=0 → 上区 mask 恰好 = 纯背景 14 行，杆像素零入选
+    const w = 32, h = 32;
+    const Ib = blank(w, h);
+    fillRect(Ib, w, 0, 14, 31, 17);
+    const part = buildPartitionFromBinary(Ib, w, h, noClose);
+    const rm0 = regionMaskAt(part, 16, 5, 0);
+    let n0 = 0, inkHit = 0;
+    for (let ry = 0; ry < rm0.h; ry++) for (let rx = 0; rx < rm0.w; rx++) {
+      if (rm0.mask[ry * rm0.w + rx] !== 255) continue;
+      n0++;
+      if (Ib[(rm0.y + ry) * w + (rm0.x + rx)]) inkHit++;
+    }
+    eq(inkHit, 0, "真墨水零入选");
+    eq(n0, 14 * 32, "纯背景 14 行");
+    const rmAuto = regionMaskAt(part, 16, 5, -1);
+    let nAuto = 0;
+    for (let i = 0; i < rmAuto.mask.length; i++) if (rmAuto.mask[i] === 255) nAuto++;
+    eq(nAuto, 16 * 32, "自动 = 填到中线（含杆上半），现行为不变");
+    // 断口圆：闭合桥是虚拟墨水（inkDepth=0）→ bleed=0 时桥上像素（label 归内/外区者）仍可入选
+    const w2 = 64, h2 = 64;
+    const Ring = ring(w2, h2, 32, 32, 20, 3, 0, 3 / 20);
+    const part2 = buildPartitionFromBinary(Ring, w2, h2);
+    const inner = labelAt(part2, 32, 32);
+    const rmIn = regionMaskAt(part2, 32, 32, 0);
+    let bridgeIn = 0, ringHit = 0;
+    for (let ry = 0; ry < rmIn.h; ry++) for (let rx = 0; rx < rmIn.w; rx++) {
+      if (rmIn.mask[ry * rmIn.w + rx] !== 255) continue;
+      const p = (rmIn.y + ry) * w2 + (rmIn.x + rx);
+      if (Ring[p]) ringHit++;                                    // 真墨水
+      else if (part2.labels[p] === inner && part2.inkDepth[p] === 0
+        && Math.abs((p % w2) - 32 - 20) <= 3 && Math.abs(((p / w2) | 0) - 32) <= 4) bridgeIn++; // 断口带内的非墨水像素
+    }
+    eq(ringHit, 0, "圆环真墨水零入选");
+    assert(bridgeIn > 0, "断口带内的虚拟桥侧像素仍入选（填色能跨桥封口）");
+  });
+
   it("越界/病态查询：出界 null；空图整图一区", () => {
     const part = buildPartitionFromBinary(blank(8, 8), 8, 8);
     eq(part.regionCount, 1, "空图一区");

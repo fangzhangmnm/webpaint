@@ -646,7 +646,7 @@
           <button class="lasso-tool-btn lasso-tool-icon lasso-slot hidden" id="lassoExpandToggle" type="button" data-i18n-title="la.autoExpand" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
           <!-- v0.7 魔棒算法选择；v0.7.8 从系统 <select> 换组槽+弹出（家规：不用系统控件——UA 弹层
                夜间主题/iPad 滚轮选择器两头受罪，且 option 装不了 SVG）。选项 JS 从 lasso.ts
-               MAGIC_ALGORITHMS SSoT 填进 #lassoAlgoMenu；magic 子工具时显；RAM-only（cache 与选择都不持久化） -->
+               MAGIC_ALGORITHMS SSoT 填进 #lassoAlgoMenu；magic 子工具时显；v0.7.17 起 per-tool 持久化（editorState.lassoTool/fillTool.algo，油漆桶默认线稿闭合） -->
           <button class="lasso-tool-btn lasso-tool-select lasso-slot hidden" id="lassoAlgoBtn" type="button" data-i18n-title="la.algoSel" aria-haspopup="true"><span id="lassoAlgoBtnLabel"></span><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
           <!-- v0.7.2 算法配置扳手（user：不常用命令进⋯，算法 configuration 进扳手小三角）：
                弹出 #lassoAlgoCfgMenu，行按当前算法显隐 -->
@@ -726,7 +726,7 @@
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="fillDuplicateBtn" data-sel-act="dup" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg><span data-i18n="la.duplicate">复制选区到新层</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="fillMoveToLayerBtn" data-sel-act="move" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span data-i18n="la.moveToLayer">选区移动到新层</span></button>
       <!-- 蚂蚁线 toggle：fill 专属（ADR-0004 修订；选区菜单不再出现——v0.6.30 分家） -->
-      <button class="lasso-tool-btn" id="lassoAntsBtn" type="button" role="menuitem" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-rectangle"/></svg><span data-i18n="la.antsToggle">蚂蚁线</span></button>
+      <button class="lasso-tool-btn" id="lassoAntsBtn" type="button" role="menuitem" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-rectangle"/></svg><span data-i18n="la.antsToggle">蚂蚁线</span></button>
     </div>
       <button class="lasso-tool-btn" id="lassoSelectAllBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
       <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
@@ -781,7 +781,14 @@
       <div class="algo-cfg-row algo-cfg-lineart">
         <span data-i18n="la.tipSens">端点灵敏度</span>
         <input type="range" id="lassoTipSens" min="0" max="100" step="1" value="25" style="width:88px;" data-i18n-aria="la.tipSens" />
-        <span id="lassoTipSensVal" class="lasso-popup-val">50</span>
+        <span id="lassoTipSensVal" class="lasso-popup-val">25</span>
+      </div>
+      <!-- v0.7.17 蔓延距离（像素画模式）：自动=填到中线 / 0=真墨水一个不碰 / n=陷 n px；query-time 即时生效 -->
+      <div class="algo-cfg-row algo-cfg-lineart">
+        <span data-i18n="la.underLine">填到线下</span>
+        <button class="lasso-tool-btn" id="lassoBleedMinus" type="button" aria-label="−">−</button>
+        <span class="lasso-popup-val" id="lassoBleedVal">自动</span>
+        <button class="lasso-tool-btn" id="lassoBleedPlus" type="button" aria-label="＋">＋</button>
       </div>
       <button class="lasso-tool-btn algo-cfg-row algo-cfg-lineart" id="lassoLineartDebugBtn" type="button" role="menuitem" aria-pressed="false"><span data-i18n="la.lineartDebug">调试视图</span></button>
     </div>

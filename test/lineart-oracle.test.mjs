@@ -121,4 +121,22 @@ describe("lineart-oracle · tap→Selection + contentRev 缓存", () => {
     eq(o.isReady(doc, L), false, "灵敏度变 → 失效");
     eq(o.getTipSensitivity(), 80, "读回新值");
   });
+
+  it("蔓延距离（v0.7.17）：query-time 参数不作废缓存，选区随之收缩", () => {
+    const L = fakeLayer(gapRingRgba(w, h, 32, 32, 20, 3, 3 / 20), w, h);
+    const o = new LineartOracle();
+    const selAuto = o.selectAt(doc, L, 32, 32);
+    const nAuto = count255(selAuto);
+    selAuto.dispose();
+    o.setBleed(0);
+    eq(o.isReady(doc, L), true, "拨蔓延不丢缓存");
+    const sel0 = o.selectAt(doc, L, 32, 32);
+    eq(L.calls, 1, "不重建（query-time）");
+    const n0 = count255(sel0);
+    sel0.dispose();
+    assert(n0 < nAuto, `bleed=0 选区应更小（${n0} < ${nAuto}）`);
+    eq(o.getBleed(), 0, "读回");
+    o.setBleed(-5);
+    eq(o.getBleed(), -1, "clamp 下限 -1（自动）");
+  });
 });

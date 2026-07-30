@@ -85,7 +85,26 @@ magic 不再 tap-only：超 8 screen-px 升级 magic-drag 会话，沿路径逐�
 ——拖动大多数点免查询。预览直写 doc.selection（不进 undo），收笔一条 entry
 （一笔一整点），双指手势/pointercancel 走 cancelDrawing→magicDragCancel 无痕还原。
 
-## 缓存与持久化（user 拍板 2026-07-30）
+## 像素画模式：蔓延距离（v0.7.17）
+
+像素画的痛点：线下填充语义在 1px 硬线上= 填色盖线。解 = 构建时按**原始**二值墨水
+（非腐蚀后）记每像素 `inkDepth`（陷进墨水的欧氏深度，0=非墨水），查询时过滤
+`inkDepth ≤ 蔓延距离`。**query-time 参数，不作废分区缓存，拨了即时生效**。
+- 自动（-1，默认）= 不过滤 = 填到中线（非像素场景现行为）。
+- 0 = 像素画模式：真墨水一个不碰；**虚拟闭合桥 inkDepth=0 恒可跨**（断口照封，
+  不会留 1px 没填的运河）。
+- NW/SE bleed 不对称的根因 = 洋葱剥皮 BFS 扫描序平局偏置（NW 侧先出队），修对称
+  要换精确 EDT watershed（慢 2-3 倍）且对像素画无益（对称蔓≠零蔓），不做。
+
+## 缓存与持久化（user 拍板 2026-07-30；v0.7.17 持久化获授权落地）
+
+- **算法 per-tool 持久化**：`editorState.lassoTool/fillTool.algo`——油漆桶默认
+  `lineart`（线稿闭合）、选区魔棒默认 `classic`（改名「像素精确」，flood 语义）。
+  toolbar `_pushSelToolToEngine` 在切工具/换文档时灌入引擎。
+- **线稿 knob 全持久化**：`editorState.magicWand.lineart*`（closeDist/ink/minRegion/
+  tipSens/bleed），UI 改→写 editorState+灌引擎，换文档 wp:applyEditorState 回灌。
+  调试视图仍 RAM-only（诊断开关不是作品属性）。
+- 油漆桶蚂蚁线默认改关（editorState.fill.showAnts=false，toggle 保留）。
 
 - **cache = 纯 RAM**（LassoEngine._lineartOracle 单条），关页即没、下次重算；
   不进 editorState、不跟 ora 走。换文档 setDoc 顺手 invalidate（腾 16MB）。

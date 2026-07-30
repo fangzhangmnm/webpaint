@@ -63,6 +63,10 @@ export interface LineartPartition {
   /** 调试视图（v0.7.4）：检出的端点（腐蚀后坐标）+ 候选桥（含被守卫毙的） */
   keypoints: Keypoint[];
   bridges: BridgeDebug[];
+  /** 每像素「陷进真墨水多深」：0=非墨水（背景或虚拟闭合桥）；≥1=原始二值墨水像素到最近
+   *  背景的欧氏距离（ceil，封顶 255）。蔓延过滤基底（v0.7.17 像素画模式）：按**原始**墨水算
+   *  （非腐蚀后）——粗线腐蚀掉的表皮仍是可见墨水，蔓延小时不该被填。 */
+  inkDepth: Uint8Array;
 }
 
 /** RGBA（straight alpha）→ 二值笔画图：合成到白底的亮度 ≤ θ 判为笔画。透明 = 白 = 背景。 */
@@ -175,11 +179,15 @@ export function buildPartitionFromBinary(
   let hasStroke = false;
   for (let i = 0; i < Ib.length; i++) if (Ib[i]) { hasStroke = true; break; }
 
+  const inkDepth = new Uint8Array(w * h);
   if (hasStroke) {
     // EDT（feature=背景）→ 半宽估计 → 必要时腐蚀细化
     const bg = new Uint8Array(w * h);
     for (let i = 0; i < bg.length; i++) bg[i] = Ib[i] ? 0 : 1;
     const distSq = edtSquared(bg, w, h);
+    for (let i = 0; i < Ib.length; i++) {
+      if (Ib[i]) inkDepth[i] = Math.min(255, Math.ceil(Math.sqrt(distSq[i])));
+    }
     halfW = strokeHalfWidthMedian(Ib, w, h, distSq);
     if (params.erode && halfW > 3) {
       // 目标：细化到 2-3px 半宽；腐蚀半径封顶防细线整段蒸发（断口交给闭合步骤修，论文 §3）
@@ -202,6 +210,7 @@ export function buildPartitionFromBinary(
   return {
     w, h, labels, regionCount: count, bboxes: Int32Array.from(bboxes), strokeHalfWidth: halfW,
     keypoints: kps, bridges: closed ? closed.bridges : [],
+    inkDepth,
   };
 }
 
@@ -212,9 +221,11 @@ export function buildLineartPartition(
   return buildPartitionFromBinary(binarizeLuma(rgba, w, h, params.binarizeThreshold), w, h, params);
 }
 
-/** tap 查表：(x,y) 所在区域的 tight-bbox gray8 mask（255/0）。无区域 → null。 */
+/** tap 查表：(x,y) 所在区域的 tight-bbox gray8 mask（255/0）。无区域 → null。
+ *  bleedPx（v0.7.17 蔓延距离，query-time 参数不碰缓存）：-1=自动（填到中线，现行为）；
+ *  ≥0 = 最多陷进真墨水 bleedPx（0=像素画模式，真墨水一个不碰；虚拟闭合桥不是墨水，恒可跨）。 */
 export function regionMaskAt(
-  part: LineartPartition, x: number, y: number,
+  part: LineartPartition, x: number, y: number, bleedPx = -1,
 ): { x: number; y: number; w: number; h: number; mask: Uint8Array } | null {
   const xi = Math.floor(x), yi = Math.floor(y);
   if (xi < 0 || xi >= part.w || yi < 0 || yi >= part.h) return null;
@@ -224,10 +235,14 @@ export function regionMaskAt(
   const x0 = part.bboxes[b], y0 = part.bboxes[b + 1];
   const bw = part.bboxes[b + 2] - x0 + 1, bh = part.bboxes[b + 3] - y0 + 1;
   const mask = new Uint8Array(bw * bh);
+  const capped = bleedPx >= 0 ? Math.min(255, bleedPx) : -1;
   for (let ry = 0; ry < bh; ry++) {
     const row = (y0 + ry) * part.w;
     for (let rx = 0; rx < bw; rx++) {
-      if (part.labels[row + x0 + rx] === lab) mask[ry * bw + rx] = 255;
+      const p = row + x0 + rx;
+      if (part.labels[p] !== lab) continue;
+      if (capped >= 0 && part.inkDepth[p] > capped) continue;
+      mask[ry * bw + rx] = 255;
     }
   }
   return { x: x0, y: y0, w: bw, h: bh, mask };

@@ -142,15 +142,20 @@ function freshGroups() {
     // v0.5（user 拍板）：魔棒/主栅格配置**跟文件走**。expand 是 toggle（开了才用 expandPx，默认 1）。
     //   v0.5.11：threshold 归魔棒（油漆桶独立工具及 editorState.bucket 退役——填色收进套索 fill mode，
     //   flood 只剩魔棒一条路；旧 doc 里 stale 的 bucket 键被 mergeInto 静默忽略）。
-    magicWand:     { threshold: 20, expand: false, expandPx: 1 },        // #31 自动扩张 + v0.5.11 阈值
+    // #31 自动扩张 + v0.5.11 阈值；v0.7.17（user 2026-07-30 授权持久化）：线稿闭合算法的
+    //   全部 knob 跟文件走——closeDist=闭合距离(px)/ink=墨线判定(%)/minRegion=碎区下限(px)/
+    //   tipSens=端点灵敏度(0..100)/bleed=蔓延距离(-1=自动填到中线,0=像素画不碰真墨水)
+    magicWand:     { threshold: 20, expand: false, expandPx: 1,
+                     lineartCloseDist: 64, lineartInk: 50, lineartMinRegion: 32, lineartTipSens: 25, lineartBleed: -1 },
     // v0.6.19 蚂蚁线（user 拍板+持久化同意 2026-07-28）：fill 模式下可关（默认开）；
     //   toggle 只存在于 fill，非 fill 恒显示（ADR-0004 修订记录）。
-    fill:          { showAnts: true },
+    fill:          { showAnts: false },   // v0.7.17 默认改关（user 2026-07-30；toggle 仍在 fill ⋯ 菜单，per-doc 持久化）
     // v0.6.24 fill/lasso 分家（user 拍板：mental model 两个不互通的工具、实现一条路）：
     //   子工具/布尔/1:1 per-tool 持久化（v0.5.16 共享一份 RAM 记忆 _selMem 作废）。
     //   fill 默认魔棒+并（赛璐璐点色工作流）；selection 默认套索+新建（v0.6.55，user 2026-07-30：原默认矩形）。
-    lassoTool:     { sub: "freehand" as string, setOp: "new" as string, constrainSquare: false },
-    fillTool:      { sub: "magic" as string, setOp: "union" as string, constrainSquare: false },
+    //   v0.7.17：算法 per-tool 持久化（user 拍板：油漆桶默认线稿闭合、选区魔棒默认像素精确 flood）
+    lassoTool:     { sub: "freehand" as string, setOp: "new" as string, constrainSquare: false, algo: "classic" as string },
+    fillTool:      { sub: "magic" as string, setOp: "union" as string, constrainSquare: false, algo: "lineart" as string },
     // ADR-0005/0006 形状笔：子工具 + **per-图形约束**（user：每个图形的 lock 分别持久化，默认全不锁）
     //   + grid 配置（默认 2×6 = 6 头身 + 中线，border 关）
     shapeBrush:    { sub: "line" as string, constrainLine: false, constrainRect: false, constrainCircle: false, gridNu: 2, gridNv: 6, gridBorder: false },
@@ -269,16 +274,23 @@ export const editorState = {
     get sub(): string { return S.g.lassoTool.sub; }, set sub(v: string) { S.g.lassoTool.sub = v; },
     get setOp(): string { return S.g.lassoTool.setOp; }, set setOp(v: string) { S.g.lassoTool.setOp = v; },
     get constrainSquare(): boolean { return S.g.lassoTool.constrainSquare; }, set constrainSquare(v: boolean) { S.g.lassoTool.constrainSquare = v; },
+    get algo(): string { return S.g.lassoTool.algo; }, set algo(v: string) { S.g.lassoTool.algo = v; },
   },
   fillTool: {
     get sub(): string { return S.g.fillTool.sub; }, set sub(v: string) { S.g.fillTool.sub = v; },
     get setOp(): string { return S.g.fillTool.setOp; }, set setOp(v: string) { S.g.fillTool.setOp = v; },
     get constrainSquare(): boolean { return S.g.fillTool.constrainSquare; }, set constrainSquare(v: boolean) { S.g.fillTool.constrainSquare = v; },
+    get algo(): string { return S.g.fillTool.algo; }, set algo(v: string) { S.g.fillTool.algo = v; },
   },
   magicWand: {
     get threshold(): number { return S.g.magicWand.threshold; }, set threshold(v: number) { S.g.magicWand.threshold = v; },
     get expand(): boolean { return S.g.magicWand.expand; }, set expand(v: boolean) { S.g.magicWand.expand = v; },
     get expandPx(): number { return S.g.magicWand.expandPx; }, set expandPx(v: number) { S.g.magicWand.expandPx = v; },
+    get lineartCloseDist(): number { return S.g.magicWand.lineartCloseDist; }, set lineartCloseDist(v: number) { S.g.magicWand.lineartCloseDist = v; },
+    get lineartInk(): number { return S.g.magicWand.lineartInk; }, set lineartInk(v: number) { S.g.magicWand.lineartInk = v; },
+    get lineartMinRegion(): number { return S.g.magicWand.lineartMinRegion; }, set lineartMinRegion(v: number) { S.g.magicWand.lineartMinRegion = v; },
+    get lineartTipSens(): number { return S.g.magicWand.lineartTipSens; }, set lineartTipSens(v: number) { S.g.magicWand.lineartTipSens = v; },
+    get lineartBleed(): number { return S.g.magicWand.lineartBleed; }, set lineartBleed(v: number) { S.g.magicWand.lineartBleed = v; },
   },
   shapeBrush: {
     get sub(): string { return S.g.shapeBrush.sub; }, set sub(v: string) { S.g.shapeBrush.sub = v; },
