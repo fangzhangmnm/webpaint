@@ -25,6 +25,7 @@ export function attachInputSense<T>(
   opts: {
     search: (query: string) => InputSenseItem<T>[];
     onPick: (item: InputSenseItem<T>) => void;
+    /** 可选截断；缺省不设上限（菜单限高滚动，2026-07-30 user 拍板）。 */
     limit?: number;
   },
 ): InputSenseHandle {
@@ -64,7 +65,8 @@ export function attachInputSense<T>(
   };
 
   const update = () => {
-    items = opts.search(input.value).slice(0, opts.limit ?? 8);
+    const all = opts.search(input.value);
+    items = opts.limit ? all.slice(0, opts.limit) : all;
     hi = -1;
     if (!items.length) { close(); return; }
     render();

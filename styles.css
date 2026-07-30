@@ -669,6 +669,11 @@ input[type=range] {
 /* v0.7.9 按颜色拆分 sheet：带图标的动作按钮 + 中心色 swatch 行（chip 底色 = 簇心，em = 采样占比） */
 .sheet-action-with-icon { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .sheet-action-with-icon svg { width: 18px; height: 18px; flex: none; }
+#explodeCultureMenu {
+  /* sheet（--z-modal）内弹出的下拉：popover band(420) 在 modal(500) 之下会被 sheet+backdrop
+     整个盖住（真机现象「点不开」——其实开了，在底下）。提到 modal 之上、busy(520) 之下。 */
+  z-index: calc(var(--z-modal) + 5);
+}
 .explode-swatches {
   display: flex;
   flex-wrap: wrap;

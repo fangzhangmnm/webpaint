@@ -9,6 +9,7 @@
 import { clusterColors, partitionByNearest, hexOf, type ColorCluster } from "./color-cluster.ts";
 import { colorNameIn, defaultCulture } from "./color-name.ts";
 import { wireInlineSelect } from "./inline-select.ts";
+import { makeRampSlider, type RampSliderHandle } from "./ui/ramp-slider.ts";
 import { countLeaves, type Layer } from "./doc.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
@@ -35,8 +36,7 @@ function _cultureLabel(v: string): string {
 const el = {
   backdrop: () => byId("explodeBackdrop"),
   sheet: () => byId("explodeSheet"),
-  k: () => byId("explodeK") as HTMLInputElement,
-  kVal: () => byId("explodeKVal"),
+  kRow: () => byId("explodeKRow"),
   swatches: () => byId("explodeSwatches"),
   msg: () => byId("explodeMsg"),
   confirm: () => byId("explodeConfirm") as HTMLButtonElement,
@@ -51,12 +51,19 @@ let _state: {
   region: Uint8ClampedArray;
   clusters: ColorCluster[];
 } | null = null;
+// k 滑杆（ramp-slider 深模块，家族 best practice——原生 range 退役）。max 随图层余量变 →
+// 每次开 sheet 重建；k 值 session 内记住。
+let _kSlider: RampSliderHandle | null = null;
+let _k = 4;
 
 function _close() {
   el.backdrop().classList.add("hidden");
   el.sheet().classList.add("hidden");
   document.removeEventListener("keydown", _onKey);
   _state = null;   // 释放 region 引用
+  _kSlider?.dispose();
+  _kSlider = null;
+  el.kRow().innerHTML = "";
 }
 
 function _onKey(e: KeyboardEvent) {
@@ -66,9 +73,7 @@ function _onKey(e: KeyboardEvent) {
 // 重算聚类 + 渲染 swatch 行（chip 底色 = 中心色，标签 = 采样占比；title = hex）。
 function _recompute() {
   if (!_state) return;
-  const k = parseInt(el.k().value, 10);
-  el.kVal().textContent = String(k);
-  _state.clusters = clusterColors(_state.region, k);
+  _state.clusters = clusterColors(_state.region, _k);
   const box = el.swatches();
   box.innerHTML = "";
   for (const c of _state.clusters) {
@@ -97,9 +102,15 @@ export function openExplodeSheet(L: Layer | null) {
   const rect = { ox: L.bboxX, oy: L.bboxY, w: L.bboxW, h: L.bboxH };
   const region = L.pixels.getRegion(rect.ox, rect.oy, rect.w, rect.h);
   _state = { layerId: L.id, rect, region, clusters: [] };
-  const kInput = el.k();
-  kInput.max = String(Math.min(8, room));
-  if (parseInt(kInput.value, 10) > room) kInput.value = String(room);
+  const kMax = Math.min(8, room);
+  _k = Math.max(2, Math.min(_k, kMax));
+  _kSlider?.dispose();
+  el.kRow().innerHTML = "";
+  _kSlider = makeRampSlider({
+    label: t("ex.k"), min: 2, max: kMax, step: 1, value: _k,
+    onInput: (v) => { _k = v; _recompute(); },
+  });
+  el.kRow().appendChild(_kSlider.el);
   el.msg().classList.add("hidden");
   el.cultureLabel().textContent = _cultureLabel(culture());
   el.backdrop().classList.remove("hidden");
@@ -154,5 +165,4 @@ export function initExplodeSheet(c: AppContext) {
   el.confirm().addEventListener("click", _commit);
   el.cancel().addEventListener("click", _close);
   el.backdrop().addEventListener("click", _close);
-  el.k().addEventListener("input", _recompute);
 }

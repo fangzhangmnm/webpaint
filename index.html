@@ -939,11 +939,8 @@
     <div class="sheet hidden" id="explodeSheet" role="dialog" aria-modal="true" data-i18n-aria="ex.title">
       <h3 data-i18n="ex.title">按颜色拆分图层</h3>
       <p class="sheet-hint" data-i18n="ex.hint">像素按最近的中心色硬分配到多张新图层，叠加显示与原层一致</p>
-      <label class="brush-slider-row" style="grid-template-columns: 80px 1fr 24px;">
-        <span class="brush-slider-label" data-i18n="ex.k">颜色数</span>
-        <input id="explodeK" type="range" min="2" max="8" step="1" value="4" />
-        <span id="explodeKVal">4</span>
-      </label>
+      <!-- 颜色数滑杆：ramp-slider 深模块动态挂载（max 随图层余量变，每次开 sheet 重建） -->
+      <div id="explodeKRow"></div>
       <label class="brush-slider-row" style="grid-template-columns: 80px 1fr;">
         <span class="brush-slider-label" data-i18n="ex.culture">色名词库</span>
         <button class="menu-lang-select menu-inline-select" id="explodeCultureBtn" type="button" aria-haspopup="true"><span id="explodeCultureBtnLabel"></span><svg class="menu-inline-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.4 2.8 L4 5.6 L6.6 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>

@@ -109,7 +109,7 @@ export function parseColorName(text: string): string | null {
  *  （2026-07-30 user：中文品类字在尾巴——输「黄」必须查得到「豆汁黄」，不能被黄x前缀挤光）。
  *  名与别名（かな/拼音）都参与匹配，显示用正名；同档内 = 表序（priority）。
  *  全表线性扫（~2100 行/键击，个位 ms）。 */
-export function searchColorNames(query: string, limit = 8): { name: string; hex: string }[] {
+export function searchColorNames(query: string, limit = Infinity): { name: string; hex: string }[] {
   const q = norm(query);
   if (!q) return [];
   const qn = q.replace(/[ :]/g, "");
@@ -128,7 +128,8 @@ export function searchColorNames(query: string, limit = 8): { name: string; hex:
       seen.add(key); sub.push({ name, hex });
     }
   }
-  // 槽位分配：子串命中在场时给它保底 ⌈limit/2⌉，前缀拿剩下的；子串不足时前缀补满。
+  if (!Number.isFinite(limit)) return pre.concat(sub);   // 无上限（默认）：前缀档全排前，子串档殿后
+  // 有限 limit 的槽位分配：子串命中在场时给它保底 ⌈limit/2⌉，前缀拿剩下的；子串不足时前缀补满。
   const subQuota = Math.min(sub.length, Math.ceil(limit / 2));
   const preTake = Math.min(pre.length, limit - subQuota);
   return pre.slice(0, preTake).concat(sub.slice(0, limit - preTake));
