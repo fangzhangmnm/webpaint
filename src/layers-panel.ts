@@ -761,9 +761,17 @@ function _syncChrome() {
   if (downBtn) downBtn.disabled = !doc.canMoveLayer(doc.activeId!, -1);
   nextTick(() => {
     _clampListHeight();   // 列表高度跟位置/层数走，保证最底 item 可滚到
-    els.layersList.querySelector(".layer-row.active")?.scrollIntoView({ block: "nearest" });
+    // v0.6.55：只在**活动层变了**才滚到活动行。原先每次 docVersion bump 都滚——快速连点
+    //   多个眼睛时，第一次 toggle 触发 scrollIntoView 把列表挪动，第二击落在移位后的行上
+    //   （真机反馈：「第二个眼睛点击反而 toggle 第一个还没更新好的图层」）。眼睛/透明度/模式
+    //   这类不换活动层的操作不该动滚动位置。
+    if (doc.activeId !== _lastScrolledActiveId) {
+      _lastScrolledActiveId = doc.activeId;
+      els.layersList.querySelector(".layer-row.active")?.scrollIntoView({ block: "nearest" });
+    }
   });
 }
+let _lastScrolledActiveId: number | null = null;   // _syncChrome 上次滚到的活动层（换层才滚）
 
 let _layersDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
 

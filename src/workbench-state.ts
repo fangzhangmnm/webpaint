@@ -148,8 +148,8 @@ function freshGroups() {
     fill:          { showAnts: true },
     // v0.6.24 fill/lasso 分家（user 拍板：mental model 两个不互通的工具、实现一条路）：
     //   子工具/布尔/1:1 per-tool 持久化（v0.5.16 共享一份 RAM 记忆 _selMem 作废）。
-    //   fill 默认魔棒+并（赛璐璐点色工作流）；selection 默认矩形+新建。
-    lassoTool:     { sub: "rect" as string, setOp: "new" as string, constrainSquare: false },
+    //   fill 默认魔棒+并（赛璐璐点色工作流）；selection 默认套索+新建（v0.6.55，user 2026-07-30：原默认矩形）。
+    lassoTool:     { sub: "freehand" as string, setOp: "new" as string, constrainSquare: false },
     fillTool:      { sub: "magic" as string, setOp: "union" as string, constrainSquare: false },
     // ADR-0005/0006 形状笔：子工具 + **per-图形约束**（user：每个图形的 lock 分别持久化，默认全不锁）
     //   + grid 配置（默认 2×6 = 6 头身 + 中线，border 关）

@@ -71,7 +71,7 @@ function _pushSelToolToEngine(tool: string) {
   input.lasso.setConstrainSquare(rec.constrainSquare);
 }
 // （v0.6.31 回滚：顶栏组槽/长按/Alt/右键全撤——user 真机"长按还是难受"；四工具并列，
-//   "再点开笔架"v79 与 lasso 二击 Esc v124 的废除**保留**。）
+//   lasso 二击 Esc v124 的废除**保留**；"再点开笔架"v79 于 v0.6.55 恢复（user 2026-07-30）。）
 // v0.6.27 小三角统一语义（user）：单击=控件主动作（激活/toggle；纯选择槽=开菜单）；
 //   **长按 ≈450ms=开该控件的菜单**；菜单开着再点=关。共享 helper：返回 consume()——
 //   长按已触发时吞掉随后的 click。
@@ -270,7 +270,7 @@ export function setTool(tool: string) {
   if (tool === "brush" || tool === "eraser" || tool === "filterBrush" || tool === "shapeBrush") {
     rack.applyToolState(tool);
   }
-  // v0.6.24：进选区/填色工具 → 灌该工具自己的持久化记录（fill 默认魔棒+并、selection 默认矩形+新建；
+  // v0.6.24：进选区/填色工具 → 灌该工具自己的持久化记录（fill 默认魔棒+并、selection 默认套索+新建；
   //   fill 的「新建」菜单项本就隐藏，无需 coerce）。
   if (tool === "lasso" || tool === "fill") {
     _pushSelToolToEngine(tool);
@@ -884,11 +884,17 @@ export function initToolbar(ctx: AppContext) {
   _syncEditModeUI();   // 初始同步（boot setTool 同工具会 early-return 不 emit，这里兜一次）
 
   // ---- 工具按钮 ----
-  // v0.6.31 回滚：四工具并列，单击=切换（已激活=无事）。长按/Alt/右键/组菜单全撤（真机难受）。
+  // v0.6.31 回滚：四工具并列，单击=切换。长按/Alt/右键/组菜单全撤（真机难受）。
+  // v0.6.55（user 2026-07-30）：恢复「二次点弹笔架」（v79 语义回归）——已激活的画笔/橡皮/形状笔
+  //   再点 = toggle 该工具的笔架（openExclusive 自带 toggle）；无笔架的工具（lasso/fill）二次点仍无事。
   for (const b of els.toolBtns) {
     b.addEventListener("click", () => {
       const tool = b.dataset.tool!;   // .tool[data-tool] 选择器保证存在
-      if (editMode.current() === tool) return;   // 已激活=无事（v0.6.27 语义保留）
+      if (editMode.current() === tool) {
+        const rackId = RACK_PANEL_BY_TOOL[tool];
+        if (rackId) openExclusive(rackId);
+        return;
+      }
       setTool(tool);
       // 切到新 tool 时关掉之前开的 rack（防止 stale）
       closeExclusive();
