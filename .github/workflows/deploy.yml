@@ -60,6 +60,7 @@ jobs:
           #   所以下面拷不到就打 ::warning::（GH Actions 摘要里显眼），别再让它无声无息。
           #   仍不 fail：prod 与 main 的文件集合本来就可能不同步（新文件先落 main），硬失败会互相卡住。
           for f in index.html manifest.webmanifest service-worker.js styles.css builtin-brushes.json \
+                   color-words.json \
                    icon.svg icon-192.png icon-512.png apple-touch-icon-180.png; do
             cp -p prod-tree/$f site/     2>/dev/null || echo "::warning::prod 缺 $f —— / 上会 404"
             cp -p main-tree/$f site/dev/ 2>/dev/null || echo "::warning::main 缺 $f —— /dev/ 上会 404"

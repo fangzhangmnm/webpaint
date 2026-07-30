@@ -227,10 +227,35 @@ export function parseColorName(text: string): string | null {
 }
 
 // ---- IntelliSense 数据面 ----
-/** `category:` 前缀 = 浏览整个色板（**保持源序**——retro palette 的编号序就是身份；rest 再过滤，
- *  前缀档在前）。色温出单条候选。普通查询 = 前缀命中优先、子串命中殿后（有限 limit 时子串保底
- *  一半槽位——中文品类字在尾巴，输「黄」必须查得到「豆汁黄」）。名与别名都参与匹配，显示用正名。 */
-export function searchColorNames(query: string, limit = Infinity): { name: string; hex: string }[] {
+// 模糊三档（user 2026-07-30：「匹配尽量模糊」）：0=前缀 / 1=子串 / 2=子序列（「豆黄」→「豆汁黄」、
+// "tblue"→"tab:blue"）。命中不到 → -1。
+function matchTier(cand: string, q: string): number {
+  if (!cand) return -1;
+  if (cand.startsWith(q)) return 0;
+  if (cand.includes(q)) return 1;
+  let i = 0;
+  for (let j = 0; j < cand.length && i < q.length; j++) if (cand[j] === q[i]) i++;
+  return i === q.length ? 2 : -1;
+}
+function bestTier(q: string, ...cands: (string | undefined)[]): number {
+  let best = -1;
+  for (const c of cands) {
+    if (!c) continue;
+    const t = matchTier(c, q);
+    if (t >= 0 && (best < 0 || t < best)) best = t;
+  }
+  return best;
+}
+
+/** 候选：色词（name+hex）或词库本身（category——IntelliSense 是 discovery，部分输入 category
+ *  名即出「中国传统色:」候选，选中回填前缀继续浏览整板）。 */
+export interface ColorNameHit { name: string; hex: string; category?: string }
+
+/** `category:` 前缀 = 浏览整个色板（**保持源序**——retro palette 的编号序就是身份；rest 再按
+ *  三档模糊过滤）。色温出单条候选。普通查询 = category 候选置顶（discovery）→ 前缀 → 子串 →
+ *  子序列（有限 limit 时子串+子序列合计保底一半槽位——中文品类字在尾巴，输「黄」必须查得到
+ *  「豆汁黄」）。名与别名（かな/拼音）都参与匹配，显示用正名。 */
+export function searchColorNames(query: string, limit = Infinity): ColorNameHit[] {
   const q = norm(query);
   if (!q) return [];
   const mk = q.match(KELVIN_RE);
@@ -241,38 +266,47 @@ export function searchColorNames(query: string, limit = Infinity): { name: strin
     const cats = resolveCategoryToken(mc[1]);
     if (cats) {
       const rest = norm(mc[2]);
-      const pre: { name: string; hex: string }[] = [];
-      const sub: { name: string; hex: string }[] = [];
+      const tiers: ColorNameHit[][] = [[], [], []];
       for (const [cat, name, hex, alias] of _rows) {
         if (!cats.includes(cat)) continue;
-        if (!rest) { pre.push({ name, hex }); continue; }   // 裸 `category:` = 整板（源序）
-        const n = norm(name), a = alias ? norm(alias) : "";
-        if (n.startsWith(rest) || (a && a.startsWith(rest))) pre.push({ name, hex });
-        else if (n.includes(rest) || (a && a.includes(rest))) sub.push({ name, hex });
+        if (!rest) { tiers[0].push({ name, hex }); continue; }   // 裸 `category:` = 整板（源序）
+        const t = bestTier(rest, norm(name), alias ? norm(alias) : undefined);
+        if (t >= 0) tiers[t].push({ name, hex });
       }
-      const all = pre.concat(sub);
+      const all = tiers[0].concat(tiers[1], tiers[2]);
       return Number.isFinite(limit) ? all.slice(0, limit) : all;
     }
   }
-  const qn = q.replace(/[ :]/g, "");
-  const pre: { name: string; hex: string }[] = [];
-  const sub: { name: string; hex: string }[] = [];
-  const seen = new Set<string>();
-  for (const [, name, hex, alias] of _rows) {
-    if (pre.length >= limit && sub.length >= limit) break;
-    const n = norm(name), nn = n.replace(/[ :]/g, "");
-    const a = alias ? norm(alias) : "";
-    const key = n + hex;
-    if (seen.has(key)) continue;
-    if (pre.length < limit && (n.startsWith(q) || nn.startsWith(qn) || (a && a.startsWith(q)))) {
-      seen.add(key); pre.push({ name, hex });
-    } else if (sub.length < limit && (n.includes(q) || (a && a.includes(q)))) {
-      seen.add(key); sub.push({ name, hex });
+  // category discovery：查询模糊命中词库 id/label/别名 → 「label:」候选置顶（选中回填前缀）。
+  // 所有词库都可浏览（browsing ≠ naming——css/mpl 也在此可发现）。
+  const catHits: ColorNameHit[] = [];
+  for (const c of _cats) {
+    if (bestTier(q, norm(c.id), norm(c.label), ...c.aliases.map(norm)) >= 0) {
+      catHits.push({ name: `${c.label}:`, hex: "", category: c.id });
     }
   }
-  if (!Number.isFinite(limit)) return pre.concat(sub);   // 无上限（默认）：前缀档全排前，子串档殿后
-  // 有限 limit 的槽位分配：子串命中在场时给它保底 ⌈limit/2⌉，前缀拿剩下的；子串不足时前缀补满。
-  const subQuota = Math.min(sub.length, Math.ceil(limit / 2));
-  const preTake = Math.min(pre.length, limit - subQuota);
-  return pre.slice(0, preTake).concat(sub.slice(0, limit - preTake));
+  const qn = q.replace(/[ :]/g, "");
+  const tiers: ColorNameHit[][] = [[], [], []];
+  const seen = new Set<string>();
+  for (const [, name, hex, alias] of _rows) {
+    const n = norm(name);
+    const key = n + hex;
+    if (seen.has(key)) continue;
+    const nn = n.replace(/[ :]/g, "");
+    // 名 / 去空格名 / 别名 各算一遍取最优；查询自身的去空格形（"sky blue"→"skyblue"）也试。
+    let t = bestTier(q, n, nn !== n ? nn : undefined, alias ? norm(alias) : undefined);
+    if (qn !== q) {
+      const t2 = matchTier(nn, qn);
+      if (t2 >= 0 && (t < 0 || t2 < t)) t = t2;
+    }
+    if (t >= 0) { seen.add(key); tiers[t].push({ name, hex }); }
+  }
+  const [pre, sub, fuz] = tiers;
+  if (!Number.isFinite(limit)) return catHits.concat(pre, sub, fuz);   // 无上限（默认）：档序即排序
+  // 有限 limit 的槽位分配：category 候选不占配额算——先扣；子串+子序列合计保底 ⌈limit/2⌉。
+  const rest = Math.max(0, limit - catHits.length);
+  const tail = sub.concat(fuz);
+  const tailQuota = Math.min(tail.length, Math.ceil(rest / 2));
+  const preTake = Math.min(pre.length, rest - tailQuota);
+  return catHits.concat(pre.slice(0, preTake), tail.slice(0, rest - preTake));
 }
