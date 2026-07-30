@@ -852,7 +852,7 @@ export function initToolbar(ctx: AppContext) {
   // v120: 插值模式 dropdown（旧 3 个按钮 → 1 个 select）
   const lassoSampleSel = document.getElementById("lassoSampleSel") as HTMLSelectElement | null;
   // 变换采样 + 调整尺寸 两个 dropdown 都从 resample.js 的 RESAMPLE_MODES SSoT 填（以后加方法/AI 一处生效）
-  fillResampleSelect(lassoSampleSel, "transform", "spline");   // v0.6.37 默认样条（user：先默认都 spline）
+  fillResampleSelect(lassoSampleSel, "transform", "bicubic");   // v0.6.45 默认双三次（真机裁决，spline 降自选）
   fillResampleSelect(els.resampleMode, "scale", "bicubic");
   if (lassoSampleSel) {
     lassoSampleSel.addEventListener("change", () => {

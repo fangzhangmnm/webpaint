@@ -172,8 +172,8 @@ function freshGroups() {
       iso: { box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
     },
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
-    // sample：液化采样核 "bilinear"|"nearest"|"spline"（v0.6.36 保锐模式；持久化同意随本批 2026-07-28 批准）
-    liquify:       { bleed: "edge" as string, sample: "spline" as string },
+    // sample：液化采样核 "bilinear"|"nearest"|"spline"（v0.6.36 保锐模式；持久化同意随 2026-07-28 批；v0.6.45 默认回 bilinear——真机裁决 spline 无显著优势）
+    liquify:       { bleed: "edge" as string, sample: "bilinear" as string },
     colorPicker:   { layerMode: "composite" as string },                           // pick-mode: "composite" | "layer"
     viewport:      null as EditorViewport | null,
     checkboard:    false,

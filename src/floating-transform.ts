@@ -157,7 +157,7 @@ export class FloatingTransform {
   constructor(onChange: () => void = () => {}) {
     this._live = null;
     this._drag = null;
-    this._sampleMode = "spline";   // 默认样条（v0.6.37 user 拍板「先默认都 spline」；真机太卡再降）
+    this._sampleMode = "bicubic";   // 默认双三次（v0.6.45 真机裁决：spline+限幅后无显著优势且微卡，降为自选档）
     this.onChange = onChange;
   }
 
