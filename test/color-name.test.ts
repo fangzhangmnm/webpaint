@@ -97,6 +97,16 @@ test("`category:` 前缀 = 浏览整板（id/别名/label 都认，rest 再过�
   eq(searchColorNames("notacat:x").length, 0);           // 未知 token 落回普通查询（无命中）
 });
 
+test("模糊匹配 + 词库 discovery：子序列命中、部分词库名出「label:」候选", () => {
+  // 子序列（匹配尽量模糊）：「豆黄」→「豆汁黄」、"tblue" → "tab:blue"
+  assert(searchColorNames("豆黄").some((x) => x.name === "豆汁黄"), "子序列命中丢了");
+  assert(searchColorNames("tblue").some((x) => x.name === "tab:blue"), "去空格子序列丢了");
+  // discovery：部分输入 category 名 → 候选置顶，选中回填（wheel 侧行为）
+  const zg = searchColorNames("中国");
+  assert(zg.length > 0 && zg[0].category === "zh-trad" && zg[0].name === "中国传统色:", `discovery 不对: ${JSON.stringify(zg[0])}`);
+  assert(searchColorNames("xk")[0].category === "xkcd", "id 部分输入也该出词库候选");
+});
+
 test("普通联想：前缀优先/子串保底/别名命中/默认无上限", () => {
   const sky = searchColorNames("sky");
   assert(sky.some((x) => x.name === "skyblue") && sky.some((x) => x.name === "sky blue"));

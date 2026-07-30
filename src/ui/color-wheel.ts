@@ -15,7 +15,7 @@ import {
   createApp, defineComponent, reactive, ref, computed, watch, onMounted, onUnmounted,
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { hsvToHex, hexToHsv, normalizeHex, sameHex } from "./color-model.ts";
-import { parseColorName, searchColorNames } from "../color-name.ts";
+import { parseColorName, searchColorNames, type ColorNameHit } from "../color-name.ts";
 import { attachInputSense, type InputSenseHandle } from "./input-sense.ts";
 import { attachDragValue, type DragValueHandle } from "./drag-value.ts";
 import { t } from "../i18n/index.ts";
@@ -92,17 +92,25 @@ export const ColorWheel = defineComponent({
     let _sense: InputSenseHandle | null = null;
     onMounted(() => {
       draw();
-      // 色名 IntelliSense：通用 input-sense 控件 + 色名数据源（media = 色板 chip）。选中即换色。
+      // 色名 IntelliSense：通用 input-sense 控件 + 色名数据源（media = 色板 chip）。
+      // 色词候选选中即换色；**词库候选**（discovery：输入部分词库名出「中国传统色:」）
+      // 选中 = 回填「id:」并重开候选 = 继续浏览整板，不 commit。
       if (hexInput.value) {
-        _sense = attachInputSense<string>(hexInput.value, {
+        _sense = attachInputSense<ColorNameHit>(hexInput.value, {
           search: (q) => searchColorNames(q).map((it) => {
+            if (it.category) return { label: it.name, value: it };
             const chip = document.createElement("i");
             chip.className = "color-chip";
             chip.style.background = it.hex;
-            return { label: it.name, value: it.hex, media: chip };
+            return { label: it.name, value: it, media: chip };
           }),
           onPick: (it) => {
-            const d = hexToHsv(it.value);
+            const el = hexInput.value;
+            if (it.value.category) {
+              if (el) { el.value = it.value.category + ":"; el.dispatchEvent(new Event("input", { bubbles: true })); }
+              return;
+            }
+            const d = hexToHsv(it.value.hex);
             hsv.h = d.h; hsv.s = d.s; hsv.v = d.v;
             commit();
           },
