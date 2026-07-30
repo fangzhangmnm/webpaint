@@ -158,6 +158,9 @@ const LONG_PRESS_MS = 450;
 // v0.5.9 快速捏合复位（Procreate 方言）：手势寿命 < MS 且结束 scale < 起手 × RATIO → fitToScreen
 const QUICK_PINCH_FIT_MS = 230;
 const QUICK_PINCH_FIT_RATIO = 0.8;
+// v0.6.56（user：太敏感）：加绝对行程门——两指间距的**缩短量**还要 ≥ 视口短边 × PCT。
+//   纯比例判定的坑：两指落点很近时（起手 dist 小），指尖轻微一收比例就 <0.8×，误触复位。
+const QUICK_PINCH_FIT_TRAVEL_PCT = 0.08;
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
 // v249: 两参 → 引擎平滑参数（时间常数指数追踪 + 死区，详 docs/20260613-brush-procreate-smoothing.md）。
@@ -332,7 +335,7 @@ export class InputController {
   penEverSeen: boolean;
   spaceDown: boolean;
   altDown: boolean;
-  gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport; startTime: number } | null;
+  gestureStart: { dist: number; midX: number; midY: number; angle: number; vp: GestureViewport; startTime: number; lastDist: number } | null;
   _gestureTap: GestureTap | null;
   _lastTap: TapRef | null;
   _lastPenActivity: number = -Infinity;   // 最近笔尖落/移/抬时刻 (ms)。掌触 tap 门用
@@ -1143,13 +1146,15 @@ export class InputController {
     if (t.length < 2) return;
     const [a, b] = t;
     const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy) || 1;
     this.gestureStart = {
-      dist: Math.hypot(dx, dy) || 1,
+      dist,
       midX: (a.x + b.x) / 2,
       midY: (a.y + b.y) / 2,
       angle: Math.atan2(dy, dx),          // 起手两指连线角度
       vp: { ...this.board.viewport },
       startTime: performance.now(),       // v0.5.9：快速捏合复位判定用
+      lastDist: dist,                     // v0.6.56：行程门用（松手时触点可能已 <2，取不到末距）
     };
     document.body.dataset.panning = "1";
   }
@@ -1157,6 +1162,7 @@ export class InputController {
     const t = this._gestureTouches();
     if (t.length < 2 || !this.gestureStart) return;
     const [a, b] = t;
+    this.gestureStart.lastDist = Math.hypot(b.x - a.x, b.y - a.y) || 1;   // v0.6.56：行程门
     // anchor-preserving 双指变换数学已抽到 pointer-gesture.js（纯函数·可单测）。
     // 旋转**不**在此 snap（进行中吸附粘手）；松手由 _endGesture/snapRotation 吸。
     const vp = computePinchViewport(this.gestureStart, a, b, {
@@ -1172,8 +1178,13 @@ export class InputController {
     // v0.5.9（user）：快速捏合 = 视口复位（Procreate 方言）——短促（<230ms）且明显缩小（<0.8×）
     //   → fitToScreen（含旋转复位，user 拍板「旋转也一起复位」）。两指 tap（undo）位移小、scale≈1
     //   不会误触；慢捏合不触发。
+    // v0.6.56（user：太敏感）：叠加绝对行程门——两指间距实际缩短 ≥ 视口短边 × 8%。
+    //   比例门挡不住「两指落点近 + 指尖轻收」（起手 dist 小 → 比例天然剧烈）。
+    const vpMin = Math.min(this.board.canvas.clientWidth || window.innerWidth,
+                           this.board.canvas.clientHeight || window.innerHeight);
     if (g && performance.now() - g.startTime < QUICK_PINCH_FIT_MS &&
-        this.board.viewport.scale < g.vp.scale * QUICK_PINCH_FIT_RATIO) {
+        this.board.viewport.scale < g.vp.scale * QUICK_PINCH_FIT_RATIO &&
+        g.dist - g.lastDist >= vpMin * QUICK_PINCH_FIT_TRAVEL_PCT) {
       this.board.fitToScreen();
       this.status(t("tm.viewportReset"));
       return;   // 已复位，不再跑旋转吸附
