@@ -631,6 +631,31 @@ export class PaintDoc {
     return L;
   }
 
+  // v0.7.9 按颜色拆分（explode-layers）：把叶同位替换成 n 张新叶（collapseGroupToLayer 的逆向）。
+  //   parts = 调用方（color-cluster）算好的**硬分配**分片，同一 bbox 矩形、两两互斥、∪ = 原层
+  //   → source-over 堆叠逐字节等于原层；其他 mode 下因互斥（别片处透明=恒等）逐像素也等价，
+  //   所以原叶的 visible/opacity/mode/clip/lockAlpha 直接继承到每张新叶，视觉不变。
+  //   parts[0] 在最底（同级 index 靠前 = 靠底）。撤销走 snapshotTree/treeStructure：原叶活引用
+  //   在 before 快照里，**勿 dispose 其像素**（同删组语义）。失败（非叶/超上限）→ null。
+  explodeLayerToLayers(id: number, parts: { data: Uint8ClampedArray; name: string }[],
+                       rect: { ox: number; oy: number; w: number; h: number }) {
+    const loc = findParentOf(this.layers, id);
+    if (!loc || loc.node.isGroup || parts.length === 0) return null;
+    const src = loc.node as Layer;
+    if (countLeaves(this.layers) - 1 + parts.length > this.maxLayers) return null;
+    const out: Layer[] = [];
+    for (const p of parts) {
+      const L = new Layer({ width: this.width, height: this.height, name: p.name, empty: true });
+      L.visible = src.visible; L.opacity = src.opacity; L.mode = src.mode;
+      L.clippingMask = src.clippingMask; L.lockAlpha = src.lockAlpha;
+      L.replaceFromBytes(p.data, rect.ox, rect.oy, rect.w, rect.h);
+      out.push(L);
+    }
+    loc.parent.splice(loc.index, 1, ...out);
+    this.activeId = out[out.length - 1].id;
+    return out;
+  }
+
   // #25（v0.5）：盖印全部可见层 → 新叶**强制置顶**（根级数组尾 = 最顶）。merged = 全树合成位图。
   //   「其他图层自动隐藏」由调用方编排（组走 treeStructure 快照，叶 visible 走 layerProp op）。
   stampAllToTopLayer(merged: { data: Uint8ClampedArray; w: number; h: number }) {

@@ -51,6 +51,8 @@ SPECS = [
     # stopgap 再度**清零**。历史见 git（透视批/形状变体批）。
     # 2026-07-29 裁剪定尺寸三枚（定/填/适）→ 2026-07-30 真图入库收货（a069c8c），stopgap 又清零。
     # 2026-07-30 resample（采）当日提当日入库（AA 圆盘光栅化示意），stopgap 清零。
+    # 2026-07-30 按颜色拆分图层（explode-layers sheet 菜单入口）：
+    ('explode-color-layers', '拆色', (2, 5, 20, 14), '按颜色拆分图层:一层按聚类中心色 explode 成多张; 设计提示: 一叠错位色卡/一层裂成三片色块'),
 ]
 syms = []
 for sid, text, box, note in SPECS:

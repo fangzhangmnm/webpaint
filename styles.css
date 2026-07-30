@@ -666,6 +666,30 @@ input[type=range] {
 .sheet-action.danger:hover {
   filter: brightness(0.92);
 }
+/* v0.7.9 按颜色拆分 sheet：带图标的动作按钮 + 中心色 swatch 行（chip 底色 = 簇心，em = 采样占比） */
+.sheet-action-with-icon { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.sheet-action-with-icon svg { width: 18px; height: 18px; flex: none; }
+.explode-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 10px 0;
+  min-height: 44px;   /* 两档 k 之间行数不跳（≤8 个 swatch 单行放得下） */
+  align-content: flex-start;
+}
+.explode-swatch { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.explode-swatch i {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  /* 深浅主题下都能看清极浅/极深的簇心：底衬棋盘由边框兜底即可，纯色 chip 不再加纹理 */
+}
+.explode-swatch em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
 
 .hidden { display: none; }
 .sheet.hidden, .backdrop.hidden { display: block; }

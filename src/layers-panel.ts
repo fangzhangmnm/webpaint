@@ -37,6 +37,7 @@ import { editorState } from "./workbench-state.ts";
 import { raiseWindow } from "./surfaces.ts";
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";
+import { initExplodeSheet, openExplodeSheet } from "./explode-layers.ts";
 
 // doc 图层活对象（树节点 = 叶 Layer | 组 LayerGroup）。引擎类型化后直接对齐其 Node 联合，
 // 不再维护发散本地形状（doc.ts 的 Node 未 export → 此处用导出的两个 class 重建联合）。
@@ -490,6 +491,8 @@ const LayerRow = defineComponent({
       }
       else if (a === "duplicate") _duplicateLayer(live());   // v267：上移/下移已移到底栏指令栏
       else if (a === "mergeDown") _mergeDownLayer(live());
+      // v0.7.9 按颜色拆分：sheet 编排在 explode-layers.ts（选 k → 预览中心色 → 拆分/取消）
+      else if (a === "explodeColors") openExplodeSheet(live() as Layer | null);
       else if (a === "clear")     _clearLayerPixels(live());
       else if (a === "del")       _deleteLayer(live());
       // 图层组动作（编组已移到「+」菜单 = 新建空组；这里只留 reparent）
@@ -530,6 +533,7 @@ const LayerRow = defineComponent({
       moveIntoGroup: t("lp.moveIntoGroup"), choose: t("lp.choose"), moveOut: t("lp.moveOut"),
       lockAlpha: t("lp.lockAlpha"), clip: t("lp.clip"), clipGroup: t("lp.clipGroup"), refLayer: t("lp.refLayer"),
       mergeDown: t("lp.mergeDown"), clearContent: t("lp.clearContent"), delGroup: t("lp.delGroup"), del: t("lp.del"),
+      explodeColors: t("lp.explodeColors"),
       opa: t("lp.opa"), mode: t("lp.mode"),
       on: t("common.on"), off: t("common.off"),
     };
@@ -603,6 +607,7 @@ const LayerRow = defineComponent({
 
         <hr class="menu-sep" />
         <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!canMergeDown" @click="act('mergeDown')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#merge-layer-down"/></svg><span class="menu-item-label">{{ L.mergeDown }}</span></button>
+        <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!hasPx" @click="act('explodeColors')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#explode-color-layers"/></svg><span class="menu-item-label">{{ L.explodeColors }}</span></button>
         <button v-if="!isGroup" class="menu-item menu-item-with-icon" type="button" :disabled="!hasPx" @click="act('clear')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#clear-document"/></svg><span class="menu-item-label">{{ L.clearContent }}</span></button>
         <button class="menu-item menu-danger menu-item-with-icon" type="button" :disabled="!canDel" @click="act('del')"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#trash-can"/></svg><span class="menu-item-label">{{ isGroup ? L.delGroup : L.del }}</span></button>
       </div></Teleport>
@@ -777,6 +782,8 @@ let _layersDrag: { id: number; sx: number; sy: number; ol: number; ot: number } 
 
 export function initLayersPanel(ctx: AppContext) {
   ({ doc, board, history, setStatus, workpiece, ops, editMode, afterDocChange: _afterDocChange } = ctx);
+
+  initExplodeSheet(ctx);   // 按颜色拆分 sheet（⋯ 菜单入口在 LayerRow 模板）
 
   // 挂 Vue 应用到图层列表容器（旧 renderLayersPanel 渲染进的 #layersList）。
   _vueApp = createApp(LayersPanel);
