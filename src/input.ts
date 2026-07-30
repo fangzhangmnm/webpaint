@@ -167,7 +167,7 @@ const QUICK_PINCH_FIT_TAU_MS = 40;      // d(dist)/dt 的 EMA 时间常数（裸
 //   旋转门：手势累计转角 <30°（正在转画布的捏合不是复位意图）；
 //   比例门：末距 < 起手距 × 2/3（放宽版回归，纯方向 sanity 升级成幅度门）。
 const QUICK_PINCH_FIT_MAX_ROT = Math.PI / 6;
-const QUICK_PINCH_FIT_RATIO = 2 / 3;
+const QUICK_PINCH_FIT_RATIO = 0.75;     // 2/3 真机偏紧 → 75%（2026-07-30）
 const LONG_PRESS_CANCEL_SQ = 64;          // 8 px²；超出就放弃当 draw 处理
 
 // v249: 两参 → 引擎平滑参数（时间常数指数追踪 + 死区，详 docs/20260613-brush-procreate-smoothing.md）。
