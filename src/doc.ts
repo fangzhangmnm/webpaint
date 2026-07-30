@@ -1155,6 +1155,11 @@ export type FrozenNode = FrozenLeaf | FrozenGroup;
 export interface FrozenDoc {
   width: number; height: number; backgroundColor: string;
   layers: FrozenNode[];
+  // doc 级元数据也要进冻结视图——v0.7.7 前漏了这两个字段，保存路径的 stack.xml 永远
+  // 写不出 webpaint:active / webpaint:reference（activeId 有 state.json 备份通道无症状，
+  // referenceLayerId 没有 → 保存重开参考层丢失）。EncodeDoc 已改必填防再漏。
+  activeId: number | null;
+  referenceLayerId: number | null;
 }
 
 export function freezeDocForEncode(doc: PaintDoc): { frozen: FrozenDoc; dispose(): void } {
@@ -1176,6 +1181,7 @@ export function freezeDocForEncode(doc: PaintDoc): { frozen: FrozenDoc; dispose(
     frozen: {
       width: doc.width, height: doc.height, backgroundColor: doc.backgroundColor,
       layers: doc.layers.map(freezeNode),
+      activeId: doc.activeId, referenceLayerId: doc.referenceLayerId,
     },
     dispose() { for (const s of snaps) disposePixelsSnapshot(s); snaps.length = 0; },
   };

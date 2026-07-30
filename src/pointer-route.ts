@@ -3,10 +3,10 @@
 // 且 effectiveTool→role 的映射在 mouse/pen/touch 三处**各抄一份**。抽出 = 决策可单测、改一处。
 // 行为矩阵沿用 ScratchPad（见 input.js 顶部注释）；live 事件流 / pointers Map / 手势仍在 input.js。
 
-// 当前工具 → 有效工具：transform 抢画布路由走 gizmo（机械上 role=lasso）；alt+brush 临时取色。
+// 当前工具 → 有效工具：transform 抢画布路由走 gizmo（机械上 role=lasso）；alt+brush/fill 临时取色。
 export function effectiveTool(tool: string, altDown: boolean): string {
   if (tool === "transform") return "lasso";
-  if (altDown && tool === "brush") return "picker";
+  if (altDown && (tool === "brush" || tool === "fill")) return "picker";   // v0.7.8：油漆桶也吃 alt 吸色（吸预览色，WYSIWYG）
   return tool;   // crop/adjust 等 fall-through，由 input 的 canDraw gate 兜
 }
 

@@ -51,7 +51,7 @@ import { createEditorState, restoreShapePersp, editorState } from "./workbench-s
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
-import { initFillMode } from "./fill-mode.ts";
+import { initFillMode, applyFillColorFromHistory } from "./fill-mode.ts";
 import { initPerspEdit } from "./persp-edit.ts";
 import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
@@ -223,6 +223,9 @@ const ops = makeOperators({
     if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
     board.invalidateAll();
   },
+  // fillColor（v0.7.8）：fill 预览期换色入 undo。当前色是 desk 态，operator 只经注入钩子读写；
+  // set 走 fill-mode 的回灌抑制入口（防 undo 触发 watch 再入栈）。
+  fillColor: { get: () => state.color, set: (hex) => applyFillColorFromHistory(hex) },
 });
 const _afterDocChange = () => { renderLayersPanel(); board.invalidateAll(); board.requestRender(); };
 const layerSpecFrom = (L: unknown) => doc.layerSpec(L as Parameters<typeof doc.layerSpec>[0]);

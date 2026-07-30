@@ -5,7 +5,8 @@ import { effectiveTool, toolToRole, assignRole } from "../src/pointer-route.ts";
 describe("pointer-route · effectiveTool", () => {
   it("transform → lasso（抢画布路由走 gizmo）", () => eq(effectiveTool("transform", false), "lasso"));
   it("alt + brush → picker（临时取色）", () => eq(effectiveTool("brush", true), "picker"));
-  it("alt 只对 brush 生效", () => { eq(effectiveTool("eraser", true), "eraser"); eq(effectiveTool("lasso", true), "lasso"); });
+  it("alt + fill → picker（v0.7.8 油漆桶吸色，吸预览色）", () => eq(effectiveTool("fill", true), "picker"));
+  it("alt 只对 brush/fill 生效", () => { eq(effectiveTool("eraser", true), "eraser"); eq(effectiveTool("lasso", true), "lasso"); });
   it("其余原样", () => { eq(effectiveTool("brush", false), "brush"); eq(effectiveTool("crop", false), "crop"); });
 });
 

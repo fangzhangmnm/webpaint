@@ -22,12 +22,40 @@
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { reportError } from "./error-badge.ts";
 import { t } from "./i18n/index.ts";
+import { setColor } from "./color-panel.ts";
 import { watch } from "../vendor/vue/vue.esm-browser.prod.js";
 import type { AppContext } from "./app-context.ts";
 import type { Layer } from "./doc.ts";
 
 let _ctx: AppContext | null = null;
 let _lastPersistentMode = "";
+
+// ---- fill 预览期换色入 undo（v0.7.8）----
+// 预览挂着时改色 = 可撤销（改的是「将要填的东西」）。防抖合并一次拖拽/连点为一条 entry；
+// commit 前 flush（保证 undo 顺序 = 先撤 fill 再撤换色）。内存 = 两个 hex 字符串/条。
+let _colorBase: string | null = null;                       // 待入栈 entry 的「改前色」；null = 无 pending
+let _colorTimer: ReturnType<typeof setTimeout> | undefined;
+let _expectFromHistory: string | null = null;               // undo/redo 回灌的期望值（watch 异步 flush，布尔旗不可靠）
+
+// FillColorOp 的注入 set：undo/redo 走这里改色，抑制 watch 再入栈。
+export function applyFillColorFromHistory(hex: string): void {
+  clearTimeout(_colorTimer);
+  _colorBase = null;
+  _expectFromHistory = hex;
+  setColor(hex);
+}
+
+function _flushColorEntry(): void {
+  clearTimeout(_colorTimer);
+  if (_colorBase === null) return;
+  const base = _colorBase;
+  _colorBase = null;
+  if (!_ctx || !fillPreviewActive()) return;
+  const cur = _ctx.state.color;
+  if (base === cur) return;
+  const { history, workpiece, ops } = _ctx;
+  history.run(workpiece, ops.fillColor, { value: cur, _initialBefore: { v: base } }, { label: "fillColor" });
+}
 
 // 预览挂着？= fill 工具 && 有选区 && 非浮层。board 的 overlay 槽断言靠它结构安全
 // （fill canDraw=false → 不可能同时有 brush overlay）。
@@ -45,6 +73,7 @@ export function commitFillNow(): void {
 // 像素 commit（+可选清选区）一个 compound 整点。微步纪律：全 checkpoint:false（v0.5.5 教训）。
 //   before 快照归属：像素动了交 ops.pixels；GL 未提交（false=像素未动）→ 本地还原释放。
 function _doCommit(clearSelection: boolean): void {
+  _flushColorEntry();   // pending 换色先落栈——undo 顺序 = 先撤 fill 像素再撤换色
   const { doc, board, input, history, workpiece, ops, state, setStatus } = _ctx!;
   const layer = requireEditableLeaf(doc, setStatus) as Layer | null;
   if (!layer || !doc.selection) return;
@@ -113,6 +142,15 @@ export function initFillMode(ctx: AppContext): void {
     return leaf ? { color: ctx.state.color, layer: leaf } : null;
   });
   // 换色即预览跟色；选区/图层面板触发的重绘走 histchange/invalidate + docVersion 订阅（app.ts）。
-  watch(() => ctx.dialReactive.color, () => { if (fillPreviewActive()) ctx.board.requestRender(); });
+  // v0.7.8：预览挂着时的换色还要入 undo（防抖 350ms 合并拖拽；undo/redo 回灌经期望值比对跳过）。
+  watch(() => ctx.dialReactive.color, (nv: string, ov: string) => {
+    if (!fillPreviewActive()) { _colorBase = null; clearTimeout(_colorTimer); return; }
+    ctx.board.requestRender();
+    if (_expectFromHistory !== null && nv === _expectFromHistory) { _expectFromHistory = null; return; }
+    _expectFromHistory = null;
+    if (_colorBase === null) _colorBase = ov;
+    clearTimeout(_colorTimer);
+    _colorTimer = setTimeout(_flushColorEntry, 350);
+  });
   window.addEventListener("wp:modechange", _onModeChange);
 }

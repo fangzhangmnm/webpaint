@@ -34,7 +34,12 @@ import type { ParsedNode } from "./ora-stack-xml.ts";
 // renderMerged / encode 只读 doc 的 width/height/layers，与 PaintDoc 形状兼容。
 // layers 兼收活 doc 节点与冻结视图（session push 走 freezeDocForEncode）——叶必须带 getImageData
 // （v0.6.44：真机推送失败教训——unsafe cast 曾把冻结视图缺方法漏过 tsc，类型收紧堵回）。
-type EncodeDoc = { width: number; height: number; layers: PaintDoc["layers"] | FrozenNode[] };
+// activeId / referenceLayerId 必填（v0.7.8）：FrozenDoc 曾漏抄 referenceLayerId，可选字段让 tsc
+// 静默放行 → 保存路径永远写不出 webpaint:reference（导出路径传活 doc 反而没事）。必填堵死这类漏抄。
+type EncodeDoc = {
+  width: number; height: number; layers: PaintDoc["layers"] | FrozenNode[];
+  activeId: number | null; referenceLayerId: number | null;
+};
 // encode opts：两个可选 WebPaint 私有扩展。
 interface EncodeOpts {
   mergedCanvas?: OffscreenCanvas | HTMLCanvasElement | null;   // S9：调用方渲好的合成图（GL）；缺省=透明占位

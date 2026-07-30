@@ -600,8 +600,11 @@ export class InputController {
 
     // 单指长按 → picker（如开启）。pen 不参与；hand 工具下也不触发；
     // 第二根手指进来时 gesture 路径会清掉 timer
+    // v0.7.8：fill 工具（role=lasso）也参与——tentative 期（<8px 未成手势）长按吸色，吸到预览色（WYSIWYG）。
+    //   仅 tentative：floating 变换拖动（_lassoMode="transform"）不 arm；触发时二次核验防手势已展开。
+    const lassoTentative = role === "lasso" && tool === "fill" && rec._lassoMode === "tentative";
     const wantLongPress = e.pointerType === "touch" && tool !== "hand" &&
-      (role === "draw" || role === "erase" || role === "pan" || role === "hold") &&
+      (role === "draw" || role === "erase" || role === "pan" || role === "hold" || lassoTentative) &&
       this.getLongPressPickEnabled();
     if (wantLongPress) {
       rec.longPressTimer = setTimeout(() => {
@@ -613,6 +616,9 @@ export class InputController {
           if (![...this.pointers.values()].some((p) => p !== rec && p.role === "pan")) {
             delete document.body.dataset.panning;
           }
+        } else if (rec.role === "lasso") {
+          if (rec._lassoMode !== "tentative") return;   // 已成拖拽手势（magic-drag 等）→ 不抢
+          rec._lassoMode = undefined;                   // tentative 无引擎态，直接放掉
         }
         rec.role = "pick";
         this._doPick(rec.x, rec.y);

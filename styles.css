@@ -1017,6 +1017,34 @@ input[type="range"].color-ramp::-moz-range-thumb {
   box-shadow: 0 1px 2px rgba(0,0,0,0.3);
 }
 
+/* v0.7.8 ramp-slider（ui/ramp-slider.ts + 色轮 hue 条）：自绘 track+thumb 替代原生 range——
+   原生 range 做不了 shift 细调（指针动、值慢动）。外观对齐 .color-ramp 老样式。 */
+.ramp-slider {
+  position: relative;
+  height: 14px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft, rgba(128,128,128,0.25));
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  touch-action: none;
+  cursor: pointer;
+  outline-offset: 2px;
+}
+.ramp-slider-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #222;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  transform: translate(-50%, -50%);
+  pointer-events: none;   /* 拖动全归 track（thumb 只是指示器——shift 细调时它本就独立于光标） */
+}
+
 .menu-sep {
   border: 0;
   border-top: 1px solid var(--line);

@@ -170,6 +170,34 @@ export class ReferenceLayerOp extends DocumentOperator<{ value: number | null },
   }
 }
 
+// ---- ② fill 预览期换色（v0.7.8）----
+// 语义：fill 预览挂着时改颜色 = 可撤销动作（改色即改「将要填的东西」，undo 回上一色预览跟回）。
+// 事务型（色已被 UI 改掉，run 时带 _initialBefore）；颜色 get/set 注入（当前色是 desk 态，
+// workpiece 不碰 editorState/DOM——set 走 fill-mode.applyFillColorFromHistory，带回灌抑制）。
+// 内存：两个 hex 字符串，配额取默认。
+export interface FillColorArgs { value: string; _initialBefore?: { v: string } | null }
+export class FillColorOp extends DocumentOperator<FillColorArgs, { v: string }> {
+  readonly kind = "fillColor";
+  private _c: { get(): string; set(hex: string): void };
+  constructor(color: { get(): string; set(hex: string): void }) { super(); this._c = color; }
+  forward(_w: Workpiece, args: FillColorArgs, data: { v: string } | undefined): OpResult<{ v: string }> {
+    if (data === undefined) {                       // 首跑：pre-applied，只交出 undo 包
+      const before = args._initialBefore;
+      args._initialBefore = null;
+      if (!before) return { ok: false, msg: "missing _initialBefore" };
+      return { ok: true, replaced: before };
+    }
+    const cur = { v: this._c.get() };
+    this._c.set(data.v);
+    return { ok: true, replaced: cur };
+  }
+  backward(_w: Workpiece, _args: FillColorArgs, data: { v: string }): OpResult<{ v: string }> {
+    const cur = { v: this._c.get() };
+    this._c.set(data.v);
+    return { ok: true, replaced: cur };
+  }
+}
+
 // ---- ② 记录一次「新层已创建」（addLayer/duplicate/导入为图层；层由调用方经 doc API 创建）----
 // data 循环：null（层在树上）↔ spec（层被 undo 摘下时捕获）。
 export interface AddLayerArgs { layerId: number; index: number; parentId: number | null; prevActiveId: number | null; layerName: string }
@@ -378,6 +406,7 @@ export interface OperatorRegistry {
   selection: SwapSelectionOp;
   layerProp: LayerPropOp;
   referenceLayer: ReferenceLayerOp;
+  fillColor: FillColorOp;
   addLayer: AddLayerRecordOp;
   removeLayer: RemoveLayerRecordOp;
   moveLayer: MoveLayerOp;
@@ -388,12 +417,16 @@ export interface OperatorRegistry {
   floatTransform: FloatTransformOp;
   dropFloat: DropFloatOp;
 }
-export function makeOperators(deps: { applyDocTransformUi: (viewport: Record<string, number> | null | undefined, persp?: unknown) => void }): OperatorRegistry {
+export function makeOperators(deps: {
+  applyDocTransformUi: (viewport: Record<string, number> | null | undefined, persp?: unknown) => void;
+  fillColor: { get(): string; set(hex: string): void };
+}): OperatorRegistry {
   return {
     pixels: new SwapPixelsOp(),
     selection: new SwapSelectionOp(),
     layerProp: new LayerPropOp(),
     referenceLayer: new ReferenceLayerOp(),
+    fillColor: new FillColorOp(deps.fillColor),
     addLayer: new AddLayerRecordOp(),
     removeLayer: new RemoveLayerRecordOp(),
     moveLayer: new MoveLayerOp(),

@@ -33,6 +33,7 @@
 
 // registry 原语共享自 registry.js（candidate 2：filter 与 exporter 同一道接缝）。
 import { makeRegistry } from "./registry.ts";
+import { makeRampSlider } from "./ui/ramp-slider.ts";
 
 // ============= Filter 契约（TS 化）=============
 // 一个 Filter = 一个全 static 的 ES class。下面是其类型契约——消费侧
@@ -139,10 +140,12 @@ export function onFilterRegistered(fn: (item: Filter) => void): () => void {
 
 export function clamp8(v: number): number { return v < 0 ? 0 : v > 255 ? 255 : v | 0; }
 
-// 一行 slider row：label + range + 数字
+// 一行 slider row：label + 滑块 + 数字
 //   onChange(key, value) 在 input 时触发
 //   fmt(value) 可选格式化数字显示
 //   gradient 可选 CSS background（color ramp slider）
+// v0.7.8：内部从原生 range 换 ui/ramp-slider 深模块（自绘 track+thumb，drag-value 拖动核）——
+//   全部 adjust 滑块一次性获得 shift 细调（指针动、值慢动）；签名/返回不变，消费者零改动。
 export interface SliderRowOpts {
   fmt?: (value: number) => string;
   gradient?: string;
@@ -158,27 +161,11 @@ export function makeSliderRow(
   onChange: (key: string, value: number) => void,
   opts: SliderRowOpts = {},
 ): HTMLLabelElement {
-  const { fmt, gradient } = opts;
-  const wrap = document.createElement("label");
-  wrap.className = "brush-slider-row";
-  wrap.innerHTML = `<span class="brush-slider-label">${label}</span>` +
-    `<input type="range" min="${min}" max="${max}" step="${step}" value="${init}" />` +
-    `<span class="brush-slider-value"></span>`;
-  const input = wrap.querySelector("input")!;
-  if (gradient) {
-    // v132 修：input 默认 track 盖了 background；要 .color-ramp class 切自定义 track
-    input.style.background = gradient;
-    input.classList.add("color-ramp");
-  }
-  const val = wrap.querySelector(".brush-slider-value")!;
-  const update = (v: number) => { val.textContent = fmt ? fmt(v) : String(v); };
-  update(init);
-  input.addEventListener("input", () => {
-    const v = parseFloat(input.value);
-    update(v);
-    onChange(key, v);
-  });
-  return wrap;
+  return makeRampSlider({
+    label, min, max, step, value: init,
+    fmt: opts.fmt, gradient: opts.gradient,
+    onInput: (v) => onChange(key, v),
+  }).el;
 }
 
 export function makeSectionTitle(text: string): HTMLDivElement {

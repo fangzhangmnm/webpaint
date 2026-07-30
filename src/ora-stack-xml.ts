@@ -28,8 +28,8 @@ export interface OraDoc {
   layers: OraNode[];
   width: number;
   height: number;
-  activeId?: number;
-  referenceLayerId?: number;
+  activeId?: number | null;
+  referenceLayerId?: number | null;
 }
 
 // 读取端产出的 spec 节点（id 可能为 null：旧 .ora 无 webpaint:id，decode 时再发新 id）。

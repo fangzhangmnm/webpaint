@@ -12,9 +12,10 @@
 // 用 sameHex(incoming, lastEmitted) 判定「这是不是我刚吐出去的」。外部源（吸色/载图/HEX 输入）才 sync。
 
 import {
-  createApp, defineComponent, reactive, ref, computed, watch, onMounted,
+  createApp, defineComponent, reactive, ref, computed, watch, onMounted, onUnmounted,
 } from "../../vendor/vue/vue.esm-browser.prod.js";
 import { hsvToHex, hexToHsv, normalizeHex, sameHex } from "./color-model.ts";
+import { attachDragValue, type DragValueHandle } from "./drag-value.ts";
 import { t } from "../i18n/index.ts";
 
 export const ColorWheel = defineComponent({
@@ -78,41 +79,37 @@ export const ColorWheel = defineComponent({
     });
 
     watch(hsv, () => draw(), { flush: "post" });
-    onMounted(draw);
 
-    // ---- SV pad 拖动 ----
-    let dragging = false;
-    function padPick(e: PointerEvent) {
-      const c = pad.value;
-      if (!c) return;
-      const r = c.getBoundingClientRect();
-      const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
-      const y = Math.max(0, Math.min(r.height, e.clientY - r.top));
-      hsv.s = x / r.width;
-      hsv.v = 1 - y / r.height;
-      commit();
-    }
-    function padDown(e: PointerEvent) {
-      dragging = true;
-      try { pad.value?.setPointerCapture(e.pointerId); } catch {}
-      padPick(e);
-    }
-    function padMove(e: PointerEvent) {
-      if (!dragging) return;
-      // 漏掉的 pointerup 兜底：拖动中按键已松（鼠标 buttons=0）→ 结束，别再跟手。
-      // 必要性：reactive 色每帧回灌触发 re-render，某些浏览器会丢 setPointerCapture，
-      // 抬笔若落在 240×180 pad 外则 pointerup 不回到 canvas，dragging 会卡住（用户实测的「一直跟着」）。
-      if (e.buttons === 0) { dragging = false; return; }
-      padPick(e);
-    }
-    function padUp(e: PointerEvent) {
-      dragging = false;
-      try { pad.value?.releasePointerCapture(e.pointerId); } catch {}
-    }
+    // ---- SV pad / hue 条拖动（v0.7.8 收进 drag-value 拖动核）----
+    // capture + buttons 兜底 + shift 细调（相对累积、指示器独立于光标）全在核里；
+    // 这里只做归一化值 ↔ HSV 映射。round-trip 不变式不受影响（仍只经 commit 吐 hex）。
+    const hueEl = ref<HTMLElement | null>(null);
+    const hueDeg = computed(() => Math.round(hsv.h));
+    let _drags: DragValueHandle[] = [];
+    onMounted(() => {
+      draw();
+      if (pad.value) {
+        _drags.push(attachDragValue(pad.value, {
+          getValue: () => ({ x: hsv.s, y: 1 - hsv.v }),
+          onDrag: (x, y) => { hsv.s = x; hsv.v = 1 - y; commit(); },
+        }));
+      }
+      if (hueEl.value) {
+        _drags.push(attachDragValue(hueEl.value, {
+          getValue: () => ({ x: hsv.h / 360, y: 0 }),
+          onDrag: (x) => { hsv.h = Math.round(x * 360); commit(); },
+        }));
+      }
+    });
+    onUnmounted(() => { for (const d of _drags) d.dispose(); _drags = []; });
 
-    function onHue(e: Event) {
-      hsv.h = parseFloat((e.target as HTMLInputElement).value);
+    function onHueKey(e: KeyboardEvent) {
+      const d = e.key === "ArrowLeft" || e.key === "ArrowDown" ? -1
+        : e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : 0;
+      if (!d) return;
+      hsv.h = Math.max(0, Math.min(360, hsv.h + d * (e.shiftKey ? 10 : 1)));
       commit();
+      e.preventDefault();
     }
     function onHex(e: Event) {
       const el = e.target as HTMLInputElement;
@@ -125,14 +122,17 @@ export const ColorWheel = defineComponent({
 
     // i18n：t() 在 setup 调（key 受 tsc 检查），模板只引 L.*（§5a 纪律）。
     const L = { svPad: t("cw.svPad"), hue: t("cw.hue") };
-    return { pad, hsv, hex, hexText, padDown, padMove, padUp, onHue, onHex, L };
+    return { pad, hueEl, hueDeg, hsv, hex, hexText, onHueKey, onHex, L };
   },
   // 多根 = fragment：挂进 .float-panel-body 后三个节点成为它的直接 flex 子节点，
   // DOM 结构与原 index.html 一字不差（样式全 class-based，照旧生效）。
+  // v0.7.8：hue 从原生 range 换自绘（ramp-slider 同款 track/thumb class）——原生 range 做不了 shift 细调。
   template: `
-    <canvas ref="pad" class="sv-pad" width="240" height="180" :aria-label="L.svPad"
-      @pointerdown="padDown" @pointermove="padMove" @pointerup="padUp" @pointercancel="padUp"></canvas>
-    <input type="range" min="0" max="360" step="1" class="hue-slider" :value="hsv.h" @input="onHue" :aria-label="L.hue" />
+    <canvas ref="pad" class="sv-pad" width="240" height="180" :aria-label="L.svPad"></canvas>
+    <div ref="hueEl" class="hue-slider ramp-slider" role="slider" tabindex="0" :aria-label="L.hue"
+      :aria-valuenow="hueDeg" aria-valuemin="0" aria-valuemax="360" @keydown="onHueKey">
+      <div class="ramp-slider-thumb" :style="{ left: (hsv.h / 360 * 100) + '%' }"></div>
+    </div>
     <div class="picker-row">
       <span class="picker-preview" :style="{ background: hex }"></span>
       <input type="text" maxlength="9" :value="hexText" @change="onHex" aria-label="HEX" />

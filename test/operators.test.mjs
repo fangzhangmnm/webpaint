@@ -15,9 +15,13 @@ function mk() {
   const w = new Workpiece(doc);
   let unrec = 0;
   const h = new UndoHistory({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => { unrec++; } });
-  const ops = makeOperators({ applyDocTransformUi: () => {} });
+  let _color = "#1b1b1b";   // fillColor op 的注入色钩子（真 app = state.color / fill-mode 回灌抑制）
+  const ops = makeOperators({
+    applyDocTransformUi: () => {},
+    fillColor: { get: () => _color, set: (hex) => { _color = hex; } },
+  });
   _ctxs.push({ doc, h });
-  return { doc, w, h, ops, unrec: () => unrec };
+  return { doc, w, h, ops, unrec: () => unrec, color: () => _color, setColor: (hex) => { _color = hex; } };
 }
 const px = (r, g, b, a) => new Uint8ClampedArray([r, g, b, a]);
 
@@ -169,6 +173,26 @@ describe("operators · 句柄收支（清栈后池不留本套件的 tile）", (
     h.clear();
     for (const leaf of flattenLeaves(doc.layers)) leaf.pixels.dispose();
     eq(appTilePool().stats().count, before, "undo 包/层像素全部归还（无泄漏）");
+  });
+});
+
+// v0.7.8：fill 预览期换色入 undo（事务型，色已被 UI 改掉，run 带 _initialBefore）
+describe("operators · FillColor（fill 预览期换色可撤销）", () => {
+  it("换色 → undo 回旧色 → redo 回新色（对称 swap 无衰减）", () => {
+    const { w, h, ops, color, setColor } = mk();
+    setColor("#ff0000");                                     // UI 已改（pre-applied）
+    eq(h.run(w, ops.fillColor, { value: "#ff0000", _initialBefore: { v: "#1b1b1b" } }, { label: "fillColor" }).ok, true);
+    h.undo(w);
+    eq(color(), "#1b1b1b", "undo 回旧色");
+    h.redo(w);
+    eq(color(), "#ff0000", "redo 回新色");
+    h.undo(w);
+    eq(color(), "#1b1b1b", "二次 undo 仍精确");
+  });
+
+  it("缺 _initialBefore → run 拒绝（防误用为操作型）", () => {
+    const { w, h, ops } = mk();
+    eq(h.run(w, ops.fillColor, { value: "#00ff00" }).ok, false);
   });
 });
 

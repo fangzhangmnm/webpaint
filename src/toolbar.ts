@@ -235,9 +235,11 @@ export function updateLassoToolbar() {
       "aria-pressed", input.lasso.getLineartDebugView() ? "true" : "false");
   }
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
-  lassoExpandToggle.classList.toggle("hidden", !magicOn);
+  // v0.7.8：线稿算法时藏（auto-expand 是 classic flood 专属 param，引擎侧同步不吃）
+  const expandApplies = magicOn && input.lasso.getMagicAlgorithm() !== "lineart";
+  lassoExpandToggle.classList.toggle("hidden", !expandApplies);
   lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
-  if (!magicOn || !editorState.magicWand.expand) lassoMagicExpandMenu?.classList.add("hidden");
+  if (!expandApplies || !editorState.magicWand.expand) lassoMagicExpandMenu?.classList.add("hidden");
   // 清除选区内像素（v0.6.19 从 ⋯ 提到 Row1）：套索模式+有选区才显（fill 藏，同旧 lasso-only 语义）
   document.getElementById("lassoClearBtn")?.classList.toggle("hidden", !(lassoActive && hasSelection));
   // ⋯ 菜单钮：选区/填充工具常显（menu 内按 needs-sel / lasso-only 逐项禁用·隐藏——见 openSelEditUI）。

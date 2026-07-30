@@ -22,6 +22,24 @@ describe("freezeDocForEncode · 冻结视图字节读口（v0.6.44）", () => {
   });
 });
 
+// v0.7.8 回归：冻结视图必须带 doc 级元数据 activeId/referenceLayerId。
+// 真机事故：FrozenDoc 漏抄 referenceLayerId → 保存路径 stack.xml 永远不写 webpaint:reference
+// → 保存重开参考层 flag 丢失（activeId 有 state.json 备份通道所以一直无症状）。
+describe("freezeDocForEncode · doc 级元数据（v0.7.8 参考层丢失回归）", () => {
+  it("frozen 带 activeId / referenceLayerId，stack.xml 写出 webpaint:reference", async () => {
+    const { buildStackXml } = await import("../src/ora-stack-xml.ts");
+    const doc = mkDoc({ width: 64, height: 64 });
+    doc.referenceLayerId = doc.layers[0].id;
+    const { frozen, dispose } = freezeDocForEncode(doc);
+    eq(frozen.referenceLayerId, doc.layers[0].id, "冻结视图抄到 referenceLayerId");
+    eq(frozen.activeId, doc.activeId, "冻结视图抄到 activeId");
+    const xml = buildStackXml(frozen);
+    assert(xml.includes('webpaint:reference="true"'), "保存路径 stack.xml 含 webpaint:reference");
+    assert(xml.includes('webpaint:active="true"'), "保存路径 stack.xml 含 webpaint:active");
+    dispose();
+  });
+});
+
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
 const _docs = [];
 const mkDoc = (o) => { const d = new PaintDoc(o); _docs.push(d); return d; };

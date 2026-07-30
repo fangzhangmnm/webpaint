@@ -385,7 +385,9 @@ export class LassoEngine {
       ? this._lineartOracle.selectAt(this.doc, sourceLayer, start.x, start.y)
       : floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold);
     // #31：可选 flood 后自动扩张（默认关）。在 setOp 合并**之前**做，語义 = 「这一下点出来的区域」本身变胖。
-    if (sel && this._magicAutoExpandPx > 0) {
+    // v0.7.8：auto-expand 收窄为 classic flood 的子管线 param——线稿分区自带墨线下扩语义，
+    // 再叠形态学扩张是双重补偿（UI 侧线稿算法时也藏扩张钮）。
+    if (sel && this._magicAutoExpandPx > 0 && this._magicAlgorithm !== "lineart") {
       const m = sel.morphed(this._magicAutoExpandPx, this.doc.width, this.doc.height);
       if (m) { sel.dispose(); sel = m; }
     }

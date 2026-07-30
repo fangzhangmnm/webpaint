@@ -69,6 +69,7 @@ import "./editor-state.test.mjs";         // 2026-07-14 editorState struct：默
 import "./gallery-view-model.test.mjs";
 import "./color-model.test.mjs";
 import "./brush-size.test.mjs";
+import "./drag-value.test.mjs";   // 拖动核纯状态机（v0.7.8）：shift 细调相对累积/无缝切换/clamp
 import "./brush-settings-model.test.mjs";
 import "./brush-rack-view.test.mjs";
 import "./brush-rack-reactive.test.mjs";   // ★笔架↔collection 绑定回归（v415 漏接过）
