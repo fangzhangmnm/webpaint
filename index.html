@@ -642,6 +642,9 @@
           <!-- v0.6.26：扩张钮用真图标 selection-expand（user：有 svg 的）+ 小三角；−1+ stepper 收进弹出。
                点=开关；开的瞬间顺势弹 stepper 调 px（外点关）；magic 子工具时显（fill 默认魔棒≈常显 cue） -->
           <button class="lasso-tool-btn lasso-tool-icon lasso-slot hidden" id="lassoExpandToggle" type="button" data-i18n-title="la.autoExpand" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
+          <!-- v0.7 魔棒算法下拉（transform 采样 lassoSampleSel 同款文字 select）：选项 JS 从
+               lasso.ts MAGIC_ALGORITHMS SSoT 填；magic 子工具时显；RAM-only（cache 与选择都不持久化） -->
+          <select class="lasso-tool-select hidden" id="lassoAlgoSel" data-i18n-title="la.algoSel"></select>
           <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#constrain-ratio"/></svg></button>
           <!-- v0.5.12 行尾动作组：变换（选区工具）/ ⋯（低频操作收纳）/ 去选（高频，=fill 的 cancel）/ ✓（fill） -->
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
@@ -707,9 +710,6 @@
         <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" style="width:108px;" data-i18n-aria="la.threshold" />
         <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
       </div>
-      <!-- v0.7 线稿填色：魔棒算法 toggle（off=经典 flood / on=论文分区，断口自动闭合+填到线下）。
-           RAM-only（持久化待 user 同意）；图标暂借 #magic-wand（真图标已登记 SVG Icons TODO.md） -->
-      <button class="lasso-tool-btn lasso-menu-magic-only hidden" id="lassoLineartBtn" type="button" role="menuitem" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#magic-wand"/></svg><span data-i18n="la.lineartAlgo">线稿闭合</span></button>
       <button class="lasso-tool-btn" id="lassoSelectAllBtn" data-sel-act="selectAll" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
       <button class="lasso-tool-btn" id="lassoInvertBtn" data-sel-act="invert" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoSelResizeBtn" data-sel-act="resize" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
@@ -721,7 +721,6 @@
         <input type="range" id="fillThreshold" min="0" max="100" step="1" value="20" style="width:108px;" data-i18n-aria="la.threshold" />
         <span id="fillThresholdVal" class="lasso-popup-val">20</span>
       </div>
-      <button class="lasso-tool-btn lasso-menu-magic-only hidden" id="fillLineartBtn" type="button" role="menuitem" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#magic-wand"/></svg><span data-i18n="la.lineartAlgo">线稿闭合</span></button>
       <button class="lasso-tool-btn" id="fillSelectAllBtn" data-sel-act="selectAll" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
       <button class="lasso-tool-btn" id="fillInvertBtn" data-sel-act="invert" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="fillSelResizeBtn" data-sel-act="resize" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
@@ -1355,6 +1354,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-6b193f596968.mjs"></script>
+    <script type="module" src="./dist/webpaint-b4f2247c254e.mjs"></script>
   </body>
 </html>
