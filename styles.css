@@ -2574,4 +2574,6 @@ body[data-mode="gallery"] .board { display: none !important; }
   min-width: 32px; padding: 4px 0;
   display: inline-flex; align-items: center; justify-content: center;
 }
+/* 本规则与全局 .hidden 同特异性且靠后 → 必须显式补回（否则 fit 钮在自由模式漏显，v0.6.54 修） */
+.crop-toolbar-icon.hidden { display: none; }
 .crop-toolbar-icon svg { width: 20px; height: 20px; }
