@@ -50,6 +50,7 @@ SPECS = [
     # 2026-07-28 晚：20260728 交付批入库（square/ellipse/line-snap/select-polygon/persp-iso 全真图），
     # stopgap 再度**清零**。历史见 git（透视批/形状变体批）。
     # 2026-07-29 裁剪定尺寸三枚（定/填/适）→ 2026-07-30 真图入库收货（a069c8c），stopgap 又清零。
+    ("resample", "采", (3, 3, 18, 18), "裁剪·定尺寸 resample toggle（开=裁后重采样到目标分辨率；关=模板只当比例参考保原分辨率）。真图标建议=两种密度的像素网格+过渡箭头（与 crop-fixed-size 家族同笔重）"),
 ]
 syms = []
 for sid, text, box, note in SPECS:

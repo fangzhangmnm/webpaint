@@ -15,7 +15,7 @@ import { remapShapePersp, snapshotShapePersp } from "./workbench-state.ts";
 import type { AppContext } from "./app-context.ts";
 
 interface Rect { x: number; y: number; w: number; h: number; }
-interface CropState { rect: Rect; drag: string | null; startMouse: { x: number; y: number } | null; startRect: Rect | null; mode: "free" | "template"; tpl: { tw: number; th: number; aspect: number; dpi?: number } | null; }
+interface CropState { rect: Rect; drag: string | null; startMouse: { x: number; y: number } | null; startRect: Rect | null; mode: "free" | "template"; tpl: { tw: number; th: number; aspect: number; dpi?: number } | null; resample: boolean; }
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // ctx 绑入：core 单例
@@ -80,10 +80,11 @@ function _renderCropOverlay() {
   el.style.top  = r.y + "px";
   el.style.width  = Math.max(2, r.w) + "px";
   el.style.height = Math.max(2, r.h) + "px";
-  // L69：实时显示裁切后分辨率（doc 像素，非屏幕）；模板模式 = 「框 → 目标」两段
+  // L69：实时显示裁切后分辨率（doc 像素，非屏幕）；模板模式且 resample 开 = 「框 → 目标」两段；
+  //   resample 关（v0.6.64 默认）= 模板只是比例参考、输出保原分辨率 → 只显框的原生尺寸（同自由模式）
   const dim = document.getElementById("cropDim");
   const tpl = _cropState.tpl;
-  if (dim) dim.textContent = tpl
+  if (dim) dim.textContent = (tpl && _cropState.resample)
     ? `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)} → ${tpl.tw} × ${tpl.th}`
     : `${Math.round(_cropState.rect.w)} × ${Math.round(_cropState.rect.h)}`;
   // 安全线：均匀绝对边距 = 2% 短边（borderless overspray 是物理均匀量——按轴百分比会长边出更多，user 指正）
@@ -127,6 +128,9 @@ function _syncCropModeUI() {
   const isCustom = isT && (document.getElementById("cropTemplateSel") as HTMLSelectElement).value === "custom";
   show("cropCustomW", isCustom); show("cropCustomH", isCustom); show("cropCustomX", isCustom);
   show("cropFitCover", isT); show("cropFitContain", isT);
+  // v0.6.64 resample toggle（模板模式专属，默认关）
+  show("cropResampleToggle", isT);
+  document.getElementById("cropResampleToggle")!.setAttribute("aria-pressed", String(!!_cropState?.resample));
   show("cropSafety", !!tpl);
   // apply/cancel 已图标化（#check/#x，v0.6.52）——文案在 title；别写 textContent（会抹掉 svg）
   document.getElementById("cropRect")!.classList.add("tpl-move");   // v0.6.63：两模式框内均可整体平移（v125 只 handle 语义废止）
@@ -143,6 +147,7 @@ function _openCropMode() {
     drag: null, startMouse: null, startRect: null,
     mode: "free",
     tpl: null,   // 模板模式：{tw,th,aspect,dpi?}；null=自由（或自定义未填完）
+    resample: false,   // v0.6.64（user）：默认关——模板只作比例参考；开才重采样到目标分辨率
   };
   _syncCropModeUI();
   document.getElementById("cropOverlay")!.classList.remove("hidden");
@@ -288,7 +293,8 @@ export function initDocOps(ctx: AppContext) {
   document.getElementById("cropToolbarApply")!.addEventListener("click", () => {
     if (!_cropState) return;
     const tpl = _cropState.tpl;
-    if (tpl) {
+    // v0.6.64：resample 关（默认）→ 模板只是比例参考，走普通裁切保原分辨率（下方自由路径）
+    if (tpl && _cropState.resample) {
       // v0.6.49 模板模式：裁剪+重采样原子 op（保层）。frame 保浮点（比例精确）；
       //   VP 随裁缩重映射（ADR-0006 同款）；尺寸剧变 → fitToScreen。
       const fr = { ..._cropState.rect };
@@ -357,6 +363,13 @@ export function initDocOps(ctx: AppContext) {
       if (!_cropState?.tpl) return;
       _cropState.rect = fitRectToBBox(canvasRect(), _cropState.tpl.aspect, "contain");
       _renderCropOverlay();
+    });
+    // v0.6.64 resample toggle（user）：关=比例参考保原分辨率；开=裁后重采样到目标
+    document.getElementById("cropResampleToggle")!.addEventListener("click", () => {
+      if (!_cropState) return;
+      _cropState.resample = !_cropState.resample;
+      _syncCropModeUI();
+      _renderCropOverlay();   // 分辨率提示随 toggle 换算
     });
   }
 

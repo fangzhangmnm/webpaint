@@ -558,6 +558,7 @@ export const S = {
   "crop.fitCover":   { zh: "填充", en: "Fill", ja: "フィル", tok: "insa ale" },
   "crop.fitContain": { zh: "适应", en: "Fit", ja: "フィット", tok: "jo ale" },
   "crop.customTpl":  { zh: "自定义…", en: "Custom…", ja: "カスタム…", tok: "sina wile…" },
+  "crop.resample":   { zh: "调整分辨率（关=模板只作比例参考）", en: "Resample to target size (off = ratio reference only)", ja: "解像度を変更（オフ＝比率の参考のみ）", tok: "ante e suli sitelen (open ala la sitelen li awen)" },
   "crop.apply": { zh: "裁切", en: "Crop", ja: "切り抜き", tok: "kipisi" },
   "crop.templated":  { zh: "已裁剪并缩放到 {w}×{h}", en: "Cropped & scaled to {w}×{h}", ja: "{w}×{h} に切り抜き＆拡縮した", tok: "kipisi pini: suli li {w}×{h}" },
   // 滤镜笔刷工具栏
