@@ -80,6 +80,7 @@ import "./selection-tiles.test.mjs";       // S5：gray8 tile 选区底座（布
 import "./flood-select.test.mjs";
 import "./lineart-partition.test.mjs";  // 线稿分区管线（论文 Fourey-Tschumperlé-Revoy）：EDT/曲率端点/样条闭合/label map/线下瓜分
 import "./lineart-oracle.test.mjs";     // 线稿 oracle 接缝：tap→Selection + contentRev 缓存失效
+import "./magic-drag.test.mjs";        // 魔棒 drag 连续选：多区累积/跳过已盖点/一笔一 undo/cancel 无痕
 import "./fill-mode.test.mjs";
 import "./tok-ucsur.test.mjs";           // v0.5.35 tok→UCSUR 转写四条件+escape 规则           // v0.5.11 填充模式：active 谓词/开关事件（像素正确性在 gl-smoke fillParity）          // v0.5 #22/#31 flood 内核 + compose 非消费语义（v0.5.11 桶退役，内核归魔棒）
 import "./floating-transform.test.mjs";

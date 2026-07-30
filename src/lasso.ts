@@ -50,6 +50,7 @@ type LassoState =
   | "drawing-rect"
   | "drawing-ellipse"
   | "magic-tentative"
+  | "magic-drag"
   | "drawing-polygon"
   | "floating";
 type SubTool = "freehand" | "rect" | "ellipse" | "polygon" | "magic";
@@ -231,6 +232,7 @@ export class LassoEngine {
   hasSelection() { return !!this.doc?.selection; }
   getSelection() { return this.doc?.selection || null; }
   cancelDrawing() {
+    if (this._state === "magic-drag") { this.magicDragCancel(); return; }   // v0.7：drag 会话无痕还原
     if (this._subTool === "polygon") {
       // 笔级 abort（双指手势/掌触 purge/pointercancel）：只丢当前段预览，顶点会话保留——
       //   画到第 7 个顶点被误触双指清空 = 灾难（abortStroke ≠ abortSession）。
@@ -365,6 +367,72 @@ export class LassoEngine {
     return sel;
   }
   // （flood 内核本体在文件尾 floodSelectFrom——#22 提取为模块级纯函数）
+
+  // ---- 魔棒 drag 连续选（v0.7 UX：按住拖动沿路径把扫过的区域逐个并进来，一笔=一条 undo）----
+  // 会话态：_magicOrig = 起笔时的 doc.selection（undo before；所有权归 doc 直到 end/cancel 处置）；
+  //   _magicAccum = 本笔各查询区域的 union（引擎持有）。预览 = compose(orig, accum, setOp)
+  //   直写 doc.selection（不进 undo），end 一次性产 entry，cancel 还原 orig。
+  //   省钱关键：采样点已被 accum 盖住 → 跳过查询（拖动大多数点落在刚选完的区域里）。
+  _magicOrig: SelectionLike | null = null;
+  _magicAccum: SelectionLike | null = null;
+  _magicDragLastX = -1;
+  _magicDragLastY = -1;
+
+  beginMagicDrag() {
+    if (!this.doc) return;
+    this._magicOrig = this.doc.selection;
+    this._magicAccum = null;
+    this._magicDragLastX = this._magicDragLastY = -1;
+    this._state = "magic-drag";
+  }
+  /** 采样一点；选区真变了返回 true（调用方重绘）。 */
+  magicDragStep(x: number, y: number, sourceLayer: Layer | null): boolean {
+    if (!this.doc || this._state !== "magic-drag") return false;
+    const xi = Math.floor(x), yi = Math.floor(y);
+    if (xi === this._magicDragLastX && yi === this._magicDragLastY) return false;
+    this._magicDragLastX = xi; this._magicDragLastY = yi;
+    if (this._magicAccum && this._magicAccum.sampleAt(xi, yi) > 0) return false;
+    const q = this._magicWandToSelection({ x, y }, sourceLayer);
+    if (!q) return false;
+    const merged = this._magicAccum ? Selection.compose(this._magicAccum, q, "union") : q;
+    if (merged !== q) q.dispose();
+    if (this._magicAccum && merged !== this._magicAccum) this._magicAccum.dispose();
+    this._magicAccum = merged as SelectionLike;
+    // 预览直写 doc.selection：compose 不消费输入 → 喂 accum 的 clone，防 "new" 模式返回同
+    //   一对象造成双所有权（accum 归引擎、doc.selection 归 doc，各自 dispose 不打架）。
+    const accumView = this._magicAccum.clone();
+    const preview = Selection.compose(this._magicOrig, accumView, this._setOpMode);
+    if (preview !== accumView) accumView.dispose();
+    const prev = this.doc.selection;
+    if (prev && prev !== this._magicOrig && prev !== preview) prev.dispose();
+    this.doc.selection = preview;
+    this.onChange();
+    return true;
+  }
+  /** 收笔：产单条 history entry（before 所有权随 entry 交给 ops.selection，同 _applySelectionUpdate 契约）。 */
+  magicDragEnd() {
+    if (!this.doc || this._state !== "magic-drag") return null;
+    const orig = this._magicOrig;
+    const final = this.doc.selection;
+    this._magicOrig = null;
+    this._magicAccum?.dispose(); this._magicAccum = null;
+    this._state = "idle";
+    this.onChange();
+    if (final === orig) return null;
+    return { type: "selectionChange", before: orig, after: final };
+  }
+  /** 中断（双指手势/pointercancel/出错）：还原起笔时选区，无痕。 */
+  magicDragCancel() {
+    if (this._state !== "magic-drag") return;
+    if (this.doc) {
+      const prev = this.doc.selection;
+      if (prev !== this._magicOrig) { prev?.dispose(); this.doc.selection = this._magicOrig; }
+    }
+    this._magicOrig = null;
+    this._magicAccum?.dispose(); this._magicAccum = null;
+    this._state = "idle";
+    this.onChange();
+  }
 
   // 把新 mask 按 setOpMode 合并进 doc.selection，返回 history entry
   _applySelectionUpdate(newSel: SelectionLike) {

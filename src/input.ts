@@ -719,17 +719,42 @@ export class InputController {
     } else if (rec.role === "lasso") {
       const { x: dx, y: dy } = this.board.screenToDoc(e.clientX, e.clientY);
       if (rec._lassoMode === "tentative") {
-        // magic 子工具是 tap-only：不升级到 drawing；_endLasso 在 pointerup 时触发
-        if (this.lasso.getSubTool() === "magic") return;
         // v134 (user：「用 screen px，不然像素画时 lasso 用不了」)
         //   tap vs drag 阈值 = 8 screen-px 距离（防 pen jitter / mouse 抖）
         //   原本 4 doc-px² 在 32×32 pixel art zoom in 时巨大，永远不升级
         const sdx = e.clientX - rec.startX!;
         const sdy = e.clientY - rec.startY!;
+        if (this.lasso.getSubTool() === "magic") {
+          // v0.7：魔棒不再 tap-only——超阈值升级 magic-drag（沿路径连续选，一笔=一条 undo）；
+          //   tap 语义不变（_endLasso 的 tentative 分支）。红线：所有魔棒路径 try/catch + status。
+          if (sdx * sdx + sdy * sdy > 64) {
+            rec._lassoMode = "magic-drag";
+            try {
+              const src = this.doc.getFloodSourceLayer();
+              this.lasso.beginMagicDrag();
+              this.lasso.magicDragStep(rec._lassoStartDocX!, rec._lassoStartDocY!, src);
+              this.lasso.magicDragStep(dx, dy, src);
+              this.board.invalidateAll();
+            } catch (err) {
+              reportError(new Error("[magic-drag] " + String(err)), "log");
+              this.status("魔术棒出错：" + ((err as { message?: unknown })?.message || err));
+              this.lasso.magicDragCancel();
+              rec._lassoMode = "tentative";
+            }
+          }
+          return;
+        }
         if (sdx * sdx + sdy * sdy > 64) {
           rec._lassoMode = "drawing";
           this.lasso.beginPath(rec._lassoStartDocX!, rec._lassoStartDocY!);
           this.lasso.extendPath(dx, dy);
+        }
+      } else if (rec._lassoMode === "magic-drag") {
+        try {
+          if (this.lasso.magicDragStep(dx, dy, this.doc.getFloodSourceLayer())) this.board.invalidateAll();
+        } catch (err) {
+          reportError(new Error("[magic-drag] " + String(err)), "log");
+          this.status("魔术棒出错：" + ((err as { message?: unknown })?.message || err));
         }
       } else if (rec._lassoMode === "drawing") {
         this.lasso.extendPath(dx, dy);
@@ -983,6 +1008,18 @@ export class InputController {
   _endLasso(rec: PointerRec) {
     if (this.lasso.getSubTool() === "polygon" && (rec._lassoMode === "drawing" || rec._lassoMode === "tentative")) {
       this._polygonUp(rec);   // 多边形：一笔=落一个顶点（首笔 p1→p2 连落两个）；点回起点=闭合
+      return;
+    }
+    if (rec._lassoMode === "magic-drag") {
+      // v0.7 魔棒 drag 收笔：会话期间预览已直写 doc.selection，这里一次性入 undo（一笔一整点）
+      try {
+        const entry = this.lasso.magicDragEnd();
+        if (entry) { this._pushSelEntry(entry); this.board.invalidateAll(); }
+      } catch (e) {
+        reportError(new Error("[magic-drag end] " + String(e)), "log");
+        this.status("魔术棒出错：" + ((e as { message?: unknown })?.message || e));
+        this.lasso.magicDragCancel();
+      }
       return;
     }
     if (rec._lassoMode === "drawing") {
