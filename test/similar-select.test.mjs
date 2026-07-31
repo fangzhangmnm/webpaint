@@ -96,3 +96,28 @@ describe("floodSelectFrom · oklab 度量分支", () => {
     sel.dispose();
   });
 });
+
+describe("floodSelectFrom · 选区当墙（v0.7.23，union 模式止漏）", () => {
+  // 8×8 全同色层：不设墙 tap 任意点=全选；竖条墙（x=3..4）应把 flood 拦在左侧
+  const uniform = () => fakeLayer(8, 8, (_x, _y, d, o) => { d[o] = 200; d[o + 3] = 255; });
+  const wall = () => {
+    const data = new Uint8Array(2 * 8).fill(255);   // x∈[3,4] 全高
+    return { x: 3, y: 0, w: 2, h: 8, data };
+  };
+
+  it("墙拦截：同色一片但 flood 停在已选区（临时线语义）", () => {
+    const sel = floodSelectFrom({ width: 8, height: 8 }, { x: 0, y: 0 }, uniform(), 10, "rgb", wall());
+    eq(count255(sel), 24, "只选墙左 x0..2 三列");
+    eq(sel.bboxW, 3, "bbox 止步于墙");
+    sel.dispose();
+    const noStop = floodSelectFrom({ width: 8, height: 8 }, { x: 0, y: 0 }, uniform(), 10, "rgb", null);
+    eq(count255(noStop), 64, "不设墙 = 全选（对照）");
+    noStop.dispose();
+  });
+
+  it("种子豁免：tap 点已在墙里 → 整面墙忽略（先粗圈再 tap 补全不哑）", () => {
+    const sel = floodSelectFrom({ width: 8, height: 8 }, { x: 3, y: 4 }, uniform(), 10, "rgb", wall());
+    eq(count255(sel), 64, "种子在墙内 → 按无墙 flood 全选");
+    sel.dispose();
+  });
+});

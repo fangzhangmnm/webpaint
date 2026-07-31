@@ -397,11 +397,17 @@ export class LassoEngine {
     if (!this.doc) return null;
     // v0.7 线稿模式：tap → 分区 label 查表（缓存 miss 时同步构建，见 lineart-oracle.ts）。
     //   与 flood 完全同构：产原始选区，后续 auto-expand / setOp 合并共用同一条路。
+    // v0.7.23（user 2026-07-30）：classic + union 模式下**已选区当墙**——先套索糊一条「临时线」
+    //   或先圈邻区，flood 撞选区即停（前线稿时代的缺线止痛；lineart 分区预计算不吃选区、similar
+    //   无连通概念，都不参与）。drag 中 doc.selection=orig+accum 预览 → 本笔已选也顺势成墙，语义一致。
+    const stopMask = this._magicAlgorithm === "classic" && this._setOpMode === "union" && this.doc.selection
+      ? this.doc.selection.bboxMask()
+      : null;
     let sel: SelectionLike | null = this._magicAlgorithm === "lineart" && start
       ? this._lineartOracle.selectAt(this.doc, sourceLayer, start.x, start.y)
       : this._magicAlgorithm === "similar"
         ? similarSelectFrom(this.doc, start, sourceLayer, this._similarThreshold, this._colorMetric)
-        : floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold, this._colorMetric);
+        : floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold, this._colorMetric, stopMask);
     // #31：可选 flood 后自动扩张（默认关）。在 setOp 合并**之前**做，語义 = 「这一下点出来的区域」本身变胖。
     // v0.7.8：auto-expand 收窄为 classic flood 的子管线 param——线稿分区自带墨线下扩语义，
     // 再叠形态学扩张是双重补偿（UI 侧线稿算法时也藏扩张钮）。
@@ -554,12 +560,18 @@ export class LassoEngine {
 // 修：迭代**整 doc 尺寸**，layer.bbox 外当 (0,0,0,0) 透明像素。
 // 历史「容隙」功能 v71→v79 撤掉（barrier dilate 会盖住 tap 点），详 docs/20260528-lessons-magic-wand-gap-closing.md。
 // 内存（2048² doc）：layerData 16MB + combined buffer 4MB（0=未访问 1=进mask 2=barrier，三数组合一省 8MB）。
+// v0.7.23 选区当墙（user 2026-07-30：「add模式下已经选中的区域应该也记作stop」）：
+//   bbox 对齐 gray8 平面（Selection.bboxMask() 同款形状），>0 处 flood 不能进。
+//   种子豁免在本函数内：tap 点已在墙里 → 整面墙忽略（「先粗圈再 tap 补全」不许变哑）。
+export interface FloodStopMask { x: number; y: number; w: number; h: number; data: Uint8Array }
+
 export function floodSelectFrom(
   doc: { width: number; height: number },
   start: Point | null,
   sourceLayer: Layer | null,
   thresholdPct: number,
   metric: ColorMetric = "rgb",   // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 editorState 的度量
+  stopMask: FloodStopMask | null = null,
 ): Selection | null {
   if (!start) return null;
   const docW = doc.width, docH = doc.height;
@@ -590,10 +602,20 @@ export function floodSelectFrom(
 
   // 「layer 外」的 barrier 算一次：透明 (0,0,0,0) 跟 tap 色的距离
   const outsideIsBarrier = dist(0, 0, 0, 0) > tFrac;
+  // v0.7.23 选区墙：种子豁免（tap 点已选 → 本次忽略墙，重刷已选区语义）
+  let stop = stopMask;
+  if (stop) {
+    const ix = sx - stop.x, iy = sy - stop.y;
+    if (ix >= 0 && iy >= 0 && ix < stop.w && iy < stop.h && stop.data[iy * stop.w + ix] > 0) stop = null;
+  }
   // inline barrier 检查：返回 true = 是 barrier = flood 不能进
   const isBarrier = (p: number) => {
     const py = (p / docW) | 0;
     const px = p - py * docW;
+    if (stop) {
+      const ix = px - stop.x, iy = py - stop.y;
+      if (ix >= 0 && iy >= 0 && ix < stop.w && iy < stop.h && stop.data[iy * stop.w + ix] > 0) return true;
+    }
     if (!layerData || px < lbX || px >= lbX + lbW || py < lbY || py >= lbY + lbH) {
       return outsideIsBarrier;
     }
