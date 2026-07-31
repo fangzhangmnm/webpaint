@@ -325,8 +325,8 @@ export function initDocOps(ctx: AppContext) {
     // 此前两边各有一张表，往新建里加的尺寸这里永远看不到）。async fetch，回来了再填。
     // 先同步投影一次：模板模式按钮会把 value 设成 "custom"，那条 option 必须先在（否则赋值落空、
     // _syncCropModeUI 会误判成非自定义、把 W/H 输入框藏起来）。json 回来再投影一次补上模板。
-    fillTemplateSelect(tplSel, "crop", t("crop.customTpl"));
-    void loadCanvasTemplates().then(() => fillTemplateSelect(tplSel, "crop", t("crop.customTpl")));
+    fillTemplateSelect(tplSel, t("crop.customTpl"));
+    void loadCanvasTemplates().then(() => fillTemplateSelect(tplSel, t("crop.customTpl")));
     // 分段按钮 自由|模板（两项下拉太笨——user 2026-07-29 UI 意见）
     document.getElementById("cropModeFree")!.addEventListener("click", () => {
       if (!_cropState || _cropState.mode === "free") return;

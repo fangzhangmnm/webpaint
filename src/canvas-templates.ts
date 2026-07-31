@@ -13,9 +13,6 @@
 import { t, type Key } from "./i18n/index.ts";
 import { reportError } from "./error-badge.ts";
 
-/** 模板的消费面。省略 surfaces = 两个面都显示。 */
-export type TemplateSurface = "new" | "crop";
-
 export interface CanvasTemplate {
   id: string;                          // 稳定标识（editorState.crop.templateId 持久化了它——改名=破坏性）
   label: string;                       // 中文 UI 直读（i18n 缺席时的显示文本 / 在场时的 zh 兜底）
@@ -24,7 +21,6 @@ export interface CanvasTemplate {
   w: number; h: number;                // unit 下的数值
   unit: "px" | "mm" | "in";
   dpi?: number;                        // print 类必填；导出 pHYs 用
-  surfaces?: TemplateSurface[];        // 可选白名单
 }
 
 const MM_PER_IN = 25.4;
@@ -71,11 +67,6 @@ export function allTemplates(): CanvasTemplate[] {
   return _templates;
 }
 
-/** 某个消费面该显示的模板（保持 json 数组顺序 = 显示顺序）。 */
-export function templatesFor(surface: TemplateSurface): CanvasTemplate[] {
-  return _templates.filter((tp) => !tp.surfaces || tp.surfaces.includes(surface));
-}
-
 export function templateById(id: string): CanvasTemplate | null {
   return _templates.find((tp) => tp.id === id) ?? null;
 }
@@ -101,15 +92,16 @@ export function templateLabel(tp: CanvasTemplate): string {
 
 /**
  * 把模板表投影进一个 <select>：按 kind 分 optgroup，末尾追加「自定义…」。
- * 两个消费面（新建作品 / 裁剪模板模式）共用这一份渲染，省得分组逻辑再分叉一次。
+ * 两个消费面（新建作品 / 裁剪模板模式）共用这一份渲染，**显示完全一样的列表**
+ * （v0.7.34 user 定；此前有个 surfaces 分面白名单，已连同机制一起删掉）。
  * json 是 async fetch 的 → 调用方在 loadCanvasTemplates() resolve 后调；重复调用幂等（先清空再填）。
  */
-export function fillTemplateSelect(sel: HTMLSelectElement, surface: TemplateSurface, customLabel: string): void {
+export function fillTemplateSelect(sel: HTMLSelectElement, customLabel: string): void {
   const keep = sel.value;
   sel.textContent = "";
   let group: HTMLOptGroupElement | null = null;
   let groupKind: CanvasTemplate["kind"] | null = null;
-  for (const tp of templatesFor(surface)) {
+  for (const tp of _templates) {
     if (tp.kind !== groupKind) {
       group = document.createElement("optgroup");
       group.label = t(GROUP_I18N[tp.kind]);

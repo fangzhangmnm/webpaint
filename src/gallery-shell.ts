@@ -319,9 +319,9 @@ export function initGalleryShell(ctx: AppContext) {
   // v0.7.32：option 来自 canvas-templates.json（async fetch）。先同步投影一次——此刻表可能还空着，
   // 但「自定义…」这条立刻就在，下拉框不会有一段完全空白的窗口；json 回来再投影一次并选回默认。
   if (presetSel) {
-    fillTemplateSelect(presetSel, "new", t("nd.custom"));
+    fillTemplateSelect(presetSel, t("nd.custom"));
     void loadCanvasTemplates().then(() => {
-      fillTemplateSelect(presetSel, "new", t("nd.custom"));
+      fillTemplateSelect(presetSel, t("nd.custom"));
       _selectPreset(_presetVal);
     });
   }

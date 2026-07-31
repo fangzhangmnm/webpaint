@@ -54,7 +54,9 @@ export const S = {
   //   物理尺寸×DPI 换算后自动追加（写死会和换算结果漂移）。这里只留「这是什么纸」。
   "nd.print6in":        { zh: "6寸照片 4×6in 竖", en: "4×6″ photo, portrait", ja: "写真 KG判 4×6in 縦", tok: "sitelen lili 4×6in (sewi)" },
   "nd.print8in":        { zh: "8寸照片 6×8in 竖", en: "6×8″ photo, portrait", ja: "写真 6×8in 縦", tok: "sitelen suli 6×8in (sewi)" },
-  "nd.printPostcard":   { zh: "明信片 100×148mm", en: "Postcard 100×148 mm", ja: "はがき 100×148mm", tok: "lipu toki 100×148mm" },
+  "nd.printPostcard":   { zh: "明信片 100×148mm 竖", en: "Postcard 100×148 mm, portrait", ja: "はがき 100×148mm 縦", tok: "lipu toki 100×148mm (sewi)" },
+  "nd.printPostcardLand": { zh: "明信片 100×148mm 横", en: "Postcard 100×148 mm, landscape", ja: "はがき 100×148mm 横", tok: "lipu toki 100×148mm (poka)" },
+  "nd.print8inLand":    { zh: "8寸照片 6×8in 横", en: "6×8″ photo, landscape", ja: "写真 6×8in 横", tok: "sitelen suli 6×8in (poka)" },
   // v0.7.32：以下几条原本只在裁切侧、按「模板名不走 i18n」写成纯中文。合表后它们和上面几条同框，
   //   英/日界面会半中半英——补齐四语。（纯数字的 1024²/2048² 之类仍不需要 key：尺寸是国际语。）
   "nd.print6inLand":    { zh: "6寸照片 4×6in 横", en: "4×6″ photo, landscape", ja: "写真 KG判 4×6in 横", tok: "sitelen lili 4×6in (poka)" },

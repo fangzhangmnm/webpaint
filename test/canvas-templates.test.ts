@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { test, eq, assert } from "./runner.mjs";
 import {
-  _adoptCanvasTemplates, allTemplates, templatesFor, templateById, templatePx,
+  _adoptCanvasTemplates, allTemplates, templateById, templatePx,
   type CanvasTemplate,
 } from "../src/canvas-templates.ts";
 
@@ -31,10 +31,7 @@ test("数据契约：字段齐全、id 唯一、print 必带 dpi", () => {
       const stripped = tp.label.replace(/\s/g, "");
       assert(!stripped.includes(`${px.w}×${px.h}`), `别把换算出的像素数写死进 label（会漂移）: ${tp.id}`);
     }
-    if (tp.surfaces) {
-      assert(tp.surfaces.length > 0, `surfaces 空数组=谁也看不见: ${tp.id}`);
-      for (const s of tp.surfaces) assert(["new", "crop"].includes(s), `surfaces 非法: ${tp.id} ${s}`);
-    }
+    assert(!("surfaces" in tp), `v0.7.34 起两个面显示完全一样的列表，不该再有分面白名单: ${tp.id}`);
   }
 });
 
@@ -64,46 +61,36 @@ test("templatePx：物理单位按 DPI 换算成整像素", () => {
   eq(templatePx(templateById("screen-1200x900")!).h, 900, "1200×900 高");
 });
 
-test("一份表喂两个面：默认（无 surfaces）的模板新建和裁切都看得到", () => {
-  const inNew = new Set(templatesFor("new").map((tp) => tp.id));
-  const inCrop = new Set(templatesFor("crop").map((tp) => tp.id));
-  assert(inNew.size > 0 && inCrop.size > 0, "两个面都不该是空的");
-  for (const tp of allTemplates()) {
-    if (tp.surfaces) continue;
-    assert(inNew.has(tp.id), `无 surfaces 的模板漏了新建面: ${tp.id}`);
-    assert(inCrop.has(tp.id), `无 surfaces 的模板漏了裁切面: ${tp.id}`);
-  }
-  // 这次的直接起因：3:4 / 4:3 必须两个面都在（当初只加进了新建那半边）。
-  for (const id of ["screen-1200x900", "screen-900x1200"]) {
-    assert(inNew.has(id), `${id} 不在新建面`);
-    assert(inCrop.has(id), `${id} 不在裁切面`);
-  }
+test("一份表喂两个面：两边显示完全一样的列表（user 2026-07-31 定）", () => {
+  // 机制上已经没有 per-surface 过滤了（surfaces 字段连同 templatesFor() 一起删掉）——
+  // 这条守的是「别再把它加回来」：投影函数只吃 (select, 自定义文案)，没有第三个分面参数。
+  const src = readFileSync(new URL("../src/canvas-templates.ts", import.meta.url), "utf-8");
+  assert(!/templatesFor/.test(src), "templatesFor() 复活了 = 分面差异回来了");
+  assert(/export function fillTemplateSelect\(sel: HTMLSelectElement, customLabel: string\)/.test(src),
+    "fillTemplateSelect 签名变了——多出的参数是不是又在分面？");
+  // 这次的直接起因：3:4 / 4:3 得在表里（当初只加进了新建那半边的手写 option）。
+  for (const id of ["screen-1200x900", "screen-900x1200"]) assert(templateById(id), `${id} 不在表里`);
 });
 
-test("新建面保持 #21 收窄后的形状：没有 A4、没有 4096²、打印只给竖版", () => {
-  const inNew = templatesFor("new");
-  const ids = new Set(inNew.map((tp) => tp.id));
-  // A4 / 4096² 是 user 原话砍的（见 canvas-templates.json 的出处分级），这两条别自作主张加回来。
-  for (const id of ["print-a4-300", "print-a4l-300", "print-a5-300", "print-a5l-300", "screen-4096sq"]) {
-    assert(!ids.has(id), `新建面不该有 ${id}（user 原话砍掉的）`);
-  }
-  // 「只给竖版」查无 user 原话，是当年 AI 提案的细节——钉在这里只为防**无意**漂移，
-  // 不是 user 拍板；真要给新建面加横版打印模板，不必回去问，改这条断言即可。
-  for (const tp of inNew) {
-    if (tp.kind === "print") assert(tp.h > tp.w, `新建面的打印模板目前约定为竖版: ${tp.id}`);
+test("打印模板横竖成对（user 原话：照片应该有横向和竖向）", () => {
+  const prints = allTemplates().filter((tp) => tp.kind === "print");
+  assert(prints.length > 0, "没有打印模板？");
+  // 成对判据：同 unit 同 dpi、长短边数值互换，必须找得到对家。
+  for (const tp of prints) {
+    const mate = prints.find((o) =>
+      o.id !== tp.id && o.unit === tp.unit && o.dpi === tp.dpi && o.w === tp.h && o.h === tp.w);
+    assert(mate, `${tp.id}（${tp.w}×${tp.h}${tp.unit}）缺横/竖对家——打印模板要两个方向一起加`);
   }
 });
 
 test("UI 投影顺序：同 kind 的模板在数组里连续（否则 optgroup 会分裂成两块）", () => {
-  for (const surface of ["new", "crop"] as const) {
-    const seen = new Set<string>();
-    let prev = "";
-    for (const tp of templatesFor(surface)) {
-      if (tp.kind !== prev) {
-        assert(!seen.has(tp.kind), `${surface} 面的 kind ${tp.kind} 被打断成多段`);
-        seen.add(tp.kind);
-        prev = tp.kind;
-      }
+  const seen = new Set<string>();
+  let prev = "";
+  for (const tp of allTemplates()) {
+    if (tp.kind !== prev) {
+      assert(!seen.has(tp.kind), `kind ${tp.kind} 被打断成多段`);
+      seen.add(tp.kind);
+      prev = tp.kind;
     }
   }
 });
