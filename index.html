@@ -554,6 +554,8 @@
               <option value="512x512">512 × 512</option>
               <option value="1920x1080" data-i18n="nd.o1920">1920 × 1080（横）</option>
               <option value="1080x1920" data-i18n="nd.o1080">1080 × 1920（竖）</option>
+              <option value="1200x900" data-i18n="nd.o1200x900">1200 × 900（横 4:3）</option>
+              <option value="900x1200" data-i18n="nd.o900x1200">900 × 1200（竖 3:4）</option>
             </optgroup>
             <optgroup data-i18n-label="nd.grp.print" label="打印 · 300dpi">
               <option value="1200x1800" data-i18n="nd.print6in">6寸照片 1200 × 1800</option>
@@ -1445,6 +1447,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-e11e460288a7.mjs"></script>
+    <script type="module" src="./dist/webpaint-b6330c1527a3.mjs"></script>
   </body>
 </html>

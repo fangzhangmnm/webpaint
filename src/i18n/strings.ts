@@ -48,6 +48,8 @@ export const S = {
   "nd.grp.pixel":       { zh: "像素画", en: "Pixel art", ja: "ドット絵", tok: "sitelen leko" },
   "nd.o1920":           { zh: "1920 × 1080（横）", en: "1920 × 1080 (landscape)", ja: "1920 × 1080（横）", tok: "1920 × 1080 (poka)" },
   "nd.o1080":           { zh: "1080 × 1920（竖）", en: "1080 × 1920 (portrait)", ja: "1080 × 1920（縦）", tok: "1080 × 1920 (sewi)" },
+  "nd.o1200x900":       { zh: "1200 × 900（横 4:3）", en: "1200 × 900 (landscape 4:3)", ja: "1200 × 900（横 4:3）", tok: "1200 × 900 (poka 4:3)" },
+  "nd.o900x1200":       { zh: "900 × 1200（竖 3:4）", en: "900 × 1200 (portrait 3:4)", ja: "900 × 1200（縦 3:4）", tok: "900 × 1200 (sewi 3:4)" },
   "nd.print6in":        { zh: "6寸照片 1200 × 1800", en: "4×6″ photo 1200 × 1800", ja: "写真 KG判 1200 × 1800", tok: "sitelen lili 1200 × 1800" },
   "nd.print8in":        { zh: "8寸照片 1800 × 2400", en: "6×8″ photo 1800 × 2400", ja: "写真 6×8″ 1800 × 2400", tok: "sitelen suli 1800 × 2400" },
   "nd.printPostcard":   { zh: "明信片 1181 × 1748", en: "Postcard 1181 × 1748", ja: "はがき 1181 × 1748", tok: "lipu toki 1181 × 1748" },
