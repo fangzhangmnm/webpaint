@@ -53,6 +53,7 @@ SPECS = [
     # 2026-07-30 resample（采）当日提当日入库（AA 圆盘光栅化示意），stopgap 清零。
     # 2026-07-30 拆色（explode-color-layers）当日入库，甲方定名 separate-colors（color 文氏图三圆分开），
     # stopgap 清零。
+    ("fill-gap", "隙", (3, 3, 18, 18), "魔棒容隙 toggle（v0.7.24：缺口宽<n px 处 flood 过不去；EDT 受限 flood+回贴膨胀）。真图标建议=断口线条+跨缺口的桥/虚线补段（与 selection-expand 同笔重；区别于 auto-expand 的向外箭头语义）"),
 ]
 syms = []
 for sid, text, box, note in SPECS:

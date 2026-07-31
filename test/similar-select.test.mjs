@@ -115,9 +115,48 @@ describe("floodSelectFrom · 选区当墙（v0.7.23，union 模式止漏）", ()
     noStop.dispose();
   });
 
-  it("种子豁免：tap 点已在墙里 → 整面墙忽略（先粗圈再 tap 补全不哑）", () => {
+  it("种子豁免：tap 点已在墙里 → 整面墙忽略（fill union 调容差后原地重 tap 不许哑）", () => {
     const sel = floodSelectFrom({ width: 8, height: 8 }, { x: 3, y: 4 }, uniform(), 10, "rgb", wall());
     eq(count255(sel), 64, "种子在墙内 → 按无墙 flood 全选");
+    sel.dispose();
+  });
+});
+
+describe("floodSelectFrom · 容隙（v0.7.24 EDT 受限 flood+回贴）", () => {
+  // 12×8：x=5 竖墨线，y∈{3,4} 开 2px 缺口；其余全红
+  const gapped = () => fakeLayer(12, 8, (x, y, d, o) => {
+    if (x === 5 && y !== 3 && y !== 4) { d[o + 3] = 255; }            // 黑线（含 α 顶满）
+    else { d[o] = 255; d[o + 3] = 255; }                              // 红底
+  });
+
+  it("容隙关：2px 缺口照漏（对照）", () => {
+    const sel = floodSelectFrom({ width: 12, height: 8 }, { x: 1, y: 1 }, gapped(), 10, "rgb");
+    eq(count255(sel), 90, "全部非墨线 96-6 漏光");
+    sel.dispose();
+  });
+
+  it("容隙 4：缺口封住——线左全选+口部回贴，右侧零像素", () => {
+    const sel = floodSelectFrom({ width: 12, height: 8 }, { x: 1, y: 1 }, gapped(), 10, "rgb", null, 4);
+    const g = sel.materializeMaskRegion(0, 0, 12, 8);
+    for (let y = 0; y < 8; y++) for (let x = 6; x < 12; x++) eq(g[y * 12 + x], 0, `右侧 (${x},${y}) 不入选`);
+    eq(count255(sel), 42, "左 5 列 40 + 缺口内 (5,3)(5,4) 回贴 2");
+    sel.dispose();
+  });
+
+  it("贴线 tap 不哑（v71 教训）：种子在窄边 → 口袋接种，结果同开阔 tap", () => {
+    const sel = floodSelectFrom({ width: 12, height: 8 }, { x: 4, y: 1 }, gapped(), 10, "rgb", null, 4);
+    eq(count255(sel), 42, "贴线 tap 与开阔 tap 同结果");
+    sel.dispose();
+  });
+
+  it("窄走廊 tap：r 步内摸不到开阔区 → 诚实降级普通 flood（不吞 tap、不越墙）", () => {
+    // 两条竖线 x=4/x=7 夹出 2 宽走廊，tap 走廊内，gap=6（r=3 > 走廊半宽）
+    const corridor = fakeLayer(12, 8, (x, _y, d, o) => {
+      if (x === 4 || x === 7) { d[o + 3] = 255; }
+      else { d[o] = 255; d[o + 3] = 255; }
+    });
+    const sel = floodSelectFrom({ width: 12, height: 8 }, { x: 5, y: 4 }, corridor, 10, "rgb", null, 6);
+    eq(count255(sel), 16, "降级 flood 困在走廊 2×8");
     sel.dispose();
   });
 });

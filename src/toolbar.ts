@@ -276,6 +276,12 @@ export function updateLassoToolbar() {
   lassoExpandToggle.classList.toggle("hidden", !expandApplies);
   lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
   if (!expandApplies || !editorState.magicWand.expand) lassoMagicExpandMenu?.classList.add("hidden");
+  // v0.7.24 容隙钮：classic 专属（lineart 自带论文闭合、similar 无连通概念）
+  const gapApplies = magicOn && input.lasso.getMagicAlgorithm() === "classic";
+  const gapToggle = document.getElementById("lassoGapToggle");
+  gapToggle?.classList.toggle("hidden", !gapApplies);
+  gapToggle?.setAttribute("aria-pressed", editorState.magicWand.fillGap ? "true" : "false");
+  if (!gapApplies || !editorState.magicWand.fillGap) document.getElementById("lassoGapMenu")?.classList.add("hidden");
   // 清除选区内像素（v0.6.19 从 ⋯ 提到 Row1）：套索模式+有选区才显（fill 藏，同旧 lasso-only 语义）
   document.getElementById("lassoClearBtn")?.classList.toggle("hidden", !(lassoActive && hasSelection));
   // ⋯ 菜单钮：选区/填充工具常显（menu 内按 needs-sel / lasso-only 逐项禁用·隐藏——见 openSelEditUI）。
@@ -915,10 +921,50 @@ export function initToolbar(ctx: AppContext) {
   };
   byId("lassoMagicExpandMinus").addEventListener("click", () => stepMagicExpand(-1));
   byId("lassoMagicExpandPlus").addEventListener("click", () => stepMagicExpand(+1));
+  // v0.7.24 容隙 toggle + px stepper（auto-expand 同款样板；user：两个不同的 knob）。
+  //   引擎只认一个数：effective px = toggle 开 ? fillGapPx : 0。classic 专属（显隐在 updateLassoToolbar）。
+  const lassoGapToggle = byId("lassoGapToggle");
+  const lassoGapMenu = byId("lassoGapMenu");
+  const lassoGapVal = byId("lassoGapVal");
+  const pushGapToEngine = () => {
+    input.lasso.setFillGap(editorState.magicWand.fillGap ? editorState.magicWand.fillGapPx : 0);
+  };
+  const syncGapUI = () => {
+    lassoGapVal.textContent = String(editorState.magicWand.fillGapPx);
+    pushGapToEngine();
+    updateLassoToolbar();
+  };
+  _transientMenus.push(lassoGapMenu);
+  lassoGapToggle.addEventListener("click", (e: Event) => {
+    e.stopPropagation();
+    editorState.magicWand.fillGap = !editorState.magicWand.fillGap;
+    pushGapToEngine();
+    if (editorState.magicWand.fillGap) {
+      lassoGapMenu.classList.remove("hidden");
+      anchorPopupToBtn(lassoGapMenu, lassoGapToggle, { align: "left", offsetY: 6 });
+    } else {
+      lassoGapMenu.classList.add("hidden");
+    }
+    updateLassoToolbar();
+  });
+  document.addEventListener("pointerdown", (e: Event) => {
+    if (lassoGapMenu.classList.contains("hidden")) return;
+    if (lassoGapMenu.contains(e.target as Node) || lassoGapToggle.contains(e.target as Node)) return;
+    lassoGapMenu.classList.add("hidden");
+  });
+  const stepGap = (d: number) => {
+    editorState.magicWand.fillGapPx = Math.max(2, Math.min(32, editorState.magicWand.fillGapPx + d));
+    lassoGapVal.textContent = String(editorState.magicWand.fillGapPx);
+    pushGapToEngine();
+  };
+  byId("lassoGapMinus").addEventListener("click", () => stepGap(-1));
+  byId("lassoGapPlus").addEventListener("click", () => stepGap(+1));
+  window.addEventListener("wp:applyEditorState", syncGapUI);
   window.addEventListener("wp:applyEditorState", syncMagicExpandUI);
   window.addEventListener("wp:applyEditorState", syncMagicThresholdUI);
   syncMagicThresholdUI();
   syncMagicExpandUI();
+  syncGapUI();
   // 1:1 约束 toggle（rect / ellipse 用）
   lassoConstrainBtn.addEventListener("click", () => {
     const v = !input.lasso.getConstrainSquare();

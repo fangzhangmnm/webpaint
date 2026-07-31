@@ -24,6 +24,7 @@ import { Selection, rasterizePolygonGray8 } from "./selection.ts";
 import { LineartOracle } from "./lineart-oracle.ts";
 import { makeSeedDist } from "./color-dist.ts";
 import type { ColorMetric } from "./color-dist.ts";
+import { edtSquared } from "./lineart/edt.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
@@ -75,6 +76,7 @@ export class LassoEngine {
   _magicThreshold: number;
   _similarThreshold = 20;
   _colorMetric: ColorMetric = "oklab";
+  _fillGapPx = 0;
   _magicAutoExpandPx: number;
   _magicAlgorithm: MagicAlgorithm = "classic";
   _lineartOracle = new LineartOracle();
@@ -147,6 +149,9 @@ export class LassoEngine {
   getColorMetric(): ColorMetric { return this._colorMetric; }
   setMagicAutoExpand(px: number) { this._magicAutoExpandPx = Math.max(0, Math.min(100, Math.round(px) || 0)); }
   getMagicAutoExpand() { return this._magicAutoExpandPx; }
+  // v0.7.24 容隙（classic 专属；lineart 自带论文闭合、similar 无连通）：0=关，>0=封宽<gapPx 的缺口
+  setFillGap(px: number) { this._fillGapPx = Math.max(0, Math.min(32, Math.round(px) || 0)); }
+  getFillGap() { return this._fillGapPx; }
   // 魔棒算法（v0.7 线稿填色）：classic=像素精确 flood；lineart=论文分区 oracle（断口自动闭合+填到线下）。
   //   交互完全同构，tap → Selection。v0.7.17 起 per-tool 持久化（editorState.lassoTool/fillTool.algo，
   //   toolbar._pushSelToolToEngine 灌入；油漆桶默认 lineart、选区默认 classic，user 拍板）。
@@ -407,7 +412,7 @@ export class LassoEngine {
       ? this._lineartOracle.selectAt(this.doc, sourceLayer, start.x, start.y)
       : this._magicAlgorithm === "similar"
         ? similarSelectFrom(this.doc, start, sourceLayer, this._similarThreshold, this._colorMetric)
-        : floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold, this._colorMetric, stopMask);
+        : floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold, this._colorMetric, stopMask, this._fillGapPx);
     // #31：可选 flood 后自动扩张（默认关）。在 setOp 合并**之前**做，語义 = 「这一下点出来的区域」本身变胖。
     // v0.7.8：auto-expand 收窄为 classic flood 的子管线 param——线稿分区自带墨线下扩语义，
     // 再叠形态学扩张是双重补偿（UI 侧线稿算法时也藏扩张钮）。
@@ -562,7 +567,8 @@ export class LassoEngine {
 // 内存（2048² doc）：layerData 16MB + combined buffer 4MB（0=未访问 1=进mask 2=barrier，三数组合一省 8MB）。
 // v0.7.23 选区当墙（user 2026-07-30：「add模式下已经选中的区域应该也记作stop」）：
 //   bbox 对齐 gray8 平面（Selection.bboxMask() 同款形状），>0 处 flood 不能进。
-//   种子豁免在本函数内：tap 点已在墙里 → 整面墙忽略（「先粗圈再 tap 补全」不许变哑）。
+//   种子豁免在本函数内：tap 点已在墙里 → 整面墙忽略。理由（真实场景，2026-07-30 核校）：fill 默认
+//   union 且选区到 ✓ 前一直累积——调容差后**原地重 tap** 是核心调参循环，不豁免则第二下必哑。
 export interface FloodStopMask { x: number; y: number; w: number; h: number; data: Uint8Array }
 
 export function floodSelectFrom(
@@ -572,6 +578,7 @@ export function floodSelectFrom(
   thresholdPct: number,
   metric: ColorMetric = "rgb",   // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 editorState 的度量
   stopMask: FloodStopMask | null = null,
+  gapPx = 0,                     // v0.7.24 容隙：>0 = 缺口宽 <gapPx 处 flood 过不去（0=关）
 ): Selection | null {
   if (!start) return null;
   const docW = doc.width, docH = doc.height;
@@ -602,7 +609,7 @@ export function floodSelectFrom(
 
   // 「layer 外」的 barrier 算一次：透明 (0,0,0,0) 跟 tap 色的距离
   const outsideIsBarrier = dist(0, 0, 0, 0) > tFrac;
-  // v0.7.23 选区墙：种子豁免（tap 点已选 → 本次忽略墙，重刷已选区语义）
+  // v0.7.23 选区墙：种子豁免（tap 点已选 → 本次忽略墙；union 调容差后原地重 tap 不许哑）
   let stop = stopMask;
   if (stop) {
     const ix = sx - stop.x, iy = sy - stop.y;
@@ -623,10 +630,32 @@ export function floodSelectFrom(
     return dist(layerData[i4], layerData[i4 + 1], layerData[i4 + 2], layerData[i4 + 3]) > tFrac;
   };
 
-  const combined = new Uint8Array(total);
   const startIdx = sx + sy * docW;
   if (isBarrier(startIdx)) return null;
 
+  // v0.7.24 容隙（user 2026-07-30「容隙做掉」）：EDT 受限 flood 的形态学闭——不是 v71 的 barrier
+  //   dilate（会盖死 tap 点，docs/20260528-lessons-magic-wand-gap-closing.md）。tap 永不哑是硬约束。
+  if (gapPx > 0) {
+    const mark = _gapFloodMask(docW, docH, startIdx, gapPx, isBarrier);
+    if (mark) {
+      let mnx = docW, mny = docH, mxx = -1, mxy = -1;
+      for (let p = 0; p < total; p++) {
+        if (mark[p] !== 1) continue;
+        const px = p % docW, py = (p - px) / docW;
+        if (px < mnx) mnx = px; if (px > mxx) mxx = px;
+        if (py < mny) mny = py; if (py > mxy) mxy = py;
+      }
+      const tw2 = mxx - mnx + 1, th2 = mxy - mny + 1;
+      const g2 = new Uint8Array(tw2 * th2);
+      for (let y = 0; y < th2; y++) for (let x = 0; x < tw2; x++) {
+        if (mark[(mny + y) * docW + (mnx + x)] === 1) g2[y * tw2 + x] = 255;
+      }
+      return Selection.fromGray8Region(mnx, mny, tw2, th2, g2);
+    }
+    // mark=null → 种子 r 步内摸不到开阔区（整个可达区都窄）→ 诚实降级普通 flood（不吞 tap）
+  }
+
+  const combined = new Uint8Array(total);
   const stack = [startIdx];
   let mnx = docW, mny = docH, mxx = -1, mxy = -1;
   while (stack.length) {
@@ -651,6 +680,79 @@ export function floodSelectFrom(
     if (combined[(mny + y) * docW + (mnx + x)] === 1) g[y * tw + x] = 255;
   }
   return Selection.fromGray8Region(mnx, mny, tw, th, g);   // v0.4.6：flood 结果直转 gray8 tile，canvas 中转死
+}
+
+// ---- 容隙内核（v0.7.24）：EDT 受限 flood + 回贴膨胀 = 形态学闭，种子口袋接种防 tap 哑 ----
+// r=gapPx/2。core=离 barrier ≥r 的开阔像素；flood 只走 core（宽 <gapPx 的缺口/走廊过不去）；
+// 结果沿非 barrier 膨胀 r 步回贴墨线（把被 core 腐蚀掉的贴线余量补回来，缺口口部圆角封住）。
+// tap 点不在 core（画师爱贴线点，v71 教训）→ 先 ≤r 步口袋 BFS 找 core 接种；摸不到 → 返 null
+// 让调用方降级普通 flood。O(N)×4 遍 + EDT，2048² 实测百 ms 级（worker 化在 parked 单）。
+function _gapFloodMask(
+  docW: number, docH: number, startIdx: number, gapPx: number,
+  isBarrier: (p: number) => boolean,
+): Uint8Array | null {
+  const total = docW * docH;
+  const bar = new Uint8Array(total);
+  for (let p = 0; p < total; p++) if (isBarrier(p)) bar[p] = 1;
+  const edt2 = edtSquared(bar, docW, docH);
+  const r = gapPx / 2;
+  const r2 = r * r;
+  const rCeil = Math.ceil(r);
+  // 4 邻枚举（三处 BFS/flood 共用）
+  const forNeighbors = (p: number, fn: (q: number) => void) => {
+    const px = p % docW, py = (p - px) / docW;
+    if (px > 0) fn(p - 1);
+    if (px < docW - 1) fn(p + 1);
+    if (py > 0) fn(p - docW);
+    if (py < docH - 1) fn(p + docW);
+  };
+  // ① 种子口袋：≤rCeil 步 BFS 找 core 接种点（种子本身是 core 则直接开花）
+  const coreSeeds: number[] = [];
+  if (edt2[startIdx] >= r2) coreSeeds.push(startIdx);
+  else {
+    const seen = new Uint8Array(total);
+    seen[startIdx] = 1;
+    let frontier = [startIdx];
+    for (let depth = 0; depth < rCeil && frontier.length && !coreSeeds.length; depth++) {
+      const next: number[] = [];
+      for (const p of frontier) forNeighbors(p, (q) => {
+        if (seen[q] || bar[q]) return;
+        seen[q] = 1;
+        if (edt2[q] >= r2) coreSeeds.push(q);
+        next.push(q);
+      });
+      frontier = next;
+    }
+    if (!coreSeeds.length) return null;   // 可达区整个窄于 r → 调用方降级
+  }
+  // ② core flood（1=入选 2=拒过）
+  const mark = new Uint8Array(total);
+  const stack = coreSeeds.slice();
+  while (stack.length) {
+    const p = stack.pop()!;
+    if (mark[p] !== 0) continue;
+    if (bar[p] || edt2[p] < r2) { mark[p] = 2; continue; }
+    mark[p] = 1;
+    forNeighbors(p, (q) => { if (mark[q] === 0) stack.push(q); });
+  }
+  // ③ 回贴膨胀 rCeil 步（4 邻曼哈顿球，保守不越缺口中线太多）：从选中边界起，走非 barrier
+  let frontier: number[] = [];
+  for (let p = 0; p < total; p++) {
+    if (mark[p] !== 1) continue;
+    let border = false;
+    forNeighbors(p, (q) => { if (mark[q] !== 1 && !bar[q]) border = true; });
+    if (border) frontier.push(p);
+  }
+  for (let depth = 0; depth < rCeil && frontier.length; depth++) {
+    const next: number[] = [];
+    for (const p of frontier) forNeighbors(p, (q) => {
+      if (mark[q] === 1 || bar[q]) return;
+      mark[q] = 1;
+      next.push(q);
+    });
+    frontier = next;
+  }
+  return mark;
 }
 
 // ---- 同色全图内核（v0.7.21 第三算法模式，user 2026-07-30 拍板）----
