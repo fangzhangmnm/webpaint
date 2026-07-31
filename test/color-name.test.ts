@@ -116,3 +116,38 @@ test("普通联想：前缀优先/子串保底/别名命中/默认无上限", ()
   assert(huang8.some((x) => x.name.startsWith("黄")), "前缀命中也该在");
   assert(searchColorNames("黄").length > huang8.length, "默认应不设上限");
 });
+
+test("schema v2：任意深度树（子树语义）+ suppress（被动隐身/作用域可查/兄弟联想）", () => {
+  _adoptColorWords({
+    categories: [...DATA.categories,
+      { id: "t-root", label: "测试合集", aliases: [], naming: false, default_for: [] },
+      { id: "t-mid", label: "测试中层", aliases: [], naming: false, default_for: [], parent: "t-root" },
+      { id: "t-pal", label: "天依板", aliases: ["天依"], naming: false, default_for: [], parent: "t-mid" },
+      { id: "t-hidden", label: "噪音板", aliases: [], naming: false, default_for: [], parent: "t-root", suppress: true },
+    ],
+    words: [...DATA.words,
+      ["t-pal", "天依蓝", "#66ccff"],
+      ["t-pal", "髪", "#f0e0c0", "", 2],       // suppress 槽位词
+      ["t-hidden", "noise", "#123456"],          // suppress 板里的普通词
+    ],
+  });
+  // 子树浏览：根 = 全子树并集（含 suppress 词与 suppress 板——作用域内不隐身）
+  eq(searchColorNames("t-root:").length, 3);
+  eq(searchColorNames("天依:").length, 2);              // 板的别名直接可达（token 扁平，不嵌套）
+  // suppress 词：全局裸名不可查、作用域可取
+  eq(parseColorName("髪"), null);
+  eq(parseColorName("t-pal:髪"), "#f0e0c0");
+  assert(!searchColorNames("髪").some((x) => x.name === "髪"), "suppress 词漏进全局联想");
+  // suppress 板：整板被动隐身、显式寻址照常、discovery 不出
+  assert(!searchColorNames("noise").some((x) => x.name === "noise"), "suppress 板的词漏进全局联想");
+  eq(parseColorName("t-hidden:noise"), "#123456");
+  assert(!searchColorNames("噪音").some((x) => x.category === "t-hidden"), "suppress 板漏进 discovery");
+  assert(searchColorNames("测试中层").some((x) => x.category === "t-mid"), "正常中层该可 discovery");
+  // 兄弟联想：全局命中 天依蓝 → 板友 髪 追加在候选尾
+  const hits = searchColorNames("天依蓝");
+  assert(hits.some((x) => x.name === "天依蓝") && hits.some((x) => x.name === "髪"), "兄弟联想没带出板友");
+  // 子树命名：suppress 词/板都不参与，nearest 只剩 天依蓝
+  eq(colorNameIn("t-root", 0x66, 0xcc, 0xff), "天依蓝");
+  eq(colorNameIn("t-root", 0x12, 0x34, 0x56), "天依蓝");   // noise(#123456) 被隐身，不许当选
+  _adoptColorWords(DATA);   // 还原，别污染其它测试
+});

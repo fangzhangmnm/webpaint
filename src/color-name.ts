@@ -23,8 +23,13 @@ import { reportError } from "./error-badge.ts";
 export interface ColorCategory {
   id: string; label: string; aliases: string[]; naming: boolean;
   default_for: string[]; parent?: string | null; multi_anchor?: boolean;
+  suppress?: boolean; kind?: string;
 }
-type WordRow = [string, string, string, string?, (0 | 1)?];   // [cat, name, hex, alias?, slang?]
+// [cat, name, hex, alias?, flags?]。flags 位域：1=slang（parse 照认/命名跳过）、
+// 2=suppress（被动检索面隐身：全局裸名 parse/联想/命名不出；`板:` 作用域寻址照常；
+// 全局命中同板非 suppress 词时板友追加候选尾——兄弟联想）。schema v2（2026-07-30 B 案）。
+type WordRow = [string, string, string, string?, number?];
+const F_SUPPRESS = 2;
 
 let _cats: ColorCategory[] = [];
 let _rows: WordRow[] = [];
@@ -124,14 +129,32 @@ export function categoryLabel(id: string): string {
   return _cats.find((c) => c.id === id)?.label ?? id;
 }
 
-// `category:` 前缀 token → 词行所属的叶子 id 集（id / 别名 / label 都认；父类 = 全部子叶）。
+// schema v2：任意深度树（≤3 级）——「任何节点 = 它的子树」。
+function subtreeIds(rootId: string): string[] {
+  const out = [rootId];
+  for (let i = 0; i < out.length; i++) {
+    for (const c of _cats) if (c.parent === out[i]) out.push(c.id);
+  }
+  return out;
+}
+// 被动隐身判定：自身或任一祖先 suppress（作用域寻址不走这条——显式 token 永远可达）。
+function catPassiveHidden(id: string): boolean {
+  const seen = new Set<string>();
+  let cur = _cats.find((c) => c.id === id);
+  while (cur && !seen.has(cur.id)) {
+    if (cur.suppress) return true;
+    seen.add(cur.id);
+    cur = cur.parent ? _cats.find((c) => c.id === cur!.parent) : undefined;
+  }
+  return false;
+}
+
+// `category:` 前缀 token → 子树 id 集（id / 别名 / label 都认；混合节点自身的词也在内）。
 function resolveCategoryToken(token: string): string[] | null {
   const t = norm(token);
   if (!t) return null;
   const hit = _cats.find((c) => norm(c.id) === t || norm(c.label) === t || c.aliases.some((a) => norm(a) === t));
-  if (!hit) return null;
-  const kids = _cats.filter((c) => c.parent === hit.id).map((c) => c.id);
-  return kids.length ? kids : [hit.id];
+  return hit ? subtreeIds(hit.id) : null;
 }
 
 // ---- 命名 ----
@@ -141,7 +164,9 @@ function namingTable(l: string): NamingTable | null {
   if (!_rows.length) return null;
   let t = _naming.get(l);
   if (!t) {
-    let rows = _rows.filter((r) => r[0] === l && !r[4]);
+    // 子树命名 + flags（slang/suppress）与被动隐身类的词都不参与（命名要出的是能见人的名）
+    const ids = new Set(subtreeIds(l).filter((id) => !catPassiveHidden(id)));
+    let rows = _rows.filter((r) => ids.has(r[0]) && !r[4]);
     if (rows.length === 0) rows = _rows.filter((r) => r[0] === "xkcd" && !r[4]);   // 未收录 culture 兜底
     if (rows.length === 0) return null;
     const labels = rows.map((r) => r[1]);
@@ -193,7 +218,8 @@ function parseIdx(): Map<string, string> {
       const nospace = k.replace(/[ :]/g, "");   // skyblue / tabblue / tab:blue→tabblue
       if (!idx.has(nospace)) idx.set(nospace, hex);
     };
-    for (const [, name, hex, alias] of _rows) {   // 表行序 = 优先级（universal → 小众），先到先得
+    for (const [cat, name, hex, alias, flags] of _rows) {   // 表行序 = 优先级，先到先得
+      if (((flags ?? 0) & F_SUPPRESS) || catPassiveHidden(cat)) continue;   // 被动面隐身
       put(name, hex);
       if (name.includes(":")) put(name.replace(":", " "), hex);   // "tab blue"（带空格变体）
       if (alias) put(alias, hex);                                  // かな读音 / 拼音
@@ -278,9 +304,10 @@ export function searchColorNames(query: string, limit = Infinity): ColorNameHit[
     }
   }
   // category discovery：查询模糊命中词库 id/label/别名 → 「label:」候选置顶（选中回填前缀）。
-  // 所有词库都可浏览（browsing ≠ naming——css/mpl 也在此可发现）。
+  // 所有词库都可浏览（browsing ≠ naming——css/mpl 也在此可发现）；suppress 的被动隐身。
   const catHits: ColorNameHit[] = [];
   for (const c of _cats) {
+    if (catPassiveHidden(c.id)) continue;
     if (bestTier(q, norm(c.id), norm(c.label), ...c.aliases.map(norm)) >= 0) {
       catHits.push({ name: `${c.label}:`, hex: "", category: c.id });
     }
@@ -288,7 +315,9 @@ export function searchColorNames(query: string, limit = Infinity): ColorNameHit[
   const qn = q.replace(/[ :]/g, "");
   const tiers: ColorNameHit[][] = [[], [], []];
   const seen = new Set<string>();
-  for (const [, name, hex, alias] of _rows) {
+  const anchorCats = new Set<string>();   // 命中词所在板 → 板内 suppress 词的兄弟联想锚
+  for (const [cat, name, hex, alias, flags] of _rows) {
+    if (((flags ?? 0) & F_SUPPRESS) || catPassiveHidden(cat)) continue;   // 被动面隐身
     const n = norm(name);
     const key = n + hex;
     if (seen.has(key)) continue;
@@ -299,14 +328,21 @@ export function searchColorNames(query: string, limit = Infinity): ColorNameHit[
       const t2 = matchTier(nn, qn);
       if (t2 >= 0 && (t < 0 || t2 < t)) t = t2;
     }
-    if (t >= 0) { seen.add(key); tiers[t].push({ name, hex }); }
+    if (t >= 0) { seen.add(key); tiers[t].push({ name, hex }); anchorCats.add(cat); }
+  }
+  // 兄弟联想：全局命中了某板的非 suppress 词 → 该板 suppress 的板友追加在候选尾
+  const buddies: ColorNameHit[] = [];
+  for (const [cat, name, hex, , flags] of _rows) {
+    if (((flags ?? 0) & F_SUPPRESS) && anchorCats.has(cat) && !catPassiveHidden(cat)) buddies.push({ name, hex });
   }
   const [pre, sub, fuz] = tiers;
-  if (!Number.isFinite(limit)) return catHits.concat(pre, sub, fuz);   // 无上限（默认）：档序即排序
-  // 有限 limit 的槽位分配：category 候选不占配额算——先扣；子串+子序列合计保底 ⌈limit/2⌉。
+  if (!Number.isFinite(limit)) return catHits.concat(pre, sub, fuz, buddies);   // 无上限（默认）：档序即排序
+  // 有限 limit 的槽位分配：category 候选不占配额算——先扣；子串+子序列合计保底 ⌈limit/2⌉；
+  // 兄弟联想只补剩余空位。
   const rest = Math.max(0, limit - catHits.length);
   const tail = sub.concat(fuz);
   const tailQuota = Math.min(tail.length, Math.ceil(rest / 2));
   const preTake = Math.min(pre.length, rest - tailQuota);
-  return catHits.concat(pre.slice(0, preTake), tail.slice(0, rest - preTake));
+  const main = catHits.concat(pre.slice(0, preTake), tail.slice(0, rest - preTake));
+  return main.concat(buddies.slice(0, Math.max(0, limit - main.length)));
 }
