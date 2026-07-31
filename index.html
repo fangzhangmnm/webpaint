@@ -53,7 +53,7 @@
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon-180.png" />
-    <link rel="stylesheet" href="./styles.css?v=0d08da31645a" />
+    <link rel="stylesheet" href="./styles.css?v=443080faf1db" />
     <!-- zip.js UMD bundle：自挂 window.zip。必须在 module bundle 之前。
          defer（v417）：原来是 parser-blocking 的，硬刷新时 SW 被绕过 → 直奔网络 → 网络一卡整个
          文档解析就停住（浏览器标签页转圈）。defer 后它与下面的 type=module bundle 同属延迟脚本、
@@ -651,6 +651,12 @@
           <!-- v0.7.2 算法配置扳手（user：不常用命令进⋯，算法 configuration 进扳手小三角）：
                弹出 #lassoAlgoCfgMenu，行按当前算法显隐 -->
           <button class="lasso-tool-btn lasso-tool-icon lasso-slot hidden" id="lassoAlgoCfgBtn" type="button" data-i18n-title="la.algoCfg"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#wrench"/></svg><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
+          <!-- v0.7.21 容差滑条外提（user：不折进扳手，值要一直看得见）：classic/similar 时显、lineart 藏；
+               值按当前算法路由 editorState.magicWand.threshold / similarThreshold（toolbar 侧接线） -->
+          <span class="lasso-tol-inline hidden" id="lassoTolWrap">
+            <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" data-i18n-aria="la.threshold" />
+            <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
+          </span>
           <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#constrain-ratio"/></svg></button>
           <!-- v0.5.12 行尾动作组：变换（选区工具）/ ⋯（低频操作收纳）/ 去选（高频，=fill 的 cancel）/ ✓（fill） -->
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
@@ -755,10 +761,12 @@
          slider/stepper 连按不关（手动 toggle + 外点关，同 lassoMagicExpandMenu）。全 RAM-only 除经典容差
          （容差沿用 editorState.magicWand.threshold，per-doc 持久化不变，只是 UI 搬家）。 -->
     <div class="lasso-popup hidden" id="lassoAlgoCfgMenu" role="menu" data-i18n-aria="la.algoCfg" style="width:max-content; min-width:0;">
-      <div class="algo-cfg-row algo-cfg-classic">
-        <span data-i18n="la.threshold">阈值</span>
-        <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" style="width:108px;" data-i18n-aria="la.threshold" />
-        <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
+      <!-- v0.7.21：容差滑条外提到 Row1（algo-cfg-classic 行退役）；扳手里换色差度量选择
+           （classic/similar 共用，统一默认 OKLab——user 2026-07-30 拍板；OKLab/RGB 是专名不进 i18n） -->
+      <div class="algo-cfg-row algo-cfg-colormetric">
+        <span data-i18n="la.metric">色差</span>
+        <button class="lasso-tool-btn" id="lassoMetricOklab" type="button" role="menuitemradio" aria-pressed="true">OKLab</button>
+        <button class="lasso-tool-btn" id="lassoMetricRgb" type="button" role="menuitemradio" aria-pressed="false">RGB</button>
       </div>
       <div class="algo-cfg-row algo-cfg-lineart">
         <span data-i18n="la.closeDist">闭合距离</span>
@@ -1419,6 +1427,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-1ab07234e4ea.mjs"></script>
+    <script type="module" src="./dist/webpaint-e72e773f25e2.mjs"></script>
   </body>
 </html>

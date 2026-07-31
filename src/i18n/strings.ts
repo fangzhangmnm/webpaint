@@ -470,6 +470,8 @@ export const S = {
   "la.bleedAuto":    { zh: "自动", en: "Auto", ja: "自動", tok: "nasin ilo" },
   "la.algoClassic":  { zh: "像素精确", en: "Pixel-perfect flood", ja: "ピクセル精確", tok: "nasin pi kule sama" },
   "la.lineartAlgo":  { zh: "线稿闭合", en: "Line-art closing", ja: "線画クロージング", tok: "nasin pi linja pini" },
+  "la.algoSimilar":  { zh: "全图同色", en: "Similar color (global)", ja: "全域同色", tok: "nasin pi kule sama lon ale" },
+  "la.metric":       { zh: "色差", en: "Color distance", ja: "色差", tok: "nasin pi ante kule" },
   "la.new":          { zh: "新建选区（替换当前）", en: "New selection (replace)", ja: "新規選択（置き換え）", tok: "sin (ma pini li weka)" }, 
   "la.union":        { zh: "添加到选区", en: "Add to selection", ja: "選択範囲に追加", tok: "namako" }, 
   "la.subtract":     { zh: "从选区减去", en: "Subtract from selection", ja: "選択範囲から削除", tok: "weka" }, 

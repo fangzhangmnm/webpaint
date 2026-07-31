@@ -334,6 +334,10 @@ body[data-tool="fill"] .board { cursor: crosshair; }
 .algo-cfg-row { display: flex; align-items: center; gap: 6px; }
 .algo-cfg-row.hidden { display: none; }
 .algo-cfg-row > span:first-child { color: var(--ink-soft); }
+/* v0.7.21 容差滑条外提到 Row1（user：值要一直可见）：内联小滑条 + 数值 */
+.lasso-tol-inline { display: inline-flex; align-items: center; gap: 6px; }
+.lasso-tol-inline.hidden { display: none; }
+.lasso-tol-inline input[type="range"] { width: 96px; }
 .lasso-popup-val { text-align: right; font-variant-numeric: tabular-nums; }
 .lasso-popup-row input[type="range"] { width: 100%; }
 

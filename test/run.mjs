@@ -20,6 +20,7 @@ import "./shape-brush.test.mjs";      // 形状笔引擎：恒压/taper覆写/�
 import "./perspective-frame.test.mjs"; // 透视 frame（ADR-0006）：两角定形/homography/chart ε 护栏/snap 方向
 import "./pixel-conic.test.mjs";       // 像素透视圆：Zingl 有理二次 Bézier conic（双向 Hausdorff 验证）
 import "./polygon-lasso.test.mjs";     // 多边形套索：整数扫描线栅格器 + 会话两级 abort
+import "./similar-select.test.mjs";    // v0.7.21 同色全图内核 + OKLab/RGB 颜色度量（color-dist）
 import "./iso-frame.test.mjs";         // isometric 透视模式：纯平行三轴/仿射度量/box
 import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";

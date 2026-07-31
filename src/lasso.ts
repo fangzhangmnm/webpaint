@@ -22,6 +22,8 @@
 
 import { Selection, rasterizePolygonGray8 } from "./selection.ts";
 import { LineartOracle } from "./lineart-oracle.ts";
+import { makeSeedDist } from "./color-dist.ts";
+import type { ColorMetric } from "./color-dist.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
@@ -55,11 +57,14 @@ type LassoState =
   | "floating";
 type SubTool = "freehand" | "rect" | "ellipse" | "polygon" | "magic";
 type SetOpMode = "new" | "union" | "subtract" | "intersect";
-export type MagicAlgorithm = "classic" | "lineart";
+export type MagicAlgorithm = "classic" | "lineart" | "similar";
 // 魔棒算法下拉的 SSoT（transform 采样 RESAMPLE_MODES 同款）：以后加算法（EDT-Dijkstra/AI）只改这里+引擎分叉
+// v0.7.21 similar=全图同色（user 2026-07-30：「魔术棒但不选 continuous」，批量改色用——
+//   选完直接走 fill 预览换色；容差独立持久化，度量默认 OKLab）
 export const MAGIC_ALGORITHMS: { id: MagicAlgorithm; labelKey: string }[] = [
   { id: "classic", labelKey: "la.algoClassic" },
   { id: "lineart", labelKey: "la.lineartAlgo" },
+  { id: "similar", labelKey: "la.algoSimilar" },
 ];
 
 export class LassoEngine {
@@ -68,6 +73,8 @@ export class LassoEngine {
   _setOpMode: SetOpMode;
   _constrainSquare: boolean;
   _magicThreshold: number;
+  _similarThreshold = 20;
+  _colorMetric: ColorMetric = "oklab";
   _magicAutoExpandPx: number;
   _magicAlgorithm: MagicAlgorithm = "classic";
   _lineartOracle = new LineartOracle();
@@ -132,12 +139,18 @@ export class LassoEngine {
   getSetOpMode() { return this._setOpMode; }
   setMagicThreshold(v: number) { this._magicThreshold = Math.max(0, Math.min(100, v)); }
   getMagicThreshold() { return this._magicThreshold; }
+  // v0.7.21 同色全图容差（与 classic 容差分开存：flood barrier 和全图纳入是两种手感，互调不打架）
+  setSimilarThreshold(v: number) { this._similarThreshold = Math.max(0, Math.min(100, v)); }
+  getSimilarThreshold() { return this._similarThreshold; }
+  // v0.7.21 颜色度量（classic/similar 共用；lineart 不吃——它按亮度二值化）。默认 OKLab（user 拍板）。
+  setColorMetric(m: ColorMetric) { this._colorMetric = m === "rgb" ? "rgb" : "oklab"; }
+  getColorMetric(): ColorMetric { return this._colorMetric; }
   setMagicAutoExpand(px: number) { this._magicAutoExpandPx = Math.max(0, Math.min(100, Math.round(px) || 0)); }
   getMagicAutoExpand() { return this._magicAutoExpandPx; }
   // 魔棒算法（v0.7 线稿填色）：classic=像素精确 flood；lineart=论文分区 oracle（断口自动闭合+填到线下）。
   //   交互完全同构，tap → Selection。v0.7.17 起 per-tool 持久化（editorState.lassoTool/fillTool.algo，
   //   toolbar._pushSelToolToEngine 灌入；油漆桶默认 lineart、选区默认 classic，user 拍板）。
-  setMagicAlgorithm(v: MagicAlgorithm) { this._magicAlgorithm = v === "lineart" ? "lineart" : "classic"; }
+  setMagicAlgorithm(v: MagicAlgorithm) { this._magicAlgorithm = v === "lineart" || v === "similar" ? v : "classic"; }
   getMagicAlgorithm(): MagicAlgorithm { return this._magicAlgorithm; }
   /** 线稿分区缓存是否已就绪（首次 tap 前 UI 可提示「分析线稿中…」） */
   lineartReady(sourceLayer: Layer | null): boolean {
@@ -386,10 +399,13 @@ export class LassoEngine {
     //   与 flood 完全同构：产原始选区，后续 auto-expand / setOp 合并共用同一条路。
     let sel: SelectionLike | null = this._magicAlgorithm === "lineart" && start
       ? this._lineartOracle.selectAt(this.doc, sourceLayer, start.x, start.y)
-      : floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold);
+      : this._magicAlgorithm === "similar"
+        ? similarSelectFrom(this.doc, start, sourceLayer, this._similarThreshold, this._colorMetric)
+        : floodSelectFrom(this.doc, start, sourceLayer, this._magicThreshold, this._colorMetric);
     // #31：可选 flood 后自动扩张（默认关）。在 setOp 合并**之前**做，語义 = 「这一下点出来的区域」本身变胖。
     // v0.7.8：auto-expand 收窄为 classic flood 的子管线 param——线稿分区自带墨线下扩语义，
     // 再叠形态学扩张是双重补偿（UI 侧线稿算法时也藏扩张钮）。
+    // v0.7.21：similar 也吃 auto-expand——全图同色选完扩 1px 可盖住 AA 白边再填（穷人版防 halo）。
     if (sel && this._magicAutoExpandPx > 0 && this._magicAlgorithm !== "lineart") {
       const m = sel.morphed(this._magicAutoExpandPx, this.doc.width, this.doc.height);
       if (m) { sel.dispose(); sel = m; }
@@ -543,6 +559,7 @@ export function floodSelectFrom(
   start: Point | null,
   sourceLayer: Layer | null,
   thresholdPct: number,
+  metric: ColorMetric = "rgb",   // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 editorState 的度量
 ): Selection | null {
   if (!start) return null;
   const docW = doc.width, docH = doc.height;
@@ -565,11 +582,14 @@ export function floodSelectFrom(
     const idx = ((sy - lbY) * lbW + (sx - lbX)) * 4;
     sr = layerData[idx]; sg = layerData[idx + 1]; sb = layerData[idx + 2]; sa = layerData[idx + 3];
   }
-  const tCh = thresholdPct * 2.55;
+  // v0.7.21：判据抽 color-dist.makeSeedDist（rgb=原 max 通道语义逐字等价：maxdiff/255 > pct/100
+  //   ⇔ maxdiff > pct*2.55；oklab=感知 ΔE，α 独立通道）。归一化距离直比 t/100。
+  const dist = makeSeedDist(metric, sr, sg, sb, sa);
+  const tFrac = thresholdPct / 100;
   const total = docW * docH;
 
-  // 「layer 外」的 barrier 算一次：透明 (0,0,0,0) 跟 tap 色的 max-diff
-  const outsideIsBarrier = Math.max(sr, sg, sb, sa) > tCh;
+  // 「layer 外」的 barrier 算一次：透明 (0,0,0,0) 跟 tap 色的距离
+  const outsideIsBarrier = dist(0, 0, 0, 0) > tFrac;
   // inline barrier 检查：返回 true = 是 barrier = flood 不能进
   const isBarrier = (p: number) => {
     const py = (p / docW) | 0;
@@ -578,11 +598,7 @@ export function floodSelectFrom(
       return outsideIsBarrier;
     }
     const i4 = ((py - lbY) * lbW + (px - lbX)) * 4;
-    const dr = Math.abs(layerData[i4]     - sr);
-    const dg = Math.abs(layerData[i4 + 1] - sg);
-    const db = Math.abs(layerData[i4 + 2] - sb);
-    const da = Math.abs(layerData[i4 + 3] - sa);
-    return Math.max(dr, dg, db, da) > tCh;
+    return dist(layerData[i4], layerData[i4 + 1], layerData[i4 + 2], layerData[i4 + 3]) > tFrac;
   };
 
   const combined = new Uint8Array(total);
@@ -613,4 +629,71 @@ export function floodSelectFrom(
     if (combined[(mny + y) * docW + (mnx + x)] === 1) g[y * tw + x] = 255;
   }
   return Selection.fromGray8Region(mnx, mny, tw, th, g);   // v0.4.6：flood 结果直转 gray8 tile，canvas 中转死
+}
+
+// ---- 同色全图内核（v0.7.21 第三算法模式，user 2026-07-30 拍板）----
+// 与 flood 同一判据（makeSeedDist）但**不要求连通**：tap 色的相似像素全 doc 入选。
+// 用途 = 批量改色：同色选完直接走 fill 预览换色（ADR-0004 fill=选区消费视图，零新管线）。
+// 语义与 floodSelectFrom 逐字对齐：迭代整 doc 尺寸、layer bbox 外当透明像素、出界 tap → null、
+// 产出恒二值 Selection（选区二值不变量，user 2026-07-29）。O(N) 单遍扫，无 prepare 缓存。
+export function similarSelectFrom(
+  doc: { width: number; height: number },
+  start: Point | null,
+  sourceLayer: Layer | null,
+  thresholdPct: number,
+  metric: ColorMetric = "rgb",
+): Selection | null {
+  if (!start) return null;
+  const docW = doc.width, docH = doc.height;
+  const sx = Math.floor(start.x);
+  const sy = Math.floor(start.y);
+  if (sx < 0 || sx >= docW || sy < 0 || sy >= docH) return null;
+
+  const lbX = sourceLayer?.bboxX ?? 0;
+  const lbY = sourceLayer?.bboxY ?? 0;
+  const lbW = sourceLayer?.bboxW ?? 0;
+  const lbH = sourceLayer?.bboxH ?? 0;
+  let layerData: Uint8ClampedArray | null = null;
+  if (sourceLayer && lbW > 0 && lbH > 0) {
+    layerData = sourceLayer.getImageData(lbX, lbY, lbW, lbH).data;   // tiles 直读（v0.6.39 同 flood）
+  }
+  // tap 点颜色（layer 外 → 透明）
+  let sr = 0, sg = 0, sb = 0, sa = 0;
+  if (layerData && sx >= lbX && sx < lbX + lbW && sy >= lbY && sy < lbY + lbH) {
+    const idx = ((sy - lbY) * lbW + (sx - lbX)) * 4;
+    sr = layerData[idx]; sg = layerData[idx + 1]; sb = layerData[idx + 2]; sa = layerData[idx + 3];
+  }
+  const dist = makeSeedDist(metric, sr, sg, sb, sa);
+  const tFrac = thresholdPct / 100;
+  // 「layer 外」判一次（外面全是同一个透明像素）；tap 点自身 dist=0 恒入选 → 结果非空
+  const outsideIn = !(dist(0, 0, 0, 0) > tFrac);
+
+  const mark = new Uint8Array(docW * docH);
+  let mnx = docW, mny = docH, mxx = -1, mxy = -1;
+  for (let y = 0; y < docH; y++) {
+    const rowIn = !!layerData && y >= lbY && y < lbY + lbH;
+    const rowBase = y * docW;
+    for (let x = 0; x < docW; x++) {
+      let inSel: boolean;
+      if (rowIn && x >= lbX && x < lbX + lbW) {
+        const i4 = ((y - lbY) * lbW + (x - lbX)) * 4;
+        inSel = !(dist(layerData![i4], layerData![i4 + 1], layerData![i4 + 2], layerData![i4 + 3]) > tFrac);
+      } else {
+        inSel = outsideIn;
+      }
+      if (inSel) {
+        mark[rowBase + x] = 1;
+        if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+        if (y < mny) mny = y; if (y > mxy) mxy = y;
+      }
+    }
+  }
+  if (mxx < 0) return null;
+
+  const tw = mxx - mnx + 1, th = mxy - mny + 1;
+  const g = new Uint8Array(tw * th);
+  for (let y = 0; y < th; y++) for (let x = 0; x < tw; x++) {
+    if (mark[(mny + y) * docW + (mnx + x)] === 1) g[y * tw + x] = 255;
+  }
+  return Selection.fromGray8Region(mnx, mny, tw, th, g);
 }

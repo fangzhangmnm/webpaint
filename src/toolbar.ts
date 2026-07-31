@@ -232,8 +232,12 @@ export function updateLassoToolbar() {
   if (!magicOn) cfgMenu?.classList.add("hidden");
   if (cfgMenu) {
     const lineartOn = input.lasso.getMagicAlgorithm() === "lineart";
-    for (const el of cfgMenu.querySelectorAll<HTMLElement>(".algo-cfg-classic")) el.classList.toggle("hidden", lineartOn);
+    // v0.7.21：algo-cfg-classic 行退役（容差外提 Row1）；色差度量行 classic/similar 显（lineart 按亮度二值化不吃）
+    for (const el of cfgMenu.querySelectorAll<HTMLElement>(".algo-cfg-colormetric")) el.classList.toggle("hidden", lineartOn);
     for (const el of cfgMenu.querySelectorAll<HTMLElement>(".algo-cfg-lineart")) el.classList.toggle("hidden", !lineartOn);
+    const metric = editorState.magicWand.metric === "rgb" ? "rgb" : "oklab";
+    document.getElementById("lassoMetricOklab")?.setAttribute("aria-pressed", metric === "oklab" ? "true" : "false");
+    document.getElementById("lassoMetricRgb")?.setAttribute("aria-pressed", metric === "rgb" ? "true" : "false");
     const dv = document.getElementById("lassoDmaxVal");
     if (dv) dv.textContent = String(input.lasso.getLineartCloseDist());
     const iv = document.getElementById("lassoInkThresholdVal");
@@ -250,8 +254,22 @@ export function updateLassoToolbar() {
     document.getElementById("lassoLineartDebugBtn")?.setAttribute(
       "aria-pressed", input.lasso.getLineartDebugView() ? "true" : "false");
   }
+  // v0.7.21 容差滑条外提（user：不折进扳手，值一直可见）：classic/similar 时显，值按当前算法路由
+  //   （classic→magicWand.threshold / similar→magicWand.similarThreshold；lineart 无容差概念 → 藏）
+  const tolWrap = document.getElementById("lassoTolWrap");
+  if (tolWrap) {
+    const algoNow = input.lasso.getMagicAlgorithm();
+    const showTol = magicOn && algoNow !== "lineart";
+    tolWrap.classList.toggle("hidden", !showTol);
+    if (showTol) {
+      const v = algoNow === "similar" ? editorState.magicWand.similarThreshold : editorState.magicWand.threshold;
+      if (lassoThresholdInput.value !== String(v)) lassoThresholdInput.value = String(v);
+      lassoThresholdVal.textContent = String(v);
+    }
+  }
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
   // v0.7.8：线稿算法时藏（auto-expand 是 classic flood 专属 param，引擎侧同步不吃）
+  // v0.7.21：similar 也给扩张（全图同色 + 扩 1px = 盖 AA 白边再填）
   const expandApplies = magicOn && input.lasso.getMagicAlgorithm() !== "lineart";
   lassoExpandToggle.classList.toggle("hidden", !expandApplies);
   lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
@@ -823,18 +841,37 @@ export function initToolbar(ctx: AppContext) {
   //   UI 改 → 写 editorState + 灌引擎；换文档 → syncMagicThresholdUI 回灌（wp:applyEditorState）。
   // v0.7.2：容差滑条从两份 ⋯ 菜单搬进扳手弹出（#lassoAlgoCfgMenu，选区/填充共用一份 DOM）
   //   ——fillThreshold 镜像退役。持久化不变（editorState.magicWand.threshold，per-doc）。
+  // v0.7.21：滑条外提 Row1 且**按当前算法路由**（classic↔threshold / similar↔similarThreshold，两容差
+  //   分开存互不打架）；引擎两值+度量恒全量灌（换文档/换算法都不会漏）。显隐/换算法的值回灌在
+  //   updateLassoToolbar（lassoTolWrap 块）派生。
   const syncMagicThresholdUI = () => {
-    const v = editorState.magicWand.threshold;
+    input.lasso.setMagicThreshold(editorState.magicWand.threshold);
+    input.lasso.setSimilarThreshold(editorState.magicWand.similarThreshold);
+    input.lasso.setColorMetric(editorState.magicWand.metric === "rgb" ? "rgb" : "oklab");
+    const sim = input.lasso.getMagicAlgorithm() === "similar";
+    const v = sim ? editorState.magicWand.similarThreshold : editorState.magicWand.threshold;
     lassoThresholdInput.value = String(v);
     lassoThresholdVal.textContent = String(v);
-    input.lasso.setMagicThreshold(v);
   };
   lassoThresholdInput.addEventListener("input", () => {
     const v = Math.max(0, Math.min(100, parseInt(lassoThresholdInput.value, 10) || 0));
-    editorState.magicWand.threshold = v;
-    input.lasso.setMagicThreshold(v);
+    if (input.lasso.getMagicAlgorithm() === "similar") {
+      editorState.magicWand.similarThreshold = v;
+      input.lasso.setSimilarThreshold(v);
+    } else {
+      editorState.magicWand.threshold = v;
+      input.lasso.setMagicThreshold(v);
+    }
     lassoThresholdVal.textContent = String(v);
   });
+  // v0.7.21 色差度量（扳手行，classic/similar 共用；统一默认 OKLab——user 2026-07-30 拍板）
+  const setColorMetricUI = (m: "oklab" | "rgb") => {
+    editorState.magicWand.metric = m;
+    input.lasso.setColorMetric(m);
+    updateLassoToolbar();   // aria-pressed 派生（菜单不关：toggle 类连按友好，同蚂蚁线）
+  };
+  document.getElementById("lassoMetricOklab")?.addEventListener("click", () => setColorMetricUI("oklab"));
+  document.getElementById("lassoMetricRgb")?.addEventListener("click", () => setColorMetricUI("rgb"));
   // #31 魔棒 flood 后自动扩张（v0.5.12 内联化：aria-pressed toggle 钮 + px 输入，⚙/popup 退役）。
   //   引擎只认一个数：effective px = toggle 开 ? px : 0。UI 改 → 写 editorState + 灌引擎；换文档回灌。
   lassoExpandToggle = byId("lassoExpandToggle");

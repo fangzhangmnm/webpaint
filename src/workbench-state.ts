@@ -145,7 +145,9 @@ function freshGroups() {
     // #31 自动扩张 + v0.5.11 阈值；v0.7.17（user 2026-07-30 授权持久化）：线稿闭合算法的
     //   全部 knob 跟文件走——closeDist=闭合距离(px)/ink=墨线判定(%)/minRegion=碎区下限(px)/
     //   tipSens=端点灵敏度(0..100)/bleed=蔓延距离(-1=自动填到中线,0=像素画不碰真墨水)
-    magicWand:     { threshold: 20, expand: false, expandPx: 1,
+    // v0.7.21（user 2026-07-30 拍板）：similarThreshold=同色全图容差（与 classic 分开存）；
+    //   metric=颜色度量 "oklab"|"rgb"（classic/similar 共用，统一默认 OKLab；lineart 不吃）
+    magicWand:     { threshold: 20, expand: false, expandPx: 1, similarThreshold: 20, metric: "oklab" as string,
                      lineartCloseDist: 64, lineartInk: 50, lineartMinRegion: 32, lineartTipSens: 25, lineartBleed: -1 },
     // v0.6.19 蚂蚁线（user 拍板+持久化同意 2026-07-28）：fill 模式下可关（默认开）；
     //   toggle 只存在于 fill，非 fill 恒显示（ADR-0004 修订记录）。
@@ -286,6 +288,9 @@ export const editorState = {
     get threshold(): number { return S.g.magicWand.threshold; }, set threshold(v: number) { S.g.magicWand.threshold = v; },
     get expand(): boolean { return S.g.magicWand.expand; }, set expand(v: boolean) { S.g.magicWand.expand = v; },
     get expandPx(): number { return S.g.magicWand.expandPx; }, set expandPx(v: number) { S.g.magicWand.expandPx = v; },
+    // v0.7.21：同色全图容差 + 颜色度量（"oklab"|"rgb"，classic/similar 共用）
+    get similarThreshold(): number { return S.g.magicWand.similarThreshold; }, set similarThreshold(v: number) { S.g.magicWand.similarThreshold = v; },
+    get metric(): string { return S.g.magicWand.metric; }, set metric(v: string) { S.g.magicWand.metric = v; },
     get lineartCloseDist(): number { return S.g.magicWand.lineartCloseDist; }, set lineartCloseDist(v: number) { S.g.magicWand.lineartCloseDist = v; },
     get lineartInk(): number { return S.g.magicWand.lineartInk; }, set lineartInk(v: number) { S.g.magicWand.lineartInk = v; },
     get lineartMinRegion(): number { return S.g.magicWand.lineartMinRegion; }, set lineartMinRegion(v: number) { S.g.magicWand.lineartMinRegion = v; },
