@@ -65,8 +65,23 @@ export interface LineartPartition {
   bridges: BridgeDebug[];
   /** 每像素「陷进真墨水多深」：0=非墨水（背景或虚拟闭合桥）；≥1=原始二值墨水像素到最近
    *  背景的欧氏距离（ceil，封顶 255）。蔓延过滤基底（v0.7.17 像素画模式）：按**原始**墨水算
-   *  （非腐蚀后）——粗线腐蚀掉的表皮仍是可见墨水，蔓延小时不该被填。 */
-  inkDepth: Uint8Array;
+   *  （非腐蚀后）——粗线腐蚀掉的表皮仍是可见墨水，蔓延小时不该被填。
+   *  v0.7.19 懒构建（user：自动档吃灰内存省下来）：build 不算（null），第一次 bleed≥0 查询时
+   *  由 oracle 用 attachInkDepth 补算挂上（2K 图省 4MB 常驻）。 */
+  inkDepth: Uint8Array | null;
+}
+
+/** 懒补 inkDepth（v0.7.19）：Ib0 = 原始二值墨水（oracle 按同一墨线判定重新 binarize）。 */
+export function attachInkDepth(part: LineartPartition, Ib0: Uint8Array): void {
+  const { w, h } = part;
+  const bg = new Uint8Array(w * h);
+  for (let i = 0; i < bg.length; i++) bg[i] = Ib0[i] ? 0 : 1;
+  const distSq = edtSquared(bg, w, h);
+  const depth = new Uint8Array(w * h);
+  for (let i = 0; i < depth.length; i++) {
+    if (Ib0[i]) depth[i] = Math.min(255, Math.ceil(Math.sqrt(distSq[i])));
+  }
+  part.inkDepth = depth;
 }
 
 /** RGBA（straight alpha）→ 二值笔画图：合成到白底的亮度 ≤ θ 判为笔画。透明 = 白 = 背景。 */
@@ -179,15 +194,11 @@ export function buildPartitionFromBinary(
   let hasStroke = false;
   for (let i = 0; i < Ib.length; i++) if (Ib[i]) { hasStroke = true; break; }
 
-  const inkDepth = new Uint8Array(w * h);
   if (hasStroke) {
     // EDT（feature=背景）→ 半宽估计 → 必要时腐蚀细化
     const bg = new Uint8Array(w * h);
     for (let i = 0; i < bg.length; i++) bg[i] = Ib[i] ? 0 : 1;
     const distSq = edtSquared(bg, w, h);
-    for (let i = 0; i < Ib.length; i++) {
-      if (Ib[i]) inkDepth[i] = Math.min(255, Math.ceil(Math.sqrt(distSq[i])));
-    }
     halfW = strokeHalfWidthMedian(Ib, w, h, distSq);
     if (params.erode && halfW > 3) {
       // 目标：细化到 2-3px 半宽；腐蚀半径封顶防细线整段蒸发（断口交给闭合步骤修，论文 §3）
@@ -210,7 +221,7 @@ export function buildPartitionFromBinary(
   return {
     w, h, labels, regionCount: count, bboxes: Int32Array.from(bboxes), strokeHalfWidth: halfW,
     keypoints: kps, bridges: closed ? closed.bridges : [],
-    inkDepth,
+    inkDepth: null,   // 懒构建：bleed≥0 首查时 attachInkDepth（自动档不花这块内存）
   };
 }
 
@@ -236,12 +247,17 @@ export function regionMaskAt(
   const bw = part.bboxes[b + 2] - x0 + 1, bh = part.bboxes[b + 3] - y0 + 1;
   const mask = new Uint8Array(bw * bh);
   const capped = bleedPx >= 0 ? Math.min(255, bleedPx) : -1;
+  if (capped >= 0 && !part.inkDepth) {
+    // 调用方 bug（oracle 该先 attachInkDepth）——响亮抛，别静默按自动放行
+    throw new Error("regionMaskAt: bleed≥0 但 inkDepth 未构建（先 attachInkDepth）");
+  }
+  const inkDepth = part.inkDepth;
   for (let ry = 0; ry < bh; ry++) {
     const row = (y0 + ry) * part.w;
     for (let rx = 0; rx < bw; rx++) {
       const p = row + x0 + rx;
       if (part.labels[p] !== lab) continue;
-      if (capped >= 0 && part.inkDepth[p] > capped) continue;
+      if (capped >= 0 && inkDepth![p] > capped) continue;
       mask[ry * bw + rx] = 255;
     }
   }

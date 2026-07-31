@@ -7,7 +7,7 @@ const { edtSquared } = await import("../src/lineart/edt.ts");
 const { traceBorderCycles, keypointsFromBinary } = await import("../src/lineart/border.ts");
 const { digitizeSpline, transitionCount, areaGuardOk } = await import("../src/lineart/closing.ts");
 const {
-  binarizeLuma, buildPartitionFromBinary, regionMaskAt, DEFAULT_LINEART_PARAMS,
+  binarizeLuma, buildPartitionFromBinary, regionMaskAt, attachInkDepth, DEFAULT_LINEART_PARAMS,
 } = await import("../src/lineart/partition.ts");
 
 // ---- 合成图形 helpers ----
@@ -224,6 +224,12 @@ describe("lineart · 线下 label 瓜分与 mask 查询", () => {
     const Ib = blank(w, h);
     fillRect(Ib, w, 0, 14, 31, 17);
     const part = buildPartitionFromBinary(Ib, w, h, noClose);
+    // v0.7.19 懒构建：build 不带墨深；不 attach 就 bleed 查询 = 响亮抛（不静默按自动放行）
+    eq(part.inkDepth, null, "build 后 inkDepth 为 null（自动档不花这块内存）");
+    let threw = false;
+    try { regionMaskAt(part, 16, 5, 0); } catch { threw = true; }
+    eq(threw, true, "未 attach 就 bleed 查询应抛");
+    attachInkDepth(part, Ib);
     const rm0 = regionMaskAt(part, 16, 5, 0);
     let n0 = 0, inkHit = 0;
     for (let ry = 0; ry < rm0.h; ry++) for (let rx = 0; rx < rm0.w; rx++) {
@@ -241,6 +247,7 @@ describe("lineart · 线下 label 瓜分与 mask 查询", () => {
     const w2 = 64, h2 = 64;
     const Ring = ring(w2, h2, 32, 32, 20, 3, 0, 3 / 20);
     const part2 = buildPartitionFromBinary(Ring, w2, h2);
+    attachInkDepth(part2, Ring);
     const inner = labelAt(part2, 32, 32);
     const rmIn = regionMaskAt(part2, 32, 32, 0);
     let bridgeIn = 0, ringHit = 0;
@@ -248,7 +255,7 @@ describe("lineart · 线下 label 瓜分与 mask 查询", () => {
       if (rmIn.mask[ry * rmIn.w + rx] !== 255) continue;
       const p = (rmIn.y + ry) * w2 + (rmIn.x + rx);
       if (Ring[p]) ringHit++;                                    // 真墨水
-      else if (part2.labels[p] === inner && part2.inkDepth[p] === 0
+      else if (part2.labels[p] === inner && part2.inkDepth[p] === 0   // attach 后非 null
         && Math.abs((p % w2) - 32 - 20) <= 3 && Math.abs(((p / w2) | 0) - 32) <= 4) bridgeIn++; // 断口带内的非墨水像素
     }
     eq(ringHit, 0, "圆环真墨水零入选");

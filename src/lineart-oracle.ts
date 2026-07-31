@@ -7,7 +7,7 @@
 //   query（贱）：tap → label 查表 → tight-bbox mask → Selection。
 // 该文件不懂论文数学（全在 src/lineart/），也不懂指针/UI；供 LassoEngine 调用。
 import {
-  buildLineartPartition, regionMaskAt, DEFAULT_LINEART_PARAMS,
+  buildLineartPartition, regionMaskAt, attachInkDepth, binarizeLuma, DEFAULT_LINEART_PARAMS,
 } from "./lineart/partition.ts";
 import type { LineartPartition, LineartParams } from "./lineart/partition.ts";
 import { Selection } from "./selection.ts";
@@ -32,6 +32,14 @@ export class LineartOracle {
     x: number, y: number,
   ): Selection | null {
     const part = this._ensurePartition(doc, sourceLayer);
+    // v0.7.19 懒补墨深：自动档（bleed<0，默认）不算不存（2K 省 4MB 常驻）；
+    //   首次拨到显式档才重读像素+一遍 EDT 挂上（同一缓存分区只补一次）。
+    if (this._bleed >= 0 && !part.inkDepth) {
+      const rgba: Uint8ClampedArray = sourceLayer
+        ? sourceLayer.getImageData(0, 0, doc.width, doc.height).data
+        : new Uint8ClampedArray(doc.width * doc.height * 4);
+      attachInkDepth(part, binarizeLuma(rgba, doc.width, doc.height, this._params.binarizeThreshold));
+    }
     const rm = regionMaskAt(part, x, y, this._bleed);
     if (!rm) return null;
     return Selection.fromGray8Region(rm.x, rm.y, rm.w, rm.h, rm.mask);

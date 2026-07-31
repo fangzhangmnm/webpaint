@@ -131,10 +131,13 @@ describe("lineart-oracle · tap→Selection + contentRev 缓存", () => {
     o.setBleed(0);
     eq(o.isReady(doc, L), true, "拨蔓延不丢缓存");
     const sel0 = o.selectAt(doc, L, 32, 32);
-    eq(L.calls, 1, "不重建（query-time）");
+    eq(L.calls, 2, "分区未重建，但懒补墨深多读一次像素（v0.7.19）");
+    eq(o.isReady(doc, L), true, "仍是同一份缓存分区");
     const n0 = count255(sel0);
     sel0.dispose();
     assert(n0 < nAuto, `bleed=0 选区应更小（${n0} < ${nAuto}）`);
+    o.selectAt(doc, L, 2, 2).dispose();
+    eq(L.calls, 2, "墨深已挂缓存，后续 bleed 查询零读");
     eq(o.getBleed(), 0, "读回");
     o.setBleed(-5);
     eq(o.getBleed(), -1, "clamp 下限 -1（自动）");
