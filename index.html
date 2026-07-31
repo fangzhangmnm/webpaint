@@ -661,8 +661,9 @@
                值按当前算法路由 editorState.magicWand.threshold / similarThreshold（toolbar 侧接线）。
                v0.7.22：本体 = ramp-slider 分段模式（JS 挂载，原生 range 退役——线性低端太粗且 iPad 无 shift 细调） -->
           <span class="lasso-tol-inline hidden" id="lassoTolWrap"></span>
-          <!-- （v0.7.26：选区笔变体/笔径控件退役——配置全归笔架 rack key "selPen"，
-               二次点 lasso/fill 工具钮开笔架，粗细走左栏 dial） -->
+          <!-- v0.7.28 选区笔笔架旁挂钮（滤镜笔 #filterBrushOpenRack 同款）：pen 子模式才显（context-aware）；
+               粗细走左栏 dial（v0.7.26 起配置全归笔架 rack key "selPen"） -->
+          <button class="lasso-tool-btn lasso-tool-icon hidden" id="selPenRackBtn" type="button" data-i18n-title="rack.sheet"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#brush-rack"/></svg></button>
           <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#constrain-ratio"/></svg></button>
           <!-- v0.5.12 行尾动作组：变换（选区工具）/ ⋯（低频操作收纳）/ 去选（高频，=fill 的 cancel）/ ✓（fill） -->
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
@@ -1444,6 +1445,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-534d592572a1.mjs"></script>
+    <script type="module" src="./dist/webpaint-05d5c875aec2.mjs"></script>
   </body>
 </html>

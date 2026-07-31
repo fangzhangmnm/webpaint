@@ -9,7 +9,7 @@
 // undo：selection-entry 走 ops.selection（事务型 swap）、fill/clear 走 ops.pixels（事务型 swap）。
 
 import { els } from "./els.ts";
-import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
+import { PANELS, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
 import { Selection } from "./selection.ts";
 import { MAGIC_ALGORITHMS } from "./lasso.ts";
 import { makeRampSlider } from "./ui/ramp-slider.ts";
@@ -230,7 +230,12 @@ export function updateLassoToolbar() {
   }
   // v0.7.26 选区笔走笔架：pen 子工具时放行左栏 size/opacity dial（写的是 toolStates.selPen——
   //   lasso/fill 的 rack key 已映射；晚于 updateToolUI 的赋值 → 本行赢）
-  dialReactive.canDraw = editMode.canDraw() || (selToolActive && sub === "pen");
+  const penOn = selToolActive && sub === "pen";
+  dialReactive.canDraw = editMode.canDraw() || penOn;
+  // v0.7.28 旁挂笔架钮（滤镜笔同款）：pen 子模式才显；切走子工具/工具时若选区笔笔架开着 → 收
+  //   （user bug 报告：切其他子工具笔架没隐藏）
+  document.getElementById("selPenRackBtn")?.classList.toggle("hidden", !penOn);
+  if (!penOn && getCurrentExclusive() === PANELS.RACK_SEL_PEN) closeExclusive();
   // v0.7.2 算法配置扳手：magic 时显；弹出行按当前算法显隐 + 值同步（关掉时收弹出）
   const cfgBtn = document.getElementById("lassoAlgoCfgBtn");
   const cfgMenu = document.getElementById("lassoAlgoCfgMenu");
@@ -681,10 +686,13 @@ export function initToolbar(ctx: AppContext) {
   lassoSubMenuBtns = [...lassoSubMenu.querySelectorAll<HTMLElement>("[data-lasso-sub]")];
   wireSlotMenu(lassoSubSlot, lassoSubMenu, (b) => {
     const subName = b.dataset.lassoSub as Parameters<typeof input.lasso.setSubTool>[0];
-    // v0.7.27（user）：选区笔已是当前子工具再点一次 = 开笔架（形状笔 v0.6.25「已选中再点开变体」同款语义）
-    if (subName === "pen" && input.lasso.getSubTool() === "pen") { openExclusive(PANELS.RACK_SEL_PEN); return; }
     input.lasso.setSubTool(subName);
     _selToolRec().sub = subName;   // 写当前工具自己的持久化记录
+  });
+  // v0.7.28（user：「已选再点」别扭回滚）：选区笔笔架入口 = 旁挂笔架图标钮（滤镜笔
+  //   #filterBrushOpenRack 同款），pen 子模式才显示（context-aware，显隐在 updateLassoToolbar）
+  document.getElementById("selPenRackBtn")?.addEventListener("click", () => {
+    openExclusive(PANELS.RACK_SEL_PEN);
   });
   // 布尔组槽（v0.5.17 user：改回下拉，横排纯图标）
   lassoSetOpSlot = byId("lassoSetOpSlot");
@@ -1141,6 +1149,9 @@ export function initToolbar(ctx: AppContext) {
     b.addEventListener("click", () => {
       const tool = b.dataset.tool!;   // .tool[data-tool] 选择器保证存在
       if (editMode.current() === tool) {
+        // v0.7.28：lasso/fill 二次点不开笔架（context-unaware 别扭，user 回滚）——选区笔笔架
+        //   走 pen 子模式旁挂的 #selPenRackBtn；映射保留在 RACK_PANEL_BY_TOOL 只为 panel 注册。
+        if (tool === "lasso" || tool === "fill") return;
         const rackId = RACK_PANEL_BY_TOOL[tool];
         if (rackId) openExclusive(rackId);
         return;
