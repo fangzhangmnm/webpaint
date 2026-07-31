@@ -541,12 +541,12 @@
         <span class="brush-slider-label" data-i18n="bs.name">名字</span>
         <input id="newDocName" type="text" class="generic-sheet-input" data-i18n-ph="nd.untitled" />
       </label>
-      <!-- #21 终版（v0.5.10，user 拍板）：全部预设进**一个**下拉框（三 optgroup + 自定义）。
-           删 A4（拍板：没人用 A4 打印画）/删 4096²；512² 归绘画组；打印组=每比例 basket 一个代表，
-           全 300dpi 竖版（3:2→6寸=用户打印机、4:3→8寸、√2族→明信片）。纯文本 option，无 SVG 需求。
+      <!-- #21 终版（v0.5.10）：全部预设进**一个**下拉框（三 optgroup + 自定义）。纯文本 option，无 SVG 需求。
+           收窄的出处（2026-07-31 回查人类语料核过，分级见 canvas-templates.json 的 note）：
+           删 A4 / 删 4096² / 每比例 basket 一个代表 = user 原话；「全 300dpi 竖版」查无原话，是 AI 提案细节。
            v0.7.32：option 列表**不再手写在这里**——它曾是裁切模板表之外的第二份表，两份各自演化
            （往这里加的尺寸裁切看不到，user 2026-07-31 抓到）。现在 SSoT = 根目录 canvas-templates.json，
-           由 canvas-templates.ts 的 fillTemplateSelect() 投影进来（上面那条拍板落在 json 的 surfaces 字段）。 -->
+           由 canvas-templates.ts 的 fillTemplateSelect() 投影进来（上面那轮收窄落在 json 的 surfaces 字段）。 -->
       <div class="new-doc-preset-section">
         <label class="brush-slider-row" style="grid-template-columns: 80px 1fr;">
           <span class="brush-slider-label" data-i18n="nd.size">尺寸</span>
@@ -1427,6 +1427,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-12c09d2b0326.mjs"></script>
+    <script type="module" src="./dist/webpaint-f6235a02a980.mjs"></script>
   </body>
 </html>

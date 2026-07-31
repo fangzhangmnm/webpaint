@@ -80,14 +80,17 @@ test("一份表喂两个面：默认（无 surfaces）的模板新建和裁切�
   }
 });
 
-test("新建面保留 #21 拍板：没有 A4、没有 4096²、打印只给竖版", () => {
+test("新建面保持 #21 收窄后的形状：没有 A4、没有 4096²、打印只给竖版", () => {
   const inNew = templatesFor("new");
   const ids = new Set(inNew.map((tp) => tp.id));
+  // A4 / 4096² 是 user 原话砍的（见 canvas-templates.json 的出处分级），这两条别自作主张加回来。
   for (const id of ["print-a4-300", "print-a4l-300", "print-a5-300", "print-a5l-300", "screen-4096sq"]) {
-    assert(!ids.has(id), `新建面不该有 ${id}（user #21 拍板删掉的）`);
+    assert(!ids.has(id), `新建面不该有 ${id}（user 原话砍掉的）`);
   }
+  // 「只给竖版」查无 user 原话，是当年 AI 提案的细节——钉在这里只为防**无意**漂移，
+  // 不是 user 拍板；真要给新建面加横版打印模板，不必回去问，改这条断言即可。
   for (const tp of inNew) {
-    if (tp.kind === "print") assert(tp.h > tp.w, `新建面的打印模板应为竖版: ${tp.id}`);
+    if (tp.kind === "print") assert(tp.h > tp.w, `新建面的打印模板目前约定为竖版: ${tp.id}`);
   }
 });
 
