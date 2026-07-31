@@ -122,18 +122,20 @@ test("schema v2：任意深度树（子树语义）+ suppress（被动隐身/作
     categories: [...DATA.categories,
       { id: "t-root", label: "测试合集", aliases: [], naming: false, default_for: [] },
       { id: "t-mid", label: "测试中层", aliases: [], naming: false, default_for: [], parent: "t-root" },
-      { id: "t-pal", label: "天依板", aliases: ["天依"], naming: false, default_for: [], parent: "t-mid" },
+      { id: "t-pal", label: "测试板", aliases: ["测试板"], naming: false, default_for: [], parent: "t-mid" },
       { id: "t-hidden", label: "噪音板", aliases: [], naming: false, default_for: [], parent: "t-root", suppress: true },
     ],
+    // 合成词的名字得是真词库里**没有**的：同名时全局命中的是真词条，兄弟联想带出的是
+    // 真词条的板友，这里的断言就断了。2026-07-31 上游 chara/vsinger 收了「天依蓝」正是这么撞的。
     words: [...DATA.words,
-      ["t-pal", "天依蓝", "#66ccff"],
+      ["t-pal", "测试蓝", "#66ccff"],
       ["t-pal", "髪", "#f0e0c0", "", 2],       // suppress 槽位词
       ["t-hidden", "noise", "#123456"],          // suppress 板里的普通词
     ],
   });
   // 子树浏览：根 = 全子树并集（含 suppress 词与 suppress 板——作用域内不隐身）
   eq(searchColorNames("t-root:").length, 3);
-  eq(searchColorNames("天依:").length, 2);              // 板的别名直接可达（token 扁平，不嵌套）
+  eq(searchColorNames("测试板:").length, 2);            // 板的别名直接可达（token 扁平，不嵌套）
   // suppress 词：全局裸名不可查、作用域可取
   eq(parseColorName("髪"), null);
   eq(parseColorName("t-pal:髪"), "#f0e0c0");
@@ -143,11 +145,11 @@ test("schema v2：任意深度树（子树语义）+ suppress（被动隐身/作
   eq(parseColorName("t-hidden:noise"), "#123456");
   assert(!searchColorNames("噪音").some((x) => x.category === "t-hidden"), "suppress 板漏进 discovery");
   assert(searchColorNames("测试中层").some((x) => x.category === "t-mid"), "正常中层该可 discovery");
-  // 兄弟联想：全局命中 天依蓝 → 板友 髪 追加在候选尾
-  const hits = searchColorNames("天依蓝");
-  assert(hits.some((x) => x.name === "天依蓝") && hits.some((x) => x.name === "髪"), "兄弟联想没带出板友");
-  // 子树命名：suppress 词/板都不参与，nearest 只剩 天依蓝
-  eq(colorNameIn("t-root", 0x66, 0xcc, 0xff), "天依蓝");
-  eq(colorNameIn("t-root", 0x12, 0x34, 0x56), "天依蓝");   // noise(#123456) 被隐身，不许当选
+  // 兄弟联想：全局命中 测试蓝 → 板友 髪 追加在候选尾
+  const hits = searchColorNames("测试蓝");
+  assert(hits.some((x) => x.name === "测试蓝") && hits.some((x) => x.name === "髪"), "兄弟联想没带出板友");
+  // 子树命名：suppress 词/板都不参与，nearest 只剩 测试蓝
+  eq(colorNameIn("t-root", 0x66, 0xcc, 0xff), "测试蓝");
+  eq(colorNameIn("t-root", 0x12, 0x34, 0x56), "测试蓝");   // noise(#123456) 被隐身，不许当选
   _adoptColorWords(DATA);   // 还原，别污染其它测试
 });
