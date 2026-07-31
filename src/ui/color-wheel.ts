@@ -161,10 +161,15 @@ export const ColorWheel = defineComponent({
     function onHexBlur(e: Event) {
       (e.target as HTMLInputElement).value = hexText.value;   // :value 绑定不会自己拉回未 commit 的 DOM 值
     }
+    // 浏览器的双击「选词」把 `#` 当标点排除在外，只选中六位。这框整串替换才是常用意图
+    // （还吃色名："藏青"），所以双击 = 全选。只接管双击，单击定位光标照旧。
+    function onHexDblClick(e: Event) {
+      (e.target as HTMLInputElement).select();
+    }
 
     // i18n：t() 在 setup 调（key 受 tsc 检查），模板只引 L.*（§5a 纪律）。
     const L = { svPad: t("cw.svPad"), hue: t("cw.hue") };
-    return { pad, hueEl, hueDeg, hsv, hex, hexText, hexInput, onHueKey, onHexKey, onHexBlur, L };
+    return { pad, hueEl, hueDeg, hsv, hex, hexText, hexInput, onHueKey, onHexKey, onHexBlur, onHexDblClick, L };
   },
   // 多根 = fragment：挂进 .float-panel-body 后三个节点成为它的直接 flex 子节点，
   // DOM 结构与原 index.html 一字不差（样式全 class-based，照旧生效）。
@@ -177,7 +182,8 @@ export const ColorWheel = defineComponent({
     </div>
     <div class="picker-row">
       <span class="picker-preview" :style="{ background: hex }"></span>
-      <input ref="hexInput" type="text" maxlength="24" :value="hexText" @keydown="onHexKey" @blur="onHexBlur" aria-label="HEX" />
+      <input ref="hexInput" type="text" maxlength="24" :value="hexText" @keydown="onHexKey" @blur="onHexBlur"
+        @dblclick="onHexDblClick" aria-label="HEX" />
     </div>
   `,
 });
