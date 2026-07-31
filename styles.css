@@ -334,10 +334,14 @@ body[data-tool="fill"] .board { cursor: crosshair; }
 .algo-cfg-row { display: flex; align-items: center; gap: 6px; }
 .algo-cfg-row.hidden { display: none; }
 .algo-cfg-row > span:first-child { color: var(--ink-soft); }
-/* v0.7.21 容差滑条外提到 Row1（user：值要一直可见）：内联小滑条 + 数值 */
+/* v0.7.21 容差滑条外提到 Row1（user：值要一直可见）；v0.7.22 换 ramp-slider 分段模式：
+   宿主是 .brush-slider-row（grid 100px 标签列），内联场景压成 flex、空标签不占位 */
 .lasso-tol-inline { display: inline-flex; align-items: center; gap: 6px; }
 .lasso-tol-inline.hidden { display: none; }
-.lasso-tol-inline input[type="range"] { width: 96px; }
+.lasso-tol-inline .brush-slider-row { display: flex; align-items: center; gap: 6px; }
+.lasso-tol-inline .brush-slider-label { display: none; }
+.lasso-tol-inline .ramp-slider { width: 120px; }
+.lasso-tol-inline .brush-slider-value { min-width: 24px; }
 .lasso-popup-val { text-align: right; font-variant-numeric: tabular-nums; }
 .lasso-popup-row input[type="range"] { width: 100%; }
 

@@ -12,6 +12,32 @@
 
 import { attachDragValue } from "./drag-value.ts";
 
+// ---- v0.7.22 分段步长表（brush-size.ts 精神的泛化；user 拍板：容差滑条走分段不走连续 sqrt/log）----
+// 位置空间 = 档位索引（每档等宽触面）：构造性保证无死区、无够不着的值、值恒是规格里的整数。
+// 纯函数无 DOM（node 直测）；将来笔刷 size slider 迁移 = 把 brush-size 的段表喂进来（test 有互证）。
+export interface RampSeg { upTo: number; step: number }
+
+/** 段表 → 档位值序列（含 min 起点；各段 (prev, upTo] 按 step 出档）。 */
+export function segValueTable(min: number, segs: RampSeg[]): number[] {
+  const vals: number[] = [min];
+  let prev = min;
+  for (const s of segs) {
+    for (let v = prev + s.step; v <= s.upTo + 1e-9; v += s.step) vals.push(parseFloat(v.toFixed(6)));
+    prev = s.upTo;
+  }
+  return vals;
+}
+
+/** 最近档位索引（值→位置回灌；表短，线性扫够了）。 */
+export function nearestSegPos(vals: number[], v: number): number {
+  let bi = 0, bd = Infinity;
+  for (let i = 0; i < vals.length; i++) {
+    const d = Math.abs(vals[i] - v);
+    if (d < bd) { bd = d; bi = i; }
+  }
+  return bi;
+}
+
 export interface RampSliderOpts {
   label: string;
   min: number;
@@ -25,6 +51,9 @@ export interface RampSliderOpts {
   /** track 的 CSS background（color ramp）。缺省 = 素色 track。 */
   gradient?: string;
   ariaLabel?: string;
+  /** v0.7.22 分段步长模式：设了则位置空间=档位索引（step 忽略，键盘=±1 档）。min 是起点，
+      段表须覆盖到 max。低端细高端粗的量（容差/笔粗）用这个，别用连续曲线（量化后必出死区/跳档）。 */
+  segments?: RampSeg[];
 }
 
 export interface RampSliderHandle {
@@ -36,11 +65,18 @@ export interface RampSliderHandle {
 
 export function makeRampSlider(o: RampSliderOpts): RampSliderHandle {
   const decimals = Math.max(0, -Math.floor(Math.log10(o.step || 1) + 1e-9));
+  // 分段模式：量化=吸最近档；位置=档位索引/(档数-1)。连续模式：老路径原样。
+  const table = o.segments ? segValueTable(o.min, o.segments) : null;
   const quantize = (v: number): number => {
+    if (table) return table[nearestSegPos(table, v)];
     const q = o.min + Math.round((v - o.min) / o.step) * o.step;
     const c = Math.min(o.max, Math.max(o.min, q));
     return parseFloat(c.toFixed(decimals));   // 洗浮点渣（0.30000000000000004）
   };
+  const toNorm = (v: number): number =>
+    table ? nearestSegPos(table, v) / (table.length - 1 || 1) : (v - o.min) / (o.max - o.min || 1);
+  const fromNorm = (n: number): number =>
+    table ? table[Math.round(n * (table.length - 1))] : o.min + n * (o.max - o.min);
   let cur = quantize(o.value);
 
   const wrap = document.createElement("label");
@@ -58,7 +94,7 @@ export function makeRampSlider(o: RampSliderOpts): RampSliderHandle {
   track.setAttribute("aria-valuemax", String(o.max));
 
   const render = () => {
-    const n = (cur - o.min) / (o.max - o.min || 1);
+    const n = toNorm(cur);
     thumb.style.left = (n * 100) + "%";
     valEl.textContent = o.fmt ? o.fmt(cur) : String(cur);
     track.setAttribute("aria-valuenow", String(cur));
@@ -74,21 +110,27 @@ export function makeRampSlider(o: RampSliderOpts): RampSliderHandle {
   };
 
   const drag = attachDragValue(track, {
-    getValue: () => ({ x: (cur - o.min) / (o.max - o.min || 1), y: 0 }),
-    onDrag: (x) => apply(o.min + x * (o.max - o.min), true),
+    getValue: () => ({ x: toNorm(cur), y: 0 }),
+    onDrag: (x) => apply(fromNorm(x), true),
     onCommit: () => o.onCommit?.(cur),
   });
 
+  // 键盘：分段模式 = ±1 档（步长随档位表走，语义与拖动一致）；连续模式 = ±step 老路径。
+  const nudge = (dir: number, big: boolean): number => {
+    if (!table) return cur + dir * o.step * (big ? 10 : 1);
+    const i = nearestSegPos(table, cur) + dir * (big ? 5 : 1);
+    return table[Math.max(0, Math.min(table.length - 1, i))];
+  };
   track.addEventListener("keydown", (e: KeyboardEvent) => {
-    let d = 0;
-    if (e.key === "ArrowLeft" || e.key === "ArrowDown") d = -o.step;
-    else if (e.key === "ArrowRight" || e.key === "ArrowUp") d = o.step;
-    else if (e.key === "PageDown") d = -o.step * 10;
-    else if (e.key === "PageUp") d = o.step * 10;
-    else if (e.key === "Home") { apply(o.min, true); o.onCommit?.(cur); e.preventDefault(); return; }
-    else if (e.key === "End") { apply(o.max, true); o.onCommit?.(cur); e.preventDefault(); return; }
+    let next: number;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = nudge(-1, false);
+    else if (e.key === "ArrowRight" || e.key === "ArrowUp") next = nudge(+1, false);
+    else if (e.key === "PageDown") next = nudge(-1, true);
+    else if (e.key === "PageUp") next = nudge(+1, true);
+    else if (e.key === "Home") next = o.min;
+    else if (e.key === "End") next = o.max;
     else return;
-    apply(cur + d, true);
+    apply(next, true);
     o.onCommit?.(cur);
     e.preventDefault();
   });

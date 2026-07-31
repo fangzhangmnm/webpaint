@@ -53,7 +53,7 @@
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="icon" href="./icon-192.png" type="image/png" sizes="192x192" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon-180.png" />
-    <link rel="stylesheet" href="./styles.css?v=443080faf1db" />
+    <link rel="stylesheet" href="./styles.css?v=c70b43d06950" />
     <!-- zip.js UMD bundle：自挂 window.zip。必须在 module bundle 之前。
          defer（v417）：原来是 parser-blocking 的，硬刷新时 SW 被绕过 → 直奔网络 → 网络一卡整个
          文档解析就停住（浏览器标签页转圈）。defer 后它与下面的 type=module bundle 同属延迟脚本、
@@ -652,11 +652,9 @@
                弹出 #lassoAlgoCfgMenu，行按当前算法显隐 -->
           <button class="lasso-tool-btn lasso-tool-icon lasso-slot hidden" id="lassoAlgoCfgBtn" type="button" data-i18n-title="la.algoCfg"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#wrench"/></svg><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
           <!-- v0.7.21 容差滑条外提（user：不折进扳手，值要一直看得见）：classic/similar 时显、lineart 藏；
-               值按当前算法路由 editorState.magicWand.threshold / similarThreshold（toolbar 侧接线） -->
-          <span class="lasso-tol-inline hidden" id="lassoTolWrap">
-            <input type="range" id="lassoThreshold" min="0" max="100" step="1" value="20" data-i18n-aria="la.threshold" />
-            <span id="lassoThresholdVal" class="lasso-popup-val">20</span>
-          </span>
+               值按当前算法路由 editorState.magicWand.threshold / similarThreshold（toolbar 侧接线）。
+               v0.7.22：本体 = ramp-slider 分段模式（JS 挂载，原生 range 退役——线性低端太粗且 iPad 无 shift 细调） -->
+          <span class="lasso-tol-inline hidden" id="lassoTolWrap"></span>
           <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#constrain-ratio"/></svg></button>
           <!-- v0.5.12 行尾动作组：变换（选区工具）/ ⋯（低频操作收纳）/ 去选（高频，=fill 的 cancel）/ ✓（fill） -->
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
@@ -1427,6 +1425,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-e72e773f25e2.mjs"></script>
+    <script type="module" src="./dist/webpaint-03483aed60f1.mjs"></script>
   </body>
 </html>

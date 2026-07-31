@@ -12,6 +12,8 @@ import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { Selection } from "./selection.ts";
 import { MAGIC_ALGORITHMS } from "./lasso.ts";
+import { makeRampSlider } from "./ui/ramp-slider.ts";
+import type { RampSliderHandle } from "./ui/ramp-slider.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { editorState } from "./workbench-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./resample.ts";
@@ -50,7 +52,8 @@ const pushSel = (entry: { before: Selection | null } | null | undefined) => {
 let lassoToolbarStack: HTMLElement, lassoToolbarRow1: HTMLElement, lassoToolbarRow2: HTMLElement;
 let lassoSubToolBar: HTMLElement, lassoTransformCtrl: HTMLElement;
 let lassoTransformModeBtns: HTMLElement[];
-let lassoThresholdInput: HTMLInputElement, lassoThresholdVal: HTMLElement;
+// v0.7.22 容差滑条 = ramp-slider 分段模式（原生 range 退役：线性映射低端太粗、iPad 无 shift 细调）
+let lassoTolSlider: RampSliderHandle | null = null;
 let lassoConstrainBtn: HTMLElement;
 let lassoSelEditBtn: HTMLElement, lassoSelEditMenu: HTMLElement, fillSelEditMenu: HTMLElement;   // v0.6.30 选区/填色 ⋯ 分家（共享动作处理器）
 let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement, lassoSetOpMenu: HTMLElement, lassoSetOpMenuBtns: HTMLElement[];   // 布尔组槽（v0.5.17 回下拉）
@@ -261,10 +264,9 @@ export function updateLassoToolbar() {
     const algoNow = input.lasso.getMagicAlgorithm();
     const showTol = magicOn && algoNow !== "lineart";
     tolWrap.classList.toggle("hidden", !showTol);
-    if (showTol) {
+    if (showTol && lassoTolSlider) {
       const v = algoNow === "similar" ? editorState.magicWand.similarThreshold : editorState.magicWand.threshold;
-      if (lassoThresholdInput.value !== String(v)) lassoThresholdInput.value = String(v);
-      lassoThresholdVal.textContent = String(v);
+      if (lassoTolSlider.get() !== v) lassoTolSlider.set(v);
     }
   }
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
@@ -624,8 +626,6 @@ export function initToolbar(ctx: AppContext) {
   lassoSubToolBar = byId("lassoSubToolBar");
   lassoTransformCtrl = byId("lassoTransformCtrl");
   lassoTransformModeBtns = [...lassoTransformCtrl.querySelectorAll<HTMLElement>("[data-lasso-mode]")];
-  lassoThresholdInput = byId<HTMLInputElement>("lassoThreshold");
-  lassoThresholdVal = byId("lassoThresholdVal");
   lassoConstrainBtn = byId("lassoConstrainBtn");
   lassoSelEditBtn = byId("lassoSelEditBtn");
   lassoSelEditMenu = byId("lassoSelEditMenu");
@@ -844,26 +844,29 @@ export function initToolbar(ctx: AppContext) {
   // v0.7.21：滑条外提 Row1 且**按当前算法路由**（classic↔threshold / similar↔similarThreshold，两容差
   //   分开存互不打架）；引擎两值+度量恒全量灌（换文档/换算法都不会漏）。显隐/换算法的值回灌在
   //   updateLassoToolbar（lassoTolWrap 块）派生。
+  // v0.7.22：滑条本体 = ramp-slider 分段模式（user 拍板：分段步长表不走连续 sqrt/log——
+  //   位置空间=档位索引，低端细高端粗、无死区、值恒整数；brush-size 同精神，段表见下）。
+  const TOL_SEGMENTS = [{ upTo: 20, step: 1 }, { upTo: 40, step: 2 }, { upTo: 70, step: 5 }, { upTo: 100, step: 10 }];
+  lassoTolSlider = makeRampSlider({
+    label: "", ariaLabel: t("la.threshold"), min: 0, max: 100, step: 1, value: 20, segments: TOL_SEGMENTS,
+    onInput: (v) => {
+      if (input.lasso.getMagicAlgorithm() === "similar") {
+        editorState.magicWand.similarThreshold = v;
+        input.lasso.setSimilarThreshold(v);
+      } else {
+        editorState.magicWand.threshold = v;
+        input.lasso.setMagicThreshold(v);
+      }
+    },
+  });
+  byId("lassoTolWrap").appendChild(lassoTolSlider.el);
   const syncMagicThresholdUI = () => {
     input.lasso.setMagicThreshold(editorState.magicWand.threshold);
     input.lasso.setSimilarThreshold(editorState.magicWand.similarThreshold);
     input.lasso.setColorMetric(editorState.magicWand.metric === "rgb" ? "rgb" : "oklab");
     const sim = input.lasso.getMagicAlgorithm() === "similar";
-    const v = sim ? editorState.magicWand.similarThreshold : editorState.magicWand.threshold;
-    lassoThresholdInput.value = String(v);
-    lassoThresholdVal.textContent = String(v);
+    lassoTolSlider?.set(sim ? editorState.magicWand.similarThreshold : editorState.magicWand.threshold);
   };
-  lassoThresholdInput.addEventListener("input", () => {
-    const v = Math.max(0, Math.min(100, parseInt(lassoThresholdInput.value, 10) || 0));
-    if (input.lasso.getMagicAlgorithm() === "similar") {
-      editorState.magicWand.similarThreshold = v;
-      input.lasso.setSimilarThreshold(v);
-    } else {
-      editorState.magicWand.threshold = v;
-      input.lasso.setMagicThreshold(v);
-    }
-    lassoThresholdVal.textContent = String(v);
-  });
   // v0.7.21 色差度量（扳手行，classic/similar 共用；统一默认 OKLab——user 2026-07-30 拍板）
   const setColorMetricUI = (m: "oklab" | "rgb") => {
     editorState.magicWand.metric = m;

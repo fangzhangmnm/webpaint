@@ -39,6 +39,13 @@ lasso 侧魔棒自动获得同一算法（共用 SSoT）；magic-drag 按住拖 
 - 容差**外提 Row1 内联**（user：值要一直看得见，不折扳手）：`#lassoTolWrap`，classic/similar 显、
   lineart 藏；值按当前算法路由 `magicWand.threshold` / `magicWand.similarThreshold`（**分开存**，
   两种手感互调不打架；per-doc 持久化，v0.7.21 user 拍板）。
+- **滑条本体 = ramp-slider 分段步长模式**（v0.7.22，user 拍板走分段不走连续 sqrt/log）：
+  容差段表 0..20步1 / 20..40步2 / 40..70步5 / 70..100步10（40 档）。论证：容差量程不足一个
+  数量级且低端要绝对步长 1（淡色 ΔE 0.01/档已够），log 恒定相对精度对口的是跨多数量级的量
+  （笔粗）且会把半条轨道砸给 t<8 产生量化死区；分段表 = brush-size.ts 同精神（位置空间=档位
+  索引，构造性无死区/无够不着/值恒整数），iPad 无 shift 细调时曲线即全部手感。
+  `segValueTable`/`nearestSegPos` 纯函数从 ramp-slider 导出，与 brush-size 段表测试互证——
+  将来笔刷 size slider 迁移 = 同一实现喂 brush 段表（模块头注释排的队）。
 - 扳手：classic 容差行退役 → 「色差 OKLab|RGB」行（classic/similar 共用；lineart 行不变）。
 
 ## 悬而未决（下一轮候选）
