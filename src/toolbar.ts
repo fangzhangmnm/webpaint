@@ -681,6 +681,8 @@ export function initToolbar(ctx: AppContext) {
   lassoSubMenuBtns = [...lassoSubMenu.querySelectorAll<HTMLElement>("[data-lasso-sub]")];
   wireSlotMenu(lassoSubSlot, lassoSubMenu, (b) => {
     const subName = b.dataset.lassoSub as Parameters<typeof input.lasso.setSubTool>[0];
+    // v0.7.27（user）：选区笔已是当前子工具再点一次 = 开笔架（形状笔 v0.6.25「已选中再点开变体」同款语义）
+    if (subName === "pen" && input.lasso.getSubTool() === "pen") { openExclusive(PANELS.RACK_SEL_PEN); return; }
     input.lasso.setSubTool(subName);
     _selToolRec().sub = subName;   // 写当前工具自己的持久化记录
   });

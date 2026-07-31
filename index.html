@@ -859,9 +859,10 @@
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="rect" type="button" role="menuitem" data-i18n-title="la.rect"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-rectangle"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="ellipse" type="button" role="menuitem" data-i18n-title="la.ellipse"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-ellipse"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="polygon" type="button" role="menuitem" data-i18n-title="la.polygon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-polygon"/></svg></button>
-      <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="magic" type="button" role="menuitem" data-i18n-title="la.magic"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#magic-wand"/></svg></button>
-      <!-- v0.7.25 选区笔（与魔棒平级，user 拍板）：暂借 #pencil，select-pen 已登记 SVG Icons/TODO.md -->
+      <!-- v0.7.25 选区笔（与魔棒平级，user 拍板；v0.7.27 user：放魔术棒左边）：暂借 #pencil，
+           select-pen 已登记 SVG Icons/TODO.md。已选中再点 = 开笔架（toolbar 侧接线） -->
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="pen" type="button" role="menuitem" data-i18n-title="la.penSub"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#pencil"/></svg></button>
+      <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="magic" type="button" role="menuitem" data-i18n-title="la.magic"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#magic-wand"/></svg></button>
     </div>
 
     <!-- v242 选区扩张/收缩 modal：走 adjust 逻辑（transient + 实时预览），数字输入 -->
@@ -1443,6 +1444,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-ad8b536af06e.mjs"></script>
+    <script type="module" src="./dist/webpaint-534d592572a1.mjs"></script>
   </body>
 </html>
