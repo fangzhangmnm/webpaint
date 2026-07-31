@@ -1,0 +1,47 @@
+{
+  "note": [
+    "画布模板 SSoT（v0.7.32 起外置 JSON；此前是 src/canvas-templates.ts 里的 TS 常量 + index.html 里另一份",
+    "手写 <option> 列表 —— 两份表各自演化，新建作品加的模板裁切看不到，user 2026-07-31 抓到。",
+    "现在两个消费面（新建作品尺寸下拉 / 裁剪·模板模式）都 fetch 这一份，加模板只改这里、零改码。",
+    "",
+    "字段：",
+    "  id       稳定标识。**改名=破坏性**：editorState.crop.templateId 持久化了它。",
+    "  kind     print | screen | pixel —— 同时是 UI 的 optgroup 分组（渲染按数组顺序走，kind 变了就开新组）。",
+    "  w/h/unit px | mm | in。物理单位的按 dpi 换算成像素（templatePx），并在 label 后自动追加（w × h）——",
+    "           所以 label 里**不要**手写像素数，避免和换算结果漂移。",
+    "  dpi      print 类必填；导出 pHYs 用。DPI 本体论（user 拍板）：像素是画作唯一真相，DPI 只是输出",
+    "           解释——活在模板与导出文件里，永不写进 ora。",
+    "  label    中文 UI 直读（无 i18n key 时的显示文本 + 有 key 时的 zh 兜底）。",
+    "  i18n     可选 strings.ts key。尺寸数字是国际语，但「横/竖/方/照片/明信片」不是——有 key 的走翻译。",
+    "  surfaces 可选白名单，省略=两个面都显示。'new'=新建作品，'crop'=裁剪模板模式。",
+    "           标了 crop-only 的几条是 user 早先对**新建**下拉的拍板（#21 v0.5.10：删 A4「没人用 A4 打印",
+    "           画」、删 4096²、打印组只留竖版每比例一个代表），裁切侧不受该拍板约束，故保留。"
+  ],
+  "templates": [
+    { "id": "screen-4096sq",    "kind": "screen", "w": 4096, "h": 4096, "unit": "px", "label": "4096 × 4096", "surfaces": ["crop"] },
+    { "id": "screen-2048sq",    "kind": "screen", "w": 2048, "h": 2048, "unit": "px", "label": "2048 × 2048" },
+    { "id": "screen-1024sq",    "kind": "screen", "w": 1024, "h": 1024, "unit": "px", "label": "1024 × 1024" },
+    { "id": "screen-512sq",     "kind": "screen", "w": 512,  "h": 512,  "unit": "px", "label": "512 × 512" },
+    { "id": "screen-1920x1080", "kind": "screen", "w": 1920, "h": 1080, "unit": "px", "label": "1920 × 1080（横）", "i18n": "nd.o1920" },
+    { "id": "screen-1080x1920", "kind": "screen", "w": 1080, "h": 1920, "unit": "px", "label": "1080 × 1920（竖）", "i18n": "nd.o1080" },
+    { "id": "screen-1200x900",  "kind": "screen", "w": 1200, "h": 900,  "unit": "px", "label": "1200 × 900（横 4:3）", "i18n": "nd.o1200x900" },
+    { "id": "screen-900x1200",  "kind": "screen", "w": 900,  "h": 1200, "unit": "px", "label": "900 × 1200（竖 3:4）", "i18n": "nd.o900x1200" },
+
+    { "id": "print-4x6-300",    "kind": "print", "w": 4,   "h": 6,   "unit": "in", "dpi": 300, "label": "6寸照片 4×6in 竖", "i18n": "nd.print6in" },
+    { "id": "print-6x4-300",    "kind": "print", "w": 6,   "h": 4,   "unit": "in", "dpi": 300, "label": "6寸照片 4×6in 横", "i18n": "nd.print6inLand", "surfaces": ["crop"] },
+    { "id": "print-6x8-300",    "kind": "print", "w": 6,   "h": 8,   "unit": "in", "dpi": 300, "label": "8寸照片 6×8in 竖", "i18n": "nd.print8in" },
+    { "id": "print-postcard-300", "kind": "print", "w": 100, "h": 148, "unit": "mm", "dpi": 300, "label": "明信片 100×148mm", "i18n": "nd.printPostcard" },
+    { "id": "print-5x7-300",    "kind": "print", "w": 5,   "h": 7,   "unit": "in", "dpi": 300, "label": "5×7in 竖", "i18n": "nd.print5x7", "surfaces": ["crop"] },
+    { "id": "print-7x5-300",    "kind": "print", "w": 7,   "h": 5,   "unit": "in", "dpi": 300, "label": "5×7in 横", "i18n": "nd.print5x7Land", "surfaces": ["crop"] },
+    { "id": "print-a5-300",     "kind": "print", "w": 148, "h": 210, "unit": "mm", "dpi": 300, "label": "A5 竖", "i18n": "nd.printA5", "surfaces": ["crop"] },
+    { "id": "print-a5l-300",    "kind": "print", "w": 210, "h": 148, "unit": "mm", "dpi": 300, "label": "A5 横", "i18n": "nd.printA5Land", "surfaces": ["crop"] },
+    { "id": "print-a4-300",     "kind": "print", "w": 210, "h": 297, "unit": "mm", "dpi": 300, "label": "A4 竖", "i18n": "nd.printA4", "surfaces": ["crop"] },
+    { "id": "print-a4l-300",    "kind": "print", "w": 297, "h": 210, "unit": "mm", "dpi": 300, "label": "A4 横", "i18n": "nd.printA4Land", "surfaces": ["crop"] },
+
+    { "id": "pixel-16",  "kind": "pixel", "w": 16,  "h": 16,  "unit": "px", "label": "16 × 16" },
+    { "id": "pixel-32",  "kind": "pixel", "w": 32,  "h": 32,  "unit": "px", "label": "32 × 32" },
+    { "id": "pixel-64",  "kind": "pixel", "w": 64,  "h": 64,  "unit": "px", "label": "64 × 64" },
+    { "id": "pixel-128", "kind": "pixel", "w": 128, "h": 128, "unit": "px", "label": "128 × 128" },
+    { "id": "pixel-256", "kind": "pixel", "w": 256, "h": 256, "unit": "px", "label": "256 × 256" }
+  ]
+}

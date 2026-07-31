@@ -59,7 +59,10 @@ identity 快路。golden 的 CPU 参照抄了同一份错约定所以测试全�
   **填充**(Fill/cover)/**适应**(Fit/contain)；
 - 默认=自定义 + 预填当前画布尺寸（初始框=整画布零跳变）；
 - commit = `doc.cropResampleTo` 原子 op 保层（frame=目标 px 整数时恒等路径逐字节）；
-- 模板 SSoT `src/canvas-templates.ts`（照片横竖成对/方形 512–4096/像素画 32–256 + 自定义）；
+- 模板 SSoT ~~`src/canvas-templates.ts`~~ → **v0.7.32 起 = 根目录 `canvas-templates.json`**
+  （照片横竖成对/方形 512–4096/像素画 16–256 + 自定义）。改的原因：新建作品下拉当时另有一份手写
+  `<option>` 表，两份分叉（往新建加的尺寸裁切看不到）；现在两个面共读这一份 json，
+  `canvas-templates.ts` 退化为加载 + 换算 + 往 `<select>` 投影；
   **DPI 只活在模板与导出 pHYs，永不进 ora**（防小白改乱）；desk 记 `crop.templateId`；
 - 工具条全图标化；三枚新图标 2026-07-30 已从库收货（crop-fixed-size / fit-fill / fit-contain，
   sprite 重钉 a069c8c，stopgap 清零）。

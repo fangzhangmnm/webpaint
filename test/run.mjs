@@ -15,6 +15,7 @@ import "./registry.test.mjs";
 import "./resolved-brush.test.mjs";
 import "./pointer-gesture.test.mjs";
 import "./crop-geometry.test.mjs";
+import "./canvas-templates.test.ts";  // 画布尺寸模板 json SSoT：契约 + 「一份表喂新建和裁切两个面」
 import "./shape-geometry.test.mjs";   // 形状笔几何层（ADR-0005）：吸附/视口相对矩形/圆弧拟合(max范数+winding)/采样
 import "./shape-brush.test.mjs";      // 形状笔引擎：恒压/taper覆写/三子工具全链/pixelMode restore/cancel 无痕
 import "./perspective-frame.test.mjs"; // 透视 frame（ADR-0006）：两角定形/homography/chart ε 护栏/snap 方向

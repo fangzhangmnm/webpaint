@@ -50,9 +50,20 @@ export const S = {
   "nd.o1080":           { zh: "1080 × 1920（竖）", en: "1080 × 1920 (portrait)", ja: "1080 × 1920（縦）", tok: "1080 × 1920 (sewi)" },
   "nd.o1200x900":       { zh: "1200 × 900（横 4:3）", en: "1200 × 900 (landscape 4:3)", ja: "1200 × 900（横 4:3）", tok: "1200 × 900 (poka 4:3)" },
   "nd.o900x1200":       { zh: "900 × 1200（竖 3:4）", en: "900 × 1200 (portrait 3:4)", ja: "900 × 1200（縦 3:4）", tok: "900 × 1200 (sewi 3:4)" },
-  "nd.print6in":        { zh: "6寸照片 1200 × 1800", en: "4×6″ photo 1200 × 1800", ja: "写真 KG判 1200 × 1800", tok: "sitelen lili 1200 × 1800" },
-  "nd.print8in":        { zh: "8寸照片 1800 × 2400", en: "6×8″ photo 1800 × 2400", ja: "写真 6×8″ 1800 × 2400", tok: "sitelen suli 1800 × 2400" },
-  "nd.printPostcard":   { zh: "明信片 1181 × 1748", en: "Postcard 1181 × 1748", ja: "はがき 1181 × 1748", tok: "lipu toki 1181 × 1748" },
+  // v0.7.32：打印模板的**像素数不再写进文案**——由 templateLabel() 从 canvas-templates.json 的
+  //   物理尺寸×DPI 换算后自动追加（写死会和换算结果漂移）。这里只留「这是什么纸」。
+  "nd.print6in":        { zh: "6寸照片 4×6in 竖", en: "4×6″ photo, portrait", ja: "写真 KG判 4×6in 縦", tok: "sitelen lili 4×6in (sewi)" },
+  "nd.print8in":        { zh: "8寸照片 6×8in 竖", en: "6×8″ photo, portrait", ja: "写真 6×8in 縦", tok: "sitelen suli 6×8in (sewi)" },
+  "nd.printPostcard":   { zh: "明信片 100×148mm", en: "Postcard 100×148 mm", ja: "はがき 100×148mm", tok: "lipu toki 100×148mm" },
+  // v0.7.32：以下几条原本只在裁切侧、按「模板名不走 i18n」写成纯中文。合表后它们和上面几条同框，
+  //   英/日界面会半中半英——补齐四语。（纯数字的 1024²/2048² 之类仍不需要 key：尺寸是国际语。）
+  "nd.print6inLand":    { zh: "6寸照片 4×6in 横", en: "4×6″ photo, landscape", ja: "写真 KG判 4×6in 横", tok: "sitelen lili 4×6in (poka)" },
+  "nd.print5x7":        { zh: "5×7in 竖", en: "5×7″, portrait", ja: "5×7in 縦", tok: "5×7in (sewi)" },
+  "nd.print5x7Land":    { zh: "5×7in 横", en: "5×7″, landscape", ja: "5×7in 横", tok: "5×7in (poka)" },
+  "nd.printA5":         { zh: "A5 竖", en: "A5 portrait", ja: "A5 縦", tok: "A5 (sewi)" },
+  "nd.printA5Land":     { zh: "A5 横", en: "A5 landscape", ja: "A5 横", tok: "A5 (poka)" },
+  "nd.printA4":         { zh: "A4 竖", en: "A4 portrait", ja: "A4 縦", tok: "A4 (sewi)" },
+  "nd.printA4Land":     { zh: "A4 横", en: "A4 landscape", ja: "A4 横", tok: "A4 (poka)" },
   "tm.configRange":     { zh: "裁剪", en: "Crop", ja: "切り抜き", tok: "kipisi" },
   "tm.clipToSelection": { zh: "裁到选区", en: "Clip to selection", ja: "選択範囲に切り抜き", tok: "o kipisi tawa ma wile" },
   "tm.noSelectionNow":  { zh: "当前无选区", en: "no selection", ja: "選択なし", tok: "ma wile li lon ala" },

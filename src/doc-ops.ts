@@ -9,7 +9,7 @@ import { els } from "./els.ts";
 import { bumpDoc } from "./signals.ts";
 import { t } from "./i18n/index.ts";
 import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } from "./crop-geometry.ts";
-import { CANVAS_TEMPLATES, templatePx, templateById } from "./canvas-templates.ts";
+import { loadCanvasTemplates, fillTemplateSelect, templatePx, templateById } from "./canvas-templates.ts";
 import { editorState } from "./workbench-state.ts";
 import { remapShapePersp, snapshotShapePersp } from "./workbench-state.ts";
 import type { AppContext } from "./app-context.ts";
@@ -321,15 +321,12 @@ export function initDocOps(ctx: AppContext) {
   // ---- v0.6.49 模板模式控件（v0.6.48 首版的接线块因文本替换静默漏落——本次补上）----
   {
     const tplSel = document.getElementById("cropTemplateSel") as HTMLSelectElement;
-    // 模板下拉：SSoT + 自定义（模板名=尺寸国际语不走 i18n）
-    for (const tp of CANVAS_TEMPLATES) {
-      const o = document.createElement("option");
-      o.value = tp.id; o.textContent = tp.label;
-      tplSel.appendChild(o);
-    }
-    const custom = document.createElement("option");
-    custom.value = "custom"; custom.textContent = t("crop.customTpl");
-    tplSel.appendChild(custom);
+    // 模板下拉：SSoT = canvas-templates.json（v0.7.32 起和新建作品共用同一份表 + 同一个投影函数；
+    // 此前两边各有一张表，往新建里加的尺寸这里永远看不到）。async fetch，回来了再填。
+    // 先同步投影一次：模板模式按钮会把 value 设成 "custom"，那条 option 必须先在（否则赋值落空、
+    // _syncCropModeUI 会误判成非自定义、把 W/H 输入框藏起来）。json 回来再投影一次补上模板。
+    fillTemplateSelect(tplSel, "crop", t("crop.customTpl"));
+    void loadCanvasTemplates().then(() => fillTemplateSelect(tplSel, "crop", t("crop.customTpl")));
     // 分段按钮 自由|模板（两项下拉太笨——user 2026-07-29 UI 意见）
     document.getElementById("cropModeFree")!.addEventListener("click", () => {
       if (!_cropState || _cropState.mode === "free") return;

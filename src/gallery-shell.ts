@@ -33,6 +33,7 @@ import { setAddImportAsNewDoc, importImageAsNewDoc } from "./import-image.ts";
 import { isUnlocked, lock, setPassword, promptPassword } from "./crypto-state.ts";
 import { hasVerifier, checkVerifier, clearVerifier } from "./password-verifier.ts";
 import { t } from "./i18n/index.ts";
+import { loadCanvasTemplates, fillTemplateSelect, templateById, templatePx } from "./canvas-templates.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -84,7 +85,7 @@ export function openNewDocSheet() {
   const base = _newDocName();
   const folder = gallery.getFolder();
   els.newDocName.value = folder ? `${folder}/${base}` : base;
-  _selectPreset("2048x2048");
+  _selectPreset(DEFAULT_PRESET);
   els.newDocCustomRow.style.display = "none";
   els.newDocW.value = String(doc.width);
   els.newDocH.value = String(doc.height);
@@ -96,8 +97,10 @@ function closeNewDocSheet() {
   els.newDocBackdrop.classList.add("hidden");
   els.newDocSheet.classList.add("hidden");
 }
-let _presetVal = "2048x2048";   // #21：preset 单一真相（confirm 读它）
+const DEFAULT_PRESET = "screen-2048sq";
+let _presetVal = DEFAULT_PRESET;   // #21：preset 单一真相（confirm 读它）。值 = 模板 id 或 "custom"。
 // #21 终版（v0.5.10）：全部预设进一个下拉框（#newDocPreset，三 optgroup + 自定义）——chips 已删。
+// v0.7.32：option 由 canvas-templates.json 投影（不再手写在 index.html——那是和裁切分叉的第二份表）。
 function _selectPreset(val: string) {
   _presetVal = val;
   const sel = document.getElementById("newDocPreset") as HTMLSelectElement | null;
@@ -313,6 +316,15 @@ export function initGalleryShell(ctx: AppContext) {
   // 新建作品 sheet 接线
   // #21 终版（v0.5.10）：唯一的尺寸下拉框（v217 的 chips 按钮组已删）
   const presetSel = document.getElementById("newDocPreset") as HTMLSelectElement | null;
+  // v0.7.32：option 来自 canvas-templates.json（async fetch）。先同步投影一次——此刻表可能还空着，
+  // 但「自定义…」这条立刻就在，下拉框不会有一段完全空白的窗口；json 回来再投影一次并选回默认。
+  if (presetSel) {
+    fillTemplateSelect(presetSel, "new", t("nd.custom"));
+    void loadCanvasTemplates().then(() => {
+      fillTemplateSelect(presetSel, "new", t("nd.custom"));
+      _selectPreset(_presetVal);
+    });
+  }
   presetSel?.addEventListener("change", () => { if (presetSel.value) _selectPreset(presetSel.value); });
   els.newDocBackdrop.addEventListener("click", closeNewDocSheet);
   els.newDocCancel.addEventListener("click", closeNewDocSheet);
@@ -325,14 +337,17 @@ export function initGalleryShell(ctx: AppContext) {
   els.newDocConfirm.addEventListener("click", async () => {
     const nameRaw = (els.newDocName.value || "").trim() || t("gs.untitled");
     let w, h;
-    const presetVal = _presetVal || "2048x2048";
-    if (presetVal === "custom") {
+    const presetVal = _presetVal || DEFAULT_PRESET;
+    // v0.7.32：preset 值 = canvas-templates.json 的模板 id（此前是 "WxH" 字面量）。模板查不到
+    // （json 没加载到）→ 退到自定义输入框里的当前画布尺寸，而不是静默造一张 2048²。
+    const tpl = presetVal === "custom" ? null : templateById(presetVal);
+    if (tpl) {
+      const px = templatePx(tpl);
+      w = Math.max(16, Math.min(8192, px.w));
+      h = Math.max(16, Math.min(8192, px.h));
+    } else {
       w = Math.max(16, Math.min(8192, parseInt(els.newDocW.value, 10) || 2048));
       h = Math.max(16, Math.min(8192, parseInt(els.newDocH.value, 10) || 2048));
-    } else {
-      const parts = presetVal.split("x");
-      w = Math.max(16, Math.min(8192, parseInt(parts[0], 10) || 2048));
-      h = Math.max(16, Math.min(8192, parseInt(parts[1], 10) || w));
     }
     const name = await uniqueNameFor(nameRaw);
     closeNewDocSheet();

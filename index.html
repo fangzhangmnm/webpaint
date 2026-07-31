@@ -543,34 +543,14 @@
       </label>
       <!-- #21 终版（v0.5.10，user 拍板）：全部预设进**一个**下拉框（三 optgroup + 自定义）。
            删 A4（拍板：没人用 A4 打印画）/删 4096²；512² 归绘画组；打印组=每比例 basket 一个代表，
-           全 300dpi 竖版（3:2→6寸=用户打印机、4:3→8寸、√2族→明信片）。纯文本 option，无 SVG 需求。 -->
+           全 300dpi 竖版（3:2→6寸=用户打印机、4:3→8寸、√2族→明信片）。纯文本 option，无 SVG 需求。
+           v0.7.32：option 列表**不再手写在这里**——它曾是裁切模板表之外的第二份表，两份各自演化
+           （往这里加的尺寸裁切看不到，user 2026-07-31 抓到）。现在 SSoT = 根目录 canvas-templates.json，
+           由 canvas-templates.ts 的 fillTemplateSelect() 投影进来（上面那条拍板落在 json 的 surfaces 字段）。 -->
       <div class="new-doc-preset-section">
         <label class="brush-slider-row" style="grid-template-columns: 80px 1fr;">
           <span class="brush-slider-label" data-i18n="nd.size">尺寸</span>
-          <select id="newDocPreset" class="generic-sheet-input new-doc-pixel-select">
-            <optgroup data-i18n-label="nd.grp.painting" label="绘画">
-              <option value="2048x2048" selected>2048 × 2048</option>
-              <option value="1024x1024">1024 × 1024</option>
-              <option value="512x512">512 × 512</option>
-              <option value="1920x1080" data-i18n="nd.o1920">1920 × 1080（横）</option>
-              <option value="1080x1920" data-i18n="nd.o1080">1080 × 1920（竖）</option>
-              <option value="1200x900" data-i18n="nd.o1200x900">1200 × 900（横 4:3）</option>
-              <option value="900x1200" data-i18n="nd.o900x1200">900 × 1200（竖 3:4）</option>
-            </optgroup>
-            <optgroup data-i18n-label="nd.grp.print" label="打印 · 300dpi">
-              <option value="1200x1800" data-i18n="nd.print6in">6寸照片 1200 × 1800</option>
-              <option value="1800x2400" data-i18n="nd.print8in">8寸照片 1800 × 2400</option>
-              <option value="1181x1748" data-i18n="nd.printPostcard">明信片 1181 × 1748</option>
-            </optgroup>
-            <optgroup data-i18n-label="nd.grp.pixel" label="像素画">
-              <option value="16x16">16 × 16</option>
-              <option value="32x32">32 × 32</option>
-              <option value="64x64">64 × 64</option>
-              <option value="128x128">128 × 128</option>
-              <option value="256x256">256 × 256</option>
-            </optgroup>
-            <option value="custom" data-i18n="nd.custom">自定义…</option>
-          </select>
+          <select id="newDocPreset" class="generic-sheet-input new-doc-pixel-select"></select>
         </label>
       </div>
       <label class="brush-slider-row" id="newDocCustomRow" style="grid-template-columns: 80px 1fr 1fr; display:none;">
@@ -1447,6 +1427,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-b6330c1527a3.mjs"></script>
+    <script type="module" src="./dist/webpaint-12c09d2b0326.mjs"></script>
   </body>
 </html>
