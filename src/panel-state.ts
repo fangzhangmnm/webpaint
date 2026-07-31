@@ -28,6 +28,7 @@ export const PANELS = {
   RACK_ERASER: "rack-eraser",
   RACK_AIRBRUSH: "rack-airbrush",
   RACK_FILTER_BRUSH: "rack-filter-brush",   // v132 filter brush 用的 rack
+  RACK_SEL_PEN: "rack-selpen",              // v0.7.26 选区笔（lasso/fill 共用）
   LAYERS: "layers",
   BRUSH_SETTINGS: "brush-settings",
   ADJUST: "adjust",

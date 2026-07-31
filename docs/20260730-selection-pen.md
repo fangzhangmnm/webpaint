@@ -1,6 +1,21 @@
 # 选区笔（sub-tool "pen"）——笔刷手感画选区
 
-> as-of v0.7.25 / 2026-07-30
+> as-of v0.7.26 / 2026-07-31
+
+## v0.7.26 笔架化 +卡死修复（supersedes 本文 knob 节）
+
+- **配置全归笔架**（user：「笔架不是有滤镜笔画画笔橡皮笔吗，加一个选区笔就行了」）：rack 第四工具
+  类别 `"selPen"`，`getRackToolKey` 把 lasso/fill 映射过去；`toolStates.selPen` dial（序列化泛型遍历
+  白送）；builtin-brushes.json 出厂三支 `default-selpen-hard/ink/pixel`（硬圆/勾线/像素，args 逐字段
+  抄硬橡皮/勾线/像素笔；像素带 pixelMode:true=精确落纸标记，描边时压平走 buffered 动力学）。
+  v0.7.25 的自有变体下拉/笔径滑条/editorState.selPen 全部退役（那就是 user 点名的造轮子）。
+- **入口**：二次点 lasso/fill 工具钮 = 开选区笔笔架（RACK_PANEL_BY_TOOL 映射，showSheet 泛型推导）；
+  粗细 = 左栏 dial（pen 子工具时 dialReactive.canDraw 放行，写的就是 toolStates.selPen）。
+- **补种注意**：内置笔自愈只在笔架**全空**时触发——存量账户要拿到三支出厂选区笔需手点
+  「还原内置笔刷」（非破坏 setItem）；没拿到之前 fallback = DEFAULT 兜底笔（可用，硬圆手感）。
+- **卡死 RCA（v0.7.25 真机：鼠标一点就死）**：选区笔起笔漏初始化 `rec.smP`（压感 EMA 哨兵）→
+  `undefined<0` 为假 → NaN 压感 → `_walkStamps` 的 `while(true)` break 条件遇 NaN 永假 → 死循环。
+  修复 = 起笔四件套锚定 + `effectivePressureFor` 硬化（`!(smP>=0)` 即重置，防这一类漏初始化复发）。
 
 ## 拍板链（user 2026-07-30）
 

@@ -1,29 +1,29 @@
-// v0.7.25 选区笔验收：三变体 ResolvedBrush 装配（抄内置笔手感）+ stamps→二值 gray8（引擎
-// Bresenham disc 同核）+ 笔刷引擎 buffered 动力学全链 smoke（begin/extend/end 不碰 layer 像素）。
+// 选区笔验收（v0.7.25 落地 / v0.7.26 笔架化）：笔架笔→选区笔渲染态覆写 + stamps→二值 gray8
+// （引擎 Bresenham disc 同核）+ 笔刷引擎 buffered 动力学全链 smoke（begin/extend/end 不碰 layer 像素）。
 import { describe, it, assert, eq } from "./runner.mjs";
 
-const { resolveSelPenBrush, stampsToBinaryGray8, SEL_PEN_BAND } = await import("../src/sel-pen.ts");
+const { selPenSettingsFrom, stampsToBinaryGray8, SEL_PEN_BAND } = await import("../src/sel-pen.ts");
+const { resolveBrush } = await import("../src/resolved-brush.ts");
 const { BrushEngine } = await import("../src/brush.ts");
 const { Selection } = await import("../src/selection.ts");
 
-describe("sel-pen · 变体装配（ResolvedBrush 复用，不写第二条动力学）", () => {
-  it("勾线变体：重平滑/轻压变粗/起笔尖/buffered（非 pixelMode）", () => {
-    const b = resolveSelPenBrush("ink", 8);
-    eq(b.streamline, 0.5, "streamline");
-    eq(b.stabilization, 0.5, "stabilization");
-    eq(b.pressureGamma, 0.5, "γ");
-    eq(b.taperIn, 0.5, "taperIn");
-    eq(b.pixelMode, false, "像素变体也走 buffered——pixelMode 恒 false");
-    eq(b.color, SEL_PEN_BAND, "色带色");
-    eq(b.opacity, 0.5, "预览半透明");
-  });
-  it("像素变体：硬边/spacing .5/零平滑；尺寸夹取到变体上限", () => {
-    const b = resolveSelPenBrush("pixel", 999);
-    eq(b.hardness, 1, "硬边");
-    eq(b.spacing, 0.5, "spacing");
-    eq(b.streamline, 0, "零平滑");
-    eq(b.size, 64, "夹到像素变体上限 64");
-    eq(resolveSelPenBrush("hard", 30).sizeCoeff, 1, "硬圆压感全给尺寸");
+describe("sel-pen · 笔架笔 → 选区笔渲染态（v0.7.26：配置归笔架，无自有变体轮子）", () => {
+  it("覆写：色带色/半透明/normal blend/pixelMode 压平；动力学字段原样穿透", () => {
+    const base = resolveBrush({
+      preset: { shape: { kind: "round", hardness: 1 }, taper: { in: 0, out: 0 }, sizeCoeff: 0, opaCoeff: 0,
+                flowCoeff: 0, pressureGamma: 1, pressureLPF: 0, compositeMode: "wash", spacing: 0.5,
+                pixelMode: true, smooth: { streamline: 0, stabilization: 0 } },
+      size: 3, opacity: 1, color: "#ff0000",
+    });
+    const s = selPenSettingsFrom(base);
+    eq(s.color, SEL_PEN_BAND, "色带色覆写");
+    eq(s.opacity, 0.5, "预览半透明");
+    eq(s.blendMode, "source-over", "blend 钉 normal");
+    eq(s.pixelMode, false, "pixelMode 压平（buffered 动力学；精确落纸由 input 侧 disc 路径管）");
+    eq(base.pixelMode, true, "base 不被改（Object.freeze 新对象）");
+    eq(s.spacing, 0.5, "动力学字段穿透");
+    eq(s.hardness, 1, "笔形穿透");
+    eq(s.size, 3, "笔径来自笔架 dial");
   });
 });
 
@@ -48,7 +48,7 @@ describe("sel-pen · stamps→二值 gray8（disc 同核）+ 动力学全链 smo
       editRegionBytes: () => { touched = true; },
       getImageData: () => { touched = true; return { data: new Uint8ClampedArray(0) }; },
     };
-    const settings = resolveSelPenBrush("hard", 10);
+    const settings = selPenSettingsFrom(resolveBrush({ preset: null, size: 10 }));
     eng.beginStroke(fakeLayer, settings, 10, 10, 0.8, "brush", {}, 0);
     for (let i = 1; i <= 8; i++) eng.extendStroke(10 + i * 4, 10, 0.8, i * 16);
     const cs = eng.endStroke();

@@ -14,7 +14,6 @@ import { Selection } from "./selection.ts";
 import { MAGIC_ALGORITHMS } from "./lasso.ts";
 import { makeRampSlider } from "./ui/ramp-slider.ts";
 import type { RampSliderHandle } from "./ui/ramp-slider.ts";
-import { SEL_PEN_VARIANTS, SEL_PEN_SIZE_MAX } from "./sel-pen.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { editorState } from "./workbench-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./resample.ts";
@@ -55,9 +54,6 @@ let lassoSubToolBar: HTMLElement, lassoTransformCtrl: HTMLElement;
 let lassoTransformModeBtns: HTMLElement[];
 // v0.7.22 容差滑条 = ramp-slider 分段模式（原生 range 退役：线性映射低端太粗、iPad 无 shift 细调）
 let lassoTolSlider: RampSliderHandle | null = null;
-// v0.7.25 选区笔笔径滑条（per-变体上限不同 → 变体切换时重建）
-let selPenSizeSlider: RampSliderHandle | null = null;
-let selPenSizeVariant: string | null = null;
 let lassoConstrainBtn: HTMLElement;
 let lassoSelEditBtn: HTMLElement, lassoSelEditMenu: HTMLElement, fillSelEditMenu: HTMLElement;   // v0.6.30 选区/填色 ⋯ 分家（共享动作处理器）
 let lassoSetOpSlot: HTMLElement, lassoSetOpSlotUse: SVGUseElement, lassoSetOpMenu: HTMLElement, lassoSetOpMenuBtns: HTMLElement[];   // 布尔组槽（v0.5.17 回下拉）
@@ -232,23 +228,9 @@ export function updateLassoToolbar() {
       }
     }
   }
-  // v0.7.25 选区笔上下文：pen 子工具时显 变体槽 + 笔径滑条
-  const penOn = sub === "pen";
-  const spVarBtn = document.getElementById("selPenVarBtn");
-  if (spVarBtn) {
-    spVarBtn.classList.toggle("hidden", !penOn);
-    const curVar = SEL_PEN_VARIANTS.find((v) => v.id === editorState.selPen.variant) ?? SEL_PEN_VARIANTS[0];
-    const lbl2 = document.getElementById("selPenVarBtnLabel");
-    if (lbl2) lbl2.textContent = t(curVar.labelKey as Parameters<typeof t>[0]);
-    const vm = document.getElementById("selPenVarMenu");
-    if (vm) {
-      if (!penOn) vm.classList.add("hidden");
-      for (const b of vm.querySelectorAll<HTMLElement>("[data-selpen-var]")) {
-        b.setAttribute("aria-pressed", b.dataset.selpenVar === curVar.id ? "true" : "false");
-      }
-    }
-  }
-  document.getElementById("selPenSizeWrap")?.classList.toggle("hidden", !penOn);
+  // v0.7.26 选区笔走笔架：pen 子工具时放行左栏 size/opacity dial（写的是 toolStates.selPen——
+  //   lasso/fill 的 rack key 已映射；晚于 updateToolUI 的赋值 → 本行赢）
+  dialReactive.canDraw = editMode.canDraw() || (selToolActive && sub === "pen");
   // v0.7.2 算法配置扳手：magic 时显；弹出行按当前算法显隐 + 值同步（关掉时收弹出）
   const cfgBtn = document.getElementById("lassoAlgoCfgBtn");
   const cfgMenu = document.getElementById("lassoAlgoCfgMenu");
@@ -359,7 +341,8 @@ export function setTool(tool: string) {
   editMode.setTool(tool);   // emit wp:modechange → _syncEditModeUI 派生按钮高亮 / lasso 工具栏
   // 切工具 → 应用该工具的 per-tool state（size/flow/activeBrushId）+ preset 冻结字段
   //   shapeBrush alias 到 brush（getRackToolKey）：共享笔架 + 共享当前笔/dial（user：「笔和绘制用的笔刷共享笔架」）
-  if (tool === "brush" || tool === "eraser" || tool === "filterBrush" || tool === "shapeBrush") {
+  if (tool === "brush" || tool === "eraser" || tool === "filterBrush" || tool === "shapeBrush"
+      || tool === "lasso" || tool === "fill") {   // v0.7.26 选区笔：进 lasso/fill 灌 selPen dial
     rack.applyToolState(tool);
   }
   // v0.6.24：进选区/填色工具 → 灌该工具自己的持久化记录（fill 默认魔棒+并、selection 默认套索+新建；
@@ -635,6 +618,9 @@ export const RACK_PANEL_BY_TOOL: Record<string, string> = {
   eraser: PANELS.RACK_ERASER,
   filterBrush: PANELS.RACK_FILTER_BRUSH,    // v132
   shapeBrush: PANELS.RACK_BRUSH,            // ADR-0005：共享 brush 笔架
+  // v0.7.26 选区笔走笔架：lasso/fill 二次点工具钮 = 开选区笔笔架（getRackToolKey → "selPen" 列表）
+  lasso: PANELS.RACK_SEL_PEN,
+  fill: PANELS.RACK_SEL_PEN,
 };
 // （v0.6.24：_lastNonLassoTool 退役——lasso 二击 Esc 语义随组槽让位）
 
@@ -726,69 +712,8 @@ export function initToolbar(ctx: AppContext) {
     input.lasso.setMagicAlgorithm(b.dataset.lassoAlgo as Parameters<typeof input.lasso.setMagicAlgorithm>[0]);
     _selToolRec().algo = b.dataset.lassoAlgo!;   // v0.7.17 per-tool 持久化（user 授权）
   });
-  // v0.7.25 选区笔：变体组槽（文字下拉，SEL_PEN_VARIANTS SSoT）+ 笔径滑条（分段档位=brush-size
-  //   段表裁到各变体上限）。配置 per-doc（editorState.selPen），改 → 写 editorState + 灌 input 引擎。
-  const selPenVarBtn = byId("selPenVarBtn");
-  const selPenVarMenu = byId("selPenVarMenu");
-  for (const v of SEL_PEN_VARIANTS) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "lasso-tool-btn";
-    b.setAttribute("role", "menuitem");
-    b.dataset.selpenVar = v.id;
-    b.textContent = t(v.labelKey as Parameters<typeof t>[0]);
-    selPenVarMenu.appendChild(b);
-  }
-  const BRUSH_SEGS = [
-    { upTo: 20, step: 1 }, { upTo: 50, step: 2 }, { upTo: 100, step: 5 },
-    { upTo: 200, step: 10 }, { upTo: 500, step: 20 }, { upTo: 1000, step: 50 },
-  ];
-  const segsTo = (max: number) => {
-    const out: { upTo: number; step: number }[] = [];
-    let prev = 1;
-    for (const s of BRUSH_SEGS) {
-      if (max <= prev) break;
-      out.push({ upTo: Math.min(s.upTo, max), step: s.step });
-      prev = s.upTo;
-      if (s.upTo >= max) break;
-    }
-    return out;
-  };
-  const selPenVariantNow = (): "hard" | "ink" | "pixel" => {
-    const v = editorState.selPen.variant;
-    return v === "ink" || v === "pixel" ? v : "hard";
-  };
-  const selPenSizeField = (): "sizeHard" | "sizeInk" | "sizePixel" => {
-    const v = selPenVariantNow();
-    return v === "ink" ? "sizeInk" : v === "pixel" ? "sizePixel" : "sizeHard";
-  };
-  const pushSelPenToEngine = () => {
-    input.setSelPenConfig(selPenVariantNow(), editorState.selPen[selPenSizeField()]);
-  };
-  const rebuildSelPenSizeSlider = () => {
-    const variant = selPenVariantNow();
-    if (selPenSizeSlider && selPenSizeVariant === variant) {
-      selPenSizeSlider.set(editorState.selPen[selPenSizeField()]);
-      return;
-    }
-    if (selPenSizeSlider) { selPenSizeSlider.dispose(); selPenSizeSlider.el.remove(); }
-    const max = SEL_PEN_SIZE_MAX[variant];
-    selPenSizeSlider = makeRampSlider({
-      label: "", ariaLabel: t("la.penSize"), min: 1, max, step: 1,
-      value: editorState.selPen[selPenSizeField()], segments: segsTo(max),
-      onInput: (v) => { editorState.selPen[selPenSizeField()] = v; pushSelPenToEngine(); },
-    });
-    selPenSizeVariant = variant;
-    byId("selPenSizeWrap").appendChild(selPenSizeSlider.el);
-  };
-  wireSlotMenu(selPenVarBtn, selPenVarMenu, (b) => {
-    editorState.selPen.variant = b.dataset.selpenVar || "hard";
-    pushSelPenToEngine();
-    rebuildSelPenSizeSlider();
-  });
-  const syncSelPenUI = () => { rebuildSelPenSizeSlider(); pushSelPenToEngine(); };
-  window.addEventListener("wp:applyEditorState", syncSelPenUI);
-  syncSelPenUI();
+  // （v0.7.26：选区笔自有变体/笔径控件退役——配置全归笔架（rack key "selPen"），user：「别造轮子」。
+  //   笔选择 = 二次点 lasso/fill 工具钮开笔架 / 左栏 dial 笔名钮；粗细 = 左栏 dial（pen 子工具时放行）。）
   // ---- 形状笔上下文工具栏（ADR-0005）：组槽 + 约束。状态 per-doc（editorState.shapeBrush），UI 改 → 写
   //   editorState + 灌引擎；换文档 wp:applyEditorState 回灌（对齐魔棒阈值样板）。
   //   画一半切子工具/约束 = cancel 不进 undo（user 拍板，同两指手势接管语义）。

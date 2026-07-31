@@ -38,7 +38,7 @@ import { t } from "./i18n/index.ts";
 import { reportError } from "./error-badge.ts";
 
 // 惰性（不在模块 eval 期调 t()——那时 boot 门的 lang 还没 hydrate）：按 tool 现取标签。
-const toolLabel = (tool: string): string => tool === "eraser" ? t("br.toolEraser") : tool === "brush" ? t("br.toolBrush") : tool;
+const toolLabel = (tool: string): string => tool === "eraser" ? t("br.toolEraser") : tool === "brush" ? t("br.toolBrush") : (tool === "lasso" || tool === "fill") ? t("la.penSub") : tool;
 
 // 构造期依赖（早于 SSoT 块构造，故 editMode 走 thunk 避 TDZ；DOM/icons/panels 等晚绑走 init()）。
 export interface BrushRackDeps {
@@ -168,7 +168,14 @@ export class BrushRackController {
 
   // ---- 活动预设 ↔ tool dial 绑定 ----
   // shapeBrush alias 到 brush（ADR-0005）：形状笔共享笔架 + 共享当前笔/dial，零自有 toolState 持久化
-  getRackToolKey(tool: string) { return (tool === "airbrush" || tool === "shapeBrush") ? "brush" : tool; }
+  // v0.7.26 选区笔走笔架（user：「笔架不是有滤镜笔画画笔橡皮笔吗，加一个选区笔就行了」）：
+  //   lasso/fill 模式的 rack key = "selPen"（第四个 rack 工具类别；子工具 pen 消费 currentBrush，
+  //   其余子工具不吃笔——映射无副作用）
+  getRackToolKey(tool: string) {
+    if (tool === "airbrush" || tool === "shapeBrush") return "brush";
+    if (tool === "lasso" || tool === "fill") return "selPen";
+    return tool;
+  }
   defaultToolStateFor(tool: string) {
     const brush = defaultBrushForTool(this._view(), tool);
     if (brush) return { size: brush.size.base, opacity: 1.0, activeBrushId: brush.id, activeBrushName: brush.name };

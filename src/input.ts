@@ -42,8 +42,7 @@ import type { OperatorRegistry } from "./workpiece/operators.ts";
 import type { PixelEdits, PixelTx as PixelTxClass } from "./workpiece/pixel-tx.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import { Selection } from "./selection.ts";
-import { resolveSelPenBrush, stampsToBinaryGray8 } from "./sel-pen.ts";
-import type { SelPenVariant } from "./sel-pen.ts";
+import { selPenSettingsFrom, stampsToBinaryGray8 } from "./sel-pen.ts";
 
 // ---- 引擎真类型已全部 .ts 化，直接 import（见各引擎模块）。本文件仅保留以下接缝别名/最小壳。----
 // doc 现取 PaintDoc 真类型（board/lasso 都吃它）。
@@ -1027,13 +1026,20 @@ export class InputController {
     // v0.7.25 选区笔（子工具 "pen"）：down 即起笔——走笔刷引擎 buffered 生命周期（spacing/压感/
     //   taper/平滑动力学零重写，user：「不接 ResolvedBrush 才会屎山」），lasso 状态机不介入。
     //   全程不写任何 layer 像素（buffered 笔画活在 smoother buffer，抬笔才阈值化成选区）。
+    // v0.7.26 笔架化（user：「加一个选区笔就行了」）：吃 getResolvedBrush()——lasso/fill 的 rack key
+    //   已映射 "selPen"（第四类别，出厂三支：硬圆/勾线/像素），色带覆写在 selPenSettingsFrom。
     if (this.lasso.getSubTool() === "pen") {
       const { leaf } = this.doc.activeEditableLeaf();
       if (!leaf) { this.status("请先选中一个图层（选区笔预览需要锚点）"); rec.role = null; return; }
-      const settings = resolveSelPenBrush(this._selPenVariant, this._selPenSize);
+      const base = this.getResolvedBrush();
+      if (!base) { rec.role = null; return; }
+      const settings = selPenSettingsFrom(base);
+      this._selPenPixel = !!base.pixelMode;   // 抬笔走 Bresenham disc 精确落纸（像素笔手感）
       rec._lassoMode = "selpen";
       rec.rawToEngine = true;
-      rec.lastP = null;
+      // 压感/平滑状态锚定（v0.7.26 卡死修复：漏了 smP 初始化 → NaN 压感 → 引擎 spacing 死循环）
+      rec.lastRawX = rec.x; rec.lastRawY = rec.y;
+      rec.lastP = null; rec.smP = -1; rec.lastEventTs = -Infinity;
       const scale = this.board.viewport.scale || 1;
       const pressure = e ? effectivePressureFor(rec, e) : 0.5;
       this.brush.beginStroke(leaf as Layer, settings, dx, dy, pressure, "brush", _resolveSmooth(settings, scale), e?.timeStamp ?? performance.now());
@@ -1146,15 +1152,9 @@ export class InputController {
     if (!this.lasso.commit()) return;
     this.board.invalidateAll();
   }
-  // ---- v0.7.25 选区笔（lasso 子工具 "pen"）状态 + 出入口 ----
-  _selPenVariant: SelPenVariant = "hard";
-  _selPenSize = 30;
+  // ---- v0.7.25 选区笔（lasso 子工具 "pen"）状态 + 出入口；v0.7.26 配置全归笔架（无自有 knob）----
+  _selPenPixel = false;   // 起笔时记住笔架笔的 pixelMode（抬笔选 CPU disc 路径）
   _selPenLive = false;
-  /** toolbar 灌配置（editorState.selPen → 引擎；变体/尺寸持久化在 workbench-state） */
-  setSelPenConfig(variant: string, size: number) {
-    this._selPenVariant = variant === "ink" || variant === "pixel" ? variant : "hard";
-    this._selPenSize = Math.max(1, Math.round(size) || 1);
-  }
   selPenStrokeActive() { return this._selPenLive; }
   /** 抬笔：stamps → alpha → ≥128 二值 → setOp 合成（一笔一条 selectionChange；蚂蚁线此刻才更新=A 档拍板） */
   _endSelPen() {
@@ -1162,8 +1162,8 @@ export class InputController {
     this._selPenLive = false;
     const cs = this.brush.endStroke() ?? null;
     if (!cs || !cs.stamps.length) { this.board.requestRender(); return; }
-    // 硬圆/勾线 → GPU 光栅（软边阈值化）；像素变体/GL 不可用 → 引擎 Bresenham disc 同核 CPU 光栅
-    let mask = this._selPenVariant === "pixel" ? null : this.board.rasterizeStampsToMask(cs);
+    // 软边笔 → GPU 光栅（阈值化）；pixelMode 笔/GL 不可用 → 引擎 Bresenham disc 同核 CPU 光栅
+    let mask = this._selPenPixel ? null : this.board.rasterizeStampsToMask(cs);
     if (!mask) {
       const g = stampsToBinaryGray8(cs.stamps, cs.bx, cs.by, cs.bw, cs.bh,
         (buf, rw, rh, ox, oy, ix, iy, n) => this.brush.pixelDiscInto(buf, rw, rh, ox, oy, ix, iy, n, { r: 0, g: 0, b: 0 }, 1, "over"));
@@ -1541,7 +1541,9 @@ function effectivePressureFor(rec: PointerRec, ev: { pointerType?: string; press
       rec.lastP = raw;
     }
   }
-  if (rec.smP! < 0) rec.smP = raw;
+  // v0.7.26 硬化：smP 未初始化/NaN 一律重置（v0.7.25 选区笔漏初始化 → NaN 压感 → 引擎 spacing
+  //   走步 while(true) 的 break 条件遇 NaN 永假 → 鼠标一点就死循环。负号哨兵语义不变。
+  if (!(rec.smP! >= 0)) rec.smP = raw;
   else rec.smP! += SMOOTH.pressureAlpha * (raw - rec.smP!);
   return rec.smP!;
 }
