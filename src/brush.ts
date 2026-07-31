@@ -419,6 +419,10 @@ export class BrushEngine {
     }
   }
   // 一颗像素圆盘（Bresenham disc，#28 语义原样）写进区域缓冲。(ix,iy)=落格左上（doc），(ox,oy)=区域原点。
+  // v0.7.25 公开薄口：选区笔像素变体复用同一 disc 核（sel-pen.stampsToBinaryGray8 注入用，防第二份圆栅格）。
+  pixelDiscInto(buf: Uint8ClampedArray, rw: number, rh: number, ox: number, oy: number, ix: number, iy: number, intSize: number, rgb: { r: number; g: number; b: number }, as: number, comp: "over" | "erase" | "atop") {
+    this._pixelDiscInto(buf, rw, rh, ox, oy, ix, iy, intSize, rgb, as, comp);
+  }
   private _pixelDiscInto(buf: Uint8ClampedArray, rw: number, rh: number, ox: number, oy: number, ix: number, iy: number, intSize: number, rgb: { r: number; g: number; b: number }, as: number, comp: "over" | "erase" | "atop") {
     const clip = (px: number, py: number, n: number) => {
       if (py < 0 || py >= rh) return;

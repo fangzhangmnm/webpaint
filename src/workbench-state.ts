@@ -160,6 +160,8 @@ function freshGroups() {
     //   v0.7.17：算法 per-tool 持久化（user 拍板：油漆桶默认线稿闭合、选区魔棒默认像素精确 flood）
     lassoTool:     { sub: "freehand" as string, setOp: "new" as string, constrainSquare: false, algo: "classic" as string },
     fillTool:      { sub: "magic" as string, setOp: "union" as string, constrainSquare: false, algo: "lineart" as string },
+    // v0.7.25 选区笔（lasso/fill 共用子工具 "pen"）：变体 + per-变体笔径（不进笔架/云同步，per-doc 跟 ora）
+    selPen:        { variant: "hard" as string, sizeHard: 30, sizeInk: 8, sizePixel: 1 },
     // ADR-0005/0006 形状笔：子工具 + **per-图形约束**（user：每个图形的 lock 分别持久化，默认全不锁）
     //   + grid 配置（默认 2×6 = 6 头身 + 中线，border 关）
     shapeBrush:    { sub: "line" as string, constrainLine: false, constrainRect: false, constrainCircle: false, gridNu: 2, gridNv: 6, gridBorder: false },
@@ -279,6 +281,13 @@ export const editorState = {
     get setOp(): string { return S.g.lassoTool.setOp; }, set setOp(v: string) { S.g.lassoTool.setOp = v; },
     get constrainSquare(): boolean { return S.g.lassoTool.constrainSquare; }, set constrainSquare(v: boolean) { S.g.lassoTool.constrainSquare = v; },
     get algo(): string { return S.g.lassoTool.algo; }, set algo(v: string) { S.g.lassoTool.algo = v; },
+  },
+  // v0.7.25 选区笔
+  selPen: {
+    get variant(): string { return S.g.selPen.variant; }, set variant(v: string) { S.g.selPen.variant = v; },
+    get sizeHard(): number { return S.g.selPen.sizeHard; }, set sizeHard(v: number) { S.g.selPen.sizeHard = v; },
+    get sizeInk(): number { return S.g.selPen.sizeInk; }, set sizeInk(v: number) { S.g.selPen.sizeInk = v; },
+    get sizePixel(): number { return S.g.selPen.sizePixel; }, set sizePixel(v: number) { S.g.selPen.sizePixel = v; },
   },
   fillTool: {
     get sub(): string { return S.g.fillTool.sub; }, set sub(v: string) { S.g.fillTool.sub = v; },

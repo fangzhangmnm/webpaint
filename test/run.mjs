@@ -22,6 +22,7 @@ import "./pixel-conic.test.mjs";       // 像素透视圆：Zingl 有理二次 B
 import "./polygon-lasso.test.mjs";     // 多边形套索：整数扫描线栅格器 + 会话两级 abort
 import "./similar-select.test.mjs";    // v0.7.21 同色全图内核 + OKLab/RGB 颜色度量（color-dist）
 import "./ramp-seg.test.mjs";          // v0.7.22 ramp-slider 分段步长模式（与 brush-size 段表互证）
+import "./sel-pen.test.mjs";           // v0.7.25 选区笔：变体装配 + disc 同核光栅 + 引擎动力学全链
 import "./iso-frame.test.mjs";         // isometric 透视模式：纯平行三轴/仿射度量/box
 import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";

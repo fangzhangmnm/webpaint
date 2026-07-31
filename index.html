@@ -661,6 +661,10 @@
                值按当前算法路由 editorState.magicWand.threshold / similarThreshold（toolbar 侧接线）。
                v0.7.22：本体 = ramp-slider 分段模式（JS 挂载，原生 range 退役——线性低端太粗且 iPad 无 shift 细调） -->
           <span class="lasso-tol-inline hidden" id="lassoTolWrap"></span>
+          <!-- v0.7.25 选区笔上下文控件：变体组槽（硬圆/勾线/像素文字下拉）+ 笔径滑条（ramp-slider
+               分段档位，段表=brush-size 同款裁到各变体上限；pen 子工具时显） -->
+          <button class="lasso-tool-btn lasso-tool-select lasso-slot hidden" id="selPenVarBtn" type="button" data-i18n-title="la.penVarSel" aria-haspopup="true"><span id="selPenVarBtnLabel"></span><svg class="lasso-slot-caret" viewBox="0 0 8 8" aria-hidden="true"><path d="M7.2 2.8 V7.2 H2.8 Z" fill="currentColor" stroke="none"/></svg></button>
+          <span class="lasso-tol-inline hidden" id="selPenSizeWrap"></span>
           <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#constrain-ratio"/></svg></button>
           <!-- v0.5.12 行尾动作组：变换（选区工具）/ ⋯（低频操作收纳）/ 去选（高频，=fill 的 cancel）/ ✓（fill） -->
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
@@ -755,6 +759,8 @@
     <div class="lasso-icon-menu lasso-icon-list hidden" id="menuLanguageMenu" role="menu"></div>
     <!-- v0.7.8 魔棒算法弹出（lassoAlgoBtn 组槽；文字行，选项 JS 从 MAGIC_ALGORITHMS SSoT 填） -->
     <div class="lasso-icon-menu lasso-icon-list hidden" id="lassoAlgoMenu" role="menu" data-i18n-aria="la.algoSel"></div>
+    <!-- v0.7.25 选区笔变体弹出（selPenVarBtn 组槽；文字行，选项 JS 从 SEL_PEN_VARIANTS SSoT 填） -->
+    <div class="lasso-icon-menu lasso-icon-list hidden" id="selPenVarMenu" role="menu" data-i18n-aria="la.penVarSel"></div>
     <div class="lasso-icon-menu hidden" id="lassoSetOpMenu" role="menu" data-i18n-aria="la.setOpSlot">
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="new" type="button" role="menuitem" data-i18n-title="la.new"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-new"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-setop="union" type="button" role="menuitem" data-i18n-title="la.union"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-union"/></svg></button>
@@ -858,6 +864,8 @@
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="ellipse" type="button" role="menuitem" data-i18n-title="la.ellipse"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-ellipse"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="polygon" type="button" role="menuitem" data-i18n-title="la.polygon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-polygon"/></svg></button>
       <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="magic" type="button" role="menuitem" data-i18n-title="la.magic"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#magic-wand"/></svg></button>
+      <!-- v0.7.25 选区笔（与魔棒平级，user 拍板）：暂借 #pencil，select-pen 已登记 SVG Icons/TODO.md -->
+      <button class="lasso-tool-btn lasso-tool-icon" data-lasso-sub="pen" type="button" role="menuitem" data-i18n-title="la.penSub"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#pencil"/></svg></button>
     </div>
 
     <!-- v242 选区扩张/收缩 modal：走 adjust 逻辑（transient + 实时预览），数字输入 -->
@@ -1439,6 +1447,6 @@
     <!-- v121：esbuild 打成单 bundle，文件名带 content-hash。
          hash 变 = URL 变 = 浏览器自动拿新版，不可能撞 stale cache。
          build.sh 会 sed 改下面这行的文件名。 -->
-    <script type="module" src="./dist/webpaint-e25cdd4e3a22.mjs"></script>
+    <script type="module" src="./dist/webpaint-72827da37d24.mjs"></script>
   </body>
 </html>

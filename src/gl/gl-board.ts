@@ -53,6 +53,16 @@ export class GLBoard {
     return this._tree.commitBrushStroke(leafId, pixels, ov, docW, docH, apply);
   }
 
+  // v0.7.25 选区笔：stamps → bbox RGBA 字节（纯光栅，不进树）。GL lost → null（调用方走 CPU disc 回退）。
+  rasterizeStampsToBytes(
+    stamps: Parameters<RenderTreeGL["rasterizeStampsToBytes"]>[0],
+    shape: Parameters<RenderTreeGL["rasterizeStampsToBytes"]>[1],
+    bx: number, by: number, bw: number, bh: number,
+  ): Uint8ClampedArray | null {
+    if (this._glctx.isLost) return null;
+    return this._tree.rasterizeStampsToBytes(stamps, shape, bx, by, bw, bh);
+  }
+
   // S9 导出/缩略图合成面：一次性合成 → canvas（透明底）。GL lost → null（调用方兜）。
   compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement | null {
     if (this._glctx.isLost) return null;

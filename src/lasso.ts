@@ -56,7 +56,9 @@ type LassoState =
   | "magic-drag"
   | "drawing-polygon"
   | "floating";
-type SubTool = "freehand" | "rect" | "ellipse" | "polygon" | "magic";
+// v0.7.25 pen=选区笔（与魔棒平级，user 拍板）：手势生命周期在 input 侧走笔刷引擎（lasso 状态机零介入），
+//   抬笔经 _applySelectionUpdate 回到本类的选区合成契约。老版本读到 "pen" → beginPath fallthrough 软坏不崩。
+type SubTool = "freehand" | "rect" | "ellipse" | "polygon" | "magic" | "pen";
 type SetOpMode = "new" | "union" | "subtract" | "intersect";
 export type MagicAlgorithm = "classic" | "lineart" | "similar";
 // 魔棒算法下拉的 SSoT（transform 采样 RESAMPLE_MODES 同款）：以后加算法（EDT-Dijkstra/AI）只改这里+引擎分叉

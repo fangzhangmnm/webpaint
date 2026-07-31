@@ -160,6 +160,24 @@ export class RenderTreeGL {
     this._dirty = true;
   }
 
+  // v0.7.25 选区笔：一笔 stamps → bbox 预乘 RGBA 字节（α=覆盖度；调用方阈值化成二值选区）。
+  //   不进树、不碰 tile/overlay 状态、不 merge base——只借光栅器 + 一次 readPixels，FBO 即借即还。
+  //   行序 = doc 行序（栅格器约定「doc-y 1:1 不翻」，同 commit 的 readPixels）。
+  rasterizeStampsToBytes(
+    stamps: StampOverlayInput["stamps"], shape: StampOverlayInput["shape"],
+    bx: number, by: number, bw: number, bh: number,
+  ): Uint8ClampedArray | null {
+    if (!stamps.length || bw <= 0 || bh <= 0) return null;
+    const gl = this._glctx.gl;
+    const fbo = this._rasterizer.rasterize(stamps, shape, bx, by, bw, bh, null);
+    const px = new Uint8Array(bw * bh * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
+    gl.readPixels(0, 0, bw, bh, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this._glctx.returnFBO(fbo);
+    return new Uint8ClampedArray(px.buffer);
+  }
+
   // ---- S8 brush commit（spec:199-205）：merge(base tiles ⊕ stroke) 复用 live 同一 overlay shader
   //   （SSOT：mode=source-over、opacity=1、透明底 → 输出恰为合成好的新图层数据）→ bbox 一次 readPixels
   //   → apply 回调（Layer.applyRegionDiff，只封真变 tile）→ 变更 tile 从 merged FBO 直拷入池 +

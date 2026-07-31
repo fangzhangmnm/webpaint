@@ -41,7 +41,9 @@ import type { Workpiece } from "./workpiece/workpiece.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
 import type { PixelEdits, PixelTx as PixelTxClass } from "./workpiece/pixel-tx.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
-import type { Selection } from "./selection.ts";
+import { Selection } from "./selection.ts";
+import { resolveSelPenBrush, stampsToBinaryGray8 } from "./sel-pen.ts";
+import type { SelPenVariant } from "./sel-pen.ts";
 
 // ---- 引擎真类型已全部 .ts 化，直接 import（见各引擎模块）。本文件仅保留以下接缝别名/最小壳。----
 // doc 现取 PaintDoc 真类型（board/lasso 都吃它）。
@@ -591,7 +593,7 @@ export class InputController {
       }
     } else if (role === "lasso") {
       this.board.setCursor(null);
-      this._beginLasso(rec);
+      this._beginLasso(rec, e);
     } else if (role === "pick") {
       this._doPick(x, y);
     } else if (role === "pan") {
@@ -755,6 +757,16 @@ export class InputController {
           this.lasso.beginPath(rec._lassoStartDocX!, rec._lassoStartDocY!);
           this.lasso.extendPath(dx, dy);
         }
+      } else if (rec._lassoMode === "selpen") {
+        // v0.7.25 选区笔：吃 coalesced（引擎平滑要密点）；预览=stamp overlay 色带（provider 拉取）
+        const evs = (e.getCoalescedEvents?.() ?? [e]);
+        for (const ev of evs) {
+          const { x: mx, y: my } = this.board.screenToDoc(ev.clientX, ev.clientY);
+          this.brush.extendStroke(mx, my, effectivePressureFor(rec, ev), ev.timeStamp);
+        }
+        const bbox = this.brush.flushDirty();
+        if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
+        this.board.requestRender();
       } else if (rec._lassoMode === "magic-drag") {
         try {
           if (this.lasso.magicDragStep(dx, dy, this.doc.getFloodSourceLayer())) this.board.invalidateAll();
@@ -940,6 +952,11 @@ export class InputController {
   // GPU stamp overlay 拉取口（app 接给 board.setStampProvider）：当前活动引擎的 stamps。
   //   brush 与形状笔都有 collectStamps；liquify/filterBrush 无（in-place，走 live-sync）。
   collectActiveStamps(): ReturnType<BrushEngine["collectStamps"]> {
+    // v0.7.25 选区笔：同一 overlay 拉取口出色带预览（selPenBand 旗 → board 跳过 selMask/lockAlpha 裁剪）
+    if (this._selPenLive) {
+      const cs = this.brush.collectStamps();
+      return cs ? (Object.assign(cs, { selPenBand: true }) as typeof cs) : null;
+    }
     const eng = this._activeStroke?.engine as { collectStamps?: () => ReturnType<BrushEngine["collectStamps"]> } | undefined;
     return eng?.collectStamps?.() ?? null;
   }
@@ -993,7 +1010,7 @@ export class InputController {
   //     freehand → drawing-freehand
   //     rect     → drawing-rect
   //     magic    → magic-tentative（pointerup 时立即 flood fill）
-  _beginLasso(rec: PointerRec) {
+  _beginLasso(rec: PointerRec, e?: PointerEvent) {
     if (!this.doc.activeLayer) { rec.role = null; return; }
     const { x: dx, y: dy } = this.board.screenToDoc(rec.x, rec.y);
     if (this.lasso.state() === "floating") {
@@ -1007,11 +1024,31 @@ export class InputController {
       rec.role = null;
       return;
     }
+    // v0.7.25 选区笔（子工具 "pen"）：down 即起笔——走笔刷引擎 buffered 生命周期（spacing/压感/
+    //   taper/平滑动力学零重写，user：「不接 ResolvedBrush 才会屎山」），lasso 状态机不介入。
+    //   全程不写任何 layer 像素（buffered 笔画活在 smoother buffer，抬笔才阈值化成选区）。
+    if (this.lasso.getSubTool() === "pen") {
+      const { leaf } = this.doc.activeEditableLeaf();
+      if (!leaf) { this.status("请先选中一个图层（选区笔预览需要锚点）"); rec.role = null; return; }
+      const settings = resolveSelPenBrush(this._selPenVariant, this._selPenSize);
+      rec._lassoMode = "selpen";
+      rec.rawToEngine = true;
+      rec.lastP = null;
+      const scale = this.board.viewport.scale || 1;
+      const pressure = e ? effectivePressureFor(rec, e) : 0.5;
+      this.brush.beginStroke(leaf as Layer, settings, dx, dy, pressure, "brush", _resolveSmooth(settings, scale), e?.timeStamp ?? performance.now());
+      this._selPenLive = true;
+      const bbox = this.brush.flushDirty();
+      if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);
+      this.board.requestRender();
+      return;
+    }
     rec._lassoMode = "tentative";
     rec._lassoStartDocX = dx;
     rec._lassoStartDocY = dy;
   }
   _endLasso(rec: PointerRec) {
+    if (rec._lassoMode === "selpen") { this._endSelPen(); return; }
     if (this.lasso.getSubTool() === "polygon" && (rec._lassoMode === "drawing" || rec._lassoMode === "tentative")) {
       this._polygonUp(rec);   // 多边形：一笔=落一个顶点（首笔 p1→p2 连落两个）；点回起点=闭合
       return;
@@ -1109,7 +1146,46 @@ export class InputController {
     if (!this.lasso.commit()) return;
     this.board.invalidateAll();
   }
+  // ---- v0.7.25 选区笔（lasso 子工具 "pen"）状态 + 出入口 ----
+  _selPenVariant: SelPenVariant = "hard";
+  _selPenSize = 30;
+  _selPenLive = false;
+  /** toolbar 灌配置（editorState.selPen → 引擎；变体/尺寸持久化在 workbench-state） */
+  setSelPenConfig(variant: string, size: number) {
+    this._selPenVariant = variant === "ink" || variant === "pixel" ? variant : "hard";
+    this._selPenSize = Math.max(1, Math.round(size) || 1);
+  }
+  selPenStrokeActive() { return this._selPenLive; }
+  /** 抬笔：stamps → alpha → ≥128 二值 → setOp 合成（一笔一条 selectionChange；蚂蚁线此刻才更新=A 档拍板） */
+  _endSelPen() {
+    if (!this._selPenLive) return;
+    this._selPenLive = false;
+    const cs = this.brush.endStroke() ?? null;
+    if (!cs || !cs.stamps.length) { this.board.requestRender(); return; }
+    // 硬圆/勾线 → GPU 光栅（软边阈值化）；像素变体/GL 不可用 → 引擎 Bresenham disc 同核 CPU 光栅
+    let mask = this._selPenVariant === "pixel" ? null : this.board.rasterizeStampsToMask(cs);
+    if (!mask) {
+      const g = stampsToBinaryGray8(cs.stamps, cs.bx, cs.by, cs.bw, cs.bh,
+        (buf, rw, rh, ox, oy, ix, iy, n) => this.brush.pixelDiscInto(buf, rw, rh, ox, oy, ix, iy, n, { r: 0, g: 0, b: 0 }, 1, "over"));
+      mask = { x: cs.bx, y: cs.by, w: cs.bw, h: cs.bh, g };
+    }
+    let any = false;
+    for (let i = 0; i < mask.g.length; i++) if (mask.g[i]) { any = true; break; }
+    if (!any) { this.board.requestRender(); return; }
+    const sel = Selection.fromGray8Region(mask.x, mask.y, mask.w, mask.h, mask.g);
+    if (!sel) { this.board.requestRender(); return; }
+    const entry = this.lasso._applySelectionUpdate(sel);
+    if (entry) this._pushSelEntry(entry);
+    this.board.invalidateAll();
+  }
+  _abortSelPen() {
+    if (!this._selPenLive) return;
+    this._selPenLive = false;
+    this.brush.cancelStroke();
+    this.board.requestRender();
+  }
   _abortLasso() {
+    this._abortSelPen();   // v0.7.25：双指手势/pointercancel 里选区笔无痕丢弃（同 cancelDrawing 语义）
     // floating（变换中）→ 还原 pre-snapshot
     if (this.lasso.state() === "floating") {
       this.lasso.cancel();

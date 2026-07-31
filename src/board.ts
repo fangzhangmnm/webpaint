@@ -696,11 +696,13 @@ export class Board {
   // StampCollect → GPU overlay 输入（live 每帧 + commit 共用一个构造 = 同源输入喂同一 shader）。
   //   selection/lockAlpha/erase/blendMode/Π-outer opacity 全在 shader 内（live 即 commit 所见）。
   _overlayInputFrom(cs: NonNullable<StampCollect>): StampOverlayInput {
-    const sel = this.doc.selection;
+    // v0.7.25 选区笔色带：预览不吃旧选区裁剪（union 正是要往选区外画）、不吃 lockAlpha
+    const band = !!(cs as { selPenBand?: boolean }).selPenBand;
+    const sel = band ? null : this.doc.selection;
     return {
       stamps: cs.stamps, shape: cs.shape, bx: cs.bx, by: cs.by, bw: cs.bw, bh: cs.bh,
       layerId: cs.layer.id, opacity: cs.opacity, erase: cs.mode === "erase", blendMode: cs.blendMode,
-      lockAlpha: !!cs.layer.lockAlpha,
+      lockAlpha: band ? false : !!cs.layer.lockAlpha,
       selMask: sel ? (() => { const m = (sel as Selection).bboxMask(); return { data: m.data, ox: m.x, oy: m.y, ow: m.w, oh: m.h }; })() : null,
     };
   }
@@ -712,12 +714,24 @@ export class Board {
     const brush = (cs && cs.stamps.length) ? this._overlayInputFrom(cs) : null;
     const fill = this._glFillOverlay();
     if (brush && fill) {
-      // 结构上不可达（fill 只在 lasso 模式 active，lasso canDraw=false 起不了 stroke）。真到了=接线坏了，
-      //   响亮报错并取 brush（别哑着渲染错误合成）。
+      // v0.7.25：fill 工具里用选区笔（有选区 → fill 预览 active）时两者合法共存——色带优先，
+      //   抬笔选区并入后 fill 预览自然跟上。非色带撞车仍是接线坏了，响亮报错。
+      if ((cs as { selPenBand?: boolean } | null)?.selPenBand) return brush;
       reportError(new Error("[board] stamp overlay 与 fill overlay 同时非空——edit-mode 互斥被破坏"), "warning");
       return brush;
     }
     return brush ?? fill;
+  }
+
+  // v0.7.25 选区笔抬笔出口：stamps → GPU 光栅 → α≥128 二值 gray8（选区恒二值不变量）。
+  //   GL 不可用 → null（调用方走 CPU disc 回退）。
+  rasterizeStampsToMask(cs: NonNullable<StampCollect>): { x: number; y: number; w: number; h: number; g: Uint8Array } | null {
+    if (!this._glBoard || !cs.stamps.length || cs.bw <= 0 || cs.bh <= 0) return null;
+    const px = this._glBoard.rasterizeStampsToBytes(cs.stamps, cs.shape, cs.bx, cs.by, cs.bw, cs.bh);
+    if (!px) return null;
+    const g = new Uint8Array(cs.bw * cs.bh);
+    for (let i = 0; i < g.length; i++) g[i] = px[i * 4 + 3] >= 128 ? 255 : 0;
+    return { x: cs.bx, y: cs.by, w: cs.bw, h: cs.bh, g };
   }
 
   // v0.5.11 fill-mode：填色预览 provider（fill-mode.ts 注入；active 才返 {color, layer}）。
