@@ -10,8 +10,7 @@
 // 开关：URL ?nostore 或 localStorage "webpaint.nostore"="1"（体检/mhtml 排练用；正常用户永远走真 store）。
 // ⚠ 本文件是接缝（与 app-store.ts 同级），只准 import store 的**类型**——零 store 运行时代码、零 IDB。
 
-import type { Collection, CollectionEntry, ReconcileResult } from "./store/collection.ts";
-import type { Store } from "./store/create-store.ts";
+import type { Collection, CollectionEntry, ReconcileResult, Store } from "./store/index.ts";
 
 export function detectStoreAbsent(): boolean {
   try {

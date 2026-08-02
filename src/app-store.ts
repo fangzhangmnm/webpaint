@@ -4,7 +4,7 @@
 //   （localSettings/syncedSettings 那两面已于 2026-07-13 删除 —— 全部 KV 化进 collection。别照旧注释找。）
 import { createStore, createOneDriveProvider, isCached, isDirty } from "./store/index.ts";
 import { detectStoreAbsent, createNullStore, createDormantAuth } from "./store-absent.ts";
-import type { Store } from "./store/create-store.ts";
+import type { Store } from "./store/index.ts";
 import { stripSessionExt, sessionFileName } from "./config.ts";
 import { storeUI } from "./store-ui.ts";
 import { CLIENT_ID, SCOPES } from "./config.ts";

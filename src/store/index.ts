@@ -12,7 +12,7 @@ export type { Item, SyncState, ListContext } from "./listing.ts";
 export { isCached, isDirty } from "./listing.ts";
 export type { Bytes } from "./types.ts";   // 字节别名（host adapter 的类型用；不暴露内部文件路径）
 // 加密：**裸字节**级的面走 store.encryption（有 name 的场景走 file.*）；EncryptedBlob 是 at-rest 密文的 branded 类型。
-export type { Collection, CollectionEntry } from "./collection.ts";
+export type { Collection, CollectionEntry, ReconcileResult } from "./collection.ts";
 // 本地缓存 adapter（host 装配 createStore 时注入 local 用；prod=idb）。
 export { createLocalCache } from "./local-cache.ts";
 
