@@ -109,6 +109,33 @@ describe("栈完整性 · ② 修后合规：import 形状（像素先填 + AddL
   });
 });
 
+describe("栈完整性 · ③ v0.7.41 导入=一个 undo 整点（addLayer 微步 + liftFloat 封口）", () => {
+  it("单次 undo：浮层与导入层一起消失、active 复位；单次 redo 全回放", () => {
+    const { doc, w, h, ops, ft, unrec } = mk();
+    const src = fillBuf(32, 32);
+    const prevActiveId = doc.activeLayer?.id ?? null;
+    // —— v0.7.41 起 import 的合规形状：checkpoint:false 微步 + lift 封口 ——
+    const L3 = doc.addLayer("imported");
+    L3.replaceFromBytes(src, 100, 100, 32, 32);
+    const loc = doc.locateNode(L3.id);
+    const st = h.run(w, ops.addLayer,
+      { layerId: L3.id, index: loc.index, parentId: loc.parentId, prevActiveId, layerName: L3.name },
+      { checkpoint: false });
+    assert(st.ok, "addLayer 微步入栈");
+    eq(ft.lift(L3, { fallbackFullLayer: true }), true, "liftFloat 默认封口 → 整组闭合");
+    h.undo(w);                                           // 只按一次
+    eq(w.readFloatState(), null, "一次 undo：浮层消失");
+    eq(hasLayer(doc, L3.id), false, "一次 undo：导入层同整点消失");
+    eq(doc.activeLayer?.id, prevActiveId, "active 回导入前");
+    h.redo(w);                                           // 只按一次
+    eq(hasLayer(doc, L3.id), true, "一次 redo：层带像素回放");
+    assert(w.readFloatState(), "一次 redo：浮层回来");
+    const back = flattenLeaves(doc.layers).find((l) => l.id === L3.id);
+    eq(back.pixels.isEmpty(), true, "redo 后像素在浮层里（层挖空）——lift 状态完整回放");
+    eq(unrec(), 0, "全程零 unrecoverable");
+  });
+});
+
 // 测试卫生：统一释放
 describe("undo-stack-integrity 收尾", () => {
   it("清栈、收浮层并释放本文件的 doc tiles", () => {

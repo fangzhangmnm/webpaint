@@ -165,6 +165,9 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
     w = choice.w; h = choice.h;
     imgSmoothing = choice.mode === "nearest" ? "low" : "high";
   }
+  // v0.7.41 先切工具再动 doc：setTool 可能触发 fill 的「切出=commit」整点——必须落在导入前的
+  // 活动层上。此前顺序是先加层再切换，fill 的 pending 预览会被填到刚导入的层上（latent bug）。
+  setTool("lasso");
   // 新建空层（prevActiveId 先拍：undo 摘层时 active 回到导入前的层）
   const prevActiveId = doc.activeLayer?.id ?? null;
   const layer = doc.addLayer(file.name.replace(/\.[^.]+$/, ""));
@@ -188,9 +191,12 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   // selection-ops copy 模式）。此前这里裸加层不记账 + 伪造 wp:histchange —— 后续 lift 却进栈，
   // 栈引用了历史不知道的层：undo 跨树操作会静默销毁该层 / redo 找不到层 → 整栈被弃。
   // 真 history.run 自会派 wp:histchange（app.ts onChange）驱动编辑门，无需手工标脏。
+  // v0.7.41（user：「导入和进 transform 只要一个 undo checkpoint」）：本步 checkpoint:false 微步，
+  // 由紧随其后的 liftFloat（默认封口）把 [addLayer, liftFloat] 封成一个整点——一次 undo 整个导入消失。
   const loc = doc.locateNode(layer.id)!;
   const st = history.run(workpiece, ops.addLayer,
-    { layerId: layer.id, index: loc.index, parentId: loc.parentId, prevActiveId, layerName: layer.name });
+    { layerId: layer.id, index: loc.index, parentId: loc.parentId, prevActiveId, layerName: layer.name },
+    { checkpoint: false });
   if (!st.ok) reportError(new Error("[import] addLayer record failed: " + st.msg), "error");
   renderLayersPanel();
   board.invalidateAll();
@@ -201,7 +207,6 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   //   lift 本就清选区，省一条不进栈的裸赋值）。
   try {
     {
-      setTool("lasso");
       const ok = input.lasso.liftSelectionForTransform(layer, { fallbackFullLayer: true, ignoreSelection: true });
       if (ok) {
         (editMode.enterTransient as (n: string, o?: TransientOpts) => void)("transform", { apply: _commitTransform, abort: _cancelTransform });
@@ -214,6 +219,8 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
       }
     }
   } catch (e) { reportError(new Error("[import auto-transform] " + String(e)), "log"); }
+  // lift 没走成（拒绝/异常）：addLayer 微步还敞着口——补封，别让它漏进下一个动作的整点
+  history.sealCheckpoint();
   setStatus(t("mi.importedAsLayer", { name: file.name }));
 }
 

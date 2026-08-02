@@ -33,6 +33,7 @@ import "./undo-history.test.mjs";
 import "./operators.test.mjs";
 import "./pixel-tx-noop.test.mjs";
 import "./float-ops.test.mjs";     // S6：float 入 workpiece（lift/transform/reject/accept 整链 + 所有权/驱逐）
+import "./undo-stack-integrity.test.mjs";   // v0.7.35 栈引用完整性（import 越狱病理钉子 + 合规形状 + v0.7.41 单整点）
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
 import "./liquify-docspace-mask.test.mjs";
