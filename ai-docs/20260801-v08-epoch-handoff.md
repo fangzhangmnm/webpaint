@@ -143,3 +143,12 @@
   copyImageToClipboard、psd、reference.setLiveSource/toggleLive、doc-render/board 合成面、
   doc.ts 树读 helper（eachLeaf/flattenLeaves/findNodeById/countLeaves）、OraDoc/EncodeDoc.layers。
 - `readDoc()` 留作 workpiece 的引擎级只读 escape（floating-transform 两处消费；返回 Readonly，无写险）。
+
+### S4 ✅ v0.8.4：割3 dev 断言（write-gate）
+- `src/workpiece/write-gate.ts`：可重入计数窗口 + violation handler。PaintDoc **26 个 mutator 入口**
+  全部 `assertDocWrite`（configureMemory 豁免=引擎内存配置；字段写不在 S4 射程——DocView readonly 已封）。
+- 窗口开启者白名单：Workpiece 锁（_acquireLock/_releaseLock）、LayerTree（创建段/treeTx mutate 段/
+  setActive）、doc-ops.runDocTransform（applyFn 段）、session-state 装载写（docWriteWindow 包裹）。
+- 组合根武装：dev 渠道（localhost / /dev/ 路径）throw fail-fast；prod reportError warning 不炸用户；
+  **node 不武装**（引擎级测试直捅 doc 合法；gate 行为锁 = `test/write-gate.test.mjs`，测试内 arm/finally disarm）。
+- 开了就不再关（handoff §2-S4 原话）。

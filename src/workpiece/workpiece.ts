@@ -14,6 +14,7 @@
 
 import type { PaintDoc } from "../doc.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
+import { enterDocWrite, exitDocWrite } from "./write-gate.ts";
 import type { UndoHistory } from "./undo-history.ts";
 import type { LayerTree } from "./layer-tree.ts";
 import type { SelectionFace } from "./selection-face.ts";
@@ -125,12 +126,14 @@ export class Workpiece {
       throw new Error(`Workpiece: 写锁冲突——"${this._lockHolder}" 持有中，"${holder}" 被拒（operator 禁止嵌套/并发）`);
     }
     this._lockHolder = holder;
+    enterDocWrite();   // S4 割3：锁内 = 合法写窗口
   }
   _releaseLock(holder: string): void {
     if (this._lockHolder !== holder) {
       throw new Error(`Workpiece: 释放非自己持有的锁（holder=${String(this._lockHolder)}, releaser=${holder}）`);
     }
     this._lockHolder = null;
+    exitDocWrite();
   }
   _isLocked(): boolean { return this._lockHolder !== null; }
   _bumpCommit(): void { this._commitVersion++; this.isDirty = true; }

@@ -6,6 +6,7 @@
 // app.js 短路成：import { initDocOps, _updateMenuCropLabel } + setRuntime 后调 initDocOps()。
 
 import { els } from "./els.ts";
+import { docWriteWindow } from "./workpiece/write-gate.ts";
 import { bumpDoc } from "./signals.ts";
 import { t } from "./i18n/index.ts";
 import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } from "./crop-geometry.ts";
@@ -54,7 +55,7 @@ function _pushDocTransform(before: DocSnap, after: DocSnap, label: string) {
 // applyFn 内改 doc + 可选 viewport shift（必须在 after 快照前完成，故放进 applyFn）。
 export function runDocTransform(label: string, applyFn: () => void) {
   const before = _captureDocBefore();
-  applyFn();
+  docWriteWindow(applyFn);   // S4 割3：tx 信封的 apply 段 = 声明写窗口
   const after = _captureDocAfter();
   _pushDocTransform(before, after, label);
 }

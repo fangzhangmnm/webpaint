@@ -25,6 +25,7 @@ import { UndoHistory } from "./workpiece/undo-history.ts";
 import { makeOperators } from "./workpiece/operators.ts";
 import { LayerTree } from "./workpiece/layer-tree.ts";
 import { SelectionFace } from "./workpiece/selection-face.ts";
+import { armDocWriteGate } from "./workpiece/write-gate.ts";
 import { PixelEdits } from "./workpiece/pixel-tx.ts";
 import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
@@ -190,7 +191,7 @@ const _tileJobs = initTileJobs();
 // S9：doc→合成像素的唯一生产面接 GL board（导出/缩略图/mergedimage/PSD/参考窗镜像共用）。
 setDocCompositor((nodes, w, h) => board.compositeNodesToCanvas(nodes, w, h));   // interval + input 监听有 disposer（app-boot 测试要拆，否则 node 挂死）
 setDocCompositorBytes((nodes, w, h) => board.compositeNodesToBytes(nodes, w, h));   // v0.6.39 字节面（merge-down 等字节 op）
-(globalThis as { __wpBootTeardown?: Array<() => void> }).__wpBootTeardown = [_disposeSizeKeyboard, _tileJobs.dispose];
+(globalThis as { __wpBootTeardown?: Array<() => void> }).__wpBootTeardown = [_disposeSizeKeyboard, _tileJobs.dispose, () => armDocWriteGate(null)];   // gate 解除武装（防御性；node 下本就不武装）
 
 // 当前笔（ResolvedBrush）派生 + 引擎桥 = resolved-brush.ts makeCurrentBrush，input 前构造（见下）。手感数学全在 resolveBrush。
 
@@ -232,6 +233,18 @@ const ops = makeOperators({
 });
 new LayerTree({ w: workpiece, doc, history, ops });      // 自注册 workpiece.layers（结构类写面，S1）
 new SelectionFace({ w: workpiece, doc, history, ops });  // 自注册 workpiece.sel（选区写面唯一记账口，S2）
+// S4 割3：武装 write-gate——PaintDoc mutator 在写窗口外被裸调 = dev 渠道直接 throw（fail fast）、
+// prod 上报 warning 不炸用户。窗口开启者白名单见 workpiece/write-gate.ts 头注释。
+// node（测试进程 import 本模块）不武装：引擎级测试直捅 doc 是合法姿势，gate 行为自有 write-gate.test。
+const _nodeProc = (globalThis as { process?: { versions?: { node?: string } } }).process;
+if (!_nodeProc?.versions?.node) {
+  const isDevChannel = location.hostname === "localhost" || location.hostname === "127.0.0.1" || location.pathname.includes("/dev/");
+  armDocWriteGate((what) => {
+    const e = new Error(`[write-gate] PaintDoc.${what} 在写窗口外被裸调——写必须走 workpiece 组件/tx（ADR-0007 割3）`);
+    if (isDevChannel) throw e;
+    reportError(e, "warning");
+  });
+}
 const _afterDocChange = () => { renderLayersPanel(); board.invalidateAll(); board.requestRender(); };
 const layerSpecFrom = (L: unknown) => doc.layerSpec(L as Parameters<typeof doc.layerSpec>[0]);
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。

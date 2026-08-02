@@ -11,6 +11,7 @@
 //   （dirty 分层：内存脏=es.isDirty，sync 脏=listAllItems）、_store.busy/edits/session/autosave/flow.*/adoptBase/seal。
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
+import { docWriteWindow } from "./workpiece/write-gate.ts";
 import { WEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
 import { thumbBlobFromCanvas, setCurrentSessionName } from "./session.ts";
@@ -132,8 +133,8 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
     }
   }
   applyBlenderSyncState(ws?.blender);   // checkboard 已迁 editorState → 经 wp:applyEditorState 应用（settings-menu 订阅）
-  if (ws?.activeId != null && doc.setActiveById(ws.activeId)) renderLayersPanel();
-  else if (typeof ws?.activeLayerIndex === "number" && doc.setActive(ws.activeLayerIndex)) renderLayersPanel();
+  if (ws?.activeId != null && docWriteWindow(() => doc.setActiveById(ws.activeId!))) renderLayersPanel();
+  else if (typeof ws?.activeLayerIndex === "number" && docWriteWindow(() => doc.setActive(ws.activeLayerIndex!))) renderLayersPanel();
   // 新轨（desk per-doc）：载入 .webpaint/editor-state.json（缺失=老画作 → resetEditorState 已回默认）。
   //   **后手赢**：它会用 brushTool 覆盖 toolStates.brush + color。
   if (loaded._editorState != null) editorState.Unserialize(loaded._editorState);
@@ -187,7 +188,7 @@ let es: EditorSession;
 function adoptModel(loaded: LoadedDoc) {
   _loadingDoc = true;
   try {
-    doc.adoptState(loaded);
+    docWriteWindow(() => doc.adoptState(loaded));   // S4：装载写 = 声明窗口（生命周期持证人）
     resetEditorState();
     els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
     input.clearHistory();

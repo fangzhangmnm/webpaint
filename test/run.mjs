@@ -36,6 +36,7 @@ import "./float-ops.test.mjs";     // S6：float 入 workpiece（lift/transform/
 import "./undo-stack-integrity.test.mjs";   // v0.7.35 栈引用完整性（import 越狱病理钉子 + 合规形状 + v0.7.41 单整点）
 import "./workpiece-layer-tree.test.mjs";   // v0.8.1 S1 LayerTree 门面（写即记账/treeTx/装配纪律；≠ layer-tree.test 的 doc 树模型）
 import "./selection-face.test.mjs";         // v0.8.2 S2 选区写面（唯一记账口 + 预览 tx 所有权规则）
+import "./write-gate.test.mjs";             // v0.8.4 S4 割3：mutator 窗口外裸调断言（arm/disarm 纪律）
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";
 import "./liquify-docspace-mask.test.mjs";

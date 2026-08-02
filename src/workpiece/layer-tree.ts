@@ -12,6 +12,7 @@
 // 微步/整点：所有方法透传 { checkpoint }（v0.7.41 import 单整点、stampAll compound 依赖它）。
 
 import { countLeaves, type Layer, type PaintDoc } from "../doc.ts";
+import { docWriteWindow } from "./write-gate.ts";
 import type { Workpiece, OpStatus } from "./workpiece.ts";
 import type { UndoHistory } from "./undo-history.ts";
 import type { OperatorRegistry } from "./operators.ts";
@@ -41,7 +42,7 @@ export class LayerTree {
   addLayer(name?: string, o?: RunOpts): AddLayerResult {
     const doc = this._doc;
     const prevActiveId = doc.activeLayer?.id ?? null;
-    const L = doc.addLayer(name);
+    const L = docWriteWindow(() => doc.addLayer(name));   // S4：component 创建段 = 声明窗口
     if (!L) return { ok: false, msg: "maxLayers" };
     return this._recordAdd(L, prevActiveId, o);
   }
@@ -50,7 +51,7 @@ export class LayerTree {
   duplicateLayer(id: number, o?: RunOpts): AddLayerResult {
     const doc = this._doc;
     const prevActiveId = doc.activeLayer?.id ?? null;
-    const r = doc.duplicateLayer(id);
+    const r = docWriteWindow(() => doc.duplicateLayer(id));
     if (!r.ok) return { ok: false, msg: r.reason };
     return this._recordAdd(r.newLayer!, prevActiveId, o, r.loc!);
   }
@@ -62,7 +63,7 @@ export class LayerTree {
       { layerId: L.id, index: at.index, parentId: at.parentId, prevActiveId, layerName: L.name }, o);
     if (!st.ok) {
       // 记账失败绝不留无账层（那正是 v0.7.35 的越狱病理）：摘回 + 释放像素句柄。
-      this._doc.removeLayer(L.id, true);
+      docWriteWindow(() => this._doc.removeLayer(L.id, true));
       L.pixels.dispose();
       return { ok: false, msg: st.msg };
     }
@@ -121,7 +122,7 @@ export class LayerTree {
   /** 焦点写（**显式声明的不入 undo 写**，v0.8 现状保持：点选活动层不占 undo 步；
    *  undo/redo 时的 active 还原由各 operator 自带）。返回是否切成。 */
   setActive(id: number): boolean {
-    return this._doc.setActiveById(id);
+    return docWriteWindow(() => this._doc.setActiveById(id));
   }
 
   /** 结构变更 tx 窗口（编组/解组/移入移出/collapse/explode/stampAll…）：
@@ -131,7 +132,7 @@ export class LayerTree {
     statuses?: (v: T) => TreeStatuses, o?: RunOpts): { ok: boolean; value?: T; msg?: string } {
     const doc = this._doc;
     const before = doc.snapshotTree();
-    const v = mutate(doc);
+    const v = docWriteWindow(() => mutate(doc));   // S4：treeTx mutate 段 = 声明窗口
     if (v === null || v === false || v === undefined) return { ok: false, msg: "aborted" };
     const s = statuses?.(v) ?? {};
     const st = this._history.run(this._w, this._ops.treeStructure,
