@@ -15,15 +15,17 @@
 
 1. **transform 期间 Ctrl+Z / 手势 undo = 逐整点 history undo**（拖动→stamp→lift 逐步回退，
    undo 穿过 lift 自然退出浮层）；**取消浮层 = Esc / 取消按钮**。redo 在 transform 期间开放。
-   crop / 调色 adjust 的 Ctrl+Z 仍 = 取消，没变。(S6)
+   crop / 调色 adjust 的 Ctrl+Z 仍 = 取消，没变。(S6) PASS
 2. **reject（取消浮层）= identity 写回**：stamp 保留、float 原位落回，且本身可撤销。
    ⚠ freehand/椭圆等 **AA 软边选区 lift(cut)→reject 有固有覆盖率损失**（挖洞+盖回的合成数学；
-   硬边选区逐字节精确）。spec 已预认；刺眼的话是拍板项不是 bug 单。(S6)
+   硬边选区逐字节精确）。spec 已预认；刺眼的话是拍板项不是 bug 单。(S6) PASS
+    human: 固有覆盖率损失是什么？
 3. **lift 即清选区**（蚂蚁线消失、取消选区按钮态变）；undo lift 选区回来；reject 后选区不回来。
-   accept 后选区去留 = 现状「清」，待拍板项。(S6)
+   accept 后选区去留 = 现状「清」，待拍板项。(S6) PASS
 4. **subtract 减光 / 反选到全空 → 选区消失**（旧版留「隐形选区」把笔画全裁掉；新版诚实回无选区）。(S5)
-5. **选区 bbox 恒紧**（旧版略大/收缩不紧/offset=整幅）。(S5)
-6. lift 挖洞即标脏（保存提示比旧版来得早）；浮层期间切文档 = 直接弃浮层像素。(S6)
+5. **选区 bbox 恒紧**（旧版略大/收缩不紧/offset=整幅）。(S5) PASS
+6. lift 挖洞即标脏（保存提示比旧版来得早）；浮层期间切文档 = 直接弃浮层像素。(S6) PASS
+  human: 
 7. **S7 纯渲染重构，用户可见语义应零变化**——凡观感差异都值得报，尤其
    **color-dodge / color-burn / 软边淡色累积**（u8 累积器量化最可见区）。刺眼 →
    `render-tree-gl.ts` ctor `accumPrec` 一行拨回 `"f16"` 即回 v0.4.7 精度（预埋逃生门）。(S7)
