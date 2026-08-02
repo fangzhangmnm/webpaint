@@ -168,3 +168,30 @@
 - CONTEXT.md：新词条 Workpiece（写面聚合根）/ LayerTree / Sidecar（两个 reference 拆死）；
   History entry→Microstep、PixelEdit→PixelTx 陈腐词条同步刷新。
 - ADR-0007 标「已实施」。**A 骑士（S1–S6）全部完成。**
+
+## 9. B 骑士（store 解耦）进度（2026-08-02 同 session 追记）
+
+### B1+B3 ✅ v0.8.7：显式装配 + 缺席变体 + 行为锁
+- **app-store.ts 显式装配**：模块 eval 副作用收进 `_assembleReal()`；`detectStoreAbsent()`
+  （URL `?nostore` / localStorage `webpaint.nostore` / node env `WEBPAINT_NOSTORE`）选真 store 或缺席变体。
+  缺席模式下 createOneDriveProvider/createStore **完全不被调用**（零 IDB/命名空间副作用）。
+- **`src/store-absent.ts`（新接缝文件，只准 type-only import store）**：null-store（file/files/
+  encryption/collection 全成员 no-op 安全值）+ 内存 Collection（getInitData 照 seed → 内置笔刷可用、
+  session 内可编辑）+ dormant auth（isAuthConfigured=false → initAuth 整段跳过）。
+  已知代价：null-store 是结构镜像 cast——完备性由 `test/store-absent.test.mjs` 逐成员点名 +
+  **子进程整段 boot smoke**（WEBPAINT_NOSTORE=1 下 app.ts boot 不炸）兜底。
+- **build.sh B 分层 lint**：app 层对 store 的值级 import 只许接缝 app-store.ts（现状已达标：
+  app-prefs/app-state/brush-rack-controller/session-state 全是 `import type`）。
+- 绕 store 的持久化点（recon-b §4）核对：已天然集中——storage.ts（app 自有 IDB：缩略图/checkpoint）
+  + boot-snapshot.ts（2 个 localStorage 键，v409 钉子勿删）+ topbar 清缓存钮 + storage.estimate 只读。
+  无需再收编。
+
+### B 剩余（未做，待拷问/下批）
+- **B2 窄接口收敛**：ui/gallery 13 处 `_store.`、session-state/gallery-shell/enc-thumbs 裸 store、
+  AppContext.store 的 `typeof import` 换手写窄接口——**运行时缺席已由 null-object 达成**，B2 的
+  价值在「物理删除仍编译」的极端目标（recon-b 拷问补充 §2），本批裁定不做（app 侧养接口镜像的
+  维护成本 vs 收益，留给 C 骑士 headless 分层时一并裁）。
+- password 契约进 store（政策搬不搬**待拷问**，index §45）/ mhtml 单文件 release / pwa wizard /
+  动 JRP·小黑屋·RealHome 三兄弟——全部未动。
+- 新增真机项（并入 §7 清单一次交付）：13. `?nostore` 打开 → gallery 空态、能画/undo/导出 ora、
+  内置笔刷在、无红 banner；去掉参数恢复正常。14. 正常模式回归：登录/列举/保存推云无异常（装配重构不改行为）。

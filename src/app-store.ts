@@ -3,6 +3,8 @@
 //   app 只碰 store 两面（**file / collection**）+ editor-session。绝不裸碰 kv/IDB/graph/vendor。
 //   （localSettings/syncedSettings 那两面已于 2026-07-13 删除 —— 全部 KV 化进 collection。别照旧注释找。）
 import { createStore, createOneDriveProvider, isCached, isDirty } from "./store/index.ts";
+import { detectStoreAbsent, createNullStore, createDormantAuth } from "./store-absent.ts";
+import type { Store } from "./store/create-store.ts";
 import { stripSessionExt, sessionFileName } from "./config.ts";
 import { storeUI } from "./store-ui.ts";
 import { CLIENT_ID, SCOPES } from "./config.ts";
@@ -13,16 +15,24 @@ import { wirePreferences } from "./app-prefs.ts";
 import { wireAppState, appState } from "./app-state.ts";
 import { builtinBrushInitData } from "./brushes.ts";
 
-// OneDrive provider + auth。
-const od = createOneDriveProvider({ clientId: CLIENT_ID, scopes: SCOPES, msalUrl: "./vendor/msal/msal-browser.min.js" });
-export const provider = od.provider;
-const _auth = od.auth;
+// ============ 显式装配（v0.8.7 · B 骑士）============
+// store = 插件不是地基：装配收进 _assemble()，按 detectStoreAbsent()（?nostore / localStorage 开关）
+// 选真 store 或 null-store（src/store-absent.ts——内存 collection / 空 gallery / 不落盘 / auth·加密 dormant）。
+// 缺席模式下 createOneDriveProvider/createStore **完全不被调用**（零 IDB/localStorage 命名空间副作用）。
+export const storeAbsent = detectStoreAbsent();
+
+type _Prov = ReturnType<typeof createOneDriveProvider>["provider"];
+type _Auth = ReturnType<typeof createOneDriveProvider>["auth"];
+function _assembleReal(): { provider: _Prov | null; auth: _Auth; store: Store } {
+  const od = createOneDriveProvider({ clientId: CLIENT_ID, scopes: SCOPES, msalUrl: "./vendor/msal/msal-browser.min.js" });
+  return { provider: od.provider, auth: od.auth, store: _createRealStore(od.provider, od.auth) };
+}
 
 // 加密 codec 注入（不注入 = 加密 dormant）。
 const cryptoCodec = { zipPack, zipUnpack, pack7z, unpack7z };
 
 // 唯一 store（薄库）。app 建它（含 ui bundle）；migration 内部自跑（createStore 隐形，app 不 await）。
-export const store = createStore({
+const _createRealStore = (provider: _Prov, auth: _Auth): Store => createStore({
   provider,
   ui: storeUI,
   appId: "webpaint",   // 本 origin 内唯一命名空间（databaseId 默认 "defaultStore"）：IDB 库 webpaint.defaultStore + localStorage webpaint.defaultStore.* 键，与兄弟 PWA(JRP 等)隔离
@@ -49,11 +59,18 @@ export const store = createStore({
     return false;
   },
   autoCacheOpenedFile: true,
-  signedIn: () => _auth.isSignedIn(),   // 连接态 store 自持（网盘模型）：watchFolder/云列举不再由 app 每次传 ctx
+  signedIn: () => auth.isSignedIn(),   // 连接态 store 自持（网盘模型）：watchFolder/云列举不再由 app 每次传 ctx
   // 当前打开的 doc（全名）：cloud-gone 去抖 trash 绝不碰它（连 watchFolder 自动 reconcileFolder 也跳过，防 trash 掉开着的 clean 文件本地缓存）。
   //   appState.currentFile = 活动 doc 裸名（退出置 null）；边界转全名。pre-init 抛 → null（不跳过，无害）。
   activeFileName: () => { try { return appState.currentFile ? sessionFileName(appState.currentFile) : null; } catch { return null; } },
 });
+
+const _asm = storeAbsent
+  ? { provider: null, auth: createDormantAuth() as unknown as _Auth, store: createNullStore() }   // dormant auth：结构镜像 cast（同 null-store 纪律，smoke 点名 drift）
+  : _assembleReal();
+export const provider = _asm.provider;
+const _auth = _asm.auth;
+export const store = _asm.store;
 
 // ============ 设置/状态 collection（4 个）注入 ============
 // app-prefs/app-state **不 import 本文件**（防 i18n→app-store→store-ui→i18n 成环）；由此处建好 store 后惰性注入。

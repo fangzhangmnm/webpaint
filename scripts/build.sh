@@ -74,6 +74,19 @@ if [ -n "$DEEP_HITS" ]; then
 fi
 echo "[build] ✓ 无 deep import"
 
+# v0.8.7 B 骑士分层 lint：app 层对 store 的**值级** import 只许接缝（app-store.ts；store-absent.ts
+#   是缺席变体接缝、只准 type-only）。其余 app 文件要么不 import store、要么 `import type`（窄接口镜像）。
+#   防的是绕接缝直拿 store 内部对象——store = 插件不是地基（缺席模式 ?nostore 必须继续成立）。
+echo "[build] B 分层 lint（app 层 store 值级 import 只许接缝）…"
+APPSTORE_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*/store/" src --include='*.ts' 2>/dev/null \
+  | grep -v "^src/store/" | grep -v "^src/app-store.ts" | grep -v "import type" || true)
+if [ -n "$APPSTORE_HITS" ]; then
+  echo "[build] ✗ app 层出现 store 值级 import（只准接缝 app-store.ts；其余用 import type 或走 ctx.store）：" >&2
+  echo "$APPSTORE_HITS" >&2
+  exit 1
+fi
+echo "[build] ✓ B 分层 lint 过"
+
 # 0.6 v0.4 分层 lint（workpiece/tiles 红线 + 已死模块防复活）。
 #   · workpiece/** 不碰 store（持久化归 importer/exporter/persistency；spec journal/20260721 §workpiece）
 #   · tiles/** 不碰 gl/**（CPU tile 池是纯底座；GPU 侧经 bridge 反向依赖它）
