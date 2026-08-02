@@ -443,6 +443,14 @@ export class RenderTreeGL {
     for (const g of seg.byKey.values()) if (!this._pool.isAlive(g)) return false;
     return true;
   }
+  // v0.7.36 修 import 后串 tile：live-leaf 快路径此前只查 cpuVersion+generation，而 generation
+  // 只在纹理数组重建时 bump、**不含 LRU 驱逐**（gpu-tile-pool 契约:「使用者每帧先 isAlive 校验再采」，
+  // _segValid 守约、这里漏了）。大 import 一帧分配几十 tile 最易触发驱逐 → 未动图层的 index 纹理
+  // 指向已被回收重用的 slice → 256px 粒度串 tile。不活 → 落全量 re-sync（ensureUploaded 重传）。
+  private _recAlive(rec: { byKey: Map<number, number> }): boolean {
+    for (const g of rec.byKey.values()) if (!this._pool.isAlive(g)) return false;
+    return true;
+  }
   private _invalidateSegs(): void {
     for (const seg of this._segCache.values()) seg.index.dispose();
     this._segCache.clear();
@@ -470,7 +478,8 @@ export class RenderTreeGL {
       rec = undefined;
     }
     const gen = this._pool.generation;
-    if (rec && rec.src === pixels && rec.cpuVersion === pixels.contentVersion && rec.gen === gen) return;   // 快路径
+    if (rec && rec.src === pixels && rec.cpuVersion === pixels.contentVersion && rec.gen === gen
+        && this._recAlive(rec)) return;   // 快路径（isAlive 扫描防 LRU 驱逐后采到被重用的 slice）
     if (!rec) {
       rec = { index: new IndexTexture(this._glctx, docW, docH), byKey: new Map(), src: null, cpuVersion: -1, gen };
       this._layerTiles.set(leafId, rec);
