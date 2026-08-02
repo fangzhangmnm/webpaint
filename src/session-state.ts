@@ -47,7 +47,7 @@ interface OraWebpaintState {
 type LoadedDoc = PaintDoc & { _webpaintState?: OraWebpaintState; _editorState?: unknown; _referenceBlob?: Blob | null; _wroteWith?: string; };
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initSession(ctx) 注入）----
-let state: AppContext["state"], doc: AppContext["doc"], board: AppContext["board"];
+let state: AppContext["state"], doc: AppContext["docRaw"], board: AppContext["board"];
 let input: AppContext["input"], editMode: AppContext["editMode"], rack: AppContext["rack"];
 let referenceWindow: AppContext["referenceWindow"], paletteWindow: AppContext["paletteWindow"];
 let setStatus: AppContext["setStatus"], withBusy: AppContext["withBusy"];
@@ -598,7 +598,7 @@ export const session = {
 };
 
 export function initSession(ctx: AppContext) {
-  state = ctx.state; doc = ctx.doc; board = ctx.board; input = ctx.input;
+  state = ctx.state; doc = ctx.docRaw; board = ctx.board; input = ctx.input;   // docRaw：装载/换文档生命周期唯一持证人（S3）
   editMode = ctx.editMode; rack = ctx.rack;
   referenceWindow = ctx.referenceWindow; paletteWindow = ctx.paletteWindow;
   setStatus = ctx.setStatus; withBusy = ctx.withBusy;

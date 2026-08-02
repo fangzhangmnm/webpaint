@@ -22,7 +22,8 @@
 
 import { renderNodesToBytes } from "./doc-render.ts";
 import { flattenLeaves } from "./doc.ts";
-import type { Layer, PaintDoc } from "./doc.ts";
+import type { Layer } from "./doc.ts";
+import type { DocView } from "./workpiece/doc-view.ts";
 
 // doc.layers / compositeLayers 的节点联合（Layer | LayerGroup）；这两个类型在 doc.ts 未导出，
 // compositeLayers 接受 doc.layers 原样传入即可，这里给本地用到的画布上下文类型。
@@ -199,7 +200,7 @@ function asciiPascalBytes(name: string) {
 }
 
 // ---- 主入口 ----
-export async function encodeDocToPsd(doc: PaintDoc) {
+export async function encodeDocToPsd(doc: DocView) {
   const w = new BinaryWriter(64 * 1024);
   const docW = doc.width;
   const docH = doc.height;
@@ -377,7 +378,7 @@ function writeLayerChannelData(w: BinaryWriter, layer: Layer, encChannels: Encod
 }
 
 // ---- Merged image：所有可见 layer 合成到 docW×docH 平面后写入 ----
-function writeMergedImage(w: BinaryWriter, doc: PaintDoc, docW: number, docH: number) {
+function writeMergedImage(w: BinaryWriter, doc: DocView, docW: number, docH: number) {
   const c = (typeof OffscreenCanvas !== "undefined")
     ? new OffscreenCanvas(docW, docH)
     : (() => { const x = document.createElement("canvas"); x.width = docW; x.height = docH; return x; })();

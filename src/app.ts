@@ -325,7 +325,7 @@ const isMidOperation = () =>
   input.isStrokeActive() || input.lasso.hasFloating() || editMode.hasPendingTransient();
 
 const ctx: AppContext = freezeCtx({
-  state, dialReactive, currentBrush, editMode, doc, board, input, history, workpiece, ops, pixelHistory, isMidOperation,
+  state, dialReactive, currentBrush, editMode, doc, docRaw: doc, board, input, history, workpiece, ops, pixelHistory, isMidOperation,
   rack, store: _store, setStatus, withBusy, leftDial,
   updateSaveStatus, updateZoomLabel, updateNewerBanner, pullSettingsAndState,
   _suppressTransientPanels, _restoreTransientPanels, layerSpecFrom, _bringPanelTop,

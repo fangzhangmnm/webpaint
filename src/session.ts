@@ -21,7 +21,7 @@
 import { renderNodesToCanvas } from "./doc-render.ts";
 import { smartResample, canvasToBlob } from "./resample.ts";
 import { appState } from "./app-state.ts";   // active session name = appState.currentFile（synced-app-state，跨设备 resume）
-import type { PaintDoc } from "./doc.ts";
+import type { DocView } from "./workpiece/doc-view.ts";
 
 // navigator.canShare/share 的 files 形参在部分 lib.dom 里未覆盖 → 窄化扩展（不引入 any）。
 // 抄 src/brush-io.ts 的 FileShareNavigator 模式。
@@ -88,7 +88,7 @@ export async function thumbBlobFromCanvas(merged: HTMLCanvasElement | OffscreenC
 // candidate 2：导出格式（png/jpg exporter）只负责把 doc 渲成 image blob；
 // 去向（分享/下载/剪贴板）是正交的 sink，见 shareOrDownloadBlob。故此函数公开。
 // #16（v0.5）：cropRect = 「仅导出选区范围」（选区 bbox，doc 坐标）；null/undefined = 全文档（旧行为）。
-export async function renderDocToImageBlob(doc: PaintDoc, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null) {
+export async function renderDocToImageBlob(doc: DocView, mime = "image/png", quality?: number, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null) {
   const c = document.createElement("canvas");
   c.width = doc.width;
   c.height = doc.height;
@@ -167,7 +167,7 @@ export async function shareOrDownloadBlob(blob: Blob, filename: string, mime?: s
 // ---- 剪贴板 IO ----
 
 /** 把 doc 合成图复制到剪贴板（PNG）。iPad Safari / 桌面都支持。 */
-export async function copyImageToClipboard(doc: PaintDoc, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null) {
+export async function copyImageToClipboard(doc: DocView, scope = "merged", cropRect?: { x: number; y: number; w: number; h: number } | null) {
   // iOS Safari 要求 clipboard.write 在 user gesture 内"同步"触达；**不能**先 await blob 再 write
   // （那个 await 跨过 gesture 窗口 → NotAllowedError）。把 renderDocToImageBlob 的 Promise<Blob>
   // 直接交给 ClipboardItem（lazy promise 写法），复用 writeImageBlobToClipboard 同款路径。

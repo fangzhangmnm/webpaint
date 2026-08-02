@@ -37,7 +37,7 @@ import type { ParsedNode } from "./ora-stack-xml.ts";
 // activeId / referenceLayerId 必填（v0.7.8）：FrozenDoc 曾漏抄 referenceLayerId，可选字段让 tsc
 // 静默放行 → 保存路径永远写不出 webpaint:reference（导出路径传活 doc 反而没事）。必填堵死这类漏抄。
 type EncodeDoc = {
-  width: number; height: number; layers: PaintDoc["layers"] | FrozenNode[];
+  width: number; height: number; layers: ReadonlyArray<PaintDoc["layers"][number]> | FrozenNode[];
   activeId: number | null; referenceLayerId: number | null;
 };
 // encode opts：两个可选 WebPaint 私有扩展。

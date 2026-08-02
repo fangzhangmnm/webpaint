@@ -345,19 +345,19 @@ export class LayerGroup {
 // ---- 树工具（doc / board / panel / ora / undo 复用；节点 = Layer|LayerGroup）----
 
 // 叶序遍历（per-leaf 变换用：crop/flip/rotate/resample 等结构无关操作）。
-export function eachLeaf(nodes: Node[], fn: (leaf: Layer) => void) {
+export function eachLeaf(nodes: readonly Node[], fn: (leaf: Layer) => void) {
   for (const n of nodes) {
     if (n.isGroup) eachLeaf(n.children, fn);
     else fn(n);
   }
 }
-export function flattenLeaves(nodes: Node[]) {
+export function flattenLeaves(nodes: readonly Node[]) {
   const out: Layer[] = [];
   eachLeaf(nodes, (L) => out.push(L));
   return out;
 }
 // 递归按 id 找节点（叶或组）。
-export function findNodeById(nodes: Node[], id: number | null): Node | null {
+export function findNodeById(nodes: readonly Node[], id: number | null): Node | null {
   for (const n of nodes) {
     if (n.id === id) return n;
     if (n.isGroup) {
@@ -385,7 +385,7 @@ export function findParentOf(
   return null;
 }
 // 递归数叶子（容量/计数用；组不计）。
-export function countLeaves(nodes: Node[]) {
+export function countLeaves(nodes: readonly Node[]) {
   let n = 0;
   eachLeaf(nodes, () => n++);
   return n;

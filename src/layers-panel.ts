@@ -380,7 +380,7 @@ const LayerRow = defineComponent({
     function onRowClick() {
       if (layersUi.expandedId !== snap().id) layersUi.expandedId = null;
       layersUi.menuId = null;
-      doc.setActiveById(snap().id);
+      workpiece.layers.setActive(snap().id);
       renderLayersPanel();
     }
     // 名字 click：active 时再点 = 进入内联重命名；否则交给 row click 设 active
@@ -627,9 +627,9 @@ const LayersPanel = defineComponent({
       const totalLeaves = countLeaves(doc.layers);
       // 全部组（id+name+node ref）：给「移入组」列表用。算一次，每行再按「非自身/非后代/非当前父」过滤。
       const allGroups: LayerNode[] = [];
-      const collect = (nodes: LayerNode[]) => { for (const n of nodes) if (n.isGroup) { allGroups.push(n); collect(n.children!); } };
+      const collect = (nodes: readonly LayerNode[]) => { for (const n of nodes) if (n.isGroup) { allGroups.push(n); collect(n.children!); } };
       collect(doc.layers);
-      const walk = (nodes: LayerNode[], depth: number, parentNode: LayerNode | null) => {
+      const walk = (nodes: readonly LayerNode[], depth: number, parentNode: LayerNode | null) => {
         for (let i = nodes.length - 1; i >= 0; i--) {
           const n = nodes[i];
           // 该节点可移入的目标组：排除自身、自身后代（防环）、当前所在组（已在里面）。

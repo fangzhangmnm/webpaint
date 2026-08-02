@@ -21,7 +21,7 @@
 import { makeRegistry } from "./registry.ts";
 import { encodeDocToOra } from "./ora.ts";
 import { renderDocToImageBlob } from "./session.ts";
-import type { PaintDoc } from "./doc.ts";
+import type { DocView } from "./workpiece/doc-view.ts";
 
 export interface ExportOpts {
   scope?: string;
@@ -33,7 +33,7 @@ export interface Exporter {
   ext: string;
   mime?: string;
   kind: "project" | "image";
-  encode: (doc: PaintDoc, opts?: ExportOpts) => Promise<Blob>;
+  encode: (doc: DocView, opts?: ExportOpts) => Promise<Blob>;
   busyHint?: string;
 }
 

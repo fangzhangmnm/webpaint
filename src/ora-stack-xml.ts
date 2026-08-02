@@ -25,7 +25,7 @@ export interface OraNode {
   lockAlpha?: boolean;
 }
 export interface OraDoc {
-  layers: OraNode[];
+  layers: readonly OraNode[];
   width: number;
   height: number;
   activeId?: number | null;

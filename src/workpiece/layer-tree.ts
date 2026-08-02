@@ -118,6 +118,12 @@ export class LayerTree {
     return this._history.run(this._w, this._ops.pixels, { layerId: id, _initialBefore: before }, o);
   }
 
+  /** 焦点写（**显式声明的不入 undo 写**，v0.8 现状保持：点选活动层不占 undo 步；
+   *  undo/redo 时的 active 还原由各 operator 自带）。返回是否切成。 */
+  setActive(id: number): boolean {
+    return this._doc.setActiveById(id);
+  }
+
   /** 结构变更 tx 窗口（编组/解组/移入移出/collapse/explode/stampAll…）：
    *  mutate 拿可变 doc；返回 null/false/undefined = 中止（不入栈——mutate 必须未动状态或已自行回滚）；
    *  其余返回值 = 成功，前后 snapshotTree 自动入栈。statuses 从 mutate 返回值算 undo/redo 文案。 */

@@ -13,6 +13,7 @@
 //     避免 cascade 把屎山拖进门）——随各源逐步类型化再收敛引用。本接口是增量推进的锚，不是终态。
 
 import type { PaintDoc } from "./doc.ts";
+import type { DocView } from "./workpiece/doc-view.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
@@ -100,7 +101,8 @@ export interface AppContext {
 
   // 核心引擎单例
   editMode: EditMode;
-  doc: PaintDoc;
+  doc: DocView;                  // v0.8.3（S3）：只读窄接口——裸写 = 编译错（写走 workpiece 组件，见 doc-view.ts 头注释）
+  docRaw: PaintDoc;              // 装载/换文档生命周期专用（session-state 唯一正当消费者；编辑路径禁用——用它绕 DocView = 越狱）
   board: Board;
   input: InputController;
   history: UndoHistory;          // v0.4.5：配额制 undo（workpiece/undo-history）

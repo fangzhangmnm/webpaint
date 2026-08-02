@@ -25,7 +25,7 @@ import type { GestureViewport } from "./pointer-gesture.ts";
 import { raiseWindow } from "./surfaces.ts";
 import { editorState } from "./workbench-state.ts";
 import { renderNodesToCanvas } from "./doc-render.ts";
-import type { PaintDoc } from "./doc.ts";
+import type { DocView } from "./workpiece/doc-view.ts";
 
 // 参考窗内部 viewport（image-origin 约定）。形同 GestureViewport。
 type RefViewport = GestureViewport;
@@ -79,7 +79,7 @@ export class ReferenceWindow {
   ctx: CanvasRenderingContext2D;
   bitmap: RefBitmapSource | null;
   _bitmapBlob!: Blob | null;   // 在 setBitmap/clearBitmap 赋值（构造期不设）
-  _liveDoc: PaintDoc | null;
+  _liveDoc: DocView | null;
   _composeCanvas: HTMLCanvasElement | null;
   _liveDirty: boolean;
   vp: RefViewport;
@@ -161,7 +161,7 @@ export class ReferenceWindow {
   }
 
   // 实时镜像主画布：board.markDocDirty 触发 wp:docpixeldirty → markLiveDirty
-  setLiveSource(doc: PaintDoc) {
+  setLiveSource(doc: DocView) {
     if (this.bitmap) { this.bitmap.close?.(); this.bitmap = null; }
     this._liveDoc = doc;
     if (!this._composeCanvas) this._composeCanvas = document.createElement("canvas");
@@ -171,7 +171,7 @@ export class ReferenceWindow {
     this._invalidate();
   }
   isLive() { return !!this._liveDoc; }
-  toggleLive(doc: PaintDoc) {
+  toggleLive(doc: DocView) {
     if (this.isLive()) {
       this._stopLive();
       this._updateEmptyHint();

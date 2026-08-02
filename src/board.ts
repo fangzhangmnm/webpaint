@@ -835,12 +835,12 @@ export class Board {
       || this._fillProvider?.());
   }
   // S9 导出/缩略图/mergedimage/镜像的合成面（doc-render.setDocCompositor 的后端）：透明底。
-  compositeNodesToCanvas(nodes: unknown[], docW: number, docH: number): HTMLCanvasElement | null {
+  compositeNodesToCanvas(nodes: readonly unknown[], docW: number, docH: number): HTMLCanvasElement | null {
     if (!this._glBoard) return null;
     return this._glBoard.compositeToCanvas(nodes as unknown as Parameters<GLBoard["compositeToCanvas"]>[0], docW, docH);
   }
   // 字节合成面（doc-render.setDocCompositorBytes 的后端；merge-down 等字节 op 用）。
-  compositeNodesToBytes(nodes: unknown[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {
+  compositeNodesToBytes(nodes: readonly unknown[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {
     if (!this._glBoard) return null;
     return this._glBoard.compositeToBytes(nodes as unknown as Parameters<GLBoard["compositeToBytes"]>[0], docW, docH);
   }

@@ -130,3 +130,16 @@
 
 - 语义副作用（有意，v0.6.17 no-op 家族）：选区内清除/清空活动层/挖洞若实际未改像素 → 不占 undo 步。
 - 行为锁：`test/selection-face.test.mjs`。
+
+### S3 ✅ v0.8.3：DocView 编译级收口
+- `src/workpiece/doc-view.ts`：手写只读窄接口（字段全 readonly、layers=ReadonlyArray、零 mutator；
+  类型经 `PaintDoc[...]` 索引取，源变自动跟）。`AppContext.doc: DocView`——裸写 = 编译错。
+- 新增 `AppContext.docRaw: PaintDoc`：**声明写者名单**（仅二）——session-state（装载/换文档生命周期）、
+  doc-ops（runDocTransform tx 信封）。引擎单例（input/lasso/board/floating-transform）经构造注入
+  拿真 PaintDoc，不走 ctx。用 docRaw 绕 DocView = 越狱（S4 dev 断言是第二道网）。
+- 焦点写显式化：`LayerTree.setActive(id)`（不入 undo，现状保持——点选活动层不占 undo 步）；
+  topbar 清空活动层改走 `workpiece.layers.clearLayer`。
+- 读者签名放宽（PaintDoc→DocView / Node[]→readonly）：exporters.encode、session.renderDocToImageBlob/
+  copyImageToClipboard、psd、reference.setLiveSource/toggleLive、doc-render/board 合成面、
+  doc.ts 树读 helper（eachLeaf/flattenLeaves/findNodeById/countLeaves）、OraDoc/EncodeDoc.layers。
+- `readDoc()` 留作 workpiece 的引擎级只读 escape（floating-transform 两处消费；返回 Readonly，无写险）。

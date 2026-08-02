@@ -75,11 +75,9 @@ export function initTopbarMenu(ctx: AppContext) {
     closeSheet(els.clearSheet, els.clearBackdrop);
     if (a !== "confirm") return;
     const layer = doc.activeLayer as Layer | null;
-    if (!layer) return;
-    // v0.8.2（S2）：走 pixelHistory 事务（before 快照/入栈收进 tx），Ctrl+Z 能复活。
-    const tx = pixelHistory.begin(layer, "clearDoc");
-    doc.clearActiveLayer();
-    tx.commit();
+    if (!layer || layer.isGroup) return;
+    // v0.8.3（S3）：走 workpiece.layers.clearLayer（快照/清空/入栈收进组件），Ctrl+Z 能复活。
+    workpiece.layers.clearLayer(layer.id);
     board.invalidateAll();
     setStatus(t("tm.clearedActiveLayer"));
   });

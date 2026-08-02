@@ -7,8 +7,8 @@
 type Bitmap = HTMLCanvasElement | OffscreenCanvas;
 
 // 节点 = doc.ts 的 Layer|LayerGroup（结构化收：GL 侧只读 id/opacity/mode/clippingMask/visible/pixels/children）。
-export type DocCompositorFn = (nodes: unknown[], docW: number, docH: number) => Bitmap | null;
-export type DocCompositorBytesFn = (nodes: unknown[], docW: number, docH: number) => { data: Uint8ClampedArray; w: number; h: number } | null;
+export type DocCompositorFn = (nodes: readonly unknown[], docW: number, docH: number) => Bitmap | null;
+export type DocCompositorBytesFn = (nodes: readonly unknown[], docW: number, docH: number) => { data: Uint8ClampedArray; w: number; h: number } | null;
 
 let _fn: DocCompositorFn | null = null;
 let _bytesFn: DocCompositorBytesFn | null = null;
@@ -16,11 +16,11 @@ export function setDocCompositor(fn: DocCompositorFn): void { _fn = fn; }
 export function setDocCompositorBytes(fn: DocCompositorBytesFn): void { _bytesFn = fn; }
 
 /** nodes → 合成 canvas（**透明底**；doc 背景由调用方按需自铺）。null = GL 不可用。 */
-export function renderNodesToCanvas(nodes: unknown[], docW: number, docH: number): Bitmap | null {
+export function renderNodesToCanvas(nodes: readonly unknown[], docW: number, docH: number): Bitmap | null {
   return _fn ? _fn(nodes, docW, docH) : null;
 }
 
 /** nodes → 合成 straight 字节（v0.6.39：merge-down 等「字节进出」op 用——同一 GL 引擎，零 canvas）。 */
-export function renderNodesToBytes(nodes: unknown[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {
+export function renderNodesToBytes(nodes: readonly unknown[], docW: number, docH: number): { data: Uint8ClampedArray; w: number; h: number } | null {
   return _bytesFn ? _bytesFn(nodes, docW, docH) : null;
 }
