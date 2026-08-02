@@ -724,6 +724,8 @@
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoMoveToLayerBtn" data-sel-act="move" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span data-i18n="la.moveToLayer">选区移动到新层</span></button>
       <!-- v0.7.38 送选区进填色（ADR-0004 修订 5 one-shot 携入；fill 菜单不放——已经在 fill 里） -->
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoToFillBtn" data-sel-act="toFill" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg><span data-i18n="la.toFillShort">送入填色</span></button>
+      <!-- v0.7.40 蚂蚁线 toggle（selection 侧，管 lassoTool.showAnts；fill 侧那颗管 fillTool——per-tool 分家） -->
+      <button class="lasso-tool-btn" id="lassoSelAntsBtn" type="button" role="menuitem" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-rectangle"/></svg><span data-i18n="la.antsToggle">蚂蚁线</span></button>
     </div>
     <div class="lasso-icon-menu lasso-icon-list hidden" id="fillSelEditMenu" role="menu" data-i18n-aria="la.editSel">
       <!-- v0.7.38 从当前图层 alpha 建选区（fill 里同样有用：整层填充/换色工作流） -->

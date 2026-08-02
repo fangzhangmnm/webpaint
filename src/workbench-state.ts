@@ -154,15 +154,15 @@ function freshGroups() {
     magicWand:     { threshold: 20, expand: false, expandPx: 1, similarThreshold: 20, metric: "oklab" as string,
                      fillGap: false, fillGapPx: 4,
                      lineartCloseDist: 64, lineartInk: 50, lineartMinRegion: 32, lineartTipSens: 25, lineartBleed: -1 },
-    // v0.6.19 蚂蚁线（user 拍板+持久化同意 2026-07-28）：fill 模式下可关（默认开）；
-    //   toggle 只存在于 fill，非 fill 恒显示（ADR-0004 修订记录）。
-    fill:          { showAnts: false },   // v0.7.17 默认改关（user 2026-07-30；toggle 仍在 fill ⋯ 菜单，per-doc 持久化）
     // v0.6.24 fill/lasso 分家（user 拍板：mental model 两个不互通的工具、实现一条路）：
     //   子工具/布尔/1:1 per-tool 持久化（v0.5.16 共享一份 RAM 记忆 _selMem 作废）。
     //   fill 默认魔棒+并（赛璐璐点色工作流）；selection 默认套索+新建（v0.6.55，user 2026-07-30：原默认矩形）。
     //   v0.7.17：算法 per-tool 持久化（user 拍板：油漆桶默认线稿闭合、选区魔棒默认像素精确 flood）
-    lassoTool:     { sub: "freehand" as string, setOp: "new" as string, constrainSquare: false, algo: "classic" as string },
-    fillTool:      { sub: "magic" as string, setOp: "union" as string, constrainSquare: false, algo: "lineart" as string },
+    // v0.7.40 蚂蚁线 per-tool（user journal 2026-07-30:177「selection模式也可以和油漆桶一样关，
+    //   两个蚂蚁线都默认开」——撤回 v0.7.17 的 fill 默认关；旧 fill:{showAnts} 组退役，
+    //   老 doc 的 stale 键被 mergeInto 静默忽略、旧偏好回默认开，user 知情同意 2026-08-01）
+    lassoTool:     { sub: "freehand" as string, setOp: "new" as string, constrainSquare: false, algo: "classic" as string, showAnts: true },
+    fillTool:      { sub: "magic" as string, setOp: "union" as string, constrainSquare: false, algo: "lineart" as string, showAnts: true },
     // （v0.7.25 曾有 editorState.selPen 变体/笔径组，v0.7.26 笔架化后退役——配置归 toolStates.selPen
     //   + 笔架 collection；老 doc 里的 stale 键被 mergeInto 静默忽略）
     // ADR-0005/0006 形状笔：子工具 + **per-图形约束**（user：每个图形的 lock 分别持久化，默认全不锁）
@@ -276,20 +276,19 @@ export const editorState = {
     get color(): string { return _bind ? _bind.getColor() : S.g.brushTool.color; },
     set color(v: string) { if (_bind) _bind.setColor(v); else S.g.brushTool.color = v; },
   },
-  fill: {
-    get showAnts(): boolean { return S.g.fill.showAnts; }, set showAnts(v: boolean) { S.g.fill.showAnts = v; },
-  },
   lassoTool: {
     get sub(): string { return S.g.lassoTool.sub; }, set sub(v: string) { S.g.lassoTool.sub = v; },
     get setOp(): string { return S.g.lassoTool.setOp; }, set setOp(v: string) { S.g.lassoTool.setOp = v; },
     get constrainSquare(): boolean { return S.g.lassoTool.constrainSquare; }, set constrainSquare(v: boolean) { S.g.lassoTool.constrainSquare = v; },
     get algo(): string { return S.g.lassoTool.algo; }, set algo(v: string) { S.g.lassoTool.algo = v; },
+    get showAnts(): boolean { return S.g.lassoTool.showAnts; }, set showAnts(v: boolean) { S.g.lassoTool.showAnts = v; },
   },
   fillTool: {
     get sub(): string { return S.g.fillTool.sub; }, set sub(v: string) { S.g.fillTool.sub = v; },
     get setOp(): string { return S.g.fillTool.setOp; }, set setOp(v: string) { S.g.fillTool.setOp = v; },
     get constrainSquare(): boolean { return S.g.fillTool.constrainSquare; }, set constrainSquare(v: boolean) { S.g.fillTool.constrainSquare = v; },
     get algo(): string { return S.g.fillTool.algo; }, set algo(v: string) { S.g.fillTool.algo = v; },
+    get showAnts(): boolean { return S.g.fillTool.showAnts; }, set showAnts(v: boolean) { S.g.fillTool.showAnts = v; },
   },
   magicWand: {
     get threshold(): number { return S.g.magicWand.threshold; }, set threshold(v: number) { S.g.magicWand.threshold = v; },

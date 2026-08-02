@@ -207,6 +207,13 @@ export function updateLassoToolbar() {
     b.setAttribute("aria-pressed", b.dataset.lassoSetop === setOp ? "true" : "false");
     if (b.dataset.lassoSetop === "new") b.classList.toggle("hidden", fillActive);
   }
+  // v0.7.40 fill 下 setOp 槽=单击 toggle：摘小三角（三角纪律 v0.6.31：有三角=有菜单，toggle 化
+  //   必须摘否则 UI 撒谎）+ haspopup 切换 + title 说当前态（点一下会切到哪边一目了然）
+  lassoSetOpSlot.querySelector(".lasso-slot-caret")?.classList.toggle("hidden", fillActive);
+  lassoSetOpSlot.setAttribute("aria-haspopup", fillActive ? "false" : "true");
+  lassoSetOpSlot.setAttribute("title", fillActive
+    ? t(setOp === "subtract" ? "la.subtract" : "la.union") : t("la.setOpSlot"));
+  if (fillActive) lassoSetOpMenu.classList.add("hidden");
   // ⋯ 菜单：v0.7.2 起只剩命令（算法配置搬进扳手弹出）；按选区有无禁用
   const magicOn = sub === "magic";
   for (const menu of [lassoSelEditMenu, fillSelEditMenu]) {
@@ -285,8 +292,9 @@ export function updateLassoToolbar() {
   // ⋯ 菜单钮：modal 开着时(_selEdit)恒亮（预览 shrink 到空不能把 modal 撕掉）。
   const showSelEdit = !!_selEdit || (showRow1 && !otherToolSel);
   if (!showSelEdit) closeSelEditUI();
-  // v0.6.30 分家后 lasso-only/fill-only 类开关退役（漏显温床）；蚂蚁线只活在 fill 菜单
-  document.getElementById("lassoAntsBtn")?.setAttribute("aria-pressed", editorState.fill.showAnts ? "true" : "false");
+  // v0.6.30 分家后 lasso-only/fill-only 类开关退役（漏显温床）；蚂蚁线 v0.7.40 起 per-tool 两钮各归各
+  document.getElementById("lassoAntsBtn")?.setAttribute("aria-pressed", editorState.fillTool.showAnts ? "true" : "false");
+  document.getElementById("lassoSelAntsBtn")?.setAttribute("aria-pressed", editorState.lassoTool.showAnts ? "true" : "false");
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
   if (showConstrain) {
@@ -495,9 +503,15 @@ function initSelEditUI() {
     menu?.classList.toggle("hidden");
     if (wasHidden && menu) anchorPopupToBtn(menu, lassoSelEditBtn, { align: "left", offsetY: 6 });   // v0.5.14 贴钮
   });
-  // 蚂蚁线 toggle（v0.6.19，ADR-0004 修订）：写 editorState（per-doc）+ 重绘；不关菜单（toggle 类操作连按友好）
+  // 蚂蚁线 toggle（v0.6.19，ADR-0004 修订；v0.7.40 per-tool 分家）：写 editorState（per-doc）+ 重绘；
+  //   不关菜单（toggle 类操作连按友好）。fill 菜单钮管 fillTool、selection 菜单钮管 lassoTool。
   document.getElementById("lassoAntsBtn")?.addEventListener("click", () => {
-    editorState.fill.showAnts = !editorState.fill.showAnts;
+    editorState.fillTool.showAnts = !editorState.fillTool.showAnts;
+    board.requestRender();
+    updateLassoToolbar();
+  });
+  document.getElementById("lassoSelAntsBtn")?.addEventListener("click", () => {
+    editorState.lassoTool.showAnts = !editorState.lassoTool.showAnts;
     board.requestRender();
     updateLassoToolbar();
   });
@@ -663,15 +677,15 @@ export function initToolbar(ctx: AppContext) {
   window.addEventListener("wp:applyEditorState", updateLassoToolbar);   // 换文档：阈值/扩张态回灌后重派生
 
   // v0.5.14 组槽通用：点槽 → 锚定槽下方弹紧凑图标排（user：下拉要贴槽、图标不要文字）。
-  const wireSlotMenu = (slot: HTMLElement, menu: HTMLElement, onPick: (b: HTMLElement) => void) => {
+  // v0.7.40 拆成两半：wireMenuItems（菜单项+外点关）+ openSlotMenu（开合锚定）——
+  //   为 setOp 槽的 mode-aware 单击让路；其余 3 个调用点经 wireSlotMenu 合体，行为逐 bit 不变。
+  const openSlotMenu = (slot: HTMLElement, menu: HTMLElement) => {
+    const wasHidden = menu.classList.contains("hidden");
+    menu.classList.toggle("hidden");
+    if (wasHidden) anchorPopupToBtn(menu, slot, { align: "left", offsetY: 6 });
+  };
+  const wireMenuItems = (slot: HTMLElement, menu: HTMLElement, onPick: (b: HTMLElement) => void) => {
     _transientMenus.push(menu);
-    // 纯选择槽（v0.6.31 唯一的小三角语义）：单击=开/关菜单
-    slot.addEventListener("click", (e: Event) => {
-      e.stopPropagation();
-      const wasHidden = menu.classList.contains("hidden");
-      menu.classList.toggle("hidden");
-      if (wasHidden) anchorPopupToBtn(menu, slot, { align: "left", offsetY: 6 });
-    });
     for (const b of [...menu.querySelectorAll<HTMLElement>("button")]) {
       b.addEventListener("click", () => { onPick(b); menu.classList.add("hidden"); updateLassoToolbar(); });
     }
@@ -680,6 +694,14 @@ export function initToolbar(ctx: AppContext) {
       if (menu.contains(e.target as Node) || slot.contains(e.target as Node)) return;
       menu.classList.add("hidden");
     });
+  };
+  const wireSlotMenu = (slot: HTMLElement, menu: HTMLElement, onPick: (b: HTMLElement) => void) => {
+    // 纯选择槽（v0.6.31 唯一的小三角语义）：单击=开/关菜单
+    slot.addEventListener("click", (e: Event) => {
+      e.stopPropagation();
+      openSlotMenu(slot, menu);
+    });
+    wireMenuItems(slot, menu, onPick);
   };
   // 子工具组槽（freehand/rect/ellipse/polygon/flood 收一组；v0.6.24 套索/填色真·各记各的
   //   ——editorState.lassoTool/fillTool per-tool 持久化）
@@ -698,14 +720,30 @@ export function initToolbar(ctx: AppContext) {
     openExclusive(PANELS.RACK_SEL_PEN);
   });
   // 布尔组槽（v0.5.17 user：改回下拉，横排纯图标）
+  // v0.7.40（user：「fill 里布尔应该单击直接 +/− toggle，不要展开槽再选」）：mode-aware——
+  //   fill = 单击 toggle union↔subtract（"新建" 在 fill 本就隐藏，两态零信息损失；非 subtract
+  //   一律当 union 处理，防老 doc 的 fillTool.setOp 存过 "new"）；lasso = 原槽菜单三选一。
+  //   小三角/haspopup/title 的两态切换在 updateLassoToolbar（三角纪律：有三角=有菜单）。
   lassoSetOpSlot = byId("lassoSetOpSlot");
   lassoSetOpSlotUse = byId("lassoSetOpSlotUse") as unknown as SVGUseElement;
   lassoSetOpMenu = byId("lassoSetOpMenu");
   lassoSetOpMenuBtns = [...lassoSetOpMenu.querySelectorAll<HTMLElement>("[data-lasso-setop]")];
-  wireSlotMenu(lassoSetOpSlot, lassoSetOpMenu, (b) => {
+  wireMenuItems(lassoSetOpSlot, lassoSetOpMenu, (b) => {
     const op = b.dataset.lassoSetop as Parameters<typeof input.lasso.setSetOpMode>[0];
     input.lasso.setSetOpMode(op);
     _selToolRec().setOp = op;   // 写当前工具自己的记录（fill 里「新建」项已隐）
+  });
+  lassoSetOpSlot.addEventListener("click", (e: Event) => {
+    e.stopPropagation();
+    if (editMode.current() === "fill") {
+      const next = input.lasso.getSetOpMode() === "subtract" ? "union" : "subtract";
+      input.lasso.setSetOpMode(next);
+      _selToolRec().setOp = next;
+      lassoSetOpMenu.classList.add("hidden");
+      updateLassoToolbar();
+      return;
+    }
+    openSlotMenu(lassoSetOpSlot, lassoSetOpMenu);
   });
   // v0.7.8 魔棒算法组槽（原系统 <select> 退役，家规：不用系统控件）：
   //   classic=经典 flood / lineart=论文线稿分区（断口自动闭合+填到线下，lineart-oracle）。

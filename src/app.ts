@@ -276,7 +276,9 @@ input.lasso.setWarpBakeProvider(() => board.glWarpBakeFn());
 board.setLassoProvider((() => ({
   selection:      doc.selection,
   // fill 模式蚂蚁线 toggle（ADR-0004 修订 v0.6.19）：非 fill 恒显；fill 按 editorState（默认开）
-  showAnts:       editMode.current() !== "fill" || editorState.fill.showAnts,
+  // v0.7.40 蚂蚁线 per-tool 路由（user：selection 也可关、双默认开）；非选区工具恒显
+  showAnts:       editMode.current() === "fill" ? editorState.fillTool.showAnts
+                : editMode.current() === "lasso" ? editorState.lassoTool.showAnts : true,
   drawingPath:    input.lasso.getDrawingPath(),
   polyFirst:      input.lasso.polygonFirstVertex(),   // v0.6.25 多边形首顶点标记（闭合提示）
   drawingRect:    input.lasso.getDrawingRect(),

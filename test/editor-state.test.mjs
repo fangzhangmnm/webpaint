@@ -149,3 +149,21 @@ test("[editor-state] 透视 frame（ADR-0006）：默认 / 往返 / 老 doc 缺�
   eq(editorState.persp.p1.vp1, null, "缺组 → 默认");
   eq(editorState.persp.mode, "off");
 });
+
+test("[editor-state] v0.7.40 蚂蚁线 per-tool：双默认开、stale fill 组忽略、老偏好回默认", () => {
+  editorState.reset();
+  eq(editorState.lassoTool.showAnts, true, "selection 侧默认开（user journal 2026-07-30:177）");
+  eq(editorState.fillTool.showAnts, true, "fill 侧默认开（撤回 v0.7.17 默认关）");
+  // 旧 doc 存过 fill:{showAnts:false}（v0.6.19-v0.7.39 时代）→ 组已退役，mergeInto 静默忽略
+  editorState.Unserialize({ fill: { showAnts: false }, fillTool: { sub: "magic" } });
+  eq(editorState.fillTool.showAnts, true, "老 fill.showAnts 偏好丢弃 → 回默认开（user 知情 2026-08-01）");
+  eq("fill" in editorState, false, "fill facade 已删");
+  // 新字段往返
+  editorState.lassoTool.showAnts = false;
+  const s = editorState.Serialize();
+  editorState.reset();
+  editorState.Unserialize(s);
+  eq(editorState.lassoTool.showAnts, false, "lassoTool.showAnts 往返");
+  eq(editorState.fillTool.showAnts, true, "fillTool.showAnts 不受影响");
+  editorState.reset();
+});
