@@ -1035,6 +1035,11 @@ export function initToolbar(ctx: AppContext) {
     input.lasso.rotateFloat90();
     board.invalidateAll();
   });
+  // v0.7.37 复位（user：「reset scale + rot + align to center」）：一个 undo 整点，同 flip/rotate 节奏
+  byId("lassoResetTransformBtn").addEventListener("click", () => {
+    input.lasso.resetFloatTransform();
+    board.invalidateAll();
+  });
 
   byId("lassoDeselectBtn").addEventListener("click", () => {
     pushSel(input.lasso.setSelection(null));

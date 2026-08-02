@@ -371,6 +371,40 @@ export class FloatingTransform {
   flipHorizontal() { this._transformLivePoints((p, cx, _cy) => ({ x: 2 * cx - p.x, y: p.y })); }
   rotate90CCW()    { this._transformLivePoints((p, cx, cy) => ({ x: cx + (p.y - cy), y: cy - (p.x - cx) })); }
 
+  // v0.7.37（user：「reset scale + rot + align to center」）：一键复位——尺寸回 float 原始 rect
+  // （union AABB，同 lift 初始），画布居中，缩放/旋转/透视全清。全整数坐标 → 整数刚体态 →
+  // commit 走置换快路逐字节无损（跨 doc 导入对齐的手动兜底：同尺寸 roundtrip 本就居中=(0,0)）。
+  // 一个 undo 整点（同 flip/rotate90 的事务节奏）。
+  resetToCenterOriginal(): boolean {
+    const lv = this._live;
+    const fs = this._w?.readFloatState();
+    if (!lv || !fs || !fs.floats.length) return false;
+    let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+    for (const f of fs.floats) {
+      if (f.rect.x < gx0) gx0 = f.rect.x;
+      if (f.rect.y < gy0) gy0 = f.rect.y;
+      if (f.rect.x + f.rect.w > gx1) gx1 = f.rect.x + f.rect.w;
+      if (f.rect.y + f.rect.h > gy1) gy1 = f.rect.y + f.rect.h;
+    }
+    const w0 = gx1 - gx0, h0 = gy1 - gy0;
+    const doc = this._w!.readDoc();
+    const x0 = Math.round(doc.width / 2 - w0 / 2), y0 = Math.round(doc.height / 2 - h0 / 2);
+    const x1 = x0 + w0, y1 = y0 + h0;
+    // 映射约定（sourceDestQuad）：gizmoFrame = source 归一化参考系 → 必须复位成 source union AABB
+    // （basisRotate 可能转过它）；mesh = dest quad = 居中矩形。合成 = 纯整数平移。
+    lv.gizmoFrame = { origin: { x: gx0, y: gy0 }, ux: { x: w0, y: 0 }, uy: { x: 0, y: h0 } };
+    lv.mesh = [
+      [{ x: x0, y: y0 }, { x: x1, y: y0 }],
+      [{ x: x0, y: y1 }, { x: x1, y: y1 }],
+    ];
+    lv.meshN = 2;
+    lv.usedClass = "similarity";   // 自由度记账清零（同 lift 初始；随本整点 undo 回退）
+    lv.uniformAspect = w0 / Math.max(1, h0);
+    this._pushTransformCheckpoint();
+    this.onChange();
+    return true;
+  }
+
   private _pushTransformCheckpoint() {
     if (!this._w || !this._history || !this._ops || !this._live) return;
     const lv = this._live;

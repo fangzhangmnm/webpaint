@@ -54,6 +54,8 @@ SPECS = [
     # 2026-07-30 拆色（explode-color-layers）当日入库，甲方定名 separate-colors（color 文氏图三圆分开），
     # stopgap 清零。
     ("fill-gap", "隙", (3, 3, 18, 18), "魔棒容隙 toggle（v0.7.24：缺口宽<n px 处 flood 过不去；EDT 受限 flood+回贴膨胀）。真图标建议=断口线条+跨缺口的桥/虚线补段（与 selection-expand 同笔重；区别于 auto-expand 的向外箭头语义）"),
+    # 2026-08-01 transform 行「复位」钮（v0.7.37）：浮层一键回初始尺寸+画布居中+清旋转/透视。
+    ("reset-transform", "回中", (2, 5, 20, 14), "浮层变换复位（v0.7.37：尺寸回 lift 初始、画布居中、缩放/旋转/透视清零、整数吸附保置换快路）。真图标建议=居中靶心/十字准星 + 回位弧箭头（与 rotate-ccw 区分：箭头指向中心点而非绕圈）"),
 ]
 syms = []
 for sid, text, box, note in SPECS:

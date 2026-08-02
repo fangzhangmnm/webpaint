@@ -515,6 +515,7 @@ export class LassoEngine {
   // #12：浮层整体 水平翻转 / 逆时针 90°（facade 纯转发）
   flipFloatHorizontal() { this._ft.flipHorizontal(); }
   rotateFloat90() { this._ft.rotate90CCW(); }
+  resetFloatTransform() { return this._ft.resetToCenterOriginal(); }
   hitTest(x: number, y: number, screenScale = 1) { return this._ft.hitTest(x, y, screenScale); }
   beginDrag(hit: Parameters<FloatingTransform["beginDrag"]>[0], x: number, y: number) { this._ft.beginDrag(hit, x, y); }
   extendDrag(x: number, y: number) { this._ft.extendDrag(x, y); }

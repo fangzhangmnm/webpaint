@@ -421,6 +421,35 @@ describe("S6 · commit 整数平移快路（不旋转时 pixel perfect）", () =
   });
 });
 
+describe("v0.7.37 · resetToCenterOriginal（复位：原始尺寸 + 画布居中 + 整数吸附）", () => {
+  it("rotate90+flip 后 reset → mesh/gizmo = 居中原尺寸轴对齐整数矩形；commit 置换快路逐字节落位", () => {
+    const { doc, w, h, ft } = mk();
+    const L = doc.activeLayer;
+    paintRect(L, 20, 20, 40, 40);
+    L.pixels.putRegion(25, 30, 1, 1, px(1, 2, 3, 255));   // 标记像素（相对 float 原点 +5,+10）
+    doc.selection = rectSel(20, 20, 40, 40);
+    eq(ft.lift(L), true);
+    ft.rotate90CCW();
+    ft.flipHorizontal();
+    eq(ft.resetToCenterOriginal(), true, "reset ok");
+    // 512²、40×40 → dest 左上 (236,236)；gizmoFrame 复位 = source AABB（映射约定见 sourceDestQuad）
+    const t = w.readFloatState().transform;
+    eq(t.gizmoFrame.origin.x, 20); eq(t.gizmoFrame.origin.y, 20);
+    eq(t.gizmoFrame.ux.x, 40); eq(t.gizmoFrame.ux.y, 0);
+    eq(t.gizmoFrame.uy.x, 0); eq(t.gizmoFrame.uy.y, 40);
+    eq(t.mesh[0][0].x, 236); eq(t.mesh[0][0].y, 236);
+    eq(t.mesh[1][1].x, 276); eq(t.mesh[1][1].y, 276);
+    eq(t.usedClass, "similarity", "自由度记账清零");
+    eq(ft.commit(null), true, "整数刚体 → CPU 置换快路，无需 bakeFn");
+    const m = L.sampleAt(241, 246);   // 标记像素平移到位（rotate/flip 被 reset 抹掉）
+    eq(m[0], 1); eq(m[1], 2); eq(m[2], 3);
+    eq(L.sampleAt(25, 30)[3], 0, "原位置留洞（lift cut）");
+    // undo 链健康：commit → reset → flip → rotate → lift 全撤
+    for (let i = 0; i < 8 && h.canUndo(); i++) h.undo(w);
+    eq(L.sampleAt(25, 30)[3], 255, "撤到底：像素回原位");
+  });
+});
+
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
 describe("float-ops 收尾", () => {
   it("清栈、收浮层并释放本文件的 doc tiles", () => {
