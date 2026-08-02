@@ -39,6 +39,6 @@
 
 ## 拷问进度（2026-08-02 中断点）
 
-1. **C·GPU 抉择**（唯一真正未定的大架构题）讨论中未拍板。已知约束：user——「CPU 性能不可接受」（实时路径必须 GPU）。AI 提出的候选切法（**未获接受，仅供下轮参考**）：headless 硬承诺=「DOM 零依赖」而非「GPU 零依赖」；GL context 创建翻到宿主、ctor 注入 GL port（现状 gl-context.ts 已是唯一创建点）；多人协作走 op-log 不承诺 bit-exact；云后端=软件 GL；CPU 参照（reference-2d golden）留测试域不转正；WebGPU 迁移列未来独立纪元。user 表示此题需长聊，有待澄清的顾虑未说完。
+1. ➜ 已 grill 收敛：见 `20260802-v08-gpu-determinism-grill.md`（2026-08-02 稍晚；下文为收敛前状态）。**C·GPU 抉择**（唯一真正未定的大架构题）讨论中未拍板。已知约束：user——「CPU 性能不可接受」（实时路径必须 GPU）。AI 提出的候选切法（**未获接受，仅供下轮参考**）：headless 硬承诺=「DOM 零依赖」而非「GPU 零依赖」；GL context 创建翻到宿主、ctor 注入 GL port（现状 gl-context.ts 已是唯一创建点）；多人协作走 op-log 不承诺 bit-exact；云后端=软件 GL；CPU 参照（reference-2d golden）留测试域不转正；WebGPU 迁移列未来独立纪元。user 表示此题需长聊，有待澄清的顾虑未说完。
 2. 顺手账（无争议，待排期）：brush.ts 压感 LPF 壁钟 dt → 事件 t（回放前提）。
 3. 未拷问：B 的 password 设计（政策在 app/机制在 store 的分界动不动）、mhtml 可行性细节、E 的列举接口统一（watchFolder vs listAllItems）、术语拆分张力（见上）、F 的 i18n 插件自带文案问题。
