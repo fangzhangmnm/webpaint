@@ -1,4 +1,4 @@
-// Contribution 注册表原语（架构深化 candidate 2，见 docs/reports/20260608-ui-deepening-and-plugin-survey.html）。
+// Contribution 注册表原语（架构深化 candidate 2，见 ai-docs/reports/20260608-ui-deepening-and-plugin-survey.html）。
 //
 // 背景：项目早有一套好接缝（filters.js 的 registerFilter/onFilterRegistered），但只服务 filter。
 // 其余「能出现在菜单/工具栏上的贡献项」（导出格式 / 文档操作 / 工具）全是 god file 里的硬 switch。

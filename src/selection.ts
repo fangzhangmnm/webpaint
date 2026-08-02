@@ -1,6 +1,6 @@
 // Selection —— 选区，doc 的一等公民。**不可变值对象**，底座 = 稀疏 gray8 tile（S5，v0.4.6）。
 //
-// 设计见 CONTEXT.md (Selection) / docs/20260528-lasso-and-selection.md / journal/20260721 Architecture.md
+// 设计见 CONTEXT.md (Selection) / ai-docs/20260528-lasso-and-selection.md / journal/20260721 Architecture.md
 // （spec:18「selection-mask 单通道 tile 层，进 undo history」、spec:208-210）。给下个 AI：
 //
 // - **maskCanvas 死了**（v0.4.6）。mask = doc 网格对齐的稀疏 gray8 tile（0..255 = AA 覆盖度），

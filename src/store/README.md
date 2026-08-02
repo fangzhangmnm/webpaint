@@ -60,7 +60,7 @@ const store = createStore({
 > - **IndexedDB**：单库 `${appId}.${databaseId}`、单 object store `blobs`，key = `${partition}/${name}`（分区 `files/`·`trash/`·`backup/`·`collections/`，blob-partition 深模块）。
 > - **localStorage**：经 `namespacedKv` 统一加根前缀的**唯一 choke point**——`${ns}.database-version`（schema 戳）、`${ns}.files.etag:`(cloud-sync files 实例)、`${ns}.files.dirty:`(local-head，文件 dirty 权威)、`${ns}.collections.etag:`/`.dirty:`(collections 实例)、`${ns}.settings.<key>`(散键裸值)、`${ns}.internal.pending_new_folders`/`_deletions`/`_uploads`/`_folder_deletions`/`pending_gone`。各深模块只用相对键，想漏都漏不出命名空间。
 >
-> **同 origin 的每个兄弟 PWA 必须用不同 `appId`**——否则两 app 读写同一份存储：文件互漏、schema 戳互踩跳迁移（显 0B）、缓存互毁。**根治自 2026-07-12 真机灾难**（详 `docs/20260712-store-per-app-namespace.md`）。不传 `appId`/`databaseId` → 抛错，绝不静默共用。
+> **同 origin 的每个兄弟 PWA 必须用不同 `appId`**——否则两 app 读写同一份存储：文件互漏、schema 戳互踩跳迁移（显 0B）、缓存互毁。**根治自 2026-07-12 真机灾难**（详 `ai-docs/20260712-store-per-app-namespace.md`）。不传 `appId`/`databaseId` → 抛错，绝不静默共用。
 >
 > **🔒 持久化改动需同意（红线，2026-07-13）**：动**任何持久化数据结构、创建新字段**（localStorage + IDB 都算）**必须先显式获用户同意**——布局一上真机就有数据躺着，结构漂移=丢数据/裂卡/兄弟串号。
 
@@ -226,7 +226,7 @@ syncedUserPref.onChange("lang", () => {/* 云端对齐把别台设备的改带�
 > 加它之前先问：这坨字节是不是某个加密作品解出来的？是 → 只能在 RAM。
 
 
-> 加密**逻辑**（3 层容器 / KDF / peek 验证器 / 透明封解）全在库内。重型 **7z(1.6MB wasm)+zip codec 由 app 注入**（不塞每个 bundle）。不注入 → 加密 dormant（不加密的项目省 1.6MB）。密码**非交互**：库永不弹框（§7），app 持密码 + 解锁循环在 busy 外。详见 `docs/11`。
+> 加密**逻辑**（3 层容器 / KDF / peek 验证器 / 透明封解）全在库内。重型 **7z(1.6MB wasm)+zip codec 由 app 注入**（不塞每个 bundle）。不注入 → 加密 dormant（不加密的项目省 1.6MB）。密码**非交互**：库永不弹框（§7），app 持密码 + 解锁循环在 busy 外。详见 `ai-docs/11`。
 
 ```ts
 const store = createStore({
@@ -249,7 +249,7 @@ const store = createStore({
 - **读 at-rest 密文**（导出/拷贝/快照要原样搬密文、不能解壳）：`ZipFile.getEncryptedBlob()` → `EncryptedBlob | null`。
 
 > **未采用**：README 早期草拟的 `store.encryption` **超集**（库统一密钥 + `vault.salt` + `encrypted:true` + `saveEncrypted` + `addEncryption`）本版不实现
-> —— 注意别和 v415 落地的 `store.encryption`（只有三个**裸字节**级 helper，无密钥管理）混为一谈；那个是窄面，这个是被否掉的宽面——对齐 WebPaint 真机验过的 `getPassword`/`encrypt` 模型（见 `docs/11`）。要库统一密钥再单独 escalate。
+> —— 注意别和 v415 落地的 `store.encryption`（只有三个**裸字节**级 helper，无密钥管理）混为一谈；那个是窄面，这个是被否掉的宽面——对齐 WebPaint 真机验过的 `getPassword`/`encrypt` 模型（见 `ai-docs/11`）。要库统一密钥再单独 escalate。
 
 ---
 

@@ -97,7 +97,7 @@ export async function decodeImageFile(file: Blob): Promise<ImageBitmap | HTMLIma
 }
 
 // 解码边界的唯一 canvas 读出（政策注：外来格式 jpeg/webp/heic 只有原生解码器；读出这一次后
-// 管线全字节——见 docs/reports/20260728-canvas-audit.md Ⅰ 类）。
+// 管线全字节——见 ai-docs/reports/20260728-canvas-audit.md Ⅰ 类）。
 export function imageSourceToBytes(src: ResampleSource): { data: Uint8ClampedArray; w: number; h: number } {
   const w = src.width || (src as HTMLImageElement).naturalWidth;
   const h = src.height || (src as HTMLImageElement).naturalHeight;

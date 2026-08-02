@@ -91,7 +91,7 @@ Ipad打开网页就可以画，登陆微软Onedrive网盘后可以自动同步�
 <summary>✅ <b>二次元线稿勾线</b>（已跑通）</summary>
 
 - [x] 高质量的笔刷，半透明，流量，硬度
-- [x] 平滑防抖（streamline / pull stabilizer / motion filter / velocity-adaptive 几道坑都填了，详见 [docs/20260530-streamline-velocity-math.md](docs/20260530-streamline-velocity-math.md)）
+- [x] 平滑防抖（streamline / pull stabilizer / motion filter / velocity-adaptive 几道坑都填了，详见 [ai-docs/20260530-streamline-velocity-math.md](ai-docs/20260530-streamline-velocity-math.md)）
 - [x] 旋转、放大画布
 - [x] 图层系统，支持导入参考图片
 - [x] 半透明图层叠加，图层可见性
@@ -263,7 +263,7 @@ WebPaint 是 PWA（Progressive Web App），不用进 App Store，浏览器直�
 
 **冲突保护**：你在 A 设备改了画推上去，又在 B 设备改了同一张准备推时，B 会先提示「云端有更新」，让你选 拉云端 / 保留本地 / 都留 三选一，不会盲推覆盖。
 
-国内网盘（百度网盘 / 阿里云盘）和墙内镜像部署还没做（在 [backlog](docs/20260528-backlog.md) 里），想要的可以提 issue 催一下。
+国内网盘（百度网盘 / 阿里云盘）和墙内镜像部署还没做（在 [backlog](ai-docs/20260528-backlog.md) 里），想要的可以提 issue 催一下。
 
 ### 如何和Blender通信
 
@@ -293,7 +293,7 @@ WebPaint 是 PWA（Progressive Web App），不用进 App Store，浏览器直�
 - 输入 = 当前图层 / 选区像素；输出 = 新图层（不污染原图）
 - API 端可选：OpenAI 兼容接口 / Anthropic / 本地 ollama / 自己开个 FastAPI
 
-也有 P2 备选方向（[backlog](docs/20260528-backlog.md)）：本地 WASM 模型按需下载，第一次用时再下载缓存，不默 vendor 进 bundle。
+也有 P2 备选方向（[backlog](ai-docs/20260528-backlog.md)）：本地 WASM 模型按需下载，第一次用时再下载缓存，不默 vendor 进 bundle。
 
 想自己接的欢迎 PR。
 

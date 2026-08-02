@@ -1,4 +1,4 @@
-// 笔架 sheet 的纯 view-model（A3，见 docs/reports/20260606-fresh-geological-survey.html）。
+// 笔架 sheet 的纯 view-model（A3，见 ai-docs/reports/20260606-fresh-geological-survey.html）。
 // 给 rack 数据 + 状态标志 → 派生「显示什么」。无 DOM / 无 IDB / 无 cloud。
 // 笔架的 IDB 落盘 / cloud push（rackFolderFlow.sync）/ draft 生命周期是编排，留在 app
 // （同 adoptLoadedDoc 的判断——不把 IDB/网络拖进模块冒充深度）。

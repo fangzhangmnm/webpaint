@@ -4,7 +4,7 @@
 // 纯模块：无 DOM / 无 IDB / 无 cloud。view = ui/brush-config-view.ts，派生 = resolved-brush.ts。
 
 // 引擎默认参数袋 = ResolvedBrush 的 base（resolved-brush.ts import 之）。
-// 当前笔（state.brush 旧单例）已收敛成不可变 ResolvedBrush（见 docs/CONTEXT [[当前笔]]）；
+// 当前笔（state.brush 旧单例）已收敛成不可变 ResolvedBrush（见 ai-docs/CONTEXT [[当前笔]]）；
 // 这张表是「无 preset / 无笔架」时也能画的兜底默认（user mental model：console 设工具即可绘画）。
 export const DEFAULT_CONFIG = {
   size: 12,
@@ -34,7 +34,7 @@ export const DEFAULT_CONFIG = {
   blendMode: "source-over",
   // pixel mode：
   pixelMode: false,
-  // 位置平滑（时间常数指数追踪，详 docs/20260613-brush-procreate-smoothing.md）：
+  // 位置平滑（时间常数指数追踪，详 ai-docs/20260613-brush-procreate-smoothing.md）：
   streamline: 0.15,         // → 时间常数 tau：滞后恒 tau 时长（跟笔/可控/顿涌现）。0.5=满劲 → 默认 0.15=轻
   stabilization: 0,         // 死区拉绳：硬空间阈值去抖（与 tau 频域去抖正交）
   // taper：笔触两端渐细，**纯 stylistic·per-preset**（brushes.js makeBrush 的 taperIn/out → preset.taper）。默认 0=无。

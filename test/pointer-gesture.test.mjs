@@ -1,4 +1,4 @@
-// 纯手势数学验收（K3 切片，见 docs/reports/20260606-fresh-geological-survey.html）。
+// 纯手势数学验收（K3 切片，见 ai-docs/reports/20260606-fresh-geological-survey.html）。
 // 这些函数过去内联在 input.js、零测、错一个符号画面就跟手跑偏（桌面难复现）。
 // 现在是纯函数 → 可断言「anchor-preserving」不变量 + 吸附 + tap 文法。无 canvas/DOM。
 import { describe, it, assert } from "./runner.mjs";

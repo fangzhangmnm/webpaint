@@ -1,5 +1,5 @@
 // S5 · Selection gray8 tile 底座验收（v0.4.6）。
-// 覆盖（对照 docs/20260722-v04-batch1-handoff.md §4-S5 + test-charter (c)）：
+// 覆盖（对照 ai-docs/20260722-v04-batch1-handoff.md §4-S5 + test-charter (c)）：
 //   - fromGray8Region / full：稀疏建 tile、全零格不建、紧 bbox 聚合（跨 tile 边界）
 //   - compose per-tile 布尔：union/subtract/intersect 的 AA 公式 + 稀疏共享（无对手格 acquire 原 tile）
 //   - subtract 减光 → null（旧 canvas 版留“隐形空选区”，v0.4.6 语义改进）

@@ -1,4 +1,4 @@
-// Gallery 文件夹模型（A2，见 docs/reports/20260606-fresh-geological-survey.html）。
+// Gallery 文件夹模型（A2，见 ai-docs/reports/20260606-fresh-geological-survey.html）。
 // 纯数据（无 DOM / 无网络 / 无 store）：本地⊕云列表合并 + 当前文件夹层切片。
 // 过去内联在 app.js 的 renderGallery —— 「按 name 合并 local/cloud」「按当前文件夹切 immediate
 // 子夹 vs 直属文件」是真领域逻辑、跟 DOM 渲染无关，抽出可单测。

@@ -95,7 +95,7 @@ function _renderCropOverlay() {
   }
 }
 
-// ---- v0.6.48 裁剪·定尺寸模式（设计定稿 docs/20260729-crop-template-mode.md；fit 基准=原画布，v0.6.51 user 纠正）----
+// ---- v0.6.48 裁剪·定尺寸模式（设计定稿 ai-docs/20260729-crop-template-mode.md；fit 基准=原画布，v0.6.51 user 纠正）----
 // 模板控件显隐 + 目标换算 + 框吸到 contain-fit。tplId="custom" 读 wh 输入框。
 function _applyCropTemplate(tplId: string) {
   if (!_cropState) return;

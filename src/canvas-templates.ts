@@ -8,7 +8,7 @@
 // DPI 本体论（user 拍板）：像素是画作唯一真相，DPI 只是输出解释——DPI 活在**模板**与导出
 // 文件的 pHYs 里，永不写进 ora（防不懂的用户改乱 xres/yres 调不回）。
 //
-// 设计定稿：docs/20260729-crop-template-mode.md（裁剪模板模式）。
+// 设计定稿：ai-docs/20260729-crop-template-mode.md（裁剪模板模式）。
 
 import { t, type Key } from "./i18n/index.ts";
 import { reportError } from "./error-badge.ts";

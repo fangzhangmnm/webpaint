@@ -6,7 +6,7 @@
 //   worker 侧策略在 service-worker.js 里按自己的 scope 分流：prod=cache-first、dev=network-first。
 //   为何 dev 也要 SW：早先 deploy 删掉 /dev/ 的 SW、这里又跳过 dev 注册 → /dev/ PWA 零离线 → 闪退后离线打不开
 //   （"encountered a problem"）。dev 用 network-first：在线永远先抓网（"改完即见"/强制更新不变），离线才回退缓存。
-//   完整设计 + 这个坑见 docs/20260630-pwa-offline-dev-sw.md。
+//   完整设计 + 这个坑见 ai-docs/20260630-pwa-offline-dev-sw.md。
 
 import { reportError } from "./error-badge.ts";
 

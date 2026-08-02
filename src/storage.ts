@@ -31,7 +31,7 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_CHECKPOINTS)) db.createObjectStore(STORE_CHECKPOINTS);
       // v4：sessions 整个删掉（恒空的死 store；见下方说明）。deleteObjectStore 只能在 upgrade 事务里调。
       if (db.objectStoreNames.contains(STORE_SESSIONS)) db.deleteObjectStore(STORE_SESSIONS);
-      // 更旧的 docs/layers stores 不主动删（如果存在），让 DevTools 翻历史；新代码不读不写它们。
+      // 更旧的 ai-docs/layers stores 不主动删（如果存在），让 DevTools 翻历史；新代码不读不写它们。
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

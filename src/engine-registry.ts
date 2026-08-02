@@ -1,4 +1,4 @@
-// Engine dispatch 的 SSoT（K1，见 docs/reports/20260606-fresh-geological-survey.html）。
+// Engine dispatch 的 SSoT（K1，见 ai-docs/reports/20260606-fresh-geological-survey.html）。
 //
 // 背景：CONTEXT.md 把 Engine 写成「统一节律 begin/extend/end/cancel」的一道接缝，
 // 但在 input.js 里这道接缝曾是**假的**——同一组 pixel-stroke role 的成员判定

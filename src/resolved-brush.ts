@@ -1,6 +1,6 @@
 // 当前笔（ResolvedBrush）—— drawing engine 唯一吃的**不可变值**。
 //
-// 设计（2026-06-08 grill，candidate 3 / docs/reports/20260608-ui-deepening-and-plugin-survey.html）：
+// 设计（2026-06-08 grill，candidate 3 / ai-docs/reports/20260608-ui-deepening-and-plugin-survey.html）：
 //   旧路径里「当前笔」是一个**可变单例** state.brush（BrushSettings），由 applyBrushPresetFrozen
 //   + applyToolState + syncBrushColor 三处**原地改**，引擎按引用持有。这把「rack⟂engine」留成约定。
 //

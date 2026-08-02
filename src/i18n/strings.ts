@@ -1,5 +1,5 @@
 // i18n SSoT —— 唯一 glossary。每 key 四语同居（zh/en/ja 必填 → 漏译=编译错；tok 可选 → fallback en）。
-// 设计/纪律见 docs/20260707-i18n-architecture.md。
+// 设计/纪律见 ai-docs/20260707-i18n-architecture.md。
 //   · 不按语言分文件（那样加 key 易漏某语 → 静默漂移）。四语并排 + 类型门守死。
 //   · Vue 模板里不写 t()：在 setup/computed 调、以 ref 给模板（否则 tsc 不检查模板 key）。
 //   · glyph 图标（笔/混/吸/清 等）不进这里——图标不翻译，只翻它的 tooltip。

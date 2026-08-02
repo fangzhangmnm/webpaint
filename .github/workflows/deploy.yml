@@ -6,7 +6,7 @@
 # 第一次 setup：手动建 prod 分支 → push（否则 checkout prod 会 fail）：
 #   git checkout -b prod && git push -u origin prod
 #
-# 论证 / sibling 抄法：docs/20260529-dev-prod-split.md
+# 论证 / sibling 抄法：ai-docs/20260529-dev-prod-split.md
 name: Deploy Pages
 
 on:
@@ -75,7 +75,7 @@ jobs:
           cp -r main-tree/vendor site/dev/
           cp -r main-tree/dist   site/dev/
           # /dev/ 也要 SW（已上面 cp 到 site/dev/）：worker 按 scope 走 network-first——在线「改完即见」不变，
-          #   离线才回退缓存（修「/dev/ 无 SW → 闪退离线打不开」的坑，见 docs/20260630-pwa-offline-dev-sw.md）。
+          #   离线才回退缓存（修「/dev/ 无 SW → 闪退离线打不开」的坑，见 ai-docs/20260630-pwa-offline-dev-sw.md）。
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

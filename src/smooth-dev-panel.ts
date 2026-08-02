@@ -3,7 +3,7 @@
 // 所有平滑魔数：连续用 textbox（可打任意数量级值 → 自测是否真起作用/跳出饱和区，杀煤气灯）、二元用 checkbox。
 // live 改 SMOOTH + 持久化到 synced-user-preference collection 的 `stylus-smooth-params`（**不是 localStorage**，
 //   v406 起已迁；boot 由 app.ts 的 fixup 相 hydrateSmoothFromPrefs 灌回）；下一笔生效。
-//   详 docs/20260604-stroke-smoother-time-gate.md。
+//   详 ai-docs/20260604-stroke-smoother-time-gate.md。
 //
 // 协作件经 ctx 绑入：setStatus（状态行）。SMOOTH 配置直接 import；els / setMenuOpen 直接 import。
 

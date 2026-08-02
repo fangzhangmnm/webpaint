@@ -1,4 +1,4 @@
-// 导出格式平台（架构深化 candidate 2，见 docs/reports/20260608-ui-deepening-and-plugin-survey.html）。
+// 导出格式平台（架构深化 candidate 2，见 ai-docs/reports/20260608-ui-deepening-and-plugin-survey.html）。
 //
 // 把「能导出成什么格式」从 app.js 的硬 switch 收成注册表插件——和 filters.js 同一道接缝
 // （共享 registry.js）。加一个格式 = registerExporter(...) 一处，导出菜单 data-driven 自动出现。

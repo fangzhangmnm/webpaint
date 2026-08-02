@@ -1,4 +1,4 @@
-// Crop 框几何（A1，见 docs/reports/20260606-fresh-geological-survey.html）。
+// Crop 框几何（A1，见 ai-docs/reports/20260606-fresh-geological-survey.html）。
 // 纯数学（无 DOM / 无 board）：8-handle 拖拽 resize + apply 取整。过去内联在 app.js 的
 // cropOverlay pointermove。最易错的是「缩到下限时哪条边不动」的 anchor 钳制——抽出可单测。
 

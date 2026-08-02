@@ -59,7 +59,7 @@ export interface StoreConfig {
   // 同一 app 内的 store 实例标识（默认 "defaultStore"）。想在一个 app 里开**多个互不打架的 store**（不同数据集）
   //   → 传不同 databaseId：各自独立 IDB 库 `${appId}.${databaseId}` + 独立 localStorage 前缀。
   databaseId?: string;
-  // ── 加密（对齐 WebPaint，见 docs/11；逻辑在库、重型 7z/zip codec 由 app 注入）──
+  // ── 加密（对齐 WebPaint，见 ai-docs/11；逻辑在库、重型 7z/zip codec 由 app 注入）──
   //   不注入 crypto → 加密 dormant（packContainer 抛「加密未配置」）；JRP 不加密就不注入，省 1.6MB。
   crypto?: CryptoCodec;                            // app 注入的 zip/7z codec（WebPaint 用 sevenzip.ts+zip.ts 包成）
   crypt?: {
@@ -67,7 +67,7 @@ export interface StoreConfig {
     makePeek?: (plain: Blob) => Promise<Uint8Array | null>;   // 明文→不透明 peek 字节（app 域；store 不看内容）
     getPassword?: (name: string) => string | null; // 同步、非交互、只读内存（唯一密码源）；app 持密码 + 解锁循环在 busy 外
   };
-  encryptionSaltFileName?: string;   // ⚠ 未采用：README §5 的库统一密钥/salt 超集本版不实现（见 docs/11，加密走 crypt.getPassword）
+  encryptionSaltFileName?: string;   // ⚠ 未采用：README §5 的库统一密钥/salt 超集本版不实现（见 ai-docs/11，加密走 crypt.getPassword）
   // ── 内部/测试 seam（prod 默认 idb + localStorage）──
   kv?: Kv;
   local?: LocalCache;
@@ -79,7 +79,7 @@ export interface StoreConfig {
   validateAdopt: (plain: Blob) => boolean | Promise<boolean>;
   // ── 云端文件命名（app 域：store name → 云端文件名）。**不给 = 恒等**（JRP 等名字本身含扩展名的 app）。
   //   WebPaint 的 session name 是裸名（"未命名"），云端存 `.ora` → 必须给 `fileName: n => n+".ora"`（+加密 `.zip`）。
-  //   ⚠ cutover 一度漏传 → 老云端 `X.ora` 用裸名 `X` 取不到（0B/打开空白）。见 docs/20260712-store-per-app-namespace.md 边角。
+  //   ⚠ cutover 一度漏传 → 老云端 `X.ora` 用裸名 `X` 取不到（0B/打开空白）。见 ai-docs/20260712-store-per-app-namespace.md 边角。
   fileName?: (name: string) => string;               // store name → 云端文件名（如 n => n + ".ora"）
   encFileName?: (name: string) => string;            // 加密容器的云端文件名（如 n => n + ".zip"；ADR-0012）
   isOnline?: () => boolean;                          // offload 离线守卫（默认 navigator.onLine）
@@ -143,7 +143,7 @@ export interface RawFile {
   isKeptOffline(): Promise<boolean>;            // 本地有副本？（= 已留作离线）
   keepOffline(): Promise<void>;                 // 留一份离线副本（未缓存则 acquire）。注：open 已含下载子过程，故名 keepOffline 非 download
   offload(): Promise<void>;                     // 合法(clean∧在线∧曾synced∧云端有完整)→hardDelete；非法(唯一副本/不可重取)→抛 OffloadIllegalError（banner）
-  // ── 加密（at-rest 透明；对齐 WebPaint，见 docs/11。JRP 不注入 codec → dormant）──
+  // ── 加密（at-rest 透明；对齐 WebPaint，见 ai-docs/11。JRP 不注入 codec → dormant）──
   isEncrypted(): Promise<boolean>;                                       // 本地字节是否加密容器
   encrypt(opts?: { isOnline?: () => boolean }): Promise<{ status: string }>;   // 明文→密文（先本地后云 If-Match；离线 defer；错密码前置出局）
   decrypt(opts?: { isOnline?: () => boolean }): Promise<{ status: string }>;   // 密文→明文（同上红线）
@@ -194,7 +194,7 @@ export function createStore(config: StoreConfig) {
   if (config.crypto) configureCryptoCodec(config.crypto);   // app 注入 zip/7z codec 才启用加密；JRP 不注入 → dormant
 
   // ── 脊椎 + 低层 ──
-  // 两个 cloud-sync 实例（etag 命名空间按实体分离，见 docs/plan）：
+  // 两个 cloud-sync 实例（etag 命名空间按实体分离，见 ai-docs/plan）：
   //   files 实例：身份=全名（fileName 恒等；encFileName 追加 .zip，加密容器外扩展名 ADR-0012 无损可逆）；
   //     appKey="files" → `${ns}.files.etag:`；**manageDirty:false**——文件 dirty 权威在 local-head 的 `${ns}.files.dirty:`，
   //     若 cloud-sync 也写同键，push 成功写 "0" 会与「push 期间用户新编辑写 '1'」竞态、把未推编辑误判 clean 被驱逐（§A 最狠红线）。
@@ -435,7 +435,7 @@ export function createStore(config: StoreConfig) {
     return ui.resolveConflict({ name, local: localBlob, cloud: cloudPull?.blob ?? null });
   };
 
-  // ── 加密：读侧原语 + at-rest transform（照搬 WebPaint store.ts，见 docs/11；JRP 不注入 codec → dormant）──
+  // ── 加密：读侧原语 + at-rest transform（照搬 WebPaint store.ts，见 ai-docs/11；JRP 不注入 codec → dormant）──
   //   非交互：无/错密码 → null / status:"locked"（绝不弹窗）。解锁循环是 app 在 busy 外的事（seal.withPassword 守）。
   async function encTailBytes(name: string, n: number, tryCloud: boolean): Promise<Blob | null> {
     const blob = await local.get(name);                          // 本地有 → 尾切片（IDB Blob.slice 惰性）
