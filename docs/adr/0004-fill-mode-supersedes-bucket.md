@@ -55,6 +55,14 @@ commit 时才落图层；阈值/自动扩张回归魔棒属性。
   「蚂蚁线」toggle，**默认开**、持久化 `editorState.fillShowAnts`（per-doc desk，已获
   持久化同意）；**toggle 只存在于 fill 模式，非 fill 恒显示无开关**（预览色块本身是选区
   的更强可视化，赛璐璐涂色判色时边界噪音碍观察；正在拖拽的实时虚线另一路不受影响）。
+- **v0.7.38 / 2026-08-01 「送入填色」one-shot 携入（user 拍板，本批 journal
+  「you should be able to send the selection to color filling mode」）**：lasso ⋯ 菜单新增
+  显式命令「送入填色」（`sendSelectionToFill()`，fill-mode.ts）——置一次性旗标后派
+  `wp:settool`，进 fill 的钩子消费旗标、**该次不清选区**。这是 v0.6.24「彻底不互通」的
+  **唯一 sanctioned 例外**，且只开单向口：出口语义（切走 = commit + 清选区）一字不动；
+  旗标 one-shot（下次正常进 fill 照旧清）、走去非 fill 工具即作废。注意携入的选区在
+  classic+union 下自动成为 flood 的墙（v0.7.23 stopMask，种子豁免救「框内起点」）。
+  别把这条扩大成「进 fill 一律保留选区」——那是推翻 v0.6.24，需要 user 重新拍板。
 
 ## 后果
 

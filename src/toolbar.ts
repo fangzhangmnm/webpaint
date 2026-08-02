@@ -18,7 +18,7 @@ import { requireEditableLeaf } from "./editable-leaf.ts";
 import { editorState } from "./workbench-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
-import { fillPreviewActive, commitFillNow } from "./fill-mode.ts";
+import { fillPreviewActive, commitFillNow, sendSelectionToFill } from "./fill-mode.ts";
 import { anchorPopupToBtn } from "./anchored-popup.ts";
 import { configFromModeState, planesForMode, defaultVpsForMode } from "./perspective-frame.ts";
 import type { PerspMode } from "./perspective-frame.ts";
@@ -1078,6 +1078,19 @@ export function initToolbar(ctx: AppContext) {
     resize: () => _openSelEdit("expand"),   // v0.5.15 合一入口，默认扩张
     dup: () => { selectionToNewLayer({ move: false }); closeSelEditUI(); },
     move: () => { selectionToNewLayer({ move: true }); closeSelEditUI(); },
+    // v0.7.38 从当前图层 alpha 建选区（替换语义，user 拍板；组/隐藏层硬拒、空层给提示）
+    fromLayer: () => {
+      const layer = requireEditableLeaf(doc, setStatus);
+      if (!layer) { closeSelEditUI(); return; }
+      const sel = Selection.fromLayerAlpha(layer as unknown as Parameters<typeof Selection.fromLayerAlpha>[0]);
+      if (!sel) { setStatus(t("la.fromLayerEmpty")); closeSelEditUI(); return; }
+      pushSel(input.lasso.setSelection(sel));
+      board.invalidateAll();
+      updateLassoToolbar();
+      closeSelEditUI();
+    },
+    // v0.7.38 送选区进填色（ADR-0004 修订 5 的 one-shot 携入；needs-sel 禁用兜底）
+    toFill: () => { sendSelectionToFill(); closeSelEditUI(); },
   };
   for (const id of ["lassoSelEditMenu", "fillSelEditMenu"]) {
     document.getElementById(id)?.addEventListener("click", (e: Event) => {

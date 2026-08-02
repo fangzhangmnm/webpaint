@@ -1,7 +1,7 @@
 // v0.5.12 fill-mode（第一类工具版）：active 谓词真值表 + 切出=commit 钩子（transient 括号不算切出）。
 // 像素正确性不在这里——gl-smoke fillParity（golden/commit≡live/lockAlpha/导出不漏）。
 import { test, eq } from "./runner.mjs";
-import { initFillMode, fillPreviewActive, commitFillNow } from "../src/fill-mode.ts";
+import { initFillMode, fillPreviewActive, commitFillNow, sendSelectionToFill } from "../src/fill-mode.ts";
 
 // 最小 fake ctx：fill-mode 只碰这些面。editMode 状态机用字段模拟 + 手动派 wp:modechange。
 function makeCtx() {
@@ -126,4 +126,34 @@ test("[fill-mode] v0.6.24 不互通：fill→lasso 也 commit+清（对称无特
   eq(calls.commitFill, 1, "回 lasso 也 commit（v0.5.15 '保留' 作废）");
   eq(calls.setSelectionNull, 1, "commit 后清选区");
   eq(ctx.doc.selection, null, "选区不跟去 lasso");
+});
+
+test("[fill-mode] v0.7.38 送入填色：one-shot 携入不清选区，只生效一次（ADR-0004 修订 5）", () => {
+  const { ctx, calls } = makeCtx();
+  initFillMode(ctx);
+  // 测试侧接线：wp:settool → 假 editMode 切模式（真 app 是 toolbar.setTool 完整路径）
+  const onSetTool = (e) => setMode(ctx, e.detail);
+  window.addEventListener("wp:settool", onSetTool);
+  try {
+    setMode(ctx, "lasso");
+    ctx.doc.selection = {};             // lasso 里圈好选区
+    sendSelectionToFill();              // 显式命令：携入
+    eq(ctx._mode, "fill", "settool 走通，进了 fill");
+    eq(calls.setSelectionNull, 0, "携入：本次不清选区");
+    eq(ctx.doc.selection !== null, true, "选区保留在 fill 里");
+    // 出口语义不动：切走 = commit + 清
+    setMode(ctx, "brush");
+    eq(calls.commitFill, 1, "切出照旧 commit");
+    eq(calls.setSelectionNull, 1, "切出照旧清选区");
+    // one-shot：再正常进 fill → 照旧清（旗标没黏住）
+    setMode(ctx, "lasso");
+    ctx.doc.selection = {};
+    setMode(ctx, "fill");
+    eq(calls.setSelectionNull, 2, "旗标只生效一次，正常进 fill 照旧清");
+    // 无选区 / 已在 fill：no-op 不派事件
+    ctx.doc.selection = null;
+    setMode(ctx, "lasso");
+    sendSelectionToFill();
+    eq(ctx._mode, "lasso", "无选区：不切换");
+  } finally { window.removeEventListener("wp:settool", onSetTool); }
 });

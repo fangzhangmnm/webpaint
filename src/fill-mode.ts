@@ -29,6 +29,18 @@ import type { Layer } from "./doc.ts";
 
 let _ctx: AppContext | null = null;
 let _lastPersistentMode = "";
+// v0.7.38（ADR-0004 修订 5）：「送选区进填色」的 one-shot 例外旗标——显式命令携选区进 fill 时
+// 抑制**下一次**「进 fill = 清选区」。出口语义（切走 = commit + 清）一字不动，对称性只开单向口。
+let _carryIn = false;
+
+// 把当前选区送进 fill（lasso ⋯ 菜单「送入填色」）。无选区 = 静默 no-op（按钮 needs-sel 本就禁用）。
+// 派 wp:settool 走完整 setTool 路径（rack.applyToolState 等），不直调 editMode.setTool。
+export function sendSelectionToFill(): void {
+  if (!_ctx || !_ctx.doc.selection) return;
+  if (_ctx.editMode.current() === "fill") return;
+  _carryIn = true;
+  window.dispatchEvent(new CustomEvent("wp:settool", { detail: "fill" }));
+}
 
 // ---- fill 预览期换色入 undo（v0.7.8）----
 // 预览挂着时改色 = 可撤销（改的是「将要填的东西」）。防抖合并一次拖拽/连点为一条 entry；
@@ -110,7 +122,10 @@ function _onModeChange(): void {
   if (editMode.isTransient()) return;   // 括号里：不更新、不判
   const prev = _lastPersistentMode;
   _lastPersistentMode = m;
+  if (m !== "fill") _carryIn = false;   // 旗标只对「下一次进 fill」有效；走去别处即作废
   if (m === "fill" && prev !== "fill") {
+    // v0.7.38（ADR-0004 修订 5）：sendSelectionToFill 的 one-shot 携入——本次不清选区
+    if (_carryIn) { _carryIn = false; board.requestRender(); return; }
     // v0.6.24 不互通：进 fill = 清掉带进来的选区（undo 兜底）——fill 从零开始自己点
     const { input, history, workpiece, ops } = _ctx!;
     if (doc.selection) {

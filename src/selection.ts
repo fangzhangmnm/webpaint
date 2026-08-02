@@ -225,6 +225,19 @@ export class Selection {
     return Selection.fromGray8Region(x0, y0, w, h, g);
   }
 
+  /** 从图层 alpha 建（v0.7.38「从当前图层建选区」）。α≥128 → 255（恒二值不变量同上）；
+   *  空层 → null（= 没选区）。像素走 tiles 直读口 getImageData（v0.6.39 唯一正确读法，零 canvas
+   *  往返）；剪贴蒙版层按**原始** alpha（未被裁剪的），与 Procreate 一致。 */
+  static fromLayerAlpha(layer: { bboxX: number; bboxY: number; bboxW: number; bboxH: number;
+    getImageData(x: number, y: number, w: number, h: number): ImageData }): Selection | null {
+    const w = layer.bboxW, h = layer.bboxH;
+    if (w <= 0 || h <= 0) return null;
+    const d = layer.getImageData(layer.bboxX, layer.bboxY, w, h).data;
+    const g = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) g[i] = d[i * 4 + 3] >= 128 ? 255 : 0;
+    return Selection.fromGray8Region(layer.bboxX, layer.bboxY, w, h, g);
+  }
+
   /** 全白选区（select all / 反选-无选区 / 整层选区）。x/y 给 layer 偏移用。 */
   static full(docW: number, docH: number, x = 0, y = 0): Selection | null {
     const w = docW | 0, h = docH | 0;

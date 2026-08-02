@@ -261,3 +261,27 @@ describe("marching-ants · outline golden + 缓存", () => {
 });
 
 // charter H7（液化选区 doc-space）：S8 液化重写后已转绿 → 真测试在 test/liquify-docspace-mask.test.mjs。
+
+// v0.7.38 · fromLayerAlpha（「从当前图层建选区」工厂）：α≥128 二值化 + bbox 直读 + 空层 null
+describe("Selection · fromLayerAlpha（v0.7.38 从图层 alpha 建选区）", () => {
+  it("半透明边缘二值化（α≥128 入选）、位置随 layer bbox、恒二值不变量", async () => {
+    const { PaintDoc, flattenLeaves } = await import("../src/doc.ts");
+    const doc = new PaintDoc({ width: 512, height: 512 });
+    const L = doc.activeLayer;
+    // (100,100) 起 3 像素排：α=255 / α=200 / α=100（后者应被阈出）
+    const buf = new Uint8ClampedArray(3 * 1 * 4);
+    buf.set([9, 9, 9, 255,  9, 9, 9, 200,  9, 9, 9, 100]);
+    L.pixels.putRegion(100, 100, 3, 1, buf);
+    const sel = Selection.fromLayerAlpha(L);
+    assert(sel, "非空层出选区");
+    eq(sel.sampleAt(100, 100), 255, "α255 → 入选（值恒 255，二值不变量）");
+    eq(sel.sampleAt(101, 100), 255, "α200 ≥128 → 入选");
+    eq(sel.sampleAt(102, 100), 0, "α100 <128 → 阈出");
+    eq(sel.sampleAt(99, 100), 0, "bbox 外为空");
+    sel.dispose();
+    // 空层 → null（= 没选区语义）
+    const doc2 = new PaintDoc({ width: 64, height: 64 });
+    eq(Selection.fromLayerAlpha(doc2.activeLayer), null, "空层 → null");
+    for (const d of [doc, doc2]) { for (const leaf of flattenLeaves(d.layers)) leaf.pixels?.dispose?.(); }
+  });
+});

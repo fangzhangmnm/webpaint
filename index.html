@@ -714,13 +714,19 @@
     <div class="lasso-icon-menu lasso-icon-list hidden" id="lassoSelEditMenu" role="menu" data-i18n-aria="la.editSel">
       <button class="lasso-tool-btn" id="lassoSelectAllBtn" data-sel-act="selectAll" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
       <button class="lasso-tool-btn" id="lassoInvertBtn" data-sel-act="invert" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
+      <!-- v0.7.38 从当前图层 alpha 建选区（替换语义）；不带 needs-sel——要的是活动层不是选区 -->
+      <button class="lasso-tool-btn" id="lassoFromLayerBtn" data-sel-act="fromLayer" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#layers-stack"/></svg><span data-i18n="la.fromLayerShort">从图层建选区</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoSelResizeBtn" data-sel-act="resize" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoDuplicateBtn" data-sel-act="dup" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg><span data-i18n="la.duplicate">复制选区到新层</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoMoveToLayerBtn" data-sel-act="move" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span data-i18n="la.moveToLayer">选区移动到新层</span></button>
+      <!-- v0.7.38 送选区进填色（ADR-0004 修订 5 one-shot 携入；fill 菜单不放——已经在 fill 里） -->
+      <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoToFillBtn" data-sel-act="toFill" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg><span data-i18n="la.toFillShort">送入填色</span></button>
     </div>
     <div class="lasso-icon-menu lasso-icon-list hidden" id="fillSelEditMenu" role="menu" data-i18n-aria="la.editSel">
       <button class="lasso-tool-btn" id="fillSelectAllBtn" data-sel-act="selectAll" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
       <button class="lasso-tool-btn" id="fillInvertBtn" data-sel-act="invert" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
+      <!-- v0.7.38 从当前图层 alpha 建选区（fill 里同样有用：整层填充/换色工作流） -->
+      <button class="lasso-tool-btn" id="fillFromLayerBtn" data-sel-act="fromLayer" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#layers-stack"/></svg><span data-i18n="la.fromLayerShort">从图层建选区</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="fillSelResizeBtn" data-sel-act="resize" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="fillDuplicateBtn" data-sel-act="dup" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg><span data-i18n="la.duplicate">复制选区到新层</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="fillMoveToLayerBtn" data-sel-act="move" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span data-i18n="la.moveToLayer">选区移动到新层</span></button>
