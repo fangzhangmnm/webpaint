@@ -236,13 +236,13 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
   },
   { combo: "Ctrl+A",           desc: "sc.selectAll",     category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
-    run: () => document.getElementById("lassoSelectAllBtn")?.click() },
+    run: () => document.getElementById("lassoRow1SelectAllBtn")?.click() },   // v0.7.39 全选提出 ⋯ 成 Row1 钮
   { combo: "Ctrl+D",           desc: "sc.deselect", category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
     run: () => document.getElementById("lassoDeselectBtn")?.click() },
   { combo: "Ctrl+Shift+I",     desc: "sc.invert",     category: "sc.cat.lasso",
     when: (i) => _editMode(i) && !_floating(i),
-    run: () => document.getElementById("lassoInvertBtn")?.click() },
+    run: () => document.getElementById("lassoRow1InvertBtn")?.click() },   // v0.7.39 反选提出 ⋯ 成 Row1 钮
   // v156 变换 / 复制为浮层（都需选区 + 非浮层；run 内部再查选区）
   // 裸 T 任何环境可用；Ctrl+T 是浏览器保留键 → 仅装成 PWA(standalone) 时可用，标签页里被浏览器开新标签吞掉。
   { combo: "T",                desc: "sc.transformSel",     category: "sc.cat.lasso",

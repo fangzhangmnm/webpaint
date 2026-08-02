@@ -215,7 +215,6 @@ export function updateLassoToolbar() {
   // v0.7 魔棒算法选择（v0.7.8 组槽+弹出替代系统 select）：magic 子工具时显，label/pressed 镜像引擎态（RAM-only）
   const algoBtn = document.getElementById("lassoAlgoBtn");
   if (algoBtn) {
-    algoBtn.classList.toggle("hidden", !magicOn);
     const algo = input.lasso.getMagicAlgorithm();
     const lbl = document.getElementById("lassoAlgoBtnLabel");
     const cur = MAGIC_ALGORITHMS.find((a) => a.id === algo);
@@ -232,14 +231,12 @@ export function updateLassoToolbar() {
   //   lasso/fill 的 rack key 已映射；晚于 updateToolUI 的赋值 → 本行赢）
   const penOn = selToolActive && sub === "pen";
   dialReactive.canDraw = editMode.canDraw() || penOn;
-  // v0.7.28 旁挂笔架钮（滤镜笔同款）：pen 子模式才显；切走子工具/工具时若选区笔笔架开着 → 收
+  // v0.7.28 旁挂笔架钮（滤镜笔同款）：pen 子模式才显（显隐在 VIS 表）；切走时若选区笔笔架开着 → 收
   //   （user bug 报告：切其他子工具笔架没隐藏）
-  document.getElementById("selPenRackBtn")?.classList.toggle("hidden", !penOn);
   if (!penOn && getCurrentExclusive() === PANELS.RACK_SEL_PEN) closeExclusive();
-  // v0.7.2 算法配置扳手：magic 时显；弹出行按当前算法显隐 + 值同步（关掉时收弹出）
+  // v0.7.2 算法配置扳手：magic 时显（VIS 表）；弹出行按当前算法显隐 + 值同步（关掉时收弹出）
   const cfgBtn = document.getElementById("lassoAlgoCfgBtn");
   const cfgMenu = document.getElementById("lassoAlgoCfgMenu");
-  cfgBtn?.classList.toggle("hidden", !magicOn);
   if (!magicOn) cfgMenu?.classList.add("hidden");
   if (cfgMenu) {
     const lineartOn = input.lasso.getMagicAlgorithm() === "lineart";
@@ -268,48 +265,54 @@ export function updateLassoToolbar() {
   // v0.7.21 容差滑条外提（user：不折进扳手，值一直可见）：classic/similar 时显，值按当前算法路由
   //   （classic→magicWand.threshold / similar→magicWand.similarThreshold；lineart 无容差概念 → 藏）
   const tolWrap = document.getElementById("lassoTolWrap");
-  if (tolWrap) {
-    const algoNow = input.lasso.getMagicAlgorithm();
-    const showTol = magicOn && algoNow !== "lineart";
-    tolWrap.classList.toggle("hidden", !showTol);
-    if (showTol && lassoTolSlider) {
-      const v = algoNow === "similar" ? editorState.magicWand.similarThreshold : editorState.magicWand.threshold;
-      if (lassoTolSlider.get() !== v) lassoTolSlider.set(v);
-    }
+  const algoNow = input.lasso.getMagicAlgorithm();
+  const showTol = magicOn && algoNow !== "lineart";
+  if (tolWrap && showTol && lassoTolSlider) {
+    const v = algoNow === "similar" ? editorState.magicWand.similarThreshold : editorState.magicWand.threshold;
+    if (lassoTolSlider.get() !== v) lassoTolSlider.set(v);
   }
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
   // v0.7.8：线稿算法时藏（auto-expand 是 classic flood 专属 param，引擎侧同步不吃）
   // v0.7.21：similar 也给扩张（全图同色 + 扩 1px = 盖 AA 白边再填）
-  const expandApplies = magicOn && input.lasso.getMagicAlgorithm() !== "lineart";
-  lassoExpandToggle.classList.toggle("hidden", !expandApplies);
+  const expandApplies = magicOn && algoNow !== "lineart";
   lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
   if (!expandApplies || !editorState.magicWand.expand) lassoMagicExpandMenu?.classList.add("hidden");
   // v0.7.24 容隙钮：classic 专属（lineart 自带论文闭合、similar 无连通概念）
-  const gapApplies = magicOn && input.lasso.getMagicAlgorithm() === "classic";
+  const gapApplies = magicOn && algoNow === "classic";
   const gapToggle = document.getElementById("lassoGapToggle");
-  gapToggle?.classList.toggle("hidden", !gapApplies);
   gapToggle?.setAttribute("aria-pressed", editorState.magicWand.fillGap ? "true" : "false");
   if (!gapApplies || !editorState.magicWand.fillGap) document.getElementById("lassoGapMenu")?.classList.add("hidden");
-  // 清除选区内像素（v0.6.19 从 ⋯ 提到 Row1）：套索模式+有选区才显（fill 藏，同旧 lasso-only 语义）
-  document.getElementById("lassoClearBtn")?.classList.toggle("hidden", !(lassoActive && hasSelection));
-  // ⋯ 菜单钮：选区/填充工具常显（menu 内按 needs-sel / lasso-only 逐项禁用·隐藏——见 openSelEditUI）。
-  //   modal 开着时(_selEdit)恒亮（预览 shrink 到空不能把 modal 撕掉）。
+  // ⋯ 菜单钮：modal 开着时(_selEdit)恒亮（预览 shrink 到空不能把 modal 撕掉）。
   const showSelEdit = !!_selEdit || (showRow1 && !otherToolSel);
-  lassoSelEditBtn.classList.toggle("hidden", !showSelEdit);
   if (!showSelEdit) closeSelEditUI();
   // v0.6.30 分家后 lasso-only/fill-only 类开关退役（漏显温床）；蚂蚁线只活在 fill 菜单
   document.getElementById("lassoAntsBtn")?.setAttribute("aria-pressed", editorState.fill.showAnts ? "true" : "false");
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
-  lassoConstrainBtn.classList.toggle("hidden", !showConstrain);
   if (showConstrain) {
     lassoConstrainBtn.setAttribute("aria-pressed", input.lasso.getConstrainSquare() ? "true" : "false");
   }
-  // 行尾动作组：变换=选区工具专属；油漆桶=套索的深模式 toggle（fill 中亮）；✓=填充工具+有选区；
-  //   去选=有选区才显（v0.5.14 user）。
-  lassoDeselectBtn.classList.toggle("hidden", !hasSelection);
-  lassoTransformBtn.classList.toggle("hidden", !lassoActive);
-  lassoFillCommitBtn.classList.toggle("hidden", !(fillActive && fillPreviewActive()));
+  // ===== v0.7.39 声明式显隐表（user：contextual show/hide 已是反复模式——先收成一处可读表；
+  //   registry 深模块留给 UI refactor 纪元，别在这批上大抽象）。条件住 JS（v0.6.30 教训：
+  //   CSS 类开关汤 = 漏显温床，别复活）。副作用（aria-pressed/收菜单/滑条同步）仍在各自块。 =====
+  const VIS: [HTMLElement | null, boolean][] = [
+    [algoBtn, magicOn],                                                    // v0.7 魔棒算法组槽
+    [document.getElementById("selPenRackBtn"), penOn],                     // v0.7.28 选区笔笔架旁挂
+    [cfgBtn, magicOn],                                                     // v0.7.2 算法配置扳手
+    [tolWrap, showTol],                                                    // v0.7.21 容差滑条外提
+    [lassoExpandToggle, expandApplies],                                    // v0.6.26 扩张
+    [gapToggle, gapApplies],                                               // v0.7.24 容隙
+    [document.getElementById("lassoClearBtn"), lassoActive && hasSelection], // v0.6.19 清像素（lasso 专属）
+    [lassoSelEditBtn, showSelEdit],                                        // ⋯ 菜单钮
+    [lassoConstrainBtn, showConstrain],                                    // 1:1 约束
+    // v0.7.39 同槽互斥双钮（user：全选只在无选区、反选只在有选区）；otherToolSel 时 selToolActive=false 双藏
+    [document.getElementById("lassoRow1SelectAllBtn"), selToolActive && !floating && !hasSelection],
+    [document.getElementById("lassoRow1InvertBtn"), selToolActive && !floating && hasSelection],
+    [lassoDeselectBtn, hasSelection],                                      // v0.5.14 去选=有选区才显
+    [lassoTransformBtn, lassoActive],                                      // 变换=选区工具专属
+    [lassoFillCommitBtn, fillActive && fillPreviewActive()],               // ✓=填充+预览挂着
+  ];
+  for (const [el, on] of VIS) el?.classList.toggle("hidden", !on);
   if (floating) {
     const mode = input.lasso.getMode();
     for (const b of lassoTransformModeBtns) {
@@ -1099,6 +1102,10 @@ export function initToolbar(ctx: AppContext) {
       SEL_ACTIONS[b.dataset.selAct!]?.();
     });
   }
+  // v0.7.39 Row1 同槽互斥双钮（全选/反选提出 ⋯ 菜单）；快捷键 Ctrl+A / Ctrl+Shift+I 走 .click()
+  //   老惯例（input.ts），hidden 态 .click() 仍触发 → 显隐不影响快捷键
+  byId("lassoRow1SelectAllBtn").addEventListener("click", () => SEL_ACTIONS.selectAll());
+  byId("lassoRow1InvertBtn").addEventListener("click", () => SEL_ACTIONS.invert());
 
   // 反选：在 docW×docH 上 mask 取反
 

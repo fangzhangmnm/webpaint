@@ -649,6 +649,10 @@
                粗细走左栏 dial（v0.7.26 起配置全归笔架 rack key "selPen"） -->
           <button class="lasso-tool-btn lasso-tool-icon hidden" id="selPenRackBtn" type="button" data-i18n-title="rack.sheet"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#brush-rack"/></svg></button>
           <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoConstrainBtn" type="button" data-i18n-title="la.constrain" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#constrain-ratio"/></svg></button>
+          <!-- v0.7.39 上下文互斥双钮共享一个槽位（user：全选只在无选区时显、反选提出 ⋯ 只在有选区时显）
+               —— 同槽互斥 → Row1 不加宽（iPad 宽度敏感区）。快捷键 Ctrl+A / Ctrl+Shift+I 点这里。 -->
+          <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoRow1SelectAllBtn" type="button" data-i18n-title="la.selectAll"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg></button>
+          <button class="lasso-tool-btn lasso-tool-icon hidden" id="lassoRow1InvertBtn" type="button" data-i18n-title="la.invert"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg></button>
           <!-- v0.5.12 行尾动作组：变换（选区工具）/ ⋯（低频操作收纳）/ 去选（高频，=fill 的 cancel）/ ✓（fill） -->
           <button class="lasso-tool-btn lasso-tool-icon" id="lassoTransformBtn" type="button" title="变换 / 移动"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#free-transform"/></svg></button>
           <!-- v0.6.24：油漆桶 toggle 退役——fill 升顶栏组槽一等工具 -->
@@ -711,9 +715,8 @@
     <!-- v0.6.30 选区/填色 ⋯ 分家（user：class 开关汤致漏显——蚂蚁线漏进选区菜单/fill 缺操作；
          两份菜单各自完整、动作走 data-sel-act 共享处理器；slider/stepper 连按不关=手动 toggle+外点关 -->
     <!-- v0.7.2 user 裁定：⋯只留不常用命令，算法配置（容差/闭合距离…）搬进算法下拉旁扳手弹出 #lassoAlgoCfgMenu -->
+    <!-- v0.7.39：全选/反选提出为 Row1 上下文钮（同槽互斥），菜单里的两项删除防双入口 -->
     <div class="lasso-icon-menu lasso-icon-list hidden" id="lassoSelEditMenu" role="menu" data-i18n-aria="la.editSel">
-      <button class="lasso-tool-btn" id="lassoSelectAllBtn" data-sel-act="selectAll" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
-      <button class="lasso-tool-btn" id="lassoInvertBtn" data-sel-act="invert" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
       <!-- v0.7.38 从当前图层 alpha 建选区（替换语义）；不带 needs-sel——要的是活动层不是选区 -->
       <button class="lasso-tool-btn" id="lassoFromLayerBtn" data-sel-act="fromLayer" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#layers-stack"/></svg><span data-i18n="la.fromLayerShort">从图层建选区</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoSelResizeBtn" data-sel-act="resize" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
@@ -723,8 +726,6 @@
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoToFillBtn" data-sel-act="toFill" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#paint-bucket"/></svg><span data-i18n="la.toFillShort">送入填色</span></button>
     </div>
     <div class="lasso-icon-menu lasso-icon-list hidden" id="fillSelEditMenu" role="menu" data-i18n-aria="la.editSel">
-      <button class="lasso-tool-btn" id="fillSelectAllBtn" data-sel-act="selectAll" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
-      <button class="lasso-tool-btn" id="fillInvertBtn" data-sel-act="invert" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
       <!-- v0.7.38 从当前图层 alpha 建选区（fill 里同样有用：整层填充/换色工作流） -->
       <button class="lasso-tool-btn" id="fillFromLayerBtn" data-sel-act="fromLayer" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#layers-stack"/></svg><span data-i18n="la.fromLayerShort">从图层建选区</span></button>
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="fillSelResizeBtn" data-sel-act="resize" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
@@ -732,14 +733,6 @@
       <button class="lasso-tool-btn lasso-menu-needs-sel" id="fillMoveToLayerBtn" data-sel-act="move" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span data-i18n="la.moveToLayer">选区移动到新层</span></button>
       <!-- 蚂蚁线 toggle：fill 专属（ADR-0004 修订；选区菜单不再出现——v0.6.30 分家） -->
       <button class="lasso-tool-btn" id="lassoAntsBtn" type="button" role="menuitem" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-rectangle"/></svg><span data-i18n="la.antsToggle">蚂蚁线</span></button>
-    </div>
-      <button class="lasso-tool-btn" id="lassoSelectAllBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-all"/></svg><span data-i18n="la.selectAllShort">全选</span></button>
-      <button class="lasso-tool-btn" id="lassoInvertBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-invert"/></svg><span data-i18n="la.invertShort">反选</span></button>
-      <button class="lasso-tool-btn lasso-menu-needs-sel" id="lassoSelResizeBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#selection-expand"/></svg><span data-i18n="la.resizeShort">扩张 / 收缩…</span></button>
-      <button class="lasso-tool-btn lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoDuplicateBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#copy"/></svg><span data-i18n="la.duplicate">复制选区到新层</span></button>
-      <button class="lasso-tool-btn lasso-menu-needs-sel lasso-menu-lasso-only" id="lassoMoveToLayerBtn" type="button" role="menuitem"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#move-to-file"/></svg><span data-i18n="la.moveToLayer">选区移动到新层</span></button>
-      <!-- v0.6.19 蚂蚁线 toggle（ADR-0004 修订）：只在 fill 显示；默认开、per-doc 持久化 -->
-      <button class="lasso-tool-btn lasso-menu-fill-only" id="lassoAntsBtn" type="button" role="menuitem" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#select-rectangle"/></svg><span data-i18n="la.antsToggle">蚂蚁线</span></button>
     </div>
     <!-- v0.5.14 组槽下拉（紧凑菜单深模块三形态：row=横排图标 / grid / list=竖排带解说；JS 锚定槽下） -->
     <!-- v0.5.37 in-app 下拉（原生 select 打开态=chrome 域，UCSUR 必豆腐；夜间白底/装不了SVG 同根）：
