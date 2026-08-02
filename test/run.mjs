@@ -121,7 +121,7 @@ import "./ora-tree.test.mjs";               // batch 2 step3：ORA 嵌套组序�
 //   app-boot.test.mjs 的 finally 里调掉。它**必须排在 dial-controls 之前**（上面 Vue 求值顺序那条约束）。
 //   ⚠ 这不等于 boot 可拆卸：全 app 还有 20 个模块 57 处 addEventListener 没有 disposer。将来若又出现
 //   "注册 app-boot 就有别的测试挂"，先怀疑又一条没拆的全局监听，别直接把 app-boot 摘掉了事。
-//   完整方案（子进程 vs 全面 disposer 化）见 docs/reports/20260718-boot-disposability-and-test-infra.html。
+//   完整方案（子进程 vs 全面 disposer 化）见 ai-docs/reports/20260718-boot-disposability-and-test-infra.html。
 import "./app-boot.test.mjs";        // 组合根 boot smoke：22×initX + 5×Vue mount + reactive flush 全程不抛。
 import "./i18n-localize-dom.test.mjs";  // v421：data-i18n 桥不得冲掉内联 <svg><use> 图标（v419 出过）。
 import "./editor-session-safety.test.mjs";   // v417 止血：开文件事务性 / 保存失败不宣布干净 / create 标记 per-name。全是曾会丢画的路径。

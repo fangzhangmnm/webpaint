@@ -1,4 +1,4 @@
-// 纯手势数学（K3 安全切片，见 docs/reports/20260606-fresh-geological-survey.html）。
+// 纯手势数学（K3 安全切片，见 ai-docs/reports/20260606-fresh-geological-survey.html）。
 //
 // input.js 把「指针态机」（pointers Map / 事件绑定 / role 路由 / 防误触）和「手势文法」
 // （双指变换、旋转吸附、tap 判定）糊在一起。后者是最 fiddly、最易**静默回归**、却**零测**

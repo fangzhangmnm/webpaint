@@ -182,7 +182,7 @@ bindPressureDisabled(() => dialReactive.pressureOff);   // 引擎 thunk（每 po
 //   跑完若不拆掉这条 window 监听，后面的 dial-controls 测试派发 wp:adjsize 就会被处理两次（12→14 而非 13）
 //   —— 这正是那个测试一直没被注册的原因（见 test/run.mjs 的说明）。
 //   ⚠ 这只是**止血**：全 app 还有 20 个模块 57 处 addEventListener 没有 disposer，boot 并非真正可拆卸。
-//   完整方案（子进程跑 boot smoke vs 全面 disposer 化）见 docs/reports/20260718-boot-disposability-and-test-infra.html。
+//   完整方案（子进程跑 boot smoke vs 全面 disposer 化）见 ai-docs/reports/20260718-boot-disposability-and-test-infra.html。
 const _disposeSizeKeyboard = bindSizeKeyboard({ board, leftDial });
 const _tileJobs = initTileJobs();
 // S9：doc→合成像素的唯一生产面接 GL board（导出/缩略图/mergedimage/PSD/参考窗镜像共用）。

@@ -1,4 +1,4 @@
-// Brush rack 数据模型 + 默认笔架。详 docs/20260529-brush-architecture.md。
+// Brush rack 数据模型 + 默认笔架。详 ai-docs/20260529-brush-architecture.md。
 //
 // **v99 schema (Krita-aligned)**：
 // - **三个压感 coeff** (sizeCoeff / opaCoeff / flowCoeff)：−1..1，0=不响应，
@@ -111,7 +111,7 @@ export function makeBrush({
   spacingValue = 0.06,
   pixelMode = false,
   taperIn = 0, taperOut = 0,
-  // 位置平滑（per-brush，Procreate，详 docs/20260613-brush-procreate-smoothing.md）
+  // 位置平滑（per-brush，Procreate，详 ai-docs/20260613-brush-procreate-smoothing.md）
   streamline = 0.15, stabilization = 0,
   // v99r2：defaultOpa 留着，默认 1.0；user 编辑笔可以改成 0.6 当 sketch 默认
   defaultOpa = 1.0,
@@ -362,7 +362,7 @@ export function brushesByTool(rack: BrushRackData, tool: string): Brush[] {
 }
 // （brushesByFolder 已删 v415：零调用者。笔架按夹分组走 brush-rack-view.collectFolders + brushesByTool。）
 // 某工具的「代表笔」——给 defaultToolStateFor 取初值。
-// activeByTool 已废（v2：活动笔归 per-doc toolStates，见 docs/20260606-folderflow-build-plan.md §6）；
+// activeByTool 已废（v2：活动笔归 per-doc toolStates，见 ai-docs/20260606-folderflow-build-plan.md §6）；
 // 这里就取该工具第一支笔当默认。
 export function defaultBrushForTool(rack: BrushRackData, tool: string): Brush | null {
   return brushesByTool(rack, tool)[0] || null;

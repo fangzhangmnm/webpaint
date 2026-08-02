@@ -11,7 +11,7 @@
 
   （建议用 venv 跑：~/venvs/pwa-tools/bin/python tools/loc-history.py）
 
-产物（默认落 docs/reports/loc/）：
+产物（默认落 ai-docs/reports/loc/）：
     loc-history.png      —— 上图=累计代码行数曲线(+里程碑竖线)，下图=每 commit 增删柱
     loc-history.csv      —— 同数据的表（seq,hash,date,added,deleted,net,total,subject）
     commit-summaries.md  —— 每次 commit 一行短概述
@@ -41,7 +41,7 @@ from collections import defaultdict
 # 不算进「代码行数」的路径（只留「代码库本身的代码」）：
 #   排除 vendored 依赖、构建产物、测试套件、文档、归档/人类区、所有 markdown。
 EXCLUDE_PREFIX = ('vendor/', 'dist/', 'node_modules/', '.claude/',
-                  'test/', 'tests/', 'docs/', 'doc/', 'ARCHIVE/', 'bench/',
+                  'test/', 'tests/', 'ai-docs/', 'doc/', 'ARCHIVE/', 'bench/',
                   'README.files/', 'journal/', 'journals/', 'workbench/',
                   '.deprecated/', '.github/')
 EXCLUDE_SUFFIX = ('.md', '.txt',                # 文档不算代码
@@ -817,7 +817,7 @@ def pick_font():
 def main():
     ap = argparse.ArgumentParser(description='画代码行数/commit 图 + 打 commit 概述')
     ap.add_argument('--branch', default='HEAD', help='ref（默认当前 HEAD）')
-    ap.add_argument('--out', default=None, help='输出目录（默认 docs/reports/loc/）')
+    ap.add_argument('--out', default=None, help='输出目录（默认 ai-docs/reports/loc/）')
     ap.add_argument('--width', type=int, default=80, help='概述单行截断宽度')
     ap.add_argument('--by', choices=['session', 'commit', 'day', 'month'],
                     default='session', help='benchmark 聚桶粒度（默认 session=心流一坐）')

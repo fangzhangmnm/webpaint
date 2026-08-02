@@ -7,7 +7,7 @@
 //   - fetch：cache-first + 后台 revalidate；ETag 变了通知 page。
 //
 // 跟 sibling family 抄：基本可以 1:1 拷，改 STATIC_PRECACHE 列表就行。
-// 论证见 docs/20260529-why-content-hash-bundle.md。
+// 论证见 ai-docs/20260529-why-content-hash-bundle.md。
 
 const STATIC_PRECACHE = [
   "./",
@@ -31,7 +31,7 @@ let CACHE_NAME = "webpaint-boot";   // install 时会被替换为 webpaint-<bund
 // 同一个 SW 文件部署到 /(prod) 和 /dev/ 两处；按**自己的作用域**选策略（owner: docs + src/pwa-shell.ts）：
 //   - prod(scope=/)      → cache-first：秒开 + 离线稳，更新靠 asset-updated toast。
 //   - dev(scope 含 /dev/) → network-first：在线永远先抓网（「改完即见」/强制更新不变），离线才回退缓存
-//     （崩溃后能离线重开——修「/dev/ 按设计无 SW → 闪退离线打不开」的坑，见 docs/20260630-pwa-offline-dev-sw.md）。
+//     （崩溃后能离线重开——修「/dev/ 按设计无 SW → 闪退离线打不开」的坑，见 ai-docs/20260630-pwa-offline-dev-sw.md）。
 const SCOPE_IS_DEV = self.location.pathname.includes("/dev/");
 
 async function getCurrentBundleUrl() {

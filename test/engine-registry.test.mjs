@@ -1,4 +1,4 @@
-// Engine dispatch 表验收（K1，见 docs/reports/20260606-fresh-geological-survey.html）。
+// Engine dispatch 表验收（K1，见 ai-docs/reports/20260606-fresh-geological-survey.html）。
 // 这张表是 input.js 的 dispatch 决策 SSoT —— 历史上 bug 藏在「怎么被调」而非引擎内部，
 // 所以决策本身就是测试面。纯数据 + 谓词，无需 canvas / DOM。
 import { describe, it, assert, eq } from "./runner.mjs";

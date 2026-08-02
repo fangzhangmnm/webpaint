@@ -1,6 +1,6 @@
 // service-worker.js 策略路由 mock 测（无浏览器/真机）：vm 载入 SW + mock self/caches/fetch/Response，
 // 驱动 fetch 事件，断言 prod=cache-first、dev=network-first、prod 跳 /dev/、导航离线回退 index.html。
-// 修「/dev/ 无 SW → 闪退离线打不开」(docs/20260630-pwa-offline-dev-sw.md) 的回归守护。
+// 修「/dev/ 无 SW → 闪退离线打不开」(ai-docs/20260630-pwa-offline-dev-sw.md) 的回归守护。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

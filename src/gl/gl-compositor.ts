@@ -1,4 +1,4 @@
-// GLCompositor —— WebGL2 图层合成器（docs/20260614-perf-webgl-memory-clip.md §3 模块 4）。
+// GLCompositor —— WebGL2 图层合成器（ai-docs/20260614-perf-webgl-memory-clip.md §3 模块 4）。
 //
 // 算法：ping-pong 两张直值累积器，**一层一 pass**——每 pass 全屏，shader 按 doc 坐标查 tile-index
 //   采源 + 累积器 → W3C blend + source-over → 写另一张、交换。clip = 源α×基底α（无 2D dst-in）。
@@ -172,7 +172,7 @@ vec4 warpSample(sampler2D tex, vec2 size, mat3 hinv, int mode, vec2 docXY){
   return sampleSrc(tex, size, mode, u * size.x - off, v * size.y - off);
 }`;
 
-// live 浮层 pass（合成到累积器）。clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather，docs/20260628-transform-clip-gpu-warp.md）。
+// live 浮层 pass（合成到累积器）。clip 浮层裁到基底浮层 warp 后 alpha（in-shader gather，ai-docs/20260628-transform-clip-gpu-warp.md）。
 const WARP_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;

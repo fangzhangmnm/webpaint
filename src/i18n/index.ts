@@ -1,5 +1,5 @@
 // i18n 运行时 —— t()（具名插值）+ 当前语言 + setLang（reload 制）+ data-i18n 启动填充（桥）。
-// SSoT = ./strings.ts。设计见 docs/20260707-i18n-architecture.md。
+// SSoT = ./strings.ts。设计见 ai-docs/20260707-i18n-architecture.md。
 //   · 切换 = 持久化 + location.reload()（绘画 app 语言 set-once，reload 干净、零半译状态）。
 //   · <html lang> 随语言动态 → 浏览器选对 CJK 字形（日文汉字 ≠ 中文汉字）。
 //   · data-i18n 是过渡桥（非终点）：静态 index.html 一次性填充；新内容/需动的段走 Vue + t()。

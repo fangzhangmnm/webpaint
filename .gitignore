@@ -3,7 +3,7 @@ journal/
 journals/
 
 # machine generated reports
-docs/reports/
+ai-docs/reports/
 
 # 抛弃型原型 / 草稿
 tmp/

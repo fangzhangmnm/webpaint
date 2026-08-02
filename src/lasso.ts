@@ -396,7 +396,7 @@ export class LassoEngine {
   // bbox 矩形。修：迭代**整 doc 尺寸**，layer.bbox 外当 (0,0,0,0) 透明像素。
   //
   // 历史「容隙」功能 v71→v79 撤掉：barrier dilate N px 会盖住 user 的 tap 点
-  // 让小区域整片不可点。详 docs/20260528-lessons-magic-wand-gap-closing.md。
+  // 让小区域整片不可点。详 ai-docs/20260528-lessons-magic-wand-gap-closing.md。
   //
   // 内存（2048² doc）：layerData 16MB + visited buffer 4MB + maskCanvas
   // 仅 bbox 大小。barrier 不再单独 alloc（diff 算在 flood fill 里 inline）。
@@ -566,7 +566,7 @@ export class LassoEngine {
 //
 // 经典 bug（v66 + v69 又犯）：iteration 局限在 layer.bbox 内 → 点空白只选到 bbox 矩形。
 // 修：迭代**整 doc 尺寸**，layer.bbox 外当 (0,0,0,0) 透明像素。
-// 历史「容隙」功能 v71→v79 撤掉（barrier dilate 会盖住 tap 点），详 docs/20260528-lessons-magic-wand-gap-closing.md。
+// 历史「容隙」功能 v71→v79 撤掉（barrier dilate 会盖住 tap 点），详 ai-docs/20260528-lessons-magic-wand-gap-closing.md。
 // 内存（2048² doc）：layerData 16MB + combined buffer 4MB（0=未访问 1=进mask 2=barrier，三数组合一省 8MB）。
 // v0.7.23 选区当墙（user 2026-07-30：「add模式下已经选中的区域应该也记作stop」）：
 //   bbox 对齐 gray8 平面（Selection.bboxMask() 同款形状），>0 处 flood 不能进。
@@ -637,7 +637,7 @@ export function floodSelectFrom(
   if (isBarrier(startIdx)) return null;
 
   // v0.7.24 容隙（user 2026-07-30「容隙做掉」）：EDT 受限 flood 的形态学闭——不是 v71 的 barrier
-  //   dilate（会盖死 tap 点，docs/20260528-lessons-magic-wand-gap-closing.md）。tap 永不哑是硬约束。
+  //   dilate（会盖死 tap 点，ai-docs/20260528-lessons-magic-wand-gap-closing.md）。tap 永不哑是硬约束。
   if (gapPx > 0) {
     const mark = _gapFloodMask(docW, docH, startIdx, gapPx, isBarrier);
     if (mark) {
