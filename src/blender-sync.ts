@@ -273,10 +273,12 @@ async function push() {
 
 // ───────────────────────── 拉（Blender → WebPaint）─────────────────────────
 
-// 拉到新图层：贴图按原生分辨率居中放入新层（doc 尺寸不变）。沿用 import 的「新层不入 undo，
-// 标脏即可，用户不要就删层」语义。返回 false = 图层已达上限（已弹状态）。
+// 拉到新图层：贴图按原生分辨率居中放入新层（doc 尺寸不变）。返回 false = 图层已达上限（已弹状态）。
+// v0.7.35：入 undo（AddLayerRecordOp，像素先填后记录）——旧「新层不入 undo」语义是抄 import 的
+// 越狱姿势，会让栈引用历史不知道的层（undo 跨树操作静默销毁 / redo 找不到层 → 整栈被弃）。
 function placeBitmapAsNewLayer(bmp: ImageBitmap, name: string): boolean {
   const doc = ctx.doc;
+  const prevActiveId = doc.activeLayer?.id ?? null;
   const layer = doc.addLayer(name);
   if (!layer) {
     ctx.setStatus(t("bl.layerLimit", { max: doc.maxLayers }), true);
@@ -286,8 +288,10 @@ function placeBitmapAsNewLayer(bmp: ImageBitmap, name: string): boolean {
   // 贴图居中放进新层（replaceFromCanvas 内部先 clear 再整块写入）
   const px = imageSourceToBytes(bmp);   // 解码边界唯一读出（v0.6.46 字节管线）
   layer.replaceFromBytes(px.data, Math.floor((doc.width - w) / 2), Math.floor((doc.height - h) / 2), w, h);
-  session.markEdited();
-  ctx.updateSaveStatus();
+  const loc = doc.locateNode(layer.id)!;
+  const st = ctx.history.run(ctx.workpiece, ctx.ops.addLayer,
+    { layerId: layer.id, index: loc.index, parentId: loc.parentId, prevActiveId, layerName: layer.name });
+  if (!st.ok) reportError(new Error("[blender] addLayer record failed: " + st.msg), "error");
   ctx.afterDocChange();
   return true;
 }

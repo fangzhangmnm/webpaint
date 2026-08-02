@@ -42,8 +42,9 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // app 单例 / 跨模块函数（initImportImage(ctx) 装入）。
 let doc: AppContext["doc"], board: AppContext["board"], input: AppContext["input"], editMode: AppContext["editMode"];
-let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"];
+let setStatus: AppContext["setStatus"];
 let renderLayersPanel: AppContext["renderLayersPanel"], setGalleryOpen: AppContext["setGalleryOpen"], uniqueNameFor: AppContext["uniqueNameFor"];
+let history: AppContext["history"], workpiece: AppContext["workpiece"], ops: AppContext["ops"];
 
 // 图库「导入照片」会 set 此 flag=true，oraFileInput change 读后立即复位（语义：照片打底新 doc）。
 let _addImportAsNewDoc = false;
@@ -164,7 +165,8 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
     w = choice.w; h = choice.h;
     imgSmoothing = choice.mode === "nearest" ? "low" : "high";
   }
-  // 新建空层
+  // 新建空层（prevActiveId 先拍：undo 摘层时 active 回到导入前的层）
+  const prevActiveId = doc.activeLayer?.id ?? null;
   const layer = doc.addLayer(file.name.replace(/\.[^.]+$/, ""));
   if (!layer) {
     (bitmap as ImageBitmap).close?.();
@@ -182,13 +184,17 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   const out = (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, mode) : px.data;
   layer.replaceFromBytes(out, bx, by, w, h);
   (bitmap as ImageBitmap).close?.();
+  // v0.7.35 修「import 破坏 undo」：像素先填、再落 AddLayerRecordOp（首跑只记录，同
+  // selection-ops copy 模式）。此前这里裸加层不记账 + 伪造 wp:histchange —— 后续 lift 却进栈，
+  // 栈引用了历史不知道的层：undo 跨树操作会静默销毁该层 / redo 找不到层 → 整栈被弃。
+  // 真 history.run 自会派 wp:histchange（app.ts onChange）驱动编辑门，无需手工标脏。
+  const loc = doc.locateNode(layer.id)!;
+  const st = history.run(workpiece, ops.addLayer,
+    { layerId: layer.id, index: loc.index, parentId: loc.parentId, prevActiveId, layerName: layer.name });
+  if (!st.ok) reportError(new Error("[import] addLayer record failed: " + st.msg), "error");
   renderLayersPanel();
   board.invalidateAll();
   board.requestRender();
-  session.markEdited();
-  updateSaveStatus();
-  // 触发 wp:histchange 让保存状态同步
-  window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
 
   // v111: 自动 lift 全图入 transform（user：「导入图片到图层之后自动全选图片进入 transform 模式」）
   // v0.4.7：不再手写 doc.selection——lift 的隐式全选走 fallbackFullLayer（operator 内部构造，
@@ -217,10 +223,12 @@ export function initImportImage(ctx: AppContext) {
   input = ctx.input;
   editMode = ctx.editMode;
   setStatus = ctx.setStatus;
-  updateSaveStatus = ctx.updateSaveStatus;
   renderLayersPanel = ctx.renderLayersPanel;
   setGalleryOpen = ctx.setGalleryOpen;
   uniqueNameFor = ctx.uniqueNameFor;
+  history = ctx.history;
+  workpiece = ctx.workpiece;
+  ops = ctx.ops;
 
   // 图层面板「导入图片」按钮 → file picker（强制叠层，复位 _addImportAsNewDoc）。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);
