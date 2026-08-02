@@ -5,6 +5,8 @@
 > ⚠ 含一条**记忆更正**：BgRadio「不用 store paradigm 的 ADR」不存在（详 §2）。
 > 索引：`20260802-v08-recon-index-six-knights.md`
 
+> ➜ 2026-08-02 稍晚：分发机制（下方补充 4 / §4 / 拍板项 5 的主题）已单独科普并列出选项谱系——见 `20260802-v08-lib-distribution-grill.md`（流派未选定，E 开工前从建议阶梯选档）。
+
 ## 拷问补充
 
 1. **开工前第一拍板项 = 列举接口分歧**：WebPaint watchFolder 单夹订阅（红线「绝不全库 list」）vs JRP listAllItems 全树。勘探建议（未拍板）：库只吃「当前夹快照 + folders」，宿主适配；BgRadio 的 live-passthrough（user 定的禁 listing 缓存）也能塞进这形状。
