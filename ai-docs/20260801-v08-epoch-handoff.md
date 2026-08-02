@@ -152,3 +152,13 @@
 - 组合根武装：dev 渠道（localhost / /dev/ 路径）throw fail-fast；prod reportError warning 不炸用户；
   **node 不武装**（引擎级测试直捅 doc 合法；gate 行为锁 = `test/write-gate.test.mjs`，测试内 arm/finally disarm）。
 - 开了就不再关（handoff §2-S4 原话）。
+
+### S5 ✅ v0.8.5：sidecar 正名通道
+- 新信号 `wp:sidecarchange`（detail.kind，首个成员 = 参考图；未来 timelapse 同通道）：语义 =
+  「合法不记账的 doc 级持久态变了」——**只驱动编辑门/保存**，不碰 undo 按钮态。
+- side-windows 伪造 `wp:histchange` 已杀（setReferenceFromFile 改派 sidecarchange）；
+  editor-session onChange 适配器 + topbar 唯一编辑门都改听两信号（同一张门）。
+- **desk/editor-state 不接此通道**（v409「别把 dirty 加回来」钉子原样保持：desk 改动仍只在
+  落盘时捎带快照；sidecarchange 只给「必须触发落盘」的 sidecar 成员——参考图丢了=数据丢失，
+  面板位置丢了=可接受代价，两类语义不同）。
+- session.markEdited 残余正当用户 = topbar revert 回滚（内容变化）；blender-sync 处为冗余双标（无害）。

@@ -578,7 +578,7 @@ export const session = {
   get dirty() { return es ? es.isDirty() : false; },            // 内存脏（save-status 徽章用）
   get pushPending() { return es ? es.isPushPending() : false; },   // 已落本地但没上云（徽章第四态；与 dirty 正交）
   get saving() { return _pushInFlight; },   // v0.5.9：saveAndPush 在飞（app 层过程态，徽章显转圈云）
-  markEdited() { if (es) es.markDirty(); },                     // app 驱动内容变化（导入/blender/参考窗）→ 标脏
+  markEdited() { if (es) es.markDirty(); },                     // app 驱动内容变化（revert 回滚；blender 冗余双标无害）→ 标脏。参考图已迁 wp:sidecarchange（S5）
   setName, restore: restoreSession, saveAs,
   save: saveNow, saveAndPush,
   // adopt 的两个意图显式分开（别再合成一个带 flag 的）：import=新身份 / revert=既有身份。
@@ -617,9 +617,15 @@ export function initSession(ctx: AppContext) {
     editor: {
       adopt: async (bytes: Blob) => { const loaded = await decodeOraToDoc(bytes) as LoadedDoc; adoptModel(loaded); },
       encode: async () => await _encodeCurrentOraWithPeek(),
+      // v0.8.5（S5）：sidecar 变更（参考图等「跟 ora 走 ∧ 不进 undo」态）与内容变更走同一内容脏门
+      //   ——都要落盘/推云；差别只在不进 undo 栈（wp:sidecarchange 不碰 undo 按钮态）。
       // ⚠ wp:histchange 在 **window** 上 dispatch（history.ts）——绑 document 收不到 → 打开的文档编辑永不标脏、
       //   保存静默 no-op、编辑丢失（2026-07-12 真机抓到的数据丢失根因；其余监听者都用 window）。
-      onChange: (cb: () => void) => { window.addEventListener("wp:histchange", () => { if (!_loadingDoc) cb(); }); },
+      onChange: (cb: () => void) => {
+        const h = () => { if (!_loadingDoc) cb(); };
+        window.addEventListener("wp:histchange", h);
+        window.addEventListener("wp:sidecarchange", h);
+      },
     },
     isZip: true,
     policy: { autosaveMs: 0, pushOn: ["exit"] },   // S8：interval autosave 退役，改挂 bg-jobs（下方）

@@ -5,7 +5,6 @@
 //   initSideWindows(ctx) 在任何交互前填好）是安全的。setColor 是稳定 import，无需经 ctx。
 
 import { t } from "./i18n/index.ts";
-import { session } from "./session-state.ts";
 import { ReferenceWindow } from "./reference.ts";
 import { PaletteWindow } from "./palette.ts";
 import { els } from "./els.ts";
@@ -16,7 +15,7 @@ import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
 // initSideWindows(ctx) 填入；construct 期 null，仅 config 回调（lazy）/ button 接线读取。
-let setStatus: AppContext["setStatus"], editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"], input: AppContext["input"], updateSaveStatus: AppContext["updateSaveStatus"];
+let setStatus: AppContext["setStatus"], editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"];
 
 // ---- 参考小窗 ----
 // 浮动 panel + 独立 viewport（pinch / zoom / rotate）。状态在 ReferenceWindow 内部维护。
@@ -81,8 +80,6 @@ export function initSideWindows(ctx: AppContext) {
   editMode = ctx.editMode;
   state = ctx.state;
   doc = ctx.doc;
-  input = ctx.input;
-  updateSaveStatus = ctx.updateSaveStatus;
 
   window.addEventListener("wp:toggleReference", () => referenceWindow.toggle());
 
@@ -122,8 +119,9 @@ export async function setReferenceFromFile(file: File | Blob): Promise<void> {
   referenceWindow.open();
   referenceWindow.setBitmap(fit.source, { persistBlob });
   if (fit.scaled) (decoded as ImageBitmap).close?.();   // 缩放后原 bitmap 没用了，释放
-  session.markEdited();
-  updateSaveStatus();
-  window.dispatchEvent(new CustomEvent("wp:histchange", { detail: { canUndo: input.canUndo(), canRedo: input.canRedo() } }));
+  // v0.8.5（S5·ADR-0007）：参考图 = sidecar（跟 ora 走 ∧ 不进 undo）——走正名的 wp:sidecarchange
+  // 通道（编辑门/保存状态都听它）。旧姿势（markEdited + 伪造 wp:histchange）已死：那是「合法不记账
+  // 却无合法标脏通道」逼出来的，undo 按钮态靠填真值才不被污染。
+  window.dispatchEvent(new CustomEvent("wp:sidecarchange", { detail: { kind: "reference" } }));
   setStatus(t("mi.referenceLoaded", { name: (file as File).name || "", scaled: fit.scaled ? t("mi.referenceScaled", { w: fit.w, h: fit.h }) : "" }));
 }

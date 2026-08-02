@@ -82,15 +82,18 @@ export function initTopbarMenu(ctx: AppContext) {
     setStatus(t("tm.clearedActiveLayer"));
   });
 
-  // ---- 保存触发：wp:histchange dirty 门 / Ctrl+S / beforeunload / topSaveBtn ----
-  // 笔触结束 / undo / redo / 图层操作（任何 wp:histchange）→ dirty。这是 work-file 的**唯一编辑门**。
+  // ---- 保存触发：wp:histchange + wp:sidecarchange dirty 门 / Ctrl+S / beforeunload / topSaveBtn ----
+  // 笔触结束 / undo / redo / 图层操作（wp:histchange）与 sidecar 变更（参考图等，wp:sidecarchange，
+  // v0.8.5 S5）→ dirty。这是 work-file 的**唯一编辑门**（两个信号、同一张门）。
   // store.edit(name) 一处吸：推编辑游标(local-dirty) + 经门标云脏(捕 parentBase；不 gate signedIn)。
   // name 空（gallery-first 未绑 session）→ 只推游标。门机制全在库内（app 不再直调 setCloudDirty，ADR-0016 §4）。
-  window.addEventListener("wp:histchange", () => {
-    if (session.loadingDoc) return;             // 加载期 clearHistory 的 histchange 不算编辑（session 的 ora 适配器已挂 histchange→es 标脏）
+  const _editGate = () => {
+    if (session.loadingDoc) return;             // 加载期 clearHistory 的 histchange 不算编辑（session 的适配器已挂两信号→es 标脏）
     if (!session.name) return;
     updateSaveStatus();
-  });
+  };
+  window.addEventListener("wp:histchange", _editGate);
+  window.addEventListener("wp:sidecarchange", _editGate);
   // saveAndPush / renameCurrentSession / coalescer+autosave 接线全切到 session-state.ts。
   // Ctrl+S = 完整保存（本地 + 云端）；Ctrl+Shift+S = 只存本地（不推云）。合流状态机在 Store（_store.session）。
   window.addEventListener("keydown", (e: KeyboardEvent) => {
