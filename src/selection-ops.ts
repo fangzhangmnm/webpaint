@@ -25,7 +25,7 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 // app 单例 / 跨模块函数（initSelectionOps 注入）
 let doc: AppContext["doc"], board: AppContext["board"], input: AppContext["input"];
 let editMode: AppContext["editMode"], history: AppContext["history"];
-let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
+let workpiece: AppContext["workpiece"], pixelHistory: AppContext["pixelHistory"];
 let setStatus: AppContext["setStatus"], _afterDocChange: AppContext["afterDocChange"];
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"], _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let importImageAsLayer: AppContext["importImageAsLayer"];
@@ -56,11 +56,9 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   const src = doc.activeLayer;
   if (!src) return;
   if (src.isGroup) { setStatus(t("se.selectLayerFirstGroup")); return; }
-  // move 模式：挖洞前拍源层 before（归属转给 ops.pixels）；copy 模式不碰源层，不拍。
-  const beforeActive: LayerSnap | null = move ? src.snapshot() : null;
   // v0.8.1（S1）：加层走 workpiece.layers 门面（创建即记账，prevActiveId 自动拍 = 当前 active = src）。
   // compound 把 [addLayer, pixels] 封成一个整点：undo 先还原源层像素、再摘掉新层 + active 回源层。
-  let pixelsHanded = false;   // beforeActive 所有权是否已移交 ops.pixels（其失败路径自 dispose）
+  // v0.8.2（S2）：move 挖洞走 pixelHistory 事务（before 快照/入栈收进 tx；挖洞前 begin）。
   const r = history.compound(workpiece, () => {
     const a = workpiece.layers.addLayer(move ? "移到新层" : "复制层", { checkpoint: false });
     if (!a.ok) throw new Error(a.msg);
@@ -71,21 +69,17 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
     for (let i = 0; i < sel.bboxW * sel.bboxH; i++) region.data[i * 4 + 3] = Math.round(region.data[i * 4 + 3] * selMask[i] / 255);
     newL.replaceFromBytes(region.data, sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
     if (move) {
+      const tx = pixelHistory.begin(src, "moveToLayer");
       // 从源层挖洞（dst-out 选区形状：alpha 衰减、RGB 保留）
       src.editRegionBytes(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (buf) => {
         for (let i = 0; i < sel.bboxW * sel.bboxH; i++) {
           if (selMask[i]) buf[i * 4 + 3] = Math.round(buf[i * 4 + 3] * (255 - selMask[i]) / 255);
         }
       });
-      pixelsHanded = true;
-      const st2 = history.run(workpiece, ops.pixels, { layerId: src.id, _initialBefore: beforeActive }, { checkpoint: false });
-      if (!st2.ok) throw new Error(st2.msg);
+      tx.commit(undefined, { checkpoint: false });   // 空挖（选区不盖内容）→ no-op 不占微步，compound 整点照封
     }
   });
-  if (!r.ok) {
-    if (move && !pixelsHanded) disposeLayerSnap(beforeActive);   // 没走到移交点 → 快照归本函数释放
-    setStatus(errMsg(r.msg), true); _afterDocChange(); return;
-  }
+  if (!r.ok) { setStatus(errMsg(r.msg), true); _afterDocChange(); return; }
   _afterDocChange();
   setStatus(move ? t("se.movedToNewLayer") : t("se.copiedToNewLayer"));
 }
@@ -100,7 +94,7 @@ export function initSelectionOps(ctx: AppContext) {
   editMode = ctx.editMode;
   history = ctx.history;
   workpiece = ctx.workpiece;
-  ops = ctx.ops;
+  pixelHistory = ctx.pixelHistory;
   setStatus = ctx.setStatus;
   _afterDocChange = ctx.afterDocChange;
   _commitTransform = ctx._commitTransform;

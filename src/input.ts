@@ -62,7 +62,7 @@ type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
 //   GL 模式下这类笔的 live 预览要靠 board 每帧把活动层重传 GPU（buffered brush 走 GPU stamp overlay，不算）。
 interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; inPlace: boolean; }
 
-// 选区变化 entry（lasso.endPath/setSelection 产 → _pushSelEntry 走 ops.selection）。
+// 选区变化 entry（lasso.endPath/setSelection 产 → _pushSelEntry 走 workpiece.sel 记账口）。
 //   （LassoEntry 已死 v0.4.7：accept/reject 的 operator 编排收进 FloatingTransform。）
 interface SelectionChangeEntry { before?: Selection | null; after?: Selection | null; }
 
@@ -395,7 +395,7 @@ export class InputController {
     // - redo: index++, putImageData(chain[index])
     this._lastTap = null;
     // history: 共享 UndoHistory（app.js 创建注入）+ workpiece + operator 注册表。
-    // v0.4.5：不再注册 handler——lasso/selectionChange 走 ops.pixels/ops.selection（对称 swap，全同步）。
+    // v0.4.5：不再注册 handler——lasso/selectionChange 走 pixel-tx/workpiece.sel（对称 swap，全同步）。
     this.history = opts.history || null;
     this.workpiece = opts.workpiece || null;
     this.ops = opts.ops || null;
@@ -1457,10 +1457,10 @@ export class InputController {
     this.lasso.syncFloating();
   }
 
-  // 选区变化 entry（lasso.setSelection/endPath 产，选区已应用）→ ops.selection 事务型入栈。
+  // 选区变化 entry（lasso.setSelection/endPath 产，选区已应用）→ workpiece.sel 唯一记账口（S2）。
   _pushSelEntry(entry: SelectionChangeEntry | null | undefined) {
-    if (!entry || !this.history || !this.workpiece || !this.ops) return;
-    this.history.run(this.workpiece, this.ops.selection, { _initialBefore: { v: entry.before ?? null } });
+    if (!entry || !this.workpiece) return;
+    this.workpiece.sel.commitPreApplied((entry.before ?? null) as Parameters<typeof this.workpiece.sel.commitPreApplied>[0]);
   }
 
   // ---- 防误触 / ghost pointer 清理 ----

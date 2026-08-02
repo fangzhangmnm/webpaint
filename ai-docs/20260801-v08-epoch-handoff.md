@@ -1,5 +1,5 @@
 # v0.8 重构纪元 handoff：workpiece 写面收权 + sidecar 分离
-> as-of v0.8.0-2026-08-01（开版空壳；手术未动一刀）
+> as-of v0.8.0-2026-08-01（开版空壳）；施工进度见文末 §8（v0.8.1 S1 ✅ / v0.8.2 S2 ✅）
 > 读者：接手 v0.8 的下一个 AI session。拍板记录 = `ai-docs/adr/0007-workpiece-undo-scope-and-sidecar.md`（why 在那里，本文是 how/施工序）。所有「user 拍板」出处 = 2026-08-01 session（import-破坏-undo 根因讨论）。
 
 ## 0. 现状快照（进场必读）
@@ -103,3 +103,30 @@
 10. Row1 同槽互斥钮（无选区=全选/有选区=反选）；Ctrl+A / Ctrl+Shift+I；⋯ 菜单旧项消失。
 11. 蚂蚁线：新 doc 双默认开；selection/fill 各自独立开关、per-doc 持久；老 doc fill 偏好回开（预期内已同意）。
 12. i18n 抽查 en/ja/tok 新文案（复位/从图层建选区/送入填色）；水印 v0.8.0。
+
+## 8. 施工进度（2026-08-02 session 追记）
+
+### S1 ✅ v0.8.1：构造注入 + LayerTreeComponent
+- `new Workpiece(doc, history)`（capability 绑构造期）；`workpiece.layers` = `src/workpiece/layer-tree.ts`
+  （组合根装配自注册——值 import 会成 workpiece→layer-tree→operators→workpiece 环，operators 的
+  extends 在 eval 期就要 DocumentOperator）。
+- 门面 API：addLayer/duplicateLayer/removeLayer/deleteGroup/moveLayer/mergeDown/setLayerProp/
+  setReferenceLayer/clearLayer + **treeTx 结构 tx 窗口**（mutate 拿可变 doc，前后 snapshotTree 自动入栈）。
+  记账失败摘回新层（不留无账层）。改道：layers-panel / import-image / blender-sync / selection-ops /
+  explode-layers。行为锁：`test/workpiece-layer-tree.test.mjs`。
+
+### S2 ✅ v0.8.2：①型退役审计 + SelectionFace + PixelTx 归位
+7 个①型 operator 逐个定去向（「不记账」已从默认态变成显式声明态）：
+
+| operator | 去向 |
+|---|---|
+| pixels | pixel-tx 唯一形态（S2 新增：commit 透传 checkpoint + `dispose()` 弃快照不还原）。归位：filters-adjust("adjust")、toolbar 选区内清除("clearSel")、topbar 清空活动层("clearDoc")、selection-ops 挖洞("moveToLayer"，compound 内 checkpoint:false)。**保留原样（合规深模块编排）**：floating-transform（compound 内三处，本就贴 history API 的组件级模块）、fill-mode._doCommit（ADR-0004 出入口语义钉死，GL commitFill+handedOff 还原逻辑不换壳） |
+| selection | 唯一入口 = `workpiece.sel`（`src/workpiece/selection-face.ts`）：commitPreApplied 记账口 + beginPreview 预览 tx（origin 保管/write 换预览就地 dispose/commit 无变化不占步/abort 无痕）。**LassoEngine 保持 entry 契约**（选区生产引擎，node 直测 magic-drag/polygon 等；组件化选区引擎留给 C 骑士 headless 分层）。toolbar 扩缩预览 = 预览 tx 第一个住户 |
+| layerProp(_initialOld) | 透明度 slider 经 `workpiece.layers.setLayerProp({initialOld})`（S1 已收） |
+| fillColor | 留 fill-mode 编排（desk 态经注入钩子；防抖合并/回灌抑制是 ADR-0004 语义的一部分） |
+| addLayer | S1 门面「创建即记账」，首跑 pre-apply 语义消失 |
+| treeStructure | S1 treeTx 唯一入口（layers-panel 组操作/explode/stampAll 全走它） |
+| docTransform | `doc-ops.runDocTransform` 共同脊柱**就是** tx 信封（before/after snapshotAll + 压栈唯一入口）；S4 的令牌在此处拿 |
+
+- 语义副作用（有意，v0.6.17 no-op 家族）：选区内清除/清空活动层/挖洞若实际未改像素 → 不占 undo 步。
+- 行为锁：`test/selection-face.test.mjs`。

@@ -16,6 +16,7 @@ import type { PaintDoc } from "../doc.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import type { UndoHistory } from "./undo-history.ts";
 import type { LayerTree } from "./layer-tree.ts";
+import type { SelectionFace } from "./selection-face.ts";
 
 // ---- 浮层变换状态（S6：float 从 floating-transform 的 _ft 私有态收进 workpiece internals）----
 // 像素所有权：WorkpieceFloat.pixels 归当前持有者（internals 或某个 operator 的 undo 包）所有，
@@ -68,6 +69,7 @@ export class Workpiece {
   private _commitVersion = 0;
   private _lockHolder: string | null = null;
   private _layers: LayerTree | null = null;
+  private _sel: SelectionFace | null = null;
 
   constructor(doc: PaintDoc, history: UndoHistory) {
     INTERNALS.set(this, { doc, floats: null });
@@ -86,6 +88,16 @@ export class Workpiece {
   _attachLayers(c: LayerTree): void {
     if (this._layers) throw new Error("Workpiece: LayerTree 重复装配");
     this._layers = c;
+  }
+
+  /** 选区写面（S2 第二个 component：唯一记账口 + 预览 tx 窗口）。 */
+  get sel(): SelectionFace {
+    if (!this._sel) throw new Error("Workpiece: SelectionFace 未装配（组合根须紧随构造 new SelectionFace）");
+    return this._sel;
+  }
+  _attachSel(c: SelectionFace): void {
+    if (this._sel) throw new Error("Workpiece: SelectionFace 重复装配");
+    this._sel = c;
   }
 
   /** 每次 operator 提交 +1。render-tree 重建 / 缓存失效的 key。 */

@@ -24,6 +24,7 @@ import { Workpiece } from "./workpiece/workpiece.ts";
 import { UndoHistory } from "./workpiece/undo-history.ts";
 import { makeOperators } from "./workpiece/operators.ts";
 import { LayerTree } from "./workpiece/layer-tree.ts";
+import { SelectionFace } from "./workpiece/selection-face.ts";
 import { PixelEdits } from "./workpiece/pixel-tx.ts";
 import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
@@ -229,7 +230,8 @@ const ops = makeOperators({
   // set 走 fill-mode 的回灌抑制入口（防 undo 触发 watch 再入栈）。
   fillColor: { get: () => state.color, set: (hex) => applyFillColorFromHistory(hex) },
 });
-new LayerTree({ w: workpiece, doc, history, ops });   // 自注册 workpiece.layers（结构类写面，S1）
+new LayerTree({ w: workpiece, doc, history, ops });      // 自注册 workpiece.layers（结构类写面，S1）
+new SelectionFace({ w: workpiece, doc, history, ops });  // 自注册 workpiece.sel（选区写面唯一记账口，S2）
 const _afterDocChange = () => { renderLayersPanel(); board.invalidateAll(); board.requestRender(); };
 const layerSpecFrom = (L: unknown) => doc.layerSpec(L as Parameters<typeof doc.layerSpec>[0]);
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。

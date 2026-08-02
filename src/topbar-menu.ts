@@ -35,7 +35,7 @@ const errMsg = (e: unknown): string => String((e as { message?: unknown })?.mess
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initTopbarMenu(ctx) 注入）----
 let input: AppContext["input"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], editMode: AppContext["editMode"];
-let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
+let workpiece: AppContext["workpiece"], pixelHistory: AppContext["pixelHistory"];
 let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"], updateZoomLabel: AppContext["updateZoomLabel"];
 let _signInNav = false;   // v0.6.22：登录 redirect 导航中，beforeunload 别挡
 let rack: AppContext["rack"];
@@ -51,7 +51,7 @@ export function initTopbarMenu(ctx: AppContext) {
   board = ctx.board;
   history = ctx.history;
   workpiece = ctx.workpiece;
-  ops = ctx.ops;
+  pixelHistory = ctx.pixelHistory;
   editMode = ctx.editMode;
   setStatus = ctx.setStatus;
   updateSaveStatus = ctx.updateSaveStatus;
@@ -76,10 +76,10 @@ export function initTopbarMenu(ctx: AppContext) {
     if (a !== "confirm") return;
     const layer = doc.activeLayer as Layer | null;
     if (!layer) return;
-    // 事务型 pre-applied 像素 op：before 快照所有权交给 op（勿 dispose），Ctrl+Z 能复活。
-    const before = layer.snapshot();
+    // v0.8.2（S2）：走 pixelHistory 事务（before 快照/入栈收进 tx），Ctrl+Z 能复活。
+    const tx = pixelHistory.begin(layer, "clearDoc");
     doc.clearActiveLayer();
-    history.run(workpiece, ops.pixels, { layerId: layer.id, _initialBefore: before });
+    tx.commit();
     board.invalidateAll();
     setStatus(t("tm.clearedActiveLayer"));
   });

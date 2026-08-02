@@ -99,7 +99,7 @@ function _doCommit(clearSelection: boolean): void {
     if (!stPx.ok) throw new Error(stPx.msg || "ops.pixels 入栈失败");
     if (clearSelection) {
       const entry = input.lasso.setSelection(null);
-      if (entry) history.run(workpiece, ops.selection, { _initialBefore: { v: entry.before ?? null } }, { checkpoint: false });
+      if (entry) workpiece.sel.commitPreApplied(entry.before ?? null, { checkpoint: false });
     }
   });
   if (!st.ok) {
@@ -127,10 +127,10 @@ function _onModeChange(): void {
     // v0.7.38（ADR-0004 修订 5）：sendSelectionToFill 的 one-shot 携入——本次不清选区
     if (_carryIn) { _carryIn = false; board.requestRender(); return; }
     // v0.6.24 不互通：进 fill = 清掉带进来的选区（undo 兜底）——fill 从零开始自己点
-    const { input, history, workpiece, ops } = _ctx!;
+    const { input, workpiece } = _ctx!;
     if (doc.selection) {
       const entry = input.lasso.setSelection(null);
-      if (entry) history.run(workpiece, ops.selection, { _initialBefore: { v: entry.before ?? null } });
+      if (entry) workpiece.sel.commitPreApplied(entry.before ?? null);
     }
     board.requestRender();
     return;
@@ -140,9 +140,9 @@ function _onModeChange(): void {
   //   （组/隐藏层本就没显示 → 静默跳过，但选区也要清——不互通）。
   if (doc.selection && requireEditableLeaf(doc, null)) _doCommit(true);
   else if (doc.selection) {
-    const { input, history, workpiece, ops } = _ctx!;
+    const { input, workpiece } = _ctx!;
     const entry = input.lasso.setSelection(null);
-    if (entry) history.run(workpiece, ops.selection, { _initialBefore: { v: entry.before ?? null } });
+    if (entry) workpiece.sel.commitPreApplied(entry.before ?? null);
     board.requestRender();
   } else board.requestRender();   // 没得 commit 也要刷掉残余 overlay
 }

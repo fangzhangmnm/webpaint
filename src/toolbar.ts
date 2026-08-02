@@ -2,11 +2,11 @@
 // 即「选当前工具、把按钮高亮/可点从 EditMode 派生、lasso 子工具/集合运算/变换/选区动作工具栏」。
 // drawing app 只经 editMode（持久工具 + transient）这一个轴跟工具耦合：
 //   setTool → editMode.setTool → emit wp:modechange → _syncEditModeUI 重新派生整套 UI。
-// ctx 绑：editMode/state/doc/board/input/history/workpiece/ops/dialReactive/rack/setStatus/leftDial,
+// ctx 绑：editMode/state/doc/board/input/history/workpiece/pixelHistory/dialReactive/rack/setStatus/leftDial,
 //        + app-local（仍在 app.js，经 ctx 绑）：_suppressTransientPanels/_restoreTransientPanels/
 //          _commitTransform/_cancelTransform/selectionToNewLayer/afterDocChange。
 // importable：Selection（选区取反/全选）、fillResampleSelect（变换采样 dropdown SSoT）。
-// undo：selection-entry 走 ops.selection（事务型 swap）、fill/clear 走 ops.pixels（事务型 swap）。
+// undo（v0.8.2 S2）：selection-entry 走 workpiece.sel 记账口、清除走 pixelHistory 事务（①型裸调已退役）。
 
 import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
@@ -24,6 +24,7 @@ import { configFromModeState, planesForMode, defaultVpsForMode } from "./perspec
 import type { PerspMode } from "./perspective-frame.ts";
 import type { AppContext } from "./app-context.ts";
 import type { LayerSnap } from "./doc.ts";
+import type { SelectionPreviewTx } from "./workpiece/selection-face.ts";
 
 // 静态存在的工具栏元素查表 helper（initToolbar 在 DOM 就绪后调）。
 const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -31,21 +32,21 @@ const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getEl
 // requireEditableLeaf / transform 收到的 doc 活层（只描述本文件用到的）。
 interface LayerLike { id: number; snapshot(): LayerSnap; }
 // 选区编辑 modal 态（仅 modal 开着时非 null）。Selection 取自 selection.js 的 class（值导入兼作类型）。
-interface SelEditState { before: Selection; op: "expand" | "shrink"; rafId: number; }
+interface SelEditState { tx: SelectionPreviewTx; before: Selection; op: "expand" | "shrink"; rafId: number; }
 // editMode.enterTransient 的 apply/abort 回调（edit-mode.js 未类型化，默认 null 把推断窄成 null|undefined → 在调用处断言真签名）。
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 let editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"], board: AppContext["board"];
 let input: AppContext["input"], history: AppContext["history"], dialReactive: AppContext["dialReactive"];
-let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
+let workpiece: AppContext["workpiece"], pixelHistory: AppContext["pixelHistory"];
 let rack: AppContext["rack"], setStatus: AppContext["setStatus"], leftDial: AppContext["leftDial"];
 let _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"];
 let selectionToNewLayer: AppContext["selectionToNewLayer"];
 
-// selection-entry → SwapSelectionOp（事务型：setSelection 已把 after 应用到 doc，run 只交 before）。
+// selection-entry → workpiece.sel 唯一记账口（S2；setSelection 已把 after 应用到 doc，只交 before）。
 const pushSel = (entry: { before: Selection | null } | null | undefined) => {
-  if (entry) history.run(workpiece, ops.selection, { _initialBefore: { v: entry.before ?? null } });
+  if (entry) workpiece.sel.commitPreApplied(entry.before ?? null);
 };
 
 // 套索工具栏 DOM（initToolbar 里查表）。静态元素 → 非空；btn 组 → 数组；下拉 → select。
@@ -421,11 +422,9 @@ function _runSelEditPreview() {
   if (!s) return;
   const amt = _selEditAmount();
   const signed = s.op === "expand" ? amt : -amt;
-  const prev = doc.selection as Selection | null;
-  const next = s.before.morphed(signed, doc.width, doc.height);
-  doc.selection = next as (typeof doc)["selection"];
-  // v0.4.6：上一个预览产物无人接手 → 就地 dispose（before 本体和新预览除外）。morphed(0) 返回 before 本体。
-  if (prev && prev !== s.before && prev !== next && !prev.disposed) prev.dispose();
+  // v0.8.2（S2）：预览写走 SelectionPreviewTx（旧预览就地 dispose、origin 保管在 tx）。
+  //   morphed(0) 返回 before 本体 → write(origin) 合法（= 预览回到原选区）。
+  s.tx.write(s.before.morphed(signed, doc.width, doc.height) as Selection);
   input.lasso.onChange?.();   // requestRender（重画蚂蚁线）+ wp:lassochange（派生工具栏，已对 _selEdit 免疫）
 }
 function _onSelEditInput() {
@@ -454,7 +453,8 @@ function _openSelEdit(op: "expand" | "shrink") {
   const { menu, popup, title, amount } = _selEditEls();
   menu?.classList.add("hidden");
   if (_selEdit) _finishSelEdit(false);    // 已开着另一个 → 先取消旧的（还原）再开新的
-  _selEdit = { before: doc.selection as Selection, op, rafId: 0 };
+  const tx = workpiece.sel.beginPreview();
+  _selEdit = { tx, before: tx.origin() as Selection, op, rafId: 0 };
   void title;   // 标题/方向 pressed 统一走 _syncSelEditOpUI
   _syncSelEditOpUI(op);
   if (amount) amount.value = "1";         // 默认 1px（最常用的轻微扩缩）
@@ -473,13 +473,10 @@ function _finishSelEdit(applied: boolean) {
   const { popup } = _selEditEls();
   _selEdit = null;                          // 先清，防 exitTransient → updateLassoToolbar 重入
   if (applied) {
-    const before = s.before, after = doc.selection;
-    if (after !== before) pushSel({ before });   // before 所有权交给 ops.selection；after 留在 doc
+    s.tx.commit();   // 变了才记账（before 所有权交 op）；无变化不占 undo 步
     setStatus(s.op === "expand" ? t("se.selectionExpanded") : t("se.selectionShrunk"));
   } else {
-    const preview = doc.selection as Selection | null;
-    doc.selection = s.before as (typeof doc)["selection"];               // 还原
-    if (preview && preview !== s.before && !preview.disposed) preview.dispose();   // v0.4.6：弃预览产物
+    s.tx.abort();    // 无痕还原 origin，预览产物就地 dispose
   }
   popup?.classList.add("hidden");
   input.lasso.onChange?.();
@@ -648,7 +645,7 @@ export const RACK_PANEL_BY_TOOL: Record<string, string> = {
 
 export function initToolbar(ctx: AppContext) {
   ({
-    editMode, state, doc, board, input, history, workpiece, ops, dialReactive, rack, setStatus, leftDial,
+    editMode, state, doc, board, input, history, workpiece, pixelHistory, dialReactive, rack, setStatus, leftDial,
     _suppressTransientPanels, _commitTransform, _cancelTransform,
     selectionToNewLayer,
   } = ctx);
@@ -1093,9 +1090,10 @@ export function initToolbar(ctx: AppContext) {
   byId("lassoClearBtn").addEventListener("click", () => {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
-    const before = layer.snapshot();   // 归属转给 ops.pixels
+    // v0.8.2（S2）：走 pixelHistory 事务（before 快照/入栈收进 tx；no-op 清除不占 undo 步——v0.6.17 同族）。
+    const tx = pixelHistory.begin(layer as unknown as Parameters<typeof pixelHistory.begin>[0], "clearSel");
     (doc.selection as Selection).clearOnLayer(layer as unknown as Parameters<Selection["clearOnLayer"]>[0]);
-    history.run(workpiece, ops.pixels, { layerId: layer.id, _initialBefore: before });
+    tx.commit();
     board.invalidateAll();
     setStatus(t("se.clearedSelection"));
   });

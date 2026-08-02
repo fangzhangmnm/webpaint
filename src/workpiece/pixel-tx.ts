@@ -42,8 +42,9 @@ export class PixelTx {
     this._before = layer.snapshot();
     this._label = label;
   }
-  /** 入栈成功返回 true；layer 中途没了（删层）→ 不入栈返回 false。finalize 在拍 after 前跑（选区 mask 插槽）。 */
-  commit(finalize?: (layer: Layer, preSnap: PreSnapImage) => void): boolean {
+  /** 入栈成功返回 true；layer 中途没了（删层）→ 不入栈返回 false。finalize 在拍 after 前跑（选区 mask 插槽）。
+   *  o.checkpoint：compound 微步纪律用（v0.8.2 S2——selection-ops 挖洞等复合动作传 false）。 */
+  commit(finalize?: (layer: Layer, preSnap: PreSnapImage) => void, o?: { checkpoint?: boolean }): boolean {
     const { doc, w, history, ops } = this._deps;
     const L = findNodeById(doc.layers, this._layerId) as Layer | null;
     const before = this._before;
@@ -56,8 +57,16 @@ export class PixelTx {
     //   返回 false 与「层没了」共用（调用方 input.ts 本就不读返回值）。
     if (L.pixels.snapshotEquals(before.pixels)) { disposeLayerSnap(before); return false; }
     if (finalize) finalize(L, snapToImage(before, L.docW, L.docH));
-    const st = history.run(w, ops.pixels, { layerId: this._layerId, _initialBefore: before }, { label: this._label });
+    const st = history.run(w, ops.pixels, { layerId: this._layerId, _initialBefore: before },
+      { label: this._label, checkpoint: o?.checkpoint });
     return st.ok;
+  }
+
+  /** 放弃（层从未被改过的取消路径，如 adjust 预览全在 surrogate 上）：只释放快照，不还原不入栈。 */
+  dispose(): void {
+    const before = this._before;
+    this._before = null;
+    disposeLayerSnap(before);
   }
   /** 还原到 before，不入栈。 */
   abort(): void {

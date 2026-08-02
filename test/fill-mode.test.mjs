@@ -32,7 +32,7 @@ function makeCtx() {
       compound: (_w, fn) => { try { fn(); return { ok: true }; } catch (e) { return { ok: false, msg: String(e) }; } },
       run: () => ({ ok: true }),
     },
-    workpiece: {}, ops: { pixels: {}, selection: {} },
+    workpiece: { sel: { commitPreApplied: () => ({ ok: true }) } }, ops: { pixels: {}, selection: {} },
     state: { color: "#ff0000" },
     dialReactive: { color: "#ff0000" },
     setStatus: () => {},

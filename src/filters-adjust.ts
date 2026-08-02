@@ -16,7 +16,8 @@ import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";
 import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式 import）
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { fillResampleSelect } from "./resample.ts";
-import { disposeLayerSnap, type LayerSnap } from "./doc.ts";
+import type { LayerSnap } from "./doc.ts";
+import type { PixelTx } from "./workpiece/pixel-tx.ts";
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";
 
@@ -37,15 +38,16 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 // filter region preview 态（surrogate canvas + 提取的源/掩码数据）。
 interface AdjustState {
   Filter: FilterLike; active: AdjustLayer; params: Record<string, unknown>;
-  // beforeSnap = tile 句柄快照（undo 包用）：apply 时所有权交给 pixels op；cancel 时须 disposeLayerSnap。
+  // tx = pixelHistory 事务（v0.8.2 S2；开面板即 begin 拍 before）：apply → tx.commit()；
+  //   cancel → tx.dispose()（层从未被改——预览全在 surrogate 上，只释放快照不还原）。
   // v0.6.39 去 canvas 化：srcImg = tiles 直读；out = 当前预览字节（surrogate 直传 GL / apply 直落 tile）。
-  beforeSnap: LayerSnap;
+  tx: PixelTx;
   srcImg: ImageData; out: Uint8ClampedArray; maskData: Uint8Array | null; _rafId: number;
   picker: FilterLike[] | null;
 }
 
 let state: AppContext["state"], editMode: AppContext["editMode"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"];
-let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
+let workpiece: AppContext["workpiece"], pixelHistory: AppContext["pixelHistory"];
 let setStatus: AppContext["setStatus"], store: AppContext["store"], updateSaveStatus: AppContext["updateSaveStatus"];
 let _bringPanelTop: AppContext["_bringPanelTop"];
 let _suppressTransientPanels: AppContext["_suppressTransientPanels"], _restoreTransientPanels: AppContext["_restoreTransientPanels"];
@@ -103,7 +105,7 @@ function _openFilterPanel(filterId: string, opts: { picker?: FilterLike[] } = {}
   const { srcImg, out, maskData } = _initFilterSurrogate(L);
   _adjustState = {
     Filter, active: L, params: Filter.defaults(),
-    beforeSnap: L.snapshot(), srcImg, out, maskData,
+    tx: pixelHistory.begin(L as unknown as Parameters<typeof pixelHistory.begin>[0], "adjust"), srcImg, out, maskData,
     _rafId: 0,
     picker: opts.picker || null,
   };
@@ -177,12 +179,12 @@ function _closeFilterPanel(applied: boolean) {
     // 烤进 layer（surrogate 字节已是最终结果 → 直落 tile，零 canvas）
     (L as unknown as { replaceFromBytes: (d: Uint8ClampedArray, x: number, y: number, w: number, h: number) => void })
       .replaceFromBytes(_adjustState.out, L.bboxX, L.bboxY, _adjustState.srcImg.width, _adjustState.srcImg.height);
-    // 事务型 pre-applied 像素 op：beforeSnap 所有权交给 op（勿 dispose）。run 同步派 wp:histchange → 编辑门已标。
-    history.run(workpiece, ops.pixels, { layerId: L.id, _initialBefore: _adjustState.beforeSnap });
+    // pixelHistory 事务收口（before 在 begin 时拍）。run 同步派 wp:histchange → 编辑门已标。
+    _adjustState.tx.commit();
     setStatus(t("mi.filterApplied", { title: _adjustState.Filter.title, name: L.name }));
   } else {
-    // cancel/abort：层从未被改（预览全在 surrogate 上），beforeSnap 没交给任何 op → 这里释放句柄。
-    disposeLayerSnap(_adjustState.beforeSnap);
+    // cancel/abort：层从未被改（预览全在 surrogate 上）→ 只释放快照，不还原不入栈。
+    _adjustState.tx.dispose();
   }
   _adjustState = null;
   els.adjustPanel.classList.add("hidden");
@@ -375,7 +377,7 @@ function _renderFilterBrushToolbar() {
 }
 
 export function initFiltersAdjust(ctx: AppContext) {
-  ({ state, editMode, doc, board, history, setStatus, store, updateSaveStatus, workpiece, ops,
+  ({ state, editMode, doc, board, history, setStatus, store, updateSaveStatus, workpiece, pixelHistory,
      _bringPanelTop, _suppressTransientPanels, _restoreTransientPanels } = ctx);
 
   els.topAdjustBtn.addEventListener("click", (e: Event) => {

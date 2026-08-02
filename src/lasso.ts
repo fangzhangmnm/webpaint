@@ -468,7 +468,7 @@ export class LassoEngine {
     this.onChange();
     return true;
   }
-  /** 收笔：产单条 history entry（before 所有权随 entry 交给 ops.selection，同 _applySelectionUpdate 契约）。 */
+  /** 收笔：产单条 history entry（before 所有权随 entry 交给 workpiece.sel 记账口，同 _applySelectionUpdate 契约）。 */
   magicDragEnd() {
     if (!this.doc || this._state !== "magic-drag") return null;
     const orig = this._magicOrig;
@@ -503,7 +503,7 @@ export class LassoEngine {
     this.doc.selection = merged;
     this.onChange();
     return { type: "selectionChange", before: oldSel, after: merged };
-    // before(=oldSel) 所有权随 entry 交给 ops.selection（input._pushSelEntry）；merged 归 doc.selection。
+    // before(=oldSel) 所有权随 entry 交给 workpiece.sel（input._pushSelEntry）；merged 归 doc.selection。
   }
 
   // -------- 模式切换 --------
