@@ -3,6 +3,7 @@
 Procreate 级绘画 PWA + **家族 sync-store 引擎的开发面**（shared-lib-workflow 流 1：引擎在 `src/store/` 在地改、真机测，稳了才 merge 回 canonical）。UI 中文。iPad 是手感的最终裁判。
 
 - **红线区**：`src/store/**`（深模块，全 TS，改前 escalate human + 读 MASTER §A）。接缝 = `src/app-store.js` + `src/store/local-adapter.ts`，app 专属只进接缝。
+- **【硬规则】doc mutation 必须走 undo（workpiece 写面，v0.8 ADR-0007）**：结构/属性/焦点 = `workpiece.layers`、选区 = `workpiece.sel`、像素 = `ctx.pixelHistory`（PixelTx）、整 doc 几何 = `doc-ops.runDocTransform`。`ctx.doc` 是只读 DocView——裸改 = 编译错 + write-gate dev throw。「不记账」必须是显式声明态（tx 窗口 / component 声明写，如 setActive）；绝不 cast 回 PaintDoc 或摸 `ctx.docRaw` 绕收口（docRaw 唯一持证人 = session-state 装载写）。
 - **错误上报（统一）**：全 app + store 的错误唯一汇拢点 = `src/error-badge.ts` 的 `reportError(err, level?)`——
   它是**最终消费者**（唯一 console.log 的地方）。分级：`error`/`warning`→顶层 banner（`#__errBar`，z-9999，盖过
   gallery overlay/busy/gate/modal）、`info`→状态栏、`log`→仅 console（良性 offline/fallback）。

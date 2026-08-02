@@ -67,17 +67,29 @@ _Avoid_: mode 字符串大 switch（旧 drag handler 的分支地狱）
 「能否在当前 active 节点写像素」的**唯一**判定（`doc` 上）。`requireEditableLeaf({allowHidden}) → leaf | null(+标准状态行)`：active 是组 → 硬拒「请选择一个图层」；active 隐藏叶 → 默认软拒「图层已隐藏」（`allowHidden` 放行）。**所有写/读单叶像素的命令穿它一处**（填充/清除/调整/滤镜/拷贝/魔术棒/吸色 raw/nudge…），取代散在 input.js:402、selection-ops.ts:44、filters 漏查的 ad-hoc `isGroup`/`!visible`。例外 = 变换/Ctrl+D（组合法，深化目的）+ doc 级命令（裁剪/合并）。EditMode CAPS 精神往「目标轴」延伸。
 _Avoid_: 各命令各抄一句 isGroup/!visible（面条 + 漂移源）
 
+**Workpiece（写面聚合根）**:
+undo system 的监管对象，**全部作用域**（ADR-0007：可撤销的都是 workpiece component，与「是否进 ora」无关）。`new Workpiece(doc, history)` 构造期注入 undo（capability 绑构造期）；聚合 component：`workpiece.layers`（[[LayerTree（结构类写面）]]）+ `workpiece.sel`（选区写面 SelectionFace）+ 像素走 pixelHistory（PixelTx）+ 整 doc 几何走 doc-ops.runDocTransform（tx 信封）。写 doc 的合法路径**只有**这些组件/tx；`ctx.doc` 是只读 DocView（裸写=编译错），PaintDoc mutator 入口另有 write-gate dev 断言兜底（v0.8.4 割3）。装载/换文档走 `ctx.docRaw`（session-state 唯一持证人）。
+_Avoid_: 手工 history.run + args 组装（S1 起下沉进 component）, ①型 pre-apply 裸调（S2 退役——「不记账」必须是显式声明态：tx 窗口或 component）, workbench（被否——语义是 editor app runtime）
+
+**LayerTree（结构类写面）**:
+`workpiece.layers`。「写即记账」门面：addLayer/duplicateLayer/removeLayer/deleteGroup/moveLayer/mergeDown/setLayerProp/setReferenceLayer/clearLayer + `treeTx`（结构 tx 窗口：mutate 拿可变 doc，前后 snapshotTree 自动入栈）+ `setActive`（显式声明的不入 undo 焦点写）。记账失败摘回 mutation（不留无账层）。
+_Avoid_: doc.addLayer + 手工 AddLayerRecordOp（旧姿势）, 在 app 层拼 locateNode/prevActiveId 舞蹈
+
+**Sidecar**:
+「跟 ora 走 ∧ 不进 undo history」的 doc 级状态（ADR-0007 命名定案）。成员：参考**图**（side-windows 的 referenceImage blob）、editor-state.json（desk）、未来 timelapse。变更通道 = `wp:sidecarchange`（驱动编辑门/落盘推云，不碰 undo 按钮态）——但 **desk 不发信号**（v409「desk 无 dirty」钉子：只拖面板不落盘，落盘时捎带快照）。**术语拆死**：参考**层**指定（`referenceLayerId`，workpiece 侧，ReferenceLayerOp 可撤销）≠ 参考**图**（sidecar 侧，不进 undo）——两个 "reference" 是两个东西。
+_Avoid_: workbench-state 当 sidecar 统称（workbench 语义被否）, 伪造 wp:histchange 标脏（v0.8.5 已杀的旧姿势）, 给 desk 加 dirty 标记（v409 钉子）
+
 **Snapshot**:
 某一刻 layer 像素的拷贝 `{ bboxX/Y/W/H, imageData }`，空层 imageData=null。undo 的原子。
 _Avoid_: backup, capture
 
-**History entry**:
-UndoStack 里一步可撤销操作的最小数据壳，按 `type` dispatch 到注册的 handler。领域无关。
-_Avoid_: command, action, undo step
+**History entry / Microstep**:
+配额制 UndoHistory（0.4 纪元）栈里的一步 = `{op, args, data, checkpoint, label}`，data 是当前方向的逆包（forward/backward 对称 swap）。checkpoint 把多个微步封成一个 undo 整点（compound / sealCheckpoint）。
+_Avoid_: command, action, undo step, UndoStack/type-dispatch handler（0.4 前旧机制，已死）
 
-**PixelEdit**:
-一次"按-拖-抬"产生的像素编辑事务模块。`begin(layer,type)` 拍 before-snapshot，`commit()` 拍 after、压缩、入栈，`abort()` 还原。自己注册 stroke/liquify/filterBrush 三类 handler。拥有 snapshot 压缩与还原原语。
-_Avoid_: undo manager, snapshot manager, stroke recorder
+**PixelEdit / PixelTx**:
+一次"按-拖-抬"（或 adjust/fill 这类"开面板-预览-收口"）的像素编辑事务（`workpiece/pixel-tx.ts`，ctx.pixelHistory 门面）。`begin(layer,label)` 拍 before 句柄快照（零拷贝），`commit(finalize?, {checkpoint?})` 经 SwapPixelsOp 入栈（no-op 守卫：没写过像素不占 undo 步），`abort()` 还原，`dispose()` 弃快照不还原（层从未被改的取消路径）。
+_Avoid_: undo manager, snapshot manager, stroke recorder, 手撒 layer.snapshot()+ops.pixels 裸调（S2 退役）
 
 **EditMode**:
 独占编辑状态机的 SSoT（`src/edit-mode.js`）。**单轴**：`current()` 是一个 enum（CAPS 的 key），持久工具（brush/eraser/lasso/...）和 transient（transform/crop/adjust）平级。能力表 CAPS（canDraw/allowsColor/cursor/ctrlZ/transient）按 current() 查表 → 谓词。输入 gating、UI 显隐/cursor、ctrl-z 语义全从 current() 派生。叫 EditMode 不叫 Mode 因为 "mode" 在本仓重载（L.mode 混合 / liquify.mode / body.dataset.mode）。提案见 [[ai-docs/20260531-tool-mode-state-machine.md]]。

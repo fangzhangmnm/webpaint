@@ -162,3 +162,9 @@
   落盘时捎带快照；sidecarchange 只给「必须触发落盘」的 sidecar 成员——参考图丢了=数据丢失，
   面板位置丢了=可接受代价，两类语义不同）。
 - session.markEdited 残余正当用户 = topbar revert 回滚（内容变化）；blender-sync 处为冗余双标（无害）。
+
+### S6 ✅ v0.8.6：硬规则落盘 + 文档收口
+- CLAUDE.md 硬规则：「doc mutation 必须走 undo（workpiece 写面）；裸改 = 编译错 + dev throw」。
+- CONTEXT.md：新词条 Workpiece（写面聚合根）/ LayerTree / Sidecar（两个 reference 拆死）；
+  History entry→Microstep、PixelEdit→PixelTx 陈腐词条同步刷新。
+- ADR-0007 标「已实施」。**A 骑士（S1–S6）全部完成。**
