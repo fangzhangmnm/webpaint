@@ -179,8 +179,8 @@ describe("SwapSelectionOp · 往返 + 句柄释放", () => {
     const { SwapSelectionOp } = await import("../src/workpiece/operators.ts");
     const { PaintDoc } = await import("../src/doc.ts");
     const doc = new PaintDoc({ width: 64, height: 64 });
-    const w = new Workpiece(doc);
     const h = new UndoHistory({ maxQuotaBytes: 1 << 20, onChange: () => {}, onUnrecoverable: () => {} });
+    const w = new Workpiece(doc, h);
     return { doc, w, h, op: new SwapSelectionOp() };
   }
   it("do→undo→redo 往返：doc.selection 引用正确换手", async () => {

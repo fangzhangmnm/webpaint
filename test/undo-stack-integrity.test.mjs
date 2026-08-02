@@ -19,9 +19,9 @@ import { FloatingTransform } from "../src/floating-transform.ts";
 const _ctxs = [], _orphans = [];   // _orphans：病理测试里被 restoreTree 静默丢掉的层（所有权归测试）
 function mk() {
   const doc = new PaintDoc({ width: 512, height: 512 });
-  const w = new Workpiece(doc);
   let unrec = 0;
   const h = new UndoHistory({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => { unrec++; } });
+  const w = new Workpiece(doc, h);
   const ops = makeOperators({ applyDocTransformUi: () => {} });
   const ft = new FloatingTransform();
   ft.attach(w, h, ops);

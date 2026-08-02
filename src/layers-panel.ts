@@ -18,7 +18,7 @@
 // 面板外的 chrome（计数标签 / 加按钮禁用 / 删按钮禁用 / 滚到活动层）不在 mount 容器内，
 // 由 watch(docVersion) 副作用同步。
 //
-// 仍留 app.js 的协作件经 ctx 绑入：doc / board / history / workpiece / ops / setStatus（核心单例）
+// 仍留 app.js 的协作件经 ctx 绑入：doc / board / history / workpiece / setStatus（核心单例）
 // + _afterDocChange（lasso / history handler 也调）。
 
 import { createApp, defineComponent, reactive, computed, watch, nextTick, ref } from "../vendor/vue/vue.esm-browser.prod.js";
@@ -61,7 +61,7 @@ interface LayerRowData {
 interface LayerRowProps { layer: LayerLeafSnap; depth: number; isGroup: boolean; menuOpen: boolean; }
 
 let doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
-let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
+let workpiece: AppContext["workpiece"];
 // 留在 app.js、经 ctx 绑入的协作件（被非图层代码也调用）
 let _afterDocChange: AppContext["afterDocChange"];
 
@@ -137,56 +137,43 @@ export function renderLayersPanel() {
   bumpDoc();
 }
 
-// ---- 每层操作（逐字保留旧行为；经 ctx 绑入的 doc/history/board/setStatus）----
+// ---- 每层操作（逐字保留旧行为；v0.8.1 S1 起结构写走 workpiece.layers 门面，args 舞蹈已下沉）----
 function _addEmptyLayer() {
   if (countLeaves(doc.layers) >= doc.maxLayers) {
     setStatus(t("lp.st.maxLayers", { n: doc.maxLayers }));
     return;
   }
-  const prevActiveId = doc.activeLayer?.id ?? null;   // 持久化：undo 创建时回到创建前的活动层
-  const L = doc.addLayer();
-  if (!L) return;
-  const loc = doc.locateNode(L.id)!;                   // {parentId, index}：组内新建也精确复位
-  // 层已由 doc.addLayer 创建 —— AddLayerRecordOp 首跑只记录（undo 摘层时才捕 spec）。
-  history.run(workpiece, ops.addLayer, { layerId: L.id, index: loc.index, parentId: loc.parentId, prevActiveId, layerName: L.name });
+  if (!workpiece.layers.addLayer().ok) return;
   _afterDocChange();
 }
 function _deleteLayer(L: LayerNode | null) {
   if (!L) return;
-  // 组删除：连带 children，撤销底座 = snapshotTree（保叶活引用）。
-  // 允许删非空组（含删到 0 叶）—— 删空了就补一张空层保 ≥1 叶（不卡在「非空组删不掉」）。
+  // 组删除：连带 children（删到 0 叶自动补空层，component 内置）。
   if (L.isGroup) {
-    const before = doc.snapshotTree();
-    doc.removeLayer(L.id, true);
-    if (countLeaves(doc.layers) === 0) doc.addLayer();   // 清空 → 补空层
-    const after = doc.snapshotTree();
-    // 事务型 pre-applied：restoreTree(after) 首跑是幂等 no-op。
-    history.run(workpiece, ops.treeStructure, { before, after,
+    workpiece.layers.deleteGroup(L.id, {
       undoStatus: t("lp.st.restoredGroup", { name: L.name }), redoStatus: t("lp.st.deletedGroup", { name: L.name }) });
     _afterDocChange();
     return;
   }
-  // 操作型：RemoveLayerRecordOp.forward 自己捕快照 + 删（含 keep-one 守卫）。
-  const st = history.run(workpiece, ops.removeLayer, { layerId: L.id, layerName: L.name });
+  // 叶：RemoveLayerRecordOp 自捕快照 + 删（含 keep-one 守卫）。
+  const st = workpiece.layers.removeLayer(L.id, L.name);
   if (!st.ok) { setStatus(t("lp.st.keepOne")); return; }
   _afterDocChange();
 }
-// ---- 图层组 op caller（都走 snapshotTree 结构撤销；纯结构变、零像素拷贝）----
+// ---- 图层组 op caller（都走 workpiece.layers.treeTx 结构 tx 窗口；纯结构变、零像素拷贝）----
 // 新建**空**图层组（创建入口 = 「+」菜单；编组当前层已砍，靠空组 + 移入「某组」达成）。
 function _addEmptyGroup() {
-  const before = doc.snapshotTree();
-  const g = doc.addGroup();
-  history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.deletedGroup", { name: g.name }), redoStatus: t("lp.st.newGroup", { name: g.name }) });
+  const r = workpiece.layers.treeTx((d) => d.addGroup(), (g) => ({
+    undoStatus: t("lp.st.deletedGroup", { name: g.name }), redoStatus: t("lp.st.newGroup", { name: g.name }) }));
+  if (!r.ok) return;
   _afterDocChange();
-  setStatus(t("lp.st.newGroupColon", { name: g.name }));
+  setStatus(t("lp.st.newGroupColon", { name: r.value!.name }));
 }
 function _ungroupLayer(L: LayerNode | null) {
   if (!L || !L.isGroup) return;
-  const before = doc.snapshotTree();
-  if (!doc.ungroup(L.id).ok) return;
-  history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.regrouped"), redoStatus: t("lp.st.ungrouped") });
+  const r = workpiece.layers.treeTx((d) => d.ungroup(L.id).ok || null, () => ({
+    undoStatus: t("lp.st.regrouped"), redoStatus: t("lp.st.ungrouped") }));
+  if (!r.ok) return;
   _afterDocChange();
   setStatus(t("lp.st.ungroupedName", { name: L.name }));
 }
@@ -196,11 +183,9 @@ function _collapseGroup(L: LayerNode | null) {
   const kids = (L as LayerGroup).children;
   const merged = countLeaves(kids) > 0 ? renderNodesToBytes(kids as unknown[], doc.width, doc.height) : null;
   if (countLeaves(kids) > 0 && !merged) { setStatus(t("lp.st.glNeeded"), true); return; }
-  const before = doc.snapshotTree();
-  const nl = doc.collapseGroupToLayer(L.id, merged);
-  if (!nl) return;
-  history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.restoredGroup", { name: L.name }), redoStatus: t("lp.st.collapsedGroup", { name: L.name }) });
+  const r = workpiece.layers.treeTx((d) => d.collapseGroupToLayer(L.id, merged), () => ({
+    undoStatus: t("lp.st.restoredGroup", { name: L.name }), redoStatus: t("lp.st.collapsedGroup", { name: L.name }) }));
+  if (!r.ok) return;
   _afterDocChange();
   board.invalidateAll();
   setStatus(t("lp.st.collapsedGroup", { name: L.name }));
@@ -213,22 +198,23 @@ function _stampAllToNewLayer() {
   const merged = renderNodesToBytes(doc.layers as unknown[], doc.width, doc.height);
   if (!merged) { setStatus(t("lp.st.glNeeded"), true); return; }
   history.compound(workpiece, () => {
-    const before = doc.snapshotTree();
-    const nl = doc.stampAllToTopLayer(merged);
-    if (!nl) return;
-    // 其他根级**组**先藏（进 after 快照 → undo 恢复）；根级**叶**记下来走 layerProp
-    const rootLeavesToHide: LayerNode[] = [];
-    for (const n of doc.layers) {
-      if (n === (nl as unknown as LayerNode)) continue;
-      if (n.isGroup) { if (n.visible) n.visible = false; }
-      else if (n.visible) rootLeavesToHide.push(n);
-    }
     // compound 纪律：微步全传 checkpoint:false，compound 收口时统一 sealCheckpoint——
-    // 否则每个 run 各自封口，undo 会拆成 N 步（先只恢复一层可见性）而不是一次撤掉整个盖印。
-    history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
-      undoStatus: t("lp.st.unstamped"), redoStatus: t("lp.st.stamped") }, { checkpoint: false });
+    // 否则每步各自封口，undo 会拆成 N 步（先只恢复一层可见性）而不是一次撤掉整个盖印。
+    const rootLeavesToHide: LayerNode[] = [];
+    const r = workpiece.layers.treeTx((d) => {
+      const nl = d.stampAllToTopLayer(merged);
+      if (!nl) return null;
+      // 其他根级**组**先藏（进 after 快照 → undo 恢复）；根级**叶**记下来走 setLayerProp
+      for (const n of d.layers) {
+        if (n === (nl as unknown as LayerNode)) continue;
+        if (n.isGroup) { if (n.visible) n.visible = false; }
+        else if (n.visible) rootLeavesToHide.push(n);
+      }
+      return nl;
+    }, () => ({ undoStatus: t("lp.st.unstamped"), redoStatus: t("lp.st.stamped") }), { checkpoint: false });
+    if (!r.ok) return;
     for (const leaf of rootLeavesToHide) {
-      history.run(workpiece, ops.layerProp, { layerId: leaf.id, prop: "visible", value: false }, { checkpoint: false });
+      workpiece.layers.setLayerProp(leaf.id, "visible", false, { checkpoint: false });
     }
   });
   _afterDocChange();
@@ -237,19 +223,17 @@ function _stampAllToNewLayer() {
 }
 function _moveIntoGroup(L: LayerNode | null, groupId: number) {
   if (!L || groupId == null) return;
-  const before = doc.snapshotTree();
-  if (!doc.moveIntoGroup(L.id, groupId)) return;
-  history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.movedOut"), redoStatus: t("lp.st.movedIn") });
+  const r = workpiece.layers.treeTx((d) => d.moveIntoGroup(L.id, groupId) || null, () => ({
+    undoStatus: t("lp.st.movedOut"), redoStatus: t("lp.st.movedIn") }));
+  if (!r.ok) return;
   _afterDocChange();
   setStatus(t("lp.st.movedInColon", { name: L.name }));
 }
 function _moveOutOfGroup(L: LayerNode | null) {
   if (!L) return;
-  const before = doc.snapshotTree();
-  if (!doc.moveOutOfGroup(L.id)) return;
-  history.run(workpiece, ops.treeStructure, { before, after: doc.snapshotTree(),
-    undoStatus: t("lp.st.movedBack"), redoStatus: t("lp.st.movedOut") });
+  const r = workpiece.layers.treeTx((d) => d.moveOutOfGroup(L.id) || null, () => ({
+    undoStatus: t("lp.st.movedBack"), redoStatus: t("lp.st.movedOut") }));
+  if (!r.ok) return;
   _afterDocChange();
   setStatus(t("lp.st.movedOutColon", { name: L.name }));
 }
@@ -258,10 +242,7 @@ function _clearLayerPixels(L: LayerNode | null) {
   if (!L) return;
   // 清空像素是叶专属 op（template gates on !isGroup）；组无 bbox/snapshot → 就地 as Layer 视之。
   if ((L as Layer).bboxW <= 0 || (L as Layer).bboxH <= 0) { setStatus(t("lp.st.alreadyEmpty")); return; }
-  // 事务型 pre-applied：先清再 run，before 快照所有权交给 op（勿 dispose）。
-  const before = (L as Layer).snapshot();
-  (L as Layer).clearAll();
-  history.run(workpiece, ops.pixels, { layerId: L.id, _initialBefore: before });
+  if (!workpiece.layers.clearLayer(L.id).ok) return;
   _afterDocChange();
   board.invalidateAll();
   setStatus(t("lp.st.cleared", { name: L.name }));
@@ -276,7 +257,7 @@ const _MERGE_DOWN_STATUS: Record<string, string> = {
 function _mergeDownLayer(L: LayerNode | null) {
   if (!L) return;
   // 操作型：MergeDownOp.forward 自己合并；st.msg = doc.mergeDownLayer 的 reason。
-  const st = history.run(workpiece, ops.mergeDown, { layerId: L.id });   // 向下合并是叶专属 op（template gates on !isGroup）
+  const st = workpiece.layers.mergeDown(L.id);   // 向下合并是叶专属 op（template gates on !isGroup）
   if (!st.ok) {
     if (st.msg === "empty-active") { _deleteLayer(L); return; }   // active 空 → 当删 active
     setStatus(_MERGE_DOWN_STATUS[st.msg ?? ""] || t("lp.st.mergeFail"));
@@ -287,20 +268,16 @@ function _mergeDownLayer(L: LayerNode | null) {
 function _moveLayerDelta(L: LayerNode | null, delta: number) {
   if (!L) return;
   // 操作型：MoveLayerOp.forward 自己移（同级 ±delta；撤销靠反向 delta，树安全）。
-  const st = history.run(workpiece, ops.moveLayer, { layerId: L.id, delta });
+  const st = workpiece.layers.moveLayer(L.id, delta);
   if (!st.ok) return;
   _afterDocChange();
 }
-// v267 复制图层：模型 op 归 doc.duplicateLayer；这里包成 addLayer 记录（undo 摘新层时才捕 spec、
-//   redo 经 insertLayerAt 连像素恢复）。
+// v267 复制图层：模型 op 归 doc.duplicateLayer；记账（undo 摘新层时才捕 spec、
+//   redo 经 insertLayerAt 连像素恢复）已随 args 舞蹈下沉进 workpiece.layers.duplicateLayer。
 function _duplicateLayer(L: LayerNode | null) {
   if (!L) return;
   if (countLeaves(doc.layers) >= doc.maxLayers) { setStatus(t("lp.st.maxLayers", { n: doc.maxLayers })); return; }
-  const prevActiveId = doc.activeLayer?.id ?? null;
-  const r = doc.duplicateLayer(L.id);
-  if (!r.ok) return;
-  const newLayer = r.newLayer!;
-  history.run(workpiece, ops.addLayer, { layerId: newLayer.id, index: r.loc!.index, parentId: r.loc!.parentId, prevActiveId, layerName: newLayer.name });
+  if (!workpiece.layers.duplicateLayer(L.id).ok) return;
   _afterDocChange();
   setStatus(t("lp.st.duplicated", { name: L.name }));
 }
@@ -310,21 +287,21 @@ function _duplicateLayer(L: LayerNode | null) {
 // toggle/select 一律操作型：不 pre-apply，LayerPropOp.forward 自己写（透明度 slider 例外，见 opaCommit）。
 function _toggleVisible(L: LayerNode | null) {
   if (!L) return;
-  history.run(workpiece, ops.layerProp, { layerId: L.id, prop: "visible", value: !L.visible });
+  workpiece.layers.setLayerProp(L.id, "visible", !L.visible);
   renderLayersPanel();
   board.invalidateAll();
   board.requestRender();
 }
 function _setMode(L: LayerNode | null, newVal: string) {
   if (!L) return;
-  history.run(workpiece, ops.layerProp, { layerId: L.id, prop: "mode", value: newVal });
+  workpiece.layers.setLayerProp(L.id, "mode", newVal);
   renderLayersPanel();
   board.invalidateAll();
   board.requestRender();
 }
 function _toggleClipping(L: LayerNode | null) {
   if (!L) return;
-  history.run(workpiece, ops.layerProp, { layerId: L.id, prop: "clippingMask", value: !L.clippingMask });
+  workpiece.layers.setLayerProp(L.id, "clippingMask", !L.clippingMask);
   renderLayersPanel();
   board.invalidateAll();
   board.requestRender();
@@ -333,13 +310,13 @@ function _toggleClipping(L: LayerNode | null) {
 function _toggleLockAlpha(L: LayerNode | null) {
   if (!L) return;
   // 锁 α 是叶专属 toggle（template gates on !isGroup）；组无 lockAlpha → 就地 as Layer 视之。
-  history.run(workpiece, ops.layerProp, { layerId: L.id, prop: "lockAlpha", value: !(L as Layer).lockAlpha });
+  workpiece.layers.setLayerProp(L.id, "lockAlpha", !(L as Layer).lockAlpha);
   renderLayersPanel();
 }
 function _toggleReference(L: LayerNode | null) {
   if (!L) return;
   const isRefNow = doc.referenceLayerId === L.id;
-  history.run(workpiece, ops.referenceLayer, { value: isRefNow ? null : L.id });
+  workpiece.layers.setReferenceLayer(isRefNow ? null : L.id);
   renderLayersPanel();
 }
 function _commitRename(L: LayerNode | null, raw: string) {
@@ -348,7 +325,7 @@ function _commitRename(L: LayerNode | null, raw: string) {
   const v = (raw ?? "").trim();
   const newName = v || oldName;
   if (newName !== oldName) {
-    history.run(workpiece, ops.layerProp, { layerId: L.id, prop: "name", value: newName });
+    workpiece.layers.setLayerProp(L.id, "name", newName);
   }
   renderLayersPanel();
 }
@@ -462,7 +439,7 @@ const LayerRow = defineComponent({
       const lv = live();
       if (lv && opaOld !== lv.opacity) {
         // 事务型 pre-applied：拖动期间 _opacityLive 已实时写 opacity，提交时只补 undo 记录。
-        history.run(workpiece, ops.layerProp, { layerId: lv.id, prop: "opacity", value: lv.opacity, _initialOld: { v: opaOld } });
+        workpiece.layers.setLayerProp(lv.id, "opacity", lv.opacity, { initialOld: { v: opaOld } });
       }
       opaOld = null;
     }
@@ -797,7 +774,7 @@ function _canMergeDownActive(): boolean {
 let _layersDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
 
 export function initLayersPanel(ctx: AppContext) {
-  ({ doc, board, history, setStatus, workpiece, ops, editMode, afterDocChange: _afterDocChange } = ctx);
+  ({ doc, board, history, setStatus, workpiece, editMode, afterDocChange: _afterDocChange } = ctx);
 
   initExplodeSheet(ctx);   // 按颜色拆分 sheet（⋯ 菜单入口在 LayerRow 模板）
 

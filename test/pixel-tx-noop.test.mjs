@@ -13,8 +13,8 @@ import { PixelEdits } from "../src/workpiece/pixel-tx.ts";
 const _ctxs = [];
 function mk() {
   const doc = new PaintDoc({ width: 512, height: 512 });
-  const w = new Workpiece(doc);
   const h = new UndoHistory({ maxQuotaBytes: 1 << 30 });
+  const w = new Workpiece(doc, h);
   const ops = makeOperators({ applyDocTransformUi: () => {} });
   const edits = new PixelEdits({ doc, w, history: h, ops });
   _ctxs.push({ doc, h });

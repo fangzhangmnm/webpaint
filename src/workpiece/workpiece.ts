@@ -14,6 +14,8 @@
 
 import type { PaintDoc } from "../doc.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
+import type { UndoHistory } from "./undo-history.ts";
+import type { LayerTree } from "./layer-tree.ts";
 
 // ---- 浮层变换状态（S6：float 从 floating-transform 的 _ft 私有态收进 workpiece internals）----
 // 像素所有权：WorkpieceFloat.pixels 归当前持有者（internals 或某个 operator 的 undo 包）所有，
@@ -60,11 +62,30 @@ export class Workpiece {
   /** 运行时数据是否偏离上次持久化（autosave/保存编排读写；operator 提交自动置 true）。 */
   isDirty = false;
 
+  /** 构造期注入的 undo system（ADR-0007：capability 绑构造期；component 写 API 经它记账）。 */
+  readonly history: UndoHistory;
+
   private _commitVersion = 0;
   private _lockHolder: string | null = null;
+  private _layers: LayerTree | null = null;
 
-  constructor(doc: PaintDoc) {
+  constructor(doc: PaintDoc, history: UndoHistory) {
     INTERNALS.set(this, { doc, floats: null });
+    this.history = history;
+  }
+
+  /** 结构类写面（S1 第一个 component：层树增删/复制/移动/合并/属性/结构 tx）。
+   *  写 doc 结构的唯一合法门——app 层不再直接 doc.addLayer + 手工记账。 */
+  get layers(): LayerTree {
+    if (!this._layers) throw new Error("Workpiece: LayerTree 未装配（组合根须紧随构造 new LayerTree）");
+    return this._layers;
+  }
+  /** LayerTree 构造时自注册（单次；组合根协作面，外部勿调）。
+   *  值 import LayerTree 会成环（workpiece→layer-tree→operators→workpiece，operators 的
+   *  extends 在模块 eval 期就要 DocumentOperator）→ 组件由组合根构造、注入到此。 */
+  _attachLayers(c: LayerTree): void {
+    if (this._layers) throw new Error("Workpiece: LayerTree 重复装配");
+    this._layers = c;
   }
 
   /** 每次 operator 提交 +1。render-tree 重建 / 缓存失效的 key。 */

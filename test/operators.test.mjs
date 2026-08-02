@@ -12,9 +12,9 @@ import { appTilePool } from "../src/tiles/app-tile-pool.ts";
 const _ctxs = [], _orphans = [];   // _orphans：测试有意造成的「脱离 doc 的层」（所有权归测试）
 function mk() {
   const doc = new PaintDoc({ width: 512, height: 512 });
-  const w = new Workpiece(doc);
   let unrec = 0;
   const h = new UndoHistory({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => { unrec++; } });
+  const w = new Workpiece(doc, h);
   let _color = "#1b1b1b";   // fillColor op 的注入色钩子（真 app = state.color / fill-mode 回灌抑制）
   const ops = makeOperators({
     applyDocTransformUi: () => {},

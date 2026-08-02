@@ -32,7 +32,6 @@ class CostOp extends SetOp {
 
 function mk(opts = {}) {
   const doc = { v: 0 };
-  const w = new Workpiece(doc);
   const events = { unrecoverable: 0, changes: 0, applied: [] };
   const h = new UndoHistory({
     maxQuotaBytes: opts.maxQuotaBytes ?? 1 << 30,
@@ -40,6 +39,7 @@ function mk(opts = {}) {
     onChange: () => { events.changes++; },
     onApplied: (i) => { events.applied.push(`${i.dir}:${i.kind}`); },
   });
+  const w = new Workpiece(doc, h);
   return { doc, w, h, events, set: new SetOp() };
 }
 

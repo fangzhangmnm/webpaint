@@ -21,9 +21,9 @@ import { FloatingTransform } from "../src/floating-transform.ts";
 const _ctxs = [], _orphans = [];   // _orphans：测试有意造成的「脱离 doc 的层」（所有权归测试）
 function mk() {
   const doc = new PaintDoc({ width: 512, height: 512 });
-  const w = new Workpiece(doc);
   let unrec = 0;
   const h = new UndoHistory({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => { unrec++; } });
+  const w = new Workpiece(doc, h);
   const ops = makeOperators({ applyDocTransformUi: () => {} });
   const ft = new FloatingTransform();
   ft.attach(w, h, ops);

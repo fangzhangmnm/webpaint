@@ -44,7 +44,7 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 let doc: AppContext["doc"], board: AppContext["board"], input: AppContext["input"], editMode: AppContext["editMode"];
 let setStatus: AppContext["setStatus"];
 let renderLayersPanel: AppContext["renderLayersPanel"], setGalleryOpen: AppContext["setGalleryOpen"], uniqueNameFor: AppContext["uniqueNameFor"];
-let history: AppContext["history"], workpiece: AppContext["workpiece"], ops: AppContext["ops"];
+let history: AppContext["history"], workpiece: AppContext["workpiece"];
 
 // 图库「导入照片」会 set 此 flag=true，oraFileInput change 读后立即复位（语义：照片打底新 doc）。
 let _addImportAsNewDoc = false;
@@ -168,14 +168,18 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   // v0.7.41 先切工具再动 doc：setTool 可能触发 fill 的「切出=commit」整点——必须落在导入前的
   // 活动层上。此前顺序是先加层再切换，fill 的 pending 预览会被填到刚导入的层上（latent bug）。
   setTool("lasso");
-  // 新建空层（prevActiveId 先拍：undo 摘层时 active 回到导入前的层）
-  const prevActiveId = doc.activeLayer?.id ?? null;
-  const layer = doc.addLayer(file.name.replace(/\.[^.]+$/, ""));
-  if (!layer) {
+  // v0.8.1（S1）：新建层走 workpiece.layers 门面（创建即记账；prevActiveId/locateNode 舞蹈已下沉。
+  // AddLayerRecordOp 首跑只验证——像素在记账后填充合法，undo 摘层时才捕 spec、redo 连像素恢复）。
+  // v0.7.41（user：「导入和进 transform 只要一个 undo checkpoint」）：checkpoint:false 微步，
+  // 由紧随其后的 liftFloat（默认封口）把 [addLayer, liftFloat] 封成一个整点——一次 undo 整个导入消失。
+  const a = workpiece.layers.addLayer(file.name.replace(/\.[^.]+$/, ""), { checkpoint: false });
+  if (!a.ok) {
     (bitmap as ImageBitmap).close?.();
-    setStatus(t("mi.layerLimitImport", { max: doc.maxLayers }));
+    if (a.msg === "maxLayers") setStatus(t("mi.layerLimitImport", { max: doc.maxLayers }));
+    else reportError(new Error("[import] addLayer failed: " + a.msg), "error");
     return;
   }
+  const layer = a.layer;
   // bbox 中心：默认 doc 中心；opts.center（doc 坐标）可指定（Ctrl+V 传视口中心）
   const ccx = opts.center?.x ?? docW / 2;
   const ccy = opts.center?.y ?? docH / 2;
@@ -187,17 +191,9 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   const out = (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, mode) : px.data;
   layer.replaceFromBytes(out, bx, by, w, h);
   (bitmap as ImageBitmap).close?.();
-  // v0.7.35 修「import 破坏 undo」：像素先填、再落 AddLayerRecordOp（首跑只记录，同
-  // selection-ops copy 模式）。此前这里裸加层不记账 + 伪造 wp:histchange —— 后续 lift 却进栈，
-  // 栈引用了历史不知道的层：undo 跨树操作会静默销毁该层 / redo 找不到层 → 整栈被弃。
-  // 真 history.run 自会派 wp:histchange（app.ts onChange）驱动编辑门，无需手工标脏。
-  // v0.7.41（user：「导入和进 transform 只要一个 undo checkpoint」）：本步 checkpoint:false 微步，
-  // 由紧随其后的 liftFloat（默认封口）把 [addLayer, liftFloat] 封成一个整点——一次 undo 整个导入消失。
-  const loc = doc.locateNode(layer.id)!;
-  const st = history.run(workpiece, ops.addLayer,
-    { layerId: layer.id, index: loc.index, parentId: loc.parentId, prevActiveId, layerName: layer.name },
-    { checkpoint: false });
-  if (!st.ok) reportError(new Error("[import] addLayer record failed: " + st.msg), "error");
+  // v0.7.35 修「import 破坏 undo」：加层必记账（现由门面保证——记账失败连层都不留）。此前这里
+  // 裸加层不记账 + 伪造 wp:histchange —— 后续 lift 却进栈，栈引用了历史不知道的层：undo 跨树
+  // 操作会静默销毁该层 / redo 找不到层 → 整栈被弃。真 history.run 自会派 wp:histchange 驱动编辑门。
   renderLayersPanel();
   board.invalidateAll();
   board.requestRender();
@@ -235,7 +231,6 @@ export function initImportImage(ctx: AppContext) {
   uniqueNameFor = ctx.uniqueNameFor;
   history = ctx.history;
   workpiece = ctx.workpiece;
-  ops = ctx.ops;
 
   // 图层面板「导入图片」按钮 → file picker（强制叠层，复位 _addImportAsNewDoc）。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);

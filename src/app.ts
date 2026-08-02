@@ -23,6 +23,7 @@ import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } fro
 import { Workpiece } from "./workpiece/workpiece.ts";
 import { UndoHistory } from "./workpiece/undo-history.ts";
 import { makeOperators } from "./workpiece/operators.ts";
+import { LayerTree } from "./workpiece/layer-tree.ts";
 import { PixelEdits } from "./workpiece/pixel-tx.ts";
 import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
@@ -194,7 +195,7 @@ setDocCompositorBytes((nodes, w, h) => board.compositeNodesToBytes(nodes, w, h))
 
 
 // v0.4.5：workpiece 聚合根 + 配额制 UndoHistory（operator 是唯一写入口；见 workpiece/*.ts + test charter）。
-const workpiece = new Workpiece(doc);
+// v0.8.1（S1）：history 先建、构造注入 workpiece（ADR-0007 capability 绑构造期）。
 const UNDO_QUOTA_BYTES = 128 * 1024 * 1024;   // undo 配额（tile 压缩前记 0，压缩后计入；整 checkpoint 驱逐）
 const history = new UndoHistory({
   maxQuotaBytes: UNDO_QUOTA_BYTES,
@@ -215,6 +216,7 @@ const history = new UndoHistory({
     if (info.status) setStatus(info.status);
   },
 });
+const workpiece = new Workpiece(doc, history);
 const ops = makeOperators({
   // docTransform 的 UI 随行（viewport 复位 + 尺寸标签 + 透视配置还原；operator 本体不碰 DOM）。
   applyDocTransformUi: (viewport, persp) => {
@@ -227,6 +229,7 @@ const ops = makeOperators({
   // set 走 fill-mode 的回灌抑制入口（防 undo 触发 watch 再入栈）。
   fillColor: { get: () => state.color, set: (hex) => applyFillColorFromHistory(hex) },
 });
+new LayerTree({ w: workpiece, doc, history, ops });   // 自注册 workpiece.layers（结构类写面，S1）
 const _afterDocChange = () => { renderLayersPanel(); board.invalidateAll(); board.requestRender(); };
 const layerSpecFrom = (L: unknown) => doc.layerSpec(L as Parameters<typeof doc.layerSpec>[0]);
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。

@@ -112,7 +112,7 @@ export function openExplodeSheet(L: Layer | null) {
 
 function _commit() {
   if (!_state || _state.clusters.length < 2) return;
-  const { doc, history, workpiece, ops, board, setStatus, afterDocChange } = ctx;
+  const { doc, workpiece, board, setStatus, afterDocChange } = ctx;
   const L = doc.findLayer(_state.layerId);
   if (!L || L.isGroup) { _close(); return; }
   // 全分辨率硬分配（预览是采样估计；这里才是定案）。空簇丢弃 → 实际层数可能 < k。
@@ -131,19 +131,17 @@ function _commit() {
   }
   if (kept.length < 2) { setStatus(t("ex.empty")); _close(); return; }
   kept.reverse();   // clusters 按占比降序 → 反转后大簇在 parts[0] = 同级最底
-  const before = doc.snapshotTree();
-  const out = doc.explodeLayerToLayers(L.id, kept, _state.rect);
-  if (!out) { setStatus(t("ex.tooMany", { n: doc.maxLayers })); _close(); return; }
-  const after = doc.snapshotTree();
-  history.run(workpiece, ops.treeStructure, {
-    before, after,
+  // v0.8.1（S1）：结构变更走 workpiece.layers.treeTx（snapshotTree 舞蹈下沉；失败=层数超限）。
+  const rect = _state.rect;
+  const r = workpiece.layers.treeTx((d) => d.explodeLayerToLayers(L.id, kept, rect), (out) => ({
     undoStatus: t("lp.st.unexploded", { name: L.name }),
     redoStatus: t("lp.st.exploded", { name: L.name, k: out.length }),
-  });
+  }));
+  if (!r.ok) { setStatus(t("ex.tooMany", { n: doc.maxLayers })); _close(); return; }
   _close();
   afterDocChange();
   board.invalidateAll();
-  setStatus(t("lp.st.exploded", { name: L.name, k: out.length }));
+  setStatus(t("lp.st.exploded", { name: L.name, k: r.value!.length }));
 }
 
 export function initExplodeSheet(c: AppContext) {

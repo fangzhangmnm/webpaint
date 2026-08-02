@@ -58,33 +58,34 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   if (src.isGroup) { setStatus(t("se.selectLayerFirstGroup")); return; }
   // move 模式：挖洞前拍源层 before（归属转给 ops.pixels）；copy 模式不碰源层，不拍。
   const beforeActive: LayerSnap | null = move ? src.snapshot() : null;
-  const newL = doc.addLayer(move ? "移到新层" : "复制层");
-  if (!newL) { disposeLayerSnap(beforeActive); return; }
-  // 把 active ∩ selection 的像素 copy 进 newL（v0.6.41 全字节：tiles 直读 → alpha×mask → 直落 tile）
-  const region = src.getImageData(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
-  const selMask = sel.materializeMaskRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
-  for (let i = 0; i < sel.bboxW * sel.bboxH; i++) region.data[i * 4 + 3] = Math.round(region.data[i * 4 + 3] * selMask[i] / 255);
-  newL.replaceFromBytes(region.data, sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
-  if (move) {
-    // 从源层挖洞（dst-out 选区形状：alpha 衰减、RGB 保留）
-    src.editRegionBytes(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (buf) => {
-      for (let i = 0; i < sel.bboxW * sel.bboxH; i++) {
-        if (selMask[i]) buf[i * 4 + 3] = Math.round(buf[i * 4 + 3] * (255 - selMask[i]) / 255);
-      }
-    });
-  }
-  const loc = doc.locateNode(newL.id)!;   // {parentId, index}：组内也精确（undo 摘层 / redo insertLayerAt 用）
+  // v0.8.1（S1）：加层走 workpiece.layers 门面（创建即记账，prevActiveId 自动拍 = 当前 active = src）。
+  // compound 把 [addLayer, pixels] 封成一个整点：undo 先还原源层像素、再摘掉新层 + active 回源层。
+  let pixelsHanded = false;   // beforeActive 所有权是否已移交 ops.pixels（其失败路径自 dispose）
   const r = history.compound(workpiece, () => {
-    const st1 = history.run(workpiece, ops.addLayer,
-      { layerId: newL.id, index: loc.index, parentId: loc.parentId, prevActiveId: src.id, layerName: newL.name },
-      { checkpoint: false });
-    if (!st1.ok) throw new Error(st1.msg);
+    const a = workpiece.layers.addLayer(move ? "移到新层" : "复制层", { checkpoint: false });
+    if (!a.ok) throw new Error(a.msg);
+    const newL = a.layer;
+    // 把 active ∩ selection 的像素 copy 进 newL（v0.6.41 全字节：tiles 直读 → alpha×mask → 直落 tile）
+    const region = src.getImageData(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
+    const selMask = sel.materializeMaskRegion(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
+    for (let i = 0; i < sel.bboxW * sel.bboxH; i++) region.data[i * 4 + 3] = Math.round(region.data[i * 4 + 3] * selMask[i] / 255);
+    newL.replaceFromBytes(region.data, sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
     if (move) {
+      // 从源层挖洞（dst-out 选区形状：alpha 衰减、RGB 保留）
+      src.editRegionBytes(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (buf) => {
+        for (let i = 0; i < sel.bboxW * sel.bboxH; i++) {
+          if (selMask[i]) buf[i * 4 + 3] = Math.round(buf[i * 4 + 3] * (255 - selMask[i]) / 255);
+        }
+      });
+      pixelsHanded = true;
       const st2 = history.run(workpiece, ops.pixels, { layerId: src.id, _initialBefore: beforeActive }, { checkpoint: false });
       if (!st2.ok) throw new Error(st2.msg);
     }
   });
-  if (!r.ok) { setStatus(errMsg(r.msg), true); _afterDocChange(); return; }
+  if (!r.ok) {
+    if (move && !pixelsHanded) disposeLayerSnap(beforeActive);   // 没走到移交点 → 快照归本函数释放
+    setStatus(errMsg(r.msg), true); _afterDocChange(); return;
+  }
   _afterDocChange();
   setStatus(move ? t("se.movedToNewLayer") : t("se.copiedToNewLayer"));
 }

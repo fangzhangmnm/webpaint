@@ -238,9 +238,10 @@ export class AddLayerRecordOp extends DocumentOperator<AddLayerArgs, LayerSpecSh
 
 // ---- ② 删除叶层（操作型：forward 自己捕快照+删；组删除走 TreeStructureOp）----
 interface RemovedRecord { spec: LayerSpecShape; index: number; parentId: number | null; prevActiveId: number | null }
-export class RemoveLayerRecordOp extends DocumentOperator<{ layerId: number; layerName: string; allowEmpty?: boolean }, RemovedRecord | undefined> {
+export interface RemoveLayerArgs { layerId: number; layerName: string; allowEmpty?: boolean }
+export class RemoveLayerRecordOp extends DocumentOperator<RemoveLayerArgs, RemovedRecord | undefined> {
   readonly kind = "removeLayer";
-  forward(w: Workpiece, args: { layerId: number; layerName: string; allowEmpty?: boolean }, _data: RemovedRecord | undefined): OpResult<RemovedRecord | undefined> {
+  forward(w: Workpiece, args: RemoveLayerArgs, _data: RemovedRecord | undefined): OpResult<RemovedRecord | undefined> {
     const doc = this.mut(w).doc;
     const L = leafById(doc, args.layerId);
     const loc = doc.locateNode(args.layerId);
@@ -254,20 +255,20 @@ export class RemoveLayerRecordOp extends DocumentOperator<{ layerId: number; lay
     L.pixels.dispose();                             // spec 已持句柄副本，本体退场
     return { ok: true, replaced: { spec, index: loc.index, parentId: loc.parentId, prevActiveId } };
   }
-  backward(w: Workpiece, args: { layerId: number; layerName: string }, data: RemovedRecord): OpResult<RemovedRecord | undefined> {
+  backward(w: Workpiece, args: RemoveLayerArgs, data: RemovedRecord): OpResult<RemovedRecord | undefined> {
     const doc = this.mut(w).doc;
     if (!doc.insertLayerAt(data.index, data.spec, data.parentId)) return { ok: false, msg: "insert failed" };
     disposeLayerSpec(data.spec);
     doc.setActiveById(args.layerId);                // v125：恢复的层设为 active + toast
     return { ok: true, replaced: undefined };
   }
-  override estimateQuotaBytes(_a: { layerId: number; layerName: string }, data: RemovedRecord | undefined): number {
+  override estimateQuotaBytes(_a: RemoveLayerArgs, data: RemovedRecord | undefined): number {
     return 512 + estimateSnapBytes(data?.spec.snap);
   }
-  override disposeData(_a: { layerId: number; layerName: string }, data: RemovedRecord | undefined): void {
+  override disposeData(_a: RemoveLayerArgs, data: RemovedRecord | undefined): void {
     if (data) disposeLayerSpec(data.spec);
   }
-  override statusFor(dir: "do" | "undo" | "redo", args: { layerId: number; layerName: string }): string | undefined {
+  override statusFor(dir: "do" | "undo" | "redo", args: RemoveLayerArgs): string | undefined {
     if (dir === "undo") return t("se.restoredLayer", { name: args.layerName });
     if (dir === "redo") return t("se.deletedLayer", { name: args.layerName });
     return undefined;
