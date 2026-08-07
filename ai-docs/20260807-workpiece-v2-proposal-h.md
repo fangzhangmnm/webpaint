@@ -16,29 +16,37 @@ interface WorkpieceComponent {
 }
 
 interface UndoStep {
-  readonly id: number;                            // stateVersion 的锚
+  readonly id: number;                            // stateVersion 的锚（栈单调分配，永不复用）
   entries: { c: WorkpieceComponent; data: RecordData }[];
   label?: string;
   hint?: (dir: "undo" | "redo") => void;          // 非权威附注（ADR-0008 §7 三纪律；只捕小值）
 }
+type UndoStepInput = Omit<UndoStep, "id">;        // T1 实现：id 由栈分配（唯一 id 权威），push 收 input
 
 class UndoStack {
   constructor(opts: { maxQuotaBytes: number;
                       onChange?: () => void;                     // 栈形变（按钮态/编辑门）
                       onApplied?: (step: UndoStep, dir: "undo" | "redo") => void });
-  push(step: UndoStep): void;                     // 由 WriteToken.commit 调，app 不直调
+  push(step: UndoStepInput): void;                // 由 WriteToken.commit 调，app 不直调
   undo(): boolean;  redo(): boolean;
   canUndo(): boolean;  canRedo(): boolean;
-  cursorStepId(): number;                         // = stateVersion（栈底 0）
+  cursorStepId(): number;                         // = stateVersion（栈底 = baseId：初始 0，驱逐后 = 末驱逐步 id）
+  depth(): number;                                // 栈内步数（驱逐观测/调试；T1 补）
   quotaUsage(): number;  clear(): void;
+  _bindWorkpiece(hooks): void;                    // Workpiece 独占协作面（beforeApply 令牌门 / afterApply 计数+信号）；app 勿碰
 }
 ```
 
 ## workpiece.ts（app-agnostic 基类）
 
 ```ts
+// T1 实现补的 collector 面（token 协作）：注册进 workpiece 的组件除 WorkpieceComponent 三方法外
+// 还须 sealRecord()——commit/cancel 时打包并清空本 token 的 collector（null = 本 token 没被摸）。
+interface CollectorComponent extends WorkpieceComponent { sealRecord(): RecordData | null }
+
 class Workpiece {
-  constructor(opts?: { undo?: UndoStack });       // 不传 = 无 undo（写照走令牌，record 即弃）
+  constructor(opts?: { undo?: UndoStack;          // 不传 = 无 undo（写照走令牌，record 即弃，touched 即 silentDirty）
+                       onTokenLeak?: (label?: string) => void });   // FR 兜底报警（T1 补；默认 console.error）
   // ── 令牌（唯一写门）──
   begin(label?: string): WriteToken;              // 已有开着的 → throw（泄漏查获点；FR 兜底）
   // ── meta ──
@@ -48,8 +56,9 @@ class Workpiece {
   markSaved(): void;                              // 持久层存盘后调：记 lastSaved + 清 silentDirty
   isDirty(): boolean;                             // = stateVersion !== lastSaved || silentDirty
   // ── 组件注册（子类 ctor 调）──
-  protected register(c: WorkpieceComponent, policy: { undo: "recorded" | "silent" }): void;
+  protected register(c: CollectorComponent, policy: { undo: "recorded" | "silent" }): void;
   onChange(cb: (e: { kind: string; recorded: boolean }) => void): () => void;   // 统一变更信号（histchange/sidecarchange 后继）
+  _componentWrite(c: CollectorComponent): void;   // 组件写路径守门（写 substrate 前必调；无令牌/未注册 → throw）；app 勿碰
 }
 
 class WriteToken {

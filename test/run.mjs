@@ -30,6 +30,7 @@ import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";
 import "./background-sync-jobs.test.mjs";
 import "./undo-history.test.mjs";
+import "./undo-stack.test.mjs";             // T1 workpiece v2（ADR-0008）：令牌/collector/自反 swap/配额/双计数（旧 undo-history 在 T5 拆除）
 import "./operators.test.mjs";
 import "./pixel-tx-noop.test.mjs";
 import "./float-ops.test.mjs";     // S6：float 入 workpiece（lift/transform/reject/accept 整链 + 所有权/驱逐）
