@@ -1,0 +1,8 @@
+import type { CheckpointRecord } from "./checkpoint-policy.ts";
+export declare function getThumb(key: string): Promise<unknown>;
+export declare function setThumb(key: string, value: unknown): Promise<void>;
+export declare function deleteThumb(key: string): Promise<void>;
+export declare function clearThumbs(): Promise<number>;
+export declare function getCheckpoint(key: string): Promise<CheckpointRecord | null>;
+export declare function putCheckpoint(key: string, rec: CheckpointRecord): Promise<void>;
+export declare function deleteCheckpoint(key: string): Promise<void>;

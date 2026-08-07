@@ -18,6 +18,7 @@ export { createLocalCache } from "./local-cache.ts";
 
 // provider（云端低层 adapter）：OneDrive（浏览器）/ graph 适配器（可 mock 验）。
 export { createOneDriveProvider } from "./providers/index.ts";
+export type { AuthState } from "./providers/auth.ts";   // .h 生成需要可命名（TS4023）；公开面缺了就补这里
 export { graphToCloudProvider } from "./onedrive-provider.ts";
 //   注：迁移（migration）不暴露——createStore 内部自跑（数据搬迁是同步细节，app 不该看见）。
 //   brush-rack 走 store.collection、gallery 缩略图/文件夹走 file.getPeek / store.list——不再 deep import

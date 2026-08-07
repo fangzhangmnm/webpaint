@@ -25,7 +25,9 @@ Procreate 级绘画 PWA + **家族 sync-store 引擎的开发面**（shared-lib-
 
 每次push dev 走这 4 步（**成对 commit**：先源、后 bundle）：
 1. **bump 版本**：`./bump.sh vN-YYYY-MM-DD`（N 单调+1，日期=发版日；唯一版本号在 `src/version.ts`，esbuild inline 进 bundle、SW/index.html 都读它）。
-2. **commit 源**：`git add src test && git commit -m "vN: <一句话>"`。
+2. **commit 源**：先 `bash scripts/gen-api.sh` 重打 `api/`（.h 树，供人类参考——重构交付/大功能必打，
+   小修看着办，user 要求时必打）；`git add src test api && git commit -m "vN: <一句话>"`。**重构策划**另须
+   附「现状 .h + 提案 .h」两份（提案落 ai-docs/，形状改动要回写提案——它是 pin 住的契约）。
 3. **构建**：`bash scripts/build.sh`——前置 `tsc --noEmit` 门（不过不准发）；esbuild bundle → `dist/webpaint-<hash>.mjs`（content-hash 命名）；`sed` 改 `index.html` 指新 hash；清旧 hash bundle。**别手改 dist/ 或 index.html 的 hash**。
 4. **commit bundle + push**：`git add dist index.html && git commit -m "vN: dev bundle (webpaint-<hash>) — <一句话> smoke" && git push origin main`。
 

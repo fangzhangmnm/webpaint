@@ -1,0 +1,57 @@
+import { RenderTreeGL } from "./render-tree-gl.ts";
+import type { FloatInput, OverlayInput, SurrogateInput } from "./render-tree-gl.ts";
+import type { LayerPixels } from "../tiles/tile-layer.ts";
+import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
+export interface GLDoc {
+    layers: DocNode[];
+    width: number;
+    height: number;
+}
+export type { DocLeaf as GLLeaf } from "./gl-doc-bridge.ts";
+export declare class GLBoard {
+    readonly canvas: HTMLCanvasElement;
+    private _glctx;
+    private _tree;
+    constructor(canvas: HTMLCanvasElement, maxSlices: number);
+    get memory(): {
+        usedTiles: number;
+        capacity: number;
+        usedBytes: number;
+        committedBytes: number;
+        quotaBytes: number;
+    };
+    get stats(): {
+        passes: number;
+        floatPasses: number;
+    };
+    get fboPoolStats(): {
+        count: number;
+        bytes: number;
+    };
+    get frameStats(): {
+        segBuilds: number;
+        segHits: number;
+        cachingDegraded: boolean;
+    };
+    markContentDirty(): void;
+    commitBrushStroke(leafId: number, pixels: LayerPixels, ov: OverlayInput, docW: number, docH: number, apply: (px: Uint8ClampedArray, x: number, y: number, w: number, h: number) => {
+        tx: number;
+        ty: number;
+    }[]): boolean;
+    rasterizeStampsToBytes(stamps: Parameters<RenderTreeGL["rasterizeStampsToBytes"]>[0], shape: Parameters<RenderTreeGL["rasterizeStampsToBytes"]>[1], bx: number, by: number, bw: number, bh: number): Uint8ClampedArray | null;
+    compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement | null;
+    compositeToBytes(nodes: DocNode[], docW: number, docH: number): {
+        data: Uint8ClampedArray;
+        w: number;
+        h: number;
+    } | null;
+    pickColor(doc: GLDoc, docBg: string | null, x: number, y: number, surrogate?: SurrogateInput | null, overlay?: OverlayInput | null): [number, number, number, number] | null;
+    warpToBytes(src: Parameters<RenderTreeGL["warpToBytes"]>[0], srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): {
+        data: Uint8ClampedArray;
+        w: number;
+        h: number;
+        dstX: number;
+        dstY: number;
+    } | null;
+    render(doc: GLDoc, affine6: number[], canvasW: number, canvasH: number, scale: number, voidColor: string, docBg: string | null, floats?: FloatInput[], stampOverlay?: OverlayInput | null, liveSyncLeaf?: DocLeaf | null, surrogate?: SurrogateInput | null): void;
+}

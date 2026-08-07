@@ -55,7 +55,7 @@ let activeAccount: Account = null;
 let initPromise: Promise<AuthState> | null = null;
 
 // initAuth / getAuthState 返回的状态。
-interface AuthState {
+export interface AuthState {
   signedIn: boolean;
   account: Account;
   notConfigured?: boolean;

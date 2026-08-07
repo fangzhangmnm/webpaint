@@ -61,7 +61,7 @@ export interface FloatView {
   mode: TransformModeKind | null;
 }
 
-interface Hit {
+export interface Hit {
   kind: "translate" | "corner" | "edge" | "rotate" | "basisRotate";
   row?: number;
   col?: number;

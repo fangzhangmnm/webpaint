@@ -1,0 +1,15 @@
+import { S, type Lang } from "./strings.ts";
+export type { Lang } from "./strings.ts";
+export type Key = keyof typeof S;
+export declare const LANGS: Lang[];
+export declare const LANG_NAME: Record<Lang, string>;
+export declare function langDisplayName(l: Lang): string;
+export declare function lang(): Lang;
+export declare function t(key: Key, params?: Record<string, string | number>): string;
+export declare function tLatin(key: Key, params?: Record<string, string | number>): string;
+export declare function applyHtmlLang(): void;
+export declare function setLang(l: Lang): Promise<void>;
+export declare function reconcileLangFromPrefs(): void;
+export declare function setLocalizedText(el: HTMLElement, s: string): void;
+export declare function localizeDom(root?: ParentNode): void;
+export declare function initI18n(): void;
