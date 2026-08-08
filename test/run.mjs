@@ -33,6 +33,7 @@ import "./undo-history.test.mjs";
 import "./undo-stack.test.mjs";             // T1 workpiece v2（ADR-0008）：令牌/collector/自反 swap/配额/双计数（旧 undo-history 在 T5 拆除）
 import "./layer-tiles.test.mjs";            // T2 像素组件：写时扣押（Krita memento）/verbs/computed 白名单+双捕获/no-op 守卫（pixel-tx-noop 后继）
 import "./legacy-bridge.test.mjs";          // T2 唯一栈桥：旧 operator 骑 v2 栈（run/compound/seal 语义 parity + tiles 混合原子性）
+import "./layer-tree2.test.mjs";            // T3a 层树 json 组件：换根收集/tileset 引用计数（删组泄漏回归锚）/verbs/setActive 不记账
 import "./operators.test.mjs";
 import "./float-ops.test.mjs";     // S6：float 入 workpiece（lift/transform/reject/accept 整链 + 所有权/驱逐）
 import "./undo-stack-integrity.test.mjs";   // v0.7.35 栈引用完整性（import 越狱病理钉子 + 合规形状 + v0.7.41 单整点）

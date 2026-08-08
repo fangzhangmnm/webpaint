@@ -61,6 +61,59 @@ export class LayerTiles implements CollectorComponent {
   /** legacy-bridge 协作面：旧 operator 应用期间挂起收集（其 undo 自带快照，收了=双记账）。 */
   _suspendCollect(on: boolean): void { this._suspend += on ? 1 : -1; }
 
+  // ── tileset 注册表（T3，ADR-0008 §3）：id → 引用计数 tileset ──
+  // 持有者 = LayerTree 的每个活根（substrate/collector/record 各按 json 里的 pixelsRef 出现 +1）。
+  // 归零 → lp.dispose() 还池（TreeStructureOp 注释在案的 bounded 泄漏在 v2 下由这套算术消灭：
+  // 删层的 tileset 被 undo record 的旧根持有，record 驱逐才真正释放）。
+  private _tilesets = new Map<number, { lp: LayerPixels; refs: number }>();
+  private _nextTilesetId = 1;
+
+  /** 新 tileset 入册，refs=1 归调用方（json 收养 +1 后调用方 release——净移交）。 */
+  createTileset(lp: LayerPixels): number {
+    const id = this._nextTilesetId++;
+    this._tilesets.set(id, { lp, refs: 1 });
+    return id;
+  }
+  /** 零拷贝复制（句柄共享快照）：duplicateLayer 用。refs=1 归调用方。 */
+  duplicateTileset(id: number): number | null {
+    const e = this._tilesets.get(id);
+    if (!e) return null;
+    const np = new LayerPixels(e.lp.docW, e.lp.docH);
+    this._suspendCollect(true);
+    try {
+      const snap = e.lp.snapshot();
+      np.restore(snap);
+      for (const [, h] of snap.tiles) h.release();   // snapshot 的持有已由 restore 的 acquire 接棒
+    } finally {
+      this._suspendCollect(false);
+    }
+    return this.createTileset(np);
+  }
+  acquireTileset(id: number): void {
+    const e = this._tilesets.get(id);
+    if (!e) throw new Error(`LayerTiles: acquire 不存在的 tileset（${id}）`);
+    e.refs++;
+  }
+  releaseTileset(id: number): void {
+    const e = this._tilesets.get(id);
+    if (!e) throw new Error(`LayerTiles: release 不存在的 tileset（${id}——双释放?）`);
+    if (--e.refs <= 0) {
+      this._tilesets.delete(id);
+      e.lp.dispose();
+    }
+  }
+  tilesetPixels(id: number): LayerPixels | null { return this._tilesets.get(id)?.lp ?? null; }
+  /** computed 变换换实例（tileset id 稳定，内容换血；旧实例还池）。 */
+  swapTilesetPixels(id: number, np: LayerPixels): void {
+    const e = this._tilesets.get(id);
+    if (!e) throw new Error(`LayerTiles: swap 不存在的 tileset（${id}）`);
+    e.lp.dispose();
+    e.lp = np;
+  }
+  /** 注册表观测（测试/泄漏审计）。 */
+  tilesetCount(): number { return this._tilesets.size; }
+  tilesetRefs(id: number): number { return this._tilesets.get(id)?.refs ?? 0; }
+
   // ── 读 · 档1 render 端口（零拷贝身份制）──
   version(layerId: number): number { return this._host.getPixels(layerId)?.contentVersion ?? -1; }
   *tiles(layerId: number): IterableIterator<TileEntry> {

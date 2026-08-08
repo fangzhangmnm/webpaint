@@ -39,6 +39,20 @@ export declare class LayerTiles implements CollectorComponent {
     constructor(wp: Workpiece, host: TilesHost);
     /** legacy-bridge 协作面：旧 operator 应用期间挂起收集（其 undo 自带快照，收了=双记账）。 */
     _suspendCollect(on: boolean): void;
+    private _tilesets;
+    private _nextTilesetId;
+    /** 新 tileset 入册，refs=1 归调用方（json 收养 +1 后调用方 release——净移交）。 */
+    createTileset(lp: LayerPixels): number;
+    /** 零拷贝复制（句柄共享快照）：duplicateLayer 用。refs=1 归调用方。 */
+    duplicateTileset(id: number): number | null;
+    acquireTileset(id: number): void;
+    releaseTileset(id: number): void;
+    tilesetPixels(id: number): LayerPixels | null;
+    /** computed 变换换实例（tileset id 稳定，内容换血；旧实例还池）。 */
+    swapTilesetPixels(id: number, np: LayerPixels): void;
+    /** 注册表观测（测试/泄漏审计）。 */
+    tilesetCount(): number;
+    tilesetRefs(id: number): number;
     version(layerId: number): number;
     tiles(layerId: number): IterableIterator<TileEntry>;
     contentBounds(layerId: number, tight?: boolean): Rect | null;

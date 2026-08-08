@@ -106,12 +106,20 @@ class LayerTree implements WorkpieceComponent {
   explodeGroupInPlace(id): boolean;               // 解组：children 提到原位
   moveLayer(id, delta): boolean;
   moveIntoGroup(id, gid) / moveOutOfGroup(id): boolean;
-  mergeDown(id, mergedBytes): boolean;            // 合成字节外部烤好递入（零 GL）
+  mergeDown(id, merged: { bytes; rect; resultClipping }): boolean;   // 合成字节外部烤好递入（零 GL；
+                                                  // under 归一化 opacity=1/source-over/resultClipping——T3a 定形）
   setLayerProp(id, prop, value): boolean;
   setTreeProp(key: "referenceLayerId" | "backgroundColor", value): void;   // 元规则相同才合并动词
   setActive(id): boolean;                         // 唯一不记账 verb（焦点=导航，ADR-0008 §4）
 }
-```
+// T3a 实现注：叶/组判别 = "children" in node（json 纯数据无 isGroup 标志）；结构共享实现为整树浅深拷
+//（≤64 叶 KB 级，路径级共享是后续优化，契约不变）；recorded 步的根快照含 activeId → undo 天然还原焦点。
+// ⚠ 缺口（cutover 片补 + 回写本文件）：提案没有「编组」verb（v1 走 TreeStructureOp）——需补 groupLayers 类动词。
+
+// LayerTiles 增设 tileset 注册表（T3a；所有权算术的账房）：
+//   createTileset(lp)→id（refs=1 归调用方，json 收养后 release=净移交）/ duplicateTileset(id)（句柄共享零拷贝）
+//   acquireTileset / releaseTileset（归零 → lp.dispose 还池）/ tilesetPixels(id) / swapTilesetPixels(id, np)
+//   持有者 = LayerTree 每个活根（substrate/collector/record）按 leaf.pixelsRef 各 +1；swap 交换根计数不动。
 
 ## layer-tiles.ts（tile 扁平仓；tileset 引用计数）
 
