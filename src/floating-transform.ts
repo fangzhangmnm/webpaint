@@ -98,7 +98,7 @@ interface TransformMode {
 const MODE_CLASS: Record<TransformModeKind, TransformClass> = { uniform: "similarity", free: "affine", distort: "projective" };
 const CLASS_LEVEL: Record<TransformClass, number> = { similarity: 1, affine: 2, projective: 3 };
 
-// live 网格（拖动热路径的本地副本；SSoT = workpiece.readFloatState().transform）。
+// live 网格（拖动热路径的本地副本；SSoT = floatLayer.view().transform）。
 interface LiveMeta {
   gizmoFrame: FloatFrame;
   mesh: Mesh;
@@ -286,7 +286,7 @@ export class FloatingTransform {
 
   // -------- 模式切换 --------
   // mode = null（"selected"：只显轮廓、拖内 = 平移）或 "free" | "uniform" | "distort"。
-  // 投影改网格 → metadata 整点入栈（FloatTransformOp）。
+  // 投影改网格 → metadata 整点入栈（FloatLayerComponent.setTransform）。
   // 模式切换 = 记账制（v0.6.34，取代 projectOnEnter 投影）：目标模式的类 ≥ 已用过的最高类才允许切，
   //   不悄悄改 mesh（投影 = 预览外的突变，user 否决）。降不回去的模式由 UI 置灰（canSetMode）。
   setMode(mode: TransformModeKind | null) {
@@ -873,7 +873,7 @@ function solveAffineEdge(mesh: Mesh, meshSnap: Mesh, drag: Drag, edge: string, x
 }
 
 // ============ 几何工具 ============
-// （unionRects/bboxToQuad 已随 lift 下沉进 LiftFloatOp——初始 gizmo/mesh 归 operator 产。）
+// （unionRects/bboxToQuad 已随 lift 内联进 lift() 编排——初始 gizmo/mesh 在令牌内产。）
 function sub(a: Point, b: Point): Point { return { x: a.x - b.x, y: a.y - b.y }; }
 function mid(a: Point, b: Point): Point { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
 function norm(v: Point): Point {

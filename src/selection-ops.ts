@@ -85,7 +85,7 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
 }
 
 // （_makeFullLayerSelection 已删 v0.4.7：唯一调用方 import-image 改走 lift 的 fallbackFullLayer——
-//   隐式全选在 LiftFloatOp 内部构造，不再手写 doc.selection。）
+//   隐式全选在 lift 编排内部构造，不再手写 doc.selection。）
 
 export function initSelectionOps(ctx: AppContext) {
   doc = ctx.doc;

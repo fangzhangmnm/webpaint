@@ -332,7 +332,7 @@ export class LassoEngine {
     this.onChange();
   }
 
-  // 用 doc.selection 作 mask source，把对应 layer 像素 lift 到 floating（LiftFloatOp 整点：
+  // 用 doc.selection 作 mask source，把对应 layer 像素 lift 到 floating（lift 令牌整点：
   // 清选区 + 建 float tiles + 挖洞，可撤销）。完成后进 floating 状态（transform 子状态）。
   // opts.cut: true(默认) = 挖空源层（Ctrl+T 变换）；false = 不挖洞，源层保留（Ctrl+D 复制为浮层）
   // opts.fallbackFullLayer: 没选区时用整层做隐式全选（v218；operator 内部构造，不写 doc.selection）
