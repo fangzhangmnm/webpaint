@@ -12,8 +12,7 @@
 //   · 反应式 state / dialReactive / rack / 浮窗 / gallery 的形状暂在此**诚实描述**（不 import 其 .ts 源，
 //     避免 cascade 把屎山拖进门）——随各源逐步类型化再收敛引用。本接口是增量推进的锚，不是终态。
 
-import type { PaintDoc } from "./doc.ts";
-import type { DocView } from "./workpiece/doc-view.ts";
+import type { PaintingView } from "./workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
@@ -102,8 +101,8 @@ export interface AppContext {
 
   // 核心引擎单例
   editMode: EditMode;
-  doc: DocView;                  // v0.8.3（S3）：只读窄接口——裸写 = 编译错（写走 workpiece 组件，见 doc-view.ts 头注释）
-  docRaw: PaintDoc;              // 装载/换文档生命周期专用（session-state 唯一正当消费者；编辑路径禁用——用它绕 DocView = 越狱）
+  doc: PaintingView;             // T3b-2：树模式端口（DocView 同形读面 + 选区过渡宿）。docRaw 已杀——
+                                 // 装载/换文档走 wp2.load()（令牌写），不存在 raw 逃生门。
   board: Board;
   input: InputController;
   history: LegacyHistory;        // T2（ADR-0008）：旧 UndoHistory 公共面照旧，底下骑 v2 UndoStack（唯一栈）
@@ -132,7 +131,6 @@ export interface AppContext {
   // transient 面板 / 变换护栏（transient-panels.ts）
   _suppressTransientPanels: (mode: string) => void;   // v319：真实现 mode 必填（allow[mode]），原 reason?: 太松
   _restoreTransientPanels: () => void;
-  layerSpecFrom: (L: unknown) => ReturnType<PaintDoc["layerSpec"]>;   // v319：真返回 doc.layerSpec 的 LayerSpecShape（doc.ts 未导出 → 经 ReturnType 取）
   _bringPanelTop: (el: HTMLElement | null) => void;   // v319：= surfaces.raiseWindow
   _commitTransform: () => void;
   _cancelTransform: () => void;

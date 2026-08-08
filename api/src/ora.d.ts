@@ -1,24 +1,53 @@
-import { PaintDoc } from "./doc.ts";
-import type { FrozenNode } from "./doc.ts";
+import type { PaintingData } from "./workpiece/painting-workpiece.ts";
+export interface EncodeLeaf {
+    isGroup: false;
+    id: number;
+    name: string;
+    visible: boolean;
+    opacity: number;
+    mode: string;
+    clippingMask: boolean;
+    lockAlpha: boolean;
+    bboxX: number;
+    bboxY: number;
+    bboxW: number;
+    bboxH: number;
+    getImageData(x: number, y: number, w: number, h: number): ImageData;
+}
+export interface EncodeGroup {
+    isGroup: true;
+    id: number;
+    name: string;
+    visible: boolean;
+    opacity: number;
+    mode: string;
+    clippingMask: boolean;
+    children: EncodeNode[];
+}
+export type EncodeNode = EncodeLeaf | EncodeGroup;
 type EncodeDoc = {
     width: number;
     height: number;
-    layers: ReadonlyArray<PaintDoc["layers"][number]> | FrozenNode[];
+    layers: readonly EncodeNode[];
     activeId: number | null;
     referenceLayerId: number | null;
 };
+/** exportData 冻结快照 → encode 消费面（保存路径的 freezeDocForEncode 后继；bytes 已当场拷出，
+ *  getImageData = 纯切片，无 canvas、无追写风险）。 */
+export declare function paintingDataToEncodeDoc(data: PaintingData): EncodeDoc;
 interface EncodeOpts {
     mergedCanvas?: OffscreenCanvas | HTMLCanvasElement | null;
     referenceImage?: Blob;
     webpaintState?: object;
     editorState?: object;
 }
-type DecodedDoc = PaintDoc & {
+export interface DecodedPainting {
+    data: PaintingData;
     _referenceBlob?: Blob;
     _webpaintState?: unknown;
     _editorState?: unknown;
     _wroteWith: string | null;
-};
+}
 /** doc → Blob (.ora)
  *
  * WebPaint 私有扩展（都在 webpaint/ 命名空间下，第三方 reader 会忽略或剥离）：
@@ -30,7 +59,7 @@ type DecodedDoc = PaintDoc & {
  * opts.webpaintState:  optional object（直接 JSON.stringify）
  */
 export declare function encodeDocToOra(doc: EncodeDoc, opts?: EncodeOpts): Promise<any>;
-/** Blob (.ora 明文) → PaintDoc */
-export declare function decodeOraToDoc(blob: Blob): Promise<DecodedDoc>;
+/** Blob (.ora 明文) → DecodedPainting（json 形 + 内联 tile 字节 + sidecar）。 */
+export declare function decodeOraToPainting(blob: Blob): Promise<DecodedPainting>;
 export declare function parseAppVersion(s: string | null | undefined): number | null;
 export {};

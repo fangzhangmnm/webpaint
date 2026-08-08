@@ -1,11 +1,11 @@
-import type { Layer, LayerGroup } from "./doc.ts";
+import type { ViewLeaf, ViewGroup } from "./workpiece/painting-view.ts";
 import type { FloatFrame, Workpiece } from "./workpiece/workpiece.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
 import type { TransformClass, HistoryFacade } from "./workpiece/workpiece.ts";
 import type { SplinePlane } from "./bspline.ts";
 import type { U8Plane } from "./rotsprite.ts";
-type Node = Layer | LayerGroup;
+type Node = ViewLeaf | ViewGroup;
 interface Point {
     x: number;
     y: number;

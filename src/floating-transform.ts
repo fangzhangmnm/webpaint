@@ -21,8 +21,8 @@
 // 渲染：2×2 mesh → GPU warp（gl-compositor，per-pixel inverse homography；本文件只出 warp 矩阵，
 //   栅格在 GPU）。浮层源 = straight 字节平面 typed-array 直传（v0.6.38 去 canvas 化；WeakMap 缓存）。
 
-import { findNodeById } from "./doc.ts";
-import type { Layer, LayerGroup } from "./doc.ts";
+import { findViewNodeById } from "./workpiece/painting-view.ts";
+import type { ViewLeaf, ViewGroup } from "./workpiece/painting-view.ts";
 import type { FloatFrame, Workpiece, FloatTransformMeta, WorkpieceFloat, FloatState } from "./workpiece/workpiece.ts";
 
 import type { OperatorRegistry } from "./workpiece/operators.ts";
@@ -35,7 +35,7 @@ import { rotspriteUpscale } from "./rotsprite.ts";
 import type { U8Plane } from "./rotsprite.ts";
 
 // ---- 局部几何/数据类型（type-strip 后纯运行时无变化）----
-type Node = Layer | LayerGroup;
+type Node = ViewLeaf | ViewGroup;
 interface Point { x: number; y: number; }
 type Mesh = Point[][];                          // 2×2：[[TL,TR],[BL,BR]]
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -387,7 +387,7 @@ export class FloatingTransform {
       if (f.rect.y + f.rect.h > gy1) gy1 = f.rect.y + f.rect.h;
     }
     const w0 = gx1 - gx0, h0 = gy1 - gy0;
-    const doc = this._w!.readDoc();
+    const doc = this._w!.readView();
     const x0 = Math.round(doc.width / 2 - w0 / 2), y0 = Math.round(doc.height / 2 - h0 / 2);
     const x1 = x0 + w0, y1 = y0 + h0;
     // 映射约定（sourceDestQuad）：gizmoFrame = source 归一化参考系 → 必须复位成 source union AABB
@@ -418,7 +418,7 @@ export class FloatingTransform {
   // 把一个 float 的像素落回源 layer（stamp/accept 共用）。GPU 烤定：sourceWarpMatrix 算 Hinv+bbox →
   //   bakeFn（board.glWarpBakeFn = GPU warp readback）→ straight canvas → editRegion 落层。与 live warp 同采样器，
   //   零 preview/commit 漂移。bakeFn 缺省（GL 失败）→ 不烤（app 已显「需 WebGL2」）。
-  private _bakeDown(f: WorkpieceFloat, leaf: Layer, bakeFn: WarpBakeFn | null) {
+  private _bakeDown(f: WorkpieceFloat, leaf: ViewLeaf, bakeFn: WarpBakeFn | null) {
     if (!this._live) return;
     const lv = this._live;
     // 整数刚体快路（v0.6.34：identity/整数平移/90°倍数旋转/翻转 全族）：destQuad = rect 的整数刚体像
@@ -451,10 +451,10 @@ export class FloatingTransform {
   }
 
   // 源层 id → 活叶（消失容忍：跳过该 float，别的照常）。
-  private _leafFor(f: WorkpieceFloat): Layer | null {
-    const doc = this._w!.readDoc();
-    const n = findNodeById(doc.layers, f.sourceLayerId);
-    return n && !n.isGroup ? (n as Layer) : null;
+  private _leafFor(f: WorkpieceFloat): ViewLeaf | null {
+    const doc = this._w!.readView();
+    const n = findViewNodeById(doc.layers, f.sourceLayerId);
+    return n && !n.isGroup ? (n as ViewLeaf) : null;
   }
 
   // Stamp：各 float 按当前 mesh 烤进源层，KEEP float。一个 compound 整点（pre-applied ops.pixels）。

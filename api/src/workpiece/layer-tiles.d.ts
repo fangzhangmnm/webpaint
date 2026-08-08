@@ -50,6 +50,9 @@ export declare class LayerTiles implements CollectorComponent {
     tilesetPixels(id: number): LayerPixels | null;
     /** computed 变换换实例（tileset id 稳定，内容换血；旧实例还池）。 */
     swapTilesetPixels(id: number, np: LayerPixels): void;
+    /** 实例交换**不 dispose**（swapTilesetPixels 的非销毁变体）：旧实例所有权交还调用方——
+     *  DocResizeOp（crop/resample 的 undo 包持前一侧实例）用。T3b-2 补。 */
+    exchangeTilesetPixels(id: number, np: LayerPixels): LayerPixels;
     /** 注册表观测（测试/泄漏审计）。 */
     tilesetCount(): number;
     tilesetRefs(id: number): number;

@@ -50,8 +50,24 @@ export declare class LegacyHistory implements HistoryFacade {
     }): OpStatus;
     /** 手势结束：把开着的微步令牌封口（= 旧 sealCheckpoint）。 */
     sealCheckpoint(): void;
-    /** 复合动作：一个令牌 = 一个整点；fn 中途抛/失败 → token.cancel 倒序回滚（含 tile 收集，优于旧实现）。 */
-    compound<T>(_w: WorkpieceV1, fn: () => T): {
+    /** 复合动作：一个令牌 = 一个整点；fn 中途抛/失败 → token.cancel 倒序回滚（含 tile 收集，优于旧实现）。
+     *  o.hint（T3b-2 补）：step.hint 落地（提案 .h；docTransform 的 viewport/persp 还原唯一住户）。 */
+    compound<T>(_w: WorkpieceV1, fn: () => T, o?: {
+        label?: string;
+        hint?: (dir: "undo" | "redo") => void;
+    }): {
+        ok: boolean;
+        value?: T;
+        msg?: string;
+    };
+    /** v2-verb 迁移载具（T3b-2 立，T5 随桥拆）：fn 里**直写 v2 组件**（layerTree2/layerTiles verbs），
+     *  本方法只管共享令牌的开/续/封（checkpoint:false = 留开聚合微步，语义同 run）。
+     *  与 run/compound 共用 _open → 微步聚合/fill compound/import 单整点的时序全兼容。
+     *  注意这不是「新增 legacy op 调用方」——恰相反，它承接从 operator 流迁出的调用方。 */
+    withPoint<T>(label: string | undefined, o: {
+        checkpoint?: boolean;
+        hint?: (dir: "undo" | "redo") => void;
+    } | undefined, fn: () => T): {
         ok: boolean;
         value?: T;
         msg?: string;

@@ -14,14 +14,14 @@
 //   cancelBrushStroke?(state)                            可选，取消（abort 路径）
 //   flushDirty?(state) → [x0,y0,x1,y1] | null            可选，告诉 board dirty bbox
 
-import type { Layer } from "./doc.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import type { Selection } from "./selection.ts";
 
 // filter-brush 模式下 Filter 必须实现的最小契约（brush 方法在 filters.js 运行时挂上，
 // 故此处只描述本引擎会 dispatch 的子集；handle/params 对引擎是不透明的）。
 interface BrushFilter {
   id?: string;
-  beginBrushStroke(layer: Layer, params: unknown, brushSettings: unknown, selection: Selection | null, x: number, y: number, pressure: number): unknown;
+  beginBrushStroke(layer: ViewLeaf, params: unknown, brushSettings: unknown, selection: Selection | null, x: number, y: number, pressure: number): unknown;
   extendBrushStamp(state: unknown, x: number, y: number, pressure: number): void;
   endBrushStroke?(state: unknown): void;
   cancelBrushStroke?(state: unknown): void;
@@ -37,7 +37,7 @@ export class FilterBrushEngine {
     this._Filter = null;
   }
 
-  beginStroke(layer: Layer, Filter: BrushFilter, params: unknown, brushSettings: unknown, selection: Selection | null, x: number, y: number, pressure: number) {
+  beginStroke(layer: ViewLeaf, Filter: BrushFilter, params: unknown, brushSettings: unknown, selection: Selection | null, x: number, y: number, pressure: number) {
     if (!Filter || !Filter.beginBrushStroke) {
       throw new Error(`Filter ${Filter && Filter.id} 不支持 brush 模式`);
     }

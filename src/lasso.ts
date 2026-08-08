@@ -28,7 +28,7 @@ import { edtSquared } from "./lineart/edt.ts";
 import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
-import type { Layer, LayerGroup } from "./doc.ts";
+import type { ViewLeaf, ViewGroup } from "./workpiece/painting-view.ts";
 import type { Workpiece, HistoryFacade } from "./workpiece/workpiece.ts";
 
 import type { OperatorRegistry } from "./workpiece/operators.ts";
@@ -45,7 +45,7 @@ interface LassoDoc {
   height: number;
   selection: SelectionLike | null;
 }
-type LassoNode = Layer | LayerGroup;
+type LassoNode = ViewLeaf | ViewGroup;
 type LiftOpts = { cut?: boolean; fallbackFullLayer?: boolean; ignoreSelection?: boolean };
 type LassoState =
   | "idle"
@@ -160,7 +160,7 @@ export class LassoEngine {
   setMagicAlgorithm(v: MagicAlgorithm) { this._magicAlgorithm = v === "lineart" || v === "similar" ? v : "classic"; }
   getMagicAlgorithm(): MagicAlgorithm { return this._magicAlgorithm; }
   /** 线稿分区缓存是否已就绪（首次 tap 前 UI 可提示「分析线稿中…」） */
-  lineartReady(sourceLayer: Layer | null): boolean {
+  lineartReady(sourceLayer: ViewLeaf | null): boolean {
     return !this.doc || this._lineartOracle.isReady(this.doc, sourceLayer);
   }
   // 线稿算法 knob 透传（扳手弹出用；RAM-only，改了 oracle 自己丢缓存）
@@ -178,7 +178,7 @@ export class LassoEngine {
   _lineartDebugView = false;
   setLineartDebugView(on: unknown) { this._lineartDebugView = !!on; }
   getLineartDebugView() { return this._lineartDebugView; }
-  lineartDebugInfo(sourceLayer: Layer | null) {
+  lineartDebugInfo(sourceLayer: ViewLeaf | null) {
     if (!this._lineartDebugView || this._magicAlgorithm !== "lineart" || !this.doc) return null;
     return this._lineartOracle.debugInfo(this.doc, sourceLayer);
   }
@@ -237,7 +237,7 @@ export class LassoEngine {
   // 返回 history entry（caller push）或 null（选区无效 / 没动）
   // v125 (user：「lasso 全在外面时行为奇怪，应该自动清掉在外面，然后判断没选中任何」)
   //   rasterize 出 newSel 后先 clip 到 doc 边界。完全在外 → 返 null
-  endPath(sourceLayer: Layer | null) {
+  endPath(sourceLayer: ViewLeaf | null) {
     if (this._state === "drawing-polygon") return null;   // polygon 走 polygonAddVertex/polygonClose，不在此收笔
     let newSel = null;
     if (this._state === "drawing-freehand") {
@@ -400,7 +400,7 @@ export class LassoEngine {
   //
   // 内存（2048² doc）：layerData 16MB + visited buffer 4MB + maskCanvas
   // 仅 bbox 大小。barrier 不再单独 alloc（diff 算在 flood fill 里 inline）。
-  _magicWandToSelection(start: Point | null, sourceLayer: Layer | null): SelectionLike | null {
+  _magicWandToSelection(start: Point | null, sourceLayer: ViewLeaf | null): SelectionLike | null {
     if (!this.doc) return null;
     // v0.7 线稿模式：tap → 分区 label 查表（缓存 miss 时同步构建，见 lineart-oracle.ts）。
     //   与 flood 完全同构：产原始选区，后续 auto-expand / setOp 合并共用同一条路。
@@ -445,7 +445,7 @@ export class LassoEngine {
     this._state = "magic-drag";
   }
   /** 采样一点；选区真变了返回 true（调用方重绘）。 */
-  magicDragStep(x: number, y: number, sourceLayer: Layer | null): boolean {
+  magicDragStep(x: number, y: number, sourceLayer: ViewLeaf | null): boolean {
     if (!this.doc || this._state !== "magic-drag") return false;
     const xi = Math.floor(x), yi = Math.floor(y);
     if (xi === this._magicDragLastX && yi === this._magicDragLastY) return false;
@@ -577,7 +577,7 @@ export interface FloodStopMask { x: number; y: number; w: number; h: number; dat
 export function floodSelectFrom(
   doc: { width: number; height: number },
   start: Point | null,
-  sourceLayer: Layer | null,
+  sourceLayer: ViewLeaf | null,
   thresholdPct: number,
   metric: ColorMetric = "rgb",   // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 editorState 的度量
   stopMask: FloodStopMask | null = null,
@@ -766,7 +766,7 @@ function _gapFloodMask(
 export function similarSelectFrom(
   doc: { width: number; height: number },
   start: Point | null,
-  sourceLayer: Layer | null,
+  sourceLayer: ViewLeaf | null,
   thresholdPct: number,
   metric: ColorMetric = "rgb",
 ): Selection | null {

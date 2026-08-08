@@ -16,7 +16,7 @@
 //   input / doc / board / history / editMode / setStatus / updateSaveStatus / updateZoomLabel /
 //   gallery / rack。
 // 直接 import（leaf/singleton）：session、els、openInputSheet/openConfirmSheet/lockSyncGate、
-//   setMenuOpen、decodeOraToDoc 等（以实际 import 块为准）。
+//   setMenuOpen、decodeOraToPainting 等（以实际 import 块为准）。
 
 import { session } from "./session-state.ts";
 import { isUnlocked } from "./crypto-state.ts";
@@ -26,9 +26,9 @@ import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { setMenuOpen } from "./settings-menu.ts";
 import { signIn, isAuthConfigured } from "./app-store.ts";   // auth 是公共面（cloud-auth-ui 同款直连；v415 红线针对的是 sync store，不含 auth）
 import { sessionNameConflict } from "./session-name.ts";
-import { decodeOraToDoc } from "./ora.ts";
+import { decodeOraToPainting } from "./ora.ts";
 import { t } from "./i18n/index.ts";
-import type { Layer, PaintDoc } from "./doc.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
 
 import type { AppContext } from "./app-context.ts";
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -73,7 +73,7 @@ export function initTopbarMenu(ctx: AppContext) {
     if (!a) return;
     closeSheet(els.clearSheet, els.clearBackdrop);
     if (a !== "confirm") return;
-    const layer = doc.activeLayer as Layer | null;
+    const layer = doc.activeLayer as ViewLeaf | null;
     if (!layer || layer.isGroup) return;
     // v0.8.3（S3）：走 workpiece.layers.clearLayer（快照/清空/入栈收进组件），Ctrl+Z 能复活。
     workpiece.layers.clearLayer(layer.id);
@@ -230,10 +230,10 @@ export function initTopbarMenu(ctx: AppContext) {
     try {
       // cp.blob 已是**明文**：加密作品的快照按密文容器存，readCheckpoint 里用内存密码解好了
       //   （锁定/错密码 → readCheckpoint 返 null，上面那个分支已提示"无快照"）。
-      const loaded = await decodeOraToDoc(cp.blob);
+      const loaded = await decodeOraToPainting(cp.blob);
       // 既有身份（不是新建）→ 首存 mode:"existing"，就是要写回原文件；且**不重新封存快照**
       //   （否则刚回滚掉的状态立刻覆盖快照，只能 revert 一次）。
-      session.adoptAsExisting(loaded as PaintDoc, session.name);
+      session.adoptAsExisting(loaded, session.name);
       // R4：revert 是内容变化（像素回到旧快照）→ 必须走 clean→dirty 门标云脏。
       //   旧版只 edits.mark() 不标云脏 → 云端永远收不到 revert，且 clean 快进会无备份吃掉 revert 结果。
       session.markEdited();

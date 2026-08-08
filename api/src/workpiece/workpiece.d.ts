@@ -1,4 +1,4 @@
-import type { PaintDoc } from "../doc.ts";
+import type { PaintingView } from "./painting-view.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import type { LayerTree } from "./layer-tree.ts";
 import type { SelectionFace } from "./selection-face.ts";
@@ -48,7 +48,7 @@ export interface FloatState {
     transform: FloatTransformMeta;
 }
 export interface WorkpieceInternals {
-    doc: PaintDoc;
+    doc: PaintingView;
     floats: FloatState | null;
 }
 export declare class Workpiece {
@@ -61,7 +61,7 @@ export declare class Workpiece {
     private _lockHolder;
     private _layers;
     private _sel;
-    constructor(doc: PaintDoc, history: HistoryFacade);
+    constructor(doc: PaintingView, history: HistoryFacade);
     /** 结构类写面（S1 第一个 component：层树增删/复制/移动/合并/属性/结构 tx）。
      *  写 doc 结构的唯一合法门——app 层不再直接 doc.addLayer + 手工记账。 */
     get layers(): LayerTree;
@@ -74,8 +74,8 @@ export declare class Workpiece {
     _attachSel(c: SelectionFace): void;
     /** 每次 operator 提交 +1。render-tree 重建 / 缓存失效的 key。 */
     get commitVersion(): number;
-    /** 只读视图。⚠ 迁移期 escape hatch：老代码（board 渲染/导出/吸管）直读；新代码请依赖更窄的读口。 */
-    readDoc(): Readonly<PaintDoc>;
+    /** 端口读口（floating-transform 等构造期未持 port 的引擎用；T5 随本类拆）。 */
+    readView(): PaintingView;
     /** 浮层变换状态只读视图（board GPU warp 预览 / gizmo 引擎消费）。null = 无活动浮层。 */
     readFloatState(): Readonly<FloatState> | null;
     /** 换文档 escape hatch：直接清浮层状态并释放句柄（clearHistory/adoptState 同步调；
@@ -99,7 +99,19 @@ export interface HistoryFacade {
         checkpoint?: boolean;
         label?: string;
     }): OpStatus;
-    compound<T>(w: Workpiece, fn: () => T): {
+    compound<T>(w: Workpiece, fn: () => T, o?: {
+        label?: string;
+        hint?: (dir: "undo" | "redo") => void;
+    }): {
+        ok: boolean;
+        value?: T;
+        msg?: string;
+    };
+    /** v2-verb 迁移载具（T3b-2；见 legacy-bridge.withPoint）：fn 直写 v2 组件，共享令牌开/续/封。 */
+    withPoint<T>(label: string | undefined, o: {
+        checkpoint?: boolean;
+        hint?: (dir: "undo" | "redo") => void;
+    } | undefined, fn: () => T): {
         ok: boolean;
         value?: T;
         msg?: string;

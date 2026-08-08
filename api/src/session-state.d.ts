@@ -1,26 +1,8 @@
-import { PaintDoc } from "./doc.ts";
+import { type DecodedPainting } from "./ora.ts";
 import type { EncryptedBlob } from "./store/index.ts";
 import type { AppContext } from "./app-context.ts";
 import type { GalleryItem } from "./gallery-model.ts";
-interface OraWebpaintState {
-    reference?: unknown;
-    color?: string;
-    toolStates?: Record<string, unknown>;
-    palette?: unknown;
-    checkerboard?: boolean;
-    activeId?: number;
-    activeLayerIndex?: number;
-    viewport?: {
-        scale?: number;
-    } & Record<string, unknown>;
-    blender?: unknown;
-}
-type LoadedDoc = PaintDoc & {
-    _webpaintState?: OraWebpaintState;
-    _editorState?: unknown;
-    _referenceBlob?: Blob | null;
-    _wroteWith?: string;
-};
+type LoadedDoc = DecodedPainting;
 /** 外部导入：装入一个解好的 doc，作为**新身份**。首存 mode:"new"（撞名抛，不静默覆盖）。 */
 declare function adoptAsNew(loaded: LoadedDoc, name: string): void;
 /** revert 回滚：装入一个解好的 doc，身份**不变**（首存 mode:"existing"，就是要写回原文件）。
@@ -44,10 +26,11 @@ declare function renameCurrentSession({ suggested, reason }?: {
     reason?: string;
 }): Promise<string | null>;
 declare function exitCanvasToGallery(): Promise<void>;
-declare function newDoc({ name, w, h, fillLayer0 }: {
+declare function newDoc({ name, w, h, layer0Name, fillLayer0 }: {
     name: string;
     w: number;
     h: number;
+    layer0Name?: string;
     fillLayer0?: (layer: unknown) => void;
 }): Promise<void>;
 declare function openItem(item: GalleryItem): Promise<void>;

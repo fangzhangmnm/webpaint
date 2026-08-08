@@ -3,10 +3,10 @@
 //   _openImagePicker()      图层面板「导入图片」按钮 → 触发 oraFileInput（强制走 importImageAsLayer）
 //   importImageAsNewDoc()   图库「导入照片 / 剪贴板新建」语义：照片当新 doc 打底（doc 尺寸 = 照片，cap 8192）
 //   importImageAsLayer()    photobash / Ctrl+V 粘贴 / 桌面拖拽：图片叠为当前 doc 的新层（含自动 lift transform）
-// oraFileInput change-handler 按文件类型分流（.ora→session.adopt / image→As{NewDoc|Layer}）。
+// oraFileInput change-handler 按文件类型分流（.ora→session.adopt / image→As{NewDoc|ViewLeaf}）。
 // 大图（> 画布）走 _openBigImportSheet 询问 fit / 保原 / 自定义尺寸。
 // 与 app 经 ctx 绑核心单例（doc/board/input/...）；leaf 依赖直接 import（session/resample/ora/els）。
-// 「导入照片(新建)」复用 session.newDoc 骨架（fillLayer0 画照片），不再自建 PaintDoc/做 doc 替换。
+// 「导入照片(新建)」复用 session.newDoc 骨架（fillLayer0 画照片），不再自建 PaintingView/做 doc 替换。
 
 import { els } from "./els.ts";
 import { reportError } from "./error-badge.ts";
@@ -14,7 +14,7 @@ import { t } from "./i18n/index.ts";
 import { session } from "./session-state.ts";
 import { decodeImageFile, imageSourceToBytes } from "./resample.ts";
 import { resampleBytes } from "./resample-bytes.ts";
-import { decodeOraToDoc } from "./ora.ts";
+import { decodeOraToPainting } from "./ora.ts";
 import { store as _store } from "./app-store.ts";
 import { stripSessionExt } from "./config.ts";
 import { unlockImportedContainer } from "./enc-thumbs.ts";
@@ -24,7 +24,7 @@ import { openChoiceSheet } from "./sheets.ts";
 import { setReferenceFromFile } from "./side-windows.ts";
 import { _suppressTransientPanels, _commitTransform, _cancelTransform } from "./transient-panels.ts";
 import type { AppContext } from "./app-context.ts";
-import type { PaintDoc } from "./doc.ts";
+
 
 // 错误信息提取（catch 子句 e 在 strict 下是 unknown）。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
@@ -71,9 +71,8 @@ export async function importImageAsNewDoc(file: File) {
   // 共用 session.newDoc 骨架（消 survey rec #4 孪生）：照片绘制 = fillLayer0；doc 替换/全部重置/
   // 落盘/checkpoint 归 session。照片导入因此与空白新建完全对齐（清 selection/参考窗 + color 归黑 +
   // 加密归明文 + 关图库）——human 定：之前不重置这些反而是小 bug。
-  await session.newDoc({ name, w, h, fillLayer0: (layer: unknown) => {
+  await session.newDoc({ name, w, h, layer0Name: file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImageName"), fillLayer0: (layer: unknown) => {
     const L = layer as ImportLayer;
-    L.name = file.name.replace(/\.[^.]+$/, "") || t("mi.defaultImageName");
     // v0.6.46 字节管线：解码边界读出一次 → 面积平均缩小（缩小正解）/双三次放大 → 直落 tile
     const px = imageSourceToBytes(bitmap as ImageBitmap);
     const out = (w !== px.w || h !== px.h) ? resampleBytes(px.data, px.w, px.h, w, h, "auto") : px.data;
@@ -237,7 +236,7 @@ export function initImportImage(ctx: AppContext) {
   // v0.5.19 导入剪贴板（+菜单）：复用 Ctrl+V 全链路（selection-ops 的 wp:paste——读剪贴板→新层视口居中→错误上 banner）
   document.getElementById("layerImportClipboardBtn")?.addEventListener("click", () => window.dispatchEvent(new CustomEvent("wp:paste")));
 
-  // file-input plumbing：按文件类型分流（.ora→adopt / image→As{NewDoc|Layer}）。
+  // file-input plumbing：按文件类型分流（.ora→adopt / image→As{NewDoc|ViewLeaf}）。
   els.oraFileInput.addEventListener("change", async (e: Event) => {
     const file = (e.target as HTMLInputElement).files?.[0];
     // 图库里"导入照片"语义：把照片当新 doc 打底（不是叠到当前）
@@ -259,10 +258,10 @@ export function initImportImage(ctx: AppContext) {
           plain = got.plain;
           onPasswordVerified(nm, got.pw);
         }
-        const loaded = await decodeOraToDoc(plain);
+        const loaded = await decodeOraToPainting(plain);
         // ★新身份：首存走 mode:"new"，撞名抛而不静默覆盖。
         //   v415 前这里走的是 existing → **导入同名 .ora 会静默盖掉已有作品**（活的数据丢失）。
-        session.adoptAsNew(loaded as PaintDoc, nm);
+        session.adoptAsNew(loaded, nm);
         setStatus(t("mi.imported", { name: nm }));
         setGalleryOpen(false);
       } else if (isImage) {

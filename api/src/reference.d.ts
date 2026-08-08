@@ -1,5 +1,5 @@
 import type { GestureViewport } from "./pointer-gesture.ts";
-import type { DocView } from "./workpiece/doc-view.ts";
+import type { PaintingView } from "./workpiece/painting-view.ts";
 type RefViewport = GestureViewport;
 interface ReferenceWindowOpts {
     panel: HTMLElement;
@@ -55,7 +55,7 @@ export declare class ReferenceWindow {
     ctx: CanvasRenderingContext2D;
     bitmap: RefBitmapSource | null;
     _bitmapBlob: Blob | null;
-    _liveDoc: DocView | null;
+    _liveDoc: PaintingView | null;
     _composeCanvas: HTMLCanvasElement | null;
     _liveDirty: boolean;
     vp: RefViewport;
@@ -71,9 +71,9 @@ export declare class ReferenceWindow {
     setBitmap(bitmap: RefBitmapSource | null, opts?: SetBitmapOpts): void;
     getPersistBlob(): Blob | null;
     clearBitmap(): void;
-    setLiveSource(doc: DocView): void;
+    setLiveSource(doc: PaintingView): void;
     isLive(): boolean;
-    toggleLive(doc: DocView): void;
+    toggleLive(doc: PaintingView): void;
     _stopLive(): void;
     markLiveDirty(): void;
     _recomposeLive(): boolean;

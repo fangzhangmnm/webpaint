@@ -1,4 +1,4 @@
-// Board = 显示层。把 PaintDoc 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
+// Board = 显示层。把 PaintingView 合成到屏幕 <canvas> 上 + 视口 pan/zoom + cursor 预览。
 import { sourceWarpMatrix, sourceDestQuad, integerRigidOf } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT（别在本文件硬编码第二份）
@@ -9,10 +9,11 @@ import type { FloatInput, StampOverlayInput, FillOverlayInput, OverlayInput, Sur
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
 // brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。
-type StampCollect = { stamps: Stamp[]; shape: StrokeShape; layer: Layer; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null;
+type StampCollect = { stamps: Stamp[]; shape: StrokeShape; layer: ViewLeaf; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null;
 import type { GLDoc, GLLeaf } from "./gl/gl-board.ts";
-import type { PaintDoc, Layer } from "./doc.ts";
-import { eachLeaf, layerByteBudget } from "./doc.ts";
+import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
+import { layerByteBudget } from "./doc.ts";
+import { eachViewLeaf } from "./workpiece/painting-view.ts";
 
 // ---- 本文件用到的结构类型（局部定义，只覆盖 board 实际访问的成员）----
 
@@ -114,7 +115,7 @@ const PAN_KEEP_VISIBLE = 48;    // 平移时至少留这么多 px 画布在屏�
 export class Board {
   canvas: HTMLCanvasElement;
   ctx: Ctx2D;
-  doc: PaintDoc;
+  doc: PaintingView;
   dpr: number;
   viewport: Viewport;
   onViewportChange: ViewportChangeCb;
@@ -135,7 +136,7 @@ export class Board {
   // 按需创建 / 延迟初始化的字段
   _strokeActiveHint?: (() => unknown) | null;
   // GL live-sync：原地改像素的笔描边中要重传 GPU 的活动叶（无=不重传，buffered brush/无描边）。
-  _liveSyncProvider?: (() => Layer | null) | null;
+  _liveSyncProvider?: (() => ViewLeaf | null) | null;
   _lassoProvider?: (() => LassoInfo | null | undefined) | null;
   _activeSurrogateLayerId?: number | null;
   _activeSurrogateBytes?: { data: Uint8ClampedArray; w: number; h: number } | null;
@@ -151,7 +152,7 @@ export class Board {
   _glBoard?: GLBoard | null;
   _glCanvas?: HTMLCanvasElement | null;
 
-  constructor(canvas: HTMLCanvasElement, doc: PaintDoc) {
+  constructor(canvas: HTMLCanvasElement, doc: PaintingView) {
     this.canvas = canvas;
     // 本 2D canvas 恒 alpha:true（透明，只画 lasso overlay/边框，GL canvas 在后透出 doc）。GL 是唯一 display 路径。
     this.ctx = canvas.getContext("2d", { alpha: true })!;
@@ -248,7 +249,7 @@ export class Board {
     }
   }
 
-  setDoc(doc: PaintDoc) {
+  setDoc(doc: PaintingView) {
     this.doc = doc;
     this._configureDocMemory();
     this._glBoard?.markContentDirty();   // GL：新 doc → 全量重传
@@ -412,7 +413,7 @@ export class Board {
   setStrokeActiveHint(fn: (() => unknown) | null) { this._strokeActiveHint = fn; }
 
   // GL live-sync：返回描边中原地改像素、需每帧重传 GPU 的活动叶（无=null）。仅 GL 路径消费。
-  setLiveSyncProvider(fn: (() => Layer | null) | null) { this._liveSyncProvider = fn; }
+  setLiveSyncProvider(fn: (() => ViewLeaf | null) | null) { this._liveSyncProvider = fn; }
 
   // 套索 overlay：在 layer 像素之上画一条 polygon (drawing) 或 floating canvas + marching ants
   setLassoProvider(fn: (() => LassoInfo | null | undefined) | null) {
@@ -621,7 +622,7 @@ export class Board {
     // 切片②：GL 合成直读 tile（不碰 layer.canvas）→ 物化 canvas 是纯冗余的第二份像素拷贝。
     //   非 live-preview 帧（已 syncAll 把 tile 传 GPU）后释放各层物化缓存 → GL 模式不常驻第二份拷贝。
     //   （live-preview 中不释放：活动层 surrogate / 叠层路径可能仍读 canvas。getter 命中会按需重建。）
-    if (!this._isLivePreview()) eachLeaf(this.doc.layers, (l) => l.releaseMaterialized());
+    if (!this._isLivePreview()) eachViewLeaf(this.doc.layers, (l) => l.releaseMaterialized());
     // 2D 叠层（透明底）：lasso 蚂蚁线/handles + doc 边框
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, W, H);
@@ -735,9 +736,9 @@ export class Board {
   }
 
   // v0.5.11 fill-mode：填色预览 provider（fill-mode.ts 注入；active 才返 {color, layer}）。
-  _fillProvider: (() => { color: string; layer: Layer } | null) | null = null;
+  _fillProvider: (() => { color: string; layer: ViewLeaf } | null) | null = null;
   _perspGizmoProvider: (() => PerspGizmoData | null) | null = null;   // ADR-0006 VP 编辑 gizmo
-  setFillProvider(fn: (() => { color: string; layer: Layer } | null) | null) { this._fillProvider = fn; }
+  setFillProvider(fn: (() => { color: string; layer: ViewLeaf } | null) | null) { this._fillProvider = fn; }
 
   // fill 输入构造（live 每帧 + commit 共用 = 同源输入喂同一 shader，对齐 _overlayInputFrom 的 SSoT 纪律）。
   _glFillOverlay(): FillOverlayInput | null {
@@ -745,7 +746,7 @@ export class Board {
     if (!f) return null;
     return this._fillInputFrom(f);
   }
-  _fillInputFrom(f: { color: string; layer: Layer }): FillOverlayInput | null {
+  _fillInputFrom(f: { color: string; layer: ViewLeaf }): FillOverlayInput | null {
     const sel = this.doc.selection as Selection | null;
     if (!sel) return null;
     const m = sel.bboxMask();
@@ -774,7 +775,7 @@ export class Board {
   // v0.5.11 fill commit：镜像 commitBrushStroke——同一 GPU merge→tile diff→applyRegionDiff 路径，
   //   输入构造与 live 共用 _fillInputFrom（SSoT：预览所见即 commit 所得，含 lockAlpha）。
   //   返回 false = 没提交（无选区/GL 失败/池到顶），调用方别当成功。
-  commitFill(f: { color: string; layer: Layer }): boolean {
+  commitFill(f: { color: string; layer: ViewLeaf }): boolean {
     if (!this._glBoard) return false;
     const ov = this._fillInputFrom(f);
     if (!ov) return false;

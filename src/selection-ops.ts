@@ -7,7 +7,8 @@
 //     Ctrl+T 直接复用 lassoTransformBtn.click()，不在此。Ctrl+C/V 仅走系统剪贴板，无内部 buffer / token。
 import { readImageFromClipboard, writeImageBlobToClipboard } from "./session.ts";
 import { Selection } from "./selection.ts";
-import { countLeaves, disposeLayerSnap, type LayerSnap } from "./doc.ts";
+import { disposeLayerSnap, type LayerSnap } from "./doc.ts";
+import { countViewLeaves } from "./workpiece/painting-view.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { reportError } from "./error-badge.ts";
 import { updateLassoToolbar } from "./toolbar.ts";
@@ -52,7 +53,7 @@ function _extractSelectionRegionCanvas(layer: LayerLike, sel: Selection) {
 export function selectionToNewLayer({ move }: { move: boolean }) {
   const sel = doc.selection;
   if (!sel) { setStatus(t("se.noSelection")); return; }
-  if (countLeaves(doc.layers) >= doc.maxLayers) { setStatus(t("se.maxLayersReached", { max: doc.maxLayers })); return; }
+  if (countViewLeaves(doc.layers) >= doc.maxLayers) { setStatus(t("se.maxLayersReached", { max: doc.maxLayers })); return; }
   const src = doc.activeLayer;
   if (!src) return;
   if (src.isGroup) { setStatus(t("se.selectLayerFirstGroup")); return; }

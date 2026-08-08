@@ -1,4 +1,4 @@
-import type { DocView } from "./workpiece/doc-view.ts";
+import type { PaintingView } from "./workpiece/painting-view.ts";
 export interface ExportOpts {
     scope?: string;
     cropRect?: {
@@ -14,7 +14,7 @@ export interface Exporter {
     ext: string;
     mime?: string;
     kind: "project" | "image";
-    encode: (doc: DocView, opts?: ExportOpts) => Promise<Blob>;
+    encode: (doc: PaintingView, opts?: ExportOpts) => Promise<Blob>;
     busyHint?: string;
 }
 export declare function registerExporter(spec: Exporter): void;

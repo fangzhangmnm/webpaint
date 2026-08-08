@@ -1,4 +1,4 @@
-import type { Layer } from "../doc.ts";
+import type { ViewLeaf } from "../workpiece/painting-view.ts";
 import type { SplinePlane } from "../bspline.ts";
 import type { Selection } from "../selection.ts";
 interface LiquifySettings {
@@ -30,7 +30,7 @@ interface MaskPlane {
     data: Uint8Array;
 }
 interface LiquifyStroke {
-    layer: Layer;
+    layer: ViewLeaf;
     settings: LiquifySettings;
     bleed: string;
     lastX: number;
@@ -45,7 +45,7 @@ interface LiquifyStroke {
 export declare class LiquifyEngine {
     _stroke: LiquifyStroke | null;
     constructor();
-    beginStroke(layer: Layer, settings: LiquifySettings, x: number, y: number, selection: Selection | null): void;
+    beginStroke(layer: ViewLeaf, settings: LiquifySettings, x: number, y: number, selection: Selection | null): void;
     extendStroke(x: number, y: number): void;
     endStroke(): void;
     isActive(): boolean;

@@ -1,27 +1,26 @@
-// operators —— 12 族文档操作的 DocumentOperator 实现（0.4 纪元，替代 layer-undo/pixel-edit/input 的
-// 注册 handler）。全部**同步**（硬规则）：像素/spec/深快照的底座已换 tile 句柄（doc.ts LayerSnap），
-// createImageBitmap/PNG-blob 解码舞蹈全数退场。
+// operators —— 仍走 legacy 桥的 DocumentOperator（T3b-2 之后的**残余集**；T4/T5 清零）。
 //
-// 两种执行形态：
-//   ① 事务型（pre-applied）：引擎先改（描边/选区/整 doc 变换），run 时带 _initialBefore/_initialOld
-//      —— 首跑 forward 不再应用，只交出 undo 包。之后 undo/redo 按对称 swap 往复。
-//   ② 操作型：forward 自己动手（层增删/移动/合并/属性）——调用方**不得**预先 mutate。
-// 复合动作（lasso commit / 选区转图层 / 删组）用 UndoHistory.compound 把多个微步封一个整点。
+// v0.8 T3b-2 已迁走：layerProp/referenceLayer/addLayer/removeLayer/moveLayer/treeStructure/
+// mergeDown（→ layerTree2 verbs，经 layer-tree.ts 门面 withPoint）与 DocTransformOp
+// （→ doc-ops 的 computed verbs + DocResizeOp + step.hint）。本文件只剩：
+//   pixels     SwapPixelsOp   —— 预览违规户（液化就地写/filterBrush/浮层落地）的事务型入栈；
+//                                 买账路径（stroke/fill/滤镜 commit）早已 token+LayerTiles。
+//   selection  SwapSelectionOp—— 选区记账（T4 SelectionComponent 接棒）。substrate = 端口过渡宿。
+//   fillColor  FillColorOp    —— fill 预览期换色（T4 PendingFill 接棒）。
+//   docResize  DocResizeOp    —— crop/resample 的叶实例交换记账（T3b-2 立；几何变换的
+//                                 undo 包 = 另一侧 LayerPixels 实例，与树 record 同 step 翻转）。
+//   float 三件套（float-ops.ts）—— T4 FloatLayerComponent 接棒。
 //
-// 句柄纪律：args/data 里出现的 LayerSnap/LayerSpecShape 一律归本 operator 所有——消费（restore）
-// 后立即 dispose，驱逐/截断经 disposeData 释放。漏网由池 FR assert 点名。
+// 执行形态与句柄纪律沿旧约（见 git 历史 v0.8.12 版头注）。
 
 import { DocumentOperator, Workpiece, type OpResult } from "./workpiece.ts";
-import {
-  findNodeById, disposeLayerSnap, disposeLayerSpec, disposeDeepSnapNodes,
-  Layer, type LayerSpecShape, type LayerSnap, type PaintDoc, type DeepSnapNode,
-} from "../doc.ts";
+import { findViewNodeById, disposeViewSnap, type ViewLeaf, type ViewLeafSnap, type PaintingView } from "./painting-view.ts";
+import type { LayerPixels } from "../tiles/tile-layer.ts";
 import { LiftFloatOp, FloatTransformOp, DropFloatOp } from "./float-ops.ts";
 import type { Selection } from "../selection.ts";
-import { t } from "../i18n/index.ts";
 
 // tile 句柄快照的配额估计：压缩前记 0（走共享 raw 池配额），压缩后 = compressedBytes/refCount。
-function estimateSnapBytes(snap: LayerSnap | null | undefined): number {
+function estimateSnapBytes(snap: ViewLeafSnap | null | undefined): number {
   if (!snap) return 0;
   let sum = 0;
   for (const [, h] of snap.pixels.tiles) {
@@ -30,22 +29,25 @@ function estimateSnapBytes(snap: LayerSnap | null | undefined): number {
   }
   return sum;
 }
-function estimateDeepBytes(nodes: DeepSnapNode[]): number {
+function estimateInstanceBytes(lp: LayerPixels): number {
   let sum = 0;
-  for (const n of nodes) sum += n.isGroup ? estimateDeepBytes(n.children || []) : estimateSnapBytes(n.snap);
+  for (const h of lp.handles()) {
+    if (h.released) continue;
+    if (h.isCompressed()) sum += Math.ceil(h.compressedByteLength() / Math.max(1, h.refCount()));
+  }
   return sum;
 }
 
-function leafById(doc: PaintDoc, id: number): Layer | null {
-  const n = findNodeById(doc.layers, id);
-  return n && !n.isGroup ? (n as Layer) : null;
+function leafById(doc: PaintingView, id: number): ViewLeaf | null {
+  const n = findViewNodeById(doc.layers, id);
+  return n && !n.isGroup ? n : null;
 }
 
-// ---- ① 像素 swap（stroke / liquify / filter / 填充 / 清除 / lasso 单层）----
-export interface SwapPixelsArgs { layerId: number; _initialBefore?: LayerSnap | null }
-export class SwapPixelsOp extends DocumentOperator<SwapPixelsArgs, LayerSnap> {
+// ---- ① 像素 swap（液化/filterBrush/浮层落地等 pre-applied 事务型；T2 后的残余住户）----
+export interface SwapPixelsArgs { layerId: number; _initialBefore?: ViewLeafSnap | null }
+export class SwapPixelsOp extends DocumentOperator<SwapPixelsArgs, ViewLeafSnap> {
   readonly kind = "pixels";
-  forward(w: Workpiece, args: SwapPixelsArgs, data: LayerSnap | undefined): OpResult<LayerSnap> {
+  forward(w: Workpiece, args: SwapPixelsArgs, data: ViewLeafSnap | undefined): OpResult<ViewLeafSnap> {
     const doc = this.mut(w).doc;
     const L = leafById(doc, args.layerId);
     if (!L) { this.disposeData(args, data); return { ok: false, msg: "layer gone" }; }
@@ -57,30 +59,28 @@ export class SwapPixelsOp extends DocumentOperator<SwapPixelsArgs, LayerSnap> {
     }
     return { ok: true, replaced: this._install(L, data) };
   }
-  backward(w: Workpiece, args: SwapPixelsArgs, data: LayerSnap): OpResult<LayerSnap> {
+  backward(w: Workpiece, args: SwapPixelsArgs, data: ViewLeafSnap): OpResult<ViewLeafSnap> {
     const doc = this.mut(w).doc;
     const L = leafById(doc, args.layerId);
     if (!L) return { ok: false, msg: "layer gone" };
     return { ok: true, replaced: this._install(L, data) };
   }
-  private _install(L: Layer, snap: LayerSnap): LayerSnap {
+  private _install(L: ViewLeaf, snap: ViewLeafSnap): ViewLeafSnap {
     const cur = L.snapshot();
     L.restoreFromSnapshot(snap);
-    disposeLayerSnap(snap);                        // 已消费（restore 装的是 acquire 副本）
+    disposeViewSnap(snap);                         // 已消费（restore 装的是 acquire 副本）
     return cur;
   }
-  override estimateQuotaBytes(args: SwapPixelsArgs, data: LayerSnap | undefined): number {
+  override estimateQuotaBytes(args: SwapPixelsArgs, data: ViewLeafSnap | undefined): number {
     return 512 + estimateSnapBytes(data) + estimateSnapBytes(args._initialBefore);
   }
-  override disposeData(args: SwapPixelsArgs, data: LayerSnap | undefined): void {
-    if (args._initialBefore) { disposeLayerSnap(args._initialBefore); args._initialBefore = null; }
-    disposeLayerSnap(data);
+  override disposeData(args: SwapPixelsArgs, data: ViewLeafSnap | undefined): void {
+    if (args._initialBefore) { disposeViewSnap(args._initialBefore); args._initialBefore = null; }
+    disposeViewSnap(data);
   }
 }
 
 // ---- ① 选区 swap（selectionChange：圈选/清选/反选/全选）。Selection 不可变 → 纯引用交换 ----
-// v0.4.6：Selection 底座换 gray8 tile 句柄 → 配额与 LayerSnap 同规（压缩前 0、压缩后按压缩字节/refCount），
-// 驱逐/截断经 disposeData 释放句柄（Selection.dispose）。
 function estimateSelectionBytes(sel: Selection | null | undefined): number {
   if (!sel || sel.disposed) return 0;
   let sum = 0;
@@ -124,57 +124,7 @@ export class SwapSelectionOp extends DocumentOperator<SwapSelectionArgs, SelBox>
   }
 }
 
-// ---- ② 层属性 swap（rename/visible/opacity/mode/clippingMask/lockAlpha；组节点也适用）----
-// 事务型调用（已 pre-apply）传 _initialOld；操作型调用（未 apply）不传，forward 自己读旧值再写。
-export interface LayerPropArgs { layerId: number; prop: string; value: unknown; _initialOld?: { v: unknown } | null }
-export class LayerPropOp extends DocumentOperator<LayerPropArgs, { v: unknown }> {
-  readonly kind = "layerProp";
-  forward(w: Workpiece, args: LayerPropArgs, data: { v: unknown } | undefined): OpResult<{ v: unknown }> {
-    const doc = this.mut(w).doc;
-    const n = findNodeById(doc.layers, args.layerId) as unknown as Record<string, unknown> | null;
-    if (!n) return { ok: false, msg: "node gone" };
-    if (data === undefined && args._initialOld) {   // 事务型首跑
-      const old = args._initialOld;
-      args._initialOld = null;
-      n[args.prop] = args.value;                    // 幂等重写（通常已是该值）
-      return { ok: true, replaced: old };
-    }
-    const old = { v: n[args.prop] };
-    n[args.prop] = data === undefined ? args.value : data.v;
-    return { ok: true, replaced: old };
-  }
-  backward(w: Workpiece, args: LayerPropArgs, data: { v: unknown }): OpResult<{ v: unknown }> {
-    const doc = this.mut(w).doc;
-    const n = findNodeById(doc.layers, args.layerId) as unknown as Record<string, unknown> | null;
-    if (!n) return { ok: false, msg: "node gone" };
-    const old = { v: n[args.prop] };
-    n[args.prop] = data.v;
-    return { ok: true, replaced: old };
-  }
-}
-
-// ---- ② 参考层指定（doc 级 unique 状态）----
-export class ReferenceLayerOp extends DocumentOperator<{ value: number | null }, { v: number | null }> {
-  readonly kind = "referenceLayer";
-  forward(w: Workpiece, args: { value: number | null }, data: { v: number | null } | undefined): OpResult<{ v: number | null }> {
-    const doc = this.mut(w).doc;
-    const old = { v: doc.referenceLayerId };
-    doc.referenceLayerId = data === undefined ? args.value : data.v;
-    return { ok: true, replaced: old };
-  }
-  backward(w: Workpiece, _args: { value: number | null }, data: { v: number | null }): OpResult<{ v: number | null }> {
-    const doc = this.mut(w).doc;
-    const old = { v: doc.referenceLayerId };
-    doc.referenceLayerId = data.v;
-    return { ok: true, replaced: old };
-  }
-}
-
-// ---- ② fill 预览期换色（v0.7.8）----
-// 语义：fill 预览挂着时改颜色 = 可撤销动作（改色即改「将要填的东西」，undo 回上一色预览跟回）。
-// 事务型（色已被 UI 改掉，run 时带 _initialBefore）；颜色 get/set 注入（当前色是 desk 态，
-// workpiece 不碰 editorState/DOM——set 走 fill-mode.applyFillColorFromHistory，带回灌抑制）。
-// 内存：两个 hex 字符串，配额取默认。
+// ---- ② fill 预览期换色（v0.7.8；语义见 git 历史。颜色 get/set 注入——desk 态，workpiece 不碰 UI）----
 export interface FillColorArgs { value: string; _initialBefore?: { v: string } | null }
 export class FillColorOp extends DocumentOperator<FillColorArgs, { v: string }> {
   readonly kind = "fillColor";
@@ -198,206 +148,47 @@ export class FillColorOp extends DocumentOperator<FillColorArgs, { v: string }> 
   }
 }
 
-// ---- ② 记录一次「新层已创建」（addLayer/duplicate/导入为图层；层由调用方经 doc API 创建）----
-// data 循环：null（层在树上）↔ spec（层被 undo 摘下时捕获）。
-export interface AddLayerArgs { layerId: number; index: number; parentId: number | null; prevActiveId: number | null; layerName: string }
-export class AddLayerRecordOp extends DocumentOperator<AddLayerArgs, LayerSpecShape | null> {
-  readonly kind = "addLayer";
-  forward(w: Workpiece, args: AddLayerArgs, data: LayerSpecShape | null | undefined): OpResult<LayerSpecShape | null> {
-    const doc = this.mut(w).doc;
-    if (data === undefined) {                       // 首跑：层已由调用方创建
-      if (!findNodeById(doc.layers, args.layerId)) return { ok: false, msg: "layer not created" };
-      return { ok: true, replaced: null };
+// ---- ① 整 doc 几何 resize（T3b-2：crop/cropResample/resample 的实例交换记账）----
+// pre-applied：doc-ops 已逐叶 exchangeLeafPixels 换上新实例，旧实例列表随 _initial 交入。
+// data 循环 = 「另一侧」的实例集；swap = 逐叶 exchange（所有权互换，零拷贝）。json 尺寸
+// （width/height）走 layerTree2.setTreeProp 进树 record——同一 step 内两账同向翻，一致性由
+// 栈序保证（先于本步的 stroke record 要 undo 必先穿过本步，届时 docW 已还原、across 匹配）。
+type ResizeSide = { leaves: { layerId: number; lp: LayerPixels }[] };
+export interface DocResizeArgs { _initial?: ResizeSide | null }
+export class DocResizeOp extends DocumentOperator<DocResizeArgs, ResizeSide> {
+  readonly kind = "docResize";
+  forward(w: Workpiece, args: DocResizeArgs, data: ResizeSide | undefined): OpResult<ResizeSide> {
+    if (data === undefined) {                       // 首跑：pre-applied，交出旧实例集
+      const initial = args._initial;
+      args._initial = null;
+      if (!initial) return { ok: false, msg: "missing _initial" };
+      return { ok: true, replaced: initial };
     }
-    if (!data) return { ok: false, msg: "redo without spec" };
-    if (!doc.insertLayerAt(args.index, data, args.parentId)) return { ok: false, msg: "insert failed" };
-    disposeLayerSpec(data);                         // 已消费
-    doc.setActiveById(args.layerId);
-    return { ok: true, replaced: null };
+    return { ok: true, replaced: this._swap(this.mut(w).doc, data) };
   }
-  backward(w: Workpiece, args: AddLayerArgs, _data: LayerSpecShape | null): OpResult<LayerSpecShape | null> {
-    const doc = this.mut(w).doc;
-    const L = leafById(doc, args.layerId);
-    if (!L) return { ok: false, msg: "layer gone" };
-    const spec = doc.layerSpec(L);
-    doc.removeLayer(args.layerId, true);
-    L.pixels.dispose();                             // spec 已持句柄副本
-    if (args.prevActiveId != null) doc.setActiveById(args.prevActiveId);
-    return { ok: true, replaced: spec };
+  backward(w: Workpiece, _args: DocResizeArgs, data: ResizeSide): OpResult<ResizeSide> {
+    return { ok: true, replaced: this._swap(this.mut(w).doc, data) };
   }
-  override estimateQuotaBytes(_a: AddLayerArgs, data: LayerSpecShape | null | undefined): number {
-    return 512 + estimateSnapBytes(data?.snap);
-  }
-  override disposeData(_a: AddLayerArgs, data: LayerSpecShape | null | undefined): void { disposeLayerSpec(data ?? null); }
-  override statusFor(dir: "do" | "undo" | "redo", args: AddLayerArgs): string | undefined {
-    if (dir === "undo") return t("se.undoCreateLayer", { name: args.layerName });
-    if (dir === "redo") return t("se.restoredLayer", { name: args.layerName });
-    return undefined;
-  }
-}
-
-// ---- ② 删除叶层（操作型：forward 自己捕快照+删；组删除走 TreeStructureOp）----
-interface RemovedRecord { spec: LayerSpecShape; index: number; parentId: number | null; prevActiveId: number | null }
-export interface RemoveLayerArgs { layerId: number; layerName: string; allowEmpty?: boolean }
-export class RemoveLayerRecordOp extends DocumentOperator<RemoveLayerArgs, RemovedRecord | undefined> {
-  readonly kind = "removeLayer";
-  forward(w: Workpiece, args: RemoveLayerArgs, _data: RemovedRecord | undefined): OpResult<RemovedRecord | undefined> {
-    const doc = this.mut(w).doc;
-    const L = leafById(doc, args.layerId);
-    const loc = doc.locateNode(args.layerId);
-    if (!L || !loc) return { ok: false, msg: "layer gone" };
-    const prevActiveId = doc.activeId;
-    const spec = doc.layerSpec(L);
-    if (!doc.removeLayer(args.layerId, args.allowEmpty ?? false)) {
-      disposeLayerSpec(spec);
-      return { ok: false, msg: "keep-one guard" };
-    }
-    L.pixels.dispose();                             // spec 已持句柄副本，本体退场
-    return { ok: true, replaced: { spec, index: loc.index, parentId: loc.parentId, prevActiveId } };
-  }
-  backward(w: Workpiece, args: RemoveLayerArgs, data: RemovedRecord): OpResult<RemovedRecord | undefined> {
-    const doc = this.mut(w).doc;
-    if (!doc.insertLayerAt(data.index, data.spec, data.parentId)) return { ok: false, msg: "insert failed" };
-    disposeLayerSpec(data.spec);
-    doc.setActiveById(args.layerId);                // v125：恢复的层设为 active + toast
-    return { ok: true, replaced: undefined };
-  }
-  override estimateQuotaBytes(_a: RemoveLayerArgs, data: RemovedRecord | undefined): number {
-    return 512 + estimateSnapBytes(data?.spec.snap);
-  }
-  override disposeData(_a: RemoveLayerArgs, data: RemovedRecord | undefined): void {
-    if (data) disposeLayerSpec(data.spec);
-  }
-  override statusFor(dir: "do" | "undo" | "redo", args: RemoveLayerArgs): string | undefined {
-    if (dir === "undo") return t("se.restoredLayer", { name: args.layerName });
-    if (dir === "redo") return t("se.deletedLayer", { name: args.layerName });
-    return undefined;
-  }
-}
-
-// ---- ② 同级移动 ----
-export class MoveLayerOp extends DocumentOperator<{ layerId: number; delta: number }, undefined> {
-  readonly kind = "moveLayer";
-  forward(w: Workpiece, args: { layerId: number; delta: number }, _d: undefined): OpResult<undefined> {
-    const doc = this.mut(w).doc;
-    return doc.moveLayer(args.layerId, args.delta) ? { ok: true } : { ok: false, msg: "cannot move" };
-  }
-  backward(w: Workpiece, args: { layerId: number; delta: number }, _d: undefined): OpResult<undefined> {
-    const doc = this.mut(w).doc;
-    return doc.moveLayer(args.layerId, -args.delta) ? { ok: true } : { ok: false, msg: "cannot move back" };
-  }
-}
-
-// ---- ① 树结构 swap（编组/解组/移入移出/删组；snapshotTree 保叶活引用，零像素拷贝）----
-// 事务型：调用方 snapshotTree → mutate → snapshotTree → run（首跑 restoreTree(after) 幂等）。
-// ⚠ 已知取舍：删组后该 entry 被驱逐/截断时，游离叶的句柄不 dispose（多 entry 可能共享同批活引用，
-//   贸然释放会把别的 entry 的 undo 恢复成空层）。泄漏 bounded（换文档时 clearHistory+adoptState 清），
-//   池 FR assert 可见。层级组件真正收进 workpiece internals（后续切片）时给出所有权解。
-type TreeSnap = ReturnType<PaintDoc["snapshotTree"]>;
-export interface TreeStructureArgs { before: TreeSnap; after: TreeSnap; undoStatus?: string; redoStatus?: string }
-export class TreeStructureOp extends DocumentOperator<TreeStructureArgs, undefined> {
-  readonly kind = "treeStructure";
-  forward(w: Workpiece, args: TreeStructureArgs, _d: undefined): OpResult<undefined> {
-    this.mut(w).doc.restoreTree(args.after);
-    return { ok: true };
-  }
-  backward(w: Workpiece, args: TreeStructureArgs, _d: undefined): OpResult<undefined> {
-    this.mut(w).doc.restoreTree(args.before);
-    return { ok: true };
-  }
-  override statusFor(dir: "do" | "undo" | "redo", args: TreeStructureArgs): string | undefined {
-    if (dir === "undo") return args.undoStatus;
-    if (dir === "redo") return args.redoStatus;
-    return undefined;
-  }
-}
-
-// ---- ② 向下合并（forward 自己动手：捕 under 前态 + 调 doc.mergeDownLayer）----
-type MergeRecord = {
-  underId: number;
-  underBefore: LayerSnap; underBeforeOpacity: number; underBeforeMode: string; underBeforeClipping: boolean;
-  activeSpec: LayerSpecShape; activeLoc: { parentId: number | null; index: number };
-};
-export class MergeDownOp extends DocumentOperator<{ layerId: number }, MergeRecord | undefined> {
-  readonly kind = "mergeDown";
-  forward(w: Workpiece, args: { layerId: number }, data: MergeRecord | undefined): OpResult<MergeRecord | undefined> {
-    const doc = this.mut(w).doc;
-    if (data) this.disposeData(args, data);        // redo：旧记录作废，重合并重捕
-    const L = leafById(doc, args.layerId);
-    if (!L) return { ok: false, msg: "layer gone" };
-    const r = doc.mergeDownLayer(L) as { ok: boolean; reason?: string } & Partial<MergeRecord> & { underAfter?: LayerSnap };
-    if (!r.ok) return { ok: false, msg: r.reason };
-    disposeLayerSnap(r.underAfter);                // redo 重算，不留 after 快照
+  private _swap(doc: PaintingView, data: ResizeSide): ResizeSide {
     return {
-      ok: true,
-      replaced: {
-        underId: r.underId!, underBefore: r.underBefore!, underBeforeOpacity: r.underBeforeOpacity!,
-        underBeforeMode: r.underBeforeMode!, underBeforeClipping: !!r.underBeforeClipping,
-        activeSpec: r.activeSpec!, activeLoc: r.activeLoc!,
-      },
+      leaves: data.leaves.map((e) => {
+        const cur = doc.exchangeLeafPixels(e.layerId, e.lp);
+        if (!cur) throw new Error(`DocResizeOp: swap 时层已不在（layerId=${e.layerId}——栈序 bug）`);
+        return { layerId: e.layerId, lp: cur };
+      }),
     };
   }
-  backward(w: Workpiece, args: { layerId: number }, data: MergeRecord): OpResult<MergeRecord | undefined> {
-    const doc = this.mut(w).doc;
-    const under = leafById(doc, data.underId);
-    if (!under) return { ok: false, msg: "under gone" };
-    under.restoreFromSnapshot(data.underBefore);
-    under.opacity = data.underBeforeOpacity;
-    under.mode = data.underBeforeMode;
-    under.clippingMask = data.underBeforeClipping;
-    if (!doc.insertLayerAt(data.activeLoc.index, data.activeSpec, data.activeLoc.parentId)) return { ok: false, msg: "insert failed" };
-    doc.setActiveById(args.layerId);
-    this.disposeData(args, data);                  // 快照已消费
-    return { ok: true, replaced: undefined };
+  override estimateQuotaBytes(args: DocResizeArgs, data: ResizeSide | undefined): number {
+    let sum = 1024;
+    for (const e of data?.leaves ?? []) sum += estimateInstanceBytes(e.lp);
+    for (const e of args._initial?.leaves ?? []) sum += estimateInstanceBytes(e.lp);
+    return sum;
   }
-  override estimateQuotaBytes(_a: { layerId: number }, data: MergeRecord | undefined): number {
-    return data ? 512 + estimateSnapBytes(data.underBefore) + estimateSnapBytes(data.activeSpec.snap) : 512;
-  }
-  override disposeData(_a: { layerId: number }, data: MergeRecord | undefined): void {
-    if (!data) return;
-    disposeLayerSnap(data.underBefore);
-    disposeLayerSpec(data.activeSpec);
-  }
-  override statusFor(dir: "do" | "undo" | "redo", _args: { layerId: number }): string | undefined {
-    return dir === "redo" ? t("se.mergedDown") : undefined;
-  }
-}
-
-// ---- ① 整 doc 变换（crop/resample/flip/rotate/offset；事务型：调用方前后各拍 snapshotAll）----
-type DocSnapAll = ReturnType<PaintDoc["snapshotAll"]>;
-export interface DocTransformArgs {
-  // persp = 形状笔透视配置快照（ADR-0006：VP 是 doc 坐标的 desk 态，裁剪/旋转随 doc 几何重映射，
-  //   undo/redo 必须一起还原否则透视静默错位）。对 operator 不透明，还原经注入回调。
-  before: { doc: DocSnapAll; viewport?: Record<string, number> | null; persp?: unknown };
-  after: { doc: DocSnapAll; viewport?: Record<string, number> | null; persp?: unknown };
-}
-export class DocTransformOp extends DocumentOperator<DocTransformArgs, boolean> {
-  readonly kind = "docTransform";
-  // viewport/尺寸标签/透视配置是 board/UI/desk 的事，注入回调（workpiece 不碰 DOM）。
-  private _applyUi: (viewport: Record<string, number> | null | undefined, persp?: unknown) => void;
-  constructor(applyUi: (viewport: Record<string, number> | null | undefined, persp?: unknown) => void) { super(); this._applyUi = applyUi; }
-  forward(w: Workpiece, args: DocTransformArgs, data: boolean | undefined): OpResult<boolean> {
-    if (data !== undefined) {                       // redo（首跑 pre-applied）
-      this.mut(w).doc.restoreSnapshotAll(args.after.doc);
-      this._applyUi(args.after.viewport, args.after.persp);
-    }
-    return { ok: true, replaced: true };
-  }
-  backward(w: Workpiece, args: DocTransformArgs, _data: boolean): OpResult<boolean> {
-    this.mut(w).doc.restoreSnapshotAll(args.before.doc);
-    this._applyUi(args.before.viewport, args.before.persp);
-    return { ok: true, replaced: true };
-  }
-  override estimateQuotaBytes(args: DocTransformArgs): number {
-    return 1024 + estimateDeepBytes(args.before.doc.layers) + estimateDeepBytes(args.after.doc.layers)
-      + estimateSelectionBytes(args.before.doc.selection) + estimateSelectionBytes(args.after.doc.selection);
-  }
-  override disposeData(args: DocTransformArgs): void {
-    disposeDeepSnapNodes(args.before.doc.layers);
-    disposeDeepSnapNodes(args.after.doc.layers);
-    // v0.4.6：快照持有的 selection clone（tile 句柄）一并释放。
-    if (args.before.doc.selection && !args.before.doc.selection.disposed) args.before.doc.selection.dispose();
-    if (args.after.doc.selection && !args.after.doc.selection.disposed) args.after.doc.selection.dispose();
+  override disposeData(args: DocResizeArgs, data: ResizeSide | undefined): void {
+    for (const e of data?.leaves ?? []) e.lp.dispose();
+    if (data) data.leaves = [];
+    for (const e of args._initial?.leaves ?? []) e.lp.dispose();
+    if (args._initial) args._initial = null;
   }
 }
 
@@ -405,35 +196,20 @@ export class DocTransformOp extends DocumentOperator<DocTransformArgs, boolean> 
 export interface OperatorRegistry {
   pixels: SwapPixelsOp;
   selection: SwapSelectionOp;
-  layerProp: LayerPropOp;
-  referenceLayer: ReferenceLayerOp;
   fillColor: FillColorOp;
-  addLayer: AddLayerRecordOp;
-  removeLayer: RemoveLayerRecordOp;
-  moveLayer: MoveLayerOp;
-  treeStructure: TreeStructureOp;
-  mergeDown: MergeDownOp;
-  docTransform: DocTransformOp;
+  docResize: DocResizeOp;
   liftFloat: LiftFloatOp;
   floatTransform: FloatTransformOp;
   dropFloat: DropFloatOp;
 }
 export function makeOperators(deps: {
-  applyDocTransformUi: (viewport: Record<string, number> | null | undefined, persp?: unknown) => void;
   fillColor: { get(): string; set(hex: string): void };
 }): OperatorRegistry {
   return {
     pixels: new SwapPixelsOp(),
     selection: new SwapSelectionOp(),
-    layerProp: new LayerPropOp(),
-    referenceLayer: new ReferenceLayerOp(),
     fillColor: new FillColorOp(deps.fillColor),
-    addLayer: new AddLayerRecordOp(),
-    removeLayer: new RemoveLayerRecordOp(),
-    moveLayer: new MoveLayerOp(),
-    treeStructure: new TreeStructureOp(),
-    mergeDown: new MergeDownOp(),
-    docTransform: new DocTransformOp(deps.applyDocTransformUi),
+    docResize: new DocResizeOp(),
     liftFloat: new LiftFloatOp(),
     floatTransform: new FloatTransformOp(),
     dropFloat: new DropFloatOp(),

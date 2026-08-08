@@ -1,5 +1,5 @@
 # workpiece v2 施工 handoff（令牌+collector 纪元）
-> as-of v0.8.8 / 2026-08-07。读者 = 接手施工的下一个 AI session。
+> as-of v0.8.13 / 2026-08-07。读者 = 接手施工的下一个 AI session。
 > 拍板（why）= `ai-docs/adr/0008-workpiece-v2-token-collector.md`；目标契约（what）=
 > `20260807-workpiece-v2-proposal-h.md`（**pin 住的接口**，形状改动要回写它）；本文 = how/施工序。
 > 现状 .h = `api/`（`bash scripts/gen-api.sh` 重生成）。
@@ -16,7 +16,7 @@
   东西就行」。桥/兼容层的取舍自己拍，唯一硬约束 = 只减不增 + T5 物理删除（见 legacy-bridge.ts 头）。
   **要问 user 的只有非中间态的事**：终态契约（提案 .h）的形状偏离、undo 白/黑名单变动、数据安全。
 - push 纪律照旧：新 session 第一批默认不 push；user 本 session 口头授权后可自动推 dev；prod 永远必问。
-- 测试基线：1189 node 测试 + tsc 0 错 + `bash scripts/build.sh` 全 lint 过。
+- 测试基线：1239 node 测试 + tsc 0 错 + `bash scripts/build.sh` 全 lint 过。
 - `test/run.mjs` 是显式清单不是 glob——新测试必须注册。
 - 版本：每片 `./bump.sh v0.8.N-日期` patch 递增；**v2 完工要不要 bump 0.9 由 user 显式拍**（minor 权限硬规则）。
 
@@ -71,7 +71,7 @@
 - `bash scripts/gen-api.sh` 重打 .h，与提案 .h 对账（形状偏差要么回写提案要么改实现）；
 - CONTEXT.md 词条更新（token/collector/record/组件表）；handoff 进度节；真机批清单汇总一次交付。
 
-## 1.5 施工进度（as-of v0.8.12 / 2026-08-07，worktree-workpiece-v2 分支）
+## 1.5 施工进度（as-of v0.8.13 / 2026-08-07，worktree-workpiece-v2 分支）
 
 > user 已裁定 §0 悬案：**不推 dev、不等真机，直接开工**（2026-08-07 本 session）。
 
@@ -88,15 +88,37 @@
   （引用计数，record 驱逐才释放——**删组泄漏回归锚已钉**）。
 - **T3b-1 ✓**（v0.8.12）：PaintingWorkpiece 树模式（opts.tree）+ load(PaintingData) 令牌灌入
   + exportData 冻结快照 + addGroup/loadRoot verb。PaintingData 定形见提案 .h。
-- **T3b-2（下一棒从这开工）= app cutover**：app.ts 从 host 模式换树模式；ora/psd 解码器产
-  PaintingData；session-state 装载走 wp2.load()；board/render 喂树从 doc.layers 改
-  layerTree.view() 映射；29 个 import doc.ts 文件逐个改读口；杀 ctx.docRaw/DocView/readDoc；
-  v1 LayerTree/SelectionFace 门面的 doc 依赖同批清。tsc 是审计器。
-  然后 T4（selection/float/pendingFill/persp 组件化，顺手消 float 双记账）→ T5 拆旧
-  （operators/undo-history/write-gate/legacy-bridge/workpiece.ts v1；workpiece2/layer-tree2 正名）
-  → T6 GL 双 facade → T7 收口。
-- **落盘注意**：本 session 被 worktree 隔离 hook 挡住无法 merge 本地 main（与上一棒同）——
-  下一棒进场先在主 checkout `git merge --ff-only worktree-workpiece-v2`。
+- **T3b-2 ✓**（v0.8.13）：**app cutover 完成——PaintDoc 出局，树模式 = 文档 SSoT**。
+  - app.ts：`wp2 = PaintingWorkpiece({tree})` + `doc = new PaintingView(wp2)`（端口，DocView 同形
+    读面 + 选区过渡宿）——board/input/lasso/引擎/23 个消费文件几乎零语义改动（类型 Layer→ViewLeaf
+    等机械换名）。ctx.docRaw / DocView / readDoc() 全杀（readView() 是 port 管道，T5 随 v1 拆）。
+  - 门面换心：layer-tree.ts 保名，方法体全走 `history.withPoint`（共享令牌，checkpoint:false 聚合
+    语义保住）+ layerTree2 verbs；treeTx 退役，组合动作各归各名（addGroup/ungroup/collapseGroup/
+    moveIntoGroup/moveOutOfGroup/explodeLayer/stampAll）；undo/redo 状态栏文案走 statuses→step.hint。
+  - operators.ts 瘦身：7 族结构 op + DocTransformOp 删；残余 = pixels/selection/fillColor/float 三件
+    套 + 新 DocResizeOp（实例交换）。doc-ops 换 v2 脊柱：flip/rot90/offset 走 computed 白名单、
+    crop/cropResample/resample 走 exchange+DocResizeOp、json 尺寸走 setTreeProp(width/height)、
+    viewport/persp 还原 = **step.hint 落地**（compound({hint})，T4 待办只剩 persp 组件化）。
+  - codec：decodeOraToPainting 产 PaintingData（sidecar 随行）；保存 = wp2.exportData() →
+    paintingDataToEncodeDoc（纯切片，无句柄无 dispose）；session-state 装载 = input.clearHistory →
+    wp2.load → clearSelectionOnLoad；newDoc/import/revert 全令牌化。freezeDocForEncode 仅测试在用。
+  - 测试：1239 绿 + tsc 0 + build.sh lint 过。行为锚已迁：workpiece-layer-tree.test（v2 门面）、
+    operators.test（残余集+DocResize+所有权收支）、integrity ①改写成「无令牌 verb → throw」令牌墙锚
+    （旧病理结构上不可能）、write-gate.test 裁成机械契约。float-ops/selection-face 测试仍跑 PaintDoc
+    基座（结构兼容，T4 迁移时重写）。
+  - ⚠ 施工中抓到的真雷（已修，后续别再踩）：**实例交换段必须 _suspendCollect**——mapLeaf 造新实例
+    的 putRegion 会被写时扣押逮到（seal 时已 exchange 装上、解析到 layerId → across drift 炸 undo）。
+  - ⚠ 已知过渡态：fillLayer0/decoder 基线写 = 无令牌白写（load 前基线，不入 undo，es.adopted 管脏）；
+    panel 命名 helper（图层 N/组 N）落 layers-panel；组折叠仍在 panel collapsedIds（从未持久化）。
+- **T4（下一棒从这开工）**= selection/float/pendingFill/persp 组件化：SelectionComponent（substrate
+  现在 PaintingView._selection 过渡宿）、FloatLayerComponent（float-ops 已端口化，顺手消
+  floating-transform 三处 _initialBefore 双记账）、PendingFill（FillColorOp 死）、PerspComponent
+  （doc-ops hint 里的 persp 部分迁走）→ T5 拆旧（operators/undo-history/write-gate/legacy-bridge/
+  workpiece.ts v1/layer-tree.ts 门面/doc.ts PaintDoc 残余；workpiece2/layer-tree2 正名；
+  painting-view.ts 归宿评估——正名 or 随引擎迁 tiles 读口后拆）→ T6 GL 双 facade → T7 收口。
+- **落盘注意**：T1-T3b-1 已由上一棒 merge 进本地 main（762e068）；本棒（T3b-2 = v0.8.13）在
+  worktree-workpiece-v2 分支，merge 回本地 main 若再被 worktree 隔离 hook 挡，下一棒进场先在主
+  checkout `git merge --ff-only worktree-workpiece-v2`。
 
 ## 2. 地雷
 

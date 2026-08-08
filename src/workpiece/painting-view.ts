@@ -203,6 +203,9 @@ export class PaintingView {
   constructor(wp: PaintingWorkpiece) {
     if (!wp.layerTree) throw new Error("PaintingView: 需要树模式的 PaintingWorkpiece（opts.tree）");
     this._wp = wp;
+    // 主动跟车：任何 commit/undo/redo/cancel 后立刻 resync——持有 ViewLeaf 引用跨 commit 的
+    // 消费者（引擎/测试）读 props 不吃 stale 镜像（lazy _sync 只兜「谁先读 layers」的路径）。
+    wp.onChange(() => this._sync());
   }
 
   private get _tree() { return this._wp.layerTree!; }

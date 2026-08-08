@@ -19,13 +19,13 @@ import {
   type OpResult, type WorkpieceInternals,
   type FloatState, type FloatTransformMeta, type FloatRect, type WorkpieceFloat,
 } from "./workpiece.ts";
-import { findNodeById, eachLeaf, disposeLayerSnap, type Layer, type LayerSnap, type PaintDoc } from "../doc.ts";
+import { findViewNodeById, eachViewLeaf, disposeViewSnap, type ViewLeaf, type ViewLeafSnap, type PaintingView } from "./painting-view.ts";
 import { LayerPixels } from "../tiles/tile-layer.ts";
 import type { Selection } from "../selection.ts";
 
 let _floatIdCounter = 1;
 
-// ---- 配额估计（同 LayerSnap 规：raw 记 0 走共享池配额，压缩后按压缩字节/refCount）----
+// ---- 配额估计（同 ViewLeafSnap 规：raw 记 0 走共享池配额，压缩后按压缩字节/refCount）----
 export function estimateFloatPixelBytes(lp: LayerPixels): number {
   let sum = 0;
   for (const h of lp.handles()) {
@@ -40,7 +40,7 @@ function estimateFloatStateBytes(fs: FloatState | null): number {
   for (const f of fs.floats) sum += estimateFloatPixelBytes(f.pixels);
   return sum;
 }
-function estimateSnapBytes(snap: LayerSnap | null | undefined): number {
+function estimateSnapBytes(snap: ViewLeafSnap | null | undefined): number {
   if (!snap) return 0;
   let sum = 0;
   for (const [, h] of snap.pixels.tiles) {
@@ -70,16 +70,16 @@ export function cloneFloatMeta(t: FloatTransformMeta): FloatTransformMeta {
   };
 }
 
-function leafById(doc: PaintDoc, id: number): Layer | null {
-  const n = findNodeById(doc.layers, id);
-  return n && !n.isGroup ? (n as Layer) : null;
+function leafById(doc: PaintingView, id: number): ViewLeaf | null {
+  const n = findViewNodeById(doc.layers, id);
+  return n && !n.isGroup ? (n as ViewLeaf) : null;
 }
 
 // ============ 像素纯函数（typed-array；node 全测） ============
 
 // leaf ∩ selection → 浮层像素（trim 到非透明内容紧 bbox；不足 2×2 → null，v232 误触级别）。
 // sel=null = 隐式整层全选（fallbackFullLayer）。纯读，不动 leaf。
-export function extractFloatPixels(leaf: Layer, sel: Selection | null): WorkpieceFloat | null {
+export function extractFloatPixels(leaf: ViewLeaf, sel: Selection | null): WorkpieceFloat | null {
   const content = leaf.pixels.contentBounds(true);
   if (!content) return null;
   // 选区可能跨内容框外；clip 到交集
@@ -124,9 +124,9 @@ export function extractFloatPixels(leaf: Layer, sel: Selection | null): Workpiec
 }
 
 // 源层挖洞缓冲（dst-out 等价：a' = a·(255−m)/255；sel=null = 隐式全选 → 区域清空）。
-// 纯函数：调用方经 leaf.putImageData 落层（保 Layer 物化缓存失效）；全透明化的 tile 由
+// 纯函数：调用方经 leaf.putImageData 落层（保 ViewLeaf 物化缓存失效）；全透明化的 tile 由
 // putRegion 自动回收（dirty 标记 → GL 增量重传，路径同旧 editRegion）。
-export function composeCutHole(leaf: Layer, sel: Selection | null, region: FloatRect): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } | null {
+export function composeCutHole(leaf: ViewLeaf, sel: Selection | null, region: FloatRect): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } | null {
   const { x, y, w, h } = region;
   if (w <= 0 || h <= 0) return null;
   const buf = leaf.pixels.getRegion(x, y, w, h);
@@ -138,15 +138,15 @@ export function composeCutHole(leaf: Layer, sel: Selection | null, region: Float
 }
 
 // putImageData 只消费 {width,height,data}——node 无 ImageData 构造器时用普通对象喂（测试路径）。
-export function applyRegionBuf(leaf: Layer, r: { x: number; y: number; w: number; h: number; data: Uint8ClampedArray }): void {
+export function applyRegionBuf(leaf: ViewLeaf, r: { x: number; y: number; w: number; h: number; data: Uint8ClampedArray }): void {
   leaf.putImageData(r.x, r.y, { width: r.w, height: r.h, data: r.data } as unknown as ImageData);
 }
 
 // reject 的 identity 写回：float 像素在原 rect 处 source-over 落到 leaf 当前内容之上
 // （straight-alpha 合成；stamp 保留、float 在其上；无重采样）。返回合成好的 region 缓冲，
-// 调用方负责 leaf.putImageData（保 Layer 物化缓存失效）。
+// 调用方负责 leaf.putImageData（保 ViewLeaf 物化缓存失效）。
 // (ox,oy)：整数像素偏移（commit/stamp 的整数平移快路用；reject 传缺省 0,0 = 原位）。
-export function composeIdentityWriteback(leaf: Layer, f: WorkpieceFloat, ox = 0, oy = 0): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
+export function composeIdentityWriteback(leaf: ViewLeaf, f: WorkpieceFloat, ox = 0, oy = 0): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
   const { w, h } = f.rect;
   return composeRigidWriteback(leaf, f, {
     dx0: f.rect.x + ox, dy0: f.rect.y + oy, dw: w, dh: h,
@@ -165,8 +165,8 @@ export interface RigidMap {
 
 // 任意 straight RGBA 缓冲在 (x,y) 处 source-over 落到 leaf 当前内容之上（typed array，
 // 零 canvas premult 往返——v0.6.38 warp bake 落层用，取代 editRegion/drawImage）。
-// 调用方负责 leaf.putImageData（保 Layer 物化缓存失效）。
-export function composeOverWriteback(leaf: Layer, x: number, y: number, w: number, h: number, src: Uint8ClampedArray): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
+// 调用方负责 leaf.putImageData（保 ViewLeaf 物化缓存失效）。
+export function composeOverWriteback(leaf: ViewLeaf, x: number, y: number, w: number, h: number, src: Uint8ClampedArray): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
   const dst = leaf.pixels.getRegion(x, y, w, h);
   for (let i = 0; i < dst.length; i += 4) {
     const fa = src[i + 3];
@@ -189,8 +189,8 @@ export function composeOverWriteback(leaf: Layer, x: number, y: number, w: numbe
 }
 
 // 整数刚体写回：float 像素按置换映射 source-over 落到 leaf 当前内容之上（straight-alpha，
-// 逐字节精确、与采样模式无关）。调用方负责 leaf.putImageData（保 Layer 物化缓存失效）。
-export function composeRigidWriteback(leaf: Layer, f: WorkpieceFloat, m: RigidMap): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
+// 逐字节精确、与采样模式无关）。调用方负责 leaf.putImageData（保 ViewLeaf 物化缓存失效）。
+export function composeRigidWriteback(leaf: ViewLeaf, f: WorkpieceFloat, m: RigidMap): { x: number; y: number; w: number; h: number; data: Uint8ClampedArray } {
   const { w, h } = f.rect;
   const { dx0, dy0, dw, dh } = m;
   const dst = leaf.pixels.getRegion(dx0, dy0, dw, dh);
@@ -231,7 +231,7 @@ export function composeRigidWriteback(leaf: Layer, f: WorkpieceFloat, m: RigidMa
 export interface LiftFloatArgs { nodeId: number; cut: boolean; fallbackFullLayer: boolean; ignoreSelection?: boolean }
 export interface LiftSwapData {
   floats: FloatState | null;
-  leafSnaps: { layerId: number; snap: LayerSnap }[];
+  leafSnaps: { layerId: number; snap: ViewLeafSnap }[];
   selection: { v: Selection | null };
 }
 export class LiftFloatOp extends DocumentOperator<LiftFloatArgs, LiftSwapData> {
@@ -241,14 +241,14 @@ export class LiftFloatOp extends DocumentOperator<LiftFloatArgs, LiftSwapData> {
     const doc = its.doc;
     if (data === undefined) {                        // 首跑：bake（纯读）→ 全部成功才 mutate（原子）
       if (its.floats) return { ok: false, msg: "float already active" };
-      const node = findNodeById(doc.layers, args.nodeId);
+      const node = findViewNodeById(doc.layers, args.nodeId);
       if (!node) return { ok: false, msg: "node gone" };
       const sel = args.ignoreSelection ? null : doc.selection;
       if (!sel && !args.fallbackFullLayer) return { ok: false, msg: "no selection" };
-      const leaves: Layer[] = [];
-      if (node.isGroup) eachLeaf(node.children, (L) => leaves.push(L));   // 含隐藏叶（整组一起动）
-      else leaves.push(node as Layer);
-      const baked: { leaf: Layer; float: WorkpieceFloat }[] = [];
+      const leaves: ViewLeaf[] = [];
+      if (node.isGroup) eachViewLeaf(node.children, (L) => leaves.push(L));   // 含隐藏叶（整组一起动）
+      else leaves.push(node as ViewLeaf);
+      const baked: { leaf: ViewLeaf; float: WorkpieceFloat }[] = [];
       for (const leaf of leaves) {
         const f = extractFloatPixels(leaf, sel);
         if (f) baked.push({ leaf, float: f });
@@ -310,7 +310,7 @@ export class LiftFloatOp extends DocumentOperator<LiftFloatArgs, LiftSwapData> {
   // 三元组整体换向。先验证所有层还在（半应用 = 不可恢复，宁 fail 整步）。
   private _swap(its: WorkpieceInternals, data: LiftSwapData): LiftSwapData | null {
     const doc = its.doc;
-    const leaves: Layer[] = [];
+    const leaves: ViewLeaf[] = [];
     for (const s of data.leafSnaps) {
       const L = leafById(doc, s.layerId);
       if (!L) return null;
@@ -319,7 +319,7 @@ export class LiftFloatOp extends DocumentOperator<LiftFloatArgs, LiftSwapData> {
     const curSnaps = data.leafSnaps.map((s, i) => ({ layerId: s.layerId, snap: leaves[i].snapshot() }));
     data.leafSnaps.forEach((s, i) => {
       leaves[i].restoreFromSnapshot(s.snap);
-      disposeLayerSnap(s.snap);                      // 已消费（restore 装 acquire 副本）
+      disposeViewSnap(s.snap);                      // 已消费（restore 装 acquire 副本）
     });
     const curFloats = its.floats;
     its.floats = data.floats;
@@ -335,7 +335,7 @@ export class LiftFloatOp extends DocumentOperator<LiftFloatArgs, LiftSwapData> {
   }
   override disposeData(_a: LiftFloatArgs, data: LiftSwapData | undefined): void {
     if (!data) return;
-    for (const s of data.leafSnaps) disposeLayerSnap(s.snap);
+    for (const s of data.leafSnaps) disposeViewSnap(s.snap);
     data.leafSnaps.length = 0;
     if (data.selection.v && !data.selection.v.disposed) data.selection.v.dispose();
     data.selection.v = null;

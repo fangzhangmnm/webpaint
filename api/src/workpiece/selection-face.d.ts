@@ -1,4 +1,4 @@
-import type { PaintDoc } from "../doc.ts";
+import type { PaintingView } from "./painting-view.ts";
 import type { Selection } from "../selection.ts";
 import type { Workpiece, OpStatus, HistoryFacade } from "./workpiece.ts";
 import type { OperatorRegistry } from "./operators.ts";
@@ -11,7 +11,7 @@ export declare class SelectionFace {
     private _ops;
     constructor(deps: {
         w: Workpiece;
-        doc: PaintDoc;
+        doc: PaintingView;
         history: HistoryFacade;
         ops: OperatorRegistry;
     });
@@ -27,7 +27,7 @@ export declare class SelectionPreviewTx {
     private _doc;
     private _origin;
     private _open;
-    constructor(face: SelectionFace, doc: PaintDoc);
+    constructor(face: SelectionFace, doc: PaintingView);
     origin(): Sel;
     private _assertOpen;
     /** 换预览：上一个预览产物无人接手 → 就地 dispose（origin 与新值本体除外）。write(origin) 合法（= 预览回到原选区）。 */

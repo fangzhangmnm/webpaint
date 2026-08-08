@@ -10,7 +10,7 @@ import { clusterColors, partitionByNearest, hexOf, type ColorCluster } from "./c
 import { colorNameIn, defaultCulture, namingCategories, categoryLabel } from "./color-name.ts";
 import { wireInlineSelect } from "./inline-select.ts";
 import { makeRampSlider, type RampSliderHandle } from "./ui/ramp-slider.ts";
-import { countLeaves, type Layer } from "./doc.ts";
+import { countViewLeaves, type ViewLeaf } from "./workpiece/painting-view.ts";
 import { t } from "./i18n/index.ts";
 import type { AppContext } from "./app-context.ts";
 
@@ -85,10 +85,10 @@ function _recompute() {
 }
 
 // 入口（图层 ⋯ 菜单）。守卫：叶、有像素、还有 ≥1 个空位（k≥2 → 净增 ≥1 叶）。
-export function openExplodeSheet(L: Layer | null) {
+export function openExplodeSheet(L: ViewLeaf | null) {
   if (!L || L.isGroup) return;
   if (L.bboxW <= 0 || L.bboxH <= 0) { ctx.setStatus(t("ex.empty")); return; }
-  const room = ctx.doc.maxLayers - countLeaves(ctx.doc.layers) + 1;   // 原叶让位后可放的分片数
+  const room = ctx.doc.maxLayers - countViewLeaves(ctx.doc.layers) + 1;   // 原叶让位后可放的分片数
   if (room < 2) { ctx.setStatus(t("ex.tooMany", { n: ctx.doc.maxLayers })); return; }
   const rect = { ox: L.bboxX, oy: L.bboxY, w: L.bboxW, h: L.bboxH };
   const region = L.pixels.getRegion(rect.ox, rect.oy, rect.w, rect.h);
@@ -131,17 +131,17 @@ function _commit() {
   }
   if (kept.length < 2) { setStatus(t("ex.empty")); _close(); return; }
   kept.reverse();   // clusters 按占比降序 → 反转后大簇在 parts[0] = 同级最底
-  // v0.8.1（S1）：结构变更走 workpiece.layers.treeTx（snapshotTree 舞蹈下沉；失败=层数超限）。
+  // T3b-2：结构变更走 workpiece.layers.explodeLayer（v2 verb；失败=层数超限）。
   const rect = _state.rect;
-  const r = workpiece.layers.treeTx((d) => d.explodeLayerToLayers(L.id, kept, rect), (out) => ({
+  const r = workpiece.layers.explodeLayer(L.id, kept, { x: rect.ox, y: rect.oy, w: rect.w, h: rect.h }, {
     undoStatus: t("lp.st.unexploded", { name: L.name }),
-    redoStatus: t("lp.st.exploded", { name: L.name, k: out.length }),
-  }));
+    redoStatus: t("lp.st.exploded", { name: L.name, k: kept.length }),
+  });
   if (!r.ok) { setStatus(t("ex.tooMany", { n: doc.maxLayers })); _close(); return; }
   _close();
   afterDocChange();
   board.invalidateAll();
-  setStatus(t("lp.st.exploded", { name: L.name, k: r.value!.length }));
+  setStatus(t("lp.st.exploded", { name: L.name, k: kept.length }));
 }
 
 export function initExplodeSheet(c: AppContext) {

@@ -1,4 +1,4 @@
-import type { DocView } from "./workpiece/doc-view.ts";
+import type { PaintingView } from "./workpiece/painting-view.ts";
 export declare function getCurrentSessionName(): string;
 export declare function setCurrentSessionName(name: string): void;
 /** 合成图 canvas → 缩略图 blob（最长边 = maxSide）。PNG 保 alpha（容器 CSS 背景可独立调色）。
@@ -6,7 +6,7 @@ export declare function setCurrentSessionName(name: string): void;
 export declare function thumbBlobFromCanvas(merged: HTMLCanvasElement | OffscreenCanvas, maxSide?: number): Promise<Blob | null>;
 /** 渲染合成图 blob（分享 PNG/JPG 用）。全走 HTMLCanvasElement.toBlob，
  *  避开 Safari OffscreenCanvas.convertToBlob JPEG 返 null 的 bug。 */
-export declare function renderDocToImageBlob(doc: DocView, mime?: string, quality?: number, scope?: string, cropRect?: {
+export declare function renderDocToImageBlob(doc: PaintingView, mime?: string, quality?: number, scope?: string, cropRect?: {
     x: number;
     y: number;
     w: number;
@@ -20,7 +20,7 @@ export declare function shareOrDownloadBlob(blob: Blob, filename: string, mime?:
     method: string;
 }>;
 /** 把 doc 合成图复制到剪贴板（PNG）。iPad Safari / 桌面都支持。 */
-export declare function copyImageToClipboard(doc: DocView, scope?: string, cropRect?: {
+export declare function copyImageToClipboard(doc: PaintingView, scope?: string, cropRect?: {
     x: number;
     y: number;
     w: number;

@@ -25,7 +25,7 @@ import { t } from "./i18n/index.ts";
 import { setColor } from "./color-panel.ts";
 import { watch } from "../vendor/vue/vue.esm-browser.prod.js";
 import type { AppContext } from "./app-context.ts";
-import type { Layer } from "./doc.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
 
 let _ctx: AppContext | null = null;
 let _lastPersistentMode = "";
@@ -88,7 +88,7 @@ export function commitFillNow(): void {
 function _doCommit(clearSelection: boolean): void {
   _flushColorEntry();   // pending 换色先落栈——undo 顺序 = 先撤 fill 像素再撤换色
   const { doc, board, input, history, workpiece, state, setStatus } = _ctx!;
-  const layer = requireEditableLeaf(doc, setStatus) as Layer | null;
+  const layer = requireEditableLeaf(doc, setStatus) as ViewLeaf | null;
   if (!layer || !doc.selection) return;
   const st = history.compound(workpiece, () => {
     const ok = board.commitFill({ color: state.color, layer });
@@ -148,7 +148,7 @@ export function initFillMode(ctx: AppContext): void {
   // 预览 provider（board 每渲染帧拉取）：active 才给内容；组/隐藏层静默不预览。
   ctx.board.setFillProvider(() => {
     if (!fillPreviewActive()) return null;
-    const leaf = requireEditableLeaf(ctx.doc, null) as Layer | null;
+    const leaf = requireEditableLeaf(ctx.doc, null) as ViewLeaf | null;
     return leaf ? { color: ctx.state.color, layer: leaf } : null;
   });
   // 换色即预览跟色；选区/图层面板触发的重绘走 histchange/invalidate + docVersion 订阅（app.ts）。

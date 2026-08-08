@@ -1,5 +1,5 @@
 import { StrokeSmoother } from "./stroke-smoother.ts";
-import type { Layer } from "./doc.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 interface StampParams {
@@ -15,7 +15,7 @@ interface Walk {
 }
 type Rect = [number, number, number, number];
 interface StrokeState {
-    layer: Layer;
+    layer: ViewLeaf;
     settings: ResolvedBrush;
     mode: string;
     buffered: boolean;
@@ -36,7 +36,7 @@ export declare class BrushEngine {
     _stroke: StrokeState | null;
     constructor();
     _stepFor(s: ResolvedBrush, pressure: number): number;
-    beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, pressure: number, mode?: string, smooth?: {
+    beginStroke(layer: ViewLeaf, settings: ResolvedBrush, x: number, y: number, pressure: number, mode?: string, smooth?: {
         tau?: number;
         deadzone?: number;
         tailBow?: number;
@@ -56,7 +56,7 @@ export declare class BrushEngine {
     collectStamps(): {
         stamps: Stamp[];
         shape: StrokeShape;
-        layer: Layer;
+        layer: ViewLeaf;
         mode: string;
         opacity: number;
         blendMode: string;

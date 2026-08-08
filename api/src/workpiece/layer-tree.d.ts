@@ -1,6 +1,7 @@
-import { type Layer, type PaintDoc } from "../doc.ts";
 import type { Workpiece, OpStatus, HistoryFacade } from "./workpiece.ts";
-import type { OperatorRegistry } from "./operators.ts";
+import type { LayerTree2 } from "./layer-tree2.ts";
+import type { LayerTiles, Rect } from "./layer-tiles.ts";
+import { type PaintingView, type ViewLeaf } from "./painting-view.ts";
 export interface TreeStatuses {
     undoStatus?: string;
     redoStatus?: string;
@@ -8,63 +9,80 @@ export interface TreeStatuses {
 export interface RunOpts {
     checkpoint?: boolean;
     label?: string;
+    statuses?: TreeStatuses;
 }
 export type AddLayerResult = {
     ok: true;
-    layer: Layer;
+    layer: ViewLeaf;
 } | {
     ok: false;
     msg?: string;
 };
 export declare class LayerTree {
-    private _w;
-    private _doc;
     private _history;
-    private _ops;
+    private _tree;
+    private _tiles;
+    private _port;
+    private _status;
     constructor(deps: {
         w: Workpiece;
-        doc: PaintDoc;
         history: HistoryFacade;
-        ops: OperatorRegistry;
+        tree: LayerTree2;
+        tiles: LayerTiles;
+        port: PaintingView;
+        status?: (msg: string) => void;
     });
-    /** 新建空层（组内新建也精确复位；prevActiveId 自动拍：undo 摘层时回创建前的活动层）。
-     *  创建即记账（AddLayerRecordOp 首跑只验证）；像素初始化可在返回后做——undo 摘层时才捕 spec，
-     *  redo 经 insertLayerAt 连像素恢复（v0.7.35 合规形状，undo-stack-integrity 测试钉着）。
-     *  失败：msg="maxLayers"（层数到顶）。 */
+    /** o.statuses → step.hint（undo/redo 时报状态栏；非权威附注）。 */
+    private _hint;
+    private _point;
+    /** 新建空层（active 同级之上 / active 是组则组内顶；active=新层）。失败：msg="maxLayers"。 */
     addLayer(name?: string, o?: RunOpts): AddLayerResult;
-    /** 复制叶层（插源层之上 + 设 active；像素句柄 copy-on-write 零拷贝）。msg="max"|"missing"。 */
+    /** 复制叶层（插源层之上 + 设 active；tileset 句柄共享零拷贝）。msg="max"|"missing"。 */
     duplicateLayer(id: number, o?: RunOpts): AddLayerResult;
-    private _recordAdd;
-    /** 删除叶层（RemoveLayerRecordOp 自捕快照；默认 keep-one 守卫，msg="keep-one guard"）。 */
-    removeLayer(id: number, layerName: string, o?: RunOpts & {
-        allowEmpty?: boolean;
-    }): OpStatus;
-    /** 删组（连带 children；删到 0 叶自动补一张空层，不卡「非空组删不掉」）。 */
+    /** 删除叶层（keep-one 守卫：msg="keep-one guard"）。 */
+    removeLayer(id: number, _layerName: string, o?: RunOpts): OpStatus;
+    /** 删组（连带 children；删到 0 叶自动补一张空层）。 */
     deleteGroup(id: number, statuses: TreeStatuses, o?: RunOpts): OpStatus;
-    /** 同级上移/下移（delta=+1 上 / -1 下；撤销 = 反向 delta）。 */
+    /** 同级上移/下移（delta=+1 上 / -1 下）。 */
     moveLayer(id: number, delta: number, o?: RunOpts): OpStatus;
-    /** 向下合并（合并数学在 doc.mergeDownLayer；msg = 其 reason：bottom/clipping-under/…）。 */
+    /** 向下合并：合成字节在此烤（renderNodesToBytes，与 display 同一套混合数学——v0.6.39 拍板），
+     *  verb 只收字节。msg = bottom | merge-into-group | clipping-under | empty-active | no-gl。 */
     mergeDown(id: number, o?: RunOpts): OpStatus;
     /** 层/组属性（rename/visible/opacity/mode/clippingMask/lockAlpha）。
-     *  initialOld：pre-applied 场景（透明度 slider 拖动期已实时写值，提交只补账）。 */
-    setLayerProp(id: number, prop: string, value: unknown, o?: RunOpts & {
-        initialOld?: {
-            v: unknown;
-        } | null;
-    }): OpStatus;
+     *  拖动期预览走 view 镜像（不碰 json），提交只在此记一账——旧 initialOld 舞蹈退役。 */
+    setLayerProp(id: number, prop: string, value: unknown, o?: RunOpts): OpStatus;
     /** 参考层指定（doc 级 unique；null = 取消）。 */
     setReferenceLayer(id: number | null, o?: RunOpts): OpStatus;
-    /** 清空叶层像素（保留图层/名字/属性；事务型：先清、before 快照交 SwapPixelsOp）。 */
+    /** 清空叶层像素（保留图层/名字/属性）。 */
     clearLayer(id: number, o?: RunOpts): OpStatus;
-    /** 焦点写（**显式声明的不入 undo 写**，v0.8 现状保持：点选活动层不占 undo 步；
-     *  undo/redo 时的 active 还原由各 operator 自带）。返回是否切成。 */
+    /** 焦点写（显式声明的不入 undo 写；undo/redo 的焦点还原由根快照天然给出）。 */
     setActive(id: number): boolean;
-    /** 结构变更 tx 窗口（编组/解组/移入移出/collapse/explode/stampAll…）：
-     *  mutate 拿可变 doc；返回 null/false/undefined = 中止（不入栈——mutate 必须未动状态或已自行回滚）；
-     *  其余返回值 = 成功，前后 snapshotTree 自动入栈。statuses 从 mutate 返回值算 undo/redo 文案。 */
-    treeTx<T>(mutate: (doc: PaintDoc) => T | null | false | undefined, statuses?: (v: T) => TreeStatuses, o?: RunOpts): {
+    /** 新建空组（active 是组 → 嵌入；否则同级之上；active=新组）。命名归调用方（UI 惯例「组 N」）。 */
+    addGroup(name?: string, statuses?: TreeStatuses, o?: RunOpts): {
         ok: boolean;
-        value?: T;
+        groupId?: number;
         msg?: string;
     };
+    /** 解组：children 提到原位。 */
+    ungroup(id: number, statuses: TreeStatuses, o?: RunOpts): OpStatus;
+    /** 组烤成单叶同位替换（#25 collapse）；merged=null = 空组 → 空叶。 */
+    collapseGroup(id: number, merged: {
+        bytes: Uint8ClampedArray;
+        rect: Rect;
+    } | null, statuses: TreeStatuses, o?: RunOpts): OpStatus;
+    /** 移入组（组内顶部）。 */
+    moveIntoGroup(id: number, gid: number, statuses: TreeStatuses, o?: RunOpts): OpStatus;
+    /** 移出组（组同级、组上方）。 */
+    moveOutOfGroup(id: number, statuses: TreeStatuses, o?: RunOpts): OpStatus;
+    /** 按颜色拆分（v0.7.9 explode）：叶同位替换成 n 张新叶。 */
+    explodeLayer(id: number, parts: {
+        data: Uint8ClampedArray;
+        name: string;
+    }[], rect: Rect, statuses: TreeStatuses, o?: RunOpts): OpStatus;
+    /** 盖印全部可见层 → 新叶置顶 + 其余**根级节点**隐藏（组作为组藏，沿旧行为；一个整点）。
+     *  merged=null = 空合成 → 空叶。 */
+    stampAll(name: string, merged: {
+        bytes: Uint8ClampedArray;
+        rect: Rect;
+    } | null, statuses?: TreeStatuses, o?: RunOpts): AddLayerResult;
 }

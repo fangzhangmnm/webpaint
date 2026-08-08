@@ -3,7 +3,7 @@ import { LassoEngine } from "./lasso.ts";
 import { FilterBrushEngine } from "./filter-brush.ts";
 import { ShapeBrushEngine } from "./shape-brush.ts";
 import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
-import type { PaintDoc, Layer } from "./doc.ts";
+import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
 import type { HistoryFacade, Workpiece } from "./workpiece/workpiece.ts";
@@ -13,7 +13,7 @@ import type { LayerTiles } from "./workpiece/layer-tiles.ts";
 import type { WriteToken } from "./workpiece/workpiece2.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import { Selection } from "./selection.ts";
-type Doc = PaintDoc;
+type Doc = PaintingView;
 type History = HistoryFacade;
 interface FilterBrushState {
     Filter: unknown;
@@ -23,7 +23,7 @@ type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
 interface ActiveStroke {
     engine: StrokeEngine;
     token: WriteToken;
-    layer: Layer;
+    layer: ViewLeaf;
     finalize: boolean;
     inPlace: boolean;
 }
@@ -150,7 +150,7 @@ export declare class InputController {
     isStrokeActive(): boolean;
     collectActiveStamps(): ReturnType<BrushEngine["collectStamps"]>;
     abortActiveStroke(): void;
-    liveMutatedLeaf(): Layer | null;
+    liveMutatedLeaf(): ViewLeaf | null;
     _beginFilterBrush(rec: PointerRec): void;
     _beginLasso(rec: PointerRec, e?: PointerEvent): void;
     _endLasso(rec: PointerRec): void;

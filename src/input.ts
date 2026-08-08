@@ -33,7 +33,7 @@ import { inputSmooth } from "./stroke-input-smooth.ts";
 import { t } from "./i18n/index.ts";
 import { SMOOTH } from "./smooth-config.ts";
 import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
-import type { PaintDoc, Layer } from "./doc.ts";
+import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
 import type { HistoryFacade, Workpiece } from "./workpiece/workpiece.ts";
@@ -46,8 +46,8 @@ import { Selection } from "./selection.ts";
 import { selPenSettingsFrom, stampsToBinaryGray8 } from "./sel-pen.ts";
 
 // ---- 引擎真类型已全部 .ts 化，直接 import（见各引擎模块）。本文件仅保留以下接缝别名/最小壳。----
-// doc 现取 PaintDoc 真类型（board/lasso 都吃它）。
-type Doc = PaintDoc;
+// doc 现取 PaintingView 真类型（board/lasso 都吃它）。
+type Doc = PaintingView;
 // 共享 undo 编排门面（T2 起 = LegacyHistory 桥骑 v2 栈；HistoryFacade 形状不变）。
 type History = HistoryFacade;
 // filterBrush 当前激活态：Filter 是 filter-brush.ts 的 BrushFilter（未 export，对 input 不透明）+ params。
@@ -61,7 +61,7 @@ type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
 //   GL 模式下这类笔的 live 预览要靠 board 每帧把活动层重传 GPU（buffered brush 走 GPU stamp overlay，不算）。
 // v2（T2）：tx → token+layer。像素写不再拍整层快照——描边期写 layer.pixels 被 LayerTiles collector
 //   写时扣押；commit 打包一步 / cancel 倒序回滚。
-interface ActiveStroke { engine: StrokeEngine; token: WriteToken; layer: Layer; finalize: boolean; inPlace: boolean; }
+interface ActiveStroke { engine: StrokeEngine; token: WriteToken; layer: ViewLeaf; finalize: boolean; inPlace: boolean; }
 
 // 选区变化 entry（lasso.endPath/setSelection 产 → _pushSelEntry 走 workpiece.sel 记账口）。
 //   （LassoEntry 已死 v0.4.7：accept/reject 的 operator 编排收进 FloatingTransform。）
@@ -884,7 +884,7 @@ export class InputController {
   // ---- 笔画 ----
   // 笔触 = 一个 "stroke" type 的 history entry。endStroke 时 push。
   // entry shape：{ type: "stroke", layerId, before, after, beforeBlob, afterBlob }
-  // - before/after = Layer.snapshot()（bboxX/Y/W/H + imageData）
+  // - before/after = ViewLeaf.snapshot()（bboxX/Y/W/H + imageData）
   // - blob 字段 push 后异步 toBlob 填，填好后释放 imageData
   // 详见 ai-docs/20260527-undo-architecture.md。
   // 即时笔位置平滑在 stroke-input-smooth.js（inputSmooth，死区+EMA，pure·可测）；主笔刷走引擎 stroke-smoother.js。
@@ -893,7 +893,7 @@ export class InputController {
     const settings = this.getResolvedBrush();
     if (!settings || !this.doc.activeLayer) return;
     // activeLayer 是 Node（叶|组）；上游 activeEditableLeaf 已硬拒组 → 此处确为可写叶。
-    const layer = this.doc.activeLayer as Layer;
+    const layer = this.doc.activeLayer as ViewLeaf;
     const spec = pixelStrokeSpec(rec.role as string)!;   // draw / erase / shapeBrush → 同 stroke 事务 + finalize
     // engineKey 查表（registry 注释的本意）：draw/erase → brush；shapeBrush → 形状笔。签名一致。
     const eng = this[spec.engineKey as "brush" | "shapeBrush"];
@@ -972,11 +972,11 @@ export class InputController {
 
   // GL live-sync 接缝：描边中原地改像素的笔（liquify/filterBrush/pixelMode brush）→ 返回活动叶，
   //   board 每帧把它重传 GPU 才能显 live 预览（buffered brush 走 GPU stamp overlay，返 null）。非描边 / overlay 笔 → null。
-  liveMutatedLeaf(): Layer | null {
+  liveMutatedLeaf(): ViewLeaf | null {
     const as = this._activeStroke;
     if (!as || !as.inPlace) return null;
     const layer = this.doc.activeLayer;
-    return (layer && !(layer as Layer).isGroup) ? (layer as Layer) : null;
+    return (layer && !(layer as ViewLeaf).isGroup) ? (layer as ViewLeaf) : null;
   }
 
   // ---- Filter brush (v132) ----
@@ -989,7 +989,7 @@ export class InputController {
     if (!fbState || !fbState.Filter || !brushSettings || !this.doc.activeLayer) {
       rec.role = null; return;
     }
-    const layer = this.doc.activeLayer as Layer;   // 组已被上游硬拒，此处确为叶
+    const layer = this.doc.activeLayer as ViewLeaf;   // 组已被上游硬拒，此处确为叶
     const spec = pixelStrokeSpec(rec.role as string)!;   // filterBrush → "stroke" 事务，finalize:false
     const token = this.wp2!.begin(spec.historyType);
     // filterBrush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre → 无需 post-stroke finalize（spec.finalize=false）
@@ -1051,7 +1051,7 @@ export class InputController {
       rec.lastP = null; rec.smP = -1; rec.lastEventTs = -Infinity;
       const scale = this.board.viewport.scale || 1;
       const pressure = e ? effectivePressureFor(rec, e) : 0.5;
-      this.brush.beginStroke(leaf as Layer, settings, dx, dy, pressure, "brush", _resolveSmooth(settings, scale), e?.timeStamp ?? performance.now());
+      this.brush.beginStroke(leaf as ViewLeaf, settings, dx, dy, pressure, "brush", _resolveSmooth(settings, scale), e?.timeStamp ?? performance.now());
       this._selPenLive = true;
       const bbox = this.brush.flushDirty();
       if (bbox) this.board.markDocDirty(bbox[0], bbox[1], bbox[2], bbox[3]);

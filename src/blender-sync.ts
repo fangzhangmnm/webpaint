@@ -6,7 +6,7 @@
 //   - vendored btp 客户端（../vendor/btp/v1/index.js）——BTPClient 走 fetch；连接 = 一个 baseUrl
 //     （本机 localhost / 另一台设备填能连到 server 的 HTTPS 地址，如 tailscale serve 的 *.ts.net）
 //   - 三个 WebPaint 深模块：renderDocToImageBlob（唯一合成器）、smartResample（安全缩放，
-//     step-halving 抗锯齿，缩小到小贴图不糊）、Layer.replaceFromCanvas（clear + 整块换像素）
+//     step-halving 抗锯齿，缩小到小贴图不糊）、ViewLeaf.replaceFromCanvas（clear + 整块换像素）
 //
 // UI 中文（跟 WebPaint 一致）。交互沿用 app 既有「smart 按钮」范式：连接键 = 智能保存键那种
 // 单键多态（连接/连接中/已连接，点击随态切动作）；拉取/推送 = 菜单里 smart 导入导出那种 main + ⋯ 配置。
@@ -17,7 +17,7 @@
 import type { AppContext } from "./app-context.ts";
 import { reportError } from "./error-badge.ts";
 import { session } from "./session-state.ts";
-import type { Layer } from "./doc.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import { renderDocToImageBlob } from "./session.ts";
 import { smartResample, canvasToBlob , imageSourceToBytes } from "./resample.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
@@ -295,7 +295,7 @@ function placeBitmapAsNewLayer(bmp: ImageBitmap, name: string): boolean {
 }
 
 // 覆盖当前图层：换成贴图（原生分辨率，从 (0,0) 起）。走 v2 令牌 → 可 Ctrl-Z 还原旧像素。
-function overwriteLeaf(leaf: Layer, bmp: ImageBitmap) {
+function overwriteLeaf(leaf: ViewLeaf, bmp: ImageBitmap) {
   const token = ctx.wp2.begin("stroke");
   const w = bmp.width, h = bmp.height;
   const px = imageSourceToBytes(bmp);   // 解码边界唯一读出（v0.6.46 字节管线）
@@ -314,9 +314,9 @@ async function pull() {
   if (!name) { ctx.setStatus(t("bl.enterTextureName"), true); return; }
 
   // 覆盖模式先确认有可写叶（组/隐藏/无 → 不白拉），fail fast
-  let leaf: Layer | null = null;
+  let leaf: ViewLeaf | null = null;
   if (pullTarget === "overwrite") {
-    leaf = requireEditableLeaf(ctx.doc, ctx.setStatus) as Layer | null;
+    leaf = requireEditableLeaf(ctx.doc, ctx.setStatus) as ViewLeaf | null;
     if (!leaf) return;   // requireEditableLeaf 已弹标准状态行
   }
 
@@ -327,7 +327,7 @@ async function pull() {
       const bmp = await createImageBitmap(blob);
       try {
         if (pullTarget === "new") ok = placeBitmapAsNewLayer(bmp, name);
-        else overwriteLeaf(leaf as Layer, bmp);
+        else overwriteLeaf(leaf as ViewLeaf, bmp);
       } finally {
         bmp.close();
       }

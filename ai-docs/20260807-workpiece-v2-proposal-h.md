@@ -117,8 +117,15 @@ class LayerTree implements WorkpieceComponent {
   mergeDown(id, merged: { bytes; rect; resultClipping }): boolean;   // 合成字节外部烤好递入（零 GL；
                                                   // under 归一化 opacity=1/source-over/resultClipping——T3a 定形）
   setLayerProp(id, prop, value): boolean;
-  setTreeProp(key: "referenceLayerId" | "backgroundColor", value): void;   // 元规则相同才合并动词
+  setTreeProp(key: "referenceLayerId" | "backgroundColor" | "width" | "height", value): void;
+                                                  // 元规则相同才合并动词（doc 级 unique 值）；
+                                                  // width/height 是 T3b-2 补——整 doc 几何变换的尺寸位
+                                                  //（像素实例交换另记账，同 step 两账同向翻）
   setActive(id): boolean;                         // 唯一不记账 verb（焦点=导航，ADR-0008 §4）
+  // T3b-2 补 verb（app cutover 的结构组合动作，语义对齐 v1 doc 同名 op）：
+  addLayerTop(name?): TreeLeaf | null;            // 盖印 stampAll 用：新空叶强制置顶（根级末尾）
+  collapseGroupToLeaf(id, merged: { bytes; rect } | null): TreeLeaf | null;   // #25 组烤成单叶同位替换
+  explodeLeaf(id, parts: { data; name }[], rect): TreeLeaf[] | null;          // v0.7.9 按颜色拆分
 }
 // T3a 实现注：叶/组判别 = "children" in node（json 纯数据无 isGroup 标志）；结构共享实现为整树浅深拷
 //（≤64 叶 KB 级，路径级共享是后续优化，契约不变）；recorded 步的根快照含 activeId → undo 天然还原焦点。
@@ -130,6 +137,7 @@ class LayerTree implements WorkpieceComponent {
 // LayerTiles 增设 tileset 注册表（T3a；所有权算术的账房）：
 //   createTileset(lp)→id（refs=1 归调用方，json 收养后 release=净移交）/ duplicateTileset(id)（句柄共享零拷贝）
 //   acquireTileset / releaseTileset（归零 → lp.dispose 还池）/ tilesetPixels(id) / swapTilesetPixels(id, np)
+//   exchangeTilesetPixels(id, np)→旧实例（T3b-2：swap 的非销毁变体——crop/resample 的 undo 包持前一侧实例）
 //   持有者 = LayerTree 每个活根（substrate/collector/record）按 leaf.pixelsRef 各 +1；swap 交换根计数不动。
 
 ## layer-tiles.ts（tile 扁平仓；tileset 引用计数）
@@ -198,6 +206,23 @@ class RasterService {     // 一次性算像素（C 骑士接缝）
   compositeToBytes(tree, w, h): Bytes;  compositeToCanvas(...): HTMLCanvasElement;
   pickColor(tree, …, x, y): [r, g, b, a];
 }
+```
+
+## 迁移期形状（T3b-2 落，非终态契约；T4/T5 收编或拆除）
+
+```ts
+// PaintingView（src/workpiece/painting-view.ts）：app 的文档读写端口 = 旧 ctx.doc(DocView) 同形
+//   （width/height/layers(view 节点)/activeId/selection/maxLayers/activeEditableLeaf/…）。
+//   ViewLeaf 带旧 Layer 的读写面（pixels/bbox 物化缓存/editRegion/snapshot…），像素 = tileset
+//   注册表活实例——引擎（brush/liquify/lasso/float）与 codec 消费面零改动。selection 过渡宿在此
+//   （T4 SelectionComponent 接棒）。终态归宿 T5 评估：要么正名（app 读口保留端口形），要么随
+//   引擎迁 LayerTiles 读口后拆。
+// LegacyHistory.withPoint(label, {checkpoint, hint}, fn)：v2-verb 迁移载具（共享令牌开/续/封；
+//   门面 layer-tree.ts 的所有 verb 走它）。T5 随桥拆——那时调用方直接 wp2.begin。
+// DocResizeOp（operators.ts）：crop/cropResample/resample 的实例交换记账（undo 包 = 另一侧
+//   LayerPixels 实例；json 尺寸走 setTreeProp width/height 进树 record，同 step 两账同向翻）。
+//   flip/rot90/offsetWrap 已走 computed 白名单。step.hint 已落地（compound({hint})），唯一住户
+//   = docTransform 的 viewport/persp 还原（doc-ops._applyUi）——T4 persp 组件化后只剩 viewport。
 ```
 
 ## dials / desk（改名，形状不变）

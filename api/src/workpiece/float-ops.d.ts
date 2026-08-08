@@ -1,25 +1,25 @@
 import { DocumentOperator, Workpiece, type OpResult, type FloatState, type FloatTransformMeta, type FloatRect, type WorkpieceFloat } from "./workpiece.ts";
-import { type Layer, type LayerSnap } from "../doc.ts";
+import { type ViewLeaf, type ViewLeafSnap } from "./painting-view.ts";
 import { LayerPixels } from "../tiles/tile-layer.ts";
 import type { Selection } from "../selection.ts";
 export declare function estimateFloatPixelBytes(lp: LayerPixels): number;
 export declare function cloneFloatMeta(t: FloatTransformMeta): FloatTransformMeta;
-export declare function extractFloatPixels(leaf: Layer, sel: Selection | null): WorkpieceFloat | null;
-export declare function composeCutHole(leaf: Layer, sel: Selection | null, region: FloatRect): {
+export declare function extractFloatPixels(leaf: ViewLeaf, sel: Selection | null): WorkpieceFloat | null;
+export declare function composeCutHole(leaf: ViewLeaf, sel: Selection | null, region: FloatRect): {
     x: number;
     y: number;
     w: number;
     h: number;
     data: Uint8ClampedArray;
 } | null;
-export declare function applyRegionBuf(leaf: Layer, r: {
+export declare function applyRegionBuf(leaf: ViewLeaf, r: {
     x: number;
     y: number;
     w: number;
     h: number;
     data: Uint8ClampedArray;
 }): void;
-export declare function composeIdentityWriteback(leaf: Layer, f: WorkpieceFloat, ox?: number, oy?: number): {
+export declare function composeIdentityWriteback(leaf: ViewLeaf, f: WorkpieceFloat, ox?: number, oy?: number): {
     x: number;
     y: number;
     w: number;
@@ -41,14 +41,14 @@ export interface RigidMap {
     m22: number;
     s0y: number;
 }
-export declare function composeOverWriteback(leaf: Layer, x: number, y: number, w: number, h: number, src: Uint8ClampedArray): {
+export declare function composeOverWriteback(leaf: ViewLeaf, x: number, y: number, w: number, h: number, src: Uint8ClampedArray): {
     x: number;
     y: number;
     w: number;
     h: number;
     data: Uint8ClampedArray;
 };
-export declare function composeRigidWriteback(leaf: Layer, f: WorkpieceFloat, m: RigidMap): {
+export declare function composeRigidWriteback(leaf: ViewLeaf, f: WorkpieceFloat, m: RigidMap): {
     x: number;
     y: number;
     w: number;
@@ -65,7 +65,7 @@ export interface LiftSwapData {
     floats: FloatState | null;
     leafSnaps: {
         layerId: number;
-        snap: LayerSnap;
+        snap: ViewLeafSnap;
     }[];
     selection: {
         v: Selection | null;

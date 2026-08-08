@@ -1,27 +1,32 @@
-// document-operator 在**真 PaintDoc** 上的可逆性集成测试（test charter (b)：历史 bug 的回归护栏）。
-// 每族 op：do → undo → 深比对回到原态 → redo → 比对到新态。node 可测面（mergeDown 走 canvas 合成，
-// 归 smoke/真机批）。
+// legacy 残余 operator 在 **v2 树模式工件**上的可逆性集成测试（T3b-2 换基座）。
+// 已迁走的 op 族（add/remove/move/prop/reference/treeStructure/mergeDown/docTransform）的行为锚
+// 在 workpiece-layer-tree.test.mjs（门面）+ layer-tree2.test.mjs（verb 契约）；本文件只测残余集：
+//   pixels（SwapPixelsOp 事务型）/ fillColor / docResize（T3b-2 新立：几何变换实例交换）
+//   + 清栈后 tileset/池的所有权收支。
+// 「层被删后 undo 该笔」的栈序腐坏在 v2 下结构上不可能（栈序保证 undo 必先穿过删层步）；
+// 桥的不可恢复协议锚在 legacy-bridge.test.mjs（compound/swap 中途失败 → 弃栈）。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { PaintDoc, flattenLeaves } from "../src/doc.ts";
+import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
+import { PaintingView, flattenViewLeaves } from "../src/workpiece/painting-view.ts";
 import { Workpiece } from "../src/workpiece/workpiece.ts";
-import { UndoHistory } from "../src/workpiece/undo-history.ts";
+import { LegacyHistory, LegacyOpsComponent } from "../src/workpiece/legacy-bridge.ts";
 import { makeOperators } from "../src/workpiece/operators.ts";
 import { appTilePool } from "../src/tiles/app-tile-pool.ts";
 
-// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
-const _ctxs = [], _orphans = [];   // _orphans：测试有意造成的「脱离 doc 的层」（所有权归测试）
+const _ctxs = [];
 function mk() {
-  const doc = new PaintDoc({ width: 512, height: 512 });
   let unrec = 0;
-  const h = new UndoHistory({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => { unrec++; } });
+  const h = new LegacyHistory({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => { unrec++; } });
+  const wp2 = new PaintingWorkpiece({ undo: h.stack, tree: { width: 512, height: 512 } });
+  const doc = new PaintingView(wp2);
   const w = new Workpiece(doc, h);
+  const legacy = new LegacyOpsComponent(w);
+  wp2.attachLegacy(legacy);
+  h.attach(wp2, legacy, (on) => wp2.layerTiles._suspendCollect(on));
   let _color = "#1b1b1b";   // fillColor op 的注入色钩子（真 app = state.color / fill-mode 回灌抑制）
-  const ops = makeOperators({
-    applyDocTransformUi: () => {},
-    fillColor: { get: () => _color, set: (hex) => { _color = hex; } },
-  });
-  _ctxs.push({ doc, h });
-  return { doc, w, h, ops, unrec: () => unrec, color: () => _color, setColor: (hex) => { _color = hex; } };
+  const ops = makeOperators({ fillColor: { get: () => _color, set: (hex) => { _color = hex; } } });
+  _ctxs.push({ h, wp2 });
+  return { doc, wp2, w, h, ops, unrec: () => unrec, color: () => _color, setColor: (hex) => { _color = hex; } };
 }
 const px = (r, g, b, a) => new Uint8ClampedArray([r, g, b, a]);
 
@@ -43,136 +48,66 @@ describe("operators · SwapPixels（事务型：引擎先画，before 句柄零�
     h.undo(w);
     eq(L.sampleAt(10, 10)[0], 1, "二次 undo 仍精确（对称 swap 无衰减）");
   });
-
-  it("层被删后 undo 该笔 → 不可恢复协议（弃栈上报），不炸不错删", () => {
-    const { doc, w, h, ops, unrec } = mk();
-    const L = doc.addLayer("受害者");
-    const before = L.snapshot();
-    L.pixels.putRegion(0, 0, 1, 1, px(7, 7, 7, 255));
-    h.run(w, ops.pixels, { layerId: L.id, _initialBefore: before });
-    doc.removeLayer(L.id); _orphans.push(L);                 // 直接删（绕 undo——模拟腐坏场景；像素释放归 caller=本测试）
-    eq(h.undo(w), false);
-    eq(unrec(), 1, "layer gone → 不可恢复弃栈（诚实，不吞错照报成功）");
-  });
 });
 
-describe("operators · Add/Remove/Move/Prop/Reference（操作型）", () => {
-  it("addLayer 记录 → undo 摘层（active 回退）→ redo 复原（含像素）", () => {
-    const { doc, w, h, ops } = mk();
-    const prevActiveId = doc.activeId;
-    const L = doc.addLayer("新层");
-    L.pixels.putRegion(50, 50, 1, 1, px(8, 8, 8, 255));
-    const loc = doc.locateNode(L.id);
-    eq(h.run(w, ops.addLayer, { layerId: L.id, index: loc.index, parentId: loc.parentId, prevActiveId, layerName: L.name }).ok, true);
-    h.undo(w);
-    assert(!flattenLeaves(doc.layers).some((x) => x.id === L.id), "undo 摘掉新层");
-    eq(doc.activeId, prevActiveId, "active 回创建前（v125）");
-    h.redo(w);
-    const back = flattenLeaves(doc.layers).find((x) => x.id === L.id);
-    assert(back, "redo 复原（同 id）");
-    eq(back.sampleAt(50, 50)[0], 8, "像素随 spec 句柄回来");
-    eq(doc.activeId, L.id);
-  });
-
-  it("removeLayer → undo 复原像素与位置 → redo 再删；keep-one 护栏返回 ok:false", () => {
-    const { doc, w, h, ops } = mk();
-    const L = doc.addLayer("要删的");
-    L.pixels.putRegion(30, 30, 1, 1, px(6, 6, 6, 255));
-    eq(h.run(w, ops.removeLayer, { layerId: L.id, layerName: L.name }).ok, true);
-    assert(!flattenLeaves(doc.layers).some((x) => x.id === L.id));
-    h.undo(w);
-    const back = flattenLeaves(doc.layers).find((x) => x.id === L.id);
-    assert(back && back.sampleAt(30, 30)[0] === 6, "undo 连像素复原");
-    h.redo(w);
-    assert(!flattenLeaves(doc.layers).some((x) => x.id === L.id), "redo 再删");
-    // keep-one：只剩 1 层时拒绝
-    const only = flattenLeaves(doc.layers)[0];
-    eq(h.run(w, ops.removeLayer, { layerId: only.id, layerName: only.name }).ok, false);
-    assert(flattenLeaves(doc.layers).length === 1, "护栏生效，层还在");
-  });
-
-  it("layerProp 双形态：操作型 apply + 事务型 _initialOld；undo/redo 对称", () => {
-    const { doc, w, h, ops } = mk();
-    const L = doc.activeLayer;
-    // 操作型：op 自己写
-    h.run(w, ops.layerProp, { layerId: L.id, prop: "visible", value: false });
-    eq(L.visible, false);
-    h.undo(w); eq(L.visible, true);
-    h.redo(w); eq(L.visible, false);
-    // 事务型：滑杆已实时写，收尾入栈
-    const old = L.opacity;
-    L.opacity = 0.3;
-    h.run(w, ops.layerProp, { layerId: L.id, prop: "opacity", value: 0.3, _initialOld: { v: old } });
-    h.undo(w); eq(L.opacity, old, "undo 回拖动前");
-    h.redo(w); eq(L.opacity, 0.3);
-  });
-
-  it("moveLayer / referenceLayer 往返", () => {
-    const { doc, w, h, ops } = mk();
-    const a = doc.activeLayer;
-    doc.addLayer("上面");
-    eq(h.run(w, ops.moveLayer, { layerId: a.id, delta: 1 }).ok, true);
-    eq(doc.layers[1].id, a.id, "上移");
-    h.undo(w); eq(doc.layers[0].id, a.id, "undo 回位");
-    h.run(w, ops.referenceLayer, { value: a.id });
-    eq(doc.referenceLayerId, a.id);
-    h.undo(w); eq(doc.referenceLayerId, null);
-  });
-});
-
-describe("operators · TreeStructure / DocTransform（结构与整 doc 快照）", () => {
-  it("编组（事务型 snapshotTree 前后）→ undo 解组还原（叶活引用像素零拷贝）", () => {
-    const { doc, w, h, ops } = mk();
-    const L1 = doc.activeLayer;
-    doc.addLayer("l2");
-    const before = doc.snapshotTree();
-    doc.groupSelection(L1.id);                       // L1 套进新组（单 id API）
-    const after = doc.snapshotTree();
-    eq(h.run(w, ops.treeStructure, { before, after }).ok, true);
-    assert(doc.layers.some((n) => n.isGroup), "已编组");
-    h.undo(w);
-    assert(!doc.layers.some((n) => n.isGroup), "undo 解组");
-    assert(flattenLeaves(doc.layers).some((x) => x === L1), "叶是同一活对象");
-    h.redo(w);
-    assert(doc.layers.some((n) => n.isGroup), "redo 再编组");
-  });
-
-  it("crop（docTransform 事务型）→ undo 回原尺寸与像素 → redo 回裁后", () => {
-    const { doc, w, h, ops } = mk();
+describe("operators · DocResize（T3b-2：crop/resample 的实例交换 + 树尺寸同步翻）", () => {
+  it("crop 形（compound：exchange + docResize 微步 + setTreeProp）→ undo 回原尺寸与像素 → redo 回裁后", () => {
+    const { doc, wp2, w, h, ops, unrec } = mk();
     const L = doc.activeLayer;
     L.pixels.putRegion(400, 400, 1, 1, px(4, 4, 4, 255));
-    const before = { doc: doc.snapshotAll(), viewport: null };
-    doc.cropTo({ x: 0, y: 0, w: 256, h: 256 });
-    const after = { doc: doc.snapshotAll(), viewport: null };
-    eq(h.run(w, ops.docTransform, { before, after }).ok, true);
-    eq(doc.width, 256);
-    const orig = flattenLeaves(doc.layers);        // restoreSnapshotAll 整树替换——被换下的层归测试释放
+    L.pixels.putRegion(8, 8, 1, 1, px(2, 2, 2, 255));
+    const r = h.compound(w, () => {
+      // 实例交换段挂起收集（doc-ops runDocTransform 同款纪律）：新实例构造期的 putRegion 不许
+      //   被写时扣押（记录归 DocResizeOp），否则 undo 炸 across 断言。
+      const old = [];
+      wp2.layerTiles._suspendCollect(true);
+      try {
+        for (const leaf of flattenViewLeaves(doc.layers)) {
+          const np = leaf.pixels.cropped(0, 0, 256, 256);
+          old.push({ layerId: leaf.id, lp: doc.exchangeLeafPixels(leaf.id, np) });
+        }
+      } finally {
+        wp2.layerTiles._suspendCollect(false);
+      }
+      const st = h.run(w, ops.docResize, { _initial: { leaves: old } }, { checkpoint: false });
+      if (!st.ok) throw new Error(st.msg);
+      wp2.layerTree.setTreeProp("width", 256);
+      wp2.layerTree.setTreeProp("height", 256);
+    }, { label: "crop" });
+    assert(r.ok, "crop compound ok");
+    eq(doc.width, 256, "裁后尺寸");
+    eq(doc.activeLayer.sampleAt(8, 8)[0], 2, "保留区像素还在");
     h.undo(w);
     eq(doc.width, 512, "undo 回原尺寸");
     eq(doc.activeLayer.sampleAt(400, 400)[0], 4, "裁掉的像素回来了");
-    const undoLayers = flattenLeaves(doc.layers);
     h.redo(w);
     eq(doc.width, 256, "redo 回裁后");
-    _orphans.push(...orig, ...undoLayers);
+    eq(doc.activeLayer.sampleAt(400, 400)[3], 0, "redo 后裁外像素不在");
+    h.undo(w);
+    eq(doc.activeLayer.sampleAt(400, 400)[0], 4, "二次 undo 仍精确");
+    eq(unrec(), 0, "全程无不可恢复");
+  });
+
+  it("缺 _initial → run 拒绝（防误用为操作型）", () => {
+    const { w, h, ops } = mk();
+    eq(h.run(w, ops.docResize, {}).ok, false);
   });
 });
 
-describe("operators · 句柄收支（清栈后池不留本套件的 tile）", () => {
-  it("一串操作 + 清栈 + 层清空 → 池计数回落到进入前", () => {
+describe("operators · 所有权收支（清栈+换文档后池不留本套件的 tile）", () => {
+  it("一串操作 + 清栈 + load 空文档 → 池计数回落到进入前", () => {
     const before = appTilePool().stats().count;
-    const { doc, w, h, ops } = mk();
+    const { doc, wp2, w, h, ops } = mk();
     const L = doc.activeLayer;
-    const b1 = L.snapshot();
     L.pixels.putRegion(0, 0, 2, 2, new Uint8ClampedArray(16).fill(9));
+    const b1 = L.snapshot();
+    L.pixels.putRegion(64, 64, 2, 2, new Uint8ClampedArray(16).fill(7));
     h.run(w, ops.pixels, { layerId: L.id, _initialBefore: b1 });
-    const L2 = doc.addLayer("t");
-    L2.pixels.putRegion(5, 5, 1, 1, px(1, 1, 1, 9));
-    const loc = doc.locateNode(L2.id);
-    h.run(w, ops.addLayer, { layerId: L2.id, index: loc.index, parentId: loc.parentId, prevActiveId: L.id, layerName: "t" });
-    h.undo(w); h.redo(w); h.undo(w); h.undo(w);
+    h.undo(w); h.redo(w); h.undo(w);
     h.clear();
-    for (const leaf of flattenLeaves(doc.layers)) leaf.pixels.dispose();
-    eq(appTilePool().stats().count, before, "undo 包/层像素全部归还（无泄漏）");
+    // 换文档：旧根 record 随 load 清栈驱逐 → 旧 tileset 引用计数归零还池（换文档零手工 dispose）。
+    wp2.load({ width: 8, height: 8, nodes: [{ name: "空", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });
+    eq(appTilePool().stats().count, before, "undo 包/旧文档像素全部归还（无泄漏）");
   });
 });
 
@@ -196,16 +131,14 @@ describe("operators · FillColor（fill 预览期换色可撤销）", () => {
   });
 });
 
-// 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
+// 测试卫生：统一释放（清栈 + 换空文档 = record 驱逐 → tileset 归零还池；防 FR 泄漏 assert 刷屏）
 describe("operators 收尾", () => {
-  it("清栈并释放本文件的 doc tiles", () => {
-    for (const { doc, h } of _ctxs) {
+  it("清栈并释放本文件的工件资源", () => {
+    for (const { h, wp2 } of _ctxs) {
       h.clear();
-      for (const leaf of flattenLeaves(doc.layers)) leaf.pixels?.dispose?.();
-      doc.selection?.dispose?.();
+      wp2.load({ width: 4, height: 4, nodes: [{ name: "空", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });
     }
-    for (const L of _orphans) L.pixels?.dispose?.();
-    _ctxs.length = 0; _orphans.length = 0;
+    _ctxs.length = 0;
     assert(true, "disposed");
   });
 });

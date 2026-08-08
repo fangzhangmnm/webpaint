@@ -56,6 +56,21 @@ export declare class LayerTree2 implements CollectorComponent {
     /** 新建**空**组（v1 addGroup 语义）：active 是组 → 嵌进去；否则同级之上。active = 新组。
      *  组不计 maxLeaves（只数叶）。 */
     addGroup(name?: string): TreeGroup | null;
+    /** 新建空叶**强制置顶**（根级末尾 = 最顶；盖印 stampAll 用）。active = 新层。null = maxLeaves。 */
+    addLayerTop(name?: string): TreeLeaf | null;
+    /** 把组烤成单叶**同位替换**（#25 collapse）：新叶继承组的 visible/opacity/mode/clippingMask
+     *  （合成字节已把子树烤平 → 视觉不变）；merged=null = 空组 → 空叶。active = 新叶。
+     *  组 children 的 tileset 随旧根进 record，驱逐才释放。 */
+    collapseGroupToLeaf(id: number, merged: {
+        bytes: Uint8ClampedArray;
+        rect: Rect;
+    } | null): TreeLeaf | null;
+    /** 按颜色拆分（v0.7.9 explode）：叶同位替换成 n 张新叶（parts[0] 最底），props 全继承
+     *  （分片互斥 → 逐像素等价，视觉不变）。active = 最上分片。null = 非叶/超 maxLeaves。 */
+    explodeLeaf(id: number, parts: {
+        data: Uint8ClampedArray;
+        name: string;
+    }[], rect: Rect): TreeLeaf[] | null;
     /** 换整根（load 的令牌写；ADR-0008：解码器产 plain data 灌入）。
      *  调用方负责新根 tileset 的净移交（createTileset 后 release）；旧根照常进 collector/record，
      *  load 收尾清栈时旧 doc 资源随 record 驱逐释放。nextId 重播种。 */
@@ -82,8 +97,10 @@ export declare class LayerTree2 implements CollectorComponent {
         resultClipping: boolean;
     }): boolean;
     setLayerProp(id: number, prop: LayerPropKey, value: unknown): boolean;
-    /** 元规则相同才合并动词（提案 .h）：doc 级 unique 值。 */
-    setTreeProp(key: "referenceLayerId" | "backgroundColor", value: number | null | string): void;
+    /** 元规则相同才合并动词（提案 .h）：doc 级 unique 值。
+     *  width/height（T3b-2 补）：整 doc 几何变换（crop/resample/rot90）的尺寸位——像素实例交换
+     *  由 DocResizeOp/computed 记账，json 尺寸走本 verb 进树 record，同一 step 内两账同向翻。 */
+    setTreeProp(key: "referenceLayerId" | "backgroundColor" | "width" | "height", value: number | null | string): void;
     /** 唯一不记账 verb（焦点=导航）：无需令牌、不收集；换根共享 nodes（records 不受扰）。 */
     setActive(id: number): boolean;
     sealRecord(): RecordData | null;

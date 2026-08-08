@@ -5,7 +5,7 @@ import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 type StampCollect = {
     stamps: Stamp[];
     shape: StrokeShape;
-    layer: Layer;
+    layer: ViewLeaf;
     mode: string;
     opacity: number;
     blendMode: string;
@@ -14,7 +14,7 @@ type StampCollect = {
     bw: number;
     bh: number;
 } | null;
-import type { PaintDoc, Layer } from "./doc.ts";
+import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
 interface Viewport {
     tx: number;
     ty: number;
@@ -138,7 +138,7 @@ type ViewportChangeCb = (() => void) | null;
 export declare class Board {
     canvas: HTMLCanvasElement;
     ctx: Ctx2D;
-    doc: PaintDoc;
+    doc: PaintingView;
     dpr: number;
     viewport: Viewport;
     onViewportChange: ViewportChangeCb;
@@ -157,7 +157,7 @@ export declare class Board {
     cursorEl: HTMLElement | null;
     _gridSig: string;
     _strokeActiveHint?: (() => unknown) | null;
-    _liveSyncProvider?: (() => Layer | null) | null;
+    _liveSyncProvider?: (() => ViewLeaf | null) | null;
     _lassoProvider?: (() => LassoInfo | null | undefined) | null;
     _activeSurrogateLayerId?: number | null;
     _activeSurrogateBytes?: {
@@ -175,10 +175,10 @@ export declare class Board {
     static _dispatchingDirty?: boolean;
     _glBoard?: GLBoard | null;
     _glCanvas?: HTMLCanvasElement | null;
-    constructor(canvas: HTMLCanvasElement, doc: PaintDoc);
+    constructor(canvas: HTMLCanvasElement, doc: PaintingView);
     _configureDocMemory(): void;
     _setupGLBoard(): void;
-    setDoc(doc: PaintDoc): void;
+    setDoc(doc: PaintingView): void;
     setShowCheckerboard(on: boolean): void;
     setPixelGridEnabled(on: boolean): void;
     getPixelGridEnabled(): boolean;
@@ -207,7 +207,7 @@ export declare class Board {
     fitToScreen(padding?: number): void;
     invalidateAll(): void;
     setStrokeActiveHint(fn: (() => unknown) | null): void;
-    setLiveSyncProvider(fn: (() => Layer | null) | null): void;
+    setLiveSyncProvider(fn: (() => ViewLeaf | null) | null): void;
     setLassoProvider(fn: (() => LassoInfo | null | undefined) | null): void;
     setActiveLayerSurrogate(layerId: number | null, bytes: {
         data: Uint8ClampedArray;
@@ -244,23 +244,23 @@ export declare class Board {
     } | null;
     _fillProvider: (() => {
         color: string;
-        layer: Layer;
+        layer: ViewLeaf;
     } | null) | null;
     _perspGizmoProvider: (() => PerspGizmoData | null) | null;
     setFillProvider(fn: (() => {
         color: string;
-        layer: Layer;
+        layer: ViewLeaf;
     } | null) | null): void;
     _glFillOverlay(): FillOverlayInput | null;
     _fillInputFrom(f: {
         color: string;
-        layer: Layer;
+        layer: ViewLeaf;
     }): FillOverlayInput | null;
     isGLBoard(): boolean;
     commitBrushStroke(cs: NonNullable<StampCollect>): boolean;
     commitFill(f: {
         color: string;
-        layer: Layer;
+        layer: ViewLeaf;
     }): boolean;
     glWarpBakeFn(): WarpBakeFn | null;
     _glFloatInputs(): FloatInput[];

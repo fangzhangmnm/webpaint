@@ -35,7 +35,7 @@
 //     抬笔 finish() 收尾把直线桥换成动量弧尾、钉终点。
 
 import { StrokeSmoother } from "./stroke-smoother.ts";
-import type { Layer } from "./doc.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
@@ -56,7 +56,7 @@ type Rect = [number, number, number, number];
 
 // 进行中描边的全部可变态（begin 建、extend/end 改、end 清）
 interface StrokeState {
-  layer: Layer;
+  layer: ViewLeaf;
   settings: ResolvedBrush;
   mode: string;
   buffered: boolean;
@@ -104,7 +104,7 @@ export class BrushEngine {
 
   // smooth: { tau(ms), deadzone(doc px) }。t = 起手事件时间戳(ms)。详 ai-docs/20260613-brush-procreate-smoothing.md。
   //   tau=0 & deadzone=0 → 不平滑（直通 raw）。
-  beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, pressure: number, mode: string = "brush", smooth: { tau?: number; deadzone?: number; tailBow?: number } = {}, t: number | null = null) {
+  beginStroke(layer: ViewLeaf, settings: ResolvedBrush, x: number, y: number, pressure: number, mode: string = "brush", smooth: { tau?: number; deadzone?: number; tailBow?: number } = {}, t: number | null = null) {
     const isBuildup = (settings.compositeMode || "wash") === "buildup";
     // buffered = 走 frozen/tail 平滑（进 buffer）；pixel = immediate（直接进 layer）
     const buffered = !settings.pixelMode;
@@ -307,7 +307,7 @@ export class BrushEngine {
   //   (GLStampRasterizer，board 消费)。**复用 _walkStamps(手感间距) + _stampParams(压感/taper)**，与 CPU
   //   _emitFrozen 同源 → 手感逐位一致；纯读（传 fresh walk，不碰 live cursor/buffer）。endStroke 后 _taperTotal
   //   有值则自动含出端 taper。pixelMode/未描边 → null（caller 回退）。color 给 0..1；erase 由 caller 用 mode 处理。
-  collectStamps(): { stamps: Stamp[]; shape: StrokeShape; layer: Layer; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null {
+  collectStamps(): { stamps: Stamp[]; shape: StrokeShape; layer: ViewLeaf; mode: string; opacity: number; blendMode: string; bx: number; by: number; bw: number; bh: number } | null {
     const st = this._stroke;
     if (!st || !st.buffered || !st.sm || st.settings.pixelMode) return null;
     const out: Stamp[] = [];

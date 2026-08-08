@@ -1,63 +1,110 @@
 // 职责（单一）：文档级变换 op —— 裁切（裁到选区 / 自由 8-handle）、水平翻转、重采样（调整尺寸）。
-// 共同脊柱 runDocTransform：before 快照 → 改 doc(+viewport shift) → after 快照 → 压 docTransform。
+// 共同脊柱 runDocTransform（T3b-2 换 v2 形）：一个 compound 令牌 = 一个整点。
+//   - flip/rot90/offset 走 LayerTiles computed verbs（省内存可逆变换白名单）；
+//   - crop/cropResample/resample 走逐叶实例交换 + DocResizeOp 记账（undo 包 = 另一侧实例）；
+//   - json 尺寸走 layerTree2.setTreeProp("width"/"height")（树 record 同 step 翻转）；
+//   - 选区走 SwapSelectionOp 微步（pre-applied；T4 组件化后迁走）；
+//   - viewport/persp 还原走 **step.hint**（提案 .h：docTransform 是 hint 的唯一住户）。
 // 守卫（无选区/尺寸非法/没变化）留调用方。crop/resample 是 EditMode transient（enter/apply/cancel 走 editMode）。
-//
-// 旧 app.js 的 v110/114 crop / resample / adjust 区里**纯文档变换**的部分全搬来（filter/调色 panel 不属本类）。
-// app.js 短路成：import { initDocOps, _updateMenuCropLabel } + setRuntime 后调 initDocOps()。
 
 import { els } from "./els.ts";
-import { docWriteWindow } from "./workpiece/write-gate.ts";
 import { bumpDoc } from "./signals.ts";
 import { t } from "./i18n/index.ts";
 import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } from "./crop-geometry.ts";
 import { loadCanvasTemplates, fillTemplateSelect, templatePx, templateById } from "./canvas-templates.ts";
 import { editorState } from "./workbench-state.ts";
-import { remapShapePersp, snapshotShapePersp } from "./workbench-state.ts";
+import { remapShapePersp, snapshotShapePersp, restoreShapePersp } from "./workbench-state.ts";
+import { flattenViewLeaves } from "./workpiece/painting-view.ts";
+import { LayerPixels } from "./tiles/tile-layer.ts";
+import { resampleBytes } from "./resample-bytes.ts";
+import type { Selection } from "./selection.ts";
 import type { AppContext } from "./app-context.ts";
 
 interface Rect { x: number; y: number; w: number; h: number; }
 interface CropState { rect: Rect; drag: string | null; startMouse: { x: number; y: number } | null; startRect: Rect | null; mode: "free" | "template"; tpl: { tw: number; th: number; aspect: number; dpi?: number } | null; resample: boolean; }
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
-// ctx 绑入：core 单例
-// doc = docRaw：runDocTransform 是整 doc 几何的 tx 信封（S2 审计定案的声明写者）——mutator 在
-// before/after snapshotAll 括号内合法；S4 的 dev 断言令牌在 runDocTransform 里拿。
-let editMode: AppContext["editMode"], doc: AppContext["docRaw"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
-let workpiece: AppContext["workpiece"], ops: AppContext["ops"];
+// ctx 绑入：core 单例。doc = PaintingView 端口（读面 + 选区过渡宿 + exchangeLeafPixels 协作面）。
+let editMode: AppContext["editMode"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
+let workpiece: AppContext["workpiece"], ops: AppContext["ops"], wp2: AppContext["wp2"];
 // 命令 = 拥有它的模块的接口（显式 import，不经 ctx）
 import { setMenuOpen } from "./settings-menu.ts";
 import { setAdjustOpen } from "./filters-adjust.ts";
+import { reportError } from "./error-badge.ts";
 // ctx 绑入：仍在 app.js 的编排件（app-local function）
 let _suppressTransientPanels: AppContext["_suppressTransientPanels"], _restoreTransientPanels: AppContext["_restoreTransientPanels"];
 
-// ===== v110/114 crop / resample / adjust =====
-// 通用：op 前先 commit floating + 把当前 doc + viewport snapshot 当 before
-function _captureDocBefore() {
+// ===== 文档变换脊柱（v2）=====
+interface UiSnap { viewport: Record<string, number>; persp: unknown }
+function _captureUi(): UiSnap {
+  return { viewport: { ...board.viewport }, persp: snapshotShapePersp() };
+}
+// undo/redo 的 UI 随行还原（step.hint 消费）：视口 + 透视配置 + 尺寸标签 + 重绘。
+function _applyUi(u: UiSnap): void {
+  Object.assign(board.viewport, u.viewport);
+  restoreShapePersp(u.persp);
+  if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
+  board.invalidateAll();
+}
+
+interface DocTransformSpec {
+  /** 新 doc 尺寸（缺省 = 不变）。 */
+  newW?: number; newH?: number;
+  /** resize 形：逐叶产新实例（旧实例进 DocResizeOp undo 包）。 */
+  mapLeaf?: (lp: LayerPixels) => LayerPixels;
+  /** computed 形：LayerTiles 白名单 verb（flip/rot90/offsetWrap）。 */
+  applyComputed?: () => void;
+  /** 选区映射（缺省 = 保留原选区；返回 null = 清选区）。 */
+  mapSelection?: (sel: Selection) => Selection | null;
+  /** persp remap / viewport shift / fitToScreen（在 after UI 快照之前跑）。 */
+  after?: () => void;
+}
+
+// 结构上保证不漏 undo 事务：整个变换在一个 compound 令牌里，undo 包 = collector record +
+// DocResizeOp/Selection 微步；fn 中途抛 → token.cancel 全量回滚（含已换实例/已换选区）。
+function runDocTransform(label: string, tf: DocTransformSpec): void {
   editMode.applyPendingTransient();
-  return { doc: doc.snapshotAll(), viewport: { ...board.viewport }, persp: snapshotShapePersp() };
-}
-function _captureDocAfter() {
-  return { doc: doc.snapshotAll(), viewport: { ...board.viewport }, persp: snapshotShapePersp() };
-}
-type DocSnap = { doc: ReturnType<AppContext["docRaw"]["snapshotAll"]>; viewport: Record<string, number>; persp: unknown };
-function _pushDocTransform(before: DocSnap, after: DocSnap, label: string) {
-  // 事务型 pre-applied：变换已在两次快照之间跑完，首跑 forward 只收下 undo 包。
-  history.run(workpiece, ops.docTransform, { before, after });   // run 同步派 wp:histchange → 编辑门已标游标+云脏（无需再标）
+  const ui: { before: UiSnap; after: UiSnap | null } = { before: _captureUi(), after: null };
+  const res = history.compound(workpiece, () => {
+    if (tf.mapLeaf) {
+      // ⚠ 挂起收集：mapLeaf 造新实例的 putRegion 会被写时扣押逮到（seal 时新实例已被 exchange
+      //   装上、解析得到 layerId → 双记账 + across 与旧网格漂移，undo 直接炸断言）。记录归
+      //   DocResizeOp 自带（实例交换），collector 此段必须闭嘴——suspend 的既定用途（T2 同款）。
+      const old: { layerId: number; lp: LayerPixels }[] = [];
+      wp2.layerTiles._suspendCollect(true);
+      try {
+        for (const leaf of flattenViewLeaves(doc.layers)) {
+          const np = tf.mapLeaf(leaf.pixels);
+          const prev = doc.exchangeLeafPixels(leaf.id, np);
+          if (prev) old.push({ layerId: leaf.id, lp: prev });
+        }
+      } finally {
+        wp2.layerTiles._suspendCollect(false);
+      }
+      const st = history.run(workpiece, ops.docResize, { _initial: { leaves: old } }, { checkpoint: false });
+      if (!st.ok) throw new Error(st.msg ?? "docResize 记账失败");
+    }
+    tf.applyComputed?.();
+    const tree = wp2.layerTree!;
+    if (tf.newW !== undefined && tf.newW !== doc.width) tree.setTreeProp("width", tf.newW);
+    if (tf.newH !== undefined && tf.newH !== doc.height) tree.setTreeProp("height", tf.newH);
+    const oldSel = doc.selection;
+    if (oldSel) {
+      const mapped = tf.mapSelection ? tf.mapSelection(oldSel) : oldSel;
+      if (mapped !== oldSel) {
+        doc.selection = mapped;   // pre-applied：before 所有权交 SwapSelectionOp
+        const st = history.run(workpiece, ops.selection, { _initialBefore: { v: oldSel } }, { checkpoint: false });
+        if (!st.ok) throw new Error(st.msg ?? "selection 记账失败");
+      }
+    }
+    tf.after?.();
+    ui.after = _captureUi();
+  }, { label: "docTransform", hint: (dir) => _applyUi(dir === "undo" ? ui.before : ui.after!) });
+  if (!res.ok) { reportError(new Error(`[docTransform] ${label} 失败（已回滚）：${res.msg ?? "?"}`), "error"); return; }
   if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   board.invalidateAll();
   bumpDoc();
   setStatus(label);
-}
-
-// 文档变换的提交信封：把「before 快照 → 改 doc → after 快照 → 压 docTransform」这条
-// 四处重复的脊柱收一处。结构上保证不会漏掉 undo 事务（漏了 = 这步静默不可撤销）。
-// 守卫（无选区/尺寸非法/没变化）留在调用方——helper 只管「已决定要做」的那次变换的提交。
-// applyFn 内改 doc + 可选 viewport shift（必须在 after 快照前完成，故放进 applyFn）。
-export function runDocTransform(label: string, applyFn: () => void) {
-  const before = _captureDocBefore();
-  docWriteWindow(applyFn);   // S4 割3：tx 信封的 apply 段 = 声明写窗口
-  const after = _captureDocAfter();
-  _pushDocTransform(before, after, label);
 }
 
 // v114: 裁切后让原 (rect.x, rect.y) 像素在屏上不挪 → viewport.tx/ty 减去 (rect.x, rect.y) × scale
@@ -220,7 +267,7 @@ function _closeOffsetDialog() {
 }
 
 export function initDocOps(ctx: AppContext) {
-  ({ editMode, docRaw: doc, board, history, setStatus, workpiece, ops,
+  ({ editMode, doc, board, history, setStatus, workpiece, ops, wp2,
      _suppressTransientPanels, _restoreTransientPanels } = ctx);
 
   // 裁到选区 ----
@@ -232,10 +279,14 @@ export function initDocOps(ctx: AppContext) {
     const x = Math.max(0, s.bboxX | 0), y = Math.max(0, s.bboxY | 0);
     const w = Math.min(doc.width - x, s.bboxW | 0), h = Math.min(doc.height - y, s.bboxH | 0);
     if (w < 1 || h < 1) { setStatus(t("tm.selectionTooSmall"), true); return; }
-    runDocTransform(t("tm.croppedToSelection", { w, h }), () => {
-      doc.cropTo({ x, y, w, h });
-      remapShapePersp((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移
-      _shiftViewportAfterCrop({ x, y });
+    runDocTransform(t("tm.croppedToSelection", { w, h }), {
+      newW: w, newH: h,
+      mapLeaf: (lp) => lp.cropped(x, y, w, h),
+      mapSelection: (sel) => sel.croppedTo(x, y, w, h),
+      after: () => {
+        remapShapePersp((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移
+        _shiftViewportAfterCrop({ x, y });
+      },
     });
   });
 
@@ -264,10 +315,11 @@ export function initDocOps(ctx: AppContext) {
       if (editMode.hasPendingTransient()) editMode.applyPendingTransient();   // v0.5.38 决定性动作=apply 悬浮 transient
       setMenuOpen(false);
       setAdjustOpen(false);
-      runDocTransform(t("tm.flippedHorizontal"), () => {
-        const W = doc.width;
-        doc.flipHorizontal();
-        remapShapePersp((p) => ({ x: W - p.x, y: p.y }));   // ADR-0006：像素中线 W−(i+.5)=(W−i−1)+.5 仍在格上
+      const W = doc.width;
+      runDocTransform(t("tm.flippedHorizontal"), {
+        applyComputed: () => wp2.layerTiles.flipHorizontalAll(),
+        mapSelection: (sel) => sel.flippedHorizontal(W),
+        after: () => remapShapePersp((p) => ({ x: W - p.x, y: p.y })),   // ADR-0006：像素中线 W−(i+.5)=(W−i−1)+.5 仍在格上
       });
     });
   }
@@ -281,13 +333,17 @@ export function initDocOps(ctx: AppContext) {
       if (editMode.hasPendingTransient()) editMode.applyPendingTransient();   // v0.5.38 决定性动作=apply 悬浮 transient
       setMenuOpen(false);
       setAdjustOpen(false);
-      runDocTransform(t("tm.rotated90CCW"), () => {
-        const W = doc.width;
-        doc.rotate90CCW();
-        // ADR-0006：VP 随转（(x,y)→(y, W−x)，同 doc 像素映射）；VP 对的地平线转成竖直 →
-        //   自动解锁 lockHorizon（锁的语义 = doc 水平线，转后无法表示；下次 VP 编辑可重锁）。
-        remapShapePersp((p) => ({ x: p.y, y: W - p.x }), { unlockHorizon: true });
-        board.fitToScreen();
+      const W = doc.width, H = doc.height;
+      runDocTransform(t("tm.rotated90CCW"), {
+        applyComputed: () => wp2.layerTiles.rotate90All(1),
+        newW: H, newH: W,
+        mapSelection: (sel) => sel.rotated90CCW(W, H),
+        after: () => {
+          // ADR-0006：VP 随转（(x,y)→(y, W−x)，同 doc 像素映射）；VP 对的地平线转成竖直 →
+          //   自动解锁 lockHorizon（锁的语义 = doc 水平线，转后无法表示；下次 VP 编辑可重锁）。
+          remapShapePersp((p) => ({ x: p.y, y: W - p.x }), { unlockHorizon: true });
+          board.fitToScreen();
+        },
       });
     });
   }
@@ -302,10 +358,37 @@ export function initDocOps(ctx: AppContext) {
       //   VP 随裁缩重映射（ADR-0006 同款）；尺寸剧变 → fitToScreen。
       const fr = { ..._cropState.rect };
       const sx = tpl.tw / fr.w, sy = tpl.th / fr.h;
-      runDocTransform(t("crop.templated", { w: tpl.tw, h: tpl.th }), () => {
-        doc.cropResampleTo(fr, tpl.tw, tpl.th, "auto");
-        remapShapePersp((p) => ({ x: (p.x - fr.x) * sx, y: (p.y - fr.y) * sy }));
-        board.fitToScreen();
+      const tw = tpl.tw, th = tpl.th;
+      // 裁剪+重采样原子变换（v0.6.48 语义原样；逐叶只处理 frame∩内容框子矩形，保 tile 稀疏性）。
+      const fx = fr.x, fy = fr.y, fw = Math.max(1, fr.w), fh = Math.max(1, fr.h);
+      runDocTransform(t("crop.templated", { w: tw, h: th }), {
+        newW: tw, newH: th,
+        mapLeaf: (lp) => {
+          const np = new LayerPixels(tw, th);
+          const b = lp.contentBounds(true);
+          if (!b) return np;
+          const ix0 = Math.max(fx, b.x), iy0 = Math.max(fy, b.y);
+          const ix1 = Math.min(fx + fw, b.x + b.w), iy1 = Math.min(fy + fh, b.y + b.h);
+          const iw = Math.ceil(ix1 - ix0), ih = Math.ceil(iy1 - iy0);
+          if (iw <= 0 || ih <= 0) return np;
+          const srcBytes = lp.getRegion(Math.floor(ix0), Math.floor(iy0), iw, ih);
+          const nbx = Math.floor((ix0 - fx) * sx), nby = Math.floor((iy0 - fy) * sy);
+          const nbw = Math.max(1, Math.min(tw - nbx, Math.round(iw * sx)));
+          const nbh = Math.max(1, Math.min(th - nby, Math.round(ih * sy)));
+          np.putRegion(nbx, nby, nbw, nbh, resampleBytes(srcBytes, iw, ih, nbw, nbh, "auto"));
+          return np;
+        },
+        mapSelection: (sel) => {
+          const cropped = sel.croppedTo(Math.round(fx), Math.round(fy), Math.round(fw), Math.round(fh));
+          if (!cropped) return null;
+          const out = cropped.resampledTo(sx, sy);
+          if (cropped !== sel && cropped !== out) cropped.dispose();   // 中间产物即弃（sel 本体归 op）
+          return out;
+        },
+        after: () => {
+          remapShapePersp((p) => ({ x: (p.x - fx) * sx, y: (p.y - fy) * sy }));
+          board.fitToScreen();
+        },
       });
       _closeCropMode();
       return;
@@ -313,10 +396,14 @@ export function initDocOps(ctx: AppContext) {
     // v127 (user：「裁切还可以扩张」)：允许 x/y 负（向左/向上扩），允许 w/h > doc（向右/向下扩）
     //   只保最小 1 + 最大 8192；doc.cropTo 已支持负 dx/dy
     const { x, y, w, h } = cropRectToInts(_cropState.rect, { min: 1, max: 8192 });
-    runDocTransform(t("tm.cropped", { w, h }), () => {
-      doc.cropTo({ x, y, w, h });
-      remapShapePersp((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移（含负向扩张）
-      _shiftViewportAfterCrop({ x, y });
+    runDocTransform(t("tm.cropped", { w, h }), {
+      newW: w, newH: h,
+      mapLeaf: (lp) => lp.cropped(x, y, w, h),
+      mapSelection: (sel) => sel.croppedTo(x, y, w, h),
+      after: () => {
+        remapShapePersp((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移（含负向扩张）
+        _shiftViewportAfterCrop({ x, y });
+      },
     });
     _closeCropMode();
   });
@@ -435,13 +522,27 @@ export function initDocOps(ctx: AppContext) {
     const mode = els.resampleMode.value || "bicubic";
     if (nw < 1 || nh < 1 || nw > 8192 || nh > 8192) { setStatus(t("tm.sizeOutOfRange"), true); return; }
     if (nw === doc.width && nh === doc.height) { _closeResampleDialog(); return; }
-    runDocTransform(t("tm.resampled", { w: nw, h: nh, mode }), () => {
-      const sx = nw / doc.width, sy = nh / doc.height;
-      doc.resampleTo(nw, nh, mode);
-      // ADR-0006 §7 补漏：resample 从未过 remapShapePersp（改画布尺寸后透视静默错位）。
-      //   缩放破 +0.5 格系 → 重钉像素中线（水平地平线仍水平，lockHorizon 不动）。
-      const c = (v: number) => Math.floor(v) + 0.5;
-      remapShapePersp((p) => ({ x: c(p.x * sx), y: c(p.y * sy) }));
+    const sx = nw / doc.width, sy = nh / doc.height;
+    runDocTransform(t("tm.resampled", { w: nw, h: nh, mode }), {
+      newW: nw, newH: nh,
+      // v0.6.46 字节管线原样：逐叶 getRegion → resample-bytes → 直落新 tile，零 premult 往返。
+      mapLeaf: (lp) => {
+        const np = new LayerPixels(nw, nh);
+        const b = lp.contentBounds(true);
+        if (!b) return np;
+        const srcBytes = lp.getRegion(b.x, b.y, b.w, b.h);
+        const nbw = Math.max(1, Math.round(b.w * sx));
+        const nbh = Math.max(1, Math.round(b.h * sy));
+        np.putRegion(Math.round(b.x * sx), Math.round(b.y * sy), nbw, nbh, resampleBytes(srcBytes, b.w, b.h, nbw, nbh, mode));
+        return np;
+      },
+      mapSelection: (sel) => sel.resampledTo(sx, sy),
+      after: () => {
+        // ADR-0006 §7 补漏：resample 从未过 remapShapePersp（改画布尺寸后透视静默错位）。
+        //   缩放破 +0.5 格系 → 重钉像素中线（水平地平线仍水平，lockHorizon 不动）。
+        const c = (v: number) => Math.floor(v) + 0.5;
+        remapShapePersp((p) => ({ x: c(p.x * sx), y: c(p.y * sy) }));
+      },
     });
     _closeResampleDialog();
   });
@@ -462,9 +563,11 @@ export function initDocOps(ctx: AppContext) {
     const ox = ((dx % doc.width) + doc.width) % doc.width;
     const oy = ((dy % doc.height) + doc.height) % doc.height;
     if (ox === 0 && oy === 0) { _closeOffsetDialog(); return; }
-    runDocTransform(t("tm.offset", { dx, dy }), () => {
-      doc.offsetWrap(dx, dy);
-      remapShapePersp((p) => ({ x: p.x + ox, y: p.y + oy }));   // ADR-0006：VP 平移不 wrap（VP 本可在画布外）
+    const W = doc.width, H = doc.height;
+    runDocTransform(t("tm.offset", { dx, dy }), {
+      applyComputed: () => wp2.layerTiles.offsetWrapAll(dx, dy),
+      mapSelection: (sel) => sel.offsetWrapped(ox, oy, W, H),
+      after: () => remapShapePersp((p) => ({ x: p.x + ox, y: p.y + oy })),   // ADR-0006：VP 平移不 wrap（VP 本可在画布外）
     });
     _closeOffsetDialog();
   });

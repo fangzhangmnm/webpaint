@@ -1,7 +1,8 @@
 import { BrushEngine } from "./brush.ts";
 import type { ClipBox } from "./shape-geometry.ts";
 import type { Family, PerspConfig, Mat3 } from "./perspective-frame.ts";
-import type { Layer, LayerSnap } from "./doc.ts";
+import type { LayerSnap } from "./doc.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Pt } from "./shape-geometry.ts";
 export type ShapeSubTool = "line" | "rect" | "circle" | "grid";
@@ -22,7 +23,7 @@ type Frame = {
     famB: Family;
 };
 interface ShapeStroke {
-    layer: Layer;
+    layer: ViewLeaf;
     settings: ResolvedBrush;
     mode: string;
     frame: Frame;
@@ -57,7 +58,7 @@ export declare class ShapeBrushEngine {
     setViewportRotProvider(fn: (() => number) | null): void;
     setPerspProvider(fn: (() => PerspConfig | null) | null): void;
     _resolveFrame(pixel: boolean): Frame;
-    beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, _pressure: number, mode?: string, _smooth?: object, _t?: number | null): void;
+    beginStroke(layer: ViewLeaf, settings: ResolvedBrush, x: number, y: number, _pressure: number, mode?: string, _smooth?: object, _t?: number | null): void;
     extendStroke(x: number, y: number, _pressure: number, _t?: number | null): void;
     endStroke(): StampCollect | null;
     cancelStroke(): void;

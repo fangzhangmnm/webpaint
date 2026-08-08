@@ -44,6 +44,9 @@ export declare class PaintingWorkpiece extends Workpiece {
         };
         legacy?: CollectorComponent;
     });
+    /** 迁移期后装 legacy 桥组件（T5 拆）：组合根的构造环解法——legacyOps 需要 v1 workpiece，
+     *  v1 需要 PaintingView 端口，端口需要本工件 → 桥组件只能在本工件建成后注册。 */
+    attachLegacy(c: CollectorComponent): void;
     /** 装载（杀 docRaw/adoptState 的后继）：令牌灌入 → 清栈 → markSaved。 */
     load(data: PaintingData): void;
     /** 编码器读口：冻结快照（bytes 当场拷出；空叶 pixels=null）。 */

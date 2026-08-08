@@ -14,7 +14,7 @@
 import { registerFilter } from "../filters.ts";
 import type { Filter, FilterParams, BrushLayer, BrushSettings, BrushSelection, DirtyRect } from "../filters.ts";
 import { LiquifyEngine } from "./liquify-engine.ts";
-import type { Layer } from "../doc.ts";
+import type { ViewLeaf } from "../workpiece/painting-view.ts";
 import type { Selection } from "../selection.ts";
 
 // liquify 把 stroke 委托给 LiquifyEngine；单 stroke 的可变状态只持一个 engine 引用。
@@ -71,7 +71,7 @@ export class LiquifyFilter {
       bleed: (params.bleed as string) || "edge",          // v147 选区边界取样模式
       sample: (params.sample as string) || "bilinear",    // 采样核（v0.6.45 默认回 bilinear，真机裁决）
     };
-    engine.beginStroke(layer as unknown as Layer, settings, x, y, selection as unknown as Selection | null);
+    engine.beginStroke(layer as unknown as ViewLeaf, settings, x, y, selection as unknown as Selection | null);
     return { engine };
   }
 

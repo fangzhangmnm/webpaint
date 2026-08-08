@@ -37,7 +37,7 @@
 // dx 坑保护：跟 v46/v47 一样，extendStroke 拿 input.js 已过 timeStamp + 平滑
 // 管线的 (x, y)，自身不再过滤 raw。
 
-import type { Layer } from "../doc.ts";
+import type { ViewLeaf } from "../workpiece/painting-view.ts";
 import { prefilterToSplinePlane, sampleSplinePremult } from "../bspline.ts";
 import type { SplinePlane } from "../bspline.ts";
 import { bicubicSamplePremult } from "../resample-bytes.ts";
@@ -60,7 +60,7 @@ interface DispField {
   data: Float32Array;
 }
 
-// Layer.snapshotImageData() 产物（CPU 算法读者的只读物化——不是 undo 包，别拿去 restore）。
+// ViewLeaf.snapshotImageData() 产物（CPU 算法读者的只读物化——不是 undo 包，别拿去 restore）。
 interface LayerSnapshot {
   bboxX: number;
   bboxY: number;
@@ -74,7 +74,7 @@ interface LayerSnapshot {
 interface MaskPlane { x: number; y: number; w: number; h: number; data: Uint8Array }
 
 interface LiquifyStroke {
-  layer: Layer;
+  layer: ViewLeaf;
   settings: LiquifySettings;
   bleed: string;
   lastX: number;
@@ -103,7 +103,7 @@ export class LiquifyEngine {
   //   "clip"   — 设墙：源落选区外 → 保留 dest 原像素（无位移），什么都不进
   //   "edge"   — (默认) 沿 dest→source 射线 march 到刚离开选区的边界点采样
   //              → 边界像素沿拉拽方向被无限拉长，无外部内容、无中轴接缝（见 ai-docs/20260528-liquify-blur.md）
-  beginStroke(layer: Layer, settings: LiquifySettings, x: number, y: number, selection: Selection | null) {
+  beginStroke(layer: ViewLeaf, settings: LiquifySettings, x: number, y: number, selection: Selection | null) {
     const lbW = Math.max(1, layer.bboxW);
     const lbH = Math.max(1, layer.bboxH);
     const bleed = settings.bleed || "edge";

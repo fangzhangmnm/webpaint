@@ -1,143 +1,222 @@
-// layer-tree —— workpiece 的结构类写面 component（v0.8.1 · S1 写面收权，ADR-0007）。
+// layer-tree —— workpiece 的结构类写面门面（v0.8.1 S1 立；**T3b-2 换心**：operator 流 → v2 verbs）。
 //
-// 「写即记账」契约：每个公共方法 = mutate + 自动 history.run(对应 operator)，一体不可拆——
-// 调用点只表达意图（新建层/删组/复制/合并/属性），locateNode/prevActiveId 的 args 组装舞蹈
-// 全部下沉到这里。记账失败绝不留下无账 mutation（addLayer 记账失败会把刚建的层摘回去）。
+// 「写即记账」契约不变：每个公共方法 = 一个 withPoint 令牌整点（checkpoint:false = 留开聚合，
+// 语义同旧 run；import 单整点/stampAll 复合沿用）。方法体内直写 LayerTree2/LayerTiles verbs，
+// undo 包 = 组件 collector 的根/tile record——TreeStructureOp/snapshotTree 舞蹈整族退役。
+// treeTx 已删：结构组合动作各有名字（addGroup/ungroup/collapseGroup/explodeLayer/stampAll/…）。
 //
-// treeTx 是结构变更的 tx 窗口：mutate 回调拿到可变 PaintDoc（受控 escape），前后自动拍
-// snapshotTree、成功即入栈（TreeStructureOp 事务型，restoreTree(after) 首跑幂等）。
-// DocView（S3）收口后，app 层结构写只剩本组件这一条门。
-//
-// 本组件不碰 DOM/i18n/store：undo/redo 状态栏文案由调用方传入（TreeStatuses）。
-// 微步/整点：所有方法透传 { checkpoint }（v0.7.41 import 单整点、stampAll compound 依赖它）。
+// undo/redo 状态栏文案：经 o.statuses 由调用方传入（本组件不碰 i18n），落 step.hint
+// （非权威附注——文案丢了不影响状态正确性，符合 hint 三纪律）。
+// mergeDown 的合成字节在此烤（renderNodesToBytes 纯函数面）——v2 verb 收字节不碰 GL（T3a 定形）。
 
-import { countLeaves, type Layer, type PaintDoc } from "../doc.ts";
-import { docWriteWindow } from "./write-gate.ts";
 import type { Workpiece, OpStatus, HistoryFacade } from "./workpiece.ts";
-
-import type { OperatorRegistry } from "./operators.ts";
+import type { LayerTree2, LayerPropKey } from "./layer-tree2.ts";
+import type { LayerTiles, Rect } from "./layer-tiles.ts";
+import { flattenViewLeaves, type PaintingView, type ViewLeaf, type ViewGroup, type ViewNode } from "./painting-view.ts";
+import { renderNodesToBytes } from "../doc-render.ts";
 
 export interface TreeStatuses { undoStatus?: string; redoStatus?: string }
-export interface RunOpts { checkpoint?: boolean; label?: string }
-export type AddLayerResult = { ok: true; layer: Layer } | { ok: false; msg?: string };
+export interface RunOpts { checkpoint?: boolean; label?: string; statuses?: TreeStatuses }
+export type AddLayerResult = { ok: true; layer: ViewLeaf } | { ok: false; msg?: string };
 
 export class LayerTree {
-  private _w: Workpiece;
-  private _doc: PaintDoc;
   private _history: HistoryFacade;
-  private _ops: OperatorRegistry;
+  private _tree: LayerTree2;
+  private _tiles: LayerTiles;
+  private _port: PaintingView;
+  private _status: (msg: string) => void;
 
-  constructor(deps: { w: Workpiece; doc: PaintDoc; history: HistoryFacade; ops: OperatorRegistry }) {
-    this._w = deps.w;
-    this._doc = deps.doc;
+  constructor(deps: { w: Workpiece; history: HistoryFacade; tree: LayerTree2; tiles: LayerTiles; port: PaintingView; status?: (msg: string) => void }) {
     this._history = deps.history;
-    this._ops = deps.ops;
+    this._tree = deps.tree;
+    this._tiles = deps.tiles;
+    this._port = deps.port;
+    this._status = deps.status ?? (() => {});
     deps.w._attachLayers(this);
   }
 
-  /** 新建空层（组内新建也精确复位；prevActiveId 自动拍：undo 摘层时回创建前的活动层）。
-   *  创建即记账（AddLayerRecordOp 首跑只验证）；像素初始化可在返回后做——undo 摘层时才捕 spec，
-   *  redo 经 insertLayerAt 连像素恢复（v0.7.35 合规形状，undo-stack-integrity 测试钉着）。
-   *  失败：msg="maxLayers"（层数到顶）。 */
+  /** o.statuses → step.hint（undo/redo 时报状态栏；非权威附注）。 */
+  private _hint(o?: RunOpts): ((dir: "undo" | "redo") => void) | undefined {
+    const s = o?.statuses;
+    if (!s || (!s.undoStatus && !s.redoStatus)) return undefined;
+    const status = this._status;
+    return (dir) => {
+      const msg = dir === "undo" ? s.undoStatus : s.redoStatus;
+      if (msg) status(msg);
+    };
+  }
+  private _point<T>(label: string, o: RunOpts | undefined, fn: () => T): { ok: boolean; value?: T; msg?: string } {
+    return this._history.withPoint(o?.label ?? label, { checkpoint: o?.checkpoint, hint: this._hint(o) }, fn);
+  }
+
+  /** 新建空层（active 同级之上 / active 是组则组内顶；active=新层）。失败：msg="maxLayers"。 */
   addLayer(name?: string, o?: RunOpts): AddLayerResult {
-    const doc = this._doc;
-    const prevActiveId = doc.activeLayer?.id ?? null;
-    const L = docWriteWindow(() => doc.addLayer(name));   // S4：component 创建段 = 声明窗口
-    if (!L) return { ok: false, msg: "maxLayers" };
-    return this._recordAdd(L, prevActiveId, o);
+    const r = this._point("addLayer", o, () => this._tree.addLayer(name));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    if (!r.value) return { ok: false, msg: "maxLayers" };
+    return { ok: true, layer: this._port.findLayer(r.value.id) as ViewLeaf };
   }
 
-  /** 复制叶层（插源层之上 + 设 active；像素句柄 copy-on-write 零拷贝）。msg="max"|"missing"。 */
+  /** 复制叶层（插源层之上 + 设 active；tileset 句柄共享零拷贝）。msg="max"|"missing"。 */
   duplicateLayer(id: number, o?: RunOpts): AddLayerResult {
-    const doc = this._doc;
-    const prevActiveId = doc.activeLayer?.id ?? null;
-    const r = docWriteWindow(() => doc.duplicateLayer(id));
-    if (!r.ok) return { ok: false, msg: r.reason };
-    return this._recordAdd(r.newLayer!, prevActiveId, o, r.loc!);
+    if (!this._tree.leafById(id)) return { ok: false, msg: "missing" };
+    const r = this._point("duplicateLayer", o, () => this._tree.duplicateLayer(id));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    if (!r.value) return { ok: false, msg: "max" };
+    return { ok: true, layer: this._port.findLayer(r.value.id) as ViewLeaf };
   }
 
-  private _recordAdd(L: Layer, prevActiveId: number | null, o?: RunOpts,
-    loc?: { parentId: number | null; index: number }): AddLayerResult {
-    const at = loc ?? this._doc.locateNode(L.id)!;
-    const st = this._history.run(this._w, this._ops.addLayer,
-      { layerId: L.id, index: at.index, parentId: at.parentId, prevActiveId, layerName: L.name }, o);
-    if (!st.ok) {
-      // 记账失败绝不留无账层（那正是 v0.7.35 的越狱病理）：摘回 + 释放像素句柄。
-      docWriteWindow(() => this._doc.removeLayer(L.id, true));
-      L.pixels.dispose();
-      return { ok: false, msg: st.msg };
-    }
-    return { ok: true, layer: L };
+  /** 删除叶层（keep-one 守卫：msg="keep-one guard"）。 */
+  removeLayer(id: number, _layerName: string, o?: RunOpts): OpStatus {
+    const r = this._point("removeLayer", o, () => this._tree.removeLayer(id));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "keep-one guard" };
   }
 
-  /** 删除叶层（RemoveLayerRecordOp 自捕快照；默认 keep-one 守卫，msg="keep-one guard"）。 */
-  removeLayer(id: number, layerName: string, o?: RunOpts & { allowEmpty?: boolean }): OpStatus {
-    return this._history.run(this._w, this._ops.removeLayer,
-      { layerId: id, layerName, allowEmpty: o?.allowEmpty }, o);
-  }
-
-  /** 删组（连带 children；删到 0 叶自动补一张空层，不卡「非空组删不掉」）。 */
+  /** 删组（连带 children；删到 0 叶自动补一张空层）。 */
   deleteGroup(id: number, statuses: TreeStatuses, o?: RunOpts): OpStatus {
-    const r = this.treeTx((doc) => {
-      if (!doc.removeLayer(id, true)) return null;
-      if (countLeaves(doc.layers) === 0) doc.addLayer();
-      return true;
-    }, () => statuses, o);
-    return r.ok ? { ok: true } : { ok: false, msg: r.msg };
+    const r = this._point("deleteGroup", { ...o, statuses }, () => this._tree.removeGroupAndFillEmpty(id));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "not-group" };
   }
 
-  /** 同级上移/下移（delta=+1 上 / -1 下；撤销 = 反向 delta）。 */
+  /** 同级上移/下移（delta=+1 上 / -1 下）。 */
   moveLayer(id: number, delta: number, o?: RunOpts): OpStatus {
-    return this._history.run(this._w, this._ops.moveLayer, { layerId: id, delta }, o);
+    const r = this._point("moveLayer", o, () => this._tree.moveLayer(id, delta));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "cannot move" };
   }
 
-  /** 向下合并（合并数学在 doc.mergeDownLayer；msg = 其 reason：bottom/clipping-under/…）。 */
+  /** 向下合并：合成字节在此烤（renderNodesToBytes，与 display 同一套混合数学——v0.6.39 拍板），
+   *  verb 只收字节。msg = bottom | merge-into-group | clipping-under | empty-active | no-gl。 */
   mergeDown(id: number, o?: RunOpts): OpStatus {
-    return this._history.run(this._w, this._ops.mergeDown, { layerId: id }, o);
+    const port = this._port;
+    const top = port.findLayer(id);
+    if (!top || top.isGroup) return { ok: false, msg: "bottom" };
+    const loc = port.locateNode(id);
+    if (!loc || loc.index <= 0) return { ok: false, msg: "bottom" };
+    const siblings: readonly ViewNode[] = loc.parentId == null
+      ? port.layers
+      : (port.findLayer(loc.parentId) as ViewGroup | null)?.children ?? [];
+    const underNode = siblings[loc.index - 1];
+    if (!underNode || underNode.isGroup) return { ok: false, msg: "merge-into-group" };
+    const under = underNode;
+    if (under.clippingMask && !top.clippingMask) return { ok: false, msg: "clipping-under" };
+    const L = top as ViewLeaf;
+    const aHasPx = L.bboxW > 0 && L.bboxH > 0;
+    const uHasPx = under.bboxW > 0 && under.bboxH > 0;
+    if (!aHasPx) return { ok: false, msg: "empty-active" };
+
+    // 剪裁语义沿 v258/doc.mergeDownLayer：active 剪裁+under 基底 → dst-in 裁进；链内合并保持剪裁。
+    const clipActiveToUnder = L.clippingMask && !under.clippingMask;
+    const resultClipping = L.clippingMask && under.clippingMask;
+    const x0 = uHasPx ? Math.min(under.bboxX, L.bboxX) : L.bboxX;
+    const y0 = uHasPx ? Math.min(under.bboxY, L.bboxY) : L.bboxY;
+    const x1 = uHasPx ? Math.max(under.bboxX + under.bboxW, L.bboxX + L.bboxW) : L.bboxX + L.bboxW;
+    const y1 = uHasPx ? Math.max(under.bboxY + under.bboxH, L.bboxY + L.bboxH) : L.bboxY + L.bboxH;
+    const newW = x1 - x0, newH = y1 - y0;
+    const comp = renderNodesToBytes([
+      { isGroup: false, id: under.id, opacity: under.opacity, mode: "source-over", clippingMask: false, visible: true, pixels: under.pixels },
+      { isGroup: false, id: L.id, opacity: L.opacity, mode: L.mode || "source-over", clippingMask: clipActiveToUnder, visible: true, pixels: L.pixels },
+    ], port.width, port.height) as { data: Uint8ClampedArray } | null;
+    if (!comp) return { ok: false, msg: "no-gl" };
+    const out = new Uint8ClampedArray(newW * newH * 4);
+    for (let y = 0; y < newH; y++) {
+      const srcOff = ((y0 + y) * port.width + x0) * 4;
+      out.set(comp.data.subarray(srcOff, srcOff + newW * 4), y * newW * 4);
+    }
+    const r = this._point("mergeDown", o, () =>
+      this._tree.mergeDown(id, { bytes: out, rect: { x: x0, y: y0, w: newW, h: newH }, resultClipping }));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "bottom" };
   }
 
   /** 层/组属性（rename/visible/opacity/mode/clippingMask/lockAlpha）。
-   *  initialOld：pre-applied 场景（透明度 slider 拖动期已实时写值，提交只补账）。 */
-  setLayerProp(id: number, prop: string, value: unknown,
-    o?: RunOpts & { initialOld?: { v: unknown } | null }): OpStatus {
-    return this._history.run(this._w, this._ops.layerProp,
-      { layerId: id, prop, value, _initialOld: o?.initialOld ?? null }, o);
+   *  拖动期预览走 view 镜像（不碰 json），提交只在此记一账——旧 initialOld 舞蹈退役。 */
+  setLayerProp(id: number, prop: string, value: unknown, o?: RunOpts): OpStatus {
+    const r = this._point("layerProp", o, () => this._tree.setLayerProp(id, prop as LayerPropKey, value));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "node gone" };
   }
 
   /** 参考层指定（doc 级 unique；null = 取消）。 */
   setReferenceLayer(id: number | null, o?: RunOpts): OpStatus {
-    return this._history.run(this._w, this._ops.referenceLayer, { value: id }, o);
+    const r = this._point("referenceLayer", o, () => { this._tree.setTreeProp("referenceLayerId", id); });
+    return r.ok ? { ok: true } : { ok: false, msg: r.msg };
   }
 
-  /** 清空叶层像素（保留图层/名字/属性；事务型：先清、before 快照交 SwapPixelsOp）。 */
+  /** 清空叶层像素（保留图层/名字/属性）。 */
   clearLayer(id: number, o?: RunOpts): OpStatus {
-    const n = this._doc.findLayer(id);
-    if (!n || n.isGroup) return { ok: false, msg: "layer gone" };
-    const L = n as Layer;
-    const before = L.snapshot();
-    L.clearAll();
-    return this._history.run(this._w, this._ops.pixels, { layerId: id, _initialBefore: before }, o);
+    if (!this._tree.leafById(id)) return { ok: false, msg: "layer gone" };
+    const r = this._point("clearLayer", o, () => this._tiles.clearLayer(id));
+    return r.ok ? { ok: true } : { ok: false, msg: r.msg };
   }
 
-  /** 焦点写（**显式声明的不入 undo 写**，v0.8 现状保持：点选活动层不占 undo 步；
-   *  undo/redo 时的 active 还原由各 operator 自带）。返回是否切成。 */
+  /** 焦点写（显式声明的不入 undo 写；undo/redo 的焦点还原由根快照天然给出）。 */
   setActive(id: number): boolean {
-    return docWriteWindow(() => this._doc.setActiveById(id));
+    return this._tree.setActive(id);
   }
 
-  /** 结构变更 tx 窗口（编组/解组/移入移出/collapse/explode/stampAll…）：
-   *  mutate 拿可变 doc；返回 null/false/undefined = 中止（不入栈——mutate 必须未动状态或已自行回滚）；
-   *  其余返回值 = 成功，前后 snapshotTree 自动入栈。statuses 从 mutate 返回值算 undo/redo 文案。 */
-  treeTx<T>(mutate: (doc: PaintDoc) => T | null | false | undefined,
-    statuses?: (v: T) => TreeStatuses, o?: RunOpts): { ok: boolean; value?: T; msg?: string } {
-    const doc = this._doc;
-    const before = doc.snapshotTree();
-    const v = docWriteWindow(() => mutate(doc));   // S4：treeTx mutate 段 = 声明窗口
-    if (v === null || v === false || v === undefined) return { ok: false, msg: "aborted" };
-    const s = statuses?.(v) ?? {};
-    const st = this._history.run(this._w, this._ops.treeStructure,
-      { before, after: doc.snapshotTree(), undoStatus: s.undoStatus, redoStatus: s.redoStatus }, o);
-    if (!st.ok) return { ok: false, msg: st.msg };
-    return { ok: true, value: v };
+  // ---- 结构组合动作（原 treeTx 住户，各归各名）----
+
+  /** 新建空组（active 是组 → 嵌入；否则同级之上；active=新组）。命名归调用方（UI 惯例「组 N」）。 */
+  addGroup(name?: string, statuses?: TreeStatuses, o?: RunOpts): { ok: boolean; groupId?: number; msg?: string } {
+    const r = this._point("addGroup", { ...o, statuses }, () => this._tree.addGroup(name));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true, groupId: r.value.id } : { ok: false, msg: "failed" };
+  }
+
+  /** 解组：children 提到原位。 */
+  ungroup(id: number, statuses: TreeStatuses, o?: RunOpts): OpStatus {
+    const r = this._point("ungroup", { ...o, statuses }, () => this._tree.explodeGroupInPlace(id));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "not-group" };
+  }
+
+  /** 组烤成单叶同位替换（#25 collapse）；merged=null = 空组 → 空叶。 */
+  collapseGroup(id: number, merged: { bytes: Uint8ClampedArray; rect: Rect } | null, statuses: TreeStatuses, o?: RunOpts): OpStatus {
+    const r = this._point("collapseGroup", { ...o, statuses }, () => this._tree.collapseGroupToLeaf(id, merged));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "not-group" };
+  }
+
+  /** 移入组（组内顶部）。 */
+  moveIntoGroup(id: number, gid: number, statuses: TreeStatuses, o?: RunOpts): OpStatus {
+    const r = this._point("moveIntoGroup", { ...o, statuses }, () => this._tree.moveIntoGroup(id, gid));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "cannot move" };
+  }
+
+  /** 移出组（组同级、组上方）。 */
+  moveOutOfGroup(id: number, statuses: TreeStatuses, o?: RunOpts): OpStatus {
+    const r = this._point("moveOutOfGroup", { ...o, statuses }, () => this._tree.moveOutOfGroup(id));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "cannot move" };
+  }
+
+  /** 按颜色拆分（v0.7.9 explode）：叶同位替换成 n 张新叶。 */
+  explodeLayer(id: number, parts: { data: Uint8ClampedArray; name: string }[], rect: Rect, statuses: TreeStatuses, o?: RunOpts): OpStatus {
+    const r = this._point("explodeLayer", { ...o, statuses }, () => this._tree.explodeLeaf(id, parts, rect));
+    if (!r.ok) return { ok: false, msg: r.msg };
+    return r.value ? { ok: true } : { ok: false, msg: "maxLayers" };
+  }
+
+  /** 盖印全部可见层 → 新叶置顶 + 其余**根级节点**隐藏（组作为组藏，沿旧行为；一个整点）。
+   *  merged=null = 空合成 → 空叶。 */
+  stampAll(name: string, merged: { bytes: Uint8ClampedArray; rect: Rect } | null, statuses?: TreeStatuses, o?: RunOpts): AddLayerResult {
+    const r = this._point("stampAll", { ...o, statuses }, () => {
+      const leaf = this._tree.addLayerTop(name);
+      if (!leaf) return null;
+      if (merged && merged.rect.w > 0 && merged.rect.h > 0) {
+        this._tiles.replaceLayer(leaf.id, merged.bytes, merged.rect);
+      }
+      for (const n of this._port.layers) {
+        if (n.id !== leaf.id && n.visible) this._tree.setLayerProp(n.id, "visible", false);
+      }
+      return leaf;
+    });
+    if (!r.ok) return { ok: false, msg: r.msg };
+    if (!r.value) return { ok: false, msg: "maxLayers" };
+    return { ok: true, layer: this._port.findLayer(r.value.id) as ViewLeaf };
   }
 }

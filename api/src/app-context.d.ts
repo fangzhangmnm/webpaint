@@ -1,5 +1,4 @@
-import type { PaintDoc } from "./doc.ts";
-import type { DocView } from "./workpiece/doc-view.ts";
+import type { PaintingView } from "./workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
@@ -89,8 +88,7 @@ export interface AppContext {
     dialReactive: DialReactive;
     currentBrush: CurrentBrushRef;
     editMode: EditMode;
-    doc: DocView;
-    docRaw: PaintDoc;
+    doc: PaintingView;
     board: Board;
     input: InputController;
     history: LegacyHistory;
@@ -110,7 +108,6 @@ export interface AppContext {
     updateNewerBanner: () => void;
     _suppressTransientPanels: (mode: string) => void;
     _restoreTransientPanels: () => void;
-    layerSpecFrom: (L: unknown) => ReturnType<PaintDoc["layerSpec"]>;
     _bringPanelTop: (el: HTMLElement | null) => void;
     _commitTransform: () => void;
     _cancelTransform: () => void;

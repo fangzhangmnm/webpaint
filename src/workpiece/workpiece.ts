@@ -12,7 +12,7 @@
 // 都在 doc 上）。后续切片把 doc 的可变方法逐步下沉成 operator、组件收窄；渲染/导出经窄读接口。
 // workpiece 不碰 store（红线；持久化归 importer/exporter/persistency 管，它们只读写快照）。
 
-import type { PaintDoc } from "../doc.ts";
+import type { PaintingView } from "./painting-view.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import { enterDocWrite, exitDocWrite } from "./write-gate.ts";
 import type { LayerTree } from "./layer-tree.ts";
@@ -52,8 +52,11 @@ export interface FloatState {
   transform: FloatTransformMeta;
 }
 
+// T3b-2：internals 载体从 PaintDoc 换成 PaintingView（树模式端口）。留桥的 operator
+// （selection/float/docResize/fillColor）经 mut(w).doc 读写的面由端口同形提供；
+// selection 的过渡宿在端口上（doc.selection 的后继）。T4/T5 组件化后本类整体退场。
 export interface WorkpieceInternals {
-  doc: PaintDoc;
+  doc: PaintingView;
   floats: FloatState | null;
 }
 
@@ -72,7 +75,7 @@ export class Workpiece {
   private _layers: LayerTree | null = null;
   private _sel: SelectionFace | null = null;
 
-  constructor(doc: PaintDoc, history: HistoryFacade) {
+  constructor(doc: PaintingView, history: HistoryFacade) {
     INTERNALS.set(this, { doc, floats: null });
     this.history = history;
   }
@@ -104,9 +107,9 @@ export class Workpiece {
   /** 每次 operator 提交 +1。render-tree 重建 / 缓存失效的 key。 */
   get commitVersion(): number { return this._commitVersion; }
 
-  // ---- 窄读接口（迁移期最小集：导出数据的 escape hatch。写必须走 operator。）----
-  /** 只读视图。⚠ 迁移期 escape hatch：老代码（board 渲染/导出/吸管）直读；新代码请依赖更窄的读口。 */
-  readDoc(): Readonly<PaintDoc> { return INTERNALS.get(this)!.doc; }
+  // ---- 窄读接口（T3b-2：readDoc() 已杀——PaintDoc escape hatch 不复存在）----
+  /** 端口读口（floating-transform 等构造期未持 port 的引擎用；T5 随本类拆）。 */
+  readView(): PaintingView { return INTERNALS.get(this)!.doc; }
 
   /** 浮层变换状态只读视图（board GPU warp 预览 / gizmo 引擎消费）。null = 无活动浮层。 */
   readFloatState(): Readonly<FloatState> | null { return INTERNALS.get(this)!.floats; }
@@ -145,7 +148,9 @@ export type OpStatus = { ok: true } | { ok: false; msg?: string };
  *  调用方（LayerTree/SelectionFace/doc-ops/fill/float/layers-panel/import-image）只准依赖这个形状。 */
 export interface HistoryFacade {
   run<A, D>(w: Workpiece, op: DocumentOperator<A, D>, args: A, o?: { checkpoint?: boolean; label?: string }): OpStatus;
-  compound<T>(w: Workpiece, fn: () => T): { ok: boolean; value?: T; msg?: string };
+  compound<T>(w: Workpiece, fn: () => T, o?: { label?: string; hint?: (dir: "undo" | "redo") => void }): { ok: boolean; value?: T; msg?: string };
+  /** v2-verb 迁移载具（T3b-2；见 legacy-bridge.withPoint）：fn 直写 v2 组件，共享令牌开/续/封。 */
+  withPoint<T>(label: string | undefined, o: { checkpoint?: boolean; hint?: (dir: "undo" | "redo") => void } | undefined, fn: () => T): { ok: boolean; value?: T; msg?: string };
   sealCheckpoint(): void;
   undo(w: Workpiece): boolean;
   redo(w: Workpiece): boolean;

@@ -3,7 +3,7 @@ import { LineartOracle } from "./lineart-oracle.ts";
 import type { ColorMetric } from "./color-dist.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
-import type { Layer, LayerGroup } from "./doc.ts";
+import type { ViewLeaf, ViewGroup } from "./workpiece/painting-view.ts";
 import type { Workpiece, HistoryFacade } from "./workpiece/workpiece.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
 interface Point {
@@ -22,7 +22,7 @@ interface LassoDoc {
     height: number;
     selection: SelectionLike | null;
 }
-type LassoNode = Layer | LayerGroup;
+type LassoNode = ViewLeaf | ViewGroup;
 type LiftOpts = {
     cut?: boolean;
     fallbackFullLayer?: boolean;
@@ -77,7 +77,7 @@ export declare class LassoEngine {
     setMagicAlgorithm(v: MagicAlgorithm): void;
     getMagicAlgorithm(): MagicAlgorithm;
     /** 线稿分区缓存是否已就绪（首次 tap 前 UI 可提示「分析线稿中…」） */
-    lineartReady(sourceLayer: Layer | null): boolean;
+    lineartReady(sourceLayer: ViewLeaf | null): boolean;
     setLineartCloseDist(px: number): void;
     getLineartCloseDist(): number;
     setLineartInkThreshold(pct: number): void;
@@ -91,7 +91,7 @@ export declare class LassoEngine {
     _lineartDebugView: boolean;
     setLineartDebugView(on: unknown): void;
     getLineartDebugView(): boolean;
-    lineartDebugInfo(sourceLayer: Layer | null): {
+    lineartDebugInfo(sourceLayer: ViewLeaf | null): {
         w: number;
         h: number;
         keypoints: import("./lineart/partition.ts").LineartPartition["keypoints"];
@@ -103,7 +103,7 @@ export declare class LassoEngine {
     getConstrainSquare(): boolean;
     beginPath(x: number, y: number): void;
     extendPath(x: number, y: number): void;
-    endPath(sourceLayer: Layer | null): {
+    endPath(sourceLayer: ViewLeaf | null): {
         type: string;
         before: Selection | null;
         after: Selection | null;
@@ -132,14 +132,14 @@ export declare class LassoEngine {
     _rasterizeFreehandToSelection(pts: Point[]): SelectionLike | null;
     _rasterizeRectToSelection(r: DraftRect | null): SelectionLike | null;
     _rasterizeEllipseToSelection(r: DraftRect | null): SelectionLike | null;
-    _magicWandToSelection(start: Point | null, sourceLayer: Layer | null): SelectionLike | null;
+    _magicWandToSelection(start: Point | null, sourceLayer: ViewLeaf | null): SelectionLike | null;
     _magicOrig: SelectionLike | null;
     _magicAccum: SelectionLike | null;
     _magicDragLastX: number;
     _magicDragLastY: number;
     beginMagicDrag(): void;
     /** 采样一点；选区真变了返回 true（调用方重绘）。 */
-    magicDragStep(x: number, y: number, sourceLayer: Layer | null): boolean;
+    magicDragStep(x: number, y: number, sourceLayer: ViewLeaf | null): boolean;
     /** 收笔：产单条 history entry（before 所有权随 entry 交给 workpiece.sel 记账口，同 _applySelectionUpdate 契约）。 */
     magicDragEnd(): {
         type: string;
@@ -187,10 +187,10 @@ export interface FloodStopMask {
 export declare function floodSelectFrom(doc: {
     width: number;
     height: number;
-}, start: Point | null, sourceLayer: Layer | null, thresholdPct: number, metric?: ColorMetric, // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 editorState 的度量
+}, start: Point | null, sourceLayer: ViewLeaf | null, thresholdPct: number, metric?: ColorMetric, // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 editorState 的度量
 stopMask?: FloodStopMask | null, gapPx?: number): Selection | null;
 export declare function similarSelectFrom(doc: {
     width: number;
     height: number;
-}, start: Point | null, sourceLayer: Layer | null, thresholdPct: number, metric?: ColorMetric): Selection | null;
+}, start: Point | null, sourceLayer: ViewLeaf | null, thresholdPct: number, metric?: ColorMetric): Selection | null;
 export {};

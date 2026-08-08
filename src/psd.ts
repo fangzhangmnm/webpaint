@@ -2,7 +2,7 @@
 //
 // 子集（决意不做的）：
 //   - Color mode: RGB 8-bit only（不做 16-bit / 32-bit / CMYK / Lab）
-//   - Layer：raster pixel layer + bbox + 4 channel(A/R/G/B) + blend mode + opacity
+//   - ViewLeaf：raster pixel layer + bbox + 4 channel(A/R/G/B) + blend mode + opacity
 //     + visibility + 名字（pascal ASCII + luni unicode）
 //   - 不做：layer mask / adjustment layer / smart object / text / vector / clipping group
 //   - 不做：image resources（thumb / DPI / 颜色配置都不写，PS 用默认值）
@@ -21,11 +21,11 @@
 //   // → image/vnd.adobe.photoshop blob，触发下载或 share
 
 import { renderNodesToBytes } from "./doc-render.ts";
-import { flattenLeaves } from "./doc.ts";
-import type { Layer } from "./doc.ts";
-import type { DocView } from "./workpiece/doc-view.ts";
+import { flattenViewLeaves } from "./workpiece/painting-view.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
+import type { PaintingView } from "./workpiece/painting-view.ts";
 
-// doc.layers / compositeLayers 的节点联合（Layer | LayerGroup）；这两个类型在 doc.ts 未导出，
+// doc.layers / compositeLayers 的节点联合（ViewLeaf | LayerGroup）；这两个类型在 doc.ts 未导出，
 // compositeLayers 接受 doc.layers 原样传入即可，这里给本地用到的画布上下文类型。
 type Ctx = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
@@ -200,7 +200,7 @@ function asciiPascalBytes(name: string) {
 }
 
 // ---- 主入口 ----
-export async function encodeDocToPsd(doc: DocView) {
+export async function encodeDocToPsd(doc: PaintingView) {
   const w = new BinaryWriter(64 * 1024);
   const docW = doc.width;
   const docH = doc.height;
@@ -221,18 +221,18 @@ export async function encodeDocToPsd(doc: DocView) {
   // ===== Image Resources (空) =====
   w.writeUInt32(0);
 
-  // ===== Layer & Mask Info =====
+  // ===== ViewLeaf & Mask Info =====
   const layerMaskLenOff = w.offset;
   w.writeUInt32(0);                    // 占位
 
-  // --- Layer Info subsection ---
+  // --- ViewLeaf Info subsection ---
   const layerInfoLenOff = w.offset;
   w.writeUInt32(0);                    // 占位
 
-  // Layer count（正数 = 普通；负数 = 第一个 alpha channel 是 doc 的合成透明，我们不用）
+  // ViewLeaf count（正数 = 普通；负数 = 第一个 alpha channel 是 doc 的合成透明，我们不用）
   // 图层组（batch 2）：PSD per-layer records 仍是**扁平叶**（组拍平进 merged，lsct 真组留 P2）。
   //   组本身无像素 canvas → 用 flattenLeaves 取所有叶，组结构丢失但像素不丢。
-  const layers = flattenLeaves(doc.layers);
+  const layers = flattenViewLeaves(doc.layers);
   w.writeInt16(layers.length);
 
   // 预先编码所有 layer 通道，记下每通道字节长度供 layer record 写入
@@ -246,7 +246,7 @@ export async function encodeDocToPsd(doc: DocView) {
   for (let i = 0; i < layers.length; i++) {
     writeLayerChannelData(w, layers[i], encoded[i]);
   }
-  // Layer info 字段 padded 到 2 的倍数
+  // ViewLeaf info 字段 padded 到 2 的倍数
   w.padTo(2);
   const layerInfoLen = w.offset - layerInfoLenOff - 4;
   w.fillUInt32(layerInfoLenOff, layerInfoLen);
@@ -254,7 +254,7 @@ export async function encodeDocToPsd(doc: DocView) {
   // --- Global layer mask info（空）---
   w.writeUInt32(0);
 
-  // Layer & mask info section length 回填
+  // ViewLeaf & mask info section length 回填
   const layerMaskLen = w.offset - layerMaskLenOff - 4;
   w.fillUInt32(layerMaskLenOff, layerMaskLen);
 
@@ -266,7 +266,7 @@ export async function encodeDocToPsd(doc: DocView) {
 }
 
 // ---- 每 layer 通道编码（预算长度用）----
-function encodeLayerChannels(layer: Layer): EncodedChannel[] {
+function encodeLayerChannels(layer: ViewLeaf): EncodedChannel[] {
   const lw = layer.bboxW || 0;
   const lh = layer.bboxH || 0;
   let channels;
@@ -292,7 +292,7 @@ function encodeLayerChannels(layer: Layer): EncodedChannel[] {
   });
 }
 
-function writeLayerRecord(w: BinaryWriter, layer: Layer, encChannels: EncodedChannel[]) {
+function writeLayerRecord(w: BinaryWriter, layer: ViewLeaf, encChannels: EncodedChannel[]) {
   // bbox（PSD wants top, left, bottom, right）
   const empty = !(layer.bboxW > 0 && layer.bboxH > 0);
   const top    = empty ? 0 : layer.bboxY;
@@ -327,13 +327,13 @@ function writeLayerRecord(w: BinaryWriter, layer: Layer, encChannels: EncodedCha
   const extraOff = w.offset;
   w.writeUInt32(0);
 
-  // Layer mask data (empty)
+  // ViewLeaf mask data (empty)
   w.writeUInt32(0);
-  // Layer blending ranges (empty)
+  // ViewLeaf blending ranges (empty)
   w.writeUInt32(0);
 
   // Pascal name（ASCII fallback），整体 padded 到 4 倍数
-  const nameBytes = asciiPascalBytes(layer.name || "Layer");
+  const nameBytes = asciiPascalBytes(layer.name || "ViewLeaf");
   w.writeUInt8(nameBytes.length);
   w.writeBytes(nameBytes);
   // pad
@@ -341,8 +341,8 @@ function writeLayerRecord(w: BinaryWriter, layer: Layer, encChannels: EncodedCha
   const padN = (4 - (consumed % 4)) % 4;
   for (let i = 0; i < padN; i++) w.writeUInt8(0);
 
-  // Additional Layer Info: "luni" 真实 unicode 名
-  writeLuni(w, layer.name || "Layer");
+  // Additional ViewLeaf Info: "luni" 真实 unicode 名
+  writeLuni(w, layer.name || "ViewLeaf");
 
   // 回填 extra data length
   const extraLen = w.offset - extraOff - 4;
@@ -366,7 +366,7 @@ function writeLuni(w: BinaryWriter, name: string) {
   w.fillUInt32(lenOff, dataLen);
 }
 
-function writeLayerChannelData(w: BinaryWriter, layer: Layer, encChannels: EncodedChannel[]) {
+function writeLayerChannelData(w: BinaryWriter, layer: ViewLeaf, encChannels: EncodedChannel[]) {
   const lh = layer.bboxH || 0;
   for (const ch of encChannels) {
     w.writeUInt16(1);                            // compression = RLE
@@ -378,7 +378,7 @@ function writeLayerChannelData(w: BinaryWriter, layer: Layer, encChannels: Encod
 }
 
 // ---- Merged image：所有可见 layer 合成到 docW×docH 平面后写入 ----
-function writeMergedImage(w: BinaryWriter, doc: DocView, docW: number, docH: number) {
+function writeMergedImage(w: BinaryWriter, doc: PaintingView, docW: number, docH: number) {
   const c = (typeof OffscreenCanvas !== "undefined")
     ? new OffscreenCanvas(docW, docH)
     : (() => { const x = document.createElement("canvas"); x.width = docW; x.height = docH; return x; })();

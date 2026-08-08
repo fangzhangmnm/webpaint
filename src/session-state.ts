@@ -11,15 +11,13 @@
 //   （dirty 分层：内存脏=es.isDirty，sync 脏=listAllItems）、_store.busy/edits/session/autosave/flow.*/adoptBase/seal。
 
 import { reactive } from "../vendor/vue/vue.esm-browser.prod.js";
-import { docWriteWindow } from "./workpiece/write-gate.ts";
 import { WEBPAINT_VERSION } from "./version.ts";
 import { reportError } from "./error-badge.ts";
 import { thumbBlobFromCanvas, setCurrentSessionName } from "./session.ts";
 import { renderNodesToCanvas } from "./doc-render.ts";
-import { encodeDocToOra, decodeOraToDoc, parseAppVersion } from "./ora.ts";
-import { freezeDocForEncode } from "./doc.ts";
-import { PaintDoc } from "./doc.ts";
-import type { Layer } from "./doc.ts";
+import { encodeDocToOra, decodeOraToPainting, paintingDataToEncodeDoc, parseAppVersion, type DecodedPainting } from "./ora.ts";
+import { flattenViewLeaves } from "./workpiece/painting-view.ts";
+import { tLatin } from "./i18n/index.ts";
 import { isSignedIn, store as _store } from "./app-store.ts";
 import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字节（branded：明文流不进只收密文的 sink）
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
@@ -45,10 +43,11 @@ interface OraWebpaintState {
   viewport?: { scale?: number } & Record<string, unknown>;
   blender?: unknown;
 }
-type LoadedDoc = PaintDoc & { _webpaintState?: OraWebpaintState; _editorState?: unknown; _referenceBlob?: Blob | null; _wroteWith?: string; };
+type LoadedDoc = DecodedPainting;
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initSession(ctx) 注入）----
-let state: AppContext["state"], doc: AppContext["docRaw"], board: AppContext["board"];
+let state: AppContext["state"], doc: AppContext["doc"], board: AppContext["board"];
+let wp2: AppContext["wp2"];
 let input: AppContext["input"], editMode: AppContext["editMode"], rack: AppContext["rack"];
 let referenceWindow: AppContext["referenceWindow"], paletteWindow: AppContext["paletteWindow"];
 let setStatus: AppContext["setStatus"], withBusy: AppContext["withBusy"];
@@ -115,7 +114,7 @@ function resetEditorState() {
 //   开/关/定位自己（**只读 editorState + 裸 DOM 操作，不回写 editorState**）。
 function applyEditorStateToUI(): void { window.dispatchEvent(new CustomEvent("wp:applyEditorState")); }
 function restoreEditorStateFromOra(loaded: LoadedDoc) {
-  const ws = loaded?._webpaintState;
+  const ws = loaded?._webpaintState as OraWebpaintState | undefined;
   if (loaded?._referenceBlob) {
     // skipFit：ref 面板 open/位置/vp 由 editorState.refPanel 经 wp:applyEditorState 恢复；bitmap 异步载入不覆盖已载入 vp。
     createImageBitmap(loaded._referenceBlob).then((bitmap: ImageBitmap) => {
@@ -133,8 +132,11 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
     }
   }
   applyBlenderSyncState(ws?.blender);   // checkboard 已迁 editorState → 经 wp:applyEditorState 应用（settings-menu 订阅）
-  if (ws?.activeId != null && docWriteWindow(() => doc.setActiveById(ws.activeId!))) renderLayersPanel();
-  else if (typeof ws?.activeLayerIndex === "number" && docWriteWindow(() => doc.setActive(ws.activeLayerIndex!))) renderLayersPanel();
+  if (ws?.activeId != null && wp2.layerTree!.setActive(ws.activeId!)) renderLayersPanel();
+  else if (typeof ws?.activeLayerIndex === "number") {   // 兼容旧（扁平叶序 index）
+    const leaf = flattenViewLeaves(doc.layers)[ws.activeLayerIndex!];
+    if (leaf && wp2.layerTree!.setActive(leaf.id)) renderLayersPanel();
+  }
   // 新轨（desk per-doc）：载入 .webpaint/editor-state.json（缺失=老画作 → resetEditorState 已回默认）。
   //   **后手赢**：它会用 brushTool 覆盖 toolStates.brush + color。
   if (loaded._editorState != null) editorState.Unserialize(loaded._editorState);
@@ -150,7 +152,7 @@ function _buildOraMeta() {
     { tx: board.viewport.tx, ty: board.viewport.ty, scale: board.viewport.scale, rot: board.viewport.rot },
     state.checkerboard,
   );
-  return { referenceImage: referenceWindow.getPersistBlob(), webpaintState: storeEditorStateToOra(), editorState: editorState.Serialize() };
+  return { referenceImage: referenceWindow.getPersistBlob() ?? undefined, webpaintState: storeEditorStateToOra(), editorState: editorState.Serialize() };
 }
 // S8（spec:41 存档一致性）：encode 前**同步**冻结 {结构 + 每叶 tile 快照}（零拷贝），bytes 与 peek
 //   读同一冻结视图 → encode 的 await 间隙里任何编辑（描边 commit / 层结构操作）都不撕存档，
@@ -160,23 +162,23 @@ async function _encodeCurrentOraWithPeek(): Promise<{ bytes: Blob; peek: Blob | 
   // merged（GL 合成）与 freeze 在**同一同步刻**取自活 doc → mergedimage/缩略图/层数据三者一致。
   //   GL 不可用（context lost 中的 autosave）→ merged=null：ora 用透明占位、peek 省略——层数据照常落盘。
   const merged = renderNodesToCanvas(doc.layers, doc.width, doc.height);
-  const { frozen, dispose } = freezeDocForEncode(doc as Parameters<typeof freezeDocForEncode>[0]);
-  try {
-    const meta = _buildOraMeta() as Record<string, unknown>;
-    const bytes = await encodeDocToOra(frozen, { ...meta, mergedCanvas: merged } as Parameters<typeof encodeDocToOra>[1]) as Blob;   // v0.6.44：unsafe cast 删（EncodeDoc 已兼收冻结视图）
-    const peek = merged ? await thumbBlobFromCanvas(merged, 256) : null;
-    return { bytes, peek };
-  } finally { dispose(); }
+  // v2 冻结形（T3b-2）：exportData 当场拷出全部字节（同步刻，与 merged 同源一致）→ 编码期任何
+  //   编辑都追不进快照；无句柄、无 dispose。paintingDataToEncodeDoc 只是纯切片视图。
+  const frozen = paintingDataToEncodeDoc(wp2.exportData());
+  const meta = _buildOraMeta();
+  const bytes = await encodeDocToOra(frozen, { ...meta, mergedCanvas: merged }) as Blob;
+  const peek = merged ? await thumbBlobFromCanvas(merged, 256) : null;
+  return { bytes, peek };
 }
 
 // ---- blank-unnamed 自检 ----
 function _docIsBlankUnnamed() {
   if (_isLazyBlankSession) {
-    for (const L of doc.layers as Layer[]) if (L.bboxW > 0 && L.bboxH > 0) { _isLazyBlankSession = false; _recomputePhase(); return false; }
+    for (const L of flattenViewLeaves(doc.layers)) if (L.bboxW > 0 && L.bboxH > 0) { _isLazyBlankSession = false; _recomputePhase(); return false; }
     return true;
   }
   if (_activeSessionName && _activeSessionName !== "未命名") return false;
-  for (const L of doc.layers as Layer[]) if (L.bboxW > 0 && L.bboxH > 0) return false;
+  for (const L of flattenViewLeaves(doc.layers)) if (L.bboxW > 0 && L.bboxH > 0) return false;
   return true;
 }
 
@@ -188,10 +190,11 @@ let es: EditorSession;
 function adoptModel(loaded: LoadedDoc) {
   _loadingDoc = true;
   try {
-    docWriteWindow(() => doc.adoptState(loaded));   // S4：装载写 = 声明窗口（生命周期持证人）
+    input.clearHistory();       // 先清：弃开着的令牌 + drop floats + lasso 取消（load 要开新令牌）
+    wp2.load(loaded.data);      // 令牌灌入 + 清栈 + markSaved（docRaw/adoptState 的后继，ADR-0008 §3）
+    doc.clearSelectionOnLoad(); // 跨 session 不沿用选区（旧 adoptState 语义）
     resetEditorState();
     els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
-    input.clearHistory();
     board.invalidateAll(); board.requestRender(); renderLayersPanel();
     // 版本降级检测：写这画的 WebPaint 版本 > 当前 → 警告（守卫 saveNow/saveAndPush 覆盖）。
     _loadedDocIsNewer = false; _loadedDocNewerConfirmed = false;
@@ -436,14 +439,20 @@ async function exitCanvasToGallery() {
 }
 
 // ---- 新建 doc ----
-async function newDoc({ name, w, h, fillLayer0 }: { name: string; w: number; h: number; fillLayer0?: (layer: unknown) => void }) {
+async function newDoc({ name, w, h, layer0Name, fillLayer0 }: { name: string; w: number; h: number; layer0Name?: string; fillLayer0?: (layer: unknown) => void }) {
   if (es.isDirty()) await saveNow();
-  const fresh = new PaintDoc({ width: w, height: h });
-  doc.layers = fresh.layers; doc.activeIndex = 0; doc.width = w; doc.height = h; doc.selection = null; doc.referenceLayerId = null;
+  input.clearHistory();
+  wp2.load({
+    width: w, height: h, backgroundColor: "#ffffff",
+    nodes: [{ name: layer0Name ?? `${tLatin("doc.layerName")} 1`, visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }],
+  });
+  doc.clearSelectionOnLoad();
   els.canvasSizeLabel.textContent = `${w}×${h}`;
+  // fillLayer0（导入图片为新文档等）：装载基线内容——写在 history 之前（无令牌 = 不入 undo，
+  //   与旧「fill 后 clearHistory」语义一致）；脏门由下方 es.adopted(create:true) 负责。
   if (fillLayer0) fillLayer0(doc.layers[0]);
   _setActive(name); _recomputePhase();
-  _enc.encrypted = false; input.clearHistory(); board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
+  _enc.encrypted = false; board.invalidateAll(); board.fitToScreen(); renderLayersPanel();
   resetEditorState();
   applyEditorStateToUI();   // desk：新建 → 面板回默认（关）
   es.adopted(toFull(name), { create: true });   // 新建画布/import：es 记为当前 + 脏；首存 mode:"new"（撞名不静默覆盖）。边界转全名。
@@ -599,7 +608,7 @@ export const session = {
 };
 
 export function initSession(ctx: AppContext) {
-  state = ctx.state; doc = ctx.docRaw; board = ctx.board; input = ctx.input;   // docRaw：装载/换文档生命周期唯一持证人（S3）
+  state = ctx.state; doc = ctx.doc; board = ctx.board; input = ctx.input; wp2 = ctx.wp2;   // 装载/换文档 = wp2.load（令牌写；T3b-2）
   editMode = ctx.editMode; rack = ctx.rack;
   referenceWindow = ctx.referenceWindow; paletteWindow = ctx.paletteWindow;
   setStatus = ctx.setStatus; withBusy = ctx.withBusy;
@@ -615,7 +624,7 @@ export function initSession(ctx: AppContext) {
     store: _store as unknown as StoreLike,   // 真 store 结构满足 StoreLike（file/reconcile 超集）；断言解耦
 
     editor: {
-      adopt: async (bytes: Blob) => { const loaded = await decodeOraToDoc(bytes) as LoadedDoc; adoptModel(loaded); },
+      adopt: async (bytes: Blob) => { const loaded = await decodeOraToPainting(bytes) as LoadedDoc; adoptModel(loaded); },
       encode: async () => await _encodeCurrentOraWithPeek(),
       // v0.8.5（S5）：sidecar 变更（参考图等「跟 ora 走 ∧ 不进 undo」态）与内容变更走同一内容脏门
       //   ——都要落盘/推云；差别只在不进 undo 栈（wp:sidecarchange 不碰 undo 按钮态）。

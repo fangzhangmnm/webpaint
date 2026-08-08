@@ -38,7 +38,8 @@ import {
 } from "./perspective-frame.ts";
 import { bresenhamConicInQuad } from "./pixel-conic.ts";
 import type { Family, PerspConfig, Mat3 } from "./perspective-frame.ts";
-import type { Layer, LayerSnap } from "./doc.ts";
+import type { LayerSnap } from "./doc.ts";
+import type { ViewLeaf } from "./workpiece/painting-view.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import type { Pt } from "./shape-geometry.ts";
 
@@ -58,7 +59,7 @@ type Frame =
   | { kind: "persp"; cfg: PerspConfig; famA: Family; famB: Family };
 
 interface ShapeStroke {
-  layer: Layer;
+  layer: ViewLeaf;
   settings: ResolvedBrush;     // 已覆写 taperIn/Out=0 的冻结值
   mode: string;                // "brush" | "erase"
   frame: Frame;
@@ -112,7 +113,7 @@ export class ShapeBrushEngine {
 
   // 签名与 BrushEngine.beginStroke 一致 → input._beginStroke 按 engineKey 通用调用。
   //   pressure/smooth/t 有意忽略（恒压 + 直通 + 合成时间戳）。
-  beginStroke(layer: Layer, settings: ResolvedBrush, x: number, y: number, _pressure: number,
+  beginStroke(layer: ViewLeaf, settings: ResolvedBrush, x: number, y: number, _pressure: number,
               mode: string = "brush", _smooth: object = {}, _t: number | null = null) {
     const s = { ...settings, taperIn: 0, taperOut: 0 } as ResolvedBrush;
     Object.freeze(s);
