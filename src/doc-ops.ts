@@ -4,7 +4,9 @@
 //   - crop/cropResample/resample 走逐叶实例交换 + DocResizeOp 记账（undo 包 = 另一侧实例）；
 //   - json 尺寸走 layerTree2.setTreeProp("width"/"height")（树 record 同 step 翻转）；
 //   - 选区走 SelectionComponent（pre-applied 直写组件 verb——T4a）；
-//   - viewport/persp 还原走 **step.hint**（提案 .h：docTransform 是 hint 的唯一住户）。
+//   - 透视 remap 走 PerspComponent.remapForDocTransform（token 记账，undo 同 step 还原——T4d，
+//     persp 信封退役）；
+//   - viewport 还原走 **step.hint**（提案 .h：docTransform 是 hint 的唯一住户，T4d 后只剩视口）。
 // 守卫（无选区/尺寸非法/没变化）留调用方。crop/resample 是 EditMode transient（enter/apply/cancel 走 editMode）。
 
 import { els } from "./els.ts";
@@ -13,7 +15,6 @@ import { t } from "./i18n/index.ts";
 import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } from "./crop-geometry.ts";
 import { loadCanvasTemplates, fillTemplateSelect, templatePx, templateById } from "./canvas-templates.ts";
 import { editorState } from "./workbench-state.ts";
-import { remapShapePersp, snapshotShapePersp, restoreShapePersp } from "./workbench-state.ts";
 import { flattenViewLeaves } from "./workpiece/painting-view.ts";
 import { LayerPixels } from "./tiles/tile-layer.ts";
 import { resampleBytes } from "./resample-bytes.ts";
@@ -35,14 +36,13 @@ import { reportError } from "./error-badge.ts";
 let _suppressTransientPanels: AppContext["_suppressTransientPanels"], _restoreTransientPanels: AppContext["_restoreTransientPanels"];
 
 // ===== 文档变换脊柱（v2）=====
-interface UiSnap { viewport: Record<string, number>; persp: unknown }
+interface UiSnap { viewport: Record<string, number> }
 function _captureUi(): UiSnap {
-  return { viewport: { ...board.viewport }, persp: snapshotShapePersp() };
+  return { viewport: { ...board.viewport } };
 }
-// undo/redo 的 UI 随行还原（step.hint 消费）：视口 + 透视配置 + 尺寸标签 + 重绘。
+// undo/redo 的 UI 随行还原（step.hint 消费）：视口 + 尺寸标签 + 重绘（T4d：透视归组件 record）。
 function _applyUi(u: UiSnap): void {
   Object.assign(board.viewport, u.viewport);
-  restoreShapePersp(u.persp);
   if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   board.invalidateAll();
 }
@@ -56,7 +56,7 @@ interface DocTransformSpec {
   applyComputed?: () => void;
   /** 选区映射（缺省 = 保留原选区；返回 null = 清选区）。 */
   mapSelection?: (sel: Selection) => Selection | null;
-  /** persp remap / viewport shift / fitToScreen（在 after UI 快照之前跑）。 */
+  /** persp remap（走 wp2.persp 组件记账）/ viewport shift / fitToScreen（在 after UI 快照之前跑）。 */
   after?: () => void;
 }
 
@@ -283,7 +283,7 @@ export function initDocOps(ctx: AppContext) {
       mapLeaf: (lp) => lp.cropped(x, y, w, h),
       mapSelection: (sel) => sel.croppedTo(x, y, w, h),
       after: () => {
-        remapShapePersp((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移
+        wp2.persp.remapForDocTransform((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移
         _shiftViewportAfterCrop({ x, y });
       },
     });
@@ -318,7 +318,7 @@ export function initDocOps(ctx: AppContext) {
       runDocTransform(t("tm.flippedHorizontal"), {
         applyComputed: () => wp2.layerTiles.flipHorizontalAll(),
         mapSelection: (sel) => sel.flippedHorizontal(W),
-        after: () => remapShapePersp((p) => ({ x: W - p.x, y: p.y })),   // ADR-0006：像素中线 W−(i+.5)=(W−i−1)+.5 仍在格上
+        after: () => wp2.persp.remapForDocTransform((p) => ({ x: W - p.x, y: p.y })),   // ADR-0006：像素中线 W−(i+.5)=(W−i−1)+.5 仍在格上
       });
     });
   }
@@ -340,7 +340,7 @@ export function initDocOps(ctx: AppContext) {
         after: () => {
           // ADR-0006：VP 随转（(x,y)→(y, W−x)，同 doc 像素映射）；VP 对的地平线转成竖直 →
           //   自动解锁 lockHorizon（锁的语义 = doc 水平线，转后无法表示；下次 VP 编辑可重锁）。
-          remapShapePersp((p) => ({ x: p.y, y: W - p.x }), { unlockHorizon: true });
+          wp2.persp.remapForDocTransform((p) => ({ x: p.y, y: W - p.x }), { unlockHorizon: true });
           board.fitToScreen();
         },
       });
@@ -385,7 +385,7 @@ export function initDocOps(ctx: AppContext) {
           return out;
         },
         after: () => {
-          remapShapePersp((p) => ({ x: (p.x - fx) * sx, y: (p.y - fy) * sy }));
+          wp2.persp.remapForDocTransform((p) => ({ x: (p.x - fx) * sx, y: (p.y - fy) * sy }));
           board.fitToScreen();
         },
       });
@@ -400,7 +400,7 @@ export function initDocOps(ctx: AppContext) {
       mapLeaf: (lp) => lp.cropped(x, y, w, h),
       mapSelection: (sel) => sel.croppedTo(x, y, w, h),
       after: () => {
-        remapShapePersp((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移（含负向扩张）
+        wp2.persp.remapForDocTransform((p) => ({ x: p.x - x, y: p.y - y }));   // ADR-0006：VP 随裁剪平移（含负向扩张）
         _shiftViewportAfterCrop({ x, y });
       },
     });
@@ -540,7 +540,7 @@ export function initDocOps(ctx: AppContext) {
         // ADR-0006 §7 补漏：resample 从未过 remapShapePersp（改画布尺寸后透视静默错位）。
         //   缩放破 +0.5 格系 → 重钉像素中线（水平地平线仍水平，lockHorizon 不动）。
         const c = (v: number) => Math.floor(v) + 0.5;
-        remapShapePersp((p) => ({ x: c(p.x * sx), y: c(p.y * sy) }));
+        wp2.persp.remapForDocTransform((p) => ({ x: c(p.x * sx), y: c(p.y * sy) }));
       },
     });
     _closeResampleDialog();
@@ -566,7 +566,7 @@ export function initDocOps(ctx: AppContext) {
     runDocTransform(t("tm.offset", { dx, dy }), {
       applyComputed: () => wp2.layerTiles.offsetWrapAll(dx, dy),
       mapSelection: (sel) => sel.offsetWrapped(ox, oy, W, H),
-      after: () => remapShapePersp((p) => ({ x: p.x + ox, y: p.y + oy })),   // ADR-0006：VP 平移不 wrap（VP 本可在画布外）
+      after: () => wp2.persp.remapForDocTransform((p) => ({ x: p.x + ox, y: p.y + oy })),   // ADR-0006：VP 平移不 wrap（VP 本可在画布外）
     });
     _closeOffsetDialog();
   });

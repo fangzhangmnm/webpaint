@@ -93,6 +93,7 @@ import "./stroke-smoother.test.mjs";
 import "./selection-morph.test.mjs";
 import "./selection-tiles.test.mjs";       // S5：gray8 tile 选区底座（布尔/所有权/ants/SelectionComponent）
 import "./pending-fill.test.mjs";         // T4c：PendingFill 组件（预览换色可撤/笔刷色不被 undo 碰）
+import "./persp-component.test.mjs";      // T4d：PerspComponent（doc 变换 remap 记账，信封退役）
 import "./flood-select.test.mjs";
 import "./lineart-partition.test.mjs";  // 线稿分区管线（论文 Fourey-Tschumperlé-Revoy）：EDT/曲率端点/样条闭合/label map/线下瓜分
 import "./lineart-oracle.test.mjs";     // 线稿 oracle 接缝：tap→Selection + contentRev 缓存失效

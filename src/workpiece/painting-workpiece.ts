@@ -18,6 +18,7 @@ import { LayerTree2, isGroupNode, type TreeJson, type TreeNode, type TreeLeaf } 
 import { SelectionComponent } from "./selection-component.ts";
 import { FloatLayerComponent } from "./float-component.ts";
 import { PendingFill } from "./pending-fill.ts";
+import { PerspComponent, type PerspHost } from "./persp-component.ts";
 import { LayerPixels } from "../tiles/tile-layer.ts";
 
 // ---- 装载/导出的 plain data（解码器/编码器的唯一交换形；判别同 TreeNode："children" in n）----
@@ -39,17 +40,27 @@ export interface PaintingData {
   nodes: PaintingDataNode[];
 }
 
+/** 无 app（node 测试）时的内存 persp host：只承接快照互换，无 remap 数学。 */
+function memoryPerspHost(): PerspHost {
+  let data: unknown = null;
+  const cp = (v: unknown) => (v == null ? null : JSON.parse(JSON.stringify(v)));
+  return { snapshot: () => cp(data), restore: (s) => { data = cp(s); }, remap: () => {} };
+}
+
 export class PaintingWorkpiece extends Workpiece {
   readonly layerTiles: LayerTiles;
   readonly layerTree: LayerTree2 | null;
   readonly selection: SelectionComponent;   // recorded（不持久化，跨 session 清——T4a）
   readonly floatLayer: FloatLayerComponent; // recorded（不持久化，退出前 settle——T4b）
   readonly pendingFill: PendingFill;        // recorded（不持久化；fill 工具期非 null——T4c）
+  readonly persp: PerspComponent;           // recorded（持久化去向=desk 文件；记账面=doc 变换 remap——T4d）
 
   constructor(opts: WorkpieceOpts & {
     host?: TilesHost;
     tree?: { width: number; height: number; maxLeaves?: () => number };
     legacy?: CollectorComponent;
+    /** desk persp 配置的读写口（app 接 workbench-state；不传 = 内存 host，纯测试用）。 */
+    persp?: PerspHost;
   }) {
     super(opts);
     if (opts.tree) {
@@ -100,6 +111,8 @@ export class PaintingWorkpiece extends Workpiece {
     this.register(this.floatLayer, { undo: "recorded" });
     this.pendingFill = new PendingFill(this);
     this.register(this.pendingFill, { undo: "recorded" });
+    this.persp = new PerspComponent(this, opts.persp ?? memoryPerspHost());
+    this.register(this.persp, { undo: "recorded" });
     if (opts.legacy) this.register(opts.legacy, { undo: "recorded" });   // 迁移期（T5 拆）
   }
 

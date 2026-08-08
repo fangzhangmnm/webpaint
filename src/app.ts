@@ -49,7 +49,7 @@ import { initToolbar, RACK_PANEL_BY_TOOL, closeTransientMenus } from "./toolbar.
 import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
 import { setDocCompositor, setDocCompositorBytes } from "./doc-render.ts";
-import { createEditorState, editorState } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
+import { createEditorState, editorState, snapshotShapePersp, restoreShapePersp, remapShapePersp } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
@@ -135,6 +135,8 @@ const history = new LegacyHistory({
 const wp2: PaintingWorkpiece = new PaintingWorkpiece({
   undo: history.stack,
   tree: { width: 2048, height: 2048, maxLeaves: (): number => doc.maxLayers },   // thunk：端口在下方 const（惰性求值，TDZ 安全）
+  // T4d：desk persp 配置的读写口（doc 变换 remap 记账用；VP 编辑仍 desk 直写不进栈）
+  persp: { snapshot: snapshotShapePersp, restore: restoreShapePersp, remap: remapShapePersp },
 });
 const doc: PaintingView = new PaintingView(wp2);
 const board = new Board(els.board as HTMLCanvasElement, doc);

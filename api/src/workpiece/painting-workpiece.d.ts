@@ -4,6 +4,7 @@ import { LayerTree2 } from "./layer-tree2.ts";
 import { SelectionComponent } from "./selection-component.ts";
 import { FloatLayerComponent } from "./float-component.ts";
 import { PendingFill } from "./pending-fill.ts";
+import { PerspComponent, type PerspHost } from "./persp-component.ts";
 export interface PaintingDataLeaf {
     id?: number;
     name: string;
@@ -41,6 +42,7 @@ export declare class PaintingWorkpiece extends Workpiece {
     readonly selection: SelectionComponent;
     readonly floatLayer: FloatLayerComponent;
     readonly pendingFill: PendingFill;
+    readonly persp: PerspComponent;
     constructor(opts: WorkpieceOpts & {
         host?: TilesHost;
         tree?: {
@@ -49,6 +51,8 @@ export declare class PaintingWorkpiece extends Workpiece {
             maxLeaves?: () => number;
         };
         legacy?: CollectorComponent;
+        /** desk persp 配置的读写口（app 接 workbench-state；不传 = 内存 host，纯测试用）。 */
+        persp?: PerspHost;
     });
     /** 迁移期后装 legacy 桥组件（T5 拆）：组合根的构造环解法——legacyOps 需要 v1 workpiece，
      *  v1 需要 PaintingView 端口，端口需要本工件 → 桥组件只能在本工件建成后注册。 */
