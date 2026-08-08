@@ -1,5 +1,9 @@
 // legacy-bridge —— 迁移期唯一 undo 栈的桥（T2 立，T5 拆）。
 //
+// ☠ 拆迁楼，只减不增：**新代码禁止 import 本模块、禁止新增 history.run/compound 调用方**。
+// 新功能一律令牌+组件直写（wp2.begin + layerTiles/layerTree2/…）；本桥的现存调用方每迁走一族
+// 划掉一族（T3b-2 树/T4 选区·float·persp），T5 清零后连文件一起删。它若还活着 = 重构没交付。
+//
 // 问题：v2 纪元切像素路径时不能让 undo 分裂成两个栈（fill compound 的原子性、ctrl-z 时序都会碎）。
 // 解：v2 UndoStack **立刻成为唯一权威**；旧 DocumentOperator 流（LayerTree/SelectionFace/doc-ops/
 // float/layers-panel/import-image）经本桥骑上 v2 栈——旧 forward/backward 的对称 swap 契约
