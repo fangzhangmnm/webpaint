@@ -123,6 +123,80 @@ export class LayerTree2 implements CollectorComponent {
     return made && isGroupNode(made) ? made : null;
   }
 
+  /** 新建空叶**强制置顶**（根级末尾 = 最顶；盖印 stampAll 用）。active = 新层。null = maxLeaves。 */
+  addLayerTop(name?: string): TreeLeaf | null {
+    if (this.countLeaves() >= this._maxLeaves()) return null;
+    const id = this._nextId++;
+    const lp = new LayerPixels(this._json.width, this._json.height);
+    const ref = this._tiles.createTileset(lp);
+    const leaf: TreeLeaf = {
+      id, name: name ?? `Layer ${id}`, visible: true, opacity: 1, mode: "source-over",
+      clippingMask: false, lockAlpha: false, pixelsRef: ref,
+    };
+    const next = this._clone(this._json);
+    next.nodes.push(leaf);
+    next.activeId = id;
+    this._swapRoot(next);
+    this._tiles.releaseTileset(ref);
+    return this.leafById(id);
+  }
+
+  /** 把组烤成单叶**同位替换**（#25 collapse）：新叶继承组的 visible/opacity/mode/clippingMask
+   *  （合成字节已把子树烤平 → 视觉不变）；merged=null = 空组 → 空叶。active = 新叶。
+   *  组 children 的 tileset 随旧根进 record，驱逐才释放。 */
+  collapseGroupToLeaf(id: number, merged: { bytes: Uint8ClampedArray; rect: Rect } | null): TreeLeaf | null {
+    const g0 = this.nodeById(id);
+    if (!g0 || !isGroupNode(g0)) return null;
+    const nid = this._nextId++;
+    const lp = new LayerPixels(this._json.width, this._json.height);
+    if (merged && merged.rect.w > 0 && merged.rect.h > 0) {
+      lp.putRegion(merged.rect.x, merged.rect.y, merged.rect.w, merged.rect.h, merged.bytes);
+    }
+    const ref = this._tiles.createTileset(lp);
+    const next = this._clone(this._json);
+    const loc = this._locate(next.nodes, id)!;
+    const g = loc.parentArr[loc.index] as TreeGroup;
+    const leaf: TreeLeaf = {
+      id: nid, name: g.name, visible: g.visible, opacity: g.opacity, mode: g.mode,
+      clippingMask: g.clippingMask, lockAlpha: false, pixelsRef: ref,
+    };
+    loc.parentArr.splice(loc.index, 1, leaf);
+    next.activeId = nid;
+    if (next.referenceLayerId !== null && !this._contains(next.nodes, next.referenceLayerId)) next.referenceLayerId = null;
+    this._swapRoot(next);
+    this._tiles.releaseTileset(ref);
+    return this.leafById(nid);
+  }
+
+  /** 按颜色拆分（v0.7.9 explode）：叶同位替换成 n 张新叶（parts[0] 最底），props 全继承
+   *  （分片互斥 → 逐像素等价，视觉不变）。active = 最上分片。null = 非叶/超 maxLeaves。 */
+  explodeLeaf(id: number, parts: { data: Uint8ClampedArray; name: string }[], rect: Rect): TreeLeaf[] | null {
+    const src = this.leafById(id);
+    if (!src || parts.length === 0) return null;
+    if (this.countLeaves() - 1 + parts.length > this._maxLeaves()) return null;
+    const refs: number[] = [];
+    const leaves: TreeLeaf[] = parts.map((p) => {
+      const lp = new LayerPixels(this._json.width, this._json.height);
+      // applyRegionDiff 而非 putRegion：分片大多稀疏，diff 只物化非全透明 tile（沿 v0.7.9 取舍）。
+      if (rect.w > 0 && rect.h > 0) lp.applyRegionDiff(rect.x, rect.y, rect.w, rect.h, p.data);
+      const ref = this._tiles.createTileset(lp);
+      refs.push(ref);
+      const nid = this._nextId++;
+      return {
+        id: nid, name: p.name, visible: src.visible, opacity: src.opacity, mode: src.mode,
+        clippingMask: src.clippingMask, lockAlpha: src.lockAlpha, pixelsRef: ref,
+      };
+    });
+    const next = this._clone(this._json);
+    const loc = this._locate(next.nodes, id)!;
+    loc.parentArr.splice(loc.index, 1, ...leaves);
+    next.activeId = leaves[leaves.length - 1].id;
+    if (next.referenceLayerId === id) next.referenceLayerId = null;
+    this._swapRoot(next);
+    for (const r of refs) this._tiles.releaseTileset(r);
+    return leaves.map((l) => this.leafById(l.id)!);
+  }
+
   /** 换整根（load 的令牌写；ADR-0008：解码器产 plain data 灌入）。
    *  调用方负责新根 tileset 的净移交（createTileset 后 release）；旧根照常进 collector/record，
    *  load 收尾清栈时旧 doc 资源随 record 驱逐释放。nextId 重播种。 */
@@ -285,8 +359,10 @@ export class LayerTree2 implements CollectorComponent {
     return true;
   }
 
-  /** 元规则相同才合并动词（提案 .h）：doc 级 unique 值。 */
-  setTreeProp(key: "referenceLayerId" | "backgroundColor", value: number | null | string): void {
+  /** 元规则相同才合并动词（提案 .h）：doc 级 unique 值。
+   *  width/height（T3b-2 补）：整 doc 几何变换（crop/resample/rot90）的尺寸位——像素实例交换
+   *  由 DocResizeOp/computed 记账，json 尺寸走本 verb 进树 record，同一 step 内两账同向翻。 */
+  setTreeProp(key: "referenceLayerId" | "backgroundColor" | "width" | "height", value: number | null | string): void {
     const next = this._clone(this._json);
     (next as unknown as Record<string, unknown>)[key] = value;
     this._swapRoot(next);

@@ -110,6 +110,15 @@ export class LayerTiles implements CollectorComponent {
     e.lp.dispose();
     e.lp = np;
   }
+  /** 实例交换**不 dispose**（swapTilesetPixels 的非销毁变体）：旧实例所有权交还调用方——
+   *  DocResizeOp（crop/resample 的 undo 包持前一侧实例）用。T3b-2 补。 */
+  exchangeTilesetPixels(id: number, np: LayerPixels): LayerPixels {
+    const e = this._tilesets.get(id);
+    if (!e) throw new Error(`LayerTiles: exchange 不存在的 tileset（${id}）`);
+    const old = e.lp;
+    e.lp = np;
+    return old;
+  }
   /** 注册表观测（测试/泄漏审计）。 */
   tilesetCount(): number { return this._tilesets.size; }
   tilesetRefs(id: number): number { return this._tilesets.get(id)?.refs ?? 0; }

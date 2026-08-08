@@ -1,0 +1,345 @@
+// painting-view —— 树模式的 app 读写端口（T3b-2 cutover 的枢纽；ADR-0008）。
+//
+// 角色：PaintingWorkpiece（LayerTree2 json + LayerTiles tileset 注册表）→ 旧 DocView 同形的
+// **view 节点树**。让 23 个 doc.ts 消费文件在割接时几乎零改动：board/GL 管线本就 duck-typed
+// （{id,visible,opacity,mode,clippingMask,pixels,children}），引擎（brush/liquify/lasso）拿到的
+// ViewLeaf 具备旧 Layer 的读写面（pixels/bbox/canvas 物化缓存/editRegion/snapshot…——写走
+// 活 LayerPixels，token 开着时由 tile-layer 全局观察者写时扣押，纪律与 T2 一致）。
+//
+// 过渡态（T4/T5 收编，自裁范围）：
+//   - selection 暂住本端口（doc.selection 的后继；T4 SelectionComponent 落地后迁走）。
+//     写纪律沿旧约：引擎/预览直写，记账走 SelectionFace（唯一记账口）。
+//   - ViewLeaf 的写方法 = 旧 Layer「预览违规户」们（液化就地写等，见 handoff §3）的继续容身处；
+//     买账的路径（stroke commit/fill/滤镜）早已走 token+LayerTiles。
+//   - contentRev 全局单调（lineart-oracle 等 (id,rev) 缓存键的不复用保证——tileset 实例换血后
+//     LayerPixels.contentVersion 从头数，这里用 WeakMap+全局计数器重映射）。
+//
+// 同步策略：LayerTree2 每次写换新根（不可变值契约）→ 端口以**根引用身份**做缓存键；
+// ViewLeaf 按 id 复用（物化缓存/引擎持引用跨 commit 有效），属性镜像每次 resync 回灌。
+
+import { LayerPixels, materialize, editRegion as editPixels, editRegionBytes as editPixelsBytes, disposePixelsSnapshot, type PixelsSnapshot } from "../tiles/tile-layer.ts";
+import { makeBitmap } from "../bitmap.ts";
+import type { PaintingWorkpiece } from "./painting-workpiece.ts";
+import type { LayerTiles } from "./layer-tiles.ts";
+import { isGroupNode, type TreeNode, type TreeLeaf } from "./layer-tree2.ts";
+import { computeMaxLayers, layerByteBudget } from "../doc.ts";
+import type { Selection } from "../selection.ts";
+
+type Bitmap = OffscreenCanvas | HTMLCanvasElement;
+type Ctx2D = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+
+// 旧 LayerSnap 同形（undo 包/引擎 pre-snap；用完 disposeViewSnap）。
+export interface ViewLeafSnap { pixels: PixelsSnapshot }
+export function disposeViewSnap(snap: ViewLeafSnap | null | undefined): void {
+  if (snap) disposePixelsSnapshot(snap.pixels);
+}
+
+// contentRev 全局单调重映射（(id,rev) 永不复用；见头注）。
+let _globalRev = 0;
+const _revByInstance = new WeakMap<LayerPixels, { seen: number; rev: number }>();
+function revFor(lp: LayerPixels): number {
+  let e = _revByInstance.get(lp);
+  if (!e) { e = { seen: lp.contentVersion, rev: ++_globalRev }; _revByInstance.set(lp, e); return e.rev; }
+  if (e.seen !== lp.contentVersion) { e.seen = lp.contentVersion; e.rev = ++_globalRev; }
+  return e.rev;
+}
+
+/** 叶 view：旧 Layer 的读写面，像素 = tileset 注册表里的活 LayerPixels。 */
+export class ViewLeaf {
+  readonly isGroup = false as const;
+  readonly id: number;
+  name = "";
+  visible = true;
+  opacity = 1;
+  mode = "source-over";
+  clippingMask = false;
+  lockAlpha = false;
+  docW = 0;
+  docH = 0;
+  /** @internal 属性回灌（端口 resync 用）。 */
+  _pixelsRef = 0;
+  private _tiles: LayerTiles;
+  private _mat: { canvas: Bitmap; ox: number; oy: number; forRev: number; forInstance: LayerPixels } | null = null;
+  private _empty: Bitmap | null = null;
+
+  constructor(tiles: LayerTiles, id: number) {
+    this._tiles = tiles;
+    this.id = id;
+  }
+
+  /** 活像素（tileset 注册表解析；叶已被删时端口不再发出本对象，getter 假定 ref 有效）。 */
+  get pixels(): LayerPixels {
+    const lp = this._tiles.tilesetPixels(this._pixelsRef);
+    if (!lp) throw new Error(`ViewLeaf: tileset 不在（id=${this.id}, ref=${this._pixelsRef}——stale view 引用?）`);
+    return lp;
+  }
+
+  /** 内容版本（全局单调不复用；lineart-oracle 等 (id,rev) 缓存键）。 */
+  get contentRev(): number { return revFor(this.pixels); }
+
+  // ---- 派生只读视图（物化缓存；语义同旧 Layer._ensureMat）----
+  private _ensureMat(): { canvas: Bitmap; ox: number; oy: number } {
+    const lp = this.pixels;
+    const rev = lp.contentVersion;
+    if (this._mat && this._mat.forRev === rev && this._mat.forInstance === lp) return this._mat;
+    const m = materialize(lp, true);
+    if (m) { this._mat = { canvas: m.canvas as Bitmap, ox: m.ox, oy: m.oy, forRev: rev, forInstance: lp }; return this._mat; }
+    if (!this._empty) this._empty = makeBitmap(1, 1);
+    this._mat = { canvas: this._empty, ox: 0, oy: 0, forRev: rev, forInstance: lp };
+    return this._mat;
+  }
+  /** 纯腾内存（GL 模式每帧后调；下次访问按需重建）。 */
+  releaseMaterialized(): void { this._mat = null; }
+
+  residentBytes(countMat: boolean): number {
+    const mat = (countMat && this._mat) ? this._mat.canvas.width * this._mat.canvas.height * 4 : 0;
+    return this.pixels.byteUsage + mat;
+  }
+
+  get canvas(): Bitmap { return this._ensureMat().canvas; }
+  get ctx(): Ctx2D { return this._ensureMat().canvas.getContext("2d", { willReadFrequently: true }) as Ctx2D; }
+  get bboxX(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().ox; }
+  get bboxY(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().oy; }
+  get bboxW(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().canvas.width; }
+  get bboxH(): number { return this.pixels.isEmpty() ? 0 : this._ensureMat().canvas.height; }
+  get width(): number { return this.bboxW; }
+  get height(): number { return this.bboxH; }
+
+  // ---- 写者入口（活 LayerPixels 直写；token 开着 = 写时扣押，纪律同 T2）----
+  editRegion(x0: number, y0: number, w: number, h: number, fn: (ctx: CanvasRenderingContext2D, ox: number, oy: number) => void): void {
+    editPixels(this.pixels, x0, y0, w, h, fn);
+  }
+  editRegionBytes(x0: number, y0: number, w: number, h: number, fn: (buf: Uint8ClampedArray, ox: number, oy: number) => void): void {
+    editPixelsBytes(this.pixels, x0, y0, w, h, fn);
+  }
+  replaceFromBytes(data: Uint8ClampedArray, ox: number, oy: number, w: number, h: number): void {
+    const lp = this.pixels;
+    lp.clear();
+    if (w > 0 && h > 0) lp.putRegion(ox, oy, w, h, data);
+  }
+  clearAll(): void { this.pixels.clear(); }
+
+  sampleAt(docX: number, docY: number): [number, number, number, number] {
+    return this.pixels.sampleAt(Math.floor(docX), Math.floor(docY)) as [number, number, number, number];
+  }
+  getImageData(docX: number, docY: number, w: number, h: number): ImageData {
+    return new ImageData(this.pixels.getRegion(docX, docY, w, h), w, h);
+  }
+  putImageData(docX: number, docY: number, img: ImageData): void {
+    this.pixels.putRegion(docX, docY, img.width, img.height, img.data);
+  }
+  applyRegionDiff(docX: number, docY: number, w: number, h: number, src: Uint8ClampedArray): { tx: number; ty: number }[] {
+    return this.pixels.applyRegionDiff(docX, docY, w, h, src);
+  }
+
+  // undo/pre-snap 快照（句柄共享零拷贝；归属交 caller，用完 disposeViewSnap）。
+  snapshot(): ViewLeafSnap { return { pixels: this.pixels.snapshot() }; }
+  restoreFromSnapshot(snap: ViewLeafSnap): void { this.pixels.restore(snap.pixels); }
+
+  /** CPU 算法读者的只读物化（液化 startSnap/选区 preSnap）；空层 imageData:null。 */
+  snapshotImageData(): { bboxX: number; bboxY: number; bboxW: number; bboxH: number; imageData: ImageData | null } {
+    const lp = this.pixels;
+    const b = lp.contentBounds(true);
+    if (!b) return { bboxX: 0, bboxY: 0, bboxW: 0, bboxH: 0, imageData: null };
+    return { bboxX: b.x, bboxY: b.y, bboxW: b.w, bboxH: b.h, imageData: new ImageData(lp.getRegion(b.x, b.y, b.w, b.h), b.w, b.h) };
+  }
+}
+
+/** 组 view：纯结构镜像（每次 resync 重建，children 里叶按 id 复用）。 */
+export class ViewGroup {
+  readonly isGroup = true as const;
+  readonly id: number;
+  name = "";
+  visible = true;
+  opacity = 1;
+  mode = "pass-through";
+  clippingMask = false;
+  children: ViewNode[] = [];
+  constructor(id: number) { this.id = id; }
+}
+
+export type ViewNode = ViewLeaf | ViewGroup;
+
+// ---- 树工具（view 节点版；doc.ts eachLeaf/flattenLeaves/findNodeById/countLeaves 的后继）----
+export function eachViewLeaf(nodes: readonly ViewNode[], fn: (leaf: ViewLeaf) => void): void {
+  for (const n of nodes) {
+    if (n.isGroup) eachViewLeaf(n.children, fn);
+    else fn(n);
+  }
+}
+export function flattenViewLeaves(nodes: readonly ViewNode[]): ViewLeaf[] {
+  const out: ViewLeaf[] = [];
+  eachViewLeaf(nodes, (l) => out.push(l));
+  return out;
+}
+export function findViewNodeById(nodes: readonly ViewNode[], id: number | null): ViewNode | null {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    if (n.isGroup) {
+      const f = findViewNodeById(n.children, id);
+      if (f) return f;
+    }
+  }
+  return null;
+}
+export function countViewLeaves(nodes: readonly ViewNode[]): number {
+  let c = 0;
+  eachViewLeaf(nodes, () => c++);
+  return c;
+}
+
+/** app 的文档读写端口（旧 ctx.doc = DocView 的后继；单例，跨换文档稳定）。 */
+export class PaintingView {
+  private _wp: PaintingWorkpiece;
+  private _nodes: ViewNode[] = [];
+  private _leafCache = new Map<number, ViewLeaf>();
+  private _lastRoot: unknown = null;
+  // 选区过渡宿（doc.selection 后继；T4 迁 SelectionComponent）。写纪律沿旧约。
+  private _selection: Selection | null = null;
+  // 内存预算档（旧 PaintDoc._memBudgetBytes/_memCountMat 同形；board 按 GL/2D 配）。
+  private _memBudgetBytes: number | null = null;
+  private _memCountMat = true;
+
+  constructor(wp: PaintingWorkpiece) {
+    if (!wp.layerTree) throw new Error("PaintingView: 需要树模式的 PaintingWorkpiece（opts.tree）");
+    this._wp = wp;
+  }
+
+  private get _tree() { return this._wp.layerTree!; }
+
+  /** 根引用身份同步：LayerTree2 每写换新根 → 引用变了才重建镜像（叶按 id 复用）。 */
+  private _sync(): void {
+    const json = this._tree.view();
+    if (json === this._lastRoot) return;
+    this._lastRoot = json;
+    const alive = new Set<number>();
+    const build = (ns: readonly TreeNode[]): ViewNode[] => ns.map((n): ViewNode => {
+      if (isGroupNode(n)) {
+        const g = new ViewGroup(n.id);
+        g.name = n.name; g.visible = n.visible; g.opacity = n.opacity; g.mode = n.mode;
+        g.clippingMask = n.clippingMask;
+        g.children = build(n.children);
+        return g;
+      }
+      return this._syncLeaf(n, json.width, json.height, alive);
+    });
+    this._nodes = build(json.nodes);
+    for (const id of [...this._leafCache.keys()]) {
+      if (!alive.has(id)) this._leafCache.delete(id);
+    }
+  }
+  private _syncLeaf(n: TreeLeaf, docW: number, docH: number, alive: Set<number>): ViewLeaf {
+    let leaf = this._leafCache.get(n.id);
+    if (!leaf) { leaf = new ViewLeaf(this._wp.layerTiles, n.id); this._leafCache.set(n.id, leaf); }
+    leaf.name = n.name; leaf.visible = n.visible; leaf.opacity = n.opacity; leaf.mode = n.mode;
+    leaf.clippingMask = n.clippingMask; leaf.lockAlpha = n.lockAlpha;
+    leaf._pixelsRef = n.pixelsRef;
+    leaf.docW = docW; leaf.docH = docH;
+    alive.add(n.id);
+    return leaf;
+  }
+
+  // ---- DocView 同形读面 ----
+  get width(): number { return this._tree.view().width; }
+  get height(): number { return this._tree.view().height; }
+  get backgroundColor(): string { return this._tree.view().backgroundColor; }
+  get activeId(): number | null { return this._tree.view().activeId; }
+  get referenceLayerId(): number | null { return this._tree.view().referenceLayerId; }
+  get layers(): ViewNode[] { this._sync(); return this._nodes; }
+
+  get activeLayer(): ViewNode | null { return findViewNodeById(this.layers, this.activeId); }
+  findLayer(id: number): ViewNode | null { return findViewNodeById(this.layers, id); }
+
+  /** 扁平叶序 index 兼容 getter（session-state 持久化用）。 */
+  get activeIndex(): number {
+    return flattenViewLeaves(this.layers).findIndex((l) => l.id === this.activeId);
+  }
+
+  /** 节点同级位置（面板按钮态用）。 */
+  locateNode(id: number): { parentId: number | null; index: number } | null {
+    const walk = (ns: readonly ViewNode[], parent: ViewGroup | null): { parentId: number | null; index: number } | null => {
+      for (let i = 0; i < ns.length; i++) {
+        const n = ns[i];
+        if (n.id === id) return { parentId: parent ? parent.id : null, index: i };
+        if (n.isGroup) { const r = walk(n.children, n); if (r) return r; }
+      }
+      return null;
+    };
+    return walk(this.layers, null);
+  }
+  canMoveLayer(id: number, toward: number): boolean {
+    const find = (ns: readonly ViewNode[]): { arr: readonly ViewNode[]; i: number } | null => {
+      for (let i = 0; i < ns.length; i++) {
+        const n = ns[i];
+        if (n.id === id) return { arr: ns, i };
+        if (n.isGroup) { const r = find(n.children); if (r) return r; }
+      }
+      return null;
+    };
+    const loc = find(this.layers);
+    if (!loc) return false;
+    const j = loc.i + toward;
+    return j >= 0 && j < loc.arr.length;
+  }
+
+  /** 「能否在当前 active 写像素」单谓词（语义沿旧 PaintDoc.activeEditableLeaf）。 */
+  activeEditableLeaf({ allowHidden = false }: { allowHidden?: boolean } = {}): { leaf: ViewLeaf | null; reason: string | null } {
+    const a = this.activeLayer;
+    if (!a) return { leaf: null, reason: "none" };
+    if (a.isGroup) return { leaf: null, reason: "group" };
+    if (!a.visible && !allowHidden) return { leaf: null, reason: "hidden" };
+    return { leaf: a, reason: null };
+  }
+  /** active 自身或任一祖先组隐藏？（变换类操作的盲改软拒。） */
+  activeNodeHidden(): boolean {
+    const path: ViewNode[] = [];
+    const walk = (ns: readonly ViewNode[], stack: ViewNode[]): boolean => {
+      for (const n of ns) {
+        if (n.id === this.activeId) { path.push(...stack, n); return true; }
+        if (n.isGroup && walk(n.children, [...stack, n])) return true;
+      }
+      return false;
+    };
+    walk(this.layers, []);
+    return path.some((n) => !n.visible);
+  }
+  getReferenceLayer(): ViewNode | null {
+    if (this.referenceLayerId == null) return null;
+    return findViewNodeById(this.layers, this.referenceLayerId);
+  }
+  /** 魔棒/油漆桶 source：reference 优先，否则 active（组不可作源 → null）。 */
+  getFloodSourceLayer(): ViewLeaf | null {
+    const ref = this.getReferenceLayer();
+    if (ref && !ref.isGroup) return ref;
+    const a = this.activeLayer;
+    return a && !a.isGroup ? a : null;
+  }
+
+  // ---- 选区（过渡宿；T4 迁 SelectionComponent）----
+  get selection(): Selection | null { return this._selection; }
+  set selection(v: Selection | null) { this._selection = v; }
+  /** 换文档收尾（跨 session 不沿用选区——旧 adoptState 语义）。 */
+  clearSelectionOnLoad(): void {
+    if (this._selection && !this._selection.disposed) this._selection.dispose();
+    this._selection = null;
+  }
+
+  // ---- 内存预算 / 层数上限（语义沿旧 PaintDoc.maxLayers）----
+  configureMemory(budgetBytes: number, countMat: boolean): void {
+    this._memBudgetBytes = budgetBytes;
+    this._memCountMat = countMat;
+  }
+  get maxLayers(): number {
+    const leaves = flattenViewLeaves(this.layers);
+    let resident = 0;
+    for (const l of leaves) resident += l.residentBytes(this._memCountMat);
+    return computeMaxLayers(leaves.length, resident, this._memBudgetBytes ?? layerByteBudget());
+  }
+
+  // ---- 变换协作面（DocResizeOp 用：实例交换，不 dispose——旧实例进 undo 包）----
+  exchangeLeafPixels(layerId: number, np: LayerPixels): LayerPixels | null {
+    const leaf = this._tree.leafById(layerId);
+    if (!leaf) return null;
+    return this._wp.layerTiles.exchangeTilesetPixels(leaf.pixelsRef, np);
+  }
+}
