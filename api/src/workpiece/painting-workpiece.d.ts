@@ -3,6 +3,7 @@ import { LayerTiles, type TilesHost, type Rect } from "./layer-tiles.ts";
 import { LayerTree2 } from "./layer-tree2.ts";
 import { SelectionComponent } from "./selection-component.ts";
 import { FloatLayerComponent } from "./float-component.ts";
+import { PendingFill } from "./pending-fill.ts";
 export interface PaintingDataLeaf {
     id?: number;
     name: string;
@@ -39,6 +40,7 @@ export declare class PaintingWorkpiece extends Workpiece {
     readonly layerTree: LayerTree2 | null;
     readonly selection: SelectionComponent;
     readonly floatLayer: FloatLayerComponent;
+    readonly pendingFill: PendingFill;
     constructor(opts: WorkpieceOpts & {
         host?: TilesHost;
         tree?: {

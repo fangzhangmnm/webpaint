@@ -30,9 +30,22 @@ function makeCtx() {
     },
     history: {
       compound: (_w, fn) => { try { fn(); return { ok: true }; } catch (e) { return { ok: false, msg: String(e) }; } },
+      withPoint: (_l, _o, fn) => { try { fn(); return { ok: true }; } catch (e) { return { ok: false, msg: String(e) }; } },
       run: () => ({ ok: true }),
     },
-    workpiece: { sel: { commitPreApplied: () => ({ ok: true }) } }, ops: { pixels: {}, selection: {} },
+    workpiece: { sel: { commitPreApplied: () => ({ ok: true }) } }, ops: {},
+    // T4c：pending 色组件 stub（真组件在 pending-fill.test.mjs；这里只要面形状）
+    wp2: {
+      pendingFill: {
+        _v: null,
+        view() { return this._v; },
+        begin(c) { this._v = { color: c }; },
+        clear() { this._v = null; },
+        setColorLive(c) { if (this._v) this._v = { color: c }; },
+        commitPreApplied: () => {},
+      },
+      onChange: () => {},
+    },
     state: { color: "#ff0000" },
     dialReactive: { color: "#ff0000" },
     setStatus: () => {},

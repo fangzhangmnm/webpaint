@@ -10,8 +10,25 @@ import { editorState } from "./workbench-state.ts";
 
 let state: AppContext["state"], colorWheel: ReturnType<typeof mountColorWheel>;
 
+// ---- 色板 target 切换（T4c）：fill 预览期，色板编辑「将要填的颜色」（PendingFill），不碰笔刷色。
+// 注册制防环：fill-mode init 时注册 provider（返回 null = 无 target，照旧写笔刷色）。
+export interface ColorTarget { get(): string; set(hex: string): void }
+let _targetProvider: (() => ColorTarget | null) | null = null;
+export function registerColorTarget(p: () => ColorTarget | null): void { _targetProvider = p; }
+/** 色板当前显示/编辑的颜色（target 优先，否则笔刷色）。 */
+export function currentPanelColor(): string { return _targetProvider?.()?.get() ?? state.color; }
+/** 显示面重同步（target 生灭/undo 换色后调；只写 DOM/色轮，不写任何状态）。 */
+export function refreshColorDisplay(): void {
+  if (!colorWheel) return;   // initColorPanel 之前（node 测试/boot 早期）无显示面可刷
+  const c = currentPanelColor();
+  els.activeSwatch.style.background = c;
+  colorWheel.setColor(c);
+}
+
 export function setColor(hex: string) {
-  editorState.brushTool.color = hex;   // 绑定反应式引擎（→state.color/dialReactive.color 重派生）+ 标脏持久化
+  const t = _targetProvider?.();
+  if (t) t.set(hex);   // fill 预览期：改的是 PendingFill（可撤销）；笔刷色不动
+  else editorState.brushTool.color = hex;   // 绑定反应式引擎（→state.color/dialReactive.color 重派生）+ 标脏持久化
   els.activeSwatch.style.background = hex;
   colorWheel.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue
 }
@@ -65,7 +82,7 @@ function applyColorPanelFromEditorState() {
 export function initColorPanel(ctx: AppContext) {
   state = ctx.state;
   colorWheel = mountColorWheel(els.colorPanelBody as HTMLElement, {
-    getColor: () => state.color,
+    getColor: () => currentPanelColor(),
     onPick: (hex: string) => setColor(hex),
   });
   els.activeSwatch.addEventListener("click", () => toggleColorPanel());

@@ -1,7 +1,8 @@
 // legacy 残余 operator 在 **v2 树模式工件**上的可逆性集成测试（T3b-2 换基座）。
 // 已迁走的 op 族（add/remove/move/prop/reference/treeStructure/mergeDown/docTransform）的行为锚
 // 在 workpiece-layer-tree.test.mjs（门面）+ layer-tree2.test.mjs（verb 契约）；本文件只测残余集：
-//   fillColor / docResize（T3b-2 新立：几何变换实例交换）+ 清栈后 tileset/池的所有权收支。
+//   docResize（T3b-2 新立：几何变换实例交换）+ 清栈后 tileset/池的所有权收支。
+// （FillColorOp 已死——T4c：fill 预览换色归 PendingFill 组件，锚在 pending-fill.test.mjs。）
 // （SwapPixelsOp 已死——T4b：像素事务归 token+LayerTiles 写时扣押，锚在 layer-tiles/float-ops 测试。）
 // 「层被删后 undo 该笔」的栈序腐坏在 v2 下结构上不可能（栈序保证 undo 必先穿过删层步）；
 // 桥的不可恢复协议锚在 legacy-bridge.test.mjs（compound/swap 中途失败 → 弃栈）。
@@ -23,10 +24,9 @@ function mk() {
   const legacy = new LegacyOpsComponent(w);
   wp2.attachLegacy(legacy);
   h.attach(wp2, legacy, (on) => wp2.layerTiles._suspendCollect(on));
-  let _color = "#1b1b1b";   // fillColor op 的注入色钩子（真 app = state.color / fill-mode 回灌抑制）
-  const ops = makeOperators({ fillColor: { get: () => _color, set: (hex) => { _color = hex; } } });
+  const ops = makeOperators();
   _ctxs.push({ h, wp2 });
-  return { doc, wp2, w, h, ops, unrec: () => unrec, color: () => _color, setColor: (hex) => { _color = hex; } };
+  return { doc, wp2, w, h, ops, unrec: () => unrec };
 }
 const px = (r, g, b, a) => new Uint8ClampedArray([r, g, b, a]);
 
@@ -108,26 +108,6 @@ describe("operators · 所有权收支（清栈+换文档后池不留本套件�
     // 换文档：旧根 record 随 load 清栈驱逐 → 旧 tileset 引用计数归零还池（换文档零手工 dispose）。
     wp2.load({ width: 8, height: 8, nodes: [{ name: "空", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });
     eq(appTilePool().stats().count, before, "undo 包/旧文档像素全部归还（无泄漏）");
-  });
-});
-
-// v0.7.8：fill 预览期换色入 undo（事务型，色已被 UI 改掉，run 带 _initialBefore）
-describe("operators · FillColor（fill 预览期换色可撤销）", () => {
-  it("换色 → undo 回旧色 → redo 回新色（对称 swap 无衰减）", () => {
-    const { w, h, ops, color, setColor } = mk();
-    setColor("#ff0000");                                     // UI 已改（pre-applied）
-    eq(h.run(w, ops.fillColor, { value: "#ff0000", _initialBefore: { v: "#1b1b1b" } }, { label: "fillColor" }).ok, true);
-    h.undo(w);
-    eq(color(), "#1b1b1b", "undo 回旧色");
-    h.redo(w);
-    eq(color(), "#ff0000", "redo 回新色");
-    h.undo(w);
-    eq(color(), "#1b1b1b", "二次 undo 仍精确");
-  });
-
-  it("缺 _initialBefore → run 拒绝（防误用为操作型）", () => {
-    const { w, h, ops } = mk();
-    eq(h.run(w, ops.fillColor, { value: "#00ff00" }).ok, false);
   });
 });
 

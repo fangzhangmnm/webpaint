@@ -2,8 +2,8 @@
 //
 // v0.8 已迁走：结构 7 族+DocTransform（T3b-2 → layerTree2/doc-ops）、selection（T4a →
 // SelectionComponent）、pixels/float 三件套（T4b → LayerTiles 写时扣押 + FloatLayerComponent；
-// SwapPixelsOp 的最后住户是浮层落地，液化/filterBrush 早已 wp2.begin 令牌化）。本文件只剩：
-//   fillColor  FillColorOp    —— fill 预览期换色（T4c PendingFill 接棒）。
+// SwapPixelsOp 的最后住户是浮层落地，液化/filterBrush 早已 wp2.begin 令牌化；fillColor T4c →
+// PendingFill）。本文件只剩：
 //   docResize  DocResizeOp    —— crop/resample 的叶实例交换记账（T3b-2 立；几何变换的
 //                                 undo 包 = 另一侧 LayerPixels 实例，与树 record 同 step 翻转）。
 //
@@ -20,30 +20,6 @@ function estimateInstanceBytes(lp: LayerPixels): number {
     if (h.isCompressed()) sum += Math.ceil(h.compressedByteLength() / Math.max(1, h.refCount()));
   }
   return sum;
-}
-
-// ---- ② fill 预览期换色（v0.7.8；语义见 git 历史。颜色 get/set 注入——desk 态，workpiece 不碰 UI）----
-export interface FillColorArgs { value: string; _initialBefore?: { v: string } | null }
-export class FillColorOp extends DocumentOperator<FillColorArgs, { v: string }> {
-  readonly kind = "fillColor";
-  private _c: { get(): string; set(hex: string): void };
-  constructor(color: { get(): string; set(hex: string): void }) { super(); this._c = color; }
-  forward(_w: Workpiece, args: FillColorArgs, data: { v: string } | undefined): OpResult<{ v: string }> {
-    if (data === undefined) {                       // 首跑：pre-applied，只交出 undo 包
-      const before = args._initialBefore;
-      args._initialBefore = null;
-      if (!before) return { ok: false, msg: "missing _initialBefore" };
-      return { ok: true, replaced: before };
-    }
-    const cur = { v: this._c.get() };
-    this._c.set(data.v);
-    return { ok: true, replaced: cur };
-  }
-  backward(_w: Workpiece, _args: FillColorArgs, data: { v: string }): OpResult<{ v: string }> {
-    const cur = { v: this._c.get() };
-    this._c.set(data.v);
-    return { ok: true, replaced: cur };
-  }
 }
 
 // ---- ① 整 doc 几何 resize（T3b-2：crop/cropResample/resample 的实例交换记账）----
@@ -92,14 +68,10 @@ export class DocResizeOp extends DocumentOperator<DocResizeArgs, ResizeSide> {
 
 // ---- 注册表（app.ts 组装进 ctx；有注入需求的在 app 侧 new）----
 export interface OperatorRegistry {
-  fillColor: FillColorOp;
   docResize: DocResizeOp;
 }
-export function makeOperators(deps: {
-  fillColor: { get(): string; set(hex: string): void };
-}): OperatorRegistry {
+export function makeOperators(): OperatorRegistry {
   return {
-    fillColor: new FillColorOp(deps.fillColor),
     docResize: new DocResizeOp(),
   };
 }

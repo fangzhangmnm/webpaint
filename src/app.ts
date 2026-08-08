@@ -53,7 +53,7 @@ import { createEditorState, editorState } from "./workbench-state.ts";   // cand
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
-import { initFillMode, applyFillColorFromHistory } from "./fill-mode.ts";
+import { initFillMode } from "./fill-mode.ts";
 import { initPerspEdit } from "./persp-edit.ts";
 import { updateSaveStatus, updateNewerBanner } from "./save-status.ts";
 import { initErrorBadge, reportError } from "./error-badge.ts";
@@ -229,11 +229,7 @@ wp2.attachLegacy(legacyOps);   // 构造环解法：legacyOps 需 v1，v1 需端
 history.attach(wp2, legacyOps, (on) => wp2.layerTiles._suspendCollect(on));
 // v1 计数/isDirty 跟车：任何 recorded 变更（commit/undo/redo/cancel）→ bump（渲染缓存失效 + 保存脏门）。
 wp2.onChange((e) => { if (e.recorded) workpiece._bumpCommit(); });
-const ops = makeOperators({
-  // fillColor（v0.7.8）：fill 预览期换色入 undo。当前色是 desk 态，operator 只经注入钩子读写；
-  // set 走 fill-mode 的回灌抑制入口（防 undo 触发 watch 再入栈）。
-  fillColor: { get: () => state.color, set: (hex) => applyFillColorFromHistory(hex) },
-});
+const ops = makeOperators();   // T4c 后残余 = docResize（fillColor → wp2.pendingFill）
 // 结构类写面门面（T3b-2 换心：operator 流 → v2 verbs）+ 选区写面（substrate = 端口过渡宿）。
 new LayerTree({ w: workpiece, history, tree: wp2.layerTree!, tiles: wp2.layerTiles, port: doc, status: setStatus });
 new SelectionFace({ w: workpiece, history, sel: wp2.selection });

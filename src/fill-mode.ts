@@ -22,8 +22,7 @@
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { reportError } from "./error-badge.ts";
 import { t } from "./i18n/index.ts";
-import { setColor } from "./color-panel.ts";
-import { watch } from "../vendor/vue/vue.esm-browser.prod.js";
+import { registerColorTarget, refreshColorDisplay } from "./color-panel.ts";
 import type { AppContext } from "./app-context.ts";
 import type { ViewLeaf } from "./workpiece/painting-view.ts";
 
@@ -42,19 +41,17 @@ export function sendSelectionToFill(): void {
   window.dispatchEvent(new CustomEvent("wp:settool", { detail: "fill" }));
 }
 
-// ---- fill 预览期换色入 undo（v0.7.8）----
-// 预览挂着时改色 = 可撤销（改的是「将要填的东西」）。防抖合并一次拖拽/连点为一条 entry；
-// commit 前 flush（保证 undo 顺序 = 先撤 fill 再撤换色）。内存 = 两个 hex 字符串/条。
+// ---- fill 预览期换色入 undo（v0.7.8 生；T4c 换 PendingFill 组件 + 色板 target 切换）----
+// 预览挂着时改色 = 可撤销（改的是「将要填的东西」= PendingFill.color，**笔刷色不动**）。
+// 防抖合并一次拖拽/连点为一条 entry；commit 前 flush（undo 顺序 = 先撤 fill 再撤换色）。
+// undo/redo 直接翻组件 substrate → onChange(kind=pendingFill) 刷显示——旧 FillColorOp 的
+// 回灌抑制（_expectFromHistory）机制随 op 一起死。
 let _colorBase: string | null = null;                       // 待入栈 entry 的「改前色」；null = 无 pending
 let _colorTimer: ReturnType<typeof setTimeout> | undefined;
-let _expectFromHistory: string | null = null;               // undo/redo 回灌的期望值（watch 异步 flush，布尔旗不可靠）
 
-// FillColorOp 的注入 set：undo/redo 走这里改色，抑制 watch 再入栈。
-export function applyFillColorFromHistory(hex: string): void {
-  clearTimeout(_colorTimer);
-  _colorBase = null;
-  _expectFromHistory = hex;
-  setColor(hex);
+// 「将要填的颜色」（预览/commit 的取色口；无 pending 时退回笔刷色）。
+function _fillColor(): string {
+  return _ctx!.wp2.pendingFill.view()?.color ?? _ctx!.state.color;
 }
 
 function _flushColorEntry(): void {
@@ -63,10 +60,10 @@ function _flushColorEntry(): void {
   const base = _colorBase;
   _colorBase = null;
   if (!_ctx || !fillPreviewActive()) return;
-  const cur = _ctx.state.color;
-  if (base === cur) return;
-  const { history, workpiece, ops } = _ctx;
-  history.run(workpiece, ops.fillColor, { value: cur, _initialBefore: { v: base } }, { label: "fillColor" });
+  const pf = _ctx.wp2.pendingFill;
+  const cur = pf.view()?.color;
+  if (cur == null || base === cur) return;
+  _ctx.history.withPoint("fillColor", {}, () => pf.commitPreApplied(base));
 }
 
 // 预览挂着？= fill 工具 && 有选区 && 非浮层。board 的 overlay 槽断言靠它结构安全
@@ -87,11 +84,12 @@ export function commitFillNow(): void {
 //   写时扣押；compound 中途失败 = token.cancel 倒序回滚（像素/选区一体无痕）。
 function _doCommit(clearSelection: boolean): void {
   _flushColorEntry();   // pending 换色先落栈——undo 顺序 = 先撤 fill 像素再撤换色
-  const { doc, board, input, history, workpiece, state, setStatus } = _ctx!;
+  const { doc, board, input, history, workpiece, setStatus } = _ctx!;
+  const fillColor = _fillColor();
   const layer = requireEditableLeaf(doc, setStatus) as ViewLeaf | null;
   if (!layer || !doc.selection) return;
   const st = history.compound(workpiece, () => {
-    const ok = board.commitFill({ color: state.color, layer });
+    const ok = board.commitFill({ color: fillColor, layer });
     if (!ok) throw new Error("GL fill merge 未提交（无选区/池到顶）");
     if (clearSelection) {
       const entry = input.lasso.setSelection(null);
@@ -105,7 +103,7 @@ function _doCommit(clearSelection: boolean): void {
     return;
   }
   board.invalidateAll();
-  setStatus(t("se.filled", { color: state.color }));
+  setStatus(t("se.filled", { color: fillColor }));
 }
 
 // fill 边界钩子。只认「持久模式 → 持久模式」的真切换；transient 括号（扩张 modal 等）不算。
@@ -118,7 +116,15 @@ function _onModeChange(): void {
   const prev = _lastPersistentMode;
   _lastPersistentMode = m;
   if (m !== "fill") _carryIn = false;   // 旗标只对「下一次进 fill」有效；走去别处即作废
+  if (prev === "fill" && m !== "fill") {
+    // 真切出 fill：pending 色退场（未 commit 的 pending entry 由 _doCommit 分支 flush；
+    // 无选区分支的残余防抖直接作废——预览已不在，记了也是幽灵步）
+    _colorBase = null; clearTimeout(_colorTimer);
+    _ctx!.wp2.pendingFill.clear();
+    refreshColorDisplay();   // 色板显示回笔刷色（它从未被 fill 期间的换色碰过）
+  }
   if (m === "fill" && prev !== "fill") {
+    _ctx!.wp2.pendingFill.begin(_ctx!.state.color);   // 起步 = 当前笔刷色（显示零跳变）
     // v0.7.38（ADR-0004 修订 5）：sendSelectionToFill 的 one-shot 携入——本次不清选区
     if (_carryIn) { _carryIn = false; board.requestRender(); return; }
     // v0.6.24 不互通：进 fill = 清掉带进来的选区（undo 兜底）——fill 从零开始自己点
@@ -149,18 +155,33 @@ export function initFillMode(ctx: AppContext): void {
   ctx.board.setFillProvider(() => {
     if (!fillPreviewActive()) return null;
     const leaf = requireEditableLeaf(ctx.doc, null) as ViewLeaf | null;
-    return leaf ? { color: ctx.state.color, layer: leaf } : null;
+    return leaf ? { color: _fillColor(), layer: leaf } : null;
   });
-  // 换色即预览跟色；选区/图层面板触发的重绘走 histchange/invalidate + docVersion 订阅（app.ts）。
-  // v0.7.8：预览挂着时的换色还要入 undo（防抖 350ms 合并拖拽；undo/redo 回灌经期望值比对跳过）。
-  watch(() => ctx.dialReactive.color, (nv: string, ov: string) => {
-    if (!fillPreviewActive()) { _colorBase = null; clearTimeout(_colorTimer); return; }
+  // 色板 target 切换（T4c）：fill 预览期，setColor/吸管/色词全改 PendingFill（笔刷色不动）。
+  // 防抖 350ms 合并一次拖拽/连点为一条 entry（v0.7.8 语义沿用）。
+  registerColorTarget(() => {
+    if (!fillPreviewActive()) return null;
+    const pf = ctx.wp2.pendingFill;
+    if (!pf.view()) pf.begin(ctx.state.color);   // 兜底（undo 把选区变回来等路径）
+    return {
+      get: () => pf.view()!.color,
+      set: (hex) => {
+        const cur = pf.view()!.color;
+        if (cur === hex) return;
+        if (_colorBase === null) _colorBase = cur;
+        clearTimeout(_colorTimer);
+        _colorTimer = setTimeout(_flushColorEntry, 350);
+        pf.setColorLive(hex);
+        ctx.board.requestRender();
+      },
+    };
+  });
+  // undo/redo 翻 pending 色 → 色板显示重同步 + 预览重绘（组件信号，无回灌环）。
+  ctx.wp2.onChange((e) => {
+    if (e.kind !== "pendingFill") return;
+    _colorBase = null; clearTimeout(_colorTimer);   // 栈动了：作废窗口内的防抖（防幽灵合并）
+    refreshColorDisplay();
     ctx.board.requestRender();
-    if (_expectFromHistory !== null && nv === _expectFromHistory) { _expectFromHistory = null; return; }
-    _expectFromHistory = null;
-    if (_colorBase === null) _colorBase = ov;
-    clearTimeout(_colorTimer);
-    _colorTimer = setTimeout(_flushColorEntry, 350);
   });
   window.addEventListener("wp:modechange", _onModeChange);
 }
