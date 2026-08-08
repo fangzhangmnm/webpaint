@@ -43,6 +43,8 @@ export declare class Workpiece {
     isDirty(): boolean;
     /** 统一变更信号（histchange/sidecarchange 后继）。commit/cancel 按 touched 发、undo/redo 按 entries 发。 */
     onChange(cb: (e: WorkpieceChangeEvent) => void): () => void;
+    /** 子类协作面（load 清栈用）；app 侧栈引用走构造时自己传入的 UndoStack。 */
+    protected get undoStack(): UndoStack | null;
     protected register(c: CollectorComponent, policy: {
         undo: UndoPolicy;
     }): void;

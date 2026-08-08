@@ -114,6 +114,9 @@ export class Workpiece {
 
   // ── 组件注册（子类 ctor 调）──
 
+  /** 子类协作面（load 清栈用）；app 侧栈引用走构造时自己传入的 UndoStack。 */
+  protected get undoStack() { return this._undo; }
+
   protected register(c: CollectorComponent, policy: { undo: UndoPolicy }): void {
     if (this._registry.some((r) => r.c.kind === c.kind)) {
       throw new Error(`Workpiece: 组件 kind 重复注册（${c.kind}）`);

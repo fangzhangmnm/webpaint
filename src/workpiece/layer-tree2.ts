@@ -81,6 +81,9 @@ export class LayerTree2 implements CollectorComponent {
     this._eachNode(this._json.nodes, (n) => { if (!isGroupNode(n)) c++; });
     return c;
   }
+  eachLeaf(cb: (leaf: TreeLeaf) => void): void {
+    this._eachNode(this._json.nodes, (n) => { if (!isGroupNode(n)) cb(n); });
+  }
 
   // ── verbs（token 开着才合法；边界行为写进名字）──
 
@@ -102,6 +105,32 @@ export class LayerTree2 implements CollectorComponent {
     this._swapRoot(next);
     this._tiles.releaseTileset(ref);   // json 已收养（_swapRoot acquire）——净移交
     return this.leafById(id);
+  }
+
+  /** 新建**空**组（v1 addGroup 语义）：active 是组 → 嵌进去；否则同级之上。active = 新组。
+   *  组不计 maxLeaves（只数叶）。 */
+  addGroup(name?: string): TreeGroup | null {
+    const id = this._nextId++;
+    const g: TreeGroup = { id, name: name ?? `Group ${id}`, visible: true, opacity: 1, mode: "source-over", clippingMask: false, children: [] };
+    const next = this._clone(this._json);
+    const loc = this._locate(next.nodes, next.activeId);
+    if (loc && isGroupNode(loc.parentArr[loc.index])) (loc.parentArr[loc.index] as TreeGroup).children.push(g);
+    else if (loc) loc.parentArr.splice(loc.index + 1, 0, g);
+    else next.nodes.push(g);
+    next.activeId = id;
+    this._swapRoot(next);
+    const made = this.nodeById(id);
+    return made && isGroupNode(made) ? made : null;
+  }
+
+  /** 换整根（load 的令牌写；ADR-0008：解码器产 plain data 灌入）。
+   *  调用方负责新根 tileset 的净移交（createTileset 后 release）；旧根照常进 collector/record，
+   *  load 收尾清栈时旧 doc 资源随 record 驱逐释放。nextId 重播种。 */
+  loadRoot(json: TreeJson): void {
+    this._swapRoot(json);
+    let maxId = 0;
+    this._eachNode(json.nodes, (n) => { if (n.id > maxId) maxId = n.id; });
+    this._nextId = maxId + 1;
   }
 
   /** 复制叶（props 原样、tileset 句柄共享零拷贝）；插到源上方，active = 副本。null = maxLeaves/源不在。 */

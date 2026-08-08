@@ -84,7 +84,15 @@ class PaintingWorkpiece extends Workpiece {
   load(data: PaintingData): void;         // 杀 docRaw/adoptState 的后继
   exportData(): PaintingData;             // 编码器读口（冻结快照语义沿 freezeDocForEncode）
 }
-```
+
+// T3b-1 定形：PaintingData（解码器/编码器唯一交换形；判别同 TreeNode："children" in n）
+//   leaf  = { id?; name; visible; opacity; mode; clippingMask; lockAlpha;
+//             pixels: { rect; bytes } | null }        // 内联 tile 字节（空叶 null）
+//   group = { id?; …props; children: PaintingDataNode[] }
+//   root  = { width; height; backgroundColor?; activeId?; referenceLayerId?; nodes }
+// load 语义：挂起 tile 收集（树根 record 已携带全部所有权）→ loadRoot 换整根 → commit →
+//   undoStack.clear()（旧 doc 根 record 驱逐 = 旧 tileset 全释放，换文档零手工 dispose）→ markSaved。
+// 迁移期两形态：opts.host（T2 app，doc 树背）或 opts.tree（树模式，出生单空叶）——cutover 后只剩树模式。
 
 ## layer-tree.ts（纯 json + 可持久化树）
 
@@ -114,7 +122,10 @@ class LayerTree implements WorkpieceComponent {
 }
 // T3a 实现注：叶/组判别 = "children" in node（json 纯数据无 isGroup 标志）；结构共享实现为整树浅深拷
 //（≤64 叶 KB 级，路径级共享是后续优化，契约不变）；recorded 步的根快照含 activeId → undo 天然还原焦点。
-// ⚠ 缺口（cutover 片补 + 回写本文件）：提案没有「编组」verb（v1 走 TreeStructureOp）——需补 groupLayers 类动词。
+// T3b-1 补 verb（填上面记名的缺口，语义对齐 v1 doc.addGroup）：
+//   addGroup(name?): TreeGroup | null;   // 空组插 active 同级之上（active 是组 → 嵌进去）；active=新组；组不计 maxLeaves
+//   loadRoot(json): void;                // load 的换整根令牌写（nextId 重播种；调用方净移交新根 tileset）
+//   eachLeaf(cb): void;                  // 读 helper（树背 host 的解析用）
 
 // LayerTiles 增设 tileset 注册表（T3a；所有权算术的账房）：
 //   createTileset(lp)→id（refs=1 归调用方，json 收养后 release=净移交）/ duplicateTileset(id)（句柄共享零拷贝）
