@@ -20,7 +20,7 @@ export interface Vp { x: number; y: number; }
 
 export type PlaneId = "off" | "ground" | "wall" | "wallL" | "wallR";
 
-// 透视配置（editorState per-ora；VP 坐标 snap 像素中线 +0.5 与形状端点同格系——
+// 透视配置（desk per-ora；VP 坐标 snap 像素中线 +0.5 与形状端点同格系——
 //   VP 到任意端点连线斜率是整数比，Bresenham 对称）
 export interface PerspConfig {
   vp1: Vp | null;

@@ -3,7 +3,7 @@
 
 import { describe, it, assert, eq } from "./runner.mjs";
 import { makeDialControls } from "../src/dial-controls.ts";
-import { createEditorState } from "../src/workbench-state.ts";
+import { useDials } from "../src/workbench-state.ts";
 
 // 假笔架：write* 直接写 toolStates（复刻真 rack 行为的最小子集）；按 getEditMode 当前工具。
 function fakeRack(state, sizeMax = 200) {
@@ -17,7 +17,7 @@ function fakeRack(state, sizeMax = 200) {
 
 describe("dial-controls · dial 写入 + 键盘调粗", () => {
   it("setSize：clamp 成 ≥1 整数 + 写 dial", () => {
-    const { state } = createEditorState();
+    const { state } = useDials();
     const { setSize } = makeDialControls({ state, rack: fakeRack(state), getEditMode: () => ({ current: () => "brush" }) });
     setSize(0.4);
     eq(state.toolStates.brush.size, 1, "setSize 应 clamp 到 ≥1");
@@ -26,21 +26,21 @@ describe("dial-controls · dial 写入 + 键盘调粗", () => {
   });
 
   it("setOpacity：写 dial opacity", () => {
-    const { state } = createEditorState();
+    const { state } = useDials();
     const { setOpacity } = makeDialControls({ state, rack: fakeRack(state), getEditMode: () => ({ current: () => "brush" }) });
     setOpacity(0.5);
     eq(state.toolStates.brush.opacity, 0.5, "setOpacity 没写 dial");
   });
 
   it("currentDials：按 getEditMode 当前工具返回对应 dial", () => {
-    const { state } = createEditorState();
+    const { state } = useDials();
     const { currentDials } = makeDialControls({ state, rack: { getRackToolKey: (t) => t }, getEditMode: () => ({ current: () => "eraser" }) });
     state.toolStates.eraser.size = 55;
     eq(currentDials().size, 55, "currentDials 没返回当前工具(eraser)的 dial");
   });
 
   it("键盘 wp:adjsize：段量化 + clamp 到预设 max + flashSize", () => {
-    const { state } = createEditorState();
+    const { state } = useDials();
     state.toolStates.brush.size = 12;
     const { bindKeyboard } = makeDialControls({ state, rack: fakeRack(state, 50), getEditMode: () => ({ current: () => "brush" }) });
     let flashed = 0;
@@ -53,11 +53,11 @@ describe("dial-controls · dial 写入 + 键盘调粗", () => {
     state.toolStates.brush.size = 48;
     window.dispatchEvent(new CustomEvent("wp:adjsize", { detail: +1 }));
     eq(state.toolStates.brush.size, 50, "48→50（step=2 段 + clamp 到 max=50）");
-    off();   // 清理监听：dial 走 editorState 单例，泄漏监听会跨测串扰
+    off();   // 清理监听：dial 走 desk 单例，泄漏监听会跨测串扰
   });
 
   it("键盘：非绘制工具忽略", () => {
-    const { state } = createEditorState();
+    const { state } = useDials();
     state.toolStates.brush.size = 12;
     const { bindKeyboard } = makeDialControls({ state, rack: fakeRack(state), getEditMode: () => ({ current: () => "lasso" }) });
     const off = bindKeyboard({ board: { _cursor: null }, leftDial: { flashSize: () => {} } });

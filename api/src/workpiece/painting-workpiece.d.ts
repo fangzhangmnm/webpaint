@@ -1,6 +1,6 @@
-import { Workpiece, type WorkpieceOpts, type CollectorComponent } from "./workpiece2.ts";
+import { Workpiece, type WorkpieceOpts } from "./workpiece.ts";
 import { LayerTiles, type TilesHost, type Rect } from "./layer-tiles.ts";
-import { LayerTree2 } from "./layer-tree2.ts";
+import { LayerTree } from "./layer-tree.ts";
 import { SelectionComponent } from "./selection-component.ts";
 import { FloatLayerComponent } from "./float-component.ts";
 import { PendingFill } from "./pending-fill.ts";
@@ -38,7 +38,7 @@ export interface PaintingData {
 }
 export declare class PaintingWorkpiece extends Workpiece {
     readonly layerTiles: LayerTiles;
-    readonly layerTree: LayerTree2 | null;
+    readonly layerTree: LayerTree | null;
     readonly selection: SelectionComponent;
     readonly floatLayer: FloatLayerComponent;
     readonly pendingFill: PendingFill;
@@ -50,13 +50,9 @@ export declare class PaintingWorkpiece extends Workpiece {
             height: number;
             maxLeaves?: () => number;
         };
-        legacy?: CollectorComponent;
         /** desk persp 配置的读写口（app 接 workbench-state；不传 = 内存 host，纯测试用）。 */
         persp?: PerspHost;
     });
-    /** 迁移期后装 legacy 桥组件（T5 拆）：组合根的构造环解法——legacyOps 需要 v1 workpiece，
-     *  v1 需要 PaintingView 端口，端口需要本工件 → 桥组件只能在本工件建成后注册。 */
-    attachLegacy(c: CollectorComponent): void;
     /** 装载（杀 docRaw/adoptState 的后继）：令牌灌入 → 清栈 → markSaved。 */
     load(data: PaintingData): void;
     /** 编码器读口：冻结快照（bytes 当场拷出；空叶 pixels=null）。 */

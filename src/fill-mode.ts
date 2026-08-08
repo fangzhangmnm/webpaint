@@ -1,10 +1,10 @@
 // fill-mode（v0.5.11 生，v0.5.12 升第一类工具）——油漆桶 = 选区机器 + 填色消费视图。
 //   任何选区生产者（魔棒/套索/矩形/椭圆/将来的 AI 分割）都自动获得填色能力——本模块零 flood 知识，
-//   阈值/自动扩张是魔棒（选区生产者）的属性（editorState.magicWand），不在这里。
+//   阈值/自动扩张是魔棒（选区生产者）的属性（desk.magicWand），不在这里。
 //
 // 语义（user 拍板 2026-07-24 两轮，ADR-0004 + v0.5.12 修订）：
 //   · fill 是**第一类工具**（editMode "fill"；指针经 pointer-route 全走 lasso role，零第二套代码）。
-//     工具身份即模式——editorState.fillMode 开关已删（工具不 per-doc 持久化，与笔/套索一视同仁）。
+//     工具身份即模式——desk.fillMode 开关已删（工具不 per-doc 持久化，与笔/套索一视同仁）。
 //   · **只 preview 不落文档**：fill 工具 + 有选区 → GPU 预览（board fill provider → 笔刷 overlay 同槽，
 //     journal v0.4 Plan L81「commit 和 live 同一个 shader，ssot」）。
 //   · 出口语义（v0.6.24「彻底不互通」拍板，ADR-0004 修订记录；супersede v0.5.15/v0.6.19）：

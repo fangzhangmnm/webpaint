@@ -23,7 +23,7 @@ import type { EncryptedBlob } from "./store/index.ts";   // 密文 at-rest 字�
 import { openInputSheet, openConfirmSheet, lockSyncGate } from "./sheets.ts";
 import { pathFolder } from "./gallery-path.ts";
 import { sessionFileName, sessionBareName } from "./config.ts";
-import { serializedToolStatePatch, editorState } from "./workbench-state.ts";
+import { serializedToolStatePatch, desk } from "./workbench-state.ts";
 import { getBlenderSyncState, applyBlenderSyncState } from "./blender-sync.ts";
 import { ensureNewPassword, ensureUnlocked } from "./enc-thumbs.ts";
 import { setPassword, getPassword } from "./crypto-state.ts";
@@ -89,34 +89,25 @@ async function _refreshEncrypted() {
   catch { _enc.encrypted = false; }
 }
 
-// ============ 编辑器状态 I/O（v267b；app 编辑器概念，不动）============
-function storeEditorStateToOra() {
-  // ⚠**双轨**（诚实交代，别信"只留未迁字段"那种话）：checkerboard/viewport 确已迁走，但 color + toolStates
-  //   **两处都写**——本函数写 webpaint/state.json，editorState.Serialize() 又写 .webpaint/editor-state.json。
-  //   载入时 editorState 后手赢（restoreEditorStateFromOra 末尾 Unserialize）。
-  //   为什么还不能删旧轨：ws.toolStates 覆盖**全部**工具（eraser/filterBrush 的 dial 只在这），而
-  //   editorState.brushTool 只覆盖 brush 一个。要拆轨得先把 eraser/filterBrush dial 迁进 editorState（下一轮）。
-  return {
-    color: state.color, toolStates: state.toolStates,
-    palette: paletteWindow.getSerializedState(),
-    activeId: doc.activeId, activeLayerIndex: doc.activeIndex, blender: getBlenderSyncState(),
-  };
-}
+// ============ 编辑器状态 I/O（v267b；T5/v0.8.21 拆双轨：旧轨 webpaint/state.json **停写**）============
+// 旧轨独有的三样（eraser/filterBrush/selPen dial、palette、blender）已迁 desk（toolDials/palette/blender
+// 三组，存时 syncRuntimeForSave 捞进）；activeId 在 stack.xml webpaint:active 原生携带。
+// 读兼容：restoreEditorStateFromOra 仍吃存量 .ora 的 _webpaintState（desk 后手赢），拔除另议。
 function resetEditorState() {
   referenceWindow.clearBitmap(); referenceWindow.close?.();
   paletteWindow.clear?.(); paletteWindow.close?.();
   setColor("#000000"); applyCheckerboard(false); state.filterBrush = null; applyBlenderSyncState();
-  editorState.reset();   // desk per-doc：开新文件/换画/卸载 → 重置 editorState struct（stage4）
+  desk.reset();   // desk per-doc：开新文件/换画/卸载 → 重置 desk struct（stage4）
 }
 
-// desk apply-on-load（stage5）：editorState.Unserialize/reset 后，把面板/视口等**回灌到 UI**。
-//   各面板模块（color/layers/ref/blender panel）在 init 里监听 wp:applyEditorState，读 editorState.<panel>
-//   开/关/定位自己（**只读 editorState + 裸 DOM 操作，不回写 editorState**）。
+// desk apply-on-load（stage5）：desk.Unserialize/reset 后，把面板/视口等**回灌到 UI**。
+//   各面板模块（color/layers/ref/blender panel）在 init 里监听 wp:applyEditorState，读 desk.<panel>
+//   开/关/定位自己（**只读 desk + 裸 DOM 操作，不回写 desk**）。
 function applyEditorStateToUI(): void { window.dispatchEvent(new CustomEvent("wp:applyEditorState")); }
 function restoreEditorStateFromOra(loaded: LoadedDoc) {
   const ws = loaded?._webpaintState as OraWebpaintState | undefined;
   if (loaded?._referenceBlob) {
-    // skipFit：ref 面板 open/位置/vp 由 editorState.refPanel 经 wp:applyEditorState 恢复；bitmap 异步载入不覆盖已载入 vp。
+    // skipFit：ref 面板 open/位置/vp 由 desk.refPanel 经 wp:applyEditorState 恢复；bitmap 异步载入不覆盖已载入 vp。
     createImageBitmap(loaded._referenceBlob).then((bitmap: ImageBitmap) => {
       referenceWindow.setBitmap(bitmap, { persistBlob: loaded._referenceBlob, skipFit: true });
     }).catch(() => {});
@@ -131,7 +122,7 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
       if (patch) Object.assign(state.toolStates[tk], patch);
     }
   }
-  applyBlenderSyncState(ws?.blender);   // checkboard 已迁 editorState → 经 wp:applyEditorState 应用（settings-menu 订阅）
+  applyBlenderSyncState(ws?.blender);   // checkboard 已迁 desk → 经 wp:applyEditorState 应用（settings-menu 订阅）
   if (ws?.activeId != null && wp2.layerTree!.setActive(ws.activeId!)) renderLayersPanel();
   else if (typeof ws?.activeLayerIndex === "number") {   // 兼容旧（扁平叶序 index）
     const leaf = flattenViewLeaves(doc.layers)[ws.activeLayerIndex!];
@@ -139,7 +130,19 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
   }
   // 新轨（desk per-doc）：载入 .webpaint/editor-state.json（缺失=老画作 → resetEditorState 已回默认）。
   //   **后手赢**：它会用 brushTool 覆盖 toolStates.brush + color。
-  if (loaded._editorState != null) editorState.Unserialize(loaded._editorState);
+  if (loaded._editorState != null) desk.Unserialize(loaded._editorState);
+  // T5（v0.8.21）：旧轨停写后三样的新家（desk 后手赢——覆盖上面旧轨灌的值；存量老 .ora 无这三组 = null 跳过）。
+  if (loaded._editorState != null) {
+    const dials = desk.toolDials;
+    if (dials && typeof dials === "object") {
+      for (const tk of Object.keys(state.toolStates)) {
+        const patch = serializedToolStatePatch(state.toolStates[tk], (dials as Record<string, unknown>)[tk]);
+        if (patch) Object.assign(state.toolStates[tk], patch);
+      }
+    }
+    if (desk.palette != null) { try { paletteWindow.applySerializedState(desk.palette); } catch (_) {} }
+    if (desk.blender != null) applyBlenderSyncState(desk.blender);
+  }
   // ⚠ applyToolState 必须排在 **Unserialize 之后**（v409 修）：它按 toolStates 的 activeBrushId 应用笔架，
   //   而新轨刚覆盖过那个值。v407-v408 把它放在 Unserialize 之前 —— 只因两轨由同一次 _buildOraMeta 同刻写出、
   //   值必然相同才没暴露，是"靠巧合正确"。任一轨的兼容映射漂移（serializedToolStatePatch 的 v98 逻辑只作用于
@@ -147,12 +150,13 @@ function restoreEditorStateFromOra(loaded: LoadedDoc) {
   if (savedToolStates || loaded._editorState != null) rack.applyToolState(editMode.current());
 }
 function _buildOraMeta() {
-  // 存前把运行时 board 视口 + checkboard 观感开关镜像进 editorState（**不标脏**，见 syncRuntimeForSave 注）。
-  editorState.syncRuntimeForSave(
+  // 存前把运行时 board 视口 + checkboard 观感开关镜像进 desk（**不标脏**，见 syncRuntimeForSave 注）。
+  desk.syncRuntimeForSave(
     { tx: board.viewport.tx, ty: board.viewport.ty, scale: board.viewport.scale, rot: board.viewport.rot },
     state.checkerboard,
+    { toolDials: state.toolStates, palette: paletteWindow.getSerializedState(), blender: getBlenderSyncState() },
   );
-  return { referenceImage: referenceWindow.getPersistBlob() ?? undefined, webpaintState: storeEditorStateToOra(), editorState: editorState.Serialize() };
+  return { referenceImage: referenceWindow.getPersistBlob() ?? undefined, desk: desk.Serialize() };
 }
 // S8（spec:41 存档一致性）：encode 前**同步**冻结 {结构 + 每叶 tile 快照}（零拷贝），bytes 与 peek
 //   读同一冻结视图 → encode 的 await 间隙里任何编辑（描边 commit / 层结构操作）都不撕存档，
@@ -205,7 +209,7 @@ function adoptModel(loaded: LoadedDoc) {
     } else { _loadedDocWriterVer = null; }
     updateNewerBanner();
     restoreEditorStateFromOra(loaded);
-    const vp = editorState.viewport;   // 视口从 editorState（.webpaint/editor-state.json）回灌 board
+    const vp = desk.viewport;   // 视口从 desk（.webpaint/editor-state.json）回灌 board
     // #27：必须经 setViewport（scale 夹取 + _clampPan），不许 Object.assign 裸灌——大屏存的
     // viewport 换小屏/旋转后画布整体落屏外，且交互 pan 夹取之外没有任何路径能把它拉回。
     if (vp && typeof vp.scale === "number") {

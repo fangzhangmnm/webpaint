@@ -149,6 +149,7 @@ interface TilesHost {
   findLayerIdByPixels(lp): number | null;         // seal 时解析；解析不到（临时实例/浮层）→ 扣押作废
   eachLayer(cb): void;
   replacePixels(layerId, np): void;               // computed 变换换整 tileset 实例
+  exchangePixels(layerId, np): LayerPixels | null; // 非销毁交换（旧实例交还调用方；exchange record 用，T5）
 }
 
 class LayerTiles implements WorkpieceComponent {
@@ -168,10 +169,14 @@ class LayerTiles implements WorkpieceComponent {
   // ── computed record 白名单（双捕获断言：verb 内 collector 必须零收集）──
   // record 恒存 undo 包（seal 时取逆）；swap = 原样应用 + 返回其逆（rot/offset 非自逆，T2 定形）
   flipHorizontalAll(): void;  rotate90All(dir): void;  offsetWrapAll(dx, dy): void;
+  // ── exchange record（T5 定形：DocResizeOp 收编）——crop/cropResample/resample 的实例交换记账
+  // record = { t:"exchange", leaves:[{layerId, lp}] }（lp=另一侧实例，所有权归 record，swap 零拷贝互换）；
+  // map 期间挂起收集的纪律在 verb 内（调用方无需 _suspendCollect）；与 tiles 收集/computed 同 token 互斥断言。
+  resizeAllLeaves(map: (layerId, lp) => LayerPixels): void;
   // ── token 内读口（T2 补：input 选区 finalize / no-op 判定）──
   tokenChanged(layerId): boolean;                 // collector 有它的扣押？（no-op 笔画守卫 v0.6.17 后继）
   tokenBeforeImage(layerId): PreSnapImage;        // 令牌前内容紧 bbox 物化（applyMaskPostStroke 的 pre）
-  _suspendCollect(on): void;                      // 迁移期协作面：legacy op 应用窗口挂起收集（T5 随桥拆）
+  _suspendCollect(on): void;                      // 内部/装载协作面（load 灌入用；T5 起 verb 体内自理，调用方不碰）
 }
 // tileset 生命周期：json.pixelsRef 持有 +1 / record 持有 +1 / 归零还池（FR assert 兜漏）——T3 落地；
 // T2 现状：record 持 tile 句柄（池引用计数 +1），tileset 实例仍归 doc.Layer 所有。
@@ -189,8 +194,9 @@ class SelectionComponent {
   clearOnLoad(): void;              // 换文档收尾（无 token；栈随后清）
 }
 // record = { v: Selection|null }（另一侧，所有权归 record）。
-// app 调用面 = SelectionFace 门面（workpiece.sel，T5 评估收编）：commitPreApplied 经
-// history.withPoint 骑共享令牌；beginPreview() tx 窗口语义原样。
+// T5 定形：SelectionFace 门面死。调用方直接 history.withPoint(() => wp2.selection.commitPreApplied(before))；
+// beginPreview() 收编本组件（SelectionPreviewTx 纯预览窗：origin 保管/write 换预览/abort 无痕，
+// commit 返回 {changed, before}——**记账归调用方**，组件零 history 依赖）。
 
 // T4b：组件 = 状态机 verbs；lift/commit/reject 的**编排**留在 FloatingTransform 引擎
 // （GPU bake/采样缓存/gizmo 数学在引擎；挖洞/烤层像素由 LayerTiles 写时扣押同 step 分账、
@@ -243,27 +249,42 @@ class RasterService {     // 一次性算像素（C 骑士接缝）
 }
 ```
 
-## 迁移期形状（T3b-2 落，非终态契约；T4/T5 收编或拆除）
+## T5 落地形（拆旧交付后的编排面；旧机器物理不存在）
 
 ```ts
-// PaintingView（src/workpiece/painting-view.ts）：app 的文档读写端口 = 旧 ctx.doc(DocView) 同形
-//   （width/height/layers(view 节点)/activeId/selection/maxLayers/activeEditableLeaf/…）。
-//   ViewLeaf 带旧 Layer 的读写面（pixels/bbox 物化缓存/editRegion/snapshot…），像素 = tileset
-//   注册表活实例——引擎（brush/liquify/lasso/float）与 codec 消费面零改动。selection 已迁
-//   SelectionComponent（T4a——端口只留镜像口 getter/setter）。终态归宿 T5 评估：要么正名
-//   （app 读口保留端口形），要么随引擎迁 LayerTiles 读口后拆。
-// LegacyHistory.withPoint(label, {checkpoint, hint}, fn)：v2-verb 迁移载具（共享令牌开/续/封；
-//   门面 layer-tree.ts 的所有 verb 走它）。T5 随桥拆——那时调用方直接 wp2.begin。
-// DocResizeOp（operators.ts——T4 后残余集的**唯一**住户）：crop/cropResample/resample 的实例
-//   交换记账（undo 包 = 另一侧 LayerPixels 实例；json 尺寸走 setTreeProp width/height 进树
-//   record，同 step 两账同向翻）。flip/rot90/offsetWrap 已走 computed 白名单。step.hint 已落地
-//   （compound({hint})），唯一住户 = docTransform 的 viewport 还原（T4d 后 persp 归组件 record）。
+// History（src/workpiece/history.ts）—— v2 undo 编排器（LegacyHistory 的 v2-native 后继）：
+class History {
+  constructor(opts: { maxQuotaBytes; onUnrecoverable; onChange?; onApplied?(info: {kind, dir}) });
+  readonly stack: UndoStack;             // wp ctor 要 stack 先在 → attach(wp) late-bind
+  attach(wp: Workpiece): void;
+  withPoint<T>(label, o: { checkpoint?; hint? } | undefined, fn: () => T): { ok; value?; msg? };
+      // 共享令牌开/续/封；checkpoint:false = 留开聚合微步；嵌套骑外层令牌（openedHere 才有回滚权）；
+      // fn throw → cancel 回滚（compound 已并入本方法——旧 run/compound 死）
+  sealCheckpoint(): void;                // 手势结束封口
+  undo() / redo(): boolean;              // 顶端未封口先补封；swap 抛 → 不可恢复协议（弃栈+回调）
+  canUndo/canRedo/depth/quotaUsage/clear;
+}
+
+// LayersFace（src/layers-face.ts，app 侧胶水 = ctx.layers）—— 结构类写面门面：
+//   每方法 = 一个 withPoint 整点（RunOpts {checkpoint, label, statuses}→step.hint）；
+//   verb 面 = 旧 LayerTree 门面同形（addLayer/duplicate/remove/deleteGroup/move/mergeDown(烤字节)/
+//   setLayerProp/setReferenceLayer/clearLayer/setActive/addGroup/ungroup/collapseGroup/
+//   moveIntoGroup/moveOutOfGroup/explodeLayer/stampAll）。v1 Workpiece 载体死——ctor 不再收 w。
+
+// PaintingView（src/workpiece/painting-view.ts）：**T5 定案 = 正名保留端口形**（评估选项①）。
+//   app 的文档读口 ctx.doc（width/height/layers/activeId/selection 镜像口/maxLayers/…），
+//   ViewLeaf 带 Layer 读写面（引擎/codec 消费面零改动）。「doc」一词回归 user 术语 =
+//   惰化持久格式（EncodeDoc/decode 侧）；活文档 = workpiece，ctx.doc 只是端口名。
+//   PaintDoc 类 = 测试基座残余（生产零引用；gl-smoke/旧基座测试迁 v2 后随 freezeDocForEncode 拆）。
 ```
 
 ## dials / desk（改名，形状不变）
 
 ```ts
-useDials(): Dials     // 现 createEditorState() 反应式层（Vue composable 惯例）
-desk                  // 现 editorState struct；文件名 .webpaint/editor-state.json 暂不改
-// 旧轨 webpaint/state.json：停写；读兼容留存量
+useDials()            // ✓T5 落地（原 createEditorState()；返回形 {state, dialReactive} 不变）
+desk                  // ✓T5 落地（原 editorState struct；文件名 .webpaint/editor-state.json 未改）
+// 旧轨 webpaint/state.json：✓v0.8.21 停写（ADR-0008 §9）。它独有的三样迁进 desk 新组：
+//   toolDials（全部工具 dial 快照——eraser/filterBrush/selPen 从前只在旧轨）/ palette / blender
+//   （三组 opaque json，默认 null 整包赋值；存时 syncRuntimeForSave(vp, checkboard, extra) 捞进）。
+// activeId 在 stack.xml webpaint:active 原生携带（旧轨备份通道不再需要）。读兼容留存量，拔除另议。
 ```

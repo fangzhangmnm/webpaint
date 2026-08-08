@@ -21,7 +21,7 @@
 //   usesResolvedBrush _move 是否取 getResolvedBrush() 喂四件套平滑（液化 / filterBrush 传 null）。
 //   finalize          endStroke 时是否按选区 applyMaskPostStroke
 //                     （filterBrush 在 begin 已吃 selection，故 false）。
-//   historyType       pixelHistory.begin 的事务标签（workpiece/pixel-tx）。
+//   historyType       令牌事务标签（workpiece v2；wp2.begin(label)）。
 export interface PixelStrokeSpec {
   engineKey: string;
   coalesceLatest: boolean;

@@ -1,5 +1,5 @@
 # workpiece v2 施工 handoff（令牌+collector 纪元）
-> as-of v0.8.13 / 2026-08-07。读者 = 接手施工的下一个 AI session。
+> as-of v0.8.21 / 2026-08-08（T5 拆旧交付完毕，下一棒 T6）。读者 = 接手施工的下一个 AI session。
 > 拍板（why）= `ai-docs/adr/0008-workpiece-v2-token-collector.md`；目标契约（what）=
 > `20260807-workpiece-v2-proposal-h.md`（**pin 住的接口**，形状改动要回写它）；本文 = how/施工序。
 > 现状 .h = `api/`（`bash scripts/gen-api.sh` 重生成）。
@@ -132,15 +132,33 @@
   - 测试 1252 绿 + tsc 0 + build.sh lint 过；新增 pending-fill/persp-component 两测试文件
     （test/run.mjs 已注册），selection-face/float-ops/operators/undo-stack-integrity/
     selection-tiles/fill-mode 换 v2 基座锚语义逐条保留。
-- **T5（下一棒从这开工）**= 拆旧 + rename 片（§1 T5 清单；判据 = 文件物理不存在）。T4 后补充情报：
-  - operators.ts 只剩 DocResizeOp——拆法：doc-ops 的实例交换段直接组件化（LayerTiles 已有
-    exchangeTilesetPixels，可考虑升成 collector 记账的 verb）或并进 layer-tiles record。
-  - workpiece.ts(v1) 残余职责：写锁 + HistoryFacade 载体 + layers/sel 门面 getter + readView；
-    legacy-bridge 现存调用方 = layer-tree.ts 门面 withPoint 全家 + doc-ops（compound/run docResize）
-    + fill-mode（compound/withPoint）+ floating-transform（withPoint）+ selection-face（withPoint）
-    + input undo/redo/clear + import-image/blender-sync（经门面）。
-  - write-gate.ts 已不武装（T3b-2 起）、undo-history.ts 只剩 undo-history.test 在用——都是纯拆。
-- **落盘注意**：T1-T3b-2 已在本地 main（1c714be=v0.8.13）；本棒 T4（v0.8.14-17）在
+- **T5 ✓**（v0.8.18-21，2026-08-08 本棒）：拆旧 + rename 片全落，**交付判据达成——§1 T5 清单文件
+  物理不存在**（operators/undo-history/write-gate/selection-face/layer-tree(v1门面)/workpiece(v1)/
+  legacy-bridge 全删；doc-view T3b 已拆）。四片：
+  - **T5a**（v0.8.18）DocResizeOp 收编 `LayerTiles.resizeAllLeaves`（exchange record，
+    undo 包=另一侧实例自反互换；map 期间挂起收集的纪律收进 verb——调用方不再碰 _suspendCollect）；
+    host 增 exchangePixels；operators.ts 死；operators.test → doc-resize.test（纯 v2 基座）。
+  - **T5b**（v0.8.19）`src/workpiece/history.ts` = **History 编排器**（LegacyHistory 的 v2-native
+    后继：withPoint 共享令牌开/续/封 + sealCheckpoint + undo/redo 门 + 不可恢复协议；compound 并入
+    withPoint，run 死）。门面迁 app 侧：layer-tree(v1门面) → `src/layers-face.ts`（LayersFace，
+    **ctx.layers**；v1 载体死）；SelectionFace 死——SelectionPreviewTx 收编 selection-component
+    （commit 返 {changed, before}，**记账归调用方** withPoint）；ctx.workpiece 死。测试：
+    legacy-bridge.test → history.test、selection-face.test → selection-preview.test、
+    undo-history/write-gate.test 删（锚在 undo-stack/integrity）。
+  - **T5c**（v0.8.20）收编正名：workpiece2.ts→workpiece.ts、layer-tree2.ts→layer-tree.ts
+    （类 LayerTree2→LayerTree）；layer-tree2.test→layer-tree-json.test。
+  - **T5d**（v0.8.21）rename 片：createEditorState→**useDials**、editorState→**desk**（240 处机械换名，
+    形状不变）；**旧轨 webpaint/state.json 停写**（ADR-0008 §9——它独有的 eraser/filterBrush/selPen
+    dial、palette、blender 三样迁进 desk 新组 toolDials/palette/blender，opaque json 整包收放；
+    activeId 本就在 stack.xml webpaint:active；读兼容留存量，拔除另议）；PaintDoc 判定=测试基座残余
+    （生产零引用，头注禁新 import；gl-smoke/旧基座测试迁 v2 后随 freezeDocForEncode 拆）；
+    PaintingView **定案正名保留端口形**（提案 T5 评估选项①）；CLAUDE.md 硬规则改写 v2 语言、
+    ADR-0007 标 superseded-by-0008、提案 .h 全部回写（History/LayersFace/exchange record/desk 三组）。
+  - 测试 1232 绿 + tsc 0 + build.sh lint 过（净 -21：旧栈/桥/门面测试删、history/selection-preview/
+    doc-resize 新增）。
+- **T6（下一棒从这开工）**= GL 双 facade（§1 T6：GlRoom 引用包 + RenderTree/RasterService 拆分，
+  行为不变纯搬家，gl-smoke + fillParity 是锚）。然后 T7 收口。
+- **落盘注意**：T1-T4（v0.8.9-17）已 ff 进本地 main（bcb0023）；本棒 T5（v0.8.18-21）在
   worktree-workpiece-v2 分支，进场先在主 checkout `git merge --ff-only worktree-workpiece-v2`。
 
 ## 2. 地雷

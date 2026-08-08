@@ -7,7 +7,7 @@
 
 import { describe, it, assert, eq } from "./runner.mjs";
 import { makeCurrentBrush } from "../src/resolved-brush.ts";
-import { createEditorState } from "../src/workbench-state.ts";
+import { useDials } from "../src/workbench-state.ts";
 import { shallowRef } from "../vendor/vue/vue.esm-browser.prod.js";
 
 // 最小假笔架：getRackToolKey 直返工具名；findToolBrushPure 默认返 null（→ resolveBrush 走 DEFAULT 兜底）。
@@ -20,7 +20,7 @@ function fakeRack(preset = null) {
 
 describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖断裂）", () => {
   it("改 dial.size → currentBrush.value.size 跟随重算", () => {
-    const { state, dialReactive } = createEditorState();
+    const { state, dialReactive } = useDials();
     const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack() });
     state.toolStates.brush.size = 17;
     eq(currentBrush.value.size, 17, "size dial 改了笔没跟");
@@ -29,14 +29,14 @@ describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖�
   });
 
   it("改全局 color → currentBrush.value.color 跟随", () => {
-    const { state, dialReactive } = createEditorState();
+    const { state, dialReactive } = useDials();
     const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack() });
     state.color = "#123456";
     eq(currentBrush.value.color, "#123456", "color 改了笔没跟");
   });
 
   it("computed 缓存：dep 不变则同一冻结值；dep 变则新值", () => {
-    const { state, dialReactive } = createEditorState();
+    const { state, dialReactive } = useDials();
     const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack: fakeRack() });
     const v1 = currentBrush.value;
     assert(v1 === currentBrush.value, "dep 没变应返回缓存的同一值");
@@ -48,7 +48,7 @@ describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖�
   // v415：手动计数器 rackVersion 已删。笔架内容的反应式来源改成 controller 里的 shallowRef 镜像，
   //   currentBrush 经 findToolBrushPure 读它 → 依赖自动建立（不再靠"记得 bump"）。
   it("笔架内容变（镜像整体换）→ currentBrush 重算，无需任何手动 bump", () => {
-    const { state, dialReactive } = createEditorState();
+    const { state, dialReactive } = useDials();
     const mirror = shallowRef([{ id: "b1", name: "笔A", size: { base: 10 }, spacing: 0.2 }]);
     // 仿真 controller：findToolBrushPure 读镜像（这一读就是依赖）
     const rack = {
@@ -67,7 +67,7 @@ describe("current-brush · 反应式接线（守 boot-smoke 抓不到的依赖�
   // 人类钉死的约束：computed **必须纯**。写回 reactive 会引发无限重算/难查的串扰，
   //   所以治愈型 findToolBrush（会写 ts.activeBrushId/Name）永远不许上 computed 路径。
   it("★纯度：求值 currentBrush 绝不写 toolStates", () => {
-    const { state, dialReactive } = createEditorState();
+    const { state, dialReactive } = useDials();
     // 故意给一个**解析不到**的 activeBrushId —— 正是会诱使"治愈回写"的场景
     state.toolStates.brush.activeBrushId = "不存在的笔";
     state.toolStates.brush.activeBrushName = "不存在";

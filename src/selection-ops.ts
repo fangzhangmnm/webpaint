@@ -59,7 +59,7 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   if (src.isGroup) { setStatus(t("se.selectLayerFirstGroup")); return; }
   // v0.8.1（S1）：加层走 ctx.layers 门面（创建即记账，prevActiveId 自动拍 = 当前 active = src）。
   // compound 把 [addLayer, pixels] 封成一个整点：undo 先还原源层像素、再摘掉新层 + active 回源层。
-  // v0.8.2（S2）：move 挖洞走 pixelHistory 事务（before 快照/入栈收进 tx；挖洞前 begin）。
+  // v0.8.2（S2→T5）：move 挖洞在同一 withPoint 令牌内，tile 换手由 LayerTiles 写时扣押。
   const r = history.withPoint(move ? "moveToNewLayer" : "copyToNewLayer", {}, () => {
     const a = layers.addLayer(move ? "移到新层" : "复制层", { checkpoint: false });
     if (!a.ok) throw new Error(a.msg);

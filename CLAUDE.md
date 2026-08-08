@@ -3,7 +3,7 @@
 Procreate 级绘画 PWA + **家族 sync-store 引擎的开发面**（shared-lib-workflow 流 1：引擎在 `src/store/` 在地改、真机测，稳了才 merge 回 canonical）。UI 中文。iPad 是手感的最终裁判。
 
 - **红线区**：`src/store/**`（深模块，全 TS，改前 escalate human + 读 MASTER §A）。接缝 = `src/app-store.js` + `src/store/local-adapter.ts`，app 专属只进接缝。
-- **【硬规则】doc mutation 必须走 undo（workpiece 写面，v0.8 ADR-0007）**：结构/属性/焦点 = `workpiece.layers`、选区 = `workpiece.sel`、像素 = `ctx.pixelHistory`（PixelTx）、整 doc 几何 = `doc-ops.runDocTransform`。`ctx.doc` 是只读 DocView——裸改 = 编译错 + write-gate dev throw。「不记账」必须是显式声明态（tx 窗口 / component 声明写，如 setActive）；绝不 cast 回 PaintDoc 或摸 `ctx.docRaw` 绕收口（docRaw 唯一持证人 = session-state 装载写）。
+- **【硬规则】文档 mutation 必须持令牌记账（workpiece v2，ADR-0008）**：写前 `wp2.begin()` 拿令牌（共享令牌编排走 `ctx.history.withPoint`），组件 verb 直写 substrate、collector 写时扣押自动记账——结构 = `ctx.layers` 门面（LayersFace）/ `wp2.layerTree` verbs、像素 = `wp2.layerTiles`（engine 直写也被观察者逮到）、选区 = `wp2.selection`、浮层 = `wp2.floatLayer`、fill 预览色 = `wp2.pendingFill`、整 doc 几何 = `doc-ops.runDocTransform`。无令牌写 = `_componentWrite` throw（结构上不存在裸写路径）。「不记账」必须是显式声明态（`_rawWrite` 预览直写 / `setActive` 焦点 / load 灌入）；`ctx.doc` 是 PaintingView 端口（读面 + 选区过渡宿），不是逃生门。
 - **错误上报（统一）**：全 app + store 的错误唯一汇拢点 = `src/error-badge.ts` 的 `reportError(err, level?)`——
   它是**最终消费者**（唯一 console.log 的地方）。分级：`error`/`warning`→顶层 banner（`#__errBar`，z-9999，盖过
   gallery overlay/busy/gate/modal）、`info`→状态栏、`log`→仅 console（良性 offline/fallback）。

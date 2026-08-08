@@ -1,5 +1,5 @@
 // persp-component —— workpiece v2 的透视配置组件（ADR-0008 §3 升格；T4d）。
-// substrate = desk 的 persp 配置（editorState.persp——持久化仍进 desk 文件：**存哪个文件与
+// substrate = desk 的 persp 配置（desk.persp——持久化仍进 desk 文件：**存哪个文件与
 // undo 归属正交**，ADR-0008）；组件经注入 host 读写，零 desk 内部知识。
 //
 // 记账范围（刻意收窄）：**只有 remapForDocTransform**（裁剪/翻转/旋转/偏移/重采样的 VP 重映射，

@@ -91,7 +91,7 @@ export declare class PaintingView {
     private _memCountMat;
     constructor(wp: PaintingWorkpiece);
     private get _tree();
-    /** 根引用身份同步：LayerTree2 每写换新根 → 引用变了才重建镜像（叶按 id 复用）。 */
+    /** 根引用身份同步：LayerTree 每写换新根 → 引用变了才重建镜像（叶按 id 复用）。 */
     private _sync;
     private _syncLeaf;
     get width(): number;
@@ -128,6 +128,5 @@ export declare class PaintingView {
     clearSelectionOnLoad(): void;
     configureMemory(budgetBytes: number, countMat: boolean): void;
     get maxLayers(): number;
-    exchangeLeafPixels(layerId: number, np: LayerPixels): LayerPixels | null;
 }
 export {};

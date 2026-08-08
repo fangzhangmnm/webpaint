@@ -2,7 +2,7 @@
 //
 // 插件式隔离的子功能：唯一对外入口 initBlenderSync(ctx)，外加随文档持久化的 get/applyBlenderSyncState。
 // 依赖面收窄到三处，全是别人家的深模块 / 契约，本模块零格式知识：
-//   - AppContext seam（doc / board / pixelHistory / setStatus / withBusy / …）
+//   - AppContext seam（doc / board / history / setStatus / withBusy / …）
 //   - vendored btp 客户端（../vendor/btp/v1/index.js）——BTPClient 走 fetch；连接 = 一个 baseUrl
 //     （本机 localhost / 另一台设备填能连到 server 的 HTTPS 地址，如 tailscale serve 的 *.ts.net）
 //   - 三个 WebPaint 深模块：renderDocToImageBlob（唯一合成器）、smartResample（安全缩放，
@@ -22,13 +22,13 @@ import { renderDocToImageBlob } from "./session.ts";
 import { smartResample, canvasToBlob , imageSourceToBytes } from "./resample.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { setMenuOpen } from "./settings-menu.ts";
-import { editorState } from "./workbench-state.ts";
+import { desk } from "./workbench-state.ts";
 import { appState } from "./app-state.ts";
 import { BTPClient, BTPError } from "../vendor/btp/v1/index.js";
 import { t } from "./i18n/index.ts";
 import { iconHtml } from "./ui/icon.ts";
 
-// 面板 show/position 随文档走 → editorState.blenderPanel（.ora 序列化）。
+// 面板 show/position 随文档走 → desk.blenderPanel（.ora 序列化）。
 // 远端 URL 是账号级设置（tailscale 稳定端点，跨设备同步）→ appState.blenderPanelUrl，不随文档走。
 const errMsg = (e: unknown): string => String((e as { message?: unknown })?.message || e);
 
@@ -87,7 +87,7 @@ export function initBlenderSync(c: AppContext) {
   document.addEventListener("pointerdown", (e) => {
     if (!panel.contains(e.target as Node)) closeAllPopups();
   });
-  // 文档 editorState 加载/重置后 → 回灌面板 show/position（+ 账号级 URL）
+  // 文档 desk 加载/重置后 → 回灌面板 show/position（+ 账号级 URL）
   window.addEventListener("wp:applyEditorState", () => applyBlenderPanelFromEditorState());
 }
 
@@ -99,16 +99,16 @@ export function reconcileBlenderUrlFromPrefs(): void {
   remoteUrl.value = appState.blenderPanelUrl || "";
 }
 
-// 文档加载/新建后应用该 doc 保存的面板状态：只写 DOM，绝不回写 editorState。
+// 文档加载/新建后应用该 doc 保存的面板状态：只写 DOM，绝不回写 desk。
 // URL 是账号级（appState 跨设备同步），顺带刷新——可能在别的设备上改过。
 function applyBlenderPanelFromEditorState() {
   if (!built) return;
   remoteUrl.value = appState.blenderPanelUrl || "";
-  const show = editorState.blenderPanel.show;
+  const show = desk.blenderPanel.show;
   panel.classList.toggle("hidden", !show);
   if (show) {
     document.body.appendChild(panel);   // 置顶
-    const saved = editorState.blenderPanel.position;
+    const saved = desk.blenderPanel.position;
     if (saved) {
       const w = panel.offsetWidth, h = panel.offsetHeight;
       const left = Math.max(0, Math.min(window.innerWidth - w, saved.left));
@@ -400,7 +400,7 @@ function togglePanel(force?: boolean) {
   const show = force === undefined ? hidden : force;
   panel.classList.toggle("hidden", !show);
   if (show) document.body.appendChild(panel);   // 置顶
-  editorState.blenderPanel.show = show;         // 随文档持久化（标脏）
+  desk.blenderPanel.show = show;         // 随文档持久化（标脏）
 }
 
 function buildPanel() {
@@ -561,7 +561,7 @@ function attachDrag(head: HTMLElement) {
     panel.style.left = left + "px";
     panel.style.right = "auto";
     panel.style.top = top + "px";
-    editorState.blenderPanel.position = { left, top };   // 随文档持久化（标脏）
+    desk.blenderPanel.position = { left, top };   // 随文档持久化（标脏）
   });
   head.addEventListener("pointerup", (e: PointerEvent) => {
     if (drag && e.pointerId === drag.id) {
@@ -572,7 +572,7 @@ function attachDrag(head: HTMLElement) {
 }
 
 function restorePos() {
-  const saved = editorState.blenderPanel.position;
+  const saved = desk.blenderPanel.position;
   if (!saved) return;
   panel.style.left = saved.left + "px";
   panel.style.right = "auto";

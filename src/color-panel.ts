@@ -6,7 +6,7 @@ import type { AppContext } from "./app-context.ts";
 import { els } from "./els.ts";
 import { mountColorWheel } from "./ui/color-wheel.ts";
 import { raiseWindow } from "./surfaces.ts";
-import { editorState } from "./workbench-state.ts";
+import { desk } from "./workbench-state.ts";
 
 let state: AppContext["state"], colorWheel: ReturnType<typeof mountColorWheel>;
 
@@ -28,7 +28,7 @@ export function refreshColorDisplay(): void {
 export function setColor(hex: string) {
   const t = _targetProvider?.();
   if (t) t.set(hex);   // fill 预览期：改的是 PendingFill（可撤销）；笔刷色不动
-  else editorState.brushTool.color = hex;   // 绑定反应式引擎（→state.color/dialReactive.color 重派生）+ 标脏持久化
+  else desk.brushTool.color = hex;   // 绑定反应式引擎（→state.color/dialReactive.color 重派生）+ 标脏持久化
   els.activeSwatch.style.background = hex;
   colorWheel.setColor(hex);   // 推给色轮；组件自己守 round-trip，不会弹 hue
 }
@@ -37,10 +37,10 @@ export function toggleColorPanel(force?: boolean) {
   const hidden = els.colorPanel.classList.contains("hidden");
   const show = force === true ? true : force === false ? false : hidden;
   if (show) {
-    editorState.colorPanel.enabled = true;
+    desk.colorPanel.enabled = true;
     els.colorPanel.classList.remove("hidden");
     raiseWindow(els.colorPanel);
-    const saved = editorState.colorPanel.position;
+    const saved = desk.colorPanel.position;
     const w = els.colorPanel.offsetWidth || 264;
     const h = els.colorPanel.offsetHeight || 320;
     if (saved?.width) els.colorPanel.style.width = Math.max(180, saved.width) + "px";   // v0.5.21 持久化宽
@@ -51,7 +51,7 @@ export function toggleColorPanel(force?: boolean) {
     els.colorPanel.style.left = left + "px";
     els.colorPanel.style.top = top + "px";
   } else {
-    editorState.colorPanel.enabled = false;
+    desk.colorPanel.enabled = false;
     els.colorPanel.classList.add("hidden");
   }
 }
@@ -59,12 +59,12 @@ export function toggleColorPanel(force?: boolean) {
 let _panelDrag: { id: number; sx: number; sy: number; ol: number; ot: number } | null = null;
 let _pickerPinTimer: ReturnType<typeof setTimeout> | undefined;
 
-// 文档加载/新建后应用该 doc 保存的面板状态：只写 DOM，绝不回写 editorState（否则会误标脏）。
+// 文档加载/新建后应用该 doc 保存的面板状态：只写 DOM，绝不回写 desk（否则会误标脏）。
 function applyColorPanelFromEditorState() {
   els.activeSwatch.style.background = state.color;
-  if (editorState.colorPanel.enabled) {
+  if (desk.colorPanel.enabled) {
     els.colorPanel.classList.remove("hidden");
-    const saved = editorState.colorPanel.position;
+    const saved = desk.colorPanel.position;
     if (saved?.width) els.colorPanel.style.width = Math.max(180, saved.width) + "px";   // v0.5.21 持久化宽
     const w = els.colorPanel.offsetWidth || 264;
     const h = els.colorPanel.offsetHeight || 320;
@@ -105,7 +105,7 @@ export function initColorPanel(ctx: AppContext) {
     const top = Math.max(60, Math.min(window.innerHeight - h, _panelDrag.ot + (e.clientY - _panelDrag.sy)));   // top 地板=出血区（v0.4.11，同 layers-panel）
     els.colorPanel.style.left = left + "px";
     els.colorPanel.style.top = top + "px";
-    editorState.colorPanel.position = { ...(editorState.colorPanel.position ?? {}), left, top };
+    desk.colorPanel.position = { ...(desk.colorPanel.position ?? {}), left, top };
   });
   els.colorPanelHead.addEventListener("pointerup", (e: PointerEvent) => {
     if (_panelDrag && e.pointerId === _panelDrag.id) {
@@ -126,7 +126,7 @@ export function initColorPanel(ctx: AppContext) {
     const r = els.colorPanel.getBoundingClientRect();
     const w = Math.max(180, Math.min(window.innerWidth - r.left - 8, _resize.ow + (e.clientX - _resize.sx)));
     els.colorPanel.style.width = w + "px";
-    editorState.colorPanel.position = { ...(editorState.colorPanel.position ?? {}), left: r.left, top: r.top, width: w };
+    desk.colorPanel.position = { ...(desk.colorPanel.position ?? {}), left: r.left, top: r.top, width: w };
   });
   resizeEl?.addEventListener("pointerup", (e: PointerEvent) => {
     if (_resize && e.pointerId === _resize.id) {

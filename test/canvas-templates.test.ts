@@ -3,7 +3,7 @@
 // 这个测试文件存在的理由（v0.7.32，user 2026-07-31）：模板此前有**两份**表——canvas-templates.ts
 // 的 TS 常量（裁切读）+ index.html 手写的 <option>（新建读）。往新建里加了 1200×900，裁切看不到。
 // 合成一份 json 之后，最该守的就是「一条模板确实同时喂两个面」和「id 不许乱改」（crop 的
-// editorState.crop.templateId 持久化了 id）。
+// desk.crop.templateId 持久化了 id）。
 import { readFileSync } from "node:fs";
 import { test, eq, assert } from "./runner.mjs";
 import {
@@ -36,7 +36,7 @@ test("数据契约：字段齐全、id 唯一、print 必带 dpi", () => {
 });
 
 test("id 是持久化契约：crop 的 templateId 存量 id 一个都不许消失", () => {
-  // editorState.crop.templateId 存的就是这些字符串（v0.6.48 起）。改名 = 用户桌面记忆失效。
+  // desk.crop.templateId 存的就是这些字符串（v0.6.48 起）。改名 = 用户桌面记忆失效。
   for (const id of [
     "print-4x6-300", "print-6x4-300", "print-5x7-300", "print-7x5-300",
     "print-a5-300", "print-a5l-300", "print-a4-300", "print-a4l-300",

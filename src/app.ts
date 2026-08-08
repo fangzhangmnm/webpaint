@@ -1,6 +1,6 @@
 // app.js —— Composition Root（组合根）。**只装配，不实现业务**。
 //
-// 职责：构造核心单例（doc / board / input / editMode / history / pixelHistory / rack / currentBrush）→
+// 职责：构造核心单例（doc / board / input / editMode / history / wp2 / rack / currentBrush）→
 //   组一个显式 ctx → 调各深模块的 initX(ctx) 接线 → 挂 boot 加载 / auth / PWA 外壳。
 //   god-file 已肢解：UI 与业务分散到单一职责模块（session-state / editor-state / gallery-shell /
 //   topbar-menu / cloud-freshness / import-image / export-import-menu / side-windows / selection-ops /
@@ -46,7 +46,7 @@ import { initToolbar, RACK_PANEL_BY_TOOL, closeTransientMenus } from "./toolbar.
 import { setColor, initColorPanel } from "./color-panel.ts";
 import { session, initSession, setSessionGallery } from "./session-state.ts";   // candidate 3 · 活动文档生命周期 SSoT
 import { setDocCompositor, setDocCompositorBytes } from "./doc-render.ts";
-import { createEditorState, editorState, snapshotShapePersp, restoreShapePersp, remapShapePersp } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
+import { useDials, desk, snapshotShapePersp, restoreShapePersp, remapShapePersp } from "./workbench-state.ts";   // candidate 3 · 编辑器 RAM 反应式 SSoT（dial/color/压感）
 import { showFullscreenBusy, hideFullscreenBusy, withBusy } from "./fullscreen-busy.ts";
 import { initSmoothDevPanel } from "./smooth-dev-panel.ts";
 import { selectionToNewLayer, initSelectionOps } from "./selection-ops.ts";
@@ -141,7 +141,7 @@ if (els.galleryMenuVersion) els.galleryMenuVersion.textContent = t("menu.version
 
 // 编辑器「当前设成什么样」的反应式 RAM SSoT（主色 / 每工具 dial / 压感开关 / 棋盘等）= editor-state.ts。
 // 当前笔（currentBrush computed）从这束 dial + 笔架预设纯派生（见下，组合接线留 app）。
-const { state, dialReactive } = createEditorState();
+const { state, dialReactive } = useDials();
 
 // 左栏 dial = <LeftDial> Vue 组件（src/ui/left-dial.ts）：笔指示按钮(tap=rack/长按=设置) + size/opacity 竖滑块 + size popup。
 // 全绑定反应式 dial SSoT（getter 读 state.toolStates/dialReactive → 组件 computed 自动追踪）。
@@ -174,13 +174,13 @@ const leftDial = mountLeftDial(els.leftDialMount, {
   onOpacity: (frac) => setOpacity(frac),
   onBrushTap: () => { const id = RACK_PANEL_BY_TOOL[editMode.current()]; if (id) openExclusive(id); },
   onBrushLongpress: () => { const b = rack.findToolBrush(_leftDial()); if (b) { closeExclusive(); rack.openBrushSettings(b.id); } },
-  // v0.6.15 禁用笔压（per-doc desk：editorState.pressureDisabled ⇄ dialReactive.pressureOff）：开 = 恒定 0.5
+  // v0.6.15 禁用笔压（per-doc desk：desk.pressureDisabled ⇄ dialReactive.pressureOff）：开 = 恒定 0.5
   getPressureDisabled: () => dialReactive.pressureOff,
-  onTogglePressure: (v) => { editorState.pressureDisabled = v; setStatus(t(v ? "status.pressureOff" : "status.pressureOn")); },
+  onTogglePressure: (v) => { desk.pressureDisabled = v; setStatus(t(v ? "status.pressureOff" : "status.pressureOn")); },
 });
 bindPressureDisabled(() => dialReactive.pressureOff);   // 引擎 thunk（每 pointer 事件读；载入/重置经 applyBoundFromGroups 自动回灌）
 // v0.6.32 笔压独立按钮（user：undo/redo 上方；原笔粗图标位 v0.6.16 方案退役）。
-//   SSoT 不变：editorState.pressureDisabled ⇄ dialReactive.pressureOff；换文档 applyEditorState 回灌后重派生。
+//   SSoT 不变：desk.pressureDisabled ⇄ dialReactive.pressureOff；换文档 applyEditorState 回灌后重派生。
 {
   const btn = document.getElementById("pressureToggleBtn")!;
   const use = document.getElementById("pressureToggleUse")!;
@@ -192,7 +192,7 @@ bindPressureDisabled(() => dialReactive.pressureOff);   // 引擎 thunk（每 po
   };
   btn.addEventListener("click", () => {
     const v = !dialReactive.pressureOff;
-    editorState.pressureDisabled = v;
+    desk.pressureDisabled = v;
     setStatus(t(v ? "status.pressureOff" : "status.pressureOn"));
     sync();
   });
@@ -265,10 +265,10 @@ board.setLiveSyncProvider(() => input.liveMutatedLeaf());
 input.lasso.setWarpBakeProvider(() => board.glWarpBakeFn());
 board.setLassoProvider((() => ({
   selection:      doc.selection,
-  // fill 模式蚂蚁线 toggle（ADR-0004 修订 v0.6.19）：非 fill 恒显；fill 按 editorState（默认开）
+  // fill 模式蚂蚁线 toggle（ADR-0004 修订 v0.6.19）：非 fill 恒显；fill 按 desk（默认开）
   // v0.7.40 蚂蚁线 per-tool 路由（user：selection 也可关、双默认开）；非选区工具恒显
-  showAnts:       editMode.current() === "fill" ? editorState.fillTool.showAnts
-                : editMode.current() === "lasso" ? editorState.lassoTool.showAnts : true,
+  showAnts:       editMode.current() === "fill" ? desk.fillTool.showAnts
+                : editMode.current() === "lasso" ? desk.lassoTool.showAnts : true,
   drawingPath:    input.lasso.getDrawingPath(),
   polyFirst:      input.lasso.polygonFirstVertex(),   // v0.6.25 多边形首顶点标记（闭合提示）
   drawingRect:    input.lasso.getDrawingRect(),

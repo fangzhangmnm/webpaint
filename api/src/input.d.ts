@@ -6,15 +6,13 @@ import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
 import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { HistoryFacade, Workpiece } from "./workpiece/workpiece.ts";
-import type { OperatorRegistry } from "./workpiece/operators.ts";
+import type { History } from "./workpiece/history.ts";
 import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
 import type { LayerTiles } from "./workpiece/layer-tiles.ts";
-import type { WriteToken } from "./workpiece/workpiece2.ts";
+import type { WriteToken } from "./workpiece/workpiece.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import { Selection } from "./selection.ts";
 type Doc = PaintingView;
-type History = HistoryFacade;
 interface FilterBrushState {
     Filter: unknown;
     params: unknown;
@@ -82,8 +80,6 @@ interface InputOpts {
     onColorSampled?: (hex: string) => void;
     status?: (msg: string) => void;
     history?: History | null;
-    workpiece?: Workpiece | null;
-    ops?: OperatorRegistry | null;
     wp2?: PaintingWorkpiece | null;
     layerTiles?: LayerTiles | null;
     isContentReplacing?: () => boolean;
@@ -133,8 +129,6 @@ export declare class InputController {
     _lastTap: TapRef | null;
     _lastPenActivity: number;
     history: History | null;
-    workpiece: Workpiece | null;
-    ops: OperatorRegistry | null;
     wp2: PaintingWorkpiece | null;
     layerTiles: LayerTiles | null;
     _activeStroke: ActiveStroke | null;

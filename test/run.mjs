@@ -77,7 +77,7 @@ import "./store-lost-response-claim.test.mjs";   // N6 认领尾部校验：同�
 import "./migration.test.mjs";       // ADR-0019 迁移**框架**：版本戳/命名空间/编排机制（单调·幂等·崩溃安全，合成迁移注入）。V001/V002 tax 已清（2026-07-13）
 import "./store-narrow-waist.test.ts";   // 2026-07-13 窄腰重构：命名空间根 appId.databaseId + kv 前缀 + isHidden + collection 名/保留名 + 两实例 etag 隔离 + settings 散键 + backupFolder .backup
 import "./app-state.test.mjs";            // 2026-07-14 app-state struct 门面：冷字段直读写 collection（不落 RAM）+ push/pull
-import "./editor-state.test.mjs";         // 2026-07-14 editorState struct：默认/setDirtyFlag/Serialize 往返/Unserialize 容错/reset
+import "./editor-state.test.mjs";         // 2026-07-14 desk struct：默认/setDirtyFlag/Serialize 往返/Unserialize 容错/reset
 import "./gallery-view-model.test.mjs";
 import "./color-model.test.mjs";
 import "./brush-size.test.mjs";

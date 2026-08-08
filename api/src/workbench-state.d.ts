@@ -1,6 +1,6 @@
 import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.ts";
 export type EditorState = EditorRuntimeState;
-export declare function createEditorState(): {
+export declare function useDials(): {
     state: EditorRuntimeState;
     dialReactive: DialReactive;
 };
@@ -150,6 +150,9 @@ declare function freshGroups(): {
             } | null;
         };
     };
+    toolDials: unknown;
+    palette: unknown;
+    blender: unknown;
     grid: {
         on: boolean;
         cell: number;
@@ -184,7 +187,7 @@ interface EngineBind {
     setPressureOff(v: boolean): void;
 }
 export declare function bindEditorReactive(b: EngineBind): void;
-export declare const editorState: {
+export declare const desk: {
     export: {
         format: string;
         target: string;
@@ -337,9 +340,16 @@ export declare const editorState: {
     Serialize(): EditorGroups;
     Unserialize(json: unknown): void;
     reset(): void;
-    syncRuntimeForSave(vp: EditorViewport, checkboard: boolean): void;
+    readonly toolDials: unknown;
+    readonly palette: unknown;
+    readonly blender: unknown;
+    syncRuntimeForSave(vp: EditorViewport, checkboard: boolean, extra?: {
+        toolDials?: unknown;
+        palette?: unknown;
+        blender?: unknown;
+    }): void;
 };
-export type EditorStateStruct = typeof editorState;
+export type DeskStruct = typeof desk;
 export declare function remapShapePersp(f: (p: {
     x: number;
     y: number;

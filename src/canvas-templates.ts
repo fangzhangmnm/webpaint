@@ -14,7 +14,7 @@ import { t, type Key } from "./i18n/index.ts";
 import { reportError } from "./error-badge.ts";
 
 export interface CanvasTemplate {
-  id: string;                          // 稳定标识（editorState.crop.templateId 持久化了它——改名=破坏性）
+  id: string;                          // 稳定标识（desk.crop.templateId 持久化了它——改名=破坏性）
   label: string;                       // 中文 UI 直读（i18n 缺席时的显示文本 / 在场时的 zh 兜底）
   i18n?: string;                       // 可选 strings.ts key（「横/竖/照片/明信片」值得翻译）
   kind: "print" | "screen" | "pixel";  // 同时是 optgroup 分组

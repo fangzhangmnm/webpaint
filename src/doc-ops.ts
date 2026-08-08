@@ -14,7 +14,7 @@ import { bumpDoc } from "./signals.ts";
 import { t } from "./i18n/index.ts";
 import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } from "./crop-geometry.ts";
 import { loadCanvasTemplates, fillTemplateSelect, templatePx, templateById } from "./canvas-templates.ts";
-import { editorState } from "./workbench-state.ts";
+import { desk } from "./workbench-state.ts";
 import { LayerPixels } from "./tiles/tile-layer.ts";
 import { resampleBytes } from "./resample-bytes.ts";
 import type { Selection } from "./selection.ts";
@@ -144,7 +144,7 @@ function _applyCropTemplate(tplId: string) {
     if (!t) return;
     const px = templatePx(t);
     tw = px.w; th = px.h;
-    editorState.crop.templateId = tplId;   // desk 便利记忆（无 DPI 语义）
+    desk.crop.templateId = tplId;   // desk 便利记忆（无 DPI 语义）
   }
   _cropState.tpl = { tw, th, aspect: tw / th, dpi: tplId === "custom" ? undefined : templateById(tplId)?.dpi };
   // 初始框 = 画布矩形的 cover（框⊆画布、居中、比例锁死——不跳出画布，可预期；fit 按钮才按内容 bbox）

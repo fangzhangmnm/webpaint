@@ -3,13 +3,13 @@
 // 结构：DOM 手柄（screen 坐标，VP 常在画布外也能拖；board.onViewportChange 链式挂钩跟随
 //   pan/zoom）+ board overlay 画淡地平线/box 棱线（setPerspGizmoProvider）。
 // 语义（user 拍板三轮）：
-//   · VP per-mode 分开存（editorState.persp.p1/p2/p3），坐标 snap 像素中线 +0.5；
+//   · VP per-mode 分开存（desk.persp.p1/p2/p3），坐标 snap 像素中线 +0.5；
 //     lockHorizon 默认开（重置默认时回开）；参考点已删（box 取代——「低配的方块」）。
 //   · 参考 box：VP = SSoT，box 参数只是编辑会话控制面。**顶点分层**（not every vertex is equal）：
 //     A（最前角）= 整体平移不动 VP；B1/B2/B3（连 A 的三个）= 主控——精确单轴（转该轴 VP + 行程，
 //     锁地平线时 VP 沿地平线滑）；C/D（更次级）= 阻尼 GN 全参数微调。
 //   · 应用=保留（transient apply），取消/ctrl-z=回快照。工具条 = lasso 图标风格（重置/锁/✓/✕）。
-import { editorState } from "./workbench-state.ts";
+import { desk } from "./workbench-state.ts";
 import { clampPixelCenter } from "./shape-geometry.ts";
 import { defaultVpsForMode, boxAxesForMode, boxCorners, solveBoxDrag, BOX_EDGES, ISO_AXES } from "./perspective-frame.ts";
 import { updateShapeToolbar } from "./toolbar.ts";
@@ -25,7 +25,7 @@ let _active = false;
 let _toolbar: HTMLElement, _layer: HTMLElement;
 let _lockBtn: HTMLElement, _lockUse: SVGUseElement;
 const _handles = new Map<Kind, HTMLElement>();
-let _box: BoxParams | null = null;   // 工作引用；SSoT 在 editorState 槽位（随 VP 持久化，user 拍板）
+let _box: BoxParams | null = null;   // 工作引用；SSoT 在 desk 槽位（随 VP 持久化，user 拍板）
 const _boxHandles: HTMLElement[] = [];
 
 function _saveBox() {
@@ -39,13 +39,13 @@ function _loadBox(): BoxParams | null {
 }
 
 function _mode(): PerspMode {
-  const m = editorState.persp.mode;
+  const m = desk.persp.mode;
   return (m === "p1" || m === "p2" || m === "p3" || m === "iso") ? m : "off";
 }
 // 当前模式的 VP 槽（per-mode 分开存）
 function _slot(): { vp1?: Vp | null; vp2?: Vp | null; vp3?: Vp | null; box?: BoxParams | null } | null {
   const m = _mode();
-  const g = editorState.persp;
+  const g = desk.persp;
   return m === "p1" ? g.p1 : m === "p2" ? g.p2 : m === "p3" ? g.p3 : m === "iso" ? g.iso : null;
 }
 function _get(kind: Kind): Vp | null {
@@ -77,7 +77,7 @@ function _snap(p: Vp): Vp { return { x: clampPixelCenter(p.x), y: clampPixelCent
 function _moveTo(kind: Kind, screenX: number, screenY: number) {
   const { board } = _ctx!;
   let p = _snap(board.screenToDoc(screenX, screenY));
-  const g = editorState.persp;
+  const g = desk.persp;
   const vp1 = _get("vp1");
   if (g.lockHorizon && kind === "vp2" && vp1) p = { x: p.x, y: vp1.y };
   _set(kind, p);
@@ -194,7 +194,7 @@ function _syncHandles() {
 //   水平 VP 沿地平线滑）；4-7=C/D：次级，阻尼 GN 全参数微调。
 function _boxDragTo(cornerIdx: number, screenX: number, screenY: number) {
   if (!_ctx || !_box) return;
-  const g = editorState.persp;
+  const g = desk.persp;
   const m = _mode();
   const vp1 = _get("vp1");
   if (m === "off" || (m !== "iso" && !vp1)) return;
@@ -308,7 +308,7 @@ function _snapVpsToGrid() {
 function _syncUi() {
   if (!_ctx || !_active) return;
   _syncHandles();
-  const lock = editorState.persp.lockHorizon;
+  const lock = desk.persp.lockHorizon;
   _lockBtn.classList.toggle("hidden", _mode() === "iso");   // iso 无地平线
   _lockBtn.setAttribute("aria-pressed", lock ? "true" : "false");
   _lockUse.setAttribute("href", lock ? "#lock" : "#unlock");
@@ -324,7 +324,7 @@ function _resetDefaults() {
   _set("vp1", def.vp1);
   if (m !== "p1") _set("vp2", def.vp2);
   if (m === "p3") _set("vp3", def.vp3);
-  editorState.persp.lockHorizon = true;
+  desk.persp.lockHorizon = true;
   _box = _defaultBox();
   _saveBox();
   _syncUi();
@@ -370,7 +370,7 @@ export function initPerspEdit(ctx: AppContext): void {
   _lockUse = document.getElementById("perspLockUse") as unknown as SVGUseElement;
   document.getElementById("perspResetBtn")!.addEventListener("click", () => _resetDefaults());
   _lockBtn.addEventListener("click", () => {
-    const g = editorState.persp;
+    const g = desk.persp;
     g.lockHorizon = !g.lockHorizon;
     if (g.lockHorizon) {
       const vp1 = _get("vp1"), vp2 = _get("vp2");
@@ -386,11 +386,11 @@ export function initPerspEdit(ctx: AppContext): void {
   // pan/zoom 中手柄跟随（单槽回调 → 链式包装，别打断 crop 的；只定位不 render，防递归）
   const prev = ctx.board.onViewportChange;
   ctx.board.onViewportChange = () => { prev?.(); if (_active) _syncHandles(); };
-  // 换文档：收 UI（状态本就 live 在 editorState，新 doc 已 Unserialize）
+  // 换文档：收 UI（状态本就 live 在 desk，新 doc 已 Unserialize）
   window.addEventListener("wp:applyEditorState", () => { if (_active) _finish(); });
   // gizmo：淡地平线 + VP 圈 + box 棱线（编辑模式）；绘图态 showGizmo 开 → 只显 VP+地平线
   ctx.board.setPerspGizmoProvider(() => {
-    const g = editorState.persp;
+    const g = desk.persp;
     const m = _mode();
     if (m === "off") return null;
     if (!_active && (!g.showGizmo || _ctx!.editMode.current() !== "shapeBrush")) return null;

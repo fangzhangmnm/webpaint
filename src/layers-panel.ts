@@ -32,7 +32,7 @@ import { renderNodesToCanvas, renderNodesToBytes } from "./doc-render.ts";
 import { t, tLatin } from "./i18n/index.ts";
 import { docVersion, bumpDoc } from "./signals.ts";
 import { els } from "./els.ts";
-import { editorState } from "./workbench-state.ts";
+import { desk } from "./workbench-state.ts";
 import { raiseWindow } from "./surfaces.ts";
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";
@@ -105,15 +105,15 @@ export function toggleLayersPanel(force?: boolean) {
   const show = force === true ? true : force === false ? false : hidden;
   els.layersPanel.classList.toggle("hidden", !show);
   els.layersBtn.setAttribute("aria-pressed", show ? "true" : "false");
-  // 开关状态随文档走：写进 editorState（setter 自动标记 workspace dirty）。
-  editorState.layersPanel.enabled = show;
+  // 开关状态随文档走：写进 desk（setter 自动标记 workspace dirty）。
+  desk.layersPanel.enabled = show;
   if (show) { raiseWindow(els.layersPanel); renderLayersPanel(); }
 }
 
-// doc 的 editorState 加载/重置后，把面板开关 + 位置**只读地**应用到 DOM（绝不回写 editorState → 不误标 dirty）。
-// 直接走裸 DOM 开关，不经 toggleLayersPanel（那条路径会写 editorState）。session-state 在 editorState 就绪后派发 wp:applyEditorState。
+// doc 的 desk 加载/重置后，把面板开关 + 位置**只读地**应用到 DOM（绝不回写 desk → 不误标 dirty）。
+// 直接走裸 DOM 开关，不经 toggleLayersPanel（那条路径会写 desk）。session-state 在 desk 就绪后派发 wp:applyEditorState。
 function applyLayersPanelFromEditorState() {
-  const pos = editorState.layersPanel.position;   // {left,top,width?,height?} | null（null = 自动摆放，不动位置）
+  const pos = desk.layersPanel.position;   // {left,top,width?,height?} | null（null = 自动摆放，不动位置）
   if (pos) {
     els.layersPanel.style.left = pos.left + "px";
     els.layersPanel.style.right = "auto";
@@ -125,7 +125,7 @@ function applyLayersPanelFromEditorState() {
     els.layersPanel.style.width = "";
     _userListH = null;
   }
-  const enabled = editorState.layersPanel.enabled;
+  const enabled = desk.layersPanel.enabled;
   els.layersPanel.classList.toggle("hidden", !enabled);
   els.layersBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
   if (enabled) { raiseWindow(els.layersPanel); renderLayersPanel(); }
@@ -832,7 +832,7 @@ export function initLayersPanel(ctx: AppContext) {
     els.layersPanel.style.top = top + "px";
     _clampListHeight();   // 拖动改了面板顶 → 重钉列表高度，底部 item 始终够得着
     // 位置随文档走；保留已持久化的 width/height（#13），别整枝盖掉
-    editorState.layersPanel.position = { ...(editorState.layersPanel.position ?? {}), left, top };
+    desk.layersPanel.position = { ...(desk.layersPanel.position ?? {}), left, top };
   });
   // #13 右下角拖拽调大小：宽 = 面板宽，高 = 列表高（_userListH）。尺寸随 position 一起持久化（PanelPos.width/height）。
   const resizeEl = document.getElementById("layersPanelResize");
@@ -850,7 +850,7 @@ export function initLayersPanel(ctx: AppContext) {
     _userListH = Math.max(0, _layersResize.oh + (e.clientY - _layersResize.sy));
     els.layersPanel.style.width = w + "px";
     _clampListHeight();   // 高走 maxHeight 夹取：往下拖也永远够不出视口底（含 foot）
-    editorState.layersPanel.position = { left: r.left, top: r.top, width: w, height: _userListH };   // 整枝赋值
+    desk.layersPanel.position = { left: r.left, top: r.top, width: w, height: _userListH };   // 整枝赋值
   });
   resizeEl?.addEventListener("pointerup", (e: PointerEvent) => {
     if (_layersResize && e.pointerId === _layersResize.id) {
@@ -865,9 +865,9 @@ export function initLayersPanel(ctx: AppContext) {
       _layersDrag = null;
     }
   });
-  // 面板开关 + 位置随文档走：doc 的 editorState 加载/重置后由 session-state 派发 wp:applyEditorState，据此应用到 DOM。
+  // 面板开关 + 位置随文档走：doc 的 desk 加载/重置后由 session-state 派发 wp:applyEditorState，据此应用到 DOM。
   window.addEventListener("wp:applyEditorState", () => applyLayersPanelFromEditorState());
-  applyLayersPanelFromEditorState();   // 初次也按当前 editorState 摆好
+  applyLayersPanelFromEditorState();   // 初次也按当前 desk 摆好
 
   // v267 指令栏：+（弹菜单：新图层 / 导入图片）· 上移 · 下移 · 删除。命令全走深模块 caller，UI 只调。
   const addPopup = document.getElementById("layerAddPopup");

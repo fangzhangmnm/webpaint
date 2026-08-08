@@ -8,7 +8,7 @@
 // （与 brush-rack 构造里的 editMode:()=>editMode 同款）。board/leftDial 也晚 → bindKeyboard 分离调。
 
 import { stepFor, quantizeSize } from "./ui/brush-size.ts";
-import { editorState } from "./workbench-state.ts";   // brush dial → editorState.brushTool SSoT（binding 写反应式）
+import { desk } from "./workbench-state.ts";   // brush dial → desk.brushTool SSoT（binding 写反应式）
 import type { EditorRuntimeState } from "./app-context.ts";
 import type { BrushRackController } from "./brush-rack-controller.ts";
 import type { EditMode } from "./edit-mode.ts";
@@ -18,17 +18,17 @@ interface DialControlsDeps { state: EditorRuntimeState; rack: BrushRackControlle
 interface DialKeyboardDeps { board: Board; leftDial: { flashSize: () => void }; }
 
 export function makeDialControls({ state, rack, getEditMode }: DialControlsDeps) {
-  // brush 工具的 size/opacity 归 editorState.brushTool SSoT（per-doc；desk 不标脏，见 editor-state.ts:117）；其他工具 dial（eraser/filterBrush）
-  //   未进 editorState（留下一轮）→ 仍走 rack.writeCurrentTool*。editorState.brushTool.size 经 binding 写同一 reactive dial，
+  // brush 工具的 size/opacity 归 desk.brushTool SSoT（per-doc；desk 不标脏，见 editor-state.ts:117）；其他工具 dial（eraser/filterBrush）
+  //   未进 desk（留下一轮）→ 仍走 rack.writeCurrentTool*。desk.brushTool.size 经 binding 写同一 reactive dial，
   //   与 writeCurrentToolSize（ts.size=v）等价 + 额外标脏。删 webpaint.size/opacity 设备级 LS 种子。
   const isBrushTool = () => rack.getRackToolKey(getEditMode().current()) === "brush";
   const setSize = (v: number) => {
     v = Math.max(1, Math.round(v));        // clamp to int
-    if (isBrushTool()) editorState.brushTool.size = v;
+    if (isBrushTool()) desk.brushTool.size = v;
     else rack.writeCurrentToolSize(v);     // 反应式 → currentBrush + <LeftDial> 自动跟随
   };
   const setOpacity = (v: number) => {
-    if (isBrushTool()) editorState.brushTool.opacity = v;
+    if (isBrushTool()) desk.brushTool.opacity = v;
     else rack.writeCurrentToolOpacity(v);
   };
   const currentDials = () => state.toolStates[rack.getRackToolKey(getEditMode().current())] || state.toolStates.brush;

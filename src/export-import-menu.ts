@@ -2,7 +2,7 @@
 // + 齿轮（🔧）配置 popup + 菜单子标签刷新。
 //
 // 旧 app.js 「菜单：导入 / 导出 / 剪贴板」区逐字搬来；app.js 短路成 import + initExportImportMenu() 装配。
-// 导入/导出偏好存 editorState（per-doc desk state，见 editor-state.ts）；boot 的 _updateMenuSubLabels() 进 init。
+// 导入/导出偏好存 desk（per-doc desk state，见 editor-state.ts）；boot 的 _updateMenuSubLabels() 进 init。
 // stampNow（导出文件名时间戳）只此处用，一并搬入。
 //
 // 依赖直 import（叶/单例）：exporters / els / settings-menu(setMenuOpen) / session-state(session) /
@@ -16,7 +16,7 @@ import { setMenuOpen } from "./settings-menu.ts";
 import { session } from "./session-state.ts";
 import { triggerDownload, shareOrDownloadBlob, copyImageToClipboard, readImageFromClipboard, printImageBlob, printImageInNewWindow, prefersShare } from "./session.ts";
 import { importImageAsLayer } from "./import-image.ts";
-import { editorState } from "./workbench-state.ts";
+import { desk } from "./workbench-state.ts";
 import { reportError } from "./error-badge.ts";
 
 import type { AppContext } from "./app-context.ts";
@@ -31,15 +31,15 @@ function stampNow() {
 
 // v120: 主菜单导出/导入 重组（user：「导出项目和导出语义分开」+「小扳手」)
 // - 主行 = 按 sticky config 一键执行；🔧 = 弹 inline popup 改 config
-// - 偏好存 editorState（per-doc desk state，setter 自动标 workspace dirty）
-//   getter/setter 返回形保持不变（scope ↔ editorState.export.layerMode 映射），call site 不动。
+// - 偏好存 desk（per-doc desk state，setter 自动标 workspace dirty）
+//   getter/setter 返回形保持不变（scope ↔ desk.export.layerMode 映射），call site 不动。
 function _getExpImg(): { format: string; target: string; scope: string; clipSelection: boolean } {
-  // scope ← editorState.export.layerMode ("merged" | "active")
-  return { format: editorState.export.format, target: editorState.export.target, scope: editorState.export.layerMode, clipSelection: editorState.export.clipSelection };
+  // scope ← desk.export.layerMode ("merged" | "active")
+  return { format: desk.export.format, target: desk.export.target, scope: desk.export.layerMode, clipSelection: desk.export.clipSelection };
 }
 // #16：有选区且开了「仅导出选区范围」→ 选区 bbox（doc 坐标）；否则 null=全文档
 function _selCropRect(): { x: number; y: number; w: number; h: number } | null {
-  if (!editorState.export.clipSelection) return null;
+  if (!desk.export.clipSelection) return null;
   const sel = doc.selection as { bboxX: number; bboxY: number; bboxW: number; bboxH: number } | null;
   if (!sel || !(sel.bboxW > 0) || !(sel.bboxH > 0)) return null;
   return { x: sel.bboxX, y: sel.bboxY, w: sel.bboxW, h: sel.bboxH };
@@ -87,7 +87,7 @@ export function initExportImportMenu(ctx: AppContext) {
   ({ doc, setStatus, board } = ctx);
 
   _updateMenuSubLabels();
-  // desk 载入：换画后导入导出偏好（editorState）变了 → 刷新折叠菜单 sub-label（值本身按需读，无数据问题；仅显示同步）。
+  // desk 载入：换画后导入导出偏好（desk）变了 → 刷新折叠菜单 sub-label（值本身按需读，无数据问题；仅显示同步）。
   window.addEventListener("wp:applyEditorState", _updateMenuSubLabels);
 
   els.menuExportImage.addEventListener("click", async () => {
@@ -171,10 +171,10 @@ export function initExportImportMenu(ctx: AppContext) {
       else if (scopeSel.value === "all") scopeSel.value = "merged";   // 「所有图层」仅项目格式可选
       scopeSel.disabled = proj; tgtSel.disabled = proj;
       clipEl.disabled = proj || !doc.selection;
-      editorState.export.format = fmtSel.value;
-      editorState.export.target = tgtSel.value;
-      editorState.export.layerMode = scopeSel.value;
-      if (!clipEl.disabled) editorState.export.clipSelection = clipEl.checked;
+      desk.export.format = fmtSel.value;
+      desk.export.target = tgtSel.value;
+      desk.export.layerMode = scopeSel.value;
+      if (!clipEl.disabled) desk.export.clipSelection = clipEl.checked;
       _updateMenuSubLabels();
     };
     _openMenuConfigPopup(e.currentTarget as HTMLElement, `

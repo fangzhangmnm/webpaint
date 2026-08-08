@@ -38,8 +38,7 @@ export declare function paintingDataToEncodeDoc(data: PaintingData): EncodeDoc;
 interface EncodeOpts {
     mergedCanvas?: OffscreenCanvas | HTMLCanvasElement | null;
     referenceImage?: Blob;
-    webpaintState?: object;
-    editorState?: object;
+    desk?: object;
 }
 export interface DecodedPainting {
     data: PaintingData;
@@ -51,12 +50,11 @@ export interface DecodedPainting {
 /** doc → Blob (.ora)
  *
  * WebPaint 私有扩展（都在 webpaint/ 命名空间下，第三方 reader 会忽略或剥离）：
- *   webpaint/state.json        — 杂七杂八的应用状态（palette / activeLayerIndex / 未迁字段；ref 位图指针）
  *   webpaint/reference.png     — ref 小窗当前显示的图（原 Blob bytes）
- *   .webpaint/editor-state.json — editorState struct（desk per-doc；2026-07-14，不向后兼容旧 state.json 的被迁字段）
+ *   .webpaint/editor-state.json — desk struct（desk per-doc；含 toolDials/palette/blender 三组）
+ *   （旧轨 webpaint/state.json **v0.8.21 起停写**——ADR-0008 §9；decode 读兼容保留存量，拔除另议）
  *
  * opts.referenceImage: optional Blob
- * opts.webpaintState:  optional object（直接 JSON.stringify）
  */
 export declare function encodeDocToOra(doc: EncodeDoc, opts?: EncodeOpts): Promise<any>;
 /** Blob (.ora 明文) → DecodedPainting（json 形 + 内联 tile 字节 + sidecar）。 */

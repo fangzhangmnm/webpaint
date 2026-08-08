@@ -1522,7 +1522,7 @@ export class InputController {
 // 决定（brush.ts 的 signedLerp，0=不响应）。v409 删了 pressureToSize/pressureToOpacity——那对字段
 // 从 v30 起就没人读了，这条注释在此之前一直是假的。
 // v0.6.15 禁用笔压（左栏 size 栏的 toggle）：开 = 忽略传感器，恒定 0.5（与鼠标路径同值）。
-//   SSoT = editorState.pressureDisabled（per-doc desk，跟 ora 走；user 2026-07-25「显然是 editor state」），
+//   SSoT = desk.pressureDisabled（per-doc desk，跟 ora 走；user 2026-07-25「显然是 editor state」），
 //   绑在 dialReactive.pressureOff。引擎侧 thunk 惰性读（每 pointer 事件求值），app boot 时接线。
 let _pressureOff: () => boolean = () => false;
 export function bindPressureDisabled(fn: () => boolean): void { _pressureOff = fn; }

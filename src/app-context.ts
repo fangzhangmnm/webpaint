@@ -6,7 +6,7 @@
 // 每个 initX(ctx: AppContext) 签它 → 一处真理、处处复用、改 ctx 形状编译器即点出受影响模块。
 //
 // 类型策略（见 ai-docs/20260619-ts-migration.md「seam 优先 + 诚实描述现状」）：
-//   · 引擎单例（doc/board/input/editMode/history/pixelHistory）= `import type` 自未类型化的 .js class
+//   · 引擎单例（doc/board/input/editMode/history）= `import type` 自未类型化的 .js class
 //     → 拿 tsc 从 JS 推断出的真实实例形状，**零额外迁移**、不连带把别的 .ts 拖进门（.js 走 checkJs:false）。
 //   · currentBrush 的 ResolvedBrush 来自已入门的 resolved-brush.ts。
 //   · 反应式 state / dialReactive / rack / 浮窗 / gallery 的形状暂在此**诚实描述**（不 import 其 .ts 源，
@@ -44,7 +44,7 @@ export interface DialReactive {
   tool: string;
   color: string;
   canDraw: boolean;
-  pressureOff: boolean;   // 禁用笔压（per-doc desk：editorState.pressureDisabled 绑定于此）
+  pressureOff: boolean;   // 禁用笔压（per-doc desk：desk.pressureDisabled 绑定于此）
 }
 
 // ---- 句柄类（深源未入门，先描述消费方用到的接口；grow as needed）----
@@ -69,7 +69,7 @@ export interface RackHandle {
 }
 // 浮窗（side-windows.ts）：参考窗 / 调色板窗——方法集不同，分两个句柄。
 export interface ReferenceWindowHandle {
-  // 参考窗 open/位置/vp 已迁 editorState.refPanel（2026-07-14）；不再 getSerializedState/applySerializedState。
+  // 参考窗 open/位置/vp 已迁 desk.refPanel（2026-07-14）；不再 getSerializedState/applySerializedState。
   clearBitmap(): void;
   setBitmap(bitmap: ImageBitmap, opts?: { persistBlob?: Blob | null; skipFit?: boolean }): void;
   getPersistBlob(): Blob | null;

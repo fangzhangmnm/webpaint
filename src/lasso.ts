@@ -100,7 +100,7 @@ export class LassoEngine {
     // v242：扩展/收缩从魔术棒拆走 → 改成「选区编辑 op」(Selection.morphed)，详 toolbar 选区编辑齿轮。
     //   魔术棒不再 bake 任何 expand（之前默认 +2 是错误——魔术棒就该是纯净的颜色 flood）。
     // #31（v0.5，user 拍板）：重新提供**可选**的 flood 后自动扩张（toggle，默认 0=关，per-doc 配置由
-    //   toolbar 从 editorState 灌入）。与 v242 不冲突：默认仍是纯净 flood，手动「扩张…」op 保留。
+    //   toolbar 从 desk 灌入）。与 v242 不冲突：默认仍是纯净 flood，手动「扩张…」op 保留。
     this._magicAutoExpandPx = 0;
     this._points = [];            // freehand draft
     this._rect = null;            // {x0, y0, x1, y1} during rect / ellipse draw
@@ -155,7 +155,7 @@ export class LassoEngine {
   setFillGap(px: number) { this._fillGapPx = Math.max(0, Math.min(32, Math.round(px) || 0)); }
   getFillGap() { return this._fillGapPx; }
   // 魔棒算法（v0.7 线稿填色）：classic=像素精确 flood；lineart=论文分区 oracle（断口自动闭合+填到线下）。
-  //   交互完全同构，tap → Selection。v0.7.17 起 per-tool 持久化（editorState.lassoTool/fillTool.algo，
+  //   交互完全同构，tap → Selection。v0.7.17 起 per-tool 持久化（desk.lassoTool/fillTool.algo，
   //   toolbar._pushSelToolToEngine 灌入；油漆桶默认 lineart、选区默认 classic，user 拍板）。
   setMagicAlgorithm(v: MagicAlgorithm) { this._magicAlgorithm = v === "lineart" || v === "similar" ? v : "classic"; }
   getMagicAlgorithm(): MagicAlgorithm { return this._magicAlgorithm; }
@@ -579,7 +579,7 @@ export function floodSelectFrom(
   start: Point | null,
   sourceLayer: ViewLeaf | null,
   thresholdPct: number,
-  metric: ColorMetric = "rgb",   // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 editorState 的度量
+  metric: ColorMetric = "rgb",   // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 desk 的度量
   stopMask: FloodStopMask | null = null,
   gapPx = 0,                     // v0.7.24 容隙：>0 = 缺口宽 <gapPx 处 flood 过不去（0=关）
 ): Selection | null {

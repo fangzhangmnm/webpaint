@@ -1,13 +1,11 @@
-// PaintDoc = 模型层（无 DOM）。
-//
-// 一张 doc 由若干 layer 组成。每个 layer 自带一个固定分辨率的 OffscreenCanvas
-// （或退化到 <canvas>）。doc 不负责显示 —— 显示是 Board 的事。
-//
-// 一期约定（手感优先）：
-// - 固定分辨率 2048×2048（DEFAULT_DOC_SIZE）。
-// - 初始一个 "图层 1"。后续阶段才上多图层 UI。
-// - 没有持久化（proposal："甚至没保存的情况下"）。但 doc 的 API 已经按"会被序列化"
-//   去设计 —— 后期换 IndexedDB / OneDrive / 自定义文件格式时不需要重构模型。
+// doc.ts —— Layer/树工具族 + PaintDoc（⚠ T5/v0.8.21 语义清理后的地位，别再误用）：
+//   · 生产侧活着的是：Layer/LayerGroup 节点类、树工具（findNodeById/countLeaves/flattenLeaves/…）、
+//     computeMaxLayers/layerByteBudget、LayerSnap——PaintingView(端口)/board/引擎消费这些。
+//   · **PaintDoc 类 = 测试基座残余**（生产零引用；文档 SSoT = PaintingWorkpiece 树模式，ADR-0008）。
+//     住户 = gl-smoke harness + doc-offset/rotate/mergedown/crop-geometry/freeze-encode 等旧基座测试；
+//     它们迁 v2 基座后 PaintDoc/freezeDocForEncode 随之拆除。**新代码禁止 import PaintDoc**。
+//   · 「doc」一词回归 user 术语 = 惰化持久格式（EncodeDoc/decode 侧）；活文档叫 workpiece，
+//     app 读口叫端口（ctx.doc = PaintingView，保留端口形——提案 .h T5 评估选项①）。
 
 import { smartResample } from "./resample.ts";
 import { makeBitmap } from "./bitmap.ts";

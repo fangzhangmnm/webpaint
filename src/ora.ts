@@ -95,8 +95,7 @@ export function paintingDataToEncodeDoc(data: PaintingData): EncodeDoc {
 interface EncodeOpts {
   mergedCanvas?: OffscreenCanvas | HTMLCanvasElement | null;   // S9：调用方渲好的合成图（GL）；缺省=透明占位
   referenceImage?: Blob;
-  webpaintState?: object;
-  editorState?: object;   // editorState.Serialize() → .webpaint/editor-state.json（desk per-doc；不向后兼容 webpaint/state.json）
+  desk?: object;   // desk.Serialize() → .webpaint/editor-state.json（desk per-doc；不向后兼容 webpaint/state.json）
 }
 // decode 产物（T3b-2）：plain data（wp2.load 灌入）+ WebPaint 私有 sidecar 随行。
 // 字段名沿旧 DecodedDoc 下划线惯例——session-state 消费面零改名。
@@ -104,7 +103,7 @@ export interface DecodedPainting {
   data: PaintingData;
   _referenceBlob?: Blob;
   _webpaintState?: unknown;
-  _editorState?: unknown;   // .webpaint/editor-state.json → editorState.Unserialize()
+  _editorState?: unknown;   // .webpaint/editor-state.json → desk.Unserialize()
   _wroteWith: string | null;
 }
 // 加密对本 codec **不可见**（v235 起）：encode 永远出明文 ora、decode 永远收明文 ora。
@@ -155,12 +154,11 @@ function renderThumbnail(merged: OffscreenCanvas | HTMLCanvasElement, maxSide = 
 /** doc → Blob (.ora)
  *
  * WebPaint 私有扩展（都在 webpaint/ 命名空间下，第三方 reader 会忽略或剥离）：
- *   webpaint/state.json        — 杂七杂八的应用状态（palette / activeLayerIndex / 未迁字段；ref 位图指针）
  *   webpaint/reference.png     — ref 小窗当前显示的图（原 Blob bytes）
- *   .webpaint/editor-state.json — editorState struct（desk per-doc；2026-07-14，不向后兼容旧 state.json 的被迁字段）
+ *   .webpaint/editor-state.json — desk struct（desk per-doc；含 toolDials/palette/blender 三组）
+ *   （旧轨 webpaint/state.json **v0.8.21 起停写**——ADR-0008 §9；decode 读兼容保留存量，拔除另议）
  *
  * opts.referenceImage: optional Blob
- * opts.webpaintState:  optional object（直接 JSON.stringify）
  */
 export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
   // S9：merged 由调用方渲入（opts.mergedCanvas，GL 合成、与 display 同源；v134 约定保 alpha 不涂底）。
@@ -199,9 +197,9 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
     entries.push({ path: `data/layer${L.id}.png`, data: png });
   }
 
-  // WebPaint 私有扩展：reference 小窗的图 + 杂项 state JSON。
+  // WebPaint 私有扩展：reference 小窗的图 + desk sidecar。
   // Thumbnails/thumbnail.png 放**最后一个 entry**：缩略图 byte-range 提取先拉尾片 80KB，thumbnail 在尾
-  //   → 一发命中、零额外请求。故 reference.png / state.json 都排在它之前。
+  //   → 一发命中、零额外请求。故 reference.png / editor-state.json 都排在它之前。
   //   历史：v398 前 reference.png 被 push 在 thumbnail 之后，那时库靠「尾部硬扫最后一个 PNG」找缩略图，
   //   会先扫到 reference.png → 缩略图错显成参考图。v399 起库改**按文件名**解 CD 取 entry，位置不再决定对错
   //   （错图 bug 根治），但 thumbnail 放最后仍是最省 byte-range 的约定。
@@ -209,13 +207,9 @@ export async function encodeDocToOra(doc: EncodeDoc, opts: EncodeOpts = {}) {
     const refBytes = new Uint8Array(await opts.referenceImage.arrayBuffer());
     entries.push({ path: "webpaint/reference.png", data: refBytes });
   }
-  if (opts.webpaintState && typeof opts.webpaintState === "object") {
-    const jsonText = JSON.stringify(opts.webpaintState);
-    entries.push({ path: "webpaint/state.json", data: jsonText });
-  }
-  // editorState struct（desk per-doc）→ .webpaint/editor-state.json（决策3：不向后兼容 webpaint/state.json）。
-  if (opts.editorState && typeof opts.editorState === "object") {
-    entries.push({ path: ".webpaint/editor-state.json", data: JSON.stringify(opts.editorState) });
+  // desk struct（desk per-doc）→ .webpaint/editor-state.json（旧轨 webpaint/state.json v0.8.21 停写）。
+  if (opts.desk && typeof opts.desk === "object") {
+    entries.push({ path: ".webpaint/editor-state.json", data: JSON.stringify(opts.desk) });
   }
 
   // thumbnail 末尾（云端 byte-range 优化）——必须是最后一个 entry，见上方 reference.png 注释。
@@ -309,7 +303,7 @@ export async function decodeOraToPainting(blob: Blob): Promise<DecodedPainting> 
       reportError(new Error("[ora] webpaint/state.json parse failed: " + String(e)), "log");
     }
   }
-  // editorState struct（desk per-doc）；缺失（老画作/不向后兼容）→ 留 undefined，adopt 时 reset 到默认。
+  // desk struct（desk per-doc）；缺失（老画作/不向后兼容）→ 留 undefined，adopt 时 reset 到默认。
   if (files[".webpaint/editor-state.json"]) {
     try {
       out._editorState = JSON.parse(bytesToString(files[".webpaint/editor-state.json"]));

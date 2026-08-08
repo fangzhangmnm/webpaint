@@ -20,7 +20,7 @@ const byId = (id: string) => document.getElementById(id) as HTMLElement;
 // 色名 culture（≠ localization，user 2026-07-30：二次元场景中国传统色远优于 western）。
 // 词库清单/显示名全部来自 color-words.json 的 category 元数据（加词库零改码）；
 // session 内记住上次选择、**不缓存默认值**（词库是异步 asset，数据到位前 defaultCulture
-// 只会兜底 xkcd——别把兜底烧死成用户选择）；不持久化（进 editorState/store 需另获 user 同意）。
+// 只会兜底 xkcd——别把兜底烧死成用户选择）；不持久化（进 desk/store 需另获 user 同意）。
 let _culture: string | null = null;
 function culture(): string { return _culture ?? defaultCulture(); }
 

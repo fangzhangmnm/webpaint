@@ -127,7 +127,7 @@ export class Board {
   _voidColor: string;
   _showCheckerboard: boolean;
   _pixelGridEnabled: boolean;
-  _docGridOn: boolean;      // #10 主栅格（per-doc，editorState.grid）
+  _docGridOn: boolean;      // #10 主栅格（per-doc，desk.grid）
   _docGridCell: number;
   gridCanvas: HTMLCanvasElement | null;
   gctx: Ctx2D | null;
@@ -178,7 +178,7 @@ export class Board {
     //   真值由 app.ts 的 fixup 相经 settings-menu 的 renderSettingsFromPrefs() 灌入（SSoT = PREF_DEFAULTS["pixel-grid"]）；
     //   这里只是构造期占位，别在这硬编码第二份默认值。
     this._pixelGridEnabled = PREF_DEFAULTS["pixel-grid"];
-    // #10 主栅格：per-doc 配置（editorState.grid），由 settings-menu 经 setDocGrid 灌入；这里只是占位默认。
+    // #10 主栅格：per-doc 配置（desk.grid），由 settings-menu 经 setDocGrid 灌入；这里只是占位默认。
     this._docGridOn = false;
     this._docGridCell = 16;
 
@@ -265,7 +265,7 @@ export class Board {
     this.requestRender();
   }
   getPixelGridEnabled() { return this._pixelGridEnabled; }
-  // #10 主栅格：per-doc 配置灌入口（settings-menu 从 editorState.grid 调）
+  // #10 主栅格：per-doc 配置灌入口（settings-menu 从 desk.grid 调）
   setDocGrid(on: boolean, cell: number) {
     this._docGridOn = !!on;
     this._docGridCell = Math.max(2, Math.round(cell) || 16);

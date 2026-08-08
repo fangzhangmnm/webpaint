@@ -8,7 +8,7 @@
 // state.filterBrush 是 active filter-brush 的 SSoT（在 state 上，经绑定的 state 读写）。
 import { els } from "./els.ts";
 import { t, tLatin } from "./i18n/index.ts";
-import { editorState } from "./workbench-state.ts";
+import { desk } from "./workbench-state.ts";
 import { PANELS, openExclusive, closeExclusive } from "./panel-state.ts";
 import { getFilter, listFilters, onFilterRegistered } from "./filters.ts";
 import { anchorPopupBelowToolbars, positionPopup } from "./anchored-popup.ts";
@@ -274,9 +274,9 @@ function _enterFilterBrushMode(Filter: FilterLike) {
   let variant = variants.find((v) => v.id === savedVid) || variants[0];
   // v147 声明了 boundaryModes 的 filter（液化）→ params 带上持久化的 bleed；其他 filter 不掺这个 key
   let params = Filter.boundaryModes
-    ? { ...variant.params, bleed: editorState.liquify.bleed }
+    ? { ...variant.params, bleed: desk.liquify.bleed }
     : variant.params;
-  if (Filter.sampleModes) params = { ...params, sample: editorState.liquify.sample };
+  if (Filter.sampleModes) params = { ...params, sample: desk.liquify.sample };
   state.filterBrush = { Filter, params, variantId: variant.id, variantLabel: variant.title };
   if (state.toolStates.filterBrush) state.toolStates.filterBrush.variantId = variant.id;
   setTool("filterBrush");
@@ -345,13 +345,13 @@ function _renderFilterBrushToolbar() {
     });
   }
   // ② v0.6.36 采样核下拉：声明了 sampleModes 的 filter（液化）常驻渲染。选项 = RESAMPLE_MODES
-  //   的 liquify context（SSoT 复用，与 transform 下拉同源）；持久化 editorState.liquify.sample。
+  //   的 liquify context（SSoT 复用，与 transform 下拉同源）；持久化 desk.liquify.sample。
   if (Filter.sampleModes) {
     const ssel = mkSel("filterBrushSampleSel");
     fillResampleSelect(ssel, "liquify", (fb.params.sample as string) || "bicubic");
     ssel.addEventListener("change", () => {
       fb.params = { ...fb.params, sample: ssel.value };
-      editorState.liquify.sample = ssel.value;
+      desk.liquify.sample = ssel.value;
     });
   }
   // ③ v147 边界取样下拉：仅当 filter 声明 boundaryModes（液化）且有选区时渲染。
@@ -369,7 +369,7 @@ function _renderFilterBrushToolbar() {
     }
     bsel.addEventListener("change", () => {
       fb.params = { ...fb.params, bleed: bsel.value };
-      editorState.liquify.bleed = bsel.value;
+      desk.liquify.bleed = bsel.value;
       const m = Filter.boundaryModes!.find((b) => b.id === bsel.value);
       setStatus(t("mi.boundary", { mode: m ? m.title : bsel.value }));
     });

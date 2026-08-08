@@ -8,7 +8,7 @@
 //   默认 2×6 = 6 头身 + 中线；参考线画在图层上，不是 gizmo)。
 //
 // frame（形状笔全局，ADR-0006）：align-to-viewport（默认，几何相对视口轴）或 透视平面
-//   （editorState.persp：VP 0-3 个 + 平面选择）。透视下 rect=梯形/四边形、grid=透视缩短格、
+//   （desk.persp：VP 0-3 个 + 平面选择）。透视下 rect=梯形/四边形、grid=透视缩短格、
 //   circle 徒手拟合在平面 chart 里做、line 约束吸向 VP（透视辅助线）。
 //   约束键在透视下全子工具有效（UI v2.4）：line=吸 VP；rect=平面欧氏正方、circle=平面欧氏圆
 //   ——度量由经典约定重建视点（planeMetric：三点=垂心/二点=中心投影+Thales/一点=d=H），
@@ -97,7 +97,7 @@ export class ShapeBrushEngine {
   _effConstrain(): boolean { return this.getConstrain() !== this._constrainInvert; }
   setGridConfig(g: Partial<GridConfig>) { this._grid = { ...this._grid, ...g }; }
   getGridConfig(): GridConfig { return { ...this._grid }; }
-  // 视口 rot / 透视配置注入（app 接线 board.viewport 与 editorState；引擎不认识两者）
+  // 视口 rot / 透视配置注入（app 接线 board.viewport 与 desk；引擎不认识两者）
   setViewportRotProvider(fn: (() => number) | null) { this._rotProvider = fn; }
   setPerspProvider(fn: (() => PerspConfig | null) | null) { this._perspProvider = fn; }
 

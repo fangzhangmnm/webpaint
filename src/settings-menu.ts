@@ -9,7 +9,7 @@
 import { updateCloudAuthUI } from "./cloud-auth-ui.ts";
 import { els } from "./els.ts";
 import { syncedUserPreference, localUserPreference, PREF_DEFAULTS } from "./app-prefs.ts";   // 手势/视图开关=跨设备；menu-tab=设备本地
-import { editorState } from "./workbench-state.ts";   // checkboard = per-doc editorState（载入时经 wp:applyEditorState 应用到 board）
+import { desk } from "./workbench-state.ts";   // checkboard = per-doc desk（载入时经 wp:applyEditorState 应用到 board）
 import { applyTheme, themeLabel, THEMES, currentTheme } from "./theme.ts";
 import { t, lang, setLang, LANGS, langDisplayName, type Key } from "./i18n/index.ts";
 import { KEYBOARD_SHORTCUTS } from "./input.ts";
@@ -196,8 +196,8 @@ export function initSettingsMenu(ctx: AppContext) {
     applySingleFingerDraw(!state.singleFingerDraw);
     setStatus(t("status.singleFingerDraw", { s: state.singleFingerDraw ? t("common.on") : t("common.off") }));
   });
-  // desk 载入：文档的 checkboard 回灌到 board（applyCheckerboard 只写 board+mirror，不写 editorState→不标脏；守人类 2026-06-10 决定）。
-  window.addEventListener("wp:applyEditorState", () => applyCheckerboard(editorState.checkboard));
+  // desk 载入：文档的 checkboard 回灌到 board（applyCheckerboard 只写 board+mirror，不写 desk→不标脏；守人类 2026-06-10 决定）。
+  window.addEventListener("wp:applyEditorState", () => applyCheckerboard(desk.checkboard));
   els.menuCheckerboard.addEventListener("click", () => {
     applyCheckerboard(!state.checkerboard);
     // UI 态不 mark dirty（user 2026-06-10）：棋盘是观感开关，下次真编辑保存时顺手捞进 state.json。
@@ -211,28 +211,28 @@ export function initSettingsMenu(ctx: AppContext) {
     setStatus(t("status.pixelGrid", { s: next ? t("common.on") : t("common.off") }));
   });
 
-  // #10 主栅格（tilemap 对齐）：per-doc（editorState.grid），一直显示不渐隐（对照像素栅格的放大渐显）。
-  //   同 checkerboard 纪律：观感开关不 mark dirty（editorState setter 本就不标脏）。
+  // #10 主栅格（tilemap 对齐）：per-doc（desk.grid），一直显示不渐隐（对照像素栅格的放大渐显）。
+  //   同 checkerboard 纪律：观感开关不 mark dirty（desk setter 本就不标脏）。
   const applyDocGrid = () => {
-    board.setDocGrid?.(editorState.grid.on, editorState.grid.cell);
-    setMenuItem(els.menuDocGrid, editorState.grid.on);
+    board.setDocGrid?.(desk.grid.on, desk.grid.cell);
+    setMenuItem(els.menuDocGrid, desk.grid.on);
     const cellLabel = els.menuDocGridCell?.querySelector(".menu-item-state");
-    if (cellLabel) cellLabel.textContent = `${editorState.grid.cell}px`;
+    if (cellLabel) cellLabel.textContent = `${desk.grid.cell}px`;
   };
   window.addEventListener("wp:applyEditorState", applyDocGrid);
   els.menuDocGrid?.addEventListener("click", () => {
-    editorState.grid.on = !editorState.grid.on;
+    desk.grid.on = !desk.grid.on;
     applyDocGrid();
-    setStatus(t("status.docGrid", { s: editorState.grid.on ? t("common.on") : t("common.off") }));
+    setStatus(t("status.docGrid", { s: desk.grid.on ? t("common.on") : t("common.off") }));
   });
   els.menuDocGridCell?.addEventListener("click", async () => {
     setMenuOpen(false);
-    const v = await openInputSheet(t("menu.docGridCellTitle"), String(editorState.grid.cell), { placeholder: "16" });
+    const v = await openInputSheet(t("menu.docGridCellTitle"), String(desk.grid.cell), { placeholder: "16" });
     if (v == null) return;
     const n = Math.max(2, Math.min(1024, parseInt(v, 10) || 0));
     if (!n) return;
-    editorState.grid.cell = n;
-    if (!editorState.grid.on) editorState.grid.on = true;   // 设了尺寸=想看到它，顺手打开
+    desk.grid.cell = n;
+    if (!desk.grid.on) desk.grid.on = true;   // 设了尺寸=想看到它，顺手打开
     applyDocGrid();
     setStatus(t("status.docGridCell", { n }));
   });

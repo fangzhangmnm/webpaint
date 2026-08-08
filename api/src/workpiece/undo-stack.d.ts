@@ -30,7 +30,7 @@ export interface UndoStackOpts {
     /** 某步被 undo/redo 应用。app 侧接状态栏 toast + 面板刷新。 */
     onApplied?: (step: UndoStep, dir: "undo" | "redo") => void;
 }
-/** Workpiece 协作面（_bindWorkpiece 注入；见 workpiece2.ts）。 */
+/** Workpiece 协作面（_bindWorkpiece 注入；见 workpiece.ts）。 */
 export interface StackWorkpieceHooks {
     /** undo/redo 入口先调：开着的令牌下禁 undo（throw）。 */
     beforeApply(): void;

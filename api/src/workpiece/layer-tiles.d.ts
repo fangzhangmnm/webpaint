@@ -1,6 +1,6 @@
 import { LayerPixels } from "../tiles/tile-layer.ts";
 import type { RecordData } from "./undo-stack.ts";
-import type { Workpiece, CollectorComponent } from "./workpiece2.ts";
+import type { Workpiece, CollectorComponent } from "./workpiece.ts";
 /** 实例↔身份解析 + 实例替换（computed 变换用）。T2 由 app 以 doc 树实现；T3 起归 LayerTree json。 */
 export interface TilesHost {
     getPixels(layerId: number): LayerPixels | null;
@@ -8,6 +8,9 @@ export interface TilesHost {
     eachLayer(cb: (layerId: number, lp: LayerPixels) => void): void;
     /** 换整个 tileset 实例（旧实例由 host 负责 dispose）。computed 变换 apply 用。 */
     replacePixels(layerId: number, np: LayerPixels): void;
+    /** 实例交换**不 dispose**（replacePixels 的非销毁变体）：旧实例所有权交还调用方。
+     *  resize exchange record（crop/resample 的 undo 包持另一侧实例）用。T5 收编 DocResizeOp。 */
+    exchangePixels(layerId: number, np: LayerPixels): LayerPixels | null;
 }
 /** applyMaskPostStroke 的 preSnap 形状（原 pixel-tx PreSnapImage；selection.ts LayerSnapLike 同构）。 */
 export interface PreSnapImage {
@@ -35,9 +38,10 @@ export declare class LayerTiles implements CollectorComponent {
     private _host;
     private _collected;
     private _computed;
+    private _exchange;
     private _suspend;
     constructor(wp: Workpiece, host: TilesHost);
-    /** legacy-bridge 协作面：旧 operator 应用期间挂起收集（其 undo 自带快照，收了=双记账）。 */
+    /** 内部/装载协作面：自带记账的窗口挂起收集（exchange/computed verb 体内、load 灌入——收了=双记账）。 */
     _suspendCollect(on: boolean): void;
     private _tilesets;
     private _nextTilesetId;
@@ -68,6 +72,12 @@ export declare class LayerTiles implements CollectorComponent {
     flipHorizontalAll(): void;
     rotate90All(dir: 1 | -1): void;
     offsetWrapAll(dx: number, dy: number): void;
+    /** 整 doc 几何 resize 的实例交换记账（crop/cropResample/resample；T5 收编 DocResizeOp）。
+     *  逐叶 map 产新实例并交换装上；record = 旧实例集（undo 包 = 另一侧实例，swap 零拷贝互换）。
+     *  map 期间收集挂起在**组件内**——新实例的 putRegion 若被写时扣押，seal 时已装上树会解析到
+     *  layerId → 双记账 + across drift 炸 undo（T3b-2 施工时踩过的真雷，纪律收进 verb 不再靠调用方）。
+     *  json 尺寸（width/height）由调用方另走 setTreeProp 进树 record，同 step 两账同向翻。 */
+    resizeAllLeaves(map: (layerId: number, lp: LayerPixels) => LayerPixels): void;
     /** 本 token 是否真的动过该层（collector 有它的扣押）。 */
     tokenChanged(layerId: number): boolean;
     /** 令牌前该层内容的紧 bbox 物化（applyMaskPostStroke 的 preSnap）。

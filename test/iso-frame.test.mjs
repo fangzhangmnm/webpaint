@@ -111,12 +111,12 @@ describe("iso · 参考 box 与重映射", () => {
   });
   it("remapShapePersp：iso box 锚点随 crop 平移", async () => {
     const ws = await import("../src/workbench-state.ts");
-    ws.editorState.persp.mode = "iso";
-    ws.editorState.persp.iso.box = { A: { x: 100.5, y: 200.5 }, t: [50, 50, -50] };
+    ws.desk.persp.mode = "iso";
+    ws.desk.persp.iso.box = { A: { x: 100.5, y: 200.5 }, t: [50, 50, -50] };
     ws.remapShapePersp((p) => ({ x: p.x - 30, y: p.y - 20 }));
-    const b = ws.editorState.persp.iso.box;
+    const b = ws.desk.persp.iso.box;
     close(b.A.x, 70.5); close(b.A.y, 180.5);
-    ws.editorState.persp.iso.box = null;
-    ws.editorState.persp.mode = "off";
+    ws.desk.persp.iso.box = null;
+    ws.desk.persp.mode = "off";
   });
 });

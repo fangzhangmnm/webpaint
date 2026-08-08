@@ -93,8 +93,8 @@ export function mountLeftDial(el: HTMLElement, opts: LeftDialOpts): LeftDialHand
       function brushUp() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
       function brushClick() { if (lpFired) { lpFired = false; return; } opts.onBrushTap(); }
 
-      // 禁用笔压 toggle：SSoT = editorState.pressureDisabled（绑 dialReactive.pressureOff，反应式）——
-      //   computed 直读，doc 载入/重置回灌自动跟随；点按经 opts 写回 editorState。
+      // 禁用笔压 toggle：SSoT = desk.pressureDisabled（绑 dialReactive.pressureOff，反应式）——
+      //   computed 直读，doc 载入/重置回灌自动跟随；点按经 opts 写回 desk。
       const pressureOff = computed(() => opts.getPressureDisabled());
       function togglePressure() { opts.onTogglePressure(!pressureOff.value); }
 

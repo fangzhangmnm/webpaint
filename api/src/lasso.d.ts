@@ -4,7 +4,7 @@ import type { ColorMetric } from "./color-dist.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";
-import type { HistoryFacade } from "./workpiece/workpiece.ts";
+import type { History } from "./workpiece/history.ts";
 import type { FloatLayerComponent } from "./workpiece/float-component.ts";
 import type { SelectionComponent } from "./workpiece/selection-component.ts";
 interface Point {
@@ -59,7 +59,7 @@ export declare class LassoEngine {
     onChange: () => void;
     constructor();
     setDoc(doc: LassoDoc | null): void;
-    attachWorkpiece(doc: PaintingView, history: HistoryFacade, float: FloatLayerComponent, sel: SelectionComponent): void;
+    attachWorkpiece(doc: PaintingView, history: History, float: FloatLayerComponent, sel: SelectionComponent): void;
     syncFloating(): void;
     setSubTool(name: SubTool): void;
     getSubTool(): SubTool;
@@ -141,7 +141,7 @@ export declare class LassoEngine {
     beginMagicDrag(): void;
     /** 采样一点；选区真变了返回 true（调用方重绘）。 */
     magicDragStep(x: number, y: number, sourceLayer: ViewLeaf | null): boolean;
-    /** 收笔：产单条 history entry（before 所有权随 entry 交给 workpiece.sel 记账口，同 _applySelectionUpdate 契约）。 */
+    /** 收笔：产单条 history entry（before 所有权随 entry 交给 SelectionComponent 记账，同 _applySelectionUpdate 契约）。 */
     magicDragEnd(): {
         type: string;
         before: Selection | null;
@@ -188,7 +188,7 @@ export interface FloodStopMask {
 export declare function floodSelectFrom(doc: {
     width: number;
     height: number;
-}, start: Point | null, sourceLayer: ViewLeaf | null, thresholdPct: number, metric?: ColorMetric, // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 editorState 的度量
+}, start: Point | null, sourceLayer: ViewLeaf | null, thresholdPct: number, metric?: ColorMetric, // v0.7.21：默认 rgb = v242 逐字语义（旧测试原样绿）；app 侧灌 desk 的度量
 stopMask?: FloodStopMask | null, gapPx?: number): Selection | null;
 export declare function similarSelectFrom(doc: {
     width: number;

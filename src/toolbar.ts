@@ -6,7 +6,7 @@
 //        + app-local（仍在 app.js，经 ctx 绑）：_suppressTransientPanels/_restoreTransientPanels/
 //          _commitTransform/_cancelTransform/selectionToNewLayer/afterDocChange。
 // importable：Selection（选区取反/全选）、fillResampleSelect（变换采样 dropdown SSoT）。
-// undo（v0.8.2 S2；T5 直写组件 verb）：selection-entry 走 SelectionComponent 记账、清除走 pixelHistory 事务。
+// undo（v0.8.2 S2；T5 直写组件 verb）：selection-entry 走 SelectionComponent 记账、清除走令牌+LayerTiles。
 
 import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
@@ -15,7 +15,7 @@ import { MAGIC_ALGORITHMS } from "./lasso.ts";
 import { makeRampSlider } from "./ui/ramp-slider.ts";
 import type { RampSliderHandle } from "./ui/ramp-slider.ts";
 import { requireEditableLeaf } from "./editable-leaf.ts";
-import { editorState } from "./workbench-state.ts";   // pickMode → editorState.colorPicker.layerMode SSoT（binding 写反应式）
+import { desk } from "./workbench-state.ts";   // pickMode → desk.colorPicker.layerMode SSoT（binding 写反应式）
 import { fillResampleSelect } from "./resample.ts";
 import { t } from "./i18n/index.ts";
 import { fillPreviewActive, commitFillNow, sendSelectionToFill } from "./fill-mode.ts";
@@ -64,13 +64,13 @@ let lassoTransformBtn: HTMLElement, lassoFillCommitBtn: HTMLElement, lassoDesele
 let pickerToolbar: HTMLElement | null, pickModeSel: HTMLSelectElement | null;   // 吸色 context toolbar（取样模式：合并 / 当前图层）
 
 // v0.6.24 fill/lasso 分家（v0.5.16 的共享 RAM 记忆 _selMem 作废）：子工具/布尔/1:1 per-tool
-//   持久化在 editorState.lassoTool / fillTool（跟 ora 走）。当前选区工具的记录：
+//   持久化在 desk.lassoTool / fillTool（跟 ora 走）。当前选区工具的记录：
 function _selToolRec() {
-  return editMode.current() === "fill" ? editorState.fillTool : editorState.lassoTool;
+  return editMode.current() === "fill" ? desk.fillTool : desk.lassoTool;
 }
 // 把指定工具的记录灌进引擎（setTool 进入时 + 换文档 applyEditorState 时）
 function _pushSelToolToEngine(tool: string) {
-  const rec = tool === "fill" ? editorState.fillTool : editorState.lassoTool;
+  const rec = tool === "fill" ? desk.fillTool : desk.lassoTool;
   input.lasso.setSubTool(rec.sub as Parameters<typeof input.lasso.setSubTool>[0]);
   input.lasso.setSetOpMode(rec.setOp as Parameters<typeof input.lasso.setSetOpMode>[0]);
   input.lasso.setConstrainSquare(rec.constrainSquare);
@@ -110,13 +110,13 @@ export function updateShapeToolbar() {
   shapeToolbarStack.classList.toggle("hidden", !active);
   if (!active) { shapeGridMenu?.classList.add("hidden"); return; }
   const sub = input.shapeBrush.getSubTool();
-  const gPersp = editorState.persp;
+  const gPersp = desk.persp;
   const perspMode = (["p1", "p2", "p3", "iso"].includes(gPersp.mode) ? gPersp.mode : "off") as PerspMode;
   for (const b of shapeSubBtns) {
     b.setAttribute("aria-pressed", b.dataset.shapeSub === sub ? "true" : "false");
   }
   // v0.6.25 变体钮面：line=自由/15°snap（透视下 snap 换「吸向消失点」义）；rect=长方/正方；circle=椭圆/正圆
-  const es = editorState.shapeBrush;
+  const es = desk.shapeBrush;
   const lineSnapIcon = perspMode !== "off" ? "#snap-vanishing-point" : "#line-snap";   // v0.6.27：15° 字样图标退位（user），line-snap stopgap 待真图
   shapeSubLineUse.setAttribute("href", es.constrainLine ? lineSnapIcon : "#line");
   shapeSubRectUse.setAttribute("href", es.constrainRect ? "#square" : "#rectangle");
@@ -132,9 +132,9 @@ export function updateShapeToolbar() {
     if (s2 !== sub) menu.classList.add("hidden");   // 切子工具收起别家的菜单
   }
   if (sub === "grid") {
-    shapeGridNuVal.textContent = String(editorState.shapeBrush.gridNu);
-    shapeGridNvVal.textContent = String(editorState.shapeBrush.gridNv);
-    shapeGridBorderBtn.setAttribute("aria-pressed", editorState.shapeBrush.gridBorder ? "true" : "false");
+    shapeGridNuVal.textContent = String(desk.shapeBrush.gridNu);
+    shapeGridNvVal.textContent = String(desk.shapeBrush.gridNv);
+    shapeGridBorderBtn.setAttribute("aria-pressed", desk.shapeBrush.gridBorder ? "true" : "false");
   }
   // 透视模式组槽（UI v2.1）：槽显当前模式；透视开着 → 平面槽（line 智能吸附不吃平面 → 藏）+
   //   VP 编辑钮 + 绘图 gizmo 显隐钮出现
@@ -251,7 +251,7 @@ export function updateLassoToolbar() {
     // v0.7.21：algo-cfg-classic 行退役（容差外提 Row1）；色差度量行 classic/similar 显（lineart 按亮度二值化不吃）
     for (const el of cfgMenu.querySelectorAll<HTMLElement>(".algo-cfg-colormetric")) el.classList.toggle("hidden", lineartOn);
     for (const el of cfgMenu.querySelectorAll<HTMLElement>(".algo-cfg-lineart")) el.classList.toggle("hidden", !lineartOn);
-    const metric = editorState.magicWand.metric === "rgb" ? "rgb" : "oklab";
+    const metric = desk.magicWand.metric === "rgb" ? "rgb" : "oklab";
     document.getElementById("lassoMetricOklab")?.setAttribute("aria-pressed", metric === "oklab" ? "true" : "false");
     document.getElementById("lassoMetricRgb")?.setAttribute("aria-pressed", metric === "rgb" ? "true" : "false");
     const dv = document.getElementById("lassoDmaxVal");
@@ -276,26 +276,26 @@ export function updateLassoToolbar() {
   const algoNow = input.lasso.getMagicAlgorithm();
   const showTol = magicOn && algoNow !== "lineart";
   if (tolWrap && showTol && lassoTolSlider) {
-    const v = algoNow === "similar" ? editorState.magicWand.similarThreshold : editorState.magicWand.threshold;
+    const v = algoNow === "similar" ? desk.magicWand.similarThreshold : desk.magicWand.threshold;
     if (lassoTolSlider.get() !== v) lassoTolSlider.set(v);
   }
   // v0.6.26：扩张钮（图标+小三角）magic 子工具时显；stepper 弹出跟随开关（关/切走时收）
   // v0.7.8：线稿算法时藏（auto-expand 是 classic flood 专属 param，引擎侧同步不吃）
   // v0.7.21：similar 也给扩张（全图同色 + 扩 1px = 盖 AA 白边再填）
   const expandApplies = magicOn && algoNow !== "lineart";
-  lassoExpandToggle.setAttribute("aria-pressed", editorState.magicWand.expand ? "true" : "false");
-  if (!expandApplies || !editorState.magicWand.expand) lassoMagicExpandMenu?.classList.add("hidden");
+  lassoExpandToggle.setAttribute("aria-pressed", desk.magicWand.expand ? "true" : "false");
+  if (!expandApplies || !desk.magicWand.expand) lassoMagicExpandMenu?.classList.add("hidden");
   // v0.7.24 容隙钮：classic 专属（lineart 自带论文闭合、similar 无连通概念）
   const gapApplies = magicOn && algoNow === "classic";
   const gapToggle = document.getElementById("lassoGapToggle");
-  gapToggle?.setAttribute("aria-pressed", editorState.magicWand.fillGap ? "true" : "false");
-  if (!gapApplies || !editorState.magicWand.fillGap) document.getElementById("lassoGapMenu")?.classList.add("hidden");
+  gapToggle?.setAttribute("aria-pressed", desk.magicWand.fillGap ? "true" : "false");
+  if (!gapApplies || !desk.magicWand.fillGap) document.getElementById("lassoGapMenu")?.classList.add("hidden");
   // ⋯ 菜单钮：modal 开着时(_selEdit)恒亮（预览 shrink 到空不能把 modal 撕掉）。
   const showSelEdit = !!_selEdit || (showRow1 && !otherToolSel);
   if (!showSelEdit) closeSelEditUI();
   // v0.6.30 分家后 lasso-only/fill-only 类开关退役（漏显温床）；蚂蚁线 v0.7.40 起 per-tool 两钮各归各
-  document.getElementById("lassoAntsBtn")?.setAttribute("aria-pressed", editorState.fillTool.showAnts ? "true" : "false");
-  document.getElementById("lassoSelAntsBtn")?.setAttribute("aria-pressed", editorState.lassoTool.showAnts ? "true" : "false");
+  document.getElementById("lassoAntsBtn")?.setAttribute("aria-pressed", desk.fillTool.showAnts ? "true" : "false");
+  document.getElementById("lassoSelAntsBtn")?.setAttribute("aria-pressed", desk.lassoTool.showAnts ? "true" : "false");
   // 1:1 约束按钮：仅 rect / ellipse 子工具下显示
   const showConstrain = sub === "rect" || sub === "ellipse";
   if (showConstrain) {
@@ -501,22 +501,22 @@ function initSelEditUI() {
     menu?.classList.toggle("hidden");
     if (wasHidden && menu) anchorPopupToBtn(menu, lassoSelEditBtn, { align: "left", offsetY: 6 });   // v0.5.14 贴钮
   });
-  // 蚂蚁线 toggle（v0.6.19，ADR-0004 修订；v0.7.40 per-tool 分家）：写 editorState（per-doc）+ 重绘；
+  // 蚂蚁线 toggle（v0.6.19，ADR-0004 修订；v0.7.40 per-tool 分家）：写 desk（per-doc）+ 重绘；
   //   不关菜单（toggle 类操作连按友好）。fill 菜单钮管 fillTool、selection 菜单钮管 lassoTool。
   document.getElementById("lassoAntsBtn")?.addEventListener("click", () => {
-    editorState.fillTool.showAnts = !editorState.fillTool.showAnts;
+    desk.fillTool.showAnts = !desk.fillTool.showAnts;
     board.requestRender();
     updateLassoToolbar();
   });
   document.getElementById("lassoSelAntsBtn")?.addEventListener("click", () => {
-    editorState.lassoTool.showAnts = !editorState.lassoTool.showAnts;
+    desk.lassoTool.showAnts = !desk.lassoTool.showAnts;
     board.requestRender();
     updateLassoToolbar();
   });
   // v0.7.2 算法配置扳手弹出（user：⋯只留命令，configuration 进扳手小三角）。
   //   slider/stepper 连按不关 = 手动 toggle + 外点关（lassoMagicExpandMenu 样板）。
-  //   v0.7.17（user 授权）：线稿 knob 全部 editorState.magicWand 持久化（跟文件走）——
-  //   UI 改 → 写 editorState + 灌引擎；换文档 wp:applyEditorState 回灌（阈值同款样板）。
+  //   v0.7.17（user 授权）：线稿 knob 全部 desk.magicWand 持久化（跟文件走）——
+  //   UI 改 → 写 desk + 灌引擎；换文档 wp:applyEditorState 回灌（阈值同款样板）。
   //   调试视图仍 RAM-only（诊断开关不是作品属性）。
   const lassoAlgoCfgBtn = document.getElementById("lassoAlgoCfgBtn");
   const lassoAlgoCfgMenu = document.getElementById("lassoAlgoCfgMenu");
@@ -539,7 +539,7 @@ function initSelEditUI() {
     const dmaxVal = document.getElementById("lassoDmaxVal");
     const stepDmax = (d: number) => {
       input.lasso.setLineartCloseDist(input.lasso.getLineartCloseDist() + d);
-      editorState.magicWand.lineartCloseDist = input.lasso.getLineartCloseDist();
+      desk.magicWand.lineartCloseDist = input.lasso.getLineartCloseDist();
       if (dmaxVal) dmaxVal.textContent = String(input.lasso.getLineartCloseDist());
     };
     document.getElementById("lassoDmaxMinus")?.addEventListener("click", () => stepDmax(-16));
@@ -550,14 +550,14 @@ function initSelEditUI() {
     inkInp?.addEventListener("input", () => {
       const v = Math.max(0, Math.min(100, parseInt(inkInp.value, 10) || 0));
       input.lasso.setLineartInkThreshold(v);
-      editorState.magicWand.lineartInk = v;
+      desk.magicWand.lineartInk = v;
       if (inkVal) inkVal.textContent = String(v);
     });
     // v0.7.4 碎区下限 stepper（±8；0=关守卫）
     const aminVal = document.getElementById("lassoAminVal");
     const stepAmin = (d: number) => {
       input.lasso.setLineartMinRegion(input.lasso.getLineartMinRegion() + d);
-      editorState.magicWand.lineartMinRegion = input.lasso.getLineartMinRegion();
+      desk.magicWand.lineartMinRegion = input.lasso.getLineartMinRegion();
       if (aminVal) aminVal.textContent = String(input.lasso.getLineartMinRegion());
     };
     document.getElementById("lassoAminMinus")?.addEventListener("click", () => stepAmin(-8));
@@ -568,7 +568,7 @@ function initSelEditUI() {
     sensInp?.addEventListener("input", () => {
       const v = Math.max(0, Math.min(100, parseInt(sensInp.value, 10) || 0));
       input.lasso.setLineartTipSensitivity(v);
-      editorState.magicWand.lineartTipSens = v;
+      desk.magicWand.lineartTipSens = v;
       if (sensVal) sensVal.textContent = String(v);
     });
     // v0.7.17 蔓延距离 stepper（-1=自动填到中线 / 0=像素画不碰真墨水 / 1..8 陷 n px；
@@ -581,14 +581,14 @@ function initSelEditUI() {
       if (i < 0) i = 0;
       i = Math.max(0, Math.min(BLEED_STEPS.length - 1, i + d));
       input.lasso.setLineartBleed(BLEED_STEPS[i]);
-      editorState.magicWand.lineartBleed = BLEED_STEPS[i];
+      desk.magicWand.lineartBleed = BLEED_STEPS[i];
       if (bleedVal) bleedVal.textContent = bleedLabel(BLEED_STEPS[i]);
     };
     document.getElementById("lassoBleedMinus")?.addEventListener("click", () => stepBleed(-1));
     document.getElementById("lassoBleedPlus")?.addEventListener("click", () => stepBleed(+1));
-    // 换文档回灌：editorState → 引擎 + UI（阈值 syncMagicThresholdUI 同款）
+    // 换文档回灌：desk → 引擎 + UI（阈值 syncMagicThresholdUI 同款）
     const syncLineartFromEditorState = () => {
-      const mw = editorState.magicWand;
+      const mw = desk.magicWand;
       input.lasso.setLineartCloseDist(mw.lineartCloseDist);
       input.lasso.setLineartInkThreshold(mw.lineartInk);
       input.lasso.setLineartMinRegion(mw.lineartMinRegion);
@@ -702,7 +702,7 @@ export function initToolbar(ctx: AppContext) {
     wireMenuItems(slot, menu, onPick);
   };
   // 子工具组槽（freehand/rect/ellipse/polygon/flood 收一组；v0.6.24 套索/填色真·各记各的
-  //   ——editorState.lassoTool/fillTool per-tool 持久化）
+  //   ——desk.lassoTool/fillTool per-tool 持久化）
   lassoSubSlot = byId("lassoSubSlot");
   lassoSubSlotUse = byId("lassoSubSlotUse") as unknown as SVGUseElement;
   lassoSubMenu = byId("lassoSubMenu");
@@ -763,8 +763,8 @@ export function initToolbar(ctx: AppContext) {
   });
   // （v0.7.26：选区笔自有变体/笔径控件退役——配置全归笔架（rack key "selPen"），user：「别造轮子」。
   //   笔选择 = 二次点 lasso/fill 工具钮开笔架 / 左栏 dial 笔名钮；粗细 = 左栏 dial（pen 子工具时放行）。）
-  // ---- 形状笔上下文工具栏（ADR-0005）：组槽 + 约束。状态 per-doc（editorState.shapeBrush），UI 改 → 写
-  //   editorState + 灌引擎；换文档 wp:applyEditorState 回灌（对齐魔棒阈值样板）。
+  // ---- 形状笔上下文工具栏（ADR-0005）：组槽 + 约束。状态 per-doc（desk.shapeBrush），UI 改 → 写
+  //   desk + 灌引擎；换文档 wp:applyEditorState 回灌（对齐魔棒阈值样板）。
   //   画一半切子工具/约束 = cancel 不进 undo（user 拍板，同两指手势接管语义）。
   shapeToolbarStack = byId("shapeToolbarStack");
   shapeSubBtns = [...byId("shapeSubCtl").querySelectorAll<HTMLElement>("[data-shape-sub]")];
@@ -782,7 +782,7 @@ export function initToolbar(ctx: AppContext) {
           if (input.isStrokeActive()) input.abortActiveStroke();
           const v = mb.dataset.shapeVar === "constrain";
           input.shapeBrush.setConstrainFor(s2 as "line" | "rect" | "circle", v);
-          editorState.shapeBrush[CONSTRAIN_KEY[s2]] = v;
+          desk.shapeBrush[CONSTRAIN_KEY[s2]] = v;
           menu.classList.add("hidden");
           updateShapeToolbar();
         });
@@ -811,7 +811,7 @@ export function initToolbar(ctx: AppContext) {
         return;
       }
       input.shapeBrush.setSubTool(sub2);
-      editorState.shapeBrush.sub = sub2;
+      desk.shapeBrush.sub = sub2;
       updateShapeToolbar();
     });
   }
@@ -822,13 +822,13 @@ export function initToolbar(ctx: AppContext) {
   shapeGridBorderBtn = byId("shapeGridBorderBtn");
   const pushGridToEngine = () => {
     input.shapeBrush.setGridConfig({
-      nu: editorState.shapeBrush.gridNu, nv: editorState.shapeBrush.gridNv,
-      border: editorState.shapeBrush.gridBorder,
+      nu: desk.shapeBrush.gridNu, nv: desk.shapeBrush.gridNv,
+      border: desk.shapeBrush.gridBorder,
     });
   };
   const stepGrid = (axis: "gridNu" | "gridNv", d: number) => {
     if (input.isStrokeActive()) input.abortActiveStroke();
-    editorState.shapeBrush[axis] = Math.max(1, Math.min(24, editorState.shapeBrush[axis] + d));
+    desk.shapeBrush[axis] = Math.max(1, Math.min(24, desk.shapeBrush[axis] + d));
     pushGridToEngine();
     updateShapeToolbar();
   };
@@ -838,7 +838,7 @@ export function initToolbar(ctx: AppContext) {
   byId("shapeGridNvPlus").addEventListener("click", () => stepGrid("gridNv", +1));
   shapeGridBorderBtn.addEventListener("click", () => {
     if (input.isStrokeActive()) input.abortActiveStroke();
-    editorState.shapeBrush.gridBorder = !editorState.shapeBrush.gridBorder;
+    desk.shapeBrush.gridBorder = !desk.shapeBrush.gridBorder;
     pushGridToEngine();
     updateShapeToolbar();
   });
@@ -856,7 +856,7 @@ export function initToolbar(ctx: AppContext) {
   wireSlotMenu(shapePerspModeSlot, shapePerspModeMenu, (b) => {
     if (input.isStrokeActive()) input.abortActiveStroke();
     const mode = b.dataset.perspMode as PerspMode;
-    const g = editorState.persp;
+    const g = desk.persp;
     g.mode = mode;
     if (mode !== "off") {
       // per-mode 槽位（一/二/三点分开存）：本模式缺的 VP 按默认位补齐，调过的保留
@@ -880,31 +880,31 @@ export function initToolbar(ctx: AppContext) {
   for (const b of shapePlaneBtns) {
     b.addEventListener("click", () => {
       if (input.isStrokeActive()) input.abortActiveStroke();
-      editorState.persp.plane = b.dataset.shapePlane!;
+      desk.persp.plane = b.dataset.shapePlane!;
       updateShapeToolbar();
     });
   }
   shapePerspShowBtn.addEventListener("click", () => {
-    editorState.persp.showGizmo = !editorState.persp.showGizmo;
+    desk.persp.showGizmo = !desk.persp.showGizmo;
     updateShapeToolbar();
     board.requestRender();
   });
-  input.shapeBrush.setPerspProvider(() => configFromModeState(editorState.persp));
+  input.shapeBrush.setPerspProvider(() => configFromModeState(desk.persp));
   const syncShapeFromEditorState = () => {
-    input.shapeBrush.setSubTool(editorState.shapeBrush.sub as Parameters<typeof input.shapeBrush.setSubTool>[0]);
-    input.shapeBrush.setConstrainFor("line", editorState.shapeBrush.constrainLine);
-    input.shapeBrush.setConstrainFor("rect", editorState.shapeBrush.constrainRect);
-    input.shapeBrush.setConstrainFor("circle", editorState.shapeBrush.constrainCircle);
+    input.shapeBrush.setSubTool(desk.shapeBrush.sub as Parameters<typeof input.shapeBrush.setSubTool>[0]);
+    input.shapeBrush.setConstrainFor("line", desk.shapeBrush.constrainLine);
+    input.shapeBrush.setConstrainFor("rect", desk.shapeBrush.constrainRect);
+    input.shapeBrush.setConstrainFor("circle", desk.shapeBrush.constrainCircle);
     pushGridToEngine();
     updateShapeToolbar();
   };
   window.addEventListener("wp:applyEditorState", syncShapeFromEditorState);
   syncShapeFromEditorState();
   // v242：扩展滑块从魔术棒拆走（改成选区编辑 op，见 initSelEditUI）。魔术棒只剩阈值。
-  // v0.5.11：阈值 per-doc 持久化（editorState.magicWand.threshold，原 editorState.bucket 退役后归魔棒）。
-  //   UI 改 → 写 editorState + 灌引擎；换文档 → syncMagicThresholdUI 回灌（wp:applyEditorState）。
+  // v0.5.11：阈值 per-doc 持久化（desk.magicWand.threshold，原 desk.bucket 退役后归魔棒）。
+  //   UI 改 → 写 desk + 灌引擎；换文档 → syncMagicThresholdUI 回灌（wp:applyEditorState）。
   // v0.7.2：容差滑条从两份 ⋯ 菜单搬进扳手弹出（#lassoAlgoCfgMenu，选区/填充共用一份 DOM）
-  //   ——fillThreshold 镜像退役。持久化不变（editorState.magicWand.threshold，per-doc）。
+  //   ——fillThreshold 镜像退役。持久化不变（desk.magicWand.threshold，per-doc）。
   // v0.7.21：滑条外提 Row1 且**按当前算法路由**（classic↔threshold / similar↔similarThreshold，两容差
   //   分开存互不打架）；引擎两值+度量恒全量灌（换文档/换算法都不会漏）。显隐/换算法的值回灌在
   //   updateLassoToolbar（lassoTolWrap 块）派生。
@@ -915,49 +915,49 @@ export function initToolbar(ctx: AppContext) {
     label: "", ariaLabel: t("la.threshold"), min: 0, max: 100, step: 1, value: 20, segments: TOL_SEGMENTS,
     onInput: (v) => {
       if (input.lasso.getMagicAlgorithm() === "similar") {
-        editorState.magicWand.similarThreshold = v;
+        desk.magicWand.similarThreshold = v;
         input.lasso.setSimilarThreshold(v);
       } else {
-        editorState.magicWand.threshold = v;
+        desk.magicWand.threshold = v;
         input.lasso.setMagicThreshold(v);
       }
     },
   });
   byId("lassoTolWrap").appendChild(lassoTolSlider.el);
   const syncMagicThresholdUI = () => {
-    input.lasso.setMagicThreshold(editorState.magicWand.threshold);
-    input.lasso.setSimilarThreshold(editorState.magicWand.similarThreshold);
-    input.lasso.setColorMetric(editorState.magicWand.metric === "rgb" ? "rgb" : "oklab");
+    input.lasso.setMagicThreshold(desk.magicWand.threshold);
+    input.lasso.setSimilarThreshold(desk.magicWand.similarThreshold);
+    input.lasso.setColorMetric(desk.magicWand.metric === "rgb" ? "rgb" : "oklab");
     const sim = input.lasso.getMagicAlgorithm() === "similar";
-    lassoTolSlider?.set(sim ? editorState.magicWand.similarThreshold : editorState.magicWand.threshold);
+    lassoTolSlider?.set(sim ? desk.magicWand.similarThreshold : desk.magicWand.threshold);
   };
   // v0.7.21 色差度量（扳手行，classic/similar 共用；统一默认 OKLab——user 2026-07-30 拍板）
   const setColorMetricUI = (m: "oklab" | "rgb") => {
-    editorState.magicWand.metric = m;
+    desk.magicWand.metric = m;
     input.lasso.setColorMetric(m);
     updateLassoToolbar();   // aria-pressed 派生（菜单不关：toggle 类连按友好，同蚂蚁线）
   };
   document.getElementById("lassoMetricOklab")?.addEventListener("click", () => setColorMetricUI("oklab"));
   document.getElementById("lassoMetricRgb")?.addEventListener("click", () => setColorMetricUI("rgb"));
   // #31 魔棒 flood 后自动扩张（v0.5.12 内联化：aria-pressed toggle 钮 + px 输入，⚙/popup 退役）。
-  //   引擎只认一个数：effective px = toggle 开 ? px : 0。UI 改 → 写 editorState + 灌引擎；换文档回灌。
+  //   引擎只认一个数：effective px = toggle 开 ? px : 0。UI 改 → 写 desk + 灌引擎；换文档回灌。
   lassoExpandToggle = byId("lassoExpandToggle");
   lassoMagicExpandVal = byId("lassoMagicExpandVal");
   lassoMagicExpandMenu = byId("lassoMagicExpandMenu");
   const pushMagicExpandToEngine = () => {
-    input.lasso.setMagicAutoExpand(editorState.magicWand.expand ? editorState.magicWand.expandPx : 0);
+    input.lasso.setMagicAutoExpand(desk.magicWand.expand ? desk.magicWand.expandPx : 0);
   };
   const syncMagicExpandUI = () => {
-    lassoMagicExpandVal.textContent = String(editorState.magicWand.expandPx);
+    lassoMagicExpandVal.textContent = String(desk.magicWand.expandPx);
     pushMagicExpandToEngine();
     updateLassoToolbar();   // toggle pressed 态/stepper 显隐在 updateLassoToolbar 派生
   };
   _transientMenus.push(lassoMagicExpandMenu);
   lassoExpandToggle.addEventListener("click", (e: Event) => {
     e.stopPropagation();
-    editorState.magicWand.expand = !editorState.magicWand.expand;
+    desk.magicWand.expand = !desk.magicWand.expand;
     pushMagicExpandToEngine();
-    if (editorState.magicWand.expand) {
+    if (desk.magicWand.expand) {
       // 开的瞬间顺势弹 stepper 调 px（v0.6.26；外点关，steppers 连按不关）
       lassoMagicExpandMenu.classList.remove("hidden");
       anchorPopupToBtn(lassoMagicExpandMenu, lassoExpandToggle, { align: "left", offsetY: 6 });
@@ -973,8 +973,8 @@ export function initToolbar(ctx: AppContext) {
   });
   // −1+ stepper（v0.6.19 文本框退役——文本框吞快捷键+弹键盘；样板 = shapeGrid steppers 连按不关菜单）
   const stepMagicExpand = (d: number) => {
-    editorState.magicWand.expandPx = Math.max(0, Math.min(100, editorState.magicWand.expandPx + d));
-    lassoMagicExpandVal.textContent = String(editorState.magicWand.expandPx);
+    desk.magicWand.expandPx = Math.max(0, Math.min(100, desk.magicWand.expandPx + d));
+    lassoMagicExpandVal.textContent = String(desk.magicWand.expandPx);
     pushMagicExpandToEngine();
   };
   byId("lassoMagicExpandMinus").addEventListener("click", () => stepMagicExpand(-1));
@@ -985,19 +985,19 @@ export function initToolbar(ctx: AppContext) {
   const lassoGapMenu = byId("lassoGapMenu");
   const lassoGapVal = byId("lassoGapVal");
   const pushGapToEngine = () => {
-    input.lasso.setFillGap(editorState.magicWand.fillGap ? editorState.magicWand.fillGapPx : 0);
+    input.lasso.setFillGap(desk.magicWand.fillGap ? desk.magicWand.fillGapPx : 0);
   };
   const syncGapUI = () => {
-    lassoGapVal.textContent = String(editorState.magicWand.fillGapPx);
+    lassoGapVal.textContent = String(desk.magicWand.fillGapPx);
     pushGapToEngine();
     updateLassoToolbar();
   };
   _transientMenus.push(lassoGapMenu);
   lassoGapToggle.addEventListener("click", (e: Event) => {
     e.stopPropagation();
-    editorState.magicWand.fillGap = !editorState.magicWand.fillGap;
+    desk.magicWand.fillGap = !desk.magicWand.fillGap;
     pushGapToEngine();
-    if (editorState.magicWand.fillGap) {
+    if (desk.magicWand.fillGap) {
       lassoGapMenu.classList.remove("hidden");
       anchorPopupToBtn(lassoGapMenu, lassoGapToggle, { align: "left", offsetY: 6 });
     } else {
@@ -1011,8 +1011,8 @@ export function initToolbar(ctx: AppContext) {
     lassoGapMenu.classList.add("hidden");
   });
   const stepGap = (d: number) => {
-    editorState.magicWand.fillGapPx = Math.max(2, Math.min(32, editorState.magicWand.fillGapPx + d));
-    lassoGapVal.textContent = String(editorState.magicWand.fillGapPx);
+    desk.magicWand.fillGapPx = Math.max(2, Math.min(32, desk.magicWand.fillGapPx + d));
+    lassoGapVal.textContent = String(desk.magicWand.fillGapPx);
     pushGapToEngine();
   };
   byId("lassoGapMinus").addEventListener("click", () => stepGap(-1));
@@ -1182,16 +1182,16 @@ export function initToolbar(ctx: AppContext) {
     });
   }
   // 吸色取样模式 dropdown（composite 合并 / layer 当前图层 raw）。
-  //   持久化 = editorState.colorPicker.layerMode（per-doc desk，进 .webpaint/editor-state.json）——**不是 LS**，
+  //   持久化 = desk.colorPicker.layerMode（per-doc desk，进 .webpaint/editor-state.json）——**不是 LS**，
   //   v406 起设备级 webpaint.pickMode 已删。input._doPick 经 getPickMode 读（走 bindEditorReactive 的桥）。
   pickerToolbar = document.getElementById("pickerToolbar");
   pickModeSel = document.getElementById("pickModeSel") as HTMLSelectElement | null;
   if (pickModeSel) {
     const psel = pickModeSel;
-    psel.value = editorState.colorPicker.layerMode;   // binding → state.pickMode（引擎 input._doPick 经 getPickMode 读）
-    psel.addEventListener("change", () => { editorState.colorPicker.layerMode = psel.value; });
-    // desk 载入：文档的 pickMode 回灌 → 刷新下拉显示（editorState 已由 Unserialize 更新，只同步 UI，不回写）
-    window.addEventListener("wp:applyEditorState", () => { psel.value = editorState.colorPicker.layerMode; });
+    psel.value = desk.colorPicker.layerMode;   // binding → state.pickMode（引擎 input._doPick 经 getPickMode 读）
+    psel.addEventListener("change", () => { desk.colorPicker.layerMode = psel.value; });
+    // desk 载入：文档的 pickMode 回灌 → 刷新下拉显示（desk 已由 Unserialize 更新，只同步 UI，不回写）
+    window.addEventListener("wp:applyEditorState", () => { psel.value = desk.colorPicker.layerMode; });
   }
   // 选区 → 新层 / 复制层
 

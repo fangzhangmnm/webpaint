@@ -4,7 +4,7 @@
 // 设计取舍：
 // - 不复用 Board —— Board 强耦合 PaintDoc / brush overlay / dirty 系统。参考窗只是 "画一张图"。
 // - 复用 .float-panel 拖动模式（标题栏拖整窗），手势只在内部画布区域生效。
-// - panel 位置 / 大小 / 开关 / 参考图 viewport 全进 editorState.refPanel（per-doc，跟 .ora 走，
+// - panel 位置 / 大小 / 开关 / 参考图 viewport 全进 desk.refPanel（per-doc，跟 .ora 走，
 //   "一个 project = 一个 desk"），不再落 device localStorage。原图 bitmap 另存 webpaint/reference.png
 //   （session-state 管，见 getPersistBlob）。载入由 session-state 派发 wp:applyEditorState 回灌。
 //
@@ -23,7 +23,7 @@
 import { pinchScaleRot, solveAnchorTranslation } from "./pointer-gesture.ts";
 import type { GestureViewport } from "./pointer-gesture.ts";
 import { raiseWindow } from "./surfaces.ts";
-import { editorState } from "./workbench-state.ts";
+import { desk } from "./workbench-state.ts";
 import { renderNodesToCanvas } from "./doc-render.ts";
 import type { PaintingView } from "./workpiece/painting-view.ts";
 
@@ -52,7 +52,7 @@ interface ReferenceWindowOpts {
 type RefBitmapSource = (ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas) & { close?: () => void };
 
 // setBitmap 的 opts：原始文件 Blob（跟 doc 一起进 .ora）。
-interface SetBitmapOpts { persistBlob?: Blob | null; skipFit?: boolean; }   // skipFit：doc 恢复时不 fitToPanel（保住 editorState 载入的 vp）
+interface SetBitmapOpts { persistBlob?: Blob | null; skipFit?: boolean; }   // skipFit：doc 恢复时不 fitToPanel（保住 desk 载入的 vp）
 
 // 拖整窗 / 手势 state。
 interface PanelDragState { id: number; sx: number; sy: number; ol: number; ot: number; }
@@ -90,7 +90,7 @@ export class ReferenceWindow {
   _gestureStart: GestureStartState | null;
   _lastLiveComposeT?: number;
   _liveThrottle?: ReturnType<typeof setTimeout> | null;
-  _applying: boolean;   // apply-on-load 期间：抑制 _savePos/_saveVp 回写 editorState（否则载入即标脏）
+  _applying: boolean;   // apply-on-load 期间：抑制 _savePos/_saveVp 回写 desk（否则载入即标脏）
 
   constructor(opts: ReferenceWindowOpts) {
     this.panel   = opts.panel;                 // .float-panel
@@ -130,7 +130,7 @@ export class ReferenceWindow {
     this._applying = false;
 
     this._bind();
-    // 位置 / viewport / 开关 = per-doc editorState.refPanel，由 session-state 在 doc 载入/重置后
+    // 位置 / viewport / 开关 = per-doc desk.refPanel，由 session-state 在 doc 载入/重置后
     // 派发 wp:applyEditorState → applyRefPanelFromEditorState() 回灌（见 _bind 监听）。
   }
 
@@ -143,7 +143,7 @@ export class ReferenceWindow {
     // 持久化的原始 Blob（PNG / JPEG / 不管什么 mime），跟 doc 一起进 .ora。
     // opts.persistBlob 是调用方给的"原始文件" Blob。
     this._bitmapBlob = opts.persistBlob || null;
-    if (bitmap && !opts.skipFit) this.fitToPanel();   // doc 恢复（skipFit）→ 保留 editorState 载入的 vp，不 fit
+    if (bitmap && !opts.skipFit) this.fitToPanel();   // doc 恢复（skipFit）→ 保留 desk 载入的 vp，不 fit
     this._updateEmptyHint();
     this._invalidate();
   }
@@ -221,7 +221,7 @@ export class ReferenceWindow {
     return true;
   }
   open() {
-    editorState.refPanel.enabled = true;   // desk：开窗随 doc 走（标脏，per-doc）
+    desk.refPanel.enabled = true;   // desk：开窗随 doc 走（标脏，per-doc）
     this.panel.classList.remove("hidden");
     raiseWindow(this.panel);   // v232：开窗即置顶（surfaces window band）
     // v112: 默认位置避开 topbar + 左 sidebar（user：「不要 spawn 在左上角贴顶，那样难点」）
@@ -239,7 +239,7 @@ export class ReferenceWindow {
     this._invalidate();
   }
   close() {
-    editorState.refPanel.enabled = false;   // desk：关窗随 doc 走（标脏，per-doc）
+    desk.refPanel.enabled = false;   // desk：关窗随 doc 走（标脏，per-doc）
     this.panel.classList.add("hidden");
   }
   isOpen() { return !this.panel.classList.contains("hidden"); }
@@ -271,8 +271,8 @@ export class ReferenceWindow {
     window.addEventListener("wp:docpixeldirty", () => this.markLiveDirty());
     window.addEventListener("wp:histchange", () => this.markLiveDirty());
 
-    // desk：doc 的 editorState 载入 / 重置后，session-state 派发 wp:applyEditorState →
-    // 把 refPanel（开关 / 位置 / viewport）回灌到 DOM + this.vp（不回写 editorState，见 _applying 守卫）。
+    // desk：doc 的 desk 载入 / 重置后，session-state 派发 wp:applyEditorState →
+    // 把 refPanel（开关 / 位置 / viewport）回灌到 DOM + this.vp（不回写 desk，见 _applying 守卫）。
     window.addEventListener("wp:applyEditorState", () => this.applyRefPanelFromEditorState());
 
     // 拖整窗（标题栏）
@@ -505,15 +505,15 @@ export class ReferenceWindow {
     const has = !!(this.bitmap || this._liveDoc);
     this.emptyHint.classList.toggle("hidden", has);
   }
-  // desk：doc 的 editorState 载入 / 重置后回灌到 DOM + this.vp。裸 DOM 开关（不经 open()/close()——
-  // 那两条会写 editorState.enabled 标脏）；_applying 守住异步 ResizeObserver 触发的 _savePos 不回写。
+  // desk：doc 的 desk 载入 / 重置后回灌到 DOM + this.vp。裸 DOM 开关（不经 open()/close()——
+  // 那两条会写 desk.enabled 标脏）；_applying 守住异步 ResizeObserver 触发的 _savePos 不回写。
   applyRefPanelFromEditorState() {
     this._applying = true;
     try {
-      this._loadVp();    // viewport → this.vp（只读 editorState，不回写）
+      this._loadVp();    // viewport → this.vp（只读 desk，不回写）
       this._loadPos();   // 位置 → 裸 DOM（clamp/默认，不回写）
       // 开关：裸 classList，不经 open()/close()
-      if (editorState.refPanel.enabled) {
+      if (desk.refPanel.enabled) {
         this.panel.classList.remove("hidden");
         raiseWindow(this.panel);
         this._resizeCanvasToBody();
@@ -532,16 +532,16 @@ export class ReferenceWindow {
   _savePos() {
     if (this._applying) return;
     const r = this.panel.getBoundingClientRect();
-    const cur = editorState.refPanel.position;
+    const cur = desk.refPanel.position;
     // 值没变就不写（否则 ResizeObserver 的无意义触发会误标脏）
     if (cur && cur.left === r.left && cur.top === r.top && cur.width === r.width && cur.height === r.height) return;
-    editorState.refPanel.position = { left: r.left, top: r.top, width: r.width, height: r.height };
+    desk.refPanel.position = { left: r.left, top: r.top, width: r.width, height: r.height };
   }
   _loadPos() {
     // v268b (user)：钳进安全区——旧的(或越界的)持久化位置会把窗停在左上角，和 iPad 顶部
     //   日期栏 + 左侧工具栏打架。floor 清掉 topbar(56)/左栏(80)/safe-area 余量。
     const MIN_LEFT = 96, MIN_TOP = 96;
-    const o = editorState.refPanel.position;
+    const o = desk.refPanel.position;
     if (o && o.left != null && o.top != null) {
       this.panel.style.left = Math.max(MIN_LEFT, o.left) + "px";
       this.panel.style.top = Math.max(MIN_TOP, o.top) + "px";
@@ -555,10 +555,10 @@ export class ReferenceWindow {
   }
   _saveVp() {
     if (this._applying) return;
-    editorState.refPanel.viewport = { ...this.vp };
+    desk.refPanel.viewport = { ...this.vp };
   }
   _loadVp() {
-    const o = editorState.refPanel.viewport;
+    const o = desk.refPanel.viewport;
     if (!o) return;
     if (Number.isFinite(o.tx)) this.vp.tx = o.tx;
     if (Number.isFinite(o.ty)) this.vp.ty = o.ty;

@@ -1,6 +1,9 @@
 # ADR-0007 · workpiece = undo 作用域；sidecar 分离；写面收权（v0.8 纪元 spec）
 > created 20260801
-> 状态：已拍板（user，2026-08-01 session，import-破坏-undo 根因讨论）。v0.7.35 只做止血；本 ADR 是 v0.8.0 重构纪元的开工 spec。
+> 状态：**superseded-by ADR-0008**（2026-08-08 / v0.8.21，T5 拆旧交付）——概念框架（undo 作用域=workpiece、
+> sidecar 分离、写面收权）由 0008 的令牌+collector 机制继承落地；本 ADR 的实施形态
+> （DocumentOperator/write-gate/DocView/operator 注册表）已物理拆除。why 部分仍具史料价值。
+> 原状态：已拍板（user，2026-08-01 session，import-破坏-undo 根因讨论）。v0.7.35 只做止血；本 ADR 是 v0.8.0 重构纪元的开工 spec。
 > **已实施**（v0.8.1–v0.8.6，2026-08-02）：S1 构造注入+LayerTree / S2 ①型退役+SelectionFace+PixelTx / S3 DocView 编译收口 / S4 write-gate 割3 / S5 wp:sidecarchange / S6 硬规则落 CLAUDE.md。施工记录见 `ai-docs/20260801-v08-epoch-handoff.md` §8。
 
 ## 背景（为什么）

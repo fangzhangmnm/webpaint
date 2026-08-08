@@ -1,6 +1,6 @@
 import type { Selection } from "../selection.ts";
 import type { RecordData } from "./undo-stack.ts";
-import type { Workpiece, CollectorComponent } from "./workpiece2.ts";
+import type { Workpiece, CollectorComponent } from "./workpiece.ts";
 export declare function estimateSelectionBytes(sel: Selection | null | undefined): number;
 export declare class SelectionComponent implements CollectorComponent {
     readonly kind = "selection";
@@ -17,8 +17,32 @@ export declare class SelectionComponent implements CollectorComponent {
     commitPreApplied(before: Selection | null): void;
     /** 换文档收尾（跨 session 不沿用选区；旧 adoptState 语义）。无 token——load 流，栈随后清。 */
     clearOnLoad(): void;
+    /** 预览 tx 窗口（T5 收编自 selection-face）：origin 保管、write 换预览、commit/abort 收口。
+     *  纯组件逻辑不碰 history——commit 返回 {changed, before}，**记账归调用方**
+     *  （history.withPoint(() => sel.commitPreApplied(before))）。toolbar 扩缩预览住户。 */
+    beginPreview(): SelectionPreviewTx;
     sealRecord(): RecordData | null;
     swapRecord(data: RecordData): RecordData;
     recordBytes(data: RecordData): number;
     disposeRecord(data: RecordData): void;
+}
+/** 预览 tx（值语义沿 selection-face 的 SelectionPreviewTx；T5 起记账在调用方）。
+ *  origin = 进入时的选区。所有权：commit 后 before(=origin) 交调用方递给 commitPreApplied；
+ *  abort 还原 origin、预览产物就地 dispose。 */
+export declare class SelectionPreviewTx {
+    private _sel;
+    private _origin;
+    private _open;
+    constructor(sel: SelectionComponent);
+    origin(): Selection | null;
+    private _assertOpen;
+    /** 换预览：上一个预览产物无人接手 → 就地 dispose（origin 与新值本体除外）。write(origin) 合法（= 预览回到原选区）。 */
+    write(next: Selection | null): void;
+    /** 收口：current ≠ origin → {changed:true, before:origin}（调用方负责记账）；无变化 → changed:false。 */
+    commit(): {
+        changed: boolean;
+        before: Selection | null;
+    };
+    /** 无痕还原 origin，预览产物就地 dispose。 */
+    abort(): void;
 }

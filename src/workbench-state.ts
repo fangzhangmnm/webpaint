@@ -1,7 +1,7 @@
-// 本文件两块（**刻意同居**：下面的 editorState struct 经 bindEditorReactive 绑住上面的 reactive dial，
+// 本文件两块（**刻意同居**：下面的 desk struct 经 bindEditorReactive 绑住上面的 reactive dial，
 //   二者是同一份存储的两个面，拆开就得把桥暴露成跨模块 API）：
-//   ① createEditorState() —— 编辑器「当前设成什么样」的**反应式 RAM SSoT**（纯内存）
-//   ② editorState struct  —— per-doc「desk」的门面 + 序列化（见下方分隔线）
+//   ① useDials() —— 编辑器「当前设成什么样」的**反应式 RAM SSoT**（纯内存）
+//   ② desk struct  —— per-doc「desk」的门面 + 序列化（见下方分隔线）
 //
 // ① 的单一职责：构造编辑器当前设置的单一真源——主色、每工具 dial（size/opacity/activeBrushId）、
 //   棋盘/长按吸色等开关、filterBrush 瞬态。**不**负责落盘：ORA 存档由 session-state 的 _buildOraMeta
@@ -11,7 +11,7 @@
 //
 // ① 不做：当前笔派生（currentBrush computed 在 app，依赖 rack/engine = 组合接线）；工具/transient 相位
 //   （editMode）；瞬态面板互斥（panel-state）。故意不造中央 god-object——各轴各自反应式。
-//   （视口**会**进 ORA，但走 ② 的 editorState.viewport 存时镜像，不在 ① 里。）
+//   （视口**会**进 ORA，但走 ② 的 desk.viewport 存时镜像，不在 ① 里。）
 //
 // 反应式桥：color 用 defineProperty 代理回 dialReactive —— app 里 state.color 的读写零改动，背后是
 //   反应式（Vue 组件 computed 自动追踪 → 当前笔重派生）。
@@ -24,12 +24,12 @@ import type { EditorRuntimeState, DialReactive, ToolDial } from "./app-context.t
 // 编辑器 RAM 态的形状契约见 AppContext（EditorRuntimeState / DialReactive）——本模块是其唯一构造者。
 export type EditorState = EditorRuntimeState;
 
-export function createEditorState(): { state: EditorRuntimeState; dialReactive: DialReactive } {
+export function useDials(): { state: EditorRuntimeState; dialReactive: DialReactive } {
   // state.toolStates：per-tool 持久化（per-doc）。当前笔 = currentBrush computed（在 app）从这束 dial 纯派生。
   // shapes/airbrush **不**自己存——alias 到 brush（见 rack.getRackToolKey）。形状：{ size, opacity, activeBrushId }。
   // reactive：dial 是反应式 SSoT。先建 toolStates → 让 state 字面量一次成形、整体类型化（序列化走 JSON.stringify 无碍）。
   const toolStates: Record<string, ToolDial> = reactive({
-    // brush dial 默认（size/opacity/activeBrushId 归 editorState.brushTool SSoT，boot 后 bindEditorReactive 灌入、doc 载入覆盖；
+    // brush dial 默认（size/opacity/activeBrushId 归 desk.brushTool SSoT，boot 后 bindEditorReactive 灌入、doc 载入覆盖；
     //   不再从 LS 种子——desk per-doc，删了 webpaint.size/opacity 设备记忆）。
     //   v415 删了 flow：四处钉死 1.0、无滑块、无 preset 来源——压感对流量的影响走 per-preset 的 flowCoeff。
     brush:    { size: 12, opacity: 1.0, activeBrushId: null },
@@ -45,16 +45,16 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     // tool（当前工具）的 SSoT 在 editMode（editMode.current()）。见 edit-mode.js / CONTEXT.md。
     // v132 filter brush 激活时 = { Filter, params, variantLabel }；空闲 = null
     filterBrush: null,
-    color: "#1b1b1b",   // 归 editorState.brushTool.color SSoT（boot bind 灌入 / doc 载入覆盖）；删 webpaint.color LS 种子
+    color: "#1b1b1b",   // 归 desk.brushTool.color SSoT（boot bind 灌入 / doc 载入覆盖）；删 webpaint.color LS 种子
     // （全局压感开关 pressureToSize/Opacity 已 deprecate 2026-07-14 → 每笔自带，见 resolved-brush；删 webpaint.pToSize/pToOpacity LS）
     // 手势开关 = 跨设备偏好（synced-user-preference collection）。
-    // ⚠v409 起 createEditorState 在 collection hydrate **之前**跑（TLA 门已拆）→ 这里只能拿到 DEFAULTS。
+    // ⚠v409 起 useDials 在 collection hydrate **之前**跑（TLA 门已拆）→ 这里只能拿到 DEFAULTS。
     //   真值由 app.ts 的 fixup 相（await prefsReady）经 settings-menu 的 renderSettingsFromPrefs() 灌入。
     //   消费方是 thunk 惰性读（app.ts 的 getLongPressPickEnabled/getSingleFingerDraw，每次 pointerdown 求值）
     //   → 灌入即生效，不需要反应式。
     longPressPick: PREF_DEFAULTS["long-press-pick"],
     singleFingerDraw: PREF_DEFAULTS["single-finger-draw"],
-    pickMode: "composite",  // 吸色取样 composite|layer；归 editorState.colorPicker.layerMode SSoT（bind 灌入/载入覆盖）；删 webpaint.pickMode LS
+    pickMode: "composite",  // 吸色取样 composite|layer；归 desk.colorPicker.layerMode SSoT（bind 灌入/载入覆盖）；删 webpaint.pickMode LS
     // v125 checkerboard 从全局 LS 改 per-doc（跟文件走）。初始 false；adopt 时按文件值覆盖；新建默认 false。
     checkerboard: false,
     toolStates,
@@ -65,7 +65,7 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     tool: "brush",                 // 镜像 editMode.current()（含 transient）；_syncEditModeUI 同步
     color: state.color,
     canDraw: true,                 // 镜像 editMode.canDraw()；_syncEditModeUI 同步 → <LeftDial> 滑块 disabled
-    pressureOff: false,            // 禁用笔压（per-doc desk：editorState.pressureDisabled 绑定于此；引擎经 input.ts thunk 读）
+    pressureOff: false,            // 禁用笔压（per-doc desk：desk.pressureDisabled 绑定于此；引擎经 input.ts thunk 读）
   });
   // color 读写代理回 dialReactive（app 里 state.color 零改动，背后反应式）。
   Object.defineProperty(state, "color", {
@@ -73,8 +73,8 @@ export function createEditorState(): { state: EditorRuntimeState; dialReactive: 
     configurable: true, enumerable: true,
   });
 
-  // editorState.brushTool / colorPicker.layerMode 绑到反应式引擎态（引擎不改；editorState 作 SSoT 接口）。
-  //   绑定即把 editorState 当前 S.g（默认，或 boot 前已 Unserialize 的值）灌进这些 reactive 字段，二者对齐。
+  // desk.brushTool / colorPicker.layerMode 绑到反应式引擎态（引擎不改；desk 作 SSoT 接口）。
+  //   绑定即把 desk 当前 S.g（默认，或 boot 前已 Unserialize 的值）灌进这些 reactive 字段，二者对齐。
   bindEditorReactive({
     getSize: () => toolStates.brush.size ?? 12, setSize: (v) => { toolStates.brush.size = v; },
     getOpacity: () => toolStates.brush.opacity ?? 1.0, setOpacity: (v) => { toolStates.brush.opacity = v; },
@@ -114,7 +114,7 @@ export function serializedToolStatePatch(current: ToolDial, saved: unknown): Par
 // EditorState struct —— per-doc「desk」的 Hot RAM SSoT + 序列化（2026-07-14）
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // 「一个 project 就是一个 desk」：editor-state = 跟文档走的编辑器桌面态（面板/导入导出/工具参数/视口/棋盘）。
-//   用法像 struct：`editorState.colorPanel.position = {left,top}`（代码热路径）。
+//   用法像 struct：`desk.colorPanel.position = {left,top}`（代码热路径）。
 //   **永远 Hot、不自动推**；除各字段外只有 Serialize() / Unserialize() / reset() / syncRuntimeForSave()。
 //   开新文件必 reset()（钉在 session-state 的 adoptModel + newDoc，结构性无法绕过）。
 //   序列化进 ora 的 `.webpaint/editor-state.json`；**存盘时被顺手捞走**（_buildOraMeta），不自己驱动落盘。
@@ -143,7 +143,7 @@ function freshGroups() {
     blenderPanel:  { show: false, position: null as PanelPos | null },
     brushTool:     { activeBrushId: null as string | null, size: 12, opacity: 1, color: "#1b1b1b" },
     // v0.5（user 拍板）：魔棒/主栅格配置**跟文件走**。expand 是 toggle（开了才用 expandPx，默认 1）。
-    //   v0.5.11：threshold 归魔棒（油漆桶独立工具及 editorState.bucket 退役——填色收进套索 fill mode，
+    //   v0.5.11：threshold 归魔棒（油漆桶独立工具及 desk.bucket 退役——填色收进套索 fill mode，
     //   flood 只剩魔棒一条路；旧 doc 里 stale 的 bucket 键被 mergeInto 静默忽略）。
     // #31 自动扩张 + v0.5.11 阈值；v0.7.17（user 2026-07-30 授权持久化）：线稿闭合算法的
     //   全部 knob 跟文件走——closeDist=闭合距离(px)/ink=墨线判定(%)/minRegion=碎区下限(px)/
@@ -163,7 +163,7 @@ function freshGroups() {
     //   老 doc 的 stale 键被 mergeInto 静默忽略、旧偏好回默认开，user 知情同意 2026-08-01）
     lassoTool:     { sub: "freehand" as string, setOp: "new" as string, constrainSquare: false, algo: "classic" as string, showAnts: true },
     fillTool:      { sub: "magic" as string, setOp: "union" as string, constrainSquare: false, algo: "lineart" as string, showAnts: true },
-    // （v0.7.25 曾有 editorState.selPen 变体/笔径组，v0.7.26 笔架化后退役——配置归 toolStates.selPen
+    // （v0.7.25 曾有 desk.selPen 变体/笔径组，v0.7.26 笔架化后退役——配置归 toolStates.selPen
     //   + 笔架 collection；老 doc 里的 stale 键被 mergeInto 静默忽略）
     // ADR-0005/0006 形状笔：子工具 + **per-图形约束**（user：每个图形的 lock 分别持久化，默认全不锁）
     //   + grid 配置（默认 2×6 = 6 头身 + 中线，border 关）
@@ -185,6 +185,14 @@ function freshGroups() {
       //   +0.5 格系；t=三轴 px 行程）。持久化同意随 2026-07-28 plan 批准。
       iso: { box: null as { A: { x: number; y: number }; t: [number, number, number] } | null },
     },
+    // T5（v0.8.21）旧轨 webpaint/state.json 停写（ADR-0008 §9，user 确认）——它独有的三样收进 desk：
+    //   toolDials = **全部**工具的 dial 快照（eraser/filterBrush/selPen 从前只在旧轨；brush 与
+    //   brushTool 同刻同源、载入时 brushTool 语义不变）；palette = 调色板窗序列化；blender = 同步面板态。
+    //   三者都是「整包收/整包放」的 opaque json → 默认 null、mergeInto 整体赋值（{} 默认会被
+    //   mergeInto 的 dst-keys 遍历吞掉，别改回去）。
+    toolDials:     null as unknown,
+    palette:       null as unknown,
+    blender:       null as unknown,
     grid:          { on: false, cell: 16 },                              // #10 主栅格（tilemap 对齐，一直显示）
     // v0.6.48 裁剪·模板模式：本文档上次用的模板 id（便利记忆，无 DPI 语义——DPI 活在模板 SSoT，见设计定稿）
     crop:          { templateId: "" as string },
@@ -203,8 +211,8 @@ export type EditorGroups = ReturnType<typeof freshGroups>;
 const S = { g: freshGroups() };       // mutable holder（reset 时整份换，访问器每次 deref S.g → reset 生效）
 
 // ── 反应式引擎绑定（stage5）：brushTool(size/opacity/activeBrushId/color) + colorPicker.layerMode 是引擎**每笔读**的
-//   反应式态。editorState 作 SSoT 接口，底层存储绑到 createEditorState 的 reactive state —— 引擎一行不改、
-//   Vue 反应式不断（改 editorState.brushTool.size 直接写 reactive → currentBrush 重算）。
+//   反应式态。desk 作 SSoT 接口，底层存储绑到 useDials 的 reactive state —— 引擎一行不改、
+//   Vue 反应式不断（改 desk.brushTool.size 直接写 reactive → currentBrush 重算）。
 //   未绑定（pre-boot / node 测）→ 回落 S.g 纯值。
 interface EngineBind {
   getSize(): number; setSize(v: number): void;
@@ -215,7 +223,7 @@ interface EngineBind {
   getPressureOff(): boolean; setPressureOff(v: boolean): void;
 }
 let _bind: EngineBind | null = null;
-// 用 _bind 的 raw setter 灌值（不经 editorState setter → 不 mark dirty；load/reset/bind 用）。
+// 用 _bind 的 raw setter 灌值（不经 desk setter → 不 mark dirty；load/reset/bind 用）。
 function applyBoundFromGroups(g: EditorGroups): void {
   if (!_bind) return;
   _bind.setSize(g.brushTool.size); _bind.setOpacity(g.brushTool.opacity);
@@ -223,7 +231,7 @@ function applyBoundFromGroups(g: EditorGroups): void {
   _bind.setPickMode(g.colorPicker.layerMode);
   _bind.setPressureOff(g.pressureDisabled);
 }
-// boot 时 createEditorState 调：把当前 S.g（默认/已载入）灌进反应式引擎，二者对齐。
+// boot 时 useDials 调：把当前 S.g（默认/已载入）灌进反应式引擎，二者对齐。
 export function bindEditorReactive(b: EngineBind): void { _bind = b; applyBoundFromGroups(S.g); }
 
 // 容错合并：present 键覆盖，缺键留 default，深一层（position/viewport）也浅合并。
@@ -239,7 +247,7 @@ function mergeInto<T extends object>(dst: T, src: unknown): void {
 }
 
 // ── struct 门面：显式访问器 + 四方法（**setter 不标脏**——desk 无 dirty 标记，见上方 ⚠）───────────
-export const editorState = {
+export const desk = {
   // export ──（import 组 v0.5.19 退役：导入收进图层 + 菜单，无配置面）
   export: {
     get format(): string { return S.g.export.format; }, set format(v: string) { S.g.export.format = v; },
@@ -337,7 +345,7 @@ export const editorState = {
     set layerMode(v: string) { if (_bind) _bind.setPickMode(v); else S.g.colorPicker.layerMode = v; },
   },
   // viewport / checkboard —— 真 SSoT 在 board.viewport / state.checkerboard，这两个字段是**存盘时的单向镜像**
-  //   （由 syncRuntimeForSave 灌入）+ 载入时的回灌源（session-state 读 editorState.viewport → board）。
+  //   （由 syncRuntimeForSave 灌入）+ 载入时的回灌源（session-state 读 desk.viewport → board）。
   //   故 setter 生产代码不调；留着是为了 Unserialize/测试能构造完整 desk。
   get viewport(): EditorViewport | null { return S.g.viewport; }, set viewport(v: EditorViewport | null) { S.g.viewport = v; },
   get checkboard(): boolean { return S.g.checkboard; }, set checkboard(v: boolean) { S.g.checkboard = v; },
@@ -361,11 +369,24 @@ export const editorState = {
   // 开新文件必调：回默认 + 灌引擎。
   reset(): void { S.g = freshGroups(); applyBoundFromGroups(S.g); },
 
+  // 载入回灌读口（T5：旧轨 state.json 停写后这三样的新家；session-state 在 Unserialize 后消费）。
+  get toolDials(): unknown { return S.g.toolDials; },
+  get palette(): unknown { return S.g.palette; },
+  get blender(): unknown { return S.g.blender; },
+
   // 存前把运行时 SSoT（board 视口 / checkboard 观感开关）镜像进 S.g —— 存时才捞进（顺手），
   //   改动时什么都不做（desk 无 dirty 标记；且人类 2026-06-10 钉死「切棋盘不让画变未保存」）。
-  syncRuntimeForSave(vp: EditorViewport, checkboard: boolean): void { S.g.viewport = vp; S.g.checkboard = checkboard; },
+  //   extra（T5）：旧轨停写后随存快照的三样（toolDials/palette/blender）——同为存时捞进不标脏。
+  syncRuntimeForSave(vp: EditorViewport, checkboard: boolean, extra?: { toolDials?: unknown; palette?: unknown; blender?: unknown }): void {
+    S.g.viewport = vp; S.g.checkboard = checkboard;
+    if (extra) {
+      if (extra.toolDials !== undefined) S.g.toolDials = extra.toolDials;
+      if (extra.palette !== undefined) S.g.palette = extra.palette;
+      if (extra.blender !== undefined) S.g.blender = extra.blender;
+    }
+  },
 };
-export type EditorStateStruct = typeof editorState;
+export type DeskStruct = typeof desk;
 
 // 画布几何操作（裁剪/旋转/翻转/偏移）时透视配置的重映射（ADR-0006；user：小心裁剪时 VP 坐标）。
 //   VP/参考点是 doc 坐标的 desk 态，doc 几何变了不跟着变 = 透视静默错位。调用点在 doc-ops.ts

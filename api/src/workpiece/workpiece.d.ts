@@ -1,96 +1,80 @@
-import type { PaintingView } from "./painting-view.ts";
-import type { LayerTree } from "./layer-tree.ts";
-import type { SelectionFace } from "./selection-face.ts";
-export interface WorkpieceInternals {
-    doc: PaintingView;
+import type { UndoStack, RecordData, WorkpieceComponent } from "./undo-stack.ts";
+/** 注册进 workpiece 的组件还须带 collector 面（token 协作；ADR-0008 §1）。 */
+export interface CollectorComponent extends WorkpieceComponent {
+    /** commit/cancel 时打包并清空本 token 的 collector；null = 本 token 没被摸。 */
+    sealRecord(): RecordData | null;
+}
+export type UndoPolicy = "recorded" | "silent";
+export interface WorkpieceOpts {
+    /** 不传 = 该 workpiece 无 undo（写照走令牌，record 即弃）。 */
+    undo?: UndoStack;
+    /** FR 兜底报警：令牌未 commit/cancel 就被 GC（泄漏 bug）。默认 console.error。 */
+    onTokenLeak?: (label?: string) => void;
+}
+export interface WorkpieceChangeEvent {
+    kind: string;
+    recorded: boolean;
 }
 export declare class Workpiece {
-    /** 运行时数据是否偏离上次持久化（autosave/保存编排读写；operator 提交自动置 true）。 */
-    isDirty: boolean;
-    /** 构造期注入的 undo system（ADR-0007：capability 绑构造期；component 写 API 经它记账）。
-     *  T2 起类型收成 HistoryFacade：真 UndoHistory（引擎测试）与 LegacyHistory 桥（app，骑 v2 栈）都满足。 */
-    readonly history: HistoryFacade;
+    private _undo;
+    private _registry;
+    private _tokenRef;
+    private _tokenOpen;
+    private _touched;
     private _commitVersion;
-    private _lockHolder;
-    private _layers;
-    private _sel;
-    constructor(doc: PaintingView, history: HistoryFacade);
-    /** 结构类写面（S1 第一个 component：层树增删/复制/移动/合并/属性/结构 tx）。
-     *  写 doc 结构的唯一合法门——app 层不再直接 doc.addLayer + 手工记账。 */
-    get layers(): LayerTree;
-    /** LayerTree 构造时自注册（单次；组合根协作面，外部勿调）。
-     *  值 import LayerTree 会成环（workpiece→layer-tree→operators→workpiece，operators 的
-     *  extends 在模块 eval 期就要 DocumentOperator）→ 组件由组合根构造、注入到此。 */
-    _attachLayers(c: LayerTree): void;
-    /** 选区写面（S2 第二个 component：唯一记账口 + 预览 tx 窗口）。 */
-    get sel(): SelectionFace;
-    _attachSel(c: SelectionFace): void;
-    /** 每次 operator 提交 +1。render-tree 重建 / 缓存失效的 key。 */
+    private _lastSaved;
+    private _silentDirty;
+    private _listeners;
+    private _onTokenLeak;
+    private _fr;
+    constructor(opts?: WorkpieceOpts);
+    /** 已有开着的令牌 → throw（泄漏查获点）；泄漏者已被 GC → FR 报警路线 + 此处自愈回滚后继续。 */
+    begin(label?: string): WriteToken;
+    /** 开着的令牌存在？（substrate 观察者的收集门：LayerTiles 观察 tile 换手时据此判断收不收。） */
+    get tokenOpen(): boolean;
+    /** 单调：每次 step 应用（commit/undo/redo/cancel）+1 → 渲染缓存失效。 */
     get commitVersion(): number;
-    /** 端口读口（构造期未持 port 的引擎用；T5 随本类拆）。 */
-    readView(): PaintingView;
-    _acquireLock(holder: string): void;
-    _releaseLock(holder: string): void;
-    _isLocked(): boolean;
-    _bumpCommit(): void;
+    /** 位置身份：= 游标处 step id（无 undo workpiece 恒 0）→ dirty 派生。 */
+    get stateVersion(): number;
+    /** silent 组件（或无 undo workpiece 的任何组件）动过未存。 */
+    get silentDirty(): boolean;
+    /** 持久层存盘后调：记 lastSaved + 清 silentDirty。 */
+    markSaved(): void;
+    isDirty(): boolean;
+    /** 统一变更信号（histchange/sidecarchange 后继）。commit/cancel 按 touched 发、undo/redo 按 entries 发。 */
+    onChange(cb: (e: WorkpieceChangeEvent) => void): () => void;
+    /** 子类协作面（load 清栈用）；app 侧栈引用走构造时自己传入的 UndoStack。 */
+    protected get undoStack(): UndoStack | null;
+    protected register(c: CollectorComponent, policy: {
+        undo: UndoPolicy;
+    }): void;
+    /** component 写路径守门：写 substrate 前必调（无开着的令牌 → throw；同时登记 touched）。 */
+    _componentWrite(c: CollectorComponent): void;
+    /** WriteToken.commit 的后半场（token 关门后调）。 */
+    _commitToken(token: WriteToken, label?: string, hint?: (dir: "undo" | "redo") => void): void;
+    /** WriteToken.cancel 的后半场：倒序自反 swap 回滚，无痕（不入栈、不动 silentDirty）。 */
+    _cancelToken(token: WriteToken): void;
+    /** 不可恢复路径协作面（History unrecoverable / clear 用）：关门 + 各 collector 弃置——
+     *  不回滚（状态已不可信，回滚可能二次伤害），只释放句柄防泄漏。 */
+    _abandonToken(token: WriteToken): void;
+    private _assertCurrent;
+    private _rollbackTouched;
+    private _emit;
 }
-export type OpStatus = {
-    ok: true;
-} | {
-    ok: false;
-    msg?: string;
-};
-/** undo 编排门面的公共面（T2 桥接期抽出）：真 UndoHistory 与 legacy-bridge 的 LegacyHistory 都结构满足。
- *  调用方（LayerTree/SelectionFace/doc-ops/fill/float/layers-panel/import-image）只准依赖这个形状。 */
-export interface HistoryFacade {
-    run<A, D>(w: Workpiece, op: DocumentOperator<A, D>, args: A, o?: {
-        checkpoint?: boolean;
-        label?: string;
-    }): OpStatus;
-    compound<T>(w: Workpiece, fn: () => T, o?: {
+export declare class WriteToken {
+    private _wp;
+    private _label?;
+    private _open;
+    /** 仅 Workpiece.begin 构造（模块内协作；外部拿不到 ctor 入口）。 */
+    constructor(wp: Workpiece, label?: string);
+    /** commit/cancel 后再写 → throw（_componentWrite 查 open）。 */
+    get open(): boolean;
+    commit(opts?: {
         label?: string;
         hint?: (dir: "undo" | "redo") => void;
-    }): {
-        ok: boolean;
-        value?: T;
-        msg?: string;
-    };
-    /** v2-verb 迁移载具（T3b-2；见 legacy-bridge.withPoint）：fn 直写 v2 组件，共享令牌开/续/封。 */
-    withPoint<T>(label: string | undefined, o: {
-        checkpoint?: boolean;
-        hint?: (dir: "undo" | "redo") => void;
-    } | undefined, fn: () => T): {
-        ok: boolean;
-        value?: T;
-        msg?: string;
-    };
-    sealCheckpoint(): void;
-    undo(w: Workpiece): boolean;
-    redo(w: Workpiece): boolean;
-    canUndo(): boolean;
-    canRedo(): boolean;
-    readonly depth: number;
-    quotaUsage(): number;
-    clear(): void;
-}
-export interface OpResult<D> {
-    ok: boolean;
-    msg?: string;
-    replaced?: D;
-}
-export declare abstract class DocumentOperator<A, D> {
-    /** 标签（调试/状态栏/统计 key）。 */
-    abstract readonly kind: string;
-    /** 拿内部可变数据。仅在持锁的 forward/backward 里合法（其余时机 throw）。 */
-    protected mut(w: Workpiece): WorkpieceInternals;
-    /** 必须同步（硬规则）。见 OpResult 契约。 */
-    abstract forward(w: Workpiece, args: A, data: D | undefined): OpResult<D>;
-    abstract backward(w: Workpiece, args: A, data: D): OpResult<D>;
-    /** 该步 undo 包的内存估计（undo-history 配额驱逐用）。tile 句柄：压缩前记 0（走共享 raw
-     *  池配额）、压缩后记 compressedBytes/refCount——每次 push 全量重扫，压缩会让 usage 变。 */
-    estimateQuotaBytes(_args: A, _data: D | undefined): number;
-    /** 驱逐/清栈/截断 redo 时释放 data 持有的资源（tile 句柄 release 等）。 */
-    disposeData(_args: A, _data: D | undefined): void;
-    /** UI 提示（可选）：undo/redo 后的状态栏 toast 文案。UI 编排在 app 侧消费，workpiece 不碰 DOM。 */
-    statusFor?(dir: "do" | "undo" | "redo", args: A): string | undefined;
+    }): void;
+    /** 各被摸 collector 倒序回滚，无痕。 */
+    cancel(): void;
+    /** 不可恢复路径：弃置（不回滚不入栈，只释放 record）。app 正常流禁用——只给 unrecoverable 兜底。 */
+    abandon(): void;
 }

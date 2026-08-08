@@ -2,7 +2,7 @@ import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-vie
 import type { FloatFrame, TransformClass, FloatLayerComponent } from "./workpiece/float-component.ts";
 import type { SelectionComponent } from "./workpiece/selection-component.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
-import type { HistoryFacade } from "./workpiece/workpiece.ts";
+import type { History } from "./workpiece/history.ts";
 import type { SplinePlane } from "./bspline.ts";
 import type { U8Plane } from "./rotsprite.ts";
 type Node = ViewLeaf | ViewGroup;
@@ -78,7 +78,7 @@ export declare class FloatingTransform {
     private _float;
     private _sel;
     constructor(onChange?: () => void);
-    attach(doc: PaintingView, history: HistoryFacade, float: FloatLayerComponent, sel: SelectionComponent): void;
+    attach(doc: PaintingView, history: History, float: FloatLayerComponent, sel: SelectionComponent): void;
     setSampleMode(m: string): void;
     getSampleMode(): SampleMode;
     isActive(): boolean;

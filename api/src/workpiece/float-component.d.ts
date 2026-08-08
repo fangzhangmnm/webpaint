@@ -1,6 +1,6 @@
 import { LayerPixels } from "../tiles/tile-layer.ts";
 import type { RecordData } from "./undo-stack.ts";
-import type { Workpiece, CollectorComponent } from "./workpiece2.ts";
+import type { Workpiece, CollectorComponent } from "./workpiece.ts";
 export interface FloatRect {
     x: number;
     y: number;
