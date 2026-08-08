@@ -44,7 +44,7 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 let doc: AppContext["doc"], board: AppContext["board"], input: AppContext["input"], editMode: AppContext["editMode"];
 let setStatus: AppContext["setStatus"];
 let renderLayersPanel: AppContext["renderLayersPanel"], setGalleryOpen: AppContext["setGalleryOpen"], uniqueNameFor: AppContext["uniqueNameFor"];
-let history: AppContext["history"], workpiece: AppContext["workpiece"];
+let history: AppContext["history"], layers: AppContext["layers"];
 
 // 图库「导入照片」会 set 此 flag=true，oraFileInput change 读后立即复位（语义：照片打底新 doc）。
 let _addImportAsNewDoc = false;
@@ -167,11 +167,11 @@ export async function importImageAsLayer(file: File, opts: { center?: { x: numbe
   // v0.7.41 先切工具再动 doc：setTool 可能触发 fill 的「切出=commit」整点——必须落在导入前的
   // 活动层上。此前顺序是先加层再切换，fill 的 pending 预览会被填到刚导入的层上（latent bug）。
   setTool("lasso");
-  // v0.8.1（S1）：新建层走 workpiece.layers 门面（创建即记账；prevActiveId/locateNode 舞蹈已下沉。
+  // v0.8.1（S1）：新建层走 ctx.layers 门面（创建即记账；prevActiveId/locateNode 舞蹈已下沉。
   // AddLayerRecordOp 首跑只验证——像素在记账后填充合法，undo 摘层时才捕 spec、redo 连像素恢复）。
   // v0.7.41（user：「导入和进 transform 只要一个 undo checkpoint」）：checkpoint:false 微步，
   // 由紧随其后的 liftFloat（默认封口）把 [addLayer, liftFloat] 封成一个整点——一次 undo 整个导入消失。
-  const a = workpiece.layers.addLayer(file.name.replace(/\.[^.]+$/, ""), { checkpoint: false });
+  const a = layers.addLayer(file.name.replace(/\.[^.]+$/, ""), { checkpoint: false });
   if (!a.ok) {
     (bitmap as ImageBitmap).close?.();
     if (a.msg === "maxLayers") setStatus(t("mi.layerLimitImport", { max: doc.maxLayers }));
@@ -229,7 +229,7 @@ export function initImportImage(ctx: AppContext) {
   setGalleryOpen = ctx.setGalleryOpen;
   uniqueNameFor = ctx.uniqueNameFor;
   history = ctx.history;
-  workpiece = ctx.workpiece;
+  layers = ctx.layers;
 
   // 图层面板「导入图片」按钮 → file picker（强制叠层，复位 _addImportAsNewDoc）。
   document.getElementById("layerImportPhotoBtn")?.addEventListener("click", _openImagePicker);

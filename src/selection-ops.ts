@@ -25,8 +25,8 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // app 单例 / 跨模块函数（initSelectionOps 注入）
 let doc: AppContext["doc"], board: AppContext["board"], input: AppContext["input"];
-let editMode: AppContext["editMode"], history: AppContext["history"];
-let workpiece: AppContext["workpiece"];
+let editMode: AppContext["editMode"], history: AppContext["history"], layers: AppContext["layers"];
+
 let setStatus: AppContext["setStatus"], _afterDocChange: AppContext["afterDocChange"];
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"], _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let importImageAsLayer: AppContext["importImageAsLayer"];
@@ -57,11 +57,11 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
   const src = doc.activeLayer;
   if (!src) return;
   if (src.isGroup) { setStatus(t("se.selectLayerFirstGroup")); return; }
-  // v0.8.1（S1）：加层走 workpiece.layers 门面（创建即记账，prevActiveId 自动拍 = 当前 active = src）。
+  // v0.8.1（S1）：加层走 ctx.layers 门面（创建即记账，prevActiveId 自动拍 = 当前 active = src）。
   // compound 把 [addLayer, pixels] 封成一个整点：undo 先还原源层像素、再摘掉新层 + active 回源层。
   // v0.8.2（S2）：move 挖洞走 pixelHistory 事务（before 快照/入栈收进 tx；挖洞前 begin）。
-  const r = history.compound(workpiece, () => {
-    const a = workpiece.layers.addLayer(move ? "移到新层" : "复制层", { checkpoint: false });
+  const r = history.withPoint(move ? "moveToNewLayer" : "copyToNewLayer", {}, () => {
+    const a = layers.addLayer(move ? "移到新层" : "复制层", { checkpoint: false });
     if (!a.ok) throw new Error(a.msg);
     const newL = a.layer;
     // 把 active ∩ selection 的像素 copy 进 newL（v0.6.41 全字节：tiles 直读 → alpha×mask → 直落 tile）
@@ -93,7 +93,7 @@ export function initSelectionOps(ctx: AppContext) {
   input = ctx.input;
   editMode = ctx.editMode;
   history = ctx.history;
-  workpiece = ctx.workpiece;
+  layers = ctx.layers;
   setStatus = ctx.setStatus;
   _afterDocChange = ctx.afterDocChange;
   _commitTransform = ctx._commitTransform;

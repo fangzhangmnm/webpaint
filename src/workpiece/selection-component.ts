@@ -59,6 +59,13 @@ export class SelectionComponent implements CollectorComponent {
     this._cur = null;
   }
 
+  /** 预览 tx 窗口（T5 收编自 selection-face）：origin 保管、write 换预览、commit/abort 收口。
+   *  纯组件逻辑不碰 history——commit 返回 {changed, before}，**记账归调用方**
+   *  （history.withPoint(() => sel.commitPreApplied(before))）。toolbar 扩缩预览住户。 */
+  beginPreview(): SelectionPreviewTx {
+    return new SelectionPreviewTx(this);
+  }
+
   // ── CollectorComponent ──
 
   sealRecord(): RecordData | null {
@@ -82,5 +89,53 @@ export class SelectionComponent implements CollectorComponent {
     const r = data as SelRecord;
     if (r.v && !r.v.disposed) r.v.dispose();
     r.v = null;
+  }
+}
+
+/** 预览 tx（值语义沿 selection-face 的 SelectionPreviewTx；T5 起记账在调用方）。
+ *  origin = 进入时的选区。所有权：commit 后 before(=origin) 交调用方递给 commitPreApplied；
+ *  abort 还原 origin、预览产物就地 dispose。 */
+export class SelectionPreviewTx {
+  private _sel: SelectionComponent;
+  private _origin: Selection | null;
+  private _open = true;
+
+  constructor(sel: SelectionComponent) {
+    this._sel = sel;
+    this._origin = sel.view();
+  }
+
+  origin(): Selection | null { return this._origin; }
+  private _assertOpen(): void {
+    if (!this._open) throw new Error("SelectionPreviewTx: 已收口（commit/abort 后不可再用）");
+  }
+
+  /** 换预览：上一个预览产物无人接手 → 就地 dispose（origin 与新值本体除外）。write(origin) 合法（= 预览回到原选区）。 */
+  write(next: Selection | null): void {
+    this._assertOpen();
+    const prev = this._sel.view();
+    if (prev === next) return;
+    this._sel._rawWrite(next);
+    if (prev && prev !== this._origin && !prev.disposed) prev.dispose();
+  }
+
+  /** 收口：current ≠ origin → {changed:true, before:origin}（调用方负责记账）；无变化 → changed:false。 */
+  commit(): { changed: boolean; before: Selection | null } {
+    this._assertOpen();
+    this._open = false;
+    const cur = this._sel.view();
+    if (cur === this._origin) return { changed: false, before: null };
+    return { changed: true, before: this._origin };
+  }
+
+  /** 无痕还原 origin，预览产物就地 dispose。 */
+  abort(): void {
+    this._assertOpen();
+    this._open = false;
+    const cur = this._sel.view();
+    if (cur !== this._origin) {
+      if (cur && !cur.disposed) cur.dispose();
+      this._sel._rawWrite(this._origin);
+    }
   }
 }

@@ -58,7 +58,6 @@ export class PaintingWorkpiece extends Workpiece {
   constructor(opts: WorkpieceOpts & {
     host?: TilesHost;
     tree?: { width: number; height: number; maxLeaves?: () => number };
-    legacy?: CollectorComponent;
     /** desk persp 配置的读写口（app 接 workbench-state；不传 = 内存 host，纯测试用）。 */
     persp?: PerspHost;
   }) {
@@ -117,13 +116,6 @@ export class PaintingWorkpiece extends Workpiece {
     this.register(this.pendingFill, { undo: "recorded" });
     this.persp = new PerspComponent(this, opts.persp ?? memoryPerspHost());
     this.register(this.persp, { undo: "recorded" });
-    if (opts.legacy) this.register(opts.legacy, { undo: "recorded" });   // 迁移期（T5 拆）
-  }
-
-  /** 迁移期后装 legacy 桥组件（T5 拆）：组合根的构造环解法——legacyOps 需要 v1 workpiece，
-   *  v1 需要 PaintingView 端口，端口需要本工件 → 桥组件只能在本工件建成后注册。 */
-  attachLegacy(c: CollectorComponent): void {
-    this.register(c, { undo: "recorded" });
   }
 
   /** 装载（杀 docRaw/adoptState 的后继）：令牌灌入 → 清栈 → markSaved。 */

@@ -29,18 +29,16 @@ import "./iso-frame.test.mjs";         // isometric 透视模式：纯平行三�
 import "./app-version.test.mjs";
 import "./cpu-tile-pool.test.mjs";
 import "./background-sync-jobs.test.mjs";
-import "./undo-history.test.mjs";
-import "./undo-stack.test.mjs";             // T1 workpiece v2（ADR-0008）：令牌/collector/自反 swap/配额/双计数（旧 undo-history 在 T5 拆除）
+import "./undo-stack.test.mjs";             // T1 workpiece v2（ADR-0008）：令牌/collector/自反 swap/配额/双计数
 import "./layer-tiles.test.mjs";            // T2 像素组件：写时扣押（Krita memento）/verbs/computed 白名单+双捕获/no-op 守卫（pixel-tx-noop 后继）
-import "./legacy-bridge.test.mjs";          // T2 唯一栈桥：旧 operator 骑 v2 栈（run/compound/seal 语义 parity + tiles 混合原子性）
+import "./history.test.mjs";                // T5 History 编排器：withPoint 聚合/嵌套回滚/不可恢复协议（前身 legacy-bridge.test）
 import "./layer-tree2.test.mjs";            // T3a 层树 json 组件：换根收集/tileset 引用计数（删组泄漏回归锚）/verbs/setActive 不记账
 import "./painting-workpiece.test.mjs";     // T3b-1 树模式：load 令牌灌入（旧 doc 随 record 驱逐）/exportData 冻结往返/addGroup
 import "./doc-resize.test.mjs";
 import "./float-ops.test.mjs";     // S6：float 入 workpiece（lift/transform/reject/accept 整链 + 所有权/驱逐）
 import "./undo-stack-integrity.test.mjs";   // v0.7.35 栈引用完整性（import 越狱病理钉子 + 合规形状 + v0.7.41 单整点）
 import "./workpiece-layer-tree.test.mjs";   // v0.8.1 S1 LayerTree 门面（写即记账/treeTx/装配纪律；≠ layer-tree.test 的 doc 树模型）
-import "./selection-face.test.mjs";         // v0.8.2 S2 选区写面（唯一记账口 + 预览 tx 所有权规则）
-import "./write-gate.test.mjs";             // v0.8.4 S4 割3：mutator 窗口外裸调断言（arm/disarm 纪律）
+import "./selection-preview.test.mjs";      // v0.8.2 S2 选区写面锚（T5 换纯 v2：预览 tx 收编组件 + withPoint 记账）
 import "./store-absent.test.mjs";           // v0.8.7 B 骑士：null-store/内存 collection/dormant auth + 子进程 nostore boot smoke
 import "./sw-strategy.test.mjs";
 import "./liquify-bbox.test.mjs";

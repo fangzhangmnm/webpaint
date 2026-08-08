@@ -36,7 +36,7 @@ import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
 import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { HistoryFacade, Workpiece } from "./workpiece/workpiece.ts";
+import type { History } from "./workpiece/history.ts";
 import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
 import type { LayerTiles } from "./workpiece/layer-tiles.ts";
 import type { WriteToken } from "./workpiece/workpiece2.ts";
@@ -47,8 +47,6 @@ import { selPenSettingsFrom, stampsToBinaryGray8 } from "./sel-pen.ts";
 // ---- 引擎真类型已全部 .ts 化，直接 import（见各引擎模块）。本文件仅保留以下接缝别名/最小壳。----
 // doc 现取 PaintingView 真类型（board/lasso 都吃它）。
 type Doc = PaintingView;
-// 共享 undo 编排门面（T2 起 = LegacyHistory 桥骑 v2 栈；HistoryFacade 形状不变）。
-type History = HistoryFacade;
 // filterBrush 当前激活态：Filter 是 filter-brush.ts 的 BrushFilter（未 export，对 input 不透明）+ params。
 //   beginStroke 调用点再断言到引擎签名；这里 Filter/params 对 input 不透明 → unknown。
 interface FilterBrushState { Filter: unknown; params: unknown; }
@@ -62,7 +60,7 @@ type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
 //   写时扣押；commit 打包一步 / cancel 倒序回滚。
 interface ActiveStroke { engine: StrokeEngine; token: WriteToken; layer: ViewLeaf; finalize: boolean; inPlace: boolean; }
 
-// 选区变化 entry（lasso.endPath/setSelection 产 → _pushSelEntry 走 workpiece.sel 记账口）。
+// 选区变化 entry（lasso.endPath/setSelection 产 → _pushSelEntry 走 SelectionComponent 记账）。
 //   （LassoEntry 已死 v0.4.7：accept/reject 的 operator 编排收进 FloatingTransform。）
 interface SelectionChangeEntry { before?: Selection | null; after?: Selection | null; }
 
@@ -117,7 +115,6 @@ interface InputOpts {
   onColorSampled?: (hex: string) => void;
   status?: (msg: string) => void;
   history?: History | null;
-  workpiece?: Workpiece | null;
   wp2?: PaintingWorkpiece | null;
   layerTiles?: LayerTiles | null;
   isContentReplacing?: () => boolean;   // N10：云端快进正在换画布内容时为 true → draw-role 起笔降级（同 !canDraw 路径）
@@ -348,7 +345,6 @@ export class InputController {
   _lastTap: TapRef | null;
   _lastPenActivity: number = -Infinity;   // 最近笔尖落/移/抬时刻 (ms)。掌触 tap 门用
   history: History | null;
-  workpiece: Workpiece | null;
   wp2: PaintingWorkpiece | null;
   layerTiles: LayerTiles | null;
   _activeStroke: ActiveStroke | null = null;
@@ -394,10 +390,8 @@ export class InputController {
     // - undo: index--, putImageData(chain[index])
     // - redo: index++, putImageData(chain[index])
     this._lastTap = null;
-    // history: 共享 UndoHistory（app.js 创建注入）+ workpiece + operator 注册表。
-    // v0.4.5：不再注册 handler——lasso/selectionChange 走 pixel-tx/workpiece.sel（对称 swap，全同步）。
+    // history: 共享 History 编排器（app.ts 创建注入；T5 起纯 v2 令牌流）。
     this.history = opts.history || null;
-    this.workpiece = opts.workpiece || null;
     this.wp2 = opts.wp2 || null;
     this.layerTiles = opts.layerTiles || null;
     // 把 doc 引用给 lasso，便于直接操作 doc.selection
@@ -1448,11 +1442,11 @@ export class InputController {
     this.undo();
   }
   undo() {   // 纯 history undo（crop/adjust 的取消走 ctrlZ → editMode.abortTransient）
-    if (this.history && this.workpiece) this.history.undo(this.workpiece);
+    if (this.history) this.history.undo();
   }
   redo() {
     if (this.editMode && this.editMode.isTransient() && this.editMode.ctrlZMeans() === "abort-transient") return;   // crop/adjust 期间禁 redo
-    if (this.history && this.workpiece) this.history.redo(this.workpiece);
+    if (this.history) this.history.redo();
   }
   clearHistory() {
     if (this.history) this.history.clear();
@@ -1462,10 +1456,10 @@ export class InputController {
     this.lasso.syncFloating();
   }
 
-  // 选区变化 entry（lasso.setSelection/endPath 产，选区已应用）→ workpiece.sel 唯一记账口（S2）。
+  // 选区变化 entry（lasso.setSelection/endPath 产，选区已应用）→ SelectionComponent 记账（T5：直写组件 verb）。
   _pushSelEntry(entry: SelectionChangeEntry | null | undefined) {
-    if (!entry || !this.workpiece) return;
-    this.workpiece.sel.commitPreApplied((entry.before ?? null) as Parameters<typeof this.workpiece.sel.commitPreApplied>[0]);
+    if (!entry || !this.wp2 || !this.history) return;
+    this.history.withPoint("selection", {}, () => this.wp2!.selection.commitPreApplied((entry.before ?? null) as Selection | null));
   }
 
   // ---- 防误触 / ghost pointer 清理 ----

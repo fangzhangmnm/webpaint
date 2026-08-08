@@ -1,38 +1,38 @@
-// layer-tree —— workpiece 的结构类写面门面（v0.8.1 S1 立；**T3b-2 换心**：operator 流 → v2 verbs）。
+// layers-face —— 结构类写面门面（v0.8.1 S1 立；T3b-2 换心 v2 verbs；T5 迁出 workpiece/ 正名）。
+// app 侧胶水：layers-panel/topbar/import/explode/blender-sync 的图层结构入口（ctx.layers）。
 //
-// 「写即记账」契约不变：每个公共方法 = 一个 withPoint 令牌整点（checkpoint:false = 留开聚合，
-// 语义同旧 run；import 单整点/stampAll 复合沿用）。方法体内直写 LayerTree2/LayerTiles verbs，
-// undo 包 = 组件 collector 的根/tile record——TreeStructureOp/snapshotTree 舞蹈整族退役。
-// treeTx 已删：结构组合动作各有名字（addGroup/ungroup/collapseGroup/explodeLayer/stampAll/…）。
+// 「写即记账」契约不变：每个公共方法 = 一个 withPoint 令牌整点（checkpoint:false = 留开聚合；
+// import 单整点/stampAll 复合沿用）。方法体内直写 LayerTree2/LayerTiles verbs，
+// undo 包 = 组件 collector 的根/tile record。
 //
-// undo/redo 状态栏文案：经 o.statuses 由调用方传入（本组件不碰 i18n），落 step.hint
+// undo/redo 状态栏文案：经 o.statuses 由调用方传入（本门面不碰 i18n），落 step.hint
 // （非权威附注——文案丢了不影响状态正确性，符合 hint 三纪律）。
 // mergeDown 的合成字节在此烤（renderNodesToBytes 纯函数面）——v2 verb 收字节不碰 GL（T3a 定形）。
 
-import type { Workpiece, OpStatus, HistoryFacade } from "./workpiece.ts";
-import type { LayerTree2, LayerPropKey } from "./layer-tree2.ts";
-import type { LayerTiles, Rect } from "./layer-tiles.ts";
-import { flattenViewLeaves, type PaintingView, type ViewLeaf, type ViewGroup, type ViewNode } from "./painting-view.ts";
-import { renderNodesToBytes } from "../doc-render.ts";
+import type { History } from "./workpiece/history.ts";
+import type { LayerTree2, LayerPropKey } from "./workpiece/layer-tree2.ts";
+import type { LayerTiles, Rect } from "./workpiece/layer-tiles.ts";
+import { type PaintingView, type ViewLeaf, type ViewGroup, type ViewNode } from "./workpiece/painting-view.ts";
+import { renderNodesToBytes } from "./doc-render.ts";
 
+export type OpStatus = { ok: true } | { ok: false; msg?: string };
 export interface TreeStatuses { undoStatus?: string; redoStatus?: string }
 export interface RunOpts { checkpoint?: boolean; label?: string; statuses?: TreeStatuses }
 export type AddLayerResult = { ok: true; layer: ViewLeaf } | { ok: false; msg?: string };
 
-export class LayerTree {
-  private _history: HistoryFacade;
+export class LayersFace {
+  private _history: History;
   private _tree: LayerTree2;
   private _tiles: LayerTiles;
   private _port: PaintingView;
   private _status: (msg: string) => void;
 
-  constructor(deps: { w: Workpiece; history: HistoryFacade; tree: LayerTree2; tiles: LayerTiles; port: PaintingView; status?: (msg: string) => void }) {
+  constructor(deps: { history: History; tree: LayerTree2; tiles: LayerTiles; port: PaintingView; status?: (msg: string) => void }) {
     this._history = deps.history;
     this._tree = deps.tree;
     this._tiles = deps.tiles;
     this._port = deps.port;
     this._status = deps.status ?? (() => {});
-    deps.w._attachLayers(this);
   }
 
   /** o.statuses → step.hint（undo/redo 时报状态栏；非权威附注）。 */

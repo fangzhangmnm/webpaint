@@ -26,7 +26,7 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 // ctx 绑入：core 单例。doc = PaintingView 端口（读面 + 选区过渡宿）。
 let editMode: AppContext["editMode"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
-let workpiece: AppContext["workpiece"], wp2: AppContext["wp2"];
+let wp2: AppContext["wp2"];
 // 命令 = 拥有它的模块的接口（显式 import，不经 ctx）
 import { setMenuOpen } from "./settings-menu.ts";
 import { setAdjustOpen } from "./filters-adjust.ts";
@@ -49,7 +49,7 @@ function _applyUi(u: UiSnap): void {
 interface DocTransformSpec {
   /** 新 doc 尺寸（缺省 = 不变）。 */
   newW?: number; newH?: number;
-  /** resize 形：逐叶产新实例（旧实例进 DocResizeOp undo 包）。 */
+  /** resize 形：逐叶产新实例（旧实例进 exchange record undo 包）。 */
   mapLeaf?: (lp: LayerPixels) => LayerPixels;
   /** computed 形：LayerTiles 白名单 verb（flip/rot90/offsetWrap）。 */
   applyComputed?: () => void;
@@ -59,12 +59,12 @@ interface DocTransformSpec {
   after?: () => void;
 }
 
-// 结构上保证不漏 undo 事务：整个变换在一个 compound 令牌里，undo 包 = collector record +
-// DocResizeOp/Selection 微步；fn 中途抛 → token.cancel 全量回滚（含已换实例/已换选区）。
+// 结构上保证不漏 undo 事务：整个变换在一个 withPoint 令牌里，undo 包 = 各组件 collector record
+// （tiles exchange/树/选区/persp）；fn 中途抛 → token.cancel 全量回滚（含已换实例/已换选区）。
 function runDocTransform(label: string, tf: DocTransformSpec): void {
   editMode.applyPendingTransient();
   const ui: { before: UiSnap; after: UiSnap | null } = { before: _captureUi(), after: null };
-  const res = history.compound(workpiece, () => {
+  const res = history.withPoint("docTransform", { hint: (dir) => _applyUi(dir === "undo" ? ui.before : ui.after!) }, () => {
     if (tf.mapLeaf) {
       // T5：实例交换记账收进 LayerTiles.resizeAllLeaves（exchange record；map 期间挂起收集的
       //   纪律也在 verb 内——旧 DocResizeOp/挂起舞蹈退役）。undo 包 = 另一侧实例，同 step 与树账同向翻。
@@ -84,7 +84,7 @@ function runDocTransform(label: string, tf: DocTransformSpec): void {
     }
     tf.after?.();
     ui.after = _captureUi();
-  }, { label: "docTransform", hint: (dir) => _applyUi(dir === "undo" ? ui.before : ui.after!) });
+  });
   if (!res.ok) { reportError(new Error(`[docTransform] ${label} 失败（已回滚）：${res.msg ?? "?"}`), "error"); return; }
   if (els.canvasSizeLabel) els.canvasSizeLabel.textContent = `${doc.width}×${doc.height}`;
   board.invalidateAll();
@@ -252,7 +252,7 @@ function _closeOffsetDialog() {
 }
 
 export function initDocOps(ctx: AppContext) {
-  ({ editMode, doc, board, history, setStatus, workpiece, wp2,
+  ({ editMode, doc, board, history, setStatus, wp2,
      _suppressTransientPanels, _restoreTransientPanels } = ctx);
 
   // 裁到选区 ----

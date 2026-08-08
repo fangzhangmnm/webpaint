@@ -63,7 +63,7 @@ export class LayerTiles implements CollectorComponent {
     setTileSwapObserver((lp, key, old) => this._onTileSwap(lp, key, old));
   }
 
-  /** legacy-bridge 协作面：旧 operator 应用期间挂起收集（其 undo 自带快照，收了=双记账）。 */
+  /** 内部/装载协作面：自带记账的窗口挂起收集（exchange/computed verb 体内、load 灌入——收了=双记账）。 */
   _suspendCollect(on: boolean): void { this._suspend += on ? 1 : -1; }
 
   // ── tileset 注册表（T3，ADR-0008 §3）：id → 引用计数 tileset ──

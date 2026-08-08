@@ -275,11 +275,11 @@ async function push() {
 
 // 拉到新图层：贴图按原生分辨率居中放入新层（doc 尺寸不变）。返回 false = 图层已达上限（已弹状态）。
 // v0.7.35：入 undo——旧「新层不入 undo」语义是抄 import 的越狱姿势，会让栈引用历史不知道的层
-// （undo 跨树操作静默销毁 / redo 找不到层 → 整栈被弃）。v0.8.1（S1）：走 workpiece.layers 门面
+// （undo 跨树操作静默销毁 / redo 找不到层 → 整栈被弃）。v0.8.1（S1）：走 ctx.layers 门面
 // （创建即记账；AddLayerRecordOp 首跑只验证，像素在记账后填充合法——undo 摘层时才捕 spec）。
 function placeBitmapAsNewLayer(bmp: ImageBitmap, name: string): boolean {
   const doc = ctx.doc;
-  const a = ctx.workpiece.layers.addLayer(name);
+  const a = ctx.layers.addLayer(name);
   if (!a.ok) {
     if (a.msg === "maxLayers") ctx.setStatus(t("bl.layerLimit", { max: doc.maxLayers }), true);
     else reportError(new Error("[blender] addLayer failed: " + a.msg), "error");

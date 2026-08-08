@@ -29,7 +29,7 @@ import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";
-import type { HistoryFacade } from "./workpiece/workpiece.ts";
+import type { History } from "./workpiece/history.ts";
 import type { FloatLayerComponent } from "./workpiece/float-component.ts";
 import type { SelectionComponent } from "./workpiece/selection-component.ts";
 
@@ -120,7 +120,7 @@ export class LassoEngine {
     this._lineartOracle.invalidate();   // 换文档释放 label map（16MB 级）；key 本身安全，这里纯腾内存
   }
   // v0.4.7（S6）：float 状态在 workpiece——lift/变换/stamp/accept/reject 全走 operator，接线在此注入。
-  attachWorkpiece(doc: PaintingView, history: HistoryFacade, float: FloatLayerComponent, sel: SelectionComponent) { this._ft.attach(doc, history, float, sel); }
+  attachWorkpiece(doc: PaintingView, history: History, float: FloatLayerComponent, sel: SelectionComponent) { this._ft.attach(doc, history, float, sel); }
   // undo/redo 可能让浮层出现/消失（lift/drop 都在栈上）：把 _state 与 workpiece 对齐 + 引擎重采纳
   // transform metadata。app 侧 reconciler（transient-panels.syncFloatTransient）每次 histchange 后调。
   syncFloating() {
@@ -468,7 +468,7 @@ export class LassoEngine {
     this.onChange();
     return true;
   }
-  /** 收笔：产单条 history entry（before 所有权随 entry 交给 workpiece.sel 记账口，同 _applySelectionUpdate 契约）。 */
+  /** 收笔：产单条 history entry（before 所有权随 entry 交给 SelectionComponent 记账，同 _applySelectionUpdate 契约）。 */
   magicDragEnd() {
     if (!this.doc || this._state !== "magic-drag") return null;
     const orig = this._magicOrig;
@@ -503,7 +503,7 @@ export class LassoEngine {
     this.doc.selection = merged;
     this.onChange();
     return { type: "selectionChange", before: oldSel, after: merged };
-    // before(=oldSel) 所有权随 entry 交给 workpiece.sel（input._pushSelEntry）；merged 归 doc.selection。
+    // before(=oldSel) 所有权随 entry 交给 SelectionComponent（input._pushSelEntry）；merged 归 doc.selection。
   }
 
   // -------- 模式切换 --------

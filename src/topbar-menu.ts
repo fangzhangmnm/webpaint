@@ -35,7 +35,7 @@ const errMsg = (e: unknown): string => String((e as { message?: unknown })?.mess
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initTopbarMenu(ctx) 注入）----
 let input: AppContext["input"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], editMode: AppContext["editMode"];
-let workpiece: AppContext["workpiece"];
+let layers: AppContext["layers"];
 let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"], updateZoomLabel: AppContext["updateZoomLabel"];
 let _signInNav = false;   // v0.6.22：登录 redirect 导航中，beforeunload 别挡
 let rack: AppContext["rack"];
@@ -50,7 +50,7 @@ export function initTopbarMenu(ctx: AppContext) {
   doc = ctx.doc;
   board = ctx.board;
   history = ctx.history;
-  workpiece = ctx.workpiece;
+  layers = ctx.layers;
   editMode = ctx.editMode;
   setStatus = ctx.setStatus;
   updateSaveStatus = ctx.updateSaveStatus;
@@ -75,8 +75,8 @@ export function initTopbarMenu(ctx: AppContext) {
     if (a !== "confirm") return;
     const layer = doc.activeLayer as ViewLeaf | null;
     if (!layer || layer.isGroup) return;
-    // v0.8.3（S3）：走 workpiece.layers.clearLayer（快照/清空/入栈收进组件），Ctrl+Z 能复活。
-    workpiece.layers.clearLayer(layer.id);
+    // v0.8.3（S3）：走 ctx.layers.clearLayer（快照/清空/入栈收进组件），Ctrl+Z 能复活。
+    layers.clearLayer(layer.id);
     board.invalidateAll();
     setStatus(t("tm.clearedActiveLayer"));
   });

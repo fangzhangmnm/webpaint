@@ -177,7 +177,7 @@ export class Workpiece {
     this._rollbackTouched();
   }
 
-  /** 不可恢复路径协作面（legacy-bridge unrecoverable 用）：关门 + 各 collector 弃置——
+  /** 不可恢复路径协作面（History unrecoverable / clear 用）：关门 + 各 collector 弃置——
    *  不回滚（状态已不可信，回滚可能二次伤害），只释放句柄防泄漏。 */
   _abandonToken(token: WriteToken): void {
     this._assertCurrent(token);

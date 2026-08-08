@@ -16,8 +16,8 @@ import type { PaintingView } from "./workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { LegacyHistory } from "./workpiece/legacy-bridge.ts";
-import type { Workpiece } from "./workpiece/workpiece.ts";
+import type { History } from "./workpiece/history.ts";
+import type { LayersFace } from "./layers-face.ts";
 import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
 import type { LayerTiles } from "./workpiece/layer-tiles.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
@@ -104,8 +104,8 @@ export interface AppContext {
                                  // 装载/换文档走 wp2.load()（令牌写），不存在 raw 逃生门。
   board: Board;
   input: InputController;
-  history: LegacyHistory;        // T2（ADR-0008）：旧 UndoHistory 公共面照旧，底下骑 v2 UndoStack（唯一栈）
-  workpiece: Workpiece;          // v1 文档聚合根（T5 拆中：operator 注册表已死，残余 = 门面载体）
+  history: History;              // v2 undo 编排器（共享令牌开/续/封 + undo/redo 门 + 不可恢复协议）
+  layers: LayersFace;            // 结构类写面门面（图层结构入口：withPoint 整点 + statuses hint）
   wp2: PaintingWorkpiece;        // v2 工件（令牌工厂；像素写 = begin() + 直写，collector 自动记账）
   layerTiles: LayerTiles;        // v2 像素组件（= wp2.layerTiles，热路径直取）
   rack: RackHandle;

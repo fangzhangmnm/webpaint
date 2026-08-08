@@ -29,7 +29,7 @@ import type { FloatFrame, FloatTransformMeta, WorkpieceFloat, FloatState, Transf
 import type { SelectionComponent } from "./workpiece/selection-component.ts";
 import { extractFloatPixels, composeCutHole, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
-import type { HistoryFacade } from "./workpiece/workpiece.ts";
+import type { History } from "./workpiece/history.ts";
 import { prefilterToSplinePlane } from "./bspline.ts";
 import type { SplinePlane } from "./bspline.ts";
 import { rotspriteUpscale } from "./rotsprite.ts";
@@ -151,7 +151,7 @@ export class FloatingTransform {
   _sampleMode: SampleMode;
   onChange: () => void;
   private _doc: PaintingView | null = null;
-  private _history: HistoryFacade | null = null;
+  private _history: History | null = null;
   private _float: FloatLayerComponent | null = null;
   private _sel: SelectionComponent | null = null;
 
@@ -164,7 +164,7 @@ export class FloatingTransform {
   }
 
   // workpiece/undo 接线（input.ts 构造后注入；lift/stamp/commit/cancel 全走令牌编排）。
-  attach(doc: PaintingView, history: HistoryFacade, float: FloatLayerComponent, sel: SelectionComponent) {
+  attach(doc: PaintingView, history: History, float: FloatLayerComponent, sel: SelectionComponent) {
     this._doc = doc;
     this._history = history;
     this._float = float;

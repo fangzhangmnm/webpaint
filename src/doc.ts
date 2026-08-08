@@ -105,7 +105,6 @@ export type DeepSnapNode =
 
 // 选区对象：selection.ts 拥有真类型（batch 14 起直接 import，替原本地 SelectionLike 镜像）。
 import type { Selection } from "./selection.ts";
-import { assertDocWrite } from "./workpiece/write-gate.ts";   // S4 割3：mutator 入口兜底（窗口外裸调 → dev throw / prod 上报）
 
 export class Layer {
   id: number;
@@ -444,7 +443,6 @@ export class PaintDoc {
     backgroundColor: string;
     referenceLayerId?: number | null;
   }) {
-    assertDocWrite("adoptState");
     // v0.4：旧树的 tile 句柄显式释放（caller=adoptModel 随后 clearHistory，无人再引用旧树；
     //   loaded.layers 是解码出的新树，与旧树不共对象）。
     if (loaded.layers !== this.layers) eachLeaf(this.layers, (l) => l.pixels.dispose());
@@ -525,7 +523,6 @@ export class PaintDoc {
 
   // 兼容：按扁平叶序 index 设 active（老 ORA state 存的是 index）。
   setActive(index: number) {
-    assertDocWrite("setActive");
     const L = flattenLeaves(this.layers)[index];
     if (!L) return false;
     this.activeId = L.id;
@@ -533,7 +530,6 @@ export class PaintDoc {
   }
 
   setActiveById(id: number) {
-    assertDocWrite("setActiveById");
     if (!findNodeById(this.layers, id)) return false;
     this.activeId = id;
     return true;
@@ -556,7 +552,6 @@ export class PaintDoc {
   }
 
   addLayer(name?: string) {
-    assertDocWrite("addLayer");
     if (countLeaves(this.layers) >= this.maxLayers) return null;
     const finalName = name || this._nextLayerName();
     const L = new Layer({
@@ -588,7 +583,6 @@ export class PaintDoc {
   // 删除指定节点（id；叶或组——组连带 children）。默认 doc 至少留 1 个叶（守底）。
   //   allowEmpty=true：允许删到 0 叶（组删除用——清空后 caller 补一张空层，保证不卡在「非空组删不掉」）。
   removeLayer(id: number, allowEmpty = false) {
-    assertDocWrite("removeLayer");
     const loc = findParentOf(this.layers, id);
     if (!loc) return false;
     const removingLeaves = countLeaves([loc.node]);
@@ -635,7 +629,6 @@ export class PaintDoc {
   //   组自身 opacity/mode/clip/visible 保留到新叶上 → 视觉不变）；null = 空组 → 空叶。
   //   撤销走 snapshotTree/treeStructure（新叶是活引用，undo 即从树上摘掉）。
   collapseGroupToLayer(id: number, merged: { data: Uint8ClampedArray; w: number; h: number } | null) {
-    assertDocWrite("collapseGroupToLayer");
     const loc = findParentOf(this.layers, id);
     if (!loc || !loc.node.isGroup) return null;
     const g = loc.node as LayerGroup;
@@ -655,7 +648,6 @@ export class PaintDoc {
   //   在 before 快照里，**勿 dispose 其像素**（同删组语义）。失败（非叶/超上限）→ null。
   explodeLayerToLayers(id: number, parts: { data: Uint8ClampedArray; name: string }[],
                        rect: { ox: number; oy: number; w: number; h: number }) {
-    assertDocWrite("explodeLayerToLayers");
     const loc = findParentOf(this.layers, id);
     if (!loc || loc.node.isGroup || parts.length === 0) return null;
     const src = loc.node as Layer;
@@ -679,7 +671,6 @@ export class PaintDoc {
   // #25（v0.5）：盖印全部可见层 → 新叶**强制置顶**（根级数组尾 = 最顶）。merged = 全树合成位图。
   //   「其他图层自动隐藏」由调用方编排（组走 treeStructure 快照，叶 visible 走 layerProp op）。
   stampAllToTopLayer(merged: { data: Uint8ClampedArray; w: number; h: number }) {
-    assertDocWrite("stampAllToTopLayer");
     if (countLeaves(this.layers) >= this.maxLayers) return null;
     const L = new Layer({ width: this.width, height: this.height, name: `${tLatin("doc.stampName")} ${this._nextLayerNum()}`, empty: true });
     L.replaceFromBytes(merged.data, 0, 0, merged.w, merged.h);
@@ -689,7 +680,6 @@ export class PaintDoc {
   }
 
   mergeDownLayer(L: Layer) {
-    assertDocWrite("mergeDownLayer");
     if (!L || L.isGroup) return { ok: false, reason: "bottom" };
     const loc = findParentOf(this.layers, L.id);
     if (!loc || loc.index <= 0) return { ok: false, reason: "bottom" };
@@ -767,7 +757,6 @@ export class PaintDoc {
   //   caller 传 locateNode() 拿到的 {parentId, index}，组内删除/新建也能精确复位。active 不在此调整
   //   （所有 caller 插入后显式 setActiveById）。
   insertLayerAt(index: number, spec: LayerSpecShape, parentId: number | null = null) {
-    assertDocWrite("insertLayerAt");
     if (countLeaves(this.layers) >= this.maxLayers) return false;
     const parentNode = parentId == null ? null : findNodeById(this.layers, parentId);
     const parent = parentNode && parentNode.isGroup ? parentNode.children : this.layers;
@@ -814,7 +803,6 @@ export class PaintDoc {
   // 上移 / 下移（toward = +1 上，-1 下）——在节点**同级**内。active 按 id 不需调整。
   // bottom = 同级 [0]，top = 同级末尾。跨组边界移动 = reparent（见 moveIntoGroup/moveOutOfGroup）。
   moveLayer(id: number, toward: number) {
-    assertDocWrite("moveLayer");
     const loc = findParentOf(this.layers, id);
     if (!loc) return false;
     const j = loc.index + toward;
@@ -828,7 +816,6 @@ export class PaintDoc {
   //   插在源层之上并设为 active。纯模型操作（无 history）：caller 负责入栈 + 压缩快照 + 刷新。
   //   成功 → { ok:true, newLayer, index }；失败 → { ok:false, reason: max | missing }
   duplicateLayer(id: number) {
-    assertDocWrite("duplicateLayer");
     if (countLeaves(this.layers) >= this.maxLayers) return { ok: false, reason: "max" };
     const loc = findParentOf(this.layers, id);
     if (!loc) return { ok: false, reason: "missing" };
@@ -857,7 +844,6 @@ export class PaintDoc {
   // 新建**空**组，插在 active 节点的同级、active 之上，设为 active。返回新组。
   //   组不计入 maxLayers（只数叶）。创建入口走「+」菜单（编组当前层已砍，靠空组 + 移入上方组）。
   addGroup(name?: string) {
-    assertDocWrite("addGroup");
     const g = new LayerGroup({ name });
     this._insertAtActive(g);          // active 是组 → 嵌进去；否则同级之上
     this.activeId = g.id;
@@ -866,7 +852,6 @@ export class PaintDoc {
 
   // 把节点（id）包进一个新组，替换其在 parent 的原位。返回 { ok, group } 或 { ok:false }。
   groupSelection(id: number) {
-    assertDocWrite("groupSelection");
     const loc = findParentOf(this.layers, id);
     if (!loc) return { ok: false, reason: "missing" };
     const g = new LayerGroup({ children: [loc.node] });
@@ -877,7 +862,6 @@ export class PaintDoc {
 
   // 解组：组的 children 提到组在 parent 的原位（保序），删组。返回 { ok, childIds } 或 { ok:false }。
   ungroup(groupId: number) {
-    assertDocWrite("ungroup");
     const loc = findParentOf(this.layers, groupId);
     if (!loc || !loc.node.isGroup) return { ok: false, reason: "not-group" };
     const kids = loc.node.children;
@@ -890,7 +874,6 @@ export class PaintDoc {
 
   // 把节点移入组（到组内顶部 = children 末尾）。拒绝把组移进自己的子孙。返回 ok。
   moveIntoGroup(id: number, groupId: number) {
-    assertDocWrite("moveIntoGroup");
     if (id === groupId) return false;
     const g = findNodeById(this.layers, groupId);
     const node = findNodeById(this.layers, id);
@@ -904,7 +887,6 @@ export class PaintDoc {
 
   // 把节点移出其所在组（提到组的同级、组之上）。已在根 → no-op。返回 ok。
   moveOutOfGroup(id: number) {
-    assertDocWrite("moveOutOfGroup");
     const loc = findParentOf(this.layers, id);
     if (!loc || !loc.parentNode) return false;
     const gloc = findParentOf(this.layers, loc.parentNode.id);
@@ -926,7 +908,6 @@ export class PaintDoc {
     return { activeId: this.activeId, nodes: this.layers.map(snapNode) };
   }
   restoreTree(snap: { activeId: number | null; nodes: TreeSnapNode[] } | null) {
-    assertDocWrite("restoreTree");
     if (!snap) return;
     const build = (rec: TreeSnapNode): Node => {
       if (!rec.isGroup) return rec.ref;     // 同一个活 Layer 对象
@@ -948,7 +929,6 @@ export class PaintDoc {
 
   // 清空当前 layer 像素（不删 layer）。
   clearActiveLayer() {
-    assertDocWrite("clearActiveLayer");
     const L = this.activeLayer;
     if (!L || L.isGroup) return;
     L.clearAll();
@@ -1007,7 +987,6 @@ export class PaintDoc {
     selection: Selection | null;
     layers: DeepSnapNode[];
   } | null) {
-    assertDocWrite("restoreSnapshotAll");
     if (!snap) return;
     this.width = snap.width;
     this.height = snap.height;
@@ -1029,7 +1008,6 @@ export class PaintDoc {
   //   resample-bytes：auto=缩小面积平均（整数比=严格 box，像素模板鲁棒）/放大双三次。
   //   frame 恰 = 目标 px 且整数 → resampleBytes 恒等路径 = 纯裁剪逐字节。
   cropResampleTo(frame: { x: number; y: number; w: number; h: number }, tw: number, th: number, mode = "auto") {
-    assertDocWrite("cropResampleTo");
     const fx = frame.x, fy = frame.y, fw = Math.max(1, frame.w), fh = Math.max(1, frame.h);
     const sx = tw / fw, sy = th / fh;
     for (const L of flattenLeaves(this.layers)) {
@@ -1056,7 +1034,6 @@ export class PaintDoc {
   }
 
   cropTo(rect: { x: number; y: number; w: number; h: number }) {
-    assertDocWrite("cropTo");
     const dx = rect.x | 0, dy = rect.y | 0, nw = Math.max(1, rect.w | 0), nh = Math.max(1, rect.h | 0);
     for (const L of flattenLeaves(this.layers)) {
       L.setPixels(L.pixels.cropped(dx, dy, nw, nh), nw, nh);   // 纯 tile：裁切 + 新 doc 尺寸
@@ -1073,7 +1050,6 @@ export class PaintDoc {
   // 水平翻转整个 doc（所有 layer + selection）。doc 尺寸不变。
   // 每层：canvas 内容左右镜像；bbox 左上角 x → docW - (bboxX + bboxW)。
   flipHorizontal() {
-    assertDocWrite("flipHorizontal");
     const W = this.width;
     for (const L of flattenLeaves(this.layers)) {
       L.setPixels(L.pixels.flippedHorizontal(), L.docW, L.docH);   // 纯 tile 水平镜像
@@ -1094,7 +1070,6 @@ export class PaintDoc {
   //   要 newX=ly, newY=bboxW-lx → (a,b,c,d,e,f)=(0,-1,1,0,0,bboxW)。
   //   （注意 e=0,f=bboxW；写成 (…,bboxW,0) 会把内容平移出界——这是常见照抄错。）
   rotate90CCW() {
-    assertDocWrite("rotate90CCW");
     const W = this.width;
     const H = this.height;
     for (const L of flattenLeaves(this.layers)) {
@@ -1112,7 +1087,6 @@ export class PaintDoc {
   // v110: 重采样 doc 到 newW × newH。mode: "nearest" | "bilinear" | "bicubic"
   // 各 layer canvas 重画 + bbox 缩放；selection mask 同步缩放
   resampleTo(newW: number, newH: number, mode = "bilinear") {
-    assertDocWrite("resampleTo");
     const nw = Math.max(1, newW | 0);
     const nh = Math.max(1, newH | 0);
     const sx = nw / this.width;
@@ -1147,7 +1121,6 @@ export class PaintDoc {
   //   —— 不做 trim-to-content：seamless 贴图层通常铺满整幅，trim 后 bbox 仍是整幅；
   //      trim 扫描是易错优化，且 computeMaxLayers 本就按「每层占满」悲观预算，整幅 bbox 与之一致。
   offsetWrap(dx: number, dy: number) {
-    assertDocWrite("offsetWrap");
     const W = this.width, H = this.height;
     const ox = (((dx | 0) % W) + W) % W;   // 归一化到 [0, W)
     const oy = (((dy | 0) % H) + H) % H;   // 归一化到 [0, H)

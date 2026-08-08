@@ -2,11 +2,11 @@
 // 即「选当前工具、把按钮高亮/可点从 EditMode 派生、lasso 子工具/集合运算/变换/选区动作工具栏」。
 // drawing app 只经 editMode（持久工具 + transient）这一个轴跟工具耦合：
 //   setTool → editMode.setTool → emit wp:modechange → _syncEditModeUI 重新派生整套 UI。
-// ctx 绑：editMode/state/doc/board/input/history/workpiece/pixelHistory/dialReactive/rack/setStatus/leftDial,
+// ctx 绑：editMode/state/doc/board/input/history/wp2/dialReactive/rack/setStatus/leftDial,
 //        + app-local（仍在 app.js，经 ctx 绑）：_suppressTransientPanels/_restoreTransientPanels/
 //          _commitTransform/_cancelTransform/selectionToNewLayer/afterDocChange。
 // importable：Selection（选区取反/全选）、fillResampleSelect（变换采样 dropdown SSoT）。
-// undo（v0.8.2 S2）：selection-entry 走 workpiece.sel 记账口、清除走 pixelHistory 事务（①型裸调已退役）。
+// undo（v0.8.2 S2；T5 直写组件 verb）：selection-entry 走 SelectionComponent 记账、清除走 pixelHistory 事务。
 
 import { els } from "./els.ts";
 import { PANELS, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
@@ -24,7 +24,7 @@ import { configFromModeState, planesForMode, defaultVpsForMode } from "./perspec
 import type { PerspMode } from "./perspective-frame.ts";
 import type { AppContext } from "./app-context.ts";
 import type { LayerSnap } from "./doc.ts";
-import type { SelectionPreviewTx } from "./workpiece/selection-face.ts";
+import type { SelectionPreviewTx } from "./workpiece/selection-component.ts";
 
 // 静态存在的工具栏元素查表 helper（initToolbar 在 DOM 就绪后调）。
 const byId = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -38,15 +38,15 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 let editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"], board: AppContext["board"];
 let input: AppContext["input"], history: AppContext["history"], dialReactive: AppContext["dialReactive"];
-let workpiece: AppContext["workpiece"], wp2: AppContext["wp2"];
+let wp2: AppContext["wp2"];
 let rack: AppContext["rack"], setStatus: AppContext["setStatus"], leftDial: AppContext["leftDial"];
 let _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"];
 let selectionToNewLayer: AppContext["selectionToNewLayer"];
 
-// selection-entry → workpiece.sel 唯一记账口（S2；setSelection 已把 after 应用到 doc，只交 before）。
+// selection-entry → SelectionComponent 记账（S2；setSelection 已把 after 应用到 doc，只交 before）。
 const pushSel = (entry: { before: Selection | null } | null | undefined) => {
-  if (entry) workpiece.sel.commitPreApplied(entry.before ?? null);
+  if (entry) history.withPoint("selection", {}, () => wp2.selection.commitPreApplied(entry.before ?? null));
 };
 
 // 套索工具栏 DOM（initToolbar 里查表）。静态元素 → 非空；btn 组 → 数组；下拉 → select。
@@ -453,7 +453,7 @@ function _openSelEdit(op: "expand" | "shrink") {
   const { menu, popup, title, amount } = _selEditEls();
   menu?.classList.add("hidden");
   if (_selEdit) _finishSelEdit(false);    // 已开着另一个 → 先取消旧的（还原）再开新的
-  const tx = workpiece.sel.beginPreview();
+  const tx = wp2.selection.beginPreview();
   _selEdit = { tx, before: tx.origin() as Selection, op, rafId: 0 };
   void title;   // 标题/方向 pressed 统一走 _syncSelEditOpUI
   _syncSelEditOpUI(op);
@@ -473,7 +473,8 @@ function _finishSelEdit(applied: boolean) {
   const { popup } = _selEditEls();
   _selEdit = null;                          // 先清，防 exitTransient → updateLassoToolbar 重入
   if (applied) {
-    s.tx.commit();   // 变了才记账（before 所有权交 op）；无变化不占 undo 步
+    const r = s.tx.commit();   // 变了才记账（before 所有权交组件 record）；无变化不占 undo 步
+    if (r.changed) history.withPoint("selection", {}, () => wp2.selection.commitPreApplied(r.before));
     setStatus(s.op === "expand" ? t("se.selectionExpanded") : t("se.selectionShrunk"));
   } else {
     s.tx.abort();    // 无痕还原 origin，预览产物就地 dispose
@@ -645,7 +646,7 @@ export const RACK_PANEL_BY_TOOL: Record<string, string> = {
 
 export function initToolbar(ctx: AppContext) {
   ({
-    editMode, state, doc, board, input, history, workpiece, wp2, dialReactive, rack, setStatus, leftDial,
+    editMode, state, doc, board, input, history, wp2, dialReactive, rack, setStatus, leftDial,
     _suppressTransientPanels, _commitTransform, _cancelTransform,
     selectionToNewLayer,
   } = ctx);

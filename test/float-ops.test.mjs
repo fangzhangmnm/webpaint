@@ -17,27 +17,23 @@ import { describe, it, assert, eq } from "./runner.mjs";
 import { Selection } from "../src/selection.ts";
 import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
 import { PaintingView, flattenViewLeaves } from "../src/workpiece/painting-view.ts";
-import { Workpiece } from "../src/workpiece/workpiece.ts";
-import { LegacyHistory, LegacyOpsComponent } from "../src/workpiece/legacy-bridge.ts";
-import { LayerTree } from "../src/workpiece/layer-tree.ts";
+import { History } from "../src/workpiece/history.ts";
+import { LayersFace } from "../src/layers-face.ts";
 import { FloatingTransform } from "../src/floating-transform.ts";
 
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏；见 shape-brush.test.mjs 同款）
 const _ctxs = [];
 function mk() {
   let unrec = 0;
-  const h = new LegacyHistory({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => { unrec++; } });
+  const h = new History({ maxQuotaBytes: 1 << 30, onUnrecoverable: () => { unrec++; } });
   const wp2 = new PaintingWorkpiece({ undo: h.stack, tree: { width: 512, height: 512 } });
   const doc = new PaintingView(wp2);
-  const w = new Workpiece(doc, h);
-  const legacy = new LegacyOpsComponent(w);
-  wp2.attachLegacy(legacy);
-  h.attach(wp2, legacy, (on) => wp2.layerTiles._suspendCollect(on));
-  const lt = new LayerTree({ w, history: h, tree: wp2.layerTree, tiles: wp2.layerTiles, port: doc, status: () => {} });
+  h.attach(wp2);
+  const lt = new LayersFace({ history: h, tree: wp2.layerTree, tiles: wp2.layerTiles, port: doc, status: () => {} });
   const ft = new FloatingTransform();
   ft.attach(doc, h, wp2.floatLayer, wp2.selection);
   _ctxs.push({ doc, h, wp2 });
-  return { doc, w, h, wp2, lt, ft, float: wp2.floatLayer, unrec: () => unrec };
+  return { doc, h, wp2, lt, ft, float: wp2.floatLayer, unrec: () => unrec };
 }
 const px = (r, g, b, a) => new Uint8ClampedArray([r, g, b, a]);
 // 不透明方块（x0,y0,w,h 全 [10,20,30,255]）
@@ -57,7 +53,7 @@ function tokenDot(wp2, L, x, y, color) {
 
 describe("S6 · lift（整点：清选区 + float tiles + 挖洞）", () => {
   it("lift(cut) → 洞开了、float 在组件、选区清了；undo 逐字节复原 + 选区回来；redo 再来", () => {
-    const { doc, w, h, ft, float } = mk();
+    const { doc, h, ft, float } = mk();
     const L = doc.activeLayer;
     paintRect(L, 20, 20, 40, 40);
     const origBytes = L.pixels.getRegion(20, 20, 40, 40);
@@ -77,13 +73,13 @@ describe("S6 · lift（整点：清选区 + float tiles + 挖洞）", () => {
     eq(fs.transform.gizmoFrame.origin.x, 30); eq(fs.transform.gizmoFrame.ux.x, 16);
     eq(fs.transform.mode, "free");
 
-    h.undo(w);
+    h.undo();
     eq(float.view(), null, "undo：浮层消失");
     eq(doc.selection, selRef, "undo：选区原对象回来（所有权链 substrate→record→substrate）");
     const after = L.pixels.getRegion(20, 20, 40, 40);
     assert(origBytes.every((v, i) => v === after[i]), "undo：像素逐字节复原");
 
-    h.redo(w);
+    h.redo();
     assert(float.view(), "redo：浮层回来");
     eq(L.sampleAt(35, 35)[3], 0, "redo：洞回来");
     eq(doc.selection, null, "redo：选区再次清空");
@@ -144,7 +140,7 @@ describe("S6 · lift（整点：清选区 + float tiles + 挖洞）", () => {
 
 describe("S6 · 变换 metadata 微整点（FloatLayerComponent.setTransform）", () => {
   it("拖动一次 = 一个整点：mesh 入组件；undo 回旧网格（像素不动）；redo 回新网格", () => {
-    const { doc, w, h, ft, float } = mk();
+    const { doc, h, ft, float } = mk();
     const L = doc.activeLayer;
     paintRect(L, 20, 20, 40, 40);
     doc.selection = rectSel(30, 30, 16, 16);
@@ -158,7 +154,7 @@ describe("S6 · 变换 metadata 微整点（FloatLayerComponent.setTransform）"
     eq(fs.transform.mesh[0][0].x, 35, "TL 平移 +5 已入栈（30+5）");
     eq(fs.transform.mesh[0][0].y, 33);
 
-    h.undo(w);
+    h.undo();
     fs = float.view();
     assert(fs, "undo 只回网格，浮层还在");
     eq(fs.transform.mesh[0][0].x, 30, "网格回原位");
@@ -167,12 +163,12 @@ describe("S6 · 变换 metadata 微整点（FloatLayerComponent.setTransform）"
     ft.syncFromWorkpiece();
     eq(ft._live.mesh[0][0].x, 30, "引擎 live 网格重采纳");
 
-    h.redo(w);
+    h.redo();
     eq(float.view().transform.mesh[0][0].x, 35, "redo 回新网格");
   });
 
   it("点一下就松（网格没动）→ 不产生整点；setMode = 一个整点", () => {
-    const { doc, w, h, ft, float } = mk();
+    const { doc, h, ft, float } = mk();
     const L = doc.activeLayer;
     paintRect(L, 20, 20, 40, 40);
     doc.selection = rectSel(30, 30, 16, 16);
@@ -184,14 +180,14 @@ describe("S6 · 变换 metadata 微整点（FloatLayerComponent.setTransform）"
     ft.setMode("distort");
     eq(h.depth, d0 + 1, "切模式 = metadata 整点");
     eq(float.view().transform.mode, "distort");
-    h.undo(w);
+    h.undo();
     eq(float.view().transform.mode, "free", "undo 回 free");
   });
 });
 
 describe("S6 · reject（cancel = identity 写回，非 undo）", () => {
   it("binary mask：lift(cut) → reject → 像素逐字节回原；reject 是可撤销整点", () => {
-    const { doc, w, h, ft, float } = mk();
+    const { doc, h, ft, float } = mk();
     const L = doc.activeLayer;
     paintRect(L, 20, 20, 40, 40);
     const origBytes = L.pixels.getRegion(0, 0, 100, 100);
@@ -203,10 +199,10 @@ describe("S6 · reject（cancel = identity 写回，非 undo）", () => {
     assert(origBytes.every((v, i) => v === after[i]), "identity 写回：binary mask 逐字节精确");
     eq(doc.selection, null, "选区保持 lift 后的空态（reject ≠ undo）");
 
-    h.undo(w);                                   // 撤销 reject
+    h.undo();                                   // 撤销 reject
     assert(float.view(), "undo reject：浮层回来");
     eq(L.sampleAt(35, 35)[3], 0, "洞也回来");
-    h.undo(w);                                   // 再撤销 lift
+    h.undo();                                   // 再撤销 lift
     eq(float.view(), null);
     const after2 = L.pixels.getRegion(0, 0, 100, 100);
     assert(origBytes.every((v, i) => v === after2[i]), "undo 链一路回原");
@@ -228,7 +224,7 @@ describe("S6 · reject（cancel = identity 写回，非 undo）", () => {
 
 describe("S6 · accept（commit = 烤层 + drop 整点）+ 所有权/驱逐", () => {
   it("accept(bakeFn=null)：浮层收摊；undo 浮层回来（FloatState substrate↔record 移交）；redo 再收", () => {
-    const { doc, w, h, ft, float } = mk();
+    const { doc, h, ft, float } = mk();
     const L = doc.activeLayer;
     paintRect(L, 20, 20, 40, 40);
     doc.selection = rectSel(30, 30, 16, 16);
@@ -236,17 +232,17 @@ describe("S6 · accept（commit = 烤层 + drop 整点）+ 所有权/驱逐", ()
     const fsRef = float.view();
     eq(ft.commit(null), true, "accept ok（identity → CPU 快路烤回，GL 缺席也落）");
     eq(float.view(), null, "浮层收摊");
-    h.undo(w);
+    h.undo();
     eq(float.view(), fsRef, "undo accept：同一个 FloatState 对象回 substrate（移交非复制）");
     assert(fsRef.floats[0].pixels.tileCount > 0, "float tiles 活着");
-    h.redo(w);
+    h.redo();
     eq(float.view(), null, "redo：再收摊");
-    h.undo(w);
+    h.undo();
     eq(float.view(), fsRef, "二次往复无衰减");
   });
 
   it("lift→拖→accept 整链 undo×3 回起点、redo×3 回终点", () => {
-    const { doc, w, h, ft, float } = mk();
+    const { doc, h, ft, float } = mk();
     const L = doc.activeLayer;
     paintRect(L, 20, 20, 40, 40);
     const origBytes = L.pixels.getRegion(0, 0, 100, 100);
@@ -256,12 +252,12 @@ describe("S6 · accept（commit = 烤层 + drop 整点）+ 所有权/驱逐", ()
     ft.beginDrag({ kind: "translate" }, 0, 0); ft.extendDrag(8, 0); ft.endDrag();
     ft.commit(null);
     eq(float.view(), null);
-    h.undo(w); h.undo(w); h.undo(w);
+    h.undo(); h.undo(); h.undo();
     eq(float.view(), null, "回起点：无浮层");
     eq(doc.selection, selRef, "选区回来");
     const after = L.pixels.getRegion(0, 0, 100, 100);
     assert(origBytes.every((v, i) => v === after[i]), "像素回起点");
-    h.redo(w); h.redo(w); h.redo(w);
+    h.redo(); h.redo(); h.redo();
     eq(float.view(), null, "回终点：已 accept");
     // +8 整数平移 → CPU 快路烤回（bakeFn=null 也落）：旧位置留洞、新位置有像素
     eq(L.sampleAt(35, 35)[3], 0, "旧位置洞在（内容移去 +8）");
@@ -270,14 +266,14 @@ describe("S6 · accept（commit = 烤层 + drop 整点）+ 所有权/驱逐", ()
   });
 
   it("redo 段截断释放 float tiles（disposeRecord）：undo lift 后另起一笔 → 包内浮层句柄清空", () => {
-    const { doc, w, h, wp2, ft, float } = mk();
+    const { doc, h, wp2, ft, float } = mk();
     const L = doc.activeLayer;
     paintRect(L, 20, 20, 40, 40);
     doc.selection = rectSel(30, 30, 16, 16);
     ft.lift(L);
     const fsRef = float.view();
     assert(fsRef.floats[0].pixels.tileCount > 0);
-    h.undo(w);                                  // 浮层 → lift 步的 redo 包
+    h.undo();                                  // 浮层 → lift 步的 redo 包
     eq(float.view(), null);
     assert(fsRef.floats[0].pixels.tileCount > 0, "还在包里，句柄活着");
     tokenDot(wp2, L, 5, 5, px(1, 1, 1, 255));   // 另起一笔 → 截断 redo 段
@@ -437,7 +433,7 @@ describe("S6 · commit 整数平移快路（不旋转时 pixel perfect）", () =
 
 describe("v0.7.37 · resetToCenterOriginal（复位：原始尺寸 + 画布居中 + 整数吸附）", () => {
   it("rotate90+flip 后 reset → mesh/gizmo = 居中原尺寸轴对齐整数矩形；commit 置换快路逐字节落位", () => {
-    const { doc, w, h, ft, float } = mk();
+    const { doc, h, ft, float } = mk();
     const L = doc.activeLayer;
     paintRect(L, 20, 20, 40, 40);
     L.pixels.putRegion(25, 30, 1, 1, px(1, 2, 3, 255));   // 标记像素（相对 float 原点 +5,+10）
@@ -459,7 +455,7 @@ describe("v0.7.37 · resetToCenterOriginal（复位：原始尺寸 + 画布居�
     eq(m[0], 1); eq(m[1], 2); eq(m[2], 3);
     eq(L.sampleAt(25, 30)[3], 0, "原位置留洞（lift cut）");
     // undo 链健康：commit → reset → flip → rotate → lift 全撤
-    for (let i = 0; i < 8 && h.canUndo(); i++) h.undo(w);
+    for (let i = 0; i < 8 && h.canUndo(); i++) h.undo();
     eq(L.sampleAt(25, 30)[3], 255, "撤到底：像素回原位");
   });
 });
