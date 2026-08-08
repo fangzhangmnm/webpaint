@@ -181,9 +181,10 @@
     dials·desk/GL 双 facade 词条；treeTx/PixelTx/write-gate/DocView/UndoHistory 全进 _Avoid_。
   - **真机批清单汇总** = 本文 §4（v0.7.35-41 遗留 12 条并入 + v2 新锚 10 条，一次交付）；
     `20260801-v08-epoch-handoff.md` §7 加了指针防双源。
-- **落盘注意**：T1-T6（v0.8.9-22）已 ff 进本地 main；本棒 T7（v0.8.23）在 worktree-workpiece-v2
-  分支，进场先在主 checkout `git merge --ff-only worktree-workpiece-v2`。**全程未 push**（新 session
-  默认不 push 纪律）——push dev 前先问/等 user 授权。
+- **落盘注意**：T1-T7（v0.8.9-23）已 ff 进本地 main 并 **push dev**（user 2026-08-08 授权；
+  origin/main = v0.8.23 = 350caea）。真机批 = user 随缘看 §4，没空就继续往下做。
+- **user 2026-08-08 拍板**：**几个比较现实的骑士做完前不 bump 0.9**——「现在只是 0.8 的前 1/3」。
+  v2 只是纪元开篇，后续骑士（C·GPU 等，见 `20260802-v08-recon-index`）继续走 0.8.x。
 
 ## 4. 真机批清单（v2 完工一次交付；user 2026-08-07 拍板攒批）
 
