@@ -1,19 +1,5 @@
 import { DocumentOperator, Workpiece, type OpResult } from "./workpiece.ts";
-import { type ViewLeafSnap } from "./painting-view.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
-import { LiftFloatOp, FloatTransformOp, DropFloatOp } from "./float-ops.ts";
-export interface SwapPixelsArgs {
-    layerId: number;
-    _initialBefore?: ViewLeafSnap | null;
-}
-export declare class SwapPixelsOp extends DocumentOperator<SwapPixelsArgs, ViewLeafSnap> {
-    readonly kind = "pixels";
-    forward(w: Workpiece, args: SwapPixelsArgs, data: ViewLeafSnap | undefined): OpResult<ViewLeafSnap>;
-    backward(w: Workpiece, args: SwapPixelsArgs, data: ViewLeafSnap): OpResult<ViewLeafSnap>;
-    private _install;
-    estimateQuotaBytes(args: SwapPixelsArgs, data: ViewLeafSnap | undefined): number;
-    disposeData(args: SwapPixelsArgs, data: ViewLeafSnap | undefined): void;
-}
 export interface FillColorArgs {
     value: string;
     _initialBefore?: {
@@ -58,12 +44,8 @@ export declare class DocResizeOp extends DocumentOperator<DocResizeArgs, ResizeS
     disposeData(args: DocResizeArgs, data: ResizeSide | undefined): void;
 }
 export interface OperatorRegistry {
-    pixels: SwapPixelsOp;
     fillColor: FillColorOp;
     docResize: DocResizeOp;
-    liftFloat: LiftFloatOp;
-    floatTransform: FloatTransformOp;
-    dropFloat: DropFloatOp;
 }
 export declare function makeOperators(deps: {
     fillColor: {

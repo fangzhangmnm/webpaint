@@ -2,6 +2,7 @@ import { Workpiece, type WorkpieceOpts, type CollectorComponent } from "./workpi
 import { LayerTiles, type TilesHost, type Rect } from "./layer-tiles.ts";
 import { LayerTree2 } from "./layer-tree2.ts";
 import { SelectionComponent } from "./selection-component.ts";
+import { FloatLayerComponent } from "./float-component.ts";
 export interface PaintingDataLeaf {
     id?: number;
     name: string;
@@ -37,6 +38,7 @@ export declare class PaintingWorkpiece extends Workpiece {
     readonly layerTiles: LayerTiles;
     readonly layerTree: LayerTree2 | null;
     readonly selection: SelectionComponent;
+    readonly floatLayer: FloatLayerComponent;
     constructor(opts: WorkpieceOpts & {
         host?: TilesHost;
         tree?: {

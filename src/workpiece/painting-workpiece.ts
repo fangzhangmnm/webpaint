@@ -16,6 +16,7 @@ import { Workpiece, type WorkpieceOpts, type CollectorComponent } from "./workpi
 import { LayerTiles, type TilesHost, type Rect } from "./layer-tiles.ts";
 import { LayerTree2, isGroupNode, type TreeJson, type TreeNode, type TreeLeaf } from "./layer-tree2.ts";
 import { SelectionComponent } from "./selection-component.ts";
+import { FloatLayerComponent } from "./float-component.ts";
 import { LayerPixels } from "../tiles/tile-layer.ts";
 
 // ---- 装载/导出的 plain data（解码器/编码器的唯一交换形；判别同 TreeNode："children" in n）----
@@ -41,6 +42,7 @@ export class PaintingWorkpiece extends Workpiece {
   readonly layerTiles: LayerTiles;
   readonly layerTree: LayerTree2 | null;
   readonly selection: SelectionComponent;   // recorded（不持久化，跨 session 清——T4a）
+  readonly floatLayer: FloatLayerComponent; // recorded（不持久化，退出前 settle——T4b）
 
   constructor(opts: WorkpieceOpts & {
     host?: TilesHost;
@@ -92,6 +94,8 @@ export class PaintingWorkpiece extends Workpiece {
     }
     this.selection = new SelectionComponent(this);
     this.register(this.selection, { undo: "recorded" });
+    this.floatLayer = new FloatLayerComponent(this);
+    this.register(this.floatLayer, { undo: "recorded" });
     if (opts.legacy) this.register(opts.legacy, { undo: "recorded" });   // 迁移期（T5 拆）
   }
 

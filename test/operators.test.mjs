@@ -1,8 +1,8 @@
 // legacy 残余 operator 在 **v2 树模式工件**上的可逆性集成测试（T3b-2 换基座）。
 // 已迁走的 op 族（add/remove/move/prop/reference/treeStructure/mergeDown/docTransform）的行为锚
 // 在 workpiece-layer-tree.test.mjs（门面）+ layer-tree2.test.mjs（verb 契约）；本文件只测残余集：
-//   pixels（SwapPixelsOp 事务型）/ fillColor / docResize（T3b-2 新立：几何变换实例交换）
-//   + 清栈后 tileset/池的所有权收支。
+//   fillColor / docResize（T3b-2 新立：几何变换实例交换）+ 清栈后 tileset/池的所有权收支。
+// （SwapPixelsOp 已死——T4b：像素事务归 token+LayerTiles 写时扣押，锚在 layer-tiles/float-ops 测试。）
 // 「层被删后 undo 该笔」的栈序腐坏在 v2 下结构上不可能（栈序保证 undo 必先穿过删层步）；
 // 桥的不可恢复协议锚在 legacy-bridge.test.mjs（compound/swap 中途失败 → 弃栈）。
 import { describe, it, assert, eq } from "./runner.mjs";
@@ -30,15 +30,15 @@ function mk() {
 }
 const px = (r, g, b, a) => new Uint8ClampedArray([r, g, b, a]);
 
-describe("operators · SwapPixels（事务型：引擎先画，before 句柄零拷贝）", () => {
-  it("画一笔 → undo 回原态 → redo 回新态（像素逐点验证）", () => {
-    const { doc, w, h, ops } = mk();
+describe("operators · 像素事务（T4b：token + 写时扣押取代 SwapPixelsOp）", () => {
+  it("令牌内画一笔 → undo 回原态 → redo 回新态（像素逐点验证）", () => {
+    const { doc, wp2, w, h } = mk();
     const L = doc.activeLayer;
-    L.pixels.putRegion(10, 10, 1, 1, px(1, 2, 3, 255));      // 底色（不进 undo 的初态）
-    const before = L.snapshot();
-    L.pixels.putRegion(10, 10, 1, 1, px(9, 9, 9, 255));      // 引擎改动
+    L.pixels.putRegion(10, 10, 1, 1, px(1, 2, 3, 255));      // 底色（令牌外直写，不进 undo 的初态）
+    const t = wp2.begin("stroke");
+    L.pixels.putRegion(10, 10, 1, 1, px(9, 9, 9, 255));      // 引擎改动（写时扣押）
     L.pixels.putRegion(300, 300, 1, 1, px(5, 5, 5, 255));
-    eq(h.run(w, ops.pixels, { layerId: L.id, _initialBefore: before }).ok, true);
+    t.commit();
     h.undo(w);
     eq(L.sampleAt(10, 10)[0], 1, "undo 回底色");
     eq(L.sampleAt(300, 300)[3], 0, "undo 后第二点消失");
@@ -100,9 +100,9 @@ describe("operators · 所有权收支（清栈+换文档后池不留本套件�
     const { doc, wp2, w, h, ops } = mk();
     const L = doc.activeLayer;
     L.pixels.putRegion(0, 0, 2, 2, new Uint8ClampedArray(16).fill(9));
-    const b1 = L.snapshot();
+    const t = wp2.begin("stroke");
     L.pixels.putRegion(64, 64, 2, 2, new Uint8ClampedArray(16).fill(7));
-    h.run(w, ops.pixels, { layerId: L.id, _initialBefore: b1 });
+    t.commit();
     h.undo(w); h.redo(w); h.undo(w);
     h.clear();
     // 换文档：旧根 record 随 load 清栈驱逐 → 旧 tileset 引用计数归零还池（换文档零手工 dispose）。

@@ -1,8 +1,8 @@
-import type { ViewLeaf, ViewGroup } from "./workpiece/painting-view.ts";
-import type { FloatFrame, Workpiece } from "./workpiece/workpiece.ts";
-import type { OperatorRegistry } from "./workpiece/operators.ts";
+import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";
+import type { FloatFrame, TransformClass, FloatLayerComponent } from "./workpiece/float-component.ts";
+import type { SelectionComponent } from "./workpiece/selection-component.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
-import type { TransformClass, HistoryFacade } from "./workpiece/workpiece.ts";
+import type { HistoryFacade } from "./workpiece/workpiece.ts";
 import type { SplinePlane } from "./bspline.ts";
 import type { U8Plane } from "./rotsprite.ts";
 type Node = ViewLeaf | ViewGroup;
@@ -73,11 +73,12 @@ export declare class FloatingTransform {
     _drag: Drag | null;
     _sampleMode: SampleMode;
     onChange: () => void;
-    private _w;
+    private _doc;
     private _history;
-    private _ops;
+    private _float;
+    private _sel;
     constructor(onChange?: () => void);
-    attach(w: Workpiece, history: HistoryFacade, ops: OperatorRegistry): void;
+    attach(doc: PaintingView, history: HistoryFacade, float: FloatLayerComponent, sel: SelectionComponent): void;
     setSampleMode(m: string): void;
     getSampleMode(): SampleMode;
     isActive(): boolean;

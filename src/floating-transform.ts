@@ -4,13 +4,14 @@
 // 2026-06-19 从 lasso.js 抽出：lasso.js 只产 Selection + 经 LassoEngine facade 驱动本模块；
 // input.js / board.js / app.js 不直接 import 本模块，全走 LassoEngine（接缝不变）。
 //
-// v0.4.7（S6）：float 状态（像素 tiles + transform metadata）**移入 workpiece internals**
-// （workpiece/float-ops.ts 的 3 个 operator）。本类降级为：
+// v0.4.7（S6）float 状态移入 workpiece；v0.8.15（T4b）组件化：FloatLayerComponent 持状态与记账，
+// 本类 = 引擎编排：
 //   - gizmo/单应性数学（MODES adapter + quadWarp/sourceWarpMatrix，原样保留）；
 //   - live 网格视图 _live（拖动中的热路径：每 move 只动本地网格，抬手才把 metadata 整点入栈——
 //     同 stroke 的事务型节奏；undo/redo 后经 syncFromWorkpiece 重新采纳）；
-//   - lift/stamp/accept/reject 的 operator 编排（lift=LiftFloatOp 整点；stamp/accept/reject =
-//     pre-applied ops.pixels × N + DropFloatOp 收摊，compound 封一个整点）。
+//   - lift/stamp/accept/reject 的令牌编排（history.withPoint 一个整点：挖洞/烤层像素由
+//     LayerTiles 写时扣押、选区由 SelectionComponent、浮层状态由 FloatLayerComponent 分账——
+//     旧 pre-applied ops.pixels 快照 × N + DropFloatOp 微步链死，三处 _initialBefore 双记账随之消灭）。
 // reject（cancel）≠ undo：identity 写回 operator——float 像素在原位 source-over 落到当前内容上
 // （stamp 保留、无重采样，spec:220-225），可再撤销。
 //
@@ -21,14 +22,14 @@
 // 渲染：2×2 mesh → GPU warp（gl-compositor，per-pixel inverse homography；本文件只出 warp 矩阵，
 //   栅格在 GPU）。浮层源 = straight 字节平面 typed-array 直传（v0.6.38 去 canvas 化；WeakMap 缓存）。
 
-import { findViewNodeById } from "./workpiece/painting-view.ts";
-import type { ViewLeaf, ViewGroup } from "./workpiece/painting-view.ts";
-import type { FloatFrame, Workpiece, FloatTransformMeta, WorkpieceFloat, FloatState } from "./workpiece/workpiece.ts";
-
-import type { OperatorRegistry } from "./workpiece/operators.ts";
-import { cloneFloatMeta, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
+import { findViewNodeById, eachViewLeaf } from "./workpiece/painting-view.ts";
+import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";
+import { cloneFloatMeta } from "./workpiece/float-component.ts";
+import type { FloatFrame, FloatTransformMeta, WorkpieceFloat, FloatState, TransformClass, FloatLayerComponent } from "./workpiece/float-component.ts";
+import type { SelectionComponent } from "./workpiece/selection-component.ts";
+import { extractFloatPixels, composeCutHole, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
-import type { TransformClass, HistoryFacade } from "./workpiece/workpiece.ts";
+import type { HistoryFacade } from "./workpiece/workpiece.ts";
 import { prefilterToSplinePlane } from "./bspline.ts";
 import type { SplinePlane } from "./bspline.ts";
 import { rotspriteUpscale } from "./rotsprite.ts";
@@ -149,9 +150,10 @@ export class FloatingTransform {
   _drag: Drag | null;
   _sampleMode: SampleMode;
   onChange: () => void;
-  private _w: Workpiece | null = null;
+  private _doc: PaintingView | null = null;
   private _history: HistoryFacade | null = null;
-  private _ops: OperatorRegistry | null = null;
+  private _float: FloatLayerComponent | null = null;
+  private _sel: SelectionComponent | null = null;
 
   // onChange 晚绑定（LassoEngine 构造时传 () => this.onChange()，因为 input.js 之后才赋 onChange）。
   constructor(onChange: () => void = () => {}) {
@@ -161,11 +163,12 @@ export class FloatingTransform {
     this.onChange = onChange;
   }
 
-  // workpiece/undo 接线（input.ts 构造后注入；lift/stamp/commit/cancel 全走 operator）。
-  attach(w: Workpiece, history: HistoryFacade, ops: OperatorRegistry) {
-    this._w = w;
+  // workpiece/undo 接线（input.ts 构造后注入；lift/stamp/commit/cancel 全走令牌编排）。
+  attach(doc: PaintingView, history: HistoryFacade, float: FloatLayerComponent, sel: SelectionComponent) {
+    this._doc = doc;
     this._history = history;
-    this._ops = ops;
+    this._float = float;
+    this._sel = sel;
   }
 
   setSampleMode(m: string) {
@@ -176,12 +179,12 @@ export class FloatingTransform {
   }
   getSampleMode() { return this._sampleMode; }
 
-  isActive() { return !!this._w?.readFloatState(); }
+  isActive() { return !!this._float?.view(); }
 
   // 只读视图（app lassoProvider → board：GPU warp 输入 + gizmo overlay）。
   // _live 落后于 workpiece（undo/redo 刚动完、reconciler 未跑）时就地补同步——渲染永远吃一致态。
   current(): FloatView | null {
-    const fs = this._w?.readFloatState();
+    const fs = this._float?.view();
     if (!fs) return null;
     if (!this._live) this.syncFromWorkpiece();
     const lv = this._live;
@@ -203,26 +206,79 @@ export class FloatingTransform {
   // undo/redo/lift 后：live 网格重新采纳 workpiece 的 transform metadata。拖动中不采纳（防御）。
   syncFromWorkpiece() {
     if (this._drag) return;
-    const fs = this._w?.readFloatState();
+    const fs = this._float?.view();
     if (!fs) { this._live = null; return; }
     const t = cloneFloatMeta(fs.transform);
     this._live = { gizmoFrame: t.gizmoFrame, mesh: t.mesh as Mesh, meshN: t.meshN, mode: t.mode, uniformAspect: t.uniformAspect, usedClass: t.usedClass };
   }
 
-  // 把 active 节点 lift 成浮层（LiftFloatOp 整点：清选区 + 建 float tiles + 挖洞，全可撤销）。
+  // 把 active 节点 lift 成浮层（一个令牌整点：清选区 + 建 float tiles + 挖洞，全可撤销——
+  // 挖洞像素走 LayerTiles 写时扣押、选区走 SelectionComponent、浮层状态走 FloatLayerComponent 分账）。
   // leaf → 单 float；group → 组内所有叶(含隐藏)各一 float，共享一个 gizmo（隐藏随组动、不定框）。
   // 选区为 null 且 opts.fallbackFullLayer → 隐式整层全选。opts.cut: true(默认)=挖空源层（Ctrl+T）；
   // false=不挖洞（Ctrl+D 复制为浮层）。返回 bool（false = 没东西可变换，栈未动）。
   lift(node: Node | null, opts: LiftOpts = {}) {
-    if (!node || !this._w || !this._history || !this._ops) return false;
-    if (this._w.readFloatState()) return false;
-    const st = this._history.run(this._w, this._ops.liftFloat, {
-      nodeId: node.id,
-      cut: opts.cut !== false,
-      fallbackFullLayer: !!opts.fallbackFullLayer,
-      ignoreSelection: !!opts.ignoreSelection,
+    if (!node || !this._history || !this._float || !this._sel) return false;
+    if (this._float.view()) return false;
+    // bake（纯读，令牌外）：全部成功才 mutate（原子；没东西可变换 → 栈未动）
+    const sel = opts.ignoreSelection ? null : this._sel.view();
+    if (!sel && !opts.fallbackFullLayer) return false;
+    const leaves: ViewLeaf[] = [];
+    if (node.isGroup) eachViewLeaf(node.children, (L) => leaves.push(L));   // 含隐藏叶（整组一起动）
+    else leaves.push(node as ViewLeaf);
+    const baked: { leaf: ViewLeaf; float: WorkpieceFloat }[] = [];
+    for (const leaf of leaves) {
+      const f = extractFloatPixels(leaf, sel);
+      if (f) baked.push({ leaf, float: f });
+    }
+    if (!baked.length) return false;
+    const r = this._history.withPoint("liftFloat", {}, () => {
+      if (opts.cut !== false) {
+        for (const b of baked) {
+          // 洞区域 = 内容∩选区 bbox（trim 掉的边缘本就透明，挖不挖等价——旧 LiftFloatOp 语义原样）
+          const content = b.leaf.pixels.contentBounds(true);
+          if (!content) continue;
+          const x0 = sel ? Math.max(content.x, sel.bboxX) : content.x;
+          const y0 = sel ? Math.max(content.y, sel.bboxY) : content.y;
+          const x1 = sel ? Math.min(content.x + content.w, sel.bboxX + sel.bboxW) : content.x + content.w;
+          const y1 = sel ? Math.min(content.y + content.h, sel.bboxY + sel.bboxH) : content.y + content.h;
+          const hole = composeCutHole(b.leaf, sel, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+          if (hole) applyRegionBuf(b.leaf, hole);
+        }
+      }
+      // gizmo 框 = 可见 source rect 并集（隐藏叶随组动但不定框；全隐藏兜底 = 全部）
+      const vis = baked.filter((b) => b.leaf.visible);
+      const rects = (vis.length ? vis : baked).map((b) => b.float.rect);
+      let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+      for (const rc of rects) {
+        if (rc.x < gx0) gx0 = rc.x;
+        if (rc.y < gy0) gy0 = rc.y;
+        if (rc.x + rc.w > gx1) gx1 = rc.x + rc.w;
+        if (rc.y + rc.h > gy1) gy1 = rc.y + rc.h;
+      }
+      const gw = gx1 - gx0, gh = gy1 - gy0;
+      this._sel!.set(null);   // 旧选区进 selection record（ignoreSelection 也照清——旧 lift 语义）
+      this._float!.install({
+        floats: baked.map((b) => b.float),
+        transform: {
+          // 初始 frame = AABB（轴对齐）；方手柄转轴后才是一般平行四边形（v0.6.21）
+          gizmoFrame: { origin: { x: gx0, y: gy0 }, ux: { x: gw, y: 0 }, uy: { x: 0, y: gh } },
+          mesh: [
+            [{ x: gx0, y: gy0 }, { x: gx1, y: gy0 }],
+            [{ x: gx0, y: gy1 }, { x: gx1, y: gy1 }],
+          ],
+          meshN: 2,
+          mode: "free",
+          uniformAspect: gw / Math.max(1, gh),
+          usedClass: "similarity",
+        },
+      });
     });
-    if (!st.ok) return false;
+    if (!r.ok) {
+      // install 是令牌内最后一步：失败 = 浮层从未上台（cancel 已回滚挖洞/选区）→ 提取物归本函数释放
+      for (const b of baked) b.float.pixels.dispose();
+      return false;
+    }
     this.syncFromWorkpiece();
     this.onChange();
     return true;
@@ -305,7 +361,7 @@ export class FloatingTransform {
   }
   // basisRotate 外接用的内容 rect 集（workpiece floats；测试直接播种 _live 时为空 → 退化用 mesh 角）
   _contentRects(): Rect[] {
-    const fs = this._w?.readFloatState();
+    const fs = this._float?.view();
     return fs ? fs.floats.map((fl) => ({ ...fl.rect })) : [];
   }
 
@@ -377,7 +433,7 @@ export class FloatingTransform {
   // 一个 undo 整点（同 flip/rotate90 的事务节奏）。
   resetToCenterOriginal(): boolean {
     const lv = this._live;
-    const fs = this._w?.readFloatState();
+    const fs = this._float?.view();
     if (!lv || !fs || !fs.floats.length) return false;
     let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
     for (const f of fs.floats) {
@@ -387,7 +443,7 @@ export class FloatingTransform {
       if (f.rect.y + f.rect.h > gy1) gy1 = f.rect.y + f.rect.h;
     }
     const w0 = gx1 - gx0, h0 = gy1 - gy0;
-    const doc = this._w!.readView();
+    const doc = this._doc!;
     const x0 = Math.round(doc.width / 2 - w0 / 2), y0 = Math.round(doc.height / 2 - h0 / 2);
     const x1 = x0 + w0, y1 = y0 + h0;
     // 映射约定（sourceDestQuad）：gizmoFrame = source 归一化参考系 → 必须复位成 source union AABB
@@ -406,12 +462,12 @@ export class FloatingTransform {
   }
 
   private _pushTransformCheckpoint() {
-    if (!this._w || !this._history || !this._ops || !this._live) return;
+    if (!this._history || !this._float || !this._live) return;
     const lv = this._live;
-    this._history.run(this._w, this._ops.floatTransform, {
-      after: cloneFloatMeta({
+    this._history.withPoint("floatTransform", {}, () => {
+      this._float!.setTransform({
         gizmoFrame: lv.gizmoFrame, mesh: lv.mesh, meshN: lv.meshN, mode: lv.mode, uniformAspect: lv.uniformAspect, usedClass: lv.usedClass,
-      } as FloatTransformMeta),
+      } as FloatTransformMeta);   // 组件内克隆——live 网格不被 record 引用
     });
   }
 
@@ -452,23 +508,19 @@ export class FloatingTransform {
 
   // 源层 id → 活叶（消失容忍：跳过该 float，别的照常）。
   private _leafFor(f: WorkpieceFloat): ViewLeaf | null {
-    const doc = this._w!.readView();
-    const n = findViewNodeById(doc.layers, f.sourceLayerId);
+    const n = findViewNodeById(this._doc!.layers, f.sourceLayerId);
     return n && !n.isGroup ? (n as ViewLeaf) : null;
   }
 
-  // Stamp：各 float 按当前 mesh 烤进源层，KEEP float。一个 compound 整点（pre-applied ops.pixels）。
+  // Stamp：各 float 按当前 mesh 烤进源层，KEEP float。一个令牌整点（烤层像素 = LayerTiles
+  // 写时扣押；全 no-op 时 collector 空 → 不占 undo 步）。
   stamp(bakeFn?: WarpBakeFn | null) {
-    const fs = this._w?.readFloatState();
-    if (!fs || !this._history || !this._ops || !bakeFn) return false;
-    const r = this._history.compound(this._w!, () => {
+    const fs = this._float?.view();
+    if (!fs || !this._history || !bakeFn) return false;
+    const r = this._history.withPoint("stampFloat", {}, () => {
       for (const f of fs.floats) {
         const leaf = this._leafFor(f);
-        if (!leaf) continue;
-        const before = leaf.snapshot();          // 归属转给 ops.pixels
-        this._bakeDown(f, leaf, bakeFn);
-        const st = this._history!.run(this._w!, this._ops!.pixels, { layerId: leaf.id, _initialBefore: before }, { checkpoint: false });
-        if (!st.ok) throw new Error(st.msg);
+        if (leaf) this._bakeDown(f, leaf, bakeFn);
       }
     });
     this.onChange();
@@ -476,45 +528,35 @@ export class FloatingTransform {
   }
 
   // -------- accept / reject --------
-  // accept（commit）：各 float 烤进源层 + DropFloatOp 收摊，一个 compound 整点。
+  // accept（commit）：各 float 烤进源层 + FloatLayerComponent.drop 收摊，一个令牌整点。
   //   选区在 lift 时已清（spec:213）——accept 不再碰 selection（现状「清」保持，UX 待人类拍板）。
   commit(bakeFn?: WarpBakeFn | null): boolean {
-    const fs = this._w?.readFloatState();
-    if (!fs || !this._history || !this._ops) return false;
-    const r = this._history.compound(this._w!, () => {
+    const fs = this._float?.view();
+    if (!fs || !this._history) return false;
+    const r = this._history.withPoint("acceptFloat", {}, () => {
       for (const f of fs.floats) {
         const leaf = this._leafFor(f);
-        if (!leaf) continue;
-        const before = leaf.snapshot();
-        this._bakeDown(f, leaf, bakeFn ?? null);
-        const st = this._history!.run(this._w!, this._ops!.pixels, { layerId: leaf.id, _initialBefore: before }, { checkpoint: false });
-        if (!st.ok) throw new Error(st.msg);
+        if (leaf) this._bakeDown(f, leaf, bakeFn ?? null);
       }
-      const st2 = this._history!.run(this._w!, this._ops!.dropFloat, { reason: "accept" }, { checkpoint: false });
-      if (!st2.ok) throw new Error(st2.msg);
+      this._float!.drop();
     });
     this._drag = null;
     this.syncFromWorkpiece();
     this.onChange();
     return r.ok;
   }
-  // reject（cancel）：**不是 undo**（spec:220-225）——identity 写回 operator：float 像素在原 rect
+  // reject（cancel）：**不是 undo**（spec:220-225）——identity 写回：float 像素在原 rect
   //   source-over 落到当前内容上（stamp 保留、float 在其上），不走 warp 采样器（无重采样）。
   //   本身是一个可撤销整点（Ctrl+Z 可把 reject 撤回来）。选区保持 lift 后的空态。
   cancel(): boolean {
-    const fs = this._w?.readFloatState();
-    if (!fs || !this._history || !this._ops) return false;
-    const r = this._history.compound(this._w!, () => {
+    const fs = this._float?.view();
+    if (!fs || !this._history) return false;
+    const r = this._history.withPoint("rejectFloat", {}, () => {
       for (const f of fs.floats) {
         const leaf = this._leafFor(f);
-        if (!leaf) continue;
-        const before = leaf.snapshot();
-        applyRegionBuf(leaf, composeIdentityWriteback(leaf, f));
-        const st = this._history!.run(this._w!, this._ops!.pixels, { layerId: leaf.id, _initialBefore: before }, { checkpoint: false });
-        if (!st.ok) throw new Error(st.msg);
+        if (leaf) applyRegionBuf(leaf, composeIdentityWriteback(leaf, f));
       }
-      const st2 = this._history!.run(this._w!, this._ops!.dropFloat, { reason: "reject" }, { checkpoint: false });
-      if (!st2.ok) throw new Error(st2.msg);
+      this._float!.drop();
     });
     this._drag = null;
     this.syncFromWorkpiece();

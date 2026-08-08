@@ -18,46 +18,11 @@ import { enterDocWrite, exitDocWrite } from "./write-gate.ts";
 import type { LayerTree } from "./layer-tree.ts";
 import type { SelectionFace } from "./selection-face.ts";
 
-// ---- 浮层变换状态（S6：float 从 floating-transform 的 _ft 私有态收进 workpiece internals）----
-// 像素所有权：WorkpieceFloat.pixels 归当前持有者（internals 或某个 operator 的 undo 包）所有，
-// 状态对象在 internals ↔ undo 包之间**整体移交**（同一时刻只有一个 owner），漏 dispose 由池 FR 点名。
-export interface FloatRect { x: number; y: number; w: number; h: number }
-export type FloatMesh = { x: number; y: number }[][];   // 2×2：[[TL,TR],[BL,BR]]（doc 坐标）
-export interface WorkpieceFloat {
-  id: number;
-  sourceLayerId: number;
-  /** lift 时像素的 identity 位置（内容紧 bbox）；reject 按此写回，不走 warp 采样器。 */
-  rect: FloatRect;
-  /** doc 网格对齐的稀疏 tile（池驻留、可压缩；不可变——变换只动 transform metadata）。 */
-  pixels: LayerPixels;
-}
-/** 参考 frame（v0.6.21 有向化，Procreate 方手柄语义）：p(u,v)=origin+u·ux+v·uy，u,v∈[0,1]。
- *  lift 时 = 可见源并集 AABB（ux/uy 轴对齐）；方手柄转轴后为一般平行四边形——只改参数化不动像素。 */
-export interface FloatPt { x: number; y: number }
-export interface FloatFrame { origin: FloatPt; ux: FloatPt; uy: FloatPt; }
-/** 像素变换用过的最高自由度类（模式切换记账制，v0.6.34）：拖动升级、只升不降、随 undo 整点回退。
- *  记的是**像素变换**的类而非 mesh 形状——basisRotate 转轴不动像素不升级（几何判定会误判它）。 */
-export type TransformClass = "similarity" | "affine" | "projective";
-/** 共享 gizmo 的变换元数据（组 lift 多 float 共用一份；per-float dest quad 由 rect×单应性派生）。 */
-export interface FloatTransformMeta {
-  gizmoFrame: FloatFrame;
-  mesh: FloatMesh;
-  meshN: number;
-  mode: "free" | "uniform" | "distort" | null;
-  uniformAspect: number;
-  usedClass?: TransformClass;   // 缺省视为 "similarity"（pristine lift / 旧测试播种）
-}
-export interface FloatState {
-  floats: WorkpieceFloat[];
-  transform: FloatTransformMeta;
-}
-
-// T3b-2：internals 载体从 PaintDoc 换成 PaintingView（树模式端口）。留桥的 operator
-// （selection/float/docResize/fillColor）经 mut(w).doc 读写的面由端口同形提供；
-// selection 的过渡宿在端口上（doc.selection 的后继）。T4/T5 组件化后本类整体退场。
+// T3b-2：internals 载体从 PaintDoc 换成 PaintingView（树模式端口）。T4 后留桥的 operator
+// 只剩 docResize/fillColor，经 mut(w).doc 读写的面由端口同形提供。T5 本类整体退场。
+// （float 类型族 + 状态已迁 float-component.ts——T4b。）
 export interface WorkpieceInternals {
   doc: PaintingView;
-  floats: FloatState | null;
 }
 
 const INTERNALS = new WeakMap<Workpiece, WorkpieceInternals>();
@@ -76,7 +41,7 @@ export class Workpiece {
   private _sel: SelectionFace | null = null;
 
   constructor(doc: PaintingView, history: HistoryFacade) {
-    INTERNALS.set(this, { doc, floats: null });
+    INTERNALS.set(this, { doc });
     this.history = history;
   }
 
@@ -107,21 +72,9 @@ export class Workpiece {
   /** 每次 operator 提交 +1。render-tree 重建 / 缓存失效的 key。 */
   get commitVersion(): number { return this._commitVersion; }
 
-  // ---- 窄读接口（T3b-2：readDoc() 已杀——PaintDoc escape hatch 不复存在）----
-  /** 端口读口（floating-transform 等构造期未持 port 的引擎用；T5 随本类拆）。 */
+  // ---- 窄读接口（T3b-2：readDoc() 已杀；T4b：float 读口迁 FloatLayerComponent.view()）----
+  /** 端口读口（构造期未持 port 的引擎用；T5 随本类拆）。 */
   readView(): PaintingView { return INTERNALS.get(this)!.doc; }
-
-  /** 浮层变换状态只读视图（board GPU warp 预览 / gizmo 引擎消费）。null = 无活动浮层。 */
-  readFloatState(): Readonly<FloatState> | null { return INTERNALS.get(this)!.floats; }
-
-  /** 换文档 escape hatch：直接清浮层状态并释放句柄（clearHistory/adoptState 同步调；
-   *  正常编辑流走 DropFloatOp，别拿这个绕 undo）。 */
-  dropFloats(): void {
-    const its = INTERNALS.get(this)!;
-    if (!its.floats) return;
-    for (const f of its.floats.floats) f.pixels.dispose();
-    its.floats = null;
-  }
 
   // ---- 锁（operator/undo-history 协作面；外部勿碰）----
   _acquireLock(holder: string): void {

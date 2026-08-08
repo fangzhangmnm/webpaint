@@ -3,9 +3,10 @@ import { LineartOracle } from "./lineart-oracle.ts";
 import type { ColorMetric } from "./color-dist.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
-import type { ViewLeaf, ViewGroup } from "./workpiece/painting-view.ts";
-import type { Workpiece, HistoryFacade } from "./workpiece/workpiece.ts";
-import type { OperatorRegistry } from "./workpiece/operators.ts";
+import type { ViewLeaf, ViewGroup, PaintingView } from "./workpiece/painting-view.ts";
+import type { HistoryFacade } from "./workpiece/workpiece.ts";
+import type { FloatLayerComponent } from "./workpiece/float-component.ts";
+import type { SelectionComponent } from "./workpiece/selection-component.ts";
 interface Point {
     x: number;
     y: number;
@@ -58,7 +59,7 @@ export declare class LassoEngine {
     onChange: () => void;
     constructor();
     setDoc(doc: LassoDoc | null): void;
-    attachWorkpiece(w: Workpiece, history: HistoryFacade, ops: OperatorRegistry): void;
+    attachWorkpiece(doc: PaintingView, history: HistoryFacade, float: FloatLayerComponent, sel: SelectionComponent): void;
     syncFloating(): void;
     setSubTool(name: SubTool): void;
     getSubTool(): SubTool;

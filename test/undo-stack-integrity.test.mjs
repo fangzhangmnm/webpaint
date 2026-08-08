@@ -30,7 +30,7 @@ function mk() {
   const ops = makeOperators({ fillColor: { get: () => "#000", set: () => {} } });
   const lt = new LayerTree({ w, history: h, tree: wp2.layerTree, tiles: wp2.layerTiles, port: doc });
   const ft = new FloatingTransform();
-  ft.attach(w, h, ops);
+  ft.attach(doc, h, wp2.floatLayer, wp2.selection);
   _ctxs.push({ h, w, wp2 });
   return { doc, wp2, w, h, ops, lt, ft, unrec: () => unrec };
 }
@@ -64,7 +64,7 @@ describe("栈完整性 · ① 令牌墙：无令牌写 → substrate 拒绝（�
 
 describe("栈完整性 · ② 修后合规：import 形状（门面微步 + token 内像素 + lift）跨步 undo/redo 全程健康", () => {
   it("undo×3 层干净消失 + active 复位；redo×3 层与像素逐字节回放 + 浮层回来；零 unrecoverable", () => {
-    const { doc, w, h, lt, ft, unrec } = mk();
+    const { doc, wp2, w, h, lt, ft, unrec } = mk();
     const L1 = doc.activeLayer;
     lt.addLayer("L2");                                       // 栈: [addLayer(L2)]
     lt.setActive(L1.id);
@@ -79,7 +79,7 @@ describe("栈完整性 · ② 修后合规：import 形状（门面微步 + toke
     eq(ft.lift(L3, { fallbackFullLayer: true }), true);      // 栈: [..., liftFloat]
 
     h.undo(w);                                               // 撤 lift：像素回层、浮层消失
-    eq(w.readFloatState(), null);
+    eq(wp2.floatLayer.view(), null);
     eq(L3.sampleAt(110, 110)[3], 255, "undo lift：像素回到层上");
     h.undo(w);                                               // 撤 addLayer+px：层被摘、active 复位
     eq(hasLayer(doc, L3.id), false, "undo：导入的层干净消失");
@@ -96,14 +96,14 @@ describe("栈完整性 · ② 修后合规：import 形状（门面微步 + toke
     assert(src.every((v, i) => v === got[i]), "redo：像素逐字节回放");
     eq(doc.activeLayer?.id, L3.id, "redo：active = 导入层");
     h.redo(w);                                               // liftFloat：能找到层
-    assert(w.readFloatState(), "redo：浮层回来");
+    assert(wp2.floatLayer.view(), "redo：浮层回来");
     eq(unrec(), 0);
   });
 });
 
 describe("栈完整性 · ③ v0.7.41 导入=一个 undo 整点（addLayer 微步 + liftFloat 封口）", () => {
   it("单次 undo：浮层与导入层一起消失、active 复位；单次 redo 全回放", () => {
-    const { doc, w, h, lt, ft, unrec } = mk();
+    const { doc, wp2, w, h, lt, ft, unrec } = mk();
     const src = fillBuf(32, 32);
     const prevActiveId = doc.activeLayer?.id ?? null;
     // —— v0.7.41 起 import 的合规形状：checkpoint:false 微步 + lift 封口 ——
@@ -113,12 +113,12 @@ describe("栈完整性 · ③ v0.7.41 导入=一个 undo 整点（addLayer 微�
     L3.pixels.putRegion(100, 100, 32, 32, src);
     eq(ft.lift(L3, { fallbackFullLayer: true }), true, "liftFloat 默认封口 → 整组闭合");
     h.undo(w);                                           // 只按一次
-    eq(w.readFloatState(), null, "一次 undo：浮层消失");
+    eq(wp2.floatLayer.view(), null, "一次 undo：浮层消失");
     eq(hasLayer(doc, L3.id), false, "一次 undo：导入层同整点消失");
     eq(doc.activeLayer?.id, prevActiveId, "active 回导入前");
     h.redo(w);                                           // 只按一次
     eq(hasLayer(doc, L3.id), true, "一次 redo：层带像素回放");
-    assert(w.readFloatState(), "一次 redo：浮层回来");
+    assert(wp2.floatLayer.view(), "一次 redo：浮层回来");
     const back = flattenViewLeaves(doc.layers).find((l) => l.id === L3.id);
     eq(back.pixels.isEmpty(), true, "redo 后像素在浮层里（层挖空）——lift 状态完整回放");
     eq(unrec(), 0, "全程零 unrecoverable");
@@ -128,9 +128,9 @@ describe("栈完整性 · ③ v0.7.41 导入=一个 undo 整点（addLayer 微�
 // 测试卫生：统一释放（清栈+收浮层 = record 驱逐 → tileset 归零还池）
 describe("undo-stack-integrity 收尾", () => {
   it("清栈、收浮层并释放本文件的工件资源", () => {
-    for (const { h, w, wp2 } of _ctxs) {
+    for (const { h, wp2 } of _ctxs) {
       h.clear();
-      w.dropFloats();
+      wp2.floatLayer.dropForLoad();
       wp2.load({ width: 4, height: 4, nodes: [{ name: "空", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixels: null }] });
     }
     _ctxs.length = 0;

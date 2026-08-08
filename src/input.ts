@@ -406,9 +406,9 @@ export class InputController {
     this.layerTiles = opts.layerTiles || null;
     // 把 doc 引用给 lasso，便于直接操作 doc.selection
     this.lasso.setDoc(this.doc);
-    // v0.4.7（S6）：float 状态在 workpiece——lasso 的 lift/变换/stamp/accept/reject 走 operator。
-    if (this.workpiece && this.history && this.ops) {
-      this.lasso.attachWorkpiece(this.workpiece, this.history, this.ops);
+    // T4b：float 状态在 FloatLayerComponent——lasso 的 lift/变换/stamp/accept/reject 走令牌编排。
+    if (this.wp2 && this.history) {
+      this.lasso.attachWorkpiece(this.doc, this.history, this.wp2.floatLayer, this.wp2.selection);
     }
     this._bind();
   }
@@ -1156,7 +1156,7 @@ export class InputController {
     this.board.requestRender();
   }
   _commitLasso() {
-    // v0.4.7（S6）：accept 的 operator 编排（烤层 ops.pixels × N + DropFloatOp，compound 封整点）
+    // T4b：accept 的令牌编排（烤层像素写时扣押 + FloatLayerComponent.drop，一个整点）
     // 全在 FloatingTransform；旧「commit 返回手拼 entry → 这里再 push」链死。
     if (!this.lasso.commit()) return;
     this.board.invalidateAll();
@@ -1460,8 +1460,8 @@ export class InputController {
   }
   clearHistory() {
     if (this.history) this.history.clear();
-    // 换文档：浮层状态直接清（不走 operator——栈都没了）+ lasso 状态对齐。
-    this.workpiece?.dropFloats();
+    // 换文档：浮层状态直接清（不走 undo——栈都没了）+ lasso 状态对齐。
+    this.wp2?.floatLayer.dropForLoad();
     this.lasso.polygonCancelSession();   // 换文档：多边形会话丢弃（interrupt=cancel 家规）
     this.lasso.syncFloating();
   }

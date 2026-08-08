@@ -1,9 +1,6 @@
-import { DocumentOperator, Workpiece, type OpResult, type FloatState, type FloatTransformMeta, type FloatRect, type WorkpieceFloat } from "./workpiece.ts";
-import { type ViewLeaf, type ViewLeafSnap } from "./painting-view.ts";
-import { LayerPixels } from "../tiles/tile-layer.ts";
+import type { ViewLeaf } from "./painting-view.ts";
+import type { FloatRect, WorkpieceFloat } from "./float-component.ts";
 import type { Selection } from "../selection.ts";
-export declare function estimateFloatPixelBytes(lp: LayerPixels): number;
-export declare function cloneFloatMeta(t: FloatTransformMeta): FloatTransformMeta;
 export declare function extractFloatPixels(leaf: ViewLeaf, sel: Selection | null): WorkpieceFloat | null;
 export declare function composeCutHole(leaf: ViewLeaf, sel: Selection | null, region: FloatRect): {
     x: number;
@@ -55,77 +52,3 @@ export declare function composeRigidWriteback(leaf: ViewLeaf, f: WorkpieceFloat,
     h: number;
     data: Uint8ClampedArray;
 };
-export interface LiftFloatArgs {
-    nodeId: number;
-    cut: boolean;
-    fallbackFullLayer: boolean;
-    ignoreSelection?: boolean;
-}
-export interface LiftSwapData {
-    floats: FloatState | null;
-    leafSnaps: {
-        layerId: number;
-        snap: ViewLeafSnap;
-    }[];
-    selection: {
-        v: Selection | null;
-    };
-}
-export declare class LiftFloatOp extends DocumentOperator<LiftFloatArgs, LiftSwapData> {
-    readonly kind = "liftFloat";
-    forward(w: Workpiece, args: LiftFloatArgs, data: LiftSwapData | undefined): OpResult<LiftSwapData>;
-    backward(w: Workpiece, _args: LiftFloatArgs, data: LiftSwapData): OpResult<LiftSwapData>;
-    private _swap;
-    estimateQuotaBytes(_a: LiftFloatArgs, data: LiftSwapData | undefined): number;
-    disposeData(_a: LiftFloatArgs, data: LiftSwapData | undefined): void;
-}
-export interface FloatTransformArgs {
-    after: FloatTransformMeta;
-}
-export declare class FloatTransformOp extends DocumentOperator<FloatTransformArgs, {
-    t: FloatTransformMeta;
-}> {
-    readonly kind = "floatTransform";
-    forward(w: Workpiece, args: FloatTransformArgs, data: {
-        t: FloatTransformMeta;
-    } | undefined): OpResult<{
-        t: FloatTransformMeta;
-    }>;
-    backward(w: Workpiece, _args: FloatTransformArgs, data: {
-        t: FloatTransformMeta;
-    }): OpResult<{
-        t: FloatTransformMeta;
-    }>;
-}
-export declare class DropFloatOp extends DocumentOperator<{
-    reason?: string;
-}, {
-    fs: FloatState | null;
-}> {
-    readonly kind = "dropFloat";
-    forward(w: Workpiece, _args: {
-        reason?: string;
-    }, data: {
-        fs: FloatState | null;
-    } | undefined): OpResult<{
-        fs: FloatState | null;
-    }>;
-    backward(w: Workpiece, _args: {
-        reason?: string;
-    }, data: {
-        fs: FloatState | null;
-    }): OpResult<{
-        fs: FloatState | null;
-    }>;
-    private _swap;
-    estimateQuotaBytes(_a: {
-        reason?: string;
-    }, data: {
-        fs: FloatState | null;
-    } | undefined): number;
-    disposeData(_a: {
-        reason?: string;
-    }, data: {
-        fs: FloatState | null;
-    } | undefined): void;
-}
