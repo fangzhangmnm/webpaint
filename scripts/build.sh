@@ -91,7 +91,8 @@ echo "[build] ✓ B 分层 lint 过"
 #   · workpiece/** 不碰 store（持久化归 importer/exporter/persistency；spec journal/20260721 §workpiece）
 #   · tiles/** 不碰 gl/**（CPU tile 池是纯底座；GPU 侧经 bridge 反向依赖它）
 #   · selection.ts / marching-ants.ts 不碰 gl/**、store（S5：选区是纯 CPU tile 值对象；GL 上传走 board 接缝）
-#   · history.ts / pixel-edit.ts / layer-undo.ts / gl/tile-residency.ts 已日落（v0.4.3-0.4.5），不得复活 import
+#   · history.ts(根目录旧栈) / pixel-edit.ts / layer-undo.ts / gl/tile-residency.ts 已日落（v0.4.3-0.4.5），
+#     不得复活 import（workpiece/history.ts 是 T5 的 v2 编排器、undo-history 曾是合法名——都排除在外）
 #   · S7：gl/tile-backend-gl.ts / gl/tile-store.ts / gl/tile-index.ts / gl/gl-doc-renderer.ts 已死
 #     （gpu-tile-pool + tile-bridge + render-tree-gl 取代），不得复活 import
 #   · render/** 是纯规划（node 全测），不 import gl/**、store
@@ -99,7 +100,7 @@ echo "[build] v0.4 分层 lint…"
 LAYER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/store/|app-store)" src/workpiece --include='*.ts' 2>/dev/null || true)
 TILES_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*/gl/" src/tiles --include='*.ts' 2>/dev/null || true)
 SEL_HITS=$(grep -nE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/gl/|/store/|app-store)" src/selection.ts src/marching-ants.ts 2>/dev/null || true)
-DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/history\.ts|/pixel-edit\.ts|/layer-undo\.ts|/tile-residency\.ts|/tile-backend-gl\.ts|/tile-store\.ts|/tile-index\.ts|/gl-doc-renderer\.ts)" src test --include='*.ts' --include='*.mjs' 2>/dev/null | grep -v "undo-history" || true)
+DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/history\.ts|/pixel-edit\.ts|/layer-undo\.ts|/tile-residency\.ts|/tile-backend-gl\.ts|/tile-store\.ts|/tile-index\.ts|/gl-doc-renderer\.ts)" src test --include='*.ts' --include='*.mjs' 2>/dev/null | grep -v "undo-history\|workpiece/history" || true)
 # S9 归档模块防复活（src 禁 import；test/gl-smoke 的 reference-*.ts 是合法归档地）：
 S9DEAD_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/layer-composite\.ts|/gl-compose-plan\.ts)" src --include='*.ts' 2>/dev/null || true)
 
