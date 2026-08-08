@@ -1,9 +1,9 @@
-// LayerTree2（T3a，ADR-0008）：纯 json substrate / 换根收集 / tileset 引用计数所有权算术
+// LayerTree（T3a，ADR-0008）：纯 json substrate / 换根收集 / tileset 引用计数所有权算术
 //（TreeStructureOp bounded 泄漏的 v2 解——回归锚：删组→驱逐→无泄漏）/ verbs 契约 / setActive 不记账。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { UndoStack } from "../src/workpiece/undo-stack.ts";
 import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
-import { LayerTree2 } from "../src/workpiece/layer-tree2.ts";
+import { LayerTree } from "../src/workpiece/layer-tree.ts";
 import { LayerPixels } from "../src/tiles/tile-layer.ts";
 
 class Wp extends PaintingWorkpiece {
@@ -44,7 +44,7 @@ function mk(opts = {}) {
   // 初始 doc：一张 64×64 一叶
   const lp0 = new LayerPixels(64, 64);
   const ref0 = wp.layerTiles.createTileset(lp0);
-  tree = new LayerTree2({
+  tree = new LayerTree({
     wp, tiles: wp.layerTiles,
     initial: {
       nodes: [{ id: 1, name: "bg", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixelsRef: ref0 }],
@@ -58,7 +58,7 @@ function mk(opts = {}) {
 
 const solid = (w, h, v) => new Uint8ClampedArray(w * h * 4).fill(v);
 
-describe("LayerTree2 · 换根收集与所有权", () => {
+describe("LayerTree · 换根收集与所有权", () => {
   it("addLayer：插 active 上方 + active 换新；一步入栈；undo/redo 树往返", () => {
     const { undo, wp, tree } = mk();
     const v0 = tree.view();
@@ -152,7 +152,7 @@ describe("LayerTree2 · 换根收集与所有权", () => {
   });
 });
 
-describe("LayerTree2 · verbs 契约", () => {
+describe("LayerTree · verbs 契约", () => {
   it("duplicateLayer：props 原样、像素零拷贝共享、插源上方", () => {
     const { wp, tree, tiles, undo } = mk();
     let t = wp.begin(); tiles.putRegion(1, 0, 0, 2, 2, solid(2, 2, 66)); t.commit();
@@ -263,7 +263,7 @@ function mkGrouped() {
   const mkRef = () => wp.layerTiles.createTileset(new LayerPixels(64, 64));
   const r1 = mkRef(), r11 = mkRef(), r12 = mkRef();
   const leaf = (id, name, pixelsRef) => ({ id, name, visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixelsRef });
-  tree = new LayerTree2({
+  tree = new LayerTree({
     wp, tiles: wp.layerTiles,
     initial: {
       nodes: [leaf(1, "bg", r1), { id: 10, name: "g", visible: true, opacity: 1, mode: "source-over", clippingMask: false, children: [leaf(11, "a", r11), leaf(12, "b", r12)] }],
@@ -288,7 +288,7 @@ function mkSmall() {
   const wp = new Wp({ undo, host, onTokenLeak: () => {} });
   const lp0 = new LayerPixels(32, 32);
   const ref0 = wp.layerTiles.createTileset(lp0);
-  tree = new LayerTree2({
+  tree = new LayerTree({
     wp, tiles: wp.layerTiles, maxLeaves: () => 2,
     initial: {
       nodes: [{ id: 1, name: "bg", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixelsRef: ref0 }],

@@ -4,7 +4,7 @@
 //
 // 两种形态（迁移期并存，cutover 后只剩树模式）：
 //   - host 模式（T2 app 现状）：tile substrate 经外部 TilesHost 解析（doc 树查找）；layerTree = null。
-//   - 树模式（T3b）：opts.tree 给出出生尺寸 → 内建 LayerTree2 + 树背 host（pixelsRef → tileset 注册表）；
+//   - 树模式（T3b）：opts.tree 给出出生尺寸 → 内建 LayerTree + 树背 host（pixelsRef → tileset 注册表）；
 //     出生 = 单空叶 doc；内容经 load(data) 令牌灌入。
 //
 // load = 令牌写（ADR-0008 §3）：解码器产 plain data（PaintingData：json 形 + 内联 tile 字节）→
@@ -12,9 +12,9 @@
 //   旧 doc 的 tileset 随被清掉的 record（旧根）释放——换文档零手工 dispose。
 // exportData = 编码器读口：冻结快照语义（bytes 当场拷出，后续编辑不追写——freezeDocForEncode 的 v2 形）。
 
-import { Workpiece, type WorkpieceOpts, type CollectorComponent } from "./workpiece2.ts";
+import { Workpiece, type WorkpieceOpts, type CollectorComponent } from "./workpiece.ts";
 import { LayerTiles, type TilesHost, type Rect } from "./layer-tiles.ts";
-import { LayerTree2, isGroupNode, type TreeJson, type TreeNode, type TreeLeaf } from "./layer-tree2.ts";
+import { LayerTree, isGroupNode, type TreeJson, type TreeNode, type TreeLeaf } from "./layer-tree.ts";
 import { SelectionComponent } from "./selection-component.ts";
 import { FloatLayerComponent } from "./float-component.ts";
 import { PendingFill } from "./pending-fill.ts";
@@ -49,7 +49,7 @@ function memoryPerspHost(): PerspHost {
 
 export class PaintingWorkpiece extends Workpiece {
   readonly layerTiles: LayerTiles;
-  readonly layerTree: LayerTree2 | null;
+  readonly layerTree: LayerTree | null;
   readonly selection: SelectionComponent;   // recorded（不持久化，跨 session 清——T4a）
   readonly floatLayer: FloatLayerComponent; // recorded（不持久化，退出前 settle——T4b）
   readonly pendingFill: PendingFill;        // recorded（不持久化；fill 工具期非 null——T4c）
@@ -91,7 +91,7 @@ export class PaintingWorkpiece extends Workpiece {
       };
       this.layerTiles = new LayerTiles(this, treeHost);
       const ref0 = this.layerTiles.createTileset(new LayerPixels(opts.tree.width, opts.tree.height));
-      this.layerTree = new LayerTree2({
+      this.layerTree = new LayerTree({
         wp: this, tiles: this.layerTiles, maxLeaves: opts.tree.maxLeaves,
         initial: {
           nodes: [{ id: 1, name: "Layer 1", visible: true, opacity: 1, mode: "source-over", clippingMask: false, lockAlpha: false, pixelsRef: ref0 }],
@@ -174,7 +174,7 @@ export class PaintingWorkpiece extends Workpiece {
 
   // ---- 内部 ----
 
-  private _requireTree(): LayerTree2 {
+  private _requireTree(): LayerTree {
     if (!this.layerTree) throw new Error("PaintingWorkpiece: host 模式没有 layerTree（load/export 是树模式能力）");
     return this.layerTree;
   }

@@ -1,5 +1,5 @@
-// v0.8 T3b-2 · LayerTree 门面行为锁（换心后：withPoint + layerTree2 verbs；旧 operator 流退役）。
-// （区分 layer-tree2.test.mjs——那是 v2 树组件的 verb 契约；本文件测 workpiece.layers 门面 =
+// v0.8 T3b-2 · LayerTree 门面行为锁（换心后：withPoint + LayerTree(json) verbs；旧 operator 流退役）。
+// （区分 layer-tree-json.test.mjs——那是 v2 树组件的 verb 契约；本文件测 workpiece.layers 门面 =
 //   app 调用面的「写即记账」行为：undo/redo 往返、checkpoint 聚合、keep-one、hint 文案。）
 // 迁移自旧 operator-流版（v0.8.1 S1）——锚语义逐条保留：
 //   - addLayer/duplicateLayer = 创建即记账（undo 摘层回 prevActive、redo 连像素恢复——像素随

@@ -18,7 +18,7 @@ import { LayerPixels, setTileSwapObserver } from "../tiles/tile-layer.ts";
 import type { TileHandle } from "../tiles/cpu-tile-pool.ts";
 import { tilesAcross, tileKey } from "../tiles/tile-geometry.ts";
 import type { RecordData } from "./undo-stack.ts";
-import type { Workpiece, CollectorComponent } from "./workpiece2.ts";
+import type { Workpiece, CollectorComponent } from "./workpiece.ts";
 
 /** 实例↔身份解析 + 实例替换（computed 变换用）。T2 由 app 以 doc 树实现；T3 起归 LayerTree json。 */
 export interface TilesHost {

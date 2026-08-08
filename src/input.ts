@@ -39,7 +39,7 @@ import type { EditMode } from "./edit-mode.ts";
 import type { History } from "./workpiece/history.ts";
 import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
 import type { LayerTiles } from "./workpiece/layer-tiles.ts";
-import type { WriteToken } from "./workpiece/workpiece2.ts";
+import type { WriteToken } from "./workpiece/workpiece.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import { Selection } from "./selection.ts";
 import { selPenSettingsFrom, stampsToBinaryGray8 } from "./sel-pen.ts";

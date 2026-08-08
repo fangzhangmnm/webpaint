@@ -7,7 +7,7 @@
 //   - 不可恢复协议：undo swap 中途抛 → 弃整栈 + onUnrecoverable（宁丢历史不留半坏）；
 //   - onChange 随栈形变、onApplied 按 step entries 翻译。
 import { describe, it, assert, eq } from "./runner.mjs";
-import { Workpiece } from "../src/workpiece/workpiece2.ts";
+import { Workpiece } from "../src/workpiece/workpiece.ts";
 import { History } from "../src/workpiece/history.ts";
 
 // 最小组件：值语义 {v}；record = 另一侧值（自反 swap）。swapThrow 可注入（不可恢复协议测试用）。

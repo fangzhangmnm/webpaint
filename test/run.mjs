@@ -32,7 +32,7 @@ import "./background-sync-jobs.test.mjs";
 import "./undo-stack.test.mjs";             // T1 workpiece v2（ADR-0008）：令牌/collector/自反 swap/配额/双计数
 import "./layer-tiles.test.mjs";            // T2 像素组件：写时扣押（Krita memento）/verbs/computed 白名单+双捕获/no-op 守卫（pixel-tx-noop 后继）
 import "./history.test.mjs";                // T5 History 编排器：withPoint 聚合/嵌套回滚/不可恢复协议（前身 legacy-bridge.test）
-import "./layer-tree2.test.mjs";            // T3a 层树 json 组件：换根收集/tileset 引用计数（删组泄漏回归锚）/verbs/setActive 不记账
+import "./layer-tree-json.test.mjs";            // T3a 层树 json 组件：换根收集/tileset 引用计数（删组泄漏回归锚）/verbs/setActive 不记账
 import "./painting-workpiece.test.mjs";     // T3b-1 树模式：load 令牌灌入（旧 doc 随 record 驱逐）/exportData 冻结往返/addGroup
 import "./doc-resize.test.mjs";
 import "./float-ops.test.mjs";     // S6：float 入 workpiece（lift/transform/reject/accept 整链 + 所有权/驱逐）

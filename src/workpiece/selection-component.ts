@@ -10,7 +10,7 @@
 
 import type { Selection } from "../selection.ts";
 import type { RecordData } from "./undo-stack.ts";
-import type { Workpiece, CollectorComponent } from "./workpiece2.ts";
+import type { Workpiece, CollectorComponent } from "./workpiece.ts";
 
 export function estimateSelectionBytes(sel: Selection | null | undefined): number {
   if (!sel || sel.disposed) return 0;

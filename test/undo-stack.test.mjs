@@ -1,11 +1,11 @@
-// undo-stack v2 + workpiece2 契约测试（T1，玩具组件——基类不挑组件形状）。
+// undo-stack v2 + workpiece(v2 基类) 契约测试（T1，玩具组件——基类不挑组件形状）。
 // 钉死：令牌唯一性/无令牌写拒绝、commit 打包成单步、cancel 倒序回滚无痕、自反 swap 往返逐字节、
 // 配额整步驱逐+dispose+最新步保底、stateVersion 位置身份（画→存→画→undo=clean 真值表）、
 // silent 组件 record 即弃+silentDirty、无 undo workpiece 写面纪律统一、双计数语义分离。
 // 这些是 v2 纪元（ADR-0008）的全部承重墙；旧栈 undo-history.test 在 T5 拆除时按此迁移退役。
 import { describe, it, assert, eq } from "./runner.mjs";
 import { UndoStack } from "../src/workpiece/undo-stack.ts";
-import { Workpiece } from "../src/workpiece/workpiece2.ts";
+import { Workpiece } from "../src/workpiece/workpiece.ts";
 
 // 玩具组件：单值 substrate + 值对象 collector（首写扣押旧值快照——ADR-0008「json 收快照」形态）。
 class ValueComp {

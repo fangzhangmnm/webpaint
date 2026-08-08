@@ -2,7 +2,7 @@
 // 共同脊柱 runDocTransform（T3b-2 换 v2 形）：一个 compound 令牌 = 一个整点。
 //   - flip/rot90/offset 走 LayerTiles computed verbs（省内存可逆变换白名单）；
 //   - crop/cropResample/resample 走 LayerTiles.resizeAllLeaves（exchange record；undo 包 = 另一侧实例）；
-//   - json 尺寸走 layerTree2.setTreeProp("width"/"height")（树 record 同 step 翻转）；
+//   - json 尺寸走 layerTree.setTreeProp("width"/"height")（树 record 同 step 翻转）；
 //   - 选区走 SelectionComponent（pre-applied 直写组件 verb——T4a）；
 //   - 透视 remap 走 PerspComponent.remapForDocTransform（token 记账，undo 同 step 还原——T4d，
 //     persp 信封退役）；

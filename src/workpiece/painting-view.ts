@@ -1,6 +1,6 @@
 // painting-view —— 树模式的 app 读写端口（T3b-2 cutover 的枢纽；ADR-0008）。
 //
-// 角色：PaintingWorkpiece（LayerTree2 json + LayerTiles tileset 注册表）→ 旧 DocView 同形的
+// 角色：PaintingWorkpiece（LayerTree json + LayerTiles tileset 注册表）→ 旧 DocView 同形的
 // **view 节点树**。让 23 个 doc.ts 消费文件在割接时几乎零改动：board/GL 管线本就 duck-typed
 // （{id,visible,opacity,mode,clippingMask,pixels,children}），引擎（brush/liquify/lasso）拿到的
 // ViewLeaf 具备旧 Layer 的读写面（pixels/bbox/canvas 物化缓存/editRegion/snapshot…——写走
@@ -14,14 +14,14 @@
 //   - contentRev 全局单调（lineart-oracle 等 (id,rev) 缓存键的不复用保证——tileset 实例换血后
 //     LayerPixels.contentVersion 从头数，这里用 WeakMap+全局计数器重映射）。
 //
-// 同步策略：LayerTree2 每次写换新根（不可变值契约）→ 端口以**根引用身份**做缓存键；
+// 同步策略：LayerTree 每次写换新根（不可变值契约）→ 端口以**根引用身份**做缓存键；
 // ViewLeaf 按 id 复用（物化缓存/引擎持引用跨 commit 有效），属性镜像每次 resync 回灌。
 
 import { LayerPixels, materialize, editRegion as editPixels, editRegionBytes as editPixelsBytes, disposePixelsSnapshot, type PixelsSnapshot } from "../tiles/tile-layer.ts";
 import { makeBitmap } from "../bitmap.ts";
 import type { PaintingWorkpiece } from "./painting-workpiece.ts";
 import type { LayerTiles } from "./layer-tiles.ts";
-import { isGroupNode, type TreeNode, type TreeLeaf } from "./layer-tree2.ts";
+import { isGroupNode, type TreeNode, type TreeLeaf } from "./layer-tree.ts";
 import { computeMaxLayers, layerByteBudget } from "../doc.ts";
 import type { Selection } from "../selection.ts";
 
@@ -208,7 +208,7 @@ export class PaintingView {
 
   private get _tree() { return this._wp.layerTree!; }
 
-  /** 根引用身份同步：LayerTree2 每写换新根 → 引用变了才重建镜像（叶按 id 复用）。 */
+  /** 根引用身份同步：LayerTree 每写换新根 → 引用变了才重建镜像（叶按 id 复用）。 */
   private _sync(): void {
     const json = this._tree.view();
     if (json === this._lastRoot) return;

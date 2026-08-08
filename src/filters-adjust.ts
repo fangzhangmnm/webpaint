@@ -17,7 +17,7 @@ import { setTool } from "./toolbar.ts";   // 命令 = toolbar 的接口（显式
 import { requireEditableLeaf } from "./editable-leaf.ts";
 import { fillResampleSelect } from "./resample.ts";
 import type { LayerSnap } from "./doc.ts";
-import type { WriteToken } from "./workpiece/workpiece2.ts";
+import type { WriteToken } from "./workpiece/workpiece.ts";
 import type { AppContext } from "./app-context.ts";
 import { iconHtml } from "./ui/icon.ts";
 

@@ -11,7 +11,7 @@
 // 只翻本组件 substrate，view 无人消费 → 无副作用；FillColorOp 的「undo 改笔刷色」行为死）。
 
 import type { RecordData } from "./undo-stack.ts";
-import type { Workpiece, CollectorComponent } from "./workpiece2.ts";
+import type { Workpiece, CollectorComponent } from "./workpiece.ts";
 
 interface PendingBox { color: string }
 interface PendingRecord { v: PendingBox | null }

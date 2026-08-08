@@ -1,5 +1,4 @@
-// workpiece2 —— workpiece v2 基类：令牌工厂 + undo stack + meta（ADR-0008）。
-// ⚠ 临时文件名：T5 拆掉旧机器后收编正名成 workpiece.ts（施工序见 20260807-workpiece-v2-handoff.md）。
+// workpiece —— v2 基类：令牌工厂 + undo stack + meta（ADR-0008；T5 收编正名，前身 workpiece2.ts）。
 //
 // 元规则（ADR-0008 §1）：
 //   - 同时只准一个开着的令牌（第二次 begin → throw = 泄漏查获点；FinalizationRegistry 兜底——

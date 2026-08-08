@@ -2,7 +2,7 @@
 // app 侧胶水：layers-panel/topbar/import/explode/blender-sync 的图层结构入口（ctx.layers）。
 //
 // 「写即记账」契约不变：每个公共方法 = 一个 withPoint 令牌整点（checkpoint:false = 留开聚合；
-// import 单整点/stampAll 复合沿用）。方法体内直写 LayerTree2/LayerTiles verbs，
+// import 单整点/stampAll 复合沿用）。方法体内直写 LayerTree/LayerTiles verbs，
 // undo 包 = 组件 collector 的根/tile record。
 //
 // undo/redo 状态栏文案：经 o.statuses 由调用方传入（本门面不碰 i18n），落 step.hint
@@ -10,7 +10,7 @@
 // mergeDown 的合成字节在此烤（renderNodesToBytes 纯函数面）——v2 verb 收字节不碰 GL（T3a 定形）。
 
 import type { History } from "./workpiece/history.ts";
-import type { LayerTree2, LayerPropKey } from "./workpiece/layer-tree2.ts";
+import type { LayerTree, LayerPropKey } from "./workpiece/layer-tree.ts";
 import type { LayerTiles, Rect } from "./workpiece/layer-tiles.ts";
 import { type PaintingView, type ViewLeaf, type ViewGroup, type ViewNode } from "./workpiece/painting-view.ts";
 import { renderNodesToBytes } from "./doc-render.ts";
@@ -22,12 +22,12 @@ export type AddLayerResult = { ok: true; layer: ViewLeaf } | { ok: false; msg?: 
 
 export class LayersFace {
   private _history: History;
-  private _tree: LayerTree2;
+  private _tree: LayerTree;
   private _tiles: LayerTiles;
   private _port: PaintingView;
   private _status: (msg: string) => void;
 
-  constructor(deps: { history: History; tree: LayerTree2; tiles: LayerTiles; port: PaintingView; status?: (msg: string) => void }) {
+  constructor(deps: { history: History; tree: LayerTree; tiles: LayerTiles; port: PaintingView; status?: (msg: string) => void }) {
     this._history = deps.history;
     this._tree = deps.tree;
     this._tiles = deps.tiles;

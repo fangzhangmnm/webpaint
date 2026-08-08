@@ -108,7 +108,7 @@ if (navigator.maxTouchPoints > 0) {
 }
 initI18n();   // 本地化 boot：设 <html lang> + 填静态 HTML data-i18n（早于任何 JS 设标签/首帧）
 // ============ v2 纪元核心装配（T3b-2 cutover；T5 起纯 v2——桥/operator 流已拆）============
-// 树模式 PaintingWorkpiece = 文档 SSoT（LayerTree2 json + LayerTiles tileset 注册表）；
+// 树模式 PaintingWorkpiece = 文档 SSoT（LayerTree json + LayerTiles tileset 注册表）；
 // doc = PaintingView 端口（旧 DocView 同形读面 + 选区过渡宿）——PaintDoc 已出局。
 // 唯一 undo 权威 = v2 UndoStack（History 编排器持有）；history 先建（wp2 ctor 要 stack）。
 const UNDO_QUOTA_BYTES = 128 * 1024 * 1024;   // undo 配额（tile 压缩前记 0，压缩后计入；整步驱逐）

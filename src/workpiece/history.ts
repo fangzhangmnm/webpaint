@@ -10,7 +10,7 @@
 // 组件 verb 的记账/回滚本体在各 collector（ADR-0008）；本类只管令牌与栈的编排，不碰 DOM/i18n。
 
 import { UndoStack, type UndoStep } from "./undo-stack.ts";
-import type { Workpiece, WriteToken } from "./workpiece2.ts";
+import type { Workpiece, WriteToken } from "./workpiece.ts";
 
 export interface HistoryOpts {
   maxQuotaBytes: number;

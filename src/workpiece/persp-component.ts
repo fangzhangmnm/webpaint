@@ -12,7 +12,7 @@
 // desk 直写一并盖回（与旧信封 wholesale restore 行为一致）。
 
 import type { RecordData } from "./undo-stack.ts";
-import type { Workpiece, CollectorComponent } from "./workpiece2.ts";
+import type { Workpiece, CollectorComponent } from "./workpiece.ts";
 
 export interface PerspPt { x: number; y: number }
 export interface PerspHost {

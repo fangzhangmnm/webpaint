@@ -1,5 +1,4 @@
-// layer-tree2 —— workpiece v2 的层树组件（纯 json substrate，ADR-0008 §3；T3）。
-// ⚠ 临时文件名：T5 拆掉 v1 门面（layer-tree.ts）后收编正名。
+// layer-tree —— v2 层树组件（纯 json substrate，ADR-0008 §3；T3 立，T5 收编正名，前身 layer-tree2.ts）。
 //
 // substrate = TreeJson（纯数据，可持久化）；像素只持 pixelsRef（LayerTiles tileset 注册表的 id）。
 // 写 = 换新根（旧根整体进 collector/record——一个 token 至多一份原件，中间产物即弃）。
@@ -16,7 +15,7 @@
 // 手工 setActiveById 的行为在 v2 下由根快照天然给出）。
 
 import type { RecordData } from "./undo-stack.ts";
-import type { Workpiece, CollectorComponent } from "./workpiece2.ts";
+import type { Workpiece, CollectorComponent } from "./workpiece.ts";
 import type { LayerTiles, Rect } from "./layer-tiles.ts";
 import { LayerPixels } from "../tiles/tile-layer.ts";
 
@@ -43,7 +42,7 @@ export type LayerPropKey = "name" | "visible" | "opacity" | "mode" | "clippingMa
 
 interface TreeRecord { json: TreeJson }
 
-export class LayerTree2 implements CollectorComponent {
+export class LayerTree implements CollectorComponent {
   readonly kind = "layerTree";
   private _wp: Workpiece;
   private _tiles: LayerTiles;
