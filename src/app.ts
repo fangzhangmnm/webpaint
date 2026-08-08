@@ -20,7 +20,6 @@ import { InputController, bindPressureDisabled } from "./input.ts";
 import { makeCurrentBrush } from "./resolved-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolveBrush，同文件）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
 import { Workpiece } from "./workpiece/workpiece.ts";
-import { makeOperators } from "./workpiece/operators.ts";
 import { LayerTree } from "./workpiece/layer-tree.ts";
 import { SelectionFace } from "./workpiece/selection-face.ts";
 import { LegacyHistory, LegacyOpsComponent } from "./workpiece/legacy-bridge.ts";
@@ -231,7 +230,6 @@ wp2.attachLegacy(legacyOps);   // 构造环解法：legacyOps 需 v1，v1 需端
 history.attach(wp2, legacyOps, (on) => wp2.layerTiles._suspendCollect(on));
 // v1 计数/isDirty 跟车：任何 recorded 变更（commit/undo/redo/cancel）→ bump（渲染缓存失效 + 保存脏门）。
 wp2.onChange((e) => { if (e.recorded) workpiece._bumpCommit(); });
-const ops = makeOperators();   // T4c 后残余 = docResize（fillColor → wp2.pendingFill）
 // 结构类写面门面（T3b-2 换心：operator 流 → v2 verbs）+ 选区写面（substrate = 端口过渡宿）。
 new LayerTree({ w: workpiece, history, tree: wp2.layerTree!, tiles: wp2.layerTiles, port: doc, status: setStatus });
 new SelectionFace({ w: workpiece, history, sel: wp2.selection });
@@ -254,7 +252,6 @@ const input = new InputController(board, doc, {
   status: setStatus,
   history,
   workpiece,
-  ops,
   wp2,
   layerTiles: wp2.layerTiles,
   editMode,
@@ -326,7 +323,7 @@ const isMidOperation = () =>
   input.isStrokeActive() || input.lasso.hasFloating() || editMode.hasPendingTransient();
 
 const ctx: AppContext = freezeCtx({
-  state, dialReactive, currentBrush, editMode, doc, board, input, history, workpiece, ops, wp2, layerTiles: wp2.layerTiles, isMidOperation,
+  state, dialReactive, currentBrush, editMode, doc, board, input, history, workpiece, wp2, layerTiles: wp2.layerTiles, isMidOperation,
   rack, store: _store, setStatus, withBusy, leftDial,
   updateSaveStatus, updateZoomLabel, updateNewerBanner, pullSettingsAndState,
   _suppressTransientPanels, _restoreTransientPanels, _bringPanelTop,

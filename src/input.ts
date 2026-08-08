@@ -37,7 +37,6 @@ import type { PaintingView, ViewLeaf } from "./workpiece/painting-view.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
 import type { HistoryFacade, Workpiece } from "./workpiece/workpiece.ts";
-import type { OperatorRegistry } from "./workpiece/operators.ts";
 import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
 import type { LayerTiles } from "./workpiece/layer-tiles.ts";
 import type { WriteToken } from "./workpiece/workpiece2.ts";
@@ -119,7 +118,6 @@ interface InputOpts {
   status?: (msg: string) => void;
   history?: History | null;
   workpiece?: Workpiece | null;
-  ops?: OperatorRegistry | null;
   wp2?: PaintingWorkpiece | null;
   layerTiles?: LayerTiles | null;
   isContentReplacing?: () => boolean;   // N10：云端快进正在换画布内容时为 true → draw-role 起笔降级（同 !canDraw 路径）
@@ -351,7 +349,6 @@ export class InputController {
   _lastPenActivity: number = -Infinity;   // 最近笔尖落/移/抬时刻 (ms)。掌触 tap 门用
   history: History | null;
   workpiece: Workpiece | null;
-  ops: OperatorRegistry | null;
   wp2: PaintingWorkpiece | null;
   layerTiles: LayerTiles | null;
   _activeStroke: ActiveStroke | null = null;
@@ -401,7 +398,6 @@ export class InputController {
     // v0.4.5：不再注册 handler——lasso/selectionChange 走 pixel-tx/workpiece.sel（对称 swap，全同步）。
     this.history = opts.history || null;
     this.workpiece = opts.workpiece || null;
-    this.ops = opts.ops || null;
     this.wp2 = opts.wp2 || null;
     this.layerTiles = opts.layerTiles || null;
     // 把 doc 引用给 lasso，便于直接操作 doc.selection

@@ -1,7 +1,7 @@
 // 职责（单一）：文档级变换 op —— 裁切（裁到选区 / 自由 8-handle）、水平翻转、重采样（调整尺寸）。
 // 共同脊柱 runDocTransform（T3b-2 换 v2 形）：一个 compound 令牌 = 一个整点。
 //   - flip/rot90/offset 走 LayerTiles computed verbs（省内存可逆变换白名单）；
-//   - crop/cropResample/resample 走逐叶实例交换 + DocResizeOp 记账（undo 包 = 另一侧实例）；
+//   - crop/cropResample/resample 走 LayerTiles.resizeAllLeaves（exchange record；undo 包 = 另一侧实例）；
 //   - json 尺寸走 layerTree2.setTreeProp("width"/"height")（树 record 同 step 翻转）；
 //   - 选区走 SelectionComponent（pre-applied 直写组件 verb——T4a）；
 //   - 透视 remap 走 PerspComponent.remapForDocTransform（token 记账，undo 同 step 还原——T4d，
@@ -15,7 +15,6 @@ import { t } from "./i18n/index.ts";
 import { resizeCropRect, resizeCropRectAspect, fitRectToBBox, cropRectToInts } from "./crop-geometry.ts";
 import { loadCanvasTemplates, fillTemplateSelect, templatePx, templateById } from "./canvas-templates.ts";
 import { editorState } from "./workbench-state.ts";
-import { flattenViewLeaves } from "./workpiece/painting-view.ts";
 import { LayerPixels } from "./tiles/tile-layer.ts";
 import { resampleBytes } from "./resample-bytes.ts";
 import type { Selection } from "./selection.ts";
@@ -25,9 +24,9 @@ interface Rect { x: number; y: number; w: number; h: number; }
 interface CropState { rect: Rect; drag: string | null; startMouse: { x: number; y: number } | null; startRect: Rect | null; mode: "free" | "template"; tpl: { tw: number; th: number; aspect: number; dpi?: number } | null; resample: boolean; }
 interface TransientOpts { apply?: () => void; abort?: () => void; }
 
-// ctx 绑入：core 单例。doc = PaintingView 端口（读面 + 选区过渡宿 + exchangeLeafPixels 协作面）。
+// ctx 绑入：core 单例。doc = PaintingView 端口（读面 + 选区过渡宿）。
 let editMode: AppContext["editMode"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], setStatus: AppContext["setStatus"];
-let workpiece: AppContext["workpiece"], ops: AppContext["ops"], wp2: AppContext["wp2"];
+let workpiece: AppContext["workpiece"], wp2: AppContext["wp2"];
 // 命令 = 拥有它的模块的接口（显式 import，不经 ctx）
 import { setMenuOpen } from "./settings-menu.ts";
 import { setAdjustOpen } from "./filters-adjust.ts";
@@ -67,22 +66,9 @@ function runDocTransform(label: string, tf: DocTransformSpec): void {
   const ui: { before: UiSnap; after: UiSnap | null } = { before: _captureUi(), after: null };
   const res = history.compound(workpiece, () => {
     if (tf.mapLeaf) {
-      // ⚠ 挂起收集：mapLeaf 造新实例的 putRegion 会被写时扣押逮到（seal 时新实例已被 exchange
-      //   装上、解析得到 layerId → 双记账 + across 与旧网格漂移，undo 直接炸断言）。记录归
-      //   DocResizeOp 自带（实例交换），collector 此段必须闭嘴——suspend 的既定用途（T2 同款）。
-      const old: { layerId: number; lp: LayerPixels }[] = [];
-      wp2.layerTiles._suspendCollect(true);
-      try {
-        for (const leaf of flattenViewLeaves(doc.layers)) {
-          const np = tf.mapLeaf(leaf.pixels);
-          const prev = doc.exchangeLeafPixels(leaf.id, np);
-          if (prev) old.push({ layerId: leaf.id, lp: prev });
-        }
-      } finally {
-        wp2.layerTiles._suspendCollect(false);
-      }
-      const st = history.run(workpiece, ops.docResize, { _initial: { leaves: old } }, { checkpoint: false });
-      if (!st.ok) throw new Error(st.msg ?? "docResize 记账失败");
+      // T5：实例交换记账收进 LayerTiles.resizeAllLeaves（exchange record；map 期间挂起收集的
+      //   纪律也在 verb 内——旧 DocResizeOp/挂起舞蹈退役）。undo 包 = 另一侧实例，同 step 与树账同向翻。
+      wp2.layerTiles.resizeAllLeaves((_id, lp) => tf.mapLeaf!(lp));
     }
     tf.applyComputed?.();
     const tree = wp2.layerTree!;
@@ -266,7 +252,7 @@ function _closeOffsetDialog() {
 }
 
 export function initDocOps(ctx: AppContext) {
-  ({ editMode, doc, board, history, setStatus, workpiece, ops, wp2,
+  ({ editMode, doc, board, history, setStatus, workpiece, wp2,
      _suppressTransientPanels, _restoreTransientPanels } = ctx);
 
   // 裁到选区 ----

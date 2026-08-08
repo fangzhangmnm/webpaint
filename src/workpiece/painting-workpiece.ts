@@ -85,6 +85,10 @@ export class PaintingWorkpiece extends Workpiece {
           const leaf = this.layerTree?.leafById(layerId);
           if (leaf) this.layerTiles.swapTilesetPixels(leaf.pixelsRef, np);
         },
+        exchangePixels: (layerId, np) => {
+          const leaf = this.layerTree?.leafById(layerId);
+          return leaf ? this.layerTiles.exchangeTilesetPixels(leaf.pixelsRef, np) : null;
+        },
       };
       this.layerTiles = new LayerTiles(this, treeHost);
       const ref0 = this.layerTiles.createTileset(new LayerPixels(opts.tree.width, opts.tree.height));

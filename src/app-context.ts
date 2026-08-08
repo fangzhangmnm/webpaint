@@ -18,7 +18,6 @@ import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
 import type { LegacyHistory } from "./workpiece/legacy-bridge.ts";
 import type { Workpiece } from "./workpiece/workpiece.ts";
-import type { OperatorRegistry } from "./workpiece/operators.ts";
 import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
 import type { LayerTiles } from "./workpiece/layer-tiles.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
@@ -106,8 +105,7 @@ export interface AppContext {
   board: Board;
   input: InputController;
   history: LegacyHistory;        // T2（ADR-0008）：旧 UndoHistory 公共面照旧，底下骑 v2 UndoStack（唯一栈）
-  workpiece: Workpiece;          // v1 文档聚合根（旧 operator 的作用对象；T5 拆）
-  ops: OperatorRegistry;         // document-operator 注册表（workpiece/operators；T3/T4 逐族迁 v2 组件）
+  workpiece: Workpiece;          // v1 文档聚合根（T5 拆中：operator 注册表已死，残余 = 门面载体）
   wp2: PaintingWorkpiece;        // v2 工件（令牌工厂；像素写 = begin() + 直写，collector 自动记账）
   layerTiles: LayerTiles;        // v2 像素组件（= wp2.layerTiles，热路径直取）
   rack: RackHandle;

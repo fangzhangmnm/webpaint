@@ -12,7 +12,6 @@ import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
 import { PaintingView, flattenViewLeaves } from "../src/workpiece/painting-view.ts";
 import { Workpiece } from "../src/workpiece/workpiece.ts";
 import { LegacyHistory, LegacyOpsComponent } from "../src/workpiece/legacy-bridge.ts";
-import { makeOperators } from "../src/workpiece/operators.ts";
 import { LayerTree } from "../src/workpiece/layer-tree.ts";
 import { FloatingTransform } from "../src/floating-transform.ts";
 
@@ -27,12 +26,11 @@ function mk() {
   const legacy = new LegacyOpsComponent(w);
   wp2.attachLegacy(legacy);
   h.attach(wp2, legacy, (on) => wp2.layerTiles._suspendCollect(on));
-  const ops = makeOperators({ fillColor: { get: () => "#000", set: () => {} } });
   const lt = new LayerTree({ w, history: h, tree: wp2.layerTree, tiles: wp2.layerTiles, port: doc });
   const ft = new FloatingTransform();
   ft.attach(doc, h, wp2.floatLayer, wp2.selection);
   _ctxs.push({ h, w, wp2 });
-  return { doc, wp2, w, h, ops, lt, ft, unrec: () => unrec };
+  return { doc, wp2, w, h, lt, ft, unrec: () => unrec };
 }
 // 不透明标记块（值可辨认，供逐字节比对）
 function fillBuf(wpx, hpx) {

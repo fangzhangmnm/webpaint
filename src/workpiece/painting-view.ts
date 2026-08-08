@@ -334,11 +334,4 @@ export class PaintingView {
     for (const l of leaves) resident += l.residentBytes(this._memCountMat);
     return computeMaxLayers(leaves.length, resident, this._memBudgetBytes ?? layerByteBudget());
   }
-
-  // ---- 变换协作面（DocResizeOp 用：实例交换，不 dispose——旧实例进 undo 包）----
-  exchangeLeafPixels(layerId: number, np: LayerPixels): LayerPixels | null {
-    const leaf = this._tree.leafById(layerId);
-    if (!leaf) return null;
-    return this._wp.layerTiles.exchangeTilesetPixels(leaf.pixelsRef, np);
-  }
 }

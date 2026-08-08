@@ -14,7 +14,6 @@ import { PaintingWorkpiece } from "../src/workpiece/painting-workpiece.ts";
 import { PaintingView, flattenViewLeaves, countViewLeaves } from "../src/workpiece/painting-view.ts";
 import { Workpiece } from "../src/workpiece/workpiece.ts";
 import { LegacyHistory, LegacyOpsComponent } from "../src/workpiece/legacy-bridge.ts";
-import { makeOperators } from "../src/workpiece/operators.ts";
 import { LayerTree } from "../src/workpiece/layer-tree.ts";
 
 // 测试卫生：统一释放（防 tile-pool FR 泄漏 assert 刷屏）
@@ -29,10 +28,9 @@ function mk() {
   const legacy = new LegacyOpsComponent(w);
   wp2.attachLegacy(legacy);
   h.attach(wp2, legacy, (on) => wp2.layerTiles._suspendCollect(on));
-  const ops = makeOperators({ fillColor: { get: () => "#000000", set: () => {} } });
   const lt = new LayerTree({ w, history: h, tree: wp2.layerTree, tiles: wp2.layerTiles, port: doc, status: (m) => statuses.push(m) });
   _ctxs.push({ h });
-  return { doc, wp2, w, h, ops, lt, unrec: () => unrec, statuses };
+  return { doc, wp2, w, h, lt, unrec: () => unrec, statuses };
 }
 const px = (r, g, b, a) => new Uint8ClampedArray([r, g, b, a]);
 const readPx = (L, x, y) => Array.from(L.getImageData(x, y, 1, 1).data).join(",");   // eq 是严格 !== → 转字符串比对

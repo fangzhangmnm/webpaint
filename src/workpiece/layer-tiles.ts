@@ -27,6 +27,9 @@ export interface TilesHost {
   eachLayer(cb: (layerId: number, lp: LayerPixels) => void): void;
   /** 换整个 tileset 实例（旧实例由 host 负责 dispose）。computed 变换 apply 用。 */
   replacePixels(layerId: number, np: LayerPixels): void;
+  /** 实例交换**不 dispose**（replacePixels 的非销毁变体）：旧实例所有权交还调用方。
+   *  resize exchange record（crop/resample 的 undo 包持另一侧实例）用。T5 收编 DocResizeOp。 */
+  exchangePixels(layerId: number, np: LayerPixels): LayerPixels | null;
 }
 
 interface TilesetDiff { layerId: number; across: number; tiles: [number, TileHandle | null][] }
@@ -34,7 +37,8 @@ type TilesRecord =
   | { t: "tiles"; layers: TilesetDiff[] }
   | { t: "flip" }
   | { t: "rot"; dir: 1 | -1 }               // 1 = CCW（LayerPixels.rotated90CCW 的方向）
-  | { t: "offset"; dx: number; dy: number };
+  | { t: "offset"; dx: number; dy: number }
+  | { t: "exchange"; leaves: { layerId: number; lp: LayerPixels }[] };   // lp = 另一侧实例（所有权归 record）
 
 /** applyMaskPostStroke 的 preSnap 形状（原 pixel-tx PreSnapImage；selection.ts LayerSnapLike 同构）。 */
 export interface PreSnapImage { bboxX: number; bboxY: number; bboxW: number; bboxH: number; imageData: ImageData | null }
@@ -48,6 +52,7 @@ export class LayerTiles implements CollectorComponent {
   private _host: TilesHost;
   private _collected = new Map<LayerPixels, Map<number, TileHandle | null>>();
   private _computed: TilesRecord | null = null;
+  private _exchange: TilesRecord | null = null;
   private _suspend = 0;
 
   constructor(wp: Workpiece, host: TilesHost) {
@@ -167,6 +172,31 @@ export class LayerTiles implements CollectorComponent {
   rotate90All(dir: 1 | -1): void { this._computedVerb({ t: "rot", dir }); }
   offsetWrapAll(dx: number, dy: number): void { this._computedVerb({ t: "offset", dx, dy }); }
 
+  /** 整 doc 几何 resize 的实例交换记账（crop/cropResample/resample；T5 收编 DocResizeOp）。
+   *  逐叶 map 产新实例并交换装上；record = 旧实例集（undo 包 = 另一侧实例，swap 零拷贝互换）。
+   *  map 期间收集挂起在**组件内**——新实例的 putRegion 若被写时扣押，seal 时已装上树会解析到
+   *  layerId → 双记账 + across drift 炸 undo（T3b-2 施工时踩过的真雷，纪律收进 verb 不再靠调用方）。
+   *  json 尺寸（width/height）由调用方另走 setTreeProp 进树 record，同 step 两账同向翻。 */
+  resizeAllLeaves(map: (layerId: number, lp: LayerPixels) => LayerPixels): void {
+    this._wp._componentWrite(this);
+    if (this._exchange) throw new Error("LayerTiles: 一个 token 只准一个 exchange record");
+    if (this._computed) throw new Error("LayerTiles: exchange 与 computed record 同 token 并存（multiple-parallel-path 违规）");
+    if (this._collectedCount() > 0) throw new Error("LayerTiles: exchange verb 前本 token 已有 tile 收集（双捕获断言）");
+    const leaves: { layerId: number; lp: LayerPixels }[] = [];
+    this._suspendCollect(true);
+    try {
+      const jobs: [number, LayerPixels][] = [];
+      this._host.eachLayer((id, lp) => jobs.push([id, map(id, lp)]));
+      for (const [id, np] of jobs) {
+        const old = this._host.exchangePixels(id, np);
+        if (old) leaves.push({ layerId: id, lp: old });
+      }
+    } finally {
+      this._suspendCollect(false);
+    }
+    this._exchange = { t: "exchange", leaves };
+  }
+
   // ── token 内读口（input 选区 finalize / no-op 判定）──
   /** 本 token 是否真的动过该层（collector 有它的扣押）。 */
   tokenChanged(layerId: number): boolean {
@@ -204,6 +234,17 @@ export class LayerTiles implements CollectorComponent {
   // ── CollectorComponent ──
 
   sealRecord(): RecordData | null {
+    if (this._exchange) {
+      if (this._collectedCount() > 0 || this._computed) {
+        this._disposeCollected();
+        this._computed = null;
+        this._exchange = null;
+        throw new Error("LayerTiles: exchange record 与 tile 收集/computed 同 token 并存（双捕获断言）");
+      }
+      const r = this._exchange;
+      this._exchange = null;
+      return r;
+    }
     if (this._computed) {
       if (this._collectedCount() > 0) {
         this._disposeCollected();
@@ -240,6 +281,22 @@ export class LayerTiles implements CollectorComponent {
       }
       return r;
     }
+    if (r.t === "exchange") {
+      // 自反：逐叶实例互换（所有权互换，零拷贝）；层不在 = 栈序 bug（先于本步的删层步必先被 undo 穿过）。
+      this._suspendCollect(true);
+      try {
+        return {
+          t: "exchange",
+          leaves: r.leaves.map((e) => {
+            const cur = this._host.exchangePixels(e.layerId, e.lp);
+            if (!cur) throw new Error(`LayerTiles: exchange swap 时层已不在（layerId=${e.layerId}——栈序 bug）`);
+            return { layerId: e.layerId, lp: cur };
+          }),
+        } satisfies TilesRecord;
+      } finally {
+        this._suspendCollect(false);
+      }
+    }
     // computed：record 恒存「应用它 = 回到另一侧」的变换（seal 时已取逆）——swap = 原样应用 + 返回其逆。
     this._suspendCollect(true);
     try {
@@ -252,6 +309,17 @@ export class LayerTiles implements CollectorComponent {
 
   recordBytes(data: RecordData): number {
     const r = data as TilesRecord;
+    if (r.t === "exchange") {
+      // 实例配额规则同 tiles：压缩前记 0（走共享 raw 池配额）、压缩后 compressedBytes/refCount。
+      let sum = 64;
+      for (const e of r.leaves) {
+        for (const h of e.lp.handles()) {
+          if (h.released) continue;
+          if (h.isCompressed()) sum += Math.ceil(h.compressedByteLength() / Math.max(1, h.refCount()));
+        }
+      }
+      return sum;
+    }
     if (r.t !== "tiles") return 64;
     let sum = 0;
     for (const entry of r.layers) {
@@ -266,6 +334,11 @@ export class LayerTiles implements CollectorComponent {
 
   disposeRecord(data: RecordData): void {
     const r = data as TilesRecord;
+    if (r.t === "exchange") {
+      for (const e of r.leaves) e.lp.dispose();
+      r.leaves = [];
+      return;
+    }
     if (r.t !== "tiles") return;
     for (const entry of r.layers) for (const [, h] of entry.tiles) if (h && !h.released) h.release();
   }
