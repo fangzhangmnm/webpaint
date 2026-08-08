@@ -177,17 +177,52 @@ class LayerTiles implements WorkpieceComponent {
 // T2 现状：record 持 tile 句柄（池引用计数 +1），tileset 实例仍归 doc.Layer 所有。
 ```
 
-## 其余组件（形状同族，从简列）
+## 其余组件（T4 实现定形；record 皆自反 swap、collector 首捕获赢、净零变化不占步）
 
 ```ts
-class SelectionComponent { view(): Selection | null; set(sel): void /* token */ }
-class FloatLayerComponent {   // 组 lift 每叶一 source、共享 transform（现状语义迁移）
-  view(): Readonly<FloatState> | null;   // { sources:[{sourceLayerId,rect,tilesRef}], transform } | null
-  lift(...) / setTransform(...) / commit(...) / reject(...)   // 各自 token 写；identity 走 CPU 快路
+// T4a：pre-applied 双轨（引擎预览直写 + 记账写）——lasso/预览 tx 生态零改造的实现形态。
+class SelectionComponent {
+  view(): Selection | null;
+  _rawWrite(v): void;               // 预览直写（lasso 引擎/预览 tx/pre-applied 换手；显式声明态）
+  set(next): void;                  // token 写：组件自己换手（替换值所有权交 collector/即弃）
+  commitPreApplied(before): void;   // token 写：after 已直写上台，before 所有权交入
+  clearOnLoad(): void;              // 换文档收尾（无 token；栈随后清）
 }
-class PendingFill { view(): { color: string } | null; begin(initColor) / setColor(c) / clear() }
-class PerspComponent { view(): Readonly<PerspConfig> | null; set(cfg) / remapForDocTransform(...) }
-class ReferenceGallery /* silent */ { view(); setImage(blob, bitmap) / clear() }
+// record = { v: Selection|null }（另一侧，所有权归 record）。
+// app 调用面 = SelectionFace 门面（workpiece.sel，T5 评估收编）：commitPreApplied 经
+// history.withPoint 骑共享令牌；beginPreview() tx 窗口语义原样。
+
+// T4b：组件 = 状态机 verbs；lift/commit/reject 的**编排**留在 FloatingTransform 引擎
+// （GPU bake/采样缓存/gizmo 数学在引擎；挖洞/烤层像素由 LayerTiles 写时扣押同 step 分账、
+//  选区由 SelectionComponent 分账——旧 LiftFloatOp 三元组/pre-applied ops.pixels 链死）。
+class FloatLayerComponent {
+  view(): Readonly<FloatState> | null;   // FloatState = { floats:[{sourceLayerId,rect,pixels}], transform }
+  install(fs): void;                // lift 收尾（token）：FloatState 所有权交入；已有浮层 throw
+  setTransform(meta): void;         // 变换整点（token）：只换 metadata（入参克隆）
+  drop(): void;                     // 收摊（token）：accept/reject 的收尾微步
+  dropForLoad(): void;              // 换文档 escape hatch（无 token；栈随后清）
+}
+// record 双轨：{t:"state",fs} 整包移交 / {t:"meta",meta}；同 token meta→drop 升格 state。
+// float 类型族（FloatState/WorkpieceFloat/FloatTransformMeta/…）随组件迁 float-component.ts。
+
+// T4c：色板 target 切换（fill 预览期 setColor/吸管/色词全改本组件，**笔刷色不被 undo 碰**）。
+class PendingFill {
+  view(): { color: string } | null;
+  begin(initColor) / clear();       // 导航态声明写（进/出 fill 工具；无 token 不记账）
+  setColorLive(hex): void;          // 预览直写（防抖窗口中间值）
+  commitPreApplied(before): void;   // token 写：防抖 flush 一步（v0.7.8 合并语义）
+}
+
+// T4d：记账面刻意收窄 = 只有 doc 变换 remap（VP 编辑器仍 desk 直写不进栈——user 拍板
+// 「VP setting 不进 undo history」在案；ADR-0008 升格解决的是 undo 与 doc 几何的同步还原）。
+class PerspComponent {
+  constructor(wp, host: PerspHost); // host = desk 读写口（snapshot/restore/remap——app 接 workbench-state）
+  view(): unknown;                  // = host.snapshot()
+  remapForDocTransform(f, opts): void;   // token 写（doc-ops compound 内）；record = 整包快照
+  set(cfg): void;                   // 预留口（VP 编辑可撤化时用；现无调用方）
+}
+
+class ReferenceGallery /* silent */ { view(); setImage(blob, bitmap) / clear() }   // 未组件化（现状 sidecar）
 ```
 
 ## render 侧拆分（gl/）
@@ -214,15 +249,15 @@ class RasterService {     // 一次性算像素（C 骑士接缝）
 // PaintingView（src/workpiece/painting-view.ts）：app 的文档读写端口 = 旧 ctx.doc(DocView) 同形
 //   （width/height/layers(view 节点)/activeId/selection/maxLayers/activeEditableLeaf/…）。
 //   ViewLeaf 带旧 Layer 的读写面（pixels/bbox 物化缓存/editRegion/snapshot…），像素 = tileset
-//   注册表活实例——引擎（brush/liquify/lasso/float）与 codec 消费面零改动。selection 过渡宿在此
-//   （T4 SelectionComponent 接棒）。终态归宿 T5 评估：要么正名（app 读口保留端口形），要么随
-//   引擎迁 LayerTiles 读口后拆。
+//   注册表活实例——引擎（brush/liquify/lasso/float）与 codec 消费面零改动。selection 已迁
+//   SelectionComponent（T4a——端口只留镜像口 getter/setter）。终态归宿 T5 评估：要么正名
+//   （app 读口保留端口形），要么随引擎迁 LayerTiles 读口后拆。
 // LegacyHistory.withPoint(label, {checkpoint, hint}, fn)：v2-verb 迁移载具（共享令牌开/续/封；
 //   门面 layer-tree.ts 的所有 verb 走它）。T5 随桥拆——那时调用方直接 wp2.begin。
-// DocResizeOp（operators.ts）：crop/cropResample/resample 的实例交换记账（undo 包 = 另一侧
-//   LayerPixels 实例；json 尺寸走 setTreeProp width/height 进树 record，同 step 两账同向翻）。
-//   flip/rot90/offsetWrap 已走 computed 白名单。step.hint 已落地（compound({hint})），唯一住户
-//   = docTransform 的 viewport/persp 还原（doc-ops._applyUi）——T4 persp 组件化后只剩 viewport。
+// DocResizeOp（operators.ts——T4 后残余集的**唯一**住户）：crop/cropResample/resample 的实例
+//   交换记账（undo 包 = 另一侧 LayerPixels 实例；json 尺寸走 setTreeProp width/height 进树
+//   record，同 step 两账同向翻）。flip/rot90/offsetWrap 已走 computed 白名单。step.hint 已落地
+//   （compound({hint})），唯一住户 = docTransform 的 viewport 还原（T4d 后 persp 归组件 record）。
 ```
 
 ## dials / desk（改名，形状不变）

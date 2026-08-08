@@ -110,15 +110,38 @@
     的 putRegion 会被写时扣押逮到（seal 时已 exchange 装上、解析到 layerId → across drift 炸 undo）。
   - ⚠ 已知过渡态：fillLayer0/decoder 基线写 = 无令牌白写（load 前基线，不入 undo，es.adopted 管脏）；
     panel 命名 helper（图层 N/组 N）落 layers-panel；组折叠仍在 panel collapsedIds（从未持久化）。
-- **T4（下一棒从这开工）**= selection/float/pendingFill/persp 组件化：SelectionComponent（substrate
-  现在 PaintingView._selection 过渡宿）、FloatLayerComponent（float-ops 已端口化，顺手消
-  floating-transform 三处 _initialBefore 双记账）、PendingFill（FillColorOp 死）、PerspComponent
-  （doc-ops hint 里的 persp 部分迁走）→ T5 拆旧（operators/undo-history/write-gate/legacy-bridge/
-  workpiece.ts v1/layer-tree.ts 门面/doc.ts PaintDoc 残余；workpiece2/layer-tree2 正名；
-  painting-view.ts 归宿评估——正名 or 随引擎迁 tiles 读口后拆）→ T6 GL 双 facade → T7 收口。
-- **落盘注意**：T1-T3b-1 已由上一棒 merge 进本地 main（762e068）；本棒（T3b-2 = v0.8.13）在
-  worktree-workpiece-v2 分支，merge 回本地 main 若再被 worktree 隔离 hook 挡，下一棒进场先在主
-  checkout `git merge --ff-only worktree-workpiece-v2`。
+- **T4 ✓**（v0.8.14-17，2026-08-07 本棒）：selection/float/pendingFill/persp 四片组件化全落，
+  **operators.ts 残余集只剩 DocResizeOp 一族**（SwapSelectionOp/SwapPixelsOp/FillColorOp/float
+  三件套全死）。组件定形已回写提案 .h「其余组件」节（形状与蓝图的偏离都在那——读它）：
+  - **T4a**（v0.8.14）SelectionComponent：pre-applied 双轨（_rawWrite 预览直写 + set/
+    commitPreApplied token 记账，首捕获赢/中间产物即弃）；PaintingView.selection 收成镜像口；
+    SelectionFace 门面换心走 withPoint（调用方零改动）；doc-ops 选区微步直写组件 verb。
+  - **T4b**（v0.8.15）FloatLayerComponent：状态机 verbs（install/setTransform/drop + dropForLoad），
+    record 双轨 state/meta；lift/stamp/accept/reject 编排留 FloatingTransform（withPoint 一个
+    令牌整点：挖洞/烤层=LayerTiles 扣押、选区/浮层各自分账）；float 类型族迁 float-component.ts；
+    三处 _initialBefore 双记账消灭；v1 workpiece internals 只剩 doc。
+    ⚠ 迁移注记：旧锚「源层被外力删掉→不可恢复」在 v2 结构上不可能（树只能经 recorded verb 改），
+    float-ops.test 头注留档；桥的不可恢复协议锚在 legacy-bridge.test。
+  - **T4c**（v0.8.16）PendingFill + 色板 target 切换（color-panel registerColorTarget）：fill
+    预览期 setColor/吸管/色词全改 pending 色，**笔刷色不被 undo 碰**（pending-fill.test 行为锚）；
+    undo/redo 翻 substrate → onChange 刷显示，_expectFromHistory 回灌抑制机制死。
+  - **T4d**（v0.8.17）PerspComponent：**记账面刻意收窄 = 只有 doc 变换 remap**（doc-ops 七处
+    remapShapePersp → 组件 verb，persp 信封退役，hint 只剩 viewport）。VP 编辑器仍 desk 直写
+    不进栈——user 拍板「VP setting 不进 undo history」（persp-edit.ts _finish 注）与 ADR-0008
+    升格不冲突：升格解决的是「undo 不同步还原=透视静默错位」。未动 undo 白名单，无需上呈。
+  - 测试 1252 绿 + tsc 0 + build.sh lint 过；新增 pending-fill/persp-component 两测试文件
+    （test/run.mjs 已注册），selection-face/float-ops/operators/undo-stack-integrity/
+    selection-tiles/fill-mode 换 v2 基座锚语义逐条保留。
+- **T5（下一棒从这开工）**= 拆旧 + rename 片（§1 T5 清单；判据 = 文件物理不存在）。T4 后补充情报：
+  - operators.ts 只剩 DocResizeOp——拆法：doc-ops 的实例交换段直接组件化（LayerTiles 已有
+    exchangeTilesetPixels，可考虑升成 collector 记账的 verb）或并进 layer-tiles record。
+  - workpiece.ts(v1) 残余职责：写锁 + HistoryFacade 载体 + layers/sel 门面 getter + readView；
+    legacy-bridge 现存调用方 = layer-tree.ts 门面 withPoint 全家 + doc-ops（compound/run docResize）
+    + fill-mode（compound/withPoint）+ floating-transform（withPoint）+ selection-face（withPoint）
+    + input undo/redo/clear + import-image/blender-sync（经门面）。
+  - write-gate.ts 已不武装（T3b-2 起）、undo-history.ts 只剩 undo-history.test 在用——都是纯拆。
+- **落盘注意**：T1-T3b-2 已在本地 main（1c714be=v0.8.13）；本棒 T4（v0.8.14-17）在
+  worktree-workpiece-v2 分支，进场先在主 checkout `git merge --ff-only worktree-workpiece-v2`。
 
 ## 2. 地雷
 
