@@ -1,5 +1,6 @@
 # workpiece v2 施工 handoff（令牌+collector 纪元）
-> as-of v0.8.22 / 2026-08-08（T6 GL 双 facade 完毕，下一棒 T7 收口）。读者 = 接手施工的下一个 AI session。
+> as-of v0.8.23 / 2026-08-08（**T1-T7 全部完工，v2 施工收口**）。读者 = 接手的下一个 AI session。
+> 下一步 = §4 真机批一次交付（要不要先 push dev / bump 0.9 由 user 拍——minor 权限硬规则）。
 > 拍板（why）= `ai-docs/adr/0008-workpiece-v2-token-collector.md`；目标契约（what）=
 > `20260807-workpiece-v2-proposal-h.md`（**pin 住的接口**，形状改动要回写它）；本文 = how/施工序。
 > 现状 .h = `api/`（`bash scripts/gen-api.sh` 重生成）。
@@ -170,10 +171,37 @@
     旧 `(tree as any)._bridge` 私字段挖法改正路 room.bridge。
   - 提案 .h「render 侧拆分」节已回写落地形（renderFrame 保 v1 扁平入参、GlRoom 台面职责）。
   - 锚全绿：gl-smoke PASSED（含 fillParity/commitParity/clipLive）+ 1232 node + tsc 0 + build.sh lint。
-- **T7（下一棒从这开工）**= 收口（§1 T7：.h 对账 ✓已随 T6 重打、CONTEXT.md 词条、真机批清单汇总）。
-- **落盘注意**：T1-T4（v0.8.9-17）+ T5（v0.8.18-21）已 ff 进本地 main（2642b00）；本棒 T6
-  （v0.8.22）在 worktree-workpiece-v2 分支，进场先在主 checkout
-  `git merge --ff-only worktree-workpiece-v2`。
+- **T7 ✓**（v0.8.23，2026-08-08 本棒）：收口三件全落。
+  - **.h 对账**：`gen-api.sh` 重跑零 drift；提案 .h 残余偏差回写两处——painting-workpiece class 块的
+    silent 组件行（referenceGallery/palette 本纪元未组件化：palette 归 desk、参考图 sidecar 现状）
+    + opts.host/layerTree:null 形态注明测试基座残余（随 freezeDocForEncode 拆）。
+  - **CONTEXT.md 词条**：v1 语言清杀 + v2 词条落地——PaintDoc→PaintingWorkpiece（活文档，组件表）、
+    Workpiece/WriteToken（令牌元规则）、UndoStack/UndoStep/History（编排器）、LayerTiles（tile
+    collector）、LayerTree+LayersFace、Selection/Float 补 v2 组件形注记、新增 PendingFill/
+    dials·desk/GL 双 facade 词条；treeTx/PixelTx/write-gate/DocView/UndoHistory 全进 _Avoid_。
+  - **真机批清单汇总** = 本文 §4（v0.7.35-41 遗留 12 条并入 + v2 新锚 10 条，一次交付）；
+    `20260801-v08-epoch-handoff.md` §7 加了指针防双源。
+- **落盘注意**：T1-T6（v0.8.9-22）已 ff 进本地 main；本棒 T7（v0.8.23）在 worktree-workpiece-v2
+  分支，进场先在主 checkout `git merge --ff-only worktree-workpiece-v2`。**全程未 push**（新 session
+  默认不 push 纪律）——push dev 前先问/等 user 授权。
+
+## 4. 真机批清单（v2 完工一次交付；user 2026-08-07 拍板攒批）
+
+> 合并来源：`20260801-v08-epoch-handoff.md` §7 的 v0.7.35-41 遗留 12 条（原文照录不重抄，见该节）
+> + 下列 v2 新锚。跑批时两份一起过；水印对 v0.8.23（或发版时的当前号）。
+
+v2 新锚（undo 栈/组件/GL 全换心后的行为验证）：
+
+1. **基本手感**：连笔画→每笔一个 undo 整点→undo/redo 手感无卡顿无红 banner（栈全换心后的 smoke）。
+2. **dirty 真值表**：画→存（clean）→再画（dirty）→undo 回存档点 = **save 按钮回 clean**（stateVersion 位置身份语义，v1 无此行为）。
+3. **结构操作各一发**：加层/复制/删层/移层/合组/解组/mergeDown/explode/stampAll → 各一步 undo+redo，图层面板与画面一致。
+4. **doc 几何**：crop/resample/flip/rot90/offset → undo 逐字节回原（computed record 白名单 + exchange 路径）；带 VP 的画 crop 后透视不错位（PerspComponent remap）。
+5. **fill 预览色板**：进 fill 调色/吸管/色词 → 改的是 pending 色、**笔刷色不动**；commit 一步 undo；undo 后色板显示跟着回滚。
+6. **float**：组上 lift（含隐藏叶）→变换→accept/undo；reject 无痕；变换后源层像素归位。
+7. **选区**：lasso/魔棒/选区笔 + undo/redo + Ctrl+D；选区跨 crop/resample 存活。
+8. **配额驱逐**：大文档反复大笔涂抹把 undo 配额顶满 → 继续画不崩、内存不涨（tileset 引用计数归零还池）。
+9. **存量兼容**：旧 .ora（带旧轨 webpaint/state.json）打开——eraser/filterBrush/selPen dial、palette、blender 设置还在；保存后走新轨 desk，再开不丢。
+10. **换文档**：图库切画/新建/revert → undo 栈清空、无跨文档残留、无泄漏红 banner；GL 画面无串 tile/闪烁（T6 双 facade 搬家）。
 
 ## 2. 地雷
 

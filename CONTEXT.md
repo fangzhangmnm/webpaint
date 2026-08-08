@@ -1,17 +1,17 @@
 # WebPaint Context
 
-WebPaint 的领域语言。栅格绘画 PWA：模型(PaintDoc) ⇄ 显示(Board) ⇄ 输入(Input)+引擎。
+WebPaint 的领域语言。栅格绘画 PWA：模型(PaintingWorkpiece) ⇄ 显示(Board/GL) ⇄ 输入(Input)+引擎。
 本文件是 `/improve-codebase-architecture`、`/grill-with-docs` 等技能的领域词表——只收本项目特有的概念，通用编程词不进。
 
 ## Language
 
-**PaintDoc**:
-绘画的模型。持有 layer 数组、当前选区、背景色；不知道屏幕/工具/笔刷。
-_Avoid_: document, canvas (canvas 专指 HTML `<canvas>` 元素)
+**PaintingWorkpiece（活文档）**:
+绘画的模型 = **外部唯一引用**（ADR-0008：持有 doc 数据结构本身即违规）。`Workpiece` 基类（app-agnostic：令牌工厂/undo 栈/双计数/组件注册；见 [[Workpiece / WriteToken（令牌元规则）]]）+ 组件表（全 recorded）：`layerTree`（结构 json）/ `layerTiles`（tile 扁平仓）/ `selection` / `floatLayer` / `pendingFill` / `persp`。silent 槽（参考图/palette）本纪元未组件化——palette 归 desk、参考图走 sidecar 现状；升格=注册表改一个字段。装载/导出 = `load(PaintingData)`（解码器产 plain data 令牌灌入 + 清栈 + markSaved）/ `exportData()`（冻结快照）。`ctx.doc` = PaintingView 端口（读面 + 选区镜像口 + ViewLeaf 读写面），不是逃生门。
+_Avoid_: PaintDoc（**测试基座残余**，生产零引用、头注禁新 import，随 freezeDocForEncode 拆）, document, canvas (canvas 专指 HTML `<canvas>` 元素), docRaw / DocView / readDoc（v2 拆除）
 
-**Layer**:
-一张像素位面 = 一个 OffscreenCanvas + bbox。拥有 `snapshot()/restoreFromSnapshot()`。
-_Avoid_: surface, bitmap
+**Layer / ViewLeaf**:
+一张像素位面。活文档的叶 = **ViewLeaf**（PaintingView 端口，带 `snapshot()/restoreFromSnapshot()` 读写面，引擎/codec 消费）；像素 substrate = per-layer tileset（`src/tiles/tile-layer.ts` 的 LayerPixels，经 [[LayerTiles（tile collector）]] 记账）。
+_Avoid_: surface, bitmap, Layer 类（doc.ts 内=测试基座残余）, 「一个 OffscreenCanvas」（tiles 化前的旧实况）
 
 **Board**:
 显示层。把 doc 合成到可见 `<canvas>`，做视口变换；只**读** doc 渲染，不写像素。
@@ -22,7 +22,7 @@ pointer/wheel/键盘 → 行为。屏幕坐标转 doc 坐标，驱动各引擎�
 _Avoid_: controller, handler
 
 **AppContext（组合根装配上下文）**:
-[[PaintDoc]]/[[Board]]/[[Input / InputController]]/EditMode/history/rack… 这些核心单例 + 跨模块函数，由组合根（`app.js`）一次构造、即刻冻结成一个显式 `ctx`，传给每个深模块的 `initX(ctx)` 接线。是 app 层布线的**单一类型契约**（`src/app-context.ts` 的 `AppContext` interface）——取代肢解期那套 `let doc:any …; initX(ctx)` 各抄一份的散落约定。改 ctx 形状 → 编译器即点出受影响模块。
+[[PaintingWorkpiece（活文档）]]/[[Board]]/[[Input / InputController]]/EditMode/history/rack… 这些核心单例 + 跨模块函数，由组合根（`app.ts`）一次构造、即刻冻结成一个显式 `ctx`，传给每个深模块的 `initX(ctx)` 接线。是 app 层布线的**单一类型契约**（`src/app-context.ts` 的 `AppContext` interface）——取代肢解期那套 `let doc:any …; initX(ctx)` 各抄一份的散落约定。改 ctx 形状 → 编译器即点出受影响模块。
 _Avoid_: rt（旧全局占位）, DI container / service locator（这只是显式参数对象，不是框架）, god-object
 
 **Engine**:
@@ -34,7 +34,7 @@ _Avoid_: ShapesEngine（旧名——v257 删掉的 ctx.fillRect 直填旧实现�
 _Avoid_: 手势识别自动 snap（判定延迟，被否）, adjusting 态/手柄（从没要过）, defaultPressure 字段（撤案——鼠标主路径本就恒 0.5）, 旧 src/shapes.js 的直填路线
 
 **透视 frame（PerspConfig / [[形状笔（ShapeBrushEngine）]] 全局）**:
-形状笔的几何参考系（ADR-0006）：align-to-viewport（默认）或透视平面。配置 per-ora（`editorState.persp`）：VP 0-3（vp1/vp2 水平对按 x 排序 + lockHorizon 默认开；vp3 竖直族=三点透视，只有位置）+ 参考点 + 平面（地板/墙/左墙/右墙——按 VP 数动态过滤）。核心机制 = **两角定形→单位方 homography**（`src/perspective-frame.ts`）：透视矩形=四边形、透视椭圆=内切圆的像、grid 间距=cross-ratio；正方/正圆约束走 **planeMetric**（v0.6.10 经典约定重建视点→平面欧氏度量，推翻早期"不可定义"判决）。isometric 模式（v0.6.20）：PerspConfig.axes 三平行族（2:1 惯例固定轴），零奇点走仿射路径、度量解析仿射、编辑面 = box 独任（persp.iso.box）。地平线奇点：**无路径"结构性免疫"**（两角定形的导出角跨线即落奇点，v0.6.18 修"天空第二个矩形"）——quadFromCorners 跨线走 chart 平面坐标、越线角垂直回缩钉 ε 带；徒手拟合走 chart 的 **ε 规则**（pencil 枚举坐标 1/max(w,ε) 饱和、平行枚举坐标真发散 clamp +BIG 不翻负）。像素透视圆 = Zingl 有理二次 Bézier（`src/pixel-conic.ts`，权重解析零可调）。VP 编辑 = crop 同款 transient（`src/persp-edit.ts`，DOM 手柄画布外可拖、参考点射线只在编辑模式显示）。doc 裁剪/旋转/翻转/偏移 → `remapShapePersp` 重映射 + persp 快照进 docTransform undo 信封。
+形状笔的几何参考系（ADR-0006）：align-to-viewport（默认）或透视平面。配置 per-ora（`desk.persp`）：VP 0-3（vp1/vp2 水平对按 x 排序 + lockHorizon 默认开；vp3 竖直族=三点透视，只有位置）+ 参考点 + 平面（地板/墙/左墙/右墙——按 VP 数动态过滤）。核心机制 = **两角定形→单位方 homography**（`src/perspective-frame.ts`）：透视矩形=四边形、透视椭圆=内切圆的像、grid 间距=cross-ratio；正方/正圆约束走 **planeMetric**（v0.6.10 经典约定重建视点→平面欧氏度量，推翻早期"不可定义"判决）。isometric 模式（v0.6.20）：PerspConfig.axes 三平行族（2:1 惯例固定轴），零奇点走仿射路径、度量解析仿射、编辑面 = box 独任（persp.iso.box）。地平线奇点：**无路径"结构性免疫"**（两角定形的导出角跨线即落奇点，v0.6.18 修"天空第二个矩形"）——quadFromCorners 跨线走 chart 平面坐标、越线角垂直回缩钉 ε 带；徒手拟合走 chart 的 **ε 规则**（pencil 枚举坐标 1/max(w,ε) 饱和、平行枚举坐标真发散 clamp +BIG 不翻负）。像素透视圆 = Zingl 有理二次 Bézier（`src/pixel-conic.ts`，权重解析零可调）。VP 编辑 = crop 同款 transient（`src/persp-edit.ts`，DOM 手柄画布外可拖、参考点射线只在编辑模式显示）。doc 裁剪/旋转/翻转/偏移 → `wp2.persp.remapForDocTransform`（PerspComponent，recorded；T4d——记账面刻意收窄=只有 doc 变换 remap，VP 编辑器仍 desk 直写不进栈，user 拍板「VP setting 不进 undo history」；旧 docTransform persp 信封退役）。
 _Avoid_: 尺笔自带透视模式（被全局 frame 吃掉）, 3D grid（弃案：两角点拖不出第三轴，手动画）, grid 最小间距护栏（弃案：不可控）, 把 VP 存 viewport/设备态（它是画的属性，跟 ora 走）
 _Avoid_: tool (tool 是 UI 层的工具选择), brush (brush 专指圆笔引擎)
 
@@ -50,6 +50,7 @@ _Avoid_: pause / stop（泛词）, hover
 选区，doc 的一等公民。**不可变值对象**（bbox + maskCanvas，alpha=255 内/0 外），拥有 mask 操作：compose（并/减/交）、invert、outline（懒算缓存的行军蚁描边）、applyMaskPostStroke、fill/clearOnLayer、croppedTo/resampledTo。compose/invert/transform 返回新 Selection。`doc.selection` 持 Selection|null，null=无选区=全图可作用。undo 只换引用，不深拷。
 _Avoid_: mask (mask 是 Selection 的实现细节), marquee, selection state
 **已完成的整合·别再提议搬**：compose/invert/outline/applyMaskPostStroke/fill/clear/crop 等 mask 代数**早已全在 selection.js**（见 `lasso.js:30` 注释）；lasso.js 只**构造** Selection（freehand/rect/ellipse/magic）并 `Selection.compose` 委托，不重复实现代数。lasso.js 大（63KB）是因为浮动 gizmo 的透视/单应矩阵数学（`invertMat3`=3×3 矩阵求逆，≠ 选区反选）+ 选区构造，不是冗余代数。历轮 AI（含 fresh explorer）反复幻觉「lasso 该把 mask 操作收回 selection」——那是 2026-05 就做完的事，勘探到此即可停。
+**v2 组件形（T4a）**：`wp2.selection` = **pre-applied 双轨**——`_rawWrite` 预览直写（lasso 引擎/预览窗；显式声明态）+ `set`/`commitPreApplied(before)` 令牌记账（首捕获赢、中间产物即弃）；`beginPreview()` 预览窗（origin 保管/abort 无痕，commit 返 `{changed, before}`——**记账归调用方** withPoint）。`ctx.doc.selection` 是镜像口。SelectionFace / SwapSelectionOp / SelectionPreviewTx 独立类均死。
 
 **浮层变换（Float / FloatingTransform）**:
 选区像素被「抬起 → 自由变换（移动/缩放/旋转/透视）→ 落回」的瞬态。**深模块 `src/floating-transform.js`（v291 落地 Slice 0-4，node 测 388 过、未真机；从 lasso.js 抽出——lasso 1077→370 行，只产 Selection + 经 facade 驱动 Float）**。
@@ -57,7 +58,8 @@ _Avoid_: mask (mask 是 Selection 的实现细节), marquee, selection state
 - **一个 gizmo / 一个 transform** 驱动全部 source。gizmo 包围盒 = 调**规范合成器**画**组的可见 composite** 再 trim-to-content（隐藏叶**不参与定框**，但**参与变换** = 随组移动、落回各自层）。每个 source = `{layer, canvas, srcRect, preSnap}`，commit **各自写回自己的 layer**（一条**多层 undo entry** `[{layerId,before,after}]`）。
 - **渲染接缝**：合成器新增 `floatFor(node)`（与 [[Board]] 注入的 `overlayFor` 平级），把浮层像素插在**源层 z 位**（修「浮层盖在所有层之上」的旧 board overlay 行为）；gizmo 框线/handles **仍是 board overlay**（工具 UI 永在最上）。2×2 homography（`renderQuadPerPixel`/`invertMat3`）**不变**——多 source 时每 source 各自的 dest quad = 同一 H 作用到该 source 的 srcRect 四角；只改「在哪合成、有几份」。
 - **变形模式 = 深模块 adapter**（[[TransformMode]]）：free/uniform/distort/(warp) 各自一个 adapter 满足共同 `TransformMode` 接口（handles / 约束 drag / meshN），Float 持当前 adapter。**warp 当前实现是错数学屎山，2026-06-19 删除**；以后用正确数学重加（届时也支持组）。v1 只 free/uniform/distort（均 2×2 单 homography）。 **v0.6.21 参考 frame 有向化**：gizmoBbox→gizmoFrame(origin/ux/uy)，distort 双手柄——圆=转像素（恒可用）、方=转参考 frame 轴不动像素（mesh 转 dθ + frame 复合 H⁻¹∘R∘H；仅 mesh 仿射时露，拖过透视角 isAffineQuad 判据自动收回，圆转不误收）；这是 warp 重加的 frame 地基。
-_Avoid_: 单层 float（旧 premise，已被复数 source 取代）, 把浮层画在所有层之上（旧 board overlay 行为）, 旧 4×4 warp / drawMesh / Catmull-Rom 升采样（已删的错数学）
+**v2 组件形（T4b）**：状态机收进 `wp2.floatLayer`（FloatLayerComponent：install/setTransform/drop + dropForLoad；record 双轨 state/meta，同 token meta→drop 升格 state）；lift/stamp/accept/reject 的**编排**留 FloatingTransform 引擎（一个 withPoint 整点：挖洞/烤层像素 = LayerTiles 写时扣押、选区/浮层各自分账）。float 类型族在 `src/workpiece/float-component.ts`。
+_Avoid_: 单层 float（旧 premise，已被复数 source 取代）, 把浮层画在所有层之上（旧 board overlay 行为）, 旧 4×4 warp / drawMesh / Catmull-Rom 升采样（已删的错数学）, LiftFloatOp 三元组 / _initialBefore 双记账（v2 已消灭）
 
 **TransformMode（变形模式）**:
 [[浮层变换（Float / FloatingTransform）]] 的变形约束策略，深模块 adapter（Strategy）。接口 = `handles(mesh)`（露哪些把手）+ `applyHandleDrag(mesh, handleId, dx, dy) → newMesh`（约束数学，**纯函数·node 可测**）+ `meshN`。free=平行四边形仿射 TRS、uniform=锁长宽比、distort=自由四边形/透视；warp=逐点（待重加）。Float 只持「当前 adapter + mesh + sources」，约束逻辑下沉各 adapter。
@@ -67,36 +69,48 @@ _Avoid_: mode 字符串大 switch（旧 drag handler 的分支地狱）
 「能否在当前 active 节点写像素」的**唯一**判定（`doc` 上）。`requireEditableLeaf({allowHidden}) → leaf | null(+标准状态行)`：active 是组 → 硬拒「请选择一个图层」；active 隐藏叶 → 默认软拒「图层已隐藏」（`allowHidden` 放行）。**所有写/读单叶像素的命令穿它一处**（填充/清除/调整/滤镜/拷贝/魔术棒/吸色 raw/nudge…），取代散在 input.js:402、selection-ops.ts:44、filters 漏查的 ad-hoc `isGroup`/`!visible`。例外 = 变换/Ctrl+D（组合法，深化目的）+ doc 级命令（裁剪/合并）。EditMode CAPS 精神往「目标轴」延伸。
 _Avoid_: 各命令各抄一句 isGroup/!visible（面条 + 漂移源）
 
-**Workpiece（写面聚合根）**:
-undo system 的监管对象，**全部作用域**（ADR-0007：可撤销的都是 workpiece component，与「是否进 ora」无关）。`new Workpiece(doc, history)` 构造期注入 undo（capability 绑构造期）；聚合 component：`workpiece.layers`（[[LayerTree（结构类写面）]]）+ `workpiece.sel`（选区写面 SelectionFace）+ 像素走 pixelHistory（PixelTx）+ 整 doc 几何走 doc-ops.runDocTransform（tx 信封）。写 doc 的合法路径**只有**这些组件/tx；`ctx.doc` 是只读 DocView（裸写=编译错），PaintDoc mutator 入口另有 write-gate dev 断言兜底（v0.8.4 割3）。装载/换文档走 `ctx.docRaw`（session-state 唯一持证人）。
-_Avoid_: 手工 history.run + args 组装（S1 起下沉进 component）, ①型 pre-apply 裸调（S2 退役——「不记账」必须是显式声明态：tx 窗口或 component）, workbench（被否——语义是 editor app runtime）
+**Workpiece / WriteToken（令牌元规则）**:
+文档 mutation 的元规则（ADR-0008 §1-2，supersede ①型/②型 operator 模型）：写前 `wp2.begin()` 拿**令牌**（同时只准一个，第二次 begin=throw=泄漏查获点，FR 兜底报警）；组件 verb **直接写** substrate，被换下的旧数据由该组件自己的 **collector** 静默扣押（异质收集：tiles 收句柄、json 收快照、值对象收引用；非本 token 新建→扣押、本 token 新建→discard）；`commit()` = 各被摸 collector `sealRecord()` 打包 → **一个 UndoStep 入栈**；`cancel()` = 倒序自反 swap 回滚无痕。**record = 纯数据 + component 层 dispatch**（`swapRecord` 自反/对合：undo 倒序、redo 正序再调一次，不存在「undo 生成 redo」；不存函数引用）。computed record（白名单只有 flip/rot90/offsetWrap）零负载 swap=再变换一次，**双捕获断言**防平行路径。无令牌写 = `_componentWrite` throw——「忘记记账」**结构上不存在**。「不记账」必须是显式声明态（`_rawWrite` 预览直写 / `setActive` 焦点 / load 灌入）。共享令牌编排走 `ctx.history.withPoint`。undo 白/黑名单（判据「这个值变了，用户期待 ctrl-z 撤它吗」）变动须问 user——见 ADR-0008 §4 表。
+_Avoid_: 手写 forward/backward 逆元（operators ①/②型，v2 已死）, write-gate dev 断言（v2 拆除，结构锁取代）, workbench（被否——语义是 editor app runtime）, 函数注册成字符串（= operator 注册表换门牌复活）
 
-**LayerTree（结构类写面）**:
-`workpiece.layers`。「写即记账」门面：addLayer/duplicateLayer/removeLayer/deleteGroup/moveLayer/mergeDown/setLayerProp/setReferenceLayer/clearLayer + `treeTx`（结构 tx 窗口：mutate 拿可变 doc，前后 snapshotTree 自动入栈）+ `setActive`（显式声明的不入 undo 焦点写）。记账失败摘回 mutation（不留无账层）。
-_Avoid_: doc.addLayer + 手工 AddLayerRecordOp（旧姿势）, 在 app 层拼 locateNode/prevActiveId 舞蹈
+**LayerTree（结构 json 组件）+ LayersFace（ctx.layers）**:
+结构 = `wp2.layerTree`：**纯 json 树**（TreeJson 结构共享非深拷、可持久化）+ 每叶 pixelsRef 指向 LayerTiles；verbs = addLayer/duplicate/remove/move/mergeDown（合成字节外部烤好递入）/setLayerProp/setTreeProp(width/height)/addGroup/loadRoot（换整根，load 用）+ `setActive`（显式声明的不入 undo 焦点写）；record = 换根收集。app 侧门面 = `src/layers-face.ts`（LayersFace，**`ctx.layers`**）：每方法一个 `history.withPoint` 整点，组合动作各归各名（ungroup/collapseGroup/moveIntoGroup/moveOutOfGroup/explodeLayer/stampAll），状态栏文案走 statuses→step.hint。
+_Avoid_: treeTx（tx 窗口已溶解成令牌+verbs）, workpiece.layers（v1 载体死）, doc.addLayer + 手工 RecordOp（旧姿势）, 在 app 层拼 locateNode/prevActiveId 舞蹈
 
 **Sidecar**:
-「跟 ora 走 ∧ 不进 undo history」的 doc 级状态（ADR-0007 命名定案）。成员：参考**图**（side-windows 的 referenceImage blob）、editor-state.json（desk）、未来 timelapse。变更通道 = `wp:sidecarchange`（驱动编辑门/落盘推云，不碰 undo 按钮态）——但 **desk 不发信号**（v409「desk 无 dirty」钉子：只拖面板不落盘，落盘时捎带快照）。**术语拆死**：参考**层**指定（`referenceLayerId`，workpiece 侧，ReferenceLayerOp 可撤销）≠ 参考**图**（sidecar 侧，不进 undo）——两个 "reference" 是两个东西。
+「跟 ora 走 ∧ 不进 undo history」的 doc 级状态（ADR-0007 命名定案）。成员：参考**图**（side-windows 的 referenceImage blob）、editor-state.json（desk）、未来 timelapse。变更通道 = `wp:sidecarchange`（驱动编辑门/落盘推云，不碰 undo 按钮态）——但 **desk 不发信号**（v409「desk 无 dirty」钉子：只拖面板不落盘，落盘时捎带快照）。**术语拆死**：参考**层**指定（`referenceLayerId`，workpiece 侧，layerTree verb 记账可撤销）≠ 参考**图**（sidecar 侧，不进 undo）——两个 "reference" 是两个东西。v2 注：sidecar = **silent 形容词不开新 workpiece**（ADR-0008 §3）；参考图/palette 本纪元未组件化（palette 已归 desk），`wp:sidecarchange` 通道仍在，组件化那天信号统一从 workpiece 出。
 _Avoid_: workbench-state 当 sidecar 统称（workbench 语义被否）, 伪造 wp:histchange 标脏（v0.8.5 已杀的旧姿势）, 给 desk 加 dirty 标记（v409 钉子）
 
 **Snapshot**:
-某一刻 layer 像素的拷贝 `{ bboxX/Y/W/H, imageData }`，空层 imageData=null。undo 的原子。
-_Avoid_: backup, capture
+某一刻 leaf 像素的拷贝（ViewLeafSnap，tiles 句柄制）。引擎 live 预览重合成（每帧 `restoreFromSnapshot`）与浮层 lift 的机制；**不再是 undo 的原子**——v2 undo 的原子 = record（collector 扣押的句柄/快照/引用）。
+_Avoid_: backup, capture, 「snapshot 入 undo 栈」（v1 心智）
 
-**History entry / Microstep**:
-配额制 UndoHistory（0.4 纪元）栈里的一步 = `{op, args, data, checkpoint, label}`，data 是当前方向的逆包（forward/backward 对称 swap）。checkpoint 把多个微步封成一个 undo 整点（compound / sealCheckpoint）。
-_Avoid_: command, action, undo step, UndoStack/type-dispatch handler（0.4 前旧机制，已死）
+**UndoStack / UndoStep / History（编排器）**:
+v2 配额制 undo 栈（`src/workpiece/undo-stack.ts`，零依赖）。UndoStep = `{id, entries:[{c, data}], label?, hint?}`——id 栈分配单调永不复用（= stateVersion 的锚）；undo=entries 倒序 `swapRecord`、redo=正序再调一次（自反）；配额驱逐 `disposeRecord` 释放资源（tile 引用计数 −1）。`hint` = 非权威附注单闭包（三纪律：非权威/lossy 无害/消费在 app；唯一住户 = viewport 还原）。**History**（`src/workpiece/history.ts`，`ctx.history`）= v2 编排器：`withPoint(label, opts, fn)` 共享令牌开/续/封（`checkpoint:false`=留开聚合微步、嵌套骑外层令牌、fn throw→cancel 回滚）+ `sealCheckpoint()` 手势封口 + undo/redo 门（开着的令牌下禁 undo）+ 不可恢复协议（swap 抛→弃栈+回调）。dirty 派生 `stateVersion !== lastSaved || silentDirty`（画→存→画→undo=clean 真值表）；commitVersion 单调（undo 也 +1，渲染缓存失效）——两计数语义不同不许合并。
+_Avoid_: UndoHistory / History entry / Microstep / {op,args,data} 逆包（v1 旧栈，v2 物理拆除）, LegacyHistory（T5 已死的迁移桥）, command, action, isDirty 可变布尔（退役——dirty 是派生）
 
-**PixelEdit / PixelTx**:
-一次"按-拖-抬"（或 adjust/fill 这类"开面板-预览-收口"）的像素编辑事务（`workpiece/pixel-tx.ts`，ctx.pixelHistory 门面）。`begin(layer,label)` 拍 before 句柄快照（零拷贝），`commit(finalize?, {checkpoint?})` 经 SwapPixelsOp 入栈（no-op 守卫：没写过像素不占 undo 步），`abort()` 还原，`dispose()` 弃快照不还原（层从未被改的取消路径）。
-_Avoid_: undo manager, snapshot manager, stroke recorder, 手撒 layer.snapshot()+ops.pixels 裸调（S2 退役）
+**LayerTiles（tile collector）**:
+像素 substrate = `wp2.layerTiles`：per-layer tileset 扁平仓 + **substrate 层写时扣押** collector（`tiles/tile-layer.ts` 的 setTileSwapObserver——engine 直写也被逮到 + 自动登记 touched；Krita memento 语义）。**tileset 引用计数**：json 持有/record 持有各 +1，归零还池（池 FR assert 兜漏）——record 驱逐才释放，「删组→驱逐→无泄漏」有回归锚。读口两档：**TileReadPort**（身份制零拷贝，render/bridge 用）+ `getRegion`（引擎/导出）。整树几何 = `resizeAllLeaves`（exchange record：undo 包=另一侧实例自反互换；map 期间挂起收集的纪律收在 verb 内）。净零变化不占 undo 步。
+_Avoid_: PixelTx / pixelHistory（v2 物理拆除）, 手撒 snapshot+ops.pixels 裸调, 调用方碰 _suspendCollect（T5a 起收进 verb）, undo manager, stroke recorder
+
+**PendingFill（fill 预览色）**:
+色板 = 编辑器，指向 color target：平时 `brush.color`（**永不 undo**）；fill 预览期自动指 `wp2.pendingFill.color`（color-panel registerColorTarget 切换；进入时从笔刷色同步初值）。预览期 setColor/吸管/色词 = 真 undo step（防抖合并沿 v0.7.8：`setColorLive` 直写中间值 + `commitPreApplied` 防抖 flush 一步）；commit = [tiles+选区清+PendingFill 清] 一步。收益：**undo 永远不再改用户调色盘上的当前色**（pending-fill.test 行为锚）。region 归 Selection（fill=选区的消费视图，ADR-0004 不动）。
+_Avoid_: FillColorOp（v2 已死）, _expectFromHistory 回灌抑制（机制死——undo 翻 substrate → onChange 刷显示）, 把笔刷色入 undo
+
+**dials / desk**:
+RAM 反应式层 = `useDials()`（Vue 惯例名；原 createEditorState，T5d 换名）；**desk** = per-doc 桌面 struct（原 editorState；持久化文件 `.webpaint/editor-state.json` 名未改）。判据（ADR-0008 §4）：**调好的手感是偏好不是创作**——笔刷色/dial/容差/面板布置不进 undo；v409「desk 无 dirty」钉子仍在。旧轨 `webpaint/state.json` 已停写（v0.8.21）：它独有的 toolDials/palette/blender 三组迁 desk（opaque json 整包收放），读兼容留存量、拔除另议。
+_Avoid_: editorState / createEditorState（旧名，T5d 换毕）, 把 dial 写进 undo, 给 desk 加 dirty 标记
+
+**GlRoom / RenderTree / RasterService（GL 双 facade）**:
+render 侧三件（T6，ADR-0008 §8）：**GlRoom** = 机房（GLContext/GpuTilePool/CpuGpuTileBridge/GLCompositor 五件套唯一实例 + 共享台面：叶驻留 leaves+sync 族、pseudo 装置 overlay·float·selMask·fillTex、composeSteps 合成机、onInvalidate 失效信号、HUD 观测口）；**RenderTree** = tree composite（renderFrame/段缓存/display 快路径/pin provider）；**RasterService** = 一次性算像素（bakeStamps/rasterizeStampsToBytes/warpToBytes/compositeOnce/pickColor——零帧状态，C 骑士 headless 的显形接缝）。**两 facade 必须共享同一 bridge/pool 实例**（烤定搭 base-tile 便车；拆两套缓存=每笔整层重传）。workpiece/引擎零 GL：GPU 只算不管账，账本永远是 CPU 句柄。
+_Avoid_: render-tree-gl（T6 拆除）, facade 各持缓存, GPU 侧记账, `(tree as any)._bridge` 私字段挖法（走 room.bridge 正路）
 
 **EditMode**:
 独占编辑状态机的 SSoT（`src/edit-mode.js`）。**单轴**：`current()` 是一个 enum（CAPS 的 key），持久工具（brush/eraser/lasso/...）和 transient（transform/crop/adjust）平级。能力表 CAPS（canDraw/allowsColor/cursor/ctrlZ/transient）按 current() 查表 → 谓词。输入 gating、UI 显隐/cursor、ctrl-z 语义全从 current() 派生。叫 EditMode 不叫 Mode 因为 "mode" 在本仓重载（L.mode 混合 / liquify.mode / body.dataset.mode）。提案见 [[ai-docs/20260531-tool-mode-state-machine.md]]。
 _Avoid_: tool state, app state, mode manager, Mode（裸"mode"歧义）
 
 **Transient**:
-EditMode 里"多 step、需 commit/cancel、ctrl-z=取消"的那类 mode（transform / crop / adjust），与持久工具平级（CAPS `transient:true`）。canDraw=false → 期间结构上不可能起 stroke。结束回到进来前的持久工具（_returnTool，内部，brush 兜底）。两个语义旋钮在 CAPS：onToolSwitch（点工具=apply/cancel）、returnTo。区别于单次手势进行中（那是 PixelEdit 的 tx）。
+EditMode 里"多 step、需 commit/cancel、ctrl-z=取消"的那类 mode（transform / crop / adjust），与持久工具平级（CAPS `transient:true`）。canDraw=false → 期间结构上不可能起 stroke。结束回到进来前的持久工具（_returnTool，内部，brush 兜底）。两个语义旋钮在 CAPS：onToolSwitch（点工具=apply/cancel）、returnTo。区别于单次手势进行中（那是一个开着的令牌）。
 _Avoid_: pending state, temporary mode, overlay, 双轴/second axis
 
 **Store**:

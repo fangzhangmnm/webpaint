@@ -78,8 +78,9 @@ class PaintingWorkpiece extends Workpiece {
   readonly floatLayer: FloatLayerComponent; // recorded（不持久化，退出前 settle）
   readonly pendingFill: PendingFill;      // recorded（不持久化）
   readonly persp: PerspComponent;         // recorded（ADR-0008 升格；持久化去向=desk 文件）
-  readonly referenceGallery: ReferenceGallery; // silent
-  readonly palette: PaletteState;         // silent
+  // silent 组件（referenceGallery/palette）T7 对账：本纪元未组件化——palette 归 desk 新组
+  //（T5d，opaque json 整包收放）、参考图仍 sidecar 现状（wp:sidecarchange）。升 recorded/
+  // 组件化那天再入注册表（ADR-0008 §3 的注册表机制已就绪，改一个字段的路留着）。
   // 装载：全白构造 + load 令牌写（解码器产 plain data；随后 undo.clear）
   load(data: PaintingData): void;         // 杀 docRaw/adoptState 的后继
   exportData(): PaintingData;             // 编码器读口（冻结快照语义沿 freezeDocForEncode）
@@ -92,7 +93,8 @@ class PaintingWorkpiece extends Workpiece {
 //   root  = { width; height; backgroundColor?; activeId?; referenceLayerId?; nodes }
 // load 语义：挂起 tile 收集（树根 record 已携带全部所有权）→ loadRoot 换整根 → commit →
 //   undoStack.clear()（旧 doc 根 record 驱逐 = 旧 tileset 全释放，换文档零手工 dispose）→ markSaved。
-// 迁移期两形态：opts.host（T2 app，doc 树背）或 opts.tree（树模式，出生单空叶）——cutover 后只剩树模式。
+// 迁移期两形态：opts.host（T2 app，doc 树背）或 opts.tree（树模式，出生单空叶）——cutover 后生产只剩
+// 树模式；opts.host + layerTree:null 形态 = 测试基座残余（T5d：PaintDoc 生产零引用，随 freezeDocForEncode 拆）。
 
 ## layer-tree.ts（纯 json + 可持久化树）
 
