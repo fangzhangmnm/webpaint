@@ -3,7 +3,7 @@
 //   - flip/rot90/offset 走 LayerTiles computed verbs（省内存可逆变换白名单）；
 //   - crop/cropResample/resample 走逐叶实例交换 + DocResizeOp 记账（undo 包 = 另一侧实例）；
 //   - json 尺寸走 layerTree2.setTreeProp("width"/"height")（树 record 同 step 翻转）；
-//   - 选区走 SwapSelectionOp 微步（pre-applied；T4 组件化后迁走）；
+//   - 选区走 SelectionComponent（pre-applied 直写组件 verb——T4a）；
 //   - viewport/persp 还原走 **step.hint**（提案 .h：docTransform 是 hint 的唯一住户）。
 // 守卫（无选区/尺寸非法/没变化）留调用方。crop/resample 是 EditMode transient（enter/apply/cancel 走 editMode）。
 
@@ -92,9 +92,8 @@ function runDocTransform(label: string, tf: DocTransformSpec): void {
     if (oldSel) {
       const mapped = tf.mapSelection ? tf.mapSelection(oldSel) : oldSel;
       if (mapped !== oldSel) {
-        doc.selection = mapped;   // pre-applied：before 所有权交 SwapSelectionOp
-        const st = history.run(workpiece, ops.selection, { _initialBefore: { v: oldSel } }, { checkpoint: false });
-        if (!st.ok) throw new Error(st.msg ?? "selection 记账失败");
+        doc.selection = mapped;   // pre-applied：before 所有权交 SelectionComponent record（T4a）
+        wp2.selection.commitPreApplied(oldSel);   // compound 令牌已开——直写组件 verb
       }
     }
     tf.after?.();

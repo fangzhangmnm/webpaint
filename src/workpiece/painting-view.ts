@@ -7,8 +7,8 @@
 // 活 LayerPixels，token 开着时由 tile-layer 全局观察者写时扣押，纪律与 T2 一致）。
 //
 // 过渡态（T4/T5 收编，自裁范围）：
-//   - selection 暂住本端口（doc.selection 的后继；T4 SelectionComponent 落地后迁走）。
-//     写纪律沿旧约：引擎/预览直写，记账走 SelectionFace（唯一记账口）。
+//   - selection substrate 已迁 SelectionComponent（T4a）；本端口只留镜像口
+//     （getter/setter = view/_rawWrite 直通）。写纪律沿旧约：引擎/预览直写，记账走 SelectionFace。
 //   - ViewLeaf 的写方法 = 旧 Layer「预览违规户」们（液化就地写等，见 handoff §3）的继续容身处；
 //     买账的路径（stroke commit/fill/滤镜）早已走 token+LayerTiles。
 //   - contentRev 全局单调（lineart-oracle 等 (id,rev) 缓存键的不复用保证——tileset 实例换血后
@@ -194,8 +194,6 @@ export class PaintingView {
   private _nodes: ViewNode[] = [];
   private _leafCache = new Map<number, ViewLeaf>();
   private _lastRoot: unknown = null;
-  // 选区过渡宿（doc.selection 后继；T4 迁 SelectionComponent）。写纪律沿旧约。
-  private _selection: Selection | null = null;
   // 内存预算档（旧 PaintDoc._memBudgetBytes/_memCountMat 同形；board 按 GL/2D 配）。
   private _memBudgetBytes: number | null = null;
   private _memCountMat = true;
@@ -318,14 +316,12 @@ export class PaintingView {
     return a && !a.isGroup ? a : null;
   }
 
-  // ---- 选区（过渡宿；T4 迁 SelectionComponent）----
-  get selection(): Selection | null { return this._selection; }
-  set selection(v: Selection | null) { this._selection = v; }
+  // ---- 选区（T4a：substrate 归 SelectionComponent；此处 = 端口镜像口）----
+  // setter = 预览直写（lasso 引擎/预览 tx/pre-applied 换手；记账走 SelectionFace → 组件）。
+  get selection(): Selection | null { return this._wp.selection.view(); }
+  set selection(v: Selection | null) { this._wp.selection._rawWrite(v); }
   /** 换文档收尾（跨 session 不沿用选区——旧 adoptState 语义）。 */
-  clearSelectionOnLoad(): void {
-    if (this._selection && !this._selection.disposed) this._selection.dispose();
-    this._selection = null;
-  }
+  clearSelectionOnLoad(): void { this._wp.selection.clearOnLoad(); }
 
   // ---- 内存预算 / 层数上限（语义沿旧 PaintDoc.maxLayers）----
   configureMemory(budgetBytes: number, countMat: boolean): void {

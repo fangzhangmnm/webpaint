@@ -91,7 +91,7 @@ import "./pointer-route.test.mjs";
 import "./stroke-input-smooth.test.mjs";
 import "./stroke-smoother.test.mjs";
 import "./selection-morph.test.mjs";
-import "./selection-tiles.test.mjs";       // S5：gray8 tile 选区底座（布尔/所有权/ants/SwapSelectionOp）
+import "./selection-tiles.test.mjs";       // S5：gray8 tile 选区底座（布尔/所有权/ants/SelectionComponent）
 import "./flood-select.test.mjs";
 import "./lineart-partition.test.mjs";  // 线稿分区管线（论文 Fourey-Tschumperlé-Revoy）：EDT/曲率端点/样条闭合/label map/线下瓜分
 import "./lineart-oracle.test.mjs";     // 线稿 oracle 接缝：tap→Selection + contentRev 缓存失效

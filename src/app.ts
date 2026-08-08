@@ -236,7 +236,7 @@ const ops = makeOperators({
 });
 // 结构类写面门面（T3b-2 换心：operator 流 → v2 verbs）+ 选区写面（substrate = 端口过渡宿）。
 new LayerTree({ w: workpiece, history, tree: wp2.layerTree!, tiles: wp2.layerTiles, port: doc, status: setStatus });
-new SelectionFace({ w: workpiece, doc, history, ops });
+new SelectionFace({ w: workpiece, history, sel: wp2.selection });
 // write-gate（S4）不再武装：PaintDoc 已出局，「裸写不可能」由令牌墙（_componentWrite throw）结构性给出。
 const _afterDocChange = () => { renderLayersPanel(); board.invalidateAll(); board.requestRender(); };
 // EditMode：独占编辑状态机，当前编辑模式（工具/transient）的 SSoT（取代旧 state.tool）。见 edit-mode.js / CONTEXT.md。

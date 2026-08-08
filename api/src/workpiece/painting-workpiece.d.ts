@@ -1,6 +1,7 @@
 import { Workpiece, type WorkpieceOpts, type CollectorComponent } from "./workpiece2.ts";
 import { LayerTiles, type TilesHost, type Rect } from "./layer-tiles.ts";
 import { LayerTree2 } from "./layer-tree2.ts";
+import { SelectionComponent } from "./selection-component.ts";
 export interface PaintingDataLeaf {
     id?: number;
     name: string;
@@ -35,6 +36,7 @@ export interface PaintingData {
 export declare class PaintingWorkpiece extends Workpiece {
     readonly layerTiles: LayerTiles;
     readonly layerTree: LayerTree2 | null;
+    readonly selection: SelectionComponent;
     constructor(opts: WorkpieceOpts & {
         host?: TilesHost;
         tree?: {

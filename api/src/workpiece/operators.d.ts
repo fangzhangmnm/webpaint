@@ -2,7 +2,6 @@ import { DocumentOperator, Workpiece, type OpResult } from "./workpiece.ts";
 import { type ViewLeafSnap } from "./painting-view.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import { LiftFloatOp, FloatTransformOp, DropFloatOp } from "./float-ops.ts";
-import type { Selection } from "../selection.ts";
 export interface SwapPixelsArgs {
     layerId: number;
     _initialBefore?: ViewLeafSnap | null;
@@ -14,21 +13,6 @@ export declare class SwapPixelsOp extends DocumentOperator<SwapPixelsArgs, ViewL
     private _install;
     estimateQuotaBytes(args: SwapPixelsArgs, data: ViewLeafSnap | undefined): number;
     disposeData(args: SwapPixelsArgs, data: ViewLeafSnap | undefined): void;
-}
-export interface SwapSelectionArgs {
-    _initialBefore?: {
-        v: Selection | null;
-    } | null;
-}
-type SelBox = {
-    v: Selection | null;
-};
-export declare class SwapSelectionOp extends DocumentOperator<SwapSelectionArgs, SelBox> {
-    readonly kind = "selection";
-    forward(w: Workpiece, args: SwapSelectionArgs, data: SelBox | undefined): OpResult<SelBox>;
-    backward(w: Workpiece, _args: SwapSelectionArgs, data: SelBox): OpResult<SelBox>;
-    estimateQuotaBytes(args: SwapSelectionArgs, data: SelBox | undefined): number;
-    disposeData(args: SwapSelectionArgs, data: SelBox | undefined): void;
 }
 export interface FillColorArgs {
     value: string;
@@ -75,7 +59,6 @@ export declare class DocResizeOp extends DocumentOperator<DocResizeArgs, ResizeS
 }
 export interface OperatorRegistry {
     pixels: SwapPixelsOp;
-    selection: SwapSelectionOp;
     fillColor: FillColorOp;
     docResize: DocResizeOp;
     liftFloat: LiftFloatOp;

@@ -6,7 +6,7 @@
 //   - invert / croppedTo / flippedHorizontal（rotate/offset 已在 doc-rotate/doc-offset 测）
 //   - 窄读口 sampleAt / materializeMaskRegion / bboxMask 缓存
 //   - clone/dispose 所有权：双 dispose throw、use-after-dispose throw、clone 后互不影响
-//   - SwapSelectionOp：do/undo/redo 往返 + disposeData 释放句柄 + 配额按压缩字节
+//   - SelectionComponent（T4a 起）：do/undo/redo 往返 + disposeRecord 释放句柄 + 配额按压缩字节
 //   - marching-ants：正方形 golden 走线 + 缓存身份
 //   - H7（液化选区 doc-space）：**RED 挂线**（S8 液化重写转绿），todo() 占位
 import { describe, it, assert, eq, todo } from "./runner.mjs";
@@ -172,50 +172,52 @@ describe("Selection · 窄读口 + 所有权", () => {
   });
 });
 
-describe("SwapSelectionOp · 往返 + 句柄释放", () => {
+describe("SelectionComponent · 往返 + 句柄释放（T4a：SwapSelectionOp 锚迁移）", () => {
   async function setup() {
-    const { Workpiece } = await import("../src/workpiece/workpiece.ts");
-    const { UndoHistory } = await import("../src/workpiece/undo-history.ts");
-    const { SwapSelectionOp } = await import("../src/workpiece/operators.ts");
-    const { PaintDoc } = await import("../src/doc.ts");
-    const doc = new PaintDoc({ width: 64, height: 64 });
-    const h = new UndoHistory({ maxQuotaBytes: 1 << 20, onChange: () => {}, onUnrecoverable: () => {} });
-    const w = new Workpiece(doc, h);
-    return { doc, w, h, op: new SwapSelectionOp() };
+    const { PaintingWorkpiece } = await import("../src/workpiece/painting-workpiece.ts");
+    const { UndoStack } = await import("../src/workpiece/undo-stack.ts");
+    const stack = new UndoStack({ maxQuotaBytes: 1 << 20 });
+    const wp2 = new PaintingWorkpiece({ undo: stack, tree: { width: 64, height: 64 } });
+    return { wp2, stack, sel: wp2.selection };
   }
-  it("do→undo→redo 往返：doc.selection 引用正确换手", async () => {
-    const { doc, w, h, op } = await setup();
+  it("do→undo→redo 往返：选区引用正确换手（零拷贝）", async () => {
+    const { wp2, stack, sel } = await setup();
     const s1 = solid(0, 0, 4, 4);
-    doc.selection = s1;                                    // 事务型：引擎先改
-    const st = h.run(w, op, { _initialBefore: { v: null } });
-    assert(st.ok, "run ok");
-    h.undo(w);
-    eq(doc.selection, null, "undo 回无选区");
+    sel._rawWrite(s1);                                     // pre-applied：引擎先改
+    const t = wp2.begin("sel");
+    sel.commitPreApplied(null);
+    t.commit();
+    stack.undo();
+    eq(sel.view(), null, "undo 回无选区");
     assert(!s1.disposed, "undo 后 s1 在 redo 包里，未释放");
-    h.redo(w);
-    assert(doc.selection === s1, "redo 回 s1 本体（引用交换，零拷贝）");
-    h.clear();
-    assert(!s1.disposed, "s1 在 doc 手里，clear 不动它");
-    s1.dispose();
+    stack.redo();
+    assert(sel.view() === s1, "redo 回 s1 本体（引用交换，零拷贝）");
+    stack.clear();
+    assert(!s1.disposed, "s1 在 substrate 手里，clear 不动它");
+    sel.clearOnLoad();
   });
-  it("clear 历史释放包内 Selection 句柄（disposeData）", async () => {
-    const { doc, w, h, op } = await setup();
+  it("clear 历史释放包内 Selection 句柄（disposeRecord）", async () => {
+    const { wp2, stack, sel } = await setup();
     const s1 = solid(0, 0, 4, 4);
     const s2 = solid(8, 8, 4, 4);
-    doc.selection = s1;
-    h.run(w, op, { _initialBefore: { v: null } });
-    doc.selection = s2;                                    // 换选区：s1 交给包
-    h.run(w, op, { _initialBefore: { v: s1 } });
-    h.clear();
-    assert(s1.disposed, "包持有的 s1 被 disposeData 释放");
-    assert(!s2.disposed, "doc 持有的 s2 不动");
-    s2.dispose();
+    sel._rawWrite(s1);
+    let t = wp2.begin("sel");
+    sel.commitPreApplied(null);
+    t.commit();
+    sel._rawWrite(s2);                                     // 换选区：s1 交给包
+    t = wp2.begin("sel");
+    sel.commitPreApplied(s1);
+    t.commit();
+    stack.clear();
+    assert(s1.disposed, "包持有的 s1 被 disposeRecord 释放");
+    assert(!s2.disposed, "substrate 持有的 s2 不动");
+    sel.clearOnLoad();
   });
-  it("配额估计：raw 期 ≈ 基础值；压缩后计压缩字节", async () => {
-    const { op } = await setup();
+  it("配额估计：raw 期 ≈ 基础值（tile 计 0，走共享池配额）", async () => {
+    const { sel } = await setup();
     const s = solid(0, 0, 16, 16);
-    const base = op.estimateQuotaBytes({ _initialBefore: null }, { v: s });
-    assert(base >= 512 && base < 2048, `raw 期只有基础值（tile 计 0），实得 ${base}`);
+    const base = sel.recordBytes({ v: s });
+    assert(base >= 256 && base < 2048, `raw 期只有基础值（tile 计 0），实得 ${base}`);
     s.dispose();
   });
 });

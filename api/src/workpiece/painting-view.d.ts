@@ -87,7 +87,6 @@ export declare class PaintingView {
     private _nodes;
     private _leafCache;
     private _lastRoot;
-    private _selection;
     private _memBudgetBytes;
     private _memCountMat;
     constructor(wp: PaintingWorkpiece);

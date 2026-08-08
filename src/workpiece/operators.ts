@@ -5,8 +5,8 @@
 // （→ doc-ops 的 computed verbs + DocResizeOp + step.hint）。本文件只剩：
 //   pixels     SwapPixelsOp   —— 预览违规户（液化就地写/filterBrush/浮层落地）的事务型入栈；
 //                                 买账路径（stroke/fill/滤镜 commit）早已 token+LayerTiles。
-//   selection  SwapSelectionOp—— 选区记账（T4 SelectionComponent 接棒）。substrate = 端口过渡宿。
 //   fillColor  FillColorOp    —— fill 预览期换色（T4 PendingFill 接棒）。
+//   （selection 已迁 SelectionComponent——T4a。）
 //   docResize  DocResizeOp    —— crop/resample 的叶实例交换记账（T3b-2 立；几何变换的
 //                                 undo 包 = 另一侧 LayerPixels 实例，与树 record 同 step 翻转）。
 //   float 三件套（float-ops.ts）—— T4 FloatLayerComponent 接棒。
@@ -17,7 +17,6 @@ import { DocumentOperator, Workpiece, type OpResult } from "./workpiece.ts";
 import { findViewNodeById, disposeViewSnap, type ViewLeaf, type ViewLeafSnap, type PaintingView } from "./painting-view.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import { LiftFloatOp, FloatTransformOp, DropFloatOp } from "./float-ops.ts";
-import type { Selection } from "../selection.ts";
 
 // tile 句柄快照的配额估计：压缩前记 0（走共享 raw 池配额），压缩后 = compressedBytes/refCount。
 function estimateSnapBytes(snap: ViewLeafSnap | null | undefined): number {
@@ -80,49 +79,7 @@ export class SwapPixelsOp extends DocumentOperator<SwapPixelsArgs, ViewLeafSnap>
   }
 }
 
-// ---- ① 选区 swap（selectionChange：圈选/清选/反选/全选）。Selection 不可变 → 纯引用交换 ----
-function estimateSelectionBytes(sel: Selection | null | undefined): number {
-  if (!sel || sel.disposed) return 0;
-  let sum = 0;
-  for (const h of sel.tileHandles()) {
-    if (h.released) continue;
-    if (h.isCompressed()) sum += Math.ceil(h.compressedByteLength() / Math.max(1, h.refCount()));
-  }
-  return sum;
-}
-export interface SwapSelectionArgs { _initialBefore?: { v: Selection | null } | null }
-type SelBox = { v: Selection | null };
-export class SwapSelectionOp extends DocumentOperator<SwapSelectionArgs, SelBox> {
-  readonly kind = "selection";
-  forward(w: Workpiece, args: SwapSelectionArgs, data: SelBox | undefined): OpResult<SelBox> {
-    const doc = this.mut(w).doc;
-    if (data === undefined) {
-      const before = args._initialBefore;
-      args._initialBefore = null;
-      if (!before) return { ok: false, msg: "missing _initialBefore" };
-      return { ok: true, replaced: before };
-    }
-    const cur = { v: doc.selection };
-    doc.selection = data.v;
-    return { ok: true, replaced: cur };
-  }
-  backward(w: Workpiece, _args: SwapSelectionArgs, data: SelBox): OpResult<SelBox> {
-    const doc = this.mut(w).doc;
-    const cur = { v: doc.selection };
-    doc.selection = data.v;
-    return { ok: true, replaced: cur };
-  }
-  override estimateQuotaBytes(args: SwapSelectionArgs, data: SelBox | undefined): number {
-    return 512 + estimateSelectionBytes(data?.v) + estimateSelectionBytes(args._initialBefore?.v);
-  }
-  override disposeData(args: SwapSelectionArgs, data: SelBox | undefined): void {
-    if (args._initialBefore) {
-      if (args._initialBefore.v && !args._initialBefore.v.disposed) args._initialBefore.v.dispose();
-      args._initialBefore = null;
-    }
-    if (data?.v && !data.v.disposed) data.v.dispose();
-  }
-}
+// （SwapSelectionOp 已死——T4a：选区记账归 SelectionComponent，见 selection-component.ts。）
 
 // ---- ② fill 预览期换色（v0.7.8；语义见 git 历史。颜色 get/set 注入——desk 态，workpiece 不碰 UI）----
 export interface FillColorArgs { value: string; _initialBefore?: { v: string } | null }
@@ -195,7 +152,6 @@ export class DocResizeOp extends DocumentOperator<DocResizeArgs, ResizeSide> {
 // ---- 注册表（app.ts 组装进 ctx；有注入需求的在 app 侧 new）----
 export interface OperatorRegistry {
   pixels: SwapPixelsOp;
-  selection: SwapSelectionOp;
   fillColor: FillColorOp;
   docResize: DocResizeOp;
   liftFloat: LiftFloatOp;
@@ -207,7 +163,6 @@ export function makeOperators(deps: {
 }): OperatorRegistry {
   return {
     pixels: new SwapPixelsOp(),
-    selection: new SwapSelectionOp(),
     fillColor: new FillColorOp(deps.fillColor),
     docResize: new DocResizeOp(),
     liftFloat: new LiftFloatOp(),
