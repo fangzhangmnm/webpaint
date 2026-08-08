@@ -4,8 +4,7 @@ import type { ColorMetric } from "./color-dist.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
-import type { Workpiece } from "./workpiece/workpiece.ts";
-import type { UndoHistory } from "./workpiece/undo-history.ts";
+import type { Workpiece, HistoryFacade } from "./workpiece/workpiece.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
 interface Point {
     x: number;
@@ -59,7 +58,7 @@ export declare class LassoEngine {
     onChange: () => void;
     constructor();
     setDoc(doc: LassoDoc | null): void;
-    attachWorkpiece(w: Workpiece, history: UndoHistory, ops: OperatorRegistry): void;
+    attachWorkpiece(w: Workpiece, history: HistoryFacade, ops: OperatorRegistry): void;
     syncFloating(): void;
     setSubTool(name: SubTool): void;
     getSubTool(): SubTool;

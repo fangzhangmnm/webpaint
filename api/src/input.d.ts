@@ -6,16 +6,15 @@ import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { UndoHistory } from "./workpiece/undo-history.ts";
-import type { Workpiece } from "./workpiece/workpiece.ts";
+import type { HistoryFacade, Workpiece } from "./workpiece/workpiece.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
-import type { PixelEdits, PixelTx as PixelTxClass } from "./workpiece/pixel-tx.ts";
+import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
+import type { LayerTiles } from "./workpiece/layer-tiles.ts";
+import type { WriteToken } from "./workpiece/workpiece2.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import { Selection } from "./selection.ts";
 type Doc = PaintDoc;
-type History = UndoHistory;
-type PixelHistory = PixelEdits;
-type PixelTx = PixelTxClass;
+type History = HistoryFacade;
 interface FilterBrushState {
     Filter: unknown;
     params: unknown;
@@ -23,7 +22,8 @@ interface FilterBrushState {
 type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
 interface ActiveStroke {
     engine: StrokeEngine;
-    tx: PixelTx;
+    token: WriteToken;
+    layer: Layer;
     finalize: boolean;
     inPlace: boolean;
 }
@@ -84,7 +84,8 @@ interface InputOpts {
     history?: History | null;
     workpiece?: Workpiece | null;
     ops?: OperatorRegistry | null;
-    pixelHistory?: PixelHistory | null;
+    wp2?: PaintingWorkpiece | null;
+    layerTiles?: LayerTiles | null;
     isContentReplacing?: () => boolean;
 }
 interface KeyboardShortcut {
@@ -134,7 +135,8 @@ export declare class InputController {
     history: History | null;
     workpiece: Workpiece | null;
     ops: OperatorRegistry | null;
-    pixelHistory: PixelHistory | null;
+    wp2: PaintingWorkpiece | null;
+    layerTiles: LayerTiles | null;
     _activeStroke: ActiveStroke | null;
     constructor(board: Board, doc: Doc, opts?: InputOpts);
     _bind(): void;

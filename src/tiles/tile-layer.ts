@@ -18,6 +18,14 @@ import { computeBBox, type TileHandle } from "./cpu-tile-pool.ts";
 
 const TILE_RGBA = TILE_SIZE * TILE_SIZE * 4;
 
+// ---- tile 换手观察者（workpiece v2 collector 接缝，ADR-0008）----
+// 任何 LayerPixels 实例的 tile 槽位变更（换新/删格/restore/clear）都在**变更前**上报
+// (实例, key, 旧句柄|null)。观察者想留住旧句柄必须自己 acquire（上报后本体照常 release）。
+// 全局单点：收集与否由观察者自己 gate（LayerTiles 按「令牌开着且未 suspend」判）。
+export type TileSwapObserver = (lp: LayerPixels, key: number, old: TileHandle | null) => void;
+let _tileObserver: TileSwapObserver | null = null;
+export function setTileSwapObserver(fn: TileSwapObserver | null): void { _tileObserver = fn; }
+
 // undo 快照：共享句柄（acquire 过的）。用完必须 disposePixelsSnapshot 释放。
 export interface PixelsSnapshot { across: number; tiles: [number, TileHandle][] }
 export function disposePixelsSnapshot(snap: PixelsSnapshot): void {
@@ -289,8 +297,18 @@ export class LayerPixels {
     this._contentVersion++;
     this._releaseAll();
     for (const [key, h] of snap.tiles) {
+      _tileObserver?.(this, key, null);   // _releaseAll 已清空 → 每格都是「空→有」（首捕获赢，见观察者约）
       this._tiles.set(key, h.acquire());
     }
+  }
+
+  // ---- workpiece v2 undo 协作面：按 key 直接换句柄（**所有权移交**——收下 h 不 acquire、
+  //   交出旧句柄不 release；h=null = 删格）。不触发观察者（undo 应用本身不是「新写入」）。
+  _swapTileHandle(key: number, h: TileHandle | null): TileHandle | null {
+    this._contentVersion++;
+    const old = this._tiles.get(key) ?? null;
+    if (h) this._tiles.set(key, h); else this._tiles.delete(key);
+    return old;
   }
 
   // ---- 内部 ----
@@ -299,15 +317,17 @@ export class LayerPixels {
     const bbox = computeBBox("rgba8", asBytes(buf), TILE_SIZE);
     const old = this._tiles.get(key);
     if (bbox === null) {
-      if (old) { old.release(); this._tiles.delete(key); }
+      if (old) { _tileObserver?.(this, key, old); old.release(); this._tiles.delete(key); }
+      // 空写空格 = 零变更，不上报
     } else {
+      _tileObserver?.(this, key, old ?? null);
       this._tiles.set(key, appTilePool().createTile("rgba8", asBytes(buf), bbox));
       if (old) old.release();
     }
   }
 
   private _releaseAll(): void {
-    this._tiles.forEach((h) => { if (!h.released) h.release(); });
+    this._tiles.forEach((h, key) => { _tileObserver?.(this, key, h); if (!h.released) h.release(); });
     this._tiles.clear();
   }
 }

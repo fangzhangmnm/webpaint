@@ -1,7 +1,6 @@
 import type { PaintDoc } from "../doc.ts";
 import type { Selection } from "../selection.ts";
-import type { Workpiece, OpStatus } from "./workpiece.ts";
-import type { UndoHistory } from "./undo-history.ts";
+import type { Workpiece, OpStatus, HistoryFacade } from "./workpiece.ts";
 import type { OperatorRegistry } from "./operators.ts";
 import type { RunOpts } from "./layer-tree.ts";
 type Sel = Selection | null;
@@ -13,7 +12,7 @@ export declare class SelectionFace {
     constructor(deps: {
         w: Workpiece;
         doc: PaintDoc;
-        history: UndoHistory;
+        history: HistoryFacade;
         ops: OperatorRegistry;
     });
     /** 唯一记账口：doc.selection 已被引擎/调用方换好，before 所有权交入（消费/释放归 op）。 */

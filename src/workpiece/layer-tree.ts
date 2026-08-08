@@ -13,8 +13,8 @@
 
 import { countLeaves, type Layer, type PaintDoc } from "../doc.ts";
 import { docWriteWindow } from "./write-gate.ts";
-import type { Workpiece, OpStatus } from "./workpiece.ts";
-import type { UndoHistory } from "./undo-history.ts";
+import type { Workpiece, OpStatus, HistoryFacade } from "./workpiece.ts";
+
 import type { OperatorRegistry } from "./operators.ts";
 
 export interface TreeStatuses { undoStatus?: string; redoStatus?: string }
@@ -24,10 +24,10 @@ export type AddLayerResult = { ok: true; layer: Layer } | { ok: false; msg?: str
 export class LayerTree {
   private _w: Workpiece;
   private _doc: PaintDoc;
-  private _history: UndoHistory;
+  private _history: HistoryFacade;
   private _ops: OperatorRegistry;
 
-  constructor(deps: { w: Workpiece; doc: PaintDoc; history: UndoHistory; ops: OperatorRegistry }) {
+  constructor(deps: { w: Workpiece; doc: PaintDoc; history: HistoryFacade; ops: OperatorRegistry }) {
     this._w = deps.w;
     this._doc = deps.doc;
     this._history = deps.history;

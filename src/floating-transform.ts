@@ -24,11 +24,11 @@
 import { findNodeById } from "./doc.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
 import type { FloatFrame, Workpiece, FloatTransformMeta, WorkpieceFloat, FloatState } from "./workpiece/workpiece.ts";
-import type { UndoHistory } from "./workpiece/undo-history.ts";
+
 import type { OperatorRegistry } from "./workpiece/operators.ts";
 import { cloneFloatMeta, composeIdentityWriteback, composeRigidWriteback, composeOverWriteback, applyRegionBuf } from "./workpiece/float-ops.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
-import type { TransformClass } from "./workpiece/workpiece.ts";
+import type { TransformClass, HistoryFacade } from "./workpiece/workpiece.ts";
 import { prefilterToSplinePlane } from "./bspline.ts";
 import type { SplinePlane } from "./bspline.ts";
 import { rotspriteUpscale } from "./rotsprite.ts";
@@ -150,7 +150,7 @@ export class FloatingTransform {
   _sampleMode: SampleMode;
   onChange: () => void;
   private _w: Workpiece | null = null;
-  private _history: UndoHistory | null = null;
+  private _history: HistoryFacade | null = null;
   private _ops: OperatorRegistry | null = null;
 
   // onChange 晚绑定（LassoEngine 构造时传 () => this.onChange()，因为 input.js 之后才赋 onChange）。
@@ -162,7 +162,7 @@ export class FloatingTransform {
   }
 
   // workpiece/undo 接线（input.ts 构造后注入；lift/stamp/commit/cancel 全走 operator）。
-  attach(w: Workpiece, history: UndoHistory, ops: OperatorRegistry) {
+  attach(w: Workpiece, history: HistoryFacade, ops: OperatorRegistry) {
     this._w = w;
     this._history = history;
     this._ops = ops;

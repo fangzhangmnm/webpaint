@@ -36,10 +36,11 @@ import type { GestureViewport, TapRef } from "./pointer-gesture.ts";
 import type { PaintDoc, Layer } from "./doc.ts";
 import type { Board } from "./board.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { UndoHistory } from "./workpiece/undo-history.ts";
-import type { Workpiece } from "./workpiece/workpiece.ts";
+import type { HistoryFacade, Workpiece } from "./workpiece/workpiece.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
-import type { PixelEdits, PixelTx as PixelTxClass } from "./workpiece/pixel-tx.ts";
+import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
+import type { LayerTiles } from "./workpiece/layer-tiles.ts";
+import type { WriteToken } from "./workpiece/workpiece2.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 import { Selection } from "./selection.ts";
 import { selPenSettingsFrom, stampsToBinaryGray8 } from "./sel-pen.ts";
@@ -47,10 +48,8 @@ import { selPenSettingsFrom, stampsToBinaryGray8 } from "./sel-pen.ts";
 // ---- 引擎真类型已全部 .ts 化，直接 import（见各引擎模块）。本文件仅保留以下接缝别名/最小壳。----
 // doc 现取 PaintDoc 真类型（board/lasso 都吃它）。
 type Doc = PaintDoc;
-// 共享 UndoHistory（workpiece/undo-history.ts；v0.4.5 配额制 operator 栈）。
-type History = UndoHistory;
-type PixelHistory = PixelEdits;
-type PixelTx = PixelTxClass;
+// 共享 undo 编排门面（T2 起 = LegacyHistory 桥骑 v2 栈；HistoryFacade 形状不变）。
+type History = HistoryFacade;
 // filterBrush 当前激活态：Filter 是 filter-brush.ts 的 BrushFilter（未 export，对 input 不透明）+ params。
 //   beginStroke 调用点再断言到引擎签名；这里 Filter/params 对 input 不透明 → unknown。
 interface FilterBrushState { Filter: unknown; params: unknown; }
@@ -60,7 +59,9 @@ interface FilterBrushState { Filter: unknown; params: unknown; }
 type StrokeEngine = BrushEngine | FilterBrushEngine | ShapeBrushEngine;
 // inPlace = 描边中原地改 layer 像素（liquify/filterBrush/pixelMode brush），非 overlay 预览。
 //   GL 模式下这类笔的 live 预览要靠 board 每帧把活动层重传 GPU（buffered brush 走 GPU stamp overlay，不算）。
-interface ActiveStroke { engine: StrokeEngine; tx: PixelTx; finalize: boolean; inPlace: boolean; }
+// v2（T2）：tx → token+layer。像素写不再拍整层快照——描边期写 layer.pixels 被 LayerTiles collector
+//   写时扣押；commit 打包一步 / cancel 倒序回滚。
+interface ActiveStroke { engine: StrokeEngine; token: WriteToken; layer: Layer; finalize: boolean; inPlace: boolean; }
 
 // 选区变化 entry（lasso.endPath/setSelection 产 → _pushSelEntry 走 workpiece.sel 记账口）。
 //   （LassoEntry 已死 v0.4.7：accept/reject 的 operator 编排收进 FloatingTransform。）
@@ -119,7 +120,8 @@ interface InputOpts {
   history?: History | null;
   workpiece?: Workpiece | null;
   ops?: OperatorRegistry | null;
-  pixelHistory?: PixelHistory | null;
+  wp2?: PaintingWorkpiece | null;
+  layerTiles?: LayerTiles | null;
   isContentReplacing?: () => boolean;   // N10：云端快进正在换画布内容时为 true → draw-role 起笔降级（同 !canDraw 路径）
 }
 
@@ -350,7 +352,8 @@ export class InputController {
   history: History | null;
   workpiece: Workpiece | null;
   ops: OperatorRegistry | null;
-  pixelHistory: PixelHistory | null;
+  wp2: PaintingWorkpiece | null;
+  layerTiles: LayerTiles | null;
   _activeStroke: ActiveStroke | null = null;
 
   constructor(board: Board, doc: Doc, opts: InputOpts = {}) {
@@ -399,7 +402,8 @@ export class InputController {
     this.history = opts.history || null;
     this.workpiece = opts.workpiece || null;
     this.ops = opts.ops || null;
-    this.pixelHistory = opts.pixelHistory || null;
+    this.wp2 = opts.wp2 || null;
+    this.layerTiles = opts.layerTiles || null;
     // 把 doc 引用给 lasso，便于直接操作 doc.selection
     this.lasso.setDoc(this.doc);
     // v0.4.7（S6）：float 状态在 workpiece——lasso 的 lift/变换/stamp/accept/reject 走 operator。
@@ -893,8 +897,8 @@ export class InputController {
     const spec = pixelStrokeSpec(rec.role as string)!;   // draw / erase / shapeBrush → 同 stroke 事务 + finalize
     // engineKey 查表（registry 注释的本意）：draw/erase → brush；shapeBrush → 形状笔。签名一致。
     const eng = this[spec.engineKey as "brush" | "shapeBrush"];
-    const tx = this.pixelHistory!.begin(layer, spec.historyType);
-    this._activeStroke = { engine: eng, tx, finalize: spec.finalize, inPlace: !!settings.pixelMode };
+    const token = this.wp2!.begin(spec.historyType);
+    this._activeStroke = { engine: eng, token, layer, finalize: spec.finalize, inPlace: !!settings.pixelMode };
 
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, e);
@@ -929,12 +933,15 @@ export class InputController {
     if (cs && cs.stamps.length) gpuCommitted = this.board.commitBrushStroke(cs);
     // finalize（applyMaskPostStroke CPU 兜选区）只兜没走 GPU commit 的路径（pixel 笔/液化）：
     //   GPU commit 的选区已由 shader 裁（与 live 一致），再兜是重复劳动 + 一次整层物化。
-    const sel = (as.finalize && !gpuCommitted) ? this.doc.selection : null;
-    type CommitFn = NonNullable<Parameters<PixelTx["commit"]>[0]>;
-    const finalize: CommitFn | null = sel
-      ? (layer, pre) => sel.applyMaskPostStroke(layer as Parameters<Selection["applyMaskPostStroke"]>[0], pre)
-      : null;
-    as.tx.commit(finalize as Parameters<PixelTx["commit"]>[0]);
+    //   v2：pre 图从 collector 现算（tokenBeforeImage）——只有真动过层且带选区才付物化钱；
+    //   兜出来的回写仍在令牌内（首捕获已在，undo 包不变）。no-op 笔画 = collector 空 = commit 不占步。
+    const sel = (as.finalize && !gpuCommitted && this.layerTiles!.tokenChanged(as.layer.id)) ? this.doc.selection : null;
+    if (sel) {
+      sel.applyMaskPostStroke(
+        as.layer as unknown as Parameters<Selection["applyMaskPostStroke"]>[0],
+        this.layerTiles!.tokenBeforeImage(as.layer.id));
+    }
+    as.token.commit();
     // 抬笔 commit：像素已落 layer → invalidateAll 触发重渲 + GL markContentDirty。
     this.board.invalidateAll();
   }
@@ -943,7 +950,8 @@ export class InputController {
     if (!as) return;
     this._activeStroke = null;
     as.engine.cancelStroke();
-    as.tx.abort();
+    as.token.cancel();   // collector 倒序回滚（取代旧整层快照 restore）
+    this.board.invalidateAll();
   }
   // 任一像素笔画进行中（brush / 像素笔 / liquify / filterBrush / 形状笔 都设 _activeStroke）。
   // board._strokeActiveHint 用它判 livePreview（描边中走直接合成 / GL 门控），含像素笔/liquify/filterBrush。
@@ -983,9 +991,9 @@ export class InputController {
     }
     const layer = this.doc.activeLayer as Layer;   // 组已被上游硬拒，此处确为叶
     const spec = pixelStrokeSpec(rec.role as string)!;   // filterBrush → "stroke" 事务，finalize:false
-    const tx = this.pixelHistory!.begin(layer, spec.historyType);
+    const token = this.wp2!.begin(spec.historyType);
     // filterBrush 在 beginStroke 时已吃了 selection，stamp 内 mask 外保留 pre → 无需 post-stroke finalize（spec.finalize=false）
-    this._activeStroke = { engine: this.filterBrush, tx, finalize: spec.finalize, inPlace: true };
+    this._activeStroke = { engine: this.filterBrush, token, layer, finalize: spec.finalize, inPlace: true };
     const { x: dx, y: dy } = this.board.screenToDoc(rec.smX!, rec.smY!);
     const pressure = effectivePressureFor(rec, { pressure: rec.lastP ?? 1 });
     try {
@@ -993,6 +1001,7 @@ export class InputController {
       this.filterBrush.beginStroke(layer, fbState.Filter as Parameters<FilterBrushEngine["beginStroke"]>[1], fbState.params, brushSettings, this.doc.selection, dx, dy, pressure);
     } catch (e) {
       reportError(new Error("[filter brush] begin failed: " + String(e)), "log");
+      token.cancel();   // 令牌必须收口，否则后续 begin 全被单令牌门挡死
       this._activeStroke = null;
       rec.role = null;
       this.status?.(`filter brush 出错：${(e as { message?: unknown })?.message || e}`);

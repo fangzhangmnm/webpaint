@@ -11,8 +11,8 @@
 
 import type { PaintDoc } from "../doc.ts";
 import type { Selection } from "../selection.ts";
-import type { Workpiece, OpStatus } from "./workpiece.ts";
-import type { UndoHistory } from "./undo-history.ts";
+import type { Workpiece, OpStatus, HistoryFacade } from "./workpiece.ts";
+
 import type { OperatorRegistry } from "./operators.ts";
 import type { RunOpts } from "./layer-tree.ts";
 
@@ -21,10 +21,10 @@ type Sel = Selection | null;
 export class SelectionFace {
   private _w: Workpiece;
   private _doc: PaintDoc;
-  private _history: UndoHistory;
+  private _history: HistoryFacade;
   private _ops: OperatorRegistry;
 
-  constructor(deps: { w: Workpiece; doc: PaintDoc; history: UndoHistory; ops: OperatorRegistry }) {
+  constructor(deps: { w: Workpiece; doc: PaintDoc; history: HistoryFacade; ops: OperatorRegistry }) {
     this._w = deps.w;
     this._doc = deps.doc;
     this._history = deps.history;

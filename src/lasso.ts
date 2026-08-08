@@ -29,8 +29,8 @@ import { makeBitmap } from "./bitmap.ts";
 import { FloatingTransform } from "./floating-transform.ts";
 import type { WarpBakeFn } from "./floating-transform.ts";
 import type { Layer, LayerGroup } from "./doc.ts";
-import type { Workpiece } from "./workpiece/workpiece.ts";
-import type { UndoHistory } from "./workpiece/undo-history.ts";
+import type { Workpiece, HistoryFacade } from "./workpiece/workpiece.ts";
+
 import type { OperatorRegistry } from "./workpiece/operators.ts";
 
 // ---- 本文件用到的最小局部类型（selection/doc/layer 的真类型在各自模块；此处只描述本类消费面）----
@@ -120,7 +120,7 @@ export class LassoEngine {
     this._lineartOracle.invalidate();   // 换文档释放 label map（16MB 级）；key 本身安全，这里纯腾内存
   }
   // v0.4.7（S6）：float 状态在 workpiece——lift/变换/stamp/accept/reject 全走 operator，接线在此注入。
-  attachWorkpiece(w: Workpiece, history: UndoHistory, ops: OperatorRegistry) { this._ft.attach(w, history, ops); }
+  attachWorkpiece(w: Workpiece, history: HistoryFacade, ops: OperatorRegistry) { this._ft.attach(w, history, ops); }
   // undo/redo 可能让浮层出现/消失（lift/drop 都在栈上）：把 _state 与 workpiece 对齐 + 引擎重采纳
   // transform metadata。app 侧 reconciler（transient-panels.syncFloatTransient）每次 histchange 后调。
   syncFloating() {

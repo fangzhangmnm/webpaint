@@ -38,7 +38,7 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 
 let editMode: AppContext["editMode"], state: AppContext["state"], doc: AppContext["doc"], board: AppContext["board"];
 let input: AppContext["input"], history: AppContext["history"], dialReactive: AppContext["dialReactive"];
-let workpiece: AppContext["workpiece"], pixelHistory: AppContext["pixelHistory"];
+let workpiece: AppContext["workpiece"], wp2: AppContext["wp2"];
 let rack: AppContext["rack"], setStatus: AppContext["setStatus"], leftDial: AppContext["leftDial"];
 let _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"];
@@ -645,7 +645,7 @@ export const RACK_PANEL_BY_TOOL: Record<string, string> = {
 
 export function initToolbar(ctx: AppContext) {
   ({
-    editMode, state, doc, board, input, history, workpiece, pixelHistory, dialReactive, rack, setStatus, leftDial,
+    editMode, state, doc, board, input, history, workpiece, wp2, dialReactive, rack, setStatus, leftDial,
     _suppressTransientPanels, _commitTransform, _cancelTransform,
     selectionToNewLayer,
   } = ctx);
@@ -1090,10 +1090,10 @@ export function initToolbar(ctx: AppContext) {
   byId("lassoClearBtn").addEventListener("click", () => {
     const layer = requireEditableLeaf(doc, setStatus) as LayerLike | null;
     if (!layer || !doc.selection) return;
-    // v0.8.2（S2）：走 pixelHistory 事务（before 快照/入栈收进 tx；no-op 清除不占 undo 步——v0.6.17 同族）。
-    const tx = pixelHistory.begin(layer as unknown as Parameters<typeof pixelHistory.begin>[0], "clearSel");
+    // v2（T2）：令牌 + collector 写时扣押（no-op 清除 = 零换手 = 不占 undo 步——v0.6.17 同族）。
+    const token = wp2.begin("clearSel");
     (doc.selection as Selection).clearOnLayer(layer as unknown as Parameters<Selection["clearOnLayer"]>[0]);
-    tx.commit();
+    token.commit();
     board.invalidateAll();
     setStatus(t("se.clearedSelection"));
   });

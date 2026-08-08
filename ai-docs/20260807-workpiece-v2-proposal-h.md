@@ -116,22 +116,38 @@ class LayerTree implements WorkpieceComponent {
 ## layer-tiles.ts（tile 扁平仓；tileset 引用计数）
 
 ```ts
+// T2 实现补：实例↔身份解析走 TilesHost（T2 = doc 树查找；T3 起 = LayerTree json 的 pixelsRef 表）。
+interface TilesHost {
+  getPixels(layerId): LayerPixels | null;
+  findLayerIdByPixels(lp): number | null;         // seal 时解析；解析不到（临时实例/浮层）→ 扣押作废
+  eachLayer(cb): void;
+  replacePixels(layerId, np): void;               // computed 变换换整 tileset 实例
+}
+
 class LayerTiles implements WorkpieceComponent {
   // ── 读 · 档1 render 端口（零拷贝身份制）──
   version(layerId): number;                       // contentVersion；没变整层跳过
-  tiles(layerId): Iterable<[TileKey, TileView]>;  // TileView = { contentId; bytes(): Uint8ClampedArray }
-  contentBounds(layerId): Rect | null;
+  tiles(layerId): Iterable<TileEntry>;            // TileEntry = { tx; ty; contentId; bytes(): Uint8ClampedArray }（T2 定形）
+  contentBounds(layerId, tight?): Rect | null;
   // ── 读 · 档2 便捷（引擎/导出/吸管）──
   getRegion(layerId, x, y, w, h): Uint8ClampedArray;
   // ── 写（token 开着才合法；collector 自动扣押被换句柄）──
+  // ⚠ 收集在 **substrate 层**（tile-layer.ts setTileSwapObserver）：engine 直写 layer 像素也被
+  //   写时扣押并自动登记 touched——verbs 是便捷面不是唯一口（「结构上收不漏」的实现形态）。
   putRegion(layerId, x, y, w, h, bytes): void;
-  editRegion(layerId, rect, fn): void;
-  replaceLayer(layerId, bytes, rect): void;       // merge-down/滤镜 commit 用
+  editRegion(layerId, rect, fn): void;            // fn(buf, ox, oy) 字节版（editRegionBytes 同构）
+  replaceLayer(layerId, bytes, rect): void;       // merge-down/滤镜 commit 用（清空+整块写）
   clearLayer(layerId): void;
   // ── computed record 白名单（双捕获断言：verb 内 collector 必须零收集）──
+  // record 恒存 undo 包（seal 时取逆）；swap = 原样应用 + 返回其逆（rot/offset 非自逆，T2 定形）
   flipHorizontalAll(): void;  rotate90All(dir): void;  offsetWrapAll(dx, dy): void;
+  // ── token 内读口（T2 补：input 选区 finalize / no-op 判定）──
+  tokenChanged(layerId): boolean;                 // collector 有它的扣押？（no-op 笔画守卫 v0.6.17 后继）
+  tokenBeforeImage(layerId): PreSnapImage;        // 令牌前内容紧 bbox 物化（applyMaskPostStroke 的 pre）
+  _suspendCollect(on): void;                      // 迁移期协作面：legacy op 应用窗口挂起收集（T5 随桥拆）
 }
-// tileset 生命周期：json.pixelsRef 持有 +1 / record 持有 +1 / 归零还池（FR assert 兜漏）
+// tileset 生命周期：json.pixelsRef 持有 +1 / record 持有 +1 / 归零还池（FR assert 兜漏）——T3 落地；
+// T2 现状：record 持 tile 句柄（池引用计数 +1），tileset 实例仍归 doc.Layer 所有。
 ```
 
 ## 其余组件（形状同族，从简列）

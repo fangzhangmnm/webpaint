@@ -25,7 +25,7 @@ interface TransientOpts { apply?: () => void; abort?: () => void; }
 // app 单例 / 跨模块函数（initSelectionOps 注入）
 let doc: AppContext["doc"], board: AppContext["board"], input: AppContext["input"];
 let editMode: AppContext["editMode"], history: AppContext["history"];
-let workpiece: AppContext["workpiece"], pixelHistory: AppContext["pixelHistory"];
+let workpiece: AppContext["workpiece"];
 let setStatus: AppContext["setStatus"], _afterDocChange: AppContext["afterDocChange"];
 let _commitTransform: AppContext["_commitTransform"], _cancelTransform: AppContext["_cancelTransform"], _suppressTransientPanels: AppContext["_suppressTransientPanels"];
 let importImageAsLayer: AppContext["importImageAsLayer"];
@@ -69,14 +69,13 @@ export function selectionToNewLayer({ move }: { move: boolean }) {
     for (let i = 0; i < sel.bboxW * sel.bboxH; i++) region.data[i * 4 + 3] = Math.round(region.data[i * 4 + 3] * selMask[i] / 255);
     newL.replaceFromBytes(region.data, sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH);
     if (move) {
-      const tx = pixelHistory.begin(src, "moveToLayer");
-      // 从源层挖洞（dst-out 选区形状：alpha 衰减、RGB 保留）
+      // 从源层挖洞（dst-out 选区形状：alpha 衰减、RGB 保留）。v2（T2）：compound 的令牌开着，
+      // 换手由 LayerTiles collector 写时扣押——不再需要 pixelHistory 事务（空挖 = 零换手 = 零记账）。
       src.editRegionBytes(sel.bboxX, sel.bboxY, sel.bboxW, sel.bboxH, (buf) => {
         for (let i = 0; i < sel.bboxW * sel.bboxH; i++) {
           if (selMask[i]) buf[i * 4 + 3] = Math.round(buf[i * 4 + 3] * (255 - selMask[i]) / 255);
         }
       });
-      tx.commit(undefined, { checkpoint: false });   // 空挖（选区不盖内容）→ no-op 不占微步，compound 整点照封
     }
   });
   if (!r.ok) { setStatus(errMsg(r.msg), true); _afterDocChange(); return; }
@@ -94,7 +93,6 @@ export function initSelectionOps(ctx: AppContext) {
   editMode = ctx.editMode;
   history = ctx.history;
   workpiece = ctx.workpiece;
-  pixelHistory = ctx.pixelHistory;
   setStatus = ctx.setStatus;
   _afterDocChange = ctx.afterDocChange;
   _commitTransform = ctx._commitTransform;

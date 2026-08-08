@@ -21,12 +21,14 @@ import { InputController, bindPressureDisabled } from "./input.ts";
 import { makeCurrentBrush } from "./resolved-brush.ts";   // 当前笔派生 computed + 引擎桥（手感数学在 resolveBrush，同文件）
 import { registerPanel, openExclusive, closeExclusive, getCurrentExclusive } from "./panel-state.ts";
 import { Workpiece } from "./workpiece/workpiece.ts";
-import { UndoHistory } from "./workpiece/undo-history.ts";
 import { makeOperators } from "./workpiece/operators.ts";
 import { LayerTree } from "./workpiece/layer-tree.ts";
 import { SelectionFace } from "./workpiece/selection-face.ts";
 import { armDocWriteGate } from "./workpiece/write-gate.ts";
-import { PixelEdits } from "./workpiece/pixel-tx.ts";
+import { LegacyHistory, LegacyOpsComponent } from "./workpiece/legacy-bridge.ts";
+import { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
+import type { TilesHost } from "./workpiece/layer-tiles.ts";
+import type { LayerPixels } from "./tiles/tile-layer.ts";
 import { EditMode } from "./edit-mode.ts";
 import { referenceWindow, paletteWindow, initSideWindows } from "./side-windows.ts";   // 参考/调色板浮窗（construct+wiring）
 import { initDevConsole } from "./dev-console.ts";   // window.WebPaint 调试接口
@@ -198,10 +200,12 @@ setDocCompositorBytes((nodes, w, h) => board.compositeNodesToBytes(nodes, w, h))
 
 // v0.4.5：workpiece 聚合根 + 配额制 UndoHistory（operator 是唯一写入口；见 workpiece/*.ts + test charter）。
 // v0.8.1（S1）：history 先建、构造注入 workpiece（ADR-0007 capability 绑构造期）。
-const UNDO_QUOTA_BYTES = 128 * 1024 * 1024;   // undo 配额（tile 压缩前记 0，压缩后计入；整 checkpoint 驱逐）
-const history = new UndoHistory({
+const UNDO_QUOTA_BYTES = 128 * 1024 * 1024;   // undo 配额（tile 压缩前记 0，压缩后计入；整步驱逐）
+// v0.8.9+（T2，ADR-0008）：唯一 undo 权威 = v2 UndoStack。旧 operator 流经 LegacyHistory 桥骑上
+// v2 栈（公共面 = HistoryFacade，调用方零改动）；像素路径 = 令牌 + LayerTiles collector（PixelTx 已拆）。
+const history = new LegacyHistory({
   maxQuotaBytes: UNDO_QUOTA_BYTES,
-  // 不可恢复（operator 抛非原子异常 / backward 失败）：栈已弃 → 从当前文档态重建画面 + error banner。
+  // 不可恢复（operator 抛非原子异常 / swap 中途失败）：栈已弃 → 从当前文档态重建画面 + error banner。
   onUnrecoverable: (e) => {
     reportError(new Error("[undo] 不可恢复的 operator 异常，撤销历史已重置（画面已从当前文档态重建）：" + String(e)), "error");
     renderLayersPanel(); board.invalidateAll(); board.requestRender();
@@ -212,13 +216,27 @@ const history = new UndoHistory({
   onApplied: (info) => {
     if (info.dir !== "do") {
       renderLayersPanel(); board.invalidateAll(); board.requestRender();
-      // （S8e：旧 forceGLResyncUnderFloat hint 已拆——执行器把 float 源层标 updated，
-      //   contentVersion 快路径自会重传变更 tile，无需强制信号。）
     }
     if (info.status) setStatus(info.status);
   },
 });
 const workpiece = new Workpiece(doc, history);
+// v2 工件（T2 起步形态）：tile substrate host = doc 树查找（T3 LayerTree json 化后换 pixelsRef 表）。
+type AnyNode = { id: number; isGroup?: boolean; children?: AnyNode[]; pixels?: LayerPixels; setPixels?(p: LayerPixels): void };
+const _eachNode = (nodes: AnyNode[], cb: (n: AnyNode) => void) => {
+  for (const n of nodes) { if (n.isGroup) _eachNode(n.children ?? [], cb); else cb(n); }
+};
+const tilesHost: TilesHost = {
+  getPixels: (id) => { let f: LayerPixels | null = null; _eachNode(doc.layers as unknown as AnyNode[], (n) => { if (n.id === id) f = n.pixels ?? null; }); return f; },
+  findLayerIdByPixels: (lp) => { let f: number | null = null; _eachNode(doc.layers as unknown as AnyNode[], (n) => { if (n.pixels === lp) f = n.id; }); return f; },
+  eachLayer: (cb) => _eachNode(doc.layers as unknown as AnyNode[], (n) => { if (n.pixels) cb(n.id, n.pixels); }),
+  replacePixels: (id, np) => { _eachNode(doc.layers as unknown as AnyNode[], (n) => { if (n.id === id) n.setPixels?.(np); }); },
+};
+const legacyOps = new LegacyOpsComponent(workpiece);
+const wp2 = new PaintingWorkpiece({ undo: history.stack, host: tilesHost, legacy: legacyOps });
+history.attach(wp2, legacyOps, (on) => wp2.layerTiles._suspendCollect(on));
+// v1 计数/isDirty 跟车：任何 recorded 变更（commit/undo/redo/cancel）→ bump（渲染缓存失效 + 保存脏门）。
+wp2.onChange((e) => { if (e.recorded) workpiece._bumpCommit(); });
 const ops = makeOperators({
   // docTransform 的 UI 随行（viewport 复位 + 尺寸标签 + 透视配置还原；operator 本体不碰 DOM）。
   applyDocTransformUi: (viewport, persp) => {
@@ -251,9 +269,6 @@ const layerSpecFrom = (L: unknown) => doc.layerSpec(L as Parameters<typeof doc.l
 const editMode = new EditMode({ initialTool: "brush" });
 // 当前笔派生（dial+预设+color+压感 → ResolvedBrush，resolved-brush.ts）。input 前建（getResolvedBrush 读它）。
 const { currentBrush } = makeCurrentBrush({ state, dialReactive, rack });
-// 像素编辑事务门面（begin(layer,label) 形状同旧 PixelEdit；底层 = 句柄快照 + SwapPixelsOp）。
-const pixelHistory = new PixelEdits({ doc, w: workpiece, history, ops, board });
-
 const input = new InputController(board, doc, {
   getTool: () => editMode.current(),
   getResolvedBrush: () => currentBrush.value,
@@ -268,7 +283,8 @@ const input = new InputController(board, doc, {
   history,
   workpiece,
   ops,
-  pixelHistory,
+  wp2,
+  layerTiles: wp2.layerTiles,
   editMode,
 });
 
@@ -338,7 +354,7 @@ const isMidOperation = () =>
   input.isStrokeActive() || input.lasso.hasFloating() || editMode.hasPendingTransient();
 
 const ctx: AppContext = freezeCtx({
-  state, dialReactive, currentBrush, editMode, doc, docRaw: doc, board, input, history, workpiece, ops, pixelHistory, isMidOperation,
+  state, dialReactive, currentBrush, editMode, doc, docRaw: doc, board, input, history, workpiece, ops, wp2, layerTiles: wp2.layerTiles, isMidOperation,
   rack, store: _store, setStatus, withBusy, leftDial,
   updateSaveStatus, updateZoomLabel, updateNewerBanner, pullSettingsAndState,
   _suppressTransientPanels, _restoreTransientPanels, layerSpecFrom, _bringPanelTop,

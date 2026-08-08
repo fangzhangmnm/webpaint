@@ -1,9 +1,8 @@
 import type { Layer, LayerGroup } from "./doc.ts";
 import type { FloatFrame, Workpiece } from "./workpiece/workpiece.ts";
-import type { UndoHistory } from "./workpiece/undo-history.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
 import type { RigidMap } from "./workpiece/float-ops.ts";
-import type { TransformClass } from "./workpiece/workpiece.ts";
+import type { TransformClass, HistoryFacade } from "./workpiece/workpiece.ts";
 import type { SplinePlane } from "./bspline.ts";
 import type { U8Plane } from "./rotsprite.ts";
 type Node = Layer | LayerGroup;
@@ -78,7 +77,7 @@ export declare class FloatingTransform {
     private _history;
     private _ops;
     constructor(onChange?: () => void);
-    attach(w: Workpiece, history: UndoHistory, ops: OperatorRegistry): void;
+    attach(w: Workpiece, history: HistoryFacade, ops: OperatorRegistry): void;
     setSampleMode(m: string): void;
     getSampleMode(): SampleMode;
     isActive(): boolean;

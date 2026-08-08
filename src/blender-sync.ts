@@ -294,13 +294,13 @@ function placeBitmapAsNewLayer(bmp: ImageBitmap, name: string): boolean {
   return true;
 }
 
-// 覆盖当前图层：换成贴图（原生分辨率，从 (0,0) 起）。走 pixelHistory 事务 → 可 Ctrl-Z 还原旧像素。
+// 覆盖当前图层：换成贴图（原生分辨率，从 (0,0) 起）。走 v2 令牌 → 可 Ctrl-Z 还原旧像素。
 function overwriteLeaf(leaf: Layer, bmp: ImageBitmap) {
-  const tx = ctx.pixelHistory.begin(leaf, "stroke");   // 立刻拍 before
+  const token = ctx.wp2.begin("stroke");
   const w = bmp.width, h = bmp.height;
   const px = imageSourceToBytes(bmp);   // 解码边界唯一读出（v0.6.46 字节管线）
-  leaf.replaceFromBytes(px.data, 0, 0, w, h);   // 先 clear 再整块写入（= 旧 restoreFromSnapshot 换像素语义）
-  tx.commit();                                         // 拍 after + 入 undo 栈（自带 wp:histchange）
+  leaf.replaceFromBytes(px.data, 0, 0, w, h);   // 先 clear 再整块写入；换手由 collector 写时扣押
+  token.commit();                                       // 一步入栈（wp:histchange 由栈 onChange 派）
   ctx.board.invalidateAll();
   ctx.board.requestRender();
   ctx.renderLayersPanel();                             // 刷缩略图

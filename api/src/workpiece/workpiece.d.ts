@@ -1,6 +1,5 @@
 import type { PaintDoc } from "../doc.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
-import type { UndoHistory } from "./undo-history.ts";
 import type { LayerTree } from "./layer-tree.ts";
 import type { SelectionFace } from "./selection-face.ts";
 export interface FloatRect {
@@ -55,13 +54,14 @@ export interface WorkpieceInternals {
 export declare class Workpiece {
     /** 运行时数据是否偏离上次持久化（autosave/保存编排读写；operator 提交自动置 true）。 */
     isDirty: boolean;
-    /** 构造期注入的 undo system（ADR-0007：capability 绑构造期；component 写 API 经它记账）。 */
-    readonly history: UndoHistory;
+    /** 构造期注入的 undo system（ADR-0007：capability 绑构造期；component 写 API 经它记账）。
+     *  T2 起类型收成 HistoryFacade：真 UndoHistory（引擎测试）与 LegacyHistory 桥（app，骑 v2 栈）都满足。 */
+    readonly history: HistoryFacade;
     private _commitVersion;
     private _lockHolder;
     private _layers;
     private _sel;
-    constructor(doc: PaintDoc, history: UndoHistory);
+    constructor(doc: PaintDoc, history: HistoryFacade);
     /** 结构类写面（S1 第一个 component：层树增删/复制/移动/合并/属性/结构 tx）。
      *  写 doc 结构的唯一合法门——app 层不再直接 doc.addLayer + 手工记账。 */
     get layers(): LayerTree;
@@ -92,6 +92,27 @@ export type OpStatus = {
     ok: false;
     msg?: string;
 };
+/** undo 编排门面的公共面（T2 桥接期抽出）：真 UndoHistory 与 legacy-bridge 的 LegacyHistory 都结构满足。
+ *  调用方（LayerTree/SelectionFace/doc-ops/fill/float/layers-panel/import-image）只准依赖这个形状。 */
+export interface HistoryFacade {
+    run<A, D>(w: Workpiece, op: DocumentOperator<A, D>, args: A, o?: {
+        checkpoint?: boolean;
+        label?: string;
+    }): OpStatus;
+    compound<T>(w: Workpiece, fn: () => T): {
+        ok: boolean;
+        value?: T;
+        msg?: string;
+    };
+    sealCheckpoint(): void;
+    undo(w: Workpiece): boolean;
+    redo(w: Workpiece): boolean;
+    canUndo(): boolean;
+    canRedo(): boolean;
+    readonly depth: number;
+    quotaUsage(): number;
+    clear(): void;
+}
 export interface OpResult<D> {
     ok: boolean;
     msg?: string;

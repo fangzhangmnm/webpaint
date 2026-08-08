@@ -35,7 +35,7 @@ const errMsg = (e: unknown): string => String((e as { message?: unknown })?.mess
 
 // ---- ctx-bound 协作件（app 拥有，boot 时 initTopbarMenu(ctx) 注入）----
 let input: AppContext["input"], doc: AppContext["doc"], board: AppContext["board"], history: AppContext["history"], editMode: AppContext["editMode"];
-let workpiece: AppContext["workpiece"], pixelHistory: AppContext["pixelHistory"];
+let workpiece: AppContext["workpiece"];
 let setStatus: AppContext["setStatus"], updateSaveStatus: AppContext["updateSaveStatus"], updateZoomLabel: AppContext["updateZoomLabel"];
 let _signInNav = false;   // v0.6.22：登录 redirect 导航中，beforeunload 别挡
 let rack: AppContext["rack"];
@@ -51,7 +51,6 @@ export function initTopbarMenu(ctx: AppContext) {
   board = ctx.board;
   history = ctx.history;
   workpiece = ctx.workpiece;
-  pixelHistory = ctx.pixelHistory;
   editMode = ctx.editMode;
   setStatus = ctx.setStatus;
   updateSaveStatus = ctx.updateSaveStatus;

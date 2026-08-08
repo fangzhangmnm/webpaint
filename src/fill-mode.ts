@@ -82,28 +82,23 @@ export function commitFillNow(): void {
   _doCommit(true);
 }
 
-// 像素 commit（+可选清选区）一个 compound 整点。微步纪律：全 checkpoint:false（v0.5.5 教训）。
-//   before 快照归属：像素动了交 ops.pixels；GL 未提交（false=像素未动）→ 本地还原释放。
+// 像素 commit（+可选清选区）一个 compound 整点（= 一个令牌一步，ADR-0004 出入口语义不动）。
+//   v2（T2）：before 快照/ops.pixels 微步退役——commitFill 的 tile 换手由 LayerTiles collector
+//   写时扣押；compound 中途失败 = token.cancel 倒序回滚（像素/选区一体无痕）。
 function _doCommit(clearSelection: boolean): void {
   _flushColorEntry();   // pending 换色先落栈——undo 顺序 = 先撤 fill 像素再撤换色
-  const { doc, board, input, history, workpiece, ops, state, setStatus } = _ctx!;
+  const { doc, board, input, history, workpiece, state, setStatus } = _ctx!;
   const layer = requireEditableLeaf(doc, setStatus) as Layer | null;
   if (!layer || !doc.selection) return;
-  const before = layer.snapshot();
-  let handedOff = false;
   const st = history.compound(workpiece, () => {
     const ok = board.commitFill({ color: state.color, layer });
     if (!ok) throw new Error("GL fill merge 未提交（无选区/池到顶）");
-    handedOff = true;
-    const stPx = history.run(workpiece, ops.pixels, { layerId: layer.id, _initialBefore: before }, { checkpoint: false, label: "fill" });
-    if (!stPx.ok) throw new Error(stPx.msg || "ops.pixels 入栈失败");
     if (clearSelection) {
       const entry = input.lasso.setSelection(null);
       if (entry) workpiece.sel.commitPreApplied(entry.before ?? null, { checkpoint: false });
     }
   });
   if (!st.ok) {
-    if (!handedOff) layer.restoreFromSnapshot(before);   // 像素没动、快照没人接手 → 还原姿态释放
     reportError(new Error("[fill] commit 失败：" + (st.msg || "?")), "warning");
     setStatus(t("fm.commitFailed"), true);
     board.invalidateAll();

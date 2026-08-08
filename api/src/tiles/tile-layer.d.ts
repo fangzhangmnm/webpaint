@@ -1,4 +1,6 @@
 import { type TileHandle } from "./cpu-tile-pool.ts";
+export type TileSwapObserver = (lp: LayerPixels, key: number, old: TileHandle | null) => void;
+export declare function setTileSwapObserver(fn: TileSwapObserver | null): void;
 export interface PixelsSnapshot {
     across: number;
     tiles: [number, TileHandle][];
@@ -43,6 +45,7 @@ export declare class LayerPixels {
     snapshot(): PixelsSnapshot;
     snapshotEquals(snap: PixelsSnapshot): boolean;
     restore(snap: PixelsSnapshot): void;
+    _swapTileHandle(key: number, h: TileHandle | null): TileHandle | null;
     private _setTileBuf;
     private _releaseAll;
 }

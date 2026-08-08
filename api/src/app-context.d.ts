@@ -3,10 +3,11 @@ import type { DocView } from "./workpiece/doc-view.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { UndoHistory } from "./workpiece/undo-history.ts";
+import type { LegacyHistory } from "./workpiece/legacy-bridge.ts";
 import type { Workpiece } from "./workpiece/workpiece.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
-import type { PixelEdits } from "./workpiece/pixel-tx.ts";
+import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
+import type { LayerTiles } from "./workpiece/layer-tiles.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 export interface ToolDial {
     size: number;
@@ -92,10 +93,11 @@ export interface AppContext {
     docRaw: PaintDoc;
     board: Board;
     input: InputController;
-    history: UndoHistory;
+    history: LegacyHistory;
     workpiece: Workpiece;
     ops: OperatorRegistry;
-    pixelHistory: PixelEdits;
+    wp2: PaintingWorkpiece;
+    layerTiles: LayerTiles;
     rack: RackHandle;
     store: typeof import("./app-store.ts").store;
     setStatus: (text: string, persist?: boolean) => void;

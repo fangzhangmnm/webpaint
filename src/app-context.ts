@@ -17,10 +17,11 @@ import type { DocView } from "./workpiece/doc-view.ts";
 import type { Board } from "./board.ts";
 import type { InputController } from "./input.ts";
 import type { EditMode } from "./edit-mode.ts";
-import type { UndoHistory } from "./workpiece/undo-history.ts";
+import type { LegacyHistory } from "./workpiece/legacy-bridge.ts";
 import type { Workpiece } from "./workpiece/workpiece.ts";
 import type { OperatorRegistry } from "./workpiece/operators.ts";
-import type { PixelEdits } from "./workpiece/pixel-tx.ts";
+import type { PaintingWorkpiece } from "./workpiece/painting-workpiece.ts";
+import type { LayerTiles } from "./workpiece/layer-tiles.ts";
 import type { ResolvedBrush } from "./resolved-brush.ts";
 
 // ---- 反应式 RAM 态（editor-state.ts 的 state/dialReactive；此处描述消费方读到的字段）----
@@ -105,10 +106,11 @@ export interface AppContext {
   docRaw: PaintDoc;              // 装载/换文档生命周期专用（session-state 唯一正当消费者；编辑路径禁用——用它绕 DocView = 越狱）
   board: Board;
   input: InputController;
-  history: UndoHistory;          // v0.4.5：配额制 undo（workpiece/undo-history）
-  workpiece: Workpiece;          // 文档聚合根（operator 的作用对象；undo/redo/run 都要传它）
-  ops: OperatorRegistry;         // document-operator 注册表（workpiece/operators）
-  pixelHistory: PixelEdits;      // 像素编辑事务门面（workpiece/pixel-tx；begin(layer,label) 形状不变）
+  history: LegacyHistory;        // T2（ADR-0008）：旧 UndoHistory 公共面照旧，底下骑 v2 UndoStack（唯一栈）
+  workpiece: Workpiece;          // v1 文档聚合根（旧 operator 的作用对象；T5 拆）
+  ops: OperatorRegistry;         // document-operator 注册表（workpiece/operators；T3/T4 逐族迁 v2 组件）
+  wp2: PaintingWorkpiece;        // v2 工件（令牌工厂；像素写 = begin() + 直写，collector 自动记账）
+  layerTiles: LayerTiles;        // v2 像素组件（= wp2.layerTiles，热路径直取）
   rack: RackHandle;
 
   // 同步存储 / HUD

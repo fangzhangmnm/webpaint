@@ -1,6 +1,5 @@
 import { type Layer, type PaintDoc } from "../doc.ts";
-import type { Workpiece, OpStatus } from "./workpiece.ts";
-import type { UndoHistory } from "./undo-history.ts";
+import type { Workpiece, OpStatus, HistoryFacade } from "./workpiece.ts";
 import type { OperatorRegistry } from "./operators.ts";
 export interface TreeStatuses {
     undoStatus?: string;
@@ -25,7 +24,7 @@ export declare class LayerTree {
     constructor(deps: {
         w: Workpiece;
         doc: PaintDoc;
-        history: UndoHistory;
+        history: HistoryFacade;
         ops: OperatorRegistry;
     });
     /** 新建空层（组内新建也精确复位；prevActiveId 自动拍：undo 摘层时回创建前的活动层）。

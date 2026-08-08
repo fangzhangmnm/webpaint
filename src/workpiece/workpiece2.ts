@@ -86,6 +86,9 @@ export class Workpiece {
     return token;
   }
 
+  /** 开着的令牌存在？（substrate 观察者的收集门：LayerTiles 观察 tile 换手时据此判断收不收。） */
+  get tokenOpen(): boolean { return this._tokenOpen && !!this._tokenRef?.deref(); }
+
   // ── meta ──
 
   /** 单调：每次 step 应用（commit/undo/redo/cancel）+1 → 渲染缓存失效。 */
@@ -171,6 +174,21 @@ export class Workpiece {
     this._rollbackTouched();
   }
 
+  /** 不可恢复路径协作面（legacy-bridge unrecoverable 用）：关门 + 各 collector 弃置——
+   *  不回滚（状态已不可信，回滚可能二次伤害），只释放句柄防泄漏。 */
+  _abandonToken(token: WriteToken): void {
+    this._assertCurrent(token);
+    this._fr.unregister(token);
+    this._tokenOpen = false;
+    this._tokenRef = null;
+    const touched = this._touched;
+    this._touched = [];
+    for (const c of touched) {
+      const data = c.sealRecord();
+      if (data !== null) c.disposeRecord(data);
+    }
+  }
+
   private _assertCurrent(token: WriteToken): void {
     if (!this._tokenOpen || this._tokenRef?.deref() !== token) {
       throw new Error("Workpiece: 非当前令牌的 commit/cancel 被拒（令牌只能从 begin() 拿）");
@@ -227,5 +245,12 @@ export class WriteToken {
     if (!this._open) throw new Error("WriteToken: 已关闭（commit/cancel 只准一次）");
     this._open = false;
     this._wp._cancelToken(this);
+  }
+
+  /** 不可恢复路径：弃置（不回滚不入栈，只释放 record）。app 正常流禁用——只给 unrecoverable 兜底。 */
+  abandon(): void {
+    if (!this._open) throw new Error("WriteToken: 已关闭（commit/cancel 只准一次）");
+    this._open = false;
+    this._wp._abandonToken(this);
   }
 }
