@@ -231,22 +231,44 @@ class PerspComponent {
 class ReferenceGallery /* silent */ { view(); setImage(blob, bitmap) / clear() }   // 未组件化（现状 sidecar）
 ```
 
-## render 侧拆分（gl/）
+## render 侧拆分（gl/）——T6 落地定形
 
 ```ts
 // 机房五件套不动：GLContext / GpuTilePool / CpuGpuTileBridge / GLCompositor / GLStampRasterizer
-class RenderTree {        // 单一职责：tree composite
+// T6 实现定形：GlRoom（gl-room.ts）不止五件套引用包——两 facade 共享的「台面」也在 room：
+//   叶 GPU 驻留台账（leaves + sync 族：bakeStamps 搭 render 帧 base-tile 便车的实现形态）、
+//   pseudo 装置（overlay/float/选区 mask/fill 色纹理——live 预览与吸管 WYSIWYG 同一份状态）、
+//   composeSteps 合成机（display 帧与一次性合成同一条 pass 序）。room 零策略零帧决策；
+//   段缓存/display/plan 签名/frameStats/pin provider 归 RenderTree 私有。
+class GlRoom {
+  constructor(glctx: GLContext, maxSlices: number, accumPrec?: FBOPrec);
+  readonly glctx; readonly backend; readonly pool; readonly bridge; readonly comp; readonly rasterizer;
+  readonly leaves: Map<number, LeafRec>;          // 共享叶驻留（拆两套=每笔整层重传，禁）
+  syncLeafSafe / syncSurrogate / recAlive / cpuAlive;
+  setFloats / setStampOverlay / overlayDesc / clearOverlay / releaseOverlayFBO;
+  toPlanNodes / composeSteps / composeSegTransient / liveClipTexFor / releaseLiveClip;
+  onInvalidate(cb) / invalidateTree();            // bake 落新像素 → RenderTree 置脏（facade 互不知晓）
+  handleContextRestored();                        // 机房侧作废（段/display 归 RenderTree 自清）
+  get memory / stats / fboPoolStats;              // HUD 观测口（GLBoard 直读 room）
+}
+class RenderTree {        // 单一职责：tree composite（render-tree.ts）
   constructor(room: GlRoom);                      // GlRoom = 共享机房引用包（唯一实例！）
-  renderFrame(tree, viewport, bg, flags): void;   // flags = { floats[], overlay, surrogate, liveSyncLeafId }
+  renderFrame(nodes, docW, docH, bg, affine6, canvasW, canvasH, scale, voidRgb,
+              floats, stampOverlay, surrogate, liveSyncLeafId): void;   // 板级入参保持 v1 扁平形
   markDirty(): void;  handleContextRestored(): void;
+  readonly frameStats;                            // segBuilds/segHits/cachingDegraded
 }
-class RasterService {     // 一次性算像素（C 骑士接缝）
+class RasterService {     // 一次性算像素（raster-service.ts；C 骑士接缝）——零缓存零帧状态
   constructor(room: GlRoom);                      // 与 RenderTree 同一 room（搭 base-tile 便车）
-  bakeStamps(leafId, stamps, …): boolean;         // 笔迹烤定（原 commitBrushStroke）
+  bakeStamps(leafId, pixels, ov, docW, docH, apply): boolean;   // 笔迹烤定（原 commitBrushStroke）
+  rasterizeStampsToBytes(stamps, shape, bx, by, bw, bh): Uint8ClampedArray | null;   // v0.7.25 选区笔
   warpToBytes(...): Bytes;
-  compositeToBytes(tree, w, h): Bytes;  compositeToCanvas(...): HTMLCanvasElement;
-  pickColor(tree, …, x, y): [r, g, b, a];
+  compositeOnce(nodes, w, h, bg?, surrogate?, overlay?): PooledFBO;    // caller returnFBO
+  compositeToBytes(nodes, w, h): Bytes;  compositeToCanvas(...): HTMLCanvasElement;
+  pickColor(nodes, w, h, bg, x, y, surrogate?, overlay?): [r, g, b, a];
 }
+// GLBoard（gl-board.ts，板级薄壳）装配唯一 room + 双 facade；对 board.ts 的方法面不变
+//（commitBrushStroke 名在板级保留——app 词汇；GL 侧正名 bakeStamps）。
 ```
 
 ## T5 落地形（拆旧交付后的编排面；旧机器物理不存在）

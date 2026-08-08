@@ -1,5 +1,5 @@
-import { RenderTreeGL } from "./render-tree-gl.ts";
-import type { FloatInput, OverlayInput, SurrogateInput } from "./render-tree-gl.ts";
+import { RasterService } from "./raster-service.ts";
+import type { FloatInput, OverlayInput, SurrogateInput } from "./gl-room.ts";
 import type { LayerPixels } from "../tiles/tile-layer.ts";
 import type { DocNode, DocLeaf } from "./gl-doc-bridge.ts";
 export interface GLDoc {
@@ -11,7 +11,9 @@ export type { DocLeaf as GLLeaf } from "./gl-doc-bridge.ts";
 export declare class GLBoard {
     readonly canvas: HTMLCanvasElement;
     private _glctx;
+    private _room;
     private _tree;
+    private _raster;
     constructor(canvas: HTMLCanvasElement, maxSlices: number);
     get memory(): {
         usedTiles: number;
@@ -38,7 +40,7 @@ export declare class GLBoard {
         tx: number;
         ty: number;
     }[]): boolean;
-    rasterizeStampsToBytes(stamps: Parameters<RenderTreeGL["rasterizeStampsToBytes"]>[0], shape: Parameters<RenderTreeGL["rasterizeStampsToBytes"]>[1], bx: number, by: number, bw: number, bh: number): Uint8ClampedArray | null;
+    rasterizeStampsToBytes(stamps: Parameters<RasterService["rasterizeStampsToBytes"]>[0], shape: Parameters<RasterService["rasterizeStampsToBytes"]>[1], bx: number, by: number, bw: number, bh: number): Uint8ClampedArray | null;
     compositeToCanvas(nodes: DocNode[], docW: number, docH: number): HTMLCanvasElement | null;
     compositeToBytes(nodes: DocNode[], docW: number, docH: number): {
         data: Uint8ClampedArray;
@@ -46,7 +48,7 @@ export declare class GLBoard {
         h: number;
     } | null;
     pickColor(doc: GLDoc, docBg: string | null, x: number, y: number, surrogate?: SurrogateInput | null, overlay?: OverlayInput | null): [number, number, number, number] | null;
-    warpToBytes(src: Parameters<RenderTreeGL["warpToBytes"]>[0], srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): {
+    warpToBytes(src: Parameters<RasterService["warpToBytes"]>[0], srcW: number, srcH: number, hinv: number[], mode: number, bx: number, by: number, bw: number, bh: number): {
         data: Uint8ClampedArray;
         w: number;
         h: number;

@@ -12,7 +12,9 @@ import { TILE_SIZE, tilesAcross } from "../../src/tiles/tile-geometry.ts";
 import { GLCompositor } from "../../src/gl/gl-compositor.ts";
 import { BLEND_MODES } from "../../src/gl/blend-glsl.ts";
 import { docTreeToComp, compositeTree } from "./reference-gl-compositor.ts";
-import { RenderTreeGL } from "../../src/gl/render-tree-gl.ts";
+import { GlRoom } from "../../src/gl/gl-room.ts";
+import { RenderTree } from "../../src/gl/render-tree.ts";
+import { RasterService } from "../../src/gl/raster-service.ts";
 import { LayerPixels, materialize, editRegion, replaceFromCanvas } from "../../src/tiles/tile-layer.ts";
 import { GLStampRasterizer } from "../../src/gl/gl-stamp.ts";
 import type { Stamp } from "../../src/gl/gl-stamp.ts";
@@ -476,13 +478,20 @@ function bridgeParity(glctx: GLContext, add: Add): void {
 // ---- E2)（v0.4.3 删）TileResidency 已日落：CPU tile 池恒驻留，GPU-readback 重物化机器不复存在。
 
 
-// ---- F) render-tree 执行器端到端（S7b）：RenderTreeGL.renderFrame 真跑（含段缓存/快路径/自愈），
+
+// T6：GlRoom 双 facade（生产同构装配——tree=composite，raster=一次性算像素，共享同一 room）。
+function makeStage(glctx: GLContext, maxSlices: number): { room: GlRoom; tree: RenderTree; raster: RasterService } {
+  const room = new GlRoom(glctx, maxSlices);
+  return { room, tree: new RenderTree(room), raster: new RasterService(room) };
+}
+
+// ---- F) render-tree 执行器端到端（S7b）：RenderTree.renderFrame 真跑（含段缓存/快路径/自愈），
 //        canvas backbuffer 读回 vs compositeLayers golden。identity affine + N×N canvas = 1:1 像素。----
 function rendertreeParity(glctx: GLContext, add: Add): void {
   const N = 512;
   const gl = glctx.gl;
   glctx.canvas.width = N; glctx.canvas.height = N;
-  const tree = new RenderTreeGL(glctx, 512);
+  const { tree, raster } = makeStage(glctx, 512);
 
   const cA = makeLayerCanvas(N, N, (x, y) => [60, 120 + (x % 120), 60 + (y % 160), 255]);
   const cM = makeLayerCanvas(N, N, (x, y) => [200, 200 - (x % 100), 150 + (y % 40), 120]);
@@ -552,7 +561,7 @@ function rendertreeParity(glctx: GLContext, add: Add): void {
   cmp("rt:context-loss 自愈重建", ref1, renderAndRead(null));
 
   // export 一次性合成（不碰缓存）。
-  const once = tree.compositeOnce(nodes as never, N, N);
+  const once = raster.compositeOnce(nodes as never, N, N);
   const oncePx = new Uint8Array(N * N * 4);
   gl.bindFramebuffer(gl.FRAMEBUFFER, once.fbo);
   gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, oncePx);
@@ -563,7 +572,7 @@ function rendertreeParity(glctx: GLContext, add: Add): void {
   // S8 吸管：pickColor（compositeOnce + 1px readback）vs golden 采样点（含 alpha）。
   let pickMd = 0;
   for (const [sx, sy] of [[150, 150], [300, 300], [30, 470], [470, 30]] as [number, number][]) {
-    const p = tree.pickColor(nodes as never, N, N, undefined, sx, sy);
+    const p = raster.pickColor(nodes as never, N, N, undefined, sx, sy);
     const o = (sy * N + sx) * 4;
     for (let k = 0; k < 4; k++) pickMd = Math.max(pickMd, Math.abs(p[k] - ref1[o + k]));
   }
@@ -575,21 +584,21 @@ function rendertreeParity(glctx: GLContext, add: Add): void {
   const surBytes = new Uint8ClampedArray(N * N * 4);
   for (let i = 0; i < N * N; i++) { surBytes[i * 4] = 255; surBytes[i * 4 + 2] = 255; surBytes[i * 4 + 3] = 255; }
   const sur = { layerId: 6, bytes: { data: surBytes, w: N, h: N }, bx: 0, by: 0, w: N, h: N };
-  const pSur = tree.pickColor(nodes as never, N, N, undefined, 300, 300, sur as never);
+  const pSur = raster.pickColor(nodes as never, N, N, undefined, 300, 300, sur as never);
   add("rt:pickColor 带替身 = 替身色", Math.abs(pSur[0] - 255) <= 2 && pSur[1] <= 2 && Math.abs(pSur[2] - 255) <= 2, `got=${pSur}`);
-  const pReal = tree.pickColor(nodes as never, N, N, undefined, 300, 300);
+  const pReal = raster.pickColor(nodes as never, N, N, undefined, 300, 300);
   let realMd = 0;
   for (let k = 0; k < 4; k++) realMd = Math.max(realMd, Math.abs(pReal[k] - ref1[(300 * N + 300) * 4 + k]));
   add("rt:替身后无替身取色回真像素", realMd <= 4, `maxΔ=${realMd}`);
 }
 
-// ---- G) S8 brush GPU commit ≡ live：commitBrushStroke（merge 同一 overlay shader → tile-diff 落层
+// ---- G) S8 brush GPU commit ≡ live：bakeStamps（原 commitBrushStroke；merge 同一 overlay shader → tile-diff 落层
 //        → GPU 收养）后的静态帧，必须与 commit 前带 stampOverlay 的 live 帧逐像素一致（u8 量化容差）。----
 function commitParity(glctx: GLContext, add: Add): void {
   const N = 512;
   const gl = glctx.gl;
   glctx.canvas.width = N; glctx.canvas.height = N;
-  const tree = new RenderTreeGL(glctx, 512);
+  const { room, tree, raster } = makeStage(glctx, 512);
 
   const readBack = (): Uint8Array => {
     const raw = new Uint8Array(N * N * 4);
@@ -637,10 +646,10 @@ function commitParity(glctx: GLContext, add: Add): void {
     // 远处 tile 句柄：commit 后必须不动（tile-diff 不背未变 tile）。bbox ⊂ 左上 → tile(1,1) 在外。
     const farBefore = pixels.getTileHandle(1, 1);
     // commit → 静态帧
-    const ok = tree.commitBrushStroke(id, pixels, ov as never, N, N, (px, x, y, w, h) => pixels.applyRegionDiff(x, y, w, h, px));
+    const ok = raster.bakeStamps(id, pixels, ov as never, N, N, (px, x, y, w, h) => pixels.applyRegionDiff(x, y, w, h, px));
     add(`commit:${c.name} 提交成功`, ok);
     // eslint 类似场合：私有 stats 只在 smoke 里窥（断言收养生效 = 下一帧零上传）。
-    const bridge = (tree as unknown as { _bridge: { stats: { uploads: number } } })._bridge;
+    const bridge = room.bridge;
     const upBefore = bridge.stats.uploads;
     tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], null, null, null);
     const committed = readBack();
@@ -662,7 +671,7 @@ function fillParity(glctx: GLContext, add: Add): void {
   const N = 512;
   const gl = glctx.gl;
   glctx.canvas.width = N; glctx.canvas.height = N;
-  const tree = new RenderTreeGL(glctx, 512);
+  const { room, tree, raster } = makeStage(glctx, 512);
   const readBack = (): Uint8Array => {
     const raw = new Uint8Array(N * N * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -711,7 +720,7 @@ function fillParity(glctx: GLContext, add: Add): void {
     // golden 对比走 compositeOnce（透明底 FBO——屏幕 backbuffer 会被 void 清屏压掉透明度，不能当 golden 对比面）。
     //   这条路径同时就是吸管 pickColor 的合成面（一石二鸟）。
     {
-      const once = tree.compositeOnce(nodes as never, N, N, undefined, null, ov as never);
+      const once = raster.compositeOnce(nodes as never, N, N, undefined, null, ov as never);
       const px = new Uint8Array(N * N * 4);
       gl.bindFramebuffer(gl.FRAMEBUFFER, once.fbo);
       gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -729,7 +738,7 @@ function fillParity(glctx: GLContext, add: Add): void {
       const g0 = gc0.getContext("2d")!; g0.clearRect(0, 0, N, N);
       compositeLayers(g0 as unknown as CanvasRenderingContext2D, [leaf] as never, {});
       const refClean = g0.getImageData(0, 0, N, N).data;
-      const once = tree.compositeOnce(nodes as never, N, N);
+      const once = raster.compositeOnce(nodes as never, N, N);
       const px = new Uint8Array(N * N * 4);
       gl.bindFramebuffer(gl.FRAMEBUFFER, once.fbo);
       gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -741,16 +750,16 @@ function fillParity(glctx: GLContext, add: Add): void {
     // 吸管 WYSIWYG：带 overlay 在 mask=255 带内 = golden 所见（透明底直值，与 CPU ref 同面）。
     {
       const sx = bx + 150, sy = by + 80;   // mask=255 带
-      const pOv = tree.pickColor(nodes as never, N, N, undefined, sx, sy, null, ov as never);
+      const pOv = raster.pickColor(nodes as never, N, N, undefined, sx, sy, null, ov as never);
       let dOv = 0; const o = (sy * N + sx) * 4;
       for (let k = 0; k < 4; k++) dOv = Math.max(dOv, Math.abs(pOv[k] - ref[o + k]));
       add(`fill:${lockAlpha ? "lockAlpha " : ""}pickColor 带 overlay = golden 所见`, dOv <= 4, `maxΔ=${dOv}`);
     }
     // commit ≡ live（同 shader SSoT）+ bbox 外 tile 不动 + 收养生效。
     const farBefore = pixels.getTileHandle(1, 1);
-    const ok = tree.commitBrushStroke(id, pixels, ov as never, N, N, (px, x, y, w, h) => pixels.applyRegionDiff(x, y, w, h, px));
+    const ok = raster.bakeStamps(id, pixels, ov as never, N, N, (px, x, y, w, h) => pixels.applyRegionDiff(x, y, w, h, px));
     add(`fill:${lockAlpha ? "lockAlpha " : ""}commit 提交成功`, ok);
-    const bridge = (tree as unknown as { _bridge: { stats: { uploads: number } } })._bridge;
+    const bridge = room.bridge;
     const upBefore = bridge.stats.uploads;
     tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], null, null, null);
     const committed = readBack();
@@ -770,7 +779,7 @@ function clipLiveParity(glctx: GLContext, add: Add): void {
   const N = 512;
   const gl = glctx.gl;
   glctx.canvas.width = N; glctx.canvas.height = N;
-  const tree = new RenderTreeGL(glctx, 512);
+  const { tree, raster } = makeStage(glctx, 512);
   const readBack = (): Uint8Array => {
     const raw = new Uint8Array(N * N * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -801,7 +810,7 @@ function clipLiveParity(glctx: GLContext, add: Add): void {
     };
     tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], ov as never, null, null);
     const live = readBack();
-    const ok = tree.commitBrushStroke(B.id, basePx, ov as never, N, N, (px, x, y, w, h) => basePx.applyRegionDiff(x, y, w, h, px));
+    const ok = raster.bakeStamps(B.id, basePx, ov as never, N, N, (px, x, y, w, h) => basePx.applyRegionDiff(x, y, w, h, px));
     add(`clipLive:${erase ? "erase" : "draw"} 提交成功`, ok);
     tree.renderFrame(nodes as never, N, N, undefined, [1, 0, 0, 1, 0, 0], N, N, 1, [0, 0, 0], [], null, null, null);
     const committed = readBack();
@@ -980,7 +989,7 @@ function checkerParity(glctx: GLContext, add: Add): void {
 function rectHinv(x0: number, y0: number, w: number, h: number): number[] {
   return [1 / w, 0, -x0 / w, 0, 1 / h, -y0 / h, 0, 0, 1];
 }
-// rotsprite EPX 放大平面 → u8 纹理（对齐 render-tree-gl._setFloats u8Plane 上传）
+// rotsprite EPX 放大平面 → u8 纹理（对齐 gl-room.setFloats u8Plane 上传）
 function texFromU8Plane(glctx: GLContext, p: U8Plane): WebGLTexture {
   const gl = glctx.gl;
   const t = gl.createTexture()!;
@@ -994,7 +1003,7 @@ function texFromU8Plane(glctx: GLContext, p: U8Plane): WebGLTexture {
   gl.bindTexture(gl.TEXTURE_2D, null);
   return t;
 }
-// spline 系数平面 → RGBA16F 纹理（对齐 render-tree-gl._setFloats mode 3 上传）
+// spline 系数平面 → RGBA16F 纹理（对齐 gl-room.setFloats mode 3 上传）
 function texFromSplinePlane(glctx: GLContext, p: SplinePlane): WebGLTexture {
   const gl = glctx.gl;
   const t = gl.createTexture()!;
@@ -1149,8 +1158,8 @@ function warpParity(glctx: GLContext, add: Add): void {
 //   「合并不改观感」是它的定义性质。
 function mergeDownParity(glctx: GLContext, add: Add): void {
   const N = 128;
-  const tree = new RenderTreeGL(glctx, 512);
-  setDocCompositorBytes((nodes, w, h) => tree.compositeToBytes(nodes as never, w, h));
+  const { raster } = makeStage(glctx, 512);
+  setDocCompositorBytes((nodes, w, h) => raster.compositeToBytes(nodes as never, w, h));
   const doc = new PaintDoc({ width: N, height: N });
   const base = doc.layers[0];
   const fill = (L: { putImageData: (x: number, y: number, img: unknown) => void }, fn: (x: number, y: number) => number[]) => {
@@ -1163,14 +1172,13 @@ function mergeDownParity(glctx: GLContext, add: Add): void {
   fill(top as never, (x, y) => [(y * 5) % 256, 80, 220, 60 + ((x + y) % 180)]);
   top.mode = "multiply"; top.opacity = 0.7; top.clippingMask = true;
   doc.activeIndex = doc.layers.indexOf(top);
-  const before = tree.compositeToBytes(doc.layers as never, N, N).data;
+  const before = raster.compositeToBytes(doc.layers as never, N, N).data;
   const r = doc.mergeDownLayer(top as never) as { ok: boolean; reason?: string };
   add("mergedown:GL 字节面合并成功", r.ok, r.ok ? "" : String(r.reason));
-  const after = tree.compositeToBytes(doc.layers as never, N, N).data;
+  const after = raster.compositeToBytes(doc.layers as never, N, N).data;
   const { md, at } = maxPremulDiff(before, new Uint8Array(after.buffer, after.byteOffset, after.byteLength), N);
   add("mergedown:multiply+opacity+clip 合并前后 composite 不变", md <= 4, `maxΔ=${md} ${md > 4 ? at : ""}`);
   for (const l of doc.layers) (l as { pixels?: { dispose?: () => void } }).pixels?.dispose?.();
-  tree.dispose?.();
 }
 
 function warpClipParity(glctx: GLContext, add: Add): void {

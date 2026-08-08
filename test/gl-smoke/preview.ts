@@ -3,7 +3,8 @@
 // 像素正确性已由 smoke 自 diff（vs compositeLayers）证；这页是感性确认 + perf。
 
 import { GLContext } from "../../src/gl/gl-context.ts";
-import { RenderTreeGL, poolCapacityForBudget } from "../../src/gl/render-tree-gl.ts";
+import { GlRoom, poolCapacityForBudget } from "../../src/gl/gl-room.ts";
+import { RenderTree } from "../../src/gl/render-tree.ts";
 import { LayerPixels, replaceFromCanvas } from "../../src/tiles/tile-layer.ts";
 import type { DocNode } from "../../src/gl/gl-doc-bridge.ts";
 
@@ -46,10 +47,11 @@ const canvas = document.getElementById("c") as HTMLCanvasElement;
 canvas.width = N; canvas.height = N;
 const hud = document.getElementById("hud") as HTMLDivElement;
 
-let tree: RenderTreeGL;
+let room: GlRoom; let tree: RenderTree;
 try {
   const glctx = new GLContext(canvas);
-  tree = new RenderTreeGL(glctx, poolCapacityForBudget(256 * 1024 * 1024));   // 256MB quota
+  room = new GlRoom(glctx, poolCapacityForBudget(256 * 1024 * 1024));   // 256MB quota
+  tree = new RenderTree(room);
 } catch (e) {
   hud.textContent = "需要 WebGL2：" + String(e);
   throw e;
@@ -66,7 +68,7 @@ function frame() {
   const dt = performance.now() - t0;
   if (dt >= 500) {
     fps = frames * 1000 / dt; frames = 0; t0 = performance.now();
-    const m = tree.memory;
+    const m = room.memory;
     hud.textContent = `GL 整树重合成 ${fps.toFixed(0)} fps · doc ${N}² · ${nodes.length} 层(含 2 clip + multiply 组) · tile ${m.usedTiles}/${m.capacity} · 实占 ${(m.usedBytes / 1048576).toFixed(1)}MB`;
   }
   requestAnimationFrame(frame);

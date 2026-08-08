@@ -94,7 +94,7 @@ echo "[build] ✓ B 分层 lint 过"
 #   · history.ts(根目录旧栈) / pixel-edit.ts / layer-undo.ts / gl/tile-residency.ts 已日落（v0.4.3-0.4.5），
 #     不得复活 import（workpiece/history.ts 是 T5 的 v2 编排器、undo-history 曾是合法名——都排除在外）
 #   · S7：gl/tile-backend-gl.ts / gl/tile-store.ts / gl/tile-index.ts / gl/gl-doc-renderer.ts 已死
-#     （gpu-tile-pool + tile-bridge + render-tree-gl 取代），不得复活 import
+#     （gpu-tile-pool + tile-bridge + render-tree 取代），不得复活 import
 #   · render/** 是纯规划（node 全测），不 import gl/**、store
 echo "[build] v0.4 分层 lint…"
 LAYER_HITS=$(grep -rnE "(from|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*(/store/|app-store)" src/workpiece --include='*.ts' 2>/dev/null || true)

@@ -1,6 +1,6 @@
 // render-plan —— 渲染树纯规划（S7b；spec: journal/20260721 Architecture.md :123-159）。
 // 输入 图层树 + pseudo 标志 + updatedNodes → 输出 pass 步骤表 + 跨帧缓存段（segment）描述。
-// **纯逻辑零 GL**（build.sh lint：render/ 不 import gl/）——执行器 gl/render-tree-gl.ts 消费。
+// **纯逻辑零 GL**（build.sh lint：render/ 不 import gl/）——执行器 gl/render-tree.ts（+ gl/raster-service.ts）消费。
 //
 // 核心：把「每帧一层一 pass 全量重合成」换成「静止兄弟合并成缓存段，每帧只画 动态层 + 少数段」。
 // 分区规则（spec:144-155 的「建议跨帧缓存」落地）：

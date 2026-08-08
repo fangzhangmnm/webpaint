@@ -1,5 +1,5 @@
 # workpiece v2 施工 handoff（令牌+collector 纪元）
-> as-of v0.8.21 / 2026-08-08（T5 拆旧交付完毕，下一棒 T6）。读者 = 接手施工的下一个 AI session。
+> as-of v0.8.22 / 2026-08-08（T6 GL 双 facade 完毕，下一棒 T7 收口）。读者 = 接手施工的下一个 AI session。
 > 拍板（why）= `ai-docs/adr/0008-workpiece-v2-token-collector.md`；目标契约（what）=
 > `20260807-workpiece-v2-proposal-h.md`（**pin 住的接口**，形状改动要回写它）；本文 = how/施工序。
 > 现状 .h = `api/`（`bash scripts/gen-api.sh` 重生成）。
@@ -16,7 +16,7 @@
   东西就行」。桥/兼容层的取舍自己拍，唯一硬约束 = 只减不增 + T5 物理删除（见 legacy-bridge.ts 头）。
   **要问 user 的只有非中间态的事**：终态契约（提案 .h）的形状偏离、undo 白/黑名单变动、数据安全。
 - push 纪律照旧：新 session 第一批默认不 push；user 本 session 口头授权后可自动推 dev；prod 永远必问。
-- 测试基线：1239 node 测试 + tsc 0 错 + `bash scripts/build.sh` 全 lint 过。
+- 测试基线：1232 node 测试 + tsc 0 错 + `bash scripts/build.sh` 全 lint 过 + `npm run smoke` GL smoke PASSED。
 - `test/run.mjs` 是显式清单不是 glob——新测试必须注册。
 - 版本：每片 `./bump.sh v0.8.N-日期` patch 递增；**v2 完工要不要 bump 0.9 由 user 显式拍**（minor 权限硬规则）。
 
@@ -156,10 +156,24 @@
     ADR-0007 标 superseded-by-0008、提案 .h 全部回写（History/LayersFace/exchange record/desk 三组）。
   - 测试 1232 绿 + tsc 0 + build.sh lint 过（净 -21：旧栈/桥/门面测试删、history/selection-preview/
     doc-resize 新增）。
-- **T6（下一棒从这开工）**= GL 双 facade（§1 T6：GlRoom 引用包 + RenderTree/RasterService 拆分，
-  行为不变纯搬家，gl-smoke + fillParity 是锚）。然后 T7 收口。
-- **落盘注意**：T1-T4（v0.8.9-17）已 ff 进本地 main（bcb0023）；本棒 T5（v0.8.18-21）在
-  worktree-workpiece-v2 分支，进场先在主 checkout `git merge --ff-only worktree-workpiece-v2`。
+- **T6 ✓**（v0.8.22，2026-08-08 本棒）：GL 双 facade 落地，**render-tree-gl.ts 物理不存在**。
+  - `gl-room.ts` = GlRoom：机房五件套唯一实例 + 两 facade 共享台面（叶驻留 leaves+sync 族/
+    pseudo 装置 overlay·float·selMask·fillTex/composeSteps 合成机/onInvalidate 失效信号/HUD 观测口）。
+    board 输入类型（FloatInput/OverlayInput/SurrogateInput…）+ poolCapacityForBudget 随迁。
+  - `render-tree.ts` = RenderTree（tree composite）：renderFrame/段缓存/display 快路径/plan 签名/
+    frameStats/pin provider（leaves+segs 两档，注册在 ctor）；订阅 room.onInvalidate 置脏。
+  - `raster-service.ts` = RasterService（一次性算像素，C 骑士接缝）：bakeStamps（原
+    commitBrushStroke，收尾 room.invalidateTree() 代替直接 markDirty——facade 互不知晓）+
+    rasterizeStampsToBytes + warpToBytes + compositeOnce/ToBytes/ToCanvas + pickColor。零帧状态。
+  - GLBoard 装配 room+双 facade，对 board.ts 方法面不变（板级仍叫 commitBrushStroke=app 词汇）；
+    board.ts 只改 import 来源。harness/preview 改 makeStage(room,tree,raster) 装配，
+    旧 `(tree as any)._bridge` 私字段挖法改正路 room.bridge。
+  - 提案 .h「render 侧拆分」节已回写落地形（renderFrame 保 v1 扁平入参、GlRoom 台面职责）。
+  - 锚全绿：gl-smoke PASSED（含 fillParity/commitParity/clipLive）+ 1232 node + tsc 0 + build.sh lint。
+- **T7（下一棒从这开工）**= 收口（§1 T7：.h 对账 ✓已随 T6 重打、CONTEXT.md 词条、真机批清单汇总）。
+- **落盘注意**：T1-T4（v0.8.9-17）+ T5（v0.8.18-21）已 ff 进本地 main（2642b00）；本棒 T6
+  （v0.8.22）在 worktree-workpiece-v2 分支，进场先在主 checkout
+  `git merge --ff-only worktree-workpiece-v2`。
 
 ## 2. 地雷
 

@@ -1,7 +1,7 @@
 // doc 图层树的结构化节点类型（DocLeaf/DocNode）+ safeMode。
 // 用**结构化类型**接 doc 节点（不 import doc.ts）→ gl/ 保持独立深模块；board 传结构兼容的真节点即可。
 // （S9：docTreeToComp 随树递归执行器归档进 test/gl-smoke/reference-gl-compositor.ts——
-//   生产翻译面 = render-tree-gl 的 _toPlanNodes。）
+//   生产翻译面 = gl-room 的 toPlanNodes。）
 
 import { BLEND_MODES } from "./blend-glsl.ts";
 import type { BlendMode } from "./blend-glsl.ts";

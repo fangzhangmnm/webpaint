@@ -1,4 +1,4 @@
-// 【S9 归档】GL 规范树递归合成器 —— smoke 的对拍参照执行器（生产走 render-plan + RenderTreeGL）。
+// 【S9 归档】GL 规范树递归合成器 —— smoke 的对拍参照执行器（生产走 render-plan + RenderTree）。
 // 原居：gl-compositor.ts 的 composite()/_composeFresh/_applyNodes + gl-compose-plan.ts 的
 // CompNode/clip 判定 + gl-doc-bridge.ts 的 docTreeToComp。生产零调用后集中归档在 test 域
 // （「别删对拍能力」= handoff 琐碎第 6 条）。语义与 reference-2d.ts（旧 2D 规范合成器）逐条对齐。

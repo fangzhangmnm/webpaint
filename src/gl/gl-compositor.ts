@@ -4,7 +4,7 @@
 //   采源 + 累积器 → W3C blend + source-over → 写另一张、交换。clip = 源α×基底α（无 2D dst-in）。
 // S9 起本类只剩 **pass 原语**（begin/newAcc/pass/floatPass/finishAcc/end/present/warp）——
 //   树递归执行器归档进 test/gl-smoke/reference-gl-compositor.ts（smoke 对拍参照），
-//   生产唯一执行器 = render-tree-gl（render-plan 驱动）。
+//   生产唯一执行器 = render-tree（render-plan 驱动；T6 起与 raster-service 共享 gl-room）。
 
 import { COMPOSITE_VERT, compositeFragSource, compositeProgramKey } from "./blend-glsl.ts";
 import type { BlendMode, SourceKind } from "./blend-glsl.ts";
@@ -35,7 +35,7 @@ export interface FloatDesc {
 export type Background = [number, number, number, number] | "checker";
 
 // 可变 ping-pong 对（pass-through 组要在同一累积器上续 pass，故按引用传递）。
-// S7 起导出：render-tree-gl 执行器直接驱动 pass 原语（begin/newAcc/pass/floatPass/finishAcc/end），
+// S7 起导出：render-tree/raster-service 执行器直接驱动 pass 原语（begin/newAcc/pass/floatPass/finishAcc/end），
 //   本类自己的 composite() 树递归保留（smoke harness 的规范执行器 + 对拍参照）。
 export interface Acc { read: PooledFBO; write: PooledFBO; }
 
@@ -263,7 +263,7 @@ export class GLCompositor {
     return this._glctx.program(compositeProgramKey(mode, src, overlayMode), COMPOSITE_VERT, compositeFragSource(mode, src, overlayMode));
   }
 
-  // ---- 执行器原语（render-tree-gl / 对拍 harness 驱动） ----
+  // ---- 执行器原语（render-tree / raster-service / 对拍 harness 驱动） ----
 
   // 帧作用域：绑 VAO + viewport（doc 尺寸）一次。resetStats=false 时保留计数（执行器整帧统计）。
   begin(docW: number, docH: number, resetStats = true): void {

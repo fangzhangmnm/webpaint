@@ -1,6 +1,6 @@
 import type { WarpBakeFn } from "./floating-transform.ts";
 import { GLBoard } from "./gl/gl-board.ts";
-import type { FloatInput, StampOverlayInput, FillOverlayInput, OverlayInput, SurrogateInput } from "./gl/render-tree-gl.ts";
+import type { FloatInput, StampOverlayInput, FillOverlayInput, OverlayInput, SurrogateInput } from "./gl/gl-room.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 type StampCollect = {
     stamps: Stamp[];

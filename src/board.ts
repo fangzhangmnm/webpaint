@@ -4,8 +4,8 @@ import type { WarpBakeFn } from "./floating-transform.ts";
 import { PREF_DEFAULTS } from "./app-prefs.ts";   // pixel-grid 默认值 SSoT（别在本文件硬编码第二份）
 import { reportError } from "./error-badge.ts";
 import { GLBoard } from "./gl/gl-board.ts";
-import { poolCapacityForBudget } from "./gl/render-tree-gl.ts";
-import type { FloatInput, StampOverlayInput, FillOverlayInput, OverlayInput, SurrogateInput } from "./gl/render-tree-gl.ts";
+import { poolCapacityForBudget } from "./gl/gl-room.ts";
+import type { FloatInput, StampOverlayInput, FillOverlayInput, OverlayInput, SurrogateInput } from "./gl/gl-room.ts";
 import type { Stamp, StrokeShape } from "./gl/gl-stamp.ts";
 
 // brush.collectStamps() 的返回形（board 不 import BrushEngine，结构化接）。
