@@ -63,6 +63,33 @@
 - `bash scripts/gen-api.sh` 重打 .h，与提案 .h 对账（形状偏差要么回写提案要么改实现）；
 - CONTEXT.md 词条更新（token/collector/record/组件表）；handoff 进度节；真机批清单汇总一次交付。
 
+## 1.5 施工进度（as-of v0.8.12 / 2026-08-07，worktree-workpiece-v2 分支）
+
+> user 已裁定 §0 悬案：**不推 dev、不等真机，直接开工**（2026-08-07 本 session）。
+
+- **T1 ✓**（v0.8.9）：undo-stack.ts + workpiece2.ts + 22 测试。提案回写：UndoStepInput（id 栈分配）/
+  depth()/CollectorComponent.sealRecord/onTokenLeak/_componentWrite/tokenOpen/abandon。
+- **T2 ✓**（v0.8.10）：**关键架构决定——迁移期唯一 undo 栈**。v2 UndoStack 立刻成权威；旧 operator
+  流经 `legacy-bridge.ts`（LegacyHistory 实现 HistoryFacade，调用方零改动；checkpoint/compound
+  映射成令牌）骑上 v2 栈。LayerTiles collector = **substrate 层写时扣押**（tile-layer.ts
+  setTileSwapObserver——engine 直写也收得到 + 自动登记 touched）。PixelTx 死；input/filters-adjust/
+  selection-ops/toolbar/blender-sync/fill-mode 全部令牌化。
+  ⚠ 已知过渡态：floating-transform 三处 `_initialBefore` 在 compound 内双记账（内容正确、
+  多存一份共享句柄；T4 float 组件化时消除）。
+- **T3a ✓**（v0.8.11）：layer-tree2.ts（TreeJson 换根收集）+ LayerTiles tileset 注册表
+  （引用计数，record 驱逐才释放——**删组泄漏回归锚已钉**）。
+- **T3b-1 ✓**（v0.8.12）：PaintingWorkpiece 树模式（opts.tree）+ load(PaintingData) 令牌灌入
+  + exportData 冻结快照 + addGroup/loadRoot verb。PaintingData 定形见提案 .h。
+- **T3b-2（下一棒从这开工）= app cutover**：app.ts 从 host 模式换树模式；ora/psd 解码器产
+  PaintingData；session-state 装载走 wp2.load()；board/render 喂树从 doc.layers 改
+  layerTree.view() 映射；29 个 import doc.ts 文件逐个改读口；杀 ctx.docRaw/DocView/readDoc；
+  v1 LayerTree/SelectionFace 门面的 doc 依赖同批清。tsc 是审计器。
+  然后 T4（selection/float/pendingFill/persp 组件化，顺手消 float 双记账）→ T5 拆旧
+  （operators/undo-history/write-gate/legacy-bridge/workpiece.ts v1；workpiece2/layer-tree2 正名）
+  → T6 GL 双 facade → T7 收口。
+- **落盘注意**：本 session 被 worktree 隔离 hook 挡住无法 merge 本地 main（与上一棒同）——
+  下一棒进场先在主 checkout `git merge --ff-only worktree-workpiece-v2`。
+
 ## 2. 地雷
 
 - fill（ADR-0004 修订5 one-shot 携入）与 float（v291 复数 source/v0.6.21 有向 frame）都是 user 多轮
