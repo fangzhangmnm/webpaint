@@ -6,9 +6,15 @@
 
 ## 0. 进场必读
 
-- **前置悬案（比开工更优先）**：v0.8.1–7 + v0.8.8 已 merge 本地 main，**未 push origin、真机 14 条未跑**
-  （清单 = `20260801-v08-epoch-handoff.md` §7 12 条 + §9 两条）。**建议序：先问 user 推 dev → 跑真机批
-  → 再动 v2**。理由：v2 要拆 S2–S4 的脚手架，先让现状行为在真机上钉成锚，拆的时候才有对照。
+- **§0 悬案已裁定（user 2026-08-07）**：不推 dev、不等真机，直接施工。真机批**推迟到 v2 完工后一次交付**
+  ——user 原话：「我为什么不会在架构重构阶段实机测试？因为这时候就不是一个 legitimate 的可以跑的
+  app，写完了才算数，一口气写不完可以接力。中间怕错可以模块化测试」。中间态靠 node 测试 + tsc 兜，
+  别拿半台手术机器去跑真机、也别为此打断施工问人。
+  （14 条真机清单仍在 `20260801-v08-epoch-handoff.md` §7+§9，v2 完工后与 v2 新锚合并成一批交付。）
+- **过渡态自己裁，不上呈**（user 2026-08-07）：user 只关心终态设计达成度（= ADR-0008 + 提案 .h），
+  不关心 legacy 怎么处理——「不要留念旧东西。只要防止这个变成新重构的伤疤然后导致你一直维护旧的
+  东西就行」。桥/兼容层的取舍自己拍，唯一硬约束 = 只减不增 + T5 物理删除（见 legacy-bridge.ts 头）。
+  **要问 user 的只有非中间态的事**：终态契约（提案 .h）的形状偏离、undo 白/黑名单变动、数据安全。
 - push 纪律照旧：新 session 第一批默认不 push；user 本 session 口头授权后可自动推 dev；prod 永远必问。
 - 测试基线：1189 node 测试 + tsc 0 错 + `bash scripts/build.sh` 全 lint 过。
 - `test/run.mjs` 是显式清单不是 glob——新测试必须注册。
@@ -48,8 +54,10 @@
 - step.hint 落地：唯一住户 = docTransform 的 viewport 还原（闭包捕前后视口小对象）。
 
 ### T5 · 旧机器拆除 + rename 片
-- 拆：operators.ts / undo-history.ts(旧) / write-gate.ts / doc-view.ts / pixel-tx.ts / selection-face.ts /
-  layer-tree.ts(v1 门面) / workpiece.ts(v1)；workpiece2 收编正名。行为锚测试全部迁 v2 后才准删旧测试。
+- 拆：operators.ts / undo-history.ts(旧) / write-gate.ts / doc-view.ts / ~~pixel-tx.ts~~(T2 已拆) / selection-face.ts /
+  layer-tree.ts(v1 门面) / workpiece.ts(v1) / **legacy-bridge.ts**；workpiece2/layer-tree2 收编正名。
+  行为锚测试全部迁 v2 后才准删旧测试。
+- **交付判据（user 2026-08-07 语义）：上列文件物理不存在。在则重构未交付。**
 - rename 片（单独 commit）：PaintDoc 残余语义清理、dials/desk 改名（`useDials()`）、
   旧轨 webpaint/state.json 停写（读兼容留存量 + 注释注明拔除版本）、「doc」词回归 user 术语。
 - CLAUDE.md 硬规则条目改写成 v2 语言（令牌/组件），ADR-0007 标 superseded-by-0008。
