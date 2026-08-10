@@ -14,7 +14,7 @@
 // seal 时解析不到 layerId 的实例（临时 LayerPixels/浮层）扣押作废、句柄释放——非 workpiece 权威数据。
 // 配额规则沿旧栈：tile 压缩前记 0（走共享 raw 池配额）、压缩后记 compressedBytes/refCount。
 
-import { LayerPixels, setTileSwapObserver } from "../tiles/tile-layer.ts";
+import { LayerPixels, addTileSwapObserver } from "../tiles/tile-layer.ts";
 import type { TileHandle } from "../tiles/cpu-tile-pool.ts";
 import { tilesAcross, tileKey } from "../../common/tile-geometry.ts";
 import type { RecordData } from "./undo-stack.ts";
@@ -55,13 +55,18 @@ export class LayerTiles implements CollectorComponent {
   private _exchange: TilesRecord | null = null;
   private _suspend = 0;
 
+  private _observerDispose: () => void;
+
   constructor(wp: Workpiece, host: TilesHost) {
     this._wp = wp;
     this._host = host;
-    // 全局观察者（tile-layer.ts 单点）：收集与否在这 gate。多 workpiece 场景（测试）后建者接管——
-    // 旧实例令牌恒关不受扰。
-    setTileSwapObserver((lp, key, old) => this._onTileSwap(lp, key, old));
+    // 观察者（tile-layer.ts）：C7 起多播注册（旧单槽下第二个实例静默偷钩，双 backend = 坏账）。
+    // 收集与否在 _onTileSwap gate：令牌开着且未 suspend + 所有权戳（有主且不是我的 → 跳过）。
+    this._observerDispose = addTileSwapObserver((lp, key, old) => this._onTileSwap(lp, key, old));
   }
+
+  /** 退租（WebPaintBackend.dispose）：解除观察者注册。之后本实例不再收集（也不该再被写）。 */
+  dispose(): void { this._observerDispose(); }
 
   /** 内部/装载协作面：自带记账的窗口挂起收集（exchange/computed verb 体内、load 灌入——收了=双记账）。 */
   _suspendCollect(on: boolean): void { this._suspend += on ? 1 : -1; }
@@ -73,10 +78,18 @@ export class LayerTiles implements CollectorComponent {
   private _tilesets = new Map<number, { lp: LayerPixels; refs: number }>();
   private _nextTilesetId = 1;
 
+  // C7 所有权戳（多 tab 租户）：入册实例打上「归我管」标记——多播观察者按戳过滤，别的 backend
+  // 的换手不进我的 collector。无戳实例（StrokeShadow 替身等临时件）保持旧语义：谁令牌开着谁扣押，
+  // seal 解析不到 layerId 自动作废（layer-tiles 头注在案的机制）。
+  private _stampOwner(lp: LayerPixels): void {
+    (lp as LayerPixels & { _collectorOwner?: LayerTiles })._collectorOwner = this;
+  }
+
   /** 新 tileset 入册，refs=1 归调用方（json 收养 +1 后调用方 release——净移交）。 */
   createTileset(lp: LayerPixels): number {
     const id = this._nextTilesetId++;
     this._tilesets.set(id, { lp, refs: 1 });
+    this._stampOwner(lp);
     return id;
   }
   /** 零拷贝复制（句柄共享快照）：duplicateLayer 用。refs=1 归调用方。 */
@@ -114,6 +127,7 @@ export class LayerTiles implements CollectorComponent {
     if (!e) throw new Error(`LayerTiles: swap 不存在的 tileset（${id}）`);
     e.lp.dispose();
     e.lp = np;
+    this._stampOwner(np);
   }
   /** 实例交换**不 dispose**（swapTilesetPixels 的非销毁变体）：旧实例所有权交还调用方——
    *  DocResizeOp（crop/resample 的 undo 包持前一侧实例）用。T3b-2 补。 */
@@ -122,7 +136,8 @@ export class LayerTiles implements CollectorComponent {
     if (!e) throw new Error(`LayerTiles: exchange 不存在的 tileset（${id}）`);
     const old = e.lp;
     e.lp = np;
-    return old;
+    this._stampOwner(np);
+    return old;   // 旧实例所有权交调用方（戳留着无害：undo 包持有期不再进注册表，换手仍按戳归我）
   }
   /** 注册表观测（测试/泄漏审计）。 */
   tilesetCount(): number { return this._tilesets.size; }
@@ -347,6 +362,10 @@ export class LayerTiles implements CollectorComponent {
 
   private _onTileSwap(lp: LayerPixels, key: number, old: TileHandle | null): void {
     if (this._suspend > 0 || !this._wp.tokenOpen) return;
+    // C7 所有权过滤（多播观察者）：有主且不是我的实例 → 不收（别的 backend 的换手）。
+    // 无主（临时替身）沿旧语义收下，seal 解析不到自动作废。
+    const owner = (lp as LayerPixels & { _collectorOwner?: LayerTiles })._collectorOwner;
+    if (owner !== undefined && owner !== this) return;
     this._wp._componentWrite(this);   // 写即登记 touched（无令牌不可能到这——tokenOpen 已 gate）
     let tiles = this._collected.get(lp);
     if (!tiles) { tiles = new Map(); this._collected.set(lp, tiles); }

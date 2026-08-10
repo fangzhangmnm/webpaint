@@ -21,10 +21,18 @@ const TILE_RGBA = TILE_SIZE * TILE_SIZE * 4;
 // ---- tile 换手观察者（workpiece v2 collector 接缝，ADR-0008）----
 // 任何 LayerPixels 实例的 tile 槽位变更（换新/删格/restore/clear）都在**变更前**上报
 // (实例, key, 旧句柄|null)。观察者想留住旧句柄必须自己 acquire（上报后本体照常 release）。
-// 全局单点：收集与否由观察者自己 gate（LayerTiles 按「令牌开着且未 suspend」判）。
+// C7 多 tab 租户：全局单槽 → **多播注册表**（旧单槽下第二个 LayerTiles 会静默偷走第一个的记账钩，
+// 双 backend 并存 = 像素写坏账）。收集与否仍由观察者自己 gate（LayerTiles 按「令牌开着且未
+// suspend」+ 所有权戳判——见 layer-tiles._onTileSwap）。注册返回 disposer（backend.dispose 退租）。
 export type TileSwapObserver = (lp: LayerPixels, key: number, old: TileHandle | null) => void;
-let _tileObserver: TileSwapObserver | null = null;
-export function setTileSwapObserver(fn: TileSwapObserver | null): void { _tileObserver = fn; }
+const _tileObservers = new Set<TileSwapObserver>();
+export function addTileSwapObserver(fn: TileSwapObserver): () => void {
+  _tileObservers.add(fn);
+  return () => { _tileObservers.delete(fn); };
+}
+function _notifyTileSwap(lp: LayerPixels, key: number, old: TileHandle | null): void {
+  for (const fn of _tileObservers) fn(lp, key, old);
+}
 
 // undo 快照：共享句柄（acquire 过的）。用完必须 disposePixelsSnapshot 释放。
 export interface PixelsSnapshot { across: number; tiles: [number, TileHandle][] }
@@ -297,7 +305,7 @@ export class LayerPixels {
     this._contentVersion++;
     this._releaseAll();
     for (const [key, h] of snap.tiles) {
-      _tileObserver?.(this, key, null);   // _releaseAll 已清空 → 每格都是「空→有」（首捕获赢，见观察者约）
+      _notifyTileSwap(this, key, null);   // _releaseAll 已清空 → 每格都是「空→有」（首捕获赢，见观察者约）
       this._tiles.set(key, h.acquire());
     }
   }
@@ -317,17 +325,17 @@ export class LayerPixels {
     const bbox = computeBBox("rgba8", asBytes(buf), TILE_SIZE);
     const old = this._tiles.get(key);
     if (bbox === null) {
-      if (old) { _tileObserver?.(this, key, old); old.release(); this._tiles.delete(key); }
+      if (old) { _notifyTileSwap(this, key, old); old.release(); this._tiles.delete(key); }
       // 空写空格 = 零变更，不上报
     } else {
-      _tileObserver?.(this, key, old ?? null);
+      _notifyTileSwap(this, key, old ?? null);
       this._tiles.set(key, appTilePool().createTile("rgba8", asBytes(buf), bbox));
       if (old) old.release();
     }
   }
 
   private _releaseAll(): void {
-    this._tiles.forEach((h, key) => { _tileObserver?.(this, key, h); if (!h.released) h.release(); });
+    this._tiles.forEach((h, key) => { _notifyTileSwap(this, key, h); if (!h.released) h.release(); });
     this._tiles.clear();
   }
 }
