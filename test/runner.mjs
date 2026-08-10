@@ -28,8 +28,14 @@ export async function throwsStatus(fn, status, msg) {
 }
 
 export async function run() {
+  // C8 测试分级：TEST_FILTER=<子串> 只跑名字匹配的测试（中间棒「只跑相关模块+tsc」的开发期快捷）。
+  // 只是过滤器不是分层——交付验收仍跑全量 npm test（+test:full 全量层）；被跳过的文件级收尾
+  // （如 shape-brush 的 tile 释放 it）可能一并被跳，FR 泄漏警告刷屏属预期噪音。
+  const filter = process.env.TEST_FILTER;
+  const tests = filter ? _tests.filter((t) => t.name.includes(filter)) : _tests;
+  if (filter) console.log(`\n  TEST_FILTER="${filter}" → ${tests.length}/${_tests.length} 条（开发期快捷，交付仍跑全量）\n`);
   let pass = 0, fail = 0;
-  for (const t of _tests) {
+  for (const t of tests) {
     try { await t.fn(); console.log("  \x1b[32m✓\x1b[0m", t.name); pass++; }
     catch (e) { console.log("  \x1b[31m✗\x1b[0m", t.name, "\n      ", e.message); fail++; }
   }

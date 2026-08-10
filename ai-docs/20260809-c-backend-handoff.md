@@ -400,7 +400,25 @@
   继续服务）。验收：tsc 0、**1256 绿**（+1 红队全景锚）、build 五 lint、GL smoke PASSED。
   无新真机锚（MCP 不进浏览器路径）。**观察记录**：套件里 tile-pool FR 泄漏警告 ~4 条（GC 时机
   漂移、不计失败）在 v0.8.41 基线已存在，非本批引入——测试 rig 释放卫生的既有噪音，待清账。
-  **C8 剩余（接力）**：⑤测试分级（npm test 快层 / npm run test:full 全量层：全量画作
-  round-trip、真 GPU vs SwiftShader vs SoftGl2 三方 golden ±ε、mock multiplayer 双 backend）+
-  ⑥arena 租户配额记账（等 mock multiplayer 当第二真租户；注入共享 Port 的 backend dispose
-  退租也挂这）。
+  ~~**C8 剩余（接力）**：⑤测试分级~~（↓ v0.8.44 前半已落；三方 golden + ⑥ 仍开放）。
+- **C8 第六棒 ✅ v0.8.44（2026-08-10）——测试分级前半 + 全量画作 round-trip + mock multiplayer**：
+  ①**分级骨架**：`npm run test:full` = 快层(run.mjs) + 全量层(`test/run-full.mjs` 显式注册) +
+  GL smoke 三段链；快层开发期快捷 = **`TEST_FILTER=<子串> npm test`**（runner.run() 过滤器——
+  §0「中间棒可只跑相关模块+tsc」的实体；只是过滤器不是分层，交付验收仍全量）。
+  ②**全量画作 round-trip**（`full-painting-roundtrip.test.mjs`）：结构丰富画作（4 叶+嵌套组+
+  属性全谱 mode/opacity/clipping/lockAlpha/visible + 6 笔含 pixelMode/erase + hsb/stainedGlass
+  filter + 负向扩张 crop）→ encodeOra→open→encodeOra **逐字节** + 两代 exportImage 逐字节
+  （SoftGl2 全域注入 = MCP server 同款）+ 构建路径决定论（同脚本两次→同 ora 字节）。
+  两条实勘语义记录：backgroundColor 不进 .ora（既有语义，bg 归壳 sidecar——对比剔除）；
+  lockAlpha 空层落不了笔（行为正确，剧本须先画后锁）。
+  ③**mock multiplayer**（`full-mock-multiplayer.test.mjs`）：**两 backend 共享同一 SoftGl2Port**
+  ——交错作画（A open stroke 期间 B 整笔/B undo 穿插 A filter 事务）后各租户字节 = 各自 solo
+  参考**逐位**（共享 Port 不串台）；令牌墙 per-backend（跨租户互斥结构上不存在——接口 wire
+  裁定的实测）；dispose A 后 B 照画照导出（退租不拖累邻居）。**⑥ 要的「第二真租户」自此存在**。
+  ④顺手：run-full/mcp-server 补 DOMParser shim（open .ora 的 parseStackXml；xml-shim 复用）。
+  验收：tsc 0、快层 **1256 绿** + 全量层 3 绿 + TEST_FILTER 快捷验证（8/1256）、build 五 lint、
+  GL smoke PASSED。无新真机锚（纯测试面）。**C8 剩余（接力）**：⑤后半 = 三方 golden ±ε
+  （gl-smoke harness.ts 注入 SoftGl2 第三比较器——SoftGl2 是纯 TS 可进浏览器页与 GL/2D ref
+  同页对拍；SwiftShader 在 CI/WSL、真 GPU 在 user 真机同一套锚）+ ⑥arena 租户配额记账
+  （mock multiplayer 已备好第二真租户；Gl2Port.createTileArena 的配额/退租接口 + backend
+  dispose 释放 _room arena——SoftGl2 靠 GC、真 GPU 要显式 free）。

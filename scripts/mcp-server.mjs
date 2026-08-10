@@ -15,7 +15,9 @@
 import fs from "node:fs";
 import readline from "node:readline";
 import { ensureZipLoaded } from "../test/zip-node.mjs";   // vendored zip.js 的 node 装载器（encodeOra/open .ora 用；dev-only 面复用 test 侧装载器）
+import { installDomParserShim } from "../test/xml-shim.mjs";   // open .ora 的 parseStackXml 用（node 无 DOMParser）
 ensureZipLoaded();
+installDomParserShim();
 
 // ImageData 最小 shim（node 无）：ora encode 面（paintingDataToEncodeDoc.getImageData）拿它当
 // 纯字节容器（{data,width,height}），与 test/dom-shim-first.mjs 同款。encode 面改纯 bytes 读口
