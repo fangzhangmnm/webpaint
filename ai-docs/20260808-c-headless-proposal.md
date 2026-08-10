@@ -87,6 +87,13 @@ export interface Gl2Port {
   instanced 展开成循环），不复刻硬件数值与 instancing 机制，golden ±ε 锚。
 - 数据自愈归 backend：bridge（cpuId→gpuId）+ 重传逻辑留 backend 侧（CPU 池恒 SSoT 现状不动）。
 - 多 tab 一等需求：N 个 backend 共享一个 Port；node 测试含多 backend 并发用例；UX 后做。
+- **C8 第一棒落地回写（v0.8.39）**：`gl` 裸口清零达成（终态契约成立）——动词面全量收编：
+  `draw`/`drawInstanced`（按名 shader 画单位 quad，spec 自带全部状态：target/viewport/clear/
+  scissor/blend/uniforms/textures）+ `readPixels`/`clearFBO` + 纹理动词（rgba8|rgba16f|r8|r32f）
+  + **`createTileArena`（arena 归 Port 落地）**。全句柄不透明（SoftGl2Port 自造同形对象的前提）；
+  uniform 类型由实现体反射、mat3 row-major、sampler 单元+占位归实现体、blend 封闭三态。
+  quadVAO 从接口删除（顶点域钉死单位 quad，不开放任意几何）。arena 的**租户配额记账**仍等
+  第二真租户（C8 mock multiplayer），接口形状已定（recreate/uploadSlice/copySlice 显式源 FBO）。
 
 ## 3. WebPaintBackend 契约
 
@@ -231,8 +238,8 @@ reject——每 verb 一步 undo）；正因无挂起事务，会话中途 undo/
 
 ### 6.3 仍留白（显式未定，等切片产出，不许提前固化）
 
-- Gl2Port 动词面：C1 已回写第一刀（§2「C1 落地回写」——lifecycle/program/FBO/quad 已收编，
-  `gl` 裸口过渡）；**全量收编签名**（pass/instanced/readPixels 动词化）等 C5/C8 逐片回写。
+- ~~Gl2Port 动词面~~ **已收口（C8 第一棒 v0.8.39）**：全量动词化落地，`gl` 裸口删除
+  （§2「C8 第一棒落地回写」）。仍留白的只剩 shader 注册表 CPU 对表的具体形（SoftGl2Port 同批）。
 - backend interface 的 verbs 全清单——等 C7 逐条过（workpiece v2 现有面 api 化）。
 - 魔棒拖选预览宿的迁移形态（SelectionPreviewTx api 化 vs 预览全引擎自持）——等 C6 现场定
   （两候选路见普查 doc §6.3）。

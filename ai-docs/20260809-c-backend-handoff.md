@@ -294,3 +294,27 @@
   PNG·JPG/mergedimage 观感如旧（壳迁移+per-tenant 注入回归）；`?nostore` 打开照常能画能导出
   （B2 窄 Port 不改运行时）。**下一片 = C8**（SoftGl2Port + MCP + 测试分级；`gl` 裸口收编 + arena
   归 Port 接口同批设计）。
+- **C8 第一棒 ✅ v0.8.39（2026-08-10）——动词面收编（`gl` 裸口清零）+ arena 归 Port**：
+  ①**契约**（`src/common/gl2-port.ts`）：`gl` 裸口与 quadVAO 删除——绘制只剩两个动词
+  `draw`/`drawInstanced`（按名 shader 画单位 quad；spec 自带 target/viewport/clear/scissor/
+  blend/uniforms/textures，无 ambient 状态）+ `readPixels`/`clearFBO` + 纹理三动词
+  （`createTexture`/`uploadTexture` rgba8|rgba16f|r8|r32f/`deleteTexture`）+ `createTileArena`。
+  全句柄不透明（PooledFBO 的 fbo/tex 字段收进实现体；SoftGl2Port 自造同形对象的前提）。
+  契约细则：mat3 一律 row-major（实现体自转置）、bool→int、未声明 uniform 静默跳过
+  （null-location 语义，调用方可无条件传全量）、sampler 单元按声明序归实现体+未提供绑占位
+  （「未绑 sampler 落单元 0 与 sampler2DArray 冲突 0x502」经典 quirk 收进壳）、blend 枚举封闭
+  三态（none/premult-over/max-alpha）。②**BrowserGl2Port**：link 时 getActiveUniform 反射
+  （uniform 类型分派表 + sampler 固定单元）、port 持 instanced VAO（loc0 quad+loc1 vec4/实例）、
+  `BrowserTileArena`（原 GLGpuTileBackend 翻入壳；copySlice 收显式源 FBO 参数——ambient
+  READ_FRAMEBUFFER 拔除）。③**消费面清零**：gl-compositor/gl-stamp/gl-room/gpu-tile-pool/
+  raster-service/render-tree 零 `gl.*`；GLStampRasterizer 只剩 shader 源+实例打包+两个 spec；
+  IndexTexture 走 r32f 纹理动词；pass 手工 placeholder/单元编号整删；GlRoom.backend →
+  GlRoom.arena（Gl2TileArena，池记账 GpuTilePool 结构面不变，fake backend 只改 copySlice 签名）；
+  render-tree present 的 void clear 并进 draw spec。④smoke harness + reference-gl-compositor
+  同步迁移（纹理助手/readback 走动词；harness 屏幕读回/getError/readSliceRaw 留 BrowserGl2Port
+  具体类 `gl`——壳侧合法，契约面摸不到）。验收：tsc 0、**1225 绿**、build 五 lint 全过、
+  GL smoke PASSED（行为不变纯收编，golden 未移位、no GL error）。无新真机锚（对比锚 =
+  真机批既有全流程绘画条目）。**C8 剩余（接力）**：SoftGl2Port（迂腐语义实现这份动词契约）+
+  shader 注册表 GPU/CPU 对表 + backend stroke/filter 档口接通（node 无 GL 跑通笔画）+
+  arena 租户配额记账（等 mock multiplayer）+ MCP 红队 + 测试分级（npm test / test:full +
+  Playwright 三方对拍）。
